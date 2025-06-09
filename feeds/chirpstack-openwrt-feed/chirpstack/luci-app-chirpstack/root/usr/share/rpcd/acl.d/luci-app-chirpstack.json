@@ -1,0 +1,48 @@
+{
+    "luci-app-chirpstack": {
+        "description": "Grant UCI access to ChirpStack configuration",
+        "read": {
+            "ubus": {
+                "uci": [
+                    "get"
+                ]
+            },
+            "uci": [
+                "chirpstack-concentratord",
+                "chirpstack-concentratord-slot1",
+                "chirpstack-concentratord-slot2",
+                "chirpstack-mqtt-forwarder",
+                "chirpstack-mqtt-forwarder-slot1",
+                "chirpstack-mqtt-forwarder-slot2",
+                "chirpstack-mqtt-forwarder-mesh",
+                "chirpstack-udp-forwarder",
+                "chirpstack-udp-forwarder-slot1",
+                "chirpstack-udp-forwarder-slot2",
+                "chirpstack",
+                "chirpstack-gateway-mesh"
+            ]
+        },
+        "write": {
+            "ubus": {
+                "uci": [
+                    "set",
+                    "commit"
+                ]
+            },
+            "uci": [
+                "chirpstack-concentratord",
+                "chirpstack-concentratord-slot1",
+                "chirpstack-concentratord-slot2",
+                "chirpstack-mqtt-forwarder",
+                "chirpstack-mqtt-forwarder-slot1",
+                "chirpstack-mqtt-forwarder-slot2",
+                "chirpstack-mqtt-forwarder-mesh",
+                "chirpstack-udp-forwarder",
+                "chirpstack-udp-forwarder-slot1",
+                "chirpstack-udp-forwarder-slot2",
+                "chirpstack",
+                "chirpstack-gateway-mesh"
+            ]
+        }
+    }
+}
