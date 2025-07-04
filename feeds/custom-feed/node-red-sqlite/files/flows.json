@@ -1,0 +1,96 @@
+[
+    {
+        "id": "sqlite-tab",
+        "type": "tab",
+        "label": "ChirpStack SQLite",
+        "disabled": false,
+        "info": "SQLite integration examples for ChirpStack Gateway OS"
+    },
+    {
+        "id": "inject1",
+        "type": "inject",
+        "z": "sqlite-tab",
+        "name": "Test SQLite",
+        "props": [
+            {
+                "p": "payload"
+            },
+            {
+                "p": "topic",
+                "vt": "str"
+            }
+        ],
+        "repeat": "",
+        "crontab": "",
+        "once": false,
+        "onceDelay": 0.1,
+        "topic": "",
+        "payload": "SELECT sqlite_version() as version, datetime('now') as timestamp",
+        "payloadType": "str",
+        "x": 140,
+        "y": 100,
+        "wires": [
+            [
+                "sqlite1"
+            ]
+        ]
+    },
+    {
+        "id": "sqlite1",
+        "type": "sqlite",
+        "z": "sqlite-tab",
+        "mydb": "/tmp/chirpstack.db",
+        "sqlquery": "msg.payload",
+        "sql": "",
+        "name": "ChirpStack DB",
+        "x": 340,
+        "y": 100,
+        "wires": [
+            [
+                "debug1"
+            ]
+        ]
+    },
+    {
+        "id": "debug1",
+        "type": "debug",
+        "z": "sqlite-tab",
+        "name": "SQLite Result",
+        "active": true,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "true",
+        "targetType": "full",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 540,
+        "y": 100,
+        "wires": []
+    },
+    {
+        "id": "inject2",
+        "type": "inject",
+        "z": "sqlite-tab",
+        "name": "Create Table",
+        "props": [
+            {
+                "p": "payload"
+            }
+        ],
+        "repeat": "",
+        "crontab": "",
+        "once": false,
+        "onceDelay": 0.1,
+        "topic": "",
+        "payload": "CREATE TABLE IF NOT EXISTS gateway_stats (id INTEGER PRIMARY KEY, timestamp DATETIME DEFAULT CURRENT_TIMESTAMP, gateway_id TEXT, rssi INTEGER, snr REAL)",
+        "payloadType": "str",
+        "x": 140,
+        "y": 160,
+        "wires": [
+            [
+                "sqlite1"
+            ]
+        ]
+    }
+]
