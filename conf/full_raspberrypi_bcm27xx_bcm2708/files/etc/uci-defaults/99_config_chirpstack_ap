@@ -34,9 +34,9 @@ set wireless.default_radio0=wifi-iface
 set wireless.default_radio0.device='radio0'
 set wireless.default_radio0.network='wwan'
 set wireless.default_radio0.mode='ap'
-set wireless.default_radio0.ssid="ChirpStackAP-${GWID_END}"
+set wireless.default_radio0.ssid="OSI-OS-${GWID_END}"
 set wireless.default_radio0.encryption='psk2'
-set wireless.default_radio0.key='ChirpStackAP'
+set wireless.default_radio0.key='opensmartirrigation'
 commit wireless
 
 add_list firewall.@zone[0].network='wwan'
