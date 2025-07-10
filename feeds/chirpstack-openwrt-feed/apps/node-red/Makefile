@@ -72,4 +72,21 @@ define Package/node-red/install
 	$(INSTALL_DATA) ./files/node-red.nginx $(1)/etc/nginx/conf.d/node-red.locations
 endef
 
+define Package/node-red/postinst
+#!/bin/sh
+[ -z "$${IPKG_INSTROOT}" ] || exit 0
+
+# Create node-red user and group if they do not exist
+if ! grep -q "^node-red:" /etc/passwd; then
+    echo "node-red:x:1000:1000:Node-RED:/var/lib/node-red:/bin/false" >> /etc/passwd
+    echo "node-red:x:1000:" >> /etc/group
+fi
+
+# Create data directory
+mkdir -p /var/lib/node-red/.node-red
+chown -R node-red:node-red /var/lib/node-red
+
+exit 0
+endef
+
 $(eval $(call BuildPackage,node-red))

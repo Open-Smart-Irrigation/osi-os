@@ -1,94 +1,79 @@
 include $(TOPDIR)/rules.mk
 
-PKG_NAME:=node-red-sqlite
-PKG_VERSION:=3.0.8
+PKG_NPM_NAME:=node-red-node-sqlite
+PKG_NAME:=$(PKG_NPM_NAME)
+PKG_VERSION:=1.1.0
 PKG_RELEASE:=1
 
-PKG_SOURCE:=node-red-$(PKG_VERSION).tar.gz
-PKG_SOURCE_URL:=https://registry.npmjs.org/node-red/-/
-PKG_HASH:=skip
+PKG_SOURCE:=$(PKG_NPM_NAME)-$(PKG_VERSION).tgz
+PKG_SOURCE_URL:=https://registry.npmjs.org/$(PKG_NPM_NAME)/-/
+PKG_HASH:=bc19564d9c9c089e4f3e865acffed03badae6927618aaa1ed96fa1745df5fdce
 
-PKG_MAINTAINER:=Your Name <your@email.com>
+PKG_BUILD_DEPENDS:=node/host
+
+PKG_MAINTAINER:= Orne Brocaar <info@brocaar.com>
 PKG_LICENSE:=Apache-2.0
 PKG_LICENSE_FILES:=LICENSE
 
 include $(INCLUDE_DIR)/package.mk
 
-define Package/node-red-sqlite
-  SECTION:=utils
-  CATEGORY:=Utilities
-  SUBMENU:=Node-RED
-  TITLE:=Node-RED with SQLite support
-  URL:=https://nodered.org
-  DEPENDS:=+node +node-npm +sqlite3-cli
-  PKGARCH:=all
+define Package/node-red-node-sqlite
+	SECTION:=utils
+	CATEGORY:=Utilities
+	SUBMENU:=Node-RED
+	TITLE:=Node-RED SQLite node
+	URL:=https://flows.nodered.org/node/node-red-node-sqlite
+	DEPENDS:=+node +node-npm +node-red +libsqlite3
 endef
 
-define Package/node-red-sqlite/description
-  Node-RED with pre-installed SQLite node for database operations
+define Package/node-red-node-sqlite/description
+	A Node-RED node to read and write a local sqlite database.
 endef
 
-define Package/node-red-sqlite/conffiles
-/etc/config/node-red
-endef
+TAR_OPTIONS+= --strip-components 1
+TAR_CMD=$(HOST_TAR) -C $(1) $(TAR_OPTIONS)
 
-define Build/Prepare
-	$(call Build/Prepare/Default)
-endef
+NODEJS_CPU:=$(subst powerpc,ppc,$(subst aarch64,arm64,$(subst x86_64,x64,$(subst i386,ia32,$(ARCH)))))
+TMPNPM:=$(shell mktemp -u XXXXXXXXXX)
 
-define Build/Configure
-endef
+TARGET_CFLAGS+=$(FPIC)
+TARGET_CPPFLAGS+=$(FPIC)
+
+NPM_FLAGS:= \
+	$(MAKE_VARS) \
+	$(MAKE_FLAGS) \
+	npm_config_arch=$(NODEJS_CPU) \
+	npm_config_target_arch=$(NODEJS_CPU) \
+	npm_config_build_from_source=true \
+	npm_config_nodedir=$(STAGING_DIR)/usr/ \
+	npm_config_prefix=$(PKG_INSTALL_DIR)/usr/ \
+	npm_config_cache=$(TMP_DIR)/npm-cache-$(TMPNPM) \
+	npm_config_tmp=$(TMP_DIR)/npm-tmp-$(TMPNPM)
 
 define Build/Compile
+	$(NPM_FLAGS) npm i -g --production $(PKG_BUILD_DIR)
+	$(NPM_FLAGS) npm i --production --prefix=$(PKG_BUILD_DIR) --target_arch=$(NODEJS_CPU) --prefer-dedupe
+	rm -rf $(TMP_DIR)/npm-tmp-$(TMPNPM)
+	rm -rf $(TMP_DIR)/npm-cache-$(TMPNPM)
 endef
 
-define Package/node-red-sqlite/install
-	$(INSTALL_DIR) $(1)/usr/lib/node_modules/node-red
-	$(INSTALL_DIR) $(1)/usr/bin
-	$(INSTALL_DIR) $(1)/etc/init.d
-	$(INSTALL_DIR) $(1)/etc/config
-	$(INSTALL_DIR) $(1)/usr/share/node-red
-	
-	# Install Node-RED
-	$(CP) $(PKG_BUILD_DIR)/* $(1)/usr/lib/node_modules/node-red/
-	
-	# Create node-red executable
-	echo '#!/bin/sh' > $(1)/usr/bin/node-red
-	echo 'cd /usr/lib/node_modules/node-red && node red.js $$$$*' >> $(1)/usr/bin/node-red
-	$(INSTALL_BIN) $(1)/usr/bin/node-red $(1)/usr/bin/node-red
-	
-	# Install init script
-	$(INSTALL_BIN) ./files/node-red.init $(1)/etc/init.d/node-red
-	
-	# Install UCI configuration
-	$(INSTALL_CONF) ./files/node-red.config $(1)/etc/config/node-red
-	
-	# Install default flows and settings
-	$(INSTALL_DATA) ./files/flows.json $(1)/usr/share/node-red/flows.json
-	$(INSTALL_DATA) ./files/settings.js $(1)/usr/share/node-red/settings.js
+define Package/node-red-node-sqlite/install
+	$(INSTALL_DIR) $(1)/usr/lib/node/node-red/node_modules/$(PKG_NPM_NAME)
+
+	$(CP) $(PKG_INSTALL_DIR)/usr/lib/node_modules/$(PKG_NPM_NAME)/{*.json,*.md,LICENSE} \
+		$(1)/usr/lib/node/node-red/node_modules/$(PKG_NPM_NAME)
+	$(CP) $(PKG_INSTALL_DIR)/usr/lib/node_modules/$(PKG_NPM_NAME)/{node_modules,icons,*.js,*.html} \
+		$(1)/usr/lib/node/node-red/node_modules/$(PKG_NPM_NAME)
+
+	# Install default sensor_data.db and schema.sql if present
+	if [ -f ../../../../files/etc/usr/share/sensor_data.db ]; then \
+		$(INSTALL_DIR) $(1)/usr/share; \
+		$(INSTALL_DATA) ../../../../files/etc/usr/share/sensor_data.db $(1)/usr/share/sensor_data.db; \
+	fi
+	if [ -f ../../../../files/etc/usr/share/schema.sql ]; then \
+		$(INSTALL_DIR) $(1)/usr/share; \
+		$(INSTALL_DATA) ../../../../files/etc/usr/share/schema.sql $(1)/usr/share/schema.sql; \
+	fi
 endef
 
-define Package/node-red-sqlite/postinst
-#!/bin/sh
-[ -z "$${IPKG_INSTROOT}" ] || exit 0
-
-# Install Node-RED SQLite node
-npm install -g --prefix /usr node-red-node-sqlite
-
-# Create node-red user and directories
-if ! grep -q "^node-red:" /etc/passwd; then
-    echo "node-red:x:1000:1000:Node-RED:/var/lib/node-red:/bin/false" >> /etc/passwd
-    echo "node-red:x:1000:" >> /etc/group
-fi
-
-mkdir -p /var/lib/node-red/.node-red
-cp /usr/share/node-red/* /var/lib/node-red/.node-red/ 2>/dev/null || true
-chown -R node-red:node-red /var/lib/node-red
-
-# Enable service
-/etc/init.d/node-red enable
-
-exit 0
-endef
-
-$(eval $(call BuildPackage,node-red-sqlite))
+$(eval $(call BuildPackage,node-red-node-sqlite))
