@@ -38,7 +38,7 @@
         "z": "0077890f0352ff63",
         "g": "38bc75bc54561ece",
         "name": "KIWI",
-        "topic": "application/945c3652-8cdc-44ce-9a5d-eb146d626be2/device/647fda0000007f9b/#",
+        "topic": "application/+/device/+/up",
         "qos": "0",
         "datatype": "auto-detect",
         "broker": "b0b19352dac3fb34",
@@ -47,6 +47,22 @@
         "rh": 0,
         "inputs": 0,
         "x": 510,
+        "y": 200,
+        "wires": [
+            [
+                "filter-device-eui"
+            ]
+        ]
+    },
+    {
+        "id": "filter-device-eui",
+        "type": "function",
+        "z": "0077890f0352ff63",
+        "g": "38bc75bc54561ece",
+        "name": "Filter by Device EUI",
+        "func": "var targetEUI = flow.get('targetEUI') || global.get('targetEUI') || msg.targetEUI || 'YOUR_DEVICE_EUI';\nif (msg.payload && msg.payload.devEUI === targetEUI) {\n    return msg;\n}\nreturn null;",
+        "outputs": 1,
+        "x": 700,
         "y": 200,
         "wires": [
             [
@@ -116,7 +132,7 @@
         "sqlquery": "msg.topic",
         "sql": "",
         "name": "Sensor DB Insert",
-        "db": "sensor_data.db",
+        "database": "/srv/node-red/sensor_data.db",
         "x": 1400,
         "y": 200,
         "wires": [
@@ -187,5 +203,70 @@
         "willMsg": {},
         "userProps": "",
         "sessionExpiry": ""
+    },
+    {
+        "id": "ui_tab_sensor_config",
+        "type": "ui_tab",
+        "name": "Sensor Config",
+        "icon": "dashboard",
+        "order": 1
+    },
+    {
+        "id": "ui_group_sensor_config",
+        "type": "ui_group",
+        "name": "Sensor Selection",
+        "tab": "ui_tab_sensor_config",
+        "order": 1,
+        "disp": true,
+        "width": "6",
+        "collapse": false
+    },
+    {
+        "id": "ui_form_eui",
+        "type": "ui_form",
+        "z": "0077890f0352ff63",
+        "name": "Enter Device EUI",
+        "label": "Enter Device EUI",
+        "group": "ui_group_sensor_config",
+        "order": 1,
+        "width": 6,
+        "height": 1,
+        "options": [
+            { "label": "Device EUI", "value": "eui", "type": "text", "required": true }
+        ],
+        "formValue": {},
+        "payload": "",
+        "submit": "Set EUI",
+        "topic": "setEUI",
+        "x": 200,
+        "y": 100,
+        "wires": [["set_target_eui"]]
+    },
+    {
+        "id": "set_target_eui",
+        "type": "function",
+        "z": "0077890f0352ff63",
+        "name": "Set targetEUI",
+        "func": "flow.set('targetEUI', msg.payload.eui);\nmsg.payload = 'Current targetEUI set to: ' + msg.payload.eui;\nreturn msg;",
+        "outputs": 1,
+        "x": 400,
+        "y": 100,
+        "wires": [["ui_text_current_eui"]]
+    },
+    {
+        "id": "ui_text_current_eui",
+        "type": "ui_text",
+        "z": "0077890f0352ff63",
+        "group": "ui_group_sensor_config",
+        "order": 2,
+        "width": 6,
+        "height": 1,
+        "name": "Current EUI",
+        "label": "Current Device EUI:",
+        "format": "{{msg.payload}}",
+        "layout": "row-spread",
+        "x": 600,
+        "y": 100,
+        "wires": []
     }
 ]

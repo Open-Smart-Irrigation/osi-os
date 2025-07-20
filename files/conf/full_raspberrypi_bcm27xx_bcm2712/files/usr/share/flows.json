@@ -329,7 +329,7 @@
         "z": "0077890f0352ff63",
         "g": "38bc75bc54561ece",
         "name": "KIWI",
-        "topic": "application/945c3652-8cdc-44ce-9a5d-eb146d626be2/device/647fda0000007f9b/#",
+        "topic": "application/+/device/+/up",
         "qos": "0",
         "datatype": "auto-detect",
         "broker": "b0b19352dac3fb34",
@@ -344,6 +344,16 @@
                 "abda19b6ffedb281"
             ]
         ]
+    },
+    {
+        "id": "filter-device-eui",
+        "type": "function",
+        "name": "Filter by Device EUI",
+        "func": "var targetEUI = flow.get('targetEUI') || global.get('targetEUI') || msg.targetEUI || 'YOUR_DEVICE_EUI';\nif (msg.payload && msg.payload.devEUI === targetEUI) {\n    return msg;\n}\nreturn null;",
+        "outputs": 1,
+        "x": 700,
+        "y": 200,
+        "wires": [["abda19b6ffedb281"]]
     },
     {
         "id": "abda19b6ffedb281",
@@ -457,7 +467,7 @@
         "z": "0077890f0352ff63",
         "g": "38bc75bc54561ece",
         "name": "STREGA",
-        "topic": "application/945c3652-8cdc-44ce-9a5d-eb146d626be2/device/0004a30b00e95c44/#",
+        "topic": "application/+/device/+/up",
         "qos": "0",
         "datatype": "auto-detect",
         "broker": "b0b19352dac3fb34",
@@ -472,6 +482,16 @@
                 "3f6c57b7e0433339"
             ]
         ]
+    },
+    {
+        "id": "filter-device-eui",
+        "type": "function",
+        "name": "Filter by Device EUI",
+        "func": "var targetEUI = flow.get('targetEUI') || global.get('targetEUI') || msg.targetEUI || 'YOUR_DEVICE_EUI';\nif (msg.payload && msg.payload.devEUI === targetEUI) {\n    return msg;\n}\nreturn null;",
+        "outputs": 1,
+        "x": 700,
+        "y": 280,
+        "wires": [["3f6c57b7e0433339"]]
     },
     {
         "id": "3f6c57b7e0433339",
