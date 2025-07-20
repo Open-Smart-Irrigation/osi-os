@@ -2,12 +2,12 @@ include $(TOPDIR)/rules.mk
 
 PKG_NPM_NAME:=node-red-dashboard
 PKG_NAME:=$(PKG_NPM_NAME)
-PKG_VERSION:=3.6.1
+PKG_VERSION:=3.6.5
 PKG_RELEASE:=1
 
 PKG_SOURCE:=$(PKG_NPM_NAME)-$(PKG_VERSION).tgz
 PKG_SOURCE_URL:=https://registry.npmjs.org/$(PKG_NPM_NAME)/-/
-PKG_HASH:=skip
+PKG_HASH:=c6d9d7d4c812b4022de93ae0c5dbcea9804f8fe96f79db4e3c439094858b27d0
 
 PKG_BUILD_DEPENDS:=node/host
 
@@ -32,17 +32,28 @@ endef
 TAR_OPTIONS+= --strip-components 1
 TAR_CMD=$(HOST_TAR) -C $(1) $(TAR_OPTIONS)
 
+NODEJS_CPU:=$(subst powerpc,ppc,$(subst aarch64,arm64,$(subst x86_64,x64,$(subst i386,ia32,$(ARCH)))))
+TMPNPM:=$(shell mktemp -u XXXXXXXXXX)
+
+TARGET_CFLAGS+=$(FPIC)
+TARGET_CPPFLAGS+=$(FPIC)
+
 NPM_FLAGS:= \
-	npm_config_arch=$(ARCH) \
+	$(MAKE_VARS) \
+	$(MAKE_FLAGS) \
+	npm_config_arch=$(NODEJS_CPU) \
+	npm_config_target_arch=$(NODEJS_CPU) \
 	npm_config_build_from_source=true \
 	npm_config_nodedir=$(STAGING_DIR)/usr/ \
 	npm_config_prefix=$(PKG_INSTALL_DIR)/usr/ \
-	npm_config_cache=$(TMP_DIR)/npm-cache \
-	npm_config_tmp=$(TMP_DIR)/npm-tmp
+	npm_config_cache=$(TMP_DIR)/npm-cache-$(TMPNPM) \
+	npm_config_tmp=$(TMP_DIR)/npm-tmp-$(TMPNPM)
 
 define Build/Compile
 	$(NPM_FLAGS) npm i -g --production $(PKG_BUILD_DIR)
-	$(NPM_FLAGS) npm i --production --prefix=$(PKG_BUILD_DIR)
+	$(NPM_FLAGS) npm i --production --prefix=$(PKG_BUILD_DIR) --target_arch=$(NODEJS_CPU) --prefer-dedupe
+	rm -rf $(TMP_DIR)/npm-tmp-$(TMPNPM)
+	rm -rf $(TMP_DIR)/npm-cache-$(TMPNPM)
 endef
 
 define Package/node-red-dashboard/install
