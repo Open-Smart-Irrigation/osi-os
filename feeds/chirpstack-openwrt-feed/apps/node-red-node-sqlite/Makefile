@@ -18,9 +18,8 @@ PKG_LICENSE_FILES:=LICENSE
 include $(INCLUDE_DIR)/package.mk
 
 define Package/node-red-node-sqlite
-	SECTION:=utils
-	CATEGORY:=Utilities
-	SUBMENU:=Node-RED
+	SECTION:=node-red
+	CATEGORY:=Node-RED
 	TITLE:=Node-RED SQLite node
 	URL:=https://flows.nodered.org/node/node-red-node-sqlite
 	DEPENDS:=+node +node-npm +node-red +libsqlite3

@@ -48,7 +48,7 @@ endef
 define Package/node-red-dashboard/install
 	$(INSTALL_DIR) $(1)/usr/lib/node/node-red/node_modules/$(PKG_NPM_NAME)
 	$(CP) $(PKG_INSTALL_DIR)/usr/lib/node_modules/$(PKG_NPM_NAME)/{*.json,*.md,LICENSE} $(1)/usr/lib/node/node-red/node_modules/$(PKG_NPM_NAME)
-	$(CP) $(PKG_INSTALL_DIR)/usr/lib/node_modules/$(PKG_NPM_NAME)/{node_modules,nodes,icons} $(1)/usr/lib/node/node-red/node_modules/$(PKG_NPM_NAME)
+	$(CP) $(PKG_INSTALL_DIR)/usr/lib/node_modules/$(PKG_NPM_NAME)/{node_modules,nodes} $(1)/usr/lib/node/node-red/node_modules/$(PKG_NPM_NAME)
 endef
 
 $(eval $(call BuildPackage,node-red-dashboard)) 
