@@ -1,6 +1,6 @@
 [
     {
-        "id": "0077890f0352ff63",
+        "id": "6c7ae7c3951cc68c",
         "type": "tab",
         "label": "read sensor",
         "disabled": false,
@@ -8,9 +8,9 @@
         "env": []
     },
     {
-        "id": "38bc75bc54561ece",
+        "id": "e9db13d7826e7d4d",
         "type": "group",
-        "z": "0077890f0352ff63",
+        "z": "6c7ae7c3951cc68c",
         "style": {
             "stroke": "#999999",
             "stroke-opacity": "1",
@@ -21,11 +21,11 @@
             "color": "#a4a4a4"
         },
         "nodes": [
-            "68233a96f1377c0c",
-            "abda19b6ffedb281",
-            "1a7c1e1774d13afe",
-            "83d777b8cdc63fbd",
-            "ab6a83b4f51d4343"
+            "b9947be55f79f7ef",
+            "9334ed34746aa5ba",
+            "72d99a3ed7268925",
+            "0587cbe2e62d1b01",
+            "7fb2470b15f3f1a3"
         ],
         "x": 434,
         "y": 99,
@@ -33,10 +33,10 @@
         "h": 142
     },
     {
-        "id": "68233a96f1377c0c",
+        "id": "b9947be55f79f7ef",
         "type": "mqtt in",
-        "z": "0077890f0352ff63",
-        "g": "38bc75bc54561ece",
+        "z": "6c7ae7c3951cc68c",
+        "g": "e9db13d7826e7d4d",
         "name": "KIWI",
         "topic": "application/+/device/+/up",
         "qos": "0",
@@ -50,15 +50,15 @@
         "y": 200,
         "wires": [
             [
-                "filter-device-eui"
+                "baec907c0eed683b"
             ]
         ]
     },
     {
-        "id": "filter-device-eui",
+        "id": "baec907c0eed683b",
         "type": "function",
-        "z": "0077890f0352ff63",
-        "g": "38bc75bc54561ece",
+        "z": "6c7ae7c3951cc68c",
+        "g": "e9db13d7826e7d4d",
         "name": "Filter by Device EUI",
         "func": "var targetEUI = flow.get('targetEUI') || global.get('targetEUI') || msg.targetEUI || 'YOUR_DEVICE_EUI';\nif (msg.payload && msg.payload.devEUI === targetEUI) {\n    return msg;\n}\nreturn null;",
         "outputs": 1,
@@ -66,30 +66,30 @@
         "y": 200,
         "wires": [
             [
-                "abda19b6ffedb281"
+                "9334ed34746aa5ba"
             ]
         ]
     },
     {
-        "id": "abda19b6ffedb281",
+        "id": "9334ed34746aa5ba",
         "type": "device event",
-        "z": "0077890f0352ff63",
-        "g": "38bc75bc54561ece",
+        "z": "6c7ae7c3951cc68c",
+        "g": "e9db13d7826e7d4d",
         "name": "up",
         "eventType": "up",
-        "x": 810,
-        "y": 200,
+        "x": 870,
+        "y": 160,
         "wires": [
             [
-                "1a7c1e1774d13afe"
+                "72d99a3ed7268925"
             ]
         ]
     },
     {
-        "id": "1a7c1e1774d13afe",
+        "id": "72d99a3ed7268925",
         "type": "function",
-        "z": "0077890f0352ff63",
-        "g": "38bc75bc54561ece",
+        "z": "6c7ae7c3951cc68c",
+        "g": "e9db13d7826e7d4d",
         "name": "Process Data",
         "func": "function convertHzToKPa(input_frequency) {\n    if (input_frequency > 6430) return 0;\n    if (input_frequency >= 4330 && input_frequency <= 6430) return 9 - (input_frequency - 4330) * 0.004286;\n    if (input_frequency >= 2820 && input_frequency <= 4330) return 15 - (input_frequency - 2820) * 0.003974;\n    if (input_frequency >= 1110 && input_frequency <= 2820) return 35 - (input_frequency - 1110) * 0.01170;\n    if (input_frequency >= 770 && input_frequency <= 1110) return 55 - (input_frequency - 770) * 0.05884;\n    if (input_frequency >= 600 && input_frequency <= 770) return 75 - (input_frequency - 600) * 0.1176;\n    if (input_frequency >= 485 && input_frequency <= 600) return 100 - (input_frequency - 485) * 0.2174;\n    if (input_frequency >= 293 && input_frequency <= 485) return 200 - (input_frequency - 293) * 0.5208;\n    if (input_frequency < 293) return 200;\n    return null;\n}\n\nfunction processAndStore(msg) {\n    try {\n        const data = msg.payload;\n        const now = new Date();\n\n        // Convert both frequency readings to kPa\n        const watermark1 = convertHzToKPa(data.object.input5_frequency);\n        const watermark2 = convertHzToKPa(data.object.input6_frequency);\n\n        // Create formatted data structure\n        const formattedData = {\n            timestamp: now.toISOString(),\n            readings: {\n                input5_frequency: data.object.input5_frequency,\n                watermark1: watermark1,\n                input6_frequency: data.object.input6_frequency,\n                watermark2: watermark2,\n                light_intensity: data.object.light_intensity || null\n            }\n        };\n\n        // Update node status with both moisture readings\n        node.status({\n            fill: \"blue\",\n            shape: \"dot\",\n            text: \"WM1: \" + watermark1.toFixed(2) + \" kPa, WM2: \" + watermark2.toFixed(2) + \" kPa\"\n        });\n\n        msg.formattedData = formattedData;\n        return msg;\n\n    } catch (error) {\n        node.error(\"Error processing message: \" + error.message);\n        return null;\n    }\n}\n\nreturn processAndStore(msg);",
         "outputs": 1,
@@ -101,17 +101,17 @@
         "y": 200,
         "wires": [
             [
-                "sql-insert-function",
-                "ab6a83b4f51d4343"
+                "e0847e085110d61b",
+                "7fb2470b15f3f1a3"
             ]
         ]
     },
     {
-        "id": "sql-insert-function",
+        "id": "e0847e085110d61b",
         "type": "function",
-        "z": "0077890f0352ff63",
+        "z": "6c7ae7c3951cc68c",
         "name": "Build SQL INSERT",
-        "func": "const data = msg.formattedData;\nconst readings = data.readings;\nconst timestamp = data.timestamp;\nconst swt_kpa = readings.watermark1 !== undefined ? readings.watermark1 : null;\nconst light_lux = readings.light_intensity !== undefined ? readings.light_intensity : null;\nconst sensor_id = 1; // Set this as needed\nlet columns = ['sensor_id', 'timestamp'];\nlet values = [sensor_id, timestamp];\nif (swt_kpa !== null) { columns.push('swt_kpa'); values.push(swt_kpa); }\nif (light_lux !== null) { columns.push('light_lux'); values.push(light_lux); }\nconst placeholders = values.map(() => '?').join(',');\nconst sql = `INSERT INTO sensor_data (${columns.join(',')}) VALUES (${placeholders})`;\nmsg.topic = sql;\nmsg.payload = values;\nreturn msg;",
+        "func": "const data = msg.formattedData;\nconst readings = data.readings;\nconst timestamp = data.timestamp;\nconst swt_kpa = readings.watermark1 !== undefined ? readings.watermark1 : null;\nconst light_lux = readings.light_intensity !== undefined ? readings.light_intensity : null;\nconst temperature_c = readings.temperature_c !== undefined ? readings.temperature_c : (readings.temperature !== undefined ? readings.temperature : null);\nconst humidity_percent = readings.humidity_percent !== undefined ? readings.humidity_percent : (readings.humidity !== undefined ? readings.humidity : null);\nconst sensor_id = 1; // Set this as needed\nlet columns = ['sensor_id', 'timestamp'];\nlet values = [sensor_id, timestamp];\nif (swt_kpa !== null) { columns.push('swt_kpa'); values.push(swt_kpa); }\nif (light_lux !== null) { columns.push('light_lux'); values.push(light_lux); }\nif (temperature_c !== null) { columns.push('temperature_c'); values.push(temperature_c); }\nif (humidity_percent !== null) { columns.push('humidity_percent'); values.push(humidity_percent); }\nconst placeholders = values.map(() => '?').join(',');\nconst sql = `INSERT INTO sensor_data (${columns.join(',')}) VALUES (${placeholders})`;\nmsg.topic = sql;\nmsg.payload = values;\nreturn msg;",
         "outputs": 1,
         "noerr": 0,
         "initialize": "",
@@ -121,31 +121,31 @@
         "y": 200,
         "wires": [
             [
-                "sqlite-node"
+                "fd1e6cd909addf6b"
             ]
         ]
     },
     {
-        "id": "sqlite-node",
+        "id": "fd1e6cd909addf6b",
         "type": "sqlite",
-        "z": "0077890f0352ff63",
+        "z": "6c7ae7c3951cc68c",
+        "mydb": "efb38c2504b2b25f",
         "sqlquery": "msg.topic",
         "sql": "",
         "name": "Sensor DB Insert",
-        "database": "/srv/node-red/sensor_data.db",
         "x": 1400,
         "y": 200,
         "wires": [
             [
-                "83d777b8cdc63fbd"
+                "0587cbe2e62d1b01"
             ]
         ]
     },
     {
-        "id": "83d777b8cdc63fbd",
+        "id": "0587cbe2e62d1b01",
         "type": "debug",
-        "z": "0077890f0352ff63",
-        "g": "38bc75bc54561ece",
+        "z": "6c7ae7c3951cc68c",
+        "g": "e9db13d7826e7d4d",
         "name": "Storage Debug",
         "active": true,
         "tosidebar": true,
@@ -160,10 +160,10 @@
         "wires": []
     },
     {
-        "id": "ab6a83b4f51d4343",
+        "id": "7fb2470b15f3f1a3",
         "type": "debug",
-        "z": "0077890f0352ff63",
-        "g": "38bc75bc54561ece",
+        "z": "6c7ae7c3951cc68c",
+        "g": "e9db13d7826e7d4d",
         "name": "Moisture Debug",
         "active": true,
         "tosidebar": true,
@@ -175,6 +175,84 @@
         "statusType": "auto",
         "x": 1200,
         "y": 140,
+        "wires": []
+    },
+    {
+        "id": "b504a3379f065177",
+        "type": "function",
+        "z": "6c7ae7c3951cc68c",
+        "name": "Set targetEUI",
+        "func": "flow.set('targetEUI', msg.payload.eui);\nmsg.payload = 'Current targetEUI set to: ' + msg.payload.eui;\nreturn msg;",
+        "outputs": 1,
+        "timeout": "",
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 400,
+        "y": 100,
+        "wires": [
+            [
+                "750eb4190ef59842"
+            ]
+        ]
+    },
+    {
+        "id": "caceae768e9958a2",
+        "type": "ui_form",
+        "z": "6c7ae7c3951cc68c",
+        "name": "Enter Device EUI",
+        "label": "Enter Device EUI",
+        "group": "f5b6e0000aa82d9f",
+        "order": 1,
+        "width": 6,
+        "height": 1,
+        "options": [
+            {
+                "label": "Device EUI",
+                "value": "eui",
+                "type": "text",
+                "required": true,
+                "rows": null
+            }
+        ],
+        "formValue": {
+            "eui": ""
+        },
+        "payload": "",
+        "submit": "Set EUI",
+        "cancel": "",
+        "topic": "setEUI",
+        "topicType": "str",
+        "splitLayout": false,
+        "className": "",
+        "x": 200,
+        "y": 100,
+        "wires": [
+            [
+                "b504a3379f065177"
+            ]
+        ]
+    },
+    {
+        "id": "750eb4190ef59842",
+        "type": "ui_text",
+        "z": "6c7ae7c3951cc68c",
+        "group": "f5b6e0000aa82d9f",
+        "order": 2,
+        "width": 6,
+        "height": 1,
+        "name": "Current EUI",
+        "label": "Current Device EUI:",
+        "format": "{{msg.payload}}",
+        "layout": "row-spread",
+        "className": "",
+        "style": false,
+        "font": "",
+        "fontSize": "",
+        "color": "#000000",
+        "x": 600,
+        "y": 100,
         "wires": []
     },
     {
@@ -205,68 +283,29 @@
         "sessionExpiry": ""
     },
     {
-        "id": "ui_tab_sensor_config",
-        "type": "ui_tab",
-        "name": "Sensor Config",
-        "icon": "dashboard",
-        "order": 1
+        "id": "efb38c2504b2b25f",
+        "type": "sqlitedb",
+        "db": "/srv/database.db",
+        "mode": "RWC"
     },
     {
-        "id": "ui_group_sensor_config",
+        "id": "f5b6e0000aa82d9f",
         "type": "ui_group",
-        "name": "Sensor Selection",
-        "tab": "ui_tab_sensor_config",
+        "name": "Select sensor",
+        "tab": "dd52a5aacf7b6166",
         "order": 1,
         "disp": true,
         "width": "6",
-        "collapse": false
+        "collapse": false,
+        "className": ""
     },
     {
-        "id": "ui_form_eui",
-        "type": "ui_form",
-        "z": "0077890f0352ff63",
-        "name": "Enter Device EUI",
-        "label": "Enter Device EUI",
-        "group": "ui_group_sensor_config",
+        "id": "dd52a5aacf7b6166",
+        "type": "ui_tab",
+        "name": "Sensor Config",
+        "icon": "dashboard",
         "order": 1,
-        "width": 6,
-        "height": 1,
-        "options": [
-            { "label": "Device EUI", "value": "eui", "type": "text", "required": true }
-        ],
-        "formValue": {},
-        "payload": "",
-        "submit": "Set EUI",
-        "topic": "setEUI",
-        "x": 200,
-        "y": 100,
-        "wires": [["set_target_eui"]]
-    },
-    {
-        "id": "set_target_eui",
-        "type": "function",
-        "z": "0077890f0352ff63",
-        "name": "Set targetEUI",
-        "func": "flow.set('targetEUI', msg.payload.eui);\nmsg.payload = 'Current targetEUI set to: ' + msg.payload.eui;\nreturn msg;",
-        "outputs": 1,
-        "x": 400,
-        "y": 100,
-        "wires": [["ui_text_current_eui"]]
-    },
-    {
-        "id": "ui_text_current_eui",
-        "type": "ui_text",
-        "z": "0077890f0352ff63",
-        "group": "ui_group_sensor_config",
-        "order": 2,
-        "width": 6,
-        "height": 1,
-        "name": "Current EUI",
-        "label": "Current Device EUI:",
-        "format": "{{msg.payload}}",
-        "layout": "row-spread",
-        "x": 600,
-        "y": 100,
-        "wires": []
+        "disabled": false,
+        "hidden": false
     }
 ]

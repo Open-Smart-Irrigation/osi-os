@@ -116,7 +116,7 @@
         "sqlquery": "msg.topic",
         "sql": "",
         "name": "Sensor DB Insert",
-        "db": "sensor_data.db",
+        "db": "database.db",
         "x": 1400,
         "y": 200,
         "wires": [

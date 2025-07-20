@@ -1,7 +1,7 @@
 #!/bin/sh
 
-CUSTOM_DB_SOURCE="/usr/share/sensor_data.db"
-CUSTOM_DB_DEST="/srv/sensor_data.db"
+CUSTOM_DB_SOURCE="/usr/share/database.db"
+CUSTOM_DB_DEST="/srv/database.db"
 SCHEMA_FILE="/usr/share/schema.sql"
 
 mkdir -p /srv
