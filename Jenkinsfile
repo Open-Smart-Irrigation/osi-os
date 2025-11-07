@@ -263,57 +263,40 @@ pipeline {
         stage('Build') {
             steps {
                 sh '''
-                    cd /build_cache/osi-build
+                    set -e
+                    cd /build_cache/osi-build/openwrt
 
                     echo "=========================================="
                     echo "=== Starting Build for ${TARGET_ENV} ==="
                     echo "=========================================="
-                    echo "Build started at: $(date)"
-                    echo ""
 
-                    # Create logs directory
-                    mkdir -p logs
+                    echo "Setting FORCE_UNSAFE_CONFIGURE=1 to bypass root configure check..."
+                    export FORCE_UNSAFE_CONFIGURE=1
 
-                    # Navigate to openwrt directory
-                    cd openwrt
-
-                    echo "=== Refreshing configuration ==="
+                    echo "Running defconfig to refresh config..."
                     make defconfig 2>&1 | tee ../logs/defconfig.log
 
-                    echo ""
-                    echo "=== Starting verbose single-threaded build ==="
-                    echo "This will take 2-6 hours..."
-                    echo ""
-
-                    # Run build with verbose output, single-threaded for better error visibility
+                    echo "Starting verbose single-threaded build (this may take hours)..."
                     make -j1 V=s 2>&1 | tee ../logs/build_verbose.log
 
-                    # Capture exit code
                     BUILD_RESULT=${PIPESTATUS[0]}
-
-                    echo ""
-                    echo "Build finished at: $(date)"
 
                     if [ $BUILD_RESULT -eq 0 ]; then
                         echo "✓ Build completed successfully"
                     else
                         echo "✗ Build FAILED with exit code: $BUILD_RESULT"
-                        echo ""
-                        echo "=== Last 200 lines of verbose build output ==="
+                        echo "=== Last 200 lines of build output ==="
                         tail -n 200 ../logs/build_verbose.log
                         exit $BUILD_RESULT
                     fi
 
                     echo ""
-                    echo "=== Build Output Directory ==="
+                    echo "=== Build Output Directory Contents ==="
                     if [ -d bin ]; then
-                        echo "Build artifacts found:"
                         find bin -type f \\( -name "*.img.gz" -o -name "*.bin" \\) | head -20
-                        echo ""
-                        echo "Total size:"
                         du -sh bin
                     else
-                        echo "WARNING: No bin directory found!"
+                        echo "Warning: bin directory not found!"
                         exit 1
                     fi
                     echo ""
