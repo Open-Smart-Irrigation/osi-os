@@ -61,6 +61,9 @@ pipeline {
                     ln -s ../conf/.config openwrt/.config
                     ln -s ../conf/files openwrt/files
 
+                    # Fix docker-compose volume mount for Docker-in-Docker
+                    sed -i "s|- .:/workdir|- ${PWD}:/workdir|" docker-compose.yml
+
                     # Now run docker commands
                     docker compose run --rm chirpstack-gateway-os sh -c 'openwrt/scripts/feeds update -a'
                     docker compose run --rm chirpstack-gateway-os sh -c 'openwrt/scripts/feeds install -a'
