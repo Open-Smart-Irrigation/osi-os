@@ -47,6 +47,7 @@ pipeline {
             }
             steps {
                 sh '''
+                    git submodule update --init --recursive
                     make init
                     touch .initialized
                 '''
