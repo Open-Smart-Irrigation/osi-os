@@ -1,0 +1,32 @@
+version: '3.8' # Good practice, ensures modern features
+
+services:
+  jenkins:
+    build: .
+    container_name: jenkins-chirpstack
+    privileged: true
+    user: root
+    ports:
+      - "8080:8080"
+      - "50000:50000"
+    volumes:
+      - jenkins_home:/var/jenkins_home
+      - /var/run/docker.sock:/var/run/docker.sock
+      - /usr/bin/docker:/usr/bin/docker
+      # CORRECTED: Mount the Docker Compose V2 plugin from your host's actual location
+      - /usr/libexec/docker/cli-plugins/docker-compose:/usr/local/lib/docker/cli-plugins/docker-compose
+      - /home/jenkins-user/jenkins-builds:/build_cache
+    environment:
+      - JAVA_OPTS=-Xmx2048m
+      - DOCKER_HOST=unix:///var/run/docker.sock
+    restart: unless-stopped
+    networks:
+      - jenkins_network
+
+volumes:
+  jenkins_home:
+    driver: local
+
+networks:
+  jenkins_network:
+    driver: bridge
