@@ -48,6 +48,11 @@ pipeline {
             steps {
                 sh '''
                     git submodule update --init --recursive
+
+                    # Remove existing symlinks if they exist
+                    rm -f openwrt/.config
+                    rm -f openwrt/files
+
                     make init
                     touch .initialized
                 '''
