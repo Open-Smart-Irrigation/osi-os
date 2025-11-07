@@ -53,13 +53,9 @@ pipeline {
                         echo ""
                         echo "=== Docker Version ==="
                         docker --version
-                        docker compose version || docker-compose --version
                         echo ""
                         echo "=== Disk Space ==="
                         df -h ${WORKSPACE}
-                        echo ""
-                        echo "=== Memory ==="
-                        free -h
                     '''
 
                     // Check minimum disk space (20GB)
@@ -82,12 +78,8 @@ pipeline {
             steps {
                 echo "Performing clean build..."
                 sh '''
-                    echo "Cleaning Docker containers and images..."
-                    docker compose down -v || true
                     echo "Cleaning build artifacts..."
                     make clean || true
-                    echo "Cleaning Docker system (pruning)..."
-                    docker system prune -f
                 '''
             }
         }
@@ -115,20 +107,14 @@ pipeline {
         stage('Update Feeds') {
             steps {
                 echo "Updating OpenWrt feeds..."
-                sh '''
-                    # Run make update in the Docker environment
-                    docker compose run --rm devshell make update
-                '''
+                sh 'make update'
             }
         }
 
         stage('Switch Environment') {
             steps {
                 echo "Switching to target environment: ${params.TARGET_ENV}"
-                sh '''
-                    # Switch to the target environment
-                    docker compose run --rm devshell make switch-env ENV=${TARGET_ENV}
-                '''
+                sh 'make switch-env ENV=${TARGET_ENV}'
             }
         }
 
@@ -136,11 +122,7 @@ pipeline {
             steps {
                 echo "Building ChirpStack Gateway OS image..."
                 echo "This may take 1-3 hours depending on hardware..."
-
-                sh '''
-                    # Build the image
-                    docker compose run --rm devshell make
-                '''
+                sh 'make'
             }
         }
 
@@ -217,8 +199,8 @@ pipeline {
                 echo "=== Docker Containers ==="
                 docker ps -a || true
                 echo ""
-                echo "=== Docker Compose Logs ==="
-                docker compose logs --tail=100 || true
+                echo "=== Recent Docker Logs ==="
+                docker ps -q | xargs -r docker logs --tail=50 || true
                 echo ""
                 echo "=== Disk Space ==="
                 df -h
@@ -232,8 +214,9 @@ pipeline {
         always {
             // Clean up Docker resources to free space
             sh '''
-                echo "Cleaning up Docker resources..."
-                docker compose down || true
+                echo "Cleaning up..."
+                docker ps -aq | xargs -r docker stop || true
+                docker ps -aq | xargs -r docker rm || true
             '''
 
             // Record build metrics
