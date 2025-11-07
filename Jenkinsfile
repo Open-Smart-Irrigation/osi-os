@@ -268,16 +268,25 @@ pipeline {
                     echo "=========================================="
                     echo "=== Starting Build for ${TARGET_ENV} ==="
                     echo "=========================================="
-                    echo "This may take 2-6 hours depending on configuration..."
                     echo "Build started at: $(date)"
                     echo ""
 
                     # Create logs directory
                     mkdir -p logs
 
-                    # Run the build - 'make' enters devshell and builds
-                    echo "Running 'make' to start build process..."
-                    make 2>&1 | tee logs/build.log
+                    # Navigate to openwrt directory
+                    cd openwrt
+
+                    echo "=== Refreshing configuration ==="
+                    make defconfig 2>&1 | tee ../logs/defconfig.log
+
+                    echo ""
+                    echo "=== Starting verbose single-threaded build ==="
+                    echo "This will take 2-6 hours..."
+                    echo ""
+
+                    # Run build with verbose output, single-threaded for better error visibility
+                    make -j1 V=s 2>&1 | tee ../logs/build_verbose.log
 
                     # Capture exit code
                     BUILD_RESULT=${PIPESTATUS[0]}
@@ -290,21 +299,21 @@ pipeline {
                     else
                         echo "✗ Build FAILED with exit code: $BUILD_RESULT"
                         echo ""
-                        echo "=== Last 200 lines of build output ==="
-                        tail -n 200 logs/build.log
+                        echo "=== Last 200 lines of verbose build output ==="
+                        tail -n 200 ../logs/build_verbose.log
                         exit $BUILD_RESULT
                     fi
 
                     echo ""
                     echo "=== Build Output Directory ==="
-                    if [ -d openwrt/bin ]; then
+                    if [ -d bin ]; then
                         echo "Build artifacts found:"
-                        find openwrt/bin -type f \\( -name "*.img.gz" -o -name "*.bin" \\) | head -20
+                        find bin -type f \\( -name "*.img.gz" -o -name "*.bin" \\) | head -20
                         echo ""
                         echo "Total size:"
-                        du -sh openwrt/bin
+                        du -sh bin
                     else
-                        echo "WARNING: No openwrt/bin directory found!"
+                        echo "WARNING: No bin directory found!"
                         exit 1
                     fi
                     echo ""
