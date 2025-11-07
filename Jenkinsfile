@@ -270,6 +270,9 @@ pipeline {
                     echo "=== Starting Build for ${TARGET_ENV} ==="
                     echo "=========================================="
 
+                    # Create logs directory if it doesn't exist
+                    mkdir -p ../logs
+
                     echo "Setting FORCE_UNSAFE_CONFIGURE=1 to bypass root configure check..."
                     export FORCE_UNSAFE_CONFIGURE=1
 
@@ -394,35 +397,33 @@ pipeline {
                 echo ""
                 echo "=== Troubleshooting Information ==="
 
-                # Check if logs exist
-                if [ -f /build_cache/osi-build/logs/build.log ]; then
-                    echo "=== Last 150 lines of build log ==="
-                    tail -n 150 /build_cache/osi-build/logs/build.log
+                # Check for verbose build log
+                if [ -f /build_cache/osi-build/logs/build_verbose.log ]; then
+                    echo "=== Last 200 lines of verbose build log ==="
+                    tail -n 200 /build_cache/osi-build/logs/build_verbose.log
                 else
-                    echo "No build.log found at /build_cache/osi-build/logs/build.log"
+                    echo "No build_verbose.log found"
+                fi
+
+                # Check for defconfig log
+                if [ -f /build_cache/osi-build/logs/defconfig.log ]; then
+                    echo "=== Last 50 lines of defconfig log ==="
+                    tail -n 50 /build_cache/osi-build/logs/defconfig.log
                 fi
 
                 echo ""
-                echo "=== Checking for other logs ==="
+                echo "=== Checking for all logs ==="
                 find /build_cache/osi-build -name "*.log" -type f 2>/dev/null | while read logfile; do
                     echo "Found log: $logfile"
-                    echo "--- Last 50 lines of $logfile ---"
+                    echo "--- Last 50 lines ---"
                     tail -n 50 "$logfile"
                     echo ""
                 done
 
                 echo ""
-                echo "=== Build directory contents ==="
-                ls -la /build_cache/osi-build 2>/dev/null || echo "Build directory not accessible"
-
-                echo ""
-                echo "=== OpenWrt directory check ==="
-                ls -la /build_cache/osi-build/openwrt 2>/dev/null | head -30 || echo "OpenWrt directory not found"
-
-                echo ""
-                echo "=== Check for compilation errors ==="
+                echo "=== Check for package compilation errors ==="
                 if [ -f /build_cache/osi-build/openwrt/logs/package/error.txt ]; then
-                    echo "Package compilation errors found:"
+                    echo "Package errors found:"
                     cat /build_cache/osi-build/openwrt/logs/package/error.txt
                 fi
             '''
