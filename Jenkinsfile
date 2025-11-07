@@ -1,335 +1,246 @@
 pipeline {
     agent any
 
-    options {
-        buildDiscarder(logRotator(
-            numToKeepStr: '2',
-            artifactNumToKeepStr: '1',
-            daysToKeepStr: '30',
-            artifactDaysToKeepStr: '15'
-        ))
-
-        timeout(time: 4, unit: 'HOURS')
-        timestamps()
-        disableConcurrentBuilds()
+    parameters {
+        choice(
+            name: 'TARGET_ENV',
+            choices: [
+                'full_raspberrypi_bcm27xx_bcm2709',
+                'full_raspberrypi_bcm27xx_bcm2708',
+                'full_raspberrypi_bcm27xx_bcm2710',
+                'full_raspberrypi_bcm27xx_bcm2711'
+            ],
+            description: 'Target environment for build'
+        )
+        booleanParam(
+            name: 'CLEAN_BUILD',
+            defaultValue: false,
+            description: 'Perform a clean build (removes all build artifacts)'
+        )
+        booleanParam(
+            name: 'FORCE_INIT',
+            defaultValue: false,
+            description: 'Force re-initialization of build environment'
+        )
     }
 
     environment {
-        BUILD_ENV = 'full_raspberrypi_bcm27xx_bcm2709'
-        BUILD_OUTPUT = 'openwrt/bin/targets/bcm27xx/bcm2709'
-        MIN_DISK_SPACE = '25'
+        // Ensure Docker is available
+        DOCKER_BUILDKIT = '1'
+        // Set workspace for large builds
+        BUILD_DIR = "${WORKSPACE}/chirpstack-gateway-os"
     }
 
-    triggers {
-        githubPush()
+    options {
+        // Keep builds for 30 days or 10 builds
+        buildDiscarder(logRotator(numToKeepStr: '10', daysToKeepStr: '30'))
+        // Add timestamps to console output
+        timestamps()
+        // Timeout for the entire build
+        timeout(time: 4, unit: 'HOURS')
+        // Don't allow concurrent builds on same node
+        disableConcurrentBuilds()
     }
 
     stages {
-        stage('Checkout') {
+        stage('Check Prerequisites') {
             steps {
-                echo '===================================='
-                echo 'Checking out OSI-OS repository'
-                echo '===================================='
-
-                checkout scm
-
-                sh '''
-                    echo "Git Branch: $(git branch --show-current || echo 'detached HEAD')"
-                    echo "Git Commit: $(git rev-parse HEAD)"
-                    echo "Git Commit Message: $(git log -1 --pretty=%B | head -1)"
-                '''
-            }
-        }
-
-        stage('Environment Check') {
-            steps {
-                echo '===================================='
-                echo 'Checking build environment'
-                echo '===================================='
-
                 script {
+                    echo "Checking build prerequisites..."
                     sh '''
                         echo "=== System Information ==="
                         uname -a
-
-                        echo "\\n=== Docker Version ==="
+                        echo ""
+                        echo "=== Docker Version ==="
                         docker --version
-                        docker info | grep -E 'Server Version|Storage Driver' || true
-
-                        echo "\\n=== Disk Space ==="
-                        df -h | grep -E '(Filesystem|/$|/var)'
-
-                        echo "\\n=== Available Memory ==="
+                        docker compose version || docker-compose --version
+                        echo ""
+                        echo "=== Disk Space ==="
+                        df -h ${WORKSPACE}
+                        echo ""
+                        echo "=== Memory ==="
                         free -h
-
-                        echo "\\n=== CPU Information ==="
-                        echo "CPU Cores: $(nproc)"
                     '''
 
-                    def availableSpace = sh(
-                        script: "df -BG . | tail -1 | awk '{print \$4}' | sed 's/G//'",
+                    // Check minimum disk space (20GB)
+                    def diskSpace = sh(
+                        script: "df ${WORKSPACE} | tail -1 | awk '{print \$4}'",
                         returnStdout: true
-                    ).trim().toInteger()
+                    ).trim().toLong()
 
-                    if (availableSpace < env.MIN_DISK_SPACE.toInteger()) {
-                        error("Insufficient disk space! Available: ${availableSpace}GB, Required: ${env.MIN_DISK_SPACE}GB")
+                    if (diskSpace < 20000000) { // 20GB in KB
+                        error("Insufficient disk space. Need at least 20GB free.")
                     }
-
-                    echo "✓ Disk space check passed: ${availableSpace}GB available"
                 }
+            }
+        }
+
+        stage('Clean Workspace') {
+            when {
+                expression { params.CLEAN_BUILD == true }
+            }
+            steps {
+                echo "Performing clean build..."
+                sh '''
+                    echo "Cleaning Docker containers and images..."
+                    docker compose down -v || true
+                    echo "Cleaning build artifacts..."
+                    make clean || true
+                    echo "Cleaning Docker system (pruning)..."
+                    docker system prune -f
+                '''
             }
         }
 
         stage('Initialize Build Environment') {
             when {
-                expression {
-                    return !fileExists('openwrt')
+                anyOf {
+                    expression { params.FORCE_INIT == true }
+                    expression { !fileExists('.initialized') }
                 }
             }
             steps {
-                echo '===================================='
-                echo 'Initializing OpenWrt build environment'
-                echo 'This downloads ~2GB and takes 10-15 minutes'
-                echo '===================================='
+                echo "Initializing OpenWrt build environment..."
+                sh '''
+                    echo "Running make init..."
+                    make init
+
+                    # Create marker file to skip this step on subsequent builds
+                    touch .initialized
+                    echo "Initialization completed at $(date)" >> .initialized
+                '''
+            }
+        }
+
+        stage('Update Feeds') {
+            steps {
+                echo "Updating OpenWrt feeds..."
+                sh '''
+                    # Run make update in the Docker environment
+                    docker compose run --rm devshell make update
+                '''
+            }
+        }
+
+        stage('Switch Environment') {
+            steps {
+                echo "Switching to target environment: ${params.TARGET_ENV}"
+                sh '''
+                    # Switch to the target environment
+                    docker compose run --rm devshell make switch-env ENV=${TARGET_ENV}
+                '''
+            }
+        }
+
+        stage('Build Image') {
+            steps {
+                echo "Building ChirpStack Gateway OS image..."
+                echo "This may take 1-3 hours depending on hardware..."
 
                 sh '''
-                    set -e
-                    echo "Starting initialization at $(date)"
-                    make init
-                    echo "Initialization completed at $(date)"
+                    # Build the image
+                    docker compose run --rm devshell make
                 '''
-
-                echo '✓ Build environment initialized'
             }
         }
 
-        stage('Build Pipeline') {
+        stage('Collect Artifacts') {
             steps {
-                echo '===================================='
-                echo 'Running complete build pipeline'
-                echo '===================================='
-
                 script {
-                    def startTime = System.currentTimeMillis()
+                    echo "Collecting build artifacts..."
 
-                    // Create a script that will be executed inside the container
-                    sh """
-                        cat > /tmp/build-script-${BUILD_NUMBER}.sh << 'BUILD_SCRIPT_EOF'
-#!/bin/bash
-set -e
+                    // Find the target directory based on environment
+                    def targetPath = sh(
+                        script: '''
+                            find openwrt/bin/targets -type f -name "*.img.gz" -o -name "*.bin" | head -1 | xargs dirname || echo "openwrt/bin/targets"
+                        ''',
+                        returnStdout: true
+                    ).trim()
 
-echo "========================================"
-echo "Starting ChirpStack Gateway OS Build"
-echo "========================================"
+                    if (targetPath && fileExists(targetPath)) {
+                        echo "Artifacts found in: ${targetPath}"
 
-echo "\\n[1/4] Updating package feeds..."
-make update
-echo "✓ Feeds updated"
+                        // Archive the artifacts
+                        archiveArtifacts artifacts: "${targetPath}/*",
+                                       fingerprint: true,
+                                       allowEmptyArchive: true
 
-echo "\\n[2/4] Switching to target environment: ${BUILD_ENV}"
-make switch-env ENV=${BUILD_ENV}
-echo "✓ Environment switched"
-
-echo "\\n[3/4] Building firmware (this takes 1-4 hours on first build)..."
-echo "Build started at \$(date)"
-echo "Using \$(nproc) CPU cores"
-make -j\$(nproc)
-echo "Build completed at \$(date)"
-echo "✓ Build completed"
-
-echo "\\n[4/4] Verifying build output..."
-if [ -d "${BUILD_OUTPUT}" ]; then
-    echo "Build output directory found"
-    ls -lh ${BUILD_OUTPUT}/ | head -20
-
-    if ls ${BUILD_OUTPUT}/*.img.gz 1> /dev/null 2>&1; then
-        echo "✓ Firmware images created successfully"
-        find ${BUILD_OUTPUT} -name "*.img.gz" -exec basename {} \\;
-    else
-        echo "ERROR: No firmware images found!"
-        exit 1
-    fi
-else
-    echo "ERROR: Build output directory not found!"
-    exit 1
-fi
-
-echo "\\n========================================"
-echo "Build Pipeline Completed Successfully"
-echo "========================================"
-BUILD_SCRIPT_EOF
-
-                        chmod +x /tmp/build-script-${BUILD_NUMBER}.sh
-
-                        # Execute the build script inside the Docker container
-                        # The Makefile should handle launching Docker
-                        # We pass the script to execute
-                        make devshell-exec SCRIPT=/tmp/build-script-${BUILD_NUMBER}.sh || \
-                        docker run --rm \
-                            -v \$(pwd):/build \
-                            -v /tmp/build-script-${BUILD_NUMBER}.sh:/tmp/build-script.sh:ro \
-                            -w /build \
-                            chirpstack/chirpstack-gateway-os-dev:latest \
-                            bash /tmp/build-script.sh
-
-                        # Cleanup
-                        rm -f /tmp/build-script-${BUILD_NUMBER}.sh
-                    """
-
-                    def endTime = System.currentTimeMillis()
-                    def duration = (endTime - startTime) / 1000 / 60
-                    echo "✓ Complete build pipeline finished in ${duration.round(2)} minutes"
+                        // List built images
+                        sh "ls -lh ${targetPath}/"
+                    } else {
+                        echo "Warning: No artifacts found. Build may have failed."
+                    }
                 }
             }
         }
 
-        stage('Verify Build Output') {
+        stage('Generate Build Report') {
             steps {
-                echo '===================================='
-                echo 'Final verification of build artifacts'
-                echo '===================================='
-
-                sh """
-                    echo "=== Build Output Files ==="
-                    ls -lh ${BUILD_OUTPUT}/
-
-                    echo "\\n=== Firmware Images ==="
-                    find ${BUILD_OUTPUT} -name "*.img.gz" -ls
-
-                    echo "\\n=== File Sizes ==="
-                    du -h ${BUILD_OUTPUT}/*.img.gz 2>/dev/null || echo "Checking files..."
-
-                    echo "\\n=== SHA256 Checksums ==="
-                    if [ -f "${BUILD_OUTPUT}/sha256sums" ]; then
-                        cat ${BUILD_OUTPUT}/sha256sums
-                    else
-                        echo "No checksum file found"
-                    fi
-                """
-
-                echo '✓ Build output verified'
-            }
-        }
-
-        stage('Archive Artifacts') {
-            steps {
-                echo '===================================='
-                echo 'Archiving OSI-OS build artifacts'
-                echo '===================================='
-
                 script {
-                    archiveArtifacts artifacts: """
-                        ${BUILD_OUTPUT}/*-factory.img.gz,
-                        ${BUILD_OUTPUT}/*-sysupgrade.img.gz,
-                        ${BUILD_OUTPUT}/sha256sums
-                    """.trim(),
-                    fingerprint: true,
-                    allowEmptyArchive: false,
-                    onlyIfSuccessful: true
+                    def buildReport = """
+                    ╔════════════════════════════════════════════════════╗
+                    ║     ChirpStack Gateway OS Build Report            ║
+                    ╚════════════════════════════════════════════════════╝
 
-                    sh """
-                        cat > build-info.txt << 'BUILD_INFO_EOF'
-=== Open Smart Irrigation OS Build Information ===
+                    Build Number:    ${env.BUILD_NUMBER}
+                    Target:          ${params.TARGET_ENV}
+                    Clean Build:     ${params.CLEAN_BUILD}
+                    Build Time:      ${currentBuild.durationString}
+                    Status:          ${currentBuild.result ?: 'SUCCESS'}
 
-Build Number: ${BUILD_NUMBER}
-Build Date: \$(date -u +"%Y-%m-%d %H:%M:%S UTC")
+                    Build Artifacts:
+                    """.stripIndent()
 
-Git Information:
-  Repository: https://github.com/Open-Smart-Irrigation/osi-os.git
-  Branch: \$(git branch --show-current || echo 'detached HEAD')
-  Commit: \$(git rev-parse HEAD)
-  Commit Message: \$(git log -1 --pretty=%B | head -1)
-  Author: \$(git log -1 --pretty=format:'%an <%ae>')
+                    sh '''
+                        echo "Finding build artifacts..."
+                        find openwrt/bin/targets -type f \\( -name "*.img.gz" -o -name "*.bin" \\) -exec ls -lh {} \\; || echo "No artifacts found"
+                    '''
 
-Build Environment:
-  Target: ${BUILD_ENV}
-  Jenkins Job: ${JOB_NAME}
-  Build URL: ${BUILD_URL}
-
-Firmware Images:
-BUILD_INFO_EOF
-
-                        find ${BUILD_OUTPUT} -name "*.img.gz" -exec basename {} \\; >> build-info.txt
-
-                        echo "\\nBuild System:" >> build-info.txt
-                        echo "  CPU Cores Used: \$(nproc)" >> build-info.txt
-                        echo "  System: \$(uname -a)" >> build-info.txt
-                        echo "  Docker: \$(docker --version)" >> build-info.txt
-
-                        cat build-info.txt
-                    """
-
-                    archiveArtifacts artifacts: 'build-info.txt', fingerprint: true
+                    echo buildReport
                 }
-
-                echo '✓ Artifacts archived'
             }
         }
     }
 
     post {
         success {
-            echo '=========================================='
-            echo '✓ OSI-OS BUILD SUCCESSFUL!'
-            echo '=========================================='
-
-            script {
-                echo "\\n📦 Firmware images: ${BUILD_URL}artifact/${BUILD_OUTPUT}/"
-                echo "📄 Build info: ${BUILD_URL}artifact/build-info.txt"
-            }
+            echo "✅ Build completed successfully!"
+            echo "Build artifacts have been archived and are available in Jenkins."
         }
 
         failure {
-            echo '=========================================='
-            echo '✗ BUILD FAILED!'
-            echo '=========================================='
+            echo "❌ Build failed!"
+            echo "Check the console output for errors."
 
-            script {
-                echo "\\n📋 Console output: ${BUILD_URL}console"
-                echo "\\n⚠️  Common issues:"
-                echo "  • Insufficient disk space (need 25GB+)"
-                echo "  • Network issues during feed updates"
-                echo "  • Docker connectivity problems"
-                echo "  • Missing docker group permissions for Jenkins"
-            }
+            // Collect logs for debugging
+            sh '''
+                echo "=== Docker Containers ==="
+                docker ps -a || true
+                echo ""
+                echo "=== Docker Compose Logs ==="
+                docker compose logs --tail=100 || true
+                echo ""
+                echo "=== Disk Space ==="
+                df -h
+            '''
+        }
+
+        unstable {
+            echo "⚠️ Build completed with warnings"
         }
 
         always {
-            echo '===================================='
-            echo 'Post-Build Cleanup'
-            echo '===================================='
+            // Clean up Docker resources to free space
+            sh '''
+                echo "Cleaning up Docker resources..."
+                docker compose down || true
+            '''
 
+            // Record build metrics
             script {
-                sh '''
-                    echo "=== Resource Usage ==="
-                    df -h | grep -E '(Filesystem|/$|/var)'
-                    echo ""
-                    free -h
-                    echo ""
-                    du -sh . 2>/dev/null || echo "Workspace: unknown"
-                '''
-
-                def availableSpace = sh(
-                    script: "df -BG . | tail -1 | awk '{print \$4}' | sed 's/G//'",
-                    returnStdout: true
-                ).trim().toInteger()
-
-                if (availableSpace < 15) {
-                    echo "⚠️ Low disk space: ${availableSpace}GB - cleaning build intermediates..."
-                    sh '''
-                        if [ -d openwrt ]; then
-                            cd openwrt && make clean || true
-                        fi
-                    '''
-                } else {
-                    echo "✓ Sufficient space: ${availableSpace}GB remaining"
-                }
+                def buildDuration = currentBuild.duration / 1000 / 60 // in minutes
+                echo "Build took ${buildDuration} minutes"
             }
-
-            echo '===================================='
-            echo "Build #${BUILD_NUMBER} completed"
-            echo "Duration: ${currentBuild.durationString}"
-            echo '===================================='
         }
     }
 }
