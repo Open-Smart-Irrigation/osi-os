@@ -47,13 +47,25 @@ pipeline {
             }
             steps {
                 sh '''
+                    # Initialize git submodules
                     git submodule update --init --recursive
 
                     # Remove existing symlinks if they exist
                     rm -f openwrt/.config
                     rm -f openwrt/files
 
-                    make init
+                    # Copy feeds config
+                    cp feeds.conf.default openwrt/feeds.conf.default
+
+                    # Create symlinks
+                    ln -s ../conf/.config openwrt/.config
+                    ln -s ../conf/files openwrt/files
+
+                    # Now run docker commands
+                    docker compose run --rm chirpstack-gateway-os openwrt/scripts/feeds update -a
+                    docker compose run --rm chirpstack-gateway-os openwrt/scripts/feeds install -a
+                    docker compose run --rm chirpstack-gateway-os quilt init
+
                     touch .initialized
                 '''
             }
