@@ -4,7 +4,7 @@ services:
       context: .
       dockerfile: Dockerfile-devel
     volumes:
-      - .:/workdir
+      - ${PWD}:/workdir  # Use environment variable instead of .
     ulimits:
       nofile:
         soft: 1024
