@@ -62,9 +62,9 @@ pipeline {
                     ln -s ../conf/files openwrt/files
 
                     # Now run docker commands
-                    docker compose run --rm chirpstack-gateway-os bash -c "openwrt/scripts/feeds update -a"
-                    docker compose run --rm chirpstack-gateway-os bash -c "openwrt/scripts/feeds install -a"
-                    docker compose run --rm chirpstack-gateway-os bash -c "quilt init"
+                    docker compose run --rm chirpstack-gateway-os sh -c 'openwrt/scripts/feeds update -a'
+                    docker compose run --rm chirpstack-gateway-os sh -c 'openwrt/scripts/feeds install -a'
+                    docker compose run --rm chirpstack-gateway-os sh -c 'quilt init'
 
                     touch .initialized
                 '''
