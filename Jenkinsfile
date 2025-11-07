@@ -2,7 +2,7 @@ pipeline {
     agent any
 
     options {
-        // Keep last 10 builds, 5 with artifacts
+        // Keep last 2 builds, 1 with artifacts
         buildDiscarder(logRotator(
             numToKeepStr: '2',
             artifactNumToKeepStr: '1',
@@ -29,6 +29,9 @@ pipeline {
 
         // Minimum disk space required (GB)
         MIN_DISK_SPACE = '25'
+
+        // Docker Compose project name (to avoid conflicts)
+        COMPOSE_PROJECT_NAME = "chirpstack-build-${BUILD_NUMBER}"
     }
 
     triggers {
@@ -46,7 +49,7 @@ pipeline {
                 checkout scm
 
                 sh '''
-                    echo "Git Branch: $(git branch --show-current)"
+                    echo "Git Branch: $(git branch --show-current || echo 'detached HEAD')"
                     echo "Git Commit: $(git rev-parse HEAD)"
                     echo "Git Commit Message: $(git log -1 --pretty=%B | head -1)"
                 '''
@@ -68,6 +71,9 @@ pipeline {
                         docker --version
                         docker info | grep -E 'Server Version|Storage Driver|Kernel Version' || true
 
+                        echo "\\n=== Docker Compose Version ==="
+                        docker-compose --version || docker compose version || echo "Warning: docker-compose not found"
+
                         echo "\\n=== Disk Space ==="
                         df -h | grep -E '(Filesystem|/$|/var)'
 
@@ -78,9 +84,9 @@ pipeline {
                         echo "CPU Cores: $(nproc)"
 
                         echo "\\n=== Build Tools ==="
-                        gcc --version | head -1
-                        make --version | head -1
-                        python3 --version
+                        which gcc && gcc --version | head -1 || echo "gcc not in PATH (ok if in Docker)"
+                        which make && make --version | head -1 || echo "make not in PATH (ok if in Docker)"
+                        which python3 && python3 --version || echo "python3 not in PATH (ok if in Docker)"
                         git --version
                     '''
 
@@ -122,7 +128,7 @@ pipeline {
             }
         }
 
-        stage('Enter Development Shell & Update Feeds') {
+        stage('Update Feeds') {
             steps {
                 echo '===================================='
                 echo 'Updating OpenWrt package feeds'
@@ -130,12 +136,17 @@ pipeline {
 
                 retry(3) {
                     sh '''
-                        make devshell << 'DEVSHELL_EOF'
-echo "Updating feeds at $(date)"
-make update
-echo "Feed update completed at $(date)"
-exit
-DEVSHELL_EOF
+                        set -e
+                        echo "Updating feeds at $(date)"
+
+                        # Run update command inside Docker container
+                        # Using docker-compose run with --rm to clean up container after
+                        docker-compose run --rm \
+                            -e WORKDIR=/build \
+                            chirpstack-gateway-os-dev \
+                            bash -c "cd /build && make update"
+
+                        echo "Feed update completed at $(date)"
                     '''
                 }
 
@@ -150,12 +161,16 @@ DEVSHELL_EOF
                 echo '===================================='
 
                 sh """
-                    make devshell << 'DEVSHELL_EOF'
-echo "Switching to environment: ${BUILD_ENV}"
-make switch-env ENV=${BUILD_ENV}
-echo "Environment switched successfully"
-exit
-DEVSHELL_EOF
+                    set -e
+                    echo "Switching to environment: ${BUILD_ENV}"
+
+                    # Run switch-env command inside Docker container
+                    docker-compose run --rm \
+                        -e WORKDIR=/build \
+                        chirpstack-gateway-os-dev \
+                        bash -c "cd /build && make switch-env ENV=${BUILD_ENV}"
+
+                    echo "Environment switched successfully"
                 """
 
                 echo '✓ Environment switched'
@@ -173,16 +188,17 @@ DEVSHELL_EOF
                     def startTime = System.currentTimeMillis()
 
                     sh '''
-                        make devshell << 'DEVSHELL_EOF'
-echo "Build started at $(date)"
-echo "Using $(nproc) CPU cores"
+                        set -e
+                        echo "Build started at $(date)"
+                        echo "Using $(nproc) CPU cores"
 
-# Build with parallel jobs
-make -j$(nproc)
+                        # Build with parallel jobs inside Docker container
+                        docker-compose run --rm \
+                            -e WORKDIR=/build \
+                            chirpstack-gateway-os-dev \
+                            bash -c "cd /build && make -j$(nproc)"
 
-echo "Build completed at $(date)"
-exit
-DEVSHELL_EOF
+                        echo "Build completed at $(date)"
                     '''
 
                     def endTime = System.currentTimeMillis()
@@ -200,21 +216,30 @@ DEVSHELL_EOF
 
                 script {
                     sh """
+                        set -e
                         echo "=== Build Output Files ==="
                         if [ -d "${BUILD_OUTPUT}" ]; then
                             ls -lh ${BUILD_OUTPUT}/
 
                             echo "\\n=== Firmware Images ==="
-                            find ${BUILD_OUTPUT} -name "*.img.gz" -o -name "*.img" || echo "No images found yet"
+                            find ${BUILD_OUTPUT} -name "*.img.gz" -o -name "*.img" || echo "No images found"
 
                             echo "\\n=== File Sizes ==="
                             du -h ${BUILD_OUTPUT}/*.img.gz 2>/dev/null || echo "No .img.gz files found"
+
+                            # Verify at least one image exists
+                            if ! ls ${BUILD_OUTPUT}/*.img.gz 1> /dev/null 2>&1; then
+                                echo "ERROR: No firmware images found!"
+                                exit 1
+                            fi
                         else
                             echo "ERROR: Build output directory not found!"
                             exit 1
                         fi
                     """
                 }
+
+                echo '✓ Build output verified'
             }
         }
 
@@ -245,7 +270,7 @@ Build Date: \$(date -u +"%Y-%m-%d %H:%M:%S UTC")
 
 Git Information:
   Repository: https://github.com/Open-Smart-Irrigation/osi-os.git
-  Branch: \$(git branch --show-current)
+  Branch: \$(git branch --show-current || echo 'detached HEAD')
   Commit: \$(git rev-parse HEAD)
   Commit Message: \$(git log -1 --pretty=%B | head -1)
   Author: \$(git log -1 --pretty=format:'%an <%ae>')
@@ -262,7 +287,7 @@ BUILD_INFO_EOF
 
                         echo "\\nBuild System:" >> build-info.txt
                         echo "  CPU Cores Used: \$(nproc)" >> build-info.txt
-                        echo "  OS: \$(cat /etc/rocky-release)" >> build-info.txt
+                        uname -a >> build-info.txt
                         echo "  Docker Version: \$(docker --version)" >> build-info.txt
                     """
 
@@ -309,6 +334,8 @@ BUILD_INFO_EOF
                 echo "2. Network issues during feed updates"
                 echo "3. Missing dependencies on host"
                 echo "4. Docker connectivity problems"
+                echo "5. Docker Compose not installed or not accessible"
+                echo "6. Incorrect docker-compose.yml configuration"
             }
         }
 
@@ -338,6 +365,12 @@ BUILD_INFO_EOF
                     du -sh . 2>/dev/null || echo "Unable to calculate"
                 '''
 
+                // Stop and remove any running containers from this build
+                sh '''
+                    echo "\\n=== Cleaning up Docker containers ==="
+                    docker-compose down --remove-orphans || true
+                '''
+
                 // Aggressive cleanup if low on space
                 def availableSpace = sh(
                     script: "df -BG . | tail -1 | awk '{print \$4}' | sed 's/G//'",
@@ -350,7 +383,12 @@ BUILD_INFO_EOF
 
                     sh '''
                         # Clean OpenWrt build intermediates but keep downloads
-                        cd openwrt 2>/dev/null && make clean || true
+                        if [ -d openwrt ]; then
+                            docker-compose run --rm \
+                                -e WORKDIR=/build \
+                                chirpstack-gateway-os-dev \
+                                bash -c "cd /build/openwrt && make clean" || true
+                        fi
 
                         echo "✓ Build cleaned"
                     '''
