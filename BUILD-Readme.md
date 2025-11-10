@@ -28,8 +28,14 @@ make devshell
 ### 3. Switch to Target Environment
 
 ```bash
-# Switch to Raspberry Pi environment (or your target)
-make switch-env ENV=full_raspberrypi_bcm27xx_bcm2709
+# Switch to Raspberry Pi 5 environment 
+make switch-env ENV=full_raspberrypi_bcm27xx_bcm2712
+
+#Currently we are supporting these targets: 
+
+#full_raspberrypi_bcm27xx_bcm2711 → for Raspberry Pi 4 Model B (BCM2711 SoC)
+
+#full_raspberrypi_bcm27xx_bcm2712 → for Raspberry Pi 5 (BCM2712 SoC)
 ```
 
 ### 4. Update Feeds (Important!)
