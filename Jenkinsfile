@@ -2,19 +2,13 @@ pipeline {
     agent any
 
     parameters {
-        choice(
+     choice(
             name: 'TARGET_ENV',
             choices: [
-                'full_raspberrypi_bcm27xx_bcm2709',
-                'full_raspberrypi_bcm27xx_bcm2708',
-                'full_raspberrypi_bcm27xx_bcm2710',
                 'full_raspberrypi_bcm27xx_bcm2711',
-                'base_raspberrypi_bcm27xx_bcm2709',
-                'base_raspberrypi_bcm27xx_bcm2708',
-                'base_raspberrypi_bcm27xx_bcm2710',
-                'base_raspberrypi_bcm27xx_bcm2711'
+                'full_raspberrypi_bcm27xx_bcm2712'
             ],
-            description: 'Target platform'
+            description: 'Target platform (bcm2711 = Pi 4, bcm2712 = Pi 5)'
         )
         booleanParam(
             name: 'CLEAN_BUILD',
@@ -270,7 +264,7 @@ pipeline {
                     echo "=== Starting Build for ${TARGET_ENV} ==="
                     echo "=========================================="
 
-                    # Create logs directory if it doesn't exist
+                    # Create logs directory
                     mkdir -p ../logs
 
                     echo "Setting FORCE_UNSAFE_CONFIGURE=1 to bypass root configure check..."
@@ -279,24 +273,38 @@ pipeline {
                     echo "Running defconfig to refresh config..."
                     make defconfig 2>&1 | tee ../logs/defconfig.log
 
-                    echo "Starting verbose single-threaded build (this may take hours)..."
-                    make -j1 V=s 2>&1 | tee ../logs/build_verbose.log
+                    echo ""
+                    echo "Starting 2-thread build (optimized for 4 vCores, 8GB RAM)..."
+                    echo "Build started at: $(date)"
+                    echo ""
+
+                    # 2-thread build without verbose flag
+                    make -j2 2>&1 | tee ../logs/build.log
 
                     BUILD_RESULT=${PIPESTATUS[0]}
+
+                    echo ""
+                    echo "Build finished at: $(date)"
 
                     if [ $BUILD_RESULT -eq 0 ]; then
                         echo "✓ Build completed successfully"
                     else
                         echo "✗ Build FAILED with exit code: $BUILD_RESULT"
+                        echo ""
                         echo "=== Last 200 lines of build output ==="
-                        tail -n 200 ../logs/build_verbose.log
+                        tail -n 200 ../logs/build.log
+                        echo ""
+                        echo "=== TIP: Re-run with make -j1 V=s for detailed verbose debugging ==="
                         exit $BUILD_RESULT
                     fi
 
                     echo ""
                     echo "=== Build Output Directory Contents ==="
                     if [ -d bin ]; then
+                        echo "Firmware images created:"
                         find bin -type f \\( -name "*.img.gz" -o -name "*.bin" \\) | head -20
+                        echo ""
+                        echo "Total binary size:"
                         du -sh bin
                     else
                         echo "Warning: bin directory not found!"
@@ -306,6 +314,7 @@ pipeline {
                 '''
             }
         }
+
 
         stage('Archive Artifacts') {
             steps {
@@ -323,9 +332,11 @@ pipeline {
                     cp /build_cache/osi-build/logs/*.log ${WORKSPACE}/logs/ 2>/dev/null || echo "No logs in logs/ directory"
                     cp /build_cache/osi-build/*.log ${WORKSPACE}/logs/ 2>/dev/null || echo "No root-level logs"
 
-                    # Copy built images
+                    # Copy built images from the actual location
+                    echo "Looking for build artifacts in /build_cache/osi-build/openwrt/bin/targets..."
+
                     if [ -d /build_cache/osi-build/openwrt/bin/targets ]; then
-                        echo "Copying build artifacts..."
+                        echo "Found targets directory, copying to workspace..."
                         cp -r /build_cache/osi-build/openwrt/bin/targets ${WORKSPACE}/output/
 
                         echo ""
@@ -335,13 +346,14 @@ pipeline {
                         echo ""
                         echo "Total artifact size:"
                         du -sh ${WORKSPACE}/output/targets
-
+                        echo ""
+                        echo "✓ Artifacts copied successfully to workspace"
                     else
-                        echo "✗ ERROR: No build artifacts found!"
-                        echo "Build may have failed or not produced output"
+                        echo "✗ ERROR: No build artifacts found at /build_cache/osi-build/openwrt/bin/targets"
+                        echo "Checking alternative locations..."
+                        ls -la /build_cache/osi-build/openwrt/bin/ || echo "No bin directory"
                         exit 1
                     fi
-                    echo ""
                 '''
 
                 // Archive the built images
