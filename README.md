@@ -1,46 +1,119 @@
-# OSI OS – Open Smart Irrigation Operating System
+# ChirpStack Gateway OS
 
-**OSI OS** is an open-source operating system for Raspberry Pi, designed to power LoRaWAN-based smart irrigation hubs. Built on ChirpStack Gateway OS and developed within the Node-RED environment, OSI OS enables fully offline irrigation scheduling and real-time sensor monitoring—ideal for deployment in resource-constrained agricultural settings.
+ChirpStack Gateway OS is an open-source [OpenWrt](https://openwrt.org/) based
+embedded OS for LoRa<sup>&reg;</sup> gateways. It provides a web-interface for
+configuration and contains pre-defined configuration options for common
+LoRa hardware to make it easy to setup a LoRa gateway and optionally a
+ChirpStack-based LoRaWAN<sup>&reg;</sup> Network Server.
 
-## Key Features
-- **LoRaWAN Integration**  
-  Supports long-range, low-power communication between sensors and actuators.
+**Note:** If you are looking for the [Yocto](https://www.yoctoproject.org/)
+recipes of the previously Yocto based ChirpStack Gateway OS, please switch to
+the [v4_yocto](https://github.com/chirpstack/chirpstack-gateway-os/tree/v4_yocto)
+branch.
 
-- **Node-RED Visual Programming**  
-  Intuitive, event-based interface suitable for quick, beginner-friendly adaptation.
+## Documentation and binaries
 
-- **Local Data Processing**  
-  100% offline operation with on-device storage and scheduling logic.
+Please refer to the [ChirpStack Gateway OS documentation](https://www.chirpstack.io/docs/chirpstack-gateway-os/)
+for documentation and pre-compiled images.
 
-- **Farmer-Friendly Dashboard**  
-  Web-based UI accessible via local Wi-Fi
+## Building from source
 
-- **Modular Plugin System**  
-  Easily extend the system to support new sensors or actuators.
-##  Roadmap
+### Requirements
 
-This roadmap outlines the planned development milestones for OSI OS. Timelines are indicative and may shift based on field feedback and contributor input.
+Building ChirpStack Gateway OS requires:
 
-### Alpha – Core Functionality (Q4 2025)
-- [x] Offline operation with customized ChirpStack Gateway OS (Raspberry Pi)
-- [ ] Integration of KIWI Agriculture Sensor by TEKTELIC (soil moisture, temp, humidity)
-- [ ] Integration of STREGA Smart Valve for automated irrigation control
-- [ ] Local database (SQLite) for storing sensor and environmental data
-- [ ] Node-RED flows for basic scheduling, threshold logic, and actuator control
-- [ ] Web dashboard for  soil monitoring and trigger-based scheduling
-- [ ] Basic alerting system (e.g., dry soil warning, device disconnect)
-- [ ] Documentation: Hardware setup, wiring guide, image flashing, troubleshooting
+* [Docker](https://www.docker.com/)
 
-### Beta – Field-Ready Release (Q2 2026)
-- [ ] Multi user and role-based access (farmer, technician, superuser)
-- [ ] Modular plugin system to support additional sensors and control devices
-- [ ] Backup and export functionality for sensor logs and schedules
-- [ ] On-device diagnostics UI (LoRa signal, battery status, system health)
-- [ ] Sensor calibration and alerting functions in UI
+### Initialize
 
-### v1.0 – Community Release (Q4 2026)
-- [ ] Stable OS image with one-click installer
-- [ ] Configurable irrigation routines per crop
-- [ ] Multilingual dashboard (starting with English, French, Arabic, Swahili)
-- [ ] Contribution workflow for plugin submissions and bug reports
-- [ ] Training package for local technicians and partners
+To initialize the [OpenWrt](https://openwrt.org/) build environment, run the
+following command:
+
+```bash
+make init
+```
+
+This will:
+
+* Clone the OpenWrt code
+* Fetch all the OpenWrt feeds, including the [ChirpStack OpenWrt Feed](https://github.com/chirpstack/chirpstack-openwrt-feed)
+* Symlink configuration and files
+
+### Update
+
+This step is not required after running `make init`, but allows you to update
+the OpenWrt source and feeds at a later point:
+
+```bash
+make update
+```
+
+### Build
+
+For building the ChirpStack Gateway OS, you must enter the Docker-based
+development environment first:
+
+```
+make devshell
+```
+
+#### Switch configuration
+
+Each target and image has its own OpenWrt configuration file, files and
+patches. These can be found under the `conf` directory of this repository.
+
+To switch to one of these configuration environments, you must execute:
+
+```
+make switch-env ENV=name-of-env
+```
+
+Fo example if you would like to switch to `base_raspberrypi_bcm27xx_bcm2709`,
+you execute:
+
+```
+make switch-env ENV=base_raspberrypi_bcm27xx_bcm2709
+```
+
+This will:
+
+* Undo all previously applied patches.
+* Update the symlinks for OpenWrt configuration and files.
+* Apply all patches. 
+
+#### Building image
+
+Once the configuration has been set, run the following command to build the
+ChirpStack Gateway OS image:
+
+```bash
+make
+```
+
+Note that this can take a couple of hours depending on the selected
+configuration and will require a significant amount of disk-space.
+
+#### Making configuration changes
+
+**Note:** The commands listed below must be executed within the `openwrt`
+directory.
+
+To make configuration changes (e.g. add additional packages), you can execute:
+
+```bash
+make menuconfig
+```
+
+As updates to OpenWrt packages can introduce new configuration options over
+time, you can run the following command to update the configuration:
+
+```bash
+make defconfig
+```
+
+Please refer also to the [OpenWrt build system usage documentation](https://openwrt.org/docs/guide-developer/toolchain/use-buildsystem).
+
+## Links
+
+* [ChirpStack documentation](https://www.chirpstack.io/)
+* [chirpstack-openwrt-feed](https://github.com/chirpstack/chirpstack-openwrt-feed) repository
