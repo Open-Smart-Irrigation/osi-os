@@ -19,8 +19,9 @@ PKG_LICENSE_FILES:=LICENSE
 include $(INCLUDE_DIR)/package.mk
 
 define Package/node-red-contrib-chirpstack
-	SECTION:=chirpstack
-	CATEGORY:=ChirpStack
+	SECTION:=utils
+	CATEGORY:=Utilities
+	SUBMENU:=Node-RED
 	TITLE:=ChirpStack Node-RED nodes
 	URL:=https://github.com/chirpstack/node-red-contrib-chirpstack
 	DEPENDS:=+node +node-npm +node-red

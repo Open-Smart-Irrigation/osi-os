@@ -11,7 +11,7 @@ PKG_HASH:=bc19564d9c9c089e4f3e865acffed03badae6927618aaa1ed96fa1745df5fdce
 
 PKG_BUILD_DEPENDS:=node/host
 
-PKG_MAINTAINER:= Orne Brocaar <info@brocaar.com>
+PKG_MAINTAINER:= knolleary
 PKG_LICENSE:=Apache-2.0
 PKG_LICENSE_FILES:=LICENSE
 
