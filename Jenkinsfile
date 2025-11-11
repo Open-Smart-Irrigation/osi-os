@@ -225,7 +225,13 @@ pipeline {
                     echo "=========================================="
                     echo "=== Switching to Environment: ${TARGET_ENV} ==="
                     echo "=========================================="
-
+                    
+          # Prevent quilt error: make sure patches/series exists
+            mkdir -p ${TARGET_ENV}/patches
+            if [ ! -f ${TARGET_ENV}/patches/series ]; then
+                echo "Creating empty ${TARGET_ENV}/patches/series"
+                : > ${TARGET_ENV}/patches/series
+            fi
                     # Use make switch-env
                     make switch-env ENV=${TARGET_ENV} 2>&1 | tee switch-env.log
 
