@@ -438,7 +438,23 @@ pipeline {
                     echo "Package errors found:"
                     cat /build_cache/osi-build/openwrt/logs/package/error.txt
                 fi
-            '''
+            
+      # Prepare workspace log dir for archiving
+      mkdir -p ${WORKSPACE}/logs
+      # Copy anything we have into workspace
+      cp -r /build_cache/osi-build/logs/*.log ${WORKSPACE}/logs/ 2>/dev/null || true
+      cp -r /build_cache/osi-build/*.log ${WORKSPACE}/logs/ 2>/dev/null || true
+      if [ -d /build_cache/osi-build/openwrt/logs ]; then
+        mkdir -p ${WORKSPACE}/logs/openwrt
+        cp -r /build_cache/osi-build/openwrt/logs/* ${WORKSPACE}/logs/openwrt/ 2>/dev/null || true
+      fi
+    '''
+
+// Archive logs on failure
+archiveArtifacts artifacts: 'logs/**/*.log, logs/**/*.txt',
+                 allowEmptyArchive: true,
+                 fingerprint: false
+
         }
         always {
             sh '''
