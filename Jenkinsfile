@@ -17,12 +17,6 @@ parameters {
     // booleanParam(name: 'VERBOSE_BUILD', defaultValue: false, description: 'Enable verbose build output')
 }
 
-options {
-    buildDiscarder(logRotator(numToKeepStr: '5'))
-    timestamps()
-    timeout(time: 12, unit: 'HOURS')
-}
-
 stages {
     stage('Check Space & Environment') {
         steps {
