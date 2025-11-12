@@ -397,4 +397,88 @@ pipeline {
                     du -sh ${WORKSPACE}
                     echo ""
                     echo "=== OpenWrt Build Directory Size ==="
-                    du -sh
+                    du -sh ${WORKSPACE}/openwrt 2>/dev/null || echo "OpenWrt directory not found"
+                    echo ""
+                    echo "=== Final Artifacts ==="
+                    find ${WORKSPACE}/output -type f \\( -name "*.img.gz" -o -name "*.bin" \\) -exec ls -lh {} \\;
+                    echo ""
+                    echo "=========================================="
+                '''
+            }
+        }
+    }
+
+    post {
+        success {
+            sh '''
+                echo "✓✓✓ BUILD SUCCESS ✓✓✓"
+                echo "Build completed successfully for ${TARGET_ENV}"
+                echo "Artifacts have been archived and are available for download"
+                echo ""
+                echo "Artifact location in workspace:"
+                ls -la ${WORKSPACE}/output/
+            '''
+        }
+        failure {
+            sh '''
+                echo "✗✗✗ BUILD FAILED ✗✗✗"
+                echo "Build failed for ${TARGET_ENV}"
+                echo ""
+                echo "=== Troubleshooting Information ==="
+                
+                # Check for build log
+                if [ -f ${WORKSPACE}/logs/build.log ]; then
+                    echo ""
+                    echo "=== Last 200 lines of build log ==="
+                    tail -n 200 ${WORKSPACE}/logs/build.log
+                else
+                    echo "No build.log found"
+                fi
+                
+                # Check for defconfig log
+                if [ -f ${WORKSPACE}/logs/defconfig.log ]; then
+                    echo ""
+                    echo "=== Last 50 lines of defconfig log ==="
+                    tail -n 50 ${WORKSPACE}/logs/defconfig.log
+                fi
+                
+                # Check for switch-env log
+                if [ -f ${WORKSPACE}/switch-env.log ]; then
+                    echo ""
+                    echo "=== Last 50 lines of switch-env log ==="
+                    tail -n 50 ${WORKSPACE}/switch-env.log
+                fi
+                
+                echo ""
+                echo "=== Checking for all logs ==="
+                find ${WORKSPACE} -maxdepth 2 -name "*.log" -type f 2>/dev/null | while read logfile; do
+                    echo "Found log: $logfile"
+                    echo "--- Last 30 lines ---"
+                    tail -n 30 "$logfile"
+                    echo ""
+                done
+                
+                echo ""
+                echo "=== Check for package compilation errors ==="
+                if [ -f ${WORKSPACE}/openwrt/logs/package/error.txt ]; then
+                    echo "Package errors found:"
+                    cat ${WORKSPACE}/openwrt/logs/package/error.txt
+                fi
+            '''
+        }
+        always {
+            sh '''
+                echo ""
+                echo "=========================================="
+                echo "=== Final Status ==="
+                echo "=========================================="
+                echo "=== Final Disk Space ==="
+                df -h
+                echo ""
+                echo "=== Workspace Size ==="
+                du -sh ${WORKSPACE}
+                echo "=========================================="
+            '''
+        }
+    }
+}
