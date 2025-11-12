@@ -249,6 +249,29 @@ pipeline {
                     ls -l openwrt/.config openwrt/files openwrt/patches
                     echo ""
                     
+                    echo "=== Debugging patch symlink chain ==="
+                    echo "1. Check openwrt/patches symlink:"
+                    ls -la openwrt/patches
+                    echo ""
+                    echo "2. Check where openwrt/patches points (should be ../conf/patches):"
+                    readlink openwrt/patches
+                    echo ""
+                    echo "3. Check if ../conf/patches exists from openwrt dir:"
+                    ls -la openwrt/../conf/patches 2>&1 || echo "Does not exist or broken"
+                    echo ""
+                    echo "4. Check conf/patches symlink:"
+                    ls -la conf/patches 2>&1 || echo "conf/patches does not exist yet"
+                    echo ""
+                    echo "5. Try to access openwrt/patches/series:"
+                    ls -la openwrt/patches/series 2>&1 || echo "Cannot access openwrt/patches/series"
+                    echo ""
+                    echo "6. Try to cd to openwrt and list patches:"
+                    (cd openwrt && ls -la patches/) 2>&1 || echo "Cannot list patches from openwrt"
+                    echo ""
+                    echo "7. Try to cd to openwrt and read patches/series:"
+                    (cd openwrt && cat patches/series) 2>&1 || echo "Cannot read patches/series from openwrt"
+                    echo ""
+                    
                     echo "Executing: make switch-env ENV=${TARGET_ENV}"
                     make switch-env ENV=${TARGET_ENV} 2>&1 | tee switch-env.log
                     
