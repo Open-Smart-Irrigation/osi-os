@@ -302,22 +302,16 @@ EOF
                     (cd openwrt && cat patches/series) 2>&1 || echo "Cannot read patches/series from openwrt"
                     echo ""
                     
-                    echo "=== Cleaning previous quilt state ==="
-                    # Remove .pc to ensure clean state - patches may already be applied from previous builds
-                    rm -rf openwrt/.pc
+                    echo "=== Ensuring quilt state is configured ==="
+                    # Don't clean .pc - let quilt track what's applied
+                    # Just ensure .quilt_patches points to the right place
                     mkdir -p openwrt/.pc
                     echo "patches" > openwrt/.pc/.quilt_patches
-                    echo "Cleaned .pc directory and recreated .quilt_patches"
-                    ls -la openwrt/.pc/
-                    echo ""
-                    
-                    echo "=== Resetting openwrt source to clean state ==="
-                    # Reset any modified files in openwrt to ensure patches can be applied cleanly
-                    cd openwrt
-                    git checkout -- . 2>&1 || echo "Git reset completed"
-                    git clean -fd 2>&1 || echo "Git clean completed"
-                    cd ..
-                    echo "OpenWrt source reset to clean state"
+                    echo "Set .quilt_patches to 'patches'"
+                    if [ -d openwrt/.pc ]; then
+                        echo "Existing .pc contents:"
+                        ls -la openwrt/.pc/ | head -10
+                    fi
                     echo ""
                     
                     echo "Executing: make switch-env ENV=${TARGET_ENV}"
