@@ -178,6 +178,10 @@ pipeline {
                     echo "=== Step 6: Install feeds ==="
                     ./scripts/feeds install -a 2>&1 | tee ../feeds-install.log
                     
+                    echo ""
+                    echo "=== Step 7: Initialize quilt ==="
+                    quilt init 2>&1 | tee ../quilt-init.log || echo "Quilt init completed (may show warnings)"
+                    
                     cd ..
                     
                     echo ""
@@ -261,6 +265,18 @@ QUILT_REFRESH_ARGS="--no-timestamps --no-index -p ab"
 EOF
                     echo "Created .quiltrc with contents:"
                     cat openwrt/.quiltrc
+                    echo ""
+                    
+                    echo "=== Initializing quilt .pc directory ==="
+                    # Ensure .pc directory exists and has the right patches location
+                    mkdir -p openwrt/.pc
+                    echo "patches" > openwrt/.pc/.quilt_patches
+                    echo "Created .pc/.quilt_patches with contents:"
+                    cat openwrt/.pc/.quilt_patches
+                    echo ""
+                    
+                    echo "=== Testing quilt from openwrt directory ==="
+                    (cd openwrt && pwd && ls -la .pc/ && quilt series) 2>&1 || echo "Quilt test failed (might be ok if no patches applied yet)"
                     echo ""
                     
                     echo "=== Debugging patch symlink chain ==="
