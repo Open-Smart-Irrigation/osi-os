@@ -77,50 +77,43 @@ pipeline {
         }
 
         stage('Setup Build Directory') {
-            steps {
-                sh '''
-                    echo "=========================================="
-                    echo "=== Setting Up Build Directory ==="
-                    echo "=========================================="
-                    
-                    cd ${WORKSPACE}
-                    
-                    echo "Workspace location: ${WORKSPACE}"
-                    echo ""
-                    
-                    # Create necessary directories
-                    mkdir -p logs output
-                    
-                    # Check if osi-build already exists in workspace
-                    if [ ! -d osi-build ] || [ ! -d osi-build/.git ]; then
-                        echo "osi-build not found in workspace or incomplete. Cloning from /build_cache..."
-                        
-                        if [ -d /build_cache/osi-build ]; then
-                            echo "Found /build_cache/osi-build, copying to workspace..."
-                            cp -r /build_cache/osi-build .
-                            cd osi-build
-                            
-                            # Verify critical files
-                            if [ ! -f Makefile ]; then
-                                echo "ERROR: Makefile not found after copy!"
-                                exit 1
-                            fi
-                        else
-                            echo "ERROR: /build_cache/osi-build not found!"
-                            exit 1
-                        fi
-                    else
-                        echo "osi-build found in workspace, checking for updates..."
-                        cd osi-build
-                        
-                        # Sync updates from /build_cache if it exists
-                        if [ -d /build_cache/osi-build ]; then
-                            echo "Syncing with /build_cache/osi-build..."
-                            rsync -av --exclude='.git' --exclude='openwrt' --exclude='build_dir' /build_cache/osi-build/ . || true
-                        fi
+                        steps {
+                            sh '''
+                                echo "=========================================="
+                                echo "=== Setting Up Build Directory ==="
+                                echo "=========================================="
+                                
+                                cd ${WORKSPACE}
+                                
+                                echo "Workspace location: ${WORKSPACE}"
+                                echo ""
+                                
+                                # Create necessary directories
+                                mkdir -p logs output
+                                
+                                # Check if osi-build repository exists in workspace
+                                if [ ! -d osi-build ]; then
+                                    echo "ERROR: osi-build repository not found in workspace!"
+                                    echo ""
+                                    echo "This Jenkins job requires the osi-build repository to be present."
+                        echo "Expected location: ${WORKSPACE}/osi-build"
+                        echo ""
+                        echo "Please ensure the repository is cloned to the workspace before running this job."
+                        echo "You can do this by:"
+                        echo "  1. Manual git clone: git clone <repo-url> ${WORKSPACE}/osi-build"
+                        echo "  2. Add a 'Checkout' stage to this Jenkinsfile"
+                        echo ""
+                        exit 1
                     fi
                     
-                    echo ""
+                    if [ ! -f osi-build/Makefile ]; then
+                        echo "ERROR: Makefile not found in osi-build directory!"
+                        echo "Repository may be incomplete or corrupted."
+                        exit 1
+                    fi
+                    
+                    cd osi-build
+                    
                     echo "=== Build Repository Contents ==="
                     ls -la
                     
