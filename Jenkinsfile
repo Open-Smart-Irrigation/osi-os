@@ -251,6 +251,29 @@ pipeline {
                     fi
                     
                     echo ""
+                    echo "=== Recreating symlinks in openwrt/ ==="
+                    # Ensure these symlinks exist every time (not just first init)
+                    rm -f openwrt/.config openwrt/files openwrt/patches
+                    ln -s ../conf/.config openwrt/.config
+                    ln -s ../conf/files openwrt/files
+                    ln -s ../conf/patches openwrt/patches
+                    
+                    echo "Verifying symlinks:"
+                    ls -l openwrt/.config openwrt/files openwrt/patches
+                    echo ""
+                    
+                    echo "Verifying patches/series is accessible:"
+                    if [ -f openwrt/patches/series ]; then
+                        echo "✓ patches/series found"
+                        echo "Series file contents:"
+                        cat openwrt/patches/series
+                    else
+                        echo "✗ WARNING: patches/series not found!"
+                        echo "Checking symlink chain:"
+                        ls -la openwrt/patches
+                        ls -la conf/patches
+                    fi
+                    echo ""
                     echo "=== Current Configuration ==="
                     if [ -f openwrt/.config ]; then
                         echo "Config file exists (symlink):"
