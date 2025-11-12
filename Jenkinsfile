@@ -27,12 +27,36 @@ pipeline {
     }
 
     stages {
-        stage('Checkout') {
+        stage('Check Space & Environment') {
             steps {
-                script {
+                sh '''
                     echo "=========================================="
-                    echo "=== Checking out repository ==="
-                    echo "========================================
+                    echo "=== Environment Check ==="
+                    echo "=========================================="
+                    echo ""
+                    echo "=== Current User ==="
+                    whoami
+                    id
+                    echo ""
+                    echo "=== Disk Space ==="
+                    df -h
+                    echo ""
+                    echo "=== Jenkins Workspace ==="
+                    echo "WORKSPACE: ${WORKSPACE}"
+                    ls -la ${WORKSPACE}
+                    echo ""
+                    echo "=== Docker Environment ==="
+                    which docker || echo "Docker not found in PATH"
+                    docker --version || echo "Docker command failed"
+                    docker compose version || echo "Docker Compose V2 not available"
+                    echo ""
+                    echo "=== Test Docker Access ==="
+                    docker ps || echo "Cannot access Docker daemon"
+                    echo ""
+                    echo "=========================================="
+                '''
+            }
+        }
 
         stage('Clean') {
             when {
