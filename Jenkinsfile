@@ -218,6 +218,9 @@ pipeline {
         stage('Switch Environment') {
             steps {
                 sh '''#!/bin/bash
+                    set -e
+                    export QUILT_PATCHES=patches
+                    
                     cd ${WORKSPACE}
                     
                     echo "=========================================="
