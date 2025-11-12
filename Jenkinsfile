@@ -252,6 +252,17 @@ pipeline {
                     ls -l openwrt/.config openwrt/files openwrt/patches
                     echo ""
                     
+                    echo "=== Configuring quilt ==="
+                    # Create .quiltrc to tell quilt where patches are
+                    cat > openwrt/.quiltrc << 'EOF'
+QUILT_PATCHES=patches
+QUILT_DIFF_ARGS="--no-timestamps --no-index -p ab --color=auto"
+QUILT_REFRESH_ARGS="--no-timestamps --no-index -p ab"
+EOF
+                    echo "Created .quiltrc with contents:"
+                    cat openwrt/.quiltrc
+                    echo ""
+                    
                     echo "=== Debugging patch symlink chain ==="
                     echo "1. Check openwrt/patches symlink:"
                     ls -la openwrt/patches
@@ -276,7 +287,12 @@ pipeline {
                     echo ""
                     
                     echo "Executing: make switch-env ENV=${TARGET_ENV}"
-                    make switch-env ENV=${TARGET_ENV} 2>&1 | tee switch-env.log
+                    echo "Verifying QUILT_PATCHES is set:"
+                    echo "QUILT_PATCHES=${QUILT_PATCHES}"
+                    echo ""
+                    
+                    # Try passing QUILT_PATCHES directly to make
+                    make QUILT_PATCHES=patches switch-env ENV=${TARGET_ENV} 2>&1 | tee switch-env.log
                     
                     if [ ${PIPESTATUS[0]} -eq 0 ]; then
                         echo "✓ Environment switch completed successfully"
