@@ -164,12 +164,18 @@ pipeline {
                     ls -l openwrt/files
                     
                     echo ""
-                    echo "=== Step 4: Update feeds ==="
+                    echo "=== Step 4: Create patches symlink ==="
+                    rm -f openwrt/patches
+                    ln -s ../conf/patches openwrt/patches
+                    ls -l openwrt/patches
+                    
+                    echo ""
+                    echo "=== Step 5: Update feeds ==="
                     cd openwrt
                     ./scripts/feeds update -a 2>&1 | tee ../feeds-update.log
                     
                     echo ""
-                    echo "=== Step 5: Install feeds ==="
+                    echo "=== Step 6: Install feeds ==="
                     ./scripts/feeds install -a 2>&1 | tee ../feeds-install.log
                     
                     cd ..
@@ -211,7 +217,7 @@ pipeline {
 
         stage('Switch Environment') {
             steps {
-                sh '''
+                sh '''#!/bin/bash
                     cd ${WORKSPACE}
                     
                     echo "=========================================="
@@ -263,7 +269,7 @@ pipeline {
 
         stage('Build') {
             steps {
-                sh '''
+                sh '''#!/bin/bash
                     set -e
                     cd ${WORKSPACE}/openwrt
                     
