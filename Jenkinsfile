@@ -67,8 +67,9 @@ pipeline {
                     
                     cd ${WORKSPACE}
                     
-                    echo "Removing workspace contents..."
-                    rm -rf osi-build openwrt build_dir staging_dir output logs
+                    echo "Removing build artifacts..."
+                    rm -rf openwrt/bin openwrt/build_dir openwrt/staging_dir openwrt/tmp
+                    rm -rf logs output .initialized
                     
                     echo "Clean completed"
                     echo ""
@@ -77,44 +78,21 @@ pipeline {
         }
 
         stage('Setup Build Directory') {
-                        steps {
-                            sh '''
-                                echo "=========================================="
-                                echo "=== Setting Up Build Directory ==="
-                                echo "=========================================="
-                                
-                                cd ${WORKSPACE}
-                                
-                                echo "Workspace location: ${WORKSPACE}"
-                                echo ""
-                                
-                                # Create necessary directories
-                                mkdir -p logs output
-                                
-                                # Check if osi-build repository exists in workspace
-                                if [ ! -d osi-build ]; then
-                                    echo "ERROR: osi-build repository not found in workspace!"
-                                    echo ""
-                                    echo "This Jenkins job requires the osi-build repository to be present."
-                        echo "Expected location: ${WORKSPACE}/osi-build"
-                        echo ""
-                        echo "Please ensure the repository is cloned to the workspace before running this job."
-                        echo "You can do this by:"
-                        echo "  1. Manual git clone: git clone <repo-url> ${WORKSPACE}/osi-build"
-                        echo "  2. Add a 'Checkout' stage to this Jenkinsfile"
-                        echo ""
-                        exit 1
-                    fi
+            steps {
+                sh '''
+                    echo "=========================================="
+                    echo "=== Setting Up Build Directory ==="
+                    echo "=========================================="
                     
-                    if [ ! -f osi-build/Makefile ]; then
-                        echo "ERROR: Makefile not found in osi-build directory!"
-                        echo "Repository may be incomplete or corrupted."
-                        exit 1
-                    fi
+                    cd ${WORKSPACE}
                     
-                    cd osi-build
+                    echo "Workspace location: ${WORKSPACE}"
+                    echo ""
                     
-                    echo "=== Build Repository Contents ==="
+                    # Create necessary directories
+                    mkdir -p logs output
+                    
+                    echo "=== Repository Contents ==="
                     ls -la
                     
                     echo ""
@@ -124,7 +102,8 @@ pipeline {
                         echo "Available make targets:"
                         grep "^[a-zA-Z_-]*:" Makefile | head -20
                     else
-                        echo "✗ ERROR: Makefile not found!"
+                        echo "✗ ERROR: Makefile not found in workspace root!"
+                        echo "Expected: ${WORKSPACE}/Makefile"
                         exit 1
                     fi
                     
@@ -137,11 +116,11 @@ pipeline {
 
         stage('Initialize Build Environment') {
             when {
-                expression { !fileExists("${WORKSPACE}/osi-build/.initialized") }
+                expression { !fileExists("${WORKSPACE}/.initialized") }
             }
             steps {
                 sh '''
-                    cd ${WORKSPACE}/osi-build
+                    cd ${WORKSPACE}
                     
                     echo "=========================================="
                     echo "=== Initializing Build Environment ==="
@@ -155,7 +134,7 @@ pipeline {
                     # If openwrt directory doesn't exist, git submodule hasn't been initialized
                     if [ ! -d openwrt/.git ]; then
                         echo "Initializing git submodules..."
-                        git submodule update --init --recursive 2>&1 | tee ../submodule.log
+                        git submodule update --init --recursive 2>&1 | tee submodule.log
                     fi
                     
                     # Now run make init manually step-by-step to avoid conflicts
@@ -188,7 +167,7 @@ pipeline {
                     
                     echo ""
                     echo "✓ Initialization completed successfully"
-                    touch ${WORKSPACE}/osi-build/.initialized
+                    touch ${WORKSPACE}/.initialized
                     
                     echo ""
                     echo "=== Post-Init Directory Structure ==="
@@ -200,11 +179,11 @@ pipeline {
 
         stage('Update Feeds') {
             when {
-                expression { fileExists("${WORKSPACE}/osi-build/.initialized") }
+                expression { fileExists("${WORKSPACE}/.initialized") }
             }
             steps {
                 sh '''
-                    cd ${WORKSPACE}/osi-build
+                    cd ${WORKSPACE}
                     
                     echo "=========================================="
                     echo "=== Updating Feeds ==="
@@ -224,7 +203,7 @@ pipeline {
         stage('Switch Environment') {
             steps {
                 sh '''
-                    cd ${WORKSPACE}/osi-build
+                    cd ${WORKSPACE}
                     
                     echo "=========================================="
                     echo "=== Switching to Environment: ${TARGET_ENV} ==="
@@ -290,7 +269,7 @@ pipeline {
             steps {
                 sh '''
                     set -e
-                    cd ${WORKSPACE}/osi-build/openwrt
+                    cd ${WORKSPACE}/openwrt
                     
                     echo "=========================================="
                     echo "=== Starting Build for ${TARGET_ENV} ==="
@@ -361,15 +340,15 @@ pipeline {
                     
                     # Copy build logs
                     echo "Copying build logs..."
-                    cp osi-build/logs/*.log output/logs/ 2>/dev/null || echo "No logs in logs/ directory"
-                    cp osi-build/*.log output/logs/ 2>/dev/null || echo "No root-level logs"
+                    cp logs/*.log output/logs/ 2>/dev/null || echo "No logs in logs/ directory"
+                    cp *.log output/logs/ 2>/dev/null || echo "No root-level logs"
                     
                     # Copy built images from OpenWrt bin directory
-                    echo "Looking for build artifacts in osi-build/openwrt/bin/targets..."
+                    echo "Looking for build artifacts in openwrt/bin/targets..."
                     
-                    if [ -d osi-build/openwrt/bin/targets ]; then
+                    if [ -d openwrt/bin/targets ]; then
                         echo "Found targets directory, copying to workspace..."
-                        cp -r osi-build/openwrt/bin/targets/* output/targets/
+                        cp -r openwrt/bin/targets/* output/targets/
                         
                         echo ""
                         echo "=== Artifact Summary ==="
@@ -382,8 +361,8 @@ pipeline {
                         echo "✓ Artifacts copied successfully to workspace"
                     else
                         echo "✗ ERROR: No build artifacts found!"
-                        echo "Expected location: osi-build/openwrt/bin/targets"
-                        ls -la osi-build/openwrt/bin/ || echo "bin directory not found"
+                        echo "Expected location: openwrt/bin/targets"
+                        ls -la openwrt/bin/ || echo "bin directory not found"
                         exit 1
                     fi
                     echo ""
@@ -408,7 +387,7 @@ pipeline {
                     echo "=== Build Summary ==="
                     echo "=========================================="
                     echo "Target Environment: ${TARGET_ENV}"
-                    echo "Build Location: ${WORKSPACE}/osi-build"
+                    echo "Build Location: ${WORKSPACE}"
                     echo "Build completed at: $(date)"
                     echo ""
                     echo "=== Disk Usage After Build ==="
@@ -418,88 +397,4 @@ pipeline {
                     du -sh ${WORKSPACE}
                     echo ""
                     echo "=== OpenWrt Build Directory Size ==="
-                    du -sh ${WORKSPACE}/osi-build/openwrt 2>/dev/null || echo "OpenWrt directory not found"
-                    echo ""
-                    echo "=== Final Artifacts ==="
-                    find ${WORKSPACE}/output -type f \\( -name "*.img.gz" -o -name "*.bin" \\) -exec ls -lh {} \\;
-                    echo ""
-                    echo "=========================================="
-                '''
-            }
-        }
-    }
-
-    post {
-        success {
-            sh '''
-                echo "✓✓✓ BUILD SUCCESS ✓✓✓"
-                echo "Build completed successfully for ${TARGET_ENV}"
-                echo "Artifacts have been archived and are available for download"
-                echo ""
-                echo "Artifact location in workspace:"
-                ls -la ${WORKSPACE}/output/
-            '''
-        }
-        failure {
-            sh '''
-                echo "✗✗✗ BUILD FAILED ✗✗✗"
-                echo "Build failed for ${TARGET_ENV}"
-                echo ""
-                echo "=== Troubleshooting Information ==="
-                
-                # Check for build log
-                if [ -f ${WORKSPACE}/osi-build/logs/build.log ]; then
-                    echo ""
-                    echo "=== Last 200 lines of build log ==="
-                    tail -n 200 ${WORKSPACE}/osi-build/logs/build.log
-                else
-                    echo "No build.log found"
-                fi
-                
-                # Check for defconfig log
-                if [ -f ${WORKSPACE}/osi-build/logs/defconfig.log ]; then
-                    echo ""
-                    echo "=== Last 50 lines of defconfig log ==="
-                    tail -n 50 ${WORKSPACE}/osi-build/logs/defconfig.log
-                fi
-                
-                # Check for switch-env log
-                if [ -f ${WORKSPACE}/osi-build/switch-env.log ]; then
-                    echo ""
-                    echo "=== Last 50 lines of switch-env log ==="
-                    tail -n 50 ${WORKSPACE}/osi-build/switch-env.log
-                fi
-                
-                echo ""
-                echo "=== Checking for all logs ==="
-                find ${WORKSPACE}/osi-build -name "*.log" -type f 2>/dev/null | while read logfile; do
-                    echo "Found log: $logfile"
-                    echo "--- Last 30 lines ---"
-                    tail -n 30 "$logfile"
-                    echo ""
-                done
-                
-                echo ""
-                echo "=== Check for package compilation errors ==="
-                if [ -f ${WORKSPACE}/osi-build/openwrt/logs/package/error.txt ]; then
-                    echo "Package errors found:"
-                    cat ${WORKSPACE}/osi-build/openwrt/logs/package/error.txt
-                fi
-            '''
-        }
-        always {
-            sh '''
-                echo ""
-                echo "=========================================="
-                echo "=== Final Status ==="
-                echo "=========================================="
-                echo "=== Final Disk Space ==="
-                df -h
-                echo ""
-                echo "=== Workspace Size ==="
-                du -sh ${WORKSPACE}
-                echo "=========================================="
-            '''
-        }
-    }
-}
+                    du -sh
