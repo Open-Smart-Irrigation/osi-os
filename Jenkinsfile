@@ -27,36 +27,12 @@ pipeline {
     }
 
     stages {
-        stage('Check Space & Environment') {
+        stage('Checkout') {
             steps {
-                sh '''
+                script {
                     echo "=========================================="
-                    echo "=== Environment Check ==="
-                    echo "=========================================="
-                    echo ""
-                    echo "=== Current User ==="
-                    whoami
-                    id
-                    echo ""
-                    echo "=== Disk Space ==="
-                    df -h
-                    echo ""
-                    echo "=== Jenkins Workspace ==="
-                    echo "WORKSPACE: ${WORKSPACE}"
-                    ls -la ${WORKSPACE}
-                    echo ""
-                    echo "=== Docker Environment ==="
-                    which docker || echo "Docker not found in PATH"
-                    docker --version || echo "Docker command failed"
-                    docker compose version || echo "Docker Compose V2 not available"
-                    echo ""
-                    echo "=== Test Docker Access ==="
-                    docker ps || echo "Cannot access Docker daemon"
-                    echo ""
-                    echo "=========================================="
-                '''
-            }
-        }
+                    echo "=== Checking out repository ==="
+                    echo "========================================
 
         stage('Clean') {
             when {
@@ -221,16 +197,16 @@ pipeline {
                     # Remove any previous patch-related assumptions
                     # (no quilt patch fixers in this streamlined flow)
                     
-                    # Verify target environment directory exists in workspace
-                    if [ ! -d "${TARGET_ENV}" ]; then
-                        echo "ERROR: Target environment directory not found: ${TARGET_ENV}"
+                    # Verify target environment directory exists in conf/
+                    if [ ! -d "conf/${TARGET_ENV}" ]; then
+                        echo "ERROR: Target environment directory not found: conf/${TARGET_ENV}"
                         echo "See available environments:"
-                        ls -d full_* base_* 2>/dev/null || echo "No environment directories found"
+                        ls -d conf/full_* conf/base_* 2>/dev/null || echo "No environment directories found"
                         exit 1
                     fi
                     
                     echo "Target environment directory contents:"
-                    ls -la ${TARGET_ENV}/
+                    ls -la conf/${TARGET_ENV}/
                     echo ""
                     
                     echo "Executing: make switch-env ENV=${TARGET_ENV}"
