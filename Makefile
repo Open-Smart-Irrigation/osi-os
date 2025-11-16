@@ -34,6 +34,11 @@ switch-env:
 	@echo "Cleaning patch state"
 	cd openwrt && quilt pop -af || true
 	rm -rf openwrt/.pc
+	
+	@echo "Restoring clean source tree"
+	cd openwrt && git checkout -- . || true
+	cd openwrt && git clean -fd || true
+	
 	mkdir -p openwrt/.pc
 	echo "patches" > openwrt/.pc/.quilt_patches
 	
