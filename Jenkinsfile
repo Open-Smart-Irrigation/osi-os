@@ -226,7 +226,8 @@ pipeline {
                     export QUILT_PATCHES=patches
                     
                     cd ${WORKSPACE}
-                    
+                    echo "=== Debugging mount and patch paths before switch ===="
+                    docker compose run --rm chirpstack-gateway-os bash -c "pwd && ls -la /workdir/conf/patches/ && cat /workdir/conf/patches/series"
                     echo "=========================================="
                     echo "=== Switching to Environment: ${TARGET_ENV} ==="
                     echo "=========================================="
