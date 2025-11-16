@@ -43,6 +43,9 @@ switch-env:
 	ln -s ${ENV}/patches conf/patches
 	ln -s ${ENV}/.config conf/.config
 	
+	@echo "Upgrading quilt workspace"
+	cd openwrt && quilt upgrade || true
+	
 	@echo "Applying patches"
 	cd openwrt && quilt push -a || [ $$? -eq 2 ]
 
