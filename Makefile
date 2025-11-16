@@ -31,25 +31,20 @@ devshell:
 # Switch configuration environment.,
 # Note: execute this within the devshell.
 switch-env:
-	@echo "Rollback previously applied patches"
-	-cd openwrt && quilt pop -a
-
+	@echo "Cleaning patch state"
+	cd openwrt && quilt pop -af || true
+	rm -rf openwrt/.pc
+	mkdir -p openwrt/.pc
+	echo "patches" > openwrt/.pc/.quilt_patches
+	
 	@echo "Switching configuration"
 	rm -f conf/files conf/patches conf/.config
 	ln -s ${ENV}/files conf/files
 	ln -s ${ENV}/patches conf/patches
 	ln -s ${ENV}/.config conf/.config
-
+	
 	@echo "Applying patches"
-	rm -rf openwrt/.pc/*
-	mkdir -p openwrt/.pc
-	echo "patches" > openwrt/.pc/.quilt_patches
-	cd openwrt && \
-	if ! quilt applied | tail -1 | grep -q "$$(cat patches/series | tail -1)"; then \
-	quilt push -a || [ $$? -eq 2 ]; \
-	else \
-	echo "All patches already applied"; \
-	fi
+	cd openwrt && quilt push -a || [ $$? -eq 2 ]
 
 # Clean the OpenWrt environment.
 clean:
