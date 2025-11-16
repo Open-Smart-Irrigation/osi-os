@@ -42,14 +42,14 @@ switch-env:
 
 	@echo "Applying patches"
 	rm -rf openwrt/.pc/*
-    mkdir -p openwrt/.pc
-    echo "patches" > openwrt/.pc/.quilt_patches
+	mkdir -p openwrt/.pc
+	echo "patches" > openwrt/.pc/.quilt_patches
 	cd openwrt && \
-        if ! quilt applied | tail -1 | grep -q "$(cat patches/series | tail -1)"; then \
-            quilt push -a || [ $$? -eq 2 ]; \
-        else \
-            echo "All patches already applied"; \
-        fi
+	if ! quilt applied | tail -1 | grep -q "$$(cat patches/series | tail -1)"; then \
+	quilt push -a || [ $$? -eq 2 ]; \
+	else \
+	echo "All patches already applied"; \
+	fi
 
 # Clean the OpenWrt environment.
 clean:
