@@ -217,7 +217,7 @@ pipeline {
                     echo ""
                 '''
             }
-        }
+        }d
 
         stage('Switch Environment') {
             steps {
