@@ -1,5 +1,5 @@
---- config-6.6
-+++ config-6.6 (patched)
+--- openwrt.orig/target/linux/bcm27xx/bcm2712/config-6.6
++++ openwrt/target/linux/bcm27xx/bcm2712/config-6.6
 @@ -241,7 +241,6 @@
 -CONFIG_FB_IOMEM_FOPS=y
 -CONFIG_FB_IOMEM_HELPERS=y
