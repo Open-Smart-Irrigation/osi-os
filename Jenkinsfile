@@ -365,7 +365,10 @@ EOF
                 sh '''#!/bin/bash
                     set -e
                     cd ${WORKSPACE}/openwrt
-                    
+
+
+                    echo "Processing configuration..."
+                    make oldconfig 2>&1 | tee ../logs/oldconfig.log
                     echo "=========================================="
                     echo "=== Starting Build for ${TARGET_ENV} ==="
                     echo "=========================================="
