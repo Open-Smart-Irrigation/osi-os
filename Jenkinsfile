@@ -172,16 +172,15 @@ pipeline {
                     echo ""
                     echo "=== Step 5: Update feeds ==="
                     cd openwrt
-                    ./scripts/feeds update -a 2>&1 | tee ../feeds-update.log
-                    
+                    docker compose run --rm chirpstack-gateway-os openwrt/scripts/feeds update -a 2>&1 | tee feeds-update.log
+
                     echo ""
                     echo "=== Step 6: Install feeds ==="
-                    ./scripts/feeds install -a 2>&1 | tee ../feeds-install.log
-                    
+                    docker compose run --rm chirpstack-gateway-os openwrt/scripts/feeds install -a 2>&1 | tee feeds-install.log
                     echo ""
+
                     echo "=== Step 7: Initialize quilt ==="
-                    quilt init 2>&1 | tee ../quilt-init.log || echo "Quilt init completed (may show warnings)"
-                    
+                    docker compose run --rm chirpstack-gateway-os quilt init 2>&1 | tee quilt-init.log || echo "Quilt init completed (may show warnings)"
                     cd ..
                     
                     echo ""
