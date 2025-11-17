@@ -372,10 +372,7 @@ EOF
                     
                     mkdir -p ../logs
                     export FORCE_UNSAFE_CONFIGURE=1
-                    
-                    echo "Running defconfig to refresh config..."
-                    make defconfig 2>&1 | tee ../logs/defconfig.log
-                    
+                                        
                     echo ""
                     echo "Starting 2-thread build (uses 2 cores by default)"
                     echo "Build started at: $(date)"
