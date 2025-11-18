@@ -29,8 +29,8 @@ pipeline {
                 sh '''
                     echo "=========================================="
                     echo "=== Environment Check ==="
-                    whoami
-                    docker --version || echo "Docker command failed"
+                    echo "Workspace: ${WORKSPACE}"
+                    ls -la ${WORKSPACE}
                     echo "=========================================="
                 '''
             }
@@ -41,113 +41,95 @@ pipeline {
             steps {
                 sh '''
                     cd ${WORKSPACE}
-                    echo "Removing build artifacts..."
                     rm -rf openwrt/bin openwrt/build_dir openwrt/staging_dir openwrt/tmp
                     rm -rf logs output .initialized
                 '''
             }
         }
 
-        stage('Setup Build Directory') {
-            steps {
-                sh '''
-                    cd ${WORKSPACE}
-                    mkdir -p logs output
-                    if [ ! -f Makefile ]; then
-                        echo "ERROR: Makefile not found at workspace root."
-                        exit 1
-                    fi
-                '''
-            }
-        }
-
-        stage('Initialize Build Environment') {
+        stage('Initialize') {
             when { expression { !fileExists("${WORKSPACE}/.initialized") } }
             steps {
                 sh '''
                     cd ${WORKSPACE}
-                    rm -f openwrt/.config openwrt/files 2>/dev/null || true
-                    
-                    if [ -d openwrt/.git ]; then
-                        echo "Submodules already initialized"
-                    else
-                        git submodule update --init --recursive
-                    fi
-                    
-                    cp feeds.conf.default openwrt/feeds.conf.default
-                    
-                    # We only do a basic update here. Detailed install happens after switch-env
-                    cd openwrt
-                    docker compose run --rm chirpstack-gateway-os openwrt/scripts/feeds update -a
-                    
+                    # Ensure submodules are pulled (including the chirpstack feed)
+                    git submodule update --init --recursive
                     touch ${WORKSPACE}/.initialized
                 '''
             }
         }
 
-        stage('Switch Environment & Install Feeds') {
-                    steps {
-                        sh '''#!/bin/bash
-                            set -e
-                            export QUILT_PATCHES=patches
-                            cd ${WORKSPACE}
+        stage('Switch Environment & Fix Feeds') {
+            steps {
+                sh '''#!/bin/bash
+                    set -e
+                    cd ${WORKSPACE}
 
-                            echo "=========================================="
-                            echo "=== Switching to Environment: ${TARGET_ENV} ==="
-                            echo "=========================================="
+                    echo "=== Switching to Environment: ${TARGET_ENV} ==="
 
-                            # 1. PRE-SWITCH: Ensure basic symlinks exist so Makefile doesn't error
-                            rm -f openwrt/.config openwrt/files openwrt/patches
-                            ln -s ../conf/.config openwrt/.config
-                            ln -s ../conf/files openwrt/files
-                            ln -s ../conf/patches openwrt/patches
+                    # 1. Create dummy config links so Makefile doesn't crash
+                    rm -f openwrt/.config openwrt/files openwrt/patches
+                    ln -s ../conf/.config openwrt/.config
+                    ln -s ../conf/files openwrt/files
+                    ln -s ../conf/patches openwrt/patches
 
-                            # 2. EXECUTE SWITCH
-                            # WARNING: This runs 'git clean -fd' which deletes the 'feeds' directory!
-                            make QUILT_PATCHES=patches switch-env ENV=${TARGET_ENV} 2>&1 | tee switch-env.log
+                    # 2. Run switch-env (Note: This runs 'git clean -fd' inside openwrt)
+                    # This wipes out openwrt/feeds and openwrt/feeds.conf.default
+                    make QUILT_PATCHES=patches switch-env ENV=${TARGET_ENV}
 
-                            echo "=========================================="
-                            echo "=== RE-INITIALIZING FEEDS (Critical Fix) ==="
-                            echo "=========================================="
+                    echo "=========================================="
+                    echo "=== FIXING FEEDS PATHS (Critical Fix) ==="
+                    echo "=========================================="
 
-                            # 3. RESTORE CONFIG
-                            # 'make switch-env' might have reverted feeds.conf.default to vanilla OpenWrt.
-                            # We must ensure your custom version (with Chirpstack/Node-RED repos) is used.
-                            echo "Restoring feeds.conf.default..."
-                            cp feeds.conf.default openwrt/feeds.conf.default
+                    cd ${WORKSPACE}
 
-                            cd openwrt
+                    # 3. Copy the default feeds config
+                    cp feeds.conf.default openwrt/feeds.conf.default
 
-                            # 4. UPDATE FEEDS
-                            # 'git clean' deleted the downloaded feeds. We must fetch them again.
-                            echo "Updating feeds (this may take a minute)..."
-                            ./scripts/feeds update -a 2>&1 | tee ../feeds-update-switch.log
+                    # 4. REWRITE PATHS
+                    # The default config uses '/workdir/...' which only exists inside the Docker container.
+                    # We are building on the Host, so we must point it to ${WORKSPACE}.
+                    echo "Original feeds.conf.default:"
+                    cat openwrt/feeds.conf.default
 
-                            # 5. INSTALL FEEDS
-                            # Create the symlinks so the build system sees the packages
-                            echo "Installing feeds..."
-                            ./scripts/feeds install -a 2>&1 | tee ../feeds-install-switch.log
+                    echo "Rewriting '/workdir' to '${WORKSPACE}'..."
+                    sed -i "s|/workdir|${WORKSPACE}|g" openwrt/feeds.conf.default
 
-                            echo "✓ Feeds restored."
+                    # Also handle relative paths just in case 'src-link chirpstack ../feeds/...'
+                    # If we are in openwrt/, ../feeds is correct.
 
-                            # 6. VERIFICATION
-                            echo "=== Verifying Package Availability ==="
-                            if ./scripts/feeds search node-red > /dev/null; then
-                                echo "✓ Node-RED found in feeds."
-                            else
-                                echo "✗ ERROR: Node-RED still missing from feeds!"
-                                exit 1
-                            fi
+                    echo "Corrected feeds.conf.default:"
+                    cat openwrt/feeds.conf.default
 
-                            if ./scripts/feeds search chirpstack-gateway-bridge > /dev/null; then
-                                echo "✓ Chirpstack Gateway Bridge found in feeds."
-                            else
-                                echo "✗ ERROR: Chirpstack Gateway Bridge missing from feeds!"
-                                exit 1
-                            fi
-                        '''
-                    }
-                }
+                    # 5. UPDATE & INSTALL FEEDS
+                    cd openwrt
+                    echo "Updating feeds..."
+                    ./scripts/feeds update -a
+
+                    echo "Installing feeds..."
+                    ./scripts/feeds install -a
+
+                    # 6. VERIFY PACKAGES EXIST
+                    echo "=== Verification ==="
+                    if ./scripts/feeds search chirpstack-gateway-bridge | grep -q "chirpstack-gateway-bridge"; then
+                        echo "✓ ChirpStack Gateway Bridge found in feeds."
+                    else
+                        echo "✗ ERROR: ChirpStack Gateway Bridge NOT found in feeds."
+                        echo "Debug: Content of feeds directory:"
+                        ls -la feeds/
+                        ls -la feeds/chirpstack/ 2>/dev/null || echo "feeds/chirpstack missing"
+                        exit 1
+                    fi
+
+                    if ./scripts/feeds search node-red | grep -q "node-red"; then
+                        echo "✓ Node-RED found in feeds."
+                    else
+                        echo "✗ ERROR: Node-RED NOT found in feeds."
+                        exit 1
+                    fi
+                '''
+            }
+        }
 
         stage('Build') {
             steps {
@@ -159,72 +141,60 @@ pipeline {
                     echo "=== Configuring Build ==="
                     echo "=========================================="
 
-                    # Force defconfig to expand dependencies properly
-                    # This ensures that if Node-RED needs nodejs, nodejs gets selected
-                    make defconfig 2>&1 | tee ../logs/defconfig.log
+                    # Run defconfig to apply the target and expand dependencies
+                    make defconfig > ../logs/defconfig.log 2>&1
 
-                    # Check if critical packages are still enabled after config expansion
-                    echo "=== Checking Config Content ==="
+                    echo "=== checking .config for critical packages ==="
+                    # We grep strictly; if these are missing, the image will be broken.
+
+                    MISSING=0
+
                     if grep -q "CONFIG_PACKAGE_chirpstack-gateway-bridge=y" .config; then
-                        echo "✓ ChirpStack Gateway Bridge enabled"
+                        echo "✓ ChirpStack Gateway Bridge: ENABLED"
                     else
-                        echo "✗ WARNING: ChirpStack Gateway Bridge DISABLED"
+                        echo "✗ ChirpStack Gateway Bridge: DISABLED/MISSING"
+                        MISSING=1
                     fi
-                    
+
                     if grep -q "CONFIG_PACKAGE_node-red=y" .config; then
-                        echo "✓ Node-RED enabled"
+                        echo "✓ Node-RED: ENABLED"
                     else
-                        echo "✗ WARNING: Node-RED DISABLED (Will be missing from image)"
+                        echo "✗ Node-RED: DISABLED/MISSING"
+                        MISSING=1
                     fi
 
-                    echo "=========================================="
-                    echo "=== Starting Build for ${TARGET_ENV} ==="
-                    echo "=========================================="
-                    
-                    mkdir -p ../logs
-                    export FORCE_UNSAFE_CONFIGURE=1
-                    
-                    # Using -j$(nproc) allows using all available cores, or stick to -j2 if memory is tight
-                    make -j2 2>&1 | tee ../logs/build.log
-                    
-                    BUILD_RESULT=${PIPESTATUS[0]}
-                    
-                    if [ $BUILD_RESULT -eq 0 ]; then
-                        echo "✓ Build completed successfully"
-                    else
-                        echo "✗ Build FAILED"
-                        exit $BUILD_RESULT
-                    fi
-                '''
-            }
-        }
-
-        stage('Archive Artifacts') {
-            steps {
-                sh '''
-                    cd ${WORKSPACE}
-                    mkdir -p output/targets output/logs
-                    
-                    cp logs/*.log output/logs/ 2>/dev/null || true
-                    
-                    if [ -d openwrt/bin/targets ]; then
-                        cp -r openwrt/bin/targets/* output/targets/
-                        echo "✓ Artifacts copied"
-                    else
-                        echo "✗ No binaries found"
+                    if [ "$MISSING" -eq "1" ]; then
+                        echo ""
+                        echo "!!! STOPPING BUILD DUE TO MISSING PACKAGES !!!"
+                        echo "Check logs/defconfig.log for dependency errors."
+                        tail -n 50 ../logs/defconfig.log
                         exit 1
                     fi
+
+                    echo "=========================================="
+                    echo "=== Starting Compilation ==="
+                    echo "=========================================="
+
+                    mkdir -p ../logs
+                    # IGNORE_ERRORS=m allows the build to continue if non-essential modules fail,
+                    # but we usually want strict builds.
+                    make -j2 download world 2>&1 | tee ../logs/build.log
                 '''
-                archiveArtifacts artifacts: 'output/targets/**/*.img.gz, output/targets/**/*.bin, output/logs/*.log',
-                               allowEmptyArchive: false,
-                               fingerprint: true
             }
         }
-    }
 
-    post {
-        always {
-            sh 'echo "Build process finished."'
+        stage('Archive') {
+            steps {
+                sh '''
+                    mkdir -p output/targets output/logs
+                    cp logs/*.log output/logs/ 2>/dev/null || true
+                    if [ -d openwrt/bin/targets ]; then
+                        cp -r openwrt/bin/targets/* output/targets/
+                    fi
+                '''
+                archiveArtifacts artifacts: 'output/targets/**/*.img.gz, output/targets/**/*.bin', allowEmptyArchive: true
+                archiveArtifacts artifacts: 'output/logs/*.log', allowEmptyArchive: true
+            }
         }
     }
 }
