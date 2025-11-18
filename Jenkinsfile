@@ -86,46 +86,68 @@ pipeline {
         }
 
         stage('Switch Environment & Install Feeds') {
-            steps {
-                sh '''#!/bin/bash
-                    set -e
-                    export QUILT_PATCHES=patches
-                    cd ${WORKSPACE}
-                    
-                    echo "=== Switching to Environment: ${TARGET_ENV} ==="
-                    
-                    # 1. PRE-SWITCH: Ensure basic symlinks exist so Makefile doesn't error
-                    rm -f openwrt/.config openwrt/files openwrt/patches
-                    ln -s ../conf/.config openwrt/.config
-                    ln -s ../conf/files openwrt/files
-                    ln -s ../conf/patches openwrt/patches
-                    
-                    # 2. EXECUTE SWITCH (Note: This performs 'git clean -fd' inside openwrt)
-                    make QUILT_PATCHES=patches switch-env ENV=${TARGET_ENV} 2>&1 | tee switch-env.log
-                    
-                    # 3. CRITICAL FIX: Re-install feeds
-                    # The 'make switch-env' wiped the feed symlinks. We must restore them now.
-                    echo "=========================================="
-                    echo "=== RESTORING FEEDS (Critical Step) ==="
-                    echo "=========================================="
-                    cd openwrt
-                    
-                    # Install all feeds so the build system knows about Node-RED etc.
-                    ./scripts/feeds install -a 2>&1 | tee ../feeds-install.log
-                    
-                    echo "✓ Feeds installed."
-                    
-                    # 4. Verify Environment
-                    echo "=== Verifying Node-RED availability ==="
-                    # Check if the package info exists in openwrt logic
-                    if ./scripts/feeds search node-red > /dev/null; then
-                        echo "✓ Node-RED found in feeds."
-                    else
-                        echo "✗ WARNING: Node-RED not found in feeds!"
-                    fi
-                '''
-            }
-        }
+                    steps {
+                        sh '''#!/bin/bash
+                            set -e
+                            export QUILT_PATCHES=patches
+                            cd ${WORKSPACE}
+
+                            echo "=========================================="
+                            echo "=== Switching to Environment: ${TARGET_ENV} ==="
+                            echo "=========================================="
+
+                            # 1. PRE-SWITCH: Ensure basic symlinks exist so Makefile doesn't error
+                            rm -f openwrt/.config openwrt/files openwrt/patches
+                            ln -s ../conf/.config openwrt/.config
+                            ln -s ../conf/files openwrt/files
+                            ln -s ../conf/patches openwrt/patches
+
+                            # 2. EXECUTE SWITCH
+                            # WARNING: This runs 'git clean -fd' which deletes the 'feeds' directory!
+                            make QUILT_PATCHES=patches switch-env ENV=${TARGET_ENV} 2>&1 | tee switch-env.log
+
+                            echo "=========================================="
+                            echo "=== RE-INITIALIZING FEEDS (Critical Fix) ==="
+                            echo "=========================================="
+
+                            # 3. RESTORE CONFIG
+                            # 'make switch-env' might have reverted feeds.conf.default to vanilla OpenWrt.
+                            # We must ensure your custom version (with Chirpstack/Node-RED repos) is used.
+                            echo "Restoring feeds.conf.default..."
+                            cp feeds.conf.default openwrt/feeds.conf.default
+
+                            cd openwrt
+
+                            # 4. UPDATE FEEDS
+                            # 'git clean' deleted the downloaded feeds. We must fetch them again.
+                            echo "Updating feeds (this may take a minute)..."
+                            ./scripts/feeds update -a 2>&1 | tee ../feeds-update-switch.log
+
+                            # 5. INSTALL FEEDS
+                            # Create the symlinks so the build system sees the packages
+                            echo "Installing feeds..."
+                            ./scripts/feeds install -a 2>&1 | tee ../feeds-install-switch.log
+
+                            echo "✓ Feeds restored."
+
+                            # 6. VERIFICATION
+                            echo "=== Verifying Package Availability ==="
+                            if ./scripts/feeds search node-red > /dev/null; then
+                                echo "✓ Node-RED found in feeds."
+                            else
+                                echo "✗ ERROR: Node-RED still missing from feeds!"
+                                exit 1
+                            fi
+
+                            if ./scripts/feeds search chirpstack-gateway-bridge > /dev/null; then
+                                echo "✓ Chirpstack Gateway Bridge found in feeds."
+                            else
+                                echo "✗ ERROR: Chirpstack Gateway Bridge missing from feeds!"
+                                exit 1
+                            fi
+                        '''
+                    }
+                }
 
         stage('Build') {
             steps {
