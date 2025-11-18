@@ -157,7 +157,7 @@ pipeline {
                     echo "=========================================="
 
                     mkdir -p ../logs
-                    make -j2 download world 2>&1 | tee ../logs/build.log
+                    make -j1 download world 2>&1 | tee ../logs/build.log
                 '''
             }
         }
