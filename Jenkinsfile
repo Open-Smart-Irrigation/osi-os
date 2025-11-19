@@ -124,40 +124,42 @@ pipeline {
             steps {
                 sh '''#!/bin/bash
                     set -e
+                    
+                    # FIX: Ensure logs directory exists immediately
+                    mkdir -p ${WORKSPACE}/logs
+                    
                     cd ${WORKSPACE}/openwrt
 
                     echo "=========================================="
                     echo "=== Configuring Build ==="
                     echo "=========================================="
-
-                    # Apply defaults. This will drop packages that don't exist.
+                    
                     make defconfig > ../logs/defconfig.log 2>&1
-
-                    echo "=== Checking Final Configuration (.config) ==="
-
-                    # Check Node-RED
-                    if grep -q "CONFIG_PACKAGE_node-red=y" .config; then
-                        echo "✓ Node-RED is ENABLED."
-                    else
-                        echo "✗ WARNING: Node-RED is DISABLED. (Check logs/defconfig.log if this is unexpected)"
-                        # We don't exit here to allow partial builds, but you can change this.
+                    
+                    echo "=========================================="
+                    echo "=== DEBUGGING RUST FAILURE ==="
+                    echo "=========================================="
+                    
+                    # We are running this specifically to see why Rust fails.
+                    # V=s ensures the error is printed to the console.
+                    echo "Attempting to compile Rust Host dependency..."
+                    
+                    if ! make package/feeds/packages/rust/compile -j1 V=s; then
+                        echo ""
+                        echo "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
+                        echo "!!! RUST COMPILATION FAILED - SEE ERROR ABOVE !!!"
+                        echo "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
+                        echo ""
+                        exit 1
                     fi
-
-                    # Check Chirpstack Components
-                    if grep -q "CONFIG_PACKAGE_chirpstack-mqtt-forwarder=y" .config; then
-                        echo "✓ ChirpStack MQTT Forwarder is ENABLED."
-                    elif grep -q "CONFIG_PACKAGE_chirpstack-gateway-bridge=y" .config; then
-                        echo "✓ ChirpStack Gateway Bridge is ENABLED."
-                    else
-                        echo "✗ WARNING: No ChirpStack Forwarder/Bridge enabled in .config"
-                    fi
+                    
+                    echo "✓ Rust compiled successfully."
 
                     echo "=========================================="
-                    echo "=== Starting Compilation ==="
+                    echo "=== Starting Full Build ==="
                     echo "=========================================="
-
-                    mkdir -p ../logs
-                    make -j1 download world 2>&1 | tee ../logs/build.log
+                    
+                    make -j1 download world > ../logs/build.log 2>&1
                 '''
             }
         }
