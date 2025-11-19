@@ -125,7 +125,7 @@ pipeline {
                 sh '''#!/bin/bash
                     set -e
                     
-                    # FIX: Ensure logs directory exists immediately
+                    # Ensure logs directory exists
                     mkdir -p ${WORKSPACE}/logs
                     
                     cd ${WORKSPACE}/openwrt
@@ -137,13 +137,30 @@ pipeline {
                     make defconfig > ../logs/defconfig.log 2>&1
                     
                     echo "=========================================="
-                    echo "=== DEBUGGING RUST FAILURE ==="
+                    echo "=== BOOTSTRAP: BUILDING TOOLCHAIN ==="
                     echo "=========================================="
                     
-                    # We are running this specifically to see why Rust fails.
-                    # V=s ensures the error is printed to the console.
-                    echo "Attempting to compile Rust Host dependency..."
+                    # CRITICAL FIX:
+                    # We must build the compiler (GCC) and C-Library (Musl) 
+                    # before we can build any complex packages like Rust.
+                    # We use -j2 here because toolchains are usually memory safe.
                     
+                    echo "Building Tools and Toolchain..."
+                    if ! make -j2 tools/install toolchain/install > ../logs/toolchain_build.log 2>&1; then
+                        echo "✗ ERROR: Toolchain build failed!"
+                        tail -n 50 ../logs/toolchain_build.log
+                        exit 1
+                    fi
+                    echo "✓ Toolchain installed successfully."
+                    
+                    echo "=========================================="
+                    echo "=== COMPILING RUST (Host) ==="
+                    echo "=========================================="
+                    
+                    # Now that toolchain exists, we compile Rust.
+                    # We use -j1 and V=s to handle memory and see errors.
+                    
+                    echo "Compiling Rust..."
                     if ! make package/feeds/packages/rust/compile -j1 V=s; then
                         echo ""
                         echo "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
@@ -156,9 +173,10 @@ pipeline {
                     echo "✓ Rust compiled successfully."
 
                     echo "=========================================="
-                    echo "=== Starting Full Build ==="
+                    echo "=== STARTING FULL BUILD ==="
                     echo "=========================================="
                     
+                    # Finish the rest of the image
                     make -j1 download world > ../logs/build.log 2>&1
                 '''
             }
