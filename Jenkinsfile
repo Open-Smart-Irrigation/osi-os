@@ -24,14 +24,28 @@ pipeline {
     }
 
     stages {
-        stage('Check Environment') {
+        stage('System Prep') {
             steps {
                 sh '''
-                    echo "=== Workspace Info ==="
-                    echo "Workspace: ${WORKSPACE}"
-                    echo "User: $(whoami)"
-                    echo "Disk Space:"
-                    df -h
+                    echo "=== Installing Critical Build Dependencies ==="
+                    # The standard Jenkins container lacks libraries required for Rust/OpenWrt
+                    # We use 'sudo' if Jenkins user has it, or assume running as root
+                    
+                    if [ "$(id -u)" -eq 0 ]; then
+                        apt-get update
+                        # These are the dependencies that usually break Rust builds if missing:
+                        # libssl-dev, pkg-config, clang, build-essential
+                        apt-get install -y build-essential libncurses5-dev zlib1g-dev \
+                            gawk git gettext libssl-dev xsltproc rsync wget unzip \
+                            python3 python3-distutils file pkg-config clang \
+                            cmake
+                    else
+                        echo "WARNING: Not running as root. Cannot install dependencies."
+                        echo "Ensure your Docker image has 'libssl-dev' and 'pkg-config' installed."
+                    fi
+                    
+                    echo "=== Memory Check ==="
+                    free -h
                 '''
             }
         }
@@ -41,9 +55,10 @@ pipeline {
             steps {
                 sh '''
                     cd ${WORKSPACE}
-                    echo "Cleaning build directory..."
                     rm -rf openwrt/bin openwrt/build_dir openwrt/staging_dir openwrt/tmp
                     rm -rf logs output .initialized
+                    # Also clean downloads if we suspect corruption
+                    # rm -rf openwrt/dl
                 '''
             }
         }
@@ -53,7 +68,6 @@ pipeline {
             steps {
                 sh '''
                     cd ${WORKSPACE}
-                    # Ensure git submodules are ready
                     git submodule update --init --recursive
                     touch ${WORKSPACE}/.initialized
                 '''
@@ -66,42 +80,24 @@ pipeline {
                     set -e
                     cd ${WORKSPACE}
                     
-                    echo "=== Switching to Environment: ${TARGET_ENV} ==="
-                    
-                    # 1. Prepare symlinks so Makefile doesn't complain
+                    # Setup Symlinks
                     rm -f openwrt/.config openwrt/files openwrt/patches
                     ln -s ../conf/.config openwrt/.config
                     ln -s ../conf/files openwrt/files
                     ln -s ../conf/patches openwrt/patches
                     
-                    # 2. Run standard switch-env (Warning: This wipes feeds/)
+                    # Switch Env
                     make QUILT_PATCHES=patches switch-env ENV=${TARGET_ENV}
                     
-                    echo "=== REPAIRING FEEDS ==="
-                    
+                    # Fix Feeds
                     cd ${WORKSPACE}
-                    
-                    # 3. Restore the config
                     cp feeds.conf.default openwrt/feeds.conf.default
-                    
-                    # 4. CRITICAL: Rewrite Docker paths to Host paths
-                    # This ensures we can find the packages on the VPS disk
                     sed -i "s|/workdir|${WORKSPACE}|g" openwrt/feeds.conf.default
                     
+                    # Update Feeds
                     cd openwrt
-                    
-                    # 5. Update and Install
-                    # We must re-download because switch-env deleted the folders
                     ./scripts/feeds update -a
                     ./scripts/feeds install -a
-                    
-                    # 6. Simple Verification
-                    if ./scripts/feeds search node-red | grep -q "node-red"; then
-                        echo "✓ Node-RED found."
-                    else
-                        echo "✗ ERROR: Node-RED missing from feeds."
-                        exit 1
-                    fi
                 '''
             }
         }
@@ -110,54 +106,57 @@ pipeline {
             steps {
                 sh '''#!/bin/bash
                     set -e
-                    
-                    # CRITICAL FOR DOCKER:
-                    # Many tools (tar, gzip) fail to build as root without this flag.
                     export FORCE_UNSAFE_CONFIGURE=1
+                    export REJECT_MSG="Rust build failed"
                     
                     mkdir -p ${WORKSPACE}/logs
                     cd ${WORKSPACE}/openwrt
-
-                    echo "=========================================="
-                    echo "=== Configuring ==="
-                    echo "=========================================="
                     
-                    # Apply config and expand dependencies
                     make defconfig > ../logs/defconfig.log 2>&1
                     
-                    echo "=== Checking Critical Packages in .config ==="
-                    grep "CONFIG_PACKAGE_node-red=y" .config && echo "✓ Node-RED Enabled" || echo "warning: Node-RED Disabled"
-                    grep "CONFIG_PACKAGE_chirpstack-mqtt-forwarder=y" .config && echo "✓ ChirpStack Forwarder Enabled" || echo "warning: ChirpStack Forwarder Disabled"
-
                     echo "=========================================="
-                    echo "=== Building (Single Thread) ==="
+                    echo "=== ATTEMPTING BUILD (With Logs) ==="
                     echo "=========================================="
                     
-                    echo "Starting build... This will take time."
-                    echo "Using -j1 to prevent memory crashes."
-                    
-                    # We use standard 'make download world'.
-                    # We trust OpenWrt to handle the order (tools -> toolchain -> rust -> packages).
-                    # If this fails, we print the tail of the log.
+                    # We try to compile everything with -j1
+                    # If it fails, we go into Forensic Mode
                     
                     if ! make -j1 download world > ../logs/build.log 2>&1; then
                         echo ""
-                        echo "✗✗✗ BUILD FAILED ✗✗✗"
-                        echo "Displaying last 100 lines of build log:"
-                        echo "----------------------------------------"
-                        tail -n 100 ../logs/build.log
-                        echo "----------------------------------------"
+                        echo "❌❌❌ BUILD FAILED ❌❌❌"
+                        echo ""
+                        echo "=== ANALYZING FAILURE ==="
                         
-                        # Check specifically for package errors
-                        if [ -f "logs/package/error.txt" ]; then
-                            echo "Found specific package error:"
-                            cat logs/package/error.txt
+                        # 1. Check for the Rust specific error log
+                        # OpenWrt saves package build logs in logs/package/feeds/...
+                        
+                        echo "Searching for Rust build logs..."
+                        RUST_LOGS=$(find logs/package/feeds/packages/rust -name "*.txt" 2>/dev/null)
+                        
+                        if [ -n "$RUST_LOGS" ]; then
+                            echo "Found Rust logs at: $RUST_LOGS"
+                            echo "--- CONTENT OF RUST LOG ---"
+                            cat $RUST_LOGS
+                            echo "--- END OF RUST LOG ---"
+                        else
+                            echo "No specific Rust log file found."
                         fi
+                        
+                        # 2. Check the main error file
+                        if [ -f "logs/package/error.txt" ]; then
+                            echo "--- CONTENT OF PACKAGE ERROR LOG ---"
+                            cat logs/package/error.txt
+                            echo "------------------------------------"
+                        fi
+                        
+                        # 3. Tail the main build log
+                        echo "--- TAIL OF MAIN BUILD LOG ---"
+                        tail -n 100 ../logs/build.log
                         
                         exit 1
                     fi
                     
-                    echo "✓ Build Completed Successfully"
+                    echo "✓ Build Successful"
                 '''
             }
         }
@@ -167,14 +166,11 @@ pipeline {
                 sh '''
                     mkdir -p output/targets output/logs
                     cp logs/*.log output/logs/ 2>/dev/null || true
-                    
-                    # Copy the images
                     if [ -d openwrt/bin/targets ]; then
                         cp -r openwrt/bin/targets/* output/targets/
                     fi
                 '''
-                archiveArtifacts artifacts: 'output/targets/**/*.img.gz, output/targets/**/*.bin', allowEmptyArchive: true
-                archiveArtifacts artifacts: 'output/logs/*.log', allowEmptyArchive: true
+                archiveArtifacts artifacts: 'output/targets/**/*.img.gz', allowEmptyArchive: true
             }
         }
     }
