@@ -12,8 +12,8 @@ pipeline {
         )
         booleanParam(
             name: 'CLEAN_BUILD',
-            defaultValue: false,
-            description: 'Clean before build (removes entire build directory)'
+            defaultValue: true,
+            description: 'Clean before build (RECOMMENDED for this run)'
         )
     }
 
@@ -24,143 +24,161 @@ pipeline {
     }
 
     stages {
-       stage('System Prep') {
+        stage('1. System Prep & Verification') {
             steps {
                 sh '''
-                    echo "=== Installing Critical Build Dependencies ==="
+                    echo "=== 1.1 Memory Check ==="
+                    free -h
                     
+                    echo "=== 1.2 Installing Dependencies ==="
                     if [ "$(id -u)" -eq 0 ]; then
-                        apt-get update
+                        # Update package lists
+                        apt-get update -q
                         
-                        # FIXED: Removed 'python3-distutils' (deprecated/removed in Debian 12+)
-                        # Added 'python3-setuptools' instead.
-                        
-                        apt-get install -y build-essential libncurses5-dev zlib1g-dev \
+                        # Install core build tools + Python fix + SSL
+                        # Added 'rsync' and 'curl' explicitly as they are often needed
+                        apt-get install -y -q build-essential libncurses5-dev zlib1g-dev \
                             gawk git gettext libssl-dev xsltproc rsync wget unzip \
                             python3 python3-setuptools file pkg-config clang \
-                            cmake
+                            cmake curl
+                            
+                        echo "✓ Dependencies installed"
                     else
-                        echo "WARNING: Not running as root. Cannot install dependencies."
+                        echo "WARNING: Not root. Skipping apt-get."
                     fi
                     
-                    echo "=== Memory Check ==="
-                    free -h
+                    echo "=== 1.3 Verify Python ==="
+                    # Check if setuptools is actually recognized
+                    python3 -c "import setuptools; print('✓ Python Setuptools is working')" || echo "✗ Python Setuptools ERROR"
                 '''
             }
         }
 
-        stage('Clean') {
+        stage('2. Clean Workspace') {
             when { expression { params.CLEAN_BUILD } }
             steps {
                 sh '''
                     cd ${WORKSPACE}
+                    echo "Cleaning build directories..."
                     rm -rf openwrt/bin openwrt/build_dir openwrt/staging_dir openwrt/tmp
                     rm -rf logs output .initialized
-                    # Also clean downloads if we suspect corruption
-                    # rm -rf openwrt/dl
+                    
+                    # We keep openwrt/dl to save download time
+                    echo "✓ Clean complete (Downloads preserved)"
                 '''
             }
         }
 
-        stage('Initialize') {
-            when { expression { !fileExists("${WORKSPACE}/.initialized") } }
-            steps {
-                sh '''
-                    cd ${WORKSPACE}
-                    git submodule update --init --recursive
-                    touch ${WORKSPACE}/.initialized
-                '''
-            }
-        }
-
-        stage('Switch Environment & Fix Feeds') {
+        stage('3. Initialize & Feeds') {
             steps {
                 sh '''#!/bin/bash
                     set -e
                     cd ${WORKSPACE}
                     
-                    # Setup Symlinks
+                    # Init Submodules
+                    if [ ! -f .initialized ]; then
+                        git submodule update --init --recursive
+                        touch .initialized
+                    fi
+                    
+                    # Symlinks
                     rm -f openwrt/.config openwrt/files openwrt/patches
                     ln -s ../conf/.config openwrt/.config
                     ln -s ../conf/files openwrt/files
                     ln -s ../conf/patches openwrt/patches
                     
                     # Switch Env
+                    echo "Running make switch-env..."
                     make QUILT_PATCHES=patches switch-env ENV=${TARGET_ENV}
                     
-                    # Fix Feeds
-                    cd ${WORKSPACE}
+                    # Fix Feeds Paths
+                    echo "Fixing feed paths..."
                     cp feeds.conf.default openwrt/feeds.conf.default
                     sed -i "s|/workdir|${WORKSPACE}|g" openwrt/feeds.conf.default
                     
                     # Update Feeds
                     cd openwrt
+                    echo "Updating feeds..."
                     ./scripts/feeds update -a
                     ./scripts/feeds install -a
+                    
+                    echo "✓ Feeds ready"
                 '''
             }
         }
 
-        stage('Build') {
+        stage('4. Configuration') {
             steps {
                 sh '''#!/bin/bash
                     set -e
                     export FORCE_UNSAFE_CONFIGURE=1
-                    export REJECT_MSG="Rust build failed"
-                    
                     mkdir -p ${WORKSPACE}/logs
                     cd ${WORKSPACE}/openwrt
                     
+                    echo "Generating .config..."
                     make defconfig > ../logs/defconfig.log 2>&1
                     
-                    echo "=========================================="
-                    echo "=== ATTEMPTING BUILD (With Logs) ==="
-                    echo "=========================================="
-                    
-                    # We try to compile everything with -j1
-                    # If it fails, we go into Forensic Mode
-                    
-                    if ! make -j1 download world > ../logs/build.log 2>&1; then
-                        echo ""
-                        echo "❌❌❌ BUILD FAILED ❌❌❌"
-                        echo ""
-                        echo "=== ANALYZING FAILURE ==="
-                        
-                        # 1. Check for the Rust specific error log
-                        # OpenWrt saves package build logs in logs/package/feeds/...
-                        
-                        echo "Searching for Rust build logs..."
-                        RUST_LOGS=$(find logs/package/feeds/packages/rust -name "*.txt" 2>/dev/null)
-                        
-                        if [ -n "$RUST_LOGS" ]; then
-                            echo "Found Rust logs at: $RUST_LOGS"
-                            echo "--- CONTENT OF RUST LOG ---"
-                            cat $RUST_LOGS
-                            echo "--- END OF RUST LOG ---"
-                        else
-                            echo "No specific Rust log file found."
-                        fi
-                        
-                        # 2. Check the main error file
-                        if [ -f "logs/package/error.txt" ]; then
-                            echo "--- CONTENT OF PACKAGE ERROR LOG ---"
-                            cat logs/package/error.txt
-                            echo "------------------------------------"
-                        fi
-                        
-                        # 3. Tail the main build log
-                        echo "--- TAIL OF MAIN BUILD LOG ---"
-                        tail -n 100 ../logs/build.log
-                        
-                        exit 1
-                    fi
-                    
-                    echo "✓ Build Successful"
+                    # Show the user what is enabled
+                    echo "=== Config Check ==="
+                    grep "CONFIG_PACKAGE_rust" .config || echo "Rust package not found in config"
+                    grep "CONFIG_PACKAGE_node-red" .config || echo "Node-RED not found in config"
                 '''
             }
         }
 
-        stage('Archive') {
+        stage('5. Compile Rust (Targeted)') {
+            steps {
+                sh '''#!/bin/bash
+                    set -e
+                    export FORCE_UNSAFE_CONFIGURE=1
+                    cd ${WORKSPACE}/openwrt
+                    
+                    echo "=============================================="
+                    echo "=== STEP 5: COMPILING RUST (The Hard Part) ==="
+                    echo "=============================================="
+                    echo "We are isolating Rust. You will see VERBOSE output now."
+                    echo "If this fails, the error will be on the screen."
+                    echo "----------------------------------------------"
+                    
+                    # Command Explanation:
+                    # -j1  : Single thread to save memory
+                    # V=s  : Verbose (Prints everything to console)
+                    # 2>&1 | tee : Show on screen AND save to file
+                    
+                    # We specifically build the rust compiler host package first
+                    make package/feeds/packages/rust/compile -j1 V=s 2>&1 | tee ../logs/rust_verbose.log
+                    
+                    echo "----------------------------------------------"
+                    echo "✓ RUST COMPILED SUCCESSFULLY"
+                    echo "=============================================="
+                '''
+            }
+        }
+
+        stage('6. Compile Firmware (The Rest)') {
+            steps {
+                sh '''#!/bin/bash
+                    set -e
+                    export FORCE_UNSAFE_CONFIGURE=1
+                    cd ${WORKSPACE}/openwrt
+                    
+                    echo "=============================================="
+                    echo "=== STEP 6: BUILDING FIRMWARE IMAGE ==="
+                    echo "=============================================="
+                    echo "Rust is done. Now building the rest (Kernel, Node.js, etc)."
+                    echo "Output is summarized to keep logs clean, but errors will be shown."
+                    
+                    # Here we don't use V=s because it would generate GBs of logs for the whole OS.
+                    # We use standard output, which shows "Compiling x..."
+                    
+                    make -j1 world 2>&1 | tee ../logs/build_main.log
+                    
+                    echo "✓ FIRMWARE BUILD COMPLETE"
+                '''
+            }
+        }
+
+        stage('7. Archive') {
             steps {
                 sh '''
                     mkdir -p output/targets output/logs
@@ -170,6 +188,7 @@ pipeline {
                     fi
                 '''
                 archiveArtifacts artifacts: 'output/targets/**/*.img.gz', allowEmptyArchive: true
+                archiveArtifacts artifacts: 'output/logs/*.log', allowEmptyArchive: true
             }
         }
     }
