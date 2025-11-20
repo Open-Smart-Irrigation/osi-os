@@ -24,24 +24,23 @@ pipeline {
     }
 
     stages {
-        stage('System Prep') {
+       stage('System Prep') {
             steps {
                 sh '''
                     echo "=== Installing Critical Build Dependencies ==="
-                    # The standard Jenkins container lacks libraries required for Rust/OpenWrt
-                    # We use 'sudo' if Jenkins user has it, or assume running as root
                     
                     if [ "$(id -u)" -eq 0 ]; then
                         apt-get update
-                        # These are the dependencies that usually break Rust builds if missing:
-                        # libssl-dev, pkg-config, clang, build-essential
+                        
+                        # FIXED: Removed 'python3-distutils' (deprecated/removed in Debian 12+)
+                        # Added 'python3-setuptools' instead.
+                        
                         apt-get install -y build-essential libncurses5-dev zlib1g-dev \
                             gawk git gettext libssl-dev xsltproc rsync wget unzip \
-                            python3 python3-distutils file pkg-config clang \
+                            python3 python3-setuptools file pkg-config clang \
                             cmake
                     else
                         echo "WARNING: Not running as root. Cannot install dependencies."
-                        echo "Ensure your Docker image has 'libssl-dev' and 'pkg-config' installed."
                     fi
                     
                     echo "=== Memory Check ==="
