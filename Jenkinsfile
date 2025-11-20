@@ -13,7 +13,7 @@ pipeline {
         booleanParam(
             name: 'CLEAN_BUILD',
             defaultValue: true,
-            description: 'Clean before build (RECOMMENDED for this run)'
+            description: 'Clean before build (RECOMMENDED)'
         )
     }
 
@@ -24,32 +24,18 @@ pipeline {
     }
 
     stages {
-        stage('1. System Prep & Verification') {
+        stage('1. System Prep') {
             steps {
                 sh '''
-                    echo "=== 1.1 Memory Check ==="
-                    free -h
-                    
-                    echo "=== 1.2 Installing Dependencies ==="
                     if [ "$(id -u)" -eq 0 ]; then
-                        # Update package lists
                         apt-get update -q
-                        
-                        # Install core build tools + Python fix + SSL
-                        # Added 'rsync' and 'curl' explicitly as they are often needed
                         apt-get install -y -q build-essential libncurses5-dev zlib1g-dev \
                             gawk git gettext libssl-dev xsltproc rsync wget unzip \
                             python3 python3-setuptools file pkg-config clang \
                             cmake curl
-                            
-                        echo "✓ Dependencies installed"
-                    else
-                        echo "WARNING: Not root. Skipping apt-get."
                     fi
-                    
-                    echo "=== 1.3 Verify Python ==="
-                    # Check if setuptools is actually recognized
-                    python3 -c "import setuptools; print('✓ Python Setuptools is working')" || echo "✗ Python Setuptools ERROR"
+                    # Check python setuptools
+                    python3 -c "import setuptools; print('✓ Python Setuptools OK')" || echo "Warning: Python check failed"
                 '''
             }
         }
@@ -59,12 +45,9 @@ pipeline {
             steps {
                 sh '''
                     cd ${WORKSPACE}
-                    echo "Cleaning build directories..."
                     rm -rf openwrt/bin openwrt/build_dir openwrt/staging_dir openwrt/tmp
                     rm -rf logs output .initialized
-                    
-                    # We keep openwrt/dl to save download time
-                    echo "✓ Clean complete (Downloads preserved)"
+                    # Keep openwrt/dl to save download time
                 '''
             }
         }
@@ -75,34 +58,24 @@ pipeline {
                     set -e
                     cd ${WORKSPACE}
                     
-                    # Init Submodules
                     if [ ! -f .initialized ]; then
                         git submodule update --init --recursive
                         touch .initialized
                     fi
                     
-                    # Symlinks
                     rm -f openwrt/.config openwrt/files openwrt/patches
                     ln -s ../conf/.config openwrt/.config
                     ln -s ../conf/files openwrt/files
                     ln -s ../conf/patches openwrt/patches
                     
-                    # Switch Env
-                    echo "Running make switch-env..."
                     make QUILT_PATCHES=patches switch-env ENV=${TARGET_ENV}
                     
-                    # Fix Feeds Paths
-                    echo "Fixing feed paths..."
                     cp feeds.conf.default openwrt/feeds.conf.default
                     sed -i "s|/workdir|${WORKSPACE}|g" openwrt/feeds.conf.default
                     
-                    # Update Feeds
                     cd openwrt
-                    echo "Updating feeds..."
                     ./scripts/feeds update -a
                     ./scripts/feeds install -a
-                    
-                    echo "✓ Feeds ready"
                 '''
             }
         }
@@ -115,61 +88,72 @@ pipeline {
                     mkdir -p ${WORKSPACE}/logs
                     cd ${WORKSPACE}/openwrt
                     
-                    echo "Generating .config..."
                     make defconfig > ../logs/defconfig.log 2>&1
-                    
-                    # Show the user what is enabled
-                    echo "=== Config Check ==="
-                    grep "CONFIG_PACKAGE_rust" .config || echo "Rust package not found in config"
-                    grep "CONFIG_PACKAGE_node-red" .config || echo "Node-RED not found in config"
                 '''
             }
         }
 
-        stage('5. Compile Rust (Targeted)') {
+        stage('5. Bootstrap Toolchain (CRITICAL)') {
             steps {
                 sh '''#!/bin/bash
                     set -e
+                    # This makes the pipe fail if the build fails (fixing the false success msg)
+                    set -o pipefail 
                     export FORCE_UNSAFE_CONFIGURE=1
+                    
                     cd ${WORKSPACE}/openwrt
                     
                     echo "=============================================="
-                    echo "=== STEP 5: COMPILING RUST (The Hard Part) ==="
+                    echo "=== STEP 5: BUILDING TOOLCHAIN ==="
                     echo "=============================================="
-                    echo "We are isolating Rust. You will see VERBOSE output now."
-                    echo "If this fails, the error will be on the screen."
-                    echo "----------------------------------------------"
+                    echo "Compiling GCC and Musl Libc. This creates the missing ld-musl files."
+                    echo "We use -j4 here because C compilation is safe and faster."
                     
-                    # Command Explanation:
-                    # -j1  : Single thread to save memory
-                    # V=s  : Verbose (Prints everything to console)
-                    # 2>&1 | tee : Show on screen AND save to file
+                    # FIX: We build 'tools' and 'toolchain' first.
+                    # This puts ld-musl-*.so into staging_dir so Rust can find it.
                     
-                    # We specifically build the rust compiler host package first
+                    make -j4 tools/install toolchain/install 2>&1 | tee ../logs/toolchain_build.log
+                    
+                    echo "✓ Toolchain installed. Staging directory is ready."
+                '''
+            }
+        }
+
+        stage('6. Compile Rust (Targeted)') {
+            steps {
+                sh '''#!/bin/bash
+                    set -e
+                    set -o pipefail
+                    export FORCE_UNSAFE_CONFIGURE=1
+                    
+                    cd ${WORKSPACE}/openwrt
+                    
+                    echo "=============================================="
+                    echo "=== STEP 6: COMPILING RUST ==="
+                    echo "=============================================="
+                    echo "Toolchain is ready. Now compiling Rust."
+                    echo "Using -j1 to prevent memory crashes."
+                    
+                    # Now we can safely compile Rust because the toolchain exists
                     make package/feeds/packages/rust/compile -j1 V=s 2>&1 | tee ../logs/rust_verbose.log
                     
-                    echo "----------------------------------------------"
                     echo "✓ RUST COMPILED SUCCESSFULLY"
-                    echo "=============================================="
                 '''
             }
         }
 
-        stage('6. Compile Firmware (The Rest)') {
+        stage('7. Compile Firmware (The Rest)') {
             steps {
                 sh '''#!/bin/bash
                     set -e
+                    set -o pipefail
                     export FORCE_UNSAFE_CONFIGURE=1
+                    
                     cd ${WORKSPACE}/openwrt
                     
                     echo "=============================================="
-                    echo "=== STEP 6: BUILDING FIRMWARE IMAGE ==="
+                    echo "=== STEP 7: BUILDING FINAL IMAGE ==="
                     echo "=============================================="
-                    echo "Rust is done. Now building the rest (Kernel, Node.js, etc)."
-                    echo "Output is summarized to keep logs clean, but errors will be shown."
-                    
-                    # Here we don't use V=s because it would generate GBs of logs for the whole OS.
-                    # We use standard output, which shows "Compiling x..."
                     
                     make -j1 world 2>&1 | tee ../logs/build_main.log
                     
@@ -178,7 +162,7 @@ pipeline {
             }
         }
 
-        stage('7. Archive') {
+        stage('8. Archive') {
             steps {
                 sh '''
                     mkdir -p output/targets output/logs
