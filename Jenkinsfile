@@ -62,7 +62,40 @@ pipeline {
             }
         }
 
-        stage('3. FORCE Rust Rebuild') {
+        stage('3. Surgical Rust Clean') {
+            steps {
+                sh '''#!/bin/bash
+                    set -e
+                    cd ${WORKSPACE}/openwrt
+                    
+                    echo "=========================================="
+                    echo "=== MANUAL CLEANUP (Surgical) ==="
+                    echo "=========================================="
+                    
+                    # 1. Delete the build folders (The Data)
+                    echo "Deleting Build Directories..."
+                    rm -rf build_dir/host/rust*
+                    rm -rf build_dir/target-*/rust*
+                    rm -rf feeds/packages/lang/rust/host-build
+                    
+                    # 2. Delete the Stamp Files (The Markers)
+                    # This ensures Make forgets that it ever built Rust.
+                    echo "Hunting down hidden stamp files..."
+                    
+                    # Delete anything named .built or .prepared inside a folder with "rust" in the name
+                    find staging_dir -path "*rust*" -name ".built" -delete
+                    find staging_dir -path "*rust*" -name ".prepared" -delete
+                    find staging_dir -path "*rust*" -name ".configured" -delete
+                    
+                    find build_dir -path "*rust*" -name ".built" -delete
+                    find build_dir -path "*rust*" -name ".prepared" -delete
+                    
+                    echo "✓ Rust build history has been wiped."
+                '''
+            }
+        }
+
+        stage('4. Compile Rust (Standard Mode)') {
             steps {
                 sh '''#!/bin/bash
                     set -e
@@ -70,23 +103,16 @@ pipeline {
                     cd ${WORKSPACE}/openwrt
                     
                     echo "=========================================="
-                    echo "=== FORCING RUST REBUILD (Mode: -B) ==="
+                    echo "=== COMPILING RUST ==="
                     echo "=========================================="
+                    echo "We are back to standard mode (no -B)."
+                    echo "Since stamp files are gone, this MUST rebuild."
                     
-                    # 1. Clean artifacts
-                    make package/feeds/packages/rust/clean
-                    
-                    # 2. Touch the makefile (Tricks make into thinking it changed)
-                    touch feeds/packages/lang/rust/Makefile
-                    
-                    # 3. COMPILE WITH FORCE FLAG (-B)
-                    # -B: Unconditionally build all targets, ignoring timestamps.
-                    echo "Running make -B ... (This MUST rebuild now)"
-                    
-                    if ! make -B package/feeds/packages/rust/compile -j1 V=s 2>&1 | tee ../logs/rust_force.log; then
+                    # Using tee to show logs on screen.
+                    if ! make package/feeds/packages/rust/compile -j1 V=s 2>&1 | tee ../logs/rust_verbose.log; then
                         echo ""
                         echo "❌❌❌ RUST FAILED ❌❌❌"
-                        echo "Error is above."
+                        echo "The specific error should be visible above."
                         exit 1
                     fi
                     
@@ -95,7 +121,7 @@ pipeline {
             }
         }
 
-        stage('4. Finish Firmware') {
+        stage('5. Finish Firmware') {
             steps {
                 sh '''#!/bin/bash
                     set -e
