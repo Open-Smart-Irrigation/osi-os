@@ -10,7 +10,7 @@ pipeline {
             ],
             description: 'Target platform (bcm2711 = Pi 4, bcm2712 = Pi 5)'
         )
-        // DEFAULT IS NOW FALSE -> WE WANT TO RESUME!
+        // DEFAULT IS FALSE -> WE WANT TO RESUME!
         booleanParam(
             name: 'CLEAN_BUILD',
             defaultValue: false,
@@ -108,7 +108,7 @@ pipeline {
             }
         }
 
-        stage('6. Compile Rust (HOST + TARGET)') {
+        stage('6. Compile Rust (Targeted)') {
             steps {
                 sh '''#!/bin/bash
                     set -e
@@ -118,22 +118,23 @@ pipeline {
                     cd ${WORKSPACE}/openwrt
                     
                     echo "=============================================="
-                    echo "=== STEP 6: COMPILING RUST (VERBOSE) ==="
+                    echo "=== STEP 6: COMPILING RUST (FORCE REBUILD) ==="
                     echo "=============================================="
-                    echo "Disk Space Remaining:"
-                    df -h .
+                    echo "Cleaning Rust package to force Host-Compile..."
+                    
+                    # 1. Clean Rust specifically
+                    make package/feeds/packages/rust/clean
+                    
                     echo "----------------------------------------------"
+                    echo "Now compiling Rust with Verbose logs..."
+                    echo "Using -j1 to prevent memory crashes."
                     
-                    # FIX: We explicitly build HOST compile first. 
-                    # This is where it failed last time. We use V=s to see why.
+                    # 2. Compile Rust (Since we cleaned, this builds Host + Target)
+                    # We use 'tee' so you see the log on screen immediately.
                     
-                    echo ">>> Compiling Rust [HOST]..."
-                    make package/feeds/packages/rust/host-compile -j1 V=s 2>&1 | tee ../logs/rust_host_verbose.log
+                    make package/feeds/packages/rust/compile -j1 V=s 2>&1 | tee ../logs/rust_verbose.log
                     
-                    echo ">>> Compiling Rust [TARGET]..."
-                    make package/feeds/packages/rust/compile -j1 V=s 2>&1 | tee ../logs/rust_target_verbose.log
-                    
-                    echo "✓ RUST FULLY COMPILED"
+                    echo "✓ RUST COMPILED SUCCESSFULLY"
                 '''
             }
         }
