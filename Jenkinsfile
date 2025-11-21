@@ -13,7 +13,7 @@ pipeline {
         booleanParam(
             name: 'CLEAN_BUILD',
             defaultValue: false,
-            description: 'Clean before build (Removes build artifacts)'
+            description: 'Clean before build (UNCHECK THIS)'
         )
     }
 
@@ -24,137 +24,114 @@ pipeline {
     }
 
     stages {
-        stage('1. Environment Verification') {
+        stage('1. Verify Docker Tools') {
             steps {
                 sh '''
-                    echo "=== Checking Build Container Capabilities ==="
-                    echo "Current User: $(whoami)"
+                    echo "=== Verifying Container Dependencies ==="
+                    # If these fail, you MUST rebuild your Docker image on the VPS
                     
-                    # Verify the critical tools you added to the Dockerfile exist
-                    echo "Checking Clang (Required for Rust/Bindgen):"
-                    clang --version || echo "WARNING: Clang not found"
+                    if ! command -v pkg-config &> /dev/null; then
+                        echo "❌ CRITICAL ERROR: 'pkg-config' is missing!"
+                        echo "Rust cannot compile without it. Please update your Dockerfile and rebuild the container."
+                        exit 1
+                    fi
                     
-                    echo "Checking Pkg-Config (Required for SSL):"
-                    pkg-config --version || echo "WARNING: Pkg-Config not found"
+                    if ! command -v clang &> /dev/null; then
+                        echo "❌ CRITICAL ERROR: 'clang' is missing!"
+                        exit 1
+                    fi
                     
-                    echo "Checking Disk Space:"
-                    df -h
+                    echo "✓ Docker environment looks good."
                 '''
             }
         }
 
-        stage('2. Clean Workspace') {
-            when { expression { params.CLEAN_BUILD } }
-            steps {
-                sh '''
-                    cd ${WORKSPACE}
-                    echo "Cleaning build directory..."
-                    rm -rf openwrt/bin openwrt/build_dir openwrt/staging_dir openwrt/tmp
-                    rm -rf logs output .initialized
-                    
-                    # We purposefully keep 'openwrt/dl' to save download time
-                    echo "✓ Clean complete."
-                '''
-            }
-        }
-
-        stage('3. Initialize & Switch Environment') {
+        stage('2. Initialize') {
             steps {
                 sh '''#!/bin/bash
                     set -e
                     cd ${WORKSPACE}
+                    if [ ! -f .initialized ]; then git submodule update --init --recursive; touch .initialized; fi
                     
-                    # 1. Initialize Git Submodules
-                    if [ ! -f .initialized ]; then
-                        git submodule update --init --recursive
-                        touch .initialized
-                    fi
-                    
-                    # 2. Prepare Symlinks for Switch
+                    # Reset Configs
                     rm -f openwrt/.config openwrt/files openwrt/patches
                     ln -s ../conf/.config openwrt/.config
                     ln -s ../conf/files openwrt/files
                     ln -s ../conf/patches openwrt/patches
                     
-                    # 3. Switch Environment (This wipes the feeds directory)
-                    echo "Switching to target: ${TARGET_ENV}"
                     make QUILT_PATCHES=patches switch-env ENV=${TARGET_ENV}
                     
-                    # 4. Restore Feeds Config & Fix Paths
-                    # This is critical because Jenkins runs on the Host path, not the Docker internal path
+                    # Fix Feeds Path
                     cp feeds.conf.default openwrt/feeds.conf.default
                     sed -i "s|/workdir|${WORKSPACE}|g" openwrt/feeds.conf.default
                     
-                    # 5. Update & Install Feeds
-                    # Must be done AFTER switch-env
                     cd openwrt
                     ./scripts/feeds update -a
                     ./scripts/feeds install -a
-                    
-                    echo "✓ Environment ready."
+                    make defconfig > ../logs/defconfig.log 2>&1
                 '''
             }
         }
 
-        stage('4. Configure & Build') {
+        stage('3. Prepare Rust (Auto-Fix)') {
             steps {
                 sh '''#!/bin/bash
                     set -e
-                    # Required for running tools like tar/gzip as root inside Docker
-                    export FORCE_UNSAFE_CONFIGURE=1
-                    
-                    mkdir -p ${WORKSPACE}/logs
                     cd ${WORKSPACE}/openwrt
-
-                    echo "=========================================="
-                    echo "=== 4.1 Configuration ==="
-                    echo "=========================================="
                     
-                    # Generate the full .config from defaults
-                    make defconfig > ../logs/defconfig.log 2>&1
+                    echo "=== Ensuring Rust Rebuilds ==="
+                    # We silently delete the stamp files so Make doesn't skip this step
+                    # This fixes the "Nothing to be done" error
                     
-                    echo "=========================================="
-                    echo "=== 4.2 Downloading Sources ==="
-                    echo "=========================================="
+                    find staging_dir -path "*rust*" -name ".built" -delete
+                    find staging_dir -path "*rust*" -name ".prepared" -delete
+                    find build_dir -path "*rust*" -name ".built" -delete
                     
-                    # We use -j4 here because downloading is not memory intensive
-                    make -j4 download > ../logs/download.log 2>&1 || true
-                    
-                    echo "=========================================="
-                    echo "=== 4.3 Compiling Firmware ==="
-                    echo "=========================================="
-                    echo "Starting build with -j1 (Single Core) for stability."
-                    echo "Output is being logged to screen and file."
-                    
-                    # We use -j1 to ensure Rust has enough memory.
-                    # We use 'tee' to show progress on the console.
-                    
-                    if ! make -j1 world 2>&1 | tee ../logs/build_main.log; then
-                        echo ""
-                        echo "❌❌❌ BUILD FAILED ❌❌❌"
-                        echo "Check the logs above for details."
-                        exit 1
-                    fi
-                    
-                    echo "✓ Build Completed Successfully"
+                    # We also remove the host build directory to force a clean host compile
+                    rm -rf build_dir/host/rust*
                 '''
             }
         }
 
-        stage('5. Archive Artifacts') {
+        stage('4. Compile Rust') {
             steps {
-                sh '''
-                    mkdir -p output/targets output/logs
-                    cp logs/*.log output/logs/ 2>/dev/null || true
+                sh '''#!/bin/bash
+                    set -e
+                    export FORCE_UNSAFE_CONFIGURE=1
+                    cd ${WORKSPACE}/openwrt
                     
-                    # Copy firmware images
-                    if [ -d openwrt/bin/targets ]; then
-                        cp -r openwrt/bin/targets/* output/targets/
+                    echo "=== Compiling Rust (Standard Mode) ==="
+                    # -j1 to save memory
+                    # V=s to see errors
+                    
+                    if ! make package/feeds/packages/rust/compile -j1 V=s 2>&1 | tee ../logs/rust_verbose.log; then
+                        echo ""
+                        echo "❌❌❌ RUST FAILED ❌❌❌"
+                        echo "The error log is printed above."
+                        exit 1
                     fi
+                    
+                    echo "✓ Rust compiled successfully."
                 '''
-                
-                archiveArtifacts artifacts: 'output/targets/**/*.img.gz, output/targets/**/*.bin', allowEmptyArchive: true
-                archiveArtifacts artifacts: 'output/logs/*.log', allowEmptyArchive: true
+            }
+        }
+
+        stage('5. Finish Firmware') {
+            steps {
+                sh '''#!/bin/bash
+                    set -e
+                    export FORCE_UNSAFE_CONFIGURE=1
+                    cd ${WORKSPACE}/openwrt
+                    
+                    echo "=== Building Final Image ==="
+                    make -j1 world 2>&1 | tee ../logs/build_main.log
+                '''
+            }
+        }
+        
+        stage('Archive') {
+            steps {
+                archiveArtifacts artifacts: 'output/targets/**/*.img.gz, output/logs/*.log', allowEmptyArchive: true
             }
         }
     }
