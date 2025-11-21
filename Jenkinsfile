@@ -38,13 +38,12 @@ pipeline {
                         update-ca-certificates
                     fi
                     
-                    echo "=== 2. PURGING RUST CACHE (The Fix?) ==="
+                    echo "=== 2. PURGING RUST CACHE (The Fix) ==="
                     cd ${WORKSPACE}/openwrt
-                    # If these files are corrupted, the build fails instantly.
-                    # We delete them to force a fresh download.
+                    # FIX: Using 'rm -rf' to handle directories correctly
                     echo "Deleting cached Rust/Cargo downloads..."
-                    rm -f dl/rust* 
-                    rm -f dl/carg*
+                    rm -rf dl/rust* 
+                    rm -rf dl/carg*
                     rm -rf build_dir/host/rust*
                     rm -rf feeds/packages/lang/rust/host-build
                 '''
@@ -57,7 +56,6 @@ pipeline {
                     set -e
                     cd ${WORKSPACE}
                     
-                    # Standard setup stuff
                     if [ ! -f .initialized ]; then
                         git submodule update --init --recursive
                         touch .initialized
@@ -113,9 +111,7 @@ pipeline {
                         
                         echo ""
                         echo "=== 2. CHECKING INTERNAL OPENWRT LOGS ==="
-                        # OpenWrt hides the real error in logs/package/...
-                        # We use '-exec cat {} +' which is safer than backslashes
-                        
+                        # Safe syntax to find and cat files
                         if [ -d "logs/package/feeds/packages/rust" ]; then
                             find logs/package/feeds/packages/rust -name "*.txt" -exec cat {} +
                         else
