@@ -68,7 +68,7 @@ pipeline {
             }
         }
 
-        stage('3. Prepare Rust (Auto-Fix)') {
+          stage('3. Prepare Rust (Auto-Fix)') {
             steps {
                 sh '''#!/bin/bash
                     set -e
@@ -76,16 +76,12 @@ pipeline {
                     
                     echo "=== Applying Rust Artifact Fix ==="
                     # FIX: Disable downloading expired CI artifacts
-                    # This forces the build to compile LLVM from source instead of 404ing
                     sed -i 's/llvm.download-ci-llvm=true/llvm.download-ci-llvm=false/g' feeds/packages/lang/rust/Makefile
                     
                     echo "=== Ensuring Rust Rebuilds ==="
-                    # Wipe previous failed states to force the Makefile change to take effect
                     find staging_dir -path "*rust*" -name ".built" -delete
                     find staging_dir -path "*rust*" -name ".prepared" -delete
                     find build_dir -path "*rust*" -name ".built" -delete
-                    
-                    # Remove the host build directory to force a clean host compile
                     rm -rf build_dir/host/rust*
                 '''
             }
@@ -96,13 +92,21 @@ pipeline {
                 sh '''#!/bin/bash
                     set -e
                     export FORCE_UNSAFE_CONFIGURE=1
+                    
+                    # --- CRITICAL MEMORY SETTINGS ---
+                    # Limit Cargo (Rust) to 2 parallel jobs
+                    export CARGO_BUILD_JOBS=2
+                    # Limit CMake/Ninja (LLVM) to 2 parallel jobs
+                    export CMAKE_BUILD_PARALLEL_LEVEL=2
+                    
                     cd ${WORKSPACE}/openwrt
                     
                     echo "=== Compiling Rust (Source Mode) ==="
-                    # Warning: This will take significantly longer (30-60 mins)
-                    # but it WILL work as long as you have 16GB+ RAM.
+                    echo "Detected 8GB RAM + Swap. Throttling build to prevent OOM."
                     
-                    if ! make package/feeds/packages/rust/compile -j1 V=s 2>&1 | tee ../logs/rust_verbose.log; then
+                    # We use -j2 here to match the exports above. 
+                    # -j1 is too safe/slow, -j4 might crash. -j2 is the sweet spot for 24GB virt mem.
+                    if ! make package/feeds/packages/rust/compile -j2 V=s 2>&1 | tee ../logs/rust_verbose.log; then
                         echo ""
                         echo "❌❌❌ RUST FAILED ❌❌❌"
                         echo "The error log is printed above."
@@ -113,6 +117,7 @@ pipeline {
                 '''
             }
         }
+
 
         stage('5. Finish Firmware') {
             steps {
