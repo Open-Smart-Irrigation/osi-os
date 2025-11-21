@@ -2,18 +2,8 @@ pipeline {
     agent any
     
     parameters {
-        choice(
-            name: 'TARGET_ENV',
-            choices: [
-                'full_raspberrypi_bcm27xx_bcm2712'
-            ],
-            description: 'Target platform'
-        )
-        booleanParam(
-            name: 'CLEAN_BUILD',
-            defaultValue: false,
-            description: 'Clean before build (LEAVE UNCHECKED)'
-        )
+        choice(name: 'TARGET_ENV', choices: ['full_raspberrypi_bcm27xx_bcm2712'], description: 'Target')
+        booleanParam(name: 'CLEAN_BUILD', defaultValue: false, description: 'Clean before build')
     }
 
     options {
@@ -23,17 +13,16 @@ pipeline {
     }
 
     stages {
-        stage('1. System Prep') {
+        stage('1. Environment Check') {
             steps {
                 sh '''
-                    if [ "$(id -u)" -eq 0 ]; then
-                        apt-get update -q
-                        apt-get install -y -q build-essential libncurses5-dev zlib1g-dev \
-                            gawk git gettext libssl-dev xsltproc rsync wget unzip \
-                            python3 python3-setuptools file pkg-config clang \
-                            cmake curl ca-certificates
-                        update-ca-certificates
-                    fi
+                    echo "=== Checking Critical Tools ==="
+                    echo "Clang (Required for Bindgen):"
+                    clang --version
+                    echo "Pkg-Config (Required for SSL):"
+                    pkg-config --version
+                    echo "CMake:"
+                    cmake --version
                 '''
             }
         }
@@ -51,6 +40,7 @@ pipeline {
                     ln -s ../conf/patches openwrt/patches
                     
                     make QUILT_PATCHES=patches switch-env ENV=${TARGET_ENV}
+                    
                     cp feeds.conf.default openwrt/feeds.conf.default
                     sed -i "s|/workdir|${WORKSPACE}|g" openwrt/feeds.conf.default
                     
@@ -68,55 +58,29 @@ pipeline {
                     set -e
                     cd ${WORKSPACE}/openwrt
                     
-                    echo "=========================================="
-                    echo "=== MANUAL CLEANUP (Surgical) ==="
-                    echo "=========================================="
-                    
-                    # 1. Delete the build folders (The Data)
-                    echo "Deleting Build Directories..."
-                    rm -rf build_dir/host/rust*
-                    rm -rf build_dir/target-*/rust*
-                    rm -rf feeds/packages/lang/rust/host-build
-                    
-                    # 2. Delete the Stamp Files (The Markers)
-                    # This ensures Make forgets that it ever built Rust.
-                    echo "Hunting down hidden stamp files..."
-                    
-                    # Delete anything named .built or .prepared inside a folder with "rust" in the name
+                    echo "=== Removing Rust Stamp Files ==="
+                    # This forces a rebuild without deleting everything
                     find staging_dir -path "*rust*" -name ".built" -delete
                     find staging_dir -path "*rust*" -name ".prepared" -delete
-                    find staging_dir -path "*rust*" -name ".configured" -delete
-                    
-                    find build_dir -path "*rust*" -name ".built" -delete
-                    find build_dir -path "*rust*" -name ".prepared" -delete
-                    
-                    echo "✓ Rust build history has been wiped."
+                    rm -rf build_dir/host/rust*
+                    rm -rf build_dir/target-*/rust*
                 '''
             }
         }
 
-        stage('4. Compile Rust (Standard Mode)') {
+        stage('4. Compile Rust') {
             steps {
                 sh '''#!/bin/bash
                     set -e
+                    # No need for FORCE_UNSAFE_CONFIGURE if running as 'jenkins' user with proper tools
+                    # But usually OpenWrt likes it just in case
                     export FORCE_UNSAFE_CONFIGURE=1
+                    
                     cd ${WORKSPACE}/openwrt
                     
-                    echo "=========================================="
-                    echo "=== COMPILING RUST ==="
-                    echo "=========================================="
-                    echo "We are back to standard mode (no -B)."
-                    echo "Since stamp files are gone, this MUST rebuild."
-                    
-                    # Using tee to show logs on screen.
-                    if ! make package/feeds/packages/rust/compile -j1 V=s 2>&1 | tee ../logs/rust_verbose.log; then
-                        echo ""
-                        echo "❌❌❌ RUST FAILED ❌❌❌"
-                        echo "The specific error should be visible above."
-                        exit 1
-                    fi
-                    
-                    echo "✓ Rust built successfully."
+                    echo "=== Compiling Rust (Standard Mode) ==="
+                    # Using tee to show output. With correct tools, this should work.
+                    make package/feeds/packages/rust/compile -j1 V=s 2>&1 | tee ../logs/rust_verbose.log
                 '''
             }
         }
