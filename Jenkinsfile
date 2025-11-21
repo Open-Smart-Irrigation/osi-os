@@ -10,11 +10,10 @@ pipeline {
             ],
             description: 'Target platform (bcm2711 = Pi 4, bcm2712 = Pi 5)'
         )
-        // DEFAULT IS FALSE -> WE WANT TO RESUME!
         booleanParam(
             name: 'CLEAN_BUILD',
             defaultValue: false,
-            description: 'Clean before build (UNCHECK THIS TO SAVE TIME)'
+            description: 'Clean before build (UNCHECK THIS)'
         )
     }
 
@@ -25,47 +24,45 @@ pipeline {
     }
 
     stages {
-        stage('1. System Prep') {
+        stage('1. Forensic Prep') {
             steps {
                 sh '''
-                    echo "=== Disk Space Check (CRITICAL) ==="
-                    df -h
-                    
+                    echo "=== 1. Installing Certificates & Tools ==="
                     if [ "$(id -u)" -eq 0 ]; then
                         apt-get update -q
+                        # ca-certificates is CRITICAL for Rust downloads
                         apt-get install -y -q build-essential libncurses5-dev zlib1g-dev \
                             gawk git gettext libssl-dev xsltproc rsync wget unzip \
                             python3 python3-setuptools file pkg-config clang \
-                            cmake curl
+                            cmake curl ca-certificates
+                        update-ca-certificates
                     fi
+                    
+                    echo "=== 2. PURGING RUST CACHE (The Fix?) ==="
+                    cd ${WORKSPACE}/openwrt
+                    # If these files are corrupted, the build fails instantly.
+                    # We delete them to force a fresh download.
+                    echo "Deleting cached Rust/Cargo downloads..."
+                    rm -f dl/rust* 
+                    rm -f dl/carg*
+                    rm -rf build_dir/host/rust*
+                    rm -rf feeds/packages/lang/rust/host-build
                 '''
             }
         }
 
-        stage('2. Clean Workspace') {
-            when { expression { params.CLEAN_BUILD } }
-            steps {
-                sh '''
-                    # ONLY RUNS IF YOU CHECK THE BOX
-                    cd ${WORKSPACE}
-                    rm -rf openwrt/bin openwrt/build_dir openwrt/staging_dir openwrt/tmp
-                    rm -rf logs output .initialized
-                '''
-            }
-        }
-
-        stage('3. Initialize & Feeds') {
+        stage('2. Initialize') {
             steps {
                 sh '''#!/bin/bash
                     set -e
                     cd ${WORKSPACE}
                     
+                    # Standard setup stuff
                     if [ ! -f .initialized ]; then
                         git submodule update --init --recursive
                         touch .initialized
                     fi
                     
-                    # Refresh Feeds (Fast)
                     rm -f openwrt/.config openwrt/files openwrt/patches
                     ln -s ../conf/.config openwrt/.config
                     ln -s ../conf/files openwrt/files
@@ -79,98 +76,72 @@ pipeline {
                     cd openwrt
                     ./scripts/feeds update -a
                     ./scripts/feeds install -a
-                '''
-            }
-        }
-
-        stage('4. Configuration') {
-            steps {
-                sh '''#!/bin/bash
-                    set -e
-                    export FORCE_UNSAFE_CONFIGURE=1
-                    mkdir -p ${WORKSPACE}/logs
-                    cd ${WORKSPACE}/openwrt
                     make defconfig > ../logs/defconfig.log 2>&1
                 '''
             }
         }
 
-        stage('5. Bootstrap Toolchain') {
+        stage('3. Compile Rust (Forensic Mode)') {
             steps {
                 sh '''#!/bin/bash
                     set -e
+                    # ALLOW ROOT BUILD
                     export FORCE_UNSAFE_CONFIGURE=1
-                    cd ${WORKSPACE}/openwrt
-                    
-                    # Ensure toolchain is present (Should be fast if already done)
-                    make -j4 tools/install toolchain/install 2>&1 | tee ../logs/toolchain_build.log
-                '''
-            }
-        }
-
-        stage('6. Compile Rust (Targeted)') {
-            steps {
-                sh '''#!/bin/bash
-                    set -e
-                    set -o pipefail
-                    export FORCE_UNSAFE_CONFIGURE=1
+                    # TELL CARGO IT IS OKAY TO RUN AS ROOT
+                    export CARGO_HOME=${WORKSPACE}/openwrt/dl/cargo_home
+                    mkdir -p $CARGO_HOME
                     
                     cd ${WORKSPACE}/openwrt
                     
                     echo "=============================================="
-                    echo "=== STEP 6: COMPILING RUST (FORCE REBUILD) ==="
+                    echo "=== ATTEMPTING TO BUILD RUST ==="
                     echo "=============================================="
-                    echo "Cleaning Rust package to force Host-Compile..."
+                    echo "We cleaned the cache. This should trigger a download."
                     
-                    # 1. Clean Rust specifically
-                    make package/feeds/packages/rust/clean
+                    # We use -j1 V=s to capture everything.
+                    # If this fails, the '||' block below captures the logs.
                     
-                    echo "----------------------------------------------"
-                    echo "Now compiling Rust with Verbose logs..."
-                    echo "Using -j1 to prevent memory crashes."
-                    
-                    # 2. Compile Rust (Since we cleaned, this builds Host + Target)
-                    # We use 'tee' so you see the log on screen immediately.
-                    
-                    make package/feeds/packages/rust/compile -j1 V=s 2>&1 | tee ../logs/rust_verbose.log
-                    
-                    echo "✓ RUST COMPILED SUCCESSFULLY"
-                '''
-            }
-        }
-
-        stage('7. Compile Firmware (Resume)') {
-            steps {
-                sh '''#!/bin/bash
-                    set -e
-                    set -o pipefail
-                    export FORCE_UNSAFE_CONFIGURE=1
-                    
-                    cd ${WORKSPACE}/openwrt
-                    
-                    echo "=============================================="
-                    echo "=== STEP 7: RESUMING BUILD ==="
-                    echo "=============================================="
-                    echo "Since we did NOT clean, this will skip Node.js if it is already done."
-                    
-                    make -j1 world 2>&1 | tee ../logs/build_main.log
-                    
-                    echo "✓ FIRMWARE BUILD COMPLETE"
-                '''
-            }
-        }
-
-        stage('8. Archive') {
-            steps {
-                sh '''
-                    mkdir -p output/targets output/logs
-                    cp logs/*.log output/logs/ 2>/dev/null || true
-                    if [ -d openwrt/bin/targets ]; then
-                        cp -r openwrt/bin/targets/* output/targets/
+                    if ! make package/feeds/packages/rust/compile -j1 V=s > ../logs/rust_debug.log 2>&1; then
+                        echo ""
+                        echo "❌❌❌ RUST FAILED AGAIN ❌❌❌"
+                        echo "BUT NOW WE WILL SEE WHY."
+                        echo ""
+                        
+                        echo "=== 1. CHECKING CONSOLE OUTPUT ==="
+                        # Print the last 200 lines of what just happened
+                        tail -n 200 ../logs/rust_debug.log
+                        
+                        echo ""
+                        echo "=== 2. CHECKING INTERNAL OPENWRT LOGS ==="
+                        # OpenWrt hides the real error in logs/package/...
+                        # We find ANY text file in the rust log directory and print it.
+                        
+                        find logs/package/feeds/packages/rust -name "*.txt" -print -exec cat {} \;
+                        
+                        echo ""
+                        echo "=== END OF FORENSIC REPORT ==="
+                        exit 1
                     fi
+                    
+                    echo "✓ Rust compiled successfully!"
                 '''
-                archiveArtifacts artifacts: 'output/targets/**/*.img.gz', allowEmptyArchive: true
-                archiveArtifacts artifacts: 'output/logs/*.log', allowEmptyArchive: true
+            }
+        }
+
+        stage('4. Compile Firmware (Resume)') {
+            steps {
+                sh '''#!/bin/bash
+                    set -e
+                    export FORCE_UNSAFE_CONFIGURE=1
+                    cd ${WORKSPACE}/openwrt
+                    make -j1 world > ../logs/build_main.log 2>&1
+                '''
+            }
+        }
+        
+        stage('Archive') {
+            steps {
+                archiveArtifacts artifacts: 'output/targets/**/*.img.gz, output/logs/*.log', allowEmptyArchive: true
             }
         }
     }
