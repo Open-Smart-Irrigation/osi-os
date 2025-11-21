@@ -114,9 +114,13 @@ pipeline {
                         echo ""
                         echo "=== 2. CHECKING INTERNAL OPENWRT LOGS ==="
                         # OpenWrt hides the real error in logs/package/...
-                        # We find ANY text file in the rust log directory and print it.
+                        # We use '-exec cat {} +' which is safer than backslashes
                         
-                        find logs/package/feeds/packages/rust -name "*.txt" -print -exec cat {} \;
+                        if [ -d "logs/package/feeds/packages/rust" ]; then
+                            find logs/package/feeds/packages/rust -name "*.txt" -exec cat {} +
+                        else
+                            echo "No internal error logs found."
+                        fi
                         
                         echo ""
                         echo "=== END OF FORENSIC REPORT ==="
