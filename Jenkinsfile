@@ -71,14 +71,22 @@ pipeline {
                     # 4. Host Compile Step (Verbose) - THE CRASH SITE
                     echo ">>> Step 3: Compiling Rust Host Tools..."
                     
-                    # We use a trick here: 2>&1 redirects errors to standard output so Jenkins shows them
+                    # We use 2>&1 to force output to console
                     if ! make package/feeds/packages/rust/host-compile V=s 2>&1; then
                         echo ""
                         echo "❌❌❌ FAILED AT HOST-COMPILE STEP ❌❌❌"
                         echo "SEARCHING FOR HIDDEN LOGS..."
                         
-                        # If OpenWrt hid the log in a file, find it and print it
-                        find logs/package/feeds/packages/rust -name "*.txt" -exec echo "--- LOG FILE FOUND: {} ---" \; -exec cat {} \;
+                        # Safe syntax that works in Jenkins Groovy:
+                        if [ -d "logs/package/feeds/packages/rust" ]; then
+                            find logs/package/feeds/packages/rust -name "*.txt" | while read logfile; do
+                                echo "--- LOG FILE FOUND: $logfile ---"
+                                cat "$logfile"
+                                echo "--- END LOG FILE ---"
+                            done
+                        else
+                            echo "No internal log files found."
+                        fi
                         
                         exit 1
                     fi
