@@ -28,19 +28,14 @@ pipeline {
             steps {
                 sh '''
                     echo "=== Verifying Container Dependencies ==="
-                    # If these fail, you MUST rebuild your Docker image on the VPS
-                    
                     if ! command -v pkg-config &> /dev/null; then
                         echo "❌ CRITICAL ERROR: 'pkg-config' is missing!"
-                        echo "Rust cannot compile without it. Please update your Dockerfile and rebuild the container."
                         exit 1
                     fi
-                    
                     if ! command -v clang &> /dev/null; then
                         echo "❌ CRITICAL ERROR: 'clang' is missing!"
                         exit 1
                     fi
-                    
                     echo "✓ Docker environment looks good."
                 '''
             }
@@ -79,15 +74,18 @@ pipeline {
                     set -e
                     cd ${WORKSPACE}/openwrt
                     
-                    echo "=== Ensuring Rust Rebuilds ==="
-                    # We silently delete the stamp files so Make doesn't skip this step
-                    # This fixes the "Nothing to be done" error
+                    echo "=== Applying Rust Artifact Fix ==="
+                    # FIX: Disable downloading expired CI artifacts
+                    # This forces the build to compile LLVM from source instead of 404ing
+                    sed -i 's/llvm.download-ci-llvm=true/llvm.download-ci-llvm=false/g' feeds/packages/lang/rust/Makefile
                     
+                    echo "=== Ensuring Rust Rebuilds ==="
+                    # Wipe previous failed states to force the Makefile change to take effect
                     find staging_dir -path "*rust*" -name ".built" -delete
                     find staging_dir -path "*rust*" -name ".prepared" -delete
                     find build_dir -path "*rust*" -name ".built" -delete
                     
-                    # We also remove the host build directory to force a clean host compile
+                    # Remove the host build directory to force a clean host compile
                     rm -rf build_dir/host/rust*
                 '''
             }
@@ -100,9 +98,9 @@ pipeline {
                     export FORCE_UNSAFE_CONFIGURE=1
                     cd ${WORKSPACE}/openwrt
                     
-                    echo "=== Compiling Rust (Standard Mode) ==="
-                    # -j1 to save memory
-                    # V=s to see errors
+                    echo "=== Compiling Rust (Source Mode) ==="
+                    # Warning: This will take significantly longer (30-60 mins)
+                    # but it WILL work as long as you have 16GB+ RAM.
                     
                     if ! make package/feeds/packages/rust/compile -j1 V=s 2>&1 | tee ../logs/rust_verbose.log; then
                         echo ""
