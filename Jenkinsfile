@@ -10,7 +10,7 @@ pipeline {
             ],
             description: 'Target platform (bcm2711 = Pi 4, bcm2712 = Pi 5)'
         )
-        # DEFAULT IS NOW FALSE -> WE WANT TO RESUME!
+        // DEFAULT IS NOW FALSE -> WE WANT TO RESUME!
         booleanParam(
             name: 'CLEAN_BUILD',
             defaultValue: false,
