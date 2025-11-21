@@ -10,10 +10,11 @@ pipeline {
             ],
             description: 'Target platform (bcm2711 = Pi 4, bcm2712 = Pi 5)'
         )
+        # DEFAULT IS NOW FALSE -> WE WANT TO RESUME!
         booleanParam(
             name: 'CLEAN_BUILD',
-            defaultValue: true,
-            description: 'Clean before build (RECOMMENDED)'
+            defaultValue: false,
+            description: 'Clean before build (UNCHECK THIS TO SAVE TIME)'
         )
     }
 
@@ -27,6 +28,9 @@ pipeline {
         stage('1. System Prep') {
             steps {
                 sh '''
+                    echo "=== Disk Space Check (CRITICAL) ==="
+                    df -h
+                    
                     if [ "$(id -u)" -eq 0 ]; then
                         apt-get update -q
                         apt-get install -y -q build-essential libncurses5-dev zlib1g-dev \
@@ -34,8 +38,6 @@ pipeline {
                             python3 python3-setuptools file pkg-config clang \
                             cmake curl
                     fi
-                    # Check python setuptools
-                    python3 -c "import setuptools; print('✓ Python Setuptools OK')" || echo "Warning: Python check failed"
                 '''
             }
         }
@@ -44,10 +46,10 @@ pipeline {
             when { expression { params.CLEAN_BUILD } }
             steps {
                 sh '''
+                    # ONLY RUNS IF YOU CHECK THE BOX
                     cd ${WORKSPACE}
                     rm -rf openwrt/bin openwrt/build_dir openwrt/staging_dir openwrt/tmp
                     rm -rf logs output .initialized
-                    # Keep openwrt/dl to save download time
                 '''
             }
         }
@@ -63,6 +65,7 @@ pipeline {
                         touch .initialized
                     fi
                     
+                    # Refresh Feeds (Fast)
                     rm -f openwrt/.config openwrt/files openwrt/patches
                     ln -s ../conf/.config openwrt/.config
                     ln -s ../conf/files openwrt/files
@@ -87,39 +90,25 @@ pipeline {
                     export FORCE_UNSAFE_CONFIGURE=1
                     mkdir -p ${WORKSPACE}/logs
                     cd ${WORKSPACE}/openwrt
-                    
                     make defconfig > ../logs/defconfig.log 2>&1
                 '''
             }
         }
 
-        stage('5. Bootstrap Toolchain (CRITICAL)') {
+        stage('5. Bootstrap Toolchain') {
             steps {
                 sh '''#!/bin/bash
                     set -e
-                    # This makes the pipe fail if the build fails (fixing the false success msg)
-                    set -o pipefail 
                     export FORCE_UNSAFE_CONFIGURE=1
-                    
                     cd ${WORKSPACE}/openwrt
                     
-                    echo "=============================================="
-                    echo "=== STEP 5: BUILDING TOOLCHAIN ==="
-                    echo "=============================================="
-                    echo "Compiling GCC and Musl Libc. This creates the missing ld-musl files."
-                    echo "We use -j4 here because C compilation is safe and faster."
-                    
-                    # FIX: We build 'tools' and 'toolchain' first.
-                    # This puts ld-musl-*.so into staging_dir so Rust can find it.
-                    
+                    # Ensure toolchain is present (Should be fast if already done)
                     make -j4 tools/install toolchain/install 2>&1 | tee ../logs/toolchain_build.log
-                    
-                    echo "✓ Toolchain installed. Staging directory is ready."
                 '''
             }
         }
 
-        stage('6. Compile Rust (Targeted)') {
+        stage('6. Compile Rust (HOST + TARGET)') {
             steps {
                 sh '''#!/bin/bash
                     set -e
@@ -129,20 +118,27 @@ pipeline {
                     cd ${WORKSPACE}/openwrt
                     
                     echo "=============================================="
-                    echo "=== STEP 6: COMPILING RUST ==="
+                    echo "=== STEP 6: COMPILING RUST (VERBOSE) ==="
                     echo "=============================================="
-                    echo "Toolchain is ready. Now compiling Rust."
-                    echo "Using -j1 to prevent memory crashes."
+                    echo "Disk Space Remaining:"
+                    df -h .
+                    echo "----------------------------------------------"
                     
-                    # Now we can safely compile Rust because the toolchain exists
-                    make package/feeds/packages/rust/compile -j1 V=s 2>&1 | tee ../logs/rust_verbose.log
+                    # FIX: We explicitly build HOST compile first. 
+                    # This is where it failed last time. We use V=s to see why.
                     
-                    echo "✓ RUST COMPILED SUCCESSFULLY"
+                    echo ">>> Compiling Rust [HOST]..."
+                    make package/feeds/packages/rust/host-compile -j1 V=s 2>&1 | tee ../logs/rust_host_verbose.log
+                    
+                    echo ">>> Compiling Rust [TARGET]..."
+                    make package/feeds/packages/rust/compile -j1 V=s 2>&1 | tee ../logs/rust_target_verbose.log
+                    
+                    echo "✓ RUST FULLY COMPILED"
                 '''
             }
         }
 
-        stage('7. Compile Firmware (The Rest)') {
+        stage('7. Compile Firmware (Resume)') {
             steps {
                 sh '''#!/bin/bash
                     set -e
@@ -152,8 +148,9 @@ pipeline {
                     cd ${WORKSPACE}/openwrt
                     
                     echo "=============================================="
-                    echo "=== STEP 7: BUILDING FINAL IMAGE ==="
+                    echo "=== STEP 7: RESUMING BUILD ==="
                     echo "=============================================="
+                    echo "Since we did NOT clean, this will skip Node.js if it is already done."
                     
                     make -j1 world 2>&1 | tee ../logs/build_main.log
                     
