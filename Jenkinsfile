@@ -6,23 +6,27 @@ pipeline {
         booleanParam(name: 'CLEAN_BUILD', defaultValue: false, description: 'Leave UNCHECKED')
     }
 
+    options {
+        timestamps()
+        timeout(time: 12, unit: 'HOURS')
+    }
+
     stages {
         stage('1. Setup') {
             steps {
                 sh '''
-                    # Basic Prep
                     if [ "$(id -u)" -eq 0 ]; then
                         apt-get update -q
                         apt-get install -y -q build-essential libncurses5-dev zlib1g-dev \
                             gawk git gettext libssl-dev xsltproc rsync wget unzip \
                             python3 python3-setuptools file pkg-config clang \
                             cmake curl ca-certificates
+                        update-ca-certificates
                     fi
                     
                     cd ${WORKSPACE}
                     if [ ! -f .initialized ]; then git submodule update --init --recursive; touch .initialized; fi
                     
-                    # Link Configs
                     rm -f openwrt/.config openwrt/files openwrt/patches
                     ln -s ../conf/.config openwrt/.config
                     ln -s ../conf/files openwrt/files
@@ -40,59 +44,55 @@ pipeline {
             }
         }
 
-        stage('2. Rust Diagnostic') {
+        stage('2. Rust Repair') {
             steps {
                 sh '''#!/bin/bash
-                    cd ${WORKSPACE}/openwrt
+                    set -e
                     export FORCE_UNSAFE_CONFIGURE=1
+                    cd ${WORKSPACE}/openwrt
                     
                     echo "=============================================="
-                    echo "=== DIAGNOSTIC MODE: RUST HOST ==="
+                    echo "=== FIXING RUST BUILD STATE ==="
                     echo "=============================================="
                     
-                    # 1. Clean ONLY Rust
-                    echo ">>> Cleaning Rust..."
-                    make package/feeds/packages/rust/clean
+                    # 1. MANUALLY DELETE THE HOST BUILD
+                    # The standard 'make clean' was missing this folder, causing the fake success.
+                    echo "Nuking Rust build directories..."
+                    rm -rf build_dir/host/rust*
+                    rm -rf build_dir/target-*/rust*
                     
-                    # 2. Download Step (Verbose)
-                    echo ">>> Step 1: Downloading Rust Sources..."
-                    if ! make package/feeds/packages/rust/download V=s; then
-                        echo "❌ FAILED AT DOWNLOAD STEP"
-                        exit 1
+                    # 2. COMPILE (This time it MUST run because files are gone)
+                    echo ">>> Compiling Rust (This will take 30+ minutes)..."
+                    echo "If this fails, the error will be printed below."
+                    
+                    # We use the standard 'compile' target which automatically triggers host-compile
+                    if ! make package/feeds/packages/rust/compile -j1 V=s 2>&1; then
+                         echo ""
+                         echo "❌❌❌ RUST COMPILATION FAILED ❌❌❌"
+                         exit 1
                     fi
                     
-                    # 3. Prepare Step (Verbose) - Unzipping & Patching
-                    echo ">>> Step 2: Preparing/Unzipping Rust..."
-                    if ! make package/feeds/packages/rust/prepare V=s; then
-                        echo "❌ FAILED AT PREPARE STEP"
-                        exit 1
-                    fi
-                    
-                    # 4. Host Compile Step (Verbose) - THE CRASH SITE
-                    echo ">>> Step 3: Compiling Rust Host Tools..."
-                    
-                    # We use 2>&1 to force output to console
-                    if ! make package/feeds/packages/rust/host-compile V=s 2>&1; then
-                        echo ""
-                        echo "❌❌❌ FAILED AT HOST-COMPILE STEP ❌❌❌"
-                        echo "SEARCHING FOR HIDDEN LOGS..."
-                        
-                        # Safe syntax that works in Jenkins Groovy:
-                        if [ -d "logs/package/feeds/packages/rust" ]; then
-                            find logs/package/feeds/packages/rust -name "*.txt" | while read logfile; do
-                                echo "--- LOG FILE FOUND: $logfile ---"
-                                cat "$logfile"
-                                echo "--- END LOG FILE ---"
-                            done
-                        else
-                            echo "No internal log files found."
-                        fi
-                        
-                        exit 1
-                    fi
-                    
-                    echo "✓ Rust Host Compiled Successfully"
+                    echo "✓ Rust compiled successfully (Host + Target)"
                 '''
+            }
+        }
+
+        stage('3. Finish Firmware') {
+            steps {
+                sh '''#!/bin/bash
+                    set -e
+                    export FORCE_UNSAFE_CONFIGURE=1
+                    cd ${WORKSPACE}/openwrt
+                    
+                    echo "=== Building Final Image ==="
+                    make -j1 world 2>&1 | tee ../logs/build_final.log
+                '''
+            }
+        }
+        
+        stage('Archive') {
+            steps {
+                archiveArtifacts artifacts: 'output/targets/**/*.img.gz, output/logs/*.log', allowEmptyArchive: true
             }
         }
     }
