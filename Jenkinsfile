@@ -5,7 +5,7 @@ pipeline {
         choice(
             name: 'TARGET_ENV',
             choices: [
-                'full_raspberrypi_bcm27xx_bcm2712' // Defaulting to Pi 5 as per your logs
+                'full_raspberrypi_bcm27xx_bcm2712'
             ],
             description: 'Target platform'
         )
@@ -62,38 +62,7 @@ pipeline {
             }
         }
 
-        stage('3. NUCLEAR CLEAN (Rust Only)') {
-            steps {
-                sh '''#!/bin/bash
-                    set -e
-                    cd ${WORKSPACE}/openwrt
-                    
-                    echo "=========================================="
-                    echo "=== DELETING HIDDEN STAMP FILES ==="
-                    echo "=========================================="
-                    
-                    # 1. Use Make to clean (Best effort)
-                    make package/feeds/packages/rust/clean
-                    
-                    # 2. DELETE THE HIDDEN FILES (The actual fix)
-                    # These are the files that tell Make "Don't worry, I'm already done"
-                    
-                    echo "Finding and destroying rust stamp files..."
-                    find staging_dir -name ".built" -path "*rust*" -delete
-                    find staging_dir -name ".prepared" -path "*rust*" -delete
-                    find build_dir -name ".built" -path "*rust*" -delete
-                    
-                    # 3. Delete the build directories explicitly
-                    rm -rf build_dir/host/rust*
-                    rm -rf build_dir/target-*/rust*
-                    rm -rf feeds/packages/lang/rust/host-build
-                    
-                    echo "✓ Rust history has been erased."
-                '''
-            }
-        }
-
-        stage('4. Compile Rust (VERBOSE)') {
+        stage('3. FORCE Rust Rebuild') {
             steps {
                 sh '''#!/bin/bash
                     set -e
@@ -101,16 +70,23 @@ pipeline {
                     cd ${WORKSPACE}/openwrt
                     
                     echo "=========================================="
-                    echo "=== COMPILING RUST (Must take >10 mins) ==="
+                    echo "=== FORCING RUST REBUILD (Mode: -B) ==="
                     echo "=========================================="
                     
-                    # We use tee to show logs on screen.
-                    # If this fails, the error WILL be on the screen now.
+                    # 1. Clean artifacts
+                    make package/feeds/packages/rust/clean
                     
-                    if ! make package/feeds/packages/rust/compile -j1 V=s 2>&1 | tee ../logs/rust_verbose.log; then
+                    # 2. Touch the makefile (Tricks make into thinking it changed)
+                    touch feeds/packages/lang/rust/Makefile
+                    
+                    # 3. COMPILE WITH FORCE FLAG (-B)
+                    # -B: Unconditionally build all targets, ignoring timestamps.
+                    echo "Running make -B ... (This MUST rebuild now)"
+                    
+                    if ! make -B package/feeds/packages/rust/compile -j1 V=s 2>&1 | tee ../logs/rust_force.log; then
                         echo ""
                         echo "❌❌❌ RUST FAILED ❌❌❌"
-                        echo "The error should be visible above."
+                        echo "Error is above."
                         exit 1
                     fi
                     
@@ -119,7 +95,7 @@ pipeline {
             }
         }
 
-        stage('5. Finish Firmware') {
+        stage('4. Finish Firmware') {
             steps {
                 sh '''#!/bin/bash
                     set -e
