@@ -13,7 +13,7 @@ pipeline {
         booleanParam(
             name: 'CLEAN_BUILD',
             defaultValue: false,
-            description: 'Clean before build (UNCHECK THIS)'
+            description: 'Clean before build (LEAVE UNCHECKED)'
         )
     }
 
@@ -24,28 +24,19 @@ pipeline {
     }
 
     stages {
-        stage('1. Forensic Prep') {
+        stage('1. System Prep') {
             steps {
                 sh '''
-                    echo "=== 1. Installing Certificates & Tools ==="
+                    echo "=== System Dependencies ==="
                     if [ "$(id -u)" -eq 0 ]; then
                         apt-get update -q
-                        # ca-certificates is CRITICAL for Rust downloads
+                        # Ensure certificates and tools are present
                         apt-get install -y -q build-essential libncurses5-dev zlib1g-dev \
                             gawk git gettext libssl-dev xsltproc rsync wget unzip \
                             python3 python3-setuptools file pkg-config clang \
                             cmake curl ca-certificates
                         update-ca-certificates
                     fi
-                    
-                    echo "=== 2. PURGING RUST CACHE (The Fix) ==="
-                    cd ${WORKSPACE}/openwrt
-                    # FIX: Using 'rm -rf' to handle directories correctly
-                    echo "Deleting cached Rust/Cargo downloads..."
-                    rm -rf dl/rust* 
-                    rm -rf dl/carg*
-                    rm -rf build_dir/host/rust*
-                    rm -rf feeds/packages/lang/rust/host-build
                 '''
             }
         }
@@ -79,66 +70,51 @@ pipeline {
             }
         }
 
-        stage('3. Compile Rust (Forensic Mode)') {
+        stage('3. Force Rust Rebuild') {
             steps {
                 sh '''#!/bin/bash
                     set -e
-                    # ALLOW ROOT BUILD
                     export FORCE_UNSAFE_CONFIGURE=1
-                    # TELL CARGO IT IS OKAY TO RUN AS ROOT
-                    export CARGO_HOME=${WORKSPACE}/openwrt/dl/cargo_home
-                    mkdir -p $CARGO_HOME
-                    
                     cd ${WORKSPACE}/openwrt
                     
-                    echo "=============================================="
-                    echo "=== ATTEMPTING TO BUILD RUST ==="
-                    echo "=============================================="
-                    echo "We cleaned the cache. This should trigger a download."
+                    echo "=========================================="
+                    echo "=== STEP 3: FORCING RUST CLEAN & BUILD ==="
+                    echo "=========================================="
                     
-                    # We use -j1 V=s to capture everything.
-                    # If this fails, the '||' block below captures the logs.
+                    # 1. TELL MAKE TO CLEAN RUST
+                    # This updates the timestamps so it knows to rebuild
+                    echo "Cleaning Rust package..."
+                    make package/feeds/packages/rust/clean
                     
-                    if ! make package/feeds/packages/rust/compile -j1 V=s > ../logs/rust_debug.log 2>&1; then
-                        echo ""
-                        echo "❌❌❌ RUST FAILED AGAIN ❌❌❌"
-                        echo "BUT NOW WE WILL SEE WHY."
-                        echo ""
-                        
-                        echo "=== 1. CHECKING CONSOLE OUTPUT ==="
-                        # Print the last 200 lines of what just happened
-                        tail -n 200 ../logs/rust_debug.log
-                        
-                        echo ""
-                        echo "=== 2. CHECKING INTERNAL OPENWRT LOGS ==="
-                        # Safe syntax to find and cat files
-                        if [ -d "logs/package/feeds/packages/rust" ]; then
-                            find logs/package/feeds/packages/rust -name "*.txt" -exec cat {} +
-                        else
-                            echo "No internal error logs found."
-                        fi
-                        
-                        echo ""
-                        echo "=== END OF FORENSIC REPORT ==="
-                        exit 1
-                    fi
+                    # 2. COMPILE WITH LOGS ON SCREEN
+                    echo "Compiling Rust (This should take >15 mins)..."
+                    echo "If this finishes in 10 seconds, IT FAILED."
                     
-                    echo "✓ Rust compiled successfully!"
+                    # We pipe to 'tee' so we see it on the console AND save it
+                    make package/feeds/packages/rust/compile -j1 V=s 2>&1 | tee ../logs/rust_build.log
+                    
+                    echo "✓ Rust compilation finished."
                 '''
             }
         }
 
-        stage('4. Compile Firmware (Resume)') {
+        stage('4. Compile Firmware') {
             steps {
                 sh '''#!/bin/bash
                     set -e
                     export FORCE_UNSAFE_CONFIGURE=1
                     cd ${WORKSPACE}/openwrt
-                    make -j1 world > ../logs/build_main.log 2>&1
+                    
+                    echo "=========================================="
+                    echo "=== STEP 4: FINISHING BUILD ==="
+                    echo "=========================================="
+                    
+                    # We use 'tee' here too so we can see if it crashes
+                    make -j1 world 2>&1 | tee ../logs/build_main.log
                 '''
             }
         }
-        
+
         stage('Archive') {
             steps {
                 archiveArtifacts artifacts: 'output/targets/**/*.img.gz, output/logs/*.log', allowEmptyArchive: true
