@@ -26,16 +26,21 @@ pipeline {
     stages {
         stage('1. Verify Docker Tools') {
             steps {
-                sh '''
+                sh '''#!/bin/bash
                     echo "=== Verifying Container Dependencies ==="
-                    if ! command -v pkg-config &> /dev/null; then
+                    
+                    # Fixed: Use standard redirection or force bash
+                    if ! command -v pkg-config > /dev/null 2>&1; then
                         echo "❌ CRITICAL ERROR: 'pkg-config' is missing!"
+                        echo "Current PATH: $PATH"
                         exit 1
                     fi
-                    if ! command -v clang &> /dev/null; then
+                    
+                    if ! command -v clang > /dev/null 2>&1; then
                         echo "❌ CRITICAL ERROR: 'clang' is missing!"
                         exit 1
                     fi
+                    
                     echo "✓ Docker environment looks good."
                 '''
             }
