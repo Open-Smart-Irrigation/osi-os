@@ -1534,5 +1534,154 @@
         "af47b435520fda54"
       ]
     ]
+  },
+  {
+    "id": "api001tab",
+    "type": "tab",
+    "label": "React GUI API",
+    "disabled": false,
+    "info": "REST API endpoints for React GUI application",
+    "env": []
+  },
+  {
+    "id": "api001http",
+    "type": "http in",
+    "z": "api001tab",
+    "name": "GET /api/sensors",
+    "url": "/api/sensors",
+    "method": "get",
+    "upload": false,
+    "swaggerDoc": "",
+    "x": 160,
+    "y": 100,
+    "wires": [
+      [
+        "api001func"
+      ]
+    ]
+  },
+  {
+    "id": "api001func",
+    "type": "function",
+    "z": "api001tab",
+    "name": "List Sensors",
+    "func": "msg.payload = [\n  { id: 'sensor-1', name: 'Garden Zone A', location: 'North Garden' },\n  { id: 'sensor-2', name: 'Garden Zone B', location: 'South Garden' },\n  { id: 'sensor-3', name: 'Greenhouse', location: 'Greenhouse 1' },\n  { id: 'sensor-4', name: 'Lawn Area', location: 'Front Lawn' }\n];\n\nmsg.headers = {\n  'Content-Type': 'application/json',\n  'Access-Control-Allow-Origin': '*'\n};\n\nreturn msg;",
+    "outputs": 1,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 370,
+    "y": 100,
+    "wires": [
+      [
+        "api001resp"
+      ]
+    ]
+  },
+  {
+    "id": "api001resp",
+    "type": "http response",
+    "z": "api001tab",
+    "name": "Response",
+    "statusCode": "200",
+    "headers": {},
+    "x": 560,
+    "y": 100,
+    "wires": []
+  },
+  {
+    "id": "api002http",
+    "type": "http in",
+    "z": "api001tab",
+    "name": "GET /api/sensors/:id/current",
+    "url": "/api/sensors/:id/current",
+    "method": "get",
+    "upload": false,
+    "swaggerDoc": "",
+    "x": 190,
+    "y": 200,
+    "wires": [
+      [
+        "api002func"
+      ]
+    ]
+  },
+  {
+    "id": "api002func",
+    "type": "function",
+    "z": "api001tab",
+    "name": "Current Sensor Data",
+    "func": "const sensorId = msg.req.params.id;\n\n// Generate realistic dummy data\nconst baseHumidity = {\n  'sensor-1': 55,\n  'sensor-2': 48,\n  'sensor-3': 62,\n  'sensor-4': 45\n}[sensorId] || 50;\n\nconst baseFlow = {\n  'sensor-1': 12.5,\n  'sensor-2': 8.3,\n  'sensor-3': 15.2,\n  'sensor-4': 10.1\n}[sensorId] || 10;\n\nmsg.payload = {\n  humidity: baseHumidity + (Math.random() * 6 - 3),\n  flow: baseFlow + (Math.random() * 2 - 1),\n  temperature: 20 + (Math.random() * 8),\n  valveStatus: Math.random() > 0.5 ? 'open' : 'closed',\n  lastUpdate: new Date().toISOString()\n};\n\nmsg.headers = {\n  'Content-Type': 'application/json',\n  'Access-Control-Allow-Origin': '*'\n};\n\nreturn msg;",
+    "outputs": 1,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 440,
+    "y": 200,
+    "wires": [
+      [
+        "api002resp"
+      ]
+    ]
+  },
+  {
+    "id": "api002resp",
+    "type": "http response",
+    "z": "api001tab",
+    "name": "Response",
+    "statusCode": "200",
+    "headers": {},
+    "x": 660,
+    "y": 200,
+    "wires": []
+  },
+  {
+    "id": "api003http",
+    "type": "http in",
+    "z": "api001tab",
+    "name": "GET /api/sensors/:id/history",
+    "url": "/api/sensors/:id/history",
+    "method": "get",
+    "upload": false,
+    "swaggerDoc": "",
+    "x": 190,
+    "y": 300,
+    "wires": [
+      [
+        "api003func"
+      ]
+    ]
+  },
+  {
+    "id": "api003func",
+    "type": "function",
+    "z": "api001tab",
+    "name": "Historical Data",
+    "func": "const sensorId = msg.req.params.id;\nconst hours = parseInt(msg.req.query.hours) || 24;\n\nconst data = [];\nconst now = Date.now();\n\n// Base values per sensor\nconst baseHumidity = {\n  'sensor-1': 55,\n  'sensor-2': 48,\n  'sensor-3': 62,\n  'sensor-4': 45\n}[sensorId] || 50;\n\nconst baseFlow = {\n  'sensor-1': 12.5,\n  'sensor-2': 8.3,\n  'sensor-3': 15.2,\n  'sensor-4': 10.1\n}[sensorId] || 10;\n\nfor (let i = hours; i >= 0; i--) {\n  const timestamp = now - (i * 60 * 60 * 1000);\n  const date = new Date(timestamp);\n  \n  // Add some variation over time\n  const timeVariation = Math.sin(i / 12 * Math.PI) * 5;\n  \n  data.push({\n    timestamp: timestamp,\n    time: date.toLocaleTimeString('en-US', {\n      hour: '2-digit',\n      minute: '2-digit'\n    }),\n    humidity: baseHumidity + timeVariation + (Math.random() * 4 - 2),\n    flow: baseFlow + (Math.random() * 3 - 1.5)\n  });\n}\n\nmsg.payload = data;\nmsg.headers = {\n  'Content-Type': 'application/json',\n  'Access-Control-Allow-Origin': '*'\n};\n\nreturn msg;",
+    "outputs": 1,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 430,
+    "y": 300,
+    "wires": [
+      [
+        "api003resp"
+      ]
+    ]
+  },
+  {
+    "id": "api003resp",
+    "type": "http response",
+    "z": "api001tab",
+    "name": "Response",
+    "statusCode": "200",
+    "headers": {},
+    "x": 660,
+    "y": 300,
+    "wires": []
   }
 ]
