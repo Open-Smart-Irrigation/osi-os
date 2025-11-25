@@ -51,19 +51,19 @@ pipeline {
                     set -e
                     cd ${WORKSPACE}
                     if [ ! -f .initialized ]; then git submodule update --init --recursive; touch .initialized; fi
-                    
+
                     # Reset Configs
                     rm -f openwrt/.config openwrt/files openwrt/patches
                     ln -s ../conf/.config openwrt/.config
                     ln -s ../conf/files openwrt/files
                     ln -s ../conf/patches openwrt/patches
-                    
+
                     make QUILT_PATCHES=patches switch-env ENV=${TARGET_ENV}
-                    
+
                     # Fix Feeds Path
                     cp feeds.conf.default openwrt/feeds.conf.default
                     sed -i "s|/workdir|${WORKSPACE}|g" openwrt/feeds.conf.default
-                    
+
                     cd openwrt
                     ./scripts/feeds update -a
                     ./scripts/feeds install -a
@@ -72,7 +72,49 @@ pipeline {
             }
         }
 
-          stage('3. Prepare Rust (Auto-Fix)') {
+        stage('3. Build React GUI') {
+            steps {
+                sh '''#!/bin/bash
+                    set -e
+                    cd ${WORKSPACE}/web/react-gui
+
+                    echo "=== Building Open Smart Irrigation React Application ==="
+
+                    # Check if Node.js is available
+                    if ! command -v node > /dev/null 2>&1; then
+                        echo "❌ Node.js is not installed"
+                        exit 1
+                    fi
+
+                    # Check if npm is available
+                    if ! command -v npm > /dev/null 2>&1; then
+                        echo "❌ npm is not installed"
+                        exit 1
+                    fi
+
+                    echo "Node version: $(node --version)"
+                    echo "npm version: $(npm --version)"
+
+                    # Install dependencies
+                    echo "Installing dependencies..."
+                    npm install
+
+                    # Build the React application
+                    echo "Building React application..."
+                    npm run build
+
+                    # Verify build output
+                    if [ -f "${WORKSPACE}/feeds/chirpstack-openwrt-feed/apps/node-red/files/gui/index.html" ]; then
+                        echo "✓ React GUI built successfully"
+                    else
+                        echo "❌ Build failed - index.html not found"
+                        exit 1
+                    fi
+                '''
+            }
+        }
+
+        stage('4. Prepare Rust (Auto-Fix)') {
             steps {
                 sh '''#!/bin/bash
                     set -e
@@ -91,7 +133,7 @@ pipeline {
             }
         }
 
-        stage('4. Compile Rust') {
+        stage('5. Compile Rust') {
             steps {
                 sh '''#!/bin/bash
                     set -e
@@ -123,7 +165,7 @@ pipeline {
         }
 
 
-        stage('5. Finish Firmware') {
+        stage('6. Finish Firmware') {
             steps {
                 sh '''#!/bin/bash
                     set -e
