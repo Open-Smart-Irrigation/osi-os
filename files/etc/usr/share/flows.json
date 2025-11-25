@@ -8,22 +8,6 @@
         "env": []
     },
     {
-        "id": "45de7a5e05bac8c8",
-        "type": "tab",
-        "label": "irrigation control",
-        "disabled": false,
-        "info": "",
-        "env": []
-    },
-    {
-        "id": "7a350b04ebb9f802",
-        "type": "tab",
-        "label": "irrigation execution",
-        "disabled": false,
-        "info": "",
-        "env": []
-    },
-    {
         "id": "38bc75bc54561ece",
         "type": "group",
         "z": "0077890f0352ff63",
@@ -40,85 +24,14 @@
             "68233a96f1377c0c",
             "abda19b6ffedb281",
             "1a7c1e1774d13afe",
-            "030f9b950cb1806b",
-            "2c5ab8accc240bcd",
             "83d777b8cdc63fbd",
-            "aba0f58458a69ab7",
             "ab6a83b4f51d4343",
-            "cd5bcf26a7efa22c",
-            "3f6c57b7e0433339",
-            "623fa8b594e155dd"
+            "sqlite-node"
         ],
-        "x": 434,
+        "x": 254,
         "y": 99,
-        "w": 1492,
-        "h": 322
-    },
-    {
-        "id": "9c578ac834b92308",
-        "type": "group",
-        "z": "45de7a5e05bac8c8",
-        "style": {
-            "stroke": "#999999",
-            "stroke-opacity": "1",
-            "fill": "none",
-            "fill-opacity": "1",
-            "label": true,
-            "label-position": "nw",
-            "color": "#a4a4a4"
-        },
-        "nodes": [
-            "7578d39bfe6673aa",
-            "4062da995112e6be",
-            "9d3760de51de0e2d",
-            "a4790b511dc9f817",
-            "a93f5d9104c3ad6f",
-            "a41805a850d18162",
-            "75b420cf0c1db4e8",
-            "505d1c3958131fc1",
-            "477ce9bd716d0f30",
-            "6149adab9fd2d6b9",
-            "c60536338ac4cd5d",
-            "8f06d4e41c531760",
-            "cae735d4a1abe6bb",
-            "1fddb7c859826dd4",
-            "2a18c88ade15aac3",
-            "dc2f912708d8704c",
-            "96141fe95551e615",
-            "504c87d1ffa24b23",
-            "902109def7710b5b"
-        ],
-        "x": -6,
-        "y": 59,
-        "w": 1012,
-        "h": 722
-    },
-    {
-        "id": "be9e51133e241377",
-        "type": "group",
-        "z": "45de7a5e05bac8c8",
-        "style": {
-            "stroke": "#999999",
-            "stroke-opacity": "1",
-            "fill": "none",
-            "fill-opacity": "1",
-            "label": true,
-            "label-position": "nw",
-            "color": "#a4a4a4"
-        },
-        "nodes": [
-            "7633a3fe855c0c6a",
-            "339d6e8f4ad9b474",
-            "5db859392705cb5d",
-            "6c674428851c5ff6",
-            "4b720f8eb8eaa676",
-            "8cedb3dd19de3cab",
-            "e1213a1c538843a0"
-        ],
-        "x": 214,
-        "y": 799,
-        "w": 472,
-        "h": 322
+        "w": 1672,
+        "h": 142
     },
     {
         "id": "b0b19352dac3fb34",
@@ -148,34 +61,13 @@
         "sessionExpiry": ""
     },
     {
-        "id": "8a6b74c0.3c461",
-        "type": "mqtt-broker",
-        "name": "localhost:1883",
-        "broker": "192.168.1.51",
-        "port": "1883",
-        "clientid": "",
-        "autoConnect": false,
-        "usetls": false,
-        "protocolVersion": "5",
-        "keepalive": "60",
-        "cleansession": true,
-        "birthTopic": "",
-        "birthQos": "0",
-        "birthRetain": "false",
-        "birthPayload": "",
-        "birthMsg": {},
-        "closeTopic": "",
-        "closePayload": "",
-        "closeMsg": {},
-        "willTopic": "",
-        "willQos": "0",
-        "willRetain": "false",
-        "willPayload": "",
-        "willMsg": {},
-        "sessionExpiry": ""
+        "id": "7dbdb443aedb194b",
+        "type": "sqlitedb",
+        "db": "/srv/osi/sensor_data.db",
+        "mode": "RWC"
     },
     {
-        "id": "31bb671e50a559df",
+        "id": "6cbac061.124d8",
         "type": "ui_base",
         "theme": {
             "name": "theme-light",
@@ -196,8 +88,7 @@
                 "name": "Untitled Theme 1",
                 "default": "#4B7930",
                 "baseColor": "#4B7930",
-                "baseFont": "-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,Oxygen-Sans,Ubuntu,Cantarell,Helvetica Neue,sans-serif",
-                "reset": false
+                "baseFont": "-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,Oxygen-Sans,Ubuntu,Cantarell,Helvetica Neue,sans-serif"
             },
             "themeState": {
                 "base-color": {
@@ -249,16 +140,15 @@
                 "primary": "indigo",
                 "accents": "blue",
                 "warn": "red",
-                "background": "grey",
-                "palette": "light"
+                "background": "grey"
             }
         },
         "site": {
-            "name": "Open Smart Irrigation",
+            "name": "Smart Parks - OpenCollar",
             "hideToolbar": "false",
             "allowSwipe": "false",
             "lockMenu": "false",
-            "allowTempTheme": "false",
+            "allowTempTheme": "true",
             "dateFormat": "DD/MM/YYYY",
             "sizes": {
                 "sx": 48,
@@ -273,63 +163,12 @@
         }
     },
     {
-        "id": "cf38bc72a263815c",
-        "type": "ui_tab",
-        "name": "Irrigation Dashboard",
-        "icon": "dashboard",
-        "order": 1,
-        "disabled": false,
-        "hidden": false
-    },
-    {
-        "id": "2ffb630f556d9f7b",
-        "type": "ui_group",
-        "name": "Automated irrigation",
-        "tab": "cf38bc72a263815c",
-        "order": 1,
-        "disp": true,
-        "width": "6",
-        "collapse": false,
-        "className": ""
-    },
-    {
-        "id": "1c8b1d8afd284d32",
-        "type": "ui_link",
-        "name": "Documentation",
-        "link": "https://app.gitbook.com/o/2jeMdoVNESW8c2YjS05s/s/Amy4aeAV2E2f38wn0Asl/",
-        "icon": "open_in_browser",
-        "target": "newtab",
-        "order": 2
-    },
-    {
-        "id": "1e8c961555f76809",
-        "type": "ui_group",
-        "name": "Status",
-        "tab": "cf38bc72a263815c",
-        "order": 2,
-        "disp": true,
-        "width": "6",
-        "collapse": false,
-        "className": ""
-    },
-    {
-        "id": "bb148e1bdbf63db2",
-        "type": "ui_group",
-        "name": "Soil Moisture Monitor",
-        "tab": "cf38bc72a263815c",
-        "order": 3,
-        "disp": true,
-        "width": "10",
-        "collapse": false,
-        "className": ""
-    },
-    {
         "id": "68233a96f1377c0c",
         "type": "mqtt in",
         "z": "0077890f0352ff63",
         "g": "38bc75bc54561ece",
         "name": "KIWI",
-        "topic": "application/945c3652-8cdc-44ce-9a5d-eb146d626be2/device/647fda0000007f9b/#",
+        "topic": "application/64720b8b-abed-47c8-919e-a5ae40798ac7/device/647fda0000007f9b/#",
         "qos": "0",
         "datatype": "auto-detect",
         "broker": "b0b19352dac3fb34",
@@ -337,7 +176,7 @@
         "rap": true,
         "rh": 0,
         "inputs": 0,
-        "x": 510,
+        "x": 330,
         "y": 200,
         "wires": [
             [
@@ -352,10 +191,11 @@
         "g": "38bc75bc54561ece",
         "name": "up",
         "eventType": "up",
-        "x": 810,
+        "x": 630,
         "y": 200,
         "wires": [
             [
+                "51b3555464a77089",
                 "1a7c1e1774d13afe"
             ]
         ]
@@ -366,16 +206,18 @@
         "z": "0077890f0352ff63",
         "g": "38bc75bc54561ece",
         "name": "Process Data",
-        "func": "function convertHzToKPa(input_frequency) {\n    if (input_frequency > 6430) return 0;\n    if (input_frequency >= 4330 && input_frequency <= 6430) return 9 - (input_frequency - 4330) * 0.004286;\n    if (input_frequency >= 2820 && input_frequency <= 4330) return 15 - (input_frequency - 2820) * 0.003974;\n    if (input_frequency >= 1110 && input_frequency <= 2820) return 35 - (input_frequency - 1110) * 0.01170;\n    if (input_frequency >= 770 && input_frequency <= 1110) return 55 - (input_frequency - 770) * 0.05884;\n    if (input_frequency >= 600 && input_frequency <= 770) return 75 - (input_frequency - 600) * 0.1176;\n    if (input_frequency >= 485 && input_frequency <= 600) return 100 - (input_frequency - 485) * 0.2174;\n    if (input_frequency >= 293 && input_frequency <= 485) return 200 - (input_frequency - 293) * 0.5208;\n    if (input_frequency < 293) return 200;\n    return null;\n}\n\nfunction processAndStore(msg) {\n    try {\n        const data = msg.payload;\n        const now = new Date();\n\n        // Convert both frequency readings to kPa\n        const watermark1 = convertHzToKPa(data.object.input5_frequency);\n        const watermark2 = convertHzToKPa(data.object.input6_frequency);\n\n        // Create formatted data structure\n        const formattedData = {\n            timestamp: now.toISOString(),\n            readings: {\n                input5_frequency: data.object.input5_frequency,\n                watermark1: watermark1,\n                input6_frequency: data.object.input6_frequency,\n                watermark2: watermark2,\n                light_intensity: data.object.light_intensity || null\n            }\n        };\n\n        // Update node status with both moisture readings\n        node.status({\n            fill: \"blue\",\n            shape: \"dot\",\n            text: \"WM1: \" + watermark1.toFixed(2) + \" kPa, WM2: \" + watermark2.toFixed(2) + \" kPa\"\n        });\n\n        msg.formattedData = formattedData;\n        return msg;\n\n    } catch (error) {\n        node.error(\"Error processing message: \" + error.message);\n        return null;\n    }\n}\n\nreturn processAndStore(msg);",
+        "func": "function convertHzToKPa(input_frequency) {\n    if (typeof input_frequency !== \"number\" || isNaN(input_frequency)) {\n        return null;\n    }\n\n    if (input_frequency > 6430) return 0;\n    if (input_frequency >= 4330 && input_frequency <= 6430) return 9 - (input_frequency - 4330) * 0.004286;\n    if (input_frequency >= 2820 && input_frequency <= 4330) return 15 - (input_frequency - 2820) * 0.003974;\n    if (input_frequency >= 1110 && input_frequency <= 2820) return 35 - (input_frequency - 1110) * 0.01170;\n    if (input_frequency >= 770 && input_frequency <= 1110) return 55 - (input_frequency - 770) * 0.05884;\n    if (input_frequency >= 600 && input_frequency <= 770) return 75 - (input_frequency - 600) * 0.1176;\n    if (input_frequency >= 485 && input_frequency <= 600) return 100 - (input_frequency - 485) * 0.2174;\n    if (input_frequency >= 293 && input_frequency <= 485) return 200 - (input_frequency - 293) * 0.5208;\n    if (input_frequency < 293) return 200;\n    return null;\n}\n\nfunction processAndStore(msg) {\n    try {\n        const data = msg.payload;\n\n        if (!data || !data.deviceInfo || !data.object) {\n            node.error(\"Unexpected payload structure\");\n            return null;\n        }\n\n        const devEui = data.deviceInfo.devEui || \"\";\n        const deviceName = data.deviceInfo.deviceName || \"\";\n\n        // Prefer ChirpStack time if present, fall back to local time\n        let timestamp;\n        if (data.time) {\n            timestamp = new Date(data.time).toISOString();\n        } else {\n            timestamp = new Date().toISOString();\n        }\n\n        // Raw frequencies from KIWI\n        const f_wm1 = data.object.input5_frequency;\n        const f_wm2 = data.object.input6_frequency;\n\n        // Convert to kPa\n        const wm1_kpa = convertHzToKPa(f_wm1);\n        const wm2_kpa = convertHzToKPa(f_wm2);\n\n        const light_intensity =\n            (data.object.light_intensity !== undefined)\n                ? data.object.light_intensity\n                : null;\n\n        const formattedData = {\n            timestamp,\n            devEui,\n            deviceName,\n            readings: {\n                input5_frequency: f_wm1,\n                swt_wm1: wm1_kpa,\n                input6_frequency: f_wm2,\n                swt_wm2: wm2_kpa,\n                light_intensity: light_intensity\n            }\n        };\n\n        // Node status\n        const statusParts = [];\n        if (Number.isFinite(wm1_kpa)) {\n            statusParts.push(\"WM1: \" + wm1_kpa.toFixed(2) + \" kPa\");\n        }\n        if (Number.isFinite(wm2_kpa)) {\n            statusParts.push(\"WM2: \" + wm2_kpa.toFixed(2) + \" kPa\");\n        }\n\n        node.status({\n            fill: \"blue\",\n            shape: \"dot\",\n            text: statusParts.length ? statusParts.join(\" | \") : \"no WM data\"\n        });\n\n        msg.formattedData = formattedData;\n        return msg;\n\n    } catch (error) {\n        node.error(\"Error processing message: \" + error.message);\n        return null;\n    }\n}\n\nreturn processAndStore(msg);\n",
         "outputs": 1,
+        "timeout": "",
         "noerr": 0,
         "initialize": "",
         "finalize": "",
         "libs": [],
-        "x": 1000,
-        "y": 200,
+        "x": 860,
+        "y": 180,
         "wires": [
             [
+                "ab6a83b4f51d4343",
                 "sql-insert-function"
             ]
         ]
@@ -385,8 +227,9 @@
         "type": "function",
         "z": "0077890f0352ff63",
         "name": "Build SQL INSERT",
-        "func": "const data = msg.formattedData;\nconst readings = data.readings;\nconst timestamp = data.timestamp;\nconst swt_kpa = readings.watermark1 !== undefined ? readings.watermark1 : null;\nconst light_lux = readings.light_intensity !== undefined ? readings.light_intensity : null;\nconst sensor_id = 1; // Set this as needed\nlet columns = ['sensor_id', 'timestamp'];\nlet values = [sensor_id, timestamp];\nif (swt_kpa !== null) { columns.push('swt_kpa'); values.push(swt_kpa); }\nif (light_lux !== null) { columns.push('light_lux'); values.push(light_lux); }\nconst placeholders = values.map(() => '?').join(',');\nconst sql = `INSERT INTO sensor_data (${columns.join(',')}) VALUES (${placeholders})`;\nmsg.topic = sql;\nmsg.payload = values;\nreturn msg;",
+        "func": "const data = msg.formattedData;\n\nif (!data || !data.readings) {\n    node.error(\"formattedData missing on msg\");\n    return null;\n}\n\nconst devEui     = data.devEui || \"\";\nconst deviceName = data.deviceName || \"\";\nconst timestamp  = data.timestamp;\nconst readings   = data.readings;\n\nconst swt_wm1   = readings.swt_wm1;\nconst swt_wm2   = readings.swt_wm2;\nconst light_lux = readings.light_intensity;\n\n// Helper to convert JS values to SQL literals\nfunction sqlValue(v) {\n    if (v === null || v === undefined) return \"NULL\";\n    if (typeof v === \"number\") {\n        if (Number.isNaN(v)) return \"NULL\";\n        return v.toString();\n    }\n    // Treat everything else as text, escape single quotes\n    return \"'\" + String(v).replace(/'/g, \"''\") + \"'\";\n}\n\n// Build literal SQL, like in the golden example\nconst sql = `\nINSERT INTO sensor_data (dev_eui, device_name, timestamp, swt_wm1, swt_wm2, light_lux)\nVALUES (\n  ${sqlValue(devEui)},\n  ${sqlValue(deviceName)},\n  ${sqlValue(timestamp)},\n  ${sqlValue(swt_wm1)},\n  ${sqlValue(swt_wm2)},\n  ${sqlValue(light_lux)}\n);\n`.trim();\n\n// For sqlite: only msg.topic matters for the query\nmsg.topic = sql;\n\n// For debugging: keep a nice structured payload\nmsg.payload = {\n    dev_eui: devEui,\n    device_name: deviceName,\n    timestamp,\n    swt_wm1,\n    swt_wm2,\n    light_lux\n};\n\nmsg._source = \"kiwi_insert_literal\";\n\nnode.status({\n    fill: \"green\",\n    shape: \"dot\",\n    text: `SQL insert devEui=${devEui}`\n});\n\nreturn msg;\n",
         "outputs": 1,
+        "timeout": "",
         "noerr": 0,
         "initialize": "",
         "finalize": "",
@@ -395,23 +238,8 @@
         "y": 200,
         "wires": [
             [
-                "sqlite-node"
-            ]
-        ]
-    },
-    {
-        "id": "sqlite-node",
-        "type": "sqlite",
-        "z": "0077890f0352ff63",
-        "name": "Sensor DB Insert",
-        "database": "/srv/sensor_data.db",
-        "sqlquery": "msg.topic",
-        "sql": "",
-        "x": 1400,
-        "y": 200,
-        "wires": [
-            [
-                "aba0f58458a69ab7"
+                "sqlite-node",
+                "7ec890cb0b379fcf"
             ]
         ]
     },
@@ -425,8 +253,8 @@
         "tosidebar": true,
         "console": false,
         "tostatus": false,
-        "complete": "payload",
-        "targetType": "msg",
+        "complete": "true",
+        "targetType": "full",
         "statusVal": "",
         "statusType": "auto",
         "x": 1800,
@@ -452,48 +280,73 @@
         "wires": []
     },
     {
-        "id": "cd5bcf26a7efa22c",
-        "type": "mqtt in",
+        "id": "sqlite-node",
+        "type": "sqlite",
         "z": "0077890f0352ff63",
         "g": "38bc75bc54561ece",
-        "name": "STREGA",
-        "topic": "application/945c3652-8cdc-44ce-9a5d-eb146d626be2/device/0004a30b00e95c44/#",
-        "qos": "0",
-        "datatype": "auto-detect",
-        "broker": "b0b19352dac3fb34",
-        "nl": false,
-        "rap": true,
-        "rh": 0,
-        "inputs": 0,
-        "x": 520,
-        "y": 280,
+        "mydb": "7dbdb443aedb194b",
+        "sqlquery": "msg.topic",
+        "sql": "",
+        "name": "Sensor DB Insert",
+        "x": 1510,
+        "y": 200,
         "wires": [
             [
-                "3f6c57b7e0433339"
+                "83d777b8cdc63fbd"
             ]
         ]
     },
     {
-        "id": "3f6c57b7e0433339",
-        "type": "device event",
+        "id": "0c0c69ee3bb9fc63",
+        "type": "inject",
         "z": "0077890f0352ff63",
-        "g": "38bc75bc54561ece",
-        "name": "up",
-        "eventType": "up",
-        "x": 810,
-        "y": 280,
+        "name": "Init sensor_data table",
+        "props": [
+            {
+                "p": "payload"
+            },
+            {
+                "p": "topic",
+                "vt": "str"
+            }
+        ],
+        "repeat": "",
+        "crontab": "",
+        "once": false,
+        "onceDelay": 0.1,
+        "topic": "CREATE TABLE IF NOT EXISTS sensor_data (     id INTEGER PRIMARY KEY AUTOINCREMENT,     dev_eui TEXT,     device_name TEXT,     timestamp TEXT,     swt_wm1 REAL,     swt_wm2 REAL,     light_lux REAL );",
+        "payload": "",
+        "payloadType": "date",
+        "x": 740,
+        "y": 420,
         "wires": [
             [
-                "623fa8b594e155dd"
+                "sqlite-node"
             ]
         ]
     },
     {
-        "id": "623fa8b594e155dd",
+        "id": "7ec890cb0b379fcf",
         "type": "debug",
         "z": "0077890f0352ff63",
-        "g": "38bc75bc54561ece",
-        "name": "Debug STREGA",
+        "name": "Debug SQL",
+        "active": true,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "true",
+        "targetType": "full",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 1230,
+        "y": 380,
+        "wires": []
+    },
+    {
+        "id": "51b3555464a77089",
+        "type": "debug",
+        "z": "0077890f0352ff63",
+        "name": "debug raw data",
         "active": true,
         "tosidebar": true,
         "console": false,
@@ -502,1011 +355,134 @@
         "targetType": "msg",
         "statusVal": "",
         "statusType": "auto",
-        "x": 960,
-        "y": 380,
+        "x": 940,
+        "y": 320,
         "wires": []
     },
     {
-        "id": "7578d39bfe6673aa",
-        "type": "ui_switch",
-        "z": "45de7a5e05bac8c8",
-        "g": "9c578ac834b92308",
-        "name": "WM1 enable",
-        "label": "Enable Watermark 1",
-        "tooltip": "",
-        "group": "2ffb630f556d9f7b",
-        "order": 2,
-        "width": 0,
-        "height": 0,
-        "passthru": true,
-        "decouple": "false",
-        "topic": "WM1_enable",
-        "topicType": "str",
-        "style": "",
-        "onvalue": "true",
-        "onvalueType": "bool",
-        "onicon": "",
-        "oncolor": "",
-        "offvalue": "false",
-        "offvalueType": "bool",
-        "officon": "",
-        "offcolor": "",
-        "animate": false,
-        "className": "",
-        "x": 210,
-        "y": 140,
-        "wires": [
-            [
-                "9d3760de51de0e2d"
-            ]
-        ]
-    },
-    {
-        "id": "4062da995112e6be",
-        "type": "ui_switch",
-        "z": "45de7a5e05bac8c8",
-        "g": "9c578ac834b92308",
-        "name": "WM2 enable",
-        "label": "Enable Watermark 2",
-        "tooltip": "",
-        "group": "2ffb630f556d9f7b",
-        "order": 4,
-        "width": 0,
-        "height": 0,
-        "passthru": true,
-        "decouple": "false",
-        "topic": "WM2_enable",
-        "topicType": "str",
-        "style": "",
-        "onvalue": "true",
-        "onvalueType": "bool",
-        "onicon": "",
-        "oncolor": "",
-        "offvalue": "false",
-        "offvalueType": "bool",
-        "officon": "",
-        "offcolor": "",
-        "animate": false,
-        "className": "",
-        "x": 210,
-        "y": 240,
-        "wires": [
-            [
-                "9d3760de51de0e2d"
-            ]
-        ]
-    },
-    {
-        "id": "9d3760de51de0e2d",
-        "type": "function",
-        "z": "45de7a5e05bac8c8",
-        "g": "9c578ac834b92308",
-        "name": "process settings",
-        "func": "// Debug incoming message\nnode.log(\"Received message - Topic: \" + msg.topic + \", Payload: \" + msg.payload);\n\nlet settings = global.get('irrigationSettings');\n\n// Ensure irrigation object exists\nif (!settings.irrigation) {\n    settings.irrigation = {\n        times: [],\n        duration: 20\n    };\n}\n\n// Validate numeric inputs (trigger, depth, duration)\nif (msg.topic === 'WM1_trigger' || msg.topic === 'WM2_trigger' ||\n    msg.topic === 'WM1_depth' || msg.topic === 'WM2_depth' ||\n    msg.topic === 'irrigation_duration') {\n\n    let value = Number(msg.payload);\n    if (isNaN(value)) {\n        node.status({ fill: \"red\", shape: \"ring\", text: \"Not a number: \" + msg.payload });\n        return null;\n    }\n\n    // Check ranges\n    if (msg.topic.includes('trigger')) {\n        if (value < 0 || value > 200) {\n            node.status({ fill: \"red\", shape: \"ring\", text: \"Trigger out of range (0-200): \" + value });\n            return null;\n        }\n    } else if (msg.topic.includes('depth')) {\n        if (value < 0 || value > 500) {\n            node.status({ fill: \"red\", shape: \"ring\", text: \"Depth out of range (0-100): \" + value });\n            return null;\n        }\n    } else if (msg.topic === 'irrigation_duration') {\n        if (value < 1 || value > 120) {\n            node.status({ fill: \"red\", shape: \"ring\", text: \"Duration out of range (1-60): \" + value });\n            return null;\n        }\n    }\n    msg.payload = Math.round(value);\n}\n\n// Validate irrigation time\nif (msg.topic === 'add_irrigation_time') {\n    // Debug log\n    node.log(\"Time validation - Received: '\" + msg.payload + \"' Type: \" + typeof msg.payload);\n\n    const timeString = String(msg.payload).trim();\n\n    // Time format regex: accepts \"HH:mm\" or \"H:mm\"\n    const timeRegex = /^([0-9]|0[0-9]|1[0-9]|2[0-3]):([0-5][0-9])$/;\n\n    if (!timeRegex.test(timeString)) {\n        node.log(\"Time validation failed for: \" + timeString);\n        return null;\n    }\n\n    // Format time to ensure consistent HH:mm format\n    const [hours, minutes] = timeString.split(':');\n    msg.payload = `${hours.padStart(2, '0')}:${minutes}`;\n    node.log(\"Time validation passed: \" + msg.payload);\n}\n\n// Update settings based on which input was changed\nswitch (msg.topic) {\n    case 'WM1_enable':\n        settings.watermark1.enabled = Boolean(msg.payload);\n        node.status({ fill: \"blue\", shape: \"dot\", text: \"WM1 Installed: \" + msg.payload });\n        break;\n    case 'WM2_enable':\n        settings.watermark2.enabled = Boolean(msg.payload);\n        node.status({ fill: \"blue\", shape: \"dot\", text: \"WM2 Installed: \" + msg.payload });\n        break;\n    case 'WM1_trigger':\n        settings.watermark1.trigger = msg.payload;\n        node.status({ fill: \"blue\", shape: \"dot\", text: \"WM1 Trigger: \" + msg.payload + \" kPa\" });\n        break;\n    case 'WM2_trigger':\n        settings.watermark2.trigger = msg.payload;\n        node.status({ fill: \"blue\", shape: \"dot\", text: \"WM2 Trigger: \" + msg.payload + \" kPa\" });\n        break;\n    case 'WM1_depth':\n        settings.watermark1.depth = msg.payload;\n        node.status({ fill: \"blue\", shape: \"dot\", text: \"WM1 Depth: \" + msg.payload + \" cm\" });\n        break;\n    case 'WM2_depth':\n        settings.watermark2.depth = msg.payload;\n        node.status({ fill: \"blue\", shape: \"dot\", text: \"WM2 Depth: \" + msg.payload + \" cm\" });\n        break;\n    case 'add_irrigation_time':\n        if (!settings.irrigation.times.includes(msg.payload)) {\n            settings.irrigation.times.push(msg.payload);\n            settings.irrigation.times.sort();\n            node.status({ fill: \"blue\", shape: \"dot\", text: \"Added time: \" + msg.payload });\n\n            // Save settings\n            global.set('irrigationSettings', settings);\n\n            // Return both template update and schedule update\n            return [\n                {  // First output: for template and debug\n                    topic: msg.topic,\n                    payload: settings,\n                    lastChanged: {\n                        topic: msg.topic,\n                        value: msg.payload,\n                        time: new Date().toISOString()\n                    }\n                },\n                {  // Second output: for file save\n                    payload: JSON.stringify(settings, null, 2),\n                    filename: '/data/irrigation/settings.json'\n                }\n            ];\n        }\n        break;\n\n    case 'delete_irrigation_time':\n        // Save settings\n        global.set('irrigationSettings', msg.payload);\n        node.status({ fill: \"blue\", shape: \"dot\", text: \"Updated times\" });\n\n        return [\n           {  // First output: for template and debug\n                topic: delete_irrigation_time,\n               payload: msg.payload,\n               lastChanged: msg.lastChanged\n           },\n            {  // Second output: for file save\n                payload: JSON.stringify(msg.payload, null, 2),\n                filename: '/data/irrigation/settings.json'\n            }\n        ];\n        break;\n    default:\n        node.status({ fill: \"yellow\", shape: \"ring\", text: \"Unknown topic: \" + msg.topic });\n        return null;\n}\n\n// Store updated settings\nglobal.set('irrigationSettings', settings);\n\n// Return array of messages\nreturn [\n    {  // First output: for template and debug\n        topic: msg.topic,\n        payload: settings,\n        lastChanged: {\n            topic: msg.topic,\n            value: msg.payload,\n            time: new Date().toISOString()\n        }\n    },\n    {  // Second output: for file save\n        payload: JSON.stringify(settings, null, 2),\n        filename: '/data/irrigation/settings.json'\n    }\n];",
-        "outputs": 1,
-        "noerr": 0,
-        "initialize": "let settings = global.get('irrigationSettings');\nif (!settings) {\n    settings = {\n        watermark1: {\n            enabled: true,\n            trigger: 25,\n            depth: 30  // cm\n        },\n        watermark2: {\n            enabled: false,\n            trigger: 35,\n            depth: 60  // cm\n        },\n        irrigation: {\n            times: [],\n            duration: 20  // min\n        }\n    };\n    global.set('irrigationSettings', settings);\n}",
-        "finalize": "// Clear status on stop\nnode.status({});",
-        "libs": [],
-        "x": 600,
-        "y": 540,
-        "wires": [
-            [
-                "75b420cf0c1db4e8",
-                "902109def7710b5b",
-                "a41805a850d18162",
-                "504c87d1ffa24b23",
-                "96141fe95551e615"
-            ]
-        ]
-    },
-    {
-        "id": "a4790b511dc9f817",
-        "type": "ui_text_input",
-        "z": "45de7a5e05bac8c8",
-        "g": "9c578ac834b92308",
-        "name": "WM1 Trigger",
-        "label": "Trigger value Watermark 1 (kPa)",
-        "tooltip": "Enter the soil moisture tension in kPa to trigger irrigation.",
-        "group": "2ffb630f556d9f7b",
-        "order": 3,
-        "width": 0,
-        "height": 0,
-        "passthru": true,
-        "mode": "number",
-        "delay": 300,
-        "topic": "WM1_trigger",
-        "sendOnBlur": true,
-        "className": "",
-        "topicType": "str",
-        "x": 210,
-        "y": 200,
-        "wires": [
-            [
-                "9d3760de51de0e2d"
-            ]
+        "id": "35275fd208c05a60",
+        "type": "inject",
+        "z": "0077890f0352ff63",
+        "name": "show schema",
+        "props": [
+            {
+                "p": "payload"
+            },
+            {
+                "p": "topic",
+                "vt": "str"
+            }
         ],
-        "icon": "font-awesome/fa-umbrella"
-    },
-    {
-        "id": "a93f5d9104c3ad6f",
-        "type": "ui_text_input",
-        "z": "45de7a5e05bac8c8",
-        "g": "9c578ac834b92308",
-        "name": "WM2 Trigger",
-        "label": "Trigger value Watermark 2 (kPa)",
-        "tooltip": "Enter the soil moisture tension in kPa to trigger irrigation.",
-        "group": "2ffb630f556d9f7b",
-        "order": 5,
-        "width": 0,
-        "height": 0,
-        "passthru": true,
-        "mode": "number",
-        "delay": 300,
-        "topic": "WM2_trigger",
-        "sendOnBlur": true,
-        "className": "",
-        "topicType": "str",
-        "x": 210,
-        "y": 300,
+        "repeat": "",
+        "crontab": "",
+        "once": false,
+        "onceDelay": 0.1,
+        "topic": "PRAGMA table_info(sensor_data);",
+        "payload": "",
+        "payloadType": "date",
+        "x": 670,
+        "y": 640,
         "wires": [
             [
-                "9d3760de51de0e2d"
+                "sqlite-node"
             ]
-        ],
-        "icon": "font-awesome/fa-umbrella"
-    },
-    {
-        "id": "a41805a850d18162",
-        "type": "debug",
-        "z": "45de7a5e05bac8c8",
-        "g": "9c578ac834b92308",
-        "name": "settings debug",
-        "active": true,
-        "tosidebar": true,
-        "console": false,
-        "tostatus": false,
-        "complete": "true",
-        "targetType": "full",
-        "statusVal": "",
-        "statusType": "auto",
-        "x": 880,
-        "y": 380,
-        "wires": []
-    },
-    {
-        "id": "75b420cf0c1db4e8",
-        "type": "file",
-        "z": "45de7a5e05bac8c8",
-        "g": "9c578ac834b92308",
-        "name": "save settings",
-        "filename": "/data/irrigation/settings.json",
-        "filenameType": "str",
-        "appendNewline": false,
-        "createDir": true,
-        "overwriteFile": "true",
-        "encoding": "utf8",
-        "x": 890,
-        "y": 460,
-        "wires": [
-            []
         ]
     },
     {
-        "id": "505d1c3958131fc1",
+        "id": "5127ef059e4ac72a",
+        "type": "inject",
+        "z": "0077890f0352ff63",
+        "name": "show rows",
+        "props": [
+            {
+                "p": "payload"
+            },
+            {
+                "p": "topic",
+                "vt": "str"
+            }
+        ],
+        "repeat": "",
+        "crontab": "",
+        "once": false,
+        "onceDelay": 0.1,
+        "topic": "SELECT * FROM sensor_data WHERE dev_eui IS NOT NULL ORDER BY id DESC LIMIT 5;",
+        "payload": "",
+        "payloadType": "date",
+        "x": 1040,
+        "y": 640,
+        "wires": [
+            [
+                "sqlite-node"
+            ]
+        ]
+    },
+    {
+        "id": "667d4b53415ee240",
+        "type": "http in",
+        "z": "0077890f0352ff63",
+        "name": "Database Download Endpoint",
+        "url": "/download/database",
+        "method": "get",
+        "upload": false,
+        "swaggerDoc": "",
+        "x": 540,
+        "y": 740,
+        "wires": [
+            [
+                "9263de49d5c9beb0"
+            ]
+        ]
+    },
+    {
+        "id": "9263de49d5c9beb0",
         "type": "file in",
-        "z": "45de7a5e05bac8c8",
-        "g": "9c578ac834b92308",
-        "name": "load settings",
-        "filename": "/data/irrigation/settings.json",
+        "z": "0077890f0352ff63",
+        "name": "Read Database File",
+        "filename": "/srv/osi/sensor_data.db",
         "filenameType": "str",
-        "format": "utf8",
+        "format": "",
         "chunk": false,
         "sendError": false,
         "encoding": "none",
         "allProps": false,
-        "x": 90,
-        "y": 720,
-        "wires": [
-            [
-                "477ce9bd716d0f30"
-            ]
-        ]
-    },
-    {
-        "id": "477ce9bd716d0f30",
-        "type": "function",
-        "z": "45de7a5e05bac8c8",
-        "g": "9c578ac834b92308",
-        "name": "initialize settings",
-        "func": "if (msg.payload) {\n    try {\n        // Try to load saved settings\n        const savedSettings = JSON.parse(msg.payload);\n        global.set('irrigationSettings', savedSettings);\n        node.status({ fill: \"green\", shape: \"dot\", text: \"Settings loaded\" });\n    } catch (error) {\n        node.error(\"Error loading settings: \" + error.message);\n        node.status({ fill: \"yellow\", shape: \"ring\", text: \"Using default settings\" });\n    }\n}\nreturn msg;",
-        "outputs": 1,
-        "noerr": 0,
-        "initialize": "// Initialize default settings\nlet settings = {\n    watermark1: {\n        enabled: true,\n        trigger: 25\n    },\n    watermark2: {\n        enabled: false,\n        trigger: 35\n    }\n};\n\n// Store default settings globally\nglobal.set('irrigationSettings', settings);",
-        "finalize": "// Clear status on stop\nnode.status({});",
-        "libs": [],
-        "x": 280,
+        "x": 840,
         "y": 740,
         "wires": [
-            []
-        ]
-    },
-    {
-        "id": "6149adab9fd2d6b9",
-        "type": "ui_text",
-        "z": "45de7a5e05bac8c8",
-        "g": "9c578ac834b92308",
-        "group": "2ffb630f556d9f7b",
-        "order": 1,
-        "width": 0,
-        "height": 0,
-        "name": "text_sensor_installation",
-        "label": "Sensor Installation",
-        "format": "{{msg.payload}}",
-        "layout": "row-center",
-        "className": "",
-        "style": true,
-        "font": "",
-        "fontSize": 16,
-        "color": "#000000",
-        "x": 170,
-        "y": 100,
-        "wires": []
-    },
-    {
-        "id": "c60536338ac4cd5d",
-        "type": "ui_text",
-        "z": "45de7a5e05bac8c8",
-        "g": "9c578ac834b92308",
-        "group": "2ffb630f556d9f7b",
-        "order": 6,
-        "width": 0,
-        "height": 0,
-        "name": "text_sensor_depth",
-        "label": "Sensor Depth",
-        "format": "{{msg.payload}}",
-        "layout": "row-center",
-        "className": "",
-        "style": true,
-        "font": "",
-        "fontSize": 16,
-        "color": "#000000",
-        "x": 190,
-        "y": 360,
-        "wires": []
-    },
-    {
-        "id": "8f06d4e41c531760",
-        "type": "ui_text",
-        "z": "45de7a5e05bac8c8",
-        "g": "9c578ac834b92308",
-        "group": "2ffb630f556d9f7b",
-        "order": 9,
-        "width": 0,
-        "height": 0,
-        "name": "text_irrigation_times",
-        "label": "Irrigation Times",
-        "format": "{{msg.payload}}",
-        "layout": "row-center",
-        "className": "",
-        "style": true,
-        "font": "",
-        "fontSize": 16,
-        "color": "#000000",
-        "x": 180,
-        "y": 480,
-        "wires": []
-    },
-    {
-        "id": "cae735d4a1abe6bb",
-        "type": "ui_text_input",
-        "z": "45de7a5e05bac8c8",
-        "g": "9c578ac834b92308",
-        "name": "depth_watermark1",
-        "label": "Watermark 1 Depth (cm)",
-        "tooltip": "Enter the depth of the installed sensor in cm. ",
-        "group": "2ffb630f556d9f7b",
-        "order": 7,
-        "width": 0,
-        "height": 0,
-        "passthru": true,
-        "mode": "number",
-        "delay": 300,
-        "topic": "WM1_depth",
-        "sendOnBlur": true,
-        "className": "",
-        "topicType": "str",
-        "x": 190,
-        "y": 400,
-        "wires": [
             [
-                "9d3760de51de0e2d"
+                "567a64614ffc1882"
             ]
         ]
     },
     {
-        "id": "1fddb7c859826dd4",
-        "type": "ui_text_input",
-        "z": "45de7a5e05bac8c8",
-        "g": "9c578ac834b92308",
-        "name": "depth_watermark2",
-        "label": "Watermark 2 Depth (cm)",
-        "tooltip": "Enter the depth of the installed sensor in cm. ",
-        "group": "2ffb630f556d9f7b",
-        "order": 8,
-        "width": 0,
-        "height": 0,
-        "passthru": true,
-        "mode": "number",
-        "delay": 300,
-        "topic": "WM2_depth",
-        "sendOnBlur": true,
-        "className": "",
-        "topicType": "str",
-        "x": 190,
-        "y": 440,
-        "wires": [
-            [
-                "9d3760de51de0e2d"
-            ]
-        ]
-    },
-    {
-        "id": "2a18c88ade15aac3",
-        "type": "ui_text_input",
-        "z": "45de7a5e05bac8c8",
-        "g": "9c578ac834b92308",
-        "name": "irrigation_times",
-        "label": "Add Irrigation Time",
-        "tooltip": "Enter irrigation times in 24h format (e.g., 07:00, 19:30)",
-        "group": "2ffb630f556d9f7b",
-        "order": 10,
-        "width": 0,
-        "height": 0,
-        "passthru": true,
-        "mode": "text",
-        "delay": "100",
-        "topic": "add_irrigation_time",
-        "sendOnBlur": true,
-        "className": "",
-        "topicType": "str",
-        "x": 200,
-        "y": 520,
-        "wires": [
-            [
-                "9d3760de51de0e2d"
-            ]
-        ]
-    },
-    {
-        "id": "dc2f912708d8704c",
-        "type": "ui_text_input",
-        "z": "45de7a5e05bac8c8",
-        "g": "9c578ac834b92308",
-        "name": "irrigation_duration",
-        "label": "Irrigation duration (min)",
-        "tooltip": "Enter the irrigation duration (valve opening) in minutes. ",
-        "group": "2ffb630f556d9f7b",
-        "order": 12,
-        "width": 0,
-        "height": 0,
-        "passthru": true,
-        "mode": "number",
-        "delay": 300,
-        "topic": "irrigation_duration",
-        "sendOnBlur": true,
-        "className": "",
-        "topicType": "str",
-        "x": 190,
-        "y": 560,
-        "wires": [
-            [
-                "9d3760de51de0e2d"
-            ]
-        ]
-    },
-    {
-        "id": "96141fe95551e615",
-        "type": "ui_template",
-        "z": "45de7a5e05bac8c8",
-        "g": "9c578ac834b92308",
-        "group": "2ffb630f556d9f7b",
-        "name": "irrigation_times",
-        "order": 11,
-        "width": "6",
-        "height": "3",
-        "format": "<div style=\"padding: 10px; background: #f5f5f5; border-radius: 5px;\">\n    <div style=\"margin: 10px 0; padding: 5px;\">\n        <b>Irrigation Times:</b>\n        <div ng-repeat=\"time in msg.payload.irrigation.times track by $index\"\n            style=\"margin: 5px 0; padding: 5px; background: white; border-radius: 3px; display: flex; justify-content: space-between; align-items: center;\">\n            <span>{{time}}</span>\n            <md-button class=\"md-raised md-warn\" ng-click=\"send({\n                          topic: 'delete_irrigation_time',\n                          payload: time\n                      });\" style=\"min-width: 60px; margin: 0 0 0 10px;\">\n                Remove\n            </md-button>\n        </div>\n        <div ng-if=\"!msg.payload.irrigation.times.length\" style=\"color: #666; font-style: italic; padding: 10px 0;\">\n            No irrigation times set\n        </div>\n    </div>\n</div>",
-        "storeOutMessages": true,
-        "fwdInMessages": true,
-        "resendOnRefresh": true,
-        "templateScope": "local",
-        "className": "",
-        "x": 580,
-        "y": 620,
-        "wires": [
-            [
-                "9d3760de51de0e2d"
-            ]
-        ]
-    },
-    {
-        "id": "504c87d1ffa24b23",
-        "type": "link out",
-        "z": "45de7a5e05bac8c8",
-        "g": "9c578ac834b92308",
-        "name": "give times",
-        "mode": "link",
-        "links": [
-            "c4340a38446f25b7"
-        ],
-        "x": 815,
-        "y": 540,
-        "wires": []
-    },
-    {
-        "id": "902109def7710b5b",
-        "type": "ui_ui_control",
-        "z": "45de7a5e05bac8c8",
-        "g": "9c578ac834b92308",
-        "name": "refresh dashboard",
-        "events": "all",
-        "x": 810,
-        "y": 600,
-        "wires": [
-            []
-        ]
-    },
-    {
-        "id": "7633a3fe855c0c6a",
-        "type": "ui_gauge",
-        "z": "45de7a5e05bac8c8",
-        "g": "be9e51133e241377",
-        "name": "",
-        "group": "1e8c961555f76809",
-        "order": 3,
-        "width": 0,
-        "height": 0,
-        "gtype": "donut",
-        "title": "Soil Moisture Watermark 1",
-        "label": "kPa",
-        "format": "{{value}}",
-        "min": 0,
-        "max": "200",
-        "colors": [
-            "#00b500",
-            "#e6e600",
-            "#ca3838"
-        ],
-        "seg1": "20",
-        "seg2": "50",
-        "diff": false,
-        "className": "",
-        "x": 540,
-        "y": 960,
-        "wires": []
-    },
-    {
-        "id": "339d6e8f4ad9b474",
-        "type": "ui_gauge",
-        "z": "45de7a5e05bac8c8",
-        "g": "be9e51133e241377",
-        "name": "",
-        "group": "1e8c961555f76809",
-        "order": 4,
-        "width": 0,
-        "height": 0,
-        "gtype": "donut",
-        "title": "Soil Moisture Watermark 2",
-        "label": "kPa",
-        "format": "{{value}}",
-        "min": 0,
-        "max": "200",
-        "colors": [
-            "#00b500",
-            "#e6e600",
-            "#ca3838"
-        ],
-        "seg1": "20",
-        "seg2": "50",
-        "diff": false,
-        "className": "",
-        "x": 540,
-        "y": 1020,
-        "wires": []
-    },
-    {
-        "id": "5db859392705cb5d",
-        "type": "ui_text",
-        "z": "45de7a5e05bac8c8",
-        "g": "be9e51133e241377",
-        "group": "1e8c961555f76809",
-        "order": 1,
-        "width": 0,
-        "height": 0,
-        "name": "",
-        "label": "Temperature: 22 °C",
-        "format": "{{msg.payload}}",
-        "layout": "row-spread",
-        "className": "",
-        "style": false,
-        "font": "",
-        "fontSize": 16,
-        "color": "#000000",
-        "x": 510,
-        "y": 900,
-        "wires": [],
-        "icon": "font-awesome/fa-thermometer"
-    },
-    {
-        "id": "6c674428851c5ff6",
-        "type": "ui_text",
-        "z": "45de7a5e05bac8c8",
-        "g": "be9e51133e241377",
-        "group": "1e8c961555f76809",
-        "order": 2,
-        "width": 0,
-        "height": 0,
-        "name": "",
-        "label": "Humidity: 67%",
-        "format": "{{msg.payload}}",
-        "layout": "row-spread",
-        "className": "",
-        "style": false,
-        "font": "",
-        "fontSize": 16,
-        "color": "#000000",
-        "x": 520,
-        "y": 840,
-        "wires": [],
-        "icon": "font-awesome/fa-cloud"
-    },
-    {
-        "id": "4b720f8eb8eaa676",
-        "type": "ui_text",
-        "z": "45de7a5e05bac8c8",
-        "g": "be9e51133e241377",
-        "group": "1e8c961555f76809",
-        "order": 5,
-        "width": 0,
-        "height": 0,
-        "name": "",
-        "label": "Valve Status: Closed",
-        "format": "{{msg.payload}}",
-        "layout": "row-spread",
-        "className": "",
-        "style": false,
-        "font": "",
-        "fontSize": 16,
-        "color": "#000000",
-        "x": 500,
-        "y": 1080,
-        "wires": []
-    },
-    {
-        "id": "8a66531f68d2d59d",
+        "id": "567a64614ffc1882",
         "type": "function",
-        "z": "45de7a5e05bac8c8",
-        "name": "send message ",
-        "func": "\nreturn msg;",
+        "z": "0077890f0352ff63",
+        "name": "Set Download Headers",
+        "func": "// Set HTTP headers for file download\nmsg.headers = {\n    'Content-Type': 'application/x-sqlite3',\n    'Content-Disposition': 'attachment; filename=\"sensor_data.db\"'\n};\n\nreturn msg;",
         "outputs": 1,
+        "timeout": 0,
         "noerr": 0,
         "initialize": "",
         "finalize": "",
         "libs": [],
-        "x": 880,
-        "y": 720,
-        "wires": [
-            []
-        ]
-    },
-    {
-        "id": "4b208b7cd2ff7519",
-        "type": "ui_button",
-        "z": "45de7a5e05bac8c8",
-        "name": "",
-        "group": "2ffb630f556d9f7b",
-        "order": 14,
-        "width": 0,
-        "height": 0,
-        "passthru": false,
-        "label": "Close valve",
-        "tooltip": "",
-        "color": "",
-        "bgcolor": "",
-        "className": "",
-        "icon": "close",
-        "payload": "",
-        "payloadType": "str",
-        "topic": "topic",
-        "topicType": "msg",
-        "x": 570,
-        "y": 760,
+        "x": 1110,
+        "y": 740,
         "wires": [
             [
-                "8a66531f68d2d59d"
+                "c929879592d2db2d"
             ]
         ]
     },
     {
-        "id": "fd61b18b97d5cde4",
-        "type": "ui_button",
-        "z": "45de7a5e05bac8c8",
-        "name": "",
-        "group": "2ffb630f556d9f7b",
-        "order": 13,
-        "width": 0,
-        "height": 0,
-        "passthru": false,
-        "label": "Irrigate",
-        "tooltip": "",
-        "color": "",
-        "bgcolor": "",
-        "className": "",
-        "icon": "",
-        "payload": "",
-        "payloadType": "str",
-        "topic": "topic",
-        "topicType": "msg",
-        "x": 560,
-        "y": 680,
-        "wires": [
-            [
-                "8a66531f68d2d59d"
-            ]
-        ]
-    },
-    {
-        "id": "b122ed44b3a2ea2a",
-        "type": "ui_chart",
-        "z": "45de7a5e05bac8c8",
-        "name": "",
-        "group": "bb148e1bdbf63db2",
-        "order": 1,
-        "width": "10",
-        "height": "10",
-        "label": "History Soil Moisture",
-        "chartType": "line",
-        "legend": "true",
-        "xformat": "Date",
-        "interpolate": "linear",
-        "nodata": "Here the soil moisture data over time will be shown",
-        "dot": false,
-        "ymin": "0",
-        "ymax": "200",
-        "removeOlder": "7",
-        "removeOlderPoints": "",
-        "removeOlderUnit": "86400",
-        "cutout": 0,
-        "useOneColor": false,
-        "useUTC": false,
-        "colors": [
-            "#1f77b4",
-            "#e4b1cc",
-            "#ff7f0e",
-            "#2ca02c",
-            "#98df8a",
-            "#d62728",
-            "#ff9896",
-            "#9467bd",
-            "#c5b0d5"
-        ],
-        "outputs": 1,
-        "useDifferentColor": false,
-        "className": "",
-        "x": 1220,
-        "y": 900,
-        "wires": [
-            []
-        ]
-    },
-    {
-        "id": "d3eda166d42e9fef",
-        "type": "ui_date_picker",
-        "z": "45de7a5e05bac8c8",
-        "name": "",
-        "label": "Date",
-        "group": "bb148e1bdbf63db2",
-        "order": 2,
-        "width": 0,
-        "height": 0,
-        "passthru": true,
-        "topic": "topic",
-        "topicType": "msg",
-        "className": "",
-        "x": 930,
-        "y": 960,
-        "wires": [
-            []
-        ]
-    },
-    {
-        "id": "812c9d9703fa2790",
-        "type": "ui_button",
-        "z": "45de7a5e05bac8c8",
-        "name": "",
-        "group": "bb148e1bdbf63db2",
-        "order": 3,
-        "width": 0,
-        "height": 0,
-        "passthru": false,
-        "label": "Download data",
-        "tooltip": "",
-        "color": "",
-        "bgcolor": "",
-        "className": "",
-        "icon": "arrow_downward",
-        "payload": "",
-        "payloadType": "str",
-        "topic": "topic",
-        "topicType": "msg",
-        "x": 940,
-        "y": 1020,
-        "wires": [
-            []
-        ]
-    },
-    {
-        "id": "8cedb3dd19de3cab",
-        "type": "inject",
-        "z": "45de7a5e05bac8c8",
-        "g": "be9e51133e241377",
-        "name": "",
-        "props": [
-            {
-                "p": "payload"
-            },
-            {
-                "p": "topic",
-                "vt": "str"
-            }
-        ],
-        "repeat": "",
-        "crontab": "",
-        "once": false,
-        "onceDelay": 0.1,
-        "topic": "",
-        "payload": "22",
-        "payloadType": "num",
-        "x": 310,
-        "y": 960,
-        "wires": [
-            [
-                "7633a3fe855c0c6a"
-            ]
-        ]
-    },
-    {
-        "id": "e1213a1c538843a0",
-        "type": "inject",
-        "z": "45de7a5e05bac8c8",
-        "g": "be9e51133e241377",
-        "name": "",
-        "props": [
-            {
-                "p": "payload"
-            },
-            {
-                "p": "topic",
-                "vt": "str"
-            }
-        ],
-        "repeat": "",
-        "crontab": "",
-        "once": false,
-        "onceDelay": 0.1,
-        "topic": "",
-        "payload": "18",
-        "payloadType": "num",
-        "x": 310,
-        "y": 1020,
-        "wires": [
-            [
-                "339d6e8f4ad9b474"
-            ]
-        ]
-    },
-    {
-        "id": "0c28689e03e99c79",
-        "type": "inject",
-        "z": "45de7a5e05bac8c8",
-        "name": "Update graph",
-        "props": [
-            {
-                "p": "payload"
-            },
-            {
-                "p": "topic",
-                "vt": "str"
-            }
-        ],
-        "repeat": "900",
-        "crontab": "",
-        "once": false,
-        "onceDelay": 0.1,
-        "topic": "update_graph",
-        "payload": "",
-        "payloadType": "date",
-        "x": 820,
-        "y": 900,
-        "wires": [
-            [
-                "99b6ca60be65da39"
-            ]
-        ]
-    },
-    {
-        "id": "99b6ca60be65da39",
-        "type": "function",
-        "z": "45de7a5e05bac8c8",
-        "name": "get data",
-        "func": "function generateTestData(days = 7) {\n    let watermark1 = [];\n    let watermark2 = [];\n    let dates = [];\n    \n    // Generate one point per day\n    for (let i = 0; i < days; i++) {\n        const date = new Date();\n        date.setDate(date.getDate() - (days - i - 1));\n        const dateStr = (date.getMonth() + 1).toString().padStart(2, '0') + \n                       '/' + date.getDate().toString().padStart(2, '0');\n        \n        // Create repeating pattern every 3 days\n        const dayInCycle = i % 3;\n        \n        let value1, value2;\n        if (dayInCycle === 0) {  // First day\n            value1 = 15;\n            value2 = 15;\n        } else if (dayInCycle === 1) {  // Second day\n            value1 = 45;\n            value2 = 35;\n        } else {  // Third day\n            value1 = 80;\n            value2 = 60;\n        }\n        \n        // Add small random variation\n        watermark1.push(Number(value1 + (Math.random() * 4 - 2)));\n        watermark2.push(Number(value2 + (Math.random() * 4 - 2)));\n        dates.push(dateStr);\n    }\n    \n    msg.payload = [{\n        series: [\"Watermark 1\", \"Watermark 2\"],\n        data: [watermark1, watermark2],\n        labels: dates,\n        options: {\n            scales: {\n                yAxes: [{\n                    scaleLabel: {\n                        display: true,\n                        labelString: 'Soil Moisture Tension (kPa)'\n                    }\n                }]\n            }\n        }\n    }];\n    \n    return msg;\n}\n\nreturn generateTestData(7);",
-        "outputs": 1,
-        "noerr": 0,
-        "initialize": "",
-        "finalize": "",
-        "libs": [],
-        "x": 1000,
-        "y": 900,
-        "wires": [
-            [
-                "b122ed44b3a2ea2a"
-            ]
-        ]
-    },
-    {
-        "id": "af47b435520fda54",
-        "type": "function",
-        "z": "7a350b04ebb9f802",
-        "name": "Update Cron Schedule",
-        "func": "\nlet times = msg.payload.irrigation.times;\nif (!times || !Array.isArray(times)) {\n    node.warn(\"No valid times array found\");\n    return null;\n}\n\n// Format for cron-plus dynamic schedules\nlet schedules = {\n    schedules: times.map(time => {\n        let [hours, minutes] = time.split(':');\n        return {\n            name: `irrigation_${time}`,\n            topic: \"irrigation_check\",\n            payload: {\n                time: time,\n                type: \"irrigation_check\"\n            },\n            expression: `${minutes} ${hours} * * *`,\n            expressionType: \"cron\",\n            payloadType: \"json\",\n            enabled: true\n        };\n    })\n};\n\nreturn {\n    topic: \"dynamic-schedules\",\n    payload: schedules\n};",
-        "outputs": 1,
-        "noerr": 0,
-        "initialize": "",
-        "finalize": "",
-        "libs": [],
-        "x": 320,
-        "y": 440,
-        "wires": [
-            [
-                "bbd9a0031fc80a54"
-            ]
-        ]
-    },
-    {
-        "id": "c4340a38446f25b7",
-        "type": "link in",
-        "z": "7a350b04ebb9f802",
-        "name": "get times",
-        "links": [
-            "504c87d1ffa24b23"
-        ],
-        "x": 25,
-        "y": 440,
-        "wires": [
-            [
-                "53ab1710f8d1cb12"
-            ]
-        ]
-    },
-    {
-        "id": "bbd9a0031fc80a54",
-        "type": "cronplus",
-        "z": "7a350b04ebb9f802",
-        "name": "Irrigation schedule",
-        "outputField": "payload",
-        "timeZone": "",
-        "storeName": "",
-        "commandResponseMsgOutput": "output1",
-        "defaultLocation": "",
-        "defaultLocationType": "default",
-        "outputs": 1,
-        "options": [],
-        "x": 530,
-        "y": 440,
-        "wires": [
-            [
-                "ad942c44d0b9ea79",
-                "53607711b39d712f"
-            ]
-        ]
-    },
-    {
-        "id": "ad942c44d0b9ea79",
-        "type": "function",
-        "z": "7a350b04ebb9f802",
-        "name": "test schedule",
-        "func": "if (msg.topic === \"irrigation_check\") {\n    // Log the triggered schedule\n    node.log(\"Irrigation schedule triggered at: \" + new Date().toLocaleTimeString());\n    node.log(\"Schedule details: \" + JSON.stringify(msg.payload));\n\n    // Create status message\n    node.status({\n        fill: \"green\",\n        shape: \"dot\",\n        text: \"Triggered: \" + msg.payload.time\n    });\n\n    return msg;\n}\nreturn null;",
-        "outputs": 1,
-        "noerr": 0,
-        "initialize": "",
-        "finalize": "",
-        "libs": [],
-        "x": 690,
-        "y": 300,
-        "wires": [
-            [
-                "7f8ddac47ded7e54"
-            ]
-        ]
-    },
-    {
-        "id": "53607711b39d712f",
-        "type": "function",
-        "z": "7a350b04ebb9f802",
-        "name": "monitor schedules",
-        "func": "let activeSchedules = [];\n\nif (msg.topic === \"dynamic-schedules\") {\n    // New schedules being set\n    activeSchedules = msg.payload.schedules.map(s => ({\n        time: s.payload.time,\n        expression: s.expression,\n        enabled: s.enabled\n    }));\n} else if (msg.topic === \"irrigation_check\") {\n    // Schedule triggered\n    activeSchedules.push({\n        time: msg.payload.time,\n        lastTriggered: new Date().toLocaleTimeString()\n    });\n}\n\n// Create monitoring message for debug/dashboard\nreturn {\n    topic: \"schedule_status\",\n    payload: {\n        activeSchedules: activeSchedules,\n        lastUpdated: new Date().toLocaleTimeString(),\n        totalSchedules: activeSchedules.length\n    }\n};",
-        "outputs": 1,
-        "noerr": 0,
-        "initialize": "",
-        "finalize": "",
-        "libs": [],
-        "x": 730,
-        "y": 360,
-        "wires": [
-            [
-                "fcfd836133a5bde7"
-            ]
-        ]
-    },
-    {
-        "id": "7f8ddac47ded7e54",
-        "type": "debug",
-        "z": "7a350b04ebb9f802",
-        "name": "debug test schedule",
-        "active": true,
-        "tosidebar": true,
-        "console": false,
-        "tostatus": false,
-        "complete": "true",
-        "targetType": "full",
-        "statusVal": "",
-        "statusType": "auto",
-        "x": 1000,
-        "y": 300,
+        "id": "c929879592d2db2d",
+        "type": "http response",
+        "z": "0077890f0352ff63",
+        "name": "Send Database File",
+        "statusCode": "",
+        "headers": {},
+        "x": 1410,
+        "y": 740,
         "wires": []
-    },
-    {
-        "id": "fcfd836133a5bde7",
-        "type": "debug",
-        "z": "7a350b04ebb9f802",
-        "name": "debug monitor schedule",
-        "active": true,
-        "tosidebar": true,
-        "console": false,
-        "tostatus": false,
-        "complete": "true",
-        "targetType": "full",
-        "statusVal": "",
-        "statusType": "auto",
-        "x": 1010,
-        "y": 360,
-        "wires": []
-    },
-    {
-        "id": "53ab1710f8d1cb12",
-        "type": "change",
-        "z": "7a350b04ebb9f802",
-        "name": "",
-        "rules": [
-            {
-                "t": "set",
-                "p": "topic",
-                "pt": "msg",
-                "to": "dynamic-schedules",
-                "tot": "str"
-            }
-        ],
-        "action": "",
-        "property": "",
-        "from": "",
-        "to": "",
-        "reg": false,
-        "x": 130,
-        "y": 440,
-        "wires": [
-            [
-                "af47b435520fda54"
-            ]
-        ]
     }
 ]
