@@ -3,6 +3,7 @@ FROM jenkins/jenkins:lts
 USER root
 
 # Install build dependencies for OpenWrt/ChirpStack Gateway OS
+# Added: pkg-config, clang, cmake, zstd, xz-utils, libncurses-dev
 RUN apt-get update && apt-get install -y \
     build-essential \
     gcc \
@@ -19,14 +20,12 @@ RUN apt-get update && apt-get install -y \
     bison \
     make \
     autoconf \
-    gettext \
     texinfo \
     unzip \
     sharutils \
     subversion \
     ncurses-dev \
-    zlib1g-dev \
-    gawk \
+    libncurses-dev \
     git \
     ccache \
     rsync \
@@ -35,49 +34,15 @@ RUN apt-get update && apt-get install -y \
     python3 \
     python3-dev \
     python3-setuptools \
-    libncurses5-dev \
     libssl-dev \
     libelf-dev \
     file \
     quilt \
     xsltproc \
     libxml-parser-perl \
+    pkg-config \
+    clang \
+    cmake \
+    zstd \
+    xz-utils \
     && rm -rf /var/lib/apt/lists/*
-
-# Verify installations
-RUN gcc --version && \
-    g++ --version && \
-    python3 --version && \
-    gawk --version && \
-    quilt --version && \
-    rsync --version
-
-USER jenkins
-
-~
-~
-~
-~
-~
-~
-~
-~
-~
-~
-~
-~
-~
-~
-~
-~
-~
-~
-~
-~
-~
-~
-~
-~
-~
-~
-"Dockerfile" 56L, 920B                                                                                                                   1,1           All

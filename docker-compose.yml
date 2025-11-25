@@ -4,7 +4,7 @@ services:
       context: .
       dockerfile: Dockerfile-devel
     volumes:
-      - ${PWD}:/workdir  # Use environment variable instead of .
+      - /home/jenkins-user/jenkins-workspace/osi:/workdir
     ulimits:
       nofile:
         soft: 1024
