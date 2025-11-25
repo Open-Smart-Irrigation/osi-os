@@ -1,9 +1,11 @@
 module.exports = {
     flowFile: "flows.json",
+    userDir: "/var/lib/node-red/.node-red",
     uiPort: process.env.PORT || 1880,
-    // Add the static file path here.
-    // This matches the install path from the Makefile instructions below.
-    httpStatic: '/usr/lib/node-red/files/gui',
+
+    // Serve React GUI at /gui path
+    httpStatic: '/usr/lib/node-red/gui',
+    httpStaticRoot: '/gui/',
 
     mqttReconnectTime: 15000,
     serialReconnectTime: 15000,
@@ -27,16 +29,5 @@ module.exports = {
         projects: {
             enabled: false
         }
-    },
-
-    // Disable authentication for local use
-    // For production, enable authentication
-    adminAuth: {
-        type: "credentials",
-        users: [{
-            username: "admin",
-            password: "$2a$08$zZWtXTja0fB1pzD4sHCMyOCMYz2Z6dNbM6tl8sJogENOMcxWV9DN.",
-            permissions: "*"
-        }]
     }
 };
