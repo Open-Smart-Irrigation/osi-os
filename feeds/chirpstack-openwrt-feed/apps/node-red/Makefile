@@ -71,6 +71,14 @@ define Package/node-red/install
 
 	$(INSTALL_DIR) $(1)/etc/nginx/conf.d
 	$(INSTALL_DATA) ./files/node-red.nginx $(1)/etc/nginx/conf.d/node-red.locations
+
+	# Install Node-RED settings and flows
+	$(INSTALL_DIR) $(1)/var/lib/node-red/.node-red
+	$(INSTALL_DATA) ./files/settings.js $(1)/var/lib/node-red/.node-red/settings.js
+
+	# Install React GUI static files
+	$(INSTALL_DIR) $(1)/usr/lib/node-red/gui
+	$(CP) ./files/gui/* $(1)/usr/lib/node-red/gui/
 endef
 
 define Package/node-red/postinst

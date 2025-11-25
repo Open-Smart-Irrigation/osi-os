@@ -2,6 +2,10 @@ FROM jenkins/jenkins:lts
 
 USER root
 
+# Install Node.js (LTS) for React GUI builds
+RUN curl -fsSL https://deb.nodesource.com/setup_lts.x | bash - \
+    && apt-get install -y nodejs
+
 # Install build dependencies for OpenWrt/ChirpStack Gateway OS
 # Added: pkg-config, clang, cmake, zstd, xz-utils, libncurses-dev
 RUN apt-get update && apt-get install -y \
@@ -46,3 +50,6 @@ RUN apt-get update && apt-get install -y \
     zstd \
     xz-utils \
     && rm -rf /var/lib/apt/lists/*
+
+# Verify Node.js installation
+RUN node --version && npm --version
