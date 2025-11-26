@@ -156,7 +156,23 @@ pipeline {
             }
         }
 
-        stage('6. Compile Rust') {
+        stage('6. Build Toolchain') {
+            steps {
+                sh '''#!/bin/bash
+                    set -e
+                    export FORCE_UNSAFE_CONFIGURE=1
+                    cd ${WORKSPACE}/openwrt
+
+                    echo "=== Building Toolchain ==="
+                    # Build toolchain first (required for Rust compilation)
+                    make -j2 toolchain/compile V=s 2>&1 | tee ../logs/toolchain.log
+
+                    echo "✓ Toolchain built successfully."
+                '''
+            }
+        }
+
+        stage('7. Compile Rust') {
             steps {
                 sh '''#!/bin/bash
                     set -e
@@ -188,7 +204,7 @@ pipeline {
         }
 
 
-        stage('7. Finish Firmware') {
+        stage('8. Finish Firmware') {
             steps {
                 sh '''#!/bin/bash
                     set -e
