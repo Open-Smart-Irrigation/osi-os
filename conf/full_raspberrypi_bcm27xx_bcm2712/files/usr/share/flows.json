@@ -25,141 +25,13 @@
             "abda19b6ffedb281",
             "1a7c1e1774d13afe",
             "83d777b8cdc63fbd",
-            "ab6a83b4f51d4343"
+            "ab6a83b4f51d4343",
+            "sqlite-node"
         ],
-        "x": 434,
+        "x": 254,
         "y": 99,
-        "w": 1492,
+        "w": 1672,
         "h": 142
-    },
-    {
-        "id": "68233a96f1377c0c",
-        "type": "mqtt in",
-        "z": "0077890f0352ff63",
-        "g": "38bc75bc54561ece",
-        "name": "KIWI",
-        "topic": "application/945c3652-8cdc-44ce-9a5d-eb146d626be2/device/647fda0000007f9b/#",
-        "qos": "0",
-        "datatype": "auto-detect",
-        "broker": "b0b19352dac3fb34",
-        "nl": false,
-        "rap": true,
-        "rh": 0,
-        "inputs": 0,
-        "x": 510,
-        "y": 200,
-        "wires": [
-            [
-                "abda19b6ffedb281"
-            ]
-        ]
-    },
-    {
-        "id": "abda19b6ffedb281",
-        "type": "device event",
-        "z": "0077890f0352ff63",
-        "g": "38bc75bc54561ece",
-        "name": "up",
-        "eventType": "up",
-        "x": 810,
-        "y": 200,
-        "wires": [
-            [
-                "1a7c1e1774d13afe"
-            ]
-        ]
-    },
-    {
-        "id": "1a7c1e1774d13afe",
-        "type": "function",
-        "z": "0077890f0352ff63",
-        "g": "38bc75bc54561ece",
-        "name": "Process Data",
-        "func": "function convertHzToKPa(input_frequency) {\n    if (input_frequency > 6430) return 0;\n    if (input_frequency >= 4330 && input_frequency <= 6430) return 9 - (input_frequency - 4330) * 0.004286;\n    if (input_frequency >= 2820 && input_frequency <= 4330) return 15 - (input_frequency - 2820) * 0.003974;\n    if (input_frequency >= 1110 && input_frequency <= 2820) return 35 - (input_frequency - 1110) * 0.01170;\n    if (input_frequency >= 770 && input_frequency <= 1110) return 55 - (input_frequency - 770) * 0.05884;\n    if (input_frequency >= 600 && input_frequency <= 770) return 75 - (input_frequency - 600) * 0.1176;\n    if (input_frequency >= 485 && input_frequency <= 600) return 100 - (input_frequency - 485) * 0.2174;\n    if (input_frequency >= 293 && input_frequency <= 485) return 200 - (input_frequency - 293) * 0.5208;\n    if (input_frequency < 293) return 200;\n    return null;\n}\n\nfunction processAndStore(msg) {\n    try {\n        const data = msg.payload;\n        const now = new Date();\n\n        // Convert both frequency readings to kPa\n        const watermark1 = convertHzToKPa(data.object.input5_frequency);\n        const watermark2 = convertHzToKPa(data.object.input6_frequency);\n\n        // Create formatted data structure\n        const formattedData = {\n            timestamp: now.toISOString(),\n            readings: {\n                input5_frequency: data.object.input5_frequency,\n                watermark1: watermark1,\n                input6_frequency: data.object.input6_frequency,\n                watermark2: watermark2,\n                light_intensity: data.object.light_intensity || null\n            }\n        };\n\n        // Update node status with both moisture readings\n        node.status({\n            fill: \"blue\",\n            shape: \"dot\",\n            text: \"WM1: \" + watermark1.toFixed(2) + \" kPa, WM2: \" + watermark2.toFixed(2) + \" kPa\"\n        });\n\n        msg.formattedData = formattedData;\n        return msg;\n\n    } catch (error) {\n        node.error(\"Error processing message: \" + error.message);\n        return null;\n    }\n}\n\nreturn processAndStore(msg);",
-        "outputs": 1,
-        "noerr": 0,
-        "initialize": "",
-        "finalize": "",
-        "libs": [],
-        "x": 1000,
-        "y": 200,
-        "wires": [
-            [
-                "sql-insert-function",
-                "ab6a83b4f51d4343"
-            ]
-        ]
-    },
-    {
-        "id": "sql-insert-function",
-        "type": "function",
-        "z": "0077890f0352ff63",
-        "name": "Build SQL INSERT",
-        "func": "const data = msg.formattedData;\nconst readings = data.readings;\nconst timestamp = data.timestamp;\nconst swt_kpa = readings.watermark1 !== undefined ? readings.watermark1 : null;\nconst light_lux = readings.light_intensity !== undefined ? readings.light_intensity : null;\nconst sensor_id = 1; // Set this as needed\nlet columns = ['sensor_id', 'timestamp'];\nlet values = [sensor_id, timestamp];\nif (swt_kpa !== null) { columns.push('swt_kpa'); values.push(swt_kpa); }\nif (light_lux !== null) { columns.push('light_lux'); values.push(light_lux); }\nconst placeholders = values.map(() => '?').join(',');\nconst sql = `INSERT INTO sensor_data (${columns.join(',')}) VALUES (${placeholders})`;\nmsg.topic = sql;\nmsg.payload = values;\nreturn msg;",
-        "outputs": 1,
-        "noerr": 0,
-        "initialize": "",
-        "finalize": "",
-        "libs": [],
-        "x": 1200,
-        "y": 200,
-        "wires": [
-            [
-                "sqlite-node"
-            ]
-        ]
-    },
-    {
-        "id": "sqlite-node",
-        "type": "sqlite",
-        "z": "0077890f0352ff63",
-        "sqlquery": "msg.topic",
-        "sql": "",
-        "name": "Sensor DB Insert",
-        "db": "sensor_data.db",
-        "x": 1400,
-        "y": 200,
-        "wires": [
-            [
-                "83d777b8cdc63fbd"
-            ]
-        ]
-    },
-    {
-        "id": "83d777b8cdc63fbd",
-        "type": "debug",
-        "z": "0077890f0352ff63",
-        "g": "38bc75bc54561ece",
-        "name": "Storage Debug",
-        "active": true,
-        "tosidebar": true,
-        "console": false,
-        "tostatus": false,
-        "complete": "payload",
-        "targetType": "msg",
-        "statusVal": "",
-        "statusType": "auto",
-        "x": 1800,
-        "y": 200,
-        "wires": []
-    },
-    {
-        "id": "ab6a83b4f51d4343",
-        "type": "debug",
-        "z": "0077890f0352ff63",
-        "g": "38bc75bc54561ece",
-        "name": "Moisture Debug",
-        "active": true,
-        "tosidebar": true,
-        "console": false,
-        "tostatus": false,
-        "complete": "formattedData.readings",
-        "targetType": "msg",
-        "statusVal": "",
-        "statusType": "auto",
-        "x": 1200,
-        "y": 140,
-        "wires": []
     },
     {
         "id": "b0b19352dac3fb34",
@@ -187,5 +59,579 @@
         "willMsg": {},
         "userProps": "",
         "sessionExpiry": ""
-    }
+    },
+    {
+        "id": "7dbdb443aedb194b",
+        "type": "sqlitedb",
+        "db": "/srv/osi/sensor_data.db",
+        "mode": "RWC"
+    },
+    {
+        "id": "6cbac061.124d8",
+        "type": "ui_base",
+        "theme": {
+            "name": "theme-light",
+            "lightTheme": {
+                "default": "#0094CE",
+                "baseColor": "#0094CE",
+                "baseFont": "-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,Oxygen-Sans,Ubuntu,Cantarell,Helvetica Neue,sans-serif",
+                "edited": true,
+                "reset": false
+            },
+            "darkTheme": {
+                "default": "#097479",
+                "baseColor": "#097479",
+                "baseFont": "-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,Oxygen-Sans,Ubuntu,Cantarell,Helvetica Neue,sans-serif",
+                "edited": false
+            },
+            "customTheme": {
+                "name": "Untitled Theme 1",
+                "default": "#4B7930",
+                "baseColor": "#4B7930",
+                "baseFont": "-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,Oxygen-Sans,Ubuntu,Cantarell,Helvetica Neue,sans-serif"
+            },
+            "themeState": {
+                "base-color": {
+                    "default": "#0094CE",
+                    "value": "#0094CE",
+                    "edited": false
+                },
+                "page-titlebar-backgroundColor": {
+                    "value": "#0094CE",
+                    "edited": false
+                },
+                "page-backgroundColor": {
+                    "value": "#fafafa",
+                    "edited": false
+                },
+                "page-sidebar-backgroundColor": {
+                    "value": "#ffffff",
+                    "edited": false
+                },
+                "group-textColor": {
+                    "value": "#1bbfff",
+                    "edited": false
+                },
+                "group-borderColor": {
+                    "value": "#ffffff",
+                    "edited": false
+                },
+                "group-backgroundColor": {
+                    "value": "#ffffff",
+                    "edited": false
+                },
+                "widget-textColor": {
+                    "value": "#111111",
+                    "edited": false
+                },
+                "widget-backgroundColor": {
+                    "value": "#0094ce",
+                    "edited": false
+                },
+                "widget-borderColor": {
+                    "value": "#ffffff",
+                    "edited": false
+                },
+                "base-font": {
+                    "value": "-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,Oxygen-Sans,Ubuntu,Cantarell,Helvetica Neue,sans-serif"
+                }
+            },
+            "angularTheme": {
+                "primary": "indigo",
+                "accents": "blue",
+                "warn": "red",
+                "background": "grey"
+            }
+        },
+        "site": {
+            "name": "Smart Parks - OpenCollar",
+            "hideToolbar": "false",
+            "allowSwipe": "false",
+            "lockMenu": "false",
+            "allowTempTheme": "true",
+            "dateFormat": "DD/MM/YYYY",
+            "sizes": {
+                "sx": 48,
+                "sy": 48,
+                "gx": 6,
+                "gy": 6,
+                "cx": 6,
+                "cy": 6,
+                "px": 0,
+                "py": 0
+            }
+        }
+    },
+    {
+        "id": "68233a96f1377c0c",
+        "type": "mqtt in",
+        "z": "0077890f0352ff63",
+        "g": "38bc75bc54561ece",
+        "name": "KIWI",
+        "topic": "application/64720b8b-abed-47c8-919e-a5ae40798ac7/device/647fda0000007f9b/#",
+        "qos": "0",
+        "datatype": "auto-detect",
+        "broker": "b0b19352dac3fb34",
+        "nl": false,
+        "rap": true,
+        "rh": 0,
+        "inputs": 0,
+        "x": 330,
+        "y": 200,
+        "wires": [
+            [
+                "abda19b6ffedb281"
+            ]
+        ]
+    },
+    {
+        "id": "abda19b6ffedb281",
+        "type": "device event",
+        "z": "0077890f0352ff63",
+        "g": "38bc75bc54561ece",
+        "name": "up",
+        "eventType": "up",
+        "x": 630,
+        "y": 200,
+        "wires": [
+            [
+                "51b3555464a77089",
+                "1a7c1e1774d13afe"
+            ]
+        ]
+    },
+    {
+        "id": "1a7c1e1774d13afe",
+        "type": "function",
+        "z": "0077890f0352ff63",
+        "g": "38bc75bc54561ece",
+        "name": "Process Data",
+        "func": "function convertHzToKPa(input_frequency) {\n    if (typeof input_frequency !== \"number\" || isNaN(input_frequency)) {\n        return null;\n    }\n\n    if (input_frequency > 6430) return 0;\n    if (input_frequency >= 4330 && input_frequency <= 6430) return 9 - (input_frequency - 4330) * 0.004286;\n    if (input_frequency >= 2820 && input_frequency <= 4330) return 15 - (input_frequency - 2820) * 0.003974;\n    if (input_frequency >= 1110 && input_frequency <= 2820) return 35 - (input_frequency - 1110) * 0.01170;\n    if (input_frequency >= 770 && input_frequency <= 1110) return 55 - (input_frequency - 770) * 0.05884;\n    if (input_frequency >= 600 && input_frequency <= 770) return 75 - (input_frequency - 600) * 0.1176;\n    if (input_frequency >= 485 && input_frequency <= 600) return 100 - (input_frequency - 485) * 0.2174;\n    if (input_frequency >= 293 && input_frequency <= 485) return 200 - (input_frequency - 293) * 0.5208;\n    if (input_frequency < 293) return 200;\n    return null;\n}\n\nfunction processAndStore(msg) {\n    try {\n        const data = msg.payload;\n\n        if (!data || !data.deviceInfo || !data.object) {\n            node.error(\"Unexpected payload structure\");\n            return null;\n        }\n\n        const devEui = data.deviceInfo.devEui || \"\";\n        const deviceName = data.deviceInfo.deviceName || \"\";\n\n        // Prefer ChirpStack time if present, fall back to local time\n        let timestamp;\n        if (data.time) {\n            timestamp = new Date(data.time).toISOString();\n        } else {\n            timestamp = new Date().toISOString();\n        }\n\n        // Raw frequencies from KIWI\n        const f_wm1 = data.object.input5_frequency;\n        const f_wm2 = data.object.input6_frequency;\n\n        // Convert to kPa\n        const wm1_kpa = convertHzToKPa(f_wm1);\n        const wm2_kpa = convertHzToKPa(f_wm2);\n\n        const light_intensity =\n            (data.object.light_intensity !== undefined)\n                ? data.object.light_intensity\n                : null;\n\n        const formattedData = {\n            timestamp,\n            devEui,\n            deviceName,\n            readings: {\n                input5_frequency: f_wm1,\n                swt_wm1: wm1_kpa,\n                input6_frequency: f_wm2,\n                swt_wm2: wm2_kpa,\n                light_intensity: light_intensity\n            }\n        };\n\n        // Node status\n        const statusParts = [];\n        if (Number.isFinite(wm1_kpa)) {\n            statusParts.push(\"WM1: \" + wm1_kpa.toFixed(2) + \" kPa\");\n        }\n        if (Number.isFinite(wm2_kpa)) {\n            statusParts.push(\"WM2: \" + wm2_kpa.toFixed(2) + \" kPa\");\n        }\n\n        node.status({\n            fill: \"blue\",\n            shape: \"dot\",\n            text: statusParts.length ? statusParts.join(\" | \") : \"no WM data\"\n        });\n\n        msg.formattedData = formattedData;\n        return msg;\n\n    } catch (error) {\n        node.error(\"Error processing message: \" + error.message);\n        return null;\n    }\n}\n\nreturn processAndStore(msg);\n",
+        "outputs": 1,
+        "timeout": "",
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 860,
+        "y": 180,
+        "wires": [
+            [
+                "ab6a83b4f51d4343",
+                "sql-insert-function"
+            ]
+        ]
+    },
+    {
+        "id": "sql-insert-function",
+        "type": "function",
+        "z": "0077890f0352ff63",
+        "name": "Build SQL INSERT",
+        "func": "const data = msg.formattedData;\n\nif (!data || !data.readings) {\n    node.error(\"formattedData missing on msg\");\n    return null;\n}\n\nconst devEui     = data.devEui || \"\";\nconst deviceName = data.deviceName || \"\";\nconst timestamp  = data.timestamp;\nconst readings   = data.readings;\n\nconst swt_wm1   = readings.swt_wm1;\nconst swt_wm2   = readings.swt_wm2;\nconst light_lux = readings.light_intensity;\n\n// Helper to convert JS values to SQL literals\nfunction sqlValue(v) {\n    if (v === null || v === undefined) return \"NULL\";\n    if (typeof v === \"number\") {\n        if (Number.isNaN(v)) return \"NULL\";\n        return v.toString();\n    }\n    // Treat everything else as text, escape single quotes\n    return \"'\" + String(v).replace(/'/g, \"''\") + \"'\";\n}\n\n// Build literal SQL, like in the golden example\nconst sql = `\nINSERT INTO sensor_data (dev_eui, device_name, timestamp, swt_wm1, swt_wm2, light_lux)\nVALUES (\n  ${sqlValue(devEui)},\n  ${sqlValue(deviceName)},\n  ${sqlValue(timestamp)},\n  ${sqlValue(swt_wm1)},\n  ${sqlValue(swt_wm2)},\n  ${sqlValue(light_lux)}\n);\n`.trim();\n\n// For sqlite: only msg.topic matters for the query\nmsg.topic = sql;\n\n// For debugging: keep a nice structured payload\nmsg.payload = {\n    dev_eui: devEui,\n    device_name: deviceName,\n    timestamp,\n    swt_wm1,\n    swt_wm2,\n    light_lux\n};\n\nmsg._source = \"kiwi_insert_literal\";\n\nnode.status({\n    fill: \"green\",\n    shape: \"dot\",\n    text: `SQL insert devEui=${devEui}`\n});\n\nreturn msg;\n",
+        "outputs": 1,
+        "timeout": "",
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 1200,
+        "y": 200,
+        "wires": [
+            [
+                "sqlite-node",
+                "7ec890cb0b379fcf"
+            ]
+        ]
+    },
+    {
+        "id": "83d777b8cdc63fbd",
+        "type": "debug",
+        "z": "0077890f0352ff63",
+        "g": "38bc75bc54561ece",
+        "name": "Storage Debug",
+        "active": true,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "true",
+        "targetType": "full",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 1800,
+        "y": 200,
+        "wires": []
+    },
+    {
+        "id": "ab6a83b4f51d4343",
+        "type": "debug",
+        "z": "0077890f0352ff63",
+        "g": "38bc75bc54561ece",
+        "name": "Moisture Debug",
+        "active": true,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "formattedData.readings",
+        "targetType": "msg",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 1200,
+        "y": 140,
+        "wires": []
+    },
+    {
+        "id": "sqlite-node",
+        "type": "sqlite",
+        "z": "0077890f0352ff63",
+        "g": "38bc75bc54561ece",
+        "mydb": "7dbdb443aedb194b",
+        "sqlquery": "msg.topic",
+        "sql": "",
+        "name": "Sensor DB Insert",
+        "x": 1510,
+        "y": 200,
+        "wires": [
+            [
+                "83d777b8cdc63fbd"
+            ]
+        ]
+    },
+    {
+        "id": "0c0c69ee3bb9fc63",
+        "type": "inject",
+        "z": "0077890f0352ff63",
+        "name": "Init sensor_data table",
+        "props": [
+            {
+                "p": "payload"
+            },
+            {
+                "p": "topic",
+                "vt": "str"
+            }
+        ],
+        "repeat": "",
+        "crontab": "",
+        "once": false,
+        "onceDelay": 0.1,
+        "topic": "CREATE TABLE IF NOT EXISTS sensor_data (     id INTEGER PRIMARY KEY AUTOINCREMENT,     dev_eui TEXT,     device_name TEXT,     timestamp TEXT,     swt_wm1 REAL,     swt_wm2 REAL,     light_lux REAL );",
+        "payload": "",
+        "payloadType": "date",
+        "x": 740,
+        "y": 420,
+        "wires": [
+            [
+                "sqlite-node"
+            ]
+        ]
+    },
+    {
+        "id": "7ec890cb0b379fcf",
+        "type": "debug",
+        "z": "0077890f0352ff63",
+        "name": "Debug SQL",
+        "active": true,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "true",
+        "targetType": "full",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 1230,
+        "y": 380,
+        "wires": []
+    },
+    {
+        "id": "51b3555464a77089",
+        "type": "debug",
+        "z": "0077890f0352ff63",
+        "name": "debug raw data",
+        "active": true,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "payload",
+        "targetType": "msg",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 940,
+        "y": 320,
+        "wires": []
+    },
+    {
+        "id": "35275fd208c05a60",
+        "type": "inject",
+        "z": "0077890f0352ff63",
+        "name": "show schema",
+        "props": [
+            {
+                "p": "payload"
+            },
+            {
+                "p": "topic",
+                "vt": "str"
+            }
+        ],
+        "repeat": "",
+        "crontab": "",
+        "once": false,
+        "onceDelay": 0.1,
+        "topic": "PRAGMA table_info(sensor_data);",
+        "payload": "",
+        "payloadType": "date",
+        "x": 670,
+        "y": 640,
+        "wires": [
+            [
+                "sqlite-node"
+            ]
+        ]
+    },
+    {
+        "id": "5127ef059e4ac72a",
+        "type": "inject",
+        "z": "0077890f0352ff63",
+        "name": "show rows",
+        "props": [
+            {
+                "p": "payload"
+            },
+            {
+                "p": "topic",
+                "vt": "str"
+            }
+        ],
+        "repeat": "",
+        "crontab": "",
+        "once": false,
+        "onceDelay": 0.1,
+        "topic": "SELECT * FROM sensor_data WHERE dev_eui IS NOT NULL ORDER BY id DESC LIMIT 5;",
+        "payload": "",
+        "payloadType": "date",
+        "x": 1040,
+        "y": 640,
+        "wires": [
+            [
+                "sqlite-node"
+            ]
+        ]
+    },
+    {
+        "id": "667d4b53415ee240",
+        "type": "http in",
+        "z": "0077890f0352ff63",
+        "name": "Database Download Endpoint",
+        "url": "/download/database",
+        "method": "get",
+        "upload": false,
+        "swaggerDoc": "",
+        "x": 540,
+        "y": 740,
+        "wires": [
+            [
+                "9263de49d5c9beb0"
+            ]
+        ]
+    },
+    {
+        "id": "9263de49d5c9beb0",
+        "type": "file in",
+        "z": "0077890f0352ff63",
+        "name": "Read Database File",
+        "filename": "/srv/osi/sensor_data.db",
+        "filenameType": "str",
+        "format": "",
+        "chunk": false,
+        "sendError": false,
+        "encoding": "none",
+        "allProps": false,
+        "x": 840,
+        "y": 740,
+        "wires": [
+            [
+                "567a64614ffc1882"
+            ]
+        ]
+    },
+    {
+        "id": "567a64614ffc1882",
+        "type": "function",
+        "z": "0077890f0352ff63",
+        "name": "Set Download Headers",
+        "func": "// Set HTTP headers for file download\nmsg.headers = {\n    'Content-Type': 'application/x-sqlite3',\n    'Content-Disposition': 'attachment; filename=\"sensor_data.db\"'\n};\n\nreturn msg;",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 1110,
+        "y": 740,
+        "wires": [
+            [
+                "c929879592d2db2d"
+            ]
+        ]
+    },
+    {
+        "id": "c929879592d2db2d",
+        "type": "http response",
+        "z": "0077890f0352ff63",
+        "name": "Send Database File",
+        "statusCode": "",
+        "headers": {},
+        "x": 1410,
+        "y": 740,
+        "wires": []
+    },
+  {
+    "id": "api001tab",
+    "type": "tab",
+    "label": "React GUI API",
+    "disabled": false,
+    "info": "REST API endpoints for React GUI application",
+    "env": []
+  },
+  {
+    "id": "api001http",
+    "type": "http in",
+    "z": "api001tab",
+    "name": "GET /api/sensors",
+    "url": "/api/sensors",
+    "method": "get",
+    "upload": false,
+    "swaggerDoc": "",
+    "x": 160,
+    "y": 100,
+    "wires": [
+      [
+        "api001func"
+      ]
+    ]
+  },
+  {
+    "id": "api001func",
+    "type": "function",
+    "z": "api001tab",
+    "name": "List Sensors",
+    "func": "msg.payload = [\n  { id: 'sensor-1', name: 'Garden Zone A', location: 'North Garden' },\n  { id: 'sensor-2', name: 'Garden Zone B', location: 'South Garden' },\n  { id: 'sensor-3', name: 'Greenhouse', location: 'Greenhouse 1' },\n  { id: 'sensor-4', name: 'Lawn Area', location: 'Front Lawn' }\n];\n\nmsg.headers = {\n  'Content-Type': 'application/json',\n  'Access-Control-Allow-Origin': '*'\n};\n\nreturn msg;",
+    "outputs": 1,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 370,
+    "y": 100,
+    "wires": [
+      [
+        "api001resp"
+      ]
+    ]
+  },
+  {
+    "id": "api001resp",
+    "type": "http response",
+    "z": "api001tab",
+    "name": "Response",
+    "statusCode": "200",
+    "headers": {},
+    "x": 560,
+    "y": 100,
+    "wires": []
+  },
+  {
+    "id": "api002http",
+    "type": "http in",
+    "z": "api001tab",
+    "name": "GET /api/sensors/:id/current",
+    "url": "/api/sensors/:id/current",
+    "method": "get",
+    "upload": false,
+    "swaggerDoc": "",
+    "x": 190,
+    "y": 200,
+    "wires": [
+      [
+        "api002func"
+      ]
+    ]
+  },
+  {
+    "id": "api002func",
+    "type": "function",
+    "z": "api001tab",
+    "name": "Current Sensor Data",
+    "func": "const sensorId = msg.req.params.id;\n\n// Generate realistic dummy data\nconst baseHumidity = {\n  'sensor-1': 55,\n  'sensor-2': 48,\n  'sensor-3': 62,\n  'sensor-4': 45\n}[sensorId] || 50;\n\nconst baseFlow = {\n  'sensor-1': 12.5,\n  'sensor-2': 8.3,\n  'sensor-3': 15.2,\n  'sensor-4': 10.1\n}[sensorId] || 10;\n\nmsg.payload = {\n  humidity: baseHumidity + (Math.random() * 6 - 3),\n  flow: baseFlow + (Math.random() * 2 - 1),\n  temperature: 20 + (Math.random() * 8),\n  valveStatus: Math.random() > 0.5 ? 'open' : 'closed',\n  lastUpdate: new Date().toISOString()\n};\n\nmsg.headers = {\n  'Content-Type': 'application/json',\n  'Access-Control-Allow-Origin': '*'\n};\n\nreturn msg;",
+    "outputs": 1,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 440,
+    "y": 200,
+    "wires": [
+      [
+        "api002resp"
+      ]
+    ]
+  },
+  {
+    "id": "api002resp",
+    "type": "http response",
+    "z": "api001tab",
+    "name": "Response",
+    "statusCode": "200",
+    "headers": {},
+    "x": 660,
+    "y": 200,
+    "wires": []
+  },
+  {
+    "id": "api003http",
+    "type": "http in",
+    "z": "api001tab",
+    "name": "GET /api/sensors/:id/history",
+    "url": "/api/sensors/:id/history",
+    "method": "get",
+    "upload": false,
+    "swaggerDoc": "",
+    "x": 190,
+    "y": 300,
+    "wires": [
+      [
+        "api003func"
+      ]
+    ]
+  },
+  {
+    "id": "api003func",
+    "type": "function",
+    "z": "api001tab",
+    "name": "Historical Data",
+    "func": "const sensorId = msg.req.params.id;\nconst hours = parseInt(msg.req.query.hours) || 24;\n\nconst data = [];\nconst now = Date.now();\n\n// Base values per sensor\nconst baseHumidity = {\n  'sensor-1': 55,\n  'sensor-2': 48,\n  'sensor-3': 62,\n  'sensor-4': 45\n}[sensorId] || 50;\n\nconst baseFlow = {\n  'sensor-1': 12.5,\n  'sensor-2': 8.3,\n  'sensor-3': 15.2,\n  'sensor-4': 10.1\n}[sensorId] || 10;\n\nfor (let i = hours; i >= 0; i--) {\n  const timestamp = now - (i * 60 * 60 * 1000);\n  const date = new Date(timestamp);\n  \n  // Add some variation over time\n  const timeVariation = Math.sin(i / 12 * Math.PI) * 5;\n  \n  data.push({\n    timestamp: timestamp,\n    time: date.toLocaleTimeString('en-US', {\n      hour: '2-digit',\n      minute: '2-digit'\n    }),\n    humidity: baseHumidity + timeVariation + (Math.random() * 4 - 2),\n    flow: baseFlow + (Math.random() * 3 - 1.5)\n  });\n}\n\nmsg.payload = data;\nmsg.headers = {\n  'Content-Type': 'application/json',\n  'Access-Control-Allow-Origin': '*'\n};\n\nreturn msg;",
+    "outputs": 1,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 430,
+    "y": 300,
+    "wires": [
+      [
+        "api003resp"
+      ]
+    ]
+  },
+  {
+    "id": "api003resp",
+    "type": "http response",
+    "z": "api001tab",
+    "name": "Response",
+    "statusCode": "200",
+    "headers": {},
+    "x": 660,
+    "y": 300,
+    "wires": []
+  }
 ]
