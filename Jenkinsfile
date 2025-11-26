@@ -50,6 +50,11 @@ pipeline {
                 sh '''#!/bin/bash
                     set -e
                     cd ${WORKSPACE}
+
+                    # Create log directories
+                    mkdir -p logs
+                    mkdir -p output/logs
+
                     if [ ! -f .initialized ]; then git submodule update --init --recursive; touch .initialized; fi
 
                     # Reset Configs
