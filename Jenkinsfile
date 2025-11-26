@@ -114,7 +114,24 @@ pipeline {
             }
         }
 
-        stage('4. Prepare Rust (Auto-Fix)') {
+        stage('4. Force Node-RED Rebuild') {
+            steps {
+                sh '''#!/bin/bash
+                    set -e
+                    cd ${WORKSPACE}/openwrt
+
+                    echo "=== Forcing Node-RED to rebuild with updated GUI ==="
+                    # Clean node-red package to force rebuild with new React files
+                    rm -rf build_dir/target-*/node-red*
+                    rm -rf build_dir/target-*/packages/node-red*
+                    find staging_dir -name "node-red" -type d -exec rm -rf {} + 2>/dev/null || true
+
+                    echo "✓ Node-RED build cache cleared"
+                '''
+            }
+        }
+
+        stage('5. Prepare Rust (Auto-Fix)') {
             steps {
                 sh '''#!/bin/bash
                     set -e
@@ -133,7 +150,7 @@ pipeline {
             }
         }
 
-        stage('5. Compile Rust') {
+        stage('6. Compile Rust') {
             steps {
                 sh '''#!/bin/bash
                     set -e
@@ -165,7 +182,7 @@ pipeline {
         }
 
 
-        stage('6. Finish Firmware') {
+        stage('7. Finish Firmware') {
             steps {
                 sh '''#!/bin/bash
                     set -e
