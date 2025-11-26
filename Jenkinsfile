@@ -126,10 +126,10 @@ pipeline {
                     cd ${WORKSPACE}/openwrt
 
                     echo "=== Forcing Node-RED to rebuild with updated GUI ==="
-                    # Clean node-red package to force rebuild with new React files
-                    rm -rf build_dir/target-*/node-red*
-                    rm -rf build_dir/target-*/packages/node-red*
-                    find staging_dir -name "node-red" -type d -exec rm -rf {} + 2>/dev/null || true
+                    # Clean node-red package to force rebuild with new React files (safe for clean builds)
+                    [ -d build_dir ] && rm -rf build_dir/target-*/node-red* || true
+                    [ -d build_dir ] && rm -rf build_dir/target-*/packages/node-red* || true
+                    [ -d staging_dir ] && find staging_dir -name "node-red" -type d -exec rm -rf {} + 2>/dev/null || true
 
                     echo "✓ Node-RED build cache cleared"
                 '''
@@ -145,12 +145,13 @@ pipeline {
                     echo "=== Applying Rust Artifact Fix ==="
                     # FIX: Disable downloading expired CI artifacts
                     sed -i 's/llvm.download-ci-llvm=true/llvm.download-ci-llvm=false/g' feeds/packages/lang/rust/Makefile
-                    
+
                     echo "=== Ensuring Rust Rebuilds ==="
-                    find staging_dir -path "*rust*" -name ".built" -delete
-                    find staging_dir -path "*rust*" -name ".prepared" -delete
-                    find build_dir -path "*rust*" -name ".built" -delete
-                    rm -rf build_dir/host/rust*
+                    # Only clean if directories exist (safe for clean builds)
+                    [ -d staging_dir ] && find staging_dir -path "*rust*" -name ".built" -delete 2>/dev/null || true
+                    [ -d staging_dir ] && find staging_dir -path "*rust*" -name ".prepared" -delete 2>/dev/null || true
+                    [ -d build_dir ] && find build_dir -path "*rust*" -name ".built" -delete 2>/dev/null || true
+                    [ -d build_dir ] && rm -rf build_dir/host/rust* || true
                 '''
             }
         }
