@@ -224,9 +224,34 @@ pipeline {
             }
         }
         
-        stage('Archive') {
+        stage('9. Verify Artifacts') {
             steps {
-                archiveArtifacts artifacts: 'openwrt/bin/targets/**/*.img.gz, openwrt/bin/targets/**/*.img, openwrt/bin/targets/**/*.bin, output/logs/*.log', allowEmptyArchive: true
+                sh '''#!/bin/bash
+                    set -e
+                    cd ${WORKSPACE}
+
+                    echo "=== Verifying Build Artifacts ==="
+
+                    # Check for firmware images
+                    IMAGES=$(find openwrt/bin/targets -name "*.img.gz" -o -name "*.img" -o -name "*.bin" 2>/dev/null | wc -l)
+
+                    if [ "$IMAGES" -eq 0 ]; then
+                        echo "❌ CRITICAL ERROR: No firmware images found!"
+                        echo "Expected files in: openwrt/bin/targets/"
+                        echo "Contents of bin/targets:"
+                        ls -R openwrt/bin/targets/ || echo "Directory does not exist"
+                        exit 1
+                    fi
+
+                    echo "✓ Found $IMAGES firmware image(s)"
+                    find openwrt/bin/targets -name "*.img.gz" -o -name "*.img" -o -name "*.bin"
+                '''
+            }
+        }
+
+        stage('10. Archive') {
+            steps {
+                archiveArtifacts artifacts: 'openwrt/bin/targets/**/*.img.gz, openwrt/bin/targets/**/*.img, openwrt/bin/targets/**/*.bin, output/logs/*.log', allowEmptyArchive: false
             }
         }
 
