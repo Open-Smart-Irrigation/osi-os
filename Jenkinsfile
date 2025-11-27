@@ -82,7 +82,6 @@ pipeline {
                 sh '''#!/bin/bash
                     set -e
                     cd ${WORKSPACE}/web/react-gui
-
                     echo "=== Building Open Smart Irrigation React Application ==="
 
                     # Check if Node.js is available
@@ -209,9 +208,17 @@ pipeline {
                 sh '''#!/bin/bash
                     set -e
                     export FORCE_UNSAFE_CONFIGURE=1
+
+                    # --- CRITICAL MEMORY SETTINGS FOR RUST PACKAGES ---
+                    # Limit Cargo (Rust) to 2 parallel jobs for chirpstack compilation
+                    export CARGO_BUILD_JOBS=2
+                    # Limit CMake/Ninja (LLVM) to 2 parallel jobs
+                    export CMAKE_BUILD_PARALLEL_LEVEL=2
+
                     cd ${WORKSPACE}/openwrt
-                    
+
                     echo "=== Building Final Image ==="
+                    echo "Memory limits set: CARGO_BUILD_JOBS=2 (prevents OOM during chirpstack build)"
                     make -j1 world 2>&1 | tee ../logs/build_main.log
                 '''
             }
