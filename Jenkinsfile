@@ -203,28 +203,99 @@ pipeline {
         }
 
 
-        stage('8. Finish Firmware') {
+        stage('8. Build Chirpstack Dependencies') {
             steps {
                 sh '''#!/bin/bash
                     set -e
+                    set -o pipefail
+                    export FORCE_UNSAFE_CONFIGURE=1
+
+                    cd ${WORKSPACE}/openwrt
+
+                    echo "=== Building Chirpstack Dependencies ==="
+
+                    # Build protobuf for host (required for chirpstack code generation)
+                    echo "Building protobuf/host..."
+                    if ! make package/feeds/packages/protobuf/host/compile -j2 V=s 2>&1 | tee ../logs/protobuf_host.log; then
+                        echo "❌ protobuf/host failed - check logs/protobuf_host.log"
+                        tail -50 ../logs/protobuf_host.log
+                        exit 1
+                    fi
+
+                    # Build node-yarn for host (required for chirpstack UI build)
+                    echo "Building node-yarn/host..."
+                    if ! make package/feeds/packages/node-yarn/host/compile -j2 V=s 2>&1 | tee ../logs/node_yarn_host.log; then
+                        echo "❌ node-yarn/host failed - check logs/node_yarn_host.log"
+                        tail -50 ../logs/node_yarn_host.log
+                        exit 1
+                    fi
+
+                    echo "✓ Chirpstack dependencies built successfully."
+                '''
+            }
+        }
+
+        stage('9. Compile Chirpstack') {
+            steps {
+                sh '''#!/bin/bash
+                    set -e
+                    set -o pipefail
                     export FORCE_UNSAFE_CONFIGURE=1
 
                     # --- CRITICAL MEMORY SETTINGS FOR RUST PACKAGES ---
-                    # Limit Cargo (Rust) to 2 parallel jobs for chirpstack compilation
                     export CARGO_BUILD_JOBS=2
-                    # Limit CMake/Ninja (LLVM) to 2 parallel jobs
                     export CMAKE_BUILD_PARALLEL_LEVEL=2
 
                     cd ${WORKSPACE}/openwrt
 
-                    echo "=== Building Final Image ==="
-                    echo "Memory limits set: CARGO_BUILD_JOBS=2 (prevents OOM during chirpstack build)"
-                    make -j1 world 2>&1 | tee ../logs/build_main.log
+                    echo "=== Compiling Chirpstack (Verbose Mode) ==="
+                    echo "Memory limits: CARGO_BUILD_JOBS=2, CMAKE_BUILD_PARALLEL_LEVEL=2"
+
+                    # Compile chirpstack with full verbose output
+                    if ! make package/feeds/chirpstack/chirpstack/compile -j1 V=s 2>&1 | tee ../logs/chirpstack_build.log; then
+                        echo ""
+                        echo "❌❌❌ CHIRPSTACK COMPILATION FAILED ❌❌❌"
+                        echo "Full log saved to: logs/chirpstack_build.log"
+                        echo ""
+                        echo "=== Last 100 lines of error log ==="
+                        tail -100 ../logs/chirpstack_build.log
+                        exit 1
+                    fi
+
+                    echo "✓ Chirpstack compiled successfully."
+                '''
+            }
+        }
+
+        stage('10. Finish Firmware') {
+            steps {
+                sh '''#!/bin/bash
+                    set -e
+                    set -o pipefail
+                    export FORCE_UNSAFE_CONFIGURE=1
+
+                    # --- CRITICAL MEMORY SETTINGS FOR RUST PACKAGES ---
+                    export CARGO_BUILD_JOBS=2
+                    export CMAKE_BUILD_PARALLEL_LEVEL=2
+
+                    cd ${WORKSPACE}/openwrt
+
+                    echo "=== Building Final Image (Verbose Mode) ==="
+                    echo "Memory limits set: CARGO_BUILD_JOBS=2"
+
+                    # Build with verbose output to capture detailed logs
+                    if ! make -j1 V=s world 2>&1 | tee ../logs/build_main.log; then
+                        echo "❌ Firmware build failed - check logs/build_main.log"
+                        tail -100 ../logs/build_main.log
+                        exit 1
+                    fi
+
+                    echo "✓ Firmware built successfully."
                 '''
             }
         }
         
-        stage('9. Verify Artifacts') {
+        stage('11. Verify Artifacts') {
             steps {
                 sh '''#!/bin/bash
                     set -e
@@ -249,11 +320,24 @@ pipeline {
             }
         }
 
-        stage('10. Archive') {
+        stage('12. Archive') {
             steps {
                 archiveArtifacts artifacts: 'openwrt/bin/targets/**/*.img.gz, openwrt/bin/targets/**/*.img, openwrt/bin/targets/**/*.bin, output/logs/*.log', allowEmptyArchive: false
             }
         }
 
+    }
+
+    post {
+        always {
+            // Always archive logs, even on failure
+            archiveArtifacts artifacts: 'logs/*.log, output/logs/*.log', allowEmptyArchive: true, fingerprint: true
+        }
+        failure {
+            echo '❌ Build failed! Check the archived logs for details.'
+        }
+        success {
+            echo '✓ Build completed successfully!'
+        }
     }
 }
