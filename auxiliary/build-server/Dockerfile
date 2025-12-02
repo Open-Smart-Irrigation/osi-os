@@ -49,6 +49,8 @@ RUN apt-get update && apt-get install -y \
     cmake \
     zstd \
     xz-utils \
+    libclang-dev \
+    protobuf-compiler \
     && rm -rf /var/lib/apt/lists/*
 
 # Verify Node.js installation

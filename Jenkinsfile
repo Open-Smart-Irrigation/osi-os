@@ -269,24 +269,22 @@ pipeline {
 
         stage('10. Finish Firmware') {
             steps {
+                // Force using bash to ensure pipefail works, OR remove pipe entirely
                 sh '''#!/bin/bash
                     set -e
                     set -o pipefail
-                    export FORCE_UNSAFE_CONFIGURE=1
 
-                    # --- CRITICAL MEMORY SETTINGS FOR RUST PACKAGES ---
-                    export CARGO_BUILD_JOBS=2
-                    export CMAKE_BUILD_PARALLEL_LEVEL=2
-
-                    cd ${WORKSPACE}/openwrt
+                    # ... exports ...
 
                     echo "=== Building Final Image (Verbose Mode) ==="
-                    echo "Memory limits set: CARGO_BUILD_JOBS=2"
 
-                    # Build with verbose output to capture detailed logs
+                    # METHOD A: Remove tee (Logs are already captured by Jenkins console)
+                    # make -j1 V=s world
+
+                    # METHOD B: Keep tee but ensure bash + pipefail works
+                    # We use a trap to ensure we see the error
                     if ! make -j1 V=s world 2>&1 | tee ../logs/build_main.log; then
-                        echo "❌ Firmware build failed - check logs/build_main.log"
-                        tail -100 ../logs/build_main.log
+                        echo "❌ Firmware build failed!"
                         exit 1
                     fi
 
