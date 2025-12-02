@@ -5,7 +5,7 @@ module.exports = {
 
     // Serve React GUI at /gui path
     httpStatic: '/usr/lib/node-red/gui',
-    httpStaticRoot: '/gui/',
+    httpStaticRoot: '/gui',
 
     mqttReconnectTime: 15000,
     serialReconnectTime: 15000,
