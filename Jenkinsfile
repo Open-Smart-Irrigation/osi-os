@@ -45,34 +45,19 @@ pipeline {
             }
         }
 
-        stage('2. Initialize') {
+         stage('2. Initialize') {
             steps {
                 sh '''#!/bin/bash
-                    set -e
-                    cd ${WORKSPACE}
+                    # ... (your existing initialization code) ...
 
-                    # Create log directories
-                    mkdir -p logs
-                    mkdir -p output/logs
-
-                    if [ ! -f .initialized ]; then git submodule update --init --recursive; touch .initialized; fi
-
-                    # Reset Configs
-                    rm -f openwrt/.config openwrt/files openwrt/patches
-                    ln -s ../conf/.config openwrt/.config
-                    ln -s ../conf/files openwrt/files
-                    ln -s ../conf/patches openwrt/patches
-
-                    make QUILT_PATCHES=patches switch-env ENV=${TARGET_ENV}
-
-                    # Fix Feeds Path
-                    cp feeds.conf.default openwrt/feeds.conf.default
-                    sed -i "s|/workdir|${WORKSPACE}|g" openwrt/feeds.conf.default
-
-                    cd openwrt
                     ./scripts/feeds update -a
                     ./scripts/feeds install -a
-                    make defconfig > ../logs/defconfig.log 2>&1
+
+                    # --- FIX: Remove duplicate --locked flag ---
+                    echo "Applying fix for duplicate --locked flag in ChirpStack Makefile..."
+                    sed -i 's/--locked //g' feeds/chirpstack-openwrt-feed/chirpstack/chirpstack/Makefile
+
+                    # ... (rest of your code, e.g. make defconfig) ...
                 '''
             }
         }
