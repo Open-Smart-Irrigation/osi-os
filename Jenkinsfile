@@ -46,32 +46,27 @@ pipeline {
         }
 
           stage('2. Initialize') {
-             steps {
-                 sh '''#!/bin/bash
-                     set -e
-                     cd ${WORKSPACE}
+              steps {
+                  sh '''#!/bin/bash
+                      set -e
+                      cd ${WORKSPACE}
 
-                     # ... (standard init) ...
+                      # ... (git submodule update, etc.) ...
 
-                     if [ ! -f .initialized ]; then git submodule update --init --recursive; touch .initialized; fi
+                      # Update feeds
+                      ./scripts/feeds update -a
+                      ./scripts/feeds install -a
 
-                     # ... (config setup) ...
+                      # === FIX: Remove duplicate --locked flag from ALL ChirpStack Makefiles ===
+                      # This finds every Makefile in the feed and removes "--locked" to avoid the
+                      # conflict with the new OpenWrt build system which adds it automatically.
+                      echo "Applying global fix for duplicate --locked flag..."
+                      find feeds/chirpstack-openwrt-feed -name "Makefile" -exec sed -i 's/--locked//g' {} +
 
-                     # Update feeds
-                     ./scripts/feeds update -a
-                     ./scripts/feeds install -a
-
-                     # === GLOBAL FIX ===
-                     # Recursively find ALL Makefiles in the chirpstack feed
-                     # and remove the hardcoded "--locked" flag to prevent duplicates.
-                     echo "Applying global fix for duplicate --locked flag..."
-                     find feeds/chirpstack-openwrt-feed -name "Makefile" -exec sed -i 's/--locked//g' {} +
-
-                     # ... (rest of stage: make defconfig etc.) ...
-                     make defconfig > ../logs/defconfig.log 2>&1
-                 '''
-             }
-         }
+                      # ... (make defconfig, etc.) ...
+                  '''
+              }
+          }
 
         stage('3. Build React GUI') {
             steps {
