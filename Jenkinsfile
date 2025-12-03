@@ -254,21 +254,20 @@ pipeline {
 
         stage('10. Finish Firmware') {
             steps {
-                // Force using bash to ensure pipefail works, OR remove pipe entirely
                 sh '''#!/bin/bash
                     set -e
                     set -o pipefail
 
-                    # ... exports ...
+                    # Ensure we are in the correct directory
+                    cd ${WORKSPACE}/openwrt
+
+                    # Ensure the log directory exists (using absolute path to be safe)
+                    mkdir -p ${WORKSPACE}/logs
 
                     echo "=== Building Final Image (Verbose Mode) ==="
 
-                    # METHOD A: Remove tee (Logs are already captured by Jenkins console)
-                    # make -j1 V=s world
-
-                    # METHOD B: Keep tee but ensure bash + pipefail works
-                    # We use a trap to ensure we see the error
-                    if ! make -j1 V=s world 2>&1 | tee ../logs/build_main.log; then
+                    # Use absolute path for the log file to avoid relative path confusion
+                    if ! make -j1 V=s world 2>&1 | tee ${WORKSPACE}/logs/build_main.log; then
                         echo "❌ Firmware build failed!"
                         exit 1
                     fi
@@ -277,6 +276,7 @@ pipeline {
                 '''
             }
         }
+
         
         stage('11. Verify Artifacts') {
             steps {
