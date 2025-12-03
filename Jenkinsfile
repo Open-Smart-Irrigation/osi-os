@@ -83,8 +83,7 @@ pipeline {
                    # === GLOBAL FIX for duplicate --locked flags ===
                    # We are now inside 'openwrt/', so 'feeds/' is a valid relative path.
                    echo "Applying global fix for duplicate --locked flag..."
-                   find feeds/chirpstack-openwrt-feed -name "Makefile" -exec sed -i 's/--locked//g' {} +
-
+                    find feeds/chirpstack -name "Makefile" -exec sed -i 's/--locked//g' {} +
                    # Generate Config
                    make defconfig > ../logs/defconfig.log 2>&1
                '''
