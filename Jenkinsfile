@@ -45,22 +45,33 @@ pipeline {
             }
         }
 
-         stage('2. Initialize') {
-            steps {
-                sh '''#!/bin/bash
-                    # ... (your existing initialization code) ...
+          stage('2. Initialize') {
+             steps {
+                 sh '''#!/bin/bash
+                     set -e
+                     cd ${WORKSPACE}
 
-                    ./scripts/feeds update -a
-                    ./scripts/feeds install -a
+                     # ... (standard init) ...
 
-                    # --- FIX: Remove duplicate --locked flag ---
-                    echo "Applying fix for duplicate --locked flag in ChirpStack Makefile..."
-                    sed -i 's/--locked //g' feeds/chirpstack-openwrt-feed/chirpstack/chirpstack/Makefile
+                     if [ ! -f .initialized ]; then git submodule update --init --recursive; touch .initialized; fi
 
-                    # ... (rest of your code, e.g. make defconfig) ...
-                '''
-            }
-        }
+                     # ... (config setup) ...
+
+                     # Update feeds
+                     ./scripts/feeds update -a
+                     ./scripts/feeds install -a
+
+                     # === GLOBAL FIX ===
+                     # Recursively find ALL Makefiles in the chirpstack feed
+                     # and remove the hardcoded "--locked" flag to prevent duplicates.
+                     echo "Applying global fix for duplicate --locked flag..."
+                     find feeds/chirpstack-openwrt-feed -name "Makefile" -exec sed -i 's/--locked//g' {} +
+
+                     # ... (rest of stage: make defconfig etc.) ...
+                     make defconfig > ../logs/defconfig.log 2>&1
+                 '''
+             }
+         }
 
         stage('3. Build React GUI') {
             steps {
