@@ -249,21 +249,23 @@ pipeline {
         }
 
         stage('9. Compile Chirpstack') {
-            steps {
+    steps {
                 sh '''#!/bin/bash
                     set -e
                     set -o pipefail
                     export FORCE_UNSAFE_CONFIGURE=1
-
                     # --- CRITICAL MEMORY SETTINGS FOR RUST PACKAGES ---
                     export CARGO_BUILD_JOBS=2
                     export CMAKE_BUILD_PARALLEL_LEVEL=2
-
                     cd ${WORKSPACE}/openwrt
-
                     echo "=== Compiling Chirpstack (Verbose Mode) ==="
                     echo "Memory limits: CARGO_BUILD_JOBS=2, CMAKE_BUILD_PARALLEL_LEVEL=2"
-
+        
+                    # Fix the duplicate --locked flag issue
+                    echo "Applying fix for duplicate --locked flag..."
+                    find . -name "Makefile" -exec sed -i 's/--locked --locked/--locked/g' {} +
+                    find . -name "Makefile" -exec sed -i 's/--locked --locked --locked/--locked/g' {} +
+        
                     # Compile chirpstack with full verbose output
                     if ! make package/feeds/chirpstack/chirpstack/compile -j1 V=s 2>&1 | tee ../logs/chirpstack_build.log; then
                         echo ""
@@ -274,7 +276,6 @@ pipeline {
                         tail -100 ../logs/chirpstack_build.log
                         exit 1
                     fi
-
                     echo "✓ Chirpstack compiled successfully."
                 '''
             }
