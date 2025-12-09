@@ -155,27 +155,28 @@ pipeline {
                 sh '''#!/bin/bash
                     set -e
                     export FORCE_UNSAFE_CONFIGURE=1
-                    
+        
                     # --- CRITICAL MEMORY SETTINGS ---
                     # Limit Cargo (Rust) to 2 parallel jobs
                     export CARGO_BUILD_JOBS=2
                     # Limit CMake/Ninja (LLVM) to 2 parallel jobs
                     export CMAKE_BUILD_PARALLEL_LEVEL=2
-                    
+        
                     cd ${WORKSPACE}/openwrt
-                    
+        
+                    # Fix duplicate --locked flag
+                    find . -name "Makefile" -exec sed -i 's/--locked --locked/--locked/g' {} \;
+        
                     echo "=== Compiling Rust (Source Mode) ==="
                     echo "Detected 8GB RAM + Swap. Throttling build to prevent OOM."
-                    
-                    # We use -j2 here to match the exports above. 
-                    # -j1 is too safe/slow, -j4 might crash. -j2 is the sweet spot for 24GB virt mem.
+        
                     if ! make package/feeds/packages/rust/compile -j2 V=s 2>&1 | tee ../logs/rust_verbose.log; then
                         echo ""
                         echo "❌❌❌ RUST FAILED ❌❌❌"
                         echo "The error log is printed above."
                         exit 1
                     fi
-                    
+        
                     echo "✓ Rust compiled successfully."
                 '''
             }
