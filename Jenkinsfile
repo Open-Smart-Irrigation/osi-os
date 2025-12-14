@@ -56,6 +56,17 @@ pipeline {
                           # 3. ENTER OPENWRT DIRECTORY
                           cd openwrt
 
+                          # Fix feeds.conf to use correct workspace paths
+                          echo "=== Configuring feeds with correct workspace paths ==="
+                          cat > feeds.conf << EOF
+src-git packages https://git.openwrt.org/feed/packages.git^d8cd30f4e281d6853b3de134c4f147a807583e43
+src-git luci https://git.openwrt.org/project/luci.git^2ac26e56cc55102cb10e7b0867c2b78e0f6d5fd8
+src-git routing https://git.openwrt.org/feed/routing.git^c9b636698881059a3c981032770968f5a98ff201
+src-link chirpstack ${WORKSPACE}/feeds/chirpstack-openwrt-feed
+src-link custom ${WORKSPACE}/feeds/custom-feed
+EOF
+                          echo "✓ Created feeds.conf with workspace paths"
+
                           # Update & Install Feeds
                           ./scripts/feeds update -a
                           ./scripts/feeds install -a
