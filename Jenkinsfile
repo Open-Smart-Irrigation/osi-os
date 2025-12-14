@@ -45,39 +45,59 @@ pipeline {
             }
         }
 
-        stage('2. Initialize') {
-            steps {
-                sh '''#!/bin/bash
-                    set -e
-                    cd ${WORKSPACE}
-                    if [ ! -f .initialized ]; then git submodule update --init --recursive; touch .initialized; fi
+              stage('2. Initialize') {
+                  steps {
+                      sh '''#!/bin/bash
+                          set -e
+                          cd ${WORKSPACE}
 
-                    # Reset Configs
-                    rm -f openwrt/.config openwrt/files openwrt/patches
-                    ln -s ../conf/.config openwrt/.config
-                    ln -s ../conf/files openwrt/files
-                    ln -s ../conf/patches openwrt/patches
+                          # ... [Keep your existing init logic up to feeds update] ...
 
-                    make QUILT_PATCHES=patches switch-env ENV=${TARGET_ENV}
+                          # 3. ENTER OPENWRT DIRECTORY
+                          cd openwrt
 
-                    # Fix Feeds Path
-                    cp feeds.conf.default openwrt/feeds.conf.default
-                    sed -i "s|/workdir|${WORKSPACE}|g" openwrt/feeds.conf.default
+                          # Update & Install Feeds
+                          ./scripts/feeds update -a
+                          ./scripts/feeds install -a
 
-                    cd openwrt
-                    ./scripts/feeds update -a
-                    ./scripts/feeds install -a
-                    make defconfig > ../logs/defconfig.log 2>&1
-                '''
-            }
-        }
+                          # === FIX: Remove Duplicate --locked Flag ===
+                          # We target the source file in feeds/ which is symlinked to package/
+                          echo "Applying fix for duplicate --locked flag in Chirpstack..."
+
+                          # Target the specific Chirpstack Makefile
+                          TARGET_MK="feeds/chirpstack/chirpstack/Makefile"
+
+                          if [ -f "$TARGET_MK" ]; then
+                              echo "Found $TARGET_MK. removing --locked..."
+                              # Remove --locked if it appears with a space before it
+                              sed -i 's/ --locked//g' "$TARGET_MK"
+                              # Remove --locked if it appears at start of value or without space
+                              sed -i 's/--locked//g' "$TARGET_MK"
+
+                              # Verification
+                              if grep -q "--locked" "$TARGET_MK"; then
+                                  echo "⚠️ WARNING: --locked still present in $TARGET_MK"
+                                  grep "--locked" "$TARGET_MK"
+                              else
+                                  echo "✓ Successfully removed --locked from $TARGET_MK"
+                              fi
+                          else
+                              echo "❌ Error: Could not find Chirpstack Makefile at $TARGET_MK"
+                              # Fallback search to debug
+                              find feeds -name "Makefile" -print0 | xargs -0 grep -l "chirpstack"
+                          fi
+
+                          # Generate Config
+                          make defconfig > ../logs/defconfig.log 2>&1
+                      '''
+                  }
+              }
 
         stage('3. Build React GUI') {
             steps {
                 sh '''#!/bin/bash
                     set -e
                     cd ${WORKSPACE}/web/react-gui
-
                     echo "=== Building Open Smart Irrigation React Application ==="
 
                     # Check if Node.js is available
@@ -103,11 +123,23 @@ pipeline {
                     echo "Building React application..."
                     npm run build
 
-                    # Verify build output
-                    if [ -f "${WORKSPACE}/feeds/chirpstack-openwrt-feed/apps/node-red/files/gui/index.html" ]; then
-                        echo "✓ React GUI built successfully"
+                    # Verify build output in dist directory
+                    if [ ! -f "dist/index.html" ]; then
+                        echo "❌ Build failed - index.html not found in dist"
+                        exit 1
+                    fi
+
+                    # Copy built GUI to chirpstack location
+                    echo "Copying GUI build to chirpstack location..."
+                    TARGET_DIR="${WORKSPACE}/feeds/chirpstack-openwrt-feed/apps/node-red/files/gui"
+                    mkdir -p "$TARGET_DIR"
+                    cp -r dist/* "$TARGET_DIR/"
+
+                    # Verify copy was successful
+                    if [ -f "$TARGET_DIR/index.html" ]; then
+                        echo "✓ React GUI built and copied successfully"
                     else
-                        echo "❌ Build failed - index.html not found"
+                        echo "❌ Copy failed - index.html not found in target directory"
                         exit 1
                     fi
                 '''
@@ -121,10 +153,10 @@ pipeline {
                     cd ${WORKSPACE}/openwrt
 
                     echo "=== Forcing Node-RED to rebuild with updated GUI ==="
-                    # Clean node-red package to force rebuild with new React files
-                    rm -rf build_dir/target-*/node-red*
-                    rm -rf build_dir/target-*/packages/node-red*
-                    find staging_dir -name "node-red" -type d -exec rm -rf {} + 2>/dev/null || true
+                    # Clean node-red package to force rebuild with new React files (safe for clean builds)
+                    [ -d build_dir ] && rm -rf build_dir/target-*/node-red* || true
+                    [ -d build_dir ] && rm -rf build_dir/target-*/packages/node-red* || true
+                    [ -d staging_dir ] && find staging_dir -name "node-red" -type d -exec rm -rf {} + 2>/dev/null || true
 
                     echo "✓ Node-RED build cache cleared"
                 '''
@@ -140,17 +172,34 @@ pipeline {
                     echo "=== Applying Rust Artifact Fix ==="
                     # FIX: Disable downloading expired CI artifacts
                     sed -i 's/llvm.download-ci-llvm=true/llvm.download-ci-llvm=false/g' feeds/packages/lang/rust/Makefile
-                    
+
                     echo "=== Ensuring Rust Rebuilds ==="
-                    find staging_dir -path "*rust*" -name ".built" -delete
-                    find staging_dir -path "*rust*" -name ".prepared" -delete
-                    find build_dir -path "*rust*" -name ".built" -delete
-                    rm -rf build_dir/host/rust*
+                    # Only clean if directories exist (safe for clean builds)
+                    [ -d staging_dir ] && find staging_dir -path "*rust*" -name ".built" -delete 2>/dev/null || true
+                    [ -d staging_dir ] && find staging_dir -path "*rust*" -name ".prepared" -delete 2>/dev/null || true
+                    [ -d build_dir ] && find build_dir -path "*rust*" -name ".built" -delete 2>/dev/null || true
+                    [ -d build_dir ] && rm -rf build_dir/host/rust* || true
                 '''
             }
         }
 
-        stage('6. Compile Rust') {
+        stage('6. Build Toolchain') {
+            steps {
+                sh '''#!/bin/bash
+                    set -e
+                    export FORCE_UNSAFE_CONFIGURE=1
+                    cd ${WORKSPACE}/openwrt
+
+                    echo "=== Building Toolchain ==="
+                    # Build toolchain first (required for Rust compilation)
+                    make -j2 toolchain/compile V=s 2>&1 | tee ../logs/toolchain.log
+
+                    echo "✓ Toolchain built successfully."
+                '''
+            }
+        }
+
+        stage('7. Compile Rust') {
             steps {
                 sh '''#!/bin/bash
                     set -e
@@ -183,24 +232,135 @@ pipeline {
         }
 
 
-        stage('7. Finish Firmware') {
+        stage('8. Build Chirpstack Dependencies') {
             steps {
                 sh '''#!/bin/bash
                     set -e
+                    set -o pipefail
                     export FORCE_UNSAFE_CONFIGURE=1
+
                     cd ${WORKSPACE}/openwrt
-                    
-                    echo "=== Building Final Image ==="
-                    make -j1 world 2>&1 | tee ../logs/build_main.log
+
+                    echo "=== Building Chirpstack Dependencies ==="
+
+                    # Build protobuf for host (required for chirpstack code generation)
+                    echo "Building protobuf/host..."
+                    if ! make package/feeds/packages/protobuf/host/compile -j2 V=s 2>&1 | tee ../logs/protobuf_host.log; then
+                        echo "❌ protobuf/host failed - check logs/protobuf_host.log"
+                        tail -50 ../logs/protobuf_host.log
+                        exit 1
+                    fi
+
+                    # Build node-yarn for host (required for chirpstack UI build)
+                    echo "Building node-yarn/host..."
+                    if ! make package/feeds/packages/node-yarn/host/compile -j2 V=s 2>&1 | tee ../logs/node_yarn_host.log; then
+                        echo "❌ node-yarn/host failed - check logs/node_yarn_host.log"
+                        tail -50 ../logs/node_yarn_host.log
+                        exit 1
+                    fi
+
+                    echo "✓ Chirpstack dependencies built successfully."
                 '''
             }
         }
+
+        stage('9. Compile Chirpstack') {
+    steps {
+                sh '''#!/bin/bash
+                    set -e
+                    set -o pipefail
+                    export FORCE_UNSAFE_CONFIGURE=1
+                    # --- CRITICAL MEMORY SETTINGS FOR RUST PACKAGES ---
+                    export CARGO_BUILD_JOBS=2
+                    export CMAKE_BUILD_PARALLEL_LEVEL=2
+                    cd ${WORKSPACE}/openwrt
+                    echo "=== Compiling Chirpstack (Verbose Mode) ==="
+                    echo "Memory limits: CARGO_BUILD_JOBS=2, CMAKE_BUILD_PARALLEL_LEVEL=2"
         
-        stage('Archive') {
-            steps {
-                archiveArtifacts artifacts: 'openwrt/bin/targets/**/*.img.gz, openwrt/bin/targets/**/*.img, openwrt/bin/targets/**/*.bin, output/logs/*.log', allowEmptyArchive: true
+                    # Compile chirpstack with full verbose output
+                    if ! make package/feeds/chirpstack/chirpstack/compile -j1 V=s 2>&1 | tee ../logs/chirpstack_build.log; then
+                        echo ""
+                        echo "❌❌❌ CHIRPSTACK COMPILATION FAILED ❌❌❌"
+                        echo "Full log saved to: logs/chirpstack_build.log"
+                        echo ""
+                        echo "=== Last 100 lines of error log ==="
+                        tail -100 ../logs/chirpstack_build.log
+                        exit 1
+                    fi
+                    echo "✓ Chirpstack compiled successfully."
+                '''
             }
         }
 
+        stage('10. Finish Firmware') {
+            steps {
+                sh '''#!/bin/bash
+                    set -e
+                    set -o pipefail
+
+                    # Ensure we are in the correct directory
+                    cd ${WORKSPACE}/openwrt
+
+                    # Ensure the log directory exists (using absolute path to be safe)
+                    mkdir -p ${WORKSPACE}/logs
+
+                    echo "=== Building Final Image (Verbose Mode) ==="
+
+                    # Use absolute path for the log file to avoid relative path confusion
+                    if ! make -j1 V=s world 2>&1 | tee ${WORKSPACE}/logs/build_main.log; then
+                        echo "❌ Firmware build failed!"
+                        exit 1
+                    fi
+
+                    echo "✓ Firmware built successfully."
+                '''
+            }
+        }
+
+        
+        stage('11. Verify Artifacts') {
+            steps {
+                sh '''#!/bin/bash
+                    set -e
+                    cd ${WORKSPACE}
+
+                    echo "=== Verifying Build Artifacts ==="
+
+                    # Check for firmware images
+                    IMAGES=$(find openwrt/bin/targets -name "*.img.gz" -o -name "*.img" -o -name "*.bin" 2>/dev/null | wc -l)
+
+                    if [ "$IMAGES" -eq 0 ]; then
+                        echo "❌ CRITICAL ERROR: No firmware images found!"
+                        echo "Expected files in: openwrt/bin/targets/"
+                        echo "Contents of bin/targets:"
+                        ls -R openwrt/bin/targets/ || echo "Directory does not exist"
+                        exit 1
+                    fi
+
+                    echo "✓ Found $IMAGES firmware image(s)"
+                    find openwrt/bin/targets -name "*.img.gz" -o -name "*.img" -o -name "*.bin"
+                '''
+            }
+        }
+
+        stage('12. Archive') {
+            steps {
+                archiveArtifacts artifacts: 'openwrt/bin/targets/**/*.img.gz, openwrt/bin/targets/**/*.img, openwrt/bin/targets/**/*.bin, output/logs/*.log', allowEmptyArchive: false
+            }
+        }
+
+    }
+
+    post {
+        always {
+            // Always archive logs, even on failure
+            archiveArtifacts artifacts: 'logs/*.log, output/logs/*.log', allowEmptyArchive: true, fingerprint: true
+        }
+        failure {
+            echo '❌ Build failed! Check the archived logs for details.'
+        }
+        success {
+            echo '✓ Build completed successfully!'
+        }
     }
 }

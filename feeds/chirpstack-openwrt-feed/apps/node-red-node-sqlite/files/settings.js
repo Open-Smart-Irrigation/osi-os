@@ -4,6 +4,7 @@ module.exports = {
     // Add the static file path here.
     // This matches the install path from the Makefile instructions below.
     httpStatic: '/usr/lib/node-red/files/gui',
+    httpStaticRoot: '/gui',
 
     mqttReconnectTime: 15000,
     serialReconnectTime: 15000,

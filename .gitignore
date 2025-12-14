@@ -8,3 +8,5 @@
 /conf/.config
 /conf/files
 /conf/patches
+/feeds/chirpstack-openwrt-feed/apps/node-red/files/gui/
+/feeds/chirpstack-openwrt-feed/apps/node-red/files/gui/index.html

@@ -1,4 +1,4 @@
-FROM jenkins/jenkins:lts
+FROM jenkins/jenkins:lts-jdk17
 
 USER root
 
@@ -26,6 +26,7 @@ RUN apt-get update && apt-get install -y \
     autoconf \
     texinfo \
     unzip \
+    zip \
     sharutils \
     subversion \
     ncurses-dev \
@@ -49,6 +50,8 @@ RUN apt-get update && apt-get install -y \
     cmake \
     zstd \
     xz-utils \
+    libclang-dev \
+    protobuf-compiler \
     && rm -rf /var/lib/apt/lists/*
 
 # Verify Node.js installation
