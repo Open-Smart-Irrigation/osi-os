@@ -214,7 +214,7 @@ pipeline {
                     cd ${WORKSPACE}/openwrt
         
                     # Fix duplicate --locked flag
-                    find . -name "Makefile" -exec sed -i 's/--locked --locked/--locked/g' {} \;
+                    find . -name "Makefile" -exec sed -i 's/--locked --locked/--locked/g' {} +
         
                     echo "=== Compiling Rust (Source Mode) ==="
                     echo "Detected 8GB RAM + Swap. Throttling build to prevent OOM."
