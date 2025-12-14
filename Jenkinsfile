@@ -72,14 +72,14 @@ EOF
                           ./scripts/feeds install -a
 
                           # === FIX: Remove Duplicate --locked Flag ===
-                          # We target the source file in feeds/ which is symlinked to package/
                           echo "Applying fix for duplicate --locked flag in Chirpstack..."
 
-                          # Target the specific Chirpstack Makefile
-                          TARGET_MK="feeds/chirpstack/chirpstack/Makefile"
+                          # OpenWRT feeds install creates symlinks in package/feeds/, not feeds/
+                          # So we fix the source file directly
+                          TARGET_MK="${WORKSPACE}/feeds/chirpstack-openwrt-feed/chirpstack/chirpstack/Makefile"
 
                           if [ -f "$TARGET_MK" ]; then
-                              echo "Found $TARGET_MK. removing --locked..."
+                              echo "Found $TARGET_MK. Removing --locked..."
                               # Remove --locked if it appears with a space before it
                               sed -i 's/ --locked//g' "$TARGET_MK"
                               # Remove --locked if it appears at start of value or without space
@@ -94,8 +94,9 @@ EOF
                               fi
                           else
                               echo "❌ Error: Could not find Chirpstack Makefile at $TARGET_MK"
-                              # Fallback search to debug
-                              find feeds -name "Makefile" -print0 | xargs -0 grep -l "chirpstack"
+                              echo "Searching for chirpstack Makefiles..."
+                              find ${WORKSPACE}/feeds -name "Makefile" -type f | grep chirpstack | head -10
+                              exit 1
                           fi
 
                           # Generate Config
