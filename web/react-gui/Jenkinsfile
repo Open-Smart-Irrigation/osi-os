@@ -38,7 +38,7 @@ pipeline {
             steps {
                 sh '''#!/bin/bash
                     set -e
-                    cd ${WORKSPACE}
+                    cd ${WORKSPACE}/web/react-gui
                     echo "=== Installing npm dependencies ==="
                     npm install
                     echo "✓ Dependencies installed successfully"
@@ -50,7 +50,7 @@ pipeline {
             steps {
                 sh '''#!/bin/bash
                     set -e
-                    cd ${WORKSPACE}
+                    cd ${WORKSPACE}/web/react-gui
                     echo "=== Building Open Smart Irrigation GUI ==="
                     npm run build
 
@@ -71,7 +71,7 @@ pipeline {
             steps {
                 sh '''#!/bin/bash
                     set -e
-                    cd ${WORKSPACE}
+                    cd ${WORKSPACE}/web/react-gui
 
                     echo "=== Creating ZIP archive ==="
 
@@ -108,7 +108,7 @@ pipeline {
 
         stage('5. Archive Artifacts') {
             steps {
-                archiveArtifacts artifacts: 'archive/*.zip', fingerprint: true
+                archiveArtifacts artifacts: 'web/react-gui/archive/*.zip', fingerprint: true
                 echo '✓ GUI build archived successfully and ready for download'
             }
         }
@@ -126,6 +126,7 @@ pipeline {
             // Clean up build artifacts but keep the archive
             sh '''#!/bin/bash
                 echo "=== Cleaning up build files ==="
+                cd ${WORKSPACE}/web/react-gui
                 rm -rf dist node_modules
                 echo "✓ Cleanup complete (archive preserved)"
             '''
