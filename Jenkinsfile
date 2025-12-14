@@ -123,11 +123,23 @@ pipeline {
                     echo "Building React application..."
                     npm run build
 
-                    # Verify build output
-                    if [ -f "${WORKSPACE}/feeds/chirpstack-openwrt-feed/apps/node-red/files/gui/index.html" ]; then
-                        echo "✓ React GUI built successfully"
+                    # Verify build output in dist directory
+                    if [ ! -f "dist/index.html" ]; then
+                        echo "❌ Build failed - index.html not found in dist"
+                        exit 1
+                    fi
+
+                    # Copy built GUI to chirpstack location
+                    echo "Copying GUI build to chirpstack location..."
+                    TARGET_DIR="${WORKSPACE}/feeds/chirpstack-openwrt-feed/apps/node-red/files/gui"
+                    mkdir -p "$TARGET_DIR"
+                    cp -r dist/* "$TARGET_DIR/"
+
+                    # Verify copy was successful
+                    if [ -f "$TARGET_DIR/index.html" ]; then
+                        echo "✓ React GUI built and copied successfully"
                     else
-                        echo "❌ Build failed - index.html not found"
+                        echo "❌ Copy failed - index.html not found in target directory"
                         exit 1
                     fi
                 '''
