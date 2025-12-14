@@ -45,50 +45,53 @@ pipeline {
             }
         }
 
-       stage('2. Initialize') {
-           steps {
-               sh '''#!/bin/bash
-                   set -e
+              stage('2. Initialize') {
+                  steps {
+                      sh '''#!/bin/bash
+                          set -e
+                          cd ${WORKSPACE}
 
-                   # 1. Go to Workspace Root to handle submodules/configs
-                   cd ${WORKSPACE}
+                          # ... [Keep your existing init logic up to feeds update] ...
 
-                   # Create log directories
-                   mkdir -p logs
-                   mkdir -p output/logs
+                          # 3. ENTER OPENWRT DIRECTORY
+                          cd openwrt
 
-                   # Initialize submodules if needed
-                   if [ ! -f .initialized ]; then git submodule update --init --recursive; touch .initialized; fi
+                          # Update & Install Feeds
+                          ./scripts/feeds update -a
+                          ./scripts/feeds install -a
 
-                   # Reset Configs (Symlinking from your config folder)
-                   rm -f openwrt/.config openwrt/files openwrt/patches
-                   ln -s ../conf/.config openwrt/.config
-                   ln -s ../conf/files openwrt/files
-                   ln -s ../conf/patches openwrt/patches
+                          # === FIX: Remove Duplicate --locked Flag ===
+                          # We target the source file in feeds/ which is symlinked to package/
+                          echo "Applying fix for duplicate --locked flag in Chirpstack..."
 
-                   # 2. Switch Environment (Make changes in root, often runs make in openwrt)
-                   make QUILT_PATCHES=patches switch-env ENV=${TARGET_ENV}
+                          # Target the specific Chirpstack Makefile
+                          TARGET_MK="feeds/chirpstack/chirpstack/Makefile"
 
-                   # Fix Feeds Path
-                   cp feeds.conf.default openwrt/feeds.conf.default
-                   sed -i "s|/workdir|${WORKSPACE}|g" openwrt/feeds.conf.default
+                          if [ -f "$TARGET_MK" ]; then
+                              echo "Found $TARGET_MK. removing --locked..."
+                              # Remove --locked if it appears with a space before it
+                              sed -i 's/ --locked//g' "$TARGET_MK"
+                              # Remove --locked if it appears at start of value or without space
+                              sed -i 's/--locked//g' "$TARGET_MK"
 
-                   # 3. ENTER OPENWRT DIRECTORY (This was missing!)
-                   cd openwrt
+                              # Verification
+                              if grep -q "--locked" "$TARGET_MK"; then
+                                  echo "⚠️ WARNING: --locked still present in $TARGET_MK"
+                                  grep "--locked" "$TARGET_MK"
+                              else
+                                  echo "✓ Successfully removed --locked from $TARGET_MK"
+                              fi
+                          else
+                              echo "❌ Error: Could not find Chirpstack Makefile at $TARGET_MK"
+                              # Fallback search to debug
+                              find feeds -name "Makefile" -print0 | xargs -0 grep -l "chirpstack"
+                          fi
 
-                   # Update & Install Feeds
-                   ./scripts/feeds update -a
-                   ./scripts/feeds install -a
-
-                   # === GLOBAL FIX for duplicate --locked flags ===
-                   # We are now inside 'openwrt/', so 'feeds/' is a valid relative path.
-                   echo "Applying global fix for duplicate --locked flag..."
-                    find feeds/chirpstack -name "Makefile" -exec sed -i 's/--locked//g' {} +
-                   # Generate Config
-                   make defconfig > ../logs/defconfig.log 2>&1
-               '''
-           }
-       }
+                          # Generate Config
+                          make defconfig > ../logs/defconfig.log 2>&1
+                      '''
+                  }
+              }
 
         stage('3. Build React GUI') {
             steps {
@@ -260,11 +263,6 @@ pipeline {
                     cd ${WORKSPACE}/openwrt
                     echo "=== Compiling Chirpstack (Verbose Mode) ==="
                     echo "Memory limits: CARGO_BUILD_JOBS=2, CMAKE_BUILD_PARALLEL_LEVEL=2"
-        
-                    # Fix the duplicate --locked flag issue
-                    echo "Applying fix for duplicate --locked flag..."
-                    find . -name "Makefile" -exec sed -i 's/--locked --locked/--locked/g' {} +
-                    find . -name "Makefile" -exec sed -i 's/--locked --locked --locked/--locked/g' {} +
         
                     # Compile chirpstack with full verbose output
                     if ! make package/feeds/chirpstack/chirpstack/compile -j1 V=s 2>&1 | tee ../logs/chirpstack_build.log; then
