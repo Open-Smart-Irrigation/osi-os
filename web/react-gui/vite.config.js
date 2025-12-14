@@ -6,7 +6,18 @@ export default defineConfig({
   base: '/gui/',  // Must match httpStaticRoot in Node-RED settings.js
   server: {
     port: 3000,
-    host: true
+    host: true,
+    proxy: {
+      // Proxy API requests to Node-RED backend
+      '/api': {
+        target: 'http://localhost:1880',
+        changeOrigin: true
+      },
+      '/auth': {
+        target: 'http://localhost:1880',
+        changeOrigin: true
+      }
+    }
   },
   build: {
     outDir: 'dist',
