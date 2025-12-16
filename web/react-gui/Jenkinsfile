@@ -77,38 +77,47 @@ pipeline {
 
                     # Create a clean archive directory
                     rm -rf archive
-                    mkdir -p archive
+                    mkdir -p archive/gui
 
-                    # Create timestamp for filename
-                    TIMESTAMP=$(date +%Y%m%d-%H%M%S)
-                    BUILD_NUM=${BUILD_NUMBER:-0}
-                    ZIP_NAME="osi-gui-${BUILD_NUM}-${TIMESTAMP}.zip"
+                    # Copy dist contents to archive
+                    echo "Adding GUI files..."
+                    cp -r dist/* archive/gui/
 
-                    # Create zip from dist directory
-                    cd dist
-                    zip -r "../archive/${ZIP_NAME}" ./*
+                    # Add farming database
+                    echo "Adding farming database..."
+                    if [ -f "farming.db" ]; then
+                        cp farming.db archive/gui/
+                        echo "✓ farming.db included"
+                    else
+                        echo "⚠ farming.db not found, skipping"
+                    fi
+
+                    # Create zip archive
+                    cd archive
+                    zip -r "osi-gui.zip" gui/*
+
+                    # Move zip up and clean up
+                    mv osi-gui.zip ..
                     cd ..
+                    rm -rf archive/gui
 
                     # Verify zip was created
-                    if [ ! -f "archive/${ZIP_NAME}" ]; then
+                    if [ ! -f "archive/osi-gui.zip" ]; then
                         echo "❌ Failed to create ZIP archive"
                         exit 1
                     fi
 
-                    ZIP_SIZE=$(du -h "archive/${ZIP_NAME}" | cut -f1)
-                    echo "✓ Created ${ZIP_NAME} (${ZIP_SIZE})"
-
-                    # Create a 'latest' symlink for convenience
-                    cd archive
-                    ln -sf "${ZIP_NAME}" osi-gui-latest.zip
-                    ls -lh
+                    ZIP_SIZE=$(du -h "archive/osi-gui.zip" | cut -f1)
+                    echo "✓ Created osi-gui.zip (${ZIP_SIZE})"
+                    echo "Contents:"
+                    unzip -l "archive/osi-gui.zip" | head -20
                 '''
             }
         }
 
         stage('5. Archive Artifacts') {
             steps {
-                archiveArtifacts artifacts: 'web/react-gui/archive/*.zip', fingerprint: true
+                archiveArtifacts artifacts: 'web/react-gui/archive/osi-gui.zip', fingerprint: true
                 echo '✓ GUI build archived successfully and ready for download'
             }
         }
