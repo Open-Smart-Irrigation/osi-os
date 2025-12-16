@@ -95,10 +95,9 @@ pipeline {
                     # Create zip archive
                     cd archive
                     zip -r "osi-gui.zip" gui/*
-
-                    # Move zip up and clean up
-                    mv osi-gui.zip ..
                     cd ..
+
+                    # Clean up temporary gui directory
                     rm -rf archive/gui
 
                     # Verify zip was created
