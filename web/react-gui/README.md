@@ -4,30 +4,96 @@ A modern React-based dashboard for monitoring smart irrigation systems with real
 
 ## Features
 
-- Real-time monitoring of soil humidity levels
-- Water flow tracking from smart valves
-- Interactive charts showing 24-hour historical data
-- Multiple sensor support with easy switching
-- Temperature monitoring
-- Valve status indicators
-- Responsive design for desktop and mobile
-- Dark theme optimized for visibility
+- 🔐 **User Authentication** - Secure login/register system
+- 📊 **Real-time Device Monitoring** - Auto-refresh every 10 seconds
+- 🌾 **Kiwi Soil Sensors** - Monitor soil water tension and light levels
+- 💧 **Strega Valve Control** - Open/close valves remotely
+- 📱 **Mobile-First Design** - Large touch targets for field use
+- 🎨 **High Contrast UI** - Optimized for outdoor visibility
+- 🗄️ **SQLite Database** - Pre-configured and ready to deploy
 
-## Getting Started
+## Quick Start
 
-### Installation
+### 1. Install Dependencies
 
 ```bash
 npm install
 ```
 
-### Development
+### 2. Database Setup (Already Done!)
+
+The database `farming.db` is **already included** with sample data:
+- **User**: username: `farmer`, password: `test123`
+- **Devices**: 1 Kiwi sensor + 1 Strega valve
+- **Sample data**: Sensor readings ready to view
+
+**No setup script needed** - the database is ready to use!
+
+<details>
+<summary>Want to recreate the database? (Optional)</summary>
+
+```bash
+node setup-database.cjs
+```
+
+This will recreate `farming.db` with fresh sample data.
+</details>
+
+### 3. Start Node-RED Backend
+
+```bash
+# Install Node-RED globally if needed
+npm install -g node-red
+
+# Start Node-RED
+node-red
+```
+
+Then:
+1. Open Node-RED at `http://localhost:1880`
+2. Go to Menu → Import
+3. Import the file `node-red-flows.json`
+4. Click **Deploy**
+
+### 4. Configure Node-RED Settings
+
+Edit your Node-RED settings file (`~/.node-red/settings.js`):
+
+```javascript
+// Add to functionGlobalContext section
+functionGlobalContext: {
+    // Import the database and auth libraries
+    ...require('/path/to/your/react-gui/node-red-init.cjs')
+}
+```
+
+**Or manually add:**
+```javascript
+functionGlobalContext: {
+    database: require('better-sqlite3')('/path/to/your/react-gui/farming.db'),
+    bcrypt: require('bcrypt'),
+    jwt: require('jsonwebtoken')
+}
+```
+
+### 5. Start React GUI
 
 ```bash
 npm run dev
 ```
 
-The application will be available at `http://localhost:3000`
+Access at: **`http://localhost:3000/gui/`**
+
+Login with: `farmer` / `test123`
+
+## For Prototyping
+
+**Good news!** You don't need to set up JWT_SECRET for prototyping. The system uses a default fallback secret automatically.
+
+For production deployment, set:
+```bash
+export JWT_SECRET=your-secure-secret-key
+```
 
 ### Production Build
 

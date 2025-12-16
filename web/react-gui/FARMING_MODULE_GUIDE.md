@@ -130,12 +130,48 @@ For valves, add:
 
 ## Running the Application
 
+### Prerequisites
+
+**1. Database Setup**
+
+The database `farming.db` is already included with sample data. No setup needed!
+
+If you need to recreate it:
+```bash
+node setup-database.cjs
+```
+
+**2. Node-RED Setup**
+
+Start Node-RED and import `node-red-flows.json`:
+```bash
+node-red
+```
+
+Then configure `~/.node-red/settings.js`:
+```javascript
+functionGlobalContext: {
+    ...require('/path/to/react-gui/node-red-init.cjs')
+}
+```
+
+**3. JWT Secret (Optional for Prototyping)**
+
+For prototyping, JWT_SECRET is **optional** - the system uses a default fallback.
+
+For production, set:
+```bash
+export JWT_SECRET=your-secure-secret-key
+```
+
 ### Development
 ```bash
 cd /Users/silvanimhof/IdeaProjects/osi-os/web/react-gui
 npm run dev
 ```
 Access at: `http://localhost:3000/gui/`
+
+Default login: `farmer` / `test123`
 
 ### Production Build
 ```bash
@@ -180,17 +216,29 @@ The app is configured with base path `/gui/` to match your Node-RED setup.
 
 ## Next Steps
 
-1. **Implement Node-RED Backend**
-   - Create the required API endpoints
-   - Set up authentication middleware
-   - Connect to your LoRaWAN devices
+1. **✅ Database Ready**
+   - Database `farming.db` is included with sample data
+   - Default user: `farmer` / `test123`
+   - Sample devices already configured
 
-2. **Test the Integration**
+2. **Import Node-RED Flows**
+   - Start Node-RED: `node-red`
+   - Import `node-red-flows.json`
+   - Configure settings.js with database path
+   - Click Deploy
+
+3. **Test the Integration**
    - Start Node-RED on port 1880
-   - Run the React dev server
-   - Register a user and add devices
+   - Run the React dev server: `npm run dev`
+   - Login with farmer/test123
+   - View sample devices
 
-3. **Customize**
+4. **Connect Real Devices**
+   - Add your LoRaWAN devices via the dashboard
+   - Configure ChirpStack integration in Node-RED
+   - Update device DevEUIs to match your hardware
+
+5. **Customize (Optional)**
    - Adjust the "too dry" threshold (currently 30 kPa) in `KiwiSensorCard.tsx:12`
    - Modify polling interval (currently 10s) in `FarmingDashboard.tsx:19`
    - Add more device types by extending `DeviceType` in `types/farming.ts`
