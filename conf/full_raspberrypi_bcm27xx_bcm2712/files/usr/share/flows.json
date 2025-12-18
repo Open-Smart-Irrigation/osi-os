@@ -67,6 +67,12 @@
         "mode": "RWC"
     },
     {
+        "id": "farming-db-config",
+        "type": "sqlitedb",
+        "db": "/srv/osi/farming.db",
+        "mode": "RWC"
+    },
+    {
         "id": "6cbac061.124d8",
         "type": "ui_base",
         "theme": {
@@ -632,6 +638,179 @@
     "headers": {},
     "x": 660,
     "y": 300,
+    "wires": []
+  },
+  {
+    "id": "auth-tab",
+    "type": "tab",
+    "label": "Authentication",
+    "disabled": false,
+    "info": "User authentication endpoints for login and registration",
+    "env": []
+  },
+  {
+    "id": "auth-register-http",
+    "type": "http in",
+    "z": "auth-tab",
+    "name": "POST /auth/register",
+    "url": "/auth/register",
+    "method": "post",
+    "upload": false,
+    "swaggerDoc": "",
+    "x": 160,
+    "y": 100,
+    "wires": [
+      [
+        "auth-register-func"
+      ]
+    ]
+  },
+  {
+    "id": "auth-register-func",
+    "type": "function",
+    "z": "auth-tab",
+    "name": "Register User",
+    "func": "// Extract username and password from request\nconst { username, password } = msg.payload;\n\nif (!username || !password) {\n  msg.statusCode = 400;\n  msg.payload = { message: 'Username and password are required' };\n  return [null, msg];\n}\n\nif (password.length < 6) {\n  msg.statusCode = 400;\n  msg.payload = { message: 'Password must be at least 6 characters' };\n  return [null, msg];\n}\n\n// Store in context for next node to use\nflow.set('register_username', username);\nflow.set('register_password', password);\n\n// Check if user exists\nmsg.topic = `SELECT username FROM users WHERE username = '${username.replace(/'/g, \"''\")}'`;\nmsg.checkType = 'register';\nreturn [msg, null];",
+    "outputs": 2,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 390,
+    "y": 100,
+    "wires": [
+      [
+        "auth-db-query"
+      ],
+      [
+        "auth-response"
+      ]
+    ]
+  },
+  {
+    "id": "auth-login-http",
+    "type": "http in",
+    "z": "auth-tab",
+    "name": "POST /auth/login",
+    "url": "/auth/login",
+    "method": "post",
+    "upload": false,
+    "swaggerDoc": "",
+    "x": 150,
+    "y": 200,
+    "wires": [
+      [
+        "auth-login-func"
+      ]
+    ]
+  },
+  {
+    "id": "auth-login-func",
+    "type": "function",
+    "z": "auth-tab",
+    "name": "Login User",
+    "func": "// Extract username and password from request\nconst { username, password } = msg.payload;\n\nif (!username || !password) {\n  msg.statusCode = 400;\n  msg.payload = { message: 'Username and password are required' };\n  return [null, msg];\n}\n\n// Store in context for validation\nflow.set('login_username', username);\nflow.set('login_password', password);\n\n// Query for user\nmsg.topic = `SELECT * FROM users WHERE username = '${username.replace(/'/g, \"''\")}'`;\nmsg.checkType = 'login';\nreturn [msg, null];",
+    "outputs": 2,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 370,
+    "y": 200,
+    "wires": [
+      [
+        "auth-db-query"
+      ],
+      [
+        "auth-response"
+      ]
+    ]
+  },
+  {
+    "id": "auth-db-query",
+    "type": "sqlite",
+    "z": "auth-tab",
+    "mydb": "farming-db-config",
+    "sqlquery": "msg.topic",
+    "sql": "",
+    "name": "Query Farming DB",
+    "x": 610,
+    "y": 150,
+    "wires": [
+      [
+        "auth-process-result"
+      ]
+    ]
+  },
+  {
+    "id": "auth-process-result",
+    "type": "function",
+    "z": "auth-tab",
+    "name": "Process Result",
+    "func": "const checkType = msg.checkType;\nconst result = msg.payload;\n\nif (checkType === 'register') {\n  const username = flow.get('register_username');\n  const password = flow.get('register_password');\n  \n  // Check if user already exists\n  if (result && result.length > 0) {\n    msg.statusCode = 400;\n    msg.payload = { message: 'Username already exists' };\n    return [null, msg];\n  }\n  \n  // Insert new user\n  const now = new Date().toISOString();\n  msg.topic = `INSERT INTO users (username, password_hash, created_at) VALUES ('${username.replace(/'/g, \"''\")}', '${password.replace(/'/g, \"''\")}', '${now}')`;\n  msg.insertType = 'register';\n  return [msg, null];\n  \n} else if (checkType === 'login') {\n  const username = flow.get('login_username');\n  const password = flow.get('login_password');\n  \n  // Check if user exists and password matches\n  if (!result || result.length === 0) {\n    msg.statusCode = 401;\n    msg.payload = { message: 'Invalid username or password' };\n    return [null, msg];\n  }\n  \n  const user = result[0];\n  \n  // Simple password check (plain text comparison)\n  if (user.password_hash !== password) {\n    msg.statusCode = 401;\n    msg.payload = { message: 'Invalid username or password' };\n    return [null, msg];\n  }\n  \n  // Generate simple token (base64 of username:timestamp)\n  const token = Buffer.from(`${username}:${Date.now()}`).toString('base64');\n  \n  msg.statusCode = 200;\n  msg.payload = { token };\n  return [null, msg];\n}\n\nreturn [null, msg];",
+    "outputs": 2,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 820,
+    "y": 150,
+    "wires": [
+      [
+        "auth-db-insert"
+      ],
+      [
+        "auth-response"
+      ]
+    ]
+  },
+  {
+    "id": "auth-db-insert",
+    "type": "sqlite",
+    "z": "auth-tab",
+    "mydb": "farming-db-config",
+    "sqlquery": "msg.topic",
+    "sql": "",
+    "name": "Insert User",
+    "x": 1030,
+    "y": 100,
+    "wires": [
+      [
+        "auth-insert-complete"
+      ]
+    ]
+  },
+  {
+    "id": "auth-insert-complete",
+    "type": "function",
+    "z": "auth-tab",
+    "name": "Registration Success",
+    "func": "msg.statusCode = 201;\nmsg.payload = { success: true };\nreturn msg;",
+    "outputs": 1,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 1260,
+    "y": 100,
+    "wires": [
+      [
+        "auth-response"
+      ]
+    ]
+  },
+  {
+    "id": "auth-response",
+    "type": "http response",
+    "z": "auth-tab",
+    "name": "Auth Response",
+    "statusCode": "",
+    "headers": {
+      "Content-Type": "application/json",
+      "Access-Control-Allow-Origin": "*"
+    },
+    "x": 1250,
+    "y": 200,
     "wires": []
   }
 ]
