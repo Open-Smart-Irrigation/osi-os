@@ -55,14 +55,14 @@ pipeline {
                     npm run build
 
                     # Verify build output
-                    if [ ! -f "dist/index.html" ]; then
+                    if [ ! -f "build/index.html" ]; then
                         echo "❌ Build failed - index.html not found"
                         exit 1
                     fi
 
                     echo "✓ GUI built successfully"
                     echo "Build contents:"
-                    ls -lh dist/
+                    ls -lh build/
                 '''
             }
         }
@@ -79,9 +79,9 @@ pipeline {
                     rm -rf archive
                     mkdir -p archive/gui
 
-                    # Copy dist contents to archive
+                    # Copy build contents to archive
                     echo "Adding GUI files..."
-                    cp -r dist/* archive/gui/
+                    cp -r build/* archive/gui/
 
                     # Add farming database
                     echo "Adding farming database..."
@@ -135,7 +135,7 @@ pipeline {
             sh '''#!/bin/bash
                 echo "=== Cleaning up build files ==="
                 cd ${WORKSPACE}/web/react-gui
-                rm -rf dist node_modules
+                rm -rf build node_modules
                 echo "✓ Cleanup complete (archive preserved)"
             '''
         }
