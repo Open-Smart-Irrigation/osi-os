@@ -24,21 +24,35 @@ api.interceptors.request.use(
   (config) => {
     const token = localStorage.getItem('auth_token');
     if (token) {
-      config.headers.Authorization = `Bearer ${token}`;
+      // Ensure headers object exists
+      if (!config.headers) {
+        config.headers = {} as any;
+      }
+      // Set Authorization header
+      config.headers['Authorization'] = `Bearer ${token}`;
+      console.log('[API] Request to:', config.url, 'with token:', token.substring(0, 20) + '...');
+    } else {
+      console.log('[API] Request to:', config.url, 'without token (not found in localStorage)');
     }
     return config;
   },
   (error) => {
+    console.error('[API] Request interceptor error:', error);
     return Promise.reject(error);
   }
 );
 
 // Response interceptor to handle auth errors
 api.interceptors.response.use(
-  (response) => response,
+  (response) => {
+    console.log('[API] Response from:', response.config.url, 'Status:', response.status);
+    return response;
+  },
   (error) => {
+    console.error('[API] Response error:', error.config?.url, 'Status:', error.response?.status);
     if (error.response?.status === 401) {
       // Clear token but don't redirect - let page handle error display
+      console.warn('[API] 401 Unauthorized - clearing token from localStorage');
       localStorage.removeItem('auth_token');
     }
     return Promise.reject(error);

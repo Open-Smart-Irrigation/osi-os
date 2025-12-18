@@ -23,17 +23,22 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     // Check for existing token on mount
     const storedToken = localStorage.getItem('auth_token');
     const storedUsername = localStorage.getItem('username');
+    console.log('[Auth] Checking localStorage on mount - token:', storedToken ? storedToken.substring(0, 20) + '...' : 'null');
     if (storedToken) {
       setToken(storedToken);
       setUsername(storedUsername);
+      console.log('[Auth] Restored session for user:', storedUsername);
     }
     setLoading(false);
   }, []);
 
   const login = async (credentials: LoginRequest) => {
+    console.log('[Auth] Logging in user:', credentials.username);
     const response = await authAPI.login(credentials);
+    console.log('[Auth] Login successful, received token:', response.token ? response.token.substring(0, 20) + '...' : 'null');
     localStorage.setItem('auth_token', response.token);
     localStorage.setItem('username', credentials.username);
+    console.log('[Auth] Token saved to localStorage');
     setToken(response.token);
     setUsername(credentials.username);
   };
@@ -43,6 +48,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   const logout = () => {
+    console.log('[Auth] Logging out user');
     localStorage.removeItem('auth_token');
     localStorage.removeItem('username');
     setToken(null);
