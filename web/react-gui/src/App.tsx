@@ -1,5 +1,5 @@
 import React from 'react';
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { HashRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider } from './contexts/AuthContext';
 import { PrivateRoute } from './components/PrivateRoute';
 import { Login } from './pages/Login';
@@ -9,7 +9,7 @@ import { FarmingDashboard } from './pages/FarmingDashboard';
 function App() {
   return (
     <AuthProvider>
-      <BrowserRouter basename="/gui">
+      <HashRouter basename="/gui">
         <Routes>
           {/* Public Routes */}
           <Route path="/login" element={<Login />} />
@@ -28,7 +28,7 @@ function App() {
           {/* Default redirect */}
           <Route path="/" element={<Navigate to="/dashboard" replace />} />
         </Routes>
-      </BrowserRouter>
+      </HashRouter>
     </AuthProvider>
   );
 }

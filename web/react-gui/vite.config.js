@@ -9,18 +9,21 @@ export default defineConfig({
     host: true,
     proxy: {
       // Proxy API requests to Node-RED backend
+      // Use VITE_NODERED_URL env variable or default to localhost
       '/api': {
-        target: 'http://localhost:1880',
-        changeOrigin: true
+        target: process.env.VITE_NODERED_URL || 'http://localhost:1880',
+        changeOrigin: true,
+        secure: false
       },
       '/auth': {
-        target: 'http://localhost:1880',
-        changeOrigin: true
+        target: process.env.VITE_NODERED_URL || 'http://localhost:1880',
+        changeOrigin: true,
+        secure: false
       }
     }
   },
   build: {
-    outDir: 'dist',
+    outDir: 'build',  // Changed to match docker-compose volume
     emptyOutDir: true
   }
 })

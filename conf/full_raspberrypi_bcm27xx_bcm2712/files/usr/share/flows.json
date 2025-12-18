@@ -494,57 +494,128 @@
   {
     "id": "api001tab",
     "type": "tab",
-    "label": "React GUI API",
+    "label": "Device Management API",
     "disabled": false,
-    "info": "REST API endpoints for React GUI application",
+    "info": "Device management API with user-based authentication",
     "env": []
   },
   {
-    "id": "api001http",
+    "id": "api-get-devices-http",
     "type": "http in",
     "z": "api001tab",
-    "name": "GET /api/sensors",
-    "url": "/api/sensors",
+    "name": "GET /api/devices",
+    "url": "/api/devices",
     "method": "get",
     "upload": false,
     "swaggerDoc": "",
-    "x": 160,
-    "y": 100,
+    "x": 140,
+    "y": 80,
     "wires": [
       [
-        "api001func"
+        "api-verify-auth"
       ]
     ]
   },
   {
-    "id": "api001func",
+    "id": "api-verify-auth",
     "type": "function",
     "z": "api001tab",
-    "name": "List Sensors",
-    "func": "msg.payload = [\n  { id: 'sensor-1', name: 'Garden Zone A', location: 'North Garden' },\n  { id: 'sensor-2', name: 'Garden Zone B', location: 'South Garden' },\n  { id: 'sensor-3', name: 'Greenhouse', location: 'Greenhouse 1' },\n  { id: 'sensor-4', name: 'Lawn Area', location: 'Front Lawn' }\n];\n\nmsg.headers = {\n  'Content-Type': 'application/json',\n  'Access-Control-Allow-Origin': '*'\n};\n\nreturn msg;",
+    "name": "Verify Token & Extract Username",
+    "func": "// Check for Authorization header\nconst authHeader = msg.req.headers.authorization;\n\nif (!authHeader || !authHeader.startsWith('Bearer ')) {\n  msg.statusCode = 401;\n  msg.payload = { message: 'Unauthorized' };\n  return [null, msg];\n}\n\nconst token = authHeader.substring(7);\n\ntry {\n  // Decode base64 token (format: username:timestamp)\n  const decoded = Buffer.from(token, 'base64').toString('utf-8');\n  const [username, timestamp] = decoded.split(':');\n  \n  if (!username) {\n    msg.statusCode = 401;\n    msg.payload = { message: 'Invalid token' };\n    return [null, msg];\n  }\n  \n  // Store username for database lookup\n  flow.set('auth_username', username);\n  flow.set('auth_endpoint', msg.req.url);\n  flow.set('auth_method', msg.req.method);\n  flow.set('auth_params', msg.req.params);\n  flow.set('auth_body', msg.payload);\n  \n  // Query to get user_id\n  msg.topic = `SELECT id FROM users WHERE username = '${username.replace(/'/g, \"''\")}'`;\n  return [msg, null];\n  \n} catch (err) {\n  msg.statusCode = 401;\n  msg.payload = { message: 'Invalid token format' };\n  return [null, msg];\n}",
+    "outputs": 2,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 390,
+    "y": 80,
+    "wires": [
+      [
+        "api-lookup-user"
+      ],
+      [
+        "api-response"
+      ]
+    ]
+  },
+  {
+    "id": "api-lookup-user",
+    "type": "sqlite",
+    "z": "api001tab",
+    "mydb": "farming-db-config",
+    "sqlquery": "msg.topic",
+    "sql": "",
+    "name": "Lookup User ID",
+    "x": 660,
+    "y": 80,
+    "wires": [
+      [
+        "api-check-user"
+      ]
+    ]
+  },
+  {
+    "id": "api-check-user",
+    "type": "function",
+    "z": "api001tab",
+    "name": "Check User Exists",
+    "func": "const result = msg.payload;\n\nif (!result || result.length === 0) {\n  msg.statusCode = 401;\n  msg.payload = { message: 'User not found' };\n  return [null, msg];\n}\n\nconst userId = result[0].id;\nflow.set('auth_user_id', userId);\n\n// Route to appropriate endpoint based on URL\nconst endpoint = flow.get('auth_endpoint');\nconst method = flow.get('auth_method');\n\nif (method === 'GET' && endpoint === '/api/devices') {\n  // Query devices for this user\n  msg.topic = `\n    SELECT \n      d.*\n    FROM devices d\n    WHERE d.user_id = ${userId}\n    ORDER BY d.created_at DESC\n  `;\n  return [msg, null, null, null];\n} else if (method === 'POST' && endpoint === '/api/devices') {\n  // Add device\n  const body = flow.get('auth_body');\n  flow.set('add_device_data', body);\n  return [null, msg, null, null];\n} else if (method === 'GET' && endpoint === '/api/catalog') {\n  // Return catalog\n  return [null, null, msg, null];\n} else if (method === 'POST' && endpoint.startsWith('/api/valve/')) {\n  // Valve control\n  return [null, null, null, msg];\n}\n\nreturn [null, null, null, null];",
+    "outputs": 4,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 880,
+    "y": 80,
+    "wires": [
+      [
+        "api-get-devices-db"
+      ],
+      [
+        "api-add-device-func"
+      ],
+      [
+        "api-catalog-func"
+      ],
+      [
+        "api-valve-func"
+      ]
+    ]
+  },
+  {
+    "id": "api-get-devices-db",
+    "type": "sqlite",
+    "z": "api001tab",
+    "mydb": "farming-db-config",
+    "sqlquery": "msg.topic",
+    "sql": "",
+    "name": "Get User Devices",
+    "x": 1100,
+    "y": 40,
+    "wires": [
+      [
+        "api-format-devices"
+      ]
+    ]
+  },
+  {
+    "id": "api-format-devices",
+    "type": "function",
+    "z": "api001tab",
+    "name": "Format Device Response",
+    "func": "const devices = msg.payload || [];\n\n// Format devices for frontend\nconst formattedDevices = devices.map(d => ({\n  deveui: d.deveui,\n  name: d.name,\n  type_id: d.type_id,\n  last_seen: d.updated_at,\n  latest_data: {},\n  current_state: d.current_state,\n  target_state: d.target_state\n}));\n\nmsg.statusCode = 200;\nmsg.payload = formattedDevices;\nreturn msg;",
     "outputs": 1,
     "noerr": 0,
     "initialize": "",
     "finalize": "",
     "libs": [],
-    "x": 370,
-    "y": 100,
+    "x": 1330,
+    "y": 40,
     "wires": [
       [
-        "api001resp"
+        "api-response"
       ]
     ]
-  },
-  {
-    "id": "api001resp",
-    "type": "http response",
-    "z": "api001tab",
-    "name": "Response",
-    "statusCode": "200",
-    "headers": {},
-    "x": 560,
-    "y": 100,
-    "wires": []
   },
   {
     "id": "api002http",
@@ -588,7 +659,9 @@
     "z": "api001tab",
     "name": "Response",
     "statusCode": "200",
-    "headers": {},
+    "headers": {
+      "Access-Control-Allow-Origin": "*"
+    },
     "x": 660,
     "y": 200,
     "wires": []
@@ -635,9 +708,44 @@
     "z": "api001tab",
     "name": "Response",
     "statusCode": "200",
-    "headers": {},
+    "headers": {
+      "Access-Control-Allow-Origin": "*"
+    },
     "x": 660,
     "y": 300,
+    "wires": []
+  },
+  {
+    "id": "api-options-http",
+    "type": "http in",
+    "z": "api001tab",
+    "name": "OPTIONS /api/*",
+    "url": "/api/*",
+    "method": "options",
+    "upload": false,
+    "swaggerDoc": "",
+    "x": 160,
+    "y": 400,
+    "wires": [
+      [
+        "api-options-response"
+      ]
+    ]
+  },
+  {
+    "id": "api-options-response",
+    "type": "http response",
+    "z": "api001tab",
+    "name": "CORS Preflight Response",
+    "statusCode": "204",
+    "headers": {
+      "Access-Control-Allow-Origin": "*",
+      "Access-Control-Allow-Methods": "GET,POST,PUT,DELETE,OPTIONS",
+      "Access-Control-Allow-Headers": "Content-Type,Authorization",
+      "Access-Control-Max-Age": "86400"
+    },
+    "x": 430,
+    "y": 400,
     "wires": []
   },
   {
@@ -811,6 +919,39 @@
     },
     "x": 1250,
     "y": 200,
+    "wires": []
+  },
+  {
+    "id": "auth-options-http",
+    "type": "http in",
+    "z": "auth-tab",
+    "name": "OPTIONS /auth/*",
+    "url": "/auth/*",
+    "method": "options",
+    "upload": false,
+    "swaggerDoc": "",
+    "x": 160,
+    "y": 300,
+    "wires": [
+      [
+        "auth-options-response"
+      ]
+    ]
+  },
+  {
+    "id": "auth-options-response",
+    "type": "http response",
+    "z": "auth-tab",
+    "name": "CORS Preflight Response",
+    "statusCode": "204",
+    "headers": {
+      "Access-Control-Allow-Origin": "*",
+      "Access-Control-Allow-Methods": "GET,POST,PUT,DELETE,OPTIONS",
+      "Access-Control-Allow-Headers": "Content-Type,Authorization",
+      "Access-Control-Max-Age": "86400"
+    },
+    "x": 430,
+    "y": 300,
     "wires": []
   }
 ]
