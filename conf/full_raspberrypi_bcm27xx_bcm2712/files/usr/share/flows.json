@@ -618,6 +618,117 @@
     ]
   },
   {
+    "id": "api-response",
+    "type": "http response",
+    "z": "api001tab",
+    "name": "API Response",
+    "statusCode": "",
+    "headers": {
+      "Content-Type": "application/json",
+      "Access-Control-Allow-Origin": "*",
+      "Access-Control-Allow-Methods": "GET,POST,PUT,DELETE,OPTIONS",
+      "Access-Control-Allow-Headers": "Content-Type,Authorization"
+    },
+    "x": 1550,
+    "y": 80,
+    "wires": []
+  },
+  {
+    "id": "api-add-device-func",
+    "type": "function",
+    "z": "api001tab",
+    "name": "Add Device",
+    "func": "const userId = flow.get('auth_user_id');\nconst deviceData = flow.get('add_device_data');\n\nif (!deviceData || !deviceData.deveui || !deviceData.type_id) {\n  msg.statusCode = 400;\n  msg.payload = { message: 'Missing required fields' };\n  return [null, msg];\n}\n\nconst now = new Date().toISOString();\nmsg.topic = `INSERT INTO devices (deveui, name, type_id, user_id, created_at, updated_at) VALUES ('${deviceData.deveui}', '${deviceData.name || deviceData.deveui}', '${deviceData.type_id}', ${userId}, '${now}', '${now}')`;\nreturn [msg, null];",
+    "outputs": 2,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 1100,
+    "y": 120,
+    "wires": [
+      [
+        "api-add-device-db"
+      ],
+      [
+        "api-response"
+      ]
+    ]
+  },
+  {
+    "id": "api-add-device-db",
+    "type": "sqlite",
+    "z": "api001tab",
+    "mydb": "farming-db-config",
+    "sqlquery": "msg.topic",
+    "sql": "",
+    "name": "Insert Device",
+    "x": 1320,
+    "y": 120,
+    "wires": [
+      [
+        "api-add-device-success"
+      ]
+    ]
+  },
+  {
+    "id": "api-add-device-success",
+    "type": "function",
+    "z": "api001tab",
+    "name": "Add Device Success",
+    "func": "msg.statusCode = 201;\nmsg.payload = { success: true };\nreturn msg;",
+    "outputs": 1,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 1540,
+    "y": 120,
+    "wires": [
+      [
+        "api-response"
+      ]
+    ]
+  },
+  {
+    "id": "api-catalog-func",
+    "type": "function",
+    "z": "api001tab",
+    "name": "Return Catalog",
+    "func": "msg.statusCode = 200;\nmsg.payload = [\n  { id: 'KIWI_SENSOR', name: 'Kiwi Soil Sensor' },\n  { id: 'STREGA_VALVE', name: 'Strega Smart Valve' }\n];\nreturn msg;",
+    "outputs": 1,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 1100,
+    "y": 160,
+    "wires": [
+      [
+        "api-response"
+      ]
+    ]
+  },
+  {
+    "id": "api-valve-func",
+    "type": "function",
+    "z": "api001tab",
+    "name": "Valve Control",
+    "func": "msg.statusCode = 200;\nmsg.payload = { success: true, message: 'Valve control not yet implemented' };\nreturn msg;",
+    "outputs": 1,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 1100,
+    "y": 200,
+    "wires": [
+      [
+        "api-response"
+      ]
+    ]
+  },
+  {
     "id": "api002http",
     "type": "http in",
     "z": "api001tab",
@@ -660,7 +771,9 @@
     "name": "Response",
     "statusCode": "200",
     "headers": {
-      "Access-Control-Allow-Origin": "*"
+      "Access-Control-Allow-Origin": "*",
+      "Access-Control-Allow-Methods": "GET,POST,PUT,DELETE,OPTIONS",
+      "Access-Control-Allow-Headers": "Content-Type,Authorization"
     },
     "x": 660,
     "y": 200,
@@ -709,7 +822,9 @@
     "name": "Response",
     "statusCode": "200",
     "headers": {
-      "Access-Control-Allow-Origin": "*"
+      "Access-Control-Allow-Origin": "*",
+      "Access-Control-Allow-Methods": "GET,POST,PUT,DELETE,OPTIONS",
+      "Access-Control-Allow-Headers": "Content-Type,Authorization"
     },
     "x": 660,
     "y": 300,
@@ -915,7 +1030,9 @@
     "statusCode": "",
     "headers": {
       "Content-Type": "application/json",
-      "Access-Control-Allow-Origin": "*"
+      "Access-Control-Allow-Origin": "*",
+      "Access-Control-Allow-Methods": "GET,POST,PUT,DELETE,OPTIONS",
+      "Access-Control-Allow-Headers": "Content-Type,Authorization"
     },
     "x": 1250,
     "y": 200,
