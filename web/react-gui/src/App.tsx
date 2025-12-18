@@ -9,7 +9,7 @@ import { FarmingDashboard } from './pages/FarmingDashboard';
 function App() {
   return (
     <AuthProvider>
-      <HashRouter basename="/gui">
+      <HashRouter>
         <Routes>
           {/* Public Routes */}
           <Route path="/login" element={<Login />} />
