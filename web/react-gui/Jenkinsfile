@@ -55,14 +55,14 @@ pipeline {
                     npm run build
 
                     # Verify build output
-                    if [ ! -f "dist/index.html" ]; then
+                    if [ ! -f "build/index.html" ]; then
                         echo "❌ Build failed - index.html not found"
                         exit 1
                     fi
 
                     echo "✓ GUI built successfully"
                     echo "Build contents:"
-                    ls -lh dist/
+                    ls -lh build/
                 '''
             }
         }
@@ -77,38 +77,46 @@ pipeline {
 
                     # Create a clean archive directory
                     rm -rf archive
-                    mkdir -p archive
+                    mkdir -p archive/gui
 
-                    # Create timestamp for filename
-                    TIMESTAMP=$(date +%Y%m%d-%H%M%S)
-                    BUILD_NUM=${BUILD_NUMBER:-0}
-                    ZIP_NAME="osi-gui-${BUILD_NUM}-${TIMESTAMP}.zip"
+                    # Copy build contents to archive
+                    echo "Adding GUI files..."
+                    cp -r build/* archive/gui/
 
-                    # Create zip from dist directory
-                    cd dist
-                    zip -r "../archive/${ZIP_NAME}" ./*
+                    # Add farming database
+                    echo "Adding farming database..."
+                    if [ -f "farming.db" ]; then
+                        cp farming.db archive/gui/
+                        echo "✓ farming.db included"
+                    else
+                        echo "⚠ farming.db not found, skipping"
+                    fi
+
+                    # Create zip archive
+                    cd archive
+                    zip -r "osi-gui.zip" gui/*
                     cd ..
 
+                    # Clean up temporary gui directory
+                    rm -rf archive/gui
+
                     # Verify zip was created
-                    if [ ! -f "archive/${ZIP_NAME}" ]; then
+                    if [ ! -f "archive/osi-gui.zip" ]; then
                         echo "❌ Failed to create ZIP archive"
                         exit 1
                     fi
 
-                    ZIP_SIZE=$(du -h "archive/${ZIP_NAME}" | cut -f1)
-                    echo "✓ Created ${ZIP_NAME} (${ZIP_SIZE})"
-
-                    # Create a 'latest' symlink for convenience
-                    cd archive
-                    ln -sf "${ZIP_NAME}" osi-gui-latest.zip
-                    ls -lh
+                    ZIP_SIZE=$(du -h "archive/osi-gui.zip" | cut -f1)
+                    echo "✓ Created osi-gui.zip (${ZIP_SIZE})"
+                    echo "Contents:"
+                    unzip -l "archive/osi-gui.zip" | head -20
                 '''
             }
         }
 
         stage('5. Archive Artifacts') {
             steps {
-                archiveArtifacts artifacts: 'web/react-gui/archive/*.zip', fingerprint: true
+                archiveArtifacts artifacts: 'web/react-gui/archive/osi-gui.zip', fingerprint: true
                 echo '✓ GUI build archived successfully and ready for download'
             }
         }
@@ -127,7 +135,7 @@ pipeline {
             sh '''#!/bin/bash
                 echo "=== Cleaning up build files ==="
                 cd ${WORKSPACE}/web/react-gui
-                rm -rf dist node_modules
+                rm -rf build node_modules
                 echo "✓ Cleanup complete (archive preserved)"
             '''
         }

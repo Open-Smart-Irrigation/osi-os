@@ -1,0 +1,20 @@
+@import "tailwindcss";
+
+/* Custom base styles */
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
+    'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
+    sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* High contrast styles for accessibility (farmers in developing countries) */
+.touch-target {
+  min-height: 48px;
+  min-width: 48px;
+}
+
+.high-contrast-text {
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.5);
+}

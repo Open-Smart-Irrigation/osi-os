@@ -1,0 +1,310 @@
+[
+  {
+    "id": "device-api-tab",
+    "type": "tab",
+    "label": "Device Management",
+    "disabled": false,
+    "info": "Device CRUD operations with user auth"
+  },
+  {
+    "id": "get-devices-http",
+    "type": "http in",
+    "z": "device-api-tab",
+    "name": "GET /api/devices",
+    "url": "/api/devices",
+    "method": "get",
+    "x": 140,
+    "y": 80,
+    "wires": [["get-devices-auth"]]
+  },
+  {
+    "id": "get-devices-auth",
+    "type": "function",
+    "z": "device-api-tab",
+    "name": "Decode Token & Get Username",
+    "func": "const authHeader = msg.req.headers.authorization;\n\nif (!authHeader || !authHeader.startsWith('Bearer ')) {\n  msg.statusCode = 401;\n  msg.payload = { message: 'Unauthorized' };\n  return [null, msg];\n}\n\ntry {\n  const token = authHeader.substring(7);\n  const decoded = Buffer.from(token, 'base64').toString('utf-8');\n  const username = decoded.split(':')[0];\n  \n  msg.topic = `SELECT id FROM users WHERE username = '${username.replace(/'/g, \"''\")}'`;\n  return [msg, null];\n} catch (err) {\n  msg.statusCode = 401;\n  msg.payload = { message: 'Invalid token' };\n  return [null, msg];\n}",
+    "outputs": 2,
+    "x": 380,
+    "y": 80,
+    "wires": [["get-devices-lookup"], ["device-response"]]
+  },
+  {
+    "id": "get-devices-lookup",
+    "type": "sqlite",
+    "z": "device-api-tab",
+    "mydb": "farming-db-config",
+    "sqlquery": "msg.topic",
+    "name": "Lookup User",
+    "x": 640,
+    "y": 80,
+    "wires": [["get-devices-query"]]
+  },
+  {
+    "id": "get-devices-query",
+    "type": "function",
+    "z": "device-api-tab",
+    "name": "Build Query",
+    "func": "if (!msg.payload || msg.payload.length === 0) {\n  msg.statusCode = 401;\n  msg.payload = { message: 'User not found' };\n  return [null, msg];\n}\n\nconst userId = msg.payload[0].id;\nmsg.topic = `SELECT * FROM devices WHERE user_id = ${userId} ORDER BY created_at DESC`;\nreturn [msg, null];",
+    "outputs": 2,
+    "x": 840,
+    "y": 80,
+    "wires": [["get-devices-db"], ["device-response"]]
+  },
+  {
+    "id": "get-devices-db",
+    "type": "sqlite",
+    "z": "device-api-tab",
+    "mydb": "farming-db-config",
+    "sqlquery": "msg.topic",
+    "name": "Get Devices",
+    "x": 1040,
+    "y": 80,
+    "wires": [["format-devices"]]
+  },
+  {
+    "id": "format-devices",
+    "type": "function",
+    "z": "device-api-tab",
+    "name": "Format Response",
+    "func": "// Store devices in flow context\nflow.set('devices_to_format', msg.payload || []);\n\nif (!msg.payload || msg.payload.length === 0) {\n  msg.statusCode = 200;\n  msg.payload = [];\n  return msg;\n}\n\n// Get DevEUIs to query for latest data\nconst deveuiList = msg.payload.map(d => `'${d.deveui}'`).join(',');\n\n// Query for latest sensor data for each device\nmsg.topic = `\n  SELECT \n    dd.deveui,\n    dd.swt_wm1,\n    dd.swt_wm2,\n    dd.light_lux\n  FROM device_data dd\n  INNER JOIN (\n    SELECT deveui, MAX(recorded_at) as max_time\n    FROM device_data\n    WHERE deveui IN (${deveuiList})\n    GROUP BY deveui\n  ) latest ON dd.deveui = latest.deveui AND dd.recorded_at = latest.max_time\n`;\n\nreturn msg;",
+    "x": 1230,
+    "y": 80,
+    "wires": [["fetch-latest-data"]]
+  },
+  {
+    "id": "fetch-latest-data",
+    "type": "sqlite",
+    "z": "device-api-tab",
+    "mydb": "farming-db-config",
+    "sqlquery": "msg.topic",
+    "name": "Get Latest Data",
+    "x": 1450,
+    "y": 80,
+    "wires": [["merge-device-data"]]
+  },
+  {
+    "id": "merge-device-data",
+    "type": "function",
+    "z": "device-api-tab",
+    "name": "Merge Data",
+    "func": "const devices = flow.get('devices_to_format') || [];\nconst sensorData = msg.payload || [];\n\n// Create a map of deveui -> latest data\nconst dataMap = {};\nsensorData.forEach(d => {\n  dataMap[d.deveui] = {\n    swt_wm1: d.swt_wm1,\n    swt_wm2: d.swt_wm2,\n    light_lux: d.light_lux\n  };\n});\n\n// Merge devices with their latest data\nconst result = devices.map(d => ({\n  deveui: d.deveui,\n  name: d.name,\n  type_id: d.type_id,\n  last_seen: d.updated_at,\n  latest_data: dataMap[d.deveui] || {},\n  current_state: d.current_state,\n  target_state: d.target_state\n}));\n\nmsg.statusCode = 200;\nmsg.payload = result;\nreturn msg;",
+    "x": 1650,
+    "y": 80,
+    "wires": [["device-response"]]
+  },
+  {
+    "id": "get-catalog-http",
+    "type": "http in",
+    "z": "device-api-tab",
+    "name": "GET /api/catalog",
+    "url": "/api/catalog",
+    "method": "get",
+    "x": 140,
+    "y": 180,
+    "wires": [["catalog-response"]]
+  },
+  {
+    "id": "catalog-response",
+    "type": "function",
+    "z": "device-api-tab",
+    "name": "Return Catalog",
+    "func": "msg.statusCode = 200;\nmsg.payload = [\n  { id: 'KIWI_SENSOR', name: 'Kiwi Soil Sensor' },\n  { id: 'STREGA_VALVE', name: 'Strega Smart Valve' }\n];\nreturn msg;",
+    "x": 370,
+    "y": 180,
+    "wires": [["device-response"]]
+  },
+  {
+    "id": "device-response",
+    "type": "http response",
+    "z": "device-api-tab",
+    "name": "Response",
+    "headers": {
+      "Content-Type": "application/json",
+      "Access-Control-Allow-Origin": "*",
+      "Access-Control-Allow-Methods": "GET,POST,PUT,DELETE,OPTIONS",
+      "Access-Control-Allow-Headers": "Content-Type,Authorization"
+    },
+    "x": 1420,
+    "y": 80,
+    "wires": []
+  },
+  {
+    "id": "post-devices-http",
+    "type": "http in",
+    "z": "device-api-tab",
+    "name": "POST /api/devices",
+    "url": "/api/devices",
+    "method": "post",
+    "x": 140,
+    "y": 340,
+    "wires": [["post-devices-auth"]]
+  },
+  {
+    "id": "post-devices-auth",
+    "type": "function",
+    "z": "device-api-tab",
+    "name": "Auth & Validate",
+    "func": "const authHeader = msg.req.headers.authorization;\n\nif (!authHeader || !authHeader.startsWith('Bearer ')) {\n  msg.statusCode = 401;\n  msg.payload = { message: 'Unauthorized' };\n  return [null, msg];\n}\n\ntry {\n  const token = authHeader.substring(7);\n  const decoded = Buffer.from(token, 'base64').toString('utf-8');\n  const username = decoded.split(':')[0];\n  \n  // Validate device data\n  const { deveui, name, type_id } = msg.payload;\n  \n  if (!deveui || !name || !type_id) {\n    msg.statusCode = 400;\n    msg.payload = { message: 'Missing required fields: deveui, name, type_id' };\n    return [null, msg];\n  }\n  \n  if (!['KIWI_SENSOR', 'STREGA_VALVE'].includes(type_id)) {\n    msg.statusCode = 400;\n    msg.payload = { message: 'Invalid type_id' };\n    return [null, msg];\n  }\n  \n  // Store device data for later\n  flow.set('new_device_deveui', deveui);\n  flow.set('new_device_name', name);\n  flow.set('new_device_type', type_id);\n  \n  // Lookup user ID\n  msg.topic = `SELECT id FROM users WHERE username = '${username.replace(/'/g, \"''\")}'`;\n  return [msg, null];\n} catch (err) {\n  msg.statusCode = 401;\n  msg.payload = { message: 'Invalid token' };\n  return [null, msg];\n}",
+    "outputs": 2,
+    "x": 370,
+    "y": 340,
+    "wires": [["post-devices-lookup"], ["device-response"]]
+  },
+  {
+    "id": "post-devices-lookup",
+    "type": "sqlite",
+    "z": "device-api-tab",
+    "mydb": "farming-db-config",
+    "sqlquery": "msg.topic",
+    "name": "Lookup User",
+    "x": 590,
+    "y": 340,
+    "wires": [["check-existing-device"]]
+  },
+  {
+    "id": "check-existing-device",
+    "type": "function",
+    "z": "device-api-tab",
+    "name": "Check If Device Exists",
+    "func": "if (!msg.payload || msg.payload.length === 0) {\n  msg.statusCode = 401;\n  msg.payload = { message: 'User not found' };\n  return [null, msg];\n}\n\nconst userId = msg.payload[0].id;\nflow.set('new_device_user_id', userId);\n\nconst deveui = flow.get('new_device_deveui');\n\n// Check if device already exists\nmsg.topic = `SELECT * FROM devices WHERE deveui = '${deveui.replace(/'/g, \"''\")}'`;\n\nreturn [msg, null];",
+    "outputs": 2,
+    "x": 790,
+    "y": 340,
+    "wires": [["check-device-db"], ["device-response"]]
+  },
+  {
+    "id": "check-device-db",
+    "type": "sqlite",
+    "z": "device-api-tab",
+    "mydb": "farming-db-config",
+    "sqlquery": "msg.topic",
+    "name": "Check Device",
+    "x": 1000,
+    "y": 340,
+    "wires": [["post-devices-insert"]]
+  },
+  {
+    "id": "post-devices-insert",
+    "type": "function",
+    "z": "device-api-tab",
+    "name": "Insert or Claim Device",
+    "func": "const userId = flow.get('new_device_user_id');\nconst deveui = flow.get('new_device_deveui');\nconst name = flow.get('new_device_name');\nconst type_id = flow.get('new_device_type');\nconst now = new Date().toISOString();\n\n// Check if device already exists\nif (msg.payload && msg.payload.length > 0) {\n  // Device exists - claim it by updating user_id and name\n  msg.topic = `UPDATE devices SET user_id = ${userId}, name = '${name.replace(/'/g, \"''\")}', updated_at = '${now}' WHERE deveui = '${deveui.replace(/'/g, \"''\")}'`;\n  flow.set('device_action', 'claimed');\n} else {\n  // Device doesn't exist - insert new\n  const currentState = type_id === 'STREGA_VALVE' ? \"'CLOSED'\" : 'NULL';\n  const targetState = type_id === 'STREGA_VALVE' ? \"'CLOSED'\" : 'NULL';\n  \n  msg.topic = `INSERT INTO devices (deveui, name, type_id, user_id, current_state, target_state, created_at, updated_at) VALUES ('${deveui.replace(/'/g, \"''\")}', '${name.replace(/'/g, \"''\")}', '${type_id}', ${userId}, ${currentState}, ${targetState}, '${now}', '${now}')`;\n  flow.set('device_action', 'created');\n}\n\nreturn [msg, null];",
+    "outputs": 2,
+    "x": 1210,
+    "y": 340,
+    "wires": [["post-devices-db"], ["device-response"]]
+  },
+  {
+    "id": "post-devices-db",
+    "type": "sqlite",
+    "z": "device-api-tab",
+    "mydb": "farming-db-config",
+    "sqlquery": "msg.topic",
+    "name": "Save to DB",
+    "x": 1430,
+    "y": 340,
+    "wires": [["post-devices-response"]]
+  },
+  {
+    "id": "post-devices-response",
+    "type": "function",
+    "z": "device-api-tab",
+    "name": "Format Response",
+    "func": "const deveui = flow.get('new_device_deveui');\nconst name = flow.get('new_device_name');\nconst type_id = flow.get('new_device_type');\nconst action = flow.get('device_action');\nconst now = new Date().toISOString();\n\nmsg.statusCode = action === 'claimed' ? 200 : 201;\nmsg.payload = {\n  deveui: deveui,\n  name: name,\n  type_id: type_id,\n  last_seen: now,\n  latest_data: {},\n  current_state: type_id === 'STREGA_VALVE' ? 'CLOSED' : undefined,\n  target_state: type_id === 'STREGA_VALVE' ? 'CLOSED' : undefined\n};\n\nreturn msg;",
+    "x": 1650,
+    "y": 340,
+    "wires": [["device-response"]]
+  },
+  {
+    "id": "delete-device-http",
+    "type": "http in",
+    "z": "device-api-tab",
+    "name": "DELETE /api/devices/:deveui",
+    "url": "/api/devices/:deveui",
+    "method": "delete",
+    "x": 140,
+    "y": 500,
+    "wires": [["delete-device-auth"]]
+  },
+  {
+    "id": "delete-device-auth",
+    "type": "function",
+    "z": "device-api-tab",
+    "name": "Decode Token & Get Username",
+    "func": "const authHeader = msg.req.headers.authorization;\n\nif (!authHeader || !authHeader.startsWith('Bearer ')) {\n  msg.statusCode = 401;\n  msg.payload = { message: 'Unauthorized' };\n  return [null, msg];\n}\n\ntry {\n  const token = authHeader.substring(7);\n  const decoded = Buffer.from(token, 'base64').toString('utf-8');\n  const username = decoded.split(':')[0];\n  \n  // Store deveui from URL parameter\n  flow.set('delete_device_deveui', msg.req.params.deveui);\n  \n  msg.topic = `SELECT id FROM users WHERE username = '${username.replace(/'/g, \"''\")}'`;\n  return [msg, null];\n} catch (err) {\n  msg.statusCode = 401;\n  msg.payload = { message: 'Invalid token' };\n  return [null, msg];\n}",
+    "outputs": 2,
+    "x": 380,
+    "y": 500,
+    "wires": [["delete-device-lookup"], ["device-response"]]
+  },
+  {
+    "id": "delete-device-lookup",
+    "type": "sqlite",
+    "z": "device-api-tab",
+    "mydb": "farming-db-config",
+    "sqlquery": "msg.topic",
+    "name": "Lookup User",
+    "x": 640,
+    "y": 500,
+    "wires": [["delete-device-unlink"]]
+  },
+  {
+    "id": "delete-device-unlink",
+    "type": "function",
+    "z": "device-api-tab",
+    "name": "Unlink Device",
+    "func": "if (!msg.payload || msg.payload.length === 0) {\n  msg.statusCode = 401;\n  msg.payload = { message: 'User not found' };\n  return [null, msg];\n}\n\nconst userId = msg.payload[0].id;\nconst deveui = flow.get('delete_device_deveui');\n\n// Unlink device by setting user_id to NULL\nmsg.topic = `UPDATE devices SET user_id = NULL WHERE deveui = '${deveui.replace(/'/g, \"''\")}' AND user_id = ${userId}`;\nreturn [msg, null];",
+    "outputs": 2,
+    "x": 840,
+    "y": 500,
+    "wires": [["delete-device-db"], ["device-response"]]
+  },
+  {
+    "id": "delete-device-db",
+    "type": "sqlite",
+    "z": "device-api-tab",
+    "mydb": "farming-db-config",
+    "sqlquery": "msg.topic",
+    "name": "Unlink in DB",
+    "x": 1040,
+    "y": 500,
+    "wires": [["delete-device-response"]]
+  },
+  {
+    "id": "delete-device-response",
+    "type": "function",
+    "z": "device-api-tab",
+    "name": "Format Response",
+    "func": "msg.statusCode = 200;\nmsg.payload = { message: 'Device removed successfully' };\nreturn msg;",
+    "x": 1240,
+    "y": 500,
+    "wires": [["device-response"]]
+  },
+  {
+    "id": "device-options-http",
+    "type": "http in",
+    "z": "device-api-tab",
+    "name": "OPTIONS /api/*",
+    "url": "/api/*",
+    "method": "options",
+    "x": 140,
+    "y": 600,
+    "wires": [["device-options-response"]]
+  },
+  {
+    "id": "device-options-response",
+    "type": "http response",
+    "z": "device-api-tab",
+    "name": "CORS Response",
+    "statusCode": "204",
+    "headers": {
+      "Access-Control-Allow-Origin": "*",
+      "Access-Control-Allow-Methods": "GET,POST,PUT,DELETE,OPTIONS",
+      "Access-Control-Allow-Headers": "Content-Type,Authorization",
+      "Access-Control-Max-Age": "86400"
+    },
+    "x": 380,
+    "y": 600,
+    "wires": []
+  }
+]
