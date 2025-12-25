@@ -27,6 +27,10 @@ export const FarmingDashboard: React.FC = () => {
     mutate(); // Refresh after valve control
   };
 
+  const handleDeviceRemoved = () => {
+    mutate(); // Refresh after device removal
+  };
+
   const kiwiSensors = devices?.filter((d) => d.type_id === 'KIWI_SENSOR') || [];
   const stregaValves = devices?.filter((d) => d.type_id === 'STREGA_VALVE') || [];
 
@@ -113,7 +117,11 @@ export const FarmingDashboard: React.FC = () => {
                 </h2>
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                   {kiwiSensors.map((device) => (
-                    <KiwiSensorCard key={device.deveui} device={device} />
+                    <KiwiSensorCard
+                      key={device.deveui}
+                      device={device}
+                      onRemove={handleDeviceRemoved}
+                    />
                   ))}
                 </div>
               </div>
@@ -131,6 +139,7 @@ export const FarmingDashboard: React.FC = () => {
                       key={device.deveui}
                       device={device}
                       onUpdate={handleDeviceUpdate}
+                      onRemove={handleDeviceRemoved}
                     />
                   ))}
                 </div>

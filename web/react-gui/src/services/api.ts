@@ -92,6 +92,10 @@ export const devicesAPI = {
   controlValve: async (deveui: string, action: ValveActionRequest): Promise<void> => {
     await api.post(`/api/valve/${deveui}`, action);
   },
+
+  remove: async (deveui: string): Promise<void> => {
+    await api.delete(`/api/devices/${deveui}`);
+  },
 };
 
 export default api;
