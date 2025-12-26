@@ -2,7 +2,7 @@ pipeline {
     agent any
 
     options {
-        buildDiscarder(logRotator(numToKeepStr: '10'))
+        buildDiscarder(logRotator(numToKeepStr: '2'))
         timestamps()
     }
 
@@ -38,7 +38,7 @@ pipeline {
             steps {
                 sh '''#!/bin/bash
                     set -e
-                    cd ${WORKSPACE}/web/react-gui
+                    cd "${WORKSPACE}/web/react-gui"
                     echo "=== Installing npm dependencies ==="
                     npm install
                     echo "✓ Dependencies installed successfully"
@@ -50,7 +50,7 @@ pipeline {
             steps {
                 sh '''#!/bin/bash
                     set -e
-                    cd ${WORKSPACE}/web/react-gui
+                    cd "${WORKSPACE}/web/react-gui"
                     echo "=== Building Open Smart Irrigation GUI ==="
                     npm run build
 
@@ -71,7 +71,7 @@ pipeline {
             steps {
                 sh '''#!/bin/bash
                     set -e
-                    cd ${WORKSPACE}/web/react-gui
+                    cd "${WORKSPACE}/web/react-gui"
 
                     echo "=== Creating ZIP archive ==="
 
@@ -134,7 +134,7 @@ pipeline {
             // Clean up build artifacts but keep the archive
             sh '''#!/bin/bash
                 echo "=== Cleaning up build files ==="
-                cd ${WORKSPACE}/web/react-gui
+                cd "${WORKSPACE}/web/react-gui"
                 rm -rf build node_modules
                 echo "✓ Cleanup complete (archive preserved)"
             '''
