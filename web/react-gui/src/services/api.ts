@@ -7,7 +7,9 @@ import type {
   RegisterResponse,
   DeviceCatalogItem,
   AddDeviceRequest,
-  ValveActionRequest
+  ValveActionRequest,
+  IrrigationZone,
+  CreateZoneRequest
 } from '../types/farming';
 
 // Create axios instance with base configuration
@@ -95,6 +97,31 @@ export const devicesAPI = {
 
   remove: async (deveui: string): Promise<void> => {
     await api.delete(`/api/devices/${deveui}`);
+  },
+};
+
+// Irrigation Zones API
+export const irrigationZonesAPI = {
+  getAll: async (): Promise<IrrigationZone[]> => {
+    const response = await api.get<IrrigationZone[]>('/api/irrigation-zones');
+    return response.data;
+  },
+
+  create: async (zone: CreateZoneRequest): Promise<IrrigationZone> => {
+    const response = await api.post<IrrigationZone>('/api/irrigation-zones', zone);
+    return response.data;
+  },
+
+  delete: async (zoneId: number): Promise<void> => {
+    await api.delete(`/api/irrigation-zones/${zoneId}`);
+  },
+
+  assignDevice: async (zoneId: number, deveui: string): Promise<void> => {
+    await api.put(`/api/irrigation-zones/${zoneId}/devices/${deveui}`);
+  },
+
+  removeDevice: async (zoneId: number, deveui: string): Promise<void> => {
+    await api.delete(`/api/irrigation-zones/${zoneId}/devices/${deveui}`);
   },
 };
 

@@ -17,6 +17,9 @@ export interface Device {
   // Only for Valves
   target_state?: 'OPEN' | 'CLOSED';
   current_state?: 'OPEN' | 'CLOSED';
+
+  // Irrigation zone assignment
+  irrigation_zone_id?: number | null;
 }
 
 export interface User {
@@ -55,4 +58,25 @@ export interface AddDeviceRequest {
 
 export interface ValveActionRequest {
   action: 'OPEN' | 'CLOSE';
+}
+
+// Irrigation zones
+export interface IrrigationZone {
+  id: number;
+  name: string;
+  device_count: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CreateZoneRequest {
+  name: string;
+}
+
+// Scheduling
+export type ScheduleMetric = 'swt_wm1' | 'swt_wm2' | 'average';
+
+export interface Schedule {
+  metric: ScheduleMetric;
+  threshold: number;
 }
