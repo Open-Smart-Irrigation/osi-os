@@ -123,6 +123,27 @@ export const irrigationZonesAPI = {
   removeDevice: async (zoneId: number, deveui: string): Promise<void> => {
     await api.delete(`/api/irrigation-zones/${zoneId}/devices/${deveui}`);
   },
+
+ // Update irrigation schedule for a zone
+  updateSchedule: async (
+    zoneId: number,
+    schedule: {
+      trigger_metric: 'SWT_WM1' | 'SWT_WM2' | 'SWT_AVG';
+      threshold_kpa: number;
+      enabled?: boolean;
+    }
+  ): Promise<{
+    irrigation_zone_id: number;
+    trigger_metric: 'SWT_WM1' | 'SWT_WM2' | 'SWT_AVG';
+    threshold_kpa: number;
+    enabled: boolean;
+  }> => {
+    const response = await api.put(
+      `/api/irrigation-zones/${zoneId}/schedule`,
+      schedule
+    );
+    return response.data;
+  },
 };
 
 export default api;
