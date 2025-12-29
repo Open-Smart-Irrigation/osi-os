@@ -60,23 +60,35 @@ export interface ValveActionRequest {
   action: 'OPEN' | 'CLOSE';
 }
 
-// Irrigation zones
+// ---- Irrigation schedule types ----
+export type TriggerMetric = 'SWT_WM1' | 'SWT_WM2' | 'SWT_AVG';
+
+export interface IrrigationSchedule {
+  irrigation_zone_id: number;
+  trigger_metric: TriggerMetric;
+  threshold_kpa: number;
+  enabled: boolean;
+  last_triggered_at?: string | null;
+}
+
+export interface UpdateIrrigationScheduleRequest {
+  trigger_metric: TriggerMetric;
+  threshold_kpa: number;
+  enabled: boolean;
+}
+
+// ---- Irrigation zone types ----
 export interface IrrigationZone {
   id: number;
   name: string;
   device_count: number;
   created_at: string;
   updated_at: string;
+
+  // Returned by GET /api/irrigation-zones (your Node-RED flow adds this)
+  schedule: IrrigationSchedule | null;
 }
 
 export interface CreateZoneRequest {
   name: string;
-}
-
-// Scheduling
-export type ScheduleMetric = 'swt_wm1' | 'swt_wm2' | 'average';
-
-export interface Schedule {
-  metric: ScheduleMetric;
-  threshold: number;
 }

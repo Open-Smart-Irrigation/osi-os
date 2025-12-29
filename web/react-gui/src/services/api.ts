@@ -9,7 +9,9 @@ import type {
   AddDeviceRequest,
   ValveActionRequest,
   IrrigationZone,
-  CreateZoneRequest
+  CreateZoneRequest,
+  UpdateIrrigationScheduleRequest,
+  IrrigationSchedule,
 } from '../types/farming';
 
 // Create axios instance with base configuration
@@ -26,11 +28,9 @@ api.interceptors.request.use(
   (config) => {
     const token = localStorage.getItem('auth_token');
     if (token) {
-      // Ensure headers object exists
       if (!config.headers) {
         config.headers = {} as any;
       }
-      // Set Authorization header
       config.headers['Authorization'] = `Bearer ${token}`;
       console.log('[API] Request to:', config.url, 'with token:', token.substring(0, 20) + '...');
     } else {
@@ -53,7 +53,6 @@ api.interceptors.response.use(
   (error) => {
     console.error('[API] Response error:', error.config?.url, 'Status:', error.response?.status);
     if (error.response?.status === 401) {
-      // Clear token but don't redirect - let page handle error display
       console.warn('[API] 401 Unauthorized - clearing token from localStorage');
       localStorage.removeItem('auth_token');
     }
@@ -124,23 +123,14 @@ export const irrigationZonesAPI = {
     await api.delete(`/api/irrigation-zones/${zoneId}/devices/${deveui}`);
   },
 
- // Update irrigation schedule for a zone
+  // Save/update schedule for a zone
   updateSchedule: async (
     zoneId: number,
-    schedule: {
-      trigger_metric: 'SWT_WM1' | 'SWT_WM2' | 'SWT_AVG';
-      threshold_kpa: number;
-      enabled?: boolean;
-    }
-  ): Promise<{
-    irrigation_zone_id: number;
-    trigger_metric: 'SWT_WM1' | 'SWT_WM2' | 'SWT_AVG';
-    threshold_kpa: number;
-    enabled: boolean;
-  }> => {
-    const response = await api.put(
+    body: UpdateIrrigationScheduleRequest
+  ): Promise<IrrigationSchedule> => {
+    const response = await api.put<IrrigationSchedule>(
       `/api/irrigation-zones/${zoneId}/schedule`,
-      schedule
+      body
     );
     return response.data;
   },
