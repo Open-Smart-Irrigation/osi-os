@@ -25,6 +25,7 @@ export const ScheduleSection: React.FC<ScheduleSectionProps> = ({
   const [triggerMetric, setTriggerMetric] = useState<TriggerMetric>('SWT_WM1');
   const [thresholdKpa, setThresholdKpa] = useState<number>(30);
   const [enabled, setEnabled] = useState<boolean>(true);
+  const [durationMinutes, setDurationMinutes] = useState<number>(20);
 
   const [error, setError] = useState<string>('');
   const [success, setSuccess] = useState<string>('');
@@ -46,6 +47,8 @@ export const ScheduleSection: React.FC<ScheduleSectionProps> = ({
           const s: any = (z as any).schedule;
           if (s.trigger_metric) setTriggerMetric(s.trigger_metric as TriggerMetric);
           if (typeof s.threshold_kpa === 'number') setThresholdKpa(s.threshold_kpa);
+          if (typeof s.duration_minutes === 'number') setDurationMinutes(s.duration_minutes);
+          if (s.duration_minutes === null || s.duration_minutes === undefined) setDurationMinutes(20);
           if (typeof s.enabled === 'boolean') setEnabled(s.enabled);
           if (s.enabled === 0 || s.enabled === 1) setEnabled(Boolean(s.enabled));
         }
@@ -83,12 +86,17 @@ export const ScheduleSection: React.FC<ScheduleSectionProps> = ({
     setSuccess('');
 
     try {
+      const durationPayload = Number.isFinite(durationMinutes) ? Math.round(durationMinutes) : 20;
+      if (import.meta.env?.DEV && !Number.isFinite(durationMinutes)) {
+        console.warn('[ScheduleSection] duration_minutes is not a finite number, defaulting to 20.');
+      }
       // Use a dedicated API call (see note below)
       // PUT /api/irrigation-zones/:id/schedule
       await irrigationZonesAPI.updateSchedule(zoneId, {
         trigger_metric: triggerMetric,
         threshold_kpa: thresholdKpa,
         enabled,
+        duration_minutes: durationPayload,
       });
 
       setSuccess('Saved.');
@@ -157,21 +165,52 @@ export const ScheduleSection: React.FC<ScheduleSectionProps> = ({
               </select>
             </div>
 
-            {/* Threshold Input */}
-            <div>
-              <label className="block text-slate-300 text-sm font-semibold mb-2">
-                Threshold (kPa)
-              </label>
-              <input
-                type="number"
-                value={thresholdKpa}
-                onChange={(e) => setThresholdKpa(Number(e.target.value))}
-                min="1"
-                max="300"
-                className="w-full px-3 py-2 bg-slate-700 border-2 border-slate-600 rounded-lg text-white focus:outline-none focus:border-farm-green focus:ring-2 focus:ring-farm-green/50"
-              />
-              <div className="mt-1 text-slate-400 text-xs">
-                Trigger if {metricLabel} ≥ {Number.isFinite(thresholdKpa) ? thresholdKpa : '…'} kPa (once/day, 06:00).
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              {/* Threshold Input */}
+              <div>
+                <label className="block text-slate-300 text-sm font-semibold mb-2">
+                  Threshold (kPa)
+                </label>
+                <input
+                  type="number"
+                  value={thresholdKpa}
+                  onChange={(e) => setThresholdKpa(Number(e.target.value))}
+                  min="1"
+                  max="300"
+                  step="1"
+                  className="w-full px-3 py-2 bg-slate-700 border-2 border-slate-600 rounded-lg text-white focus:outline-none focus:border-farm-green focus:ring-2 focus:ring-farm-green/50"
+                />
+                <div className="mt-1 text-slate-400 text-xs">
+                  Trigger if {metricLabel} ≥ {Number.isFinite(thresholdKpa) ? thresholdKpa : '…'} kPa (once/day, 06:00).
+                </div>
+              </div>
+
+              {/* Duration Input */}
+              <div>
+                <label className="block text-slate-300 text-sm font-semibold mb-2">
+                  Irrigation duration (min)
+                </label>
+                <input
+                  type="number"
+                  value={durationMinutes}
+                  onChange={(e) => {
+                    const value = e.target.value;
+                    if (value === '') {
+                      setDurationMinutes((prev) => (Number.isFinite(prev) ? prev : 20));
+                      return;
+                    }
+                    const next = Number(value);
+                    if (Number.isFinite(next)) {
+                      setDurationMinutes(next);
+                    } else {
+                      setDurationMinutes((prev) => (Number.isFinite(prev) ? prev : 20));
+                    }
+                  }}
+                  min="1"
+                  max="240"
+                  step="1"
+                  className="w-full px-3 py-2 bg-slate-700 border-2 border-slate-600 rounded-lg text-white focus:outline-none focus:border-farm-green focus:ring-2 focus:ring-farm-green/50"
+                />
               </div>
             </div>
           </div>
@@ -202,6 +241,11 @@ export const ScheduleSection: React.FC<ScheduleSectionProps> = ({
                       setTriggerMetric(z.schedule.trigger_metric as TriggerMetric);
                       setThresholdKpa(Number(z.schedule.threshold_kpa));
                       setEnabled(Boolean(z.schedule.enabled));
+                      if (typeof z.schedule.duration_minutes === 'number') {
+                        setDurationMinutes(z.schedule.duration_minutes);
+                      } else {
+                        setDurationMinutes(20);
+                      }
                     }
                   })
                   .catch((err: any) => setError(err?.response?.data?.message || 'Failed to reload schedule'))

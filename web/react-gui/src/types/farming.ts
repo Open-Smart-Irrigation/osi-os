@@ -70,6 +70,7 @@ export interface IrrigationSchedule {
   trigger_metric: TriggerMetric;
   threshold_kpa: number;
   enabled: boolean;
+  duration_minutes?: number;
   last_triggered_at?: string | null;
 }
 
@@ -77,6 +78,7 @@ export interface UpdateIrrigationScheduleRequest {
   trigger_metric: TriggerMetric;
   threshold_kpa: number;
   enabled: boolean;
+  duration_minutes?: number;
 }
 
 // ---- Irrigation zone types ----
