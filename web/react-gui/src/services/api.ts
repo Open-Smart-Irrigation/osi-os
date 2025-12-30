@@ -32,14 +32,11 @@ api.interceptors.request.use(
         config.headers = {} as any;
       }
       config.headers['Authorization'] = `Bearer ${token}`;
-      console.log('[API] Request to:', config.url, 'with token:', token.substring(0, 20) + '...');
     } else {
-      console.log('[API] Request to:', config.url, 'without token (not found in localStorage)');
     }
     return config;
   },
   (error) => {
-    console.error('[API] Request interceptor error:', error);
     return Promise.reject(error);
   }
 );
@@ -47,13 +44,10 @@ api.interceptors.request.use(
 // Response interceptor to handle auth errors
 api.interceptors.response.use(
   (response) => {
-    console.log('[API] Response from:', response.config.url, 'Status:', response.status);
     return response;
   },
   (error) => {
-    console.error('[API] Response error:', error.config?.url, 'Status:', error.response?.status);
     if (error.response?.status === 401) {
-      console.warn('[API] 401 Unauthorized - clearing token from localStorage');
       localStorage.removeItem('auth_token');
     }
     return Promise.reject(error);

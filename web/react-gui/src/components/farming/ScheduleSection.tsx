@@ -88,28 +88,12 @@ export const ScheduleSection: React.FC<ScheduleSectionProps> = ({
     try {
       const durationRaw = Number.isFinite(durationMinutes) ? Math.round(durationMinutes) : 20;
       const durationPayload = Math.min(240, Math.max(1, durationRaw));
-      if (import.meta.env?.DEV && !Number.isFinite(durationMinutes)) {
-        console.warn('[ScheduleSection] duration_minutes is not a finite number, defaulting to 20.');
-      }
       const payload = {
         trigger_metric: triggerMetric,
         threshold_kpa: thresholdKpa,
         enabled,
         duration_minutes: durationPayload,
       };
-      if (
-        import.meta.env?.DEV &&
-        (payload.duration_minutes === undefined ||
-          payload.duration_minutes === null ||
-          Number.isNaN(payload.duration_minutes))
-      ) {
-        console.error('[ScheduleSection] duration_minutes missing from save payload', payload);
-      }
-      console.log('[ScheduleSection] Save payload', {
-        durationMinutes,
-        durationPayload,
-        payload,
-      });
       // Use a dedicated API call (see note below)
       // PUT /api/irrigation-zones/:id/schedule
       await irrigationZonesAPI.updateSchedule(zoneId, payload);
