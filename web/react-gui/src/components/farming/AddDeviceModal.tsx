@@ -71,20 +71,20 @@ export const AddDeviceModal: React.FC<AddDeviceModalProps> = ({
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4">
-      <div className="bg-slate-800 rounded-2xl shadow-2xl border-2 border-slate-700 max-w-lg w-full p-8">
+    <div className="fixed inset-0 bg-[var(--overlay)] flex items-center justify-center z-50 p-4">
+      <div className="bg-[var(--card)] rounded-2xl shadow-2xl border-2 border-[var(--border)] max-w-lg w-full p-8">
         <div className="flex justify-between items-center mb-6">
-          <h2 className="text-3xl font-bold text-white high-contrast-text">Add Device</h2>
+          <h2 className="text-3xl font-bold text-[var(--text)] high-contrast-text">Add Device</h2>
           <button
             onClick={onClose}
-            className="text-slate-400 hover:text-white text-3xl leading-none"
+            className="text-[var(--text-tertiary)] hover:text-[var(--text)] text-3xl leading-none"
           >
             ×
           </button>
         </div>
 
         {error && (
-          <div className="mb-4 bg-red-500/20 border border-red-500 text-red-200 px-3 py-2 rounded-lg text-sm">
+          <div className="mb-4 bg-[var(--error-bg)] border border-[var(--error-bg)] text-[var(--error-text)] px-3 py-2 rounded-lg text-sm">
             {error}
           </div>
         )}
@@ -92,13 +92,13 @@ export const AddDeviceModal: React.FC<AddDeviceModalProps> = ({
         <form onSubmit={handleSubmit} className="space-y-6">
           {/* Device Type */}
           <div>
-            <label className="block text-white text-lg font-semibold mb-2">
+            <label className="block text-[var(--text)] text-lg font-semibold mb-2">
               Device Type
             </label>
             <select
               value={selectedType}
               onChange={(e) => setSelectedType(e.target.value as DeviceType)}
-              className="w-full px-4 py-4 touch-target bg-slate-700 border-2 border-slate-600 rounded-lg text-white text-lg focus:outline-none focus:border-farm-green focus:ring-2 focus:ring-farm-green/50"
+              className="w-full px-4 py-4 touch-target bg-white border-2 border-[var(--border)] rounded-lg text-[var(--text)] text-lg placeholder:text-[var(--text-tertiary)] focus:outline-none focus:border-[var(--focus)] focus:ring-2 focus:ring-[var(--focus)]"
             >
               {catalog.map((item) => (
                 <option key={item.id} value={item.id}>
@@ -110,7 +110,7 @@ export const AddDeviceModal: React.FC<AddDeviceModalProps> = ({
 
           {/* Name */}
           <div>
-            <label htmlFor="name" className="block text-white text-lg font-semibold mb-2">
+            <label htmlFor="name" className="block text-[var(--text)] text-lg font-semibold mb-2">
               Device Name
             </label>
             <input
@@ -120,13 +120,13 @@ export const AddDeviceModal: React.FC<AddDeviceModalProps> = ({
               onChange={(e) => setName(e.target.value)}
               required
               placeholder="e.g., North Field, Main Valve"
-              className="w-full px-4 py-4 touch-target bg-slate-700 border-2 border-slate-600 rounded-lg text-white text-lg focus:outline-none focus:border-farm-green focus:ring-2 focus:ring-farm-green/50"
+              className="w-full px-4 py-4 touch-target bg-white border-2 border-[var(--border)] rounded-lg text-[var(--text)] text-lg placeholder:text-[var(--text-tertiary)] focus:outline-none focus:border-[var(--focus)] focus:ring-2 focus:ring-[var(--focus)]"
             />
           </div>
 
           {/* DevEUI */}
           <div>
-            <label htmlFor="deveui" className="block text-white text-lg font-semibold mb-2">
+            <label htmlFor="deveui" className="block text-[var(--text)] text-lg font-semibold mb-2">
               DevEUI
             </label>
             <input
@@ -137,9 +137,9 @@ export const AddDeviceModal: React.FC<AddDeviceModalProps> = ({
               required
               maxLength={16}
               placeholder="16 hex characters"
-              className="w-full px-4 py-4 touch-target bg-slate-700 border-2 border-slate-600 rounded-lg text-white text-lg font-mono focus:outline-none focus:border-farm-green focus:ring-2 focus:ring-farm-green/50"
+              className="w-full px-4 py-4 touch-target bg-white border-2 border-[var(--border)] rounded-lg text-[var(--text)] text-lg font-mono placeholder:text-[var(--text-tertiary)] focus:outline-none focus:border-[var(--focus)] focus:ring-2 focus:ring-[var(--focus)]"
             />
-            <p className="text-slate-400 text-sm mt-1">
+            <p className="text-[var(--text-tertiary)] text-sm mt-1">
               Enter exactly 16 hexadecimal characters (0-9, A-F)
             </p>
           </div>
@@ -149,14 +149,14 @@ export const AddDeviceModal: React.FC<AddDeviceModalProps> = ({
             <button
               type="button"
               onClick={onClose}
-              className="flex-1 bg-slate-600 hover:bg-slate-500 text-white font-bold text-lg py-4 touch-target rounded-lg transition-colors"
+              className="flex-1 bg-[var(--secondary-bg)] hover:bg-[var(--border)] text-[var(--text)] font-bold text-lg py-4 touch-target rounded-lg transition-colors"
             >
               Cancel
             </button>
             <button
               type="submit"
               disabled={loading}
-              className="flex-1 bg-farm-green hover:bg-green-600 disabled:bg-slate-600 text-white font-bold text-lg py-4 touch-target rounded-lg transition-colors shadow-lg disabled:cursor-not-allowed"
+              className="flex-1 bg-[var(--primary)] hover:bg-[var(--primary-hover)] disabled:bg-[var(--border)] text-white font-bold text-lg py-4 touch-target rounded-lg transition-colors shadow-lg disabled:cursor-not-allowed disabled:text-[var(--text-disabled)]"
             >
               {loading ? 'Adding...' : 'Add Device'}
             </button>

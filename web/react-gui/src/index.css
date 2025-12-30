@@ -1,5 +1,35 @@
 @import "tailwindcss";
 
+/* Light, high-contrast theme for field readability */
+:root {
+  --bg: #F4F6F8;
+  --surface: #E8EDF2;
+  --card: #FFFFFF;
+  --text: #0F172A;
+  --text-secondary: #334155;
+  --text-tertiary: #64748B;
+  --text-disabled: #94A3B8;
+  --border: #CBD5E1;
+  --focus: #2563EB;
+  --primary: #2563EB;
+  --primary-hover: #1D4ED8;
+  --secondary-bg: #E2E8F0;
+  --header-bg: #1E3A8A;
+  --header-text: #FFFFFF;
+  --header-subtext: #E0E7FF;
+  --success-bg: #DCFCE7;
+  --success-text: #14532D;
+  --success-border: #16A34A;
+  --warn-bg: #FEF3C7;
+  --warn-text: #92400E;
+  --warn-border: #F59E0B;
+  --error-bg: #DC2626;
+  --error-text: #FFFFFF;
+  --toggle-on: #16A34A;
+  --toggle-off: #CBD5E1;
+  --overlay: #334155;
+}
+
 /* Custom base styles */
 body {
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',

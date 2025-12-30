@@ -48,28 +48,28 @@ export const AssignDeviceModal: React.FC<AssignDeviceModalProps> = ({
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4">
-      <div className="bg-slate-800 rounded-2xl shadow-2xl border-2 border-slate-700 max-w-lg w-full p-8">
+    <div className="fixed inset-0 bg-[var(--overlay)] flex items-center justify-center z-50 p-4">
+      <div className="bg-[var(--card)] rounded-2xl shadow-2xl border-2 border-[var(--border)] max-w-lg w-full p-8">
         <div className="flex justify-between items-center mb-6">
-          <h2 className="text-3xl font-bold text-white high-contrast-text">
+          <h2 className="text-3xl font-bold text-[var(--text)] high-contrast-text">
             Assign Device to {zoneName}
           </h2>
           <button
             onClick={onClose}
-            className="text-slate-400 hover:text-white text-3xl leading-none"
+            className="text-[var(--text-tertiary)] hover:text-[var(--text)] text-3xl leading-none"
           >
             ×
           </button>
         </div>
 
         {error && (
-          <div className="mb-4 bg-red-500/20 border border-red-500 text-red-200 px-3 py-2 rounded-lg text-sm">
+          <div className="mb-4 bg-[var(--error-bg)] border border-[var(--error-bg)] text-[var(--error-text)] px-3 py-2 rounded-lg text-sm">
             {error}
           </div>
         )}
 
         {availableDevices.length === 0 ? (
-          <div className="bg-yellow-500/20 border border-yellow-500 text-yellow-200 px-4 py-3 rounded-lg">
+          <div className="bg-[var(--warn-bg)] border border-[var(--warn-border)] text-[var(--warn-text)] px-4 py-3 rounded-lg">
             <p className="font-bold mb-1">No unassigned devices</p>
             <p className="text-sm">
               All your devices are already assigned to zones. Add more devices or remove them from other zones first.
@@ -78,7 +78,7 @@ export const AssignDeviceModal: React.FC<AssignDeviceModalProps> = ({
         ) : (
           <form onSubmit={handleSubmit} className="space-y-6">
             <div>
-              <label htmlFor="device" className="block text-white text-lg font-semibold mb-2">
+              <label htmlFor="device" className="block text-[var(--text)] text-lg font-semibold mb-2">
                 Select Device
               </label>
               <select
@@ -86,7 +86,7 @@ export const AssignDeviceModal: React.FC<AssignDeviceModalProps> = ({
                 value={selectedDeveui}
                 onChange={(e) => setSelectedDeveui(e.target.value)}
                 required
-                className="w-full px-4 py-4 touch-target bg-slate-700 border-2 border-slate-600 rounded-lg text-white text-lg focus:outline-none focus:border-farm-green focus:ring-2 focus:ring-farm-green/50"
+                className="w-full px-4 py-4 touch-target bg-white border-2 border-[var(--border)] rounded-lg text-[var(--text)] text-lg focus:outline-none focus:border-[var(--focus)] focus:ring-2 focus:ring-[var(--focus)]"
               >
                 <option value="">-- Select a device --</option>
                 {availableDevices.map((device) => (
@@ -101,14 +101,14 @@ export const AssignDeviceModal: React.FC<AssignDeviceModalProps> = ({
               <button
                 type="button"
                 onClick={onClose}
-                className="flex-1 bg-slate-600 hover:bg-slate-500 text-white font-bold text-lg py-4 touch-target rounded-lg transition-colors"
+                className="flex-1 bg-[var(--secondary-bg)] hover:bg-[var(--border)] text-[var(--text)] font-bold text-lg py-4 touch-target rounded-lg transition-colors"
               >
                 Cancel
               </button>
               <button
                 type="submit"
                 disabled={loading}
-                className="flex-1 bg-farm-green hover:bg-green-600 disabled:bg-slate-600 text-white font-bold text-lg py-4 touch-target rounded-lg transition-colors shadow-lg disabled:cursor-not-allowed"
+                className="flex-1 bg-[var(--primary)] hover:bg-[var(--primary-hover)] disabled:bg-[var(--border)] text-white font-bold text-lg py-4 touch-target rounded-lg transition-colors shadow-lg disabled:cursor-not-allowed disabled:text-[var(--text-disabled)]"
               >
                 {loading ? 'Assigning...' : 'Assign Device'}
               </button>

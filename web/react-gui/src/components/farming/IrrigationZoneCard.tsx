@@ -54,21 +54,21 @@ export const IrrigationZoneCard: React.FC<IrrigationZoneCardProps> = ({
   const stregaValves = devices.filter((d) => d.type_id === 'STREGA_VALVE');
 
   return (
-    <div className="bg-slate-700 border-2 border-slate-600 rounded-xl p-6 shadow-lg mb-6">
+    <div className="bg-[var(--surface)] border-2 border-[var(--border)] rounded-xl p-6 shadow-lg mb-6">
       {/* Zone Header */}
       <div className="flex items-start justify-between mb-4">
         <div className="flex-1">
-          <h3 className="text-3xl font-bold text-white mb-1 high-contrast-text">
+          <h3 className="text-3xl font-bold text-[var(--text)] mb-1 high-contrast-text">
             {zone.name}
           </h3>
-          <p className="text-slate-300 text-sm">
+          <p className="text-[var(--text-secondary)] text-sm">
             {zone.device_count} device{zone.device_count !== 1 ? 's' : ''}
           </p>
         </div>
         <div className="flex gap-2">
           <button
             onClick={() => setShowAssignModal(true)}
-            className="bg-farm-green hover:bg-green-600 text-white px-4 py-2 rounded-lg text-sm font-semibold transition-colors"
+            className="bg-[var(--primary)] hover:bg-[var(--primary-hover)] text-white px-4 py-2 rounded-lg text-sm font-semibold transition-colors"
             title="Assign device to zone"
           >
             + Device
@@ -76,7 +76,7 @@ export const IrrigationZoneCard: React.FC<IrrigationZoneCardProps> = ({
           <button
             onClick={() => setShowDeleteConfirm(true)}
             disabled={isDeleting}
-            className="bg-red-600 hover:bg-red-700 disabled:bg-slate-600 text-white px-4 py-2 rounded-lg text-sm font-semibold transition-colors disabled:cursor-not-allowed"
+            className="bg-[var(--error-bg)] hover:bg-[var(--error-bg)] disabled:bg-[var(--border)] text-[var(--error-text)] px-4 py-2 rounded-lg text-sm font-semibold transition-colors disabled:cursor-not-allowed disabled:text-[var(--text-disabled)]"
             title="Delete zone"
           >
             Delete
@@ -85,13 +85,13 @@ export const IrrigationZoneCard: React.FC<IrrigationZoneCardProps> = ({
       </div>
 
       {error && (
-        <div className="bg-red-500/20 border border-red-500 text-red-200 px-3 py-2 rounded-lg mb-4 text-sm">
+        <div className="bg-[var(--error-bg)] border border-[var(--error-bg)] text-[var(--error-text)] px-3 py-2 rounded-lg mb-4 text-sm">
           {error}
         </div>
       )}
 
       {showDeleteConfirm && (
-        <div className="bg-yellow-500/20 border-2 border-yellow-500 text-yellow-200 px-4 py-3 rounded-lg mb-4">
+        <div className="bg-[var(--warn-bg)] border-2 border-[var(--warn-border)] text-[var(--warn-text)] px-4 py-3 rounded-lg mb-4">
           <p className="font-bold mb-2">Delete this zone?</p>
           <p className="text-sm mb-3">
             All devices will be unassigned from this zone. This action cannot be undone.
@@ -100,7 +100,7 @@ export const IrrigationZoneCard: React.FC<IrrigationZoneCardProps> = ({
             <button
               onClick={handleDeleteZone}
               disabled={isDeleting}
-              className="bg-red-600 hover:bg-red-700 disabled:bg-slate-600 text-white font-bold px-4 py-2 rounded-lg transition-colors disabled:cursor-not-allowed flex items-center gap-2"
+              className="bg-[var(--error-bg)] hover:bg-[var(--error-bg)] disabled:bg-[var(--border)] text-[var(--error-text)] font-bold px-4 py-2 rounded-lg transition-colors disabled:cursor-not-allowed flex items-center gap-2 disabled:text-[var(--text-disabled)]"
             >
               {isDeleting ? (
                 <>
@@ -114,7 +114,7 @@ export const IrrigationZoneCard: React.FC<IrrigationZoneCardProps> = ({
             <button
               onClick={() => setShowDeleteConfirm(false)}
               disabled={isDeleting}
-              className="bg-slate-600 hover:bg-slate-500 disabled:bg-slate-700 text-white font-bold px-4 py-2 rounded-lg transition-colors disabled:cursor-not-allowed"
+              className="bg-[var(--secondary-bg)] hover:bg-[var(--border)] disabled:bg-[var(--border)] text-[var(--text)] font-bold px-4 py-2 rounded-lg transition-colors disabled:cursor-not-allowed disabled:text-[var(--text-disabled)]"
             >
               Cancel
             </button>
@@ -128,7 +128,7 @@ export const IrrigationZoneCard: React.FC<IrrigationZoneCardProps> = ({
       {/* Devices in Zone */}
       {devices.length > 0 ? (
         <div>
-          <h4 className="text-white text-xl font-bold mb-3">Devices in this zone:</h4>
+          <h4 className="text-[var(--text)] text-xl font-bold mb-3">Devices in this zone:</h4>
 
           {/* Sensors */}
           {kiwiSensors.length > 0 && (
@@ -138,7 +138,7 @@ export const IrrigationZoneCard: React.FC<IrrigationZoneCardProps> = ({
                   <div key={device.deveui} className="relative">
                     <KiwiSensorCard device={device} onRemove={() => handleRemoveDevice(device.deveui)} />
                     {removingDevice === device.deveui && (
-                      <div className="absolute inset-0 bg-black/50 flex items-center justify-center rounded-xl">
+                      <div className="absolute inset-0 bg-[var(--overlay)] flex items-center justify-center rounded-xl">
                         <div className="animate-spin h-8 w-8 border-4 border-white border-t-transparent rounded-full" />
                       </div>
                     )}
@@ -160,7 +160,7 @@ export const IrrigationZoneCard: React.FC<IrrigationZoneCardProps> = ({
                       onRemove={() => handleRemoveDevice(device.deveui)}
                     />
                     {removingDevice === device.deveui && (
-                      <div className="absolute inset-0 bg-black/50 flex items-center justify-center rounded-xl">
+                      <div className="absolute inset-0 bg-[var(--overlay)] flex items-center justify-center rounded-xl">
                         <div className="animate-spin h-8 w-8 border-4 border-white border-t-transparent rounded-full" />
                       </div>
                     )}
@@ -171,11 +171,11 @@ export const IrrigationZoneCard: React.FC<IrrigationZoneCardProps> = ({
           )}
         </div>
       ) : (
-        <div className="bg-slate-800 rounded-lg p-6 text-center">
-          <p className="text-slate-400 text-lg mb-3">No devices in this zone yet</p>
+        <div className="bg-[var(--card)] rounded-lg p-6 text-center">
+          <p className="text-[var(--text-tertiary)] text-lg mb-3">No devices in this zone yet</p>
           <button
             onClick={() => setShowAssignModal(true)}
-            className="bg-farm-green hover:bg-green-600 text-white font-bold px-6 py-3 rounded-lg transition-colors"
+            className="bg-[var(--primary)] hover:bg-[var(--primary-hover)] text-white font-bold px-6 py-3 rounded-lg transition-colors"
           >
             Assign First Device
           </button>

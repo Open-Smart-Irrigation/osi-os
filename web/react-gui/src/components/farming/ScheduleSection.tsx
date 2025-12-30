@@ -111,19 +111,19 @@ export const ScheduleSection: React.FC<ScheduleSectionProps> = ({
     Number.isFinite(thresholdKpa) && thresholdKpa > 0 && thresholdKpa <= 300 && !!triggerMetric;
 
   return (
-    <div className="bg-slate-800 rounded-lg p-4 mb-4">
+    <div className="bg-[var(--card)] rounded-lg p-4 mb-4">
       <div className="flex items-center justify-between gap-4 mb-3">
-        <h4 className="text-white text-lg font-bold">Irrigation Schedule</h4>
+        <h4 className="text-[var(--text)] text-lg font-bold">Irrigation Schedule</h4>
 
         <div className="flex items-center gap-2">
-          <span className="text-slate-300 text-sm font-semibold">Enabled</span>
+          <span className="text-[var(--text-secondary)] text-sm font-semibold">Enabled</span>
           <button
             type="button"
             onClick={() => setEnabled((v) => !v)}
             className={`px-3 py-1 rounded-lg text-sm font-bold border-2 transition-colors ${
               enabled
-                ? 'bg-green-600/20 border-green-600 text-green-200'
-                : 'bg-slate-700 border-slate-600 text-slate-200'
+                ? 'bg-[var(--toggle-on)] border-[var(--toggle-on)] text-white'
+                : 'bg-[var(--toggle-off)] border-[var(--toggle-off)] text-[var(--text-secondary)]'
             }`}
             aria-pressed={enabled}
           >
@@ -133,30 +133,30 @@ export const ScheduleSection: React.FC<ScheduleSectionProps> = ({
       </div>
 
       {error && (
-        <div className="mb-3 bg-red-500/20 border border-red-500 text-red-200 px-3 py-2 rounded-lg text-sm">
+        <div className="mb-3 bg-[var(--error-bg)] border border-[var(--error-bg)] text-[var(--error-text)] px-3 py-2 rounded-lg text-sm">
           {error}
         </div>
       )}
       {success && (
-        <div className="mb-3 bg-green-500/20 border border-green-500 text-green-200 px-3 py-2 rounded-lg text-sm">
+        <div className="mb-3 bg-[var(--success-bg)] border border-[var(--success-border)] text-[var(--success-text)] px-3 py-2 rounded-lg text-sm">
           {success}
         </div>
       )}
 
       {loading ? (
-        <div className="text-slate-400 text-sm">Loading schedule...</div>
+        <div className="text-[var(--text-tertiary)] text-sm">Loading schedule...</div>
       ) : (
         <>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             {/* Metric Selector */}
             <div>
-              <label className="block text-slate-300 text-sm font-semibold mb-2">
+              <label className="block text-[var(--text-secondary)] text-sm font-semibold mb-2">
                 Trigger Metric
               </label>
               <select
                 value={triggerMetric}
                 onChange={(e) => setTriggerMetric(e.target.value as TriggerMetric)}
-                className="w-full px-3 py-2 bg-slate-700 border-2 border-slate-600 rounded-lg text-white focus:outline-none focus:border-farm-green focus:ring-2 focus:ring-farm-green/50"
+                className="w-full px-3 py-2 bg-[var(--card)] border-2 border-[var(--border)] rounded-lg text-[var(--text)] focus:outline-none focus:border-[var(--focus)] focus:ring-2 focus:ring-[var(--focus)]"
               >
                 <option value="SWT_WM1">Soil Water Tension 1</option>
                 <option value="SWT_WM2">Soil Water Tension 2</option>
@@ -167,7 +167,7 @@ export const ScheduleSection: React.FC<ScheduleSectionProps> = ({
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               {/* Threshold Input */}
               <div>
-                <label className="block text-slate-300 text-sm font-semibold mb-2">
+                <label className="block text-[var(--text-secondary)] text-sm font-semibold mb-2">
                   Threshold (kPa)
                 </label>
                 <input
@@ -177,16 +177,16 @@ export const ScheduleSection: React.FC<ScheduleSectionProps> = ({
                   min="1"
                   max="300"
                   step="1"
-                  className="w-full px-3 py-2 bg-slate-700 border-2 border-slate-600 rounded-lg text-white focus:outline-none focus:border-farm-green focus:ring-2 focus:ring-farm-green/50"
+                  className="w-full px-3 py-2 bg-[var(--card)] border-2 border-[var(--border)] rounded-lg text-[var(--text)] focus:outline-none focus:border-[var(--focus)] focus:ring-2 focus:ring-[var(--focus)]"
                 />
-                <div className="mt-1 text-slate-400 text-xs">
+                <div className="mt-1 text-[var(--text-tertiary)] text-xs">
                   Trigger if {metricLabel} ≥ {Number.isFinite(thresholdKpa) ? thresholdKpa : '…'} kPa (once/day, 06:00).
                 </div>
               </div>
 
               {/* Duration Input */}
               <div>
-                <label className="block text-slate-300 text-sm font-semibold mb-2">
+                <label className="block text-[var(--text-secondary)] text-sm font-semibold mb-2">
                   Irrigation duration (min)
                 </label>
                 <input
@@ -208,7 +208,7 @@ export const ScheduleSection: React.FC<ScheduleSectionProps> = ({
                   min="1"
                   max="240"
                   step="1"
-                  className="w-full px-3 py-2 bg-slate-700 border-2 border-slate-600 rounded-lg text-white focus:outline-none focus:border-farm-green focus:ring-2 focus:ring-farm-green/50"
+                  className="w-full px-3 py-2 bg-[var(--card)] border-2 border-[var(--border)] rounded-lg text-[var(--text)] focus:outline-none focus:border-[var(--focus)] focus:ring-2 focus:ring-[var(--focus)]"
                 />
               </div>
             </div>
@@ -219,7 +219,7 @@ export const ScheduleSection: React.FC<ScheduleSectionProps> = ({
               type="button"
               disabled={!canSave || saving}
               onClick={saveSchedule}
-              className="bg-farm-green hover:bg-green-600 disabled:bg-slate-600 text-white font-bold text-sm px-4 py-2 rounded-lg transition-colors disabled:cursor-not-allowed"
+              className="bg-[var(--primary)] hover:bg-[var(--primary-hover)] disabled:bg-[var(--border)] disabled:text-[var(--text-disabled)] text-white font-bold text-sm px-4 py-2 rounded-lg transition-colors disabled:cursor-not-allowed"
             >
               {saving ? 'Saving...' : 'Save schedule'}
             </button>
@@ -250,7 +250,7 @@ export const ScheduleSection: React.FC<ScheduleSectionProps> = ({
                   .catch((err: any) => setError(err?.response?.data?.message || 'Failed to reload schedule'))
                   .finally(() => setLoading(false));
               }}
-              className="bg-slate-700 hover:bg-slate-600 text-white font-bold text-sm px-4 py-2 rounded-lg transition-colors disabled:cursor-not-allowed"
+              className="bg-[var(--secondary-bg)] hover:bg-[var(--border)] text-[var(--text)] font-bold text-sm px-4 py-2 rounded-lg transition-colors disabled:cursor-not-allowed disabled:text-[var(--text-disabled)]"
             >
               Reload
             </button>
@@ -258,7 +258,7 @@ export const ScheduleSection: React.FC<ScheduleSectionProps> = ({
         </>
       )}
 
-      <div className="mt-3 text-slate-400 text-xs">
+      <div className="mt-3 text-[var(--text-tertiary)] text-xs">
         Scheduler logic (backend): trigger if metric_kpa ≥ threshold_kpa, only once per day, fixed 06:00.
       </div>
     </div>

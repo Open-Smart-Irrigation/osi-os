@@ -45,11 +45,11 @@ export const Register: React.FC = () => {
 
   if (success) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-slate-900 to-slate-800 px-4">
-        <div className="max-w-md w-full bg-slate-800 rounded-2xl shadow-2xl border border-slate-700 p-8 text-center">
+      <div className="min-h-screen flex items-center justify-center bg-[var(--bg)] px-4">
+        <div className="max-w-md w-full bg-[var(--card)] rounded-2xl shadow-2xl border border-[var(--border)] p-8 text-center">
           <div className="text-6xl mb-4">✓</div>
-          <h2 className="text-3xl font-bold text-farm-green mb-4">Success!</h2>
-          <p className="text-white text-lg">
+          <h2 className="text-3xl font-bold text-[var(--success-text)] mb-4">Success!</h2>
+          <p className="text-[var(--text)] text-lg">
             Account created successfully. Redirecting to login...
           </p>
         </div>
@@ -58,24 +58,24 @@ export const Register: React.FC = () => {
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-slate-900 to-slate-800 px-4">
-      <div className="max-w-md w-full bg-slate-800 rounded-2xl shadow-2xl border border-slate-700 p-8">
+    <div className="min-h-screen flex items-center justify-center bg-[var(--bg)] px-4">
+      <div className="max-w-md w-full bg-[var(--card)] rounded-2xl shadow-2xl border border-[var(--border)] p-8">
         <div className="text-center mb-8">
-          <h1 className="text-4xl font-bold text-white mb-2 high-contrast-text">
+          <h1 className="text-4xl font-bold text-[var(--text)] mb-2 high-contrast-text">
             Create Account
           </h1>
-          <p className="text-slate-300 text-lg">Register for Open Smart irrigation</p>
+          <p className="text-[var(--text-secondary)] text-lg">Register for Open Smart irrigation</p>
         </div>
 
         {error && (
-          <div className="mb-6 bg-red-500/20 border-2 border-red-500 text-red-200 px-4 py-3 rounded-lg">
+          <div className="mb-6 bg-[var(--error-bg)] border-2 border-[var(--error-bg)] text-[var(--error-text)] px-4 py-3 rounded-lg">
             {error}
           </div>
         )}
 
         <form onSubmit={handleSubmit} className="space-y-6">
           <div>
-            <label htmlFor="username" className="block text-white text-lg font-semibold mb-2">
+            <label htmlFor="username" className="block text-[var(--text)] text-lg font-semibold mb-2">
               Username
             </label>
             <input
@@ -84,13 +84,13 @@ export const Register: React.FC = () => {
               value={username}
               onChange={(e) => setUsername(e.target.value)}
               required
-              className="w-full px-4 py-4 touch-target bg-slate-700 border-2 border-slate-600 rounded-lg text-white text-lg focus:outline-none focus:border-farm-green focus:ring-2 focus:ring-farm-green/50"
+              className="w-full px-4 py-4 touch-target bg-white border-2 border-[var(--border)] rounded-lg text-[var(--text)] text-lg placeholder:text-[var(--text-tertiary)] focus:outline-none focus:border-[var(--focus)] focus:ring-2 focus:ring-[var(--focus)]"
               placeholder="Choose a username"
             />
           </div>
 
           <div>
-            <label htmlFor="password" className="block text-white text-lg font-semibold mb-2">
+            <label htmlFor="password" className="block text-[var(--text)] text-lg font-semibold mb-2">
               Password
             </label>
             <input
@@ -99,13 +99,13 @@ export const Register: React.FC = () => {
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               required
-              className="w-full px-4 py-4 touch-target bg-slate-700 border-2 border-slate-600 rounded-lg text-white text-lg focus:outline-none focus:border-farm-green focus:ring-2 focus:ring-farm-green/50"
+              className="w-full px-4 py-4 touch-target bg-white border-2 border-[var(--border)] rounded-lg text-[var(--text)] text-lg placeholder:text-[var(--text-tertiary)] focus:outline-none focus:border-[var(--focus)] focus:ring-2 focus:ring-[var(--focus)]"
               placeholder="Choose a password"
             />
           </div>
 
           <div>
-            <label htmlFor="confirmPassword" className="block text-white text-lg font-semibold mb-2">
+            <label htmlFor="confirmPassword" className="block text-[var(--text)] text-lg font-semibold mb-2">
               Confirm Password
             </label>
             <input
@@ -114,7 +114,7 @@ export const Register: React.FC = () => {
               value={confirmPassword}
               onChange={(e) => setConfirmPassword(e.target.value)}
               required
-              className="w-full px-4 py-4 touch-target bg-slate-700 border-2 border-slate-600 rounded-lg text-white text-lg focus:outline-none focus:border-farm-green focus:ring-2 focus:ring-farm-green/50"
+              className="w-full px-4 py-4 touch-target bg-white border-2 border-[var(--border)] rounded-lg text-[var(--text)] text-lg placeholder:text-[var(--text-tertiary)] focus:outline-none focus:border-[var(--focus)] focus:ring-2 focus:ring-[var(--focus)]"
               placeholder="Re-enter your password"
             />
           </div>
@@ -122,7 +122,7 @@ export const Register: React.FC = () => {
           <button
             type="submit"
             disabled={loading}
-            className="w-full bg-farm-green hover:bg-green-600 disabled:bg-slate-600 text-white font-bold text-xl py-4 touch-target rounded-lg transition-colors shadow-lg disabled:cursor-not-allowed"
+            className="w-full bg-[var(--primary)] hover:bg-[var(--primary-hover)] disabled:bg-[var(--border)] text-white font-bold text-xl py-4 touch-target rounded-lg transition-colors shadow-lg disabled:cursor-not-allowed disabled:text-[var(--text-disabled)]"
           >
             {loading ? 'Creating Account...' : 'Create Account'}
           </button>
@@ -131,7 +131,7 @@ export const Register: React.FC = () => {
         <div className="mt-6 text-center">
           <Link
             to="/login"
-            className="text-farm-green hover:text-green-400 text-lg font-semibold underline"
+            className="text-[var(--primary)] hover:text-[var(--primary-hover)] text-lg font-semibold underline"
           >
             Already have an account? Sign in
           </Link>
