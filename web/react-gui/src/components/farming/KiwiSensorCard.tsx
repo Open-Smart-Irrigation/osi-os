@@ -8,16 +8,13 @@ interface KiwiSensorCardProps {
 }
 
 export const KiwiSensorCard: React.FC<KiwiSensorCardProps> = ({ device, onRemove }) => {
-  const { swt_wm1, swt_wm2, light_lux } = device.latest_data;
+  const { swt_wm1, swt_wm2, light_lux, ambient_temperature, relative_humidity } = device.latest_data;
   const lastSeen = new Date(device.last_seen);
   const now = new Date();
   const minutesAgo = Math.floor((now.getTime() - lastSeen.getTime()) / (1000 * 60));
   const [isRemoving, setIsRemoving] = useState(false);
   const [showConfirm, setShowConfirm] = useState(false);
   const [error, setError] = useState<string | null>(null);
-
-  // Determine if soil is too dry (< 30 kPa)
-  const isToDry = swt_wm1 !== undefined && swt_wm1 < 30;
 
   const handleRemove = async () => {
     setIsRemoving(true);
@@ -34,13 +31,7 @@ export const KiwiSensorCard: React.FC<KiwiSensorCardProps> = ({ device, onRemove
   };
 
   return (
-    <div
-      className={`rounded-xl p-6 border-2 shadow-lg transition-all ${
-        isToDry
-          ? 'bg-red-500/20 border-red-500'
-          : 'bg-slate-700 border-slate-600 hover:border-farm-blue'
-      }`}
-    >
+    <div className="rounded-xl p-6 border-2 shadow-lg transition-all bg-slate-700 border-slate-600 hover:border-farm-blue">
       <div className="flex items-start justify-between mb-4">
         <div className="flex-1">
           <h3 className="text-2xl font-bold text-white mb-1 high-contrast-text">
@@ -99,16 +90,6 @@ export const KiwiSensorCard: React.FC<KiwiSensorCardProps> = ({ device, onRemove
         </div>
       )}
 
-      {isToDry && (
-        <div className="bg-red-600 text-white px-4 py-3 rounded-lg mb-4 flex items-center gap-3">
-          <span className="text-3xl">⚠️</span>
-          <div>
-            <p className="font-bold text-lg">TOO DRY!</p>
-            <p className="text-sm">Soil needs watering</p>
-          </div>
-        </div>
-      )}
-
       <div className="grid grid-cols-1 gap-4">
         {/* Soil Water Tension 1 */}
         <div className="bg-slate-800 rounded-lg p-4">
@@ -143,6 +124,24 @@ export const KiwiSensorCard: React.FC<KiwiSensorCardProps> = ({ device, onRemove
             </p>
           </div>
         )}
+
+        <div className="bg-slate-800 rounded-lg p-4">
+          <p className="text-slate-400 text-sm font-semibold mb-1">AMBIENT TEMPERATURE</p>
+          <p className="text-4xl font-bold text-white">
+            {ambient_temperature !== undefined && ambient_temperature !== null
+              ? `${ambient_temperature.toFixed(1)} °C`
+              : 'N/A'}
+          </p>
+        </div>
+
+        <div className="bg-slate-800 rounded-lg p-4">
+          <p className="text-slate-400 text-sm font-semibold mb-1">RELATIVE HUMIDITY</p>
+          <p className="text-4xl font-bold text-white">
+            {relative_humidity !== undefined && relative_humidity !== null
+              ? `${relative_humidity.toFixed(0)} %`
+              : 'N/A'}
+          </p>
+        </div>
       </div>
 
       <div className="mt-4 pt-4 border-t border-slate-600">

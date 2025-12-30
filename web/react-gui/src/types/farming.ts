@@ -12,6 +12,8 @@ export interface Device {
     swt_wm1?: number;   // Soil Water Tension 1 (kPa) - 0 to 200
     swt_wm2?: number;   // Soil Water Tension 2 (kPa)
     light_lux?: number; // Light intensity
+    ambient_temperature?: number;
+    relative_humidity?: number;
   };
 
   // Only for Valves
