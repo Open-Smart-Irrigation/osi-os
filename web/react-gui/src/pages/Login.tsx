@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
+import osiLogo from '../assets/osi_logo.png';
 
 export const Login: React.FC = () => {
   const [username, setUsername] = useState('');
@@ -29,8 +30,9 @@ export const Login: React.FC = () => {
     <div className="min-h-screen flex items-center justify-center bg-[var(--bg)] px-4">
       <div className="max-w-md w-full bg-[var(--card)] rounded-2xl shadow-2xl border border-[var(--border)] p-8">
         <div className="text-center mb-8">
+          <img src={osiLogo} alt="OSI OS Logo" className="mx-auto mb-4 h-20 w-20" />
           <h1 className="text-4xl font-bold text-[var(--text)] mb-2 high-contrast-text">
-            Open Smart irrigation
+            OSI OS v0.4.0 (Alpha)
           </h1>
           <p className="text-[var(--text-secondary)] text-lg">Sign in to your account</p>
         </div>
