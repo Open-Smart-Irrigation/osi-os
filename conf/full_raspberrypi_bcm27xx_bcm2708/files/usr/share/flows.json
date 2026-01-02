@@ -53,6 +53,13 @@
         "env": []
     },
     {
+        "id": "7d4f3e45f4b0d111",
+        "type": "tab",
+        "label": "Download Sensor Data",
+        "disabled": false,
+        "info": ""
+    },
+    {
         "id": "2d7171577c7b3f8b",
         "type": "group",
         "z": "49e87447205bb849",
@@ -3046,7 +3053,11 @@
         "name": "Rows → CSV + Headers",
         "func": "// msg.payload is expected to be an array of row objects from sqlite node.\n// Convert to CSV and return as downloadable attachment.\n\nconst rows = Array.isArray(msg.payload) ? msg.payload : [];\n\n// Helper: CSV escape\nfunction esc(v) {\n  if (v === null || v === undefined) return '';\n  const s = String(v);\n  // Escape quotes by doubling them\n  const needsQuotes = /[\\n\\r,\\\"]/g.test(s);\n  const out = s.replace(/\\\"/g, '\"\"');\n  return needsQuotes ? `\"${out}\"` : out;\n}\n\n// Define a stable column order\nconst cols = [\n  'ts','dev_eui','f_cnt','dr','spreading_factor','frequency_hz','bandwidth_hz','code_rate','confirmed',\n  'latitude','longitude','altitude_m','hdop','sats','accuracy_m',\n  'gateway_id','rssi_dbm','snr_db','channel','crc_status'\n];\n\nlet csv = cols.join(',') + '\\n';\nfor (const r of rows) {\n  const line = cols.map(c => esc(r?.[c])).join(',');\n  csv += line + '\\n';\n}\n\n// Filename with timestamp\nconst now = new Date().toISOString().replace(/[:]/g,'-');\nconst filename = `fieldtest_${now}.csv`;\n\nmsg.headers = msg.headers || {};\nmsg.headers['Content-Type'] = 'text/csv; charset=utf-8';\nmsg.headers['Content-Disposition'] = `attachment; filename=\"${filename}\"`;\n\nmsg.payload = csv;\nreturn msg;\n",
         "outputs": 1,
+        "timeout": "",
         "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
         "x": 880,
         "y": 520,
         "wires": [
@@ -3065,5 +3076,116 @@
         "x": 1130,
         "y": 520,
         "wires": []
+    },
+    {
+        "id": "httpin_download_sensordata",
+        "type": "http in",
+        "z": "7d4f3e45f4b0d111",
+        "name": "GET /download-sensordata",
+        "url": "/download-sensordata",
+        "method": "get",
+        "upload": false,
+        "swaggerDoc": "",
+        "x": 190,
+        "y": 140,
+        "wires": [
+            [
+                "fn_build_sensor_sql_params"
+            ]
+        ]
+    },
+    {
+        "id": "fn_build_sensor_sql_params",
+        "type": "function",
+        "z": "7d4f3e45f4b0d111",
+        "name": "Build SQL + Params",
+        "func": "// Exports sensor readings from device_data joined with devices.\n// Optional query params: from, to, deveui, zone_id\n\nconst q = msg.req?.query || {};\n\nconst from   = (typeof q.from === 'string'   && q.from.trim())   ? q.from.trim()   : null;\nconst to     = (typeof q.to === 'string'     && q.to.trim())     ? q.to.trim()     : null;\nconst devEui = (typeof q.deveui === 'string' && q.deveui.trim()) ? q.deveui.trim() : null;\nconst zoneId = (typeof q.zone_id === 'string'&& q.zone_id.trim())? q.zone_id.trim(): null;\n\nlet sql = `\nSELECT\n  dd.recorded_at AS ts,\n  dd.deveui      AS deveui,\n  d.name         AS device_name,\n  d.type_id      AS device_type,\n  d.irrigation_zone_id AS zone_id,\n  dd.swt_wm1,\n  dd.swt_wm2,\n  dd.light_lux,\n  dd.ambient_temperature,\n  dd.relative_humidity\nFROM device_data dd\nLEFT JOIN devices d\n  ON dd.deveui = d.deveui\nWHERE 1=1\n`;\n\nconst params = [];\n\nif (from)   { sql += ` AND dd.recorded_at >= ?`; params.push(from); }\nif (to)     { sql += ` AND dd.recorded_at <= ?`; params.push(to); }\nif (devEui) { sql += ` AND dd.deveui = ?`; params.push(devEui); }\nif (zoneId) { sql += ` AND d.irrigation_zone_id = ?`; params.push(zoneId); }\n\nsql += ` ORDER BY dd.recorded_at;`;\n\nmsg.topic = sql;\nmsg.params = params;\nreturn msg;\n",
+        "outputs": 1,
+        "noerr": 0,
+        "x": 460,
+        "y": 140,
+        "wires": [
+            [
+                "sqlite_query_sensordata"
+            ]
+        ]
+    },
+    {
+        "id": "sqlite_query_sensordata",
+        "type": "sqlite",
+        "z": "7d4f3e45f4b0d111",
+        "mydb": "734737e846d06893",
+        "sqlquery": "msg.topic",
+        "sql": "",
+        "name": "SQLite query sensordata",
+        "x": 720,
+        "y": 140,
+        "wires": [
+            [
+                "fn_rows_to_csv_sensordata"
+            ]
+        ]
+    },
+    {
+        "id": "fn_rows_to_csv_sensordata",
+        "type": "function",
+        "z": "7d4f3e45f4b0d111",
+        "name": "Rows → CSV + Download",
+        "func": "const rows = Array.isArray(msg.payload) ? msg.payload : [];\n\nfunction esc(v) {\n  if (v === null || v === undefined) return '';\n  const s = String(v);\n  const needsQuotes = /[\\n\\r,\\\"]/g.test(s);\n  const out = s.replace(/\\\"/g, '\"\"');\n  return needsQuotes ? `\"${out}\"` : out;\n}\n\nconst cols = [\n  'ts','deveui','device_name','device_type','zone_id',\n  'swt_wm1','swt_wm2','light_lux','ambient_temperature','relative_humidity'\n];\n\nlet csv = cols.join(',') + '\\n';\nfor (const r of rows) {\n  csv += cols.map(c => esc(r?.[c])).join(',') + '\\n';\n}\n\nconst now = new Date().toISOString().replace(/[:]/g, '-');\nconst filename = `sensordata_${now}.csv`;\n\nmsg.headers = msg.headers || {};\nmsg.headers['Content-Type'] = 'text/csv; charset=utf-8';\nmsg.headers['Content-Disposition'] = `attachment; filename=\"${filename}\"`;\nmsg.payload = csv;\nreturn msg;\n",
+        "outputs": 1,
+        "noerr": 0,
+        "x": 980,
+        "y": 140,
+        "wires": [
+            [
+                "httpresp_download_sensordata"
+            ]
+        ]
+    },
+    {
+        "id": "httpresp_download_sensordata",
+        "type": "http response",
+        "z": "7d4f3e45f4b0d111",
+        "name": "HTTP Response",
+        "statusCode": "",
+        "headers": {},
+        "x": 1210,
+        "y": 140,
+        "wires": []
+    },
+    {
+        "id": "catch_download_sensordata",
+        "type": "catch",
+        "z": "7d4f3e45f4b0d111",
+        "name": "Catch errors (avoid hanging HTTP)",
+        "scope": [
+            "fn_build_sensor_sql_params",
+            "sqlite_query_sensordata",
+            "fn_rows_to_csv_sensordata"
+        ],
+        "uncaught": false,
+        "x": 280,
+        "y": 220,
+        "wires": [
+            [
+                "fn_http500"
+            ]
+        ]
+    },
+    {
+        "id": "fn_http500",
+        "type": "function",
+        "z": "7d4f3e45f4b0d111",
+        "name": "Return HTTP 500",
+        "func": "msg.statusCode = 500;\nmsg.headers = { 'Content-Type': 'application/json; charset=utf-8' };\nmsg.payload = {\n  error: 'download-sensordata failed',\n  message: msg.error?.message || String(msg.error || 'unknown error')\n};\nreturn msg;",
+        "outputs": 1,
+        "noerr": 0,
+        "x": 500,
+        "y": 220,
+        "wires": [
+            [
+                "httpresp_download_sensordata"
+            ]
+        ]
     }
 ]
