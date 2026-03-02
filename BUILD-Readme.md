@@ -1,107 +1,165 @@
-# ChirpStack Gateway OS Build Process
+# OSI OS — Firmware Build Guide
+
+> **Note:** The firmware build is currently work-in-progress. For day-to-day development, use the [manual deployment workflow](README.md#device-setup-manual) instead.
+
+---
 
 ## Prerequisites
 
-- Docker and Docker Compose installed
-- At least 20GB free disk space
-- At least 8GB RAM recommended
-- Stable internet connection
+- [Docker](https://www.docker.com/) and Docker Compose installed
+- At least 20 GB free disk space
+- At least 8 GB RAM recommended
+- Stable internet connection (build downloads several GB of packages)
+
+---
 
 ## Build Steps
 
-### 1. Initialize Build Environment (First Time Only)
+### 1. Initialize (first time only)
 
 ```bash
-# Initialize OpenWrt build environment
 make init
 ```
 
-**⚠️ This takes 10-15 minutes and downloads ~2GB of data**
+This clones the OpenWrt source, fetches all feeds (including the ChirpStack OpenWrt feed), and sets up symlinks. Takes 10–15 minutes and downloads ~2 GB.
 
-### 2. Enter Development Shell
+### 2. Enter the Docker build environment
 
 ```bash
-# Enter the Docker development environment
 make devshell
 ```
 
-### 3. Switch to Target Environment
+All subsequent build commands run inside this Docker container.
+
+### 3. Switch to the target configuration
 
 ```bash
-# Switch to Raspberry Pi 5 environment 
+# Raspberry Pi 5 (primary / recommended)
 make switch-env ENV=full_raspberrypi_bcm27xx_bcm2712
 
-#Currently we are supporting these targets: 
+# Raspberry Pi 2/3
+make switch-env ENV=full_raspberrypi_bcm27xx_bcm2709
 
-#full_raspberrypi_bcm27xx_bcm2711 → for Raspberry Pi 4 Model B (BCM2711 SoC)
-
-#full_raspberrypi_bcm27xx_bcm2712 → for Raspberry Pi 5 (BCM2712 SoC)
+# Raspberry Pi 1/Zero
+make switch-env ENV=full_raspberrypi_bcm27xx_bcm2708
 ```
 
-### 4. Update Feeds (Important!)
+`switch-env` undoes any previously applied patches, updates OpenWrt symlinks, and applies the target's quilt patches.
+
+### 4. Update feeds
 
 ```bash
-# Update all OpenWrt feeds
 make update
 ```
 
-### 5. Build the Image
+Run this after `switch-env` to ensure all feeds are up to date.
+
+### 5. Build the React GUI
+
+Before building the firmware, build the React frontend and copy it into the Node-RED package:
 
 ```bash
-# Build the complete image
+# Run outside the Docker container, in the repo root
+cd web/react-gui
+npm install
+npm run build
+cp -r build/* feeds/chirpstack-openwrt-feed/apps/node-red/files/gui/
+```
+
+### 6. Build the firmware image
+
+Inside the Docker devshell:
+
+```bash
 make
 ```
 
-**⚠️ This takes 1-3 hours depending on your hardware**
+This takes 1–3 hours depending on hardware. The first build is slowest; subsequent builds reuse cached artifacts.
+
+---
 
 ## Build Output
 
-After successful build, your image will be in:
-```
-openwrt/bin/targets/bcm27xx/bcm2709/
-```
+After a successful build, firmware images are in:
+
+| Target | Output directory |
+|---|---|
+| Raspberry Pi 5 | `openwrt/bin/targets/bcm27xx/bcm2712/` |
+| Raspberry Pi 2/3 | `openwrt/bin/targets/bcm27xx/bcm2709/` |
+| Raspberry Pi 1/Zero | `openwrt/bin/targets/bcm27xx/bcm2708/` |
 
 Look for files like:
-- `openwrt-bcm27xx-bcm2709-rpi-3-ext4-factory.img.gz`
-- `openwrt-bcm27xx-bcm2709-rpi-3-ext4-sysupgrade.img.gz`
+- `openwrt-bcm27xx-bcm2712-rpi-5-ext4-factory.img.gz` — for flashing a new SD card
+- `openwrt-bcm27xx-bcm2712-rpi-5-ext4-sysupgrade.img.gz` — for over-the-air upgrades
 
-## Common Issues & Solutions
+---
 
-### "No space left on device"
-- Free up disk space (need 20GB+)
-- Run `docker system prune -a` to clean Docker cache
+## Making Configuration Changes
 
-### "Permission denied" errors
-- Make sure you're in the docker group: `sudo usermod -aG docker $USER`
-- Log out and back in, or run: `newgrp docker`
-
-### Build fails with missing packages
-- Run `make update` inside devshell
-- Try `make clean` and rebuild if packages seem corrupted
-
-### "Feed not found" errors
-- Run `make init` again
-- Check internet connection during feed updates
-
-## Clean Build (If Things Go Wrong)
+Run the following commands from inside the `openwrt/` directory (still within devshell):
 
 ```bash
-# Clean everything and start fresh
+# Interactive package/kernel config
+make menuconfig
+
+# Refresh config after upstream updates
+make defconfig
+```
+
+See the [OpenWrt build system documentation](https://openwrt.org/docs/guide-developer/toolchain/use-buildsystem) for more options.
+
+---
+
+## Troubleshooting
+
+### "No space left on device"
+Free up disk space (20 GB+ required). Clean Docker cache:
+```bash
+docker system prune -a
+```
+
+### "Permission denied" errors
+Ensure your user is in the `docker` group:
+```bash
+sudo usermod -aG docker $USER
+newgrp docker
+```
+
+### Build fails with missing packages
+Run `make update` inside the devshell, then retry. If packages seem corrupted:
+```bash
+make clean && make
+```
+
+### "Feed not found" errors
+Run `make init` again and check your internet connection.
+
+### Rust compilation OOM
+The Jenkinsfile limits Cargo to 2 parallel jobs (`CARGO_BUILD_JOBS=2`). If building locally with more RAM available, you can increase this, but keep it conservative on machines with less than 16 GB.
+
+---
+
+## Clean Build
+
+```bash
 make clean
 make init
 make devshell
-make switch-env ENV=full_raspberrypi_bcm27xx_bcm2709
+# then inside devshell:
+make switch-env ENV=full_raspberrypi_bcm27xx_bcm2712
 make update
 make
 ```
+
+---
 
 ## Quick Reference
 
 ```bash
-# Complete build process in order:
-make init                    # First time only
-make devshell               # Enter Docker environment
-make switch-env ENV=full_raspberrypi_bcm27xx_bcm2709
-make update                 # Update feeds
-make                        # Build image
+# Complete build sequence (Pi 5):
+make init                                          # First time only
+make devshell                                      # Enter Docker environment
+make switch-env ENV=full_raspberrypi_bcm27xx_bcm2712
+make update
+make
 ```
