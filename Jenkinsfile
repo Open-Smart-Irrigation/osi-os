@@ -30,7 +30,7 @@ pipeline {
                     echo "=== Verifying Container Dependencies ==="
 
                     MISSING=0
-                    for cmd in pkg-config clang node npm rustc; do
+                    for cmd in pkg-config clang node npm; do
                         if ! command -v "$cmd" > /dev/null 2>&1; then
                             echo "❌ CRITICAL: '$cmd' is missing!"
                             MISSING=1
@@ -42,6 +42,13 @@ pipeline {
                     if [ "$MISSING" -eq 1 ]; then
                         echo "Current PATH: $PATH"
                         exit 1
+                    fi
+
+                    # rustc is built from source by OpenWrt (stage 7), just report if present
+                    if command -v rustc > /dev/null 2>&1; then
+                        echo "✓ rustc (pre-installed): $(rustc --version)"
+                    else
+                        echo "- rustc: not pre-installed (will be built from source)"
                     fi
 
                     # Disk space check
