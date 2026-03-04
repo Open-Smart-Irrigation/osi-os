@@ -118,23 +118,26 @@ EOF
                     ./scripts/feeds install -a 2>&1 | tee ${WORKSPACE}/logs/feeds_install.log
                     echo "✓ Feeds updated and installed"
 
-                    # 9. Apply quilt patches from target config
+                    # 9. Apply patches from target config
+                    # Patches use openwrt/ prefix, so apply from workspace root
+                    cd ${WORKSPACE}
                     PATCH_DIR="${WORKSPACE}/conf/${TARGET_ENV}/patches"
                     if [ -d "$PATCH_DIR" ] && [ -f "$PATCH_DIR/series" ]; then
-                        echo "=== Applying quilt patches from ${TARGET_ENV} ==="
-                        export QUILT_PATCHES="$PATCH_DIR"
-                        quilt push -a --leave-reject 2>&1 | tee ${WORKSPACE}/logs/quilt.log || {
-                            # quilt returns 2 if patches already applied
-                            if [ $? -ne 2 ]; then
-                                echo "❌ Quilt patch application failed"
-                                exit 1
+                        echo "=== Applying patches from ${TARGET_ENV} ==="
+                        while IFS= read -r patchfile; do
+                            # Skip empty lines and comments
+                            case "$patchfile" in ''|\#*) continue ;; esac
+                            echo "Applying $patchfile..."
+                            if ! patch -p0 --forward -i "$PATCH_DIR/$patchfile"; then
+                                # --forward returns 1 if already applied
+                                echo "  (patch already applied or skipped)"
                             fi
-                            echo "✓ Patches already applied"
-                        }
-                        echo "✓ Quilt patches applied"
+                        done < "$PATCH_DIR/series"
+                        echo "✓ Patches applied"
                     else
                         echo "⚠️ No patches directory or series file for ${TARGET_ENV}"
                     fi
+                    cd ${WORKSPACE}/openwrt
 
                     # 10. Fix: Remove --locked flag from Chirpstack Makefile
                     echo "=== Removing --locked flag from Chirpstack Makefile ==="
