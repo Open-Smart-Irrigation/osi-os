@@ -2,6 +2,8 @@ import React, { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import osiLogo from '../assets/osi_logo.png';
+import { useTranslation } from 'react-i18next';
+import { LanguageSwitcher } from '../components/LanguageSwitcher';
 
 export const Login: React.FC = () => {
   const [username, setUsername] = useState('');
@@ -10,6 +12,7 @@ export const Login: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
   const { login } = useAuth();
+  const { t } = useTranslation('auth');
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -20,21 +23,24 @@ export const Login: React.FC = () => {
       await login({ username, password });
       navigate('/dashboard');
     } catch (err: any) {
-      setError(err.response?.data?.message || 'Login failed. Please check your credentials.');
+      setError(err.response?.data?.message || t('login.failed'));
     } finally {
       setLoading(false);
     }
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-[var(--bg)] px-4">
+    <div className="relative min-h-screen flex items-center justify-center bg-[var(--bg)] px-4">
+      <div className="absolute top-4 right-4">
+        <LanguageSwitcher />
+      </div>
       <div className="max-w-md w-full bg-[var(--card)] rounded-2xl shadow-2xl border border-[var(--border)] p-8">
         <div className="text-center mb-8">
           <img src={osiLogo} alt="OSI OS Logo" className="mx-auto mb-4 h-20 w-20" />
           <h1 className="text-4xl font-bold text-[var(--text)] mb-2 high-contrast-text">
             OSI OS v0.4.0 (Alpha)
           </h1>
-          <p className="text-[var(--text-secondary)] text-lg">Sign in to your account</p>
+          <p className="text-[var(--text-secondary)] text-lg">{t('login.subtitle')}</p>
         </div>
 
         {error && (
@@ -46,7 +52,7 @@ export const Login: React.FC = () => {
         <form onSubmit={handleSubmit} className="space-y-6">
           <div>
             <label htmlFor="username" className="block text-[var(--text)] text-lg font-semibold mb-2">
-              Username
+              {t('login.username')}
             </label>
             <input
               id="username"
@@ -55,13 +61,13 @@ export const Login: React.FC = () => {
               onChange={(e) => setUsername(e.target.value)}
               required
               className="w-full px-4 py-4 touch-target bg-white border-2 border-[var(--border)] rounded-lg text-[var(--text)] text-lg placeholder:text-[var(--text-tertiary)] focus:outline-none focus:border-[var(--focus)] focus:ring-2 focus:ring-[var(--focus)]"
-              placeholder="Enter your username"
+              placeholder={t('login.usernamePlaceholder')}
             />
           </div>
 
           <div>
             <label htmlFor="password" className="block text-[var(--text)] text-lg font-semibold mb-2">
-              Password
+              {t('login.password')}
             </label>
             <input
               id="password"
@@ -70,7 +76,7 @@ export const Login: React.FC = () => {
               onChange={(e) => setPassword(e.target.value)}
               required
               className="w-full px-4 py-4 touch-target bg-white border-2 border-[var(--border)] rounded-lg text-[var(--text)] text-lg placeholder:text-[var(--text-tertiary)] focus:outline-none focus:border-[var(--focus)] focus:ring-2 focus:ring-[var(--focus)]"
-              placeholder="Enter your password"
+              placeholder={t('login.passwordPlaceholder')}
             />
           </div>
 
@@ -79,7 +85,7 @@ export const Login: React.FC = () => {
             disabled={loading}
             className="w-full bg-[var(--primary)] hover:bg-[var(--primary-hover)] disabled:bg-[var(--border)] text-white font-bold text-xl py-4 touch-target rounded-lg transition-colors shadow-lg disabled:cursor-not-allowed disabled:text-[var(--text-disabled)]"
           >
-            {loading ? 'Signing In...' : 'Sign In'}
+            {loading ? t('login.signingIn') : t('login.signIn')}
           </button>
         </form>
 
@@ -88,7 +94,7 @@ export const Login: React.FC = () => {
             to="/register"
             className="text-[var(--primary)] hover:text-[var(--primary-hover)] text-lg font-semibold underline"
           >
-            No account? Register here
+            {t('login.noAccount')}
           </Link>
         </div>
       </div>

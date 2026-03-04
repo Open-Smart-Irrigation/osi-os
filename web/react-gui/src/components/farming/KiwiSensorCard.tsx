@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import type { Device } from '../../types/farming';
 import { devicesAPI } from '../../services/api';
+import { useTranslation } from 'react-i18next';
 
 interface KiwiSensorCardProps {
   device: Device;
@@ -8,6 +9,8 @@ interface KiwiSensorCardProps {
 }
 
 export const KiwiSensorCard: React.FC<KiwiSensorCardProps> = ({ device, onRemove }) => {
+  const { t } = useTranslation('devices');
+  const { t: tc } = useTranslation('common');
   const { swt_wm1, swt_wm2, light_lux, ambient_temperature, relative_humidity } = device.latest_data;
   const lastSeen = new Date(device.last_seen);
   const now = new Date();
@@ -25,7 +28,7 @@ export const KiwiSensorCard: React.FC<KiwiSensorCardProps> = ({ device, onRemove
         onRemove();
       }
     } catch (err: any) {
-      setError(err.response?.data?.message || 'Failed to remove device');
+      setError(err.response?.data?.message || t('kiwiSensor.failedToRemove'));
       setIsRemoving(false);
     }
   };
@@ -41,7 +44,7 @@ export const KiwiSensorCard: React.FC<KiwiSensorCardProps> = ({ device, onRemove
         </div>
         <div className="flex items-start gap-2">
           <div className="bg-[var(--primary)] text-white px-3 py-1 rounded-lg text-sm font-semibold">
-            KIWI SENSOR
+            {t('kiwiSensor.badge')}
           </div>
           <button
             onClick={() => setShowConfirm(true)}
@@ -62,8 +65,8 @@ export const KiwiSensorCard: React.FC<KiwiSensorCardProps> = ({ device, onRemove
 
       {showConfirm && (
         <div className="bg-[var(--warn-bg)] border-2 border-[var(--warn-border)] text-[var(--warn-text)] px-4 py-3 rounded-lg mb-4">
-          <p className="font-bold mb-2">Remove this device?</p>
-          <p className="text-sm mb-3">This will unlink the device from your account.</p>
+          <p className="font-bold mb-2">{t('kiwiSensor.removeConfirm')}</p>
+          <p className="text-sm mb-3">{t('kiwiSensor.removeSubtitle')}</p>
           <div className="flex gap-2">
             <button
               onClick={handleRemove}
@@ -73,10 +76,10 @@ export const KiwiSensorCard: React.FC<KiwiSensorCardProps> = ({ device, onRemove
               {isRemoving ? (
                 <>
                   <div className="animate-spin h-4 w-4 border-2 border-white border-t-transparent rounded-full" />
-                  Removing...
+                  {t('kiwiSensor.removing')}
                 </>
               ) : (
-                'Yes, Remove'
+                t('kiwiSensor.yesRemove')
               )}
             </button>
             <button
@@ -84,7 +87,7 @@ export const KiwiSensorCard: React.FC<KiwiSensorCardProps> = ({ device, onRemove
               disabled={isRemoving}
               className="bg-[var(--secondary-bg)] hover:bg-[var(--border)] disabled:bg-[var(--border)] text-[var(--text)] font-bold px-4 py-2 rounded-lg transition-colors disabled:cursor-not-allowed disabled:text-[var(--text-disabled)]"
             >
-              Cancel
+              {tc('cancel')}
             </button>
           </div>
         </div>
@@ -94,10 +97,10 @@ export const KiwiSensorCard: React.FC<KiwiSensorCardProps> = ({ device, onRemove
         {/* Soil Water Tension 1 */}
         <div className="bg-[var(--card)] rounded-lg p-4">
           <p className="text-[var(--text-tertiary)] text-sm font-semibold mb-1">
-            SOIL WATER TENSION 1
+            {t('kiwiSensor.soilWaterTension1')}
           </p>
           <p className="text-4xl font-bold text-[var(--text)]">
-            {swt_wm1 !== undefined ? `${swt_wm1.toFixed(1)} kPa` : 'N/A'}
+            {swt_wm1 !== undefined ? `${swt_wm1.toFixed(1)} kPa` : tc('na')}
           </p>
         </div>
 
@@ -105,7 +108,7 @@ export const KiwiSensorCard: React.FC<KiwiSensorCardProps> = ({ device, onRemove
         {swt_wm2 !== undefined && (
           <div className="bg-[var(--card)] rounded-lg p-4">
             <p className="text-[var(--text-tertiary)] text-sm font-semibold mb-1">
-              SOIL WATER TENSION 2
+              {t('kiwiSensor.soilWaterTension2')}
             </p>
             <p className="text-4xl font-bold text-[var(--text)]">
               {swt_wm2.toFixed(1)} kPa
@@ -117,7 +120,7 @@ export const KiwiSensorCard: React.FC<KiwiSensorCardProps> = ({ device, onRemove
         {light_lux !== undefined && (
           <div className="bg-[var(--card)] rounded-lg p-4">
             <p className="text-[var(--text-tertiary)] text-sm font-semibold mb-1">
-              LIGHT INTENSITY
+              {t('kiwiSensor.lightIntensity')}
             </p>
             <p className="text-4xl font-bold text-[var(--text)]">
               {light_lux.toFixed(0)} lux
@@ -126,27 +129,27 @@ export const KiwiSensorCard: React.FC<KiwiSensorCardProps> = ({ device, onRemove
         )}
 
         <div className="bg-[var(--card)] rounded-lg p-4">
-          <p className="text-[var(--text-tertiary)] text-sm font-semibold mb-1">AMBIENT TEMPERATURE</p>
+          <p className="text-[var(--text-tertiary)] text-sm font-semibold mb-1">{t('kiwiSensor.ambientTemperature')}</p>
           <p className="text-4xl font-bold text-[var(--text)]">
             {ambient_temperature !== undefined && ambient_temperature !== null
               ? `${ambient_temperature.toFixed(1)} °C`
-              : 'N/A'}
+              : tc('na')}
           </p>
         </div>
 
         <div className="bg-[var(--card)] rounded-lg p-4">
-          <p className="text-[var(--text-tertiary)] text-sm font-semibold mb-1">RELATIVE HUMIDITY</p>
+          <p className="text-[var(--text-tertiary)] text-sm font-semibold mb-1">{t('kiwiSensor.relativeHumidity')}</p>
           <p className="text-4xl font-bold text-[var(--text)]">
             {relative_humidity !== undefined && relative_humidity !== null
               ? `${relative_humidity.toFixed(0)} %`
-              : 'N/A'}
+              : tc('na')}
           </p>
         </div>
       </div>
 
       <div className="mt-4 pt-4 border-t border-[var(--border)]">
         <p className="text-[var(--text-tertiary)] text-sm">
-          Last seen: <span className="text-[var(--text)] font-semibold">{minutesAgo} minutes ago</span>
+          {t('kiwiSensor.lastSeen', { minutes: minutesAgo })}
         </p>
       </div>
     </div>

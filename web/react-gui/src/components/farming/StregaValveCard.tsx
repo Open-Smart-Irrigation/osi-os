@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import type { Device } from '../../types/farming';
 import { devicesAPI } from '../../services/api';
+import { useTranslation } from 'react-i18next';
 
 interface StregaValveCardProps {
   device: Device;
@@ -9,6 +10,8 @@ interface StregaValveCardProps {
 }
 
 export const StregaValveCard: React.FC<StregaValveCardProps> = ({ device, onUpdate, onRemove }) => {
+  const { t } = useTranslation('devices');
+  const { t: tc } = useTranslation('common');
   const [loading, setLoading] = useState<'OPEN' | 'CLOSE' | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isRemoving, setIsRemoving] = useState(false);
@@ -41,7 +44,7 @@ export const StregaValveCard: React.FC<StregaValveCardProps> = ({ device, onUpda
         onRemove();
       }
     } catch (err: any) {
-      setError(err.response?.data?.message || 'Failed to remove device');
+      setError(err.response?.data?.message || t('stregaValve.failedToRemove'));
       setIsRemoving(false);
     }
   };
@@ -57,7 +60,7 @@ export const StregaValveCard: React.FC<StregaValveCardProps> = ({ device, onUpda
         </div>
         <div className="flex items-start gap-2">
           <div className="bg-[var(--primary)] text-white px-3 py-1 rounded-lg text-sm font-semibold">
-            STREGA VALVE
+            {t('stregaValve.badge')}
           </div>
           <button
             onClick={() => setShowConfirm(true)}
@@ -78,8 +81,8 @@ export const StregaValveCard: React.FC<StregaValveCardProps> = ({ device, onUpda
 
       {showConfirm && (
         <div className="bg-[var(--warn-bg)] border-2 border-[var(--warn-border)] text-[var(--warn-text)] px-4 py-3 rounded-lg mb-4">
-          <p className="font-bold mb-2">Remove this device?</p>
-          <p className="text-sm mb-3">This will unlink the device from your account.</p>
+          <p className="font-bold mb-2">{t('stregaValve.removeConfirm')}</p>
+          <p className="text-sm mb-3">{t('stregaValve.removeSubtitle')}</p>
           <div className="flex gap-2">
             <button
               onClick={handleRemove}
@@ -89,10 +92,10 @@ export const StregaValveCard: React.FC<StregaValveCardProps> = ({ device, onUpda
               {isRemoving ? (
                 <>
                   <div className="animate-spin h-4 w-4 border-2 border-white border-t-transparent rounded-full" />
-                  Removing...
+                  {t('stregaValve.removing')}
                 </>
               ) : (
-                'Yes, Remove'
+                t('stregaValve.yesRemove')
               )}
             </button>
             <button
@@ -100,7 +103,7 @@ export const StregaValveCard: React.FC<StregaValveCardProps> = ({ device, onUpda
               disabled={isRemoving}
               className="bg-[var(--secondary-bg)] hover:bg-[var(--border)] disabled:bg-[var(--border)] text-[var(--text)] font-bold px-4 py-2 rounded-lg transition-colors disabled:cursor-not-allowed disabled:text-[var(--text-disabled)]"
             >
-              Cancel
+              {tc('cancel')}
             </button>
           </div>
         </div>
@@ -108,7 +111,7 @@ export const StregaValveCard: React.FC<StregaValveCardProps> = ({ device, onUpda
 
       {/* Status Display */}
       <div className="bg-[var(--card)] rounded-lg p-6 mb-6">
-        <p className="text-[var(--text-tertiary)] text-sm font-semibold mb-3">STATUS</p>
+        <p className="text-[var(--text-tertiary)] text-sm font-semibold mb-3">{t('stregaValve.status')}</p>
         <div className="flex items-center gap-3">
           <div
             className={`w-6 h-6 rounded-full ${
@@ -120,12 +123,12 @@ export const StregaValveCard: React.FC<StregaValveCardProps> = ({ device, onUpda
               isOpen ? 'text-[var(--toggle-on)]' : 'text-[var(--text-tertiary)]'
             }`}
           >
-            {isOpen ? 'OPEN' : 'CLOSED'}
+            {isOpen ? t('stregaValve.open') : t('stregaValve.closed')}
           </p>
         </div>
         {device.target_state && device.target_state !== device.current_state && (
           <p className="text-[var(--text-secondary)] text-sm mt-2">
-            Target: {device.target_state}
+            {t('stregaValve.target', { state: device.target_state })}
           </p>
         )}
       </div>
@@ -140,10 +143,10 @@ export const StregaValveCard: React.FC<StregaValveCardProps> = ({ device, onUpda
           {loading === 'OPEN' ? (
             <>
               <div className="animate-spin h-5 w-5 border-2 border-white border-t-transparent rounded-full" />
-              Opening...
+              {t('stregaValve.opening')}
             </>
           ) : (
-            'OPEN'
+            t('stregaValve.open')
           )}
         </button>
         <button
@@ -154,17 +157,17 @@ export const StregaValveCard: React.FC<StregaValveCardProps> = ({ device, onUpda
           {loading === 'CLOSE' ? (
             <>
               <div className="animate-spin h-5 w-5 border-2 border-white border-t-transparent rounded-full" />
-              Closing...
+              {t('stregaValve.closing')}
             </>
           ) : (
-            'CLOSE'
+            t('stregaValve.closed')
           )}
         </button>
       </div>
 
       <div className="mt-4 pt-4 border-t border-[var(--border)]">
         <p className="text-[var(--text-tertiary)] text-sm">
-          Last seen: <span className="text-[var(--text)] font-semibold">{minutesAgo} minutes ago</span>
+          {t('stregaValve.lastSeen', { minutes: minutesAgo })}
         </p>
       </div>
     </div>

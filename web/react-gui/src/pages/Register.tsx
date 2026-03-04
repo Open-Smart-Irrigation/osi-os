@@ -1,6 +1,8 @@
 import React, { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
+import { useTranslation } from 'react-i18next';
+import { LanguageSwitcher } from '../components/LanguageSwitcher';
 
 export const Register: React.FC = () => {
   const [username, setUsername] = useState('');
@@ -11,20 +13,19 @@ export const Register: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
   const { register } = useAuth();
+  const { t } = useTranslation('auth');
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
 
-    // Validate passwords match
     if (password !== confirmPassword) {
-      setError('Passwords do not match');
+      setError(t('register.passwordMismatch'));
       return;
     }
 
-    // Validate password length
     if (password.length < 6) {
-      setError('Password must be at least 6 characters');
+      setError(t('register.passwordTooShort'));
       return;
     }
 
@@ -37,7 +38,7 @@ export const Register: React.FC = () => {
         navigate('/login');
       }, 2000);
     } catch (err: any) {
-      setError(err.response?.data?.message || 'Registration failed. Please try again.');
+      setError(err.response?.data?.message || t('register.failed'));
     } finally {
       setLoading(false);
     }
@@ -48,9 +49,9 @@ export const Register: React.FC = () => {
       <div className="min-h-screen flex items-center justify-center bg-[var(--bg)] px-4">
         <div className="max-w-md w-full bg-[var(--card)] rounded-2xl shadow-2xl border border-[var(--border)] p-8 text-center">
           <div className="text-6xl mb-4">✓</div>
-          <h2 className="text-3xl font-bold text-[var(--success-text)] mb-4">Success!</h2>
+          <h2 className="text-3xl font-bold text-[var(--success-text)] mb-4">{t('register.successTitle')}</h2>
           <p className="text-[var(--text)] text-lg">
-            Account created successfully. Redirecting to login...
+            {t('register.successMessage')}
           </p>
         </div>
       </div>
@@ -58,13 +59,16 @@ export const Register: React.FC = () => {
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-[var(--bg)] px-4">
+    <div className="relative min-h-screen flex items-center justify-center bg-[var(--bg)] px-4">
+      <div className="absolute top-4 right-4">
+        <LanguageSwitcher />
+      </div>
       <div className="max-w-md w-full bg-[var(--card)] rounded-2xl shadow-2xl border border-[var(--border)] p-8">
         <div className="text-center mb-8">
           <h1 className="text-4xl font-bold text-[var(--text)] mb-2 high-contrast-text">
-            Create Account
+            {t('register.title')}
           </h1>
-          <p className="text-[var(--text-secondary)] text-lg">Register for Open Smart irrigation</p>
+          <p className="text-[var(--text-secondary)] text-lg">{t('register.subtitle')}</p>
         </div>
 
         {error && (
@@ -76,7 +80,7 @@ export const Register: React.FC = () => {
         <form onSubmit={handleSubmit} className="space-y-6">
           <div>
             <label htmlFor="username" className="block text-[var(--text)] text-lg font-semibold mb-2">
-              Username
+              {t('register.username')}
             </label>
             <input
               id="username"
@@ -85,13 +89,13 @@ export const Register: React.FC = () => {
               onChange={(e) => setUsername(e.target.value)}
               required
               className="w-full px-4 py-4 touch-target bg-white border-2 border-[var(--border)] rounded-lg text-[var(--text)] text-lg placeholder:text-[var(--text-tertiary)] focus:outline-none focus:border-[var(--focus)] focus:ring-2 focus:ring-[var(--focus)]"
-              placeholder="Choose a username"
+              placeholder={t('register.usernamePlaceholder')}
             />
           </div>
 
           <div>
             <label htmlFor="password" className="block text-[var(--text)] text-lg font-semibold mb-2">
-              Password
+              {t('register.password')}
             </label>
             <input
               id="password"
@@ -100,13 +104,13 @@ export const Register: React.FC = () => {
               onChange={(e) => setPassword(e.target.value)}
               required
               className="w-full px-4 py-4 touch-target bg-white border-2 border-[var(--border)] rounded-lg text-[var(--text)] text-lg placeholder:text-[var(--text-tertiary)] focus:outline-none focus:border-[var(--focus)] focus:ring-2 focus:ring-[var(--focus)]"
-              placeholder="Choose a password"
+              placeholder={t('register.passwordPlaceholder')}
             />
           </div>
 
           <div>
             <label htmlFor="confirmPassword" className="block text-[var(--text)] text-lg font-semibold mb-2">
-              Confirm Password
+              {t('register.confirmPassword')}
             </label>
             <input
               id="confirmPassword"
@@ -115,7 +119,7 @@ export const Register: React.FC = () => {
               onChange={(e) => setConfirmPassword(e.target.value)}
               required
               className="w-full px-4 py-4 touch-target bg-white border-2 border-[var(--border)] rounded-lg text-[var(--text)] text-lg placeholder:text-[var(--text-tertiary)] focus:outline-none focus:border-[var(--focus)] focus:ring-2 focus:ring-[var(--focus)]"
-              placeholder="Re-enter your password"
+              placeholder={t('register.confirmPasswordPlaceholder')}
             />
           </div>
 
@@ -124,7 +128,7 @@ export const Register: React.FC = () => {
             disabled={loading}
             className="w-full bg-[var(--primary)] hover:bg-[var(--primary-hover)] disabled:bg-[var(--border)] text-white font-bold text-xl py-4 touch-target rounded-lg transition-colors shadow-lg disabled:cursor-not-allowed disabled:text-[var(--text-disabled)]"
           >
-            {loading ? 'Creating Account...' : 'Create Account'}
+            {loading ? t('register.creating') : t('register.submit')}
           </button>
         </form>
 
@@ -133,7 +137,7 @@ export const Register: React.FC = () => {
             to="/login"
             className="text-[var(--primary)] hover:text-[var(--primary-hover)] text-lg font-semibold underline"
           >
-            Already have an account? Sign in
+            {t('register.haveAccount')}
           </Link>
         </div>
       </div>

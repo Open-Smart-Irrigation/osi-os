@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { irrigationZonesAPI } from '../../services/api';
 import type { IrrigationZone } from '../../types/farming';
+import { useTranslation } from 'react-i18next';
 
 type TriggerMetric = 'SWT_WM1' | 'SWT_WM2' | 'SWT_AVG';
 
@@ -19,6 +20,7 @@ export const ScheduleSection: React.FC<ScheduleSectionProps> = ({
   zoneName,
   onScheduleSaved,
 }) => {
+  const { t } = useTranslation('devices');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
 
@@ -54,7 +56,7 @@ export const ScheduleSection: React.FC<ScheduleSectionProps> = ({
         }
       } catch (err: any) {
         if (!cancelled) {
-          setError(err?.response?.data?.message || 'Failed to load schedule');
+          setError(err?.response?.data?.message || t('schedule.loadFailed'));
         }
       } finally {
         if (!cancelled) setLoading(false);
@@ -70,15 +72,15 @@ export const ScheduleSection: React.FC<ScheduleSectionProps> = ({
   const metricLabel = useMemo(() => {
     switch (triggerMetric) {
       case 'SWT_WM1':
-        return 'Soil Water Tension 1';
+        return t('schedule.soilWaterTension1');
       case 'SWT_WM2':
-        return 'Soil Water Tension 2';
+        return t('schedule.soilWaterTension2');
       case 'SWT_AVG':
-        return 'Average (WM1 + WM2)';
+        return t('schedule.average');
       default:
         return triggerMetric;
     }
-  }, [triggerMetric]);
+  }, [triggerMetric, t]);
 
   const saveSchedule = async () => {
     setSaving(true);
@@ -98,10 +100,10 @@ export const ScheduleSection: React.FC<ScheduleSectionProps> = ({
       // PUT /api/irrigation-zones/:id/schedule
       await irrigationZonesAPI.updateSchedule(zoneId, payload);
 
-      setSuccess('Saved.');
+      setSuccess(t('schedule.saved'));
       if (onScheduleSaved) onScheduleSaved();
     } catch (err: any) {
-      setError(err?.response?.data?.message || 'Failed to save schedule');
+      setError(err?.response?.data?.message || t('schedule.saveFailed'));
     } finally {
       setSaving(false);
     }
@@ -113,10 +115,10 @@ export const ScheduleSection: React.FC<ScheduleSectionProps> = ({
   return (
     <div className="bg-[var(--card)] rounded-lg p-4 mb-4">
       <div className="flex items-center justify-between gap-4 mb-3">
-        <h4 className="text-[var(--text)] text-lg font-bold">Irrigation Schedule</h4>
+        <h4 className="text-[var(--text)] text-lg font-bold">{t('schedule.irrigationSchedule')}</h4>
 
         <div className="flex items-center gap-2">
-          <span className="text-[var(--text-secondary)] text-sm font-semibold">Enabled</span>
+          <span className="text-[var(--text-secondary)] text-sm font-semibold">{t('schedule.enabled')}</span>
           <button
             type="button"
             onClick={() => setEnabled((v) => !v)}
@@ -127,7 +129,7 @@ export const ScheduleSection: React.FC<ScheduleSectionProps> = ({
             }`}
             aria-pressed={enabled}
           >
-            {enabled ? 'On' : 'Off'}
+            {enabled ? t('schedule.on') : t('schedule.off')}
           </button>
         </div>
       </div>
@@ -144,23 +146,23 @@ export const ScheduleSection: React.FC<ScheduleSectionProps> = ({
       )}
 
       {loading ? (
-        <div className="text-[var(--text-tertiary)] text-sm">Loading schedule...</div>
+        <div className="text-[var(--text-tertiary)] text-sm">{t('schedule.loadingSchedule')}</div>
       ) : (
         <>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             {/* Metric Selector */}
             <div>
               <label className="block text-[var(--text-secondary)] text-sm font-semibold mb-2">
-                Trigger Metric
+                {t('schedule.triggerMetric')}
               </label>
               <select
                 value={triggerMetric}
                 onChange={(e) => setTriggerMetric(e.target.value as TriggerMetric)}
                 className="w-full px-3 py-2 bg-[var(--card)] border-2 border-[var(--border)] rounded-lg text-[var(--text)] focus:outline-none focus:border-[var(--focus)] focus:ring-2 focus:ring-[var(--focus)]"
               >
-                <option value="SWT_WM1">Soil Water Tension 1</option>
-                <option value="SWT_WM2">Soil Water Tension 2</option>
-                <option value="SWT_AVG">Average (WM1 + WM2)</option>
+                <option value="SWT_WM1">{t('schedule.soilWaterTension1')}</option>
+                <option value="SWT_WM2">{t('schedule.soilWaterTension2')}</option>
+                <option value="SWT_AVG">{t('schedule.average')}</option>
               </select>
             </div>
 
@@ -168,7 +170,7 @@ export const ScheduleSection: React.FC<ScheduleSectionProps> = ({
               {/* Threshold Input */}
               <div>
                 <label className="block text-[var(--text-secondary)] text-sm font-semibold mb-2">
-                  Threshold (kPa)
+                  {t('schedule.thresholdKpa')}
                 </label>
                 <input
                   type="number"
@@ -180,14 +182,14 @@ export const ScheduleSection: React.FC<ScheduleSectionProps> = ({
                   className="w-full px-3 py-2 bg-[var(--card)] border-2 border-[var(--border)] rounded-lg text-[var(--text)] focus:outline-none focus:border-[var(--focus)] focus:ring-2 focus:ring-[var(--focus)]"
                 />
                 <div className="mt-1 text-[var(--text-tertiary)] text-xs">
-                  Trigger if {metricLabel} ≥ {Number.isFinite(thresholdKpa) ? thresholdKpa : '…'} kPa (once/day, 06:00).
+                  {t('schedule.triggerHint', { metric: metricLabel, threshold: Number.isFinite(thresholdKpa) ? thresholdKpa : '…' })}
                 </div>
               </div>
 
               {/* Duration Input */}
               <div>
                 <label className="block text-[var(--text-secondary)] text-sm font-semibold mb-2">
-                  Irrigation duration (min)
+                  {t('schedule.duration')}
                 </label>
                 <input
                   type="number"
@@ -221,7 +223,7 @@ export const ScheduleSection: React.FC<ScheduleSectionProps> = ({
               onClick={saveSchedule}
               className="bg-[var(--primary)] hover:bg-[var(--primary-hover)] disabled:bg-[var(--border)] disabled:text-[var(--text-disabled)] text-white font-bold text-sm px-4 py-2 rounded-lg transition-colors disabled:cursor-not-allowed"
             >
-              {saving ? 'Saving...' : 'Save schedule'}
+              {saving ? t('schedule.saving') : t('schedule.saveSchedule')}
             </button>
 
             <button
@@ -247,19 +249,19 @@ export const ScheduleSection: React.FC<ScheduleSectionProps> = ({
                       }
                     }
                   })
-                  .catch((err: any) => setError(err?.response?.data?.message || 'Failed to reload schedule'))
+                  .catch((err: any) => setError(err?.response?.data?.message || t('schedule.reloadFailed')))
                   .finally(() => setLoading(false));
               }}
               className="bg-[var(--secondary-bg)] hover:bg-[var(--border)] text-[var(--text)] font-bold text-sm px-4 py-2 rounded-lg transition-colors disabled:cursor-not-allowed disabled:text-[var(--text-disabled)]"
             >
-              Reload
+              {t('schedule.reload')}
             </button>
           </div>
         </>
       )}
 
       <div className="mt-3 text-[var(--text-tertiary)] text-xs">
-        Scheduler logic (backend): trigger if metric_kpa ≥ threshold_kpa, only once per day, fixed 06:00.
+        {t('schedule.backendNote')}
       </div>
     </div>
   );

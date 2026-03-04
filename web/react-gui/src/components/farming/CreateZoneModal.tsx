@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { irrigationZonesAPI } from '../../services/api';
+import { useTranslation } from 'react-i18next';
 
 interface CreateZoneModalProps {
   isOpen: boolean;
@@ -12,6 +13,8 @@ export const CreateZoneModal: React.FC<CreateZoneModalProps> = ({
   onClose,
   onZoneCreated,
 }) => {
+  const { t } = useTranslation('devices');
+  const { t: tc } = useTranslation('common');
   const [name, setName] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -21,7 +24,7 @@ export const CreateZoneModal: React.FC<CreateZoneModalProps> = ({
     setError('');
 
     if (!name.trim()) {
-      setError('Zone name is required');
+      setError(t('createZoneModal.zoneNameRequired'));
       return;
     }
 
@@ -32,7 +35,7 @@ export const CreateZoneModal: React.FC<CreateZoneModalProps> = ({
       onZoneCreated();
       onClose();
     } catch (err: any) {
-      setError(err.response?.data?.message || 'Failed to create zone');
+      setError(err.response?.data?.message || t('createZoneModal.failed'));
     } finally {
       setLoading(false);
     }
@@ -45,7 +48,7 @@ export const CreateZoneModal: React.FC<CreateZoneModalProps> = ({
       <div className="bg-[var(--card)] rounded-2xl shadow-2xl border-2 border-[var(--border)] max-w-lg w-full p-8">
         <div className="flex justify-between items-center mb-6">
           <h2 className="text-3xl font-bold text-[var(--text)] high-contrast-text">
-            Create Irrigation Zone
+            {t('createZoneModal.title')}
           </h2>
           <button
             onClick={onClose}
@@ -64,7 +67,7 @@ export const CreateZoneModal: React.FC<CreateZoneModalProps> = ({
         <form onSubmit={handleSubmit} className="space-y-6">
           <div>
             <label htmlFor="zone-name" className="block text-[var(--text)] text-lg font-semibold mb-2">
-              Zone Name
+              {t('createZoneModal.zoneName')}
             </label>
             <input
               id="zone-name"
@@ -72,7 +75,7 @@ export const CreateZoneModal: React.FC<CreateZoneModalProps> = ({
               value={name}
               onChange={(e) => setName(e.target.value)}
               required
-              placeholder="e.g., Garden A, North Field, Orchard 1"
+              placeholder={t('createZoneModal.zoneNamePlaceholder')}
               className="w-full px-4 py-4 touch-target bg-white border-2 border-[var(--border)] rounded-lg text-[var(--text)] text-lg placeholder:text-[var(--text-tertiary)] focus:outline-none focus:border-[var(--focus)] focus:ring-2 focus:ring-[var(--focus)]"
             />
           </div>
@@ -83,14 +86,14 @@ export const CreateZoneModal: React.FC<CreateZoneModalProps> = ({
               onClick={onClose}
               className="flex-1 bg-[var(--secondary-bg)] hover:bg-[var(--border)] text-[var(--text)] font-bold text-lg py-4 touch-target rounded-lg transition-colors"
             >
-              Cancel
+              {tc('cancel')}
             </button>
             <button
               type="submit"
               disabled={loading}
               className="flex-1 bg-[var(--primary)] hover:bg-[var(--primary-hover)] disabled:bg-[var(--border)] text-white font-bold text-lg py-4 touch-target rounded-lg transition-colors shadow-lg disabled:cursor-not-allowed disabled:text-[var(--text-disabled)]"
             >
-              {loading ? 'Creating...' : 'Create Zone'}
+              {loading ? t('createZoneModal.creating') : t('createZoneModal.submit')}
             </button>
           </div>
         </form>

@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { irrigationZonesAPI } from '../../services/api';
 import type { Device } from '../../types/farming';
+import { useTranslation } from 'react-i18next';
 
 interface AssignDeviceModalProps {
   isOpen: boolean;
@@ -19,6 +20,8 @@ export const AssignDeviceModal: React.FC<AssignDeviceModalProps> = ({
   zoneName,
   availableDevices,
 }) => {
+  const { t } = useTranslation('devices');
+  const { t: tc } = useTranslation('common');
   const [selectedDeveui, setSelectedDeveui] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -28,7 +31,7 @@ export const AssignDeviceModal: React.FC<AssignDeviceModalProps> = ({
     setError('');
 
     if (!selectedDeveui) {
-      setError('Please select a device');
+      setError(t('assignModal.pleaseSelect'));
       return;
     }
 
@@ -39,7 +42,7 @@ export const AssignDeviceModal: React.FC<AssignDeviceModalProps> = ({
       onDeviceAssigned();
       onClose();
     } catch (err: any) {
-      setError(err.response?.data?.message || 'Failed to assign device');
+      setError(err.response?.data?.message || t('assignModal.failed'));
     } finally {
       setLoading(false);
     }
@@ -52,7 +55,7 @@ export const AssignDeviceModal: React.FC<AssignDeviceModalProps> = ({
       <div className="bg-[var(--card)] rounded-2xl shadow-2xl border-2 border-[var(--border)] max-w-lg w-full p-8">
         <div className="flex justify-between items-center mb-6">
           <h2 className="text-3xl font-bold text-[var(--text)] high-contrast-text">
-            Assign Device to {zoneName}
+            {t('assignModal.title', { zoneName })}
           </h2>
           <button
             onClick={onClose}
@@ -70,16 +73,16 @@ export const AssignDeviceModal: React.FC<AssignDeviceModalProps> = ({
 
         {availableDevices.length === 0 ? (
           <div className="bg-[var(--warn-bg)] border border-[var(--warn-border)] text-[var(--warn-text)] px-4 py-3 rounded-lg">
-            <p className="font-bold mb-1">No unassigned devices</p>
+            <p className="font-bold mb-1">{t('assignModal.noDevicesTitle')}</p>
             <p className="text-sm">
-              All your devices are already assigned to zones. Add more devices or remove them from other zones first.
+              {t('assignModal.noDevicesSubtitle')}
             </p>
           </div>
         ) : (
           <form onSubmit={handleSubmit} className="space-y-6">
             <div>
               <label htmlFor="device" className="block text-[var(--text)] text-lg font-semibold mb-2">
-                Select Device
+                {t('assignModal.selectDevice')}
               </label>
               <select
                 id="device"
@@ -88,7 +91,7 @@ export const AssignDeviceModal: React.FC<AssignDeviceModalProps> = ({
                 required
                 className="w-full px-4 py-4 touch-target bg-white border-2 border-[var(--border)] rounded-lg text-[var(--text)] text-lg focus:outline-none focus:border-[var(--focus)] focus:ring-2 focus:ring-[var(--focus)]"
               >
-                <option value="">-- Select a device --</option>
+                <option value="">{t('assignModal.selectPlaceholder')}</option>
                 {availableDevices.map((device) => (
                   <option key={device.deveui} value={device.deveui}>
                     {device.name} ({device.type_id})
@@ -103,14 +106,14 @@ export const AssignDeviceModal: React.FC<AssignDeviceModalProps> = ({
                 onClick={onClose}
                 className="flex-1 bg-[var(--secondary-bg)] hover:bg-[var(--border)] text-[var(--text)] font-bold text-lg py-4 touch-target rounded-lg transition-colors"
               >
-                Cancel
+                {tc('cancel')}
               </button>
               <button
                 type="submit"
                 disabled={loading}
                 className="flex-1 bg-[var(--primary)] hover:bg-[var(--primary-hover)] disabled:bg-[var(--border)] text-white font-bold text-lg py-4 touch-target rounded-lg transition-colors shadow-lg disabled:cursor-not-allowed disabled:text-[var(--text-disabled)]"
               >
-                {loading ? 'Assigning...' : 'Assign Device'}
+                {loading ? t('assignModal.assigning') : t('assignModal.submit')}
               </button>
             </div>
           </form>
