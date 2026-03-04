@@ -288,7 +288,32 @@ EOF
                     cd ${WORKSPACE}/openwrt
                     echo "=== Compiling Chirpstack (Verbose Mode) ==="
                     echo "Memory limits: CARGO_BUILD_JOBS=2, CMAKE_BUILD_PARALLEL_LEVEL=2"
-        
+
+                    # --- FIX: home@0.5.12 requires rustc 1.88, but we have 1.85 ---
+                    # Prepare source first so we can patch the Cargo.lock before compilation.
+                    echo "Preparing chirpstack source..."
+                    make package/feeds/chirpstack/chirpstack/prepare -j1 V=s 2>&1 | tee ../logs/chirpstack_prepare.log
+
+                    # Find the extracted Cargo.lock and downgrade 'home' to a rustc-1.85-compatible version.
+                    CARGO_LOCK=$(find build_dir -name "Cargo.lock" -path "*/chirpstack-*/chirpstack/*" 2>/dev/null | head -1)
+                    if [ -n "$CARGO_LOCK" ]; then
+                        SRC_DIR=$(dirname "$CARGO_LOCK")
+                        echo "Patching home crate in $SRC_DIR"
+                        HOST_CARGO=$(find staging_dir/host -name "cargo" -type f 2>/dev/null | head -1)
+                        if [ -z "$HOST_CARGO" ]; then
+                            echo "❌ Could not find host cargo binary"
+                            exit 1
+                        fi
+                        cd "$SRC_DIR"
+                        # Downgrade home to 0.5.11 (last version before MSRV was bumped to 1.88)
+                        "$HOST_CARGO" update home --precise 0.5.11
+                        cd ${WORKSPACE}/openwrt
+                        echo "✓ home crate pinned to 0.5.11"
+                    else
+                        echo "❌ Could not find Cargo.lock in chirpstack build dir"
+                        exit 1
+                    fi
+
                     # Compile chirpstack with full verbose output
                     if ! make package/feeds/chirpstack/chirpstack/compile -j1 V=s 2>&1 | tee ../logs/chirpstack_build.log; then
                         echo ""
