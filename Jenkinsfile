@@ -135,7 +135,7 @@ EOF
                     if [ -f "$TARGET_MK" ]; then
                         sed -i 's/ --locked//g' "$TARGET_MK"
                         sed -i 's/--locked//g' "$TARGET_MK"
-                        if grep -q "\-\-locked" "$TARGET_MK"; then
+                        if grep -q -- "--locked" "$TARGET_MK"; then
                             echo "⚠️ WARNING: --locked still present in $TARGET_MK"
                         else
                             echo "✓ Removed --locked from Chirpstack Makefile"
