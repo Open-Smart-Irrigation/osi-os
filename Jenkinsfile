@@ -153,9 +153,9 @@ EOF
                         exit 1
                     fi
 
-                    # 11. Generate defconfig
+                    # 11. Generate defconfig (TERM=dumb avoids 'Error opening terminal' in headless CI)
                     echo "=== Running make defconfig ==="
-                    make defconfig 2>&1 | tee ${WORKSPACE}/logs/defconfig.log
+                    TERM=dumb make defconfig 2>&1 | tee ${WORKSPACE}/logs/defconfig.log
                     echo "✓ Initialization complete"
                 '''
             }
