@@ -1,0 +1,19 @@
+#!/bin/sh
+# Only run if not already configured
+[ -n "$(uci -q get osi-server.cloud.device_eui 2>/dev/null)" ] && exit 0
+
+# Derive device EUI from Ethernet MAC
+ETH_MAC=$(ip link show eth0 2>/dev/null | awk '/ether/{print $2}' | tr -d ':' | tr 'a-f' 'A-F')
+[ -z "$ETH_MAC" ] && ETH_MAC=$(ip link show wlan0 2>/dev/null | awk '/ether/{print $2}' | tr -d ':' | tr 'a-f' 'A-F')
+
+uci -q batch <<EOF
+set osi-server.cloud=osi_server
+set osi-server.cloud.enabled=0
+set osi-server.cloud.device_eui=$ETH_MAC
+set osi-server.cloud.device_type=GATEWAY
+set osi-server.cloud.firmware_version=0.4.0
+set osi-server.cloud.server_host=
+set osi-server.cloud.mqtt_password=
+commit osi-server
+EOF
+exit 0

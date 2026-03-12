@@ -1861,7 +1861,7 @@
         "type": "function",
         "z": "device-api-tab",
         "name": "Build actuator_command + DB writes",
-        "func": "const rows = Array.isArray(msg.payload) ? msg.payload : [];\nif (rows.length === 0) {\n  msg.statusCode = 404;\n  msg.payload = { message: 'Valve not found in devices table' };\n  return [null, null, msg];\n}\n\nconst device = rows[0];\nconst deveui = String(device.deveui).toUpperCase();\nconst typeId = String(device.type_id || '');\nconst deviceUserId = device.user_id;\n\nconst userId = Number(flow.get('valve_cmd_user_id'));\nconst action = String(flow.get('valve_cmd_action'));\nconst durationMinutes = flow.get('valve_cmd_duration');\n\nif (typeId !== 'STREGA_VALVE') {\n  msg.statusCode = 409;\n  msg.payload = { message: `Device ${deveui} is not a STREGA_VALVE` };\n  return [null, null, msg];\n}\n\n// Enforce ownership (adjust if you want shared access)\nif (deviceUserId !== null && deviceUserId !== undefined && Number(deviceUserId) !== userId) {\n  msg.statusCode = 403;\n  msg.payload = { message: 'Valve is claimed by another user' };\n  return [null, null, msg];\n}\n\nconst nowIso = new Date().toISOString();\n\n// actuator_command that your Actuator_STREGA flow already understands\nconst cmd = {\n  type: 'actuator_command',\n  device: { devEui: deveui },\n  data: {\n    action,\n    duration_minutes: durationMinutes ?? undefined,\n    reason: 'manual_gui',\n    timestamp: nowIso\n  }\n};\n\nfunction esc(s) { return String(s).replace(/'/g, \"''\"); }\n\n// Determine target_state for DB\nlet targetState = null;\nif (action.startsWith('OPEN')) targetState = 'OPEN';\nif (action.startsWith('CLOSE')) targetState = 'CLOSED';\n\nconst insertLogSql = `\n  INSERT INTO actuator_log\n    (deveui, action, duration_open, created_at)\n  VALUES\n    ('${esc(deveui)}', '${esc(action)}', ${durationMinutes ?? 'NULL'}, '${esc(nowIso)}');\n`.trim();\n\nconst updateDeviceSql = `\n  UPDATE devices\n  SET target_state = ${targetState ? `'${targetState}'` : 'target_state'},\n      updated_at = '${esc(nowIso)}'\n  WHERE deveui = '${esc(deveui)}';\n`.trim();\n\n// Output 1: command to actuator\n// Output 2: DB writes (log + device update)\n// Output 3: http response\nconst httpOk = {\n  status: 'queued',\n  deveui,\n  action,\n  duration_minutes: durationMinutes ?? null,\n  timestamp: nowIso\n};\n\nreturn [ { payload: cmd }, { topic: insertLogSql + \"\\n\" + updateDeviceSql }, { statusCode: 202, payload: httpOk } ];\n",
+        "func": "const rows = Array.isArray(msg.payload) ? msg.payload : [];\nif (rows.length === 0) {\n  msg.statusCode = 404;\n  msg.payload = { message: 'Valve not found in devices table' };\n  return [null, null, msg];\n}\n\nconst device = rows[0];\nconst deveui = String(device.deveui).toUpperCase();\nconst typeId = String(device.type_id || '');\nconst deviceUserId = device.user_id;\n\nconst userId = Number(flow.get('valve_cmd_user_id'));\nconst action = String(flow.get('valve_cmd_action'));\nconst durationMinutes = flow.get('valve_cmd_duration');\n\nif (typeId !== 'STREGA_VALVE') {\n  msg.statusCode = 409;\n  msg.payload = { message: `Device ${deveui} is not a STREGA_VALVE` };\n  return [null, null, msg];\n}\n\n// Enforce ownership (adjust if you want shared access)\nif (deviceUserId !== null && deviceUserId !== undefined && Number(deviceUserId) !== userId) {\n  msg.statusCode = 403;\n  msg.payload = { message: 'Valve is claimed by another user' };\n  return [null, null, msg];\n}\n\nconst nowIso = new Date().toISOString();\n\n// actuator_command that your Actuator_STREGA flow already understands\nconst cmd = {\n  type: 'actuator_command',\n  device: { devEui: deveui },\n  data: {\n    action,\n    duration_minutes: durationMinutes ?? undefined,\n    reason: 'manual_gui',\n    timestamp: nowIso\n  }\n};\n\nfunction esc(s) { return String(s).replace(/'/g, \"''\"); }\n\n// Determine target_state for DB\nlet targetState = null;\nif (action.startsWith('OPEN')) targetState = 'OPEN';\nif (action.startsWith('CLOSE')) targetState = 'CLOSED';\n\nconst insertLogSql = `\n  INSERT INTO actuator_log\n    (deveui, action, duration_minutes, created_at)\n  VALUES\n    ('${esc(deveui)}', '${esc(action)}', ${durationMinutes ?? 'NULL'}, '${esc(nowIso)}');\n`.trim();\n\nconst updateDeviceSql = `\n  UPDATE devices\n  SET target_state = ${targetState ? `'${targetState}'` : 'target_state'},\n      updated_at = '${esc(nowIso)}'\n  WHERE deveui = '${esc(deveui)}';\n`.trim();\n\n// Output 1: command to actuator\n// Output 2: DB writes (log + device update)\n// Output 3: http response\nconst httpOk = {\n  status: 'queued',\n  deveui,\n  action,\n  duration_minutes: durationMinutes ?? null,\n  timestamp: nowIso\n};\n\nreturn [ { payload: cmd }, { topic: insertLogSql + \"\\n\" + updateDeviceSql }, { statusCode: 202, payload: httpOk } ];\n",
         "outputs": 3,
         "noerr": 0,
         "initialize": "",
@@ -2523,7 +2523,8 @@
         "name": "from scheduler/manual",
         "links": [
             "1ef83e7d26a33d6c",
-            "b64b9e8c1a0e2c77"
+            "b64b9e8c1a0e2c77",
+            "745b6db588017e56"
         ],
         "x": 155,
         "y": 160,
@@ -2723,7 +2724,8 @@
         "y": 360,
         "wires": [
             [
-                "d32f3a7a70821d54"
+                "d32f3a7a70821d54",
+                "a1ba5f5866ef6511"
             ]
         ]
     },
@@ -3187,5 +3189,351 @@
                 "httpresp_download_sensordata"
             ]
         ]
+    },
+
+    {
+        "id": "a1ba5f5866ef6511",
+        "type": "link out",
+        "z": "8a18de184886c8a8",
+        "name": "to OSI Server ACK",
+        "mode": "link",
+        "links": [
+            "57275dba8aefa1be"
+        ],
+        "x": 1415,
+        "y": 420,
+        "wires": []
+    },
+
+    {
+        "id": "93b1537a596e0e6d",
+        "type": "tab",
+        "label": "OSI-Server Cloud Integration",
+        "disabled": false,
+        "info": "Connects OSI-OS Pi to OSI-Server cloud backend via MQTT TLS.\nRequired env vars: DEVICE_EUI, DEVICE_TYPE, DEVICE_MQTT_PASSWORD, OSI_SERVER_HOST, FIRMWARE_VERSION"
+    },
+    {
+        "id": "c9f4a3b1d2e87650",
+        "type": "tls-config",
+        "name": "OSI Server TLS",
+        "cert": "",
+        "key": "",
+        "ca": "",
+        "certname": "",
+        "keyname": "",
+        "caname": "",
+        "servername": "",
+        "verifyservercert": false,
+        "alpnprotocol": ""
+    },
+    {
+        "id": "ec43625ea99685a6",
+        "type": "mqtt-broker",
+        "name": "OSI Cloud Broker",
+        "broker": "${OSI_SERVER_HOST}",
+        "port": "8883",
+        "clientid": "device_${DEVICE_EUI}",
+        "autoConnect": true,
+        "usetls": true,
+        "tls": "c9f4a3b1d2e87650",
+        "protocolVersion": "5",
+        "keepalive": "60",
+        "cleansession": false,
+        "birthTopic": "",
+        "birthQos": "0",
+        "birthPayload": "",
+        "birthMsg": {},
+        "closeTopic": "",
+        "closeQos": "0",
+        "closePayload": "",
+        "closeMsg": {},
+        "willTopic": "",
+        "willQos": "0",
+        "willPayload": "",
+        "willMsg": {},
+        "userProps": "",
+        "sessionExpiry": "",
+        "credentials": {
+            "user": "${DEVICE_EUI}",
+            "password": "${DEVICE_MQTT_PASSWORD}"
+        }
+    },
+
+    {
+        "id": "310dfe7cfe34a448",
+        "type": "inject",
+        "z": "93b1537a596e0e6d",
+        "name": "Every 60s",
+        "props": [{"p": "payload"}],
+        "repeat": "60",
+        "crontab": "",
+        "once": true,
+        "onceDelay": "5",
+        "topic": "",
+        "payload": "",
+        "payloadType": "date",
+        "x": 160,
+        "y": 100,
+        "wires": [["062a0f9bf66d9789"]]
+    },
+    {
+        "id": "062a0f9bf66d9789",
+        "type": "function",
+        "z": "93b1537a596e0e6d",
+        "name": "Build Heartbeat",
+        "func": "var eui = env.get('DEVICE_EUI') || 'UNKNOWN';\nvar deviceType = env.get('DEVICE_TYPE') || 'GATEWAY';\nvar fw = env.get('FIRMWARE_VERSION') || '0.4.0';\nmsg.topic = 'devices/' + eui + '/heartbeat';\nmsg.payload = JSON.stringify({\n    deviceEui: eui,\n    deviceType: deviceType,\n    firmwareVersion: fw,\n    timestamp: new Date().toISOString(),\n    ip: null\n});\nmsg.qos = 1;\nreturn msg;",
+        "outputs": 1,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 360,
+        "y": 100,
+        "wires": [["d769e9face3844d5"]]
+    },
+    {
+        "id": "d769e9face3844d5",
+        "type": "mqtt out",
+        "z": "93b1537a596e0e6d",
+        "name": "Heartbeat \u2192 Cloud",
+        "topic": "",
+        "qos": "1",
+        "retain": "false",
+        "respTopic": "",
+        "contentType": "",
+        "userProps": "",
+        "correl": "",
+        "expiry": "",
+        "broker": "ec43625ea99685a6",
+        "x": 570,
+        "y": 100,
+        "wires": []
+    },
+
+    {
+        "id": "983d2de5486eeb4d",
+        "type": "mqtt in",
+        "z": "93b1537a596e0e6d",
+        "name": "Local Sensor Uplinks",
+        "topic": "application/+/device/+/event/up",
+        "qos": "1",
+        "datatype": "json",
+        "broker": "b0b19352dac3fb34",
+        "nl": false,
+        "rap": false,
+        "rh": 0,
+        "inputs": 0,
+        "x": 160,
+        "y": 200,
+        "wires": [["8809bb5239dfb3d4"]]
+    },
+    {
+        "id": "8809bb5239dfb3d4",
+        "type": "function",
+        "z": "93b1537a596e0e6d",
+        "name": "Build Telemetry",
+        "func": "var data = msg.payload;\nvar obj = data.object || {};\nvar eui = env.get('DEVICE_EUI') || 'UNKNOWN';\nmsg.topic = 'devices/' + eui + '/telemetry';\nmsg.payload = JSON.stringify({\n    deviceEui: (data.deviceInfo && data.deviceInfo.devEui) || eui,\n    timestamp: data.time || new Date().toISOString(),\n    swt_wm1: obj.swt_wm1 || null,\n    swt_wm2: obj.swt_wm2 || null,\n    light_lux: obj.light_intensity || obj.light_lux || null,\n    ambient_temperature: obj.ambient_temperature || null,\n    relative_humidity: obj.relative_humidity || null\n});\nmsg.qos = 1;\nreturn msg;",
+        "outputs": 1,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 380,
+        "y": 200,
+        "wires": [["9b38464d56b05ae0"]]
+    },
+    {
+        "id": "9b38464d56b05ae0",
+        "type": "mqtt out",
+        "z": "93b1537a596e0e6d",
+        "name": "Telemetry \u2192 Cloud",
+        "topic": "",
+        "qos": "1",
+        "retain": "false",
+        "respTopic": "",
+        "contentType": "",
+        "userProps": "",
+        "correl": "",
+        "expiry": "",
+        "broker": "ec43625ea99685a6",
+        "x": 580,
+        "y": 200,
+        "wires": []
+    },
+
+    {
+        "id": "4f57c8d8823c0e5d",
+        "type": "mqtt in",
+        "z": "93b1537a596e0e6d",
+        "name": "Commands from Cloud",
+        "topic": "devices/${DEVICE_EUI}/commands",
+        "qos": "1",
+        "datatype": "json",
+        "broker": "ec43625ea99685a6",
+        "nl": false,
+        "rap": false,
+        "rh": 0,
+        "inputs": 0,
+        "x": 160,
+        "y": 300,
+        "wires": [["934bf2bc19a8ce22"]]
+    },
+    {
+        "id": "934bf2bc19a8ce22",
+        "type": "function",
+        "z": "93b1537a596e0e6d",
+        "name": "Route Command",
+        "func": "var cmd = (typeof msg.payload === 'string') ? JSON.parse(msg.payload) : msg.payload;\nflow.set('lastCommandId', cmd.commandId);\nflow.set('lastCommand', cmd);\n\nif (cmd.commandType === 'VALVE_COMMAND') {\n    msg.payload = {\n        type: 'actuator_command',\n        device: { devEui: cmd.devEui || '' },\n        data: {\n            action: cmd.action,\n            duration_minutes: cmd.duration_minutes || 0,\n            reason: 'osi_server_command',\n            commandId: cmd.commandId\n        }\n    };\n    return [msg, null];\n} else if (cmd.commandType === 'UPDATE_SCHEDULE') {\n    msg.payload = cmd;\n    return [null, msg];\n}\nreturn null;",
+        "outputs": 2,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 390,
+        "y": 300,
+        "wires": [
+            ["745b6db588017e56"],
+            ["4f4a765f36cee6f3"]
+        ]
+    },
+    {
+        "id": "745b6db588017e56",
+        "type": "link out",
+        "z": "93b1537a596e0e6d",
+        "name": "to Actuator_STREGA",
+        "mode": "link",
+        "links": [
+            "5974306566e99a92"
+        ],
+        "x": 615,
+        "y": 260,
+        "wires": []
+    },
+    {
+        "id": "4f4a765f36cee6f3",
+        "type": "function",
+        "z": "93b1537a596e0e6d",
+        "name": "Build UPDATE SQL",
+        "func": "var cmd = msg.payload;\nvar zoneId = cmd.zoneId;\nvar metric = (cmd.triggerMetric || 'SWT_WM1').replace(/'/g, \"''\");\nvar threshold = parseFloat(cmd.thresholdKpa) || 0;\nvar duration = parseInt(cmd.durationMinutes) || 0;\nvar enabled = cmd.enabled ? 1 : 0;\n\nmsg.topic = 'UPDATE irrigation_schedules SET ' +\n    'trigger_metric = \\'' + metric + '\\', ' +\n    'threshold_kpa = ' + threshold + ', ' +\n    'duration_minutes = ' + duration + ', ' +\n    'enabled = ' + enabled + ' ' +\n    'WHERE irrigation_zone_id = ' + zoneId;\nmsg.payload = [];\nreturn msg;",
+        "outputs": 1,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 620,
+        "y": 340,
+        "wires": [["78d3d38be30a8741"]]
+    },
+    {
+        "id": "78d3d38be30a8741",
+        "type": "sqlite",
+        "z": "93b1537a596e0e6d",
+        "mydb": "734737e846d06893",
+        "sqlquery": "msg.topic",
+        "sql": "",
+        "name": "DB: update schedule",
+        "x": 840,
+        "y": 340,
+        "wires": [["e2e139678c3ddded"]]
+    },
+    {
+        "id": "e2e139678c3ddded",
+        "type": "function",
+        "z": "93b1537a596e0e6d",
+        "name": "Build Schedule ACK",
+        "func": "var eui = env.get('DEVICE_EUI') || 'UNKNOWN';\nvar cmd = flow.get('lastCommand') || {};\nmsg.topic = 'devices/' + eui + '/command_ack';\nmsg.payload = JSON.stringify({\n    commandId: flow.get('lastCommandId') || null,\n    result: 'SUCCESS',\n    state: 'SCHEDULE_UPDATED'\n});\nmsg.qos = 1;\nreturn msg;",
+        "outputs": 1,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 1060,
+        "y": 340,
+        "wires": [["d83e38164efbb860"]]
+    },
+    {
+        "id": "d83e38164efbb860",
+        "type": "mqtt out",
+        "z": "93b1537a596e0e6d",
+        "name": "Schedule ACK \u2192 Cloud",
+        "topic": "",
+        "qos": "1",
+        "retain": "false",
+        "respTopic": "",
+        "contentType": "",
+        "userProps": "",
+        "correl": "",
+        "expiry": "",
+        "broker": "ec43625ea99685a6",
+        "x": 1290,
+        "y": 340,
+        "wires": []
+    },
+
+    {
+        "id": "57275dba8aefa1be",
+        "type": "link in",
+        "z": "93b1537a596e0e6d",
+        "name": "from Actuator_STREGA (post log)",
+        "links": [
+            "a1ba5f5866ef6511"
+        ],
+        "x": 155,
+        "y": 420,
+        "wires": [["c8628cffe45f64f7"]]
+    },
+    {
+        "id": "c8628cffe45f64f7",
+        "type": "function",
+        "z": "93b1537a596e0e6d",
+        "name": "Build Status + ACK",
+        "func": "var eui = env.get('DEVICE_EUI') || 'UNKNOWN';\nvar commandId = flow.get('lastCommandId');\nvar ctx = msg._log_ctx || {};\nvar action = ctx.action || '';\nvar state = (action === 'OPEN' || action === 'OPEN_FOR_DURATION') ? 'OPEN' : 'CLOSED';\nvar ts = new Date().toISOString();\n\nvar statusMsg = {\n    topic: 'devices/' + eui + '/status',\n    payload: JSON.stringify({ state: state, timestamp: ts }),\n    qos: 1\n};\nvar ackMsg = {\n    topic: 'devices/' + eui + '/command_ack',\n    payload: JSON.stringify({\n        commandId: commandId || null,\n        result: 'SUCCESS',\n        state: state\n    }),\n    qos: 1\n};\nreturn [statusMsg, ackMsg];",
+        "outputs": 2,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 380,
+        "y": 420,
+        "wires": [
+            ["c338bc61bee49337"],
+            ["9d5e3035c3d069c4"]
+        ]
+    },
+    {
+        "id": "c338bc61bee49337",
+        "type": "mqtt out",
+        "z": "93b1537a596e0e6d",
+        "name": "Status \u2192 Cloud",
+        "topic": "",
+        "qos": "1",
+        "retain": "false",
+        "respTopic": "",
+        "contentType": "",
+        "userProps": "",
+        "correl": "",
+        "expiry": "",
+        "broker": "ec43625ea99685a6",
+        "x": 600,
+        "y": 400,
+        "wires": []
+    },
+    {
+        "id": "9d5e3035c3d069c4",
+        "type": "mqtt out",
+        "z": "93b1537a596e0e6d",
+        "name": "Command ACK \u2192 Cloud",
+        "topic": "",
+        "qos": "1",
+        "retain": "false",
+        "respTopic": "",
+        "contentType": "",
+        "userProps": "",
+        "correl": "",
+        "expiry": "",
+        "broker": "ec43625ea99685a6",
+        "x": 620,
+        "y": 440,
+        "wires": []
     }
 ]
