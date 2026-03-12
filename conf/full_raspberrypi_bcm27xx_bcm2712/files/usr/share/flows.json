@@ -3213,29 +3213,14 @@
         "info": "Connects OSI-OS Pi to OSI-Server cloud backend via MQTT TLS.\nRequired env vars: DEVICE_EUI, DEVICE_TYPE, DEVICE_MQTT_PASSWORD, OSI_SERVER_HOST, FIRMWARE_VERSION"
     },
     {
-        "id": "c9f4a3b1d2e87650",
-        "type": "tls-config",
-        "name": "OSI Server TLS",
-        "cert": "",
-        "key": "",
-        "ca": "",
-        "certname": "",
-        "keyname": "",
-        "caname": "",
-        "servername": "",
-        "verifyservercert": false,
-        "alpnprotocol": ""
-    },
-    {
         "id": "ec43625ea99685a6",
         "type": "mqtt-broker",
         "name": "OSI Cloud Broker",
-        "broker": "${OSI_SERVER_HOST}",
-        "port": "8883",
-        "clientid": "device_${DEVICE_EUI}",
+        "broker": "wss://server.opensmartirrigation.org/mqtt",
+        "port": "443",
+        "clientid": "device_88A29E8D5F67",
         "autoConnect": true,
-        "usetls": true,
-        "tls": "c9f4a3b1d2e87650",
+        "usetls": false,
         "protocolVersion": "5",
         "keepalive": "60",
         "cleansession": false,
@@ -3254,8 +3239,8 @@
         "userProps": "",
         "sessionExpiry": "",
         "credentials": {
-            "user": "${DEVICE_EUI}",
-            "password": "${DEVICE_MQTT_PASSWORD}"
+            "user": "88A29E8D5F67",
+            "password": "YAQxqhMk5vTz7cXcMhkMQ0"
         }
     },
 
