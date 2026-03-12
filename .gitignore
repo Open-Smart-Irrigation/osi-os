@@ -1,6 +1,9 @@
 # Dist
 /dist
 
+# Deploy build artifacts
+/react_gui.tar.gz
+
 # Hidden files
 /.*
 

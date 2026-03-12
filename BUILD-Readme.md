@@ -1,6 +1,6 @@
 # OSI OS — Firmware Build Guide
 
-> **Note:** The firmware build is currently work-in-progress. For day-to-day development, use the [manual deployment workflow](README.md#device-setup-manual) instead.
+> **Note:** The firmware build is currently work-in-progress. For day-to-day development and device setup, use the [deploy script workflow](README.md#device-setup) instead.
 
 ---
 

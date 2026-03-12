@@ -2,7 +2,7 @@
 
 OSI OS is an open-source, offline-first smart irrigation platform for smallholder farmers. It runs on a Raspberry Pi 5 LoRaWAN gateway and combines soil sensing, automated irrigation scheduling, and a farmer-facing web dashboard — all without requiring internet connectivity.
 
-Built on [ChirpStack Gateway OS](https://www.chirpstack.io/docs/chirpstack-gateway-os/) (OpenWrt 24.10), version **0.4.0 Alpha**.
+Built on [ChirpStack Gateway OS](https://www.chirpstack.io/docs/chirpstack-gateway-os/) (OpenWrt 24.10).
 
 ---
 
@@ -38,17 +38,17 @@ Field devices  (soil sensors, smart valves)
 
 ## Supported Hardware
 
-| Device | Target config |
-|---|---|
+| Device                       | Target config                      |
+| ---------------------------- | ---------------------------------- |
 | Raspberry Pi 5 (**primary**) | `full_raspberrypi_bcm27xx_bcm2712` |
-| Raspberry Pi 2/3 | `full_raspberrypi_bcm27xx_bcm2709` |
-| Raspberry Pi 1/Zero | `full_raspberrypi_bcm27xx_bcm2708` |
-| RAK7391 | `rak_rak7391` |
-| RAK7289v2 | `rak_rak7289v2` |
-| RAK7268v2 | `rak_rak7268v2` |
-| RAK7267 | `rak_rak7267` |
-| Seeed SenseCAP M2 | `seeed_sensecap_m2` |
-| Dragino LPS8N | `dragino_lps8n` |
+| Raspberry Pi 2/3             | `full_raspberrypi_bcm27xx_bcm2709` |
+| Raspberry Pi 1/Zero          | `full_raspberrypi_bcm27xx_bcm2708` |
+| RAK7391                      | `rak_rak7391`                      |
+| RAK7289v2                    | `rak_rak7289v2`                    |
+| RAK7268v2                    | `rak_rak7268v2`                    |
+| RAK7267                      | `rak_rak7267`                      |
+| Seeed SenseCAP M2            | `seeed_sensecap_m2`                |
+| Dragino LPS8N                | `dragino_lps8n`                    |
 
 > Current active development targets only the Raspberry Pi 5 configuration.
 
@@ -143,35 +143,120 @@ Output images are in `openwrt/bin/targets/bcm27xx/bcm2712/`.
 
 ---
 
-## Device Setup (Manual)
+## Device Setup
 
-1. Flash the [ChirpStack Gateway OS](https://www.chirpstack.io/docs/chirpstack-gateway-os/) base image for Raspberry Pi to a microSD card.
-2. Boot the Pi and connect via SSH (`root@192.168.0.1` on the default AP).
-3. Copy the database:
-   ```bash
-   scp conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/db/farming.db \
-       root@<pi-ip>:/data/db/farming.db
-   ```
-4. Copy the Node-RED flows:
-   ```bash
-   scp conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/flows.json \
-       root@<pi-ip>:/srv/node-red/flows.json
-   ```
-5. Build and deploy the React GUI:
-   ```bash
-   cd web/react-gui && npm run build
-   scp -r build/* root@<pi-ip>:/usr/lib/node-red/gui/
-   ```
-6. Restart Node-RED:
-   ```bash
-   ssh root@<pi-ip> '/etc/init.d/node-red restart'
-   ```
-7. Open `http://<pi-ip>:1880/gui` in a browser.
+> **Current approach:** The OSI OS firmware build is work-in-progress. The recommended way to get OSI OS running is to start from the latest [ChirpStack Gateway OS Full](https://www.chirpstack.io/docs/chirpstack-gateway-os/) image (which already includes Node-RED, Node.js, and npm) and deploy the OSI OS components on top via `scp` and `ssh`.
+
+### Prerequisites
+
+- This repository cloned on your dev machine
+- Node.js 20+ and npm on your dev machine
+
+### Step 1 — Flash ChirpStack Gateway OS
+
+Flash the latest **ChirpStack Gateway OS Full** image for Raspberry Pi 5 to a microSD card and boot the Pi. Connect to it via SSH — either through the default Wi-Fi AP (`192.168.0.1`) or your local network IP.
+
+Default SSH credentials: `root` / _(no password on first boot, or set during flash)_
+
+### Step 2 — Build the React GUI
+
+On your dev machine, from the repo root:
+
+```bash
+cd web/react-gui
+npm install
+npm run build
+cd ../..
+```
+
+### Step 3 — Deploy via scp and SSH
+
+```bash
+PI=root@<pi-ip>
+
+# Node-RED config (enables React GUI static serving)
+scp feeds/chirpstack-openwrt-feed/apps/node-red/files/settings.js \
+    $PI:/srv/node-red/settings.js
+
+# Node-RED flows (backend logic)
+scp conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/flows.json \
+    $PI:/srv/node-red/flows.json
+
+# SQLite database
+ssh $PI 'mkdir -p /data/db'
+scp conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/db/farming.db \
+    $PI:/data/db/farming.db
+
+# SQLite Node-RED module (not pre-installed on ChirpStack OS)
+ssh $PI 'cd /srv/node-red && npm install node-red-node-sqlite --save'
+
+# React GUI
+ssh $PI 'mkdir -p /usr/lib/node-red/gui'
+scp -r web/react-gui/build/* $PI:/usr/lib/node-red/gui/
+```
+
+### Step 4 — Restart Node-RED
+
+```bash
+ssh root@<pi-ip> '/etc/init.d/node-red restart'
+```
+
+### Step 5 — Open the UI
+
+Navigate to `http://<pi-ip>:1880/gui` in a browser.
+
+---
+
+### Re-deploying after changes
+
+```bash
+PI=root@<pi-ip>
+
+# Rebuild and redeploy React GUI (if frontend changed)
+cd web/react-gui && npm run build && cd ../..
+scp -r web/react-gui/build/* $PI:/usr/lib/node-red/gui/
+
+# Redeploy flows (if flows.json changed)
+scp conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/flows.json \
+    $PI:/srv/node-red/flows.json
+
+ssh $PI '/etc/init.d/node-red restart'
+```
+
+---
+
+### Alternative: deploy script (scripted/CI use)
+
+If `scp` is not available (e.g. no interactive terminal), use the included `deploy.sh` via an SSH remote port forward. This tunnels a local HTTP server through the SSH connection so the Pi can pull all files over `localhost`:
+
+```bash
+# 1. Build and package the React GUI
+cd web/react-gui && npm run build && cd ../..
+tar czf react_gui.tar.gz -C web/react-gui/build .
+
+# 2. Serve the repo locally
+python3 -m http.server 9876
+
+# 3. In a second terminal — deploy via tunnel
+ssh -R 9876:localhost:9876 root@<pi-ip> 'curl -s http://localhost:9876/deploy.sh | sh'
+
+# 4. Restart Node-RED
+ssh root@<pi-ip> '/etc/init.d/node-red restart'
+```
 
 ---
 
 ## Default Wi-Fi Access Point (first boot)
 
+For Chirpstack Gateway OS setup (current approach):
+| Setting | Value |
+|---|---|
+| SSID | `ChirpstackAP-<last 6 chars of MAC>` |
+| Password | `ChirpStackAP` |
+| Device IP | `192.168.0.1` |
+
+
+For OSI OS firmware build:
 | Setting | Value |
 |---|---|
 | SSID | `OSI-OS-<last 6 chars of MAC>` |
