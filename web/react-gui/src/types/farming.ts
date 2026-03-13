@@ -1,5 +1,5 @@
 // The specific supported hardware types
-export type DeviceType = 'KIWI_SENSOR' | 'STREGA_VALVE';
+export type DeviceType = 'KIWI_SENSOR' | 'STREGA_VALVE' | 'DRAGINO_LSN50';
 
 export interface Device {
   deveui: string;       // Unique LoRaWAN ID
@@ -9,11 +9,14 @@ export interface Device {
 
   // Specific data payload matching Node-RED output
   latest_data: {
-    swt_wm1?: number;   // Soil Water Tension 1 (kPa) - 0 to 200
-    swt_wm2?: number;   // Soil Water Tension 2 (kPa)
-    light_lux?: number; // Light intensity
+    swt_wm1?: number;           // Soil Water Tension 1 (kPa) - 0 to 200
+    swt_wm2?: number;           // Soil Water Tension 2 (kPa)
+    light_lux?: number;         // Light intensity
     ambient_temperature?: number;
     relative_humidity?: number;
+    ext_temperature_c?: number; // DS18B20 probe temperature (°C) — LSN50
+    bat_v?: number;             // Battery voltage (V) — LSN50
+    adc_ch0v?: number;          // ADC CH0 voltage (V) — LSN50 analog input
   };
 
   // Only for Valves

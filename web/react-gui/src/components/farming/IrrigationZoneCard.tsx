@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import type { IrrigationZone, Device } from '../../types/farming';
 import { irrigationZonesAPI } from '../../services/api';
 import { KiwiSensorCard } from './KiwiSensorCard';
+import { DraginoTempCard } from './DraginoTempCard';
 import { StregaValveCard } from './StregaValveCard';
 import { ScheduleSection } from './ScheduleSection';
 import { AssignDeviceModal } from './AssignDeviceModal';
@@ -52,6 +53,7 @@ export const IrrigationZoneCard: React.FC<IrrigationZoneCardProps> = ({
 
   const kiwiSensors = devices.filter((d) => d.type_id === 'KIWI_SENSOR');
   const stregaValves = devices.filter((d) => d.type_id === 'STREGA_VALVE');
+  const lsn50Nodes = devices.filter((d) => d.type_id === 'DRAGINO_LSN50');
 
   return (
     <div className="bg-[var(--surface)] border-2 border-[var(--border)] rounded-xl p-6 shadow-lg mb-6">
@@ -157,6 +159,27 @@ export const IrrigationZoneCard: React.FC<IrrigationZoneCardProps> = ({
                     <StregaValveCard
                       device={device}
                       onUpdate={onUpdate}
+                      onRemove={() => handleRemoveDevice(device.deveui)}
+                    />
+                    {removingDevice === device.deveui && (
+                      <div className="absolute inset-0 bg-[var(--overlay)] flex items-center justify-center rounded-xl">
+                        <div className="animate-spin h-8 w-8 border-4 border-white border-t-transparent rounded-full" />
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* LSN50 Nodes */}
+          {lsn50Nodes.length > 0 && (
+            <div className="mt-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                {lsn50Nodes.map((device) => (
+                  <div key={device.deveui} className="relative">
+                    <DraginoTempCard
+                      device={device}
                       onRemove={() => handleRemoveDevice(device.deveui)}
                     />
                     {removingDevice === device.deveui && (

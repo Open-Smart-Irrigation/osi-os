@@ -4,6 +4,7 @@ import { devicesAPI, irrigationZonesAPI } from '../services/api';
 import { useAuth } from '../contexts/AuthContext';
 import { KiwiSensorCard } from '../components/farming/KiwiSensorCard';
 import { StregaValveCard } from '../components/farming/StregaValveCard';
+import { DraginoTempCard } from '../components/farming/DraginoTempCard';
 import { IrrigationZoneCard } from '../components/farming/IrrigationZoneCard';
 import { AddDeviceModal } from '../components/farming/AddDeviceModal';
 import { CreateZoneModal } from '../components/farming/CreateZoneModal';
@@ -74,6 +75,7 @@ export const FarmingDashboard: React.FC = () => {
 
   const unassignedSensors = unassignedDevices.filter((d) => d.type_id === 'KIWI_SENSOR');
   const unassignedValves = unassignedDevices.filter((d) => d.type_id === 'STREGA_VALVE');
+  const unassignedLSN50 = unassignedDevices.filter((d) => d.type_id === 'DRAGINO_LSN50');
 
   const isLoading = !devices && !devicesError && !zones && !zonesError;
   const error = devicesError || zonesError;
@@ -222,6 +224,22 @@ export const FarmingDashboard: React.FC = () => {
                             key={device.deveui}
                             device={device}
                             onUpdate={handleUpdate}
+                            onRemove={handleUpdate}
+                          />
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Unassigned LSN50 Nodes */}
+                  {unassignedLSN50.length > 0 && (
+                    <div className="mt-6">
+                      <h3 className="text-[var(--text)] text-xl font-bold mb-3">Dragino LSN50 Nodes</h3>
+                      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                        {unassignedLSN50.map((device) => (
+                          <DraginoTempCard
+                            key={device.deveui}
+                            device={device}
                             onRemove={handleUpdate}
                           />
                         ))}
