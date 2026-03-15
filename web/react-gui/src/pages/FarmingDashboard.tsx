@@ -10,6 +10,7 @@ import { IrrigationZoneCard } from '../components/farming/IrrigationZoneCard';
 import { AddDeviceModal } from '../components/farming/AddDeviceModal';
 import { CreateZoneModal } from '../components/farming/CreateZoneModal';
 import { LanguageSwitcher } from '../components/LanguageSwitcher';
+import { SystemPanel } from '../components/farming/SystemPanel';
 import type { Device, IrrigationZone } from '../types/farming';
 
 const devicesFetcher = () => devicesAPI.getAll();
@@ -255,6 +256,11 @@ export const FarmingDashboard: React.FC = () => {
                 </div>
               </div>
             )}
+
+            {/* Gateway system panel */}
+            <div className="mt-8">
+              <SystemPanel />
+            </div>
 
             {/* Auto-refresh indicator */}
             <div className="mt-8 text-center text-[var(--text-tertiary)] text-sm">

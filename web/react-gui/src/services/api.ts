@@ -172,4 +172,33 @@ export const sensorAPI = {
   },
 };
 
+export interface SystemStats {
+  cpu_temp_c: number;
+  mem_total_mb: number;
+  mem_used_mb: number;
+  mem_free_mb: number;
+  mem_percent: number;
+  load_1: number;
+  load_5: number;
+  load_15: number;
+  cpu_count: number;
+  fan_available: boolean;
+  fan_mode: 'pwm' | 'cooling' | 'none';
+  fan_value: number | null;
+  fan_max: number | null;
+}
+
+export const systemAPI = {
+  getStats: async (): Promise<SystemStats> => {
+    const res = await api.get<SystemStats>('/api/system/stats');
+    return res.data;
+  },
+  reboot: async (): Promise<void> => {
+    await api.post('/api/system/reboot');
+  },
+  setFan: async (speed: number): Promise<void> => {
+    await api.post('/api/system/fan', { speed });
+  },
+};
+
 export default api;
