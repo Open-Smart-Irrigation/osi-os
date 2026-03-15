@@ -2,11 +2,31 @@ import React, { useState } from 'react';
 import type { Device } from '../../types/farming';
 import { devicesAPI } from '../../services/api';
 import { useTranslation } from 'react-i18next';
+import { SensorMonitor } from './SensorMonitor';
 
 interface KiwiSensorCardProps {
   device: Device;
   onRemove?: () => void;
 }
+
+// ── Sensor monitor config ─────────────────────────────────────────────────────
+interface SensorDef {
+  field: string;
+  label: string;  // used as the monitor drawer title (English)
+  unit: string;
+  color: string;
+  decimals: number;
+}
+
+const SENSORS: SensorDef[] = [
+  { field: 'swt_wm1',             label: 'Soil Water Tension 1', unit: 'kPa', color: '#3b82f6', decimals: 1 },
+  { field: 'swt_wm2',             label: 'Soil Water Tension 2', unit: 'kPa', color: '#6366f1', decimals: 1 },
+  { field: 'light_lux',           label: 'Light Intensity',      unit: 'lux', color: '#f59e0b', decimals: 0 },
+  { field: 'ambient_temperature', label: 'Ambient Temperature',  unit: '°C',  color: '#f97316', decimals: 1 },
+  { field: 'relative_humidity',   label: 'Relative Humidity',    unit: '%',   color: '#06b6d4', decimals: 0 },
+];
+
+const SENSOR_BY_FIELD = Object.fromEntries(SENSORS.map(s => [s.field, s]));
 
 export const KiwiSensorCard: React.FC<KiwiSensorCardProps> = ({ device, onRemove }) => {
   const { t } = useTranslation('devices');
@@ -18,6 +38,7 @@ export const KiwiSensorCard: React.FC<KiwiSensorCardProps> = ({ device, onRemove
   const [isRemoving, setIsRemoving] = useState(false);
   const [showConfirm, setShowConfirm] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [monitor, setMonitor] = useState<SensorDef | null>(null);
 
   const handleRemove = async () => {
     setIsRemoving(true);
@@ -31,6 +52,23 @@ export const KiwiSensorCard: React.FC<KiwiSensorCardProps> = ({ device, onRemove
       setError(err.response?.data?.message || t('kiwiSensor.failedToRemove'));
       setIsRemoving(false);
     }
+  };
+
+  // Helper: render a sensor value as a clickable button (if non-null) or plain text
+  const renderValue = (field: string, formatted: string | null) => {
+    const sensor = SENSOR_BY_FIELD[field];
+    if (!formatted || !sensor) {
+      return <p className="text-4xl font-bold text-[var(--text)]">{formatted ?? tc('na')}</p>;
+    }
+    return (
+      <button
+        onClick={() => setMonitor(sensor)}
+        className="text-4xl font-bold text-[var(--text)] hover:text-[var(--primary)] transition-colors text-left underline decoration-dotted underline-offset-4 cursor-pointer"
+        title="View history"
+      >
+        {formatted}
+      </button>
+    );
   };
 
   return (
@@ -99,9 +137,7 @@ export const KiwiSensorCard: React.FC<KiwiSensorCardProps> = ({ device, onRemove
           <p className="text-[var(--text-tertiary)] text-sm font-semibold mb-1">
             {t('kiwiSensor.soilWaterTension1')}
           </p>
-          <p className="text-4xl font-bold text-[var(--text)]">
-            {swt_wm1 !== undefined ? `${swt_wm1.toFixed(1)} kPa` : tc('na')}
-          </p>
+          {renderValue('swt_wm1', swt_wm1 !== undefined ? `${swt_wm1.toFixed(1)} kPa` : null)}
         </div>
 
         {/* Soil Water Tension 2 */}
@@ -110,9 +146,7 @@ export const KiwiSensorCard: React.FC<KiwiSensorCardProps> = ({ device, onRemove
             <p className="text-[var(--text-tertiary)] text-sm font-semibold mb-1">
               {t('kiwiSensor.soilWaterTension2')}
             </p>
-            <p className="text-4xl font-bold text-[var(--text)]">
-              {swt_wm2.toFixed(1)} kPa
-            </p>
+            {renderValue('swt_wm2', `${swt_wm2.toFixed(1)} kPa`)}
           </div>
         )}
 
@@ -122,28 +156,28 @@ export const KiwiSensorCard: React.FC<KiwiSensorCardProps> = ({ device, onRemove
             <p className="text-[var(--text-tertiary)] text-sm font-semibold mb-1">
               {t('kiwiSensor.lightIntensity')}
             </p>
-            <p className="text-4xl font-bold text-[var(--text)]">
-              {light_lux.toFixed(0)} lux
-            </p>
+            {renderValue('light_lux', `${light_lux.toFixed(0)} lux`)}
           </div>
         )}
 
         <div className="bg-[var(--card)] rounded-lg p-4">
           <p className="text-[var(--text-tertiary)] text-sm font-semibold mb-1">{t('kiwiSensor.ambientTemperature')}</p>
-          <p className="text-4xl font-bold text-[var(--text)]">
-            {ambient_temperature !== undefined && ambient_temperature !== null
+          {renderValue(
+            'ambient_temperature',
+            ambient_temperature !== undefined && ambient_temperature !== null
               ? `${ambient_temperature.toFixed(1)} °C`
-              : tc('na')}
-          </p>
+              : null,
+          )}
         </div>
 
         <div className="bg-[var(--card)] rounded-lg p-4">
           <p className="text-[var(--text-tertiary)] text-sm font-semibold mb-1">{t('kiwiSensor.relativeHumidity')}</p>
-          <p className="text-4xl font-bold text-[var(--text)]">
-            {relative_humidity !== undefined && relative_humidity !== null
+          {renderValue(
+            'relative_humidity',
+            relative_humidity !== undefined && relative_humidity !== null
               ? `${relative_humidity.toFixed(0)} %`
-              : tc('na')}
-          </p>
+              : null,
+          )}
         </div>
       </div>
 
@@ -152,6 +186,19 @@ export const KiwiSensorCard: React.FC<KiwiSensorCardProps> = ({ device, onRemove
           {t('kiwiSensor.lastSeen', { minutes: minutesAgo })}
         </p>
       </div>
+
+      {monitor && (
+        <SensorMonitor
+          deveui={device.deveui}
+          deviceName={device.name}
+          field={monitor.field}
+          label={monitor.label}
+          unit={monitor.unit}
+          color={monitor.color}
+          decimals={monitor.decimals}
+          onClose={() => setMonitor(null)}
+        />
+      )}
     </div>
   );
 };

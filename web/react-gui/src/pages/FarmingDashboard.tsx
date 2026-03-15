@@ -246,6 +246,7 @@ export const FarmingDashboard: React.FC = () => {
                             key={device.deveui}
                             device={device}
                             onRemove={handleUpdate}
+                            onUpdate={handleUpdate}
                           />
                         ))}
                       </div>
