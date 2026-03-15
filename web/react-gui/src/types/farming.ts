@@ -16,12 +16,20 @@ export interface Device {
     relative_humidity?: number;
     ext_temperature_c?: number; // DS18B20 probe temperature (°C) — LSN50
     bat_v?: number;             // Battery voltage (V) — LSN50
-    adc_ch0v?: number;          // ADC CH0 voltage (V) — LSN50 analog input
+    adc_ch0v?: number;          // ADC CH0 raw voltage (V) — LSN50 analog input
+    // Dendrometer (OPKON SLPS linear potentiometer via LSN50 ADC)
+    dendro_position_mm?: number | null; // Calculated trunk position (mm), 0–25 range
+    dendro_valid?: number | null;       // 1 = valid reading, 0 = out-of-range/error
+    dendro_delta_mm?: number | null;    // Change from previous reading (mm); null on first uplink
   };
 
   // Only for Valves
   target_state?: 'OPEN' | 'CLOSED';
   current_state?: 'OPEN' | 'CLOSED';
+
+  // Per-device opt-in flags for optional LSN50 sensors
+  dendro_enabled?: number; // 0 = disabled (default), 1 = OPKON dendrometer on ADC
+  temp_enabled?: number;   // 0 = disabled (default), 1 = DS18B20 probe on temp input
 
   // Irrigation zone assignment
   irrigation_zone_id?: number | null;

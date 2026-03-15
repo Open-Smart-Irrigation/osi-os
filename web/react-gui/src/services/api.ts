@@ -130,4 +130,46 @@ export const irrigationZonesAPI = {
   },
 };
 
+export interface DendroHistoryPoint {
+  t: string;           // ISO timestamp
+  position_mm: number;
+  delta_mm: number | null;
+  adc_v: number;
+  valid: number;       // 1 = valid
+}
+
+export const lsn50API = {
+  setDendroEnabled: async (deveui: string, enabled: boolean): Promise<void> => {
+    await api.put(`/api/devices/${deveui}/dendro`, { enabled });
+  },
+  setTempEnabled: async (deveui: string, enabled: boolean): Promise<void> => {
+    await api.put(`/api/devices/${deveui}/temp`, { enabled });
+  },
+};
+
+export const dendroAPI = {
+  getHistory: async (deveui: string, hours = 24): Promise<DendroHistoryPoint[]> => {
+    const response = await api.get<DendroHistoryPoint[]>(
+      `/api/devices/${deveui}/dendro-history`,
+      { params: { hours } }
+    );
+    return response.data;
+  },
+};
+
+export interface SensorHistoryPoint {
+  t: string;      // ISO timestamp
+  value: number | null;
+}
+
+export const sensorAPI = {
+  getHistory: async (deveui: string, field: string, hours = 24): Promise<SensorHistoryPoint[]> => {
+    const response = await api.get<SensorHistoryPoint[]>(
+      `/api/devices/${deveui}/sensor-history`,
+      { params: { field, hours } }
+    );
+    return response.data;
+  },
+};
+
 export default api;
