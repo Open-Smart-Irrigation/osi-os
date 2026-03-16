@@ -1,0 +1,21 @@
+{
+  "title": "Panel de control Open Smart Irrigation",
+  "welcome": "Bienvenido, {{username}}",
+  "addZone": "Añadir zona",
+  "addDevice": "Añadir dispositivo",
+  "logout": "Cerrar sesión",
+  "loading": "Cargando panel de control...",
+  "failedToLoad": "Error al cargar los datos",
+  "autoRefresh": "Actualización automática cada 10 segundos",
+  "emptyState": {
+    "title": "¡Bienvenido a tu granja!",
+    "subtitle": "Comienza creando una zona de riego y añadiendo dispositivos",
+    "createZone": "Crear zona",
+    "addDevice": "Añadir dispositivo"
+  },
+  "irrigationZones": "Zonas de riego",
+  "unassignedDevices": "Dispositivos sin asignar",
+  "unassignedSubtitle": "Estos dispositivos no están asignados a ninguna zona de riego",
+  "soilSensors": "Sensores de suelo",
+  "smartValves": "Válvulas inteligentes"
+}

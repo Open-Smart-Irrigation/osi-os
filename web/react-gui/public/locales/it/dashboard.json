@@ -1,0 +1,21 @@
+{
+  "title": "Dashboard Open Smart Irrigation",
+  "welcome": "Benvenuto, {{username}}",
+  "addZone": "Aggiungi zona",
+  "addDevice": "Aggiungi dispositivo",
+  "logout": "Esci",
+  "loading": "Caricamento dashboard...",
+  "failedToLoad": "Caricamento dati fallito",
+  "autoRefresh": "Aggiornamento automatico ogni 10 secondi",
+  "emptyState": {
+    "title": "Benvenuto nella tua fattoria!",
+    "subtitle": "Inizia creando una zona di irrigazione e aggiungendo dispositivi",
+    "createZone": "Crea zona",
+    "addDevice": "Aggiungi dispositivo"
+  },
+  "irrigationZones": "Zone di irrigazione",
+  "unassignedDevices": "Dispositivi non assegnati",
+  "unassignedSubtitle": "Questi dispositivi non sono assegnati a nessuna zona di irrigazione",
+  "soilSensors": "Sensori del suolo",
+  "smartValves": "Valvole intelligenti"
+}

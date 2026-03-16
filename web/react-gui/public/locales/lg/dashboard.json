@@ -1,0 +1,21 @@
+{
+  "title": "Pulezidenti w'Open Smart Irrigation",
+  "welcome": "Tukwanirizza, {{username}}",
+  "addZone": "Yongera Ekifo",
+  "addDevice": "Yongera Ekyuma",
+  "logout": "Fuluma",
+  "loading": "Tikutwala pulezidenti...",
+  "failedToLoad": "Okutwalako ebintu kugaanye",
+  "autoRefresh": "Tikukyusaamu buli myaka 10",
+  "emptyState": {
+    "title": "Tukwanirizza ku nnimiro yo!",
+    "subtitle": "Tandika nga otondawo ekifo ky'okusukkulirira n'okuwaayo ebyuma",
+    "createZone": "Tondawo Ekifo",
+    "addDevice": "Yongera Ekyuma"
+  },
+  "irrigationZones": "Ebifo by'okusukkulirira",
+  "unassignedDevices": "Ebyuma ebitawerekwa",
+  "unassignedSubtitle": "Ebyuma ebino tebiwerekeddwa ku kifo kyonna ky'okusukkulirira",
+  "soilSensors": "Ebyuma eby'obutaka",
+  "smartValves": "Zzimu ez'amagezi"
+}
