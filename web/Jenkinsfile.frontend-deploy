@@ -8,7 +8,7 @@ pipeline {
     }
 
     environment {
-        VPS_HOST = '83.228.220.63'
+        VPS_HOST = 'vps-92c7b4bb.vps.ovh.net'
         VPS_USER = 'rocky'
         DEPLOY_PATH = '/home/rocky/nodered/react-gui/build'
     }
