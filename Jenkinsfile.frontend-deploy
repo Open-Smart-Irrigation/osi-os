@@ -1,0 +1,82 @@
+pipeline {
+    agent any
+
+    options {
+        buildDiscarder(logRotator(numToKeepStr: '10'))
+        timestamps()
+        disableConcurrentBuilds()
+    }
+
+    environment {
+        VPS_HOST = '83.228.220.63'
+        VPS_USER = 'rocky'
+        DEPLOY_PATH = '/home/rocky/nodered/react-gui/build'
+    }
+
+    stages {
+        stage('1. Build React GUI') {
+            steps {
+                sh '''#!/bin/bash
+                    set -e
+                    cd ${WORKSPACE}/web/react-gui
+
+                    echo "=== Node/npm versions ==="
+                    node --version
+                    npm --version
+
+                    echo "=== Installing dependencies ==="
+                    npm ci
+
+                    echo "=== Building React application ==="
+                    npm run build
+
+                    if [ ! -f "dist/index.html" ]; then
+                        echo "ERROR: Build failed — dist/index.html not found"
+                        exit 1
+                    fi
+
+                    echo "Build output:"
+                    ls -lh dist/
+                    echo "✓ React build complete"
+                '''
+            }
+        }
+
+        stage('2. Deploy to VPS') {
+            steps {
+                sshagent(credentials: ['vps-deploy-key']) {
+                    sh '''#!/bin/bash
+                        set -e
+
+                        echo "=== Preparing target directory on VPS ==="
+                        ssh -o StrictHostKeyChecking=no \
+                            ${VPS_USER}@${VPS_HOST} \
+                            "rm -rf ${DEPLOY_PATH} && mkdir -p ${DEPLOY_PATH}"
+
+                        echo "=== Transferring build to VPS ==="
+                        tar -czf - -C ${WORKSPACE}/web/react-gui/dist . \
+                            | ssh -o StrictHostKeyChecking=no \
+                                ${VPS_USER}@${VPS_HOST} \
+                                "tar -xzf - -C ${DEPLOY_PATH}"
+
+                        echo "=== Verifying deployment ==="
+                        ssh -o StrictHostKeyChecking=no \
+                            ${VPS_USER}@${VPS_HOST} \
+                            "ls -lh ${DEPLOY_PATH}/index.html && echo '✓ index.html present on VPS'"
+
+                        echo "✓ Deployment complete → ${VPS_USER}@${VPS_HOST}:${DEPLOY_PATH}"
+                    '''
+                }
+            }
+        }
+    }
+
+    post {
+        success {
+            echo "✓ Frontend deployed successfully to ${VPS_USER}@${VPS_HOST}:${DEPLOY_PATH}"
+        }
+        failure {
+            echo "ERROR: Deployment failed — check the logs above"
+        }
+    }
+}
