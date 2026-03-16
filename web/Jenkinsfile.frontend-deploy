@@ -18,7 +18,7 @@ pipeline {
             steps {
                 sh '''#!/bin/bash
                     set -e
-                    cd ${WORKSPACE}/web/react-gui
+                    cd "${WORKSPACE}/web/react-gui"
 
                     echo "=== Node/npm versions ==="
                     node --version
@@ -54,7 +54,7 @@ pipeline {
                             "rm -rf ${DEPLOY_PATH} && mkdir -p ${DEPLOY_PATH}"
 
                         echo "=== Transferring build to VPS ==="
-                        tar -czf - -C ${WORKSPACE}/web/react-gui/dist . \
+                        tar -czf - -C "${WORKSPACE}/web/react-gui/dist" . \
                             | ssh -o StrictHostKeyChecking=no \
                                 ${VPS_USER}@${VPS_HOST} \
                                 "tar -xzf - -C ${DEPLOY_PATH}"
