@@ -185,9 +185,9 @@ EOF
                     echo "Building React application..."
                     npm run build
 
-                    # Verify build output in dist directory
-                    if [ ! -f "dist/index.html" ]; then
-                        echo "❌ Build failed - index.html not found in dist"
+                    # Verify build output in build directory
+                    if [ ! -f "build/index.html" ]; then
+                        echo "❌ Build failed - index.html not found in build"
                         exit 1
                     fi
 
@@ -195,7 +195,7 @@ EOF
                     echo "Copying GUI build to chirpstack location..."
                     TARGET_DIR="${WORKSPACE}/feeds/chirpstack-openwrt-feed/apps/node-red/files/gui"
                     mkdir -p "$TARGET_DIR"
-                    cp -r dist/* "$TARGET_DIR/"
+                    cp -r build/* "$TARGET_DIR/"
 
                     if [ -f "$TARGET_DIR/index.html" ]; then
                         echo "✓ React GUI built and copied successfully"
