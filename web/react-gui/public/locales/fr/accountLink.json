@@ -1,0 +1,44 @@
+{
+  "title": "Connecter à OSI Server",
+  "navLink": "OSI Server",
+  "backToDashboard": "Retour au tableau de bord",
+  "status": {
+    "linked": "Compte lié à OSI Server",
+    "notLinked": "Non connecté à OSI Server",
+    "linkedAs": "Lié en tant que : {{username}}",
+    "linkedSince": "Depuis : {{date}}"
+  },
+  "form": {
+    "serverUrl": "URL du serveur OSI",
+    "actionLabel": "Action",
+    "actionLogin": "Lier un compte existant",
+    "actionRegister": "Créer un nouveau compte",
+    "username": "Nom d'utilisateur serveur",
+    "email": "E-mail",
+    "password": "Mot de passe",
+    "submit": "Connecter à OSI Server",
+    "submitting": "Connexion...",
+    "cancel": "Annuler"
+  },
+  "warning": {
+    "title": "Important",
+    "message": "Après la liaison, vous devez utiliser vos identifiants OSI Server pour vous connecter. Votre mot de passe local sera remplacé par le hash du serveur.",
+    "proceed": "Continuer"
+  },
+  "success": {
+    "title": "Connecté avec succès",
+    "message": "Votre compte est maintenant lié en tant que {{username}} sur OSI Server.",
+    "claimedDevices": "Appareils réclamés sur le serveur : {{count}}",
+    "skippedDevices": "Appareils ignorés (déjà réclamés) : {{count}}"
+  },
+  "unlink": {
+    "button": "Se déconnecter d'OSI Server",
+    "confirm": "Êtes-vous sûr ? Après la déconnexion, vous devez utiliser votre mot de passe local d'origine.",
+    "success": "Déconnecté d'OSI Server"
+  },
+  "errors": {
+    "networkError": "Impossible d'atteindre OSI Server. Vérifiez l'URL et votre connexion Internet.",
+    "authFailed": "Identifiants OSI Server invalides.",
+    "generic": "Une erreur s'est produite. Veuillez réessayer."
+  }
+}

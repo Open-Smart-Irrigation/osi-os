@@ -201,4 +201,31 @@ export const systemAPI = {
   },
 };
 
+export interface AccountLinkRequest {
+  serverUrl: string;
+  action: 'login' | 'register';
+  username: string;
+  email?: string;
+  password: string;
+}
+
+export interface AccountLinkStatus {
+  linked: boolean;
+  serverUsername: string | null;
+  linkedAt: string | null;
+}
+
+export interface AccountLinkResult {
+  success: boolean;
+  serverUsername: string;
+  claimedDevices: string[];
+  skippedDevices: string[];
+}
+
+export const accountLinkAPI = {
+  getStatus: () => api.get<AccountLinkStatus>('/api/account-link/status').then(r => r.data),
+  link: (req: AccountLinkRequest) => api.post<AccountLinkResult>('/api/account-link', req).then(r => r.data),
+  unlink: () => api.delete('/api/account-link'),
+};
+
 export default api;

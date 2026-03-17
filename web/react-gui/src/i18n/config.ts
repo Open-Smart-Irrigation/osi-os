@@ -23,7 +23,7 @@ i18n
     fallbackLng: 'en',
     supportedLngs: SUPPORTED_LANGUAGES.map(l => l.code),
     defaultNS: 'common',
-    ns: ['common', 'auth', 'dashboard', 'devices'],
+    ns: ['common', 'auth', 'dashboard', 'devices', 'accountLink'],
     detection: {
       order: ['localStorage', 'navigator'],
       lookupLocalStorage: 'i18n_language',

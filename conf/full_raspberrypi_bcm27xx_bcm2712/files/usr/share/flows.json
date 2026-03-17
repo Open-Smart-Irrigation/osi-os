@@ -220,7 +220,7 @@
     "type": "function",
     "z": "auth-tab",
     "name": "Process Result",
-    "func": "const checkType = msg.checkType;\nconst result = msg.payload;\n\nif (checkType === 'register') {\n  const username = flow.get('register_username');\n  const password = flow.get('register_password');\n  \n  // Check if user already exists\n  if (result && result.length > 0) {\n    msg.statusCode = 400;\n    msg.payload = { message: 'Username already exists' };\n    return [null, msg];\n  }\n  \n  // Insert new user\n  const now = new Date().toISOString();\n  msg.topic = `INSERT INTO users (username, password_hash, created_at) VALUES ('${username.replace(/'/g, \"''\")}', '${password.replace(/'/g, \"''\")}', '${now}')`;\n  msg.insertType = 'register';\n  return [msg, null];\n  \n} else if (checkType === 'login') {\n  const username = flow.get('login_username');\n  const password = flow.get('login_password');\n  \n  // Check if user exists and password matches\n  if (!result || result.length === 0) {\n    msg.statusCode = 401;\n    msg.payload = { message: 'Invalid username or password' };\n    return [null, msg];\n  }\n  \n  const user = result[0];\n  \n  // Simple password check (plain text comparison)\n  if (user.password_hash !== password) {\n    msg.statusCode = 401;\n    msg.payload = { message: 'Invalid username or password' };\n    return [null, msg];\n  }\n  \n  // Generate simple token (base64 of username:timestamp)\n  const token = Buffer.from(`${username}:${Date.now()}`).toString('base64');\n  \n  msg.statusCode = 200;\n  msg.payload = { token };\n  return [null, msg];\n}\n\nreturn [null, msg];",
+    "func": "const checkType = msg.checkType;\nconst result = msg.payload;\n\nif (checkType === 'register') {\n  const username = flow.get('register_username');\n  const password = flow.get('register_password');\n  if (result && result.length > 0) {\n    msg.statusCode = 400;\n    msg.payload = { message: 'Username already exists' };\n    return [null, msg];\n  }\n  const now = new Date().toISOString();\n  msg.topic = `INSERT INTO users (username, password_hash, created_at) VALUES ('${username.replace(/'/g, \"''\")}', '${password.replace(/'/g, \"''\")}', '${now}')`;\n  msg.insertType = 'register';\n  return [msg, null];\n\n} else if (checkType === 'login') {\n  const username = flow.get('login_username');\n  const password = flow.get('login_password');\n  if (!result || result.length === 0) {\n    msg.statusCode = 401;\n    msg.payload = { message: 'Invalid username or password' };\n    return [null, msg];\n  }\n  const user = result[0];\n  const authMode = user.auth_mode || 'local';\n  let passwordValid = false;\n  if (authMode === 'server') {\n    const bcrypt = require('bcryptjs');\n    passwordValid = bcrypt.compareSync(password, user.server_password_hash);\n  } else {\n    passwordValid = (user.password_hash === password);\n  }\n  if (!passwordValid) {\n    msg.statusCode = 401;\n    msg.payload = { message: 'Invalid username or password' };\n    return [null, msg];\n  }\n  const token = Buffer.from(`${username}:${Date.now()}`).toString('base64');\n  msg.statusCode = 200;\n  msg.payload = { token };\n  return [null, msg];\n}\n\nreturn [null, msg];",
     "outputs": 2,
     "noerr": 0,
     "initialize": "",
@@ -1091,7 +1091,7 @@
     "type": "function",
     "z": "device-api-tab",
     "name": "Format Response",
-    "func": "const rows = msg.payload || [];\n\nmsg.statusCode = 200;\nmsg.payload = rows.map(r => ({\n  id: r.id,\n  name: r.name,\n  device_count: r.device_count,\n  created_at: r.created_at,\n  updated_at: r.updated_at,\n\n  schedule: r.trigger_metric\n    ? {\n      trigger_metric: r.trigger_metric,\n      threshold_kpa: r.threshold_kpa,\n      duration_minutes: r.duration_minutes,   // \u2190 ADD THIS\n      enabled: Boolean(r.enabled),\n      last_triggered_at: r.last_triggered_at\n    }\n    : null\n}));\n\nreturn msg;\n",
+    "func": "const rows = msg.payload || [];\n\nmsg.statusCode = 200;\nmsg.payload = rows.map(r => ({\n  id: r.id,\n  name: r.name,\n  device_count: r.device_count,\n  created_at: r.created_at,\n  updated_at: r.updated_at,\n\n  schedule: r.trigger_metric\n    ? {\n      trigger_metric: r.trigger_metric,\n      threshold_kpa: r.threshold_kpa,\n      duration_minutes: r.duration_minutes,   // ← ADD THIS\n      enabled: Boolean(r.enabled),\n      last_triggered_at: r.last_triggered_at\n    }\n    : null\n}));\n\nreturn msg;\n",
     "outputs": 1,
     "timeout": "",
     "noerr": 0,
@@ -1617,7 +1617,7 @@
     "type": "function",
     "z": "device-api-tab",
     "name": "Verify Zone Ownership",
-    "func": "// Verify Zone Ownership + validate schedule payload (including duration)\n\ntry {\n  // 1) Validate user lookup result\n  if (!Array.isArray(msg.payload) || msg.payload.length === 0 || msg.payload[0]?.id === undefined) {\n    msg.statusCode = 401;\n    msg.payload = { message: \"User not found\" };\n    return [null, msg];\n  }\n\n  const userId = Number(msg.payload[0].id);\n\n  // 2) Validate zone id\n  const zoneId = parseInt(msg.req?.params?.id, 10);\n\n  if (!Number.isFinite(userId)) {\n    msg.statusCode = 401;\n    msg.payload = { message: \"Invalid user ID\" };\n    return [null, msg];\n  }\n\n  if (!Number.isFinite(zoneId)) {\n    msg.statusCode = 400;\n    msg.payload = { message: \"Invalid zone ID\" };\n    return [null, msg];\n  }\n\n  // 3) Parse preserved request body\n  let body = msg.req_body;\n  if (typeof body === \"string\") {\n    try { body = JSON.parse(body); } catch { body = {}; }\n  }\n  if (!body || typeof body !== \"object\") body = {};\n\n  // 4) Parse fields (robust against GUI naming)\n  const trigger_metric =\n    body.trigger_metric ??\n    body.triggerMetric ??\n    body.metric ??\n    body.metric_id;\n\n  const threshold_kpa =\n    body.threshold_kpa ??\n    body.thresholdKpa ??\n    body.threshold ??\n    body.kpa;\n\n  const duration_raw =\n    body.duration_minutes ??\n    body.durationMinutes ??\n    body.duration ??\n    body.minutes;\n\n  const enabledRaw =\n    body.enabled ??\n    body.is_enabled ??\n    body.isEnabled;\n\n  // 5) Validate trigger metric\n  const allowed = [\"SWT_WM1\", \"SWT_WM2\", \"SWT_AVG\"];\n  const trig = String(trigger_metric || \"\").toUpperCase();\n\n  if (!allowed.includes(trig)) {\n    msg.statusCode = 400;\n    msg.payload = { message: `Invalid trigger_metric. Allowed: ${allowed.join(\", \")}` };\n    return [null, msg];\n  }\n\n  // 6) Validate threshold\n  const th = Number(threshold_kpa);\n  if (!Number.isFinite(th) || th <= 0 || th > 300) {\n    msg.statusCode = 400;\n    msg.payload = { message: \"Invalid threshold_kpa (0 < x \u2264 300)\" };\n    return [null, msg];\n  }\n\n  // 7) Validate duration_minutes\n  let durationMin =\n    duration_raw === undefined || duration_raw === null\n      ? 20\n      : Number(duration_raw);\n\n  if (!Number.isFinite(durationMin) || durationMin <= 0 || durationMin > 1440) {\n    msg.statusCode = 400;\n    msg.payload = { message: \"Invalid duration_minutes (0 < x \u2264 1440)\" };\n    return [null, msg];\n  }\n\n  durationMin = Math.round(durationMin);\n\n  // 8) Normalize enabled\n  const enabledInt =\n    enabledRaw === undefined || enabledRaw === null\n      ? 1\n      : (enabledRaw ? 1 : 0);\n\n  // 9) Store in flow context\n  flow.set(\"sched_user_id\", userId);\n  flow.set(\"sched_zone_id\", zoneId);\n  flow.set(\"sched_trigger_metric\", trig);\n  flow.set(\"sched_threshold_kpa\", th);\n  flow.set(\"sched_duration_minutes\", durationMin);\n  flow.set(\"sched_enabled\", enabledInt);\n\n  // 10) Verify zone belongs to user\n  msg.topic = `\n    SELECT id\n    FROM irrigation_zones\n    WHERE id = ${zoneId}\n      AND user_id = ${userId}\n      AND deleted_at IS NULL\n    LIMIT 1;\n  `.trim();\n\n  return [msg, null];\n\n} catch (err) {\n  msg.statusCode = 500;\n  msg.payload = { message: \"Schedule validation failed\", error: String(err?.message || err) };\n  return [null, msg];\n}\n",
+    "func": "// Verify Zone Ownership + validate schedule payload (including duration)\n\ntry {\n  // 1) Validate user lookup result\n  if (!Array.isArray(msg.payload) || msg.payload.length === 0 || msg.payload[0]?.id === undefined) {\n    msg.statusCode = 401;\n    msg.payload = { message: \"User not found\" };\n    return [null, msg];\n  }\n\n  const userId = Number(msg.payload[0].id);\n\n  // 2) Validate zone id\n  const zoneId = parseInt(msg.req?.params?.id, 10);\n\n  if (!Number.isFinite(userId)) {\n    msg.statusCode = 401;\n    msg.payload = { message: \"Invalid user ID\" };\n    return [null, msg];\n  }\n\n  if (!Number.isFinite(zoneId)) {\n    msg.statusCode = 400;\n    msg.payload = { message: \"Invalid zone ID\" };\n    return [null, msg];\n  }\n\n  // 3) Parse preserved request body\n  let body = msg.req_body;\n  if (typeof body === \"string\") {\n    try { body = JSON.parse(body); } catch { body = {}; }\n  }\n  if (!body || typeof body !== \"object\") body = {};\n\n  // 4) Parse fields (robust against GUI naming)\n  const trigger_metric =\n    body.trigger_metric ??\n    body.triggerMetric ??\n    body.metric ??\n    body.metric_id;\n\n  const threshold_kpa =\n    body.threshold_kpa ??\n    body.thresholdKpa ??\n    body.threshold ??\n    body.kpa;\n\n  const duration_raw =\n    body.duration_minutes ??\n    body.durationMinutes ??\n    body.duration ??\n    body.minutes;\n\n  const enabledRaw =\n    body.enabled ??\n    body.is_enabled ??\n    body.isEnabled;\n\n  // 5) Validate trigger metric\n  const allowed = [\"SWT_WM1\", \"SWT_WM2\", \"SWT_AVG\"];\n  const trig = String(trigger_metric || \"\").toUpperCase();\n\n  if (!allowed.includes(trig)) {\n    msg.statusCode = 400;\n    msg.payload = { message: `Invalid trigger_metric. Allowed: ${allowed.join(\", \")}` };\n    return [null, msg];\n  }\n\n  // 6) Validate threshold\n  const th = Number(threshold_kpa);\n  if (!Number.isFinite(th) || th <= 0 || th > 300) {\n    msg.statusCode = 400;\n    msg.payload = { message: \"Invalid threshold_kpa (0 < x ≤ 300)\" };\n    return [null, msg];\n  }\n\n  // 7) Validate duration_minutes\n  let durationMin =\n    duration_raw === undefined || duration_raw === null\n      ? 20\n      : Number(duration_raw);\n\n  if (!Number.isFinite(durationMin) || durationMin <= 0 || durationMin > 1440) {\n    msg.statusCode = 400;\n    msg.payload = { message: \"Invalid duration_minutes (0 < x ≤ 1440)\" };\n    return [null, msg];\n  }\n\n  durationMin = Math.round(durationMin);\n\n  // 8) Normalize enabled\n  const enabledInt =\n    enabledRaw === undefined || enabledRaw === null\n      ? 1\n      : (enabledRaw ? 1 : 0);\n\n  // 9) Store in flow context\n  flow.set(\"sched_user_id\", userId);\n  flow.set(\"sched_zone_id\", zoneId);\n  flow.set(\"sched_trigger_metric\", trig);\n  flow.set(\"sched_threshold_kpa\", th);\n  flow.set(\"sched_duration_minutes\", durationMin);\n  flow.set(\"sched_enabled\", enabledInt);\n\n  // 10) Verify zone belongs to user\n  msg.topic = `\n    SELECT id\n    FROM irrigation_zones\n    WHERE id = ${zoneId}\n      AND user_id = ${userId}\n      AND deleted_at IS NULL\n    LIMIT 1;\n  `.trim();\n\n  return [msg, null];\n\n} catch (err) {\n  msg.statusCode = 500;\n  msg.payload = { message: \"Schedule validation failed\", error: String(err?.message || err) };\n  return [null, msg];\n}\n",
     "outputs": 2,
     "timeout": 0,
     "noerr": 0,
@@ -2852,7 +2852,7 @@
     "type": "function",
     "z": "a88bb648cac221ce",
     "name": "KIWI UPLINK SIM",
-    "func": "/**\n * KIWI UPLINK SIM (15min) \u2013 MULTI-DEVICE (UPPERCASE DevEUI)\n *\n * Simulates 6 KIWI-like devices with realistic WM1/WM2 dynamics + lux + temp + RH.\n * Device naming convention:\n *   farm_<farmId>_sensor_<n>_type_KIWI\n *\n * Output payload fields (compatible with your Process Data):\n *   payload.deviceInfo.devEui        (NOW UPPERCASE)\n *   payload.deviceInfo.deviceName\n *   payload.time\n *   payload.object.input5_frequency\n *   payload.object.input6_frequency\n *   payload.object.light_intensity\n *   payload.object.ambient_temperature\n *   payload.object.relative_humidity\n */\n\nfunction clamp(x, a, b) { return Math.max(a, Math.min(b, x)); }\n\n// ---------- deterministic devEUI generation ----------\nfunction hash32(str) {\n    // FNV-1a 32-bit\n    let h = 0x811c9dc5;\n    for (let i = 0; i < str.length; i++) {\n        h ^= str.charCodeAt(i);\n        h = (h * 0x01000193) >>> 0;\n    }\n    return h >>> 0;\n}\n\nfunction hex8(n) {\n    return (n >>> 0).toString(16).padStart(8, \"0\");\n}\n\nfunction makeDevEuiFromName(name) {\n    // Create 16-hex char EUI from two 32-bit hashes + some structure\n    const h1 = hash32(\"A|\" + name);\n    const h2 = hash32(\"B|\" + name);\n    const h3 = hash32(\"C|\" + name);\n    const h4 = hash32(\"D|\" + name);\n\n    const p1 = (h1 ^ (h3 >>> 1)) >>> 0;\n    const p2 = (h2 ^ (h4 >>> 1)) >>> 0;\n\n    // IMPORTANT: normalize to UPPERCASE here\n    return (hex8(p1) + hex8(p2)).toUpperCase();\n}\n\n// ---------- kPa <-> Hz ----------\nfunction kPaToHz(kpa) {\n    const K = clamp(kpa, 0, 200);\n    let hz;\n\n    if (K <= 9) {\n        hz = 4330 + (9 - K) / 0.004286;\n        hz = clamp(hz, 4330, 6430);\n    } else if (K <= 15) {\n        hz = 2820 + (15 - K) / 0.003974;\n        hz = clamp(hz, 2820, 4330);\n    } else if (K <= 35) {\n        hz = 1110 + (35 - K) / 0.01170;\n        hz = clamp(hz, 1110, 2820);\n    } else if (K <= 55) {\n        hz = 770 + (55 - K) / 0.05884;\n        hz = clamp(hz, 770, 1110);\n    } else if (K <= 75) {\n        hz = 600 + (75 - K) / 0.1176;\n        hz = clamp(hz, 600, 770);\n    } else if (K <= 100) {\n        hz = 485 + (100 - K) / 0.2174;\n        hz = clamp(hz, 485, 600);\n    } else {\n        hz = 293 + (200 - K) / 0.5208;\n        hz = clamp(hz, 293, 485);\n    }\n\n    // Small measurement noise\n    hz += (Math.random() * 8 - 4); // +/- 4 Hz\n    hz = Math.round(clamp(hz, 250, 7000));\n    return hz;\n}\n\n// ---------- lux / temp / RH ----------\nfunction luxFromLocalTime(d) {\n    const h = d.getHours() + d.getMinutes() / 60;\n    const sunrise = 6.25;\n    const sunset = 18.75;\n\n    if (h < sunrise || h > sunset) return Math.max(0, Math.round(Math.random() * 3));\n\n    const x = (h - sunrise) / (sunset - sunrise) * Math.PI;\n    const base = Math.sin(x); // 0..1..0\n    const peakLux = 65000;\n    const cloudFactor = 0.6 + Math.random() * 0.4;\n    const noise = 0.95 + Math.random() * 0.10;\n\n    return Math.round(peakLux * base * cloudFactor * noise);\n}\n\nfunction tempRhFromLocalTime(d, lux) {\n    const h = d.getHours() + d.getMinutes() / 60;\n    const luxRatio = clamp((lux || 0) / 65000, 0, 1);\n\n    // Temperature: peak around ~15:00\n    const tMin = 20.5;\n    const tMax = 31.0;\n    const amp = tMax - tMin;\n\n    const phase = ((h - 15) / 24) * 2 * Math.PI;\n    const tempCycle = 0.5 * (1 + Math.cos(phase)); // 0..1\n\n    const sunBoost = 1.2 * (luxRatio - 0.5);\n    let temp = tMin + amp * tempCycle + sunBoost;\n    temp += (Math.random() * 0.6 - 0.3);\n    temp = clamp(temp, 18, 35);\n\n    // RH inverse to tempCycle\n    const rhMax = 92;\n    const rhMin = 58;\n    const invCycle = 1 - tempCycle;\n\n    let rh = rhMin + (rhMax - rhMin) * invCycle;\n    rh += (1 - luxRatio) * 4;\n    rh += (Math.random() * 3 - 1.5);\n    rh = clamp(rh, 35, 100);\n\n    return {\n        ambient_temperature: Math.round(temp * 10) / 10,\n        relative_humidity: Math.round(rh * 10) / 10\n    };\n}\n\n// ---------- per-device dynamics ----------\nfunction initDeviceState(deviceName, devEui, profile) {\n    return {\n        deviceName,\n        devEui,\n\n        wm1_kpa: profile.wm1_start,\n        wm2_kpa: profile.wm2_start,\n\n        wm1_target: profile.wm1_target,\n        wm2_target: profile.wm2_target,\n\n        wettingActive: false,\n        wettingStepsLeft: 0,\n        wettingIntensity: 0,\n\n        wm2_disconnectActive: false,\n        wm2_disconnectStepsLeft: 0,\n\n        wetProb: profile.wetProb,\n        wm2DiscProb: profile.wm2DiscProb,\n\n        dryBiasWm1: 0.15 + Math.random() * 0.25,\n        dryBiasWm2: 0.25 + Math.random() * 0.45\n    };\n}\n\nfunction stepDeviceState(st) {\n    const dryStepWm1 = st.dryBiasWm1 + (Math.random() * 0.6);\n    const dryStepWm2 = st.dryBiasWm2 + (Math.random() * 1.0);\n\n    const noiseWm1 = (Math.random() * 0.6 - 0.3);\n    const noiseWm2 = (Math.random() * 0.9 - 0.45);\n\n    if (Math.random() < 0.035) st.wm1_target = clamp(st.wm1_target + (Math.random() * 4 - 2), 12, 55);\n    if (Math.random() < 0.055) st.wm2_target = clamp(st.wm2_target + (Math.random() * 10 - 4), 18, 135);\n\n    if (!st.wettingActive && Math.random() < st.wetProb) {\n        st.wettingActive = true;\n        st.wettingStepsLeft = 6 + Math.floor(Math.random() * 10);\n        st.wettingIntensity = 8 + Math.random() * 28;\n    }\n\n    if (!st.wm2_disconnectActive && Math.random() < st.wm2DiscProb) {\n        st.wm2_disconnectActive = true;\n        st.wm2_disconnectStepsLeft = 8 + Math.floor(Math.random() * 24);\n    }\n\n    if (st.wettingActive && st.wettingStepsLeft > 0) {\n        const stepFrac = st.wettingStepsLeft / Math.max(1, (st.wettingStepsLeft + 4));\n        const drop = (st.wettingIntensity / (st.wettingStepsLeft + 2)) * (1.1 - 0.4 * stepFrac);\n\n        st.wm1_kpa -= drop * 0.6;\n        st.wm2_kpa -= drop * 0.9;\n\n        st.wettingStepsLeft -= 1;\n\n        if (st.wettingStepsLeft <= 0) {\n            st.wettingActive = false;\n            st.wettingIntensity = 0;\n            st.wm1_target = clamp(st.wm1_target - (2 + Math.random() * 6), 8, 45);\n            st.wm2_target = clamp(st.wm2_target - (4 + Math.random() * 10), 12, 110);\n        }\n    } else {\n        st.wm1_kpa += dryStepWm1;\n        st.wm2_kpa += dryStepWm2;\n\n        st.wm1_kpa += (st.wm1_target - st.wm1_kpa) * 0.03;\n        st.wm2_kpa += (st.wm2_target - st.wm2_kpa) * 0.03;\n    }\n\n    st.wm1_kpa = clamp(st.wm1_kpa + noiseWm1, 0, 150);\n    st.wm2_kpa = clamp(st.wm2_kpa + noiseWm2, 0, 150);\n\n    let wm2EffectiveKpa = st.wm2_kpa;\n    if (st.wm2_disconnectActive) {\n        wm2EffectiveKpa = 200;\n        st.wm2_disconnectStepsLeft -= 1;\n        if (st.wm2_disconnectStepsLeft <= 0) st.wm2_disconnectActive = false;\n    }\n\n    return { wm1: st.wm1_kpa, wm2: wm2EffectiveKpa };\n}\n\n// ---------- device list ----------\nconst farmId = \"001\";\n\nconst deviceNames = [\n    `farm_${farmId}_sensor_001_type_KIWI`,\n    `farm_${farmId}_sensor_002_type_KIWI`,\n    `farm_${farmId}_sensor_003_type_KIWI`,\n    `farm_${farmId}_sensor_004_type_KIWI`,\n    `farm_${farmId}_sensor_005_type_KIWI`,\n    `farm_${farmId}_sensor_006_type_KIWI`\n];\n\nconst profiles = [\n    { wm1_start: 22, wm2_start: 34, wm1_target: 28, wm2_target: 45, wetProb: 0.008, wm2DiscProb: 0.0003 },\n    { wm1_start: 26, wm2_start: 42, wm1_target: 33, wm2_target: 58, wetProb: 0.007, wm2DiscProb: 0.0004 },\n    { wm1_start: 18, wm2_start: 38, wm1_target: 26, wm2_target: 52, wetProb: 0.009, wm2DiscProb: 0.0002 },\n\n    { wm1_start: 30, wm2_start: 60, wm1_target: 38, wm2_target: 85, wetProb: 0.006, wm2DiscProb: 0.0006 },\n    { wm1_start: 28, wm2_start: 55, wm1_target: 36, wm2_target: 95, wetProb: 0.006, wm2DiscProb: 0.0006 },\n    { wm1_start: 24, wm2_start: 48, wm1_target: 34, wm2_target: 75, wetProb: 0.007, wm2DiscProb: 0.0005 }\n];\n\n// ---------- state init ----------\nconst key = \"kiwiSimMultiState\";\nlet state = flow.get(key);\nif (!state) state = {};\n\nconst now = new Date();\nconst nowIso = now.toISOString();\n\nconst lux = luxFromLocalTime(now);\nconst th = tempRhFromLocalTime(now, lux);\n\nconst outMsgs = [];\n\nfor (let i = 0; i < deviceNames.length; i++) {\n    const name = deviceNames[i];\n    const devEui = makeDevEuiFromName(name); // already UPPERCASE\n\n    if (!state[name]) {\n        state[name] = initDeviceState(name, devEui, profiles[i]);\n    } else {\n        state[name].deviceName = name;\n        state[name].devEui = devEui;\n    }\n\n    const st = state[name];\n    const kpa = stepDeviceState(st);\n\n    const f5 = kPaToHz(kpa.wm1);\n    const f6 = kPaToHz(kpa.wm2);\n\n    const payload = {\n        deduplicationId: \"SIM-\" + Math.random().toString(16).slice(2),\n        time: nowIso,\n        deviceInfo: {\n            deviceName: name,\n            devEui: devEui // UPPERCASE\n        },\n        object: {\n            input5_frequency: f5,\n            input6_frequency: f6,\n            light_intensity: lux,\n            ambient_temperature: th.ambient_temperature,\n            relative_humidity: th.relative_humidity,\n            port: \"10\",\n            raw: \"[SIMULATED]\"\n        }\n    };\n\n    outMsgs.push({ payload });\n}\n\n// Persist state\nflow.set(key, state);\n\nconst s0 = state[deviceNames[0]];\nnode.status({\n    fill: (s0 && s0.wettingActive) ? \"blue\" : \"green\",\n    shape: \"dot\",\n    text: `SIM x6 | lux=${lux} T=${th.ambient_temperature}C RH=${th.relative_humidity}%`\n});\n\n// Emit 6 messages (one per device)\nreturn [outMsgs];\n",
+    "func": "/**\n * KIWI UPLINK SIM (15min) – MULTI-DEVICE (UPPERCASE DevEUI)\n *\n * Simulates 6 KIWI-like devices with realistic WM1/WM2 dynamics + lux + temp + RH.\n * Device naming convention:\n *   farm_<farmId>_sensor_<n>_type_KIWI\n *\n * Output payload fields (compatible with your Process Data):\n *   payload.deviceInfo.devEui        (NOW UPPERCASE)\n *   payload.deviceInfo.deviceName\n *   payload.time\n *   payload.object.input5_frequency\n *   payload.object.input6_frequency\n *   payload.object.light_intensity\n *   payload.object.ambient_temperature\n *   payload.object.relative_humidity\n */\n\nfunction clamp(x, a, b) { return Math.max(a, Math.min(b, x)); }\n\n// ---------- deterministic devEUI generation ----------\nfunction hash32(str) {\n    // FNV-1a 32-bit\n    let h = 0x811c9dc5;\n    for (let i = 0; i < str.length; i++) {\n        h ^= str.charCodeAt(i);\n        h = (h * 0x01000193) >>> 0;\n    }\n    return h >>> 0;\n}\n\nfunction hex8(n) {\n    return (n >>> 0).toString(16).padStart(8, \"0\");\n}\n\nfunction makeDevEuiFromName(name) {\n    // Create 16-hex char EUI from two 32-bit hashes + some structure\n    const h1 = hash32(\"A|\" + name);\n    const h2 = hash32(\"B|\" + name);\n    const h3 = hash32(\"C|\" + name);\n    const h4 = hash32(\"D|\" + name);\n\n    const p1 = (h1 ^ (h3 >>> 1)) >>> 0;\n    const p2 = (h2 ^ (h4 >>> 1)) >>> 0;\n\n    // IMPORTANT: normalize to UPPERCASE here\n    return (hex8(p1) + hex8(p2)).toUpperCase();\n}\n\n// ---------- kPa <-> Hz ----------\nfunction kPaToHz(kpa) {\n    const K = clamp(kpa, 0, 200);\n    let hz;\n\n    if (K <= 9) {\n        hz = 4330 + (9 - K) / 0.004286;\n        hz = clamp(hz, 4330, 6430);\n    } else if (K <= 15) {\n        hz = 2820 + (15 - K) / 0.003974;\n        hz = clamp(hz, 2820, 4330);\n    } else if (K <= 35) {\n        hz = 1110 + (35 - K) / 0.01170;\n        hz = clamp(hz, 1110, 2820);\n    } else if (K <= 55) {\n        hz = 770 + (55 - K) / 0.05884;\n        hz = clamp(hz, 770, 1110);\n    } else if (K <= 75) {\n        hz = 600 + (75 - K) / 0.1176;\n        hz = clamp(hz, 600, 770);\n    } else if (K <= 100) {\n        hz = 485 + (100 - K) / 0.2174;\n        hz = clamp(hz, 485, 600);\n    } else {\n        hz = 293 + (200 - K) / 0.5208;\n        hz = clamp(hz, 293, 485);\n    }\n\n    // Small measurement noise\n    hz += (Math.random() * 8 - 4); // +/- 4 Hz\n    hz = Math.round(clamp(hz, 250, 7000));\n    return hz;\n}\n\n// ---------- lux / temp / RH ----------\nfunction luxFromLocalTime(d) {\n    const h = d.getHours() + d.getMinutes() / 60;\n    const sunrise = 6.25;\n    const sunset = 18.75;\n\n    if (h < sunrise || h > sunset) return Math.max(0, Math.round(Math.random() * 3));\n\n    const x = (h - sunrise) / (sunset - sunrise) * Math.PI;\n    const base = Math.sin(x); // 0..1..0\n    const peakLux = 65000;\n    const cloudFactor = 0.6 + Math.random() * 0.4;\n    const noise = 0.95 + Math.random() * 0.10;\n\n    return Math.round(peakLux * base * cloudFactor * noise);\n}\n\nfunction tempRhFromLocalTime(d, lux) {\n    const h = d.getHours() + d.getMinutes() / 60;\n    const luxRatio = clamp((lux || 0) / 65000, 0, 1);\n\n    // Temperature: peak around ~15:00\n    const tMin = 20.5;\n    const tMax = 31.0;\n    const amp = tMax - tMin;\n\n    const phase = ((h - 15) / 24) * 2 * Math.PI;\n    const tempCycle = 0.5 * (1 + Math.cos(phase)); // 0..1\n\n    const sunBoost = 1.2 * (luxRatio - 0.5);\n    let temp = tMin + amp * tempCycle + sunBoost;\n    temp += (Math.random() * 0.6 - 0.3);\n    temp = clamp(temp, 18, 35);\n\n    // RH inverse to tempCycle\n    const rhMax = 92;\n    const rhMin = 58;\n    const invCycle = 1 - tempCycle;\n\n    let rh = rhMin + (rhMax - rhMin) * invCycle;\n    rh += (1 - luxRatio) * 4;\n    rh += (Math.random() * 3 - 1.5);\n    rh = clamp(rh, 35, 100);\n\n    return {\n        ambient_temperature: Math.round(temp * 10) / 10,\n        relative_humidity: Math.round(rh * 10) / 10\n    };\n}\n\n// ---------- per-device dynamics ----------\nfunction initDeviceState(deviceName, devEui, profile) {\n    return {\n        deviceName,\n        devEui,\n\n        wm1_kpa: profile.wm1_start,\n        wm2_kpa: profile.wm2_start,\n\n        wm1_target: profile.wm1_target,\n        wm2_target: profile.wm2_target,\n\n        wettingActive: false,\n        wettingStepsLeft: 0,\n        wettingIntensity: 0,\n\n        wm2_disconnectActive: false,\n        wm2_disconnectStepsLeft: 0,\n\n        wetProb: profile.wetProb,\n        wm2DiscProb: profile.wm2DiscProb,\n\n        dryBiasWm1: 0.15 + Math.random() * 0.25,\n        dryBiasWm2: 0.25 + Math.random() * 0.45\n    };\n}\n\nfunction stepDeviceState(st) {\n    const dryStepWm1 = st.dryBiasWm1 + (Math.random() * 0.6);\n    const dryStepWm2 = st.dryBiasWm2 + (Math.random() * 1.0);\n\n    const noiseWm1 = (Math.random() * 0.6 - 0.3);\n    const noiseWm2 = (Math.random() * 0.9 - 0.45);\n\n    if (Math.random() < 0.035) st.wm1_target = clamp(st.wm1_target + (Math.random() * 4 - 2), 12, 55);\n    if (Math.random() < 0.055) st.wm2_target = clamp(st.wm2_target + (Math.random() * 10 - 4), 18, 135);\n\n    if (!st.wettingActive && Math.random() < st.wetProb) {\n        st.wettingActive = true;\n        st.wettingStepsLeft = 6 + Math.floor(Math.random() * 10);\n        st.wettingIntensity = 8 + Math.random() * 28;\n    }\n\n    if (!st.wm2_disconnectActive && Math.random() < st.wm2DiscProb) {\n        st.wm2_disconnectActive = true;\n        st.wm2_disconnectStepsLeft = 8 + Math.floor(Math.random() * 24);\n    }\n\n    if (st.wettingActive && st.wettingStepsLeft > 0) {\n        const stepFrac = st.wettingStepsLeft / Math.max(1, (st.wettingStepsLeft + 4));\n        const drop = (st.wettingIntensity / (st.wettingStepsLeft + 2)) * (1.1 - 0.4 * stepFrac);\n\n        st.wm1_kpa -= drop * 0.6;\n        st.wm2_kpa -= drop * 0.9;\n\n        st.wettingStepsLeft -= 1;\n\n        if (st.wettingStepsLeft <= 0) {\n            st.wettingActive = false;\n            st.wettingIntensity = 0;\n            st.wm1_target = clamp(st.wm1_target - (2 + Math.random() * 6), 8, 45);\n            st.wm2_target = clamp(st.wm2_target - (4 + Math.random() * 10), 12, 110);\n        }\n    } else {\n        st.wm1_kpa += dryStepWm1;\n        st.wm2_kpa += dryStepWm2;\n\n        st.wm1_kpa += (st.wm1_target - st.wm1_kpa) * 0.03;\n        st.wm2_kpa += (st.wm2_target - st.wm2_kpa) * 0.03;\n    }\n\n    st.wm1_kpa = clamp(st.wm1_kpa + noiseWm1, 0, 150);\n    st.wm2_kpa = clamp(st.wm2_kpa + noiseWm2, 0, 150);\n\n    let wm2EffectiveKpa = st.wm2_kpa;\n    if (st.wm2_disconnectActive) {\n        wm2EffectiveKpa = 200;\n        st.wm2_disconnectStepsLeft -= 1;\n        if (st.wm2_disconnectStepsLeft <= 0) st.wm2_disconnectActive = false;\n    }\n\n    return { wm1: st.wm1_kpa, wm2: wm2EffectiveKpa };\n}\n\n// ---------- device list ----------\nconst farmId = \"001\";\n\nconst deviceNames = [\n    `farm_${farmId}_sensor_001_type_KIWI`,\n    `farm_${farmId}_sensor_002_type_KIWI`,\n    `farm_${farmId}_sensor_003_type_KIWI`,\n    `farm_${farmId}_sensor_004_type_KIWI`,\n    `farm_${farmId}_sensor_005_type_KIWI`,\n    `farm_${farmId}_sensor_006_type_KIWI`\n];\n\nconst profiles = [\n    { wm1_start: 22, wm2_start: 34, wm1_target: 28, wm2_target: 45, wetProb: 0.008, wm2DiscProb: 0.0003 },\n    { wm1_start: 26, wm2_start: 42, wm1_target: 33, wm2_target: 58, wetProb: 0.007, wm2DiscProb: 0.0004 },\n    { wm1_start: 18, wm2_start: 38, wm1_target: 26, wm2_target: 52, wetProb: 0.009, wm2DiscProb: 0.0002 },\n\n    { wm1_start: 30, wm2_start: 60, wm1_target: 38, wm2_target: 85, wetProb: 0.006, wm2DiscProb: 0.0006 },\n    { wm1_start: 28, wm2_start: 55, wm1_target: 36, wm2_target: 95, wetProb: 0.006, wm2DiscProb: 0.0006 },\n    { wm1_start: 24, wm2_start: 48, wm1_target: 34, wm2_target: 75, wetProb: 0.007, wm2DiscProb: 0.0005 }\n];\n\n// ---------- state init ----------\nconst key = \"kiwiSimMultiState\";\nlet state = flow.get(key);\nif (!state) state = {};\n\nconst now = new Date();\nconst nowIso = now.toISOString();\n\nconst lux = luxFromLocalTime(now);\nconst th = tempRhFromLocalTime(now, lux);\n\nconst outMsgs = [];\n\nfor (let i = 0; i < deviceNames.length; i++) {\n    const name = deviceNames[i];\n    const devEui = makeDevEuiFromName(name); // already UPPERCASE\n\n    if (!state[name]) {\n        state[name] = initDeviceState(name, devEui, profiles[i]);\n    } else {\n        state[name].deviceName = name;\n        state[name].devEui = devEui;\n    }\n\n    const st = state[name];\n    const kpa = stepDeviceState(st);\n\n    const f5 = kPaToHz(kpa.wm1);\n    const f6 = kPaToHz(kpa.wm2);\n\n    const payload = {\n        deduplicationId: \"SIM-\" + Math.random().toString(16).slice(2),\n        time: nowIso,\n        deviceInfo: {\n            deviceName: name,\n            devEui: devEui // UPPERCASE\n        },\n        object: {\n            input5_frequency: f5,\n            input6_frequency: f6,\n            light_intensity: lux,\n            ambient_temperature: th.ambient_temperature,\n            relative_humidity: th.relative_humidity,\n            port: \"10\",\n            raw: \"[SIMULATED]\"\n        }\n    };\n\n    outMsgs.push({ payload });\n}\n\n// Persist state\nflow.set(key, state);\n\nconst s0 = state[deviceNames[0]];\nnode.status({\n    fill: (s0 && s0.wettingActive) ? \"blue\" : \"green\",\n    shape: \"dot\",\n    text: `SIM x6 | lux=${lux} T=${th.ambient_temperature}C RH=${th.relative_humidity}%`\n});\n\n// Emit 6 messages (one per device)\nreturn [outMsgs];\n",
     "outputs": 1,
     "timeout": 0,
     "noerr": 0,
@@ -3052,7 +3052,7 @@
     "id": "fn_rows_to_csv",
     "type": "function",
     "z": "a3f03829ad106e10",
-    "name": "Rows \u2192 CSV + Headers",
+    "name": "Rows → CSV + Headers",
     "func": "// msg.payload is expected to be an array of row objects from sqlite node.\n// Convert to CSV and return as downloadable attachment.\n\nconst rows = Array.isArray(msg.payload) ? msg.payload : [];\n\n// Helper: CSV escape\nfunction esc(v) {\n  if (v === null || v === undefined) return '';\n  const s = String(v);\n  // Escape quotes by doubling them\n  const needsQuotes = /[\\n\\r,\\\"]/g.test(s);\n  const out = s.replace(/\\\"/g, '\"\"');\n  return needsQuotes ? `\"${out}\"` : out;\n}\n\n// Define a stable column order\nconst cols = [\n  'ts','dev_eui','f_cnt','dr','spreading_factor','frequency_hz','bandwidth_hz','code_rate','confirmed',\n  'latitude','longitude','altitude_m','hdop','sats','accuracy_m',\n  'gateway_id','rssi_dbm','snr_db','channel','crc_status'\n];\n\nlet csv = cols.join(',') + '\\n';\nfor (const r of rows) {\n  const line = cols.map(c => esc(r?.[c])).join(',');\n  csv += line + '\\n';\n}\n\n// Filename with timestamp\nconst now = new Date().toISOString().replace(/[:]/g,'-');\nconst filename = `fieldtest_${now}.csv`;\n\nmsg.headers = msg.headers || {};\nmsg.headers['Content-Type'] = 'text/csv; charset=utf-8';\nmsg.headers['Content-Disposition'] = `attachment; filename=\"${filename}\"`;\n\nmsg.payload = csv;\nreturn msg;\n",
     "outputs": 1,
     "timeout": "",
@@ -3132,7 +3132,7 @@
     "id": "fn_rows_to_csv_sensordata",
     "type": "function",
     "z": "7d4f3e45f4b0d111",
-    "name": "Rows \u2192 CSV + Download",
+    "name": "Rows → CSV + Download",
     "func": "const rows = Array.isArray(msg.payload) ? msg.payload : [];\n\nfunction esc(v) {\n  if (v === null || v === undefined) return '';\n  const s = String(v);\n  const needsQuotes = /[\\n\\r,\\\"]/g.test(s);\n  const out = s.replace(/\\\"/g, '\"\"');\n  return needsQuotes ? `\"${out}\"` : out;\n}\n\nconst cols = [\n  'ts','deveui','device_name','device_type','zone_id',\n  'swt_wm1','swt_wm2','light_lux','ambient_temperature','relative_humidity'\n];\n\nlet csv = cols.join(',') + '\\n';\nfor (const r of rows) {\n  csv += cols.map(c => esc(r?.[c])).join(',') + '\\n';\n}\n\nconst now = new Date().toISOString().replace(/[:]/g, '-');\nconst filename = `sensordata_${now}.csv`;\n\nmsg.headers = msg.headers || {};\nmsg.headers['Content-Type'] = 'text/csv; charset=utf-8';\nmsg.headers['Content-Disposition'] = `attachment; filename=\"${filename}\"`;\nmsg.payload = csv;\nreturn msg;\n",
     "outputs": 1,
     "noerr": 0,
@@ -3289,7 +3289,7 @@
     "id": "d769e9face3844d5",
     "type": "mqtt out",
     "z": "93b1537a596e0e6d",
-    "name": "Heartbeat \u2192 Cloud",
+    "name": "Heartbeat → Cloud",
     "topic": "",
     "qos": "1",
     "retain": "false",
@@ -3347,7 +3347,7 @@
     "id": "9b38464d56b05ae0",
     "type": "mqtt out",
     "z": "93b1537a596e0e6d",
-    "name": "Telemetry \u2192 Cloud",
+    "name": "Telemetry → Cloud",
     "topic": "",
     "qos": "1",
     "retain": "false",
@@ -3475,7 +3475,7 @@
     "id": "d83e38164efbb860",
     "type": "mqtt out",
     "z": "93b1537a596e0e6d",
-    "name": "Schedule ACK \u2192 Cloud",
+    "name": "Schedule ACK → Cloud",
     "topic": "",
     "qos": "1",
     "retain": "false",
@@ -3531,7 +3531,7 @@
     "id": "c338bc61bee49337",
     "type": "mqtt out",
     "z": "93b1537a596e0e6d",
-    "name": "Status \u2192 Cloud",
+    "name": "Status → Cloud",
     "topic": "",
     "qos": "1",
     "retain": "false",
@@ -3549,7 +3549,7 @@
     "id": "9d5e3035c3d069c4",
     "type": "mqtt out",
     "z": "93b1537a596e0e6d",
-    "name": "Command ACK \u2192 Cloud",
+    "name": "Command ACK → Cloud",
     "topic": "",
     "qos": "1",
     "retain": "false",
@@ -3597,7 +3597,7 @@
     "type": "function",
     "z": "lsn50-tab",
     "name": "Decode LSN50",
-    "func": "// Decode Dragino LSN50 v2 uplink (ChirpStack already decoded via codec)\n// Expects data.object with: TempC1, BatV, ADC_CH0V\n// Falls back to raw byte decode from data.data (base64) if object is absent.\n// Calculates dendrometer position from ADC via voltage divider (2x100kOhm halves wiper V):\n//   position_mm = ADC_V * 10   (valid range: 0-2.6 V ADC -> 0-26 mm)\n\nfunction decodeRawBytes(b64) {\n    try {\n        const buf = Buffer.from(b64, 'base64');\n        if (buf.length < 11) return null;\n        const batV = ((buf[0] << 8) | buf[1]) / 1000;\n        const tempRaw = (buf[2] << 24 >> 16) | buf[3];\n        const tempC1 = tempRaw / 10;\n        const adcV = ((buf[4] << 8) | buf[5]) / 1000;\n        // sentinel: disconnected probe\n        if (buf[2] === 0x7F && buf[3] === 0xFF) return { batV, tempC1: null, adcV };\n        return { batV, tempC1, adcV };\n    } catch(e) { return null; }\n}\n\ntry {\n    const data = msg.payload;\n    if (!data || !data.deviceInfo) {\n        node.error(\"Unexpected payload structure\");\n        return null;\n    }\n\n    const devEui = String(data.deviceInfo.devEui || '').toUpperCase();\n    if (!devEui) { node.error(\"Missing devEui\"); return null; }\n\n    const timestamp = data.time\n        ? new Date(data.time).toISOString()\n        : new Date().toISOString();\n\n    let tempC1 = null, batV = null, adcV = null;\n\n    if (data.object) {\n        // ChirpStack codec decoded \u2014 use directly\n        const obj = data.object;\n        tempC1 = (typeof obj.TempC1 === 'number') ? obj.TempC1 : null;\n        batV   = (typeof obj.BatV   === 'number') ? obj.BatV   : null;\n        adcV   = (typeof obj.ADC_CH0V === 'number') ? obj.ADC_CH0V : null;\n    } else if (data.data) {\n        // Fallback: decode raw base64 payload\n        const decoded = decodeRawBytes(data.data);\n        if (decoded) { tempC1 = decoded.tempC1; batV = decoded.batV; adcV = decoded.adcV; }\n    }\n\n    // ---- Dendrometer calculation ----\n    let positionMm = null;\n    let dendroValid = null;\n    let deltaMm = null;\n\n    if (adcV !== null) {\n        // Validity: 0\u20132.6 V ADC; outside this = sensor error or disconnected\n        dendroValid = (adcV >= 0 && adcV <= 2.6) ? 1 : 0;\n\n        if (dendroValid) {\n            // Voltage divider (2x100kOhm) halves wiper voltage, so V_wiper = ADC_V * 2\n            // Potentiometer powered by switched +5 V: position_mm = (V_wiper / 5.0) * 25\n            // Simplified: position_mm = ADC_V * 10\n            positionMm = Math.round(adcV * 10 * 1000) / 1000;\n\n            // Delta from previous valid reading (per-device flow context)\n            const prevKey = 'dendro_prev_' + devEui;\n            const prev = flow.get(prevKey);\n            if (typeof prev === 'number') {\n                deltaMm = Math.round((positionMm - prev) * 1000) / 1000;\n            }\n            flow.set(prevKey, positionMm);\n        }\n    }\n    // ---------------------------------\n\n    msg.formattedData = { timestamp, devEui, tempC1, batV, adcV, positionMm, dendroValid, deltaMm };\n\n    const parts = [];\n    if (tempC1 !== null)     parts.push(`T ${tempC1.toFixed(1)} \u00b0C`);\n    if (batV   !== null)     parts.push(`Bat ${batV.toFixed(2)} V`);\n    if (adcV   !== null)     parts.push(`ADC ${adcV.toFixed(3)} V`);\n    if (positionMm !== null) {\n        const tag = dendroValid ? `${positionMm.toFixed(2)} mm` : 'INVALID';\n        parts.push(`Dendro ${tag}`);\n    }\n    node.status({ fill: \"blue\", shape: \"dot\", text: parts.join(\" | \") || \"no data\" });\n\n    return msg;\n} catch(err) {\n    node.error(\"Decode LSN50 error: \" + err.message, msg);\n    return null;\n}",
+    "func": "// Decode Dragino LSN50 v2 uplink (ChirpStack already decoded via codec)\n// Expects data.object with: TempC1, BatV, ADC_CH0V\n// Falls back to raw byte decode from data.data (base64) if object is absent.\n// Calculates dendrometer position from ADC via voltage divider (2x100kOhm halves wiper V):\n//   position_mm = ADC_V * 10   (valid range: 0-2.6 V ADC -> 0-26 mm)\n\nfunction decodeRawBytes(b64) {\n    try {\n        const buf = Buffer.from(b64, 'base64');\n        if (buf.length < 11) return null;\n        const batV = ((buf[0] << 8) | buf[1]) / 1000;\n        const tempRaw = (buf[2] << 24 >> 16) | buf[3];\n        const tempC1 = tempRaw / 10;\n        const adcV = ((buf[4] << 8) | buf[5]) / 1000;\n        // sentinel: disconnected probe\n        if (buf[2] === 0x7F && buf[3] === 0xFF) return { batV, tempC1: null, adcV };\n        return { batV, tempC1, adcV };\n    } catch(e) { return null; }\n}\n\ntry {\n    const data = msg.payload;\n    if (!data || !data.deviceInfo) {\n        node.error(\"Unexpected payload structure\");\n        return null;\n    }\n\n    const devEui = String(data.deviceInfo.devEui || '').toUpperCase();\n    if (!devEui) { node.error(\"Missing devEui\"); return null; }\n\n    const timestamp = data.time\n        ? new Date(data.time).toISOString()\n        : new Date().toISOString();\n\n    let tempC1 = null, batV = null, adcV = null;\n\n    if (data.object) {\n        // ChirpStack codec decoded — use directly\n        const obj = data.object;\n        tempC1 = (typeof obj.TempC1 === 'number') ? obj.TempC1 : null;\n        batV   = (typeof obj.BatV   === 'number') ? obj.BatV   : null;\n        adcV   = (typeof obj.ADC_CH0V === 'number') ? obj.ADC_CH0V : null;\n    } else if (data.data) {\n        // Fallback: decode raw base64 payload\n        const decoded = decodeRawBytes(data.data);\n        if (decoded) { tempC1 = decoded.tempC1; batV = decoded.batV; adcV = decoded.adcV; }\n    }\n\n    // ---- Dendrometer calculation ----\n    let positionMm = null;\n    let dendroValid = null;\n    let deltaMm = null;\n\n    if (adcV !== null) {\n        // Validity: 0–2.6 V ADC; outside this = sensor error or disconnected\n        dendroValid = (adcV >= 0 && adcV <= 2.6) ? 1 : 0;\n\n        if (dendroValid) {\n            // Voltage divider (2x100kOhm) halves wiper voltage, so V_wiper = ADC_V * 2\n            // Potentiometer powered by switched +5 V: position_mm = (V_wiper / 5.0) * 25\n            // Simplified: position_mm = ADC_V * 10\n            positionMm = Math.round(adcV * 10 * 1000) / 1000;\n\n            // Delta from previous valid reading (per-device flow context)\n            const prevKey = 'dendro_prev_' + devEui;\n            const prev = flow.get(prevKey);\n            if (typeof prev === 'number') {\n                deltaMm = Math.round((positionMm - prev) * 1000) / 1000;\n            }\n            flow.set(prevKey, positionMm);\n        }\n    }\n    // ---------------------------------\n\n    msg.formattedData = { timestamp, devEui, tempC1, batV, adcV, positionMm, dendroValid, deltaMm };\n\n    const parts = [];\n    if (tempC1 !== null)     parts.push(`T ${tempC1.toFixed(1)} °C`);\n    if (batV   !== null)     parts.push(`Bat ${batV.toFixed(2)} V`);\n    if (adcV   !== null)     parts.push(`ADC ${adcV.toFixed(3)} V`);\n    if (positionMm !== null) {\n        const tag = dendroValid ? `${positionMm.toFixed(2)} mm` : 'INVALID';\n        parts.push(`Dendro ${tag}`);\n    }\n    node.status({ fill: \"blue\", shape: \"dot\", text: parts.join(\" | \") || \"no data\" });\n\n    return msg;\n} catch(err) {\n    node.error(\"Decode LSN50 error: \" + err.message, msg);\n    return null;\n}",
     "outputs": 1,
     "timeout": "",
     "noerr": 0,
@@ -4032,7 +4032,7 @@
     "type": "function",
     "z": "sys-admin-tab",
     "name": "System Stats",
-    "func": "try {\n  var os  = require('os');\n  var fs  = require('fs');\n\n  var cpuTemp = parseInt(fs.readFileSync('/sys/class/thermal/thermal_zone0/temp', 'utf8').trim()) / 1000;\n  var loadavg = os.loadavg();\n  var totalMem = os.totalmem();\n  var freeMem  = os.freemem();\n  var usedMem  = totalMem - freeMem;\n  var cpuCount = os.cpus().length;\n\n  // Fan detection \u2014 try PWM paths first, then thermal cooling device\n  var fanAvailable = false;\n  var fanMode  = 'none';\n  var fanValue = null;\n  var fanMax   = null;\n  var pwmPaths = [\n    '/sys/devices/platform/cooling_fan/hwmon/hwmon0/pwm1',\n    '/sys/class/hwmon/hwmon0/pwm1'\n  ];\n  for (var i = 0; i < pwmPaths.length; i++) {\n    try {\n      fanValue = parseInt(fs.readFileSync(pwmPaths[i], 'utf8').trim());\n      fanAvailable = true; fanMode = 'pwm'; fanMax = 255;\n      break;\n    } catch(e) {}\n  }\n  if (!fanAvailable) {\n    try {\n      var cp = '/sys/class/thermal/cooling_device0/cur_state';\n      fanValue = parseInt(fs.readFileSync(cp, 'utf8').trim());\n      fanMax   = parseInt(fs.readFileSync(cp.replace('cur_state','max_state'), 'utf8').trim());\n      fanAvailable = true; fanMode = 'cooling';\n    } catch(e) {}\n  }\n\n  msg.payload = {\n    cpu_temp_c:  Math.round(cpuTemp * 10) / 10,\n    mem_total_mb: Math.round(totalMem / 1048576),\n    mem_used_mb:  Math.round(usedMem  / 1048576),\n    mem_free_mb:  Math.round(freeMem  / 1048576),\n    mem_percent:  Math.round((usedMem / totalMem) * 100),\n    load_1:  Math.round(loadavg[0] * 100) / 100,\n    load_5:  Math.round(loadavg[1] * 100) / 100,\n    load_15: Math.round(loadavg[2] * 100) / 100,\n    cpu_count: cpuCount,\n    fan_available: fanAvailable,\n    fan_mode:  fanMode,\n    fan_value: fanValue,\n    fan_max:   fanMax\n  };\n  msg.statusCode = 200;\n} catch(err) {\n  msg.statusCode = 500;\n  msg.payload = { error: err.message };\n}\nreturn msg;",
+    "func": "try {\n  var os  = require('os');\n  var fs  = require('fs');\n\n  var cpuTemp = parseInt(fs.readFileSync('/sys/class/thermal/thermal_zone0/temp', 'utf8').trim()) / 1000;\n  var loadavg = os.loadavg();\n  var totalMem = os.totalmem();\n  var freeMem  = os.freemem();\n  var usedMem  = totalMem - freeMem;\n  var cpuCount = os.cpus().length;\n\n  // Fan detection — try PWM paths first, then thermal cooling device\n  var fanAvailable = false;\n  var fanMode  = 'none';\n  var fanValue = null;\n  var fanMax   = null;\n  var pwmPaths = [\n    '/sys/devices/platform/cooling_fan/hwmon/hwmon0/pwm1',\n    '/sys/class/hwmon/hwmon0/pwm1'\n  ];\n  for (var i = 0; i < pwmPaths.length; i++) {\n    try {\n      fanValue = parseInt(fs.readFileSync(pwmPaths[i], 'utf8').trim());\n      fanAvailable = true; fanMode = 'pwm'; fanMax = 255;\n      break;\n    } catch(e) {}\n  }\n  if (!fanAvailable) {\n    try {\n      var cp = '/sys/class/thermal/cooling_device0/cur_state';\n      fanValue = parseInt(fs.readFileSync(cp, 'utf8').trim());\n      fanMax   = parseInt(fs.readFileSync(cp.replace('cur_state','max_state'), 'utf8').trim());\n      fanAvailable = true; fanMode = 'cooling';\n    } catch(e) {}\n  }\n\n  msg.payload = {\n    cpu_temp_c:  Math.round(cpuTemp * 10) / 10,\n    mem_total_mb: Math.round(totalMem / 1048576),\n    mem_used_mb:  Math.round(usedMem  / 1048576),\n    mem_free_mb:  Math.round(freeMem  / 1048576),\n    mem_percent:  Math.round((usedMem / totalMem) * 100),\n    load_1:  Math.round(loadavg[0] * 100) / 100,\n    load_5:  Math.round(loadavg[1] * 100) / 100,\n    load_15: Math.round(loadavg[2] * 100) / 100,\n    cpu_count: cpuCount,\n    fan_available: fanAvailable,\n    fan_mode:  fanMode,\n    fan_value: fanValue,\n    fan_max:   fanMax\n  };\n  msg.statusCode = 200;\n} catch(err) {\n  msg.statusCode = 500;\n  msg.payload = { error: err.message };\n}\nreturn msg;",
     "outputs": 1,
     "x": 360,
     "y": 80,
@@ -4092,7 +4092,7 @@
     "type": "function",
     "z": "sys-admin-tab",
     "name": "Fan Control",
-    "func": "var auth = msg.req.headers.authorization;\nif (!auth || !auth.startsWith('Bearer ')) {\n  msg.statusCode = 401; msg.payload = { error: 'Unauthorized' }; return msg;\n}\nvar fs   = require('fs');\nvar body = msg.req.body || msg.payload || {};\nvar speed = body.speed;\nif (typeof speed !== 'number' || speed < 0 || speed > 255) {\n  msg.statusCode = 400; msg.payload = { error: 'Provide speed: 0\u2013255' }; return msg;\n}\nspeed = Math.round(speed);\n\nvar pwmPaths    = ['/sys/devices/platform/cooling_fan/hwmon/hwmon0/pwm1','/sys/class/hwmon/hwmon0/pwm1'];\nvar enablePaths = ['/sys/devices/platform/cooling_fan/hwmon/hwmon0/pwm1_enable','/sys/class/hwmon/hwmon0/pwm1_enable'];\nvar success = false;\nfor (var i = 0; i < pwmPaths.length; i++) {\n  try {\n    try { fs.writeFileSync(enablePaths[i], '1'); } catch(e) {}\n    fs.writeFileSync(pwmPaths[i], String(speed));\n    success = true; break;\n  } catch(e) {}\n}\nif (!success) {\n  try {\n    var state = Math.round((speed / 255) * 4);\n    fs.writeFileSync('/sys/class/thermal/cooling_device0/cur_state', String(state));\n    success = true;\n  } catch(e) {}\n}\nif (success) {\n  msg.statusCode = 200; msg.payload = { speed: speed, success: true };\n} else {\n  msg.statusCode = 503; msg.payload = { error: 'Fan control not available on this device' };\n}\nreturn msg;",
+    "func": "var auth = msg.req.headers.authorization;\nif (!auth || !auth.startsWith('Bearer ')) {\n  msg.statusCode = 401; msg.payload = { error: 'Unauthorized' }; return msg;\n}\nvar fs   = require('fs');\nvar body = msg.req.body || msg.payload || {};\nvar speed = body.speed;\nif (typeof speed !== 'number' || speed < 0 || speed > 255) {\n  msg.statusCode = 400; msg.payload = { error: 'Provide speed: 0–255' }; return msg;\n}\nspeed = Math.round(speed);\n\nvar pwmPaths    = ['/sys/devices/platform/cooling_fan/hwmon/hwmon0/pwm1','/sys/class/hwmon/hwmon0/pwm1'];\nvar enablePaths = ['/sys/devices/platform/cooling_fan/hwmon/hwmon0/pwm1_enable','/sys/class/hwmon/hwmon0/pwm1_enable'];\nvar success = false;\nfor (var i = 0; i < pwmPaths.length; i++) {\n  try {\n    try { fs.writeFileSync(enablePaths[i], '1'); } catch(e) {}\n    fs.writeFileSync(pwmPaths[i], String(speed));\n    success = true; break;\n  } catch(e) {}\n}\nif (!success) {\n  try {\n    var state = Math.round((speed / 255) * 4);\n    fs.writeFileSync('/sys/class/thermal/cooling_device0/cur_state', String(state));\n    success = true;\n  } catch(e) {}\n}\nif (success) {\n  msg.statusCode = 200; msg.payload = { speed: speed, success: true };\n} else {\n  msg.statusCode = 503; msg.payload = { error: 'Fan control not available on this device' };\n}\nreturn msg;",
     "outputs": 1,
     "x": 360,
     "y": 240,
@@ -4160,6 +4160,559 @@
     },
     "x": 580,
     "y": 320,
+    "wires": []
+  },
+  {
+    "id": "al-migrate-inject",
+    "type": "inject",
+    "z": "c2b43a6c6e7d2c11",
+    "name": "Migrate users schema",
+    "props": [
+      {
+        "p": "payload"
+      }
+    ],
+    "repeat": "",
+    "crontab": "",
+    "once": true,
+    "onceDelay": "2",
+    "topic": "",
+    "payload": "",
+    "payloadType": "date",
+    "x": 120,
+    "y": 700,
+    "wires": [
+      [
+        "al-migrate-func"
+      ]
+    ]
+  },
+  {
+    "id": "al-migrate-func",
+    "type": "function",
+    "z": "c2b43a6c6e7d2c11",
+    "name": "Build ALTER statements",
+    "func": "return [\n  [\n    { topic: \"ALTER TABLE users ADD COLUMN IF NOT EXISTS server_username TEXT\" },\n    { topic: \"ALTER TABLE users ADD COLUMN IF NOT EXISTS server_password_hash TEXT\" },\n    { topic: \"ALTER TABLE users ADD COLUMN IF NOT EXISTS server_linked_at DATETIME\" },\n    { topic: \"ALTER TABLE users ADD COLUMN IF NOT EXISTS auth_mode TEXT NOT NULL DEFAULT 'local'\" }\n  ]\n];",
+    "outputs": 1,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 350,
+    "y": 700,
+    "wires": [
+      [
+        "al-migrate-db"
+      ]
+    ]
+  },
+  {
+    "id": "al-migrate-db",
+    "type": "sqlite",
+    "z": "c2b43a6c6e7d2c11",
+    "mydb": "734737e846d06893",
+    "sqlquery": "msg.topic",
+    "sql": "",
+    "name": "Run migration",
+    "x": 570,
+    "y": 700,
+    "wires": [
+      [
+        "al-migrate-debug"
+      ]
+    ]
+  },
+  {
+    "id": "al-migrate-debug",
+    "type": "debug",
+    "z": "c2b43a6c6e7d2c11",
+    "name": "debug migration",
+    "active": true,
+    "tosidebar": true,
+    "console": false,
+    "tostatus": false,
+    "complete": "false",
+    "statusVal": "",
+    "statusType": "auto",
+    "x": 770,
+    "y": 700,
+    "wires": []
+  },
+  {
+    "id": "account-link-tab",
+    "type": "tab",
+    "label": "Account Link",
+    "disabled": false,
+    "info": ""
+  },
+  {
+    "id": "al-status-in",
+    "type": "http in",
+    "z": "account-link-tab",
+    "name": "GET /api/account-link/status",
+    "url": "/api/account-link/status",
+    "method": "get",
+    "upload": false,
+    "swaggerDoc": "",
+    "x": 160,
+    "y": 80,
+    "wires": [
+      [
+        "al-status-decode"
+      ]
+    ]
+  },
+  {
+    "id": "al-status-decode",
+    "type": "function",
+    "z": "account-link-tab",
+    "name": "Decode token & build query",
+    "func": "const authHeader = msg.req.headers['authorization'] || '';\nconst token = authHeader.replace('Bearer ', '');\nconst decoded = Buffer.from(token, 'base64').toString('utf8');\nconst username = decoded.split(':')[0];\nflow.set('status_username', username);\nmsg.topic = \"SELECT server_username, server_linked_at, auth_mode FROM users WHERE username = '\" + username.replace(/'/g, \"''\") + \"'\";\nreturn msg;",
+    "outputs": 1,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 440,
+    "y": 80,
+    "wires": [
+      [
+        "al-status-db"
+      ]
+    ]
+  },
+  {
+    "id": "al-status-db",
+    "type": "sqlite",
+    "z": "account-link-tab",
+    "mydb": "734737e846d06893",
+    "sqlquery": "msg.topic",
+    "sql": "",
+    "name": "Lookup user",
+    "x": 680,
+    "y": 80,
+    "wires": [
+      [
+        "al-status-format"
+      ]
+    ]
+  },
+  {
+    "id": "al-status-format",
+    "type": "function",
+    "z": "account-link-tab",
+    "name": "Format status response",
+    "func": "const result = msg.payload;\nif (!result || result.length === 0) {\n  msg.statusCode = 401;\n  msg.payload = { message: 'User not found' };\n  return msg;\n}\nconst user = result[0];\nconst linked = user.auth_mode === 'server';\nmsg.statusCode = 200;\nmsg.payload = {\n  linked: linked,\n  serverUsername: user.server_username || null,\n  linkedAt: user.server_linked_at || null\n};\nreturn msg;",
+    "outputs": 1,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 900,
+    "y": 80,
+    "wires": [
+      [
+        "al-status-resp"
+      ]
+    ]
+  },
+  {
+    "id": "al-status-resp",
+    "type": "http response",
+    "z": "account-link-tab",
+    "name": "Status response",
+    "statusCode": "",
+    "headers": {
+      "Access-Control-Allow-Origin": "*"
+    },
+    "x": 1120,
+    "y": 80,
+    "wires": []
+  },
+  {
+    "id": "al-link-in",
+    "type": "http in",
+    "z": "account-link-tab",
+    "name": "POST /api/account-link",
+    "url": "/api/account-link",
+    "method": "post",
+    "upload": false,
+    "swaggerDoc": "",
+    "x": 140,
+    "y": 220,
+    "wires": [
+      [
+        "al-link-validate"
+      ]
+    ]
+  },
+  {
+    "id": "al-link-validate",
+    "type": "function",
+    "z": "account-link-tab",
+    "name": "Validate & decode token",
+    "func": "const authHeader = msg.req.headers['authorization'] || '';\nconst token = authHeader.replace('Bearer ', '');\nif (!token) {\n  msg.statusCode = 401;\n  msg.payload = { message: 'Unauthorized' };\n  return [null, msg];\n}\nconst decoded = Buffer.from(token, 'base64').toString('utf8');\nconst localUsername = decoded.split(':')[0];\nconst body = msg.payload || {};\nif (!body.serverUrl || !body.action || !body.username || !body.password) {\n  msg.statusCode = 400;\n  msg.payload = { message: 'Missing required fields' };\n  return [null, msg];\n}\nif (body.action === 'register' && !body.email) {\n  msg.statusCode = 400;\n  msg.payload = { message: 'Email required for registration' };\n  return [null, msg];\n}\nflow.set('al_local_username', localUsername);\nflow.set('al_server_url', body.serverUrl);\nflow.set('al_action', body.action);\nflow.set('al_server_username', body.username);\nflow.set('al_server_email', body.email || '');\nflow.set('al_server_password', body.password);\nmsg.topic = \"SELECT id FROM users WHERE username = '\" + localUsername.replace(/'/g, \"''\") + \"'\";\nreturn [msg, null];",
+    "outputs": 2,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 380,
+    "y": 220,
+    "wires": [
+      [
+        "al-link-db-user"
+      ],
+      [
+        "al-link-resp"
+      ]
+    ]
+  },
+  {
+    "id": "al-link-db-user",
+    "type": "sqlite",
+    "z": "account-link-tab",
+    "mydb": "734737e846d06893",
+    "sqlquery": "msg.topic",
+    "sql": "",
+    "name": "Lookup local user",
+    "x": 620,
+    "y": 220,
+    "wires": [
+      [
+        "al-link-build-req"
+      ]
+    ]
+  },
+  {
+    "id": "al-link-build-req",
+    "type": "function",
+    "z": "account-link-tab",
+    "name": "Build server auth request",
+    "func": "const result = msg.payload;\nif (!result || result.length === 0) {\n  msg.statusCode = 401;\n  msg.payload = { message: 'Local user not found' };\n  return [null, msg];\n}\nflow.set('al_local_user_id', result[0].id);\nconst serverUrl = flow.get('al_server_url');\nconst action = flow.get('al_action');\nconst username = flow.get('al_server_username');\nconst email = flow.get('al_server_email');\nconst password = flow.get('al_server_password');\nmsg.url = serverUrl + '/auth/local-sync';\nmsg.method = 'POST';\nmsg.headers = { 'Content-Type': 'application/json' };\nmsg.payload = { action: action, username: username, email: email, password: password };\nreturn [msg, null];",
+    "outputs": 2,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 860,
+    "y": 220,
+    "wires": [
+      [
+        "al-link-server-auth"
+      ],
+      [
+        "al-link-resp"
+      ]
+    ]
+  },
+  {
+    "id": "al-link-server-auth",
+    "type": "http request",
+    "z": "account-link-tab",
+    "name": "POST /auth/local-sync",
+    "method": "use",
+    "ret": "obj",
+    "paytoqs": "ignore",
+    "url": "",
+    "tls": "",
+    "persist": false,
+    "proxy": "",
+    "insecureHTTPParser": false,
+    "authType": "",
+    "senderr": false,
+    "headers": [],
+    "x": 1100,
+    "y": 220,
+    "wires": [
+      [
+        "al-link-handle-auth"
+      ]
+    ]
+  },
+  {
+    "id": "al-link-handle-auth",
+    "type": "function",
+    "z": "account-link-tab",
+    "name": "Handle server auth response",
+    "func": "if (!msg.statusCode || msg.statusCode < 200 || msg.statusCode >= 300) {\n  msg.statusCode = msg.statusCode === 401 ? 401 : 502;\n  msg.payload = { message: 'Server authentication failed' };\n  return [null, msg];\n}\nconst data = msg.payload;\nflow.set('al_token', data.token);\nflow.set('al_password_hash', data.passwordHash);\nflow.set('al_verified_server_username', data.username);\nconst localUserId = flow.get('al_local_user_id');\nmsg.topic = 'SELECT deveui FROM devices WHERE user_id = ' + localUserId;\nreturn [msg, null];",
+    "outputs": 2,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 1340,
+    "y": 220,
+    "wires": [
+      [
+        "al-link-db-devices"
+      ],
+      [
+        "al-link-resp"
+      ]
+    ]
+  },
+  {
+    "id": "al-link-db-devices",
+    "type": "sqlite",
+    "z": "account-link-tab",
+    "mydb": "734737e846d06893",
+    "sqlquery": "msg.topic",
+    "sql": "",
+    "name": "Get local devices",
+    "x": 1560,
+    "y": 220,
+    "wires": [
+      [
+        "al-link-build-claim"
+      ]
+    ]
+  },
+  {
+    "id": "al-link-build-claim",
+    "type": "function",
+    "z": "account-link-tab",
+    "name": "Build bulk claim request",
+    "func": "const devices = msg.payload || [];\nconst serverUrl = flow.get('al_server_url');\nconst token = flow.get('al_token');\nconst deviceEuis = devices.map(function(d) { return d.deveui; });\nflow.set('al_device_euis', deviceEuis);\nmsg.url = serverUrl + '/api/v1/devices/claim-bulk';\nmsg.method = 'POST';\nmsg.headers = { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token };\nmsg.payload = { deviceEuis: deviceEuis };\nreturn msg;",
+    "outputs": 1,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 1780,
+    "y": 220,
+    "wires": [
+      [
+        "al-link-server-claim"
+      ]
+    ]
+  },
+  {
+    "id": "al-link-server-claim",
+    "type": "http request",
+    "z": "account-link-tab",
+    "name": "POST /api/v1/devices/claim-bulk",
+    "method": "use",
+    "ret": "obj",
+    "paytoqs": "ignore",
+    "url": "",
+    "tls": "",
+    "persist": false,
+    "proxy": "",
+    "insecureHTTPParser": false,
+    "authType": "",
+    "senderr": false,
+    "headers": [],
+    "x": 2020,
+    "y": 220,
+    "wires": [
+      [
+        "al-link-handle-claim"
+      ]
+    ]
+  },
+  {
+    "id": "al-link-handle-claim",
+    "type": "function",
+    "z": "account-link-tab",
+    "name": "Handle claim response & build UPDATE",
+    "func": "const claimResult = msg.payload || {};\nconst claimed = claimResult.claimed || [];\nconst skipped = claimResult.skipped || [];\nflow.set('al_claimed', claimed);\nflow.set('al_skipped', skipped);\nconst localUsername = flow.get('al_local_username');\nconst serverUsername = flow.get('al_verified_server_username');\nconst passwordHash = flow.get('al_password_hash');\nconst now = new Date().toISOString();\nmsg.topic = \"UPDATE users SET server_username = '\" + serverUsername.replace(/'/g, \"''\") + \"', server_password_hash = '\" + passwordHash.replace(/'/g, \"''\") + \"', server_linked_at = '\" + now + \"', auth_mode = 'server' WHERE username = '\" + localUsername.replace(/'/g, \"''\") + \"'\";\nreturn msg;",
+    "outputs": 1,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 2260,
+    "y": 220,
+    "wires": [
+      [
+        "al-link-db-update"
+      ]
+    ]
+  },
+  {
+    "id": "al-link-db-update",
+    "type": "sqlite",
+    "z": "account-link-tab",
+    "mydb": "734737e846d06893",
+    "sqlquery": "msg.topic",
+    "sql": "",
+    "name": "Update user auth mode",
+    "x": 2480,
+    "y": 220,
+    "wires": [
+      [
+        "al-link-success"
+      ]
+    ]
+  },
+  {
+    "id": "al-link-success",
+    "type": "function",
+    "z": "account-link-tab",
+    "name": "Format success response",
+    "func": "const serverUsername = flow.get('al_verified_server_username');\nconst claimed = flow.get('al_claimed') || [];\nconst skipped = flow.get('al_skipped') || [];\nmsg.statusCode = 200;\nmsg.payload = {\n  success: true,\n  serverUsername: serverUsername,\n  claimedDevices: claimed,\n  skippedDevices: skipped\n};\nreturn msg;",
+    "outputs": 1,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 2700,
+    "y": 220,
+    "wires": [
+      [
+        "al-link-resp"
+      ]
+    ]
+  },
+  {
+    "id": "al-link-resp",
+    "type": "http response",
+    "z": "account-link-tab",
+    "name": "Link response",
+    "statusCode": "",
+    "headers": {
+      "Access-Control-Allow-Origin": "*",
+      "Access-Control-Allow-Methods": "GET,POST,DELETE,OPTIONS",
+      "Access-Control-Allow-Headers": "Content-Type,Authorization"
+    },
+    "x": 2920,
+    "y": 220,
+    "wires": []
+  },
+  {
+    "id": "al-unlink-in",
+    "type": "http in",
+    "z": "account-link-tab",
+    "name": "DELETE /api/account-link",
+    "url": "/api/account-link",
+    "method": "delete",
+    "upload": false,
+    "swaggerDoc": "",
+    "x": 140,
+    "y": 360,
+    "wires": [
+      [
+        "al-unlink-func"
+      ]
+    ]
+  },
+  {
+    "id": "al-unlink-func",
+    "type": "function",
+    "z": "account-link-tab",
+    "name": "Decode token & build UPDATE",
+    "func": "const authHeader = msg.req.headers['authorization'] || '';\nconst token = authHeader.replace('Bearer ', '');\nconst decoded = Buffer.from(token, 'base64').toString('utf8');\nconst username = decoded.split(':')[0];\nmsg.topic = \"UPDATE users SET auth_mode = 'local', server_username = NULL, server_password_hash = NULL, server_linked_at = NULL WHERE username = '\" + username.replace(/'/g, \"''\") + \"'\";\nreturn msg;",
+    "outputs": 1,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 400,
+    "y": 360,
+    "wires": [
+      [
+        "al-unlink-db"
+      ]
+    ]
+  },
+  {
+    "id": "al-unlink-db",
+    "type": "sqlite",
+    "z": "account-link-tab",
+    "mydb": "734737e846d06893",
+    "sqlquery": "msg.topic",
+    "sql": "",
+    "name": "Update user",
+    "x": 620,
+    "y": 360,
+    "wires": [
+      [
+        "al-unlink-format"
+      ]
+    ]
+  },
+  {
+    "id": "al-unlink-format",
+    "type": "function",
+    "z": "account-link-tab",
+    "name": "Format unlink response",
+    "func": "msg.statusCode = 200;\nmsg.payload = { success: true };\nreturn msg;",
+    "outputs": 1,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 820,
+    "y": 360,
+    "wires": [
+      [
+        "al-unlink-resp"
+      ]
+    ]
+  },
+  {
+    "id": "al-unlink-resp",
+    "type": "http response",
+    "z": "account-link-tab",
+    "name": "Unlink response",
+    "statusCode": "",
+    "headers": {
+      "Access-Control-Allow-Origin": "*"
+    },
+    "x": 1040,
+    "y": 360,
+    "wires": []
+  },
+  {
+    "id": "al-options-in",
+    "type": "http in",
+    "z": "account-link-tab",
+    "name": "OPTIONS /api/account-link",
+    "url": "/api/account-link",
+    "method": "options",
+    "upload": false,
+    "swaggerDoc": "",
+    "x": 140,
+    "y": 460,
+    "wires": [
+      [
+        "al-options-func"
+      ]
+    ]
+  },
+  {
+    "id": "al-options-func",
+    "type": "function",
+    "z": "account-link-tab",
+    "name": "CORS preflight",
+    "func": "msg.statusCode = 204;\nmsg.payload = '';\nreturn msg;",
+    "outputs": 1,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 380,
+    "y": 460,
+    "wires": [
+      [
+        "al-options-resp"
+      ]
+    ]
+  },
+  {
+    "id": "al-options-resp",
+    "type": "http response",
+    "z": "account-link-tab",
+    "name": "CORS response",
+    "statusCode": "",
+    "headers": {
+      "Access-Control-Allow-Origin": "*",
+      "Access-Control-Allow-Methods": "GET,POST,DELETE,OPTIONS",
+      "Access-Control-Allow-Headers": "Content-Type,Authorization"
+    },
+    "x": 580,
+    "y": 460,
     "wires": []
   }
 ]

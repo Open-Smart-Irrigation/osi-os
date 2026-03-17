@@ -1,0 +1,44 @@
+{
+  "title": "Yungibwa ku OSI Server",
+  "navLink": "OSI Server",
+  "backToDashboard": "Ddayo ku Dashboard",
+  "status": {
+    "linked": "Akawunti ya ku OSI Server eyungibbwa",
+    "notLinked": "Tewali kugyungibbwa ku OSI Server",
+    "linkedAs": "Eyungibbwa nga: {{username}}",
+    "linkedSince": "Okuva: {{date}}"
+  },
+  "form": {
+    "serverUrl": "Endabirwamu ya OSI Server",
+    "actionLabel": "Kola",
+    "actionLogin": "Yunga akawunti eyaliwo",
+    "actionRegister": "Tonda akawunti empya",
+    "username": "Erinnya ery'omukozesa ku server",
+    "email": "Email",
+    "password": "Ekigambo ky'okulinda",
+    "submit": "Yungibwa ku OSI Server",
+    "submitting": "Kiyungibwa...",
+    "cancel": "Sazaamu"
+  },
+  "warning": {
+    "title": "Kigambiddwa",
+    "message": "Oluvannyuma lw'okuyungibwa, oteekwa okozesa ebintu by'okuyingira by'OSI Server. Ekigambo kyo ky'okulinda eky'omu bitundu kijja kussibwako ekigambo ky'okulinda eky'oku server.",
+    "proceed": "Komezagana"
+  },
+  "success": {
+    "title": "Kiyungibwa bulungi",
+    "message": "Akawunti yo kati eyungiddwa nga {{username}} ku OSI Server.",
+    "claimedDevices": "Ebikozesebwa ebyategekebwa ku server: {{count}}",
+    "skippedDevices": "Ebikozesebwa ebyasazibwaawo (byali byatengeddwa): {{count}}"
+  },
+  "unlink": {
+    "button": "Gyamu ku OSI Server",
+    "confirm": "Oli mukakafu? Oluvannyuma lw'okugyamu, oteekwa okozesa ekigambo kyo ky'okulinda eky'omu bitundu ekya mazima.",
+    "success": "Bagyiddwa ku OSI Server"
+  },
+  "errors": {
+    "networkError": "Teyinziddwa kutuuka ku OSI Server. Kebera endabirwamu n'okuteekateeka kwo kw'omukutu.",
+    "authFailed": "Ebintu by'okuyingira by'OSI Server si bya mazima.",
+    "generic": "Waliwo ensobi. Gezaako nate."
+  }
+}

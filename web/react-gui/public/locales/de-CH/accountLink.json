@@ -1,0 +1,44 @@
+{
+  "title": "Mit OSI Server verbinden",
+  "navLink": "OSI Server",
+  "backToDashboard": "Zurück zum Dashboard",
+  "status": {
+    "linked": "Konto mit OSI Server verknüpft",
+    "notLinked": "Nicht mit OSI Server verbunden",
+    "linkedAs": "Verknüpft als: {{username}}",
+    "linkedSince": "Seit: {{date}}"
+  },
+  "form": {
+    "serverUrl": "OSI Server URL",
+    "actionLabel": "Aktion",
+    "actionLogin": "Bestehendes Konto verknüpfen",
+    "actionRegister": "Neues Konto erstellen",
+    "username": "Server-Benutzername",
+    "email": "E-Mail",
+    "password": "Passwort",
+    "submit": "Mit OSI Server verbinden",
+    "submitting": "Verbinden...",
+    "cancel": "Abbrechen"
+  },
+  "warning": {
+    "title": "Wichtig",
+    "message": "Nach der Verknüpfung müssen Sie Ihre OSI Server-Anmeldedaten verwenden. Ihr lokales Passwort wird durch den Server-Passwort-Hash ersetzt.",
+    "proceed": "Fortfahren"
+  },
+  "success": {
+    "title": "Erfolgreich verbunden",
+    "message": "Ihr Konto ist jetzt als {{username}} auf dem OSI Server verknüpft.",
+    "claimedDevices": "Auf dem Server beanspruchte Geräte: {{count}}",
+    "skippedDevices": "Übersprungene Geräte (bereits beansprucht): {{count}}"
+  },
+  "unlink": {
+    "button": "Verbindung zum OSI Server trennen",
+    "confirm": "Sind Sie sicher? Nach dem Trennen müssen Sie Ihr lokales Originalpasswort verwenden.",
+    "success": "Verbindung zum OSI Server getrennt"
+  },
+  "errors": {
+    "networkError": "OSI Server nicht erreichbar. Prüfen Sie die URL und Ihre Internetverbindung.",
+    "authFailed": "Ungültige OSI Server-Anmeldedaten.",
+    "generic": "Ein Fehler ist aufgetreten. Bitte versuchen Sie es erneut."
+  }
+}

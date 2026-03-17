@@ -1,0 +1,44 @@
+{
+  "title": "Connect to OSI Server",
+  "navLink": "OSI Server",
+  "backToDashboard": "Back to Dashboard",
+  "status": {
+    "linked": "Account linked to OSI Server",
+    "notLinked": "Not connected to OSI Server",
+    "linkedAs": "Linked as: {{username}}",
+    "linkedSince": "Since: {{date}}"
+  },
+  "form": {
+    "serverUrl": "OSI Server URL",
+    "actionLabel": "Action",
+    "actionLogin": "Link existing account",
+    "actionRegister": "Create new account",
+    "username": "Server Username",
+    "email": "Email",
+    "password": "Password",
+    "submit": "Connect to OSI Server",
+    "submitting": "Connecting...",
+    "cancel": "Cancel"
+  },
+  "warning": {
+    "title": "Important",
+    "message": "After linking, you must use your OSI Server credentials to log in. Your local password will be replaced by the server password hash.",
+    "proceed": "Proceed"
+  },
+  "success": {
+    "title": "Successfully Connected",
+    "message": "Your account is now linked as {{username}} on OSI Server.",
+    "claimedDevices": "Devices claimed on server: {{count}}",
+    "skippedDevices": "Devices skipped (already claimed): {{count}}"
+  },
+  "unlink": {
+    "button": "Disconnect from OSI Server",
+    "confirm": "Are you sure? After disconnecting, you must use your original local password to log in.",
+    "success": "Disconnected from OSI Server"
+  },
+  "errors": {
+    "networkError": "Cannot reach OSI Server. Check the URL and your internet connection.",
+    "authFailed": "Invalid OSI Server credentials.",
+    "generic": "An error occurred. Please try again."
+  }
+}

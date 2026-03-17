@@ -1,4 +1,5 @@
 import React, { useState, useMemo } from 'react';
+import { Link } from 'react-router-dom';
 import useSWR from 'swr';
 import { devicesAPI, irrigationZonesAPI } from '../services/api';
 import { useAuth } from '../contexts/AuthContext';
@@ -113,6 +114,13 @@ export const FarmingDashboard: React.FC = () => {
                 <span className="text-2xl">+</span>
                 {t('addDevice')}
               </button>
+              <Link
+                to="/account-link"
+                className="bg-[var(--secondary-bg)] hover:bg-[var(--border)] text-[var(--text)] font-bold text-lg px-6 py-3 touch-target rounded-lg transition-colors flex items-center gap-2"
+              >
+                <span>☁</span>
+                OSI Server
+              </Link>
               <button
                 onClick={logout}
                 className="bg-[var(--secondary-bg)] hover:bg-[var(--border)] text-[var(--text)] font-bold text-lg px-6 py-3 touch-target rounded-lg transition-colors"

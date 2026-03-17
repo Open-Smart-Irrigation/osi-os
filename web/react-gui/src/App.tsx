@@ -4,6 +4,7 @@ import { PrivateRoute } from './components/PrivateRoute';
 import { Login } from './pages/Login';
 import { Register } from './pages/Register';
 import { FarmingDashboard } from './pages/FarmingDashboard';
+import { AccountLink } from './pages/AccountLink';
 
 function App() {
   return (
@@ -20,6 +21,15 @@ function App() {
             element={
               <PrivateRoute>
                 <FarmingDashboard />
+              </PrivateRoute>
+            }
+          />
+
+          <Route
+            path="/account-link"
+            element={
+              <PrivateRoute>
+                <AccountLink />
               </PrivateRoute>
             }
           />

@@ -1,0 +1,44 @@
+{
+  "title": "Conectar ao OSI Server",
+  "navLink": "OSI Server",
+  "backToDashboard": "Voltar ao painel",
+  "status": {
+    "linked": "Conta vinculada ao OSI Server",
+    "notLinked": "Não conectado ao OSI Server",
+    "linkedAs": "Vinculado como: {{username}}",
+    "linkedSince": "Desde: {{date}}"
+  },
+  "form": {
+    "serverUrl": "URL do servidor OSI",
+    "actionLabel": "Ação",
+    "actionLogin": "Vincular conta existente",
+    "actionRegister": "Criar nova conta",
+    "username": "Nome de utilizador do servidor",
+    "email": "E-mail",
+    "password": "Palavra-passe",
+    "submit": "Conectar ao OSI Server",
+    "submitting": "A conectar...",
+    "cancel": "Cancelar"
+  },
+  "warning": {
+    "title": "Importante",
+    "message": "Após a vinculação, deve usar as suas credenciais OSI Server para iniciar sessão. A sua palavra-passe local será substituída pelo hash do servidor.",
+    "proceed": "Prosseguir"
+  },
+  "success": {
+    "title": "Conectado com sucesso",
+    "message": "A sua conta está agora vinculada como {{username}} no OSI Server.",
+    "claimedDevices": "Dispositivos reclamados no servidor: {{count}}",
+    "skippedDevices": "Dispositivos ignorados (já reclamados): {{count}}"
+  },
+  "unlink": {
+    "button": "Desligar do OSI Server",
+    "confirm": "Tem a certeza? Após desligar, deve usar a sua palavra-passe local original.",
+    "success": "Desligado do OSI Server"
+  },
+  "errors": {
+    "networkError": "Não foi possível alcançar o OSI Server. Verifique o URL e a sua ligação à Internet.",
+    "authFailed": "Credenciais OSI Server inválidas.",
+    "generic": "Ocorreu um erro. Por favor, tente novamente."
+  }
+}
