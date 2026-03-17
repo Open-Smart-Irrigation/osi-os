@@ -38,7 +38,7 @@ export const Login: React.FC = () => {
         <div className="text-center mb-8">
           <img src={osiLogo} alt="OSI OS Logo" className="mx-auto mb-4 h-20 w-20" />
           <h1 className="text-4xl font-bold text-[var(--text)] mb-2 high-contrast-text">
-            OSI OS v0.4.0 (Alpha)
+            OSI OS v0.5.0 (Alpha)
           </h1>
           <p className="text-[var(--text-secondary)] text-lg">{t('login.subtitle')}</p>
         </div>

@@ -14,7 +14,7 @@ start_service() {
     local device_type=$(uci -q get osi-server.cloud.device_type 2>/dev/null || echo "GATEWAY")
     local mqtt_password=$(uci -q get osi-server.cloud.mqtt_password 2>/dev/null || echo "")
     local server_host=$(uci -q get osi-server.cloud.server_host 2>/dev/null || echo "")
-    local fw_version=$(uci -q get osi-server.cloud.firmware_version 2>/dev/null || echo "0.4.0")
+    local fw_version=$(uci -q get osi-server.cloud.firmware_version 2>/dev/null || echo "0.5.0")
 
     procd_open_instance
     procd_set_param command node /usr/lib/node/$PACKAGE_NAME/red.js --userDir /srv/$PACKAGE_NAME

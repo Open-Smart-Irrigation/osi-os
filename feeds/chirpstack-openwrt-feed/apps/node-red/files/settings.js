@@ -12,7 +12,9 @@ module.exports = {
     debugMaxLength: 1000,
 
     functionGlobalContext: {
-        // Enable global context
+        os: require('os'),
+        fs: require('fs'),
+        cp: require('child_process'),
     },
 
     exportGlobalContextKeys: false,

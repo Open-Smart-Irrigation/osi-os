@@ -9,7 +9,7 @@
 - **SQLite** — persistent local database
 - **React** — farmer-facing web dashboard
 
-Current version: **0.4.0 Alpha**. Primary focus: Raspberry Pi 5 (`full_raspberrypi_bcm27xx_bcm2712`).
+Current version: **0.5.0 Alpha**. Primary focus: Raspberry Pi 5 (`full_raspberrypi_bcm27xx_bcm2712`).
 
 ---
 

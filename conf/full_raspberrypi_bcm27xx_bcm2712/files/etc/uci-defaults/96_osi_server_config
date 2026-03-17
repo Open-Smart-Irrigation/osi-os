@@ -11,7 +11,7 @@ set osi-server.cloud=osi_server
 set osi-server.cloud.enabled=0
 set osi-server.cloud.device_eui=$ETH_MAC
 set osi-server.cloud.device_type=GATEWAY
-set osi-server.cloud.firmware_version=0.4.0
+set osi-server.cloud.firmware_version=0.5.0
 set osi-server.cloud.server_host=
 set osi-server.cloud.mqtt_password=
 commit osi-server
