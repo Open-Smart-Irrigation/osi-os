@@ -1,0 +1,36 @@
+#!/bin/sh
+# Tailscale first-boot setup
+# Reads auth key from /etc/tailscale/authkey (provisioned at flash time)
+# If no key is present, Tailscale is installed but not connected — operator
+# can manually run: tailscale up --authkey=<key>
+
+AUTHKEY_FILE="/etc/tailscale/authkey"
+HOSTNAME=$(uci -q get system.@system[0].hostname 2>/dev/null || echo "osi-device")
+
+if [ ! -f "$AUTHKEY_FILE" ]; then
+    logger -t tailscale-init "No authkey found at $AUTHKEY_FILE — skipping auto-connect"
+    exit 0
+fi
+
+AUTHKEY=$(cat "$AUTHKEY_FILE" | tr -d '[:space:]')
+
+if [ -z "$AUTHKEY" ]; then
+    logger -t tailscale-init "Authkey file is empty — skipping auto-connect"
+    exit 0
+fi
+
+# Wait for network to be up
+for i in $(seq 1 30); do
+    if ping -c1 -W2 8.8.8.8 > /dev/null 2>&1; then
+        break
+    fi
+    sleep 2
+done
+
+tailscale up \
+    --authkey="$AUTHKEY" \
+    --hostname="$HOSTNAME" \
+    --advertise-tags="tag:osi-device" \
+    --accept-dns=false \
+    && logger -t tailscale-init "Tailscale connected as $HOSTNAME" \
+    || logger -t tailscale-init "Tailscale up failed — check key and connectivity"

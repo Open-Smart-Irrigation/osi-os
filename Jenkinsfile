@@ -124,15 +124,13 @@ EOF
                     PATCH_DIR="${WORKSPACE}/conf/${TARGET_ENV}/patches"
                     if [ -d "$PATCH_DIR" ] && [ -f "$PATCH_DIR/series" ]; then
                         echo "=== Applying patches from ${TARGET_ENV} ==="
-                        while IFS= read -r patchfile; do
-                            # Skip empty lines and comments
-                            case "$patchfile" in ''|\#*) continue ;; esac
+                        grep -v '^[[:space:]]*#' "$PATCH_DIR/series" | grep -v '^[[:space:]]*$' | while IFS= read -r patchfile; do
                             echo "Applying $patchfile..."
                             if ! patch -p0 --forward -i "$PATCH_DIR/$patchfile"; then
                                 # --forward returns 1 if already applied
                                 echo "  (patch already applied or skipped)"
                             fi
-                        done < "$PATCH_DIR/series"
+                        done
                         echo "✓ Patches applied"
                     else
                         echo "⚠️ No patches directory or series file for ${TARGET_ENV}"
