@@ -213,15 +213,22 @@ ssh root@<pi-ip> 'opkg update && opkg install tailscale'
 ssh root@<pi-ip> '/etc/init.d/tailscale enable && /etc/init.d/tailscale start'
 ```
 
+Then open the firewall to allow inbound traffic on the Tailscale interface (OpenWrt drops it by default):
+
+```bash
+ssh root@<pi-ip> "printf '#!/bin/sh\nnft insert rule inet fw4 input iifname \"tailscale0\" accept comment \"tailscale-allow\"\n' > /etc/tailscale-firewall.sh && chmod +x /etc/tailscale-firewall.sh"
+ssh root@<pi-ip> "uci add firewall include && uci set firewall.@include[-1].path='/etc/tailscale-firewall.sh' && uci set firewall.@include[-1].type='script' && uci commit firewall && /etc/init.d/firewall restart"
+```
+
 Then connect the device to your Tailscale network:
 
 ```bash
 ssh root@<pi-ip> 'tailscale up --accept-dns=false --hostname=<device-name>'
 ```
 
-Visit the auth URL printed in the output to approve the device in your Tailscale admin console. Once approved, the device is reachable at its Tailscale IP from anywhere on your tailnet.
+Visit the auth URL printed in the output to approve the device in your Tailscale admin console. Once approved, the device is reachable at its Tailscale IP from anywhere on your tailnet — including via SSH: `ssh root@<tailscale-ip>`.
 
-> **State persistence:** Tailscale stores its state at `/etc/tailscale/tailscaled.state` on the overlayfs — it survives reboots and stays connected automatically.
+> **State persistence:** Tailscale stores its state at `/etc/tailscale/tailscaled.state` on the overlayfs — it survives reboots and stays connected automatically. The firewall rule is re-applied on every firewall restart via the UCI include.
 
 ### Step 5 — Restart Node-RED
 
