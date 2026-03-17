@@ -204,15 +204,34 @@ ssh $PI 'mkdir -p /usr/lib/node-red/gui'
 scp -r web/react-gui/build/* $PI:/usr/lib/node-red/gui/
 ```
 
-### Step 4 — Restart Node-RED
+### Step 4 — Install Tailscale (remote access)
+
+Tailscale provides persistent SSH access to field-deployed devices without needing to know their local IP or be on the same network.
+
+```bash
+ssh root@<pi-ip> 'opkg update && opkg install tailscale'
+ssh root@<pi-ip> '/etc/init.d/tailscale enable && /etc/init.d/tailscale start'
+```
+
+Then connect the device to your Tailscale network:
+
+```bash
+ssh root@<pi-ip> 'tailscale up --accept-dns=false --hostname=<device-name>'
+```
+
+Visit the auth URL printed in the output to approve the device in your Tailscale admin console. Once approved, the device is reachable at its Tailscale IP from anywhere on your tailnet.
+
+> **State persistence:** Tailscale stores its state at `/etc/tailscale/tailscaled.state` on the overlayfs — it survives reboots and stays connected automatically.
+
+### Step 5 — Restart Node-RED
 
 ```bash
 ssh root@<pi-ip> '/etc/init.d/node-red restart'
 ```
 
-### Step 5 — Open the UI
+### Step 6 — Open the UI
 
-Navigate to `http://<pi-ip>:1880/gui` in a browser.
+Navigate to `http://<pi-ip>:1880/gui` in a browser (use the Tailscale IP for remote access).
 
 ---
 
