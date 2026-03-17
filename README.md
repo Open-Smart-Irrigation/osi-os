@@ -1,5 +1,7 @@
 # OSI OS — Open Smart Irrigation OS
 
+**v0.5.0 Alpha**
+
 OSI OS is an open-source, offline-first smart irrigation platform for smallholder farmers. It runs on a Raspberry Pi 5 LoRaWAN gateway and combines soil sensing, automated irrigation scheduling, and a farmer-facing web dashboard — all without requiring internet connectivity.
 
 Built on [ChirpStack Gateway OS](https://www.chirpstack.io/docs/chirpstack-gateway-os/) (OpenWrt 24.10).
@@ -16,6 +18,9 @@ Built on [ChirpStack Gateway OS](https://www.chirpstack.io/docs/chirpstack-gatew
 - **Multi-user support** — individual user accounts per device
 - **Offline-first** — fully functional without internet; cloud sync optional
 - **Sensor data export** — download historical readings as CSV or raw SQLite
+- **OSI Cloud integration** — remote monitoring and gateway control via OSI Server; fan speed control and reboot from anywhere
+- **Dragino LSN50V2 support** — external temperature (DS18B20) and ADC/dendrometer sensor node
+- **Raspberry Pi system monitoring** — CPU temperature, memory usage, CPU load, and fan speed visible in the web dashboard
 
 ---
 
@@ -31,7 +36,11 @@ Node-RED  (localhost:1880)
         ↕ SQLite  (/data/db/farming.db)
 ChirpStack  (LoRaWAN network server, localhost:8080)
         ↕ LoRa radio
-Field devices  (soil sensors, smart valves)
+Field devices  (KIWI soil sensors, Strega valves, Dragino LSN50V2)
+
+        ↕ MQTT over WebSocket (wss, port 443)
+OSI Server  (optional cloud — remote monitoring & control)
+  └── Web dashboard — multi-device overview, fan control, reboot
 ```
 
 ---

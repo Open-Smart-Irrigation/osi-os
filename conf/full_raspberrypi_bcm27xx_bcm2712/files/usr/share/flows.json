@@ -3216,7 +3216,7 @@
     "name": "OSI Cloud Broker",
     "broker": "wss://server.opensmartirrigation.org/mqtt",
     "port": "443",
-    "clientid": "device_88A29E8D5F67",
+    "clientid": "device_${DEVICE_EUI}",
     "autoConnect": true,
     "usetls": false,
     "protocolVersion": "5",
@@ -3237,8 +3237,8 @@
     "userProps": "",
     "sessionExpiry": "",
     "credentials": {
-      "user": "88A29E8D5F67",
-      "password": "YAQxqhMk5vTz7cXcMhkMQ0"
+      "user": "${DEVICE_EUI}",
+      "password": "${DEVICE_MQTT_PASSWORD}"
     }
   },
   {
@@ -3366,7 +3366,7 @@
     "type": "mqtt in",
     "z": "93b1537a596e0e6d",
     "name": "Commands from Cloud",
-    "topic": "devices/${DEVICE_EUI}/commands",
+    "topic": "devices/0016C001F11766E7/commands",
     "qos": "1",
     "datatype": "json",
     "broker": "ec43625ea99685a6",
