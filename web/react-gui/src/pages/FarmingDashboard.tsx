@@ -94,7 +94,7 @@ export const FarmingDashboard: React.FC = () => {
           <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
             <div>
               <h1 className="text-4xl font-bold text-[var(--header-text)] high-contrast-text">
-                {t('title')}
+                OSI OS Dashboard
               </h1>
               <p className="text-[var(--header-subtext)] text-lg mt-1">{t('welcome', { username })}</p>
             </div>
