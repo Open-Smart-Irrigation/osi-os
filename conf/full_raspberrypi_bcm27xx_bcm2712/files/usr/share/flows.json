@@ -182,7 +182,7 @@
     "type": "function",
     "z": "auth-tab",
     "name": "Login User",
-    "func": "// Extract username and password from request\nconst { username, password } = msg.payload;\n\nif (!username || !password) {\n  msg.statusCode = 400;\n  msg.payload = { message: 'Username and password are required' };\n  return [null, msg];\n}\n\n// Store in context for validation\nflow.set('login_username', username);\nflow.set('login_password', password);\n\n// Query for user\nmsg.topic = `SELECT * FROM users WHERE username = '${username.replace(/'/g, \"''\")}'`;\nmsg.checkType = 'login';\nreturn [msg, null];",
+    "func": "// Extract username and password from request\nconst { username, password } = msg.payload;\n\nif (!username || !password) {\n  msg.statusCode = 400;\n  msg.payload = { message: 'Username and password are required' };\n  return [null, msg];\n}\n\n// Store in context for validation\nflow.set('login_username', username);\nflow.set('login_password', password);\n\n// Query for user by local username or linked cloud username\nmsg.topic = `SELECT * FROM users WHERE username = '${username.replace(/'/g, \"''\")}' OR server_username = '${username.replace(/'/g, \"''\")}'`;\nmsg.checkType = 'login';\nreturn [msg, null];",
     "outputs": 2,
     "noerr": 0,
     "initialize": "",
