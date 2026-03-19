@@ -11,6 +11,8 @@ module.exports = {
     serialReconnectTime: 15000,
     debugMaxLength: 1000,
 
+    functionExternalModules: true,
+
     functionGlobalContext: {
         os: require('os'),
         fs: require('fs'),
