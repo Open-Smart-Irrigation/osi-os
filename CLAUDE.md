@@ -82,7 +82,7 @@ osi-os/
 | Node-RED flows | `/srv/node-red/flows.json` |
 | SQLite database | `/data/db/farming.db` |
 | React GUI static files | `/usr/lib/node-red/gui/` |
-| Node-RED settings | `/var/lib/node-red/.node-red/settings.js` |
+| Node-RED settings | `/srv/node-red/settings.js` |
 | Node-RED init script | `/etc/init.d/node-red` |
 | Node-RED start/stop | `/etc/init.d/node-red start` / `stop` |
 | Web UI | `http://<device-ip>:1880/gui` |
