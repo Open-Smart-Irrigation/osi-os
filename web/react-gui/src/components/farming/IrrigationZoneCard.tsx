@@ -6,6 +6,7 @@ import { DraginoTempCard } from './DraginoTempCard';
 import { StregaValveCard } from './StregaValveCard';
 import { ScheduleSection } from './ScheduleSection';
 import { AssignDeviceModal } from './AssignDeviceModal';
+import { DendrometerSection } from './dendrometer/DendrometerSection';
 import { useTranslation } from 'react-i18next';
 
 interface IrrigationZoneCardProps {
@@ -129,6 +130,9 @@ export const IrrigationZoneCard: React.FC<IrrigationZoneCardProps> = ({
 
       {/* Schedule Section */}
       <ScheduleSection zoneId={zone.id} zoneName={zone.name} />
+
+      {/* Dendrometer Monitoring Section */}
+      <DendrometerSection zone={zone} devices={lsn50Nodes} />
 
       {/* Devices in Zone */}
       {devices.length > 0 ? (

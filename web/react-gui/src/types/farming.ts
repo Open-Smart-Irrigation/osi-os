@@ -107,3 +107,54 @@ export interface IrrigationZone {
 export interface CreateZoneRequest {
   name: string;
 }
+
+// ---- Dendrometer analytics types ----
+
+export type StressLevel = 'none' | 'mild' | 'moderate' | 'significant' | 'severe';
+export type IrrigationAction = 'decrease_10' | 'maintain' | 'increase_10' | 'increase_20' | 'emergency_irrigate';
+export type DataQuality = 'good' | 'unreliable' | 'insufficient';
+
+/** One computed day of dendrometer indicators for a single device */
+export interface DendroDaily {
+  id: number;
+  deveui: string;
+  date: string;                      // YYYY-MM-DD
+  d_max_um: number | null;
+  d_min_um: number | null;
+  mds_um: number | null;             // Maximum Daily Shrinkage
+  tgr_um: number | null;             // Trunk Growth Rate (vs yesterday's D_max)
+  tgr_smoothed_um: number | null;    // 3-day smoothed TGR
+  twd_um: number | null;             // Tree Water Deficit (30-day peak − today D_max)
+  dr_um: number | null;              // Daily Recovery (today D_max − yesterday D_min)
+  recovery_delta_um: number | null;  // 7-day avg DR − 7-day avg MDS
+  signal_intensity: number | null;   // MDS_tree / MDS_reference
+  stress_level: StressLevel;
+  data_quality: DataQuality;
+  valid_readings_count: number;
+  computed_at: string;
+}
+
+/** Zone-level daily irrigation recommendation */
+export interface ZoneRecommendation {
+  id: number;
+  zone_id: number;
+  date: string;
+  zone_stress_summary: StressLevel;
+  rainfall_mm: number;
+  water_delivered_liters: number;
+  irrigation_action: IrrigationAction;
+  action_reasoning: string;
+  computed_at: string;
+}
+
+/** One raw dendrometer reading from dendrometer_readings table */
+export interface DendroReading {
+  id: number;
+  deveui: string;
+  position_um: number;
+  adc_v: number;
+  bat_v: number | null;
+  is_valid: number;
+  is_outlier: number;
+  recorded_at: string;
+}
