@@ -5053,5 +5053,158 @@
       ]
     ],
     "func": "msg.statusCode=204;msg.payload='';msg.headers={'Access-Control-Allow-Origin':'*','Access-Control-Allow-Methods':'GET,PUT,POST,DELETE,OPTIONS','Access-Control-Allow-Headers':'Authorization,Content-Type'};return msg;"
+  },
+  {
+    "id": "dendro-live-sim-tab",
+    "type": "tab",
+    "label": "Dendro Live Sim",
+    "disabled": false,
+    "info": "8-tree dendrometer live simulation — 4 control reference + 4 monitored irrigated trees"
+  },
+  {
+    "id": "lsn50-sim-link-in",
+    "type": "link in",
+    "z": "lsn50-tab",
+    "name": "LSN50 SIM IN",
+    "links": [
+      "sim-dendro-link-out"
+    ],
+    "x": 140,
+    "y": 460,
+    "wires": [
+      [
+        "lsn50-decode-fn"
+      ]
+    ]
+  },
+  {
+    "id": "sim-dendro-inject-live",
+    "type": "inject",
+    "z": "dendro-live-sim-tab",
+    "name": "LSN50 DENDRO LIVE – 10min",
+    "props": [
+      {
+        "p": "payload"
+      }
+    ],
+    "repeat": "600",
+    "crontab": "",
+    "once": true,
+    "onceDelay": 2,
+    "topic": "",
+    "payload": "",
+    "payloadType": "date",
+    "x": 200,
+    "y": 400,
+    "wires": [
+      [
+        "sim-dendro-fn-live"
+      ]
+    ]
+  },
+  {
+    "id": "sim-dendro-fn-live",
+    "type": "function",
+    "z": "dendro-live-sim-tab",
+    "name": "DENDRO TREE UPLINK SIM",
+    "func": "// DENDRO TREE UPLINK SIM — 8 LSN50 trees, fires every 10 min\n// Writes device_data + dendrometer_readings directly via sqlite3\n// (bypasses MQTT pipeline to avoid SQLite concurrency issues)\n//\n// 4 control reference trees (is_reference_tree=1): stable, small MDS baseline\n// 4 monitored irrigated trees (is_reference_tree=0): amplitude grows with stress\n\nreturn (async () => {\n  const REF_AMP = 80; // µm — reference tree baseline amplitude\n\n  const TREES = [\n    { key: 'sim_ctl_01', baseMm: 14.8, ampUm: REF_AMP, ampGrowUmDay: 0,   growUmDay:  5 },\n    { key: 'sim_ctl_02', baseMm: 15.5, ampUm: REF_AMP, ampGrowUmDay: 0,   growUmDay:  4 },\n    { key: 'sim_ctl_03', baseMm: 13.2, ampUm: REF_AMP, ampGrowUmDay: 0,   growUmDay:  6 },\n    { key: 'sim_ctl_04', baseMm: 16.8, ampUm: REF_AMP, ampGrowUmDay: 0,   growUmDay:  3 },\n    { key: 'sim_irr_01', baseMm: 14.0, ampUm: REF_AMP, ampGrowUmDay: 0,   growUmDay: 15 },\n    { key: 'sim_irr_02', baseMm: 15.2, ampUm: REF_AMP, ampGrowUmDay: 0.5, growUmDay: 12 },\n    { key: 'sim_irr_03', baseMm: 13.5, ampUm: REF_AMP, ampGrowUmDay: 0.9, growUmDay: 18 },\n    { key: 'sim_irr_04', baseMm: 16.0, ampUm: REF_AMP, ampGrowUmDay: 1.6, growUmDay: 10 },\n  ];\n\n  function hash32(str) {\n    let h = 0x811c9dc5;\n    for (let i = 0; i < str.length; i++) { h ^= str.charCodeAt(i); h = (h * 0x01000193) >>> 0; }\n    return h >>> 0;\n  }\n  function makeDevEui(name) {\n    const h1 = hash32('A|'+name), h2 = hash32('B|'+name);\n    const h3 = hash32('C|'+name), h4 = hash32('D|'+name);\n    return ((h1^(h3>>>1))>>>0).toString(16).padStart(8,'0').toUpperCase() +\n           ((h2^(h4>>>1))>>>0).toString(16).padStart(8,'0').toUpperCase();\n  }\n\n  const EPOCH_MS = (() => {\n    const d = new Date(Date.now() - 30 * 86400000);\n    d.setUTCHours(0,0,0,0);\n    return d.getTime();\n  })();\n\n  function getPosUm(tree, nowMs) {\n    const elapsed  = (nowMs - EPOCH_MS) / 1000;\n    const dayFrac  = elapsed / 86400;\n    const hourFrac = (elapsed % 86400) / 3600;\n    const growth   = tree.growUmDay * dayFrac;\n    const effAmp   = tree.ampUm + (tree.ampGrowUmDay || 0) * dayFrac;\n    let diurnal = 0;\n    if (hourFrac >= 6 && hourFrac <= 18)\n      diurnal = effAmp * Math.sin(Math.PI * (hourFrac - 6) / 12);\n    const noise = 8 * Math.sin(elapsed * 0.017) + 5 * Math.sin(elapsed * 0.071);\n    return Math.round(tree.baseMm * 1000 + growth - diurnal + noise);\n  }\n\n  function n(v) { return (v===null||v===undefined||!isFinite(Number(v))) ? 'NULL' : String(Number(v)); }\n  function s(v) { return (v===null||v===undefined) ? 'NULL' : \"'\"+String(v).replace(/'/g,\"''\")+\"'\"; }\n\n  const _db  = new sqlite3.Database('/data/db/farming.db');\n  const exec = sql => new Promise((res,rej) => _db.run(sql, e => e ? rej(e) : res()));\n  const close = () => new Promise(res => _db.close(() => res()));\n\n  try {\n    const now   = new Date();\n    const nowMs = now.getTime();\n    const ts    = now.toISOString();\n    const tempC = 18 + 8 * Math.sin(Math.PI * (now.getUTCHours() - 6) / 12);\n\n    for (const tree of TREES) {\n      const deveui = makeDevEui(tree.key);\n      const posUm  = getPosUm(tree, nowMs);\n      const isValid = (posUm >= 0 && posUm <= 26000) ? 1 : 0;\n      const posMm  = posUm / 1000;\n      const adcV   = Math.max(0, Math.min(2.6, posMm / 10));\n      const batV   = 3.39 + Math.sin(nowMs / 7200000 + deveui.charCodeAt(0)) * 0.02;\n\n      // Insert device_data (last-seen record)\n      await exec(\n        'INSERT INTO device_data(deveui,ext_temperature_c,bat_v,adc_ch0v,dendro_position_mm,dendro_valid,dendro_delta_mm,recorded_at) VALUES('+\n        s(deveui)+','+n(Math.round(tempC*10)/10)+','+n(Math.round(batV*1000)/1000)+','+\n        n(Math.round(adcV*1000)/1000)+','+n(Math.round(posMm*1000)/1000)+','+n(isValid)+',NULL,'+s(ts)+')'\n      );\n\n      // Insert dendrometer_readings\n      await exec(\n        'INSERT OR IGNORE INTO dendrometer_readings(deveui,position_um,adc_v,is_valid,is_outlier,recorded_at) VALUES('+\n        s(deveui)+','+n(posUm)+','+n(Math.round(adcV*1000)/1000)+','+n(isValid)+',0,'+s(ts)+')'\n      );\n    }\n\n    await close();\n    node.status({ fill: 'green', shape: 'dot', text: 'SIM x8 @ ' + ts.slice(11,19) });\n    msg.payload = { simulated: 8, ts };\n    return msg;\n  } catch(err) {\n    node.error('DENDRO SIM LIVE ERROR: ' + err.message);\n    node.status({ fill: 'red', shape: 'ring', text: err.message.slice(0,40) });\n    try { await close(); } catch(e) {}\n    return null;\n  }\n})();",
+    "outputs": 1,
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [
+      {
+        "var": "sqlite3",
+        "module": "sqlite3"
+      }
+    ],
+    "x": 470,
+    "y": 400,
+    "wires": [
+      [
+        "sim-dendro-debug-live"
+      ]
+    ]
+  },
+  {
+    "id": "sim-dendro-debug-live",
+    "type": "debug",
+    "z": "dendro-live-sim-tab",
+    "name": "Live Sim Status",
+    "active": true,
+    "tosidebar": true,
+    "complete": "payload",
+    "targetType": "msg",
+    "statusVal": "",
+    "statusType": "auto",
+    "x": 710,
+    "y": 400,
+    "wires": []
+  },
+  {
+    "id": "sim-dendro-inject-setup",
+    "type": "inject",
+    "z": "a88bb648cac221ce",
+    "name": "DENDRO SIM SETUP (run once)",
+    "props": [
+      {
+        "p": "payload"
+      }
+    ],
+    "repeat": "",
+    "crontab": "",
+    "once": false,
+    "onceDelay": 0,
+    "topic": "",
+    "payload": "",
+    "payloadType": "date",
+    "x": 220,
+    "y": 500,
+    "wires": [
+      [
+        "sim-dendro-fn-setup"
+      ]
+    ]
+  },
+  {
+    "id": "sim-dendro-fn-setup",
+    "type": "function",
+    "z": "a88bb648cac221ce",
+    "name": "DENDRO SIM SETUP",
+    "func": "// DENDRO SIM SETUP\n// 1. Upsert 8 sim LSN50 devices into user 1's account, zone \"Sim Zone A\"\n// 2. Backfill 30 days of dendrometer_readings (every 10 min per device)\n// 3. Compute dendro_daily for each day using the analytics algorithm\n// 4. Compute zone_daily_recommendations for each day\n//\n// Safe to re-run: devices/readings use INSERT OR IGNORE or INSERT OR REPLACE.\n\nreturn (async () => {\n  const DB_PATH = '/data/db/farming.db';\n  const _db = new sqlite3.Database(DB_PATH);\n  const q    = sql => new Promise((res,rej) => _db.all(sql, (e,r) => e ? rej(e) : res(r||[])));\n  const exec = sql => new Promise((res,rej) => _db.run(sql,  e   => e ? rej(e) : res()));\n  const close = ()  => new Promise(res => _db.close(() => res()));\n\n  function n(v) { return (v===null||v===undefined||!isFinite(Number(v))) ? 'NULL' : String(Number(v)); }\n  function s(v) { return (v===null||v===undefined) ? 'NULL' : \"'\"+String(v).replace(/'/g,\"''\")+\"'\"; }\n  function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }\n\n  // ── Tree definitions ────────────────────────────────────────────────────\n  const TREES = [\n    // Irrigated (dendro_enabled=1, is_reference_tree=0)\n    { key:'sim_irr_01', displayName:'Sim Irrigated 1', baseMm:14.0, ampUm: 50,  growUmDay:15, stressUmDay: 0, isRef:0 },\n    { key:'sim_irr_02', displayName:'Sim Irrigated 2', baseMm:15.2, ampUm: 60,  growUmDay:12, stressUmDay: 0, isRef:0 },\n    { key:'sim_irr_03', displayName:'Sim Irrigated 3', baseMm:13.5, ampUm: 45,  growUmDay:18, stressUmDay: 0, isRef:0 },\n    { key:'sim_irr_04', displayName:'Sim Irrigated 4', baseMm:16.0, ampUm: 55,  growUmDay:10, stressUmDay: 0, isRef:0 },\n    // Control / reference (dendro_enabled=1, is_reference_tree=1)\n    { key:'sim_ctl_01', displayName:'Sim Control 1',   baseMm:14.8, ampUm:140,  growUmDay: 5, stressUmDay: 3, isRef:1 },\n    { key:'sim_ctl_02', displayName:'Sim Control 2',   baseMm:15.5, ampUm:160,  growUmDay: 4, stressUmDay: 4, isRef:1 },\n    { key:'sim_ctl_03', displayName:'Sim Control 3',   baseMm:13.2, ampUm:120,  growUmDay: 6, stressUmDay: 2, isRef:1 },\n    { key:'sim_ctl_04', displayName:'Sim Control 4',   baseMm:16.8, ampUm:150,  growUmDay: 3, stressUmDay: 5, isRef:1 },\n  ];\n\n  // ── DevEUI generator (same hash as live sim) ────────────────────────────\n  function hash32(str) {\n    let h = 0x811c9dc5;\n    for (let i = 0; i < str.length; i++) { h ^= str.charCodeAt(i); h = (h * 0x01000193) >>> 0; }\n    return h >>> 0;\n  }\n  function makeDevEui(name) {\n    const h1 = hash32('A|'+name), h2 = hash32('B|'+name);\n    const h3 = hash32('C|'+name), h4 = hash32('D|'+name);\n    return ((h1^(h3>>>1))>>>0).toString(16).padStart(8,'0').toUpperCase() +\n           ((h2^(h4>>>1))>>>0).toString(16).padStart(8,'0').toUpperCase();\n  }\n  TREES.forEach(t => { t.deveui = makeDevEui(t.key); });\n\n  // ── Position model ──────────────────────────────────────────────────────\n  // Same as live sim: base + growth – diurnal – stressDrift + noise\n  const EPOCH_MS = (() => {\n    const d = new Date(Date.now() - 30 * 86400000);\n    d.setUTCHours(0,0,0,0);\n    return d.getTime();\n  })();\n\n  function getPosUm(tree, timestampMs) {\n    const elapsed  = (timestampMs - EPOCH_MS) / 1000;\n    const dayFrac  = elapsed / 86400;\n    const hourFrac = (elapsed % 86400) / 3600;\n    const growth   = tree.growUmDay  * dayFrac;\n    const stress   = tree.stressUmDay * dayFrac;\n    let diurnal = 0;\n    if (hourFrac >= 6 && hourFrac <= 18)\n      diurnal = tree.ampUm * Math.sin(Math.PI * (hourFrac - 6) / 12);\n    const noise = 8 * Math.sin(elapsed * 0.017) + 5 * Math.sin(elapsed * 0.071);\n    return Math.round(tree.baseMm * 1000 + growth - diurnal - stress + noise);\n  }\n\n  try {\n    node.status({ fill:'yellow', shape:'ring', text:'Setting up devices…' });\n\n    // ── 1. Ensure user 1 exists, get their ID ──────────────────────────────\n    const users = await q(\"SELECT id FROM users ORDER BY id ASC LIMIT 1\");\n    if (!users.length) throw new Error('No users in DB');\n    const userId = users[0].id;\n\n    // ── 2. Create or find \"Sim Zone A\" zone ────────────────────────────────\n    const existingZone = await q(\n      \"SELECT id FROM irrigation_zones WHERE user_id=\"+userId+\" AND name='Sim Zone A' AND deleted_at IS NULL LIMIT 1\"\n    );\n    let zoneId;\n    if (existingZone.length) {\n      zoneId = existingZone[0].id;\n      node.log('Using existing zone id=' + zoneId);\n    } else {\n      const now = new Date().toISOString();\n      await exec(\"INSERT INTO irrigation_zones(name,user_id,created_at,updated_at) VALUES('Sim Zone A',\"+userId+\",'\"+now+\"','\"+now+\"')\");\n      const newZone = await q(\"SELECT id FROM irrigation_zones WHERE user_id=\"+userId+\" AND name='Sim Zone A' ORDER BY id DESC LIMIT 1\");\n      zoneId = newZone[0].id;\n      node.log('Created zone id=' + zoneId);\n    }\n\n    // ── 3. Register devices ────────────────────────────────────────────────\n    const LSN50_APP_ID = '22f61e5c-d89b-4222-839f-3d72a302fc2e';\n    for (const tree of TREES) {\n      const existing = await q(\"SELECT deveui FROM devices WHERE deveui=\"+s(tree.deveui)+\" LIMIT 1\");\n      if (!existing.length) {\n        const now = new Date().toISOString();\n        await exec(\n          \"INSERT INTO devices(deveui,name,type_id,user_id,irrigation_zone_id,dendro_enabled,temp_enabled,is_reference_tree,chirpstack_app_id,created_at,updated_at) VALUES(\"+\n          s(tree.deveui)+\",\"+s(tree.displayName)+\",'DRAGINO_LSN50',\"+userId+\",\"+zoneId+\",1,1,\"+tree.isRef+\",\"+s(LSN50_APP_ID)+\",'\"+now+\"','\"+now+\"')\"\n        );\n        node.log('Registered device ' + tree.deveui + ' ' + tree.displayName);\n      } else {\n        // Ensure assigned to this zone with correct flags\n        const now = new Date().toISOString();\n        await exec(\n          \"UPDATE devices SET irrigation_zone_id=\"+zoneId+\",dendro_enabled=1,temp_enabled=1,is_reference_tree=\"+tree.isRef+\",updated_at='\"+now+\"' WHERE deveui=\"+s(tree.deveui)\n        );\n      }\n    }\n\n    // ── 4. Backfill dendrometer_readings ───────────────────────────────────\n    node.status({ fill:'yellow', shape:'ring', text:'Inserting readings…' });\n    const STEP_MS  = 10 * 60 * 1000; // 10 minutes\n    const DAYS     = 30;\n    const TOTAL_MS = DAYS * 86400000;\n\n    // Build batch inserts (1000 rows per transaction per device)\n    for (const tree of TREES) {\n      // Delete old sim readings for this device (clean re-run)\n      await exec(\"DELETE FROM dendrometer_readings WHERE deveui=\"+s(tree.deveui));\n\n      const rows = [];\n      for (let t = EPOCH_MS; t < EPOCH_MS + TOTAL_MS; t += STEP_MS) {\n        const posUm = getPosUm(tree, t);\n        const isValid = (posUm >= 0 && posUm <= 26000) ? 1 : 0;\n        const ts = new Date(t).toISOString();\n        rows.push(\"(\"+s(tree.deveui)+\",\"+n(posUm)+\",NULL,\"+n(isValid)+\",0,'\"+ts+\"')\");\n      }\n\n      // Insert in chunks of 500\n      const CHUNK = 500;\n      for (let i = 0; i < rows.length; i += CHUNK) {\n        const chunk = rows.slice(i, i + CHUNK);\n        await exec(\n          \"INSERT OR IGNORE INTO dendrometer_readings(deveui,position_um,adc_v,is_valid,is_outlier,recorded_at) VALUES \"+\n          chunk.join(',')\n        );\n      }\n      node.log('Inserted '+rows.length+' readings for '+tree.deveui);\n    }\n\n    // ── 5. Compute dendro_daily + zone_recommendations for each day ────────\n    node.status({ fill:'yellow', shape:'ring', text:'Computing analytics…' });\n\n    // Clear old sim analytics\n    for (const tree of TREES) {\n      await exec(\"DELETE FROM dendrometer_daily WHERE deveui=\"+s(tree.deveui));\n    }\n    await exec(\"DELETE FROM zone_daily_recommendations WHERE zone_id=\"+zoneId);\n\n    const RANK = { none:0, mild:1, moderate:2, significant:3, severe:4 };\n    const NOISE = 30;\n\n    function median3(vals) {\n      return vals.map((_, i) => {\n        const w = vals.slice(Math.max(0,i-1), Math.min(vals.length,i+2))\n                      .filter(v => v!=null && isFinite(v)).sort((a,b) => a-b);\n        return w.length ? w[Math.floor(w.length/2)] : null;\n      });\n    }\n    function round(v, d) { return v==null ? null : Math.round(v*Math.pow(10,d))/Math.pow(10,d); }\n    function classifyStress(si, tgrS, tgrH, twdH) {\n      if (si!=null) {\n        if (si<=1.0) return 'none'; if (si<=1.15) return 'mild';\n        if (si<=1.25) return 'moderate'; if (si<=1.4) return 'significant';\n        return 'severe';\n      }\n      if (tgrS==null) return 'none';\n      if (tgrS < 0) return 'significant';\n      if ((tgrH||[]).filter(t=>t!=null&&Math.abs(t)<=NOISE).length>=2) return 'moderate';\n      if ((twdH||[]).length>=3) {\n        const l=twdH.slice(-3);\n        if (l.every((v,i)=>i===0||(v!=null&&l[i-1]!=null&&v>l[i-1]))) return 'significant';\n      }\n      if (Math.abs(tgrS)<=NOISE) return 'mild';\n      return 'none';\n    }\n    function irrAction(h3, rain) {\n      if (h3.includes('severe')) return { action:'emergency_irrigate', reasoning:'Severe stress — emergency irrigation' };\n      const c={};\n      for (const l of h3) c[l]=(c[l]||0)+1;\n      let d='none';\n      for (const [l,cnt] of Object.entries(c)) if (cnt>=2 && (RANK[l]||0)>(RANK[d]||0)) d=l;\n      if (d==='none')        return { action:'decrease_10',  reasoning:'No stress ≥2 of last 3 days — reduce 10%' };\n      if (d==='mild')        return { action:'maintain',     reasoning:'Mild stress ≥2 of last 3 days — maintain' };\n      if (d==='moderate')    return rain ? { action:'maintain',    reasoning:'Moderate stress; rain suppresses increase' }\n                                        : { action:'increase_10',  reasoning:'Moderate stress ≥2 of last 3 days — increase 10%' };\n      if (d==='significant') return rain ? { action:'increase_10', reasoning:'Significant stress; rain limits to +10%' }\n                                        : { action:'increase_20',  reasoning:'Significant stress ≥2 of last 3 days — increase 20%' };\n      return { action:'maintain', reasoning:'Insufficient data — maintain' };\n    }\n\n    // Per-day analytics loop\n    const dailyResults = {}; // keyed by deveui, array of day records (oldest first)\n    TREES.forEach(t => { dailyResults[t.deveui] = []; });\n\n    for (let d = 0; d < DAYS; d++) {\n      const dayStart = new Date(EPOCH_MS + d * 86400000);\n      const dayEnd   = new Date(EPOCH_MS + (d+1) * 86400000);\n      const dateStr  = dayStart.toISOString().slice(0,10);\n      const computedAt = dayEnd.toISOString();\n\n      // Per-device compute\n      const dayTrees = [];\n      for (const tree of TREES) {\n        const EUI = tree.deveui;\n        const rows = await q(\n          \"SELECT position_um,is_valid,is_outlier FROM dendrometer_readings WHERE deveui=\"+s(EUI)+\n          \" AND recorded_at>='\"+dayStart.toISOString()+\"' AND recorded_at<'\"+dayEnd.toISOString()+\n          \"' ORDER BY recorded_at ASC\"\n        );\n        const vc = rows.filter(r=>r.is_valid===1&&r.is_outlier===0).length;\n        const qual = rows.length<10 ? 'insufficient' : vc<80 ? 'unreliable' : 'good';\n        const filt = median3(rows.map(r=>(r.is_valid===1&&r.is_outlier===0)?r.position_um:null))\n                       .filter(v=>v!=null&&isFinite(v));\n\n        if (!filt.length) {\n          dayTrees.push({ deveui:EUI, is_ref:tree.isRef, d_max:null, d_min:null, mds:null,\n                          tgr:null, tgrS:null, twd:null, dr:null, recD:null, si:null,\n                          stress:'none', qual, vc });\n          continue;\n        }\n\n        const dMax = Math.max(...filt), dMin = Math.min(...filt), mds = dMax - dMin;\n\n        // History from already-computed days (oldest first in dailyResults)\n        const hist = (dailyResults[EUI] || []).slice(-7).reverse(); // newest first\n        const yest = hist[0] || null;\n        const tgr  = (yest && yest.d_max!=null) ? round(dMax - yest.d_max, 0) : null;\n        const prevT = hist.slice(0,2).map(r=>r.tgr).filter(v=>v!=null);\n        const tgrAll = [tgr,...prevT].filter(v=>v!=null);\n        const tgrS = tgrAll.length ? round(tgrAll.reduce((a,b)=>a+b,0)/tgrAll.length,0) : null;\n\n        // Peak D_max for TWD (rolling 30-day window = all days so far)\n        const allPrev = dailyResults[EUI] || [];\n        const peak = allPrev.length\n          ? Math.max(dMax, ...allPrev.map(r=>r.d_max).filter(v=>v!=null))\n          : dMax;\n        const twd = Math.max(0, round(peak - dMax, 0));\n\n        const dr = (yest && yest.d_min!=null) ? round(dMax - yest.d_min, 0) : null;\n        const drA = [dr,...hist.slice(0,6).map(r=>r.dr)].filter(v=>v!=null);\n        const mA  = [mds,...hist.slice(0,6).map(r=>r.mds)].filter(v=>v!=null);\n        const recD = (drA.length&&mA.length)\n          ? round(drA.reduce((a,b)=>a+b)/drA.length - mA.reduce((a,b)=>a+b)/mA.length, 0)\n          : null;\n\n        dayTrees.push({ deveui:EUI, is_ref:tree.isRef, d_max:round(dMax,0), d_min:round(dMin,0),\n                        mds:round(mds,0), tgr, tgrS, twd, dr, recD, si:null, stress:null, qual, vc });\n      }\n\n      // Compute SI (irrigated vs first control reference)\n      const ref = dayTrees.find(t => t.is_ref && t.mds!=null && t.mds>0);\n      for (const t of dayTrees) {\n        if (ref && !t.is_ref && t.mds!=null) t.si = round(t.mds / ref.mds, 2);\n      }\n\n      // Classify stress + insert dendro_daily\n      for (const t of dayTrees) {\n        const prev = (dailyResults[t.deveui]||[]).slice(-3).reverse();\n        const tgrH = prev.map(r=>r.tgrS);\n        const twdH = prev.map(r=>r.twd);\n        t.stress = classifyStress(t.si, t.tgrS, tgrH, twdH);\n\n        await exec(\n          \"INSERT OR REPLACE INTO dendrometer_daily\"+\n          \"(deveui,date,d_max_um,d_min_um,mds_um,tgr_um,tgr_smoothed_um,twd_um,dr_um,\"+\n          \"recovery_delta_um,signal_intensity,stress_level,data_quality,valid_readings_count,computed_at)\"+\n          \" VALUES(\"+s(t.deveui)+\",\"+s(dateStr)+\",\"+n(t.d_max)+\",\"+n(t.d_min)+\",\"+n(t.mds)+\",\"+\n          n(t.tgr)+\",\"+n(t.tgrS)+\",\"+n(t.twd)+\",\"+n(t.dr)+\",\"+n(t.recD)+\",\"+n(t.si)+\",\"+\n          s(t.stress)+\",\"+s(t.qual)+\",\"+n(t.vc)+\",\"+s(computedAt)+\")\"\n        );\n\n        // Accumulate for next-day lookups\n        if (!dailyResults[t.deveui]) dailyResults[t.deveui] = [];\n        dailyResults[t.deveui].push(t);\n      }\n\n      // Zone recommendation for this day\n      const nonRef  = dayTrees.filter(t => !t.is_ref);\n      const zoneSt  = nonRef.reduce((w,t) => (RANK[t.stress]||0)>(RANK[w]||0) ? t.stress : w, 'none');\n      const zoneHist = []; // collect last 2 days zone stress\n      // Look up previous zone recommendations from already-inserted rows\n      const prevRecs = await q(\n        \"SELECT zone_stress_summary FROM zone_daily_recommendations WHERE zone_id=\"+zoneId+\n        \" AND date<\"+s(dateStr)+\" ORDER BY date DESC LIMIT 2\"\n      );\n      const hist3 = [zoneSt, ...prevRecs.map(r=>r.zone_stress_summary)].slice(0,3);\n      const { action, reasoning } = irrAction(hist3, false);\n\n      await exec(\n        \"INSERT OR REPLACE INTO zone_daily_recommendations\"+\n        \"(zone_id,date,zone_stress_summary,rainfall_mm,water_delivered_liters,irrigation_action,action_reasoning,recommendation_json,computed_at)\"+\n        \" VALUES(\"+zoneId+\",\"+s(dateStr)+\",\"+s(zoneSt)+\",0,0,\"+s(action)+\",\"+s(reasoning)+\",\"+\n        s(JSON.stringify({zone_id:zoneId,date:dateStr,zone_stress:zoneSt,action}))+\",\"+s(computedAt)+\")\"\n      );\n    }\n\n    await close();\n    const msg2 = { payload: { success:true, zone_id:zoneId, devices:TREES.length, days:DAYS } };\n    node.status({ fill:'green', shape:'dot', text:'Done — '+TREES.length+' devices, '+DAYS+' days' });\n    node.log('Sim setup complete: zone '+zoneId+', '+TREES.length+' devices, '+DAYS+' days backfilled');\n    return msg2;\n\n  } catch(err) {\n    node.error('DENDRO SIM SETUP ERROR: '+err.message+'\\n'+err.stack);\n    node.status({ fill:'red', shape:'ring', text:err.message });\n    try { await close(); } catch(e) {}\n    return null;\n  }\n})();",
+    "outputs": 1,
+    "timeout": 60,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [
+      {
+        "var": "sqlite3",
+        "module": "sqlite3"
+      }
+    ],
+    "x": 490,
+    "y": 500,
+    "wires": [
+      [
+        "sim-dendro-debug-setup"
+      ]
+    ]
+  },
+  {
+    "id": "sim-dendro-debug-setup",
+    "type": "debug",
+    "z": "a88bb648cac221ce",
+    "name": "Setup Result",
+    "active": true,
+    "tosidebar": true,
+    "complete": "payload",
+    "targetType": "msg",
+    "statusVal": "",
+    "statusType": "auto",
+    "x": 730,
+    "y": 500,
+    "wires": []
   }
 ]
