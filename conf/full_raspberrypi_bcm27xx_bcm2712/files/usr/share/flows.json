@@ -4728,15 +4728,15 @@
     "type": "function",
     "z": "lsn50-tab",
     "name": "Build Dendrometer Readings INSERT",
+    "outputs": 1,
+    "x": 920,
+    "y": 120,
     "wires": [
       [
         "dendro-readings-sqlite"
       ]
     ],
-    "outputs": 1,
-    "x": 920,
-    "y": 120,
-    "func": "// Insert validated position into dendrometer_readings time-series table.\n// Runs after device_data insert; msg.formattedData still holds the decoded values.\nconst d = msg.formattedData;\nif (!d || !d.devEui) return null;          // nothing to do\nif (d.dendroValid === null || d.dendroValid === undefined) return null;  // dendro not enabled\nif (d.positionMm === null || d.positionMm === undefined) return null;\n\nconst positionUm = Math.round(d.positionMm * 1000);  // mm → µm\nconst deltaUm    = (d.deltaMm !== null && d.deltaMm !== undefined)\n                 ? Math.round(d.deltaMm * 1000) : null;\n\n// ── Spike detection: >500 µm change between consecutive readings ──────────\nconst isOutlier = (deltaUm !== null && Math.abs(deltaUm) > 500) ? 1 : 0;\n\n// ── Battery-disconnection check: ADC_V ≈ BAT_V (within 50 mV) ────────────\nlet isValid = d.dendroValid;   // already 0/1 from range check in Decode LSN50\nlet invalidReason = null;\nif (isValid && d.batV !== null && d.adcV !== null\n    && Math.abs(d.adcV - d.batV) <= 0.05) {\n  isValid = 0;\n  invalidReason = 'sensor_disconnected';\n} else if (!isValid) {\n  invalidReason = 'out_of_range';\n}\n\nfunction sqlNum(v) { return (v === null || v === undefined || !isFinite(Number(v))) ? 'NULL' : String(Number(v)); }\nfunction sqlStr(v) { return (v === null || v === undefined) ? 'NULL' : \"'\" + String(v).replace(/'/g,\"''\") + \"'\"; }\n\nmsg.topic = [\n  'INSERT INTO dendrometer_readings',\n  '  (deveui, position_um, adc_v, bat_v, is_valid, invalid_reason, is_outlier, recorded_at)',\n  'VALUES (',\n  '  ' + sqlStr(d.devEui)      + ',',\n  '  ' + sqlNum(positionUm)    + ',',\n  '  ' + sqlNum(d.adcV)        + ',',\n  '  ' + sqlNum(d.batV)        + ',',\n  '  ' + isValid               + ',',\n  '  ' + sqlStr(invalidReason) + ',',\n  '  ' + isOutlier             + ',',\n  '  ' + sqlStr(d.timestamp),\n  ');'\n].join('\\n');\nmsg.payload = msg.topic;\nnode.status({ fill: isOutlier ? 'yellow' : (isValid ? 'green' : 'red'),\n              shape: 'dot',\n              text: (isValid ? positionUm + ' µm' : (invalidReason || 'invalid')) +\n                    (isOutlier ? ' SPIKE' : '') });\nreturn msg;"
+    "func": "const d=msg.formattedData;\nif(!d||!d.devEui||d.dendroValid===null||d.dendroValid===undefined||d.positionMm===null||d.positionMm===undefined)return null;\nconst posUm=Math.round(d.positionMm*1000);\nconst dUm=(d.deltaMm!=null)?Math.round(d.deltaMm*1000):null;\nconst spike=(dUm!=null&&Math.abs(dUm)>500)?1:0;\nlet valid=d.dendroValid,reason=null;\nif(valid&&d.batV!=null&&d.adcV!=null&&Math.abs(d.adcV-d.batV)<=0.05){valid=0;reason='sensor_disconnected';}\nelse if(!valid){reason='out_of_range';}\nfunction ss(v){return v==null?'NULL':\"'\"+String(v).replace(/'/g,\"''\")+\"'\";}\nfunction sn(v){return(v==null||!isFinite(Number(v)))?'NULL':String(Number(v));}\nmsg.topic=['INSERT INTO dendrometer_readings(deveui,position_um,adc_v,bat_v,is_valid,invalid_reason,is_outlier,recorded_at)VALUES(',\n  ss(d.devEui)+','+sn(posUm)+','+sn(d.adcV)+','+sn(d.batV)+','+valid+','+ss(reason)+','+spike+','+ss(d.timestamp),\n');'].join('\\n');\nmsg.payload=msg.topic;\nnode.status({fill:spike?'yellow':(valid?'green':'red'),shape:'dot',text:(valid?posUm+' µm':(reason||'invalid'))+(spike?' SPIKE':'')});\nreturn msg;"
   },
   {
     "id": "dendro-readings-sqlite",
@@ -4788,7 +4788,13 @@
         "dendro-compute-debug"
       ]
     ],
-    "func": "// ═══════════════════════════════════════════════════════════════════\n// DAILY DENDROMETER ANALYTICS  — Phase 1 (monitoring + recommendations)\n// Runs at 08:00 UTC daily, analysing the preceding 24 hours.\n// ═══════════════════════════════════════════════════════════════════\nconst cp  = global.get('cp');\nconst DB  = '/data/db/farming.db';\nconst NOW = new Date();\nconst TODAY = NOW.toISOString().slice(0, 10);   // YYYY-MM-DD (UTC date)\nconst WIN_END   = NOW.toISOString();\nconst WIN_START = new Date(NOW - 86400000).toISOString();  // 24 h window\n\n// ── DB helpers ──────────────────────────────────────────────────────────────\nfunction q(sql) {\n  const r = cp.spawnSync('sqlite3', ['-json', DB, sql], { timeout: 30000, encoding: 'utf8' });\n  if (r.status !== 0) { node.error('DB q: ' + (r.stderr||'').trim()); return []; }\n  const o = (r.stdout||'').trim(); return o ? JSON.parse(o) : [];\n}\nfunction exec(sql) {\n  const r = cp.spawnSync('sqlite3', [DB, sql], { timeout: 10000, encoding: 'utf8' });\n  if (r.status !== 0) { node.error('DB exec: ' + (r.stderr||'').trim()); return false; }\n  return true;\n}\nfunction n(v)  { return (v===null||v===undefined||!isFinite(Number(v))) ? 'NULL' : String(Number(v)); }\nfunction s(v)  { return (v===null||v===undefined) ? 'NULL' : \"'\" + String(v).replace(/'/g,\"''\") + \"'\"; }\nfunction round(v, d) { if (v===null||v===undefined) return null; const f=Math.pow(10,d||0); return Math.round(v*f)/f; }\n\n// ── Median filter ───────────────────────────────────────────────────────────\nfunction medianFilter(values, w) {\n  const half = Math.floor(w / 2);\n  return values.map((_, i) => {\n    const win = values.slice(Math.max(0,i-half), Math.min(values.length,i+half+1))\n                      .filter(v => v !== null && isFinite(v))\n                      .sort((a,b) => a-b);\n    return win.length ? win[Math.floor(win.length/2)] : null;\n  });\n}\n\n// ── Stress classification ───────────────────────────────────────────────────\nconst RANK = { none:0, mild:1, moderate:2, significant:3, severe:4 };\nfunction classifyStress(si, tgrSmoothed, tgrHist, twdHist) {\n  // Protocol A: Signal Intensity (when reference tree present)\n  if (si !== null && si !== undefined) {\n    if (si <= 1.0)  return 'none';\n    if (si <= 1.15) return 'mild';\n    if (si <= 1.25) return 'moderate';\n    if (si <= 1.4)  return 'significant';\n    return 'severe';\n  }\n  // Protocol B: TGR + TWD\n  if (tgrSmoothed === null) return 'none';\n  if (tgrSmoothed < 0)      return 'significant';\n  const NOISE = 30;\n  const zeroCount = (tgrHist || []).filter(t => t !== null && Math.abs(t) <= NOISE).length;\n  if (zeroCount >= 2)       return 'moderate';\n  // TWD increasing 3+ consecutive days\n  if ((twdHist||[]).length >= 3) {\n    const last3 = twdHist.slice(-3);\n    if (last3.every((v,i) => i===0 || (v!==null && last3[i-1]!==null && v > last3[i-1])))\n      return 'significant';\n  }\n  if (Math.abs(tgrSmoothed) <= NOISE) return 'mild';  // near-zero growth: early warning\n  return 'none';\n}\n\n// ── Irrigation action (2-of-3 rule) ────────────────────────────────────────\nfunction irrigationAction(history3, hasRecentRain) {\n  if (history3.includes('severe'))\n    return { action:'emergency_irrigate', reasoning:'Severe tree water stress — emergency irrigation required' };\n\n  const counts = {};\n  for (const lvl of history3) counts[lvl] = (counts[lvl]||0) + 1;\n  let dominant = 'none';\n  for (const [lvl, cnt] of Object.entries(counts))\n    if (cnt >= 2 && (RANK[lvl]||0) > (RANK[dominant]||0)) dominant = lvl;\n\n  if (dominant === 'none')        return { action:'decrease_10',       reasoning:'No stress for ≥2 of last 3 days — reduce irrigation by 10%' };\n  if (dominant === 'mild')        return { action:'maintain',           reasoning:'Mild stress for ≥2 of last 3 days — maintain current schedule' };\n  if (dominant === 'moderate')    return hasRecentRain\n    ? { action:'maintain',    reasoning:'Moderate stress but rain event (>5 mm) suppresses increase — maintain' }\n    : { action:'increase_10', reasoning:'Moderate stress for ≥2 of last 3 days — increase irrigation by 10%' };\n  if (dominant === 'significant') return hasRecentRain\n    ? { action:'increase_10', reasoning:'Significant stress; rain event limits increase to 10%' }\n    : { action:'increase_20', reasoning:'Significant stress for ≥2 of last 3 days — increase irrigation by 20%' };\n  return { action:'maintain', reasoning:'Insufficient trend data — maintain current schedule' };\n}\n\n// ── Main ─────────────────────────────────────────────────────────────────────\ntry {\n  const zones = q(`\n    SELECT DISTINCT iz.id AS zone_id, iz.name AS zone_name,\n           COALESCE(iz.timezone,'UTC') AS timezone\n    FROM   irrigation_zones iz\n    JOIN   devices d ON d.irrigation_zone_id = iz.id\n    WHERE  d.type_id = 'DRAGINO_LSN50' AND d.dendro_enabled = 1\n      AND  iz.deleted_at IS NULL\n  `);\n\n  if (!zones.length) {\n    node.status({ fill:'grey', shape:'ring', text:'No dendro zones found' });\n    msg.payload = { success:true, date:TODAY, zones:[] };\n    return msg;\n  }\n\n  const summary = [];\n\n  for (const zone of zones) {\n    const devices = q(`\n      SELECT deveui, name, COALESCE(is_reference_tree,0) AS is_ref\n      FROM   devices\n      WHERE  irrigation_zone_id = ${zone.zone_id}\n        AND  type_id = 'DRAGINO_LSN50' AND dendro_enabled = 1\n    `);\n\n    const trees = [];\n\n    for (const dev of devices) {\n      const EUI = dev.deveui.replace(/'/g,\"''\");\n\n      // Fetch 24 h readings\n      const rows = q(`\n        SELECT position_um, is_valid, is_outlier\n        FROM   dendrometer_readings\n        WHERE  deveui = '${EUI}'\n          AND  recorded_at >= '${WIN_START}'\n          AND  recorded_at <  '${WIN_END}'\n        ORDER BY recorded_at ASC\n      `);\n\n      const validCount = rows.filter(r => r.is_valid===1 && r.is_outlier===0).length;\n      const quality = rows.length < 10 ? 'insufficient'\n                    : validCount < 80  ? 'unreliable'\n                    : 'good';\n\n      // Apply median filter (window = 3) to valid positions\n      const rawPos = rows.map(r => (r.is_valid===1 && r.is_outlier===0) ? r.position_um : null);\n      const filtered = medianFilter(rawPos, 3).filter(v => v !== null && isFinite(v));\n\n      if (!filtered.length) {\n        trees.push({ deveui:dev.deveui, name:dev.name, is_ref:!!dev.is_ref,\n                     d_max_um:null, d_min_um:null, mds_um:null, tgr_um:null,\n                     tgr_smoothed_um:null, twd_um:null, dr_um:null,\n                     recovery_delta_um:null, si:null, stress:'none',\n                     quality, valid_count:validCount });\n        continue;\n      }\n\n      const dMax = Math.max(...filtered);\n      const dMin = Math.min(...filtered);\n      const mds  = dMax - dMin;\n\n      // Fetch last 7 days of daily data\n      const hist = q(`\n        SELECT date, d_max_um, d_min_um, mds_um, tgr_um, tgr_smoothed_um, twd_um, dr_um\n        FROM   dendrometer_daily\n        WHERE  deveui = '${EUI}'\n          AND  date <  '${TODAY}'\n        ORDER BY date DESC LIMIT 7\n      `);\n\n      const yest = hist[0] || null;\n\n      // TGR\n      const tgr = (yest && yest.d_max_um !== null) ? round(dMax - yest.d_max_um, 0) : null;\n      const prevTgrs = hist.slice(0,2).map(r => r.tgr_um).filter(v => v!==null);\n      const tgrAll   = [tgr, ...prevTgrs].filter(v => v!==null);\n      const tgrSmoothed = tgrAll.length ? round(tgrAll.reduce((a,b)=>a+b,0)/tgrAll.length, 0) : null;\n\n      // TWD: D_max_recent_peak (30-day look-back) minus today's D_max\n      const peakRow  = q(`SELECT MAX(d_max_um) AS peak FROM dendrometer_daily\n                          WHERE deveui='${EUI}' AND date >= date('${TODAY}','-30 days')`);\n      const dMaxPeak = (peakRow[0] && peakRow[0].peak !== null) ? peakRow[0].peak : dMax;\n      const twd      = Math.max(0, round(dMaxPeak - dMax, 0));\n\n      // Daily Recovery\n      const dr = (yest && yest.d_min_um !== null) ? round(dMax - yest.d_min_um, 0) : null;\n\n      // Recovery Delta (7-day rolling)\n      const drAll  = [dr,  ...hist.slice(0,6).map(r=>r.dr_um)].filter(v=>v!==null);\n      const mdsAll = [mds, ...hist.slice(0,6).map(r=>r.mds_um)].filter(v=>v!==null);\n      const avgDr  = drAll.length  ? drAll.reduce((a,b)=>a+b,0)/drAll.length  : null;\n      const avgMds = mdsAll.length ? mdsAll.reduce((a,b)=>a+b,0)/mdsAll.length : null;\n      const recDelta = (avgDr!==null && avgMds!==null) ? round(avgDr-avgMds,0) : null;\n\n      trees.push({ deveui:dev.deveui, name:dev.name, is_ref:!!dev.is_ref,\n                   d_max_um:round(dMax,0), d_min_um:round(dMin,0), mds_um:round(mds,0),\n                   tgr_um:tgr, tgr_smoothed_um:tgrSmoothed, twd_um:twd,\n                   dr_um:dr, recovery_delta_um:recDelta,\n                   si:null, stress:null, quality, valid_count:validCount });\n    }\n\n    // ── SI + final stress (zone pass: need reference tree MDS) ──────────────\n    const refTree = trees.find(t => t.is_ref && t.mds_um !== null && t.mds_um > 0);\n    for (const tree of trees) {\n      if (refTree && !tree.is_ref && tree.mds_um !== null)\n        tree.si = round(tree.mds_um / refTree.mds_um, 2);\n\n      const tgrHist = q(`SELECT tgr_smoothed_um FROM dendrometer_daily\n                          WHERE deveui='${tree.deveui.replace(/'/g,\"''\")}' ORDER BY date DESC LIMIT 3`)\n                     .map(r => r.tgr_smoothed_um);\n      const twdHist = q(`SELECT twd_um FROM dendrometer_daily\n                          WHERE deveui='${tree.deveui.replace(/'/g,\"''\")}' ORDER BY date DESC LIMIT 3`)\n                     .map(r => r.twd_um);\n      tree.stress = classifyStress(tree.si, tree.tgr_smoothed_um, tgrHist, twdHist);\n\n      // Upsert dendrometer_daily\n      exec(`INSERT INTO dendrometer_daily\n              (deveui,date,d_max_um,d_min_um,mds_um,tgr_um,tgr_smoothed_um,\n               twd_um,dr_um,recovery_delta_um,signal_intensity,stress_level,\n               data_quality,valid_readings_count,computed_at)\n            VALUES\n              (${s(tree.deveui)},${s(TODAY)},\n               ${n(tree.d_max_um)},${n(tree.d_min_um)},${n(tree.mds_um)},\n               ${n(tree.tgr_um)},${n(tree.tgr_smoothed_um)},${n(tree.twd_um)},\n               ${n(tree.dr_um)},${n(tree.recovery_delta_um)},\n               ${n(tree.si)},${s(tree.stress)},\n               ${s(tree.quality)},${n(tree.valid_count)},${s(NOW.toISOString())})\n            ON CONFLICT(deveui,date) DO UPDATE SET\n              d_max_um=excluded.d_max_um, d_min_um=excluded.d_min_um,\n              mds_um=excluded.mds_um, tgr_um=excluded.tgr_um,\n              tgr_smoothed_um=excluded.tgr_smoothed_um, twd_um=excluded.twd_um,\n              dr_um=excluded.dr_um, recovery_delta_um=excluded.recovery_delta_um,\n              signal_intensity=excluded.signal_intensity, stress_level=excluded.stress_level,\n              data_quality=excluded.data_quality,\n              valid_readings_count=excluded.valid_readings_count,\n              computed_at=excluded.computed_at`);\n    }\n\n    // ── Zone stress summary ────────────────────────────────────────────────\n    const nonRef = trees.filter(t => !t.is_ref);\n    const zoneSt = nonRef.reduce((w,t) => (RANK[t.stress]||0) > (RANK[w]||0) ? t.stress : w, 'none');\n\n    // 2-of-3 rule: fetch last 3 zone summaries (not counting today)\n    const past = q(`SELECT zone_stress_summary FROM zone_daily_recommendations\n                    WHERE zone_id=${zone.zone_id} AND date < '${TODAY}'\n                    ORDER BY date DESC LIMIT 2`)\n               .map(r => r.zone_stress_summary);\n    const hist3 = [zoneSt, ...past].slice(0, 3);\n\n    // Rain suppression: last recorded day rainfall_mm > 5\n    const rainRow = q(`SELECT rainfall_mm FROM zone_daily_recommendations\n                        WHERE zone_id=${zone.zone_id} ORDER BY date DESC LIMIT 1`);\n    const hasRain = rainRow.length && (rainRow[0].rainfall_mm||0) > 5;\n\n    const { action, reasoning } = irrigationAction(hist3, hasRain);\n\n    const recJson = JSON.stringify({\n      zone_id: String(zone.zone_id), date: TODAY,\n      trees: trees.map(t => ({\n        tree_id: t.name, device_eui: t.deveui,\n        'mds_µm': t.mds_um, 'tgr_µm': t.tgr_um, 'tgr_smoothed_µm': t.tgr_smoothed_um,\n        'twd_µm': t.twd_um, 'dr_µm': t.dr_um, 'recovery_delta_µm': t.recovery_delta_um,\n        signal_intensity: t.si, stress_level: t.stress||'none', data_quality: t.quality\n      })),\n      zone_stress_summary: zoneSt, rainfall_mm: 0, water_delivered_liters: 0,\n      irrigation_action: action, action_reasoning: reasoning\n    });\n\n    exec(`INSERT INTO zone_daily_recommendations\n            (zone_id,date,zone_stress_summary,rainfall_mm,water_delivered_liters,\n             irrigation_action,action_reasoning,recommendation_json,computed_at)\n          VALUES\n            (${zone.zone_id},${s(TODAY)},${s(zoneSt)},0,0,\n             ${s(action)},${s(reasoning)},${s(recJson)},${s(NOW.toISOString())})\n          ON CONFLICT(zone_id,date) DO UPDATE SET\n            zone_stress_summary=excluded.zone_stress_summary,\n            irrigation_action=excluded.irrigation_action,\n            action_reasoning=excluded.action_reasoning,\n            recommendation_json=excluded.recommendation_json,\n            computed_at=excluded.computed_at`);\n\n    summary.push({ zone_id:zone.zone_id, zone:zone.zone_name, stress:zoneSt, action });\n    node.log('Zone ' + zone.zone_name + ': ' + zoneSt + ' → ' + action);\n  }\n\n  node.status({ fill:'green', shape:'dot', text: TODAY + ' — ' + zones.length + ' zone(s) computed' });\n  msg.payload = { success:true, date:TODAY, zones:summary };\n  return msg;\n\n} catch(err) {\n  node.error('Daily analytics error: ' + err.message + '\\n' + err.stack);\n  node.status({ fill:'red', shape:'ring', text:'Error: ' + err.message });\n  return null;\n}"
+    "libs": [
+      {
+        "var": "sqlite3",
+        "module": "sqlite3"
+      }
+    ],
+    "func": "return (async () => {\n\nconst _db  = new sqlite3.Database('/data/db/farming.db');\nconst q    = (sql) => new Promise((res,rej) => _db.all(sql, (e,r) => e?rej(e):res(r||[])));\nconst exec = (sql) => new Promise((res,rej) => _db.run(sql, e => e?rej(e):res(true)));\nconst close = () => new Promise(res => _db.close(() => res()));\nfunction n(v){return(v===null||v===undefined||!isFinite(Number(v)))?'NULL':String(Number(v));}\nfunction s(v){return(v===null||v===undefined)?'NULL':\"'\"+String(v).replace(/'/g,\"''\")+\"'\";}\nconst NOW=new Date(), TODAY=NOW.toISOString().slice(0,10);\nconst WIN_END=NOW.toISOString(), WIN_START=new Date(NOW-86400000).toISOString();\nconst RANK={none:0,mild:1,moderate:2,significant:3,severe:4};\nconst NOISE=30;\nfunction round(v,d){if(v==null)return null;return Math.round(v*Math.pow(10,d||0))/Math.pow(10,d||0);}\nfunction median3(vals){\n  const h=1;\n  return vals.map((_,i)=>{\n    const w=vals.slice(Math.max(0,i-h),Math.min(vals.length,i+h+1))\n              .filter(v=>v!=null&&isFinite(v)).sort((a,b)=>a-b);\n    return w.length?w[Math.floor(w.length/2)]:null;\n  });\n}\nfunction classifyStress(si,tgrS,tgrH,twdH){\n  if(si!=null){if(si<=1.0)return'none';if(si<=1.15)return'mild';if(si<=1.25)return'moderate';if(si<=1.4)return'significant';return'severe';}\n  if(tgrS==null)return'none';if(tgrS<0)return'significant';\n  if((tgrH||[]).filter(t=>t!=null&&Math.abs(t)<=NOISE).length>=2)return'moderate';\n  if((twdH||[]).length>=3){const l=twdH.slice(-3);if(l.every((v,i)=>i===0||(v!=null&&l[i-1]!=null&&v>l[i-1])))return'significant';}\n  if(Math.abs(tgrS)<=NOISE)return'mild';return'none';\n}\nfunction irrAction(h3,rain){\n  if(h3.includes('severe'))return{action:'emergency_irrigate',reasoning:'Severe stress — emergency irrigation required'};\n  const c={};for(const l of h3)c[l]=(c[l]||0)+1;\n  let d='none';for(const[l,n]of Object.entries(c))if(n>=2&&(RANK[l]||0)>(RANK[d]||0))d=l;\n  if(d==='none')       return{action:'decrease_10',  reasoning:'No stress ≥2 of last 3 days — reduce 10%'};\n  if(d==='mild')       return{action:'maintain',     reasoning:'Mild stress ≥2 of last 3 days — maintain'};\n  if(d==='moderate')   return rain?{action:'maintain',reasoning:'Moderate stress; rain suppresses increase'}\n                                  :{action:'increase_10',reasoning:'Moderate stress ≥2 of last 3 days — increase 10%'};\n  if(d==='significant')return rain?{action:'increase_10',reasoning:'Significant stress; rain limits to +10%'}\n                                  :{action:'increase_20',reasoning:'Significant stress ≥2 of last 3 days — increase 20%'};\n  return{action:'maintain',reasoning:'Insufficient data — maintain'};\n}\ntry{\n  const zones=await q('SELECT DISTINCT iz.id AS zone_id,iz.name AS zone_name FROM irrigation_zones iz JOIN devices d ON d.irrigation_zone_id=iz.id WHERE d.type_id=\\'DRAGINO_LSN50\\' AND d.dendro_enabled=1 AND iz.deleted_at IS NULL');\n  if(!zones.length){node.status({fill:'grey',shape:'ring',text:'No dendro zones'});msg.payload={success:true,date:TODAY,zones:[]};await close();return msg;}\n  const summary=[];\n  for(const zone of zones){\n    const devs=await q('SELECT deveui,name,COALESCE(is_reference_tree,0) AS is_ref FROM devices WHERE irrigation_zone_id='+zone.zone_id+' AND type_id=\\'DRAGINO_LSN50\\' AND dendro_enabled=1');\n    const trees=[];\n    for(const dev of devs){\n      const EUI=dev.deveui.replace(/'/g,\"''\");\n      const rows=await q('SELECT position_um,is_valid,is_outlier FROM dendrometer_readings WHERE deveui=\\''+EUI+'\\' AND recorded_at>=\\''+WIN_START+'\\' AND recorded_at<\\''+WIN_END+'\\' ORDER BY recorded_at ASC');\n      const vc=rows.filter(r=>r.is_valid===1&&r.is_outlier===0).length;\n      const qual=rows.length<10?'insufficient':vc<80?'unreliable':'good';\n      const filt=median3(rows.map(r=>(r.is_valid===1&&r.is_outlier===0)?r.position_um:null)).filter(v=>v!=null&&isFinite(v));\n      if(!filt.length){trees.push({deveui:dev.deveui,name:dev.name,is_ref:!!dev.is_ref,d_max_um:null,d_min_um:null,mds_um:null,tgr_um:null,tgr_smoothed_um:null,twd_um:null,dr_um:null,recovery_delta_um:null,si:null,stress:'none',qual,vc});continue;}\n      const dMax=Math.max(...filt),dMin=Math.min(...filt),mds=dMax-dMin;\n      const hist=await q('SELECT date,d_max_um,d_min_um,mds_um,tgr_um,dr_um FROM dendrometer_daily WHERE deveui=\\''+EUI+'\\' AND date<\\''+TODAY+'\\' ORDER BY date DESC LIMIT 7');\n      const yest=hist[0]||null;\n      const tgr=(yest&&yest.d_max_um!=null)?round(dMax-yest.d_max_um,0):null;\n      const prevT=hist.slice(0,2).map(r=>r.tgr_um).filter(v=>v!=null);\n      const tgrAll=[tgr,...prevT].filter(v=>v!=null);\n      const tgrS=tgrAll.length?round(tgrAll.reduce((a,b)=>a+b,0)/tgrAll.length,0):null;\n      const pk=await q('SELECT MAX(d_max_um) AS peak FROM dendrometer_daily WHERE deveui=\\''+EUI+'\\' AND date>=date(\\''+TODAY+'\\',\\'-30 days\\')');\n      const peak=(pk[0]&&pk[0].peak!=null)?pk[0].peak:dMax;\n      const twd=Math.max(0,round(peak-dMax,0));\n      const dr=(yest&&yest.d_min_um!=null)?round(dMax-yest.d_min_um,0):null;\n      const drA=[dr,...hist.slice(0,6).map(r=>r.dr_um)].filter(v=>v!=null);\n      const mA=[mds,...hist.slice(0,6).map(r=>r.mds_um)].filter(v=>v!=null);\n      const recD=(drA.length&&mA.length)?round(drA.reduce((a,b)=>a+b)/drA.length-mA.reduce((a,b)=>a+b)/mA.length,0):null;\n      trees.push({deveui:dev.deveui,name:dev.name,is_ref:!!dev.is_ref,d_max_um:round(dMax,0),d_min_um:round(dMin,0),mds_um:round(mds,0),tgr_um:tgr,tgr_smoothed_um:tgrS,twd_um:twd,dr_um:dr,recovery_delta_um:recD,si:null,stress:null,qual,vc});\n    }\n    const ref=trees.find(t=>t.is_ref&&t.mds_um!=null&&t.mds_um>0);\n    for(const t of trees){\n      if(ref&&!t.is_ref&&t.mds_um!=null)t.si=round(t.mds_um/ref.mds_um,2);\n      const EUI=t.deveui.replace(/'/g,\"''\");\n      const tgrH=(await q('SELECT tgr_smoothed_um FROM dendrometer_daily WHERE deveui=\\''+EUI+'\\' ORDER BY date DESC LIMIT 3')).map(r=>r.tgr_smoothed_um);\n      const twdH=(await q('SELECT twd_um FROM dendrometer_daily WHERE deveui=\\''+EUI+'\\' ORDER BY date DESC LIMIT 3')).map(r=>r.twd_um);\n      t.stress=classifyStress(t.si,t.tgr_smoothed_um,tgrH,twdH);\n      await exec('INSERT OR REPLACE INTO dendrometer_daily(deveui,date,d_max_um,d_min_um,mds_um,tgr_um,tgr_smoothed_um,twd_um,dr_um,recovery_delta_um,signal_intensity,stress_level,data_quality,valid_readings_count,computed_at)VALUES('+s(t.deveui)+','+s(TODAY)+','+n(t.d_max_um)+','+n(t.d_min_um)+','+n(t.mds_um)+','+n(t.tgr_um)+','+n(t.tgr_smoothed_um)+','+n(t.twd_um)+','+n(t.dr_um)+','+n(t.recovery_delta_um)+','+n(t.si)+','+s(t.stress)+','+s(t.qual)+','+n(t.vc)+','+s(NOW.toISOString())+')');\n    }\n    const nonRef=trees.filter(t=>!t.is_ref);\n    const zoneSt=nonRef.reduce((w,t)=>(RANK[t.stress]||0)>(RANK[w]||0)?t.stress:w,'none');\n    const past=(await q('SELECT zone_stress_summary FROM zone_daily_recommendations WHERE zone_id='+zone.zone_id+' AND date<\\''+TODAY+'\\' ORDER BY date DESC LIMIT 2')).map(r=>r.zone_stress_summary);\n    const hist3=[zoneSt,...past].slice(0,3);\n    const rr=await q('SELECT rainfall_mm FROM zone_daily_recommendations WHERE zone_id='+zone.zone_id+' ORDER BY date DESC LIMIT 1');\n    const hasRain=rr.length&&(rr[0].rainfall_mm||0)>5;\n    const{action,reasoning}=irrAction(hist3,hasRain);\n    const rec=JSON.stringify({zone_id:String(zone.zone_id),date:TODAY,trees:trees.map(t=>({'tree_id':t.name,'device_eui':t.deveui,'mds_µm':t.mds_um,'tgr_µm':t.tgr_um,'tgr_smoothed_µm':t.tgr_smoothed_um,'twd_µm':t.twd_um,'dr_µm':t.dr_um,'recovery_delta_µm':t.recovery_delta_um,'signal_intensity':t.si,'stress_level':t.stress||'none','data_quality':t.qual})),zone_stress_summary:zoneSt,rainfall_mm:0,water_delivered_liters:0,irrigation_action:action,action_reasoning:reasoning});\n    await exec('INSERT OR REPLACE INTO zone_daily_recommendations(zone_id,date,zone_stress_summary,rainfall_mm,water_delivered_liters,irrigation_action,action_reasoning,recommendation_json,computed_at)VALUES('+zone.zone_id+','+s(TODAY)+','+s(zoneSt)+',0,0,'+s(action)+','+s(reasoning)+','+s(rec)+','+s(NOW.toISOString())+')');\n    summary.push({zone_id:zone.zone_id,zone:zone.zone_name,stress:zoneSt,action});\n    node.log('Zone '+zone.zone_name+': '+zoneSt+' → '+action);\n  }\n  node.status({fill:'green',shape:'dot',text:TODAY+' — '+zones.length+' zone(s)'});\n  msg.payload={success:true,date:TODAY,zones:summary};\n  await close(); return msg;\n}catch(err){\n  node.error('Analytics: '+err.message+'\\n'+err.stack);\n  node.status({fill:'red',shape:'ring',text:err.message});\n  try{await close();}catch(e){}\n  return null;\n}\n})();"
   },
   {
     "id": "dendro-compute-debug",
@@ -4805,7 +4811,7 @@
     "z": "dendro-analytics-tab",
     "name": "Response",
     "x": 900,
-    "y": 200,
+    "y": 300,
     "wires": []
   },
   {
@@ -4814,7 +4820,7 @@
     "z": "dendro-analytics-tab",
     "name": "CORS Response",
     "x": 900,
-    "y": 560,
+    "y": 600,
     "wires": []
   },
   {
@@ -4825,7 +4831,7 @@
     "method": "get",
     "url": "/api/dendrometer/:deveui/daily",
     "x": 150,
-    "y": 160,
+    "y": 180,
     "wires": [
       [
         "dendro-daily-fn"
@@ -4838,13 +4844,19 @@
     "z": "dendro-analytics-tab",
     "name": "Get Daily Indicators",
     "x": 420,
-    "y": 160,
+    "y": 180,
     "wires": [
       [
         "dendro-http-resp"
       ]
     ],
-    "func": "const auth = msg.req.headers.authorization;\nif (!auth || !auth.startsWith('Bearer ')) {\n  msg.statusCode = 401; msg.payload = { error: 'Unauthorized' };\n  msg.headers = { 'Access-Control-Allow-Origin': '*', 'Content-Type': 'application/json' };\n  return msg;\n}\nconst cp = global.get('cp');\nconst DB = '/data/db/farming.db';\nfunction q(sql) {\n  const r = cp.spawnSync('sqlite3',['-json',DB,sql],{timeout:15000,encoding:'utf8'});\n  if (r.status!==0) return [];\n  const o=(r.stdout||'').trim(); return o?JSON.parse(o):[];\n}\nfunction n(v){return(v===null||v===undefined||!isFinite(Number(v)))?'NULL':String(Number(v));}\nfunction s(v){return(v===null||v===undefined)?'NULL':\"'\"+String(v).replace(/'/g,\"''\")+\"'\";}\nfunction exec(sql){const r=cp.spawnSync('sqlite3',[DB,sql],{timeout:10000,encoding:'utf8'});return r.status===0;}\nfunction respond(data,code){\n  msg.statusCode=code||200;\n  msg.payload=data;\n  msg.headers={'Access-Control-Allow-Origin':'*','Content-Type':'application/json'};\n  return msg;\n}\nconst deveui = (msg.req.params.deveui||'').toUpperCase().replace(/'/g,\"''\");\nconst days   = Math.min(Math.max(parseInt(msg.req.query.days)||7,1),90);\nconst rows   = q(`SELECT * FROM dendrometer_daily\n                  WHERE deveui='${deveui}' ORDER BY date DESC LIMIT ${days}`);\nreturn respond(rows);"
+    "libs": [
+      {
+        "var": "sqlite3",
+        "module": "sqlite3"
+      }
+    ],
+    "func": "return (async()=>{\n\nconst auth = msg.req.headers.authorization;\nif (!auth || !auth.startsWith('Bearer ')) {\n  msg.statusCode=401; msg.payload={error:'Unauthorized'};\n  msg.headers={'Access-Control-Allow-Origin':'*'}; return msg;\n}\n\nconst _db  = new sqlite3.Database('/data/db/farming.db');\nconst q    = (sql) => new Promise((res,rej) => _db.all(sql, (e,r) => e?rej(e):res(r||[])));\nconst exec = (sql) => new Promise((res,rej) => _db.run(sql, e => e?rej(e):res(true)));\nconst close = () => new Promise(res => _db.close(() => res()));\nfunction n(v){return(v===null||v===undefined||!isFinite(Number(v)))?'NULL':String(Number(v));}\nfunction s(v){return(v===null||v===undefined)?'NULL':\"'\"+String(v).replace(/'/g,\"''\")+\"'\";}\nfunction respond(data,code){\n  msg.statusCode=code||200; msg.payload=data;\n  msg.headers={'Access-Control-Allow-Origin':'*','Content-Type':'application/json'};\n  return msg;\n}\ntry{\nconst deveui=(msg.req.params.deveui||'').toUpperCase().replace(/'/g,\"''\");\nconst days=Math.min(Math.max(parseInt(msg.req.query.days)||7,1),90);\nconst rows=await q('SELECT * FROM dendrometer_daily WHERE deveui=\\''+deveui+'\\' ORDER BY date DESC LIMIT '+days);\nawait close(); return respond(rows);\n}catch(e){try{await close();}catch(_){} return respond({error:e.message},500);}\n})();"
   },
   {
     "id": "dendro-zone-rec-http",
@@ -4854,7 +4866,7 @@
     "method": "get",
     "url": "/api/irrigation-zones/:zone_id/recommendations",
     "x": 150,
-    "y": 240,
+    "y": 260,
     "wires": [
       [
         "dendro-zone-rec-fn"
@@ -4867,13 +4879,19 @@
     "z": "dendro-analytics-tab",
     "name": "Get Zone Recommendations",
     "x": 420,
-    "y": 240,
+    "y": 260,
     "wires": [
       [
         "dendro-http-resp"
       ]
     ],
-    "func": "const auth = msg.req.headers.authorization;\nif (!auth || !auth.startsWith('Bearer ')) {\n  msg.statusCode = 401; msg.payload = { error: 'Unauthorized' };\n  msg.headers = { 'Access-Control-Allow-Origin': '*', 'Content-Type': 'application/json' };\n  return msg;\n}\nconst cp = global.get('cp');\nconst DB = '/data/db/farming.db';\nfunction q(sql) {\n  const r = cp.spawnSync('sqlite3',['-json',DB,sql],{timeout:15000,encoding:'utf8'});\n  if (r.status!==0) return [];\n  const o=(r.stdout||'').trim(); return o?JSON.parse(o):[];\n}\nfunction n(v){return(v===null||v===undefined||!isFinite(Number(v)))?'NULL':String(Number(v));}\nfunction s(v){return(v===null||v===undefined)?'NULL':\"'\"+String(v).replace(/'/g,\"''\")+\"'\";}\nfunction exec(sql){const r=cp.spawnSync('sqlite3',[DB,sql],{timeout:10000,encoding:'utf8'});return r.status===0;}\nfunction respond(data,code){\n  msg.statusCode=code||200;\n  msg.payload=data;\n  msg.headers={'Access-Control-Allow-Origin':'*','Content-Type':'application/json'};\n  return msg;\n}\nconst zoneId = parseInt(msg.req.params.zone_id);\nconst days   = Math.min(Math.max(parseInt(msg.req.query.days)||30,1),365);\nconst rows   = q(`SELECT zone_id,date,zone_stress_summary,rainfall_mm,\n                         water_delivered_liters,irrigation_action,action_reasoning,computed_at\n                  FROM zone_daily_recommendations\n                  WHERE zone_id=${zoneId} ORDER BY date DESC LIMIT ${days}`);\nreturn respond(rows);"
+    "libs": [
+      {
+        "var": "sqlite3",
+        "module": "sqlite3"
+      }
+    ],
+    "func": "return (async()=>{\n\nconst auth = msg.req.headers.authorization;\nif (!auth || !auth.startsWith('Bearer ')) {\n  msg.statusCode=401; msg.payload={error:'Unauthorized'};\n  msg.headers={'Access-Control-Allow-Origin':'*'}; return msg;\n}\n\nconst _db  = new sqlite3.Database('/data/db/farming.db');\nconst q    = (sql) => new Promise((res,rej) => _db.all(sql, (e,r) => e?rej(e):res(r||[])));\nconst exec = (sql) => new Promise((res,rej) => _db.run(sql, e => e?rej(e):res(true)));\nconst close = () => new Promise(res => _db.close(() => res()));\nfunction n(v){return(v===null||v===undefined||!isFinite(Number(v)))?'NULL':String(Number(v));}\nfunction s(v){return(v===null||v===undefined)?'NULL':\"'\"+String(v).replace(/'/g,\"''\")+\"'\";}\nfunction respond(data,code){\n  msg.statusCode=code||200; msg.payload=data;\n  msg.headers={'Access-Control-Allow-Origin':'*','Content-Type':'application/json'};\n  return msg;\n}\ntry{\nconst zoneId=parseInt(msg.req.params.zone_id);\nconst days=Math.min(Math.max(parseInt(msg.req.query.days)||30,1),365);\nconst rows=await q('SELECT zone_id,date,zone_stress_summary,rainfall_mm,water_delivered_liters,irrigation_action,action_reasoning,computed_at FROM zone_daily_recommendations WHERE zone_id='+zoneId+' ORDER BY date DESC LIMIT '+days);\nawait close(); return respond(rows);\n}catch(e){try{await close();}catch(_){} return respond({error:e.message},500);}\n})();"
   },
   {
     "id": "dendro-raw-http",
@@ -4883,7 +4901,7 @@
     "method": "get",
     "url": "/api/dendrometer/:deveui/readings",
     "x": 150,
-    "y": 320,
+    "y": 340,
     "wires": [
       [
         "dendro-raw-fn"
@@ -4896,13 +4914,19 @@
     "z": "dendro-analytics-tab",
     "name": "Get Raw Readings",
     "x": 420,
-    "y": 320,
+    "y": 340,
     "wires": [
       [
         "dendro-http-resp"
       ]
     ],
-    "func": "const auth = msg.req.headers.authorization;\nif (!auth || !auth.startsWith('Bearer ')) {\n  msg.statusCode = 401; msg.payload = { error: 'Unauthorized' };\n  msg.headers = { 'Access-Control-Allow-Origin': '*', 'Content-Type': 'application/json' };\n  return msg;\n}\nconst cp = global.get('cp');\nconst DB = '/data/db/farming.db';\nfunction q(sql) {\n  const r = cp.spawnSync('sqlite3',['-json',DB,sql],{timeout:15000,encoding:'utf8'});\n  if (r.status!==0) return [];\n  const o=(r.stdout||'').trim(); return o?JSON.parse(o):[];\n}\nfunction n(v){return(v===null||v===undefined||!isFinite(Number(v)))?'NULL':String(Number(v));}\nfunction s(v){return(v===null||v===undefined)?'NULL':\"'\"+String(v).replace(/'/g,\"''\")+\"'\";}\nfunction exec(sql){const r=cp.spawnSync('sqlite3',[DB,sql],{timeout:10000,encoding:'utf8'});return r.status===0;}\nfunction respond(data,code){\n  msg.statusCode=code||200;\n  msg.payload=data;\n  msg.headers={'Access-Control-Allow-Origin':'*','Content-Type':'application/json'};\n  return msg;\n}\nconst deveui = (msg.req.params.deveui||'').toUpperCase().replace(/'/g,\"''\");\nconst from   = msg.req.query.from || new Date(Date.now()-86400000).toISOString();\nconst to     = msg.req.query.to   || new Date().toISOString();\nconst rows   = q(`SELECT id,deveui,position_um,adc_v,bat_v,is_valid,is_outlier,recorded_at\n                  FROM dendrometer_readings\n                  WHERE deveui='${deveui}'\n                    AND recorded_at >= '${from.replace(/'/g,\"''\")}'\n                    AND recorded_at <  '${to.replace(/'/g,\"''\")}'\n                  ORDER BY recorded_at ASC LIMIT 2000`);\nreturn respond(rows);"
+    "libs": [
+      {
+        "var": "sqlite3",
+        "module": "sqlite3"
+      }
+    ],
+    "func": "return (async()=>{\n\nconst auth = msg.req.headers.authorization;\nif (!auth || !auth.startsWith('Bearer ')) {\n  msg.statusCode=401; msg.payload={error:'Unauthorized'};\n  msg.headers={'Access-Control-Allow-Origin':'*'}; return msg;\n}\n\nconst _db  = new sqlite3.Database('/data/db/farming.db');\nconst q    = (sql) => new Promise((res,rej) => _db.all(sql, (e,r) => e?rej(e):res(r||[])));\nconst exec = (sql) => new Promise((res,rej) => _db.run(sql, e => e?rej(e):res(true)));\nconst close = () => new Promise(res => _db.close(() => res()));\nfunction n(v){return(v===null||v===undefined||!isFinite(Number(v)))?'NULL':String(Number(v));}\nfunction s(v){return(v===null||v===undefined)?'NULL':\"'\"+String(v).replace(/'/g,\"''\")+\"'\";}\nfunction respond(data,code){\n  msg.statusCode=code||200; msg.payload=data;\n  msg.headers={'Access-Control-Allow-Origin':'*','Content-Type':'application/json'};\n  return msg;\n}\ntry{\nconst deveui=(msg.req.params.deveui||'').toUpperCase().replace(/'/g,\"''\");\nconst from=(msg.req.query.from||new Date(Date.now()-86400000).toISOString()).replace(/'/g,\"''\");\nconst to=(msg.req.query.to||new Date().toISOString()).replace(/'/g,\"''\");\nconst rows=await q(\"SELECT id,deveui,position_um,adc_v,bat_v,is_valid,is_outlier,recorded_at FROM dendrometer_readings WHERE deveui='\"+deveui+\"' AND recorded_at>='\"+from+\"' AND recorded_at<'\"+to+\"' ORDER BY recorded_at ASC LIMIT 2000\");\nawait close(); return respond(rows);\n}catch(e){try{await close();}catch(_){} return respond({error:e.message},500);}\n})();"
   },
   {
     "id": "dendro-ref-tree-http",
@@ -4912,7 +4936,7 @@
     "method": "put",
     "url": "/api/devices/:deveui/reference-tree",
     "x": 150,
-    "y": 400,
+    "y": 420,
     "wires": [
       [
         "dendro-ref-tree-fn"
@@ -4925,13 +4949,19 @@
     "z": "dendro-analytics-tab",
     "name": "Set Reference Tree",
     "x": 420,
-    "y": 400,
+    "y": 420,
     "wires": [
       [
         "dendro-http-resp"
       ]
     ],
-    "func": "const auth = msg.req.headers.authorization;\nif (!auth || !auth.startsWith('Bearer ')) {\n  msg.statusCode = 401; msg.payload = { error: 'Unauthorized' };\n  msg.headers = { 'Access-Control-Allow-Origin': '*', 'Content-Type': 'application/json' };\n  return msg;\n}\nconst cp = global.get('cp');\nconst DB = '/data/db/farming.db';\nfunction q(sql) {\n  const r = cp.spawnSync('sqlite3',['-json',DB,sql],{timeout:15000,encoding:'utf8'});\n  if (r.status!==0) return [];\n  const o=(r.stdout||'').trim(); return o?JSON.parse(o):[];\n}\nfunction n(v){return(v===null||v===undefined||!isFinite(Number(v)))?'NULL':String(Number(v));}\nfunction s(v){return(v===null||v===undefined)?'NULL':\"'\"+String(v).replace(/'/g,\"''\")+\"'\";}\nfunction exec(sql){const r=cp.spawnSync('sqlite3',[DB,sql],{timeout:10000,encoding:'utf8'});return r.status===0;}\nfunction respond(data,code){\n  msg.statusCode=code||200;\n  msg.payload=data;\n  msg.headers={'Access-Control-Allow-Origin':'*','Content-Type':'application/json'};\n  return msg;\n}\nconst deveui  = (msg.req.params.deveui||'').toUpperCase();\nconst body    = msg.req.body || msg.payload || {};\nconst isRef   = body.is_reference_tree ? 1 : 0;\nconst dev     = q(`SELECT deveui FROM devices WHERE deveui='${deveui.replace(/'/g,\"''\")}'`);\nif (!dev.length) return respond({ error:'Device not found' }, 404);\nexec(`UPDATE devices SET is_reference_tree=${isRef} WHERE deveui='${deveui.replace(/'/g,\"''\") }'`);\nreturn respond({ success:true, deveui, is_reference_tree:isRef });"
+    "libs": [
+      {
+        "var": "sqlite3",
+        "module": "sqlite3"
+      }
+    ],
+    "func": "return (async()=>{\n\nconst auth = msg.req.headers.authorization;\nif (!auth || !auth.startsWith('Bearer ')) {\n  msg.statusCode=401; msg.payload={error:'Unauthorized'};\n  msg.headers={'Access-Control-Allow-Origin':'*'}; return msg;\n}\n\nconst _db  = new sqlite3.Database('/data/db/farming.db');\nconst q    = (sql) => new Promise((res,rej) => _db.all(sql, (e,r) => e?rej(e):res(r||[])));\nconst exec = (sql) => new Promise((res,rej) => _db.run(sql, e => e?rej(e):res(true)));\nconst close = () => new Promise(res => _db.close(() => res()));\nfunction n(v){return(v===null||v===undefined||!isFinite(Number(v)))?'NULL':String(Number(v));}\nfunction s(v){return(v===null||v===undefined)?'NULL':\"'\"+String(v).replace(/'/g,\"''\")+\"'\";}\nfunction respond(data,code){\n  msg.statusCode=code||200; msg.payload=data;\n  msg.headers={'Access-Control-Allow-Origin':'*','Content-Type':'application/json'};\n  return msg;\n}\ntry{\nconst deveui=(msg.req.params.deveui||'').toUpperCase();\nconst isRef=(msg.req.body||{}).is_reference_tree?1:0;\nconst eui=deveui.replace(/'/g,\"''\");\nconst dev=await q(\"SELECT deveui FROM devices WHERE deveui='\"+eui+\"'\");\nif(!dev.length){await close();return respond({error:'Device not found'},404);}\nawait exec(\"UPDATE devices SET is_reference_tree=\"+isRef+\" WHERE deveui='\"+eui+\"'\");\nawait close(); return respond({success:true,deveui,is_reference_tree:isRef});\n}catch(e){try{await close();}catch(_){} return respond({error:e.message},500);}\n})();"
   },
   {
     "id": "dendro-tz-http",
@@ -4941,7 +4971,7 @@
     "method": "put",
     "url": "/api/irrigation-zones/:zone_id/timezone",
     "x": 150,
-    "y": 480,
+    "y": 500,
     "wires": [
       [
         "dendro-tz-fn"
@@ -4954,23 +4984,28 @@
     "z": "dendro-analytics-tab",
     "name": "Set Zone Timezone",
     "x": 420,
-    "y": 480,
+    "y": 500,
     "wires": [
       [
         "dendro-http-resp"
       ]
     ],
-    "func": "const auth = msg.req.headers.authorization;\nif (!auth || !auth.startsWith('Bearer ')) {\n  msg.statusCode = 401; msg.payload = { error: 'Unauthorized' };\n  msg.headers = { 'Access-Control-Allow-Origin': '*', 'Content-Type': 'application/json' };\n  return msg;\n}\nconst cp = global.get('cp');\nconst DB = '/data/db/farming.db';\nfunction q(sql) {\n  const r = cp.spawnSync('sqlite3',['-json',DB,sql],{timeout:15000,encoding:'utf8'});\n  if (r.status!==0) return [];\n  const o=(r.stdout||'').trim(); return o?JSON.parse(o):[];\n}\nfunction n(v){return(v===null||v===undefined||!isFinite(Number(v)))?'NULL':String(Number(v));}\nfunction s(v){return(v===null||v===undefined)?'NULL':\"'\"+String(v).replace(/'/g,\"''\")+\"'\";}\nfunction exec(sql){const r=cp.spawnSync('sqlite3',[DB,sql],{timeout:10000,encoding:'utf8'});return r.status===0;}\nfunction respond(data,code){\n  msg.statusCode=code||200;\n  msg.payload=data;\n  msg.headers={'Access-Control-Allow-Origin':'*','Content-Type':'application/json'};\n  return msg;\n}\nconst zoneId = parseInt(msg.req.params.zone_id);\nconst body   = msg.req.body || msg.payload || {};\nconst tz     = (body.timezone||'UTC').replace(/'/g,\"''\");\nexec(`UPDATE irrigation_zones SET timezone='${tz}' WHERE id=${zoneId}`);\nreturn respond({ success:true, zone_id:zoneId, timezone:tz });"
+    "libs": [
+      {
+        "var": "sqlite3",
+        "module": "sqlite3"
+      }
+    ],
+    "func": "return (async()=>{\n\nconst auth = msg.req.headers.authorization;\nif (!auth || !auth.startsWith('Bearer ')) {\n  msg.statusCode=401; msg.payload={error:'Unauthorized'};\n  msg.headers={'Access-Control-Allow-Origin':'*'}; return msg;\n}\n\nconst _db  = new sqlite3.Database('/data/db/farming.db');\nconst q    = (sql) => new Promise((res,rej) => _db.all(sql, (e,r) => e?rej(e):res(r||[])));\nconst exec = (sql) => new Promise((res,rej) => _db.run(sql, e => e?rej(e):res(true)));\nconst close = () => new Promise(res => _db.close(() => res()));\nfunction n(v){return(v===null||v===undefined||!isFinite(Number(v)))?'NULL':String(Number(v));}\nfunction s(v){return(v===null||v===undefined)?'NULL':\"'\"+String(v).replace(/'/g,\"''\")+\"'\";}\nfunction respond(data,code){\n  msg.statusCode=code||200; msg.payload=data;\n  msg.headers={'Access-Control-Allow-Origin':'*','Content-Type':'application/json'};\n  return msg;\n}\ntry{\nconst zoneId=parseInt(msg.req.params.zone_id);\nconst tz=((msg.req.body||{}).timezone||'UTC').replace(/'/g,\"''\");\nawait exec(\"UPDATE irrigation_zones SET timezone='\"+tz+\"' WHERE id=\"+zoneId);\nawait close(); return respond({success:true,zone_id:zoneId,timezone:tz});\n}catch(e){try{await close();}catch(_){} return respond({error:e.message},500);}\n})();"
   },
   {
     "id": "dendro-cors-http",
     "type": "http in",
     "z": "dendro-analytics-tab",
-    "name": "OPTIONS /api/dendrometer/*",
     "method": "options",
     "url": "/api/dendrometer/*",
     "x": 150,
-    "y": 560,
+    "y": 580,
     "wires": [
       [
         "dendro-cors-fn"
@@ -4981,11 +5016,10 @@
     "id": "dendro-zone-cors-http",
     "type": "http in",
     "z": "dendro-analytics-tab",
-    "name": "OPTIONS /api/irrigation-zones/:zone_id/recommendations",
     "method": "options",
     "url": "/api/irrigation-zones/:zone_id/recommendations",
     "x": 150,
-    "y": 620,
+    "y": 640,
     "wires": [
       [
         "dendro-cors-fn"
@@ -4996,11 +5030,10 @@
     "id": "dendro-zone-ref-cors-http",
     "type": "http in",
     "z": "dendro-analytics-tab",
-    "name": "OPTIONS /api/devices/:deveui/reference-tree",
     "method": "options",
     "url": "/api/devices/:deveui/reference-tree",
     "x": 150,
-    "y": 680,
+    "y": 700,
     "wires": [
       [
         "dendro-cors-fn"
@@ -5012,13 +5045,13 @@
     "type": "function",
     "z": "dendro-analytics-tab",
     "name": "CORS Preflight",
-    "x": 420,
-    "y": 620,
+    "x": 450,
+    "y": 640,
     "wires": [
       [
         "dendro-cors-resp"
       ]
     ],
-    "func": "msg.statusCode = 204; msg.payload = '';\nmsg.headers = {\n  'Access-Control-Allow-Origin': '*',\n  'Access-Control-Allow-Methods': 'GET,PUT,POST,DELETE,OPTIONS',\n  'Access-Control-Allow-Headers': 'Authorization,Content-Type'\n};\nreturn msg;"
+    "func": "msg.statusCode=204;msg.payload='';msg.headers={'Access-Control-Allow-Origin':'*','Access-Control-Allow-Methods':'GET,PUT,POST,DELETE,OPTIONS','Access-Control-Allow-Headers':'Authorization,Content-Type'};return msg;"
   }
 ]
