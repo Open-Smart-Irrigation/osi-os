@@ -5,6 +5,7 @@ import { IrrigationActionBanner } from './IrrigationActionBanner';
 import { DendrometerTreeCard } from './DendrometerTreeCard';
 import { DendrometerMonitor } from './DendrometerMonitor';
 import { STRESS_CONFIG } from './stressConfig';
+import { ZoneAnalysisCard } from './ZoneAnalysisCard';
 
 interface Props {
   zone: IrrigationZone;
@@ -107,11 +108,13 @@ export const DendrometerSection: React.FC<Props> = ({ zone, devices }) => {
                   <NoDataBanner />
                 )}
 
+                {/* Zone analysis card — per-parameter averages */}
+                <ZoneAnalysisCard devices={dendroDevices} dailyMap={dailyMap} />
+
                 {/* Tree grid */}
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   {dendroDevices.map(device => {
                     const rows = dailyMap[device.deveui] ?? [];
-                    // rows is newest-first from API
                     const todayRow    = rows[0] ?? null;
                     const sparkline   = [...rows].reverse(); // oldest-first for sparkline
                     return (

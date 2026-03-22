@@ -28,8 +28,9 @@ export interface Device {
   current_state?: 'OPEN' | 'CLOSED';
 
   // Per-device opt-in flags for optional LSN50 sensors
-  dendro_enabled?: number; // 0 = disabled (default), 1 = OPKON dendrometer on ADC
-  temp_enabled?: number;   // 0 = disabled (default), 1 = DS18B20 probe on temp input
+  dendro_enabled?: number;      // 0 = disabled (default), 1 = OPKON dendrometer on ADC
+  temp_enabled?: number;        // 0 = disabled (default), 1 = DS18B20 probe on temp input
+  is_reference_tree?: number;   // 0 = monitored/irrigated, 1 = control/reference tree
 
   // Irrigation zone assignment
   irrigation_zone_id?: number | null;
@@ -74,7 +75,15 @@ export interface ValveActionRequest {
 }
 
 // ---- Irrigation schedule types ----
-export type TriggerMetric = 'SWT_WM1' | 'SWT_WM2' | 'SWT_AVG';
+export type TriggerMetric =
+  | 'SWT_WM1' | 'SWT_WM2' | 'SWT_WM3' | 'SWT_AVG'  // Soil Water Tension (kPa)
+  | 'VWC'                                             // Volumetric Water Content (%)
+  | 'DENDRO';                                         // Dendrometer stress-based
+
+export type SchedulerType = 'SWT' | 'VWC' | 'DENDRO';
+
+/** Dendrometer stress threshold (threshold_kpa encodes this for DENDRO trigger) */
+export type DendroStressThreshold = 'mild' | 'moderate' | 'significant' | 'severe';
 
 export interface IrrigationSchedule {
   irrigation_zone_id: number;

@@ -283,7 +283,7 @@ export const DendrometerMonitor: React.FC<Props> = ({ device, daily, onClose }) 
       <div className="flex-1 bg-black/40 backdrop-blur-sm" onClick={onClose} />
 
       {/* Drawer */}
-      <div className="w-full max-w-lg bg-[var(--card)] flex flex-col shadow-2xl overflow-hidden">
+      <div className="w-full md:max-w-2xl bg-[var(--card)] flex flex-col shadow-2xl overflow-hidden">
         {/* Header */}
         <div className="flex items-center gap-3 px-5 py-4 border-b border-[var(--border)]" style={{ borderLeftWidth: 4, borderLeftColor: cfg.hex }}>
           <button
