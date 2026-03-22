@@ -12,6 +12,9 @@ import type {
   CreateZoneRequest,
   UpdateIrrigationScheduleRequest,
   IrrigationSchedule,
+  DendroDaily,
+  ZoneRecommendation,
+  DendroReading,
 } from '../types/farming';
 
 // Create axios instance with base configuration
@@ -144,6 +147,24 @@ export const lsn50API = {
   },
   setTempEnabled: async (deveui: string, enabled: boolean): Promise<void> => {
     await api.put(`/api/devices/${deveui}/temp`, { enabled });
+  },
+};
+
+export const dendroAnalyticsAPI = {
+  getDailyIndicators: async (deveui: string, days = 7): Promise<DendroDaily[]> => {
+    const response = await api.get<DendroDaily[]>(`/api/dendrometer/${deveui}/daily`, { params: { days } });
+    return response.data;
+  },
+  getZoneRecommendations: async (zoneId: number, days = 14): Promise<ZoneRecommendation[]> => {
+    const response = await api.get<ZoneRecommendation[]>(`/api/irrigation-zones/${zoneId}/recommendations`, { params: { days } });
+    return response.data;
+  },
+  getRawReadings: async (deveui: string, from: string, to: string): Promise<DendroReading[]> => {
+    const response = await api.get<DendroReading[]>(`/api/dendrometer/${deveui}/readings`, { params: { from, to } });
+    return response.data;
+  },
+  setReferenceTree: async (deveui: string, isRef: boolean): Promise<void> => {
+    await api.put(`/api/devices/${deveui}/reference-tree`, { is_reference_tree: isRef ? 1 : 0 });
   },
 };
 
