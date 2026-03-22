@@ -263,38 +263,43 @@ scp -r build/* root@<pi-ip>:/usr/lib/node-red/gui/
 
 1. **Fix valve bugs** (error prompt + last_seen)
 2. **Dragino SDI-12-LB/LS support** — 4 dendrometers per device; trunk-diameter-based irrigation trigger (Maximum Daily Shrinkage algorithm). Payload spec pending.
-3. **OSI Server integration** — cloud monitoring & control (see section below)
-4. **Multi-language UI** — German, French, Italian, Luganda (react-i18next)
-5. **First-boot init script** + firmware build fix
+3. **Multi-language UI** — German, French, Italian, Luganda (react-i18next)
+4. **First-boot init script** + firmware build fix
+
+> OSI Server integration is **complete** — see OSI Server Integration section below.
 
 ---
 
-## OSI Server Integration (Design)
+## OSI Server Integration (Implemented)
 
-The OSI Server is a separate cloud service for multi-device monitoring and remote control. The Pi acts as an **agent** that communicates with the server.
+The OSI Server is a live cloud service at `server.opensmartirrigation.org`. The Pi communicates via persistent MQTT WebSocket.
 
-**Proposed connection model (both push and pull):**
+**Connection model (MQTT over WebSocket):**
 
 ```
 Pi (OSI OS)                          OSI Server (cloud)
-    │                                      │
-    │── POST /api/v1/telemetry ──────────>│  Push sensor data (batched, periodic)
-    │<─ GET /api/v1/commands/pending ─────│  Pull pending commands (poll interval)
-    │── POST /api/v1/commands/{id}/ack ──>│  Acknowledge executed command
-    │── POST /api/v1/config/sync ────────>│  Push current config snapshot
-    │<─ GET /api/v1/config/latest ────────│  Pull config updates from server
+    │── devices/{eui}/heartbeat ──────>│  Every 60s — device presence
+    │── devices/{eui}/telemetry ───────>│  Every uplink — sensor data
+    │── devices/{eui}/status ──────────>│  State changes
+    │── devices/{eui}/command_ack ─────>│  Command acknowledgement
+    │<─ devices/{eui}/commands ─────────│  Commands from server UI
 ```
 
-**Authentication:** Each Pi registers with a unique `device_id` (derived from Ethernet MAC) and a server-issued `api_key`. Stored in UCI config on the device.
+**Authentication:** Pi identifies by LoRa concentrator EUI (`0016C001F11766E7`). MQTT credentials stored in env vars `DEVICE_EUI` / `DEVICE_MQTT_PASSWORD` on the Pi. Managed in `OSI-Server Cloud Integration` flow tab.
 
-**What can be controlled remotely:**
-- Valve OPEN/CLOSE commands (queued, delivered on next poll)
-- Irrigation schedule updates (threshold, duration, enabled)
-- Device naming and zone assignment
+**Commands supported (server → Pi):**
+- `UPDATE_SCHEDULE` — updates `irrigation_schedules` table on Pi (zoneId, triggerMetric, thresholdKpa, durationMinutes, enabled)
+- Valve commands (OPEN/CLOSE) via existing `Actuator_STREGA` tab
 
-**Offline behaviour:** Pi operates fully independently when server is unreachable. Commands queue on server and are consumed when connectivity resumes.
+**Offline behaviour:** Pi operates fully independently. Commands sent while Pi is offline will be delivered when MQTT reconnects (QoS 1).
 
-**Implementation location:** New Node-RED flow tab `OSI Server Sync` + new UCI config for server URL and API key.
+**CRITICAL — topic env var limitation:** Node-RED 4.x MQTT `in` node topic field does NOT expand env vars. Commands subscription topic is HARDCODED: `devices/0016C001F11766E7/commands`.
+
+**OSI Server stack:** Spring Boot 3.4.3 / Java 21 / PostgreSQL 16 / Eclipse Paho MQTT / React 18 (Vite)
+- Repo: `github.com/Open-Smart-Irrigation/osi-server`
+- Docker: `rocky@83.228.220.63:~/docker/osi-server/docker/`
+- Rebuild: `docker compose up --build -d`
+- Frontend source MUST be in the repo — Docker builds from source, not pre-built dist
 
 ---
 
