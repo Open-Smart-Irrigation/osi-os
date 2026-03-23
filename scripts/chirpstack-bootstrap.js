@@ -366,13 +366,9 @@ async function main() {
     CHIRPSTACK_PROFILE_STREGA:   stregaProfileId,
     CHIRPSTACK_PROFILE_LSN50:    lsn50ProfileId,
     CHIRPSTACK_PROFILE_RAK10701: rak10701ProfileId,
-    // AppKeys (fixed per device type — printed on device label)
-    // Set these BEFORE registering devices, or re-run with correct values:
-    // CHIRPSTACK_APPKEY_KIWI=<32-hex-chars>
-    // CHIRPSTACK_APPKEY_STREGA=<32-hex-chars>
-    // CHIRPSTACK_APPKEY_LSN50=<32-hex-chars>
-    // CHIRPSTACK_APPKEY_DRAGINO_SN50V2=<32-hex-chars>
   });
+  // Note: AppKeys are per-device (unique, printed on each device label).
+  // They are entered by the user in the registration UI — no env vars needed.
 
   patchSettingsJs();
   updateFlowsJson(sensorsAppId, actuatorsAppId, fieldTesterAppId);
@@ -390,13 +386,9 @@ async function main() {
   console.log(`    ${CFG.profileStregaName.padEnd(24)} ${stregaProfileId}`);
   console.log(`    ${CFG.profileLsn50Name.padEnd(24)} ${lsn50ProfileId}`);
   console.log(`    ${CFG.profileRakName.padEnd(24)} ${rak10701ProfileId}\n`);
-  console.log('  Next steps:');
-  console.log(`  1. Add AppKeys to ${CFG.envFile}:`);
-  console.log('       CHIRPSTACK_APPKEY_KIWI=<32-hex>             (from device label)');
-  console.log('       CHIRPSTACK_APPKEY_STREGA=<32-hex>           (from device label)');
-  console.log('       CHIRPSTACK_APPKEY_LSN50=<32-hex>            (from device label)');
-  console.log('       CHIRPSTACK_APPKEY_DRAGINO_SN50V2=<32-hex>   (from device label)');
-  console.log('  2. Restart Node-RED:  /etc/init.d/node-red restart\n');
+  console.log('  Next step:');
+  console.log('  1. Restart Node-RED:  /etc/init.d/node-red restart');
+  console.log('  2. Register devices via the OSI OS UI (type + DevEUI + AppKey from device label)\n');
 }
 
 main().catch(err => {
