@@ -20,6 +20,7 @@ export const AddDeviceModal: React.FC<AddDeviceModalProps> = ({
   const [selectedType, setSelectedType] = useState<DeviceType>('KIWI_SENSOR');
   const [name, setName] = useState('');
   const [deveui, setDeveui] = useState('');
+  const [appkey, setAppkey] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
@@ -46,9 +47,12 @@ export const AddDeviceModal: React.FC<AddDeviceModalProps> = ({
     setError('');
 
     // Validate DevEUI (16 hex characters)
-    const deveuiRegex = /^[0-9A-Fa-f]{16}$/;
-    if (!deveuiRegex.test(deveui)) {
+    if (!/^[0-9A-Fa-f]{16}$/.test(deveui)) {
       setError(t('addModal.deveuiInvalid'));
+      return;
+    }
+    if (appkey && !/^[0-9A-Fa-f]{32}$/.test(appkey)) {
+      setError(t('addModal.appkeyInvalid', 'AppKey must be exactly 32 hex characters'));
       return;
     }
 
@@ -58,10 +62,12 @@ export const AddDeviceModal: React.FC<AddDeviceModalProps> = ({
         deveui,
         name,
         type_id: selectedType,
+        appkey: appkey || undefined,
       });
       // Reset form
       setName('');
       setDeveui('');
+      setAppkey('');
       onDeviceAdded();
       onClose();
     } catch (err: any) {
@@ -144,6 +150,25 @@ export const AddDeviceModal: React.FC<AddDeviceModalProps> = ({
             />
             <p className="text-[var(--text-tertiary)] text-sm mt-1">
               {t('addModal.deveuiHint')}
+            </p>
+          </div>
+
+          {/* AppKey */}
+          <div>
+            <label htmlFor="appkey" className="block text-[var(--text)] text-lg font-semibold mb-2">
+              {t('addModal.appkey', 'AppKey')}
+            </label>
+            <input
+              id="appkey"
+              type="text"
+              value={appkey}
+              onChange={(e) => setAppkey(e.target.value.toUpperCase())}
+              maxLength={32}
+              placeholder={t('addModal.appkeyPlaceholder', 'AABBCCDDEEFF00112233445566778899')}
+              className="w-full px-4 py-4 touch-target bg-white border-2 border-[var(--border)] rounded-lg text-[var(--text)] text-lg font-mono placeholder:text-[var(--text-tertiary)] focus:outline-none focus:border-[var(--focus)] focus:ring-2 focus:ring-[var(--focus)]"
+            />
+            <p className="text-[var(--text-tertiary)] text-sm mt-1">
+              {t('addModal.appkeyHint', '32 hex characters printed on the device label')}
             </p>
           </div>
 

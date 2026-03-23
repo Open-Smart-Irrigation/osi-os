@@ -68,6 +68,7 @@ export interface AddDeviceRequest {
   deveui: string;
   name: string;
   type_id: DeviceType;
+  appkey?: string;
 }
 
 export interface ValveActionRequest {
