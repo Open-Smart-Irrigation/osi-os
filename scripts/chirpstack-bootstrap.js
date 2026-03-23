@@ -16,14 +16,27 @@
  *   node /tmp/chirpstack-bootstrap.js
  *
  * Overridable via environment variables:
- *   CS_URL             ChirpStack API base URL      (default: http://localhost:8080)
- *   CS_ADMIN_EMAIL     Admin login email             (default: admin@chirpstack.io)
- *   CS_ADMIN_PASSWORD  Admin login password          (default: admin)
- *   CS_REGION          LoRaWAN region                (default: EU868)
- *                        EU868 | US915 | AU915 | AS923 | IN865 | KR920 | RU864
- *   ENV_FILE           Env file path                 (default: /srv/node-red/.chirpstack.env)
- *   SETTINGS_JS        Node-RED settings.js path     (default: /srv/node-red/settings.js)
- *   FLOWS_JSON         Node-RED flows.json path      (default: /srv/node-red/flows.json)
+ *   CS_URL                  ChirpStack REST API URL       (default: http://localhost:8090)
+ *   CS_API_KEY              Pre-created API key token     (skips login if set)
+ *                             Generate with: chirpstack -c /var/etc/chirpstack create-api-key --name osi-bootstrap
+ *   CS_ADMIN_EMAIL          Admin login email             (default: admin@chirpstack.io)
+ *   CS_ADMIN_PASSWORD       Admin login password          (default: admin)
+ *   CS_REGION               LoRaWAN region                (default: EU868)
+ *                             EU868 | US915 | AU915 | AS923 | IN865 | KR920 | RU864
+ *   ENV_FILE                Env file path                 (default: /srv/node-red/.chirpstack.env)
+ *   SETTINGS_JS             Node-RED settings.js path     (default: /srv/node-red/settings.js)
+ *   FLOWS_JSON              Node-RED flows.json path      (default: /srv/node-red/flows.json)
+ *
+ * App name overrides (use to reuse existing apps instead of creating OSI-prefixed ones):
+ *   CS_APP_SENSORS_NAME     (default: "OSI Sensors")
+ *   CS_APP_ACTUATORS_NAME   (default: "OSI Actuators")
+ *   CS_APP_FIELD_TESTER_NAME (default: "OSI Field Tester")
+ *
+ * Profile name overrides (use to reuse an existing device profile):
+ *   CS_PROFILE_KIWI_NAME    (default: "OSI KIWI Sensor")
+ *   CS_PROFILE_STREGA_NAME  (default: "OSI STREGA Valve")
+ *   CS_PROFILE_LSN50_NAME   (default: "OSI Dragino LSN50")
+ *   CS_PROFILE_RAK_NAME     (default: "OSI RAK Field Tester")
  */
 
 'use strict';
@@ -33,13 +46,23 @@ const http = require('http');
 // ─── Config ──────────────────────────────────────────────────────────────────
 
 const CFG = {
-  url:           process.env.CS_URL             || 'http://localhost:8080',
-  adminEmail:    process.env.CS_ADMIN_EMAIL     || 'admin@chirpstack.io',
-  adminPassword: process.env.CS_ADMIN_PASSWORD  || 'admin',
-  region:        process.env.CS_REGION          || 'EU868',
-  envFile:       process.env.ENV_FILE           || '/srv/node-red/.chirpstack.env',
-  settingsJs:    process.env.SETTINGS_JS        || '/srv/node-red/settings.js',
-  flowsJson:     process.env.FLOWS_JSON         || '/srv/node-red/flows.json',
+  url:                 process.env.CS_URL                   || 'http://localhost:8090',
+  apiKey:              process.env.CS_API_KEY               || '',
+  adminEmail:          process.env.CS_ADMIN_EMAIL           || 'admin@chirpstack.io',
+  adminPassword:       process.env.CS_ADMIN_PASSWORD        || 'admin',
+  region:              process.env.CS_REGION                || 'EU868',
+  envFile:             process.env.ENV_FILE                 || '/srv/node-red/.chirpstack.env',
+  settingsJs:          process.env.SETTINGS_JS              || '/srv/node-red/settings.js',
+  flowsJson:           process.env.FLOWS_JSON               || '/srv/node-red/flows.json',
+  // App names — override to reuse existing apps with different names
+  appSensorsName:      process.env.CS_APP_SENSORS_NAME      || 'OSI Sensors',
+  appActuatorsName:    process.env.CS_APP_ACTUATORS_NAME    || 'OSI Actuators',
+  appFieldTesterName:  process.env.CS_APP_FIELD_TESTER_NAME || 'OSI Field Tester',
+  // Profile names — override to reuse an existing device profile
+  profileKiwiName:     process.env.CS_PROFILE_KIWI_NAME     || 'OSI KIWI Sensor',
+  profileStregaName:   process.env.CS_PROFILE_STREGA_NAME   || 'OSI STREGA Valve',
+  profileLsn50Name:    process.env.CS_PROFILE_LSN50_NAME    || 'OSI Dragino LSN50',
+  profileRakName:      process.env.CS_PROFILE_RAK_NAME      || 'OSI RAK Field Tester',
 };
 
 // ─── HTTP helper ─────────────────────────────────────────────────────────────
@@ -50,7 +73,7 @@ function request(method, path, body, token) {
     const data = body ? JSON.stringify(body) : null;
     const opts = {
       hostname: u.hostname,
-      port:     u.port || 8080,
+      port:     u.port || 8090,
       path:     u.pathname + u.search,
       method,
       headers: {
@@ -120,8 +143,16 @@ async function getOrCreateApp(jwt, tenantId, name, description) {
 }
 
 async function getOrCreateProfile(jwt, tenantId, name, description) {
-  const list = await get(`/api/device-profiles?tenantId=${tenantId}&limit=100`, jwt);
-  const existing = (list.result || []).find(p => p.name === name);
+  // Paginate — ChirpStack ships 200+ built-in profiles
+  let offset = 0, existing = null;
+  do {
+    const list = await get(`/api/device-profiles?tenantId=${tenantId}&limit=100&offset=${offset}`, jwt);
+    const results = list.result || [];
+    existing = results.find(p => p.name === name);
+    if (existing || results.length < 100) break;
+    offset += 100;
+  } while (!existing);
+
   if (existing) {
     console.log(`  ✓ Profile exists:  "${name}" (${existing.id})`);
     return existing.id;
@@ -159,6 +190,20 @@ async function createApiKey(jwt, tenantId) {
   if (!res.token) throw new Error('API key creation returned no token');
   console.log(`  ✓ API key created (id: ${res.id})`);
   return res.token;
+}
+
+async function createApiKeyViaCLI() {
+  const { execSync } = require('child_process');
+  console.log('  + Creating API key via CLI (chirpstack create-api-key) …');
+  try {
+    const out = execSync('chirpstack -c /var/etc/chirpstack create-api-key --name osi-nodered 2>&1').toString();
+    const match = out.match(/^token:\s*(.+)$/m);
+    if (!match) throw new Error('No token in CLI output: ' + out);
+    console.log('  ✓ API key created via CLI');
+    return match[1].trim();
+  } catch (e) {
+    throw new Error('CLI create-api-key failed: ' + e.message);
+  }
 }
 
 // ─── File patching functions ──────────────────────────────────────────────────
@@ -263,32 +308,50 @@ async function main() {
   console.log('\n╔══════════════════════════════════════════════╗');
   console.log('║   OSI OS  —  ChirpStack Bootstrap            ║');
   console.log('╚══════════════════════════════════════════════╝\n');
-  console.log(`  ChirpStack URL : ${CFG.url}`);
-  console.log(`  LoRaWAN region : ${CFG.region}`);
-  console.log(`  Admin email    : ${CFG.adminEmail}`);
-  console.log(`  Env file       : ${CFG.envFile}\n`);
+  console.log(`  ChirpStack REST URL : ${CFG.url}`);
+  console.log(`  LoRaWAN region      : ${CFG.region}`);
+  console.log(`  API key mode        : ${CFG.apiKey ? 'pre-created (skip login)' : 'login'}`);
+  console.log(`  Env file            : ${CFG.envFile}\n`);
 
   // ── Step 1: Authenticate ──────────────────────────────────────────────────
-  console.log('[ 1/5 ] Authentication');
-  const jwt = await login();
+  let jwt, apiKey;
+  if (CFG.apiKey) {
+    console.log('[ 1/5 ] Authentication — using pre-created API key');
+    jwt = CFG.apiKey;
+    apiKey = CFG.apiKey;
+    const tenantRes = await getTenantId(jwt).catch(() => null);
+    if (!tenantRes) {
+      // Try CLI fallback if REST API unreachable
+      console.log('  ⚠ REST API unreachable — trying CLI fallback for API key');
+      apiKey = await createApiKeyViaCLI();
+      jwt = apiKey;
+    }
+  } else {
+    console.log('[ 1/5 ] Authentication');
+    jwt = await login();
+  }
   const tenantId = await getTenantId(jwt);
 
   // ── Step 2: Applications ──────────────────────────────────────────────────
   console.log('\n[ 2/5 ] Applications');
-  const sensorsAppId     = await getOrCreateApp(jwt, tenantId, 'OSI Sensors',      'KIWI soil sensors and Dragino LSN50 dendrometers');
-  const actuatorsAppId   = await getOrCreateApp(jwt, tenantId, 'OSI Actuators',    'STREGA smart irrigation valves');
-  const fieldTesterAppId = await getOrCreateApp(jwt, tenantId, 'OSI Field Tester', 'RAK10701 field coverage testing');
+  const sensorsAppId     = await getOrCreateApp(jwt, tenantId, CFG.appSensorsName,     'KIWI soil sensors and Dragino LSN50 dendrometers');
+  const actuatorsAppId   = await getOrCreateApp(jwt, tenantId, CFG.appActuatorsName,   'STREGA smart irrigation valves');
+  const fieldTesterAppId = await getOrCreateApp(jwt, tenantId, CFG.appFieldTesterName, 'RAK10701 field coverage testing');
 
   // ── Step 3: Device profiles ───────────────────────────────────────────────
   console.log('\n[ 3/5 ] Device profiles');
-  const kiwiProfileId      = await getOrCreateProfile(jwt, tenantId, 'OSI KIWI Sensor',      'Kiwi soil moisture & temperature (LoRaWAN 1.0.3 OTAA)');
-  const stregaProfileId    = await getOrCreateProfile(jwt, tenantId, 'OSI STREGA Valve',      'Strega smart irrigation valve (LoRaWAN 1.0.3 OTAA)');
-  const lsn50ProfileId     = await getOrCreateProfile(jwt, tenantId, 'OSI Dragino LSN50',     'Dragino LSN50 temperature & dendrometer ADC (LoRaWAN 1.0.3 OTAA)');
-  const rak10701ProfileId  = await getOrCreateProfile(jwt, tenantId, 'OSI RAK Field Tester',  'RAK10701 LoRaWAN coverage field tester');
+  const kiwiProfileId      = await getOrCreateProfile(jwt, tenantId, CFG.profileKiwiName,    'Kiwi soil moisture & temperature (LoRaWAN 1.0.3 OTAA)');
+  const stregaProfileId    = await getOrCreateProfile(jwt, tenantId, CFG.profileStregaName,  'Strega smart irrigation valve (LoRaWAN 1.0.3 OTAA)');
+  const lsn50ProfileId     = await getOrCreateProfile(jwt, tenantId, CFG.profileLsn50Name,   'Dragino LSN50 temperature & dendrometer ADC (LoRaWAN 1.0.3 OTAA)');
+  const rak10701ProfileId  = await getOrCreateProfile(jwt, tenantId, CFG.profileRakName,     'RAK10701 LoRaWAN coverage field tester');
 
   // ── Step 4: API key ───────────────────────────────────────────────────────
   console.log('\n[ 4/5 ] API key');
-  const apiKey = await createApiKey(jwt, tenantId);
+  if (!apiKey) {
+    apiKey = await createApiKey(jwt, tenantId);
+  } else {
+    console.log('  ✓ Using pre-created API key (no new key needed)');
+  }
 
   // ── Step 5: Write outputs ─────────────────────────────────────────────────
   console.log('\n[ 5/5 ] Writing configuration');
@@ -308,6 +371,7 @@ async function main() {
     // CHIRPSTACK_APPKEY_KIWI=<32-hex-chars>
     // CHIRPSTACK_APPKEY_STREGA=<32-hex-chars>
     // CHIRPSTACK_APPKEY_LSN50=<32-hex-chars>
+    // CHIRPSTACK_APPKEY_DRAGINO_SN50V2=<32-hex-chars>
   });
 
   patchSettingsJs();
@@ -317,20 +381,21 @@ async function main() {
   console.log('\n╔══════════════════════════════════════════════╗');
   console.log('║   Bootstrap complete                         ║');
   console.log('╚══════════════════════════════════════════════╝\n');
-  console.log('  Applications created / found:');
-  console.log(`    OSI Sensors      ${sensorsAppId}`);
-  console.log(`    OSI Actuators    ${actuatorsAppId}`);
-  console.log(`    OSI Field Tester ${fieldTesterAppId}\n`);
+  console.log('  Applications found / created:');
+  console.log(`    ${CFG.appSensorsName.padEnd(20)} ${sensorsAppId}`);
+  console.log(`    ${CFG.appActuatorsName.padEnd(20)} ${actuatorsAppId}`);
+  console.log(`    ${CFG.appFieldTesterName.padEnd(20)} ${fieldTesterAppId}\n`);
   console.log('  Device profiles:');
-  console.log(`    KIWI_SENSOR      ${kiwiProfileId}`);
-  console.log(`    STREGA_VALVE     ${stregaProfileId}`);
-  console.log(`    DRAGINO_LSN50    ${lsn50ProfileId}`);
-  console.log(`    RAK10701         ${rak10701ProfileId}\n`);
+  console.log(`    ${CFG.profileKiwiName.padEnd(24)} ${kiwiProfileId}`);
+  console.log(`    ${CFG.profileStregaName.padEnd(24)} ${stregaProfileId}`);
+  console.log(`    ${CFG.profileLsn50Name.padEnd(24)} ${lsn50ProfileId}`);
+  console.log(`    ${CFG.profileRakName.padEnd(24)} ${rak10701ProfileId}\n`);
   console.log('  Next steps:');
   console.log(`  1. Add AppKeys to ${CFG.envFile}:`);
-  console.log('       CHIRPSTACK_APPKEY_KIWI=<32-hex>    (from device label)');
-  console.log('       CHIRPSTACK_APPKEY_STREGA=<32-hex>  (from device label)');
-  console.log('       CHIRPSTACK_APPKEY_LSN50=<32-hex>   (from device label)');
+  console.log('       CHIRPSTACK_APPKEY_KIWI=<32-hex>             (from device label)');
+  console.log('       CHIRPSTACK_APPKEY_STREGA=<32-hex>           (from device label)');
+  console.log('       CHIRPSTACK_APPKEY_LSN50=<32-hex>            (from device label)');
+  console.log('       CHIRPSTACK_APPKEY_DRAGINO_SN50V2=<32-hex>   (from device label)');
   console.log('  2. Restart Node-RED:  /etc/init.d/node-red restart\n');
 }
 
