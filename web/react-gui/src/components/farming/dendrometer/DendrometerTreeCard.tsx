@@ -72,18 +72,36 @@ const SiBar: React.FC<{ si: number }> = ({ si }) => {
   );
 };
 
+// ── TWDnorm bar ───────────────────────────────────────────────────────────────
+const TwdNormBar: React.FC<{ value: number }> = ({ value }) => {
+  const pct = Math.min(100, Math.max(0, value * 100));
+  const color = value < 0.5 ? '#16a34a' : value < 0.8 ? '#d97706' : value < 1.2 ? '#dc2626' : '#7f1d1d';
+  return (
+    <div className="flex items-center gap-1.5 w-full">
+      <span className="text-sm font-bold text-[var(--text)] tabular-nums w-8 shrink-0">
+        {value.toFixed(2)}
+      </span>
+      <div className="relative flex-1 h-2 bg-[var(--border)] rounded-full overflow-hidden">
+        <div className="absolute top-0 bottom-0 rounded-full" style={{ left: 0, width: `${pct}%`, backgroundColor: color }} />
+      </div>
+    </div>
+  );
+};
+
 // ── Main component ────────────────────────────────────────────────────────────
 export const DendrometerTreeCard: React.FC<Props> = ({ device, today, history, onOpenMonitor }) => {
+  const baselineComplete = today?.baseline_complete === 1;
   const stress = today?.stress_level ?? 'none';
   const cfg = STRESS_CONFIG[stress];
   const hasData = today != null && today.mds_um != null;
+  const borderClass = !hasData || !baselineComplete ? 'border-l-gray-300' : cfg.border;
 
   return (
     <div
       className={`
         bg-[var(--card)] rounded-xl border border-[var(--border)] border-l-4 shadow-sm
         flex flex-col overflow-hidden
-        ${cfg.border}
+        ${borderClass}
       `}
     >
       {/* Card header */}
@@ -99,45 +117,71 @@ export const DendrometerTreeCard: React.FC<Props> = ({ device, today, history, o
             </span>
           )}
         </div>
-        <StressBadge level={stress} />
+        {baselineComplete
+          ? <StressBadge level={stress} />
+          : <span className="inline-block text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full font-semibold">Building baseline</span>
+        }
       </div>
 
       {/* Indicators */}
       <div className="px-4 py-2 flex flex-col gap-2 flex-1">
         {!hasData ? (
           <p className="text-[var(--text-tertiary)] text-sm italic">No data yet today</p>
+        ) : !baselineComplete ? (
+          <>
+            <p className="text-sm text-[var(--text-secondary)]">
+              📊 Day {today.baseline_days ?? 0}/14 — collecting reference data
+            </p>
+            <p className="text-xs text-[var(--text-tertiary)]">
+              Stress indicators activate after 14 days of measurements.
+            </p>
+            {/* MDS still useful during baseline period */}
+            <Row label="MDS">
+              <span className="font-bold text-[var(--text)] tabular-nums">{today.mds_um} µm</span>
+            </Row>
+            <Row label="TGR">
+              <span className="font-bold text-[var(--text)] tabular-nums">
+                {today.tgr_um != null ? (today.tgr_um >= 0 ? '+' : '') + today.tgr_um + ' µm' : '—'}
+              </span>
+              <TgrArrow tgr={today.tgr_um} />
+            </Row>
+          </>
         ) : (
           <>
+            {/* Low MDS_ref warning */}
+            {today.mds_max_reference_um != null && today.mds_max_reference_um < 80 && (
+              <p className="text-xs text-amber-700 bg-amber-50 rounded px-2 py-1">
+                ⚠ Low MDS reference ({today.mds_max_reference_um} µm) — stress precision may be limited
+              </p>
+            )}
+
             {/* MDS */}
             <Row label="MDS">
-              <span className="font-bold text-[var(--text)] tabular-nums">
-                {today.mds_um} µm
-              </span>
+              <span className="font-bold text-[var(--text)] tabular-nums">{today.mds_um} µm</span>
             </Row>
 
             {/* TGR */}
             <Row label="TGR">
               <span className="font-bold text-[var(--text)] tabular-nums">
-                {today.tgr_um != null
-                  ? (today.tgr_um >= 0 ? '+' : '') + today.tgr_um + ' µm'
-                  : '—'}
+                {today.tgr_um != null ? (today.tgr_um >= 0 ? '+' : '') + today.tgr_um + ' µm' : '—'}
               </span>
               <TgrArrow tgr={today.tgr_um} />
             </Row>
 
-            {/* TWD — only shown when non-zero */}
-            {today.twd_um != null && today.twd_um > 0 && (
-              <Row label="TWD">
-                <span className={`font-bold tabular-nums ${today.twd_um > 100 ? 'text-red-600' : 'text-orange-600'}`}>
-                  {today.twd_um} µm
-                </span>
+            {/* TWDnorm — primary v4 stress indicator (non-reference trees only) */}
+            {device.is_reference_tree !== 1 && today.twd_norm_night != null && (
+              <Row label="TWDn">
+                <TwdNormBar value={today.twd_norm_night} />
               </Row>
             )}
 
-            {/* SI — hidden on reference tree */}
-            {device.is_reference_tree !== 1 && today.signal_intensity != null && (
-              <Row label="SI">
-                <SiBar si={today.signal_intensity} />
+            {/* Recovery Ratio — show when there's active TWD */}
+            {device.is_reference_tree !== 1 && today.recovery_ratio_smoothed != null &&
+              today.twd_norm_night != null && today.twd_norm_night >= 0.5 && (
+              <Row label="RR">
+                <span className={`font-bold tabular-nums text-sm ${today.recovery_ratio_smoothed >= 0.8 ? 'text-green-600' : 'text-orange-600'}`}>
+                  {today.recovery_ratio_smoothed.toFixed(2)}
+                </span>
               </Row>
             )}
 

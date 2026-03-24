@@ -121,23 +121,53 @@ export interface CreateZoneRequest {
 // ---- Dendrometer analytics types ----
 
 export type StressLevel = 'none' | 'mild' | 'moderate' | 'significant' | 'severe';
-export type IrrigationAction = 'decrease_10' | 'maintain' | 'increase_10' | 'increase_20' | 'emergency_irrigate';
+export type IrrigationAction =
+  | 'decrease_20'
+  | 'decrease_10'
+  | 'maintain'
+  | 'maintain_rain_suppression'
+  | 'maintain_recovery_hold'
+  | 'increase_10'
+  | 'increase_20'
+  | 'emergency_irrigate';
 export type DataQuality = 'good' | 'unreliable' | 'insufficient';
 
 /** One computed day of dendrometer indicators for a single device */
 export interface DendroDaily {
   id: number;
   deveui: string;
-  date: string;                      // YYYY-MM-DD
+  date: string;                            // YYYY-MM-DD
+  // v3 fields
   d_max_um: number | null;
   d_min_um: number | null;
-  mds_um: number | null;             // Maximum Daily Shrinkage
-  tgr_um: number | null;             // Trunk Growth Rate (vs yesterday's D_max)
-  tgr_smoothed_um: number | null;    // 3-day smoothed TGR
-  twd_um: number | null;             // Tree Water Deficit (30-day peak − today D_max)
-  dr_um: number | null;              // Daily Recovery (today D_max − yesterday D_min)
-  recovery_delta_um: number | null;  // 7-day avg DR − 7-day avg MDS
-  signal_intensity: number | null;   // MDS_tree / MDS_reference
+  mds_um: number | null;                   // Maximum Daily Shrinkage
+  tgr_um: number | null;                   // Trunk Growth Rate (vs yesterday's D_max)
+  tgr_smoothed_um: number | null;          // 3-day smoothed TGR
+  twd_um: number | null;                   // Tree Water Deficit (30-day peak − today D_max)
+  dr_um: number | null;                    // Daily Recovery (today D_max − yesterday D_min)
+  recovery_delta_um: number | null;        // 5-day avg DR − avg MDS
+  signal_intensity: number | null;         // MDS_tree / MDS_reference (v3)
+  // v4 fields
+  twd_night_um: number | null;             // Pre-dawn TWD (D_max_running − D_max)
+  twd_day_um: number | null;               // Midday TWD (D_max_running − D_min)
+  twd_norm_night: number | null;           // TWDnorm pre-dawn (TWD_night / MDS_max_reference)
+  twd_norm_day: number | null;             // TWDnorm midday
+  mds_norm: number | null;                 // MDSnorm (MDS / MDS_max_reference)
+  recovery_ratio: number | null;           // DR / MDS (1.0 = full recovery)
+  recovery_ratio_smoothed: number | null;  // 3-day smoothed Recovery Ratio
+  r_delta_5day: number | null;             // 5-day avg(DR) − avg(MDS)
+  delta_twd_smoothed: number | null;       // 3-day smoothed ΔTWD
+  d_max_running_um: number | null;         // All-time zero-growth peak D_max (TWD reference)
+  d_max_time: string | null;               // Local time of D_max (HH:MM)
+  d_min_time: string | null;               // Local time of D_min (HH:MM)
+  twd_episode_active: number;              // 0 or 1
+  twd_episode_start: string | null;        // YYYY-MM-DD when current episode began
+  twd_episode_max_um: number | null;       // Peak TWD in current episode (µm)
+  // Baseline info (JOINed from dendro_baselines)
+  baseline_complete: number;               // 0 = collecting, 1 = established
+  baseline_days: number | null;            // Days counted toward 14-day baseline
+  mds_max_reference_um: number | null;     // 90th-pct MDS from baseline period (µm)
+  // meta
   stress_level: StressLevel;
   data_quality: DataQuality;
   valid_readings_count: number;
@@ -155,6 +185,11 @@ export interface ZoneRecommendation {
   irrigation_action: IrrigationAction;
   action_reasoning: string;
   computed_at: string;
+  // v4 fields
+  rain_suppression_active: number;        // 0 or 1
+  recovery_verification_active: number;   // 0 or 1
+  vpd_max_kpa: number | null;
+  vpd_source: string | null;              // 'local_sensor' | 'online' | 'unavailable'
 }
 
 /** One raw dendrometer reading from dendrometer_readings table */

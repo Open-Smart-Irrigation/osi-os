@@ -73,6 +73,13 @@ export interface ActionConfig {
 }
 
 export const ACTION_CONFIG: Record<IrrigationAction, ActionConfig> = {
+  decrease_20: {
+    label: 'Decrease irrigation −20%',
+    icon: '↓↓',
+    bannerBg: 'bg-green-100',
+    bannerText: 'text-green-900',
+    bannerBorder: 'border-green-500',
+  },
   decrease_10: {
     label: 'Decrease irrigation −10%',
     icon: '↓',
@@ -86,6 +93,20 @@ export const ACTION_CONFIG: Record<IrrigationAction, ActionConfig> = {
     bannerBg: 'bg-blue-50',
     bannerText: 'text-blue-900',
     bannerBorder: 'border-blue-400',
+  },
+  maintain_rain_suppression: {
+    label: 'Maintaining — rain suppression active',
+    icon: '🌧',
+    bannerBg: 'bg-sky-50',
+    bannerText: 'text-sky-900',
+    bannerBorder: 'border-sky-400',
+  },
+  maintain_recovery_hold: {
+    label: 'Maintaining — recovery verification in progress',
+    icon: '⏳',
+    bannerBg: 'bg-purple-50',
+    bannerText: 'text-purple-900',
+    bannerBorder: 'border-purple-400',
   },
   increase_10: {
     label: 'Increase irrigation +10%',

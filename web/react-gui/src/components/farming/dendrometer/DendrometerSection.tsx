@@ -36,8 +36,8 @@ export const DendrometerSection: React.FC<Props> = ({ zone, devices }) => {
       setError(null);
       try {
         const [dailyResults, recs] = await Promise.all([
-          Promise.all(dendroDevices.map(d => dendroAnalyticsAPI.getDailyIndicators(d.deveui, 8))),
-          dendroAnalyticsAPI.getZoneRecommendations(zone.id, 14),
+          Promise.all(dendroDevices.map(d => dendroAnalyticsAPI.getDailyIndicators(d.deveui, 30))),
+          dendroAnalyticsAPI.getZoneRecommendations(zone.id, 30),
         ]);
         if (cancelled) return;
 
