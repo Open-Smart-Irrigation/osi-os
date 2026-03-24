@@ -13,10 +13,10 @@ const DENDRO_STRESS_FROM_NUM: Record<number, DendroStressThreshold> = {
   1: 'mild', 2: 'moderate', 3: 'significant', 4: 'severe',
 };
 const DENDRO_STRESS_LABELS: Record<DendroStressThreshold, string> = {
-  mild: 'Mild stress (SI > 1.15)',
-  moderate: 'Moderate stress (SI > 1.25)',
-  significant: 'High stress (SI > 1.40)',
-  severe: 'Severe stress only',
+  mild: 'Mild stress (TWDnorm 0.3 – 0.7)',
+  moderate: 'Moderate stress (TWDnorm 0.7 – 1.0)',
+  significant: 'High stress (TWDnorm 1.0 – 1.5)',
+  severe: 'Severe stress only (TWDnorm > 1.5)',
 };
 
 function schedulerTypeFromMetric(metric: string): SchedulerType {

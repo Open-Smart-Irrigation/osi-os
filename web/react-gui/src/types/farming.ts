@@ -77,7 +77,8 @@ export interface ValveActionRequest {
 
 // ---- Irrigation schedule types ----
 export type TriggerMetric =
-  | 'SWT_WM1' | 'SWT_WM2' | 'SWT_WM3' | 'SWT_AVG'  // Soil Water Tension (kPa)
+  | 'SWT_1' | 'SWT_2' | 'SWT_3' | 'SWT_AVG'         // Soil Water Tension (kPa) — v4 names
+  | 'SWT_WM1' | 'SWT_WM2' | 'SWT_WM3'               // Legacy SWT names (backward compat)
   | 'VWC'                                             // Volumetric Water Content (%)
   | 'DENDRO';                                         // Dendrometer stress-based
 
