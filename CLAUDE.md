@@ -262,11 +262,9 @@ scp -r build/* root@<pi-ip>:/usr/lib/node-red/gui/
 ## Roadmap (in priority order)
 
 1. **Fix valve bugs** (error prompt + last_seen)
-2. **Dragino SDI-12-LB/LS support** — 4 dendrometers per device; trunk-diameter-based irrigation trigger (Maximum Daily Shrinkage algorithm). Payload spec pending.
-3. **Multi-language UI** — German, French, Italian, Luganda (react-i18next)
-4. **First-boot init script** + firmware build fix
 
-> OSI Server integration is **complete** — see OSI Server Integration section below.
+2. **LSN50 Integration: Change the different modes via the GUI
+
 
 ---
 
