@@ -94,6 +94,8 @@ export interface IrrigationSchedule {
   enabled: boolean;
   duration_minutes?: number;
   last_triggered_at?: string | null;
+  response_mode?: string | null;
+  responseMode?: string | null;
 }
 
 export interface UpdateIrrigationScheduleRequest {
@@ -101,6 +103,7 @@ export interface UpdateIrrigationScheduleRequest {
   threshold_kpa: number;
   enabled: boolean;
   duration_minutes?: number;
+  response_mode?: string;
 }
 
 // ---- Irrigation zone types ----
@@ -113,6 +116,26 @@ export interface IrrigationZone {
 
   // Returned by GET /api/irrigation-zones (your Node-RED flow adds this)
   schedule: IrrigationSchedule | null;
+
+  // Zone metadata (available after DB migration + Node-RED config endpoint)
+  timezone?: string | null;
+  latitude?: number | null;
+  longitude?: number | null;
+  phenological_stage?: string | null;
+  crop_type?: string | null;
+  variety?: string | null;
+  soil_type?: string | null;
+  irrigation_method?: string | null;
+  notes?: string | null;
+  calibration_key?: string | null;
+
+  // Compat aliases (server uses camelCase)
+  phenologicalStage?: string | null;
+  calibrationKey?: string | null;
+  cropType?: string | null;
+  soilType?: string | null;
+  irrigationMethod?: string | null;
+  variety_compat?: string | null;
 }
 
 export interface CreateZoneRequest {

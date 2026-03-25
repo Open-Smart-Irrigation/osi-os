@@ -7,6 +7,8 @@ import { StregaValveCard } from './StregaValveCard';
 import { ScheduleSection } from './ScheduleSection';
 import { AssignDeviceModal } from './AssignDeviceModal';
 import { DendrometerSection } from './dendrometer/DendrometerSection';
+import { ZoneConfigModal } from './ZoneConfigModal';
+import { AdvancedScheduleDrawer } from './AdvancedScheduleDrawer';
 import { useTranslation } from 'react-i18next';
 
 interface IrrigationZoneCardProps {
@@ -27,6 +29,8 @@ export const IrrigationZoneCard: React.FC<IrrigationZoneCardProps> = ({
   const [isDeleting, setIsDeleting] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [showAssignModal, setShowAssignModal] = useState(false);
+  const [showConfigModal, setShowConfigModal] = useState(false);
+  const [showAdvancedDrawer, setShowAdvancedDrawer] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [removingDevice, setRemovingDevice] = useState<string | null>(null);
 
@@ -59,10 +63,16 @@ export const IrrigationZoneCard: React.FC<IrrigationZoneCardProps> = ({
   const stregaValves = devices.filter((d) => d.type_id === 'STREGA_VALVE');
   const lsn50Nodes = devices.filter((d) => d.type_id === 'DRAGINO_LSN50');
 
+  const hasDendroDevices = lsn50Nodes.some(d => d.dendro_enabled === 1);
+  const schedMetric = zone.schedule?.trigger_metric;
+  const schedEnabled = zone.schedule?.enabled ?? false;
+  const cropType = zone.crop_type ?? zone.cropType;
+  const soilType = zone.soil_type ?? zone.soilType;
+
   return (
     <div className="bg-[var(--surface)] border-2 border-[var(--border)] rounded-xl p-6 shadow-lg mb-6">
       {/* Zone Header */}
-      <div className="flex items-start justify-between mb-4">
+      <div className="flex items-start justify-between mb-3">
         <div className="flex-1">
           <h3 className="text-3xl font-bold text-[var(--text)] mb-1 high-contrast-text">
             {zone.name}
@@ -72,6 +82,12 @@ export const IrrigationZoneCard: React.FC<IrrigationZoneCardProps> = ({
           </p>
         </div>
         <div className="flex gap-2">
+          <button
+            onClick={() => setShowConfigModal(true)}
+            className="bg-[var(--surface)] hover:bg-[var(--border)] border border-[var(--border)] text-[var(--text)] px-4 py-2 rounded-lg text-sm font-semibold transition-colors"
+          >
+            Configure
+          </button>
           <button
             onClick={() => setShowAssignModal(true)}
             className="bg-[var(--primary)] hover:bg-[var(--primary-hover)] text-white px-4 py-2 rounded-lg text-sm font-semibold transition-colors"
@@ -88,6 +104,35 @@ export const IrrigationZoneCard: React.FC<IrrigationZoneCardProps> = ({
             {t('zone.deleteZone')}
           </button>
         </div>
+      </div>
+
+      {/* Zone context chips */}
+      <div className="flex flex-wrap gap-2 mb-4">
+        {cropType && (
+          <span className="inline-flex items-center gap-1 bg-[var(--surface)] border border-[var(--border)] text-[var(--text-secondary)] text-xs px-2.5 py-1 rounded-full">
+            <span>🌱</span> {cropType}{(zone.variety) ? ` — ${zone.variety}` : ''}
+          </span>
+        )}
+        {soilType && (
+          <span className="inline-flex items-center gap-1 bg-[var(--surface)] border border-[var(--border)] text-[var(--text-secondary)] text-xs px-2.5 py-1 rounded-full">
+            <span>⛰</span> {soilType}
+          </span>
+        )}
+        {hasDendroDevices && (
+          <span className="inline-flex items-center gap-1 bg-teal-50 border border-teal-200 text-teal-800 text-xs px-2.5 py-1 rounded-full font-medium">
+            <span>📏</span> Dendro active
+          </span>
+        )}
+        {zone.schedule && schedEnabled && schedMetric && (
+          <span className="inline-flex items-center gap-1 bg-blue-50 border border-blue-200 text-blue-800 text-xs px-2.5 py-1 rounded-full">
+            <span>⏱</span> {schedMetric === 'DENDRO' ? 'Dendro trigger' : schedMetric === 'VWC' ? 'VWC trigger' : 'SWT trigger'} enabled
+          </span>
+        )}
+        {zone.schedule && !schedEnabled && (
+          <span className="inline-flex items-center gap-1 bg-[var(--surface)] border border-[var(--border)] text-[var(--text-tertiary)] text-xs px-2.5 py-1 rounded-full">
+            <span>⏸</span> Scheduler off
+          </span>
+        )}
       </div>
 
       {error && (
@@ -129,7 +174,11 @@ export const IrrigationZoneCard: React.FC<IrrigationZoneCardProps> = ({
       )}
 
       {/* Schedule Section */}
-      <ScheduleSection zoneId={zone.id} zoneName={zone.name} />
+      <ScheduleSection
+        zoneId={zone.id}
+        zoneName={zone.name}
+        onAdvancedOpen={() => setShowAdvancedDrawer(true)}
+      />
 
       {/* Dendrometer Monitoring Section */}
       <DendrometerSection zone={zone} devices={lsn50Nodes} />
@@ -220,6 +269,19 @@ export const IrrigationZoneCard: React.FC<IrrigationZoneCardProps> = ({
         zoneId={zone.id}
         zoneName={zone.name}
         availableDevices={unassignedDevices}
+      />
+
+      <ZoneConfigModal
+        isOpen={showConfigModal}
+        zone={zone}
+        onClose={() => setShowConfigModal(false)}
+        onSaved={onUpdate}
+      />
+
+      <AdvancedScheduleDrawer
+        isOpen={showAdvancedDrawer}
+        zone={zone}
+        onClose={() => setShowAdvancedDrawer(false)}
       />
     </div>
   );

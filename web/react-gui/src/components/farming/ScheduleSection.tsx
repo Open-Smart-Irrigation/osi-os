@@ -12,11 +12,19 @@ const DENDRO_STRESS_VALUES: Record<DendroStressThreshold, number> = {
 const DENDRO_STRESS_FROM_NUM: Record<number, DendroStressThreshold> = {
   1: 'mild', 2: 'moderate', 3: 'significant', 4: 'severe',
 };
+
+/** User-facing sensitivity labels — no internal metric names */
 const DENDRO_STRESS_LABELS: Record<DendroStressThreshold, string> = {
-  mild: 'Mild stress (TWDnorm 0.3 – 0.7)',
-  moderate: 'Moderate stress (TWDnorm 0.7 – 1.0)',
-  significant: 'High stress (TWDnorm 1.0 – 1.5)',
-  severe: 'Severe stress only (TWDnorm > 1.5)',
+  mild:        'Low sensitivity — irrigate at first signs of stress',
+  moderate:    'Medium sensitivity — irrigate at moderate stress (recommended)',
+  significant: 'High sensitivity — irrigate only under significant stress',
+  severe:      'Conservative — irrigate only at severe stress',
+};
+
+const RESPONSE_MODE_LABELS: Record<string, string> = {
+  proportional: 'Proportional — scale duration with stress level',
+  fixed:        'Fixed — always irrigate for base duration',
+  aggressive:   'Aggressive — extend duration strongly at high stress',
 };
 
 function schedulerTypeFromMetric(metric: string): SchedulerType {
@@ -28,7 +36,6 @@ function schedulerTypeFromMetric(metric: string): SchedulerType {
 function defaultMetricForType(type: SchedulerType, currentMetric: TriggerMetric): TriggerMetric {
   if (type === 'DENDRO') return 'DENDRO';
   if (type === 'VWC') return 'VWC';
-  // SWT
   if (currentMetric === 'SWT_WM1' || currentMetric === 'SWT_WM2' || currentMetric === 'SWT_WM3' || currentMetric === 'SWT_AVG') return currentMetric;
   return 'SWT_WM1';
 }
@@ -143,18 +150,24 @@ const VwcForm: React.FC<VwcFormProps> = ({ threshold, duration, onThreshold, onD
 interface DendroFormProps {
   stressThreshold: DendroStressThreshold;
   duration: number;
+  responseMode: string;
   onStress: (v: DendroStressThreshold) => void;
   onDuration: (v: number) => void;
+  onResponseMode: (v: string) => void;
+  onAdvanced: () => void;
 }
-const DendroForm: React.FC<DendroFormProps> = ({ stressThreshold, duration, onStress, onDuration }) => (
+const DendroForm: React.FC<DendroFormProps> = ({
+  stressThreshold, duration, responseMode,
+  onStress, onDuration, onResponseMode, onAdvanced,
+}) => (
   <div className="flex flex-col gap-4">
-    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-      <div>
-        <label className="block text-[var(--text-secondary)] text-sm font-semibold mb-2">Trigger at stress level</label>
+    <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+      <div className="sm:col-span-1">
+        <label className="block text-[var(--text-secondary)] text-sm font-semibold mb-2">Trigger sensitivity</label>
         <select
           value={stressThreshold}
           onChange={e => onStress(e.target.value as DendroStressThreshold)}
-          className="w-full px-3 py-2 bg-[var(--card)] border-2 border-[var(--border)] rounded-lg text-[var(--text)] focus:outline-none focus:border-[var(--focus)] focus:ring-2 focus:ring-[var(--focus)]"
+          className="w-full px-3 py-2 bg-[var(--card)] border-2 border-[var(--border)] rounded-lg text-[var(--text)] focus:outline-none focus:border-[var(--focus)] focus:ring-2 focus:ring-[var(--focus)] text-sm"
         >
           {(Object.keys(DENDRO_STRESS_LABELS) as DendroStressThreshold[]).map(k => (
             <option key={k} value={k}>{DENDRO_STRESS_LABELS[k]}</option>
@@ -171,16 +184,27 @@ const DendroForm: React.FC<DendroFormProps> = ({ stressThreshold, duration, onSt
           className="w-full px-3 py-2 bg-[var(--card)] border-2 border-[var(--border)] rounded-lg text-[var(--text)] focus:outline-none focus:border-[var(--focus)] focus:ring-2 focus:ring-[var(--focus)]"
         />
       </div>
-    </div>
-    <div className="rounded-lg bg-[var(--surface)] border border-[var(--border)] px-3 py-2.5 text-xs text-[var(--text-secondary)]">
-      <p className="font-semibold mb-1">How dendrometer scheduling works</p>
-      <p>Daily irrigation recommendations are computed from trunk shrinkage (MDS), water deficit (TWD), and Signal Intensity (SI) across all dendrometer trees in the zone.</p>
-      <div className="mt-2 grid grid-cols-2 gap-x-4 gap-y-0.5">
-        <span>maintain → base duration</span>
-        <span>increase +10% → base × 1.10</span>
-        <span>increase +20% → base × 1.20</span>
-        <span className="text-red-700 font-semibold">emergency → base × 1.50</span>
+      <div>
+        <label className="block text-[var(--text-secondary)] text-sm font-semibold mb-2">Response mode</label>
+        <select
+          value={responseMode}
+          onChange={e => onResponseMode(e.target.value)}
+          className="w-full px-3 py-2 bg-[var(--card)] border-2 border-[var(--border)] rounded-lg text-[var(--text)] focus:outline-none focus:border-[var(--focus)] focus:ring-2 focus:ring-[var(--focus)] text-sm"
+        >
+          {Object.entries(RESPONSE_MODE_LABELS).map(([v, l]) => (
+            <option key={v} value={v}>{l}</option>
+          ))}
+        </select>
       </div>
+    </div>
+    <div className="flex justify-end">
+      <button
+        type="button"
+        onClick={onAdvanced}
+        className="text-xs text-[var(--primary)] hover:underline"
+      >
+        Advanced settings →
+      </button>
     </div>
   </div>
 );
@@ -190,9 +214,12 @@ interface ScheduleSectionProps {
   zoneId: number;
   zoneName: string;
   onScheduleSaved?: () => void;
+  onAdvancedOpen?: () => void;
 }
 
-export const ScheduleSection: React.FC<ScheduleSectionProps> = ({ zoneId, onScheduleSaved }) => {
+export const ScheduleSection: React.FC<ScheduleSectionProps> = ({
+  zoneId, onScheduleSaved, onAdvancedOpen,
+}) => {
   const { t } = useTranslation('devices');
   const [loading, setLoading]   = useState(true);
   const [saving, setSaving]     = useState(false);
@@ -205,23 +232,29 @@ export const ScheduleSection: React.FC<ScheduleSectionProps> = ({ zoneId, onSche
   const [threshold, setThreshold]           = useState(30);
   const [duration, setDuration]             = useState(20);
   const [stressThreshold, setStressThreshold] = useState<DendroStressThreshold>('moderate');
+  const [responseMode, setResponseMode]     = useState('proportional');
 
   // ── Load ──────────────────────────────────────────────────────────────────
   const applySchedule = (s: any) => {
     if (!s) return;
-    const metric: TriggerMetric = s.trigger_metric ?? 'SWT_WM1';
+    const metric: TriggerMetric = s.trigger_metric ?? s.triggerMetric ?? 'SWT_WM1';
     const type = schedulerTypeFromMetric(metric);
     setSchedulerType(type);
     setTriggerMetric(metric);
     if (type === 'DENDRO') {
-      setStressThreshold(DENDRO_STRESS_FROM_NUM[Number(s.threshold_kpa)] ?? 'moderate');
-      setThreshold(2); // default moderate
+      const kpa = s.threshold_kpa ?? s.thresholdKpa;
+      setStressThreshold(DENDRO_STRESS_FROM_NUM[Number(kpa)] ?? 'moderate');
+      setThreshold(2);
     } else {
-      setThreshold(typeof s.threshold_kpa === 'number' ? s.threshold_kpa : 30);
+      const kpa = s.threshold_kpa ?? s.thresholdKpa;
+      setThreshold(typeof kpa === 'number' ? kpa : 30);
     }
-    if (typeof s.duration_minutes === 'number') setDuration(s.duration_minutes);
+    const mins = s.duration_minutes ?? s.durationMinutes;
+    if (typeof mins === 'number') setDuration(mins);
     if (typeof s.enabled === 'boolean') setEnabled(s.enabled);
     else if (s.enabled === 0 || s.enabled === 1) setEnabled(Boolean(s.enabled));
+    if (s.responseMode) setResponseMode(s.responseMode);
+    else if ((s as any).response_mode) setResponseMode((s as any).response_mode);
   };
 
   useEffect(() => {
@@ -232,7 +265,7 @@ export const ScheduleSection: React.FC<ScheduleSectionProps> = ({ zoneId, onSche
     irrigationZonesAPI.getAll().then((zones: any[]) => {
       if (cancelled) return;
       const z = zones.find((x: any) => Number(x.id) === Number(zoneId)) as IrrigationZone | undefined;
-      if (z?.schedule) applySchedule((z as any).schedule);
+      if (z?.schedule) applySchedule(z.schedule);
     }).catch((err: any) => {
       if (!cancelled) setError(err?.response?.data?.message || t('schedule.loadFailed'));
     }).finally(() => {
@@ -245,7 +278,6 @@ export const ScheduleSection: React.FC<ScheduleSectionProps> = ({ zoneId, onSche
   const handleTypeChange = (type: SchedulerType) => {
     setSchedulerType(type);
     setTriggerMetric(defaultMetricForType(type, triggerMetric));
-    // Reset threshold to sensible default for the new type
     if (type === 'VWC') setThreshold(prev => prev > 100 ? 30 : prev);
     if (type === 'SWT') setThreshold(prev => prev <= 100 ? 30 : prev);
   };
@@ -264,6 +296,7 @@ export const ScheduleSection: React.FC<ScheduleSectionProps> = ({ zoneId, onSche
         threshold_kpa: thresholdPayload,
         enabled,
         duration_minutes: Math.min(240, Math.max(1, Math.round(duration))),
+        response_mode: schedulerType === 'DENDRO' ? responseMode : undefined,
       };
       await irrigationZonesAPI.updateSchedule(zoneId, payload);
       setSuccess(t('schedule.saved'));
@@ -363,8 +396,11 @@ export const ScheduleSection: React.FC<ScheduleSectionProps> = ({ zoneId, onSche
             <DendroForm
               stressThreshold={stressThreshold}
               duration={duration}
+              responseMode={responseMode}
               onStress={setStressThreshold}
               onDuration={setDuration}
+              onResponseMode={setResponseMode}
+              onAdvanced={onAdvancedOpen ?? (() => {})}
             />
           )}
 

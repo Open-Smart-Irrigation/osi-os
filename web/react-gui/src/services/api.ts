@@ -131,6 +131,24 @@ export const irrigationZonesAPI = {
     );
     return response.data;
   },
+
+  // Update zone configuration metadata
+  updateConfig: async (zoneId: number, payload: {
+    cropType?: string | null;
+    variety?: string | null;
+    soilType?: string | null;
+    irrigationMethod?: string | null;
+    notes?: string | null;
+    timezone?: string | null;
+    phenologicalStage?: string | null;
+    calibrationKey?: string | null;
+  }): Promise<IrrigationZone> => {
+    const response = await api.put<IrrigationZone>(
+      `/api/irrigation-zones/${zoneId}/config`,
+      payload
+    );
+    return response.data;
+  },
 };
 
 export interface DendroHistoryPoint {
