@@ -150,14 +150,81 @@ export const lsn50API = {
   },
 };
 
+function normaliseDendroDaily(row: any): DendroDaily {
+  return {
+    id: row.id,
+    deveui: row.deveui,
+    date: row.date,
+    d_max_um: row.d_max_um ?? null,
+    d_min_um: row.d_min_um ?? null,
+    mds_um: row.mds_um ?? null,
+    tgr_um: row.tgr_um ?? null,
+    tgr_smoothed_um: row.tgr_smoothed_um ?? null,
+    twd_um: row.twd_um ?? null,
+    dr_um: row.dr_um ?? null,
+    recovery_delta_um: row.recovery_delta_um ?? null,
+    signal_intensity: row.signal_intensity ?? null,
+    twd_night_um: row.twd_night_um ?? null,
+    twd_day_um: row.twd_day_um ?? null,
+    twd_norm_night: row.twd_norm_night ?? null,
+    twd_norm_day: row.twd_norm_day ?? null,
+    mds_norm: row.mds_norm ?? null,
+    recovery_ratio: row.recovery_ratio ?? null,
+    recovery_ratio_smoothed: row.recovery_ratio_smoothed ?? null,
+    r_delta_5day: row.r_delta_5day ?? null,
+    delta_twd_smoothed: row.delta_twd_smoothed ?? null,
+    d_max_running_um: row.d_max_running_um ?? null,
+    d_max_time: row.d_max_time ?? null,
+    d_min_time: row.d_min_time ?? null,
+    twd_episode_active: row.twd_episode_active ?? 0,
+    twd_episode_start: row.twd_episode_start ?? null,
+    twd_episode_max_um: row.twd_episode_max_um ?? null,
+    envelope_ref_um: row.envelope_ref_um ?? null,
+    twd_method: row.twd_method ?? null,
+    confidence_score: row.confidence_score ?? null,
+    qa_flags_json: row.qa_flags_json ?? null,
+    low_confidence_day: row.low_confidence_day ?? 0,
+    tree_state_v5: row.tree_state_v5 ?? row.stress_level ?? 'none',
+    baseline_complete: row.baseline_complete ?? 0,
+    baseline_days: row.baseline_days ?? null,
+    mds_max_reference_um: row.mds_max_reference_um ?? null,
+    stress_level: row.stress_level ?? 'none',
+    data_quality: row.data_quality ?? 'insufficient',
+    valid_readings_count: row.valid_readings_count ?? 0,
+    computed_at: row.computed_at,
+  };
+}
+
+function normaliseZoneRecommendation(row: any): ZoneRecommendation {
+  return {
+    id: row.id,
+    zone_id: row.zone_id,
+    date: row.date,
+    zone_stress_summary: row.zone_stress_summary ?? 'none',
+    rainfall_mm: row.rainfall_mm ?? 0,
+    water_delivered_liters: row.water_delivered_liters ?? 0,
+    irrigation_action: row.irrigation_action ?? 'maintain',
+    action_reasoning: row.action_reasoning ?? '',
+    computed_at: row.computed_at,
+    rain_suppression_active: row.rain_suppression_active ?? 0,
+    recovery_verification_active: row.recovery_verification_active ?? 0,
+    vpd_max_kpa: row.vpd_max_kpa ?? null,
+    vpd_source: row.vpd_source ?? null,
+    usable_tree_count: row.usable_tree_count ?? 0,
+    low_confidence_tree_count: row.low_confidence_tree_count ?? 0,
+    outlier_filtered_tree_count: row.outlier_filtered_tree_count ?? 0,
+    zone_confidence_score: row.zone_confidence_score ?? null,
+  };
+}
+
 export const dendroAnalyticsAPI = {
   getDailyIndicators: async (deveui: string, days = 7): Promise<DendroDaily[]> => {
-    const response = await api.get<DendroDaily[]>(`/api/dendrometer/${deveui}/daily`, { params: { days } });
-    return response.data;
+    const response = await api.get<any[]>(`/api/dendrometer/${deveui}/daily`, { params: { days } });
+    return response.data.map(normaliseDendroDaily);
   },
   getZoneRecommendations: async (zoneId: number, days = 14): Promise<ZoneRecommendation[]> => {
-    const response = await api.get<ZoneRecommendation[]>(`/api/irrigation-zones/${zoneId}/recommendations`, { params: { days } });
-    return response.data;
+    const response = await api.get<any[]>(`/api/irrigation-zones/${zoneId}/recommendations`, { params: { days } });
+    return response.data.map(normaliseZoneRecommendation);
   },
   getRawReadings: async (deveui: string, from: string, to: string): Promise<DendroReading[]> => {
     const response = await api.get<DendroReading[]>(`/api/dendrometer/${deveui}/readings`, { params: { from, to } });

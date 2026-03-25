@@ -131,7 +131,7 @@ export type IrrigationAction =
   | 'increase_10'
   | 'increase_20'
   | 'emergency_irrigate';
-export type DataQuality = 'good' | 'unreliable' | 'insufficient';
+export type DataQuality = 'good' | 'reduced' | 'unreliable' | 'insufficient';
 
 /** One computed day of dendrometer indicators for a single device */
 export interface DendroDaily {
@@ -164,6 +164,13 @@ export interface DendroDaily {
   twd_episode_active: number;              // 0 or 1
   twd_episode_start: string | null;        // YYYY-MM-DD when current episode began
   twd_episode_max_um: number | null;       // Peak TWD in current episode (µm)
+  // v5 canonical fields
+  envelope_ref_um: number | null;
+  twd_method: string | null;
+  confidence_score: number | null;
+  qa_flags_json: string | null;
+  low_confidence_day: number;
+  tree_state_v5: StressLevel;
   // Baseline info (JOINed from dendro_baselines)
   baseline_complete: number;               // 0 = collecting, 1 = established
   baseline_days: number | null;            // Days counted toward 14-day baseline
@@ -190,7 +197,12 @@ export interface ZoneRecommendation {
   rain_suppression_active: number;        // 0 or 1
   recovery_verification_active: number;   // 0 or 1
   vpd_max_kpa: number | null;
-  vpd_source: string | null;              // 'local_sensor' | 'online' | 'unavailable'
+  vpd_source: string | null;              // 'local_sensor' | 'open_meteo' | 'unavailable'
+  // zone quality metadata
+  usable_tree_count: number;
+  low_confidence_tree_count: number;
+  outlier_filtered_tree_count: number;
+  zone_confidence_score: number | null;
 }
 
 /** One raw dendrometer reading from dendrometer_readings table */
