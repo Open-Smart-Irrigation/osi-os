@@ -96,11 +96,35 @@ export const devicesAPI = {
   },
 };
 
+function normaliseZone(z: any): IrrigationZone {
+  const sched = z.schedule;
+  return {
+    ...z,
+    // Camelise new metadata fields from Pi snake_case API
+    cropType:          z.cropType          ?? z.crop_type          ?? null,
+    variety:           z.variety                                   ?? null,
+    soilType:          z.soilType          ?? z.soil_type          ?? null,
+    irrigationMethod:  z.irrigationMethod  ?? z.irrigation_method  ?? null,
+    notes:             z.notes                                     ?? null,
+    timezone:          z.timezone                                  ?? null,
+    phenologicalStage: z.phenologicalStage ?? z.phenological_stage ?? null,
+    calibrationKey:    z.calibrationKey    ?? z.calibration_key    ?? null,
+    schedule: sched ? {
+      ...sched,
+      triggerMetric:   sched.triggerMetric   ?? sched.trigger_metric   ?? null,
+      thresholdKpa:    sched.thresholdKpa    ?? sched.threshold_kpa    ?? null,
+      durationMinutes: sched.durationMinutes ?? sched.duration_minutes ?? null,
+      lastTriggeredAt: sched.lastTriggeredAt ?? sched.last_triggered_at ?? null,
+      responseMode:    sched.responseMode    ?? sched.response_mode    ?? 'proportional',
+    } : null,
+  } as IrrigationZone;
+}
+
 // Irrigation Zones API
 export const irrigationZonesAPI = {
   getAll: async (): Promise<IrrigationZone[]> => {
-    const response = await api.get<IrrigationZone[]>('/api/irrigation-zones');
-    return response.data;
+    const response = await api.get<any[]>('/api/irrigation-zones');
+    return response.data.map(normaliseZone);
   },
 
   create: async (zone: CreateZoneRequest): Promise<IrrigationZone> => {

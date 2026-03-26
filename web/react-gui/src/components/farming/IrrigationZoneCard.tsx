@@ -64,10 +64,10 @@ export const IrrigationZoneCard: React.FC<IrrigationZoneCardProps> = ({
   const lsn50Nodes = devices.filter((d) => d.type_id === 'DRAGINO_LSN50');
 
   const hasDendroDevices = lsn50Nodes.some(d => d.dendro_enabled === 1);
-  const schedMetric = zone.schedule?.trigger_metric;
+  const schedMetric = zone.schedule?.triggerMetric ?? zone.schedule?.trigger_metric;
   const schedEnabled = zone.schedule?.enabled ?? false;
-  const cropType = zone.crop_type ?? zone.cropType;
-  const soilType = zone.soil_type ?? zone.soilType;
+  const cropType = zone.cropType;
+  const soilType = zone.soilType;
 
   return (
     <div className="bg-[var(--surface)] border-2 border-[var(--border)] rounded-xl p-6 shadow-lg mb-6">
@@ -123,11 +123,21 @@ export const IrrigationZoneCard: React.FC<IrrigationZoneCardProps> = ({
             <span>📏</span> Dendro active
           </span>
         )}
-        {zone.schedule && schedEnabled && schedMetric && (
-          <span className="inline-flex items-center gap-1 bg-blue-50 border border-blue-200 text-blue-800 text-xs px-2.5 py-1 rounded-full">
-            <span>⏱</span> {schedMetric === 'DENDRO' ? 'Dendro trigger' : schedMetric === 'VWC' ? 'VWC trigger' : 'SWT trigger'} enabled
-          </span>
-        )}
+        {zone.schedule && schedEnabled && schedMetric && (() => {
+          const metricLabel =
+            schedMetric === 'DENDRO'   ? 'Dendro trigger' :
+            schedMetric === 'VWC'      ? 'VWC trigger' :
+            schedMetric === 'SWT_WM1'  ? 'Soil tension (S1)' :
+            schedMetric === 'SWT_WM2'  ? 'Soil tension (S2)' :
+            schedMetric === 'SWT_WM3'  ? 'Soil tension (S3)' :
+            schedMetric === 'SWT_AVG'  ? 'Soil tension (avg)' :
+                                         'Soil tension';
+          return (
+            <span className="inline-flex items-center gap-1 bg-blue-50 border border-blue-200 text-blue-800 text-xs px-2.5 py-1 rounded-full">
+              <span>⏱</span> {metricLabel} enabled
+            </span>
+          );
+        })()}
         {zone.schedule && !schedEnabled && (
           <span className="inline-flex items-center gap-1 bg-[var(--surface)] border border-[var(--border)] text-[var(--text-tertiary)] text-xs px-2.5 py-1 rounded-full">
             <span>⏸</span> Scheduler off
@@ -282,6 +292,7 @@ export const IrrigationZoneCard: React.FC<IrrigationZoneCardProps> = ({
         isOpen={showAdvancedDrawer}
         zone={zone}
         onClose={() => setShowAdvancedDrawer(false)}
+        onSaved={onUpdate}
       />
     </div>
   );

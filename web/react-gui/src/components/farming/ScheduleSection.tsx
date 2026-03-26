@@ -254,7 +254,6 @@ export const ScheduleSection: React.FC<ScheduleSectionProps> = ({
     if (typeof s.enabled === 'boolean') setEnabled(s.enabled);
     else if (s.enabled === 0 || s.enabled === 1) setEnabled(Boolean(s.enabled));
     if (s.responseMode) setResponseMode(s.responseMode);
-    else if ((s as any).response_mode) setResponseMode((s as any).response_mode);
   };
 
   useEffect(() => {
