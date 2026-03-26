@@ -86,14 +86,14 @@ Access at: **`http://localhost:3000/gui/`**
 
 Login with: `farmer` / `test123`
 
-## For Prototyping
+## Auth Secret
 
-**Good news!** You don't need to set up JWT_SECRET for prototyping. The system uses a default fallback secret automatically.
-
-For production deployment, set:
+Set a JWT signing secret before starting Node-RED:
 ```bash
 export JWT_SECRET=your-secure-secret-key
 ```
+
+For local development, any long random value is fine. The fallback secret has been removed.
 
 ### Production Build
 

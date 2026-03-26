@@ -97,7 +97,6 @@
     "reload": "Recarregar",
     "reloadFailed": "Falha ao recarregar programa",
     "saved": "Guardado.",
-    "triggerHint": "Ativar se {{metric}} ≥ {{threshold}} kPa (uma vez/dia, 06:00).",
-    "backendNote": "Lógica do agendador (backend): ativar se metric_kpa ≥ threshold_kpa, apenas uma vez por dia, às 06:00 fixas."
+    "triggerHint": "Ativar se {{metric}} ≥ {{threshold}} kPa (uma vez/dia, 06:00)."
   }
 }

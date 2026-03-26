@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { accountLinkAPI } from '../services/api';
-import type { AccountLinkStatus, AccountLinkResult } from '../services/api';
+import type { AccountLinkStatus, AccountLinkResult, ForceSyncResult } from '../services/api';
 
 export const AccountLink: React.FC = () => {
   const { t } = useTranslation('accountLink');
@@ -25,6 +25,11 @@ export const AccountLink: React.FC = () => {
 
   const [unlinking, setUnlinking] = useState(false);
   const [showUnlinkConfirm, setShowUnlinkConfirm] = useState(false);
+  const [forcingSync, setForcingSync] = useState(false);
+  const [forceSyncResult, setForceSyncResult] = useState<ForceSyncResult | null>(null);
+  const [showReauth, setShowReauth] = useState(false);
+  const [reauthPassword, setReauthPassword] = useState('');
+  const [reauthSubmitting, setReauthSubmitting] = useState(false);
 
   useEffect(() => {
     accountLinkAPI.getStatus()
@@ -52,7 +57,12 @@ export const AccountLink: React.FC = () => {
         password,
       });
       setResult(res);
-      setStatus({ linked: true, serverUsername: res.serverUsername, linkedAt: new Date().toISOString() });
+      setStatus({
+        linked: true,
+        serverUsername: res.serverUsername,
+        linkedAt: new Date().toISOString(),
+        serverUrl,
+      });
     } catch (err: any) {
       const status = err.response?.status;
       if (status === 401) {
@@ -74,12 +84,78 @@ export const AccountLink: React.FC = () => {
       await accountLinkAPI.unlink();
       setStatus({ linked: false, serverUsername: null, linkedAt: null });
       setResult(null);
+      setForceSyncResult(null);
     } catch {
       setError(t('errors.generic'));
     } finally {
       setUnlinking(false);
     }
   };
+
+  const handleForceSync = async () => {
+    setForcingSync(true);
+    setError('');
+    try {
+      const res = await accountLinkAPI.forceSync();
+      setForceSyncResult(res);
+    } catch (err: any) {
+      setError(err.response?.data?.error || err.response?.data?.message || t('errors.forceSyncFailed'));
+    } finally {
+      setForcingSync(false);
+    }
+  };
+
+  const handleReauthenticate = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!status?.serverUsername || !status?.serverUrl) {
+      setError(t('errors.forceSyncFailed'));
+      return;
+    }
+    setReauthSubmitting(true);
+    setError('');
+    try {
+      const res = await accountLinkAPI.link({
+        serverUrl: status.serverUrl,
+        action: 'login',
+        username: status.serverUsername,
+        password: reauthPassword,
+      });
+      setResult(res);
+      setForceSyncResult(null);
+      setReauthPassword('');
+      setShowReauth(false);
+      setStatus({
+        linked: true,
+        serverUsername: res.serverUsername,
+        linkedAt: new Date().toISOString(),
+        serverUrl: status.serverUrl,
+      });
+    } catch (err: any) {
+      const code = err.response?.status;
+      if (code === 401) {
+        setError(t('errors.authFailed'));
+      } else if (!err.response) {
+        setError(t('errors.networkError'));
+      } else {
+        setError(err.response?.data?.message || t('errors.generic'));
+      }
+    } finally {
+      setReauthSubmitting(false);
+    }
+  };
+
+  const needsReauth = Boolean(
+    status?.linked &&
+    status.serverUsername &&
+    status.serverUrl &&
+    forceSyncResult &&
+    !forceSyncResult.success &&
+    (
+      forceSyncResult.refresh.statusCode === 401 ||
+      forceSyncResult.refresh.statusCode === 403 ||
+      forceSyncResult.lastError?.source === 'sync-token-refresh'
+    )
+  );
 
   if (loadingStatus) {
     return (
@@ -139,7 +215,144 @@ export const AccountLink: React.FC = () => {
                     {t('status.linkedSince', { date: new Date(status.linkedAt).toLocaleDateString() })}
                   </p>
                 )}
+                {status.serverUrl && (
+                  <p className="text-[var(--text-secondary)] text-sm mt-1 break-all">
+                    {status.serverUrl}
+                  </p>
+                )}
               </div>
+
+              <div className="bg-[var(--secondary-bg)] rounded-lg p-4 mb-6">
+                <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                  <div>
+                    <p className="text-[var(--text)] font-semibold">{t('sync.title')}</p>
+                    <p className="text-[var(--text-secondary)] text-sm mt-1">{t('sync.description')}</p>
+                  </div>
+                  <button
+                    onClick={handleForceSync}
+                    disabled={forcingSync}
+                    className="bg-[var(--primary)] hover:bg-[var(--primary-hover)] text-white font-bold px-5 py-3 rounded-lg transition-colors disabled:opacity-50"
+                  >
+                    {forcingSync ? t('sync.running') : t('sync.button')}
+                  </button>
+                </div>
+
+                {forceSyncResult && (
+                  <div className={`mt-4 rounded-lg border p-4 ${
+                    forceSyncResult.success
+                      ? 'border-green-200 bg-green-50'
+                      : 'border-yellow-300 bg-yellow-50'
+                  }`}>
+                    <p className={`font-bold ${
+                      forceSyncResult.success ? 'text-green-800' : 'text-yellow-800'
+                    }`}>
+                      {forceSyncResult.success ? t('sync.successTitle') : t('sync.partialTitle')}
+                    </p>
+                    <p className="text-[var(--text-secondary)] text-sm mt-1">
+                      {new Date(forceSyncResult.forcedAt).toLocaleString()}
+                    </p>
+                    <div className="mt-3 space-y-2 text-sm text-[var(--text)]">
+                      <p>
+                        {forceSyncResult.refresh.succeeded
+                          ? t('sync.refreshed')
+                          : t('sync.usedCurrentToken')}
+                      </p>
+                      <p>
+                        {t('sync.bootstrap', {
+                          applied: forceSyncResult.bootstrap.applied,
+                          skipped: forceSyncResult.bootstrap.skipped,
+                        })}
+                      </p>
+                      <p>
+                        {t('sync.outbox', {
+                          delivered: forceSyncResult.outbox.deliveredCount,
+                          before: forceSyncResult.outbox.beforeCount,
+                          after: forceSyncResult.outbox.afterCount,
+                        })}
+                      </p>
+                      <p>
+                        {t('sync.pending', {
+                          count: forceSyncResult.pendingCommands.queuedCount,
+                        })}
+                      </p>
+                      {forceSyncResult.lastError && (
+                        <p className="text-yellow-800">
+                          {t('sync.lastError', {
+                            source: forceSyncResult.lastError.source,
+                            message: forceSyncResult.lastError.message,
+                          })}
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {needsReauth && (
+                <div className="bg-yellow-50 border border-yellow-300 rounded-lg p-4 mb-6">
+                  <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+                    <div>
+                      <p className="font-bold text-yellow-800">{t('reauth.title')}</p>
+                      <p className="text-yellow-700 text-sm mt-1">{t('reauth.description')}</p>
+                    </div>
+                    {!showReauth && (
+                      <button
+                        onClick={() => setShowReauth(true)}
+                        className="bg-yellow-600 hover:bg-yellow-700 text-white font-bold px-4 py-2 rounded-lg transition-colors"
+                      >
+                        {t('reauth.button')}
+                      </button>
+                    )}
+                  </div>
+
+                  {showReauth && (
+                    <form onSubmit={handleReauthenticate} className="mt-4 space-y-3">
+                      <div>
+                        <label className="block text-[var(--text)] font-semibold mb-2">
+                          {t('reauth.username')}
+                        </label>
+                        <input
+                          type="text"
+                          value={status.serverUsername || ''}
+                          disabled
+                          className="w-full px-4 py-3 bg-white border-2 border-[var(--border)] rounded-lg text-[var(--text-secondary)]"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[var(--text)] font-semibold mb-2">
+                          {t('reauth.password')}
+                        </label>
+                        <input
+                          type="password"
+                          value={reauthPassword}
+                          onChange={e => setReauthPassword(e.target.value)}
+                          required
+                          className="w-full px-4 py-3 bg-white border-2 border-[var(--border)] rounded-lg text-[var(--text)] focus:outline-none focus:border-[var(--focus)]"
+                        />
+                      </div>
+                      <div className="flex gap-3">
+                        <button
+                          type="submit"
+                          disabled={reauthSubmitting}
+                          className="bg-[var(--primary)] hover:bg-[var(--primary-hover)] text-white font-bold px-4 py-3 rounded-lg transition-colors disabled:opacity-50"
+                        >
+                          {reauthSubmitting ? t('reauth.running') : t('reauth.submit')}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setShowReauth(false);
+                            setReauthPassword('');
+                          }}
+                          className="bg-[var(--secondary-bg)] hover:bg-[var(--border)] text-[var(--text)] font-bold px-4 py-3 rounded-lg transition-colors"
+                        >
+                          {t('form.cancel')}
+                        </button>
+                      </div>
+                    </form>
+                  )}
+                </div>
+              )}
 
               {showUnlinkConfirm ? (
                 <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">

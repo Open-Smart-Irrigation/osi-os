@@ -196,8 +196,21 @@ ssh $PI 'mkdir -p /data/db'
 scp conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/db/farming.db \
     $PI:/data/db/farming.db
 
-# SQLite Node-RED module (not pre-installed on ChirpStack OS)
-ssh $PI 'cd /srv/node-red && npm install node-red-node-sqlite --save'
+# Node-RED runtime package manifest
+scp conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/package.json \
+    $PI:/srv/node-red/package.json
+scp conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/package-lock.json \
+    $PI:/srv/node-red/package-lock.json
+
+# Local ChirpStack helper package used by Node-RED function external modules
+ssh $PI 'mkdir -p /srv/node-red/osi-chirpstack-helper'
+scp conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-chirpstack-helper/package.json \
+    $PI:/srv/node-red/osi-chirpstack-helper/package.json
+scp conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-chirpstack-helper/index.js \
+    $PI:/srv/node-red/osi-chirpstack-helper/index.js
+
+# Install Node-RED runtime dependencies on-device so native modules match the Pi architecture
+ssh $PI 'cd /srv/node-red && npm install --omit=dev --no-fund --no-audit'
 
 # React GUI
 ssh $PI 'mkdir -p /usr/lib/node-red/gui'
@@ -254,6 +267,18 @@ scp -r web/react-gui/build/* $PI:/usr/lib/node-red/gui/
 # Redeploy flows (if flows.json changed)
 scp conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/flows.json \
     $PI:/srv/node-red/flows.json
+
+# Redeploy runtime manifests and reinstall dependencies (if Node-RED packaging changed)
+scp conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/package.json \
+    $PI:/srv/node-red/package.json
+scp conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/package-lock.json \
+    $PI:/srv/node-red/package-lock.json
+ssh $PI 'mkdir -p /srv/node-red/osi-chirpstack-helper'
+scp conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-chirpstack-helper/package.json \
+    $PI:/srv/node-red/osi-chirpstack-helper/package.json
+scp conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-chirpstack-helper/index.js \
+    $PI:/srv/node-red/osi-chirpstack-helper/index.js
+ssh $PI 'cd /srv/node-red && npm install --omit=dev --no-fund --no-audit'
 
 ssh $PI '/etc/init.d/node-red restart'
 ```

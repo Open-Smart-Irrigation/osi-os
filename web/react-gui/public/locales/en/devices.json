@@ -97,7 +97,6 @@
     "reload": "Reload",
     "reloadFailed": "Failed to reload schedule",
     "saved": "Saved.",
-    "triggerHint": "Trigger if {{metric}} ≥ {{threshold}} kPa (once/day, 06:00).",
-    "backendNote": "Scheduler logic (backend): trigger if metric_kpa ≥ threshold_kpa, only once per day, fixed 06:00."
+    "triggerHint": "Trigger if {{metric}} ≥ {{threshold}} kPa (once/day, 06:00)."
   }
 }

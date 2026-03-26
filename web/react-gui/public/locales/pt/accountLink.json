@@ -22,7 +22,7 @@
   },
   "warning": {
     "title": "Importante",
-    "message": "Após a vinculação, deve usar as suas credenciais OSI Server para iniciar sessão. A sua palavra-passe local será substituída pelo hash do servidor.",
+    "message": "After linking, you must use your OSI Server credentials to log in. OSI OS stores a gateway-specific offline verifier for linked login.",
     "proceed": "Prosseguir"
   },
   "success": {
@@ -39,6 +39,30 @@
   "errors": {
     "networkError": "Não foi possível alcançar o OSI Server. Verifique o URL e a sua ligação à Internet.",
     "authFailed": "Credenciais OSI Server inválidas.",
-    "generic": "Ocorreu um erro. Por favor, tente novamente."
+    "generic": "Ocorreu um erro. Por favor, tente novamente.",
+    "forceSyncFailed": "Manual sync failed. Please try again."
+  },
+  "sync": {
+    "title": "Manual sync",
+    "description": "Run an immediate recovery sync with OSI Server.",
+    "button": "Force sync now",
+    "running": "Syncing...",
+    "successTitle": "Manual sync completed",
+    "partialTitle": "Manual sync finished with issues",
+    "refreshed": "Sync token refreshed before sync.",
+    "usedCurrentToken": "Using current sync token.",
+    "bootstrap": "Bootstrap applied: {{applied}}, skipped: {{skipped}}",
+    "outbox": "Outbox delivered: {{delivered}} ({{before}} -> {{after}} pending)",
+    "pending": "Pending commands queued: {{count}}",
+    "lastError": "Last error from {{source}}: {{message}}"
+  },
+  "reauth": {
+    "title": "Sync token expired",
+    "description": "Re-authenticate with OSI Server to mint a fresh sync token for this gateway.",
+    "button": "Re-authenticate",
+    "username": "Server Username",
+    "password": "OSI Server Password",
+    "submit": "Refresh connection",
+    "running": "Refreshing..."
   }
 }

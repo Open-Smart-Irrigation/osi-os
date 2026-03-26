@@ -97,7 +97,6 @@
     "reload": "Ricarica",
     "reloadFailed": "Ricaricamento programma fallito",
     "saved": "Salvato.",
-    "triggerHint": "Attiva se {{metric}} ≥ {{threshold}} kPa (una volta/giorno, 06:00).",
-    "backendNote": "Logica pianificatore (backend): attiva se metric_kpa ≥ threshold_kpa, solo una volta al giorno, alle 06:00 fisse."
+    "triggerHint": "Attiva se {{metric}} ≥ {{threshold}} kPa (una volta/giorno, 06:00)."
   }
 }

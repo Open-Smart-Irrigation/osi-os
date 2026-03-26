@@ -97,7 +97,6 @@
     "reload": "Neu laden",
     "reloadFailed": "Plan konnte nicht neu geladen werden",
     "saved": "Gespeichert.",
-    "triggerHint": "Auslösen wenn {{metric}} ≥ {{threshold}} kPa (einmal/Tag, 06:00).",
-    "backendNote": "Planungslogik (Backend): Auslösen wenn metric_kpa ≥ threshold_kpa, nur einmal täglich, fest 06:00."
+    "triggerHint": "Auslösen wenn {{metric}} ≥ {{threshold}} kPa (einmal/Tag, 06:00)."
   }
 }

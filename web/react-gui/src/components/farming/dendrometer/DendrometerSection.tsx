@@ -9,7 +9,7 @@ import { ZoneAnalysisCard } from './ZoneAnalysisCard';
 
 interface Props {
   zone: IrrigationZone;
-  /** All LSN50 devices assigned to this zone */
+  /** All devices assigned to this zone */
   devices: Device[];
 }
 
@@ -36,15 +36,14 @@ export const DendrometerSection: React.FC<Props> = ({ zone, devices }) => {
       setError(null);
       try {
         const [dailyResults, recs] = await Promise.all([
-          Promise.all(dendroDevices.map(d => dendroAnalyticsAPI.getDailyIndicators(d.deveui, 8))),
-          dendroAnalyticsAPI.getZoneRecommendations(zone.id, 14),
+          Promise.all(dendroDevices.map(d => dendroAnalyticsAPI.getDailyIndicators(d.deveui!, 30))),
+          dendroAnalyticsAPI.getZoneRecommendations(zone.id, 30),
         ]);
         if (cancelled) return;
 
         const map: Record<string, DendroDaily[]> = {};
         dendroDevices.forEach((d, i) => {
-          // API returns newest-first; keep newest-first for today lookups, oldest-first for sparkline
-          map[d.deveui] = dailyResults[i];
+          map[d.deveui!] = dailyResults[i];
         });
         setDailyMap(map);
         setZoneRecs(recs);
@@ -108,13 +107,20 @@ export const DendrometerSection: React.FC<Props> = ({ zone, devices }) => {
                   <NoDataBanner />
                 )}
 
+                {/* Confidence pill — after action banner */}
+                <ConfidencePill
+                  zoneRec={today}
+                  dailyMap={dailyMap}
+                  dendroDevices={dendroDevices}
+                />
+
                 {/* Zone analysis card — per-parameter averages */}
-                <ZoneAnalysisCard devices={dendroDevices} dailyMap={dailyMap} />
+                <ZoneAnalysisCard devices={dendroDevices} dailyMap={dailyMap} todayRec={zoneRecs[0] ?? null} />
 
                 {/* Tree grid */}
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   {dendroDevices.map(device => {
-                    const rows = dailyMap[device.deveui] ?? [];
+                    const rows = dailyMap[device.deveui!] ?? [];
                     const todayRow    = rows[0] ?? null;
                     const sparkline   = [...rows].reverse(); // oldest-first for sparkline
                     return (
@@ -148,12 +154,78 @@ export const DendrometerSection: React.FC<Props> = ({ zone, devices }) => {
       {monitorDevice && (
         <DendrometerMonitor
           device={monitorDevice}
-          daily={dailyMap[monitorDevice.deveui] ?? []}
+          daily={dailyMap[monitorDevice.deveui!] ?? []}
           onClose={() => setMonitorDevice(null)}
         />
       )}
     </>
   );
+};
+
+// ── ConfidencePill ────────────────────────────────────────────────────────────
+
+interface ConfidencePillProps {
+  zoneRec: ZoneRecommendation | null;
+  dailyMap: Record<string, DendroDaily[]>;
+  dendroDevices: Device[];
+}
+
+const ConfidencePill: React.FC<ConfidencePillProps> = ({ zoneRec, dailyMap, dendroDevices }) => {
+  // Check if any tree still building baseline
+  const anyBaselineIncomplete = dendroDevices.some(d => {
+    const rows = dailyMap[d.deveui!] ?? [];
+    return rows.length > 0 && rows[0].baseline_complete !== 1;
+  });
+
+  const confidence = zoneRec?.zone_confidence_score;
+  const lowConfCount = zoneRec?.low_confidence_tree_count ?? 0;
+  const usableCount  = zoneRec?.usable_tree_count ?? dendroDevices.length;
+
+  if (anyBaselineIncomplete) {
+    const maxDays = Math.max(
+      ...dendroDevices.map(d => {
+        const rows = dailyMap[d.deveui!] ?? [];
+        return rows[0]?.baseline_days ?? 0;
+      })
+    );
+    return (
+      <div className="flex items-center gap-2 text-xs">
+        <span className="inline-flex items-center gap-1.5 bg-amber-100 border border-amber-300 text-amber-800 px-2.5 py-1 rounded-full font-medium">
+          <span className="w-2 h-2 rounded-full bg-amber-400 animate-pulse" />
+          Building baseline ({maxDays}/14 days)
+        </span>
+        <span className="text-[var(--text-tertiary)]">v3 classification active until baseline complete</span>
+      </div>
+    );
+  }
+
+  if (confidence != null && confidence < 0.6) {
+    return (
+      <div className="flex items-center gap-2 text-xs">
+        <span className="inline-flex items-center gap-1.5 bg-orange-100 border border-orange-300 text-orange-800 px-2.5 py-1 rounded-full font-medium">
+          <span className="w-2 h-2 rounded-full bg-orange-400" />
+          Low confidence ({(confidence * 100).toFixed(0)}%)
+        </span>
+        {lowConfCount > 0 && (
+          <span className="text-[var(--text-tertiary)]">{lowConfCount} of {usableCount} trees flagged</span>
+        )}
+      </div>
+    );
+  }
+
+  if (confidence != null && confidence >= 0.6) {
+    return (
+      <div className="flex items-center gap-2 text-xs">
+        <span className="inline-flex items-center gap-1.5 bg-green-100 border border-green-300 text-green-800 px-2.5 py-1 rounded-full font-medium">
+          <span className="w-2 h-2 rounded-full bg-green-500" />
+          High confidence ({(confidence * 100).toFixed(0)}%)
+        </span>
+        <span className="text-[var(--text-tertiary)]">{usableCount} tree{usableCount !== 1 ? 's' : ''} used</span>
+      </div>
+    );
+  }
+
+  return null;
 };
 
 // ── Sub-components ────────────────────────────────────────────────────────────

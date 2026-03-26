@@ -26,8 +26,24 @@ mkdir -p /data/db
 curl -s "$BASE/conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/db/farming.db" \
     -o /data/db/farming.db && echo "OK" || echo "FAIL"
 
-echo "--- node-red-node-sqlite ---"
-cd /srv/node-red && npm install node-red-node-sqlite --save 2>&1 | tail -3
+echo "--- Node-RED runtime package.json ---"
+mkdir -p /srv/node-red
+curl -s "$BASE/conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/package.json" \
+    -o /srv/node-red/package.json && echo "OK" || echo "FAIL"
+
+echo "--- Node-RED runtime package-lock.json ---"
+curl -s "$BASE/conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/package-lock.json" \
+    -o /srv/node-red/package-lock.json && echo "OK" || echo "FAIL"
+
+echo "--- osi-chirpstack-helper ---"
+mkdir -p /srv/node-red/osi-chirpstack-helper
+curl -s "$BASE/conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-chirpstack-helper/package.json" \
+    -o /srv/node-red/osi-chirpstack-helper/package.json && echo "package OK" || echo "package FAIL"
+curl -s "$BASE/conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-chirpstack-helper/index.js" \
+    -o /srv/node-red/osi-chirpstack-helper/index.js && echo "index OK" || echo "index FAIL"
+
+echo "--- Node-RED runtime dependencies ---"
+cd /srv/node-red && npm install --omit=dev --no-fund --no-audit 2>&1 | tail -20
 
 echo "--- React GUI ---"
 mkdir -p /usr/lib/node-red/gui
