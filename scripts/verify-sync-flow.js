@@ -8,11 +8,18 @@ const flowPath = path.resolve(__dirname, '..', 'conf', 'full_raspberrypi_bcm27xx
 const flows = JSON.parse(fs.readFileSync(flowPath, 'utf8'));
 
 const requiredHttpRoutes = [
+  '/api/account-link',
+  '/api/account-link/status',
   '/api/sync/state',
   '/api/sync/force'
 ];
 
 const requiredFunctionNodes = [
+  'Validate & decode token',
+  'Handle server auth response',
+  'Handle claim response & build UPDATE',
+  'Set Download Headers',
+  'Daily Dendrometer Analytics',
   'Sync Init Schema + Triggers',
   'Build Cloud Bootstrap',
   'Mark Bootstrap Synced',
@@ -32,6 +39,19 @@ function fail(message) {
 
 function findNodeByName(name) {
   return flows.find((node) => node.name === name);
+}
+
+function expectIncludes(nodeName, needle, description) {
+  const node = findNodeByName(nodeName);
+  if (!node) {
+    fail(`missing function node ${nodeName}`);
+    return;
+  }
+  if (!node.func.includes(needle)) {
+    fail(`${nodeName} missing ${description}`);
+  } else {
+    console.log(`OK ${nodeName} ${description}`);
+  }
 }
 
 for (const route of requiredHttpRoutes) {
@@ -83,6 +103,30 @@ if (bootstrapNode) {
     } else {
       console.log(`OK bootstrap includes ${key}`);
     }
+  }
+}
+
+expectIncludes('Validate & decode token', 'const auth = verifyBearer', 'uses decoded local auth');
+expectIncludes('Handle server auth response', 'statusCode >= 400 && statusCode < 500', 'maps remote auth failures away from 401');
+expectIncludes('Handle server auth response', 'Server authentication returned no sync token', 'requires sync token on successful link');
+expectIncludes('Handle claim response & build UPDATE', 'return [null, msg];', 'can stop before mutating local auth state');
+expectIncludes('Set Download Headers', 'Database download is disabled', 'keeps database download disabled');
+expectIncludes('Login User', 'ORDER BY CASE WHEN username', 'prefers local username matches');
+expectIncludes('Process Result', 'Multiple accounts match this username', 'rejects ambiguous linked logins');
+expectIncludes('Process Result', 'osi_auth_token_secret', 'uses a persisted local auth secret');
+expectIncludes('Sync Init Schema + Triggers', 'AFTER INSERT ON dendrometer_daily', 'emits dendro daily outbox rows from dendrometer_daily');
+expectIncludes('Sync Init Schema + Triggers', 'AFTER UPDATE ON dendrometer_daily', 'updates dendro daily outbox rows from dendrometer_daily');
+expectIncludes('Daily Dendrometer Analytics', 'const recoveryThreshold=(calibration.thresholds.mild||CALIBRATIONS.default.thresholds.mild)*(phenoMod>0?phenoMod:1.0);', 'uses calibration-aware recovery threshold');
+expectIncludes('Daily Dendrometer Analytics', 't.twd_night_um<recoveryThreshold', 'uses absolute night TWD in recovery verification');
+expectIncludes('Daily Dendrometer Analytics', "date>=date('${ANALYTICS_DATE}','-3 days')", 'uses the exact previous-three-day recovery window');
+
+const authNodes = flows.filter((node) => typeof node.func === 'string' && node.func.includes('function getAuthSecret()'));
+for (const insecureNeedle of ['osi-os-default-auth-secret', "env.get('CHIRPSTACK_API_KEY')"]) {
+  const offendingNode = authNodes.find((node) => node.func.includes(insecureNeedle));
+  if (offendingNode) {
+    fail(`${offendingNode.name || offendingNode.id} still contains insecure auth secret fallback: ${insecureNeedle}`);
+  } else {
+    console.log(`OK removed insecure auth fallback ${insecureNeedle}`);
   }
 }
 

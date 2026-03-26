@@ -135,7 +135,7 @@ console.log(`  Sensor readings: ${db.prepare('SELECT COUNT(*) as count FROM devi
 console.log('\n📝 Next steps:');
 console.log('  1. Update the DB_PATH in your Node-RED settings or init script');
 console.log('  2. Import the node-red-flows.json into Node-RED');
-console.log('  3. Set environment variable: JWT_SECRET=your-secret-key');
+console.log('  3. Set required environment variable: JWT_SECRET=your-secret-key');
 console.log('  4. Restart Node-RED');
 console.log('  5. Start the React app with: npm run dev\n');
 

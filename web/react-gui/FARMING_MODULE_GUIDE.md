@@ -155,11 +155,9 @@ functionGlobalContext: {
 }
 ```
 
-**3. JWT Secret (Optional for Prototyping)**
+**3. JWT Secret**
 
-For prototyping, JWT_SECRET is **optional** - the system uses a default fallback.
-
-For production, set:
+Set `JWT_SECRET` before starting Node-RED. For local development, any long random value is fine.
 ```bash
 export JWT_SECRET=your-secure-secret-key
 ```
