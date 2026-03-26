@@ -5,6 +5,12 @@ const vm = require('vm');
 const path = require('path');
 
 const flowPath = path.resolve(__dirname, '..', 'conf', 'full_raspberrypi_bcm27xx_bcm2712', 'files', 'usr', 'share', 'flows.json');
+const nodeRedRoot = path.resolve(__dirname, '..', 'conf', 'full_raspberrypi_bcm27xx_bcm2712', 'files', 'usr', 'share', 'node-red');
+const helperCandidates = [
+  path.join(nodeRedRoot, 'node_modules', 'osi-chirpstack-helper'),
+  path.join(nodeRedRoot, 'osi-chirpstack-helper')
+];
+const packageJsonPath = path.join(nodeRedRoot, 'package.json');
 const flows = JSON.parse(fs.readFileSync(flowPath, 'utf8'));
 
 const requiredHttpRoutes = [
@@ -51,6 +57,19 @@ function expectIncludes(nodeName, needle, description) {
     fail(`${nodeName} missing ${description}`);
   } else {
     console.log(`OK ${nodeName} ${description}`);
+  }
+}
+
+function expectExcludes(nodeName, needle, description) {
+  const node = findNodeByName(nodeName);
+  if (!node) {
+    fail(`missing function node ${nodeName}`);
+    return;
+  }
+  if (node.func.includes(needle)) {
+    fail(`${nodeName} still contains ${description}`);
+  } else {
+    console.log(`OK ${nodeName} removed ${description}`);
   }
 }
 
@@ -114,6 +133,12 @@ expectIncludes('Set Download Headers', 'Database download is disabled', 'keeps d
 expectIncludes('Login User', 'ORDER BY CASE WHEN username', 'prefers local username matches');
 expectIncludes('Process Result', 'Multiple accounts match this username', 'rejects ambiguous linked logins');
 expectIncludes('Process Result', 'osi_auth_token_secret', 'uses a persisted local auth secret');
+expectIncludes('CS Register Device', 'chirpstack.createProvisioningClientFromEnv(env)', 'uses shared ChirpStack provisioning helper');
+expectIncludes('CS Register Device', 'ensureDeviceProvisioned', 'provisions devices through gRPC helper');
+expectExcludes('CS Register Device', '/api/devices', 'legacy ChirpStack REST device endpoint');
+expectIncludes('CS Register (cloud cmd)', 'chirpstack.createProvisioningClientFromEnv(env)', 'uses shared ChirpStack provisioning helper');
+expectIncludes('CS Register (cloud cmd)', 'ensureDeviceProvisioned', 'provisions cloud-triggered devices through gRPC helper');
+expectExcludes('CS Register (cloud cmd)', '/api/devices', 'legacy ChirpStack REST device endpoint');
 expectIncludes('Sync Init Schema + Triggers', 'AFTER INSERT ON dendrometer_daily', 'emits dendro daily outbox rows from dendrometer_daily');
 expectIncludes('Sync Init Schema + Triggers', 'AFTER UPDATE ON dendrometer_daily', 'updates dendro daily outbox rows from dendrometer_daily');
 expectIncludes('Daily Dendrometer Analytics', 'const recoveryThreshold=(calibration.thresholds.mild||CALIBRATIONS.default.thresholds.mild)*(phenoMod>0?phenoMod:1.0);', 'uses calibration-aware recovery threshold');
@@ -127,6 +152,37 @@ for (const insecureNeedle of ['osi-os-default-auth-secret', "env.get('CHIRPSTACK
     fail(`${offendingNode.name || offendingNode.id} still contains insecure auth secret fallback: ${insecureNeedle}`);
   } else {
     console.log(`OK removed insecure auth fallback ${insecureNeedle}`);
+  }
+}
+
+if (!fs.existsSync(packageJsonPath)) {
+  fail(`missing Node-RED package manifest at ${packageJsonPath}`);
+} else {
+  const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, 'utf8'));
+  for (const dependency of ['@chirpstack/chirpstack-api', '@grpc/grpc-js', '@rakwireless/field-tester-server', 'bcryptjs', 'node-red-node-sqlite', 'osi-chirpstack-helper', 'sqlite3']) {
+    if (!packageJson.dependencies || !packageJson.dependencies[dependency]) {
+      fail(`package.json missing dependency ${dependency}`);
+    } else {
+      console.log(`OK package.json includes ${dependency}`);
+    }
+  }
+}
+
+const helperPath = helperCandidates.find((candidate) => fs.existsSync(candidate));
+if (!helperPath) {
+  fail(`missing ChirpStack helper module at one of: ${helperCandidates.join(', ')}`);
+} else {
+  try {
+    const helper = require(helperPath);
+    for (const exportName of ['createClient', 'createProvisioningClientFromEnv', 'normalizeApiUrl']) {
+      if (typeof helper[exportName] !== 'function') {
+        fail(`helper missing export ${exportName}`);
+      } else {
+        console.log(`OK helper exports ${exportName}`);
+      }
+    }
+  } catch (error) {
+    fail(`failed to load ChirpStack helper: ${error.message}`);
   }
 }
 

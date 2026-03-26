@@ -1,0 +1,12 @@
+{
+  "private": true,
+  "dependencies": {
+    "@chirpstack/chirpstack-api": "4.12.1",
+    "@grpc/grpc-js": "1.14.3",
+    "@rakwireless/field-tester-server": "0.2.4",
+    "bcryptjs": "3.0.3",
+    "node-red-node-sqlite": "1.1.1",
+    "osi-chirpstack-helper": "file:osi-chirpstack-helper",
+    "sqlite3": "^5.1.7"
+  }
+}
