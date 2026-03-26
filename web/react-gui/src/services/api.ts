@@ -343,6 +343,7 @@ export interface AccountLinkStatus {
   linked: boolean;
   serverUsername: string | null;
   linkedAt: string | null;
+  serverUrl?: string | null;
 }
 
 export interface AccountLinkResult {
@@ -352,10 +353,55 @@ export interface AccountLinkResult {
   skippedDevices: string[];
 }
 
+export interface ForceSyncResult {
+  success: boolean;
+  forcedAt: string;
+  refresh: {
+    attempted: boolean;
+    succeeded: boolean;
+    statusCode?: number | null;
+    syncTokenExpiresAt?: number | null;
+    error?: string | null;
+  };
+  bootstrap: {
+    attempted: boolean;
+    succeeded: boolean;
+    applied: number;
+    skipped: number;
+    statusCode?: number | null;
+    error?: string | null;
+  };
+  outbox: {
+    attempted: boolean;
+    succeeded: boolean;
+    beforeCount: number;
+    deliveredCount: number;
+    afterCount: number;
+    applied: number;
+    skipped: number;
+    statusCode?: number | null;
+    error?: string | null;
+  };
+  pendingCommands: {
+    attempted: boolean;
+    succeeded: boolean;
+    fetchedCount: number;
+    queuedCount: number;
+    statusCode?: number | null;
+    error?: string | null;
+  };
+  lastError: {
+    source: string;
+    message: string;
+    statusCode?: number | null;
+  } | null;
+}
+
 export const accountLinkAPI = {
   getStatus: () => api.get<AccountLinkStatus>('/api/account-link/status').then(r => r.data),
   link: (req: AccountLinkRequest) => api.post<AccountLinkResult>('/api/account-link', req).then(r => r.data),
   unlink: () => api.delete('/api/account-link'),
+  forceSync: () => api.post<ForceSyncResult>('/api/sync/force').then(r => r.data),
 };
 
 export default api;

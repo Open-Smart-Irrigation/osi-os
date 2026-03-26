@@ -8,7 +8,8 @@ const flowPath = path.resolve(__dirname, '..', 'conf', 'full_raspberrypi_bcm27xx
 const flows = JSON.parse(fs.readFileSync(flowPath, 'utf8'));
 
 const requiredHttpRoutes = [
-  '/api/sync/state'
+  '/api/sync/state',
+  '/api/sync/force'
 ];
 
 const requiredFunctionNodes = [
@@ -20,7 +21,8 @@ const requiredFunctionNodes = [
   'Build Pending Command Pull',
   'Replay Pending Commands',
   'Build Sync Token Refresh',
-  'Store Refreshed Sync Token'
+  'Store Refreshed Sync Token',
+  'Run Force Sync'
 ];
 
 function fail(message) {
