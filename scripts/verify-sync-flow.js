@@ -18,7 +18,9 @@ const requiredFunctionNodes = [
   'Build Edge Event Batch',
   'Mark Synced Events Delivered',
   'Build Pending Command Pull',
-  'Replay Pending Commands'
+  'Replay Pending Commands',
+  'Build Sync Token Refresh',
+  'Store Refreshed Sync Token'
 ];
 
 function fail(message) {
@@ -60,6 +62,15 @@ if (!bootstrapInject) {
   fail(`unexpected sync bootstrap repeat interval: ${bootstrapInject.repeat}`);
 } else {
   console.log('OK bootstrap repeat 21600');
+}
+
+const refreshInject = flows.find((node) => node.id === 'sync-refresh-inject');
+if (!refreshInject) {
+  fail('missing sync-refresh-inject node');
+} else if (refreshInject.repeat !== '3600') {
+  fail(`unexpected sync refresh repeat interval: ${refreshInject.repeat}`);
+} else {
+  console.log('OK refresh repeat 3600');
 }
 
 const bootstrapNode = findNodeByName('Build Cloud Bootstrap');
