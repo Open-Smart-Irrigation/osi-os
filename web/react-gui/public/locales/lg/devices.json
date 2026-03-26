@@ -97,7 +97,6 @@
     "reload": "Zaamu",
     "reloadFailed": "Okuzaamu nteekateeka kugaanye",
     "saved": "Kitereddwa.",
-    "triggerHint": "Tandika singa {{metric}} ≥ {{threshold}} kPa (omulundi gumu/lunaku, 06:00).",
-    "backendNote": "Enteekateeka y'omulamuzi (backend): tandika singa metric_kpa ≥ threshold_kpa, omulundi gumu buli lunaku, 06:00 ekiriwa."
+    "triggerHint": "Tandika singa {{metric}} ≥ {{threshold}} kPa (omulundi gumu/lunaku, 06:00)."
   }
 }

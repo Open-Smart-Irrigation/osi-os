@@ -424,7 +424,6 @@ export const ScheduleSection: React.FC<ScheduleSectionProps> = ({
         </>
       )}
 
-      <div className="mt-3 text-[var(--text-tertiary)] text-xs">{t('schedule.backendNote')}</div>
     </div>
   );
 };

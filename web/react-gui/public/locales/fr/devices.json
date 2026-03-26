@@ -97,7 +97,6 @@
     "reload": "Recharger",
     "reloadFailed": "Impossible de recharger le planning",
     "saved": "Sauvegardé.",
-    "triggerHint": "Déclencher si {{metric}} ≥ {{threshold}} kPa (une fois/jour, 06h00).",
-    "backendNote": "Logique de planification (backend) : déclencher si metric_kpa ≥ threshold_kpa, une seule fois par jour, fixé à 06h00."
+    "triggerHint": "Déclencher si {{metric}} ≥ {{threshold}} kPa (une fois/jour, 06h00)."
   }
 }
