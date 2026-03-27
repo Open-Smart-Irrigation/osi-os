@@ -274,8 +274,11 @@ const ConfigPanel: React.FC<{
 // ── Main card ────────────────────────────────────────────────────────────────
 export const DraginoTempCard: React.FC<DraginoTempCardProps> = ({ device, onRemove, onUpdate }) => {
   const { ext_temperature_c, bat_v, adc_ch0v, dendro_position_mm, dendro_valid, dendro_delta_mm } = device.latest_data;
-  const lastSeen   = new Date(device.last_seen);
-  const minutesAgo = Math.floor((Date.now() - lastSeen.getTime()) / (1000 * 60));
+  const lastSeenStr = device.last_seen ?? null;
+  const lastSeen = lastSeenStr ? new Date(lastSeenStr) : null;
+  const minutesAgo = lastSeen
+    ? Math.floor((Date.now() - lastSeen.getTime()) / (1000 * 60))
+    : null;
 
   const [isRemoving,   setIsRemoving]   = useState(false);
   const [showConfirm,  setShowConfirm]  = useState(false);
@@ -461,7 +464,10 @@ export const DraginoTempCard: React.FC<DraginoTempCardProps> = ({ device, onRemo
       {/* Footer */}
       <div className="mt-4 pt-4 border-t border-[var(--border)]">
         <p className="text-[var(--text-tertiary)] text-sm">
-          Last seen: <span className="text-[var(--text)] font-semibold">{minutesAgo} minutes ago</span>
+          Last seen:{' '}
+          <span className="text-[var(--text)] font-semibold">
+            {minutesAgo !== null ? `${minutesAgo} minutes ago` : 'Never seen'}
+          </span>
         </p>
       </div>
 

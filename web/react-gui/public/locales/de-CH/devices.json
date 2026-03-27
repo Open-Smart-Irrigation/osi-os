@@ -44,8 +44,6 @@
     "soilWaterTension1": "BODENWASSERSPANNUNG 1",
     "soilWaterTension2": "BODENWASSERSPANNUNG 2",
     "lightIntensity": "LICHTINTENSITÄT",
-    "ambientTemperature": "UMGEBUNGSTEMPERATUR",
-    "relativeHumidity": "RELATIVE LUFTFEUCHTIGKEIT",
     "lastSeen": "Zuletzt gesehen: vor {{minutes}} Minuten"
   },
   "stregaValve": {

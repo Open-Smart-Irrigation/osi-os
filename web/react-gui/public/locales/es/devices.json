@@ -44,8 +44,6 @@
     "soilWaterTension1": "TENSIÓN HÍDRICA DEL SUELO 1",
     "soilWaterTension2": "TENSIÓN HÍDRICA DEL SUELO 2",
     "lightIntensity": "INTENSIDAD LUMÍNICA",
-    "ambientTemperature": "TEMPERATURA AMBIENTE",
-    "relativeHumidity": "HUMEDAD RELATIVA",
     "lastSeen": "Visto hace {{minutes}} minutos"
   },
   "stregaValve": {

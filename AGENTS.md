@@ -328,10 +328,10 @@ cd /home/phil/Repos/osi-server/backend
 
 - Treat `flows.json` as the main edge backend; many API and scheduler changes live there.
 - Prefer edge-first assumptions when a design choice is ambiguous.
+- Use `feat:` for new-feature commits and `fix:` for bug-fix commits by default.
 - Do not reintroduce cloud password hash sync; linked login now depends on a gateway-specific offline verifier.
 - For synced farms, mirrored edge outputs are the canonical user-facing state.
 - If a sync token is expired, the intended user recovery path is now:
   - account-link page
   - `Force sync now`
   - if needed, `Re-authenticate with OSI Server`
-

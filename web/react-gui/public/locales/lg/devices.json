@@ -44,8 +44,6 @@
     "soilWaterTension1": "OKUZIKA KW'AMAZZI MU BUTAKA 1",
     "soilWaterTension2": "OKUZIKA KW'AMAZZI MU BUTAKA 2",
     "lightIntensity": "AKAWAAWA K'OMUSANA",
-    "ambientTemperature": "OBUNNYOGOVU BW'OKEEWU",
-    "relativeHumidity": "OBUWANVU BW'OMUKKA",
     "lastSeen": "Bwagulibwa omulundi gw'omuliko: {{minutes}} edakiika ewedde"
   },
   "stregaValve": {

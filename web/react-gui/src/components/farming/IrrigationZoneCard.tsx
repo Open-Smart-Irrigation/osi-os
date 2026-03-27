@@ -204,7 +204,11 @@ export const IrrigationZoneCard: React.FC<IrrigationZoneCardProps> = ({
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                 {kiwiSensors.map((device) => (
                   <div key={device.deveui} className="relative">
-                    <KiwiSensorCard device={device} onRemove={() => handleRemoveDevice(device.deveui)} />
+                    <KiwiSensorCard
+                      device={device}
+                      onRemove={() => handleRemoveDevice(device.deveui)}
+                      onUpdate={onUpdate}
+                    />
                     {removingDevice === device.deveui && (
                       <div className="absolute inset-0 bg-[var(--overlay)] flex items-center justify-center rounded-xl">
                         <div className="animate-spin h-8 w-8 border-4 border-white border-t-transparent rounded-full" />

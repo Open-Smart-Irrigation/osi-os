@@ -238,6 +238,21 @@ export const lsn50API = {
   },
 };
 
+export const kiwiAPI = {
+  setUplinkInterval: async (deveui: string, minutes: number): Promise<void> => {
+    await api.put(`/api/devices/${deveui}/kiwi/interval`, { minutes });
+  },
+  enableTemperatureHumidity: async (deveui: string, minutes: number): Promise<void> => {
+    await api.post(`/api/devices/${deveui}/kiwi/temperature-humidity/enable`, { minutes });
+  },
+};
+
+export const stregaAPI = {
+  setUplinkInterval: async (deveui: string, minutes: number): Promise<void> => {
+    await api.put(`/api/devices/${deveui}/strega/interval`, { minutes });
+  },
+};
+
 function normaliseDendroDaily(row: any): DendroDaily {
   return {
     id: row.id,

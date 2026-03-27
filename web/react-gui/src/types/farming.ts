@@ -6,7 +6,7 @@ export interface Device {
   deveui: string;       // Unique LoRaWAN ID
   name: string;         // User-given name (e.g., "North Field")
   type_id: DeviceType;
-  last_seen: string;    // ISO Date string
+  last_seen?: string | null;    // ISO Date string
 
   // Specific data payload matching Node-RED output
   latest_data: {

@@ -1,18 +1,18 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import type { Device } from '../../types/farming';
-import { devicesAPI } from '../../services/api';
+import { devicesAPI, kiwiAPI } from '../../services/api';
 import { useTranslation } from 'react-i18next';
 import { SensorMonitor } from './SensorMonitor';
 
 interface KiwiSensorCardProps {
   device: Device;
   onRemove?: () => void;
+  onUpdate?: () => void;
 }
 
-// ── Sensor monitor config ─────────────────────────────────────────────────────
 interface SensorDef {
   field: string;
-  label: string;  // used as the monitor drawer title (English)
+  label: string;
   unit: string;
   color: string;
   decimals: number;
@@ -27,16 +27,159 @@ const SENSORS: SensorDef[] = [
 ];
 
 const SENSOR_BY_FIELD = Object.fromEntries(SENSORS.map(s => [s.field, s]));
+const MAX_KIWI_INTERVAL_MINUTES = 1440;
 
-export const KiwiSensorCard: React.FC<KiwiSensorCardProps> = ({ device, onRemove }) => {
+const ConfigPanel: React.FC<{
+  device: Device;
+  onUpdate?: () => void;
+  onClose: () => void;
+}> = ({ device, onUpdate, onClose }) => {
+  const { t } = useTranslation('devices');
+  const ref = useRef<HTMLDivElement>(null);
+  const [busy, setBusy] = useState<'interval' | 'enable' | null>(null);
+  const [intervalMinutesInput, setIntervalMinutesInput] = useState('');
+  const [error, setError] = useState<string | null>(null);
+  const [info, setInfo] = useState<string | null>(null);
+
+  useEffect(() => {
+    const handler = (event: MouseEvent) => {
+      if (ref.current && !ref.current.contains(event.target as Node)) onClose();
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [onClose]);
+
+  const parseMinutes = (): number | null => {
+    if (!intervalMinutesInput.trim()) return null;
+    const minutes = Number(intervalMinutesInput);
+    if (!Number.isInteger(minutes) || minutes < 1 || minutes > MAX_KIWI_INTERVAL_MINUTES) {
+      return null;
+    }
+    return minutes;
+  };
+
+  const applyInterval = async () => {
+    const minutes = parseMinutes();
+    if (minutes == null) {
+      setError(t('kiwiSensor.invalidInterval'));
+      setInfo(null);
+      return;
+    }
+
+    setBusy('interval');
+    setError(null);
+    setInfo(null);
+    try {
+      await kiwiAPI.setUplinkInterval(device.deveui, minutes);
+      setIntervalMinutesInput(String(minutes));
+      setInfo(t('kiwiSensor.intervalPending', { minutes }));
+      onUpdate?.();
+    } catch (err: any) {
+      setError(err.response?.data?.message || t('kiwiSensor.failedToSetInterval'));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const enableTemperatureHumidity = async () => {
+    const minutes = parseMinutes();
+    if (minutes == null) {
+      setError(t('kiwiSensor.enableTempHumidityRequiresInterval', {
+        defaultValue: 'Enter a whole number of minutes between 1 and 1440 before enabling ambient temperature and humidity.',
+      }));
+      setInfo(null);
+      return;
+    }
+
+    setBusy('enable');
+    setError(null);
+    setInfo(null);
+    try {
+      await kiwiAPI.enableTemperatureHumidity(device.deveui, minutes);
+      setIntervalMinutesInput(String(minutes));
+      setInfo(t('kiwiSensor.enableTempHumidityPending', { minutes }));
+      onUpdate?.();
+    } catch (err: any) {
+      setError(err.response?.data?.message || t('kiwiSensor.failedToEnableTempHumidity'));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  return (
+    <div
+      ref={ref}
+      className="absolute right-0 top-full mt-1 z-20 bg-[var(--surface)] border border-[var(--border)] rounded-xl shadow-xl p-3 min-w-[300px]"
+    >
+      <p className="text-[var(--text-tertiary)] text-xs font-semibold mb-2 px-1">{t('kiwiSensor.settings')}</p>
+      <div className="px-1">
+        <label
+          className="block text-[var(--text-secondary)] text-xs font-semibold mb-1"
+          htmlFor={`kiwi-interval-${device.deveui}`}
+        >
+          {t('kiwiSensor.intervalLabel')}
+        </label>
+        <input
+          id={`kiwi-interval-${device.deveui}`}
+          type="number"
+          min={1}
+          max={MAX_KIWI_INTERVAL_MINUTES}
+          step={1}
+          inputMode="numeric"
+          value={intervalMinutesInput}
+          disabled={busy !== null}
+          onChange={(event) => setIntervalMinutesInput(event.target.value)}
+          placeholder={t('kiwiSensor.intervalPlaceholder')}
+          className="w-full rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-sm text-[var(--text)]"
+        />
+        <p className="text-[var(--text-tertiary)] text-xs mt-2">
+          {t('kiwiSensor.intervalNote')}
+        </p>
+        <button
+          type="button"
+          onClick={applyInterval}
+          disabled={busy !== null}
+          className="mt-3 w-full rounded-lg bg-[var(--primary)] px-3 py-2 text-sm font-semibold text-white transition-colors hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60"
+        >
+          {busy === 'interval' ? t('kiwiSensor.applyingInterval') : t('kiwiSensor.applyInterval')}
+        </button>
+      </div>
+      <div className="mt-3 pt-3 border-t border-[var(--border)] px-1">
+        <p className="text-[var(--text-secondary)] text-xs font-semibold mb-1">
+          {t('kiwiSensor.enableTempHumidityTitle')}
+        </p>
+        <p className="text-[var(--text-tertiary)] text-xs">
+          {t('kiwiSensor.enableTempHumidityNote', {
+            defaultValue: 'Enables ambient temperature and humidity reporting using the interval entered above.',
+          })}
+        </p>
+        <button
+          type="button"
+          onClick={enableTemperatureHumidity}
+          disabled={busy !== null}
+          className="mt-3 w-full rounded-lg bg-[var(--secondary-bg)] px-3 py-2 text-sm font-semibold text-[var(--text)] transition-colors hover:bg-[var(--border)] disabled:cursor-not-allowed disabled:opacity-60"
+        >
+          {busy === 'enable' ? t('kiwiSensor.enablingTempHumidity') : t('kiwiSensor.enableTempHumidity')}
+        </button>
+      </div>
+      {info && <p className="text-[var(--text-tertiary)] text-xs mt-3 px-1">{info}</p>}
+      {error && <p className="text-[var(--error-text)] text-xs mt-2 px-1">{error}</p>}
+    </div>
+  );
+};
+
+export const KiwiSensorCard: React.FC<KiwiSensorCardProps> = ({ device, onRemove, onUpdate }) => {
   const { t } = useTranslation('devices');
   const { t: tc } = useTranslation('common');
   const { swt_wm1, swt_wm2, light_lux, ambient_temperature, relative_humidity } = device.latest_data;
-  const lastSeen = new Date(device.last_seen);
-  const now = new Date();
-  const minutesAgo = Math.floor((now.getTime() - lastSeen.getTime()) / (1000 * 60));
+  const lastSeenStr = device.last_seen ?? null;
+  const lastSeen = lastSeenStr ? new Date(lastSeenStr) : null;
+  const minutesAgo = lastSeen
+    ? Math.floor((Date.now() - lastSeen.getTime()) / (1000 * 60))
+    : null;
   const [isRemoving, setIsRemoving] = useState(false);
   const [showConfirm, setShowConfirm] = useState(false);
+  const [showConfig, setShowConfig] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [monitor, setMonitor] = useState<SensorDef | null>(null);
 
@@ -45,16 +188,13 @@ export const KiwiSensorCard: React.FC<KiwiSensorCardProps> = ({ device, onRemove
     setError(null);
     try {
       await devicesAPI.remove(device.deveui);
-      if (onRemove) {
-        onRemove();
-      }
+      onRemove?.();
     } catch (err: any) {
       setError(err.response?.data?.message || t('kiwiSensor.failedToRemove'));
       setIsRemoving(false);
     }
   };
 
-  // Helper: render a sensor value as a clickable button (if non-null) or plain text
   const renderValue = (field: string, formatted: string | null) => {
     const sensor = SENSOR_BY_FIELD[field];
     if (!formatted || !sensor) {
@@ -80,10 +220,28 @@ export const KiwiSensorCard: React.FC<KiwiSensorCardProps> = ({ device, onRemove
           </h3>
           <p className="text-[var(--text-secondary)] text-sm">{device.deveui}</p>
         </div>
-        <div className="flex items-start gap-2">
+        <div className="flex items-start gap-2 relative">
           <div className="bg-[var(--primary)] text-white px-3 py-1 rounded-lg text-sm font-semibold">
             {t('kiwiSensor.badge')}
           </div>
+          <button
+            onClick={() => setShowConfig(v => !v)}
+            className={`px-3 py-1 rounded-lg text-sm font-semibold transition-colors ${
+              showConfig
+                ? 'bg-[var(--primary)] text-white'
+                : 'bg-[var(--card)] text-[var(--text-tertiary)] hover:bg-[var(--border)]'
+            }`}
+            title={t('kiwiSensor.settings')}
+          >
+            ⚙
+          </button>
+          {showConfig && (
+            <ConfigPanel
+              device={device}
+              onUpdate={onUpdate}
+              onClose={() => setShowConfig(false)}
+            />
+          )}
           <button
             onClick={() => setShowConfirm(true)}
             disabled={isRemoving}
@@ -132,7 +290,6 @@ export const KiwiSensorCard: React.FC<KiwiSensorCardProps> = ({ device, onRemove
       )}
 
       <div className="grid grid-cols-1 gap-4">
-        {/* Soil Water Tension 1 */}
         <div className="bg-[var(--card)] rounded-lg p-4">
           <p className="text-[var(--text-tertiary)] text-sm font-semibold mb-1">
             {t('kiwiSensor.soilWaterTension1')}
@@ -140,7 +297,6 @@ export const KiwiSensorCard: React.FC<KiwiSensorCardProps> = ({ device, onRemove
           {renderValue('swt_wm1', swt_wm1 !== undefined ? `${swt_wm1.toFixed(1)} kPa` : null)}
         </div>
 
-        {/* Soil Water Tension 2 */}
         {swt_wm2 !== undefined && (
           <div className="bg-[var(--card)] rounded-lg p-4">
             <p className="text-[var(--text-tertiary)] text-sm font-semibold mb-1">
@@ -150,7 +306,6 @@ export const KiwiSensorCard: React.FC<KiwiSensorCardProps> = ({ device, onRemove
           </div>
         )}
 
-        {/* Light */}
         {light_lux !== undefined && (
           <div className="bg-[var(--card)] rounded-lg p-4">
             <p className="text-[var(--text-tertiary)] text-sm font-semibold mb-1">
@@ -183,7 +338,9 @@ export const KiwiSensorCard: React.FC<KiwiSensorCardProps> = ({ device, onRemove
 
       <div className="mt-4 pt-4 border-t border-[var(--border)]">
         <p className="text-[var(--text-tertiary)] text-sm">
-          {t('kiwiSensor.lastSeen', { minutes: minutesAgo })}
+          {minutesAgo !== null
+            ? t('kiwiSensor.lastSeen', { minutes: minutesAgo })
+            : t('kiwiSensor.neverSeen', { defaultValue: 'Never seen' })}
         </p>
       </div>
 
