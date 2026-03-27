@@ -1,5 +1,6 @@
 // The specific supported hardware types
 export type DeviceType = 'KIWI_SENSOR' | 'STREGA_VALVE' | 'DRAGINO_LSN50';
+export type Lsn50Mode = 'MOD1' | 'MOD2' | 'MOD3' | 'MOD4' | 'MOD5' | 'MOD6';
 
 export interface Device {
   deveui: string;       // Unique LoRaWAN ID
@@ -21,6 +22,9 @@ export interface Device {
     dendro_position_mm?: number | null; // Calculated trunk position (mm), 0–25 range
     dendro_valid?: number | null;       // 1 = valid reading, 0 = out-of-range/error
     dendro_delta_mm?: number | null;    // Change from previous reading (mm); null on first uplink
+    lsn50_mode_code?: number | null;
+    lsn50_mode_label?: Lsn50Mode | string | null;
+    lsn50_mode_observed_at?: string | null;
   };
 
   // Only for Valves
@@ -31,6 +35,7 @@ export interface Device {
   dendro_enabled?: number;      // 0 = disabled (default), 1 = OPKON dendrometer on ADC
   temp_enabled?: number;        // 0 = disabled (default), 1 = DS18B20 probe on temp input
   is_reference_tree?: number;   // 0 = monitored/irrigated, 1 = control/reference tree
+  device_mode?: number | null;  // Requested/configured LSN50 mode on the edge
 
   // Irrigation zone assignment
   irrigation_zone_id?: number | null;

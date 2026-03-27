@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import type { Device } from '../../types/farming';
+import type { Device, Lsn50Mode } from '../../types/farming';
 import { devicesAPI, lsn50API } from '../../services/api';
 import { DendrometerMonitor } from './DendrometerMonitor';
 import { SensorMonitor } from './SensorMonitor';
@@ -16,6 +16,29 @@ const SENSOR_OPTIONS: Array<{
   { key: 'dendro_enabled', label: 'Dendrometer',  toggle: (id, e) => lsn50API.setDendroEnabled(id, e) },
 ];
 
+const LSN50_MODE_OPTIONS: Array<{ value: Lsn50Mode; description: string }> = [
+  { value: 'MOD1', description: 'Default OSI mode with temperature probe and ADC support.' },
+  { value: 'MOD2', description: 'Distance mode.' },
+  { value: 'MOD3', description: 'Three ADC channels plus I2C mode.' },
+  { value: 'MOD4', description: 'Three DS18B20 temperature channels mode.' },
+  { value: 'MOD5', description: 'Weight mode.' },
+  { value: 'MOD6', description: 'Counting mode.' },
+];
+
+function normaliseLsn50Mode(value: unknown): Lsn50Mode | null {
+  const raw = String(value ?? '').trim().toUpperCase();
+  return raw === 'MOD1' || raw === 'MOD2' || raw === 'MOD3' || raw === 'MOD4' || raw === 'MOD5' || raw === 'MOD6'
+    ? raw
+    : null;
+}
+
+function getCurrentLsn50Mode(device: Device): Lsn50Mode | null {
+  const observed = normaliseLsn50Mode(device.latest_data?.lsn50_mode_label);
+  if (observed) return observed;
+  const configured = Number(device.device_mode ?? 0);
+  return configured >= 1 && configured <= 6 ? (`MOD${configured}` as Lsn50Mode) : null;
+}
+
 // ── Props ────────────────────────────────────────────────────────────────────
 interface DraginoTempCardProps {
   device: Device;
@@ -31,7 +54,13 @@ const ConfigPanel: React.FC<{
 }> = ({ device, onUpdate, onClose }) => {
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [selectedMode, setSelectedMode] = useState<Lsn50Mode>(getCurrentLsn50Mode(device) ?? 'MOD1');
+  const [pendingMode, setPendingMode] = useState<Lsn50Mode | null>(null);
+  const [modeInfo, setModeInfo] = useState<string | null>(null);
   const ref = useRef<HTMLDivElement>(null);
+  const currentMode = getCurrentLsn50Mode(device);
+  const observedAt = device.latest_data?.lsn50_mode_observed_at ?? null;
+  const selectedModeDescription = LSN50_MODE_OPTIONS.find(option => option.value === selectedMode)?.description ?? '';
 
   // Close on outside click
   useEffect(() => {
@@ -41,6 +70,19 @@ const ConfigPanel: React.FC<{
     document.addEventListener('mousedown', handler);
     return () => document.removeEventListener('mousedown', handler);
   }, [onClose]);
+
+  useEffect(() => {
+    if (!pendingMode) {
+      setSelectedMode(currentMode ?? 'MOD1');
+    }
+  }, [currentMode, pendingMode]);
+
+  useEffect(() => {
+    if (pendingMode && currentMode === pendingMode) {
+      setModeInfo(`Mode ${pendingMode} confirmed on the latest uplink.`);
+      setPendingMode(null);
+    }
+  }, [currentMode, pendingMode]);
 
   const toggle = async (opt: typeof SENSOR_OPTIONS[0]) => {
     const current = device[opt.key] === 1;
@@ -56,10 +98,39 @@ const ConfigPanel: React.FC<{
     }
   };
 
+  const applyMode = async () => {
+    if (selectedMode === currentMode && !pendingMode) {
+      setModeInfo(`LSN50 is already using ${selectedMode}.`);
+      return;
+    }
+    if (
+      selectedMode !== 'MOD1' &&
+      (device.dendro_enabled === 1 || device.temp_enabled === 1) &&
+      !window.confirm('Switching away from MOD1 can change the telemetry OSI receives from this node. Continue?')
+    ) {
+      return;
+    }
+
+    setBusy('mode');
+    setError(null);
+    setModeInfo(null);
+    try {
+      await lsn50API.setMode(device.deveui, selectedMode);
+      setPendingMode(selectedMode);
+      setModeInfo(`Mode change requested; waiting for the next uplink to confirm ${selectedMode}.`);
+      onUpdate();
+    } catch {
+      setPendingMode(null);
+      setError('Failed to change LSN50 mode');
+    } finally {
+      setBusy(null);
+    }
+  };
+
   return (
     <div
       ref={ref}
-      className="absolute right-0 top-full mt-1 z-20 bg-[var(--surface)] border border-[var(--border)] rounded-xl shadow-xl p-3 min-w-[180px]"
+      className="absolute right-0 top-full mt-1 z-20 bg-[var(--surface)] border border-[var(--border)] rounded-xl shadow-xl p-3 min-w-[280px]"
     >
       <p className="text-[var(--text-tertiary)] text-xs font-semibold mb-2 px-1">ACTIVE SENSORS</p>
       {SENSOR_OPTIONS.map(opt => {
@@ -84,6 +155,55 @@ const ConfigPanel: React.FC<{
           </label>
         );
       })}
+      <div className="mt-3 pt-3 border-t border-[var(--border)]">
+        <p className="text-[var(--text-tertiary)] text-xs font-semibold mb-2 px-1">DEVICE MODE</p>
+        <div className="px-1">
+          <div className="flex items-center justify-between gap-3 text-sm mb-2">
+            <span className="text-[var(--text-secondary)]">Current mode</span>
+            <span className="rounded-full bg-[var(--card)] px-2 py-1 font-semibold text-[var(--text)]">
+              {currentMode ?? 'Unknown'}
+            </span>
+          </div>
+          {observedAt && (
+            <p className="text-[var(--text-tertiary)] text-xs mb-3">
+              Observed {new Date(observedAt).toLocaleString()}
+            </p>
+          )}
+          <label className="block text-[var(--text-secondary)] text-xs font-semibold mb-1">
+            Requested mode
+          </label>
+          <select
+            value={selectedMode}
+            disabled={busy === 'mode'}
+            onChange={(event) => setSelectedMode(event.target.value as Lsn50Mode)}
+            className="w-full rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-sm text-[var(--text)]"
+          >
+            {LSN50_MODE_OPTIONS.map(option => (
+              <option key={option.value} value={option.value}>
+                {option.value}
+              </option>
+            ))}
+          </select>
+          <p className="text-[var(--text-tertiary)] text-xs mt-2">{selectedModeDescription}</p>
+          {selectedMode !== 'MOD1' && (
+            <p className="text-[var(--warn-text)] text-xs mt-2">
+              MOD2–MOD6 are advanced modes. OSI’s temperature and dendrometer views are designed around MOD1.
+            </p>
+          )}
+          <p className="text-[var(--text-tertiary)] text-xs mt-2">
+            Mode changes are confirmed after the next uplink.
+          </p>
+          <button
+            type="button"
+            onClick={applyMode}
+            disabled={busy === 'mode'}
+            className="mt-3 w-full rounded-lg bg-[var(--primary)] px-3 py-2 text-sm font-semibold text-white transition-colors hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {busy === 'mode' ? 'Applying mode...' : 'Apply mode'}
+          </button>
+          {modeInfo && <p className="text-[var(--text-tertiary)] text-xs mt-2">{modeInfo}</p>}
+        </div>
+      </div>
       {error && <p className="text-[var(--error-text)] text-xs mt-2 px-1">{error}</p>}
     </div>
   );
@@ -153,7 +273,7 @@ export const DraginoTempCard: React.FC<DraginoTempCardProps> = ({ device, onRemo
           {showConfig && (
             <ConfigPanel
               device={device}
-              onUpdate={() => { setShowConfig(false); if (onUpdate) onUpdate(); }}
+              onUpdate={() => { if (onUpdate) onUpdate(); }}
               onClose={() => setShowConfig(false)}
             />
           )}

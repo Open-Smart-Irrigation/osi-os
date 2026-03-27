@@ -17,6 +17,7 @@ import type {
   ZoneRecommendationDiagnostics,
   SdVpdStatus,
   DendroReading,
+  Lsn50Mode,
 } from '../types/farming';
 
 // Create axios instance with base configuration
@@ -228,6 +229,9 @@ export const lsn50API = {
   },
   setTempEnabled: async (deveui: string, enabled: boolean): Promise<void> => {
     await api.put(`/api/devices/${deveui}/temp`, { enabled });
+  },
+  setMode: async (deveui: string, mode: Lsn50Mode): Promise<void> => {
+    await api.put(`/api/devices/${deveui}/lsn50/mode`, { mode });
   },
 };
 

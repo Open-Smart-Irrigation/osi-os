@@ -17,7 +17,8 @@ const requiredHttpRoutes = [
   '/api/account-link',
   '/api/account-link/status',
   '/api/sync/state',
-  '/api/sync/force'
+  '/api/sync/force',
+  '/api/devices/:deveui/lsn50/mode'
 ];
 
 const requiredFunctionNodes = [
@@ -35,7 +36,11 @@ const requiredFunctionNodes = [
   'Replay Pending Commands',
   'Build Sync Token Refresh',
   'Store Refreshed Sync Token',
-  'Run Force Sync'
+  'Run Force Sync',
+  'Auth + Parse LSN50 Mode',
+  'Authorize + Fanout LSN50 Mode',
+  'Format LSN50 Mode Response',
+  'Build LSN50 mode downlink'
 ];
 
 function fail(message) {
@@ -45,6 +50,10 @@ function fail(message) {
 
 function findNodeByName(name) {
   return flows.find((node) => node.name === name);
+}
+
+function findNodeById(id) {
+  return flows.find((node) => node.id === id);
 }
 
 function expectIncludes(nodeName, needle, description) {
@@ -70,6 +79,19 @@ function expectExcludes(nodeName, needle, description) {
     fail(`${nodeName} still contains ${description}`);
   } else {
     console.log(`OK ${nodeName} removed ${description}`);
+  }
+}
+
+function expectIncludesById(nodeId, needle, description) {
+  const node = findNodeById(nodeId);
+  if (!node) {
+    fail(`missing node ${nodeId}`);
+    return;
+  }
+  if (!String(node.func || '').includes(needle)) {
+    fail(`${nodeId} missing ${description}`);
+  } else {
+    console.log(`OK ${nodeId} ${description}`);
   }
 }
 
@@ -144,8 +166,10 @@ expectIncludes('Sync Init Schema + Triggers', 'AFTER UPDATE ON dendrometer_daily
 expectIncludes('Sync Init Schema + Triggers', 'COALESCE(server_username, username)', 'emits linked cloud usernames in device outbox events');
 expectIncludes('Build Cloud Bootstrap', 'COALESCE(u.server_username, u.username) AS claimed_by_username', 'uses linked cloud usernames in bootstrap device snapshots');
 expectIncludes('Build Cloud Bootstrap', 'COALESCE(u.server_username, u.username) AS username', 'uses linked cloud usernames in bootstrap zone snapshots');
+expectIncludes('Build Cloud Bootstrap', "'  dd.lsn50_mode_code,'", 'includes observed LSN50 mode in bootstrap sensor data');
 expectIncludes('Run Force Sync', 'COALESCE(u.server_username, u.username) AS claimed_by_username', 'uses linked cloud usernames in force-sync device snapshots');
 expectIncludes('Run Force Sync', 'COALESCE(u.server_username, u.username) AS username', 'uses linked cloud usernames in force-sync zone snapshots');
+expectIncludes('Run Force Sync', "'  dd.lsn50_mode_code,'", 'includes observed LSN50 mode in force-sync sensor data');
 expectIncludes('Daily Dendrometer Analytics', 'const recoveryThreshold=(calibration.thresholds.mild||CALIBRATIONS.default.thresholds.mild)*(phenoMod>0?phenoMod:1.0);', 'uses calibration-aware recovery threshold');
 expectIncludes('Daily Dendrometer Analytics', 't.twd_night_um<recoveryThreshold', 'uses absolute night TWD in recovery verification');
 expectIncludes('Daily Dendrometer Analytics', "date>=date('${ANALYTICS_DATE}','-3 days')", 'uses the exact previous-three-day recovery window');
@@ -159,6 +183,21 @@ expectIncludes('Daily Dendrometer Analytics', 'vpd_override_summary:vpdOverrideS
 expectIncludes('Daily Dendrometer Analytics', 'sd_vpd_summary:sdVpdSummary', 'stores SD-VPD diagnostics in recommendation_json');
 expectIncludes('Get Zone Recommendations', 'zdr.recommendation_json', 'returns recommendation_json from the zone recommendation query');
 expectIncludes('Get Zone Recommendations', 'recommendation_json:r.recommendation_json ?? null', 'exposes recommendation_json in the local recommendations API');
+expectIncludes('Build Telemetry', 'lsn50_mode_code: observedModeCode', 'publishes observed LSN50 mode in edge telemetry');
+expectIncludes('Decode LSN50', 'function detectLsn50ModeCode', 'decodes observed LSN50 mode from raw uplinks');
+expectIncludes('Apply Config', 'd.modeCodeToStore = d.observedModeCode != null ? d.observedModeCode : deviceMode;', 'stores observed or configured LSN50 mode on ingest');
+expectIncludesById('lsn50-sql-fn', 'lsn50_mode_code, lsn50_mode_label, lsn50_mode_observed_at', 'persists observed LSN50 mode into device_data');
+expectIncludesById('format-devices', 'dd.lsn50_mode_code', 'returns observed LSN50 mode in GET /api/devices');
+expectIncludesById('merge-device-data', 'device_mode: d.device_mode ?? 1', 'returns configured LSN50 mode in GET /api/devices');
+expectIncludes('Route Command', "commandType === 'SET_LSN50_MODE'", 'routes SET_LSN50_MODE gateway commands');
+expectIncludes('Build UPDATE SQL', "if (commandType === 'SET_LSN50_MODE') {", 'updates the local configured LSN50 mode for synced commands');
+expectIncludes('Build Schedule ACK', "if (commandType === 'SET_LSN50_MODE') {", 'skips duplicate generic ACKs for LSN50 mode commands');
+expectIncludes('Sync Init Schema + Triggers', 'ALTER TABLE device_data ADD COLUMN lsn50_mode_code INTEGER', 'adds LSN50 mode columns to device_data');
+expectIncludes('Sync Init Schema + Triggers', "'lsn50_mode_code', NEW.lsn50_mode_code", 'mirrors observed LSN50 mode in device_data outbox events');
+expectIncludes('Auth + Parse LSN50 Mode', "Mode must be one of MOD1..MOD6", 'validates supported LSN50 modes on the local API');
+expectIncludes('Authorize + Fanout LSN50 Mode', "commandType: 'SET_LSN50_MODE'", 'fans out validated local LSN50 mode changes into the shared command path');
+expectIncludes('Format LSN50 Mode Response', "confirmation: 'waiting_for_next_uplink'", 'returns explicit confirmation-waiting state from the local API');
+expectIncludes('Build LSN50 mode downlink', "commandType: 'SET_LSN50_MODE'", 'builds Dragino mode downlinks and ACK payloads');
 
 const authNodes = flows.filter((node) => typeof node.func === 'string' && node.func.includes('function getAuthSecret()'));
 for (const insecureNeedle of ['osi-os-default-auth-secret', "env.get('CHIRPSTACK_API_KEY')"]) {
