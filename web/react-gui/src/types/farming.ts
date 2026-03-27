@@ -206,6 +206,22 @@ export interface DendroDaily {
 }
 
 /** Zone-level daily irrigation recommendation */
+export type SdVpdStatus = 'coupled' | 'decoupled' | 'insufficient_data';
+
+export interface ZoneRecommendationDiagnostics {
+  vpdOverrideSummary: {
+    downgradedTreeCount: number;
+    upgradedTreeCount: number;
+  };
+  sdVpdSummary: {
+    baselineR2: number | null;
+    rolling14dR2: number | null;
+    status: SdVpdStatus;
+    comparableTreeCount: number;
+    decoupledTreeCount: number;
+  };
+}
+
 export interface ZoneRecommendation {
   id: number;
   zone_id: number;
@@ -215,6 +231,8 @@ export interface ZoneRecommendation {
   water_delivered_liters: number;
   irrigation_action: IrrigationAction;
   action_reasoning: string;
+  recommendation_json: string | null;
+  diagnostics: ZoneRecommendationDiagnostics | null;
   computed_at: string;
   // v4 fields
   rain_suppression_active: number;        // 0 or 1

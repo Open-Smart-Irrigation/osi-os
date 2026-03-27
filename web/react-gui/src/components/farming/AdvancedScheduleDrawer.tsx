@@ -46,6 +46,16 @@ const DENDRO_STRESS_LABEL: Record<number, string> = {
   4: 'Conservative — severe stress only',
 };
 
+const SD_VPD_STATUS_LABEL: Record<string, string> = {
+  coupled: 'Coupled',
+  decoupled: 'Decoupled',
+  insufficient_data: 'Insufficient data',
+};
+
+function formatR2(value: number | null | undefined): string {
+  return value != null ? value.toFixed(3) : 'Insufficient data';
+}
+
 const Field: React.FC<{ label: string; value: string | number | null | undefined; mono?: boolean }> = ({
   label, value, mono = false,
 }) => (
@@ -257,6 +267,9 @@ const AnalysisTab: React.FC<{
   onSaved?: () => void;
 }> = ({ zone, recommendations, loading, onSaved }) => {
   const latest = recommendations[0];
+  const diagnostics = latest?.diagnostics ?? null;
+  const sdVpdSummary = diagnostics?.sdVpdSummary ?? null;
+  const vpdOverrideSummary = diagnostics?.vpdOverrideSummary ?? null;
 
   const [timezone, setTimezone]   = useState(zone.timezone ?? 'UTC');
   const [tzSaving, setTzSaving]   = useState(false);
@@ -329,11 +342,28 @@ const AnalysisTab: React.FC<{
 
       {/* ── SD-VPD correlation ── */}
       <Section title="SD-VPD correlation">
-        <Field label="Baseline R²" value={zone.schedule ? 'Available after ≥14 baseline days' : '—'} />
+        <Field
+          label="Baseline R²"
+          value={sdVpdSummary ? formatR2(sdVpdSummary.baselineR2) : 'Unavailable in recommendation diagnostics'}
+        />
+        <Field
+          label="Rolling 14-day R²"
+          value={sdVpdSummary ? formatR2(sdVpdSummary.rolling14dR2) : 'Unavailable in recommendation diagnostics'}
+        />
+        <Field
+          label="SD-VPD status"
+          value={sdVpdSummary ? SD_VPD_STATUS_LABEL[sdVpdSummary.status] : 'Unavailable in recommendation diagnostics'}
+        />
+        <Field
+          label="VPD overrides"
+          value={vpdOverrideSummary
+            ? `${vpdOverrideSummary.downgradedTreeCount} downgraded / ${vpdOverrideSummary.upgradedTreeCount} upgraded`
+            : 'Unavailable in recommendation diagnostics'}
+        />
         <p className="text-xs text-[var(--text-tertiary)] py-2">
           Stem diameter daily amplitude (SDA = d_max − d_min) is correlated with maximum
-          daily VPD to detect anomalous stress response. Low correlation may indicate sensor
-          issues or extreme atmospheric demand.
+          daily VPD to detect anomalous stress response. The latest zone recommendation now
+          summarizes both rolling SD-VPD coupling and any VPD-based stress overrides.
         </p>
       </Section>
 

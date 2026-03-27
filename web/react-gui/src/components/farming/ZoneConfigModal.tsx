@@ -70,6 +70,8 @@ export const ZoneConfigModal: React.FC<Props> = ({ isOpen, zone, onClose, onSave
   const [timezone, setTimezone] = useState(zone.timezone ?? 'UTC');
   const [phenologicalStage, setPhenologicalStage] = useState(zone.phenologicalStage ?? 'default');
   const [calibrationKey, setCalibrationKey] = useState(zone.calibrationKey ?? 'default');
+  const [latitude, setLatitude] = useState(zone.latitude != null ? String(zone.latitude) : '');
+  const [longitude, setLongitude] = useState(zone.longitude != null ? String(zone.longitude) : '');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -83,24 +85,71 @@ export const ZoneConfigModal: React.FC<Props> = ({ isOpen, zone, onClose, onSave
     setTimezone(zone.timezone ?? 'UTC');
     setPhenologicalStage(zone.phenologicalStage ?? 'default');
     setCalibrationKey(zone.calibrationKey ?? 'default');
+    setLatitude(zone.latitude != null ? String(zone.latitude) : '');
+    setLongitude(zone.longitude != null ? String(zone.longitude) : '');
   }, [zone]);
 
   if (!isOpen) return null;
+
+  const trimmedLatitude = latitude.trim();
+  const trimmedLongitude = longitude.trim();
+
+  const buildConfigPayload = () => {
+    const payload: {
+      cropType?: string | null;
+      variety?: string | null;
+      soilType?: string | null;
+      irrigationMethod?: string | null;
+      notes?: string | null;
+      timezone?: string | null;
+      phenologicalStage?: string | null;
+      calibrationKey?: string | null;
+    } = {};
+
+    if ((zone.cropType ?? '') !== cropType) payload.cropType = cropType || null;
+    if ((zone.variety ?? '') !== variety) payload.variety = variety || null;
+    if ((zone.soilType ?? '') !== soilType) payload.soilType = soilType || null;
+    if ((zone.irrigationMethod ?? '') !== irrigationMethod) payload.irrigationMethod = irrigationMethod || null;
+    if ((zone.notes ?? '') !== notes) payload.notes = notes || null;
+    if ((zone.timezone ?? 'UTC') !== timezone) payload.timezone = timezone;
+    if ((zone.phenologicalStage ?? 'default') !== phenologicalStage) payload.phenologicalStage = phenologicalStage;
+    if ((zone.calibrationKey ?? 'default') !== calibrationKey) payload.calibrationKey = calibrationKey;
+
+    return payload;
+  };
+
+  const parseLocationPayload = () => {
+    if (trimmedLatitude === '' && trimmedLongitude === '') return null;
+    if (trimmedLatitude === '' || trimmedLongitude === '') {
+      throw new Error('Enter both latitude and longitude or leave both blank.');
+    }
+    const parsedLatitude = Number(trimmedLatitude);
+    const parsedLongitude = Number(trimmedLongitude);
+    if (!Number.isFinite(parsedLatitude) || parsedLatitude < -90 || parsedLatitude > 90) {
+      throw new Error('Latitude must be between -90 and 90.');
+    }
+    if (!Number.isFinite(parsedLongitude) || parsedLongitude < -180 || parsedLongitude > 180) {
+      throw new Error('Longitude must be between -180 and 180.');
+    }
+    return { latitude: parsedLatitude, longitude: parsedLongitude };
+  };
 
   const handleSave = async () => {
     setSaving(true);
     setError(null);
     try {
-      await irrigationZonesAPI.updateConfig(zone.id, {
-        cropType: cropType || null,
-        variety: variety || null,
-        soilType: soilType || null,
-        irrigationMethod: irrigationMethod || null,
-        notes: notes || null,
-        timezone,
-        phenologicalStage,
-        calibrationKey,
-      });
+      const configPayload = buildConfigPayload();
+      const locationPayload = parseLocationPayload();
+      const hasConfigChanges = Object.keys(configPayload).length > 0;
+      const locationChanged = locationPayload != null
+        && (locationPayload.latitude !== zone.latitude || locationPayload.longitude !== zone.longitude);
+
+      if (hasConfigChanges) {
+        await irrigationZonesAPI.updateConfig(zone.id, configPayload);
+      }
+      if (locationChanged) {
+        await irrigationZonesAPI.setZoneLocation(zone.id, locationPayload);
+      }
       onSaved();
       onClose();
     } catch (err: any) {
@@ -207,6 +256,27 @@ export const ZoneConfigModal: React.FC<Props> = ({ isOpen, zone, onClose, onSave
               className="w-full bg-[var(--surface)] border border-[var(--border)] text-[var(--text)] rounded-lg px-3 py-2 text-sm placeholder:text-[var(--text-tertiary)]"
             />
             <p className="text-xs text-[var(--text-tertiary)] mt-1">Used to align nightly min/max extraction windows. IANA timezone (e.g. Europe/Rome).</p>
+          </div>
+
+          <div>
+            <p className="text-xs font-semibold text-[var(--text-tertiary)] uppercase tracking-wide mb-2">Zone location</p>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              <input
+                type="number"
+                value={latitude}
+                onChange={e => setLatitude(e.target.value)}
+                placeholder="Latitude"
+                className="w-full bg-[var(--surface)] border border-[var(--border)] text-[var(--text)] rounded-lg px-3 py-2 text-sm placeholder:text-[var(--text-tertiary)]"
+              />
+              <input
+                type="number"
+                value={longitude}
+                onChange={e => setLongitude(e.target.value)}
+                placeholder="Longitude"
+                className="w-full bg-[var(--surface)] border border-[var(--border)] text-[var(--text)] rounded-lg px-3 py-2 text-sm placeholder:text-[var(--text-tertiary)]"
+              />
+            </div>
+            <p className="text-xs text-[var(--text-tertiary)] mt-1">Used for weather and VPD lookup. Save both coordinates together.</p>
           </div>
 
           <hr className="border-[var(--border)]" />

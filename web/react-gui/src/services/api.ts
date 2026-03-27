@@ -14,6 +14,8 @@ import type {
   IrrigationSchedule,
   DendroDaily,
   ZoneRecommendation,
+  ZoneRecommendationDiagnostics,
+  SdVpdStatus,
   DendroReading,
 } from '../types/farming';
 
@@ -120,6 +122,36 @@ function normaliseZone(z: any): IrrigationZone {
   } as IrrigationZone;
 }
 
+function normaliseSdVpdStatus(raw: unknown): SdVpdStatus {
+  return raw === 'coupled' || raw === 'decoupled' || raw === 'insufficient_data'
+    ? raw
+    : 'insufficient_data';
+}
+
+function parseRecommendationDiagnostics(raw: string | null): ZoneRecommendationDiagnostics | null {
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw);
+    const overrideSummary = parsed?.vpd_override_summary ?? {};
+    const sdVpdSummary = parsed?.sd_vpd_summary ?? {};
+    return {
+      vpdOverrideSummary: {
+        downgradedTreeCount: Number(overrideSummary.downgraded_tree_count ?? 0),
+        upgradedTreeCount: Number(overrideSummary.upgraded_tree_count ?? 0),
+      },
+      sdVpdSummary: {
+        baselineR2: sdVpdSummary.baseline_r2 ?? null,
+        rolling14dR2: sdVpdSummary.rolling_14d_r2 ?? null,
+        status: normaliseSdVpdStatus(sdVpdSummary.status),
+        comparableTreeCount: Number(sdVpdSummary.comparable_tree_count ?? 0),
+        decoupledTreeCount: Number(sdVpdSummary.decoupled_tree_count ?? 0),
+      },
+    };
+  } catch {
+    return null;
+  }
+}
+
 // Irrigation Zones API
 export const irrigationZonesAPI = {
   getAll: async (): Promise<IrrigationZone[]> => {
@@ -172,6 +204,13 @@ export const irrigationZonesAPI = {
       payload
     );
     return response.data;
+  },
+
+  setZoneLocation: async (zoneId: number, payload: {
+    latitude: number;
+    longitude: number;
+  }): Promise<void> => {
+    await api.put(`/api/irrigation-zones/${zoneId}/location`, payload);
   },
 };
 
@@ -238,6 +277,7 @@ function normaliseDendroDaily(row: any): DendroDaily {
 }
 
 function normaliseZoneRecommendation(row: any): ZoneRecommendation {
+  const recommendationJson = typeof row.recommendation_json === 'string' ? row.recommendation_json : null;
   return {
     id: row.id,
     zone_id: row.zone_id,
@@ -247,6 +287,8 @@ function normaliseZoneRecommendation(row: any): ZoneRecommendation {
     water_delivered_liters: row.water_delivered_liters ?? 0,
     irrigation_action: row.irrigation_action ?? 'maintain',
     action_reasoning: row.action_reasoning ?? '',
+    recommendation_json: recommendationJson,
+    diagnostics: parseRecommendationDiagnostics(recommendationJson),
     computed_at: row.computed_at,
     rain_suppression_active: row.rain_suppression_active ?? 0,
     recovery_verification_active: row.recovery_verification_active ?? 0,
