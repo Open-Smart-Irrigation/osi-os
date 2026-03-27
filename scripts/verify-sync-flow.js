@@ -18,7 +18,8 @@ const requiredHttpRoutes = [
   '/api/account-link/status',
   '/api/sync/state',
   '/api/sync/force',
-  '/api/devices/:deveui/lsn50/mode'
+  '/api/devices/:deveui/lsn50/mode',
+  '/api/devices/:deveui/lsn50/interval'
 ];
 
 const requiredFunctionNodes = [
@@ -38,8 +39,11 @@ const requiredFunctionNodes = [
   'Store Refreshed Sync Token',
   'Run Force Sync',
   'Auth + Parse LSN50 Mode',
+  'Auth + Parse LSN50 Interval',
   'Authorize + Fanout LSN50 Mode',
+  'Authorize + Fanout LSN50 Interval',
   'Format LSN50 Mode Response',
+  'Format LSN50 Interval Response',
   'Build LSN50 mode downlink'
 ];
 
@@ -190,14 +194,20 @@ expectIncludesById('lsn50-sql-fn', 'lsn50_mode_code, lsn50_mode_label, lsn50_mod
 expectIncludesById('format-devices', 'dd.lsn50_mode_code', 'returns observed LSN50 mode in GET /api/devices');
 expectIncludesById('merge-device-data', 'device_mode: d.device_mode ?? 1', 'returns configured LSN50 mode in GET /api/devices');
 expectIncludes('Route Command', "commandType === 'SET_LSN50_MODE'", 'routes SET_LSN50_MODE gateway commands');
+expectIncludes('Route Command', "commandType === 'SET_LSN50_INTERVAL'", 'routes SET_LSN50_INTERVAL gateway commands');
 expectIncludes('Build UPDATE SQL', "if (commandType === 'SET_LSN50_MODE') {", 'updates the local configured LSN50 mode for synced commands');
-expectIncludes('Build Schedule ACK', "if (commandType === 'SET_LSN50_MODE') {", 'skips duplicate generic ACKs for LSN50 mode commands');
+expectIncludes('Build UPDATE SQL', "if (commandType === 'SET_LSN50_INTERVAL') {", 'accepts synced LSN50 interval commands on the gateway');
+expectIncludes('Build Schedule ACK', "commandType === 'SET_LSN50_MODE' || commandType === 'SET_LSN50_INTERVAL'", 'skips duplicate generic ACKs for LSN50 mode and interval commands');
 expectIncludes('Sync Init Schema + Triggers', 'ALTER TABLE device_data ADD COLUMN lsn50_mode_code INTEGER', 'adds LSN50 mode columns to device_data');
 expectIncludes('Sync Init Schema + Triggers', "'lsn50_mode_code', NEW.lsn50_mode_code", 'mirrors observed LSN50 mode in device_data outbox events');
-expectIncludes('Auth + Parse LSN50 Mode', "Mode must be one of MOD1..MOD6", 'validates supported LSN50 modes on the local API');
+expectIncludes('Auth + Parse LSN50 Mode', "Mode must be one of MOD1..MOD9", 'validates supported LSN50 modes on the local API');
+expectIncludes('Auth + Parse LSN50 Interval', "Minutes must be a whole number between 1 and ", 'validates LSN50 uplink interval minutes on the local API');
 expectIncludes('Authorize + Fanout LSN50 Mode', "commandType: 'SET_LSN50_MODE'", 'fans out validated local LSN50 mode changes into the shared command path');
+expectIncludes('Authorize + Fanout LSN50 Interval', "commandType: 'SET_LSN50_INTERVAL'", 'fans out validated local LSN50 interval changes into the shared command path');
 expectIncludes('Format LSN50 Mode Response', "confirmation: 'waiting_for_next_uplink'", 'returns explicit confirmation-waiting state from the local API');
-expectIncludes('Build LSN50 mode downlink', "commandType: 'SET_LSN50_MODE'", 'builds Dragino mode downlinks and ACK payloads');
+expectIncludes('Format LSN50 Interval Response', "confirmation: 'downlink_queued'", 'returns queued state from the local LSN50 interval API');
+expectIncludes('Build LSN50 mode downlink', "commandType === 'SET_LSN50_INTERVAL'", 'builds Dragino interval downlinks');
+expectIncludes('Build LSN50 mode downlink', 'rawBytes = [0x01, (intervalSeconds >> 16) & 0xFF, (intervalSeconds >> 8) & 0xFF, intervalSeconds & 0xFF];', 'encodes Dragino TDC interval bytes');
 
 const authNodes = flows.filter((node) => typeof node.func === 'string' && node.func.includes('function getAuthSecret()'));
 for (const insecureNeedle of ['osi-os-default-auth-secret', "env.get('CHIRPSTACK_API_KEY')"]) {

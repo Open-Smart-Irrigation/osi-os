@@ -23,11 +23,15 @@ const LSN50_MODE_OPTIONS: Array<{ value: Lsn50Mode; description: string }> = [
   { value: 'MOD4', description: 'Three DS18B20 temperature channels mode.' },
   { value: 'MOD5', description: 'Weight mode.' },
   { value: 'MOD6', description: 'Counting mode.' },
+  { value: 'MOD7', description: 'Three digital interrupt channels mode.' },
+  { value: 'MOD8', description: 'Three ADC channels plus one DS18B20 mode.' },
+  { value: 'MOD9', description: 'Rain gauge and flow counter mode.' },
 ];
+const MAX_LSN50_INTERVAL_MINUTES = Math.floor(0xFFFFFF / 60);
 
 function normaliseLsn50Mode(value: unknown): Lsn50Mode | null {
   const raw = String(value ?? '').trim().toUpperCase();
-  return raw === 'MOD1' || raw === 'MOD2' || raw === 'MOD3' || raw === 'MOD4' || raw === 'MOD5' || raw === 'MOD6'
+  return raw === 'MOD1' || raw === 'MOD2' || raw === 'MOD3' || raw === 'MOD4' || raw === 'MOD5' || raw === 'MOD6' || raw === 'MOD7' || raw === 'MOD8' || raw === 'MOD9'
     ? raw
     : null;
 }
@@ -36,7 +40,7 @@ function getCurrentLsn50Mode(device: Device): Lsn50Mode | null {
   const observed = normaliseLsn50Mode(device.latest_data?.lsn50_mode_label);
   if (observed) return observed;
   const configured = Number(device.device_mode ?? 0);
-  return configured >= 1 && configured <= 6 ? (`MOD${configured}` as Lsn50Mode) : null;
+  return configured >= 1 && configured <= 9 ? (`MOD${configured}` as Lsn50Mode) : null;
 }
 
 // ── Props ────────────────────────────────────────────────────────────────────
@@ -57,6 +61,8 @@ const ConfigPanel: React.FC<{
   const [selectedMode, setSelectedMode] = useState<Lsn50Mode>(getCurrentLsn50Mode(device) ?? 'MOD1');
   const [pendingMode, setPendingMode] = useState<Lsn50Mode | null>(null);
   const [modeInfo, setModeInfo] = useState<string | null>(null);
+  const [intervalMinutesInput, setIntervalMinutesInput] = useState('');
+  const [intervalInfo, setIntervalInfo] = useState<string | null>(null);
   const ref = useRef<HTMLDivElement>(null);
   const currentMode = getCurrentLsn50Mode(device);
   const observedAt = device.latest_data?.lsn50_mode_observed_at ?? null;
@@ -127,6 +133,29 @@ const ConfigPanel: React.FC<{
     }
   };
 
+  const applyInterval = async () => {
+    const parsed = Number(intervalMinutesInput);
+    if (!Number.isInteger(parsed) || parsed < 1 || parsed > MAX_LSN50_INTERVAL_MINUTES) {
+      setError(`Enter a whole number of minutes between 1 and ${MAX_LSN50_INTERVAL_MINUTES}.`);
+      setIntervalInfo(null);
+      return;
+    }
+
+    setBusy('interval');
+    setError(null);
+    setIntervalInfo(null);
+    try {
+      await lsn50API.setUplinkInterval(device.deveui, parsed);
+      setIntervalMinutesInput(String(parsed));
+      setIntervalInfo(`Uplink interval change requested for ${parsed} minute${parsed === 1 ? '' : 's'}. The device applies this after it receives the downlink.`);
+      onUpdate();
+    } catch {
+      setError('Failed to change LSN50 uplink interval');
+    } finally {
+      setBusy(null);
+    }
+  };
+
   return (
     <div
       ref={ref}
@@ -187,7 +216,7 @@ const ConfigPanel: React.FC<{
           <p className="text-[var(--text-tertiary)] text-xs mt-2">{selectedModeDescription}</p>
           {selectedMode !== 'MOD1' && (
             <p className="text-[var(--warn-text)] text-xs mt-2">
-              MOD2–MOD6 are advanced modes. OSI’s temperature and dendrometer views are designed around MOD1.
+              MOD2-MOD9 are advanced modes. OSI's temperature and dendrometer views are designed around MOD1.
             </p>
           )}
           <p className="text-[var(--text-tertiary)] text-xs mt-2">
@@ -202,6 +231,39 @@ const ConfigPanel: React.FC<{
             {busy === 'mode' ? 'Applying mode...' : 'Apply mode'}
           </button>
           {modeInfo && <p className="text-[var(--text-tertiary)] text-xs mt-2">{modeInfo}</p>}
+        </div>
+      </div>
+      <div className="mt-3 pt-3 border-t border-[var(--border)]">
+        <p className="text-[var(--text-tertiary)] text-xs font-semibold mb-2 px-1">UPLINK INTERVAL</p>
+        <div className="px-1">
+          <label className="block text-[var(--text-secondary)] text-xs font-semibold mb-1" htmlFor={`lsn50-interval-${device.deveui}`}>
+            Desired interval (minutes)
+          </label>
+          <input
+            id={`lsn50-interval-${device.deveui}`}
+            type="number"
+            min={1}
+            max={MAX_LSN50_INTERVAL_MINUTES}
+            step={1}
+            inputMode="numeric"
+            value={intervalMinutesInput}
+            disabled={busy === 'interval'}
+            onChange={(event) => setIntervalMinutesInput(event.target.value)}
+            placeholder="e.g. 20"
+            className="w-full rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-sm text-[var(--text)]"
+          />
+          <p className="text-[var(--text-tertiary)] text-xs mt-2">
+            Enter whole minutes. Normal LSN50 uplinks do not report the active interval back to OSI.
+          </p>
+          <button
+            type="button"
+            onClick={applyInterval}
+            disabled={busy === 'interval'}
+            className="mt-3 w-full rounded-lg bg-[var(--primary)] px-3 py-2 text-sm font-semibold text-white transition-colors hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {busy === 'interval' ? 'Applying interval...' : 'Apply interval'}
+          </button>
+          {intervalInfo && <p className="text-[var(--text-tertiary)] text-xs mt-2">{intervalInfo}</p>}
         </div>
       </div>
       {error && <p className="text-[var(--error-text)] text-xs mt-2 px-1">{error}</p>}

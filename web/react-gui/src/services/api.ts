@@ -233,6 +233,9 @@ export const lsn50API = {
   setMode: async (deveui: string, mode: Lsn50Mode): Promise<void> => {
     await api.put(`/api/devices/${deveui}/lsn50/mode`, { mode });
   },
+  setUplinkInterval: async (deveui: string, minutes: number): Promise<void> => {
+    await api.put(`/api/devices/${deveui}/lsn50/interval`, { minutes });
+  },
 };
 
 function normaliseDendroDaily(row: any): DendroDaily {
