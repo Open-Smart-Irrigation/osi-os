@@ -9,6 +9,8 @@ const tenantGrpc = require('@chirpstack/chirpstack-api/api/tenant_grpc_pb');
 const tenantPb = require('@chirpstack/chirpstack-api/api/tenant_pb');
 const profileGrpc = require('@chirpstack/chirpstack-api/api/device_profile_grpc_pb');
 const profilePb = require('@chirpstack/chirpstack-api/api/device_profile_pb');
+const gatewayGrpc = require('@chirpstack/chirpstack-api/api/gateway_grpc_pb');
+const gatewayPb = require('@chirpstack/chirpstack-api/api/gateway_pb');
 const commonPb = require('@chirpstack/chirpstack-api/common/common_pb');
 
 const DEFAULT_PAGE_SIZE = 100;
@@ -130,6 +132,7 @@ class ChirpStackClient {
     this.applicationClient = new applicationGrpc.ApplicationServiceClient(this.apiUrl.target, this.credentials);
     this.tenantClient = new tenantGrpc.TenantServiceClient(this.apiUrl.target, this.credentials);
     this.deviceProfileClient = new profileGrpc.DeviceProfileServiceClient(this.apiUrl.target, this.credentials);
+    this.gatewayClient = new gatewayGrpc.GatewayServiceClient(this.apiUrl.target, this.credentials);
   }
 
   async getDevice(devEui) {
@@ -380,6 +383,39 @@ class ChirpStackClient {
     const request = new profilePb.CreateDeviceProfileRequest();
     request.setDeviceProfile(profile);
     return await grpcInvoke(this.deviceProfileClient, 'create', request, this.metadata, 'createDeviceProfile');
+  }
+
+  async getGateway(gatewayId) {
+    const request = new gatewayPb.GetGatewayRequest();
+    request.setGatewayId(normalizeDevEui(gatewayId));
+    try {
+      const response = await grpcInvoke(this.gatewayClient, 'get', request, this.metadata, 'getGateway');
+      return response.getGateway();
+    } catch (error) {
+      if (error.code === grpc.status.NOT_FOUND) {
+        return null;
+      }
+      throw error;
+    }
+  }
+
+  async updateGatewayLocation(gatewayId, input) {
+    const gateway = await this.getGateway(gatewayId);
+    if (!gateway) {
+      throw annotateError(new Error(`Gateway ${normalizeDevEui(gatewayId)} not found in ChirpStack`), 'updateGatewayLocation');
+    }
+
+    const location = new commonPb.Location();
+    location.setLatitude(Number(input.latitude));
+    location.setLongitude(Number(input.longitude));
+    if (input.altitude !== undefined && input.altitude !== null && Number.isFinite(Number(input.altitude))) {
+      location.setAltitude(Number(input.altitude));
+    }
+    gateway.setLocation(location);
+
+    const request = new gatewayPb.UpdateGatewayRequest();
+    request.setGateway(gateway);
+    return await grpcInvoke(this.gatewayClient, 'update', request, this.metadata, 'updateGatewayLocation');
   }
 }
 

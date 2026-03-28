@@ -128,6 +128,8 @@ export interface IrrigationZone {
   timezone?: string | null;
   latitude?: number | null;
   longitude?: number | null;
+  gatewayDeviceEui?: string | null;
+  gateway_device_eui?: string | null;
   phenological_stage?: string | null;
   crop_type?: string | null;
   variety?: string | null;
@@ -143,6 +145,27 @@ export interface IrrigationZone {
   soilType?: string | null;
   irrigationMethod?: string | null;
   variety_compat?: string | null;
+}
+
+export type GatewayLocationStatus = 'live' | 'stale' | 'no_fix';
+
+export interface GatewayLocation {
+  gatewayDeviceEui: string;
+  latitude: number | null;
+  longitude: number | null;
+  altitudeM: number | null;
+  accuracyM: number | null;
+  hdop: number | null;
+  sats: number | null;
+  fixMode: number | null;
+  status: GatewayLocationStatus;
+  source: string | null;
+  nativeConcentratordStatus: string | null;
+  chirpstackMirrorStatus: string | null;
+  lastFixAt: string | null;
+  lastGoodFixAt: string | null;
+  syncVersion: number;
+  updatedAt: string | null;
 }
 
 export interface CreateZoneRequest {
@@ -245,7 +268,7 @@ export interface ZoneRecommendation {
   rain_suppression_active: number;        // 0 or 1
   recovery_verification_active: number;   // 0 or 1
   vpd_max_kpa: number | null;
-  vpd_source: string | null;              // 'local_sensor' | 'open_meteo' | 'unavailable'
+  vpd_source: string | null;              // 'local_sensor' | 'openagri' | 'open_meteo' | 'unavailable'
   // zone quality metadata
   usable_tree_count: number;
   low_confidence_tree_count: number;

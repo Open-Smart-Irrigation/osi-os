@@ -1,0 +1,6 @@
+config gpsd 'core'
+	option enabled '1'
+	option readonly '1'
+	list devices '/dev/ttyAMA0'
+	option listen_globally '0'
+	option port '2947'

@@ -19,6 +19,8 @@ import type {
   DendroReading,
   Lsn50Mode,
   StregaModel,
+  GatewayLocation,
+  GatewayLocationStatus,
 } from '../types/farming';
 
 // Create axios instance with base configuration
@@ -113,6 +115,7 @@ function normaliseZone(z: any): IrrigationZone {
     timezone:          z.timezone                                  ?? null,
     phenologicalStage: z.phenologicalStage ?? z.phenological_stage ?? null,
     calibrationKey:    z.calibrationKey    ?? z.calibration_key    ?? null,
+    gatewayDeviceEui:  z.gatewayDeviceEui  ?? z.gateway_device_eui ?? null,
     schedule: sched ? {
       ...sched,
       triggerMetric:   sched.triggerMetric   ?? sched.trigger_metric   ?? null,
@@ -122,6 +125,33 @@ function normaliseZone(z: any): IrrigationZone {
       responseMode:    sched.responseMode    ?? sched.response_mode    ?? 'proportional',
     } : null,
   } as IrrigationZone;
+}
+
+function normaliseGatewayLocationStatus(value: unknown): GatewayLocationStatus {
+  return value === 'live' || value === 'stale' || value === 'no_fix'
+    ? value
+    : 'no_fix';
+}
+
+function normaliseGatewayLocation(raw: any): GatewayLocation {
+  return {
+    gatewayDeviceEui: String(raw?.gatewayDeviceEui ?? raw?.gateway_device_eui ?? '').trim().toUpperCase(),
+    latitude: raw?.latitude ?? null,
+    longitude: raw?.longitude ?? null,
+    altitudeM: raw?.altitudeM ?? raw?.altitude_m ?? null,
+    accuracyM: raw?.accuracyM ?? raw?.accuracy_m ?? null,
+    hdop: raw?.hdop ?? null,
+    sats: raw?.sats ?? raw?.satellites ?? null,
+    fixMode: raw?.fixMode ?? raw?.fix_mode ?? null,
+    status: normaliseGatewayLocationStatus(raw?.status),
+    source: raw?.source ?? null,
+    nativeConcentratordStatus: raw?.nativeConcentratordStatus ?? raw?.native_concentratord_status ?? null,
+    chirpstackMirrorStatus: raw?.chirpstackMirrorStatus ?? raw?.chirpstack_mirror_status ?? null,
+    lastFixAt: raw?.lastFixAt ?? raw?.last_fix_at ?? null,
+    lastGoodFixAt: raw?.lastGoodFixAt ?? raw?.last_good_fix_at ?? null,
+    syncVersion: Number(raw?.syncVersion ?? raw?.sync_version ?? 0),
+    updatedAt: raw?.updatedAt ?? raw?.updated_at ?? null,
+  };
 }
 
 function normaliseSdVpdStatus(raw: unknown): SdVpdStatus {
@@ -213,6 +243,18 @@ export const irrigationZonesAPI = {
     longitude: number;
   }): Promise<void> => {
     await api.put(`/api/irrigation-zones/${zoneId}/location`, payload);
+  },
+};
+
+export const gatewayLocationAPI = {
+  getCurrent: async (): Promise<GatewayLocation> => {
+    const response = await api.get('/api/gateway/location');
+    return normaliseGatewayLocation(response.data);
+  },
+
+  getForGateway: async (gatewayDeviceEui: string): Promise<GatewayLocation> => {
+    const response = await api.get(`/api/gateways/${gatewayDeviceEui}/location`);
+    return normaliseGatewayLocation(response.data);
   },
 };
 
