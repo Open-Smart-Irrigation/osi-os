@@ -26,6 +26,13 @@ export interface Device {
     lsn50_mode_code?: number | null;
     lsn50_mode_label?: Lsn50Mode | string | null;
     lsn50_mode_observed_at?: string | null;
+    // MOD9: rain gauge (Davis 6466M, 0.2 mm/tip) + flow meter (GWF Unico2, 1 pulse = 1 L)
+    rain_count_cumulative?: number | null;
+    rain_tips_delta?: number | null;
+    rain_mm_delta?: number | null;
+    flow_count_cumulative?: number | null;
+    flow_pulses_delta?: number | null;
+    flow_liters_delta?: number | null;
   };
 
   // Only for Valves

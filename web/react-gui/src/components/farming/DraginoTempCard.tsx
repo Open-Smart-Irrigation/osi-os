@@ -388,7 +388,12 @@ const ConfigPanel: React.FC<{
 
 // ── Main card ────────────────────────────────────────────────────────────────
 export const DraginoTempCard: React.FC<DraginoTempCardProps> = ({ device, onRemove, onUpdate }) => {
-  const { ext_temperature_c, bat_v, adc_ch0v, dendro_position_mm, dendro_valid, dendro_delta_mm } = device.latest_data;
+  const {
+    ext_temperature_c, bat_v, adc_ch0v,
+    dendro_position_mm, dendro_valid, dendro_delta_mm,
+    rain_mm_delta, flow_liters_delta,
+  } = device.latest_data;
+  const isMod9 = getCurrentLsn50Mode(device) === 'MOD9';
   const lastSeenStr = device.last_seen ?? null;
   const lastSeen = lastSeenStr ? new Date(lastSeenStr) : null;
   const minutesAgo = lastSeen
@@ -534,8 +539,46 @@ export const DraginoTempCard: React.FC<DraginoTempCardProps> = ({ device, onRemo
           </div>
         )}
 
-        {/* Dendrometer — only when enabled */}
-        {dendroEnabled && dendro_position_mm !== undefined && dendro_position_mm !== null && (
+        {/* MOD9: Rain gauge (Davis 6466M) */}
+        {isMod9 && (
+          <div className="bg-[var(--card)] rounded-lg p-4">
+            <p className="text-[var(--text-tertiary)] text-sm font-semibold mb-1">RAIN GAUGE</p>
+            {rain_mm_delta !== null && rain_mm_delta !== undefined ? (
+              <button
+                onClick={() => setSensorMonitor({ field: 'rain_mm_delta', label: 'Rainfall', unit: 'mm', color: '#38bdf8', decimals: 1 })}
+                className="text-4xl font-bold text-[var(--text)] hover:text-[var(--primary)] transition-colors text-left underline decoration-dotted underline-offset-4 cursor-pointer"
+                title="View history"
+              >
+                {rain_mm_delta.toFixed(1)} mm
+              </button>
+            ) : (
+              <p className="text-4xl font-bold text-[var(--text-tertiary)]">—</p>
+            )}
+            <p className="text-[var(--text-tertiary)] text-xs mt-1">this interval · tap to view history</p>
+          </div>
+        )}
+
+        {/* MOD9: Flow meter (GWF Unico2) */}
+        {isMod9 && (
+          <div className="bg-[var(--card)] rounded-lg p-4">
+            <p className="text-[var(--text-tertiary)] text-sm font-semibold mb-1">FLOW METER</p>
+            {flow_liters_delta !== null && flow_liters_delta !== undefined ? (
+              <button
+                onClick={() => setSensorMonitor({ field: 'flow_liters_delta', label: 'Flow', unit: 'L', color: '#6366f1', decimals: 0 })}
+                className="text-4xl font-bold text-[var(--text)] hover:text-[var(--primary)] transition-colors text-left underline decoration-dotted underline-offset-4 cursor-pointer"
+                title="View history"
+              >
+                {flow_liters_delta.toFixed(0)} L
+              </button>
+            ) : (
+              <p className="text-4xl font-bold text-[var(--text-tertiary)]">—</p>
+            )}
+            <p className="text-[var(--text-tertiary)] text-xs mt-1">this interval · tap to view history</p>
+          </div>
+        )}
+
+        {/* Dendrometer — only when enabled and not in MOD9 */}
+        {!isMod9 && dendroEnabled && dendro_position_mm !== undefined && dendro_position_mm !== null && (
           <div className={`rounded-lg p-4 ${dendro_valid ? 'bg-[var(--card)]' : 'bg-[var(--error-bg)]'}`}>
             <p className="text-[var(--text-tertiary)] text-sm font-semibold mb-1">DENDROMETER POSITION</p>
             {dendro_valid ? (
@@ -560,8 +603,8 @@ export const DraginoTempCard: React.FC<DraginoTempCardProps> = ({ device, onRemo
           </div>
         )}
 
-        {/* ADC raw — shown when dendro is disabled and ADC is non-trivial */}
-        {!dendroEnabled && adc_ch0v !== undefined && adc_ch0v !== null && adc_ch0v > 0.01 && (
+        {/* ADC raw — shown when dendro is disabled, not MOD9, and ADC is non-trivial */}
+        {!isMod9 && !dendroEnabled && adc_ch0v !== undefined && adc_ch0v !== null && adc_ch0v > 0.01 && (
           <div className="bg-[var(--card)] rounded-lg p-4">
             <p className="text-[var(--text-tertiary)] text-sm font-semibold mb-1">ADC INPUT</p>
             <button
