@@ -573,8 +573,8 @@ export const DraginoTempCard: React.FC<DraginoTempCardProps> = ({ device, onRemo
           </div>
         )}
 
-        {/* Dendrometer — only when enabled and not in MOD9 */}
-        {!isMod9 && dendroEnabled && dendro_position_mm !== undefined && dendro_position_mm !== null && (
+        {/* Dendrometer — only when enabled */}
+        {dendroEnabled && dendro_position_mm !== undefined && dendro_position_mm !== null && (
           <div className={`rounded-lg p-4 ${dendro_valid ? 'bg-[var(--card)]' : 'bg-[var(--error-bg)]'}`}>
             <p className="text-[var(--text-tertiary)] text-sm font-semibold mb-1">DENDROMETER POSITION</p>
             {dendro_valid ? (
@@ -599,8 +599,8 @@ export const DraginoTempCard: React.FC<DraginoTempCardProps> = ({ device, onRemo
           </div>
         )}
 
-        {/* ADC raw — shown when dendro is disabled, not MOD9, and ADC is non-trivial */}
-        {!isMod9 && !dendroEnabled && adc_ch0v !== undefined && adc_ch0v !== null && adc_ch0v > 0.01 && (
+        {/* ADC raw — shown when dendro is disabled and ADC is non-trivial */}
+        {!dendroEnabled && adc_ch0v !== undefined && adc_ch0v !== null && adc_ch0v > 0.01 && (
           <div className="bg-[var(--card)] rounded-lg p-4">
             <p className="text-[var(--text-tertiary)] text-sm font-semibold mb-1">ADC INPUT</p>
             <button
