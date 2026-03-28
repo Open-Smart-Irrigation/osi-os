@@ -72,35 +72,33 @@ export const IrrigationZoneCard: React.FC<IrrigationZoneCardProps> = ({
 
   return (
     <div className="bg-[var(--surface)] border-2 border-[var(--border)] rounded-xl p-6 shadow-lg mb-6">
-      {/* Zone Header */}
-      <div className="flex items-start justify-between mb-3">
-        <div className="flex-1">
-          <h3 className="text-3xl font-bold text-[var(--text)] mb-1 high-contrast-text">
+      {/* Zone Header — stacks vertically on mobile */}
+      <div className="flex flex-col sm:flex-row sm:items-start gap-3 mb-3">
+        <div className="flex-1 min-w-0">
+          <h3 className="text-3xl font-bold text-[var(--text)] mb-1 high-contrast-text break-words">
             {zone.name}
           </h3>
           <p className="text-[var(--text-secondary)] text-sm">
             {t('zone.deviceCount', { count: zone.device_count })}
           </p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2 shrink-0">
           <button
             onClick={() => setShowConfigModal(true)}
-            className="bg-[var(--surface)] hover:bg-[var(--border)] border border-[var(--border)] text-[var(--text)] px-4 py-2 rounded-lg text-sm font-semibold transition-colors"
+            className="touch-target bg-[var(--surface)] hover:bg-[var(--border)] border border-[var(--border)] text-[var(--text)] px-4 py-2 rounded-lg text-sm font-semibold transition-colors"
           >
             Configure
           </button>
           <button
             onClick={() => setShowAssignModal(true)}
-            className="bg-[var(--primary)] hover:bg-[var(--primary-hover)] text-white px-4 py-2 rounded-lg text-sm font-semibold transition-colors"
-            title="Assign device to zone"
+            className="touch-target bg-[var(--primary)] hover:bg-[var(--primary-hover)] text-white px-4 py-2 rounded-lg text-sm font-semibold transition-colors"
           >
             {t('zone.assignDevice')}
           </button>
           <button
             onClick={() => setShowDeleteConfirm(true)}
             disabled={isDeleting}
-            className="bg-[var(--error-bg)] hover:bg-[var(--error-bg)] disabled:bg-[var(--border)] text-[var(--error-text)] px-4 py-2 rounded-lg text-sm font-semibold transition-colors disabled:cursor-not-allowed disabled:text-[var(--text-disabled)]"
-            title="Delete zone"
+            className="touch-target bg-[var(--error-bg)] hover:bg-red-700 disabled:bg-[var(--border)] text-[var(--error-text)] px-4 py-2 rounded-lg text-sm font-semibold transition-colors disabled:cursor-not-allowed disabled:text-[var(--text-disabled)]"
           >
             {t('zone.deleteZone')}
           </button>
@@ -197,87 +195,94 @@ export const IrrigationZoneCard: React.FC<IrrigationZoneCardProps> = ({
       {/* Environment Section */}
       <EnvironmentCard zone={zone} />
 
-      {/* Devices in Zone */}
-      {devices.length > 0 ? (
-        <div>
-          <h4 className="text-[var(--text)] text-xl font-bold mb-3">{t('zone.devicesInZone')}</h4>
+      {/* Devices in Zone — consistent border-t separator */}
+      <div className="mt-6 border-t border-[var(--border)] pt-5">
+        {devices.length > 0 ? (
+          <>
+            <h4 className="text-xs font-bold uppercase tracking-widest text-[var(--text-tertiary)] mb-4">
+              {t('zone.devicesInZone')}
+            </h4>
 
-          {/* Sensors */}
-          {kiwiSensors.length > 0 && (
-            <div className="mb-4">
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                {kiwiSensors.map((device) => (
-                  <div key={device.deveui} className="relative">
-                    <KiwiSensorCard
-                      device={device}
-                      onRemove={() => handleRemoveDevice(device.deveui)}
-                      onUpdate={onUpdate}
-                    />
-                    {removingDevice === device.deveui && (
-                      <div className="absolute inset-0 bg-[var(--overlay)] flex items-center justify-center rounded-xl">
-                        <div className="animate-spin h-8 w-8 border-4 border-white border-t-transparent rounded-full" />
-                      </div>
-                    )}
-                  </div>
-                ))}
+            {/* Sensors */}
+            {kiwiSensors.length > 0 && (
+              <div className="mb-5">
+                <p className="text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)] mb-3">{t('soilSensors')}</p>
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {kiwiSensors.map((device) => (
+                    <div key={device.deveui} className="relative">
+                      <KiwiSensorCard
+                        device={device}
+                        onRemove={() => handleRemoveDevice(device.deveui)}
+                        onUpdate={onUpdate}
+                      />
+                      {removingDevice === device.deveui && (
+                        <div className="absolute inset-0 bg-[var(--overlay)]/70 flex items-center justify-center rounded-xl">
+                          <div className="animate-spin h-8 w-8 border-4 border-[var(--primary)] border-t-transparent rounded-full" />
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
               </div>
-            </div>
-          )}
+            )}
 
-          {/* Valves */}
-          {stregaValves.length > 0 && (
-            <div>
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                {stregaValves.map((device) => (
-                  <div key={device.deveui} className="relative">
-                    <StregaValveCard
-                      device={device}
-                      onUpdate={onUpdate}
-                      onRemove={() => handleRemoveDevice(device.deveui)}
-                    />
-                    {removingDevice === device.deveui && (
-                      <div className="absolute inset-0 bg-[var(--overlay)] flex items-center justify-center rounded-xl">
-                        <div className="animate-spin h-8 w-8 border-4 border-white border-t-transparent rounded-full" />
-                      </div>
-                    )}
-                  </div>
-                ))}
+            {/* Valves */}
+            {stregaValves.length > 0 && (
+              <div className="mb-5">
+                <p className="text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)] mb-3">{t('smartValves')}</p>
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {stregaValves.map((device) => (
+                    <div key={device.deveui} className="relative">
+                      <StregaValveCard
+                        device={device}
+                        onUpdate={onUpdate}
+                        onRemove={() => handleRemoveDevice(device.deveui)}
+                      />
+                      {removingDevice === device.deveui && (
+                        <div className="absolute inset-0 bg-[var(--overlay)]/70 flex items-center justify-center rounded-xl">
+                          <div className="animate-spin h-8 w-8 border-4 border-[var(--primary)] border-t-transparent rounded-full" />
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
               </div>
-            </div>
-          )}
+            )}
 
-          {/* LSN50 Nodes */}
-          {lsn50Nodes.length > 0 && (
-            <div className="mt-4">
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                {lsn50Nodes.map((device) => (
-                  <div key={device.deveui} className="relative">
-                    <DraginoTempCard
-                      device={device}
-                      onRemove={() => handleRemoveDevice(device.deveui)}
-                    />
-                    {removingDevice === device.deveui && (
-                      <div className="absolute inset-0 bg-[var(--overlay)] flex items-center justify-center rounded-xl">
-                        <div className="animate-spin h-8 w-8 border-4 border-white border-t-transparent rounded-full" />
-                      </div>
-                    )}
-                  </div>
-                ))}
+            {/* LSN50 Nodes */}
+            {lsn50Nodes.length > 0 && (
+              <div className="mb-5">
+                <p className="text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)] mb-3">Dragino LSN50 Nodes</p>
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {lsn50Nodes.map((device) => (
+                    <div key={device.deveui} className="relative">
+                      <DraginoTempCard
+                        device={device}
+                        onRemove={() => handleRemoveDevice(device.deveui)}
+                      />
+                      {removingDevice === device.deveui && (
+                        <div className="absolute inset-0 bg-[var(--overlay)]/70 flex items-center justify-center rounded-xl">
+                          <div className="animate-spin h-8 w-8 border-4 border-[var(--primary)] border-t-transparent rounded-full" />
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
               </div>
-            </div>
-          )}
-        </div>
-      ) : (
-        <div className="bg-[var(--card)] rounded-lg p-6 text-center">
-          <p className="text-[var(--text-tertiary)] text-lg mb-3">{t('zone.noDevices')}</p>
-          <button
-            onClick={() => setShowAssignModal(true)}
-            className="bg-[var(--primary)] hover:bg-[var(--primary-hover)] text-white font-bold px-6 py-3 rounded-lg transition-colors"
-          >
-            {t('zone.assignFirst')}
-          </button>
-        </div>
-      )}
+            )}
+          </>
+        ) : (
+          <div className="bg-[var(--card)] rounded-lg p-6 text-center">
+            <p className="text-[var(--text-tertiary)] text-lg mb-3">{t('zone.noDevices')}</p>
+            <button
+              onClick={() => setShowAssignModal(true)}
+              className="bg-[var(--primary)] hover:bg-[var(--primary-hover)] text-white font-bold px-6 py-3 rounded-lg transition-colors"
+            >
+              {t('zone.assignFirst')}
+            </button>
+          </div>
+        )}
+      </div>
 
       {/* Assign Device Modal */}
       <AssignDeviceModal

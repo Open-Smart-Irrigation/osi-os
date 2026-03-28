@@ -234,7 +234,7 @@ const ConfigPanel: React.FC<{
   return (
     <div
       ref={ref}
-      className="absolute right-0 top-full mt-1 z-20 bg-[var(--surface)] border border-[var(--border)] rounded-xl shadow-xl p-3 min-w-[360px] max-w-[420px]"
+      className="absolute right-0 top-full mt-1 z-20 bg-[var(--surface)] border border-[var(--border)] rounded-xl shadow-xl p-3 w-[360px] max-w-[calc(100vw-2rem)]"
     >
       <p className="text-[var(--text-tertiary)] text-xs font-semibold mb-2 px-1">{t('stregaValve.settings', { defaultValue: 'STREGA SETTINGS' })}</p>
 
@@ -244,7 +244,7 @@ const ConfigPanel: React.FC<{
           <p className="text-[var(--text-tertiary)] text-xs mt-1">
             {t('stregaValve.quickActionNote', { defaultValue: 'Queue a one-off open or close for seconds, minutes, or hours.' })}
           </p>
-          <div className="grid grid-cols-3 gap-2 mt-3">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 mt-3">
             <select
               value={timedAction}
               disabled={busyAction === 'timed'}

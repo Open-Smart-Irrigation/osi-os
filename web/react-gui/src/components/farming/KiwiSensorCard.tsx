@@ -109,7 +109,7 @@ const ConfigPanel: React.FC<{
   return (
     <div
       ref={ref}
-      className="absolute right-0 top-full mt-1 z-20 bg-[var(--surface)] border border-[var(--border)] rounded-xl shadow-xl p-3 min-w-[300px]"
+      className="absolute right-0 top-full mt-1 z-20 bg-[var(--surface)] border border-[var(--border)] rounded-xl shadow-xl p-3 min-w-[280px] max-w-[calc(100vw-2rem)]"
     >
       <p className="text-[var(--text-tertiary)] text-xs font-semibold mb-2 px-1">{t('kiwiSensor.settings')}</p>
       <div className="px-1">
@@ -226,7 +226,7 @@ export const KiwiSensorCard: React.FC<KiwiSensorCardProps> = ({ device, onRemove
           </div>
           <button
             onClick={() => setShowConfig(v => !v)}
-            className={`px-3 py-1 rounded-lg text-sm font-semibold transition-colors ${
+            className={`touch-target px-3 py-2 rounded-lg text-sm font-semibold transition-colors ${
               showConfig
                 ? 'bg-[var(--primary)] text-white'
                 : 'bg-[var(--card)] text-[var(--text-tertiary)] hover:bg-[var(--border)]'
@@ -245,7 +245,7 @@ export const KiwiSensorCard: React.FC<KiwiSensorCardProps> = ({ device, onRemove
           <button
             onClick={() => setShowConfirm(true)}
             disabled={isRemoving}
-            className="bg-[var(--error-bg)] hover:bg-[var(--error-bg)] disabled:bg-[var(--border)] text-[var(--error-text)] px-3 py-1 rounded-lg text-sm font-semibold transition-colors disabled:cursor-not-allowed disabled:text-[var(--text-disabled)]"
+            className="touch-target bg-[var(--error-bg)] hover:bg-red-700 disabled:bg-[var(--border)] text-[var(--error-text)] px-3 py-2 rounded-lg text-sm font-semibold transition-colors disabled:cursor-not-allowed disabled:text-[var(--text-disabled)]"
             title="Remove device"
           >
             ✕

@@ -98,32 +98,34 @@ export const FarmingDashboard: React.FC = () => {
               </h1>
               <p className="text-[var(--header-subtext)] text-lg mt-1">{t('welcome', { username })}</p>
             </div>
-            <div className="flex gap-3 flex-wrap">
-              <LanguageSwitcher />
+            <div className="flex flex-col sm:flex-row sm:flex-wrap gap-2 sm:gap-3">
+              <div className="w-full sm:w-auto flex justify-center sm:justify-start">
+                <LanguageSwitcher />
+              </div>
               <button
                 onClick={() => setIsCreateZoneModalOpen(true)}
-                className="bg-[var(--primary)] hover:bg-[var(--primary-hover)] text-white font-bold text-lg px-6 py-3 touch-target rounded-lg transition-colors shadow-lg flex items-center gap-2"
+                className="w-full sm:w-auto bg-[var(--primary)] hover:bg-[var(--primary-hover)] text-white font-bold text-lg px-6 py-3 touch-target rounded-lg transition-colors shadow-lg flex items-center justify-center gap-2"
               >
                 <span className="text-2xl">+</span>
                 {t('addZone')}
               </button>
               <button
                 onClick={() => setIsAddDeviceModalOpen(true)}
-                className="bg-[var(--primary)] hover:bg-[var(--primary-hover)] text-white font-bold text-lg px-6 py-3 touch-target rounded-lg transition-colors shadow-lg flex items-center gap-2"
+                className="w-full sm:w-auto bg-[var(--primary)] hover:bg-[var(--primary-hover)] text-white font-bold text-lg px-6 py-3 touch-target rounded-lg transition-colors shadow-lg flex items-center justify-center gap-2"
               >
                 <span className="text-2xl">+</span>
                 {t('addDevice')}
               </button>
               <Link
                 to="/account-link"
-                className="bg-[var(--secondary-bg)] hover:bg-[var(--border)] text-[var(--text)] font-bold text-lg px-6 py-3 touch-target rounded-lg transition-colors flex items-center gap-2"
+                className="w-full sm:w-auto bg-[var(--secondary-bg)] hover:bg-[var(--border)] text-[var(--text)] font-bold text-lg px-6 py-3 touch-target rounded-lg transition-colors flex items-center justify-center gap-2"
               >
                 <span>☁</span>
                 OSI Server
               </Link>
               <button
                 onClick={logout}
-                className="bg-[var(--secondary-bg)] hover:bg-[var(--border)] text-[var(--text)] font-bold text-lg px-6 py-3 touch-target rounded-lg transition-colors"
+                className="w-full sm:w-auto bg-[var(--secondary-bg)] hover:bg-[var(--border)] text-[var(--text)] font-bold text-lg px-6 py-3 touch-target rounded-lg transition-colors"
               >
                 {t('logout')}
               </button>
@@ -137,7 +139,7 @@ export const FarmingDashboard: React.FC = () => {
         {/* Loading State */}
         {isLoading && (
           <div className="text-center py-12">
-            <div className="inline-block animate-spin h-12 w-12 border-4 border-[var(--text)] border-t-transparent rounded-full mb-4" />
+            <div className="inline-block animate-spin h-12 w-12 border-4 border-[var(--primary)] border-t-transparent rounded-full mb-4" />
             <p className="text-[var(--text)] text-xl">{t('loading')}</p>
           </div>
         )}
@@ -186,7 +188,7 @@ export const FarmingDashboard: React.FC = () => {
             {/* Irrigation Zones Section */}
             {zones.length > 0 && (
               <div className="mb-8">
-                <h2 className="text-3xl font-bold text-[var(--text)] mb-4 high-contrast-text">
+                <h2 className="text-2xl font-bold text-[var(--text)] mb-4 high-contrast-text">
                   {t('irrigationZones')}
                 </h2>
                 {zones.map((zone) => (
@@ -204,7 +206,7 @@ export const FarmingDashboard: React.FC = () => {
             {/* Unassigned Devices Section */}
             {unassignedDevices.length > 0 && (
               <div>
-                <h2 className="text-3xl font-bold text-[var(--text)] mb-4 high-contrast-text">
+                <h2 className="text-2xl font-bold text-[var(--text)] mb-4 high-contrast-text">
                   {t('unassignedDevices')}
                 </h2>
                 <div className="bg-[var(--surface)] border-2 border-dashed border-[var(--border)] rounded-xl p-6">
@@ -215,7 +217,7 @@ export const FarmingDashboard: React.FC = () => {
                   {/* Unassigned Sensors */}
                   {unassignedSensors.length > 0 && (
                     <div className="mb-6">
-                      <h3 className="text-[var(--text)] text-xl font-bold mb-3">{t('soilSensors')}</h3>
+                      <h3 className="text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)] mb-3">{t('soilSensors')}</h3>
                       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                         {unassignedSensors.map((device) => (
                           <KiwiSensorCard
@@ -232,7 +234,7 @@ export const FarmingDashboard: React.FC = () => {
                   {/* Unassigned Valves */}
                   {unassignedValves.length > 0 && (
                     <div>
-                      <h3 className="text-[var(--text)] text-xl font-bold mb-3">{t('smartValves')}</h3>
+                      <h3 className="text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)] mb-3">{t('smartValves')}</h3>
                       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                         {unassignedValves.map((device) => (
                           <StregaValveCard
@@ -249,7 +251,7 @@ export const FarmingDashboard: React.FC = () => {
                   {/* Unassigned LSN50 Nodes */}
                   {unassignedLSN50.length > 0 && (
                     <div className="mt-6">
-                      <h3 className="text-[var(--text)] text-xl font-bold mb-3">Dragino LSN50 Nodes</h3>
+                      <h3 className="text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)] mb-3">Dragino LSN50 Nodes</h3>
                       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                         {unassignedLSN50.map((device) => (
                           <DraginoTempCard

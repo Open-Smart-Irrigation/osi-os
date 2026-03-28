@@ -214,7 +214,7 @@ const ConfigPanel: React.FC<{
   return (
     <div
       ref={ref}
-      className="absolute right-0 top-full mt-1 z-20 bg-[var(--surface)] border border-[var(--border)] rounded-xl shadow-xl p-3 min-w-[280px]"
+      className="absolute right-0 top-full mt-1 z-20 bg-[var(--surface)] border border-[var(--border)] rounded-xl shadow-xl p-3 min-w-[280px] max-w-[calc(100vw-2rem)]"
     >
       <p className="text-[var(--text-tertiary)] text-xs font-semibold mb-2 px-1">ACTIVE SENSORS</p>
       {SENSOR_OPTIONS.map(opt => {
