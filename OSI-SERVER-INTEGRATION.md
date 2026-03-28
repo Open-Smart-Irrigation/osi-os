@@ -141,8 +141,39 @@ Node-RED reads these from the process environment (set by UCI config + init scri
 | `DEVICE_MQTT_PASSWORD` | UCI `osi-server.cloud.mqtt_password` | `<random>` |
 | `OSI_SERVER_HOST` | UCI `osi-server.cloud.server_host` | `cloud.example.com` |
 | `FIRMWARE_VERSION` | UCI `osi-server.cloud.firmware_version` | `0.5.0` |
+| `OPENAGRI_WEATHER_URL` | UCI `osi-server.cloud.openagri_weather_url` | `https://cloud.example.com/weather` |
+| `OPENAGRI_WEATHER_USERNAME` | UCI `osi-server.cloud.openagri_weather_username` | `osi-weather` |
+| `OPENAGRI_WEATHER_PASSWORD` | UCI `osi-server.cloud.openagri_weather_password` | `<shared-secret>` |
+| `OPENAGRI_WEATHER_BEARER_TOKEN` | UCI `osi-server.cloud.openagri_weather_bearer_token` | `<optional-static-jwt>` |
+| `OPENAGRI_WEATHER_RADIUS_KM` | UCI `osi-server.cloud.openagri_weather_radius_km` | `10` |
+| `OPENAGRI_WEATHER_CURRENT_CACHE_MINUTES` | UCI `osi-server.cloud.openagri_weather_current_cache_minutes` | `30` |
+| `OPENAGRI_WEATHER_FORECAST_CACHE_MINUTES` | UCI `osi-server.cloud.openagri_weather_forecast_cache_minutes` | `120` |
 
 In Node-RED function nodes, read them as: `env.get('DEVICE_EUI')`
+
+`OPENAGRI_WEATHER_RADIUS_KM` currently applies to the OpenAgri hourly-history lookup used by edge dendro analytics. The newer `environment-summary` current and forecast calls still use the hosted lat/lon endpoints directly and do not add a radius parameter.
+
+---
+
+## Local Environment Summary API
+
+The edge now has a prepared backend endpoint for the future environment card:
+
+- `GET /api/irrigation-zones/:zone_id/environment-summary`
+
+It returns four sections designed for the later UI toggles:
+
+- `local`: aggregated local sensor metrics plus per-device observations
+- `online`: hosted OpenAgri current weather, with direct Open-Meteo fallback
+- `agronomic`: local-first VPD / dew point / heat index / THI / ET0 / ETc
+- `forecast`: rain-focused hourly + daily forecast with ET0/ETc when available
+
+Behavioral rules baked into the backend:
+
+- local zone sensors are preferred over online weather for current agronomic calculations
+- zone coordinates are used first, then mirrored gateway coordinates as fallback
+- current and forecast weather are cached locally in SQLite via `zone_weather_cache`
+- stale cached online data can still be served if the upstream weather lookup is temporarily unavailable
 
 ---
 

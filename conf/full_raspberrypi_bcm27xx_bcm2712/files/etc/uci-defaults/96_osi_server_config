@@ -14,6 +14,13 @@ set osi-server.cloud.device_type=GATEWAY
 set osi-server.cloud.firmware_version=0.5.0
 set osi-server.cloud.server_host=
 set osi-server.cloud.mqtt_password=
+set osi-server.cloud.openagri_weather_url=
+set osi-server.cloud.openagri_weather_username=
+set osi-server.cloud.openagri_weather_password=
+set osi-server.cloud.openagri_weather_bearer_token=
+set osi-server.cloud.openagri_weather_radius_km=10
+set osi-server.cloud.openagri_weather_current_cache_minutes=30
+set osi-server.cloud.openagri_weather_forecast_cache_minutes=120
 commit osi-server
 EOF
 exit 0

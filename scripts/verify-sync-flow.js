@@ -31,7 +31,8 @@ const requiredHttpRoutes = [
   '/api/devices/:deveui/strega/partial-opening',
   '/api/devices/:deveui/strega/flushing',
   '/api/gateway/location',
-  '/api/gateways/:gatewayEui/location'
+  '/api/gateways/:gatewayEui/location',
+  '/api/irrigation-zones/:zone_id/environment-summary'
 ];
 
 const requiredFunctionNodes = [
@@ -78,7 +79,8 @@ const requiredFunctionNodes = [
   'Format STREGA Advanced Response',
   'Build LSN50 mode downlink',
   'Auth + Query Gateway Location',
-  'Format Gateway Location Response'
+  'Format Gateway Location Response',
+  'Get Zone Environment Summary'
 ];
 
 function fail(message) {
@@ -243,6 +245,12 @@ expectIncludes('Daily Dendrometer Analytics', 'vpd_override_summary:vpdOverrideS
 expectIncludes('Daily Dendrometer Analytics', 'sd_vpd_summary:sdVpdSummary', 'stores SD-VPD diagnostics in recommendation_json');
 expectIncludes('Get Zone Recommendations', 'zdr.recommendation_json', 'returns recommendation_json from the zone recommendation query');
 expectIncludes('Get Zone Recommendations', 'recommendation_json:r.recommendation_json ?? null', 'exposes recommendation_json in the local recommendations API');
+expectIncludes('Daily Dendrometer Analytics', "env.get('OPENAGRI_WEATHER_RADIUS_KM')", 'supports configurable OpenAgri history search radius for edge analytics');
+expectIncludes('Get Zone Environment Summary', 'CREATE TABLE IF NOT EXISTS zone_weather_cache', 'creates a local weather cache table for environment summaries');
+expectIncludes('Get Zone Environment Summary', "env.get('OPENAGRI_WEATHER_CURRENT_CACHE_MINUTES')", 'supports configurable current-weather cache TTL');
+expectIncludes('Get Zone Environment Summary', "env.get('OPENAGRI_WEATHER_FORECAST_CACHE_MINUTES')", 'supports configurable forecast cache TTL');
+expectIncludes('Get Zone Environment Summary', "preferredSource: usingLocal ? 'local'", 'prioritizes local sensor climate over online weather for agronomic metrics');
+expectIncludes('Get Zone Environment Summary', 'LEFT JOIN gateway_locations gl ON gl.gateway_device_eui = iz.gateway_device_eui', 'falls back to mirrored gateway coordinates when a zone has no explicit location');
 expectIncludes('Build Telemetry', 'lsn50_mode_code: observedModeCode', 'publishes observed LSN50 mode in edge telemetry');
 expectIncludes('Decode LSN50', 'function detectLsn50ModeCode', 'decodes observed LSN50 mode from raw uplinks');
 expectIncludes('Apply Config', 'd.modeCodeToStore = d.observedModeCode != null ? d.observedModeCode : deviceMode;', 'stores observed or configured LSN50 mode on ingest');
