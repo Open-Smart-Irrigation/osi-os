@@ -27,7 +27,14 @@ const LSN50_MODE_OPTIONS: Array<{ value: Lsn50Mode; description: string }> = [
   { value: 'MOD8', description: 'Three ADC channels plus one DS18B20 mode.' },
   { value: 'MOD9', description: 'Rain gauge and flow counter mode.' },
 ];
+const LSN50_INTERRUPT_MODE_OPTIONS = [
+  { value: 0, label: 'Disabled' },
+  { value: 1, label: 'Rising or falling edge' },
+  { value: 2, label: 'Falling edge only' },
+  { value: 3, label: 'Rising edge only' },
+];
 const MAX_LSN50_INTERVAL_MINUTES = Math.floor(0xFFFFFF / 60);
+const MAX_LSN50_5V_WARMUP_MS = 65535;
 
 function normaliseLsn50Mode(value: unknown): Lsn50Mode | null {
   const raw = String(value ?? '').trim().toUpperCase();
@@ -63,6 +70,9 @@ const ConfigPanel: React.FC<{
   const [modeInfo, setModeInfo] = useState<string | null>(null);
   const [intervalMinutesInput, setIntervalMinutesInput] = useState('');
   const [intervalInfo, setIntervalInfo] = useState<string | null>(null);
+  const [interruptModeInput, setInterruptModeInput] = useState('0');
+  const [warmupMillisecondsInput, setWarmupMillisecondsInput] = useState('');
+  const [advancedInfo, setAdvancedInfo] = useState<string | null>(null);
   const ref = useRef<HTMLDivElement>(null);
   const currentMode = getCurrentLsn50Mode(device);
   const observedAt = device.latest_data?.lsn50_mode_observed_at ?? null;
@@ -151,6 +161,50 @@ const ConfigPanel: React.FC<{
       onUpdate();
     } catch {
       setError('Failed to change LSN50 uplink interval');
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const applyInterruptMode = async () => {
+    const parsed = Number(interruptModeInput);
+    if (!Number.isInteger(parsed) || parsed < 0 || parsed > 3) {
+      setError('Interrupt mode must be between 0 and 3.');
+      setAdvancedInfo(null);
+      return;
+    }
+
+    setBusy('interrupt');
+    setError(null);
+    setAdvancedInfo(null);
+    try {
+      await lsn50API.setInterruptMode(device.deveui, parsed);
+      setAdvancedInfo(`Interrupt mode ${parsed} requested. This affects external interrupt-driven sensor inputs.`);
+      onUpdate();
+    } catch {
+      setError('Failed to change the LSN50 interrupt mode');
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const applyFiveVoltWarmup = async () => {
+    const parsed = Number(warmupMillisecondsInput);
+    if (!Number.isInteger(parsed) || parsed < 0 || parsed > MAX_LSN50_5V_WARMUP_MS) {
+      setError(`Enter a warm-up time between 0 and ${MAX_LSN50_5V_WARMUP_MS} ms.`);
+      setAdvancedInfo(null);
+      return;
+    }
+
+    setBusy('warmup');
+    setError(null);
+    setAdvancedInfo(null);
+    try {
+      await lsn50API.setFiveVoltWarmup(device.deveui, parsed);
+      setAdvancedInfo(`5V warm-up request queued for ${parsed} ms.`);
+      onUpdate();
+    } catch {
+      setError('Failed to change the 5V warm-up time');
     } finally {
       setBusy(null);
     }
@@ -264,6 +318,67 @@ const ConfigPanel: React.FC<{
             {busy === 'interval' ? 'Applying interval...' : 'Apply interval'}
           </button>
           {intervalInfo && <p className="text-[var(--text-tertiary)] text-xs mt-2">{intervalInfo}</p>}
+        </div>
+      </div>
+      <div className="mt-3 pt-3 border-t border-[var(--border)]">
+        <p className="text-[var(--text-tertiary)] text-xs font-semibold mb-2 px-1">ADVANCED SENSOR I/O</p>
+        <div className="px-1 space-y-3">
+          <div>
+            <label className="block text-[var(--text-secondary)] text-xs font-semibold mb-1">
+              Interrupt trigger mode
+            </label>
+            <select
+              value={interruptModeInput}
+              disabled={busy === 'interrupt'}
+              onChange={(event) => setInterruptModeInput(event.target.value)}
+              className="w-full rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-sm text-[var(--text)]"
+            >
+              {LSN50_INTERRUPT_MODE_OPTIONS.map(option => (
+                <option key={option.value} value={option.value}>{option.label}</option>
+              ))}
+            </select>
+            <button
+              type="button"
+              onClick={applyInterruptMode}
+              disabled={busy !== null}
+              className="mt-2 w-full rounded-lg bg-[var(--secondary-bg)] px-3 py-2 text-sm font-semibold text-[var(--text)] transition-colors hover:bg-[var(--border)] disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {busy === 'interrupt' ? 'Applying interrupt mode...' : 'Apply interrupt mode'}
+            </button>
+          </div>
+          <div>
+            <label className="block text-[var(--text-secondary)] text-xs font-semibold mb-1" htmlFor={`lsn50-warmup-${device.deveui}`}>
+              5V warm-up time (ms)
+            </label>
+            <input
+              id={`lsn50-warmup-${device.deveui}`}
+              type="number"
+              min={0}
+              max={MAX_LSN50_5V_WARMUP_MS}
+              step={1}
+              inputMode="numeric"
+              value={warmupMillisecondsInput}
+              disabled={busy === 'warmup'}
+              onChange={(event) => setWarmupMillisecondsInput(event.target.value)}
+              placeholder="1000"
+              className="w-full rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-sm text-[var(--text)]"
+            />
+            <p className="text-[var(--text-tertiary)] text-xs mt-2">
+              Useful for probes that need sensor power to settle before sampling.
+            </p>
+            <button
+              type="button"
+              onClick={applyFiveVoltWarmup}
+              disabled={busy !== null}
+              className="mt-2 w-full rounded-lg bg-[var(--secondary-bg)] px-3 py-2 text-sm font-semibold text-[var(--text)] transition-colors hover:bg-[var(--border)] disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {busy === 'warmup' ? 'Applying 5V warm-up...' : 'Apply 5V warm-up'}
+            </button>
+          </div>
+          <p className="text-[var(--warn-text)] text-xs">
+            These controls are intended for external sensors and non-default LSN50 integrations.
+          </p>
+          {advancedInfo && <p className="text-[var(--text-tertiary)] text-xs">{advancedInfo}</p>}
         </div>
       </div>
       {error && <p className="text-[var(--error-text)] text-xs mt-2 px-1">{error}</p>}

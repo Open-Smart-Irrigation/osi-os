@@ -18,6 +18,7 @@ import type {
   SdVpdStatus,
   DendroReading,
   Lsn50Mode,
+  StregaModel,
 } from '../types/farming';
 
 // Create axios instance with base configuration
@@ -236,6 +237,12 @@ export const lsn50API = {
   setUplinkInterval: async (deveui: string, minutes: number): Promise<void> => {
     await api.put(`/api/devices/${deveui}/lsn50/interval`, { minutes });
   },
+  setInterruptMode: async (deveui: string, mode: number): Promise<void> => {
+    await api.put(`/api/devices/${deveui}/lsn50/interrupt-mode`, { mode });
+  },
+  setFiveVoltWarmup: async (deveui: string, milliseconds: number): Promise<void> => {
+    await api.put(`/api/devices/${deveui}/lsn50/5v-warmup`, { milliseconds });
+  },
 };
 
 export const kiwiAPI = {
@@ -248,8 +255,38 @@ export const kiwiAPI = {
 };
 
 export const stregaAPI = {
-  setUplinkInterval: async (deveui: string, minutes: number): Promise<void> => {
-    await api.put(`/api/devices/${deveui}/strega/interval`, { minutes });
+  setUplinkInterval: async (deveui: string, payload: {
+    minutes?: number;
+    closedMinutes?: number;
+    openedMinutes?: number;
+    tamperDisabled?: boolean;
+  }): Promise<void> => {
+    await api.put(`/api/devices/${deveui}/strega/interval`, payload);
+  },
+  setModel: async (deveui: string, model: StregaModel): Promise<void> => {
+    await api.put(`/api/devices/${deveui}/strega/model`, { model });
+  },
+  setTimedAction: async (deveui: string, payload: {
+    action: 'OPEN' | 'CLOSE';
+    unit: 'seconds' | 'minutes' | 'hours';
+    amount: number;
+  }): Promise<void> => {
+    await api.put(`/api/devices/${deveui}/strega/timed-action`, payload);
+  },
+  setMagnetEnabled: async (deveui: string, enabled: boolean): Promise<void> => {
+    await api.put(`/api/devices/${deveui}/strega/magnet`, { enabled });
+  },
+  setPartialOpening: async (deveui: string, payload: {
+    action: 'OPEN' | 'CLOSE';
+    percentage: number;
+  }): Promise<void> => {
+    await api.put(`/api/devices/${deveui}/strega/partial-opening`, payload);
+  },
+  setFlushing: async (deveui: string, payload: {
+    returnPosition: 'OPEN' | 'CLOSE';
+    percentage: number;
+  }): Promise<void> => {
+    await api.put(`/api/devices/${deveui}/strega/flushing`, payload);
   },
 };
 
