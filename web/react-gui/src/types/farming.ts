@@ -42,6 +42,8 @@ export interface Device {
   // Per-device opt-in flags for optional LSN50 sensors
   dendro_enabled?: number;      // 0 = disabled (default), 1 = OPKON dendrometer on ADC
   temp_enabled?: number;        // 0 = disabled (default), 1 = DS18B20 probe on temp input
+  rain_gauge_enabled?: number;  // 0 = disabled (default), 1 = rain gauge on count1 (MOD9)
+  flow_meter_enabled?: number;  // 0 = disabled (default), 1 = flow meter on count2 (MOD9)
   is_reference_tree?: number;   // 0 = monitored/irrigated, 1 = control/reference tree
   device_mode?: number | null;  // Requested/configured LSN50 mode on the edge
   strega_model?: StregaModel | string | null;

@@ -8,17 +8,12 @@ import { SensorMonitor } from './SensorMonitor';
 const SENSOR_OPTIONS: Array<{
   key: keyof Device;
   label: string;
-  isEnabled?: (device: Device) => boolean;
   toggle: (deveui: string, enabled: boolean) => Promise<void>;
 }> = [
-  { key: 'temp_enabled',   label: 'Temperature',  toggle: (id, e) => lsn50API.setTempEnabled(id, e)   },
-  { key: 'dendro_enabled', label: 'Dendrometer',  toggle: (id, e) => lsn50API.setDendroEnabled(id, e) },
-  {
-    key: 'device_mode',
-    label: 'Rain & Flow (MOD9)',
-    isEnabled: (d) => d.device_mode === 9,
-    toggle: (id, e) => lsn50API.setMode(id, e ? 'MOD9' : 'MOD1'),
-  },
+  { key: 'temp_enabled',        label: 'Temperature',  toggle: (id, e) => lsn50API.setTempEnabled(id, e)        },
+  { key: 'dendro_enabled',      label: 'Dendrometer',  toggle: (id, e) => lsn50API.setDendroEnabled(id, e)      },
+  { key: 'rain_gauge_enabled',  label: 'Rain Gauge',   toggle: (id, e) => lsn50API.setRainGaugeEnabled(id, e)   },
+  { key: 'flow_meter_enabled',  label: 'Flow Meter',   toggle: (id, e) => lsn50API.setFlowMeterEnabled(id, e)   },
 ];
 
 const LSN50_MODE_OPTIONS: Array<{ value: Lsn50Mode; description: string }> = [
@@ -106,7 +101,7 @@ const ConfigPanel: React.FC<{
   }, [currentMode, pendingMode]);
 
   const toggle = async (opt: typeof SENSOR_OPTIONS[0]) => {
-    const current = opt.isEnabled ? opt.isEnabled(device) : device[opt.key] === 1;
+    const current = device[opt.key] === 1;
     setBusy(opt.key as string);
     setError(null);
     try {
@@ -222,7 +217,7 @@ const ConfigPanel: React.FC<{
     >
       <p className="text-[var(--text-tertiary)] text-xs font-semibold mb-2 px-1">ACTIVE SENSORS</p>
       {SENSOR_OPTIONS.map(opt => {
-        const enabled = opt.isEnabled ? opt.isEnabled(device) : device[opt.key] === 1;
+        const enabled = device[opt.key] === 1;
         const loading  = busy === (opt.key as string);
         return (
           <label
@@ -273,11 +268,6 @@ const ConfigPanel: React.FC<{
             ))}
           </select>
           <p className="text-[var(--text-tertiary)] text-xs mt-2">{selectedModeDescription}</p>
-          {selectedMode !== 'MOD1' && (
-            <p className="text-[var(--warn-text)] text-xs mt-2">
-              MOD2-MOD9 are advanced modes. OSI's temperature and dendrometer views are designed around MOD1.
-            </p>
-          )}
           <p className="text-[var(--text-tertiary)] text-xs mt-2">
             Mode changes are confirmed after the next uplink.
           </p>
@@ -398,7 +388,8 @@ export const DraginoTempCard: React.FC<DraginoTempCardProps> = ({ device, onRemo
     dendro_position_mm, dendro_valid, dendro_delta_mm,
     rain_mm_delta, flow_liters_delta,
   } = device.latest_data;
-  const isMod9 = getCurrentLsn50Mode(device) === 'MOD9';
+  const rainEnabled = device.rain_gauge_enabled === 1;
+  const flowEnabled = device.flow_meter_enabled === 1;
   const lastSeenStr = device.last_seen ?? null;
   const lastSeen = lastSeenStr ? new Date(lastSeenStr) : null;
   const minutesAgo = lastSeen
@@ -544,8 +535,8 @@ export const DraginoTempCard: React.FC<DraginoTempCardProps> = ({ device, onRemo
           </div>
         )}
 
-        {/* MOD9: Rain gauge (Davis 6466M) */}
-        {isMod9 && (
+        {/* Rain gauge (Davis 6466M) — shown when rain_gauge_enabled */}
+        {rainEnabled && (
           <div className="bg-[var(--card)] rounded-lg p-4">
             <p className="text-[var(--text-tertiary)] text-sm font-semibold mb-1">RAIN GAUGE</p>
             {rain_mm_delta !== null && rain_mm_delta !== undefined ? (
@@ -563,8 +554,8 @@ export const DraginoTempCard: React.FC<DraginoTempCardProps> = ({ device, onRemo
           </div>
         )}
 
-        {/* MOD9: Flow meter (GWF Unico2) */}
-        {isMod9 && (
+        {/* Flow meter (GWF Unico2) — shown when flow_meter_enabled */}
+        {flowEnabled && (
           <div className="bg-[var(--card)] rounded-lg p-4">
             <p className="text-[var(--text-tertiary)] text-sm font-semibold mb-1">FLOW METER</p>
             {flow_liters_delta !== null && flow_liters_delta !== undefined ? (

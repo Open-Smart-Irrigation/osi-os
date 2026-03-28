@@ -274,6 +274,12 @@ export const lsn50API = {
   setTempEnabled: async (deveui: string, enabled: boolean): Promise<void> => {
     await api.put(`/api/devices/${deveui}/temp`, { enabled });
   },
+  setRainGaugeEnabled: async (deveui: string, enabled: boolean): Promise<void> => {
+    await api.put(`/api/devices/${deveui}/rain-gauge`, { enabled });
+  },
+  setFlowMeterEnabled: async (deveui: string, enabled: boolean): Promise<void> => {
+    await api.put(`/api/devices/${deveui}/flow-meter`, { enabled });
+  },
   setMode: async (deveui: string, mode: Lsn50Mode): Promise<void> => {
     await api.put(`/api/devices/${deveui}/lsn50/mode`, { mode });
   },
