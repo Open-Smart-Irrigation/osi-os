@@ -106,7 +106,7 @@ const ConfigPanel: React.FC<{
   }, [currentMode, pendingMode]);
 
   const toggle = async (opt: typeof SENSOR_OPTIONS[0]) => {
-    const current = device[opt.key] === 1;
+    const current = opt.isEnabled ? opt.isEnabled(device) : device[opt.key] === 1;
     setBusy(opt.key as string);
     setError(null);
     try {
