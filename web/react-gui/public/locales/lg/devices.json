@@ -96,5 +96,45 @@
     "reloadFailed": "Okuzaamu nteekateeka kugaanye",
     "saved": "Kitereddwa.",
     "triggerHint": "Tandika singa {{metric}} ≥ {{threshold}} kPa (omulundi gumu/lunaku, 06:00)."
+  },
+  "environment": {
+    "sectionTitle": "Obutonde",
+    "tabs": { "local": "Eky'omu kitundu", "online": "Ku mukutu", "agronomic": "Eby'okulima", "forecast": "Ebikuubiriza" },
+    "source": { "openagri": "OpenAgri", "open_meteo": "Open-Meteo", "local": "Ebikuuma eby'eggwanga", "unavailable": "Tekyabaawo" },
+    "cache": { "live": "Amaanyi", "stale": "Ekaddiye", "miss": "Tewali makulu" },
+    "location": { "zone": "Entera z'essaza", "gateway": "GPS y'ebbanga", "unavailable": "Tewali kifo" },
+    "local": {
+      "freshSensors": "{{count}} eppya",
+      "staleSensors_one": "{{count}} ekaddiye",
+      "staleSensors_other": "{{count}} ekaddiye",
+      "perDevice": "Ebyofubirwa bya buli kyuma",
+      "noData": "Tewali makulu ga sensor ery'eggwanga",
+      "observedAt": "Kiraabibwa {{time}}"
+    },
+    "online": {
+      "unavailable": "Tewali makulu ga bude ku mukutu ku ssaza lino",
+      "noLocation": "Teeka entera z'essaza okukozesa bude ku mukutu",
+      "updatesAt": "Kusinziiramu ku {{time}}"
+    },
+    "agronomic": {
+      "vpd": "VPD", "dewPoint": "Ekifo ky'amazzi", "heatIndex": "Ebbugumu", "thi": "THI",
+      "et0": "ET₀ ensibuko", "kc": "Kc eby'ebimera", "etc": "ET eby'ebimera",
+      "noData": "Tewali makulu ag'okulima", "fromSource": "okuva {{source}}"
+    },
+    "forecast": {
+      "next24h": "Essawa 24 ezijja", "next72h": "Essawa 72 ezijja", "nextRain": "Enkuba ejja",
+      "rainHours": "Essawa z'enkuba", "maxHourly": "Nnyingi ku ssawa",
+      "today": "leero", "tomorrow": "enkya",
+      "noData": "Tewali bikuubiriza",
+      "noLocation": "Teeka entera z'essaza okukozesa ebikuubiriza",
+      "hourlyTitle": "Enkuba ku ssawa (essawa 24 ezijja)"
+    },
+    "metrics": {
+      "air_temperature_c": "Ebbugumu ery'empewo", "relative_humidity_pct": "Amaanzi mu mpewo",
+      "probe_temperature_c": "Ebbugumu ery'omuzizi", "pressure_hpa": "Okunyigiriza",
+      "wind_speed_mps": "Empewo", "wind_direction_deg": "Akalagirirwa k'empewo",
+      "rainfall_mm": "Enkuba", "light_lux": "Omusana",
+      "uv_index": "Enkomerero ya UV", "soil_temperature_c": "Ebbugumu ery'ettaka", "soil_moisture_pct": "Amaanzi mu ttaka"
+    }
   }
 }

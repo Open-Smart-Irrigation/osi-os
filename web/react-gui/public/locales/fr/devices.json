@@ -96,5 +96,45 @@
     "reloadFailed": "Impossible de recharger le planning",
     "saved": "Sauvegardé.",
     "triggerHint": "Déclencher si {{metric}} ≥ {{threshold}} kPa (une fois/jour, 06h00)."
+  },
+  "environment": {
+    "sectionTitle": "Environnement",
+    "tabs": { "local": "Local", "online": "En ligne", "agronomic": "Agronomique", "forecast": "Prévisions" },
+    "source": { "openagri": "OpenAgri", "open_meteo": "Open-Meteo", "local": "Capteurs locaux", "unavailable": "Indisponible" },
+    "cache": { "live": "En direct", "stale": "Obsolète", "miss": "Aucune donnée" },
+    "location": { "zone": "Coordonnées de zone", "gateway": "GPS passerelle", "unavailable": "Aucun emplacement" },
+    "local": {
+      "freshSensors": "{{count}} récent",
+      "staleSensors_one": "{{count}} obsolète",
+      "staleSensors_other": "{{count}} obsolètes",
+      "perDevice": "Lectures par appareil",
+      "noData": "Aucune donnée de capteur local disponible",
+      "observedAt": "Observé {{time}}"
+    },
+    "online": {
+      "unavailable": "Aucune donnée météo en ligne pour cette zone",
+      "noLocation": "Définissez les coordonnées de zone pour activer la météo en ligne",
+      "updatesAt": "Mise à jour à {{time}}"
+    },
+    "agronomic": {
+      "vpd": "VPD", "dewPoint": "Point de rosée", "heatIndex": "Indice de chaleur", "thi": "THI",
+      "et0": "ET₀ référence", "kc": "Coeff. culture Kc", "etc": "ET culture",
+      "noData": "Aucune donnée agronomique disponible", "fromSource": "depuis {{source}}"
+    },
+    "forecast": {
+      "next24h": "Proch. 24 h", "next72h": "Proch. 72 h", "nextRain": "Prochaine pluie",
+      "rainHours": "Heures de pluie", "maxHourly": "Max. horaire",
+      "today": "aujourd'hui", "tomorrow": "demain",
+      "noData": "Prévisions indisponibles",
+      "noLocation": "Définissez les coordonnées de zone pour activer les prévisions",
+      "hourlyTitle": "Pluie horaire (proch. 24 h)"
+    },
+    "metrics": {
+      "air_temperature_c": "Temp. air", "relative_humidity_pct": "Humidité",
+      "probe_temperature_c": "Temp. sonde", "pressure_hpa": "Pression",
+      "wind_speed_mps": "Vent", "wind_direction_deg": "Dir. vent",
+      "rainfall_mm": "Précipitations", "light_lux": "Lumière",
+      "uv_index": "Indice UV", "soil_temperature_c": "Temp. sol", "soil_moisture_pct": "Humidité sol"
+    }
   }
 }

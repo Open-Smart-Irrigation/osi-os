@@ -7,6 +7,7 @@ import { StregaValveCard } from './StregaValveCard';
 import { ScheduleSection } from './ScheduleSection';
 import { AssignDeviceModal } from './AssignDeviceModal';
 import { DendrometerSection } from './dendrometer/DendrometerSection';
+import { EnvironmentCard } from './environment/EnvironmentCard';
 import { ZoneConfigModal } from './ZoneConfigModal';
 import { AdvancedScheduleDrawer } from './AdvancedScheduleDrawer';
 import { useTranslation } from 'react-i18next';
@@ -192,6 +193,9 @@ export const IrrigationZoneCard: React.FC<IrrigationZoneCardProps> = ({
 
       {/* Dendrometer Monitoring Section */}
       <DendrometerSection zone={zone} devices={lsn50Nodes} />
+
+      {/* Environment Section */}
+      <EnvironmentCard zone={zone} />
 
       {/* Devices in Zone */}
       {devices.length > 0 ? (

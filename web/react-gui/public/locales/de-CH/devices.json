@@ -96,5 +96,45 @@
     "reloadFailed": "Plan konnte nicht neu geladen werden",
     "saved": "Gespeichert.",
     "triggerHint": "Auslösen wenn {{metric}} ≥ {{threshold}} kPa (einmal/Tag, 06:00)."
+  },
+  "environment": {
+    "sectionTitle": "Umwelt",
+    "tabs": { "local": "Lokal", "online": "Online", "agronomic": "Agronomisch", "forecast": "Vorhersage" },
+    "source": { "openagri": "OpenAgri", "open_meteo": "Open-Meteo", "local": "Lokale Sensoren", "unavailable": "Nicht verfügbar" },
+    "cache": { "live": "Aktuell", "stale": "Veraltet", "miss": "Keine Daten" },
+    "location": { "zone": "Zonenkoordinaten", "gateway": "Gateway-GPS", "unavailable": "Kein Standort gesetzt" },
+    "local": {
+      "freshSensors": "{{count}} aktuell",
+      "staleSensors_one": "{{count}} veraltet",
+      "staleSensors_other": "{{count}} veraltet",
+      "perDevice": "Messwerte pro Gerät",
+      "noData": "Keine lokalen Sensordaten verfügbar",
+      "observedAt": "Gemessen {{time}}"
+    },
+    "online": {
+      "unavailable": "Keine Online-Wetterdaten für diese Zone verfügbar",
+      "noLocation": "Zonenkoordinaten setzen, um Online-Wetter zu aktivieren",
+      "updatesAt": "Aktualisierung um {{time}}"
+    },
+    "agronomic": {
+      "vpd": "VPD", "dewPoint": "Taupunkt", "heatIndex": "Hitzeindex", "thi": "THI",
+      "et0": "Referenz-ET₀", "kc": "Erntekoeff. Kc", "etc": "Ernte-ET",
+      "noData": "Keine agronomischen Daten verfügbar", "fromSource": "von {{source}}"
+    },
+    "forecast": {
+      "next24h": "Nächste 24 Std.", "next72h": "Nächste 72 Std.", "nextRain": "Nächster Regen",
+      "rainHours": "Regenstunden", "maxHourly": "Max. stündlich",
+      "today": "heute", "tomorrow": "morgen",
+      "noData": "Keine Vorhersage verfügbar",
+      "noLocation": "Zonenkoordinaten setzen, um Vorhersage zu aktivieren",
+      "hourlyTitle": "Stündlicher Regen (nächste 24 Std.)"
+    },
+    "metrics": {
+      "air_temperature_c": "Lufttemp.", "relative_humidity_pct": "Luftfeuchte",
+      "probe_temperature_c": "Sondentemp.", "pressure_hpa": "Luftdruck",
+      "wind_speed_mps": "Wind", "wind_direction_deg": "Windrichtung",
+      "rainfall_mm": "Niederschlag", "light_lux": "Licht",
+      "uv_index": "UV-Index", "soil_temperature_c": "Bodentemp.", "soil_moisture_pct": "Bodenfeuchte"
+    }
   }
 }

@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import type { GatewayLocation, IrrigationZone } from '../../types/farming';
 import { gatewayLocationAPI, irrigationZonesAPI } from '../../services/api';
+import { CROP_GROUPS } from './cropKc';
 
 interface Props {
   isOpen: boolean;
@@ -8,21 +9,6 @@ interface Props {
   onClose: () => void;
   onSaved: () => void;
 }
-
-const CROP_OPTIONS = [
-  { value: '', label: '— Select crop —' },
-  { value: 'apple', label: 'Apple' },
-  { value: 'grapevine', label: 'Grapevine' },
-  { value: 'olive', label: 'Olive' },
-  { value: 'citrus', label: 'Citrus' },
-  { value: 'peach', label: 'Peach / Nectarine' },
-  { value: 'cherry', label: 'Cherry' },
-  { value: 'pear', label: 'Pear' },
-  { value: 'plum', label: 'Plum' },
-  { value: 'walnut', label: 'Walnut' },
-  { value: 'almond', label: 'Almond' },
-  { value: 'other', label: 'Other' },
-];
 
 const SOIL_OPTIONS = [
   { value: '', label: '— Select soil type —' },
@@ -233,7 +219,13 @@ export const ZoneConfigModal: React.FC<Props> = ({ isOpen, zone, onClose, onSave
                 onChange={e => setCropType(e.target.value)}
                 className="flex-1 bg-[var(--surface)] border border-[var(--border)] text-[var(--text)] rounded-lg px-3 py-2 text-sm"
               >
-                {CROP_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+                <option value="">— Select crop —</option>
+                {CROP_GROUPS.map(g => (
+                  <optgroup key={g.groupLabel} label={g.groupLabel}>
+                    {g.crops.map(c => <option key={c.value} value={c.value}>{c.label}</option>)}
+                  </optgroup>
+                ))}
+                <option value="other">Other / Custom</option>
               </select>
               <input
                 type="text"

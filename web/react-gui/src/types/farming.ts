@@ -276,6 +276,138 @@ export interface ZoneRecommendation {
   zone_confidence_score: number | null;
 }
 
+// ── Zone Environment Summary ──────────────────────────────────────────────────
+
+export interface ZoneEnvironmentSummary {
+  zoneId: number;
+  zoneName: string;
+  generatedAt: string;
+  location: EnvironmentLocation;
+  local: LocalEnvironment;
+  online: OnlineEnvironment;
+  agronomic: AgronomicEnvironment;
+  forecast: ForecastEnvironment;
+}
+
+export interface EnvironmentLocation {
+  latitude: number | null;
+  longitude: number | null;
+  timezone: string;
+  source: 'zone' | 'gateway' | 'unavailable';
+}
+
+export interface LocalEnvironment {
+  available: boolean;
+  observedAt: string | null;
+  sensorCount: number;
+  freshSensorCount: number;
+  staleSensorCount: number;
+  metrics: LocalMetric[];
+  devices: LocalSensorDevice[];
+}
+
+export interface LocalMetric {
+  key: string;
+  label: string;
+  unit: string;
+  mean: number;
+  median: number;
+  min: number;
+  max: number;
+  sampleCount: number;
+}
+
+export interface LocalSensorDevice {
+  deviceEui: string;
+  name: string;
+  type: string;
+  observedAt: string;
+  metrics: Record<string, number>;
+}
+
+export interface OnlineEnvironment {
+  available: boolean;
+  source: 'openagri' | 'open_meteo' | 'unavailable';
+  cacheStatus: 'live' | 'stale' | 'miss';
+  observedAt: string | null;
+  expiresAt: string | null;
+  current: OnlineWeather | null;
+}
+
+export interface OnlineWeather {
+  description: string | null;
+  weatherCode: number | null;
+  airTemperatureC: number | null;
+  relativeHumidityPct: number | null;
+  pressureHpa: number | null;
+  windSpeedMps: number | null;
+  windDirectionDeg: number | null;
+  cloudCoverPct: number | null;
+  rainMm: number | null;
+  precipitationProbabilityPct: number | null;
+}
+
+export interface AgronomicEnvironment {
+  preferredSource: string;
+  current: AgronomicCurrent | null;
+}
+
+export interface AgronomicCurrent {
+  thermodynamicSource: string;
+  evapotranspirationSource: string;
+  cropCoefficientSource: string;
+  airTemperatureC: number | null;
+  relativeHumidityPct: number | null;
+  vpdKpa: number | null;
+  dewPointC: number | null;
+  heatIndexC: number | null;
+  thi: number | null;
+  referenceEt0MmDay: number | null;
+  cropCoefficientKc: number | null;
+  etcMmDay: number | null;
+}
+
+export interface ForecastEnvironment {
+  available: boolean;
+  source: 'openagri' | 'open_meteo' | 'unavailable';
+  cacheStatus: 'live' | 'stale' | 'miss';
+  observedAt: string | null;
+  expiresAt: string | null;
+  rainFocus: RainFocus | null;
+}
+
+export interface RainFocus {
+  totalNext24hMm: number;
+  totalNext72hMm: number;
+  maxHourlyRainMm: number;
+  maxHourlyRainAt: string | null;
+  nextRainEta: string | null;
+  rainHoursNext24h: number;
+  daily: DailyForecast[];
+  hourly: HourlyForecast[];
+}
+
+export interface DailyForecast {
+  date: string;
+  description: string | null;
+  weatherCode: number | null;
+  maxTempC: number | null;
+  minTempC: number | null;
+  rainMm: number | null;
+  rainProbabilityPct: number | null;
+  windSpeedMps: number | null;
+  et0MmDay: number | null;
+  etcMmDay: number | null;
+}
+
+export interface HourlyForecast {
+  time: string;
+  rainMm: number | null;
+  rainProbabilityPct: number | null;
+  tempC: number | null;
+  windSpeedMps: number | null;
+}
+
 /** One raw dendrometer reading from dendrometer_readings table */
 export interface DendroReading {
   id: number;

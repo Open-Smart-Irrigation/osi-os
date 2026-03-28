@@ -1,0 +1,121 @@
+/* ── Weather Icon Animations ──────────────────────────────────────────────── */
+
+/* Sun rotation */
+@keyframes wi-sun-rotate {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}
+
+/* Sun pulse (scale) */
+@keyframes wi-sun-pulse {
+  0%, 100% { transform: scale(1); }
+  50%       { transform: scale(1.08); }
+}
+
+/* Cloud drift left–right */
+@keyframes wi-cloud-drift {
+  0%, 100% { transform: translateX(0); }
+  50%       { transform: translateX(3px); }
+}
+
+/* Cloud float up–down */
+@keyframes wi-cloud-float {
+  0%, 100% { transform: translateY(0); }
+  50%       { transform: translateY(-2px); }
+}
+
+/* Sun peek from behind cloud (translateX) */
+@keyframes wi-sun-peek {
+  0%, 100% { transform: translateX(0); }
+  50%       { transform: translateX(-3px); }
+}
+
+/* Rain drop fall */
+@keyframes wi-raindrop {
+  0%   { transform: translateY(-4px); opacity: 0; }
+  30%  { opacity: 1; }
+  100% { transform: translateY(10px); opacity: 0; }
+}
+
+/* Lightning flash */
+@keyframes wi-lightning {
+  0%, 100%      { opacity: 0; }
+  10%, 30%      { opacity: 1; }
+  20%, 40%, 90% { opacity: 0; }
+}
+
+/* Snowflake fall + spin */
+@keyframes wi-snow {
+  0%   { transform: translateY(-4px) rotate(0deg);   opacity: 0; }
+  20%  { opacity: 1; }
+  100% { transform: translateY(12px) rotate(180deg); opacity: 0; }
+}
+
+/* Fog line drift */
+@keyframes wi-fog {
+  0%, 100% { transform: translateX(0);   opacity: 0.7; }
+  50%       { transform: translateX(4px); opacity: 0.4; }
+}
+
+/* Gentle shake (storm cloud) */
+@keyframes wi-shake {
+  0%, 100% { transform: translateX(0); }
+  25%       { transform: translateX(-1px); }
+  75%       { transform: translateX(1px); }
+}
+
+/* ── Animation utility classes ──────────────────────────────────────────── */
+
+.wi-sun-rays {
+  transform-origin: 50% 50%;
+  animation: wi-sun-rotate 20s linear infinite;
+}
+
+.wi-sun-core {
+  animation: wi-sun-pulse 3s ease-in-out infinite;
+}
+
+.wi-cloud-main {
+  animation: wi-cloud-drift 4s ease-in-out infinite;
+}
+
+.wi-cloud-float {
+  animation: wi-cloud-float 3.5s ease-in-out infinite;
+}
+
+.wi-sun-peek {
+  animation: wi-sun-peek 3s ease-in-out infinite;
+}
+
+.wi-raindrop-1 { animation: wi-raindrop 1.2s ease-in infinite; animation-delay: 0s; }
+.wi-raindrop-2 { animation: wi-raindrop 1.2s ease-in infinite; animation-delay: 0.2s; }
+.wi-raindrop-3 { animation: wi-raindrop 1.2s ease-in infinite; animation-delay: 0.4s; }
+.wi-raindrop-4 { animation: wi-raindrop 1.2s ease-in infinite; animation-delay: 0.1s; }
+.wi-raindrop-5 { animation: wi-raindrop 1.2s ease-in infinite; animation-delay: 0.3s; }
+.wi-raindrop-6 { animation: wi-raindrop 1.2s ease-in infinite; animation-delay: 0.6s; }
+
+.wi-heavy-drop-1 { animation: wi-raindrop 0.8s ease-in infinite; animation-delay: 0s; }
+.wi-heavy-drop-2 { animation: wi-raindrop 0.8s ease-in infinite; animation-delay: 0.13s; }
+.wi-heavy-drop-3 { animation: wi-raindrop 0.8s ease-in infinite; animation-delay: 0.26s; }
+.wi-heavy-drop-4 { animation: wi-raindrop 0.8s ease-in infinite; animation-delay: 0.05s; }
+.wi-heavy-drop-5 { animation: wi-raindrop 0.8s ease-in infinite; animation-delay: 0.18s; }
+.wi-heavy-drop-6 { animation: wi-raindrop 0.8s ease-in infinite; animation-delay: 0.39s; }
+
+.wi-lightning {
+  animation: wi-lightning 2.5s ease-in-out infinite;
+}
+
+.wi-storm-cloud {
+  animation: wi-shake 2.5s ease-in-out infinite;
+}
+
+.wi-snow-1 { animation: wi-snow 2s ease-in infinite; animation-delay: 0s; }
+.wi-snow-2 { animation: wi-snow 2s ease-in infinite; animation-delay: 0.33s; }
+.wi-snow-3 { animation: wi-snow 2s ease-in infinite; animation-delay: 0.66s; }
+.wi-snow-4 { animation: wi-snow 2s ease-in infinite; animation-delay: 0.16s; }
+.wi-snow-5 { animation: wi-snow 2s ease-in infinite; animation-delay: 0.5s; }
+.wi-snow-6 { animation: wi-snow 2s ease-in infinite; animation-delay: 0.83s; }
+
+.wi-fog-1 { animation: wi-fog 3s ease-in-out infinite; animation-delay: 0s; }
+.wi-fog-2 { animation: wi-fog 3s ease-in-out infinite; animation-delay: 0.5s; }
+.wi-fog-3 { animation: wi-fog 3s ease-in-out infinite; animation-delay: 1s; }

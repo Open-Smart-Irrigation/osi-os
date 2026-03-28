@@ -21,6 +21,7 @@ import type {
   StregaModel,
   GatewayLocation,
   GatewayLocationStatus,
+  ZoneEnvironmentSummary,
 } from '../types/farming';
 
 // Create axios instance with base configuration
@@ -545,6 +546,11 @@ export const accountLinkAPI = {
   link: (req: AccountLinkRequest) => api.post<AccountLinkResult>('/api/account-link', req).then(r => r.data),
   unlink: () => api.delete('/api/account-link'),
   forceSync: () => api.post<ForceSyncResult>('/api/sync/force').then(r => r.data),
+};
+
+export const environmentAPI = {
+  getSummary: (zoneId: number): Promise<ZoneEnvironmentSummary> =>
+    api.get<ZoneEnvironmentSummary>(`/api/irrigation-zones/${zoneId}/environment-summary`).then(r => r.data),
 };
 
 export default api;

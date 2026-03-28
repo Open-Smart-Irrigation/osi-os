@@ -125,5 +125,79 @@
     "reloadFailed": "Failed to reload schedule",
     "saved": "Saved.",
     "triggerHint": "Trigger if {{metric}} ≥ {{threshold}} kPa (once/day, 06:00)."
+  },
+  "environment": {
+    "sectionTitle": "Environment",
+    "tabs": {
+      "local": "Local",
+      "online": "Online",
+      "agronomic": "Agronomic",
+      "forecast": "Forecast"
+    },
+    "source": {
+      "openagri": "OpenAgri",
+      "open_meteo": "Open-Meteo",
+      "local": "Local sensors",
+      "unavailable": "Unavailable"
+    },
+    "cache": {
+      "live": "Live",
+      "stale": "Stale",
+      "miss": "No data"
+    },
+    "location": {
+      "zone": "Zone coordinates",
+      "gateway": "Gateway GPS",
+      "unavailable": "No location set"
+    },
+    "local": {
+      "freshSensors": "{{count}} fresh",
+      "staleSensors_one": "{{count}} stale",
+      "staleSensors_other": "{{count}} stale",
+      "perDevice": "Per-device readings",
+      "noData": "No local sensor data available",
+      "observedAt": "Observed {{time}}"
+    },
+    "online": {
+      "unavailable": "No online weather available for this zone",
+      "noLocation": "Set zone coordinates to enable online weather",
+      "updatesAt": "Updates at {{time}}"
+    },
+    "agronomic": {
+      "vpd": "VPD",
+      "dewPoint": "Dew point",
+      "heatIndex": "Heat index",
+      "thi": "THI",
+      "et0": "Reference ET₀",
+      "kc": "Crop coeff. Kc",
+      "etc": "Crop ET",
+      "noData": "No agronomic data available",
+      "fromSource": "from {{source}}"
+    },
+    "forecast": {
+      "next24h": "Next 24 h",
+      "next72h": "Next 72 h",
+      "nextRain": "Next rain",
+      "rainHours": "Rain hours",
+      "maxHourly": "Peak hourly",
+      "today": "today",
+      "tomorrow": "tomorrow",
+      "noData": "No forecast available",
+      "noLocation": "Set zone coordinates to enable forecast",
+      "hourlyTitle": "Hourly rain (next 24 h)"
+    },
+    "metrics": {
+      "air_temperature_c": "Air Temp",
+      "relative_humidity_pct": "Humidity",
+      "probe_temperature_c": "Probe Temp",
+      "pressure_hpa": "Pressure",
+      "wind_speed_mps": "Wind",
+      "wind_direction_deg": "Wind Dir",
+      "rainfall_mm": "Rainfall",
+      "light_lux": "Light",
+      "uv_index": "UV Index",
+      "soil_temperature_c": "Soil Temp",
+      "soil_moisture_pct": "Soil Moisture"
+    }
   }
 }
