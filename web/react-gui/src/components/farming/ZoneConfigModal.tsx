@@ -1,6 +1,14 @@
 import React, { useState, useEffect } from 'react';
 import type { GatewayLocation, IrrigationZone } from '../../types/farming';
 import { gatewayLocationAPI, irrigationZonesAPI } from '../../services/api';
+import {
+  getDeviceLocationErrorMessage,
+  getDeviceLocationSupport,
+  openNativeLocationSettings,
+  requestDeviceLocation,
+  type DeviceLocationCapture,
+  type DeviceLocationSupport,
+} from '../../services/deviceLocation';
 import { CROP_GROUPS } from './cropKc';
 
 interface Props {
@@ -64,6 +72,11 @@ export const ZoneConfigModal: React.FC<Props> = ({ isOpen, zone, onClose, onSave
   const [gatewayLocation, setGatewayLocation] = useState<GatewayLocation | null>(null);
   const [gatewayLocationLoading, setGatewayLocationLoading] = useState(false);
   const [gatewayLocationError, setGatewayLocationError] = useState<string | null>(null);
+  const [deviceLocationSupport, setDeviceLocationSupport] = useState<DeviceLocationSupport | null>(null);
+  const [deviceLocationSupportLoading, setDeviceLocationSupportLoading] = useState(false);
+  const [deviceLocationLoading, setDeviceLocationLoading] = useState(false);
+  const [deviceLocationError, setDeviceLocationError] = useState<string | null>(null);
+  const [deviceLocationMeta, setDeviceLocationMeta] = useState<DeviceLocationCapture | null>(null);
 
   // Sync when zone prop changes (e.g. after onSaved refresh)
   useEffect(() => {
@@ -77,7 +90,24 @@ export const ZoneConfigModal: React.FC<Props> = ({ isOpen, zone, onClose, onSave
     setCalibrationKey(zone.calibrationKey ?? 'default');
     setLatitude(zone.latitude != null ? String(zone.latitude) : '');
     setLongitude(zone.longitude != null ? String(zone.longitude) : '');
+    setDeviceLocationError(null);
+    setDeviceLocationMeta(null);
   }, [zone]);
+
+  const refreshDeviceLocationSupport = async () => {
+    setDeviceLocationSupportLoading(true);
+    try {
+      const support = await getDeviceLocationSupport();
+      setDeviceLocationSupport(support);
+      if (support.reason !== 'permission_denied') {
+        setDeviceLocationError(null);
+      } else if (!deviceLocationError) {
+        setDeviceLocationError(support.message);
+      }
+    } finally {
+      setDeviceLocationSupportLoading(false);
+    }
+  };
 
   const loadGatewayLocation = async (currentGatewayEui: string) => {
     setGatewayLocationLoading(true);
@@ -98,9 +128,10 @@ export const ZoneConfigModal: React.FC<Props> = ({ isOpen, zone, onClose, onSave
     if (!gatewayDeviceEui) {
       setGatewayLocation(null);
       setGatewayLocationError(null);
-      return;
+    } else {
+      void loadGatewayLocation(gatewayDeviceEui);
     }
-    void loadGatewayLocation(gatewayDeviceEui);
+    void refreshDeviceLocationSupport();
   }, [gatewayDeviceEui, isOpen]);
 
   if (!isOpen) return null;
@@ -178,6 +209,30 @@ export const ZoneConfigModal: React.FC<Props> = ({ isOpen, zone, onClose, onSave
     setLatitude(String(gatewayLocation.latitude));
     setLongitude(String(gatewayLocation.longitude));
     setError(null);
+    setDeviceLocationError(null);
+  };
+
+  const useDeviceLocation = async () => {
+    setDeviceLocationLoading(true);
+    setDeviceLocationError(null);
+    try {
+      const capture = await requestDeviceLocation();
+      setLatitude(String(capture.latitude));
+      setLongitude(String(capture.longitude));
+      setDeviceLocationMeta(capture);
+      setError(null);
+    } catch (err) {
+      setDeviceLocationError(getDeviceLocationErrorMessage(err));
+    } finally {
+      setDeviceLocationLoading(false);
+      void refreshDeviceLocationSupport();
+    }
+  };
+
+  const handleOpenLocationSettings = () => {
+    if (!openNativeLocationSettings()) {
+      setDeviceLocationError('Open the app settings and enable location permission, then try again.');
+    }
   };
 
   const gatewayStatusLabel = gatewayLocation?.status === 'live'
@@ -196,6 +251,20 @@ export const ZoneConfigModal: React.FC<Props> = ({ isOpen, zone, onClose, onSave
   const gatewayAgeLabel = gatewayAgeSource
     ? `${Math.max(0, Math.round((Date.now() - new Date(gatewayAgeSource).getTime()) / 60000))} min ago`
     : 'No recent fix';
+
+  const canRequestDeviceLocation = Boolean(deviceLocationSupport?.available && !deviceLocationLoading);
+  const deviceLocationStatusClass = deviceLocationSupport?.available
+    ? 'bg-emerald-100 text-emerald-800'
+    : deviceLocationSupport?.reason === 'permission_denied'
+      ? 'bg-amber-100 text-amber-800'
+      : 'bg-slate-100 text-slate-700';
+  const deviceLocationStatusLabel = deviceLocationSupport?.available
+    ? 'Available'
+    : deviceLocationSupport?.reason === 'permission_denied'
+      ? 'Permission needed'
+      : deviceLocationSupportLoading
+        ? 'Checking…'
+        : 'Unavailable';
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
@@ -371,6 +440,65 @@ export const ZoneConfigModal: React.FC<Props> = ({ isOpen, zone, onClose, onSave
 
             {gatewayLocationError && (
               <p className="mt-3 text-xs text-[var(--text-tertiary)]">{gatewayLocationError}</p>
+            )}
+          </div>
+
+          <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)]/70 p-3">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <p className="text-xs font-semibold text-[var(--text-tertiary)] uppercase tracking-wide">Device GPS</p>
+                <p className="text-sm text-[var(--text)]">Use your phone or browser location for this zone.</p>
+                <p className="text-xs text-[var(--text-tertiary)] mt-1">
+                  Fills latitude and longitude from this device. Review timezone separately if the farm is in a different timezone.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => void useDeviceLocation()}
+                disabled={!canRequestDeviceLocation}
+                className="rounded-lg border border-[var(--accent)] px-3 py-1.5 text-xs font-semibold text-[var(--accent)] disabled:opacity-50"
+              >
+                {deviceLocationLoading ? 'Locating…' : 'Use device location'}
+              </button>
+            </div>
+
+            <div className="mt-3 space-y-2 text-sm text-[var(--text)]">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${deviceLocationStatusClass}`}>{deviceLocationStatusLabel}</span>
+                {deviceLocationSupport?.permissionState && deviceLocationSupport.permissionState !== 'unknown' && (
+                  <span className="text-[var(--text-tertiary)]">
+                    Permission {deviceLocationSupport.permissionState}
+                  </span>
+                )}
+              </div>
+              <p>{deviceLocationSupport?.message ?? 'Checking whether device GPS is available…'}</p>
+              {deviceLocationMeta && (
+                <div className="space-y-1">
+                  <p>
+                    {trimmedLatitude && trimmedLongitude
+                      ? `${Number(trimmedLatitude).toFixed(6)}, ${Number(trimmedLongitude).toFixed(6)}`
+                      : 'Device location captured.'}
+                  </p>
+                  <p className="text-xs text-[var(--text-tertiary)]">
+                    Captured {new Date(deviceLocationMeta.capturedAt).toLocaleString()}
+                    {deviceLocationMeta.accuracyM != null ? `, accuracy ~${deviceLocationMeta.accuracyM.toFixed(1)} m` : ''}
+                    {deviceLocationMeta.source === 'native-app' ? ', via mobile app' : ', via browser'}
+                  </p>
+                </div>
+              )}
+              {deviceLocationSupport?.canOpenSettings && deviceLocationSupport.reason === 'permission_denied' && (
+                <button
+                  type="button"
+                  onClick={handleOpenLocationSettings}
+                  className="rounded-lg border border-[var(--border)] px-3 py-1.5 text-xs font-medium text-[var(--text)]"
+                >
+                  Open app settings
+                </button>
+              )}
+            </div>
+
+            {deviceLocationError && (
+              <p className="mt-3 text-xs text-red-700">{deviceLocationError}</p>
             )}
           </div>
 
