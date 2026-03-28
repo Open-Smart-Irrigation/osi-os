@@ -73,6 +73,7 @@ const ConfigPanel: React.FC<{
   const [interruptModeInput, setInterruptModeInput] = useState('0');
   const [warmupMillisecondsInput, setWarmupMillisecondsInput] = useState('');
   const [advancedInfo, setAdvancedInfo] = useState<string | null>(null);
+  const [showAdvanced, setShowAdvanced] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   const currentMode = getCurrentLsn50Mode(device);
   const observedAt = device.latest_data?.lsn50_mode_observed_at ?? null;
@@ -316,8 +317,15 @@ const ConfigPanel: React.FC<{
         </div>
       </div>
       <div className="mt-3 pt-3 border-t border-[var(--border)]">
-        <p className="text-[var(--text-tertiary)] text-xs font-semibold mb-2 px-1">ADVANCED SENSOR I/O</p>
-        <div className="px-1 space-y-3">
+        <button
+          type="button"
+          onClick={() => setShowAdvanced(v => !v)}
+          className="w-full flex items-center justify-between px-1 py-1 text-xs font-semibold text-[var(--text-tertiary)] hover:text-[var(--text)] transition-colors"
+        >
+          <span>ADVANCED SENSOR I/O</span>
+          <span>{showAdvanced ? '▲' : '▼'}</span>
+        </button>
+        {showAdvanced && <div className="px-1 mt-2 space-y-3">
           <div>
             <label className="block text-[var(--text-secondary)] text-xs font-semibold mb-1">
               Interrupt trigger mode
@@ -374,7 +382,7 @@ const ConfigPanel: React.FC<{
             These controls are intended for external sensors and non-default LSN50 integrations.
           </p>
           {advancedInfo && <p className="text-[var(--text-tertiary)] text-xs">{advancedInfo}</p>}
-        </div>
+        </div>}
       </div>
       {error && <p className="text-[var(--error-text)] text-xs mt-2 px-1">{error}</p>}
     </div>
