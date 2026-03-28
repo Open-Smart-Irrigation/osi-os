@@ -4,16 +4,21 @@ import { devicesAPI, lsn50API } from '../../services/api';
 import { DendrometerMonitor } from './DendrometerMonitor';
 import { SensorMonitor } from './SensorMonitor';
 
-// ── Sensor config registry ───────────────────────────────────────────────────
-// Add future sensors (rain gauge, flow meter …) here only — no other UI changes
-// needed when the corresponding DB column and API endpoint are wired up.
+// ── Sensor config registry ────────────────────────────────────────────────────
 const SENSOR_OPTIONS: Array<{
   key: keyof Device;
   label: string;
+  isEnabled?: (device: Device) => boolean;
   toggle: (deveui: string, enabled: boolean) => Promise<void>;
 }> = [
   { key: 'temp_enabled',   label: 'Temperature',  toggle: (id, e) => lsn50API.setTempEnabled(id, e)   },
   { key: 'dendro_enabled', label: 'Dendrometer',  toggle: (id, e) => lsn50API.setDendroEnabled(id, e) },
+  {
+    key: 'device_mode',
+    label: 'Rain & Flow (MOD9)',
+    isEnabled: (d) => d.device_mode === 9,
+    toggle: (id, e) => lsn50API.setMode(id, e ? 'MOD9' : 'MOD1'),
+  },
 ];
 
 const LSN50_MODE_OPTIONS: Array<{ value: Lsn50Mode; description: string }> = [
@@ -217,7 +222,7 @@ const ConfigPanel: React.FC<{
     >
       <p className="text-[var(--text-tertiary)] text-xs font-semibold mb-2 px-1">ACTIVE SENSORS</p>
       {SENSOR_OPTIONS.map(opt => {
-        const enabled = device[opt.key] === 1;
+        const enabled = opt.isEnabled ? opt.isEnabled(device) : device[opt.key] === 1;
         const loading  = busy === (opt.key as string);
         return (
           <label
