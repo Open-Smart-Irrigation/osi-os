@@ -547,17 +547,13 @@ export const DraginoTempCard: React.FC<DraginoTempCardProps> = ({ device, onRemo
         {rainEnabled && (
           <div className="bg-[var(--card)] rounded-lg p-4">
             <p className="text-[var(--text-tertiary)] text-sm font-semibold mb-1">RAIN GAUGE</p>
-            {rain_mm_delta !== null && rain_mm_delta !== undefined ? (
-              <button
-                onClick={() => setSensorMonitor({ field: 'rain_mm_delta', label: 'Rainfall', unit: 'mm', color: '#38bdf8', decimals: 1 })}
-                className="text-4xl font-bold text-[var(--text)] hover:text-[var(--primary)] transition-colors text-left underline decoration-dotted underline-offset-4 cursor-pointer"
-                title="View history"
-              >
-                {rain_mm_delta.toFixed(1)} mm
-              </button>
-            ) : (
-              <p className="text-4xl font-bold text-[var(--text-tertiary)]">—</p>
-            )}
+            <button
+              onClick={() => setSensorMonitor({ field: 'rain_mm_delta', label: 'Rainfall', unit: 'mm', color: '#38bdf8', decimals: 1 })}
+              className="text-4xl font-bold text-[var(--text)] hover:text-[var(--primary)] transition-colors text-left underline decoration-dotted underline-offset-4 cursor-pointer"
+              title="View history"
+            >
+              {rain_mm_delta != null ? `${rain_mm_delta.toFixed(1)} mm` : '—'}
+            </button>
             <p className="text-[var(--text-tertiary)] text-xs mt-1">this interval · tap to view history</p>
           </div>
         )}
@@ -566,17 +562,13 @@ export const DraginoTempCard: React.FC<DraginoTempCardProps> = ({ device, onRemo
         {flowEnabled && (
           <div className="bg-[var(--card)] rounded-lg p-4">
             <p className="text-[var(--text-tertiary)] text-sm font-semibold mb-1">FLOW METER</p>
-            {flow_liters_delta !== null && flow_liters_delta !== undefined ? (
-              <button
-                onClick={() => setSensorMonitor({ field: 'flow_liters_delta', label: 'Flow', unit: 'L', color: '#6366f1', decimals: 0 })}
-                className="text-4xl font-bold text-[var(--text)] hover:text-[var(--primary)] transition-colors text-left underline decoration-dotted underline-offset-4 cursor-pointer"
-                title="View history"
-              >
-                {flow_liters_delta.toFixed(0)} L
-              </button>
-            ) : (
-              <p className="text-4xl font-bold text-[var(--text-tertiary)]">—</p>
-            )}
+            <button
+              onClick={() => setSensorMonitor({ field: 'flow_liters_delta', label: 'Flow', unit: 'L', color: '#6366f1', decimals: 0 })}
+              className="text-4xl font-bold text-[var(--text)] hover:text-[var(--primary)] transition-colors text-left underline decoration-dotted underline-offset-4 cursor-pointer"
+              title="View history"
+            >
+              {flow_liters_delta != null ? `${flow_liters_delta.toFixed(0)} L` : '—'}
+            </button>
             <p className="text-[var(--text-tertiary)] text-xs mt-1">this interval · tap to view history</p>
           </div>
         )}
