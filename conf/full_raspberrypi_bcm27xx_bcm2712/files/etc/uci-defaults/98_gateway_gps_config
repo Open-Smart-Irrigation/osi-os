@@ -5,7 +5,7 @@ set gpsd.core=gpsd
 set gpsd.core.enabled='1'
 set gpsd.core.readonly='1'
 delete gpsd.core.devices
-add_list gpsd.core.devices='/dev/ttyAMA0'
+set gpsd.core.device='/dev/ttyAMA0'
 set gpsd.core.listen_globally='0'
 set gpsd.core.port='2947'
 
