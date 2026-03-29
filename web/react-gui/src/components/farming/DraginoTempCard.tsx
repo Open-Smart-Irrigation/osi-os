@@ -50,6 +50,36 @@ function getCurrentLsn50Mode(device: Device): Lsn50Mode | null {
   return configured >= 1 && configured <= 9 ? (`MOD${configured}` as Lsn50Mode) : null;
 }
 
+function formatCounterInterval(seconds: number | null | undefined): string | null {
+  const value = Number(seconds);
+  if (!Number.isFinite(value) || value <= 0) return null;
+  const minutes = value / 60;
+  if (minutes >= 1 && Math.abs(minutes - Math.round(minutes)) < 1e-9) {
+    return `${Math.round(minutes)} min interval`;
+  }
+  if (minutes >= 1) {
+    return `${minutes.toFixed(minutes >= 10 ? 1 : 2)} min interval`;
+  }
+  return `${Math.round(value)} s interval`;
+}
+
+function formatCounterStatus(status: string | null | undefined): string | null {
+  switch (status) {
+    case 'first_sample':
+      return 'Waiting for the next uplink to calculate a delta.';
+    case 'duplicate_timestamp':
+      return 'Skipped duplicate uplink timestamp.';
+    case 'out_of_order':
+      return 'Skipped out-of-order uplink.';
+    case 'counter_reset':
+      return 'Counter reset detected; interval delta skipped.';
+    case 'invalid_interval':
+      return 'Invalid uplink interval; delta skipped.';
+    default:
+      return null;
+  }
+}
+
 // ── Props ────────────────────────────────────────────────────────────────────
 interface DraginoTempCardProps {
   device: Device;
@@ -394,7 +424,9 @@ export const DraginoTempCard: React.FC<DraginoTempCardProps> = ({ device, onRemo
   const {
     ext_temperature_c, bat_v, adc_ch0v,
     dendro_position_mm, dendro_valid, dendro_delta_mm,
-    rain_mm_delta, flow_liters_delta,
+    rain_mm_delta, rain_mm_per_hour, rain_delta_status,
+    flow_liters_delta, flow_liters_per_min, flow_delta_status,
+    counter_interval_seconds,
   } = device.latest_data;
   const rainEnabled = device.rain_gauge_enabled === 1;
   const flowEnabled = device.flow_meter_enabled === 1;
@@ -403,6 +435,9 @@ export const DraginoTempCard: React.FC<DraginoTempCardProps> = ({ device, onRemo
   const minutesAgo = lastSeen
     ? Math.floor((Date.now() - lastSeen.getTime()) / (1000 * 60))
     : null;
+  const intervalLabel = formatCounterInterval(counter_interval_seconds);
+  const rainStatusLabel = formatCounterStatus(rain_delta_status);
+  const flowStatusLabel = formatCounterStatus(flow_delta_status);
 
   const [isRemoving,   setIsRemoving]   = useState(false);
   const [showConfirm,  setShowConfirm]  = useState(false);
@@ -554,7 +589,13 @@ export const DraginoTempCard: React.FC<DraginoTempCardProps> = ({ device, onRemo
             >
               {rain_mm_delta != null ? `${rain_mm_delta.toFixed(1)} mm` : '—'}
             </button>
-            <p className="text-[var(--text-tertiary)] text-xs mt-1">this interval · tap to view history</p>
+            <p className="text-[var(--text-tertiary)] text-xs mt-1">
+              {rain_mm_per_hour != null && intervalLabel
+                ? `${rain_mm_per_hour.toFixed(3)} mm/h over ${intervalLabel}`
+                : rainStatusLabel || (intervalLabel ? `this ${intervalLabel.toLowerCase()}` : 'this interval')}
+              {' · '}
+              tap to view history
+            </p>
           </div>
         )}
 
@@ -569,7 +610,13 @@ export const DraginoTempCard: React.FC<DraginoTempCardProps> = ({ device, onRemo
             >
               {flow_liters_delta != null ? `${flow_liters_delta.toFixed(0)} L` : '—'}
             </button>
-            <p className="text-[var(--text-tertiary)] text-xs mt-1">this interval · tap to view history</p>
+            <p className="text-[var(--text-tertiary)] text-xs mt-1">
+              {flow_liters_per_min != null && intervalLabel
+                ? `${flow_liters_per_min.toFixed(3)} L/min over ${intervalLabel}`
+                : flowStatusLabel || (intervalLabel ? `this ${intervalLabel.toLowerCase()}` : 'this interval')}
+              {' · '}
+              tap to view history
+            </p>
           </div>
         )}
 

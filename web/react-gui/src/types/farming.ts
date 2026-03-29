@@ -30,9 +30,14 @@ export interface Device {
     rain_count_cumulative?: number | null;
     rain_tips_delta?: number | null;
     rain_mm_delta?: number | null;
+    rain_mm_per_hour?: number | null;
+    rain_delta_status?: string | null;
     flow_count_cumulative?: number | null;
     flow_pulses_delta?: number | null;
     flow_liters_delta?: number | null;
+    flow_liters_per_min?: number | null;
+    flow_delta_status?: string | null;
+    counter_interval_seconds?: number | null;
   };
 
   // Only for Valves
