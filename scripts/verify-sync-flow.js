@@ -10,6 +10,10 @@ const helperCandidates = [
   path.join(nodeRedRoot, 'node_modules', 'osi-chirpstack-helper'),
   path.join(nodeRedRoot, 'osi-chirpstack-helper')
 ];
+const dbHelperCandidates = [
+  path.join(nodeRedRoot, 'node_modules', 'osi-db-helper'),
+  path.join(nodeRedRoot, 'osi-db-helper')
+];
 const packageJsonPath = path.join(nodeRedRoot, 'package.json');
 const flows = JSON.parse(fs.readFileSync(flowPath, 'utf8'));
 
@@ -423,12 +427,26 @@ if (!fs.existsSync(packageJsonPath)) {
   fail(`missing Node-RED package manifest at ${packageJsonPath}`);
 } else {
   const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, 'utf8'));
-  for (const dependency of ['@chirpstack/chirpstack-api', '@grpc/grpc-js', '@rakwireless/field-tester-server', 'bcryptjs', 'node-red-node-sqlite', 'osi-chirpstack-helper', 'sqlite3']) {
+  for (const dependency of ['@chirpstack/chirpstack-api', '@grpc/grpc-js', '@rakwireless/field-tester-server', 'bcryptjs', 'node-red-node-sqlite', 'osi-chirpstack-helper', 'osi-db-helper', 'sqlite3']) {
     if (!packageJson.dependencies || !packageJson.dependencies[dependency]) {
       fail(`package.json missing dependency ${dependency}`);
     } else {
       console.log(`OK package.json includes ${dependency}`);
     }
+  }
+}
+
+const rawDbNodes = flows.filter(
+  (node) => typeof node.func === 'string' && node.func.includes("new sqlite3.Database('/data/db/farming.db')")
+);
+for (const node of rawDbNodes) {
+  const sqliteLib = (node.libs || []).find((entry) => entry && entry.var === 'sqlite3');
+  if (!sqliteLib) {
+    fail(`${node.name || node.id} missing sqlite3 helper import`);
+  } else if (sqliteLib.module !== 'osi-db-helper') {
+    fail(`${node.name || node.id} should import osi-db-helper instead of ${sqliteLib.module}`);
+  } else {
+    console.log(`OK ${node.name || node.id} uses osi-db-helper`);
   }
 }
 
@@ -459,6 +477,37 @@ if (!helperPath) {
       }
     } else {
       fail(`failed to load ChirpStack helper: ${error.message}`);
+    }
+  }
+}
+
+const dbHelperPath = dbHelperCandidates.find((candidate) => fs.existsSync(candidate));
+if (!dbHelperPath) {
+  fail(`missing DB helper module at one of: ${dbHelperCandidates.join(', ')}`);
+} else {
+  try {
+    const helper = require(dbHelperPath);
+    for (const exportName of ['Database', 'getHealth', 'quickCheck']) {
+      if (typeof helper[exportName] !== 'function') {
+        fail(`DB helper missing export ${exportName}`);
+      } else {
+        console.log(`OK DB helper exports ${exportName}`);
+      }
+    }
+  } catch (error) {
+    const helperIndexPath = path.join(dbHelperPath, 'index.js');
+    const helperSource = fs.existsSync(helperIndexPath) ? fs.readFileSync(helperIndexPath, 'utf8') : '';
+    if (error.code === 'MODULE_NOT_FOUND' && helperSource) {
+      console.log(`OK DB helper source present despite missing local runtime deps: ${error.message}`);
+      for (const exportName of ['Database', 'getHealth', 'quickCheck']) {
+        if (!helperSource.includes(exportName)) {
+          fail(`DB helper source missing export ${exportName}`);
+        } else {
+          console.log(`OK DB helper source includes ${exportName}`);
+        }
+      }
+    } else {
+      fail(`failed to load DB helper: ${error.message}`);
     }
   }
 }
