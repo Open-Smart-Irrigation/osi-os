@@ -207,6 +207,8 @@ if (bootstrapNode) {
 expectIncludes('Validate & decode token', 'const auth = verifyBearer', 'uses decoded local auth');
 expectIncludes('Handle server auth response', 'statusCode >= 400 && statusCode < 500', 'maps remote auth failures away from 401');
 expectIncludes('Handle server auth response', 'Server authentication returned no sync token', 'requires sync token on successful link');
+expectIncludesById('al-link-build-claim', 'if (deviceEuis.length === 0)', 'skips remote bulk claim when there are no local devices');
+expectIncludesById('al-link-build-claim', 'return [msg, null];', 'only calls remote bulk claim when device claims are needed');
 expectIncludes('Handle claim response & build UPDATE', 'return [null, msg];', 'can stop before mutating local auth state');
 expectIncludes('Set Download Headers', 'Database download is disabled', 'keeps database download disabled');
 expectIncludes('Login User', 'ORDER BY CASE WHEN username', 'prefers local username matches');
