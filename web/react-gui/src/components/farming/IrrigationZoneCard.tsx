@@ -1,6 +1,6 @@
-import React, { useState } from 'react';
-import type { IrrigationZone, Device } from '../../types/farming';
-import { irrigationZonesAPI } from '../../services/api';
+import React, { useEffect, useState } from 'react';
+import type { IrrigationZone, Device, ZoneEnvironmentSummary, ZoneRecommendation } from '../../types/farming';
+import { dendroAnalyticsAPI, environmentAPI, irrigationZonesAPI } from '../../services/api';
 import { KiwiSensorCard } from './KiwiSensorCard';
 import { DraginoTempCard } from './DraginoTempCard';
 import { StregaValveCard } from './StregaValveCard';
@@ -19,6 +19,54 @@ interface IrrigationZoneCardProps {
   onUpdate: () => void;
 }
 
+function formatWaterValue(value: number | null | undefined, unit: string, digits = 1): string {
+  if (value == null || !Number.isFinite(value)) {
+    return '—';
+  }
+  return `${value.toFixed(digits)} ${unit}`;
+}
+
+function formatWaterAction(code: string | null | undefined): string {
+  switch (code) {
+    case 'delay_irrigation':
+      return 'Delay irrigation';
+    case 'irrigate_today':
+      return 'Irrigate today';
+    case 'monitor_today':
+      return 'Monitor today';
+    case 'maintain_rain_suppression':
+      return 'Rain suppression active';
+    case 'maintain_recovery_hold':
+      return 'Recovery hold active';
+    case 'increase_10':
+      return 'Increase irrigation slightly';
+    case 'increase_20':
+      return 'Increase irrigation';
+    case 'decrease_10':
+      return 'Decrease irrigation slightly';
+    case 'decrease_20':
+      return 'Decrease irrigation';
+    case 'emergency_irrigate':
+      return 'Emergency irrigation';
+    default:
+      return 'Monitor water status';
+  }
+}
+
+function classifySoil(devices: Device[]): { label: string; swt: number | null } {
+  const swtValues = devices.flatMap((device) => {
+    const data = device.latest_data;
+    return [data?.swt_wm1, data?.swt_wm2].filter((value): value is number => value != null && Number.isFinite(value));
+  });
+  if (!swtValues.length) {
+    return { label: 'No soil sensor reading', swt: null };
+  }
+  const mean = swtValues.reduce((sum, value) => sum + value, 0) / swtValues.length;
+  if (mean < 20) return { label: 'Wet', swt: mean };
+  if (mean < 60) return { label: 'Moderate', swt: mean };
+  return { label: 'Dry', swt: mean };
+}
+
 export const IrrigationZoneCard: React.FC<IrrigationZoneCardProps> = ({
   zone,
   devices,
@@ -34,6 +82,8 @@ export const IrrigationZoneCard: React.FC<IrrigationZoneCardProps> = ({
   const [showAdvancedDrawer, setShowAdvancedDrawer] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [removingDevice, setRemovingDevice] = useState<string | null>(null);
+  const [environmentSummary, setEnvironmentSummary] = useState<ZoneEnvironmentSummary | null>(null);
+  const [latestZoneRecommendation, setLatestZoneRecommendation] = useState<ZoneRecommendation | null>(null);
 
   const handleDeleteZone = async () => {
     setIsDeleting(true);
@@ -69,6 +119,35 @@ export const IrrigationZoneCard: React.FC<IrrigationZoneCardProps> = ({
   const schedEnabled = zone.schedule?.enabled ?? false;
   const cropType = zone.cropType;
   const soilType = zone.soilType;
+  const soilNow = classifySoil(devices);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const load = async () => {
+      try {
+        const [summary, recommendations] = await Promise.all([
+          environmentAPI.getSummary(zone.id),
+          hasDendroDevices ? dendroAnalyticsAPI.getZoneRecommendations(zone.id, 1) : Promise.resolve([]),
+        ]);
+        if (cancelled) return;
+        setEnvironmentSummary(summary);
+        setLatestZoneRecommendation(recommendations[0] ?? null);
+      } catch {
+        if (!cancelled) {
+          setEnvironmentSummary(null);
+          setLatestZoneRecommendation(null);
+        }
+      }
+    };
+
+    void load();
+    const interval = window.setInterval(() => void load(), 5 * 60 * 1000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+    };
+  }, [hasDendroDevices, zone.id]);
 
   return (
     <div className="bg-[var(--surface)] border-2 border-[var(--border)] rounded-xl p-6 shadow-lg mb-6">
@@ -144,6 +223,69 @@ export const IrrigationZoneCard: React.FC<IrrigationZoneCardProps> = ({
         )}
       </div>
 
+      {environmentSummary?.water && (
+        <div className="mb-4 rounded-2xl border border-sky-100 bg-[linear-gradient(135deg,#f0f9ff,white_55%,#ecfeff)] p-4">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <p className="text-xs font-bold uppercase tracking-[0.18em] text-sky-700">Water Today</p>
+              <p className="mt-1 text-sm text-[var(--text-secondary)]">
+                {environmentSummary.water.action?.reasoning ?? 'Daily rain, irrigation, and crop demand summary for this zone.'}
+              </p>
+            </div>
+            <div className="text-xs text-[var(--text-tertiary)]">
+              Updated {environmentSummary.water.observedAt ? new Date(environmentSummary.water.observedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '—'}
+            </div>
+          </div>
+          <div className="mt-4 grid grid-cols-2 gap-2 lg:grid-cols-4">
+            <div className="rounded-xl bg-white/80 p-3 shadow-sm ring-1 ring-sky-100">
+              <p className="text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)]">Rain today</p>
+              <p className="mt-2 text-2xl font-bold text-sky-700">{formatWaterValue(environmentSummary.water.rainTodayMm, 'mm', 1)}</p>
+            </div>
+            <div className="rounded-xl bg-white/80 p-3 shadow-sm ring-1 ring-teal-100">
+              <p className="text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)]">Irrigation today</p>
+              <p className="mt-2 text-2xl font-bold text-teal-700">{formatWaterValue(environmentSummary.water.irrigationTodayLiters, 'L', 0)}</p>
+              {environmentSummary.water.irrigationTodayNetMm != null && (
+                <p className="mt-1 text-xs text-[var(--text-secondary)]">{formatWaterValue(environmentSummary.water.irrigationTodayNetMm, 'mm', 1)} effective</p>
+              )}
+            </div>
+            <div className="rounded-xl bg-white/80 p-3 shadow-sm ring-1 ring-cyan-100">
+              <p className="text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)]">Next rain</p>
+              <p className="mt-2 text-2xl font-bold text-cyan-700">{formatWaterValue(environmentSummary.water.next24hRainMm, 'mm', 1)}</p>
+              <p className="mt-1 text-xs text-[var(--text-secondary)]">Forecast next 24 h</p>
+            </div>
+            <div className="rounded-xl bg-white/80 p-3 shadow-sm ring-1 ring-amber-100">
+              <p className="text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)]">Action</p>
+              <p className="mt-2 text-2xl font-bold text-amber-700">{formatWaterAction(environmentSummary.water.action?.code)}</p>
+              <p className="mt-1 text-xs text-[var(--text-secondary)]">
+                {environmentSummary.water.action?.source === 'dendro' ? 'Driven by dendrometer recommendation' : 'Driven by water balance'}
+              </p>
+            </div>
+          </div>
+          <div className="mt-3 grid gap-2 md:grid-cols-2">
+            <div className="rounded-xl border border-[var(--border)] bg-white/70 px-3 py-2">
+              <p className="text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)]">Soil now</p>
+              <p className="mt-1 text-lg font-semibold text-[var(--text)]">
+                {soilNow.swt != null ? `${soilNow.swt.toFixed(1)} kPa` : '—'}
+              </p>
+              <p className="text-sm text-[var(--text-secondary)]">{soilNow.label}</p>
+            </div>
+            {hasDendroDevices && (
+              <div className="rounded-xl border border-[var(--border)] bg-white/70 px-3 py-2">
+                <p className="text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)]">Tree stress</p>
+                <p className="mt-1 text-lg font-semibold text-[var(--text)]">
+                  {latestZoneRecommendation?.zone_stress_summary?.replace(/_/g, ' ') ?? 'Awaiting recommendation'}
+                </p>
+                <p className="text-sm text-[var(--text-secondary)]">
+                  {latestZoneRecommendation?.zone_confidence_score != null
+                    ? `${Math.round(latestZoneRecommendation.zone_confidence_score * 100)}% confidence`
+                    : 'Confidence updates with the latest dendro run'}
+                </p>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
       {error && (
         <div className="bg-[var(--error-bg)] border border-[var(--error-bg)] text-[var(--error-text)] px-3 py-2 rounded-lg mb-4 text-sm">
           {error}
@@ -193,7 +335,7 @@ export const IrrigationZoneCard: React.FC<IrrigationZoneCardProps> = ({
       <DendrometerSection zone={zone} devices={lsn50Nodes} />
 
       {/* Environment Section */}
-      <EnvironmentCard zone={zone} />
+      <EnvironmentCard zone={zone} devices={devices} />
 
       {/* Devices in Zone — consistent border-t separator */}
       <div className="mt-6 border-t border-[var(--border)] pt-5">

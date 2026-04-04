@@ -4,16 +4,15 @@ import { devicesAPI, lsn50API } from '../../services/api';
 import { DendrometerMonitor } from './DendrometerMonitor';
 import { SensorMonitor } from './SensorMonitor';
 
-// ── Sensor config registry ────────────────────────────────────────────────────
 const SENSOR_OPTIONS: Array<{
-  key: keyof Device;
+  key: 'temp_enabled' | 'dendro_enabled' | 'rain_gauge_enabled' | 'flow_meter_enabled';
   label: string;
   toggle: (deveui: string, enabled: boolean) => Promise<void>;
 }> = [
-  { key: 'temp_enabled',        label: 'Temperature',  toggle: (id, e) => lsn50API.setTempEnabled(id, e)        },
-  { key: 'dendro_enabled',      label: 'Dendrometer',  toggle: (id, e) => lsn50API.setDendroEnabled(id, e)      },
-  { key: 'rain_gauge_enabled',  label: 'Rain Gauge',   toggle: (id, e) => lsn50API.setRainGaugeEnabled(id, e)   },
-  { key: 'flow_meter_enabled',  label: 'Flow Meter',   toggle: (id, e) => lsn50API.setFlowMeterEnabled(id, e)   },
+  { key: 'temp_enabled', label: 'Temperature', toggle: (id, enabled) => lsn50API.setTempEnabled(id, enabled) },
+  { key: 'dendro_enabled', label: 'Dendrometer', toggle: (id, enabled) => lsn50API.setDendroEnabled(id, enabled) },
+  { key: 'rain_gauge_enabled', label: 'Rain Gauge', toggle: (id, enabled) => lsn50API.setRainGaugeEnabled(id, enabled) },
+  { key: 'flow_meter_enabled', label: 'Flow Meter', toggle: (id, enabled) => lsn50API.setFlowMeterEnabled(id, enabled) },
 ];
 
 const LSN50_MODE_OPTIONS: Array<{ value: Lsn50Mode; description: string }> = [
@@ -27,14 +26,22 @@ const LSN50_MODE_OPTIONS: Array<{ value: Lsn50Mode; description: string }> = [
   { value: 'MOD8', description: 'Three ADC channels plus one DS18B20 mode.' },
   { value: 'MOD9', description: 'Rain gauge and flow counter mode.' },
 ];
+
 const LSN50_INTERRUPT_MODE_OPTIONS = [
   { value: 0, label: 'Disabled' },
   { value: 1, label: 'Rising or falling edge' },
   { value: 2, label: 'Falling edge only' },
   { value: 3, label: 'Rising edge only' },
 ];
-const MAX_LSN50_INTERVAL_MINUTES = Math.floor(0xFFFFFF / 60);
+
+const MAX_LSN50_INTERVAL_MINUTES = Math.floor(0xffffff / 60);
 const MAX_LSN50_5V_WARMUP_MS = 65535;
+
+function requiresMod9Counter(
+  key: 'temp_enabled' | 'dendro_enabled' | 'rain_gauge_enabled' | 'flow_meter_enabled',
+): boolean {
+  return key === 'rain_gauge_enabled' || key === 'flow_meter_enabled';
+}
 
 function normaliseLsn50Mode(value: unknown): Lsn50Mode | null {
   const raw = String(value ?? '').trim().toUpperCase();
@@ -80,14 +87,19 @@ function formatCounterStatus(status: string | null | undefined): string | null {
   }
 }
 
-// ── Props ────────────────────────────────────────────────────────────────────
+function formatPerTenMinuteValue(value: number | null | undefined, unit: string, digits = 1): string | null {
+  if (value == null || !Number.isFinite(value)) {
+    return null;
+  }
+  return `${value.toFixed(digits)} ${unit} per 10 min`;
+}
+
 interface DraginoTempCardProps {
   device: Device;
   onRemove?: () => void;
   onUpdate?: () => void;
 }
 
-// ── Gear-icon config panel ───────────────────────────────────────────────────
 const ConfigPanel: React.FC<{
   device: Device;
   onUpdate: () => void;
@@ -107,12 +119,12 @@ const ConfigPanel: React.FC<{
   const ref = useRef<HTMLDivElement>(null);
   const currentMode = getCurrentLsn50Mode(device);
   const observedAt = device.latest_data?.lsn50_mode_observed_at ?? null;
-  const selectedModeDescription = LSN50_MODE_OPTIONS.find(option => option.value === selectedMode)?.description ?? '';
+  const selectedModeDescription = LSN50_MODE_OPTIONS.find((option) => option.value === selectedMode)?.description ?? '';
+  const counterModeReady = currentMode === 'MOD9' || pendingMode === 'MOD9';
 
-  // Close on outside click
   useEffect(() => {
-    const handler = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) onClose();
+    const handler = (event: MouseEvent) => {
+      if (ref.current && !ref.current.contains(event.target as Node)) onClose();
     };
     document.addEventListener('mousedown', handler);
     return () => document.removeEventListener('mousedown', handler);
@@ -131,15 +143,19 @@ const ConfigPanel: React.FC<{
     }
   }, [currentMode, pendingMode]);
 
-  const toggle = async (opt: typeof SENSOR_OPTIONS[0]) => {
-    const current = device[opt.key] === 1;
-    setBusy(opt.key as string);
+  const toggle = async (option: typeof SENSOR_OPTIONS[number]) => {
+    const current = device[option.key] === 1;
+    if (!current && requiresMod9Counter(option.key) && !counterModeReady) {
+      setError('Rain gauge and flow meter require MOD9. Apply MOD9 before enabling these counters.');
+      return;
+    }
+    setBusy(option.key);
     setError(null);
     try {
-      await opt.toggle(device.deveui, !current);
+      await option.toggle(device.deveui, !current);
       onUpdate();
     } catch {
-      setError(`Failed to update ${opt.label}`);
+      setError(`Failed to update ${option.label}`);
     } finally {
       setBusy(null);
     }
@@ -244,217 +260,213 @@ const ConfigPanel: React.FC<{
   return (
     <div
       ref={ref}
-      className="absolute right-0 top-full mt-1 z-20 bg-[var(--surface)] border border-[var(--border)] rounded-xl shadow-xl p-3 min-w-[280px] max-w-[calc(100vw-2rem)]"
+      className="absolute right-0 top-full z-20 mt-1 min-w-[280px] max-w-[calc(100vw-2rem)] rounded-xl border border-[var(--border)] bg-[var(--surface)] p-3 shadow-xl"
     >
-      <p className="text-[var(--text-tertiary)] text-xs font-semibold mb-2 px-1">ACTIVE SENSORS</p>
-      {SENSOR_OPTIONS.map(opt => {
-        const enabled = device[opt.key] === 1;
-        const loading  = busy === (opt.key as string);
+      <p className="mb-2 px-1 text-xs font-semibold text-[var(--text-tertiary)]">ACTIVE SENSORS</p>
+      {SENSOR_OPTIONS.map((option) => {
+        const enabled = device[option.key] === 1;
+        const loading = busy === option.key;
+        const disabledByMode = !enabled && requiresMod9Counter(option.key) && !counterModeReady;
         return (
           <label
-            key={opt.key as string}
-            className="flex items-center gap-3 px-1 py-2 rounded-lg hover:bg-[var(--card)] cursor-pointer select-none"
+            key={option.key}
+            className={`flex cursor-pointer select-none items-center gap-3 rounded-lg px-1 py-2 hover:bg-[var(--card)] ${disabledByMode ? 'opacity-70' : ''}`}
           >
             <input
               type="checkbox"
               checked={enabled}
               disabled={loading}
-              onChange={() => toggle(opt)}
-              className="w-4 h-4 accent-[var(--primary)] cursor-pointer disabled:opacity-50"
+              onChange={() => void toggle(option)}
+              className="h-4 w-4 rounded border-[var(--border)] text-[var(--primary)] focus:ring-[var(--primary)]"
             />
-            <span className="text-[var(--text)] text-sm font-medium flex-1">{opt.label}</span>
-            {loading && (
-              <span className="w-3 h-3 border-2 border-[var(--primary)] border-t-transparent rounded-full animate-spin" />
-            )}
+            <span className="flex-1 text-sm text-[var(--text)]">{option.label}</span>
+            {loading && <span className="text-xs text-[var(--text-tertiary)]">…</span>}
           </label>
         );
       })}
-      <div className="mt-3 pt-3 border-t border-[var(--border)]">
-        <p className="text-[var(--text-tertiary)] text-xs font-semibold mb-2 px-1">DEVICE MODE</p>
-        <div className="px-1">
-          <div className="flex items-center justify-between gap-3 text-sm mb-2">
-            <span className="text-[var(--text-secondary)]">Current mode</span>
-            <span className="rounded-full bg-[var(--card)] px-2 py-1 font-semibold text-[var(--text)]">
-              {currentMode ?? 'Unknown'}
-            </span>
+
+      <div className="mt-3 rounded-lg border border-[var(--border)] bg-[var(--card)] p-3">
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)]">LSN50 mode</p>
+            <p className="text-sm font-semibold text-[var(--text)]">{currentMode ?? 'Unknown'}</p>
           </div>
           {observedAt && (
-            <p className="text-[var(--text-tertiary)] text-xs mb-3">
-              Observed {new Date(observedAt).toLocaleString()}
-            </p>
+            <span className="text-xs text-[var(--text-tertiary)]">
+              Seen {new Date(observedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+            </span>
           )}
-          <label className="block text-[var(--text-secondary)] text-xs font-semibold mb-1">
-            Requested mode
-          </label>
-          <select
-            value={selectedMode}
-            disabled={busy === 'mode'}
-            onChange={(event) => setSelectedMode(event.target.value as Lsn50Mode)}
-            className="w-full rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-sm text-[var(--text)]"
-          >
-            {LSN50_MODE_OPTIONS.map(option => (
-              <option key={option.value} value={option.value}>
-                {option.value}
-              </option>
-            ))}
-          </select>
-          <p className="text-[var(--text-tertiary)] text-xs mt-2">{selectedModeDescription}</p>
-          <p className="text-[var(--text-tertiary)] text-xs mt-2">
-            Mode changes are confirmed after the next uplink.
-          </p>
-          <button
-            type="button"
-            onClick={applyMode}
-            disabled={busy === 'mode'}
-            className="mt-3 w-full rounded-lg bg-[var(--primary)] px-3 py-2 text-sm font-semibold text-white transition-colors hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60"
-          >
-            {busy === 'mode' ? 'Applying mode...' : 'Apply mode'}
-          </button>
-          {modeInfo && <p className="text-[var(--text-tertiary)] text-xs mt-2">{modeInfo}</p>}
         </div>
-      </div>
-      <div className="mt-3 pt-3 border-t border-[var(--border)]">
-        <p className="text-[var(--text-tertiary)] text-xs font-semibold mb-2 px-1">UPLINK INTERVAL</p>
-        <div className="px-1">
-          <label className="block text-[var(--text-secondary)] text-xs font-semibold mb-1" htmlFor={`lsn50-interval-${device.deveui}`}>
-            Desired interval (minutes)
-          </label>
-          <input
-            id={`lsn50-interval-${device.deveui}`}
-            type="number"
-            min={1}
-            max={MAX_LSN50_INTERVAL_MINUTES}
-            step={1}
-            inputMode="numeric"
-            value={intervalMinutesInput}
-            disabled={busy === 'interval'}
-            onChange={(event) => setIntervalMinutesInput(event.target.value)}
-            placeholder="e.g. 20"
-            className="w-full rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-sm text-[var(--text)]"
-          />
-          <p className="text-[var(--text-tertiary)] text-xs mt-2">
-            Enter whole minutes. Normal LSN50 uplinks do not report the active interval back to OSI.
-          </p>
-          <button
-            type="button"
-            onClick={applyInterval}
-            disabled={busy === 'interval'}
-            className="mt-3 w-full rounded-lg bg-[var(--primary)] px-3 py-2 text-sm font-semibold text-white transition-colors hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60"
-          >
-            {busy === 'interval' ? 'Applying interval...' : 'Apply interval'}
-          </button>
-          {intervalInfo && <p className="text-[var(--text-tertiary)] text-xs mt-2">{intervalInfo}</p>}
-        </div>
-      </div>
-      <div className="mt-3 pt-3 border-t border-[var(--border)]">
+        <select
+          value={selectedMode}
+          disabled={busy === 'mode'}
+          onChange={(event) => setSelectedMode(event.target.value as Lsn50Mode)}
+          className="mt-3 w-full rounded-lg border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-sm text-[var(--text)]"
+        >
+          {LSN50_MODE_OPTIONS.map((option) => (
+            <option key={option.value} value={option.value}>{option.value}</option>
+          ))}
+        </select>
+        <p className="mt-2 text-xs text-[var(--text-tertiary)]">{selectedModeDescription}</p>
         <button
           type="button"
-          onClick={() => setShowAdvanced(v => !v)}
-          className="w-full flex items-center justify-between px-1 py-1 text-xs font-semibold text-[var(--text-tertiary)] hover:text-[var(--text)] transition-colors"
+          onClick={() => void applyMode()}
+          disabled={busy !== null}
+          className="mt-3 w-full rounded-lg bg-[var(--primary)] px-3 py-2 text-sm font-semibold text-white transition-colors hover:bg-[var(--primary-hover)] disabled:cursor-not-allowed disabled:opacity-60"
         >
-          <span>ADVANCED SENSOR I/O</span>
-          <span>{showAdvanced ? '▲' : '▼'}</span>
+          {busy === 'mode' ? 'Applying mode...' : 'Apply mode'}
         </button>
-        {showAdvanced && <div className="px-1 mt-2 space-y-3">
-          <div>
-            <label className="block text-[var(--text-secondary)] text-xs font-semibold mb-1">
-              Interrupt trigger mode
-            </label>
-            <select
-              value={interruptModeInput}
-              disabled={busy === 'interrupt'}
-              onChange={(event) => setInterruptModeInput(event.target.value)}
-              className="w-full rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-sm text-[var(--text)]"
-            >
-              {LSN50_INTERRUPT_MODE_OPTIONS.map(option => (
-                <option key={option.value} value={option.value}>{option.label}</option>
-              ))}
-            </select>
-            <button
-              type="button"
-              onClick={applyInterruptMode}
-              disabled={busy !== null}
-              className="mt-2 w-full rounded-lg bg-[var(--secondary-bg)] px-3 py-2 text-sm font-semibold text-[var(--text)] transition-colors hover:bg-[var(--border)] disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              {busy === 'interrupt' ? 'Applying interrupt mode...' : 'Apply interrupt mode'}
-            </button>
-          </div>
-          <div>
-            <label className="block text-[var(--text-secondary)] text-xs font-semibold mb-1" htmlFor={`lsn50-warmup-${device.deveui}`}>
-              5V warm-up time (ms)
-            </label>
-            <input
-              id={`lsn50-warmup-${device.deveui}`}
-              type="number"
-              min={0}
-              max={MAX_LSN50_5V_WARMUP_MS}
-              step={1}
-              inputMode="numeric"
-              value={warmupMillisecondsInput}
-              disabled={busy === 'warmup'}
-              onChange={(event) => setWarmupMillisecondsInput(event.target.value)}
-              placeholder="1000"
-              className="w-full rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-sm text-[var(--text)]"
-            />
-            <p className="text-[var(--text-tertiary)] text-xs mt-2">
-              Useful for probes that need sensor power to settle before sampling.
-            </p>
-            <button
-              type="button"
-              onClick={applyFiveVoltWarmup}
-              disabled={busy !== null}
-              className="mt-2 w-full rounded-lg bg-[var(--secondary-bg)] px-3 py-2 text-sm font-semibold text-[var(--text)] transition-colors hover:bg-[var(--border)] disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              {busy === 'warmup' ? 'Applying 5V warm-up...' : 'Apply 5V warm-up'}
-            </button>
-          </div>
-          <p className="text-[var(--warn-text)] text-xs">
-            These controls are intended for external sensors and non-default LSN50 integrations.
-          </p>
-          {advancedInfo && <p className="text-[var(--text-tertiary)] text-xs">{advancedInfo}</p>}
-        </div>}
+        {modeInfo && <p className="mt-2 text-xs text-[var(--text-tertiary)]">{modeInfo}</p>}
+        {!counterModeReady && (
+          <p className="mt-2 text-xs text-[var(--warn-text)]">Rain gauge and flow meter can only be enabled after MOD9 is active.</p>
+        )}
       </div>
-      {error && <p className="text-[var(--error-text)] text-xs mt-2 px-1">{error}</p>}
+
+      <div className="mt-3 rounded-lg border border-[var(--border)] bg-[var(--card)] p-3">
+        <label className="block text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)]" htmlFor={`lsn50-interval-${device.deveui}`}>
+          Uplink interval (minutes)
+        </label>
+        <input
+          id={`lsn50-interval-${device.deveui}`}
+          type="number"
+          min={1}
+          max={MAX_LSN50_INTERVAL_MINUTES}
+          step={1}
+          inputMode="numeric"
+          value={intervalMinutesInput}
+          disabled={busy === 'interval'}
+          onChange={(event) => setIntervalMinutesInput(event.target.value)}
+          placeholder="60"
+          className="mt-2 w-full rounded-lg border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-sm text-[var(--text)]"
+        />
+        <p className="mt-2 text-xs text-[var(--text-tertiary)]">Minimum 1 minute. Maximum {MAX_LSN50_INTERVAL_MINUTES} minutes.</p>
+        <button
+          type="button"
+          onClick={() => void applyInterval()}
+          disabled={busy !== null}
+          className="mt-2 w-full rounded-lg bg-[var(--secondary-bg)] px-3 py-2 text-sm font-semibold text-[var(--text)] transition-colors hover:bg-[var(--border)] disabled:cursor-not-allowed disabled:opacity-60"
+        >
+          {busy === 'interval' ? 'Applying interval...' : 'Apply uplink interval'}
+        </button>
+        {intervalInfo && <p className="mt-2 text-xs text-[var(--text-tertiary)]">{intervalInfo}</p>}
+      </div>
+
+      <div className="mt-3 border-t border-[var(--border)] pt-3">
+        <button
+          type="button"
+          onClick={() => setShowAdvanced((value) => !value)}
+          className="flex w-full items-center justify-between rounded-lg bg-[var(--card)] px-3 py-2 text-left text-sm font-semibold text-[var(--text)]"
+        >
+          <span>Advanced device settings</span>
+          <span className={`transition-transform ${showAdvanced ? 'rotate-180' : ''}`}>▾</span>
+        </button>
+        {showAdvanced && (
+          <div className="mt-3 space-y-3 rounded-lg border border-[var(--border)] bg-[var(--card)] p-3">
+            <div>
+              <label className="mb-1 block text-xs font-semibold text-[var(--text-secondary)]">Interrupt trigger mode</label>
+              <select
+                value={interruptModeInput}
+                disabled={busy === 'interrupt'}
+                onChange={(event) => setInterruptModeInput(event.target.value)}
+                className="w-full rounded-lg border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-sm text-[var(--text)]"
+              >
+                {LSN50_INTERRUPT_MODE_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value}>{option.label}</option>
+                ))}
+              </select>
+              <button
+                type="button"
+                onClick={() => void applyInterruptMode()}
+                disabled={busy !== null}
+                className="mt-2 w-full rounded-lg bg-[var(--secondary-bg)] px-3 py-2 text-sm font-semibold text-[var(--text)] transition-colors hover:bg-[var(--border)] disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {busy === 'interrupt' ? 'Applying interrupt mode...' : 'Apply interrupt mode'}
+              </button>
+            </div>
+            <div>
+              <label className="mb-1 block text-xs font-semibold text-[var(--text-secondary)]" htmlFor={`lsn50-warmup-${device.deveui}`}>
+                5V warm-up time (ms)
+              </label>
+              <input
+                id={`lsn50-warmup-${device.deveui}`}
+                type="number"
+                min={0}
+                max={MAX_LSN50_5V_WARMUP_MS}
+                step={1}
+                inputMode="numeric"
+                value={warmupMillisecondsInput}
+                disabled={busy === 'warmup'}
+                onChange={(event) => setWarmupMillisecondsInput(event.target.value)}
+                placeholder="1000"
+                className="w-full rounded-lg border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-sm text-[var(--text)]"
+              />
+              <p className="mt-2 text-xs text-[var(--text-tertiary)]">Useful for probes that need sensor power to settle before sampling.</p>
+              <button
+                type="button"
+                onClick={() => void applyFiveVoltWarmup()}
+                disabled={busy !== null}
+                className="mt-2 w-full rounded-lg bg-[var(--secondary-bg)] px-3 py-2 text-sm font-semibold text-[var(--text)] transition-colors hover:bg-[var(--border)] disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {busy === 'warmup' ? 'Applying 5V warm-up...' : 'Apply 5V warm-up'}
+              </button>
+            </div>
+            <p className="text-xs text-[var(--warn-text)]">These controls are intended for external sensors and non-default LSN50 integrations.</p>
+            {advancedInfo && <p className="text-xs text-[var(--text-tertiary)]">{advancedInfo}</p>}
+          </div>
+        )}
+      </div>
+
+      {error && <p className="mt-2 px-1 text-xs text-[var(--error-text)]">{error}</p>}
     </div>
   );
 };
 
-// ── Main card ────────────────────────────────────────────────────────────────
 export const DraginoTempCard: React.FC<DraginoTempCardProps> = ({ device, onRemove, onUpdate }) => {
-  const {
-    ext_temperature_c, bat_v, adc_ch0v,
-    dendro_position_mm, dendro_valid, dendro_delta_mm,
-    rain_mm_delta, rain_mm_per_hour, rain_delta_status,
-    flow_liters_delta, flow_liters_per_min, flow_delta_status,
-    counter_interval_seconds,
-  } = device.latest_data;
-  const rainEnabled = device.rain_gauge_enabled === 1;
-  const flowEnabled = device.flow_meter_enabled === 1;
+  const data = device.latest_data;
   const lastSeenStr = device.last_seen ?? null;
   const lastSeen = lastSeenStr ? new Date(lastSeenStr) : null;
-  const minutesAgo = lastSeen
-    ? Math.floor((Date.now() - lastSeen.getTime()) / (1000 * 60))
-    : null;
-  const intervalLabel = formatCounterInterval(counter_interval_seconds);
-  const rainStatusLabel = formatCounterStatus(rain_delta_status);
-  const flowStatusLabel = formatCounterStatus(flow_delta_status);
-
-  const [isRemoving,   setIsRemoving]   = useState(false);
-  const [showConfirm,  setShowConfirm]  = useState(false);
-  const [showConfig,   setShowConfig]   = useState(false);
-  const [showMonitor,  setShowMonitor]  = useState(false);
-  const [sensorMonitor, setSensorMonitor] = useState<{ field: string; label: string; unit: string; color: string; decimals: number } | null>(null);
-  const [error,        setError]        = useState<string | null>(null);
-
+  const minutesAgo = lastSeen ? Math.floor((Date.now() - lastSeen.getTime()) / (1000 * 60)) : null;
   const dendroEnabled = device.dendro_enabled === 1;
-  const tempEnabled   = device.temp_enabled   === 1;
+  const tempEnabled = device.temp_enabled === 1;
+  const rainEnabled = device.rain_gauge_enabled === 1;
+  const flowEnabled = device.flow_meter_enabled === 1;
+  const intervalLabel = formatCounterInterval(data?.counter_interval_seconds);
+  const rainStatusLabel = formatCounterStatus(data?.rain_delta_status);
+  const flowStatusLabel = formatCounterStatus(data?.flow_delta_status);
+  const rainRateSummary =
+    formatPerTenMinuteValue(data?.rain_mm_per_10min, 'mm', 1)
+    ?? (data?.rain_mm_per_hour != null && intervalLabel
+      ? `${data.rain_mm_per_hour.toFixed(3)} mm/h over ${intervalLabel}`
+      : null)
+    ?? (intervalLabel ? `this ${intervalLabel.toLowerCase()}` : 'this interval');
+  const flowRateSummary =
+    formatPerTenMinuteValue(data?.flow_liters_per_10min, 'L', 0)
+    ?? (data?.flow_liters_per_min != null && intervalLabel
+      ? `${data.flow_liters_per_min.toFixed(3)} L/min over ${intervalLabel}`
+      : null)
+    ?? (intervalLabel ? `this ${intervalLabel.toLowerCase()}` : 'this interval');
+
+  const [isRemoving, setIsRemoving] = useState(false);
+  const [showConfirm, setShowConfirm] = useState(false);
+  const [showConfig, setShowConfig] = useState(false);
+  const [showMonitor, setShowMonitor] = useState(false);
+  const [sensorMonitor, setSensorMonitor] = useState<{
+    field: string;
+    label: string;
+    unit: string;
+    color: string;
+    decimals: number;
+    initialField?: string;
+    seriesOptions?: Array<{ field: string; label: string; unit: string; color?: string; decimals?: number }>;
+  } | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
   const handleRemove = async () => {
     setIsRemoving(true);
     setError(null);
     try {
       await devicesAPI.remove(device.deveui);
-      if (onRemove) onRemove();
+      onRemove?.();
     } catch (err: any) {
       setError(err.response?.data?.message || 'Failed to remove device');
       setIsRemoving(false);
@@ -462,31 +474,26 @@ export const DraginoTempCard: React.FC<DraginoTempCardProps> = ({ device, onRemo
   };
 
   const batColour =
-    bat_v === undefined ? 'var(--text-tertiary)' :
-    bat_v >= 3.2 ? '#22c55e' :
-    bat_v >= 2.9 ? '#f59e0b' :
+    data?.bat_v === undefined ? 'var(--text-tertiary)' :
+    data.bat_v >= 3.2 ? '#22c55e' :
+    data.bat_v >= 2.9 ? '#f59e0b' :
     '#ef4444';
 
   return (
-    <div className="rounded-xl p-6 border-2 shadow-lg transition-all bg-[var(--surface)] border-[var(--border)] hover:border-[var(--focus)]">
-
-      {/* Header */}
-      <div className="flex items-start justify-between mb-4">
+    <div className="rounded-xl border-2 border-[var(--border)] bg-[var(--surface)] p-6 shadow-lg transition-all hover:border-[var(--focus)]">
+      <div className="mb-4 flex items-start justify-between">
         <div className="flex-1">
-          <h3 className="text-2xl font-bold text-[var(--text)] mb-1 high-contrast-text">
-            {device.name}
-          </h3>
-          <p className="text-[var(--text-secondary)] text-sm">{device.deveui}</p>
+          <h3 className="mb-1 text-2xl font-bold text-[var(--text)] high-contrast-text">{device.name}</h3>
+          <p className="text-sm text-[var(--text-secondary)]">{device.deveui}</p>
         </div>
-        <div className="flex items-start gap-2 relative">
-          <div className="bg-[var(--primary)] text-white px-3 py-1 rounded-lg text-sm font-semibold">
+        <div className="relative flex items-start gap-2">
+          <div className="rounded-lg bg-[var(--primary)] px-3 py-1 text-sm font-semibold text-white">
             LSN50
           </div>
-          {/* Gear / sensor config */}
           <button
-            onClick={() => setShowConfig(v => !v)}
+            onClick={() => setShowConfig((value) => !value)}
             title="Configure active sensors"
-            className={`px-3 py-1 rounded-lg text-sm font-semibold transition-colors ${
+            className={`rounded-lg px-3 py-1 text-sm font-semibold transition-colors ${
               showConfig
                 ? 'bg-[var(--primary)] text-white'
                 : 'bg-[var(--card)] text-[var(--text-tertiary)] hover:bg-[var(--border)]'
@@ -497,14 +504,14 @@ export const DraginoTempCard: React.FC<DraginoTempCardProps> = ({ device, onRemo
           {showConfig && (
             <ConfigPanel
               device={device}
-              onUpdate={() => { if (onUpdate) onUpdate(); }}
+              onUpdate={() => { onUpdate?.(); }}
               onClose={() => setShowConfig(false)}
             />
           )}
           <button
             onClick={() => setShowConfirm(true)}
             disabled={isRemoving}
-            className="bg-[var(--error-bg)] hover:bg-[var(--error-bg)] disabled:bg-[var(--border)] text-[var(--error-text)] px-3 py-1 rounded-lg text-sm font-semibold transition-colors disabled:cursor-not-allowed disabled:text-[var(--text-disabled)]"
+            className="rounded-lg bg-[var(--error-bg)] px-3 py-1 text-sm font-semibold text-[var(--error-text)] transition-colors disabled:cursor-not-allowed disabled:bg-[var(--border)] disabled:text-[var(--text-disabled)]"
             title="Remove device"
           >
             ✕
@@ -513,29 +520,32 @@ export const DraginoTempCard: React.FC<DraginoTempCardProps> = ({ device, onRemo
       </div>
 
       {error && (
-        <div className="bg-[var(--error-bg)] border border-[var(--error-bg)] text-[var(--error-text)] px-3 py-2 rounded-lg mb-4 text-sm">
+        <div className="mb-4 rounded-lg border border-[var(--error-bg)] bg-[var(--error-bg)] px-3 py-2 text-sm text-[var(--error-text)]">
           {error}
         </div>
       )}
 
       {showConfirm && (
-        <div className="bg-[var(--warn-bg)] border-2 border-[var(--warn-border)] text-[var(--warn-text)] px-4 py-3 rounded-lg mb-4">
-          <p className="font-bold mb-2">Remove this device?</p>
-          <p className="text-sm mb-3">This will unlink the device from your account.</p>
+        <div className="mb-4 rounded-lg border-2 border-[var(--warn-border)] bg-[var(--warn-bg)] px-4 py-3 text-[var(--warn-text)]">
+          <p className="mb-2 font-bold">Remove this device?</p>
+          <p className="mb-3 text-sm">This will unlink the device from your account.</p>
           <div className="flex gap-2">
             <button
-              onClick={handleRemove}
+              onClick={() => void handleRemove()}
               disabled={isRemoving}
-              className="bg-[var(--error-bg)] hover:bg-[var(--error-bg)] disabled:bg-[var(--border)] text-[var(--error-text)] font-bold px-4 py-2 rounded-lg transition-colors disabled:cursor-not-allowed flex items-center gap-2 disabled:text-[var(--text-disabled)]"
+              className="flex items-center gap-2 rounded-lg bg-[var(--error-bg)] px-4 py-2 font-bold text-[var(--error-text)] transition-colors disabled:cursor-not-allowed disabled:bg-[var(--border)] disabled:text-[var(--text-disabled)]"
             >
               {isRemoving ? (
-                <><div className="animate-spin h-4 w-4 border-2 border-white border-t-transparent rounded-full" />Removing...</>
+                <>
+                  <div className="h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent" />
+                  Removing...
+                </>
               ) : 'Yes, Remove'}
             </button>
             <button
               onClick={() => setShowConfirm(false)}
               disabled={isRemoving}
-              className="bg-[var(--secondary-bg)] hover:bg-[var(--border)] disabled:bg-[var(--border)] text-[var(--text)] font-bold px-4 py-2 rounded-lg transition-colors disabled:cursor-not-allowed disabled:text-[var(--text-disabled)]"
+              className="rounded-lg bg-[var(--secondary-bg)] px-4 py-2 font-bold text-[var(--text)] transition-colors disabled:cursor-not-allowed disabled:bg-[var(--border)] disabled:text-[var(--text-disabled)]"
             >
               Cancel
             </button>
@@ -544,18 +554,16 @@ export const DraginoTempCard: React.FC<DraginoTempCardProps> = ({ device, onRemo
       )}
 
       <div className="grid grid-cols-1 gap-4">
-
-        {/* Temperature — only when enabled */}
         {tempEnabled && (
-          <div className="bg-[var(--card)] rounded-lg p-4">
-            <p className="text-[var(--text-tertiary)] text-sm font-semibold mb-1">TEMPERATURE</p>
-            {ext_temperature_c !== undefined && ext_temperature_c !== null ? (
+          <div className="rounded-lg bg-[var(--card)] p-4">
+            <p className="mb-1 text-sm font-semibold text-[var(--text-tertiary)]">TEMPERATURE</p>
+            {data?.ext_temperature_c != null ? (
               <button
                 onClick={() => setSensorMonitor({ field: 'ext_temperature_c', label: 'Temperature', unit: '°C', color: '#f97316', decimals: 1 })}
-                className="text-4xl font-bold text-[var(--text)] hover:text-[var(--primary)] transition-colors text-left underline decoration-dotted underline-offset-4 cursor-pointer"
+                className="cursor-pointer text-left text-4xl font-bold text-[var(--text)] underline decoration-dotted underline-offset-4 transition-colors hover:text-[var(--primary)]"
                 title="View history"
               >
-                {ext_temperature_c.toFixed(1)} °C
+                {data.ext_temperature_c.toFixed(1)} °C
               </button>
             ) : (
               <p className="text-4xl font-bold text-[var(--text)]">—</p>
@@ -563,82 +571,116 @@ export const DraginoTempCard: React.FC<DraginoTempCardProps> = ({ device, onRemo
           </div>
         )}
 
-        {/* Battery */}
-        {bat_v !== undefined && (
-          <div className="bg-[var(--card)] rounded-lg p-4">
-            <p className="text-[var(--text-tertiary)] text-sm font-semibold mb-1">BATTERY</p>
+        {data?.bat_v != null && (
+          <div className="rounded-lg bg-[var(--card)] p-4">
+            <p className="mb-1 text-sm font-semibold text-[var(--text-tertiary)]">BATTERY</p>
             <button
               onClick={() => setSensorMonitor({ field: 'bat_v', label: 'Battery Voltage', unit: 'V', color: '#22c55e', decimals: 2 })}
-              className="text-4xl font-bold hover:opacity-75 transition-opacity text-left underline decoration-dotted underline-offset-4 cursor-pointer"
+              className="cursor-pointer text-left text-4xl font-bold underline decoration-dotted underline-offset-4 transition-opacity hover:opacity-75"
               style={{ color: batColour }}
               title="View history"
             >
-              {bat_v.toFixed(2)} V
+              {data.bat_v.toFixed(2)} V
             </button>
           </div>
         )}
 
-        {/* Rain gauge (Davis 6466M) — shown when rain_gauge_enabled */}
         {rainEnabled && (
-          <div className="bg-[var(--card)] rounded-lg p-4">
-            <p className="text-[var(--text-tertiary)] text-sm font-semibold mb-1">RAIN GAUGE</p>
+          <div className="rounded-lg bg-[var(--card)] p-4">
+            <p className="mb-1 text-sm font-semibold text-[var(--text-tertiary)]">Rain Gauge</p>
+            <p className="mb-2 text-sm text-[var(--text-secondary)]">
+              Today:{' '}
+              <span className="font-semibold text-[var(--text)]">
+                {data?.rain_mm_today != null ? `${data.rain_mm_today.toFixed(1)} mm` : '—'}
+              </span>
+            </p>
             <button
-              onClick={() => setSensorMonitor({ field: 'rain_mm_delta', label: 'Rainfall', unit: 'mm', color: '#38bdf8', decimals: 1 })}
-              className="text-4xl font-bold text-[var(--text)] hover:text-[var(--primary)] transition-colors text-left underline decoration-dotted underline-offset-4 cursor-pointer"
+              onClick={() => setSensorMonitor({
+                field: 'rain_mm_per_10min',
+                initialField: 'rain_mm_per_10min',
+                label: 'Rainfall',
+                unit: 'mm',
+                color: '#38bdf8',
+                decimals: 1,
+                seriesOptions: [
+                  { field: 'rain_mm_per_10min', label: 'Per 10 min', unit: 'mm', color: '#38bdf8', decimals: 1 },
+                  { field: 'rain_mm_delta', label: 'This interval', unit: 'mm', color: '#0ea5e9', decimals: 1 },
+                ],
+              })}
+              className="cursor-pointer text-left text-4xl font-bold text-[var(--text)] underline decoration-dotted underline-offset-4 transition-colors hover:text-[var(--primary)]"
               title="View history"
             >
-              {rain_mm_delta != null ? `${rain_mm_delta.toFixed(1)} mm` : '—'}
+              {data?.rain_mm_delta != null ? `${data.rain_mm_delta.toFixed(1)} mm` : '—'}
             </button>
-            <p className="text-[var(--text-tertiary)] text-xs mt-1">
-              {rain_mm_per_hour != null && intervalLabel
-                ? `${rain_mm_per_hour.toFixed(3)} mm/h over ${intervalLabel}`
-                : rainStatusLabel || (intervalLabel ? `this ${intervalLabel.toLowerCase()}` : 'this interval')}
+            <p className="mt-1 text-xs text-[var(--text-tertiary)]">
+              {rainRateSummary}
               {' · '}
               tap to view history
             </p>
+            {rainStatusLabel && rainStatusLabel !== rainRateSummary && (
+              <p className="mt-1 text-xs text-[var(--text-tertiary)]">{rainStatusLabel}</p>
+            )}
           </div>
         )}
 
-        {/* Flow meter (GWF Unico2) — shown when flow_meter_enabled */}
         {flowEnabled && (
-          <div className="bg-[var(--card)] rounded-lg p-4">
-            <p className="text-[var(--text-tertiary)] text-sm font-semibold mb-1">FLOW METER</p>
+          <div className="rounded-lg bg-[var(--card)] p-4">
+            <p className="mb-1 text-sm font-semibold text-[var(--text-tertiary)]">Flow Meter</p>
+            <p className="mb-2 text-sm text-[var(--text-secondary)]">
+              Today:{' '}
+              <span className="font-semibold text-[var(--text)]">
+                {data?.flow_liters_today != null ? `${data.flow_liters_today.toFixed(0)} L` : '—'}
+              </span>
+            </p>
             <button
-              onClick={() => setSensorMonitor({ field: 'flow_liters_delta', label: 'Flow', unit: 'L', color: '#6366f1', decimals: 0 })}
-              className="text-4xl font-bold text-[var(--text)] hover:text-[var(--primary)] transition-colors text-left underline decoration-dotted underline-offset-4 cursor-pointer"
+              onClick={() => setSensorMonitor({
+                field: 'flow_liters_per_10min',
+                initialField: 'flow_liters_per_10min',
+                label: 'Flow',
+                unit: 'L',
+                color: '#6366f1',
+                decimals: 0,
+                seriesOptions: [
+                  { field: 'flow_liters_per_10min', label: 'Per 10 min', unit: 'L', color: '#6366f1', decimals: 0 },
+                  { field: 'flow_liters_delta', label: 'This interval', unit: 'L', color: '#4f46e5', decimals: 0 },
+                ],
+              })}
+              className="cursor-pointer text-left text-4xl font-bold text-[var(--text)] underline decoration-dotted underline-offset-4 transition-colors hover:text-[var(--primary)]"
               title="View history"
             >
-              {flow_liters_delta != null ? `${flow_liters_delta.toFixed(0)} L` : '—'}
+              {data?.flow_liters_delta != null ? `${data.flow_liters_delta.toFixed(0)} L` : '—'}
             </button>
-            <p className="text-[var(--text-tertiary)] text-xs mt-1">
-              {flow_liters_per_min != null && intervalLabel
-                ? `${flow_liters_per_min.toFixed(3)} L/min over ${intervalLabel}`
-                : flowStatusLabel || (intervalLabel ? `this ${intervalLabel.toLowerCase()}` : 'this interval')}
+            <p className="mt-1 text-xs text-[var(--text-tertiary)]">
+              {flowRateSummary}
               {' · '}
               tap to view history
             </p>
+            {flowStatusLabel && flowStatusLabel !== flowRateSummary && (
+              <p className="mt-1 text-xs text-[var(--text-tertiary)]">{flowStatusLabel}</p>
+            )}
           </div>
         )}
 
-        {/* Dendrometer — only when enabled */}
-        {dendroEnabled && dendro_position_mm !== undefined && dendro_position_mm !== null && (
-          <div className={`rounded-lg p-4 ${dendro_valid ? 'bg-[var(--card)]' : 'bg-[var(--error-bg)]'}`}>
-            <p className="text-[var(--text-tertiary)] text-sm font-semibold mb-1">DENDROMETER POSITION</p>
-            {dendro_valid ? (
+        {dendroEnabled && data?.dendro_position_mm != null && (
+          <div className={`rounded-lg p-4 ${data.dendro_valid ? 'bg-[var(--card)]' : 'bg-[var(--error-bg)]'}`}>
+            <p className="mb-1 text-sm font-semibold text-[var(--text-tertiary)]">DENDROMETER POSITION</p>
+            {data.dendro_valid ? (
               <>
                 <button
                   onClick={() => setShowMonitor(true)}
-                  className="text-4xl font-bold text-[var(--text)] hover:text-[var(--primary)] transition-colors text-left underline decoration-dotted underline-offset-4 cursor-pointer"
+                  className="cursor-pointer text-left text-4xl font-bold text-[var(--text)] underline decoration-dotted underline-offset-4 transition-colors hover:text-[var(--primary)]"
                   title="View history"
                 >
-                  {dendro_position_mm.toFixed(2)} mm
+                  {data.dendro_position_mm.toFixed(2)} mm
                 </button>
-                {dendro_delta_mm !== undefined && dendro_delta_mm !== null && (
-                  <p className={`text-sm font-semibold mt-1 ${dendro_delta_mm >= 0 ? 'text-[#22c55e]' : 'text-[var(--error-text)]'}`}>
-                    {dendro_delta_mm >= 0 ? '+' : ''}{dendro_delta_mm.toFixed(3)} mm
+                {data.dendro_delta_mm != null && (
+                  <p className={`mt-1 text-sm font-semibold ${data.dendro_delta_mm >= 0 ? 'text-[#22c55e]' : 'text-[var(--error-text)]'}`}>
+                    {data.dendro_delta_mm >= 0 ? '+' : ''}{data.dendro_delta_mm.toFixed(3)} mm
                   </p>
                 )}
-                <p className="text-[var(--text-tertiary)] text-xs mt-1">ADC: {adc_ch0v?.toFixed(3)} V · tap to monitor</p>
+                <p className="mt-1 text-xs text-[var(--text-tertiary)]">
+                  ADC: {data.adc_ch0v?.toFixed(3)} V · tap to monitor
+                </p>
               </>
             ) : (
               <p className="text-lg font-bold text-[var(--error-text)]">SENSOR ERROR</p>
@@ -646,27 +688,24 @@ export const DraginoTempCard: React.FC<DraginoTempCardProps> = ({ device, onRemo
           </div>
         )}
 
-        {/* ADC raw — shown when dendro is disabled and ADC is non-trivial */}
-        {!dendroEnabled && adc_ch0v !== undefined && adc_ch0v !== null && adc_ch0v > 0.01 && (
-          <div className="bg-[var(--card)] rounded-lg p-4">
-            <p className="text-[var(--text-tertiary)] text-sm font-semibold mb-1">ADC INPUT</p>
+        {!dendroEnabled && data?.adc_ch0v != null && data.adc_ch0v > 0.01 && (
+          <div className="rounded-lg bg-[var(--card)] p-4">
+            <p className="mb-1 text-sm font-semibold text-[var(--text-tertiary)]">ADC INPUT</p>
             <button
               onClick={() => setSensorMonitor({ field: 'adc_ch0v', label: 'ADC Input', unit: 'V', color: '#8b5cf6', decimals: 3 })}
-              className="text-4xl font-bold text-[var(--text)] hover:text-[var(--primary)] transition-colors text-left underline decoration-dotted underline-offset-4 cursor-pointer"
+              className="cursor-pointer text-left text-4xl font-bold text-[var(--text)] underline decoration-dotted underline-offset-4 transition-colors hover:text-[var(--primary)]"
               title="View history"
             >
-              {adc_ch0v.toFixed(3)} V
+              {data.adc_ch0v.toFixed(3)} V
             </button>
           </div>
         )}
-
       </div>
 
-      {/* Footer */}
-      <div className="mt-4 pt-4 border-t border-[var(--border)]">
-        <p className="text-[var(--text-tertiary)] text-sm">
+      <div className="mt-4 border-t border-[var(--border)] pt-4">
+        <p className="text-sm text-[var(--text-tertiary)]">
           Last seen:{' '}
-          <span className="text-[var(--text)] font-semibold">
+          <span className="font-semibold text-[var(--text)]">
             {minutesAgo !== null ? `${minutesAgo} minutes ago` : 'Never seen'}
           </span>
         </p>
@@ -688,6 +727,8 @@ export const DraginoTempCard: React.FC<DraginoTempCardProps> = ({ device, onRemo
           unit={sensorMonitor.unit}
           color={sensorMonitor.color}
           decimals={sensorMonitor.decimals}
+          initialField={sensorMonitor.initialField}
+          seriesOptions={sensorMonitor.seriesOptions}
           onClose={() => setSensorMonitor(null)}
         />
       )}

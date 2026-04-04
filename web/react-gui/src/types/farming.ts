@@ -31,11 +31,15 @@ export interface Device {
     rain_tips_delta?: number | null;
     rain_mm_delta?: number | null;
     rain_mm_per_hour?: number | null;
+    rain_mm_per_10min?: number | null;
+    rain_mm_today?: number | null;
     rain_delta_status?: string | null;
     flow_count_cumulative?: number | null;
     flow_pulses_delta?: number | null;
     flow_liters_delta?: number | null;
     flow_liters_per_min?: number | null;
+    flow_liters_per_10min?: number | null;
+    flow_liters_today?: number | null;
     flow_delta_status?: string | null;
     counter_interval_seconds?: number | null;
   };
@@ -149,6 +153,8 @@ export interface IrrigationZone {
   variety?: string | null;
   soil_type?: string | null;
   irrigation_method?: string | null;
+  area_m2?: number | null;
+  irrigation_efficiency_pct?: number | null;
   notes?: string | null;
   calibration_key?: string | null;
 
@@ -158,6 +164,8 @@ export interface IrrigationZone {
   cropType?: string | null;
   soilType?: string | null;
   irrigationMethod?: string | null;
+  areaM2?: number | null;
+  irrigationEfficiencyPct?: number | null;
   variety_compat?: string | null;
 }
 
@@ -297,10 +305,51 @@ export interface ZoneEnvironmentSummary {
   zoneName: string;
   generatedAt: string;
   location: EnvironmentLocation;
+  water: WaterEnvironment;
   local: LocalEnvironment;
   online: OnlineEnvironment;
   agronomic: AgronomicEnvironment;
   forecast: ForecastEnvironment;
+}
+
+export interface WaterEnvironment {
+  available: boolean;
+  observedAt: string | null;
+  areaM2: number | null;
+  irrigationEfficiencyPct: number | null;
+  rainTodayMm: number | null;
+  irrigationTodayLiters: number | null;
+  irrigationTodayNetMm: number | null;
+  waterNeededTodayMm: number | null;
+  balanceTodayMm: number | null;
+  next24hRainMm: number | null;
+  action: WaterAction | null;
+  daily: WaterDay[];
+  sensorHealth: SensorHealth;
+}
+
+export interface WaterAction {
+  code: string;
+  source: string;
+  reasoning: string;
+  recommendationDate: string | null;
+}
+
+export interface WaterDay {
+  date: string;
+  rainMm: number | null;
+  irrigationLiters: number | null;
+  irrigationNetMm: number | null;
+  totalWaterMm: number | null;
+}
+
+export interface SensorHealth {
+  sensorCount: number;
+  freshSensorCount: number;
+  staleSensorCount: number;
+  rainGaugePresent: boolean;
+  flowMeterPresent: boolean;
+  warnings: string[];
 }
 
 export interface EnvironmentLocation {

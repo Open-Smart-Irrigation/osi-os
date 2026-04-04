@@ -61,6 +61,10 @@ export const ZoneConfigModal: React.FC<Props> = ({ isOpen, zone, onClose, onSave
   const [variety, setVariety] = useState(zone.variety ?? '');
   const [soilType, setSoilType] = useState(zone.soilType ?? '');
   const [irrigationMethod, setIrrigationMethod] = useState(zone.irrigationMethod ?? '');
+  const [areaM2, setAreaM2] = useState(zone.areaM2 != null ? String(zone.areaM2) : '');
+  const [irrigationEfficiencyPct, setIrrigationEfficiencyPct] = useState(
+    zone.irrigationEfficiencyPct != null ? String(zone.irrigationEfficiencyPct) : ''
+  );
   const [notes, setNotes] = useState(zone.notes ?? '');
   const [timezone, setTimezone] = useState(zone.timezone ?? 'UTC');
   const [phenologicalStage, setPhenologicalStage] = useState(zone.phenologicalStage ?? 'default');
@@ -84,6 +88,8 @@ export const ZoneConfigModal: React.FC<Props> = ({ isOpen, zone, onClose, onSave
     setVariety(zone.variety ?? '');
     setSoilType(zone.soilType ?? '');
     setIrrigationMethod(zone.irrigationMethod ?? '');
+    setAreaM2(zone.areaM2 != null ? String(zone.areaM2) : '');
+    setIrrigationEfficiencyPct(zone.irrigationEfficiencyPct != null ? String(zone.irrigationEfficiencyPct) : '');
     setNotes(zone.notes ?? '');
     setTimezone(zone.timezone ?? 'UTC');
     setPhenologicalStage(zone.phenologicalStage ?? 'default');
@@ -145,6 +151,8 @@ export const ZoneConfigModal: React.FC<Props> = ({ isOpen, zone, onClose, onSave
       variety?: string | null;
       soilType?: string | null;
       irrigationMethod?: string | null;
+      areaM2?: number | null;
+      irrigationEfficiencyPct?: number | null;
       notes?: string | null;
       timezone?: string | null;
       phenologicalStage?: string | null;
@@ -155,6 +163,10 @@ export const ZoneConfigModal: React.FC<Props> = ({ isOpen, zone, onClose, onSave
     if ((zone.variety ?? '') !== variety) payload.variety = variety || null;
     if ((zone.soilType ?? '') !== soilType) payload.soilType = soilType || null;
     if ((zone.irrigationMethod ?? '') !== irrigationMethod) payload.irrigationMethod = irrigationMethod || null;
+    if ((zone.areaM2 != null ? String(zone.areaM2) : '') !== areaM2) payload.areaM2 = areaM2.trim() ? Number(areaM2) : null;
+    if ((zone.irrigationEfficiencyPct != null ? String(zone.irrigationEfficiencyPct) : '') !== irrigationEfficiencyPct) {
+      payload.irrigationEfficiencyPct = irrigationEfficiencyPct.trim() ? Number(irrigationEfficiencyPct) : null;
+    }
     if ((zone.notes ?? '') !== notes) payload.notes = notes || null;
     if ((zone.timezone ?? 'UTC') !== timezone) payload.timezone = timezone;
     if ((zone.phenologicalStage ?? 'default') !== phenologicalStage) payload.phenologicalStage = phenologicalStage;
@@ -328,6 +340,36 @@ export const ZoneConfigModal: React.FC<Props> = ({ isOpen, zone, onClose, onSave
             >
               {IRRIGATION_METHODS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
             </select>
+          </div>
+
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <div>
+              <p className="text-xs font-semibold text-[var(--text-tertiary)] uppercase tracking-wide mb-2">Area</p>
+              <input
+                type="number"
+                min="0"
+                step="0.1"
+                value={areaM2}
+                onChange={e => setAreaM2(e.target.value)}
+                placeholder="m²"
+                className="w-full bg-[var(--surface)] border border-[var(--border)] text-[var(--text)] rounded-lg px-3 py-2 text-sm placeholder:text-[var(--text-tertiary)]"
+              />
+              <p className="mt-1 text-xs text-[var(--text-tertiary)]">Used to convert irrigation liters into effective mm for the water balance.</p>
+            </div>
+            <div>
+              <p className="text-xs font-semibold text-[var(--text-tertiary)] uppercase tracking-wide mb-2">Irrigation efficiency</p>
+              <input
+                type="number"
+                min="0"
+                max="100"
+                step="1"
+                value={irrigationEfficiencyPct}
+                onChange={e => setIrrigationEfficiencyPct(e.target.value)}
+                placeholder="%"
+                className="w-full bg-[var(--surface)] border border-[var(--border)] text-[var(--text)] rounded-lg px-3 py-2 text-sm placeholder:text-[var(--text-tertiary)]"
+              />
+              <p className="mt-1 text-xs text-[var(--text-tertiary)]">Enter the estimated share of delivered water that reaches the crop root zone.</p>
+            </div>
           </div>
 
           <hr className="border-[var(--border)]" />
