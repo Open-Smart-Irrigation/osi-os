@@ -51,6 +51,7 @@ const requiredFunctionNodes = [
   'Build Edge Event Batch',
   'Mark Synced Events Delivered',
   'Build Pending Command Pull',
+  'Build Sync State',
   'Replay Pending Commands',
   'Build Sync Token Refresh',
   'Store Refreshed Sync Token',
@@ -94,6 +95,20 @@ if (directDbOpenCount > 0) {
   fail(`found ${directDbOpenCount} direct sqlite database opens in flows.json`);
 } else {
   console.log('OK no direct sqlite database opens remain in flows.json');
+}
+
+const helperAliasIssues = flows.filter((node) => {
+  const libs = Array.isArray(node.libs) ? node.libs : [];
+  const helperVars = libs
+    .filter((item) => item && item.module === 'osi-db-helper')
+    .map((item) => item.var);
+  if (!helperVars.length) return false;
+  return !helperVars.includes('osiDb') || helperVars.includes('sqlite3');
+});
+if (helperAliasIssues.length > 0) {
+  fail(`found ${helperAliasIssues.length} osi-db-helper nodes without the osiDb alias`);
+} else {
+  console.log('OK osi-db-helper nodes consistently use the osiDb alias');
 }
 
 function fail(message) {
@@ -219,6 +234,11 @@ expectIncludes('Handle server auth response', 'Server authentication returned no
 expectIncludes('Build server auth request', 'deviceEuis: deviceEuis', 'sends local device claims in the authenticated local-sync request');
 expectIncludes('Build server auth request', "new osiDb.Database('/data/db/farming.db')", 'loads local device claims before cloud linking');
 expectIncludes('Handle server auth response', "const claimed = Array.isArray(data.claimed)", 'accepts claimed device results directly from local-sync');
+expectIncludes('Build Sync State', 'lastMirroredEventAt', 'returns the last mirrored sync event timestamp');
+expectIncludes('Build Sync State', 'dbHealth: {', 'returns a DB health block in sync state');
+expectIncludes('Build Sync State', "journalMode: helperHealth.journalMode || null", 'returns SQLite journal mode in sync state');
+expectIncludes('Build Sync State', "quickCheck: quickCheck.status", 'returns quick-check status in sync state');
+expectIncludes('Build Sync State', "lastError: helperHealth.lastError || null", 'returns helper DB errors in sync state');
 expectIncludesById('al-link-build-claim', 'if (deviceEuis.length === 0)', 'skips remote bulk claim when there are no local devices');
 expectIncludesById('al-link-build-claim', 'return [msg, null];', 'only calls remote bulk claim when device claims are needed');
 expectIncludes('Handle claim response & build UPDATE', 'return [null, msg];', 'can stop before mutating local auth state');

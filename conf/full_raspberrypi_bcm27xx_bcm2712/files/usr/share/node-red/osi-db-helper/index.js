@@ -31,6 +31,10 @@ function setLastError(error) {
     : null;
 }
 
+function markHealthy() {
+  setLastError(null);
+}
+
 function runRaw(database, method, sql, params) {
   return new Promise((resolve, reject) => {
     const callback = function callback(error, rows) {
@@ -97,8 +101,15 @@ function enqueueOperation(executor) {
   const scheduled = operationQueue
     .catch(() => undefined)
     .then(async () => {
-      const database = await ensureSharedDatabase();
-      return executor(database);
+      try {
+        const database = await ensureSharedDatabase();
+        const result = await executor(database);
+        markHealthy();
+        return result;
+      } catch (error) {
+        setLastError(error);
+        throw error;
+      }
     });
   operationQueue = scheduled.then(
     () => undefined,
