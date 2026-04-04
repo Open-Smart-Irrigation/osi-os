@@ -155,6 +155,7 @@ export interface IrrigationZone {
   irrigation_method?: string | null;
   area_m2?: number | null;
   irrigation_efficiency_pct?: number | null;
+  scheduling_mode?: 'local' | 'server_preferred' | null;
   notes?: string | null;
   calibration_key?: string | null;
 
@@ -166,6 +167,7 @@ export interface IrrigationZone {
   irrigationMethod?: string | null;
   areaM2?: number | null;
   irrigationEfficiencyPct?: number | null;
+  schedulingMode?: 'local' | 'server_preferred' | null;
   variety_compat?: string | null;
 }
 
@@ -310,6 +312,30 @@ export interface ZoneEnvironmentSummary {
   online: OnlineEnvironment;
   agronomic: AgronomicEnvironment;
   forecast: ForecastEnvironment;
+  display?: DisplayStatus | null;
+  drift?: RecommendationDrift | null;
+}
+
+export interface DisplayStatus {
+  mode: 'shared_server' | 'shared_server_stale' | 'local_fallback' | 'unlinked_local' | 'cloud_local' | string;
+  schedulingMode: 'local' | 'server_preferred' | string;
+  sourceLabel: string;
+  sharedGeneratedAt: string | null;
+  sharedObservedAt: string | null;
+  lastReceivedAt: string | null;
+  fallbackReason: string | null;
+}
+
+export interface RecommendationDrift {
+  active: boolean;
+  severity: 'low' | 'medium' | 'high' | string;
+  reason: string;
+  localActionCode: string | null;
+  serverActionCode: string | null;
+  waterNeededDeltaMm: number | null;
+  next24hRainDeltaMm: number | null;
+  balanceDeltaMm: number | null;
+  canSwitchScheduling: boolean;
 }
 
 export interface WaterEnvironment {

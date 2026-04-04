@@ -67,6 +67,25 @@ function classifySoil(devices: Device[]): { label: string; swt: number | null } 
   return { label: 'Dry', swt: mean };
 }
 
+function formatSchedulingMode(mode: string | null | undefined): string {
+  return mode === 'server_preferred' ? 'Server when fresh' : 'Local scheduling';
+}
+
+function formatDisplayMode(mode: string | null | undefined): string {
+  switch (mode) {
+    case 'shared_server':
+      return 'OSI Server';
+    case 'shared_server_stale':
+      return 'OSI Server stale';
+    case 'local_fallback':
+      return 'Local fallback';
+    case 'unlinked_local':
+      return 'Local only';
+    default:
+      return 'Water source';
+  }
+}
+
 export const IrrigationZoneCard: React.FC<IrrigationZoneCardProps> = ({
   zone,
   devices,
@@ -84,6 +103,7 @@ export const IrrigationZoneCard: React.FC<IrrigationZoneCardProps> = ({
   const [removingDevice, setRemovingDevice] = useState<string | null>(null);
   const [environmentSummary, setEnvironmentSummary] = useState<ZoneEnvironmentSummary | null>(null);
   const [latestZoneRecommendation, setLatestZoneRecommendation] = useState<ZoneRecommendation | null>(null);
+  const [dismissedDriftAt, setDismissedDriftAt] = useState<string | null>(null);
 
   const handleDeleteZone = async () => {
     setIsDeleting(true);
@@ -148,6 +168,26 @@ export const IrrigationZoneCard: React.FC<IrrigationZoneCardProps> = ({
       window.clearInterval(interval);
     };
   }, [hasDendroDevices, zone.id]);
+
+  useEffect(() => {
+    setDismissedDriftAt(null);
+  }, [environmentSummary?.generatedAt, zone.id]);
+
+  const handleUseServerScheduling = async () => {
+    try {
+      await irrigationZonesAPI.updateConfig(zone.id, { schedulingMode: 'server_preferred' });
+      onUpdate();
+    } catch (err: any) {
+      setError(err.response?.data?.detail || err.response?.data?.message || 'Failed to switch scheduling source');
+    }
+  };
+
+  const driftPrompt = environmentSummary?.drift?.active
+    && environmentSummary.display?.schedulingMode !== 'server_preferred'
+    && environmentSummary.drift.canSwitchScheduling
+    && dismissedDriftAt !== environmentSummary.generatedAt
+      ? environmentSummary.drift
+      : null;
 
   return (
     <div className="bg-[var(--surface)] border-2 border-[var(--border)] rounded-xl p-6 shadow-lg mb-6">
@@ -232,10 +272,28 @@ export const IrrigationZoneCard: React.FC<IrrigationZoneCardProps> = ({
                 {environmentSummary.water.action?.reasoning ?? 'Daily rain, irrigation, and crop demand summary for this zone.'}
               </p>
             </div>
-            <div className="text-xs text-[var(--text-tertiary)]">
-              Updated {environmentSummary.water.observedAt ? new Date(environmentSummary.water.observedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '—'}
+            <div className="flex flex-col items-end gap-1 text-xs text-[var(--text-tertiary)]">
+              <div>Updated {environmentSummary.water.observedAt ? new Date(environmentSummary.water.observedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '—'}</div>
+              <div className="flex flex-wrap justify-end gap-1">
+                <span className="rounded-full border border-sky-200 bg-white/80 px-2 py-0.5 font-semibold text-sky-700">
+                  {formatDisplayMode(environmentSummary.display?.mode)}
+                </span>
+                <span className="rounded-full border border-[var(--border)] bg-white/80 px-2 py-0.5 font-semibold text-[var(--text-secondary)]">
+                  {formatSchedulingMode(environmentSummary.display?.schedulingMode ?? zone.schedulingMode)}
+                </span>
+              </div>
             </div>
           </div>
+          {environmentSummary.display?.fallbackReason && (
+            <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+              {environmentSummary.display.fallbackReason}
+            </div>
+          )}
+          {environmentSummary.display?.schedulingMode === 'server_preferred' && (
+            <div className="mt-3 rounded-xl border border-cyan-200 bg-cyan-50 px-3 py-2 text-sm text-cyan-900">
+              This zone follows OSI Server recommendations when they are fresh, with automatic local fallback if the link becomes stale.
+            </div>
+          )}
           <div className="mt-4 grid grid-cols-2 gap-2 lg:grid-cols-4">
             <div className="rounded-xl bg-white/80 p-3 shadow-sm ring-1 ring-sky-100">
               <p className="text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)]">Rain today</p>
@@ -283,6 +341,34 @@ export const IrrigationZoneCard: React.FC<IrrigationZoneCardProps> = ({
               </div>
             )}
           </div>
+          {driftPrompt && (
+            <div className="mt-3 rounded-xl border border-amber-300 bg-amber-50 px-3 py-3 text-sm text-amber-950">
+              <p className="font-semibold">Local and OSI Server recommendations are drifting.</p>
+              <p className="mt-1">{driftPrompt.reason}</p>
+              <div className="mt-2 flex flex-wrap gap-2 text-xs text-amber-900">
+                <span className="rounded-full bg-white/70 px-2 py-1 font-medium">
+                  Local: {formatWaterAction(driftPrompt.localActionCode)}
+                </span>
+                <span className="rounded-full bg-white/70 px-2 py-1 font-medium">
+                  Server: {formatWaterAction(driftPrompt.serverActionCode)}
+                </span>
+              </div>
+              <div className="mt-3 flex flex-wrap gap-2">
+                <button
+                  onClick={() => setDismissedDriftAt(environmentSummary.generatedAt)}
+                  className="rounded-lg border border-amber-300 bg-white px-3 py-1.5 text-sm font-semibold text-amber-900"
+                >
+                  Keep local
+                </button>
+                <button
+                  onClick={() => void handleUseServerScheduling()}
+                  className="rounded-lg bg-amber-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-amber-700"
+                >
+                  Use server scheduling
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       )}
 

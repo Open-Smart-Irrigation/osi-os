@@ -114,6 +114,7 @@ function normaliseZone(z: any): IrrigationZone {
     irrigationMethod:  z.irrigationMethod  ?? z.irrigation_method  ?? null,
     areaM2:            z.areaM2            ?? z.area_m2            ?? null,
     irrigationEfficiencyPct: z.irrigationEfficiencyPct ?? z.irrigation_efficiency_pct ?? null,
+    schedulingMode:    z.schedulingMode    ?? z.scheduling_mode    ?? 'local',
     notes:             z.notes                                     ?? null,
     timezone:          z.timezone                                  ?? null,
     phenologicalStage: z.phenologicalStage ?? z.phenological_stage ?? null,
@@ -231,6 +232,7 @@ export const irrigationZonesAPI = {
     irrigationMethod?: string | null;
     areaM2?: number | null;
     irrigationEfficiencyPct?: number | null;
+    schedulingMode?: 'local' | 'server_preferred' | null;
     notes?: string | null;
     timezone?: string | null;
     phenologicalStage?: string | null;

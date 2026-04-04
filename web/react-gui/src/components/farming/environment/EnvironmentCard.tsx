@@ -50,6 +50,21 @@ function OnlineCacheBadge({ data }: { data: ZoneEnvironmentSummary }) {
   );
 }
 
+function DisplayBadge({ data }: { data: ZoneEnvironmentSummary }) {
+  if (!data.display) return null;
+  const label =
+    data.display.mode === 'shared_server' ? 'OSI Server' :
+    data.display.mode === 'shared_server_stale' ? 'OSI Server stale' :
+    data.display.mode === 'local_fallback' ? 'Local fallback' :
+    data.display.mode === 'unlinked_local' ? 'Local only' :
+    data.display.sourceLabel;
+  return (
+    <span className="inline-flex items-center rounded-full border border-sky-200 bg-sky-50 px-2 py-0.5 text-[10px] font-semibold text-sky-700">
+      {label}
+    </span>
+  );
+}
+
 export const EnvironmentCard: React.FC<Props> = ({ zone, devices }) => {
   const { t } = useTranslation('devices');
   const [collapsed, setCollapsed] = useState(false);
@@ -106,6 +121,7 @@ export const EnvironmentCard: React.FC<Props> = ({ zone, devices }) => {
           {data && (
             <div className="ml-1 flex items-center gap-1.5">
               <LocationSourceBadge source={data.location.source} />
+              <DisplayBadge data={data} />
               <OnlineCacheBadge data={data} />
             </div>
           )}
@@ -132,6 +148,11 @@ export const EnvironmentCard: React.FC<Props> = ({ zone, devices }) => {
 
           {data && (
             <>
+              {data.display?.fallbackReason && (
+                <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+                  {data.display.fallbackReason}
+                </div>
+              )}
               <div className="flex items-center gap-0 overflow-x-auto border-b border-[var(--border)]">
                 {tabs.map((tab) => {
                   const isActive = activeTab === tab.id;

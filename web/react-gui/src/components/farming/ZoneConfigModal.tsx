@@ -65,6 +65,7 @@ export const ZoneConfigModal: React.FC<Props> = ({ isOpen, zone, onClose, onSave
   const [irrigationEfficiencyPct, setIrrigationEfficiencyPct] = useState(
     zone.irrigationEfficiencyPct != null ? String(zone.irrigationEfficiencyPct) : ''
   );
+  const [schedulingMode, setSchedulingMode] = useState<'local' | 'server_preferred'>((zone.schedulingMode ?? 'local') as 'local' | 'server_preferred');
   const [notes, setNotes] = useState(zone.notes ?? '');
   const [timezone, setTimezone] = useState(zone.timezone ?? 'UTC');
   const [phenologicalStage, setPhenologicalStage] = useState(zone.phenologicalStage ?? 'default');
@@ -90,6 +91,7 @@ export const ZoneConfigModal: React.FC<Props> = ({ isOpen, zone, onClose, onSave
     setIrrigationMethod(zone.irrigationMethod ?? '');
     setAreaM2(zone.areaM2 != null ? String(zone.areaM2) : '');
     setIrrigationEfficiencyPct(zone.irrigationEfficiencyPct != null ? String(zone.irrigationEfficiencyPct) : '');
+    setSchedulingMode((zone.schedulingMode ?? 'local') as 'local' | 'server_preferred');
     setNotes(zone.notes ?? '');
     setTimezone(zone.timezone ?? 'UTC');
     setPhenologicalStage(zone.phenologicalStage ?? 'default');
@@ -153,6 +155,7 @@ export const ZoneConfigModal: React.FC<Props> = ({ isOpen, zone, onClose, onSave
       irrigationMethod?: string | null;
       areaM2?: number | null;
       irrigationEfficiencyPct?: number | null;
+      schedulingMode?: 'local' | 'server_preferred' | null;
       notes?: string | null;
       timezone?: string | null;
       phenologicalStage?: string | null;
@@ -167,6 +170,7 @@ export const ZoneConfigModal: React.FC<Props> = ({ isOpen, zone, onClose, onSave
     if ((zone.irrigationEfficiencyPct != null ? String(zone.irrigationEfficiencyPct) : '') !== irrigationEfficiencyPct) {
       payload.irrigationEfficiencyPct = irrigationEfficiencyPct.trim() ? Number(irrigationEfficiencyPct) : null;
     }
+    if ((zone.schedulingMode ?? 'local') !== schedulingMode) payload.schedulingMode = schedulingMode;
     if ((zone.notes ?? '') !== notes) payload.notes = notes || null;
     if ((zone.timezone ?? 'UTC') !== timezone) payload.timezone = timezone;
     if ((zone.phenologicalStage ?? 'default') !== phenologicalStage) payload.phenologicalStage = phenologicalStage;
@@ -370,6 +374,21 @@ export const ZoneConfigModal: React.FC<Props> = ({ isOpen, zone, onClose, onSave
               />
               <p className="mt-1 text-xs text-[var(--text-tertiary)]">Enter the estimated share of delivered water that reaches the crop root zone.</p>
             </div>
+          </div>
+
+          <div>
+            <p className="text-xs font-semibold text-[var(--text-tertiary)] uppercase tracking-wide mb-2">Scheduling source</p>
+            <select
+              value={schedulingMode}
+              onChange={e => setSchedulingMode(e.target.value as 'local' | 'server_preferred')}
+              className="w-full bg-[var(--surface)] border border-[var(--border)] text-[var(--text)] rounded-lg px-3 py-2 text-sm"
+            >
+              <option value="local">Local edge logic (recommended)</option>
+              <option value="server_preferred">OSI Server when fresh</option>
+            </select>
+            <p className="mt-1 text-xs text-[var(--text-tertiary)]">
+              Irrigation always falls back to local logic if the server recommendation becomes stale.
+            </p>
           </div>
 
           <hr className="border-[var(--border)]" />
