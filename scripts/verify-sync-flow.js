@@ -207,6 +207,9 @@ if (bootstrapNode) {
 expectIncludes('Validate & decode token', 'const auth = verifyBearer', 'uses decoded local auth');
 expectIncludes('Handle server auth response', 'statusCode >= 400 && statusCode < 500', 'maps remote auth failures away from 401');
 expectIncludes('Handle server auth response', 'Server authentication returned no sync token', 'requires sync token on successful link');
+expectIncludes('Build server auth request', 'deviceEuis: deviceEuis', 'sends local device claims in the authenticated local-sync request');
+expectIncludes('Build server auth request', "new osiDb.Database('/data/db/farming.db')", 'loads local device claims before cloud linking');
+expectIncludes('Handle server auth response', "const claimed = Array.isArray(data.claimed)", 'accepts claimed device results directly from local-sync');
 expectIncludesById('al-link-build-claim', 'if (deviceEuis.length === 0)', 'skips remote bulk claim when there are no local devices');
 expectIncludesById('al-link-build-claim', 'return [msg, null];', 'only calls remote bulk claim when device claims are needed');
 expectIncludes('Handle claim response & build UPDATE', 'return [null, msg];', 'can stop before mutating local auth state');
