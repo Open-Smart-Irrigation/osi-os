@@ -87,6 +87,15 @@ const requiredFunctionNodes = [
   'Get Zone Environment Summary'
 ];
 
+const directDbOpenCount = flows.filter((node) =>
+  typeof node.func === 'string' && node.func.includes("new sqlite3.Database('/data/db/farming.db')")
+).length;
+if (directDbOpenCount > 0) {
+  fail(`found ${directDbOpenCount} direct sqlite database opens in flows.json`);
+} else {
+  console.log('OK no direct sqlite database opens remain in flows.json');
+}
+
 function fail(message) {
   console.error(`FAIL: ${message}`);
   process.exitCode = 1;
