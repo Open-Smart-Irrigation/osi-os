@@ -221,6 +221,7 @@ export const ScheduleSection: React.FC<ScheduleSectionProps> = ({
   zoneId, onScheduleSaved, onAdvancedOpen,
 }) => {
   const { t } = useTranslation('devices');
+  const [collapsed, setCollapsed] = useState(true);
   const [loading, setLoading]   = useState(true);
   const [saving, setSaving]     = useState(false);
   const [error, setError]       = useState('');
@@ -323,107 +324,119 @@ export const ScheduleSection: React.FC<ScheduleSectionProps> = ({
   };
 
   return (
-    <div className="bg-[var(--card)] rounded-lg p-4 mb-4">
-      {/* Header row */}
-      <div className="flex items-center justify-between gap-4 mb-4">
-        <h4 className="text-[var(--text)] text-lg font-bold">{t('schedule.irrigationSchedule')}</h4>
-        <div className="flex items-center gap-2">
-          <span className="text-[var(--text-secondary)] text-sm font-semibold">{t('schedule.enabled')}</span>
-          <button
-            type="button"
-            onClick={() => setEnabled(v => !v)}
-            className={`px-3 py-1 rounded-lg text-sm font-bold border-2 transition-colors ${
-              enabled
-                ? 'bg-[var(--toggle-on)] border-[var(--toggle-on)] text-white'
-                : 'bg-[var(--toggle-off)] border-[var(--toggle-off)] text-[var(--text-secondary)]'
-            }`}
-          >
-            {enabled ? t('schedule.on') : t('schedule.off')}
-          </button>
+    <div className="mt-6 border-t border-[var(--border)] pt-5">
+      <button
+        className="w-full flex items-center justify-between text-left group"
+        onClick={() => setCollapsed(c => !c)}
+      >
+        <span className="text-xs font-bold uppercase tracking-widest text-[var(--text-tertiary)] group-hover:text-[var(--text)] transition-colors">
+          {t('schedule.irrigationSchedule')}
+        </span>
+        <span className="text-[var(--text-tertiary)] text-sm transition-transform duration-200" style={{ display: 'inline-block', transform: collapsed ? 'rotate(-90deg)' : 'rotate(0deg)' }}>
+          ▾
+        </span>
+      </button>
+
+      {!collapsed && (
+        <div className="mt-3 bg-[var(--card)] rounded-lg p-4">
+          {/* Enabled toggle row */}
+          <div className="flex items-center justify-end gap-2 mb-4">
+            <span className="text-[var(--text-secondary)] text-sm font-semibold">{t('schedule.enabled')}</span>
+            <button
+              type="button"
+              onClick={() => setEnabled(v => !v)}
+              className={`px-3 py-1 rounded-lg text-sm font-bold border-2 transition-colors ${
+                enabled
+                  ? 'bg-[var(--toggle-on)] border-[var(--toggle-on)] text-white'
+                  : 'bg-[var(--toggle-off)] border-[var(--toggle-off)] text-[var(--text-secondary)]'
+              }`}
+            >
+              {enabled ? t('schedule.on') : t('schedule.off')}
+            </button>
+          </div>
+
+          {error && (
+            <div className="mb-3 bg-[var(--error-bg)] border border-[var(--error-bg)] text-[var(--error-text)] px-3 py-2 rounded-lg text-sm">{error}</div>
+          )}
+          {success && (
+            <div className="mb-3 bg-[var(--success-bg)] border border-[var(--success-border)] text-[var(--success-text)] px-3 py-2 rounded-lg text-sm">{success}</div>
+          )}
+
+          {loading ? (
+            <div className="text-[var(--text-tertiary)] text-sm">{t('schedule.loadingSchedule')}</div>
+          ) : (
+            <>
+              {/* Scheduler type selector */}
+              <div className="mb-4">
+                <p className="text-xs font-semibold text-[var(--text-tertiary)] uppercase tracking-wide mb-2">
+                  Trigger method
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  <TypeTab active={schedulerType === 'SWT'} onClick={() => handleTypeChange('SWT')}>
+                    Soil moisture SWT
+                  </TypeTab>
+                  <TypeTab active={schedulerType === 'VWC'} onClick={() => handleTypeChange('VWC')}>
+                    Soil moisture VWC
+                  </TypeTab>
+                  <TypeTab active={schedulerType === 'DENDRO'} onClick={() => handleTypeChange('DENDRO')}>
+                    Dendrometer
+                  </TypeTab>
+                </div>
+              </div>
+
+              {/* Conditional form */}
+              {schedulerType === 'SWT' && (
+                <SwtForm
+                  metric={triggerMetric}
+                  threshold={threshold}
+                  duration={duration}
+                  onMetric={setTriggerMetric}
+                  onThreshold={setThreshold}
+                  onDuration={setDuration}
+                />
+              )}
+              {schedulerType === 'VWC' && (
+                <VwcForm
+                  threshold={threshold}
+                  duration={duration}
+                  onThreshold={setThreshold}
+                  onDuration={setDuration}
+                />
+              )}
+              {schedulerType === 'DENDRO' && (
+                <DendroForm
+                  stressThreshold={stressThreshold}
+                  duration={duration}
+                  responseMode={responseMode}
+                  onStress={setStressThreshold}
+                  onDuration={setDuration}
+                  onResponseMode={setResponseMode}
+                  onAdvanced={onAdvancedOpen ?? (() => {})}
+                />
+              )}
+
+              <div className="flex gap-3 mt-4">
+                <button
+                  type="button"
+                  disabled={!canSave || saving}
+                  onClick={saveSchedule}
+                  className="bg-[var(--primary)] hover:bg-[var(--primary-hover)] disabled:bg-[var(--border)] disabled:text-[var(--text-disabled)] text-white font-bold text-sm px-4 py-2 rounded-lg transition-colors disabled:cursor-not-allowed"
+                >
+                  {saving ? t('schedule.saving') : t('schedule.saveSchedule')}
+                </button>
+                <button
+                  type="button"
+                  disabled={saving}
+                  onClick={reload}
+                  className="bg-[var(--secondary-bg)] hover:bg-[var(--border)] text-[var(--text)] font-bold text-sm px-4 py-2 rounded-lg transition-colors disabled:cursor-not-allowed disabled:text-[var(--text-disabled)]"
+                >
+                  {t('schedule.reload')}
+                </button>
+              </div>
+            </>
+          )}
         </div>
-      </div>
-
-      {error && (
-        <div className="mb-3 bg-[var(--error-bg)] border border-[var(--error-bg)] text-[var(--error-text)] px-3 py-2 rounded-lg text-sm">{error}</div>
       )}
-      {success && (
-        <div className="mb-3 bg-[var(--success-bg)] border border-[var(--success-border)] text-[var(--success-text)] px-3 py-2 rounded-lg text-sm">{success}</div>
-      )}
-
-      {loading ? (
-        <div className="text-[var(--text-tertiary)] text-sm">{t('schedule.loadingSchedule')}</div>
-      ) : (
-        <>
-          {/* Scheduler type selector */}
-          <div className="mb-4">
-            <p className="text-xs font-semibold text-[var(--text-tertiary)] uppercase tracking-wide mb-2">
-              Trigger method
-            </p>
-            <div className="flex flex-wrap gap-2">
-              <TypeTab active={schedulerType === 'SWT'} onClick={() => handleTypeChange('SWT')}>
-                Soil moisture SWT
-              </TypeTab>
-              <TypeTab active={schedulerType === 'VWC'} onClick={() => handleTypeChange('VWC')}>
-                Soil moisture VWC
-              </TypeTab>
-              <TypeTab active={schedulerType === 'DENDRO'} onClick={() => handleTypeChange('DENDRO')}>
-                Dendrometer
-              </TypeTab>
-            </div>
-          </div>
-
-          {/* Conditional form */}
-          {schedulerType === 'SWT' && (
-            <SwtForm
-              metric={triggerMetric}
-              threshold={threshold}
-              duration={duration}
-              onMetric={setTriggerMetric}
-              onThreshold={setThreshold}
-              onDuration={setDuration}
-            />
-          )}
-          {schedulerType === 'VWC' && (
-            <VwcForm
-              threshold={threshold}
-              duration={duration}
-              onThreshold={setThreshold}
-              onDuration={setDuration}
-            />
-          )}
-          {schedulerType === 'DENDRO' && (
-            <DendroForm
-              stressThreshold={stressThreshold}
-              duration={duration}
-              responseMode={responseMode}
-              onStress={setStressThreshold}
-              onDuration={setDuration}
-              onResponseMode={setResponseMode}
-              onAdvanced={onAdvancedOpen ?? (() => {})}
-            />
-          )}
-
-          <div className="flex gap-3 mt-4">
-            <button
-              type="button"
-              disabled={!canSave || saving}
-              onClick={saveSchedule}
-              className="bg-[var(--primary)] hover:bg-[var(--primary-hover)] disabled:bg-[var(--border)] disabled:text-[var(--text-disabled)] text-white font-bold text-sm px-4 py-2 rounded-lg transition-colors disabled:cursor-not-allowed"
-            >
-              {saving ? t('schedule.saving') : t('schedule.saveSchedule')}
-            </button>
-            <button
-              type="button"
-              disabled={saving}
-              onClick={reload}
-              className="bg-[var(--secondary-bg)] hover:bg-[var(--border)] text-[var(--text)] font-bold text-sm px-4 py-2 rounded-lg transition-colors disabled:cursor-not-allowed disabled:text-[var(--text-disabled)]"
-            >
-              {t('schedule.reload')}
-            </button>
-          </div>
-        </>
-      )}
-
     </div>
   );
 };

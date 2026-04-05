@@ -68,7 +68,7 @@ function DisplayBadge({ data }: { data: ZoneEnvironmentSummary }) {
 
 export const EnvironmentCard: React.FC<Props> = ({ zone, devices }) => {
   const { t } = useTranslation('devices');
-  const [collapsed, setCollapsed] = useState(false);
+  const [collapsed, setCollapsed] = useState(true);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [data, setData] = useState<ZoneEnvironmentSummary | null>(null);

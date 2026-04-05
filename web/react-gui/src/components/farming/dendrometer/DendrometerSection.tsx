@@ -14,7 +14,7 @@ interface Props {
 }
 
 export const DendrometerSection: React.FC<Props> = ({ zone, devices }) => {
-  const [collapsed, setCollapsed] = useState(false);
+  const [collapsed, setCollapsed] = useState(true);
   const [loading, setLoading]     = useState(true);
   const [error, setError]         = useState<string | null>(null);
 

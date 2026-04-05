@@ -94,6 +94,8 @@ export const IrrigationZoneCard: React.FC<IrrigationZoneCardProps> = ({
 }) => {
   const { t } = useTranslation('devices');
   const { t: tc } = useTranslation('common');
+  const [zoneCollapsed, setZoneCollapsed] = useState(true);
+  const [devicesCollapsed, setDevicesCollapsed] = useState(true);
   const [isDeleting, setIsDeleting] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [showAssignModal, setShowAssignModal] = useState(false);
@@ -193,14 +195,23 @@ export const IrrigationZoneCard: React.FC<IrrigationZoneCardProps> = ({
     <div className="bg-[var(--surface)] border-2 border-[var(--border)] rounded-xl p-6 shadow-lg mb-6">
       {/* Zone Header — stacks vertically on mobile */}
       <div className="flex flex-col sm:flex-row sm:items-start gap-3 mb-3">
-        <div className="flex-1 min-w-0">
+        <button
+          className="flex-1 min-w-0 text-left flex items-center gap-2 group"
+          onClick={() => setZoneCollapsed(c => !c)}
+        >
           <h3 className="text-3xl font-bold text-[var(--text)] mb-1 high-contrast-text break-words">
             {zone.name}
           </h3>
-          <p className="text-[var(--text-secondary)] text-sm">
+          <span
+            className="text-[var(--text-tertiary)] text-lg transition-transform duration-200 mt-0.5 shrink-0"
+            style={{ display: 'inline-block', transform: zoneCollapsed ? 'rotate(-90deg)' : 'rotate(0deg)' }}
+          >
+            ▾
+          </span>
+          <p className="text-[var(--text-secondary)] text-sm mt-1">
             {t('zone.deviceCount', { count: zone.device_count })}
           </p>
-        </div>
+        </button>
         <div className="flex flex-wrap gap-2 shrink-0">
           <button
             onClick={() => setShowConfigModal(true)}
@@ -262,6 +273,9 @@ export const IrrigationZoneCard: React.FC<IrrigationZoneCardProps> = ({
           </span>
         )}
       </div>
+
+      {!zoneCollapsed && (
+      <>
 
       {environmentSummary?.water && (
         <div className="mb-4 rounded-2xl border border-sky-100 bg-[linear-gradient(135deg,#f0f9ff,white_55%,#ecfeff)] p-4">
@@ -423,94 +437,110 @@ export const IrrigationZoneCard: React.FC<IrrigationZoneCardProps> = ({
       {/* Environment Section */}
       <EnvironmentCard zone={zone} devices={devices} />
 
-      {/* Devices in Zone — consistent border-t separator */}
+      {/* Devices in Zone — collapsible */}
       <div className="mt-6 border-t border-[var(--border)] pt-5">
-        {devices.length > 0 ? (
-          <>
-            <h4 className="text-xs font-bold uppercase tracking-widest text-[var(--text-tertiary)] mb-4">
-              {t('zone.devicesInZone')}
-            </h4>
+        <button
+          className="w-full flex items-center justify-between text-left group"
+          onClick={() => setDevicesCollapsed(c => !c)}
+        >
+          <span className="text-xs font-bold uppercase tracking-widest text-[var(--text-tertiary)] group-hover:text-[var(--text)] transition-colors">
+            {t('zone.devicesInZone')}
+          </span>
+          <span
+            className="text-[var(--text-tertiary)] text-sm transition-transform duration-200"
+            style={{ display: 'inline-block', transform: devicesCollapsed ? 'rotate(-90deg)' : 'rotate(0deg)' }}
+          >
+            ▾
+          </span>
+        </button>
 
-            {/* Sensors */}
-            {kiwiSensors.length > 0 && (
-              <div className="mb-5">
-                <p className="text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)] mb-3">{t('soilSensors')}</p>
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                  {kiwiSensors.map((device) => (
-                    <div key={device.deveui} className="relative">
-                      <KiwiSensorCard
-                        device={device}
-                        onRemove={() => handleRemoveDevice(device.deveui)}
-                        onUpdate={onUpdate}
-                      />
-                      {removingDevice === device.deveui && (
-                        <div className="absolute inset-0 bg-[var(--overlay)]/70 flex items-center justify-center rounded-xl">
-                          <div className="animate-spin h-8 w-8 border-4 border-[var(--primary)] border-t-transparent rounded-full" />
-                        </div>
-                      )}
-                    </div>
-                  ))}
+        {!devicesCollapsed && (
+          devices.length > 0 ? (
+            <div className="mt-3">
+              {/* Sensors */}
+              {kiwiSensors.length > 0 && (
+                <div className="mb-5">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)] mb-3">{t('soilSensors')}</p>
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                    {kiwiSensors.map((device) => (
+                      <div key={device.deveui} className="relative">
+                        <KiwiSensorCard
+                          device={device}
+                          onRemove={() => handleRemoveDevice(device.deveui)}
+                          onUpdate={onUpdate}
+                        />
+                        {removingDevice === device.deveui && (
+                          <div className="absolute inset-0 bg-[var(--overlay)]/70 flex items-center justify-center rounded-xl">
+                            <div className="animate-spin h-8 w-8 border-4 border-[var(--primary)] border-t-transparent rounded-full" />
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
                 </div>
-              </div>
-            )}
+              )}
 
-            {/* Valves */}
-            {stregaValves.length > 0 && (
-              <div className="mb-5">
-                <p className="text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)] mb-3">{t('smartValves')}</p>
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                  {stregaValves.map((device) => (
-                    <div key={device.deveui} className="relative">
-                      <StregaValveCard
-                        device={device}
-                        onUpdate={onUpdate}
-                        onRemove={() => handleRemoveDevice(device.deveui)}
-                      />
-                      {removingDevice === device.deveui && (
-                        <div className="absolute inset-0 bg-[var(--overlay)]/70 flex items-center justify-center rounded-xl">
-                          <div className="animate-spin h-8 w-8 border-4 border-[var(--primary)] border-t-transparent rounded-full" />
-                        </div>
-                      )}
-                    </div>
-                  ))}
+              {/* Valves */}
+              {stregaValves.length > 0 && (
+                <div className="mb-5">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)] mb-3">{t('smartValves')}</p>
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                    {stregaValves.map((device) => (
+                      <div key={device.deveui} className="relative">
+                        <StregaValveCard
+                          device={device}
+                          onUpdate={onUpdate}
+                          onRemove={() => handleRemoveDevice(device.deveui)}
+                        />
+                        {removingDevice === device.deveui && (
+                          <div className="absolute inset-0 bg-[var(--overlay)]/70 flex items-center justify-center rounded-xl">
+                            <div className="animate-spin h-8 w-8 border-4 border-[var(--primary)] border-t-transparent rounded-full" />
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
                 </div>
-              </div>
-            )}
+              )}
 
-            {/* LSN50 Nodes */}
-            {lsn50Nodes.length > 0 && (
-              <div className="mb-5">
-                <p className="text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)] mb-3">Dragino LSN50 Nodes</p>
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                  {lsn50Nodes.map((device) => (
-                    <div key={device.deveui} className="relative">
-                      <DraginoTempCard
-                        device={device}
-                        onRemove={() => handleRemoveDevice(device.deveui)}
-                      />
-                      {removingDevice === device.deveui && (
-                        <div className="absolute inset-0 bg-[var(--overlay)]/70 flex items-center justify-center rounded-xl">
-                          <div className="animate-spin h-8 w-8 border-4 border-[var(--primary)] border-t-transparent rounded-full" />
-                        </div>
-                      )}
-                    </div>
-                  ))}
+              {/* LSN50 Nodes */}
+              {lsn50Nodes.length > 0 && (
+                <div className="mb-5">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)] mb-3">Dragino LSN50 Nodes</p>
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                    {lsn50Nodes.map((device) => (
+                      <div key={device.deveui} className="relative">
+                        <DraginoTempCard
+                          device={device}
+                          onRemove={() => handleRemoveDevice(device.deveui)}
+                        />
+                        {removingDevice === device.deveui && (
+                          <div className="absolute inset-0 bg-[var(--overlay)]/70 flex items-center justify-center rounded-xl">
+                            <div className="animate-spin h-8 w-8 border-4 border-[var(--primary)] border-t-transparent rounded-full" />
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
                 </div>
-              </div>
-            )}
-          </>
-        ) : (
-          <div className="bg-[var(--card)] rounded-lg p-6 text-center">
-            <p className="text-[var(--text-tertiary)] text-lg mb-3">{t('zone.noDevices')}</p>
-            <button
-              onClick={() => setShowAssignModal(true)}
-              className="bg-[var(--primary)] hover:bg-[var(--primary-hover)] text-white font-bold px-6 py-3 rounded-lg transition-colors"
-            >
-              {t('zone.assignFirst')}
-            </button>
-          </div>
+              )}
+            </div>
+          ) : (
+            <div className="mt-3 bg-[var(--card)] rounded-lg p-6 text-center">
+              <p className="text-[var(--text-tertiary)] text-lg mb-3">{t('zone.noDevices')}</p>
+              <button
+                onClick={() => setShowAssignModal(true)}
+                className="bg-[var(--primary)] hover:bg-[var(--primary-hover)] text-white font-bold px-6 py-3 rounded-lg transition-colors"
+              >
+                {t('zone.assignFirst')}
+              </button>
+            </div>
+          )
         )}
       </div>
+
+      </>
+      )} {/* end !zoneCollapsed */}
 
       {/* Assign Device Modal */}
       <AssignDeviceModal
