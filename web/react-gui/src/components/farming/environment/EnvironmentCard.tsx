@@ -3,18 +3,17 @@ import { useTranslation } from 'react-i18next';
 import type { Device, IrrigationZone, ZoneEnvironmentSummary } from '../../../types/farming';
 import { environmentAPI } from '../../../services/api';
 import { LocalTab } from './LocalTab';
-import { OnlineTab } from './OnlineTab';
 import { AgronomicTab } from './AgronomicTab';
 import { WaterTab } from './WaterTab';
 import { SoilTab } from './SoilTab';
-import { ForecastTab } from './ForecastTab';
+import { WeatherTab } from './WeatherTab';
 
 interface Props {
   zone: IrrigationZone;
   devices: Device[];
 }
 
-type Tab = 'water' | 'soil' | 'online' | 'forecast' | 'agronomic' | 'sensors';
+type Tab = 'water' | 'soil' | 'weather' | 'agronomic' | 'sensors';
 
 const CloudIcon: React.FC<{ className?: string }> = ({ className }) => (
   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" className={className} aria-hidden="true">
@@ -84,7 +83,7 @@ export const EnvironmentCard: React.FC<Props> = ({ zone, devices }) => {
         const summary = await environmentAPI.getSummary(zone.id);
         if (cancelled) return;
         setData(summary);
-        setActiveTab((previous) => previous || 'water');
+        setActiveTab((previous) => (previous === 'online' || previous === 'forecast' ? 'weather' : previous) || 'water');
       } catch (e: any) {
         if (!cancelled) setError(e?.response?.data?.message ?? e?.message ?? 'Failed to load environment data');
       } finally {
@@ -106,8 +105,7 @@ export const EnvironmentCard: React.FC<Props> = ({ zone, devices }) => {
   const tabs: { id: Tab; label: string; available: boolean }[] = [
     { id: 'water', label: t('environment.tabs.water', { defaultValue: 'Water' }), available: true },
     { id: 'soil', label: t('environment.tabs.soil', { defaultValue: 'Soil' }), available: true },
-    { id: 'online', label: t('environment.tabs.weather', { defaultValue: 'Weather' }), available: data?.online.available ?? true },
-    { id: 'forecast', label: t('environment.tabs.forecast', { defaultValue: 'Forecast' }), available: data?.forecast.available ?? true },
+    { id: 'weather', label: t('environment.tabs.weather', { defaultValue: 'Weather' }), available: (data?.online.available ?? true) || (data?.forecast.available ?? true) },
     { id: 'agronomic', label: t('environment.tabs.agronomic', { defaultValue: 'Agronomy' }), available: true },
     { id: 'sensors', label: t('environment.tabs.sensors', { defaultValue: 'Sensors' }), available: true },
   ];
@@ -180,8 +178,7 @@ export const EnvironmentCard: React.FC<Props> = ({ zone, devices }) => {
               <div className="pt-1">
                 {activeTab === 'water' && <WaterTab water={data.water} />}
                 {activeTab === 'soil' && <SoilTab local={data.local} devices={devices} />}
-                {activeTab === 'online' && <OnlineTab online={data.online} location={data.location} />}
-                {activeTab === 'forecast' && <ForecastTab forecast={data.forecast} location={data.location} />}
+                {activeTab === 'weather' && <WeatherTab online={data.online} forecast={data.forecast} location={data.location} />}
                 {activeTab === 'agronomic' && (
                   <AgronomicTab agronomic={data.agronomic} cropType={cropType} phenologicalStage={phenologicalStage} />
                 )}
