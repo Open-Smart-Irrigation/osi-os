@@ -7,13 +7,14 @@ import { OnlineTab } from './OnlineTab';
 import { AgronomicTab } from './AgronomicTab';
 import { WaterTab } from './WaterTab';
 import { SoilTab } from './SoilTab';
+import { ForecastTab } from './ForecastTab';
 
 interface Props {
   zone: IrrigationZone;
   devices: Device[];
 }
 
-type Tab = 'water' | 'soil' | 'online' | 'agronomic' | 'sensors';
+type Tab = 'water' | 'soil' | 'online' | 'forecast' | 'agronomic' | 'sensors';
 
 const CloudIcon: React.FC<{ className?: string }> = ({ className }) => (
   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" className={className} aria-hidden="true">
@@ -106,6 +107,7 @@ export const EnvironmentCard: React.FC<Props> = ({ zone, devices }) => {
     { id: 'water', label: t('environment.tabs.water', { defaultValue: 'Water' }), available: true },
     { id: 'soil', label: t('environment.tabs.soil', { defaultValue: 'Soil' }), available: true },
     { id: 'online', label: t('environment.tabs.weather', { defaultValue: 'Weather' }), available: data?.online.available ?? true },
+    { id: 'forecast', label: t('environment.tabs.forecast', { defaultValue: 'Forecast' }), available: data?.forecast.available ?? true },
     { id: 'agronomic', label: t('environment.tabs.agronomic', { defaultValue: 'Agronomy' }), available: true },
     { id: 'sensors', label: t('environment.tabs.sensors', { defaultValue: 'Sensors' }), available: true },
   ];
@@ -179,6 +181,7 @@ export const EnvironmentCard: React.FC<Props> = ({ zone, devices }) => {
                 {activeTab === 'water' && <WaterTab water={data.water} />}
                 {activeTab === 'soil' && <SoilTab local={data.local} devices={devices} />}
                 {activeTab === 'online' && <OnlineTab online={data.online} location={data.location} />}
+                {activeTab === 'forecast' && <ForecastTab forecast={data.forecast} location={data.location} />}
                 {activeTab === 'agronomic' && (
                   <AgronomicTab agronomic={data.agronomic} cropType={cropType} phenologicalStage={phenologicalStage} />
                 )}
