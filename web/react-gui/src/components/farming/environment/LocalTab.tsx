@@ -81,9 +81,10 @@ const MetricCard: React.FC<{ metric: LocalMetric }> = ({ metric }) => {
 // ── Device breakdown ──────────────────────────────────────────────────────────
 
 const DEVICE_TYPE_BADGE: Record<string, string> = {
-  KIWI_SENSOR:  'bg-emerald-100 text-emerald-800',
-  DRAGINO_LSN50:'bg-sky-100 text-sky-800',
-  STREGA_VALVE: 'bg-purple-100 text-purple-800',
+  KIWI_SENSOR:     'bg-emerald-100 text-emerald-800',
+  TEKTELIC_CLOVER: 'bg-lime-100 text-lime-800',
+  DRAGINO_LSN50:   'bg-sky-100 text-sky-800',
+  STREGA_VALVE:    'bg-purple-100 text-purple-800',
 };
 
 const DeviceBreakdown: React.FC<{ local: LocalEnvironment }> = ({ local }) => {

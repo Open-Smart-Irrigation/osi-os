@@ -1,5 +1,5 @@
 // The specific supported hardware types
-export type DeviceType = 'KIWI_SENSOR' | 'STREGA_VALVE' | 'DRAGINO_LSN50';
+export type DeviceType = 'KIWI_SENSOR' | 'STREGA_VALVE' | 'DRAGINO_LSN50' | 'TEKTELIC_CLOVER';
 export type Lsn50Mode = 'MOD1' | 'MOD2' | 'MOD3' | 'MOD4' | 'MOD5' | 'MOD6' | 'MOD7' | 'MOD8' | 'MOD9';
 export type StregaModel = 'STANDARD' | 'MOTORIZED';
 

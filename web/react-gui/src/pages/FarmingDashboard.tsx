@@ -79,7 +79,7 @@ export const FarmingDashboard: React.FC = () => {
     return { devicesByZone: byZone, unassignedDevices: unassigned };
   }, [devices, zones]);
 
-  const unassignedSensors = unassignedDevices.filter((d) => d.type_id === 'KIWI_SENSOR');
+  const unassignedSensors = unassignedDevices.filter((d) => d.type_id === 'KIWI_SENSOR' || d.type_id === 'TEKTELIC_CLOVER');
   const unassignedValves = unassignedDevices.filter((d) => d.type_id === 'STREGA_VALVE');
   const unassignedLSN50 = unassignedDevices.filter((d) => d.type_id === 'DRAGINO_LSN50');
 

@@ -130,7 +130,7 @@ export const IrrigationZoneCard: React.FC<IrrigationZoneCardProps> = ({
     }
   };
 
-  const kiwiSensors = devices.filter((d) => d.type_id === 'KIWI_SENSOR');
+  const kiwiSensors = devices.filter((d) => d.type_id === 'KIWI_SENSOR' || d.type_id === 'TEKTELIC_CLOVER');
   const stregaValves = devices.filter((d) => d.type_id === 'STREGA_VALVE');
   const lsn50Nodes = devices.filter((d) => d.type_id === 'DRAGINO_LSN50');
 
