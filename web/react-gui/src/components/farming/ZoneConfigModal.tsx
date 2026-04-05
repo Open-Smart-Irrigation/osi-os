@@ -82,6 +82,9 @@ export const ZoneConfigModal: React.FC<Props> = ({ isOpen, zone, onClose, onSave
   const [deviceLocationLoading, setDeviceLocationLoading] = useState(false);
   const [deviceLocationError, setDeviceLocationError] = useState<string | null>(null);
   const [deviceLocationMeta, setDeviceLocationMeta] = useState<DeviceLocationCapture | null>(null);
+  const hasLegacyCrop = Boolean(
+    cropType && !CROP_GROUPS.some(group => group.crops.some(crop => crop.value === cropType))
+  );
 
   // Sync when zone prop changes (e.g. after onSaved refresh)
   useEffect(() => {
@@ -304,13 +307,13 @@ export const ZoneConfigModal: React.FC<Props> = ({ isOpen, zone, onClose, onSave
                 onChange={e => setCropType(e.target.value)}
                 className="flex-1 bg-[var(--surface)] border border-[var(--border)] text-[var(--text)] rounded-lg px-3 py-2 text-sm"
               >
-                <option value="">— Select crop —</option>
+                <option value="">— Select prediction crop —</option>
+                {hasLegacyCrop && <option value={cropType}>{cropType}</option>}
                 {CROP_GROUPS.map(g => (
                   <optgroup key={g.groupLabel} label={g.groupLabel}>
                     {g.crops.map(c => <option key={c.value} value={c.value}>{c.label}</option>)}
                   </optgroup>
                 ))}
-                <option value="other">Other / Custom</option>
               </select>
               <input
                 type="text"
