@@ -14,15 +14,6 @@ function formatValue(value: number | null | undefined, unit: string, digits = 1)
   return `${value.toFixed(digits)} ${unit}`;
 }
 
-function classifySoil(tensionKpa: number | null): string {
-  if (tensionKpa == null || !Number.isFinite(tensionKpa)) {
-    return 'No soil tension reading';
-  }
-  if (tensionKpa < 20) return 'Wet';
-  if (tensionKpa < 60) return 'Moderate';
-  return 'Dry';
-}
-
 export const SoilTab: React.FC<Props> = ({ local, devices }) => {
   const { t } = useTranslation('devices');
   const kiwiReadings = devices.flatMap((device) => {
@@ -34,55 +25,55 @@ export const SoilTab: React.FC<Props> = ({ local, devices }) => {
     : null;
   const soilMoistureMetric = local.metrics.find((metric) => metric.key === 'soil_moisture_pct');
   const soilTemperatureMetric = local.metrics.find((metric) => metric.key === 'soil_temperature_c');
-  const soilState = classifySoil(representativeSwt);
+
+  const hasSwt = representativeSwt != null;
+  const hasVwc = soilMoistureMetric != null;
+
+  const moistureLabel =
+    hasSwt && hasVwc ? 'Soil Moisture (SWT & VWC)' :
+    hasSwt           ? 'Soil Moisture (SWT)' :
+    hasVwc           ? 'Soil Moisture (VWC)' :
+                       'Soil Moisture';
 
   return (
-    <div className="flex flex-col gap-4">
-      <div className="grid grid-cols-1 gap-2 md:grid-cols-3">
+    <div className="flex flex-col gap-2">
+      <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
+        {/* Soil moisture — combined SWT / VWC tile */}
         <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-3">
           <p className="text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)]">
-            {t('environment.soil.soilNow', { defaultValue: 'Soil now' })}
+            {moistureLabel}
           </p>
-          <p className="mt-2 text-2xl font-bold text-[var(--text)]">
-            {representativeSwt != null ? `${representativeSwt.toFixed(1)} kPa` : '—'}
-          </p>
-          <p className="mt-1 text-sm text-[var(--text-secondary)]">{soilState}</p>
+          {hasSwt && hasVwc ? (
+            <div className="mt-2 flex items-baseline gap-3">
+              <span className="text-2xl font-bold tabular-nums text-[var(--text)]">
+                {representativeSwt!.toFixed(1)} kPa
+              </span>
+              <span className="text-2xl font-bold tabular-nums text-[var(--text)]">
+                {soilMoistureMetric!.median.toFixed(1)} %
+              </span>
+            </div>
+          ) : hasSwt ? (
+            <p className="mt-2 text-2xl font-bold tabular-nums text-[var(--text)]">
+              {representativeSwt!.toFixed(1)} kPa
+            </p>
+          ) : hasVwc ? (
+            <p className="mt-2 text-2xl font-bold tabular-nums text-[var(--text)]">
+              {soilMoistureMetric!.median.toFixed(1)} %
+            </p>
+          ) : (
+            <p className="mt-2 text-2xl font-bold text-[var(--text)]">—</p>
+          )}
         </div>
-        <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-3">
-          <p className="text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)]">
-            {t('environment.soil.moisture', { defaultValue: 'Soil moisture' })}
-          </p>
-          <p className="mt-2 text-2xl font-bold text-[var(--text)]">
-            {formatValue(soilMoistureMetric?.median, '%', 1)}
-          </p>
-          <p className="mt-1 text-sm text-[var(--text-secondary)]">
-            {soilMoistureMetric ? `${soilMoistureMetric.sampleCount} supporting sensors` : 'Available when local sensors report % moisture'}
-          </p>
-        </div>
+
+        {/* Soil temperature */}
         <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-3">
           <p className="text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)]">
             {t('environment.soil.temperature', { defaultValue: 'Soil temperature' })}
           </p>
-          <p className="mt-2 text-2xl font-bold text-[var(--text)]">
+          <p className="mt-2 text-2xl font-bold tabular-nums text-[var(--text)]">
             {formatValue(soilTemperatureMetric?.median, '°C', 1)}
           </p>
-          <p className="mt-1 text-sm text-[var(--text-secondary)]">
-            {local.observedAt
-              ? `Updated ${new Date(local.observedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`
-              : 'Waiting for fresh local readings'}
-          </p>
         </div>
-      </div>
-
-      <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
-        <p className="text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)]">
-          {t('environment.soil.interpretation', { defaultValue: 'Interpretation' })}
-        </p>
-        <p className="mt-2 text-sm text-[var(--text-secondary)]">
-          {representativeSwt != null
-            ? `${soilState} soil tension based on the active Kiwi sensors. Use this as supporting evidence alongside the water balance and dendrometer recommendation.`
-            : 'Soil tension appears when Kiwi sensors report SWT readings. Until then, the water tab stays the main decision view.'}
-        </p>
       </div>
     </div>
   );
