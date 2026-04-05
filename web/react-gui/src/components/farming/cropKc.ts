@@ -1,11 +1,8 @@
+import predictionCropCatalog from './predictionCropCatalog.json';
+
 /**
- * FAO-56 Penman-Monteith crop coefficient (Kc) reference data.
- * Source: Allen et al. (1998) Crop Evapotranspiration —
- *         FAO Irrigation and Drainage Paper No. 56, Table 12.
- *
- * Kc_ini  = initial growth stage (crop establishment)
- * Kc_mid  = mid-season (full canopy, peak demand)
- * Kc_end  = late season (senescence / post-harvest)
+ * FAO-56 Penman-Monteith crop coefficient (Kc) reference data aligned with the
+ * server-side prediction crop catalog.
  */
 
 export interface CropEntry {
@@ -21,56 +18,44 @@ export interface CropGroup {
   crops: CropEntry[];
 }
 
-// ── FAO-56 Kc table ───────────────────────────────────────────────────────────
+interface PredictionCropCatalogEntry {
+  code: string;
+  displayName: string;
+  groupLabel: string;
+  kcIni: number;
+  kcMid: number;
+  kcEnd: number;
+}
 
-export const CROP_GROUPS: CropGroup[] = [
-  {
-    groupLabel: 'Field Crops',
-    crops: [
-      { value: 'maize',      label: 'Maize / Corn', kc_ini: 0.30, kc_mid: 1.20, kc_end: 0.35 },
-      { value: 'wheat',      label: 'Wheat',        kc_ini: 0.30, kc_mid: 1.15, kc_end: 0.30 },
-      { value: 'potato',     label: 'Potato',       kc_ini: 0.50, kc_mid: 1.15, kc_end: 0.75 },
-      { value: 'sugar_beet', label: 'Sugar Beet',   kc_ini: 0.35, kc_mid: 1.20, kc_end: 0.70 },
-    ],
-  },
-  {
-    groupLabel: 'Vegetables',
-    crops: [
-      { value: 'tomato',  label: 'Tomato',  kc_ini: 0.60, kc_mid: 1.15, kc_end: 0.70 },
-      { value: 'cabbage', label: 'Cabbage', kc_ini: 0.45, kc_mid: 1.05, kc_end: 0.90 },
-    ],
-  },
-  {
-    groupLabel: 'Fruit Trees',
-    crops: [
-      { value: 'apple', label: 'Apple', kc_ini: 0.45, kc_mid: 0.95, kc_end: 0.70 },
-    ],
-  },
-];
+const PREDICTION_CROPS = predictionCropCatalog as PredictionCropCatalogEntry[];
+const GROUP_ORDER = Array.from(new Set(PREDICTION_CROPS.map((crop) => crop.groupLabel)));
 
-// ── Flat lookup map ───────────────────────────────────────────────────────────
+export const CROP_GROUPS: CropGroup[] = GROUP_ORDER.map((groupLabel) => ({
+  groupLabel,
+  crops: PREDICTION_CROPS
+    .filter((crop) => crop.groupLabel === groupLabel)
+    .map((crop) => ({
+      value: crop.code,
+      label: crop.displayName,
+      kc_ini: crop.kcIni,
+      kc_mid: crop.kcMid,
+      kc_end: crop.kcEnd,
+    })),
+})).filter((group) => group.crops.length > 0);
 
 const KC_MAP: Record<string, CropEntry> = Object.fromEntries(
-  CROP_GROUPS.flatMap(g => g.crops).map(c => [c.value, c])
+  CROP_GROUPS.flatMap((group) => group.crops).map((crop) => [crop.value, crop])
 );
 
-// ── Phenological stage → FAO growth stage ────────────────────────────────────
-
 const STAGE_KC_KEY: Record<string, keyof Pick<CropEntry, 'kc_ini' | 'kc_mid' | 'kc_end'>> = {
-  dormancy:  'kc_end',   // minimal water use, closest to late season
-  budbreak:  'kc_ini',   // early establishment / initial stage
-  fruitset:  'kc_mid',   // rapid development into mid-season
-  veraison:  'kc_mid',   // peak demand
-  harvest:   'kc_end',   // senescence / post-harvest
-  default:   'kc_mid',   // conservative: peak demand as default
+  dormancy: 'kc_end',
+  budbreak: 'kc_ini',
+  fruitset: 'kc_mid',
+  veraison: 'kc_mid',
+  harvest: 'kc_end',
+  default: 'kc_mid',
 };
 
-// ── Public helpers ────────────────────────────────────────────────────────────
-
-/**
- * Look up FAO-56 Kc for the given crop and phenological stage.
- * Returns null if crop is unknown.
- */
 export function getCropKc(
   cropType: string | null | undefined,
   phenologicalStage: string | null | undefined,
@@ -82,17 +67,14 @@ export function getCropKc(
   return entry[key];
 }
 
-/**
- * Get the CropEntry for a given crop type value, or null.
- */
 export function getCropEntry(cropType: string | null | undefined): CropEntry | null {
   if (!cropType) return null;
   return KC_MAP[cropType] ?? null;
 }
 
-/** Flat list for a simple <select> without groups (fallback). */
 export const CROP_OPTIONS_FLAT: Array<{ value: string; label: string }> = [
   { value: '', label: '— Select crop —' },
-  ...CROP_GROUPS.flatMap(g => g.crops.map(c => ({ value: c.value, label: c.label }))),
-  { value: 'other', label: 'Other / Custom' },
+  ...CROP_GROUPS.flatMap((group) => group.crops.map((crop) => ({ value: crop.value, label: crop.label }))),
 ];
+
+export const PREDICTION_CROP_CODES = PREDICTION_CROPS.map((crop) => crop.code);

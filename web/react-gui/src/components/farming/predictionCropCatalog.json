@@ -1,0 +1,58 @@
+[
+  {
+    "code": "maize",
+    "displayName": "Maize",
+    "groupLabel": "Field Crops",
+    "kcIni": 0.30,
+    "kcMid": 1.20,
+    "kcEnd": 0.35
+  },
+  {
+    "code": "wheat",
+    "displayName": "Wheat",
+    "groupLabel": "Field Crops",
+    "kcIni": 0.30,
+    "kcMid": 1.15,
+    "kcEnd": 0.30
+  },
+  {
+    "code": "potato",
+    "displayName": "Potato",
+    "groupLabel": "Field Crops",
+    "kcIni": 0.50,
+    "kcMid": 1.15,
+    "kcEnd": 0.75
+  },
+  {
+    "code": "sugar_beet",
+    "displayName": "Sugar Beet",
+    "groupLabel": "Field Crops",
+    "kcIni": 0.35,
+    "kcMid": 1.20,
+    "kcEnd": 0.70
+  },
+  {
+    "code": "tomato",
+    "displayName": "Tomato",
+    "groupLabel": "Vegetables",
+    "kcIni": 0.60,
+    "kcMid": 1.15,
+    "kcEnd": 0.70
+  },
+  {
+    "code": "cabbage",
+    "displayName": "Cabbage",
+    "groupLabel": "Vegetables",
+    "kcIni": 0.45,
+    "kcMid": 1.05,
+    "kcEnd": 0.90
+  },
+  {
+    "code": "apple",
+    "displayName": "Apple",
+    "groupLabel": "Fruit Trees",
+    "kcIni": 0.45,
+    "kcMid": 0.95,
+    "kcEnd": 0.70
+  }
+]
