@@ -83,11 +83,14 @@ export const SystemPanel: React.FC = () => {
   };
 
   return (
-    <div className="bg-[var(--surface)] border-2 border-[var(--border)] rounded-xl p-6">
+    <div className="bg-[var(--surface)] border border-[var(--border)] rounded-xl p-4 shadow-sm">
       {/* Header */}
-      <div className="flex items-center justify-between mb-5">
-        <h2 className="text-2xl font-bold text-[var(--text)]">Gateway</h2>
-        <div className="flex items-center gap-3">
+      <div className="flex items-center justify-between mb-4">
+        <div>
+          <h2 className="text-base font-semibold text-[var(--text)]">Gateway</h2>
+          <p className="text-xs text-[var(--text-tertiary)]">System status</p>
+        </div>
+        <div className="flex items-center gap-2">
           {lastUpdated && (
             <span className="text-[var(--text-tertiary)] text-xs">
               Updated {lastUpdated.toLocaleTimeString()}
@@ -96,7 +99,7 @@ export const SystemPanel: React.FC = () => {
           <button
             onClick={fetchStats}
             disabled={loading}
-            className="bg-[var(--card)] hover:bg-[var(--border)] text-[var(--text)] px-3 py-1.5 rounded-lg text-sm font-semibold transition-colors disabled:opacity-50"
+            className="px-2.5 py-1.5 rounded-md bg-[var(--card)] hover:bg-[var(--border)] text-[var(--text)] text-sm font-semibold transition-colors disabled:opacity-50"
           >
             ↻ Refresh
           </button>
@@ -116,15 +119,15 @@ export const SystemPanel: React.FC = () => {
       )}
 
       {stats && (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
 
           {/* CPU Temperature */}
-          <div className="bg-[var(--card)] rounded-xl p-4">
-            <p className="text-[var(--text-tertiary)] text-xs font-semibold mb-2">CPU TEMPERATURE</p>
-            <p className="text-4xl font-bold" style={{ color: tempColor(stats.cpu_temp_c) }}>
+          <div className="bg-[var(--card)] rounded-lg p-3">
+            <p className="text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)] mb-1">CPU TEMPERATURE</p>
+            <p className="text-2xl font-bold tabular-nums" style={{ color: tempColor(stats.cpu_temp_c) }}>
               {stats.cpu_temp_c.toFixed(1)}°C
             </p>
-            <div className="mt-3 h-2 bg-[var(--border)] rounded-full overflow-hidden">
+            <div className="mt-2 h-2 bg-[var(--border)] rounded-full overflow-hidden">
               <div
                 className="h-full rounded-full transition-all duration-500"
                 style={{
@@ -137,10 +140,10 @@ export const SystemPanel: React.FC = () => {
           </div>
 
           {/* Memory */}
-          <div className="bg-[var(--card)] rounded-xl p-4">
-            <p className="text-[var(--text-tertiary)] text-xs font-semibold mb-2">MEMORY</p>
-            <p className="text-4xl font-bold text-[var(--text)]">{stats.mem_percent}%</p>
-            <div className="mt-3 h-2 bg-[var(--border)] rounded-full overflow-hidden">
+          <div className="bg-[var(--card)] rounded-lg p-3">
+            <p className="text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)] mb-1">MEMORY</p>
+            <p className="text-2xl font-bold tabular-nums text-[var(--text)]">{stats.mem_percent}%</p>
+            <div className="mt-2 h-2 bg-[var(--border)] rounded-full overflow-hidden">
               <div
                 className="h-full rounded-full bg-[var(--primary)] transition-all duration-500"
                 style={{ width: `${stats.mem_percent}%` }}
@@ -152,17 +155,17 @@ export const SystemPanel: React.FC = () => {
           </div>
 
           {/* CPU Load */}
-          <div className="bg-[var(--card)] rounded-xl p-4">
-            <p className="text-[var(--text-tertiary)] text-xs font-semibold mb-2">
+          <div className="bg-[var(--card)] rounded-lg p-3">
+            <p className="text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)] mb-1">
               CPU LOAD ({stats.cpu_count} cores)
             </p>
             <p
-              className="text-4xl font-bold"
+              className="text-2xl font-bold tabular-nums"
               style={{ color: loadColor(stats.load_1, stats.cpu_count) }}
             >
               {stats.load_1.toFixed(2)}
             </p>
-            <div className="mt-3 flex gap-2 text-xs text-[var(--text-tertiary)]">
+            <div className="mt-2 flex gap-2 text-xs text-[var(--text-tertiary)]">
               <span>1m: <strong className="text-[var(--text)]">{stats.load_1.toFixed(2)}</strong></span>
               <span>5m: <strong className="text-[var(--text)]">{stats.load_5.toFixed(2)}</strong></span>
               <span>15m: <strong className="text-[var(--text)]">{stats.load_15.toFixed(2)}</strong></span>
@@ -170,11 +173,11 @@ export const SystemPanel: React.FC = () => {
           </div>
 
           {/* Fan Control */}
-          <div className="bg-[var(--card)] rounded-xl p-4">
-            <p className="text-[var(--text-tertiary)] text-xs font-semibold mb-2">FAN CONTROL</p>
+          <div className="bg-[var(--card)] rounded-lg p-3">
+            <p className="text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)] mb-1">FAN CONTROL</p>
             {stats.fan_available ? (
               <>
-                <p className="text-[var(--text)] text-sm mb-3">
+                <p className="text-[var(--text)] text-sm mb-2">
                   Current: <strong>{fanSpeed === 0 ? 'Off' : fanSpeed >= 255 ? 'Max' : fanSpeed}</strong>
                   {stats.fan_mode === 'pwm' && <span className="text-[var(--text-tertiary)]"> / 255</span>}
                 </p>
@@ -206,7 +209,7 @@ export const SystemPanel: React.FC = () => {
       )}
 
       {/* Reboot */}
-      <div className="mt-5 pt-4 border-t border-[var(--border)] flex items-center gap-4 flex-wrap">
+      <div className="mt-4 pt-3 border-t border-[var(--border)] flex items-center gap-3 flex-wrap">
         {rebootMsg ? (
           <p className="text-[var(--warn-text)] text-sm font-semibold">{rebootMsg}</p>
         ) : showRebootConfirm ? (

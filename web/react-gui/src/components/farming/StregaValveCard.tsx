@@ -530,24 +530,21 @@ export const StregaValveCard: React.FC<StregaValveCardProps> = ({ device, onUpda
   };
 
   return (
-    <div className="bg-[var(--surface)] border-2 border-[var(--border)] hover:border-[var(--focus)] rounded-xl p-6 shadow-lg transition-all">
-      <div className="flex items-start justify-between mb-4">
-        <div className="flex-1">
-          <h3 className="text-2xl font-bold text-[var(--text)] mb-1 high-contrast-text">
-            {device.name}
-          </h3>
-          <p className="text-[var(--text-secondary)] text-sm">{device.deveui}</p>
-        </div>
-        <div className="flex items-start gap-2 relative">
-          <div className="bg-[var(--primary)] text-white px-3 py-1 rounded-lg text-sm font-semibold">
+    <div className="bg-[var(--surface)] border border-[var(--border)] hover:border-[var(--focus)] rounded-xl p-4 shadow-sm transition-colors">
+      <div className="flex items-center justify-between gap-2 mb-0.5">
+        <h3 className="text-base font-semibold text-[var(--text)] truncate leading-tight">
+          {device.name}
+        </h3>
+        <div className="flex items-center gap-1.5 shrink-0 relative">
+          <span className="bg-violet-100 text-violet-800 px-2 py-0.5 rounded-md text-xs font-semibold tracking-wide">
             {t('stregaValve.badge')}
-          </div>
+          </span>
           <button
             onClick={() => setShowConfig(v => !v)}
-            className={`px-3 py-1 rounded-lg text-sm font-semibold transition-colors ${
+            className={`p-1.5 rounded-md transition-colors ${
               showConfig
                 ? 'bg-[var(--primary)] text-white'
-                : 'bg-[var(--card)] text-[var(--text-tertiary)] hover:bg-[var(--border)]'
+                : 'text-[var(--text-tertiary)] hover:bg-[var(--card)] hover:text-[var(--text)]'
             }`}
             title={t('stregaValve.settings')}
           >
@@ -563,13 +560,14 @@ export const StregaValveCard: React.FC<StregaValveCardProps> = ({ device, onUpda
           <button
             onClick={() => setShowConfirm(true)}
             disabled={isRemoving || loading !== null}
-            className="bg-[var(--error-bg)] hover:bg-[var(--error-bg)] disabled:bg-[var(--border)] text-[var(--error-text)] px-3 py-1 rounded-lg text-sm font-semibold transition-colors disabled:cursor-not-allowed disabled:text-[var(--text-disabled)]"
+            className="p-1.5 rounded-md bg-[var(--error-bg)] text-[var(--error-text)] hover:opacity-80 transition-opacity disabled:opacity-40 disabled:cursor-not-allowed"
             title="Remove device"
           >
             ✕
           </button>
         </div>
       </div>
+      <p className="text-xs text-[var(--text-tertiary)] font-mono mb-3 truncate">{device.deveui}</p>
 
       {error && (
         <div className="bg-[var(--error-bg)] border border-[var(--error-bg)] text-[var(--error-text)] px-3 py-2 rounded-lg mb-4 text-sm">
@@ -607,16 +605,16 @@ export const StregaValveCard: React.FC<StregaValveCardProps> = ({ device, onUpda
         </div>
       )}
 
-      <div className="bg-[var(--card)] rounded-lg p-6 mb-6">
-        <p className="text-[var(--text-tertiary)] text-sm font-semibold mb-3">{t('stregaValve.status')}</p>
-        <div className="flex items-center gap-3">
+      <div className="bg-[var(--card)] rounded-lg p-3 mb-4">
+        <p className="text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)] mb-2">{t('stregaValve.status')}</p>
+        <div className="flex items-center gap-2">
           <div
-            className={`w-6 h-6 rounded-full ${
+            className={`w-3 h-3 rounded-full shrink-0 ${
               isOpen ? 'bg-[var(--toggle-on)] animate-pulse' : 'bg-[var(--toggle-off)]'
             }`}
           />
           <p
-            className={`text-3xl font-bold ${
+            className={`text-2xl font-bold tabular-nums ${
               isOpen ? 'text-[var(--toggle-on)]' : 'text-[var(--text-tertiary)]'
             }`}
           >
@@ -624,17 +622,17 @@ export const StregaValveCard: React.FC<StregaValveCardProps> = ({ device, onUpda
           </p>
         </div>
         {device.target_state && device.target_state !== device.current_state && (
-          <p className="text-[var(--text-secondary)] text-sm mt-2">
+          <p className="text-xs text-[var(--text-secondary)] mt-1">
             {t('stregaValve.target', { state: device.target_state })}
           </p>
         )}
       </div>
 
-      <div className="grid grid-cols-2 gap-4">
+      <div className="grid grid-cols-2 gap-3">
         <button
           onClick={() => handleAction('OPEN')}
           disabled={loading !== null}
-          className="bg-[var(--primary)] hover:bg-[var(--primary-hover)] disabled:bg-[var(--border)] text-white font-bold text-lg py-4 touch-target rounded-lg transition-colors shadow-lg disabled:cursor-not-allowed disabled:text-[var(--text-disabled)] flex items-center justify-center gap-2"
+          className="bg-[var(--primary)] hover:bg-[var(--primary-hover)] disabled:bg-[var(--border)] text-white font-bold text-base py-3 touch-target rounded-lg transition-colors disabled:cursor-not-allowed disabled:text-[var(--text-disabled)] flex items-center justify-center gap-2"
         >
           {loading === 'OPEN' ? (
             <>
@@ -648,7 +646,7 @@ export const StregaValveCard: React.FC<StregaValveCardProps> = ({ device, onUpda
         <button
           onClick={() => handleAction('CLOSE')}
           disabled={loading !== null}
-          className="bg-[var(--secondary-bg)] hover:bg-[var(--border)] disabled:bg-[var(--border)] text-[var(--text)] font-bold text-lg py-4 touch-target rounded-lg transition-colors shadow-lg disabled:cursor-not-allowed disabled:text-[var(--text-disabled)] flex items-center justify-center gap-2"
+          className="bg-[var(--secondary-bg)] hover:bg-[var(--border)] disabled:bg-[var(--border)] text-[var(--text)] font-bold text-base py-3 touch-target rounded-lg transition-colors disabled:cursor-not-allowed disabled:text-[var(--text-disabled)] flex items-center justify-center gap-2"
         >
           {loading === 'CLOSE' ? (
             <>
@@ -661,8 +659,8 @@ export const StregaValveCard: React.FC<StregaValveCardProps> = ({ device, onUpda
         </button>
       </div>
 
-      <div className="mt-4 pt-4 border-t border-[var(--border)]">
-        <p className="text-[var(--text-tertiary)] text-sm">
+      <div className="mt-3 pt-3 border-t border-[var(--border)]">
+        <p className="text-xs text-[var(--text-tertiary)]">
           {minutesAgo !== null
             ? t('stregaValve.lastSeen', { minutes: minutesAgo })
             : t('stregaValve.neverSeen', { defaultValue: 'Never seen' })}

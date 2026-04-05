@@ -198,12 +198,12 @@ export const KiwiSensorCard: React.FC<KiwiSensorCardProps> = ({ device, onRemove
   const renderValue = (field: string, formatted: string | null) => {
     const sensor = SENSOR_BY_FIELD[field];
     if (!formatted || !sensor) {
-      return <p className="text-4xl font-bold text-[var(--text)]">{formatted ?? tc('na')}</p>;
+      return <p className="text-2xl font-bold text-[var(--text)] tabular-nums">{formatted ?? tc('na')}</p>;
     }
     return (
       <button
         onClick={() => setMonitor(sensor)}
-        className="text-4xl font-bold text-[var(--text)] hover:text-[var(--primary)] transition-colors text-left underline decoration-dotted underline-offset-4 cursor-pointer"
+        className="text-2xl font-bold tabular-nums text-[var(--text)] hover:text-[var(--primary)] transition-colors text-left underline decoration-dotted underline-offset-4 cursor-pointer"
         title="View history"
       >
         {formatted}
@@ -212,24 +212,21 @@ export const KiwiSensorCard: React.FC<KiwiSensorCardProps> = ({ device, onRemove
   };
 
   return (
-    <div className="rounded-xl p-6 border-2 shadow-lg transition-all bg-[var(--surface)] border-[var(--border)] hover:border-[var(--focus)]">
-      <div className="flex items-start justify-between mb-4">
-        <div className="flex-1">
-          <h3 className="text-2xl font-bold text-[var(--text)] mb-1 high-contrast-text">
-            {device.name}
-          </h3>
-          <p className="text-[var(--text-secondary)] text-sm">{device.deveui}</p>
-        </div>
-        <div className="flex items-start gap-2 relative">
-          <div className="bg-[var(--primary)] text-white px-3 py-1 rounded-lg text-sm font-semibold">
+    <div className="rounded-xl p-4 border shadow-sm transition-colors bg-[var(--surface)] border-[var(--border)] hover:border-[var(--focus)]">
+      <div className="flex items-center justify-between gap-2 mb-0.5">
+        <h3 className="text-base font-semibold text-[var(--text)] truncate leading-tight">
+          {device.name}
+        </h3>
+        <div className="flex items-center gap-1.5 shrink-0 relative">
+          <span className="bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded-md text-xs font-semibold tracking-wide">
             {t('kiwiSensor.badge')}
-          </div>
+          </span>
           <button
             onClick={() => setShowConfig(v => !v)}
-            className={`touch-target px-3 py-2 rounded-lg text-sm font-semibold transition-colors ${
+            className={`p-1.5 rounded-md transition-colors ${
               showConfig
                 ? 'bg-[var(--primary)] text-white'
-                : 'bg-[var(--card)] text-[var(--text-tertiary)] hover:bg-[var(--border)]'
+                : 'text-[var(--text-tertiary)] hover:bg-[var(--card)] hover:text-[var(--text)]'
             }`}
             title={t('kiwiSensor.settings')}
           >
@@ -245,13 +242,14 @@ export const KiwiSensorCard: React.FC<KiwiSensorCardProps> = ({ device, onRemove
           <button
             onClick={() => setShowConfirm(true)}
             disabled={isRemoving}
-            className="touch-target bg-[var(--error-bg)] hover:bg-red-700 disabled:bg-[var(--border)] text-[var(--error-text)] px-3 py-2 rounded-lg text-sm font-semibold transition-colors disabled:cursor-not-allowed disabled:text-[var(--text-disabled)]"
+            className="p-1.5 rounded-md bg-[var(--error-bg)] text-[var(--error-text)] hover:opacity-80 transition-opacity disabled:opacity-40 disabled:cursor-not-allowed"
             title="Remove device"
           >
             ✕
           </button>
         </div>
       </div>
+      <p className="text-xs text-[var(--text-tertiary)] font-mono mb-3 truncate">{device.deveui}</p>
 
       {error && (
         <div className="bg-[var(--error-bg)] border border-[var(--error-bg)] text-[var(--error-text)] px-3 py-2 rounded-lg mb-4 text-sm">
@@ -289,17 +287,17 @@ export const KiwiSensorCard: React.FC<KiwiSensorCardProps> = ({ device, onRemove
         </div>
       )}
 
-      <div className="grid grid-cols-1 gap-4">
-        <div className="bg-[var(--card)] rounded-lg p-4">
-          <p className="text-[var(--text-tertiary)] text-sm font-semibold mb-1">
+      <div className="grid grid-cols-1 gap-3">
+        <div className="bg-[var(--card)] rounded-lg p-3">
+          <p className="text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)] mb-1">
             {t('kiwiSensor.soilWaterTension1')}
           </p>
           {renderValue('swt_wm1', swt_wm1 !== undefined ? `${swt_wm1.toFixed(1)} kPa` : null)}
         </div>
 
         {swt_wm2 !== undefined && (
-          <div className="bg-[var(--card)] rounded-lg p-4">
-            <p className="text-[var(--text-tertiary)] text-sm font-semibold mb-1">
+          <div className="bg-[var(--card)] rounded-lg p-3">
+            <p className="text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)] mb-1">
               {t('kiwiSensor.soilWaterTension2')}
             </p>
             {renderValue('swt_wm2', `${swt_wm2.toFixed(1)} kPa`)}
@@ -307,16 +305,16 @@ export const KiwiSensorCard: React.FC<KiwiSensorCardProps> = ({ device, onRemove
         )}
 
         {light_lux !== undefined && (
-          <div className="bg-[var(--card)] rounded-lg p-4">
-            <p className="text-[var(--text-tertiary)] text-sm font-semibold mb-1">
+          <div className="bg-[var(--card)] rounded-lg p-3">
+            <p className="text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)] mb-1">
               {t('kiwiSensor.lightIntensity')}
             </p>
             {renderValue('light_lux', `${light_lux.toFixed(0)} lux`)}
           </div>
         )}
 
-        <div className="bg-[var(--card)] rounded-lg p-4">
-          <p className="text-[var(--text-tertiary)] text-sm font-semibold mb-1">{t('kiwiSensor.ambientTemperature')}</p>
+        <div className="bg-[var(--card)] rounded-lg p-3">
+          <p className="text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)] mb-1">{t('kiwiSensor.ambientTemperature')}</p>
           {renderValue(
             'ambient_temperature',
             ambient_temperature !== undefined && ambient_temperature !== null
@@ -325,8 +323,8 @@ export const KiwiSensorCard: React.FC<KiwiSensorCardProps> = ({ device, onRemove
           )}
         </div>
 
-        <div className="bg-[var(--card)] rounded-lg p-4">
-          <p className="text-[var(--text-tertiary)] text-sm font-semibold mb-1">{t('kiwiSensor.relativeHumidity')}</p>
+        <div className="bg-[var(--card)] rounded-lg p-3">
+          <p className="text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)] mb-1">{t('kiwiSensor.relativeHumidity')}</p>
           {renderValue(
             'relative_humidity',
             relative_humidity !== undefined && relative_humidity !== null
@@ -336,8 +334,8 @@ export const KiwiSensorCard: React.FC<KiwiSensorCardProps> = ({ device, onRemove
         </div>
       </div>
 
-      <div className="mt-4 pt-4 border-t border-[var(--border)]">
-        <p className="text-[var(--text-tertiary)] text-sm">
+      <div className="mt-3 pt-3 border-t border-[var(--border)]">
+        <p className="text-xs text-[var(--text-tertiary)]">
           {minutesAgo !== null
             ? t('kiwiSensor.lastSeen', { minutes: minutesAgo })
             : t('kiwiSensor.neverSeen', { defaultValue: 'Never seen' })}

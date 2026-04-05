@@ -480,23 +480,20 @@ export const DraginoTempCard: React.FC<DraginoTempCardProps> = ({ device, onRemo
     '#ef4444';
 
   return (
-    <div className="rounded-xl border-2 border-[var(--border)] bg-[var(--surface)] p-6 shadow-lg transition-all hover:border-[var(--focus)]">
-      <div className="mb-4 flex items-start justify-between">
-        <div className="flex-1">
-          <h3 className="mb-1 text-2xl font-bold text-[var(--text)] high-contrast-text">{device.name}</h3>
-          <p className="text-sm text-[var(--text-secondary)]">{device.deveui}</p>
-        </div>
-        <div className="relative flex items-start gap-2">
-          <div className="rounded-lg bg-[var(--primary)] px-3 py-1 text-sm font-semibold text-white">
+    <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-4 shadow-sm transition-colors hover:border-[var(--focus)]">
+      <div className="flex items-center justify-between gap-2 mb-0.5">
+        <h3 className="text-base font-semibold text-[var(--text)] truncate leading-tight">{device.name}</h3>
+        <div className="relative flex items-center gap-1.5 shrink-0">
+          <span className="bg-sky-100 text-sky-800 px-2 py-0.5 rounded-md text-xs font-semibold tracking-wide">
             LSN50
-          </div>
+          </span>
           <button
             onClick={() => setShowConfig((value) => !value)}
             title="Configure active sensors"
-            className={`rounded-lg px-3 py-1 text-sm font-semibold transition-colors ${
+            className={`p-1.5 rounded-md transition-colors ${
               showConfig
                 ? 'bg-[var(--primary)] text-white'
-                : 'bg-[var(--card)] text-[var(--text-tertiary)] hover:bg-[var(--border)]'
+                : 'text-[var(--text-tertiary)] hover:bg-[var(--card)] hover:text-[var(--text)]'
             }`}
           >
             ⚙
@@ -511,13 +508,14 @@ export const DraginoTempCard: React.FC<DraginoTempCardProps> = ({ device, onRemo
           <button
             onClick={() => setShowConfirm(true)}
             disabled={isRemoving}
-            className="rounded-lg bg-[var(--error-bg)] px-3 py-1 text-sm font-semibold text-[var(--error-text)] transition-colors disabled:cursor-not-allowed disabled:bg-[var(--border)] disabled:text-[var(--text-disabled)]"
+            className="p-1.5 rounded-md bg-[var(--error-bg)] text-[var(--error-text)] hover:opacity-80 transition-opacity disabled:opacity-40 disabled:cursor-not-allowed"
             title="Remove device"
           >
             ✕
           </button>
         </div>
       </div>
+      <p className="text-xs text-[var(--text-tertiary)] font-mono mb-3 truncate">{device.deveui}</p>
 
       {error && (
         <div className="mb-4 rounded-lg border border-[var(--error-bg)] bg-[var(--error-bg)] px-3 py-2 text-sm text-[var(--error-text)]">
@@ -553,30 +551,30 @@ export const DraginoTempCard: React.FC<DraginoTempCardProps> = ({ device, onRemo
         </div>
       )}
 
-      <div className="grid grid-cols-1 gap-4">
+      <div className="grid grid-cols-1 gap-3">
         {tempEnabled && (
-          <div className="rounded-lg bg-[var(--card)] p-4">
-            <p className="mb-1 text-sm font-semibold text-[var(--text-tertiary)]">TEMPERATURE</p>
+          <div className="rounded-lg bg-[var(--card)] p-3">
+            <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)]">TEMPERATURE</p>
             {data?.ext_temperature_c != null ? (
               <button
                 onClick={() => setSensorMonitor({ field: 'ext_temperature_c', label: 'Temperature', unit: '°C', color: '#f97316', decimals: 1 })}
-                className="cursor-pointer text-left text-4xl font-bold text-[var(--text)] underline decoration-dotted underline-offset-4 transition-colors hover:text-[var(--primary)]"
+                className="cursor-pointer text-left text-2xl font-bold tabular-nums text-[var(--text)] underline decoration-dotted underline-offset-4 transition-colors hover:text-[var(--primary)]"
                 title="View history"
               >
                 {data.ext_temperature_c.toFixed(1)} °C
               </button>
             ) : (
-              <p className="text-4xl font-bold text-[var(--text)]">—</p>
+              <p className="text-2xl font-bold tabular-nums text-[var(--text)]">—</p>
             )}
           </div>
         )}
 
         {data?.bat_v != null && (
-          <div className="rounded-lg bg-[var(--card)] p-4">
-            <p className="mb-1 text-sm font-semibold text-[var(--text-tertiary)]">BATTERY</p>
+          <div className="rounded-lg bg-[var(--card)] p-3">
+            <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)]">BATTERY</p>
             <button
               onClick={() => setSensorMonitor({ field: 'bat_v', label: 'Battery Voltage', unit: 'V', color: '#22c55e', decimals: 2 })}
-              className="cursor-pointer text-left text-4xl font-bold underline decoration-dotted underline-offset-4 transition-opacity hover:opacity-75"
+              className="cursor-pointer text-left text-2xl font-bold tabular-nums underline decoration-dotted underline-offset-4 transition-opacity hover:opacity-75"
               style={{ color: batColour }}
               title="View history"
             >
@@ -586,9 +584,9 @@ export const DraginoTempCard: React.FC<DraginoTempCardProps> = ({ device, onRemo
         )}
 
         {rainEnabled && (
-          <div className="rounded-lg bg-[var(--card)] p-4">
-            <p className="mb-1 text-sm font-semibold text-[var(--text-tertiary)]">Rain Gauge</p>
-            <p className="mb-2 text-sm text-[var(--text-secondary)]">
+          <div className="rounded-lg bg-[var(--card)] p-3">
+            <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)]">Rain Gauge</p>
+            <p className="mb-2 text-xs text-[var(--text-secondary)]">
               Today:{' '}
               <span className="font-semibold text-[var(--text)]">
                 {data?.rain_mm_today != null ? `${data.rain_mm_today.toFixed(1)} mm` : '—'}
@@ -607,7 +605,7 @@ export const DraginoTempCard: React.FC<DraginoTempCardProps> = ({ device, onRemo
                   { field: 'rain_mm_delta', label: 'This interval', unit: 'mm', color: '#0ea5e9', decimals: 1 },
                 ],
               })}
-              className="cursor-pointer text-left text-4xl font-bold text-[var(--text)] underline decoration-dotted underline-offset-4 transition-colors hover:text-[var(--primary)]"
+              className="cursor-pointer text-left text-2xl font-bold tabular-nums text-[var(--text)] underline decoration-dotted underline-offset-4 transition-colors hover:text-[var(--primary)]"
               title="View history"
             >
               {data?.rain_mm_delta != null ? `${data.rain_mm_delta.toFixed(1)} mm` : '—'}
@@ -624,9 +622,9 @@ export const DraginoTempCard: React.FC<DraginoTempCardProps> = ({ device, onRemo
         )}
 
         {flowEnabled && (
-          <div className="rounded-lg bg-[var(--card)] p-4">
-            <p className="mb-1 text-sm font-semibold text-[var(--text-tertiary)]">Flow Meter</p>
-            <p className="mb-2 text-sm text-[var(--text-secondary)]">
+          <div className="rounded-lg bg-[var(--card)] p-3">
+            <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)]">Flow Meter</p>
+            <p className="mb-2 text-xs text-[var(--text-secondary)]">
               Today:{' '}
               <span className="font-semibold text-[var(--text)]">
                 {data?.flow_liters_today != null ? `${data.flow_liters_today.toFixed(0)} L` : '—'}
@@ -645,7 +643,7 @@ export const DraginoTempCard: React.FC<DraginoTempCardProps> = ({ device, onRemo
                   { field: 'flow_liters_delta', label: 'This interval', unit: 'L', color: '#4f46e5', decimals: 0 },
                 ],
               })}
-              className="cursor-pointer text-left text-4xl font-bold text-[var(--text)] underline decoration-dotted underline-offset-4 transition-colors hover:text-[var(--primary)]"
+              className="cursor-pointer text-left text-2xl font-bold tabular-nums text-[var(--text)] underline decoration-dotted underline-offset-4 transition-colors hover:text-[var(--primary)]"
               title="View history"
             >
               {data?.flow_liters_delta != null ? `${data.flow_liters_delta.toFixed(0)} L` : '—'}
@@ -662,19 +660,19 @@ export const DraginoTempCard: React.FC<DraginoTempCardProps> = ({ device, onRemo
         )}
 
         {dendroEnabled && data?.dendro_position_mm != null && (
-          <div className={`rounded-lg p-4 ${data.dendro_valid ? 'bg-[var(--card)]' : 'bg-[var(--error-bg)]'}`}>
-            <p className="mb-1 text-sm font-semibold text-[var(--text-tertiary)]">DENDROMETER POSITION</p>
+          <div className={`rounded-lg p-3 ${data.dendro_valid ? 'bg-[var(--card)]' : 'bg-[var(--error-bg)]'}`}>
+            <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)]">DENDROMETER POSITION</p>
             {data.dendro_valid ? (
               <>
                 <button
                   onClick={() => setShowMonitor(true)}
-                  className="cursor-pointer text-left text-4xl font-bold text-[var(--text)] underline decoration-dotted underline-offset-4 transition-colors hover:text-[var(--primary)]"
+                  className="cursor-pointer text-left text-2xl font-bold tabular-nums text-[var(--text)] underline decoration-dotted underline-offset-4 transition-colors hover:text-[var(--primary)]"
                   title="View history"
                 >
                   {data.dendro_position_mm.toFixed(2)} mm
                 </button>
                 {data.dendro_delta_mm != null && (
-                  <p className={`mt-1 text-sm font-semibold ${data.dendro_delta_mm >= 0 ? 'text-[#22c55e]' : 'text-[var(--error-text)]'}`}>
+                  <p className={`mt-1 text-xs font-semibold ${data.dendro_delta_mm >= 0 ? 'text-[#22c55e]' : 'text-[var(--error-text)]'}`}>
                     {data.dendro_delta_mm >= 0 ? '+' : ''}{data.dendro_delta_mm.toFixed(3)} mm
                   </p>
                 )}
@@ -683,17 +681,17 @@ export const DraginoTempCard: React.FC<DraginoTempCardProps> = ({ device, onRemo
                 </p>
               </>
             ) : (
-              <p className="text-lg font-bold text-[var(--error-text)]">SENSOR ERROR</p>
+              <p className="text-base font-bold text-[var(--error-text)]">SENSOR ERROR</p>
             )}
           </div>
         )}
 
         {!dendroEnabled && data?.adc_ch0v != null && data.adc_ch0v > 0.01 && (
-          <div className="rounded-lg bg-[var(--card)] p-4">
-            <p className="mb-1 text-sm font-semibold text-[var(--text-tertiary)]">ADC INPUT</p>
+          <div className="rounded-lg bg-[var(--card)] p-3">
+            <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)]">ADC INPUT</p>
             <button
               onClick={() => setSensorMonitor({ field: 'adc_ch0v', label: 'ADC Input', unit: 'V', color: '#8b5cf6', decimals: 3 })}
-              className="cursor-pointer text-left text-4xl font-bold text-[var(--text)] underline decoration-dotted underline-offset-4 transition-colors hover:text-[var(--primary)]"
+              className="cursor-pointer text-left text-2xl font-bold tabular-nums text-[var(--text)] underline decoration-dotted underline-offset-4 transition-colors hover:text-[var(--primary)]"
               title="View history"
             >
               {data.adc_ch0v.toFixed(3)} V
@@ -702,8 +700,8 @@ export const DraginoTempCard: React.FC<DraginoTempCardProps> = ({ device, onRemo
         )}
       </div>
 
-      <div className="mt-4 border-t border-[var(--border)] pt-4">
-        <p className="text-sm text-[var(--text-tertiary)]">
+      <div className="mt-3 border-t border-[var(--border)] pt-3">
+        <p className="text-xs text-[var(--text-tertiary)]">
           Last seen:{' '}
           <span className="font-semibold text-[var(--text)]">
             {minutesAgo !== null ? `${minutesAgo} minutes ago` : 'Never seen'}
