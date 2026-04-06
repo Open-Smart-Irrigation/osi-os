@@ -31,6 +31,21 @@ start_service() {
     local cs_profile_lsn50=$(uci -q get osi-server.cloud.chirpstack_profile_lsn50 2>/dev/null || echo "")
     local cs_profile_clover=$(uci -q get osi-server.cloud.chirpstack_profile_clover 2>/dev/null || echo "")
 
+    # Auto-provision flows_cred.json with OSI Cloud MQTT broker credentials.
+    # Node-RED does not expand env vars in credential fields, so we write the
+    # file directly from UCI values. Only written when both EUI and password
+    # are set; never overwrites a file that already contains correct credentials.
+    local cred_file="/srv/$PACKAGE_NAME/flows_cred.json"
+    local broker_node_id="ec43625ea99685a6"
+    if [ -n "$device_eui" ] && [ -n "$mqtt_password" ]; then
+        local expected_creds="{\"${broker_node_id}\":{\"user\":\"${device_eui}\",\"password\":\"${mqtt_password}\"}}"
+        local current_creds=""
+        [ -f "$cred_file" ] && current_creds=$(cat "$cred_file" 2>/dev/null)
+        if [ "$current_creds" != "$expected_creds" ]; then
+            printf '%s' "$expected_creds" > "$cred_file"
+        fi
+    fi
+
     procd_open_instance
     procd_set_param command node /usr/lib/node/$PACKAGE_NAME/red.js --userDir /srv/$PACKAGE_NAME
     procd_set_param env \
