@@ -203,7 +203,7 @@ export const IrrigationZoneCard: React.FC<IrrigationZoneCardProps> = ({
             {zone.name}
           </h3>
           <span
-            className="text-[var(--text-tertiary)] text-lg transition-transform duration-200 mt-0.5 shrink-0"
+            className="text-[var(--text-tertiary)] text-xl transition-transform duration-200 mt-0.5 shrink-0"
             style={{ display: 'inline-block', transform: zoneCollapsed ? 'rotate(-90deg)' : 'rotate(0deg)' }}
           >
             ▾
@@ -215,9 +215,10 @@ export const IrrigationZoneCard: React.FC<IrrigationZoneCardProps> = ({
         <div className="flex flex-wrap gap-2 shrink-0">
           <button
             onClick={() => setShowConfigModal(true)}
-            className="touch-target bg-[var(--surface)] hover:bg-[var(--border)] border border-[var(--border)] text-[var(--text)] px-4 py-2 rounded-lg text-sm font-semibold transition-colors"
+            className="p-2 rounded-md text-[var(--text-secondary)] hover:bg-[var(--card)] transition-colors text-xl"
+            title="Configure"
           >
-            Configure
+            ⚙
           </button>
           <button
             onClick={() => setShowAssignModal(true)}
@@ -447,7 +448,7 @@ export const IrrigationZoneCard: React.FC<IrrigationZoneCardProps> = ({
             {t('zone.devicesInZone')}
           </span>
           <span
-            className="text-[var(--text-tertiary)] text-sm transition-transform duration-200"
+            className="text-[var(--text-tertiary)] text-xl transition-transform duration-200"
             style={{ display: 'inline-block', transform: devicesCollapsed ? 'rotate(-90deg)' : 'rotate(0deg)' }}
           >
             ▾

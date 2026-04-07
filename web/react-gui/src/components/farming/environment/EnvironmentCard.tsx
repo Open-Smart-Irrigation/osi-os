@@ -126,7 +126,7 @@ export const EnvironmentCard: React.FC<Props> = ({ zone, devices }) => {
             </div>
           )}
         </div>
-        <span className="text-sm text-[var(--text-tertiary)] transition-transform duration-200" style={{ display: 'inline-block', transform: collapsed ? 'rotate(-90deg)' : 'rotate(0deg)' }}>
+        <span className="text-xl text-[var(--text-tertiary)] transition-transform duration-200" style={{ display: 'inline-block', transform: collapsed ? 'rotate(-90deg)' : 'rotate(0deg)' }}>
           ▾
         </span>
       </button>

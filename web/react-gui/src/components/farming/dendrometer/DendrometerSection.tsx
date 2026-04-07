@@ -74,7 +74,7 @@ export const DendrometerSection: React.FC<Props> = ({ zone, devices }) => {
           <span className="text-xs font-bold uppercase tracking-widest text-[var(--text-tertiary)] group-hover:text-[var(--text)] transition-colors">
             Dendrometer Monitoring
           </span>
-          <span className="text-[var(--text-tertiary)] text-sm transition-transform duration-200" style={{ display: 'inline-block', transform: collapsed ? 'rotate(-90deg)' : 'rotate(0deg)' }}>
+          <span className="text-[var(--text-tertiary)] text-xl transition-transform duration-200" style={{ display: 'inline-block', transform: collapsed ? 'rotate(-90deg)' : 'rotate(0deg)' }}>
             ▾
           </span>
         </button>
