@@ -594,15 +594,15 @@ export const DraginoTempCard: React.FC<DraginoTempCardProps> = ({ device, onRemo
             </p>
             <button
               onClick={() => setSensorMonitor({
-                field: 'rain_mm_per_10min',
-                initialField: 'rain_mm_per_10min',
+                field: 'rain_mm_delta',
+                initialField: 'rain_mm_delta',
                 label: 'Rainfall',
                 unit: 'mm',
                 color: '#38bdf8',
                 decimals: 1,
                 seriesOptions: [
-                  { field: 'rain_mm_per_10min', label: 'Per 10 min', unit: 'mm', color: '#38bdf8', decimals: 1 },
-                  { field: 'rain_mm_delta', label: 'This interval', unit: 'mm', color: '#0ea5e9', decimals: 1 },
+                  { field: 'rain_mm_delta', label: 'This interval', unit: 'mm', color: '#38bdf8', decimals: 1 },
+                  { field: 'rain_mm_per_10min', label: 'Per 10 min (rate)', unit: 'mm', color: '#0ea5e9', decimals: 1 },
                 ],
               })}
               className="cursor-pointer text-left text-2xl font-bold tabular-nums text-[var(--text)] underline decoration-dotted underline-offset-4 transition-colors hover:text-[var(--primary)]"
@@ -632,15 +632,15 @@ export const DraginoTempCard: React.FC<DraginoTempCardProps> = ({ device, onRemo
             </p>
             <button
               onClick={() => setSensorMonitor({
-                field: 'flow_liters_per_10min',
-                initialField: 'flow_liters_per_10min',
+                field: 'flow_liters_delta',
+                initialField: 'flow_liters_delta',
                 label: 'Flow',
                 unit: 'L',
                 color: '#6366f1',
                 decimals: 0,
                 seriesOptions: [
-                  { field: 'flow_liters_per_10min', label: 'Per 10 min', unit: 'L', color: '#6366f1', decimals: 0 },
-                  { field: 'flow_liters_delta', label: 'This interval', unit: 'L', color: '#4f46e5', decimals: 0 },
+                  { field: 'flow_liters_delta', label: 'This interval', unit: 'L', color: '#6366f1', decimals: 0 },
+                  { field: 'flow_liters_per_10min', label: 'Per 10 min (rate)', unit: 'L', color: '#4f46e5', decimals: 0 },
                 ],
               })}
               className="cursor-pointer text-left text-2xl font-bold tabular-nums text-[var(--text)] underline decoration-dotted underline-offset-4 transition-colors hover:text-[var(--primary)]"
