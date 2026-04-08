@@ -242,8 +242,23 @@ New endpoints:
 
 ---
 
-## 9. Out of Scope
+## 9. ChirpStack Profile Provisioning
 
-- Firmware/ChirpStack profile provisioning automation (manual setup via ChirpStack UI)
+One-time manual setup via the ChirpStack GUI (documented as a deployment step):
+
+1. In ChirpStack → **Device Profiles** → **Add device profile**
+   - Name: `SenseCAP S2120`
+   - Region: appropriate LoRaWAN region (e.g. EU868)
+   - MAC version: LoRaWAN 1.0.3 (or as per device)
+   - Regional parameters: A
+2. In the **Codec** tab → paste the full contents of [SenseCAP_S2120_ChirpStackV3_Decoder.js](https://github.com/Seeed-Solution/SenseCAP-Decoder/blob/main/S2120/ChirpStack/SenseCAP_S2120_ChirpStackV3_Decoder.js) into the **Custom JavaScript codec** field → Save
+3. Register individual S2120 devices via the existing OSI GUI **Add Device** flow, selecting application `Sensors` and profile `SenseCAP S2120`
+
+This step must be completed before any S2120 uplinks are decoded. It is not automated — it is a one-time admin step per gateway deployment.
+
+---
+
+## 10. Out of Scope
+
 - ET0 calculation using S2120 wind/radiation data (future enhancement)
 - Historical rain chart in the device card (future)
