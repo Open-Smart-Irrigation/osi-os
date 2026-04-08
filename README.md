@@ -154,9 +154,33 @@ Output images are in `openwrt/bin/targets/bcm27xx/bcm2712/`.
 
 ## Device Setup
 
-> **Current approach:** The OSI OS firmware build is work-in-progress. The recommended way to get OSI OS running is to start from the latest [ChirpStack Gateway OS Full](https://www.chirpstack.io/docs/chirpstack-gateway-os/) image (which already includes Node-RED, Node.js, and npm) and deploy the OSI OS components on top via `scp` and `ssh`.
+Two ways to get OSI OS running on a Raspberry Pi 5:
 
-### Prerequisites
+| | Path A — Pre-built image | Path B — ChirpStack Gateway OS + deploy |
+|---|---|---|
+| **When to use** | Fastest start; no build tools needed | Latest code from this repo; or no release available for your target |
+| **What you flash** | OSI OS `.img.gz` from the [Releases page](../../releases) | ChirpStack Gateway OS Full |
+| **After flash** | Open the UI — done | Run `deploy.sh` + `chirpstack-bootstrap.js` |
+
+---
+
+### Path A — Flash the OSI OS image
+
+1. Download the latest `osi-os-<version>-bcm2712.img.gz` from the [Releases page](../../releases).
+2. Flash it to a microSD card (e.g. with [Raspberry Pi Imager](https://www.raspberrypi.com/software/) or `dd`).
+3. Boot the Pi — OSI OS starts automatically.
+4. Connect to the Wi-Fi AP `OSI-OS-<mac>` (password `opensmartirrigation`) or find the device on your local network.
+5. Navigate to `http://<device-ip>:1880/gui`.
+
+No further setup required. See [Step 4 — Install Tailscale](#step-4--install-tailscale-remote-access) if you want remote access.
+
+---
+
+### Path B — ChirpStack Gateway OS + deploy script
+
+> Use this path when no pre-built release is available, or when you want to deploy the latest code from this repo.
+
+#### Prerequisites
 
 - This repository cloned on your dev machine
 - Node.js 20+ and npm on your dev machine
@@ -167,55 +191,58 @@ Flash the latest **ChirpStack Gateway OS Full** image for Raspberry Pi 5 to a mi
 
 Default SSH credentials: `root` / _(no password on first boot, or set during flash)_
 
-### Step 2 — Build the React GUI
+### Step 2 — Deploy OSI OS components
 
-On your dev machine, from the repo root:
+The `deploy.sh` script uses an SSH reverse tunnel to pull all files from your dev machine — no manual `scp` needed:
 
 ```bash
-cd web/react-gui
-npm install
-npm run build
-cd ../..
+# 1. Build and package the React GUI
+cd web/react-gui && npm install && npm run build && cd ../..
+tar czf react_gui.tar.gz -C web/react-gui/build .
+
+# 2. Serve the repo from your dev machine
+python3 -m http.server 9876
+
+# 3. In a second terminal — deploy via tunnel (runs on the Pi, pulls from your machine)
+ssh -R 9876:localhost:9876 root@<pi-ip> 'curl -s http://localhost:9876/deploy.sh | sh'
 ```
 
-### Step 3 — Deploy via scp and SSH
+The script deploys: `settings.js`, `flows.json`, `farming.db`, Node-RED packages + dependencies (`npm install` on-device), `chirpstack-bootstrap.js`, the S2120 codec, and the React GUI bundle.
+
+<details>
+<summary>Alternative: manual file-by-file deployment (if deploy.sh is not available)</summary>
 
 ```bash
 PI=root@<pi-ip>
 
-# Node-RED config (enables React GUI static serving)
-scp feeds/chirpstack-openwrt-feed/apps/node-red/files/settings.js \
-    $PI:/srv/node-red/settings.js
-
-# Node-RED flows (backend logic)
-scp conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/flows.json \
-    $PI:/srv/node-red/flows.json
-
-# SQLite database
+scp feeds/chirpstack-openwrt-feed/apps/node-red/files/settings.js $PI:/srv/node-red/settings.js
+scp conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/flows.json $PI:/srv/node-red/flows.json
 ssh $PI 'mkdir -p /data/db'
-scp conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/db/farming.db \
-    $PI:/data/db/farming.db
-
-# Node-RED runtime package manifest
-scp conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/package.json \
-    $PI:/srv/node-red/package.json
-scp conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/package-lock.json \
-    $PI:/srv/node-red/package-lock.json
-
-# Local ChirpStack helper package used by Node-RED function external modules
+scp conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/db/farming.db $PI:/data/db/farming.db
+scp conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/package.json $PI:/srv/node-red/package.json
+scp conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/package-lock.json $PI:/srv/node-red/package-lock.json
 ssh $PI 'mkdir -p /srv/node-red/osi-chirpstack-helper'
 scp conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-chirpstack-helper/package.json \
     $PI:/srv/node-red/osi-chirpstack-helper/package.json
 scp conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-chirpstack-helper/index.js \
     $PI:/srv/node-red/osi-chirpstack-helper/index.js
-
-# Install Node-RED runtime dependencies on-device so native modules match the Pi architecture
 ssh $PI 'cd /srv/node-red && npm install --omit=dev --no-fund --no-audit'
-
-# React GUI
 ssh $PI 'mkdir -p /usr/lib/node-red/gui'
 scp -r web/react-gui/build/* $PI:/usr/lib/node-red/gui/
 ```
+
+</details>
+
+### Step 3 — Provision ChirpStack device profiles
+
+Run the bootstrap script once to create the ChirpStack applications and device profiles (KIWI, LSN50, STREGA valve, SenseCAP S2120) and write the resulting IDs into Node-RED's environment file:
+
+```bash
+ssh root@<pi-ip> 'node /srv/node-red/chirpstack-bootstrap.js'
+ssh root@<pi-ip> '/etc/init.d/node-red restart'
+```
+
+The script is idempotent — safe to re-run after reflashing or if profiles are missing.
 
 ### Step 4 — Install Tailscale (remote access)
 
@@ -243,13 +270,7 @@ Visit the auth URL printed in the output to approve the device in your Tailscale
 
 > **State persistence:** Tailscale stores its state at `/etc/tailscale/tailscaled.state` on the overlayfs — it survives reboots and stays connected automatically. The firewall rule is re-applied on every firewall restart via the UCI include.
 
-### Step 5 — Restart Node-RED
-
-```bash
-ssh root@<pi-ip> '/etc/init.d/node-red restart'
-```
-
-### Step 6 — Open the UI
+### Step 5 — Open the UI
 
 Navigate to `http://<pi-ip>:1880/gui` in a browser (use the Tailscale IP for remote access).
 
@@ -257,50 +278,14 @@ Navigate to `http://<pi-ip>:1880/gui` in a browser (use the Tailscale IP for rem
 
 ### Re-deploying after changes
 
-```bash
-PI=root@<pi-ip>
-
-# Rebuild and redeploy React GUI (if frontend changed)
-cd web/react-gui && npm run build && cd ../..
-scp -r web/react-gui/build/* $PI:/usr/lib/node-red/gui/
-
-# Redeploy flows (if flows.json changed)
-scp conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/flows.json \
-    $PI:/srv/node-red/flows.json
-
-# Redeploy runtime manifests and reinstall dependencies (if Node-RED packaging changed)
-scp conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/package.json \
-    $PI:/srv/node-red/package.json
-scp conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/package-lock.json \
-    $PI:/srv/node-red/package-lock.json
-ssh $PI 'mkdir -p /srv/node-red/osi-chirpstack-helper'
-scp conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-chirpstack-helper/package.json \
-    $PI:/srv/node-red/osi-chirpstack-helper/package.json
-scp conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-chirpstack-helper/index.js \
-    $PI:/srv/node-red/osi-chirpstack-helper/index.js
-ssh $PI 'cd /srv/node-red && npm install --omit=dev --no-fund --no-audit'
-
-ssh $PI '/etc/init.d/node-red restart'
-```
-
----
-
-### Alternative: deploy script (scripted/CI use)
-
-If `scp` is not available (e.g. no interactive terminal), use the included `deploy.sh` via an SSH remote port forward. This tunnels a local HTTP server through the SSH connection so the Pi can pull all files over `localhost`:
+Re-run `deploy.sh` — it's safe to re-run at any time and will update all components:
 
 ```bash
-# 1. Build and package the React GUI
-cd web/react-gui && npm run build && cd ../..
+cd web/react-gui && npm install && npm run build && cd ../..
 tar czf react_gui.tar.gz -C web/react-gui/build .
-
-# 2. Serve the repo locally
 python3 -m http.server 9876
-
-# 3. In a second terminal — deploy via tunnel
+# second terminal:
 ssh -R 9876:localhost:9876 root@<pi-ip> 'curl -s http://localhost:9876/deploy.sh | sh'
-
-# 4. Restart Node-RED
 ssh root@<pi-ip> '/etc/init.d/node-red restart'
 ```
 
