@@ -34,6 +34,8 @@
  *   CS_PROFILE_STREGA_NAME   (default: "OSI STREGA Valve")
  *   CS_PROFILE_LSN50_NAME    (default: "OSI Dragino LSN50")
  *   CS_PROFILE_RAK_NAME      (default: "OSI RAK Field Tester")
+ *   CS_PROFILE_S2120_NAME    (default: "OSI SenseCAP S2120")
+ *   S2120_CODEC_PATH         (default: "/srv/node-red/codecs/sensecap_s2120_decoder.js")
  */
 
 'use strict';
@@ -77,7 +79,9 @@ const CFG = {
   profileKiwiName: process.env.CS_PROFILE_KIWI_NAME || 'OSI KIWI Sensor',
   profileStregaName: process.env.CS_PROFILE_STREGA_NAME || 'OSI STREGA Valve',
   profileLsn50Name: process.env.CS_PROFILE_LSN50_NAME || 'OSI Dragino LSN50',
-  profileRakName: process.env.CS_PROFILE_RAK_NAME || 'OSI RAK Field Tester'
+  profileRakName: process.env.CS_PROFILE_RAK_NAME || 'OSI RAK Field Tester',
+  profileS2120Name: process.env.CS_PROFILE_S2120_NAME || 'OSI SenseCAP S2120',
+  s2120CodecPath: process.env.S2120_CODEC_PATH || '/srv/node-red/codecs/sensecap_s2120_decoder.js'
 };
 
 const ENV_LOADER_MARKER = '// [OSI] chirpstack env loader';
@@ -119,6 +123,26 @@ async function getOrCreateApp(client, tenantId, name, description) {
   }
   const created = await client.createApplication({ tenantId, name, description });
   console.log(`  + App created: "${name}" (${created.getId()})`);
+  return created.getId();
+}
+
+async function getOrCreateProfileWithCodec(client, tenantId, name, description, payloadCodecScript) {
+  const profiles = listItemsToObjects(await client.listDeviceProfiles(tenantId));
+  const existing = profiles.find((profile) => profile.name === name);
+  if (existing) {
+    console.log(`  ✓ Profile exists: "${name}" (${existing.id})`);
+    return existing.id;
+  }
+  const created = await client.createDeviceProfile({
+    tenantId,
+    name,
+    description,
+    region: CFG.region,
+    uplinkInterval: 3600,
+    deviceStatusReqInterval: 1,
+    payloadCodecScript: payloadCodecScript || undefined
+  });
+  console.log(`  + Profile created: "${name}" (${created.getId()})`);
   return created.getId();
 }
 
@@ -276,6 +300,15 @@ async function main() {
   const lsn50ProfileId = await getOrCreateProfile(client, tenantId, CFG.profileLsn50Name, 'Dragino LSN50 temperature & dendrometer ADC (LoRaWAN 1.0.3 OTAA)');
   const rak10701ProfileId = await getOrCreateProfile(client, tenantId, CFG.profileRakName, 'RAK10701 LoRaWAN coverage field tester');
 
+  let s2120CodecScript = '';
+  try {
+    s2120CodecScript = fs.readFileSync(CFG.s2120CodecPath, 'utf8');
+    console.log(`  ✓ S2120 codec loaded from ${CFG.s2120CodecPath} (${s2120CodecScript.length} bytes)`);
+  } catch (e) {
+    console.log(`  ⚠ S2120 codec not found at ${CFG.s2120CodecPath} — creating profile without codec`);
+  }
+  const s2120ProfileId = await getOrCreateProfileWithCodec(client, tenantId, CFG.profileS2120Name, 'SenseCAP S2120 8-in-1 weather station (LoRaWAN 1.0.3 OTAA)', s2120CodecScript);
+
   console.log('\n[ 5/5 ] Writing configuration');
   writeEnvFile({
     CHIRPSTACK_API_URL: CFG.url,
@@ -286,7 +319,8 @@ async function main() {
     CHIRPSTACK_PROFILE_KIWI: kiwiProfileId,
     CHIRPSTACK_PROFILE_STREGA: stregaProfileId,
     CHIRPSTACK_PROFILE_LSN50: lsn50ProfileId,
-    CHIRPSTACK_PROFILE_RAK10701: rak10701ProfileId
+    CHIRPSTACK_PROFILE_RAK10701: rak10701ProfileId,
+    CHIRPSTACK_PROFILE_S2120: s2120ProfileId
   });
 
   patchSettingsJs();
@@ -303,7 +337,8 @@ async function main() {
   console.log(`    ${CFG.profileKiwiName.padEnd(24)} ${kiwiProfileId}`);
   console.log(`    ${CFG.profileStregaName.padEnd(24)} ${stregaProfileId}`);
   console.log(`    ${CFG.profileLsn50Name.padEnd(24)} ${lsn50ProfileId}`);
-  console.log(`    ${CFG.profileRakName.padEnd(24)} ${rak10701ProfileId}\n`);
+  console.log(`    ${CFG.profileRakName.padEnd(24)} ${rak10701ProfileId}`);
+  console.log(`    ${CFG.profileS2120Name.padEnd(24)} ${s2120ProfileId}\n`);
   console.log('  Next step:');
   console.log('  1. Restart Node-RED:  /etc/init.d/node-red restart');
   console.log('  2. Register devices via the OSI OS UI or OSI Server UI (type + DevEUI + AppKey from device label)\n');

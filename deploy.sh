@@ -42,6 +42,11 @@ curl -s "$BASE/conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/os
 curl -s "$BASE/conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-chirpstack-helper/index.js" \
     -o /srv/node-red/osi-chirpstack-helper/index.js && echo "index OK" || echo "index FAIL"
 
+echo "--- S2120 codec ---"
+mkdir -p /srv/node-red/codecs
+curl -s "$BASE/conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/codecs/sensecap_s2120_decoder.js" \
+    -o /srv/node-red/codecs/sensecap_s2120_decoder.js && echo "OK" || echo "FAIL"
+
 echo "--- Node-RED runtime dependencies ---"
 cd /srv/node-red && npm install --omit=dev --no-fund --no-audit 2>&1 | tail -20
 

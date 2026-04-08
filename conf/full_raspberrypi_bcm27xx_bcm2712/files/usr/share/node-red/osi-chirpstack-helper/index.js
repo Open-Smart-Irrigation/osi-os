@@ -380,6 +380,11 @@ class ChirpStackClient {
     profile.setAbpRx2Dr(0);
     profile.setAbpRx2Freq(0);
 
+    if (input.payloadCodecScript) {
+      profile.setPayloadCodecRuntime(2); // CodecRuntime.JS = 2
+      profile.setPayloadCodecScript(String(input.payloadCodecScript));
+    }
+
     const request = new profilePb.CreateDeviceProfileRequest();
     request.setDeviceProfile(profile);
     return await grpcInvoke(this.deviceProfileClient, 'create', request, this.metadata, 'createDeviceProfile');
