@@ -565,4 +565,14 @@ export const environmentAPI = {
     api.get<ZoneEnvironmentSummary>(`/api/irrigation-zones/${zoneId}/environment-summary`).then(r => r.data),
 };
 
+export const s2120API = {
+  getZoneAssignments: async (deveui: string): Promise<Array<{ zone_id: number; zone_name: string }>> => {
+    const response = await api.get(`/api/devices/${deveui}/zone-assignments`);
+    return response.data;
+  },
+  setZoneAssignments: async (deveui: string, zoneIds: number[]): Promise<void> => {
+    await api.put(`/api/devices/${deveui}/zone-assignments`, { zone_ids: zoneIds });
+  },
+};
+
 export default api;
