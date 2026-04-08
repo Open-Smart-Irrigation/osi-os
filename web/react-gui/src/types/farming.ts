@@ -1,5 +1,5 @@
 // The specific supported hardware types
-export type DeviceType = 'KIWI_SENSOR' | 'STREGA_VALVE' | 'DRAGINO_LSN50' | 'TEKTELIC_CLOVER';
+export type DeviceType = 'KIWI_SENSOR' | 'STREGA_VALVE' | 'DRAGINO_LSN50' | 'TEKTELIC_CLOVER' | 'SENSECAP_S2120';
 export type Lsn50Mode = 'MOD1' | 'MOD2' | 'MOD3' | 'MOD4' | 'MOD5' | 'MOD6' | 'MOD7' | 'MOD8' | 'MOD9';
 export type StregaModel = 'STANDARD' | 'MOTORIZED';
 
@@ -42,6 +42,14 @@ export interface Device {
     flow_liters_today?: number | null;
     flow_delta_status?: string | null;
     counter_interval_seconds?: number | null;
+    // SenseCAP S2120 weather station fields
+    barometric_pressure_hpa?: number | null;
+    wind_speed_mps?: number | null;
+    wind_direction_deg?: number | null;
+    wind_gust_mps?: number | null;
+    uv_index?: number | null;
+    rain_gauge_cumulative_mm?: number | null;
+    bat_pct?: number | null;
   };
 
   // Only for Valves
@@ -59,6 +67,9 @@ export interface Device {
 
   // Irrigation zone assignment
   irrigation_zone_id?: number | null;
+  // Multi-zone assignment — populated for SENSECAP_S2120 only
+  zone_ids?: number[] | null;
+  zone_names?: string[] | null;
 }
 
 export interface User {
