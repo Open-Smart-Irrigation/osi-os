@@ -198,6 +198,7 @@ export const FarmingDashboard: React.FC = () => {
                     devices={devicesByZone.get(zone.id) || []}
                     unassignedDevices={unassignedDevices}
                     onUpdate={handleUpdate}
+                    allZones={(zones ?? []).map((z) => ({ id: z.id, name: z.name }))}
                   />
                 ))}
               </div>

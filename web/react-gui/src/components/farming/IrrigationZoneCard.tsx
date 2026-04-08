@@ -4,6 +4,7 @@ import { dendroAnalyticsAPI, environmentAPI, irrigationZonesAPI } from '../../se
 import { KiwiSensorCard } from './KiwiSensorCard';
 import { DraginoTempCard } from './DraginoTempCard';
 import { StregaValveCard } from './StregaValveCard';
+import { SenseCapWeatherCard } from './SenseCapWeatherCard';
 import { ScheduleSection } from './ScheduleSection';
 import { AssignDeviceModal } from './AssignDeviceModal';
 import { DendrometerSection } from './dendrometer/DendrometerSection';
@@ -17,6 +18,7 @@ interface IrrigationZoneCardProps {
   devices: Device[];
   unassignedDevices: Device[];
   onUpdate: () => void;
+  allZones?: Array<{ id: number; name: string }>;
 }
 
 function formatWaterValue(value: number | null | undefined, unit: string, digits = 1): string {
@@ -91,6 +93,7 @@ export const IrrigationZoneCard: React.FC<IrrigationZoneCardProps> = ({
   devices,
   unassignedDevices,
   onUpdate,
+  allZones,
 }) => {
   const { t } = useTranslation('devices');
   const { t: tc } = useTranslation('common');
@@ -135,6 +138,7 @@ export const IrrigationZoneCard: React.FC<IrrigationZoneCardProps> = ({
   const kiwiSensors = devices.filter((d) => d.type_id === 'KIWI_SENSOR' || d.type_id === 'TEKTELIC_CLOVER');
   const stregaValves = devices.filter((d) => d.type_id === 'STREGA_VALVE');
   const lsn50Nodes = devices.filter((d) => d.type_id === 'DRAGINO_LSN50');
+  const s2120Stations = devices.filter((d) => d.type_id === 'SENSECAP_S2120');
 
   const hasDendroDevices = lsn50Nodes.some(d => d.dendro_enabled === 1);
   const schedMetric = zone.schedule?.triggerMetric ?? zone.schedule?.trigger_metric;
@@ -514,6 +518,30 @@ export const IrrigationZoneCard: React.FC<IrrigationZoneCardProps> = ({
                         <DraginoTempCard
                           device={device}
                           onRemove={() => handleRemoveDevice(device.deveui)}
+                        />
+                        {removingDevice === device.deveui && (
+                          <div className="absolute inset-0 bg-[var(--overlay)]/70 flex items-center justify-center rounded-xl">
+                            <div className="animate-spin h-8 w-8 border-4 border-[var(--primary)] border-t-transparent rounded-full" />
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Weather Stations */}
+              {s2120Stations.length > 0 && (
+                <div className="mb-5">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)] mb-3">Weather Stations</p>
+                  <div className="grid grid-cols-1 gap-4">
+                    {s2120Stations.map((device) => (
+                      <div key={device.deveui} className="relative">
+                        <SenseCapWeatherCard
+                          device={device}
+                          onRemove={() => handleRemoveDevice(device.deveui)}
+                          onUpdate={onUpdate}
+                          allZones={allZones ?? [{ id: zone.id, name: zone.name }]}
                         />
                         {removingDevice === device.deveui && (
                           <div className="absolute inset-0 bg-[var(--overlay)]/70 flex items-center justify-center rounded-xl">
