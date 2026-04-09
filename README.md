@@ -159,14 +159,14 @@ Two ways to get OSI OS running on a Raspberry Pi 5:
 | | Path A — Pre-built image | Path B — ChirpStack Gateway OS + deploy |
 |---|---|---|
 | **When to use** | Fastest start; no build tools needed | Latest code from this repo; or no release available for your target |
-| **What you flash** | OSI OS `.img.gz` from the [Releases page](../../releases) | ChirpStack Gateway OS Full |
-| **After flash** | Open the UI — done | Run `deploy.sh` + `chirpstack-bootstrap.js` |
+| **What you flash** | OSI OS `.img.gz` from the [Releases page](https://github.com/Open-Smart-Irrigation/osi-os/releases) | ChirpStack Gateway OS Full |
+| **After flash** | Open the UI — done | Run `deploy.sh`, then `chirpstack-bootstrap.js` |
 
 ---
 
 ### Path A — Flash the OSI OS image
 
-1. Download the latest `osi-os-<version>-bcm2712.img.gz` from the [Releases page](../../releases).
+1. Download the latest `osi-os-<version>-bcm2712.img.gz` from the [Releases page](https://github.com/Open-Smart-Irrigation/osi-os/releases).
 2. Flash it to a microSD card (e.g. with [Raspberry Pi Imager](https://www.raspberrypi.com/software/) or `dd`).
 3. Boot the Pi — OSI OS starts automatically.
 4. Connect to the Wi-Fi AP `OSI-OS-<mac>` (password `opensmartirrigation`) or find the device on your local network.
@@ -205,9 +205,12 @@ python3 -m http.server 9876
 
 # 3. In a second terminal — deploy via tunnel (runs on the Pi, pulls from your machine)
 ssh -R 9876:localhost:9876 root@<pi-ip> 'curl -s http://localhost:9876/deploy.sh | sh'
+
+# 4. Restart Node-RED
+ssh root@<pi-ip> '/etc/init.d/node-red restart'
 ```
 
-The script deploys: `settings.js`, `flows.json`, `farming.db`, Node-RED packages + dependencies (`npm install` on-device), `chirpstack-bootstrap.js`, the S2120 codec, and the React GUI bundle.
+The script deploys: `settings.js`, `flows.json`, `farming.db`, Node-RED packages and local helpers (`osi-chirpstack-helper`, `osi-db-helper`) with `npm install` on-device, `chirpstack-bootstrap.js`, the SenseCAP S2120 codec, and the React GUI bundle.
 
 <details>
 <summary>Alternative: manual file-by-file deployment (if deploy.sh is not available)</summary>
@@ -226,6 +229,15 @@ scp conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-chirpstac
     $PI:/srv/node-red/osi-chirpstack-helper/package.json
 scp conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-chirpstack-helper/index.js \
     $PI:/srv/node-red/osi-chirpstack-helper/index.js
+ssh $PI 'mkdir -p /srv/node-red/osi-db-helper'
+scp conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-db-helper/package.json \
+    $PI:/srv/node-red/osi-db-helper/package.json
+scp conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-db-helper/index.js \
+    $PI:/srv/node-red/osi-db-helper/index.js
+scp scripts/chirpstack-bootstrap.js $PI:/srv/node-red/chirpstack-bootstrap.js
+ssh $PI 'mkdir -p /srv/node-red/codecs'
+scp conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/codecs/sensecap_s2120_decoder.js \
+    $PI:/srv/node-red/codecs/sensecap_s2120_decoder.js
 ssh $PI 'cd /srv/node-red && npm install --omit=dev --no-fund --no-audit'
 ssh $PI 'mkdir -p /usr/lib/node-red/gui'
 scp -r web/react-gui/build/* $PI:/usr/lib/node-red/gui/
@@ -239,6 +251,11 @@ Run the bootstrap script once to create the ChirpStack applications and device p
 
 ```bash
 ssh root@<pi-ip> 'node /srv/node-red/chirpstack-bootstrap.js'
+```
+
+Then restart Node-RED so it picks up the generated `.chirpstack.env`:
+
+```bash
 ssh root@<pi-ip> '/etc/init.d/node-red restart'
 ```
 
@@ -281,13 +298,18 @@ Navigate to `http://<pi-ip>:1880/gui` in a browser (use the Tailscale IP for rem
 Re-run `deploy.sh` — it's safe to re-run at any time and will update all components:
 
 ```bash
+# Rebuild and repackage the GUI if frontend changed
 cd web/react-gui && npm install && npm run build && cd ../..
 tar czf react_gui.tar.gz -C web/react-gui/build .
+
+# Serve and deploy
 python3 -m http.server 9876
 # second terminal:
 ssh -R 9876:localhost:9876 root@<pi-ip> 'curl -s http://localhost:9876/deploy.sh | sh'
 ssh root@<pi-ip> '/etc/init.d/node-red restart'
 ```
+
+No need to re-run `chirpstack-bootstrap.js` unless ChirpStack was re-provisioned or device profiles are missing.
 
 ---
 

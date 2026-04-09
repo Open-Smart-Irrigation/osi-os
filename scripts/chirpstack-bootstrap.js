@@ -180,6 +180,43 @@ async function createApiKeyViaCLI() {
   }
 }
 
+function detectGatewayEui() {
+  // 1. Try logread (most reliable on ChirpStack Gateway OS)
+  try {
+    const log = execSync('logread 2>/dev/null || true', { timeout: 5000 }).toString();
+    const m = log.match(/gateway_id[:\s"]+([0-9a-fA-F]{16})/);
+    if (m) return m[1].toUpperCase();
+  } catch (_) {}
+
+  // 2. Try active concentratord config under /var/etc
+  const confDirs = [
+    '/var/etc/chirpstack-concentratord',
+    '/var/etc',
+    '/etc/chirpstack-concentratord/sx1302',
+    '/etc/chirpstack-concentratord/sx1301',
+  ];
+  for (const dir of confDirs) {
+    try {
+      const files = fs.readdirSync(dir).filter(f => f.endsWith('.toml'));
+      for (const file of files) {
+        const content = fs.readFileSync(path.join(dir, file), 'utf8');
+        const m = content.match(/gateway_id\s*=\s*"([0-9a-fA-F]{16})"/);
+        if (m && m[1] !== '0101010101010101') return m[1].toUpperCase();
+      }
+    } catch (_) {}
+  }
+
+  // 3. Derive from eth0 MAC (standard LoRa EUI-64 expansion: insert FFFE in middle)
+  try {
+    const mac = fs.readFileSync('/sys/class/net/eth0/address', 'utf8').trim().replace(/:/g, '');
+    if (mac.length === 12) {
+      return (mac.slice(0, 6) + 'FFFE' + mac.slice(6)).toUpperCase();
+    }
+  } catch (_) {}
+
+  return null;
+}
+
 function writeEnvFile(vars) {
   const lines = Object.entries(vars)
     .map(([key, value]) => `${key}=${value}`)
@@ -310,7 +347,13 @@ async function main() {
   const s2120ProfileId = await getOrCreateProfileWithCodec(client, tenantId, CFG.profileS2120Name, 'SenseCAP S2120 8-in-1 weather station (LoRaWAN 1.0.3 OTAA)', s2120CodecScript);
 
   console.log('\n[ 5/5 ] Writing configuration');
-  writeEnvFile({
+  const gatewayEui = detectGatewayEui();
+  if (gatewayEui) {
+    console.log(`  ✓ Gateway EUI detected: ${gatewayEui}`);
+  } else {
+    console.log('  ⚠ Gateway EUI not detected — set DEVICE_EUI manually in .chirpstack.env');
+  }
+  const envVars = {
     CHIRPSTACK_API_URL: CFG.url,
     CHIRPSTACK_API_KEY: apiKey,
     CHIRPSTACK_APP_SENSORS: sensorsAppId,
@@ -321,7 +364,9 @@ async function main() {
     CHIRPSTACK_PROFILE_LSN50: lsn50ProfileId,
     CHIRPSTACK_PROFILE_RAK10701: rak10701ProfileId,
     CHIRPSTACK_PROFILE_S2120: s2120ProfileId
-  });
+  };
+  if (gatewayEui) envVars.DEVICE_EUI = gatewayEui;
+  writeEnvFile(envVars);
 
   patchSettingsJs();
   updateFlowsJson(sensorsAppId, actuatorsAppId, fieldTesterAppId);
@@ -339,6 +384,11 @@ async function main() {
   console.log(`    ${CFG.profileLsn50Name.padEnd(24)} ${lsn50ProfileId}`);
   console.log(`    ${CFG.profileRakName.padEnd(24)} ${rak10701ProfileId}`);
   console.log(`    ${CFG.profileS2120Name.padEnd(24)} ${s2120ProfileId}\n`);
+  if (gatewayEui) {
+    console.log(`  Gateway EUI (DEVICE_EUI): ${gatewayEui}\n`);
+  } else {
+    console.log('  ⚠ Gateway EUI: NOT DETECTED — add DEVICE_EUI=<eui> to .chirpstack.env manually\n');
+  }
   console.log('  Next step:');
   console.log('  1. Restart Node-RED:  /etc/init.d/node-red restart');
   console.log('  2. Register devices via the OSI OS UI or OSI Server UI (type + DevEUI + AppKey from device label)\n');
