@@ -2,14 +2,14 @@
 
 ## Scope
 
-This document reflects the current `dendrov2` implementation state after the sync, security, dendrometer, registration, and recovery work completed on **2026-03-26**.
+This document reflects the current implementation state on `main` branch. It covers the communication architecture between osi-os (edge) and osi-server (cloud), security hardening, dendrometer logic, and bidirectional sync.
 
-It is written as an agent handoff for future work in:
+Working context for:
 
 - `osi-os` at `/home/phil/Repos/osi-os`
 - `osi-server` at `/home/phil/Repos/osi-server`
 
-The architectural rule is now:
+Architectural rule:
 
 - **`osi-os` is the operational source of truth**
 - **`osi-server` mirrors edge-backed farms**
@@ -19,124 +19,82 @@ The architectural rule is now:
 
 ## Current Branches
 
-- `osi-os`: `dendrov2`
-- `osi-server`: `dendrov2`
+- `osi-os`: `main`
+- `osi-server`: `main`
+
+> Note: The `dendrov2` branch was merged into `main`.
 
 ---
 
-## What Changed Today
+## Communication Architecture: REST-Only Sync + MQTT Telemetry
 
-### 1. Dendrometer logic was overhauled and aligned
+The communication between osi-os and osi-server uses **two distinct protocols**:
 
-The dendrometer pipeline is now much closer across edge and cloud:
+```
+┌─────────────────┐                    ┌─────────────────┐
+│   OSI-OS Edge   │◄──────────────────►│  OSI-Server     │
+│   (Gateway)     │   REST/HTTPS Sync   │  (Cloud)        │
+│                 │   (Bidirectional)   │                 │
+└────────┬────────┘                    └────────┬────────┘
+         │                                      │
+         │   ┌──────────────────┐               │
+         └──►│  MQTT Broker     │               │
+              │  (Telemetry +    │               │
+              │   ACKs Only)    │               │
+              └──────────────────┘
+```
 
-- v5-style envelope-based TWD logic
-- timezone-aware previous-local-day computation
-- QA/confidence handling
-- low-confidence handling
-- MAD-style outlier filtering and representative zone aggregation
-- updated irrigation decision priority
-- DENDRO schedule support on the edge
-
-Important edge behavior:
-
-- the edge now computes and stores the authoritative daily dendro outputs
-- the edge recommendation is the source of truth for synced farms
-- rain suppression, recovery verification, and DENDRO threshold behavior are implemented on-device
-
-Key files:
-
-- `osi-os`: [flows.json](/home/phil/Repos/osi-os/conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/flows.json)
-- `osi-server`: [DendroAnalyticsService.java](/home/phil/Repos/osi-server/backend/src/main/java/org/osi/server/analytics/DendroAnalyticsService.java)
-
-### 2. Security hardening landed
-
-On `osi-os`:
-
-- login tokens are HMAC-signed, not base64-forgeable
-- local passwords are bcrypt-hashed
-- privileged endpoints check real auth and ownership
-- `/download/database` is gated
-- linked account login uses a gateway-specific offline verifier, not the cloud password hash
-
-On `osi-server`:
-
-- command ACK validation is stricter
-- telemetry no longer auto-claims ownership from `cloudUserId`
-- `/auth/local-sync` no longer returns a cloud password hash
-- sync token rotation exists via `/auth/refresh-sync`
-
-### 3. Bidirectional sync foundation was implemented
-
-Control-plane sync now exists for:
-
-- zones
-- schedules
-- zone config/location
-- device assignment / unassignment
-- device flags
-- device unclaim
-
-Data-plane mirroring now exists for:
-
-- sensor data
-- dendrometer readings
-- daily dendro outputs
-- zone daily recommendations
-- zone daily environment
-- irrigation events
-
-Key concepts now in use:
-
-- `user_uuid`
-- `zone_uuid`
-- `gateway_device_eui`
-- `sync_version`
-- tombstones via `deleted_at`
-- `sync_outbox`
-- `sync_inbox`
-- `sync_cursor`
-
-### 4. Sync auth and repair were added
-
-The sync transport is now authenticated and has repair paths:
-
-- edge gets a dedicated sync JWT during account linking
-- edge refreshes the sync token proactively
-- edge runs periodic bootstrap repair
-- edge exposes sync state locally
-- cloud exposes pending commands and gateway sync status
-
-### 5. Manual sync recovery was added
-
-For long offline recovery:
-
-- `osi-os` now exposes `POST /api/sync/force`
-- the account-link page now has a **Force sync now** button
-- if the sync token is expired, the UI now offers a friendly **Re-authenticate with OSI Server** flow instead of leaving the user to guess that re-linking is needed
+**Important**: Cloud → Edge commands flow via **REST polling**, NOT MQTT subscription. The edge is not subscribed to the cloud MQTT broker's command topics.
 
 ---
 
-## Current Architecture
+### REST (HTTP/HTTPS) — Full Bidirectional Sync
 
-### Edge-first sync model
+| osi-os calls → osi-server | Method | Purpose | Cadence |
+|---------------------------|--------|---------|---------|
+| `/auth/local-sync` | POST | Account linking + sync token acquisition | On-demand |
+| `/auth/refresh-sync` | POST | Proactive sync token refresh | Every 1 hour |
+| `/api/v1/sync/edge/bootstrap` | POST | Full state snapshot upload | Every 6 hours |
+| `/api/v1/sync/edge/events` | POST | Incremental event outbox delivery | Every 30 seconds |
+| `/api/v1/sync/gateways/{eui}/pending-commands` | GET | **Pull cloud-originated commands** | Every 30 seconds |
+| `/api/v1/sync/gateways/{eui}/status` | GET | Sync state info | On-demand |
+| `/api/v1/sync/gateways/{eui}/reconciliation` | GET | Full reconciliation status | On-demand |
+| `/api/v1/devices/claim-bulk` | POST | Bulk device claiming during link | On-demand |
 
-For gateway-backed farms:
+**Cloud → Edge command types (via REST pending-commands):**
+- `UPSERT_ZONE`, `DELETE_ZONE` — zone management
+- `UPSERT_SCHEDULE`, `UPDATE_SCHEDULE` — schedule changes
+- `UPSERT_ZONE_CONFIG`, `UPSERT_ZONE_LOCATION` — zone configuration
+- `ASSIGN_DEVICE_TO_ZONE`, `REMOVE_DEVICE_FROM_ZONE` — device assignment
+- `UPSERT_DEVICE_FLAGS` — device flags
+- `UNCLAIM_DEVICE` — device unclaim
+- `VALVE_COMMAND` — valve control
+- `SET_LSN50_*`, `SET_KIWI_*`, `SET_STREGA_*` — device configuration
+- `SET_FAN`, `REBOOT` — gateway control
+- `REGISTER_DEVICE` — device registration
 
-- edge writes canonical local state first
-- edge emits sync events
-- cloud mirrors edge state
-- cloud-originated edits are routed toward the owning gateway
+### MQTT (WSS, port 443) — Edge → Cloud Only
 
-### Shared identifiers
+**Broker**: `wss://server.opensmartirrigation.org/mqtt`
 
-- user identity: `user_uuid`
-- zone identity: `zone_uuid`
-- device identity: `DevEUI`
+MQTT is used for **telemetry and acknowledgments only**. The edge subscribes to its local ChirpStack MQTT broker, NOT the cloud broker.
 
-### Gateway binding
+**Edge → Cloud (MQTT out):**
+| Topic | Payload | Purpose |
+|-------|---------|---------|
+| `devices/{eui}/heartbeat` | Gateway status (CPU, memory, firmware) | Periodic heartbeat |
+| `devices/{eui}/telemetry` | Sensor data (temp, humidity, soil moisture, dendro) | Real-time telemetry |
+| `devices/{eui}/status` | Actuator state (valve open/closed) | Status updates |
+| `devices/{eui}/command_ack` | Command acknowledgment with result | Command confirmation |
 
-Every synced zone is intended to belong to exactly one gateway via `gateway_device_eui`.
+**Note**: The cloud does publish to `devices/{eui}/commands` via MQTT (in `CommandService.java`), but the edge is **not subscribed** to this topic. This MQTT command path appears to be unused/legacy code.
+
+### Why REST for Sync?
+
+1. **Reliable**: HTTP polling works reliably through proxies and NAT
+2. **Retry-friendly**: Natural retry semantics with idempotent operations
+3. **Edge-controlled**: The edge polls when ready, no need for persistent connections
+4. **Simple**: Single protocol for both directions
 
 ---
 
@@ -146,11 +104,12 @@ Every synced zone is intended to belong to exactly one gateway via `gateway_devi
 
 - [flows.json](/home/phil/Repos/osi-os/conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/flows.json)
 
-This file now contains:
+This file contains:
 
 - auth + local login
-- account linking
-- sync bootstrap / outbox / pending-command polling
+- account linking (REST → osi-server)
+- OSI-Server Cloud Integration tab (MQTT telemetry out + command handler)
+- sync bootstrap / outbox / pending-command polling (REST)
 - sync token refresh
 - manual force sync endpoint
 - control-plane sync apply handlers
@@ -167,28 +126,18 @@ This file now contains:
 
 - [verify-sync-flow.js](/home/phil/Repos/osi-os/scripts/verify-sync-flow.js)
 
-This checks:
-
-- required sync HTTP routes
-- critical sync function node compilation
-- bootstrap cadence
-- token refresh cadence
-- required bootstrap snapshot arrays
-
 ---
 
 ## Key OSI-Server Files
 
 - [EdgeSyncService.java](/home/phil/Repos/osi-server/backend/src/main/java/org/osi/server/sync/EdgeSyncService.java)
 - [EdgeSyncController.java](/home/phil/Repos/osi-server/backend/src/main/java/org/osi/server/sync/EdgeSyncController.java)
+- [CommandService.java](/home/phil/Repos/osi-server/backend/src/main/java/org/osi/server/command/CommandService.java)
+- [MqttSubscriberService.java](/home/phil/Repos/osi-server/backend/src/main/java/org/osi/server/mqtt/MqttSubscriberService.java)
+- [MqttPublisherService.java](/home/phil/Repos/osi-server/backend/src/main/java/org/osi/server/mqtt/MqttPublisherService.java)
 - [AuthController.java](/home/phil/Repos/osi-server/backend/src/main/java/org/osi/server/user/AuthController.java)
 - [JwtTokenProvider.java](/home/phil/Repos/osi-server/backend/src/main/java/org/osi/server/security/JwtTokenProvider.java)
 - [DendroAnalyticsService.java](/home/phil/Repos/osi-server/backend/src/main/java/org/osi/server/analytics/DendroAnalyticsService.java)
-
-Recent important migrations:
-
-- `V17__bidirectional_sync_foundation.sql`
-- `V18__data_plane_mirror.sql`
 
 ---
 
@@ -204,7 +153,7 @@ Recent important migrations:
 - `GET /api/sync/state`
 - `POST /api/sync/force`
 
-### OSI Server cloud
+### OSI Server cloud (REST sync API)
 
 - `POST /auth/local-sync`
 - `POST /auth/refresh-sync`
@@ -216,86 +165,32 @@ Recent important migrations:
 
 ---
 
-## Device Registration Status
+## Edge-First Sync Model
 
-The LoRa device registration path was tightened:
+For gateway-backed farms:
 
-- ChirpStack provisioning is now required for successful registration
-- local registration success should no longer mean “DB row only”
-- cloud registration success should no longer mean “command sent only”
+- edge writes canonical local state first
+- edge emits sync events via REST outbox
+- cloud mirrors edge state
+- cloud-originated edits flow via REST pending-commands polling
+- MQTT is used only for real-time telemetry mirroring (edge → cloud)
 
-Expected application/profile routing:
+### Sync Concepts
 
-- Kiwi -> `Sensors` application + Kiwi profile
-- LSN50 -> `Sensors` application + LSN50 profile
-- Valve -> `Actuators` application + valve profile
-
-Registration should be tested again end-to-end after this sync/security work.
-
----
-
-## What Is Working Now
-
-### Control plane
-
-- synced zone create/edit flows
-- schedule propagation
-- device assignment changes
-- device unclaim handling
-- command ACK routing with sync metadata
-
-### Data plane
-
-- telemetry mirror ingest
-- dendro reading mirror ingest
-- daily dendro mirror ingest
-- zone recommendation mirror ingest
-- zone environment mirror ingest
-- irrigation event mirror ingest
-
-### Recovery
-
-- periodic bootstrap repair
-- outbox flush
-- pending-command polling
-- sync token refresh
-- manual force sync
-- manual re-auth when force sync reveals token expiry
-
----
-
-## Residual Gaps / Next Likely Work
-
-These are the most likely next tasks:
-
-1. Runtime end-to-end validation on real edge/cloud deployments
-- especially reconnect timing
-- long offline windows
-- command replay behavior
-
-2. GUI parity work
-- both GUIs should stay visually and behaviorally mirrored
-- account-link / sync state UX may need to be mirrored on `osi-server`
-
-3. Registration verification
-- test whether device registration now appears correctly in ChirpStack
-- confirm edge/cloud visibility after join/uplink
-
-4. Additional sync observability
-- clearer per-resource sync status in device/zone/schedule responses
-- operator-facing drift indicators in the UI
-
-5. Optional polish
-- better localized copy for the new force-sync and re-auth actions
-- code splitting in the React GUI if bundle size becomes a concern
+- `user_uuid` — user identity
+- `zone_uuid` — zone identity
+- `gateway_device_eui` — gateway binding
+- `sync_version` — event versioning
+- tombstones via `deleted_at`
+- `sync_outbox` — edge events pending cloud delivery
+- `sync_inbox` — deduplication of incoming edge events
+- `sync_cursor` — sync progress tracking
 
 ---
 
 ## Verified Commands
 
 ### OSI OS
-
-Run from repo root:
 
 ```bash
 node scripts/verify-sync-flow.js
@@ -304,13 +199,10 @@ node scripts/verify-sync-flow.js
 Frontend build:
 
 ```bash
-cd web/react-gui
-npm run build
+cd web/react-gui && npm run build
 ```
 
 ### OSI Server
-
-Typical targeted test commands used today:
 
 ```bash
 cd /home/phil/Repos/osi-server/backend
@@ -318,8 +210,6 @@ cd /home/phil/Repos/osi-server/backend
 ./gradlew test --tests org.osi.server.sync.EdgeSyncServiceBootstrapTest
 ./gradlew test --tests org.osi.server.sync.EdgeSyncServiceDataPlaneTest
 ./gradlew test --tests org.osi.server.sync.EdgeSyncControllerTest
-./gradlew test --tests org.osi.server.user.AuthControllerTest
-./gradlew test --tests org.osi.server.security.JwtTokenProviderTest
 ```
 
 ---
@@ -329,9 +219,76 @@ cd /home/phil/Repos/osi-server/backend
 - Treat `flows.json` as the main edge backend; many API and scheduler changes live there.
 - Prefer edge-first assumptions when a design choice is ambiguous.
 - Use `feat:` for new-feature commits and `fix:` for bug-fix commits by default.
-- Do not reintroduce cloud password hash sync; linked login now depends on a gateway-specific offline verifier.
+- Do not reintroduce cloud password hash sync; linked login uses a gateway-specific offline verifier.
 - For synced farms, mirrored edge outputs are the canonical user-facing state.
-- If a sync token is expired, the intended user recovery path is now:
-  - account-link page
-  - `Force sync now`
-  - if needed, `Re-authenticate with OSI Server`
+- **All cloud→edge commands flow via REST polling** (`pending-commands` endpoint), not MQTT subscription.
+- MQTT is used for **telemetry only** (edge → cloud) plus heartbeats and ACKs.
+
+---
+
+## Deprecated Code
+
+### osi-server: MqttPublisherService
+
+**Status**: Deprecated (marked `@Deprecated`)
+
+Cloud-to-edge commands no longer use MQTT. The `MqttPublisherService` is kept for potential future use.
+
+- Location: `backend/src/main/java/org/osi/server/mqtt/MqttPublisherService.java`
+- Used by: `CommandService.java` (also deprecated)
+- Replacement: REST polling via `EdgeSyncService.getPendingCommands()`
+
+---
+
+## Adding A New Device Type
+
+1. Update DB schema (`database/farming.db`)
+2. Update TypeScript types (`web/react-gui/src/types/farming.ts`)
+3. Add Node-RED ingest flow in `flows.json`
+4. Add catalog / merge logic
+5. Add React card/component
+6. Render in dashboard
+7. Update bundled DB copies
+
+Also consider sync metadata requirements and ChirpStack app/profile mapping.
+
+### Device ChirpStack Mapping
+
+| Device | Application | Profile |
+|--------|-------------|---------|
+| Kiwi | `Sensors` | Kiwi |
+| LSN50 | `Sensors` | LSN50 |
+| Valve | `Actuators` | STREGA |
+
+---
+
+## Security
+
+- Local auth tokens: HMAC-signed
+- Local passwords: bcrypt-hashed
+- `/download/database`: gated
+- Linked login: gateway-specific offline verifier
+
+---
+
+## Critical File Locations
+
+### On the running Raspberry Pi
+
+| What | Path |
+|------|------|
+| Node-RED flows | `/srv/node-red/flows.json` |
+| SQLite database | `/data/db/farming.db` |
+| React GUI | `/usr/lib/node-red/gui/` |
+| Node-RED settings | `/srv/node-red/settings.js` |
+| Node-RED init | `/etc/init.d/node-red` |
+| Web UI | `http://<device-ip>:1880/gui` |
+
+### In the repo
+
+| What | Path |
+|------|------|
+| Node-RED flows | `conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/flows.json` |
+| Database | `conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/db/farming.db` |
+| React source | `web/react-gui/src/` |
+| Node-RED settings | `feeds/chirpstack-openwrt-feed/apps/node-red/files/settings.js` |
