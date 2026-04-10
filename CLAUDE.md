@@ -143,6 +143,22 @@ ssh root@<pi-ip> '/etc/init.d/node-red restart'
 
 ---
 
+## Session Closeout
+
+When the user says `finish the session`, treat that as a deliberate close-out request.
+
+- Review `git status --short --branch` and report staged, unstaged, and untracked files.
+- Remove only clearly temporary files created during the session. If a file might still be useful, list it as a cleanup candidate instead of deleting it.
+- Review and update [AGENTS.md](/home/phil/Repos/osi-os/AGENTS.md) for durable repo-level context changes.
+- Review and update `/home/phil/.claude/projects/-home-phil-Repos-osi-os/memory/MEMORY.md` for cross-session operational context changes.
+- Run `scripts/session-closeout.sh` and report any warnings or follow-up needed.
+- If neither context file changed, say explicitly that both were reviewed and left unchanged.
+- End with remaining risks, skipped verification, and the next recommended step.
+
+Keep closeout updates factual and avoid speculative rewrites.
+
+---
+
 ## Adding A New Device Type
 
 1. Update DB schema (`database/farming.db`)
@@ -163,6 +179,12 @@ Also consider sync metadata requirements and ChirpStack app/profile mapping.
 - Local passwords: bcrypt-hashed
 - `/download/database`: gated
 - Linked account login: gateway-specific offline verifier (not cloud password hash)
+
+---
+
+## Session Closeout
+
+When the user says `finish the session`, follow the 9-step convention documented in [AGENTS.md § Session Closeout](/home/phil/Repos/osi-os/AGENTS.md). Run `scripts/session-closeout.sh` as part of that process and report any warnings.
 
 ---
 

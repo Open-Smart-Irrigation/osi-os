@@ -226,6 +226,28 @@ cd /home/phil/Repos/osi-server/backend
 
 ---
 
+## Session Closeout
+
+When the user says `finish the session`, treat it as an explicit close-out request. Unless the user says otherwise, execute all of the following steps:
+
+1. Run `git status --short --branch` and report staged, unstaged, and untracked files.
+2. Clean up only clearly temporary files created during the current session (e.g. `/tmp/` scripts, throwaway test files).
+3. If a file might still be useful or might belong to the user, do **not** delete it — report it as a cleanup candidate instead.
+4. Review the repo context files (`AGENTS.md`, `CLAUDE.md`) so they stay accurate across sessions.
+5. Update `AGENTS.md` for durable repo-level facts: architecture, workflows, commands, file locations, branch expectations, known gotchas.
+6. Update `/home/phil/.claude/projects/-home-phil-Repos-osi-os/memory/MEMORY.md` for cross-session operational details, device inventory, historical notes, and similar durable context.
+7. Run `scripts/session-closeout.sh` and report any warnings it surfaces.
+8. If no context files needed changes, explicitly state that `AGENTS.md` and `MEMORY.md` were reviewed and left unchanged.
+9. End with a short summary of remaining risks, skipped verification, and the next recommended step.
+
+Constraints:
+- Do not rewrite context files speculatively.
+- Keep updates factual and concise.
+- Never delete ambiguous files without asking.
+- Prefer conservative cleanup over aggressive cleanup.
+
+---
+
 ## Deprecated Code
 
 ### osi-server: MqttPublisherService
