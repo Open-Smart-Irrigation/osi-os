@@ -568,7 +568,7 @@
     "type": "function",
     "z": "device-api-tab",
     "name": "Return Catalog",
-    "func": "msg.statusCode = 200;\nmsg.payload = [\n  { id: 'KIWI_SENSOR', name: 'Kiwi Soil Sensor' },\n  { id: 'TEKTELIC_CLOVER', name: 'Clover Soil Sensor' },\n  { id: 'STREGA_VALVE', name: 'Strega Smart Valve' },\n  { id: 'DRAGINO_LSN50', name: 'Dragino LSN50 Sensor Node' }\n];\nreturn msg;",
+    "func": "msg.statusCode = 200;\nmsg.payload = [\n  { id: 'KIWI_SENSOR', name: 'Kiwi Soil Sensor' },\n  { id: 'TEKTELIC_CLOVER', name: 'Clover Soil Sensor' },\n  { id: 'STREGA_VALVE', name: 'Strega Smart Valve' },\n  { id: 'DRAGINO_LSN50', name: 'Dragino LSN50 Sensor Node' },\n  { id: 'SENSECAP_S2120', name: 'SenseCAP S2120 Weather Station' }\n];\nreturn msg;",
     "outputs": 1,
     "x": 370,
     "y": 180,
