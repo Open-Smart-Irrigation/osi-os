@@ -12,6 +12,7 @@ import { AddDeviceModal } from '../components/farming/AddDeviceModal';
 import { CreateZoneModal } from '../components/farming/CreateZoneModal';
 import { LanguageSwitcher } from '../components/LanguageSwitcher';
 import { SystemPanel } from '../components/farming/SystemPanel';
+import { SenseCapWeatherCard } from '../components/farming/SenseCapWeatherCard';
 import type { Device, IrrigationZone } from '../types/farming';
 
 const devicesFetcher = () => devicesAPI.getAll();
@@ -82,6 +83,7 @@ export const FarmingDashboard: React.FC = () => {
   const unassignedSensors = unassignedDevices.filter((d) => d.type_id === 'KIWI_SENSOR' || d.type_id === 'TEKTELIC_CLOVER');
   const unassignedValves = unassignedDevices.filter((d) => d.type_id === 'STREGA_VALVE');
   const unassignedLSN50 = unassignedDevices.filter((d) => d.type_id === 'DRAGINO_LSN50');
+  const unassignedS2120 = unassignedDevices.filter((d) => d.type_id === 'SENSECAP_S2120');
 
   const isLoading = !devices && !devicesError && !zones && !zonesError;
   const error = devicesError || zonesError;
@@ -259,6 +261,23 @@ export const FarmingDashboard: React.FC = () => {
                             key={device.deveui}
                             device={device}
                             onRemove={handleUpdate}
+                            onUpdate={handleUpdate}
+                          />
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Unassigned SenseCAP S2120 Weather Stations */}
+                  {unassignedS2120.length > 0 && (
+                    <div className="mt-6">
+                      <h3 className="text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)] mb-3">SenseCAP S2120 Weather Stations</h3>
+                      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                        {unassignedS2120.map((device) => (
+                          <SenseCapWeatherCard
+                            key={device.deveui}
+                            device={device}
+                            allZones={(zones ?? []).map((z) => ({ id: z.id, name: z.name }))}
                             onUpdate={handleUpdate}
                           />
                         ))}
