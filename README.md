@@ -217,7 +217,7 @@ The script deploys: `settings.js`, `flows.json`, `farming.db`, Node-RED packages
 
 ```bash
 PI=root@<pi-ip>
-
+/
 scp feeds/chirpstack-openwrt-feed/apps/node-red/files/settings.js $PI:/srv/node-red/settings.js
 scp conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/flows.json $PI:/srv/node-red/flows.json
 ssh $PI 'mkdir -p /data/db'
