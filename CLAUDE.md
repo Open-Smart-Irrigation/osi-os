@@ -129,6 +129,8 @@ cd web/react-gui && npm install && npm run build
 ```
 
 ### Deploy to device
+Do not overwrite `/data/db/farming.db` on a live or previously provisioned Pi. Treat the bundled database as a first-boot seed only; use `deploy.sh` or migrations for updates, and back up the live DB plus any `farming.db-wal`, `farming.db-shm`, or `farming.db-journal` sidecar files before manual repair.
+
 ```bash
 # Deploy flows
 scp conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/flows.json \

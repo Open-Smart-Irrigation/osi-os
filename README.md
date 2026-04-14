@@ -68,11 +68,11 @@ OSI Server  (optional cloud — remote monitoring & control)
 ```
 osi-os/
 ├── web/react-gui/          # React frontend (TypeScript, Tailwind CSS, Vite)
-├── conf/                   # Per-target OpenWrt configs, Node-RED flows, database
+├── conf/                   # Per-target OpenWrt configs, Node-RED flows, seed database
 │   └── full_raspberrypi_bcm27xx_bcm2712/
 │       └── files/usr/share/
 │           ├── flows.json  # Node-RED backend logic
-│           └── db/farming.db  # Pre-seeded SQLite database
+│           └── db/farming.db  # Seed SQLite database for first boot only
 ├── feeds/                  # ChirpStack + Node-RED OpenWrt packages
 │   └── chirpstack-openwrt-feed/
 ├── openwrt/                # OpenWrt 24.10 source (git submodule)
@@ -203,14 +203,16 @@ tar czf react_gui.tar.gz -C web/react-gui/build .
 # 2. Serve the repo from your dev machine
 python3 -m http.server 9876
 
-# 3. In a second terminal — deploy via tunnel (runs on the Pi, pulls from your machine)
-ssh -R 9876:localhost:9876 root@<pi-ip> 'curl -s http://localhost:9876/deploy.sh | sh'
+# 3. In a second terminal - deploy via tunnel (runs on the Pi, pulls from your machine)
+ssh -R 9876:localhost:9876 root@<pi-ip> 'curl -fsS http://localhost:9876/deploy.sh | sh'
 
 # 4. Restart Node-RED
 ssh root@<pi-ip> '/etc/init.d/node-red restart'
 ```
 
-The script deploys: `settings.js`, `flows.json`, `farming.db`, Node-RED packages and local helpers (`osi-chirpstack-helper`, `osi-db-helper`) with `npm install` on-device, `chirpstack-bootstrap.js`, the SenseCAP S2120 codec, and the React GUI bundle.
+The script deploys: `settings.js`, `flows.json`, Node-RED packages and local helpers (`osi-chirpstack-helper`, `osi-db-helper`) with `npm install` on-device, `chirpstack-bootstrap.js`, the SenseCAP S2120 codec, and the React GUI bundle.
+
+Database safety: `deploy.sh` must never overwrite `/data/db/farming.db`. It seeds the bundled `farming.db` only when the target file is missing, and it exits instead of seeding if orphaned SQLite WAL/SHM/journal sidecar files are present. On already-provisioned or field devices, the live DB is preserved.
 
 <details>
 <summary>Alternative: manual file-by-file deployment (if deploy.sh is not available)</summary>
@@ -220,8 +222,8 @@ PI=root@<pi-ip>
 /
 scp feeds/chirpstack-openwrt-feed/apps/node-red/files/settings.js $PI:/srv/node-red/settings.js
 scp conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/flows.json $PI:/srv/node-red/flows.json
-ssh $PI 'mkdir -p /data/db'
-scp conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/db/farming.db $PI:/data/db/farming.db
+scp conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/db/farming.db $PI:/tmp/osi-os-seed-farming.db
+ssh $PI 'mkdir -p /data/db && if [ ! -e /data/db/farming.db ]; then mv /tmp/osi-os-seed-farming.db /data/db/farming.db; else rm -f /tmp/osi-os-seed-farming.db; echo "preserved existing /data/db/farming.db"; fi'
 scp conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/package.json $PI:/srv/node-red/package.json
 scp conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/package-lock.json $PI:/srv/node-red/package-lock.json
 ssh $PI 'mkdir -p /srv/node-red/osi-chirpstack-helper'
@@ -295,7 +297,7 @@ Navigate to `http://<pi-ip>:1880/gui` in a browser (use the Tailscale IP for rem
 
 ### Re-deploying after changes
 
-Re-run `deploy.sh` — it's safe to re-run at any time and will update all components:
+Re-run `deploy.sh` to update application components. It is safe to re-run on live devices because it preserves `/data/db/farming.db` and only seeds the DB on devices where that file is absent:
 
 ```bash
 # Rebuild and repackage the GUI if frontend changed
@@ -305,7 +307,7 @@ tar czf react_gui.tar.gz -C web/react-gui/build .
 # Serve and deploy
 python3 -m http.server 9876
 # second terminal:
-ssh -R 9876:localhost:9876 root@<pi-ip> 'curl -s http://localhost:9876/deploy.sh | sh'
+ssh -R 9876:localhost:9876 root@<pi-ip> 'curl -fsS http://localhost:9876/deploy.sh | sh'
 ssh root@<pi-ip> '/etc/init.d/node-red restart'
 ```
 
