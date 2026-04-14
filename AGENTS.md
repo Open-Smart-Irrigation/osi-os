@@ -209,6 +209,7 @@ cd /home/phil/Repos/osi-server/backend
 ./gradlew test --tests org.osi.server.sync.EdgeSyncServiceControlPlaneTest
 ./gradlew test --tests org.osi.server.sync.EdgeSyncServiceBootstrapTest
 ./gradlew test --tests org.osi.server.sync.EdgeSyncServiceDataPlaneTest
+./gradlew test --tests org.osi.server.sync.EdgeSyncServiceStatusTest
 ./gradlew test --tests org.osi.server.sync.EdgeSyncControllerTest
 ```
 
@@ -223,6 +224,15 @@ cd /home/phil/Repos/osi-server/backend
 - For synced farms, mirrored edge outputs are the canonical user-facing state.
 - **All cloud→edge commands flow via REST polling** (`pending-commands` endpoint), not MQTT subscription.
 - MQTT is used for **telemetry only** (edge → cloud) plus heartbeats and ACKs.
+
+### Live Deploy Database Safety
+
+- Never overwrite `/data/db/farming.db` on a running Pi. It is live operational data and the source of truth for edge state.
+- `deploy.sh` must preserve an existing `/data/db/farming.db`; it may seed the bundled DB only when the target DB is absent.
+- Do not run manual `scp .../farming.db root@<pi>:/data/db/farming.db` against a live or previously provisioned device.
+- Before any manual DB repair or destructive cloud cleanup, take a timestamped backup of the Pi DB, including `farming.db-wal`, `farming.db-shm`, and `farming.db-journal` when present.
+- If a deploy needs schema changes, use migrations or idempotent SQL against the existing DB instead of replacing the file.
+- If `/data/db/farming.db` is missing but SQLite sidecar files exist, stop and inspect/recover rather than seeding a new DB.
 
 ---
 
