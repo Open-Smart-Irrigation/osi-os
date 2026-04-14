@@ -126,10 +126,14 @@ export type DendroStressThreshold = 'mild' | 'moderate' | 'significant' | 'sever
 export interface IrrigationSchedule {
   irrigation_zone_id: number;
   trigger_metric: TriggerMetric;
+  triggerMetric?: TriggerMetric;
   threshold_kpa: number;
+  thresholdKpa?: number;
   enabled: boolean;
   duration_minutes?: number;
+  durationMinutes?: number;
   last_triggered_at?: string | null;
+  lastTriggeredAt?: string | null;
   response_mode?: string | null;
   responseMode?: string | null;
 }
@@ -147,8 +151,11 @@ export interface IrrigationZone {
   id: number;
   name: string;
   device_count: number;
+  deviceCount?: number;
   created_at: string;
+  createdAt?: string;
   updated_at: string;
+  updatedAt?: string;
 
   // Returned by GET /api/irrigation-zones (your Node-RED flow adds this)
   schedule: IrrigationSchedule | null;
@@ -179,7 +186,7 @@ export interface IrrigationZone {
   areaM2?: number | null;
   irrigationEfficiencyPct?: number | null;
   schedulingMode?: 'local' | 'server_preferred' | null;
-  variety_compat?: string | null;
+  varietyCompat?: string | null;
 }
 
 export type GatewayLocationStatus = 'live' | 'stale' | 'no_fix';

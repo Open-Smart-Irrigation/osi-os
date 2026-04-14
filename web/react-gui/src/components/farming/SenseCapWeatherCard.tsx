@@ -1,6 +1,7 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useRef, useState } from 'react';
 import type { Device } from '../../types/farming';
-import { devicesAPI, s2120API } from '../../services/api';
+import { devicesAPI, getApiErrorMessage, s2120API } from '../../services/api';
+import { useDismissOnPointerDown } from '../../hooks/useDismissOnPointerDown';
 import { useTranslation } from 'react-i18next';
 
 interface Props {
@@ -45,13 +46,7 @@ const ZonePickerPanel: React.FC<{
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    const handler = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) onClose();
-    };
-    document.addEventListener('mousedown', handler);
-    return () => document.removeEventListener('mousedown', handler);
-  }, [onClose]);
+  useDismissOnPointerDown(ref, onClose);
 
   const toggle = (id: number) => setSelected(prev => {
     const next = new Set(prev);
@@ -67,8 +62,7 @@ const ZonePickerPanel: React.FC<{
       onUpdate?.();
       onClose();
     } catch (err: unknown) {
-      const e = err as { response?: { data?: { error?: string } } };
-      setError(e.response?.data?.error ?? 'Failed to save');
+      setError(getApiErrorMessage(err, 'Failed to save'));
     } finally {
       setBusy(false);
     }
@@ -125,8 +119,7 @@ export const SenseCapWeatherCard: React.FC<Props> = ({ device, onRemove, onUpdat
       await devicesAPI.remove(device.deveui);
       onRemove?.();
     } catch (err: unknown) {
-      const e = err as { response?: { data?: { message?: string } } };
-      setError(e.response?.data?.message ?? 'Failed to remove device');
+      setError(getApiErrorMessage(err, 'Failed to remove device'));
       setIsRemoving(false);
     }
   };

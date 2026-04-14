@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import type { Device, Lsn50Mode } from '../../types/farming';
 import { devicesAPI, lsn50API } from '../../services/api';
+import { useDismissOnPointerDown } from '../../hooks/useDismissOnPointerDown';
 import { DendrometerMonitor } from './DendrometerMonitor';
 import { SensorMonitor } from './SensorMonitor';
 
@@ -122,13 +123,7 @@ const ConfigPanel: React.FC<{
   const selectedModeDescription = LSN50_MODE_OPTIONS.find((option) => option.value === selectedMode)?.description ?? '';
   const counterModeReady = currentMode === 'MOD9' || pendingMode === 'MOD9';
 
-  useEffect(() => {
-    const handler = (event: MouseEvent) => {
-      if (ref.current && !ref.current.contains(event.target as Node)) onClose();
-    };
-    document.addEventListener('mousedown', handler);
-    return () => document.removeEventListener('mousedown', handler);
-  }, [onClose]);
+  useDismissOnPointerDown(ref, onClose);
 
   useEffect(() => {
     if (!pendingMode) {

@@ -39,12 +39,6 @@ function fmtTickShort(iso: string, hours: number): string {
   return d.toLocaleString(undefined, { month: 'short', day: 'numeric' });
 }
 
-function fmtLabel(iso: string): string {
-  return new Date(iso).toLocaleString(undefined, {
-    month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit',
-  });
-}
-
 // ─── aggregated-delta computation ───────────────────────────────────────────
 
 interface DeltaBucket {
@@ -113,7 +107,7 @@ const TooltipPosition = ({ active, payload, label, hours }: any) => {
   );
 };
 
-const TooltipDelta = ({ active, payload, label, intervalMinutes, hours }: any) => {
+const TooltipDelta = ({ active, payload, label, hours }: any) => {
   if (!active || !payload?.length) return null;
   const bucket: DeltaBucket = payload[0]?.payload;
   const v: number | null = payload[0].value;

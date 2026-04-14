@@ -83,7 +83,7 @@ export const EnvironmentCard: React.FC<Props> = ({ zone, devices }) => {
         const summary = await environmentAPI.getSummary(zone.id);
         if (cancelled) return;
         setData(summary);
-        setActiveTab((previous) => (previous === 'online' || previous === 'forecast' ? 'weather' : previous) || 'water');
+        setActiveTab((previous) => previous || 'water');
       } catch (e: any) {
         if (!cancelled) setError(e?.response?.data?.message ?? e?.message ?? 'Failed to load environment data');
       } finally {

@@ -1,6 +1,7 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useRef, useState } from 'react';
 import type { Device } from '../../types/farming';
 import { devicesAPI, kiwiAPI } from '../../services/api';
+import { useDismissOnPointerDown } from '../../hooks/useDismissOnPointerDown';
 import { useTranslation } from 'react-i18next';
 import { SensorMonitor } from './SensorMonitor';
 
@@ -41,13 +42,7 @@ const ConfigPanel: React.FC<{
   const [error, setError] = useState<string | null>(null);
   const [info, setInfo] = useState<string | null>(null);
 
-  useEffect(() => {
-    const handler = (event: MouseEvent) => {
-      if (ref.current && !ref.current.contains(event.target as Node)) onClose();
-    };
-    document.addEventListener('mousedown', handler);
-    return () => document.removeEventListener('mousedown', handler);
-  }, [onClose]);
+  useDismissOnPointerDown(ref, onClose);
 
   const parseMinutes = (): number | null => {
     if (!intervalMinutesInput.trim()) return null;

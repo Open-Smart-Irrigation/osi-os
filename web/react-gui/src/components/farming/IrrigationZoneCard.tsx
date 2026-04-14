@@ -96,6 +96,7 @@ export const IrrigationZoneCard: React.FC<IrrigationZoneCardProps> = ({
   allZones,
 }) => {
   const { t } = useTranslation('devices');
+  const { t: tDashboard } = useTranslation('dashboard');
   const { t: tc } = useTranslation('common');
   const [zoneCollapsed, setZoneCollapsed] = useState(true);
   const [devicesCollapsed, setDevicesCollapsed] = useState(true);
@@ -465,7 +466,7 @@ export const IrrigationZoneCard: React.FC<IrrigationZoneCardProps> = ({
               {/* Sensors */}
               {kiwiSensors.length > 0 && (
                 <div className="mb-5">
-                  <p className="text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)] mb-3">{t('soilSensors')}</p>
+                  <p className="text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)] mb-3">{tDashboard('soilSensors')}</p>
                   <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                     {kiwiSensors.map((device) => (
                       <div key={device.deveui} className="relative">
@@ -488,7 +489,7 @@ export const IrrigationZoneCard: React.FC<IrrigationZoneCardProps> = ({
               {/* Valves */}
               {stregaValves.length > 0 && (
                 <div className="mb-5">
-                  <p className="text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)] mb-3">{t('smartValves')}</p>
+                  <p className="text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)] mb-3">{tDashboard('smartValves')}</p>
                   <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                     {stregaValves.map((device) => (
                       <div key={device.deveui} className="relative">

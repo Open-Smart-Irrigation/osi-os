@@ -1,6 +1,7 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useRef, useState } from 'react';
 import type { Device, StregaModel } from '../../types/farming';
 import { devicesAPI, stregaAPI } from '../../services/api';
+import { useDismissOnPointerDown } from '../../hooks/useDismissOnPointerDown';
 import { useTranslation } from 'react-i18next';
 
 interface StregaValveCardProps {
@@ -62,13 +63,7 @@ const ConfigPanel: React.FC<{
   const recognizedModel = getRecognizedStregaModel(device);
   const isMotorized = recognizedModel === 'MOTORIZED';
 
-  useEffect(() => {
-    const handler = (event: MouseEvent) => {
-      if (ref.current && !ref.current.contains(event.target as Node)) onClose();
-    };
-    document.addEventListener('mousedown', handler);
-    return () => document.removeEventListener('mousedown', handler);
-  }, [onClose]);
+  useDismissOnPointerDown(ref, onClose);
 
   const applyInterval = async () => {
     const closedMinutes = Number(closedIntervalInput);

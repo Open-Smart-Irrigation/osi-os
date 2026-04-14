@@ -225,15 +225,20 @@ return msg;
 gui/
 ├── src/
 │   ├── components/
-│   │   ├── Dashboard.jsx       # Main dashboard container
-│   │   ├── SensorSelector.jsx  # Sensor switching component
-│   │   ├── MetricsGrid.jsx     # Current metrics display
-│   │   ├── HumidityChart.jsx   # Humidity visualization
-│   │   └── FlowChart.jsx       # Water flow visualization
+│   │   ├── PrivateRoute.tsx    # Auth guard
+│   │   ├── LanguageSwitcher.tsx
+│   │   └── farming/            # Device cards, zones, environment and analytics UI
+│   ├── contexts/
+│   │   └── AuthContext.tsx     # Local auth/session state
+│   ├── hooks/
+│   │   └── useDismissOnPointerDown.ts
+│   ├── i18n/
+│   │   └── config.ts           # i18next setup
 │   ├── services/
-│   │   └── dataService.js      # Data fetching service
-│   ├── App.jsx                 # Root component
-│   ├── App.css                 # Global styles
+│   │   └── api.ts              # Local OSI OS API client
+│   ├── types/
+│   │   └── farming.ts          # Shared domain types
+│   ├── App.tsx                 # Root component
 │   └── main.jsx                # Application entry point
 ├── package.json
 ├── vite.config.js

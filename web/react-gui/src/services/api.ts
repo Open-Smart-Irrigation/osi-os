@@ -1,4 +1,5 @@
 import axios from 'axios';
+import { notifyAuthExpired } from './authEvents';
 import type {
   Device,
   LoginRequest,
@@ -24,6 +25,32 @@ import type {
   ZoneEnvironmentSummary,
 } from '../types/farming';
 
+type ApiErrorPayload = {
+  detail?: string;
+  error?: string;
+  message?: string;
+};
+
+function shouldSuppressAuthExpiry(error: unknown): boolean {
+  return Boolean((error as { config?: { skipAuthExpiry?: boolean } })?.config?.skipAuthExpiry);
+}
+
+export function getApiErrorMessage(error: unknown, fallback: string): string {
+  if (axios.isAxiosError<ApiErrorPayload>(error)) {
+    return error.response?.data?.detail
+      || error.response?.data?.message
+      || error.response?.data?.error
+      || error.message
+      || fallback;
+  }
+
+  if (error instanceof Error && error.message) {
+    return error.message;
+  }
+
+  return fallback;
+}
+
 // Create axios instance with base configuration
 const api = axios.create({
   baseURL: '/', // Vite proxy will forward to localhost:1880
@@ -42,7 +69,6 @@ api.interceptors.request.use(
         config.headers = {} as any;
       }
       config.headers['Authorization'] = `Bearer ${token}`;
-    } else {
     }
     return config;
   },
@@ -58,7 +84,12 @@ api.interceptors.response.use(
   },
   (error) => {
     if (error.response?.status === 401) {
+      const hadSession = Boolean(localStorage.getItem('auth_token'));
       localStorage.removeItem('auth_token');
+      localStorage.removeItem('username');
+      if (hadSession && !shouldSuppressAuthExpiry(error)) {
+        notifyAuthExpired();
+      }
     }
     return Promise.reject(error);
   }
@@ -77,16 +108,46 @@ export const authAPI = {
   },
 };
 
+function normaliseSchedule(sched: any): IrrigationSchedule {
+  return {
+    ...sched,
+    irrigation_zone_id: Number(sched?.irrigation_zone_id ?? sched?.irrigationZoneId ?? 0),
+    trigger_metric: sched?.trigger_metric ?? sched?.triggerMetric ?? 'SWT_1',
+    triggerMetric: sched?.triggerMetric ?? sched?.trigger_metric ?? 'SWT_1',
+    threshold_kpa: Number(sched?.threshold_kpa ?? sched?.thresholdKpa ?? 0),
+    thresholdKpa: Number(sched?.thresholdKpa ?? sched?.threshold_kpa ?? 0),
+    duration_minutes: sched?.duration_minutes ?? sched?.durationMinutes ?? undefined,
+    durationMinutes: sched?.durationMinutes ?? sched?.duration_minutes ?? undefined,
+    last_triggered_at: sched?.last_triggered_at ?? sched?.lastTriggeredAt ?? null,
+    lastTriggeredAt: sched?.lastTriggeredAt ?? sched?.last_triggered_at ?? null,
+    response_mode: sched?.response_mode ?? sched?.responseMode ?? null,
+    responseMode: sched?.responseMode ?? sched?.response_mode ?? null,
+  };
+}
+
+function normaliseDevice(device: any): Device {
+  return {
+    ...device,
+    deveui: String(device?.deveui ?? '').trim().toUpperCase(),
+    latest_data: device?.latest_data ?? {},
+    last_seen: device?.last_seen ?? null,
+    irrigation_zone_id: device?.irrigation_zone_id ?? null,
+    zone_ids: Array.isArray(device?.zone_ids) ? device.zone_ids : null,
+    zone_names: Array.isArray(device?.zone_names) ? device.zone_names : null,
+  };
+}
+
 // Devices API
 export const devicesAPI = {
   getAll: async (): Promise<Device[]> => {
     const response = await api.get<Device[]>('/api/devices');
-    return response.data;
+    const rows = Array.isArray(response.data) ? response.data : [];
+    return rows.map(normaliseDevice);
   },
 
   add: async (device: AddDeviceRequest): Promise<Device> => {
     const response = await api.post<Device>('/api/devices', device);
-    return response.data;
+    return normaliseDevice(response.data);
   },
 
   getCatalog: async (): Promise<DeviceCatalogItem[]> => {
@@ -107,6 +168,9 @@ function normaliseZone(z: any): IrrigationZone {
   const sched = z.schedule;
   return {
     ...z,
+    deviceCount:       z.deviceCount       ?? z.device_count ?? 0,
+    createdAt:         z.createdAt         ?? z.created_at,
+    updatedAt:         z.updatedAt         ?? z.updated_at,
     // Camelise new metadata fields from Pi snake_case API
     cropType:          z.cropType          ?? z.crop_type          ?? null,
     variety:           z.variety                                   ?? null,
@@ -120,14 +184,8 @@ function normaliseZone(z: any): IrrigationZone {
     phenologicalStage: z.phenologicalStage ?? z.phenological_stage ?? null,
     calibrationKey:    z.calibrationKey    ?? z.calibration_key    ?? null,
     gatewayDeviceEui:  z.gatewayDeviceEui  ?? z.gateway_device_eui ?? null,
-    schedule: sched ? {
-      ...sched,
-      triggerMetric:   sched.triggerMetric   ?? sched.trigger_metric   ?? null,
-      thresholdKpa:    sched.thresholdKpa    ?? sched.threshold_kpa    ?? null,
-      durationMinutes: sched.durationMinutes ?? sched.duration_minutes ?? null,
-      lastTriggeredAt: sched.lastTriggeredAt ?? sched.last_triggered_at ?? null,
-      responseMode:    sched.responseMode    ?? sched.response_mode    ?? 'proportional',
-    } : null,
+    varietyCompat:     z.varietyCompat      ?? z.variety_compat       ?? z.variety ?? null,
+    schedule: sched ? normaliseSchedule(sched) : null,
   } as IrrigationZone;
 }
 
@@ -192,12 +250,13 @@ function parseRecommendationDiagnostics(raw: string | null): ZoneRecommendationD
 export const irrigationZonesAPI = {
   getAll: async (): Promise<IrrigationZone[]> => {
     const response = await api.get<any[]>('/api/irrigation-zones');
-    return response.data.map(normaliseZone);
+    const rows = Array.isArray(response.data) ? response.data : [];
+    return rows.map(normaliseZone);
   },
 
   create: async (zone: CreateZoneRequest): Promise<IrrigationZone> => {
     const response = await api.post<IrrigationZone>('/api/irrigation-zones', zone);
-    return response.data;
+    return normaliseZone(response.data);
   },
 
   delete: async (zoneId: number): Promise<void> => {
@@ -221,7 +280,7 @@ export const irrigationZonesAPI = {
       `/api/irrigation-zones/${zoneId}/schedule`,
       body
     );
-    return response.data;
+    return normaliseSchedule(response.data);
   },
 
   // Update zone configuration metadata
@@ -242,7 +301,7 @@ export const irrigationZonesAPI = {
       `/api/irrigation-zones/${zoneId}/config`,
       payload
     );
-    return response.data;
+    return normaliseZone(response.data);
   },
 
   setZoneLocation: async (zoneId: number, payload: {
@@ -418,11 +477,13 @@ function normaliseZoneRecommendation(row: any): ZoneRecommendation {
 export const dendroAnalyticsAPI = {
   getDailyIndicators: async (deveui: string, days = 7): Promise<DendroDaily[]> => {
     const response = await api.get<any[]>(`/api/dendrometer/${deveui}/daily`, { params: { days } });
-    return response.data.map(normaliseDendroDaily);
+    const rows = Array.isArray(response.data) ? response.data : [];
+    return rows.map(normaliseDendroDaily);
   },
   getZoneRecommendations: async (zoneId: number, days = 14): Promise<ZoneRecommendation[]> => {
     const response = await api.get<any[]>(`/api/irrigation-zones/${zoneId}/recommendations`, { params: { days } });
-    return response.data.map(normaliseZoneRecommendation);
+    const rows = Array.isArray(response.data) ? response.data : [];
+    return rows.map(normaliseZoneRecommendation);
   },
   getRawReadings: async (deveui: string, from: string, to: string): Promise<DendroReading[]> => {
     const response = await api.get<DendroReading[]>(`/api/dendrometer/${deveui}/readings`, { params: { from, to } });
@@ -555,7 +616,8 @@ export interface ForceSyncResult {
 
 export const accountLinkAPI = {
   getStatus: () => api.get<AccountLinkStatus>('/api/account-link/status').then(r => r.data),
-  link: (req: AccountLinkRequest) => api.post<AccountLinkResult>('/api/account-link', req).then(r => r.data),
+  link: (req: AccountLinkRequest) =>
+    api.post<AccountLinkResult>('/api/account-link', req, { skipAuthExpiry: true } as any).then(r => r.data),
   unlink: () => api.delete('/api/account-link'),
   forceSync: () => api.post<ForceSyncResult>('/api/sync/force').then(r => r.data),
 };
