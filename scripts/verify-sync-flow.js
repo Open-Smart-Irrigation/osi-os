@@ -34,6 +34,7 @@ const requiredHttpRoutes = [
   '/api/devices/:deveui/strega/magnet',
   '/api/devices/:deveui/strega/partial-opening',
   '/api/devices/:deveui/strega/flushing',
+  '/api/devices/:deveui/zone-assignments',
   '/api/gateway/location',
   '/api/gateways/:gatewayEui/location',
   '/api/irrigation-zones/:zone_id/environment-summary'
@@ -83,6 +84,10 @@ const requiredFunctionNodes = [
   'Authorize + Fanout STREGA Advanced',
   'Format STREGA Advanced Response',
   'Build LSN50 mode downlink',
+  'Process S2120',
+  'Aggregate Zone Rain',
+  'Get Zone Assignments',
+  'Auth + Set Zone Assignments',
   'Auth + Query Gateway Location',
   'Format Gateway Location Response',
   'Get Zone Environment Summary'
@@ -173,6 +178,21 @@ function expectExcludesById(nodeId, needle, description) {
     fail(`${nodeId} still contains ${description}`);
   } else {
     console.log(`OK ${nodeId} removed ${description}`);
+  }
+}
+
+function expectLibById(nodeId, varName, moduleName, description) {
+  const node = findNodeById(nodeId);
+  if (!node) {
+    fail(`missing node ${nodeId}`);
+    return;
+  }
+  const libs = Array.isArray(node.libs) ? node.libs : [];
+  const found = libs.some((item) => item && item.var === varName && item.module === moduleName);
+  if (!found) {
+    fail(`${nodeId} missing ${description}`);
+  } else {
+    console.log(`OK ${nodeId} ${description}`);
   }
 }
 
@@ -345,6 +365,13 @@ expectIncludesById('format-devices', 'dd.flow_liters_per_min', 'returns interval
 expectIncludesById('format-devices', 'dd.rain_mm_per_10min', 'returns normalized rain telemetry in GET /api/devices');
 expectIncludesById('format-devices', 'dd.flow_liters_per_10min', 'returns normalized flow telemetry in GET /api/devices');
 expectIncludesById('format-devices', 'dd.counter_interval_seconds', 'returns elapsed counter interval in GET /api/devices');
+expectIncludesById('format-devices', 'dd.barometric_pressure_hpa', 'returns S2120 pressure in GET /api/devices');
+expectIncludesById('format-devices', 'dd.wind_speed_mps', 'returns S2120 wind speed in GET /api/devices');
+expectIncludesById('format-devices', 'dd.wind_direction_deg', 'returns S2120 wind direction in GET /api/devices');
+expectIncludesById('format-devices', 'dd.wind_gust_mps', 'returns S2120 wind gust in GET /api/devices');
+expectIncludesById('format-devices', 'dd.uv_index', 'returns S2120 UV in GET /api/devices');
+expectIncludesById('format-devices', 'dd.rain_gauge_cumulative_mm', 'returns S2120 cumulative rain in GET /api/devices');
+expectIncludesById('format-devices', 'dd.bat_pct', 'returns S2120 battery in GET /api/devices');
 expectIncludesById('merge-device-data', 'device_mode: d.device_mode ?? 1', 'returns configured LSN50 mode in GET /api/devices');
 expectIncludesById('merge-device-data', 'strega_model: d.strega_model || null', 'returns stored STREGA model metadata in GET /api/devices');
 expectIncludesById('merge-device-data', 'rain_mm_per_hour: latest.rain_mm_per_hour', 'merges interval-aware rain rate into GET /api/devices');
@@ -352,6 +379,30 @@ expectIncludesById('merge-device-data', 'flow_liters_per_min: latest.flow_liters
 expectIncludesById('merge-device-data', 'rain_mm_per_10min: latest.rain_mm_per_10min', 'merges normalized rain telemetry into GET /api/devices');
 expectIncludesById('merge-device-data', 'flow_liters_per_10min: latest.flow_liters_per_10min', 'merges normalized flow telemetry into GET /api/devices');
 expectIncludesById('merge-device-data', 'counter_interval_seconds: latest.counter_interval_seconds', 'merges elapsed counter interval into GET /api/devices');
+expectIncludesById('merge-device-data', 'barometric_pressure_hpa: latest.barometric_pressure_hpa', 'merges S2120 pressure into GET /api/devices');
+expectIncludesById('merge-device-data', 'wind_speed_mps: latest.wind_speed_mps', 'merges S2120 wind speed into GET /api/devices');
+expectIncludesById('merge-device-data', 'wind_direction_deg: latest.wind_direction_deg', 'merges S2120 wind direction into GET /api/devices');
+expectIncludesById('merge-device-data', 'wind_gust_mps: latest.wind_gust_mps', 'merges S2120 wind gust into GET /api/devices');
+expectIncludesById('merge-device-data', 'uv_index: latest.uv_index', 'merges S2120 UV into GET /api/devices');
+expectIncludesById('merge-device-data', 'rain_gauge_cumulative_mm: latest.rain_gauge_cumulative_mm', 'merges S2120 cumulative rain into GET /api/devices');
+expectIncludesById('merge-device-data', 'bat_pct: latest.bat_pct', 'merges S2120 battery into GET /api/devices');
+expectIncludesById('s2120-process-fn', 'data.object?.messages', 'accepts live decoded S2120 message shape');
+expectIncludesById('s2120-process-fn', 'data.object?.data?.messages', 'accepts nested decoded S2120 message shape');
+expectIncludesById('s2120-process-fn', "normalizePressureHpa(measurements['4101'])", 'uses current S2120 pressure ID');
+expectIncludesById('s2120-process-fn', "measurements['4213'] ?? measurements['4113']", 'uses current and legacy S2120 cumulative rain IDs');
+expectIncludesById('s2120-process-fn', "measurements['4191']", 'uses current S2120 wind gust ID');
+expectIncludesById('s2120-rain-agg-fn', 'SELECT wsz.zone_id', 'prefers explicit S2120 weather station zone assignments');
+expectIncludesById('s2120-rain-agg-fn', 'if (!zones.length)', 'falls back when S2120 weather station zone assignments are absent');
+expectIncludesById('s2120-rain-agg-fn', 'd.irrigation_zone_id AS zone_id', 'uses legacy S2120 irrigation zone fallback');
+expectIncludesById('s2120-rain-agg-fn', 'const rainToday = sn(d.rainMmToday != null ? d.rainMmToday : d.rainMmDelta)', 'seeds S2120 zone totals from device daily rain');
+expectIncludesById('s2120-rain-agg-fn', 'MAX(COALESCE(rainfall_mm,0)+${rainDelta}, ${rainToday})', 'keeps S2120 zone totals caught up with device daily rain');
+expectLibById('s2120-process-fn', 'osiDb', 'osi-db-helper', 'imports osi-db-helper as osiDb');
+expectLibById('s2120-rain-agg-fn', 'osiDb', 'osi-db-helper', 'imports osi-db-helper as osiDb');
+expectLibById('merge-device-data', 'osiDb', 'osi-db-helper', 'imports osi-db-helper as osiDb for S2120 enrichment');
+expectLibById('s2120-zones-get-fn', 'crypto', 'crypto', 'imports crypto for auth verification');
+expectLibById('s2120-zones-get-fn', 'osiDb', 'osi-db-helper', 'imports osi-db-helper as osiDb');
+expectLibById('s2120-zones-put-auth-fn', 'crypto', 'crypto', 'imports crypto for auth verification');
+expectLibById('s2120-zones-put-auth-fn', 'osiDb', 'osi-db-helper', 'imports osi-db-helper as osiDb');
 expectIncludesById('sensor-history-fn', 'rain_mm_per_hour', 'allows rate-based rain history queries');
 expectIncludesById('sensor-history-fn', 'flow_liters_per_min', 'allows rate-based flow history queries');
 expectIncludesById('sensor-history-fn', 'rain_mm_per_10min', 'allows normalized rain history queries');
