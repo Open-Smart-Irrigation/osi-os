@@ -180,17 +180,15 @@ async function createApiKeyViaCLI() {
   }
 }
 
-function detectGatewayEui() {
-  // 1. Try logread (most reliable on ChirpStack Gateway OS)
-  try {
-    const log = execSync('logread 2>/dev/null || true', { timeout: 5000 }).toString();
-    const topicMatch = log.match(/gateway\/([0-9a-fA-F]{16})\/event\//);
-    if (topicMatch) return topicMatch[1].toUpperCase();
-    const m = log.match(/gateway_id[:\s"]+([0-9a-fA-F]{16})/);
-    if (m) return m[1].toUpperCase();
-  } catch (_) {}
+function normalizeGatewayEui(value) {
+  const raw = String(value || '').trim().replace(/[^0-9a-fA-F]/g, '').toUpperCase();
+  if (!raw) return null;
+  if (raw.length === 16) return raw === '0101010101010101' ? null : raw;
+  if (raw.length === 12) return `${raw.slice(0, 6)}FFFE${raw.slice(6)}`;
+  return null;
+}
 
-  // 2. Try active concentratord config under /var/etc
+function readGatewayEuiFromTOML() {
   const confDirs = [
     '/var/etc/chirpstack-concentratord',
     '/var/etc',
@@ -199,22 +197,51 @@ function detectGatewayEui() {
   ];
   for (const dir of confDirs) {
     try {
-      const files = fs.readdirSync(dir).filter(f => f.endsWith('.toml'));
+      const files = fs.readdirSync(dir).filter((file) => file.endsWith('.toml'));
       for (const file of files) {
         const content = fs.readFileSync(path.join(dir, file), 'utf8');
-        const m = content.match(/gateway_id\s*=\s*"([0-9a-fA-F]{16})"/);
-        if (m && m[1] !== '0101010101010101') return m[1].toUpperCase();
+        const match = content.match(/gateway_id\s*=\s*"([0-9a-fA-F]{16})"/);
+        const resolved = normalizeGatewayEui(match && match[1]);
+        if (resolved) return resolved;
       }
     } catch (_) {}
   }
+  return null;
+}
 
-  // 3. Derive from eth0 MAC (standard LoRa EUI-64 expansion: insert FFFE in middle)
+function readGatewayEuiViaCommand(command) {
   try {
-    const mac = fs.readFileSync('/sys/class/net/eth0/address', 'utf8').trim().replace(/:/g, '');
-    if (mac.length === 12) {
-      return (mac.slice(0, 6) + 'FFFE' + mac.slice(6)).toUpperCase();
-    }
+    return normalizeGatewayEui(execSync(command, { timeout: 5000 }).toString('utf8'));
+  } catch (_) {
+    return null;
+  }
+}
+
+function detectGatewayEui() {
+  try {
+    const log = execSync('logread 2>/dev/null || true', { timeout: 5000 }).toString();
+    const topicMatch = log.match(/gateway\/([0-9a-fA-F]{16})\/event\//);
+    if (topicMatch) return normalizeGatewayEui(topicMatch[1]);
+    const match = log.match(/gateway_id[:\s"]+([0-9a-fA-F]{16})/);
+    if (match) return normalizeGatewayEui(match[1]);
   } catch (_) {}
+
+  for (const candidate of [
+    readGatewayEuiFromTOML(),
+    readGatewayEuiViaCommand('uci -q get chirpstack-concentratord.@sx1302[0].gateway_id 2>/dev/null || true'),
+    readGatewayEuiViaCommand('uci -q get chirpstack-concentratord.@sx1301[0].gateway_id 2>/dev/null || true'),
+    readGatewayEuiViaCommand('uci -q get osi-server.cloud.device_eui 2>/dev/null || true')
+  ]) {
+    if (candidate) return candidate;
+  }
+
+  for (const iface of ['eth0', 'br-lan', 'wlan0']) {
+    try {
+      const mac = fs.readFileSync(`/sys/class/net/${iface}/address`, 'utf8');
+      const resolved = normalizeGatewayEui(mac);
+      if (resolved) return resolved;
+    } catch (_) {}
+  }
 
   return null;
 }
