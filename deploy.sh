@@ -74,6 +74,11 @@ fetch_required "Node-RED settings.js" \
     "feeds/chirpstack-openwrt-feed/apps/node-red/files/settings.js" \
     "/srv/node-red/settings.js"
 
+fetch_required "Node-RED init script" \
+    "feeds/chirpstack-openwrt-feed/apps/node-red/files/node-red.init" \
+    "/etc/init.d/node-red"
+chmod 755 /etc/init.d/node-red
+
 fetch_required "flows.json" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/flows.json" \
     "/srv/node-red/flows.json"

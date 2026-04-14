@@ -184,6 +184,8 @@ function detectGatewayEui() {
   // 1. Try logread (most reliable on ChirpStack Gateway OS)
   try {
     const log = execSync('logread 2>/dev/null || true', { timeout: 5000 }).toString();
+    const topicMatch = log.match(/gateway\/([0-9a-fA-F]{16})\/event\//);
+    if (topicMatch) return topicMatch[1].toUpperCase();
     const m = log.match(/gateway_id[:\s"]+([0-9a-fA-F]{16})/);
     if (m) return m[1].toUpperCase();
   } catch (_) {}
