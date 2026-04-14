@@ -30,12 +30,14 @@ start_service() {
     local cs_profile_strega=$(uci -q get osi-server.cloud.chirpstack_profile_strega 2>/dev/null || echo "")
     local cs_profile_lsn50=$(uci -q get osi-server.cloud.chirpstack_profile_lsn50 2>/dev/null || echo "")
     local cs_profile_clover=$(uci -q get osi-server.cloud.chirpstack_profile_clover 2>/dev/null || echo "")
+    local cs_profile_s2120=$(uci -q get osi-server.cloud.chirpstack_profile_s2120 2>/dev/null || echo "")
 
     # Auto-provision flows_cred.json with OSI Cloud MQTT broker credentials.
-    # Node-RED does not expand env vars in credential fields, so we write the
-    # file directly from UCI values. Only written when both EUI and password
-    # are set; never overwrites a file that already contains correct credentials.
+    # Node-RED does not expand env vars in credential fields or MQTT client IDs,
+    # so we write the credential file and concrete client ID from UCI values.
+    # Only written when both EUI and password are set.
     local cred_file="/srv/$PACKAGE_NAME/flows_cred.json"
+    local flow_file="/srv/$PACKAGE_NAME/flows.json"
     local broker_node_id="ec43625ea99685a6"
     if [ -n "$device_eui" ] && [ -n "$mqtt_password" ]; then
         local expected_creds="{\"${broker_node_id}\":{\"user\":\"${device_eui}\",\"password\":\"${mqtt_password}\"}}"
@@ -43,6 +45,24 @@ start_service() {
         [ -f "$cred_file" ] && current_creds=$(cat "$cred_file" 2>/dev/null)
         if [ "$current_creds" != "$expected_creds" ]; then
             printf '%s' "$expected_creds" > "$cred_file"
+        fi
+        if [ -f "$flow_file" ]; then
+            FLOW_FILE="$flow_file" BROKER_NODE_ID="$broker_node_id" DEVICE_EUI_VALUE="$device_eui" node <<'NODE'
+const fs = require('fs');
+const flowFile = process.env.FLOW_FILE;
+const brokerNodeId = process.env.BROKER_NODE_ID;
+const deviceEui = process.env.DEVICE_EUI_VALUE;
+try {
+  const flows = JSON.parse(fs.readFileSync(flowFile, 'utf8'));
+  const broker = flows.find((node) => node && node.id === brokerNodeId);
+  if (broker && broker.clientid !== `device_${deviceEui}`) {
+    broker.clientid = `device_${deviceEui}`;
+    fs.writeFileSync(flowFile, JSON.stringify(flows, null, 2));
+  }
+} catch (error) {
+  console.error('[node-red.init] unable to update OSI Cloud MQTT client ID:', error.message);
+}
+NODE
         fi
     fi
 
@@ -66,7 +86,8 @@ start_service() {
         CHIRPSTACK_PROFILE_KIWI="$cs_profile_kiwi" \
         CHIRPSTACK_PROFILE_STREGA="$cs_profile_strega" \
         CHIRPSTACK_PROFILE_LSN50="$cs_profile_lsn50" \
-        CHIRPSTACK_PROFILE_CLOVER="$cs_profile_clover"
+        CHIRPSTACK_PROFILE_CLOVER="$cs_profile_clover" \
+        CHIRPSTACK_PROFILE_S2120="$cs_profile_s2120"
     procd_set_param respawn 3600 5 -1
     procd_close_instance
 }
