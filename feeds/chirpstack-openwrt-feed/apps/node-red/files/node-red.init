@@ -95,7 +95,7 @@ start_service() {
     local mqtt_password=$(uci -q get osi-server.cloud.mqtt_password 2>/dev/null || echo "")
     local server_host=$(uci -q get osi-server.cloud.server_host 2>/dev/null || echo "")
     local allow_private_server_urls=$(uci -q get osi-server.cloud.allow_private_target 2>/dev/null || echo "0")
-    local fw_version=$(uci -q get osi-server.cloud.firmware_version 2>/dev/null || echo "0.5.0")
+    local fw_version=$(uci -q get osi-server.cloud.firmware_version 2>/dev/null || echo "0.6.0")
     local openagri_weather_url=$(uci -q get osi-server.cloud.openagri_weather_url 2>/dev/null || echo "")
     local openagri_weather_username=$(uci -q get osi-server.cloud.openagri_weather_username 2>/dev/null || echo "")
     local openagri_weather_password=$(uci -q get osi-server.cloud.openagri_weather_password 2>/dev/null || echo "")

@@ -1,6 +1,6 @@
 # OSI OS — Open Smart Irrigation OS
 
-**v0.5.0 Alpha**
+**v0.6.0 Alpha**
 
 OSI OS is an open-source, offline-first smart irrigation platform for smallholder farmers. It runs on a Raspberry Pi 5 LoRaWAN gateway and combines soil sensing, automated irrigation scheduling, and a farmer-facing web dashboard — all without requiring internet connectivity.
 

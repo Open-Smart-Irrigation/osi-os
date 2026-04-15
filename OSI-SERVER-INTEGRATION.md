@@ -140,7 +140,7 @@ Node-RED reads these from the process environment (set by UCI config + init scri
 | `DEVICE_TYPE` | UCI `osi-server.cloud.device_type` | `GATEWAY` |
 | `DEVICE_MQTT_PASSWORD` | UCI `osi-server.cloud.mqtt_password` | `<random>` |
 | `OSI_SERVER_HOST` | UCI `osi-server.cloud.server_host` | `cloud.example.com` |
-| `FIRMWARE_VERSION` | UCI `osi-server.cloud.firmware_version` | `0.5.0` |
+| `FIRMWARE_VERSION` | UCI `osi-server.cloud.firmware_version` | `0.6.0` |
 | `OPENAGRI_WEATHER_URL` | UCI `osi-server.cloud.openagri_weather_url` | `https://cloud.example.com/weather` |
 | `OPENAGRI_WEATHER_USERNAME` | UCI `osi-server.cloud.openagri_weather_username` | `osi-weather` |
 | `OPENAGRI_WEATHER_PASSWORD` | UCI `osi-server.cloud.openagri_weather_password` | `<shared-secret>` |
@@ -188,7 +188,7 @@ Build Heartbeat function:
 ```javascript
 var eui = env.get('DEVICE_EUI') || 'UNKNOWN';
 var deviceType = env.get('DEVICE_TYPE') || 'GATEWAY';
-var fw = env.get('FIRMWARE_VERSION') || '0.5.0';
+var fw = env.get('FIRMWARE_VERSION') || '0.6.0';
 msg.topic = 'devices/' + eui + '/heartbeat';
 msg.payload = JSON.stringify({
     deviceEui: eui,
@@ -359,7 +359,7 @@ set osi-server.cloud=osi_server
 set osi-server.cloud.enabled=0
 set osi-server.cloud.device_eui=$ETH_MAC
 set osi-server.cloud.device_type=GATEWAY
-set osi-server.cloud.firmware_version=0.5.0
+set osi-server.cloud.firmware_version=0.6.0
 set osi-server.cloud.server_host=
 set osi-server.cloud.mqtt_password=
 commit osi-server
@@ -382,7 +382,7 @@ start_service() {
     local device_type=$(uci -q get osi-server.cloud.device_type 2>/dev/null || echo "GATEWAY")
     local mqtt_password=$(uci -q get osi-server.cloud.mqtt_password 2>/dev/null || echo "")
     local server_host=$(uci -q get osi-server.cloud.server_host 2>/dev/null || echo "")
-    local fw_version=$(uci -q get osi-server.cloud.firmware_version 2>/dev/null || echo "0.5.0")
+    local fw_version=$(uci -q get osi-server.cloud.firmware_version 2>/dev/null || echo "0.6.0")
 
     procd_open_instance
     procd_set_param command node /usr/lib/node/$PACKAGE_NAME/red.js --userDir /srv/$PACKAGE_NAME
