@@ -79,6 +79,11 @@ fetch_required "Node-RED init script" \
     "/etc/init.d/node-red"
 chmod 755 /etc/init.d/node-red
 
+fetch_required "Gateway identity helper" \
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/libexec/osi-gateway-identity.sh" \
+    "/usr/libexec/osi-gateway-identity.sh"
+chmod 755 /usr/libexec/osi-gateway-identity.sh
+
 fetch_required "flows.json" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/flows.json" \
     "/srv/node-red/flows.json"

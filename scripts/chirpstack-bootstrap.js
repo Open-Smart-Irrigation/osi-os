@@ -188,62 +188,32 @@ function normalizeGatewayEui(value) {
   return null;
 }
 
-function readGatewayEuiFromTOML() {
-  const confDirs = [
-    '/var/etc/chirpstack-concentratord',
-    '/var/etc',
-    '/etc/chirpstack-concentratord/sx1302',
-    '/etc/chirpstack-concentratord/sx1301',
-  ];
-  for (const dir of confDirs) {
-    try {
-      const files = fs.readdirSync(dir).filter((file) => file.endsWith('.toml'));
-      for (const file of files) {
-        const content = fs.readFileSync(path.join(dir, file), 'utf8');
-        const match = content.match(/gateway_id\s*=\s*"([0-9a-fA-F]{16})"/);
-        const resolved = normalizeGatewayEui(match && match[1]);
-        if (resolved) return resolved;
-      }
-    } catch (_) {}
-  }
-  return null;
-}
-
-function readGatewayEuiViaCommand(command) {
+function readGatewayIdentityViaHelper() {
   try {
-    return normalizeGatewayEui(execSync(command, { timeout: 5000 }).toString('utf8'));
+    const helper = '/usr/libexec/osi-gateway-identity.sh';
+    if (!fs.existsSync(helper)) return null;
+    const output = execSync(`${helper} resolve`, { timeout: 5000 }).toString('utf8');
+    const lines = output.split('\n').map((line) => line.trim()).filter(Boolean);
+    const values = Object.fromEntries(lines.map((line) => {
+      const idx = line.indexOf('=');
+      return idx > 0 ? [line.slice(0, idx), line.slice(idx + 1)] : [line, ''];
+    }));
+    const deviceEui = normalizeGatewayEui(values.DEVICE_EUI);
+    if (!deviceEui) return null;
+    return {
+      deviceEui,
+      source: String(values.DEVICE_EUI_SOURCE || '').trim() || 'persisted',
+      confidence: String(values.DEVICE_EUI_CONFIDENCE || '').trim() || 'provisional',
+      lastVerifiedAt: String(values.DEVICE_EUI_LAST_VERIFIED_AT || '').trim() || null,
+    };
   } catch (_) {
     return null;
   }
 }
 
 function detectGatewayEui() {
-  try {
-    const log = execSync('logread 2>/dev/null || true', { timeout: 5000 }).toString();
-    const topicMatch = log.match(/gateway\/([0-9a-fA-F]{16})\/event\//);
-    if (topicMatch) return normalizeGatewayEui(topicMatch[1]);
-    const match = log.match(/gateway_id[:\s"]+([0-9a-fA-F]{16})/);
-    if (match) return normalizeGatewayEui(match[1]);
-  } catch (_) {}
-
-  for (const candidate of [
-    readGatewayEuiFromTOML(),
-    readGatewayEuiViaCommand('uci -q get chirpstack-concentratord.@sx1302[0].gateway_id 2>/dev/null || true'),
-    readGatewayEuiViaCommand('uci -q get chirpstack-concentratord.@sx1301[0].gateway_id 2>/dev/null || true'),
-    readGatewayEuiViaCommand('uci -q get osi-server.cloud.device_eui 2>/dev/null || true')
-  ]) {
-    if (candidate) return candidate;
-  }
-
-  for (const iface of ['eth0', 'br-lan', 'wlan0']) {
-    try {
-      const mac = fs.readFileSync(`/sys/class/net/${iface}/address`, 'utf8');
-      const resolved = normalizeGatewayEui(mac);
-      if (resolved) return resolved;
-    } catch (_) {}
-  }
-
-  return null;
+  const identity = readGatewayIdentityViaHelper();
+  return identity ? identity.deviceEui : null;
 }
 
 function writeEnvFile(vars) {

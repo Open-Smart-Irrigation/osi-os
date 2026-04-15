@@ -6,91 +6,19 @@ STOP=99
 USE_PROCD=1
 PACKAGE_NAME=node-red
 
-normalize_gateway_eui() {
-    local raw
-
-    raw="$(printf '%s' "$1" | tr -cd '0-9A-Fa-f' | tr 'a-f' 'A-F')"
-    if [ "${#raw}" -eq 16 ]; then
-        [ "$raw" = "0101010101010101" ] && return 1
-        printf '%s\n' "$raw"
-        return 0
-    fi
-    if [ "${#raw}" -eq 12 ]; then
-        printf '%s' "$raw" | awk '{print substr($0,1,6) "FFFE" substr($0,7)}'
-        printf '\n'
-        return 0
-    fi
-    return 1
-}
-
-read_gateway_eui_from_toml() {
-    local file candidate
-
-    for file in \
-        /var/etc/chirpstack-concentratord/*.toml \
-        /var/etc/*.toml \
-        /etc/chirpstack-concentratord/sx1302/*.toml \
-        /etc/chirpstack-concentratord/sx1301/*.toml
-    do
-        [ -f "$file" ] || continue
-        candidate="$(sed -nE 's/.*gateway_id *= *"([0-9A-Fa-f]{16})".*/\1/p' "$file" | head -n 1)"
-        candidate="$(normalize_gateway_eui "$candidate" || true)"
-        if [ -n "$candidate" ]; then
-            printf '%s\n' "$candidate"
-            return 0
-        fi
-    done
-    return 1
-}
-
-persist_gateway_eui() {
-    local resolved current
-
-    resolved="$(normalize_gateway_eui "$1" || true)"
-    [ -n "$resolved" ] || return 0
-    current="$(normalize_gateway_eui "$(uci -q get osi-server.cloud.device_eui 2>/dev/null || echo "")" || true)"
-    [ "$current" = "$resolved" ] && return 0
-
-    uci -q batch >/dev/null <<EOF
-set osi-server.cloud=osi_server
-set osi-server.cloud.device_eui=$resolved
-commit osi-server
-EOF
-}
-
-derive_gateway_eui() {
-    local candidate resolved raw_mac
-
-    for candidate in \
-        "$(logread 2>/dev/null | sed -nE 's#.*gateway/([0-9A-Fa-f]{16})/event/.*#\1#p' | tail -n 1)" \
-        "$(logread 2>/dev/null | sed -nE 's#.*gateway_id[:\" =]+([0-9A-Fa-f]{16}).*#\1#p' | tail -n 1)" \
-        "$(read_gateway_eui_from_toml)" \
-        "$(uci -q get chirpstack-concentratord.@sx1302[0].gateway_id 2>/dev/null || echo "")" \
-        "$(uci -q get chirpstack-concentratord.@sx1301[0].gateway_id 2>/dev/null || echo "")" \
-        "$(uci -q get osi-server.cloud.device_eui 2>/dev/null || echo "")"
-    do
-        resolved="$(normalize_gateway_eui "$candidate" || true)"
-        if [ -n "$resolved" ]; then
-            printf '%s\n' "$resolved"
-            return 0
-        fi
-    done
-
-    raw_mac="$(ip link show eth0 2>/dev/null | awk '/ether/ {print $2}')"
-    [ -z "$raw_mac" ] && raw_mac="$(ip link show br-lan 2>/dev/null | awk '/ether/ {print $2}')"
-    [ -z "$raw_mac" ] && raw_mac="$(ip link show wlan0 2>/dev/null | awk '/ether/ {print $2}')"
-    resolved="$(normalize_gateway_eui "$raw_mac" || true)"
-    [ -n "$resolved" ] || return 1
-    printf '%s\n' "$resolved"
-    return 0
-}
+[ -f /usr/libexec/osi-gateway-identity.sh ] && . /usr/libexec/osi-gateway-identity.sh
 
 start_service() {
     mkdir -p /srv/$PACKAGE_NAME
 
     # OSI Server cloud integration env vars (from UCI)
-    local device_eui="$(derive_gateway_eui || echo "")"
-    persist_gateway_eui "$device_eui"
+    gateway_identity_resolve || true
+    gateway_identity_persist || true
+    local device_eui="${GATEWAY_IDENTITY_DEVICE_EUI:-$(uci -q get osi-server.cloud.device_eui 2>/dev/null || echo "")}"
+    local device_eui_source="${GATEWAY_IDENTITY_DEVICE_EUI_SOURCE:-$(uci -q get osi-server.cloud.device_eui_source 2>/dev/null || echo "persisted")}"
+    local device_eui_confidence="${GATEWAY_IDENTITY_DEVICE_EUI_CONFIDENCE:-$(uci -q get osi-server.cloud.device_eui_confidence 2>/dev/null || echo "provisional")}"
+    local device_eui_last_verified_at="${GATEWAY_IDENTITY_DEVICE_EUI_LAST_VERIFIED_AT:-$(uci -q get osi-server.cloud.device_eui_last_verified_at 2>/dev/null || echo "")}"
+    local link_gateway_device_eui=$(uci -q get osi-server.cloud.link_gateway_device_eui 2>/dev/null || echo "")
     local device_type=$(uci -q get osi-server.cloud.device_type 2>/dev/null || echo "GATEWAY")
     local mqtt_password=$(uci -q get osi-server.cloud.mqtt_password 2>/dev/null || echo "")
     local server_host=$(uci -q get osi-server.cloud.server_host 2>/dev/null || echo "")
@@ -151,6 +79,10 @@ NODE
     procd_set_param command node /usr/lib/node/$PACKAGE_NAME/red.js --userDir /srv/$PACKAGE_NAME
     procd_set_param env \
         DEVICE_EUI="$device_eui" \
+        DEVICE_EUI_SOURCE="$device_eui_source" \
+        DEVICE_EUI_CONFIDENCE="$device_eui_confidence" \
+        DEVICE_EUI_LAST_VERIFIED_AT="$device_eui_last_verified_at" \
+        LINK_GATEWAY_DEVICE_EUI="$link_gateway_device_eui" \
         DEVICE_TYPE="$device_type" \
         DEVICE_MQTT_PASSWORD="$mqtt_password" \
         OSI_SERVER_HOST="$server_host" \

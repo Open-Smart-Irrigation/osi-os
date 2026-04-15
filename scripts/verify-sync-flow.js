@@ -9,6 +9,7 @@ const nodeRedRoot = path.resolve(__dirname, '..', 'conf', 'full_raspberrypi_bcm2
 const deployScriptPath = path.resolve(__dirname, '..', 'deploy.sh');
 const nodeRedInitPath = path.resolve(__dirname, '..', 'feeds', 'chirpstack-openwrt-feed', 'apps', 'node-red', 'files', 'node-red.init');
 const osiServerDefaultsPath = path.resolve(__dirname, '..', 'conf', 'full_raspberrypi_bcm27xx_bcm2712', 'files', 'etc', 'uci-defaults', '96_osi_server_config');
+const gatewayIdentityHelperPath = path.resolve(__dirname, '..', 'conf', 'full_raspberrypi_bcm27xx_bcm2712', 'files', 'usr', 'libexec', 'osi-gateway-identity.sh');
 const chirpstackBootstrapPath = path.resolve(__dirname, 'chirpstack-bootstrap.js');
 const helperCandidates = [
   path.join(nodeRedRoot, 'node_modules', 'osi-chirpstack-helper'),
@@ -22,6 +23,7 @@ const packageJsonPath = path.join(nodeRedRoot, 'package.json');
 const deployScript = fs.readFileSync(deployScriptPath, 'utf8');
 const nodeRedInitScript = fs.readFileSync(nodeRedInitPath, 'utf8');
 const osiServerDefaultsScript = fs.readFileSync(osiServerDefaultsPath, 'utf8');
+const gatewayIdentityHelperScript = fs.readFileSync(gatewayIdentityHelperPath, 'utf8');
 const chirpstackBootstrapScript = fs.readFileSync(chirpstackBootstrapPath, 'utf8');
 const flows = JSON.parse(fs.readFileSync(flowPath, 'utf8'));
 
@@ -281,7 +283,7 @@ if (!refreshInject) {
 const bootstrapNode = findNodeByName('Build Cloud Bootstrap');
 if (bootstrapNode) {
   for (const key of ['sensorData', 'dendroReadings', 'dendroDaily', 'zoneRecommendations', 'zoneEnvironments', 'gatewayLocations', 'irrigationEvents']) {
-    if (!bootstrapNode.func.includes(`${key}:`)) {
+    if (!bootstrapNode.func.includes(`${key}:`) && !bootstrapNode.func.includes(`${key},`) && !bootstrapNode.func.includes(`const ${key} =`)) {
       fail(`bootstrap payload missing ${key}`);
     } else {
       console.log(`OK bootstrap includes ${key}`);
@@ -294,10 +296,15 @@ expectIncludes('Validate & decode token', 'function allowPrivateTargets()', 'sup
 expectIncludes('Validate & decode token', 'ALLOW_PRIVATE_SERVER_URLS', 'accepts the runtime private-target override flag');
 expectIncludes('Validate & decode token', 'ALLOW_INSECURE_SERVER_URL', 'accepts the legacy runtime private-target override flag');
 expectIncludes('Validate & decode token', 'allow_private_target', 'accepts the persisted UCI private-target override flag');
-expectIncludes('Validate & decode token', "gateway/([0-9A-Fa-f]{16})/event/", 'checks ChirpStack gateway topic logs when resolving gateway EUI');
-expectIncludes('Validate & decode token', "chirpstack-concentratord.@sx1302[0].gateway_id", 'falls back to the sx1302 gateway_id when resolving gateway EUI');
-expectIncludes('Validate & decode token', "uci -q get osi-server.cloud.device_eui 2>/dev/null || true", 'falls back to UCI gateway EUI when env is absent');
-expectIncludes('Validate & decode token', "/sys/class/net/eth0/address", 'falls back to interface MAC-derived gateway EUI when live ChirpStack state is unavailable');
+expectIncludes('Validate & decode token', "normalizeGatewayDeviceEui(env.get('DEVICE_EUI'))", 'uses the canonical runtime gateway identity');
+expectIncludes('Validate & decode token', "env.get('DEVICE_EUI_CONFIDENCE')", 'reads runtime gateway identity confidence');
+expectIncludes('Validate & decode token', "flow.set('al_gateway_device_eui_source'", 'stores resolved gateway identity metadata in link flow state');
+expectIncludes('Validate & decode token', "flow.set('al_gateway_device_eui_confidence'", 'stores resolved gateway identity confidence in link flow state');
+expectIncludes('Validate & decode token', 'Gateway identity is not ready yet. Wait for ChirpStack gateway detection before linking.', 'blocks account linking while gateway identity remains provisional');
+expectExcludes('Validate & decode token', "gateway/([0-9A-Fa-f]{16})/event/", 'ad hoc ChirpStack log gateway probing');
+expectExcludes('Validate & decode token', "chirpstack-concentratord.@sx1302[0].gateway_id", 'ad hoc concentratord gateway probing');
+expectExcludes('Validate & decode token', "uci -q get osi-server.cloud.device_eui 2>/dev/null || true", 'ad hoc UCI gateway probing');
+expectExcludes('Validate & decode token', "/sys/class/net/eth0/address", 'ad hoc MAC-derived gateway probing');
 expectIncludes('Handle server auth response', 'statusCode >= 400 && statusCode < 500', 'maps remote auth failures away from 401');
 expectIncludes('Handle server auth response', "requiredFieldErrors.push('sync token')", 'requires sync token on successful link');
 expectIncludes('Handle server auth response', "requiredFieldErrors.push('offline verifier')", 'requires offline verifier on successful link');
@@ -307,9 +314,10 @@ expectIncludes('Handle server auth response', 'const mqttPassword = String(data.
 expectIncludes('Handle server auth response', "flow.set('al_mqtt_password', mqttPassword);", 'stores MQTT password from local-sync');
 expectIncludes('Handle server auth response', "flow.set('al_mqtt_broker_url', mqttBrokerUrl);", 'stores MQTT broker URL from local-sync');
 expectExcludes('Handle server auth response', 'UPDATE users SET server_username', 'direct linked-account DB mutation');
-expectIncludes('Build server auth request', 'deviceEuis: deviceEuis', 'sends local device claims in the authenticated local-sync request');
+expectIncludes('Build server auth request', 'deviceEuis }', 'sends local device claims in the authenticated local-sync request');
 expectIncludes('Build server auth request', "new osiDb.Database('/data/db/farming.db')", 'loads local device claims before cloud linking');
-expectIncludes('Build server auth request', "Gateway device EUI is not configured", 'fails locally when no gateway EUI can be resolved');
+expectIncludes('Build server auth request', 'Gateway identity is not configured yet', 'fails locally when no canonical gateway EUI is available');
+expectIncludes('Build server auth request', 'Gateway identity is not ready yet. Wait for ChirpStack gateway detection before linking.', 'fails linking while gateway identity remains provisional');
 expectIncludes('Handle server auth response', "const claimed = Array.isArray(data.claimed)", 'accepts claimed device results directly from local-sync');
 expectIncludes('Build Sync State', 'lastMirroredEventAt', 'returns the last mirrored sync event timestamp');
 expectIncludes('Build Sync State', 'dbHealth: {', 'returns a DB health block in sync state');
@@ -323,10 +331,13 @@ expectIncludes('Set Download Headers', 'Database download is disabled', 'keeps d
 expectIncludes('Lookup Auth User', 'ORDER BY CASE WHEN username = ?', 'prefers local username matches');
 expectIncludes('Process Result', 'Multiple accounts match this username', 'rejects ambiguous linked logins');
 expectIncludes('Process Result', 'osi_auth_token_secret', 'uses a persisted local auth secret');
-expectIncludes('Process Result', "gateway/([0-9A-Fa-f]{16})/event/", 'checks ChirpStack gateway topic logs during linked login');
-expectIncludes('Process Result', "chirpstack-concentratord.@sx1302[0].gateway_id", 'falls back to the sx1302 gateway_id during linked login');
-expectIncludes('Process Result', "uci -q get osi-server.cloud.device_eui 2>/dev/null || true", 'falls back to UCI gateway EUI during linked login');
-expectIncludes('Process Result', "/sys/class/net/eth0/address", 'falls back to interface MAC-derived gateway EUI during linked login');
+expectIncludes('Process Result', "env.get('LINK_GATEWAY_DEVICE_EUI')", 'uses the linked gateway identity captured at account-link time');
+expectIncludes('Process Result', 'decodeGatewayDeviceEuiFromSyncToken', 'falls back to the gateway encoded into the sync token');
+expectIncludes('Process Result', "env.get('DEVICE_EUI')", 'uses canonical runtime gateway identity only as a last resort');
+expectExcludes('Process Result', "gateway/([0-9A-Fa-f]{16})/event/", 'ad hoc ChirpStack log gateway probing during linked login');
+expectExcludes('Process Result', "chirpstack-concentratord.@sx1302[0].gateway_id", 'ad hoc concentratord gateway probing during linked login');
+expectExcludes('Process Result', "uci -q get osi-server.cloud.device_eui 2>/dev/null || true", 'ad hoc UCI gateway probing during linked login');
+expectExcludes('Process Result', "/sys/class/net/eth0/address", 'ad hoc MAC-derived gateway probing during linked login');
 expectIncludes('Route Command', "device: { devEui: String(cmd.deviceEui || cmd.devEui || '').trim().toUpperCase() }", 'routes valve commands from either deviceEui or devEui');
 expectIncludes('CS Register Device', 'chirpstack.createProvisioningClientFromEnv(env)', 'uses shared ChirpStack provisioning helper');
 expectIncludes('CS Register Device', 'ensureDeviceProvisioned', 'provisions devices through gRPC helper');
@@ -359,7 +370,20 @@ expectIncludes('Build Cloud Bootstrap', 'iz.irrigation_efficiency_pct', 'include
 expectIncludes('Build Cloud Bootstrap', "'  dd.rain_mm_per_10min,'", 'includes normalized rain telemetry in bootstrap sensor data');
 expectIncludes('Build Cloud Bootstrap', "'  dd.flow_liters_per_10min,'", 'includes normalized flow telemetry in bootstrap sensor data');
 expectIncludes('Build Cloud Bootstrap', 'AS event_uuid', 'synthesizes stable irrigation event UUIDs for bootstrap snapshots');
-expectIncludes('Build Cloud Bootstrap', 'gatewayLocations: gatewayLocations', 'includes gateway GPS state in bootstrap payloads');
+expectIncludes('Build Cloud Bootstrap', 'gatewayLocations,', 'includes gateway GPS state in bootstrap payloads');
+expectIncludes('Build Cloud Bootstrap', 'previousGatewayDeviceEuis: migration.previousGatewayDeviceEuis', 'includes previous gateway identities during bootstrap migration');
+expectIncludes('Build Cloud Bootstrap', 'runGatewayMigrationPreflight', 'runs local gateway migration preflight before bootstrap sync');
+expectIncludes('Build Cloud Bootstrap', 'gatewayMigrationPaused: true', 'pauses normal sync while a gateway migration repair bootstrap is pending');
+expectIncludes('Build Cloud Bootstrap', 'UPDATE irrigation_zones SET gateway_device_eui = ?', 'rewrites active zone gateway bindings during local migration');
+expectIncludes('Build Cloud Bootstrap', 'UPDATE devices SET gateway_device_eui = ?', 'rewrites active device gateway bindings during local migration');
+expectIncludes('Build Cloud Bootstrap', 'UPDATE sync_outbox SET gateway_device_eui = ?, aggregate_key = ?, payload_json = ?', 'rewrites undelivered sync outbox rows during local migration');
+expectIncludes('Mark Bootstrap Synced', "gatewayMigration.migrated", 'recognizes successful cloud-side gateway migration responses');
+expectIncludes('Mark Bootstrap Synced', 'gatewayMigrationPendingBootstrap = false', 'resumes normal sync after repair bootstrap succeeds');
+expectIncludes('Build Edge Event Batch', 'gatewayMigrationPaused', 'suppresses event delivery while gateway migration is paused');
+expectIncludes('Build Pending Command Pull', 'gatewayMigrationPaused', 'suppresses pending-command polling while gateway migration is paused');
+expectIncludes('Build Sync State', 'gatewayIdentity = {', 'returns gateway identity diagnostics in sync state');
+expectIncludes('Build Sync State', 'migrationPending', 'reports pending gateway migration state in sync state');
+expectIncludes('Build Sync State', 'lastMigrationResult', 'reports last gateway migration result in sync state');
 expectIncludes('Build Cloud Bootstrap', 'const sensorDataRows = await q([', 'loads bootstrap sensor history before reordering it');
 expectIncludes('Build Cloud Bootstrap', 'const sensorData = sensorDataRows.slice().reverse();', 'replays bootstrap sensor history oldest-to-newest');
 expectIncludes('Build Cloud Bootstrap', 'const dendroReadingsRows = await q([', 'loads bootstrap dendro history before reordering it');
@@ -382,11 +406,13 @@ expectWireById('sync-bootstrap-account-link-in', 'sync-bootstrap-build', 'routes
 expectWireById('al-unlink-format', 'al-unlink-clear-mqtt', 'clears MQTT credentials after unlinking');
 expectWireById('al-unlink-format', 'al-link-clear-state', 'clears transient link state after unlinking');
 expectIncludes('Persist MQTT Broker Config', "set osi-server.cloud.mqtt_password=", 'writes the MQTT password into UCI after linking');
+expectIncludes('Persist MQTT Broker Config', "set osi-server.cloud.link_gateway_device_eui=", 'persists the linked gateway identity into UCI after linking');
 expectIncludes('Persist MQTT Broker Config', 'Linked account response is missing MQTT credentials', 'fails linking when MQTT credentials are incomplete');
 expectIncludes('Persist MQTT Broker Config', '/etc/init.d/node-red restart', 'restarts Node-RED after storing MQTT credentials');
 expectWireById('al-link-handle-auth', 'al-link-clear-state', 'clears transient link state when server auth fails');
 expectWireById('al-link-store-mqtt', 'al-link-clear-state', 'clears transient link state when MQTT persistence fails');
 expectIncludes('Clear MQTT Broker Config', "set osi-server.cloud.mqtt_password=''", 'clears the MQTT password from UCI after unlinking');
+expectIncludes('Clear MQTT Broker Config', "set osi-server.cloud.link_gateway_device_eui=''", 'clears the linked gateway identity from UCI after unlinking');
 expectIncludes('Clear MQTT Broker Config', '/etc/init.d/node-red restart', 'restarts Node-RED after clearing MQTT credentials');
 expectIncludes('Run Force Sync', 'COALESCE(u.server_username, u.username) AS claimed_by_username', 'uses linked cloud usernames in force-sync device snapshots');
 expectIncludes('Run Force Sync', 'COALESCE(u.server_username, u.username) AS username', 'uses linked cloud usernames in force-sync zone snapshots');
@@ -606,23 +632,30 @@ expectIncludes('Build STREGA downlink + emit log ctx', "case 'TIMED_ACTION': {",
 expectIncludes('Build STREGA downlink + emit log ctx', "case 'SET_MAGNET_MODE': {", 'supports STREGA magnet-mode downlinks');
 expectIncludes('Build STREGA downlink + emit log ctx', "case 'SET_PARTIAL_OPENING': {", 'supports STREGA partial-opening downlinks');
 expectIncludes('Build STREGA downlink + emit log ctx', "case 'SET_FLUSHING': {", 'supports STREGA flushing downlinks');
-expectFileIncludes('node-red.init', nodeRedInitScript, 'derive_gateway_eui()', 'derives a gateway EUI for Node-RED when UCI stores a raw MAC or env is absent');
-expectFileIncludes('node-red.init', nodeRedInitScript, 'gateway/([0-9A-Fa-f]{16})/event/', 'prefers live ChirpStack gateway topic logs when deriving the Node-RED gateway EUI');
-expectFileIncludes('node-red.init', nodeRedInitScript, 'chirpstack-concentratord.@sx1302[0].gateway_id', 'falls back to the sx1302 gateway_id when deriving the Node-RED gateway EUI');
-expectFileIncludes('node-red.init', nodeRedInitScript, 'substr($0,1,6) "FFFE" substr($0,7)', 'converts 48-bit MAC addresses into gateway EUI-64 values');
-expectFileIncludes('node-red.init', nodeRedInitScript, 'persist_gateway_eui "$device_eui"', 'self-heals the stored gateway EUI when runtime detection finds the canonical value');
+expectFileIncludes('node-red.init', nodeRedInitScript, '. /usr/libexec/osi-gateway-identity.sh', 'uses the shared gateway identity helper');
+expectFileIncludes('node-red.init', nodeRedInitScript, 'gateway_identity_resolve', 'resolves the canonical gateway identity through the shared helper');
+expectFileIncludes('node-red.init', nodeRedInitScript, 'gateway_identity_persist', 'persists canonical gateway identity metadata during startup');
 expectFileIncludes('node-red.init', nodeRedInitScript, 'DEVICE_EUI="$device_eui"', 'exports the derived gateway EUI into the Node-RED runtime environment');
+expectFileIncludes('node-red.init', nodeRedInitScript, 'DEVICE_EUI_CONFIDENCE="$device_eui_confidence"', 'exports gateway identity confidence into the Node-RED runtime environment');
+expectFileIncludes('node-red.init', nodeRedInitScript, 'LINK_GATEWAY_DEVICE_EUI="$link_gateway_device_eui"', 'exports the linked gateway identity into the Node-RED runtime environment');
 expectFileIncludes('node-red.init', nodeRedInitScript, 'ALLOW_PRIVATE_SERVER_URLS="$allow_private_server_urls"', 'exports the private-target override into the Node-RED runtime environment');
-expectFileIncludes('96_osi_server_config', osiServerDefaultsScript, 'gateway/([0-9A-Fa-f]{16})/event/', 'prefers live ChirpStack gateway topic logs when provisioning the default gateway EUI');
-expectFileIncludes('96_osi_server_config', osiServerDefaultsScript, 'chirpstack-concentratord.@sx1302[0].gateway_id', 'falls back to the sx1302 gateway_id when provisioning the default gateway EUI');
-expectFileIncludes('96_osi_server_config', osiServerDefaultsScript, 'ip link show br-lan', 'falls back to br-lan when provisioning a default gateway EUI');
-expectFileIncludes('96_osi_server_config', osiServerDefaultsScript, 'substr($0,1,6) "FFFE" substr($0,7)', 'stores a gateway EUI-64 instead of a raw MAC in default UCI config');
+expectFileIncludes('96_osi_server_config', osiServerDefaultsScript, '. /usr/libexec/osi-gateway-identity.sh', 'uses the shared gateway identity helper for first-boot seeding');
+expectFileIncludes('96_osi_server_config', osiServerDefaultsScript, 'gateway_identity_resolve', 'resolves the canonical gateway identity during UCI seeding');
+expectFileIncludes('96_osi_server_config', osiServerDefaultsScript, 'gateway_identity_persist', 'persists canonical gateway identity during UCI seeding');
+expectFileIncludes('96_osi_server_config', osiServerDefaultsScript, 'set osi-server.cloud.device_eui_source=$DEVICE_EUI_SOURCE', 'stores the identity source in UCI');
+expectFileIncludes('96_osi_server_config', osiServerDefaultsScript, 'set osi-server.cloud.device_eui_confidence=$DEVICE_EUI_CONFIDENCE', 'stores the identity confidence in UCI');
+expectFileIncludes('96_osi_server_config', osiServerDefaultsScript, 'set osi-server.cloud.link_gateway_device_eui=', 'initializes linked gateway identity metadata in UCI');
 expectFileIncludes('96_osi_server_config', osiServerDefaultsScript, 'set osi-server.cloud.allow_private_target=0', 'defaults the private-target override to disabled');
-expectFileIncludes('chirpstack-bootstrap.js', chirpstackBootstrapScript, 'uci -q get osi-server.cloud.device_eui', 'reuses persisted gateway EUI during one-shot bootstrap detection');
-expectFileIncludes('chirpstack-bootstrap.js', chirpstackBootstrapScript, "'br-lan'", 'falls back to br-lan during one-shot bootstrap detection');
-expectFileIncludes('chirpstack-bootstrap.js', chirpstackBootstrapScript, "'wlan0'", 'falls back to wlan0 during one-shot bootstrap detection');
+expectFileIncludes('chirpstack-bootstrap.js', chirpstackBootstrapScript, '/usr/libexec/osi-gateway-identity.sh', 'uses the shared gateway identity helper during one-shot bootstrap detection');
+expectFileIncludes('chirpstack-bootstrap.js', chirpstackBootstrapScript, "readGatewayIdentityViaHelper", 'reads gateway identity via the shared helper during one-shot bootstrap detection');
 expectFileIncludes('deploy.sh', deployScript, '"feeds/chirpstack-openwrt-feed/apps/node-red/files/node-red.init"', 'deploys the Node-RED init script to live devices');
+expectFileIncludes('deploy.sh', deployScript, '"conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/libexec/osi-gateway-identity.sh"', 'deploys the shared gateway identity helper to live devices');
 expectFileIncludes('deploy.sh', deployScript, 'chmod 755 /etc/init.d/node-red', 'keeps the deployed Node-RED init script executable');
+expectFileIncludes('osi-gateway-identity.sh', gatewayIdentityHelperScript, 'gateway_identity_resolve()', 'defines the shared canonical gateway resolver');
+expectFileIncludes('osi-gateway-identity.sh', gatewayIdentityHelperScript, 'GATEWAY_IDENTITY_DEVICE_EUI_CONFIDENCE="authoritative"', 'marks live ChirpStack-derived gateway identities as authoritative');
+expectFileIncludes('osi-gateway-identity.sh', gatewayIdentityHelperScript, 'GATEWAY_IDENTITY_DEVICE_EUI_CONFIDENCE="persisted"', 'marks previously verified gateway identities as persisted');
+expectFileIncludes('osi-gateway-identity.sh', gatewayIdentityHelperScript, 'GATEWAY_IDENTITY_DEVICE_EUI_CONFIDENCE="provisional"', 'marks MAC-derived gateway identities as provisional');
+expectFileIncludes('osi-gateway-identity.sh', gatewayIdentityHelperScript, 'for iface in eth0 br-lan wlan0; do', 'falls back across known interfaces for provisional MAC-derived identity');
 
 const authNodes = flows.filter((node) => typeof node.func === 'string' && node.func.includes('function getAuthSecret()'));
 for (const insecureNeedle of ['osi-os-default-auth-secret', "env.get('CHIRPSTACK_API_KEY')"]) {

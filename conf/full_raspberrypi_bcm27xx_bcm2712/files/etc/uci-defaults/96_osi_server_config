@@ -1,73 +1,23 @@
 #!/bin/sh
-# Only run if not already configured
-[ -n "$(uci -q get osi-server.cloud.device_eui 2>/dev/null)" ] && exit 0
 
-normalize_gateway_eui() {
-    local raw
+[ -f /usr/libexec/osi-gateway-identity.sh ] && . /usr/libexec/osi-gateway-identity.sh
 
-    raw="$(printf '%s' "$1" | tr -cd '0-9A-Fa-f' | tr 'a-f' 'A-F')"
-    if [ "${#raw}" -eq 16 ]; then
-        [ "$raw" = "0101010101010101" ] && return 1
-        printf '%s\n' "$raw"
-        return 0
-    fi
-    if [ "${#raw}" -eq 12 ]; then
-        printf '%s' "$raw" | awk '{print substr($0,1,6) "FFFE" substr($0,7)}'
-        printf '\n'
-        return 0
-    fi
-    return 1
-}
+gateway_identity_resolve || true
+gateway_identity_persist || true
 
-read_gateway_eui_from_toml() {
-    local file candidate
-
-    for file in \
-        /var/etc/chirpstack-concentratord/*.toml \
-        /var/etc/*.toml \
-        /etc/chirpstack-concentratord/sx1302/*.toml \
-        /etc/chirpstack-concentratord/sx1301/*.toml
-    do
-        [ -f "$file" ] || continue
-        candidate="$(sed -nE 's/.*gateway_id *= *"([0-9A-Fa-f]{16})".*/\1/p' "$file" | head -n 1)"
-        candidate="$(normalize_gateway_eui "$candidate" || true)"
-        if [ -n "$candidate" ]; then
-            printf '%s\n' "$candidate"
-            return 0
-        fi
-    done
-    return 1
-}
-
-derive_gateway_eui() {
-    local candidate resolved raw_mac
-
-    for candidate in \
-        "$(logread 2>/dev/null | sed -nE 's#.*gateway/([0-9A-Fa-f]{16})/event/.*#\1#p' | tail -n 1)" \
-        "$(logread 2>/dev/null | sed -nE 's#.*gateway_id[:\" =]+([0-9A-Fa-f]{16}).*#\1#p' | tail -n 1)" \
-        "$(read_gateway_eui_from_toml)" \
-        "$(uci -q get chirpstack-concentratord.@sx1302[0].gateway_id 2>/dev/null || echo "")" \
-        "$(uci -q get chirpstack-concentratord.@sx1301[0].gateway_id 2>/dev/null || echo "")"
-    do
-        resolved="$(normalize_gateway_eui "$candidate" || true)"
-        if [ -n "$resolved" ]; then
-            printf '%s\n' "$resolved"
-            return 0
-        fi
-    done
-
-    raw_mac="$(ip link show eth0 2>/dev/null | awk '/ether/{print $2}')"
-    [ -z "$raw_mac" ] && raw_mac="$(ip link show br-lan 2>/dev/null | awk '/ether/{print $2}')"
-    [ -z "$raw_mac" ] && raw_mac="$(ip link show wlan0 2>/dev/null | awk '/ether/{print $2}')"
-    normalize_gateway_eui "$raw_mac"
-}
-
-DEVICE_EUI="$(derive_gateway_eui)"
+DEVICE_EUI="${GATEWAY_IDENTITY_DEVICE_EUI:-}"
+DEVICE_EUI_SOURCE="${GATEWAY_IDENTITY_DEVICE_EUI_SOURCE:-persisted}"
+DEVICE_EUI_CONFIDENCE="${GATEWAY_IDENTITY_DEVICE_EUI_CONFIDENCE:-provisional}"
+DEVICE_EUI_LAST_VERIFIED_AT="${GATEWAY_IDENTITY_DEVICE_EUI_LAST_VERIFIED_AT:-}"
 
 uci -q batch <<EOF
 set osi-server.cloud=osi_server
 set osi-server.cloud.enabled=0
 set osi-server.cloud.device_eui=$DEVICE_EUI
+set osi-server.cloud.device_eui_source=$DEVICE_EUI_SOURCE
+set osi-server.cloud.device_eui_confidence=$DEVICE_EUI_CONFIDENCE
+set osi-server.cloud.device_eui_last_verified_at=$DEVICE_EUI_LAST_VERIFIED_AT
+set osi-server.cloud.link_gateway_device_eui=
 set osi-server.cloud.device_type=GATEWAY
 set osi-server.cloud.firmware_version=0.6.0
 set osi-server.cloud.server_host=
