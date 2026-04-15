@@ -54,6 +54,17 @@ gateway_identity_read_persisted() {
     return 1
 }
 
+gateway_identity_read_linked() {
+    local linked
+    linked="$(normalize_gateway_eui "$(uci -q get osi-server.cloud.link_gateway_device_eui 2>/dev/null || true)" || true)"
+    [ -n "$linked" ] || return 1
+    GATEWAY_IDENTITY_DEVICE_EUI="$linked"
+    GATEWAY_IDENTITY_DEVICE_EUI_SOURCE="linked"
+    GATEWAY_IDENTITY_DEVICE_EUI_CONFIDENCE="persisted"
+    GATEWAY_IDENTITY_DEVICE_EUI_LAST_VERIFIED_AT="$(uci -q get osi-server.cloud.device_eui_last_verified_at 2>/dev/null || true)"
+    return 0
+}
+
 gateway_identity_read_provisional() {
     local iface raw_mac resolved
     for iface in eth0 br-lan wlan0; do
@@ -76,16 +87,13 @@ gateway_identity_resolve() {
     GATEWAY_IDENTITY_DEVICE_EUI_CONFIDENCE=""
     GATEWAY_IDENTITY_DEVICE_EUI_LAST_VERIFIED_AT=""
 
-    gateway_identity_try_command "chirpstack-log-topic" \
-        "logread 2>/dev/null | sed -nE 's#.*gateway/([0-9A-Fa-f]{16})/event/.*#\\1#p' | tail -n 1" && return 0
-    gateway_identity_try_command "chirpstack-log-id" \
-        "logread 2>/dev/null | sed -nE 's#.*gateway_id[:\\\" =]+([0-9A-Fa-f]{16}).*#\\1#p' | tail -n 1" && return 0
-    gateway_identity_try_command "concentratord-toml" \
-        "grep -h -m1 -oE 'gateway_id\\s*=\\s*\\\"[0-9A-Fa-f]{16}\\\"' /var/etc/chirpstack-concentratord/*.toml /var/etc/*.toml /etc/chirpstack-concentratord/sx1302/*.toml /etc/chirpstack-concentratord/sx1301/*.toml 2>/dev/null | sed -E 's/.*\\\"([0-9A-Fa-f]{16})\\\"/\\1/'" && return 0
     gateway_identity_try_command "concentratord-uci-sx1302" \
         "uci -q get chirpstack-concentratord.@sx1302[0].gateway_id 2>/dev/null || true" && return 0
     gateway_identity_try_command "concentratord-uci-sx1301" \
         "uci -q get chirpstack-concentratord.@sx1301[0].gateway_id 2>/dev/null || true" && return 0
+    gateway_identity_try_command "concentratord-toml" \
+        "grep -h -m1 -oE 'gateway_id\\s*=\\s*\\\"[0-9A-Fa-f]{16}\\\"' /etc/chirpstack-concentratord/sx1302/*.toml /etc/chirpstack-concentratord/sx1301/*.toml /var/etc/chirpstack-concentratord/*.toml 2>/dev/null | sed -E 's/.*\\\"([0-9A-Fa-f]{16})\\\"/\\1/'" && return 0
+    gateway_identity_read_linked && return 0
     gateway_identity_read_persisted && return 0
     gateway_identity_read_provisional && return 0
     return 1
