@@ -11,6 +11,7 @@ const CACHE_PATH = '/data/db/gateway-location-cache.json';
 const CHIRPSTACK_ENV_PATH = '/srv/node-red/.chirpstack.env';
 const NODE_RED_PACKAGE_PATH = '/usr/share/node-red/package.json';
 const CHIRPSTACK_HELPER_PATH = '/usr/share/node-red/osi-chirpstack-helper';
+const GATEWAY_IDENTITY_HELPER_PATH = '/usr/libexec/osi-gateway-identity.sh';
 
 function log(message) {
   process.stdout.write(`[osi-gateway-gps] ${new Date().toISOString()} ${message}\n`);
@@ -137,13 +138,70 @@ function ensureSchema() {
   ].join(' '));
 }
 
-function getGatewayDeviceEui() {
-  const fromEnv = String(process.env.DEVICE_EUI || '').trim().toUpperCase();
-  if (fromEnv) return fromEnv;
-  const fromCloud = String(uciGet('osi-server.cloud.device_eui', '')).trim().toUpperCase();
-  if (fromCloud) return fromCloud;
-  const fromConcentratord = String(uciGet('chirpstack-concentratord.@sx1301[0].gateway_id', '')).trim().toUpperCase();
-  return fromConcentratord || 'UNKNOWN';
+function normalizeGatewayDeviceEui(value) {
+  const raw = String(value || '').trim().replace(/[^0-9a-fA-F]/g, '').toUpperCase();
+  if (!raw) return '';
+  if (raw.length === 16) return raw === '0101010101010101' ? '' : raw;
+  if (raw.length === 12) return raw.slice(0, 6) + 'FFFE' + raw.slice(6);
+  return '';
+}
+
+function parseShellKeyValueOutput(rawOutput) {
+  const parsed = {};
+  for (const line of String(rawOutput || '').split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+    const equals = trimmed.indexOf('=');
+    if (equals <= 0) continue;
+    parsed[trimmed.slice(0, equals)] = trimmed.slice(equals + 1);
+  }
+  return parsed;
+}
+
+function resolveGatewayIdentity() {
+  try {
+    const output = execFileSync('sh', [GATEWAY_IDENTITY_HELPER_PATH, 'resolve'], {
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'pipe']
+    });
+    const parsed = parseShellKeyValueOutput(output);
+    const deviceEui = normalizeGatewayDeviceEui(parsed.DEVICE_EUI || '');
+    if (deviceEui) {
+      return {
+        deviceEui,
+        source: String(parsed.DEVICE_EUI_SOURCE || '').trim() || 'helper',
+        confidence: String(parsed.DEVICE_EUI_CONFIDENCE || '').trim().toLowerCase() || 'persisted',
+        lastVerifiedAt: String(parsed.DEVICE_EUI_LAST_VERIFIED_AT || '').trim() || null
+      };
+    }
+  } catch (_) {}
+
+  const fromEnv = normalizeGatewayDeviceEui(process.env.DEVICE_EUI || '');
+  if (fromEnv) {
+    return {
+      deviceEui: fromEnv,
+      source: String(process.env.DEVICE_EUI_SOURCE || '').trim() || 'env',
+      confidence: String(process.env.DEVICE_EUI_CONFIDENCE || '').trim().toLowerCase() || 'persisted',
+      lastVerifiedAt: String(process.env.DEVICE_EUI_LAST_VERIFIED_AT || '').trim() || null
+    };
+  }
+
+  const fromCloud = normalizeGatewayDeviceEui(uciGet('osi-server.cloud.device_eui', ''));
+  if (fromCloud) {
+    return {
+      deviceEui: fromCloud,
+      source: String(uciGet('osi-server.cloud.device_eui_source', '')).trim() || 'persisted',
+      confidence: String(uciGet('osi-server.cloud.device_eui_confidence', '')).trim().toLowerCase() || 'persisted',
+      lastVerifiedAt: String(uciGet('osi-server.cloud.device_eui_last_verified_at', '')).trim() || null
+    };
+  }
+
+  return {
+    deviceEui: 'UNKNOWN',
+    source: 'unknown',
+    confidence: 'provisional',
+    lastVerifiedAt: null
+  };
 }
 
 function readCurrentSnapshot(gatewayDeviceEui) {
@@ -221,6 +279,62 @@ function persistSnapshot(previous, snapshot, bumpSyncVersion) {
     ].join(', ')
   ].join(''));
   return nextSyncVersion;
+}
+
+function deleteGatewaySnapshot(gatewayDeviceEui) {
+  if (!gatewayDeviceEui || gatewayDeviceEui === 'UNKNOWN') return;
+  try {
+    sqliteExec(`DELETE FROM gateway_locations WHERE gateway_device_eui = ${sqlValue(gatewayDeviceEui)}`);
+  } catch (_) {}
+}
+
+function clearPendingGatewayLocationOutbox(gatewayDeviceEui) {
+  if (!gatewayDeviceEui || gatewayDeviceEui === 'UNKNOWN') return;
+  try {
+    sqliteExec([
+      'DELETE FROM sync_outbox',
+      "WHERE delivered_at IS NULL",
+      "  AND aggregate_type = 'GATEWAY_LOCATION'",
+      `  AND (gateway_device_eui = ${sqlValue(gatewayDeviceEui)} OR aggregate_key = ${sqlValue(gatewayDeviceEui)})`
+    ].join(' '));
+  } catch (_) {}
+}
+
+function migrateGatewayState(previousGatewayDeviceEui, nextGatewayDeviceEui, state) {
+  if (!previousGatewayDeviceEui || !nextGatewayDeviceEui || previousGatewayDeviceEui === nextGatewayDeviceEui) {
+    return null;
+  }
+  const oldSnapshot = readCurrentSnapshot(previousGatewayDeviceEui)
+    || ((state.snapshot && state.snapshot.gatewayDeviceEui === previousGatewayDeviceEui) ? state.snapshot : null);
+  const existingNextSnapshot = readCurrentSnapshot(nextGatewayDeviceEui);
+  let migratedSnapshot = existingNextSnapshot
+    ? Object.assign({}, existingNextSnapshot, { gatewayDeviceEui: nextGatewayDeviceEui })
+    : null;
+
+  if (!migratedSnapshot && oldSnapshot) {
+    const nextSnapshot = Object.assign({}, oldSnapshot, {
+      gatewayDeviceEui: nextGatewayDeviceEui,
+      source: oldSnapshot.source || 'gpsd',
+      updatedAt: currentTimestamp()
+    });
+    nextSnapshot.syncVersion = persistSnapshot(null, nextSnapshot, true);
+    migratedSnapshot = nextSnapshot;
+  }
+
+  clearPendingGatewayLocationOutbox(previousGatewayDeviceEui);
+  deleteGatewaySnapshot(previousGatewayDeviceEui);
+
+  if (migratedSnapshot) {
+    log(`migrated gateway GPS state from ${previousGatewayDeviceEui} to ${nextGatewayDeviceEui}`);
+  } else {
+    log(`switched gateway GPS identity from ${previousGatewayDeviceEui} to ${nextGatewayDeviceEui} without a prior snapshot`);
+  }
+
+  if (state) {
+    state.lastMirroredFix = null;
+  }
+
+  return migratedSnapshot;
 }
 
 function haversineMeters(a, b) {
@@ -377,18 +491,21 @@ function detectSerialConsoleConflict(serialDevice) {
 function ensureNativeConcentratord(config) {
   if (!config.nativeProbeEnabled) return 'disabled';
   const show = uciShow('chirpstack-concentratord');
-  if (!show.includes('chirpstack-concentratord.@sx1301[0]=')) {
+  const section = show.includes('chirpstack-concentratord.@sx1302[0]=')
+    ? 'chirpstack-concentratord.@sx1302[0]'
+    : (show.includes('chirpstack-concentratord.@sx1301[0]=') ? 'chirpstack-concentratord.@sx1301[0]' : '');
+  if (!section) {
     return 'unsupported';
   }
 
   let changed = false;
   const gnssPath = 'gpsd://127.0.0.1:2947';
-  if (!show.includes("chirpstack-concentratord.@sx1301[0].gnss_dev_path='gpsd://127.0.0.1:2947'")) {
-    uciSet('chirpstack-concentratord.@sx1301[0].gnss_dev_path', gnssPath);
+  if (!show.includes(`${section}.gnss_dev_path='gpsd://127.0.0.1:2947'`)) {
+    uciSet(`${section}.gnss_dev_path`, gnssPath);
     changed = true;
   }
-  if (!show.includes("chirpstack-concentratord.@sx1301[0].model_flags='GNSS'")) {
-    uciAddList('chirpstack-concentratord.@sx1301[0].model_flags', 'GNSS');
+  if (!show.includes(`${section}.model_flags='GNSS'`)) {
+    uciAddList(`${section}.model_flags`, 'GNSS');
     changed = true;
   }
   if (changed) {
@@ -458,9 +575,27 @@ function shouldMirror(previousMirroredFix, next, thresholdMeters) {
 
 async function runCycle(config, state) {
   const now = currentTimestamp();
-  const gatewayDeviceEui = state.gatewayDeviceEui || getGatewayDeviceEui();
-  const previous = readCurrentSnapshot(gatewayDeviceEui) || state.snapshot || null;
-  const baseSnapshot = previous || { gatewayDeviceEui };
+  const gatewayIdentity = resolveGatewayIdentity();
+  const gatewayDeviceEui = gatewayIdentity.deviceEui || state.gatewayDeviceEui || 'UNKNOWN';
+  if (!gatewayDeviceEui || gatewayDeviceEui === 'UNKNOWN') {
+    warn('gateway identity is not available yet; skipping GPS sync cycle');
+    return;
+  }
+  const previousGatewayDeviceEui = state.gatewayDeviceEui && state.gatewayDeviceEui !== gatewayDeviceEui
+    ? state.gatewayDeviceEui
+    : ((state.snapshot && state.snapshot.gatewayDeviceEui && state.snapshot.gatewayDeviceEui !== gatewayDeviceEui)
+      ? state.snapshot.gatewayDeviceEui
+      : '');
+  let previous = readCurrentSnapshot(gatewayDeviceEui)
+    || ((state.snapshot && state.snapshot.gatewayDeviceEui === gatewayDeviceEui) ? state.snapshot : null)
+    || null;
+  if (previousGatewayDeviceEui) {
+    const migratedSnapshot = migrateGatewayState(previousGatewayDeviceEui, gatewayDeviceEui, state);
+    if (migratedSnapshot) {
+      previous = migratedSnapshot;
+    }
+  }
+  const baseSnapshot = Object.assign({}, previous || {}, { gatewayDeviceEui });
   const nativeStatus = ensureNativeConcentratord(config);
 
   let currentFix = null;
@@ -471,7 +606,7 @@ async function runCycle(config, state) {
   }
 
   let snapshot = mergeWithLastGood(
-    Object.assign({ gatewayDeviceEui }, baseSnapshot),
+    Object.assign({}, baseSnapshot, { gatewayDeviceEui }),
     currentFix,
     now,
     config.staleAfterS,
@@ -479,7 +614,8 @@ async function runCycle(config, state) {
     config.chirpstackMirrorEnabled ? (baseSnapshot.chirpstackMirrorStatus || 'pending') : 'disabled'
   );
 
-  if (config.chirpstackMirrorEnabled && shouldMirror(state.lastMirroredFix, snapshot, config.chirpstackMirrorThresholdM)) {
+  if (config.chirpstackMirrorEnabled && gatewayIdentity.confidence !== 'provisional'
+      && shouldMirror(state.lastMirroredFix, snapshot, config.chirpstackMirrorThresholdM)) {
     try {
       const mirrorResult = await mirrorToChirpStack(snapshot);
       snapshot.chirpstackMirrorStatus = mirrorResult.status;
@@ -492,6 +628,8 @@ async function runCycle(config, state) {
       snapshot.chirpstackMirrorStatus = 'error';
       warn(`failed to mirror gateway location to ChirpStack: ${error.message}`);
     }
+  } else if (config.chirpstackMirrorEnabled && gatewayIdentity.confidence === 'provisional') {
+    snapshot.chirpstackMirrorStatus = 'identity_pending';
   } else if (!config.chirpstackMirrorEnabled) {
     snapshot.chirpstackMirrorStatus = 'disabled';
   }
@@ -501,6 +639,7 @@ async function runCycle(config, state) {
   snapshot.syncVersion = nextSyncVersion;
 
   state.gatewayDeviceEui = gatewayDeviceEui;
+  state.gatewayIdentity = gatewayIdentity;
   state.snapshot = snapshot;
   saveJson(CACHE_PATH, {
     snapshot,
@@ -522,16 +661,24 @@ async function main() {
   ensureDir(path.dirname(CACHE_PATH));
   ensureSchema();
 
-  const gatewayDeviceEui = getGatewayDeviceEui();
+  const gatewayIdentity = resolveGatewayIdentity();
+  const gatewayDeviceEui = gatewayIdentity.deviceEui || 'UNKNOWN';
   const cache = loadJson(CACHE_PATH) || {};
   const previous = readCurrentSnapshot(gatewayDeviceEui);
   const state = {
     gatewayDeviceEui,
-    snapshot: previous || cache.snapshot || { gatewayDeviceEui },
+    gatewayIdentity,
+    snapshot: previous || cache.snapshot || (gatewayDeviceEui && gatewayDeviceEui !== 'UNKNOWN' ? { gatewayDeviceEui } : null),
     lastMirroredFix: cache.lastMirroredFix || null
   };
 
-  if (!previous && cache.snapshot && Number.isFinite(cache.snapshot.latitude) && Number.isFinite(cache.snapshot.longitude)) {
+  if (!previous
+      && gatewayDeviceEui
+      && gatewayDeviceEui !== 'UNKNOWN'
+      && cache.snapshot
+      && (!cache.snapshot.gatewayDeviceEui || cache.snapshot.gatewayDeviceEui === gatewayDeviceEui)
+      && Number.isFinite(cache.snapshot.latitude)
+      && Number.isFinite(cache.snapshot.longitude)) {
     const seeded = Object.assign({}, cache.snapshot, {
       gatewayDeviceEui,
       status: 'stale',
@@ -542,7 +689,7 @@ async function main() {
     state.snapshot = seeded;
   }
 
-  log(`starting gateway GPS loop for ${gatewayDeviceEui}`);
+  log(`starting gateway GPS loop for ${gatewayDeviceEui} (${gatewayIdentity.source}/${gatewayIdentity.confidence})`);
   while (true) {
     try {
       await runCycle(config, state);

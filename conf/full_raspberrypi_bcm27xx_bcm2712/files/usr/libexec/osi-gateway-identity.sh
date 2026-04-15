@@ -21,6 +21,20 @@ gateway_identity_now() {
     date -u +"%Y-%m-%dT%H:%M:%SZ"
 }
 
+gateway_identity_matches_local_mac_fallback() {
+    local candidate iface raw_mac resolved
+    candidate="$(normalize_gateway_eui "$1" || true)"
+    [ -n "$candidate" ] || return 1
+    for iface in eth0 br-lan wlan0; do
+        [ -r "/sys/class/net/$iface/address" ] || continue
+        raw_mac="$(cat "/sys/class/net/$iface/address" 2>/dev/null || true)"
+        resolved="$(normalize_gateway_eui "$raw_mac" || true)"
+        [ -n "$resolved" ] || continue
+        [ "$resolved" = "$candidate" ] && return 0
+    done
+    return 1
+}
+
 gateway_identity_try_command() {
     local source="$1"
     local command="$2"
@@ -30,7 +44,11 @@ gateway_identity_try_command() {
     [ -n "$resolved" ] || return 1
     GATEWAY_IDENTITY_DEVICE_EUI="$resolved"
     GATEWAY_IDENTITY_DEVICE_EUI_SOURCE="$source"
-    GATEWAY_IDENTITY_DEVICE_EUI_CONFIDENCE="authoritative"
+    if [ "$source" != "concentratord-runtime" ] && gateway_identity_matches_local_mac_fallback "$resolved"; then
+        GATEWAY_IDENTITY_DEVICE_EUI_CONFIDENCE="provisional"
+    else
+        GATEWAY_IDENTITY_DEVICE_EUI_CONFIDENCE="authoritative"
+    fi
     GATEWAY_IDENTITY_DEVICE_EUI_LAST_VERIFIED_AT="$(gateway_identity_now)"
     return 0
 }
@@ -87,6 +105,8 @@ gateway_identity_resolve() {
     GATEWAY_IDENTITY_DEVICE_EUI_CONFIDENCE=""
     GATEWAY_IDENTITY_DEVICE_EUI_LAST_VERIFIED_AT=""
 
+    gateway_identity_try_command "concentratord-runtime" \
+        "sh /usr/bin/gateway-id.sh 2>/dev/null | grep -oE '[0-9A-Fa-f]{16}' | head -n 1" && return 0
     gateway_identity_try_command "concentratord-uci-sx1302" \
         "uci -q get chirpstack-concentratord.@sx1302[0].gateway_id 2>/dev/null || true" && return 0
     gateway_identity_try_command "concentratord-uci-sx1301" \
