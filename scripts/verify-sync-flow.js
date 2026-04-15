@@ -51,8 +51,9 @@ const requiredHttpRoutes = [
 const requiredFunctionNodes = [
   'Validate & decode token',
   'Handle server auth response',
-  'Handle claim response & build UPDATE',
+  'Finalize linked account state',
   'Persist MQTT Broker Config',
+  'Clear link flow state',
   'Clear MQTT Broker Config',
   'Set Download Headers',
   'Daily Dendrometer Analytics',
@@ -191,6 +192,14 @@ function expectExcludesById(nodeId, needle, description) {
   }
 }
 
+function expectMissingNodeById(nodeId, description) {
+  if (findNodeById(nodeId)) {
+    fail(`${nodeId} still exists: ${description}`);
+  } else {
+    console.log(`OK ${nodeId} removed ${description}`);
+  }
+}
+
 function expectLibById(nodeId, varName, moduleName, description) {
   const node = findNodeById(nodeId);
   if (!node) {
@@ -283,6 +292,7 @@ if (bootstrapNode) {
 expectIncludes('Validate & decode token', 'const auth = verifyBearer', 'uses decoded local auth');
 expectIncludes('Validate & decode token', 'function allowPrivateTargets()', 'supports a private-target maintenance override');
 expectIncludes('Validate & decode token', 'ALLOW_PRIVATE_SERVER_URLS', 'accepts the runtime private-target override flag');
+expectIncludes('Validate & decode token', 'ALLOW_INSECURE_SERVER_URL', 'accepts the legacy runtime private-target override flag');
 expectIncludes('Validate & decode token', 'allow_private_target', 'accepts the persisted UCI private-target override flag');
 expectIncludes('Validate & decode token', "gateway/([0-9A-Fa-f]{16})/event/", 'checks ChirpStack gateway topic logs when resolving gateway EUI');
 expectIncludes('Validate & decode token', "chirpstack-concentratord.@sx1302[0].gateway_id", 'falls back to the sx1302 gateway_id when resolving gateway EUI');
@@ -296,6 +306,7 @@ expectIncludes('Handle server auth response', "requiredFieldErrors.push('MQTT br
 expectIncludes('Handle server auth response', 'const mqttPassword = String(data.mqttPassword || data.mqtt_password || \'\').trim();', 'accepts MQTT credentials from local-sync');
 expectIncludes('Handle server auth response', "flow.set('al_mqtt_password', mqttPassword);", 'stores MQTT password from local-sync');
 expectIncludes('Handle server auth response', "flow.set('al_mqtt_broker_url', mqttBrokerUrl);", 'stores MQTT broker URL from local-sync');
+expectExcludes('Handle server auth response', 'UPDATE users SET server_username', 'direct linked-account DB mutation');
 expectIncludes('Build server auth request', 'deviceEuis: deviceEuis', 'sends local device claims in the authenticated local-sync request');
 expectIncludes('Build server auth request', "new osiDb.Database('/data/db/farming.db')", 'loads local device claims before cloud linking');
 expectIncludes('Build server auth request', "Gateway device EUI is not configured", 'fails locally when no gateway EUI can be resolved');
@@ -305,9 +316,9 @@ expectIncludes('Build Sync State', 'dbHealth: {', 'returns a DB health block in 
 expectIncludes('Build Sync State', "journalMode: helperHealth.journalMode || null", 'returns SQLite journal mode in sync state');
 expectIncludes('Build Sync State', "quickCheck: quickCheck.status", 'returns quick-check status in sync state');
 expectIncludes('Build Sync State', "lastError: helperHealth.lastError || null", 'returns helper DB errors in sync state');
-expectIncludesById('al-link-build-claim', 'if (deviceEuis.length === 0)', 'skips remote bulk claim when there are no local devices');
-expectIncludesById('al-link-build-claim', 'return [msg, null];', 'only calls remote bulk claim when device claims are needed');
-expectIncludes('Handle claim response & build UPDATE', 'return [null, msg];', 'can stop before mutating local auth state');
+expectIncludes('Finalize linked account state', 'UPDATE users SET server_username = ?', 'commits linked-account DB state only after MQTT persistence');
+expectIncludes('Finalize linked account state', "auth_mode = ?", 'finalizes linked auth mode explicitly');
+expectIncludes('Finalize linked account state', 'return [null, msg];', 'can stop before reporting link success');
 expectIncludes('Set Download Headers', 'Database download is disabled', 'keeps database download disabled');
 expectIncludes('Lookup Auth User', 'ORDER BY CASE WHEN username = ?', 'prefers local username matches');
 expectIncludes('Process Result', 'Multiple accounts match this username', 'rejects ambiguous linked logins');
@@ -316,6 +327,7 @@ expectIncludes('Process Result', "gateway/([0-9A-Fa-f]{16})/event/", 'checks Chi
 expectIncludes('Process Result', "chirpstack-concentratord.@sx1302[0].gateway_id", 'falls back to the sx1302 gateway_id during linked login');
 expectIncludes('Process Result', "uci -q get osi-server.cloud.device_eui 2>/dev/null || true", 'falls back to UCI gateway EUI during linked login');
 expectIncludes('Process Result', "/sys/class/net/eth0/address", 'falls back to interface MAC-derived gateway EUI during linked login');
+expectIncludes('Route Command', "device: { devEui: String(cmd.deviceEui || cmd.devEui || '').trim().toUpperCase() }", 'routes valve commands from either deviceEui or devEui');
 expectIncludes('CS Register Device', 'chirpstack.createProvisioningClientFromEnv(env)', 'uses shared ChirpStack provisioning helper');
 expectIncludes('CS Register Device', 'ensureDeviceProvisioned', 'provisions devices through gRPC helper');
 expectExcludes('CS Register Device', '/api/devices', 'legacy ChirpStack REST device endpoint');
@@ -357,13 +369,23 @@ expectIncludes('Build Cloud Bootstrap', 'deleted_at: normalizeIsoTimestamp(z.del
 expectIncludes('Build Cloud Bootstrap', 'devices: devices.map(sanitizeSyncRow)', 'normalizes device tombstone timestamps before bootstrap sync');
 expectIncludes('Build Cloud Bootstrap', 'schedules: schedules.map(sanitizeSyncRow)', 'normalizes schedule timestamps before bootstrap sync');
 expectIncludes('Mark Bootstrap Synced', "(msg.payload || {}).detail || 'Bootstrap sync failed'", 'preserves server ProblemDetail details for bootstrap errors');
-expectWireById('al-link-success', 'al-link-store-mqtt', 'persists MQTT credentials after successful account linking');
-expectWireById('al-link-store-mqtt', 'al-link-bootstrap-link-out', 'triggers an immediate bootstrap after successful MQTT config persistence');
+expectWireById('al-link-handle-auth', 'al-link-store-mqtt', 'persists MQTT credentials after successful account linking');
+expectWireById('al-link-store-mqtt', 'al-link-finalize', 'finalizes linked-account state only after MQTT config persistence');
+expectWireById('al-link-finalize', 'al-link-success', 'formats a success response only after linked-account finalization');
+expectWireById('al-link-success', 'al-link-bootstrap-link-out', 'triggers an immediate bootstrap after successful link finalization');
+expectWireById('al-link-success', 'al-link-clear-state', 'clears transient link state after a successful link');
+expectMissingNodeById('al-link-build-claim', 'the legacy claim-bulk account-link request path');
+expectMissingNodeById('al-link-server-claim', 'the legacy claim-bulk account-link HTTP request path');
+expectMissingNodeById('al-link-handle-claim', 'the legacy claim-bulk response handler');
+expectMissingNodeById('al-link-db-update', 'the legacy pre-MQTT link finalization query');
 expectWireById('sync-bootstrap-account-link-in', 'sync-bootstrap-build', 'routes post-link bootstrap triggers into the bootstrap builder');
 expectWireById('al-unlink-format', 'al-unlink-clear-mqtt', 'clears MQTT credentials after unlinking');
+expectWireById('al-unlink-format', 'al-link-clear-state', 'clears transient link state after unlinking');
 expectIncludes('Persist MQTT Broker Config', "set osi-server.cloud.mqtt_password=", 'writes the MQTT password into UCI after linking');
 expectIncludes('Persist MQTT Broker Config', 'Linked account response is missing MQTT credentials', 'fails linking when MQTT credentials are incomplete');
 expectIncludes('Persist MQTT Broker Config', '/etc/init.d/node-red restart', 'restarts Node-RED after storing MQTT credentials');
+expectWireById('al-link-handle-auth', 'al-link-clear-state', 'clears transient link state when server auth fails');
+expectWireById('al-link-store-mqtt', 'al-link-clear-state', 'clears transient link state when MQTT persistence fails');
 expectIncludes('Clear MQTT Broker Config', "set osi-server.cloud.mqtt_password=''", 'clears the MQTT password from UCI after unlinking');
 expectIncludes('Clear MQTT Broker Config', '/etc/init.d/node-red restart', 'restarts Node-RED after clearing MQTT credentials');
 expectIncludes('Run Force Sync', 'COALESCE(u.server_username, u.username) AS claimed_by_username', 'uses linked cloud usernames in force-sync device snapshots');

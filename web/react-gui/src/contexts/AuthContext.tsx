@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import { authAPI } from '../services/api';
 import { AUTH_EXPIRED_EVENT, resetAuthExpiredSignal } from '../services/authEvents';
 import type { LoginRequest, RegisterRequest } from '../types/farming';
@@ -19,6 +19,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [token, setToken] = useState<string | null>(null);
   const [username, setUsername] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const logout = useCallback(() => {
+    localStorage.removeItem('auth_token');
+    localStorage.removeItem('username');
+    resetAuthExpiredSignal();
+    setToken(null);
+    setUsername(null);
+  }, []);
 
   useEffect(() => {
     const storedToken = localStorage.getItem('auth_token');
@@ -28,7 +35,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setUsername(storedUsername);
     }
     setLoading(false);
-  }, []);
+  }, [logout]);
 
   useEffect(() => {
     const handleAuthExpired = () => {
@@ -52,14 +59,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const register = async (credentials: RegisterRequest) => {
     await authAPI.register(credentials);
-  };
-
-  const logout = () => {
-    localStorage.removeItem('auth_token');
-    localStorage.removeItem('username');
-    resetAuthExpiredSignal();
-    setToken(null);
-    setUsername(null);
   };
 
   return (

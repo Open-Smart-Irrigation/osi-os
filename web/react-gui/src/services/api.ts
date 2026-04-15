@@ -31,10 +31,6 @@ type ApiErrorPayload = {
   message?: string;
 };
 
-function shouldSuppressAuthExpiry(error: unknown): boolean {
-  return Boolean((error as { config?: { skipAuthExpiry?: boolean } })?.config?.skipAuthExpiry);
-}
-
 export function getApiErrorMessage(error: unknown, fallback: string): string {
   if (axios.isAxiosError<ApiErrorPayload>(error)) {
     return error.response?.data?.detail
@@ -84,12 +80,9 @@ api.interceptors.response.use(
   },
   (error) => {
     if (error.response?.status === 401) {
-      const hadSession = Boolean(localStorage.getItem('auth_token'));
       localStorage.removeItem('auth_token');
       localStorage.removeItem('username');
-      if (hadSession && !shouldSuppressAuthExpiry(error)) {
-        notifyAuthExpired();
-      }
+      notifyAuthExpired();
     }
     return Promise.reject(error);
   }
@@ -120,8 +113,8 @@ function normaliseSchedule(sched: any): IrrigationSchedule {
     durationMinutes: sched?.durationMinutes ?? sched?.duration_minutes ?? undefined,
     last_triggered_at: sched?.last_triggered_at ?? sched?.lastTriggeredAt ?? null,
     lastTriggeredAt: sched?.lastTriggeredAt ?? sched?.last_triggered_at ?? null,
-    response_mode: sched?.response_mode ?? sched?.responseMode ?? null,
-    responseMode: sched?.responseMode ?? sched?.response_mode ?? null,
+    response_mode: sched?.response_mode ?? sched?.responseMode ?? 'proportional',
+    responseMode: sched?.responseMode ?? sched?.response_mode ?? 'proportional',
   };
 }
 
@@ -617,7 +610,7 @@ export interface ForceSyncResult {
 export const accountLinkAPI = {
   getStatus: () => api.get<AccountLinkStatus>('/api/account-link/status').then(r => r.data),
   link: (req: AccountLinkRequest) =>
-    api.post<AccountLinkResult>('/api/account-link', req, { skipAuthExpiry: true } as any).then(r => r.data),
+    api.post<AccountLinkResult>('/api/account-link', req).then(r => r.data),
   unlink: () => api.delete('/api/account-link'),
   forceSync: () => api.post<ForceSyncResult>('/api/sync/force').then(r => r.data),
 };
