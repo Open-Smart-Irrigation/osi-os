@@ -159,7 +159,8 @@ function expectIncludes(nodeName, needle, description) {
     fail(`missing function node ${nodeName}`);
     return;
   }
-  if (!node.func.includes(needle)) {
+  const func = String(node.func || '');
+  if (!func.includes(needle)) {
     fail(`${nodeName} missing ${description}`);
   } else {
     console.log(`OK ${nodeName} ${description}`);
@@ -172,7 +173,8 @@ function expectExcludes(nodeName, needle, description) {
     fail(`missing function node ${nodeName}`);
     return;
   }
-  if (node.func.includes(needle)) {
+  const func = String(node.func || '');
+  if (func.includes(needle)) {
     fail(`${nodeName} still contains ${description}`);
   } else {
     console.log(`OK ${nodeName} removed ${description}`);
@@ -423,6 +425,8 @@ expectIncludes('Build Cloud Bootstrap', "'  dd.flow_liters_per_10min,'", 'includ
 expectIncludes('Build Cloud Bootstrap', 'AS event_uuid', 'synthesizes stable irrigation event UUIDs for bootstrap snapshots');
 expectIncludes('Build Cloud Bootstrap', 'gatewayLocations,', 'includes gateway GPS state in bootstrap payloads');
 expectIncludes('Build Cloud Bootstrap', 'previousGatewayDeviceEuis: migration.previousGatewayDeviceEuis', 'includes previous gateway identities during bootstrap migration');
+expectIncludes('Build Cloud Bootstrap', 'edgeBuildVersion,', 'includes the edge build version in bootstrap gateway metadata');
+expectIncludes('Build Cloud Bootstrap', 'syncCapabilities', 'includes sync capabilities in bootstrap gateway metadata');
 expectIncludes('Build Cloud Bootstrap', 'runGatewayMigrationPreflight', 'runs local gateway migration preflight before bootstrap sync');
 expectIncludes('Build Cloud Bootstrap', 'gatewayMigrationPaused: true', 'pauses normal sync while a gateway migration repair bootstrap is pending');
 expectIncludes('Build Cloud Bootstrap', 'UPDATE irrigation_zones SET gateway_device_eui = ?', 'rewrites active zone gateway bindings during local migration');
@@ -491,6 +495,8 @@ expectIncludes('Run Force Sync', "'  dd.rain_mm_per_10min,'", 'includes normaliz
 expectIncludes('Run Force Sync', "'  dd.flow_liters_per_10min,'", 'includes normalized flow telemetry in force-sync sensor data');
 expectIncludes('Run Force Sync', 'AS event_uuid', 'synthesizes stable irrigation event UUIDs for forced bootstrap snapshots');
 expectIncludes('Run Force Sync', 'gatewayLocations,', 'includes gateway GPS state in forced sync payloads');
+expectIncludes('Run Force Sync', 'edgeBuildVersion,', 'includes the edge build version in forced bootstrap gateway metadata');
+expectIncludes('Run Force Sync', 'syncCapabilities', 'includes sync capabilities in forced bootstrap gateway metadata');
 expectIncludes('Run Force Sync', 'const sensorDataRows = await q([', 'loads force-sync sensor history before reordering it');
 expectIncludes('Run Force Sync', 'const sensorData = sensorDataRows.slice().reverse();', 'replays force-sync sensor history oldest-to-newest');
 expectIncludes('Run Force Sync', 'const dendroReadingsRows = await q([', 'loads force-sync dendro history before reordering it');
