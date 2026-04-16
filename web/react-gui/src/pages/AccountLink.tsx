@@ -272,9 +272,13 @@ export const AccountLink: React.FC = () => {
                       </p>
                       <p>
                         {t('sync.pending', {
-                          count: forceSyncResult.pendingCommands.queuedCount,
+                          fetched: forceSyncResult.pendingCommands.fetchedCount,
+                          queued: forceSyncResult.pendingCommands.queuedCount,
                         })}
                       </p>
+                      {forceSyncResult.pendingCommands.appliesAfterResponse && (
+                        <p>{t('sync.pendingAfterResponse')}</p>
+                      )}
                       {forceSyncResult.lastError && (
                         <p className="text-yellow-800">
                           {t('sync.lastError', {

@@ -57,8 +57,14 @@ const requiredFunctionNodes = [
   'Handle server auth response',
   'Finalize linked account state',
   'Persist MQTT Broker Config',
+  'Rollback MQTT Broker Config',
+  'Schedule Link Restart',
   'Clear link flow state',
   'Clear MQTT Broker Config',
+  'Decode token & build UPDATE',
+  'Clear linked account state',
+  'Restore MQTT Broker Config',
+  'Schedule Unlink Restart',
   'Set Download Headers',
   'Daily Dendrometer Analytics',
   'Sync Init Schema + Triggers',
@@ -357,10 +363,13 @@ expectIncludes('Sync Init Schema + Triggers', 'trg_gateway_locations_outbox_ai',
 expectIncludes('Sync Init Schema + Triggers', 'GATEWAY_LOCATION_UPSERTED', 'emits gateway GPS sync events');
 expectIncludes('Sync Init Schema + Triggers', 'ALTER TABLE irrigation_zones ADD COLUMN area_m2 REAL', 'adds shared zone area config');
 expectIncludes('Sync Init Schema + Triggers', 'ALTER TABLE irrigation_zones ADD COLUMN irrigation_efficiency_pct REAL', 'adds shared irrigation efficiency config');
+expectIncludes('Sync Init Schema + Triggers', 'ALTER TABLE irrigation_zones ADD COLUMN prediction_card_enabled INTEGER DEFAULT 0', 'adds the synced prediction-card flag to zones');
 expectIncludes('Sync Init Schema + Triggers', 'ALTER TABLE device_data ADD COLUMN rain_mm_per_10min REAL', 'adds normalized rain telemetry storage');
 expectIncludes('Sync Init Schema + Triggers', 'ALTER TABLE device_data ADD COLUMN flow_liters_per_10min REAL', 'adds normalized flow telemetry storage');
 expectIncludes('Sync Init Schema + Triggers', "'area_m2', NEW.area_m2", 'mirrors zone area changes into zone sync events');
 expectIncludes('Sync Init Schema + Triggers', "'irrigation_efficiency_pct', NEW.irrigation_efficiency_pct", 'mirrors irrigation efficiency changes into zone sync events');
+expectIncludes('Sync Init Schema + Triggers', "'prediction_card_enabled', COALESCE(NEW.prediction_card_enabled, 0)", 'mirrors prediction-card changes into zone sync events');
+expectIncludes('Sync Init Schema + Triggers', 'COALESCE(NEW.prediction_card_enabled,0) <> COALESCE(OLD.prediction_card_enabled,0)', 'queues outbox events when the prediction-card flag changes');
 expectIncludes('Sync Init Schema + Triggers', "'rain_mm_per_10min', NEW.rain_mm_per_10min", 'mirrors normalized rain telemetry into device-data sync events');
 expectIncludes('Sync Init Schema + Triggers', "'flow_liters_per_10min', NEW.flow_liters_per_10min", 'mirrors normalized flow telemetry into device-data sync events');
 expectIncludes('Sync Init Schema + Triggers', 'SELECT name FROM devices WHERE deveui = NEW.deveui AND deleted_at IS NULL', 'ignores deleted devices when mirroring device-data names into the outbox');
@@ -378,6 +387,7 @@ expectIncludes('Build Cloud Bootstrap', 'd.strega_model', 'includes STREGA model
 expectIncludes('Build Cloud Bootstrap', "'  dd.lsn50_mode_code,'", 'includes observed LSN50 mode in bootstrap sensor data');
 expectIncludes('Build Cloud Bootstrap', 'iz.area_m2', 'includes zone area in bootstrap snapshots');
 expectIncludes('Build Cloud Bootstrap', 'iz.irrigation_efficiency_pct', 'includes zone irrigation efficiency in bootstrap snapshots');
+expectIncludes('Build Cloud Bootstrap', 'COALESCE(iz.prediction_card_enabled, 0) AS prediction_card_enabled', 'includes the prediction-card flag in bootstrap snapshots');
 expectIncludes('Build Cloud Bootstrap', "'  dd.rain_mm_per_10min,'", 'includes normalized rain telemetry in bootstrap sensor data');
 expectIncludes('Build Cloud Bootstrap', "'  dd.flow_liters_per_10min,'", 'includes normalized flow telemetry in bootstrap sensor data');
 expectIncludes('Build Cloud Bootstrap', 'AS event_uuid', 'synthesizes stable irrigation event UUIDs for bootstrap snapshots');
@@ -401,6 +411,7 @@ expectIncludes('Build Cloud Bootstrap', 'const dendroReadingsRows = await q([', 
 expectIncludes('Build Cloud Bootstrap', 'const dendroReadings = dendroReadingsRows.slice().reverse();', 'replays bootstrap dendro history oldest-to-newest');
 expectIncludes('Build Cloud Bootstrap', 'function normalizeIsoTimestamp(value)', 'normalizes malformed edge timestamps before bootstrap sync');
 expectIncludes('Build Cloud Bootstrap', 'deleted_at: normalizeIsoTimestamp(z.deleted_at)', 'normalizes zone tombstone timestamps before bootstrap sync');
+expectIncludes('Build Cloud Bootstrap', 'prediction_card_enabled: !!Number(z.prediction_card_enabled || 0)', 'exports the prediction-card flag in bootstrap payloads');
 expectIncludes('Build Cloud Bootstrap', 'devices: devices.map(sanitizeSyncRow)', 'normalizes device tombstone timestamps before bootstrap sync');
 expectIncludes('Build Cloud Bootstrap', 'schedules: schedules.map(sanitizeSyncRow)', 'normalizes schedule timestamps before bootstrap sync');
 expectIncludes('Build Cloud Bootstrap', 'LEFT JOIN devices d ON d.deveui = dd.deveui AND d.deleted_at IS NULL', 'ignores deleted devices when exporting bootstrap sensor history');
@@ -410,30 +421,42 @@ expectIncludes('Mark Bootstrap Synced', "(msg.payload || {}).detail || 'Bootstra
 expectWireById('al-link-handle-auth', 'al-link-store-mqtt', 'persists MQTT credentials after successful account linking');
 expectWireById('al-link-store-mqtt', 'al-link-finalize', 'finalizes linked-account state only after MQTT config persistence');
 expectWireById('al-link-finalize', 'al-link-success', 'formats a success response only after linked-account finalization');
-expectWireById('al-link-success', 'al-link-bootstrap-link-out', 'triggers an immediate bootstrap after successful link finalization');
-expectWireById('al-link-success', 'al-link-clear-state', 'clears transient link state after a successful link');
+expectWireById('al-link-finalize', 'al-link-rollback-mqtt', 'rolls back MQTT credentials when linked-account finalization fails');
+expectWireById('al-link-success', 'al-link-restart-node-red', 'schedules restart only after link success is fully prepared');
+expectWireById('al-link-restart-node-red', 'al-link-bootstrap-link-out', 'triggers an immediate bootstrap only after scheduling the link restart');
+expectWireById('al-link-restart-node-red', 'al-link-clear-state', 'clears transient link state only after successful link restart scheduling');
 expectMissingNodeById('al-link-build-claim', 'the legacy claim-bulk account-link request path');
 expectMissingNodeById('al-link-server-claim', 'the legacy claim-bulk account-link HTTP request path');
 expectMissingNodeById('al-link-handle-claim', 'the legacy claim-bulk response handler');
 expectMissingNodeById('al-link-db-update', 'the legacy pre-MQTT link finalization query');
 expectWireById('sync-bootstrap-account-link-in', 'sync-bootstrap-build', 'routes post-link bootstrap triggers into the bootstrap builder');
-expectWireById('al-unlink-format', 'al-unlink-clear-mqtt', 'clears MQTT credentials after unlinking');
-expectWireById('al-unlink-format', 'al-link-clear-state', 'clears transient link state after unlinking');
+expectWireById('al-unlink-func', 'al-unlink-clear-mqtt', 'clears MQTT credentials only after unlink auth succeeds');
+expectWireById('al-unlink-clear-mqtt', 'al-unlink-db', 'clears linked account state only after MQTT credentials are removed');
+expectWireById('al-unlink-db', 'al-unlink-restore-mqtt', 'restores MQTT credentials when unlink database cleanup fails');
+expectWireById('al-unlink-format', 'al-unlink-restart-node-red', 'schedules restart only after unlink state is cleared successfully');
+expectWireById('al-unlink-restart-node-red', 'al-link-clear-state', 'clears transient link state only after successful unlink restart scheduling');
 expectIncludes('Persist MQTT Broker Config', "set osi-server.cloud.mqtt_password=", 'writes the MQTT password into UCI after linking');
 expectIncludes('Persist MQTT Broker Config', "set osi-server.cloud.link_gateway_device_eui=", 'persists the linked gateway identity into UCI after linking');
 expectIncludes('Persist MQTT Broker Config', 'Linked account response is missing MQTT credentials', 'fails linking when MQTT credentials are incomplete');
-expectIncludes('Persist MQTT Broker Config', '/etc/init.d/node-red restart', 'restarts Node-RED after storing MQTT credentials');
+expectIncludes('Persist MQTT Broker Config', 'msg._mqttConfigBackup = {', 'backs up prior MQTT config before persisting linked credentials');
+expectExcludes('Persist MQTT Broker Config', '/etc/init.d/node-red restart', 'Node-RED restart while link persistence is still in flight');
 expectWireById('al-link-handle-auth', 'al-link-clear-state', 'clears transient link state when server auth fails');
 expectWireById('al-link-store-mqtt', 'al-link-clear-state', 'clears transient link state when MQTT persistence fails');
-expectIncludes('Clear MQTT Broker Config', "set osi-server.cloud.mqtt_password=''", 'clears the MQTT password from UCI after unlinking');
-expectIncludes('Clear MQTT Broker Config', "set osi-server.cloud.link_gateway_device_eui=''", 'clears the linked gateway identity from UCI after unlinking');
-expectIncludes('Clear MQTT Broker Config', '/etc/init.d/node-red restart', 'restarts Node-RED after clearing MQTT credentials');
+expectIncludes('Clear MQTT Broker Config', "set osi-server.cloud.mqtt_password=' + shellQuote('')", 'clears the MQTT password from UCI after unlinking');
+expectIncludes('Clear MQTT Broker Config', "set osi-server.cloud.link_gateway_device_eui=' + shellQuote('')", 'clears the linked gateway identity from UCI after unlinking');
+expectIncludes('Clear MQTT Broker Config', 'msg._mqttConfigBackup = {', 'backs up prior MQTT config before unlink cleanup');
+expectExcludes('Clear MQTT Broker Config', '/etc/init.d/node-red restart', 'Node-RED restart while unlink cleanup is still in flight');
+expectIncludes('Rollback MQTT Broker Config', 'rolled back MQTT credentials', 'restores prior MQTT config when link finalization fails');
+expectIncludes('Restore MQTT Broker Config', 'restored MQTT credentials', 'restores prior MQTT config when unlink finalization fails');
+expectIncludes('Schedule Link Restart', '/etc/init.d/node-red restart', 'schedules a Node-RED restart only after successful link completion');
+expectIncludes('Schedule Unlink Restart', '/etc/init.d/node-red restart', 'schedules a Node-RED restart only after successful unlink completion');
 expectIncludes('Run Force Sync', 'COALESCE(u.server_username, u.username) AS claimed_by_username', 'uses linked cloud usernames in force-sync device snapshots');
 expectIncludes('Run Force Sync', 'COALESCE(u.server_username, u.username) AS username', 'uses linked cloud usernames in force-sync zone snapshots');
 expectIncludes('Run Force Sync', 'd.strega_model', 'includes STREGA model metadata in force-sync device snapshots');
 expectIncludes('Run Force Sync', "'  dd.lsn50_mode_code,'", 'includes observed LSN50 mode in force-sync sensor data');
 expectIncludes('Run Force Sync', 'iz.area_m2', 'includes zone area in force-sync snapshots');
 expectIncludes('Run Force Sync', 'iz.irrigation_efficiency_pct', 'includes zone irrigation efficiency in force-sync snapshots');
+expectIncludes('Run Force Sync', 'COALESCE(iz.prediction_card_enabled, 0) AS prediction_card_enabled', 'includes the prediction-card flag in force-sync snapshots');
 expectIncludes('Run Force Sync', "'  dd.rain_mm_per_10min,'", 'includes normalized rain telemetry in force-sync sensor data');
 expectIncludes('Run Force Sync', "'  dd.flow_liters_per_10min,'", 'includes normalized flow telemetry in force-sync sensor data');
 expectIncludes('Run Force Sync', 'AS event_uuid', 'synthesizes stable irrigation event UUIDs for forced bootstrap snapshots');
@@ -444,12 +467,16 @@ expectIncludes('Run Force Sync', 'const dendroReadingsRows = await q([', 'loads 
 expectIncludes('Run Force Sync', 'const dendroReadings = dendroReadingsRows.slice().reverse();', 'replays force-sync dendro history oldest-to-newest');
 expectIncludes('Run Force Sync', 'function normalizeIsoTimestamp(value)', 'normalizes malformed edge timestamps before forced bootstrap sync');
 expectIncludes('Run Force Sync', 'deleted_at: normalizeIsoTimestamp(z.deleted_at)', 'normalizes zone tombstone timestamps before forced bootstrap sync');
+expectIncludes('Run Force Sync', 'prediction_card_enabled: !!Number(z.prediction_card_enabled || 0)', 'exports the prediction-card flag in forced bootstrap payloads');
 expectIncludes('Run Force Sync', 'devices: devices.map(sanitizeSyncRow)', 'normalizes device tombstone timestamps before forced bootstrap sync');
 expectIncludes('Run Force Sync', 'schedules: schedules.map(sanitizeSyncRow)', 'normalizes schedule timestamps before forced bootstrap sync');
 expectIncludes('Run Force Sync', 'LEFT JOIN devices d ON d.deveui = dd.deveui AND d.deleted_at IS NULL', 'ignores deleted devices when exporting force-sync sensor history');
 expectIncludes('Run Force Sync', 'LEFT JOIN devices d ON d.deveui = dr.deveui AND d.deleted_at IS NULL', 'ignores deleted devices when exporting force-sync dendro history');
 expectIncludes('Run Force Sync', 'LEFT JOIN irrigation_zones iz ON iz.id = d.irrigation_zone_id AND iz.deleted_at IS NULL', 'ignores deleted zones when exporting force-sync history');
 expectIncludes('Run Force Sync', "(bootstrapRes.payload || {}).detail || 'Bootstrap sync failed'", 'preserves server ProblemDetail details in force-sync bootstrap errors');
+expectIncludes('Run Force Sync', "pendingCommands: { attempted: false, succeeded: true, fetchedCount: 0, queuedCount: 0, appliesAfterResponse: false, applyPhase: 'NO_PENDING_COMMANDS'", 'initializes pending-command apply semantics in force-sync summary');
+expectIncludes('Run Force Sync', 'summary.pendingCommands.appliesAfterResponse = pendingRes.payload.length > 0;', 'marks force-sync pending commands as applying after the HTTP response');
+expectIncludes('Run Force Sync', "summary.pendingCommands.applyPhase = pendingRes.payload.length > 0 ? 'QUEUED_LOCAL_APPLY' : 'NO_PENDING_COMMANDS';", 'reports force-sync pending-command apply phase explicitly');
 expectIncludes('Daily Dendrometer Analytics', 'const recoveryThreshold=(calibration.thresholds.mild||CALIBRATIONS.default.thresholds.mild)*(phenoMod>0?phenoMod:1.0);', 'uses calibration-aware recovery threshold');
 expectIncludes('Daily Dendrometer Analytics', 't.twd_night_um<recoveryThreshold', 'uses absolute night TWD in recovery verification');
 expectIncludes('Daily Dendrometer Analytics', "date>=date('${ANALYTICS_DATE}','-3 days')", 'uses the exact previous-three-day recovery window');
@@ -569,8 +596,10 @@ expectIncludes('Route Command', "commandType === 'SET_STREGA_PARTIAL_OPENING'", 
 expectIncludes('Route Command', "commandType === 'SET_STREGA_FLUSHING'", 'routes SET_STREGA_FLUSHING gateway commands');
 expectIncludes('Build UPDATE SQL', "if (commandType === 'SET_LSN50_MODE') {", 'updates the local configured LSN50 mode for synced commands');
 expectIncludes('Build UPDATE SQL', 'area_m2=excluded.area_m2', 'upserts shared zone area from sync commands');
+expectIncludes('Build UPDATE SQL', 'prediction_card_enabled=excluded.prediction_card_enabled', 'upserts the prediction-card flag from sync commands');
 expectIncludes('Build UPDATE SQL', "sets.push('area_m2 = '", 'applies zone area updates from control-plane sync');
 expectIncludes('Build UPDATE SQL', "sets.push('irrigation_efficiency_pct = '", 'applies irrigation efficiency updates from control-plane sync');
+expectIncludes('Build UPDATE SQL', "sets.push('prediction_card_enabled = ' + b(predictionCardEnabled, false));", 'applies prediction-card updates from control-plane sync');
 expectIncludes('Build UPDATE SQL', "if (commandType === 'SET_LSN50_INTERVAL') {", 'accepts synced LSN50 interval commands on the gateway');
 expectIncludes('Build UPDATE SQL', "if (commandType === 'SET_LSN50_INTERRUPT_MODE') {", 'accepts synced LSN50 interrupt mode commands on the gateway');
 expectIncludes('Build UPDATE SQL', "if (commandType === 'SET_LSN50_5V_WARMUP') {", 'accepts synced LSN50 5V warm-up commands on the gateway');

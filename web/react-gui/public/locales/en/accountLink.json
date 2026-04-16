@@ -53,7 +53,8 @@
     "usedCurrentToken": "Using current sync token.",
     "bootstrap": "Bootstrap applied: {{applied}}, skipped: {{skipped}}",
     "outbox": "Outbox delivered: {{delivered}} ({{before}} -> {{after}} pending)",
-    "pending": "Pending commands queued: {{count}}",
+    "pending": "Pending commands fetched: {{fetched}}, queued for local apply: {{queued}}",
+    "pendingAfterResponse": "Local apply continues after this response returns.",
     "lastError": "Last error from {{source}}: {{message}}"
   },
   "reauth": {

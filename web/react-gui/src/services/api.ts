@@ -190,6 +190,7 @@ function normaliseZone(z: any): IrrigationZone {
     timezone:          z.timezone                                  ?? null,
     phenologicalStage: z.phenologicalStage ?? z.phenological_stage ?? null,
     calibrationKey:    z.calibrationKey    ?? z.calibration_key    ?? null,
+    predictionCardEnabled: z.predictionCardEnabled ?? z.prediction_card_enabled ?? false,
     gatewayDeviceEui:  z.gatewayDeviceEui  ?? z.gateway_device_eui ?? null,
     varietyCompat:     z.varietyCompat      ?? z.variety_compat       ?? z.variety ?? null,
     schedule: sched ? normaliseSchedule(sched) : null,
@@ -276,6 +277,7 @@ export const irrigationZonesAPI = {
     timezone?: string | null;
     phenologicalStage?: string | null;
     calibrationKey?: string | null;
+    predictionCardEnabled?: boolean;
   }): Promise<IrrigationZone> => {
     const response = await api.put<IrrigationZone>(
       `/api/irrigation-zones/${zoneId}/config`,
@@ -584,6 +586,8 @@ export interface ForceSyncResult {
     succeeded: boolean;
     fetchedCount: number;
     queuedCount: number;
+    appliesAfterResponse: boolean;
+    applyPhase: 'NO_PENDING_COMMANDS' | 'QUEUED_LOCAL_APPLY';
     statusCode?: number | null;
     error?: string | null;
   };

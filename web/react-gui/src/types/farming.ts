@@ -180,6 +180,7 @@ export interface IrrigationZone {
   scheduling_mode?: 'local' | 'server_preferred' | null;
   notes?: string | null;
   calibration_key?: string | null;
+  prediction_card_enabled?: boolean | null;
 
   // Compat aliases (server uses camelCase)
   phenologicalStage?: string | null;
@@ -191,6 +192,7 @@ export interface IrrigationZone {
   irrigationEfficiencyPct?: number | null;
   schedulingMode?: 'local' | 'server_preferred' | null;
   varietyCompat?: string | null;
+  predictionCardEnabled?: boolean | null;
 }
 
 export interface CreateZoneRequest {

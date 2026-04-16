@@ -69,6 +69,7 @@ export const ZoneConfigModal: React.FC<Props> = ({ isOpen, zone, onClose, onSave
   const [timezone, setTimezone] = useState(zone.timezone ?? 'UTC');
   const [phenologicalStage, setPhenologicalStage] = useState(zone.phenologicalStage ?? 'default');
   const [calibrationKey, setCalibrationKey] = useState(zone.calibrationKey ?? 'default');
+  const [predictionCardEnabled, setPredictionCardEnabled] = useState(zone.predictionCardEnabled ?? false);
   const [latitude, setLatitude] = useState(zone.latitude != null ? String(zone.latitude) : '');
   const [longitude, setLongitude] = useState(zone.longitude != null ? String(zone.longitude) : '');
   const [saving, setSaving] = useState(false);
@@ -95,6 +96,7 @@ export const ZoneConfigModal: React.FC<Props> = ({ isOpen, zone, onClose, onSave
     setTimezone(zone.timezone ?? 'UTC');
     setPhenologicalStage(zone.phenologicalStage ?? 'default');
     setCalibrationKey(zone.calibrationKey ?? 'default');
+    setPredictionCardEnabled(zone.predictionCardEnabled ?? false);
     setLatitude(zone.latitude != null ? String(zone.latitude) : '');
     setLongitude(zone.longitude != null ? String(zone.longitude) : '');
     setDeviceLocationError(null);
@@ -139,6 +141,7 @@ export const ZoneConfigModal: React.FC<Props> = ({ isOpen, zone, onClose, onSave
       timezone?: string | null;
       phenologicalStage?: string | null;
       calibrationKey?: string | null;
+      predictionCardEnabled?: boolean;
     } = {};
 
     if ((zone.cropType ?? '') !== cropType) payload.cropType = cropType || null;
@@ -154,6 +157,9 @@ export const ZoneConfigModal: React.FC<Props> = ({ isOpen, zone, onClose, onSave
     if ((zone.timezone ?? 'UTC') !== timezone) payload.timezone = timezone;
     if ((zone.phenologicalStage ?? 'default') !== phenologicalStage) payload.phenologicalStage = phenologicalStage;
     if ((zone.calibrationKey ?? 'default') !== calibrationKey) payload.calibrationKey = calibrationKey;
+    if ((zone.predictionCardEnabled ?? false) !== predictionCardEnabled) {
+      payload.predictionCardEnabled = predictionCardEnabled;
+    }
 
     return payload;
   };
@@ -248,6 +254,28 @@ export const ZoneConfigModal: React.FC<Props> = ({ isOpen, zone, onClose, onSave
           {error && (
             <div className="bg-red-50 border border-red-200 text-red-800 rounded-lg px-3 py-2 text-sm">{error}</div>
           )}
+
+          <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)]/70 p-4">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <p className="text-sm font-semibold text-[var(--text)]">Prediction Advisory</p>
+                <p className="text-xs text-[var(--text-tertiary)] mt-0.5">
+                  Show the prediction advisory panel for this zone once the synced edge/server state agrees on the change.
+                </p>
+              </div>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={predictionCardEnabled}
+                onClick={() => setPredictionCardEnabled(value => !value)}
+                className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors focus:outline-none ${predictionCardEnabled ? 'bg-[var(--primary)]' : 'bg-[var(--border)]'}`}
+              >
+                <span
+                  className={`pointer-events-none inline-block h-5 w-5 rounded-full bg-white shadow-sm transition-transform ${predictionCardEnabled ? 'translate-x-5' : 'translate-x-0'}`}
+                />
+              </button>
+            </div>
+          </div>
 
           {/* Crop & Variety */}
           <div>
