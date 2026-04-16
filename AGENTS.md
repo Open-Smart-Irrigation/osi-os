@@ -20,9 +20,9 @@ Architectural rule:
 ## Current Branches
 
 - `osi-os`: `main`
-- `osi-server`: `test/prediction-phase1-phase2-implementation` (active prediction-engine implementation branch)
+- `osi-server`: `main`
 
-> Note: the current live server and Pi rollout were deployed from local `overhaul` snapshots before merge; current prediction-engine work is continuing on the dedicated `osi-server` test branch.
+> Note: the current live server and Pi rollout were deployed from local release snapshots before merge. The prediction-engine, admin prediction lab, and clustered Track B rollout work has now been consolidated back onto `osi-server` `main`.
 
 ---
 
@@ -244,6 +244,9 @@ npm run build
 - Terra Intelligence lives in `osi-server/prediction_animation_v2` and is served by the backend at `/terra-intelligence`.
 - Direct access to `/terra-intelligence` should open demo mode; OSI Cloud launches live mode with a zone-scoped `?zoneId=<id>` link from the prediction advisory card.
 - When wiring Spring SPA forwarding for Terra, prefer explicit `/terra-intelligence` entry mappings; broad `**/{path:...}` patterns can fail startup under Spring's `PathPatternParser`.
+- As of `2026-04-16`, the live `osi-backend` on `83.228.220.63` is configured to use the separate prediction VPS at `https://vps-92c7b4bb.vps.ovh.net` instead of the local in-stack prediction service.
+- The prediction VPS nginx config leaves `/health` public but allowlists `/internal/*`, `/openapi.json`, `/docs`, and `/redoc` to the live OSI server addresses `83.228.220.63`, `2001:1600:18:103::336`, and localhost.
+- The old local `osi-prediction-service` container on the main OSI server was intentionally left running as a dormant fallback after cutover. Revisit it after a few weeks of stable operation before removing it.
 
 ### Live Deploy Database Safety
 
