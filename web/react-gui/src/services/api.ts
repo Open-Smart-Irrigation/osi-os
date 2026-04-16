@@ -20,8 +20,6 @@ import type {
   DendroReading,
   Lsn50Mode,
   StregaModel,
-  GatewayLocation,
-  GatewayLocationStatus,
   ZoneEnvironmentSummary,
 } from '../types/farming';
 
@@ -182,33 +180,6 @@ function normaliseZone(z: any): IrrigationZone {
   } as IrrigationZone;
 }
 
-function normaliseGatewayLocationStatus(value: unknown): GatewayLocationStatus {
-  return value === 'live' || value === 'stale' || value === 'no_fix'
-    ? value
-    : 'no_fix';
-}
-
-function normaliseGatewayLocation(raw: any): GatewayLocation {
-  return {
-    gatewayDeviceEui: String(raw?.gatewayDeviceEui ?? raw?.gateway_device_eui ?? '').trim().toUpperCase(),
-    latitude: raw?.latitude ?? null,
-    longitude: raw?.longitude ?? null,
-    altitudeM: raw?.altitudeM ?? raw?.altitude_m ?? null,
-    accuracyM: raw?.accuracyM ?? raw?.accuracy_m ?? null,
-    hdop: raw?.hdop ?? null,
-    sats: raw?.sats ?? raw?.satellites ?? null,
-    fixMode: raw?.fixMode ?? raw?.fix_mode ?? null,
-    status: normaliseGatewayLocationStatus(raw?.status),
-    source: raw?.source ?? null,
-    nativeConcentratordStatus: raw?.nativeConcentratordStatus ?? raw?.native_concentratord_status ?? null,
-    chirpstackMirrorStatus: raw?.chirpstackMirrorStatus ?? raw?.chirpstack_mirror_status ?? null,
-    lastFixAt: raw?.lastFixAt ?? raw?.last_fix_at ?? null,
-    lastGoodFixAt: raw?.lastGoodFixAt ?? raw?.last_good_fix_at ?? null,
-    syncVersion: Number(raw?.syncVersion ?? raw?.sync_version ?? 0),
-    updatedAt: raw?.updatedAt ?? raw?.updated_at ?? null,
-  };
-}
-
 function normaliseSdVpdStatus(raw: unknown): SdVpdStatus {
   return raw === 'coupled' || raw === 'decoupled' || raw === 'insufficient_data'
     ? raw
@@ -302,18 +273,6 @@ export const irrigationZonesAPI = {
     longitude: number;
   }): Promise<void> => {
     await api.put(`/api/irrigation-zones/${zoneId}/location`, payload);
-  },
-};
-
-export const gatewayLocationAPI = {
-  getCurrent: async (): Promise<GatewayLocation> => {
-    const response = await api.get('/api/gateway/location');
-    return normaliseGatewayLocation(response.data);
-  },
-
-  getForGateway: async (gatewayDeviceEui: string): Promise<GatewayLocation> => {
-    const response = await api.get(`/api/gateways/${gatewayDeviceEui}/location`);
-    return normaliseGatewayLocation(response.data);
   },
 };
 

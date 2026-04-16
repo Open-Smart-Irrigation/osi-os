@@ -9,8 +9,6 @@ const nodeRedRoot = path.resolve(__dirname, '..', 'conf', 'full_raspberrypi_bcm2
 const deployScriptPath = path.resolve(__dirname, '..', 'deploy.sh');
 const nodeRedInitPath = path.resolve(__dirname, '..', 'feeds', 'chirpstack-openwrt-feed', 'apps', 'node-red', 'files', 'node-red.init');
 const osiServerDefaultsPath = path.resolve(__dirname, '..', 'conf', 'full_raspberrypi_bcm27xx_bcm2712', 'files', 'etc', 'uci-defaults', '96_osi_server_config');
-const gpsInitPath = path.resolve(__dirname, '..', 'conf', 'full_raspberrypi_bcm27xx_bcm2712', 'files', 'etc', 'init.d', 'osi-gateway-gps');
-const gpsSidecarPath = path.resolve(__dirname, '..', 'conf', 'full_raspberrypi_bcm27xx_bcm2712', 'files', 'usr', 'bin', 'osi-gateway-gps.js');
 const sx1301GatewayDefaultPath = path.resolve(__dirname, '..', 'conf', 'full_raspberrypi_bcm27xx_bcm2712', 'files', 'etc', 'uci-defaults', '99_set_sx1301_gateway_id');
 const gatewayIdentityHelperPath = path.resolve(__dirname, '..', 'conf', 'full_raspberrypi_bcm27xx_bcm2712', 'files', 'usr', 'libexec', 'osi-gateway-identity.sh');
 const chirpstackBootstrapPath = path.resolve(__dirname, 'chirpstack-bootstrap.js');
@@ -26,8 +24,6 @@ const packageJsonPath = path.join(nodeRedRoot, 'package.json');
 const deployScript = fs.readFileSync(deployScriptPath, 'utf8');
 const nodeRedInitScript = fs.readFileSync(nodeRedInitPath, 'utf8');
 const osiServerDefaultsScript = fs.readFileSync(osiServerDefaultsPath, 'utf8');
-const gpsInitScript = fs.readFileSync(gpsInitPath, 'utf8');
-const gpsSidecarScript = fs.readFileSync(gpsSidecarPath, 'utf8');
 const sx1301GatewayDefaultScript = fs.readFileSync(sx1301GatewayDefaultPath, 'utf8');
 const gatewayIdentityHelperScript = fs.readFileSync(gatewayIdentityHelperPath, 'utf8');
 const chirpstackBootstrapScript = fs.readFileSync(chirpstackBootstrapPath, 'utf8');
@@ -656,11 +652,10 @@ expectFileIncludes('chirpstack-bootstrap.js', chirpstackBootstrapScript, '/usr/l
 expectFileIncludes('chirpstack-bootstrap.js', chirpstackBootstrapScript, "readGatewayIdentityViaHelper", 'reads gateway identity via the shared helper during one-shot bootstrap detection');
 expectFileIncludes('deploy.sh', deployScript, '"feeds/chirpstack-openwrt-feed/apps/node-red/files/node-red.init"', 'deploys the Node-RED init script to live devices');
 expectFileIncludes('deploy.sh', deployScript, '"conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/libexec/osi-gateway-identity.sh"', 'deploys the shared gateway identity helper to live devices');
-expectFileIncludes('deploy.sh', deployScript, '"conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/bin/osi-gateway-gps.js"', 'deploys the gateway GPS sidecar to live devices');
-expectFileIncludes('deploy.sh', deployScript, '"conf/full_raspberrypi_bcm27xx_bcm2712/files/etc/init.d/osi-gateway-gps"', 'deploys the gateway GPS init script to live devices');
 expectFileIncludes('deploy.sh', deployScript, 'chmod 755 /etc/init.d/node-red', 'keeps the deployed Node-RED init script executable');
-expectFileIncludes('deploy.sh', deployScript, 'chmod 755 /usr/bin/osi-gateway-gps.js', 'keeps the deployed gateway GPS sidecar executable');
-expectFileIncludes('deploy.sh', deployScript, 'chmod 755 /etc/init.d/osi-gateway-gps', 'keeps the deployed gateway GPS init script executable');
+expectFileIncludes('deploy.sh', deployScript, '/etc/init.d/osi-gateway-gps stop || true', 'stops the retired gateway GPS sidecar during deploy');
+expectFileIncludes('deploy.sh', deployScript, '/etc/init.d/osi-gateway-gps disable || true', 'disables the retired gateway GPS sidecar during deploy');
+expectFileIncludes('deploy.sh', deployScript, 'rm -f /etc/init.d/osi-gateway-gps /usr/bin/osi-gateway-gps.js', 'removes the retired gateway GPS sidecar files during deploy');
 expectFileIncludes('osi-gateway-identity.sh', gatewayIdentityHelperScript, 'gateway_identity_resolve()', 'defines the shared canonical gateway resolver');
 expectFileIncludes('osi-gateway-identity.sh', gatewayIdentityHelperScript, 'GATEWAY_IDENTITY_DEVICE_EUI_CONFIDENCE="authoritative"', 'marks live ChirpStack-derived gateway identities as authoritative');
 expectFileIncludes('osi-gateway-identity.sh', gatewayIdentityHelperScript, 'GATEWAY_IDENTITY_DEVICE_EUI_CONFIDENCE="persisted"', 'marks previously verified gateway identities as persisted');
@@ -668,28 +663,6 @@ expectFileIncludes('osi-gateway-identity.sh', gatewayIdentityHelperScript, 'GATE
 expectFileIncludes('osi-gateway-identity.sh', gatewayIdentityHelperScript, 'sh /usr/bin/gateway-id.sh', 'prefers runtime concentratord gateway identity when available');
 expectFileIncludes('osi-gateway-identity.sh', gatewayIdentityHelperScript, 'gateway_identity_matches_local_mac_fallback', 'downgrades MAC-derived concentratord IDs away from authoritative confidence');
 expectFileIncludes('osi-gateway-identity.sh', gatewayIdentityHelperScript, 'for iface in eth0 br-lan wlan0; do', 'falls back across known interfaces for provisional MAC-derived identity');
-expectFileIncludes('osi-gateway-gps init', gpsInitScript, '/usr/libexec/osi-gateway-identity.sh', 'uses the shared gateway identity helper in the GPS sidecar init');
-expectFileIncludes('osi-gateway-gps init', gpsInitScript, 'DEVICE_EUI_CONFIDENCE="$device_eui_confidence"', 'exports gateway identity confidence into the GPS sidecar runtime environment');
-expectFileIncludes('osi-gateway-gps init', gpsInitScript, 'DEVICE_EUI_LAST_VERIFIED_AT="$device_eui_last_verified_at"', 'exports gateway identity verification timestamps into the GPS sidecar runtime environment');
-expectFileIncludes('osi-gateway-gps.js', gpsSidecarScript, 'const GATEWAY_IDENTITY_HELPER_PATH =', 'uses the shared gateway identity helper inside the GPS sidecar');
-expectFileIncludes('osi-gateway-gps.js', gpsSidecarScript, "execFileSync('sh', [GATEWAY_IDENTITY_HELPER_PATH, 'resolve']", 're-resolves gateway identity through the shared helper during GPS cycles');
-expectFileIncludes('osi-gateway-gps.js', gpsSidecarScript, 'clearPendingGatewayLocationOutbox', 'clears stale undelivered gateway-location sync rows when the gateway identity changes');
-expectFileIncludes('osi-gateway-gps.js', gpsSidecarScript, 'deleteGatewaySnapshot', 'drops stale gateway-location rows when the gateway identity changes');
-expectFileIncludes('osi-gateway-gps.js', gpsSidecarScript, 'migrateGatewayState(', 'migrates cached GPS state when the gateway identity changes');
-expectFileIncludes('osi-gateway-gps.js', gpsSidecarScript, "state.snapshot && state.snapshot.gatewayDeviceEui && state.snapshot.gatewayDeviceEui !== gatewayDeviceEui", 'detects stale cached GPS identities during runtime re-resolution');
-expectFileIncludes('osi-gateway-gps.js', gpsSidecarScript, "Object.assign({}, baseSnapshot, { gatewayDeviceEui })", 'ensures stale cached snapshots cannot override the current gateway identity');
-expectFileIncludes('osi-gateway-gps.js', gpsSidecarScript, "gatewayIdentity.confidence !== 'provisional'", 'avoids ChirpStack GPS mirroring while gateway identity remains provisional');
-expectFileIncludes('osi-gateway-gps.js', gpsSidecarScript, "chirpstack-concentratord.@sx1302[0]", 'supports sx1302 concentratord GNSS configuration');
-if (gpsSidecarScript.includes('state.gatewayDeviceEui || getGatewayDeviceEui()')) {
-  fail('osi-gateway-gps.js still pins a stale gateway identity in state before re-resolution');
-} else {
-  console.log('OK osi-gateway-gps.js no longer pins a stale gateway identity in state before re-resolution');
-}
-if (gpsSidecarScript.includes('Object.assign({ gatewayDeviceEui }, baseSnapshot)')) {
-  fail('osi-gateway-gps.js still lets stale cached snapshots override the current gateway identity');
-} else {
-  console.log('OK osi-gateway-gps.js no longer lets stale cached snapshots override the current gateway identity');
-}
 expectFileIncludes('99_set_sx1301_gateway_id', sx1301GatewayDefaultScript, '/usr/libexec/osi-gateway-identity.sh', 'uses the shared gateway identity helper for first-boot concentratord seeding');
 expectFileIncludes('99_set_sx1301_gateway_id', sx1301GatewayDefaultScript, "SECTION='chirpstack-concentratord.@sx1302[0]'", 'supports sx1302 concentratord gateway-id seeding');
 expectFileIncludes('99_set_sx1301_gateway_id', sx1301GatewayDefaultScript, 'resolve_fallback_gateway_id()', 'keeps a single MAC-derived fallback path for first-boot concentratord seeding');

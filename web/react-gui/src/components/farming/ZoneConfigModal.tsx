@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import type { GatewayLocation, IrrigationZone } from '../../types/farming';
-import { gatewayLocationAPI, irrigationZonesAPI } from '../../services/api';
+import type { IrrigationZone } from '../../types/farming';
+import { irrigationZonesAPI } from '../../services/api';
 import {
   getDeviceLocationErrorMessage,
   getDeviceLocationSupport,
@@ -56,7 +56,6 @@ const PHENOLOGICAL_STAGES = [
 ];
 
 export const ZoneConfigModal: React.FC<Props> = ({ isOpen, zone, onClose, onSaved }) => {
-  const gatewayDeviceEui = zone.gatewayDeviceEui ?? zone.gateway_device_eui ?? null;
   const [cropType, setCropType] = useState(zone.cropType ?? '');
   const [variety, setVariety] = useState(zone.variety ?? '');
   const [soilType, setSoilType] = useState(zone.soilType ?? '');
@@ -74,9 +73,6 @@ export const ZoneConfigModal: React.FC<Props> = ({ isOpen, zone, onClose, onSave
   const [longitude, setLongitude] = useState(zone.longitude != null ? String(zone.longitude) : '');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [gatewayLocation, setGatewayLocation] = useState<GatewayLocation | null>(null);
-  const [gatewayLocationLoading, setGatewayLocationLoading] = useState(false);
-  const [gatewayLocationError, setGatewayLocationError] = useState<string | null>(null);
   const [deviceLocationSupport, setDeviceLocationSupport] = useState<DeviceLocationSupport | null>(null);
   const [deviceLocationSupportLoading, setDeviceLocationSupportLoading] = useState(false);
   const [deviceLocationLoading, setDeviceLocationLoading] = useState(false);
@@ -120,30 +116,10 @@ export const ZoneConfigModal: React.FC<Props> = ({ isOpen, zone, onClose, onSave
     }
   };
 
-  const loadGatewayLocation = async (currentGatewayEui: string) => {
-    setGatewayLocationLoading(true);
-    setGatewayLocationError(null);
-    try {
-      const location = await gatewayLocationAPI.getForGateway(currentGatewayEui);
-      setGatewayLocation(location);
-    } catch (err: any) {
-      setGatewayLocation(null);
-      setGatewayLocationError(err.response?.data?.message ?? err.message ?? 'Failed to load gateway GPS');
-    } finally {
-      setGatewayLocationLoading(false);
-    }
-  };
-
   useEffect(() => {
     if (!isOpen) return;
-    if (!gatewayDeviceEui) {
-      setGatewayLocation(null);
-      setGatewayLocationError(null);
-    } else {
-      void loadGatewayLocation(gatewayDeviceEui);
-    }
     void refreshDeviceLocationSupport();
-  }, [gatewayDeviceEui, isOpen]);
+  }, [isOpen]);
 
   if (!isOpen) return null;
 
@@ -223,14 +199,6 @@ export const ZoneConfigModal: React.FC<Props> = ({ isOpen, zone, onClose, onSave
     }
   };
 
-  const useGatewayLocation = () => {
-    if (gatewayLocation?.latitude == null || gatewayLocation.longitude == null) return;
-    setLatitude(String(gatewayLocation.latitude));
-    setLongitude(String(gatewayLocation.longitude));
-    setError(null);
-    setDeviceLocationError(null);
-  };
-
   const useDeviceLocation = async () => {
     setDeviceLocationLoading(true);
     setDeviceLocationError(null);
@@ -253,23 +221,6 @@ export const ZoneConfigModal: React.FC<Props> = ({ isOpen, zone, onClose, onSave
       setDeviceLocationError('Open the app settings and enable location permission, then try again.');
     }
   };
-
-  const gatewayStatusLabel = gatewayLocation?.status === 'live'
-    ? 'Live'
-    : gatewayLocation?.status === 'stale'
-      ? 'Stale'
-      : 'No fix';
-
-  const gatewayStatusClass = gatewayLocation?.status === 'live'
-    ? 'bg-emerald-100 text-emerald-800'
-    : gatewayLocation?.status === 'stale'
-      ? 'bg-amber-100 text-amber-800'
-      : 'bg-slate-100 text-slate-700';
-
-  const gatewayAgeSource = gatewayLocation?.lastFixAt ?? gatewayLocation?.lastGoodFixAt ?? null;
-  const gatewayAgeLabel = gatewayAgeSource
-    ? `${Math.max(0, Math.round((Date.now() - new Date(gatewayAgeSource).getTime()) / 60000))} min ago`
-    : 'No recent fix';
 
   const canRequestDeviceLocation = Boolean(deviceLocationSupport?.available && !deviceLocationLoading);
   const deviceLocationStatusClass = deviceLocationSupport?.available
@@ -454,57 +405,6 @@ export const ZoneConfigModal: React.FC<Props> = ({ isOpen, zone, onClose, onSave
               />
             </div>
             <p className="text-xs text-[var(--text-tertiary)] mt-1">Used for weather and VPD lookup. Save both coordinates together.</p>
-          </div>
-
-          <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)]/70 p-3">
-            <div className="flex items-center justify-between gap-3">
-              <div>
-                <p className="text-xs font-semibold text-[var(--text-tertiary)] uppercase tracking-wide">Gateway GPS</p>
-                <p className="text-sm text-[var(--text)]">
-                  {gatewayDeviceEui ? `Gateway ${gatewayDeviceEui}` : 'No linked gateway for this zone'}
-                </p>
-              </div>
-              <button
-                type="button"
-                onClick={() => gatewayDeviceEui && void loadGatewayLocation(gatewayDeviceEui)}
-                disabled={!gatewayDeviceEui || gatewayLocationLoading}
-                className="rounded-lg border border-[var(--border)] px-3 py-1.5 text-xs font-medium text-[var(--text)] disabled:opacity-50"
-              >
-                {gatewayLocationLoading ? 'Refreshing…' : 'Refresh'}
-              </button>
-            </div>
-
-            {gatewayDeviceEui && !gatewayLocationError && (
-              <div className="mt-3 space-y-2 text-sm text-[var(--text)]">
-                <div className="flex flex-wrap items-center gap-2">
-                  <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${gatewayStatusClass}`}>{gatewayStatusLabel}</span>
-                  <span className="text-[var(--text-tertiary)]">Last update {gatewayAgeLabel}</span>
-                </div>
-                <p>
-                  {gatewayLocation?.latitude != null && gatewayLocation.longitude != null
-                    ? `${gatewayLocation.latitude.toFixed(6)}, ${gatewayLocation.longitude.toFixed(6)}`
-                    : 'Gateway GPS has not produced a coordinate fix yet.'}
-                </p>
-                {gatewayLocation?.altitudeM != null && (
-                  <p className="text-xs text-[var(--text-tertiary)]">
-                    Altitude {gatewayLocation.altitudeM.toFixed(1)} m
-                    {gatewayLocation.accuracyM != null ? `, accuracy ~${gatewayLocation.accuracyM.toFixed(1)} m` : ''}
-                  </p>
-                )}
-                <button
-                  type="button"
-                  onClick={useGatewayLocation}
-                  disabled={gatewayLocation?.latitude == null || gatewayLocation.longitude == null}
-                  className="rounded-lg border border-[var(--accent)] px-3 py-1.5 text-xs font-semibold text-[var(--accent)] disabled:opacity-50"
-                >
-                  Use gateway location
-                </button>
-              </div>
-            )}
-
-            {gatewayLocationError && (
-              <p className="mt-3 text-xs text-[var(--text-tertiary)]">{gatewayLocationError}</p>
-            )}
           </div>
 
           <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)]/70 p-3">

@@ -84,15 +84,13 @@ fetch_required "Gateway identity helper" \
     "/usr/libexec/osi-gateway-identity.sh"
 chmod 755 /usr/libexec/osi-gateway-identity.sh
 
-fetch_required "Gateway GPS sidecar" \
-    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/bin/osi-gateway-gps.js" \
-    "/usr/bin/osi-gateway-gps.js"
-chmod 755 /usr/bin/osi-gateway-gps.js
-
-fetch_required "Gateway GPS init script" \
-    "conf/full_raspberrypi_bcm27xx_bcm2712/files/etc/init.d/osi-gateway-gps" \
-    "/etc/init.d/osi-gateway-gps"
-chmod 755 /etc/init.d/osi-gateway-gps
+echo "--- Remove legacy gateway GPS sidecar ---"
+if [ -x /etc/init.d/osi-gateway-gps ]; then
+    /etc/init.d/osi-gateway-gps stop || true
+    /etc/init.d/osi-gateway-gps disable || true
+fi
+rm -f /etc/init.d/osi-gateway-gps /usr/bin/osi-gateway-gps.js
+echo "OK"
 
 fetch_required "flows.json" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/flows.json" \
@@ -153,5 +151,4 @@ echo "=== Deploy complete. Next steps: ==="
 echo "  1. Restart Node-RED:         /etc/init.d/node-red restart"
 echo "  2. Run ChirpStack bootstrap: node /srv/node-red/chirpstack-bootstrap.js"
 echo "  3. Restart Node-RED again:   /etc/init.d/node-red restart"
-echo "  4. Restart gateway GPS:      /etc/init.d/osi-gateway-gps restart"
-echo "  5. Open the UI:              http://<device-ip>:1880/gui"
+echo "  4. Open the UI:              http://<device-ip>:1880/gui"

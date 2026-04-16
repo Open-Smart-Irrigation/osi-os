@@ -189,27 +189,6 @@ export interface IrrigationZone {
   varietyCompat?: string | null;
 }
 
-export type GatewayLocationStatus = 'live' | 'stale' | 'no_fix';
-
-export interface GatewayLocation {
-  gatewayDeviceEui: string;
-  latitude: number | null;
-  longitude: number | null;
-  altitudeM: number | null;
-  accuracyM: number | null;
-  hdop: number | null;
-  sats: number | null;
-  fixMode: number | null;
-  status: GatewayLocationStatus;
-  source: string | null;
-  nativeConcentratordStatus: string | null;
-  chirpstackMirrorStatus: string | null;
-  lastFixAt: string | null;
-  lastGoodFixAt: string | null;
-  syncVersion: number;
-  updatedAt: string | null;
-}
-
 export interface CreateZoneRequest {
   name: string;
 }
