@@ -49,6 +49,8 @@ db.exec(`
         user_id INTEGER NOT NULL,
         current_state TEXT CHECK(current_state IN ('OPEN', 'CLOSED')),
         target_state TEXT CHECK(target_state IN ('OPEN', 'CLOSED')),
+        soil_moisture_probe_depths_json TEXT,
+        soil_moisture_probe_depths_configured INTEGER NOT NULL DEFAULT 0,
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL,
         FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE

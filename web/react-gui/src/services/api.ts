@@ -117,6 +117,20 @@ function normaliseSchedule(sched: any): IrrigationSchedule {
 }
 
 function normaliseDevice(device: any): Device {
+  const rawDepths = device?.soil_moisture_probe_depths_json;
+  const soilMoistureProbeDepths = rawDepths && typeof rawDepths === 'object' && !Array.isArray(rawDepths)
+    ? Object.fromEntries(
+        Object.entries(rawDepths)
+          .map(([key, value]) => [String(key), Number(value)])
+          .filter(([, value]) => Number.isFinite(value) && value > 0)
+      )
+    : undefined;
+  const configuredFlag = device?.soil_moisture_probe_depths_configured;
+  const soilMoistureProbeDepthsConfigured = configuredFlag === true || configuredFlag === 1
+    ? true
+    : configuredFlag === false || configuredFlag === 0
+      ? false
+      : undefined;
   return {
     ...device,
     deveui: String(device?.deveui ?? '').trim().toUpperCase(),
@@ -125,6 +139,8 @@ function normaliseDevice(device: any): Device {
     irrigation_zone_id: device?.irrigation_zone_id ?? null,
     zone_ids: Array.isArray(device?.zone_ids) ? device.zone_ids : null,
     zone_names: Array.isArray(device?.zone_names) ? device.zone_names : null,
+    soilMoistureProbeDepths,
+    soilMoistureProbeDepthsConfigured,
   };
 }
 
@@ -317,6 +333,18 @@ export const kiwiAPI = {
   },
   enableTemperatureHumidity: async (deveui: string, minutes: number): Promise<void> => {
     await api.post(`/api/devices/${deveui}/kiwi/temperature-humidity/enable`, { minutes });
+  },
+};
+
+export const deviceMetadataAPI = {
+  setSoilMoistureDepths: async (
+    deveui: string,
+    soilMoistureProbeDepths: Record<string, number>
+  ): Promise<Device> => {
+    const response = await api.put<Device>(`/api/devices/${deveui}/soil-moisture-depths`, {
+      soilMoistureProbeDepths,
+    });
+    return normaliseDevice(response.data);
   },
 };
 

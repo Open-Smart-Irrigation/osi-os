@@ -1,6 +1,6 @@
-import React, { useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import type { Device } from '../../types/farming';
-import { devicesAPI, kiwiAPI } from '../../services/api';
+import { deviceMetadataAPI, devicesAPI, kiwiAPI } from '../../services/api';
 import { useDismissOnPointerDown } from '../../hooks/useDismissOnPointerDown';
 import { useTranslation } from 'react-i18next';
 import { SensorMonitor } from './SensorMonitor';
@@ -29,6 +29,22 @@ const SENSORS: SensorDef[] = [
 
 const SENSOR_BY_FIELD = Object.fromEntries(SENSORS.map(s => [s.field, s]));
 const MAX_KIWI_INTERVAL_MINUTES = 1440;
+const MAX_KIWI_SENSOR_DEPTH_CM = 1000;
+
+function formatDepthInput(depthCm?: number | null): string {
+  return depthCm != null && Number.isFinite(depthCm) && depthCm > 0 ? String(depthCm) : '';
+}
+
+function probeDepth(device: Device, channelKey: string): number | null {
+  const raw = device.soilMoistureProbeDepths?.[channelKey]
+    ?? device.soil_moisture_probe_depths_json?.[channelKey];
+  return raw != null && Number.isFinite(Number(raw)) && Number(raw) > 0 ? Number(raw) : null;
+}
+
+function sensorLabel(device: Device, channelKey: 'swt_wm1' | 'swt_wm2', fallback: string): string {
+  const depthCm = probeDepth(device, channelKey);
+  return depthCm != null ? `${fallback} (${depthCm} cm)` : fallback;
+}
 
 const ConfigPanel: React.FC<{
   device: Device;
@@ -37,12 +53,19 @@ const ConfigPanel: React.FC<{
 }> = ({ device, onUpdate, onClose }) => {
   const { t } = useTranslation('devices');
   const ref = useRef<HTMLDivElement>(null);
-  const [busy, setBusy] = useState<'interval' | 'enable' | null>(null);
+  const [busy, setBusy] = useState<'interval' | 'enable' | 'depths' | null>(null);
   const [intervalMinutesInput, setIntervalMinutesInput] = useState('');
+  const [swtDepth1Input, setSwtDepth1Input] = useState(formatDepthInput(probeDepth(device, 'swt_wm1')));
+  const [swtDepth2Input, setSwtDepth2Input] = useState(formatDepthInput(probeDepth(device, 'swt_wm2')));
   const [error, setError] = useState<string | null>(null);
   const [info, setInfo] = useState<string | null>(null);
 
   useDismissOnPointerDown(ref, onClose);
+
+  useEffect(() => {
+    setSwtDepth1Input(formatDepthInput(probeDepth(device, 'swt_wm1')));
+    setSwtDepth2Input(formatDepthInput(probeDepth(device, 'swt_wm2')));
+  }, [device]);
 
   const parseMinutes = (): number | null => {
     if (!intervalMinutesInput.trim()) return null;
@@ -96,6 +119,54 @@ const ConfigPanel: React.FC<{
       onUpdate?.();
     } catch (err: any) {
       setError(err.response?.data?.message || t('kiwiSensor.failedToEnableTempHumidity'));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const parseDepth = (value: string): number | null | 'invalid' => {
+    if (!value.trim()) return null;
+    const depthCm = Number(value);
+    if (!Number.isInteger(depthCm) || depthCm < 0 || depthCm > MAX_KIWI_SENSOR_DEPTH_CM) {
+      return 'invalid';
+    }
+    return depthCm === 0 ? null : depthCm;
+  };
+
+  const saveSensorDepths = async () => {
+    const swtDepth1Cm = parseDepth(swtDepth1Input);
+    const swtDepth2Cm = parseDepth(swtDepth2Input);
+    if (swtDepth1Cm === 'invalid' || swtDepth2Cm === 'invalid') {
+      setError(t('kiwiSensor.invalidDepth', {
+        defaultValue: 'Enter 0 or a whole number of centimeters between 1 and 1000.',
+      }));
+      setInfo(null);
+      return;
+    }
+
+    const soilMoistureProbeDepths: Record<string, number> = {};
+    if (swtDepth1Cm != null) {
+      soilMoistureProbeDepths.swt_wm1 = swtDepth1Cm;
+    }
+    if (swtDepth2Cm != null) {
+      soilMoistureProbeDepths.swt_wm2 = swtDepth2Cm;
+    }
+
+    setBusy('depths');
+    setError(null);
+    setInfo(null);
+    try {
+      const updated = await deviceMetadataAPI.setSoilMoistureDepths(device.deveui, soilMoistureProbeDepths);
+      setSwtDepth1Input(formatDepthInput(probeDepth(updated, 'swt_wm1')));
+      setSwtDepth2Input(formatDepthInput(probeDepth(updated, 'swt_wm2')));
+      setInfo(t('kiwiSensor.depthSaved', {
+        defaultValue: 'Soil moisture channel depths saved. Leave blank or enter 0 to mark a channel as not connected.',
+      }));
+      onUpdate?.();
+    } catch (err: any) {
+      setError(err.response?.data?.message || t('kiwiSensor.failedToSaveDepth', {
+        defaultValue: 'Failed to save soil moisture sensor depths.',
+      }));
     } finally {
       setBusy(null);
     }
@@ -155,6 +226,70 @@ const ConfigPanel: React.FC<{
           className="mt-3 w-full rounded-lg bg-[var(--secondary-bg)] px-3 py-2 text-sm font-semibold text-[var(--text)] transition-colors hover:bg-[var(--border)] disabled:cursor-not-allowed disabled:opacity-60"
         >
           {busy === 'enable' ? t('kiwiSensor.enablingTempHumidity') : t('kiwiSensor.enableTempHumidity')}
+        </button>
+      </div>
+      <div className="mt-3 pt-3 border-t border-[var(--border)] px-1">
+        <p className="text-[var(--text-secondary)] text-xs font-semibold mb-1">
+          {t('kiwiSensor.depthTitle', { defaultValue: 'SOIL MOISTURE SENSOR DEPTHS' })}
+        </p>
+        <p className="text-[var(--text-tertiary)] text-xs">
+          {t('kiwiSensor.depthNote', {
+            defaultValue: 'Enter installed depths in cm. Leave blank or enter 0 when a probe is not connected.',
+          })}
+        </p>
+        <div className="mt-3 grid grid-cols-2 gap-2">
+          <div>
+            <label
+              className="block text-[var(--text-secondary)] text-xs font-semibold mb-1"
+              htmlFor={`kiwi-swt-depth-1-${device.deveui}`}
+            >
+              {t('kiwiSensor.depth1Label', { defaultValue: 'SWT 1 depth (cm)' })}
+            </label>
+            <input
+              id={`kiwi-swt-depth-1-${device.deveui}`}
+              type="number"
+              min={0}
+              max={MAX_KIWI_SENSOR_DEPTH_CM}
+              step={1}
+              inputMode="numeric"
+              value={swtDepth1Input}
+              disabled={busy !== null}
+              onChange={(event) => setSwtDepth1Input(event.target.value)}
+              placeholder={t('kiwiSensor.depthPlaceholder', { defaultValue: '0 = off' })}
+              className="w-full rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-sm text-[var(--text)]"
+            />
+          </div>
+          <div>
+            <label
+              className="block text-[var(--text-secondary)] text-xs font-semibold mb-1"
+              htmlFor={`kiwi-swt-depth-2-${device.deveui}`}
+            >
+              {t('kiwiSensor.depth2Label', { defaultValue: 'SWT 2 depth (cm)' })}
+            </label>
+            <input
+              id={`kiwi-swt-depth-2-${device.deveui}`}
+              type="number"
+              min={0}
+              max={MAX_KIWI_SENSOR_DEPTH_CM}
+              step={1}
+              inputMode="numeric"
+              value={swtDepth2Input}
+              disabled={busy !== null}
+              onChange={(event) => setSwtDepth2Input(event.target.value)}
+              placeholder={t('kiwiSensor.depthPlaceholder', { defaultValue: '0 = off' })}
+              className="w-full rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-sm text-[var(--text)]"
+            />
+          </div>
+        </div>
+        <button
+          type="button"
+          onClick={saveSensorDepths}
+          disabled={busy !== null}
+          className="mt-3 w-full rounded-lg bg-[var(--secondary-bg)] px-3 py-2 text-sm font-semibold text-[var(--text)] transition-colors hover:bg-[var(--border)] disabled:cursor-not-allowed disabled:opacity-60"
+        >
+          {busy === 'depths'
+            ? t('kiwiSensor.savingDepths', { defaultValue: 'Saving depths...' })
+            : t('kiwiSensor.saveDepths', { defaultValue: 'Save sensor depths' })}
         </button>
       </div>
       {info && <p className="text-[var(--text-tertiary)] text-xs mt-3 px-1">{info}</p>}
@@ -285,7 +420,7 @@ export const KiwiSensorCard: React.FC<KiwiSensorCardProps> = ({ device, onRemove
       <div className="grid grid-cols-1 gap-3">
         <div className="bg-[var(--card)] rounded-lg p-3">
           <p className="text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)] mb-1">
-            {t('kiwiSensor.soilWaterTension1')}
+            {sensorLabel(device, 'swt_wm1', t('kiwiSensor.soilWaterTension1'))}
           </p>
           {renderValue('swt_wm1', swt_wm1 !== undefined ? `${swt_wm1.toFixed(1)} kPa` : null)}
         </div>
@@ -293,7 +428,7 @@ export const KiwiSensorCard: React.FC<KiwiSensorCardProps> = ({ device, onRemove
         {swt_wm2 !== undefined && (
           <div className="bg-[var(--card)] rounded-lg p-3">
             <p className="text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)] mb-1">
-              {t('kiwiSensor.soilWaterTension2')}
+              {sensorLabel(device, 'swt_wm2', t('kiwiSensor.soilWaterTension2'))}
             </p>
             {renderValue('swt_wm2', `${swt_wm2.toFixed(1)} kPa`)}
           </div>

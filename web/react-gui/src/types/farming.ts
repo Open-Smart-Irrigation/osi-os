@@ -8,6 +8,10 @@ export interface Device {
   name: string;         // User-given name (e.g., "North Field")
   type_id: DeviceType;
   last_seen?: string | null;    // ISO Date string
+  soilMoistureProbeDepths?: Record<string, number>;
+  soilMoistureProbeDepthsConfigured?: boolean;
+  soil_moisture_probe_depths_json?: Record<string, number> | null;
+  soil_moisture_probe_depths_configured?: number | boolean | null;
 
   // Specific data payload matching Node-RED output
   latest_data: {
