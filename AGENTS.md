@@ -2,7 +2,7 @@
 
 ## Scope
 
-This document reflects the current implementation state on `main` branch. It covers the communication architecture between osi-os (edge) and osi-server (cloud), security hardening, dendrometer logic, and bidirectional sync.
+This document reflects the current implementation state in the active working branches. It covers the communication architecture between osi-os (edge) and osi-server (cloud), security hardening, dendrometer logic, bidirectional sync, and the current Terra Intelligence standalone integration.
 
 Working context for:
 
@@ -20,9 +20,9 @@ Architectural rule:
 ## Current Branches
 
 - `osi-os`: `main`
-- `osi-server`: `main`
+- `osi-server`: `test/prediction-phase1-phase2-implementation` (active prediction-engine implementation branch)
 
-> Note: The `dendrov2` branch was merged into `main`.
+> Note: the current live server and Pi rollout were deployed from local `overhaul` snapshots before merge; current prediction-engine work is continuing on the dedicated `osi-server` test branch.
 
 ---
 
@@ -138,6 +138,11 @@ This file contains:
 - [AuthController.java](/home/phil/Repos/osi-server/backend/src/main/java/org/osi/server/user/AuthController.java)
 - [JwtTokenProvider.java](/home/phil/Repos/osi-server/backend/src/main/java/org/osi/server/security/JwtTokenProvider.java)
 - [DendroAnalyticsService.java](/home/phil/Repos/osi-server/backend/src/main/java/org/osi/server/analytics/DendroAnalyticsService.java)
+- [PredictionController.java](/home/phil/Repos/osi-server/backend/src/main/java/org/osi/server/prediction/PredictionController.java)
+- [ZoneFieldGeometryService.java](/home/phil/Repos/osi-server/backend/src/main/java/org/osi/server/zone/ZoneFieldGeometryService.java)
+- [PredictionFieldStateService.java](/home/phil/Repos/osi-server/backend/src/main/java/org/osi/server/prediction/PredictionFieldStateService.java)
+- [PredictionCard.tsx](/home/phil/Repos/osi-server/frontend/src/components/farming/prediction/PredictionCard.tsx)
+- [prediction_animation_v2](/home/phil/Repos/osi-server/prediction_animation_v2)
 
 ---
 
@@ -162,6 +167,9 @@ This file contains:
 - `GET /api/v1/sync/gateways/{gatewayEui}/pending-commands`
 - `GET /api/v1/sync/gateways/{gatewayEui}/status`
 - `GET /api/v1/sync/gateways/{gatewayEui}/reconciliation`
+- `GET /api/v1/irrigation-zones/{zoneId}/field-geometry`
+- `PUT /api/v1/irrigation-zones/{zoneId}/field-geometry`
+- `GET /api/v1/irrigation-zones/{zoneId}/prediction-field-state`
 
 ---
 
@@ -211,6 +219,15 @@ cd /home/phil/Repos/osi-server/backend
 ./gradlew test --tests org.osi.server.sync.EdgeSyncServiceDataPlaneTest
 ./gradlew test --tests org.osi.server.sync.EdgeSyncServiceStatusTest
 ./gradlew test --tests org.osi.server.sync.EdgeSyncControllerTest
+./gradlew test --tests org.osi.server.zone.ZoneFieldGeometryServiceTest
+./gradlew test --tests org.osi.server.prediction.PredictionFieldStateServiceTest
+```
+
+Terra frontend build:
+
+```bash
+cd /home/phil/Repos/osi-server/prediction_animation_v2
+npm run build
 ```
 
 ---
@@ -224,6 +241,9 @@ cd /home/phil/Repos/osi-server/backend
 - For synced farms, mirrored edge outputs are the canonical user-facing state.
 - **All cloud→edge commands flow via REST polling** (`pending-commands` endpoint), not MQTT subscription.
 - MQTT is used for **telemetry only** (edge → cloud) plus heartbeats and ACKs.
+- Terra Intelligence lives in `osi-server/prediction_animation_v2` and is served by the backend at `/terra-intelligence`.
+- Direct access to `/terra-intelligence` should open demo mode; OSI Cloud launches live mode with a zone-scoped `?zoneId=<id>` link from the prediction advisory card.
+- When wiring Spring SPA forwarding for Terra, prefer explicit `/terra-intelligence` entry mappings; broad `**/{path:...}` patterns can fail startup under Spring's `PathPatternParser`.
 
 ### Live Deploy Database Safety
 
@@ -233,6 +253,8 @@ cd /home/phil/Repos/osi-server/backend
 - Before any manual DB repair or destructive cloud cleanup, take a timestamped backup of the Pi DB, including `farming.db-wal`, `farming.db-shm`, and `farming.db-journal` when present.
 - If a deploy needs schema changes, use migrations or idempotent SQL against the existing DB instead of replacing the file.
 - If `/data/db/farming.db` is missing but SQLite sidecar files exist, stop and inspect/recover rather than seeding a new DB.
+- Before a live VPS rollout, create a timestamped backup under `/home/rocky/backups/osi-server-<timestamp>` with the repo snapshot, Docker env/config, PostgreSQL dump, Mosquitto state, and OpenAgri data.
+- Before a risky Pi rollout or manual repair, create a timestamped backup under `/data/db/backups/osi-os-<timestamp>` including `/data/db/`, `/srv/node-red/`, `/usr/lib/node-red/gui/`, `/etc/init.d/node-red`, `flows.json`, and `settings.js`.
 
 ---
 
