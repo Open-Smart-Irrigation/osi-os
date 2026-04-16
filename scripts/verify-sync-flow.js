@@ -54,6 +54,7 @@ const requiredHttpRoutes = [
 
 const requiredFunctionNodes = [
   'Validate & decode token',
+  'Build server auth request',
   'Handle server auth response',
   'Finalize linked account state',
   'Persist MQTT Broker Config',
@@ -104,6 +105,8 @@ const requiredFunctionNodes = [
   'Auth + Parse STREGA Flushing',
   'Authorize + Fanout STREGA Advanced',
   'Format STREGA Advanced Response',
+  'CS Register (cloud cmd)',
+  'Build Special Command ACK',
   'Build LSN50 mode downlink',
   'Process S2120',
   'Aggregate Zone Rain',
@@ -322,11 +325,18 @@ expectIncludes('Handle server auth response', 'const mqttPassword = String(data.
 expectIncludes('Handle server auth response', "flow.set('al_mqtt_password', mqttPassword);", 'stores MQTT password from local-sync');
 expectIncludes('Handle server auth response', "flow.set('al_mqtt_broker_url', mqttBrokerUrl);", 'stores MQTT broker URL from local-sync');
 expectExcludes('Handle server auth response', 'UPDATE users SET server_username', 'direct linked-account DB mutation');
-expectIncludes('Build server auth request', 'deviceEuis }', 'sends local device claims in the authenticated local-sync request');
+expectIncludes('Build server auth request', 'deviceEuis,', 'sends local device claims in the authenticated local-sync request');
 expectIncludes('Build server auth request', "new osiDb.Database('/data/db/farming.db')", 'loads local device claims before cloud linking');
 expectIncludes('Build server auth request', 'Gateway identity is not configured yet', 'fails locally when no canonical gateway EUI is available');
 expectIncludes('Build server auth request', 'Gateway identity is not ready yet. Wait for ChirpStack gateway detection before linking.', 'fails linking while gateway identity remains provisional');
+expectIncludes('Build server auth request', 'localUserUuid', 'sends the local user UUID for linked-auth targeting');
+expectIncludes('Build server auth request', 'localUsernameSnapshot', 'sends the local username snapshot for linked-auth targeting');
+expectIncludes('Build server auth request', 'edgeBuildVersion', 'sends the edge build version during local-sync');
+expectIncludes('Build server auth request', 'syncCapabilities', 'advertises linked-auth sync capabilities during local-sync');
+expectIncludes('Build server auth request', 'linked_auth_sync_v1', 'advertises the linked-auth sync capability');
+expectIncludes('Build server auth request', 'force_edge_sync_v1', 'advertises the force-edge-sync capability');
 expectIncludes('Handle server auth response', "const claimed = Array.isArray(data.claimed)", 'accepts claimed device results directly from local-sync');
+expectIncludes('Handle server auth response', 'offlineVerifierVersion', 'requires and stores the offline verifier version from local-sync');
 expectIncludes('Build Sync State', 'lastMirroredEventAt', 'returns the last mirrored sync event timestamp');
 expectIncludes('Build Sync State', 'dbHealth: {', 'returns a DB health block in sync state');
 expectIncludes('Build Sync State', "journalMode: helperHealth.journalMode || null", 'returns SQLite journal mode in sync state');
@@ -334,6 +344,8 @@ expectIncludes('Build Sync State', "quickCheck: quickCheck.status", 'returns qui
 expectIncludes('Build Sync State', "lastError: helperHealth.lastError || null", 'returns helper DB errors in sync state');
 expectIncludes('Finalize linked account state', 'UPDATE users SET server_username = ?', 'commits linked-account DB state only after MQTT persistence');
 expectIncludes('Finalize linked account state', "auth_mode = ?", 'finalizes linked auth mode explicitly');
+expectIncludes('Finalize linked account state', 'server_offline_verifier_version = ?', 'persists the synced offline verifier version locally');
+expectIncludes('Finalize linked account state', 'last_auth_sync_status = ?', 'marks linked auth as up to date after local-sync finalization');
 expectIncludes('Finalize linked account state', 'return [null, msg];', 'can stop before reporting link success');
 expectIncludes('Set Download Headers', 'Database download is disabled', 'keeps database download disabled');
 expectIncludes('Lookup Auth User', 'ORDER BY CASE WHEN username = ?', 'prefers local username matches');
@@ -347,12 +359,25 @@ expectExcludes('Process Result', "chirpstack-concentratord.@sx1302[0].gateway_id
 expectExcludes('Process Result', "uci -q get osi-server.cloud.device_eui 2>/dev/null || true", 'ad hoc UCI gateway probing during linked login');
 expectExcludes('Process Result', "/sys/class/net/eth0/address", 'ad hoc MAC-derived gateway probing during linked login');
 expectIncludes('Route Command', "device: { devEui: String(cmd.deviceEui || cmd.devEui || '').trim().toUpperCase() }", 'routes valve commands from either deviceEui or devEui');
+expectIncludes('Route Command', "commandType === 'SYNC_LINKED_AUTH'", 'routes linked-auth sync commands through the special command handler');
+expectIncludes('Route Command', "commandType === 'FORCE_EDGE_SYNC'", 'routes force-edge-sync commands through the special command handler');
 expectIncludes('CS Register Device', 'chirpstack.createProvisioningClientFromEnv(env)', 'uses shared ChirpStack provisioning helper');
 expectIncludes('CS Register Device', 'ensureDeviceProvisioned', 'provisions devices through gRPC helper');
 expectExcludes('CS Register Device', '/api/devices', 'legacy ChirpStack REST device endpoint');
 expectIncludes('CS Register (cloud cmd)', 'chirpstack.createProvisioningClientFromEnv(env)', 'uses shared ChirpStack provisioning helper');
 expectIncludes('CS Register (cloud cmd)', 'ensureDeviceProvisioned', 'provisions cloud-triggered devices through gRPC helper');
 expectExcludes('CS Register (cloud cmd)', '/api/devices', 'legacy ChirpStack REST device endpoint');
+expectIncludes('CS Register (cloud cmd)', "commandType === 'SYNC_LINKED_AUTH'", 'handles linked-auth sync commands');
+expectIncludes('CS Register (cloud cmd)', "commandType === 'FORCE_EDGE_SYNC'", 'handles force-edge-sync commands');
+expectIncludes('CS Register (cloud cmd)', 'localUserUuid', 'targets linked-auth sync by local user UUID first');
+expectIncludes('CS Register (cloud cmd)', 'STALE_IGNORED', 'acknowledges stale linked-auth versions without downgrading local auth');
+expectIncludes('CS Register (cloud cmd)', 'ALREADY_APPLIED', 'treats duplicate linked-auth commands as idempotent');
+expectIncludes('CS Register (cloud cmd)', 'server_offline_verifier_version', 'stores the linked-auth verifier version locally');
+expectIncludes('CS Register (cloud cmd)', 'last_auth_sync_status', 'tracks linked-auth apply status locally');
+expectIncludes('CS Register (cloud cmd)', 'forceSyncQueued', 'reports queued force-sync requests in the special-command ACK state');
+expectIncludes('Build Special Command ACK', 'msg.specialAck', 'formats special command acknowledgments from structured state');
+expectIncludes('Build Special Command ACK', 'authSyncOutcome', 'includes linked-auth apply outcomes in the ACK payload');
+expectIncludes('Build Special Command ACK', 'forceSyncQueued', 'includes force-sync queue state in the ACK payload');
 expectIncludes('Sync Init Schema + Triggers', 'AFTER INSERT ON dendrometer_daily', 'emits dendro daily outbox rows from dendrometer_daily');
 expectIncludes('Sync Init Schema + Triggers', 'AFTER UPDATE ON dendrometer_daily', 'updates dendro daily outbox rows from dendrometer_daily');
 expectIncludes('Sync Init Schema + Triggers', 'COALESCE(server_username, username)', 'emits linked cloud usernames in device outbox events');
@@ -364,6 +389,11 @@ expectIncludes('Sync Init Schema + Triggers', 'GATEWAY_LOCATION_UPSERTED', 'emit
 expectIncludes('Sync Init Schema + Triggers', 'ALTER TABLE irrigation_zones ADD COLUMN area_m2 REAL', 'adds shared zone area config');
 expectIncludes('Sync Init Schema + Triggers', 'ALTER TABLE irrigation_zones ADD COLUMN irrigation_efficiency_pct REAL', 'adds shared irrigation efficiency config');
 expectIncludes('Sync Init Schema + Triggers', 'ALTER TABLE irrigation_zones ADD COLUMN prediction_card_enabled INTEGER DEFAULT 0', 'adds the synced prediction-card flag to zones');
+expectIncludes('Sync Init Schema + Triggers', 'ALTER TABLE users ADD COLUMN server_offline_verifier_version INTEGER DEFAULT 0', 'adds the linked-auth verifier version column to users');
+expectIncludes('Sync Init Schema + Triggers', 'ALTER TABLE users ADD COLUMN last_auth_sync_at TEXT', 'adds the linked-auth last-sync timestamp column to users');
+expectIncludes('Sync Init Schema + Triggers', 'ALTER TABLE users ADD COLUMN last_auth_sync_status TEXT', 'adds the linked-auth status column to users');
+expectIncludes('Sync Init Schema + Triggers', 'ALTER TABLE users ADD COLUMN last_auth_sync_error TEXT', 'adds the linked-auth error column to users');
+expectIncludes('Sync Init Schema + Triggers', "UPDATE users SET last_auth_sync_status = 'up_to_date'", 'backfills linked server users with an up-to-date auth status');
 expectIncludes('Sync Init Schema + Triggers', 'ALTER TABLE device_data ADD COLUMN rain_mm_per_10min REAL', 'adds normalized rain telemetry storage');
 expectIncludes('Sync Init Schema + Triggers', 'ALTER TABLE device_data ADD COLUMN flow_liters_per_10min REAL', 'adds normalized flow telemetry storage');
 expectIncludes('Sync Init Schema + Triggers', "'area_m2', NEW.area_m2", 'mirrors zone area changes into zone sync events');
@@ -475,8 +505,11 @@ expectIncludes('Run Force Sync', 'LEFT JOIN devices d ON d.deveui = dr.deveui AN
 expectIncludes('Run Force Sync', 'LEFT JOIN irrigation_zones iz ON iz.id = d.irrigation_zone_id AND iz.deleted_at IS NULL', 'ignores deleted zones when exporting force-sync history');
 expectIncludes('Run Force Sync', "(bootstrapRes.payload || {}).detail || 'Bootstrap sync failed'", 'preserves server ProblemDetail details in force-sync bootstrap errors');
 expectIncludes('Run Force Sync', "pendingCommands: { attempted: false, succeeded: true, fetchedCount: 0, queuedCount: 0, appliesAfterResponse: false, applyPhase: 'NO_PENDING_COMMANDS'", 'initializes pending-command apply semantics in force-sync summary');
-expectIncludes('Run Force Sync', 'summary.pendingCommands.appliesAfterResponse = pendingRes.payload.length > 0;', 'marks force-sync pending commands as applying after the HTTP response');
-expectIncludes('Run Force Sync', "summary.pendingCommands.applyPhase = pendingRes.payload.length > 0 ? 'QUEUED_LOCAL_APPLY' : 'NO_PENDING_COMMANDS';", 'reports force-sync pending-command apply phase explicitly');
+expectIncludes('Run Force Sync', 'summary.pendingCommands.appliesAfterResponse = queueablePendingCommands.length > 0;', 'marks force-sync pending commands as applying after the HTTP response');
+expectIncludes('Run Force Sync', "summary.pendingCommands.applyPhase = queueablePendingCommands.length > 0 ? 'QUEUED_LOCAL_APPLY' : 'NO_PENDING_COMMANDS';", 'reports force-sync pending-command apply phase explicitly');
+expectIncludes('Run Force Sync', 'msg._forceSyncInternal', 'supports internally queued force-sync sweeps from cloud commands');
+expectIncludes('Run Force Sync', 'queueablePendingCommands', 'filters pending commands before queueing them locally');
+expectIncludes('Run Force Sync', "commandType || '').trim().toUpperCase() !== 'FORCE_EDGE_SYNC'", 'prevents force-edge-sync commands from recursing through pending-command replay');
 expectIncludes('Daily Dendrometer Analytics', 'const recoveryThreshold=(calibration.thresholds.mild||CALIBRATIONS.default.thresholds.mild)*(phenoMod>0?phenoMod:1.0);', 'uses calibration-aware recovery threshold');
 expectIncludes('Daily Dendrometer Analytics', 't.twd_night_um<recoveryThreshold', 'uses absolute night TWD in recovery verification');
 expectIncludes('Daily Dendrometer Analytics', "date>=date('${ANALYTICS_DATE}','-3 days')", 'uses the exact previous-three-day recovery window');
