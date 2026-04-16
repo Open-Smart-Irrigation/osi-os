@@ -363,6 +363,15 @@ expectIncludes('Sync Init Schema + Triggers', "'area_m2', NEW.area_m2", 'mirrors
 expectIncludes('Sync Init Schema + Triggers', "'irrigation_efficiency_pct', NEW.irrigation_efficiency_pct", 'mirrors irrigation efficiency changes into zone sync events');
 expectIncludes('Sync Init Schema + Triggers', "'rain_mm_per_10min', NEW.rain_mm_per_10min", 'mirrors normalized rain telemetry into device-data sync events');
 expectIncludes('Sync Init Schema + Triggers', "'flow_liters_per_10min', NEW.flow_liters_per_10min", 'mirrors normalized flow telemetry into device-data sync events');
+expectIncludes('Sync Init Schema + Triggers', 'SELECT name FROM devices WHERE deveui = NEW.deveui AND deleted_at IS NULL', 'ignores deleted devices when mirroring device-data names into the outbox');
+expectIncludes('Sync Init Schema + Triggers', 'SELECT type_id FROM devices WHERE deveui = NEW.deveui AND deleted_at IS NULL', 'ignores deleted devices when mirroring device-data types into the outbox');
+expectIncludes('Sync Init Schema + Triggers', 'SELECT irrigation_zone_id FROM devices WHERE deveui = NEW.deveui AND deleted_at IS NULL', 'ignores deleted devices when mirroring device-data zone bindings into the outbox');
+expectIncludes('Sync Init Schema + Triggers', 'SELECT gateway_device_eui FROM devices WHERE deveui = NEW.deveui AND deleted_at IS NULL', 'ignores deleted devices when mirroring device-data gateway bindings into the outbox');
+expectIncludes('Sync Init Schema + Triggers', 'SELECT zone_uuid FROM irrigation_zones WHERE id = NEW.zone_id AND deleted_at IS NULL', 'ignores deleted zones when mirroring zone environment rows into the outbox');
+expectIncludes('Sync Init Schema + Triggers', 'SELECT gateway_device_eui FROM irrigation_zones WHERE id = NEW.zone_id AND deleted_at IS NULL', 'ignores deleted zones when mirroring zone environment gateway bindings into the outbox');
+expectIncludes('Sync Init Schema + Triggers', 'SELECT zone_uuid FROM irrigation_zones WHERE id = NEW.irrigation_zone_id AND deleted_at IS NULL', 'ignores deleted zones when mirroring irrigation events into the outbox');
+expectIncludes('Sync Init Schema + Triggers', 'SELECT gateway_device_eui FROM irrigation_zones WHERE id = NEW.irrigation_zone_id AND deleted_at IS NULL', 'ignores deleted zones when mirroring irrigation event gateway bindings into the outbox');
+expectExcludes('Sync Init Schema + Triggers', '\\" + gateway + \\"', 'malformed literal gateway fallback SQL in sync triggers');
 expectIncludes('Build Cloud Bootstrap', 'COALESCE(u.server_username, u.username) AS claimed_by_username', 'uses linked cloud usernames in bootstrap device snapshots');
 expectIncludes('Build Cloud Bootstrap', 'COALESCE(u.server_username, u.username) AS username', 'uses linked cloud usernames in bootstrap zone snapshots');
 expectIncludes('Build Cloud Bootstrap', 'd.strega_model', 'includes STREGA model metadata in bootstrap device snapshots');
@@ -394,6 +403,9 @@ expectIncludes('Build Cloud Bootstrap', 'function normalizeIsoTimestamp(value)',
 expectIncludes('Build Cloud Bootstrap', 'deleted_at: normalizeIsoTimestamp(z.deleted_at)', 'normalizes zone tombstone timestamps before bootstrap sync');
 expectIncludes('Build Cloud Bootstrap', 'devices: devices.map(sanitizeSyncRow)', 'normalizes device tombstone timestamps before bootstrap sync');
 expectIncludes('Build Cloud Bootstrap', 'schedules: schedules.map(sanitizeSyncRow)', 'normalizes schedule timestamps before bootstrap sync');
+expectIncludes('Build Cloud Bootstrap', 'LEFT JOIN devices d ON d.deveui = dd.deveui AND d.deleted_at IS NULL', 'ignores deleted devices when exporting bootstrap sensor history');
+expectIncludes('Build Cloud Bootstrap', 'LEFT JOIN devices d ON d.deveui = dr.deveui AND d.deleted_at IS NULL', 'ignores deleted devices when exporting bootstrap dendro history');
+expectIncludes('Build Cloud Bootstrap', 'LEFT JOIN irrigation_zones iz ON iz.id = d.irrigation_zone_id AND iz.deleted_at IS NULL', 'ignores deleted zones when exporting bootstrap history');
 expectIncludes('Mark Bootstrap Synced', "(msg.payload || {}).detail || 'Bootstrap sync failed'", 'preserves server ProblemDetail details for bootstrap errors');
 expectWireById('al-link-handle-auth', 'al-link-store-mqtt', 'persists MQTT credentials after successful account linking');
 expectWireById('al-link-store-mqtt', 'al-link-finalize', 'finalizes linked-account state only after MQTT config persistence');
@@ -434,6 +446,9 @@ expectIncludes('Run Force Sync', 'function normalizeIsoTimestamp(value)', 'norma
 expectIncludes('Run Force Sync', 'deleted_at: normalizeIsoTimestamp(z.deleted_at)', 'normalizes zone tombstone timestamps before forced bootstrap sync');
 expectIncludes('Run Force Sync', 'devices: devices.map(sanitizeSyncRow)', 'normalizes device tombstone timestamps before forced bootstrap sync');
 expectIncludes('Run Force Sync', 'schedules: schedules.map(sanitizeSyncRow)', 'normalizes schedule timestamps before forced bootstrap sync');
+expectIncludes('Run Force Sync', 'LEFT JOIN devices d ON d.deveui = dd.deveui AND d.deleted_at IS NULL', 'ignores deleted devices when exporting force-sync sensor history');
+expectIncludes('Run Force Sync', 'LEFT JOIN devices d ON d.deveui = dr.deveui AND d.deleted_at IS NULL', 'ignores deleted devices when exporting force-sync dendro history');
+expectIncludes('Run Force Sync', 'LEFT JOIN irrigation_zones iz ON iz.id = d.irrigation_zone_id AND iz.deleted_at IS NULL', 'ignores deleted zones when exporting force-sync history');
 expectIncludes('Run Force Sync', "(bootstrapRes.payload || {}).detail || 'Bootstrap sync failed'", 'preserves server ProblemDetail details in force-sync bootstrap errors');
 expectIncludes('Daily Dendrometer Analytics', 'const recoveryThreshold=(calibration.thresholds.mild||CALIBRATIONS.default.thresholds.mild)*(phenoMod>0?phenoMod:1.0);', 'uses calibration-aware recovery threshold');
 expectIncludes('Daily Dendrometer Analytics', 't.twd_night_um<recoveryThreshold', 'uses absolute night TWD in recovery verification');
