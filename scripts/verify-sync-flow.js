@@ -755,6 +755,7 @@ expectFileIncludes('osi-gateway-identity.sh', gatewayIdentityHelperScript, 'gate
 expectFileIncludes('osi-gateway-identity.sh', gatewayIdentityHelperScript, 'GATEWAY_IDENTITY_DEVICE_EUI_CONFIDENCE="authoritative"', 'marks live ChirpStack-derived gateway identities as authoritative');
 expectFileIncludes('osi-gateway-identity.sh', gatewayIdentityHelperScript, 'GATEWAY_IDENTITY_DEVICE_EUI_CONFIDENCE="persisted"', 'marks previously verified gateway identities as persisted');
 expectFileIncludes('osi-gateway-identity.sh', gatewayIdentityHelperScript, 'GATEWAY_IDENTITY_DEVICE_EUI_CONFIDENCE="provisional"', 'marks MAC-derived gateway identities as provisional');
+expectFileIncludes('osi-gateway-identity.sh', gatewayIdentityHelperScript, "tr 'abcdef' 'ABCDEF'", 'uses an explicit hex-only uppercase conversion that works on BusyBox');
 expectFileIncludes('osi-gateway-identity.sh', gatewayIdentityHelperScript, '/bin/sh -c', 'runs gateway detection in a non-login shell so banner output cannot poison detection');
 expectFileIncludes('osi-gateway-identity.sh', gatewayIdentityHelperScript, 'sh /usr/bin/gateway-id.sh', 'prefers runtime concentratord gateway identity when available');
 expectFileIncludes('osi-gateway-identity.sh', gatewayIdentityHelperScript, 'gateway_identity_matches_local_mac_fallback', 'downgrades MAC-derived concentratord IDs away from authoritative confidence');

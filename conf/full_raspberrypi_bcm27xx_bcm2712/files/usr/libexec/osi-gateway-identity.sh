@@ -2,7 +2,7 @@
 
 normalize_gateway_eui() {
     local raw
-    raw="$(printf '%s' "$1" | tr -cd '0-9A-Fa-f' | tr '[:lower:]' '[:upper:]')"
+    raw="$(printf '%s' "$1" | tr -cd '0-9A-Fa-f' | tr 'abcdef' 'ABCDEF')"
     case "${#raw}" in
         16)
             [ "$raw" = "0101010101010101" ] && return 1
