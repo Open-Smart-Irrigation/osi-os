@@ -101,6 +101,10 @@ function formatDendroModeUsed(value: unknown): string | null {
   return null;
 }
 
+function isRatioDendroMode(value: unknown): boolean {
+  return value === 'ratio_mod3';
+}
+
 interface DraginoTempCardProps {
   device: Device;
   onRemove?: () => void;
@@ -447,6 +451,7 @@ export const DraginoTempCard: React.FC<DraginoTempCardProps> = ({ device, onRemo
       : null)
     ?? (intervalLabel ? `this ${intervalLabel.toLowerCase()}` : 'this interval');
   const dendroSourceLabel = formatDendroModeUsed(data?.dendro_mode_used);
+  const dendroShowsRatioDebug = isRatioDendroMode(data?.dendro_mode_used);
   const dendroHasPosition = dendroEnabled && data?.dendro_valid === 1 && data?.dendro_position_mm != null;
   const dendroNeedsCalibration = dendroEnabled
     && data?.dendro_mode_used === 'ratio_mod3'
@@ -456,8 +461,8 @@ export const DraginoTempCard: React.FC<DraginoTempCardProps> = ({ device, onRemo
   const dendroSensorError = dendroEnabled && data?.dendro_valid === 0;
   const dendroDebugParts = [
     data?.adc_ch0v != null ? `CH0 ${data.adc_ch0v.toFixed(3)} V` : null,
-    data?.adc_ch1v != null ? `CH1 ${data.adc_ch1v.toFixed(3)} V` : null,
-    data?.dendro_ratio != null ? `ratio ${data.dendro_ratio.toFixed(4)}` : null,
+    dendroShowsRatioDebug && data?.adc_ch1v != null ? `CH1 ${data.adc_ch1v.toFixed(3)} V` : null,
+    dendroShowsRatioDebug && data?.dendro_ratio != null ? `ratio ${data.dendro_ratio.toFixed(4)}` : null,
     dendroSourceLabel,
   ].filter(Boolean) as string[];
   const dendroCardVisible = dendroEnabled && (dendroHasPosition || dendroNeedsCalibration || dendroSensorError || dendroDebugParts.length > 0);

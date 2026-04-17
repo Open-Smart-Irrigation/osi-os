@@ -35,6 +35,10 @@ function formatDendroModeUsed(value: unknown): string | null {
   return null;
 }
 
+function isRatioDendroMode(value: unknown): boolean {
+  return value === 'ratio_mod3';
+}
+
 // ── Custom tooltip shared by recharts ─────────────────────────────────────────
 const ChartTooltip = ({ active, payload, label }: any) => {
   if (!active || !payload?.length) return null;
@@ -230,6 +234,7 @@ const PositionChart: React.FC<{ device: Device }> = ({ device }) => {
     adc_ch0v: r.adc_ch0v ?? r.adc_v,
     adc_ch1v: r.adc_ch1v ?? null,
     dendro_ratio: r.dendro_ratio ?? null,
+    dendro_mode_used_raw: r.dendro_mode_used ?? null,
     dendro_mode_used: formatDendroModeUsed(r.dendro_mode_used),
   }));
 
@@ -240,6 +245,7 @@ const PositionChart: React.FC<{ device: Device }> = ({ device }) => {
   const TooltipPosition = ({ active, payload, label }: any) => {
     if (!active || !payload?.length) return null;
     const point = payload[0].payload;
+    const showRatioDebug = isRatioDendroMode(point.dendro_mode_used_raw);
     return (
       <div className="bg-[var(--surface)] border border-[var(--border)] rounded-lg p-3 text-sm shadow-xl">
         <p className="text-[var(--text-tertiary)] mb-1 text-xs">Time: {label}</p>
@@ -247,10 +253,10 @@ const PositionChart: React.FC<{ device: Device }> = ({ device }) => {
         {point.adc_ch0v != null && (
           <p className="text-[var(--text-tertiary)] text-xs">CH0: {point.adc_ch0v.toFixed(3)} V</p>
         )}
-        {point.adc_ch1v != null && (
+        {showRatioDebug && point.adc_ch1v != null && (
           <p className="text-[var(--text-tertiary)] text-xs">CH1: {point.adc_ch1v.toFixed(3)} V</p>
         )}
-        {point.dendro_ratio != null && (
+        {showRatioDebug && point.dendro_ratio != null && (
           <p className="text-[var(--text-tertiary)] text-xs">Ratio: {point.dendro_ratio.toFixed(4)}</p>
         )}
         {point.dendro_mode_used && (

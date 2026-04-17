@@ -50,8 +50,9 @@ function decodeRawAdcPayload(b64) {
     const tempRaw = buf.length >= 4 ? ((buf[2] << 24 >> 16) | buf[3]) : null;
     const tempC1 = tempDisconnected || tempRaw === null ? null : tempRaw / 10;
     const adcCh0V = buf.length >= 6 ? ((buf[4] << 8) | buf[5]) / 1000 : null;
-    const adcCh1V = buf.length >= 9 ? ((buf[7] << 8) | buf[8]) / 1000 : null;
-    const adcCh4V = buf.length >= 11 ? ((buf[9] << 8) | buf[10]) / 1000 : null;
+    // Only trust the raw CH1/CH4 layout when the observed payload is actually MOD3.
+    const adcCh1V = modeCode === 3 && buf.length >= 9 ? ((buf[7] << 8) | buf[8]) / 1000 : null;
+    const adcCh4V = modeCode === 3 && buf.length >= 11 ? ((buf[9] << 8) | buf[10]) / 1000 : null;
 
     return {
       batV,
@@ -144,7 +145,9 @@ function buildDendroDerivedMetrics(options = {}) {
   const modeUsed = detectDendroModeUsed(options);
   const legacyValid = adcCh0V !== null ? (adcCh0V >= 0 && adcCh0V <= 2.6 ? 1 : 0) : null;
   const legacyPositionMm = legacyValid === 1 ? roundTo(adcCh0V * 10, 3) : null;
-  const ratioInfo = calculateDendroRatio(adcCh0V, adcCh1V, options);
+  const ratioInfo = modeUsed === 'ratio_mod3'
+    ? calculateDendroRatio(adcCh0V, adcCh1V, options)
+    : { ratio: null, isValid: false, invalidReason: null };
 
   let dendroValid = legacyValid;
   let positionMm = legacyPositionMm;

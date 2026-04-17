@@ -771,8 +771,11 @@ expectFileExcludes('api.ts', reactGuiApiSource, 'Number(row?.position_um ?? 0)',
 expectFileIncludes('farming.ts', farmingTypesSource, 'id: number | null;', 'allows synthetic raw dendrometer rows without numeric ids');
 expectFileIncludes('farming.ts', farmingTypesSource, 'position_um: number | null;', 'allows raw-only dendrometer rows to omit calibrated position');
 expectFileIncludes('DendrometerMonitor.tsx', dendroMonitorSource, 'point.valid === 1 && point.position_mm != null', 'filters main dendrometer monitor stats to calibrated positions');
+expectFileIncludes('DendrometerMonitor.tsx', dendroMonitorSource, 'const showRatioDebug = isRatioDendroMode(point.dendro_mode_used);', 'shows CH1 and ratio debug values only for ratio-mode history points');
 expectFileIncludes('farming/dendrometer/DendrometerMonitor.tsx', dendroDrawerSource, 'Raw samples are available', 'explains raw-only dendrometer rows in the 24h drawer');
+expectFileIncludes('farming/dendrometer/DendrometerMonitor.tsx', dendroDrawerSource, 'const showRatioDebug = isRatioDendroMode(point.dendro_mode_used_raw);', 'shows CH1 and ratio debug values only for ratio-mode 24h readings');
 expectFileIncludes('DraginoTempCard.tsx', draginoTempCardSource, 'data?.dendro_valid === 1 && data?.dendro_position_mm != null', 'shows healthy dendrometer displacement only for valid calibrated readings');
+expectFileIncludes('DraginoTempCard.tsx', draginoTempCardSource, 'dendroShowsRatioDebug && data?.dendro_ratio != null', 'shows ratio debug values only when ratio mode is active');
 expectExcludesById('merge-device-data', 'd.updated_at', 'updated_at fallback for last_seen in GET /api/devices');
 expectIncludes('Auth + Query Gateway Location', 'gateway_locations', 'queries gateway GPS state from the local mirror table');
 expectIncludes('Format Gateway Location Response', "status: row.status || 'no_fix'", 'returns a no-fix fallback for linked gateways');
@@ -1069,12 +1072,20 @@ if (!dendroHelperPath) {
     expectApprox(decoded && decoded.adcCh4V, 0.9, 0.001, 'dendro helper decodes ADC_CH4V from raw MOD3 payloads');
     expectEqual(decoded && decoded.modeCode, 3, 'dendro helper decodes MOD3 mode from raw payloads');
 
+    const legacyFixture = Buffer.from([0x0B, 0xB8, 0x00, 0xFA, 0x08, 0x77, 0x00, 0xFF, 0xFF, 0x03, 0x84]).toString('base64');
+    const legacyDecoded = dendroHelper.decodeRawAdcPayload(legacyFixture);
+    expectApprox(legacyDecoded && legacyDecoded.adcCh0V, 2.167, 0.001, 'dendro helper still decodes ADC_CH0V from legacy raw payloads');
+    expectEqual(legacyDecoded && legacyDecoded.adcCh1V, null, 'dendro helper ignores raw CH1 fallback data outside MOD3');
+    expectEqual(legacyDecoded && legacyDecoded.adcCh4V, null, 'dendro helper ignores raw CH4 fallback data outside MOD3');
+    expectEqual(legacyDecoded && legacyDecoded.modeCode, 1, 'dendro helper preserves the observed legacy mode from raw payloads');
+
     const legacyMetrics = dendroHelper.buildDendroDerivedMetrics({
       effectiveMode: 2,
       adcCh0V: 1.2,
       adcCh1V: null,
     });
     expectEqual(legacyMetrics.dendroModeUsed, 'legacy_single_adc', 'legacy dendrometer path remains active outside MOD3');
+    expectEqual(legacyMetrics.dendroRatio, null, 'legacy dendrometer path does not expose a ratio');
     expectApprox(legacyMetrics.positionMm, 12, 0.001, 'legacy dendrometer path preserves single-ADC conversion');
 
     const ratioMetrics = dendroHelper.buildDendroDerivedMetrics({
@@ -1099,6 +1110,7 @@ if (!dendroHelperPath) {
       ratioSpan: 0.8,
     });
     expectEqual(invalidReferenceMetrics.dendroModeUsed, 'legacy_single_adc', 'near-zero CH1 falls back to the legacy dendrometer path');
+    expectEqual(invalidReferenceMetrics.dendroRatio, null, 'near-zero CH1 does not leak a ratio through the legacy fallback');
     expectApprox(invalidReferenceMetrics.positionMm, 12, 0.001, 'near-zero CH1 preserves legacy dendrometer comparability');
 
     const invertedPosition = dendroHelper.calculateRatioDendroPositionMm({

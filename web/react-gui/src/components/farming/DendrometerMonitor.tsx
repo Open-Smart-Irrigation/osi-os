@@ -45,6 +45,10 @@ function formatDendroModeUsed(value: unknown): string | null {
   return null;
 }
 
+function isRatioDendroMode(value: unknown): boolean {
+  return value === 'ratio_mod3';
+}
+
 // ─── aggregated-delta computation ───────────────────────────────────────────
 
 interface DeltaBucket {
@@ -114,6 +118,7 @@ const TooltipPosition = ({ active, payload, label, hours }: any) => {
   if (!active || !payload?.length) return null;
   const point = payload[0].payload;
   const sourceLabel = formatDendroModeUsed(point.dendro_mode_used);
+  const showRatioDebug = isRatioDendroMode(point.dendro_mode_used);
   return (
     <div className="bg-[var(--surface)] border border-[var(--border)] rounded-lg p-3 text-sm shadow-xl">
       <p className="text-[var(--text-tertiary)] mb-1">{fmtTickShort(label, hours)}</p>
@@ -121,10 +126,10 @@ const TooltipPosition = ({ active, payload, label, hours }: any) => {
       {point.adc_ch0v != null && (
         <p className="text-[var(--text-tertiary)] text-xs">CH0: {point.adc_ch0v.toFixed(3)} V</p>
       )}
-      {point.adc_ch1v != null && (
+      {showRatioDebug && point.adc_ch1v != null && (
         <p className="text-[var(--text-tertiary)] text-xs">CH1: {point.adc_ch1v.toFixed(3)} V</p>
       )}
-      {point.dendro_ratio != null && (
+      {showRatioDebug && point.dendro_ratio != null && (
         <p className="text-[var(--text-tertiary)] text-xs">Ratio: {point.dendro_ratio.toFixed(4)}</p>
       )}
       {sourceLabel && (
