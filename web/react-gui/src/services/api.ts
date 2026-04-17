@@ -18,6 +18,7 @@ import type {
   ZoneRecommendationDiagnostics,
   SdVpdStatus,
   DendroReading,
+  DendroModeUsed,
   Lsn50Mode,
   StregaModel,
   ZoneEnvironmentSummary,
@@ -142,6 +143,12 @@ function normaliseDevice(device: any): Device {
     soilMoistureProbeDepths,
     soilMoistureProbeDepthsConfigured,
   };
+}
+
+function normaliseDendroModeUsed(value: unknown): DendroModeUsed | string | null {
+  const raw = String(value ?? '').trim();
+  if (!raw) return null;
+  return raw === 'legacy_single_adc' || raw === 'ratio_mod3' ? raw : raw;
 }
 
 // Devices API
@@ -296,10 +303,51 @@ export const irrigationZonesAPI = {
 
 export interface DendroHistoryPoint {
   t: string;           // ISO timestamp
-  position_mm: number;
+  position_mm: number | null;
   delta_mm: number | null;
-  adc_v: number;
+  adc_v: number | null;
+  adc_ch0v?: number | null;
+  adc_ch1v?: number | null;
+  dendro_ratio?: number | null;
+  dendro_mode_used?: DendroModeUsed | string | null;
   valid: number;       // 1 = valid
+}
+
+function toNullableNumber(value: unknown): number | null {
+  if (value === null || value === undefined || value === '') return null;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function normaliseDendroHistoryPoint(row: any): DendroHistoryPoint {
+  return {
+    t: String(row?.t ?? row?.recorded_at ?? ''),
+    position_mm: toNullableNumber(row?.position_mm ?? row?.dendro_position_mm),
+    delta_mm: toNullableNumber(row?.delta_mm ?? row?.dendro_delta_mm),
+    adc_v: toNullableNumber(row?.adc_v ?? row?.adc_ch0v),
+    adc_ch0v: toNullableNumber(row?.adc_ch0v ?? row?.adc_v),
+    adc_ch1v: toNullableNumber(row?.adc_ch1v),
+    dendro_ratio: toNullableNumber(row?.dendro_ratio),
+    dendro_mode_used: normaliseDendroModeUsed(row?.dendro_mode_used),
+    valid: Number(row?.valid ?? row?.dendro_valid ?? 0),
+  };
+}
+
+function normaliseDendroReading(row: any): DendroReading {
+  return {
+    id: toNullableNumber(row?.id),
+    deveui: String(row?.deveui ?? '').trim().toUpperCase(),
+    position_um: toNullableNumber(row?.position_um),
+    adc_v: toNullableNumber(row?.adc_v),
+    adc_ch0v: toNullableNumber(row?.adc_ch0v ?? row?.adc_v),
+    adc_ch1v: toNullableNumber(row?.adc_ch1v),
+    dendro_ratio: toNullableNumber(row?.dendro_ratio),
+    dendro_mode_used: normaliseDendroModeUsed(row?.dendro_mode_used),
+    bat_v: toNullableNumber(row?.bat_v),
+    is_valid: Number(row?.is_valid ?? 0),
+    is_outlier: Number(row?.is_outlier ?? 0),
+    recorded_at: String(row?.recorded_at ?? ''),
+  };
 }
 
 export const lsn50API = {
@@ -326,6 +374,15 @@ export const lsn50API = {
   },
   setFiveVoltWarmup: async (deveui: string, milliseconds: number): Promise<void> => {
     await api.put(`/api/devices/${deveui}/lsn50/5v-warmup`, { milliseconds });
+  },
+  setDendroConfig: async (deveui: string, payload: {
+    dendroForceLegacy?: boolean | null;
+    dendroStrokeMm?: number | null;
+    dendroRatioZero?: number | null;
+    dendroRatioSpan?: number | null;
+    dendroInvertDirection?: boolean | null;
+  }): Promise<void> => {
+    await api.put(`/api/devices/${deveui}/dendro-config`, payload);
   },
 };
 
@@ -468,8 +525,9 @@ export const dendroAnalyticsAPI = {
     return rows.map(normaliseZoneRecommendation);
   },
   getRawReadings: async (deveui: string, from: string, to: string): Promise<DendroReading[]> => {
-    const response = await api.get<DendroReading[]>(`/api/dendrometer/${deveui}/readings`, { params: { from, to } });
-    return response.data;
+    const response = await api.get<any[]>(`/api/dendrometer/${deveui}/readings`, { params: { from, to } });
+    const rows = Array.isArray(response.data) ? response.data : [];
+    return rows.map(normaliseDendroReading);
   },
   setReferenceTree: async (deveui: string, isRef: boolean): Promise<void> => {
     await api.put(`/api/devices/${deveui}/reference-tree`, { is_reference_tree: isRef ? 1 : 0 });
@@ -478,11 +536,12 @@ export const dendroAnalyticsAPI = {
 
 export const dendroAPI = {
   getHistory: async (deveui: string, hours = 24): Promise<DendroHistoryPoint[]> => {
-    const response = await api.get<DendroHistoryPoint[]>(
+    const response = await api.get<any[]>(
       `/api/devices/${deveui}/dendro-history`,
       { params: { hours } }
     );
-    return response.data;
+    const rows = Array.isArray(response.data) ? response.data : [];
+    return rows.map(normaliseDendroHistoryPoint);
   },
 };
 

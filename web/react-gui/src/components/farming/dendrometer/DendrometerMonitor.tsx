@@ -29,6 +29,12 @@ function fmtDate(iso: string) {
   return new Date(iso + 'T00:00:00Z').toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
 }
 
+function formatDendroModeUsed(value: unknown): string | null {
+  if (value === 'ratio_mod3') return 'Ratio MOD3';
+  if (value === 'legacy_single_adc') return 'Legacy ADC';
+  return null;
+}
+
 // ── Custom tooltip shared by recharts ─────────────────────────────────────────
 const ChartTooltip = ({ active, payload, label }: any) => {
   if (!active || !payload?.length) return null;
@@ -212,15 +218,47 @@ const PositionChart: React.FC<{ device: Device }> = ({ device }) => {
   if (loading) return <Spinner />;
   if (error)   return <ErrorMsg msg={error} />;
 
-  const validReadings = readings.filter(r => r.is_valid === 1 && r.is_outlier === 0);
+  const validReadings = readings.filter(
+    (r): r is DendroReading & { position_um: number } => r.is_valid === 1 && r.is_outlier === 0 && r.position_um != null,
+  );
+  const rawOnlyReadings = readings.filter(
+    (r) => r.position_um == null && (r.adc_ch0v != null || r.adc_ch1v != null || r.dendro_ratio != null),
+  );
   const data = validReadings.map(r => ({
     t:   new Date(r.recorded_at).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' }),
     pos: Math.round(r.position_um / 100) / 10, // → mm with 1 decimal
+    adc_ch0v: r.adc_ch0v ?? r.adc_v,
+    adc_ch1v: r.adc_ch1v ?? null,
+    dendro_ratio: r.dendro_ratio ?? null,
+    dendro_mode_used: formatDendroModeUsed(r.dendro_mode_used),
   }));
 
   const posVals = data.map(d => d.pos).filter(v => v != null);
   const dMax = posVals.length ? Math.max(...posVals).toFixed(1) : null;
   const dMin = posVals.length ? Math.min(...posVals).toFixed(1) : null;
+
+  const TooltipPosition = ({ active, payload, label }: any) => {
+    if (!active || !payload?.length) return null;
+    const point = payload[0].payload;
+    return (
+      <div className="bg-[var(--surface)] border border-[var(--border)] rounded-lg p-3 text-sm shadow-xl">
+        <p className="text-[var(--text-tertiary)] mb-1 text-xs">Time: {label}</p>
+        <p className="font-semibold text-[var(--text)]">{payload[0].value} mm</p>
+        {point.adc_ch0v != null && (
+          <p className="text-[var(--text-tertiary)] text-xs">CH0: {point.adc_ch0v.toFixed(3)} V</p>
+        )}
+        {point.adc_ch1v != null && (
+          <p className="text-[var(--text-tertiary)] text-xs">CH1: {point.adc_ch1v.toFixed(3)} V</p>
+        )}
+        {point.dendro_ratio != null && (
+          <p className="text-[var(--text-tertiary)] text-xs">Ratio: {point.dendro_ratio.toFixed(4)}</p>
+        )}
+        {point.dendro_mode_used && (
+          <p className="text-[var(--text-tertiary)] text-xs">Source: {point.dendro_mode_used}</p>
+        )}
+      </div>
+    );
+  };
 
   return (
     <div className="flex flex-col gap-2">
@@ -232,7 +270,11 @@ const PositionChart: React.FC<{ device: Device }> = ({ device }) => {
         {dMin && <span className="text-xs text-orange-700">D_min {dMin} mm</span>}
       </div>
       {data.length === 0 ? (
-        <p className="text-[var(--text-tertiary)] text-sm py-4 text-center">No valid readings in the last 24h.</p>
+        <p className="text-[var(--text-tertiary)] text-sm py-4 text-center">
+          {rawOnlyReadings.length > 0
+            ? 'Raw samples are available for the last 24h, but calibrated displacement is not yet available.'
+            : 'No valid readings in the last 24h.'}
+        </p>
       ) : (
         <ResponsiveContainer width="100%" height={220}>
           <AreaChart data={data} margin={{ top: 4, right: 4, bottom: 0, left: 0 }}>
@@ -245,7 +287,7 @@ const PositionChart: React.FC<{ device: Device }> = ({ device }) => {
             <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
             <XAxis dataKey="t" tick={{ fontSize: 10, fill: 'var(--text-tertiary)' }} interval="preserveStartEnd" />
             <YAxis tick={{ fontSize: 11, fill: 'var(--text-tertiary)' }} unit=" mm" width={52} />
-            <Tooltip formatter={(v: number) => [`${v} mm`, 'Position']} labelFormatter={l => `Time: ${l}`} />
+            <Tooltip content={<TooltipPosition />} />
             {dMax && <ReferenceLine y={parseFloat(dMax)} stroke="#16a34a" strokeDasharray="4 2" label={{ value: 'D_max', position: 'right', fontSize: 10, fill: '#16a34a' }} />}
             {dMin && <ReferenceLine y={parseFloat(dMin)} stroke="#ea580c" strokeDasharray="4 2" label={{ value: 'D_min', position: 'right', fontSize: 10, fill: '#ea580c' }} />}
             <Area type="monotone" dataKey="pos" name="Position" stroke="#3b82f6" strokeWidth={1.5} fill="url(#posGrad)" dot={false} />
@@ -253,8 +295,8 @@ const PositionChart: React.FC<{ device: Device }> = ({ device }) => {
         </ResponsiveContainer>
       )}
       <p className="text-xs text-[var(--text-tertiary)]">
-        {readings.length} total readings, {validReadings.length} valid shown.
-        {readings.length - validReadings.length > 0 && ` ${readings.length - validReadings.length} outliers/invalid hidden.`}
+        {readings.length} total readings, {validReadings.length} plotted.
+        {readings.length - validReadings.length > 0 && ` ${readings.length - validReadings.length} readings not plotted (invalid, outlier, or no calibrated displacement).`}
       </p>
     </div>
   );

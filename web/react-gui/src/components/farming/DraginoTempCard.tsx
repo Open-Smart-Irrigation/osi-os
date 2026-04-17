@@ -95,6 +95,12 @@ function formatPerTenMinuteValue(value: number | null | undefined, unit: string,
   return `${value.toFixed(digits)} ${unit} per 10 min`;
 }
 
+function formatDendroModeUsed(value: unknown): string | null {
+  if (value === 'ratio_mod3') return 'Ratio MOD3';
+  if (value === 'legacy_single_adc') return 'Legacy ADC';
+  return null;
+}
+
 interface DraginoTempCardProps {
   device: Device;
   onRemove?: () => void;
@@ -440,6 +446,21 @@ export const DraginoTempCard: React.FC<DraginoTempCardProps> = ({ device, onRemo
       ? `${data.flow_liters_per_min.toFixed(3)} L/min over ${intervalLabel}`
       : null)
     ?? (intervalLabel ? `this ${intervalLabel.toLowerCase()}` : 'this interval');
+  const dendroSourceLabel = formatDendroModeUsed(data?.dendro_mode_used);
+  const dendroHasPosition = dendroEnabled && data?.dendro_valid === 1 && data?.dendro_position_mm != null;
+  const dendroNeedsCalibration = dendroEnabled
+    && data?.dendro_mode_used === 'ratio_mod3'
+    && data?.dendro_valid !== 0
+    && data?.dendro_position_mm == null
+    && data?.dendro_ratio != null;
+  const dendroSensorError = dendroEnabled && data?.dendro_valid === 0;
+  const dendroDebugParts = [
+    data?.adc_ch0v != null ? `CH0 ${data.adc_ch0v.toFixed(3)} V` : null,
+    data?.adc_ch1v != null ? `CH1 ${data.adc_ch1v.toFixed(3)} V` : null,
+    data?.dendro_ratio != null ? `ratio ${data.dendro_ratio.toFixed(4)}` : null,
+    dendroSourceLabel,
+  ].filter(Boolean) as string[];
+  const dendroCardVisible = dendroEnabled && (dendroHasPosition || dendroNeedsCalibration || dendroSensorError || dendroDebugParts.length > 0);
 
   const [isRemoving, setIsRemoving] = useState(false);
   const [showConfirm, setShowConfirm] = useState(false);
@@ -654,29 +675,48 @@ export const DraginoTempCard: React.FC<DraginoTempCardProps> = ({ device, onRemo
           </div>
         )}
 
-        {dendroEnabled && data?.dendro_position_mm != null && (
-          <div className={`rounded-lg p-3 ${data.dendro_valid ? 'bg-[var(--card)]' : 'bg-[var(--error-bg)]'}`}>
-            <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)]">DENDROMETER POSITION</p>
-            {data.dendro_valid ? (
-              <>
-                <button
-                  onClick={() => setShowMonitor(true)}
-                  className="cursor-pointer text-left text-2xl font-bold tabular-nums text-[var(--text)] underline decoration-dotted underline-offset-4 transition-colors hover:text-[var(--primary)]"
-                  title="View history"
-                >
-                  {data.dendro_position_mm.toFixed(2)} mm
-                </button>
-                {data.dendro_delta_mm != null && (
+        {dendroCardVisible && (
+          <div className={`rounded-lg p-3 ${dendroSensorError ? 'bg-[var(--error-bg)]' : 'bg-[var(--card)]'}`}>
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)]">DENDROMETER POSITION</p>
+                {dendroHasPosition ? (
+                  <button
+                    onClick={() => setShowMonitor(true)}
+                    className="cursor-pointer text-left text-2xl font-bold tabular-nums text-[var(--text)] underline decoration-dotted underline-offset-4 transition-colors hover:text-[var(--primary)]"
+                    title="View history"
+                  >
+                    {data.dendro_position_mm!.toFixed(2)} mm
+                  </button>
+                ) : dendroNeedsCalibration ? (
+                  <p className="text-base font-bold text-[var(--warn-text)]">Calibration required</p>
+                ) : dendroSensorError ? (
+                  <p className="text-base font-bold text-[var(--error-text)]">SENSOR ERROR</p>
+                ) : (
+                  <p className="text-2xl font-bold tabular-nums text-[var(--text)]">—</p>
+                )}
+                {dendroHasPosition && data?.dendro_delta_mm != null && (
                   <p className={`mt-1 text-xs font-semibold ${data.dendro_delta_mm >= 0 ? 'text-[#22c55e]' : 'text-[var(--error-text)]'}`}>
                     {data.dendro_delta_mm >= 0 ? '+' : ''}{data.dendro_delta_mm.toFixed(3)} mm
                   </p>
                 )}
-                <p className="mt-1 text-xs text-[var(--text-tertiary)]">
-                  ADC: {data.adc_ch0v?.toFixed(3)} V · tap to monitor
-                </p>
-              </>
-            ) : (
-              <p className="text-base font-bold text-[var(--error-text)]">SENSOR ERROR</p>
+              </div>
+              {dendroSourceLabel && (
+                <span className="rounded-full bg-[var(--secondary-bg)] px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-[var(--text-secondary)]">
+                  {dendroSourceLabel}
+                </span>
+              )}
+            </div>
+            {dendroDebugParts.length > 0 && (
+              <p className="mt-1 text-xs text-[var(--text-tertiary)]">
+                {dendroDebugParts.join(' · ')}
+                {dendroHasPosition ? ' · tap to monitor' : ''}
+              </p>
+            )}
+            {dendroNeedsCalibration && (
+              <p className="mt-1 text-xs text-[var(--text-tertiary)]">
+                Ratio mode is active, but this device still needs ratio calibration values.
+              </p>
             )}
           </div>
         )}

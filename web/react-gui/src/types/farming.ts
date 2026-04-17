@@ -2,6 +2,7 @@
 export type DeviceType = 'KIWI_SENSOR' | 'STREGA_VALVE' | 'DRAGINO_LSN50' | 'TEKTELIC_CLOVER' | 'SENSECAP_S2120';
 export type Lsn50Mode = 'MOD1' | 'MOD2' | 'MOD3' | 'MOD4' | 'MOD5' | 'MOD6' | 'MOD7' | 'MOD8' | 'MOD9';
 export type StregaModel = 'STANDARD' | 'MOTORIZED';
+export type DendroModeUsed = 'legacy_single_adc' | 'ratio_mod3';
 
 export interface Device {
   deveui: string;       // Unique LoRaWAN ID
@@ -23,10 +24,13 @@ export interface Device {
     ext_temperature_c?: number; // DS18B20 probe temperature (°C) — LSN50
     bat_v?: number;             // Battery voltage (V) — LSN50
     adc_ch0v?: number;          // ADC CH0 raw voltage (V) — LSN50 analog input
+    adc_ch1v?: number | null;   // ADC CH1 reference voltage (V) — LSN50 MOD3 ratio path
     // Dendrometer (OPKON SLPS linear potentiometer via LSN50 ADC)
     dendro_position_mm?: number | null; // Calculated trunk position (mm), 0–25 range
     dendro_valid?: number | null;       // 1 = valid reading, 0 = out-of-range/error
     dendro_delta_mm?: number | null;    // Change from previous reading (mm); null on first uplink
+    dendro_ratio?: number | null;       // MOD3 ratio (ADC_CH0V / ADC_CH1V) when available
+    dendro_mode_used?: DendroModeUsed | string | null;
     lsn50_mode_code?: number | null;
     lsn50_mode_label?: Lsn50Mode | string | null;
     lsn50_mode_observed_at?: string | null;
@@ -67,6 +71,11 @@ export interface Device {
   flow_meter_enabled?: number;  // 0 = disabled (default), 1 = flow meter on count2 (MOD9)
   is_reference_tree?: number;   // 0 = monitored/irrigated, 1 = control/reference tree
   device_mode?: number | null;  // Requested/configured LSN50 mode on the edge
+  dendro_force_legacy?: number | null;
+  dendro_stroke_mm?: number | null;
+  dendro_ratio_zero?: number | null;
+  dendro_ratio_span?: number | null;
+  dendro_invert_direction?: number | null;
   strega_model?: StregaModel | string | null;
 
   // Irrigation zone assignment
@@ -502,10 +511,14 @@ export interface HourlyForecast {
 
 /** One raw dendrometer reading from dendrometer_readings table */
 export interface DendroReading {
-  id: number;
+  id: number | null;
   deveui: string;
-  position_um: number;
-  adc_v: number;
+  position_um: number | null;
+  adc_v: number | null;
+  adc_ch0v?: number | null;
+  adc_ch1v?: number | null;
+  dendro_ratio?: number | null;
+  dendro_mode_used?: DendroModeUsed | string | null;
   bat_v: number | null;
   is_valid: number;
   is_outlier: number;

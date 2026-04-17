@@ -12,6 +12,11 @@ const osiServerDefaultsPath = path.resolve(__dirname, '..', 'conf', 'full_raspbe
 const sx1301GatewayDefaultPath = path.resolve(__dirname, '..', 'conf', 'full_raspberrypi_bcm27xx_bcm2712', 'files', 'etc', 'uci-defaults', '99_set_sx1301_gateway_id');
 const gatewayIdentityHelperPath = path.resolve(__dirname, '..', 'conf', 'full_raspberrypi_bcm27xx_bcm2712', 'files', 'usr', 'libexec', 'osi-gateway-identity.sh');
 const chirpstackBootstrapPath = path.resolve(__dirname, 'chirpstack-bootstrap.js');
+const reactGuiApiPath = path.resolve(__dirname, '..', 'web', 'react-gui', 'src', 'services', 'api.ts');
+const farmingTypesPath = path.resolve(__dirname, '..', 'web', 'react-gui', 'src', 'types', 'farming.ts');
+const dendroMonitorPath = path.resolve(__dirname, '..', 'web', 'react-gui', 'src', 'components', 'farming', 'DendrometerMonitor.tsx');
+const dendroDrawerPath = path.resolve(__dirname, '..', 'web', 'react-gui', 'src', 'components', 'farming', 'dendrometer', 'DendrometerMonitor.tsx');
+const draginoTempCardPath = path.resolve(__dirname, '..', 'web', 'react-gui', 'src', 'components', 'farming', 'DraginoTempCard.tsx');
 const helperCandidates = [
   path.join(nodeRedRoot, 'node_modules', 'osi-chirpstack-helper'),
   path.join(nodeRedRoot, 'osi-chirpstack-helper')
@@ -20,6 +25,10 @@ const dbHelperCandidates = [
   path.join(nodeRedRoot, 'node_modules', 'osi-db-helper'),
   path.join(nodeRedRoot, 'osi-db-helper')
 ];
+const dendroHelperCandidates = [
+  path.join(nodeRedRoot, 'node_modules', 'osi-dendro-helper'),
+  path.join(nodeRedRoot, 'osi-dendro-helper')
+];
 const packageJsonPath = path.join(nodeRedRoot, 'package.json');
 const deployScript = fs.readFileSync(deployScriptPath, 'utf8');
 const nodeRedInitScript = fs.readFileSync(nodeRedInitPath, 'utf8');
@@ -27,7 +36,13 @@ const osiServerDefaultsScript = fs.readFileSync(osiServerDefaultsPath, 'utf8');
 const sx1301GatewayDefaultScript = fs.readFileSync(sx1301GatewayDefaultPath, 'utf8');
 const gatewayIdentityHelperScript = fs.readFileSync(gatewayIdentityHelperPath, 'utf8');
 const chirpstackBootstrapScript = fs.readFileSync(chirpstackBootstrapPath, 'utf8');
+const reactGuiApiSource = fs.readFileSync(reactGuiApiPath, 'utf8');
+const farmingTypesSource = fs.readFileSync(farmingTypesPath, 'utf8');
+const dendroMonitorSource = fs.readFileSync(dendroMonitorPath, 'utf8');
+const dendroDrawerSource = fs.readFileSync(dendroDrawerPath, 'utf8');
+const draginoTempCardSource = fs.readFileSync(draginoTempCardPath, 'utf8');
 const flows = JSON.parse(fs.readFileSync(flowPath, 'utf8'));
+const pendingChecks = [];
 
 const requiredHttpRoutes = [
   '/api/account-link',
@@ -46,6 +61,7 @@ const requiredHttpRoutes = [
   '/api/devices/:deveui/strega/magnet',
   '/api/devices/:deveui/strega/partial-opening',
   '/api/devices/:deveui/strega/flushing',
+  '/api/devices/:deveui/dendro-config',
   '/api/devices/:deveui/zone-assignments',
   '/api/gateway/location',
   '/api/gateways/:gatewayEui/location',
@@ -105,6 +121,8 @@ const requiredFunctionNodes = [
   'Auth + Parse STREGA Flushing',
   'Authorize + Fanout STREGA Advanced',
   'Format STREGA Advanced Response',
+  'Auth + Parse Dendro Config',
+  'Format Dendro Config Response',
   'CS Register (cloud cmd)',
   'Build Special Command ACK',
   'Build LSN50 mode downlink',
@@ -258,6 +276,76 @@ function expectFileExcludes(fileLabel, content, needle, description) {
   } else {
     console.log(`OK ${fileLabel} removed ${description}`);
   }
+}
+
+function expectCondition(condition, successMessage, failureMessage) {
+  if (!condition) {
+    fail(failureMessage || successMessage);
+  } else {
+    console.log(`OK ${successMessage}`);
+  }
+}
+
+function expectEqual(actual, expected, description) {
+  if (actual !== expected) {
+    fail(`${description}: expected ${JSON.stringify(expected)}, got ${JSON.stringify(actual)}`);
+  } else {
+    console.log(`OK ${description}`);
+  }
+}
+
+function expectApprox(actual, expected, epsilon, description) {
+  if (!Number.isFinite(actual) || Math.abs(actual - expected) > epsilon) {
+    fail(`${description}: expected ${expected} +/- ${epsilon}, got ${actual}`);
+  } else {
+    console.log(`OK ${description}`);
+  }
+}
+
+async function executeFunctionNodeById(nodeId, msg, options = {}) {
+  const node = findNodeById(nodeId);
+  if (!node) {
+    throw new Error(`missing node ${nodeId}`);
+  }
+  const flowState = new Map(Object.entries(options.flowState || {}));
+  const fn = new vm.Script(`(async function(msg,node,flow,env,context,global,get,set){${node.func}\n})`).runInNewContext({
+    Buffer,
+    console,
+    require,
+    process,
+    setTimeout,
+    clearTimeout,
+  });
+  const flowApi = {
+    get(key) {
+      return flowState.get(key);
+    },
+    set(key, value) {
+      if (value === undefined) flowState.delete(key);
+      else flowState.set(key, value);
+    },
+  };
+  const envValues = options.env || {};
+  const envApi = {
+    get(key) {
+      return envValues[key];
+    },
+  };
+  const noopStore = {
+    get() {
+      return undefined;
+    },
+    set() {},
+  };
+  const nodeApi = Object.assign(
+    {
+      error() {},
+      warn() {},
+      status() {},
+    },
+    options.node || {}
+  );
+  return fn(msg, nodeApi, flowApi, envApi, options.context || noopStore, options.global || noopStore, () => undefined, () => {});
 }
 
 for (const route of requiredHttpRoutes) {
@@ -551,12 +639,19 @@ expectIncludes('Get Zone Environment Summary', 'sensorHealth: buildSensorHealth(
 expectIncludes('Build Telemetry', 'lsn50_mode_code: observedModeCode', 'publishes observed LSN50 mode in edge telemetry');
 expectIncludes('Build Telemetry', 'convertHzToKPa(numberOrNull(obj.watermark1_frequency))', 'converts Kiwi watermark frequency telemetry to kPa for cloud mirroring');
 expectIncludes('Build Telemetry', "var isLsn50 = profileKind === 'DRAGINO_LSN50';", 'gates LSN50-only telemetry fields by profile');
-expectIncludes('Build Telemetry', 'var observedModeCode = isLsn50 && data.data ?', 'avoids assigning LSN50 mode codes to Kiwi telemetry');
+expectIncludes('Build Telemetry', 'var observedModeCode = isLsn50 && rawLsn50 && rawLsn50.modeCode != null ? rawLsn50.modeCode : null;', 'avoids assigning LSN50 mode codes to Kiwi telemetry');
 expectIncludes('Build Telemetry', "profileKind === 'STREGA_VALVE'", 'skips valve uplinks in sensor telemetry mirroring');
 expectIncludes('Build Telemetry', 'if (!profileKind && swtWm1 === null && swtWm2 === null', 'skips unknown no-data uplinks instead of defaulting them to Kiwi');
+expectIncludes('Build Telemetry', 'loadLsn50Config', 'loads local dendrometer config before telemetry conversion');
+expectIncludes('Build Telemetry', 'var rawLsn50 = isLsn50 && data.data ? dendro.decodeRawAdcPayload(data.data) : null;', 'reuses shared raw LSN50 ADC decoding in telemetry mirroring');
+expectIncludes('Build Telemetry', 'var derived = dendro.buildDendroDerivedMetrics({', 'reuses shared dendrometer path selection in telemetry mirroring');
+expectIncludes('Build Telemetry', 'dendro.computeDendroDeltaMm({', 'reuses shared dendrometer delta handling in telemetry mirroring');
 expectIncludesById('81c98fb07344a787', "env.get('CHIRPSTACK_PROFILE_KIWI')", 'uses env-backed Kiwi profile routing');
 expectIncludesById('81c98fb07344a787', "env.get('CHIRPSTACK_PROFILE_CLOVER')", 'uses env-backed Clover profile routing');
-expectIncludes('Decode LSN50', 'function detectLsn50ModeCode', 'decodes observed LSN50 mode from raw uplinks');
+expectIncludes('Decode LSN50', 'const rawDecoded = data.data ? dendro.decodeRawAdcPayload(data.data) : null;', 'uses the shared raw LSN50 ADC decoder');
+expectIncludes('Decode LSN50', 'adcCh1V = dendro.toFiniteNumber(obj.ADC_CH1V);', 'reads ADC_CH1V from decoded MOD3 payloads');
+expectIncludes('Decode LSN50', 'adcCh4V = dendro.toFiniteNumber(obj.ADC_CH4V);', 'reads ADC_CH4V when present without using it for dendrometer conversion');
+expectIncludes('Decode LSN50', 'const observedModeCode = rawDecoded && rawDecoded.modeCode != null ? rawDecoded.modeCode : null;', 'decodes observed LSN50 mode from shared raw uplink parsing');
 expectIncludes('Decode LSN50', "env.get('CHIRPSTACK_PROFILE_LSN50')", 'filters uplinks to the env-backed LSN50 profile');
 expectIncludes('Apply Config', 'd.modeCodeToStore = d.observedModeCode != null ? d.observedModeCode : effectiveMode;', 'stores observed or configured LSN50 mode on ingest');
 expectIncludes('Apply Config', 'loadPreviousMod9Sample', 'loads the last persisted MOD9 sample before computing deltas');
@@ -568,16 +663,29 @@ expectIncludes('Apply Config', 'd.flowLitersPerMin = d.counterIntervalSeconds', 
 expectIncludes('Apply Config', 'd.rainMmPer10Min = d.counterIntervalSeconds', 'derives normalized rain per 10 minutes');
 expectIncludes('Apply Config', 'd.flowLitersPer10Min = d.counterIntervalSeconds', 'derives normalized flow per 10 minutes');
 expectIncludes('Apply Config', 'loadTodayCounterTotals', 'derives running daily rain and flow totals from persisted counters');
+expectIncludes('Apply Config', 'const derived = dendro.buildDendroDerivedMetrics({', 'uses the shared dual-path dendrometer conversion helper');
+expectIncludes('Apply Config', 'd.dendroModeUsed = derived.dendroModeUsed;', 'stores which dendrometer conversion path was applied');
+expectIncludes('Apply Config', 'd.dendroRatio = derived.dendroRatio;', 'stores the derived dendrometer ratio');
+expectIncludes('Apply Config', 'd.dendroCalibrationMissing = derived.calibrationMissing;', 'tracks missing ratio calibration without emitting NaN values');
+expectIncludes('Apply Config', 'const delta = dendro.computeDendroDeltaMm({', 'resets dendrometer deltas when path or calibration changes');
+expectLibById('lsn50-decode-fn', 'dendro', 'osi-dendro-helper', 'imports osi-dendro-helper in Decode LSN50');
+expectLibById('lsn50-apply-config', 'dendro', 'osi-dendro-helper', 'imports osi-dendro-helper in Apply Config');
+expectLibById('8809bb5239dfb3d4', 'dendro', 'osi-dendro-helper', 'imports osi-dendro-helper in Build Telemetry');
 expectIncludesById('lsn50-sql-fn', 'lsn50_mode_code, lsn50_mode_label, lsn50_mode_observed_at', 'persists observed LSN50 mode into device_data');
 expectIncludesById('lsn50-sql-fn', 'rain_mm_per_hour, rain_mm_per_10min, rain_mm_today, rain_delta_status', 'persists interval-aware rain metadata into device_data');
 expectIncludesById('lsn50-sql-fn', 'flow_liters_per_min, flow_liters_per_10min, flow_liters_today, flow_delta_status', 'persists interval-aware flow metadata into device_data');
 expectIncludesById('lsn50-sql-fn', 'rain_mm_per_10min, rain_mm_today', 'persists normalized and daily rain telemetry into device_data');
 expectIncludesById('lsn50-sql-fn', 'flow_liters_per_10min, flow_liters_today', 'persists normalized and daily flow telemetry into device_data');
 expectIncludesById('lsn50-sql-fn', 'counter_interval_seconds', 'persists elapsed counter interval into device_data');
+expectIncludesById('lsn50-sql-fn', 'adc_ch0v, adc_ch1v,', 'persists both dendrometer ADC channels into device_data');
+expectIncludesById('lsn50-sql-fn', 'dendro_ratio, dendro_mode_used, dendro_position_mm, dendro_valid, dendro_delta_mm', 'persists dual-path dendrometer derived fields into device_data');
 expectIncludesById('lsn50-zone-agg-fn', "localDateIso(d.timestamp || computedAt", 'bins MOD9 zone totals by uplink timestamp instead of processing time');
 expectIncludesById('lsn50-zone-agg-fn', "d.rainDeltaStatus === 'ok'", 'only aggregates valid rain deltas into zone totals');
 expectIncludesById('lsn50-zone-agg-fn', "d.flowDeltaStatus === 'ok'", 'only aggregates valid flow deltas into zone totals');
 expectIncludesById('format-devices', 'dd.lsn50_mode_code', 'returns observed LSN50 mode in GET /api/devices');
+expectIncludesById('format-devices', 'dd.adc_ch1v', 'returns dendrometer CH1 voltage in GET /api/devices');
+expectIncludesById('format-devices', 'dd.dendro_ratio', 'returns dendrometer ratio in GET /api/devices');
+expectIncludesById('format-devices', 'dd.dendro_mode_used', 'returns the active dendrometer conversion path in GET /api/devices');
 expectIncludesById('format-devices', 'dd.rain_mm_per_hour', 'returns interval-aware rain rate in GET /api/devices');
 expectIncludesById('format-devices', 'dd.flow_liters_per_min', 'returns interval-aware flow rate in GET /api/devices');
 expectIncludesById('format-devices', 'dd.rain_mm_per_10min', 'returns normalized rain telemetry in GET /api/devices');
@@ -591,6 +699,14 @@ expectIncludesById('format-devices', 'dd.uv_index', 'returns S2120 UV in GET /ap
 expectIncludesById('format-devices', 'dd.rain_gauge_cumulative_mm', 'returns S2120 cumulative rain in GET /api/devices');
 expectIncludesById('format-devices', 'dd.bat_pct', 'returns S2120 battery in GET /api/devices');
 expectIncludesById('merge-device-data', 'device_mode: d.device_mode ?? 1', 'returns configured LSN50 mode in GET /api/devices');
+expectIncludesById('merge-device-data', 'dendro_force_legacy: d.dendro_force_legacy ?? 0', 'returns the explicit legacy dendrometer override in GET /api/devices');
+expectIncludesById('merge-device-data', 'dendro_stroke_mm: d.dendro_stroke_mm ?? null', 'returns dendrometer stroke calibration in GET /api/devices');
+expectIncludesById('merge-device-data', 'dendro_ratio_zero: d.dendro_ratio_zero ?? null', 'returns dendrometer ratio zero calibration in GET /api/devices');
+expectIncludesById('merge-device-data', 'dendro_ratio_span: d.dendro_ratio_span ?? null', 'returns dendrometer ratio span calibration in GET /api/devices');
+expectIncludesById('merge-device-data', 'dendro_invert_direction: d.dendro_invert_direction ?? 0', 'returns dendrometer inversion calibration in GET /api/devices');
+expectIncludesById('merge-device-data', 'adc_ch1v: latest.adc_ch1v', 'merges dendrometer CH1 voltage into GET /api/devices');
+expectIncludesById('merge-device-data', 'dendro_ratio: latest.dendro_ratio', 'merges dendrometer ratio into GET /api/devices');
+expectIncludesById('merge-device-data', 'dendro_mode_used: latest.dendro_mode_used', 'merges dendrometer path metadata into GET /api/devices');
 expectIncludesById('merge-device-data', 'strega_model: d.strega_model || null', 'returns stored STREGA model metadata in GET /api/devices');
 expectIncludesById('merge-device-data', 'rain_mm_per_hour: latest.rain_mm_per_hour', 'merges interval-aware rain rate into GET /api/devices');
 expectIncludesById('merge-device-data', 'flow_liters_per_min: latest.flow_liters_per_min', 'merges interval-aware flow rate into GET /api/devices');
@@ -626,6 +742,37 @@ expectIncludesById('sensor-history-fn', 'flow_liters_per_min', 'allows rate-base
 expectIncludesById('sensor-history-fn', 'rain_mm_per_10min', 'allows normalized rain history queries');
 expectIncludesById('sensor-history-fn', 'flow_liters_per_10min', 'allows normalized flow history queries');
 expectIncludesById('sensor-history-fn', 'counter_interval_seconds', 'allows interval-length history queries');
+expectIncludesById('dendro-history-fn', 'dd.adc_ch1v', 'returns dendrometer CH1 history points');
+expectIncludesById('dendro-history-fn', 'dd.dendro_ratio', 'returns dendrometer ratio history points');
+expectIncludesById('dendro-history-fn', 'dd.dendro_mode_used', 'returns dendrometer path history points');
+expectExcludesById('dendro-history-fn', 'AND dd.dendro_position_mm IS NOT NULL', 'the calibrated-only dendrometer history filter');
+expectIncludesById('dendro-history-fn', '(dd.dendro_position_mm IS NOT NULL OR dd.adc_ch0v IS NOT NULL OR dd.adc_ch1v IS NOT NULL OR dd.dendro_ratio IS NOT NULL)', 'returns raw-only dendrometer history rows from device_data');
+expectIncludesById('dendro-history-format', 'adc_ch1v: r.adc_ch1v', 'formats dendrometer CH1 history for the GUI');
+expectIncludesById('dendro-history-format', 'dendro_ratio: r.dendro_ratio', 'formats dendrometer ratio history for the GUI');
+expectIncludesById('dendro-history-format', 'dendro_mode_used: r.dendro_mode_used', 'formats dendrometer path history for the GUI');
+expectIncludesById('dendro-raw-fn', 'COALESCE(dr.adc_ch0v, dr.adc_v) AS adc_ch0v', 'keeps raw dendrometer CH0 history backward compatible');
+expectIncludesById('dendro-raw-fn', 'dr.adc_ch1v', 'returns raw dendrometer CH1 readings');
+expectIncludesById('dendro-raw-fn', 'dr.dendro_ratio', 'returns raw dendrometer ratios');
+expectIncludesById('dendro-raw-fn', 'dr.dendro_mode_used', 'returns raw dendrometer path metadata');
+expectIncludesById('dendro-raw-fn', 'UNION ALL', 'merges calibrated and raw-only dendrometer readings');
+expectIncludesById('dendro-raw-fn', 'FROM device_data dd', 'reads raw-only dendrometer history from device_data');
+expectIncludesById('dendro-raw-fn', 'NULL AS position_um', 'keeps raw-only dendrometer readings uncalibrated');
+expectIncludesById('dendro-raw-fn', 'COALESCE(dd.dendro_valid, 1) AS is_valid', 'defaults raw-only dendrometer validity when device_data omits it');
+expectIncludesById('dendro-raw-fn', 'dd.dendro_position_mm IS NULL', 'limits synthetic raw dendrometer rows to uncalibrated samples');
+expectIncludesById('dendro-readings-insert-fn', 'adc_v,adc_ch0v,adc_ch1v,dendro_ratio,dendro_mode_used', 'stores raw dendrometer debug fields in dendrometer_readings');
+expectLibById('put-dendro-config-auth-fn', 'osiDb', 'osi-db-helper', 'imports osi-db-helper for dendrometer config persistence');
+expectIncludesById('put-dendro-config-auth-fn', 'deleted_at IS NULL', 'ignores deleted devices when saving dendrometer config');
+expectIncludesById('put-dendro-config-auth-fn', "return respond(404, { message: 'Device not found' });", 'returns 404 for missing dendrometer-config devices');
+expectIncludes('Format Dendro Config Response', 'dendro_force_legacy: row.dendro_force_legacy ?? null', 'returns canonical dendrometer config fields');
+expectIncludes('Format Dendro Config Response', 'dendro_invert_direction: row.dendro_invert_direction ?? null', 'returns canonical dendrometer inversion config');
+expectFileIncludes('api.ts', reactGuiApiSource, 'position_mm: number | null;', 'types dendrometer history position as nullable');
+expectFileExcludes('api.ts', reactGuiApiSource, 'Number(row?.position_mm ?? row?.dendro_position_mm ?? 0)', 'coercing missing dendrometer history position to zero');
+expectFileExcludes('api.ts', reactGuiApiSource, 'Number(row?.position_um ?? 0)', 'coercing missing raw dendrometer position to zero');
+expectFileIncludes('farming.ts', farmingTypesSource, 'id: number | null;', 'allows synthetic raw dendrometer rows without numeric ids');
+expectFileIncludes('farming.ts', farmingTypesSource, 'position_um: number | null;', 'allows raw-only dendrometer rows to omit calibrated position');
+expectFileIncludes('DendrometerMonitor.tsx', dendroMonitorSource, 'point.valid === 1 && point.position_mm != null', 'filters main dendrometer monitor stats to calibrated positions');
+expectFileIncludes('farming/dendrometer/DendrometerMonitor.tsx', dendroDrawerSource, 'Raw samples are available', 'explains raw-only dendrometer rows in the 24h drawer');
+expectFileIncludes('DraginoTempCard.tsx', draginoTempCardSource, 'data?.dendro_valid === 1 && data?.dendro_position_mm != null', 'shows healthy dendrometer displacement only for valid calibrated readings');
 expectExcludesById('merge-device-data', 'd.updated_at', 'updated_at fallback for last_seen in GET /api/devices');
 expectIncludes('Auth + Query Gateway Location', 'gateway_locations', 'queries gateway GPS state from the local mirror table');
 expectIncludes('Format Gateway Location Response', "status: row.status || 'no_fix'", 'returns a no-fix fallback for linked gateways');
@@ -665,6 +812,18 @@ expectIncludes('Build Schedule ACK', "commandType === 'SET_STREGA_MAGNET_MODE'",
 expectIncludes('Build Schedule ACK', "commandType === 'SET_STREGA_PARTIAL_OPENING'", 'skips duplicate generic ACKs for direct STREGA partial-opening downlinks');
 expectIncludes('Build Schedule ACK', "commandType === 'SET_STREGA_FLUSHING'", 'skips duplicate generic ACKs for direct STREGA flushing downlinks');
 expectIncludes('Sync Init Schema + Triggers', 'ALTER TABLE device_data ADD COLUMN lsn50_mode_code INTEGER', 'adds LSN50 mode columns to device_data');
+expectIncludes('Sync Init Schema + Triggers', 'ALTER TABLE devices ADD COLUMN dendro_force_legacy INTEGER DEFAULT 0', 'adds the device-level legacy dendrometer override');
+expectIncludes('Sync Init Schema + Triggers', 'ALTER TABLE devices ADD COLUMN dendro_stroke_mm REAL', 'adds the device-level dendrometer stroke calibration');
+expectIncludes('Sync Init Schema + Triggers', 'ALTER TABLE devices ADD COLUMN dendro_ratio_zero REAL', 'adds the device-level dendrometer ratio zero calibration');
+expectIncludes('Sync Init Schema + Triggers', 'ALTER TABLE devices ADD COLUMN dendro_ratio_span REAL', 'adds the device-level dendrometer ratio span calibration');
+expectIncludes('Sync Init Schema + Triggers', 'ALTER TABLE devices ADD COLUMN dendro_invert_direction INTEGER DEFAULT 0', 'adds the device-level dendrometer inversion flag');
+expectIncludes('Sync Init Schema + Triggers', 'ALTER TABLE device_data ADD COLUMN adc_ch1v REAL', 'adds CH1 dendrometer telemetry storage');
+expectIncludes('Sync Init Schema + Triggers', 'ALTER TABLE device_data ADD COLUMN dendro_ratio REAL', 'adds ratio dendrometer telemetry storage');
+expectIncludes('Sync Init Schema + Triggers', 'ALTER TABLE device_data ADD COLUMN dendro_mode_used TEXT', 'adds dendrometer path storage');
+expectIncludes('Sync Init Schema + Triggers', 'ALTER TABLE dendrometer_readings ADD COLUMN adc_ch0v REAL', 'adds backward-compatible CH0 storage to dendrometer_readings');
+expectIncludes('Sync Init Schema + Triggers', 'ALTER TABLE dendrometer_readings ADD COLUMN adc_ch1v REAL', 'adds CH1 storage to dendrometer_readings');
+expectIncludes('Sync Init Schema + Triggers', 'ALTER TABLE dendrometer_readings ADD COLUMN dendro_ratio REAL', 'adds ratio storage to dendrometer_readings');
+expectIncludes('Sync Init Schema + Triggers', 'ALTER TABLE dendrometer_readings ADD COLUMN dendro_mode_used TEXT', 'adds path metadata storage to dendrometer_readings');
 expectIncludes('Sync Init Schema + Triggers', "'lsn50_mode_code', NEW.lsn50_mode_code", 'mirrors observed LSN50 mode in device_data outbox events');
 expectIncludes('Auth + Parse LSN50 Mode', "Mode must be one of MOD1..MOD9", 'validates supported LSN50 modes on the local API');
 expectIncludes('Auth + Parse LSN50 Interval', "Minutes must be a whole number between 1 and ", 'validates LSN50 uplink interval minutes on the local API');
@@ -681,6 +840,12 @@ expectIncludes('Auth + Parse STREGA Timed Action', 'Timed action requires OPEN o
 expectIncludes('Auth + Parse STREGA Magnet', 'enabled is required', 'validates STREGA magnet mode changes on the local API');
 expectIncludes('Auth + Parse STREGA Partial Opening', 'Partial opening requires OPEN or CLOSE and a percentage between 1 and 100', 'validates STREGA partial opening on the local API');
 expectIncludes('Auth + Parse STREGA Flushing', 'Flushing requires OPEN or CLOSE and a percentage between 1 and 100', 'validates STREGA flushing on the local API');
+expectIncludes('Auth + Parse Dendro Config', 'const forceLegacy = parseNullableFlag', 'parses the explicit legacy dendrometer override');
+expectIncludes('Auth + Parse Dendro Config', 'const strokeMm = parseNullableNumber', 'parses dendrometer stroke calibration');
+expectIncludes('Auth + Parse Dendro Config', 'const ratioZero = parseNullableNumber', 'parses dendrometer ratio zero calibration');
+expectIncludes('Auth + Parse Dendro Config', 'const ratioSpan = parseNullableNumber', 'parses dendrometer ratio span calibration');
+expectIncludes('Auth + Parse Dendro Config', 'const invertDirection = parseNullableFlag', 'parses dendrometer inversion calibration');
+expectIncludes('Auth + Parse Dendro Config', 'No dendrometer config fields supplied', 'rejects empty dendrometer config updates');
 expectIncludes('Authorize + Fanout LSN50 Mode', "commandType: 'SET_LSN50_MODE'", 'fans out validated local LSN50 mode changes into the shared command path');
 expectIncludes('Authorize + Fanout LSN50 Interval', "commandType: 'SET_LSN50_INTERVAL'", 'fans out validated local LSN50 interval changes into the shared command path');
 expectIncludes('Authorize + Fanout LSN50 Advanced', "commandType: 'SET_LSN50_INTERRUPT_MODE'", 'fans out validated local LSN50 interrupt-mode changes into the shared command path');
@@ -778,7 +943,7 @@ if (!fs.existsSync(packageJsonPath)) {
   fail(`missing Node-RED package manifest at ${packageJsonPath}`);
 } else {
   const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, 'utf8'));
-  for (const dependency of ['@chirpstack/chirpstack-api', '@grpc/grpc-js', '@rakwireless/field-tester-server', 'bcryptjs', 'node-red-node-sqlite', 'osi-chirpstack-helper', 'osi-db-helper', 'sqlite3']) {
+  for (const dependency of ['@chirpstack/chirpstack-api', '@grpc/grpc-js', '@rakwireless/field-tester-server', 'bcryptjs', 'node-red-node-sqlite', 'osi-chirpstack-helper', 'osi-db-helper', 'osi-dendro-helper', 'sqlite3']) {
     if (!packageJson.dependencies || !packageJson.dependencies[dependency]) {
       fail(`package.json missing dependency ${dependency}`);
     } else {
@@ -863,6 +1028,179 @@ if (!dbHelperPath) {
   }
 }
 
-if (!process.exitCode) {
-  console.log('Sync flow verification passed');
+const dendroHelperPath = dendroHelperCandidates.find((candidate) => fs.existsSync(candidate));
+if (!dendroHelperPath) {
+  fail(`missing dendro helper module at one of: ${dendroHelperCandidates.join(', ')}`);
+} else {
+  let dendroHelper = null;
+  try {
+    dendroHelper = require(dendroHelperPath);
+    for (const exportName of ['decodeRawAdcPayload', 'detectDendroModeUsed', 'calculateDendroRatio', 'calculateRatioDendroPositionMm', 'buildDendroDerivedMetrics', 'computeDendroDeltaMm']) {
+      if (typeof dendroHelper[exportName] !== 'function') {
+        fail(`dendro helper missing export ${exportName}`);
+      } else {
+        console.log(`OK dendro helper exports ${exportName}`);
+      }
+    }
+  } catch (error) {
+    const helperIndexPath = path.join(dendroHelperPath, 'index.js');
+    const helperSource = fs.existsSync(helperIndexPath) ? fs.readFileSync(helperIndexPath, 'utf8') : '';
+    if (error.code === 'MODULE_NOT_FOUND' && helperSource) {
+      console.log(`OK dendro helper source present despite missing local runtime deps: ${error.message}`);
+      for (const exportName of ['decodeRawAdcPayload', 'detectDendroModeUsed', 'calculateDendroRatio', 'calculateRatioDendroPositionMm', 'buildDendroDerivedMetrics', 'computeDendroDeltaMm']) {
+        if (!helperSource.includes(exportName)) {
+          fail(`dendro helper source missing export ${exportName}`);
+        } else {
+          console.log(`OK dendro helper source includes ${exportName}`);
+        }
+      }
+    } else {
+      fail(`failed to load dendro helper: ${error.message}`);
+    }
+  }
+
+  if (dendroHelper) {
+    const mod3Fixture = Buffer.from([0x0B, 0xB8, 0x00, 0xFA, 0x04, 0xB0, 0x08, 0x09, 0xC4, 0x03, 0x84]).toString('base64');
+    const decoded = dendroHelper.decodeRawAdcPayload(mod3Fixture);
+    expectApprox(decoded && decoded.adcCh0V, 1.2, 0.001, 'dendro helper decodes ADC_CH0V from raw MOD3 payloads');
+    expectApprox(decoded && decoded.adcCh1V, 2.5, 0.001, 'dendro helper decodes ADC_CH1V from raw MOD3 payloads');
+    expectApprox(decoded && decoded.adcCh4V, 0.9, 0.001, 'dendro helper decodes ADC_CH4V from raw MOD3 payloads');
+    expectEqual(decoded && decoded.modeCode, 3, 'dendro helper decodes MOD3 mode from raw payloads');
+
+    const legacyMetrics = dendroHelper.buildDendroDerivedMetrics({
+      effectiveMode: 2,
+      adcCh0V: 1.2,
+      adcCh1V: null,
+    });
+    expectEqual(legacyMetrics.dendroModeUsed, 'legacy_single_adc', 'legacy dendrometer path remains active outside MOD3');
+    expectApprox(legacyMetrics.positionMm, 12, 0.001, 'legacy dendrometer path preserves single-ADC conversion');
+
+    const ratioMetrics = dendroHelper.buildDendroDerivedMetrics({
+      effectiveMode: 3,
+      adcCh0V: 1.2,
+      adcCh1V: 2.4,
+      strokeMm: 40,
+      ratioZero: 0.2,
+      ratioSpan: 0.8,
+      invertDirection: 0,
+    });
+    expectEqual(ratioMetrics.dendroModeUsed, 'ratio_mod3', 'MOD3 dendrometer path switches to ratio mode when CH0 and CH1 are valid');
+    expectApprox(ratioMetrics.dendroRatio, 0.5, 0.000001, 'ratio dendrometer path exposes the raw ratio');
+    expectApprox(ratioMetrics.positionMm, 20, 0.001, 'ratio dendrometer path converts calibrated displacement');
+
+    const invalidReferenceMetrics = dendroHelper.buildDendroDerivedMetrics({
+      effectiveMode: 3,
+      adcCh0V: 1.2,
+      adcCh1V: 0.01,
+      strokeMm: 40,
+      ratioZero: 0.2,
+      ratioSpan: 0.8,
+    });
+    expectEqual(invalidReferenceMetrics.dendroModeUsed, 'legacy_single_adc', 'near-zero CH1 falls back to the legacy dendrometer path');
+    expectApprox(invalidReferenceMetrics.positionMm, 12, 0.001, 'near-zero CH1 preserves legacy dendrometer comparability');
+
+    const invertedPosition = dendroHelper.calculateRatioDendroPositionMm({
+      strokeMm: 40,
+      ratioZero: 0.2,
+      ratioSpan: 0.8,
+      ratio: 0.3,
+      invertDirection: 1,
+    });
+    expectApprox(invertedPosition, 33.333, 0.001, 'invert_direction reverses the ratio-based displacement conversion');
+
+    const missingCalibrationMetrics = dendroHelper.buildDendroDerivedMetrics({
+      effectiveMode: 3,
+      adcCh0V: 1.2,
+      adcCh1V: 2.4,
+    });
+    expectEqual(missingCalibrationMetrics.dendroModeUsed, 'ratio_mod3', 'ratio mode still activates without calibration values');
+    expectApprox(missingCalibrationMetrics.dendroRatio, 0.5, 0.000001, 'ratio mode still exposes raw ratios when calibration is missing');
+    expectEqual(missingCalibrationMetrics.positionMm, null, 'ratio mode does not synthesize calibrated displacement when calibration is missing');
+    expectEqual(missingCalibrationMetrics.calibrationMissing, true, 'ratio mode flags missing calibration cleanly');
+
+    const pathResetDelta = dendroHelper.computeDendroDeltaMm({
+      positionMm: 20,
+      modeUsed: 'ratio_mod3',
+      calibrationSignature: '40|0.2|0.8|0',
+      previousState: {
+        positionMm: 19,
+        modeUsed: 'legacy_single_adc',
+        calibrationSignature: 'null|null|null|0',
+      },
+    });
+    expectEqual(pathResetDelta.deltaMm, null, 'dendrometer delta resets when the conversion path changes');
+
+    const calibrationResetDelta = dendroHelper.computeDendroDeltaMm({
+      positionMm: 20,
+      modeUsed: 'ratio_mod3',
+      calibrationSignature: '50|0.2|0.8|0',
+      previousState: {
+        positionMm: 19,
+        modeUsed: 'ratio_mod3',
+        calibrationSignature: '40|0.2|0.8|0',
+      },
+    });
+    expectEqual(calibrationResetDelta.deltaMm, null, 'dendrometer delta resets when calibration changes');
+
+    pendingChecks.push(executeFunctionNodeById('dendro-readings-insert-fn', {
+      formattedData: {
+        devEui: 'ABC123',
+        detectedMode: 2,
+        dendroValid: 1,
+        positionMm: 1.234,
+        deltaMm: null,
+        adcV: 1.111,
+        adcCh1V: null,
+        dendroRatio: null,
+        dendroModeUsed: 'legacy_single_adc',
+        batV: 3.65,
+        timestamp: '2026-04-17T12:00:00.000Z',
+      },
+    }).then((sqlMsg) => {
+      const sql = String((sqlMsg && (sqlMsg.topic || sqlMsg.payload)) || '');
+      expectCondition(
+        sql.includes('adc_v,adc_ch0v,adc_ch1v,dendro_ratio,dendro_mode_used'),
+        'legacy dendrometer SQL keeps adc_v while adding CH0/CH1/ratio debug columns',
+        'legacy dendrometer SQL is missing backward-compatible raw debug columns'
+      );
+      expectCondition(
+        sql.includes("1.111,1.111,NULL,NULL,'legacy_single_adc'"),
+        'legacy dendrometer SQL preserves adc_v and adc_ch0v semantics for historical rows',
+        'legacy dendrometer SQL no longer preserves adc_v and adc_ch0v semantics'
+      );
+    }).catch((error) => {
+      fail(`failed to execute dendro-readings-insert-fn fixture: ${error.message}`);
+    }));
+
+    pendingChecks.push(executeFunctionNodeById('dendro-readings-insert-fn', {
+      formattedData: {
+        devEui: 'ABC123',
+        detectedMode: 3,
+        dendroValid: 1,
+        positionMm: 12.5,
+        deltaMm: 0.125,
+        adcV: 1.2,
+        adcCh1V: 2.4,
+        dendroRatio: 0.5,
+        dendroModeUsed: 'ratio_mod3',
+        batV: 3.7,
+        timestamp: '2026-04-17T12:05:00.000Z',
+      },
+    }).then((sqlMsg) => {
+      const sql = String((sqlMsg && (sqlMsg.topic || sqlMsg.payload)) || '');
+      expectCondition(
+        sql.includes("1.2,1.2,2.4,0.5,'ratio_mod3'"),
+        'MOD3 dendrometer SQL persists CH1, ratio, and ratio-mode metadata',
+        'MOD3 dendrometer SQL is missing the ratio-mode persistence columns or values'
+      );
+    }).catch((error) => {
+      fail(`failed to execute MOD3 dendro-readings-insert-fn fixture: ${error.message}`);
+    }));
+  }
 }
+
+Promise.all(pendingChecks).finally(() => {
+  if (!process.exitCode) {
+    console.log('Sync flow verification passed');
+  }
+});

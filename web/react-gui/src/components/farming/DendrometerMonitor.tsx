@@ -39,6 +39,12 @@ function fmtTickShort(iso: string, hours: number): string {
   return d.toLocaleString(undefined, { month: 'short', day: 'numeric' });
 }
 
+function formatDendroModeUsed(value: unknown): string | null {
+  if (value === 'ratio_mod3') return 'Ratio MOD3';
+  if (value === 'legacy_single_adc') return 'Legacy ADC';
+  return null;
+}
+
 // ─── aggregated-delta computation ───────────────────────────────────────────
 
 interface DeltaBucket {
@@ -49,11 +55,21 @@ interface DeltaBucket {
   delta: number | null; // mean(this) − mean(prev adjacent bucket); null when gap > 1.5× interval
 }
 
+type CalibratedHistoryPoint = DendroHistoryPoint & { position_mm: number };
+
+function hasCalibratedPosition(point: DendroHistoryPoint): point is CalibratedHistoryPoint {
+  return point.valid === 1 && point.position_mm != null;
+}
+
+function hasRawDendroSignals(point: DendroHistoryPoint): boolean {
+  return point.adc_ch0v != null || point.adc_ch1v != null || point.dendro_ratio != null;
+}
+
 function computeAggregatedDeltas(
   data: DendroHistoryPoint[],
   intervalMinutes: number,
 ): DeltaBucket[] {
-  const valid = data.filter(d => d.valid === 1 && d.position_mm != null);
+  const valid = data.filter(hasCalibratedPosition);
   if (valid.length === 0) return [];
 
   const intervalMs = intervalMinutes * 60 * 1000;
@@ -96,12 +112,23 @@ function computeAggregatedDeltas(
 
 const TooltipPosition = ({ active, payload, label, hours }: any) => {
   if (!active || !payload?.length) return null;
+  const point = payload[0].payload;
+  const sourceLabel = formatDendroModeUsed(point.dendro_mode_used);
   return (
     <div className="bg-[var(--surface)] border border-[var(--border)] rounded-lg p-3 text-sm shadow-xl">
       <p className="text-[var(--text-tertiary)] mb-1">{fmtTickShort(label, hours)}</p>
       <p className="font-bold text-[var(--text)]">{payload[0].value?.toFixed(3)} mm</p>
-      {payload[0].payload.adc_v !== undefined && (
-        <p className="text-[var(--text-tertiary)] text-xs">ADC: {payload[0].payload.adc_v?.toFixed(3)} V</p>
+      {point.adc_ch0v != null && (
+        <p className="text-[var(--text-tertiary)] text-xs">CH0: {point.adc_ch0v.toFixed(3)} V</p>
+      )}
+      {point.adc_ch1v != null && (
+        <p className="text-[var(--text-tertiary)] text-xs">CH1: {point.adc_ch1v.toFixed(3)} V</p>
+      )}
+      {point.dendro_ratio != null && (
+        <p className="text-[var(--text-tertiary)] text-xs">Ratio: {point.dendro_ratio.toFixed(4)}</p>
+      )}
+      {sourceLabel && (
+        <p className="text-[var(--text-tertiary)] text-xs">Source: {sourceLabel}</p>
       )}
     </div>
   );
@@ -146,12 +173,14 @@ export const DendrometerMonitor: React.FC<Props> = ({ deveui, deviceName, onClos
     return () => { cancelled = true; };
   }, [deveui, hours]);
 
+  const plottedData = useMemo(() => data.filter(hasCalibratedPosition), [data]);
+
   // Tick reduction for position chart: ~8 ticks max
   const posTicks = useMemo(() => {
-    if (!data.length) return [];
-    const step = Math.max(1, Math.floor(data.length / 8));
-    return data.filter((_, i) => i % step === 0).map(d => d.t);
-  }, [data]);
+    if (!plottedData.length) return [];
+    const step = Math.max(1, Math.floor(plottedData.length / 8));
+    return plottedData.filter((_, i) => i % step === 0).map(d => d.t);
+  }, [plottedData]);
 
   // Aggregated delta buckets (recomputed when data or interval changes)
   const deltaBuckets = useMemo(
@@ -169,10 +198,11 @@ export const DendrometerMonitor: React.FC<Props> = ({ deveui, deviceName, onClos
   }, [deltaBuckets]);
 
   // Summary stats
-  const validPositions = data.filter(d => d.valid === 1).map(d => d.position_mm);
+  const validPositions = plottedData.map(d => d.position_mm);
   const minPos = validPositions.length ? Math.min(...validPositions) : null;
   const maxPos = validPositions.length ? Math.max(...validPositions) : null;
-  const latest = data[data.length - 1];
+  const latest = plottedData[plottedData.length - 1] ?? null;
+  const hasRawOnlySamples = data.some((point) => !hasCalibratedPosition(point) && hasRawDendroSignals(point));
 
   return (
     <div
@@ -216,11 +246,11 @@ export const DendrometerMonitor: React.FC<Props> = ({ deveui, deviceName, onClos
         </div>
 
         {/* Stats row */}
-        {!loading && !error && data.length > 0 && (
+        {!loading && !error && plottedData.length > 0 && (
           <div className="px-6 pt-4 grid grid-cols-3 gap-3 shrink-0">
             <div className="bg-[var(--card)] rounded-lg p-3 text-center">
               <p className="text-[var(--text-tertiary)] text-xs font-semibold">CURRENT</p>
-              <p className="text-xl font-bold text-[var(--text)]">{latest?.position_mm?.toFixed(2)} mm</p>
+              <p className="text-xl font-bold text-[var(--text)]">{latest ? `${latest.position_mm.toFixed(2)} mm` : '—'}</p>
             </div>
             <div className="bg-[var(--card)] rounded-lg p-3 text-center">
               <p className="text-[var(--text-tertiary)] text-xs font-semibold">MIN</p>
@@ -255,14 +285,23 @@ export const DendrometerMonitor: React.FC<Props> = ({ deveui, deviceName, onClos
               </p>
             </div>
           )}
+          {!loading && !error && data.length > 0 && plottedData.length === 0 && (
+            <div className="flex-1 flex items-center justify-center">
+              <p className="text-[var(--text-tertiary)] text-lg text-center">
+                {hasRawOnlySamples
+                  ? 'Raw samples are available in this window, but calibrated displacement is not yet available.'
+                  : `No calibrated dendrometer displacement is available in the last ${hours} hours.`}
+              </p>
+            </div>
+          )}
 
-          {!loading && !error && data.length > 0 && (
+          {!loading && !error && plottedData.length > 0 && (
             <>
               {/* Chart 1: Absolute position */}
               <div>
                 <h3 className="text-[var(--text)] font-bold mb-3">Trunk Position (mm)</h3>
                 <ResponsiveContainer width="100%" height={220}>
-                  <AreaChart data={data} margin={{ top: 8, right: 8, bottom: 0, left: 0 }}>
+                  <AreaChart data={plottedData} margin={{ top: 8, right: 8, bottom: 0, left: 0 }}>
                     <defs>
                       <linearGradient id="posGrad" x1="0" y1="0" x2="0" y2="1">
                         <stop offset="5%"  stopColor="#22c55e" stopOpacity={0.35} />
