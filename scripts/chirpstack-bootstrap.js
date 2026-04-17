@@ -364,7 +364,6 @@ async function main() {
     CHIRPSTACK_PROFILE_RAK10701: rak10701ProfileId,
     CHIRPSTACK_PROFILE_S2120: s2120ProfileId
   };
-  if (gatewayEui) envVars.DEVICE_EUI = gatewayEui;
   writeEnvFile(envVars);
 
   patchSettingsJs();

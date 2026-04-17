@@ -252,6 +252,14 @@ function expectFileIncludes(fileLabel, content, needle, description) {
   }
 }
 
+function expectFileExcludes(fileLabel, content, needle, description) {
+  if (content.includes(needle)) {
+    fail(`${fileLabel} still contains ${description}`);
+  } else {
+    console.log(`OK ${fileLabel} removed ${description}`);
+  }
+}
+
 for (const route of requiredHttpRoutes) {
   const node = flows.find((candidate) => candidate.type === 'http in' && candidate.url === route);
   if (!node) {
@@ -720,6 +728,9 @@ expectIncludes('Build STREGA downlink + emit log ctx', "case 'SET_FLUSHING': {",
 expectFileIncludes('node-red.init', nodeRedInitScript, '. /usr/libexec/osi-gateway-identity.sh', 'uses the shared gateway identity helper');
 expectFileIncludes('node-red.init', nodeRedInitScript, 'gateway_identity_resolve', 'resolves the canonical gateway identity through the shared helper');
 expectFileIncludes('node-red.init', nodeRedInitScript, 'gateway_identity_persist', 'persists canonical gateway identity metadata during startup');
+expectFileIncludes('node-red.init', nodeRedInitScript, 'normalize_runtime_eui()', 'defines a startup helper to canonicalize gateway identities before exporting them');
+expectFileIncludes('node-red.init', nodeRedInitScript, 'device_eui="$(normalize_runtime_eui "$device_eui")"', 'normalizes the runtime gateway identity to uppercase before using it for MQTT credentials');
+expectFileIncludes('node-red.init', nodeRedInitScript, 'link_gateway_device_eui="$(normalize_runtime_eui "$link_gateway_device_eui")"', 'normalizes the linked gateway identity to uppercase before exporting it');
 expectFileIncludes('node-red.init', nodeRedInitScript, 'DEVICE_EUI="$device_eui"', 'exports the derived gateway EUI into the Node-RED runtime environment');
 expectFileIncludes('node-red.init', nodeRedInitScript, 'DEVICE_EUI_CONFIDENCE="$device_eui_confidence"', 'exports gateway identity confidence into the Node-RED runtime environment');
 expectFileIncludes('node-red.init', nodeRedInitScript, 'LINK_GATEWAY_DEVICE_EUI="$link_gateway_device_eui"', 'exports the linked gateway identity into the Node-RED runtime environment');
@@ -733,6 +744,7 @@ expectFileIncludes('96_osi_server_config', osiServerDefaultsScript, 'set osi-ser
 expectFileIncludes('96_osi_server_config', osiServerDefaultsScript, 'set osi-server.cloud.allow_private_target=0', 'defaults the private-target override to disabled');
 expectFileIncludes('chirpstack-bootstrap.js', chirpstackBootstrapScript, '/usr/libexec/osi-gateway-identity.sh', 'uses the shared gateway identity helper during one-shot bootstrap detection');
 expectFileIncludes('chirpstack-bootstrap.js', chirpstackBootstrapScript, "readGatewayIdentityViaHelper", 'reads gateway identity via the shared helper during one-shot bootstrap detection');
+expectFileExcludes('chirpstack-bootstrap.js', chirpstackBootstrapScript, 'envVars.DEVICE_EUI = gatewayEui', 'persisting a stale gateway identity into .chirpstack.env when Node-RED already injects the canonical runtime value');
 expectFileIncludes('deploy.sh', deployScript, '"feeds/chirpstack-openwrt-feed/apps/node-red/files/node-red.init"', 'deploys the Node-RED init script to live devices');
 expectFileIncludes('deploy.sh', deployScript, '"conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/libexec/osi-gateway-identity.sh"', 'deploys the shared gateway identity helper to live devices');
 expectFileIncludes('deploy.sh', deployScript, 'chmod 755 /etc/init.d/node-red', 'keeps the deployed Node-RED init script executable');
@@ -743,6 +755,7 @@ expectFileIncludes('osi-gateway-identity.sh', gatewayIdentityHelperScript, 'gate
 expectFileIncludes('osi-gateway-identity.sh', gatewayIdentityHelperScript, 'GATEWAY_IDENTITY_DEVICE_EUI_CONFIDENCE="authoritative"', 'marks live ChirpStack-derived gateway identities as authoritative');
 expectFileIncludes('osi-gateway-identity.sh', gatewayIdentityHelperScript, 'GATEWAY_IDENTITY_DEVICE_EUI_CONFIDENCE="persisted"', 'marks previously verified gateway identities as persisted');
 expectFileIncludes('osi-gateway-identity.sh', gatewayIdentityHelperScript, 'GATEWAY_IDENTITY_DEVICE_EUI_CONFIDENCE="provisional"', 'marks MAC-derived gateway identities as provisional');
+expectFileIncludes('osi-gateway-identity.sh', gatewayIdentityHelperScript, '/bin/sh -c', 'runs gateway detection in a non-login shell so banner output cannot poison detection');
 expectFileIncludes('osi-gateway-identity.sh', gatewayIdentityHelperScript, 'sh /usr/bin/gateway-id.sh', 'prefers runtime concentratord gateway identity when available');
 expectFileIncludes('osi-gateway-identity.sh', gatewayIdentityHelperScript, 'gateway_identity_matches_local_mac_fallback', 'downgrades MAC-derived concentratord IDs away from authoritative confidence');
 expectFileIncludes('osi-gateway-identity.sh', gatewayIdentityHelperScript, 'for iface in eth0 br-lan wlan0; do', 'falls back across known interfaces for provisional MAC-derived identity');

@@ -8,6 +8,12 @@ PACKAGE_NAME=node-red
 
 [ -f /usr/libexec/osi-gateway-identity.sh ] && . /usr/libexec/osi-gateway-identity.sh
 
+normalize_runtime_eui() {
+    local normalized
+    normalized="$(normalize_gateway_eui "$1" 2>/dev/null || true)"
+    printf '%s' "$normalized"
+}
+
 start_service() {
     mkdir -p /srv/$PACKAGE_NAME
 
@@ -19,6 +25,8 @@ start_service() {
     local device_eui_confidence="${GATEWAY_IDENTITY_DEVICE_EUI_CONFIDENCE:-$(uci -q get osi-server.cloud.device_eui_confidence 2>/dev/null || echo "provisional")}"
     local device_eui_last_verified_at="${GATEWAY_IDENTITY_DEVICE_EUI_LAST_VERIFIED_AT:-$(uci -q get osi-server.cloud.device_eui_last_verified_at 2>/dev/null || echo "")}"
     local link_gateway_device_eui=$(uci -q get osi-server.cloud.link_gateway_device_eui 2>/dev/null || echo "")
+    device_eui="$(normalize_runtime_eui "$device_eui")"
+    link_gateway_device_eui="$(normalize_runtime_eui "$link_gateway_device_eui")"
     local device_type=$(uci -q get osi-server.cloud.device_type 2>/dev/null || echo "GATEWAY")
     local mqtt_password=$(uci -q get osi-server.cloud.mqtt_password 2>/dev/null || echo "")
     local server_host=$(uci -q get osi-server.cloud.server_host 2>/dev/null || echo "")

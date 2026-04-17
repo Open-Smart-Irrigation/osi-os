@@ -39,7 +39,7 @@ gateway_identity_try_command() {
     local source="$1"
     local command="$2"
     local candidate resolved
-    candidate="$(sh -lc "$command" 2>/dev/null | head -n 1 | tr -d '\r\n' || true)"
+    candidate="$(/bin/sh -c "$command" 2>/dev/null | head -n 1 | tr -d '\r\n' || true)"
     resolved="$(normalize_gateway_eui "$candidate" || true)"
     [ -n "$resolved" ] || return 1
     GATEWAY_IDENTITY_DEVICE_EUI="$resolved"
