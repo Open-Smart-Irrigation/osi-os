@@ -68,6 +68,8 @@ The communication between osi-os and osi-server uses **two distinct protocols**:
 - `ASSIGN_DEVICE_TO_ZONE`, `REMOVE_DEVICE_FROM_ZONE` — device assignment
 - `UPSERT_DEVICE_FLAGS` — device flags
 - `UNCLAIM_DEVICE` — device unclaim
+- `SYNC_LINKED_AUTH` — linked login verifier update
+- `FORCE_EDGE_SYNC` — queue one local sync sweep
 - `VALVE_COMMAND` — valve control
 - `SET_LSN50_*`, `SET_KIWI_*`, `SET_STREGA_*` — device configuration
 - `SET_FAN`, `REBOOT` — gateway control
@@ -103,6 +105,9 @@ MQTT is used for **telemetry and acknowledgments only**. The edge subscribes to 
 ### Backend / flow logic
 
 - [flows.json](/home/phil/Repos/osi-os/conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/flows.json)
+- [osi-gateway-identity.sh](/home/phil/Repos/osi-os/conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/libexec/osi-gateway-identity.sh)
+- [chirpstack-bootstrap.js](/home/phil/Repos/osi-os/scripts/chirpstack-bootstrap.js)
+- [node-red.init](/home/phil/Repos/osi-os/feeds/chirpstack-openwrt-feed/apps/node-red/files/node-red.init)
 
 This file contains:
 
@@ -133,9 +138,13 @@ This file contains:
 - [EdgeSyncService.java](/home/phil/Repos/osi-server/backend/src/main/java/org/osi/server/sync/EdgeSyncService.java)
 - [EdgeSyncController.java](/home/phil/Repos/osi-server/backend/src/main/java/org/osi/server/sync/EdgeSyncController.java)
 - [CommandService.java](/home/phil/Repos/osi-server/backend/src/main/java/org/osi/server/command/CommandService.java)
+- [DeviceMqttProvisioningService.java](/home/phil/Repos/osi-server/backend/src/main/java/org/osi/server/mqtt/DeviceMqttProvisioningService.java)
 - [MqttSubscriberService.java](/home/phil/Repos/osi-server/backend/src/main/java/org/osi/server/mqtt/MqttSubscriberService.java)
 - [MqttPublisherService.java](/home/phil/Repos/osi-server/backend/src/main/java/org/osi/server/mqtt/MqttPublisherService.java)
 - [AuthController.java](/home/phil/Repos/osi-server/backend/src/main/java/org/osi/server/user/AuthController.java)
+- [UserController.java](/home/phil/Repos/osi-server/backend/src/main/java/org/osi/server/user/UserController.java)
+- [LinkedGatewayAccountService.java](/home/phil/Repos/osi-server/backend/src/main/java/org/osi/server/user/LinkedGatewayAccountService.java)
+- [LinkedGatewaySyncService.java](/home/phil/Repos/osi-server/backend/src/main/java/org/osi/server/user/LinkedGatewaySyncService.java)
 - [JwtTokenProvider.java](/home/phil/Repos/osi-server/backend/src/main/java/org/osi/server/security/JwtTokenProvider.java)
 - [DendroAnalyticsService.java](/home/phil/Repos/osi-server/backend/src/main/java/org/osi/server/analytics/DendroAnalyticsService.java)
 - [PredictionController.java](/home/phil/Repos/osi-server/backend/src/main/java/org/osi/server/prediction/PredictionController.java)
@@ -162,6 +171,10 @@ This file contains:
 
 - `POST /auth/local-sync`
 - `POST /auth/refresh-sync`
+- `POST /api/v1/users/me/password`
+- `GET /api/v1/users/me/linked-gateways`
+- `POST /api/v1/users/me/linked-gateways/force-sync`
+- `POST /api/v1/users/me/linked-gateways/{gatewayEui}/force-sync`
 - `POST /api/v1/sync/edge/bootstrap`
 - `POST /api/v1/sync/edge/events`
 - `GET /api/v1/sync/gateways/{gatewayEui}/pending-commands`
@@ -219,6 +232,8 @@ cd /home/phil/Repos/osi-server/backend
 ./gradlew test --tests org.osi.server.sync.EdgeSyncServiceDataPlaneTest
 ./gradlew test --tests org.osi.server.sync.EdgeSyncServiceStatusTest
 ./gradlew test --tests org.osi.server.sync.EdgeSyncControllerTest
+./gradlew test --tests org.osi.server.user.LinkedGatewaySyncServiceTest
+./gradlew test --tests org.osi.server.mqtt.DeviceMqttProvisioningServiceTest
 ./gradlew test --tests org.osi.server.zone.ZoneFieldGeometryServiceTest
 ./gradlew test --tests org.osi.server.prediction.PredictionFieldStateServiceTest
 ```
@@ -241,12 +256,17 @@ npm run build
 - For synced farms, mirrored edge outputs are the canonical user-facing state.
 - **All cloud→edge commands flow via REST polling** (`pending-commands` endpoint), not MQTT subscription.
 - MQTT is used for **telemetry only** (edge → cloud) plus heartbeats and ACKs.
+- Linked-password continuity is now a first-class control-plane feature: cloud password changes enqueue `SYNC_LINKED_AUTH`, and the cloud account page exposes linked-gateway status plus safe force-sync replay.
+- Runtime gateway EUIs are normalized to uppercase on the edge. On BusyBox helpers, prefer `tr 'abcdef' 'ABCDEF'`; `tr '[:lower:]' '[:upper:]'` was not reliable on the live Pi images.
+- The server MQTT provisioning layer now creates both uppercase and lowercase gateway usernames for mixed-version rollout compatibility, but new edge runtime state should still use the uppercase canonical EUI.
+- The deploy/bootstrap post-check for `CHIRPSTACK_PROFILE_CLOVER` is stale. Current bootstrap writes `CHIRPSTACK_PROFILE_RAK10701`, so `CLOVER`-based checks can fail as a false negative.
 - Terra Intelligence lives in `osi-server/prediction_animation_v2` and is served by the backend at `/terra-intelligence`.
 - Direct access to `/terra-intelligence` should open demo mode; OSI Cloud launches live mode with a zone-scoped `?zoneId=<id>` link from the prediction advisory card.
 - When wiring Spring SPA forwarding for Terra, prefer explicit `/terra-intelligence` entry mappings; broad `**/{path:...}` patterns can fail startup under Spring's `PathPatternParser`.
 - As of `2026-04-16`, the live `osi-backend` on `83.228.220.63` is configured to use the separate prediction VPS at `https://vps-92c7b4bb.vps.ovh.net` instead of the local in-stack prediction service.
 - The prediction VPS nginx config leaves `/health` public but allowlists `/internal/*`, `/openapi.json`, `/docs`, and `/redoc` to the live OSI server addresses `83.228.220.63`, `2001:1600:18:103::336`, and localhost.
 - The old local `osi-prediction-service` container on the main OSI server was intentionally left running as a dormant fallback after cutover. Revisit it after a few weeks of stable operation before removing it.
+- The live VPS checkout may not have working GitHub auth for `git pull`. A local git bundle + `git pull --ff-only <bundle> main` is a viable fallback, then `git update-ref refs/remotes/origin/main HEAD` keeps the live repo state clean.
 
 ### Live Deploy Database Safety
 
@@ -256,6 +276,7 @@ npm run build
 - Before any manual DB repair or destructive cloud cleanup, take a timestamped backup of the Pi DB, including `farming.db-wal`, `farming.db-shm`, and `farming.db-journal` when present.
 - If a deploy needs schema changes, use migrations or idempotent SQL against the existing DB instead of replacing the file.
 - If `/data/db/farming.db` is missing but SQLite sidecar files exist, stop and inspect/recover rather than seeding a new DB.
+- On upgraded installs, do not let stale `/srv/node-red/.chirpstack.env` `DEVICE_EUI*` values override runtime identity. The canonical gateway EUI should come from the helper / UCI path, and stale overrides should be removed during manual repair.
 - Before a live VPS rollout, create a timestamped backup under `/home/rocky/backups/osi-server-<timestamp>` with the repo snapshot, Docker env/config, PostgreSQL dump, Mosquitto state, and OpenAgri data.
 - Before a risky Pi rollout or manual repair, create a timestamped backup under `/data/db/backups/osi-os-<timestamp>` including `/data/db/`, `/srv/node-red/`, `/usr/lib/node-red/gui/`, `/etc/init.d/node-red`, `flows.json`, and `settings.js`.
 
