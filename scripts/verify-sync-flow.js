@@ -1060,11 +1060,15 @@ if (!dendroHelperPath) {
   }
 
   if (dendroHelper) {
-    const mod3Fixture = Buffer.from([0x0B, 0xB8, 0x00, 0xFA, 0x04, 0xB0, 0x08, 0x09, 0xC4, 0x03, 0x84]).toString('base64');
+    const mod3Fixture = Buffer.from([0x0F, 0xA0, 0x04, 0x00, 0x08, 0x00, 0x08, 0x01]).toString('base64');
     const decoded = dendroHelper.decodeRawAdcPayload(mod3Fixture);
-    expectApprox(decoded && decoded.adcCh0V, 1.2, 0.001, 'dendro helper decodes ADC_CH0V from raw MOD3 payloads');
-    expectApprox(decoded && decoded.adcCh1V, 2.5, 0.001, 'dendro helper decodes ADC_CH1V from raw MOD3 payloads');
-    expectApprox(decoded && decoded.adcCh4V, 0.9, 0.001, 'dendro helper decodes ADC_CH4V from raw MOD3 payloads');
+    expectApprox(decoded && decoded.batV, 4.0, 0.001, 'dendro helper decodes battery voltage from the new MOD3 payload');
+    expectApprox(decoded && decoded.adcCh0V, 1.0, 0.001, 'dendro helper derives ADC_CH0V from averaged raw MOD3 counts');
+    expectApprox(decoded && decoded.adcCh1V, 2.0, 0.001, 'dendro helper derives ADC_CH1V from averaged raw MOD3 counts');
+    expectEqual(decoded && decoded.adcCh4V, null, 'dendro helper clears ADC_CH4V for the new MOD3 payload');
+    expectEqual(decoded && decoded.adcSignalAvgRaw, 1024, 'dendro helper exposes averaged PA0 raw counts');
+    expectEqual(decoded && decoded.adcReferenceAvgRaw, 2048, 'dendro helper exposes averaged PA1 raw counts');
+    expectEqual(decoded && decoded.measurementValid, 1, 'dendro helper exposes the dendrometer valid flag');
     expectEqual(decoded && decoded.modeCode, 3, 'dendro helper decodes MOD3 mode from raw payloads');
 
     const legacyMetrics = dendroHelper.buildDendroDerivedMetrics({

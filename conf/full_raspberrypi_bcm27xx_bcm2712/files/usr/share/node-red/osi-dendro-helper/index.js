@@ -46,6 +46,36 @@ function decodeRawAdcPayload(b64) {
 
     const batV = ((buf[0] << 8) | buf[1]) / 1000;
     const modeCode = detectLsn50ModeCode(b64);
+    const isNewMod3 = modeCode === 3 && buf.length === 8;
+
+    if (isNewMod3) {
+      const adcSignalAvgRaw = (buf[2] << 8) | buf[3];
+      const adcReferenceAvgRaw = (buf[4] << 8) | buf[5];
+      const flags = buf[7];
+      const measurementValid = (flags & 0x01) === 0x01 ? 1 : 0;
+      const referenceTooLow = (flags & 0x02) === 0x02 ? 1 : 0;
+      const divisionSkipped = (flags & 0x04) === 0x04 ? 1 : 0;
+      const adcScaleV = batV / 4095;
+      const adcCh0V = roundTo(adcSignalAvgRaw * adcScaleV, 6);
+      const adcCh1V = roundTo(adcReferenceAvgRaw * adcScaleV, 6);
+
+      return {
+        batV,
+        tempC1: null,
+        adcCh0V,
+        adcCh1V,
+        adcCh4V: null,
+        adcSignalAvgRaw,
+        adcReferenceAvgRaw,
+        measurementValid,
+        referenceTooLow,
+        divisionSkipped,
+        dendroFlags: flags,
+        modeCode,
+        modeLabel: lsn50ModeLabel(modeCode),
+      };
+    }
+
     const tempDisconnected = buf.length >= 4 && buf[2] === 0x7f && buf[3] === 0xff;
     const tempRaw = buf.length >= 4 ? ((buf[2] << 24 >> 16) | buf[3]) : null;
     const tempC1 = tempDisconnected || tempRaw === null ? null : tempRaw / 10;
