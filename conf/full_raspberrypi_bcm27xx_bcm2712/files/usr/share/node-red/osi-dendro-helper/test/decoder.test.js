@@ -5,6 +5,7 @@ const assert = require('node:assert/strict');
 
 const {
   decodeMod3DendroPayload,
+  buildDendroDerivedMetrics,
 } = require('..');
 
 function hex(bytes) {
@@ -138,4 +139,55 @@ test('buildDendroDerivedMetrics: invalid MOD=3 frame falls to dendroValid=0', ()
   });
 
   assert.equal(metrics.dendroValid, 0);
+});
+
+test('buildDendroDerivedMetrics: REF_HIGH firmware flag forces dendroValid=0 even when voltages look valid', () => {
+  // Voltages in-band (signal=ref=2048 raw ≈ 1.6 V with batV=3.2) but firmware
+  // reported REF_HIGH. The gateway must honor the firmware's validity bit.
+  const metrics = buildDendroDerivedMetrics({
+    effectiveMode: 3,
+    adcCh0V: (2048 * 3.2) / 4095,
+    adcCh1V: (2048 * 3.2) / 4095,
+    measurementValid: false,
+    strokeMm: 50,
+    ratioZero: 0.2,
+    ratioSpan: 0.9,
+    invertDirection: 0,
+  });
+  assert.equal(metrics.dendroModeUsed, 'ratio_mod3');
+  assert.equal(metrics.dendroValid, 0);
+  assert.equal(metrics.dendroRatio, null);
+  assert.equal(metrics.positionMm, null);
+});
+
+test('buildDendroDerivedMetrics: ADC_FAIL firmware flag forces dendroValid=0', () => {
+  const metrics = buildDendroDerivedMetrics({
+    effectiveMode: 3,
+    adcCh0V: (2048 * 3.2) / 4095,
+    adcCh1V: (2048 * 3.2) / 4095,
+    measurementValid: false,
+    strokeMm: 50,
+    ratioZero: 0.2,
+    ratioSpan: 0.9,
+    invertDirection: 0,
+  });
+  assert.equal(metrics.dendroValid, 0);
+  assert.equal(metrics.dendroRatio, null);
+});
+
+test('buildDendroDerivedMetrics: legacy (no measurementValid field) keeps voltage-derived validity', () => {
+  // Stock firmware path: measurementValid is not passed. Voltage-based
+  // validity governs, matching pre-existing behavior.
+  const metrics = buildDendroDerivedMetrics({
+    effectiveMode: 3,
+    adcCh0V: 1.2,
+    adcCh1V: 2.4,
+    strokeMm: 40,
+    ratioZero: 0.2,
+    ratioSpan: 0.8,
+    invertDirection: 0,
+  });
+  assert.equal(metrics.dendroModeUsed, 'ratio_mod3');
+  assert.equal(metrics.dendroValid, 1);
+  assert.ok(Math.abs(metrics.dendroRatio - 0.5) < 1e-6);
 });

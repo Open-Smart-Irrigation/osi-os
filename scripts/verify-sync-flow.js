@@ -1060,12 +1060,51 @@ if (!dendroHelperPath) {
   }
 
   if (dendroHelper) {
-    const mod3Fixture = Buffer.from([0x0B, 0xB8, 0x00, 0xFA, 0x04, 0xB0, 0x08, 0x09, 0xC4, 0x03, 0x84]).toString('base64');
-    const decoded = dendroHelper.decodeRawAdcPayload(mod3Fixture);
-    expectApprox(decoded && decoded.adcCh0V, 1.2, 0.001, 'dendro helper decodes ADC_CH0V from raw MOD3 payloads');
-    expectApprox(decoded && decoded.adcCh1V, 2.5, 0.001, 'dendro helper decodes ADC_CH1V from raw MOD3 payloads');
-    expectApprox(decoded && decoded.adcCh4V, 0.9, 0.001, 'dendro helper decodes ADC_CH4V from raw MOD3 payloads');
-    expectEqual(decoded && decoded.modeCode, 3, 'dendro helper decodes MOD3 mode from raw payloads');
+    // Stock-firmware 11-byte MOD3 frame: exercises the legacy dispatcher path.
+    const stockMod3Fixture = Buffer.from([0x0B, 0xB8, 0x00, 0xFA, 0x04, 0xB0, 0x08, 0x09, 0xC4, 0x03, 0x84]).toString('base64');
+    const decoded = dendroHelper.decodeRawAdcPayload(stockMod3Fixture);
+    expectApprox(decoded && decoded.adcCh0V, 1.2, 0.001, 'dendro helper decodes ADC_CH0V from stock 11-byte MOD3 payloads');
+    expectApprox(decoded && decoded.adcCh1V, 2.5, 0.001, 'dendro helper decodes ADC_CH1V from stock 11-byte MOD3 payloads');
+    expectApprox(decoded && decoded.adcCh4V, 0.9, 0.001, 'dendro helper decodes ADC_CH4V from stock 11-byte MOD3 payloads');
+    expectEqual(decoded && decoded.modeCode, 3, 'dendro helper decodes MOD3 mode from stock 11-byte payloads');
+
+    // Custom-firmware 8-byte MOD3 frame (ratiometric rollout): batV=3.2V,
+    // signal raw=0x0400 (1024), reference raw=0x0800 (2048), status byte
+    // encodes MOD=3 (raw nibble 2), flags=VALID. Dispatcher must route this
+    // through decodeMod3DendroPayload.
+    const customMod3ValidFixture = Buffer.from([0x0C, 0x80, 0x04, 0x00, 0x08, 0x00, 0x08, 0x01]).toString('base64');
+    const customValid = dendroHelper.decodeRawAdcPayload(customMod3ValidFixture);
+    expectEqual(customValid && customValid.modeCode, 3, 'dendro helper routes 8-byte MOD3 frames to decodeMod3DendroPayload');
+    expectEqual(customValid && customValid.adcSignalAvgRaw, 1024, 'dendro helper exposes adcSignalAvgRaw from 8-byte MOD3 frames');
+    expectEqual(customValid && customValid.adcReferenceAvgRaw, 2048, 'dendro helper exposes adcReferenceAvgRaw from 8-byte MOD3 frames');
+    expectEqual(customValid && customValid.measurementValid, true, '8-byte MOD3 decoder surfaces VALID flag as measurementValid=true');
+    expectApprox(customValid && customValid.dendroRatio, 0.5, 0.000001, '8-byte MOD3 decoder computes ratio from raw signal/reference');
+    expectApprox(customValid && customValid.adcCh0V, (1024 * 3.2) / 4095, 1e-6, '8-byte MOD3 decoder reconstructs adcCh0V using batV as VDDA');
+    expectApprox(customValid && customValid.adcCh1V, (2048 * 3.2) / 4095, 1e-6, '8-byte MOD3 decoder reconstructs adcCh1V using batV as VDDA');
+
+    // Custom-firmware 8-byte MOD3 frame with REF_HIGH flag: decoder must mark
+    // the sample invalid and null the ratio regardless of voltage plausibility.
+    const customMod3InvalidFixture = Buffer.from([0x0C, 0x80, 0x08, 0x00, 0x08, 0x00, 0x08, 0x04]).toString('base64');
+    const customInvalid = dendroHelper.decodeRawAdcPayload(customMod3InvalidFixture);
+    expectEqual(customInvalid && customInvalid.measurementValid, false, 'REF_HIGH flag surfaces as measurementValid=false');
+    expectEqual(customInvalid && customInvalid.refTooHigh, true, 'REF_HIGH flag surfaces as refTooHigh=true');
+    expectEqual(customInvalid && customInvalid.dendroRatio, null, 'REF_HIGH frames null dendroRatio in the decoder');
+
+    // buildDendroDerivedMetrics must honor the firmware validity bit: voltages
+    // look in-band but the firmware said REF_HIGH, so dendroValid must be 0.
+    const firmwareInvalidMetrics = dendroHelper.buildDendroDerivedMetrics({
+      effectiveMode: customInvalid && customInvalid.modeCode,
+      adcCh0V: customInvalid && customInvalid.adcCh0V,
+      adcCh1V: customInvalid && customInvalid.adcCh1V,
+      measurementValid: customInvalid && customInvalid.measurementValid,
+      strokeMm: 40,
+      ratioZero: 0.2,
+      ratioSpan: 0.8,
+    });
+    expectEqual(firmwareInvalidMetrics.dendroModeUsed, 'ratio_mod3', '8-byte MOD3 metrics stay on ratio path even when firmware flags invalid');
+    expectEqual(firmwareInvalidMetrics.dendroValid, 0, 'firmware validity bit overrides voltage-derived dendroValid');
+    expectEqual(firmwareInvalidMetrics.dendroRatio, null, 'firmware validity bit nulls dendroRatio');
+    expectEqual(firmwareInvalidMetrics.positionMm, null, 'firmware validity bit nulls positionMm');
 
     const legacyMetrics = dendroHelper.buildDendroDerivedMetrics({
       effectiveMode: 2,

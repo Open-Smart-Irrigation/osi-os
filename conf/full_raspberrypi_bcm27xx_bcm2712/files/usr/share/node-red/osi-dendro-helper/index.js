@@ -210,21 +210,37 @@ function buildDendroDerivedMetrics(options = {}) {
   const legacyPositionMm = legacyValid === 1 ? roundTo(adcCh0V * 10, 3) : null;
   const ratioInfo = calculateDendroRatio(adcCh0V, adcCh1V, options);
 
+  // Firmware validity bit (from MOD=3 flag byte). undefined = caller did not
+  // supply it (stock firmware path, or legacy call site) — voltage-derived
+  // validity stands. Explicit false = firmware flagged REF_LOW/REF_HIGH/
+  // ADC_FAIL and the gateway must not override that judgement.
+  const firmwareFlagProvided = options.measurementValid !== undefined;
+  const firmwareSaysInvalid = firmwareFlagProvided && options.measurementValid === false;
+
   let dendroValid = legacyValid;
   let positionMm = legacyPositionMm;
   let calibrationMissing = false;
+  let ratioValue = ratioInfo.ratio;
+  let ratioInvalidReason = ratioInfo.invalidReason;
 
   if (modeUsed === 'ratio_mod3') {
-    dendroValid = ratioInfo.isValid ? 1 : 0;
-    positionMm = calculateRatioDendroPositionMm({
-      strokeMm,
-      ratioZero,
-      ratioSpan,
-      ratio: ratioInfo.ratio,
-      invertDirection,
-    });
-    if (ratioInfo.isValid && positionMm === null) {
-      calibrationMissing = true;
+    if (firmwareSaysInvalid) {
+      dendroValid = 0;
+      positionMm = null;
+      ratioValue = null;
+      ratioInvalidReason = ratioInvalidReason || 'firmware_flag_invalid';
+    } else {
+      dendroValid = ratioInfo.isValid ? 1 : 0;
+      positionMm = calculateRatioDendroPositionMm({
+        strokeMm,
+        ratioZero,
+        ratioSpan,
+        ratio: ratioInfo.ratio,
+        invertDirection,
+      });
+      if (ratioInfo.isValid && positionMm === null) {
+        calibrationMissing = true;
+      }
     }
   }
 
@@ -232,11 +248,11 @@ function buildDendroDerivedMetrics(options = {}) {
     adcCh0V,
     adcCh1V,
     dendroModeUsed: modeUsed,
-    dendroRatio: ratioInfo.ratio,
+    dendroRatio: ratioValue,
     dendroValid,
     positionMm,
     positionUm: positionMm === null ? null : Math.round(positionMm * 1000),
-    ratioInvalidReason: ratioInfo.invalidReason,
+    ratioInvalidReason,
     calibrationMissing,
     calibrationSignature: calibrationSignature({
       strokeMm,
