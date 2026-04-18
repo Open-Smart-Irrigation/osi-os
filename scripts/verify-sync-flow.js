@@ -536,6 +536,7 @@ expectIncludes('Sync Init Schema + Triggers', 'SELECT gateway_device_eui FROM ir
 expectIncludes('Sync Init Schema + Triggers', 'SELECT zone_uuid FROM irrigation_zones WHERE id = NEW.irrigation_zone_id AND deleted_at IS NULL', 'ignores deleted zones when mirroring irrigation events into the outbox');
 expectIncludes('Sync Init Schema + Triggers', 'SELECT gateway_device_eui FROM irrigation_zones WHERE id = NEW.irrigation_zone_id AND deleted_at IS NULL', 'ignores deleted zones when mirroring irrigation event gateway bindings into the outbox');
 expectExcludes('Sync Init Schema + Triggers', '" + gateway + "', 'malformed literal gateway fallback SQL in sync triggers');
+expectExcludes('Sync Init Schema + Triggers', '\'" + gatewaySql + "\'', 'double-quoted gatewaySql fallback fragments in sync init SQL');
 const migrationPreflightNodes = ['Build Cloud Bootstrap', 'Build Edge Event Batch', 'Build Pending Command Pull', 'Run Force Sync'];
 expectIncludesForEach(migrationPreflightNodes, 'const structuralGatewayDeviceEuis = normalizeGatewayList(', 'derives gateway migration candidates only from structural lineage');
 expectIncludesForEach(migrationPreflightNodes, 'gatewayMigrationCandidateSources', 'stores gateway migration candidate source diagnostics');
