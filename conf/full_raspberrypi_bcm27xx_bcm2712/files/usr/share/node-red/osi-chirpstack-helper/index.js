@@ -123,6 +123,47 @@ function listItemToObject(item) {
   return item && typeof item.toObject === 'function' ? item.toObject() : item;
 }
 
+function buildDeviceProfileMessage(input) {
+  const regionName = String(input.region || 'EU868').trim().toUpperCase();
+  const profile = new profilePb.DeviceProfile();
+  const payloadCodecScript = input.payloadCodecScript === undefined || input.payloadCodecScript === null
+    ? ''
+    : String(input.payloadCodecScript);
+  const hasPayloadCodec = payloadCodecScript.trim().length > 0;
+
+  if (input.id) {
+    profile.setId(String(input.id).trim());
+  }
+  profile.setTenantId(String(input.tenantId || '').trim());
+  profile.setName(String(input.name || '').trim());
+  profile.setDescription(String(withDefault(input.description, '')));
+  profile.setRegion(commonPb.Region[regionName] ?? commonPb.Region.EU868);
+  profile.setMacVersion(commonPb.MacVersion.LORAWAN_1_0_3);
+  profile.setRegParamsRevision(commonPb.RegParamsRevision.RP002_1_0_3);
+  profile.setAdrAlgorithmId('default');
+  profile.setSupportsOtaa(true);
+  profile.setFlushQueueOnActivate(true);
+  profile.setUplinkInterval(withDefault(input.uplinkInterval, 3600));
+  profile.setDeviceStatusReqInterval(withDefault(input.deviceStatusReqInterval, 1));
+  profile.setAbpRx1Delay(0);
+  profile.setAbpRx1DrOffset(0);
+  profile.setAbpRx2Dr(0);
+  profile.setAbpRx2Freq(0);
+
+  if (input.autoDetectMeasurements !== undefined) {
+    profile.setAutoDetectMeasurements(Boolean(input.autoDetectMeasurements));
+  } else if (hasPayloadCodec) {
+    profile.setAutoDetectMeasurements(true);
+  }
+
+  if (hasPayloadCodec) {
+    profile.setPayloadCodecRuntime(2); // CodecRuntime.JS = 2
+    profile.setPayloadCodecScript(payloadCodecScript);
+  }
+
+  return profile;
+}
+
 class ChirpStackClient {
   constructor(config) {
     this.apiUrl = normalizeApiUrl(config && config.apiUrl);
@@ -361,33 +402,32 @@ class ChirpStackClient {
     );
   }
 
-  async createDeviceProfile(input) {
-    const regionName = String(input.region || 'EU868').trim().toUpperCase();
-    const profile = new profilePb.DeviceProfile();
-    profile.setTenantId(String(input.tenantId || '').trim());
-    profile.setName(String(input.name || '').trim());
-    profile.setDescription(String(withDefault(input.description, '')));
-    profile.setRegion(commonPb.Region[regionName] ?? commonPb.Region.EU868);
-    profile.setMacVersion(commonPb.MacVersion.LORAWAN_1_0_3);
-    profile.setRegParamsRevision(commonPb.RegParamsRevision.RP002_1_0_3);
-    profile.setAdrAlgorithmId('default');
-    profile.setSupportsOtaa(true);
-    profile.setFlushQueueOnActivate(true);
-    profile.setUplinkInterval(withDefault(input.uplinkInterval, 3600));
-    profile.setDeviceStatusReqInterval(withDefault(input.deviceStatusReqInterval, 1));
-    profile.setAbpRx1Delay(0);
-    profile.setAbpRx1DrOffset(0);
-    profile.setAbpRx2Dr(0);
-    profile.setAbpRx2Freq(0);
-
-    if (input.payloadCodecScript) {
-      profile.setPayloadCodecRuntime(2); // CodecRuntime.JS = 2
-      profile.setPayloadCodecScript(String(input.payloadCodecScript));
+  async getDeviceProfile(id) {
+    const request = new profilePb.GetDeviceProfileRequest();
+    request.setId(String(id || '').trim());
+    try {
+      const response = await grpcInvoke(this.deviceProfileClient, 'get', request, this.metadata, 'getDeviceProfile');
+      return response.getDeviceProfile();
+    } catch (error) {
+      if (error.code === grpc.status.NOT_FOUND) {
+        return null;
+      }
+      throw error;
     }
+  }
 
+  async createDeviceProfile(input) {
+    const profile = buildDeviceProfileMessage(input);
     const request = new profilePb.CreateDeviceProfileRequest();
     request.setDeviceProfile(profile);
     return await grpcInvoke(this.deviceProfileClient, 'create', request, this.metadata, 'createDeviceProfile');
+  }
+
+  async updateDeviceProfile(input) {
+    const profile = buildDeviceProfileMessage(input);
+    const request = new profilePb.UpdateDeviceProfileRequest();
+    request.setDeviceProfile(profile);
+    return await grpcInvoke(this.deviceProfileClient, 'update', request, this.metadata, 'updateDeviceProfile');
   }
 
   async getGateway(gatewayId) {

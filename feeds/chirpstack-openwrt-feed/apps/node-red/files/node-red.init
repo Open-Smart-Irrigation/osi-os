@@ -19,6 +19,8 @@ start_service() {
 
     # OSI Server cloud integration env vars (from UCI)
     gateway_identity_resolve || true
+    gateway_identity_repair_concentratord_config || true
+    gateway_identity_resolve || true
     gateway_identity_persist || true
     local device_eui="${GATEWAY_IDENTITY_DEVICE_EUI:-$(uci -q get osi-server.cloud.device_eui 2>/dev/null || echo "")}"
     local device_eui_source="${GATEWAY_IDENTITY_DEVICE_EUI_SOURCE:-$(uci -q get osi-server.cloud.device_eui_source 2>/dev/null || echo "persisted")}"

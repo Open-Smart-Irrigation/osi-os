@@ -267,6 +267,9 @@ npm run build
 - The prediction VPS nginx config leaves `/health` public but allowlists `/internal/*`, `/openapi.json`, `/docs`, and `/redoc` to the live OSI server addresses `83.228.220.63`, `2001:1600:18:103::336`, and localhost.
 - The old local `osi-prediction-service` container on the main OSI server was intentionally left running as a dormant fallback after cutover. Revisit it after a few weeks of stable operation before removing it.
 - The live VPS checkout may not have working GitHub auth for `git pull`. A local git bundle + `git pull --ff-only <bundle> main` is a viable fallback, then `git update-ref refs/remotes/origin/main HEAD` keeps the live repo state clean.
+- As of `2026-04-18`, the live main OSI server at `83.228.220.63` is still a small VPS class host (`4 CPU / 4 GB RAM / 80 GB disk`). Do **not** run broad on-host rebuilds like `docker compose up -d --build` there; that rollout pattern was enough to make the host unresponsive.
+- On that small VPS, prefer prebuilt artifacts from a stronger machine. The safe backend rollout pattern is `docker compose build backend && docker compose up -d --no-deps backend`, or better, ship a prebuilt jar/image and recreate only `osi-backend`.
+- The live main VPS now has a persistent `4G` swapfile at `/var/lib/swap/swapfile`. Keep it enabled, but treat it as a safety net, not as permission to resume full-stack on-host builds.
 
 ### Live Deploy Database Safety
 
@@ -278,6 +281,7 @@ npm run build
 - If `/data/db/farming.db` is missing but SQLite sidecar files exist, stop and inspect/recover rather than seeding a new DB.
 - On upgraded installs, do not let stale `/srv/node-red/.chirpstack.env` `DEVICE_EUI*` values override runtime identity. The canonical gateway EUI should come from the helper / UCI path, and stale overrides should be removed during manual repair.
 - Before a live VPS rollout, create a timestamped backup under `/home/rocky/backups/osi-server-<timestamp>` with the repo snapshot, Docker env/config, PostgreSQL dump, Mosquitto state, and OpenAgri data.
+- For the current small live VPS, do not rebuild unrelated services during rollout. Use the narrowest possible command (`docker compose up -d --no-deps backend` after a backend-only build) and avoid any deploy path that lets Compose rebuild `prediction-service`, `fao-reference-service`, `mosquitto`, or the whole stack on-host.
 - Before a risky Pi rollout or manual repair, create a timestamped backup under `/data/db/backups/osi-os-<timestamp>` including `/data/db/`, `/srv/node-red/`, `/usr/lib/node-red/gui/`, `/etc/init.d/node-red`, `flows.json`, and `settings.js`.
 
 ---

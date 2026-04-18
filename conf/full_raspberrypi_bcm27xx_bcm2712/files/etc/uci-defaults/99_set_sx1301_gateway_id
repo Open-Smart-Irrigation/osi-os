@@ -21,14 +21,7 @@ GATEWAY_ID="${GATEWAY_IDENTITY_DEVICE_EUI:-}"
 [ -n "$GATEWAY_ID" ] || GATEWAY_ID="$(resolve_fallback_gateway_id || true)"
 [ -n "$GATEWAY_ID" ] || exit 0
 
-SECTION=""
-SHOW_OUTPUT="$(uci -q show chirpstack-concentratord 2>/dev/null || true)"
-if printf '%s\n' "$SHOW_OUTPUT" | grep -q '^chirpstack-concentratord.@sx1302\[0\]='; then
-    SECTION='chirpstack-concentratord.@sx1302[0]'
-elif printf '%s\n' "$SHOW_OUTPUT" | grep -q '^chirpstack-concentratord.@sx1301\[0\]='; then
-    SECTION='chirpstack-concentratord.@sx1301[0]'
-fi
-
+SECTION="$(gateway_identity_active_lora_section || true)"
 [ -n "$SECTION" ] || exit 0
 
 uci -q set "$SECTION.gateway_id=$GATEWAY_ID"

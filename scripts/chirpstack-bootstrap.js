@@ -35,6 +35,7 @@
  *   CS_PROFILE_LSN50_NAME    (default: "OSI Dragino LSN50")
  *   CS_PROFILE_RAK_NAME      (default: "OSI RAK Field Tester")
  *   CS_PROFILE_S2120_NAME    (default: "OSI SenseCAP S2120")
+ *   LSN50_CODEC_PATH         (default: "/srv/node-red/codecs/dragino_lsn50_decoder.js")
  *   S2120_CODEC_PATH         (default: "/srv/node-red/codecs/sensecap_s2120_decoder.js")
  */
 
@@ -81,6 +82,7 @@ const CFG = {
   profileLsn50Name: process.env.CS_PROFILE_LSN50_NAME || 'OSI Dragino LSN50',
   profileRakName: process.env.CS_PROFILE_RAK_NAME || 'OSI RAK Field Tester',
   profileS2120Name: process.env.CS_PROFILE_S2120_NAME || 'OSI SenseCAP S2120',
+  lsn50CodecPath: process.env.LSN50_CODEC_PATH || '/srv/node-red/codecs/dragino_lsn50_decoder.js',
   s2120CodecPath: process.env.S2120_CODEC_PATH || '/srv/node-red/codecs/sensecap_s2120_decoder.js'
 };
 
@@ -126,10 +128,60 @@ async function getOrCreateApp(client, tenantId, name, description) {
   return created.getId();
 }
 
-async function getOrCreateProfileWithCodec(client, tenantId, name, description, payloadCodecScript) {
+function normalizeCodecScript(payloadCodecScript) {
+  return String(payloadCodecScript || '').replace(/\r\n/g, '\n').trim();
+}
+
+function readCodecScript(codecPath, label) {
+  try {
+    const payloadCodecScript = fs.readFileSync(codecPath, 'utf8');
+    console.log(`  ✓ ${label} codec loaded from ${codecPath} (${payloadCodecScript.length} bytes)`);
+    return payloadCodecScript;
+  } catch (e) {
+    console.log(`  ⚠ ${label} codec not found at ${codecPath} — creating profile without codec`);
+    return '';
+  }
+}
+
+async function getOrCreateProfileWithCodec(client, tenantId, name, description, payloadCodecScript, options = {}) {
+  const desiredCodecScript = normalizeCodecScript(payloadCodecScript);
+  const autoDetectMeasurements = options.autoDetectMeasurements !== undefined
+    ? Boolean(options.autoDetectMeasurements)
+    : desiredCodecScript.length > 0;
   const profiles = listItemsToObjects(await client.listDeviceProfiles(tenantId));
   const existing = profiles.find((profile) => profile.name === name);
   if (existing) {
+    if (desiredCodecScript) {
+      const existingProfile = await client.getDeviceProfile(existing.id);
+      const existingCodecRuntime = existingProfile && typeof existingProfile.getPayloadCodecRuntime === 'function'
+        ? Number(existingProfile.getPayloadCodecRuntime())
+        : null;
+      const existingCodecScript = existingProfile && typeof existingProfile.getPayloadCodecScript === 'function'
+        ? normalizeCodecScript(existingProfile.getPayloadCodecScript())
+        : '';
+      const existingAutoDetect = existingProfile && typeof existingProfile.getAutoDetectMeasurements === 'function'
+        ? Boolean(existingProfile.getAutoDetectMeasurements())
+        : false;
+      const needsCodecRepair = existingCodecRuntime !== 2
+        || existingCodecScript !== desiredCodecScript
+        || existingAutoDetect !== autoDetectMeasurements;
+
+      if (needsCodecRepair) {
+        await client.updateDeviceProfile({
+          id: existing.id,
+          tenantId,
+          name,
+          description,
+          region: CFG.region,
+          uplinkInterval: 3600,
+          deviceStatusReqInterval: 1,
+          autoDetectMeasurements,
+          payloadCodecScript: desiredCodecScript
+        });
+        console.log(`  ~ Profile updated: "${name}" (${existing.id})`);
+        return existing.id;
+      }
+    }
     console.log(`  ✓ Profile exists: "${name}" (${existing.id})`);
     return existing.id;
   }
@@ -140,7 +192,8 @@ async function getOrCreateProfileWithCodec(client, tenantId, name, description, 
     region: CFG.region,
     uplinkInterval: 3600,
     deviceStatusReqInterval: 1,
-    payloadCodecScript: payloadCodecScript || undefined
+    autoDetectMeasurements,
+    payloadCodecScript: desiredCodecScript || undefined
   });
   console.log(`  + Profile created: "${name}" (${created.getId()})`);
   return created.getId();
@@ -237,10 +290,21 @@ function patchSettingsJs() {
   const loader = `
 ${ENV_LOADER_MARKER}
 try {
+  const protectedKeys = new Set([
+    'DEVICE_EUI',
+    'DEVICE_EUI_SOURCE',
+    'DEVICE_EUI_CONFIDENCE',
+    'DEVICE_EUI_LAST_VERIFIED_AT',
+    'LINK_GATEWAY_DEVICE_EUI'
+  ]);
   require('fs').readFileSync(${JSON.stringify(CFG.envFile)}, 'utf8')
     .split('\\n').filter(l => l.includes('=')).forEach(l => {
       const eq = l.indexOf('=');
-      if (eq > 0) process.env[l.slice(0, eq).trim()] = l.slice(eq + 1).trim();
+      if (eq <= 0) return;
+      const key = l.slice(0, eq).trim();
+      if (!key) return;
+      if (protectedKeys.has(key) && String(process.env[key] || '').trim()) return;
+      process.env[key] = l.slice(eq + 1).trim();
     });
 } catch (e) {}
 // [/OSI]
@@ -333,16 +397,10 @@ async function main() {
   console.log('\n[ 4/5 ] Device profiles');
   const kiwiProfileId = await getOrCreateProfile(client, tenantId, CFG.profileKiwiName, 'Kiwi soil moisture & temperature (LoRaWAN 1.0.3 OTAA)');
   const stregaProfileId = await getOrCreateProfile(client, tenantId, CFG.profileStregaName, 'Strega smart irrigation valve (LoRaWAN 1.0.3 OTAA)');
-  const lsn50ProfileId = await getOrCreateProfile(client, tenantId, CFG.profileLsn50Name, 'Dragino LSN50 temperature & dendrometer ADC (LoRaWAN 1.0.3 OTAA)');
+  const lsn50CodecScript = readCodecScript(CFG.lsn50CodecPath, 'LSN50');
+  const lsn50ProfileId = await getOrCreateProfileWithCodec(client, tenantId, CFG.profileLsn50Name, 'Dragino LSN50 temperature & dendrometer ADC (LoRaWAN 1.0.3 OTAA)', lsn50CodecScript);
   const rak10701ProfileId = await getOrCreateProfile(client, tenantId, CFG.profileRakName, 'RAK10701 LoRaWAN coverage field tester');
-
-  let s2120CodecScript = '';
-  try {
-    s2120CodecScript = fs.readFileSync(CFG.s2120CodecPath, 'utf8');
-    console.log(`  ✓ S2120 codec loaded from ${CFG.s2120CodecPath} (${s2120CodecScript.length} bytes)`);
-  } catch (e) {
-    console.log(`  ⚠ S2120 codec not found at ${CFG.s2120CodecPath} — creating profile without codec`);
-  }
+  const s2120CodecScript = readCodecScript(CFG.s2120CodecPath, 'S2120');
   const s2120ProfileId = await getOrCreateProfileWithCodec(client, tenantId, CFG.profileS2120Name, 'SenseCAP S2120 8-in-1 weather station (LoRaWAN 1.0.3 OTAA)', s2120CodecScript);
 
   console.log('\n[ 5/5 ] Writing configuration');

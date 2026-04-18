@@ -53,6 +53,58 @@ gateway_identity_try_command() {
     return 0
 }
 
+gateway_identity_active_chipset() {
+    local raw
+    raw="$(uci -q get chirpstack-concentratord.@global[0].chipset 2>/dev/null || true)"
+    raw="$(printf '%s' "$raw" | tr 'ABCDEFGHIJKLMNOPQRSTUVWXYZ' 'abcdefghijklmnopqrstuvwxyz')"
+    case "$raw" in
+        sx1301|sx1302|2g4)
+            printf '%s\n' "$raw"
+            return 0
+            ;;
+    esac
+    return 1
+}
+
+gateway_identity_active_lora_section() {
+    local active_chipset
+    active_chipset="$(gateway_identity_active_chipset || true)"
+    case "$active_chipset" in
+        sx1301|sx1302)
+            printf 'chirpstack-concentratord.@%s[0]\n' "$active_chipset"
+            return 0
+            ;;
+    esac
+    return 1
+}
+
+gateway_identity_try_active_concentratord_uci() {
+    local active_chipset active_section
+    active_chipset="$(gateway_identity_active_chipset || true)"
+    active_section="$(gateway_identity_active_lora_section || true)"
+    [ -n "$active_section" ] || return 1
+    gateway_identity_try_command "concentratord-uci-$active_chipset" \
+        "uci -q get $active_section.gateway_id 2>/dev/null || true"
+    [ "$GATEWAY_IDENTITY_DEVICE_EUI_CONFIDENCE" != "provisional" ] || return 1
+    return 0
+}
+
+gateway_identity_try_active_concentratord_toml() {
+    local active_chipset
+    active_chipset="$(gateway_identity_active_chipset || true)"
+    case "$active_chipset" in
+        sx1301|sx1302)
+            gateway_identity_try_command "concentratord-toml-$active_chipset" \
+                "grep -h -m1 -oE 'gateway_id\\s*=\\s*\\\"[0-9A-Fa-f]{16}\\\"' /etc/chirpstack-concentratord/$active_chipset/*.toml /var/etc/chirpstack-concentratord/*.toml 2>/dev/null | sed -E 's/.*\\\"([0-9A-Fa-f]{16})\\\"/\\1/'"
+            [ "$GATEWAY_IDENTITY_DEVICE_EUI_CONFIDENCE" != "provisional" ] || return 1
+            return 0
+            ;;
+        *)
+            return 1
+            ;;
+    esac
+}
+
 gateway_identity_read_persisted() {
     local stored stored_source stored_confidence stored_verified
     stored="$(normalize_gateway_eui "$(uci -q get osi-server.cloud.device_eui 2>/dev/null || true)" || true)"
@@ -107,16 +159,52 @@ gateway_identity_resolve() {
 
     gateway_identity_try_command "concentratord-runtime" \
         "sh /usr/bin/gateway-id.sh 2>/dev/null | grep -oE '[0-9A-Fa-f]{16}' | head -n 1" && return 0
-    gateway_identity_try_command "concentratord-uci-sx1302" \
-        "uci -q get chirpstack-concentratord.@sx1302[0].gateway_id 2>/dev/null || true" && return 0
-    gateway_identity_try_command "concentratord-uci-sx1301" \
-        "uci -q get chirpstack-concentratord.@sx1301[0].gateway_id 2>/dev/null || true" && return 0
-    gateway_identity_try_command "concentratord-toml" \
-        "grep -h -m1 -oE 'gateway_id\\s*=\\s*\\\"[0-9A-Fa-f]{16}\\\"' /etc/chirpstack-concentratord/sx1302/*.toml /etc/chirpstack-concentratord/sx1301/*.toml /var/etc/chirpstack-concentratord/*.toml 2>/dev/null | sed -E 's/.*\\\"([0-9A-Fa-f]{16})\\\"/\\1/'" && return 0
+    gateway_identity_try_active_concentratord_uci && return 0
+    gateway_identity_try_active_concentratord_toml && return 0
     gateway_identity_read_linked && return 0
     gateway_identity_read_persisted && return 0
     gateway_identity_read_provisional && return 0
     return 1
+}
+
+gateway_identity_repair_concentratord_config() {
+    local eui confidence active_chipset active_section current_active sibling_section sibling_value dirty
+    eui="$GATEWAY_IDENTITY_DEVICE_EUI"
+    confidence="$GATEWAY_IDENTITY_DEVICE_EUI_CONFIDENCE"
+    [ -n "$eui" ] || return 0
+    [ "$confidence" != "provisional" ] || return 0
+
+    active_chipset="$(gateway_identity_active_chipset || true)"
+    active_section="$(gateway_identity_active_lora_section || true)"
+    [ -n "$active_section" ] || return 0
+
+    dirty=0
+    current_active="$(normalize_gateway_eui "$(uci -q get "$active_section.gateway_id" 2>/dev/null || true)" || true)"
+    if [ "$current_active" != "$eui" ]; then
+        uci -q set "$active_section.gateway_id=$eui"
+        dirty=1
+    fi
+
+    sibling_section=""
+    case "$active_chipset" in
+        sx1301)
+            sibling_section='chirpstack-concentratord.@sx1302[0]'
+            ;;
+        sx1302)
+            sibling_section='chirpstack-concentratord.@sx1301[0]'
+            ;;
+    esac
+
+    if [ -n "$sibling_section" ]; then
+        sibling_value="$(uci -q get "$sibling_section.gateway_id" 2>/dev/null || true)"
+        if [ -n "$sibling_value" ]; then
+            uci -q delete "$sibling_section.gateway_id" 2>/dev/null || true
+            dirty=1
+        fi
+    fi
+
+    [ "$dirty" -eq 1 ] || return 0
+    uci commit chirpstack-concentratord
 }
 
 gateway_identity_persist() {

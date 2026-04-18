@@ -105,6 +105,23 @@ function isRatioDendroMode(value: unknown): boolean {
   return value === 'ratio_mod3';
 }
 
+function formatNumericInput(value: number | null | undefined): string {
+  return Number.isFinite(Number(value)) ? String(value) : '';
+}
+
+function parseOptionalNumericInput(label: string, value: string, options?: { positive?: boolean }): number | null {
+  const trimmed = String(value ?? '').trim();
+  if (!trimmed) return null;
+  const parsed = Number(trimmed);
+  if (!Number.isFinite(parsed)) {
+    throw new Error(`${label} must be a finite number.`);
+  }
+  if (options?.positive && parsed <= 0) {
+    throw new Error(`${label} must be greater than 0.`);
+  }
+  return parsed;
+}
+
 interface DraginoTempCardProps {
   device: Device;
   onRemove?: () => void;
@@ -125,6 +142,11 @@ const ConfigPanel: React.FC<{
   const [intervalInfo, setIntervalInfo] = useState<string | null>(null);
   const [interruptModeInput, setInterruptModeInput] = useState('0');
   const [warmupMillisecondsInput, setWarmupMillisecondsInput] = useState('');
+  const [dendroForceLegacyInput, setDendroForceLegacyInput] = useState(device.dendro_force_legacy === 1);
+  const [dendroStrokeMmInput, setDendroStrokeMmInput] = useState(formatNumericInput(device.dendro_stroke_mm));
+  const [dendroRatioZeroInput, setDendroRatioZeroInput] = useState(formatNumericInput(device.dendro_ratio_zero));
+  const [dendroRatioSpanInput, setDendroRatioSpanInput] = useState(formatNumericInput(device.dendro_ratio_span));
+  const [dendroInvertDirectionInput, setDendroInvertDirectionInput] = useState(device.dendro_invert_direction === 1);
   const [advancedInfo, setAdvancedInfo] = useState<string | null>(null);
   const [showAdvanced, setShowAdvanced] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
@@ -257,6 +279,51 @@ const ConfigPanel: React.FC<{
       onUpdate();
     } catch {
       setError('Failed to change the 5V warm-up time');
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const applyDendroConfig = async () => {
+    let strokeMm: number | null;
+    let ratioZero: number | null;
+    let ratioSpan: number | null;
+
+    try {
+      strokeMm = parseOptionalNumericInput('Stroke (mm)', dendroStrokeMmInput, { positive: true });
+      ratioZero = parseOptionalNumericInput('Ratio zero', dendroRatioZeroInput);
+      ratioSpan = parseOptionalNumericInput('Ratio span', dendroRatioSpanInput);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Invalid dendrometer calibration values');
+      setAdvancedInfo(null);
+      return;
+    }
+
+    if (ratioZero !== null && ratioSpan !== null && ratioZero === ratioSpan) {
+      setError('Ratio zero and ratio span must differ.');
+      setAdvancedInfo(null);
+      return;
+    }
+
+    setBusy('dendro-config');
+    setError(null);
+    setAdvancedInfo(null);
+    try {
+      await lsn50API.setDendroConfig(device.deveui, {
+        dendroForceLegacy: dendroForceLegacyInput,
+        dendroStrokeMm: strokeMm,
+        dendroRatioZero: ratioZero,
+        dendroRatioSpan: ratioSpan,
+        dendroInvertDirection: dendroInvertDirectionInput,
+      });
+      setAdvancedInfo(
+        dendroForceLegacyInput
+          ? 'Dendrometer calibration saved. Legacy ADC is forced for this device.'
+          : 'Dendrometer calibration saved. Ratio MOD3 will be used when the uplink provides valid CH0 and CH1 in MOD3.'
+      );
+      onUpdate();
+    } catch {
+      setError('Failed to save dendrometer calibration');
     } finally {
       setBusy(null);
     }
@@ -413,6 +480,94 @@ const ConfigPanel: React.FC<{
                 className="mt-2 w-full rounded-lg bg-[var(--secondary-bg)] px-3 py-2 text-sm font-semibold text-[var(--text)] transition-colors hover:bg-[var(--border)] disabled:cursor-not-allowed disabled:opacity-60"
               >
                 {busy === 'warmup' ? 'Applying 5V warm-up...' : 'Apply 5V warm-up'}
+              </button>
+            </div>
+            <div className="rounded-lg border border-[var(--border)] bg-[var(--surface)] p-3">
+              <p className="text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)]">Dendrometer calibration</p>
+              <p className="mt-1 text-xs text-[var(--text-tertiary)]">
+                Use these values for ratio-mode dendrometers. Leave the numeric fields blank to clear saved calibration values.
+              </p>
+              <label className="mt-3 flex cursor-pointer items-center gap-3 rounded-lg px-1 py-2 hover:bg-[var(--card)]">
+                <input
+                  type="checkbox"
+                  checked={dendroForceLegacyInput}
+                  disabled={busy === 'dendro-config'}
+                  onChange={(event) => setDendroForceLegacyInput(event.target.checked)}
+                  className="h-4 w-4 rounded border-[var(--border)] text-[var(--primary)] focus:ring-[var(--primary)]"
+                />
+                <span className="text-sm text-[var(--text)]">Force legacy mode</span>
+              </label>
+              <div className="mt-2 grid gap-3 sm:grid-cols-3">
+                <div>
+                  <label className="mb-1 block text-xs font-semibold text-[var(--text-secondary)]" htmlFor={`lsn50-dendro-stroke-${device.deveui}`}>
+                    Stroke (mm)
+                  </label>
+                  <input
+                    id={`lsn50-dendro-stroke-${device.deveui}`}
+                    type="number"
+                    step="0.001"
+                    min="0"
+                    inputMode="decimal"
+                    value={dendroStrokeMmInput}
+                    disabled={busy === 'dendro-config'}
+                    onChange={(event) => setDendroStrokeMmInput(event.target.value)}
+                    placeholder="25"
+                    className="w-full rounded-lg border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-sm text-[var(--text)]"
+                  />
+                </div>
+                <div>
+                  <label className="mb-1 block text-xs font-semibold text-[var(--text-secondary)]" htmlFor={`lsn50-dendro-zero-${device.deveui}`}>
+                    Ratio zero
+                  </label>
+                  <input
+                    id={`lsn50-dendro-zero-${device.deveui}`}
+                    type="number"
+                    step="0.000001"
+                    inputMode="decimal"
+                    value={dendroRatioZeroInput}
+                    disabled={busy === 'dendro-config'}
+                    onChange={(event) => setDendroRatioZeroInput(event.target.value)}
+                    placeholder="0.420000"
+                    className="w-full rounded-lg border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-sm text-[var(--text)]"
+                  />
+                </div>
+                <div>
+                  <label className="mb-1 block text-xs font-semibold text-[var(--text-secondary)]" htmlFor={`lsn50-dendro-span-${device.deveui}`}>
+                    Ratio span
+                  </label>
+                  <input
+                    id={`lsn50-dendro-span-${device.deveui}`}
+                    type="number"
+                    step="0.000001"
+                    inputMode="decimal"
+                    value={dendroRatioSpanInput}
+                    disabled={busy === 'dendro-config'}
+                    onChange={(event) => setDendroRatioSpanInput(event.target.value)}
+                    placeholder="0.860000"
+                    className="w-full rounded-lg border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-sm text-[var(--text)]"
+                  />
+                </div>
+              </div>
+              <label className="mt-3 flex cursor-pointer items-center gap-3 rounded-lg px-1 py-2 hover:bg-[var(--card)]">
+                <input
+                  type="checkbox"
+                  checked={dendroInvertDirectionInput}
+                  disabled={busy === 'dendro-config'}
+                  onChange={(event) => setDendroInvertDirectionInput(event.target.checked)}
+                  className="h-4 w-4 rounded border-[var(--border)] text-[var(--primary)] focus:ring-[var(--primary)]"
+                />
+                <span className="text-sm text-[var(--text)]">Invert direction</span>
+              </label>
+              <p className="mt-1 text-xs text-[var(--text-tertiary)]">
+                Ratio mode uses stroke, zero, and span to convert CH0/CH1 into calibrated displacement.
+              </p>
+              <button
+                type="button"
+                onClick={() => void applyDendroConfig()}
+                disabled={busy !== null}
+                className="mt-3 w-full rounded-lg bg-[var(--secondary-bg)] px-3 py-2 text-sm font-semibold text-[var(--text)] transition-colors hover:bg-[var(--border)] disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {busy === 'dendro-config' ? 'Saving dendrometer calibration...' : 'Save dendrometer calibration'}
               </button>
             </div>
             <p className="text-xs text-[var(--warn-text)]">These controls are intended for external sensors and non-default LSN50 integrations.</p>

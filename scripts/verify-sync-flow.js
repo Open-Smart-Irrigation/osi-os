@@ -12,6 +12,7 @@ const osiServerDefaultsPath = path.resolve(__dirname, '..', 'conf', 'full_raspbe
 const sx1301GatewayDefaultPath = path.resolve(__dirname, '..', 'conf', 'full_raspberrypi_bcm27xx_bcm2712', 'files', 'etc', 'uci-defaults', '99_set_sx1301_gateway_id');
 const gatewayIdentityHelperPath = path.resolve(__dirname, '..', 'conf', 'full_raspberrypi_bcm27xx_bcm2712', 'files', 'usr', 'libexec', 'osi-gateway-identity.sh');
 const chirpstackBootstrapPath = path.resolve(__dirname, 'chirpstack-bootstrap.js');
+const lsn50CodecPath = path.resolve(__dirname, '..', 'conf', 'full_raspberrypi_bcm27xx_bcm2712', 'files', 'usr', 'share', 'node-red', 'codecs', 'dragino_lsn50_decoder.js');
 const reactGuiApiPath = path.resolve(__dirname, '..', 'web', 'react-gui', 'src', 'services', 'api.ts');
 const farmingTypesPath = path.resolve(__dirname, '..', 'web', 'react-gui', 'src', 'types', 'farming.ts');
 const dendroMonitorPath = path.resolve(__dirname, '..', 'web', 'react-gui', 'src', 'components', 'farming', 'DendrometerMonitor.tsx');
@@ -36,6 +37,7 @@ const osiServerDefaultsScript = fs.readFileSync(osiServerDefaultsPath, 'utf8');
 const sx1301GatewayDefaultScript = fs.readFileSync(sx1301GatewayDefaultPath, 'utf8');
 const gatewayIdentityHelperScript = fs.readFileSync(gatewayIdentityHelperPath, 'utf8');
 const chirpstackBootstrapScript = fs.readFileSync(chirpstackBootstrapPath, 'utf8');
+const lsn50CodecSource = fs.existsSync(lsn50CodecPath) ? fs.readFileSync(lsn50CodecPath, 'utf8') : '';
 const reactGuiApiSource = fs.readFileSync(reactGuiApiPath, 'utf8');
 const farmingTypesSource = fs.readFileSync(farmingTypesPath, 'utf8');
 const dendroMonitorSource = fs.readFileSync(dendroMonitorPath, 'utf8');
@@ -302,6 +304,18 @@ function expectApprox(actual, expected, epsilon, description) {
   }
 }
 
+function expectIncludesForEach(nodeNames, needle, description) {
+  for (const nodeName of nodeNames) {
+    expectIncludes(nodeName, needle, description);
+  }
+}
+
+function expectExcludesForEach(nodeNames, needle, description) {
+  for (const nodeName of nodeNames) {
+    expectExcludes(nodeName, needle, description);
+  }
+}
+
 async function executeFunctionNodeById(nodeId, msg, options = {}) {
   const node = findNodeById(nodeId);
   if (!node) {
@@ -422,6 +436,9 @@ expectIncludes('Handle server auth response', "requiredFieldErrors.push('MQTT br
 expectIncludes('Handle server auth response', 'const mqttPassword = String(data.mqttPassword || data.mqtt_password || \'\').trim();', 'accepts MQTT credentials from local-sync');
 expectIncludes('Handle server auth response', "flow.set('al_mqtt_password', mqttPassword);", 'stores MQTT password from local-sync');
 expectIncludes('Handle server auth response', "flow.set('al_mqtt_broker_url', mqttBrokerUrl);", 'stores MQTT broker URL from local-sync');
+expectIncludes('Handle server auth response', 'function extractHostFromAbsoluteUrl(value)', 'uses a runtime-compatible MQTT URL parser');
+expectIncludes('Handle server auth response', "const match = text.match(new RegExp('^[a-z][a-z0-9+.-]*://([^/?#]+)', 'i'));", 'falls back to regex host extraction when URL is unavailable');
+expectExcludes('Handle server auth response', 'new URL(mqttBrokerUrl);', 'a direct MQTT broker URL constructor check that can fail on older runtimes');
 expectExcludes('Handle server auth response', 'UPDATE users SET server_username', 'direct linked-account DB mutation');
 expectIncludes('Build server auth request', 'deviceEuis,', 'sends local device claims in the authenticated local-sync request');
 expectIncludes('Build server auth request', "new osiDb.Database('/data/db/farming.db')", 'loads local device claims before cloud linking');
@@ -435,11 +452,19 @@ expectIncludes('Build server auth request', 'linked_auth_sync_v1', 'advertises t
 expectIncludes('Build server auth request', 'force_edge_sync_v1', 'advertises the force-edge-sync capability');
 expectIncludes('Handle server auth response', "const claimed = Array.isArray(data.claimed)", 'accepts claimed device results directly from local-sync');
 expectIncludes('Handle server auth response', 'offlineVerifierVersion', 'requires and stores the offline verifier version from local-sync');
+expectIncludes('Decode token & build query', 'server_offline_verifier_version', 'loads linked-auth verifier metadata for account-link status');
+expectIncludes('Format status response', 'linkedAuthPackageValid', 'reports linked-auth package validity in account-link status');
+expectIncludes('Format status response', 'linkedAuthRepairRequired', 'reports linked-auth repair requirements in account-link status');
+expectIncludes('Format status response', "linkedAuthRepairRequired ? 'repair_required'", 'downgrades stale linked-auth state in account-link status');
 expectIncludes('Build Sync State', 'lastMirroredEventAt', 'returns the last mirrored sync event timestamp');
 expectIncludes('Build Sync State', 'dbHealth: {', 'returns a DB health block in sync state');
 expectIncludes('Build Sync State', "journalMode: helperHealth.journalMode || null", 'returns SQLite journal mode in sync state');
 expectIncludes('Build Sync State', "quickCheck: quickCheck.status", 'returns quick-check status in sync state');
 expectIncludes('Build Sync State', "lastError: helperHealth.lastError || null", 'returns helper DB errors in sync state');
+expectIncludes('Build Sync State', 'linkedAuthPackageValid', 'reports linked-auth package validity in sync state');
+expectIncludes('Build Sync State', 'linkedAuthRepairRequired', 'reports linked-auth repair requirements in sync state');
+expectIncludes('Build Sync State', 'migrationCandidateSources', 'reports gateway migration candidate sources in sync state');
+expectIncludes('Build Sync State', 'rejectedMigrationCandidates', 'reports rejected gateway migration candidates in sync state');
 expectIncludes('Finalize linked account state', 'UPDATE users SET server_username = ?', 'commits linked-account DB state only after MQTT persistence');
 expectIncludes('Finalize linked account state', "auth_mode = ?", 'finalizes linked auth mode explicitly');
 expectIncludes('Finalize linked account state', 'server_offline_verifier_version = ?', 'persists the synced offline verifier version locally');
@@ -492,6 +517,8 @@ expectIncludes('Sync Init Schema + Triggers', 'ALTER TABLE users ADD COLUMN last
 expectIncludes('Sync Init Schema + Triggers', 'ALTER TABLE users ADD COLUMN last_auth_sync_status TEXT', 'adds the linked-auth status column to users');
 expectIncludes('Sync Init Schema + Triggers', 'ALTER TABLE users ADD COLUMN last_auth_sync_error TEXT', 'adds the linked-auth error column to users');
 expectIncludes('Sync Init Schema + Triggers', "UPDATE users SET last_auth_sync_status = 'up_to_date'", 'backfills linked server users with an up-to-date auth status');
+expectIncludes('Sync Init Schema + Triggers', "UPDATE users SET last_auth_sync_status = 'repair_required'", 'marks invalid linked-auth packages for repair during sync init');
+expectIncludes('Sync Init Schema + Triggers', "const gatewaySql = /^[0-9A-F]{16}$/.test(gateway)", 'uses a canonical gateway-or-NULL SQL fallback during sync init');
 expectIncludes('Sync Init Schema + Triggers', 'ALTER TABLE device_data ADD COLUMN rain_mm_per_10min REAL', 'adds normalized rain telemetry storage');
 expectIncludes('Sync Init Schema + Triggers', 'ALTER TABLE device_data ADD COLUMN flow_liters_per_10min REAL', 'adds normalized flow telemetry storage');
 expectIncludes('Sync Init Schema + Triggers', "'area_m2', NEW.area_m2", 'mirrors zone area changes into zone sync events');
@@ -508,7 +535,12 @@ expectIncludes('Sync Init Schema + Triggers', 'SELECT zone_uuid FROM irrigation_
 expectIncludes('Sync Init Schema + Triggers', 'SELECT gateway_device_eui FROM irrigation_zones WHERE id = NEW.zone_id AND deleted_at IS NULL', 'ignores deleted zones when mirroring zone environment gateway bindings into the outbox');
 expectIncludes('Sync Init Schema + Triggers', 'SELECT zone_uuid FROM irrigation_zones WHERE id = NEW.irrigation_zone_id AND deleted_at IS NULL', 'ignores deleted zones when mirroring irrigation events into the outbox');
 expectIncludes('Sync Init Schema + Triggers', 'SELECT gateway_device_eui FROM irrigation_zones WHERE id = NEW.irrigation_zone_id AND deleted_at IS NULL', 'ignores deleted zones when mirroring irrigation event gateway bindings into the outbox');
-expectExcludes('Sync Init Schema + Triggers', '\\" + gateway + \\"', 'malformed literal gateway fallback SQL in sync triggers');
+expectExcludes('Sync Init Schema + Triggers', '" + gateway + "', 'malformed literal gateway fallback SQL in sync triggers');
+const migrationPreflightNodes = ['Build Cloud Bootstrap', 'Build Edge Event Batch', 'Build Pending Command Pull', 'Run Force Sync'];
+expectIncludesForEach(migrationPreflightNodes, 'const structuralGatewayDeviceEuis = normalizeGatewayList(', 'derives gateway migration candidates only from structural lineage');
+expectIncludesForEach(migrationPreflightNodes, 'gatewayMigrationCandidateSources', 'stores gateway migration candidate source diagnostics');
+expectIncludesForEach(migrationPreflightNodes, 'gatewayMigrationRejectedCandidates', 'stores rejected gateway migration candidates');
+expectExcludesForEach(migrationPreflightNodes, "\"SELECT gateway_device_eui FROM sync_outbox WHERE delivered_at IS NULL AND gateway_device_eui IS NOT NULL AND gateway_device_eui <> ''\"", 'pending outbox rows as gateway migration candidates');
 expectIncludes('Build Cloud Bootstrap', 'COALESCE(u.server_username, u.username) AS claimed_by_username', 'uses linked cloud usernames in bootstrap device snapshots');
 expectIncludes('Build Cloud Bootstrap', 'COALESCE(u.server_username, u.username) AS username', 'uses linked cloud usernames in bootstrap zone snapshots');
 expectIncludes('Build Cloud Bootstrap', 'd.strega_model', 'includes STREGA model metadata in bootstrap device snapshots');
@@ -528,6 +560,7 @@ expectIncludes('Build Cloud Bootstrap', 'gatewayMigrationPaused: true', 'pauses 
 expectIncludes('Build Cloud Bootstrap', 'UPDATE irrigation_zones SET gateway_device_eui = ?', 'rewrites active zone gateway bindings during local migration');
 expectIncludes('Build Cloud Bootstrap', 'UPDATE devices SET gateway_device_eui = ?', 'rewrites active device gateway bindings during local migration');
 expectIncludes('Build Cloud Bootstrap', 'UPDATE sync_outbox SET gateway_device_eui = ?, aggregate_key = ?, payload_json = ?', 'rewrites undelivered sync outbox rows during local migration');
+expectIncludes('Build Cloud Bootstrap', 'rejectedCandidates', 'surfaces rejected migration candidates in bootstrap migration state');
 expectIncludes('Mark Bootstrap Synced', "gatewayMigration.migrated", 'recognizes successful cloud-side gateway migration responses');
 expectIncludes('Mark Bootstrap Synced', 'gatewayMigrationPendingBootstrap = false', 'resumes normal sync after repair bootstrap succeeds');
 expectIncludes('Build Edge Event Batch', 'gatewayMigrationPaused', 'suppresses event delivery while gateway migration is paused');
@@ -569,6 +602,7 @@ expectIncludes('Persist MQTT Broker Config', "set osi-server.cloud.mqtt_password
 expectIncludes('Persist MQTT Broker Config', "set osi-server.cloud.link_gateway_device_eui=", 'persists the linked gateway identity into UCI after linking');
 expectIncludes('Persist MQTT Broker Config', 'Linked account response is missing MQTT credentials', 'fails linking when MQTT credentials are incomplete');
 expectIncludes('Persist MQTT Broker Config', 'msg._mqttConfigBackup = {', 'backs up prior MQTT config before persisting linked credentials');
+expectIncludes('Persist MQTT Broker Config', "const match = text.match(new RegExp('^[a-z][a-z0-9+.-]*://([^/?#]+)', 'i'));", 'falls back to regex host extraction when URL is unavailable');
 expectExcludes('Persist MQTT Broker Config', '/etc/init.d/node-red restart', 'Node-RED restart while link persistence is still in flight');
 expectWireById('al-link-handle-auth', 'al-link-clear-state', 'clears transient link state when server auth fails');
 expectWireById('al-link-store-mqtt', 'al-link-clear-state', 'clears transient link state when MQTT persistence fails');
@@ -612,6 +646,7 @@ expectIncludes('Run Force Sync', "summary.pendingCommands.applyPhase = queueable
 expectIncludes('Run Force Sync', 'msg._forceSyncInternal', 'supports internally queued force-sync sweeps from cloud commands');
 expectIncludes('Run Force Sync', 'queueablePendingCommands', 'filters pending commands before queueing them locally');
 expectIncludes('Run Force Sync', "commandType || '').trim().toUpperCase() !== 'FORCE_EDGE_SYNC'", 'prevents force-edge-sync commands from recursing through pending-command replay');
+expectIncludes('Run Force Sync', 'rejectedCandidates', 'surfaces rejected migration candidates in force-sync migration state');
 expectIncludes('Daily Dendrometer Analytics', 'const recoveryThreshold=(calibration.thresholds.mild||CALIBRATIONS.default.thresholds.mild)*(phenoMod>0?phenoMod:1.0);', 'uses calibration-aware recovery threshold');
 expectIncludes('Daily Dendrometer Analytics', 't.twd_night_um<recoveryThreshold', 'uses absolute night TWD in recovery verification');
 expectIncludes('Daily Dendrometer Analytics', "date>=date('${ANALYTICS_DATE}','-3 days')", 'uses the exact previous-three-day recovery window');
@@ -776,6 +811,10 @@ expectFileIncludes('farming/dendrometer/DendrometerMonitor.tsx', dendroDrawerSou
 expectFileIncludes('farming/dendrometer/DendrometerMonitor.tsx', dendroDrawerSource, 'const showRatioDebug = isRatioDendroMode(point.dendro_mode_used_raw);', 'shows CH1 and ratio debug values only for ratio-mode 24h readings');
 expectFileIncludes('DraginoTempCard.tsx', draginoTempCardSource, 'data?.dendro_valid === 1 && data?.dendro_position_mm != null', 'shows healthy dendrometer displacement only for valid calibrated readings');
 expectFileIncludes('DraginoTempCard.tsx', draginoTempCardSource, 'dendroShowsRatioDebug && data?.dendro_ratio != null', 'shows ratio debug values only when ratio mode is active');
+expectFileIncludes('DraginoTempCard.tsx', draginoTempCardSource, 'Dendrometer calibration', 'adds dendrometer calibration controls to the LSN50 advanced settings');
+expectFileIncludes('DraginoTempCard.tsx', draginoTempCardSource, "await lsn50API.setDendroConfig(device.deveui", 'saves dendrometer calibration through the dedicated local API');
+expectFileIncludes('DraginoTempCard.tsx', draginoTempCardSource, 'Force legacy mode', 'exposes the legacy dendrometer override in the advanced settings');
+expectFileIncludes('DraginoTempCard.tsx', draginoTempCardSource, 'Invert direction', 'exposes the ratio inversion toggle in the advanced settings');
 expectExcludesById('merge-device-data', 'd.updated_at', 'updated_at fallback for last_seen in GET /api/devices');
 expectIncludes('Auth + Query Gateway Location', 'gateway_locations', 'queries gateway GPS state from the local mirror table');
 expectIncludes('Format Gateway Location Response', "status: row.status || 'no_fix'", 'returns a no-fix fallback for linked gateways');
@@ -895,6 +934,7 @@ expectIncludes('Build STREGA downlink + emit log ctx', "case 'SET_PARTIAL_OPENIN
 expectIncludes('Build STREGA downlink + emit log ctx', "case 'SET_FLUSHING': {", 'supports STREGA flushing downlinks');
 expectFileIncludes('node-red.init', nodeRedInitScript, '. /usr/libexec/osi-gateway-identity.sh', 'uses the shared gateway identity helper');
 expectFileIncludes('node-red.init', nodeRedInitScript, 'gateway_identity_resolve', 'resolves the canonical gateway identity through the shared helper');
+expectFileIncludes('node-red.init', nodeRedInitScript, 'gateway_identity_repair_concentratord_config || true', 'self-heals active concentratord gateway-id state during startup');
 expectFileIncludes('node-red.init', nodeRedInitScript, 'gateway_identity_persist', 'persists canonical gateway identity metadata during startup');
 expectFileIncludes('node-red.init', nodeRedInitScript, 'normalize_runtime_eui()', 'defines a startup helper to canonicalize gateway identities before exporting them');
 expectFileIncludes('node-red.init', nodeRedInitScript, 'device_eui="$(normalize_runtime_eui "$device_eui")"', 'normalizes the runtime gateway identity to uppercase before using it for MQTT credentials');
@@ -913,15 +953,32 @@ expectFileIncludes('96_osi_server_config', osiServerDefaultsScript, 'set osi-ser
 expectFileIncludes('chirpstack-bootstrap.js', chirpstackBootstrapScript, '/usr/libexec/osi-gateway-identity.sh', 'uses the shared gateway identity helper during one-shot bootstrap detection');
 expectFileIncludes('chirpstack-bootstrap.js', chirpstackBootstrapScript, "readGatewayIdentityViaHelper", 'reads gateway identity via the shared helper during one-shot bootstrap detection');
 expectFileExcludes('chirpstack-bootstrap.js', chirpstackBootstrapScript, 'envVars.DEVICE_EUI = gatewayEui', 'persisting a stale gateway identity into .chirpstack.env when Node-RED already injects the canonical runtime value');
+expectFileIncludes('chirpstack-bootstrap.js', chirpstackBootstrapScript, 'const protectedKeys = new Set([', 'protects runtime gateway identity keys from env-file overrides');
+expectFileIncludes('chirpstack-bootstrap.js', chirpstackBootstrapScript, "'DEVICE_EUI'", 'protects DEVICE_EUI from env-file overrides');
+expectFileIncludes('chirpstack-bootstrap.js', chirpstackBootstrapScript, "'DEVICE_EUI_SOURCE'", 'protects DEVICE_EUI_SOURCE from env-file overrides');
+expectFileIncludes('chirpstack-bootstrap.js', chirpstackBootstrapScript, "'DEVICE_EUI_CONFIDENCE'", 'protects DEVICE_EUI_CONFIDENCE from env-file overrides');
+expectFileIncludes('chirpstack-bootstrap.js', chirpstackBootstrapScript, "'DEVICE_EUI_LAST_VERIFIED_AT'", 'protects DEVICE_EUI_LAST_VERIFIED_AT from env-file overrides');
+expectFileIncludes('chirpstack-bootstrap.js', chirpstackBootstrapScript, "'LINK_GATEWAY_DEVICE_EUI'", 'protects LINK_GATEWAY_DEVICE_EUI from env-file overrides');
+expectFileIncludes('chirpstack-bootstrap.js', chirpstackBootstrapScript, "if (protectedKeys.has(key) && String(process.env[key] || '').trim()) return;", 'keeps init-provided identity env values when the env file is stale');
+expectFileIncludes('chirpstack-bootstrap.js', chirpstackBootstrapScript, 'LSN50_CODEC_PATH', 'allows overriding the LSN50 decoder path during bootstrap');
+expectFileIncludes('chirpstack-bootstrap.js', chirpstackBootstrapScript, "CFG.lsn50CodecPath", 'tracks the shipped LSN50 decoder path in bootstrap config');
+expectFileIncludes('chirpstack-bootstrap.js', chirpstackBootstrapScript, "readCodecScript(CFG.lsn50CodecPath, 'LSN50')", 'loads the shipped LSN50 decoder during bootstrap');
+expectFileIncludes('chirpstack-bootstrap.js', chirpstackBootstrapScript, "getOrCreateProfileWithCodec(client, tenantId, CFG.profileLsn50Name", 'creates or repairs the OSI LSN50 profile with a payload codec');
 expectFileIncludes('deploy.sh', deployScript, '"feeds/chirpstack-openwrt-feed/apps/node-red/files/node-red.init"', 'deploys the Node-RED init script to live devices');
 expectFileIncludes('deploy.sh', deployScript, '"conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/libexec/osi-gateway-identity.sh"', 'deploys the shared gateway identity helper to live devices');
 expectFileIncludes('deploy.sh', deployScript, '"conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-dendro-helper/package.json"', 'deploys the osi-dendro-helper package manifest to live devices');
 expectFileIncludes('deploy.sh', deployScript, '"conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-dendro-helper/index.js"', 'deploys the osi-dendro-helper runtime helper to live devices');
+expectFileIncludes('deploy.sh', deployScript, '"conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/codecs/dragino_lsn50_decoder.js"', 'deploys the shipped LSN50 ChirpStack decoder to live devices');
 expectFileIncludes('deploy.sh', deployScript, 'chmod 755 /etc/init.d/node-red', 'keeps the deployed Node-RED init script executable');
 expectFileIncludes('deploy.sh', deployScript, '/etc/init.d/osi-gateway-gps stop || true', 'stops the retired gateway GPS sidecar during deploy');
 expectFileIncludes('deploy.sh', deployScript, '/etc/init.d/osi-gateway-gps disable || true', 'disables the retired gateway GPS sidecar during deploy');
 expectFileIncludes('deploy.sh', deployScript, 'rm -f /etc/init.d/osi-gateway-gps /usr/bin/osi-gateway-gps.js', 'removes the retired gateway GPS sidecar files during deploy');
 expectFileIncludes('osi-gateway-identity.sh', gatewayIdentityHelperScript, 'gateway_identity_resolve()', 'defines the shared canonical gateway resolver');
+expectFileIncludes('osi-gateway-identity.sh', gatewayIdentityHelperScript, 'gateway_identity_active_chipset()', 'derives the active concentratord chipset before probing static gateway identifiers');
+expectFileIncludes('osi-gateway-identity.sh', gatewayIdentityHelperScript, 'uci -q get chirpstack-concentratord.@global[0].chipset', 'reads the active concentratord chipset from UCI');
+expectFileIncludes('osi-gateway-identity.sh', gatewayIdentityHelperScript, 'gateway_identity_try_active_concentratord_uci', 'limits static UCI gateway-id probing to the active chipset');
+expectFileIncludes('osi-gateway-identity.sh', gatewayIdentityHelperScript, 'gateway_identity_try_active_concentratord_toml', 'limits TOML gateway-id probing to the active chipset');
+expectFileIncludes('osi-gateway-identity.sh', gatewayIdentityHelperScript, 'gateway_identity_repair_concentratord_config()', 'defines startup self-healing for active concentratord gateway-id state');
 expectFileIncludes('osi-gateway-identity.sh', gatewayIdentityHelperScript, 'GATEWAY_IDENTITY_DEVICE_EUI_CONFIDENCE="authoritative"', 'marks live ChirpStack-derived gateway identities as authoritative');
 expectFileIncludes('osi-gateway-identity.sh', gatewayIdentityHelperScript, 'GATEWAY_IDENTITY_DEVICE_EUI_CONFIDENCE="persisted"', 'marks previously verified gateway identities as persisted');
 expectFileIncludes('osi-gateway-identity.sh', gatewayIdentityHelperScript, 'GATEWAY_IDENTITY_DEVICE_EUI_CONFIDENCE="provisional"', 'marks MAC-derived gateway identities as provisional');
@@ -930,9 +987,14 @@ expectFileIncludes('osi-gateway-identity.sh', gatewayIdentityHelperScript, '/bin
 expectFileIncludes('osi-gateway-identity.sh', gatewayIdentityHelperScript, 'sh /usr/bin/gateway-id.sh', 'prefers runtime concentratord gateway identity when available');
 expectFileIncludes('osi-gateway-identity.sh', gatewayIdentityHelperScript, 'gateway_identity_matches_local_mac_fallback', 'downgrades MAC-derived concentratord IDs away from authoritative confidence');
 expectFileIncludes('osi-gateway-identity.sh', gatewayIdentityHelperScript, 'for iface in eth0 br-lan wlan0; do', 'falls back across known interfaces for provisional MAC-derived identity');
+expectFileExcludes('osi-gateway-identity.sh', gatewayIdentityHelperScript, 'gateway_identity_try_command "concentratord-uci-sx1302"', 'hard-coded sx1302 fallback outside active-chipset-aware resolution');
+expectFileExcludes('osi-gateway-identity.sh', gatewayIdentityHelperScript, 'gateway_identity_try_command "concentratord-uci-sx1301"', 'hard-coded sx1301 fallback outside active-chipset-aware resolution');
+expectFileExcludes('osi-gateway-identity.sh', gatewayIdentityHelperScript, 'gateway_identity_try_command "concentratord-toml"', 'blank-chipset TOML fallback outside active-chipset-aware resolution');
 expectFileIncludes('99_set_sx1301_gateway_id', sx1301GatewayDefaultScript, '/usr/libexec/osi-gateway-identity.sh', 'uses the shared gateway identity helper for first-boot concentratord seeding');
-expectFileIncludes('99_set_sx1301_gateway_id', sx1301GatewayDefaultScript, "SECTION='chirpstack-concentratord.@sx1302[0]'", 'supports sx1302 concentratord gateway-id seeding');
+expectFileIncludes('99_set_sx1301_gateway_id', sx1301GatewayDefaultScript, 'gateway_identity_active_lora_section', 'seeds only the active LoRa concentratord section');
 expectFileIncludes('99_set_sx1301_gateway_id', sx1301GatewayDefaultScript, 'resolve_fallback_gateway_id()', 'keeps a single MAC-derived fallback path for first-boot concentratord seeding');
+expectFileExcludes('99_set_sx1301_gateway_id', sx1301GatewayDefaultScript, "SECTION='chirpstack-concentratord.@sx1302[0]'", 'hard-coded sx1302 seeding outside active-chipset-aware logic');
+expectFileExcludes('99_set_sx1301_gateway_id', sx1301GatewayDefaultScript, "SECTION='chirpstack-concentratord.@sx1301[0]'", 'hard-coded sx1301 seeding outside active-chipset-aware logic');
 
 const authNodes = flows.filter((node) => typeof node.func === 'string' && node.func.includes('function getAuthSecret()'));
 for (const insecureNeedle of ['osi-os-default-auth-secret', "env.get('CHIRPSTACK_API_KEY')"]) {
@@ -987,6 +1049,8 @@ if (!helperPath) {
   } catch (error) {
     const helperIndexPath = path.join(helperPath, 'index.js');
     const helperSource = fs.existsSync(helperIndexPath) ? fs.readFileSync(helperIndexPath, 'utf8') : '';
+    expectFileIncludes('osi-chirpstack-helper/index.js', helperSource, 'async getDeviceProfile(', 'adds profile reads so bootstrap can inspect existing ChirpStack codecs');
+    expectFileIncludes('osi-chirpstack-helper/index.js', helperSource, 'async updateDeviceProfile(', 'adds profile updates so bootstrap can repair codec-less ChirpStack profiles');
     if (error.code === 'MODULE_NOT_FOUND' && helperSource) {
       console.log(`OK helper source present despite missing local runtime deps: ${error.message}`);
       for (const exportName of ['createClient', 'createProvisioningClientFromEnv', 'normalizeApiUrl']) {
@@ -1001,6 +1065,10 @@ if (!helperPath) {
     }
   }
 }
+
+expectFileIncludes('dragino_lsn50_decoder.js', lsn50CodecSource, 'function decodeUplink(input)', 'ships the LSN50 ChirpStack decoder entry point');
+expectFileIncludes('dragino_lsn50_decoder.js', lsn50CodecSource, 'decode.Work_mode="3ADC+IIC";', 'ships the working MOD3 decoder path from the live LSN50 profile');
+expectFileIncludes('dragino_lsn50_decoder.js', lsn50CodecSource, 'decode.ADC_CH1V= (bytes[2]<<8 | bytes[3])/1000;', 'ships the working LSN50 CH1 decoder logic');
 
 const dbHelperPath = dbHelperCandidates.find((candidate) => fs.existsSync(candidate));
 if (!dbHelperPath) {
