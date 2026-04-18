@@ -33,9 +33,9 @@ test('decodeMod3DendroPayload: valid frame populates all fields', () => {
   assert.equal(out.refTooHigh, false);
   assert.equal(out.adcFail, false);
   assert.equal(out.dendroRatio, 1);
-  // Back-compat aliases: raw * 5.0 / 4095
-  assert.ok(Math.abs(out.adcCh0V - (2048 * 5 / 4095)) < 1e-6);
-  assert.ok(Math.abs(out.adcCh1V - (2048 * 5 / 4095)) < 1e-6);
+  // Back-compat aliases: raw * batV / 4095 (VDDA ≈ batV on LSN50 V2).
+  assert.ok(Math.abs(out.adcCh0V - (2048 * 3.2 / 4095)) < 1e-6);
+  assert.ok(Math.abs(out.adcCh1V - (2048 * 3.2 / 4095)) < 1e-6);
   assert.equal(out.adcCh4V, null);
 });
 

@@ -66,7 +66,10 @@ function decodeMod3DendroPayload(b64) {
       ? roundTo(adcSignalAvgRaw / adcReferenceAvgRaw, 6)
       : null;
 
-    const toVolts = (raw) => raw === null ? null : (raw * 5) / 4095;
+    // Back-compat aliases: reconstruct pin voltage using batV as the ADC
+    // reference (VDDA ≈ batV on LSN50 V2). Matches stock-firmware adcCh0V
+    // semantics so the [0, 2.6] legacy band and DB rows stay comparable.
+    const toVolts = (raw) => raw === null ? null : (raw * batV) / 4095;
 
     return {
       batV,
