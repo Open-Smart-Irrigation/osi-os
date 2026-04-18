@@ -1,6 +1,11 @@
 {
   "name": "osi-dendro-helper",
   "version": "1.0.0",
+  "description": "Dendrometer decoder/analytics helpers for Node-RED flows",
   "private": true,
-  "main": "index.js"
+  "main": "index.js",
+  "scripts": {
+    "test": "node --test"
+  },
+  "license": "UNLICENSED"
 }

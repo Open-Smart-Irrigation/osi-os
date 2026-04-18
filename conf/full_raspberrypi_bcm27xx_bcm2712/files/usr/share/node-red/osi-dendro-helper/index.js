@@ -2,6 +2,13 @@
 
 const SMALL_REFERENCE_THRESHOLD = 0.05;
 
+const DENDRO_FLAG_VALID    = 0x01;
+const DENDRO_FLAG_REF_LOW  = 0x02;
+const DENDRO_FLAG_REF_HIGH = 0x04;
+const DENDRO_FLAG_ADC_FAIL = 0x08;
+
+const MOD3_DENDRO_FRAME_LENGTH = 8;
+
 function toFiniteNumber(value) {
   if (value === null || value === undefined || value === '') return null;
   const number = Number(value);
@@ -34,6 +41,51 @@ function detectLsn50ModeCode(b64) {
     const rawMode = (buf[6] >> 2) & 0x1f;
     const modeCode = rawMode + 1;
     return modeCode >= 1 && modeCode <= 9 ? modeCode : null;
+  } catch (_) {
+    return null;
+  }
+}
+
+function decodeMod3DendroPayload(b64) {
+  try {
+    const buf = Buffer.from(String(b64 || ''), 'base64');
+    if (buf.length !== MOD3_DENDRO_FRAME_LENGTH) return null;
+
+    const batV                = ((buf[0] << 8) | buf[1]) / 1000;
+    const adcSignalAvgRaw     = (buf[2] << 8) | buf[3];
+    const adcReferenceAvgRaw  = (buf[4] << 8) | buf[5];
+    const statusByte          = buf[6];
+    const dendroFlags         = buf[7];
+
+    const refTooLow        = (dendroFlags & DENDRO_FLAG_REF_LOW)  !== 0;
+    const refTooHigh       = (dendroFlags & DENDRO_FLAG_REF_HIGH) !== 0;
+    const adcFail          = (dendroFlags & DENDRO_FLAG_ADC_FAIL) !== 0;
+    const measurementValid = (dendroFlags & DENDRO_FLAG_VALID)    !== 0;
+
+    const dendroRatio = measurementValid && adcReferenceAvgRaw > 0
+      ? roundTo(adcSignalAvgRaw / adcReferenceAvgRaw, 6)
+      : null;
+
+    const toVolts = (raw) => raw === null ? null : (raw * 5) / 4095;
+
+    return {
+      batV,
+      adcSignalAvgRaw,
+      adcReferenceAvgRaw,
+      statusByte,
+      modeCode: 3,
+      modeLabel: 'MOD3',
+      switchStatus: (statusByte >> 7) & 0x01,
+      dendroFlags,
+      measurementValid,
+      refTooLow,
+      refTooHigh,
+      adcFail,
+      dendroRatio,
+      adcCh0V: toVolts(adcSignalAvgRaw),
+      adcCh1V: toVolts(adcReferenceAvgRaw),
+      adcCh4V: null,
+    };
   } catch (_) {
     return null;
   }
@@ -229,6 +281,7 @@ module.exports = {
   roundTo,
   lsn50ModeLabel,
   detectLsn50ModeCode,
+  decodeMod3DendroPayload,
   decodeRawAdcPayload,
   detectDendroModeUsed,
   calculateDendroRatio,
