@@ -96,6 +96,15 @@ function decodeRawAdcPayload(b64) {
     const buf = Buffer.from(String(b64 || ''), 'base64');
     if (buf.length < 7) return null;
 
+    // New MOD=3 dendrometer frame is always exactly 8 bytes with the
+    // MOD nibble (bits 2..6 of byte 6) encoding "3" (raw==2).
+    if (buf.length === MOD3_DENDRO_FRAME_LENGTH) {
+      const rawMode = (buf[6] >> 2) & 0x1f;
+      if (rawMode + 1 === 3) {
+        return decodeMod3DendroPayload(b64);
+      }
+    }
+
     const batV = ((buf[0] << 8) | buf[1]) / 1000;
     const modeCode = detectLsn50ModeCode(b64);
     const tempDisconnected = buf.length >= 4 && buf[2] === 0x7f && buf[3] === 0xff;

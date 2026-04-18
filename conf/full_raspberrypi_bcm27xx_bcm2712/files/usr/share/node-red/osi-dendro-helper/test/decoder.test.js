@@ -67,3 +67,24 @@ test('decodeMod3DendroPayload: wrong-length buffer returns null', () => {
   const frame = [0x0C, 0x80, 0x08, 0x00];
   assert.equal(decodeMod3DendroPayload(hex(frame)), null);
 });
+
+test('decodeRawAdcPayload: 8-byte MOD=3 frame goes through new decoder', () => {
+  const frame = [0x0C, 0x80, 0x08, 0x00, 0x08, 0x00, 0x08, 0x01];
+  const { decodeRawAdcPayload } = require('..');
+  const out = decodeRawAdcPayload(hex(frame));
+  assert.equal(out.modeCode, 3);
+  assert.equal(out.adcSignalAvgRaw, 2048);
+  assert.equal(out.measurementValid, true);
+  // Back-compat alias still present so downstream flow code works.
+  assert.ok(typeof out.adcCh0V === 'number');
+});
+
+test('decodeRawAdcPayload: legacy MOD=1 frame still works', () => {
+  // 11 bytes, MOD=1: battery=3200, temp=200, oil=1500, status byte mode
+  // nibble = 0 (encodes MOD=1 per detectLsn50ModeCode: rawMode + 1).
+  const frame = [0x0C, 0x80, 0x00, 0xC8, 0x05, 0xDC, 0x00, 0x00, 0x3C, 0x00, 0x28];
+  const { decodeRawAdcPayload } = require('..');
+  const out = decodeRawAdcPayload(hex(frame));
+  assert.equal(out.batV, 3.2);
+  assert.equal(out.modeCode, 1);
+});
