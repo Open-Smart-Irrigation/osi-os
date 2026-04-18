@@ -88,3 +88,54 @@ test('decodeRawAdcPayload: legacy MOD=1 frame still works', () => {
   assert.equal(out.batV, 3.2);
   assert.equal(out.modeCode, 1);
 });
+
+test('buildDendroDerivedMetrics: ratio_mod3 path with new frame', () => {
+  const {
+    decodeRawAdcPayload,
+    buildDendroDerivedMetrics,
+  } = require('..');
+
+  const frame = [0x0C, 0x80, 0x08, 0x00, 0x0C, 0x00, 0x08, 0x01];
+  const decoded = decodeRawAdcPayload(hex(frame));
+
+  const metrics = buildDendroDerivedMetrics({
+    adcCh0V: decoded.adcCh0V,
+    adcCh1V: decoded.adcCh1V,
+    effectiveMode: decoded.modeCode,
+    strokeMm: 50,
+    ratioZero: 0.2,
+    ratioSpan: 0.9,
+    invertDirection: 0,
+  });
+
+  assert.equal(metrics.dendroModeUsed, 'ratio_mod3');
+  assert.equal(typeof metrics.dendroRatio, 'number');
+  assert.ok(metrics.dendroRatio > 0.66 && metrics.dendroRatio < 0.67);
+  assert.equal(metrics.dendroValid, 1);
+});
+
+test('buildDendroDerivedMetrics: invalid MOD=3 frame falls to dendroValid=0', () => {
+  const {
+    decodeRawAdcPayload,
+    buildDendroDerivedMetrics,
+  } = require('..');
+
+  // REF_LOW frame: ref raw=31 (≈0.038 V) falls below the 0.05 V threshold in
+  // detectDendroModeUsed so the legacy path is selected; signal raw=0x0FFF
+  // (≈5.0 V) falls outside the legacy valid band [0, 2.6], so legacyValid=0
+  // and dendroValid propagates as 0.
+  const frame = [0x0C, 0x80, 0x0F, 0xFF, 0x00, 0x1F, 0x08, 0x02];
+  const decoded = decodeRawAdcPayload(hex(frame));
+
+  const metrics = buildDendroDerivedMetrics({
+    adcCh0V: decoded.adcCh0V,
+    adcCh1V: decoded.adcCh1V,
+    effectiveMode: decoded.modeCode,
+    strokeMm: 50,
+    ratioZero: 0.2,
+    ratioSpan: 0.9,
+    invertDirection: 0,
+  });
+
+  assert.equal(metrics.dendroValid, 0);
+});
