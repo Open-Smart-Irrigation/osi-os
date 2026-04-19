@@ -131,10 +131,9 @@ function detectDendroModeUsed(options = {}) {
   const effectiveMode = toFiniteNumber(options.effectiveMode);
   const adcCh0V = toFiniteNumber(options.adcCh0V);
   const adcCh1V = toFiniteNumber(options.adcCh1V);
-  const threshold = toFiniteNumber(options.smallReferenceThreshold) ?? SMALL_REFERENCE_THRESHOLD;
 
   if (forceLegacy) return 'legacy_single_adc';
-  if (effectiveMode === 3 && adcCh0V !== null && adcCh1V !== null && adcCh1V > threshold) {
+  if (effectiveMode === 3 && adcCh0V !== null && adcCh1V !== null) {
     return 'ratio_mod3';
   }
   return 'legacy_single_adc';
