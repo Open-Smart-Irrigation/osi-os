@@ -3,6 +3,7 @@ import type { Device } from '../../types/farming';
 import { devicesAPI, getApiErrorMessage, s2120API } from '../../services/api';
 import { useDismissOnPointerDown } from '../../hooks/useDismissOnPointerDown';
 import { useTranslation } from 'react-i18next';
+import { SensorMonitor } from './SensorMonitor';
 
 interface Props {
   device: Device;
@@ -111,6 +112,15 @@ export const SenseCapWeatherCard: React.FC<Props> = ({ device, onRemove, onUpdat
   const [showConfirm, setShowConfirm] = useState(false);
   const [isRemoving, setIsRemoving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [sensorMonitor, setSensorMonitor] = useState<{
+    field: string;
+    label: string;
+    unit: string;
+    color: string;
+    decimals: number;
+    initialField?: string;
+    seriesOptions?: Array<{ field: string; label: string; unit: string; color?: string; decimals?: number }>;
+  } | null>(null);
 
   const handleRemove = async () => {
     setIsRemoving(true);
@@ -205,23 +215,38 @@ export const SenseCapWeatherCard: React.FC<Props> = ({ device, onRemove, onUpdat
       <div className="grid grid-cols-2 gap-2">
         <div className="bg-[var(--card)] rounded-lg p-3">
           <p className="text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)] mb-1">Air Temperature</p>
-          <p className="text-2xl font-bold tabular-nums" style={{ color: '#ea580c' }}>
+          <button
+            onClick={() => setSensorMonitor({ field: 'ambient_temperature', label: 'Air Temperature', unit: '°C', color: '#ea580c', decimals: 1 })}
+            className="cursor-pointer text-left text-2xl font-bold tabular-nums text-[var(--text)] underline decoration-dotted underline-offset-4 transition-colors hover:text-[var(--primary)]"
+            title="View history"
+            style={{ color: '#ea580c' }}
+          >
             {fmtNum(d.ambient_temperature, 1, '°C')}
-          </p>
+          </button>
         </div>
 
         <div className="bg-[var(--card)] rounded-lg p-3">
           <p className="text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)] mb-1">Humidity</p>
-          <p className="text-2xl font-bold tabular-nums" style={{ color: '#0891b2' }}>
+          <button
+            onClick={() => setSensorMonitor({ field: 'relative_humidity', label: 'Humidity', unit: '%', color: '#0891b2', decimals: 0 })}
+            className="cursor-pointer text-left text-2xl font-bold tabular-nums text-[var(--text)] underline decoration-dotted underline-offset-4 transition-colors hover:text-[var(--primary)]"
+            title="View history"
+            style={{ color: '#0891b2' }}
+          >
             {fmtNum(d.relative_humidity, 0, '%')}
-          </p>
+          </button>
         </div>
 
         <div className="bg-[var(--card)] rounded-lg p-3">
           <p className="text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)] mb-1">Wind Speed</p>
-          <p className="text-2xl font-bold tabular-nums" style={{ color: '#4f46e5' }}>
+          <button
+            onClick={() => setSensorMonitor({ field: 'wind_speed_mps', label: 'Wind Speed', unit: 'm/s', color: '#4f46e5', decimals: 1 })}
+            className="cursor-pointer text-left text-2xl font-bold tabular-nums text-[var(--text)] underline decoration-dotted underline-offset-4 transition-colors hover:text-[var(--primary)]"
+            title="View history"
+            style={{ color: '#4f46e5' }}
+          >
             {fmtNum(d.wind_speed_mps, 1, 'm/s')}
-          </p>
+          </button>
           {d.wind_gust_mps != null && (
             <p className="text-xs text-[var(--text-tertiary)] mt-0.5">gust {d.wind_gust_mps.toFixed(1)} m/s</p>
           )}
@@ -229,16 +254,26 @@ export const SenseCapWeatherCard: React.FC<Props> = ({ device, onRemove, onUpdat
 
         <div className="bg-[var(--card)] rounded-lg p-3">
           <p className="text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)] mb-1">Wind Direction</p>
-          <p className="text-2xl font-bold tabular-nums" style={{ color: '#7c3aed' }}>
+          <button
+            onClick={() => setSensorMonitor({ field: 'wind_direction_deg', label: 'Wind Direction', unit: '°', color: '#7c3aed', decimals: 0 })}
+            className="cursor-pointer text-left text-2xl font-bold tabular-nums text-[var(--text)] underline decoration-dotted underline-offset-4 transition-colors hover:text-[var(--primary)]"
+            title="View history"
+            style={{ color: '#7c3aed' }}
+          >
             {windDirLabel(d.wind_direction_deg)}
-          </p>
+          </button>
         </div>
 
         <div className="bg-[var(--card)] rounded-lg p-3">
           <p className="text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)] mb-1">Rain Today</p>
-          <p className="text-2xl font-bold tabular-nums" style={{ color: '#2563eb' }}>
+          <button
+            onClick={() => setSensorMonitor({ field: 'rain_mm_delta', label: 'Rainfall', unit: 'mm', color: '#2563eb', decimals: 1 })}
+            className="cursor-pointer text-left text-2xl font-bold tabular-nums text-[var(--text)] underline decoration-dotted underline-offset-4 transition-colors hover:text-[var(--primary)]"
+            title="View history"
+            style={{ color: '#2563eb' }}
+          >
             {fmtNum(d.rain_mm_today, 1, 'mm')}
-          </p>
+          </button>
           {d.rain_mm_delta != null && d.rain_mm_delta > 0 && (
             <p className="text-xs text-[var(--text-tertiary)] mt-0.5">+{d.rain_mm_delta.toFixed(1)} mm last uplink</p>
           )}
@@ -246,23 +281,38 @@ export const SenseCapWeatherCard: React.FC<Props> = ({ device, onRemove, onUpdat
 
         <div className="bg-[var(--card)] rounded-lg p-3">
           <p className="text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)] mb-1">Pressure</p>
-          <p className="text-2xl font-bold tabular-nums" style={{ color: '#475569' }}>
+          <button
+            onClick={() => setSensorMonitor({ field: 'barometric_pressure_hpa', label: 'Pressure', unit: 'hPa', color: '#475569', decimals: 0 })}
+            className="cursor-pointer text-left text-2xl font-bold tabular-nums text-[var(--text)] underline decoration-dotted underline-offset-4 transition-colors hover:text-[var(--primary)]"
+            title="View history"
+            style={{ color: '#475569' }}
+          >
             {fmtNum(d.barometric_pressure_hpa, 0, 'hPa')}
-          </p>
+          </button>
         </div>
 
         <div className="bg-[var(--card)] rounded-lg p-3">
           <p className="text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)] mb-1">Light Intensity</p>
-          <p className="text-2xl font-bold tabular-nums" style={{ color: '#d97706' }}>
+          <button
+            onClick={() => setSensorMonitor({ field: 'light_lux', label: 'Light Intensity', unit: 'lux', color: '#d97706', decimals: 0 })}
+            className="cursor-pointer text-left text-2xl font-bold tabular-nums text-[var(--text)] underline decoration-dotted underline-offset-4 transition-colors hover:text-[var(--primary)]"
+            title="View history"
+            style={{ color: '#d97706' }}
+          >
             {fmtLux(d.light_lux)}
-          </p>
+          </button>
         </div>
 
         <div className="bg-[var(--card)] rounded-lg p-3">
           <p className="text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)] mb-1">UV Index</p>
-          <p className="text-2xl font-bold tabular-nums" style={{ color: '#ca8a04' }}>
+          <button
+            onClick={() => setSensorMonitor({ field: 'uv_index', label: 'UV Index', unit: 'UVI', color: '#ca8a04', decimals: 1 })}
+            className="cursor-pointer text-left text-2xl font-bold tabular-nums text-[var(--text)] underline decoration-dotted underline-offset-4 transition-colors hover:text-[var(--primary)]"
+            title="View history"
+            style={{ color: '#ca8a04' }}
+          >
             {fmtNum(d.uv_index, 1, 'UVI')}
-          </p>
+          </button>
         </div>
       </div>
 
@@ -275,6 +325,20 @@ export const SenseCapWeatherCard: React.FC<Props> = ({ device, onRemove, onUpdat
           {d.bat_pct != null ? `🔋 ${Math.round(d.bat_pct)}% · ` : ''}{lastSeenLabel(device.last_seen)}
         </p>
       </div>
+      {sensorMonitor && (
+        <SensorMonitor
+          deveui={device.deveui}
+          deviceName={device.name}
+          field={sensorMonitor.field}
+          label={sensorMonitor.label}
+          unit={sensorMonitor.unit}
+          color={sensorMonitor.color}
+          decimals={sensorMonitor.decimals}
+          initialField={sensorMonitor.initialField}
+          seriesOptions={sensorMonitor.seriesOptions}
+          onClose={() => setSensorMonitor(null)}
+        />
+      )}
     </div>
   );
 };
