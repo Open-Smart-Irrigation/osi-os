@@ -19,7 +19,9 @@ Built on [ChirpStack Gateway OS](https://www.chirpstack.io/docs/chirpstack-gatew
 - **Offline-first** — fully functional without internet; cloud sync optional
 - **Sensor data export** — download historical readings as CSV or raw SQLite
 - **OSI Cloud integration** — remote monitoring and gateway control via OSI Server; fan speed control and reboot from anywhere
-- **Dragino LSN50V2 support** — external temperature (DS18B20) and ADC/dendrometer sensor node
+- **Dragino LSN50V2 support** — external temperature (DS18B20), ADC, and dendrometer (stem growth) sensor node
+- **SenseCAP S2120 weather station** — 8-in-1 weather station (wind speed/direction, rain, pressure, UV, temperature, humidity); multi-zone assignment; history monitoring
+- **Soil moisture probe depth metadata** — configurable depth labels per KIWI probe channel
 - **Raspberry Pi system monitoring** — CPU temperature, memory usage, CPU load, and fan speed visible in the web dashboard
 
 ---
