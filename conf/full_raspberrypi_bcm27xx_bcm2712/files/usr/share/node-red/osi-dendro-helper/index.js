@@ -2,12 +2,7 @@
 
 const SMALL_REFERENCE_THRESHOLD = 0.05;
 
-const DENDRO_FLAG_VALID    = 0x01;
-const DENDRO_FLAG_REF_LOW  = 0x02;
-const DENDRO_FLAG_REF_HIGH = 0x04;
-const DENDRO_FLAG_ADC_FAIL = 0x08;
-
-const MOD3_DENDRO_FRAME_LENGTH = 8;
+const STOCK_MOD3_MIN_LENGTH = 12;
 
 function toFiniteNumber(value) {
   if (value === null || value === undefined || value === '') return null;
@@ -46,48 +41,30 @@ function detectLsn50ModeCode(b64) {
   }
 }
 
-function decodeMod3DendroPayload(b64) {
+function decodeStockMod3Payload(b64) {
   try {
     const buf = Buffer.from(String(b64 || ''), 'base64');
-    if (buf.length !== MOD3_DENDRO_FRAME_LENGTH) return null;
+    if (buf.length < STOCK_MOD3_MIN_LENGTH) return null;
 
-    const batV                = ((buf[0] << 8) | buf[1]) / 1000;
-    const adcSignalAvgRaw     = (buf[2] << 8) | buf[3];
-    const adcReferenceAvgRaw  = (buf[4] << 8) | buf[5];
-    const statusByte          = buf[6];
-    const dendroFlags         = buf[7];
+    const rawMode = (buf[6] >> 2) & 0x1f;
+    if (rawMode + 1 !== 3) return null;
 
-    const refTooLow        = (dendroFlags & DENDRO_FLAG_REF_LOW)  !== 0;
-    const refTooHigh       = (dendroFlags & DENDRO_FLAG_REF_HIGH) !== 0;
-    const adcFail          = (dendroFlags & DENDRO_FLAG_ADC_FAIL) !== 0;
-    const measurementValid = (dendroFlags & DENDRO_FLAG_VALID)    !== 0;
-
-    const dendroRatio = measurementValid && adcReferenceAvgRaw > 0
-      ? roundTo(adcSignalAvgRaw / adcReferenceAvgRaw, 6)
-      : null;
-
-    // Back-compat aliases: reconstruct pin voltage using batV as the ADC
-    // reference (VDDA ≈ batV on LSN50 V2). Matches stock-firmware adcCh0V
-    // semantics so the [0, 2.6] legacy band and DB rows stay comparable.
-    const toVolts = (raw) => raw === null ? null : (raw * batV) / 4095;
+    const oilMv   = (buf[0] << 8) | buf[1];
+    const adc1Mv  = (buf[2] << 8) | buf[3];
+    const adc2Mv  = (buf[4] << 8) | buf[5];
+    const statusByte = buf[6];
+    const batV    = (buf[11] * 100) / 1000;
 
     return {
       batV,
-      adcSignalAvgRaw,
-      adcReferenceAvgRaw,
+      tempC1: null,
+      adcCh0V: oilMv  / 1000,
+      adcCh1V: adc1Mv / 1000,
+      adcCh4V: adc2Mv / 1000,
       statusByte,
+      switchStatus: (statusByte >> 7) & 0x01,
       modeCode: 3,
       modeLabel: 'MOD3',
-      switchStatus: (statusByte >> 7) & 0x01,
-      dendroFlags,
-      measurementValid,
-      refTooLow,
-      refTooHigh,
-      adcFail,
-      dendroRatio,
-      adcCh0V: toVolts(adcSignalAvgRaw),
-      adcCh1V: toVolts(adcReferenceAvgRaw),
-      adcCh4V: null,
     };
   } catch (_) {
     return null;
@@ -99,12 +76,10 @@ function decodeRawAdcPayload(b64) {
     const buf = Buffer.from(String(b64 || ''), 'base64');
     if (buf.length < 7) return null;
 
-    // New MOD=3 dendrometer frame is always exactly 8 bytes with the
-    // MOD nibble (bits 2..6 of byte 6) encoding "3" (raw==2).
-    if (buf.length === MOD3_DENDRO_FRAME_LENGTH) {
+    if (buf.length >= STOCK_MOD3_MIN_LENGTH) {
       const rawMode = (buf[6] >> 2) & 0x1f;
       if (rawMode + 1 === 3) {
-        return decodeMod3DendroPayload(b64);
+        return decodeStockMod3Payload(b64);
       }
     }
 
@@ -210,13 +185,6 @@ function buildDendroDerivedMetrics(options = {}) {
   const legacyPositionMm = legacyValid === 1 ? roundTo(adcCh0V * 10, 3) : null;
   const ratioInfo = calculateDendroRatio(adcCh0V, adcCh1V, options);
 
-  // Firmware validity bit (from MOD=3 flag byte). undefined = caller did not
-  // supply it (stock firmware path, or legacy call site) — voltage-derived
-  // validity stands. Explicit false = firmware flagged REF_LOW/REF_HIGH/
-  // ADC_FAIL and the gateway must not override that judgement.
-  const firmwareFlagProvided = options.measurementValid !== undefined;
-  const firmwareSaysInvalid = firmwareFlagProvided && options.measurementValid === false;
-
   let dendroValid = legacyValid;
   let positionMm = legacyPositionMm;
   let calibrationMissing = false;
@@ -224,23 +192,16 @@ function buildDendroDerivedMetrics(options = {}) {
   let ratioInvalidReason = ratioInfo.invalidReason;
 
   if (modeUsed === 'ratio_mod3') {
-    if (firmwareSaysInvalid) {
-      dendroValid = 0;
-      positionMm = null;
-      ratioValue = null;
-      ratioInvalidReason = ratioInvalidReason || 'firmware_flag_invalid';
-    } else {
-      dendroValid = ratioInfo.isValid ? 1 : 0;
-      positionMm = calculateRatioDendroPositionMm({
-        strokeMm,
-        ratioZero,
-        ratioSpan,
-        ratio: ratioInfo.ratio,
-        invertDirection,
-      });
-      if (ratioInfo.isValid && positionMm === null) {
-        calibrationMissing = true;
-      }
+    dendroValid = ratioInfo.isValid ? 1 : 0;
+    positionMm = calculateRatioDendroPositionMm({
+      strokeMm,
+      ratioZero,
+      ratioSpan,
+      ratio: ratioInfo.ratio,
+      invertDirection,
+    });
+    if (ratioInfo.isValid && positionMm === null) {
+      calibrationMissing = true;
     }
   }
 
@@ -305,11 +266,12 @@ function computeDendroDeltaMm(options = {}) {
 
 module.exports = {
   SMALL_REFERENCE_THRESHOLD,
+  STOCK_MOD3_MIN_LENGTH,
   toFiniteNumber,
   roundTo,
   lsn50ModeLabel,
   detectLsn50ModeCode,
-  decodeMod3DendroPayload,
+  decodeStockMod3Payload,
   decodeRawAdcPayload,
   detectDendroModeUsed,
   calculateDendroRatio,
