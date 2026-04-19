@@ -305,6 +305,7 @@ export interface DendroHistoryPoint {
   t: string;           // ISO timestamp
   position_mm: number | null;
   delta_mm: number | null;
+  stem_change_um: number | null;
   adc_v: number | null;
   adc_ch0v?: number | null;
   adc_ch1v?: number | null;
@@ -324,6 +325,7 @@ function normaliseDendroHistoryPoint(row: any): DendroHistoryPoint {
     t: String(row?.t ?? row?.recorded_at ?? ''),
     position_mm: toNullableNumber(row?.position_mm ?? row?.dendro_position_mm),
     delta_mm: toNullableNumber(row?.delta_mm ?? row?.dendro_delta_mm),
+    stem_change_um: toNullableNumber(row?.stem_change_um ?? row?.dendro_stem_change_um),
     adc_v: toNullableNumber(row?.adc_v ?? row?.adc_ch0v),
     adc_ch0v: toNullableNumber(row?.adc_ch0v ?? row?.adc_v),
     adc_ch1v: toNullableNumber(row?.adc_ch1v),
@@ -383,6 +385,9 @@ export const lsn50API = {
     dendroInvertDirection?: boolean | null;
   }): Promise<void> => {
     await api.put(`/api/devices/${deveui}/dendro-config`, payload);
+  },
+  resetDendroBaseline: async (deveui: string): Promise<void> => {
+    await api.post(`/api/devices/${deveui}/dendro-baseline/reset`);
   },
 };
 

@@ -226,6 +226,55 @@ function computeDendroDeltaMm(options = {}) {
   };
 }
 
+function computeDendroStemChangeUm(options = {}) {
+  const positionMm = toFiniteNumber(options.positionMm);
+  const modeUsed = String(options.modeUsed || '');
+  const calibrationSig = String(options.calibrationSignature || '');
+  const baseline = options.baselineState && typeof options.baselineState === 'object'
+    ? options.baselineState
+    : null;
+
+  if (positionMm === null) {
+    return {
+      stemChangeUm: null,
+      nextBaseline: null,
+      reset: true,
+    };
+  }
+
+  if (
+    !baseline
+    || toFiniteNumber(baseline.positionMm) === null
+    || String(baseline.modeUsed || '') !== modeUsed
+    || String(baseline.calibrationSignature || '') !== calibrationSig
+  ) {
+    return {
+      stemChangeUm: 0,
+      nextBaseline: { positionMm, modeUsed, calibrationSignature: calibrationSig },
+      reset: true,
+    };
+  }
+
+  const baselinePositionMm = Number(baseline.positionMm);
+  if (!Number.isFinite(baselinePositionMm)) {
+    return {
+      stemChangeUm: 0,
+      nextBaseline: { positionMm, modeUsed, calibrationSignature: calibrationSig },
+      reset: true,
+    };
+  }
+
+  return {
+    stemChangeUm: Math.round((positionMm - baselinePositionMm) * 1000),
+    nextBaseline: {
+      positionMm: baselinePositionMm,
+      modeUsed,
+      calibrationSignature: calibrationSig,
+    },
+    reset: false,
+  };
+}
+
 module.exports = {
   SMALL_REFERENCE_THRESHOLD,
   toFiniteNumber,
@@ -239,4 +288,5 @@ module.exports = {
   buildDendroDerivedMetrics,
   calibrationSignature,
   computeDendroDeltaMm,
+  computeDendroStemChangeUm,
 };

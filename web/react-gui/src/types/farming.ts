@@ -29,6 +29,7 @@ export interface Device {
     dendro_position_mm?: number | null; // Calculated trunk position (mm), 0–25 range
     dendro_valid?: number | null;       // 1 = valid reading, 0 = out-of-range/error
     dendro_delta_mm?: number | null;    // Change from previous reading (mm); null on first uplink
+    dendro_stem_change_um?: number | null; // Comparable stem change relative to the device baseline (µm)
     dendro_ratio?: number | null;       // MOD3 ratio (ADC_CH0V / ADC_CH1V) when available
     dendro_mode_used?: DendroModeUsed | string | null;
     lsn50_mode_code?: number | null;
@@ -76,6 +77,7 @@ export interface Device {
   dendro_ratio_zero?: number | null;
   dendro_ratio_span?: number | null;
   dendro_invert_direction?: number | null;
+  dendro_baseline_pending?: number | null;
   strega_model?: StregaModel | string | null;
 
   // Irrigation zone assignment

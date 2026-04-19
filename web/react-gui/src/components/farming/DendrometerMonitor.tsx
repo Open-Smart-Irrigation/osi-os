@@ -1,32 +1,24 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import {
-  AreaChart, Area, BarChart, Bar, Cell,
-  XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine,
+  AreaChart, Area,
+  XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
 } from 'recharts';
 import { dendroAPI, type DendroHistoryPoint } from '../../services/api';
 
 interface Props {
   deveui: string;
   deviceName: string;
+  strokeMm?: number | null;
   onClose: () => void;
 }
 
 const TIME_WINDOWS = [
   { label: '12 h', hours: 12 },
   { label: '24 h', hours: 24 },
-  { label: '7 d',  hours: 168 },
+  { label: '7 d', hours: 168 },
   { label: '30 d', hours: 720 },
   { label: '90 d', hours: 2160 },
 ];
-
-const DELTA_INTERVALS = [
-  { label: '30 min', minutes: 30 },
-  { label: '1 h',   minutes: 60 },
-  { label: '6 h',   minutes: 360 },
-  { label: '12 h',  minutes: 720 },
-];
-
-// ─── tick / label formatters ────────────────────────────────────────────────
 
 function fmtTickShort(iso: string, hours: number): string {
   const d = new Date(iso);
@@ -45,23 +37,19 @@ function formatDendroModeUsed(value: unknown): string | null {
   return null;
 }
 
-function isRatioDendroMode(value: unknown): boolean {
-  return value === 'ratio_mod3';
+function formatStemChangeUm(value: number): string {
+  const rounded = Math.round(value);
+  return `${rounded > 0 ? '+' : ''}${rounded} µm`;
 }
 
-// ─── aggregated-delta computation ───────────────────────────────────────────
+type StemHistoryPoint = DendroHistoryPoint & { stem_change_um: number };
+type MechanicalHistoryPoint = DendroHistoryPoint & { position_mm: number };
 
-interface DeltaBucket {
-  t: string;        // ISO of bucket start — used as chart dataKey
-  tEnd: string;     // ISO of bucket end
-  mean: number;     // mean position_mm across all uplinks in this bucket
-  count: number;    // how many uplinks went into the mean
-  delta: number | null; // mean(this) − mean(prev adjacent bucket); null when gap > 1.5× interval
+function hasStemChange(point: DendroHistoryPoint): point is StemHistoryPoint {
+  return point.valid === 1 && point.stem_change_um != null;
 }
 
-type CalibratedHistoryPoint = DendroHistoryPoint & { position_mm: number };
-
-function hasCalibratedPosition(point: DendroHistoryPoint): point is CalibratedHistoryPoint {
+function hasCalibratedPosition(point: DendroHistoryPoint): point is MechanicalHistoryPoint {
   return point.valid === 1 && point.position_mm != null;
 }
 
@@ -69,101 +57,35 @@ function hasRawDendroSignals(point: DendroHistoryPoint): boolean {
   return point.adc_ch0v != null || point.adc_ch1v != null || point.dendro_ratio != null;
 }
 
-function computeAggregatedDeltas(
-  data: DendroHistoryPoint[],
-  intervalMinutes: number,
-): DeltaBucket[] {
-  const valid = data.filter(hasCalibratedPosition);
-  if (valid.length === 0) return [];
-
-  const intervalMs = intervalMinutes * 60 * 1000;
-
-  // Group readings into fixed-width time buckets
-  const bucketMap = new Map<number, number[]>();
-  for (const pt of valid) {
-    const ts = new Date(pt.t).getTime();
-    const bucketStart = Math.floor(ts / intervalMs) * intervalMs;
-    const arr = bucketMap.get(bucketStart) ?? [];
-    arr.push(pt.position_mm);
-    bucketMap.set(bucketStart, arr);
-  }
-
-  const sorted = [...bucketMap.entries()]
-    .sort(([a], [b]) => a - b)
-    .map(([startMs, vals]) => ({
-      startMs,
-      t: new Date(startMs).toISOString(),
-      tEnd: new Date(startMs + intervalMs).toISOString(),
-      mean: Math.round((vals.reduce((a, b) => a + b, 0) / vals.length) * 1000) / 1000,
-      count: vals.length,
-    }));
-
-  return sorted.map((bucket, i) => {
-    if (i === 0) return { ...bucket, delta: null };
-    const prev = sorted[i - 1];
-    // Only compare adjacent buckets — discard if gap is larger than 1.5× the interval
-    // (accounts for a single missed uplink within the bucket)
-    const gap = bucket.startMs - prev.startMs;
-    const delta =
-      gap <= intervalMs * 1.5
-        ? Math.round((bucket.mean - prev.mean) * 1000) / 1000
-        : null;
-    return { ...bucket, delta };
-  });
-}
-
-// ─── custom tooltips ────────────────────────────────────────────────────────
-
-const TooltipPosition = ({ active, payload, label, hours }: any) => {
+const TooltipStemChange = ({ active, payload, label, hours }: any) => {
   if (!active || !payload?.length) return null;
-  const point = payload[0].payload;
+  const point = payload[0].payload as DendroHistoryPoint;
   const sourceLabel = formatDendroModeUsed(point.dendro_mode_used);
-  const showRatioDebug = isRatioDendroMode(point.dendro_mode_used);
   return (
-    <div className="bg-[var(--surface)] border border-[var(--border)] rounded-lg p-3 text-sm shadow-xl">
-      <p className="text-[var(--text-tertiary)] mb-1">{fmtTickShort(label, hours)}</p>
-      <p className="font-bold text-[var(--text)]">{payload[0].value?.toFixed(3)} mm</p>
-      {point.adc_ch0v != null && (
-        <p className="text-[var(--text-tertiary)] text-xs">CH0: {point.adc_ch0v.toFixed(3)} V</p>
+    <div className="rounded-lg border border-[var(--border)] bg-[var(--surface)] p-3 text-sm shadow-xl">
+      <p className="mb-1 text-[var(--text-tertiary)]">{fmtTickShort(label, hours)}</p>
+      {point.stem_change_um != null && (
+        <p className="font-bold text-[var(--text)]">{formatStemChangeUm(point.stem_change_um)}</p>
       )}
-      {showRatioDebug && point.adc_ch1v != null && (
-        <p className="text-[var(--text-tertiary)] text-xs">CH1: {point.adc_ch1v.toFixed(3)} V</p>
-      )}
-      {showRatioDebug && point.dendro_ratio != null && (
-        <p className="text-[var(--text-tertiary)] text-xs">Ratio: {point.dendro_ratio.toFixed(4)}</p>
+      {point.position_mm != null && (
+        <p className="text-xs text-[var(--text-tertiary)]">Position: {point.position_mm.toFixed(2)} mm</p>
       )}
       {sourceLabel && (
-        <p className="text-[var(--text-tertiary)] text-xs">Source: {sourceLabel}</p>
+        <p className="text-xs text-[var(--text-tertiary)]">Source: {sourceLabel}</p>
       )}
     </div>
   );
 };
 
-const TooltipDelta = ({ active, payload, label, hours }: any) => {
-  if (!active || !payload?.length) return null;
-  const bucket: DeltaBucket = payload[0]?.payload;
-  const v: number | null = payload[0].value;
-  if (v == null) return null;
-  return (
-    <div className="bg-[var(--surface)] border border-[var(--border)] rounded-lg p-3 text-sm shadow-xl">
-      <p className="text-[var(--text-tertiary)] mb-1">
-        {fmtTickShort(label, hours)} → {fmtTickShort(bucket.tEnd, hours)}
-      </p>
-      <p className={`font-bold ${v >= 0 ? 'text-[#22c55e]' : 'text-[var(--error-text)]'}`}>
-        {v >= 0 ? '+' : ''}{v.toFixed(3)} mm
-      </p>
-      <p className="text-[var(--text-tertiary)] text-xs mt-0.5">
-        Mean: {bucket.mean.toFixed(3)} mm · {bucket.count} uplinks
-      </p>
-    </div>
-  );
-};
+const MechanicalStat = ({ label, value }: { label: string; value: string }) => (
+  <div className="rounded-lg bg-[var(--card)] p-3">
+    <p className="text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)]">{label}</p>
+    <p className="mt-1 text-base font-semibold text-[var(--text)]">{value}</p>
+  </div>
+);
 
-// ─── component ───────────────────────────────────────────────────────────────
-
-export const DendrometerMonitor: React.FC<Props> = ({ deveui, deviceName, onClose }) => {
+export const DendrometerMonitor: React.FC<Props> = ({ deveui, deviceName, strokeMm, onClose }) => {
   const [hours, setHours] = useState(24);
-  const [deltaIntervalMinutes, setDeltaIntervalMinutes] = useState(60);
   const [data, setData] = useState<DendroHistoryPoint[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -173,265 +95,232 @@ export const DendrometerMonitor: React.FC<Props> = ({ deveui, deviceName, onClos
     setLoading(true);
     setError(null);
     dendroAPI.getHistory(deveui, hours)
-      .then(rows => { if (!cancelled) { setData(rows); setLoading(false); } })
-      .catch(err  => { if (!cancelled) { setError(err.message || 'Failed to load'); setLoading(false); } });
-    return () => { cancelled = true; };
+      .then((rows) => {
+        if (!cancelled) {
+          setData(rows);
+          setLoading(false);
+        }
+      })
+      .catch((err) => {
+        if (!cancelled) {
+          setError(err.message || 'Failed to load');
+          setLoading(false);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [deveui, hours]);
 
-  const plottedData = useMemo(() => data.filter(hasCalibratedPosition), [data]);
+  const plottedData = useMemo(() => data.filter(hasStemChange), [data]);
+  const mechanicalData = useMemo(() => data.filter(hasCalibratedPosition), [data]);
 
-  // Tick reduction for position chart: ~8 ticks max
   const posTicks = useMemo(() => {
     if (!plottedData.length) return [];
     const step = Math.max(1, Math.floor(plottedData.length / 8));
-    return plottedData.filter((_, i) => i % step === 0).map(d => d.t);
+    return plottedData.filter((_, i) => i % step === 0).map((d) => d.t);
   }, [plottedData]);
 
-  // Aggregated delta buckets (recomputed when data or interval changes)
-  const deltaBuckets = useMemo(
-    () => computeAggregatedDeltas(data, deltaIntervalMinutes),
-    [data, deltaIntervalMinutes],
-  );
-
-  const deltaBucketsWithValue = deltaBuckets.filter(b => b.delta !== null);
-
-  // Tick reduction for delta chart: ~8 ticks max
-  const deltaTicks = useMemo(() => {
-    if (!deltaBuckets.length) return [];
-    const step = Math.max(1, Math.floor(deltaBuckets.length / 8));
-    return deltaBuckets.filter((_, i) => i % step === 0).map(b => b.t);
-  }, [deltaBuckets]);
-
-  // Summary stats
-  const validPositions = plottedData.map(d => d.position_mm);
-  const minPos = validPositions.length ? Math.min(...validPositions) : null;
-  const maxPos = validPositions.length ? Math.max(...validPositions) : null;
-  const latest = plottedData[plottedData.length - 1] ?? null;
+  const stemValues = plottedData.map((point) => point.stem_change_um);
+  const minStem = stemValues.length ? Math.min(...stemValues) : null;
+  const maxStem = stemValues.length ? Math.max(...stemValues) : null;
+  const latestStemPoint = plottedData[plottedData.length - 1] ?? null;
+  const latestMechanicalPoint = mechanicalData[mechanicalData.length - 1] ?? null;
+  const mechanicalMin = mechanicalData.length ? Math.min(...mechanicalData.map((point) => point.position_mm)) : null;
+  const mechanicalMax = mechanicalData.length ? Math.max(...mechanicalData.map((point) => point.position_mm)) : null;
+  const latestSourceLabel = latestMechanicalPoint ? formatDendroModeUsed(latestMechanicalPoint.dendro_mode_used) : null;
+  const strokePercent = strokeMm != null && strokeMm > 0 && latestMechanicalPoint
+    ? Math.max(0, Math.min(100, (latestMechanicalPoint.position_mm / strokeMm) * 100))
+    : null;
   const hasRawOnlySamples = data.some((point) => !hasCalibratedPosition(point) && hasRawDendroSignals(point));
+  const hasMechanicalOnlySamples = mechanicalData.length > 0 && plottedData.length === 0;
 
   return (
     <div
       className="fixed inset-0 z-50 flex items-stretch justify-end"
       style={{ background: 'rgba(0,0,0,0.55)' }}
-      onClick={e => { if (e.target === e.currentTarget) onClose(); }}
+      onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
     >
-      <div className="w-full max-w-2xl bg-[var(--bg)] flex flex-col h-full overflow-y-auto shadow-2xl">
-
-        {/* Header */}
-        <div className="bg-[var(--header-bg)] px-6 py-4 flex items-center justify-between shrink-0">
-          <div>
-            <h2 className="text-2xl font-bold text-[var(--header-text)] high-contrast-text">
-              Dendrometer Monitor
-            </h2>
-            <p className="text-[var(--header-subtext)] text-sm mt-0.5">{deviceName} · {deveui}</p>
-          </div>
-          <button
-            onClick={onClose}
-            className="text-[var(--header-text)] text-3xl font-light leading-none hover:text-white px-2"
-          >
-            ×
-          </button>
-        </div>
-
-        {/* Time window selector */}
-        <div className="px-6 pt-4 flex flex-wrap gap-2 shrink-0">
-          {TIME_WINDOWS.map(w => (
+      <div className="flex h-full w-full max-w-2xl flex-col overflow-y-auto bg-[var(--bg)] shadow-2xl">
+        <div className="shrink-0 bg-[var(--header-bg)] px-6 py-4">
+          <div className="flex items-center justify-between">
+            <div>
+              <h2 className="high-contrast-text text-2xl font-bold text-[var(--header-text)]">Dendrometer Monitor</h2>
+              <p className="mt-0.5 text-sm text-[var(--header-subtext)]">{deviceName} · {deveui}</p>
+            </div>
             <button
-              key={w.hours}
-              onClick={() => setHours(w.hours)}
-              className={`px-4 py-1.5 rounded-lg text-sm font-semibold transition-colors ${
-                hours === w.hours
-                  ? 'bg-[var(--primary)] text-white'
-                  : 'bg-[var(--card)] text-[var(--text)] hover:bg-[var(--border)]'
-              }`}
+              onClick={onClose}
+              className="px-2 text-3xl font-light leading-none text-[var(--header-text)] hover:text-white"
             >
-              {w.label}
+              ×
             </button>
-          ))}
+          </div>
         </div>
 
-        {/* Stats row */}
+        <div className="shrink-0 px-6 pt-4">
+          <div className="flex flex-wrap gap-2">
+            {TIME_WINDOWS.map((window) => (
+              <button
+                key={window.hours}
+                onClick={() => setHours(window.hours)}
+                className={`rounded-lg px-4 py-1.5 text-sm font-semibold transition-colors ${
+                  hours === window.hours
+                    ? 'bg-[var(--primary)] text-white'
+                    : 'bg-[var(--card)] text-[var(--text)] hover:bg-[var(--border)]'
+                }`}
+              >
+                {window.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
         {!loading && !error && plottedData.length > 0 && (
-          <div className="px-6 pt-4 grid grid-cols-3 gap-3 shrink-0">
-            <div className="bg-[var(--card)] rounded-lg p-3 text-center">
-              <p className="text-[var(--text-tertiary)] text-xs font-semibold">CURRENT</p>
-              <p className="text-xl font-bold text-[var(--text)]">{latest ? `${latest.position_mm.toFixed(2)} mm` : '—'}</p>
-            </div>
-            <div className="bg-[var(--card)] rounded-lg p-3 text-center">
-              <p className="text-[var(--text-tertiary)] text-xs font-semibold">MIN</p>
-              <p className="text-xl font-bold text-[var(--text)]">
-                {minPos !== null ? minPos.toFixed(2) : '—'} mm
-              </p>
-            </div>
-            <div className="bg-[var(--card)] rounded-lg p-3 text-center">
-              <p className="text-[var(--text-tertiary)] text-xs font-semibold">MAX</p>
-              <p className="text-xl font-bold text-[var(--text)]">
-                {maxPos !== null ? maxPos.toFixed(2) : '—'} mm
-              </p>
-            </div>
+          <div className="grid shrink-0 grid-cols-3 gap-3 px-6 pt-4">
+            <MechanicalStat
+              label="Current"
+              value={latestStemPoint ? formatStemChangeUm(latestStemPoint.stem_change_um) : '—'}
+            />
+            <MechanicalStat
+              label="Min"
+              value={minStem !== null ? formatStemChangeUm(minStem) : '—'}
+            />
+            <MechanicalStat
+              label="Max"
+              value={maxStem !== null ? formatStemChangeUm(maxStem) : '—'}
+            />
           </div>
         )}
 
-        <div className="flex-1 px-6 py-4 flex flex-col gap-8">
+        <div className="flex flex-1 flex-col gap-6 px-6 py-4">
           {loading && (
-            <div className="flex-1 flex items-center justify-center">
-              <div className="animate-spin h-10 w-10 border-4 border-[var(--primary)] border-t-transparent rounded-full" />
+            <div className="flex flex-1 items-center justify-center">
+              <div className="h-10 w-10 animate-spin rounded-full border-4 border-[var(--primary)] border-t-transparent" />
             </div>
           )}
+
           {error && (
-            <div className="bg-[var(--error-bg)] text-[var(--error-text)] rounded-lg p-4 text-center">
+            <div className="rounded-lg bg-[var(--error-bg)] p-4 text-center text-[var(--error-text)]">
               {error}
             </div>
           )}
+
           {!loading && !error && data.length === 0 && (
-            <div className="flex-1 flex items-center justify-center">
-              <p className="text-[var(--text-tertiary)] text-lg">
+            <div className="flex flex-1 items-center justify-center">
+              <p className="text-lg text-[var(--text-tertiary)]">
                 No dendrometer data in the last {hours} hours.
               </p>
             </div>
           )}
+
           {!loading && !error && data.length > 0 && plottedData.length === 0 && (
-            <div className="flex-1 flex items-center justify-center">
-              <p className="text-[var(--text-tertiary)] text-lg text-center">
+            <div className="rounded-lg bg-[var(--card)] p-5 text-center">
+              <p className="text-lg text-[var(--text-tertiary)]">
                 {hasRawOnlySamples
                   ? 'Raw samples are available in this window, but calibrated displacement is not yet available.'
-                  : `No calibrated dendrometer displacement is available in the last ${hours} hours.`}
+                  : hasMechanicalOnlySamples
+                    ? 'Awaiting baseline. Mechanical position is available in this window, and the next valid calibrated uplink will establish the new stem-change zero point.'
+                    : `No calibrated stem change is available in the last ${hours} hours.`}
               </p>
             </div>
           )}
 
           {!loading && !error && plottedData.length > 0 && (
-            <>
-              {/* Chart 1: Absolute position */}
-              <div>
-                <h3 className="text-[var(--text)] font-bold mb-3">Trunk Position (mm)</h3>
-                <ResponsiveContainer width="100%" height={220}>
-                  <AreaChart data={plottedData} margin={{ top: 8, right: 8, bottom: 0, left: 0 }}>
-                    <defs>
-                      <linearGradient id="posGrad" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="5%"  stopColor="#22c55e" stopOpacity={0.35} />
-                        <stop offset="95%" stopColor="#22c55e" stopOpacity={0.02} />
-                      </linearGradient>
-                    </defs>
-                    <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
-                    <XAxis
-                      dataKey="t"
-                      ticks={posTicks}
-                      tickFormatter={v => fmtTickShort(v, hours)}
-                      tick={{ fontSize: 11, fill: 'var(--text-tertiary)' }}
-                      axisLine={{ stroke: 'var(--border)' }}
-                      tickLine={false}
-                    />
-                    <YAxis
-                      domain={['auto', 'auto']}
-                      tickFormatter={v => v.toFixed(1)}
-                      tick={{ fontSize: 11, fill: 'var(--text-tertiary)' }}
-                      axisLine={false}
-                      tickLine={false}
-                      width={48}
-                    />
-                    <Tooltip content={<TooltipPosition hours={hours} />} />
-                    <Area
-                      type="monotone"
-                      dataKey="position_mm"
-                      stroke="#22c55e"
-                      strokeWidth={2}
-                      fill="url(#posGrad)"
-                      dot={false}
-                      activeDot={{ r: 4, fill: '#22c55e' }}
-                      connectNulls={false}
-                    />
-                  </AreaChart>
-                </ResponsiveContainer>
+            <div>
+              <div className="mb-3">
+                <h3 className="font-bold text-[var(--text)]">Stem change over time</h3>
+                <p className="mt-1 text-xs text-[var(--text-tertiary)]">
+                  Stem change is the comparable signal used on the device card and is tracked relative to this device&apos;s edge baseline.
+                </p>
+              </div>
+              <ResponsiveContainer width="100%" height={260}>
+                <AreaChart data={plottedData} margin={{ top: 8, right: 8, bottom: 0, left: 0 }}>
+                  <defs>
+                    <linearGradient id="stemGrad" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor="#22c55e" stopOpacity={0.35} />
+                      <stop offset="95%" stopColor="#22c55e" stopOpacity={0.02} />
+                    </linearGradient>
+                  </defs>
+                  <CartesianGrid stroke="var(--border)" strokeDasharray="3 3" />
+                  <XAxis
+                    dataKey="t"
+                    ticks={posTicks}
+                    tickFormatter={(value) => fmtTickShort(value, hours)}
+                    tick={{ fontSize: 11, fill: 'var(--text-tertiary)' }}
+                    axisLine={{ stroke: 'var(--border)' }}
+                    tickLine={false}
+                  />
+                  <YAxis
+                    domain={['auto', 'auto']}
+                    tickFormatter={(value) => `${Math.round(value)}`}
+                    tick={{ fontSize: 11, fill: 'var(--text-tertiary)' }}
+                    axisLine={false}
+                    tickLine={false}
+                    width={52}
+                  />
+                  <Tooltip content={<TooltipStemChange hours={hours} />} />
+                  <Area
+                    type="monotone"
+                    dataKey="stem_change_um"
+                    stroke="#22c55e"
+                    strokeWidth={2}
+                    fill="url(#stemGrad)"
+                    dot={false}
+                    activeDot={{ r: 4, fill: '#22c55e' }}
+                    connectNulls={false}
+                  />
+                </AreaChart>
+              </ResponsiveContainer>
+            </div>
+          )}
+
+          {!loading && !error && mechanicalData.length > 0 && (
+            <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-4">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <h3 className="font-bold text-[var(--text)]">Mechanical layer</h3>
+                  <p className="mt-1 text-xs text-[var(--text-tertiary)]">
+                    Engineering interpretation only. Absolute position stays here instead of on the main device card.
+                  </p>
+                </div>
+                <p className="text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)]">Debug / engineering</p>
               </div>
 
-              {/* Chart 2: Aggregated delta */}
-              <div>
-                {/* Header row with title + interval selector */}
-                <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
-                  <h3 className="text-[var(--text)] font-bold">Change per Period (mm)</h3>
-                  <div className="flex gap-1.5">
-                    {DELTA_INTERVALS.map(iv => (
-                      <button
-                        key={iv.minutes}
-                        onClick={() => setDeltaIntervalMinutes(iv.minutes)}
-                        className={`px-3 py-1 rounded-lg text-xs font-semibold transition-colors ${
-                          deltaIntervalMinutes === iv.minutes
-                            ? 'bg-[var(--primary)] text-white'
-                            : 'bg-[var(--card)] text-[var(--text)] hover:bg-[var(--border)]'
-                        }`}
-                      >
-                        {iv.label}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
-                {deltaBucketsWithValue.length < 2 ? (
-                  <p className="text-[var(--text-tertiary)] text-sm py-4">
-                    Not enough data for {DELTA_INTERVALS.find(i => i.minutes === deltaIntervalMinutes)?.label} intervals.
-                    Try a smaller interval or a longer time window.
-                  </p>
-                ) : (
-                  <>
-                    <ResponsiveContainer width="100%" height={210}>
-                      <BarChart
-                        data={deltaBuckets}
-                        margin={{ top: 8, right: 8, bottom: 0, left: 0 }}
-                        barCategoryGap="20%"
-                      >
-                        <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
-                        <XAxis
-                          dataKey="t"
-                          ticks={deltaTicks}
-                          tickFormatter={v => fmtTickShort(v, hours)}
-                          tick={{ fontSize: 11, fill: 'var(--text-tertiary)' }}
-                          axisLine={{ stroke: 'var(--border)' }}
-                          tickLine={false}
-                        />
-                        <YAxis
-                          domain={['auto', 'auto']}
-                          tickFormatter={v => `${v > 0 ? '+' : ''}${v.toFixed(2)}`}
-                          tick={{ fontSize: 11, fill: 'var(--text-tertiary)' }}
-                          axisLine={false}
-                          tickLine={false}
-                          width={56}
-                        />
-                        <ReferenceLine y={0} stroke="var(--border)" strokeWidth={1.5} />
-                        <Tooltip
-                          content={<TooltipDelta intervalMinutes={deltaIntervalMinutes} hours={hours} />}
-                          cursor={{ fill: 'var(--border)', opacity: 0.4 }}
-                        />
-                        <Bar dataKey="delta" radius={[2, 2, 0, 0]}>
-                          {deltaBuckets.map((entry, index) => (
-                            <Cell
-                              key={`cell-${index}`}
-                              fill={
-                                entry.delta === null
-                                  ? 'transparent'
-                                  : entry.delta >= 0
-                                  ? '#22c55e'
-                                  : '#ef4444'
-                              }
-                              fillOpacity={entry.delta === null ? 0 : 0.85}
-                            />
-                          ))}
-                        </Bar>
-                      </BarChart>
-                    </ResponsiveContainer>
-                    <p className="text-[var(--text-tertiary)] text-xs mt-1">
-                      Each bar = mean position over a {DELTA_INTERVALS.find(i => i.minutes === deltaIntervalMinutes)?.label} window
-                      minus the mean of the preceding window.
-                      Gaps between non-adjacent windows are omitted.
-                    </p>
-                  </>
+              <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <MechanicalStat
+                  label="Current position"
+                  value={latestMechanicalPoint ? `${latestMechanicalPoint.position_mm.toFixed(2)} mm` : '—'}
+                />
+                <MechanicalStat
+                  label="Window range"
+                  value={mechanicalMin !== null && mechanicalMax !== null
+                    ? `${mechanicalMin.toFixed(2)} → ${mechanicalMax.toFixed(2)} mm`
+                    : '—'}
+                />
+                {strokePercent != null && (
+                  <MechanicalStat
+                    label="Stroke used"
+                    value={`${strokePercent.toFixed(0)} %${strokeMm != null ? ` of ${strokeMm.toFixed(1)} mm` : ''}`}
+                  />
+                )}
+                {latestSourceLabel && (
+                  <MechanicalStat
+                    label="Source"
+                    value={latestSourceLabel}
+                  />
                 )}
               </div>
 
-              <p className="text-[var(--text-tertiary)] text-xs text-center pb-2">
-                {data.length} readings · last {hours} h
+              <p className="mt-4 text-xs text-[var(--text-tertiary)]">
+                Ratio and ADC calibration details are available in the LSN50 card&apos;s Advanced device settings.
               </p>
-            </>
+            </div>
+          )}
+
+          {!loading && !error && data.length > 0 && (
+            <p className="pb-2 text-center text-xs text-[var(--text-tertiary)]">
+              {data.length} readings · last {hours} h
+            </p>
           )}
         </div>
       </div>

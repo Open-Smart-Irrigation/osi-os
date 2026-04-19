@@ -109,6 +109,13 @@ function formatNumericInput(value: number | null | undefined): string {
   return Number.isFinite(Number(value)) ? String(value) : '';
 }
 
+function formatStemChangeUm(value: number | null | undefined): string | null {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return null;
+  const rounded = Math.round(numeric);
+  return `${rounded > 0 ? '+' : ''}${rounded} µm`;
+}
+
 function parseOptionalNumericInput(label: string, value: string, options?: { positive?: boolean }): number | null {
   const trimmed = String(value ?? '').trim();
   if (!trimmed) return null;
@@ -154,6 +161,12 @@ const ConfigPanel: React.FC<{
   const observedAt = device.latest_data?.lsn50_mode_observed_at ?? null;
   const selectedModeDescription = LSN50_MODE_OPTIONS.find((option) => option.value === selectedMode)?.description ?? '';
   const counterModeReady = currentMode === 'MOD9' || pendingMode === 'MOD9';
+  const dendroData = device.latest_data ?? {};
+  const liveDendroSource = formatDendroModeUsed(dendroData?.dendro_mode_used);
+  const liveShowRatio = isRatioDendroMode(dendroData?.dendro_mode_used);
+  const liveStemChange = formatStemChangeUm(dendroData?.dendro_stem_change_um);
+  const showLegacyBaselineReset = device.dendro_enabled === 1
+    && (dendroData?.dendro_mode_used === 'legacy_single_adc' || device.dendro_force_legacy === 1);
 
   useDismissOnPointerDown(ref, onClose);
 
@@ -329,6 +342,25 @@ const ConfigPanel: React.FC<{
     }
   };
 
+  const resetDendroBaseline = async () => {
+    if (!window.confirm('Clear the stored stem-change baseline for this legacy dendrometer? The next valid uplink will establish a new zero point.')) {
+      return;
+    }
+
+    setBusy('dendro-baseline-reset');
+    setError(null);
+    setAdvancedInfo(null);
+    try {
+      await lsn50API.resetDendroBaseline(device.deveui);
+      setAdvancedInfo('Legacy stem baseline cleared. The next valid uplink will establish a new zero point.');
+      onUpdate();
+    } catch {
+      setError('Failed to reset the dendrometer stem baseline');
+    } finally {
+      setBusy(null);
+    }
+  };
+
   return (
     <div
       ref={ref}
@@ -487,6 +519,41 @@ const ConfigPanel: React.FC<{
               <p className="mt-1 text-xs text-[var(--text-tertiary)]">
                 Use these values for ratio-mode dendrometers. Leave the numeric fields blank to clear saved calibration values.
               </p>
+              {(liveDendroSource || dendroData?.adc_ch0v != null || (liveShowRatio && (dendroData?.adc_ch1v != null || dendroData?.dendro_ratio != null)) || dendroData?.dendro_position_mm != null || liveStemChange) && (
+                <div className="mt-3 rounded-lg border border-[var(--border)] bg-[var(--card)] p-3">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)]">Live telemetry</p>
+                  {liveStemChange && (
+                    <p className="mt-1 text-xs text-[var(--text-tertiary)]">
+                      Stem change: <span className="font-semibold text-[var(--text)]">{liveStemChange}</span>
+                    </p>
+                  )}
+                  {dendroData?.dendro_position_mm != null && (
+                    <p className="mt-1 text-xs text-[var(--text-tertiary)]">
+                      Position: <span className="font-semibold text-[var(--text)]">{dendroData.dendro_position_mm.toFixed(2)} mm</span>
+                    </p>
+                  )}
+                  {dendroData?.adc_ch0v != null && (
+                    <p className="mt-1 text-xs text-[var(--text-tertiary)]">
+                      CH0: <span className="font-semibold text-[var(--text)]">{dendroData.adc_ch0v.toFixed(3)} V</span>
+                    </p>
+                  )}
+                  {liveShowRatio && dendroData?.adc_ch1v != null && (
+                    <p className="mt-1 text-xs text-[var(--text-tertiary)]">
+                      CH1: <span className="font-semibold text-[var(--text)]">{dendroData.adc_ch1v.toFixed(3)} V</span>
+                    </p>
+                  )}
+                  {liveShowRatio && dendroData?.dendro_ratio != null && (
+                    <p className="mt-1 text-xs text-[var(--text-tertiary)]">
+                      Current ratio: <span className="font-semibold text-[var(--text)]">{dendroData.dendro_ratio.toFixed(4)}</span>
+                    </p>
+                  )}
+                  {liveDendroSource && (
+                    <p className="mt-1 text-xs text-[var(--text-tertiary)]">
+                      Source: <span className="font-semibold text-[var(--text)]">{liveDendroSource}</span>
+                    </p>
+                  )}
+                </div>
+              )}
               <label className="mt-3 flex cursor-pointer items-center gap-3 rounded-lg px-1 py-2 hover:bg-[var(--card)]">
                 <input
                   type="checkbox"
@@ -569,6 +636,22 @@ const ConfigPanel: React.FC<{
               >
                 {busy === 'dendro-config' ? 'Saving dendrometer calibration...' : 'Save dendrometer calibration'}
               </button>
+              {showLegacyBaselineReset && (
+                <div className="mt-3 rounded-lg border border-[var(--border)] bg-[var(--surface)] p-3">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)]">Legacy baseline</p>
+                  <p className="mt-1 text-xs text-[var(--text-tertiary)]">
+                    Clear the stored stem-change zero for this legacy dendrometer. The next valid uplink will establish a new baseline.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => void resetDendroBaseline()}
+                    disabled={busy !== null}
+                    className="mt-3 w-full rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-sm font-semibold text-[var(--text)] transition-colors hover:bg-[var(--secondary-bg)] disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    {busy === 'dendro-baseline-reset' ? 'Resetting stem baseline...' : 'Reset stem baseline'}
+                  </button>
+                </div>
+              )}
             </div>
             <p className="text-xs text-[var(--warn-text)]">These controls are intended for external sensors and non-default LSN50 integrations.</p>
             {advancedInfo && <p className="text-xs text-[var(--text-tertiary)]">{advancedInfo}</p>}
@@ -605,22 +688,25 @@ export const DraginoTempCard: React.FC<DraginoTempCardProps> = ({ device, onRemo
       ? `${data.flow_liters_per_min.toFixed(3)} L/min over ${intervalLabel}`
       : null)
     ?? (intervalLabel ? `this ${intervalLabel.toLowerCase()}` : 'this interval');
-  const dendroSourceLabel = formatDendroModeUsed(data?.dendro_mode_used);
-  const dendroShowsRatioDebug = isRatioDendroMode(data?.dendro_mode_used);
+  const dendroBaselinePending = dendroEnabled && device.dendro_baseline_pending === 1;
   const dendroHasPosition = dendroEnabled && data?.dendro_valid === 1 && data?.dendro_position_mm != null;
+  const dendroHasStemChange = dendroEnabled
+    && !dendroBaselinePending
+    && data?.dendro_valid === 1
+    && data?.dendro_stem_change_um != null;
   const dendroNeedsCalibration = dendroEnabled
     && data?.dendro_mode_used === 'ratio_mod3'
     && data?.dendro_valid !== 0
     && data?.dendro_position_mm == null
     && data?.dendro_ratio != null;
   const dendroSensorError = dendroEnabled && data?.dendro_valid === 0;
-  const dendroDebugParts = [
-    data?.adc_ch0v != null ? `CH0 ${data.adc_ch0v.toFixed(3)} V` : null,
-    dendroShowsRatioDebug && data?.adc_ch1v != null ? `CH1 ${data.adc_ch1v.toFixed(3)} V` : null,
-    dendroShowsRatioDebug && data?.dendro_ratio != null ? `ratio ${data.dendro_ratio.toFixed(4)}` : null,
-    dendroSourceLabel,
-  ].filter(Boolean) as string[];
-  const dendroCardVisible = dendroEnabled && (dendroHasPosition || dendroNeedsCalibration || dendroSensorError || dendroDebugParts.length > 0);
+  const dendroAwaitingBaseline = dendroEnabled
+    && !dendroNeedsCalibration
+    && !dendroSensorError
+    && (dendroBaselinePending || (dendroHasPosition && data?.dendro_stem_change_um == null));
+  const dendroStemChangeLabel = formatStemChangeUm(data?.dendro_stem_change_um);
+  const dendroCardVisible = dendroEnabled
+    && (dendroHasStemChange || dendroAwaitingBaseline || dendroNeedsCalibration || dendroSensorError);
 
   const [isRemoving, setIsRemoving] = useState(false);
   const [showConfirm, setShowConfirm] = useState(false);
@@ -837,40 +923,36 @@ export const DraginoTempCard: React.FC<DraginoTempCardProps> = ({ device, onRemo
 
         {dendroCardVisible && (
           <div className={`rounded-lg p-3 ${dendroSensorError ? 'bg-[var(--error-bg)]' : 'bg-[var(--card)]'}`}>
-            <div className="flex items-start justify-between gap-3">
-              <div>
-                <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)]">DENDROMETER POSITION</p>
-                {dendroHasPosition ? (
-                  <button
-                    onClick={() => setShowMonitor(true)}
-                    className="cursor-pointer text-left text-2xl font-bold tabular-nums text-[var(--text)] underline decoration-dotted underline-offset-4 transition-colors hover:text-[var(--primary)]"
-                    title="View history"
-                  >
-                    {data.dendro_position_mm!.toFixed(2)} mm
-                  </button>
-                ) : dendroNeedsCalibration ? (
-                  <p className="text-base font-bold text-[var(--warn-text)]">Calibration required</p>
-                ) : dendroSensorError ? (
-                  <p className="text-base font-bold text-[var(--error-text)]">SENSOR ERROR</p>
-                ) : (
-                  <p className="text-2xl font-bold tabular-nums text-[var(--text)]">—</p>
-                )}
-                {dendroHasPosition && data?.dendro_delta_mm != null && (
-                  <p className={`mt-1 text-xs font-semibold ${data.dendro_delta_mm >= 0 ? 'text-[#22c55e]' : 'text-[var(--error-text)]'}`}>
-                    {data.dendro_delta_mm >= 0 ? '+' : ''}{data.dendro_delta_mm.toFixed(3)} mm
-                  </p>
-                )}
-              </div>
-              {dendroSourceLabel && (
-                <span className="rounded-full bg-[var(--secondary-bg)] px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-[var(--text-secondary)]">
-                  {dendroSourceLabel}
-                </span>
-              )}
-            </div>
-            {dendroDebugParts.length > 0 && (
+            <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)]">Stem change</p>
+            {dendroHasStemChange && dendroStemChangeLabel ? (
+              <button
+                onClick={() => setShowMonitor(true)}
+                className="cursor-pointer text-left text-2xl font-bold tabular-nums text-[var(--text)] underline decoration-dotted underline-offset-4 transition-colors hover:text-[var(--primary)]"
+                title="View stem change history"
+              >
+                {dendroStemChangeLabel}
+              </button>
+            ) : dendroAwaitingBaseline ? (
+              <button
+                onClick={() => setShowMonitor(true)}
+                className="cursor-pointer text-left text-base font-bold text-[var(--warn-text)] underline decoration-dotted underline-offset-4 transition-colors hover:text-[var(--primary)]"
+                title="View mechanical history while the new baseline is being established"
+              >
+                Awaiting baseline
+              </button>
+            ) : dendroNeedsCalibration ? (
+              <p className="text-base font-bold text-[var(--warn-text)]">Calibration required</p>
+            ) : dendroSensorError ? (
+              <p className="text-base font-bold text-[var(--error-text)]">SENSOR ERROR</p>
+            ) : (
+              <p className="text-2xl font-bold tabular-nums text-[var(--text)]">—</p>
+            )}
+            {dendroHasStemChange && (
+              <p className="mt-1 text-xs text-[var(--text-tertiary)]">Tap to monitor stem change over time</p>
+            )}
+            {dendroAwaitingBaseline && (
               <p className="mt-1 text-xs text-[var(--text-tertiary)]">
-                {dendroDebugParts.join(' · ')}
-                {dendroHasPosition ? ' · tap to monitor' : ''}
+                The next valid calibrated uplink will establish the new zero point for stem change.
               </p>
             )}
             {dendroNeedsCalibration && (
@@ -908,6 +990,7 @@ export const DraginoTempCard: React.FC<DraginoTempCardProps> = ({ device, onRemo
         <DendrometerMonitor
           deveui={device.deveui}
           deviceName={device.name}
+          strokeMm={device.dendro_stroke_mm ?? null}
           onClose={() => setShowMonitor(false)}
         />
       )}

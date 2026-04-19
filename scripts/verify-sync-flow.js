@@ -547,6 +547,10 @@ expectIncludes('Build Cloud Bootstrap', 'COALESCE(u.server_username, u.username)
 expectIncludes('Build Cloud Bootstrap', 'COALESCE(u.server_username, u.username) AS username', 'uses linked cloud usernames in bootstrap zone snapshots');
 expectIncludes('Build Cloud Bootstrap', 'd.strega_model', 'includes STREGA model metadata in bootstrap device snapshots');
 expectIncludes('Build Cloud Bootstrap', "'  dd.lsn50_mode_code,'", 'includes observed LSN50 mode in bootstrap sensor data');
+expectIncludes('Build Cloud Bootstrap', "'  dd.adc_ch1v,'", 'includes dendrometer reference voltage in bootstrap sensor data');
+expectIncludes('Build Cloud Bootstrap', "'  dd.dendro_ratio,'", 'includes dendrometer ratio in bootstrap sensor data');
+expectIncludes('Build Cloud Bootstrap', "'  dd.dendro_mode_used,'", 'includes the selected dendrometer path in bootstrap sensor data');
+expectIncludes('Build Cloud Bootstrap', "'  dd.dendro_stem_change_um,'", 'includes baseline-relative stem change in bootstrap sensor data');
 expectIncludes('Build Cloud Bootstrap', 'iz.area_m2', 'includes zone area in bootstrap snapshots');
 expectIncludes('Build Cloud Bootstrap', 'iz.irrigation_efficiency_pct', 'includes zone irrigation efficiency in bootstrap snapshots');
 expectIncludes('Build Cloud Bootstrap', 'COALESCE(iz.prediction_card_enabled, 0) AS prediction_card_enabled', 'includes the prediction-card flag in bootstrap snapshots');
@@ -620,6 +624,10 @@ expectIncludes('Run Force Sync', 'COALESCE(u.server_username, u.username) AS cla
 expectIncludes('Run Force Sync', 'COALESCE(u.server_username, u.username) AS username', 'uses linked cloud usernames in force-sync zone snapshots');
 expectIncludes('Run Force Sync', 'd.strega_model', 'includes STREGA model metadata in force-sync device snapshots');
 expectIncludes('Run Force Sync', "'  dd.lsn50_mode_code,'", 'includes observed LSN50 mode in force-sync sensor data');
+expectIncludes('Run Force Sync', "'  dd.adc_ch1v,'", 'includes dendrometer reference voltage in force-sync sensor data');
+expectIncludes('Run Force Sync', "'  dd.dendro_ratio,'", 'includes dendrometer ratio in force-sync sensor data');
+expectIncludes('Run Force Sync', "'  dd.dendro_mode_used,'", 'includes the selected dendrometer path in force-sync sensor data');
+expectIncludes('Run Force Sync', "'  dd.dendro_stem_change_um,'", 'includes baseline-relative stem change in force-sync sensor data');
 expectIncludes('Run Force Sync', 'iz.area_m2', 'includes zone area in force-sync snapshots');
 expectIncludes('Run Force Sync', 'iz.irrigation_efficiency_pct', 'includes zone irrigation efficiency in force-sync snapshots');
 expectIncludes('Run Force Sync', 'COALESCE(iz.prediction_card_enabled, 0) AS prediction_card_enabled', 'includes the prediction-card flag in force-sync snapshots');
@@ -683,6 +691,7 @@ expectIncludes('Build Telemetry', 'loadLsn50Config', 'loads local dendrometer co
 expectIncludes('Build Telemetry', 'var rawLsn50 = isLsn50 && data.data ? dendro.decodeRawAdcPayload(data.data) : null;', 'reuses shared raw LSN50 ADC decoding in telemetry mirroring');
 expectIncludes('Build Telemetry', 'var derived = dendro.buildDendroDerivedMetrics({', 'reuses shared dendrometer path selection in telemetry mirroring');
 expectIncludes('Build Telemetry', 'dendro.computeDendroDeltaMm({', 'reuses shared dendrometer delta handling in telemetry mirroring');
+expectIncludes('Build Telemetry', 'dendro_stem_change_um: stemChangeUm,', 'publishes baseline-relative stem change in live MQTT telemetry');
 expectIncludesById('81c98fb07344a787', "env.get('CHIRPSTACK_PROFILE_KIWI')", 'uses env-backed Kiwi profile routing');
 expectIncludesById('81c98fb07344a787', "env.get('CHIRPSTACK_PROFILE_CLOVER')", 'uses env-backed Clover profile routing');
 expectIncludes('Decode LSN50', 'const rawDecoded = data.data ? dendro.decodeRawAdcPayload(data.data) : null;', 'uses the shared raw LSN50 ADC decoder');
@@ -707,6 +716,7 @@ expectIncludes('Apply Config', 'd.dendroCalibrationMissing = derived.calibration
 expectIncludes('Apply Config', 'const delta = dendro.computeDendroDeltaMm({', 'resets dendrometer deltas when path or calibration changes');
 expectIncludes('Apply Config', 'const stemChange = dendro.computeDendroStemChangeUm({', 'derives a baseline-relative stem change signal for the basic card and monitor');
 expectIncludes('Apply Config', 'd.dendroStemChangeUm = stemChange.stemChangeUm;', 'stores the baseline-relative stem change alongside mechanical position');
+expectIncludes('Apply Config', 'dendro_baseline_pending = 0,', 'clears the pending-baseline flag when a new valid stem-change baseline is persisted');
 expectLibById('lsn50-decode-fn', 'dendro', 'osi-dendro-helper', 'imports osi-dendro-helper in Decode LSN50');
 expectLibById('lsn50-apply-config', 'dendro', 'osi-dendro-helper', 'imports osi-dendro-helper in Apply Config');
 expectLibById('8809bb5239dfb3d4', 'dendro', 'osi-dendro-helper', 'imports osi-dendro-helper in Build Telemetry');
@@ -745,6 +755,7 @@ expectIncludesById('merge-device-data', 'dendro_stroke_mm: d.dendro_stroke_mm ??
 expectIncludesById('merge-device-data', 'dendro_ratio_zero: d.dendro_ratio_zero ?? null', 'returns dendrometer ratio zero calibration in GET /api/devices');
 expectIncludesById('merge-device-data', 'dendro_ratio_span: d.dendro_ratio_span ?? null', 'returns dendrometer ratio span calibration in GET /api/devices');
 expectIncludesById('merge-device-data', 'dendro_invert_direction: d.dendro_invert_direction ?? 0', 'returns dendrometer inversion calibration in GET /api/devices');
+expectIncludesById('merge-device-data', 'dendro_baseline_pending: d.dendro_baseline_pending ?? 0', 'returns the pending-baseline flag in GET /api/devices');
 expectIncludesById('merge-device-data', 'adc_ch1v: latest.adc_ch1v', 'merges dendrometer CH1 voltage into GET /api/devices');
 expectIncludesById('merge-device-data', 'dendro_ratio: latest.dendro_ratio', 'merges dendrometer ratio into GET /api/devices');
 expectIncludesById('merge-device-data', 'dendro_mode_used: latest.dendro_mode_used', 'merges dendrometer path metadata into GET /api/devices');
@@ -807,11 +818,13 @@ expectIncludesById('dendro-readings-insert-fn', 'adc_v,adc_ch0v,adc_ch1v,dendro_
 expectLibById('put-dendro-config-auth-fn', 'osiDb', 'osi-db-helper', 'imports osi-db-helper for dendrometer config persistence');
 expectIncludesById('put-dendro-config-auth-fn', 'deleted_at IS NULL', 'ignores deleted devices when saving dendrometer config');
 expectIncludesById('put-dendro-config-auth-fn', "return respond(404, { message: 'Device not found' });", 'returns 404 for missing dendrometer-config devices');
+expectIncludesById('put-dendro-config-auth-fn', 'dendro_baseline_pending = 1', 'marks the dendrometer baseline as pending when calibration changes');
 expectIncludes('Format Dendro Config Response', 'dendro_force_legacy: row.dendro_force_legacy ?? null', 'returns canonical dendrometer config fields');
 expectIncludes('Format Dendro Config Response', 'dendro_invert_direction: row.dendro_invert_direction ?? null', 'returns canonical dendrometer inversion config');
 expectIncludesById('post-dendro-baseline-reset-auth-fn', 'dendro_baseline_position_mm = NULL', 'clears the stored dendrometer baseline position');
 expectIncludesById('post-dendro-baseline-reset-auth-fn', 'dendro_baseline_mode_used = NULL', 'clears the stored dendrometer baseline mode');
 expectIncludesById('post-dendro-baseline-reset-auth-fn', 'dendro_baseline_calibration_signature = NULL', 'clears the stored dendrometer baseline calibration signature');
+expectIncludesById('post-dendro-baseline-reset-auth-fn', 'dendro_baseline_pending = 1', 'marks the dendrometer baseline as pending after a manual reset');
 expectFileIncludes('api.ts', reactGuiApiSource, 'resetDendroBaseline: async (deveui: string): Promise<void> => {', 'adds a shared client helper for dendrometer baseline resets');
 expectFileIncludes('api.ts', reactGuiApiSource, "await api.post(`/api/devices/${deveui}/dendro-baseline/reset`);", 'targets the local dendrometer baseline reset endpoint from the shared client helper');
 expectFileIncludes('api.ts', reactGuiApiSource, 'position_mm: number | null;', 'types dendrometer history position as nullable');
@@ -821,15 +834,19 @@ expectFileExcludes('api.ts', reactGuiApiSource, 'Number(row?.position_um ?? 0)',
 expectFileIncludes('farming.ts', farmingTypesSource, 'id: number | null;', 'allows synthetic raw dendrometer rows without numeric ids');
 expectFileIncludes('farming.ts', farmingTypesSource, 'position_um: number | null;', 'allows raw-only dendrometer rows to omit calibrated position');
 expectFileIncludes('farming.ts', farmingTypesSource, 'dendro_stem_change_um?: number | null;', 'types the latest stem-change signal on device payloads');
+expectFileIncludes('farming.ts', farmingTypesSource, 'dendro_baseline_pending?: number | null;', 'types the device-level baseline-pending flag');
 expectFileIncludes('api.ts', reactGuiApiSource, 'stem_change_um: number | null;', 'types the dendrometer history stem-change signal');
 expectFileIncludes('DendrometerMonitor.tsx', dendroMonitorSource, 'Stem change over time', 'labels the basic monitor around the comparable stem-change signal');
 expectFileIncludes('DendrometerMonitor.tsx', dendroMonitorSource, 'Mechanical layer', 'renders mechanical engineering values beneath the stem-change graph');
 expectFileIncludes('DendrometerMonitor.tsx', dendroMonitorSource, 'Current position', 'shows absolute mechanical position below the graph instead of as the headline graph metric');
+expectFileIncludes('DendrometerMonitor.tsx', dendroMonitorSource, 'Awaiting baseline. Mechanical position is available in this window', 'keeps the basic monitor informative when comparable stem change is not ready yet');
 expectFileIncludes('farming/dendrometer/DendrometerMonitor.tsx', dendroDrawerSource, 'Raw samples are available', 'explains raw-only dendrometer rows in the 24h drawer');
 expectFileIncludes('farming/dendrometer/DendrometerMonitor.tsx', dendroDrawerSource, 'const showRatioDebug = isRatioDendroMode(point.dendro_mode_used_raw);', 'shows CH1 and ratio debug values only for ratio-mode 24h readings');
 expectFileIncludes('DraginoTempCard.tsx', draginoTempCardSource, 'Stem change', 'shows stem change as the only primary dendrometer signal on the device card');
 expectFileExcludes('DraginoTempCard.tsx', draginoTempCardSource, 'DENDROMETER POSITION', 'removes the old absolute-position headline from the device card');
 expectFileIncludes('DraginoTempCard.tsx', draginoTempCardSource, 'dendro_stem_change_um', 'renders the baseline-relative stem change signal on the device card');
+expectFileIncludes('DraginoTempCard.tsx', draginoTempCardSource, 'dendro_baseline_pending === 1', 'suppresses stale stem-change values when the device is awaiting a new baseline');
+expectFileIncludes('DraginoTempCard.tsx', draginoTempCardSource, 'Awaiting baseline', 'keeps the dendrometer card visible while the next valid uplink establishes a new baseline');
 expectFileIncludes('DraginoTempCard.tsx', draginoTempCardSource, 'Current ratio', 'shows ratio in the dendrometer calibration section instead of on the device card');
 expectFileIncludes('DraginoTempCard.tsx', draginoTempCardSource, 'Dendrometer calibration', 'adds dendrometer calibration controls to the LSN50 advanced settings');
 expectFileIncludes('DraginoTempCard.tsx', draginoTempCardSource, "await lsn50API.setDendroConfig(device.deveui", 'saves dendrometer calibration through the dedicated local API');
@@ -893,6 +910,8 @@ expectIncludes('Sync Init Schema + Triggers', 'ALTER TABLE devices ADD COLUMN de
 expectIncludes('Sync Init Schema + Triggers', 'ALTER TABLE devices ADD COLUMN dendro_baseline_position_mm REAL', 'adds a persisted edge baseline for comparable stem-change signals');
 expectIncludes('Sync Init Schema + Triggers', 'ALTER TABLE devices ADD COLUMN dendro_baseline_mode_used TEXT', 'tracks which conversion path the stem-change baseline was captured with');
 expectIncludes('Sync Init Schema + Triggers', 'ALTER TABLE devices ADD COLUMN dendro_baseline_calibration_signature TEXT', 'tracks calibration changes that should reset the stem-change baseline');
+expectIncludes('Sync Init Schema + Triggers', 'ALTER TABLE devices ADD COLUMN dendro_baseline_pending INTEGER DEFAULT 0', 'adds a persisted pending-baseline flag on devices');
+expectIncludes('Sync Init Schema + Triggers', 'COALESCE(dendro_baseline_pending,0)', 'preserves the pending-baseline flag when rebuilding the devices table');
 expectIncludes('Sync Init Schema + Triggers', 'ALTER TABLE devices ADD COLUMN dendro_invert_direction INTEGER DEFAULT 0', 'adds the device-level dendrometer inversion flag');
 expectIncludes('Sync Init Schema + Triggers', 'ALTER TABLE device_data ADD COLUMN adc_ch1v REAL', 'adds CH1 dendrometer telemetry storage');
 expectIncludes('Sync Init Schema + Triggers', 'ALTER TABLE device_data ADD COLUMN dendro_ratio REAL', 'adds ratio dendrometer telemetry storage');
