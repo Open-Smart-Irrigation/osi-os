@@ -109,3 +109,40 @@ test('buildDendroDerivedMetrics: tiny PA1 reference flags reference_voltage_too_
   assert.equal(metrics.dendroValid, 0);
   assert.equal(metrics.ratioInvalidReason, 'reference_voltage_too_small');
 });
+
+test('REF_HIGH: reference voltage near VDDA flags invalid', () => {
+  const metrics = buildDendroDerivedMetrics({
+    adcCh0V: 2.0,
+    adcCh1V: 3.1,
+    batV: 3.2,
+    effectiveMode: 3,
+  });
+  assert.equal(metrics.dendroValid, 0);
+  assert.equal(metrics.ratioInvalidReason, 'reference_voltage_too_high');
+  assert.equal(metrics.positionMm, null);
+  assert.equal(metrics.dendroRatio, null);
+});
+
+test('REF_HIGH: reference safely below 0.95*VDDA passes', () => {
+  const metrics = buildDendroDerivedMetrics({
+    adcCh0V: 1.25,
+    adcCh1V: 2.5,
+    batV: 3.3,
+    effectiveMode: 3,
+    strokeMm: 10,
+    ratioZero: 0.0,
+    ratioSpan: 1.0,
+  });
+  assert.equal(metrics.dendroValid, 1);
+  assert.equal(metrics.ratioInvalidReason, null);
+});
+
+test('REF_HIGH: missing batV disables the guard (no false positives)', () => {
+  const metrics = buildDendroDerivedMetrics({
+    adcCh0V: 1.25,
+    adcCh1V: 2.5,
+    effectiveMode: 3,
+  });
+  assert.equal(metrics.dendroValid, 1);
+  assert.notEqual(metrics.ratioInvalidReason, 'reference_voltage_too_high');
+});

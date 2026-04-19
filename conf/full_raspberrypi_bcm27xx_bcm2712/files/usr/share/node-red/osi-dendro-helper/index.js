@@ -2,6 +2,8 @@
 
 const SMALL_REFERENCE_THRESHOLD = 0.05;
 
+const HIGH_REFERENCE_VDDA_FRACTION = 0.95;
+
 const STOCK_MOD3_MIN_LENGTH = 12;
 
 function toFiniteNumber(value) {
@@ -191,16 +193,28 @@ function buildDendroDerivedMetrics(options = {}) {
   let ratioInvalidReason = ratioInfo.invalidReason;
 
   if (modeUsed === 'ratio_mod3') {
-    dendroValid = ratioInfo.isValid ? 1 : 0;
-    positionMm = calculateRatioDendroPositionMm({
-      strokeMm,
-      ratioZero,
-      ratioSpan,
-      ratio: ratioInfo.ratio,
-      invertDirection,
-    });
-    if (ratioInfo.isValid && positionMm === null) {
-      calibrationMissing = true;
+    const batV = toFiniteNumber(options.batV);
+    const refTooHigh = batV !== null
+      && adcCh1V !== null
+      && adcCh1V > HIGH_REFERENCE_VDDA_FRACTION * batV;
+
+    if (refTooHigh) {
+      dendroValid = 0;
+      positionMm = null;
+      ratioValue = null;
+      ratioInvalidReason = 'reference_voltage_too_high';
+    } else {
+      dendroValid = ratioInfo.isValid ? 1 : 0;
+      positionMm = calculateRatioDendroPositionMm({
+        strokeMm,
+        ratioZero,
+        ratioSpan,
+        ratio: ratioInfo.ratio,
+        invertDirection,
+      });
+      if (ratioInfo.isValid && positionMm === null) {
+        calibrationMissing = true;
+      }
     }
   }
 
@@ -265,6 +279,7 @@ function computeDendroDeltaMm(options = {}) {
 
 module.exports = {
   SMALL_REFERENCE_THRESHOLD,
+  HIGH_REFERENCE_VDDA_FRACTION,
   STOCK_MOD3_MIN_LENGTH,
   toFiniteNumber,
   roundTo,
