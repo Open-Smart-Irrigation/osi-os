@@ -335,6 +335,14 @@ These are confirmed bugs and missing features as of 2026-04-20. Not yet filed as
 - **Draw field and sensor anchors box overlap**: The draw-field control and the sensor anchors panel render on top of each other, making both hard to use simultaneously.
 - **Sensor anchor box cannot be closed without sensors**: If no sensors are installed, the sensor anchor box has no close/dismiss control and the user is stuck with it open.
 
+### Mobile & Native Apps
+- **Terra mobile view**: Terra Intelligence has no responsive/mobile layout — needs a dedicated mobile view before it is usable on phones.
+- **Android app integration**: OSI OS dashboard and Terra need to be integrated into an Android app wrapper.
+- **iPhone app**: Same scope as Android — native iOS app wrapper required.
+
+### Internationalisation
+- **All translations missing**: The UI has no i18n layer yet. All strings are English-only. Full translation support (at minimum French and Swahili for target markets) is pending.
+
 ---
 
 ## Deprecated Code
