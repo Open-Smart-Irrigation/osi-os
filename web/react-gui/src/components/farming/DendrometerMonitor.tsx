@@ -43,14 +43,18 @@ function formatStemChangeUm(value: number): string {
 }
 
 type StemHistoryPoint = DendroHistoryPoint & { stem_change_um: number };
-type MechanicalHistoryPoint = DendroHistoryPoint & { position_mm: number };
+type MechanicalHistoryPoint = DendroHistoryPoint & { mechanical_position_mm: number };
 
 function hasStemChange(point: DendroHistoryPoint): point is StemHistoryPoint {
   return point.valid === 1 && point.stem_change_um != null;
 }
 
+function getMechanicalPositionMm(point: DendroHistoryPoint): number | null {
+  return point.position_raw_mm ?? point.position_mm ?? null;
+}
+
 function hasCalibratedPosition(point: DendroHistoryPoint): point is MechanicalHistoryPoint {
-  return point.valid === 1 && point.position_mm != null;
+  return point.valid === 1 && getMechanicalPositionMm(point) != null;
 }
 
 function hasRawDendroSignals(point: DendroHistoryPoint): boolean {
@@ -67,8 +71,13 @@ const TooltipStemChange = ({ active, payload, label, hours }: any) => {
       {point.stem_change_um != null && (
         <p className="font-bold text-[var(--text)]">{formatStemChangeUm(point.stem_change_um)}</p>
       )}
-      {point.position_mm != null && (
-        <p className="text-xs text-[var(--text-tertiary)]">Position: {point.position_mm.toFixed(2)} mm</p>
+      {getMechanicalPositionMm(point) != null && (
+        <p className="text-xs text-[var(--text-tertiary)]">Position: {getMechanicalPositionMm(point)?.toFixed(2)} mm</p>
+      )}
+      {point.saturated === 1 && (
+        <p className="text-xs text-[var(--warn-text)]">
+          {point.saturation_side === 'high' ? 'Above extended range' : 'Below retracted range'}
+        </p>
       )}
       {sourceLabel && (
         <p className="text-xs text-[var(--text-tertiary)]">Source: {sourceLabel}</p>
@@ -113,7 +122,12 @@ export const DendrometerMonitor: React.FC<Props> = ({ deveui, deviceName, stroke
   }, [deveui, hours]);
 
   const plottedData = useMemo(() => data.filter(hasStemChange), [data]);
-  const mechanicalData = useMemo(() => data.filter(hasCalibratedPosition), [data]);
+  const mechanicalData = useMemo(
+    () => data
+      .filter(hasCalibratedPosition)
+      .map((point) => ({ ...point, mechanical_position_mm: getMechanicalPositionMm(point)! })),
+    [data],
+  );
 
   const posTicks = useMemo(() => {
     if (!plottedData.length) return [];
@@ -126,14 +140,19 @@ export const DendrometerMonitor: React.FC<Props> = ({ deveui, deviceName, stroke
   const maxStem = stemValues.length ? Math.max(...stemValues) : null;
   const latestStemPoint = plottedData[plottedData.length - 1] ?? null;
   const latestMechanicalPoint = mechanicalData[mechanicalData.length - 1] ?? null;
-  const mechanicalMin = mechanicalData.length ? Math.min(...mechanicalData.map((point) => point.position_mm)) : null;
-  const mechanicalMax = mechanicalData.length ? Math.max(...mechanicalData.map((point) => point.position_mm)) : null;
+  const mechanicalMin = mechanicalData.length ? Math.min(...mechanicalData.map((point) => point.mechanical_position_mm)) : null;
+  const mechanicalMax = mechanicalData.length ? Math.max(...mechanicalData.map((point) => point.mechanical_position_mm)) : null;
   const latestSourceLabel = latestMechanicalPoint ? formatDendroModeUsed(latestMechanicalPoint.dendro_mode_used) : null;
   const strokePercent = strokeMm != null && strokeMm > 0 && latestMechanicalPoint
-    ? Math.max(0, Math.min(100, (latestMechanicalPoint.position_mm / strokeMm) * 100))
+    ? Math.max(0, Math.min(100, (latestMechanicalPoint.mechanical_position_mm / strokeMm) * 100))
     : null;
   const hasRawOnlySamples = data.some((point) => !hasCalibratedPosition(point) && hasRawDendroSignals(point));
   const hasMechanicalOnlySamples = mechanicalData.length > 0 && plottedData.length === 0;
+  const latestSaturationLabel = latestMechanicalPoint?.saturated === 1
+    ? latestMechanicalPoint.saturation_side === 'high'
+      ? 'Above extended range'
+      : 'Below retracted range'
+    : null;
 
   return (
     <div
@@ -289,7 +308,7 @@ export const DendrometerMonitor: React.FC<Props> = ({ deveui, deviceName, stroke
               <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
                 <MechanicalStat
                   label="Current position"
-                  value={latestMechanicalPoint ? `${latestMechanicalPoint.position_mm.toFixed(2)} mm` : '—'}
+                  value={latestMechanicalPoint ? `${latestMechanicalPoint.mechanical_position_mm.toFixed(2)} mm` : '—'}
                 />
                 <MechanicalStat
                   label="Window range"
@@ -309,8 +328,19 @@ export const DendrometerMonitor: React.FC<Props> = ({ deveui, deviceName, stroke
                     value={latestSourceLabel}
                   />
                 )}
+                {latestSaturationLabel && (
+                  <MechanicalStat
+                    label="Range state"
+                    value={latestSaturationLabel}
+                  />
+                )}
               </div>
 
+              {latestSaturationLabel && (
+                <p className="mt-4 text-xs text-[var(--warn-text)]">
+                  This latest mechanical reading is outside the stored calibration range. Stem change on the main card is suppressed until the calibration range is reviewed.
+                </p>
+              )}
               <p className="mt-4 text-xs text-[var(--text-tertiary)]">
                 Ratio and ADC calibration details are available in the LSN50 card&apos;s Advanced device settings.
               </p>

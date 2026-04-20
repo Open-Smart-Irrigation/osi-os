@@ -222,20 +222,25 @@ const PositionChart: React.FC<{ device: Device }> = ({ device }) => {
   if (loading) return <Spinner />;
   if (error)   return <ErrorMsg msg={error} />;
 
+  const positionForReading = (reading: DendroReading): number | null => reading.position_raw_um ?? reading.position_um ?? null;
   const validReadings = readings.filter(
-    (r): r is DendroReading & { position_um: number } => r.is_valid === 1 && r.is_outlier === 0 && r.position_um != null,
+    (r): r is DendroReading & { position_raw_um?: number | null; position_um: number | null } =>
+      r.is_valid === 1 && r.is_outlier === 0 && positionForReading(r) != null,
   );
   const rawOnlyReadings = readings.filter(
-    (r) => r.position_um == null && (r.adc_ch0v != null || r.adc_ch1v != null || r.dendro_ratio != null),
+    (r) => positionForReading(r) == null && (r.adc_ch0v != null || r.adc_ch1v != null || r.dendro_ratio != null),
   );
+  const saturatedReadings = validReadings.filter((r) => r.dendro_saturated === 1);
   const data = validReadings.map(r => ({
     t:   new Date(r.recorded_at).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' }),
-    pos: Math.round(r.position_um / 100) / 10, // → mm with 1 decimal
+    pos: Math.round((positionForReading(r) ?? 0) / 100) / 10, // -> mm with 1 decimal
     adc_ch0v: r.adc_ch0v ?? r.adc_v,
     adc_ch1v: r.adc_ch1v ?? null,
     dendro_ratio: r.dendro_ratio ?? null,
     dendro_mode_used_raw: r.dendro_mode_used ?? null,
     dendro_mode_used: formatDendroModeUsed(r.dendro_mode_used),
+    dendro_saturated: r.dendro_saturated ?? null,
+    dendro_saturation_side: r.dendro_saturation_side ?? null,
   }));
 
   const posVals = data.map(d => d.pos).filter(v => v != null);
@@ -250,6 +255,11 @@ const PositionChart: React.FC<{ device: Device }> = ({ device }) => {
       <div className="bg-[var(--surface)] border border-[var(--border)] rounded-lg p-3 text-sm shadow-xl">
         <p className="text-[var(--text-tertiary)] mb-1 text-xs">Time: {label}</p>
         <p className="font-semibold text-[var(--text)]">{payload[0].value} mm</p>
+        {point.dendro_saturated === 1 && (
+          <p className="text-[var(--warn-text)] text-xs">
+            {point.dendro_saturation_side === 'high' ? 'Above extended range' : 'Below retracted range'}
+          </p>
+        )}
         {point.adc_ch0v != null && (
           <p className="text-[var(--text-tertiary)] text-xs">CH0: {point.adc_ch0v.toFixed(3)} V</p>
         )}
@@ -275,6 +285,11 @@ const PositionChart: React.FC<{ device: Device }> = ({ device }) => {
         {dMax && <span className="text-xs text-green-700">D_max {dMax} mm</span>}
         {dMin && <span className="text-xs text-orange-700">D_min {dMin} mm</span>}
       </div>
+      {saturatedReadings.length > 0 && (
+        <p className="text-xs text-[var(--warn-text)]">
+          {saturatedReadings.length} plotted reading{saturatedReadings.length === 1 ? '' : 's'} fall outside the calibrated range and are shown from raw position.
+        </p>
+      )}
       {data.length === 0 ? (
         <p className="text-[var(--text-tertiary)] text-sm py-4 text-center">
           {rawOnlyReadings.length > 0

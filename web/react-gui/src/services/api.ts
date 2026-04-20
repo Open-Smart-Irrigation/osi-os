@@ -303,6 +303,7 @@ export const irrigationZonesAPI = {
 
 export interface DendroHistoryPoint {
   t: string;           // ISO timestamp
+  position_raw_mm?: number | null;
   position_mm: number | null;
   delta_mm: number | null;
   stem_change_um: number | null;
@@ -311,6 +312,8 @@ export interface DendroHistoryPoint {
   adc_ch1v?: number | null;
   dendro_ratio?: number | null;
   dendro_mode_used?: DendroModeUsed | string | null;
+  saturated?: number | null;
+  saturation_side?: string | null;
   valid: number;       // 1 = valid
 }
 
@@ -323,6 +326,7 @@ function toNullableNumber(value: unknown): number | null {
 function normaliseDendroHistoryPoint(row: any): DendroHistoryPoint {
   return {
     t: String(row?.t ?? row?.recorded_at ?? ''),
+    position_raw_mm: toNullableNumber(row?.position_raw_mm ?? row?.dendro_position_raw_mm),
     position_mm: toNullableNumber(row?.position_mm ?? row?.dendro_position_mm),
     delta_mm: toNullableNumber(row?.delta_mm ?? row?.dendro_delta_mm),
     stem_change_um: toNullableNumber(row?.stem_change_um ?? row?.dendro_stem_change_um),
@@ -331,6 +335,8 @@ function normaliseDendroHistoryPoint(row: any): DendroHistoryPoint {
     adc_ch1v: toNullableNumber(row?.adc_ch1v),
     dendro_ratio: toNullableNumber(row?.dendro_ratio),
     dendro_mode_used: normaliseDendroModeUsed(row?.dendro_mode_used),
+    saturated: toNullableNumber(row?.saturated ?? row?.dendro_saturated),
+    saturation_side: row?.saturation_side ?? row?.dendro_saturation_side ?? null,
     valid: Number(row?.valid ?? row?.dendro_valid ?? 0),
   };
 }
@@ -340,6 +346,7 @@ function normaliseDendroReading(row: any): DendroReading {
     id: toNullableNumber(row?.id),
     deveui: String(row?.deveui ?? '').trim().toUpperCase(),
     position_um: toNullableNumber(row?.position_um),
+    position_raw_um: toNullableNumber(row?.position_raw_um),
     adc_v: toNullableNumber(row?.adc_v),
     adc_ch0v: toNullableNumber(row?.adc_ch0v ?? row?.adc_v),
     adc_ch1v: toNullableNumber(row?.adc_ch1v),
@@ -348,6 +355,8 @@ function normaliseDendroReading(row: any): DendroReading {
     bat_v: toNullableNumber(row?.bat_v),
     is_valid: Number(row?.is_valid ?? 0),
     is_outlier: Number(row?.is_outlier ?? 0),
+    dendro_saturated: toNullableNumber(row?.dendro_saturated),
+    dendro_saturation_side: row?.dendro_saturation_side ?? null,
     recorded_at: String(row?.recorded_at ?? ''),
   };
 }
@@ -380,9 +389,8 @@ export const lsn50API = {
   setDendroConfig: async (deveui: string, payload: {
     dendroForceLegacy?: boolean | null;
     dendroStrokeMm?: number | null;
-    dendroRatioZero?: number | null;
-    dendroRatioSpan?: number | null;
-    dendroInvertDirection?: boolean | null;
+    dendroRatioAtRetracted?: number | null;
+    dendroRatioAtExtended?: number | null;
   }): Promise<void> => {
     await api.put(`/api/devices/${deveui}/dendro-config`, payload);
   },

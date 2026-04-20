@@ -116,6 +116,12 @@ function formatStemChangeUm(value: number | null | undefined): string | null {
   return `${rounded > 0 ? '+' : ''}${rounded} µm`;
 }
 
+function formatDendroRangeState(saturationSide: string | null | undefined): string {
+  if (saturationSide === 'low') return 'Below retracted';
+  if (saturationSide === 'high') return 'Above extended';
+  return 'In range';
+}
+
 function parseOptionalNumericInput(label: string, value: string, options?: { positive?: boolean }): number | null {
   const trimmed = String(value ?? '').trim();
   if (!trimmed) return null;
@@ -151,9 +157,12 @@ const ConfigPanel: React.FC<{
   const [warmupMillisecondsInput, setWarmupMillisecondsInput] = useState('');
   const [dendroForceLegacyInput, setDendroForceLegacyInput] = useState(device.dendro_force_legacy === 1);
   const [dendroStrokeMmInput, setDendroStrokeMmInput] = useState(formatNumericInput(device.dendro_stroke_mm));
-  const [dendroRatioZeroInput, setDendroRatioZeroInput] = useState(formatNumericInput(device.dendro_ratio_zero));
-  const [dendroRatioSpanInput, setDendroRatioSpanInput] = useState(formatNumericInput(device.dendro_ratio_span));
-  const [dendroInvertDirectionInput, setDendroInvertDirectionInput] = useState(device.dendro_invert_direction === 1);
+  const [dendroRatioAtRetractedInput, setDendroRatioAtRetractedInput] = useState(
+    formatNumericInput(device.dendro_ratio_at_retracted ?? device.dendro_ratio_zero),
+  );
+  const [dendroRatioAtExtendedInput, setDendroRatioAtExtendedInput] = useState(
+    formatNumericInput(device.dendro_ratio_at_extended ?? device.dendro_ratio_span),
+  );
   const [advancedInfo, setAdvancedInfo] = useState<string | null>(null);
   const [showAdvanced, setShowAdvanced] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
@@ -165,6 +174,7 @@ const ConfigPanel: React.FC<{
   const liveDendroSource = formatDendroModeUsed(dendroData?.dendro_mode_used);
   const liveShowRatio = isRatioDendroMode(dendroData?.dendro_mode_used);
   const liveStemChange = formatStemChangeUm(dendroData?.dendro_stem_change_um);
+  const liveRangeState = formatDendroRangeState(dendroData?.dendro_saturation_side);
   const showLegacyBaselineReset = device.dendro_enabled === 1
     && (dendroData?.dendro_mode_used === 'legacy_single_adc' || device.dendro_force_legacy === 1);
 
@@ -299,21 +309,21 @@ const ConfigPanel: React.FC<{
 
   const applyDendroConfig = async () => {
     let strokeMm: number | null;
-    let ratioZero: number | null;
-    let ratioSpan: number | null;
+    let ratioAtRetracted: number | null;
+    let ratioAtExtended: number | null;
 
     try {
       strokeMm = parseOptionalNumericInput('Stroke (mm)', dendroStrokeMmInput, { positive: true });
-      ratioZero = parseOptionalNumericInput('Ratio zero', dendroRatioZeroInput);
-      ratioSpan = parseOptionalNumericInput('Ratio span', dendroRatioSpanInput);
+      ratioAtRetracted = parseOptionalNumericInput('Retracted ratio', dendroRatioAtRetractedInput);
+      ratioAtExtended = parseOptionalNumericInput('Extended ratio', dendroRatioAtExtendedInput);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Invalid dendrometer calibration values');
       setAdvancedInfo(null);
       return;
     }
 
-    if (ratioZero !== null && ratioSpan !== null && ratioZero === ratioSpan) {
-      setError('Ratio zero and ratio span must differ.');
+    if (ratioAtRetracted !== null && ratioAtExtended !== null && ratioAtRetracted === ratioAtExtended) {
+      setError('Retracted and extended ratios must differ.');
       setAdvancedInfo(null);
       return;
     }
@@ -325,9 +335,8 @@ const ConfigPanel: React.FC<{
       await lsn50API.setDendroConfig(device.deveui, {
         dendroForceLegacy: dendroForceLegacyInput,
         dendroStrokeMm: strokeMm,
-        dendroRatioZero: ratioZero,
-        dendroRatioSpan: ratioSpan,
-        dendroInvertDirection: dendroInvertDirectionInput,
+        dendroRatioAtRetracted: ratioAtRetracted,
+        dendroRatioAtExtended: ratioAtExtended,
       });
       setAdvancedInfo(
         dendroForceLegacyInput
@@ -519,7 +528,7 @@ const ConfigPanel: React.FC<{
               <p className="mt-1 text-xs text-[var(--text-tertiary)]">
                 Use these values for ratio-mode dendrometers. Leave the numeric fields blank to clear saved calibration values.
               </p>
-              {(liveDendroSource || dendroData?.adc_ch0v != null || (liveShowRatio && (dendroData?.adc_ch1v != null || dendroData?.dendro_ratio != null)) || dendroData?.dendro_position_mm != null || liveStemChange) && (
+              {(liveDendroSource || dendroData?.adc_ch0v != null || (liveShowRatio && (dendroData?.adc_ch1v != null || dendroData?.dendro_ratio != null)) || dendroData?.dendro_position_raw_mm != null || liveStemChange) && (
                 <div className="mt-3 rounded-lg border border-[var(--border)] bg-[var(--card)] p-3">
                   <p className="text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)]">Live telemetry</p>
                   {liveStemChange && (
@@ -527,9 +536,9 @@ const ConfigPanel: React.FC<{
                       Stem change: <span className="font-semibold text-[var(--text)]">{liveStemChange}</span>
                     </p>
                   )}
-                  {dendroData?.dendro_position_mm != null && (
+                  {dendroData?.dendro_position_raw_mm != null && (
                     <p className="mt-1 text-xs text-[var(--text-tertiary)]">
-                      Position: <span className="font-semibold text-[var(--text)]">{dendroData.dendro_position_mm.toFixed(2)} mm</span>
+                      Raw position: <span className="font-semibold text-[var(--text)]">{dendroData.dendro_position_raw_mm.toFixed(2)} mm</span>
                     </p>
                   )}
                   {dendroData?.adc_ch0v != null && (
@@ -550,6 +559,11 @@ const ConfigPanel: React.FC<{
                   {liveDendroSource && (
                     <p className="mt-1 text-xs text-[var(--text-tertiary)]">
                       Source: <span className="font-semibold text-[var(--text)]">{liveDendroSource}</span>
+                    </p>
+                  )}
+                  {liveShowRatio && (
+                    <p className="mt-1 text-xs text-[var(--text-tertiary)]">
+                      Range state: <span className="font-semibold text-[var(--text)]">{liveRangeState}</span>
                     </p>
                   )}
                 </div>
@@ -583,50 +597,60 @@ const ConfigPanel: React.FC<{
                   />
                 </div>
                 <div>
-                  <label className="mb-1 block text-xs font-semibold text-[var(--text-secondary)]" htmlFor={`lsn50-dendro-zero-${device.deveui}`}>
-                    Ratio zero
-                  </label>
+                  <div className="mb-1 flex items-center justify-between gap-2">
+                    <label className="block text-xs font-semibold text-[var(--text-secondary)]" htmlFor={`lsn50-dendro-retracted-${device.deveui}`}>
+                      Retracted ratio (0 mm)
+                    </label>
+                    <button
+                      type="button"
+                      disabled={busy === 'dendro-config' || dendroData?.dendro_ratio == null}
+                      onClick={() => setDendroRatioAtRetractedInput(dendroData?.dendro_ratio != null ? String(dendroData.dendro_ratio) : '')}
+                      className="text-[11px] font-semibold text-[var(--primary)] transition-colors hover:text-[var(--primary-hover)] disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      Use current ratio
+                    </button>
+                  </div>
                   <input
-                    id={`lsn50-dendro-zero-${device.deveui}`}
+                    id={`lsn50-dendro-retracted-${device.deveui}`}
                     type="number"
                     step="0.000001"
                     inputMode="decimal"
-                    value={dendroRatioZeroInput}
+                    value={dendroRatioAtRetractedInput}
                     disabled={busy === 'dendro-config'}
-                    onChange={(event) => setDendroRatioZeroInput(event.target.value)}
+                    onChange={(event) => setDendroRatioAtRetractedInput(event.target.value)}
                     placeholder="0.420000"
                     className="w-full rounded-lg border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-sm text-[var(--text)]"
                   />
                 </div>
                 <div>
-                  <label className="mb-1 block text-xs font-semibold text-[var(--text-secondary)]" htmlFor={`lsn50-dendro-span-${device.deveui}`}>
-                    Ratio span
-                  </label>
+                  <div className="mb-1 flex items-center justify-between gap-2">
+                    <label className="block text-xs font-semibold text-[var(--text-secondary)]" htmlFor={`lsn50-dendro-extended-${device.deveui}`}>
+                      Extended ratio (full stroke)
+                    </label>
+                    <button
+                      type="button"
+                      disabled={busy === 'dendro-config' || dendroData?.dendro_ratio == null}
+                      onClick={() => setDendroRatioAtExtendedInput(dendroData?.dendro_ratio != null ? String(dendroData.dendro_ratio) : '')}
+                      className="text-[11px] font-semibold text-[var(--primary)] transition-colors hover:text-[var(--primary-hover)] disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      Use current ratio
+                    </button>
+                  </div>
                   <input
-                    id={`lsn50-dendro-span-${device.deveui}`}
+                    id={`lsn50-dendro-extended-${device.deveui}`}
                     type="number"
                     step="0.000001"
                     inputMode="decimal"
-                    value={dendroRatioSpanInput}
+                    value={dendroRatioAtExtendedInput}
                     disabled={busy === 'dendro-config'}
-                    onChange={(event) => setDendroRatioSpanInput(event.target.value)}
+                    onChange={(event) => setDendroRatioAtExtendedInput(event.target.value)}
                     placeholder="0.860000"
                     className="w-full rounded-lg border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-sm text-[var(--text)]"
                   />
                 </div>
               </div>
-              <label className="mt-3 flex cursor-pointer items-center gap-3 rounded-lg px-1 py-2 hover:bg-[var(--card)]">
-                <input
-                  type="checkbox"
-                  checked={dendroInvertDirectionInput}
-                  disabled={busy === 'dendro-config'}
-                  onChange={(event) => setDendroInvertDirectionInput(event.target.checked)}
-                  className="h-4 w-4 rounded border-[var(--border)] text-[var(--primary)] focus:ring-[var(--primary)]"
-                />
-                <span className="text-sm text-[var(--text)]">Invert direction</span>
-              </label>
               <p className="mt-1 text-xs text-[var(--text-tertiary)]">
-                Ratio mode uses stroke, zero, and span to convert CH0/CH1 into calibrated displacement.
+                Ratio mode uses retracted and extended endpoints to convert CH0/CH1 into calibrated displacement.
               </p>
               <button
                 type="button"
@@ -689,24 +713,27 @@ export const DraginoTempCard: React.FC<DraginoTempCardProps> = ({ device, onRemo
       : null)
     ?? (intervalLabel ? `this ${intervalLabel.toLowerCase()}` : 'this interval');
   const dendroBaselinePending = dendroEnabled && device.dendro_baseline_pending === 1;
-  const dendroHasPosition = dendroEnabled && data?.dendro_valid === 1 && data?.dendro_position_mm != null;
+  const dendroSaturated = dendroEnabled && data?.dendro_saturated === 1;
+  const dendroHasPosition = dendroEnabled && data?.dendro_valid === 1 && data?.dendro_position_raw_mm != null;
   const dendroHasStemChange = dendroEnabled
     && !dendroBaselinePending
+    && !dendroSaturated
     && data?.dendro_valid === 1
     && data?.dendro_stem_change_um != null;
   const dendroNeedsCalibration = dendroEnabled
     && data?.dendro_mode_used === 'ratio_mod3'
     && data?.dendro_valid !== 0
-    && data?.dendro_position_mm == null
+    && data?.dendro_position_raw_mm == null
     && data?.dendro_ratio != null;
   const dendroSensorError = dendroEnabled && data?.dendro_valid === 0;
   const dendroAwaitingBaseline = dendroEnabled
     && !dendroNeedsCalibration
     && !dendroSensorError
+    && !dendroSaturated
     && (dendroBaselinePending || (dendroHasPosition && data?.dendro_stem_change_um == null));
   const dendroStemChangeLabel = formatStemChangeUm(data?.dendro_stem_change_um);
   const dendroCardVisible = dendroEnabled
-    && (dendroHasStemChange || dendroAwaitingBaseline || dendroNeedsCalibration || dendroSensorError);
+    && (dendroHasStemChange || dendroAwaitingBaseline || dendroNeedsCalibration || dendroSensorError || dendroSaturated);
 
   const [isRemoving, setIsRemoving] = useState(false);
   const [showConfirm, setShowConfirm] = useState(false);
@@ -940,6 +967,14 @@ export const DraginoTempCard: React.FC<DraginoTempCardProps> = ({ device, onRemo
               >
                 Awaiting baseline
               </button>
+            ) : dendroSaturated ? (
+              <button
+                onClick={() => setShowMonitor(true)}
+                className="cursor-pointer text-left text-base font-bold text-[var(--warn-text)] underline decoration-dotted underline-offset-4 transition-colors hover:text-[var(--primary)]"
+                title="View mechanical history and calibration range details"
+              >
+                Out of range
+              </button>
             ) : dendroNeedsCalibration ? (
               <p className="text-base font-bold text-[var(--warn-text)]">Calibration required</p>
             ) : dendroSensorError ? (
@@ -953,6 +988,11 @@ export const DraginoTempCard: React.FC<DraginoTempCardProps> = ({ device, onRemo
             {dendroAwaitingBaseline && (
               <p className="mt-1 text-xs text-[var(--text-tertiary)]">
                 The next valid calibrated uplink will establish the new zero point for stem change.
+              </p>
+            )}
+            {dendroSaturated && (
+              <p className="mt-1 text-xs text-[var(--text-tertiary)]">
+                The current raw position is {data?.dendro_saturation_side === 'high' ? 'above the extended' : 'below the retracted'} calibration endpoint. Review the dendrometer calibration range.
               </p>
             )}
             {dendroNeedsCalibration && (

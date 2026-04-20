@@ -26,12 +26,15 @@ export interface Device {
     adc_ch0v?: number;          // ADC CH0 raw voltage (V) — LSN50 analog input
     adc_ch1v?: number | null;   // ADC CH1 reference voltage (V) — LSN50 MOD3 ratio path
     // Dendrometer (OPKON SLPS linear potentiometer via LSN50 ADC)
+    dendro_position_raw_mm?: number | null; // Unclamped engineering position in mm
     dendro_position_mm?: number | null; // Calculated trunk position (mm), 0–25 range
     dendro_valid?: number | null;       // 1 = valid reading, 0 = out-of-range/error
     dendro_delta_mm?: number | null;    // Change from previous reading (mm); null on first uplink
     dendro_stem_change_um?: number | null; // Comparable stem change relative to the device baseline (µm)
     dendro_ratio?: number | null;       // MOD3 ratio (ADC_CH0V / ADC_CH1V) when available
     dendro_mode_used?: DendroModeUsed | string | null;
+    dendro_saturated?: number | null;
+    dendro_saturation_side?: string | null;
     lsn50_mode_code?: number | null;
     lsn50_mode_label?: Lsn50Mode | string | null;
     lsn50_mode_observed_at?: string | null;
@@ -74,6 +77,8 @@ export interface Device {
   device_mode?: number | null;  // Requested/configured LSN50 mode on the edge
   dendro_force_legacy?: number | null;
   dendro_stroke_mm?: number | null;
+  dendro_ratio_at_retracted?: number | null;
+  dendro_ratio_at_extended?: number | null;
   dendro_ratio_zero?: number | null;
   dendro_ratio_span?: number | null;
   dendro_invert_direction?: number | null;
@@ -516,6 +521,7 @@ export interface DendroReading {
   id: number | null;
   deveui: string;
   position_um: number | null;
+  position_raw_um?: number | null;
   adc_v: number | null;
   adc_ch0v?: number | null;
   adc_ch1v?: number | null;
@@ -524,5 +530,7 @@ export interface DendroReading {
   bat_v: number | null;
   is_valid: number;
   is_outlier: number;
+  dendro_saturated?: number | null;
+  dendro_saturation_side?: string | null;
   recorded_at: string;
 }

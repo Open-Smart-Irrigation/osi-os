@@ -102,46 +102,71 @@ function detectDendroModeUsed(options = {}) {
   return 'legacy_single_adc';
 }
 
-function calibrationSignature(options = {}) {
+function normalizeRatioCalibration(options = {}) {
   const strokeMm = toFiniteNumber(options.strokeMm);
-  const ratioZero = toFiniteNumber(options.ratioZero);
-  const ratioSpan = toFiniteNumber(options.ratioSpan);
-  const invertDirection = Number(options.invertDirection || 0) === 1 ? 1 : 0;
+  let ratioAtRetracted = toFiniteNumber(options.ratioAtRetracted);
+  let ratioAtExtended = toFiniteNumber(options.ratioAtExtended);
+
+  if (ratioAtRetracted === null || ratioAtExtended === null) {
+    const ratioZero = toFiniteNumber(options.ratioZero);
+    const ratioSpan = toFiniteNumber(options.ratioSpan);
+    const invertDirection = Number(options.invertDirection || 0) === 1;
+
+    if (ratioAtRetracted === null && ratioZero !== null && ratioSpan !== null) {
+      ratioAtRetracted = invertDirection ? ratioSpan : ratioZero;
+    }
+    if (ratioAtExtended === null && ratioZero !== null && ratioSpan !== null) {
+      ratioAtExtended = invertDirection ? ratioZero : ratioSpan;
+    }
+  }
+
+  return {
+    strokeMm,
+    ratioAtRetracted,
+    ratioAtExtended,
+  };
+}
+
+function calibrationSignature(options = {}) {
+  const calibration = normalizeRatioCalibration(options);
   return [
-    strokeMm === null ? 'null' : strokeMm,
-    ratioZero === null ? 'null' : ratioZero,
-    ratioSpan === null ? 'null' : ratioSpan,
-    invertDirection,
+    calibration.strokeMm === null ? 'null' : calibration.strokeMm,
+    calibration.ratioAtRetracted === null ? 'null' : calibration.ratioAtRetracted,
+    calibration.ratioAtExtended === null ? 'null' : calibration.ratioAtExtended,
   ].join('|');
 }
 
-function calculateRatioDendroPositionMm(options = {}) {
-  const strokeMm = toFiniteNumber(options.strokeMm);
-  const ratioZero = toFiniteNumber(options.ratioZero);
-  const ratioSpan = toFiniteNumber(options.ratioSpan);
+function calculateRatioDendroPositionRawMm(options = {}) {
+  const calibration = normalizeRatioCalibration(options);
+  const strokeMm = calibration.strokeMm;
+  const ratioAtRetracted = calibration.ratioAtRetracted;
+  const ratioAtExtended = calibration.ratioAtExtended;
   const ratio = toFiniteNumber(options.ratio);
-  const invertDirection = Number(options.invertDirection || 0) === 1;
 
-  if (strokeMm === null || ratioZero === null || ratioSpan === null || ratio === null) return null;
-  if (strokeMm <= 0 || ratioSpan === ratioZero) return null;
+  if (strokeMm === null || ratioAtRetracted === null || ratioAtExtended === null || ratio === null) return null;
+  if (strokeMm <= 0 || ratioAtExtended === ratioAtRetracted) return null;
 
-  const numerator = invertDirection
-    ? strokeMm * (ratioSpan - ratio)
-    : strokeMm * (ratio - ratioZero);
-  const denominator = ratioSpan - ratioZero;
+  const numerator = strokeMm * (ratio - ratioAtRetracted);
+  const denominator = ratioAtExtended - ratioAtRetracted;
   const position = numerator / denominator;
   if (!Number.isFinite(position)) return null;
 
-  return roundTo(clamp(position, 0, strokeMm), 3);
+  return roundTo(position, 3);
+}
+
+function calculateRatioDendroPositionMm(options = {}) {
+  const calibration = normalizeRatioCalibration(options);
+  const rawPosition = calculateRatioDendroPositionRawMm(options);
+  if (rawPosition === null || calibration.strokeMm === null) return null;
+
+  return roundTo(clamp(rawPosition, 0, calibration.strokeMm), 3);
 }
 
 function buildDendroDerivedMetrics(options = {}) {
   const adcCh0V = toFiniteNumber(options.adcCh0V);
   const adcCh1V = toFiniteNumber(options.adcCh1V);
-  const strokeMm = toFiniteNumber(options.strokeMm);
-  const ratioZero = toFiniteNumber(options.ratioZero);
-  const ratioSpan = toFiniteNumber(options.ratioSpan);
-  const invertDirection = Number(options.invertDirection || 0) === 1 ? 1 : 0;
+  const calibration = normalizeRatioCalibration(options);
+  const strokeMm = calibration.strokeMm;
   const modeUsed = detectDendroModeUsed(options);
   const legacyValid = adcCh0V !== null ? (adcCh0V >= 0 && adcCh0V <= 2.6 ? 1 : 0) : null;
   const legacyPositionMm = legacyValid === 1 ? roundTo(adcCh0V * 10, 3) : null;
@@ -150,20 +175,37 @@ function buildDendroDerivedMetrics(options = {}) {
     : { ratio: null, isValid: false, invalidReason: null };
 
   let dendroValid = legacyValid;
+  let positionRawMm = legacyPositionMm;
   let positionMm = legacyPositionMm;
   let calibrationMissing = false;
+  let dendroSaturated = 0;
+  let dendroSaturationSide = null;
 
   if (modeUsed === 'ratio_mod3') {
     dendroValid = ratioInfo.isValid ? 1 : 0;
+    positionRawMm = calculateRatioDendroPositionRawMm({
+      strokeMm,
+      ratioAtRetracted: calibration.ratioAtRetracted,
+      ratioAtExtended: calibration.ratioAtExtended,
+      ratio: ratioInfo.ratio,
+    });
     positionMm = calculateRatioDendroPositionMm({
       strokeMm,
-      ratioZero,
-      ratioSpan,
+      ratioAtRetracted: calibration.ratioAtRetracted,
+      ratioAtExtended: calibration.ratioAtExtended,
       ratio: ratioInfo.ratio,
-      invertDirection,
     });
-    if (ratioInfo.isValid && positionMm === null) {
+    if (ratioInfo.isValid && positionRawMm === null) {
       calibrationMissing = true;
+    }
+    if (positionRawMm !== null && strokeMm !== null && strokeMm > 0) {
+      if (positionRawMm < 0) {
+        dendroSaturated = 1;
+        dendroSaturationSide = 'low';
+      } else if (positionRawMm > strokeMm) {
+        dendroSaturated = 1;
+        dendroSaturationSide = 'high';
+      }
     }
   }
 
@@ -173,20 +215,21 @@ function buildDendroDerivedMetrics(options = {}) {
     dendroModeUsed: modeUsed,
     dendroRatio: ratioInfo.ratio,
     dendroValid,
+    positionRawMm,
     positionMm,
     positionUm: positionMm === null ? null : Math.round(positionMm * 1000),
+    dendroSaturated,
+    dendroSaturationSide,
     ratioInvalidReason: ratioInfo.invalidReason,
     calibrationMissing,
     calibrationSignature: calibrationSignature({
       strokeMm,
-      ratioZero,
-      ratioSpan,
-      invertDirection,
+      ratioAtRetracted: calibration.ratioAtRetracted,
+      ratioAtExtended: calibration.ratioAtExtended,
     }),
     strokeMm,
-    ratioZero,
-    ratioSpan,
-    invertDirection,
+    ratioAtRetracted: calibration.ratioAtRetracted,
+    ratioAtExtended: calibration.ratioAtExtended,
   };
 }
 
@@ -283,7 +326,9 @@ module.exports = {
   detectLsn50ModeCode,
   decodeRawAdcPayload,
   detectDendroModeUsed,
+  normalizeRatioCalibration,
   calculateDendroRatio,
+  calculateRatioDendroPositionRawMm,
   calculateRatioDendroPositionMm,
   buildDendroDerivedMetrics,
   calibrationSignature,
