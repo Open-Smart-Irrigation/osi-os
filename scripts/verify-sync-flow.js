@@ -910,6 +910,7 @@ expectIncludes('Sync Init Schema + Triggers', "'soil_moisture_probe_depths_json'
 expectIncludes('Sync Init Schema + Triggers', "'soil_moisture_probe_depths_configured', COALESCE(NEW.soil_moisture_probe_depths_configured, 0)", 'mirrors Kiwi soil depth readiness in device outbox payloads');
 expectIncludes('Auth + Save Soil Moisture Depths', 'soil_moisture_probe_depths_json = ', 'stores Kiwi soil depth JSON through the local edge endpoint');
 expectIncludes('Auth + Save Soil Moisture Depths', 'soil_moisture_probe_depths_configured = 1', 'marks Kiwi soil depths as configured through the local edge endpoint');
+expectExcludes('Auth + Save Soil Moisture Depths', "node.error('Failed to save soil moisture depths: ' + e.message, msg);", 'soil-depth error forwarding into the tab-wide HTTP catch path');
 expectIncludes('Build UPDATE SQL', "if (commandType === 'SET_STREGA_INTERVAL') {", 'accepts synced STREGA interval commands on the gateway');
 expectIncludes('Build UPDATE SQL', "if (commandType === 'SET_STREGA_MODEL') {", 'accepts synced STREGA model updates on the gateway');
 expectIncludes('Build UPDATE SQL', "if (commandType === 'SET_STREGA_TIMED_ACTION') {", 'accepts synced STREGA timed actions on the gateway');
