@@ -310,38 +310,9 @@ Constraints:
 
 ## Known Pending Work / UI Issues
 
-These are confirmed bugs and missing features as of 2026-04-20. Not yet filed as issues.
+Tracked as GitHub Issues: https://github.com/Open-Smart-Irrigation/osi-os/issues
 
-### S2120 Weather Station
-- **Missing history for unique params**: The S2120 card has a history/monitoring tab, but it only covers standard fields. Wind speed, wind direction, UV index, barometric pressure, and rain gauge have no chart/history view yet. Needs dedicated history support for these weather-specific channels.
-
-### LSN50 Sensor Card
-- **ADC voltage shown in temperature-only mode**: When a Dragino LSN50 is configured for external temperature only (no dendrometer/ADC connected), the card still renders the ADC voltage field. It should be hidden when only the temperature channel is active.
-
-### Terra Intelligence Live View
-- **Multiple rendering breaks**: The Terra live view has several broken states that need investigation and repair before it can be used reliably.
-- **Zone not loaded on startup**: Terra does not load the previously saved zone on open — the field geometry / zone selection is blank. The flow for reading the saved `zoneId` from URL param or stored state is broken or incomplete.
-- **Save-to-zone does not overwrite**: Saving field geometry back to the zone does not reliably persist. Consider adding a dedicated "Save to zone" button rather than auto-saving.
-- **Draw field regression — cannot close polygon**: Clicking the first point to close the polygon drawing no longer works. The polygon stays open and cannot be completed via the standard first-point click.
-
-### Soil Profile Card
-- **Uneven / many-decimal horizon values**: Soil horizon depth values are displayed with inconsistent rounding and excess decimal places. Values should be rounded to a sensible precision.
-- **Soil asset does not expand with variable horizons**: When horizon count changes, the soil profile asset (illustration) does not resize — the extra area renders with a black background instead of extending the soil graphic.
-
-### Navigation
-- **No back button to OSI dashboard**: Terra Intelligence and any standalone views lack a navigation control to return to the main OSI OS dashboard. A "Back to dashboard" button or equivalent navigation affordance is missing.
-
-### Terra — Overlapping UI / Sensor Anchor Box
-- **Draw field and sensor anchors box overlap**: The draw-field control and the sensor anchors panel render on top of each other, making both hard to use simultaneously.
-- **Sensor anchor box cannot be closed without sensors**: If no sensors are installed, the sensor anchor box has no close/dismiss control and the user is stuck with it open.
-
-### Mobile & Native Apps
-- **Terra mobile view**: Terra Intelligence has no responsive/mobile layout — needs a dedicated mobile view before it is usable on phones.
-- **Android app integration**: OSI OS dashboard and Terra need to be integrated into an Android app wrapper.
-- **iPhone app**: Same scope as Android — native iOS app wrapper required.
-
-### Internationalisation
-- **All translations missing**: The UI has no i18n layer yet. All strings are English-only. Full translation support (at minimum French and Swahili for target markets) is pending.
+Key open areas: S2120 history for unique params (#33), LSN50 ADC display (#34), Terra live view regressions (#35–#40, #43), soil profile rendering (#41–#42), mobile/native apps (#44–#46), i18n (#47).
 
 ---
 
