@@ -628,6 +628,40 @@
     "wires": []
   },
   {
+    "id": "device-api-catch",
+    "type": "catch",
+    "z": "device-api-tab",
+    "name": "Catch errors (avoid hanging HTTP)",
+    "scope": null,
+    "uncaught": false,
+    "x": 1090,
+    "y": 140,
+    "wires": [
+      [
+        "device-api-http500"
+      ]
+    ]
+  },
+  {
+    "id": "device-api-http500",
+    "type": "function",
+    "z": "device-api-tab",
+    "name": "Return Device API HTTP 500",
+    "func": "if (!msg.res) {\n  return null;\n}\nmsg.statusCode = 500;\nmsg.headers = { 'Content-Type': 'application/json; charset=utf-8' };\nmsg.payload = {\n  error: 'device-api failed',\n  message: msg.error?.message || String(msg.error || 'unknown error')\n};\nreturn msg;",
+    "outputs": 1,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 1220,
+    "y": 140,
+    "wires": [
+      [
+        "device-response"
+      ]
+    ]
+  },
+  {
     "id": "post-devices-http",
     "type": "http in",
     "z": "device-api-tab",
@@ -7993,7 +8027,16 @@
     "noerr": 0,
     "initialize": "",
     "finalize": "",
-    "libs": [],
+    "libs": [
+      {
+        "var": "crypto",
+        "module": "crypto"
+      },
+      {
+        "var": "osiDb",
+        "module": "osi-db-helper"
+      }
+    ],
     "x": 520,
     "y": 2100,
     "wires": [

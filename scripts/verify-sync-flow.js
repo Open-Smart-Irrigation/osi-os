@@ -57,6 +57,7 @@ const requiredHttpRoutes = [
   '/api/devices/:deveui/lsn50/5v-warmup',
   '/api/devices/:deveui/kiwi/interval',
   '/api/devices/:deveui/kiwi/temperature-humidity/enable',
+  '/api/devices/:deveui/soil-moisture-depths',
   '/api/devices/:deveui/strega/interval',
   '/api/devices/:deveui/strega/model',
   '/api/devices/:deveui/strega/timed-action',
@@ -114,6 +115,7 @@ const requiredFunctionNodes = [
   'Auth + Parse Kiwi Temp/Humidity',
   'Authorize + Fanout Kiwi Temp/Humidity',
   'Format Kiwi Temp/Humidity Response',
+  'Auth + Save Soil Moisture Depths',
   'Auth + Parse STREGA Interval',
   'Authorize + Fanout STREGA Interval',
   'Format STREGA Interval Response',
@@ -126,6 +128,7 @@ const requiredFunctionNodes = [
   'Format STREGA Advanced Response',
   'Auth + Parse Dendro Config',
   'Format Dendro Config Response',
+  'Return Device API HTTP 500',
   'CS Register (cloud cmd)',
   'Build Special Command ACK',
   'Build LSN50 mode downlink',
@@ -790,6 +793,8 @@ expectLibById('s2120-zones-get-fn', 'crypto', 'crypto', 'imports crypto for auth
 expectLibById('s2120-zones-get-fn', 'osiDb', 'osi-db-helper', 'imports osi-db-helper as osiDb');
 expectLibById('s2120-zones-put-auth-fn', 'crypto', 'crypto', 'imports crypto for auth verification');
 expectLibById('s2120-zones-put-auth-fn', 'osiDb', 'osi-db-helper', 'imports osi-db-helper as osiDb');
+expectLibById('put-soil-depth-fn', 'crypto', 'crypto', 'imports crypto for soil-depth auth verification');
+expectLibById('put-soil-depth-fn', 'osiDb', 'osi-db-helper', 'imports osi-db-helper for soil-depth persistence');
 expectIncludesById('sensor-history-fn', 'rain_mm_per_hour', 'allows rate-based rain history queries');
 expectIncludesById('sensor-history-fn', 'flow_liters_per_min', 'allows rate-based flow history queries');
 expectIncludesById('sensor-history-fn', 'rain_mm_per_10min', 'allows normalized rain history queries');
@@ -819,6 +824,21 @@ expectLibById('put-dendro-config-auth-fn', 'osiDb', 'osi-db-helper', 'imports os
 expectIncludesById('put-dendro-config-auth-fn', 'deleted_at IS NULL', 'ignores deleted devices when saving dendrometer config');
 expectIncludesById('put-dendro-config-auth-fn', "return respond(404, { message: 'Device not found' });", 'returns 404 for missing dendrometer-config devices');
 expectIncludesById('put-dendro-config-auth-fn', 'dendro_baseline_pending = 1', 'marks the dendrometer baseline as pending when calibration changes');
+const deviceApiCatch = findNodeById('device-api-catch');
+expectCondition(
+  Boolean(deviceApiCatch),
+  'device-api catch node exists',
+  'missing device-api catch node to avoid hanging HTTP responses'
+);
+if (deviceApiCatch) {
+  expectEqual(deviceApiCatch.type, 'catch', 'device-api catch node type');
+  expectEqual(deviceApiCatch.z, 'device-api-tab', 'device-api catch node tab');
+  expectEqual(deviceApiCatch.scope, null, 'device-api catch node catches the whole tab');
+}
+expectWireById('device-api-catch', 'device-api-http500', 'routes uncaught device-api errors into the HTTP 500 formatter');
+expectIncludesById('device-api-http500', 'msg.statusCode = 500;', 'sets HTTP 500 for uncaught device-api failures');
+expectIncludesById('device-api-http500', "error: 'device-api failed'", 'formats uncaught device-api failures with the generic error code');
+expectWireById('device-api-http500', 'device-response', 'returns uncaught device-api failures through the shared response node');
 expectIncludes('Format Dendro Config Response', 'dendro_force_legacy: row.dendro_force_legacy ?? null', 'returns canonical dendrometer config fields');
 expectIncludes('Format Dendro Config Response', 'dendro_invert_direction: row.dendro_invert_direction ?? null', 'returns canonical dendrometer inversion config');
 expectIncludesById('post-dendro-baseline-reset-auth-fn', 'dendro_baseline_position_mm = NULL', 'clears the stored dendrometer baseline position');
