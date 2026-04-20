@@ -3,6 +3,7 @@
 const fs = require('fs');
 const vm = require('vm');
 const path = require('path');
+const { execFileSync } = require('child_process');
 
 const flowPath = path.resolve(__dirname, '..', 'conf', 'full_raspberrypi_bcm27xx_bcm2712', 'files', 'usr', 'share', 'flows.json');
 const nodeRedRoot = path.resolve(__dirname, '..', 'conf', 'full_raspberrypi_bcm27xx_bcm2712', 'files', 'usr', 'share', 'node-red');
@@ -13,6 +14,18 @@ const sx1301GatewayDefaultPath = path.resolve(__dirname, '..', 'conf', 'full_ras
 const gatewayIdentityHelperPath = path.resolve(__dirname, '..', 'conf', 'full_raspberrypi_bcm27xx_bcm2712', 'files', 'usr', 'libexec', 'osi-gateway-identity.sh');
 const chirpstackBootstrapPath = path.resolve(__dirname, 'chirpstack-bootstrap.js');
 const lsn50CodecPath = path.resolve(__dirname, '..', 'conf', 'full_raspberrypi_bcm27xx_bcm2712', 'files', 'usr', 'share', 'node-red', 'codecs', 'dragino_lsn50_decoder.js');
+const seedDatabasePaths = [
+  path.resolve(__dirname, '..', 'conf', 'base_raspberrypi_bcm27xx_bcm2712', 'files', 'usr', 'share', 'db', 'farming.db'),
+  path.resolve(__dirname, '..', 'conf', 'full_raspberrypi_bcm27xx_bcm2708', 'files', 'usr', 'share', 'db', 'farming.db'),
+  path.resolve(__dirname, '..', 'conf', 'full_raspberrypi_bcm27xx_bcm2709', 'files', 'usr', 'share', 'db', 'farming.db'),
+  path.resolve(__dirname, '..', 'conf', 'full_raspberrypi_bcm27xx_bcm2712', 'files', 'usr', 'share', 'db', 'farming.db'),
+  path.resolve(__dirname, '..', 'database', 'farming.db'),
+  path.resolve(__dirname, '..', 'web', 'react-gui', 'farming.db')
+];
+const seedDendroHistoryDatabasePaths = [
+  path.resolve(__dirname, '..', 'conf', 'full_raspberrypi_bcm27xx_bcm2712', 'files', 'usr', 'share', 'db', 'farming.db'),
+  path.resolve(__dirname, '..', 'database', 'farming.db')
+];
 const reactGuiApiPath = path.resolve(__dirname, '..', 'web', 'react-gui', 'src', 'services', 'api.ts');
 const farmingTypesPath = path.resolve(__dirname, '..', 'web', 'react-gui', 'src', 'types', 'farming.ts');
 const dendroMonitorPath = path.resolve(__dirname, '..', 'web', 'react-gui', 'src', 'components', 'farming', 'DendrometerMonitor.tsx');
@@ -318,6 +331,19 @@ function expectExcludesForEach(nodeNames, needle, description) {
   for (const nodeName of nodeNames) {
     expectExcludes(nodeName, needle, description);
   }
+}
+
+function readTableColumns(dbPath, tableName) {
+  const output = execFileSync('sqlite3', [dbPath, `pragma table_info(${tableName});`], { encoding: 'utf8' });
+  return output
+    .trim()
+    .split('\n')
+    .filter(Boolean)
+    .map((line) => {
+      const parts = line.split('|');
+      return parts[1];
+    })
+    .filter(Boolean);
 }
 
 async function executeFunctionNodeById(nodeId, msg, options = {}) {
@@ -937,12 +963,16 @@ expectIncludes('Sync Init Schema + Triggers', 'ALTER TABLE devices ADD COLUMN de
 expectIncludes('Sync Init Schema + Triggers', 'ALTER TABLE devices ADD COLUMN dendro_stroke_mm REAL', 'adds the device-level dendrometer stroke calibration');
 expectIncludes('Sync Init Schema + Triggers', 'ALTER TABLE devices ADD COLUMN dendro_ratio_zero REAL', 'adds the device-level dendrometer ratio zero calibration');
 expectIncludes('Sync Init Schema + Triggers', 'ALTER TABLE devices ADD COLUMN dendro_ratio_span REAL', 'adds the device-level dendrometer ratio span calibration');
+expectIncludes('Sync Init Schema + Triggers', 'ALTER TABLE devices ADD COLUMN dendro_ratio_at_retracted REAL', 'adds the canonical retracted-ratio dendrometer calibration column');
+expectIncludes('Sync Init Schema + Triggers', 'ALTER TABLE devices ADD COLUMN dendro_ratio_at_extended REAL', 'adds the canonical extended-ratio dendrometer calibration column');
 expectIncludes('Sync Init Schema + Triggers', 'ALTER TABLE devices ADD COLUMN dendro_baseline_position_mm REAL', 'adds a persisted edge baseline for comparable stem-change signals');
 expectIncludes('Sync Init Schema + Triggers', 'ALTER TABLE devices ADD COLUMN dendro_baseline_mode_used TEXT', 'tracks which conversion path the stem-change baseline was captured with');
 expectIncludes('Sync Init Schema + Triggers', 'ALTER TABLE devices ADD COLUMN dendro_baseline_calibration_signature TEXT', 'tracks calibration changes that should reset the stem-change baseline');
 expectIncludes('Sync Init Schema + Triggers', 'ALTER TABLE devices ADD COLUMN dendro_baseline_pending INTEGER DEFAULT 0', 'adds a persisted pending-baseline flag on devices');
 expectIncludes('Sync Init Schema + Triggers', 'COALESCE(dendro_baseline_pending,0)', 'preserves the pending-baseline flag when rebuilding the devices table');
 expectIncludes('Sync Init Schema + Triggers', 'ALTER TABLE devices ADD COLUMN dendro_invert_direction INTEGER DEFAULT 0', 'adds the device-level dendrometer inversion flag');
+expectIncludes('Sync Init Schema + Triggers', 'UPDATE devices SET dendro_ratio_at_retracted = CASE', 'backfills canonical retracted-ratio calibration from legacy dendrometer fields');
+expectIncludes('Sync Init Schema + Triggers', 'UPDATE devices SET dendro_ratio_at_extended = CASE', 'backfills canonical extended-ratio calibration from legacy dendrometer fields');
 expectIncludes('Sync Init Schema + Triggers', 'ALTER TABLE device_data ADD COLUMN adc_ch1v REAL', 'adds CH1 dendrometer telemetry storage');
 expectIncludes('Sync Init Schema + Triggers', 'ALTER TABLE device_data ADD COLUMN dendro_ratio REAL', 'adds ratio dendrometer telemetry storage');
 expectIncludes('Sync Init Schema + Triggers', 'ALTER TABLE device_data ADD COLUMN dendro_mode_used TEXT', 'adds dendrometer path storage');
@@ -1058,9 +1088,102 @@ expectFileIncludes('deploy.sh', deployScript, '"conf/full_raspberrypi_bcm27xx_bc
 expectFileIncludes('deploy.sh', deployScript, '"conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-dendro-helper/index.js"', 'deploys the osi-dendro-helper runtime helper to live devices');
 expectFileIncludes('deploy.sh', deployScript, '"conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/codecs/dragino_lsn50_decoder.js"', 'deploys the shipped LSN50 ChirpStack decoder to live devices');
 expectFileIncludes('deploy.sh', deployScript, 'chmod 755 /etc/init.d/node-red', 'keeps the deployed Node-RED init script executable');
+expectFileIncludes('deploy.sh', deployScript, 'ALTER TABLE devices ADD COLUMN dendro_ratio_at_retracted REAL', 'repairs the live DB with the canonical dendrometer retracted-ratio column during deploy');
+expectFileIncludes('deploy.sh', deployScript, 'ALTER TABLE devices ADD COLUMN dendro_ratio_at_extended REAL', 'repairs the live DB with the canonical dendrometer extended-ratio column during deploy');
+expectFileIncludes('deploy.sh', deployScript, 'UPDATE devices SET dendro_ratio_at_retracted = CASE', 'backfills the canonical dendrometer retracted-ratio column during deploy');
+expectFileIncludes('deploy.sh', deployScript, 'UPDATE devices SET dendro_ratio_at_extended = CASE', 'backfills the canonical dendrometer extended-ratio column during deploy');
 expectFileIncludes('deploy.sh', deployScript, '/etc/init.d/osi-gateway-gps stop || true', 'stops the retired gateway GPS sidecar during deploy');
 expectFileIncludes('deploy.sh', deployScript, '/etc/init.d/osi-gateway-gps disable || true', 'disables the retired gateway GPS sidecar during deploy');
 expectFileIncludes('deploy.sh', deployScript, 'rm -f /etc/init.d/osi-gateway-gps /usr/bin/osi-gateway-gps.js', 'removes the retired gateway GPS sidecar files during deploy');
+for (const seedDatabasePath of seedDatabasePaths) {
+  const relativeSeedPath = path.relative(path.resolve(__dirname, '..'), seedDatabasePath);
+  const columns = new Set(readTableColumns(seedDatabasePath, 'devices'));
+  expectCondition(
+    columns.has('dendro_ratio_at_retracted'),
+    `${relativeSeedPath} includes dendro_ratio_at_retracted in the bundled devices schema`,
+    `${relativeSeedPath} is missing dendro_ratio_at_retracted in the bundled devices schema`
+  );
+  expectCondition(
+    columns.has('dendro_ratio_at_extended'),
+    `${relativeSeedPath} includes dendro_ratio_at_extended in the bundled devices schema`,
+    `${relativeSeedPath} is missing dendro_ratio_at_extended in the bundled devices schema`
+  );
+  expectCondition(
+    columns.has('dendro_force_legacy'),
+    `${relativeSeedPath} includes dendro_force_legacy in the bundled devices schema`,
+    `${relativeSeedPath} is missing dendro_force_legacy in the bundled devices schema`
+  );
+  expectCondition(
+    columns.has('dendro_baseline_pending'),
+    `${relativeSeedPath} includes dendro_baseline_pending in the bundled devices schema`,
+    `${relativeSeedPath} is missing dendro_baseline_pending in the bundled devices schema`
+  );
+  expectCondition(
+    columns.has('device_mode'),
+    `${relativeSeedPath} includes device_mode in the bundled devices schema`,
+    `${relativeSeedPath} is missing device_mode in the bundled devices schema`
+  );
+  const deviceDataColumns = new Set(readTableColumns(seedDatabasePath, 'device_data'));
+  expectCondition(
+    deviceDataColumns.has('adc_ch1v'),
+    `${relativeSeedPath} includes adc_ch1v in the bundled device_data schema`,
+    `${relativeSeedPath} is missing adc_ch1v in the bundled device_data schema`
+  );
+  expectCondition(
+    deviceDataColumns.has('dendro_ratio'),
+    `${relativeSeedPath} includes dendro_ratio in the bundled device_data schema`,
+    `${relativeSeedPath} is missing dendro_ratio in the bundled device_data schema`
+  );
+  expectCondition(
+    deviceDataColumns.has('dendro_mode_used'),
+    `${relativeSeedPath} includes dendro_mode_used in the bundled device_data schema`,
+    `${relativeSeedPath} is missing dendro_mode_used in the bundled device_data schema`
+  );
+  expectCondition(
+    deviceDataColumns.has('dendro_stem_change_um'),
+    `${relativeSeedPath} includes dendro_stem_change_um in the bundled device_data schema`,
+    `${relativeSeedPath} is missing dendro_stem_change_um in the bundled device_data schema`
+  );
+  expectCondition(
+    deviceDataColumns.has('dendro_position_raw_mm'),
+    `${relativeSeedPath} includes dendro_position_raw_mm in the bundled device_data schema`,
+    `${relativeSeedPath} is missing dendro_position_raw_mm in the bundled device_data schema`
+  );
+  expectCondition(
+    deviceDataColumns.has('dendro_saturated'),
+    `${relativeSeedPath} includes dendro_saturated in the bundled device_data schema`,
+    `${relativeSeedPath} is missing dendro_saturated in the bundled device_data schema`
+  );
+  expectCondition(
+    deviceDataColumns.has('dendro_saturation_side'),
+    `${relativeSeedPath} includes dendro_saturation_side in the bundled device_data schema`,
+    `${relativeSeedPath} is missing dendro_saturation_side in the bundled device_data schema`
+  );
+}
+for (const seedDatabasePath of seedDendroHistoryDatabasePaths) {
+  const relativeSeedPath = path.relative(path.resolve(__dirname, '..'), seedDatabasePath);
+  const dendroReadingColumns = new Set(readTableColumns(seedDatabasePath, 'dendrometer_readings'));
+  expectCondition(
+    dendroReadingColumns.has('adc_ch0v'),
+    `${relativeSeedPath} includes adc_ch0v in the bundled dendrometer_readings schema`,
+    `${relativeSeedPath} is missing adc_ch0v in the bundled dendrometer_readings schema`
+  );
+  expectCondition(
+    dendroReadingColumns.has('adc_ch1v'),
+    `${relativeSeedPath} includes adc_ch1v in the bundled dendrometer_readings schema`,
+    `${relativeSeedPath} is missing adc_ch1v in the bundled dendrometer_readings schema`
+  );
+  expectCondition(
+    dendroReadingColumns.has('dendro_ratio'),
+    `${relativeSeedPath} includes dendro_ratio in the bundled dendrometer_readings schema`,
+    `${relativeSeedPath} is missing dendro_ratio in the bundled dendrometer_readings schema`
+  );
+  expectCondition(
+    dendroReadingColumns.has('dendro_mode_used'),
+    `${relativeSeedPath} includes dendro_mode_used in the bundled dendrometer_readings schema`,
+    `${relativeSeedPath} is missing dendro_mode_used in the bundled dendrometer_readings schema`
+  );
+}
 expectFileIncludes('osi-gateway-identity.sh', gatewayIdentityHelperScript, 'gateway_identity_resolve()', 'defines the shared canonical gateway resolver');
 expectFileIncludes('osi-gateway-identity.sh', gatewayIdentityHelperScript, 'gateway_identity_active_chipset()', 'derives the active concentratord chipset before probing static gateway identifiers');
 expectFileIncludes('osi-gateway-identity.sh', gatewayIdentityHelperScript, 'uci -q get chirpstack-concentratord.@global[0].chipset', 'reads the active concentratord chipset from UCI');

@@ -67,6 +67,66 @@ seed_db_if_missing() {
     echo "OK: seeded new database at $DB_PATH"
 }
 
+ensure_dendro_schema() {
+    echo "--- Live dendrometer schema repair ---"
+    if [ ! -e "$DB_PATH" ]; then
+        echo "SKIP: no live database at $DB_PATH"
+        return 0
+    fi
+    node <<'NODE'
+const fs = require('fs');
+const dbPath = '/data/db/farming.db';
+if (!fs.existsSync(dbPath)) {
+  console.log('SKIP: no live database at ' + dbPath);
+  process.exit(0);
+}
+const sqlite3 = require('/srv/node-red/node_modules/sqlite3');
+const db = new sqlite3.Database(dbPath);
+function run(sql) {
+  return new Promise((resolve, reject) => db.run(sql, (err) => err ? reject(err) : resolve()));
+}
+function all(sql) {
+  return new Promise((resolve, reject) => db.all(sql, (err, rows) => err ? reject(err) : resolve(rows || [])));
+}
+(async () => {
+  await run('PRAGMA busy_timeout=5000');
+  for (const sql of [
+    'ALTER TABLE devices ADD COLUMN dendro_ratio_at_retracted REAL',
+    'ALTER TABLE devices ADD COLUMN dendro_ratio_at_extended REAL'
+  ]) {
+    try {
+      await run(sql);
+    } catch (err) {
+      if (!/duplicate column name/i.test(String(err && err.message || err))) throw err;
+    }
+  }
+  await run(`UPDATE devices SET dendro_ratio_at_retracted = CASE
+    WHEN dendro_invert_direction = 1 THEN dendro_ratio_span
+    ELSE dendro_ratio_zero
+  END
+  WHERE dendro_ratio_at_retracted IS NULL
+    AND (dendro_ratio_zero IS NOT NULL OR dendro_ratio_span IS NOT NULL)`);
+  await run(`UPDATE devices SET dendro_ratio_at_extended = CASE
+    WHEN dendro_invert_direction = 1 THEN dendro_ratio_zero
+    ELSE dendro_ratio_span
+  END
+  WHERE dendro_ratio_at_extended IS NULL
+    AND (dendro_ratio_zero IS NOT NULL OR dendro_ratio_span IS NOT NULL)`);
+  const cols = await all('PRAGMA table_info(devices)');
+  const names = new Set(cols.map((row) => row.name));
+  if (!names.has('dendro_ratio_at_retracted') || !names.has('dendro_ratio_at_extended')) {
+    throw new Error('dendrometer calibration columns are still missing after deploy repair');
+  }
+  console.log('OK');
+  db.close();
+})().catch((err) => {
+  console.error(err && err.stack ? err.stack : err);
+  db.close();
+  process.exit(1);
+});
+NODE
+}
+
 echo "=== OSI OS Deploy ==="
 echo "Source: $BASE"
 
@@ -151,6 +211,8 @@ else
     echo "ERROR: npm install failed" >&2
     exit 1
 fi
+
+ensure_dendro_schema
 
 echo "--- React GUI ---"
 fetch "react_gui.tar.gz" "$TMP_DIR/react_gui.tar.gz"
