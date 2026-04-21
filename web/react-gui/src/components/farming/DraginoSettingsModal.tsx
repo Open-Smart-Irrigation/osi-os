@@ -59,7 +59,7 @@ function getCurrentLsn50Mode(device: Device): Lsn50Mode | null {
 const FOCUS_VISIBLE_RING =
   'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--surface)]';
 
-function getFocusableElements(container: HTMLElement | null): HTMLElement[] {
+export function getFocusableElements(container: HTMLElement | null): HTMLElement[] {
   if (!container) return [];
   return Array.from(
     container.querySelectorAll<HTMLElement>(
