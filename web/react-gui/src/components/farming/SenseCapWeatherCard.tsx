@@ -1,9 +1,11 @@
 import React, { useRef, useState } from 'react';
-import type { Device } from '../../types/farming';
-import { devicesAPI, getApiErrorMessage, s2120API } from '../../services/api';
-import { useDismissOnPointerDown } from '../../hooks/useDismissOnPointerDown';
 import { useTranslation } from 'react-i18next';
+import { useDismissOnPointerDown } from '../../hooks/useDismissOnPointerDown';
+import { devicesAPI, getApiErrorMessage, s2120API } from '../../services/api';
+import type { Device } from '../../types/farming';
+import { formatWindDirection } from '../../utils/wind';
 import { SensorMonitor } from './SensorMonitor';
+import { WindMonitor } from './WindMonitor';
 
 interface Props {
   device: Device;
@@ -12,20 +14,24 @@ interface Props {
   allZones?: Array<{ id: number; name: string }>;
 }
 
-function fmtNum(v: number | null | undefined, decimals: number, unit: string): string {
-  if (v == null) return '—';
-  return `${v.toFixed(decimals)} ${unit}`;
+type SensorMonitorConfig = {
+  field: string;
+  label: string;
+  unit: string;
+  color: string;
+  decimals: number;
+  initialField?: string;
+  seriesOptions?: Array<{ field: string; label: string; unit: string; color?: string; decimals?: number }>;
+};
+
+function fmtNum(value: number | null | undefined, decimals: number, unit: string): string {
+  if (value == null) return '—';
+  return `${value.toFixed(decimals)} ${unit}`;
 }
 
-function windDirLabel(deg: number | null | undefined): string {
-  if (deg == null) return '—';
-  const dirs = ['N','NE','E','SE','S','SW','W','NW'];
-  return dirs[Math.round(deg / 45) % 8] + ' ' + Math.round(deg) + '°';
-}
-
-function fmtLux(v: number | null | undefined): string {
-  if (v == null) return '—';
-  return v >= 1000 ? `${(v / 1000).toFixed(1)}k lux` : `${Math.round(v)} lux`;
+function fmtLux(value: number | null | undefined): string {
+  if (value == null) return '—';
+  return value >= 1000 ? `${(value / 1000).toFixed(1)}k lux` : `${Math.round(value)} lux`;
 }
 
 function lastSeenLabel(lastSeen: string | null | undefined): string {
@@ -34,6 +40,43 @@ function lastSeenLabel(lastSeen: string | null | undefined): string {
   if (diff < 1) return 'just now';
   if (diff < 60) return `${diff} min ago`;
   return `${Math.floor(diff / 60)}h ago`;
+}
+
+function formatCounterInterval(seconds: number | null | undefined): string | null {
+  const value = Number(seconds);
+  if (!Number.isFinite(value) || value <= 0) return null;
+  const minutes = value / 60;
+  if (minutes >= 1 && Math.abs(minutes - Math.round(minutes)) < 1e-9) {
+    return `${Math.round(minutes)} min interval`;
+  }
+  if (minutes >= 1) {
+    return `${minutes.toFixed(minutes >= 10 ? 1 : 2)} min interval`;
+  }
+  return `${Math.round(value)} s interval`;
+}
+
+function formatCounterStatus(status: string | null | undefined): string | null {
+  switch (status) {
+    case 'first_sample':
+      return 'Waiting for the next uplink to calculate a delta.';
+    case 'duplicate_timestamp':
+      return 'Skipped duplicate uplink timestamp.';
+    case 'out_of_order':
+      return 'Skipped out-of-order uplink.';
+    case 'counter_reset':
+      return 'Counter reset detected; interval delta skipped.';
+    case 'invalid_interval':
+      return 'Invalid uplink interval; delta skipped.';
+    default:
+      return null;
+  }
+}
+
+function formatPerTenMinuteValue(value: number | null | undefined, unit: string, digits = 1): string | null {
+  if (value == null || !Number.isFinite(value)) {
+    return null;
+  }
+  return `${value.toFixed(digits)} ${unit} per 10 min`;
 }
 
 const ZonePickerPanel: React.FC<{
@@ -49,9 +92,10 @@ const ZonePickerPanel: React.FC<{
 
   useDismissOnPointerDown(ref, onClose);
 
-  const toggle = (id: number) => setSelected(prev => {
+  const toggle = (id: number) => setSelected((prev) => {
     const next = new Set(prev);
-    next.has(id) ? next.delete(id) : next.add(id);
+    if (next.has(id)) next.delete(id);
+    else next.add(id);
     return next;
   });
 
@@ -72,34 +116,34 @@ const ZonePickerPanel: React.FC<{
   return (
     <div
       ref={ref}
-      className="absolute top-8 right-0 z-20 w-56 bg-[var(--card)] border border-[var(--border)] rounded-xl shadow-lg p-3"
+      className="absolute right-0 top-8 z-20 w-56 rounded-xl border border-[var(--border)] bg-[var(--card)] p-3 shadow-lg"
     >
-      <p className="text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)] mb-2">
+      <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)]">
         Zone Assignments
       </p>
-      <div className="flex flex-col gap-1 mb-3 max-h-40 overflow-y-auto">
-        {allZones.map(z => (
-          <label key={z.id} className="flex items-center gap-2 text-sm cursor-pointer">
+      <div className="mb-3 flex max-h-40 flex-col gap-1 overflow-y-auto">
+        {allZones.map((zone) => (
+          <label key={zone.id} className="flex cursor-pointer items-center gap-2 text-sm">
             <input
               type="checkbox"
-              checked={selected.has(z.id)}
-              onChange={() => toggle(z.id)}
+              checked={selected.has(zone.id)}
+              onChange={() => toggle(zone.id)}
               className="rounded"
             />
-            <span className="truncate">{z.name}</span>
+            <span className="truncate">{zone.name}</span>
           </label>
         ))}
         {allZones.length === 0 && (
           <p className="text-xs text-[var(--text-tertiary)]">No zones available</p>
         )}
       </div>
-      {error && <p className="text-xs text-[var(--error-text)] mb-2">{error}</p>}
+      {error && <p className="mb-2 text-xs text-[var(--error-text)]">{error}</p>}
       <button
         onClick={save}
         disabled={busy}
         className="w-full rounded-lg bg-[var(--primary)] px-3 py-1.5 text-sm font-semibold text-white disabled:opacity-60"
       >
-        {busy ? 'Saving…' : 'Save'}
+        {busy ? 'Saving...' : 'Save'}
       </button>
     </div>
   );
@@ -107,20 +151,22 @@ const ZonePickerPanel: React.FC<{
 
 export const SenseCapWeatherCard: React.FC<Props> = ({ device, onRemove, onUpdate, allZones = [] }) => {
   const { t: tc } = useTranslation('common');
-  const d = device.latest_data ?? {};
+  const data = device.latest_data ?? {};
   const [showConfig, setShowConfig] = useState(false);
   const [showConfirm, setShowConfirm] = useState(false);
   const [isRemoving, setIsRemoving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [sensorMonitor, setSensorMonitor] = useState<{
-    field: string;
-    label: string;
-    unit: string;
-    color: string;
-    decimals: number;
-    initialField?: string;
-    seriesOptions?: Array<{ field: string; label: string; unit: string; color?: string; decimals?: number }>;
-  } | null>(null);
+  const [sensorMonitor, setSensorMonitor] = useState<SensorMonitorConfig | null>(null);
+  const [showWindMonitor, setShowWindMonitor] = useState(false);
+
+  const intervalLabel = formatCounterInterval(data.counter_interval_seconds);
+  const rainStatusLabel = formatCounterStatus(data.rain_delta_status);
+  const rainRateSummary =
+    formatPerTenMinuteValue(data.rain_mm_per_10min, 'mm', 1)
+    ?? (data.rain_mm_per_hour != null && intervalLabel
+      ? `${data.rain_mm_per_hour.toFixed(3)} mm/h over ${intervalLabel}`
+      : null)
+    ?? (intervalLabel ? `this ${intervalLabel.toLowerCase()}` : 'this interval');
 
   const handleRemove = async () => {
     setIsRemoving(true);
@@ -139,19 +185,18 @@ export const SenseCapWeatherCard: React.FC<Props> = ({ device, onRemove, onUpdat
     : 'No zones assigned';
 
   return (
-    <div className="rounded-xl p-4 border shadow-sm transition-colors bg-[var(--surface)] border-[var(--border)] hover:border-[var(--focus)]">
-      {/* Header row 1 */}
-      <div className="flex items-center justify-between gap-2 mb-0.5">
-        <h3 className="text-base font-semibold text-[var(--text)] truncate leading-tight">
+    <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-4 shadow-sm transition-colors hover:border-[var(--focus)]">
+      <div className="mb-0.5 flex items-center justify-between gap-2">
+        <h3 className="truncate text-base font-semibold leading-tight text-[var(--text)]">
           {device.name}
         </h3>
-        <div className="flex items-center gap-1.5 shrink-0 relative">
-          <span className="bg-sky-100 text-sky-800 px-2 py-0.5 rounded-md text-xs font-semibold tracking-wide">
+        <div className="relative flex shrink-0 items-center gap-1.5">
+          <span className="rounded-md bg-sky-100 px-2 py-0.5 text-xs font-semibold tracking-wide text-sky-800">
             S2120
           </span>
           <button
-            onClick={() => setShowConfig(v => !v)}
-            className={`p-1.5 rounded-md transition-colors ${
+            onClick={() => setShowConfig((visible) => !visible)}
+            className={`rounded-md p-1.5 transition-colors ${
               showConfig
                 ? 'bg-[var(--primary)] text-white'
                 : 'text-[var(--text-tertiary)] hover:bg-[var(--card)] hover:text-[var(--text)]'
@@ -171,7 +216,7 @@ export const SenseCapWeatherCard: React.FC<Props> = ({ device, onRemove, onUpdat
           <button
             onClick={() => setShowConfirm(true)}
             disabled={isRemoving}
-            className="p-1.5 rounded-md bg-[var(--error-bg)] text-[var(--error-text)] hover:opacity-80 transition-opacity disabled:opacity-40 disabled:cursor-not-allowed"
+            className="rounded-md bg-[var(--error-bg)] p-1.5 text-[var(--error-text)] transition-opacity hover:opacity-80 disabled:cursor-not-allowed disabled:opacity-40"
             title="Remove device"
           >
             ✕
@@ -179,31 +224,30 @@ export const SenseCapWeatherCard: React.FC<Props> = ({ device, onRemove, onUpdat
         </div>
       </div>
 
-      {/* Header row 2: EUI */}
-      <p className="text-xs text-[var(--text-tertiary)] font-mono mb-3 truncate">{device.deveui}</p>
+      <p className="mb-3 truncate text-xs font-mono text-[var(--text-tertiary)]">{device.deveui}</p>
 
       {error && (
-        <div className="bg-[var(--error-bg)] text-[var(--error-text)] px-3 py-2 rounded-lg mb-3 text-sm">
+        <div className="mb-3 rounded-lg bg-[var(--error-bg)] px-3 py-2 text-sm text-[var(--error-text)]">
           {error}
         </div>
       )}
 
       {showConfirm && (
-        <div className="bg-[var(--warn-bg)] border-2 border-[var(--warn-border)] text-[var(--warn-text)] px-4 py-3 rounded-lg mb-4">
-          <p className="font-bold mb-2">Remove weather station?</p>
-          <p className="text-sm mb-3">This will delete all stored readings and zone assignments.</p>
+        <div className="mb-4 rounded-lg border-2 border-[var(--warn-border)] bg-[var(--warn-bg)] px-4 py-3 text-[var(--warn-text)]">
+          <p className="mb-2 font-bold">Remove weather station?</p>
+          <p className="mb-3 text-sm">This will delete all stored readings and zone assignments.</p>
           <div className="flex gap-2">
             <button
               onClick={handleRemove}
               disabled={isRemoving}
-              className="bg-[var(--error-bg)] text-[var(--error-text)] font-bold px-4 py-2 rounded-lg disabled:cursor-not-allowed"
+              className="rounded-lg bg-[var(--error-bg)] px-4 py-2 font-bold text-[var(--error-text)] disabled:cursor-not-allowed"
             >
-              {isRemoving ? 'Removing…' : 'Yes, remove'}
+              {isRemoving ? 'Removing...' : 'Yes, remove'}
             </button>
             <button
               onClick={() => setShowConfirm(false)}
               disabled={isRemoving}
-              className="bg-[var(--secondary-bg)] hover:bg-[var(--border)] text-[var(--text)] font-bold px-4 py-2 rounded-lg"
+              className="rounded-lg bg-[var(--secondary-bg)] px-4 py-2 font-bold text-[var(--text)] hover:bg-[var(--border)]"
             >
               {tc('cancel')}
             </button>
@@ -211,120 +255,138 @@ export const SenseCapWeatherCard: React.FC<Props> = ({ device, onRemove, onUpdat
         </div>
       )}
 
-      {/* 2-col parameter grid */}
       <div className="grid grid-cols-2 gap-2">
-        <div className="bg-[var(--card)] rounded-lg p-3">
-          <p className="text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)] mb-1">Air Temperature</p>
+        <div className="rounded-lg bg-[var(--card)] p-3">
+          <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)]">Air Temperature</p>
           <button
             onClick={() => setSensorMonitor({ field: 'ambient_temperature', label: 'Air Temperature', unit: '°C', color: '#ea580c', decimals: 1 })}
             className="cursor-pointer text-left text-2xl font-bold tabular-nums text-[var(--text)] underline decoration-dotted underline-offset-4 transition-colors hover:text-[var(--primary)]"
             title="View history"
             style={{ color: '#ea580c' }}
           >
-            {fmtNum(d.ambient_temperature, 1, '°C')}
+            {fmtNum(data.ambient_temperature, 1, '°C')}
           </button>
         </div>
 
-        <div className="bg-[var(--card)] rounded-lg p-3">
-          <p className="text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)] mb-1">Humidity</p>
+        <div className="rounded-lg bg-[var(--card)] p-3">
+          <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)]">Humidity</p>
           <button
             onClick={() => setSensorMonitor({ field: 'relative_humidity', label: 'Humidity', unit: '%', color: '#0891b2', decimals: 0 })}
             className="cursor-pointer text-left text-2xl font-bold tabular-nums text-[var(--text)] underline decoration-dotted underline-offset-4 transition-colors hover:text-[var(--primary)]"
             title="View history"
             style={{ color: '#0891b2' }}
           >
-            {fmtNum(d.relative_humidity, 0, '%')}
+            {fmtNum(data.relative_humidity, 0, '%')}
           </button>
         </div>
 
-        <div className="bg-[var(--card)] rounded-lg p-3">
-          <p className="text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)] mb-1">Wind Speed</p>
+        <div className="rounded-lg bg-[var(--card)] p-3">
+          <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)]">Wind Speed</p>
           <button
-            onClick={() => setSensorMonitor({ field: 'wind_speed_mps', label: 'Wind Speed', unit: 'm/s', color: '#4f46e5', decimals: 1 })}
+            onClick={() => setShowWindMonitor(true)}
             className="cursor-pointer text-left text-2xl font-bold tabular-nums text-[var(--text)] underline decoration-dotted underline-offset-4 transition-colors hover:text-[var(--primary)]"
             title="View history"
             style={{ color: '#4f46e5' }}
           >
-            {fmtNum(d.wind_speed_mps, 1, 'm/s')}
+            {fmtNum(data.wind_speed_mps, 1, 'm/s')}
           </button>
-          {d.wind_gust_mps != null && (
-            <p className="text-xs text-[var(--text-tertiary)] mt-0.5">gust {d.wind_gust_mps.toFixed(1)} m/s</p>
+          {data.wind_gust_mps != null && (
+            <p className="mt-0.5 text-xs text-[var(--text-tertiary)]">gust {data.wind_gust_mps.toFixed(1)} m/s</p>
           )}
         </div>
 
-        <div className="bg-[var(--card)] rounded-lg p-3">
-          <p className="text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)] mb-1">Wind Direction</p>
+        <div className="rounded-lg bg-[var(--card)] p-3">
+          <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)]">Wind Direction</p>
           <button
-            onClick={() => setSensorMonitor({ field: 'wind_direction_deg', label: 'Wind Direction', unit: '°', color: '#7c3aed', decimals: 0 })}
+            onClick={() => setShowWindMonitor(true)}
             className="cursor-pointer text-left text-2xl font-bold tabular-nums text-[var(--text)] underline decoration-dotted underline-offset-4 transition-colors hover:text-[var(--primary)]"
             title="View history"
             style={{ color: '#7c3aed' }}
           >
-            {windDirLabel(d.wind_direction_deg)}
+            {formatWindDirection(data.wind_direction_deg)}
           </button>
         </div>
 
-        <div className="bg-[var(--card)] rounded-lg p-3">
-          <p className="text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)] mb-1">Rain Today</p>
+        <div className="rounded-lg bg-[var(--card)] p-3">
+          <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)]">Rain Today</p>
           <button
-            onClick={() => setSensorMonitor({ field: 'rain_mm_delta', label: 'Rainfall', unit: 'mm', color: '#2563eb', decimals: 1 })}
+            onClick={() => setSensorMonitor({
+              field: 'rain_mm_delta',
+              initialField: 'rain_mm_delta',
+              label: 'Rainfall',
+              unit: 'mm',
+              color: '#2563eb',
+              decimals: 1,
+              seriesOptions: [
+                { field: 'rain_mm_delta', label: 'This interval', unit: 'mm', color: '#2563eb', decimals: 1 },
+                { field: 'rain_mm_per_10min', label: 'Per 10 min (rate)', unit: 'mm', color: '#1d4ed8', decimals: 1 },
+              ],
+            })}
             className="cursor-pointer text-left text-2xl font-bold tabular-nums text-[var(--text)] underline decoration-dotted underline-offset-4 transition-colors hover:text-[var(--primary)]"
             title="View history"
             style={{ color: '#2563eb' }}
           >
-            {fmtNum(d.rain_mm_today, 1, 'mm')}
+            {fmtNum(data.rain_mm_today, 1, 'mm')}
           </button>
-          {d.rain_mm_delta != null && d.rain_mm_delta > 0 && (
-            <p className="text-xs text-[var(--text-tertiary)] mt-0.5">+{d.rain_mm_delta.toFixed(1)} mm last uplink</p>
+          <p className="mt-0.5 text-xs text-[var(--text-tertiary)]">
+            {rainRateSummary}
+            {' · '}
+            tap to view history
+          </p>
+          {rainStatusLabel && rainStatusLabel !== rainRateSummary && (
+            <p className="mt-1 text-xs text-[var(--text-tertiary)]">{rainStatusLabel}</p>
+          )}
+          {data.rain_mm_delta != null && data.rain_mm_delta > 0 && (
+            <p className="mt-1 text-xs text-[var(--text-tertiary)]">Last uplink: {data.rain_mm_delta.toFixed(1)} mm</p>
           )}
         </div>
 
-        <div className="bg-[var(--card)] rounded-lg p-3">
-          <p className="text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)] mb-1">Pressure</p>
+        <div className="rounded-lg bg-[var(--card)] p-3">
+          <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)]">Pressure</p>
           <button
             onClick={() => setSensorMonitor({ field: 'barometric_pressure_hpa', label: 'Pressure', unit: 'hPa', color: '#475569', decimals: 0 })}
             className="cursor-pointer text-left text-2xl font-bold tabular-nums text-[var(--text)] underline decoration-dotted underline-offset-4 transition-colors hover:text-[var(--primary)]"
             title="View history"
             style={{ color: '#475569' }}
           >
-            {fmtNum(d.barometric_pressure_hpa, 0, 'hPa')}
+            {fmtNum(data.barometric_pressure_hpa, 0, 'hPa')}
           </button>
         </div>
 
-        <div className="bg-[var(--card)] rounded-lg p-3">
-          <p className="text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)] mb-1">Light Intensity</p>
+        <div className="rounded-lg bg-[var(--card)] p-3">
+          <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)]">Light Intensity</p>
           <button
             onClick={() => setSensorMonitor({ field: 'light_lux', label: 'Light Intensity', unit: 'lux', color: '#d97706', decimals: 0 })}
             className="cursor-pointer text-left text-2xl font-bold tabular-nums text-[var(--text)] underline decoration-dotted underline-offset-4 transition-colors hover:text-[var(--primary)]"
             title="View history"
             style={{ color: '#d97706' }}
           >
-            {fmtLux(d.light_lux)}
+            {fmtLux(data.light_lux)}
           </button>
         </div>
 
-        <div className="bg-[var(--card)] rounded-lg p-3">
-          <p className="text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)] mb-1">UV Index</p>
+        <div className="rounded-lg bg-[var(--card)] p-3">
+          <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)]">UV Index</p>
           <button
             onClick={() => setSensorMonitor({ field: 'uv_index', label: 'UV Index', unit: 'UVI', color: '#ca8a04', decimals: 1 })}
             className="cursor-pointer text-left text-2xl font-bold tabular-nums text-[var(--text)] underline decoration-dotted underline-offset-4 transition-colors hover:text-[var(--primary)]"
             title="View history"
             style={{ color: '#ca8a04' }}
           >
-            {fmtNum(d.uv_index, 1, 'UVI')}
+            {fmtNum(data.uv_index, 1, 'UVI')}
           </button>
         </div>
       </div>
 
-      {/* Footer */}
-      <div className="flex justify-between items-center mt-3">
-        <p className="text-xs text-[var(--text-tertiary)] truncate max-w-[60%]">
-          Zones: <span className="text-[var(--text)] font-medium">{zoneLabel}</span>
+      <div className="mt-3 flex items-center justify-between">
+        <p className="max-w-[60%] truncate text-xs text-[var(--text-tertiary)]">
+          Zones: <span className="font-medium text-[var(--text)]">{zoneLabel}</span>
         </p>
-        <p className="text-xs text-[var(--text-tertiary)] shrink-0">
-          {d.bat_pct != null ? `🔋 ${Math.round(d.bat_pct)}% · ` : ''}{lastSeenLabel(device.last_seen)}
+        <p className="shrink-0 text-xs text-[var(--text-tertiary)]">
+          {data.bat_pct != null ? `🔋 ${Math.round(data.bat_pct)}% · ` : ''}{lastSeenLabel(device.last_seen)}
         </p>
       </div>
+
       {sensorMonitor && (
         <SensorMonitor
           deveui={device.deveui}
@@ -337,6 +399,13 @@ export const SenseCapWeatherCard: React.FC<Props> = ({ device, onRemove, onUpdat
           initialField={sensorMonitor.initialField}
           seriesOptions={sensorMonitor.seriesOptions}
           onClose={() => setSensorMonitor(null)}
+        />
+      )}
+      {showWindMonitor && (
+        <WindMonitor
+          deveui={device.deveui}
+          deviceName={device.name}
+          onClose={() => setShowWindMonitor(false)}
         />
       )}
     </div>
