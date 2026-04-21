@@ -65,6 +65,18 @@ OSI Server  (optional cloud — remote monitoring & control)
 
 ---
 
+## Supported Field Devices
+
+| Device type | Description |
+| --------------------------------- | ------------------------------------------------------------------- |
+| **KIWI_SENSOR** | Soil water tension (kPa), soil moisture |
+| **DRAGINO_LSN50** | Multi-mode: temperature probe, ADC (dendrometer potentiometer), rain gauge, flow meter |
+| **STREGA_VALVE** | Motorized or standard irrigation valve (OPEN/CLOSE) |
+| **SENSECAP_S2120** | Weather station (wind, rain, UV, barometric pressure) |
+| **TEKTELIC_CLOVER** | Volumetric water content (%), soil moisture |
+
+---
+
 ## Repository Structure
 
 ```
