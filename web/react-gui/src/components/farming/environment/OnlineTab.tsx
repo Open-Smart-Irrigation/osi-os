@@ -1,6 +1,7 @@
-import React from 'react';
+﻿import React from 'react';
 import { useTranslation } from 'react-i18next';
 import type { OnlineEnvironment, EnvironmentLocation } from '../../../types/farming';
+import { toCompassDirection } from '../../../utils/wind';
 import { WeatherIcon } from './WeatherIcon';
 
 interface Props {
@@ -8,20 +9,14 @@ interface Props {
   location: EnvironmentLocation;
 }
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
-
-const COMPASS = ['N','NNE','NE','ENE','E','ESE','SE','SSE','S','SSW','SW','WSW','W','WNW','NW','NNW'];
-
-function toCompass(deg: number): string {
-  return COMPASS[Math.round(deg / 22.5) % 16];
-}
+// â”€â”€ Helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 function fmtTime(isoStr: string | null): string {
-  if (!isoStr) return '—';
+  if (!isoStr) return 'â€”';
   return new Date(isoStr).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 }
 
-// ── Cache / source badges ─────────────────────────────────────────────────────
+// â”€â”€ Cache / source badges â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 function CacheBadge({ status }: { status: 'live' | 'stale' | 'miss' }) {
   const { t } = useTranslation('devices');
@@ -47,7 +42,7 @@ function SourceBadge({ source }: { source: string }) {
   );
 }
 
-// ── Metric row ────────────────────────────────────────────────────────────────
+// â”€â”€ Metric row â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 const MetricRow: React.FC<{ icon: string; label: string; value: string; color?: string }> = ({
   icon, label, value, color,
@@ -63,7 +58,7 @@ const MetricRow: React.FC<{ icon: string; label: string; value: string; color?: 
   </div>
 );
 
-// ── Unavailable state ─────────────────────────────────────────────────────────
+// â”€â”€ Unavailable state â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 const UnavailableState: React.FC<{ location: EnvironmentLocation }> = ({ location }) => {
   const { t } = useTranslation('devices');
@@ -77,7 +72,7 @@ const UnavailableState: React.FC<{ location: EnvironmentLocation }> = ({ locatio
   );
 };
 
-// ── Main ──────────────────────────────────────────────────────────────────────
+// â”€â”€ Main â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 export const OnlineTab: React.FC<Props> = ({ online, location }) => {
   const { t } = useTranslation('devices');
@@ -99,7 +94,7 @@ export const OnlineTab: React.FC<Props> = ({ online, location }) => {
           )}
           {c.airTemperatureC != null && (
             <p className="text-3xl font-bold tabular-nums" style={{ color: '#f97316' }}>
-              {c.airTemperatureC.toFixed(1)} °C
+              {c.airTemperatureC.toFixed(1)} Â°C
             </p>
           )}
           {c.relativeHumidityPct != null && (
@@ -113,29 +108,29 @@ export const OnlineTab: React.FC<Props> = ({ online, location }) => {
       {/* Metrics list */}
       <div className="bg-[var(--card)] rounded-xl px-3 border border-[var(--border)]">
         {c.pressureHpa != null && (
-          <MetricRow icon="◉" label="Pressure" value={`${c.pressureHpa.toFixed(0)} hPa`} />
+          <MetricRow icon="â—‰" label="Pressure" value={`${c.pressureHpa.toFixed(0)} hPa`} />
         )}
         {c.windSpeedMps != null && (
           <MetricRow
-            icon="🌬"
+            icon="ðŸŒ¬"
             label="Wind"
             value={
               c.windDirectionDeg != null
-                ? `${c.windSpeedMps.toFixed(1)} m/s ${toCompass(c.windDirectionDeg)}`
+                ? `${c.windSpeedMps.toFixed(1)} m/s ${toCompassDirection(c.windDirectionDeg) ?? ''}`
                 : `${c.windSpeedMps.toFixed(1)} m/s`
             }
             color="#6366f1"
           />
         )}
         {c.cloudCoverPct != null && (
-          <MetricRow icon="☁" label="Cloud cover" value={`${c.cloudCoverPct.toFixed(0)}%`} />
+          <MetricRow icon="â˜" label="Cloud cover" value={`${c.cloudCoverPct.toFixed(0)}%`} />
         )}
         {c.rainMm != null && (
-          <MetricRow icon="🌧" label="Rain" value={`${c.rainMm.toFixed(1)} mm`} color="#3b82f6" />
+          <MetricRow icon="ðŸŒ§" label="Rain" value={`${c.rainMm.toFixed(1)} mm`} color="#3b82f6" />
         )}
         {c.precipitationProbabilityPct != null && (
           <MetricRow
-            icon="💧"
+            icon="ðŸ’§"
             label="Precip. probability"
             value={`${c.precipitationProbabilityPct.toFixed(0)}%`}
             color={c.precipitationProbabilityPct > 50 ? '#3b82f6' : undefined}

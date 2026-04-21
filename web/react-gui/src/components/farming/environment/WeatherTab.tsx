@@ -1,10 +1,11 @@
-import React from 'react';
+﻿import React from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   ComposedChart, Bar, Line, XAxis, YAxis, Tooltip,
   ResponsiveContainer, CartesianGrid,
 } from 'recharts';
 import type { OnlineEnvironment, ForecastEnvironment, DailyForecast, HourlyForecast, EnvironmentLocation } from '../../../types/farming';
+import { toCompassDirection } from '../../../utils/wind';
 import { WeatherIcon } from './WeatherIcon';
 
 interface Props {
@@ -13,12 +14,7 @@ interface Props {
   location: EnvironmentLocation;
 }
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
-
-const COMPASS = ['N','NNE','NE','ENE','E','ESE','SE','SSE','S','SSW','SW','WSW','W','WNW','NW','NNW'];
-function toCompass(deg: number): string {
-  return COMPASS[Math.round(deg / 22.5) % 16];
-}
+// â”€â”€ Helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 function fmtDay(dateStr: string): string {
   const d = new Date(dateStr + 'T12:00:00');
@@ -34,7 +30,7 @@ function fmtHour(isoStr: string): string {
 }
 
 function fmtEta(isoStr: string | null): string {
-  if (!isoStr) return '—';
+  if (!isoStr) return 'â€”';
   const d = new Date(isoStr);
   const today    = new Date();
   const tomorrow = new Date(); tomorrow.setDate(today.getDate() + 1);
@@ -50,7 +46,7 @@ function rainClass(mm: number): string {
   return              'bg-blue-200 text-blue-900 border-blue-400';
 }
 
-// ── Current conditions bar ────────────────────────────────────────────────────
+// â”€â”€ Current conditions bar â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 const CurrentConditions: React.FC<{ online: OnlineEnvironment }> = ({ online }) => {
   if (!online.available || !online.current) return null;
@@ -66,7 +62,7 @@ const CurrentConditions: React.FC<{ online: OnlineEnvironment }> = ({ online }) 
         <div className="flex flex-wrap items-baseline gap-x-3 gap-y-0.5">
           {c.airTemperatureC != null && (
             <span className="text-2xl font-bold tabular-nums" style={{ color: '#f97316' }}>
-              {c.airTemperatureC.toFixed(1)} °C
+              {c.airTemperatureC.toFixed(1)} Â°C
             </span>
           )}
           {c.relativeHumidityPct != null && (
@@ -77,7 +73,7 @@ const CurrentConditions: React.FC<{ online: OnlineEnvironment }> = ({ online }) 
           {c.windSpeedMps != null && (
             <span className="text-xs text-[var(--text-secondary)] tabular-nums">
               {c.windSpeedMps.toFixed(1)} m/s
-              {c.windDirectionDeg != null && ` ${toCompass(c.windDirectionDeg)}`}
+              {c.windDirectionDeg != null && ` ${toCompassDirection(c.windDirectionDeg) ?? ''}`}
             </span>
           )}
         </div>
@@ -86,7 +82,7 @@ const CurrentConditions: React.FC<{ online: OnlineEnvironment }> = ({ online }) 
   );
 };
 
-// ── Rain summary pills ────────────────────────────────────────────────────────
+// â”€â”€ Rain summary pills â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 interface RainPillProps { label: string; value: string; highlight?: boolean }
 
@@ -101,7 +97,7 @@ const RainPill: React.FC<RainPillProps> = ({ label, value, highlight }) => (
   </div>
 );
 
-// ── Daily strip ───────────────────────────────────────────────────────────────
+// â”€â”€ Daily strip â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 const DayCard: React.FC<{ day: DailyForecast; isToday: boolean }> = ({ day, isToday }) => {
   const rain = day.rainMm ?? 0;
@@ -114,8 +110,8 @@ const DayCard: React.FC<{ day: DailyForecast; isToday: boolean }> = ({ day, isTo
       <WeatherIcon code={day.weatherCode} description={day.description} size={40} animated={!isToday} />
       {(day.maxTempC != null || day.minTempC != null) && (
         <span className="text-xs font-medium tabular-nums text-[var(--text)]">
-          {day.maxTempC != null ? `${day.maxTempC.toFixed(0)}°` : ''}
-          {day.minTempC != null ? <span className="text-[var(--text-tertiary)]">/{day.minTempC.toFixed(0)}°</span> : ''}
+          {day.maxTempC != null ? `${day.maxTempC.toFixed(0)}Â°` : ''}
+          {day.minTempC != null ? <span className="text-[var(--text-tertiary)]">/{day.minTempC.toFixed(0)}Â°</span> : ''}
         </span>
       )}
       {rain > 0 && (
@@ -132,7 +128,7 @@ const DayCard: React.FC<{ day: DailyForecast; isToday: boolean }> = ({ day, isTo
   );
 };
 
-// ── Hourly chart ──────────────────────────────────────────────────────────────
+// â”€â”€ Hourly chart â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 interface ChartPoint { hour: string; rain: number; prob: number }
 
@@ -211,7 +207,7 @@ const HourlyChart: React.FC<{ hourly: HourlyForecast[] }> = ({ hourly }) => {
   );
 };
 
-// ── Main ──────────────────────────────────────────────────────────────────────
+// â”€â”€ Main â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 export const WeatherTab: React.FC<Props> = ({ online, forecast, location }) => {
   const { t } = useTranslation('devices');
