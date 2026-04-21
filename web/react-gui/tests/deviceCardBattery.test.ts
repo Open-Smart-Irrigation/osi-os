@@ -20,6 +20,13 @@ test('rejects nullish and invalid values instead of coercing them to zero', () =
   assert.equal(getValidBatteryPercent('abc'), null);
 });
 
+test('rejects values that would otherwise coerce missing battery state to zero', () => {
+  assert.equal(getValidBatteryPercent(' '), null);
+  assert.equal(getValidBatteryPercent('\t'), null);
+  assert.equal(getValidBatteryPercent(false), null);
+  assert.equal(getValidBatteryPercent(true), null);
+});
+
 test('rejects out-of-range percentages', () => {
   assert.equal(getValidBatteryPercent(-1), null);
   assert.equal(getValidBatteryPercent(101), null);

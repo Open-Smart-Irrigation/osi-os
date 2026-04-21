@@ -1,7 +1,18 @@
 export function getValidBatteryPercent(value: unknown): number | null {
-  if (value === null || value === undefined || value === '') return null;
+  let numeric: number | null = null;
 
-  const numeric = Number(value);
+  if (typeof value === 'number') {
+    numeric = value;
+  } else if (typeof value === 'string') {
+    const trimmed = value.trim();
+    if (trimmed === '') {
+      return null;
+    }
+    numeric = Number(trimmed);
+  } else {
+    return null;
+  }
+
   if (!Number.isFinite(numeric) || numeric < 0 || numeric > 100) {
     return null;
   }
