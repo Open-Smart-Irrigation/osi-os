@@ -72,7 +72,10 @@ export function getFocusableElements(container: HTMLElement | null): HTMLElement
         '[tabindex]:not([tabindex="-1"])',
       ].join(', '),
     ),
-  ).filter((element) => !element.hasAttribute('disabled') && !element.getAttribute('aria-hidden'));
+  ).filter(
+    (element) =>
+      !element.hasAttribute('disabled') && element.getAttribute('aria-hidden') !== 'true',
+  );
 }
 
 type SettingsSectionProps = {
@@ -119,6 +122,7 @@ export const DraginoSettingsModal: React.FC<DraginoSettingsModalProps> = ({
   const dialogRef = useRef<HTMLDivElement | null>(null);
   const closeButtonRef = useRef<HTMLButtonElement | null>(null);
   const openerRef = useRef<HTMLElement | null>(null);
+  const onCloseRef = useRef(onClose);
   const currentMode = getCurrentLsn50Mode(device);
   const observedAt = device.latest_data?.lsn50_mode_observed_at ?? null;
   const observedAtDate = observedAt ? new Date(observedAt) : null;
@@ -133,6 +137,10 @@ export const DraginoSettingsModal: React.FC<DraginoSettingsModalProps> = ({
   const advancedSettingsId = `dragino-advanced-settings-${device.deveui}`;
 
   useEffect(() => {
+    onCloseRef.current = onClose;
+  }, [onClose]);
+
+  useEffect(() => {
     openerRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     const restoreFocus = () => {
       openerRef.current?.focus();
@@ -144,7 +152,7 @@ export const DraginoSettingsModal: React.FC<DraginoSettingsModalProps> = ({
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
         event.preventDefault();
-        onClose();
+        onCloseRef.current();
         return;
       }
       if (event.key !== 'Tab') {
@@ -180,7 +188,7 @@ export const DraginoSettingsModal: React.FC<DraginoSettingsModalProps> = ({
       window.cancelAnimationFrame(focusTarget);
       restoreFocus();
     };
-  }, [onClose]);
+  }, []);
 
   useEffect(() => {
     if (!pendingMode) {

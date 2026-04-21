@@ -2,10 +2,9 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import { JSDOM } from 'jsdom';
-import React from 'react';
+import React, { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { act } from 'react-dom/test-utils';
 
 import { DraginoDendroCalibrationSection } from '../src/components/farming/DraginoDendroCalibrationSection.tsx';
 import {
@@ -91,7 +90,9 @@ test('keeps focus inside the modal when the parent rerenders with a new onClose 
     '<!doctype html><html><body><button id="opener">Open</button><div id="root"></div></body></html>',
     { url: 'http://localhost/', pretendToBeVisual: true },
   );
-  const runtimeGlobals = globalThis as Record<string, unknown>;
+  const runtimeGlobals = globalThis as Record<string, unknown> & {
+    IS_REACT_ACT_ENVIRONMENT?: boolean;
+  };
 
   const previousWindow = globalThis.window;
   const previousDocument = globalThis.document;
@@ -101,6 +102,7 @@ test('keeps focus inside the modal when the parent rerenders with a new onClose 
   const previousRequestAnimationFrame = globalThis.requestAnimationFrame;
   const previousCancelAnimationFrame = globalThis.cancelAnimationFrame;
   const previousConfirm = globalThis.window?.confirm;
+  const previousActEnvironment = runtimeGlobals.IS_REACT_ACT_ENVIRONMENT;
 
   Object.assign(runtimeGlobals, {
     window: dom.window,
@@ -111,13 +113,15 @@ test('keeps focus inside the modal when the parent rerenders with a new onClose 
     requestAnimationFrame: (callback: FrameRequestCallback) => setTimeout(() => callback(0), 0) as unknown as number,
     cancelAnimationFrame: (id: number) => clearTimeout(id),
   });
+  runtimeGlobals.IS_REACT_ACT_ENVIRONMENT = true;
   dom.window.confirm = () => true;
 
+  let root: ReturnType<typeof createRoot> | null = null;
   try {
     const device = buildDevice();
     const opener = dom.window.document.getElementById('opener') as HTMLButtonElement;
     const container = dom.window.document.getElementById('root') as HTMLDivElement;
-    const root = createRoot(container);
+    root = createRoot(container);
 
     opener.focus();
 
@@ -151,9 +155,10 @@ test('keeps focus inside the modal when the parent rerenders with a new onClose 
 
     assert.equal(dom.window.document.activeElement, modeSelect);
     assert.notEqual(dom.window.document.activeElement, opener);
-
-    act(() => root.unmount());
   } finally {
+    if (root) {
+      act(() => root.unmount());
+    }
     if (previousWindow) runtimeGlobals.window = previousWindow;
     else delete runtimeGlobals.window;
     if (previousDocument) runtimeGlobals.document = previousDocument;
@@ -168,6 +173,8 @@ test('keeps focus inside the modal when the parent rerenders with a new onClose 
     else delete runtimeGlobals.requestAnimationFrame;
     if (previousCancelAnimationFrame) runtimeGlobals.cancelAnimationFrame = previousCancelAnimationFrame;
     else delete runtimeGlobals.cancelAnimationFrame;
+    if (previousActEnvironment === undefined) delete runtimeGlobals.IS_REACT_ACT_ENVIRONMENT;
+    else runtimeGlobals.IS_REACT_ACT_ENVIRONMENT = previousActEnvironment;
     if (previousConfirm && globalThis.window) globalThis.window.confirm = previousConfirm;
     dom.window.close();
   }
