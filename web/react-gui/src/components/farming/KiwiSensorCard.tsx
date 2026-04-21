@@ -4,6 +4,7 @@ import { deviceMetadataAPI, devicesAPI, kiwiAPI } from '../../services/api';
 import { useDismissOnPointerDown } from '../../hooks/useDismissOnPointerDown';
 import { useTranslation } from 'react-i18next';
 import { SensorMonitor } from './SensorMonitor';
+import { DeviceCardFooter } from './shared/DeviceCardFooter';
 
 interface KiwiSensorCardProps {
   device: Device;
@@ -464,13 +465,12 @@ export const KiwiSensorCard: React.FC<KiwiSensorCardProps> = ({ device, onRemove
         </div>
       </div>
 
-      <div className="mt-3 pt-3 border-t border-[var(--border)]">
-        <p className="text-xs text-[var(--text-tertiary)]">
-          {minutesAgo !== null
-            ? t('kiwiSensor.lastSeen', { minutes: minutesAgo })
-            : t('kiwiSensor.neverSeen', { defaultValue: 'Never seen' })}
-        </p>
-      </div>
+      <DeviceCardFooter
+        lastSeenLabel={minutesAgo !== null
+          ? t('kiwiSensor.lastSeen', { minutes: minutesAgo })
+          : t('kiwiSensor.neverSeen', { defaultValue: 'Never seen' })}
+        batteryPercent={device.latest_data?.bat_pct}
+      />
 
       {monitor && (
         <SensorMonitor

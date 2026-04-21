@@ -6,6 +6,7 @@ import type { Device } from '../../types/farming';
 import { formatWindDirection } from '../../utils/wind';
 import { SensorMonitor } from './SensorMonitor';
 import { WindMonitor } from './WindMonitor';
+import { DeviceCardFooter } from './shared/DeviceCardFooter';
 
 interface Props {
   device: Device;
@@ -378,14 +379,15 @@ export const SenseCapWeatherCard: React.FC<Props> = ({ device, onRemove, onUpdat
         </div>
       </div>
 
-      <div className="mt-3 flex items-center justify-between">
-        <p className="max-w-[60%] truncate text-xs text-[var(--text-tertiary)]">
-          Zones: <span className="font-medium text-[var(--text)]">{zoneLabel}</span>
-        </p>
-        <p className="shrink-0 text-xs text-[var(--text-tertiary)]">
-          {data.bat_pct != null ? `🔋 ${Math.round(data.bat_pct)}% · ` : ''}{lastSeenLabel(device.last_seen)}
-        </p>
-      </div>
+      <DeviceCardFooter
+        lastSeenLabel={lastSeenLabel(device.last_seen)}
+        batteryPercent={data.bat_pct}
+        leftContent={(
+          <p className="max-w-[60%] truncate">
+            Zones: <span className="font-medium text-[var(--text)]">{zoneLabel}</span>
+          </p>
+        )}
+      />
 
       {sensorMonitor && (
         <SensorMonitor

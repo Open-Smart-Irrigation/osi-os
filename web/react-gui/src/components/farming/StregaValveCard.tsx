@@ -3,6 +3,7 @@ import type { Device, StregaModel } from '../../types/farming';
 import { devicesAPI, stregaAPI } from '../../services/api';
 import { useDismissOnPointerDown } from '../../hooks/useDismissOnPointerDown';
 import { useTranslation } from 'react-i18next';
+import { DeviceCardFooter } from './shared/DeviceCardFooter';
 
 interface StregaValveCardProps {
   device: Device;
@@ -654,13 +655,12 @@ export const StregaValveCard: React.FC<StregaValveCardProps> = ({ device, onUpda
         </button>
       </div>
 
-      <div className="mt-3 pt-3 border-t border-[var(--border)]">
-        <p className="text-xs text-[var(--text-tertiary)]">
-          {minutesAgo !== null
-            ? t('stregaValve.lastSeen', { minutes: minutesAgo })
-            : t('stregaValve.neverSeen', { defaultValue: 'Never seen' })}
-        </p>
-      </div>
+      <DeviceCardFooter
+        lastSeenLabel={minutesAgo !== null
+          ? t('stregaValve.lastSeen', { minutes: minutesAgo })
+          : t('stregaValve.neverSeen', { defaultValue: 'Never seen' })}
+        batteryPercent={device.latest_data?.bat_pct}
+      />
     </div>
   );
 };
