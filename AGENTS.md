@@ -275,10 +275,12 @@ npm run build
 
 - Never overwrite `/data/db/farming.db` on a running Pi. It is live operational data and the source of truth for edge state.
 - `deploy.sh` must preserve an existing `/data/db/farming.db`; it may seed the bundled DB only when the target DB is absent.
+- `deploy.sh` now also performs an idempotent live-DB repair for the canonical dendrometer ratio endpoint columns `devices.dendro_ratio_at_retracted` and `devices.dendro_ratio_at_extended`, including backfill from legacy `dendro_ratio_zero` / `dendro_ratio_span` / `dendro_invert_direction` when needed.
 - Do not run manual `scp .../farming.db root@<pi>:/data/db/farming.db` against a live or previously provisioned device.
 - Before any manual DB repair or destructive cloud cleanup, take a timestamped backup of the Pi DB, including `farming.db-wal`, `farming.db-shm`, and `farming.db-journal` when present.
 - If a deploy needs schema changes, use migrations or idempotent SQL against the existing DB instead of replacing the file.
 - If `/data/db/farming.db` is missing but SQLite sidecar files exist, stop and inspect/recover rather than seeding a new DB.
+- The bundled repo DB copies (`database/farming.db`, `web/react-gui/farming.db`, and the `conf/*/usr/share/db/farming.db` seeds) now include the canonical dendrometer ratio endpoint columns and newer dendro/device-data fields; `scripts/verify-sync-flow.js` checks both the flow migration text and the seed DB files directly.
 - On upgraded installs, do not let stale `/srv/node-red/.chirpstack.env` `DEVICE_EUI*` values override runtime identity. The canonical gateway EUI should come from the helper / UCI path, and stale overrides should be removed during manual repair.
 - Before a live VPS rollout, create a timestamped backup under `/home/rocky/backups/osi-server-<timestamp>` with the repo snapshot, Docker env/config, PostgreSQL dump, Mosquitto state, and OpenAgri data.
 - For the current small live VPS, do not rebuild unrelated services during rollout. Use the narrowest possible command (`docker compose up -d --no-deps backend` after a backend-only build) and avoid any deploy path that lets Compose rebuild `prediction-service`, `fao-reference-service`, `mosquitto`, or the whole stack on-host.
