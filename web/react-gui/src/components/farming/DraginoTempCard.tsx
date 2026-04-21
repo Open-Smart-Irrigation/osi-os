@@ -1,62 +1,10 @@
-import React, { useEffect, useRef, useState } from 'react';
-import type { Device, Lsn50Mode } from '../../types/farming';
-import { devicesAPI, lsn50API } from '../../services/api';
-import { useDismissOnPointerDown } from '../../hooks/useDismissOnPointerDown';
+import React, { useState } from 'react';
+import type { Device } from '../../types/farming';
+import { devicesAPI } from '../../services/api';
 import { DendrometerMonitor } from './DendrometerMonitor';
+import { DraginoSettingsModal } from './DraginoSettingsModal';
 import { SensorMonitor } from './SensorMonitor';
-
-const SENSOR_OPTIONS: Array<{
-  key: 'temp_enabled' | 'dendro_enabled' | 'rain_gauge_enabled' | 'flow_meter_enabled';
-  label: string;
-  toggle: (deveui: string, enabled: boolean) => Promise<void>;
-}> = [
-  { key: 'temp_enabled', label: 'Temperature', toggle: (id, enabled) => lsn50API.setTempEnabled(id, enabled) },
-  { key: 'dendro_enabled', label: 'Dendrometer', toggle: (id, enabled) => lsn50API.setDendroEnabled(id, enabled) },
-  { key: 'rain_gauge_enabled', label: 'Rain Gauge', toggle: (id, enabled) => lsn50API.setRainGaugeEnabled(id, enabled) },
-  { key: 'flow_meter_enabled', label: 'Flow Meter', toggle: (id, enabled) => lsn50API.setFlowMeterEnabled(id, enabled) },
-];
-
-const LSN50_MODE_OPTIONS: Array<{ value: Lsn50Mode; description: string }> = [
-  { value: 'MOD1', description: 'Default OSI mode with temperature probe and ADC support.' },
-  { value: 'MOD2', description: 'Distance mode.' },
-  { value: 'MOD3', description: 'Three ADC channels plus I2C mode.' },
-  { value: 'MOD4', description: 'Three DS18B20 temperature channels mode.' },
-  { value: 'MOD5', description: 'Weight mode.' },
-  { value: 'MOD6', description: 'Counting mode.' },
-  { value: 'MOD7', description: 'Three digital interrupt channels mode.' },
-  { value: 'MOD8', description: 'Three ADC channels plus one DS18B20 mode.' },
-  { value: 'MOD9', description: 'Rain gauge and flow counter mode.' },
-];
-
-const LSN50_INTERRUPT_MODE_OPTIONS = [
-  { value: 0, label: 'Disabled' },
-  { value: 1, label: 'Rising or falling edge' },
-  { value: 2, label: 'Falling edge only' },
-  { value: 3, label: 'Rising edge only' },
-];
-
-const MAX_LSN50_INTERVAL_MINUTES = Math.floor(0xffffff / 60);
-const MAX_LSN50_5V_WARMUP_MS = 65535;
-
-function requiresMod9Counter(
-  key: 'temp_enabled' | 'dendro_enabled' | 'rain_gauge_enabled' | 'flow_meter_enabled',
-): boolean {
-  return key === 'rain_gauge_enabled' || key === 'flow_meter_enabled';
-}
-
-function normaliseLsn50Mode(value: unknown): Lsn50Mode | null {
-  const raw = String(value ?? '').trim().toUpperCase();
-  return raw === 'MOD1' || raw === 'MOD2' || raw === 'MOD3' || raw === 'MOD4' || raw === 'MOD5' || raw === 'MOD6' || raw === 'MOD7' || raw === 'MOD8' || raw === 'MOD9'
-    ? raw
-    : null;
-}
-
-function getCurrentLsn50Mode(device: Device): Lsn50Mode | null {
-  const observed = normaliseLsn50Mode(device.latest_data?.lsn50_mode_label);
-  if (observed) return observed;
-  const configured = Number(device.device_mode ?? 0);
-  return configured >= 1 && configured <= 9 ? (`MOD${configured}` as Lsn50Mode) : null;
-}
+import { DeviceCardFooter } from './shared/DeviceCardFooter';
 
 function formatCounterInterval(seconds: number | null | undefined): string | null {
   const value = Number(seconds);
@@ -95,20 +43,6 @@ function formatPerTenMinuteValue(value: number | null | undefined, unit: string,
   return `${value.toFixed(digits)} ${unit} per 10 min`;
 }
 
-function formatDendroModeUsed(value: unknown): string | null {
-  if (value === 'ratio_mod3') return 'Ratio MOD3';
-  if (value === 'legacy_single_adc') return 'Legacy ADC';
-  return null;
-}
-
-function isRatioDendroMode(value: unknown): boolean {
-  return value === 'ratio_mod3';
-}
-
-function formatNumericInput(value: number | null | undefined): string {
-  return Number.isFinite(Number(value)) ? String(value) : '';
-}
-
 function formatStemChangeUm(value: number | null | undefined): string | null {
   const numeric = Number(value);
   if (!Number.isFinite(numeric)) return null;
@@ -122,571 +56,14 @@ function formatDendroRangeState(saturationSide: string | null | undefined): stri
   return 'In range';
 }
 
-function parseOptionalNumericInput(label: string, value: string, options?: { positive?: boolean }): number | null {
-  const trimmed = String(value ?? '').trim();
-  if (!trimmed) return null;
-  const parsed = Number(trimmed);
-  if (!Number.isFinite(parsed)) {
-    throw new Error(`${label} must be a finite number.`);
-  }
-  if (options?.positive && parsed <= 0) {
-    throw new Error(`${label} must be greater than 0.`);
-  }
-  return parsed;
-}
+const FOCUS_VISIBLE_RING =
+  'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--surface)]';
 
 interface DraginoTempCardProps {
   device: Device;
   onRemove?: () => void;
   onUpdate?: () => void;
 }
-
-const ConfigPanel: React.FC<{
-  device: Device;
-  onUpdate: () => void;
-  onClose: () => void;
-}> = ({ device, onUpdate, onClose }) => {
-  const [busy, setBusy] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [selectedMode, setSelectedMode] = useState<Lsn50Mode>(getCurrentLsn50Mode(device) ?? 'MOD1');
-  const [pendingMode, setPendingMode] = useState<Lsn50Mode | null>(null);
-  const [modeInfo, setModeInfo] = useState<string | null>(null);
-  const [intervalMinutesInput, setIntervalMinutesInput] = useState('');
-  const [intervalInfo, setIntervalInfo] = useState<string | null>(null);
-  const [interruptModeInput, setInterruptModeInput] = useState('0');
-  const [warmupMillisecondsInput, setWarmupMillisecondsInput] = useState('');
-  const [dendroForceLegacyInput, setDendroForceLegacyInput] = useState(device.dendro_force_legacy === 1);
-  const [dendroStrokeMmInput, setDendroStrokeMmInput] = useState(formatNumericInput(device.dendro_stroke_mm));
-  const [dendroRatioAtRetractedInput, setDendroRatioAtRetractedInput] = useState(
-    formatNumericInput(device.dendro_ratio_at_retracted ?? device.dendro_ratio_zero),
-  );
-  const [dendroRatioAtExtendedInput, setDendroRatioAtExtendedInput] = useState(
-    formatNumericInput(device.dendro_ratio_at_extended ?? device.dendro_ratio_span),
-  );
-  const [advancedInfo, setAdvancedInfo] = useState<string | null>(null);
-  const [showAdvanced, setShowAdvanced] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
-  const currentMode = getCurrentLsn50Mode(device);
-  const observedAt = device.latest_data?.lsn50_mode_observed_at ?? null;
-  const selectedModeDescription = LSN50_MODE_OPTIONS.find((option) => option.value === selectedMode)?.description ?? '';
-  const counterModeReady = currentMode === 'MOD9' || pendingMode === 'MOD9';
-  const dendroData = device.latest_data ?? {};
-  const liveDendroSource = formatDendroModeUsed(dendroData?.dendro_mode_used);
-  const liveShowRatio = isRatioDendroMode(dendroData?.dendro_mode_used);
-  const liveStemChange = formatStemChangeUm(dendroData?.dendro_stem_change_um);
-  const liveRangeState = formatDendroRangeState(dendroData?.dendro_saturation_side);
-  const showLegacyBaselineReset = device.dendro_enabled === 1
-    && (dendroData?.dendro_mode_used === 'legacy_single_adc' || device.dendro_force_legacy === 1);
-
-  useDismissOnPointerDown(ref, onClose);
-
-  useEffect(() => {
-    if (!pendingMode) {
-      setSelectedMode(currentMode ?? 'MOD1');
-    }
-  }, [currentMode, pendingMode]);
-
-  useEffect(() => {
-    if (pendingMode && currentMode === pendingMode) {
-      setModeInfo(`Mode ${pendingMode} confirmed on the latest uplink.`);
-      setPendingMode(null);
-    }
-  }, [currentMode, pendingMode]);
-
-  const toggle = async (option: typeof SENSOR_OPTIONS[number]) => {
-    const current = device[option.key] === 1;
-    if (!current && requiresMod9Counter(option.key) && !counterModeReady) {
-      setError('Rain gauge and flow meter require MOD9. Apply MOD9 before enabling these counters.');
-      return;
-    }
-    setBusy(option.key);
-    setError(null);
-    try {
-      await option.toggle(device.deveui, !current);
-      onUpdate();
-    } catch {
-      setError(`Failed to update ${option.label}`);
-    } finally {
-      setBusy(null);
-    }
-  };
-
-  const applyMode = async () => {
-    if (selectedMode === currentMode && !pendingMode) {
-      setModeInfo(`LSN50 is already using ${selectedMode}.`);
-      return;
-    }
-    if (
-      selectedMode !== 'MOD1' &&
-      (device.dendro_enabled === 1 || device.temp_enabled === 1) &&
-      !window.confirm('Switching away from MOD1 can change the telemetry OSI receives from this node. Continue?')
-    ) {
-      return;
-    }
-
-    setBusy('mode');
-    setError(null);
-    setModeInfo(null);
-    try {
-      await lsn50API.setMode(device.deveui, selectedMode);
-      setPendingMode(selectedMode);
-      setModeInfo(`Mode change requested; waiting for the next uplink to confirm ${selectedMode}.`);
-      onUpdate();
-    } catch {
-      setPendingMode(null);
-      setError('Failed to change LSN50 mode');
-    } finally {
-      setBusy(null);
-    }
-  };
-
-  const applyInterval = async () => {
-    const parsed = Number(intervalMinutesInput);
-    if (!Number.isInteger(parsed) || parsed < 1 || parsed > MAX_LSN50_INTERVAL_MINUTES) {
-      setError(`Enter a whole number of minutes between 1 and ${MAX_LSN50_INTERVAL_MINUTES}.`);
-      setIntervalInfo(null);
-      return;
-    }
-
-    setBusy('interval');
-    setError(null);
-    setIntervalInfo(null);
-    try {
-      await lsn50API.setUplinkInterval(device.deveui, parsed);
-      setIntervalMinutesInput(String(parsed));
-      setIntervalInfo(`Uplink interval change requested for ${parsed} minute${parsed === 1 ? '' : 's'}. The device applies this after it receives the downlink.`);
-      onUpdate();
-    } catch {
-      setError('Failed to change LSN50 uplink interval');
-    } finally {
-      setBusy(null);
-    }
-  };
-
-  const applyInterruptMode = async () => {
-    const parsed = Number(interruptModeInput);
-    if (!Number.isInteger(parsed) || parsed < 0 || parsed > 3) {
-      setError('Interrupt mode must be between 0 and 3.');
-      setAdvancedInfo(null);
-      return;
-    }
-
-    setBusy('interrupt');
-    setError(null);
-    setAdvancedInfo(null);
-    try {
-      await lsn50API.setInterruptMode(device.deveui, parsed);
-      setAdvancedInfo(`Interrupt mode ${parsed} requested. This affects external interrupt-driven sensor inputs.`);
-      onUpdate();
-    } catch {
-      setError('Failed to change the LSN50 interrupt mode');
-    } finally {
-      setBusy(null);
-    }
-  };
-
-  const applyFiveVoltWarmup = async () => {
-    const parsed = Number(warmupMillisecondsInput);
-    if (!Number.isInteger(parsed) || parsed < 0 || parsed > MAX_LSN50_5V_WARMUP_MS) {
-      setError(`Enter a warm-up time between 0 and ${MAX_LSN50_5V_WARMUP_MS} ms.`);
-      setAdvancedInfo(null);
-      return;
-    }
-
-    setBusy('warmup');
-    setError(null);
-    setAdvancedInfo(null);
-    try {
-      await lsn50API.setFiveVoltWarmup(device.deveui, parsed);
-      setAdvancedInfo(`5V warm-up request queued for ${parsed} ms.`);
-      onUpdate();
-    } catch {
-      setError('Failed to change the 5V warm-up time');
-    } finally {
-      setBusy(null);
-    }
-  };
-
-  const applyDendroConfig = async () => {
-    let strokeMm: number | null;
-    let ratioAtRetracted: number | null;
-    let ratioAtExtended: number | null;
-
-    try {
-      strokeMm = parseOptionalNumericInput('Stroke (mm)', dendroStrokeMmInput, { positive: true });
-      ratioAtRetracted = parseOptionalNumericInput('Retracted ratio', dendroRatioAtRetractedInput);
-      ratioAtExtended = parseOptionalNumericInput('Extended ratio', dendroRatioAtExtendedInput);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Invalid dendrometer calibration values');
-      setAdvancedInfo(null);
-      return;
-    }
-
-    if (ratioAtRetracted !== null && ratioAtExtended !== null && ratioAtRetracted === ratioAtExtended) {
-      setError('Retracted and extended ratios must differ.');
-      setAdvancedInfo(null);
-      return;
-    }
-
-    setBusy('dendro-config');
-    setError(null);
-    setAdvancedInfo(null);
-    try {
-      await lsn50API.setDendroConfig(device.deveui, {
-        dendroForceLegacy: dendroForceLegacyInput,
-        dendroStrokeMm: strokeMm,
-        dendroRatioAtRetracted: ratioAtRetracted,
-        dendroRatioAtExtended: ratioAtExtended,
-      });
-      setAdvancedInfo(
-        dendroForceLegacyInput
-          ? 'Dendrometer calibration saved. Legacy ADC is forced for this device.'
-          : 'Dendrometer calibration saved. Ratio MOD3 will be used when the uplink provides valid CH0 and CH1 in MOD3.'
-      );
-      onUpdate();
-    } catch {
-      setError('Failed to save dendrometer calibration');
-    } finally {
-      setBusy(null);
-    }
-  };
-
-  const resetDendroBaseline = async () => {
-    if (!window.confirm('Clear the stored stem-change baseline for this legacy dendrometer? The next valid uplink will establish a new zero point.')) {
-      return;
-    }
-
-    setBusy('dendro-baseline-reset');
-    setError(null);
-    setAdvancedInfo(null);
-    try {
-      await lsn50API.resetDendroBaseline(device.deveui);
-      setAdvancedInfo('Legacy stem baseline cleared. The next valid uplink will establish a new zero point.');
-      onUpdate();
-    } catch {
-      setError('Failed to reset the dendrometer stem baseline');
-    } finally {
-      setBusy(null);
-    }
-  };
-
-  return (
-    <div
-      ref={ref}
-      className="absolute right-0 top-full z-20 mt-1 min-w-[280px] max-w-[calc(100vw-2rem)] rounded-xl border border-[var(--border)] bg-[var(--surface)] p-3 shadow-xl"
-    >
-      <p className="mb-2 px-1 text-xs font-semibold text-[var(--text-tertiary)]">ACTIVE SENSORS</p>
-      {SENSOR_OPTIONS.map((option) => {
-        const enabled = device[option.key] === 1;
-        const loading = busy === option.key;
-        const disabledByMode = !enabled && requiresMod9Counter(option.key) && !counterModeReady;
-        return (
-          <label
-            key={option.key}
-            className={`flex cursor-pointer select-none items-center gap-3 rounded-lg px-1 py-2 hover:bg-[var(--card)] ${disabledByMode ? 'opacity-70' : ''}`}
-          >
-            <input
-              type="checkbox"
-              checked={enabled}
-              disabled={loading}
-              onChange={() => void toggle(option)}
-              className="h-4 w-4 rounded border-[var(--border)] text-[var(--primary)] focus:ring-[var(--primary)]"
-            />
-            <span className="flex-1 text-sm text-[var(--text)]">{option.label}</span>
-            {loading && <span className="text-xs text-[var(--text-tertiary)]">…</span>}
-          </label>
-        );
-      })}
-
-      <div className="mt-3 rounded-lg border border-[var(--border)] bg-[var(--card)] p-3">
-        <div className="flex items-center justify-between gap-3">
-          <div>
-            <p className="text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)]">LSN50 mode</p>
-            <p className="text-sm font-semibold text-[var(--text)]">{currentMode ?? 'Unknown'}</p>
-          </div>
-          {observedAt && (
-            <span className="text-xs text-[var(--text-tertiary)]">
-              Seen {new Date(observedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-            </span>
-          )}
-        </div>
-        <select
-          value={selectedMode}
-          disabled={busy === 'mode'}
-          onChange={(event) => setSelectedMode(event.target.value as Lsn50Mode)}
-          className="mt-3 w-full rounded-lg border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-sm text-[var(--text)]"
-        >
-          {LSN50_MODE_OPTIONS.map((option) => (
-            <option key={option.value} value={option.value}>{option.value}</option>
-          ))}
-        </select>
-        <p className="mt-2 text-xs text-[var(--text-tertiary)]">{selectedModeDescription}</p>
-        <button
-          type="button"
-          onClick={() => void applyMode()}
-          disabled={busy !== null}
-          className="mt-3 w-full rounded-lg bg-[var(--primary)] px-3 py-2 text-sm font-semibold text-white transition-colors hover:bg-[var(--primary-hover)] disabled:cursor-not-allowed disabled:opacity-60"
-        >
-          {busy === 'mode' ? 'Applying mode...' : 'Apply mode'}
-        </button>
-        {modeInfo && <p className="mt-2 text-xs text-[var(--text-tertiary)]">{modeInfo}</p>}
-        {!counterModeReady && (
-          <p className="mt-2 text-xs text-[var(--warn-text)]">Rain gauge and flow meter can only be enabled after MOD9 is active.</p>
-        )}
-      </div>
-
-      <div className="mt-3 rounded-lg border border-[var(--border)] bg-[var(--card)] p-3">
-        <label className="block text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)]" htmlFor={`lsn50-interval-${device.deveui}`}>
-          Uplink interval (minutes)
-        </label>
-        <input
-          id={`lsn50-interval-${device.deveui}`}
-          type="number"
-          min={1}
-          max={MAX_LSN50_INTERVAL_MINUTES}
-          step={1}
-          inputMode="numeric"
-          value={intervalMinutesInput}
-          disabled={busy === 'interval'}
-          onChange={(event) => setIntervalMinutesInput(event.target.value)}
-          placeholder="60"
-          className="mt-2 w-full rounded-lg border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-sm text-[var(--text)]"
-        />
-        <p className="mt-2 text-xs text-[var(--text-tertiary)]">Minimum 1 minute. Maximum {MAX_LSN50_INTERVAL_MINUTES} minutes.</p>
-        <button
-          type="button"
-          onClick={() => void applyInterval()}
-          disabled={busy !== null}
-          className="mt-2 w-full rounded-lg bg-[var(--secondary-bg)] px-3 py-2 text-sm font-semibold text-[var(--text)] transition-colors hover:bg-[var(--border)] disabled:cursor-not-allowed disabled:opacity-60"
-        >
-          {busy === 'interval' ? 'Applying interval...' : 'Apply uplink interval'}
-        </button>
-        {intervalInfo && <p className="mt-2 text-xs text-[var(--text-tertiary)]">{intervalInfo}</p>}
-      </div>
-
-      <div className="mt-3 border-t border-[var(--border)] pt-3">
-        <button
-          type="button"
-          onClick={() => setShowAdvanced((value) => !value)}
-          className="flex w-full items-center justify-between rounded-lg bg-[var(--card)] px-3 py-2 text-left text-sm font-semibold text-[var(--text)]"
-        >
-          <span>Advanced device settings</span>
-          <span className={`transition-transform ${showAdvanced ? 'rotate-180' : ''}`}>▾</span>
-        </button>
-        {showAdvanced && (
-          <div className="mt-3 space-y-3 rounded-lg border border-[var(--border)] bg-[var(--card)] p-3">
-            <div>
-              <label className="mb-1 block text-xs font-semibold text-[var(--text-secondary)]">Interrupt trigger mode</label>
-              <select
-                value={interruptModeInput}
-                disabled={busy === 'interrupt'}
-                onChange={(event) => setInterruptModeInput(event.target.value)}
-                className="w-full rounded-lg border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-sm text-[var(--text)]"
-              >
-                {LSN50_INTERRUPT_MODE_OPTIONS.map((option) => (
-                  <option key={option.value} value={option.value}>{option.label}</option>
-                ))}
-              </select>
-              <button
-                type="button"
-                onClick={() => void applyInterruptMode()}
-                disabled={busy !== null}
-                className="mt-2 w-full rounded-lg bg-[var(--secondary-bg)] px-3 py-2 text-sm font-semibold text-[var(--text)] transition-colors hover:bg-[var(--border)] disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                {busy === 'interrupt' ? 'Applying interrupt mode...' : 'Apply interrupt mode'}
-              </button>
-            </div>
-            <div>
-              <label className="mb-1 block text-xs font-semibold text-[var(--text-secondary)]" htmlFor={`lsn50-warmup-${device.deveui}`}>
-                5V warm-up time (ms)
-              </label>
-              <input
-                id={`lsn50-warmup-${device.deveui}`}
-                type="number"
-                min={0}
-                max={MAX_LSN50_5V_WARMUP_MS}
-                step={1}
-                inputMode="numeric"
-                value={warmupMillisecondsInput}
-                disabled={busy === 'warmup'}
-                onChange={(event) => setWarmupMillisecondsInput(event.target.value)}
-                placeholder="1000"
-                className="w-full rounded-lg border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-sm text-[var(--text)]"
-              />
-              <p className="mt-2 text-xs text-[var(--text-tertiary)]">Useful for probes that need sensor power to settle before sampling.</p>
-              <button
-                type="button"
-                onClick={() => void applyFiveVoltWarmup()}
-                disabled={busy !== null}
-                className="mt-2 w-full rounded-lg bg-[var(--secondary-bg)] px-3 py-2 text-sm font-semibold text-[var(--text)] transition-colors hover:bg-[var(--border)] disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                {busy === 'warmup' ? 'Applying 5V warm-up...' : 'Apply 5V warm-up'}
-              </button>
-            </div>
-            <div className="rounded-lg border border-[var(--border)] bg-[var(--surface)] p-3">
-              <p className="text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)]">Dendrometer calibration</p>
-              <p className="mt-1 text-xs text-[var(--text-tertiary)]">
-                Use these values for ratio-mode dendrometers. Leave the numeric fields blank to clear saved calibration values.
-              </p>
-              {(liveDendroSource || dendroData?.adc_ch0v != null || (liveShowRatio && (dendroData?.adc_ch1v != null || dendroData?.dendro_ratio != null)) || dendroData?.dendro_position_raw_mm != null || liveStemChange) && (
-                <div className="mt-3 rounded-lg border border-[var(--border)] bg-[var(--card)] p-3">
-                  <p className="text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)]">Live telemetry</p>
-                  {liveStemChange && (
-                    <p className="mt-1 text-xs text-[var(--text-tertiary)]">
-                      Stem change: <span className="font-semibold text-[var(--text)]">{liveStemChange}</span>
-                    </p>
-                  )}
-                  {dendroData?.dendro_position_raw_mm != null && (
-                    <p className="mt-1 text-xs text-[var(--text-tertiary)]">
-                      Raw position: <span className="font-semibold text-[var(--text)]">{dendroData.dendro_position_raw_mm.toFixed(2)} mm</span>
-                    </p>
-                  )}
-                  {dendroData?.adc_ch0v != null && (
-                    <p className="mt-1 text-xs text-[var(--text-tertiary)]">
-                      CH0: <span className="font-semibold text-[var(--text)]">{dendroData.adc_ch0v.toFixed(3)} V</span>
-                    </p>
-                  )}
-                  {liveShowRatio && dendroData?.adc_ch1v != null && (
-                    <p className="mt-1 text-xs text-[var(--text-tertiary)]">
-                      CH1: <span className="font-semibold text-[var(--text)]">{dendroData.adc_ch1v.toFixed(3)} V</span>
-                    </p>
-                  )}
-                  {liveShowRatio && dendroData?.dendro_ratio != null && (
-                    <p className="mt-1 text-xs text-[var(--text-tertiary)]">
-                      Current ratio: <span className="font-semibold text-[var(--text)]">{dendroData.dendro_ratio.toFixed(4)}</span>
-                    </p>
-                  )}
-                  {liveDendroSource && (
-                    <p className="mt-1 text-xs text-[var(--text-tertiary)]">
-                      Source: <span className="font-semibold text-[var(--text)]">{liveDendroSource}</span>
-                    </p>
-                  )}
-                  {liveShowRatio && (
-                    <p className="mt-1 text-xs text-[var(--text-tertiary)]">
-                      Range state: <span className="font-semibold text-[var(--text)]">{liveRangeState}</span>
-                    </p>
-                  )}
-                </div>
-              )}
-              <label className="mt-3 flex cursor-pointer items-center gap-3 rounded-lg px-1 py-2 hover:bg-[var(--card)]">
-                <input
-                  type="checkbox"
-                  checked={dendroForceLegacyInput}
-                  disabled={busy === 'dendro-config'}
-                  onChange={(event) => setDendroForceLegacyInput(event.target.checked)}
-                  className="h-4 w-4 rounded border-[var(--border)] text-[var(--primary)] focus:ring-[var(--primary)]"
-                />
-                <span className="text-sm text-[var(--text)]">Force legacy mode</span>
-              </label>
-              <div className="mt-2 grid gap-3 sm:grid-cols-3">
-                <div>
-                  <label className="mb-1 block text-xs font-semibold text-[var(--text-secondary)]" htmlFor={`lsn50-dendro-stroke-${device.deveui}`}>
-                    Stroke (mm)
-                  </label>
-                  <input
-                    id={`lsn50-dendro-stroke-${device.deveui}`}
-                    type="number"
-                    step="0.001"
-                    min="0"
-                    inputMode="decimal"
-                    value={dendroStrokeMmInput}
-                    disabled={busy === 'dendro-config'}
-                    onChange={(event) => setDendroStrokeMmInput(event.target.value)}
-                    placeholder="25"
-                    className="w-full rounded-lg border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-sm text-[var(--text)]"
-                  />
-                </div>
-                <div>
-                  <div className="mb-1 flex items-center justify-between gap-2">
-                    <label className="block text-xs font-semibold text-[var(--text-secondary)]" htmlFor={`lsn50-dendro-retracted-${device.deveui}`}>
-                      Retracted ratio (0 mm)
-                    </label>
-                    <button
-                      type="button"
-                      disabled={busy === 'dendro-config' || dendroData?.dendro_ratio == null}
-                      onClick={() => setDendroRatioAtRetractedInput(dendroData?.dendro_ratio != null ? String(dendroData.dendro_ratio) : '')}
-                      className="text-[11px] font-semibold text-[var(--primary)] transition-colors hover:text-[var(--primary-hover)] disabled:cursor-not-allowed disabled:opacity-50"
-                    >
-                      Use current ratio
-                    </button>
-                  </div>
-                  <input
-                    id={`lsn50-dendro-retracted-${device.deveui}`}
-                    type="number"
-                    step="0.000001"
-                    inputMode="decimal"
-                    value={dendroRatioAtRetractedInput}
-                    disabled={busy === 'dendro-config'}
-                    onChange={(event) => setDendroRatioAtRetractedInput(event.target.value)}
-                    placeholder="0.420000"
-                    className="w-full rounded-lg border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-sm text-[var(--text)]"
-                  />
-                </div>
-                <div>
-                  <div className="mb-1 flex items-center justify-between gap-2">
-                    <label className="block text-xs font-semibold text-[var(--text-secondary)]" htmlFor={`lsn50-dendro-extended-${device.deveui}`}>
-                      Extended ratio (full stroke)
-                    </label>
-                    <button
-                      type="button"
-                      disabled={busy === 'dendro-config' || dendroData?.dendro_ratio == null}
-                      onClick={() => setDendroRatioAtExtendedInput(dendroData?.dendro_ratio != null ? String(dendroData.dendro_ratio) : '')}
-                      className="text-[11px] font-semibold text-[var(--primary)] transition-colors hover:text-[var(--primary-hover)] disabled:cursor-not-allowed disabled:opacity-50"
-                    >
-                      Use current ratio
-                    </button>
-                  </div>
-                  <input
-                    id={`lsn50-dendro-extended-${device.deveui}`}
-                    type="number"
-                    step="0.000001"
-                    inputMode="decimal"
-                    value={dendroRatioAtExtendedInput}
-                    disabled={busy === 'dendro-config'}
-                    onChange={(event) => setDendroRatioAtExtendedInput(event.target.value)}
-                    placeholder="0.860000"
-                    className="w-full rounded-lg border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-sm text-[var(--text)]"
-                  />
-                </div>
-              </div>
-              <p className="mt-1 text-xs text-[var(--text-tertiary)]">
-                Ratio mode uses retracted and extended endpoints to convert CH0/CH1 into calibrated displacement.
-              </p>
-              <button
-                type="button"
-                onClick={() => void applyDendroConfig()}
-                disabled={busy !== null}
-                className="mt-3 w-full rounded-lg bg-[var(--secondary-bg)] px-3 py-2 text-sm font-semibold text-[var(--text)] transition-colors hover:bg-[var(--border)] disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                {busy === 'dendro-config' ? 'Saving dendrometer calibration...' : 'Save dendrometer calibration'}
-              </button>
-              {showLegacyBaselineReset && (
-                <div className="mt-3 rounded-lg border border-[var(--border)] bg-[var(--surface)] p-3">
-                  <p className="text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)]">Legacy baseline</p>
-                  <p className="mt-1 text-xs text-[var(--text-tertiary)]">
-                    Clear the stored stem-change zero for this legacy dendrometer. The next valid uplink will establish a new baseline.
-                  </p>
-                  <button
-                    type="button"
-                    onClick={() => void resetDendroBaseline()}
-                    disabled={busy !== null}
-                    className="mt-3 w-full rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-sm font-semibold text-[var(--text)] transition-colors hover:bg-[var(--secondary-bg)] disabled:cursor-not-allowed disabled:opacity-60"
-                  >
-                    {busy === 'dendro-baseline-reset' ? 'Resetting stem baseline...' : 'Reset stem baseline'}
-                  </button>
-                </div>
-              )}
-            </div>
-            <p className="text-xs text-[var(--warn-text)]">These controls are intended for external sensors and non-default LSN50 integrations.</p>
-            {advancedInfo && <p className="text-xs text-[var(--text-tertiary)]">{advancedInfo}</p>}
-          </div>
-        )}
-      </div>
-
-      {error && <p className="mt-2 px-1 text-xs text-[var(--error-text)]">{error}</p>}
-    </div>
-  );
-};
 
 export const DraginoTempCard: React.FC<DraginoTempCardProps> = ({ device, onRemove, onUpdate }) => {
   const data = device.latest_data;
@@ -777,28 +154,26 @@ export const DraginoTempCard: React.FC<DraginoTempCardProps> = ({ device, onRemo
             LSN50
           </span>
           <button
+            type="button"
             onClick={() => setShowConfig((value) => !value)}
-            title="Configure active sensors"
+            aria-label={showConfig ? 'Close device settings' : 'Device settings'}
+            title={showConfig ? 'Close device settings' : 'Device settings'}
             className={`p-1.5 rounded-md transition-colors ${
               showConfig
                 ? 'bg-[var(--primary)] text-white'
                 : 'text-[var(--text-tertiary)] hover:bg-[var(--card)] hover:text-[var(--text)]'
-            }`}
+            } ${FOCUS_VISIBLE_RING}`}
           >
             ⚙
           </button>
-          {showConfig && (
-            <ConfigPanel
-              device={device}
-              onUpdate={() => { onUpdate?.(); }}
-              onClose={() => setShowConfig(false)}
-            />
-          )}
+          {showConfig && <DraginoSettingsModal device={device} dendroNeedsCalibration={dendroNeedsCalibration} onUpdate={() => { onUpdate?.(); }} onClose={() => setShowConfig(false)} />}
           <button
+            type="button"
             onClick={() => setShowConfirm(true)}
             disabled={isRemoving}
-            className="p-1.5 rounded-md bg-[var(--error-bg)] text-[var(--error-text)] hover:opacity-80 transition-opacity disabled:opacity-40 disabled:cursor-not-allowed"
-            title="Remove device"
+            aria-label={isRemoving ? 'Removing device' : 'Remove device'}
+            title={isRemoving ? 'Removing device' : 'Remove device'}
+            className={`p-1.5 rounded-md bg-[var(--error-bg)] text-[var(--error-text)] hover:opacity-80 transition-opacity disabled:opacity-40 disabled:cursor-not-allowed ${FOCUS_VISIBLE_RING}`}
           >
             ✕
           </button>
@@ -818,21 +193,23 @@ export const DraginoTempCard: React.FC<DraginoTempCardProps> = ({ device, onRemo
           <p className="mb-3 text-sm">This will unlink the device from your account.</p>
           <div className="flex gap-2">
             <button
+              type="button"
               onClick={() => void handleRemove()}
               disabled={isRemoving}
-              className="flex items-center gap-2 rounded-lg bg-[var(--error-bg)] px-4 py-2 font-bold text-[var(--error-text)] transition-colors disabled:cursor-not-allowed disabled:bg-[var(--border)] disabled:text-[var(--text-disabled)]"
+              className={`flex items-center gap-2 rounded-lg bg-[var(--error-bg)] px-4 py-2 font-bold text-[var(--error-text)] transition-colors disabled:cursor-not-allowed disabled:bg-[var(--border)] disabled:text-[var(--text-disabled)] ${FOCUS_VISIBLE_RING}`}
             >
               {isRemoving ? (
                 <>
                   <div className="h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent" />
-                  Removing...
+                  Removing…
                 </>
               ) : 'Yes, Remove'}
             </button>
             <button
+              type="button"
               onClick={() => setShowConfirm(false)}
               disabled={isRemoving}
-              className="rounded-lg bg-[var(--secondary-bg)] px-4 py-2 font-bold text-[var(--text)] transition-colors disabled:cursor-not-allowed disabled:bg-[var(--border)] disabled:text-[var(--text-disabled)]"
+              className={`rounded-lg bg-[var(--secondary-bg)] px-4 py-2 font-bold text-[var(--text)] transition-colors disabled:cursor-not-allowed disabled:bg-[var(--border)] disabled:text-[var(--text-disabled)] ${FOCUS_VISIBLE_RING}`}
             >
               Cancel
             </button>
@@ -847,7 +224,7 @@ export const DraginoTempCard: React.FC<DraginoTempCardProps> = ({ device, onRemo
             {data?.ext_temperature_c != null ? (
               <button
                 onClick={() => setSensorMonitor({ field: 'ext_temperature_c', label: 'Temperature', unit: '°C', color: '#f97316', decimals: 1 })}
-                className="cursor-pointer text-left text-2xl font-bold tabular-nums text-[var(--text)] underline decoration-dotted underline-offset-4 transition-colors hover:text-[var(--primary)]"
+                className={`cursor-pointer text-left text-2xl font-bold tabular-nums text-[var(--text)] underline decoration-dotted underline-offset-4 transition-colors hover:text-[var(--primary)] ${FOCUS_VISIBLE_RING}`}
                 title="View history"
               >
                 {data.ext_temperature_c.toFixed(1)} °C
@@ -863,7 +240,7 @@ export const DraginoTempCard: React.FC<DraginoTempCardProps> = ({ device, onRemo
             <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)]">BATTERY</p>
             <button
               onClick={() => setSensorMonitor({ field: 'bat_v', label: 'Battery Voltage', unit: 'V', color: '#22c55e', decimals: 2 })}
-              className="cursor-pointer text-left text-2xl font-bold tabular-nums underline decoration-dotted underline-offset-4 transition-opacity hover:opacity-75"
+              className={`cursor-pointer text-left text-2xl font-bold tabular-nums underline decoration-dotted underline-offset-4 transition-opacity hover:opacity-75 ${FOCUS_VISIBLE_RING}`}
               style={{ color: batColour }}
               title="View history"
             >
@@ -894,7 +271,7 @@ export const DraginoTempCard: React.FC<DraginoTempCardProps> = ({ device, onRemo
                   { field: 'rain_mm_per_10min', label: 'Per 10 min (rate)', unit: 'mm', color: '#0ea5e9', decimals: 1 },
                 ],
               })}
-              className="cursor-pointer text-left text-2xl font-bold tabular-nums text-[var(--text)] underline decoration-dotted underline-offset-4 transition-colors hover:text-[var(--primary)]"
+              className={`cursor-pointer text-left text-2xl font-bold tabular-nums text-[var(--text)] underline decoration-dotted underline-offset-4 transition-colors hover:text-[var(--primary)] ${FOCUS_VISIBLE_RING}`}
               title="View history"
             >
               {data?.rain_mm_delta != null ? `${data.rain_mm_delta.toFixed(1)} mm` : '—'}
@@ -932,7 +309,7 @@ export const DraginoTempCard: React.FC<DraginoTempCardProps> = ({ device, onRemo
                   { field: 'flow_liters_per_10min', label: 'Per 10 min (rate)', unit: 'L', color: '#4f46e5', decimals: 0 },
                 ],
               })}
-              className="cursor-pointer text-left text-2xl font-bold tabular-nums text-[var(--text)] underline decoration-dotted underline-offset-4 transition-colors hover:text-[var(--primary)]"
+              className={`cursor-pointer text-left text-2xl font-bold tabular-nums text-[var(--text)] underline decoration-dotted underline-offset-4 transition-colors hover:text-[var(--primary)] ${FOCUS_VISIBLE_RING}`}
               title="View history"
             >
               {data?.flow_liters_delta != null ? `${data.flow_liters_delta.toFixed(0)} L` : '—'}
@@ -954,7 +331,7 @@ export const DraginoTempCard: React.FC<DraginoTempCardProps> = ({ device, onRemo
             {dendroHasStemChange && dendroStemChangeLabel ? (
               <button
                 onClick={() => setShowMonitor(true)}
-                className="cursor-pointer text-left text-2xl font-bold tabular-nums text-[var(--text)] underline decoration-dotted underline-offset-4 transition-colors hover:text-[var(--primary)]"
+                className={`cursor-pointer text-left text-2xl font-bold tabular-nums text-[var(--text)] underline decoration-dotted underline-offset-4 transition-colors hover:text-[var(--primary)] ${FOCUS_VISIBLE_RING}`}
                 title="View stem change history"
               >
                 {dendroStemChangeLabel}
@@ -962,7 +339,7 @@ export const DraginoTempCard: React.FC<DraginoTempCardProps> = ({ device, onRemo
             ) : dendroAwaitingBaseline ? (
               <button
                 onClick={() => setShowMonitor(true)}
-                className="cursor-pointer text-left text-base font-bold text-[var(--warn-text)] underline decoration-dotted underline-offset-4 transition-colors hover:text-[var(--primary)]"
+                className={`cursor-pointer text-left text-base font-bold text-[var(--warn-text)] underline decoration-dotted underline-offset-4 transition-colors hover:text-[var(--primary)] ${FOCUS_VISIBLE_RING}`}
                 title="View mechanical history while the new baseline is being established"
               >
                 Awaiting baseline
@@ -970,7 +347,7 @@ export const DraginoTempCard: React.FC<DraginoTempCardProps> = ({ device, onRemo
             ) : dendroSaturated ? (
               <button
                 onClick={() => setShowMonitor(true)}
-                className="cursor-pointer text-left text-base font-bold text-[var(--warn-text)] underline decoration-dotted underline-offset-4 transition-colors hover:text-[var(--primary)]"
+                className={`cursor-pointer text-left text-base font-bold text-[var(--warn-text)] underline decoration-dotted underline-offset-4 transition-colors hover:text-[var(--primary)] ${FOCUS_VISIBLE_RING}`}
                 title="View mechanical history and calibration range details"
               >
                 Out of range
@@ -996,9 +373,18 @@ export const DraginoTempCard: React.FC<DraginoTempCardProps> = ({ device, onRemo
               </p>
             )}
             {dendroNeedsCalibration && (
-              <p className="mt-1 text-xs text-[var(--text-tertiary)]">
-                Ratio mode is active, but this device still needs ratio calibration values.
-              </p>
+              <>
+                <p className="mt-1 text-xs text-[var(--text-tertiary)]">
+                  Ratio mode is active, but this device still needs ratio calibration values.
+                </p>
+                <button
+                  type="button"
+                  onClick={() => setShowConfig(true)}
+                  className={`mt-3 rounded-lg border border-[var(--warn-border)] bg-[var(--surface)] px-3 py-2 text-sm font-semibold text-[var(--warn-text)] transition-colors hover:bg-[var(--warn-bg)] ${FOCUS_VISIBLE_RING}`}
+                >
+                  Open calibration
+                </button>
+              </>
             )}
           </div>
         )}
@@ -1008,7 +394,7 @@ export const DraginoTempCard: React.FC<DraginoTempCardProps> = ({ device, onRemo
             <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)]">ADC INPUT</p>
             <button
               onClick={() => setSensorMonitor({ field: 'adc_ch0v', label: 'ADC Input', unit: 'V', color: '#8b5cf6', decimals: 3 })}
-              className="cursor-pointer text-left text-2xl font-bold tabular-nums text-[var(--text)] underline decoration-dotted underline-offset-4 transition-colors hover:text-[var(--primary)]"
+              className={`cursor-pointer text-left text-2xl font-bold tabular-nums text-[var(--text)] underline decoration-dotted underline-offset-4 transition-colors hover:text-[var(--primary)] ${FOCUS_VISIBLE_RING}`}
               title="View history"
             >
               {data.adc_ch0v.toFixed(3)} V
@@ -1017,14 +403,10 @@ export const DraginoTempCard: React.FC<DraginoTempCardProps> = ({ device, onRemo
         )}
       </div>
 
-      <div className="mt-3 border-t border-[var(--border)] pt-3">
-        <p className="text-xs text-[var(--text-tertiary)]">
-          Last seen:{' '}
-          <span className="font-semibold text-[var(--text)]">
-            {minutesAgo !== null ? `${minutesAgo} minutes ago` : 'Never seen'}
-          </span>
-        </p>
-      </div>
+      <DeviceCardFooter
+        lastSeenLabel={minutesAgo !== null ? `Last seen: ${minutesAgo} minutes ago` : 'Never seen'}
+        batteryPercent={device.latest_data?.bat_pct}
+      />
 
       {showMonitor && (
         <DendrometerMonitor
