@@ -2,10 +2,11 @@
   "deviceName": "Valve White",
   "deviceEui": "70B3D57708000334",
   "fPort": 4,
-  "base64": "MzYxNXYj/////yM=",
-  "notes": [
-    "Captured on Uganda Pi from application/e094481b-9b74-43b2-aec3-9cb3cbd6cdbb/device/70b3d57708000334/event/up",
-    "Known to be a Gen1 motorized STREGA valve",
-    "Decoded manually via the vendor Decode() function before wrapper integration"
-  ]
+  "base64": "MzYwN3Qj/////yM=",
+  "expected": {
+    "Battery": 100,
+    "Valve": "0",
+    "TemperatureSentinel": true,
+    "HygrometrySentinel": true
+  }
 }

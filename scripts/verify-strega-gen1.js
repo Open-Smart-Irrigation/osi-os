@@ -116,10 +116,74 @@ function verifyDecodeContract(decodeUplink, fixture) {
 
   assert.ok(decoded, 'decodeUplink must return a result object');
   assert.ok(decoded.data, 'decodeUplink must return a data object');
-  assert.equal(Number(decoded.data.Battery), 101, 'fixture should preserve the captured raw battery value');
-  assert.equal(String(decoded.data.Valve), '0', 'fixture should preserve the captured raw valve bit');
-  assert.equal(String(decoded.data.Tamper), '1', 'fixture should preserve the captured raw tamper bit');
+  assert.ok(Object.prototype.hasOwnProperty.call(decoded.data, 'Battery'), 'decodeUplink must expose Battery for the sample');
+  assert.equal(Number(decoded.data.Battery), fixture.expected.Battery, 'fixture should preserve the captured raw battery value');
+  assert.equal(String(decoded.data.Valve), fixture.expected.Valve, 'fixture should preserve the captured raw valve bit');
+  assert.equal(Number(decoded.data.Temperature), 125, 'fixture should preserve the captured sentinel temperature');
+  assert.equal(Number(decoded.data.Hygrometry), 100, 'fixture should preserve the captured sentinel hygrometry');
+  assert.equal(
+    Number(decoded.data.Temperature) === 125 && Number(decoded.data.Hygrometry) === 100,
+    fixture.expected.TemperatureSentinel && fixture.expected.HygrometrySentinel,
+    'fixture should be recognized as the sentinel environmental sample',
+  );
   console.log('OK managed STREGA codec decodes the Uganda Gen1 fixture');
+  return decoded;
+}
+
+async function verifyStregaNormalizationContract(flows, fixture, decoded) {
+  const node = getFunctionNode(flows, 'Process STREGA');
+  const sandbox = {
+    Buffer,
+    console,
+    crypto,
+    msg: {
+      payload: {
+        deviceInfo: {
+          devEui: fixture.deviceEui,
+          deviceProfileName: 'STREGA',
+          deviceProfileId: 'strega-profile',
+        },
+        object: decoded.data,
+        fPort: fixture.fPort,
+        time: '2026-04-22T00:00:00.000Z',
+      },
+    },
+    env: {
+      get(name) {
+        if (name === 'AUTH_TOKEN_SECRET' || name === 'JWT_SECRET' || name === 'CHIRPSTACK_PROFILE_STREGA') return '';
+        return '';
+      },
+    },
+    global: {
+      get(name) {
+        if (name === 'fs') return fs;
+        return undefined;
+      },
+    },
+    osiDb: {
+      Database: class {
+        all(_sql, callback) {
+          callback(null, [{ type_id: 'STREGA_VALVE' }]);
+        }
+
+        close(callback) {
+          callback();
+        }
+      },
+    },
+    node: {
+      status() {},
+      error() {},
+    },
+  };
+  const result = runScript(`(() => { ${node.func} })()`, sandbox, `${node.name}.vm.js`);
+  const resolved = result && typeof result.then === 'function' ? await result : result;
+
+  assert.ok(resolved, `${node.name} must return a result`);
+  assert.ok(resolved.formattedData, `${node.name} must attach formattedData`);
+  assert.equal(resolved.formattedData.ambientTemperature, null, 'normalized ambient_temperature should drop the sentinel env reading');
+  assert.equal(resolved.formattedData.relativeHumidity, null, 'normalized relative_humidity should drop the sentinel env reading');
+  assert.equal(resolved.formattedData.batPct, 100, 'normalized bat_pct should preserve the numeric battery percent');
 }
 
 function verifyCommandMatrix(flows, fixture) {
@@ -166,19 +230,18 @@ function verifyCommandMatrix(flows, fixture) {
   }
 }
 
-function main() {
+async function main() {
   const fixture = loadJson(fixturePath);
   const flows = loadJson(flowPath);
   const decodeUplink = loadCodec();
 
-  verifyDecodeContract(decodeUplink, fixture);
+  const decoded = verifyDecodeContract(decodeUplink, fixture);
+  await verifyStregaNormalizationContract(flows, fixture, decoded);
   verifyCommandMatrix(flows, fixture);
   console.log('OK Strega Gen1 smoke checks passed');
 }
 
-try {
-  main();
-} catch (error) {
+main().catch((error) => {
   console.error(`FAIL: ${error.message}`);
   process.exitCode = 1;
-}
+});
