@@ -27,6 +27,11 @@ const seedDendroHistoryDatabasePaths = [
   path.resolve(__dirname, '..', 'conf', 'full_raspberrypi_bcm27xx_bcm2712', 'files', 'usr', 'share', 'db', 'farming.db'),
   path.resolve(__dirname, '..', 'database', 'farming.db')
 ];
+const batPctDatabasePaths = [
+  path.resolve(__dirname, '..', 'conf', 'full_raspberrypi_bcm27xx_bcm2712', 'files', 'usr', 'share', 'db', 'farming.db'),
+  path.resolve(__dirname, '..', 'database', 'farming.db'),
+  path.resolve(__dirname, '..', 'web', 'react-gui', 'farming.db')
+];
 const reactGuiApiPath = path.resolve(__dirname, '..', 'web', 'react-gui', 'src', 'services', 'api.ts');
 const farmingTypesPath = path.resolve(__dirname, '..', 'web', 'react-gui', 'src', 'types', 'farming.ts');
 const dendroMonitorPath = path.resolve(__dirname, '..', 'web', 'react-gui', 'src', 'components', 'farming', 'DendrometerMonitor.tsx');
@@ -590,6 +595,7 @@ expectIncludes('Sync Init Schema + Triggers', "UPDATE users SET last_auth_sync_s
 expectIncludes('Sync Init Schema + Triggers', "const gatewaySql = /^[0-9A-F]{16}$/.test(gateway)", 'uses a canonical gateway-or-NULL SQL fallback during sync init');
 expectIncludes('Sync Init Schema + Triggers', 'ALTER TABLE device_data ADD COLUMN rain_mm_per_10min REAL', 'adds normalized rain telemetry storage');
 expectIncludes('Sync Init Schema + Triggers', 'ALTER TABLE device_data ADD COLUMN flow_liters_per_10min REAL', 'adds normalized flow telemetry storage');
+expectIncludes('Sync Init Schema + Triggers', 'ALTER TABLE device_data ADD COLUMN bat_pct REAL', 'adds STREGA battery percentage storage');
 expectIncludes('Sync Init Schema + Triggers', "'area_m2', NEW.area_m2", 'mirrors zone area changes into zone sync events');
 expectIncludes('Sync Init Schema + Triggers', "'irrigation_efficiency_pct', NEW.irrigation_efficiency_pct", 'mirrors irrigation efficiency changes into zone sync events');
 expectIncludes('Sync Init Schema + Triggers', "'prediction_card_enabled', COALESCE(NEW.prediction_card_enabled, 0)", 'mirrors prediction-card changes into zone sync events');
@@ -798,9 +804,14 @@ expectIncludes('Apply Config', 'dendro_baseline_pending = 0,', 'clears the pendi
 expectLibById('lsn50-decode-fn', 'dendro', 'osi-dendro-helper', 'imports osi-dendro-helper in Decode LSN50');
 expectLibById('lsn50-apply-config', 'dendro', 'osi-dendro-helper', 'imports osi-dendro-helper in Apply Config');
 expectLibById('8809bb5239dfb3d4', 'dendro', 'osi-dendro-helper', 'imports osi-dendro-helper in Build Telemetry');
+expectIncludesById('strega-sql-fn', 'await db.transaction(async (tx) => {', 'uses the queued helper transaction primitive for STREGA persistence');
 expectIncludesById('strega-sql-fn', 'INSERT INTO device_data', 'persists STREGA telemetry into device_data');
 expectIncludesById('strega-sql-fn', 'ambient_temperature, relative_humidity, bat_pct', 'stores decoded STREGA telemetry in local device_data columns');
 expectIncludesById('strega-sql-fn', 'UPDATE devices SET current_state =', 'updates the canonical local STREGA valve state on uplink');
+expectExcludesById('strega-sql-fn', "msg.topic = insertSql + '; ' + updateSql + ';';", 'old multi-statement STREGA SQL builder');
+expectExcludesById('strega-sql-fn', "db.run('BEGIN');", 'multi-await BEGIN transaction pattern');
+expectExcludesById('strega-sql-fn', "db.run('ROLLBACK');", 'multi-await ROLLBACK transaction pattern');
+expectExcludesById('strega-sql-fn', "db.run('COMMIT');", 'multi-await COMMIT transaction pattern');
 expectIncludesById('lsn50-sql-fn', 'lsn50_mode_code, lsn50_mode_label, lsn50_mode_observed_at', 'persists observed LSN50 mode into device_data');
 expectIncludesById('lsn50-sql-fn', 'rain_mm_per_hour, rain_mm_per_10min, rain_mm_today, rain_delta_status', 'persists interval-aware rain metadata into device_data');
 expectIncludesById('lsn50-sql-fn', 'flow_liters_per_min, flow_liters_per_10min, flow_liters_today, flow_delta_status', 'persists interval-aware flow metadata into device_data');
@@ -1246,6 +1257,15 @@ for (const seedDatabasePath of seedDatabasePaths) {
     `${relativeSeedPath} is missing dendro_saturation_side in the bundled device_data schema`
   );
 }
+for (const seedDatabasePath of batPctDatabasePaths) {
+  const relativeSeedPath = path.relative(path.resolve(__dirname, '..'), seedDatabasePath);
+  const deviceDataColumns = new Set(readTableColumns(seedDatabasePath, 'device_data'));
+  expectCondition(
+    deviceDataColumns.has('bat_pct'),
+    `${relativeSeedPath} includes bat_pct in the bundled device_data schema`,
+    `${relativeSeedPath} is missing bat_pct in the bundled device_data schema`
+  );
+}
 for (const seedDatabasePath of seedDendroHistoryDatabasePaths) {
   const relativeSeedPath = path.relative(path.resolve(__dirname, '..'), seedDatabasePath);
   const dendroReadingColumns = new Set(readTableColumns(seedDatabasePath, 'dendrometer_readings'));
@@ -1398,6 +1418,12 @@ if (!dbHelperPath) {
       fail(`failed to load DB helper: ${error.message}`);
     }
   }
+}
+
+const dbHelperIndexPath = dbHelperPath ? path.join(dbHelperPath, 'index.js') : null;
+if (dbHelperIndexPath && fs.existsSync(dbHelperIndexPath)) {
+  const dbHelperSource = fs.readFileSync(dbHelperIndexPath, 'utf8');
+  expectFileIncludes('osi-db-helper/index.js', dbHelperSource, 'transaction(', 'exposes the queued helper transaction primitive');
 }
 
 const dendroHelperPath = dendroHelperCandidates.find((candidate) => fs.existsSync(candidate));
