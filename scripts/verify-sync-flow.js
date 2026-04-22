@@ -13,6 +13,7 @@ const osiServerDefaultsPath = path.resolve(__dirname, '..', 'conf', 'full_raspbe
 const sx1301GatewayDefaultPath = path.resolve(__dirname, '..', 'conf', 'full_raspberrypi_bcm27xx_bcm2712', 'files', 'etc', 'uci-defaults', '99_set_sx1301_gateway_id');
 const gatewayIdentityHelperPath = path.resolve(__dirname, '..', 'conf', 'full_raspberrypi_bcm27xx_bcm2712', 'files', 'usr', 'libexec', 'osi-gateway-identity.sh');
 const chirpstackBootstrapPath = path.resolve(__dirname, 'chirpstack-bootstrap.js');
+const stregaCodecPath = path.resolve(__dirname, '..', 'conf', 'full_raspberrypi_bcm27xx_bcm2712', 'files', 'usr', 'share', 'node-red', 'codecs', 'strega_gen1_decoder.js');
 const lsn50CodecPath = path.resolve(__dirname, '..', 'conf', 'full_raspberrypi_bcm27xx_bcm2712', 'files', 'usr', 'share', 'node-red', 'codecs', 'dragino_lsn50_decoder.js');
 const seedDatabasePaths = [
   path.resolve(__dirname, '..', 'conf', 'base_raspberrypi_bcm27xx_bcm2712', 'files', 'usr', 'share', 'db', 'farming.db'),
@@ -55,6 +56,7 @@ const osiServerDefaultsScript = fs.readFileSync(osiServerDefaultsPath, 'utf8');
 const sx1301GatewayDefaultScript = fs.readFileSync(sx1301GatewayDefaultPath, 'utf8');
 const gatewayIdentityHelperScript = fs.readFileSync(gatewayIdentityHelperPath, 'utf8');
 const chirpstackBootstrapScript = fs.readFileSync(chirpstackBootstrapPath, 'utf8');
+const stregaCodecSource = fs.existsSync(stregaCodecPath) ? fs.readFileSync(stregaCodecPath, 'utf8') : '';
 const lsn50CodecSource = fs.existsSync(lsn50CodecPath) ? fs.readFileSync(lsn50CodecPath, 'utf8') : '';
 const reactGuiApiSource = fs.readFileSync(reactGuiApiPath, 'utf8');
 const farmingTypesSource = fs.readFileSync(farmingTypesPath, 'utf8');
@@ -155,6 +157,8 @@ const requiredFunctionNodes = [
   'CS Register (cloud cmd)',
   'Build Special Command ACK',
   'Build LSN50 mode downlink',
+  'Process STREGA',
+  'Build STREGA SQL',
   'Process S2120',
   'Aggregate Zone Rain',
   'Get Zone Assignments',
@@ -568,6 +572,8 @@ expectIncludes('Sync Init Schema + Triggers', 'AFTER INSERT ON dendrometer_daily
 expectIncludes('Sync Init Schema + Triggers', 'AFTER UPDATE ON dendrometer_daily', 'updates dendro daily outbox rows from dendrometer_daily');
 expectIncludes('Sync Init Schema + Triggers', 'COALESCE(server_username, username)', 'emits linked cloud usernames in device outbox events');
 expectIncludes('Sync Init Schema + Triggers', 'ALTER TABLE devices ADD COLUMN strega_model TEXT', 'adds the STREGA model metadata column');
+expectIncludes('Sync Init Schema + Triggers', "'current_state', NEW.current_state", 'mirrors STREGA current state changes into device outbox events');
+expectIncludes('Sync Init Schema + Triggers', "'target_state', NEW.target_state", 'mirrors STREGA target state changes into device outbox events');
 expectIncludes('Sync Init Schema + Triggers', "'strega_model', NEW.strega_model", 'mirrors STREGA model changes into device outbox events');
 expectIncludes('Sync Init Schema + Triggers', 'CREATE TABLE IF NOT EXISTS gateway_locations', 'creates the gateway GPS mirror table');
 expectIncludes('Sync Init Schema + Triggers', 'trg_gateway_locations_outbox_ai', 'creates the gateway GPS insert trigger');
@@ -608,6 +614,8 @@ expectExcludesForEach(migrationPreflightNodes, "\"SELECT gateway_device_eui FROM
 expectIncludes('Build Cloud Bootstrap', 'COALESCE(u.server_username, u.username) AS claimed_by_username', 'uses linked cloud usernames in bootstrap device snapshots');
 expectIncludes('Build Cloud Bootstrap', 'COALESCE(u.server_username, u.username) AS username', 'uses linked cloud usernames in bootstrap zone snapshots');
 expectIncludes('Build Cloud Bootstrap', 'd.strega_model', 'includes STREGA model metadata in bootstrap device snapshots');
+expectIncludes('Build Cloud Bootstrap', 'd.current_state', 'includes STREGA current state in bootstrap device snapshots');
+expectIncludes('Build Cloud Bootstrap', 'd.target_state', 'includes STREGA target state in bootstrap device snapshots');
 expectIncludes('Build Cloud Bootstrap', "'  dd.lsn50_mode_code,'", 'includes observed LSN50 mode in bootstrap sensor data');
 expectIncludes('Build Cloud Bootstrap', "'  dd.adc_ch1v,'", 'includes dendrometer reference voltage in bootstrap sensor data');
 expectIncludes('Build Cloud Bootstrap', "'  dd.dendro_ratio,'", 'includes dendrometer ratio in bootstrap sensor data');
@@ -685,6 +693,8 @@ expectIncludes('Schedule Unlink Restart', '/etc/init.d/node-red restart', 'sched
 expectIncludes('Run Force Sync', 'COALESCE(u.server_username, u.username) AS claimed_by_username', 'uses linked cloud usernames in force-sync device snapshots');
 expectIncludes('Run Force Sync', 'COALESCE(u.server_username, u.username) AS username', 'uses linked cloud usernames in force-sync zone snapshots');
 expectIncludes('Run Force Sync', 'd.strega_model', 'includes STREGA model metadata in force-sync device snapshots');
+expectIncludes('Run Force Sync', 'd.current_state', 'includes STREGA current state in force-sync device snapshots');
+expectIncludes('Run Force Sync', 'd.target_state', 'includes STREGA target state in force-sync device snapshots');
 expectIncludes('Run Force Sync', "'  dd.lsn50_mode_code,'", 'includes observed LSN50 mode in force-sync sensor data');
 expectIncludes('Run Force Sync', "'  dd.adc_ch1v,'", 'includes dendrometer reference voltage in force-sync sensor data');
 expectIncludes('Run Force Sync', "'  dd.dendro_ratio,'", 'includes dendrometer ratio in force-sync sensor data');
@@ -754,8 +764,14 @@ expectIncludes('Build Telemetry', 'var rawLsn50 = isLsn50 && data.data ? dendro.
 expectIncludes('Build Telemetry', 'var derived = dendro.buildDendroDerivedMetrics({', 'reuses shared dendrometer path selection in telemetry mirroring');
 expectIncludes('Build Telemetry', 'dendro.computeDendroDeltaMm({', 'reuses shared dendrometer delta handling in telemetry mirroring');
 expectIncludes('Build Telemetry', 'dendro_stem_change_um: stemChangeUm,', 'publishes baseline-relative stem change in live MQTT telemetry');
+expectExcludes('Build Telemetry', "if (profileKind === 'STREGA_VALVE') return null;", 'dropping STREGA telemetry from cloud MQTT mirroring');
+expectIncludes('Build Telemetry', 'gatewayDeviceEui: piEui', 'includes the gateway transport identity in cloud telemetry payloads');
 expectIncludesById('81c98fb07344a787', "env.get('CHIRPSTACK_PROFILE_KIWI')", 'uses env-backed Kiwi profile routing');
 expectIncludesById('81c98fb07344a787', "env.get('CHIRPSTACK_PROFILE_CLOVER')", 'uses env-backed Clover profile routing');
+expectIncludesById('strega-process-fn', "getProfileKind(data.deviceInfo || {})", 'derives STREGA profile routing on the dedicated edge path');
+expectIncludesById('strega-process-fn', 'decodeStregaFallback', 'falls back to the managed STREGA codec when ChirpStack has no decoded object');
+expectIncludesById('strega-process-fn', 'normalizeBatteryPercent', 'normalizes Gen1 STREGA battery values for local storage');
+expectIncludesById('strega-process-fn', 'normalizeStateFromValveBit', 'maps the Gen1 STREGA valve bit into local OPEN/CLOSED state');
 expectIncludes('Decode LSN50', 'const rawDecoded = data.data ? dendro.decodeRawAdcPayload(data.data) : null;', 'uses the shared raw LSN50 ADC decoder');
 expectIncludes('Decode LSN50', 'adcCh1V = dendro.toFiniteNumber(obj.ADC_CH1V);', 'reads ADC_CH1V from decoded MOD3 payloads');
 expectIncludes('Decode LSN50', 'adcCh4V = dendro.toFiniteNumber(obj.ADC_CH4V);', 'reads ADC_CH4V when present without using it for dendrometer conversion');
@@ -782,6 +798,9 @@ expectIncludes('Apply Config', 'dendro_baseline_pending = 0,', 'clears the pendi
 expectLibById('lsn50-decode-fn', 'dendro', 'osi-dendro-helper', 'imports osi-dendro-helper in Decode LSN50');
 expectLibById('lsn50-apply-config', 'dendro', 'osi-dendro-helper', 'imports osi-dendro-helper in Apply Config');
 expectLibById('8809bb5239dfb3d4', 'dendro', 'osi-dendro-helper', 'imports osi-dendro-helper in Build Telemetry');
+expectIncludesById('strega-sql-fn', 'INSERT INTO device_data', 'persists STREGA telemetry into device_data');
+expectIncludesById('strega-sql-fn', 'ambient_temperature, relative_humidity, bat_pct', 'stores decoded STREGA telemetry in local device_data columns');
+expectIncludesById('strega-sql-fn', 'UPDATE devices SET current_state =', 'updates the canonical local STREGA valve state on uplink');
 expectIncludesById('lsn50-sql-fn', 'lsn50_mode_code, lsn50_mode_label, lsn50_mode_observed_at', 'persists observed LSN50 mode into device_data');
 expectIncludesById('lsn50-sql-fn', 'rain_mm_per_hour, rain_mm_per_10min, rain_mm_today, rain_delta_status', 'persists interval-aware rain metadata into device_data');
 expectIncludesById('lsn50-sql-fn', 'flow_liters_per_min, flow_liters_per_10min, flow_liters_today, flow_delta_status', 'persists interval-aware flow metadata into device_data');
@@ -1107,6 +1126,11 @@ expectIncludes('Build STREGA downlink + emit log ctx', "case 'TIMED_ACTION': {",
 expectIncludes('Build STREGA downlink + emit log ctx', "case 'SET_MAGNET_MODE': {", 'supports STREGA magnet-mode downlinks');
 expectIncludes('Build STREGA downlink + emit log ctx', "case 'SET_PARTIAL_OPENING': {", 'supports STREGA partial-opening downlinks');
 expectIncludes('Build STREGA downlink + emit log ctx', "case 'SET_FLUSHING': {", 'supports STREGA flushing downlinks');
+expectIncludes('Build STREGA downlink + emit log ctx', 'deviceEui: devEui', 'includes the actual STREGA valve DevEUI in direct command ACK payloads');
+expectIncludes('Build STREGA downlink + emit log ctx', 'gatewayDeviceEui: gatewayDeviceEui', 'includes the gateway transport identity in direct STREGA command ACK payloads');
+expectIncludes('Build Status + ACK', 'deviceEui: deviceEui', 'includes the actual STREGA valve DevEUI in cloud status payloads');
+expectIncludes('Build Status + ACK', 'gatewayDeviceEui: eui', 'includes the gateway transport identity in cloud status payloads');
+expectIncludes('Build Status + ACK', "commandType: 'VALVE_COMMAND'", 'tags manual STREGA valve ACK payloads with the cloud command type');
 expectFileIncludes('node-red.init', nodeRedInitScript, '. /usr/libexec/osi-gateway-identity.sh', 'uses the shared gateway identity helper');
 expectFileIncludes('node-red.init', nodeRedInitScript, 'gateway_identity_resolve', 'resolves the canonical gateway identity through the shared helper');
 expectFileIncludes('node-red.init', nodeRedInitScript, 'gateway_identity_repair_concentratord_config || true', 'self-heals active concentratord gateway-id state during startup');
@@ -1136,6 +1160,10 @@ expectFileIncludes('chirpstack-bootstrap.js', chirpstackBootstrapScript, "'DEVIC
 expectFileIncludes('chirpstack-bootstrap.js', chirpstackBootstrapScript, "'LINK_GATEWAY_DEVICE_EUI'", 'protects LINK_GATEWAY_DEVICE_EUI from env-file overrides');
 expectFileIncludes('chirpstack-bootstrap.js', chirpstackBootstrapScript, "if (protectedKeys.has(key) && String(process.env[key] || '').trim()) return;", 'keeps init-provided identity env values when the env file is stale');
 expectFileIncludes('chirpstack-bootstrap.js', chirpstackBootstrapScript, 'LSN50_CODEC_PATH', 'allows overriding the LSN50 decoder path during bootstrap');
+expectFileIncludes('chirpstack-bootstrap.js', chirpstackBootstrapScript, 'STREGA_CODEC_PATH', 'allows overriding the STREGA decoder path during bootstrap');
+expectFileIncludes('chirpstack-bootstrap.js', chirpstackBootstrapScript, 'CFG.stregaCodecPath', 'tracks the shipped STREGA decoder path in bootstrap config');
+expectFileIncludes('chirpstack-bootstrap.js', chirpstackBootstrapScript, "readCodecScript(CFG.stregaCodecPath, 'STREGA')", 'loads the shipped STREGA decoder during bootstrap');
+expectFileIncludes('chirpstack-bootstrap.js', chirpstackBootstrapScript, "getOrCreateProfileWithCodec(client, tenantId, CFG.profileStregaName", 'creates or repairs the OSI STREGA profile with a payload codec');
 expectFileIncludes('chirpstack-bootstrap.js', chirpstackBootstrapScript, "CFG.lsn50CodecPath", 'tracks the shipped LSN50 decoder path in bootstrap config');
 expectFileIncludes('chirpstack-bootstrap.js', chirpstackBootstrapScript, "readCodecScript(CFG.lsn50CodecPath, 'LSN50')", 'loads the shipped LSN50 decoder during bootstrap');
 expectFileIncludes('chirpstack-bootstrap.js', chirpstackBootstrapScript, "getOrCreateProfileWithCodec(client, tenantId, CFG.profileLsn50Name", 'creates or repairs the OSI LSN50 profile with a payload codec');
@@ -1143,6 +1171,7 @@ expectFileIncludes('deploy.sh', deployScript, '"feeds/chirpstack-openwrt-feed/ap
 expectFileIncludes('deploy.sh', deployScript, '"conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/libexec/osi-gateway-identity.sh"', 'deploys the shared gateway identity helper to live devices');
 expectFileIncludes('deploy.sh', deployScript, '"conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-dendro-helper/package.json"', 'deploys the osi-dendro-helper package manifest to live devices');
 expectFileIncludes('deploy.sh', deployScript, '"conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-dendro-helper/index.js"', 'deploys the osi-dendro-helper runtime helper to live devices');
+expectFileIncludes('deploy.sh', deployScript, '"conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/codecs/strega_gen1_decoder.js"', 'deploys the shipped STREGA ChirpStack decoder to live devices');
 expectFileIncludes('deploy.sh', deployScript, '"conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/codecs/dragino_lsn50_decoder.js"', 'deploys the shipped LSN50 ChirpStack decoder to live devices');
 expectFileIncludes('deploy.sh', deployScript, 'chmod 755 /etc/init.d/node-red', 'keeps the deployed Node-RED init script executable');
 expectFileIncludes('deploy.sh', deployScript, 'ALTER TABLE devices ADD COLUMN dendro_ratio_at_retracted REAL', 'repairs the live DB with the canonical dendrometer retracted-ratio column during deploy');
@@ -1334,6 +1363,8 @@ if (!helperPath) {
   }
 }
 
+expectFileIncludes('strega_gen1_decoder.js', stregaCodecSource, 'function decodeUplink(input)', 'ships the STREGA ChirpStack decoder entry point');
+expectFileIncludes('strega_gen1_decoder.js', stregaCodecSource, 'function Decode(fPort, bytes)', 'ships the vendor Gen1 STREGA decoder implementation');
 expectFileIncludes('dragino_lsn50_decoder.js', lsn50CodecSource, 'function decodeUplink(input)', 'ships the LSN50 ChirpStack decoder entry point');
 expectFileIncludes('dragino_lsn50_decoder.js', lsn50CodecSource, 'decode.Work_mode="3ADC+IIC";', 'ships the working MOD3 decoder path from the live LSN50 profile');
 expectFileIncludes('dragino_lsn50_decoder.js', lsn50CodecSource, 'decode.ADC_CH1V= (bytes[2]<<8 | bytes[3])/1000;', 'ships the working LSN50 CH1 decoder logic');

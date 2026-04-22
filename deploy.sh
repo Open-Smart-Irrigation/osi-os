@@ -194,6 +194,10 @@ fetch_required "chirpstack-bootstrap.js" \
     "scripts/chirpstack-bootstrap.js" \
     "/srv/node-red/chirpstack-bootstrap.js"
 
+fetch_required "STREGA codec" \
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/codecs/strega_gen1_decoder.js" \
+    "/srv/node-red/codecs/strega_gen1_decoder.js"
+
 fetch_required "LSN50 codec" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/codecs/dragino_lsn50_decoder.js" \
     "/srv/node-red/codecs/dragino_lsn50_decoder.js"

@@ -25,18 +25,32 @@ function getApiMessage(error: any, fallback: string): string {
   return error?.response?.data?.message || error?.response?.data?.error || fallback;
 }
 
-function normaliseStregaModel(value: unknown): StregaModel | null {
+export function normaliseStregaModel(value: unknown): StregaModel | null {
   const raw = String(value ?? '').trim().toUpperCase();
   return raw === 'STANDARD' || raw === 'MOTORIZED' ? raw : null;
 }
 
-function getRecognizedStregaModel(device: Device): RecognizedStregaModel {
+export function getRecognizedStregaModel(device: Device): RecognizedStregaModel {
   const explicit = normaliseStregaModel(device.strega_model);
   if (explicit) return explicit;
   const name = String(device.name || '').toLowerCase();
   if (name.includes('motor')) return 'MOTORIZED';
   if (name.includes('solenoid') || name.includes('lite') || name.includes('standard')) return 'STANDARD';
   return 'UNKNOWN';
+}
+
+export function getDisplayedStregaState(device: Device): 'OPEN' | 'CLOSED' {
+  if (device.current_state === 'OPEN' || device.current_state === 'CLOSED') {
+    return device.current_state;
+  }
+  if (device.target_state === 'OPEN' || device.target_state === 'CLOSED') {
+    return device.target_state;
+  }
+  return 'CLOSED';
+}
+
+export function shouldShowStregaTargetState(device: Device): boolean {
+  return Boolean(device.target_state && device.target_state !== device.current_state);
 }
 
 const ConfigPanel: React.FC<{
@@ -498,7 +512,8 @@ export const StregaValveCard: React.FC<StregaValveCardProps> = ({ device, onUpda
     ? Math.floor((Date.now() - lastSeen.getTime()) / (1000 * 60))
     : null;
 
-  const isOpen = device.current_state === 'OPEN';
+  const displayedState = getDisplayedStregaState(device);
+  const isOpen = displayedState === 'OPEN';
 
   const handleAction = async (action: 'OPEN' | 'CLOSE') => {
     setLoading(action);
@@ -617,7 +632,7 @@ export const StregaValveCard: React.FC<StregaValveCardProps> = ({ device, onUpda
             {isOpen ? t('stregaValve.open') : t('stregaValve.closed')}
           </p>
         </div>
-        {device.target_state && device.target_state !== device.current_state && (
+        {shouldShowStregaTargetState(device) && (
           <p className="text-xs text-[var(--text-secondary)] mt-1">
             {t('stregaValve.target', { state: device.target_state })}
           </p>

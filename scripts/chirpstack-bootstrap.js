@@ -35,6 +35,7 @@
  *   CS_PROFILE_LSN50_NAME    (default: "OSI Dragino LSN50")
  *   CS_PROFILE_RAK_NAME      (default: "OSI RAK Field Tester")
  *   CS_PROFILE_S2120_NAME    (default: "OSI SenseCAP S2120")
+ *   STREGA_CODEC_PATH        (default: "/srv/node-red/codecs/strega_gen1_decoder.js")
  *   LSN50_CODEC_PATH         (default: "/srv/node-red/codecs/dragino_lsn50_decoder.js")
  *   S2120_CODEC_PATH         (default: "/srv/node-red/codecs/sensecap_s2120_decoder.js")
  */
@@ -82,6 +83,7 @@ const CFG = {
   profileLsn50Name: process.env.CS_PROFILE_LSN50_NAME || 'OSI Dragino LSN50',
   profileRakName: process.env.CS_PROFILE_RAK_NAME || 'OSI RAK Field Tester',
   profileS2120Name: process.env.CS_PROFILE_S2120_NAME || 'OSI SenseCAP S2120',
+  stregaCodecPath: process.env.STREGA_CODEC_PATH || '/srv/node-red/codecs/strega_gen1_decoder.js',
   lsn50CodecPath: process.env.LSN50_CODEC_PATH || '/srv/node-red/codecs/dragino_lsn50_decoder.js',
   s2120CodecPath: process.env.S2120_CODEC_PATH || '/srv/node-red/codecs/sensecap_s2120_decoder.js'
 };
@@ -396,7 +398,8 @@ async function main() {
 
   console.log('\n[ 4/5 ] Device profiles');
   const kiwiProfileId = await getOrCreateProfile(client, tenantId, CFG.profileKiwiName, 'Kiwi soil moisture & temperature (LoRaWAN 1.0.3 OTAA)');
-  const stregaProfileId = await getOrCreateProfile(client, tenantId, CFG.profileStregaName, 'Strega smart irrigation valve (LoRaWAN 1.0.3 OTAA)');
+  const stregaCodecScript = readCodecScript(CFG.stregaCodecPath, 'STREGA');
+  const stregaProfileId = await getOrCreateProfileWithCodec(client, tenantId, CFG.profileStregaName, 'Strega smart irrigation valve (LoRaWAN 1.0.3 OTAA)', stregaCodecScript);
   const lsn50CodecScript = readCodecScript(CFG.lsn50CodecPath, 'LSN50');
   const lsn50ProfileId = await getOrCreateProfileWithCodec(client, tenantId, CFG.profileLsn50Name, 'Dragino LSN50 temperature & dendrometer ADC (LoRaWAN 1.0.3 OTAA)', lsn50CodecScript);
   const rak10701ProfileId = await getOrCreateProfile(client, tenantId, CFG.profileRakName, 'RAK10701 LoRaWAN coverage field tester');

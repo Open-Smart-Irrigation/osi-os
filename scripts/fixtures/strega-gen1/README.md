@@ -1,0 +1,4 @@
+- The vendor Gen1 decoder returns Battery, Valve, Tamper, Cable, DI_0, DI_1, Leakage, Fraud, Temperature, Hygrometry.
+- Confirm Valve bit semantics with two known physical states on Uganda before finalizing OPEN/CLOSED mapping.
+- Confirm whether Battery is true percent for Gen1 and should map to bat_pct.
+- Confirm whether Temperature and Hygrometry should populate ambient_temperature and relative_humidity.
