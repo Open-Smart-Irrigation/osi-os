@@ -71,6 +71,32 @@ const weatherTabSource = fs.readFileSync(weatherTabPath, 'utf8');
 const flows = JSON.parse(fs.readFileSync(flowPath, 'utf8'));
 const pendingChecks = [];
 
+const sharedStregaIngressNode = flows.find((node) => node.id === 'e73a11a2a36aab22');
+if (!sharedStregaIngressNode) {
+  fail('missing shared STREGA ingest node e73a11a2a36aab22');
+} else {
+  if (sharedStregaIngressNode.name !== 'Local Device Uplinks') {
+    fail(`shared STREGA ingest node renamed unexpectedly: ${JSON.stringify(sharedStregaIngressNode.name)}`);
+  } else {
+    console.log('OK shared STREGA ingest node renamed to Local Device Uplinks');
+  }
+
+  if (sharedStregaIngressNode.topic !== 'application/+/device/+/event/up') {
+    fail(`shared STREGA ingest node topic narrowed unexpectedly: ${JSON.stringify(sharedStregaIngressNode.topic)}`);
+  } else {
+    console.log('OK shared STREGA ingest topic remains application/+/device/+/event/up');
+  }
+}
+
+if (
+  chirpstackBootstrapScript.includes("node.id === 'e73a11a2a36aab22'") &&
+  chirpstackBootstrapScript.includes("application/${sensorsAppId}/device/#")
+) {
+  fail('chirpstack-bootstrap.js still rewrites the shared STREGA ingest node to the sensors-only topic');
+} else {
+  console.log('OK chirpstack-bootstrap.js preserves the shared STREGA ingest topic');
+}
+
 const requiredHttpRoutes = [
   '/api/account-link',
   '/api/account-link/status',

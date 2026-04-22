@@ -2630,7 +2630,7 @@
     "id": "e73a11a2a36aab22",
     "type": "mqtt in",
     "z": "49e87447205bb849",
-    "name": "KIWI IN",
+    "name": "Local Device Uplinks",
     "topic": "application/+/device/+/event/up",
     "qos": "2",
     "datatype": "auto-detect",

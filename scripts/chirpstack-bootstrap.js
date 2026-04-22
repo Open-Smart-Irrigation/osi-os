@@ -329,13 +329,6 @@ function updateFlowsJson(sensorsAppId, actuatorsAppId, fieldTesterAppId) {
   const flows = JSON.parse(fs.readFileSync(CFG.flowsJson, 'utf8'));
   let changes = 0;
 
-  const kiwiMqtt = flows.find((node) => node.id === 'e73a11a2a36aab22');
-  if (kiwiMqtt && !kiwiMqtt.topic.includes(sensorsAppId)) {
-    kiwiMqtt.topic = `application/${sensorsAppId}/device/#`;
-    console.log(`  ✓ Sensor_KIWI MQTT topic -> application/${sensorsAppId}/device/#`);
-    changes++;
-  }
-
   const lsn50Mqtt = flows.find((node) => node.id === 'lsn50-mqtt-in');
   if (lsn50Mqtt && !lsn50Mqtt.topic.includes(sensorsAppId)) {
     lsn50Mqtt.topic = `application/${sensorsAppId}/device/#`;
