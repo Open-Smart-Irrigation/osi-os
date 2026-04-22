@@ -28,11 +28,7 @@ const seedDendroHistoryDatabasePaths = [
   path.resolve(__dirname, '..', 'conf', 'full_raspberrypi_bcm27xx_bcm2712', 'files', 'usr', 'share', 'db', 'farming.db'),
   path.resolve(__dirname, '..', 'database', 'farming.db')
 ];
-const batPctDatabasePaths = [
-  path.resolve(__dirname, '..', 'conf', 'full_raspberrypi_bcm27xx_bcm2712', 'files', 'usr', 'share', 'db', 'farming.db'),
-  path.resolve(__dirname, '..', 'database', 'farming.db'),
-  path.resolve(__dirname, '..', 'web', 'react-gui', 'farming.db')
-];
+const batPctDatabasePaths = seedDatabasePaths;
 const reactGuiApiPath = path.resolve(__dirname, '..', 'web', 'react-gui', 'src', 'services', 'api.ts');
 const farmingTypesPath = path.resolve(__dirname, '..', 'web', 'react-gui', 'src', 'types', 'farming.ts');
 const dendroMonitorPath = path.resolve(__dirname, '..', 'web', 'react-gui', 'src', 'components', 'farming', 'DendrometerMonitor.tsx');
