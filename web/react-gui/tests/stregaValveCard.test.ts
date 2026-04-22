@@ -74,8 +74,17 @@ async function renderStregaCard(device: Device): Promise<string> {
 
 function getFooterText(html: string): string {
   const dom = new JSDOM(html);
-  const paragraphs = Array.from(dom.window.document.querySelectorAll('p'));
-  return paragraphs[paragraphs.length - 1]?.textContent ?? '';
+  const footerRoot = Array.from(dom.window.document.querySelectorAll('div')).find((node) => {
+    const className = node.getAttribute('class') || '';
+    return className.includes('mt-3') && className.includes('border-t') && className.includes('pt-3');
+  });
+  const footerMeta = footerRoot
+    ? Array.from(footerRoot.querySelectorAll('div')).find((node) => {
+        const className = node.getAttribute('class') || '';
+        return className.includes('shrink-0') && className.includes('items-center') && className.includes('gap-2');
+      })?.querySelector('p')
+    : null;
+  return footerMeta?.textContent?.trim() ?? '';
 }
 
 test('explicit motorized model wins over legacy name heuristics', () => {
