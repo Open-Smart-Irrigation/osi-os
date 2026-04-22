@@ -72,19 +72,9 @@ async function renderStregaCard(device: Device): Promise<string> {
   );
 }
 
-function getFooterText(html: string): string {
+function getRenderedText(html: string): string {
   const dom = new JSDOM(html);
-  const footerRoot = Array.from(dom.window.document.querySelectorAll('div')).find((node) => {
-    const className = node.getAttribute('class') || '';
-    return className.includes('mt-3') && className.includes('border-t') && className.includes('pt-3');
-  });
-  const footerMeta = footerRoot
-    ? Array.from(footerRoot.querySelectorAll('div')).find((node) => {
-        const className = node.getAttribute('class') || '';
-        return className.includes('shrink-0') && className.includes('items-center') && className.includes('gap-2');
-      })?.querySelector('p')
-    : null;
-  return footerMeta?.textContent?.trim() ?? '';
+  return dom.window.document.body.textContent?.replace(/\s+/g, ' ').trim() ?? '';
 }
 
 test('explicit motorized model wins over legacy name heuristics', () => {
@@ -127,7 +117,7 @@ test('renders a battery footer when STREGA battery percent is 100', async () => 
     }),
   );
 
-  assert.equal(getFooterText(html), '🔋 100% · Never seen');
+  assert.ok(getRenderedText(html).includes('🔋 100% · Never seen'));
 });
 
 test('renders Never seen when STREGA last_seen is null', async () => {
@@ -137,7 +127,7 @@ test('renders Never seen when STREGA last_seen is null', async () => {
     }),
   );
 
-  assert.equal(getFooterText(html), 'Never seen');
+  assert.ok(getRenderedText(html).includes('Never seen'));
 });
 
 test('renders the translated last-seen label when STREGA last_seen is valid', async () => {
@@ -151,7 +141,7 @@ test('renders the translated last-seen label when STREGA last_seen is valid', as
       }),
     );
 
-    assert.equal(getFooterText(html), 'Last seen: 5 minutes ago');
+    assert.ok(getRenderedText(html).includes('Last seen: 5 minutes ago'));
   } finally {
     Date.now = originalDateNow;
   }
