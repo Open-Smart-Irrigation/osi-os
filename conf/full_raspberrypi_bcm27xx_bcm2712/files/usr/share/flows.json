@@ -8216,20 +8216,24 @@
     "id": "strega-sql-fn",
     "type": "function",
     "z": "49e87447205bb849",
-    "name": "Build STREGA SQL",
+    "name": "Persist STREGA Uplink",
     "outputs": 1,
     "noerr": 0,
     "initialize": "",
     "finalize": "",
-    "libs": [],
+    "libs": [
+      {
+        "var": "osiDb",
+        "module": "osi-db-helper"
+      }
+    ],
     "x": 1210,
     "y": 260,
     "wires": [
       [
-        "d756d419c7b22ee0",
-        "acecb8b0c92fb370"
+        "18559caeee39ebbd"
       ]
     ],
-    "func": "const d = msg.formattedData;\nif (!d || !d.devEui) {\n  node.error('formattedData missing', msg);\n  return null;\n}\n\nfunction ss(value) {\n  if (value === undefined || value === null || value === '') return 'NULL';\n  return \"'\" + String(value).replace(/'/g, \"''\") + \"'\";\n}\n\nfunction sn(value) {\n  if (value === undefined || value === null || value === '') return 'NULL';\n  const numeric = Number(value);\n  return Number.isFinite(numeric) ? String(numeric) : 'NULL';\n}\n\nconst insertSql = [\n  'INSERT INTO device_data',\n  '(deveui, recorded_at, ambient_temperature, relative_humidity, bat_pct)',\n  'VALUES (' + ss(d.devEui) + ', ' + ss(d.timestamp) + ', ' + sn(d.ambientTemperature) + ', ' + sn(d.relativeHumidity) + ', ' + sn(d.batPct) + ')'\n].join(' ');\n\nlet updateSql = 'UPDATE devices SET current_state = ' + (d.currentState ? ss(d.currentState) : 'current_state') + ', updated_at = ' + ss(d.timestamp);\nif (d.currentState) {\n  updateSql += \", sync_version = CASE WHEN COALESCE(current_state, '') <> \" + ss(d.currentState) + ' THEN COALESCE(sync_version, 0) + 1 ELSE sync_version END';\n}\nupdateSql += ' WHERE deveui = ' + ss(d.devEui);\n\nmsg.topic = insertSql + '; ' + updateSql + ';';\nmsg.payload = msg.topic;\nmsg.insert_debug = {\n  source: 'strega_insert_literal_device_data',\n  deveui: d.devEui,\n  recorded_at: d.timestamp,\n  current_state: d.currentState || null,\n  bat_pct: d.batPct,\n  ambient_temperature: d.ambientTemperature,\n  relative_humidity: d.relativeHumidity\n};\nnode.status({ fill: 'green', shape: 'dot', text: 'SQL STREGA ' + d.devEui });\nreturn msg;"
+    "func": "return (async () => {\n  const d = msg.formattedData;\n  if (!d || !d.devEui) {\n    node.error('formattedData missing', msg);\n    return null;\n  }\n\n  const devEui = String(d.devEui).trim().toUpperCase();\n  const recordedAt = String(d.timestamp || new Date().toISOString()).trim();\n  const db = new osiDb.Database('/data/db/farming.db');\n  const q = (sql, params = []) => new Promise((resolve, reject) => db.all(sql, params, (error, rows) => error ? reject(error) : resolve(rows || [])));\n  const run = (sql, params = []) => new Promise((resolve, reject) => db.run(sql, params, (error) => error ? reject(error) : resolve()));\n  const close = () => new Promise((resolve) => db.close(() => resolve()));\n\n  try {\n    await run('BEGIN IMMEDIATE');\n\n    const deviceRows = await q(\n      'SELECT current_state, sync_version FROM devices WHERE deveui = ? LIMIT 1',\n      [devEui]\n    );\n    const existingDevice = deviceRows[0] || null;\n    const nextState = d.currentState == null ? null : String(d.currentState).trim().toUpperCase();\n    const currentState = existingDevice && existingDevice.current_state != null\n      ? String(existingDevice.current_state).trim().toUpperCase()\n      : null;\n    const stateChanged = !!(nextState && nextState !== currentState);\n\n    await run(\n      'INSERT INTO device_data (deveui, recorded_at, ambient_temperature, relative_humidity, bat_pct) VALUES (?, ?, ?, ?, ?)',\n      [devEui, recordedAt, d.ambientTemperature ?? null, d.relativeHumidity ?? null, d.batPct ?? null]\n    );\n\n    if (stateChanged) {\n      await run(\n        'UPDATE devices SET current_state = ?, updated_at = ?, sync_version = COALESCE(sync_version, 0) + 1 WHERE deveui = ?',\n        [nextState, recordedAt, devEui]\n      );\n    }\n\n    await run('COMMIT');\n    msg.payload = {\n      source: 'strega-local-persistence',\n      deveui: devEui,\n      recorded_at: recordedAt,\n      ambient_temperature: d.ambientTemperature ?? null,\n      relative_humidity: d.relativeHumidity ?? null,\n      bat_pct: d.batPct ?? null,\n      current_state: stateChanged ? nextState : null,\n      device_state_updated: stateChanged\n    };\n    node.status({ fill: stateChanged ? 'green' : 'blue', shape: 'dot', text: (stateChanged ? 'STREGA state saved ' : 'STREGA stored ') + devEui });\n    return msg;\n  } catch (error) {\n    try {\n      await run('ROLLBACK');\n    } catch (_) {}\n    node.status({ fill: 'red', shape: 'ring', text: 'STREGA persist failed ' + devEui });\n    node.error('STREGA persistence failed: ' + String(error && error.message ? error.message : error), msg);\n    return null;\n  } finally {\n    try {\n      await close();\n    } catch (_) {}\n  }\n})().catch((error) => {\n  node.error('STREGA persistence failed: ' + String(error && error.message ? error.message : error), msg);\n  return null;\n});"
   }
 ]

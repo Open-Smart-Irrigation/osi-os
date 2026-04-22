@@ -184,7 +184,7 @@ const requiredFunctionNodes = [
   'Build Special Command ACK',
   'Build LSN50 mode downlink',
   'Process STREGA',
-  'Build STREGA SQL',
+  'Persist STREGA Uplink',
   'Process S2120',
   'Aggregate Zone Rain',
   'Get Zone Assignments',
@@ -827,6 +827,12 @@ expectLibById('8809bb5239dfb3d4', 'dendro', 'osi-dendro-helper', 'imports osi-de
 expectIncludesById('strega-sql-fn', 'INSERT INTO device_data', 'persists STREGA telemetry into device_data');
 expectIncludesById('strega-sql-fn', 'ambient_temperature, relative_humidity, bat_pct', 'stores decoded STREGA telemetry in local device_data columns');
 expectIncludesById('strega-sql-fn', 'UPDATE devices SET current_state =', 'updates the canonical local STREGA valve state on uplink');
+expectLibById('strega-sql-fn', 'osiDb', 'osi-db-helper', 'opens the local STREGA database directly');
+expectIncludesById('strega-sql-fn', 'BEGIN IMMEDIATE', 'wraps STREGA persistence in a transaction');
+expectIncludesById('strega-sql-fn', 'COMMIT', 'commits the STREGA transaction after a successful insert and optional state update');
+expectIncludesById('strega-sql-fn', 'ROLLBACK', 'rolls back failed STREGA persistence attempts');
+expectExcludesById('strega-sql-fn', "msg.topic = insertSql + '; ' + updateSql + ';'", 'the old multi-statement sqlite topic builder');
+expectExcludesById('strega-sql-fn', 'target_state', 'passive STREGA uplinks from touching target_state');
 expectIncludesById('lsn50-sql-fn', 'lsn50_mode_code, lsn50_mode_label, lsn50_mode_observed_at', 'persists observed LSN50 mode into device_data');
 expectIncludesById('lsn50-sql-fn', 'rain_mm_per_hour, rain_mm_per_10min, rain_mm_today, rain_delta_status', 'persists interval-aware rain metadata into device_data');
 expectIncludesById('lsn50-sql-fn', 'flow_liters_per_min, flow_liters_per_10min, flow_liters_today, flow_delta_status', 'persists interval-aware flow metadata into device_data');
