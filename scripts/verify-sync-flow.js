@@ -1040,6 +1040,7 @@ expectIncludes('Build Telemetry', 'convertHzToKPa(numberOrNull(obj.watermark1_fr
 expectIncludes('Build Telemetry', "var isLsn50 = profileKind === 'DRAGINO_LSN50';", 'gates LSN50-only telemetry fields by profile');
 expectIncludes('Build Telemetry', 'var observedModeCode = isLsn50 && rawLsn50 && rawLsn50.modeCode != null ? rawLsn50.modeCode : null;', 'avoids assigning LSN50 mode codes to Kiwi telemetry');
 expectIncludes('Build Telemetry', "profileKind === 'STREGA_VALVE'", 'skips valve uplinks in sensor telemetry mirroring');
+expectIncludes('Build Telemetry', 'normalizeStregaEnvironment', 'applies sentinel-aware STREGA environmental normalization in cloud telemetry');
 expectIncludes('Build Telemetry', 'if (!profileKind && swtWm1 === null && swtWm2 === null', 'skips unknown no-data uplinks instead of defaulting them to Kiwi');
 expectIncludes('Build Telemetry', 'loadLsn50Config', 'loads local dendrometer config before telemetry conversion');
 expectIncludes('Build Telemetry', 'var rawLsn50 = isLsn50 && data.data ? dendro.decodeRawAdcPayload(data.data) : null;', 'reuses shared raw LSN50 ADC decoding in telemetry mirroring');
@@ -1053,6 +1054,7 @@ expectIncludesById('81c98fb07344a787', "env.get('CHIRPSTACK_PROFILE_CLOVER')", '
 expectIncludesById('strega-process-fn', "getProfileKind(data.deviceInfo || {})", 'derives STREGA profile routing on the dedicated edge path');
 expectIncludesById('strega-process-fn', 'decodeStregaFallback', 'falls back to the managed STREGA codec when ChirpStack has no decoded object');
 expectIncludesById('strega-process-fn', 'normalizeBatteryPercent', 'normalizes Gen1 STREGA battery values for local storage');
+expectIncludesById('strega-process-fn', 'normalizeStregaEnvironment', 'drops the FFFF/FFFF sentinel environmental pair in local storage');
 expectIncludesById('strega-process-fn', 'normalizeStateFromValveBit', 'maps the Gen1 STREGA valve bit into local OPEN/CLOSED state');
 expectIncludes('Decode LSN50', 'const rawDecoded = data.data ? dendro.decodeRawAdcPayload(data.data) : null;', 'uses the shared raw LSN50 ADC decoder');
 expectIncludes('Decode LSN50', 'adcCh1V = dendro.toFiniteNumber(obj.ADC_CH1V);', 'reads ADC_CH1V from decoded MOD3 payloads');
@@ -1967,6 +1969,83 @@ if (!dendroHelperPath) {
         return [];
       };
     }
+
+    pendingChecks.push((async () => {
+      const processedMsg = await executeFunctionNodeById(
+        'strega-process-fn',
+        {
+          payload: {
+            deviceInfo: {
+              devEui: '70B3D57708000334',
+              deviceProfileName: 'STREGA',
+              deviceProfileId: 'strega-profile',
+            },
+            object: {
+              Battery: 100,
+              Valve: '0',
+              Temperature: 125,
+              Hygrometry: 100,
+            },
+            fPort: 4,
+            time: '2026-04-22T00:00:00.000Z',
+          },
+        },
+        {
+          scope: {
+            osiDb: createMockOsiDb((sql) => {
+              if (sql.includes('SELECT type_id FROM devices')) {
+                return [{ type_id: 'STREGA_VALVE' }];
+              }
+              return [];
+            }),
+          },
+        }
+      );
+      const formatted = processedMsg.formattedData || {};
+      expectEqual(formatted.batteryRaw, 100, 'STREGA process fixture preserves the raw battery value');
+      expectEqual(formatted.batPct, 100, 'STREGA process fixture preserves the normalized battery percent');
+      expectEqual(formatted.ambientTemperature, null, 'STREGA process fixture drops the sentinel ambient temperature');
+      expectEqual(formatted.relativeHumidity, null, 'STREGA process fixture drops the sentinel relative humidity');
+      expectEqual(formatted.currentState, 'CLOSED', 'STREGA process fixture preserves the valve state');
+    })().catch((error) => {
+      fail(`failed to execute STREGA process fixture: ${error.message}`);
+    }));
+
+    pendingChecks.push((async () => {
+      const telemetryMsg = await executeFunctionNodeById(
+        '8809bb5239dfb3d4',
+        {
+          payload: {
+            deviceInfo: {
+              devEui: '70B3D57708000334',
+              deviceProfileName: 'STREGA',
+              deviceProfileId: 'strega-profile',
+            },
+            object: {
+              Battery: 100,
+              Valve: '0',
+              Temperature: 125,
+              Hygrometry: 100,
+            },
+            time: '2026-04-22T00:00:00.000Z',
+          },
+        },
+        {
+          env: {
+            DEVICE_EUI: '70B3D57708000334',
+            CHIRPSTACK_PROFILE_STREGA: 'strega-profile',
+          },
+        }
+      );
+      const payload = JSON.parse(String(telemetryMsg && telemetryMsg.payload ? telemetryMsg.payload : '{}'));
+      expectEqual(payload.battery_raw, 100, 'STREGA telemetry fixture preserves the raw battery value');
+      expectEqual(payload.bat_pct, 100, 'STREGA telemetry fixture preserves the normalized battery percent');
+      expectEqual(payload.ambient_temperature, null, 'STREGA telemetry fixture drops the sentinel ambient temperature');
+      expectEqual(payload.relative_humidity, null, 'STREGA telemetry fixture drops the sentinel relative humidity');
+      expectEqual(payload.current_state, 'CLOSED', 'STREGA telemetry fixture preserves the valve state');
+    })().catch((error) => {
+      fail(`failed to execute STREGA telemetry fixture: ${error.message}`);
+    }));
 
     pendingChecks.push((async () => {
       const [processedMsg, rainOut] = await executeFunctionNodeById(

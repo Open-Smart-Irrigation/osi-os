@@ -119,14 +119,11 @@ function verifyDecodeContract(decodeUplink, fixture) {
   assert.ok(Object.prototype.hasOwnProperty.call(decoded.data, 'Battery'), 'decodeUplink must expose Battery for the sample');
   assert.equal(Number(decoded.data.Battery), fixture.expected.Battery, 'fixture should preserve the captured raw battery value');
   assert.equal(String(decoded.data.Valve), fixture.expected.Valve, 'fixture should preserve the captured raw valve bit');
-  assert.equal(Number(decoded.data.Temperature), 125, 'fixture should preserve the captured sentinel temperature');
-  assert.equal(Number(decoded.data.Hygrometry), 100, 'fixture should preserve the captured sentinel hygrometry');
-  assert.equal(
-    Number(decoded.data.Temperature) === 125 && Number(decoded.data.Hygrometry) === 100,
-    fixture.expected.TemperatureSentinel && fixture.expected.HygrometrySentinel,
-    'fixture should be recognized as the sentinel environmental sample',
-  );
-  console.log('OK managed STREGA codec decodes the Uganda Gen1 fixture');
+  assert.ok(Object.prototype.hasOwnProperty.call(decoded.data, 'Temperature'), 'decodeUplink must expose Temperature for the sample');
+  assert.ok(Object.prototype.hasOwnProperty.call(decoded.data, 'Hygrometry'), 'decodeUplink must expose Hygrometry for the sample');
+  assert.equal(decoded.data.Temperature, null, 'fixture should normalize the sentinel temperature to null');
+  assert.equal(decoded.data.Hygrometry, null, 'fixture should normalize the sentinel hygrometry to null');
+  console.log('OK managed STREGA codec decodes the Uganda Gen1 fixture with null environmental telemetry');
   return decoded;
 }
 
@@ -143,7 +140,11 @@ async function verifyStregaNormalizationContract(flows, fixture, decoded) {
           deviceProfileName: 'STREGA',
           deviceProfileId: 'strega-profile',
         },
-        object: decoded.data,
+        object: {
+          ...decoded.data,
+          Temperature: 125,
+          Hygrometry: 100,
+        },
         fPort: fixture.fPort,
         time: '2026-04-22T00:00:00.000Z',
       },
@@ -184,6 +185,8 @@ async function verifyStregaNormalizationContract(flows, fixture, decoded) {
   assert.equal(resolved.formattedData.ambientTemperature, null, 'normalized ambient_temperature should drop the sentinel env reading');
   assert.equal(resolved.formattedData.relativeHumidity, null, 'normalized relative_humidity should drop the sentinel env reading');
   assert.equal(resolved.formattedData.batPct, 100, 'normalized bat_pct should preserve the numeric battery percent');
+  assert.equal(resolved.formattedData.batteryRaw, 100, 'normalized batteryRaw should preserve the raw battery value');
+  assert.equal(resolved.formattedData.currentState, 'CLOSED', 'normalized currentState should preserve the valve bit');
 }
 
 function verifyCommandMatrix(flows, fixture) {

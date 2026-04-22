@@ -220,11 +220,17 @@ function Decode(fPort, bytes) {
   counter_A    = parseInt(msg1.substr(3,6), 16);
   analog_A     = parseInt(msg1.substr(3,4), 16);
   }
+
+  if (box_temp === 65535 && box_hum === 65535) {
+    temperature = null;
+    hygrometry = null;
+  }
   
   function pad(num, len) { 
     return ("00000000" + num).substr(-len);
     }
   function roundToTwo(num) {    
+    if (num === null || num === undefined || num === '') return null;
     return +(Math.round(num + "e+2")  + "e-2");
   }
   function dec_to_bho (n, base) {
