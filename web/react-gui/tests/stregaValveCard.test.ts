@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
+import { JSDOM } from 'jsdom';
 import React from 'react';
 import {
   I18nextProvider,
@@ -30,9 +31,9 @@ function buildDevice(overrides: Partial<Device> = {}): Device {
   };
 }
 
-function renderStregaCard(device: Device): string {
+async function renderStregaCard(device: Device): Promise<string> {
   const i18n = i18next.createInstance();
-  i18n.use(initReactI18next).init({
+  await i18n.use(initReactI18next).init({
     lng: 'en',
     fallbackLng: 'en',
     ns: ['devices', 'common'],
@@ -71,6 +72,12 @@ function renderStregaCard(device: Device): string {
   );
 }
 
+function getFooterText(html: string): string {
+  const dom = new JSDOM(html);
+  const paragraphs = Array.from(dom.window.document.querySelectorAll('p'));
+  return paragraphs[paragraphs.length - 1]?.textContent ?? '';
+}
+
 test('explicit motorized model wins over legacy name heuristics', () => {
   const device = buildDevice({
     name: 'Standard valve',
@@ -102,8 +109,8 @@ test('battery footer renders when STREGA battery percent is available', () => {
   );
 });
 
-test('renders a battery footer when STREGA battery percent is 100', () => {
-  const html = renderStregaCard(
+test('renders a battery footer when STREGA battery percent is 100', async () => {
+  const html = await renderStregaCard(
     buildDevice({
       latest_data: {
         bat_pct: 100,
@@ -111,31 +118,31 @@ test('renders a battery footer when STREGA battery percent is 100', () => {
     }),
   );
 
-  assert.match(html, /🔋 100%/);
+  assert.equal(getFooterText(html), '🔋 100% · Never seen');
 });
 
-test('renders Never seen when STREGA last_seen is null', () => {
-  const html = renderStregaCard(
+test('renders Never seen when STREGA last_seen is null', async () => {
+  const html = await renderStregaCard(
     buildDevice({
       last_seen: null,
     }),
   );
 
-  assert.match(html, /Never seen/);
+  assert.equal(getFooterText(html), 'Never seen');
 });
 
-test('renders the translated last-seen label when STREGA last_seen is valid', () => {
+test('renders the translated last-seen label when STREGA last_seen is valid', async () => {
   const originalDateNow = Date.now;
   Date.now = () => new Date('2026-04-23T12:00:00Z').getTime();
 
   try {
-    const html = renderStregaCard(
+    const html = await renderStregaCard(
       buildDevice({
         last_seen: '2026-04-23T11:55:00Z',
       }),
     );
 
-    assert.match(html, /Last seen: 5 minutes ago/);
+    assert.equal(getFooterText(html), 'Last seen: 5 minutes ago');
   } finally {
     Date.now = originalDateNow;
   }
