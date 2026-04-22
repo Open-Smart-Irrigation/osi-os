@@ -804,14 +804,21 @@ expectIncludes('Apply Config', 'dendro_baseline_pending = 0,', 'clears the pendi
 expectLibById('lsn50-decode-fn', 'dendro', 'osi-dendro-helper', 'imports osi-dendro-helper in Decode LSN50');
 expectLibById('lsn50-apply-config', 'dendro', 'osi-dendro-helper', 'imports osi-dendro-helper in Apply Config');
 expectLibById('8809bb5239dfb3d4', 'dendro', 'osi-dendro-helper', 'imports osi-dendro-helper in Build Telemetry');
-expectIncludesById('strega-sql-fn', 'await db.transaction(async (tx) => {', 'uses the queued helper transaction primitive for STREGA persistence');
-expectIncludesById('strega-sql-fn', 'INSERT INTO device_data', 'persists STREGA telemetry into device_data');
+expectIncludesById('strega-sql-fn', 'await db.transaction(async (tx) => {', 'serializes STREGA persistence through one helper-scoped transaction');
+expectIncludesById('strega-sql-fn', 'await tx.run(', 'issues parameterized statements inside the transaction scope');
+expectIncludesById('strega-sql-fn', 'INSERT INTO device_data (deveui, recorded_at, ambient_temperature, relative_humidity, bat_pct) VALUES (?, ?, ?, ?, ?)', 'persists STREGA telemetry into device_data with parameters');
+expectIncludesById('strega-sql-fn', "UPDATE devices SET current_state = ?, updated_at = ?, sync_version = COALESCE(sync_version, 0) + 1 WHERE deveui = ? AND COALESCE(UPPER(current_state), '') <> ?", 'conditionally updates the canonical local STREGA valve state on uplink');
 expectIncludesById('strega-sql-fn', 'ambient_temperature, relative_humidity, bat_pct', 'stores decoded STREGA telemetry in local device_data columns');
-expectIncludesById('strega-sql-fn', 'UPDATE devices SET current_state =', 'updates the canonical local STREGA valve state on uplink');
-expectExcludesById('strega-sql-fn', "msg.topic = insertSql + '; ' + updateSql + ';';", 'old multi-statement STREGA SQL builder');
-expectExcludesById('strega-sql-fn', "db.run('BEGIN');", 'multi-await BEGIN transaction pattern');
-expectExcludesById('strega-sql-fn', "db.run('ROLLBACK');", 'multi-await ROLLBACK transaction pattern');
-expectExcludesById('strega-sql-fn', "db.run('COMMIT');", 'multi-await COMMIT transaction pattern');
+expectIncludesById('strega-sql-fn', 'current_state: observedState', 'returns the observed local STREGA valve state');
+expectExcludesById('strega-sql-fn', 'BEGIN IMMEDIATE;', 'the old manual transaction opener inside the function node');
+expectExcludesById('strega-sql-fn', 'COMMIT;', 'the old manual transaction committer inside the function node');
+expectExcludesById('strega-sql-fn', 'ROLLBACK;', 'the old manual rollback branch inside the function node');
+expectLibById('strega-sql-fn', 'osiDb', 'osi-db-helper', 'opens the local STREGA database directly');
+expectExcludesById('strega-sql-fn', "await run('BEGIN IMMEDIATE')", 'the old multi-await transaction entrypoint');
+expectExcludesById('strega-sql-fn', "await run('COMMIT')", 'the old multi-await commit call');
+expectExcludesById('strega-sql-fn', "await run('ROLLBACK')", 'the old multi-await rollback call');
+expectExcludesById('strega-sql-fn', "msg.topic = insertSql + '; ' + updateSql + ';'", 'the old multi-statement sqlite topic builder');
+expectExcludesById('strega-sql-fn', 'target_state', 'passive STREGA uplinks from touching target_state');
 expectIncludesById('lsn50-sql-fn', 'lsn50_mode_code, lsn50_mode_label, lsn50_mode_observed_at', 'persists observed LSN50 mode into device_data');
 expectIncludesById('lsn50-sql-fn', 'rain_mm_per_hour, rain_mm_per_10min, rain_mm_today, rain_delta_status', 'persists interval-aware rain metadata into device_data');
 expectIncludesById('lsn50-sql-fn', 'flow_liters_per_min, flow_liters_per_10min, flow_liters_today, flow_delta_status', 'persists interval-aware flow metadata into device_data');
@@ -1393,6 +1400,9 @@ const dbHelperPath = dbHelperCandidates.find((candidate) => fs.existsSync(candid
 if (!dbHelperPath) {
   fail(`missing DB helper module at one of: ${dbHelperCandidates.join(', ')}`);
 } else {
+  const dbHelperIndexPath = path.join(dbHelperPath, 'index.js');
+  const dbHelperSource = fs.existsSync(dbHelperIndexPath) ? fs.readFileSync(dbHelperIndexPath, 'utf8') : '';
+  expectFileIncludes('osi-db-helper/index.js', dbHelperSource, 'transaction(executor)', 'exposes the helper-scoped transaction primitive');
   try {
     const helper = require(dbHelperPath);
     for (const exportName of ['Database', 'getHealth', 'quickCheck']) {
@@ -1403,12 +1413,10 @@ if (!dbHelperPath) {
       }
     }
   } catch (error) {
-    const helperIndexPath = path.join(dbHelperPath, 'index.js');
-    const helperSource = fs.existsSync(helperIndexPath) ? fs.readFileSync(helperIndexPath, 'utf8') : '';
-    if (error.code === 'MODULE_NOT_FOUND' && helperSource) {
+    if (error.code === 'MODULE_NOT_FOUND' && dbHelperSource) {
       console.log(`OK DB helper source present despite missing local runtime deps: ${error.message}`);
       for (const exportName of ['Database', 'getHealth', 'quickCheck']) {
-        if (!helperSource.includes(exportName)) {
+        if (!dbHelperSource.includes(exportName)) {
           fail(`DB helper source missing export ${exportName}`);
         } else {
           console.log(`OK DB helper source includes ${exportName}`);
