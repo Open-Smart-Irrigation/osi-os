@@ -4,6 +4,7 @@ const fs = require('fs');
 const vm = require('vm');
 const path = require('path');
 const { execFileSync } = require('child_process');
+const { createRequire } = require('module');
 
 const flowPath = path.resolve(__dirname, '..', 'conf', 'full_raspberrypi_bcm27xx_bcm2712', 'files', 'usr', 'share', 'flows.json');
 const nodeRedRoot = path.resolve(__dirname, '..', 'conf', 'full_raspberrypi_bcm27xx_bcm2712', 'files', 'usr', 'share', 'node-red');
@@ -407,6 +408,262 @@ function createMockOsiDb(queryHandler) {
       }
     },
   };
+}
+
+function loadCommonJsFromSource(source, filename, injectedModules = {}) {
+  const moduleInstance = { exports: {} };
+  const dirname = path.dirname(filename);
+  const helperRequire = createRequire(filename);
+  const localRequire = (request) => {
+    if (Object.prototype.hasOwnProperty.call(injectedModules, request)) {
+      return injectedModules[request];
+    }
+    return helperRequire(request);
+  };
+  const sandbox = vm.createContext({
+    Buffer,
+    console,
+    Date,
+    Promise,
+    clearImmediate,
+    clearTimeout,
+    process,
+    setImmediate,
+    setTimeout,
+  });
+  const wrapped = `(function (exports, require, module, __filename, __dirname) {\n${source}\n})`;
+  const script = new vm.Script(wrapped, { filename });
+  const factory = script.runInContext(sandbox);
+  factory(moduleInstance.exports, localRequire, moduleInstance, filename, dirname);
+  return moduleInstance.exports;
+}
+
+function createFakeSqlite3ForTransactionVerification() {
+  const stateByFilename = new Map();
+
+  function getState(filename) {
+    if (!stateByFilename.has(filename)) {
+      stateByFilename.set(filename, {
+        journalMode: 'wal',
+        synchronous: 1,
+        committedTxLog: [],
+        pendingTransaction: null,
+        history: [],
+      });
+    }
+    return stateByFilename.get(filename);
+  }
+
+  function normalizeSql(sql) {
+    return String(sql || '')
+      .trim()
+      .replace(/;+\s*$/, '')
+      .replace(/\s+/g, ' ');
+  }
+
+  function normalizeArgs(sql, params, callback) {
+    if (typeof params === 'function') {
+      return { sql, params: undefined, callback: params };
+    }
+    return { sql, params, callback };
+  }
+
+  function respond(callback, context, error, rows, statement) {
+    if (typeof callback !== 'function') return;
+    process.nextTick(() => callback.call(context, error, rows, statement));
+  }
+
+  class FakeDatabase {
+    constructor(filename, callback) {
+      this.filename = filename;
+      this.state = getState(filename);
+      process.nextTick(() => {
+        if (typeof callback === 'function') {
+          callback.call(this, null);
+        }
+      });
+    }
+
+    execute(sql, params) {
+      const normalized = normalizeSql(sql);
+      const state = this.state;
+
+      if (/^PRAGMA journal_mode\s*=\s*WAL$/i.test(normalized)) {
+        state.journalMode = 'wal';
+        return [];
+      }
+      if (/^PRAGMA synchronous\s*=\s*NORMAL$/i.test(normalized)) {
+        state.synchronous = 1;
+        return [];
+      }
+      if (/^PRAGMA foreign_keys\s*=\s*ON$/i.test(normalized)) {
+        return [];
+      }
+      if (/^PRAGMA busy_timeout\s*=\s*5000$/i.test(normalized)) {
+        return [];
+      }
+      if (/^PRAGMA wal_autocheckpoint\s*=\s*1000$/i.test(normalized)) {
+        return [];
+      }
+      if (/^PRAGMA journal_mode$/i.test(normalized)) {
+        return [{ journal_mode: state.journalMode }];
+      }
+      if (/^PRAGMA synchronous$/i.test(normalized)) {
+        return [{ synchronous: state.synchronous }];
+      }
+      if (/^PRAGMA quick_check$/i.test(normalized)) {
+        return [{ quick_check: 'ok' }];
+      }
+      if (/^BEGIN(?: IMMEDIATE)?$/i.test(normalized)) {
+        if (state.pendingTransaction) {
+          throw new Error('transaction already active');
+        }
+        state.pendingTransaction = [];
+        state.history.push('BEGIN');
+        return [];
+      }
+      if (/^COMMIT$/i.test(normalized)) {
+        if (!state.pendingTransaction) {
+          throw new Error('commit without active transaction');
+        }
+        state.committedTxLog.push(...state.pendingTransaction);
+        state.pendingTransaction = null;
+        state.history.push('COMMIT');
+        return [];
+      }
+      if (/^ROLLBACK$/i.test(normalized)) {
+        if (!state.pendingTransaction) {
+          throw new Error('rollback without active transaction');
+        }
+        state.pendingTransaction = null;
+        state.history.push('ROLLBACK');
+        return [];
+      }
+      if (/^INSERT INTO tx_log\s*\(\s*label\s*\) VALUES \(\s*\?\s*\)$/i.test(normalized)) {
+        const label = params && params.length ? String(params[0]) : '';
+        const row = { label };
+        if (state.pendingTransaction) {
+          state.pendingTransaction.push(row);
+        } else {
+          state.committedTxLog.push(row);
+        }
+        state.history.push(`INSERT:${label}`);
+        return [];
+      }
+      if (/^SELECT label FROM tx_log(?: ORDER BY rowid)?$/i.test(normalized)) {
+        return state.committedTxLog
+          .concat(state.pendingTransaction || [])
+          .map((row) => ({ label: row.label }));
+      }
+
+      throw new Error(`unexpected SQL in fake sqlite3: ${sql}`);
+    }
+
+    all(...args) {
+      const { sql, params, callback } = normalizeArgs(...args);
+      try {
+        const rows = this.execute(sql, params);
+        respond(callback, this, null, rows, { sql, changes: 0, lastID: undefined });
+      } catch (error) {
+        respond(callback, this, error);
+      }
+    }
+
+    run(...args) {
+      const { sql, params, callback } = normalizeArgs(...args);
+      try {
+        this.execute(sql, params);
+        respond(callback, this, null, undefined, { sql, changes: 1, lastID: undefined });
+      } catch (error) {
+        respond(callback, this, error);
+      }
+    }
+
+    exec(sql, callback) {
+      const statements = String(sql || '')
+        .split(';')
+        .map((statement) => statement.trim())
+        .filter(Boolean);
+      try {
+        for (const statement of statements) {
+          this.execute(statement, undefined);
+        }
+        respond(callback, this, null, undefined, { sql, changes: 0, lastID: undefined });
+      } catch (error) {
+        respond(callback, this, error);
+      }
+    }
+
+    close(callback) {
+      respond(callback, this, null);
+    }
+  }
+
+  return {
+    Database: FakeDatabase,
+    OPEN_READONLY: 1,
+    OPEN_READWRITE: 2,
+    OPEN_CREATE: 4,
+    verbose() {
+      return this;
+    },
+  };
+}
+
+async function verifyDbHelperTransactionBehavior(dbHelperSource, dbHelperIndexPath) {
+  const fakeSqlite3 = createFakeSqlite3ForTransactionVerification();
+  const helper = loadCommonJsFromSource(dbHelperSource, dbHelperIndexPath, { sqlite3: fakeSqlite3 });
+  const database = new helper.Database('/tmp/osi-db-helper-transaction-test.sqlite');
+
+  const readLabels = async () => {
+    const result = await database.all('SELECT label FROM tx_log ORDER BY rowid');
+    const rows = Array.isArray(result) ? result : Array.isArray(result && result.rows) ? result.rows : [];
+    return rows.map((row) => row.label);
+  };
+
+  await database.transaction(async (tx) => {
+    await tx.run('INSERT INTO tx_log (label) VALUES (?)', ['commit-inner-write']);
+  });
+  const afterCommit = await readLabels();
+  expectCondition(
+    afterCommit.includes('commit-inner-write'),
+    'DB helper transaction commits inner queued writes',
+    'DB helper transaction did not commit the inner queued write'
+  );
+
+  let rollbackError = null;
+  try {
+    await database.transaction(async (tx) => {
+      await tx.run('INSERT INTO tx_log (label) VALUES (?)', ['rollback-inner-write']);
+      throw new Error('intentional transaction failure');
+    });
+  } catch (error) {
+    rollbackError = error;
+  }
+  expectCondition(
+    rollbackError instanceof Error,
+    'DB helper transaction surfaces failures for rollback paths',
+    'DB helper transaction did not surface the forced rollback failure'
+  );
+  const afterRollback = await readLabels();
+  expectCondition(
+    !afterRollback.includes('rollback-inner-write'),
+    'DB helper transaction rolls back inner queued writes',
+    'DB helper transaction left rolled-back writes visible'
+  );
+
+  await database.run('INSERT INTO tx_log (label) VALUES (?)', ['post-rollback-queued-write']);
+  const afterRecovery = await readLabels();
+  expectCondition(
+    afterRecovery.includes('post-rollback-queued-write'),
+    'DB helper queue recovers after a failed transaction',
+    'DB helper queue did not accept a later write after rollback'
+  );
+  expectCondition(
+    afterRecovery.includes('commit-inner-write') && !afterRecovery.includes('rollback-inner-write'),
+    'DB helper preserves committed rows and excludes rolled-back rows after queue recovery',
+    'DB helper transaction state leaked across the queue recovery check'
+  );
 }
 
 async function executeFunctionNodeById(nodeId, msg, options = {}) {
@@ -1414,6 +1671,11 @@ if (!dbHelperPath) {
   const dbHelperIndexPath = path.join(dbHelperPath, 'index.js');
   const dbHelperSource = fs.existsSync(dbHelperIndexPath) ? fs.readFileSync(dbHelperIndexPath, 'utf8') : '';
   expectFileIncludes('osi-db-helper/index.js', dbHelperSource, 'transaction(executor)', 'exposes the helper-scoped transaction primitive');
+  pendingChecks.push(
+    verifyDbHelperTransactionBehavior(dbHelperSource, dbHelperIndexPath).catch((error) => {
+      fail(`failed to verify DB helper transaction behavior: ${error.message}`);
+    })
+  );
   try {
     const helper = require(dbHelperPath);
     for (const exportName of ['Database', 'getHealth', 'quickCheck']) {
