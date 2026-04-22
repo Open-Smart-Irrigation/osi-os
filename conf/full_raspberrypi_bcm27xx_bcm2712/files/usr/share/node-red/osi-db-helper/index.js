@@ -64,6 +64,23 @@ function openDatabase(filename) {
   });
 }
 
+function createTransactionScope(database) {
+  return {
+    run(sql, params) {
+      return runRaw(database, 'run', sql, params).then(() => undefined);
+    },
+    all(sql, params) {
+      return runRaw(database, 'all', sql, params).then(({ rows }) => rows || []);
+    },
+    get(sql, params) {
+      return runRaw(database, 'all', sql, params).then(({ rows }) => (rows && rows[0]) || undefined);
+    },
+    exec(sql) {
+      return runRaw(database, 'exec', sql).then(() => undefined);
+    }
+  };
+}
+
 function ensureSharedDatabase(filename) {
   if (initPromise) {
     return initPromise;
@@ -164,6 +181,30 @@ class DatabaseFacade {
 
   run(...args) {
     return runQueued('run', args, () => undefined);
+  }
+
+  transaction(executor) {
+    if (typeof executor !== 'function') {
+      throw new TypeError('Database.transaction requires an executor function');
+    }
+    return enqueueOperation(async (database) => {
+      await runRaw(database, 'exec', 'BEGIN IMMEDIATE;');
+      const transaction = createTransactionScope(database);
+      try {
+        const result = await executor(transaction);
+        await runRaw(database, 'exec', 'COMMIT;');
+        return result;
+      } catch (error) {
+        try {
+          await runRaw(database, 'exec', 'ROLLBACK;');
+        } catch (rollbackError) {
+          if (error && typeof error === 'object') {
+            error.rollbackError = rollbackError;
+          }
+        }
+        throw error;
+      }
+    });
   }
 
   exec(sql, callback) {
