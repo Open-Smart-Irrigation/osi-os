@@ -28,6 +28,11 @@ const seedDendroHistoryDatabasePaths = [
   path.resolve(__dirname, '..', 'conf', 'full_raspberrypi_bcm27xx_bcm2712', 'files', 'usr', 'share', 'db', 'farming.db'),
   path.resolve(__dirname, '..', 'database', 'farming.db')
 ];
+const batPctDatabasePaths = [
+  path.resolve(__dirname, '..', 'conf', 'full_raspberrypi_bcm27xx_bcm2712', 'files', 'usr', 'share', 'db', 'farming.db'),
+  path.resolve(__dirname, '..', 'database', 'farming.db'),
+  path.resolve(__dirname, '..', 'web', 'react-gui', 'farming.db')
+];
 const reactGuiApiPath = path.resolve(__dirname, '..', 'web', 'react-gui', 'src', 'services', 'api.ts');
 const farmingTypesPath = path.resolve(__dirname, '..', 'web', 'react-gui', 'src', 'types', 'farming.ts');
 const dendroMonitorPath = path.resolve(__dirname, '..', 'web', 'react-gui', 'src', 'components', 'farming', 'DendrometerMonitor.tsx');
@@ -1349,6 +1354,7 @@ expectIncludes('Sync Init Schema + Triggers', 'ALTER TABLE device_data ADD COLUM
 expectIncludes('Sync Init Schema + Triggers', 'ALTER TABLE device_data ADD COLUMN dendro_ratio REAL', 'adds ratio dendrometer telemetry storage');
 expectIncludes('Sync Init Schema + Triggers', 'ALTER TABLE device_data ADD COLUMN dendro_mode_used TEXT', 'adds dendrometer path storage');
 expectIncludes('Sync Init Schema + Triggers', 'ALTER TABLE device_data ADD COLUMN dendro_stem_change_um REAL', 'adds baseline-relative stem-change storage to device_data');
+expectIncludes('Sync Init Schema + Triggers', 'ALTER TABLE device_data ADD COLUMN bat_pct REAL', 'adds STREGA battery percentage storage');
 expectIncludes('Sync Init Schema + Triggers', 'ALTER TABLE dendrometer_readings ADD COLUMN adc_ch0v REAL', 'adds backward-compatible CH0 storage to dendrometer_readings');
 expectIncludes('Sync Init Schema + Triggers', 'ALTER TABLE dendrometer_readings ADD COLUMN adc_ch1v REAL', 'adds CH1 storage to dendrometer_readings');
 expectIncludes('Sync Init Schema + Triggers', 'ALTER TABLE dendrometer_readings ADD COLUMN dendro_ratio REAL', 'adds ratio storage to dendrometer_readings');
@@ -1540,6 +1546,15 @@ for (const seedDatabasePath of seedDatabasePaths) {
     deviceDataColumns.has('dendro_saturation_side'),
     `${relativeSeedPath} includes dendro_saturation_side in the bundled device_data schema`,
     `${relativeSeedPath} is missing dendro_saturation_side in the bundled device_data schema`
+  );
+}
+for (const seedDatabasePath of batPctDatabasePaths) {
+  const relativeSeedPath = path.relative(path.resolve(__dirname, '..'), seedDatabasePath);
+  const deviceDataColumns = new Set(readTableColumns(seedDatabasePath, 'device_data'));
+  expectCondition(
+    deviceDataColumns.has('bat_pct'),
+    `${relativeSeedPath} includes bat_pct in the bundled device_data schema`,
+    `${relativeSeedPath} is missing bat_pct in the bundled device_data schema`
   );
 }
 for (const seedDatabasePath of seedDendroHistoryDatabasePaths) {
