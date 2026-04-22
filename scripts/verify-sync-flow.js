@@ -438,7 +438,7 @@ function loadCommonJsFromSource(source, filename, injectedModules = {}) {
   return moduleInstance.exports;
 }
 
-function createFakeSqlite3ForTransactionVerification() {
+function createFakeSqlite3ForTransactionVerification(failureLabel = '__fake-sqlite-run-failure__') {
   const stateByFilename = new Map();
 
   function getState(filename) {
@@ -541,6 +541,9 @@ function createFakeSqlite3ForTransactionVerification() {
       }
       if (/^INSERT INTO tx_log\s*\(\s*label\s*\) VALUES \(\s*\?\s*\)$/i.test(normalized)) {
         const label = params && params.length ? String(params[0]) : '';
+        if (label === failureLabel) {
+          throw new Error('forced fake sqlite3 run failure');
+        }
         const row = { label };
         if (state.pendingTransaction) {
           state.pendingTransaction.push(row);
@@ -611,7 +614,8 @@ function createFakeSqlite3ForTransactionVerification() {
 }
 
 async function verifyDbHelperTransactionBehavior(dbHelperSource, dbHelperIndexPath) {
-  const fakeSqlite3 = createFakeSqlite3ForTransactionVerification();
+  const transactionFailureLabel = '__fake-sqlite-run-failure__';
+  const fakeSqlite3 = createFakeSqlite3ForTransactionVerification(transactionFailureLabel);
   const helper = loadCommonJsFromSource(dbHelperSource, dbHelperIndexPath, { sqlite3: fakeSqlite3 });
   const database = new helper.Database('/tmp/osi-db-helper-transaction-test.sqlite');
 
@@ -631,37 +635,32 @@ async function verifyDbHelperTransactionBehavior(dbHelperSource, dbHelperIndexPa
     'DB helper transaction did not commit the inner queued write'
   );
 
-  let rollbackError = null;
-  try {
-    await database.transaction(async (tx) => {
-      await tx.run('INSERT INTO tx_log (label) VALUES (?)', ['rollback-inner-write']);
-      throw new Error('intentional transaction failure');
-    });
-  } catch (error) {
-    rollbackError = error;
-  }
+  const failingTransaction = database.transaction(async (tx) => {
+    await tx.run('INSERT INTO tx_log (label) VALUES (?)', ['rollback-inner-write']);
+    await tx.run('INSERT INTO tx_log (label) VALUES (?)', [transactionFailureLabel]);
+  });
+  const queuedRecoveryWrite = database.run('INSERT INTO tx_log (label) VALUES (?)', ['post-rollback-queued-write']);
+  const rollbackError = await failingTransaction.catch((error) => error);
   expectCondition(
-    rollbackError instanceof Error,
-    'DB helper transaction surfaces failures for rollback paths',
-    'DB helper transaction did not surface the forced rollback failure'
+    rollbackError instanceof Error && String(rollbackError.message || '').includes('forced fake sqlite3 run failure'),
+    'DB helper transaction surfaces a real fake DB operation failure',
+    'DB helper transaction did not surface the fake DB operation failure'
   );
+  await queuedRecoveryWrite;
   const afterRollback = await readLabels();
   expectCondition(
     !afterRollback.includes('rollback-inner-write'),
-    'DB helper transaction rolls back inner queued writes',
+    'DB helper transaction rolls back writes after a fake DB operation failure',
     'DB helper transaction left rolled-back writes visible'
   );
-
-  await database.run('INSERT INTO tx_log (label) VALUES (?)', ['post-rollback-queued-write']);
-  const afterRecovery = await readLabels();
   expectCondition(
-    afterRecovery.includes('post-rollback-queued-write'),
-    'DB helper queue recovers after a failed transaction',
-    'DB helper queue did not accept a later write after rollback'
+    afterRollback.includes('post-rollback-queued-write'),
+    'DB helper queue accepts a write queued before the failed transaction settled',
+    'DB helper queue did not accept the queued follow-up write after rollback'
   );
   expectCondition(
-    afterRecovery.includes('commit-inner-write') && !afterRecovery.includes('rollback-inner-write'),
-    'DB helper preserves committed rows and excludes rolled-back rows after queue recovery',
+    afterRollback.includes('commit-inner-write') && !afterRollback.includes(transactionFailureLabel),
+    'DB helper preserves committed rows and excludes the failed write after queue recovery',
     'DB helper transaction state leaked across the queue recovery check'
   );
 }
