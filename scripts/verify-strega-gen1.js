@@ -127,7 +127,7 @@ function verifyDecodeContract(decodeUplink, fixture) {
   return decoded;
 }
 
-async function verifyStregaNormalizationContract(flows, fixture, decoded) {
+async function verifyStregaNormalizationContract(flows, fixture, object, label) {
   const node = getFunctionNode(flows, 'Process STREGA');
   const sandbox = {
     Buffer,
@@ -140,11 +140,7 @@ async function verifyStregaNormalizationContract(flows, fixture, decoded) {
           deviceProfileName: 'STREGA',
           deviceProfileId: 'strega-profile',
         },
-        object: {
-          ...decoded.data,
-          Temperature: 125,
-          Hygrometry: 100,
-        },
+        object,
         fPort: fixture.fPort,
         time: '2026-04-22T00:00:00.000Z',
       },
@@ -180,13 +176,13 @@ async function verifyStregaNormalizationContract(flows, fixture, decoded) {
   const result = runScript(`(() => { ${node.func} })()`, sandbox, `${node.name}.vm.js`);
   const resolved = result && typeof result.then === 'function' ? await result : result;
 
-  assert.ok(resolved, `${node.name} must return a result`);
-  assert.ok(resolved.formattedData, `${node.name} must attach formattedData`);
-  assert.equal(resolved.formattedData.ambientTemperature, null, 'normalized ambient_temperature should drop the sentinel env reading');
-  assert.equal(resolved.formattedData.relativeHumidity, null, 'normalized relative_humidity should drop the sentinel env reading');
-  assert.equal(resolved.formattedData.batPct, 100, 'normalized bat_pct should preserve the numeric battery percent');
-  assert.equal(resolved.formattedData.batteryRaw, 100, 'normalized batteryRaw should preserve the raw battery value');
-  assert.equal(resolved.formattedData.currentState, 'CLOSED', 'normalized currentState should preserve the valve bit');
+  assert.ok(resolved, `${node.name} must return a result for ${label}`);
+  assert.ok(resolved.formattedData, `${node.name} must attach formattedData for ${label}`);
+  assert.equal(resolved.formattedData.ambientTemperature, null, `${label} should drop the sentinel env reading`);
+  assert.equal(resolved.formattedData.relativeHumidity, null, `${label} should drop the sentinel env reading`);
+  assert.equal(resolved.formattedData.batPct, 100, `${label} should preserve the numeric battery percent`);
+  assert.equal(resolved.formattedData.batteryRaw, 100, `${label} should preserve the raw battery value`);
+  assert.equal(resolved.formattedData.currentState, 'CLOSED', `${label} should preserve the valve state`);
 }
 
 function verifyCommandMatrix(flows, fixture) {
@@ -239,7 +235,20 @@ async function main() {
   const decodeUplink = loadCodec();
 
   const decoded = verifyDecodeContract(decodeUplink, fixture);
-  await verifyStregaNormalizationContract(flows, fixture, decoded);
+  const managedCodecObject = { ...decoded.data };
+  delete managedCodecObject.Temperature;
+  delete managedCodecObject.Hygrometry;
+  await verifyStregaNormalizationContract(flows, fixture, managedCodecObject, 'codec handoff');
+  await verifyStregaNormalizationContract(
+    flows,
+    fixture,
+    {
+      ...decoded.data,
+      Temperature: 125,
+      Hygrometry: 100,
+    },
+    'legacy sentinel object',
+  );
   verifyCommandMatrix(flows, fixture);
   console.log('OK Strega Gen1 smoke checks passed');
 }
