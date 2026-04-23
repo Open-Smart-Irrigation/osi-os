@@ -46,13 +46,15 @@ with open('$flow') as f:
     flows = json.load(f)
 mqtt_ins = [n for n in flows if n.get('type') == 'mqtt in']
 for m in mqtt_ins:
-    if m['topic'] != '$EXPECTED_TOPIC':
-        print(f'{m.get(\"name\", m[\"id\"])}: {m[\"topic\"]}')
+    topic = m.get('topic', '')
+    if topic != '$EXPECTED_TOPIC':
+        print(f'{m.get(\"name\", m[\"id\"])}: {topic}')
 ")
 
     if [ -n "$NON_WILDCARD" ]; then
-        echo "WARN: $flow has MQTT IN nodes not using expected wildcard pattern:"
+        echo "FAIL: $flow has MQTT IN nodes not using expected wildcard pattern:"
         echo "$NON_WILDCARD"
+        FAIL=1
     fi
 done
 
