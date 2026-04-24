@@ -163,7 +163,7 @@ const requiredFunctionNodes = [
   'Build Special Command ACK',
   'Build LSN50 mode downlink',
   'Process STREGA',
-  'Build STREGA SQL',
+  'Persist STREGA Uplink',
   'Process S2120',
   'Aggregate Zone Rain',
   'Get Zone Assignments',
