@@ -317,7 +317,11 @@ Constraints:
 
 Tracked as GitHub Issues: https://github.com/Open-Smart-Irrigation/osi-os/issues
 
-Key open areas: S2120 history for unique params (#33), LSN50 ADC display (#34), Terra live view regressions (#35–#40, #43), soil profile rendering (#41–#42), mobile/native apps (#44–#46), i18n (#47).
+Key open areas in `osi-os`: S2120 history for unique params (#33), LSN50 ADC display (#34), and i18n (#47).
+
+Terra follow-up implementation work now lives primarily in `osi-server`:
+- active Terra backlog: `osi-server#9`, `#13`, `#18` through `#25`
+- `osi-os#41` and `osi-os#42` remain as mirrors/cross-links for soil-profile rendering symptoms, but the active code is in `osi-server/prediction_animation_v2`
 
 ---
 
