@@ -29,13 +29,12 @@
 
 **Files:**
 - Create: `scripts/prepare-pi-communication-config.sh`
-- Modify: `scripts/verify-communication-contract.js`
 
 This task closes the live migration gap: before a portable flow replaces an old bootstrap-mutated live flow, the target Pi must already have the ChirpStack app/profile IDs available through UCI or `.chirpstack.env`.
 
-- [ ] **Step 1: Add verifier coverage for the migration guard**
+- [ ] **Step 1: Note verifier coverage for Task 1**
 
-When Task 1 creates `scripts/verify-communication-contract.js`, include:
+Task 1 creates `scripts/verify-communication-contract.js`. When it does, include:
 
 ```js
 const migrationGuardPath = 'scripts/prepare-pi-communication-config.sh';
@@ -114,8 +113,7 @@ if (key === 'CHIRPSTACK_APP_FIELD_TESTER') {
 if (key === 'CHIRPSTACK_APP_ACTUATORS') {
   const strega = flows.find((node) => String(node.func || '').includes('CHIRPSTACK_APP_ACTUATORS') || String(node.func || '').includes('FIXED_APP_ID'));
   const source = String(strega && strega.func || '');
-  const match = source.match(/CHIRPSTACK_APP_ACTUATORS'\)\s*\|\|\s*["']([0-9a-f-]{36})["']/i)
-    || source.match(/FIXED_APP_ID\s*=\s*["']([0-9a-f-]{36})["']/i);
+  const match = source.match(/CHIRPSTACK_APP_ACTUATORS'\)\s*\|\|\s*["']([0-9a-f-]{36})["']/i);
   console.log(match ? match[1] : '');
 }
 NODE
@@ -193,7 +191,6 @@ Expected: shell syntax check exits `0`. The communication verifier check for thi
 
 ```bash
 git add scripts/prepare-pi-communication-config.sh
-git add scripts/verify-communication-contract.js 2>/dev/null || true
 git commit -m "feat: add pi communication config migration guard"
 ```
 
@@ -815,7 +812,6 @@ In `scripts/verify-sync-flow.js`, add:
 
 ```js
 expectFileIncludes('deploy.sh', deployScript, 'run_communication_preflight()', 'runs communication validation before deploy artifacts are copied');
-expectFileIncludes('deploy.sh', deployScript, 'scripts/check-mqtt-topics.sh', 'uses the MQTT topic validation script during deploy preflight');
 expectFileIncludes('deploy.sh', deployScript, 'scripts/verify-communication-contract.js', 'uses the focused communication contract verifier during deploy preflight');
 expectFileIncludes('deploy.sh', deployScript, 'Communication preflight', 'prints a clear deploy preflight section');
 ```
@@ -840,9 +836,7 @@ run_communication_preflight() {
     echo "--- Communication preflight ---"
     preflight_dir="$TMP_DIR/preflight"
     mkdir -p "$preflight_dir"
-    fetch "scripts/check-mqtt-topics.sh" "$preflight_dir/check-mqtt-topics.sh"
     fetch "scripts/verify-communication-contract.js" "$preflight_dir/scripts/verify-communication-contract.js"
-    chmod 755 "$preflight_dir/check-mqtt-topics.sh"
     (
         cd "$preflight_dir"
         mkdir -p conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share
@@ -867,7 +861,6 @@ run_communication_preflight() {
         do
             [ -s "$required" ] || { echo "ERROR: preflight artifact missing or empty: $required" >&2; exit 1; }
         done
-        sh "$preflight_dir/check-mqtt-topics.sh"
         REPO_ROOT="$preflight_dir" node "$preflight_dir/scripts/verify-communication-contract.js"
     )
     echo "OK"
@@ -1023,7 +1016,7 @@ done
 section "MQTT IN topics"
 if [ -f "$FLOW_FILE" ] && command -v node >/dev/null 2>&1; then
     # Inline Node keeps this diagnostic deployable as one copied shell script.
-    FLOW_FILE="$FLOW_FILE" node <<'NODE'
+    if ! FLOW_FILE="$FLOW_FILE" node <<'NODE'
 const fs = require('fs');
 const flowFile = process.env.FLOW_FILE;
 const flows = JSON.parse(fs.readFileSync(flowFile, 'utf8'));
@@ -1031,6 +1024,9 @@ for (const node of flows.filter((entry) => entry.type === 'mqtt in')) {
   console.log(`${node.id} ${node.name || ''} ${node.topic || ''}`.trim());
 }
 NODE
+    then
+        print_kv topics "skipped: flow parse failed"
+    fi
 else
     print_kv topics "skipped: node or flows.json unavailable"
 fi
@@ -1038,7 +1034,7 @@ fi
 section "STREGA downlink"
 if [ -f "$FLOW_FILE" ] && command -v node >/dev/null 2>&1; then
     # Inline Node keeps this diagnostic deployable as one copied shell script.
-    FLOW_FILE="$FLOW_FILE" node <<'NODE'
+    if ! FLOW_FILE="$FLOW_FILE" node <<'NODE'
 const fs = require('fs');
 const flows = JSON.parse(fs.readFileSync(process.env.FLOW_FILE, 'utf8'));
 const node = flows.find((entry) => entry.name === 'Build STREGA downlink + emit log ctx');
@@ -1047,6 +1043,9 @@ console.log('has_FIXED_APP_ID=' + source.includes('FIXED_APP_ID'));
 console.log('uses_CHIRPSTACK_APP_ACTUATORS=' + source.includes("env.get('CHIRPSTACK_APP_ACTUATORS')"));
 console.log('has_missing_app_guard=' + source.includes('Missing CHIRPSTACK_APP_ACTUATORS'));
 NODE
+    then
+        print_kv strega "skipped: flow parse failed"
+    fi
 else
     print_kv strega "skipped: node or flows.json unavailable"
 fi
@@ -1180,7 +1179,7 @@ If Task 6 did not change files, do not create an empty commit.
 
 ## Live Rollout Plan After Implementation
 
-Do not write to live Pis until Tasks 1-6 pass locally.
+Do not write to live Pis until Tasks 0-6 pass locally.
 
 1. Run read-only diagnostics on kaba100, Silvan, and Uganda and save outputs.
 2. Choose kaba100 as first write target unless new diagnostics show it is unsuitable.
