@@ -21,8 +21,181 @@
 - Modify `feeds/chirpstack-openwrt-feed/apps/node-red/files/node-red.init`: load `.chirpstack.env` as a per-key fallback for ChirpStack IDs, while keeping UCI precedence.
 - Modify `feeds/chirpstack-openwrt-feed/apps/node-red/files/settings.js`: add a checked-in `.chirpstack.env` loader so a checkout plus deploy behaves consistently when Node-RED is started outside procd or when compatibility env files exist.
 - Modify `deploy.sh`: run communication validation before copying flow/init/settings artifacts.
-- Create `scripts/diagnose-pi-communication.sh`: read-only Pi diagnostic for pre/post rollout evidence.
+- Create `scripts/diagnose-pi-communication.sh`: read-only Pi diagnostic for pre/post rollout evidence and effective config-source reporting.
+- Create `scripts/prepare-pi-communication-config.sh`: live-target migration guard that can read existing UCI, `.chirpstack.env`, and legacy mutated flows, then write missing UCI keys only when explicitly run with `--apply`.
 - Modify `scripts/check-mqtt-topics.sh` only if the platform flow list changes; keep it focused on MQTT IN topics and leave broad flow assertions in `scripts/verify-communication-contract.js`.
+
+## Task 0: Live Target Config Migration Guard
+
+**Files:**
+- Create: `scripts/prepare-pi-communication-config.sh`
+- Modify: `scripts/verify-communication-contract.js`
+
+This task closes the live migration gap: before a portable flow replaces an old bootstrap-mutated live flow, the target Pi must already have the ChirpStack app/profile IDs available through UCI or `.chirpstack.env`.
+
+- [ ] **Step 1: Add verifier coverage for the migration guard**
+
+When Task 1 creates `scripts/verify-communication-contract.js`, include:
+
+```js
+const migrationGuardPath = 'scripts/prepare-pi-communication-config.sh';
+const migrationGuard = read(migrationGuardPath, { optional: true });
+if (migrationGuard) {
+  expectIncludes(migrationGuardPath, migrationGuard, 'APPLY=0', 'defaults to dry-run mode');
+  expectIncludes(migrationGuardPath, migrationGuard, '--apply', 'requires an explicit apply flag before writing UCI');
+  expectIncludes(migrationGuardPath, migrationGuard, 'extract_from_legacy_flow()', 'can read IDs from legacy mutated flows');
+  expectIncludes(migrationGuardPath, migrationGuard, 'uci commit osi-server', 'commits populated ChirpStack config to UCI');
+  expectIncludes(migrationGuardPath, migrationGuard, 'missing_required=1', 'fails when required config cannot be found');
+}
+```
+
+- [ ] **Step 2: Create the migration guard script**
+
+Create `scripts/prepare-pi-communication-config.sh`:
+
+```sh
+#!/bin/sh
+set -eu
+
+APPLY=0
+FLOW_FILE="${FLOW_FILE:-/srv/node-red/flows.json}"
+ENV_FILE="${ENV_FILE:-/srv/node-red/.chirpstack.env}"
+
+case "${1:-}" in
+    --apply) APPLY=1 ;;
+    ""|--dry-run) APPLY=0 ;;
+    *) echo "usage: $0 [--dry-run|--apply]" >&2; exit 2 ;;
+esac
+
+read_env_key() {
+    key="$1"
+    [ -f "$ENV_FILE" ] || return 0
+    # Keep this parser aligned with node-red.init and diagnose-pi-communication.sh.
+    awk -v wanted="$key" '
+        /^[[:space:]]*#/ { next }
+        /^[[:space:]]*$/ { next }
+        {
+            line=$0
+            sub(/^[[:space:]]*/, "", line)
+            split(line, parts, "=")
+            if (parts[1] == wanted) {
+                sub(/^[^=]*=/, "", line)
+                gsub(/^["'\'']|["'\'']$/, "", line)
+                print line
+                exit
+            }
+        }
+    ' "$ENV_FILE"
+}
+
+extract_from_legacy_flow() {
+    key="$1"
+    [ -f "$FLOW_FILE" ] || return 0
+    command -v node >/dev/null 2>&1 || return 0
+    FLOW_FILE="$FLOW_FILE" LEGACY_KEY="$key" node <<'NODE'
+const fs = require('fs');
+const flows = JSON.parse(fs.readFileSync(process.env.FLOW_FILE, 'utf8'));
+const key = process.env.LEGACY_KEY;
+const mqttTopics = flows
+  .filter((node) => node.type === 'mqtt in')
+  .map((node) => String(node.topic || ''));
+function topicAppId(topic) {
+  const match = topic.match(/^application\/([0-9a-f-]{36})\//i);
+  return match ? match[1] : '';
+}
+if (key === 'CHIRPSTACK_APP_SENSORS') {
+  const topic = mqttTopics.find((value) => /\/device\/#|\/device\/\+\/event\/up/.test(value));
+  console.log(topicAppId(topic || ''));
+}
+if (key === 'CHIRPSTACK_APP_FIELD_TESTER') {
+  const topic = mqttTopics.find((value) => /^application\/[0-9a-f-]{36}\/#$/i.test(value));
+  console.log(topicAppId(topic || ''));
+}
+if (key === 'CHIRPSTACK_APP_ACTUATORS') {
+  const strega = flows.find((node) => String(node.func || '').includes('CHIRPSTACK_APP_ACTUATORS') || String(node.func || '').includes('FIXED_APP_ID'));
+  const source = String(strega && strega.func || '');
+  const match = source.match(/CHIRPSTACK_APP_ACTUATORS'\)\s*\|\|\s*["']([0-9a-f-]{36})["']/i)
+    || source.match(/FIXED_APP_ID\s*=\s*["']([0-9a-f-]{36})["']/i);
+  console.log(match ? match[1] : '');
+}
+NODE
+}
+
+resolve_value() {
+    uci_key="$1"
+    env_key="$2"
+    current="$(uci -q get "osi-server.cloud.$uci_key" 2>/dev/null || true)"
+    [ -n "$current" ] && { echo "$current"; return 0; }
+    env_value="$(read_env_key "$env_key" 2>/dev/null || true)"
+    [ -n "$env_value" ] && { echo "$env_value"; return 0; }
+    extract_from_legacy_flow "$env_key" 2>/dev/null || true
+}
+
+set_if_missing() {
+    uci_key="$1"
+    env_key="$2"
+    required="$3"
+    value="$(resolve_value "$uci_key" "$env_key" | head -n 1)"
+    current="$(uci -q get "osi-server.cloud.$uci_key" 2>/dev/null || true)"
+    if [ -n "$current" ]; then
+        echo "OK uci.$uci_key already set"
+        return 0
+    fi
+    if [ -z "$value" ]; then
+        echo "MISSING uci.$uci_key / env.$env_key"
+        [ "$required" = "1" ] && missing_required=1
+        return 0
+    fi
+    if [ "$APPLY" = "1" ]; then
+        uci set "osi-server.cloud.$uci_key=$value"
+        echo "SET uci.$uci_key from fallback source"
+    else
+        echo "DRY-RUN would set uci.$uci_key from fallback source"
+    fi
+}
+
+missing_required=0
+set_if_missing chirpstack_app_sensors CHIRPSTACK_APP_SENSORS 1
+set_if_missing chirpstack_app_actuators CHIRPSTACK_APP_ACTUATORS 1
+set_if_missing chirpstack_app_field_tester CHIRPSTACK_APP_FIELD_TESTER 0
+set_if_missing chirpstack_profile_kiwi CHIRPSTACK_PROFILE_KIWI 1
+set_if_missing chirpstack_profile_strega CHIRPSTACK_PROFILE_STREGA 1
+set_if_missing chirpstack_profile_lsn50 CHIRPSTACK_PROFILE_LSN50 1
+set_if_missing chirpstack_profile_clover CHIRPSTACK_PROFILE_CLOVER 0
+set_if_missing chirpstack_profile_rak10701 CHIRPSTACK_PROFILE_RAK10701 0
+set_if_missing chirpstack_profile_s2120 CHIRPSTACK_PROFILE_S2120 0
+
+if [ "$missing_required" = "1" ]; then
+    echo "ERROR: required ChirpStack configuration is missing; do not deploy portable flow yet" >&2
+    exit 1
+fi
+
+if [ "$APPLY" = "1" ]; then
+    uci commit osi-server
+    echo "OK committed osi-server ChirpStack config"
+else
+    echo "OK dry-run completed; rerun with --apply to write missing UCI keys"
+fi
+```
+
+- [ ] **Step 3: Verify the migration guard**
+
+Run:
+
+```bash
+chmod 755 scripts/prepare-pi-communication-config.sh
+sh -n scripts/prepare-pi-communication-config.sh
+```
+
+Expected: shell syntax check exits `0`. The communication verifier check for this script is added when Task 1 creates `scripts/verify-communication-contract.js`.
+
+- [ ] **Step 4: Commit**
+
+```bash
+git add scripts/prepare-pi-communication-config.sh
+git add scripts/verify-communication-contract.js 2>/dev/null || true
+git commit -m "feat: add pi communication config migration guard"
+```
 
 ## Task 1: Flow Contract And STREGA Runtime App ID
 
@@ -143,6 +316,16 @@ if (diagnostic) {
   expectIncludes(diagnosticPath, diagnostic, 'MQTT IN topics', 'reports Node-RED MQTT input topics');
   expectIncludes(diagnosticPath, diagnostic, 'STREGA downlink', 'reports STREGA downlink source checks');
   expectIncludes(diagnosticPath, diagnostic, 'sync_outbox', 'reports sync outbox counts when sqlite3 is available');
+}
+
+const migrationGuardPath = 'scripts/prepare-pi-communication-config.sh';
+const migrationGuard = read(migrationGuardPath, { optional: true });
+if (migrationGuard) {
+  expectIncludes(migrationGuardPath, migrationGuard, 'APPLY=0', 'defaults to dry-run mode');
+  expectIncludes(migrationGuardPath, migrationGuard, '--apply', 'requires an explicit apply flag before writing UCI');
+  expectIncludes(migrationGuardPath, migrationGuard, 'extract_from_legacy_flow()', 'can read IDs from legacy mutated flows');
+  expectIncludes(migrationGuardPath, migrationGuard, 'uci commit osi-server', 'commits populated ChirpStack config to UCI');
+  expectIncludes(migrationGuardPath, migrationGuard, 'missing_required=1', 'fails when required config cannot be found');
 }
 
 if (failures.length) {
@@ -374,6 +557,10 @@ At the top of `feeds/chirpstack-openwrt-feed/apps/node-red/files/settings.js`, b
 ```js
 const fs = require('fs');
 
+// Runtime config precedence:
+// 1. node-red.init exports UCI values first.
+// 2. node-red.init falls back per key to /srv/node-red/.chirpstack.env.
+// 3. This loader fills only still-missing non-identity keys for non-procd starts.
 const chirpstackEnvPath = '/srv/node-red/.chirpstack.env';
 const protectedKeys = new Set([
     'DEVICE_EUI',
@@ -397,6 +584,7 @@ function loadChirpstackEnvFile(filePath) {
         if (!key || protectedKeys.has(key)) continue;
         if (process.env[key]) continue;
         process.env[key] = value;
+        console.log(`[settings] loaded ${key} from .chirpstack.env`);
     }
 }
 
@@ -483,18 +671,41 @@ function toUciCloudKey(envKey) {
   return mapping[envKey] || null;
 }
 
+function assertValidUciValue(envKey, value) {
+  const text = String(value || '').trim();
+  if (!text) return false;
+  if (envKey.startsWith('CHIRPSTACK_APP_') || envKey.startsWith('CHIRPSTACK_PROFILE_')) {
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(text)) {
+      throw new Error(`${envKey} is not a valid ChirpStack UUID: ${text}`);
+    }
+  }
+  return true;
+}
+
 function writeUciConfig(envVars) {
   const commands = [];
   for (const [envKey, value] of Object.entries(envVars)) {
     const uciKey = toUciCloudKey(envKey);
-    if (!uciKey || !String(value || '').trim()) continue;
+    if (!uciKey || !assertValidUciValue(envKey, value)) continue;
     commands.push(['set', `osi-server.cloud.${uciKey}=${value}`]);
   }
   if (!commands.length) return;
-  for (const args of commands) {
-    execFileSync('uci', args, { stdio: 'inherit' });
+  try {
+    for (const args of commands) {
+      execFileSync('uci', args, { stdio: 'inherit' });
+    }
+    execFileSync('uci', ['commit', 'osi-server'], { stdio: 'inherit' });
+    for (const [envKey, value] of Object.entries(envVars)) {
+      const uciKey = toUciCloudKey(envKey);
+      if (!uciKey || !String(value || '').trim()) continue;
+      const actual = execFileSync('uci', ['-q', 'get', `osi-server.cloud.${uciKey}`], { encoding: 'utf8' }).trim();
+      if (actual !== String(value).trim()) {
+        throw new Error(`UCI readback mismatch for ${uciKey}`);
+      }
+    }
+  } catch (error) {
+    throw new Error(`Unable to persist ChirpStack UCI config: ${error.message}`);
   }
-  execFileSync('uci', ['commit', 'osi-server'], { stdio: 'inherit' });
 }
 ```
 
@@ -505,6 +716,8 @@ This keeps the file's existing destructured import style and avoids a `child_pro
 In the `envVars` object, include both keys:
 
 ```js
+// CLOVER is a compatibility alias for the RAK10701 field tester profile.
+// Both keys intentionally point to the same ChirpStack device profile ID.
 CHIRPSTACK_PROFILE_CLOVER: rak10701ProfileId,
 CHIRPSTACK_PROFILE_RAK10701: rak10701ProfileId,
 ```
@@ -535,11 +748,16 @@ function validatePortableFlows() {
     .filter((node) => typeof node.func === 'string' && node.func.includes('FIXED_APP_ID'))
     .map((node) => node.name || node.id);
   if (badTopics.length || hardcodedDownlinks.length) {
-    throw new Error([
-      'flows.json is not portable.',
+    console.log([
+      '  ⚠ flows.json uses the legacy mutation pattern and is not portable.',
       ...badTopics.map((entry) => `bad mqtt topic: ${entry}`),
-      ...hardcodedDownlinks.map((entry) => `hardcoded downlink app id: ${entry}`)
+      ...hardcodedDownlinks.map((entry) => `hardcoded downlink app id: ${entry}`),
+      '  ⚠ Bootstrap will not repair or mutate flows.json. Deploy the portable repo flow before relying on runtime env configuration.'
     ].join('\n'));
+    if (process.env.OSI_BOOTSTRAP_REQUIRE_PORTABLE_FLOW === '1') {
+      throw new Error('flows.json is not portable');
+    }
+    return;
   }
   console.log('  ✓ flows.json portable communication contract verified');
 }
@@ -582,7 +800,7 @@ Expected: exit `0`.
 
 ```bash
 git add scripts/chirpstack-bootstrap.js scripts/verify-communication-contract.js
-git commit -m "fix: persist chirpstack bootstrap config without flow mutation"
+git commit -m "refactor: stop bootstrap flow mutation and persist uci config"
 ```
 
 ## Task 4: Deploy Communication Preflight
@@ -638,6 +856,17 @@ run_communication_preflight() {
         fetch "feeds/chirpstack-openwrt-feed/apps/node-red/files/node-red.init" "feeds/chirpstack-openwrt-feed/apps/node-red/files/node-red.init"
         fetch "feeds/chirpstack-openwrt-feed/apps/node-red/files/settings.js" "feeds/chirpstack-openwrt-feed/apps/node-red/files/settings.js"
         fetch "scripts/chirpstack-bootstrap.js" "scripts/chirpstack-bootstrap.js"
+        for required in \
+            scripts/verify-communication-contract.js \
+            conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/flows.json \
+            conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/flows.json \
+            conf/full_raspberrypi_bcm27xx_bcm2708/files/usr/share/flows.json \
+            feeds/chirpstack-openwrt-feed/apps/node-red/files/node-red.init \
+            feeds/chirpstack-openwrt-feed/apps/node-red/files/settings.js \
+            scripts/chirpstack-bootstrap.js
+        do
+            [ -s "$required" ] || { echo "ERROR: preflight artifact missing or empty: $required" >&2; exit 1; }
+        done
         sh "$preflight_dir/check-mqtt-topics.sh"
         REPO_ROOT="$preflight_dir" node "$preflight_dir/scripts/verify-communication-contract.js"
     )
@@ -793,6 +1022,7 @@ done
 
 section "MQTT IN topics"
 if [ -f "$FLOW_FILE" ] && command -v node >/dev/null 2>&1; then
+    # Inline Node keeps this diagnostic deployable as one copied shell script.
     FLOW_FILE="$FLOW_FILE" node <<'NODE'
 const fs = require('fs');
 const flowFile = process.env.FLOW_FILE;
@@ -807,6 +1037,7 @@ fi
 
 section "STREGA downlink"
 if [ -f "$FLOW_FILE" ] && command -v node >/dev/null 2>&1; then
+    # Inline Node keeps this diagnostic deployable as one copied shell script.
     FLOW_FILE="$FLOW_FILE" node <<'NODE'
 const fs = require('fs');
 const flows = JSON.parse(fs.readFileSync(process.env.FLOW_FILE, 'utf8'));
@@ -826,9 +1057,20 @@ if [ ! -e "$DB_PATH" ]; then
 elif ! command -v sqlite3 >/dev/null 2>&1; then
     print_kv sqlite "skipped: sqlite3 unavailable"
 else
-    sqlite3 "$DB_PATH" "SELECT 'latest_device_data=' || COALESCE(MAX(recorded_at),'none') FROM device_data;"
-    sqlite3 "$DB_PATH" "SELECT 'sync_outbox_pending=' || COUNT(*) FROM sync_outbox WHERE delivered_at IS NULL;"
-    sqlite3 "$DB_PATH" "SELECT 'sync_outbox_delivered=' || COUNT(*) FROM sync_outbox WHERE delivered_at IS NOT NULL;"
+    table_exists() {
+        sqlite3 "$DB_PATH" "SELECT name FROM sqlite_master WHERE type='table' AND name='$1';" 2>/dev/null | grep -qx "$1"
+    }
+    if table_exists device_data; then
+        sqlite3 "$DB_PATH" "SELECT 'latest_device_data=' || COALESCE(MAX(recorded_at),'none') FROM device_data;" || true
+    else
+        print_kv latest_device_data "skipped: device_data table missing"
+    fi
+    if table_exists sync_outbox; then
+        sqlite3 "$DB_PATH" "SELECT 'sync_outbox_pending=' || COUNT(*) FROM sync_outbox WHERE delivered_at IS NULL;" || true
+        sqlite3 "$DB_PATH" "SELECT 'sync_outbox_delivered=' || COUNT(*) FROM sync_outbox WHERE delivered_at IS NOT NULL;" || true
+    else
+        print_kv sync_outbox "skipped: sync_outbox table missing"
+    fi
 fi
 
 section "Recent service logs"
@@ -881,6 +1123,7 @@ Run:
 scripts/check-mqtt-topics.sh
 node scripts/verify-communication-contract.js
 node scripts/verify-sync-flow.js
+sh -n scripts/prepare-pi-communication-config.sh
 sh -n scripts/diagnose-pi-communication.sh
 ```
 
@@ -917,9 +1160,12 @@ Record these commands for the rollout operator:
 ssh root@100.93.68.86 'sh -s' < scripts/diagnose-pi-communication.sh > /tmp/kaba100-pre-communication.txt
 ssh root@100.81.220.8 'sh -s' < scripts/diagnose-pi-communication.sh > /tmp/silvan-pre-communication.txt
 ssh root@100.69.51.98 'sh -s' < scripts/diagnose-pi-communication.sh > /tmp/uganda-pre-communication.txt
+ssh root@100.93.68.86 'sh -s -- --dry-run' < scripts/prepare-pi-communication-config.sh > /tmp/kaba100-config-preflight.txt
+ssh root@100.81.220.8 'sh -s -- --dry-run' < scripts/prepare-pi-communication-config.sh > /tmp/silvan-config-preflight.txt
+ssh root@100.69.51.98 'sh -s -- --dry-run' < scripts/prepare-pi-communication-config.sh > /tmp/uganda-config-preflight.txt
 ```
 
-These commands are read-only diagnostics. They do not deploy, restart services, write UCI, write DB files, or patch flows.
+These commands are read-only diagnostics and dry-runs. They do not deploy, restart services, write UCI, write DB files, or patch flows.
 
 - [ ] **Step 5: Commit any spec update**
 
@@ -939,12 +1185,15 @@ Do not write to live Pis until Tasks 1-6 pass locally.
 1. Run read-only diagnostics on kaba100, Silvan, and Uganda and save outputs.
 2. Choose kaba100 as first write target unless new diagnostics show it is unsuitable.
 3. Before any write, create a timestamped backup on the target under `/data/db/backups/osi-os-<timestamp>` including `/data/db/`, `/srv/node-red/`, `/usr/lib/node-red/gui/`, `/etc/init.d/node-red`, `/srv/node-red/flows.json`, and `/srv/node-red/settings.js`.
-4. Deploy the narrow artifact set using `deploy.sh`; do not overwrite `/data/db/farming.db`.
-5. Do not run `chirpstack-bootstrap.js` against an old live flow before the new portable flow has been deployed. The new bootstrap validation intentionally rejects previously patched live flows that still contain `FIXED_APP_ID`, even if they currently work through an env fallback.
-6. If bootstrap is needed after deploy, run it only after deploy preflight has passed and `/srv/node-red/flows.json` has been replaced by the portable flow.
-7. Restart Node-RED only inside the approved rollout window.
-8. Run post diagnostics and compare to pre diagnostics.
-9. Proceed to Silvan only after kaba100 passes local ingest, sync outbox, MQTT client ID, and STREGA runtime app checks.
-10. Proceed to Uganda only after one demo Pi passes all post-checks and Uganda preflight shows required app/profile IDs in UCI or `.chirpstack.env`.
+4. Run `scripts/prepare-pi-communication-config.sh` in dry-run mode on the target and save output. Abort if required config is missing.
+5. Run `scripts/prepare-pi-communication-config.sh --apply` only after the backup exists and the dry-run showed it can populate missing UCI keys from `.chirpstack.env` or the legacy flow.
+6. Re-run read-only diagnostics and confirm required app/profile IDs are now present in UCI or `.chirpstack.env`.
+7. Deploy the narrow artifact set using `deploy.sh`; do not overwrite `/data/db/farming.db`.
+8. Do not run `chirpstack-bootstrap.js` against an old live flow before the new portable flow has been deployed. The new bootstrap validation warns on previously patched live flows that still contain `FIXED_APP_ID`; deploy validation remains strict for repo artifacts.
+9. If bootstrap is needed after deploy, run it only after deploy preflight has passed and `/srv/node-red/flows.json` has been replaced by the portable flow.
+10. Restart Node-RED only inside the approved rollout window.
+11. Run post diagnostics and compare to pre diagnostics.
+12. Proceed to Silvan only after kaba100 passes local ingest, sync outbox, MQTT client ID, and STREGA runtime app checks.
+13. Proceed to Uganda only after one demo Pi passes all post-checks and Uganda preflight shows required app/profile IDs in UCI or `.chirpstack.env`.
 
 Rollback trigger: Node-RED fails to start, local ingest stops, sync outbox delivery regresses, cloud MQTT client ID changes away from `device_<uppercase gateway EUI>`, or STREGA downlink source fails the runtime app-id check.
