@@ -43,6 +43,7 @@ if (migrationGuard) {
   expectIncludes(migrationGuardPath, migrationGuard, 'APPLY=0', 'defaults to dry-run mode');
   expectIncludes(migrationGuardPath, migrationGuard, '--apply', 'requires an explicit apply flag before writing UCI');
   expectIncludes(migrationGuardPath, migrationGuard, 'extract_from_legacy_flow()', 'can read IDs from legacy mutated flows');
+  expectIncludes(migrationGuardPath, migrationGuard, 'is_uuid()', 'validates ChirpStack IDs before writing UCI');
   expectIncludes(migrationGuardPath, migrationGuard, 'uci commit osi-server', 'commits populated ChirpStack config to UCI');
   expectIncludes(migrationGuardPath, migrationGuard, 'missing_required=1', 'fails when required config cannot be found');
 }
@@ -103,7 +104,7 @@ function topicAppId(topic) {
   return match ? match[1] : '';
 }
 if (key === 'CHIRPSTACK_APP_SENSORS') {
-  const topic = mqttTopics.find((value) => /\/device\/#|\/device\/\+\/event\/up/.test(value));
+  const topic = mqttTopics.find((value) => /^application\/[0-9a-f-]{36}\/device\//i.test(value));
   console.log(topicAppId(topic || ''));
 }
 if (key === 'CHIRPSTACK_APP_FIELD_TESTER') {
@@ -131,6 +132,10 @@ resolve_value() {
     extract_from_legacy_flow "$env_key" 2>/dev/null || true
 }
 
+is_uuid() {
+    printf '%s' "$1" | grep -Eiq '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+}
+
 set_if_missing() {
     uci_key="$1"
     env_key="$2"
@@ -143,6 +148,11 @@ set_if_missing() {
     fi
     if [ -z "$value" ]; then
         echo "MISSING uci.$uci_key / env.$env_key"
+        [ "$required" = "1" ] && missing_required=1
+        return 0
+    fi
+    if ! is_uuid "$value"; then
+        echo "INVALID uci.$uci_key / env.$env_key is not a ChirpStack UUID"
         [ "$required" = "1" ] && missing_required=1
         return 0
     fi
