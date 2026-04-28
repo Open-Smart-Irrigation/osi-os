@@ -113,6 +113,8 @@ if (key === 'CHIRPSTACK_APP_FIELD_TESTER') {
 if (key === 'CHIRPSTACK_APP_ACTUATORS') {
   const strega = flows.find((node) => String(node.func || '').includes('CHIRPSTACK_APP_ACTUATORS') || String(node.func || '').includes('FIXED_APP_ID'));
   const source = String(strega && strega.func || '');
+  // Do not trust a bare const FIXED_APP_ID = "<uuid>" value here. That value is
+  // the known stale default on mixed-version Pis and must not be migrated into UCI.
   const match = source.match(/CHIRPSTACK_APP_ACTUATORS'\)\s*\|\|\s*["']([0-9a-f-]{36})["']/i);
   console.log(match ? match[1] : '');
 }
@@ -281,6 +283,14 @@ for (const relativePath of platformFlowPaths) {
   expectIncludes(relativePath, stregaSource, 'Missing CHIRPSTACK_APP_ACTUATORS', 'STREGA downlink fails loudly when Actuators app ID is missing');
   expectExcludes(relativePath, stregaSource, 'application/${FIXED_APP_ID}', 'STREGA downlink must not publish to a hardcoded app topic');
   expectIncludes(relativePath, source, "env.get('CHIRPSTACK_PROFILE_CLOVER')", 'keeps Clover compatibility profile routing');
+  const sensorDownlinks = nodes.filter((node) => {
+    const func = String(node.func || '');
+    return func.includes("env.get('CHIRPSTACK_APP_SENSORS')") && func.includes('/command/down');
+  });
+  for (const node of sensorDownlinks) {
+    const func = String(node.func || '');
+    expectIncludes(relativePath, func, 'Missing ChirpStack sensors application configuration', `${node.name || node.id} fails loudly when the Sensors app ID is missing`);
+  }
 }
 
 const nodeRedInit = read(nodeRedInitPath);
@@ -581,7 +591,9 @@ function loadChirpstackEnvFile(filePath) {
         if (!key || protectedKeys.has(key)) continue;
         if (process.env[key]) continue;
         process.env[key] = value;
-        console.log(`[settings] loaded ${key} from .chirpstack.env`);
+        if (process.env.LOG_CHIRPSTACK_ENV_LOADS === '1') {
+            console.log(`[settings] loaded ${key} from .chirpstack.env`);
+        }
     }
 }
 
@@ -975,11 +987,14 @@ read_env_key() {
 
 section "Gateway identity"
 if [ -x /usr/libexec/osi-gateway-identity.sh ]; then
-    . /usr/libexec/osi-gateway-identity.sh
-    gateway_identity_resolve || true
-    print_kv DEVICE_EUI "${GATEWAY_IDENTITY_DEVICE_EUI:-}"
-    print_kv DEVICE_EUI_SOURCE "${GATEWAY_IDENTITY_DEVICE_EUI_SOURCE:-}"
-    print_kv DEVICE_EUI_CONFIDENCE "${GATEWAY_IDENTITY_DEVICE_EUI_CONFIDENCE:-}"
+    (
+        set +e
+        . /usr/libexec/osi-gateway-identity.sh
+        gateway_identity_resolve
+        print_kv DEVICE_EUI "${GATEWAY_IDENTITY_DEVICE_EUI:-}"
+        print_kv DEVICE_EUI_SOURCE "${GATEWAY_IDENTITY_DEVICE_EUI_SOURCE:-}"
+        print_kv DEVICE_EUI_CONFIDENCE "${GATEWAY_IDENTITY_DEVICE_EUI_CONFIDENCE:-}"
+    ) || print_kv gateway_identity "skipped: helper failed"
 else
     print_kv helper "missing:/usr/libexec/osi-gateway-identity.sh"
 fi
