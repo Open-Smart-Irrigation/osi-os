@@ -106,6 +106,15 @@ Bootstrap must be idempotent on an already configured Pi. It should discover exi
 
 Legacy flow repair must be conservative and explicit. Normal bootstrap should detect app-specific MQTT IN topics and hardcoded downlink IDs, then fail with a clear diagnostic unless it is invoked with an explicit repair flag. The repair mode may only replace known legacy topic shapes with `application/+/device/+/event/up` and must write a timestamped backup before modifying `/srv/node-red/flows.json`.
 
+The current bootstrap implementation has known contract gaps that must be fixed before live rollout:
+
+- it writes `.chirpstack.env` but not UCI `osi-server.cloud.*`,
+- it mutates MQTT IN topics to app-specific values,
+- it patches STREGA `FIXED_APP_ID` in live flows rather than relying on checked-in portable flow code,
+- its STREGA patch regex only handles double-quoted `FIXED_APP_ID`, while the RPi 5/bcm2712 flow uses single quotes.
+
+The target fix is to remove the need for STREGA downlink patching by replacing checked-in flow code with runtime `env.get('CHIRPSTACK_APP_ACTUATORS')`. If an interim emergency patch is needed before the full design lands, the regex must support both quote styles, but that remains a transitional compatibility measure, not the desired architecture.
+
 ## Deploy Behavior
 
 `deploy.sh` may copy the repo flow to `/srv/node-red/flows.json`, but that flow must already be portable. Deploy should include a communication validation step that checks:
@@ -117,6 +126,15 @@ Legacy flow repair must be conservative and explicit. Normal bootstrap should de
 - live DB is preserved and not overwritten.
 
 Deploy should not require a manual post-deploy hotfix. If bootstrap must run after deploy, bootstrap should be idempotent and should preserve the portable flow contract.
+
+Deploy must fail before copying communication-critical artifacts when validation fails. At minimum, the deploy path should run the equivalent of:
+
+- `scripts/check-mqtt-topics.sh`,
+- `node scripts/verify-sync-flow.js`,
+- a source check that no checked-in `flows.json` contains `FIXED_APP_ID`,
+- a source check that checked-in `settings.js` or `node-red.init` provides the agreed `.chirpstack.env` compatibility path.
+
+This prevents a manual deploy or rollback from restoring the hardcoded STREGA app ID.
 
 ## Runtime Diagnostics
 
@@ -141,9 +159,11 @@ Repo verification must include:
 
 - `scripts/check-mqtt-topics.sh` fails on any MQTT IN topic other than `application/+/device/+/event/up`.
 - `scripts/verify-sync-flow.js` asserts STREGA downlink uses `CHIRPSTACK_APP_ACTUATORS` and no longer uses `FIXED_APP_ID`.
+- `scripts/verify-sync-flow.js` checks every checked-in platform flow, including bcm2708, bcm2709, and bcm2712.
 - Bootstrap source checks assert no code writes `application/${sensorsAppId}/device/#` or `application/${fieldTesterAppId}/#`.
 - Bootstrap tests or source checks assert UCI persistence of `CHIRPSTACK_APP_*` and `CHIRPSTACK_PROFILE_*`.
 - Node-RED init checks assert `.chirpstack.env` fallback for missing UCI values.
+- Node-RED startup tests assert `.chirpstack.env` fallback works without relying on a live-patched `settings.js`.
 
 Live rollout verification must include:
 
@@ -196,6 +216,23 @@ External review identified five implementation risks that must remain visible du
 - Bootstrap repair logic can itself become a source of breakage; normal bootstrap should detect and stop, with repair behind an explicit flag and backup.
 - Diagnostics must still be useful when `sqlite3` is missing, as seen on Silvan.
 - The `CHIRPSTACK_PROFILE_CLOVER` versus `CHIRPSTACK_PROFILE_RAK10701` mismatch and field tester flow inclusion are unresolved compatibility questions that should be resolved before broad rollout, even though they do not block the STREGA hardcoded-ID fix.
+
+A follow-up review against the current repo confirmed additional concrete gaps:
+
+- `scripts/chirpstack-bootstrap.js` writes `.chirpstack.env`, but the checked-in `node-red.init` reads ChirpStack app/profile IDs only from UCI. A fresh bootstrap can therefore create IDs that Node-RED startup does not export.
+- `feeds/chirpstack-openwrt-feed/apps/node-red/files/settings.js` does not contain a checked-in `.chirpstack.env` loader. Live settings may be bootstrap-patched, which is another reproducibility gap.
+- All checked-in platform flows still contain `FIXED_APP_ID`, including bcm2712 with single quotes. The bcm2712 form is not matched by the current double-quote-only bootstrap regex.
+- `scripts/verify-sync-flow.js` does not yet assert absence of `FIXED_APP_ID`, and `deploy.sh` does not run the communication validation scripts.
+- No repo diagnostic script currently exists for the pre/post live rollout evidence described above.
+
+Implementation priority should therefore be:
+
+1. Replace `FIXED_APP_ID` in all checked-in flows with strict runtime `CHIRPSTACK_APP_ACTUATORS` handling and failed ACK/log behavior when missing.
+2. Add bootstrap UCI persistence for all `CHIRPSTACK_APP_*` and `CHIRPSTACK_PROFILE_*` values, including a resolved `CLOVER`/`RAK10701` naming contract.
+3. Add per-key `.chirpstack.env` fallback in `node-red.init`, or move the fallback into checked-in `settings.js`; do not rely on live patching alone.
+4. Add verification gates for `FIXED_APP_ID` absence, wildcard MQTT topics, bootstrap source behavior, and fallback behavior.
+5. Build the dependency-light diagnostic script before any live rollout.
+6. Only after these repo checks pass, plan demo Pi rollout and then Uganda.
 
 ## Open Questions
 
