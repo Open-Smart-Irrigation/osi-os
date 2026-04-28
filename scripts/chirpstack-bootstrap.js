@@ -8,9 +8,10 @@
  *   • 1 API key:                  osi-nodered  (used by Node-RED function nodes)
  *
  * Writes results to:
- *   • /srv/node-red/.chirpstack.env      — env vars loaded by Node-RED on startup
- *   • /srv/node-red/settings.js          — patched to auto-load the env file
- *   • /srv/node-red/flows.json           — MQTT topics updated to new app IDs
+ *   • UCI osi-server.cloud.*             — canonical runtime ChirpStack config
+ *   • /srv/node-red/.chirpstack.env      — compatibility fallback for older installs
+ *
+ * Bootstrap validates flows.json portability but does not mutate flow behavior.
  *
  * Run ONCE on the Pi after first boot:
  *   node /tmp/chirpstack-bootstrap.js
@@ -44,7 +45,7 @@
 
 const fs = require('fs');
 const path = require('path');
-const { execSync } = require('child_process');
+const { execSync, execFileSync } = require('child_process');
 
 function loadChirpStackHelper() {
   const candidates = [
@@ -279,6 +280,59 @@ function writeEnvFile(vars) {
   console.log(`\n  ✓ Env file written: ${CFG.envFile}`);
 }
 
+function toUciCloudKey(envKey) {
+  const mapping = {
+    CHIRPSTACK_APP_SENSORS: 'chirpstack_app_sensors',
+    CHIRPSTACK_APP_ACTUATORS: 'chirpstack_app_actuators',
+    CHIRPSTACK_APP_FIELD_TESTER: 'chirpstack_app_field_tester',
+    CHIRPSTACK_PROFILE_KIWI: 'chirpstack_profile_kiwi',
+    CHIRPSTACK_PROFILE_STREGA: 'chirpstack_profile_strega',
+    CHIRPSTACK_PROFILE_LSN50: 'chirpstack_profile_lsn50',
+    CHIRPSTACK_PROFILE_CLOVER: 'chirpstack_profile_clover',
+    CHIRPSTACK_PROFILE_RAK10701: 'chirpstack_profile_rak10701',
+    CHIRPSTACK_PROFILE_S2120: 'chirpstack_profile_s2120'
+  };
+  return mapping[envKey] || null;
+}
+
+function assertValidUciValue(envKey, value) {
+  const text = String(value || '').trim();
+  if (!text) return false;
+  if (envKey.startsWith('CHIRPSTACK_APP_') || envKey.startsWith('CHIRPSTACK_PROFILE_')) {
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(text)) {
+      throw new Error(`${envKey} is not a valid ChirpStack UUID: ${text}`);
+    }
+  }
+  return true;
+}
+
+function writeUciConfig(envVars) {
+  const commands = [];
+  for (const [envKey, value] of Object.entries(envVars)) {
+    const uciKey = toUciCloudKey(envKey);
+    if (!uciKey || !assertValidUciValue(envKey, value)) continue;
+    commands.push(['set', `osi-server.cloud.${uciKey}=${String(value).trim()}`]);
+  }
+  if (!commands.length) return;
+  try {
+    for (const args of commands) {
+      execFileSync('uci', args, { stdio: 'inherit' });
+    }
+    execFileSync('uci', ['commit', 'osi-server'], { stdio: 'inherit' });
+    for (const [envKey, value] of Object.entries(envVars)) {
+      const uciKey = toUciCloudKey(envKey);
+      if (!uciKey || !String(value || '').trim()) continue;
+      const actual = execFileSync('uci', ['-q', 'get', `osi-server.cloud.${uciKey}`], { encoding: 'utf8' }).trim();
+      if (actual !== String(value).trim()) {
+        throw new Error(`UCI readback mismatch for ${uciKey}`);
+      }
+    }
+    console.log('  ✓ UCI ChirpStack config committed: osi-server.cloud');
+  } catch (error) {
+    throw new Error(`Unable to persist ChirpStack UCI config: ${error.message}`);
+  }
+}
+
 function patchSettingsJs() {
   if (!fs.existsSync(CFG.settingsJs)) {
     console.log(`  ⚠ settings.js not found at ${CFG.settingsJs} — skipping patch`);
@@ -320,53 +374,32 @@ try {
   console.log('  ✓ settings.js patched to load env file on startup');
 }
 
-function updateFlowsJson(sensorsAppId, actuatorsAppId, fieldTesterAppId) {
+function validatePortableFlows() {
   if (!fs.existsSync(CFG.flowsJson)) {
-    console.log(`  ⚠ flows.json not found at ${CFG.flowsJson} — skipping MQTT topic update`);
+    console.log('  ✓ flows.json not present; skipping portable flow validation');
     return;
   }
 
   const flows = JSON.parse(fs.readFileSync(CFG.flowsJson, 'utf8'));
-  let changes = 0;
-
-  const kiwiMqtt = flows.find((node) => node.id === 'e73a11a2a36aab22');
-  if (kiwiMqtt && !kiwiMqtt.topic.includes(sensorsAppId)) {
-    kiwiMqtt.topic = `application/${sensorsAppId}/device/#`;
-    console.log(`  ✓ Sensor_KIWI MQTT topic -> application/${sensorsAppId}/device/#`);
-    changes++;
-  }
-
-  const lsn50Mqtt = flows.find((node) => node.id === 'lsn50-mqtt-in');
-  if (lsn50Mqtt && !lsn50Mqtt.topic.includes(sensorsAppId)) {
-    lsn50Mqtt.topic = `application/${sensorsAppId}/device/#`;
-    console.log(`  ✓ Sensor_LSN50 MQTT topic -> application/${sensorsAppId}/device/#`);
-    changes++;
-  }
-
-  const fieldMqtt = flows.find((node) => node.id === 'e382bbf0dde572b1');
-  if (fieldMqtt && !fieldMqtt.topic.includes(fieldTesterAppId)) {
-    fieldMqtt.topic = `application/${fieldTesterAppId}/#`;
-    console.log(`  ✓ Field Tester MQTT topic -> application/${fieldTesterAppId}/#`);
-    changes++;
-  }
-
-  const stregaFn = flows.find((node) => node.id === 'cdbaa3891d40d7a1');
-  if (stregaFn && stregaFn.func && stregaFn.func.includes('FIXED_APP_ID')) {
-    const oldLine = /const FIXED_APP_ID\s*=\s*"[^"]+";[^\n]*/;
-    const newLine = `const FIXED_APP_ID = env.get('CHIRPSTACK_APP_ACTUATORS') || "${actuatorsAppId}"; // updated by chirpstack-bootstrap.js`;
-    if (oldLine.test(stregaFn.func)) {
-      stregaFn.func = stregaFn.func.replace(oldLine, newLine);
-      console.log('  ✓ STREGA downlink FIXED_APP_ID -> env.get(CHIRPSTACK_APP_ACTUATORS)');
-      changes++;
+  const badTopics = flows
+    .filter((node) => node.type === 'mqtt in' && node.topic !== 'application/+/device/+/event/up')
+    .map((node) => `${node.name || node.id}: ${node.topic}`);
+  const hardcodedDownlinks = flows
+    .filter((node) => typeof node.func === 'string' && node.func.includes('FIXED_APP_ID'))
+    .map((node) => node.name || node.id);
+  if (badTopics.length || hardcodedDownlinks.length) {
+    console.log([
+      '  ⚠ flows.json uses the legacy mutation pattern and is not portable.',
+      ...badTopics.map((entry) => `bad mqtt topic: ${entry}`),
+      ...hardcodedDownlinks.map((entry) => `hardcoded downlink app id: ${entry}`),
+      '  ⚠ Bootstrap will not repair or mutate flows.json. Deploy the portable repo flow before relying on runtime env configuration.'
+    ].join('\n'));
+    if (process.env.OSI_BOOTSTRAP_REQUIRE_PORTABLE_FLOW === '1') {
+      throw new Error('flows.json is not portable');
     }
+    return;
   }
-
-  if (changes > 0) {
-    fs.writeFileSync(CFG.flowsJson, JSON.stringify(flows, null, 2), 'utf8');
-    console.log(`  ✓ flows.json updated (${changes} change(s)) — restart Node-RED to apply`);
-  } else {
-    console.log('  ✓ flows.json already up to date');
-  }
+  console.log('  ✓ flows.json portable communication contract verified');
 }
 
 async function main() {
@@ -422,13 +455,19 @@ async function main() {
     CHIRPSTACK_PROFILE_KIWI: kiwiProfileId,
     CHIRPSTACK_PROFILE_STREGA: stregaProfileId,
     CHIRPSTACK_PROFILE_LSN50: lsn50ProfileId,
+    // CLOVER is a compatibility alias for the RAK10701 field tester profile.
+    // Both keys intentionally point to the same ChirpStack device profile ID.
+    CHIRPSTACK_PROFILE_CLOVER: rak10701ProfileId,
     CHIRPSTACK_PROFILE_RAK10701: rak10701ProfileId,
     CHIRPSTACK_PROFILE_S2120: s2120ProfileId
   };
   writeEnvFile(envVars);
+  writeUciConfig(envVars);
 
-  patchSettingsJs();
-  updateFlowsJson(sensorsAppId, actuatorsAppId, fieldTesterAppId);
+  if (process.env.OSI_BOOTSTRAP_PATCH_SETTINGS === '1') {
+    patchSettingsJs();
+  }
+  validatePortableFlows();
 
   console.log('\n╔══════════════════════════════════════════════╗');
   console.log('║   Bootstrap complete                         ║');

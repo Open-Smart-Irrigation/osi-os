@@ -55,6 +55,7 @@ const dendroHelperCandidates = [
   path.join(nodeRedRoot, 'osi-dendro-helper')
 ];
 const packageJsonPath = path.join(nodeRedRoot, 'package.json');
+execFileSync(process.execPath, [path.resolve(__dirname, 'verify-communication-contract.js')], { stdio: 'inherit' });
 const deployScript = fs.readFileSync(deployScriptPath, 'utf8');
 const nodeRedInitScript = fs.readFileSync(nodeRedInitPath, 'utf8');
 const osiServerDefaultsScript = fs.readFileSync(osiServerDefaultsPath, 'utf8');
@@ -1185,6 +1186,10 @@ expectFileIncludes('chirpstack-bootstrap.js', chirpstackBootstrapScript, "getOrC
 expectFileIncludes('chirpstack-bootstrap.js', chirpstackBootstrapScript, "CFG.lsn50CodecPath", 'tracks the shipped LSN50 decoder path in bootstrap config');
 expectFileIncludes('chirpstack-bootstrap.js', chirpstackBootstrapScript, "readCodecScript(CFG.lsn50CodecPath, 'LSN50')", 'loads the shipped LSN50 decoder during bootstrap');
 expectFileIncludes('chirpstack-bootstrap.js', chirpstackBootstrapScript, "getOrCreateProfileWithCodec(client, tenantId, CFG.profileLsn50Name", 'creates or repairs the OSI LSN50 profile with a payload codec');
+expectFileIncludes('deploy.sh', deployScript, 'run_communication_preflight()', 'runs communication validation before deploy artifacts are copied');
+expectFileIncludes('deploy.sh', deployScript, 'scripts/verify-communication-contract.js', 'uses the focused communication contract verifier during deploy preflight');
+expectFileIncludes('deploy.sh', deployScript, 'scripts/diagnose-pi-communication.sh', 'fetches the required communication diagnostic during deploy preflight');
+expectFileIncludes('deploy.sh', deployScript, 'Communication preflight', 'prints a clear deploy preflight section');
 expectFileIncludes('deploy.sh', deployScript, '"feeds/chirpstack-openwrt-feed/apps/node-red/files/node-red.init"', 'deploys the Node-RED init script to live devices');
 expectFileIncludes('deploy.sh', deployScript, '"conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/libexec/osi-gateway-identity.sh"', 'deploys the shared gateway identity helper to live devices');
 expectFileIncludes('deploy.sh', deployScript, '"conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-dendro-helper/package.json"', 'deploys the osi-dendro-helper package manifest to live devices');

@@ -42,6 +42,42 @@ fetch_required() {
     echo "OK"
 }
 
+run_communication_preflight() {
+    echo "--- Communication preflight ---"
+    preflight_dir="$TMP_DIR/preflight"
+    mkdir -p "$preflight_dir"
+    fetch "scripts/verify-communication-contract.js" "$preflight_dir/scripts/verify-communication-contract.js"
+    (
+        cd "$preflight_dir"
+        mkdir -p conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share
+        mkdir -p conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share
+        mkdir -p conf/full_raspberrypi_bcm27xx_bcm2708/files/usr/share
+        mkdir -p feeds/chirpstack-openwrt-feed/apps/node-red/files
+        mkdir -p scripts
+        fetch "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/flows.json" "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/flows.json"
+        fetch "conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/flows.json" "conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/flows.json"
+        fetch "conf/full_raspberrypi_bcm27xx_bcm2708/files/usr/share/flows.json" "conf/full_raspberrypi_bcm27xx_bcm2708/files/usr/share/flows.json"
+        fetch "feeds/chirpstack-openwrt-feed/apps/node-red/files/node-red.init" "feeds/chirpstack-openwrt-feed/apps/node-red/files/node-red.init"
+        fetch "feeds/chirpstack-openwrt-feed/apps/node-red/files/settings.js" "feeds/chirpstack-openwrt-feed/apps/node-red/files/settings.js"
+        fetch "scripts/chirpstack-bootstrap.js" "scripts/chirpstack-bootstrap.js"
+        fetch "scripts/diagnose-pi-communication.sh" "scripts/diagnose-pi-communication.sh"
+        for required in \
+            scripts/verify-communication-contract.js \
+            conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/flows.json \
+            conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/flows.json \
+            conf/full_raspberrypi_bcm27xx_bcm2708/files/usr/share/flows.json \
+            feeds/chirpstack-openwrt-feed/apps/node-red/files/node-red.init \
+            feeds/chirpstack-openwrt-feed/apps/node-red/files/settings.js \
+            scripts/chirpstack-bootstrap.js \
+            scripts/diagnose-pi-communication.sh
+        do
+            [ -s "$required" ] || { echo "ERROR: preflight artifact missing or empty: $required" >&2; exit 1; }
+        done
+        REPO_ROOT="$preflight_dir" node "$preflight_dir/scripts/verify-communication-contract.js"
+    )
+    echo "OK"
+}
+
 seed_db_if_missing() {
     echo "--- farming.db ---"
     if [ -e "$DB_PATH" ]; then
@@ -129,6 +165,8 @@ NODE
 
 echo "=== OSI OS Deploy ==="
 echo "Source: $BASE"
+
+run_communication_preflight
 
 fetch_required "Node-RED settings.js" \
     "feeds/chirpstack-openwrt-feed/apps/node-red/files/settings.js" \
