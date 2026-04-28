@@ -43,7 +43,9 @@ Create `scripts/verify-communication-contract.js`:
 const fs = require('fs');
 const path = require('path');
 
-const repoRoot = path.resolve(__dirname, '..');
+const repoRoot = process.env.REPO_ROOT
+  ? path.resolve(process.env.REPO_ROOT)
+  : path.resolve(__dirname, '..');
 const platformFlowPaths = [
   'conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/flows.json',
   'conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/flows.json',
@@ -108,12 +110,15 @@ for (const relativePath of platformFlowPaths) {
   expectIncludes(relativePath, stregaSource, "env.get('CHIRPSTACK_APP_ACTUATORS')", 'STREGA downlink uses runtime Actuators app ID');
   expectIncludes(relativePath, stregaSource, 'Missing CHIRPSTACK_APP_ACTUATORS', 'STREGA downlink fails loudly when Actuators app ID is missing');
   expectExcludes(relativePath, stregaSource, 'application/${FIXED_APP_ID}', 'STREGA downlink must not publish to a hardcoded app topic');
+  expectIncludes(relativePath, source, "env.get('CHIRPSTACK_PROFILE_CLOVER')", 'keeps Clover compatibility profile routing');
 }
 
 const nodeRedInit = read(nodeRedInitPath);
 expectIncludes(nodeRedInitPath, nodeRedInit, 'load_chirpstack_env_value()', 'defines a per-key .chirpstack.env fallback reader');
 expectIncludes(nodeRedInitPath, nodeRedInit, 'resolve_chirpstack_value()', 'resolves UCI first and env fallback second for ChirpStack IDs');
+expectIncludes(nodeRedInitPath, nodeRedInit, 'CHIRPSTACK_APP_FIELD_TESTER="$cs_app_field_tester"', 'exports the field tester application ID');
 expectIncludes(nodeRedInitPath, nodeRedInit, 'CHIRPSTACK_PROFILE_RAK10701', 'exports the RAK10701 profile variable');
+expectIncludes(nodeRedInitPath, nodeRedInit, 'CHIRPSTACK_PROFILE_RAK10701="$cs_profile_rak10701"', 'exports the resolved RAK10701 profile ID');
 
 const nodeRedSettings = read(nodeRedSettingsPath);
 expectIncludes(nodeRedSettingsPath, nodeRedSettings, "const chirpstackEnvPath = '/srv/node-red/.chirpstack.env';", 'has a checked-in ChirpStack env compatibility loader');
@@ -126,6 +131,9 @@ expectIncludes(chirpstackBootstrapPath, bootstrap, 'CHIRPSTACK_PROFILE_CLOVER: r
 expectExcludes(chirpstackBootstrapPath, bootstrap, '`application/${sensorsAppId}/device/#`', 'must not rewrite sensor MQTT input topics to installation-specific IDs');
 expectExcludes(chirpstackBootstrapPath, bootstrap, '`application/${fieldTesterAppId}/#`', 'must not rewrite field tester MQTT input topics to installation-specific IDs');
 expectExcludes(chirpstackBootstrapPath, bootstrap, 'FIXED_APP_ID -> env.get(CHIRPSTACK_APP_ACTUATORS)', 'must not patch STREGA flow code during normal bootstrap');
+if (bootstrap.includes('patchSettingsJs();') && !bootstrap.includes("process.env.OSI_BOOTSTRAP_PATCH_SETTINGS === '1'")) {
+  fail(`${chirpstackBootstrapPath}: patchSettingsJs() must be removed from normal bootstrap or guarded by OSI_BOOTSTRAP_PATCH_SETTINGS`);
+}
 
 const diagnostic = read(diagnosticPath, { optional: true });
 if (diagnostic) {
@@ -167,7 +175,12 @@ Expected: FAIL with at least one message containing `must not contain hardcoded 
 
 - [ ] **Step 4: Replace the STREGA downlink app-id logic in all three flows**
 
-For each platform flow, update the function node named `Build STREGA downlink + emit log ctx`. Replace the `FIXED_APP_ID` declaration with:
+The STREGA node shape differs by platform. Preserve the existing output count and wiring:
+
+- bcm2712/RPi 5 has three outputs: MQTT downlink, log context, command ACK.
+- bcm2709 and bcm2708 have two outputs: MQTT downlink, log context.
+
+For bcm2709 and bcm2708, update the function node named `Build STREGA downlink + emit log ctx`. Replace the `FIXED_APP_ID` declaration with:
 
 ```js
 const actuatorsAppId = String(env.get('CHIRPSTACK_APP_ACTUATORS') || '').trim();
@@ -191,6 +204,34 @@ if (!actuatorsAppId) {
     }
   };
   return [null, failedLogMsg];
+}
+```
+
+For bcm2712, replace the `FIXED_APP_ID` declaration with:
+
+```js
+const actuatorsAppId = String(env.get('CHIRPSTACK_APP_ACTUATORS') || '').trim();
+```
+
+Then insert this guard after the existing `function ack(result, error, extra) { ... }` declaration so the missing-config path can emit the third-output ACK:
+
+```js
+if (!actuatorsAppId) {
+  const error = 'Missing CHIRPSTACK_APP_ACTUATORS; refusing STREGA downlink';
+  node.status({ fill: 'red', shape: 'ring', text: 'missing Actuators app ID' });
+  node.error(error, msg);
+  const failedLogMsg = {
+    _log_ctx: {
+      devEui,
+      zone_id: Number.isFinite(zoneId) ? zoneId : null,
+      action,
+      duration_minutes: Number.isFinite(durationMinutes) ? durationMinutes : null,
+      reason: error,
+      result: 'FAILED',
+      created_at: new Date().toISOString()
+    }
+  };
+  return [null, failedLogMsg, ack('FAILED', error)];
 }
 ```
 
@@ -238,7 +279,9 @@ The `scripts/verify-communication-contract.js` script from Task 1 must contain t
 ```js
 expectIncludes(nodeRedInitPath, nodeRedInit, 'load_chirpstack_env_value()', 'defines a per-key .chirpstack.env fallback reader');
 expectIncludes(nodeRedInitPath, nodeRedInit, 'resolve_chirpstack_value()', 'resolves UCI first and env fallback second for ChirpStack IDs');
+expectIncludes(nodeRedInitPath, nodeRedInit, 'CHIRPSTACK_APP_FIELD_TESTER="$cs_app_field_tester"', 'exports the field tester application ID');
 expectIncludes(nodeRedInitPath, nodeRedInit, 'CHIRPSTACK_PROFILE_RAK10701', 'exports the RAK10701 profile variable');
+expectIncludes(nodeRedInitPath, nodeRedInit, 'CHIRPSTACK_PROFILE_RAK10701="$cs_profile_rak10701"', 'exports the resolved RAK10701 profile ID');
 expectIncludes(nodeRedSettingsPath, nodeRedSettings, "const chirpstackEnvPath = '/srv/node-red/.chirpstack.env';", 'has a checked-in ChirpStack env compatibility loader');
 expectIncludes(nodeRedSettingsPath, nodeRedSettings, 'protectedKeys', 'protects runtime gateway identity variables from stale env-file overrides');
 expectIncludes(nodeRedSettingsPath, nodeRedSettings, 'process.env[key] = value;', 'loads non-protected compatibility values from .chirpstack.env');
@@ -398,6 +441,9 @@ expectIncludes(chirpstackBootstrapPath, bootstrap, 'CHIRPSTACK_PROFILE_CLOVER: r
 expectExcludes(chirpstackBootstrapPath, bootstrap, '`application/${sensorsAppId}/device/#`', 'must not rewrite sensor MQTT input topics to installation-specific IDs');
 expectExcludes(chirpstackBootstrapPath, bootstrap, '`application/${fieldTesterAppId}/#`', 'must not rewrite field tester MQTT input topics to installation-specific IDs');
 expectExcludes(chirpstackBootstrapPath, bootstrap, 'FIXED_APP_ID -> env.get(CHIRPSTACK_APP_ACTUATORS)', 'must not patch STREGA flow code during normal bootstrap');
+if (bootstrap.includes('patchSettingsJs();') && !bootstrap.includes("process.env.OSI_BOOTSTRAP_PATCH_SETTINGS === '1'")) {
+  fail(`${chirpstackBootstrapPath}: patchSettingsJs() must be removed from normal bootstrap or guarded by OSI_BOOTSTRAP_PATCH_SETTINGS`);
+}
 ```
 
 - [ ] **Step 2: Run verification and confirm it fails**
@@ -413,7 +459,13 @@ Expected: FAIL on missing `writeUciConfig(envVars)` and current topic/downlink m
 
 - [ ] **Step 3: Add UCI persistence helper to bootstrap**
 
-In `scripts/chirpstack-bootstrap.js`, add:
+In `scripts/chirpstack-bootstrap.js`, extend the existing child-process import:
+
+```js
+const { execSync, execFileSync } = require('child_process');
+```
+
+Then add:
 
 ```js
 function toUciCloudKey(envKey) {
@@ -440,13 +492,13 @@ function writeUciConfig(envVars) {
   }
   if (!commands.length) return;
   for (const args of commands) {
-    child_process.execFileSync('uci', args, { stdio: 'inherit' });
+    execFileSync('uci', args, { stdio: 'inherit' });
   }
-  child_process.execFileSync('uci', ['commit', 'osi-server'], { stdio: 'inherit' });
+  execFileSync('uci', ['commit', 'osi-server'], { stdio: 'inherit' });
 }
 ```
 
-Confirm the file already imports `child_process`; if it imports destructured functions instead, use the existing import style consistently.
+This keeps the file's existing destructured import style and avoids a `child_process is not defined` runtime error.
 
 - [ ] **Step 4: Map RAK10701 to both profile names**
 
@@ -493,7 +545,21 @@ function validatePortableFlows() {
 }
 ```
 
-- [ ] **Step 6: Persist env and UCI**
+- [ ] **Step 6: Stop bootstrap settings.js patching**
+
+Remove the normal-bootstrap call to `patchSettingsJs();`. The checked-in `settings.js` loader from Task 2 owns env-file compatibility now.
+
+Keep `patchSettingsJs` only if it is moved behind an explicit compatibility flag such as:
+
+```js
+if (process.env.OSI_BOOTSTRAP_PATCH_SETTINGS === '1') {
+  patchSettingsJs();
+}
+```
+
+Normal bootstrap must not patch `settings.js` on every run.
+
+- [ ] **Step 7: Persist env and UCI**
 
 After `writeEnvFile(envVars);`, add:
 
@@ -501,7 +567,7 @@ After `writeEnvFile(envVars);`, add:
 writeUciConfig(envVars);
 ```
 
-- [ ] **Step 7: Run verification**
+- [ ] **Step 8: Run verification**
 
 Run:
 
@@ -512,7 +578,7 @@ node scripts/verify-sync-flow.js
 
 Expected: exit `0`.
 
-- [ ] **Step 8: Commit**
+- [ ] **Step 9: Commit**
 
 ```bash
 git add scripts/chirpstack-bootstrap.js scripts/verify-communication-contract.js
@@ -557,7 +623,7 @@ run_communication_preflight() {
     preflight_dir="$TMP_DIR/preflight"
     mkdir -p "$preflight_dir"
     fetch "scripts/check-mqtt-topics.sh" "$preflight_dir/check-mqtt-topics.sh"
-    fetch "scripts/verify-communication-contract.js" "$preflight_dir/verify-communication-contract.js"
+    fetch "scripts/verify-communication-contract.js" "$preflight_dir/scripts/verify-communication-contract.js"
     chmod 755 "$preflight_dir/check-mqtt-topics.sh"
     (
         cd "$preflight_dir"
@@ -573,13 +639,17 @@ run_communication_preflight() {
         fetch "feeds/chirpstack-openwrt-feed/apps/node-red/files/settings.js" "feeds/chirpstack-openwrt-feed/apps/node-red/files/settings.js"
         fetch "scripts/chirpstack-bootstrap.js" "scripts/chirpstack-bootstrap.js"
         sh "$preflight_dir/check-mqtt-topics.sh"
-        node "$preflight_dir/verify-communication-contract.js"
+        REPO_ROOT="$preflight_dir" node "$preflight_dir/scripts/verify-communication-contract.js"
     )
     echo "OK"
 }
 ```
 
 Call `run_communication_preflight` immediately after printing `Source: $BASE` and before the first `fetch_required`.
+
+The verifier must live under `$preflight_dir/scripts/` or receive `REPO_ROOT="$preflight_dir"`. This preserves the repo-root assumptions used by `path.resolve(__dirname, '..')` and prevents false missing-file failures in deploy preflight.
+
+If a preflight `fetch` fails, deploy must stop before copying artifacts. Keep the existing `set -eu` behavior and let `curl -fsSLo` fail, but print `--- Communication preflight ---` before the first preflight fetch so the failure is clearly scoped to validation setup rather than a partial deploy.
 
 - [ ] **Step 4: Run local verification**
 
@@ -663,6 +733,7 @@ section() {
 read_env_key() {
     key="$1"
     [ -f "$ENV_FILE" ] || return 0
+    # Keep this parser aligned with load_chirpstack_env_value() in node-red.init.
     awk -v wanted="$key" '
         /^[[:space:]]*#/ { next }
         /^[[:space:]]*$/ { next }
@@ -869,9 +940,11 @@ Do not write to live Pis until Tasks 1-6 pass locally.
 2. Choose kaba100 as first write target unless new diagnostics show it is unsuitable.
 3. Before any write, create a timestamped backup on the target under `/data/db/backups/osi-os-<timestamp>` including `/data/db/`, `/srv/node-red/`, `/usr/lib/node-red/gui/`, `/etc/init.d/node-red`, `/srv/node-red/flows.json`, and `/srv/node-red/settings.js`.
 4. Deploy the narrow artifact set using `deploy.sh`; do not overwrite `/data/db/farming.db`.
-5. Restart Node-RED only inside the approved rollout window.
-6. Run post diagnostics and compare to pre diagnostics.
-7. Proceed to Silvan only after kaba100 passes local ingest, sync outbox, MQTT client ID, and STREGA runtime app checks.
-8. Proceed to Uganda only after one demo Pi passes all post-checks and Uganda preflight shows required app/profile IDs in UCI or `.chirpstack.env`.
+5. Do not run `chirpstack-bootstrap.js` against an old live flow before the new portable flow has been deployed. The new bootstrap validation intentionally rejects previously patched live flows that still contain `FIXED_APP_ID`, even if they currently work through an env fallback.
+6. If bootstrap is needed after deploy, run it only after deploy preflight has passed and `/srv/node-red/flows.json` has been replaced by the portable flow.
+7. Restart Node-RED only inside the approved rollout window.
+8. Run post diagnostics and compare to pre diagnostics.
+9. Proceed to Silvan only after kaba100 passes local ingest, sync outbox, MQTT client ID, and STREGA runtime app checks.
+10. Proceed to Uganda only after one demo Pi passes all post-checks and Uganda preflight shows required app/profile IDs in UCI or `.chirpstack.env`.
 
 Rollback trigger: Node-RED fails to start, local ingest stops, sync outbox delivery regresses, cloud MQTT client ID changes away from `device_<uppercase gateway EUI>`, or STREGA downlink source fails the runtime app-id check.
