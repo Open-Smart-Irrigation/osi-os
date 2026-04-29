@@ -23,6 +23,7 @@ Architectural rule:
 - `osi-server`: `main`
 
 > Note: the prediction-engine, admin prediction lab, and clustered Track B rollout work has now been consolidated back onto `osi-server` `main`. As of `2026-04-22`, the battery-footer work has also been pushed to both repos, `kaba100` has received a GUI-only `osi-os` rollout from `main`, and the live cloud server at `83.228.220.63` has been safely rolled forward to `osi-server` `main` via a local git bundle plus a backend-only rebuild.
+> As of `2026-04-29`, Terra mobile/UX/VWC work is merged into `osi-server` `main` (`81fca4c`), and STREGA runtime recovery is merged into `osi-os` `main` (`7d057377`). The LSN50 dendrometer decoder work remains intentionally unmerged on `feature/lsn50-dendrometer-decoder-claude`.
 
 ---
 
@@ -216,11 +217,15 @@ For gateway-backed farms:
 
 ```bash
 node scripts/verify-sync-flow.js
+node scripts/verify-strega-gen1.js
+scripts/check-mqtt-topics.sh
+node scripts/verify-communication-contract.js
 ```
 
 Frontend build:
 
 ```bash
+cd web/react-gui && npm run test:unit
 cd web/react-gui && npm run build
 ```
 
@@ -273,6 +278,8 @@ npm run build
 - On that small VPS, prefer prebuilt artifacts from a stronger machine. The safe backend rollout pattern is `docker compose build backend && docker compose up -d --no-deps backend`, or better, ship a prebuilt jar/image and recreate only `osi-backend`.
 - The live main VPS now has a persistent `4G` swapfile at `/var/lib/swap/swapfile`. Keep it enabled, but treat it as a safety net, not as permission to resume full-stack on-host builds.
 - As of `2026-04-22`, live `kaba100` `DRAGINO_LSN50` devices still expose `bat_v` but not `bat_pct`, so the shipped battery-footer work only shows footer percentages for devices with real `bat_pct` values. Follow-up scope for an explicit device-specific LSN50 voltage-to-percent extension is tracked in `osi-os#51` and `osi-server#7`.
+- The STREGA runtime recovery on `osi-os` `main` depends on the shared local uplink MQTT node `e73a11a2a36aab22` remaining `application/+/device/+/event/up`. Do not narrow it to a generated ChirpStack application UUID. `scripts/check-mqtt-topics.sh` and `scripts/verify-sync-flow.js` enforce this.
+- STREGA Gen1 `ffff/ffff` environmental telemetry is a sentinel for unavailable temperature/humidity. The managed decoder and STREGA flow normalize that pair to `null`, while preserving numeric battery percent and valve state. Use `node scripts/verify-strega-gen1.js` plus `node scripts/verify-sync-flow.js` after STREGA changes.
 
 ### Live Deploy Database Safety
 
