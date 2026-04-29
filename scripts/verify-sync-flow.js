@@ -554,7 +554,8 @@ expectExcludes('Process Result', "gateway/([0-9A-Fa-f]{16})/event/", 'ad hoc Chi
 expectExcludes('Process Result', "chirpstack-concentratord.@sx1302[0].gateway_id", 'ad hoc concentratord gateway probing during linked login');
 expectExcludes('Process Result', "uci -q get osi-server.cloud.device_eui 2>/dev/null || true", 'ad hoc UCI gateway probing during linked login');
 expectExcludes('Process Result', "/sys/class/net/eth0/address", 'ad hoc MAC-derived gateway probing during linked login');
-expectIncludes('Route Command', "device: { devEui: String(cmd.deviceEui || cmd.devEui || '').trim().toUpperCase() }", 'routes valve commands from either deviceEui or devEui');
+expectIncludes('Route Command', "var valveTargetEui = String(cmd.deviceEui || cmd.devEui || '').trim().toUpperCase();", 'normalizes valve commands from either deviceEui or devEui');
+expectIncludes('Route Command', 'device: { devEui: valveTargetEui }', 'routes normalized valve commands to the STREGA actuator path');
 expectIncludes('Route Command', "commandType === 'SYNC_LINKED_AUTH'", 'routes linked-auth sync commands through the special command handler');
 expectIncludes('Route Command', "commandType === 'FORCE_EDGE_SYNC'", 'routes force-edge-sync commands through the special command handler');
 expectIncludes('CS Register Device', 'chirpstack.createProvisioningClientFromEnv(env)', 'uses shared ChirpStack provisioning helper');
@@ -1148,8 +1149,8 @@ expectIncludes('Build STREGA downlink + emit log ctx', "case 'SET_FLUSHING': {",
 expectIncludes('Build STREGA downlink + emit log ctx', 'deviceEui: devEui', 'includes the actual STREGA valve DevEUI in direct command ACK payloads');
 expectIncludes('Build STREGA downlink + emit log ctx', 'gatewayDeviceEui: gatewayDeviceEui', 'includes the gateway transport identity in direct STREGA command ACK payloads');
 expectIncludes('Build Status + ACK', 'deviceEui: deviceEui', 'includes the actual STREGA valve DevEUI in cloud status payloads');
-expectIncludes('Build Status + ACK', 'gatewayDeviceEui: eui', 'includes the gateway transport identity in cloud status payloads');
-expectIncludes('Build Status + ACK', "commandType: 'VALVE_COMMAND'", 'tags manual STREGA valve ACK payloads with the cloud command type');
+expectIncludes('Build Status + ACK', 'gatewayDeviceEui: gatewayDeviceEui', 'includes the gateway transport identity in cloud status payloads');
+expectIncludes('Build Status + ACK', "ctx.commandType || 'VALVE_COMMAND'", 'defaults manual STREGA valve ACK payloads to the cloud command type');
 pendingChecks.push((async () => {
   // Fixed fixture values mirror the live command-193 failure; the test has no hardware dependency.
   const gatewayEui = '0016C001F151B1D6';
