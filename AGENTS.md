@@ -22,7 +22,7 @@ Architectural rule:
 - `osi-os`: `main`
 - `osi-server`: `main`
 
-> Note: the current live server and Pi rollout were deployed from local release snapshots before merge. The prediction-engine, admin prediction lab, and clustered Track B rollout work has now been consolidated back onto `osi-server` `main`.
+> Note: the prediction-engine, admin prediction lab, and clustered Track B rollout work has now been consolidated back onto `osi-server` `main`. As of `2026-04-22`, the battery-footer work has also been pushed to both repos, `kaba100` has received a GUI-only `osi-os` rollout from `main`, and the live cloud server at `83.228.220.63` has been safely rolled forward to `osi-server` `main` via a local git bundle plus a backend-only rebuild.
 
 ---
 
@@ -130,6 +130,7 @@ This file contains:
 ### Verification script
 
 - [verify-sync-flow.js](/home/phil/Repos/osi-os/scripts/verify-sync-flow.js)
+- [check-mqtt-topics.sh](/home/phil/Repos/osi-os/scripts/check-mqtt-topics.sh)
 
 ---
 
@@ -266,10 +267,12 @@ npm run build
 - As of `2026-04-16`, the live `osi-backend` on `83.228.220.63` is configured to use the separate prediction VPS at `https://vps-92c7b4bb.vps.ovh.net` instead of the local in-stack prediction service.
 - The prediction VPS nginx config leaves `/health` public but allowlists `/internal/*`, `/openapi.json`, `/docs`, and `/redoc` to the live OSI server addresses `83.228.220.63`, `2001:1600:18:103::336`, and localhost.
 - The old local `osi-prediction-service` container on the main OSI server was intentionally left running as a dormant fallback after cutover. Revisit it after a few weeks of stable operation before removing it.
+- On the live VPS, the active compose working directory is `/home/rocky/docker/osi-server/docker`, and `/home/rocky/docker/osi-server` is the active repo path (currently a symlink to a release checkout). Do not assume a checkout exists at `/home/rocky/osi-server`.
 - The live VPS checkout may not have working GitHub auth for `git pull`. A local git bundle + `git pull --ff-only <bundle> main` is a viable fallback, then `git update-ref refs/remotes/origin/main HEAD` keeps the live repo state clean.
 - As of `2026-04-18`, the live main OSI server at `83.228.220.63` is still a small VPS class host (`4 CPU / 4 GB RAM / 80 GB disk`). Do **not** run broad on-host rebuilds like `docker compose up -d --build` there; that rollout pattern was enough to make the host unresponsive.
 - On that small VPS, prefer prebuilt artifacts from a stronger machine. The safe backend rollout pattern is `docker compose build backend && docker compose up -d --no-deps backend`, or better, ship a prebuilt jar/image and recreate only `osi-backend`.
 - The live main VPS now has a persistent `4G` swapfile at `/var/lib/swap/swapfile`. Keep it enabled, but treat it as a safety net, not as permission to resume full-stack on-host builds.
+- As of `2026-04-22`, live `kaba100` `DRAGINO_LSN50` devices still expose `bat_v` but not `bat_pct`, so the shipped battery-footer work only shows footer percentages for devices with real `bat_pct` values. Follow-up scope for an explicit device-specific LSN50 voltage-to-percent extension is tracked in `osi-os#51` and `osi-server#7`.
 
 ### Live Deploy Database Safety
 
@@ -314,7 +317,11 @@ Constraints:
 
 Tracked as GitHub Issues: https://github.com/Open-Smart-Irrigation/osi-os/issues
 
-Key open areas: S2120 history for unique params (#33), LSN50 ADC display (#34), Terra live view regressions (#35–#40, #43), soil profile rendering (#41–#42), mobile/native apps (#44–#46), i18n (#47).
+Key open areas in `osi-os`: S2120 history for unique params (#33), LSN50 ADC display (#34), and i18n (#47).
+
+Terra follow-up implementation work now lives primarily in `osi-server`:
+- active Terra backlog: `osi-server#9`, `#13`, `#18` through `#25`
+- `osi-os#41` and `osi-os#42` remain as mirrors/cross-links for soil-profile rendering symptoms, but the active code is in `osi-server/prediction_animation_v2`
 
 ---
 
@@ -351,6 +358,14 @@ Also consider sync metadata requirements and ChirpStack app/profile mapping.
 | Kiwi | `Sensors` | Kiwi |
 | LSN50 | `Sensors` | LSN50 |
 | Valve | `Actuators` | STREGA |
+
+### Node-RED MQTT IN Topics
+
+All MQTT IN nodes in flows.json **must** use wildcard subscription topics. ChirpStack generates random per-installation application UUIDs at bootstrap, so hardcoded UUIDs break silently on every gateway except the one whose UUIDs were baked in.
+
+**Required pattern:** `application/+/device/+/event/up`
+
+Device-type discrimination is handled by downstream function-node profile filters (env var match via `CHIRPSTACK_PROFILE_*` + `deviceProfileName` string fallback), not by MQTT topic filtering. The validation script `scripts/check-mqtt-topics.sh` enforces this convention.
 
 ---
 

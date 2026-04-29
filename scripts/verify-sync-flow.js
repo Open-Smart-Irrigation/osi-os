@@ -34,6 +34,8 @@ const farmingTypesPath = path.resolve(__dirname, '..', 'web', 'react-gui', 'src'
 const dendroMonitorPath = path.resolve(__dirname, '..', 'web', 'react-gui', 'src', 'components', 'farming', 'DendrometerMonitor.tsx');
 const dendroDrawerPath = path.resolve(__dirname, '..', 'web', 'react-gui', 'src', 'components', 'farming', 'dendrometer', 'DendrometerMonitor.tsx');
 const draginoTempCardPath = path.resolve(__dirname, '..', 'web', 'react-gui', 'src', 'components', 'farming', 'DraginoTempCard.tsx');
+const draginoSettingsModalPath = path.resolve(__dirname, '..', 'web', 'react-gui', 'src', 'components', 'farming', 'DraginoSettingsModal.tsx');
+const draginoDendroCalibrationPath = path.resolve(__dirname, '..', 'web', 'react-gui', 'src', 'components', 'farming', 'DraginoDendroCalibrationSection.tsx');
 const senseCapWeatherCardPath = path.resolve(__dirname, '..', 'web', 'react-gui', 'src', 'components', 'farming', 'SenseCapWeatherCard.tsx');
 const windMonitorPath = path.resolve(__dirname, '..', 'web', 'react-gui', 'src', 'components', 'farming', 'WindMonitor.tsx');
 const windUtilsPath = path.resolve(__dirname, '..', 'web', 'react-gui', 'src', 'utils', 'wind.ts');
@@ -52,6 +54,7 @@ const dendroHelperCandidates = [
   path.join(nodeRedRoot, 'osi-dendro-helper')
 ];
 const packageJsonPath = path.join(nodeRedRoot, 'package.json');
+execFileSync(process.execPath, [path.resolve(__dirname, 'verify-communication-contract.js')], { stdio: 'inherit' });
 const deployScript = fs.readFileSync(deployScriptPath, 'utf8');
 const nodeRedInitScript = fs.readFileSync(nodeRedInitPath, 'utf8');
 const osiServerDefaultsScript = fs.readFileSync(osiServerDefaultsPath, 'utf8');
@@ -65,6 +68,9 @@ const farmingTypesSource = fs.readFileSync(farmingTypesPath, 'utf8');
 const dendroMonitorSource = fs.readFileSync(dendroMonitorPath, 'utf8');
 const dendroDrawerSource = fs.readFileSync(dendroDrawerPath, 'utf8');
 const draginoTempCardSource = fs.readFileSync(draginoTempCardPath, 'utf8');
+const draginoSettingsModalSource = fs.readFileSync(draginoSettingsModalPath, 'utf8');
+const draginoDendroCalibrationSource = fs.readFileSync(draginoDendroCalibrationPath, 'utf8');
+const draginoSettingsSource = `${draginoSettingsModalSource}\n${draginoDendroCalibrationSource}`;
 const senseCapWeatherCardSource = fs.readFileSync(senseCapWeatherCardPath, 'utf8');
 const windMonitorSource = fs.readFileSync(windMonitorPath, 'utf8');
 const windUtilsSource = fs.readFileSync(windUtilsPath, 'utf8');
@@ -831,7 +837,8 @@ expectExcludes('Process Result', "gateway/([0-9A-Fa-f]{16})/event/", 'ad hoc Chi
 expectExcludes('Process Result', "chirpstack-concentratord.@sx1302[0].gateway_id", 'ad hoc concentratord gateway probing during linked login');
 expectExcludes('Process Result', "uci -q get osi-server.cloud.device_eui 2>/dev/null || true", 'ad hoc UCI gateway probing during linked login');
 expectExcludes('Process Result', "/sys/class/net/eth0/address", 'ad hoc MAC-derived gateway probing during linked login');
-expectIncludes('Route Command', "device: { devEui: String(cmd.deviceEui || cmd.devEui || '').trim().toUpperCase() }", 'routes valve commands from either deviceEui or devEui');
+expectIncludes('Route Command', "var valveTargetEui = String(cmd.deviceEui || cmd.devEui || '').trim().toUpperCase();", 'normalizes valve commands from either deviceEui or devEui');
+expectIncludes('Route Command', 'device: { devEui: valveTargetEui }', 'routes normalized valve commands to the STREGA actuator path');
 expectIncludes('Route Command', "commandType === 'SYNC_LINKED_AUTH'", 'routes linked-auth sync commands through the special command handler');
 expectIncludes('Route Command', "commandType === 'FORCE_EDGE_SYNC'", 'routes force-edge-sync commands through the special command handler');
 expectIncludes('CS Register Device', 'chirpstack.createProvisioningClientFromEnv(env)', 'uses shared ChirpStack provisioning helper');
@@ -873,6 +880,7 @@ expectIncludes('Sync Init Schema + Triggers', "UPDATE users SET last_auth_sync_s
 expectIncludes('Sync Init Schema + Triggers', "const gatewaySql = /^[0-9A-F]{16}$/.test(gateway)", 'uses a canonical gateway-or-NULL SQL fallback during sync init');
 expectIncludes('Sync Init Schema + Triggers', 'ALTER TABLE device_data ADD COLUMN rain_mm_per_10min REAL', 'adds normalized rain telemetry storage');
 expectIncludes('Sync Init Schema + Triggers', 'ALTER TABLE device_data ADD COLUMN flow_liters_per_10min REAL', 'adds normalized flow telemetry storage');
+expectIncludes('Sync Init Schema + Triggers', 'ALTER TABLE device_data ADD COLUMN bat_pct REAL', 'adds STREGA battery percentage storage');
 expectIncludes('Sync Init Schema + Triggers', "'area_m2', NEW.area_m2", 'mirrors zone area changes into zone sync events');
 expectIncludes('Sync Init Schema + Triggers', "'irrigation_efficiency_pct', NEW.irrigation_efficiency_pct", 'mirrors irrigation efficiency changes into zone sync events');
 expectIncludes('Sync Init Schema + Triggers', "'prediction_card_enabled', COALESCE(NEW.prediction_card_enabled, 0)", 'mirrors prediction-card changes into zone sync events');
@@ -1262,16 +1270,16 @@ expectFileExcludes('DraginoTempCard.tsx', draginoTempCardSource, 'DENDROMETER PO
 expectFileIncludes('DraginoTempCard.tsx', draginoTempCardSource, 'dendro_stem_change_um', 'renders the baseline-relative stem change signal on the device card');
 expectFileIncludes('DraginoTempCard.tsx', draginoTempCardSource, 'dendro_baseline_pending === 1', 'suppresses stale stem-change values when the device is awaiting a new baseline');
 expectFileIncludes('DraginoTempCard.tsx', draginoTempCardSource, 'Awaiting baseline', 'keeps the dendrometer card visible while the next valid uplink establishes a new baseline');
-expectFileIncludes('DraginoTempCard.tsx', draginoTempCardSource, 'Current ratio', 'shows ratio in the dendrometer calibration section instead of on the device card');
-expectFileIncludes('DraginoTempCard.tsx', draginoTempCardSource, 'Dendrometer calibration', 'adds dendrometer calibration controls to the LSN50 advanced settings');
-expectFileIncludes('DraginoTempCard.tsx', draginoTempCardSource, 'Retracted ratio (0 mm)', 'uses canonical retracted-ratio calibration wording in the advanced settings');
-expectFileIncludes('DraginoTempCard.tsx', draginoTempCardSource, 'Extended ratio (full stroke)', 'uses canonical extended-ratio calibration wording in the advanced settings');
-expectFileIncludes('DraginoTempCard.tsx', draginoTempCardSource, 'Use current ratio', 'allows capturing the live ratio into calibration endpoints');
-expectFileIncludes('DraginoTempCard.tsx', draginoTempCardSource, "await lsn50API.setDendroConfig(device.deveui", 'saves dendrometer calibration through the dedicated local API');
-expectFileIncludes('DraginoTempCard.tsx', draginoTempCardSource, 'Reset stem baseline', 'adds a manual baseline reset action for legacy dendrometers');
-expectFileIncludes('DraginoTempCard.tsx', draginoTempCardSource, "await lsn50API.resetDendroBaseline(device.deveui)", 'wires the manual baseline reset action to the local API');
-expectFileIncludes('DraginoTempCard.tsx', draginoTempCardSource, 'Force legacy mode', 'exposes the legacy dendrometer override in the advanced settings');
-expectFileExcludes('DraginoTempCard.tsx', draginoTempCardSource, 'Invert direction', 'removes the ratio inversion toggle from the advanced settings');
+expectFileIncludes('DraginoDendroCalibrationSection.tsx', draginoDendroCalibrationSource, 'Current ratio', 'shows ratio in the dendrometer calibration section instead of on the device card');
+expectFileIncludes('DraginoSettingsModal.tsx', draginoSettingsModalSource, 'Dendrometer calibration', 'adds dendrometer calibration controls to the LSN50 advanced settings');
+expectFileIncludes('DraginoDendroCalibrationSection.tsx', draginoDendroCalibrationSource, 'Retracted ratio (0 mm)', 'uses canonical retracted-ratio calibration wording in the advanced settings');
+expectFileIncludes('DraginoDendroCalibrationSection.tsx', draginoDendroCalibrationSource, 'Extended ratio (full stroke)', 'uses canonical extended-ratio calibration wording in the advanced settings');
+expectFileIncludes('DraginoDendroCalibrationSection.tsx', draginoDendroCalibrationSource, 'Capture current ratio', 'allows capturing the live ratio into calibration endpoints');
+expectFileIncludes('DraginoDendroCalibrationSection.tsx', draginoDendroCalibrationSource, "await lsn50API.setDendroConfig(device.deveui", 'saves dendrometer calibration through the dedicated local API');
+expectFileIncludes('DraginoDendroCalibrationSection.tsx', draginoDendroCalibrationSource, 'Reset stem baseline', 'adds a manual baseline reset action for legacy dendrometers');
+expectFileIncludes('DraginoDendroCalibrationSection.tsx', draginoDendroCalibrationSource, "await lsn50API.resetDendroBaseline(device.deveui)", 'wires the manual baseline reset action to the local API');
+expectFileIncludes('DraginoDendroCalibrationSection.tsx', draginoDendroCalibrationSource, 'Force legacy mode', 'exposes the legacy dendrometer override in the advanced settings');
+expectFileExcludes('Dragino settings components', draginoSettingsSource, 'Invert direction', 'removes the ratio inversion toggle from the advanced settings');
 expectFileIncludes('SenseCapWeatherCard.tsx', senseCapWeatherCardSource, 'WindMonitor', 'opens a dedicated wind monitor from the S2120 card');
 expectFileIncludes('SenseCapWeatherCard.tsx', senseCapWeatherCardSource, 'rain_mm_per_10min', 'shows normalized rain history options on the S2120 card');
 expectFileIncludes('SenseCapWeatherCard.tsx', senseCapWeatherCardSource, 'formatCounterStatus', 'renders human-readable rain-counter state on the S2120 card');
@@ -1427,8 +1435,92 @@ expectIncludes('Build STREGA downlink + emit log ctx', "case 'SET_FLUSHING': {",
 expectIncludes('Build STREGA downlink + emit log ctx', 'deviceEui: devEui', 'includes the actual STREGA valve DevEUI in direct command ACK payloads');
 expectIncludes('Build STREGA downlink + emit log ctx', 'gatewayDeviceEui: gatewayDeviceEui', 'includes the gateway transport identity in direct STREGA command ACK payloads');
 expectIncludes('Build Status + ACK', 'deviceEui: deviceEui', 'includes the actual STREGA valve DevEUI in cloud status payloads');
-expectIncludes('Build Status + ACK', 'gatewayDeviceEui: eui', 'includes the gateway transport identity in cloud status payloads');
-expectIncludes('Build Status + ACK', "commandType: 'VALVE_COMMAND'", 'tags manual STREGA valve ACK payloads with the cloud command type');
+expectIncludes('Build Status + ACK', 'gatewayDeviceEui: gatewayDeviceEui', 'includes the gateway transport identity in cloud status payloads');
+expectIncludes('Build Status + ACK', "ctx.commandType || 'VALVE_COMMAND'", 'defaults manual STREGA valve ACK payloads to the cloud command type');
+pendingChecks.push((async () => {
+  // Fixed fixture values mirror the live command-193 failure; the test has no hardware dependency.
+  const gatewayEui = '0016C001F151B1D6';
+  const valveEui = '70B3D57708000334';
+  const fixture = {
+    commandId: 193,
+    commandType: 'VALVE_COMMAND',
+    action: 'CLOSE',
+    deviceEui: valveEui,
+    devEui: valveEui,
+    gatewayDeviceEui: gatewayEui,
+    eventUuid: '2a90ee59-6473-4b84-a74e-4d79bcfb7a27',
+    aggregateType: 'DEVICE',
+    aggregateKey: valveEui,
+    appliedSyncVersion: 44,
+  };
+  const expectedContext = {
+    commandId: fixture.commandId,
+    eventUuid: fixture.eventUuid,
+    aggregateType: fixture.aggregateType,
+    aggregateKey: fixture.aggregateKey,
+    appliedSyncVersion: fixture.appliedSyncVersion,
+    commandType: fixture.commandType,
+  };
+
+  const routeResult = await executeFunctionNodeById('934bf2bc19a8ce22', { payload: fixture });
+  const valveMsg = Array.isArray(routeResult) ? routeResult[0] : null;
+  const routeData = valveMsg && valveMsg.payload && valveMsg.payload.data;
+  if (!routeData) {
+    fail('VALVE_COMMAND route did not produce an actuator_command payload');
+    return;
+  }
+  for (const [key, value] of Object.entries(expectedContext)) {
+    if (routeData[key] !== value) {
+      fail(`VALVE_COMMAND route dropped ACK context field ${key}`);
+    }
+  }
+
+  const stregaResult = await executeFunctionNodeById('cdbaa3891d40d7a1', valveMsg, {
+    env: {
+      CHIRPSTACK_APP_ACTUATORS: 'actuators-app',
+      DEVICE_EUI: gatewayEui,
+    },
+  });
+  const logMsg = Array.isArray(stregaResult) ? stregaResult[1] : null;
+  const logCtx = logMsg && logMsg._log_ctx;
+  if (!logCtx) {
+    fail('STREGA downlink did not emit log context for VALVE_COMMAND');
+    return;
+  }
+  for (const [key, value] of Object.entries(expectedContext)) {
+    if (logCtx[key] !== value) {
+      fail(`STREGA log context dropped ACK context field ${key}`);
+    }
+  }
+
+  const statusResult = await executeFunctionNodeById('c8628cffe45f64f7', logMsg, {
+    env: {
+      DEVICE_EUI: gatewayEui,
+    },
+    flowState: {
+      lastCommandId: fixture.commandId,
+    },
+  });
+  const ackMsg = Array.isArray(statusResult) ? statusResult[1] : null;
+  const ackPayload = ackMsg && typeof ackMsg.payload === 'string' ? JSON.parse(ackMsg.payload) : null;
+  if (!ackPayload) {
+    fail('Build Status + ACK did not emit a command_ack payload for VALVE_COMMAND');
+    return;
+  }
+  for (const [key, value] of Object.entries(expectedContext)) {
+    if (ackPayload[key] !== value) {
+      fail(`VALVE_COMMAND command_ack dropped ACK context field ${key}`);
+    }
+  }
+  if (ackPayload.deviceEui !== valveEui) {
+    fail('VALVE_COMMAND command_ack did not preserve the valve deviceEui');
+  }
+  if (ackPayload.gatewayDeviceEui !== gatewayEui) {
+    fail('VALVE_COMMAND command_ack did not preserve the gatewayDeviceEui');
+  }
+})().catch((error) => {
+  fail(`failed to execute VALVE_COMMAND ACK context fixture: ${error.message}`);
+}));
 expectFileIncludes('node-red.init', nodeRedInitScript, '. /usr/libexec/osi-gateway-identity.sh', 'uses the shared gateway identity helper');
 expectFileIncludes('node-red.init', nodeRedInitScript, 'gateway_identity_resolve', 'resolves the canonical gateway identity through the shared helper');
 expectFileIncludes('node-red.init', nodeRedInitScript, 'gateway_identity_repair_concentratord_config || true', 'self-heals active concentratord gateway-id state during startup');
@@ -1465,6 +1557,10 @@ expectFileIncludes('chirpstack-bootstrap.js', chirpstackBootstrapScript, "getOrC
 expectFileIncludes('chirpstack-bootstrap.js', chirpstackBootstrapScript, "CFG.lsn50CodecPath", 'tracks the shipped LSN50 decoder path in bootstrap config');
 expectFileIncludes('chirpstack-bootstrap.js', chirpstackBootstrapScript, "readCodecScript(CFG.lsn50CodecPath, 'LSN50')", 'loads the shipped LSN50 decoder during bootstrap');
 expectFileIncludes('chirpstack-bootstrap.js', chirpstackBootstrapScript, "getOrCreateProfileWithCodec(client, tenantId, CFG.profileLsn50Name", 'creates or repairs the OSI LSN50 profile with a payload codec');
+expectFileIncludes('deploy.sh', deployScript, 'run_communication_preflight()', 'runs communication validation before deploy artifacts are copied');
+expectFileIncludes('deploy.sh', deployScript, 'scripts/verify-communication-contract.js', 'uses the focused communication contract verifier during deploy preflight');
+expectFileIncludes('deploy.sh', deployScript, 'scripts/diagnose-pi-communication.sh', 'fetches the required communication diagnostic during deploy preflight');
+expectFileIncludes('deploy.sh', deployScript, 'Communication preflight', 'prints a clear deploy preflight section');
 expectFileIncludes('deploy.sh', deployScript, '"feeds/chirpstack-openwrt-feed/apps/node-red/files/node-red.init"', 'deploys the Node-RED init script to live devices');
 expectFileIncludes('deploy.sh', deployScript, '"conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/libexec/osi-gateway-identity.sh"', 'deploys the shared gateway identity helper to live devices');
 expectFileIncludes('deploy.sh', deployScript, '"conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-dendro-helper/package.json"', 'deploys the osi-dendro-helper package manifest to live devices');
@@ -1711,6 +1807,12 @@ if (!dbHelperPath) {
       fail(`failed to load DB helper: ${error.message}`);
     }
   }
+}
+
+const dbHelperIndexPath = dbHelperPath ? path.join(dbHelperPath, 'index.js') : null;
+if (dbHelperIndexPath && fs.existsSync(dbHelperIndexPath)) {
+  const dbHelperSource = fs.readFileSync(dbHelperIndexPath, 'utf8');
+  expectFileIncludes('osi-db-helper/index.js', dbHelperSource, 'transaction(', 'exposes the queued helper transaction primitive');
 }
 
 const dendroHelperPath = dendroHelperCandidates.find((candidate) => fs.existsSync(candidate));

@@ -14,10 +14,58 @@ normalize_runtime_eui() {
     printf '%s' "$normalized"
 }
 
+CHIRPSTACK_ENV_FILE="/srv/node-red/.chirpstack.env"
+
+load_chirpstack_env_value() {
+    local key="$1"
+    [ -f "$CHIRPSTACK_ENV_FILE" ] || return 0
+    # Keep this parser aligned with prepare-pi-communication-config.sh and diagnose-pi-communication.sh.
+    awk -v wanted="$key" '
+        /^[[:space:]]*#/ { next }
+        /^[[:space:]]*$/ { next }
+        {
+            line=$0
+            sub(/^[[:space:]]*/, "", line)
+            split(line, parts, "=")
+            env_key=parts[1]
+            sub(/[[:space:]]*$/, "", env_key)
+            if (env_key == wanted) {
+                sub(/^[^=]*=/, "", line)
+                gsub(/^[[:space:]]*/, "", line)
+                gsub(/[[:space:]]*$/, "", line)
+                gsub(/^["'\'']|["'\'']$/, "", line)
+                print line
+                exit
+            }
+        }
+    ' "$CHIRPSTACK_ENV_FILE"
+}
+
+resolve_chirpstack_value() {
+    local uci_key="$1"
+    local env_key="$2"
+    local value
+    value="$(uci -q get "$uci_key" 2>/dev/null || echo "")"
+    if [ -n "$value" ]; then
+        printf '%s' "$value"
+        logger -t node-red.init "chirpstack config $env_key source=uci"
+        return 0
+    fi
+    value="$(load_chirpstack_env_value "$env_key" 2>/dev/null || echo "")"
+    if [ -n "$value" ]; then
+        printf '%s' "$value"
+        logger -t node-red.init "chirpstack config $env_key source=env-fallback"
+        return 0
+    fi
+    logger -t node-red.init "chirpstack config $env_key source=missing"
+    return 0
+}
+
 start_service() {
     mkdir -p /srv/$PACKAGE_NAME
 
-    # OSI Server cloud integration env vars (from UCI)
+    # OSI Server cloud integration env vars. UCI is canonical; .chirpstack.env is
+    # a per-key compatibility fallback for older field installations.
     gateway_identity_resolve || true
     gateway_identity_repair_concentratord_config || true
     gateway_identity_resolve || true
@@ -42,14 +90,16 @@ start_service() {
     local openagri_weather_current_cache_minutes=$(uci -q get osi-server.cloud.openagri_weather_current_cache_minutes 2>/dev/null || echo "30")
     local openagri_weather_forecast_cache_minutes=$(uci -q get osi-server.cloud.openagri_weather_forecast_cache_minutes 2>/dev/null || echo "120")
 
-    # ChirpStack application and device profile IDs (per-installation, from UCI)
-    local cs_app_sensors=$(uci -q get osi-server.cloud.chirpstack_app_sensors 2>/dev/null || echo "")
-    local cs_app_actuators=$(uci -q get osi-server.cloud.chirpstack_app_actuators 2>/dev/null || echo "")
-    local cs_profile_kiwi=$(uci -q get osi-server.cloud.chirpstack_profile_kiwi 2>/dev/null || echo "")
-    local cs_profile_strega=$(uci -q get osi-server.cloud.chirpstack_profile_strega 2>/dev/null || echo "")
-    local cs_profile_lsn50=$(uci -q get osi-server.cloud.chirpstack_profile_lsn50 2>/dev/null || echo "")
-    local cs_profile_clover=$(uci -q get osi-server.cloud.chirpstack_profile_clover 2>/dev/null || echo "")
-    local cs_profile_s2120=$(uci -q get osi-server.cloud.chirpstack_profile_s2120 2>/dev/null || echo "")
+    # ChirpStack application and device profile IDs (per-installation)
+    local cs_app_sensors=$(resolve_chirpstack_value osi-server.cloud.chirpstack_app_sensors CHIRPSTACK_APP_SENSORS)
+    local cs_app_actuators=$(resolve_chirpstack_value osi-server.cloud.chirpstack_app_actuators CHIRPSTACK_APP_ACTUATORS)
+    local cs_app_field_tester=$(resolve_chirpstack_value osi-server.cloud.chirpstack_app_field_tester CHIRPSTACK_APP_FIELD_TESTER)
+    local cs_profile_kiwi=$(resolve_chirpstack_value osi-server.cloud.chirpstack_profile_kiwi CHIRPSTACK_PROFILE_KIWI)
+    local cs_profile_strega=$(resolve_chirpstack_value osi-server.cloud.chirpstack_profile_strega CHIRPSTACK_PROFILE_STREGA)
+    local cs_profile_lsn50=$(resolve_chirpstack_value osi-server.cloud.chirpstack_profile_lsn50 CHIRPSTACK_PROFILE_LSN50)
+    local cs_profile_clover=$(resolve_chirpstack_value osi-server.cloud.chirpstack_profile_clover CHIRPSTACK_PROFILE_CLOVER)
+    local cs_profile_rak10701=$(resolve_chirpstack_value osi-server.cloud.chirpstack_profile_rak10701 CHIRPSTACK_PROFILE_RAK10701)
+    local cs_profile_s2120=$(resolve_chirpstack_value osi-server.cloud.chirpstack_profile_s2120 CHIRPSTACK_PROFILE_S2120)
 
     # Auto-provision flows_cred.json with OSI Cloud MQTT broker credentials.
     # Node-RED does not expand env vars in credential fields or MQTT client IDs,
@@ -107,10 +157,12 @@ NODE
         OPENAGRI_WEATHER_FORECAST_CACHE_MINUTES="$openagri_weather_forecast_cache_minutes" \
         CHIRPSTACK_APP_SENSORS="$cs_app_sensors" \
         CHIRPSTACK_APP_ACTUATORS="$cs_app_actuators" \
+        CHIRPSTACK_APP_FIELD_TESTER="$cs_app_field_tester" \
         CHIRPSTACK_PROFILE_KIWI="$cs_profile_kiwi" \
         CHIRPSTACK_PROFILE_STREGA="$cs_profile_strega" \
         CHIRPSTACK_PROFILE_LSN50="$cs_profile_lsn50" \
         CHIRPSTACK_PROFILE_CLOVER="$cs_profile_clover" \
+        CHIRPSTACK_PROFILE_RAK10701="$cs_profile_rak10701" \
         CHIRPSTACK_PROFILE_S2120="$cs_profile_s2120"
     procd_set_param respawn 3600 5 -1
     procd_close_instance
