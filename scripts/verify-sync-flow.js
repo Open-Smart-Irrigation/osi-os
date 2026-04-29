@@ -559,7 +559,8 @@ expectExcludes('Process Result', "gateway/([0-9A-Fa-f]{16})/event/", 'ad hoc Chi
 expectExcludes('Process Result', "chirpstack-concentratord.@sx1302[0].gateway_id", 'ad hoc concentratord gateway probing during linked login');
 expectExcludes('Process Result', "uci -q get osi-server.cloud.device_eui 2>/dev/null || true", 'ad hoc UCI gateway probing during linked login');
 expectExcludes('Process Result', "/sys/class/net/eth0/address", 'ad hoc MAC-derived gateway probing during linked login');
-expectIncludes('Route Command', "device: { devEui: String(cmd.deviceEui || cmd.devEui || '').trim().toUpperCase() }", 'routes valve commands from either deviceEui or devEui');
+expectIncludes('Route Command', "var valveTargetEui = String(cmd.deviceEui || cmd.devEui || '').trim().toUpperCase();", 'normalizes valve commands from either deviceEui or devEui');
+expectIncludes('Route Command', 'device: { devEui: valveTargetEui }', 'routes normalized valve commands to the STREGA actuator path');
 expectIncludes('Route Command', "commandType === 'SYNC_LINKED_AUTH'", 'routes linked-auth sync commands through the special command handler');
 expectIncludes('Route Command', "commandType === 'FORCE_EDGE_SYNC'", 'routes force-edge-sync commands through the special command handler');
 expectIncludes('CS Register Device', 'chirpstack.createProvisioningClientFromEnv(env)', 'uses shared ChirpStack provisioning helper');
@@ -1153,8 +1154,92 @@ expectIncludes('Build STREGA downlink + emit log ctx', "case 'SET_FLUSHING': {",
 expectIncludes('Build STREGA downlink + emit log ctx', 'deviceEui: devEui', 'includes the actual STREGA valve DevEUI in direct command ACK payloads');
 expectIncludes('Build STREGA downlink + emit log ctx', 'gatewayDeviceEui: gatewayDeviceEui', 'includes the gateway transport identity in direct STREGA command ACK payloads');
 expectIncludes('Build Status + ACK', 'deviceEui: deviceEui', 'includes the actual STREGA valve DevEUI in cloud status payloads');
-expectIncludes('Build Status + ACK', 'gatewayDeviceEui: eui', 'includes the gateway transport identity in cloud status payloads');
-expectIncludes('Build Status + ACK', "commandType: 'VALVE_COMMAND'", 'tags manual STREGA valve ACK payloads with the cloud command type');
+expectIncludes('Build Status + ACK', 'gatewayDeviceEui: gatewayDeviceEui', 'includes the gateway transport identity in cloud status payloads');
+expectIncludes('Build Status + ACK', "ctx.commandType || 'VALVE_COMMAND'", 'defaults manual STREGA valve ACK payloads to the cloud command type');
+pendingChecks.push((async () => {
+  // Fixed fixture values mirror the live command-193 failure; the test has no hardware dependency.
+  const gatewayEui = '0016C001F151B1D6';
+  const valveEui = '70B3D57708000334';
+  const fixture = {
+    commandId: 193,
+    commandType: 'VALVE_COMMAND',
+    action: 'CLOSE',
+    deviceEui: valveEui,
+    devEui: valveEui,
+    gatewayDeviceEui: gatewayEui,
+    eventUuid: '2a90ee59-6473-4b84-a74e-4d79bcfb7a27',
+    aggregateType: 'DEVICE',
+    aggregateKey: valveEui,
+    appliedSyncVersion: 44,
+  };
+  const expectedContext = {
+    commandId: fixture.commandId,
+    eventUuid: fixture.eventUuid,
+    aggregateType: fixture.aggregateType,
+    aggregateKey: fixture.aggregateKey,
+    appliedSyncVersion: fixture.appliedSyncVersion,
+    commandType: fixture.commandType,
+  };
+
+  const routeResult = await executeFunctionNodeById('934bf2bc19a8ce22', { payload: fixture });
+  const valveMsg = Array.isArray(routeResult) ? routeResult[0] : null;
+  const routeData = valveMsg && valveMsg.payload && valveMsg.payload.data;
+  if (!routeData) {
+    fail('VALVE_COMMAND route did not produce an actuator_command payload');
+    return;
+  }
+  for (const [key, value] of Object.entries(expectedContext)) {
+    if (routeData[key] !== value) {
+      fail(`VALVE_COMMAND route dropped ACK context field ${key}`);
+    }
+  }
+
+  const stregaResult = await executeFunctionNodeById('cdbaa3891d40d7a1', valveMsg, {
+    env: {
+      CHIRPSTACK_APP_ACTUATORS: 'actuators-app',
+      DEVICE_EUI: gatewayEui,
+    },
+  });
+  const logMsg = Array.isArray(stregaResult) ? stregaResult[1] : null;
+  const logCtx = logMsg && logMsg._log_ctx;
+  if (!logCtx) {
+    fail('STREGA downlink did not emit log context for VALVE_COMMAND');
+    return;
+  }
+  for (const [key, value] of Object.entries(expectedContext)) {
+    if (logCtx[key] !== value) {
+      fail(`STREGA log context dropped ACK context field ${key}`);
+    }
+  }
+
+  const statusResult = await executeFunctionNodeById('c8628cffe45f64f7', logMsg, {
+    env: {
+      DEVICE_EUI: gatewayEui,
+    },
+    flowState: {
+      lastCommandId: fixture.commandId,
+    },
+  });
+  const ackMsg = Array.isArray(statusResult) ? statusResult[1] : null;
+  const ackPayload = ackMsg && typeof ackMsg.payload === 'string' ? JSON.parse(ackMsg.payload) : null;
+  if (!ackPayload) {
+    fail('Build Status + ACK did not emit a command_ack payload for VALVE_COMMAND');
+    return;
+  }
+  for (const [key, value] of Object.entries(expectedContext)) {
+    if (ackPayload[key] !== value) {
+      fail(`VALVE_COMMAND command_ack dropped ACK context field ${key}`);
+    }
+  }
+  if (ackPayload.deviceEui !== valveEui) {
+    fail('VALVE_COMMAND command_ack did not preserve the valve deviceEui');
+  }
+  if (ackPayload.gatewayDeviceEui !== gatewayEui) {
+    fail('VALVE_COMMAND command_ack did not preserve the gatewayDeviceEui');
+  }
+})().catch((error) => {
+  fail(`failed to execute VALVE_COMMAND ACK context fixture: ${error.message}`);
+}));
 expectFileIncludes('node-red.init', nodeRedInitScript, '. /usr/libexec/osi-gateway-identity.sh', 'uses the shared gateway identity helper');
 expectFileIncludes('node-red.init', nodeRedInitScript, 'gateway_identity_resolve', 'resolves the canonical gateway identity through the shared helper');
 expectFileIncludes('node-red.init', nodeRedInitScript, 'gateway_identity_repair_concentratord_config || true', 'self-heals active concentratord gateway-id state during startup');
