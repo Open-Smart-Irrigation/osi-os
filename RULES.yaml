@@ -1,0 +1,70 @@
+version: '1.0'
+template: osi-os-typescript
+description: OSI OS TypeScript rules for the edge React GUI. These rules are advisory overlays for agents; Superpowers TDD and repo verification remain authoritative.
+rules:
+  - pattern: edge-api-services
+    globs:
+      - web/react-gui/src/services/**/*.ts
+    description: Local REST service and data normalization rules
+    must_do:
+      - rule: Keep Authorization token attachment and 401 auth-expiry handling centralized in the axios service boundary.
+      - rule: Normalize gateway EUI values to uppercase at API boundaries when creating or consuming device identity fields.
+      - rule: Preserve snake_case and camelCase compatibility fields for mirrored edge/cloud resource shapes.
+      - rule: Return typed domain objects from exported API methods; narrow unknown JSON inside service helpers before UI consumption.
+    should_do:
+      - rule: Extract repeated normalization logic into named helper functions within the service layer.
+      - rule: Keep fallback error messages user-safe and domain-specific.
+    must_not_do:
+      - rule: Do not move local API normalization into presentational React components.
+      - rule: Do not introduce broad exported any types for API responses.
+      - rule: Do not remove auth-expiry notification or token cleanup behavior without replacing it with equivalent user-visible handling.
+
+  - pattern: edge-farming-components
+    globs:
+      - web/react-gui/src/components/farming/**/*.tsx
+    description: Device, zone, schedule, dendrometer, and environment component rules
+    must_do:
+      - rule: Preserve edge-first wording and behavior; mirrored cloud state is not canonical for local gateway screens.
+      - rule: Use existing shared helpers for repeated device footer, battery, weather, wind, zone, and dendrometer display behavior when available.
+      - rule: Keep command-triggering UI actions routed through service APIs and parent refresh callbacks.
+      - rule: Preserve device-specific sentinel handling, including unavailable STREGA environmental telemetry and missing LSN50 battery percent values.
+    should_do:
+      - rule: Split large components only along real responsibilities such as data loading, display formatting, modal state, or device-specific rendering.
+      - rule: Keep formatting helpers near the domain component until reuse across two or more files is clear.
+      - rule: Keep labels translatable when adjacent code already uses i18next for that screen.
+    must_not_do:
+      - rule: Do not duplicate device protocol mappings or telemetry interpretation tables in multiple components.
+      - rule: Do not directly mutate device or zone props; derive display state immutably.
+      - rule: Do not hide local control errors silently when the current UI has an error surface.
+
+  - pattern: edge-domain-types
+    globs:
+      - web/react-gui/src/types/**/*.ts
+    description: Farming domain type rules
+    must_do:
+      - rule: Keep DeviceType, Lsn50Mode, StregaModel, scheduler, dendrometer, and zone types aligned with Node-RED API payloads and sync contracts.
+      - rule: Preserve compatibility fields required by both local snake_case APIs and cloud camelCase mirrors.
+      - rule: Represent optional telemetry as optional or nullable fields instead of inventing sentinel values in TypeScript types.
+    should_do:
+      - rule: Add narrow union types for stable domain codes once the runtime accepts only those values.
+      - rule: Document non-obvious compatibility fields with concise comments.
+    must_not_do:
+      - rule: Do not remove legacy compatibility fields without updating normalization, components, and tests in the same change.
+      - rule: Do not model live operational data as always-present when devices may be offline or unassigned.
+
+  - pattern: edge-tests
+    globs:
+      - web/react-gui/tests/**/*.test.ts
+      - web/react-gui/src/**/*.test.ts
+      - web/react-gui/src/**/*.test.tsx
+    description: Edge GUI test rules
+    must_do:
+      - rule: Test behavior and normalized outputs, not private implementation details.
+      - rule: Include device-specific regressions when changing KIWI, LSN50, STREGA, SenseCAP, zone, or battery display behavior.
+      - rule: Use the existing node test runner command npm run test:unit unless a task explicitly introduces another runner.
+    should_do:
+      - rule: Keep test fixtures small and named after domain scenarios.
+      - rule: Prefer real normalization helpers over mocks for local pure logic.
+    must_not_do:
+      - rule: Do not add tests that depend on live Pi, cloud, MQTT, or browser network access.
+      - rule: Do not mock internal helpers merely to assert call order.

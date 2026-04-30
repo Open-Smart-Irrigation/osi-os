@@ -17,6 +17,20 @@ Architectural rule:
 
 ---
 
+## Agent Skills
+
+This repo uses Superpowers as the default execution framework and selected Matt Pocock skills as planning and alignment helpers.
+
+- Use Superpowers for implementation discipline: brainstorming, plans, TDD, systematic debugging, subagent execution, review, and final verification.
+- Use Matt Pocock skills for upstream alignment and issue workflow: `grill-with-docs`, `zoom-out`, `improve-codebase-architecture`, `to-prd`, `to-issues`, and `triage`.
+- Use `code-quality-principles` as an advisory checklist during planning, refactoring, review, and final self-checks. It covers DRY, KISS, SOLID, YAGNI, SoC, LoD, and COI as maintainability lenses, not hard gates.
+- For TypeScript work in `web/react-gui`, read the repo-owned `architect.yaml` and `RULES.yaml` overlays before edits and use [docs/agents/typescript-rule-overlays.md](/home/phil/Repos/osi-os/docs/agents/typescript-rule-overlays.md) for the manual workflow.
+- If a Matt skill overlaps with a Superpowers skill, prefer Superpowers for execution. Do not use Matt's `tdd` or `diagnose` in this repo unless explicitly requested.
+- Matt skills should read [CONTEXT.md](/home/phil/Repos/osi-os/CONTEXT.md) for domain language and [docs/agents/](/home/phil/Repos/osi-os/docs/agents/) for issue tracker and triage conventions.
+- `AGENTS.md` remains the operational source of truth. `CONTEXT.md` is only a compact domain vocabulary for skill workflows.
+
+---
+
 ## Current Branches
 
 - `osi-os`: `main`
@@ -153,7 +167,7 @@ This file contains:
 - [ZoneFieldGeometryService.java](/home/phil/Repos/osi-server/backend/src/main/java/org/osi/server/zone/ZoneFieldGeometryService.java)
 - [PredictionFieldStateService.java](/home/phil/Repos/osi-server/backend/src/main/java/org/osi/server/prediction/PredictionFieldStateService.java)
 - [PredictionCard.tsx](/home/phil/Repos/osi-server/frontend/src/components/farming/prediction/PredictionCard.tsx)
-- [prediction_animation_v2](/home/phil/Repos/osi-server/prediction_animation_v2)
+- [terra-intelligence](/home/phil/Repos/osi-server/terra-intelligence)
 
 ---
 
@@ -247,7 +261,7 @@ cd /home/phil/Repos/osi-server/backend
 Terra frontend build:
 
 ```bash
-cd /home/phil/Repos/osi-server/prediction_animation_v2
+cd /home/phil/Repos/osi-server/terra-intelligence
 npm run build
 ```
 
@@ -266,7 +280,7 @@ npm run build
 - Runtime gateway EUIs are normalized to uppercase on the edge. On BusyBox helpers, prefer `tr 'abcdef' 'ABCDEF'`; `tr '[:lower:]' '[:upper:]'` was not reliable on the live Pi images.
 - The server MQTT provisioning layer now creates both uppercase and lowercase gateway usernames for mixed-version rollout compatibility, but new edge runtime state should still use the uppercase canonical EUI.
 - The deploy/bootstrap post-check for `CHIRPSTACK_PROFILE_CLOVER` is stale. Current bootstrap writes `CHIRPSTACK_PROFILE_RAK10701`, so `CLOVER`-based checks can fail as a false negative.
-- Terra Intelligence lives in `osi-server/prediction_animation_v2` and is served by the backend at `/terra-intelligence`.
+- Terra Intelligence lives in `osi-server/terra-intelligence` and is served by the backend at `/terra-intelligence`.
 - Direct access to `/terra-intelligence` should open demo mode; OSI Cloud launches live mode with a zone-scoped `?zoneId=<id>` link from the prediction advisory card.
 - When wiring Spring SPA forwarding for Terra, prefer explicit `/terra-intelligence` entry mappings; broad `**/{path:...}` patterns can fail startup under Spring's `PathPatternParser`.
 - As of `2026-04-16`, the live `osi-backend` on `83.228.220.63` is configured to use the separate prediction VPS at `https://vps-92c7b4bb.vps.ovh.net` instead of the local in-stack prediction service.
@@ -328,7 +342,7 @@ Key open areas in `osi-os`: S2120 history for unique params (#33), LSN50 ADC dis
 
 Terra follow-up implementation work now lives primarily in `osi-server`:
 - active Terra backlog: `osi-server#9`, `#13`, `#18` through `#25`
-- `osi-os#41` and `osi-os#42` remain as mirrors/cross-links for soil-profile rendering symptoms, but the active code is in `osi-server/prediction_animation_v2`
+- `osi-os#41` and `osi-os#42` remain as mirrors/cross-links for soil-profile rendering symptoms, but the active code is in `osi-server/terra-intelligence`
 
 ---
 

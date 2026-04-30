@@ -37,7 +37,7 @@ The current Terra issue set is not a collection of unrelated bugs. After the add
 5. Live data orchestration, partial-failure handling, and auth flow behavior are brittle in the standalone frontend.
 6. The prediction field-state and recompute backend paths have stale-artifact and concurrency correctness risks that can break Terra live mode without any obvious UI change.
 
-Geometry and sensor-anchor persistence are still broadly stronger than the frontend shell, but the earlier "backend is structurally sound" conclusion was too optimistic for `PredictionFieldStateService` and `PredictionRunService`. The highest-risk defects now span both the standalone Terra frontend under `osi-server/prediction_animation_v2` and the live field-state/recompute backend paths in `osi-server/backend`.
+Geometry and sensor-anchor persistence are still broadly stronger than the frontend shell, but the earlier "backend is structurally sound" conclusion was too optimistic for `PredictionFieldStateService` and `PredictionRunService`. The highest-risk defects now span both the standalone Terra frontend under `osi-server/terra-intelligence` and the live field-state/recompute backend paths in `osi-server/backend`.
 
 ## Issue Inventory And Cause Analysis
 
@@ -137,8 +137,8 @@ Root cause:
 - Comparable frontend interaction coverage is effectively absent.
 
 Evidence:
-- `prediction_animation_v2/src/App.tsx` is 2259 lines.
-- `prediction_animation_v2/src/styles.css` is 1968 lines.
+- `terra-intelligence/src/App.tsx` is 2259 lines.
+- `terra-intelligence/src/styles.css` is 1968 lines.
 - Backend tests exist for `ZoneFieldGeometryService`, `ZoneSensorAnchorService`, and `PredictionFieldStateService`.
 - I did not find Terra frontend interaction tests covering startup mode, draw-close behavior, save flow, overlay layout, or mobile states.
 
@@ -208,14 +208,14 @@ These were found during the split Terra review passes and still appear to apply 
 - Medium: Terra clears `liveError` after a later successful subrequest, which hides partial bootstrap failures such as catalog load failures.
 - Medium: Terra live mode bypasses the main app's `401` handling and logout flow by using raw `fetch` in `terraLive.ts` instead of the shared API client.
 - Minor: the forecast rail still uses `onWheel` plus `preventDefault()`, which can be passive/ignored in some browsers and may let page scroll compete with Terra's hour scrubber.
-- Minor: `.gitignore` still references `prediction_animation/` instead of `prediction_animation_v2/`.
+- Minor: `.gitignore` still references `terra-intelligence/` instead of `terra-intelligence/`.
 
 ### Historical Slice Findings
 
 These came from the split review process but do not appear to be current production defects on `main`.
 
 - CodeRabbit flagged an overly broad class-level deprecation on `CommandService` during the early Terra slice review. That no longer applies on current `main`; the class is no longer marked `@Deprecated`.
-- CodeRabbit also flagged ambiguity in `prediction_animation_v2/implementation_creative_dark.md` around exact click-target semantics and the return path from the soil profile back to the top-down field view. This is still useful design hygiene, but it is not a direct runtime defect.
+- CodeRabbit also flagged ambiguity in `terra-intelligence/implementation_creative_dark.md` around exact click-target semantics and the return path from the soil profile back to the top-down field view. This is still useful design hygiene, but it is not a direct runtime defect.
 
 ## Suggested Bundling For Triage
 
@@ -293,7 +293,7 @@ Reason:
 
 Suggested issue candidates:
 - forecast rail wheel handler should use a non-passive listener
-- `.gitignore` should ignore `prediction_animation_v2/`
+- `.gitignore` should ignore `terra-intelligence/`
 
 ## Recommended Fix Order
 
@@ -321,14 +321,14 @@ Suggested issue candidates:
 
 - GitHub issue lookup via `gh` against `Open-Smart-Irrigation/osi-server` and `Open-Smart-Irrigation/osi-os`
 - confirmed the active Terra tracker is on `osi-server`; `osi-os` tickets are closed moved duplicates
-- built `osi-server/prediction_animation_v2` successfully on 2026-04-24
+- built `osi-server/terra-intelligence` successfully on 2026-04-24
 - ran backend tests successfully on 2026-04-24:
   - `org.osi.server.zone.ZoneFieldGeometryServiceTest`
   - `org.osi.server.zone.ZoneSensorAnchorServiceTest`
   - `org.osi.server.prediction.PredictionFieldStateServiceTest`
 - split Terra history into smaller review ranges
 - CodeRabbit review completed for the early mockup slice and raised:
-  - `.gitignore` mismatch for `prediction_animation_v2/`
+  - `.gitignore` mismatch for `terra-intelligence/`
   - forecast rail wheel handler concern
   - one historical `CommandService` deprecation finding that no longer applies on current `main`
   - one design-doc clarity finding in `implementation_creative_dark.md`

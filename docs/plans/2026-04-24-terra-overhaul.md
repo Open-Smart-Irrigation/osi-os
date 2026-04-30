@@ -17,37 +17,37 @@
 ### New files
 | File | Responsibility |
 |---|---|
-| `prediction_animation_v2/vitest.config.ts` | Vitest config (jsdom, globals, setup) |
-| `prediction_animation_v2/src/__tests__/setup.ts` | jest-dom matchers + Mapbox mock |
-| `prediction_animation_v2/src/__tests__/moistureModel.test.ts` | Pure-function unit tests |
-| `prediction_animation_v2/src/__tests__/terraLive.test.ts` | Pure-function unit tests |
-| `prediction_animation_v2/src/__tests__/useLiveData.test.ts` | Hook unit tests |
-| `prediction_animation_v2/src/__tests__/interactions/startupMode.test.tsx` | Entry-mode interaction test |
-| `prediction_animation_v2/src/__tests__/interactions/drawClose.test.tsx` | Draw-close interaction test |
-| `prediction_animation_v2/src/__tests__/interactions/saveFlow.test.tsx` | Save-flow interaction test |
-| `prediction_animation_v2/src/__tests__/interactions/anchorPanel.test.tsx` | Anchor panel interaction test |
-| `prediction_animation_v2/src/__tests__/interactions/backButton.test.tsx` | Back button interaction test |
-| `prediction_animation_v2/src/context/TerraContext.tsx` | Read-only shared state (dataMode, liveConfig, mode) |
-| `prediction_animation_v2/src/hooks/useLiveData.ts` | Async live state + AbortController |
-| `prediction_animation_v2/src/hooks/useDraw.ts` | Draw mode state (drawingMode, vertices, pendingSave) |
-| `prediction_animation_v2/src/hooks/useMapbox.ts` | Map init + all layer effects |
-| `prediction_animation_v2/src/components/Icon.tsx` | All SVG icons |
-| `prediction_animation_v2/src/components/ToolBar.tsx` | Tool stack buttons |
-| `prediction_animation_v2/src/components/FieldIntelligencePanel.tsx` | Bottom-right recommendation card |
-| `prediction_animation_v2/src/components/SensorAnchorPanel.tsx` | Collapsible anchor editor |
-| `prediction_animation_v2/src/components/DepthLayerIndicator.tsx` | Interactive depth bands (E1) |
-| `prediction_animation_v2/src/components/ForecastRail.tsx` | Forecast slider + segmented stress track (B1/B2) |
-| `prediction_animation_v2/src/components/ProfileView.tsx` | Soil profile section |
-| `prediction_animation_v2/src/components/FieldScene.tsx` | Map stage + all field-mode overlays |
+| `terra-intelligence/vitest.config.ts` | Vitest config (jsdom, globals, setup) |
+| `terra-intelligence/src/__tests__/setup.ts` | jest-dom matchers + Mapbox mock |
+| `terra-intelligence/src/__tests__/moistureModel.test.ts` | Pure-function unit tests |
+| `terra-intelligence/src/__tests__/terraLive.test.ts` | Pure-function unit tests |
+| `terra-intelligence/src/__tests__/useLiveData.test.ts` | Hook unit tests |
+| `terra-intelligence/src/__tests__/interactions/startupMode.test.tsx` | Entry-mode interaction test |
+| `terra-intelligence/src/__tests__/interactions/drawClose.test.tsx` | Draw-close interaction test |
+| `terra-intelligence/src/__tests__/interactions/saveFlow.test.tsx` | Save-flow interaction test |
+| `terra-intelligence/src/__tests__/interactions/anchorPanel.test.tsx` | Anchor panel interaction test |
+| `terra-intelligence/src/__tests__/interactions/backButton.test.tsx` | Back button interaction test |
+| `terra-intelligence/src/context/TerraContext.tsx` | Read-only shared state (dataMode, liveConfig, mode) |
+| `terra-intelligence/src/hooks/useLiveData.ts` | Async live state + AbortController |
+| `terra-intelligence/src/hooks/useDraw.ts` | Draw mode state (drawingMode, vertices, pendingSave) |
+| `terra-intelligence/src/hooks/useMapbox.ts` | Map init + all layer effects |
+| `terra-intelligence/src/components/Icon.tsx` | All SVG icons |
+| `terra-intelligence/src/components/ToolBar.tsx` | Tool stack buttons |
+| `terra-intelligence/src/components/FieldIntelligencePanel.tsx` | Bottom-right recommendation card |
+| `terra-intelligence/src/components/SensorAnchorPanel.tsx` | Collapsible anchor editor |
+| `terra-intelligence/src/components/DepthLayerIndicator.tsx` | Interactive depth bands (E1) |
+| `terra-intelligence/src/components/ForecastRail.tsx` | Forecast slider + segmented stress track (B1/B2) |
+| `terra-intelligence/src/components/ProfileView.tsx` | Soil profile section |
+| `terra-intelligence/src/components/FieldScene.tsx` | Map stage + all field-mode overlays |
 
 ### Modified files
 | File | What changes |
 |---|---|
-| `prediction_animation_v2/package.json` | Add Vitest + RTL devDependencies and `test` script |
-| `prediction_animation_v2/src/App.tsx` | Shrink to ~150 lines using hooks + context + components |
-| `prediction_animation_v2/src/moistureModel.ts` | Add `DemoDay` type + `computeDemoDays()` |
-| `prediction_animation_v2/src/terraLive.ts` | Add `signal?` to `fetchJson` + exported fetch fns |
-| `prediction_animation_v2/.gitignore` (repo root) | `prediction_animation/` → `prediction_animation_v2/` |
+| `terra-intelligence/package.json` | Add Vitest + RTL devDependencies and `test` script |
+| `terra-intelligence/src/App.tsx` | Shrink to ~150 lines using hooks + context + components |
+| `terra-intelligence/src/moistureModel.ts` | Add `DemoDay` type + `computeDemoDays()` |
+| `terra-intelligence/src/terraLive.ts` | Add `signal?` to `fetchJson` + exported fetch fns |
+| `terra-intelligence/.gitignore` (repo root) | `terra-intelligence/` → `terra-intelligence/` |
 | `backend/.../PredictionFieldStateService.java` | Fix 1 (artifact-first), Fix 2 (restore logging) |
 | `backend/.../PredictionRunService.java` | Fix 3 (stale-run completion guard) |
 | `backend/.../PredictionFieldStateServiceTest.java` | New test: catalog fails, artifact present → served |
@@ -59,19 +59,19 @@
 ## Task 1: Test harness
 
 **Files:**
-- Modify: `prediction_animation_v2/package.json`
-- Create: `prediction_animation_v2/vitest.config.ts`
-- Create: `prediction_animation_v2/src/__tests__/setup.ts`
-- Create: `prediction_animation_v2/src/__tests__/moistureModel.test.ts`
-- Create: `prediction_animation_v2/src/__tests__/terraLive.test.ts`
+- Modify: `terra-intelligence/package.json`
+- Create: `terra-intelligence/vitest.config.ts`
+- Create: `terra-intelligence/src/__tests__/setup.ts`
+- Create: `terra-intelligence/src/__tests__/moistureModel.test.ts`
+- Create: `terra-intelligence/src/__tests__/terraLive.test.ts`
 
 - [ ] **Step 1.1: Add devDependencies and test scripts to package.json**
 
-Replace the `"scripts"` and `"devDependencies"` sections in `prediction_animation_v2/package.json`:
+Replace the `"scripts"` and `"devDependencies"` sections in `terra-intelligence/package.json`:
 
 ```json
 {
-  "name": "osi-prediction-animation-v2",
+  "name": "terra-intelligence",
   "private": true,
   "version": "0.1.0",
   "type": "module",
@@ -106,7 +106,7 @@ Replace the `"scripts"` and `"devDependencies"` sections in `prediction_animatio
 
 - [ ] **Step 1.2: Install dependencies**
 
-Run in `prediction_animation_v2/`:
+Run in `terra-intelligence/`:
 ```bash
 npm install
 ```
@@ -115,7 +115,7 @@ Expected: lock file updated, no errors.
 
 - [ ] **Step 1.3: Create vitest.config.ts**
 
-Create `prediction_animation_v2/vitest.config.ts`:
+Create `terra-intelligence/vitest.config.ts`:
 
 ```typescript
 import { defineConfig } from 'vitest/config';
@@ -133,7 +133,7 @@ export default defineConfig({
 
 - [ ] **Step 1.4: Create test setup file with Mapbox mock**
 
-Create `prediction_animation_v2/src/__tests__/setup.ts`:
+Create `terra-intelligence/src/__tests__/setup.ts`:
 
 ```typescript
 import '@testing-library/jest-dom';
@@ -175,7 +175,7 @@ vi.mock('mapbox-gl', () => ({
 
 - [ ] **Step 1.5: Write moistureModel unit tests**
 
-Create `prediction_animation_v2/src/__tests__/moistureModel.test.ts`:
+Create `terra-intelligence/src/__tests__/moistureModel.test.ts`:
 
 ```typescript
 import { describe, it, expect } from 'vitest';
@@ -231,7 +231,7 @@ describe('buildFieldCells', () => {
 
 - [ ] **Step 1.6: Write terraLive pure-function unit tests**
 
-Create `prediction_animation_v2/src/__tests__/terraLive.test.ts`:
+Create `terra-intelligence/src/__tests__/terraLive.test.ts`:
 
 ```typescript
 import { describe, it, expect } from 'vitest';
@@ -322,7 +322,7 @@ describe('buildLiveFieldCells', () => {
 
 - [ ] **Step 1.7: Run tests — expect PASS**
 
-Run in `prediction_animation_v2/`:
+Run in `terra-intelligence/`:
 ```bash
 npm test
 ```
@@ -333,12 +333,12 @@ Expected: all tests pass. If `waterStatus` or `SpatialDayState` shapes differ fr
 
 ```bash
 git -C /home/phil/Repos/osi-server add \
-  prediction_animation_v2/package.json \
-  prediction_animation_v2/package-lock.json \
-  prediction_animation_v2/vitest.config.ts \
-  prediction_animation_v2/src/__tests__/setup.ts \
-  prediction_animation_v2/src/__tests__/moistureModel.test.ts \
-  prediction_animation_v2/src/__tests__/terraLive.test.ts
+  terra-intelligence/package.json \
+  terra-intelligence/package-lock.json \
+  terra-intelligence/vitest.config.ts \
+  terra-intelligence/src/__tests__/setup.ts \
+  terra-intelligence/src/__tests__/moistureModel.test.ts \
+  terra-intelligence/src/__tests__/terraLive.test.ts
 git -C /home/phil/Repos/osi-server commit -m "test(terra): add Vitest + RTL harness with pure-function unit tests"
 ```
 
@@ -695,16 +695,16 @@ git -C /home/phil/Repos/osi-server commit -m "fix(prediction): artifact-first se
 ## Task 3: Extract `useLiveData` hook
 
 **Files:**
-- Modify: `prediction_animation_v2/src/terraLive.ts`
-- Create: `prediction_animation_v2/src/hooks/useLiveData.ts`
-- Create: `prediction_animation_v2/src/__tests__/useLiveData.test.ts`
-- Modify: `prediction_animation_v2/src/App.tsx` (wire in hook, remove inline fetch logic)
+- Modify: `terra-intelligence/src/terraLive.ts`
+- Create: `terra-intelligence/src/hooks/useLiveData.ts`
+- Create: `terra-intelligence/src/__tests__/useLiveData.test.ts`
+- Modify: `terra-intelligence/src/App.tsx` (wire in hook, remove inline fetch logic)
 
 ### Update `fetchJson` and exported fetch functions to accept `signal`
 
 - [ ] **Step 3.1: Write the useLiveData unit tests (they will fail until the hook exists)**
 
-Create `prediction_animation_v2/src/__tests__/useLiveData.test.ts`:
+Create `terra-intelligence/src/__tests__/useLiveData.test.ts`:
 
 ```typescript
 import { describe, it, expect, vi, beforeEach } from 'vitest';
@@ -825,7 +825,7 @@ describe('useLiveData', () => {
 - [ ] **Step 3.2: Run tests — expect FAIL (hook not yet created)**
 
 ```bash
-cd /home/phil/Repos/osi-server/prediction_animation_v2 && npm test
+cd /home/phil/Repos/osi-server/terra-intelligence && npm test
 ```
 
 Expected: fail with `Cannot find module '../hooks/useLiveData'`.
@@ -888,7 +888,7 @@ export async function fetchSensorAnchors(config: LiveBootstrapConfig, signal?: A
 
 - [ ] **Step 3.4: Create `src/hooks/useLiveData.ts`**
 
-Create `prediction_animation_v2/src/hooks/useLiveData.ts`:
+Create `terra-intelligence/src/hooks/useLiveData.ts`:
 
 ```typescript
 import { useState, useRef, useCallback } from 'react';
@@ -1007,7 +1007,7 @@ function errorMessage(e: unknown): string {
 - [ ] **Step 3.5: Run tests — expect PASS**
 
 ```bash
-cd /home/phil/Repos/osi-server/prediction_animation_v2 && npm test
+cd /home/phil/Repos/osi-server/terra-intelligence && npm test
 ```
 
 Expected: all tests pass.
@@ -1040,7 +1040,7 @@ The `fieldGeometry` state now comes from `liveFieldGeometry` in live mode and lo
 - [ ] **Step 3.7: Build — confirm no TypeScript errors**
 
 ```bash
-cd /home/phil/Repos/osi-server/prediction_animation_v2 && npm run build
+cd /home/phil/Repos/osi-server/terra-intelligence && npm run build
 ```
 
 Expected: exits 0.
@@ -1049,10 +1049,10 @@ Expected: exits 0.
 
 ```bash
 git -C /home/phil/Repos/osi-server add \
-  prediction_animation_v2/src/terraLive.ts \
-  prediction_animation_v2/src/hooks/useLiveData.ts \
-  prediction_animation_v2/src/__tests__/useLiveData.test.ts \
-  prediction_animation_v2/src/App.tsx
+  terra-intelligence/src/terraLive.ts \
+  terra-intelligence/src/hooks/useLiveData.ts \
+  terra-intelligence/src/__tests__/useLiveData.test.ts \
+  terra-intelligence/src/App.tsx
 git -C /home/phil/Repos/osi-server commit -m "refactor(terra): extract useLiveData hook with AbortController and per-error tracking"
 ```
 
@@ -1061,15 +1061,15 @@ git -C /home/phil/Repos/osi-server commit -m "refactor(terra): extract useLiveDa
 ## Task 4: Extract `useDraw` and `useMapbox` hooks
 
 **Files:**
-- Create: `prediction_animation_v2/src/hooks/useDraw.ts`
-- Create: `prediction_animation_v2/src/hooks/useMapbox.ts`
-- Modify: `prediction_animation_v2/src/App.tsx`
+- Create: `terra-intelligence/src/hooks/useDraw.ts`
+- Create: `terra-intelligence/src/hooks/useMapbox.ts`
+- Modify: `terra-intelligence/src/App.tsx`
 
 - [ ] **Step 4.1: Create `src/hooks/useDraw.ts`**
 
 This hook owns: `drawingMode`, `draftVertices`, `cursorVertex`, `localPolygon` (the finalized-but-unsaved polygon), and `pendingSave`. `finalizePolygon` now only closes the polygon locally — it does **not** call the backend.
 
-Create `prediction_animation_v2/src/hooks/useDraw.ts`:
+Create `terra-intelligence/src/hooks/useDraw.ts`:
 
 ```typescript
 import { useState, useCallback } from 'react';
@@ -1145,7 +1145,7 @@ export function useDraw(): DrawState {
 
 This hook owns map initialisation, all Mapbox layer effects, and cursor state. It exposes the map ref and a `mapReady` flag. Move the map `useRef`, the `useEffect` that creates the map, and the `useEffect` blocks that update layer sources from `App.tsx` into this hook.
 
-Create `prediction_animation_v2/src/hooks/useMapbox.ts` with this interface (fill in the body by extracting from App.tsx):
+Create `terra-intelligence/src/hooks/useMapbox.ts` with this interface (fill in the body by extracting from App.tsx):
 
 ```typescript
 import { useRef, useState, useEffect } from 'react';
@@ -1225,7 +1225,7 @@ Replace all references to the old local state variables with `draw.drawingMode`,
 - [ ] **Step 4.4: Build — confirm no TypeScript errors**
 
 ```bash
-cd /home/phil/Repos/osi-server/prediction_animation_v2 && npm run build
+cd /home/phil/Repos/osi-server/terra-intelligence && npm run build
 ```
 
 Expected: exits 0. Visual behaviour is unchanged.
@@ -1234,9 +1234,9 @@ Expected: exits 0. Visual behaviour is unchanged.
 
 ```bash
 git -C /home/phil/Repos/osi-server add \
-  prediction_animation_v2/src/hooks/useDraw.ts \
-  prediction_animation_v2/src/hooks/useMapbox.ts \
-  prediction_animation_v2/src/App.tsx
+  terra-intelligence/src/hooks/useDraw.ts \
+  terra-intelligence/src/hooks/useMapbox.ts \
+  terra-intelligence/src/App.tsx
 git -C /home/phil/Repos/osi-server commit -m "refactor(terra): extract useDraw and useMapbox hooks from App.tsx"
 ```
 
@@ -1245,13 +1245,13 @@ git -C /home/phil/Repos/osi-server commit -m "refactor(terra): extract useDraw a
 ## Task 5: Bundle B — Decouple draw from save
 
 **Files:**
-- Modify: `prediction_animation_v2/src/App.tsx` (save handler, Close polygon button, Save field button)
-- Create: `prediction_animation_v2/src/__tests__/interactions/drawClose.test.tsx`
-- Create: `prediction_animation_v2/src/__tests__/interactions/saveFlow.test.tsx`
+- Modify: `terra-intelligence/src/App.tsx` (save handler, Close polygon button, Save field button)
+- Create: `terra-intelligence/src/__tests__/interactions/drawClose.test.tsx`
+- Create: `terra-intelligence/src/__tests__/interactions/saveFlow.test.tsx`
 
 - [ ] **Step 5.1: Write failing interaction tests**
 
-Create `prediction_animation_v2/src/__tests__/interactions/drawClose.test.tsx`:
+Create `terra-intelligence/src/__tests__/interactions/drawClose.test.tsx`:
 
 ```typescript
 import { describe, it, expect, vi } from 'vitest';
@@ -1288,7 +1288,7 @@ describe('draw close', () => {
 });
 ```
 
-Create `prediction_animation_v2/src/__tests__/interactions/saveFlow.test.tsx`:
+Create `terra-intelligence/src/__tests__/interactions/saveFlow.test.tsx`:
 
 ```typescript
 import { describe, it, expect, vi } from 'vitest';
@@ -1353,7 +1353,7 @@ describe('useDraw — pendingSave flag', () => {
 - [ ] **Step 5.2: Run tests — expect PASS (useDraw tests) or partial**
 
 ```bash
-cd /home/phil/Repos/osi-server/prediction_animation_v2 && npm test
+cd /home/phil/Repos/osi-server/terra-intelligence && npm test
 ```
 
 Expected: useDraw hook tests pass. The App-level draw close test may be skipped or trivially pass at this stage.
@@ -1426,7 +1426,7 @@ Also retain the pixel-proximity close gesture in the map click handler (in `useM
 - [ ] **Step 5.6: Build and run tests**
 
 ```bash
-cd /home/phil/Repos/osi-server/prediction_animation_v2
+cd /home/phil/Repos/osi-server/terra-intelligence
 npm run build && npm test
 ```
 
@@ -1436,10 +1436,10 @@ Expected: build passes, all tests pass.
 
 ```bash
 git -C /home/phil/Repos/osi-server add \
-  prediction_animation_v2/src/App.tsx \
-  prediction_animation_v2/src/hooks/useDraw.ts \
-  prediction_animation_v2/src/__tests__/interactions/drawClose.test.tsx \
-  prediction_animation_v2/src/__tests__/interactions/saveFlow.test.tsx
+  terra-intelligence/src/App.tsx \
+  terra-intelligence/src/hooks/useDraw.ts \
+  terra-intelligence/src/__tests__/interactions/drawClose.test.tsx \
+  terra-intelligence/src/__tests__/interactions/saveFlow.test.tsx
 git -C /home/phil/Repos/osi-server commit -m "fix(terra): decouple polygon close from save, add explicit Save field button (#10, #11)"
 ```
 
@@ -1448,19 +1448,19 @@ git -C /home/phil/Repos/osi-server commit -m "fix(terra): decouple polygon close
 ## Task 6: Component extraction + `TerraContext` + `App.tsx` → ~150 lines
 
 **Files:**
-- Create: `prediction_animation_v2/src/context/TerraContext.tsx`
-- Create: `prediction_animation_v2/src/components/Icon.tsx`
-- Create: `prediction_animation_v2/src/components/ToolBar.tsx`
-- Create: `prediction_animation_v2/src/components/SensorAnchorPanel.tsx`
-- Create: `prediction_animation_v2/src/components/FieldIntelligencePanel.tsx`
-- Create: `prediction_animation_v2/src/components/ProfileView.tsx`
-- Create: `prediction_animation_v2/src/components/FieldScene.tsx`
-- Modify: `prediction_animation_v2/src/App.tsx` (shrink to ~150 lines)
-- Modify: `prediction_animation_v2/.gitignore` (repo root)
+- Create: `terra-intelligence/src/context/TerraContext.tsx`
+- Create: `terra-intelligence/src/components/Icon.tsx`
+- Create: `terra-intelligence/src/components/ToolBar.tsx`
+- Create: `terra-intelligence/src/components/SensorAnchorPanel.tsx`
+- Create: `terra-intelligence/src/components/FieldIntelligencePanel.tsx`
+- Create: `terra-intelligence/src/components/ProfileView.tsx`
+- Create: `terra-intelligence/src/components/FieldScene.tsx`
+- Modify: `terra-intelligence/src/App.tsx` (shrink to ~150 lines)
+- Modify: `terra-intelligence/.gitignore` (repo root)
 
 - [ ] **Step 6.1: Create `TerraContext`**
 
-Create `prediction_animation_v2/src/context/TerraContext.tsx`:
+Create `terra-intelligence/src/context/TerraContext.tsx`:
 
 ```typescript
 import { createContext, useContext } from 'react';
@@ -1487,7 +1487,7 @@ export function useTerraContext(): TerraContextValue {
 
 - [ ] **Step 6.2: Create `Icon.tsx`**
 
-Extract all SVG icon functions from `App.tsx` (search for `function.*Icon` or `svg` element functions). Create `prediction_animation_v2/src/components/Icon.tsx`:
+Extract all SVG icon functions from `App.tsx` (search for `function.*Icon` or `svg` element functions). Create `terra-intelligence/src/components/Icon.tsx`:
 
 ```typescript
 export type IconName = 'water' | 'grid' | 'profile' | 'demand' | 'values' | 'draw' | 'back' | 'settings' | 'refresh' | 'anchor';
@@ -1509,7 +1509,7 @@ Fill in each case by moving the SVG from App.tsx. Each `function WaterIcon()` �
 
 - [ ] **Step 6.3: Create `ToolBar.tsx`**
 
-Extract the tool bar button group from App.tsx (the vertical button stack on the left side). Create `prediction_animation_v2/src/components/ToolBar.tsx`:
+Extract the tool bar button group from App.tsx (the vertical button stack on the left side). Create `terra-intelligence/src/components/ToolBar.tsx`:
 
 ```typescript
 import { Icon } from './Icon';
@@ -1578,7 +1578,7 @@ Adjust button structure and class names to exactly match the existing App.tsx to
 
 - [ ] **Step 6.4: Create `SensorAnchorPanel.tsx`**
 
-The panel is now a controlled component with explicit open/close. Extract the anchor editing section from App.tsx. Create `prediction_animation_v2/src/components/SensorAnchorPanel.tsx`:
+The panel is now a controlled component with explicit open/close. Extract the anchor editing section from App.tsx. Create `terra-intelligence/src/components/SensorAnchorPanel.tsx`:
 
 ```typescript
 import type { SensorAnchorsResponse } from '../terraLive';
@@ -1618,17 +1618,17 @@ Fill the body by moving the sensor anchor UI from App.tsx (search for `sensor-an
 
 - [ ] **Step 6.5: Create `FieldIntelligencePanel.tsx`**
 
-Extract the field intelligence / recommendation card from App.tsx. Create `prediction_animation_v2/src/components/FieldIntelligencePanel.tsx` with the relevant JSX from App.tsx (search for `field-intelligence` or `intel-panel` class names).
+Extract the field intelligence / recommendation card from App.tsx. Create `terra-intelligence/src/components/FieldIntelligencePanel.tsx` with the relevant JSX from App.tsx (search for `field-intelligence` or `intel-panel` class names).
 
 - [ ] **Step 6.6: Create `ProfileView.tsx`**
 
-Extract the soil profile section (the `mode === 'profile'` branch of App.tsx's render). Create `prediction_animation_v2/src/components/ProfileView.tsx` with the profile JSX from App.tsx.
+Extract the soil profile section (the `mode === 'profile'` branch of App.tsx's render). Create `terra-intelligence/src/components/ProfileView.tsx` with the profile JSX from App.tsx.
 
 - [ ] **Step 6.7: Create `FieldScene.tsx`**
 
 `FieldScene` is the main field-mode container. It renders: the map container div, the brand HUD, the back button (when `returnUrl` present), the live status bar, the field hints, the forecast rail, and the tool bar. It receives `mapContainerRef` to attach the Mapbox canvas.
 
-Create `prediction_animation_v2/src/components/FieldScene.tsx`:
+Create `terra-intelligence/src/components/FieldScene.tsx`:
 
 ```typescript
 import { useRef } from 'react';
@@ -1723,12 +1723,12 @@ export default function App() {
 
 - [ ] **Step 6.9: Fix `.gitignore`**
 
-In `osi-server/.gitignore`, replace `prediction_animation/` with `prediction_animation_v2/`.
+In `osi-server/.gitignore`, replace `terra-intelligence/` with `terra-intelligence/`.
 
 - [ ] **Step 6.10: Build — confirm no TypeScript errors**
 
 ```bash
-cd /home/phil/Repos/osi-server/prediction_animation_v2 && npm run build
+cd /home/phil/Repos/osi-server/terra-intelligence && npm run build
 ```
 
 Expected: exits 0.
@@ -1736,7 +1736,7 @@ Expected: exits 0.
 - [ ] **Step 6.11: Run all tests**
 
 ```bash
-cd /home/phil/Repos/osi-server/prediction_animation_v2 && npm test
+cd /home/phil/Repos/osi-server/terra-intelligence && npm test
 ```
 
 Expected: all existing tests pass.
@@ -1745,14 +1745,14 @@ Expected: all existing tests pass.
 
 ```bash
 git -C /home/phil/Repos/osi-server add \
-  prediction_animation_v2/src/context/ \
-  prediction_animation_v2/src/components/Icon.tsx \
-  prediction_animation_v2/src/components/ToolBar.tsx \
-  prediction_animation_v2/src/components/SensorAnchorPanel.tsx \
-  prediction_animation_v2/src/components/FieldIntelligencePanel.tsx \
-  prediction_animation_v2/src/components/ProfileView.tsx \
-  prediction_animation_v2/src/components/FieldScene.tsx \
-  prediction_animation_v2/src/App.tsx \
+  terra-intelligence/src/context/ \
+  terra-intelligence/src/components/Icon.tsx \
+  terra-intelligence/src/components/ToolBar.tsx \
+  terra-intelligence/src/components/SensorAnchorPanel.tsx \
+  terra-intelligence/src/components/FieldIntelligencePanel.tsx \
+  terra-intelligence/src/components/ProfileView.tsx \
+  terra-intelligence/src/components/FieldScene.tsx \
+  terra-intelligence/src/App.tsx \
   .gitignore
 git -C /home/phil/Repos/osi-server commit -m "refactor(terra): extract all components, add TerraContext, shrink App.tsx (#8)"
 ```
@@ -1762,15 +1762,15 @@ git -C /home/phil/Repos/osi-server commit -m "refactor(terra): extract all compo
 ## Task 7: CSS grid layout + `SensorAnchorPanel` open/close + mobile breakpoint
 
 **Files:**
-- Modify: `prediction_animation_v2/src/styles.css`
-- Modify: `prediction_animation_v2/src/components/SensorAnchorPanel.tsx` (already controlled)
-- Modify: `prediction_animation_v2/src/components/FieldScene.tsx` (mutual exclusion)
-- Modify: `prediction_animation_v2/src/App.tsx` (anchorPanelOpen state)
-- Create: `prediction_animation_v2/src/__tests__/interactions/anchorPanel.test.tsx`
+- Modify: `terra-intelligence/src/styles.css`
+- Modify: `terra-intelligence/src/components/SensorAnchorPanel.tsx` (already controlled)
+- Modify: `terra-intelligence/src/components/FieldScene.tsx` (mutual exclusion)
+- Modify: `terra-intelligence/src/App.tsx` (anchorPanelOpen state)
+- Create: `terra-intelligence/src/__tests__/interactions/anchorPanel.test.tsx`
 
 - [ ] **Step 7.1: Write anchor panel interaction tests (failing)**
 
-Create `prediction_animation_v2/src/__tests__/interactions/anchorPanel.test.tsx`:
+Create `terra-intelligence/src/__tests__/interactions/anchorPanel.test.tsx`:
 
 ```typescript
 import { describe, it, expect, vi } from 'vitest';
@@ -1835,7 +1835,7 @@ describe('SensorAnchorPanel open/close', () => {
 - [ ] **Step 7.2: Run tests — expect PASS for the unit-level tests**
 
 ```bash
-cd /home/phil/Repos/osi-server/prediction_animation_v2 && npm test
+cd /home/phil/Repos/osi-server/terra-intelligence && npm test
 ```
 
 The `SensorAnchorPanel` close button test should pass once `SensorAnchorPanel.tsx` has the × button (added in Task 6).
@@ -1870,7 +1870,7 @@ Pass `open={anchorPanelOpen}` and `onClose={() => setAnchorPanelOpen(false)}` to
 
 - [ ] **Step 7.4: Replace competing overlay CSS with named grid in `styles.css`**
 
-In `prediction_animation_v2/src/styles.css`, replace the `.field-scene` positioning rules with:
+In `terra-intelligence/src/styles.css`, replace the `.field-scene` positioning rules with:
 
 ```css
 .field-scene {
@@ -1940,7 +1940,7 @@ Ensure class names in the JSX match these grid-area names. Remove old `position:
 - [ ] **Step 7.5: Visual review at desktop and 375px viewport**
 
 ```bash
-cd /home/phil/Repos/osi-server/prediction_animation_v2 && npm run dev
+cd /home/phil/Repos/osi-server/terra-intelligence && npm run dev
 ```
 
 Open `http://localhost:5173` (or the reported port) in a browser. Check:
@@ -1951,7 +1951,7 @@ Open `http://localhost:5173` (or the reported port) in a browser. Check:
 - [ ] **Step 7.6: Run all tests**
 
 ```bash
-cd /home/phil/Repos/osi-server/prediction_animation_v2 && npm test
+cd /home/phil/Repos/osi-server/terra-intelligence && npm test
 ```
 
 Expected: all pass.
@@ -1960,11 +1960,11 @@ Expected: all pass.
 
 ```bash
 git -C /home/phil/Repos/osi-server add \
-  prediction_animation_v2/src/styles.css \
-  prediction_animation_v2/src/components/SensorAnchorPanel.tsx \
-  prediction_animation_v2/src/components/FieldScene.tsx \
-  prediction_animation_v2/src/App.tsx \
-  prediction_animation_v2/src/__tests__/interactions/anchorPanel.test.tsx
+  terra-intelligence/src/styles.css \
+  terra-intelligence/src/components/SensorAnchorPanel.tsx \
+  terra-intelligence/src/components/FieldScene.tsx \
+  terra-intelligence/src/App.tsx \
+  terra-intelligence/src/__tests__/interactions/anchorPanel.test.tsx
 git -C /home/phil/Repos/osi-server commit -m "fix(terra): CSS grid layout, SensorAnchorPanel open/close, mobile breakpoint (#12, #13, #15)"
 ```
 
@@ -1973,17 +1973,17 @@ git -C /home/phil/Repos/osi-server commit -m "fix(terra): CSS grid layout, Senso
 ## Task 8: GUI enhancements (B1/B2, C1, C2, E1)
 
 **Files:**
-- Modify: `prediction_animation_v2/src/moistureModel.ts`
-- Create: `prediction_animation_v2/src/components/ForecastRail.tsx`
-- Create: `prediction_animation_v2/src/components/DepthLayerIndicator.tsx`
-- Modify: `prediction_animation_v2/src/hooks/useMapbox.ts` (C1/C2 anchor layers)
-- Modify: `prediction_animation_v2/src/App.tsx` (railDays computation, depth indicator wiring)
+- Modify: `terra-intelligence/src/moistureModel.ts`
+- Create: `terra-intelligence/src/components/ForecastRail.tsx`
+- Create: `terra-intelligence/src/components/DepthLayerIndicator.tsx`
+- Modify: `terra-intelligence/src/hooks/useMapbox.ts` (C1/C2 anchor layers)
+- Modify: `terra-intelligence/src/App.tsx` (railDays computation, depth indicator wiring)
 
 ### B1/B2 — Forecast rail segmented stress track
 
 - [ ] **Step 8.1: Add `DemoDay` type and `computeDemoDays` to `moistureModel.ts`**
 
-Append to the end of `prediction_animation_v2/src/moistureModel.ts`:
+Append to the end of `terra-intelligence/src/moistureModel.ts`:
 
 ```typescript
 export type DemoDay = {
@@ -2040,14 +2040,14 @@ describe('computeDemoDays', () => {
 - [ ] **Step 8.3: Run tests — expect PASS**
 
 ```bash
-cd /home/phil/Repos/osi-server/prediction_animation_v2 && npm test
+cd /home/phil/Repos/osi-server/terra-intelligence && npm test
 ```
 
 - [ ] **Step 8.4: Create `ForecastRail.tsx` with segmented stress track**
 
 The existing `ForecastRail` function in App.tsx uses an `onWheel` JSX prop which cannot opt out of passive mode. The new component uses a `useRef` + `useEffect` to attach a non-passive listener.
 
-Create `prediction_animation_v2/src/components/ForecastRail.tsx`:
+Create `terra-intelligence/src/components/ForecastRail.tsx`:
 
 ```typescript
 import { useRef, useEffect, type CSSProperties } from 'react';
@@ -2203,7 +2203,7 @@ Remove the old `ForecastRail` function definition from App.tsx.
 
 - [ ] **Step 8.6: Create `DepthLayerIndicator.tsx`**
 
-Create `prediction_animation_v2/src/components/DepthLayerIndicator.tsx`:
+Create `terra-intelligence/src/components/DepthLayerIndicator.tsx`:
 
 ```typescript
 import type { LiveDepthView } from '../terraLive';
@@ -2370,7 +2370,7 @@ Set the freshness layer to `visibility: none` in demo mode via `setLayerVisibili
 - [ ] **Step 8.10: Build and run tests**
 
 ```bash
-cd /home/phil/Repos/osi-server/prediction_animation_v2
+cd /home/phil/Repos/osi-server/terra-intelligence
 npm run build && npm test
 ```
 
@@ -2380,13 +2380,13 @@ Expected: build passes, all tests pass including the new `computeDemoDays` tests
 
 ```bash
 git -C /home/phil/Repos/osi-server add \
-  prediction_animation_v2/src/moistureModel.ts \
-  prediction_animation_v2/src/components/ForecastRail.tsx \
-  prediction_animation_v2/src/components/DepthLayerIndicator.tsx \
-  prediction_animation_v2/src/hooks/useMapbox.ts \
-  prediction_animation_v2/src/App.tsx \
-  prediction_animation_v2/src/styles.css \
-  prediction_animation_v2/src/__tests__/moistureModel.test.ts
+  terra-intelligence/src/moistureModel.ts \
+  terra-intelligence/src/components/ForecastRail.tsx \
+  terra-intelligence/src/components/DepthLayerIndicator.tsx \
+  terra-intelligence/src/hooks/useMapbox.ts \
+  terra-intelligence/src/App.tsx \
+  terra-intelligence/src/styles.css \
+  terra-intelligence/src/__tests__/moistureModel.test.ts
 git -C /home/phil/Repos/osi-server commit -m "feat(terra): B1/B2 forecast rail stress track, E1 depth indicator, C1/C2 anchor layers"
 ```
 
@@ -2396,12 +2396,12 @@ git -C /home/phil/Repos/osi-server commit -m "feat(terra): B1/B2 forecast rail s
 
 **Files:**
 - Modify: `frontend/src/components/farming/prediction/PredictionCard.tsx`
-- Modify: `prediction_animation_v2/src/components/FieldScene.tsx` (back button already added in Task 6)
-- Create: `prediction_animation_v2/src/__tests__/interactions/backButton.test.tsx`
+- Modify: `terra-intelligence/src/components/FieldScene.tsx` (back button already added in Task 6)
+- Create: `terra-intelligence/src/__tests__/interactions/backButton.test.tsx`
 
 - [ ] **Step 9.1: Write back button test (failing)**
 
-Create `prediction_animation_v2/src/__tests__/interactions/backButton.test.tsx`:
+Create `terra-intelligence/src/__tests__/interactions/backButton.test.tsx`:
 
 ```typescript
 import { describe, it, expect, vi } from 'vitest';
@@ -2449,7 +2449,7 @@ describe('back button', () => {
 - [ ] **Step 9.2: Run test — expect PASS (back button was added in Task 6)**
 
 ```bash
-cd /home/phil/Repos/osi-server/prediction_animation_v2 && npm test -- --reporter=verbose src/__tests__/interactions/backButton.test.tsx
+cd /home/phil/Repos/osi-server/terra-intelligence && npm test -- --reporter=verbose src/__tests__/interactions/backButton.test.tsx
 ```
 
 Expected: PASS. If it fails, confirm the back button in `FieldScene.tsx` reads `returnUrl` from `window.location.search` and renders `<a href={decodeURIComponent(returnUrl)}>`.
@@ -2482,7 +2482,7 @@ Expected: exits 0.
 ```bash
 git -C /home/phil/Repos/osi-server add \
   frontend/src/components/farming/prediction/PredictionCard.tsx \
-  prediction_animation_v2/src/__tests__/interactions/backButton.test.tsx
+  terra-intelligence/src/__tests__/interactions/backButton.test.tsx
 git -C /home/phil/Repos/osi-server commit -m "feat(terra): add returnUrl back-navigation from Terra to dashboard (#14)"
 ```
 
@@ -2491,12 +2491,12 @@ git -C /home/phil/Repos/osi-server commit -m "feat(terra): add returnUrl back-na
 ## Task 10: Remaining interaction tests + final pass
 
 **Files:**
-- Create: `prediction_animation_v2/src/__tests__/interactions/startupMode.test.tsx`
+- Create: `terra-intelligence/src/__tests__/interactions/startupMode.test.tsx`
 - Run full test suite
 
 - [ ] **Step 10.1: Write startup mode test**
 
-Create `prediction_animation_v2/src/__tests__/interactions/startupMode.test.tsx`:
+Create `terra-intelligence/src/__tests__/interactions/startupMode.test.tsx`:
 
 ```typescript
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
@@ -2541,7 +2541,7 @@ Note: if `readEntryMode` is refactored to be exported from `terraLive.ts` during
 - [ ] **Step 10.2: Run full test suite**
 
 ```bash
-cd /home/phil/Repos/osi-server/prediction_animation_v2 && npm test
+cd /home/phil/Repos/osi-server/terra-intelligence && npm test
 ```
 
 Expected: all tests pass. The full suite now covers:
@@ -2569,7 +2569,7 @@ Expected: all pass.
 
 ```bash
 git -C /home/phil/Repos/osi-server add \
-  prediction_animation_v2/src/__tests__/interactions/startupMode.test.tsx
+  terra-intelligence/src/__tests__/interactions/startupMode.test.tsx
 git -C /home/phil/Repos/osi-server commit -m "test(terra): add startup mode interaction test, complete test harness"
 ```
 

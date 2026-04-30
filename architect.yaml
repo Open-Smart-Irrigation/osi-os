@@ -1,0 +1,43 @@
+features:
+  - name: edge-react-pages
+    design_pattern: Edge React page composition
+    includes:
+      - web/react-gui/src/pages/**/*.tsx
+      - web/react-gui/src/App.tsx
+    description: |
+      Pages compose route-level UI, auth/navigation state, and data-loading entry points for the local gateway GUI.
+      Keep gateway domain rules in services, types, or focused farming components. Preserve local/offline behavior and account-link flows.
+
+  - name: edge-farming-components
+    design_pattern: Edge farming device and zone UI components
+    includes:
+      - web/react-gui/src/components/farming/**/*.tsx
+    description: |
+      Farming components render gateway-backed devices, zones, schedules, dendrometer analytics, environment summaries, and local control actions.
+      Prefer shared helpers for repeated device card footer, battery, zone, weather, and dendrometer display rules.
+
+  - name: edge-api-services
+    design_pattern: Edge REST service and normalization boundary
+    includes:
+      - web/react-gui/src/services/**/*.ts
+    description: |
+      Service files are the boundary between React UI and local Node-RED REST APIs.
+      Keep request/response typing, auth-expiry behavior, and snake_case/camelCase compatibility normalization here rather than in presentational components.
+
+  - name: edge-domain-types
+    design_pattern: Edge farming and sync domain type definitions
+    includes:
+      - web/react-gui/src/types/**/*.ts
+    description: |
+      Type files define the canonical TypeScript vocabulary for local devices, zones, schedules, telemetry, dendrometers, and sync-facing fields.
+      Preserve compatibility aliases when the local API and mirrored cloud API use different field casing.
+
+  - name: edge-tests
+    design_pattern: Edge GUI behavior tests
+    includes:
+      - web/react-gui/tests/**/*.test.ts
+      - web/react-gui/src/**/*.test.ts
+      - web/react-gui/src/**/*.test.tsx
+    description: |
+      Tests should cover user-visible behavior, normalization logic, and device-specific edge cases.
+      Prefer real helpers and data shapes; mock only browser APIs or external boundaries that the test cannot own.

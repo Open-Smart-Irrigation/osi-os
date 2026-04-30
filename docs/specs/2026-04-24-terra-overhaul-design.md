@@ -5,10 +5,10 @@ Status: Approved for planning
 
 ## Scope
 
-Full structural overhaul of the Terra Intelligence frontend (`osi-server/prediction_animation_v2`) and targeted surgical fixes to the prediction backend (`osi-server/backend`). Addresses all 8 open Terra issues on `osi-server` (#8–#15), three major backend defects, and integrates five GUI enhancements (B1/B2/C1/C2/E1).
+Full structural overhaul of the Terra Intelligence frontend (`osi-server/terra-intelligence`) and targeted surgical fixes to the prediction backend (`osi-server/backend`). Addresses all 8 open Terra issues on `osi-server` (#8–#15), three major backend defects, and integrates five GUI enhancements (B1/B2/C1/C2/E1).
 
 ### In scope
-- `osi-server/prediction_animation_v2` — full component extraction from `App.tsx`, CSS grid layout model, mobile layout, test harness
+- `osi-server/terra-intelligence` — full component extraction from `App.tsx`, CSS grid layout model, mobile layout, test harness
 - `osi-server/backend` — three surgical Java fixes in `PredictionFieldStateService` and `PredictionRunService`
 - `osi-server/frontend` — `PredictionCard.tsx` launch link update (returnUrl, #14)
 - GUI enhancements: B1/B2 (forecast rail), C1/C2 (sensor anchor Mapbox layers), E1 (depth layer indicator)
@@ -40,7 +40,7 @@ The existing launch contract is preserved:
 `App.tsx` (currently 2259 lines) is split into focused files. The new structure:
 
 ```
-prediction_animation_v2/src/
+terra-intelligence/src/
 ├── App.tsx                          # ~150 lines: entry mode, context provider, scene router
 ├── moistureModel.ts                 # unchanged + computeDemoDays() for B1/B2
 ├── terraLive.ts                     # unchanged + optional onAuthExpired callback
@@ -288,7 +288,7 @@ The `<label>` for overlay depth is removed from the `SensorAnchorPanel`. The `<s
 ## Testing strategy
 
 ### Test harness setup
-- Vitest + React Testing Library added to `prediction_animation_v2`
+- Vitest + React Testing Library added to `terra-intelligence`
 - Mapbox GL mocked at module level (`vi.mock('mapbox-gl', ...)`)
 - `fetch` mocked via `vi.stubGlobal('fetch', ...)`
 - Test files in `src/__tests__/`
@@ -340,16 +340,16 @@ Each step is independently verifiable before the next starts.
 
 | Step | Repo | What | Verification |
 |---|---|---|---|
-| 1 | osi-server/prediction_animation_v2 | Add Vitest + RTL, write unit tests for existing pure functions (no code changes) | `npm test` passes |
+| 1 | osi-server/terra-intelligence | Add Vitest + RTL, write unit tests for existing pure functions (no code changes) | `npm test` passes |
 | 2 | osi-server/backend | Three Bundle F Java fixes + new backend test cases | `./gradlew test` passes |
-| 3 | osi-server/prediction_animation_v2 | Extract `useLiveData` with AbortController + version guard | Unit tests pass; no visual change |
-| 4 | osi-server/prediction_animation_v2 | Extract `useDraw` and `useMapbox` | No visual change |
-| 5 | osi-server/prediction_animation_v2 | Bundle B fix: decouple draw from save, add Close polygon button | `saveFlow.test`, `drawClose.test` pass |
-| 6 | osi-server/prediction_animation_v2 | Extract all components, add `TerraContext`, `App.tsx` → ~150 lines | Build passes, visual parity with before |
-| 7 | osi-server/prediction_animation_v2 | CSS grid layout model, `SensorAnchorPanel` open/close, mobile breakpoint | `anchorPanel.test` passes; visual review on desktop + 375px |
-| 8 | osi-server/prediction_animation_v2 | GUI enhancements: B1/B2 (`computeDemoDays`, `ForecastRail`), C1/C2 (Mapbox layers), E1 (`DepthLayerIndicator`) | Visual review; unit tests for `computeDemoDays` |
+| 3 | osi-server/terra-intelligence | Extract `useLiveData` with AbortController + version guard | Unit tests pass; no visual change |
+| 4 | osi-server/terra-intelligence | Extract `useDraw` and `useMapbox` | No visual change |
+| 5 | osi-server/terra-intelligence | Bundle B fix: decouple draw from save, add Close polygon button | `saveFlow.test`, `drawClose.test` pass |
+| 6 | osi-server/terra-intelligence | Extract all components, add `TerraContext`, `App.tsx` → ~150 lines | Build passes, visual parity with before |
+| 7 | osi-server/terra-intelligence | CSS grid layout model, `SensorAnchorPanel` open/close, mobile breakpoint | `anchorPanel.test` passes; visual review on desktop + 375px |
+| 8 | osi-server/terra-intelligence | GUI enhancements: B1/B2 (`computeDemoDays`, `ForecastRail`), C1/C2 (Mapbox layers), E1 (`DepthLayerIndicator`) | Visual review; unit tests for `computeDemoDays` |
 | 9 | osi-server/frontend | `PredictionCard.tsx`: append `returnUrl` to Terra launch link | `backButton.test` passes |
-| 10 | osi-server/prediction_animation_v2 | Interaction tests for startup mode, draw, save, anchor panel, back button | All interaction tests pass |
+| 10 | osi-server/terra-intelligence | Interaction tests for startup mode, draw, save, anchor panel, back button | All interaction tests pass |
 
 ---
 
@@ -368,5 +368,5 @@ Each step is independently verifiable before the next starts.
 
 ## Minor hygiene (included in step 6)
 
-- `.gitignore`: replace `prediction_animation/` with `prediction_animation_v2/`
+- `.gitignore`: replace `terra-intelligence/` with `terra-intelligence/`
 - Forecast rail `onWheel`: replace the JSX `onWheel` prop with a `useRef` + `useEffect` that attaches `addEventListener('wheel', handler, { passive: false })` directly on the rail element — JSX synthetic events cannot opt out of passive mode, which causes `preventDefault()` to be ignored in some browsers, letting page scroll compete with the hour scrubber
