@@ -195,6 +195,7 @@ const requiredFunctionNodes = [
   'Persist STREGA Uplink',
   'Process S2120',
   'Aggregate Zone Rain',
+  'Insert Chameleon Reading',
   'Get Zone Assignments',
   'Auth + Set Zone Assignments',
   'Auth + Query Gateway Location',
@@ -383,6 +384,19 @@ function expectExcludesForEach(nodeNames, needle, description) {
 
 function readTableColumns(dbPath, tableName) {
   const output = execFileSync('sqlite3', [dbPath, `pragma table_info(${tableName});`], { encoding: 'utf8' });
+  return output
+    .trim()
+    .split('\n')
+    .filter(Boolean)
+    .map((line) => {
+      const parts = line.split('|');
+      return parts[1];
+    })
+    .filter(Boolean);
+}
+
+function readTableIndexes(dbPath, tableName) {
+  const output = execFileSync('sqlite3', [dbPath, `pragma index_list(${tableName});`], { encoding: 'utf8' });
   return output
     .trim()
     .split('\n')
@@ -1070,7 +1084,13 @@ expectIncludes('Decode LSN50', 'adcCh1V = dendro.toFiniteNumber(obj.ADC_CH1V);',
 expectIncludes('Decode LSN50', 'adcCh4V = dendro.toFiniteNumber(obj.ADC_CH4V);', 'reads ADC_CH4V when present without using it for dendrometer conversion');
 expectIncludes('Decode LSN50', 'const observedModeCode = rawDecoded && rawDecoded.modeCode != null ? rawDecoded.modeCode : null;', 'decodes observed LSN50 mode from shared raw uplink parsing');
 expectIncludes('Decode LSN50', "env.get('CHIRPSTACK_PROFILE_LSN50')", 'filters uplinks to the env-backed LSN50 profile');
+expectIncludes('Decode LSN50', 'chameleonPayloadVersion', 'normalizes Chameleon payload version from decoder output');
+expectIncludes('Decode LSN50', 'chameleonR1OhmComp', 'normalizes Chameleon compensated resistance fields');
+expectIncludes('Decode LSN50', 'rawPayloadB64: msg._rawPayload', 'keeps the raw LoRaWAN payload base64 for Chameleon replay');
 expectIncludes('Apply Config', 'd.modeCodeToStore = d.observedModeCode != null ? d.observedModeCode : effectiveMode;', 'stores observed or configured LSN50 mode on ingest');
+expectIncludes('Apply Config', '} else if (d.isChameleon === true) {', 'adds a dedicated Chameleon branch before dendrometer derivation');
+expectIncludes('Apply Config', 'd.dendroValid = null', 'sets dendrometer validity null for Chameleon payloads');
+expectIncludes('Apply Config', 'Chameleon flags 0x', 'surfaces Chameleon status in node status text');
 expectIncludes('Apply Config', 'loadPreviousMod9Sample', 'loads the last persisted MOD9 sample before computing deltas');
 expectIncludes('Apply Config', 'd.counterIntervalSeconds = Number.isFinite(intervalSeconds) && intervalSeconds > 0 ? intervalSeconds : null;', 'computes elapsed seconds between MOD9 uplinks');
 expectIncludes('Apply Config', "if (currentCount < previousCount) return { deltaCount: null, status: 'counter_reset' };", 'treats counter decreases as resets instead of inflating deltas');
@@ -1088,8 +1108,14 @@ expectIncludes('Apply Config', 'const delta = dendro.computeDendroDeltaMm({', 'r
 expectIncludes('Apply Config', 'const stemChange = dendro.computeDendroStemChangeUm({', 'derives a baseline-relative stem change signal for the basic card and monitor');
 expectIncludes('Apply Config', 'd.dendroStemChangeUm = stemChange.stemChangeUm;', 'stores the baseline-relative stem change alongside mechanical position');
 expectIncludes('Apply Config', 'dendro_baseline_pending = 0,', 'clears the pending-baseline flag when a new valid stem-change baseline is persisted');
+expectIncludes('Insert Chameleon Reading', 'INSERT INTO chameleon_readings', 'persists decoded Chameleon readings locally');
+expectIncludes('Insert Chameleon Reading', 'if (!d || d.isChameleon !== true) return msg;', 'passes non-Chameleon LSN50 payloads downstream');
+expectIncludes('Build Dendrometer Readings INSERT', 'd.isChameleon === true', 'defensively skips dendrometer readings for Chameleon payloads');
 expectLibById('lsn50-decode-fn', 'dendro', 'osi-dendro-helper', 'imports osi-dendro-helper in Decode LSN50');
 expectLibById('lsn50-apply-config', 'dendro', 'osi-dendro-helper', 'imports osi-dendro-helper in Apply Config');
+expectLibById('chameleon-readings-insert-fn', 'osiDb', 'osi-db-helper', 'imports osi-db-helper in Insert Chameleon Reading');
+expectWireById('lsn50-zone-agg-fn', 'chameleon-readings-insert-fn', 'routes LSN50 flow through Chameleon insert');
+expectWireById('chameleon-readings-insert-fn', 'dendro-readings-insert-fn', 'passes Chameleon insert output to dendrometer insert');
 expectLibById('8809bb5239dfb3d4', 'dendro', 'osi-dendro-helper', 'imports osi-dendro-helper in Build Telemetry');
 expectIncludesById('strega-sql-fn', 'await db.transaction(async (tx) => {', 'serializes STREGA persistence through one helper-scoped transaction');
 expectIncludesById('strega-sql-fn', 'await tx.run(', 'issues parameterized statements inside the transaction scope');
@@ -1671,6 +1697,36 @@ for (const seedDatabasePath of seedDendroHistoryDatabasePaths) {
     dendroReadingColumns.has('dendro_mode_used'),
     `${relativeSeedPath} includes dendro_mode_used in the bundled dendrometer_readings schema`,
     `${relativeSeedPath} is missing dendro_mode_used in the bundled dendrometer_readings schema`
+  );
+}
+for (const seedDatabasePath of seedDatabasePaths) {
+  const relativeSeedPath = path.relative(path.resolve(__dirname, '..'), seedDatabasePath);
+  const chameleonColumns = new Set(readTableColumns(seedDatabasePath, 'chameleon_readings'));
+  const chameleonIndexes = new Set(readTableIndexes(seedDatabasePath, 'chameleon_readings'));
+  expectCondition(
+    chameleonColumns.has('payload_b64'),
+    `${relativeSeedPath} includes payload_b64 in the bundled chameleon_readings schema`,
+    `${relativeSeedPath} is missing payload_b64 in the bundled chameleon_readings schema`
+  );
+  expectCondition(
+    chameleonColumns.has('r1_ohm_comp'),
+    `${relativeSeedPath} includes r1_ohm_comp in the bundled chameleon_readings schema`,
+    `${relativeSeedPath} is missing r1_ohm_comp in the bundled chameleon_readings schema`
+  );
+  expectCondition(
+    chameleonColumns.has('f_cnt'),
+    `${relativeSeedPath} includes f_cnt in the bundled chameleon_readings schema`,
+    `${relativeSeedPath} is missing f_cnt in the bundled chameleon_readings schema`
+  );
+  expectCondition(
+    chameleonIndexes.has('idx_chameleon_readings_deveui_time'),
+    `${relativeSeedPath} includes idx_chameleon_readings_deveui_time`,
+    `${relativeSeedPath} is missing idx_chameleon_readings_deveui_time`
+  );
+  expectCondition(
+    chameleonIndexes.has('idx_chameleon_readings_array_id'),
+    `${relativeSeedPath} includes idx_chameleon_readings_array_id`,
+    `${relativeSeedPath} is missing idx_chameleon_readings_array_id`
   );
 }
 expectFileIncludes('osi-gateway-identity.sh', gatewayIdentityHelperScript, 'gateway_identity_resolve()', 'defines the shared canonical gateway resolver');

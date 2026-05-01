@@ -132,4 +132,17 @@ assert.strictEqual(open.Chameleon_R1_Ohm_Raw, 'NULL');
 assert.strictEqual(open.Chameleon_R2_Ohm_Comp, 10100);
 assert.strictEqual(open.Chameleon_R2_Ohm_Raw, 10200);
 
+const dryConnectedFrame = chameleonFrame.slice();
+dryConnectedFrame[9] = 0x00;
+dryConnectedFrame.splice(24, 4, 0x00, 0x98, 0x96, 0x7f); // 9999999
+dryConnectedFrame.splice(28, 4, 0x00, 0x98, 0x96, 0x7f);
+dryConnectedFrame.splice(32, 4, 0x00, 0x98, 0x96, 0x7f);
+const dryConnected = decode(dryConnectedFrame);
+assert.strictEqual(dryConnected.Chameleon_CH1_Open, false);
+assert.strictEqual(dryConnected.Chameleon_CH2_Open, false);
+assert.strictEqual(dryConnected.Chameleon_CH3_Open, false);
+assert.strictEqual(dryConnected.Chameleon_R1_Ohm_Raw, 9999999);
+assert.strictEqual(dryConnected.Chameleon_R2_Ohm_Raw, 9999999);
+assert.strictEqual(dryConnected.Chameleon_R3_Ohm_Raw, 9999999);
+
 console.log('LSN50 Chameleon codec checks passed');
