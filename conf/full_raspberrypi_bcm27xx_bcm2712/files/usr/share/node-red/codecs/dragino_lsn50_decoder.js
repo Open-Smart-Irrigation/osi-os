@@ -3,6 +3,80 @@ function decodeUplink(input) {
             data: Decode(input.fPort, input.bytes, input.variables)
         };   
 }
+
+/*
+ * Chameleon V1 keeps the stock MOD3 prefix, then appends a 44-byte,
+ * big-endian payload. Byte 8 is the Chameleon payload version marker.
+ */
+function readUInt16BE(bytes, offset) {
+  return (bytes[offset]<<8 | bytes[offset + 1]);
+}
+
+function readInt16BE(bytes, offset) {
+  var value = readUInt16BE(bytes, offset);
+  return (value & 0x8000) ? value - 0x10000 : value;
+}
+
+function readUInt32BE(bytes, offset) {
+  return (((bytes[offset] << 24) >>> 0) +
+          (bytes[offset + 1] << 16) +
+          (bytes[offset + 2] << 8) +
+          bytes[offset + 3]) >>> 0;
+}
+
+function byteToHex(value) {
+  var hex = value.toString(16).toUpperCase();
+  return hex.length == 1 ? "0" + hex : hex;
+}
+
+function bytesToHex(bytes, offset, length) {
+  var out = "";
+  for(var i = 0; i < length; i++) {
+    out += byteToHex(bytes[offset + i]);
+  }
+  return out;
+}
+
+function isChameleonV1Frame(bytes) {
+  return bytes.length >= 44 && bytes[8] == 0x01;
+}
+
+function readChameleonResistance(bytes, offset, dataInvalid, channelOpen) {
+  if(dataInvalid || channelOpen)
+    return "NULL";
+  return readUInt32BE(bytes, offset);
+}
+
+function decodeChameleonV1(decode, bytes) {
+  var status_flags = bytes[9];
+  var soil_temp_c_x100 = readInt16BE(bytes, 10);
+  var dataInvalid;
+
+  decode.Chameleon_Payload_Version = bytes[8];
+  decode.Chameleon_Status_Flags = status_flags;
+  decode.Chameleon_I2C_Missing = (status_flags & 0x01) ? true : false;
+  decode.Chameleon_Timeout = (status_flags & 0x02) ? true : false;
+  decode.Chameleon_Temp_Fault = (status_flags & 0x04) ? true : false;
+  decode.Chameleon_ID_Fault = (status_flags & 0x08) ? true : false;
+  decode.Chameleon_CH1_Open = (status_flags & 0x10) ? true : false;
+  decode.Chameleon_CH2_Open = (status_flags & 0x20) ? true : false;
+  decode.Chameleon_CH3_Open = (status_flags & 0x40) ? true : false;
+  dataInvalid = decode.Chameleon_I2C_Missing || decode.Chameleon_Timeout;
+
+  if(dataInvalid || decode.Chameleon_Temp_Fault || soil_temp_c_x100 == -12700)
+    decode.Chameleon_TempC = "NULL";
+  else
+    decode.Chameleon_TempC = parseFloat((soil_temp_c_x100 / 100).toFixed(2));
+
+  decode.Chameleon_R1_Ohm_Comp = readChameleonResistance(bytes, 12, dataInvalid, decode.Chameleon_CH1_Open);
+  decode.Chameleon_R2_Ohm_Comp = readChameleonResistance(bytes, 16, dataInvalid, decode.Chameleon_CH2_Open);
+  decode.Chameleon_R3_Ohm_Comp = readChameleonResistance(bytes, 20, dataInvalid, decode.Chameleon_CH3_Open);
+  decode.Chameleon_R1_Ohm_Raw = readChameleonResistance(bytes, 24, dataInvalid, decode.Chameleon_CH1_Open);
+  decode.Chameleon_R2_Ohm_Raw = readChameleonResistance(bytes, 28, dataInvalid, decode.Chameleon_CH2_Open);
+  decode.Chameleon_R3_Ohm_Raw = readChameleonResistance(bytes, 32, dataInvalid, decode.Chameleon_CH3_Open);
+  decode.Chameleon_Array_ID = (dataInvalid || decode.Chameleon_ID_Fault) ? "NULL" : bytesToHex(bytes, 36, 8);
+}
+
 function Decode(fPort, bytes, variables) {
 //LSN50 Decode   
 if(fPort==0x02)
@@ -62,23 +136,31 @@ if(fPort==0x02)
   else if(mode=='2')
   {
     decode.Work_mode="3ADC+IIC";
-    decode.BatV= bytes[11]/10;
     decode.ADC_CH0V= (bytes[0]<<8 | bytes[1])/1000;
     decode.ADC_CH1V= (bytes[2]<<8 | bytes[3])/1000;
     decode.ADC_CH4V= (bytes[4]<<8 | bytes[5])/1000;
-    if((bytes[9]<<8 | bytes[10])===0)
-      decode.Illum= (bytes[7]<<8 | bytes[8]);
-    else 
+    if(isChameleonV1Frame(bytes))
     {
-      if(((bytes[7]==0x7f)&&(bytes[8]==0xff))||((bytes[7]==0xff)&&(bytes[8]==0xff)))
-        decode.TempC_SHT= "NULL";
+      decode.BatV= bytes[7]/10;
+      decodeChameleonV1(decode, bytes);
+    }
+    else
+    {
+      decode.BatV= bytes[11]/10;
+      if((bytes[9]<<8 | bytes[10])===0)
+        decode.Illum= (bytes[7]<<8 | bytes[8]);
       else
-        decode.TempC_SHT= parseFloat(((bytes[7]<<24>>16 | bytes[8])/10).toFixed(1));
-  
-      if((bytes[9]==0xff)&&(bytes[10]==0xff))
-        decode.Hum_SHT= "NULL";
-      else
-        decode.Hum_SHT= parseFloat(((bytes[9]<<8 | bytes[10])/10).toFixed(1));
+      {
+        if(((bytes[7]==0x7f)&&(bytes[8]==0xff))||((bytes[7]==0xff)&&(bytes[8]==0xff)))
+          decode.TempC_SHT= "NULL";
+        else
+          decode.TempC_SHT= parseFloat(((bytes[7]<<24>>16 | bytes[8])/10).toFixed(1));
+
+        if((bytes[9]==0xff)&&(bytes[10]==0xff))
+          decode.Hum_SHT= "NULL";
+        else
+          decode.Hum_SHT= parseFloat(((bytes[9]<<8 | bytes[10])/10).toFixed(1));
+      }
     }
   }
   else if(mode=='3')
