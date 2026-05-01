@@ -29,12 +29,13 @@ Out of scope:
 Design note: kPa conversion is near-term, but this plan stores the payload's ohm values only. Add kPa columns in the conversion task when coefficient ownership and status semantics are implemented. The dedicated table keeps that later migration small.
 
 Review consolidation decisions:
-- `device_data.lsn50_mode_code` and `device_data.lsn50_mode_label` stay aligned to the stock LSN50 observed AT mode. For Chameleon firmware frames this is still MOD3 / `3ADC+IIC`; do not invent a Chameleon mode code in this step. Chameleon identity is carried by `d.isChameleon` during flow processing and by `chameleon_readings.payload_version` in the dedicated table.
+- `device_data.lsn50_mode_code` and `device_data.lsn50_mode_label` stay aligned to the stock LSN50 observed AT mode. For Chameleon firmware frames this is still MOD3 / `3ADC+IIC` because the firmware payload's stock mode byte is `0x08`, which decodes as mode code `2`. This is technically misleading if read without the Chameleon-specific row, but acceptable for this persistence slice because GUI/API differentiation is out of scope. Chameleon identity is carried by `d.isChameleon` during flow processing and by `chameleon_readings.payload_version` in the dedicated table.
 - Chameleon temperature is stored in `chameleon_readings.temp_c` independently of the legacy LSN50 `temp_enabled` flag. Existing generic `device_data.ext_temperature_c` behavior remains governed by the current LSN50 flow.
 - If `i2c_missing` or `timeout` is set, persist the status bits but store `NULL` for `temp_c`, all resistance fields, and `array_id`. This prevents naive consumers from plotting fault-path zeroes as real measurements. If only `temp_fault` is set, store `NULL` for `temp_c` while preserving resistance and array-id values.
 - Raw resistance `9999999` with clean status flags is treated as dry/saturated connected-sensor data, not as the open-circuit sentinel. The firmware sentinel remains `10000000`.
 - `payload_b64` stores `data.data`, the LoRaWAN FRMPayload base64 from ChirpStack, not the full ChirpStack event envelope.
 - `f_port` and `f_cnt` are nullable. Confirm the exact ChirpStack v4 event field names (`data.fPort` / `data.fCnt` versus alternatives) against a real uplink during implementation.
+- `chameleon-readings-insert-fn` has an inner `try/catch/finally` that handles normal insert and close failures. The outer `.catch()` is mostly a safety net for future synchronous setup errors before the inner `try` block, such as a constructor failure while opening the DB helper.
 
 ---
 
