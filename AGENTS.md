@@ -38,6 +38,7 @@ This repo uses Superpowers as the default execution framework and selected Matt 
 
 > Note: the prediction-engine, admin prediction lab, and clustered Track B rollout work has now been consolidated back onto `osi-server` `main`. As of `2026-04-22`, the battery-footer work has also been pushed to both repos, `kaba100` has received a GUI-only `osi-os` rollout from `main`, and the live cloud server at `83.228.220.63` has been safely rolled forward to `osi-server` `main` via a local git bundle plus a backend-only rebuild.
 > As of `2026-04-29`, Terra mobile/UX/VWC work is merged into `osi-server` `main` (`81fca4c`), and STREGA runtime recovery is merged into `osi-os` `main` (`7d057377`). The LSN50 dendrometer decoder work remains intentionally unmerged on `feature/lsn50-dendrometer-decoder-claude`.
+> As of `2026-05-01`, standalone Dragino LSN50 v2 Chameleon firmware work lives in `/home/phil/Repos/LoRa_STM32-claude` on `feature/chameleon-i2c-reader` in the Project-OSI `LoRa_STM32` fork. The firmware work is intentionally separate from OSI OS / server integration. Planning/reference docs are in `docs/plans/2026-04-30-lsn50-chameleon-i2c-firmware.md` and `docs/specs/2026-04-30-via-chameleon-hardware-reference.md`.
 
 ---
 
