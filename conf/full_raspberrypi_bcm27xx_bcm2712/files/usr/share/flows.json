@@ -5531,7 +5531,7 @@
     "y": 200,
     "wires": [
       [
-        "dendro-readings-insert-fn"
+        "chameleon-readings-insert-fn"
       ]
     ],
     "libs": [
@@ -8235,5 +8235,30 @@
       ]
     ],
     "func": "return (async () => {\n  const d = msg.formattedData;\n  if (!d || !d.devEui) {\n    node.error('formattedData missing', msg);\n    return null;\n  }\n\n  const devEui = String(d.devEui).trim().toUpperCase();\n  const recordedAt = String(d.timestamp || new Date().toISOString()).trim();\n  const ambientTemperature = d.ambientTemperature ?? null;\n  const relativeHumidity = d.relativeHumidity ?? null;\n  const batPct = d.batPct ?? null;\n  const observedState = d.currentState == null ? null : String(d.currentState).trim().toUpperCase();\n  const db = new osiDb.Database('/data/db/farming.db');\n\n  try {\n    await db.transaction(async (tx) => {\n      await tx.run(\n        'INSERT INTO device_data (deveui, recorded_at, ambient_temperature, relative_humidity, bat_pct) VALUES (?, ?, ?, ?, ?)',\n        [devEui, recordedAt, ambientTemperature, relativeHumidity, batPct]\n      );\n\n      if (observedState) {\n        // Keep updated_at tied to real valve transitions so passive uplinks do not look like config churn.\n        await tx.run(\n          \"UPDATE devices SET current_state = ?, updated_at = ?, sync_version = COALESCE(sync_version, 0) + 1 WHERE deveui = ? AND COALESCE(UPPER(current_state), '') <> ?\",\n          [observedState, recordedAt, devEui, observedState]\n        );\n      }\n    });\n\n    msg.payload = {\n      source: 'strega-local-persistence',\n      deveui: devEui,\n      recorded_at: recordedAt,\n      ambient_temperature: ambientTemperature,\n      relative_humidity: relativeHumidity,\n      bat_pct: batPct,\n      current_state: observedState\n    };\n    node.status({ fill: 'blue', shape: 'dot', text: 'STREGA stored ' + devEui });\n    return msg;\n  } catch (error) {\n    node.status({ fill: 'red', shape: 'ring', text: 'STREGA persist failed ' + devEui });\n    node.error('STREGA persistence failed: ' + String(error && error.message ? error.message : error), msg);\n    return null;\n  } finally {\n    try {\n      await db.close();\n    } catch (_) {}\n  }\n})().catch((error) => {\n  node.error('STREGA persistence failed: ' + String(error && error.message ? error.message : error), msg);\n  return null;\n});"
+  },
+  {
+    "id": "chameleon-readings-insert-fn",
+    "type": "function",
+    "z": "lsn50-tab",
+    "name": "Insert Chameleon Reading",
+    "func": "return (async()=>{\nconst d = msg.formattedData;\nif (!d || d.isChameleon !== true) return msg;\n\nfunction toNum(v) { return v === null || v === undefined || v === '' || !Number.isFinite(Number(v)) ? null : Number(v); }\nfunction toInt(v) { const n = toNum(v); return n === null ? null : Math.trunc(n); }\nfunction toStr(v) { return v === null || v === undefined || v === '' ? null : String(v); }\n\nconst dataInvalid = toInt(d.chameleonI2cMissing) === 1 || toInt(d.chameleonTimeout) === 1;\nconst tempC = dataInvalid ? null : toNum(d.chameleonTempC);\nconst arrayId = dataInvalid ? null : toStr(d.chameleonArrayId);\nconst r1OhmComp = dataInvalid ? null : toInt(d.chameleonR1OhmComp);\nconst r2OhmComp = dataInvalid ? null : toInt(d.chameleonR2OhmComp);\nconst r3OhmComp = dataInvalid ? null : toInt(d.chameleonR3OhmComp);\nconst r1OhmRaw = dataInvalid ? null : toInt(d.chameleonR1OhmRaw);\nconst r2OhmRaw = dataInvalid ? null : toInt(d.chameleonR2OhmRaw);\nconst r3OhmRaw = dataInvalid ? null : toInt(d.chameleonR3OhmRaw);\n\nconst db = new osiDb.Database('/data/db/farming.db');\nconst run = (sql, params) => new Promise((resolve, reject) => db.run(sql, params, (error) => error ? reject(error) : resolve()));\nconst close = () => new Promise((resolve) => db.close(() => resolve()));\n\ntry {\n  await run(\n    'INSERT INTO chameleon_readings (deveui,recorded_at,payload_version,status_flags,i2c_missing,timeout,temp_fault,id_fault,ch1_open,ch2_open,ch3_open,temp_c,r1_ohm_comp,r2_ohm_comp,r3_ohm_comp,r1_ohm_raw,r2_ohm_raw,r3_ohm_raw,array_id,adc_ch0v,adc_ch1v,adc_ch4v,bat_v,payload_b64,f_port,f_cnt) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',\n    [\n      String(d.devEui || '').trim().toUpperCase(),\n      toStr(d.timestamp),\n      toInt(d.chameleonPayloadVersion),\n      toInt(d.chameleonStatusFlags),\n      toInt(d.chameleonI2cMissing),\n      toInt(d.chameleonTimeout),\n      toInt(d.chameleonTempFault),\n      toInt(d.chameleonIdFault),\n      toInt(d.chameleonCh1Open),\n      toInt(d.chameleonCh2Open),\n      toInt(d.chameleonCh3Open),\n      tempC,\n      r1OhmComp,\n      r2OhmComp,\n      r3OhmComp,\n      r1OhmRaw,\n      r2OhmRaw,\n      r3OhmRaw,\n      arrayId,\n      toNum(d.adcV),\n      toNum(d.adcCh1V),\n      toNum(d.adcCh4V),\n      toNum(d.batV),\n      toStr(d.rawPayloadB64),\n      toInt(d.fPort),\n      toInt(d.fCnt)\n    ]\n  );\n  node.status({ fill: d.chameleonStatusFlags ? 'yellow' : 'green', shape: 'dot', text: 'Chameleon stored ' + d.devEui });\n  return msg;\n} catch (error) {\n  node.status({ fill: 'red', shape: 'ring', text: 'Chameleon persist failed' });\n  node.error('Chameleon persistence failed: ' + String(error && error.message ? error.message : error), msg);\n  return msg;\n} finally {\n  try { await close(); } catch (_) {}\n}\n})().catch((error) => {\n  node.error('Chameleon persistence failed: ' + String(error && error.message ? error.message : error), msg);\n  return msg;\n});",
+    "outputs": 1,
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [
+      {
+        "var": "osiDb",
+        "module": "osi-db-helper"
+      }
+    ],
+    "x": 900,
+    "y": 220,
+    "wires": [
+      [
+        "dendro-readings-insert-fn"
+      ]
+    ]
   }
 ]
