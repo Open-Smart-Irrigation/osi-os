@@ -85,6 +85,7 @@ assertIncludes(decode, 'Chameleon_Array_ID', 'decode normalizes array id');
 
 const apply = funcOf('lsn50-apply-config');
 assertIncludes(apply, '} else if (d.isChameleon === true) {', 'chameleon branch sits between MOD9 and dendrometer logic');
+assertIncludes(apply, 'temp_enabled is a legacy LSN50/dendrometer gate', 'chameleon branch documents temp_enabled handling');
 assertIncludes(apply, 'Chameleon flags 0x', 'apply-config surfaces chameleon status flags');
 assertIncludes(apply, 'd.dendroValid = null', 'chameleon branch keeps dendrometer insert guard closed');
 assertIncludes(apply, 'd.dendroCalibrationMissing = false;\n    flow.set(prevKey, undefined);', 'chameleon branch clears dendrometer previous state');
@@ -95,6 +96,8 @@ assertIncludes(chameleonInsert, 'INSERT INTO chameleon_readings', 'insert functi
 assertIncludes(chameleonInsert, 'r1_ohm_comp', 'insert stores compensated resistance');
 assertIncludes(chameleonInsert, 'r1_ohm_raw', 'insert stores raw resistance');
 assertIncludes(chameleonInsert, 'payload_b64', 'insert stores raw payload for replay');
+assertIncludes(chameleonInsert, 'rawPayloadB64 is ChirpStack data.data', 'insert documents payload_b64 replay semantics');
+assertIncludes(chameleonInsert, 'const tempInvalid = dataInvalid || toInt(d.chameleonTempFault) === 1;', 'insert explicitly nulls temp_c on temp_fault');
 assertIncludes(chameleonInsert, 'return msg;', 'insert function passes through downstream flow');
 
 const dendroInsert = funcOf('dendro-readings-insert-fn');
@@ -178,6 +181,16 @@ compileFunctionNode('dendro-readings-insert-fn');
   assert.strictEqual(fault.writes[0].params[12], null, 'r1_ohm_comp is nulled when data is invalid');
   assert.strictEqual(fault.writes[0].params[15], null, 'r1_ohm_raw is nulled when data is invalid');
   assert.strictEqual(fault.writes[0].params[18], null, 'array_id is nulled when data is invalid');
+
+  const tempFaultMsg = JSON.parse(JSON.stringify(normalMsg));
+  tempFaultMsg.formattedData.chameleonTempFault = 1;
+  tempFaultMsg.formattedData.chameleonStatusFlags = 4;
+  tempFaultMsg.formattedData.chameleonTempC = 0;
+  const tempFault = await runFunctionNode('chameleon-readings-insert-fn', tempFaultMsg);
+  assert.strictEqual(tempFault.writes[0].params[6], 1, 'temp_fault flag is persisted');
+  assert.strictEqual(tempFault.writes[0].params[11], null, 'temp_c is nulled on temp_fault');
+  assert.strictEqual(tempFault.writes[0].params[12], 1168, 'r1_ohm_comp is preserved on temp_fault-only frames');
+  assert.strictEqual(tempFault.writes[0].params[18], '286D6ADB0F0000F1', 'array_id is preserved on temp_fault-only frames');
 
   const emptyFieldMsg = JSON.parse(JSON.stringify(normalMsg));
   emptyFieldMsg.formattedData.chameleonTempC = '';
