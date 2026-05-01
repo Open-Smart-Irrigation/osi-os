@@ -1372,6 +1372,8 @@ expectIncludes('Sync Init Schema + Triggers', 'ALTER TABLE devices ADD COLUMN de
 expectIncludes('Sync Init Schema + Triggers', 'ALTER TABLE devices ADD COLUMN dendro_ratio_span REAL', 'adds the device-level dendrometer ratio span calibration');
 expectIncludes('Sync Init Schema + Triggers', 'ALTER TABLE devices ADD COLUMN dendro_ratio_at_retracted REAL', 'adds the canonical retracted-ratio dendrometer calibration column');
 expectIncludes('Sync Init Schema + Triggers', 'ALTER TABLE devices ADD COLUMN dendro_ratio_at_extended REAL', 'adds the canonical extended-ratio dendrometer calibration column');
+expectIncludes('Sync Init Schema + Triggers', 'dendro_stroke_mm REAL, dendro_ratio_at_retracted REAL, dendro_ratio_at_extended REAL, dendro_ratio_zero REAL, dendro_ratio_span REAL', 'preserves canonical dendrometer ratio columns when rebuilding the devices table');
+expectIncludes('Sync Init Schema + Triggers', 'dendro_stroke_mm,COALESCE(dendro_ratio_at_retracted,dendro_ratio_zero),COALESCE(dendro_ratio_at_extended,dendro_ratio_span),dendro_ratio_zero,dendro_ratio_span', 'copies canonical dendrometer ratios through the devices table rebuild');
 expectIncludes('Sync Init Schema + Triggers', 'ALTER TABLE devices ADD COLUMN dendro_baseline_position_mm REAL', 'adds a persisted edge baseline for comparable stem-change signals');
 expectIncludes('Sync Init Schema + Triggers', 'ALTER TABLE devices ADD COLUMN dendro_baseline_mode_used TEXT', 'tracks which conversion path the stem-change baseline was captured with');
 expectIncludes('Sync Init Schema + Triggers', 'ALTER TABLE devices ADD COLUMN dendro_baseline_calibration_signature TEXT', 'tracks calibration changes that should reset the stem-change baseline');
