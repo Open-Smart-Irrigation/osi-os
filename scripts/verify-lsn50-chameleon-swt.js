@@ -72,6 +72,21 @@ function tableColumns(dbPath, tableName) {
   assert.strictEqual(chameleon.resistanceOhmsToKpa(101195, { a: 10.33, b: 0.12, c: 7.21 }), 67.05);
   assert.strictEqual(chameleon.resistanceOhmsToKpa(162580, { a: 10.71, b: 0.13, c: 7.18 }), 82.84);
   assert.strictEqual(chameleon.resistanceOhmsToKpa(10000000, { a: 10.71, b: 0.13, c: 7.18 }), null);
+  const rowCalibration = chameleon.calibrationFromDeviceRow({
+    chameleon_enabled: 1,
+    chameleon_swt1_a: 1,
+    chameleon_swt1_b: '',
+    chameleon_swt1_c: 3,
+    chameleon_swt2_a: 4,
+    chameleon_swt2_b: 5,
+    chameleon_swt2_c: 6,
+  });
+  assert.deepStrictEqual(rowCalibration, {
+    enabled: 1,
+    swt1: { a: 1, b: 0.13, c: 3 },
+    swt2: { a: 4, b: 5, c: 6 },
+    swt3: { a: 10.33, b: 0.12, c: 7.21 },
+  });
 
   const sample = {
     r1OhmComp: 874,
@@ -91,6 +106,7 @@ function tableColumns(dbPath, tableName) {
   assert.strictEqual(chameleon.buildChameleonSwtMetrics(sample, { enabled: 0 }).swt1Kpa, null);
   assert.strictEqual(chameleon.buildChameleonSwtMetrics({ ...sample, timeout: 1 }, { enabled: 1 }).swt2Kpa, null);
   assert.strictEqual(chameleon.buildChameleonSwtMetrics({ ...sample, ch2Open: 1 }, { enabled: 1 }).swt2Kpa, null);
+  assert.strictEqual(chameleon.buildChameleonSwtMetrics({ ...sample, ch2Open: true }, { enabled: 1 }).swt2Kpa, null);
   assert.strictEqual(chameleon.buildChameleonSwtMetrics({ ...sample, r1OhmComp: 9999999 }, { enabled: 1 }).swt1Kpa, 300);
 
   const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, 'utf8'));
@@ -98,11 +114,6 @@ function tableColumns(dbPath, tableName) {
   const packageLock = JSON.parse(fs.readFileSync(packageLockPath, 'utf8'));
   assert.strictEqual(packageLock.packages[''].dependencies['osi-chameleon-helper'], 'file:osi-chameleon-helper');
   assert(packageLock.packages['node_modules/osi-chameleon-helper'], 'package-lock includes osi-chameleon-helper package');
-
-  const deploy = fs.readFileSync(deployPath, 'utf8');
-  assertIncludes(deploy, 'osi-chameleon-helper/package.json', 'deploy ships Chameleon helper package manifest');
-  assertIncludes(deploy, 'osi-chameleon-helper/index.js', 'deploy ships Chameleon helper implementation');
-  assertIncludes(deploy, 'ensure_chameleon_schema', 'deploy repairs live Chameleon SWT schema');
 
   assertLibById('lsn50-apply-config', 'chameleon', 'osi-chameleon-helper');
   assertIncludes(funcOf('lsn50-config-query-fn'), 'chameleon_enabled', 'LSN50 config query loads Chameleon enable flag');
@@ -127,6 +138,11 @@ function tableColumns(dbPath, tableName) {
   compileFunctionNode('lsn50-sql-fn');
   compileFunctionNode('dendro-readings-insert-fn');
   compileFunctionNode('put-chameleon-config-auth-fn');
+
+  const deploy = fs.readFileSync(deployPath, 'utf8');
+  assertIncludes(deploy, 'osi-chameleon-helper/package.json', 'deploy ships Chameleon helper package manifest');
+  assertIncludes(deploy, 'osi-chameleon-helper/index.js', 'deploy ships Chameleon helper implementation');
+  assertIncludes(deploy, 'ensure_chameleon_schema', 'deploy repairs live Chameleon SWT schema');
 
   for (const dbPath of seedDatabasePaths) {
     const devices = tableColumns(dbPath, 'devices');
