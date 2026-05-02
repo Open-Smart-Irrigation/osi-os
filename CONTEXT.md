@@ -21,6 +21,8 @@ This file is a compact domain glossary for agent skills. `AGENTS.md` remains the
 - **Bootstrap** - Full edge state snapshot uploaded to the cloud.
 - **Linked login** - Cloud-assisted local account linking that uses a gateway-specific offline verifier, not cloud password hash sync.
 - **Dendrometer** - Tree growth sensor flow, including canonical ratio endpoint fields for retracted and extended positions.
+- **Chameleon SWT array** - VIA Chameleon resistance sensor array attached to Dragino LSN50 v2 I2C. Raw decoded frames live in `chameleon_readings`; calibrated soil water tension lives in canonical `swt_1`, `swt_2`, and `swt_3`.
+- **Canonical SWT channels** - Sensor-family-neutral soil water tension channels `swt_1`, `swt_2`, and `swt_3`, in kPa. New GUI, scheduling, sync, and server integration work should prefer these over legacy Kiwi `swt_wm*` names.
 - **STREGA Gen1 sentinel** - `ffff/ffff` temperature/humidity payload indicating unavailable environmental telemetry.
 - **Terra Intelligence** - Standalone prediction UX served by `osi-server` at `/terra-intelligence`.
 

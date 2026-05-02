@@ -453,6 +453,7 @@ export const DraginoTempCard: React.FC<DraginoTempCardProps> = ({ device, onRemo
       <DeviceCardFooter
         lastSeenLabel={minutesAgo !== null ? `Last seen: ${minutesAgo} minutes ago` : 'Never seen'}
         batteryPercent={device.latest_data?.bat_pct}
+        batteryVoltage={device.latest_data?.bat_v}
       />
 
       {showMonitor && (

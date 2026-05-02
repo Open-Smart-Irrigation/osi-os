@@ -5,6 +5,7 @@ import { buildDeviceFooterMeta } from './deviceCardBattery';
 interface DeviceCardFooterProps {
   lastSeenLabel: string;
   batteryPercent?: unknown;
+  batteryVoltage?: unknown;
   leftContent?: React.ReactNode;
   actions?: React.ReactNode;
 }
@@ -12,6 +13,7 @@ interface DeviceCardFooterProps {
 export const DeviceCardFooter: React.FC<DeviceCardFooterProps> = ({
   lastSeenLabel,
   batteryPercent,
+  batteryVoltage,
   leftContent,
   actions,
 }) => (
@@ -23,7 +25,7 @@ export const DeviceCardFooter: React.FC<DeviceCardFooterProps> = ({
       <div className="flex shrink-0 items-center gap-2">
         {actions ?? null}
         <p className="text-xs text-[var(--text-tertiary)]">
-          {buildDeviceFooterMeta({ batPct: batteryPercent, lastSeenLabel })}
+          {buildDeviceFooterMeta({ batPct: batteryPercent, batV: batteryVoltage, lastSeenLabel })}
         </p>
       </div>
     </div>
