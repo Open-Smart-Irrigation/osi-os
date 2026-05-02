@@ -337,6 +337,19 @@ function expectLibById(nodeId, varName, moduleName, description) {
   }
 }
 
+function expectNodeTypeById(nodeId, expectedType, description) {
+  const node = findNodeById(nodeId);
+  if (!node) {
+    fail(`missing node ${nodeId}`);
+    return;
+  }
+  if (node.type !== expectedType) {
+    fail(`${nodeId} expected type ${expectedType}, got ${node.type}: ${description}`);
+  } else {
+    console.log(`OK ${nodeId} ${description}`);
+  }
+}
+
 function expectWireById(nodeId, targetId, description) {
   const node = findNodeById(nodeId);
   if (!node) {
@@ -1188,6 +1201,21 @@ expectIncludes('Rollback MQTT Broker Config', 'rolled back MQTT credentials', 'r
 expectIncludes('Restore MQTT Broker Config', 'restored MQTT credentials', 'restores prior MQTT config when unlink finalization fails');
 expectIncludes('Schedule Link Restart', '/etc/init.d/node-red restart', 'schedules a Node-RED restart only after successful link completion');
 expectIncludes('Schedule Unlink Restart', '/etc/init.d/node-red restart', 'schedules a Node-RED restart only after successful unlink completion');
+const cloudRestNodeIds = [
+  'al-link-server-auth',
+  'sync-bootstrap-http',
+  'sync-outbox-http',
+  'sync-pending-http',
+  'sync-refresh-http'
+];
+for (const nodeId of cloudRestNodeIds) {
+  expectNodeTypeById(nodeId, 'function', 'uses function node for IPv4 cloud REST');
+  expectLibById(nodeId, 'osiCloudHttp', 'osi-cloud-http', 'imports the IPv4 cloud REST helper');
+  expectIncludesById(nodeId, 'requestJsonIpv4', 'calls requestJsonIpv4');
+  expectIncludesById(nodeId, 'Cloud REST IPv4 request failed', 'preserves IPv4 request failures as message payloads');
+}
+expectIncludes('Run Force Sync', 'osiCloudHttp.requestJsonIpv4', 'uses the shared IPv4 cloud REST helper');
+expectLibById('sync-force-build', 'osiCloudHttp', 'osi-cloud-http', 'imports the IPv4 helper for manual force sync');
 expectIncludes('Run Force Sync', 'COALESCE(u.server_username, u.username) AS claimed_by_username', 'uses linked cloud usernames in force-sync device snapshots');
 expectIncludes('Run Force Sync', 'COALESCE(u.server_username, u.username) AS username', 'uses linked cloud usernames in force-sync zone snapshots');
 expectIncludes('Run Force Sync', 'd.strega_model', 'includes STREGA model metadata in force-sync device snapshots');
