@@ -163,6 +163,86 @@ function all(sql) {
 NODE
 }
 
+ensure_chameleon_schema() {
+    echo "--- Live Chameleon SWT schema repair ---"
+    if [ ! -e "$DB_PATH" ]; then
+        echo "SKIP: no live database at $DB_PATH"
+        return 0
+    fi
+    node <<'NODE'
+const fs = require('fs');
+const dbPath = '/data/db/farming.db';
+if (!fs.existsSync(dbPath)) {
+  console.log('SKIP: no live database at ' + dbPath);
+  process.exit(0);
+}
+const sqlite3 = require('/srv/node-red/node_modules/sqlite3');
+const db = new sqlite3.Database(dbPath);
+function run(sql) {
+  return new Promise((resolve, reject) => db.run(sql, (err) => err ? reject(err) : resolve()));
+}
+function all(sql) {
+  return new Promise((resolve, reject) => db.all(sql, (err, rows) => err ? reject(err) : resolve(rows || [])));
+}
+(async () => {
+  await run('PRAGMA busy_timeout=5000');
+  for (const sql of [
+    'ALTER TABLE devices ADD COLUMN chameleon_enabled INTEGER DEFAULT 0',
+    'ALTER TABLE devices ADD COLUMN chameleon_swt1_depth_cm REAL',
+    'ALTER TABLE devices ADD COLUMN chameleon_swt2_depth_cm REAL',
+    'ALTER TABLE devices ADD COLUMN chameleon_swt3_depth_cm REAL',
+    'ALTER TABLE devices ADD COLUMN chameleon_swt1_a REAL',
+    'ALTER TABLE devices ADD COLUMN chameleon_swt1_b REAL',
+    'ALTER TABLE devices ADD COLUMN chameleon_swt1_c REAL',
+    'ALTER TABLE devices ADD COLUMN chameleon_swt2_a REAL',
+    'ALTER TABLE devices ADD COLUMN chameleon_swt2_b REAL',
+    'ALTER TABLE devices ADD COLUMN chameleon_swt2_c REAL',
+    'ALTER TABLE devices ADD COLUMN chameleon_swt3_a REAL',
+    'ALTER TABLE devices ADD COLUMN chameleon_swt3_b REAL',
+    'ALTER TABLE devices ADD COLUMN chameleon_swt3_c REAL',
+    'ALTER TABLE device_data ADD COLUMN swt_1 REAL',
+    'ALTER TABLE device_data ADD COLUMN swt_2 REAL',
+    'ALTER TABLE device_data ADD COLUMN swt_3 REAL'
+  ]) {
+    try {
+      await run(sql);
+    } catch (err) {
+      if (!/duplicate column name/i.test(String(err && err.message || err))) throw err;
+    }
+  }
+  await run('UPDATE devices SET chameleon_enabled = 0 WHERE chameleon_enabled IS NULL');
+  const deviceNames = new Set((await all('PRAGMA table_info(devices)')).map((row) => row.name));
+  const dataNames = new Set((await all('PRAGMA table_info(device_data)')).map((row) => row.name));
+  for (const name of [
+    'chameleon_enabled',
+    'chameleon_swt1_depth_cm',
+    'chameleon_swt2_depth_cm',
+    'chameleon_swt3_depth_cm',
+    'chameleon_swt1_a',
+    'chameleon_swt1_b',
+    'chameleon_swt1_c',
+    'chameleon_swt2_a',
+    'chameleon_swt2_b',
+    'chameleon_swt2_c',
+    'chameleon_swt3_a',
+    'chameleon_swt3_b',
+    'chameleon_swt3_c'
+  ]) {
+    if (!deviceNames.has(name)) throw new Error('Chameleon devices column is still missing after deploy repair: ' + name);
+  }
+  for (const name of ['swt_1', 'swt_2', 'swt_3']) {
+    if (!dataNames.has(name)) throw new Error('Chameleon device_data column is still missing after deploy repair: ' + name);
+  }
+  console.log('OK');
+  db.close();
+})().catch((err) => {
+  console.error(err && err.stack ? err.stack : err);
+  db.close();
+  process.exit(1);
+});
+NODE
+}
+
 echo "=== OSI OS Deploy ==="
 echo "Source: $BASE"
 
@@ -228,6 +308,14 @@ fetch_required "osi-dendro-helper index.js" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-dendro-helper/index.js" \
     "/srv/node-red/osi-dendro-helper/index.js"
 
+fetch_required "osi-chameleon-helper package.json" \
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-chameleon-helper/package.json" \
+    "/srv/node-red/osi-chameleon-helper/package.json"
+
+fetch_required "osi-chameleon-helper index.js" \
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-chameleon-helper/index.js" \
+    "/srv/node-red/osi-chameleon-helper/index.js"
+
 fetch_required "chirpstack-bootstrap.js" \
     "scripts/chirpstack-bootstrap.js" \
     "/srv/node-red/chirpstack-bootstrap.js"
@@ -255,6 +343,7 @@ else
 fi
 
 ensure_dendro_schema
+ensure_chameleon_schema
 
 echo "--- React GUI ---"
 fetch "react_gui.tar.gz" "$TMP_DIR/react_gui.tar.gz"

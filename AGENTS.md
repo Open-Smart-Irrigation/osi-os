@@ -33,12 +33,13 @@ This repo uses Superpowers as the default execution framework and selected Matt 
 
 ## Current Branches
 
-- `osi-os`: `main`
+- `osi-os`: `feature/chameleon-swt-integration`
 - `osi-server`: `main`
 
 > Note: the prediction-engine, admin prediction lab, and clustered Track B rollout work has now been consolidated back onto `osi-server` `main`. As of `2026-04-22`, the battery-footer work has also been pushed to both repos, `kaba100` has received a GUI-only `osi-os` rollout from `main`, and the live cloud server at `83.228.220.63` has been safely rolled forward to `osi-server` `main` via a local git bundle plus a backend-only rebuild.
 > As of `2026-04-29`, Terra mobile/UX/VWC work is merged into `osi-server` `main` (`81fca4c`), and STREGA runtime recovery is merged into `osi-os` `main` (`7d057377`). The LSN50 dendrometer decoder work remains intentionally unmerged on `feature/lsn50-dendrometer-decoder-claude`.
 > As of `2026-05-01`, standalone Dragino LSN50 v2 Chameleon firmware work lives in `/home/phil/Repos/LoRa_STM32-claude` on `feature/chameleon-i2c-reader` in the Project-OSI `LoRa_STM32` fork. The firmware work is intentionally separate from OSI OS / server integration. Planning/reference docs are in `docs/plans/2026-04-30-lsn50-chameleon-i2c-firmware.md` and `docs/specs/2026-04-30-via-chameleon-hardware-reference.md`.
+> As of `2026-05-02`, Chameleon SWT backend/GUI integration lives on `feature/chameleon-swt-integration`, pushed to GitHub and deployed to live `kaba100` from commit `1294f218`.
 
 ---
 
@@ -293,6 +294,7 @@ npm run build
 - On that small VPS, prefer prebuilt artifacts from a stronger machine. The safe backend rollout pattern is `docker compose build backend && docker compose up -d --no-deps backend`, or better, ship a prebuilt jar/image and recreate only `osi-backend`.
 - The live main VPS now has a persistent `4G` swapfile at `/var/lib/swap/swapfile`. Keep it enabled, but treat it as a safety net, not as permission to resume full-stack on-host builds.
 - As of `2026-04-22`, live `kaba100` `DRAGINO_LSN50` devices still expose `bat_v` but not `bat_pct`, so the shipped battery-footer work only shows footer percentages for devices with real `bat_pct` values. Follow-up scope for an explicit device-specific LSN50 voltage-to-percent extension is tracked in `osi-os#51` and `osi-server#7`.
+- As of `2026-05-02`, SWT is canonicalized across Kiwi and Chameleon as `device_data.swt_1`, `swt_2`, and `swt_3` in kPa. Legacy Kiwi `swt_wm1` / `swt_wm2` fields are compatibility aliases only; GUI water cards, schedules, history, and exports should prefer `swt_1..3` and fall back to `swt_wm1/2` for older rows.
 - The STREGA runtime recovery on `osi-os` `main` depends on the shared local uplink MQTT node `e73a11a2a36aab22` remaining `application/+/device/+/event/up`. Do not narrow it to a generated ChirpStack application UUID. `scripts/check-mqtt-topics.sh` and `scripts/verify-sync-flow.js` enforce this.
 - STREGA Gen1 `ffff/ffff` environmental telemetry is a sentinel for unavailable temperature/humidity. The managed decoder and STREGA flow normalize that pair to `null`, while preserving numeric battery percent and valve state. Use `node scripts/verify-strega-gen1.js` plus `node scripts/verify-sync-flow.js` after STREGA changes.
 

@@ -16,8 +16,11 @@ export interface Device {
 
   // Specific data payload matching Node-RED output
   latest_data: {
-    swt_wm1?: number;           // Soil Water Tension 1 (kPa) - 0 to 200
-    swt_wm2?: number;           // Soil Water Tension 2 (kPa)
+    swt_wm1?: number;           // Legacy Kiwi SWT channel 1 alias (kPa)
+    swt_wm2?: number;           // Legacy Kiwi SWT channel 2 alias (kPa)
+    swt_1?: number | null;      // Canonical SWT channel 1 (kPa)
+    swt_2?: number | null;      // Canonical SWT channel 2 (kPa)
+    swt_3?: number | null;      // Canonical SWT channel 3 (kPa)
     light_lux?: number;         // Light intensity
     ambient_temperature?: number;
     relative_humidity?: number;
@@ -54,6 +57,26 @@ export interface Device {
     flow_liters_today?: number | null;
     flow_delta_status?: string | null;
     counter_interval_seconds?: number | null;
+    // Chameleon SWT array readings via LSN50
+    chameleon_reading_id?: number | null;
+    chameleon_payload_b64?: string | null;
+    chameleon_payload_version?: number | null;
+    chameleon_status_flags?: number | null;
+    chameleon_i2c_missing?: number | null;
+    chameleon_timeout?: number | null;
+    chameleon_temp_fault?: number | null;
+    chameleon_id_fault?: number | null;
+    chameleon_ch1_open?: number | null;
+    chameleon_ch2_open?: number | null;
+    chameleon_ch3_open?: number | null;
+    chameleon_temp_c?: number | null;
+    chameleon_r1_ohm_comp?: number | null;
+    chameleon_r2_ohm_comp?: number | null;
+    chameleon_r3_ohm_comp?: number | null;
+    chameleon_r1_ohm_raw?: number | null;
+    chameleon_r2_ohm_raw?: number | null;
+    chameleon_r3_ohm_raw?: number | null;
+    chameleon_array_id?: string | null;
     // SenseCAP S2120 weather station fields
     barometric_pressure_hpa?: number | null;
     wind_speed_mps?: number | null;
@@ -73,6 +96,7 @@ export interface Device {
   temp_enabled?: number;        // 0 = disabled (default), 1 = DS18B20 probe on temp input
   rain_gauge_enabled?: number;  // 0 = disabled (default), 1 = rain gauge on count1 (MOD9)
   flow_meter_enabled?: number;  // 0 = disabled (default), 1 = flow meter on count2 (MOD9)
+  chameleon_enabled?: number;   // 0 = disabled (default), 1 = Chameleon SWT array on I2C
   is_reference_tree?: number;   // 0 = monitored/irrigated, 1 = control/reference tree
   device_mode?: number | null;  // Requested/configured LSN50 mode on the edge
   dendro_force_legacy?: number | null;
@@ -83,6 +107,18 @@ export interface Device {
   dendro_ratio_span?: number | null;
   dendro_invert_direction?: number | null;
   dendro_baseline_pending?: number | null;
+  chameleon_swt1_depth_cm?: number | null;
+  chameleon_swt2_depth_cm?: number | null;
+  chameleon_swt3_depth_cm?: number | null;
+  chameleon_swt1_a?: number | null;
+  chameleon_swt1_b?: number | null;
+  chameleon_swt1_c?: number | null;
+  chameleon_swt2_a?: number | null;
+  chameleon_swt2_b?: number | null;
+  chameleon_swt2_c?: number | null;
+  chameleon_swt3_a?: number | null;
+  chameleon_swt3_b?: number | null;
+  chameleon_swt3_c?: number | null;
   strega_model?: StregaModel | string | null;
 
   // Irrigation zone assignment

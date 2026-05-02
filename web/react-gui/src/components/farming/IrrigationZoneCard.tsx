@@ -12,6 +12,7 @@ import { EnvironmentCard } from './environment/EnvironmentCard';
 import { ZoneConfigModal } from './ZoneConfigModal';
 import { AdvancedScheduleDrawer } from './AdvancedScheduleDrawer';
 import { useTranslation } from 'react-i18next';
+import { collectDeviceSwtValues, summarizeSwtValues } from '../../utils/swt';
 
 interface IrrigationZoneCardProps {
   zone: IrrigationZone;
@@ -53,20 +54,6 @@ function formatWaterAction(code: string | null | undefined): string {
     default:
       return 'Monitor water status';
   }
-}
-
-function classifySoil(devices: Device[]): { label: string; swt: number | null } {
-  const swtValues = devices.flatMap((device) => {
-    const data = device.latest_data;
-    return [data?.swt_wm1, data?.swt_wm2].filter((value): value is number => value != null && Number.isFinite(value));
-  });
-  if (!swtValues.length) {
-    return { label: 'No soil sensor reading', swt: null };
-  }
-  const mean = swtValues.reduce((sum, value) => sum + value, 0) / swtValues.length;
-  if (mean < 20) return { label: 'Wet', swt: mean };
-  if (mean < 60) return { label: 'Moderate', swt: mean };
-  return { label: 'Dry', swt: mean };
 }
 
 function formatSchedulingMode(mode: string | null | undefined): string {
@@ -146,7 +133,7 @@ export const IrrigationZoneCard: React.FC<IrrigationZoneCardProps> = ({
   const schedEnabled = zone.schedule?.enabled ?? false;
   const cropType = zone.cropType;
   const soilType = zone.soilType;
-  const soilNow = classifySoil(devices);
+  const soilNow = summarizeSwtValues(collectDeviceSwtValues(devices));
 
   useEffect(() => {
     let cancelled = false;
@@ -262,6 +249,9 @@ export const IrrigationZoneCard: React.FC<IrrigationZoneCardProps> = ({
           const metricLabel =
             schedMetric === 'DENDRO'   ? 'Dendro trigger' :
             schedMetric === 'VWC'      ? 'VWC trigger' :
+            schedMetric === 'SWT_1'    ? 'Soil tension (S1)' :
+            schedMetric === 'SWT_2'    ? 'Soil tension (S2)' :
+            schedMetric === 'SWT_3'    ? 'Soil tension (S3)' :
             schedMetric === 'SWT_WM1'  ? 'Soil tension (S1)' :
             schedMetric === 'SWT_WM2'  ? 'Soil tension (S2)' :
             schedMetric === 'SWT_WM3'  ? 'Soil tension (S3)' :

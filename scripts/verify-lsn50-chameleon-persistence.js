@@ -84,11 +84,15 @@ assertIncludes(decode, 'chameleonR1OhmRaw', 'decode normalizes R1 raw');
 assertIncludes(decode, 'Chameleon_Array_ID', 'decode normalizes array id');
 
 const apply = funcOf('lsn50-apply-config');
-assertIncludes(apply, '} else if (d.isChameleon === true) {', 'chameleon branch sits between MOD9 and dendrometer logic');
-assertIncludes(apply, 'temp_enabled is a legacy LSN50/dendrometer gate', 'chameleon branch documents temp_enabled handling');
+assert(
+  (nodeById('lsn50-apply-config').libs || []).some((lib) => lib.var === 'chameleon' && lib.module === 'osi-chameleon-helper'),
+  'apply-config imports osi-chameleon-helper as chameleon',
+);
+assertIncludes(apply, 'chameleon.buildChameleonSwtMetrics', 'apply-config derives Chameleon SWT metrics');
+assertIncludes(apply, 'd.swt1Kpa = swt.swt1Kpa;', 'apply-config stores SWT1 in formattedData');
+assertIncludes(apply, 'if (!dendroEnabled)', 'apply-config keeps dendrometer gate after Chameleon SWT derivation');
 assertIncludes(apply, 'Chameleon flags 0x', 'apply-config surfaces chameleon status flags');
-assertIncludes(apply, 'd.dendroValid = null', 'chameleon branch keeps dendrometer insert guard closed');
-assertIncludes(apply, 'd.dendroCalibrationMissing = false;\n    flow.set(prevKey, undefined);', 'chameleon branch clears dendrometer previous state');
+assert(!apply.includes('} else if (d.isChameleon === true) {'), 'apply-config must not bypass dendrometer derivation for Chameleon frames');
 
 const chameleonInsert = funcOf('chameleon-readings-insert-fn');
 assertIncludes(chameleonInsert, 'if (!d || d.isChameleon !== true) return msg;', 'insert passes non-chameleon payloads downstream');
@@ -101,7 +105,7 @@ assertIncludes(chameleonInsert, 'const tempInvalid = dataInvalid || toInt(d.cham
 assertIncludes(chameleonInsert, 'return msg;', 'insert function passes through downstream flow');
 
 const dendroInsert = funcOf('dendro-readings-insert-fn');
-assertIncludes(dendroInsert, 'd.isChameleon === true', 'dendrometer insert skips chameleon frames');
+assert(!dendroInsert.includes('d.isChameleon === true'), 'dendrometer insert must not skip Chameleon frames before dendro value guard');
 
 const zoneAgg = nodeById('lsn50-zone-agg-fn');
 const zoneAggTargets = (zoneAgg.wires && zoneAgg.wires[0]) || [];
