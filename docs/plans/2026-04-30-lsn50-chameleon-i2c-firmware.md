@@ -69,6 +69,13 @@ These notes consolidate follow-up review findings for the implementation agent:
 7. **Minor follow-ups are documentation/test quality, not blockers.** Struct field order should mirror the wire order for readability; the mock can keep one `mock_chameleon_set_resistance()` setter for now because existing fixtures still cover encoded raw and compensated values. If later tests need to prove the open-circuit `comp == 10M || raw == 10M` OR logic independently, split the mock setter into compensated/raw variants.
 8. **Verified clean from review.** The reviewed numeric payload fixtures, 44-byte encoder bounds, big-endian conversion, and stock-aligned first-8-byte layout all checked out. Keep those tests unchanged unless the payload contract changes again.
 9. **Keep Chameleon globals outside `USE_SHT`.** Any `USE_CHAMELEON` globals in `bsp.c`, including `g_chameleon_last_sample` and `bsp_chameleon_last_sample()`, must live outside the existing `USE_SHT` block. The Chameleon target compiles with `-UUSE_SHT`; nesting these declarations under the SHT guard would make the ARM build fail.
+10. **Dry connected sensors can look like raw open-circuit.** Bench verification with a real connected but completely dry/unsoaked Chameleon sensor produced valid I2C, valid DS18B20 ID/temp, `status_flags=0`, compensated values around `162580` ohms, and raw values of `9999999` ohms on all three channels. Next revision should not equate raw near-10 MΩ with disconnected/open by itself. Treat raw saturation as a diagnostic upper-range condition unless a truly disconnected-channel test proves that compensated values also hit the sentinel. Prefer compensated resistance for downstream kPa conversion.
+
+---
+
+## Implementation improvements
+
+- **Default Chameleon FDR mode to MOD=3.** Stock Dragino `fdr_config()` sets `mode=1` and `APP_TX_DUTYCYCLE=300000` ms. For the Chameleon-only firmware target, guard a small `USE_CHAMELEON` override in `fdr_config()` so fresh/FDR devices default to `mode=3` and enter the Chameleon MOD=3 acquisition/uplink path without requiring an immediate AT/downlink `AT+MOD=3` command. Keep this scoped to the Chameleon build so stock LSN50 behavior is unchanged. Existing EEPROM config still overrides C/FDR defaults on normal boot, so already configured devices must be set to MOD=3 via AT/downlink or factory-reset/EEPROM-cleared during rollout.
 
 ---
 
