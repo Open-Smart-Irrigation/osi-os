@@ -74,7 +74,13 @@ function sensorCompatibleWithMode(key: SensorKey, mode: Lsn50Mode): boolean {
 }
 
 function enabledSensorsIncompatibleWithMode(device: Device, mode: Lsn50Mode): typeof SENSOR_OPTIONS {
-  return SENSOR_OPTIONS.filter((option) => device[option.key] === 1 && !sensorCompatibleWithMode(option.key, mode));
+  return SENSOR_OPTIONS.filter((option) => {
+    if (device[option.key] !== 1) return false;
+    if (option.key === 'temp_enabled') {
+      return mode !== 'MOD1';
+    }
+    return !sensorCompatibleWithMode(option.key, mode);
+  });
 }
 
 function requiredModeError(label: string, requiredMode: Lsn50Mode): string {

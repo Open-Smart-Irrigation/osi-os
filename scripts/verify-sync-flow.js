@@ -1461,6 +1461,8 @@ expectFileIncludes('DraginoSettingsModal.tsx', draginoSettingsModalSource, "retu
 expectFileIncludes('DraginoSettingsModal.tsx', draginoSettingsModalSource, 'Chameleon SWT requires MOD3', 'surfaces a clear MOD3 guard message for Chameleon enablement');
 expectFileIncludes('DraginoSettingsModal.tsx', draginoSettingsModalSource, 'enabledSensorsIncompatibleWithMode', 'warns before switching away from modes required by enabled sensors');
 expectFileIncludes('DraginoSettingsModal.tsx', draginoSettingsModalSource, 'allows dendrometer in MOD1 or MOD3', 'documents the non-exclusive dendrometer and Chameleon MOD3 mode path');
+expectFileIncludes('DraginoSettingsModal.tsx', draginoSettingsModalSource, "option.key === 'temp_enabled'", 'keeps the MOD1 temperature warning path separate from strict mode gates');
+expectFileIncludes('DraginoSettingsModal.tsx', draginoSettingsModalSource, "return mode !== 'MOD1';", 'warns before switching temperature-enabled LSN50 devices away from MOD1');
 expectFileIncludes('DraginoSettingsModal.tsx', draginoSettingsModalSource, 'title="Chameleon SWT"', 'renders a dedicated Chameleon SWT settings section');
 expectFileIncludes('DraginoSettingsModal.tsx', draginoSettingsModalSource, '<DraginoChameleonSwtSection', 'renders the Chameleon SWT calibration component in the settings modal');
 expectFileIncludes('DraginoDendroCalibrationSection.tsx', draginoDendroCalibrationSource, 'Retracted ratio (0 mm)', 'uses canonical retracted-ratio calibration wording in the advanced settings');
@@ -1483,6 +1485,10 @@ expectFileIncludes('DraginoChameleonSwtSection.tsx', draginoChameleonSwtSectionS
 expectFileIncludes('DraginoChameleonSwtSection.tsx', draginoChameleonSwtSectionSource, 'Math.round(parsed * 1000000) / 1000000', 'rounds coefficient values to six decimals before save');
 expectFileIncludes('DraginoChameleonSwtSection.tsx', draginoChameleonSwtSectionSource, 'device.latest_data?.swt_1', 'shows live SWT channel 1 values when present');
 expectFileIncludes('DraginoChameleonSwtSection.tsx', draginoChameleonSwtSectionSource, 'device.latest_data?.chameleon_r1_ohm_comp', 'shows live compensated resistance when present');
+expectFileIncludes('DraginoChameleonSwtSection.tsx', draginoChameleonSwtSectionSource, "if (value == null || (typeof value === 'string' && value.trim() === '')) return null;", 'treats nullish and blank live Chameleon telemetry as absent before numeric formatting');
+expectFileIncludes('DraginoChameleonSwtSection.tsx', draginoChameleonSwtSectionSource, 'a: formatNumericInput(device[channel.coefficientKeys.a])', 'keeps absent saved coefficient a values blank instead of rehydrating workbook defaults');
+expectFileIncludes('DraginoChameleonSwtSection.tsx', draginoChameleonSwtSectionSource, 'placeholder={String(channel.defaults[field])}', 'shows Chameleon workbook defaults as coefficient placeholders');
+expectFileIncludes('DraginoChameleonSwtSection.tsx', draginoChameleonSwtSectionSource, 'a: String(channel.defaults.a)', 'keeps Restore workbook defaults as an explicit value-fill action');
 expectFileExcludes('Dragino settings components', draginoSettingsSource, 'Invert direction', 'removes the ratio inversion toggle from the advanced settings');
 expectFileIncludes('SenseCapWeatherCard.tsx', senseCapWeatherCardSource, 'WindMonitor', 'opens a dedicated wind monitor from the S2120 card');
 expectFileIncludes('SenseCapWeatherCard.tsx', senseCapWeatherCardSource, 'rain_mm_per_10min', 'shows normalized rain history options on the S2120 card');

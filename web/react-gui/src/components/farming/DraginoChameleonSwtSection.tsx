@@ -73,6 +73,7 @@ function formatNumericInput(value: unknown): string {
 }
 
 function formatLiveMetric(value: unknown, unit: string, decimals: number): string | null {
+  if (value == null || (typeof value === 'string' && value.trim() === '')) return null;
   const numeric = Number(value);
   if (!Number.isFinite(numeric)) return null;
   return `${numeric.toFixed(decimals)} ${unit}`;
@@ -102,9 +103,9 @@ function buildInitialInputs(device: Device): Record<ChannelNumber, ChannelInput>
   return CHANNELS.reduce((acc, channel) => {
     acc[channel.number] = {
       depthCm: formatNumericInput(device[channel.depthKey]),
-      a: formatNumericInput(device[channel.coefficientKeys.a] ?? channel.defaults.a),
-      b: formatNumericInput(device[channel.coefficientKeys.b] ?? channel.defaults.b),
-      c: formatNumericInput(device[channel.coefficientKeys.c] ?? channel.defaults.c),
+      a: formatNumericInput(device[channel.coefficientKeys.a]),
+      b: formatNumericInput(device[channel.coefficientKeys.b]),
+      c: formatNumericInput(device[channel.coefficientKeys.c]),
     };
     return acc;
   }, {} as Record<ChannelNumber, ChannelInput>);
@@ -286,6 +287,7 @@ export const DraginoChameleonSwtSection: React.FC<DraginoChameleonSwtSectionProp
                       value={channelInput[field]}
                       disabled={busy}
                       onChange={(event) => updateInput(channel.number, field, event.target.value)}
+                      placeholder={String(channel.defaults[field])}
                       className={`mt-1 w-full rounded-lg border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-sm text-[var(--text)] ${FOCUS_VISIBLE_RING}`}
                     />
                   </div>
