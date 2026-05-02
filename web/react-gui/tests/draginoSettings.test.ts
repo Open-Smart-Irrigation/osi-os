@@ -116,6 +116,29 @@ test('renders Chameleon SWT channels without coercing missing kPa to zero', () =
   assert.doesNotMatch(html, /0\.0 kPa/);
 });
 
+test('renders invalid Chameleon samples as unavailable on the LSN50 card', () => {
+  const html = renderToStaticMarkup(
+    React.createElement(DraginoTempCard, {
+      device: buildDevice(
+        {
+          chameleon_enabled: 1,
+        },
+        {
+          chameleon_i2c_missing: 1,
+          swt_1: 12.34,
+          swt_2: 45.67,
+          swt_3: 89.01,
+        },
+      ),
+    }),
+  );
+
+  assert.match(html, /No valid Chameleon sample/);
+  assert.doesNotMatch(html, /12\.3 kPa/);
+  assert.doesNotMatch(html, /45\.7 kPa/);
+  assert.doesNotMatch(html, /89\.0 kPa/);
+});
+
 test('does not render generic ADC input when dendrometer is disabled', () => {
   const html = renderToStaticMarkup(
     React.createElement(DraginoTempCard, {
