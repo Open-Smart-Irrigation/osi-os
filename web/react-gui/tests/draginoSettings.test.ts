@@ -12,6 +12,7 @@ import {
   DraginoSettingsModal,
   getFocusableElements,
 } from '../src/components/farming/DraginoSettingsModal.tsx';
+import { DraginoTempCard } from '../src/components/farming/DraginoTempCard.tsx';
 import { lsn50API } from '../src/services/api.ts';
 import type { Device } from '../src/types/farming.ts';
 
@@ -84,6 +85,52 @@ test('does not coerce missing Chameleon live telemetry to zero', () => {
 
   assert.doesNotMatch(html, /0\.0 kPa/);
   assert.doesNotMatch(html, /0 ohm/);
+});
+
+test('renders Chameleon SWT channels without coercing missing kPa to zero', () => {
+  const html = renderToStaticMarkup(
+    React.createElement(DraginoTempCard, {
+      device: buildDevice(
+        {
+          chameleon_enabled: 1,
+          chameleon_swt1_depth_cm: 30,
+          chameleon_swt2_depth_cm: 30.5,
+          chameleon_swt3_depth_cm: null,
+        },
+        {
+          bat_v: 3.31,
+          swt_1: null,
+          swt_2: 45.26,
+          swt_3: undefined,
+        },
+      ),
+    }),
+  );
+
+  assert.match(html, /Chameleon SWT/);
+  assert.match(html, /SWT1/);
+  assert.match(html, /30 cm/);
+  assert.match(html, /30\.5 cm/);
+  assert.match(html, /Depth unset/);
+  assert.match(html, /45\.3 kPa/);
+  assert.doesNotMatch(html, /0\.0 kPa/);
+});
+
+test('does not render generic ADC input when dendrometer is disabled', () => {
+  const html = renderToStaticMarkup(
+    React.createElement(DraginoTempCard, {
+      device: buildDevice(
+        {
+          dendro_enabled: 0,
+        },
+        {
+          adc_ch0v: 1.234,
+        },
+      ),
+    }),
+  );
+
+  assert.doesNotMatch(html, /ADC INPUT/);
 });
 
 test('renders absent Chameleon coefficients as blank values with workbook default placeholders', () => {

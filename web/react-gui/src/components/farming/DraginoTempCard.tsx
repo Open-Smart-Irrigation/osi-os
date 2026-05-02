@@ -50,6 +50,18 @@ function formatStemChangeUm(value: number | null | undefined): string | null {
   return `${rounded > 0 ? '+' : ''}${rounded} µm`;
 }
 
+function formatDepthLabel(value: number | null | undefined): string | null {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric) || numeric <= 0) return null;
+  return `${Number.isInteger(numeric) ? numeric.toFixed(0) : numeric.toFixed(1)} cm`;
+}
+
+function formatKpa(value: number | null | undefined): string {
+  if (value == null) return '—';
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? `${numeric.toFixed(1)} kPa` : '—';
+}
+
 function formatDendroRangeState(saturationSide: string | null | undefined): string {
   if (saturationSide === 'low') return 'Below retracted';
   if (saturationSide === 'high') return 'Above extended';
@@ -111,6 +123,13 @@ export const DraginoTempCard: React.FC<DraginoTempCardProps> = ({ device, onRemo
   const dendroStemChangeLabel = formatStemChangeUm(data?.dendro_stem_change_um);
   const dendroCardVisible = dendroEnabled
     && (dendroHasStemChange || dendroAwaitingBaseline || dendroNeedsCalibration || dendroSensorError || dendroSaturated);
+  const chameleonEnabled = device.chameleon_enabled === 1;
+  const chameleonDataInvalid = data?.chameleon_i2c_missing === 1 || data?.chameleon_timeout === 1;
+  const chameleonChannels = [
+    { field: 'swt_1', label: 'SWT1', value: data?.swt_1, depth: device.chameleon_swt1_depth_cm, color: '#0f766e' },
+    { field: 'swt_2', label: 'SWT2', value: data?.swt_2, depth: device.chameleon_swt2_depth_cm, color: '#2563eb' },
+    { field: 'swt_3', label: 'SWT3', value: data?.swt_3, depth: device.chameleon_swt3_depth_cm, color: '#7c3aed' },
+  ] as const;
 
   const [isRemoving, setIsRemoving] = useState(false);
   const [showConfirm, setShowConfirm] = useState(false);
@@ -246,6 +265,47 @@ export const DraginoTempCard: React.FC<DraginoTempCardProps> = ({ device, onRemo
             >
               {data.bat_v.toFixed(2)} V
             </button>
+          </div>
+        )}
+
+        {chameleonEnabled && (
+          <div className="rounded-lg bg-[var(--card)] p-3">
+            <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)]">Chameleon SWT</p>
+            {chameleonDataInvalid ? (
+              <p className="text-base font-bold text-[var(--warn-text)]">No valid Chameleon sample</p>
+            ) : (
+              <div className="grid grid-cols-1 gap-2">
+                {chameleonChannels.map((channel) => (
+                  <button
+                    key={channel.field}
+                    type="button"
+                    onClick={() => setSensorMonitor({
+                      field: channel.field,
+                      initialField: channel.field,
+                      label: channel.label,
+                      unit: 'kPa',
+                      color: channel.color,
+                      decimals: 1,
+                      seriesOptions: chameleonChannels.map((option) => ({
+                        field: option.field,
+                        label: option.label,
+                        unit: 'kPa',
+                        color: option.color,
+                        decimals: 1,
+                      })),
+                    })}
+                    className={`flex items-center justify-between rounded-md border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-left transition-colors hover:border-[var(--focus)] ${FOCUS_VISIBLE_RING}`}
+                    title="View SWT history"
+                  >
+                    <span>
+                      <span className="block text-sm font-semibold text-[var(--text)]">{channel.label}</span>
+                      <span className="block text-xs text-[var(--text-tertiary)]">{formatDepthLabel(channel.depth) || 'Depth unset'}</span>
+                    </span>
+                    <span className="text-lg font-bold tabular-nums text-[var(--text)]">{formatKpa(channel.value)}</span>
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
         )}
 
@@ -386,19 +446,6 @@ export const DraginoTempCard: React.FC<DraginoTempCardProps> = ({ device, onRemo
                 </button>
               </>
             )}
-          </div>
-        )}
-
-        {!dendroEnabled && data?.adc_ch0v != null && data.adc_ch0v > 0.01 && (
-          <div className="rounded-lg bg-[var(--card)] p-3">
-            <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)]">ADC INPUT</p>
-            <button
-              onClick={() => setSensorMonitor({ field: 'adc_ch0v', label: 'ADC Input', unit: 'V', color: '#8b5cf6', decimals: 3 })}
-              className={`cursor-pointer text-left text-2xl font-bold tabular-nums text-[var(--text)] underline decoration-dotted underline-offset-4 transition-colors hover:text-[var(--primary)] ${FOCUS_VISIBLE_RING}`}
-              title="View history"
-            >
-              {data.adc_ch0v.toFixed(3)} V
-            </button>
           </div>
         )}
       </div>

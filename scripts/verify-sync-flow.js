@@ -1449,6 +1449,12 @@ expectFileExcludes('DraginoTempCard.tsx', draginoTempCardSource, 'DENDROMETER PO
 expectFileIncludes('DraginoTempCard.tsx', draginoTempCardSource, 'dendro_stem_change_um', 'renders the baseline-relative stem change signal on the device card');
 expectFileIncludes('DraginoTempCard.tsx', draginoTempCardSource, 'dendro_baseline_pending === 1', 'suppresses stale stem-change values when the device is awaiting a new baseline');
 expectFileIncludes('DraginoTempCard.tsx', draginoTempCardSource, 'Awaiting baseline', 'keeps the dendrometer card visible while the next valid uplink establishes a new baseline');
+expectFileIncludes('DraginoTempCard.tsx', draginoTempCardSource, 'Chameleon SWT', 'renders Chameleon SWT on the LSN50 card');
+expectFileIncludes('DraginoTempCard.tsx', draginoTempCardSource, "field: 'swt_3'", 'opens history for Chameleon SWT3');
+expectFileExcludes('DraginoTempCard.tsx', draginoTempCardSource, 'ADC INPUT', 'removes generic ADC card when dendrometer is disabled');
+expectFileIncludes('DraginoTempCard.tsx', draginoTempCardSource, "if (value == null) return '—';", 'keeps Chameleon kPa formatting null-safe');
+expectFileIncludes('DraginoTempCard.tsx', draginoTempCardSource, 'No valid Chameleon sample', 'surfaces invalid Chameleon sample state on the LSN50 card');
+expectFileIncludes('DraginoTempCard.tsx', draginoTempCardSource, 'data?.chameleon_i2c_missing === 1 || data?.chameleon_timeout === 1', 'treats Chameleon missing and timeout flags as invalid samples');
 expectFileIncludes('DraginoDendroCalibrationSection.tsx', draginoDendroCalibrationSource, 'Current ratio', 'shows ratio in the dendrometer calibration section instead of on the device card');
 expectFileIncludes('DraginoSettingsModal.tsx', draginoSettingsModalSource, 'Dendrometer calibration', 'adds dendrometer calibration controls to the LSN50 advanced settings');
 expectFileIncludes('DraginoSettingsModal.tsx', draginoSettingsModalSource, "import { DraginoChameleonSwtSection } from './DraginoChameleonSwtSection';", 'imports the Chameleon SWT calibration section');
