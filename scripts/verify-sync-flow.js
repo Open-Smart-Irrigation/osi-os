@@ -1192,6 +1192,8 @@ expectIncludesById('format-devices', 'if (!validDevEuis.length)', 'avoids invali
 expectIncludesById('format-devices', "msg.topic = 'SELECT NULL AS deveui WHERE 0';", 'uses a no-row latest-data query for empty device lookups');
 expectIncludesById('format-devices', "if (!msg.payload || msg.payload.length === 0) {\n  msg.statusCode = 200;\n  msg.payload = [];\n  msg.topic = 'SELECT NULL AS deveui WHERE 0';\n  return msg;\n}", 'sets a sqlite topic before returning an empty device list');
 expectIncludesById('format-devices', "if (!validDevEuis.length) {\n  msg.statusCode = 200;\n  msg.payload = [];\n  msg.topic = 'SELECT NULL AS deveui WHERE 0';\n  return msg;\n}", 'sets a sqlite topic before returning an all-invalid DevEUI list');
+expectIncludesById('format-devices', 'msg.devices_to_format = msg.payload || [];', 'keeps GET /api/devices device rows on the request message');
+expectExcludesById('format-devices', "flow.set('devices_to_format'", 'request-scoped GET /api/devices rows in flow context');
 expectIncludesById('format-devices', 'newer.recorded_at > cr.recorded_at', 'selects the latest Chameleon reading by timestamp');
 expectIncludesById('format-devices', 'newer.recorded_at = cr.recorded_at AND newer.id > cr.id', 'breaks same-timestamp Chameleon ties by row id');
 expectIncludesById('format-devices', 'dd.rain_mm_per_hour', 'returns interval-aware rain rate in GET /api/devices');
@@ -1207,6 +1209,8 @@ expectIncludesById('format-devices', 'dd.uv_index', 'returns S2120 UV in GET /ap
 expectIncludesById('format-devices', 'dd.rain_gauge_cumulative_mm', 'returns S2120 cumulative rain in GET /api/devices');
 expectIncludesById('format-devices', 'dd.bat_pct', 'returns S2120 battery in GET /api/devices');
 expectIncludesById('merge-device-data', 'device_mode: d.device_mode ?? 1', 'returns configured LSN50 mode in GET /api/devices');
+expectIncludesById('merge-device-data', 'const devices = msg.devices_to_format || [];', 'reads GET /api/devices device rows from the request message');
+expectExcludesById('merge-device-data', "flow.get('devices_to_format'", 'request-scoped GET /api/devices rows from flow context');
 expectIncludesById('merge-device-data', 'dendro_force_legacy: d.dendro_force_legacy ?? 0', 'returns the explicit legacy dendrometer override in GET /api/devices');
 expectIncludesById('merge-device-data', 'dendro_stroke_mm: d.dendro_stroke_mm ?? null', 'returns dendrometer stroke calibration in GET /api/devices');
 expectIncludesById('merge-device-data', 'dendro_ratio_at_retracted: d.dendro_ratio_at_retracted ?? null', 'returns dendrometer retracted-ratio calibration in GET /api/devices');

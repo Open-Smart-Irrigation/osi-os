@@ -35,6 +35,7 @@
 - All six seed DBs listed by `scripts/verify-sync-flow.js` were patched, including the `bcm2708` and `bcm2709` full images.
 - Chameleon config is local-edge configuration in this iteration. The local API updates `devices.updated_at`, but does not increment sync metadata or add OSI Server control-plane fields.
 - `GET /api/devices` uses canonical uppercase 16-hex DevEUI filtering and a deterministic latest-Chameleon anti-join with timestamp plus `id` tie-break.
+- `GET /api/devices` carries the intermediate device list on `msg.devices_to_format`; request-scoped rows must not use flow context across the async SQLite query.
 - When no valid DevEUIs exist in the latest-data query, the function emits a no-row SQL statement instead of returning an incomplete message.
 - Chameleon raw readings continue to be inserted even when `chameleon_enabled=0`; derived `swt_1/2/3` stay null unless Chameleon SWT is enabled.
 - Dendrometer and Chameleon are independent layers on MOD3. Chameleon no longer bypasses dendrometer derivation or dendrometer reading insertion.
@@ -868,37 +869,43 @@ Add a latest Chameleon join to the query:
 LEFT JOIN (
   SELECT cr.*
   FROM chameleon_readings cr
-  INNER JOIN (
-    SELECT deveui, MAX(recorded_at) AS max_time
-    FROM chameleon_readings
-    WHERE deveui IN (${deveuiList})
-    GROUP BY deveui
-  ) latest_chameleon
-    ON cr.deveui = latest_chameleon.deveui
-   AND cr.recorded_at = latest_chameleon.max_time
-) cr ON cr.deveui = dd.deveui
+  WHERE cr.recorded_at IS NOT NULL
+    AND cr.deveui IN (${deveuiList})
+    AND NOT EXISTS (
+      SELECT 1
+      FROM chameleon_readings newer
+      WHERE newer.deveui = cr.deveui
+        AND newer.recorded_at IS NOT NULL
+        AND (
+          newer.recorded_at > cr.recorded_at
+          OR (newer.recorded_at = cr.recorded_at AND newer.id > cr.id)
+        )
+    )
+) ch ON ch.deveui = dd.deveui
 ```
 
 Select these latest Chameleon columns:
 
 ```js
-'  cr.payload_version AS chameleon_payload_version,',
-'  cr.status_flags AS chameleon_status_flags,',
-'  cr.i2c_missing AS chameleon_i2c_missing,',
-'  cr.timeout AS chameleon_timeout,',
-'  cr.temp_fault AS chameleon_temp_fault,',
-'  cr.id_fault AS chameleon_id_fault,',
-'  cr.ch1_open AS chameleon_ch1_open,',
-'  cr.ch2_open AS chameleon_ch2_open,',
-'  cr.ch3_open AS chameleon_ch3_open,',
-'  cr.temp_c AS chameleon_temp_c,',
-'  cr.r1_ohm_comp AS chameleon_r1_ohm_comp,',
-'  cr.r2_ohm_comp AS chameleon_r2_ohm_comp,',
-'  cr.r3_ohm_comp AS chameleon_r3_ohm_comp,',
-'  cr.r1_ohm_raw AS chameleon_r1_ohm_raw,',
-'  cr.r2_ohm_raw AS chameleon_r2_ohm_raw,',
-'  cr.r3_ohm_raw AS chameleon_r3_ohm_raw,',
-'  cr.array_id AS chameleon_array_id,',
+'  ch.id AS chameleon_reading_id,',
+'  ch.payload_b64 AS chameleon_payload_b64,',
+'  ch.payload_version AS chameleon_payload_version,',
+'  ch.status_flags AS chameleon_status_flags,',
+'  ch.i2c_missing AS chameleon_i2c_missing,',
+'  ch.timeout AS chameleon_timeout,',
+'  ch.temp_fault AS chameleon_temp_fault,',
+'  ch.id_fault AS chameleon_id_fault,',
+'  ch.ch1_open AS chameleon_ch1_open,',
+'  ch.ch2_open AS chameleon_ch2_open,',
+'  ch.ch3_open AS chameleon_ch3_open,',
+'  ch.temp_c AS chameleon_temp_c,',
+'  ch.r1_ohm_comp AS chameleon_r1_ohm_comp,',
+'  ch.r2_ohm_comp AS chameleon_r2_ohm_comp,',
+'  ch.r3_ohm_comp AS chameleon_r3_ohm_comp,',
+'  ch.r1_ohm_raw AS chameleon_r1_ohm_raw,',
+'  ch.r2_ohm_raw AS chameleon_r2_ohm_raw,',
+'  ch.r3_ohm_raw AS chameleon_r3_ohm_raw,',
+'  ch.array_id AS chameleon_array_id,',
 ```
 
 In `merge-device-data`, copy the selected values into `latest_data` with the same camel/snake style already used by other fields:

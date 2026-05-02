@@ -126,7 +126,11 @@ function tableColumns(dbPath, tableName) {
 
   assertIncludes(funcOf('lsn50-sql-fn'), 'swt_1, swt_2, swt_3', 'device_data insert stores canonical SWT channels');
   assertIncludes(funcOf('format-devices'), 'dd.swt_1', 'GET /api/devices selects SWT1');
+  assertIncludes(funcOf('format-devices'), 'msg.devices_to_format = msg.payload || [];', 'GET /api/devices keeps device rows request-scoped');
+  assertExcludes(funcOf('format-devices'), "flow.set('devices_to_format'", 'GET /api/devices must not store request rows in flow context');
   assertIncludes(funcOf('merge-device-data'), 'chameleon_enabled: d.chameleon_enabled ?? 0', 'GET /api/devices returns Chameleon enable flag');
+  assertIncludes(funcOf('merge-device-data'), 'const devices = msg.devices_to_format || [];', 'GET /api/devices reads request-scoped device rows');
+  assertExcludes(funcOf('merge-device-data'), "flow.get('devices_to_format'", 'GET /api/devices must not read request rows from flow context');
   assertIncludes(funcOf('sensor-history-fn'), "'swt_1'", 'sensor history allows SWT1');
   assertIncludes(funcOf('sensor-history-fn'), "'swt_2'", 'sensor history allows SWT2');
   assertIncludes(funcOf('sensor-history-fn'), "'swt_3'", 'sensor history allows SWT3');
