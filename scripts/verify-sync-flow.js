@@ -1372,6 +1372,68 @@ expectFileIncludes('farming.ts', farmingTypesSource, 'swt_3?: number | null;', '
 expectFileIncludes('farming.ts', farmingTypesSource, 'chameleon_payload_b64?: string | null;', 'types Chameleon raw payload on latest device payloads');
 expectFileIncludes('farming.ts', farmingTypesSource, 'chameleon_enabled?: number;', 'types device-level Chameleon enablement flag');
 expectFileIncludes('api.ts', reactGuiApiSource, 'stem_change_um: number | null;', 'types the dendrometer history stem-change signal');
+
+for (const field of [
+  'swt_1',
+  'swt_2',
+  'swt_3',
+  'chameleon_reading_id',
+  'chameleon_payload_b64',
+  'chameleon_payload_version',
+  'chameleon_status_flags',
+  'chameleon_i2c_missing',
+  'chameleon_timeout',
+  'chameleon_temp_fault',
+  'chameleon_id_fault',
+  'chameleon_ch1_open',
+  'chameleon_ch2_open',
+  'chameleon_ch3_open',
+  'chameleon_temp_c',
+  'chameleon_r1_ohm_comp',
+  'chameleon_r2_ohm_comp',
+  'chameleon_r3_ohm_comp',
+  'chameleon_r1_ohm_raw',
+  'chameleon_r2_ohm_raw',
+  'chameleon_r3_ohm_raw',
+  'chameleon_array_id',
+]) {
+  expectFileIncludes('farming.ts', farmingTypesSource, `${field}?:`, `types latest_data.${field}`);
+}
+
+for (const field of [
+  'chameleon_enabled',
+  'chameleon_swt1_depth_cm',
+  'chameleon_swt2_depth_cm',
+  'chameleon_swt3_depth_cm',
+  'chameleon_swt1_a',
+  'chameleon_swt1_b',
+  'chameleon_swt1_c',
+  'chameleon_swt2_a',
+  'chameleon_swt2_b',
+  'chameleon_swt2_c',
+  'chameleon_swt3_a',
+  'chameleon_swt3_b',
+  'chameleon_swt3_c',
+]) {
+  expectFileIncludes('farming.ts', farmingTypesSource, `${field}?:`, `types top-level Device.${field}`);
+}
+
+for (const field of [
+  'chameleonSwt1DepthCm',
+  'chameleonSwt2DepthCm',
+  'chameleonSwt3DepthCm',
+  'chameleonSwt1A',
+  'chameleonSwt1B',
+  'chameleonSwt1C',
+  'chameleonSwt2A',
+  'chameleonSwt2B',
+  'chameleonSwt2C',
+  'chameleonSwt3A',
+  'chameleonSwt3B',
+  'chameleonSwt3C',
+]) {
+  expectFileIncludes('api.ts', reactGuiApiSource, `${field}?:`, `types ChameleonConfigPayload.${field}`);
+}
 expectFileIncludes('DendrometerMonitor.tsx', dendroMonitorSource, 'Stem change over time', 'labels the basic monitor around the comparable stem-change signal');
 expectFileIncludes('DendrometerMonitor.tsx', dendroMonitorSource, 'Mechanical layer', 'renders mechanical engineering values beneath the stem-change graph');
 expectFileIncludes('DendrometerMonitor.tsx', dendroMonitorSource, 'Current position', 'shows absolute mechanical position below the graph instead of as the headline graph metric');
