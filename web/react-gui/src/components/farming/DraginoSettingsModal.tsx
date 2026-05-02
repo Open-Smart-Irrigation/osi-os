@@ -1,10 +1,13 @@
 import React, { useEffect, useRef, useState } from 'react';
 import type { Device, Lsn50Mode } from '../../types/farming';
 import { lsn50API } from '../../services/api';
+import { DraginoChameleonSwtSection } from './DraginoChameleonSwtSection';
 import { DraginoDendroCalibrationSection } from './DraginoDendroCalibrationSection';
 
+type SensorKey = 'temp_enabled' | 'dendro_enabled' | 'rain_gauge_enabled' | 'flow_meter_enabled' | 'chameleon_enabled';
+
 const SENSOR_OPTIONS: Array<{
-  key: 'temp_enabled' | 'dendro_enabled' | 'rain_gauge_enabled' | 'flow_meter_enabled';
+  key: SensorKey;
   label: string;
   toggle: (deveui: string, enabled: boolean) => Promise<void>;
 }> = [
@@ -12,6 +15,7 @@ const SENSOR_OPTIONS: Array<{
   { key: 'dendro_enabled', label: 'Dendrometer', toggle: (id, enabled) => lsn50API.setDendroEnabled(id, enabled) },
   { key: 'rain_gauge_enabled', label: 'Rain Gauge', toggle: (id, enabled) => lsn50API.setRainGaugeEnabled(id, enabled) },
   { key: 'flow_meter_enabled', label: 'Flow Meter', toggle: (id, enabled) => lsn50API.setFlowMeterEnabled(id, enabled) },
+  { key: 'chameleon_enabled', label: 'Chameleon SWT', toggle: (id, enabled) => lsn50API.setChameleonEnabled(id, enabled) },
 ];
 
 const LSN50_MODE_OPTIONS: Array<{ value: Lsn50Mode; description: string }> = [
@@ -36,10 +40,14 @@ const LSN50_INTERRUPT_MODE_OPTIONS = [
 const MAX_LSN50_INTERVAL_MINUTES = Math.floor(0xffffff / 60);
 const MAX_LSN50_5V_WARMUP_MS = 65535;
 
-function requiresMod9Counter(
-  key: 'temp_enabled' | 'dendro_enabled' | 'rain_gauge_enabled' | 'flow_meter_enabled',
-): boolean {
-  return key === 'rain_gauge_enabled' || key === 'flow_meter_enabled';
+function requiredModeForSensor(key: SensorKey): Lsn50Mode | null {
+  if (key === 'chameleon_enabled') {
+    return 'MOD3';
+  }
+  if (key === 'rain_gauge_enabled' || key === 'flow_meter_enabled') {
+    return 'MOD9';
+  }
+  return null;
 }
 
 function normaliseLsn50Mode(value: unknown): Lsn50Mode | null {
@@ -54,6 +62,26 @@ function getCurrentLsn50Mode(device: Device): Lsn50Mode | null {
   if (observed) return observed;
   const configured = Number(device.device_mode ?? 0);
   return configured >= 1 && configured <= 9 ? (`MOD${configured}` as Lsn50Mode) : null;
+}
+
+function sensorCompatibleWithMode(key: SensorKey, mode: Lsn50Mode): boolean {
+  // This allows dendrometer in MOD1 or MOD3, so Chameleon and dendrometer can share MOD3.
+  if (key === 'dendro_enabled') {
+    return mode === 'MOD1' || mode === 'MOD3';
+  }
+  const requiredMode = requiredModeForSensor(key);
+  return requiredMode == null || mode === requiredMode;
+}
+
+function enabledSensorsIncompatibleWithMode(device: Device, mode: Lsn50Mode): typeof SENSOR_OPTIONS {
+  return SENSOR_OPTIONS.filter((option) => device[option.key] === 1 && !sensorCompatibleWithMode(option.key, mode));
+}
+
+function requiredModeError(label: string, requiredMode: Lsn50Mode): string {
+  if (label === 'Chameleon SWT' && requiredMode === 'MOD3') {
+    return 'Chameleon SWT requires MOD3. Apply MOD3 before enabling this sensor.';
+  }
+  return `${label} requires ${requiredMode}. Apply ${requiredMode} before enabling this sensor.`;
 }
 
 const FOCUS_VISIBLE_RING =
@@ -130,11 +158,14 @@ export const DraginoSettingsModal: React.FC<DraginoSettingsModalProps> = ({
     ? observedAtDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
     : null;
   const selectedModeDescription = LSN50_MODE_OPTIONS.find((option) => option.value === selectedMode)?.description ?? '';
-  const counterModeReady = currentMode === 'MOD9' || pendingMode === 'MOD9';
   const titleId = `dragino-settings-title-${device.deveui}`;
   const modeSelectId = `lsn50-mode-${device.deveui}`;
   const interruptModeSelectId = `lsn50-interrupt-mode-${device.deveui}`;
   const advancedSettingsId = `dragino-advanced-settings-${device.deveui}`;
+
+  const requiredModeReady = (requiredMode: Lsn50Mode | null): boolean => (
+    requiredMode == null || currentMode === requiredMode || pendingMode === requiredMode
+  );
 
   useEffect(() => {
     onCloseRef.current = onClose;
@@ -205,8 +236,9 @@ export const DraginoSettingsModal: React.FC<DraginoSettingsModalProps> = ({
 
   const toggle = async (option: typeof SENSOR_OPTIONS[number]) => {
     const current = device[option.key] === 1;
-    if (!current && requiresMod9Counter(option.key) && !counterModeReady) {
-      setError('Rain gauge and flow meter require MOD9. Apply MOD9 before enabling these counters.');
+    const requiredMode = requiredModeForSensor(option.key);
+    if (!current && requiredMode && !requiredModeReady(requiredMode)) {
+      setError(requiredModeError(option.label, requiredMode));
       return;
     }
     setBusy(option.key);
@@ -226,12 +258,12 @@ export const DraginoSettingsModal: React.FC<DraginoSettingsModalProps> = ({
       setModeInfo(`LSN50 is already using ${selectedMode}.`);
       return;
     }
-    if (
-      selectedMode !== 'MOD1' &&
-      (device.dendro_enabled === 1 || device.temp_enabled === 1) &&
-      !window.confirm('Switching away from MOD1 can change the telemetry OSI receives from this node. Continue?')
-    ) {
-      return;
+    const incompatibleSensors = enabledSensorsIncompatibleWithMode(device, selectedMode);
+    if (incompatibleSensors.length > 0) {
+      const labels = incompatibleSensors.map((option) => option.label).join(', ');
+      if (!window.confirm(`Switching to ${selectedMode} can stop telemetry for enabled sensors: ${labels}. Continue?`)) {
+        return;
+      }
     }
 
     setBusy('mode');
@@ -354,8 +386,9 @@ export const DraginoSettingsModal: React.FC<DraginoSettingsModalProps> = ({
             {SENSOR_OPTIONS.map((option) => {
               const enabled = device[option.key] === 1;
               const loading = busy === option.key;
-              const requiresMod9 = requiresMod9Counter(option.key) && !counterModeReady;
-              const disabled = loading || (requiresMod9 && !enabled);
+              const requiredMode = requiredModeForSensor(option.key);
+              const missingRequiredMode = !enabled && !requiredModeReady(requiredMode);
+              const disabled = loading;
               return (
                 <label
                   key={option.key}
@@ -371,8 +404,8 @@ export const DraginoSettingsModal: React.FC<DraginoSettingsModalProps> = ({
                     className={`h-4 w-4 rounded border-[var(--border)] text-[var(--primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--card)]`}
                   />
                   <span className="flex-1 text-sm text-[var(--text)]">{option.label}</span>
-                  {requiresMod9 && !enabled && (
-                    <span className="text-xs font-semibold uppercase tracking-wide text-[var(--warn-text)]">Requires MOD9</span>
+                  {missingRequiredMode && requiredMode && (
+                    <span className="text-xs font-semibold uppercase tracking-wide text-[var(--warn-text)]">Requires {requiredMode}</span>
                   )}
                   {loading && <span className="text-xs text-[var(--text-tertiary)]">…</span>}
                 </label>
@@ -412,8 +445,11 @@ export const DraginoSettingsModal: React.FC<DraginoSettingsModalProps> = ({
                   ))}
                 </select>
                 <p className="mt-2 text-xs text-[var(--text-tertiary)]">{selectedModeDescription}</p>
-                {!counterModeReady && (
+                {currentMode !== 'MOD9' && pendingMode !== 'MOD9' && (
                   <p className="mt-2 text-xs text-[var(--warn-text)]">Rain gauge and flow meter can only be enabled after MOD9 is active.</p>
+                )}
+                {currentMode !== 'MOD3' && pendingMode !== 'MOD3' && (
+                  <p className="mt-2 text-xs text-[var(--warn-text)]">Chameleon SWT can only be enabled after MOD3 is active.</p>
                 )}
                 <button
                   type="button"
@@ -529,6 +565,17 @@ export const DraginoSettingsModal: React.FC<DraginoSettingsModalProps> = ({
                 {externalSensorInfo && <p className="text-xs text-[var(--text-tertiary)]">{externalSensorInfo}</p>}
               </div>
             )}
+          </SettingsSection>
+
+          <SettingsSection
+            title="Chameleon SWT"
+            description="Set channel depths and soil water tension coefficients for the Chameleon SWT array. Blank depth and coefficient fields clear the saved value."
+            className="mt-3"
+          >
+            <DraginoChameleonSwtSection
+              device={device}
+              onUpdate={onUpdate}
+            />
           </SettingsSection>
 
           <SettingsSection
