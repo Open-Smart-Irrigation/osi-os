@@ -1088,8 +1088,10 @@ expectIncludes('Decode LSN50', 'chameleonPayloadVersion', 'normalizes Chameleon 
 expectIncludes('Decode LSN50', 'chameleonR1OhmComp', 'normalizes Chameleon compensated resistance fields');
 expectIncludes('Decode LSN50', 'rawPayloadB64: msg._rawPayload', 'keeps the raw LoRaWAN payload base64 for Chameleon replay');
 expectIncludes('Apply Config', 'd.modeCodeToStore = d.observedModeCode != null ? d.observedModeCode : effectiveMode;', 'stores observed or configured LSN50 mode on ingest');
-expectIncludes('Apply Config', '} else if (d.isChameleon === true) {', 'adds a dedicated Chameleon branch before dendrometer derivation');
-expectIncludes('Apply Config', 'd.dendroValid = null', 'sets dendrometer validity null for Chameleon payloads');
+expectIncludes('Apply Config', 'chameleon.buildChameleonSwtMetrics', 'derives Chameleon SWT metrics without bypassing dendrometer logic');
+expectIncludes('Apply Config', 'd.swt1Kpa = swt.swt1Kpa;', 'stores derived SWT1 in formattedData');
+expectIncludes('Apply Config', 'if (!dendroEnabled)', 'keeps dendrometer enablement as the persistence gate after Chameleon derivation');
+expectExcludes('Apply Config', '} else if (d.isChameleon === true) {', 'the old dedicated Chameleon bypass branch');
 expectIncludes('Apply Config', 'Chameleon flags 0x', 'surfaces Chameleon status in node status text');
 expectIncludes('Apply Config', 'loadPreviousMod9Sample', 'loads the last persisted MOD9 sample before computing deltas');
 expectIncludes('Apply Config', 'd.counterIntervalSeconds = Number.isFinite(intervalSeconds) && intervalSeconds > 0 ? intervalSeconds : null;', 'computes elapsed seconds between MOD9 uplinks');
@@ -1110,9 +1112,10 @@ expectIncludes('Apply Config', 'd.dendroStemChangeUm = stemChange.stemChangeUm;'
 expectIncludes('Apply Config', 'dendro_baseline_pending = 0,', 'clears the pending-baseline flag when a new valid stem-change baseline is persisted');
 expectIncludes('Insert Chameleon Reading', 'INSERT INTO chameleon_readings', 'persists decoded Chameleon readings locally');
 expectIncludes('Insert Chameleon Reading', 'if (!d || d.isChameleon !== true) return msg;', 'passes non-Chameleon LSN50 payloads downstream');
-expectIncludes('Build Dendrometer Readings INSERT', 'd.isChameleon === true', 'defensively skips dendrometer readings for Chameleon payloads');
+expectExcludes('Build Dendrometer Readings INSERT', 'd.isChameleon === true', 'the old Chameleon dendrometer insert skip');
 expectLibById('lsn50-decode-fn', 'dendro', 'osi-dendro-helper', 'imports osi-dendro-helper in Decode LSN50');
 expectLibById('lsn50-apply-config', 'dendro', 'osi-dendro-helper', 'imports osi-dendro-helper in Apply Config');
+expectLibById('lsn50-apply-config', 'chameleon', 'osi-chameleon-helper', 'imports osi-chameleon-helper in Apply Config');
 expectLibById('chameleon-readings-insert-fn', 'osiDb', 'osi-db-helper', 'imports osi-db-helper in Insert Chameleon Reading');
 expectWireById('lsn50-zone-agg-fn', 'chameleon-readings-insert-fn', 'routes LSN50 flow through Chameleon insert');
 expectWireById('chameleon-readings-insert-fn', 'dendro-readings-insert-fn', 'passes Chameleon insert output to dendrometer insert');
@@ -1138,7 +1141,7 @@ expectIncludesById('lsn50-sql-fn', 'flow_liters_per_min, flow_liters_per_10min, 
 expectIncludesById('lsn50-sql-fn', 'rain_mm_per_10min, rain_mm_today', 'persists normalized and daily rain telemetry into device_data');
 expectIncludesById('lsn50-sql-fn', 'flow_liters_per_10min, flow_liters_today', 'persists normalized and daily flow telemetry into device_data');
 expectIncludesById('lsn50-sql-fn', 'counter_interval_seconds', 'persists elapsed counter interval into device_data');
-expectIncludesById('lsn50-sql-fn', 'adc_ch0v, adc_ch1v,', 'persists both dendrometer ADC channels into device_data');
+expectIncludesById('lsn50-sql-fn', 'adc_ch0v, adc_ch1v, swt_1, swt_2, swt_3,', 'persists dendrometer ADC channels and derived Chameleon SWT into device_data');
 expectIncludesById('lsn50-sql-fn', 'dendro_ratio, dendro_mode_used, dendro_position_raw_mm, dendro_position_mm, dendro_valid, dendro_delta_mm,', 'persists dual-path dendrometer raw and compatibility positions into device_data');
 expectIncludesById('lsn50-sql-fn', 'dendro_stem_change_um,', 'persists baseline-relative stem change into device_data');
 expectIncludesById('lsn50-sql-fn', 'dendro_saturated, dendro_saturation_side,', 'persists dendrometer saturation metadata into device_data');
