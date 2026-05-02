@@ -1183,6 +1183,10 @@ expectIncludesById('format-devices', 'ch.r2_ohm_raw AS chameleon_r2_ohm_raw', 'r
 expectIncludesById('format-devices', 'ch.r3_ohm_raw AS chameleon_r3_ohm_raw', 'returns latest Chameleon channel 3 raw resistance in GET /api/devices');
 expectIncludesById('format-devices', 'ch.array_id AS chameleon_array_id', 'returns latest Chameleon array id in GET /api/devices');
 expectIncludesById('format-devices', 'LEFT JOIN (', 'joins latest Chameleon readings in GET /api/devices');
+expectIncludesById('format-devices', '/^[0-9A-F]{16}$/.test(deveui)', 'filters GET /api/devices latest-data lookup to canonical uppercase DevEUIs');
+expectIncludesById('format-devices', 'if (!validDevEuis.length)', 'avoids invalid SQL when no canonical DevEUIs are available');
+expectIncludesById('format-devices', 'newer.recorded_at > cr.recorded_at', 'selects the latest Chameleon reading by timestamp');
+expectIncludesById('format-devices', 'newer.recorded_at = cr.recorded_at AND newer.id > cr.id', 'breaks same-timestamp Chameleon ties by row id');
 expectIncludesById('format-devices', 'dd.rain_mm_per_hour', 'returns interval-aware rain rate in GET /api/devices');
 expectIncludesById('format-devices', 'dd.flow_liters_per_min', 'returns interval-aware flow rate in GET /api/devices');
 expectIncludesById('format-devices', 'dd.rain_mm_per_10min', 'returns normalized rain telemetry in GET /api/devices');
@@ -1291,11 +1295,13 @@ expectIncludesById('put-chameleon-enabled-auth-fn', 'function parseChameleonEnab
 expectIncludesById('put-chameleon-enabled-auth-fn', "const enabled = parseChameleonEnabled(body.enabled);", 'rejects missing or invalid Chameleon enabled values');
 expectIncludesById('put-chameleon-enabled-auth-fn', "enabled must be a boolean, 1, 0, 'true', 'false', '1', or '0'", 'returns a 400 for invalid Chameleon enabled values');
 expectIncludesById('put-chameleon-enabled-auth-fn', "type_id = 'DRAGINO_LSN50'", 'limits Chameleon enabled updates to LSN50 devices');
+expectExcludesById('put-chameleon-enabled-auth-fn', 'sync_version = COALESCE(sync_version, 0) + 1', 'keeps Chameleon enabled as local-only edge config until a server sync contract exists');
 expectLibById('put-chameleon-config-auth-fn', 'crypto', 'crypto', 'imports crypto for Chameleon config auth verification');
 expectLibById('put-chameleon-config-auth-fn', 'osiDb', 'osi-db-helper', 'uses osi-db-helper for Chameleon config persistence');
 expectIncludesById('put-chameleon-config-auth-fn', 'const body = parseBody(msg.payload);', 'parses Chameleon config payload before opening the database');
 expectIncludesById('put-chameleon-config-auth-fn', 'Math.round(parsed * 1000000) / 1000000', 'rounds Chameleon config numbers to six decimals');
 expectIncludesById('put-chameleon-config-auth-fn', 'No Chameleon config fields supplied', 'rejects empty Chameleon config patches');
+expectExcludesById('put-chameleon-config-auth-fn', 'sync_version = COALESCE(sync_version, 0) + 1', 'keeps Chameleon calibration fields as local-only edge config until a server sync contract exists');
 expectIncludesById('d0b2b1c1a937e16d', 'COALESCE(dd.swt_3, NULL)', 'scheduler can evaluate Chameleon SWT channel 3');
 expectIncludesById('d0b2b1c1a937e16d', "ds.type_id = 'DRAGINO_LSN50' AND COALESCE(ds.chameleon_enabled,0) = 1", 'scheduler includes Chameleon-enabled LSN50 devices');
 expectIncludesById('d0b2b1c1a937e16d', 'CASE WHEN dd.swt_3 IS NULL THEN 0 ELSE 1 END', 'scheduler SWT average counts Chameleon channel 3 only when present');
