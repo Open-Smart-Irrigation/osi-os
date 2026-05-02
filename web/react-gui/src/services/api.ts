@@ -361,6 +361,21 @@ function normaliseDendroReading(row: any): DendroReading {
   };
 }
 
+export interface ChameleonConfigPayload {
+  chameleonSwt1DepthCm?: number | null;
+  chameleonSwt2DepthCm?: number | null;
+  chameleonSwt3DepthCm?: number | null;
+  chameleonSwt1A?: number | null;
+  chameleonSwt1B?: number | null;
+  chameleonSwt1C?: number | null;
+  chameleonSwt2A?: number | null;
+  chameleonSwt2B?: number | null;
+  chameleonSwt2C?: number | null;
+  chameleonSwt3A?: number | null;
+  chameleonSwt3B?: number | null;
+  chameleonSwt3C?: number | null;
+}
+
 export const lsn50API = {
   setDendroEnabled: async (deveui: string, enabled: boolean): Promise<void> => {
     await api.put(`/api/devices/${deveui}/dendro`, { enabled });
@@ -373,6 +388,9 @@ export const lsn50API = {
   },
   setFlowMeterEnabled: async (deveui: string, enabled: boolean): Promise<void> => {
     await api.put(`/api/devices/${deveui}/flow-meter`, { enabled });
+  },
+  setChameleonEnabled: async (deveui: string, enabled: boolean): Promise<void> => {
+    await api.put(`/api/devices/${deveui}/chameleon`, { enabled });
   },
   setMode: async (deveui: string, mode: Lsn50Mode): Promise<void> => {
     await api.put(`/api/devices/${deveui}/lsn50/mode`, { mode });
@@ -393,6 +411,9 @@ export const lsn50API = {
     dendroRatioAtExtended?: number | null;
   }): Promise<void> => {
     await api.put(`/api/devices/${deveui}/dendro-config`, payload);
+  },
+  setChameleonConfig: async (deveui: string, payload: ChameleonConfigPayload): Promise<void> => {
+    await api.put(`/api/devices/${deveui}/chameleon-config`, payload);
   },
   resetDendroBaseline: async (deveui: string): Promise<void> => {
     await api.post(`/api/devices/${deveui}/dendro-baseline/reset`);

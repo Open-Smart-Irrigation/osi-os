@@ -1355,6 +1355,11 @@ expectIncludesById('post-dendro-baseline-reset-auth-fn', 'dendro_baseline_calibr
 expectIncludesById('post-dendro-baseline-reset-auth-fn', 'dendro_baseline_pending = 1', 'marks the dendrometer baseline as pending after a manual reset');
 expectFileIncludes('api.ts', reactGuiApiSource, 'resetDendroBaseline: async (deveui: string): Promise<void> => {', 'adds a shared client helper for dendrometer baseline resets');
 expectFileIncludes('api.ts', reactGuiApiSource, "await api.post(`/api/devices/${deveui}/dendro-baseline/reset`);", 'targets the local dendrometer baseline reset endpoint from the shared client helper');
+expectFileIncludes('api.ts', reactGuiApiSource, 'export interface ChameleonConfigPayload', 'types Chameleon SWT calibration API payloads');
+expectFileIncludes('api.ts', reactGuiApiSource, 'setChameleonEnabled: async (deveui: string, enabled: boolean): Promise<void> => {', 'adds a shared client helper for Chameleon enablement');
+expectFileIncludes('api.ts', reactGuiApiSource, "await api.put(`/api/devices/${deveui}/chameleon`, { enabled });", 'targets the local Chameleon enablement endpoint from the shared client helper');
+expectFileIncludes('api.ts', reactGuiApiSource, 'setChameleonConfig: async (deveui: string, payload: ChameleonConfigPayload): Promise<void> => {', 'adds a shared client helper for Chameleon SWT calibration config');
+expectFileIncludes('api.ts', reactGuiApiSource, "await api.put(`/api/devices/${deveui}/chameleon-config`, payload);", 'targets the local Chameleon calibration endpoint from the shared client helper');
 expectFileIncludes('api.ts', reactGuiApiSource, 'position_mm: number | null;', 'types dendrometer history position as nullable');
 expectFileIncludes('api.ts', reactGuiApiSource, 'stem_change_um: toNullableNumber(row?.stem_change_um ?? row?.dendro_stem_change_um)', 'normalizes baseline-relative stem change for dendrometer history');
 expectFileExcludes('api.ts', reactGuiApiSource, 'Number(row?.position_mm ?? row?.dendro_position_mm ?? 0)', 'coercing missing dendrometer history position to zero');
@@ -1363,6 +1368,9 @@ expectFileIncludes('farming.ts', farmingTypesSource, 'id: number | null;', 'allo
 expectFileIncludes('farming.ts', farmingTypesSource, 'position_um: number | null;', 'allows raw-only dendrometer rows to omit calibrated position');
 expectFileIncludes('farming.ts', farmingTypesSource, 'dendro_stem_change_um?: number | null;', 'types the latest stem-change signal on device payloads');
 expectFileIncludes('farming.ts', farmingTypesSource, 'dendro_baseline_pending?: number | null;', 'types the device-level baseline-pending flag');
+expectFileIncludes('farming.ts', farmingTypesSource, 'swt_3?: number | null;', 'types Chameleon SWT channel 3 on latest device payloads');
+expectFileIncludes('farming.ts', farmingTypesSource, 'chameleon_payload_b64?: string | null;', 'types Chameleon raw payload on latest device payloads');
+expectFileIncludes('farming.ts', farmingTypesSource, 'chameleon_enabled?: number;', 'types device-level Chameleon enablement flag');
 expectFileIncludes('api.ts', reactGuiApiSource, 'stem_change_um: number | null;', 'types the dendrometer history stem-change signal');
 expectFileIncludes('DendrometerMonitor.tsx', dendroMonitorSource, 'Stem change over time', 'labels the basic monitor around the comparable stem-change signal');
 expectFileIncludes('DendrometerMonitor.tsx', dendroMonitorSource, 'Mechanical layer', 'renders mechanical engineering values beneath the stem-change graph');
