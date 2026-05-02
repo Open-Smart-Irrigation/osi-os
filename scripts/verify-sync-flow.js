@@ -1185,6 +1185,9 @@ expectIncludesById('format-devices', 'ch.array_id AS chameleon_array_id', 'retur
 expectIncludesById('format-devices', 'LEFT JOIN (', 'joins latest Chameleon readings in GET /api/devices');
 expectIncludesById('format-devices', '/^[0-9A-F]{16}$/.test(deveui)', 'filters GET /api/devices latest-data lookup to canonical uppercase DevEUIs');
 expectIncludesById('format-devices', 'if (!validDevEuis.length)', 'avoids invalid SQL when no canonical DevEUIs are available');
+expectIncludesById('format-devices', "msg.topic = 'SELECT NULL AS deveui WHERE 0';", 'uses a no-row latest-data query for empty device lookups');
+expectIncludesById('format-devices', "if (!msg.payload || msg.payload.length === 0) {\n  msg.statusCode = 200;\n  msg.payload = [];\n  msg.topic = 'SELECT NULL AS deveui WHERE 0';\n  return msg;\n}", 'sets a sqlite topic before returning an empty device list');
+expectIncludesById('format-devices', "if (!validDevEuis.length) {\n  msg.statusCode = 200;\n  msg.payload = [];\n  msg.topic = 'SELECT NULL AS deveui WHERE 0';\n  return msg;\n}", 'sets a sqlite topic before returning an all-invalid DevEUI list');
 expectIncludesById('format-devices', 'newer.recorded_at > cr.recorded_at', 'selects the latest Chameleon reading by timestamp');
 expectIncludesById('format-devices', 'newer.recorded_at = cr.recorded_at AND newer.id > cr.id', 'breaks same-timestamp Chameleon ties by row id');
 expectIncludesById('format-devices', 'dd.rain_mm_per_hour', 'returns interval-aware rain rate in GET /api/devices');
