@@ -123,6 +123,8 @@ const requiredHttpRoutes = [
   '/api/devices/:deveui/strega/magnet',
   '/api/devices/:deveui/strega/partial-opening',
   '/api/devices/:deveui/strega/flushing',
+  '/api/devices/:deveui/chameleon',
+  '/api/devices/:deveui/chameleon-config',
   '/api/devices/:deveui/dendro-config',
   '/api/devices/:deveui/dendro-baseline/reset',
   '/api/devices/:deveui/zone-assignments',
@@ -185,6 +187,8 @@ const requiredFunctionNodes = [
   'Auth + Parse STREGA Flushing',
   'Authorize + Fanout STREGA Advanced',
   'Format STREGA Advanced Response',
+  'Auth + Set Chameleon Enabled',
+  'Auth + Save Chameleon Config',
   'Auth + Parse Dendro Config',
   'Format Dendro Config Response',
   'Return Device API HTTP 500',
@@ -1156,6 +1160,12 @@ expectIncludesById('format-devices', 'dd.dendro_position_raw_mm', 'returns raw d
 expectIncludesById('format-devices', 'dd.dendro_stem_change_um', 'returns baseline-relative stem change in GET /api/devices');
 expectIncludesById('format-devices', 'dd.dendro_saturated', 'returns dendrometer saturation state in GET /api/devices');
 expectIncludesById('format-devices', 'dd.dendro_saturation_side', 'returns dendrometer saturation side in GET /api/devices');
+expectIncludesById('format-devices', 'dd.swt_1', 'returns Chameleon SWT channel 1 in GET /api/devices');
+expectIncludesById('format-devices', 'dd.swt_2', 'returns Chameleon SWT channel 2 in GET /api/devices');
+expectIncludesById('format-devices', 'dd.swt_3', 'returns Chameleon SWT channel 3 in GET /api/devices');
+expectIncludesById('format-devices', 'ch.payload_version AS chameleon_payload_version', 'returns latest Chameleon payload version in GET /api/devices');
+expectIncludesById('format-devices', 'ch.r1_ohm_comp AS chameleon_r1_ohm_comp', 'returns latest Chameleon compensated resistance in GET /api/devices');
+expectIncludesById('format-devices', 'LEFT JOIN (', 'joins latest Chameleon readings in GET /api/devices');
 expectIncludesById('format-devices', 'dd.rain_mm_per_hour', 'returns interval-aware rain rate in GET /api/devices');
 expectIncludesById('format-devices', 'dd.flow_liters_per_min', 'returns interval-aware flow rate in GET /api/devices');
 expectIncludesById('format-devices', 'dd.rain_mm_per_10min', 'returns normalized rain telemetry in GET /api/devices');
@@ -1174,7 +1184,13 @@ expectIncludesById('merge-device-data', 'dendro_stroke_mm: d.dendro_stroke_mm ??
 expectIncludesById('merge-device-data', 'dendro_ratio_at_retracted: d.dendro_ratio_at_retracted ?? null', 'returns dendrometer retracted-ratio calibration in GET /api/devices');
 expectIncludesById('merge-device-data', 'dendro_ratio_at_extended: d.dendro_ratio_at_extended ?? null', 'returns dendrometer extended-ratio calibration in GET /api/devices');
 expectIncludesById('merge-device-data', 'dendro_baseline_pending: d.dendro_baseline_pending ?? 0', 'returns the pending-baseline flag in GET /api/devices');
+expectIncludesById('merge-device-data', 'chameleon_enabled: d.chameleon_enabled ?? 0', 'returns Chameleon enabled config in GET /api/devices');
+expectIncludesById('merge-device-data', 'chameleon_swt1_depth_cm: d.chameleon_swt1_depth_cm ?? null', 'returns Chameleon SWT depth config in GET /api/devices');
+expectIncludesById('merge-device-data', 'chameleon_swt1_a: d.chameleon_swt1_a ?? null', 'returns Chameleon SWT coefficient config in GET /api/devices');
 expectIncludesById('merge-device-data', 'adc_ch1v: latest.adc_ch1v', 'merges dendrometer CH1 voltage into GET /api/devices');
+expectIncludesById('merge-device-data', 'swt_1: latest.swt_1', 'merges Chameleon SWT channel 1 into GET /api/devices');
+expectIncludesById('merge-device-data', 'chameleon_payload_version: latest.chameleon_payload_version', 'merges latest Chameleon payload version into GET /api/devices');
+expectIncludesById('merge-device-data', 'chameleon_r3_ohm_comp: latest.chameleon_r3_ohm_comp', 'merges latest Chameleon channel 3 resistance into GET /api/devices');
 expectIncludesById('merge-device-data', 'dendro_ratio: latest.dendro_ratio', 'merges dendrometer ratio into GET /api/devices');
 expectIncludesById('merge-device-data', 'dendro_mode_used: latest.dendro_mode_used', 'merges dendrometer path metadata into GET /api/devices');
 expectIncludesById('merge-device-data', 'dendro_position_raw_mm: latest.dendro_position_raw_mm', 'merges raw dendrometer position into GET /api/devices');
@@ -1232,6 +1248,17 @@ expectIncludesById('sensor-history-fn', 'uv_index', 'allows S2120 UV history que
 expectIncludesById('sensor-history-fn', 'barometric_pressure_hpa', 'allows S2120 pressure history queries');
 expectIncludesById('sensor-history-fn', 'rain_gauge_cumulative_mm', 'allows S2120 cumulative-rain history queries');
 expectIncludesById('sensor-history-fn', 'bat_pct', 'allows S2120 battery-percent history queries');
+expectIncludesById('sensor-history-fn', "'swt_3'", 'allows Chameleon SWT history queries');
+expectLibById('put-chameleon-enabled-auth-fn', 'crypto', 'crypto', 'imports crypto for Chameleon enabled auth verification');
+expectLibById('put-chameleon-enabled-auth-fn', 'osiDb', 'osi-db-helper', 'uses osi-db-helper for Chameleon enabled persistence');
+expectIncludesById('put-chameleon-enabled-auth-fn', "type_id = 'DRAGINO_LSN50'", 'limits Chameleon enabled updates to LSN50 devices');
+expectLibById('put-chameleon-config-auth-fn', 'crypto', 'crypto', 'imports crypto for Chameleon config auth verification');
+expectLibById('put-chameleon-config-auth-fn', 'osiDb', 'osi-db-helper', 'uses osi-db-helper for Chameleon config persistence');
+expectIncludesById('put-chameleon-config-auth-fn', 'Math.round(parsed * 1000000) / 1000000', 'rounds Chameleon config numbers to six decimals');
+expectIncludesById('put-chameleon-config-auth-fn', 'No Chameleon config fields supplied', 'rejects empty Chameleon config patches');
+expectIncludesById('d0b2b1c1a937e16d', 'COALESCE(dd.swt_3, NULL)', 'scheduler can evaluate Chameleon SWT channel 3');
+expectIncludesById('d0b2b1c1a937e16d', "ds.type_id = 'DRAGINO_LSN50' AND COALESCE(ds.chameleon_enabled,0) = 1", 'scheduler includes Chameleon-enabled LSN50 devices');
+expectIncludesById('d0b2b1c1a937e16d', 'CASE WHEN dd.swt_3 IS NULL THEN 0 ELSE 1 END', 'scheduler SWT average counts Chameleon channel 3 only when present');
 expectIncludesById('dendro-history-fn', 'dd.adc_ch1v', 'returns dendrometer CH1 history points');
 expectIncludesById('dendro-history-fn', 'dd.dendro_ratio', 'returns dendrometer ratio history points');
 expectIncludesById('dendro-history-fn', 'dd.dendro_mode_used', 'returns dendrometer path history points');
@@ -1707,7 +1734,29 @@ for (const seedDatabasePath of seedDendroHistoryDatabasePaths) {
 for (const seedDatabasePath of seedDatabasePaths) {
   const relativeSeedPath = path.relative(path.resolve(__dirname, '..'), seedDatabasePath);
   const chameleonColumns = new Set(readTableColumns(seedDatabasePath, 'chameleon_readings'));
+  const deviceColumns = new Set(readTableColumns(seedDatabasePath, 'devices'));
+  const deviceDataColumns = new Set(readTableColumns(seedDatabasePath, 'device_data'));
   const chameleonIndexes = new Set(readTableIndexes(seedDatabasePath, 'chameleon_readings'));
+  expectCondition(
+    deviceColumns.has('chameleon_enabled'),
+    `${relativeSeedPath} includes chameleon_enabled in the bundled devices schema`,
+    `${relativeSeedPath} is missing chameleon_enabled in the bundled devices schema`
+  );
+  expectCondition(
+    deviceColumns.has('chameleon_swt1_depth_cm'),
+    `${relativeSeedPath} includes chameleon_swt1_depth_cm in the bundled devices schema`,
+    `${relativeSeedPath} is missing chameleon_swt1_depth_cm in the bundled devices schema`
+  );
+  expectCondition(
+    deviceColumns.has('chameleon_swt3_c'),
+    `${relativeSeedPath} includes chameleon_swt3_c in the bundled devices schema`,
+    `${relativeSeedPath} is missing chameleon_swt3_c in the bundled devices schema`
+  );
+  expectCondition(
+    deviceDataColumns.has('swt_1'),
+    `${relativeSeedPath} includes swt_1 in the bundled device_data schema`,
+    `${relativeSeedPath} is missing swt_1 in the bundled device_data schema`
+  );
   expectCondition(
     chameleonColumns.has('payload_b64'),
     `${relativeSeedPath} includes payload_b64 in the bundled chameleon_readings schema`,
