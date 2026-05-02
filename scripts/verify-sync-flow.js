@@ -61,6 +61,8 @@ const dendroHelperCandidates = [
   path.join(nodeRedRoot, 'node_modules', 'osi-dendro-helper'),
   path.join(nodeRedRoot, 'osi-dendro-helper')
 ];
+const cloudHttpHelperPath = path.join(nodeRedRoot, 'osi-cloud-http', 'index.js');
+const cloudHttpPackagePath = path.join(nodeRedRoot, 'osi-cloud-http', 'package.json');
 const packageJsonPath = path.join(nodeRedRoot, 'package.json');
 execFileSync(process.execPath, [path.resolve(__dirname, 'verify-communication-contract.js')], { stdio: 'inherit' });
 const deployScript = fs.readFileSync(deployScriptPath, 'utf8');
@@ -72,6 +74,9 @@ const gatewayIdentityHelperScript = fs.readFileSync(gatewayIdentityHelperPath, '
 const chirpstackBootstrapScript = fs.readFileSync(chirpstackBootstrapPath, 'utf8');
 const stregaCodecSource = fs.existsSync(stregaCodecPath) ? fs.readFileSync(stregaCodecPath, 'utf8') : '';
 const lsn50CodecSource = fs.existsSync(lsn50CodecPath) ? fs.readFileSync(lsn50CodecPath, 'utf8') : '';
+const cloudHttpHelperSource = fs.existsSync(cloudHttpHelperPath) ? fs.readFileSync(cloudHttpHelperPath, 'utf8') : '';
+const cloudHttpPackageSource = fs.existsSync(cloudHttpPackagePath) ? fs.readFileSync(cloudHttpPackagePath, 'utf8') : '';
+const nodeRedPackageSource = fs.readFileSync(packageJsonPath, 'utf8');
 const reactGuiApiSource = fs.readFileSync(reactGuiApiPath, 'utf8');
 const farmingTypesSource = fs.readFileSync(farmingTypesPath, 'utf8');
 const dendroMonitorSource = fs.readFileSync(dendroMonitorPath, 'utf8');
@@ -2169,6 +2174,18 @@ if (!fs.existsSync(packageJsonPath)) {
     }
   }
 }
+
+expectCondition(!!cloudHttpHelperSource, 'osi-cloud-http helper exists', 'missing osi-cloud-http helper');
+expectFileIncludes('osi-cloud-http/index.js', cloudHttpHelperSource, 'family: 4', 'forces IPv4 DNS/address selection');
+expectFileIncludes('osi-cloud-http/index.js', cloudHttpHelperSource, 'requestJsonIpv4', 'exports requestJsonIpv4');
+expectFileIncludes('osi-cloud-http/index.js', cloudHttpHelperSource, 'setTimeout', 'sets a bounded cloud REST timeout');
+expectFileIncludes('osi-cloud-http/index.js', cloudHttpHelperSource, 'JSON.parse', 'parses JSON responses');
+expectFileIncludes('osi-cloud-http/index.js', cloudHttpHelperSource, "res.on('aborted'", 'rejects aborted response streams');
+expectFileIncludes('osi-cloud-http/index.js', cloudHttpHelperSource, "res.on('error'", 'rejects response stream errors');
+expectFileIncludes('osi-cloud-http/index.js', cloudHttpHelperSource, 'res.complete', 'rejects incomplete response stream closes');
+expectFileIncludes('osi-cloud-http/index.js', cloudHttpHelperSource, 'settled', 'guards cloud REST requests against double settlement');
+expectFileIncludes('osi-cloud-http/package.json', cloudHttpPackageSource, '"name": "osi-cloud-http"', 'declares the helper package name');
+expectFileIncludes('node-red/package.json', nodeRedPackageSource, '"osi-cloud-http": "file:osi-cloud-http"', 'installs the helper package as a local dependency');
 
 const rawDbNodes = flows.filter(
   (node) => typeof node.func === 'string' && node.func.includes("new sqlite3.Database('/data/db/farming.db')")
