@@ -37,10 +37,15 @@ const draginoTempCardPath = path.resolve(__dirname, '..', 'web', 'react-gui', 's
 const draginoSettingsModalPath = path.resolve(__dirname, '..', 'web', 'react-gui', 'src', 'components', 'farming', 'DraginoSettingsModal.tsx');
 const draginoDendroCalibrationPath = path.resolve(__dirname, '..', 'web', 'react-gui', 'src', 'components', 'farming', 'DraginoDendroCalibrationSection.tsx');
 const draginoChameleonSwtSectionPath = path.resolve(__dirname, '..', 'web', 'react-gui', 'src', 'components', 'farming', 'DraginoChameleonSwtSection.tsx');
+const irrigationZoneCardPath = path.resolve(__dirname, '..', 'web', 'react-gui', 'src', 'components', 'farming', 'IrrigationZoneCard.tsx');
+const kiwiSensorCardPath = path.resolve(__dirname, '..', 'web', 'react-gui', 'src', 'components', 'farming', 'KiwiSensorCard.tsx');
+const scheduleSectionPath = path.resolve(__dirname, '..', 'web', 'react-gui', 'src', 'components', 'farming', 'ScheduleSection.tsx');
 const senseCapWeatherCardPath = path.resolve(__dirname, '..', 'web', 'react-gui', 'src', 'components', 'farming', 'SenseCapWeatherCard.tsx');
 const windMonitorPath = path.resolve(__dirname, '..', 'web', 'react-gui', 'src', 'components', 'farming', 'WindMonitor.tsx');
+const swtUtilsPath = path.resolve(__dirname, '..', 'web', 'react-gui', 'src', 'utils', 'swt.ts');
 const windUtilsPath = path.resolve(__dirname, '..', 'web', 'react-gui', 'src', 'utils', 'wind.ts');
 const onlineTabPath = path.resolve(__dirname, '..', 'web', 'react-gui', 'src', 'components', 'farming', 'environment', 'OnlineTab.tsx');
+const soilTabPath = path.resolve(__dirname, '..', 'web', 'react-gui', 'src', 'components', 'farming', 'environment', 'SoilTab.tsx');
 const weatherTabPath = path.resolve(__dirname, '..', 'web', 'react-gui', 'src', 'components', 'farming', 'environment', 'WeatherTab.tsx');
 const helperCandidates = [
   path.join(nodeRedRoot, 'node_modules', 'osi-chirpstack-helper'),
@@ -56,6 +61,7 @@ const dendroHelperCandidates = [
 ];
 const packageJsonPath = path.join(nodeRedRoot, 'package.json');
 execFileSync(process.execPath, [path.resolve(__dirname, 'verify-communication-contract.js')], { stdio: 'inherit' });
+execFileSync(process.execPath, [path.resolve(__dirname, 'verify-db-schema-consistency.js')], { stdio: 'inherit' });
 const deployScript = fs.readFileSync(deployScriptPath, 'utf8');
 const nodeRedInitScript = fs.readFileSync(nodeRedInitPath, 'utf8');
 const osiServerDefaultsScript = fs.readFileSync(osiServerDefaultsPath, 'utf8');
@@ -75,10 +81,15 @@ const draginoChameleonSwtSectionSource = fs.existsSync(draginoChameleonSwtSectio
   ? fs.readFileSync(draginoChameleonSwtSectionPath, 'utf8')
   : '';
 const draginoSettingsSource = `${draginoSettingsModalSource}\n${draginoDendroCalibrationSource}\n${draginoChameleonSwtSectionSource}`;
+const irrigationZoneCardSource = fs.readFileSync(irrigationZoneCardPath, 'utf8');
+const kiwiSensorCardSource = fs.readFileSync(kiwiSensorCardPath, 'utf8');
+const scheduleSectionSource = fs.readFileSync(scheduleSectionPath, 'utf8');
 const senseCapWeatherCardSource = fs.readFileSync(senseCapWeatherCardPath, 'utf8');
 const windMonitorSource = fs.readFileSync(windMonitorPath, 'utf8');
+const swtUtilsSource = fs.readFileSync(swtUtilsPath, 'utf8');
 const windUtilsSource = fs.readFileSync(windUtilsPath, 'utf8');
 const onlineTabSource = fs.readFileSync(onlineTabPath, 'utf8');
+const soilTabSource = fs.readFileSync(soilTabPath, 'utf8');
 const weatherTabSource = fs.readFileSync(weatherTabPath, 'utf8');
 const flows = JSON.parse(fs.readFileSync(flowPath, 'utf8'));
 const pendingChecks = [];
@@ -1164,8 +1175,8 @@ expectIncludesById('format-devices', 'dd.dendro_position_raw_mm', 'returns raw d
 expectIncludesById('format-devices', 'dd.dendro_stem_change_um', 'returns baseline-relative stem change in GET /api/devices');
 expectIncludesById('format-devices', 'dd.dendro_saturated', 'returns dendrometer saturation state in GET /api/devices');
 expectIncludesById('format-devices', 'dd.dendro_saturation_side', 'returns dendrometer saturation side in GET /api/devices');
-expectIncludesById('format-devices', 'dd.swt_1', 'returns Chameleon SWT channel 1 in GET /api/devices');
-expectIncludesById('format-devices', 'dd.swt_2', 'returns Chameleon SWT channel 2 in GET /api/devices');
+expectIncludesById('format-devices', 'COALESCE(dd.swt_1, dd.swt_wm1) AS swt_1', 'returns canonical SWT channel 1 with legacy Kiwi fallback in GET /api/devices');
+expectIncludesById('format-devices', 'COALESCE(dd.swt_2, dd.swt_wm2) AS swt_2', 'returns canonical SWT channel 2 with legacy Kiwi fallback in GET /api/devices');
 expectIncludesById('format-devices', 'dd.swt_3', 'returns Chameleon SWT channel 3 in GET /api/devices');
 expectIncludesById('format-devices', 'ch.id AS chameleon_reading_id', 'returns latest Chameleon reading row id in GET /api/devices');
 expectIncludesById('format-devices', 'ch.payload_b64 AS chameleon_payload_b64', 'returns latest Chameleon raw payload in GET /api/devices');
@@ -1292,6 +1303,8 @@ expectIncludesById('sensor-history-fn', 'flow_liters_per_min', 'allows rate-base
 expectIncludesById('sensor-history-fn', 'rain_mm_per_10min', 'allows normalized rain history queries');
 expectIncludesById('sensor-history-fn', 'flow_liters_per_10min', 'allows normalized flow history queries');
 expectIncludesById('sensor-history-fn', 'counter_interval_seconds', 'allows interval-length history queries');
+expectIncludesById('sensor-history-fn', "swt_1: 'COALESCE(dd.swt_1, dd.swt_wm1)'", 'coalesces canonical SWT1 history across Chameleon and legacy Kiwi rows');
+expectIncludesById('sensor-history-fn', "swt_2: 'COALESCE(dd.swt_2, dd.swt_wm2)'", 'coalesces canonical SWT2 history across Chameleon and legacy Kiwi rows');
 expectIncludesById('sensor-history-fn', 'wind_speed_mps', 'allows S2120 wind-speed history queries');
 expectIncludesById('sensor-history-fn', 'wind_direction_deg', 'allows S2120 wind-direction history queries');
 expectIncludesById('sensor-history-fn', 'wind_gust_mps', 'allows S2120 wind-gust history queries');
@@ -1300,6 +1313,8 @@ expectIncludesById('sensor-history-fn', 'barometric_pressure_hpa', 'allows S2120
 expectIncludesById('sensor-history-fn', 'rain_gauge_cumulative_mm', 'allows S2120 cumulative-rain history queries');
 expectIncludesById('sensor-history-fn', 'bat_pct', 'allows S2120 battery-percent history queries');
 expectIncludesById('sensor-history-fn', "'swt_3'", 'allows Chameleon SWT history queries');
+expectIncludesById('fn_build_sensor_sql_params', 'COALESCE(dd.swt_1, dd.swt_wm1) AS swt_1', 'exports canonical SWT1 with legacy Kiwi fallback');
+expectIncludesById('fn_build_sensor_sql_params', 'COALESCE(dd.swt_2, dd.swt_wm2) AS swt_2', 'exports canonical SWT2 with legacy Kiwi fallback');
 expectLibById('put-chameleon-enabled-auth-fn', 'crypto', 'crypto', 'imports crypto for Chameleon enabled auth verification');
 expectLibById('put-chameleon-enabled-auth-fn', 'osiDb', 'osi-db-helper', 'uses osi-db-helper for Chameleon enabled persistence');
 expectIncludesById('put-chameleon-enabled-auth-fn', 'function parseChameleonEnabled(value)', 'validates Chameleon enabled payload without broad coercion');
@@ -1499,6 +1514,16 @@ expectFileIncludes('DraginoChameleonSwtSection.tsx', draginoChameleonSwtSectionS
 expectFileIncludes('DraginoChameleonSwtSection.tsx', draginoChameleonSwtSectionSource, 'a: formatNumericInput(device[channel.coefficientKeys.a])', 'keeps absent saved coefficient a values blank instead of rehydrating workbook defaults');
 expectFileIncludes('DraginoChameleonSwtSection.tsx', draginoChameleonSwtSectionSource, 'placeholder={String(channel.defaults[field])}', 'shows Chameleon workbook defaults as coefficient placeholders');
 expectFileIncludes('DraginoChameleonSwtSection.tsx', draginoChameleonSwtSectionSource, 'a: String(channel.defaults.a)', 'keeps Restore workbook defaults as an explicit value-fill action');
+expectFileIncludes('swt.ts', swtUtilsSource, 'toFiniteSwtValue(data?.swt_1) ?? toFiniteSwtValue(data?.swt_wm1)', 'uses canonical SWT1 with legacy Kiwi fallback in shared GUI SWT utilities');
+expectFileIncludes('swt.ts', swtUtilsSource, 'toFiniteSwtValue(data?.swt_2) ?? toFiniteSwtValue(data?.swt_wm2)', 'uses canonical SWT2 with legacy Kiwi fallback in shared GUI SWT utilities');
+expectFileIncludes('IrrigationZoneCard.tsx', irrigationZoneCardSource, 'summarizeSwtValues(collectDeviceSwtValues(devices))', 'computes Soil now from canonical SWT values across sensor families');
+expectFileExcludes('IrrigationZoneCard.tsx', irrigationZoneCardSource, '[data?.swt_wm1, data?.swt_wm2]', 'prevents Soil now from reading only legacy Kiwi SWT values');
+expectFileIncludes('SoilTab.tsx', soilTabSource, 'const swtReadings = collectDeviceSwtValues(devices);', 'computes soil environment SWT from canonical sensor-family-neutral values');
+expectFileIncludes('KiwiSensorCard.tsx', kiwiSensorCardSource, "field: 'swt_1'", 'uses canonical SWT1 for Kiwi live display and history');
+expectFileIncludes('KiwiSensorCard.tsx', kiwiSensorCardSource, "field: 'swt_2'", 'uses canonical SWT2 for Kiwi live display and history');
+expectFileIncludes('KiwiSensorCard.tsx', kiwiSensorCardSource, "soilMoistureProbeDepths.swt_1", 'stores Kiwi SWT1 depth metadata under the canonical key');
+expectFileIncludes('ScheduleSection.tsx', scheduleSectionSource, "if (raw === 'SWT_WM1') return 'SWT_1';", 'normalizes legacy SWT schedule metrics before editing');
+expectFileIncludes('ScheduleSection.tsx', scheduleSectionSource, '<option value="SWT_1">Sensor 1</option>', 'saves new SWT schedules with canonical metric names');
 expectFileExcludes('Dragino settings components', draginoSettingsSource, 'Invert direction', 'removes the ratio inversion toggle from the advanced settings');
 expectFileIncludes('SenseCapWeatherCard.tsx', senseCapWeatherCardSource, 'WindMonitor', 'opens a dedicated wind monitor from the S2120 card');
 expectFileIncludes('SenseCapWeatherCard.tsx', senseCapWeatherCardSource, 'rain_mm_per_10min', 'shows normalized rain history options on the S2120 card');

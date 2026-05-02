@@ -33,11 +33,23 @@ function schedulerTypeFromMetric(metric: string): SchedulerType {
   return 'SWT';
 }
 
+function normalizeTriggerMetric(metric: unknown): TriggerMetric {
+  const raw = String(metric || '').toUpperCase();
+  if (raw === 'SWT_WM1') return 'SWT_1';
+  if (raw === 'SWT_WM2') return 'SWT_2';
+  if (raw === 'SWT_WM3') return 'SWT_3';
+  if (raw === 'SWT_1' || raw === 'SWT_2' || raw === 'SWT_3' || raw === 'SWT_AVG' || raw === 'VWC' || raw === 'DENDRO') {
+    return raw as TriggerMetric;
+  }
+  return 'SWT_1';
+}
+
 function defaultMetricForType(type: SchedulerType, currentMetric: TriggerMetric): TriggerMetric {
   if (type === 'DENDRO') return 'DENDRO';
   if (type === 'VWC') return 'VWC';
-  if (currentMetric === 'SWT_WM1' || currentMetric === 'SWT_WM2' || currentMetric === 'SWT_WM3' || currentMetric === 'SWT_AVG') return currentMetric;
-  return 'SWT_WM1';
+  const canonicalMetric = normalizeTriggerMetric(currentMetric);
+  if (canonicalMetric === 'SWT_1' || canonicalMetric === 'SWT_2' || canonicalMetric === 'SWT_3' || canonicalMetric === 'SWT_AVG') return canonicalMetric;
+  return 'SWT_1';
 }
 
 // ── Scheduler type tab button ─────────────────────────────────────────────────
@@ -68,9 +80,9 @@ interface SwtFormProps {
 }
 const SwtForm: React.FC<SwtFormProps> = ({ metric, threshold, duration, onMetric, onThreshold, onDuration }) => {
   const metricLabel =
-    metric === 'SWT_WM1' ? 'Sensor 1' :
-    metric === 'SWT_WM2' ? 'Sensor 2' :
-    metric === 'SWT_WM3' ? 'Sensor 3' : 'Mean of all sensors';
+    metric === 'SWT_1' ? 'Sensor 1' :
+    metric === 'SWT_2' ? 'Sensor 2' :
+    metric === 'SWT_3' ? 'Sensor 3' : 'Mean of all sensors';
   return (
     <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
       <div>
@@ -80,9 +92,9 @@ const SwtForm: React.FC<SwtFormProps> = ({ metric, threshold, duration, onMetric
           onChange={e => onMetric(e.target.value as TriggerMetric)}
           className="w-full px-3 py-2 bg-[var(--card)] border-2 border-[var(--border)] rounded-lg text-[var(--text)] focus:outline-none focus:border-[var(--focus)] focus:ring-2 focus:ring-[var(--focus)]"
         >
-          <option value="SWT_WM1">Sensor 1</option>
-          <option value="SWT_WM2">Sensor 2</option>
-          <option value="SWT_WM3">Sensor 3</option>
+          <option value="SWT_1">Sensor 1</option>
+          <option value="SWT_2">Sensor 2</option>
+          <option value="SWT_3">Sensor 3</option>
           <option value="SWT_AVG">Mean (all sensors)</option>
         </select>
       </div>
@@ -229,7 +241,7 @@ export const ScheduleSection: React.FC<ScheduleSectionProps> = ({
 
   const [enabled, setEnabled]               = useState(true);
   const [schedulerType, setSchedulerType]   = useState<SchedulerType>('SWT');
-  const [triggerMetric, setTriggerMetric]   = useState<TriggerMetric>('SWT_WM1');
+  const [triggerMetric, setTriggerMetric]   = useState<TriggerMetric>('SWT_1');
   const [threshold, setThreshold]           = useState(30);
   const [duration, setDuration]             = useState(20);
   const [stressThreshold, setStressThreshold] = useState<DendroStressThreshold>('moderate');
@@ -238,7 +250,7 @@ export const ScheduleSection: React.FC<ScheduleSectionProps> = ({
   // ── Load ──────────────────────────────────────────────────────────────────
   const applySchedule = (s: any) => {
     if (!s) return;
-    const metric: TriggerMetric = s.trigger_metric ?? s.triggerMetric ?? 'SWT_WM1';
+    const metric = normalizeTriggerMetric(s.trigger_metric ?? s.triggerMetric ?? 'SWT_1');
     const type = schedulerTypeFromMetric(metric);
     setSchedulerType(type);
     setTriggerMetric(metric);

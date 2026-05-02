@@ -5,6 +5,7 @@ import { useDismissOnPointerDown } from '../../hooks/useDismissOnPointerDown';
 import { useTranslation } from 'react-i18next';
 import { SensorMonitor } from './SensorMonitor';
 import { DeviceCardFooter } from './shared/DeviceCardFooter';
+import { canonicalSwtChannels } from '../../utils/swt';
 
 interface KiwiSensorCardProps {
   device: Device;
@@ -21,8 +22,8 @@ interface SensorDef {
 }
 
 const SENSORS: SensorDef[] = [
-  { field: 'swt_wm1',             label: 'Soil Water Tension 1', unit: 'kPa', color: '#3b82f6', decimals: 1 },
-  { field: 'swt_wm2',             label: 'Soil Water Tension 2', unit: 'kPa', color: '#6366f1', decimals: 1 },
+  { field: 'swt_1',               label: 'Soil Water Tension 1', unit: 'kPa', color: '#3b82f6', decimals: 1 },
+  { field: 'swt_2',               label: 'Soil Water Tension 2', unit: 'kPa', color: '#6366f1', decimals: 1 },
   { field: 'light_lux',           label: 'Light Intensity',      unit: 'lux', color: '#f59e0b', decimals: 0 },
   { field: 'ambient_temperature', label: 'Ambient Temperature',  unit: '°C',  color: '#f97316', decimals: 1 },
   { field: 'relative_humidity',   label: 'Relative Humidity',    unit: '%',   color: '#06b6d4', decimals: 0 },
@@ -37,12 +38,15 @@ function formatDepthInput(depthCm?: number | null): string {
 }
 
 function probeDepth(device: Device, channelKey: string): number | null {
+  const legacyKey = channelKey === 'swt_1' ? 'swt_wm1' : channelKey === 'swt_2' ? 'swt_wm2' : null;
   const raw = device.soilMoistureProbeDepths?.[channelKey]
-    ?? device.soil_moisture_probe_depths_json?.[channelKey];
+    ?? device.soil_moisture_probe_depths_json?.[channelKey]
+    ?? (legacyKey ? device.soilMoistureProbeDepths?.[legacyKey] : undefined)
+    ?? (legacyKey ? device.soil_moisture_probe_depths_json?.[legacyKey] : undefined);
   return raw != null && Number.isFinite(Number(raw)) && Number(raw) > 0 ? Number(raw) : null;
 }
 
-function sensorLabel(device: Device, channelKey: 'swt_wm1' | 'swt_wm2', fallback: string): string {
+function sensorLabel(device: Device, channelKey: 'swt_1' | 'swt_2', fallback: string): string {
   const depthCm = probeDepth(device, channelKey);
   return depthCm != null ? `${fallback} (${depthCm} cm)` : fallback;
 }
@@ -56,16 +60,16 @@ const ConfigPanel: React.FC<{
   const ref = useRef<HTMLDivElement>(null);
   const [busy, setBusy] = useState<'interval' | 'enable' | 'depths' | null>(null);
   const [intervalMinutesInput, setIntervalMinutesInput] = useState('');
-  const [swtDepth1Input, setSwtDepth1Input] = useState(formatDepthInput(probeDepth(device, 'swt_wm1')));
-  const [swtDepth2Input, setSwtDepth2Input] = useState(formatDepthInput(probeDepth(device, 'swt_wm2')));
+  const [swtDepth1Input, setSwtDepth1Input] = useState(formatDepthInput(probeDepth(device, 'swt_1')));
+  const [swtDepth2Input, setSwtDepth2Input] = useState(formatDepthInput(probeDepth(device, 'swt_2')));
   const [error, setError] = useState<string | null>(null);
   const [info, setInfo] = useState<string | null>(null);
 
   useDismissOnPointerDown(ref, onClose);
 
   useEffect(() => {
-    setSwtDepth1Input(formatDepthInput(probeDepth(device, 'swt_wm1')));
-    setSwtDepth2Input(formatDepthInput(probeDepth(device, 'swt_wm2')));
+    setSwtDepth1Input(formatDepthInput(probeDepth(device, 'swt_1')));
+    setSwtDepth2Input(formatDepthInput(probeDepth(device, 'swt_2')));
   }, [device]);
 
   const parseMinutes = (): number | null => {
@@ -147,10 +151,10 @@ const ConfigPanel: React.FC<{
 
     const soilMoistureProbeDepths: Record<string, number> = {};
     if (swtDepth1Cm != null) {
-      soilMoistureProbeDepths.swt_wm1 = swtDepth1Cm;
+      soilMoistureProbeDepths.swt_1 = swtDepth1Cm;
     }
     if (swtDepth2Cm != null) {
-      soilMoistureProbeDepths.swt_wm2 = swtDepth2Cm;
+      soilMoistureProbeDepths.swt_2 = swtDepth2Cm;
     }
 
     setBusy('depths');
@@ -158,8 +162,8 @@ const ConfigPanel: React.FC<{
     setInfo(null);
     try {
       const updated = await deviceMetadataAPI.setSoilMoistureDepths(device.deveui, soilMoistureProbeDepths);
-      setSwtDepth1Input(formatDepthInput(probeDepth(updated, 'swt_wm1')));
-      setSwtDepth2Input(formatDepthInput(probeDepth(updated, 'swt_wm2')));
+      setSwtDepth1Input(formatDepthInput(probeDepth(updated, 'swt_1')));
+      setSwtDepth2Input(formatDepthInput(probeDepth(updated, 'swt_2')));
       setInfo(t('kiwiSensor.depthSaved', {
         defaultValue: 'Soil moisture channel depths saved. Leave blank or enter 0 to mark a channel as not connected.',
       }));
@@ -302,7 +306,8 @@ const ConfigPanel: React.FC<{
 export const KiwiSensorCard: React.FC<KiwiSensorCardProps> = ({ device, onRemove, onUpdate }) => {
   const { t } = useTranslation('devices');
   const { t: tc } = useTranslation('common');
-  const { swt_wm1, swt_wm2, light_lux, ambient_temperature, relative_humidity } = device.latest_data;
+  const { light_lux, ambient_temperature, relative_humidity } = device.latest_data;
+  const [swt1, swt2] = canonicalSwtChannels(device.latest_data);
   const lastSeenStr = device.last_seen ?? null;
   const lastSeen = lastSeenStr ? new Date(lastSeenStr) : null;
   const minutesAgo = lastSeen
@@ -421,17 +426,17 @@ export const KiwiSensorCard: React.FC<KiwiSensorCardProps> = ({ device, onRemove
       <div className="grid grid-cols-1 gap-3">
         <div className="bg-[var(--card)] rounded-lg p-3">
           <p className="text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)] mb-1">
-            {sensorLabel(device, 'swt_wm1', t('kiwiSensor.soilWaterTension1'))}
+            {sensorLabel(device, 'swt_1', t('kiwiSensor.soilWaterTension1'))}
           </p>
-          {renderValue('swt_wm1', swt_wm1 !== undefined ? `${swt_wm1.toFixed(1)} kPa` : null)}
+          {renderValue('swt_1', swt1 != null ? `${swt1.toFixed(1)} kPa` : null)}
         </div>
 
-        {swt_wm2 !== undefined && (
+        {swt2 != null && (
           <div className="bg-[var(--card)] rounded-lg p-3">
             <p className="text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)] mb-1">
-              {sensorLabel(device, 'swt_wm2', t('kiwiSensor.soilWaterTension2'))}
+              {sensorLabel(device, 'swt_2', t('kiwiSensor.soilWaterTension2'))}
             </p>
-            {renderValue('swt_wm2', `${swt_wm2.toFixed(1)} kPa`)}
+            {renderValue('swt_2', `${swt2.toFixed(1)} kPa`)}
           </div>
         )}
 

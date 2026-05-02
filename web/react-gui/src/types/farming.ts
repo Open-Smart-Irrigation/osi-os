@@ -16,11 +16,11 @@ export interface Device {
 
   // Specific data payload matching Node-RED output
   latest_data: {
-    swt_wm1?: number;           // Soil Water Tension 1 (kPa) - 0 to 200
-    swt_wm2?: number;           // Soil Water Tension 2 (kPa)
-    swt_1?: number | null;      // Chameleon SWT channel 1 (kPa)
-    swt_2?: number | null;      // Chameleon SWT channel 2 (kPa)
-    swt_3?: number | null;      // Chameleon SWT channel 3 (kPa)
+    swt_wm1?: number;           // Legacy Kiwi SWT channel 1 alias (kPa)
+    swt_wm2?: number;           // Legacy Kiwi SWT channel 2 alias (kPa)
+    swt_1?: number | null;      // Canonical SWT channel 1 (kPa)
+    swt_2?: number | null;      // Canonical SWT channel 2 (kPa)
+    swt_3?: number | null;      // Canonical SWT channel 3 (kPa)
     light_lux?: number;         // Light intensity
     ambient_temperature?: number;
     relative_humidity?: number;

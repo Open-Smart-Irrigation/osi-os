@@ -125,7 +125,8 @@ function tableColumns(dbPath, tableName) {
   assertExcludes(funcOf('dendro-readings-insert-fn'), 'd.isChameleon === true', 'Dendrometer insert no longer skips Chameleon frames by type');
 
   assertIncludes(funcOf('lsn50-sql-fn'), 'swt_1, swt_2, swt_3', 'device_data insert stores canonical SWT channels');
-  assertIncludes(funcOf('format-devices'), 'dd.swt_1', 'GET /api/devices selects SWT1');
+  assertIncludes(funcOf('format-devices'), 'COALESCE(dd.swt_1, dd.swt_wm1) AS swt_1', 'GET /api/devices selects canonical SWT1 with Kiwi fallback');
+  assertIncludes(funcOf('format-devices'), 'COALESCE(dd.swt_2, dd.swt_wm2) AS swt_2', 'GET /api/devices selects canonical SWT2 with Kiwi fallback');
   assertIncludes(funcOf('format-devices'), 'msg.devices_to_format = msg.payload || [];', 'GET /api/devices keeps device rows request-scoped');
   assertExcludes(funcOf('format-devices'), "flow.set('devices_to_format'", 'GET /api/devices must not store request rows in flow context');
   assertIncludes(funcOf('merge-device-data'), 'chameleon_enabled: d.chameleon_enabled ?? 0', 'GET /api/devices returns Chameleon enable flag');
@@ -134,6 +135,8 @@ function tableColumns(dbPath, tableName) {
   assertIncludes(funcOf('sensor-history-fn'), "'swt_1'", 'sensor history allows SWT1');
   assertIncludes(funcOf('sensor-history-fn'), "'swt_2'", 'sensor history allows SWT2');
   assertIncludes(funcOf('sensor-history-fn'), "'swt_3'", 'sensor history allows SWT3');
+  assertIncludes(funcOf('sensor-history-fn'), "swt_1: 'COALESCE(dd.swt_1, dd.swt_wm1)'", 'sensor history coalesces canonical SWT1 with Kiwi fallback');
+  assertIncludes(funcOf('sensor-history-fn'), "swt_2: 'COALESCE(dd.swt_2, dd.swt_wm2)'", 'sensor history coalesces canonical SWT2 with Kiwi fallback');
   assertIncludes(funcOf('d0b2b1c1a937e16d'), "ds.type_id = 'DRAGINO_LSN50' AND COALESCE(ds.chameleon_enabled,0) = 1", 'scheduler includes Chameleon-enabled LSN50 SWT');
   assertIncludes(funcOf('d0b2b1c1a937e16d'), 'COALESCE(dd.swt_3, NULL)', 'SWT_AVG expression handles SWT3');
 
