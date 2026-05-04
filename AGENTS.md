@@ -40,6 +40,7 @@ This repo uses Superpowers as the default execution framework and selected Matt 
 > As of `2026-04-29`, Terra mobile/UX/VWC work is merged into `osi-server` `main` (`81fca4c`), and STREGA runtime recovery is merged into `osi-os` `main` (`7d057377`). The LSN50 dendrometer decoder work remains intentionally unmerged on `feature/lsn50-dendrometer-decoder-claude`.
 > As of `2026-05-01`, standalone Dragino LSN50 v2 Chameleon firmware work lives in `/home/phil/Repos/LoRa_STM32-claude` on `feature/chameleon-i2c-reader` in the Project-OSI `LoRa_STM32` fork. The firmware work is intentionally separate from OSI OS / server integration. Planning/reference docs are in `docs/plans/2026-04-30-lsn50-chameleon-i2c-firmware.md` and `docs/specs/2026-04-30-via-chameleon-hardware-reference.md`.
 > As of `2026-05-03`, `osi-server` `main` includes and has deployed the full Chameleon cloud mirror/SWT integration (`798434b`) to the live VPS via backend-only rebuild. `osi-os` `main` includes Chameleon decode/local persistence work, while the full edge Chameleon SWT UI/calibration branch (`feature/chameleon-swt-integration`) has been deployed to `kaba100` but remains separate until explicitly merged.
+> As of `2026-05-03`, the cross-repo review/refactor work is documented in [docs/reviews/2026-05-03-osi-os-server-consolidated-review.md](/home/phil/Repos/osi-os/docs/reviews/2026-05-03-osi-os-server-consolidated-review.md), [docs/reviews/2026-05-03-sync-protocol-architecture-review.md](/home/phil/Repos/osi-os/docs/reviews/2026-05-03-sync-protocol-architecture-review.md), and the authoritative umbrella spec [docs/specs/2026-05-03-consolidated-remediation-design.md](/home/phil/Repos/osi-os/docs/specs/2026-05-03-consolidated-remediation-design.md). The older [docs/specs/2026-05-03-sync-contract-refactor-design.md](/home/phil/Repos/osi-os/docs/specs/2026-05-03-sync-contract-refactor-design.md) is only a pointer to the umbrella spec.
 
 ---
 
@@ -341,6 +342,8 @@ Constraints:
 Tracked as GitHub Issues: https://github.com/Open-Smart-Irrigation/osi-os/issues
 
 Key open areas in `osi-os`: S2120 history for unique params (#33), LSN50 ADC display (#34), and i18n (#47).
+
+Cross-repo remediation planning from the 2026-05-03 review is captured in [docs/specs/2026-05-03-consolidated-remediation-design.md](/home/phil/Repos/osi-os/docs/specs/2026-05-03-consolidated-remediation-design.md). Highest-priority first slice: prediction-service auth/path hotfixes, `sync_inbox(event_uuid)` uniqueness, edge valve safety watchdog, edge `applied_commands` command dedupe, and per-event sync results with selective edge outbox delivery marking.
 
 Terra follow-up implementation work now lives primarily in `osi-server`:
 - active Terra backlog: `osi-server#9`, `#13`, `#18` through `#25`
