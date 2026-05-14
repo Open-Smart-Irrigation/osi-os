@@ -86,6 +86,64 @@ assert.strictEqual(chameleon.Chameleon_R2_Ohm_Raw, 10200);
 assert.strictEqual(chameleon.Chameleon_R3_Ohm_Raw, 102200);
 assert.strictEqual(chameleon.Chameleon_Array_ID, '286D6ADB0F0000F1');
 
+const chameleonV2Frame = [
+  0x03, 0xf2,
+  0x07, 0xe4,
+  0x0b, 0xd6,
+  0x08,
+  0x21,
+  0x02,
+  0x00,
+  0x07, 0xc3,
+  0x00, 0x00, 0x04, 0x4c,
+  0x00, 0x00, 0x27, 0x74,
+  0x00, 0x01, 0x8b, 0x50,
+  0x28, 0x6d, 0x6a, 0xdb, 0x0f, 0x00, 0x00, 0xf1
+];
+
+const chameleonV2 = decode(chameleonV2Frame);
+assert.strictEqual(chameleonV2.Work_mode, '3ADC+IIC');
+assert.strictEqual(chameleonV2.BatV, 3.3);
+assert.strictEqual(chameleonV2.ADC_CH0V, 1.01);
+assert.strictEqual(chameleonV2.ADC_CH1V, 2.02);
+assert.strictEqual(chameleonV2.ADC_CH4V, 3.03);
+assert.strictEqual(chameleonV2.Chameleon_Payload_Version, 2);
+assert.strictEqual(chameleonV2.Chameleon_Status_Flags, 0);
+assert.strictEqual(chameleonV2.Chameleon_Data_Invalid, false);
+assert.strictEqual(chameleonV2.Chameleon_I2C_Missing, undefined);
+assert.strictEqual(chameleonV2.Chameleon_Timeout, undefined);
+assert.strictEqual(chameleonV2.Chameleon_TempC, 19.87);
+assert.strictEqual(chameleonV2.Chameleon_R1_Ohm_Comp, 1100);
+assert.strictEqual(chameleonV2.Chameleon_R2_Ohm_Comp, 10100);
+assert.strictEqual(chameleonV2.Chameleon_R3_Ohm_Comp, 101200);
+assert.strictEqual(chameleonV2.Chameleon_R1_Ohm_Raw, undefined);
+assert.strictEqual(chameleonV2.Chameleon_R2_Ohm_Raw, undefined);
+assert.strictEqual(chameleonV2.Chameleon_R3_Ohm_Raw, undefined);
+assert.strictEqual(chameleonV2.Chameleon_Array_ID, '286D6ADB0F0000F1');
+
+const chameleonV2FaultFrame = chameleonV2Frame.slice();
+chameleonV2FaultFrame[9] = 0x07;
+for (let i = 10; i < chameleonV2FaultFrame.length; i += 1) {
+  chameleonV2FaultFrame[i] = 0x00;
+}
+const chameleonV2Fault = decode(chameleonV2FaultFrame);
+assert.strictEqual(chameleonV2Fault.Chameleon_Payload_Version, 2);
+assert.strictEqual(chameleonV2Fault.Chameleon_Status_Flags, 0x07);
+assert.strictEqual(chameleonV2Fault.Chameleon_Data_Invalid, true);
+assert.strictEqual(chameleonV2Fault.Chameleon_Temp_Fault, true);
+assert.strictEqual(chameleonV2Fault.Chameleon_ID_Fault, true);
+assert.strictEqual(chameleonV2Fault.Chameleon_TempC, 'NULL');
+assert.strictEqual(chameleonV2Fault.Chameleon_R1_Ohm_Comp, 'NULL');
+assert.strictEqual(chameleonV2Fault.Chameleon_Array_ID, 'NULL');
+
+const chameleonV2OpenFrame = chameleonV2Frame.slice();
+chameleonV2OpenFrame.splice(12, 4, 0x00, 0x98, 0x96, 0x80);
+const chameleonV2Open = decode(chameleonV2OpenFrame);
+assert.strictEqual(chameleonV2Open.Chameleon_CH1_Open, true);
+assert.strictEqual(chameleonV2Open.Chameleon_CH2_Open, false);
+assert.strictEqual(chameleonV2Open.Chameleon_R1_Ohm_Comp, 'NULL');
+assert.strictEqual(chameleonV2Open.Chameleon_R2_Ohm_Comp, 10100);
+
 const faultFrame = chameleonFrame.slice();
 faultFrame[9] = 0x07; // I2C missing + timeout + temperature fault
 for (let i = 10; i < faultFrame.length; i += 1) {

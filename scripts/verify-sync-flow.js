@@ -1829,6 +1829,8 @@ expectFileIncludes('strega_gen1_decoder.js', stregaCodecSource, 'function Decode
 expectFileIncludes('dragino_lsn50_decoder.js', lsn50CodecSource, 'function decodeUplink(input)', 'ships the LSN50 ChirpStack decoder entry point');
 expectFileIncludes('dragino_lsn50_decoder.js', lsn50CodecSource, 'decode.Work_mode="3ADC+IIC";', 'ships the working MOD3 decoder path from the live LSN50 profile');
 expectFileIncludes('dragino_lsn50_decoder.js', lsn50CodecSource, 'decode.ADC_CH1V= (bytes[2]<<8 | bytes[3])/1000;', 'ships the working LSN50 CH1 decoder logic');
+expectFileIncludes('dragino_lsn50_decoder.js', lsn50CodecSource, 'function isChameleonV2Frame(bytes)', 'ships Chameleon V2 frame detection');
+expectFileIncludes('dragino_lsn50_decoder.js', lsn50CodecSource, 'decode.Chameleon_Data_Invalid', 'ships simplified Chameleon V2 status handling');
 
 const dbHelperPath = dbHelperCandidates.find((candidate) => fs.existsSync(candidate));
 if (!dbHelperPath) {
