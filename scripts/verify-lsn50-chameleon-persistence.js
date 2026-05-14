@@ -82,6 +82,7 @@ assertIncludes(decode, 'Chameleon_Payload_Version', 'decode reads payload versio
 assertIncludes(decode, 'chameleonR1OhmComp', 'decode normalizes R1 compensated');
 assertIncludes(decode, 'chameleonR1OhmRaw', 'decode normalizes R1 raw');
 assertIncludes(decode, 'Chameleon_Array_ID', 'decode normalizes array id');
+assertIncludes(decode, 'chameleonDataInvalid', 'decode normalizes V2 Chameleon data invalid flag');
 
 const apply = funcOf('lsn50-apply-config');
 assertIncludes(apply, '} else if (d.isChameleon === true) {', 'chameleon branch sits between MOD9 and dendrometer logic');
@@ -128,6 +129,7 @@ compileFunctionNode('dendro-readings-insert-fn');
       isChameleon: true,
       chameleonPayloadVersion: 1,
       chameleonStatusFlags: 0,
+      chameleonDataInvalid: 0,
       chameleonI2cMissing: 0,
       chameleonTimeout: 0,
       chameleonTempFault: 0,
@@ -166,6 +168,37 @@ compileFunctionNode('dendro-readings-insert-fn');
   assert.strictEqual(normal.writes[0].params[24], 2, 'f_port is stored when present');
   assert.strictEqual(normal.writes[0].params[25], 123, 'f_cnt is stored when present');
   assert.strictEqual(normal.closeCount, 1, 'normal write closes the database handle');
+
+  const v2Msg = JSON.parse(JSON.stringify(normalMsg));
+  v2Msg.formattedData.chameleonPayloadVersion = 2;
+  delete v2Msg.formattedData.chameleonR1OhmRaw;
+  delete v2Msg.formattedData.chameleonR2OhmRaw;
+  delete v2Msg.formattedData.chameleonR3OhmRaw;
+  const v2 = await runFunctionNode('chameleon-readings-insert-fn', v2Msg);
+  assert.strictEqual(v2.writes.length, 1, 'v2 chameleon payload writes one row');
+  assert.strictEqual(v2.writes[0].params[2], 2, 'payload_version stores v2');
+  assert.strictEqual(v2.writes[0].params[12], 1168, 'v2 r1_ohm_comp is stored');
+  assert.strictEqual(v2.writes[0].params[15], null, 'v2 omitted r1_ohm_raw stores NULL');
+  assert.strictEqual(v2.writes[0].params[16], null, 'v2 omitted r2_ohm_raw stores NULL');
+  assert.strictEqual(v2.writes[0].params[17], null, 'v2 omitted r3_ohm_raw stores NULL');
+
+  const v2InvalidMsg = JSON.parse(JSON.stringify(v2Msg));
+  v2InvalidMsg.formattedData.chameleonStatusFlags = 1;
+  v2InvalidMsg.formattedData.chameleonDataInvalid = 1;
+  v2InvalidMsg.formattedData.chameleonI2cMissing = null;
+  v2InvalidMsg.formattedData.chameleonTimeout = null;
+  v2InvalidMsg.formattedData.chameleonTempC = 0;
+  v2InvalidMsg.formattedData.chameleonR1OhmComp = 0;
+  v2InvalidMsg.formattedData.chameleonArrayId = 'SHOULD_NOT_STORE';
+  const v2Invalid = await runFunctionNode('chameleon-readings-insert-fn', v2InvalidMsg);
+  assert.strictEqual(v2Invalid.writes[0].params[3], 1, 'v2 simplified status_flags stores data-invalid bit');
+  assert.strictEqual(v2Invalid.writes[0].params[4], null, 'v2 i2c_missing remains NULL when not sent');
+  assert.strictEqual(v2Invalid.writes[0].params[5], null, 'v2 timeout remains NULL when not sent');
+  assert.strictEqual(v2Invalid.writes[0].params[11], null, 'v2 temp_c is nulled when data_invalid is set');
+  assert.strictEqual(v2Invalid.writes[0].params[12], null, 'v2 r1_ohm_comp is nulled when data_invalid is set');
+  assert.strictEqual(v2Invalid.writes[0].params[13], null, 'v2 r2_ohm_comp is nulled when data_invalid is set');
+  assert.strictEqual(v2Invalid.writes[0].params[14], null, 'v2 r3_ohm_comp is nulled when data_invalid is set');
+  assert.strictEqual(v2Invalid.writes[0].params[18], null, 'v2 array_id is nulled when data_invalid is set');
 
   const faultMsg = JSON.parse(JSON.stringify(normalMsg));
   faultMsg.formattedData.chameleonI2cMissing = 1;
