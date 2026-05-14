@@ -94,9 +94,9 @@ function decodeChameleonV2(decode, bytes) {
   decode.Chameleon_Data_Invalid = (status_flags & 0x01) ? true : false;
   decode.Chameleon_Temp_Fault = (status_flags & 0x02) ? true : false;
   decode.Chameleon_ID_Fault = (status_flags & 0x04) ? true : false;
-  decode.Chameleon_CH1_Open = (!decode.Chameleon_Data_Invalid && r1_ohm_comp == open_ohm) ? true : false;
-  decode.Chameleon_CH2_Open = (!decode.Chameleon_Data_Invalid && r2_ohm_comp == open_ohm) ? true : false;
-  decode.Chameleon_CH3_Open = (!decode.Chameleon_Data_Invalid && r3_ohm_comp == open_ohm) ? true : false;
+  decode.Chameleon_CH1_Open = decode.Chameleon_Data_Invalid ? null : (r1_ohm_comp == open_ohm);
+  decode.Chameleon_CH2_Open = decode.Chameleon_Data_Invalid ? null : (r2_ohm_comp == open_ohm);
+  decode.Chameleon_CH3_Open = decode.Chameleon_Data_Invalid ? null : (r3_ohm_comp == open_ohm);
 
   if(decode.Chameleon_Data_Invalid || decode.Chameleon_Temp_Fault || soil_temp_c_x100 == -12700)
     decode.Chameleon_TempC = "NULL";

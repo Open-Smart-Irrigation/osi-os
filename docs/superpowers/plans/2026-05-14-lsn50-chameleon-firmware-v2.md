@@ -429,7 +429,8 @@ int main(void) {
     assert_contains(lora, "#ifdef USE_CHAMELEON\n\tmode=3;\n#endif", "eeprom read forces mode 3");
     assert_contains(at_mod_set, "#ifdef USE_CHAMELEON\n\tif (workmode != 3)\n\t{\n\t\tPPRINTF(\"Chameleon firmware supports MOD=3 only\\r\\n\");\n\t\treturn AT_PARAM_ERROR;\n\t}\n#endif", "at mod rejects non-3 chameleon mode");
     assert_contains(at_mod_set, "Chameleon firmware supports MOD=3 only", "at mod chameleon message");
-    assert_contains(downlink_mod_case, "#ifdef USE_CHAMELEON\n\t\t\t\t\tmode=0x03;\n#else\n\t\t\t\t\tmode=AppData->Buff[1];\n#endif", "downlink mod clamps chameleon mode");
+    assert_contains(downlink_mod_case, "#ifdef USE_CHAMELEON\n\t\t\t\t\t\tif(AppData->Buff[1]==0x03)\n\t\t\t\t\t\t{\n\t\t\t\t\t\t\tmode=0x03;", "downlink mod accepts only chameleon mode 3");
+    assert_contains(downlink_mod_case, "#else\n\t\t\t\t\t\tmode=AppData->Buff[1];", "stock downlink mod remains configurable");
 
     free(downlink_mod_case);
     free(at_mod_set);
@@ -543,19 +544,28 @@ In `src/at.c::at_MOD_set()`, after `workmode` is parsed and validated as a numer
 
 This keeps stock builds configurable while making the Chameleon image a dedicated MOD3 firmware even when an operator sends `AT+MOD=<n>`.
 
-- [ ] **Step 7: Clamp downlink MOD writes in Chameleon builds**
+- [ ] **Step 7: Reject non-MOD3 downlink MOD writes in Chameleon builds**
 
-In `src/main.c`, inside the downlink `case 0x0A:` MOD handler, keep the stock validity check but store `0x03` under `USE_CHAMELEON`:
+In `src/main.c`, inside the downlink `case 0x0A:` MOD handler, keep the stock validity check but only acknowledge/store MOD3 under `USE_CHAMELEON`:
 
 ```c
 #ifdef USE_CHAMELEON
-					mode=0x03;
+					if(AppData->Buff[1]==0x03)
+					{
+						mode=0x03;
+						EEPROM_Store_Config();
+						atz_flags=1;
+						rxpr_flags=1;
+					}
 #else
 					mode=AppData->Buff[1];
+					EEPROM_Store_Config();
+					atz_flags=1;
+					rxpr_flags=1;
 #endif
 ```
 
-This prevents queued cloud/downlink mode commands from moving already-deployed Chameleon devices out of the acquisition path.
+This prevents queued cloud/downlink mode commands from moving already-deployed Chameleon devices out of the acquisition path or reporting a non-MOD3 write as applied.
 
 - [ ] **Step 8: Run host tests**
 
