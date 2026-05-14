@@ -75,7 +75,8 @@ These notes consolidate follow-up review findings for the implementation agent:
 
 ## Implementation improvements
 
-- **Default Chameleon FDR mode to MOD=3.** Stock Dragino `fdr_config()` sets `mode=1` and `APP_TX_DUTYCYCLE=300000` ms. For the Chameleon-only firmware target, guard a small `USE_CHAMELEON` override in `fdr_config()` so fresh/FDR devices default to `mode=3` and enter the Chameleon MOD=3 acquisition/uplink path without requiring an immediate AT/downlink `AT+MOD=3` command. Keep this scoped to the Chameleon build so stock LSN50 behavior is unchanged. Existing EEPROM config still overrides C/FDR defaults on normal boot, so already configured devices must be set to MOD=3 via AT/downlink or factory-reset/EEPROM-cleared during rollout.
+- **Make the Chameleon image MOD=3-only.** Stock Dragino `fdr_config()` sets `mode=1` and `APP_TX_DUTYCYCLE=300000` ms. For the Chameleon-only firmware target, initialize `mode=3`, set FDR mode to 3, clamp stale EEPROM-loaded modes back to 3 after `EEPROM_Read_Config()`, and guard AT/downlink MOD setters so runtime commands cannot move the firmware out of MOD=3. Keep this scoped to `USE_CHAMELEON` so stock LSN50 behavior is unchanged.
+- **Next firmware revision: compact Chameleon V2 payload.** This Chameleon-specific firmware should force MOD3 after config reads so stale EEPROM cannot leave the device in another LSN50 mode. Keep the stock MOD3 first 8 bytes, keep payload version/a simplified status byte/temp/compensated resistances/array ID, and omit the three raw resistance fields from routine uplinks. This reduces the frame from 44 to 32 bytes. Raw values remain a diagnostics-only concern; SWT conversion uses compensated resistance. V2 status keeps only data-invalid, temp-fault, and ID-fault bits; per-channel open state is derived from compensated `10_000_000` ohm readings.
 
 ---
 
