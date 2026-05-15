@@ -30,6 +30,13 @@ function compileFunctionNode(id) {
   new vm.Script(`(async function(msg,node,flow,env,context,global,get,set){${source}\n})`);
 }
 
+function assertStatus(status, expected, label) {
+  assert(status, `${label}: missing status`);
+  assert.strictEqual(status.fill, expected.fill, `${label}: fill`);
+  assert.strictEqual(status.shape, expected.shape, `${label}: shape`);
+  assert.strictEqual(status.text, expected.text, `${label}: text`);
+}
+
 async function runFunctionNode(id, msg) {
   const source = funcOf(id);
   const writes = [];
@@ -75,6 +82,7 @@ const syncInit = funcOf('sync-init-fn');
 assertIncludes(syncInit, 'CREATE TABLE IF NOT EXISTS chameleon_readings', 'schema creates chameleon_readings');
 assertIncludes(syncInit, 'idx_chameleon_readings_deveui_time', 'schema indexes by device/time');
 assertIncludes(syncInit, 'idx_chameleon_readings_array_id', 'schema indexes array id');
+assertIncludes(syncInit, 'data_invalid INTEGER DEFAULT 0', 'schema creates chameleon_readings.data_invalid');
 
 const decode = funcOf('lsn50-decode-fn');
 assertIncludes(decode, 'isChameleon', 'decode marks chameleon payloads');
@@ -98,7 +106,10 @@ assertIncludes(chameleonInsert, 'r1_ohm_comp', 'insert stores compensated resist
 assertIncludes(chameleonInsert, 'r1_ohm_raw', 'insert stores raw resistance');
 assertIncludes(chameleonInsert, 'payload_b64', 'insert stores raw payload for replay');
 assertIncludes(chameleonInsert, 'rawPayloadB64 is ChirpStack data.data', 'insert documents payload_b64 replay semantics');
+assertIncludes(chameleonInsert, 'const statusFlags = toInt(d.chameleonStatusFlags);', 'insert normalizes status flags once');
+assertIncludes(chameleonInsert, 'const dataInvalidFlag = dataInvalid ? 1 : 0;', 'insert stores computed data_invalid');
 assertIncludes(chameleonInsert, 'const tempInvalid = dataInvalid || toInt(d.chameleonTempFault) === 1;', 'insert explicitly nulls temp_c on temp_fault');
+assertIncludes(chameleonInsert, "statusFlags == null ? 'grey' : (statusFlags ? 'yellow' : 'green')", 'insert status handles unknown flags');
 assertIncludes(chameleonInsert, 'return msg;', 'insert function passes through downstream flow');
 
 const dendroInsert = funcOf('dendro-readings-insert-fn');
@@ -158,16 +169,26 @@ compileFunctionNode('dendro-readings-insert-fn');
   assert.strictEqual(normal.result, normalMsg, 'normal chameleon payload passes downstream');
   assert.strictEqual(normal.writes.length, 1, 'normal chameleon payload writes one row');
   assert(normal.writes[0].sql.includes('INSERT INTO chameleon_readings'), 'normal write targets chameleon_readings');
-  assert.strictEqual(normal.writes[0].params.length, 26, 'normal write uses all insert parameters');
+  assert.strictEqual(normal.writes[0].params.length, 27, 'normal write uses all insert parameters');
   assert.strictEqual(normal.writes[0].params[0], 'A84041FFFFFFFFFF', 'devEui is stored uppercase');
-  assert.strictEqual(normal.writes[0].params[11], 28.43, 'temp_c is stored for valid data');
-  assert.strictEqual(normal.writes[0].params[12], 1168, 'r1_ohm_comp is stored for valid data');
-  assert.strictEqual(normal.writes[0].params[15], 1168, 'r1_ohm_raw is stored for valid data');
-  assert.strictEqual(normal.writes[0].params[18], '286D6ADB0F0000F1', 'array_id is stored for valid data');
-  assert.strictEqual(normal.writes[0].params[23], 'AAECAwQ=', 'payload_b64 stores the LoRaWAN payload base64');
-  assert.strictEqual(normal.writes[0].params[24], 2, 'f_port is stored when present');
-  assert.strictEqual(normal.writes[0].params[25], 123, 'f_cnt is stored when present');
+  assert.strictEqual(normal.writes[0].params[4], 0, 'data_invalid is stored for valid data');
+  assert.strictEqual(normal.writes[0].params[5], 0, 'i2c_missing flag is persisted');
+  assert.strictEqual(normal.writes[0].params[12], 28.43, 'temp_c is stored for valid data');
+  assert.strictEqual(normal.writes[0].params[13], 1168, 'r1_ohm_comp is stored for valid data');
+  assert.strictEqual(normal.writes[0].params[16], 1168, 'r1_ohm_raw is stored for valid data');
+  assert.strictEqual(normal.writes[0].params[19], '286D6ADB0F0000F1', 'array_id is stored for valid data');
+  assert.strictEqual(normal.writes[0].params[24], 'AAECAwQ=', 'payload_b64 stores the LoRaWAN payload base64');
+  assert.strictEqual(normal.writes[0].params[25], 2, 'f_port is stored when present');
+  assert.strictEqual(normal.writes[0].params[26], 123, 'f_cnt is stored when present');
   assert.strictEqual(normal.closeCount, 1, 'normal write closes the database handle');
+  assertStatus(normal.statuses[0], { fill: 'green', shape: 'dot', text: 'Chameleon stored a84041ffffffffff' }, 'valid flags show green status');
+
+  const unknownFlagsMsg = JSON.parse(JSON.stringify(normalMsg));
+  unknownFlagsMsg.formattedData.chameleonStatusFlags = null;
+  const unknownFlags = await runFunctionNode('chameleon-readings-insert-fn', unknownFlagsMsg);
+  assert.strictEqual(unknownFlags.writes[0].params[3], null, 'unknown status_flags stores NULL');
+  assert.strictEqual(unknownFlags.writes[0].params[4], 0, 'unknown flags with valid data stores data_invalid=0');
+  assertStatus(unknownFlags.statuses[0], { fill: 'grey', shape: 'dot', text: 'Chameleon stored a84041ffffffffff' }, 'unknown flags show grey status');
 
   const v2Msg = JSON.parse(JSON.stringify(normalMsg));
   v2Msg.formattedData.chameleonPayloadVersion = 2;
@@ -177,10 +198,10 @@ compileFunctionNode('dendro-readings-insert-fn');
   const v2 = await runFunctionNode('chameleon-readings-insert-fn', v2Msg);
   assert.strictEqual(v2.writes.length, 1, 'v2 chameleon payload writes one row');
   assert.strictEqual(v2.writes[0].params[2], 2, 'payload_version stores v2');
-  assert.strictEqual(v2.writes[0].params[12], 1168, 'v2 r1_ohm_comp is stored');
-  assert.strictEqual(v2.writes[0].params[15], null, 'v2 omitted r1_ohm_raw stores NULL');
-  assert.strictEqual(v2.writes[0].params[16], null, 'v2 omitted r2_ohm_raw stores NULL');
-  assert.strictEqual(v2.writes[0].params[17], null, 'v2 omitted r3_ohm_raw stores NULL');
+  assert.strictEqual(v2.writes[0].params[13], 1168, 'v2 r1_ohm_comp is stored');
+  assert.strictEqual(v2.writes[0].params[16], null, 'v2 omitted r1_ohm_raw stores NULL');
+  assert.strictEqual(v2.writes[0].params[17], null, 'v2 omitted r2_ohm_raw stores NULL');
+  assert.strictEqual(v2.writes[0].params[18], null, 'v2 omitted r3_ohm_raw stores NULL');
 
   const v2InvalidMsg = JSON.parse(JSON.stringify(v2Msg));
   v2InvalidMsg.formattedData.chameleonStatusFlags = 1;
@@ -195,16 +216,18 @@ compileFunctionNode('dendro-readings-insert-fn');
   v2InvalidMsg.formattedData.chameleonArrayId = 'SHOULD_NOT_STORE';
   const v2Invalid = await runFunctionNode('chameleon-readings-insert-fn', v2InvalidMsg);
   assert.strictEqual(v2Invalid.writes[0].params[3], 1, 'v2 simplified status_flags stores data-invalid bit');
-  assert.strictEqual(v2Invalid.writes[0].params[4], null, 'v2 i2c_missing remains NULL when not sent');
-  assert.strictEqual(v2Invalid.writes[0].params[5], null, 'v2 timeout remains NULL when not sent');
-  assert.strictEqual(v2Invalid.writes[0].params[8], null, 'v2 ch1_open remains NULL when data_invalid is set');
-  assert.strictEqual(v2Invalid.writes[0].params[9], null, 'v2 ch2_open remains NULL when data_invalid is set');
-  assert.strictEqual(v2Invalid.writes[0].params[10], null, 'v2 ch3_open remains NULL when data_invalid is set');
-  assert.strictEqual(v2Invalid.writes[0].params[11], null, 'v2 temp_c is nulled when data_invalid is set');
-  assert.strictEqual(v2Invalid.writes[0].params[12], null, 'v2 r1_ohm_comp is nulled when data_invalid is set');
-  assert.strictEqual(v2Invalid.writes[0].params[13], null, 'v2 r2_ohm_comp is nulled when data_invalid is set');
-  assert.strictEqual(v2Invalid.writes[0].params[14], null, 'v2 r3_ohm_comp is nulled when data_invalid is set');
-  assert.strictEqual(v2Invalid.writes[0].params[18], null, 'v2 array_id is nulled when data_invalid is set');
+  assert.strictEqual(v2Invalid.writes[0].params[4], 1, 'v2 data_invalid column stores computed invalid state');
+  assert.strictEqual(v2Invalid.writes[0].params[5], null, 'v2 i2c_missing remains NULL when not sent');
+  assert.strictEqual(v2Invalid.writes[0].params[6], null, 'v2 timeout remains NULL when not sent');
+  assert.strictEqual(v2Invalid.writes[0].params[9], null, 'v2 ch1_open remains NULL when data_invalid is set');
+  assert.strictEqual(v2Invalid.writes[0].params[10], null, 'v2 ch2_open remains NULL when data_invalid is set');
+  assert.strictEqual(v2Invalid.writes[0].params[11], null, 'v2 ch3_open remains NULL when data_invalid is set');
+  assert.strictEqual(v2Invalid.writes[0].params[12], null, 'v2 temp_c is nulled when data_invalid is set');
+  assert.strictEqual(v2Invalid.writes[0].params[13], null, 'v2 r1_ohm_comp is nulled when data_invalid is set');
+  assert.strictEqual(v2Invalid.writes[0].params[14], null, 'v2 r2_ohm_comp is nulled when data_invalid is set');
+  assert.strictEqual(v2Invalid.writes[0].params[15], null, 'v2 r3_ohm_comp is nulled when data_invalid is set');
+  assert.strictEqual(v2Invalid.writes[0].params[19], null, 'v2 array_id is nulled when data_invalid is set');
+  assertStatus(v2Invalid.statuses[0], { fill: 'yellow', shape: 'dot', text: 'Chameleon stored a84041ffffffffff' }, 'nonzero flags show yellow status');
 
   const faultMsg = JSON.parse(JSON.stringify(normalMsg));
   faultMsg.formattedData.chameleonI2cMissing = 1;
@@ -215,30 +238,31 @@ compileFunctionNode('dendro-readings-insert-fn');
   faultMsg.formattedData.chameleonArrayId = 'SHOULD_NOT_STORE';
   const fault = await runFunctionNode('chameleon-readings-insert-fn', faultMsg);
   assert.strictEqual(fault.writes.length, 1, 'fault chameleon payload still writes one row');
-  assert.strictEqual(fault.writes[0].params[4], 1, 'i2c_missing flag is persisted');
-  assert.strictEqual(fault.writes[0].params[11], null, 'temp_c is nulled when data is invalid');
-  assert.strictEqual(fault.writes[0].params[12], null, 'r1_ohm_comp is nulled when data is invalid');
-  assert.strictEqual(fault.writes[0].params[15], null, 'r1_ohm_raw is nulled when data is invalid');
-  assert.strictEqual(fault.writes[0].params[18], null, 'array_id is nulled when data is invalid');
+  assert.strictEqual(fault.writes[0].params[4], 1, 'data_invalid is set when i2c_missing is set');
+  assert.strictEqual(fault.writes[0].params[5], 1, 'i2c_missing flag is persisted');
+  assert.strictEqual(fault.writes[0].params[12], null, 'temp_c is nulled when data is invalid');
+  assert.strictEqual(fault.writes[0].params[13], null, 'r1_ohm_comp is nulled when data is invalid');
+  assert.strictEqual(fault.writes[0].params[16], null, 'r1_ohm_raw is nulled when data is invalid');
+  assert.strictEqual(fault.writes[0].params[19], null, 'array_id is nulled when data is invalid');
 
   const tempFaultMsg = JSON.parse(JSON.stringify(normalMsg));
   tempFaultMsg.formattedData.chameleonTempFault = 1;
   tempFaultMsg.formattedData.chameleonStatusFlags = 4;
   tempFaultMsg.formattedData.chameleonTempC = 0;
   const tempFault = await runFunctionNode('chameleon-readings-insert-fn', tempFaultMsg);
-  assert.strictEqual(tempFault.writes[0].params[6], 1, 'temp_fault flag is persisted');
-  assert.strictEqual(tempFault.writes[0].params[11], null, 'temp_c is nulled on temp_fault');
-  assert.strictEqual(tempFault.writes[0].params[12], 1168, 'r1_ohm_comp is preserved on temp_fault-only frames');
-  assert.strictEqual(tempFault.writes[0].params[18], '286D6ADB0F0000F1', 'array_id is preserved on temp_fault-only frames');
+  assert.strictEqual(tempFault.writes[0].params[7], 1, 'temp_fault flag is persisted');
+  assert.strictEqual(tempFault.writes[0].params[12], null, 'temp_c is nulled on temp_fault');
+  assert.strictEqual(tempFault.writes[0].params[13], 1168, 'r1_ohm_comp is preserved on temp_fault-only frames');
+  assert.strictEqual(tempFault.writes[0].params[19], '286D6ADB0F0000F1', 'array_id is preserved on temp_fault-only frames');
 
   const emptyFieldMsg = JSON.parse(JSON.stringify(normalMsg));
   emptyFieldMsg.formattedData.chameleonTempC = '';
   emptyFieldMsg.formattedData.chameleonR1OhmComp = '';
   emptyFieldMsg.formattedData.fCnt = undefined;
   const emptyFields = await runFunctionNode('chameleon-readings-insert-fn', emptyFieldMsg);
-  assert.strictEqual(emptyFields.writes[0].params[11], null, 'empty temp string stores NULL');
-  assert.strictEqual(emptyFields.writes[0].params[12], null, 'empty resistance string stores NULL');
-  assert.strictEqual(emptyFields.writes[0].params[25], null, 'missing fCnt stores NULL');
+  assert.strictEqual(emptyFields.writes[0].params[12], null, 'empty temp string stores NULL');
+  assert.strictEqual(emptyFields.writes[0].params[13], null, 'empty resistance string stores NULL');
+  assert.strictEqual(emptyFields.writes[0].params[26], null, 'missing fCnt stores NULL');
 
   console.log('LSN50 Chameleon persistence checks passed');
 })().catch((error) => {

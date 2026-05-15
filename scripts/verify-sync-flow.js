@@ -775,7 +775,7 @@ if (!refreshInject) {
 
 const bootstrapNode = findNodeByName('Build Cloud Bootstrap');
 if (bootstrapNode) {
-  for (const key of ['sensorData', 'dendroReadings', 'dendroDaily', 'zoneRecommendations', 'zoneEnvironments', 'gatewayLocations', 'irrigationEvents']) {
+  for (const key of ['sensorData', 'dendroReadings', 'chameleonReadings', 'dendroDaily', 'zoneRecommendations', 'zoneEnvironments', 'gatewayLocations', 'irrigationEvents']) {
     if (!bootstrapNode.func.includes(`${key}:`) && !bootstrapNode.func.includes(`${key},`) && !bootstrapNode.func.includes(`const ${key} =`)) {
       fail(`bootstrap payload missing ${key}`);
     } else {
@@ -953,6 +953,10 @@ expectIncludes('Build Cloud Bootstrap', 'const sensorDataRows = await q([', 'loa
 expectIncludes('Build Cloud Bootstrap', 'const sensorData = sensorDataRows.slice().reverse();', 'replays bootstrap sensor history oldest-to-newest');
 expectIncludes('Build Cloud Bootstrap', 'const dendroReadingsRows = await q([', 'loads bootstrap dendro history before reordering it');
 expectIncludes('Build Cloud Bootstrap', 'const dendroReadings = dendroReadingsRows.slice().reverse();', 'replays bootstrap dendro history oldest-to-newest');
+expectIncludes('Build Cloud Bootstrap', 'const chameleonReadingsRows = await q([', 'loads bootstrap Chameleon history before reordering it');
+expectIncludes('Build Cloud Bootstrap', 'const chameleonReadings = chameleonReadingsRows.slice().reverse();', 'replays bootstrap Chameleon history oldest-to-newest');
+expectIncludes('Build Cloud Bootstrap', "'  cr.data_invalid,'", 'includes Chameleon data_invalid in bootstrap readings');
+expectIncludes('Build Cloud Bootstrap', 'FROM chameleon_readings cr', 'loads Chameleon readings from the diagnostic table during bootstrap');
 expectIncludes('Build Cloud Bootstrap', 'function normalizeIsoTimestamp(value)', 'normalizes malformed edge timestamps before bootstrap sync');
 expectIncludes('Build Cloud Bootstrap', 'deleted_at: normalizeIsoTimestamp(z.deleted_at)', 'normalizes zone tombstone timestamps before bootstrap sync');
 expectIncludes('Build Cloud Bootstrap', 'prediction_card_enabled: !!Number(z.prediction_card_enabled || 0)', 'exports the prediction-card flag in bootstrap payloads');
@@ -1018,6 +1022,9 @@ expectIncludes('Run Force Sync', 'const sensorDataRows = await q([', 'loads forc
 expectIncludes('Run Force Sync', 'const sensorData = sensorDataRows.slice().reverse();', 'replays force-sync sensor history oldest-to-newest');
 expectIncludes('Run Force Sync', 'const dendroReadingsRows = await q([', 'loads force-sync dendro history before reordering it');
 expectIncludes('Run Force Sync', 'const dendroReadings = dendroReadingsRows.slice().reverse();', 'replays force-sync dendro history oldest-to-newest');
+expectIncludes('Run Force Sync', 'const chameleonReadingsRows = await q([', 'loads force-sync Chameleon history before reordering it');
+expectIncludes('Run Force Sync', 'const chameleonReadings = chameleonReadingsRows.slice().reverse();', 'replays force-sync Chameleon history oldest-to-newest');
+expectIncludes('Run Force Sync', "'  cr.data_invalid,'", 'includes Chameleon data_invalid in force-sync readings');
 expectIncludes('Run Force Sync', 'function normalizeIsoTimestamp(value)', 'normalizes malformed edge timestamps before forced bootstrap sync');
 expectIncludes('Run Force Sync', 'deleted_at: normalizeIsoTimestamp(z.deleted_at)', 'normalizes zone tombstone timestamps before forced bootstrap sync');
 expectIncludes('Run Force Sync', 'prediction_card_enabled: !!Number(z.prediction_card_enabled || 0)', 'exports the prediction-card flag in forced bootstrap payloads');
@@ -1110,6 +1117,8 @@ expectIncludes('Apply Config', 'd.dendroStemChangeUm = stemChange.stemChangeUm;'
 expectIncludes('Apply Config', 'dendro_baseline_pending = 0,', 'clears the pending-baseline flag when a new valid stem-change baseline is persisted');
 expectIncludes('Insert Chameleon Reading', 'INSERT INTO chameleon_readings', 'persists decoded Chameleon readings locally');
 expectIncludes('Insert Chameleon Reading', 'if (!d || d.isChameleon !== true) return msg;', 'passes non-Chameleon LSN50 payloads downstream');
+expectIncludes('Sync Init Schema + Triggers', 'CHAMELEON_READING_APPENDED', 'mirrors Chameleon readings into sync outbox');
+expectIncludes('Sync Init Schema + Triggers', "'data_invalid', NEW.data_invalid", 'syncs Chameleon data_invalid status');
 expectIncludes('Build Dendrometer Readings INSERT', 'd.isChameleon === true', 'defensively skips dendrometer readings for Chameleon payloads');
 expectLibById('lsn50-decode-fn', 'dendro', 'osi-dendro-helper', 'imports osi-dendro-helper in Decode LSN50');
 expectLibById('lsn50-apply-config', 'dendro', 'osi-dendro-helper', 'imports osi-dendro-helper in Apply Config');
@@ -1719,6 +1728,11 @@ for (const seedDatabasePath of seedDatabasePaths) {
     chameleonColumns.has('f_cnt'),
     `${relativeSeedPath} includes f_cnt in the bundled chameleon_readings schema`,
     `${relativeSeedPath} is missing f_cnt in the bundled chameleon_readings schema`
+  );
+  expectCondition(
+    chameleonColumns.has('data_invalid'),
+    `${relativeSeedPath} includes data_invalid in the bundled chameleon_readings schema`,
+    `${relativeSeedPath} is missing data_invalid in the bundled chameleon_readings schema`
   );
   expectCondition(
     chameleonIndexes.has('idx_chameleon_readings_deveui_time'),
