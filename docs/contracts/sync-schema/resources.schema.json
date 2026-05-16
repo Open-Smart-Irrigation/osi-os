@@ -25,7 +25,7 @@
             "required": ["deveui", "type_id"],
             "properties": {
                 "deveui": {"type": "string", "pattern": "^[0-9A-F]{16}$"},
-                "type_id": {"type": "string", "enum": ["STREGA_VALVE", "DRAGINO_LSN50", "KIWI_SENSOR", "S2120_WEATHER", "GATEWAY"]},
+                "type_id": {"type": "string", "enum": ["STREGA_VALVE", "DRAGINO_LSN50", "KIWI_SENSOR", "TEKTELIC_CLOVER", "SENSECAP_S2120"]},
                 "name": {"type": ["string", "null"]},
                 "zone_id": {"type": ["integer", "null"]},
                 "deleted_at": {"type": ["string", "null"], "format": "date-time"}
@@ -36,7 +36,7 @@
             "required": ["zone_id", "trigger_metric"],
             "properties": {
                 "zone_id": {"type": "integer", "minimum": 1},
-                "trigger_metric": {"type": "string", "enum": ["SWT_1","SWT_2","SWT_3","SWT_AVG","SWT_WM1","SWT_WM2","SWT_WM3","VWC","DENDRO"]},
+                "trigger_metric": {"type": "string", "enum": ["SWT_WM1","SWT_WM2","SWT_AVG","DENDRO"]},
                 "trigger_value": {"type": "number"},
                 "irrigation_duration_min": {"type": "integer", "minimum": 1},
                 "enabled": {"type": "boolean"},

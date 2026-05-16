@@ -28,7 +28,7 @@ ISO-8601 UTC with **fixed millisecond precision**: `YYYY-MM-DDTHH:MM:SS.sssZ`. S
 ### Numbers
 Fixed-point decimal string. No exponent form. No negative zero.
 - Integers: bare digits, no trailing `.0`. Example: `42`, not `42.0`.
-- Floats: up to 9 significant digits, trailing zeros trimmed except one digit after the decimal point. Example: `3.14`, `0.000001`, `1.5`.
+- Floats: preserve the producer's finite decimal value, serialize in fixed-point form, and trim trailing zeros. Do not round or truncate merely to fit a digit limit; values with more than 9 significant digits remain valid if the runtime can represent them exactly enough to round-trip. Example: `3.14`, `0.000001`, `1.5`.
 - Never `NaN`, `+Infinity`, `-Infinity`; reject the payload at canonicalization time if encountered.
 
 ### Null vs absent

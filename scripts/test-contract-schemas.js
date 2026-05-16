@@ -45,5 +45,34 @@ if (!hasAmount) {
     console.log('OK  M7: amount property present in commands.schema.json');
 }
 
+// Contract resources must match edge runtime device and schedule enums.
+const resourcesSchema = loadSchema('resources.schema.json');
+const deviceTypes = resourcesSchema.definitions.Device.properties.type_id.enum || [];
+for (const type of ['TEKTELIC_CLOVER', 'SENSECAP_S2120']) {
+    if (!deviceTypes.includes(type)) {
+        console.error(`FAIL schema: resources.schema.json missing device type ${type}`);
+        ok = false;
+    } else {
+        console.log(`OK  schema: device type ${type} present`);
+    }
+}
+for (const type of ['S2120_WEATHER', 'GATEWAY']) {
+    if (deviceTypes.includes(type)) {
+        console.error(`FAIL schema: resources.schema.json contains non-edge device type ${type}`);
+        ok = false;
+    } else {
+        console.log(`OK  schema: non-edge device type ${type} absent`);
+    }
+}
+
+const triggerMetrics = resourcesSchema.definitions.Schedule.properties.trigger_metric.enum || [];
+const expectedTriggerMetrics = ['SWT_WM1', 'SWT_WM2', 'SWT_AVG', 'DENDRO'];
+if (triggerMetrics.join(',') !== expectedTriggerMetrics.join(',')) {
+    console.error(`FAIL schema: trigger_metric enum is ${triggerMetrics.join(',')}, expected ${expectedTriggerMetrics.join(',')}`);
+    ok = false;
+} else {
+    console.log('OK  schema: trigger_metric enum matches edge schedule validation');
+}
+
 if (!ok) process.exit(1);
 console.log('PASS: contract schema checks pass');

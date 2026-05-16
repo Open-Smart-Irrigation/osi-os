@@ -15,10 +15,11 @@ function extractRegistryCommandTypes() {
     const flows = JSON.parse(fs.readFileSync(FLOWS, 'utf8'));
     const registry = flows.find(n => n.type === 'function' && n.name === 'Command Type Registry');
     if (!registry) throw new Error('Command Type Registry node not found in flows.json');
+    const source = `${registry.initialize || ''}\n${registry.func || ''}`;
     const types = [];
     const re = /(\b[A-Z][A-Z0-9_]+)\s*:\s*\{/g;
     let m;
-    while ((m = re.exec(registry.func)) !== null) types.push(m[1]);
+    while ((m = re.exec(source)) !== null) types.push(m[1]);
     return types.filter(t => t === t.toUpperCase());
 }
 

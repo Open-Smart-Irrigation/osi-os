@@ -4,8 +4,6 @@
 const { execFileSync } = require('child_process');
 const fs = require('fs');
 
-const dbPath = process.argv[2] || '/data/db/farming.db';
-
 const REQUIRED_TABLES = {
   devices: ['deveui', 'name', 'type_id', 'user_id', 'current_state'],
   device_data: ['deveui', 'recorded_at'],
@@ -26,7 +24,7 @@ const OPTIONAL_CAPABILITY_TABLES = [
   'zone_daily_recommendations',
 ];
 
-function sqlite(query) {
+function sqlite(dbPath, query) {
   return execFileSync('sqlite3', ['-readonly', dbPath, query], {
     encoding: 'utf8',
     maxBuffer: 10 * 1024 * 1024,
@@ -35,7 +33,7 @@ function sqlite(query) {
 
 function safeSqlite(report, query, fallback = '') {
   try {
-    return sqlite(query);
+    return sqlite(report.dbPath, query);
   } catch (error) {
     report.ok = false;
     report.errors.push({
@@ -224,6 +222,11 @@ function countRowsWhere(report, table, whereClause) {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
-const report = audit(dbPath);
-console.log(JSON.stringify(report, null, 2));
-process.exit(report.ok ? 0 : 1);
+if (require.main === module) {
+  const dbPath = process.argv[2] || '/data/db/farming.db';
+  const report = audit(dbPath);
+  console.log(JSON.stringify(report, null, 2));
+  process.exit(report.ok ? 0 : 1);
+}
+
+module.exports = { REQUIRED_TABLES, audit };
