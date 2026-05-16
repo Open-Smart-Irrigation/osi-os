@@ -8260,5 +8260,43 @@
         "dendro-readings-insert-fn"
       ]
     ]
+  },
+  {
+    "id": "cmd-type-registry-trigger",
+    "type": "inject",
+    "z": "sys-admin-tab",
+    "name": "Load registry on startup",
+    "props": [],
+    "repeat": "",
+    "crontab": "",
+    "once": true,
+    "onceDelay": "0.1",
+    "topic": "",
+    "payload": "",
+    "payloadType": "date",
+    "x": 180,
+    "y": 100,
+    "wires": [
+      [
+        "cmd-type-registry"
+      ]
+    ]
+  },
+  {
+    "id": "cmd-type-registry",
+    "type": "function",
+    "z": "sys-admin-tab",
+    "name": "Command Type Registry",
+    "func": "// Command Type Registry - single source of truth for accepted command types.\n// Routing nodes and verification scripts read from here.\n// Indefinite/manual OPEN is intentionally NOT listed - it is rejected at dispatch.\nconst COMMAND_TYPES = {\n    OPEN_FOR_DURATION:       { dispatch: 'strega_timed_open',  actuator: true,  requires_duration: true  },\n    SET_STREGA_TIMED_ACTION: { dispatch: 'strega_timed_open',  actuator: true,  requires_duration: true  },\n    CLOSE:                   { dispatch: 'strega_explicit_close', actuator: true,  requires_duration: false },\n    SET_CHAMELEON_CONFIG:    { dispatch: 'chameleon_config',   actuator: false, requires_duration: false },\n    REGISTER_DEVICE:         { dispatch: 'device_register',    actuator: false, requires_duration: false },\n    REBOOT_DEVICE:           { dispatch: 'device_reboot',      actuator: false, requires_duration: false }\n};\nflow.set('command_types', COMMAND_TYPES);\nreturn msg;",
+    "outputs": 1,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 420,
+    "y": 100,
+    "wires": [
+      []
+    ]
   }
 ]
