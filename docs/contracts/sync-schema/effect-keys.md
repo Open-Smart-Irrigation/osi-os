@@ -30,7 +30,7 @@ Device configuration commands. `config_version` is a monotonically increasing in
 - `device_eui` is uppercase EUI-64 with no separators.
 - `zone_id` is the canonical integer zone id.
 - `command_uuid` is lowercase, hyphenated 8-4-4-4-12.
-- `scheduled_for_iso` and any timestamps are in canonical form per `canonicalization.md` once Phase 0 lands it.
+- `scheduled_for_iso` and any timestamps use canonical ISO-8601 UTC with millisecond precision (`YYYY-MM-DDTHH:MM:SS.sssZ`), matching `canonicalization.md`.
 
 ## Replay rules
 
