@@ -41,4 +41,15 @@ if (!reconcNode.func.includes('STALE_OPEN_OBSERVED')) {
 }
 console.log('OK  H2: STALE_OPEN_OBSERVED present in reconciliation monitor');
 
-console.log('PASS: C5 + H2 checks correct');
+// L1: write-strega-expectation and reject-indefinite-open must not fall back to {}
+['write-strega-expectation', 'reject-indefinite-open'].forEach(nodeId => {
+    const n = byId[nodeId];
+    if (!n) { console.error(`FAIL: node ${nodeId} not found`); process.exit(1); }
+    if (n.func.includes("flow.get('command_types') || {}")) {
+        console.error(`FAIL L1: ${nodeId} falls back to {} on startup race`);
+        process.exit(1);
+    }
+    console.log(`OK  L1: ${nodeId} has hardcoded fallback`);
+});
+
+console.log('PASS: C5 + H2 + L1 checks correct');
