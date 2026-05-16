@@ -9,7 +9,7 @@
         "event_uuid": {"type": "string", "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"},
         "resource_type": {"type": "string", "enum": ["ZONE", "DEVICE", "SCHEDULE", "ZONE_CONFIG", "ZONE_LOCATION", "DEVICE_DATA", "GATEWAY"]},
         "resource_id": {"type": "string", "minLength": 1},
-        "sync_version": {"type": "integer", "minimum": 1},
+        "sync_version": {"type": "integer", "minimum": 0},
         "payload": {"type": "object"},
         "is_tombstone": {"type": "boolean"},
         "payload_hash": {"type": ["string", "null"], "pattern": "^[0-9a-f]{64}$"},
