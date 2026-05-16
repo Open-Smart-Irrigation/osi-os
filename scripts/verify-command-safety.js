@@ -50,9 +50,32 @@ function assertIndefiniteOpenRejection() {
     console.log('  ok Indefinite-open rejection node present');
 }
 
+function assertWriteExpectation() {
+    const flows = JSON.parse(fs.readFileSync(FLOWS, 'utf8'));
+    const node = flows.find(n =>
+        n.type === 'function' && n.name === 'Write STREGA Expectation'
+    );
+    if (!node) throw new Error('Missing function node "Write STREGA Expectation"');
+    const required = [
+        'valve_actuation_expectations',
+        'commanded_duration_seconds',
+        'expected_close_at',
+        'estimated_gross_liters',
+        'volume_source',
+        'effect_key',
+        'measured_flow_meter',
+        'estimated_duration_flow_rate',
+    ];
+    for (const k of required) {
+        if (!node.func.includes(k)) throw new Error(`"Write STREGA Expectation" missing reference to ${k}`);
+    }
+    console.log('  ok Write-expectation node present and references required fields');
+}
+
 function main() {
     checkSchema();
     assertIndefiniteOpenRejection();
+    assertWriteExpectation();
     console.log('verify-command-safety: OK');
 }
 
