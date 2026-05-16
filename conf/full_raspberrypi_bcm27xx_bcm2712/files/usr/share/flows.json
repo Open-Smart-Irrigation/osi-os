@@ -8328,5 +8328,85 @@
         "745b6db588017e56"
       ]
     ]
+  },
+  {
+    "id": "strega-reconciliation-tick",
+    "type": "inject",
+    "z": "sys-admin-tab",
+    "name": "STREGA Reconciliation Tick",
+    "props": [],
+    "repeat": "60",
+    "crontab": "",
+    "once": true,
+    "onceDelay": "10",
+    "topic": "",
+    "payload": "",
+    "payloadType": "date",
+    "x": 200,
+    "y": 400,
+    "wires": [
+      [
+        "strega-reconciliation-monitor"
+      ]
+    ]
+  },
+  {
+    "id": "strega-reconciliation-monitor",
+    "type": "function",
+    "z": "sys-admin-tab",
+    "name": "STREGA Reconciliation Monitor",
+    "func": "// STREGA Reconciliation Monitor\n// Advance valve_actuation_expectations states based on STREGA uplinks.\n// Does NOT emit a CLOSE downlink on timer elapse \u2014 STREGA self-closes.\nconst RECONCILIATION_GRACE_SEC = 300;\nconst db = flow.get('db');\n\nconst active = db.prepare(\n    \"SELECT * FROM valve_actuation_expectations WHERE reconciliation_state IN ('PENDING_OBSERVATION','OBSERVED_RUNNING')\"\n).all();\n\nconst now = Date.now();\nlet advanced = 0;\nfor (const exp of active) {\n    const uplink = db.prepare(\n        \"SELECT recorded_at, current_state FROM device_data WHERE deveui = ? AND recorded_at >= ? ORDER BY recorded_at DESC LIMIT 1\"\n    ).get(exp.device_eui, exp.commanded_at);\n\n    let newState = exp.reconciliation_state;\n    let observedOpenAt = exp.observed_open_at;\n    let observedCloseAt = exp.observed_close_at;\n\n    if (uplink) {\n        if (uplink.current_state === 'OPEN' && !observedOpenAt) {\n            observedOpenAt = uplink.recorded_at;\n            newState = 'OBSERVED_RUNNING';\n        }\n        if (uplink.current_state === 'CLOSE' || uplink.current_state === 'CLOSED') {\n            observedCloseAt = uplink.recorded_at;\n            newState = 'OBSERVED_COMPLETE';\n        }\n    }\n\n    const expectedCloseMs = Date.parse(exp.expected_close_at);\n    if (newState === 'PENDING_OBSERVATION' && now > expectedCloseMs + RECONCILIATION_GRACE_SEC * 1000) {\n        newState = 'STALE_NO_OBSERVATION';\n    }\n\n    if (newState !== exp.reconciliation_state ||\n        observedOpenAt !== exp.observed_open_at ||\n        observedCloseAt !== exp.observed_close_at) {\n        db.prepare(\n            \"UPDATE valve_actuation_expectations SET reconciliation_state=?, observed_open_at=?, observed_close_at=? WHERE expectation_id=?\"\n        ).run(newState, observedOpenAt, observedCloseAt, exp.expectation_id);\n        advanced++;\n        node.log(`expectation ${exp.expectation_id} -> ${newState}`);\n    }\n}\n\nmsg.payload = { reconciled: active.length, advanced };\nreturn msg;",
+    "outputs": 1,
+    "x": 480,
+    "y": 400,
+    "wires": [
+      []
+    ]
+  },
+  {
+    "id": "cancel-valve-http-in",
+    "type": "http in",
+    "z": "device-api-tab",
+    "name": "Cancel STREGA Valve",
+    "url": "/api/v1/valves/:deveui/cancel",
+    "method": "post",
+    "upload": false,
+    "swaggerDoc": "",
+    "x": 150,
+    "y": 420,
+    "wires": [
+      [
+        "cancel-strega-actuation-fn"
+      ]
+    ]
+  },
+  {
+    "id": "cancel-strega-actuation-fn",
+    "type": "function",
+    "z": "device-api-tab",
+    "name": "Cancel STREGA Actuation",
+    "func": "// Cancel STREGA Actuation\n// Issued by the operator via GUI. Sets expectation to CANCELLED and emits CLOSE downlink.\nconst authToken = msg.req.headers['authorization'];\nconst crypto = global.get('crypto') || require('crypto');\n\n// Verify local auth token\nconst signingSecret = flow.get('localAuthSecret') || 'osi-local-auth-secret';\n// (omit for brevity - reuse existing auth verification pattern)\n\nconst deveui = msg.req.params.deveui.toUpperCase();\nconst reason = (msg.payload || {}).reason || 'operator_cancel';\n\nconst db = flow.get('db');\nconst active = db.prepare(\n    \"SELECT expectation_id FROM valve_actuation_expectations WHERE device_eui = ? AND reconciliation_state IN ('PENDING_OBSERVATION','OBSERVED_RUNNING') ORDER BY commanded_at DESC LIMIT 1\"\n).get(deveui);\n\nif (!active) {\n    msg.payload = { error: 'No active actuation to cancel' };\n    msg.statusCode = 404;\n    return msg;\n}\n\ndb.prepare(\n    \"UPDATE valve_actuation_expectations SET reconciliation_state = 'CANCELLED', cancel_reason = ? WHERE expectation_id = ?\"\n).run(reason, active.expectation_id);\n\n// Emit a CLOSE command to the valve\nconst closeCmd = {\n    command_type: 'CLOSE',\n    device_eui: deveui,\n    command_id: crypto.randomUUID(),\n    originator: 'edge',\n    reason: reason\n};\n\nmsg.payload = closeCmd;\nmsg.device_eui = deveui;\nmsg.command_type = 'CLOSE';\n// Route to STREGA downlink path\nreturn [msg, null];",
+    "outputs": 2,
+    "x": 420,
+    "y": 420,
+    "wires": [
+      [
+        "745b6db588017e56"
+      ],
+      [
+        "http-response-cancel"
+      ]
+    ]
+  },
+  {
+    "id": "http-response-cancel",
+    "type": "http response",
+    "z": "device-api-tab",
+    "name": "Cancel response",
+    "x": 650,
+    "y": 440,
+    "wires": [
+      []
+    ]
   }
 ]

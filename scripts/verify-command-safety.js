@@ -72,10 +72,55 @@ function assertWriteExpectation() {
     console.log('  ok Write-expectation node present and references required fields');
 }
 
+function assertReconciliationMonitor() {
+    const flows = JSON.parse(fs.readFileSync(FLOWS, 'utf8'));
+    const inject = flows.find(n =>
+        n.type === 'inject' && n.name === 'STREGA Reconciliation Tick'
+    );
+    if (!inject) throw new Error('Missing inject node "STREGA Reconciliation Tick"');
+    if (String(inject.repeat) !== '60') {
+        throw new Error(`STREGA Reconciliation Tick must repeat every 60 seconds (got: ${inject.repeat})`);
+    }
+    const monitor = flows.find(n =>
+        n.type === 'function' && n.name === 'STREGA Reconciliation Monitor'
+    );
+    if (!monitor) throw new Error('Missing function node "STREGA Reconciliation Monitor"');
+    for (const state of ['OBSERVED_RUNNING', 'OBSERVED_COMPLETE', 'STALE_NO_OBSERVATION']) {
+        if (!monitor.func.includes(state)) {
+            throw new Error(`Reconciliation monitor missing state transition: ${state}`);
+        }
+    }
+    if (monitor.func.match(/issue.*CLOSE/i) || monitor.func.match(/send.*close.*downlink/i)) {
+        throw new Error('Reconciliation monitor must NOT issue a CLOSE downlink on timer elapse');
+    }
+    console.log('  ok STREGA reconciliation monitor present with required state transitions');
+}
+
+function assertCancelPath() {
+    const flows = JSON.parse(fs.readFileSync(FLOWS, 'utf8'));
+    const httpIn = flows.find(n =>
+        n.type === 'http in' && n.url === '/api/v1/valves/:deveui/cancel'
+    );
+    if (!httpIn) throw new Error('Missing HTTP IN node for /api/v1/valves/:deveui/cancel');
+    const fn = flows.find(n =>
+        n.type === 'function' && n.name === 'Cancel STREGA Actuation'
+    );
+    if (!fn) throw new Error('Missing function node "Cancel STREGA Actuation"');
+    if (!fn.func.includes("'CANCELLED'") && !fn.func.includes('"CANCELLED"')) {
+        throw new Error('Cancel function must set reconciliation_state = CANCELLED');
+    }
+    if (!fn.func.includes('cancel_reason')) {
+        throw new Error('Cancel function must record cancel_reason');
+    }
+    console.log('  ok Explicit cancel path present');
+}
+
 function main() {
     checkSchema();
     assertIndefiniteOpenRejection();
     assertWriteExpectation();
+    assertReconciliationMonitor();
+    assertCancelPath();
     console.log('verify-command-safety: OK');
 }
 
