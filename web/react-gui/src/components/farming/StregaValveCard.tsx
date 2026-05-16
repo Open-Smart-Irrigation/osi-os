@@ -519,12 +519,17 @@ export const StregaValveCard: React.FC<StregaValveCardProps> = ({ device, onUpda
   const isOpen = displayedState === 'OPEN';
 
   const handleAction = async (action: 'OPEN' | 'CLOSE') => {
+    const durationMinutes = Number(openDurationMin);
+    if (action === 'OPEN' && (!Number.isInteger(durationMinutes) || durationMinutes < 1 || durationMinutes > 255)) {
+      setError(t('stregaValve.invalidOpenDuration', { defaultValue: 'Enter an open duration between 1 and 255 minutes.' }));
+      return;
+    }
+
     setLoading(action);
     setError(null);
     try {
-      const durationMinutes = Number(openDurationMin);
       await devicesAPI.controlValve(device.deveui, {
-        action,
+        action: action === 'OPEN' ? 'OPEN_FOR_DURATION' : 'CLOSE',
         ...(action === 'OPEN' ? { duration_seconds: durationMinutes * 60 } : {}),
       });
       onUpdate();
@@ -660,14 +665,18 @@ export const StregaValveCard: React.FC<StregaValveCardProps> = ({ device, onUpda
 
       {isOpen && (
         <div className="mb-3">
-          <ValveCancelButton device={device} />
+          <ValveCancelButton
+            device={device}
+            onUpdate={onUpdate}
+            onError={(message) => setError(message)}
+          />
         </div>
       )}
 
       <div className="grid grid-cols-2 gap-3">
         <div>
           <label htmlFor={`strega-duration-${device.deveui}`} className="text-xs text-[var(--text-secondary)]">
-            Duration (min)
+            {t('stregaValve.durationMin', { defaultValue: 'Duration (min)' })}
           </label>
           <input
             id={`strega-duration-${device.deveui}`}

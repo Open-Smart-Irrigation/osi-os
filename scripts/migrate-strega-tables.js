@@ -17,7 +17,6 @@ const sqlPath = path.resolve(__dirname, '../database/migrations/2026-05-16-add-s
 const sql = fs.readFileSync(sqlPath, 'utf8');
 
 try {
-    const encoded = "< " + sqlPath + " | sqlite3 " + dbPath;
     execFileSync('sqlite3', [dbPath], { input: sql, encoding: 'utf8' });
     console.log(`OK: applied ${path.basename(sqlPath)} to ${dbPath}`);
 
