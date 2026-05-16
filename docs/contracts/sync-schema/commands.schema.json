@@ -22,6 +22,9 @@
         "zone_id": {"type": ["integer", "null"]},
         "duration_seconds": {"type": ["integer", "null"], "minimum": 1},
         "duration_minutes": {"type": ["integer", "null"], "minimum": 1},
+        "amount": {"type": ["integer", "null"], "minimum": 1},
+        "unit": {"type": ["string", "null"], "enum": ["SECONDS", "MINUTES", "HOURS", null]},
+        "action": {"type": ["string", "null"], "enum": ["OPEN", "CLOSE", null]},
         "effect_key": {"type": ["string", "null"]},
         "issued_at": {"type": "string", "format": "date-time"},
         "expires_at": {"type": ["string", "null"], "format": "date-time"},
@@ -35,7 +38,7 @@
         },
         {
             "if": {"properties": {"command_type": {"const": "SET_STREGA_TIMED_ACTION"}}},
-            "then": {"required": ["duration_seconds"]}
+            "then": {"required": ["amount"]}
         }
     ]
 }
