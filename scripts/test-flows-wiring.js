@@ -32,4 +32,13 @@ assertWires('write-strega-expectation',
     [['cdbaa3891d40d7a1']],
     'write-strega-expectation → Build STREGA downlink');
 
-console.log('PASS: C5 wiring correct');
+// H2: reconciliation monitor must handle OBSERVED_RUNNING stale timeout
+const reconcNode = byId['strega-reconciliation-monitor'];
+if (!reconcNode) { console.error('FAIL: strega-reconciliation-monitor not found'); process.exit(1); }
+if (!reconcNode.func.includes('STALE_OPEN_OBSERVED')) {
+    console.error('FAIL H2: strega-reconciliation-monitor missing STALE_OPEN_OBSERVED transition');
+    process.exit(1);
+}
+console.log('OK  H2: STALE_OPEN_OBSERVED present in reconciliation monitor');
+
+console.log('PASS: C5 + H2 checks correct');
