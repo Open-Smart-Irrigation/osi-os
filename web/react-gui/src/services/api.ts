@@ -173,6 +173,10 @@ export const devicesAPI = {
     await api.post(`/api/valve/${deveui}`, action);
   },
 
+  cancelIrrigation: async (deveui: string, reason: string = 'operator_cancel'): Promise<void> => {
+    await api.post(`/api/v1/valves/${deveui}/cancel`, { reason });
+  },
+
   remove: async (deveui: string): Promise<void> => {
     await api.delete(`/api/devices/${deveui}`);
   },

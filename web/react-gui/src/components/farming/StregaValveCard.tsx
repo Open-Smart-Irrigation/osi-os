@@ -4,11 +4,13 @@ import { devicesAPI, stregaAPI } from '../../services/api';
 import { useDismissOnPointerDown } from '../../hooks/useDismissOnPointerDown';
 import { useTranslation } from 'react-i18next';
 import { DeviceCardFooter } from './shared/DeviceCardFooter';
+import ValveCancelButton from './ValveCancelButton';
 
 interface StregaValveCardProps {
   device: Device;
   onUpdate: () => void;
   onRemove?: () => void;
+  todayLiters?: { value: number; source: 'measured_flow_meter' | 'estimated_duration_flow_rate' | 'unknown' };
 }
 
 const MAX_STREGA_INTERVAL_MINUTES = 255;
@@ -498,7 +500,7 @@ const ConfigPanel: React.FC<{
   );
 };
 
-export const StregaValveCard: React.FC<StregaValveCardProps> = ({ device, onUpdate, onRemove }) => {
+export const StregaValveCard: React.FC<StregaValveCardProps> = ({ device, onUpdate, onRemove, todayLiters }) => {
   const { t } = useTranslation('devices');
   const { t: tc } = useTranslation('common');
   const [loading, setLoading] = useState<'OPEN' | 'CLOSE' | null>(null);
@@ -506,6 +508,7 @@ export const StregaValveCard: React.FC<StregaValveCardProps> = ({ device, onUpda
   const [isRemoving, setIsRemoving] = useState(false);
   const [showConfirm, setShowConfirm] = useState(false);
   const [showConfig, setShowConfig] = useState(false);
+  const [openDurationMin, setOpenDurationMin] = useState('5');
   const lastSeenStr = device.last_seen ?? null;
   const lastSeen = lastSeenStr ? new Date(lastSeenStr) : null;
   const minutesAgo = lastSeen
@@ -519,7 +522,11 @@ export const StregaValveCard: React.FC<StregaValveCardProps> = ({ device, onUpda
     setLoading(action);
     setError(null);
     try {
-      await devicesAPI.controlValve(device.deveui, { action });
+      const durationMinutes = Number(openDurationMin);
+      await devicesAPI.controlValve(device.deveui, {
+        action,
+        ...(action === 'OPEN' ? { duration_seconds: durationMinutes * 60 } : {}),
+      });
       onUpdate();
     } catch (err: any) {
       setError(err.response?.data?.message || `Failed to ${action.toLowerCase()} valve`);
@@ -639,21 +646,56 @@ export const StregaValveCard: React.FC<StregaValveCardProps> = ({ device, onUpda
         )}
       </div>
 
-      <div className="grid grid-cols-2 gap-3">
-        <button
-          onClick={() => handleAction('OPEN')}
-          disabled={loading !== null}
-          className="bg-[var(--primary)] hover:bg-[var(--primary-hover)] disabled:bg-[var(--border)] text-white font-bold text-base py-3 touch-target rounded-lg transition-colors disabled:cursor-not-allowed disabled:text-[var(--text-disabled)] flex items-center justify-center gap-2"
-        >
-          {loading === 'OPEN' ? (
-            <>
-              <div className="animate-spin h-5 w-5 border-2 border-white border-t-transparent rounded-full" />
-              {t('stregaValve.opening')}
-            </>
-          ) : (
-            t('stregaValve.open')
+      {todayLiters && (
+        <div className="text-sm text-[var(--text)] mb-3 px-1">
+          Today: {todayLiters.value} L
+          {todayLiters.source === 'measured_flow_meter' && (
+            <span className="ml-1 text-xs uppercase tracking-wide text-[var(--toggle-on)]">Measured</span>
           )}
-        </button>
+          {todayLiters.source === 'estimated_duration_flow_rate' && (
+            <span className="ml-1 text-xs uppercase tracking-wide text-amber-700">Estimated</span>
+          )}
+        </div>
+      )}
+
+      {isOpen && (
+        <div className="mb-3">
+          <ValveCancelButton device={device} />
+        </div>
+      )}
+
+      <div className="grid grid-cols-2 gap-3">
+        <div>
+          <label htmlFor={`strega-duration-${device.deveui}`} className="text-xs text-[var(--text-secondary)]">
+            Duration (min)
+          </label>
+          <input
+            id={`strega-duration-${device.deveui}`}
+            type="number"
+            min={1}
+            max={255}
+            step={1}
+            inputMode="numeric"
+            value={openDurationMin}
+            disabled={loading !== null}
+            onChange={(event) => setOpenDurationMin(event.target.value)}
+            className="w-full rounded-lg border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-sm text-[var(--text)]"
+          />
+          <button
+            onClick={() => handleAction('OPEN')}
+            disabled={loading !== null}
+            className="mt-1 w-full bg-[var(--primary)] hover:bg-[var(--primary-hover)] disabled:bg-[var(--border)] text-white font-bold text-base py-3 touch-target rounded-lg transition-colors disabled:cursor-not-allowed disabled:text-[var(--text-disabled)] flex items-center justify-center gap-2"
+          >
+            {loading === 'OPEN' ? (
+              <>
+                <div className="animate-spin h-5 w-5 border-2 border-white border-t-transparent rounded-full" />
+                {t('stregaValve.opening')}
+              </>
+            ) : (
+              `${t('stregaValve.open')} ${openDurationMin} min`
+            )}
+          </button>
+        </div>
         <button
           onClick={() => handleAction('CLOSE')}
           disabled={loading !== null}
