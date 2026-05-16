@@ -256,6 +256,38 @@ fi
 
 ensure_dendro_schema
 
+fix_mosquitto_ownership() {
+    echo "--- Mosquitto ownership ---"
+    if [ ! -e /etc/mosquitto/mosquitto.conf ]; then
+        echo "SKIP: mosquitto not installed"
+        return 0
+    fi
+    local user="mosquitto"
+    if command -v uci >/dev/null 2>&1; then
+        local uci_user="$(uci -q get mosquitto.@mosquitto[0].user 2>/dev/null || true)"
+        [ -n "$uci_user" ] && user="$uci_user"
+    fi
+    if ! id -u "$user" >/dev/null 2>&1; then
+        echo "SKIP: mosquitto user '$user' does not exist"
+        return 0
+    fi
+    for f in /etc/mosquitto/mosquitto.passwd \
+             /etc/mosquitto/mosquitto.acl \
+             /var/lib/mosquitto; do
+        if [ -e "$f" ]; then
+            chown -R "$user:$user" "$f"
+            [ -d "$f" ] && chmod 750 "$f" || chmod 0600 "$f" 2>/dev/null || true
+        fi
+    done
+    if [ -e /var/lib/mosquitto/mosquitto.db ]; then
+        chown "$user:$user" /var/lib/mosquitto/mosquitto.db
+        chmod 0600 /var/lib/mosquitto/mosquitto.db 2>/dev/null || true
+    fi
+    echo "OK"
+}
+
+fix_mosquitto_ownership
+
 echo "--- React GUI ---"
 fetch "react_gui.tar.gz" "$TMP_DIR/react_gui.tar.gz"
 mkdir -p /usr/lib/node-red/gui
