@@ -460,6 +460,15 @@ export const stregaAPI = {
   },
 };
 
+export const valveAPI = {
+  getTodayLiters: async (deveui: string): Promise<{ liters: number | null; source: string }> => {
+    const resp = await api.get<{ liters: number | null; source: string }>(
+      `/api/v1/devices/${deveui}/today-liters`
+    );
+    return resp.data;
+  },
+};
+
 function normaliseDendroDaily(row: any): DendroDaily {
   return {
     id: row.id,

@@ -8434,5 +8434,53 @@
     "wires": [
       []
     ]
+  },
+  {
+    "id": "strega-today-liters-http-in",
+    "type": "http in",
+    "z": "device-api-tab",
+    "name": "GET today-liters",
+    "url": "/api/v1/devices/:deveui/today-liters",
+    "method": "get",
+    "upload": false,
+    "swaggerDoc": "",
+    "x": 120,
+    "y": 1200,
+    "wires": [
+      [
+        "strega-today-liters-fn"
+      ]
+    ]
+  },
+  {
+    "id": "strega-today-liters-fn",
+    "type": "function",
+    "z": "device-api-tab",
+    "name": "Query today-liters",
+    "func": "return (async () => {\n    const deveui = String((msg.req && msg.req.params && msg.req.params.deveui) || '').trim().toUpperCase();\n    if (!deveui) {\n        msg.statusCode = 400;\n        msg.payload = { message: 'deveui required' };\n        return msg;\n    }\n\n    const todayStart = new Date();\n    todayStart.setHours(0, 0, 0, 0);\n    const todayIso = todayStart.toISOString();\n\n    const db = new osiDb.Database('/data/db/farming.db');\n    const row = await db.get(\n        `SELECT\n            SUM(estimated_gross_liters) AS total_liters,\n            volume_source\n         FROM valve_actuation_expectations\n         WHERE UPPER(device_eui) = ?\n           AND commanded_at >= ?\n           AND reconciliation_state NOT IN ('CANCELLED')\n         GROUP BY volume_source\n         ORDER BY SUM(estimated_gross_liters) DESC\n         LIMIT 1`,\n        [deveui, todayIso]\n    );\n\n    const liters = row && Number.isFinite(Number(row.total_liters)) ? Math.round(Number(row.total_liters) * 10) / 10 : null;\n    const source = row ? String(row.volume_source || 'unknown') : 'none';\n    msg.statusCode = 200;\n    msg.payload = { liters, source };\n    return msg;\n})().catch(err => {\n    node.error('today-liters query failed: ' + String(err && err.message ? err.message : err), msg);\n    msg.statusCode = 500;\n    msg.payload = { message: 'Internal error' };\n    return msg;\n});",
+    "outputs": 1,
+    "timeout": "",
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 350,
+    "y": 1200,
+    "wires": [
+      [
+        "strega-today-liters-http-out"
+      ]
+    ]
+  },
+  {
+    "id": "strega-today-liters-http-out",
+    "type": "http response",
+    "z": "device-api-tab",
+    "name": "resp today-liters",
+    "statusCode": "",
+    "headers": {},
+    "x": 590,
+    "y": 1200,
+    "wires": []
   }
 ]

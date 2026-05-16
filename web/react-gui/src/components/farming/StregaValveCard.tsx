@@ -1,6 +1,6 @@
-import React, { useRef, useState } from 'react';
+import React, { useRef, useState, useEffect } from 'react';
 import type { Device, StregaModel } from '../../types/farming';
-import { devicesAPI, stregaAPI } from '../../services/api';
+import { devicesAPI, stregaAPI, valveAPI } from '../../services/api';
 import { useDismissOnPointerDown } from '../../hooks/useDismissOnPointerDown';
 import { useTranslation } from 'react-i18next';
 import { DeviceCardFooter } from './shared/DeviceCardFooter';
@@ -509,6 +509,23 @@ export const StregaValveCard: React.FC<StregaValveCardProps> = ({ device, onUpda
   const [showConfirm, setShowConfirm] = useState(false);
   const [showConfig, setShowConfig] = useState(false);
   const [openDurationMin, setOpenDurationMin] = useState('5');
+  const [fetchedLiters, setFetchedLiters] = useState<{
+    value: number;
+    source: 'measured_flow_meter' | 'estimated_duration_flow_rate' | 'unknown';
+  } | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    valveAPI.getTodayLiters(device.deveui).then(({ liters, source }) => {
+      if (!cancelled && liters !== null) {
+        setFetchedLiters({
+          value: liters,
+          source: source as 'measured_flow_meter' | 'estimated_duration_flow_rate' | 'unknown',
+        });
+      }
+    }).catch(() => { /* non-critical — display remains blank */ });
+    return () => { cancelled = true; };
+  }, [device.deveui, onUpdate]);
   const lastSeenStr = device.last_seen ?? null;
   const lastSeen = lastSeenStr ? new Date(lastSeenStr) : null;
   const minutesAgo = lastSeen
@@ -651,13 +668,13 @@ export const StregaValveCard: React.FC<StregaValveCardProps> = ({ device, onUpda
         )}
       </div>
 
-      {todayLiters && (
+      {(fetchedLiters ?? todayLiters) && (
         <div className="text-sm text-[var(--text)] mb-3 px-1">
-          Today: {todayLiters.value} L
-          {todayLiters.source === 'measured_flow_meter' && (
+          Today: {(fetchedLiters ?? todayLiters)!.value} L
+          {(fetchedLiters ?? todayLiters)!.source === 'measured_flow_meter' && (
             <span className="ml-1 text-xs uppercase tracking-wide text-[var(--toggle-on)]">Measured</span>
           )}
-          {todayLiters.source === 'estimated_duration_flow_rate' && (
+          {(fetchedLiters ?? todayLiters)!.source === 'estimated_duration_flow_rate' && (
             <span className="ml-1 text-xs uppercase tracking-wide text-amber-700">Estimated</span>
           )}
         </div>

@@ -52,4 +52,10 @@ console.log('OK  H2: STALE_OPEN_OBSERVED present in reconciliation monitor');
     console.log(`OK  L1: ${nodeId} has hardcoded fallback`);
 });
 
-console.log('PASS: C5 + H2 + L1 checks correct');
+// M8: today-liters HTTP endpoint nodes must exist
+['strega-today-liters-http-in', 'strega-today-liters-fn', 'strega-today-liters-http-out'].forEach(id => {
+    if (!byId[id]) { console.error(`FAIL M8: node ${id} not found`); process.exit(1); }
+    console.log(`OK  M8: ${id} present`);
+});
+
+console.log('PASS: C5 + H2 + L1 + M8 checks correct');
