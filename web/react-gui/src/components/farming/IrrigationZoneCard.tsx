@@ -261,10 +261,8 @@ export const IrrigationZoneCard: React.FC<IrrigationZoneCardProps> = ({
         {zone.schedule && schedEnabled && schedMetric && (() => {
           const metricLabel =
             schedMetric === 'DENDRO'   ? 'Dendro trigger' :
-            schedMetric === 'VWC'      ? 'VWC trigger' :
             schedMetric === 'SWT_WM1'  ? 'Soil tension (S1)' :
             schedMetric === 'SWT_WM2'  ? 'Soil tension (S2)' :
-            schedMetric === 'SWT_WM3'  ? 'Soil tension (S3)' :
             schedMetric === 'SWT_AVG'  ? 'Soil tension (avg)' :
                                          'Soil tension';
           return (

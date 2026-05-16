@@ -127,7 +127,7 @@ function verifyDecodeContract(decodeUplink, fixture) {
   return decoded;
 }
 
-async function verifyStregaNormalizationContract(flows, fixture, object, label) {
+async function verifyStregaNormalizationContract(flows, fixture, object, label, expected = {}) {
   const node = getFunctionNode(flows, 'Process STREGA');
   const sandbox = {
     Buffer,
@@ -178,11 +178,12 @@ async function verifyStregaNormalizationContract(flows, fixture, object, label) 
 
   assert.ok(resolved, `${node.name} must return a result for ${label}`);
   assert.ok(resolved.formattedData, `${node.name} must attach formattedData for ${label}`);
-  assert.equal(resolved.formattedData.ambientTemperature, null, `${label} should drop the sentinel env reading`);
-  assert.equal(resolved.formattedData.relativeHumidity, null, `${label} should drop the sentinel env reading`);
-  assert.equal(resolved.formattedData.batPct, 100, `${label} should preserve the numeric battery percent`);
-  assert.equal(resolved.formattedData.batteryRaw, 100, `${label} should preserve the raw battery value`);
-  assert.equal(resolved.formattedData.currentState, 'CLOSED', `${label} should preserve the valve state`);
+  assert.equal(resolved.formattedData.ambientTemperature, expected.ambientTemperature ?? null, `${label} should preserve the expected ambient temperature`);
+  assert.equal(resolved.formattedData.relativeHumidity, expected.relativeHumidity ?? null, `${label} should preserve the expected relative humidity`);
+  assert.equal(resolved.formattedData.batPct, expected.batPct ?? 100, `${label} should preserve the numeric battery percent`);
+  assert.equal(resolved.formattedData.batteryRaw, expected.batteryRaw ?? 100, `${label} should preserve the raw battery value`);
+  assert.equal(resolved.formattedData.currentState, expected.currentState ?? 'CLOSED', `${label} should preserve the valve state`);
+  console.log(`OK ${label} STREGA normalization fixture`);
 }
 
 function verifyCommandMatrix(flows, fixture) {
@@ -248,6 +249,24 @@ async function main() {
       Hygrometry: 100,
     },
     'legacy sentinel object',
+  );
+  await verifyStregaNormalizationContract(
+    flows,
+    fixture,
+    {
+      Battery: 72,
+      Valve: '1',
+      Temperature: 21.4,
+      Hygrometry: 56.8,
+    },
+    'valid environmental object',
+    {
+      ambientTemperature: 21.4,
+      relativeHumidity: 56.8,
+      batPct: 72,
+      batteryRaw: 72,
+      currentState: 'OPEN',
+    },
   );
   verifyCommandMatrix(flows, fixture);
   console.log('OK Strega Gen1 smoke checks passed');

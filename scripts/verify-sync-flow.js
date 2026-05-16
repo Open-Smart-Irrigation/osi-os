@@ -737,6 +737,48 @@ async function executeFunctionNodeById(nodeId, msg, options = {}) {
   return fn(msg, nodeApi, flowApi, envApi, options.context || noopStore, options.global || noopStore, () => undefined, () => {});
 }
 
+pendingChecks.push((async () => {
+  const sensorCsvMsg = await executeFunctionNodeById('fn_rows_to_csv_sensordata', {
+    payload: [
+      {
+        ts: '2026-05-17T10:00:00.000Z',
+        deveui: 'A8404101FD5ECF41',
+        device_name: 'Sensor "Alpha", row one',
+        device_type: 'KIWI_SENSOR',
+        zone_id: 7,
+        swt_wm1: 42,
+        swt_wm2: 51,
+        light_lux: 1200,
+        ambient_temperature: 21.5,
+        relative_humidity: 68.2,
+      },
+    ],
+  });
+  expectCondition(
+    String(sensorCsvMsg.payload || '').includes('"Sensor ""Alpha"", row one"'),
+    'sensor-data CSV export doubles raw quotes and quotes comma-containing fields',
+    'sensor-data CSV export did not escape raw quotes correctly'
+  );
+
+  const fieldCsvMsg = await executeFunctionNodeById('fn_rows_to_csv', {
+    payload: [
+      {
+        ts: '2026-05-17T10:00:00.000Z',
+        dev_eui: 'A8404101FD5ECF41',
+        f_cnt: 1,
+        gateway_id: 'gateway "north", row one',
+      },
+    ],
+  });
+  expectCondition(
+    String(fieldCsvMsg.payload || '').includes('"gateway ""north"", row one"'),
+    'field-test CSV export doubles raw quotes and quotes comma-containing fields',
+    'field-test CSV export did not escape raw quotes correctly'
+  );
+})().catch((error) => {
+  fail(`failed to execute CSV export fixtures: ${error.message}`);
+}));
+
 for (const route of requiredHttpRoutes) {
   const node = flows.find((candidate) => candidate.type === 'http in' && candidate.url === route);
   if (!node) {
