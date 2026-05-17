@@ -1,0 +1,50 @@
+#!/bin/sh /etc/rc.common
+
+START=85
+
+stamp_valid() {
+	[ -f /etc/osi-bootstrap.done ] || return 1
+	[ -f /srv/node-red/.chirpstack.env ] || return 1
+	grep -q 'CHIRPSTACK_APP_SENSORS=[0-9a-f]\{8\}-' /srv/node-red/.chirpstack.env 2>/dev/null || return 1
+	return 0
+}
+
+boot() {
+	start
+}
+
+start() {
+	if stamp_valid; then
+		return 0
+	fi
+
+	if [ ! -f /srv/node-red/chirpstack-bootstrap.js ]; then
+		logger -t osi-bootstrap "bootstrap script not found, marking done"
+		touch /etc/osi-bootstrap.done
+		return 0
+	fi
+
+	logger -t osi-bootstrap "waiting for ChirpStack gRPC..."
+	local ready=0
+	for i in $(seq 1 12); do
+		if curl -sf --max-time 3 http://localhost:8080 2>/dev/null; then
+			ready=1
+			break
+		fi
+		sleep 5
+	done
+
+	if [ "$ready" = 0 ]; then
+		logger -t osi-bootstrap "ChirpStack not ready after 60s, will retry next boot"
+		return 0
+	fi
+
+	logger -t osi-bootstrap "running chirpstack-bootstrap.js..."
+	if node /srv/node-red/chirpstack-bootstrap.js; then
+		touch /etc/osi-bootstrap.done
+		logger -t osi-bootstrap "bootstrap completed successfully"
+	else
+		logger -t osi-bootstrap "bootstrap failed, will retry next boot"
+	fi
+	return 0
+}
