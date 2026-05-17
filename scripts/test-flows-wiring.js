@@ -19,6 +19,7 @@ const OPEN_RX = /new\s+osiDb\.Database/;
 const CLOSE_RX = /\.close\s*\(/;
 
 let leaks = [];
+let wiringFailures = [];
 for (const node of flows) {
     if (node.type !== 'function' || typeof node.func !== 'string') continue;
     if (!OPEN_RX.test(node.func)) continue;
@@ -30,4 +31,34 @@ if (leaks.length > 0) {
     leaks.forEach(l => console.error('  - ' + l));
     process.exit(1);
 }
-console.log('PASS: every osiDb-opening function node closes it');
+
+for (const node of flows) {
+    if (node.type !== 'function' || typeof node.func !== 'string') continue;
+    const label = (node.name || '(unnamed)') + ' [' + node.id + ']';
+    if (/runGatewayMigrationPreflight/.test(node.func)) {
+        if (!/const q = \(sql, params = \[\]\) =>/.test(node.func)) {
+            wiringFailures.push(label + ' defines gateway migration preflight without a parameterized q helper');
+        }
+        if (!/const run = \(sql, params = \[\]\) =>/.test(node.func)) {
+            wiringFailures.push(label + ' defines gateway migration preflight without a parameterized run helper');
+        }
+    }
+    if (node.id === 'sync-force-build' && !/req\.setTimeout\(timeoutMs/.test(node.func)) {
+        wiringFailures.push(label + ' requestJson lacks a timeout guard');
+    }
+    if (node.id === 'command-ack-build-batch' && !/gatewayMigrationPendingBootstrap/.test(node.func)) {
+        wiringFailures.push(label + ' does not gate ACK flushes on stable gateway identity');
+    }
+    if (node.id === 's2120-zones-put-auth-fn') {
+        if (!/const rawZoneIds =/.test(node.func) || !/Number\.isInteger/.test(node.func)) {
+            wiringFailures.push(label + ' does not reject malformed zone_ids before deleting assignments');
+        }
+    }
+}
+if (wiringFailures.length > 0) {
+    console.error('FAIL: ' + wiringFailures.length + ' flow wiring regression(s):');
+    wiringFailures.forEach(l => console.error('  - ' + l));
+    process.exit(1);
+}
+
+console.log('PASS: flow DB close and wiring guards passed');

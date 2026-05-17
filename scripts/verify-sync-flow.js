@@ -744,7 +744,7 @@ pendingChecks.push((async () => {
         ts: '2026-05-17T10:00:00.000Z',
         deveui: 'A8404101FD5ECF41',
         device_name: 'Sensor "Alpha", row one',
-        device_type: 'KIWI_SENSOR',
+        device_type: '=SUM(1+1)',
         zone_id: 7,
         swt_wm1: 42,
         swt_wm2: 51,
@@ -759,6 +759,11 @@ pendingChecks.push((async () => {
     'sensor-data CSV export doubles raw quotes and quotes comma-containing fields',
     'sensor-data CSV export did not escape raw quotes correctly'
   );
+  expectCondition(
+    String(sensorCsvMsg.payload || '').includes(",'=SUM"),
+    'sensor-data CSV export neutralizes spreadsheet formulas',
+    'sensor-data CSV export did not neutralize spreadsheet formulas'
+  );
 
   const fieldCsvMsg = await executeFunctionNodeById('fn_rows_to_csv', {
     payload: [
@@ -767,6 +772,7 @@ pendingChecks.push((async () => {
         dev_eui: 'A8404101FD5ECF41',
         f_cnt: 1,
         gateway_id: 'gateway "north", row one',
+        crc_status: '@formula',
       },
     ],
   });
@@ -775,8 +781,87 @@ pendingChecks.push((async () => {
     'field-test CSV export doubles raw quotes and quotes comma-containing fields',
     'field-test CSV export did not escape raw quotes correctly'
   );
+  expectCondition(
+    String(fieldCsvMsg.payload || '').includes(",'@formula"),
+    'field-test CSV export neutralizes spreadsheet formulas',
+    'field-test CSV export did not neutralize spreadsheet formulas'
+  );
 })().catch((error) => {
   fail(`failed to execute CSV export fixtures: ${error.message}`);
+}));
+
+pendingChecks.push((async () => {
+  const kiwiMsg = await executeFunctionNodeById('81c98fb07344a787', {
+    payload: {
+      deviceProfileName: 'Kiwi Simulator',
+      devEui: 'a8404101fd5ecf41',
+      deviceName: 'legacy simulator',
+      time: '2026-05-17T10:00:00.000Z',
+      object: {
+        input5_frequency: 4330,
+        input6_frequency: 2820,
+      },
+    },
+  }, {
+    env: { CHIRPSTACK_PROFILE_KIWI: 'profile-kiwi' },
+  });
+  expectCondition(
+    kiwiMsg && kiwiMsg.formattedData && kiwiMsg.formattedData.devEui === 'A8404101FD5ECF41',
+    'Kiwi legacy simulator payloads without deviceInfo are accepted',
+    'Kiwi legacy simulator payload was rejected'
+  );
+  expectCondition(
+    kiwiMsg.formattedData.readings.input5_frequency === 4330
+      && kiwiMsg.formattedData.readings.input6_frequency === 2820,
+    'Kiwi legacy simulator input frequencies are mapped to Watermark readings',
+    'Kiwi legacy simulator input frequencies were not preserved'
+  );
+})().catch((error) => {
+  fail(`failed to execute Kiwi simulator fixture: ${error.message}`);
+}));
+
+pendingChecks.push((async () => {
+  const lsn50Msg = await executeFunctionNodeById('lsn50-decode-fn', {
+    payload: {
+      deviceInfo: {
+        deviceProfileName: 'Dragino LSN50',
+        deviceProfileId: 'profile-lsn50',
+        devEui: 'a8404101fd5ecf42',
+      },
+      time: '2026-05-17T10:00:00.000Z',
+      data: 'raw',
+      object: {
+        TempC1: 22.4,
+        BatV: 3.55,
+      },
+    },
+  }, {
+    env: { CHIRPSTACK_PROFILE_LSN50: 'profile-lsn50' },
+    scope: {
+      dendro: {
+        decodeRawAdcPayload: () => ({
+          modeCode: 1,
+          tempC1: null,
+          batV: 3.5,
+          adcCh0V: 1.1,
+          adcCh1V: 1.2,
+          adcCh4V: 1.3,
+        }),
+        lsn50ModeLabel: () => 'MOD1 ADC',
+        toFiniteNumber: (value) => {
+          const numeric = Number(value);
+          return Number.isFinite(numeric) ? numeric : null;
+        },
+      },
+    },
+  });
+  expectCondition(
+    lsn50Msg && lsn50Msg.formattedData && lsn50Msg.formattedData.tempC1 === 22.4,
+    'LSN50 object temperature is not overwritten by null raw decode temperature',
+    'LSN50 object temperature was overwritten by null raw decode temperature'
+  );
+})().catch((error) => {
+  fail(`failed to execute LSN50 temp merge fixture: ${error.message}`);
 }));
 
 for (const route of requiredHttpRoutes) {
