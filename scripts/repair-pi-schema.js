@@ -25,6 +25,22 @@ function exec(sql) {
     }
 }
 
+function columns(table) {
+    return execFileSync('sqlite3', [dbPath, `PRAGMA table_info(${table});`], { encoding: 'utf8' })
+        .trim()
+        .split('\n')
+        .filter(Boolean)
+        .map((line) => line.split('|')[1])
+        .filter(Boolean);
+}
+
+function addColumnIfMissing(table, name, definition) {
+    if (columns(table).includes(name)) {
+        return false;
+    }
+    return exec(`ALTER TABLE ${table} ADD COLUMN ${name} ${definition}`);
+}
+
 console.log(`Repairing ${dbPath}`);
 
 // 1. Base tables
@@ -58,18 +74,39 @@ const indexes = [
     'CREATE INDEX IF NOT EXISTS idx_valve_act_exp_effect_key ON valve_actuation_expectations(effect_key)',
     'CREATE INDEX IF NOT EXISTS idx_applied_commands_device_eui ON applied_commands(device_eui)',
     'CREATE INDEX IF NOT EXISTS idx_applied_commands_effect_key ON applied_commands(effect_key)',
+    'CREATE INDEX IF NOT EXISTS idx_applied_commands_applied_at ON applied_commands(applied_at)',
 ];
 
 for (const stmt of indexes) {
     if (exec(stmt)) applied++;
 }
 
-// 3. Verify
+// 3. Column-level repairs for DBs that got an earlier runtime-created ledger.
+const appliedCommandColumns = [
+    ['result_detail', 'TEXT'],
+    ['originator', 'TEXT'],
+    ['attempt_count', 'INTEGER NOT NULL DEFAULT 0'],
+    ['last_error', 'TEXT'],
+    ['last_ack_attempt_at', 'TEXT'],
+    ['expires_at', 'TEXT'],
+];
+for (const [name, definition] of appliedCommandColumns) {
+    if (addColumnIfMissing('applied_commands', name, definition)) applied++;
+}
+
+// 4. Verify
 const tables = execFileSync('sqlite3', [dbPath, ".tables"], { encoding: 'utf8' }).split(/\s+/);
 const want = ['valve_actuation_expectations', 'zone_irrigation_calibration', 'applied_commands'];
 for (const t of want) {
     if (!tables.includes(t)) {
         console.error(`FAIL: missing table after repair: ${t}`);
+        process.exit(1);
+    }
+}
+const appliedColumns = columns('applied_commands');
+for (const column of appliedCommandColumns.map(([name]) => name)) {
+    if (!appliedColumns.includes(column)) {
+        console.error(`FAIL: missing applied_commands column after repair: ${column}`);
         process.exit(1);
     }
 }

@@ -45,6 +45,38 @@ if (!hasAmount) {
     console.log('OK  M7: amount property present in commands.schema.json');
 }
 
+const openForDurationRule = allOf.find(rule =>
+    rule.if && rule.if.properties && rule.if.properties.command_type &&
+    rule.if.properties.command_type.const === 'OPEN_FOR_DURATION'
+);
+const openDurationType = openForDurationRule &&
+    openForDurationRule.then &&
+    openForDurationRule.then.properties &&
+    openForDurationRule.then.properties.duration_seconds &&
+    openForDurationRule.then.properties.duration_seconds.type;
+if (openDurationType !== 'integer') {
+    console.error('FAIL schema: OPEN_FOR_DURATION duration_seconds can still be null');
+    ok = false;
+} else {
+    console.log('OK  schema: OPEN_FOR_DURATION duration_seconds is non-null integer');
+}
+
+const stregaTimedRule = allOf.find(rule =>
+    rule.if && rule.if.properties && rule.if.properties.command_type &&
+    rule.if.properties.command_type.const === 'SET_STREGA_TIMED_ACTION'
+);
+const timedAmountType = stregaTimedRule &&
+    stregaTimedRule.then &&
+    stregaTimedRule.then.properties &&
+    stregaTimedRule.then.properties.amount &&
+    stregaTimedRule.then.properties.amount.type;
+if (timedAmountType !== 'integer') {
+    console.error('FAIL schema: SET_STREGA_TIMED_ACTION amount can still be null');
+    ok = false;
+} else {
+    console.log('OK  schema: SET_STREGA_TIMED_ACTION amount is non-null integer');
+}
+
 // Contract resources must match edge runtime device and schedule enums.
 const resourcesSchema = loadSchema('resources.schema.json');
 const deviceTypes = resourcesSchema.definitions.Device.properties.type_id.enum || [];

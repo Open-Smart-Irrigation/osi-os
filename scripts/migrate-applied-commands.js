@@ -16,8 +16,30 @@ if (!fs.existsSync(dbPath)) {
 const sqlPath = path.resolve(__dirname, '../database/migrations/2026-05-17-add-applied-commands.sql');
 const sql = fs.readFileSync(sqlPath, 'utf8');
 
+function sqlite(input) {
+    return execFileSync('sqlite3', [dbPath], { input, encoding: 'utf8' });
+}
+
+function columns(table) {
+    return execFileSync('sqlite3', [dbPath, `PRAGMA table_info(${table});`], { encoding: 'utf8' })
+        .trim()
+        .split('\n')
+        .filter(Boolean)
+        .map((line) => line.split('|')[1])
+        .filter(Boolean);
+}
+
+function ensureColumn(table, name, definition) {
+    if (columns(table).includes(name)) {
+        console.log(`  ok ${table}.${name} present`);
+        return;
+    }
+    sqlite(`ALTER TABLE ${table} ADD COLUMN ${name} ${definition};`);
+    console.log(`  added ${table}.${name}`);
+}
+
 try {
-    execFileSync('sqlite3', [dbPath], { input: sql, encoding: 'utf8' });
+    sqlite(sql);
     console.log(`OK: applied ${path.basename(sqlPath)} to ${dbPath}`);
 
     const output = execFileSync('sqlite3', [dbPath,
@@ -25,6 +47,13 @@ try {
     ], { encoding: 'utf8' });
     if (!output.trim()) throw new Error('applied_commands table missing after migration');
     console.log('  ok applied_commands present');
+
+    ensureColumn('applied_commands', 'result_detail', 'TEXT');
+    ensureColumn('applied_commands', 'originator', 'TEXT');
+    ensureColumn('applied_commands', 'attempt_count', 'INTEGER NOT NULL DEFAULT 0');
+    ensureColumn('applied_commands', 'last_error', 'TEXT');
+    ensureColumn('applied_commands', 'last_ack_attempt_at', 'TEXT');
+    ensureColumn('applied_commands', 'expires_at', 'TEXT');
 } catch (e) {
     console.error('FAIL:', e.message);
     process.exit(1);

@@ -1000,10 +1000,15 @@ expectIncludes('Build Pending Command Pull', "'X-OSI-Sync-Protocol': '2'", 'opts
 expectIncludes('Replay Pending Commands', 'msg.payload.commands', 'accepts protocol-v2 pending-command envelopes');
 expectIncludes('Replay Pending Commands', 'leaseExpiresAt: cmd.leaseExpiresAt', 'preserves command lease expiry in queued command payloads');
 expectIncludes('Sync Init Schema + Triggers', 'CREATE TABLE IF NOT EXISTS applied_commands', 'creates the edge command replay ledger during sync init');
+expectIncludes('Sync Init Schema + Triggers', 'result_detail TEXT', 'creates the canonical applied_commands.result_detail column');
+expectIncludes('Sync Init Schema + Triggers', 'attempt_count INTEGER NOT NULL DEFAULT 0', 'creates/applies applied_commands retry accounting columns');
+expectIncludes('Sync Init Schema + Triggers', 'last_ack_attempt_at TEXT', 'creates/applies applied_commands ACK retry timestamp column');
 expectIncludes('Sync Init Schema + Triggers', 'CREATE TABLE IF NOT EXISTS command_ack_outbox', 'creates the durable edge command ACK outbox during sync init');
 expectIncludes('Deduplicate Pending Command', 'SELECT command_id, effect_key, result FROM applied_commands', 'checks command and effect-key replay ledger before dispatch');
 expectIncludes('Deduplicate Pending Command', 'duplicate_command', 'emits a terminal duplicate ACK instead of replaying a command');
 expectIncludes('Queue REST Command ACK', 'INSERT OR REPLACE INTO applied_commands', 'records terminal command outcomes in the local replay ledger');
+expectIncludes('Queue REST Command ACK', 'result_detail', 'writes terminal command detail into the canonical replay-ledger detail column');
+expectExcludes('Queue REST Command ACK', 'applied_at,detail', 'legacy applied_commands.detail insert column');
 expectIncludes('Queue REST Command ACK', 'INSERT INTO command_ack_outbox', 'queues durable REST command ACKs before MQTT telemetry forwarding');
 expectIncludes('Build Command ACK Batch', '/command-acks', 'posts queued command ACKs to the sync REST endpoint');
 expectIncludes('Build Command ACK Batch', "'X-OSI-Sync-Protocol': '2'", 'opts REST command ACKs into sync protocol v2');
