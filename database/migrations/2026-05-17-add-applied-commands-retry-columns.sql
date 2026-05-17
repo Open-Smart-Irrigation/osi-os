@@ -1,6 +1,7 @@
 -- 2026-05-17: WS3 applied_commands retry column migration.
--- Apply once with sqlite3, or use scripts/migrate-applied-commands.js for
--- idempotent live repair against DBs that may already have some columns.
+-- This file documents intended schema; idempotent application is handled by
+-- scripts/migrate-applied-commands.js and scripts/repair-pi-schema.js.
+-- Do not pipe directly to sqlite3.
 
 ALTER TABLE applied_commands ADD COLUMN attempt_count INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE applied_commands ADD COLUMN last_error TEXT;
