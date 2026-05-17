@@ -14,6 +14,9 @@ const osiServerDefaultsPath = path.resolve(__dirname, '..', 'conf', 'full_raspbe
 const sx1301GatewayDefaultPath = path.resolve(__dirname, '..', 'conf', 'full_raspberrypi_bcm27xx_bcm2712', 'files', 'etc', 'uci-defaults', '99_set_sx1301_gateway_id');
 const gatewayIdentityHelperPath = path.resolve(__dirname, '..', 'conf', 'full_raspberrypi_bcm27xx_bcm2712', 'files', 'usr', 'libexec', 'osi-gateway-identity.sh');
 const chirpstackBootstrapPath = path.resolve(__dirname, 'chirpstack-bootstrap.js');
+const osiBootstrapInitPath = path.resolve(__dirname, '..', 'conf', 'full_raspberrypi_bcm27xx_bcm2712', 'files', 'etc', 'init.d', 'osi-bootstrap');
+const osiBootstrapEnablePath = path.resolve(__dirname, '..', 'conf', 'full_raspberrypi_bcm27xx_bcm2712', 'files', 'etc', 'uci-defaults', '95_osi_bootstrap_enable');
+const sysupgradeConfPath = path.resolve(__dirname, '..', 'conf', 'full_raspberrypi_bcm27xx_bcm2712', 'files', 'etc', 'sysupgrade.conf');
 const stregaCodecPath = path.resolve(__dirname, '..', 'conf', 'full_raspberrypi_bcm27xx_bcm2712', 'files', 'usr', 'share', 'node-red', 'codecs', 'strega_gen1_decoder.js');
 const lsn50CodecPath = path.resolve(__dirname, '..', 'conf', 'full_raspberrypi_bcm27xx_bcm2712', 'files', 'usr', 'share', 'node-red', 'codecs', 'dragino_lsn50_decoder.js');
 const seedDatabasePaths = [
@@ -1985,6 +1988,49 @@ expectFileIncludes('99_set_sx1301_gateway_id', sx1301GatewayDefaultScript, 'gate
 expectFileIncludes('99_set_sx1301_gateway_id', sx1301GatewayDefaultScript, 'resolve_fallback_gateway_id()', 'keeps a single MAC-derived fallback path for first-boot concentratord seeding');
 expectFileExcludes('99_set_sx1301_gateway_id', sx1301GatewayDefaultScript, "SECTION='chirpstack-concentratord.@sx1302[0]'", 'hard-coded sx1302 seeding outside active-chipset-aware logic');
 expectFileExcludes('99_set_sx1301_gateway_id', sx1301GatewayDefaultScript, "SECTION='chirpstack-concentratord.@sx1301[0]'", 'hard-coded sx1301 seeding outside active-chipset-aware logic');
+
+// --- osi-bootstrap init script verification ---
+
+let osiBootstrapInitScript = '';
+if (fs.existsSync(osiBootstrapInitPath)) {
+  osiBootstrapInitScript = fs.readFileSync(osiBootstrapInitPath, 'utf8');
+  console.log('OK osi-bootstrap init script present');
+} else {
+  fail(`missing osi-bootstrap init script at ${osiBootstrapInitPath}`);
+}
+
+expectFileIncludes('osi-bootstrap', osiBootstrapInitScript, 'START=85', 'init script declares correct boot priority');
+expectFileIncludes('osi-bootstrap', osiBootstrapInitScript, 'stamp_valid()', 'init script defines stamp validity check');
+expectFileIncludes('osi-bootstrap', osiBootstrapInitScript, '/etc/osi-bootstrap.done', 'init script uses the canonical stamp file path');
+expectFileIncludes('osi-bootstrap', osiBootstrapInitScript, '/srv/node-red/.chirpstack.env', 'init script checks env file existence');
+expectFileIncludes('osi-bootstrap', osiBootstrapInitScript, "grep -q 'CHIRPSTACK_APP_SENSORS=[0-9a-f]\\{8\\}-'", 'init script validates env file contains valid app UUIDs');
+expectFileIncludes('osi-bootstrap', osiBootstrapInitScript, 'chirpstack-bootstrap.js', 'init script references the bootstrap script');
+expectFileIncludes('osi-bootstrap', osiBootstrapInitScript, 'curl -sf --max-time 3 http://localhost:8080', 'init script waits for ChirpStack gRPC via curl');
+expectFileIncludes('osi-bootstrap', osiBootstrapInitScript, 'seq 1 12', 'init script retries gRPC health check up to 12 times');
+expectFileIncludes('osi-bootstrap', osiBootstrapInitScript, 'logger -t osi-bootstrap', 'init script logs all events with the correct tag');
+expectFileExcludes('osi-bootstrap', osiBootstrapInitScript, 'STOP=', 'init script does not set a shutdown priority (one-shot)');
+
+// uci-defaults activation script
+let osiBootstrapEnableScript = '';
+if (fs.existsSync(osiBootstrapEnablePath)) {
+  osiBootstrapEnableScript = fs.readFileSync(osiBootstrapEnablePath, 'utf8');
+  console.log('OK osi-bootstrap uci-defaults activation script present');
+} else {
+  fail(`missing osi-bootstrap uci-defaults activation script at ${osiBootstrapEnablePath}`);
+}
+
+expectFileIncludes('95_osi_bootstrap_enable', osiBootstrapEnableScript, '/etc/init.d/osi-bootstrap enable', 'activation script enables the osi-bootstrap init on first boot');
+
+// sysupgrade.conf preservation
+let sysupgradeConf = '';
+if (fs.existsSync(sysupgradeConfPath)) {
+  sysupgradeConf = fs.readFileSync(sysupgradeConfPath, 'utf8');
+  console.log('OK sysupgrade.conf present');
+} else {
+  fail(`missing sysupgrade.conf at ${sysupgradeConfPath}`);
+}
+
+expectFileIncludes('sysupgrade.conf', sysupgradeConf, '/etc/osi-bootstrap.done', 'sysupgrade.conf preserves the osi-bootstrap stamp file');
 
 const authNodes = flows.filter((node) => typeof node.func === 'string' && node.func.includes('function getAuthSecret()'));
 for (const insecureNeedle of ['osi-os-default-auth-secret', "env.get('CHIRPSTACK_API_KEY')"]) {
