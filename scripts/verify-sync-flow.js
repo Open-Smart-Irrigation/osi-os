@@ -79,6 +79,8 @@ const weatherTabSource = fs.readFileSync(weatherTabPath, 'utf8');
 const flows = JSON.parse(fs.readFileSync(flowPath, 'utf8'));
 const pendingChecks = [];
 
+assertCommandRegistry(flows);
+
 const sharedStregaIngressNode = flows.find((node) => node.id === 'e73a11a2a36aab22');
 if (!sharedStregaIngressNode) {
   fail('missing shared STREGA ingest node e73a11a2a36aab22');
@@ -2332,6 +2334,32 @@ if (!dendroHelperPath) {
       fail(`failed to execute S2120 SQL fixture: ${error.message}`);
     }));
   }
+}
+
+function assertCommandRegistry(flows) {
+    const registry = flows.find(n =>
+        n.type === 'function' && n.name === 'Command Type Registry'
+    );
+    if (!registry) {
+        throw new Error('Missing function node named "Command Type Registry"');
+    }
+    const required = [
+        'OPEN_FOR_DURATION',
+        'SET_STREGA_TIMED_ACTION',
+        'CLOSE',
+        'SET_CHAMELEON_CONFIG',
+        'REGISTER_DEVICE',
+        'REBOOT_DEVICE',
+    ];
+    for (const cmd of required) {
+        if (!registry.func.includes(cmd)) {
+            throw new Error(`Command Type Registry missing entry: ${cmd}`);
+        }
+    }
+    if (/['"]OPEN['"]\s*:/.test(registry.func)) {
+        throw new Error('Command Type Registry must NOT contain indefinite "OPEN" key — only OPEN_FOR_DURATION');
+    }
+    console.log('  ok Command Type Registry node present with required entries');
 }
 
 Promise.all(pendingChecks).finally(() => {

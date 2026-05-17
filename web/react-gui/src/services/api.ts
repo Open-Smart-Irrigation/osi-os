@@ -173,6 +173,10 @@ export const devicesAPI = {
     await api.post(`/api/valve/${deveui}`, action);
   },
 
+  cancelIrrigation: async (deveui: string, reason: string = 'operator_cancel'): Promise<void> => {
+    await api.post(`/api/v1/valves/${deveui}/cancel`, { reason });
+  },
+
   remove: async (deveui: string): Promise<void> => {
     await api.delete(`/api/devices/${deveui}`);
   },
@@ -453,6 +457,15 @@ export const stregaAPI = {
     percentage: number;
   }): Promise<void> => {
     await api.put(`/api/devices/${deveui}/strega/flushing`, payload);
+  },
+};
+
+export const valveAPI = {
+  getTodayLiters: async (deveui: string): Promise<{ liters: number | null; source: string }> => {
+    const resp = await api.get<{ liters: number | null; source: string }>(
+      `/api/v1/devices/${deveui}/today-liters`
+    );
+    return resp.data;
   },
 };
 

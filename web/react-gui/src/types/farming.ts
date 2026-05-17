@@ -128,7 +128,8 @@ export interface AddDeviceRequest {
 }
 
 export interface ValveActionRequest {
-  action: 'OPEN' | 'CLOSE';
+  action: 'OPEN' | 'CLOSE' | 'OPEN_FOR_DURATION';
+  duration_seconds?: number;
 }
 
 // ---- Irrigation schedule types ----
