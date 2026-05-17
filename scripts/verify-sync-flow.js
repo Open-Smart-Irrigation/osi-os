@@ -1830,6 +1830,47 @@ for (const seedDatabasePath of seedDatabasePaths) {
     `${relativeSeedPath} is missing idx_chameleon_readings_array_id`
   );
 }
+// WS2/WS3 v2 protocol: verify applied_commands (retry columns) and command_ack_outbox schema in full seed DBs.
+// sync_outbox is created at runtime by flows.json init SQL; its columns are verified via the init-SQL text checks above.
+const v2SeedDatabasePaths = [
+  path.resolve(__dirname, '..', 'conf', 'full_raspberrypi_bcm27xx_bcm2712', 'files', 'usr', 'share', 'db', 'farming.db'),
+  path.resolve(__dirname, '..', 'database', 'farming.db'),
+];
+for (const seedDatabasePath of v2SeedDatabasePaths) {
+  const relativeSeedPath = path.relative(path.resolve(__dirname, '..'), seedDatabasePath);
+  const appliedCommandsColumns = new Set(readTableColumns(seedDatabasePath, 'applied_commands'));
+  expectCondition(
+    appliedCommandsColumns.has('attempt_count'),
+    `${relativeSeedPath} includes applied_commands.attempt_count for WS3 retry`,
+    `${relativeSeedPath} is missing applied_commands.attempt_count`
+  );
+  expectCondition(
+    appliedCommandsColumns.has('last_error'),
+    `${relativeSeedPath} includes applied_commands.last_error for WS3 retry`,
+    `${relativeSeedPath} is missing applied_commands.last_error`
+  );
+  expectCondition(
+    appliedCommandsColumns.has('last_ack_attempt_at'),
+    `${relativeSeedPath} includes applied_commands.last_ack_attempt_at for WS3 ACK outbox`,
+    `${relativeSeedPath} is missing applied_commands.last_ack_attempt_at`
+  );
+  expectCondition(
+    appliedCommandsColumns.has('expires_at'),
+    `${relativeSeedPath} includes applied_commands.expires_at for WS3 expiry`,
+    `${relativeSeedPath} is missing applied_commands.expires_at`
+  );
+  const ackOutboxColumns = new Set(readTableColumns(seedDatabasePath, 'command_ack_outbox'));
+  expectCondition(
+    ackOutboxColumns.has('command_id'),
+    `${relativeSeedPath} includes command_ack_outbox table for WS3 ACK flush`,
+    `${relativeSeedPath} is missing command_ack_outbox table`
+  );
+  expectCondition(
+    ackOutboxColumns.has('delivered_at'),
+    `${relativeSeedPath} includes command_ack_outbox.delivered_at for selective delivery tracking`,
+    `${relativeSeedPath} is missing command_ack_outbox.delivered_at`
+  );
+}
 expectFileIncludes('osi-gateway-identity.sh', gatewayIdentityHelperScript, 'gateway_identity_resolve()', 'defines the shared canonical gateway resolver');
 expectFileIncludes('osi-gateway-identity.sh', gatewayIdentityHelperScript, 'gateway_identity_active_chipset()', 'derives the active concentratord chipset before probing static gateway identifiers');
 expectFileIncludes('osi-gateway-identity.sh', gatewayIdentityHelperScript, 'uci -q get chirpstack-concentratord.@global[0].chipset', 'reads the active concentratord chipset from UCI');
