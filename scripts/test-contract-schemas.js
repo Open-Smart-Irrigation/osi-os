@@ -23,6 +23,19 @@ if (svMin !== 0) {
 
 // M7: commands.schema.json SET_STREGA_TIMED_ACTION must not require duration_seconds
 const cmdSchema = loadSchema('commands.schema.json');
+const commandIdPattern = new RegExp(cmdSchema.properties.command_id.pattern);
+for (const commandId of [
+    'a1234567-b89c-4def-9012-abcdefabcdef',
+    'A1234567-B89C-4DEF-9012-ABCDEFABCDEF'
+]) {
+    if (!commandIdPattern.test(commandId)) {
+        console.error(`FAIL schema: command_id pattern rejects valid UUID casing ${commandId}`);
+        ok = false;
+    } else {
+        console.log(`OK  schema: command_id accepts UUID casing ${commandId}`);
+    }
+}
+
 const allOf = cmdSchema.allOf || [];
 const stregaTimedRequiresDurationSeconds = allOf.some(rule =>
     rule.if && rule.if.properties && rule.if.properties.command_type &&

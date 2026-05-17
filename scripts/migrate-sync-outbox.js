@@ -4,7 +4,7 @@
 // Safe to re-run.
 
 const fs = require('fs');
-const { execFileSync } = require('child_process');
+const { createSqliteHelpers } = require('./sqlite-migration-helpers.js');
 
 const dbPath = process.argv[2] || '/data/db/farming.db';
 if (!fs.existsSync(dbPath)) {
@@ -12,27 +12,7 @@ if (!fs.existsSync(dbPath)) {
     process.exit(2);
 }
 
-function columns(table) {
-    return execFileSync('sqlite3', [dbPath, `PRAGMA table_info(${table});`], { encoding: 'utf8' })
-        .trim()
-        .split('\n')
-        .filter(Boolean)
-        .map((line) => line.split('|')[1])
-        .filter(Boolean);
-}
-
-function sqlite(input) {
-    return execFileSync('sqlite3', [dbPath], { input, encoding: 'utf8' });
-}
-
-function ensureColumn(table, name, definition) {
-    if (columns(table).includes(name)) {
-        console.log(`  ok ${table}.${name} present`);
-        return;
-    }
-    sqlite(`ALTER TABLE ${table} ADD COLUMN ${name} ${definition};`);
-    console.log(`  added ${table}.${name}`);
-}
+const { ensureColumn } = createSqliteHelpers(dbPath);
 
 try {
     ensureColumn('sync_outbox', 'rejected_at', 'TEXT');

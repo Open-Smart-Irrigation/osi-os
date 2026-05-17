@@ -6,7 +6,7 @@
     "required": ["command_type", "command_id", "device_eui"],
     "additionalProperties": false,
     "properties": {
-        "command_id": {"type": "string", "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"},
+        "command_id": {"type": "string", "pattern": "^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}$"},
         "command_type": {
             "type": "string",
             "enum": [

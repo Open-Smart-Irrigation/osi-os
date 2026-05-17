@@ -6,6 +6,7 @@
 const fs = require('fs');
 const path = require('path');
 const { execFileSync } = require('child_process');
+const { createSqliteHelpers } = require('./sqlite-migration-helpers.js');
 
 const dbPath = process.argv[2] || '/data/db/farming.db';
 if (!fs.existsSync(dbPath)) {
@@ -15,28 +16,7 @@ if (!fs.existsSync(dbPath)) {
 
 const sqlPath = path.resolve(__dirname, '../database/migrations/2026-05-17-add-applied-commands.sql');
 const sql = fs.readFileSync(sqlPath, 'utf8');
-
-function sqlite(input) {
-    return execFileSync('sqlite3', [dbPath], { input, encoding: 'utf8' });
-}
-
-function columns(table) {
-    return execFileSync('sqlite3', [dbPath, `PRAGMA table_info(${table});`], { encoding: 'utf8' })
-        .trim()
-        .split('\n')
-        .filter(Boolean)
-        .map((line) => line.split('|')[1])
-        .filter(Boolean);
-}
-
-function ensureColumn(table, name, definition) {
-    if (columns(table).includes(name)) {
-        console.log(`  ok ${table}.${name} present`);
-        return;
-    }
-    sqlite(`ALTER TABLE ${table} ADD COLUMN ${name} ${definition};`);
-    console.log(`  added ${table}.${name}`);
-}
+const { sqlite, ensureColumn } = createSqliteHelpers(dbPath);
 
 try {
     sqlite(sql);
