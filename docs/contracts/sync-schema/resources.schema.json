@@ -1,0 +1,47 @@
+{
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "$id": "https://contracts.opensmartirrigation.org/sync-schema/resources.schema.json",
+    "title": "Sync Resource Schema Registry",
+    "description": "Canonical resource types and their required fields for sync.",
+    "definitions": {
+        "Zone": {
+            "type": "object",
+            "required": ["zone_id", "name"],
+            "properties": {
+                "zone_id": {"type": "integer", "minimum": 1},
+                "name": {"type": "string", "minLength": 1},
+                "area_m2": {"type": ["number", "null"], "minimum": 0},
+                "irrigation_efficiency_pct": {"type": ["number", "null"], "minimum": 0, "maximum": 100},
+                "crop_type": {"type": ["string", "null"]},
+                "soil_type": {"type": ["string", "null"]},
+                "irrigation_method": {"type": ["string", "null"]},
+                "scheduling_mode": {"type": "string", "enum": ["local", "cloud"]},
+                "prediction_card": {"type": "boolean"},
+                "deleted_at": {"type": ["string", "null"], "format": "date-time"}
+            }
+        },
+        "Device": {
+            "type": "object",
+            "required": ["deveui", "type_id"],
+            "properties": {
+                "deveui": {"type": "string", "pattern": "^[0-9A-F]{16}$"},
+                "type_id": {"type": "string", "enum": ["STREGA_VALVE", "DRAGINO_LSN50", "KIWI_SENSOR", "TEKTELIC_CLOVER", "SENSECAP_S2120"]},
+                "name": {"type": ["string", "null"]},
+                "zone_id": {"type": ["integer", "null"]},
+                "deleted_at": {"type": ["string", "null"], "format": "date-time"}
+            }
+        },
+        "Schedule": {
+            "type": "object",
+            "required": ["zone_id", "trigger_metric"],
+            "properties": {
+                "zone_id": {"type": "integer", "minimum": 1},
+                "trigger_metric": {"type": "string", "enum": ["SWT_WM1","SWT_WM2","SWT_AVG","DENDRO"]},
+                "trigger_value": {"type": "number"},
+                "irrigation_duration_min": {"type": "integer", "minimum": 1},
+                "enabled": {"type": "boolean"},
+                "deleted_at": {"type": ["string", "null"], "format": "date-time"}
+            }
+        }
+    }
+}

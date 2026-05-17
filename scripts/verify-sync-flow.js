@@ -155,6 +155,11 @@ const requiredFunctionNodes = [
   'Build Edge Event Batch',
   'Mark Synced Events Delivered',
   'Build Pending Command Pull',
+  'Deduplicate Pending Command',
+  'Queue REST Command ACK',
+  'Build Command ACK Batch',
+  'Mark Command ACKs Delivered',
+  'Prune Sync Outbox',
   'Build Sync State',
   'Replay Pending Commands',
   'Build Sync Token Refresh',
@@ -734,6 +739,133 @@ async function executeFunctionNodeById(nodeId, msg, options = {}) {
   return fn(msg, nodeApi, flowApi, envApi, options.context || noopStore, options.global || noopStore, () => undefined, () => {});
 }
 
+pendingChecks.push((async () => {
+  const sensorCsvMsg = await executeFunctionNodeById('fn_rows_to_csv_sensordata', {
+    payload: [
+      {
+        ts: '2026-05-17T10:00:00.000Z',
+        deveui: 'A8404101FD5ECF41',
+        device_name: 'Sensor "Alpha", row one',
+        device_type: '=SUM(1+1)',
+        zone_id: 7,
+        swt_wm1: 42,
+        swt_wm2: 51,
+        light_lux: 1200,
+        ambient_temperature: 21.5,
+        relative_humidity: 68.2,
+      },
+    ],
+  });
+  expectCondition(
+    String(sensorCsvMsg.payload || '').includes('"Sensor ""Alpha"", row one"'),
+    'sensor-data CSV export doubles raw quotes and quotes comma-containing fields',
+    'sensor-data CSV export did not escape raw quotes correctly'
+  );
+  expectCondition(
+    String(sensorCsvMsg.payload || '').includes(",'=SUM"),
+    'sensor-data CSV export neutralizes spreadsheet formulas',
+    'sensor-data CSV export did not neutralize spreadsheet formulas'
+  );
+
+  const fieldCsvMsg = await executeFunctionNodeById('fn_rows_to_csv', {
+    payload: [
+      {
+        ts: '2026-05-17T10:00:00.000Z',
+        dev_eui: 'A8404101FD5ECF41',
+        f_cnt: 1,
+        gateway_id: 'gateway "north", row one',
+        crc_status: '@formula',
+      },
+    ],
+  });
+  expectCondition(
+    String(fieldCsvMsg.payload || '').includes('"gateway ""north"", row one"'),
+    'field-test CSV export doubles raw quotes and quotes comma-containing fields',
+    'field-test CSV export did not escape raw quotes correctly'
+  );
+  expectCondition(
+    String(fieldCsvMsg.payload || '').includes(",'@formula"),
+    'field-test CSV export neutralizes spreadsheet formulas',
+    'field-test CSV export did not neutralize spreadsheet formulas'
+  );
+})().catch((error) => {
+  fail(`failed to execute CSV export fixtures: ${error.message}`);
+}));
+
+pendingChecks.push((async () => {
+  const kiwiMsg = await executeFunctionNodeById('81c98fb07344a787', {
+    payload: {
+      deviceProfileName: 'Kiwi Simulator',
+      devEui: 'a8404101fd5ecf41',
+      deviceName: 'legacy simulator',
+      time: '2026-05-17T10:00:00.000Z',
+      object: {
+        input5_frequency: 4330,
+        input6_frequency: 2820,
+      },
+    },
+  }, {
+    env: { CHIRPSTACK_PROFILE_KIWI: 'profile-kiwi' },
+  });
+  expectCondition(
+    kiwiMsg && kiwiMsg.formattedData && kiwiMsg.formattedData.devEui === 'A8404101FD5ECF41',
+    'Kiwi legacy simulator payloads without deviceInfo are accepted',
+    'Kiwi legacy simulator payload was rejected'
+  );
+  expectCondition(
+    kiwiMsg.formattedData.readings.input5_frequency === 4330
+      && kiwiMsg.formattedData.readings.input6_frequency === 2820,
+    'Kiwi legacy simulator input frequencies are mapped to Watermark readings',
+    'Kiwi legacy simulator input frequencies were not preserved'
+  );
+})().catch((error) => {
+  fail(`failed to execute Kiwi simulator fixture: ${error.message}`);
+}));
+
+pendingChecks.push((async () => {
+  const lsn50Msg = await executeFunctionNodeById('lsn50-decode-fn', {
+    payload: {
+      deviceInfo: {
+        deviceProfileName: 'Dragino LSN50',
+        deviceProfileId: 'profile-lsn50',
+        devEui: 'a8404101fd5ecf42',
+      },
+      time: '2026-05-17T10:00:00.000Z',
+      data: 'raw',
+      object: {
+        TempC1: 22.4,
+        BatV: 3.55,
+      },
+    },
+  }, {
+    env: { CHIRPSTACK_PROFILE_LSN50: 'profile-lsn50' },
+    scope: {
+      dendro: {
+        decodeRawAdcPayload: () => ({
+          modeCode: 1,
+          tempC1: null,
+          batV: 3.5,
+          adcCh0V: 1.1,
+          adcCh1V: 1.2,
+          adcCh4V: 1.3,
+        }),
+        lsn50ModeLabel: () => 'MOD1 ADC',
+        toFiniteNumber: (value) => {
+          const numeric = Number(value);
+          return Number.isFinite(numeric) ? numeric : null;
+        },
+      },
+    },
+  });
+  expectCondition(
+    lsn50Msg && lsn50Msg.formattedData && lsn50Msg.formattedData.tempC1 === 22.4,
+    'LSN50 object temperature is not overwritten by null raw decode temperature',
+    'LSN50 object temperature was overwritten by null raw decode temperature'
+  );
+})().catch((error) => {
+  fail(`failed to execute LSN50 temp merge fixture: ${error.message}`);
+}));
+
 for (const route of requiredHttpRoutes) {
   const node = flows.find((candidate) => candidate.type === 'http in' && candidate.url === route);
   if (!node) {
@@ -947,7 +1079,52 @@ expectIncludes('Build Cloud Bootstrap', 'rejectedCandidates', 'surfaces rejected
 expectIncludes('Mark Bootstrap Synced', "gatewayMigration.migrated", 'recognizes successful cloud-side gateway migration responses');
 expectIncludes('Mark Bootstrap Synced', 'gatewayMigrationPendingBootstrap = false', 'resumes normal sync after repair bootstrap succeeds');
 expectIncludes('Build Edge Event Batch', 'gatewayMigrationPaused', 'suppresses event delivery while gateway migration is paused');
+expectIncludes('Build Edge Event Batch', "'X-OSI-Sync-Protocol': '2'", 'opts edge event delivery into sync protocol v2');
+expectIncludes('Mark Synced Events Delivered', 'terminalStatuses', 'marks delivered only for terminal protocol-v2 event results');
+expectIncludes('Mark Synced Events Delivered', "result.status || '').trim().toUpperCase()", 'parses per-event protocol-v2 result statuses');
 expectIncludes('Build Pending Command Pull', 'gatewayMigrationPaused', 'suppresses pending-command polling while gateway migration is paused');
+expectIncludes('Build Pending Command Pull', "'X-OSI-Sync-Protocol': '2'", 'opts pending-command polling into command lease protocol v2');
+expectIncludes('Replay Pending Commands', 'msg.payload.commands', 'accepts protocol-v2 pending-command envelopes');
+expectIncludes('Replay Pending Commands', 'leaseExpiresAt: cmd.leaseExpiresAt', 'preserves command lease expiry in queued command payloads');
+expectIncludes('Sync Init Schema + Triggers', 'CREATE TABLE IF NOT EXISTS applied_commands', 'creates the edge command replay ledger during sync init');
+expectIncludes('Sync Init Schema + Triggers', 'result_detail TEXT', 'creates the canonical applied_commands.result_detail column');
+expectIncludes('Sync Init Schema + Triggers', 'attempt_count INTEGER NOT NULL DEFAULT 0', 'creates/applies applied_commands retry accounting columns');
+expectIncludes('Sync Init Schema + Triggers', 'last_ack_attempt_at TEXT', 'creates/applies applied_commands ACK retry timestamp column');
+expectIncludes('Sync Init Schema + Triggers', 'CREATE TABLE IF NOT EXISTS command_ack_outbox', 'creates the durable edge command ACK outbox during sync init');
+expectIncludes('Deduplicate Pending Command', 'SELECT command_id, effect_key, result FROM applied_commands', 'checks command and effect-key replay ledger before dispatch');
+expectIncludes('Deduplicate Pending Command', 'duplicate_command', 'emits a terminal duplicate ACK instead of replaying a command');
+expectIncludes('Queue REST Command ACK', 'INSERT OR REPLACE INTO applied_commands', 'records terminal command outcomes in the local replay ledger');
+expectIncludes('Queue REST Command ACK', 'result_detail', 'writes terminal command detail into the canonical replay-ledger detail column');
+expectExcludes('Queue REST Command ACK', 'applied_at,detail', 'legacy applied_commands.detail insert column');
+expectIncludes('Queue REST Command ACK', 'INSERT INTO command_ack_outbox', 'queues durable REST command ACKs before MQTT telemetry forwarding');
+expectIncludes('Build Command ACK Batch', '/command-acks', 'posts queued command ACKs to the sync REST endpoint');
+expectIncludes('Build Command ACK Batch', "'X-OSI-Sync-Protocol': '2'", 'opts REST command ACKs into sync protocol v2');
+expectIncludes('Mark Command ACKs Delivered', 'UPDATE command_ack_outbox SET delivered_at', 'marks REST command ACK rows delivered only after a successful response');
+expectWireById('sync-pending-split', 'command-dedupe-dispatch', 'routes pending cloud commands through the replay ledger');
+expectWireById('sync-force-build', 'command-dedupe-dispatch', 'routes force-sync replayed commands through the replay ledger');
+expectWireById('command-dedupe-dispatch', '934bf2bc19a8ce22', 'allows non-duplicate commands to reach the existing command router');
+expectWireById('command-dedupe-dispatch', 'command-ack-queue-rest', 'routes duplicate command ACKs to the durable ACK queue');
+expectWireById('c8628cffe45f64f7', 'command-ack-queue-rest', 'routes STREGA command ACKs through the durable ACK queue');
+expectWireById('cs-reg-cloud-ack-fn', 'command-ack-queue-rest', 'routes special command ACKs through the durable ACK queue');
+expectWireById('lsn50-mode-ack-link-in', 'command-ack-queue-rest', 'routes LSN50 command ACKs through the durable ACK queue');
+expectWireById('command-ack-queue-rest', '9d5e3035c3d069c4', 'preserves MQTT command ACK telemetry after durable queueing');
+const outboxRetentionTick = findNodeById('outbox-retention-tick');
+expectCondition(
+  !!outboxRetentionTick,
+  'has a scheduled sync outbox retention tick',
+  'missing outbox-retention-tick node'
+);
+if (outboxRetentionTick) {
+  expectEqual(outboxRetentionTick.crontab, '0 2 * * *', 'sync outbox retention runs daily at 02:00');
+}
+expectIncludes('Prune Sync Outbox', 'OSI_OUTBOX_RETENTION_DAYS', 'uses a configurable sync outbox retention window');
+expectIncludes('Prune Sync Outbox', 'DELETE FROM sync_outbox', 'prunes delivered sync outbox rows');
+expectIncludes('Prune Sync Outbox', 'delivered_at IS NOT NULL', 'does not prune pending sync outbox rows');
+expectIncludes('Prune Sync Outbox', 'PRAGMA wal_checkpoint(TRUNCATE)', 'attempts a WAL checkpoint after deleting old outbox rows');
+expectWireById('outbox-retention-tick', 'prune-sync-outbox', 'runs the sync outbox retention function');
+expectIncludes('Run Force Sync', "'X-OSI-Sync-Protocol': '2'", 'uses sync protocol v2 for manual force-sync outbox and command polling');
+expectIncludes('Run Force Sync', 'terminalStatuses', 'manual force-sync marks only terminal protocol-v2 event results delivered');
+expectIncludes('Run Force Sync', 'pendingRes.payload.commands', 'manual force-sync accepts protocol-v2 pending-command envelopes');
 expectIncludes('Build Sync State', 'gatewayIdentity = {', 'returns gateway identity diagnostics in sync state');
 expectIncludes('Build Sync State', 'migrationPending', 'reports pending gateway migration state in sync state');
 expectIncludes('Build Sync State', 'lastMigrationResult', 'reports last gateway migration result in sync state');
@@ -1669,6 +1846,18 @@ for (const seedDatabasePath of seedDatabasePaths) {
     `${relativeSeedPath} includes dendro_saturation_side in the bundled device_data schema`,
     `${relativeSeedPath} is missing dendro_saturation_side in the bundled device_data schema`
   );
+  const appliedCommandColumns = new Set(readTableColumns(seedDatabasePath, 'applied_commands'));
+  expectCondition(
+    appliedCommandColumns.has('command_id') && appliedCommandColumns.has('effect_key') && appliedCommandColumns.has('result'),
+    `${relativeSeedPath} includes the bundled applied_commands replay ledger schema`,
+    `${relativeSeedPath} is missing the bundled applied_commands replay ledger schema`
+  );
+  const commandAckColumns = new Set(readTableColumns(seedDatabasePath, 'command_ack_outbox'));
+  expectCondition(
+    commandAckColumns.has('command_id') && commandAckColumns.has('payload_json') && commandAckColumns.has('delivered_at'),
+    `${relativeSeedPath} includes the bundled command_ack_outbox schema`,
+    `${relativeSeedPath} is missing the bundled command_ack_outbox schema`
+  );
 }
 for (const seedDatabasePath of batPctDatabasePaths) {
   const relativeSeedPath = path.relative(path.resolve(__dirname, '..'), seedDatabasePath);
@@ -1731,6 +1920,47 @@ for (const seedDatabasePath of seedDatabasePaths) {
     chameleonIndexes.has('idx_chameleon_readings_array_id'),
     `${relativeSeedPath} includes idx_chameleon_readings_array_id`,
     `${relativeSeedPath} is missing idx_chameleon_readings_array_id`
+  );
+}
+// WS2/WS3 v2 protocol: verify applied_commands (retry columns) and command_ack_outbox schema in full seed DBs.
+// sync_outbox is created at runtime by flows.json init SQL; its columns are verified via the init-SQL text checks above.
+const v2SeedDatabasePaths = [
+  path.resolve(__dirname, '..', 'conf', 'full_raspberrypi_bcm27xx_bcm2712', 'files', 'usr', 'share', 'db', 'farming.db'),
+  path.resolve(__dirname, '..', 'database', 'farming.db'),
+];
+for (const seedDatabasePath of v2SeedDatabasePaths) {
+  const relativeSeedPath = path.relative(path.resolve(__dirname, '..'), seedDatabasePath);
+  const appliedCommandsColumns = new Set(readTableColumns(seedDatabasePath, 'applied_commands'));
+  expectCondition(
+    appliedCommandsColumns.has('attempt_count'),
+    `${relativeSeedPath} includes applied_commands.attempt_count for WS3 retry`,
+    `${relativeSeedPath} is missing applied_commands.attempt_count`
+  );
+  expectCondition(
+    appliedCommandsColumns.has('last_error'),
+    `${relativeSeedPath} includes applied_commands.last_error for WS3 retry`,
+    `${relativeSeedPath} is missing applied_commands.last_error`
+  );
+  expectCondition(
+    appliedCommandsColumns.has('last_ack_attempt_at'),
+    `${relativeSeedPath} includes applied_commands.last_ack_attempt_at for WS3 ACK outbox`,
+    `${relativeSeedPath} is missing applied_commands.last_ack_attempt_at`
+  );
+  expectCondition(
+    appliedCommandsColumns.has('expires_at'),
+    `${relativeSeedPath} includes applied_commands.expires_at for WS3 expiry`,
+    `${relativeSeedPath} is missing applied_commands.expires_at`
+  );
+  const ackOutboxColumns = new Set(readTableColumns(seedDatabasePath, 'command_ack_outbox'));
+  expectCondition(
+    ackOutboxColumns.has('command_id'),
+    `${relativeSeedPath} includes command_ack_outbox table for WS3 ACK flush`,
+    `${relativeSeedPath} is missing command_ack_outbox table`
+  );
+  expectCondition(
+    ackOutboxColumns.has('delivered_at'),
+    `${relativeSeedPath} includes command_ack_outbox.delivered_at for selective delivery tracking`,
+    `${relativeSeedPath} is missing command_ack_outbox.delivered_at`
   );
 }
 expectFileIncludes('osi-gateway-identity.sh', gatewayIdentityHelperScript, 'gateway_identity_resolve()', 'defines the shared canonical gateway resolver');

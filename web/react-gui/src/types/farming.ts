@@ -134,12 +134,10 @@ export interface ValveActionRequest {
 
 // ---- Irrigation schedule types ----
 export type TriggerMetric =
-  | 'SWT_1' | 'SWT_2' | 'SWT_3' | 'SWT_AVG'         // Soil Water Tension (kPa) — v4 names
-  | 'SWT_WM1' | 'SWT_WM2' | 'SWT_WM3'               // Legacy SWT names (backward compat)
-  | 'VWC'                                             // Volumetric Water Content (%)
+  | 'SWT_WM1' | 'SWT_WM2' | 'SWT_AVG'               // Edge-enforced Soil Water Tension schedule metrics
   | 'DENDRO';                                         // Dendrometer stress-based
 
-export type SchedulerType = 'SWT' | 'VWC' | 'DENDRO';
+export type SchedulerType = 'SWT' | 'DENDRO';
 
 /** Dendrometer stress threshold (threshold_kpa encodes this for DENDRO trigger) */
 export type DendroStressThreshold = 'mild' | 'moderate' | 'significant' | 'severe';

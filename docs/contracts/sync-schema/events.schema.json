@@ -1,0 +1,22 @@
+{
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "$id": "https://contracts.opensmartirrigation.org/sync-schema/events.schema.json",
+    "title": "Sync Event Payload",
+    "type": "object",
+    "required": ["event_uuid", "resource_type", "resource_id", "sync_version", "payload"],
+    "additionalProperties": false,
+    "properties": {
+        "event_uuid": {"type": "string", "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"},
+        "resource_type": {
+            "type": "string",
+            "description": "Event stream aggregate type. ZONE, DEVICE, and SCHEDULE payloads are described in resources.schema.json; ZONE_CONFIG, ZONE_LOCATION, DEVICE_DATA, and GATEWAY are event-only aggregates with command- or telemetry-specific payloads.",
+            "enum": ["ZONE", "DEVICE", "SCHEDULE", "ZONE_CONFIG", "ZONE_LOCATION", "DEVICE_DATA", "GATEWAY"]
+        },
+        "resource_id": {"type": "string", "minLength": 1},
+        "sync_version": {"type": "integer", "minimum": 0},
+        "payload": {"type": "object"},
+        "is_tombstone": {"type": "boolean"},
+        "payload_hash": {"type": ["string", "null"], "pattern": "^[0-9a-f]{64}$"},
+        "recorded_at": {"type": "string", "format": "date-time"}
+    }
+}

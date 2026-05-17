@@ -27,16 +27,35 @@ const RESPONSE_MODE_LABELS: Record<string, string> = {
   aggressive:   'Aggressive — extend duration strongly at high stress',
 };
 
-function schedulerTypeFromMetric(metric: string): SchedulerType {
-  if (metric === 'DENDRO') return 'DENDRO';
-  if (metric === 'VWC') return 'VWC';
+export const EDGE_TRIGGER_METRICS = ['SWT_WM1', 'SWT_WM2', 'SWT_AVG', 'DENDRO'] as const;
+
+export function normalizeTriggerMetric(value: string | null | undefined): TriggerMetric {
+  switch (String(value ?? '').trim().toUpperCase()) {
+    case 'SWT_WM1':
+    case 'SWT_1':
+      return 'SWT_WM1';
+    case 'SWT_WM2':
+    case 'SWT_2':
+      return 'SWT_WM2';
+    case 'SWT_AVG':
+    case 'SWT_WM3':
+    case 'SWT_3':
+      return 'SWT_AVG';
+    case 'DENDRO':
+      return 'DENDRO';
+    default:
+      return 'SWT_WM1';
+  }
+}
+
+export function schedulerTypeFromMetric(metric: string): SchedulerType {
+  if (normalizeTriggerMetric(metric) === 'DENDRO') return 'DENDRO';
   return 'SWT';
 }
 
 function defaultMetricForType(type: SchedulerType, currentMetric: TriggerMetric): TriggerMetric {
   if (type === 'DENDRO') return 'DENDRO';
-  if (type === 'VWC') return 'VWC';
-  if (currentMetric === 'SWT_WM1' || currentMetric === 'SWT_WM2' || currentMetric === 'SWT_WM3' || currentMetric === 'SWT_AVG') return currentMetric;
+  if (currentMetric === 'SWT_WM1' || currentMetric === 'SWT_WM2' || currentMetric === 'SWT_AVG') return currentMetric;
   return 'SWT_WM1';
 }
 
@@ -69,8 +88,7 @@ interface SwtFormProps {
 const SwtForm: React.FC<SwtFormProps> = ({ metric, threshold, duration, onMetric, onThreshold, onDuration }) => {
   const metricLabel =
     metric === 'SWT_WM1' ? 'Sensor 1' :
-    metric === 'SWT_WM2' ? 'Sensor 2' :
-    metric === 'SWT_WM3' ? 'Sensor 3' : 'Mean of all sensors';
+    metric === 'SWT_WM2' ? 'Sensor 2' : 'Mean of sensors';
   return (
     <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
       <div>
@@ -82,8 +100,7 @@ const SwtForm: React.FC<SwtFormProps> = ({ metric, threshold, duration, onMetric
         >
           <option value="SWT_WM1">Sensor 1</option>
           <option value="SWT_WM2">Sensor 2</option>
-          <option value="SWT_WM3">Sensor 3</option>
-          <option value="SWT_AVG">Mean (all sensors)</option>
+          <option value="SWT_AVG">Mean</option>
         </select>
       </div>
       <div>
@@ -112,40 +129,6 @@ const SwtForm: React.FC<SwtFormProps> = ({ metric, threshold, duration, onMetric
     </div>
   );
 };
-
-interface VwcFormProps {
-  threshold: number;
-  duration: number;
-  onThreshold: (v: number) => void;
-  onDuration: (v: number) => void;
-}
-const VwcForm: React.FC<VwcFormProps> = ({ threshold, duration, onThreshold, onDuration }) => (
-  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-    <div>
-      <label className="block text-[var(--text-secondary)] text-sm font-semibold mb-2">Threshold (%)</label>
-      <input
-        type="number"
-        value={threshold}
-        onChange={e => onThreshold(Number(e.target.value))}
-        min="1" max="100" step="1"
-        className="w-full px-3 py-2 bg-[var(--card)] border-2 border-[var(--border)] rounded-lg text-[var(--text)] focus:outline-none focus:border-[var(--focus)] focus:ring-2 focus:ring-[var(--focus)]"
-      />
-      <p className="mt-1 text-[var(--text-tertiary)] text-xs">
-        Irrigate when VWC drops below {threshold}%
-      </p>
-    </div>
-    <div>
-      <label className="block text-[var(--text-secondary)] text-sm font-semibold mb-2">Duration (min)</label>
-      <input
-        type="number"
-        value={duration}
-        onChange={e => onDuration(Number(e.target.value))}
-        min="1" max="240" step="1"
-        className="w-full px-3 py-2 bg-[var(--card)] border-2 border-[var(--border)] rounded-lg text-[var(--text)] focus:outline-none focus:border-[var(--focus)] focus:ring-2 focus:ring-[var(--focus)]"
-      />
-    </div>
-  </div>
-);
 
 interface DendroFormProps {
   stressThreshold: DendroStressThreshold;
@@ -238,7 +221,7 @@ export const ScheduleSection: React.FC<ScheduleSectionProps> = ({
   // ── Load ──────────────────────────────────────────────────────────────────
   const applySchedule = (s: any) => {
     if (!s) return;
-    const metric: TriggerMetric = s.trigger_metric ?? s.triggerMetric ?? 'SWT_WM1';
+    const metric = normalizeTriggerMetric(s.trigger_metric ?? s.triggerMetric);
     const type = schedulerTypeFromMetric(metric);
     setSchedulerType(type);
     setTriggerMetric(metric);
@@ -278,7 +261,6 @@ export const ScheduleSection: React.FC<ScheduleSectionProps> = ({
   const handleTypeChange = (type: SchedulerType) => {
     setSchedulerType(type);
     setTriggerMetric(defaultMetricForType(type, triggerMetric));
-    if (type === 'VWC') setThreshold(prev => prev > 100 ? 30 : prev);
     if (type === 'SWT') setThreshold(prev => prev <= 100 ? 30 : prev);
   };
 
@@ -290,7 +272,7 @@ export const ScheduleSection: React.FC<ScheduleSectionProps> = ({
     try {
       const thresholdPayload = schedulerType === 'DENDRO'
         ? DENDRO_STRESS_VALUES[stressThreshold]
-        : Math.min(schedulerType === 'VWC' ? 100 : 300, Math.max(1, Math.round(threshold)));
+        : Math.min(300, Math.max(1, Math.round(threshold)));
       const payload = {
         trigger_metric: triggerMetric,
         threshold_kpa: thresholdPayload,
@@ -375,9 +357,6 @@ export const ScheduleSection: React.FC<ScheduleSectionProps> = ({
                   <TypeTab active={schedulerType === 'SWT'} onClick={() => handleTypeChange('SWT')}>
                     Soil moisture SWT
                   </TypeTab>
-                  <TypeTab active={schedulerType === 'VWC'} onClick={() => handleTypeChange('VWC')}>
-                    Soil moisture VWC
-                  </TypeTab>
                   <TypeTab active={schedulerType === 'DENDRO'} onClick={() => handleTypeChange('DENDRO')}>
                     Dendrometer
                   </TypeTab>
@@ -391,14 +370,6 @@ export const ScheduleSection: React.FC<ScheduleSectionProps> = ({
                   threshold={threshold}
                   duration={duration}
                   onMetric={setTriggerMetric}
-                  onThreshold={setThreshold}
-                  onDuration={setDuration}
-                />
-              )}
-              {schedulerType === 'VWC' && (
-                <VwcForm
-                  threshold={threshold}
-                  duration={duration}
                   onThreshold={setThreshold}
                   onDuration={setDuration}
                 />

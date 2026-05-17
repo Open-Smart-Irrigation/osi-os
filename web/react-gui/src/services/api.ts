@@ -104,8 +104,8 @@ function normaliseSchedule(sched: any): IrrigationSchedule {
   return {
     ...sched,
     irrigation_zone_id: Number(sched?.irrigation_zone_id ?? sched?.irrigationZoneId ?? 0),
-    trigger_metric: sched?.trigger_metric ?? sched?.triggerMetric ?? 'SWT_1',
-    triggerMetric: sched?.triggerMetric ?? sched?.trigger_metric ?? 'SWT_1',
+    trigger_metric: sched?.trigger_metric ?? sched?.triggerMetric ?? 'SWT_WM1',
+    triggerMetric: sched?.triggerMetric ?? sched?.trigger_metric ?? 'SWT_WM1',
     threshold_kpa: Number(sched?.threshold_kpa ?? sched?.thresholdKpa ?? 0),
     thresholdKpa: Number(sched?.thresholdKpa ?? sched?.threshold_kpa ?? 0),
     duration_minutes: sched?.duration_minutes ?? sched?.durationMinutes ?? undefined,
