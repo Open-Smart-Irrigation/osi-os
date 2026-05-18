@@ -1,6 +1,9 @@
 #!/bin/sh /etc/rc.common
 
-START=85
+START=99
+
+BOOTSTRAP_ROM="/usr/share/node-red/chirpstack-bootstrap.js"
+BOOTSTRAP_FALLBACK="/srv/node-red/chirpstack-bootstrap.js"
 
 stamp_valid() {
 	[ -f /etc/osi-bootstrap.done ] || return 1
@@ -18,15 +21,22 @@ start() {
 		return 0
 	fi
 
-	if [ ! -f /srv/node-red/chirpstack-bootstrap.js ]; then
-		logger -t osi-bootstrap "bootstrap script not found, marking done"
-		touch /etc/osi-bootstrap.done
+	local bootstrap_script=""
+	local provisioned_this_boot=0
+	if [ -f "$BOOTSTRAP_ROM" ]; then
+		bootstrap_script="$BOOTSTRAP_ROM"
+	elif [ -f "$BOOTSTRAP_FALLBACK" ]; then
+		bootstrap_script="$BOOTSTRAP_FALLBACK"
+	fi
+
+	if [ -z "$bootstrap_script" ]; then
+		logger -t osi-bootstrap "bootstrap script not found, will retry next boot"
 		return 0
 	fi
 
 	logger -t osi-bootstrap "waiting for ChirpStack gRPC..."
 	local ready=0
-	for i in $(seq 1 12); do
+	for i in $(seq 1 24); do
 		if curl -sf --max-time 3 http://localhost:8080 2>/dev/null; then
 			ready=1
 			break
@@ -35,16 +45,29 @@ start() {
 	done
 
 	if [ "$ready" = 0 ]; then
-		logger -t osi-bootstrap "ChirpStack not ready after 60s, will retry next boot"
+		logger -t osi-bootstrap "ChirpStack not ready after 120s, will retry next boot"
 		return 0
 	fi
 
-	logger -t osi-bootstrap "running chirpstack-bootstrap.js..."
-	if node /srv/node-red/chirpstack-bootstrap.js; then
-		touch /etc/osi-bootstrap.done
-		logger -t osi-bootstrap "bootstrap completed successfully"
+	logger -t osi-bootstrap "running $(basename "$bootstrap_script")..."
+	if node "$bootstrap_script"; then
+		if touch /etc/osi-bootstrap.done; then
+			provisioned_this_boot=1
+			logger -t osi-bootstrap "bootstrap completed successfully"
+		else
+			logger -t osi-bootstrap "bootstrap completed but stamp write failed, will retry next boot"
+		fi
 	else
 		logger -t osi-bootstrap "bootstrap failed, will retry next boot"
+	fi
+
+	if [ "$provisioned_this_boot" = 1 ]; then
+		logger -t osi-bootstrap "restarting Node-RED after bootstrap"
+		if /etc/init.d/node-red restart; then
+			logger -t osi-bootstrap "Node-RED restarted after bootstrap"
+		else
+			logger -t osi-bootstrap "Node-RED restart after bootstrap failed"
+		fi
 	fi
 	return 0
 }

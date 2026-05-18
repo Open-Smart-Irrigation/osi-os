@@ -10,13 +10,18 @@ const flowPath = path.resolve(__dirname, '..', 'conf', 'full_raspberrypi_bcm27xx
 const nodeRedRoot = path.resolve(__dirname, '..', 'conf', 'full_raspberrypi_bcm27xx_bcm2712', 'files', 'usr', 'share', 'node-red');
 const deployScriptPath = path.resolve(__dirname, '..', 'deploy.sh');
 const nodeRedInitPath = path.resolve(__dirname, '..', 'feeds', 'chirpstack-openwrt-feed', 'apps', 'node-red', 'files', 'node-red.init');
+const chirpstackInitPath = path.resolve(__dirname, '..', 'feeds', 'chirpstack-openwrt-feed', 'chirpstack', 'chirpstack', 'files', 'chirpstack.init');
 const osiServerDefaultsPath = path.resolve(__dirname, '..', 'conf', 'full_raspberrypi_bcm27xx_bcm2712', 'files', 'etc', 'uci-defaults', '96_osi_server_config');
 const sx1301GatewayDefaultPath = path.resolve(__dirname, '..', 'conf', 'full_raspberrypi_bcm27xx_bcm2712', 'files', 'etc', 'uci-defaults', '99_set_sx1301_gateway_id');
 const gatewayIdentityHelperPath = path.resolve(__dirname, '..', 'conf', 'full_raspberrypi_bcm27xx_bcm2712', 'files', 'usr', 'libexec', 'osi-gateway-identity.sh');
 const chirpstackBootstrapPath = path.resolve(__dirname, 'chirpstack-bootstrap.js');
+const chirpstackBootstrapOverlayPath = path.resolve(__dirname, '..', 'conf', 'full_raspberrypi_bcm27xx_bcm2712', 'files', 'usr', 'share', 'node-red', 'chirpstack-bootstrap.js');
 const osiBootstrapInitPath = path.resolve(__dirname, '..', 'conf', 'full_raspberrypi_bcm27xx_bcm2712', 'files', 'etc', 'init.d', 'osi-bootstrap');
 const osiBootstrapEnablePath = path.resolve(__dirname, '..', 'conf', 'full_raspberrypi_bcm27xx_bcm2712', 'files', 'etc', 'uci-defaults', '95_osi_bootstrap_enable');
 const sysupgradeConfPath = path.resolve(__dirname, '..', 'conf', 'full_raspberrypi_bcm27xx_bcm2712', 'files', 'etc', 'sysupgrade.conf');
+const osiDbSeedPath = path.resolve(__dirname, '..', 'conf', 'full_raspberrypi_bcm27xx_bcm2712', 'files', 'etc', 'uci-defaults', '97_osi_db_seed');
+const installOsiOsPath = path.resolve(__dirname, '..', 'scripts', 'install-osi-os.sh');
+const seedSqlPath = path.resolve(__dirname, '..', 'database', 'seed-blank.sql');
 const stregaCodecPath = path.resolve(__dirname, '..', 'conf', 'full_raspberrypi_bcm27xx_bcm2712', 'files', 'usr', 'share', 'node-red', 'codecs', 'strega_gen1_decoder.js');
 const lsn50CodecPath = path.resolve(__dirname, '..', 'conf', 'full_raspberrypi_bcm27xx_bcm2712', 'files', 'usr', 'share', 'node-red', 'codecs', 'dragino_lsn50_decoder.js');
 const seedDatabasePaths = [
@@ -60,6 +65,7 @@ const packageJsonPath = path.join(nodeRedRoot, 'package.json');
 execFileSync(process.execPath, [path.resolve(__dirname, 'verify-communication-contract.js')], { stdio: 'inherit' });
 const deployScript = fs.readFileSync(deployScriptPath, 'utf8');
 const nodeRedInitScript = fs.readFileSync(nodeRedInitPath, 'utf8');
+const chirpstackInitScript = fs.readFileSync(chirpstackInitPath, 'utf8');
 const osiServerDefaultsScript = fs.readFileSync(osiServerDefaultsPath, 'utf8');
 const sx1301GatewayDefaultScript = fs.readFileSync(sx1301GatewayDefaultPath, 'utf8');
 const gatewayIdentityHelperScript = fs.readFileSync(gatewayIdentityHelperPath, 'utf8');
@@ -1966,6 +1972,71 @@ for (const seedDatabasePath of v2SeedDatabasePaths) {
     `${relativeSeedPath} is missing command_ack_outbox.delivered_at`
   );
 }
+
+// --- seed DB: irrigation_schedules + sync_outbox WS2 columns ---
+for (const seedDatabasePath of v2SeedDatabasePaths) {
+  const relativeSeedPath = path.relative(path.resolve(__dirname, '..'), seedDatabasePath);
+  const scheduleCols = new Set(readTableColumns(seedDatabasePath, 'irrigation_schedules'));
+  expectCondition(
+    scheduleCols.has('irrigation_zone_id') && scheduleCols.has('threshold_kpa'),
+    `${relativeSeedPath} includes irrigation_schedules table`,
+    `${relativeSeedPath} is missing irrigation_schedules table`
+  );
+  const syncOutboxCols = new Set(readTableColumns(seedDatabasePath, 'sync_outbox'));
+  for (const col of ['rejected_at', 'rejection_reason', 'last_retryable_failure_at']) {
+    expectCondition(
+      syncOutboxCols.has(col),
+      `${relativeSeedPath} includes sync_outbox.${col} (WS2)`,
+      `${relativeSeedPath} is missing sync_outbox.${col}`
+    );
+  }
+}
+
+// --- firmware version 0.6.5 ---
+const EXPECTED_VERSION = '0.6.5';
+const osiServerDefaultsContent = fs.existsSync(osiServerDefaultsPath) ? fs.readFileSync(osiServerDefaultsPath, 'utf8') : '';
+expectFileIncludes('96_osi_server_config', osiServerDefaultsContent, `firmware_version=${EXPECTED_VERSION}`, `96_osi_server_config seeds firmware_version ${EXPECTED_VERSION}`);
+expectFileIncludes('node-red.init', nodeRedInitScript, `echo "${EXPECTED_VERSION}"`, `node-red.init fallback version is ${EXPECTED_VERSION}`);
+const flowsRaw = fs.readFileSync(flowPath, 'utf8');
+expectCondition(
+  flowsRaw.includes(`|| '${EXPECTED_VERSION}'`),
+  `flows.json heartbeat fallback version is ${EXPECTED_VERSION}`,
+  `flows.json heartbeat fallback version is not ${EXPECTED_VERSION}`
+);
+
+// --- 97_osi_db_seed ---
+let osiDbSeedScript = '';
+if (fs.existsSync(osiDbSeedPath)) {
+  osiDbSeedScript = fs.readFileSync(osiDbSeedPath, 'utf8');
+  console.log('OK 97_osi_db_seed uci-defaults script present');
+} else {
+  fail(`missing 97_osi_db_seed at ${osiDbSeedPath}`);
+}
+expectFileIncludes('97_osi_db_seed', osiDbSeedScript, '/usr/share/db/farming.db', '97_osi_db_seed seeds from /usr/share/db/farming.db');
+expectFileIncludes('97_osi_db_seed', osiDbSeedScript, '/data/db/farming.db', '97_osi_db_seed seeds to /data/db/farming.db');
+expectFileIncludes('97_osi_db_seed', osiDbSeedScript, '[ -f "$DATA_DB" ]', '97_osi_db_seed skips seed when target DB exists');
+expectFileExcludes('97_osi_db_seed', osiDbSeedScript, 'cp --force', '97_osi_db_seed must not force-overwrite existing DB');
+
+// --- install-osi-os.sh ---
+if (fs.existsSync(installOsiOsPath)) {
+  console.log('OK install-osi-os.sh present');
+} else {
+  fail(`missing install-osi-os.sh at ${installOsiOsPath}`);
+}
+
+// --- database/seed-blank.sql ---
+if (fs.existsSync(seedSqlPath)) {
+  console.log('OK database/seed-blank.sql present');
+  const seedSql = fs.readFileSync(seedSqlPath, 'utf8');
+  expectFileIncludes('seed-blank.sql', seedSql, 'irrigation_schedules', 'seed-blank.sql defines irrigation_schedules table');
+  expectFileIncludes('seed-blank.sql', seedSql, 'rejected_at', 'seed-blank.sql includes sync_outbox.rejected_at (WS2)');
+  expectFileIncludes('seed-blank.sql', seedSql, 'applied_commands', 'seed-blank.sql includes applied_commands table (WS3)');
+  expectFileIncludes('seed-blank.sql', seedSql, 'chameleon_readings', 'seed-blank.sql includes chameleon_readings table');
+  expectFileIncludes('seed-blank.sql', seedSql, 'valve_actuation_expectations', 'seed-blank.sql includes valve_actuation_expectations table (WS1)');
+} else {
+  fail(`missing database/seed-blank.sql at ${seedSqlPath}`);
+}
+
 expectFileIncludes('osi-gateway-identity.sh', gatewayIdentityHelperScript, 'gateway_identity_resolve()', 'defines the shared canonical gateway resolver');
 expectFileIncludes('osi-gateway-identity.sh', gatewayIdentityHelperScript, 'gateway_identity_active_chipset()', 'derives the active concentratord chipset before probing static gateway identifiers');
 expectFileIncludes('osi-gateway-identity.sh', gatewayIdentityHelperScript, 'uci -q get chirpstack-concentratord.@global[0].chipset', 'reads the active concentratord chipset from UCI');
@@ -1991,6 +2062,19 @@ expectFileExcludes('99_set_sx1301_gateway_id', sx1301GatewayDefaultScript, "SECT
 
 // --- osi-bootstrap init script verification ---
 
+function extractOpenWrtStart(fileLabel, content) {
+  const match = String(content || '').match(/^START=(\d+)\s*$/m);
+  if (!match) {
+    fail(`${fileLabel} missing START priority`);
+    return null;
+  }
+  return Number(match[1]);
+}
+
+function rcStartName(start, serviceName) {
+  return `S${String(start).padStart(2, '0')}${serviceName}`;
+}
+
 let osiBootstrapInitScript = '';
 if (fs.existsSync(osiBootstrapInitPath)) {
   osiBootstrapInitScript = fs.readFileSync(osiBootstrapInitPath, 'utf8');
@@ -1999,16 +2083,47 @@ if (fs.existsSync(osiBootstrapInitPath)) {
   fail(`missing osi-bootstrap init script at ${osiBootstrapInitPath}`);
 }
 
-expectFileIncludes('osi-bootstrap', osiBootstrapInitScript, 'START=85', 'init script declares correct boot priority');
+const chirpstackStart = extractOpenWrtStart('chirpstack.init', chirpstackInitScript);
+const nodeRedStart = extractOpenWrtStart('node-red.init', nodeRedInitScript);
+const osiBootstrapStart = extractOpenWrtStart('osi-bootstrap', osiBootstrapInitScript);
+expectEqual(chirpstackStart, 99, 'chirpstack init START priority');
+expectEqual(nodeRedStart, 99, 'node-red init START priority');
+expectEqual(osiBootstrapStart, 99, 'osi-bootstrap init START priority');
+const startupOrder = [
+  { serviceName: 'chirpstack', start: chirpstackStart },
+  { serviceName: 'node-red', start: nodeRedStart },
+  { serviceName: 'osi-bootstrap', start: osiBootstrapStart }
+]
+  .filter((entry) => Number.isFinite(entry.start))
+  .map((entry) => rcStartName(entry.start, entry.serviceName))
+  .sort();
+expectEqual(startupOrder.join(' < '), 'S99chirpstack < S99node-red < S99osi-bootstrap', 'OpenWrt START/name startup order for first-boot provisioning');
+
+let chirpstackBootstrapOverlayScript = '';
+if (fs.existsSync(chirpstackBootstrapOverlayPath)) {
+  chirpstackBootstrapOverlayScript = fs.readFileSync(chirpstackBootstrapOverlayPath, 'utf8');
+  console.log('OK overlay chirpstack-bootstrap.js present');
+  expectEqual(chirpstackBootstrapOverlayScript, chirpstackBootstrapScript, 'overlay chirpstack-bootstrap.js matches scripts/chirpstack-bootstrap.js byte-for-byte');
+} else {
+  fail(`missing overlay chirpstack-bootstrap.js at ${chirpstackBootstrapOverlayPath}`);
+}
+
 expectFileIncludes('osi-bootstrap', osiBootstrapInitScript, 'stamp_valid()', 'init script defines stamp validity check');
 expectFileIncludes('osi-bootstrap', osiBootstrapInitScript, '/etc/osi-bootstrap.done', 'init script uses the canonical stamp file path');
 expectFileIncludes('osi-bootstrap', osiBootstrapInitScript, '/srv/node-red/.chirpstack.env', 'init script checks env file existence');
 expectFileIncludes('osi-bootstrap', osiBootstrapInitScript, "grep -q 'CHIRPSTACK_APP_SENSORS=[0-9a-f]\\{8\\}-'", 'init script validates env file contains valid app UUIDs');
-expectFileIncludes('osi-bootstrap', osiBootstrapInitScript, 'chirpstack-bootstrap.js', 'init script references the bootstrap script');
+expectFileIncludes('osi-bootstrap', osiBootstrapInitScript, '/usr/share/node-red/chirpstack-bootstrap.js', 'init script prefers the ROM bootstrap script');
+expectFileIncludes('osi-bootstrap', osiBootstrapInitScript, '/srv/node-red/chirpstack-bootstrap.js', 'init script keeps the live-deploy bootstrap fallback');
+expectFileIncludes('osi-bootstrap', osiBootstrapInitScript, 'bootstrap script not found, will retry next boot', 'init script retries instead of marking done when bootstrap script is missing');
+expectFileExcludes('osi-bootstrap', osiBootstrapInitScript, 'bootstrap script not found, marking done', 'missing-script success path');
 expectFileIncludes('osi-bootstrap', osiBootstrapInitScript, 'curl -sf --max-time 3 http://localhost:8080', 'init script waits for ChirpStack gRPC via curl');
-expectFileIncludes('osi-bootstrap', osiBootstrapInitScript, 'seq 1 12', 'init script retries gRPC health check up to 12 times');
+expectFileIncludes('osi-bootstrap', osiBootstrapInitScript, 'seq 1 24', 'init script retries gRPC health check up to 24 times');
+expectFileIncludes('osi-bootstrap', osiBootstrapInitScript, 'if touch /etc/osi-bootstrap.done; then', 'init script treats stamp write as part of successful provisioning');
+expectFileIncludes('osi-bootstrap', osiBootstrapInitScript, 'provisioned_this_boot=1', 'init script tracks successful first-boot provisioning');
+expectFileIncludes('osi-bootstrap', osiBootstrapInitScript, 'if [ "$provisioned_this_boot" = 1 ]; then', 'init script gates Node-RED restart on successful provisioning');
+expectFileIncludes('osi-bootstrap', osiBootstrapInitScript, '/etc/init.d/node-red restart', 'init script restarts Node-RED after successful provisioning');
 expectFileIncludes('osi-bootstrap', osiBootstrapInitScript, 'logger -t osi-bootstrap', 'init script logs all events with the correct tag');
-expectFileExcludes('osi-bootstrap', osiBootstrapInitScript, 'STOP=', 'init script does not set a shutdown priority (one-shot)');
+expectCondition(!osiBootstrapInitScript.includes('STOP='), 'osi-bootstrap does not set a shutdown priority (one-shot)', 'osi-bootstrap must not set STOP for this one-shot init script');
 
 // uci-defaults activation script
 let osiBootstrapEnableScript = '';
