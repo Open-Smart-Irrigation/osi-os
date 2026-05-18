@@ -91,10 +91,12 @@ osi-os/
 │   └── chirpstack-openwrt-feed/
 ├── openwrt/                # OpenWrt 24.10 source (git submodule)
 ├── database/farming.db     # Source-of-truth database schema
+├── scripts/                # Deploy + verification scripts
 ├── Makefile                # Build system entry point
 ├── Jenkinsfile             # CI/CD pipeline
-├── CLAUDE.md               # Developer and AI context (architecture details)
-└── BUILD-Readme.md         # Detailed build instructions
+├── AGENTS.md               # Architecture, sync model, conventions
+├── CHANGELOG.md            # Release history
+└── docs/                   # Build, contracts, hardware, versioning
 ```
 
 ---
@@ -142,9 +144,9 @@ ssh root@<pi-ip> '/etc/init.d/node-red restart'
 
 ---
 
-## Building the Firmware
+## Building the firmware
 
-See [BUILD-Readme.md](BUILD-Readme.md) for full firmware build instructions.
+See [docs/build/building-firmware.md](docs/build/building-firmware.md) for full instructions.
 
 **Requirements:** Docker, 20 GB free disk space, 8 GB RAM.
 
@@ -224,9 +226,9 @@ ssh -R 9876:localhost:9876 root@<pi-ip> 'curl -fsS http://localhost:9876/deploy.
 ssh root@<pi-ip> '/etc/init.d/node-red restart'
 ```
 
-The script deploys: `settings.js`, `flows.json`, Node-RED packages and local helpers (`osi-chirpstack-helper`, `osi-db-helper`) with `npm install` on-device, `chirpstack-bootstrap.js`, the SenseCAP S2120 codec, and the React GUI bundle.
+The script deploys `settings.js`, `flows.json`, all Node-RED local helpers (`osi-chirpstack-helper`, `osi-db-helper`, `osi-dendro-helper`, `osi-chameleon-helper`, `osi-cloud-http`), `chirpstack-bootstrap.js`, device codecs (STREGA, LSN50, S2120), the React GUI bundle, and runs `npm install` on-device. It also performs idempotent live-DB schema repair (dendrometer + Chameleon SWT) and fixes Mosquitto file ownership.
 
-Database safety: `deploy.sh` must never overwrite `/data/db/farming.db`. It seeds the bundled `farming.db` only when the target file is missing, and it exits instead of seeding if orphaned SQLite WAL/SHM/journal sidecar files are present. On already-provisioned or field devices, the live DB is preserved.
+**Database safety:** `deploy.sh` never overwrites `/data/db/farming.db`. It seeds the bundled `farming.db` only when the target file is absent, and refuses to seed if orphaned SQLite WAL/SHM/journal sidecars exist. On already-provisioned devices the live DB is always preserved.
 
 <details>
 <summary>Alternative: manual file-by-file deployment (if deploy.sh is not available)</summary>
@@ -261,21 +263,17 @@ scp -r web/react-gui/build/* $PI:/usr/lib/node-red/gui/
 
 </details>
 
-### Step 3 — Provision ChirpStack device profiles
+### Step 3 — ChirpStack auto-provision
 
-Run the bootstrap script once to create the ChirpStack applications and device profiles (KIWI, LSN50, STREGA valve, SenseCAP S2120) and write the resulting IDs into Node-RED's environment file:
+ChirpStack applications, device profiles (KIWI, LSN50, STREGA, S2120, RAK10701), and UCI identity fields are provisioned automatically on first boot by the `osi-bootstrap` init script (`START=99`). No manual step is needed on a fresh device.
 
-```bash
-ssh root@<pi-ip> 'node /srv/node-red/chirpstack-bootstrap.js'
-```
-
-Then restart Node-RED so it picks up the generated `.chirpstack.env`:
+To re-provision manually (e.g. after wiping profiles):
 
 ```bash
-ssh root@<pi-ip> '/etc/init.d/node-red restart'
+ssh root@<pi-ip> 'node /srv/node-red/chirpstack-bootstrap.js && /etc/init.d/node-red restart'
 ```
 
-The script is idempotent — safe to re-run after reflashing or if profiles are missing.
+The script is idempotent — safe to re-run.
 
 ### Step 4 — Install Tailscale (remote access)
 
@@ -331,20 +329,10 @@ No need to re-run `chirpstack-bootstrap.js` unless ChirpStack was re-provisioned
 
 ## Default Wi-Fi Access Point (first boot)
 
-For Chirpstack Gateway OS setup (current approach):
-| Setting | Value |
-|---|---|
-| SSID | `ChirpstackAP-<last 6 chars of MAC>` |
-| Password | `ChirpStackAP` |
-| Device IP | `192.168.0.1` |
-
-
-For OSI OS firmware build:
-| Setting | Value |
-|---|---|
-| SSID | `OSI-OS-<last 6 chars of MAC>` |
-| Password | `opensmartirrigation` |
-| Device IP | `192.168.0.1` |
+| Path | SSID | Password | Device IP |
+|------|------|----------|-----------|
+| ChirpStack Gateway OS base (Path B) | `ChirpstackAP-<mac6>` | `ChirpStackAP` | `192.168.0.1` |
+| OSI OS firmware (Path A) | `OSI-OS-<mac6>` | `opensmartirrigation` | `192.168.0.1` |
 
 ---
 
