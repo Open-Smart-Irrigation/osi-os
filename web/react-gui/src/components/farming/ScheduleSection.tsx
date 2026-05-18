@@ -53,16 +53,6 @@ export function schedulerTypeFromMetric(metric: string): SchedulerType {
   return 'SWT';
 }
 
-function normalizeTriggerMetric(metric: unknown): TriggerMetric {
-  const raw = String(metric || '').toUpperCase();
-  if (raw === 'SWT_WM1') return 'SWT_1';
-  if (raw === 'SWT_WM2') return 'SWT_2';
-  if (raw === 'SWT_WM3') return 'SWT_3';
-  if (raw === 'SWT_1' || raw === 'SWT_2' || raw === 'SWT_3' || raw === 'SWT_AVG' || raw === 'VWC' || raw === 'DENDRO') {
-    return raw as TriggerMetric;
-  }
-  return 'SWT_1';
-}
 
 function defaultMetricForType(type: SchedulerType, currentMetric: TriggerMetric): TriggerMetric {
   if (type === 'DENDRO') return 'DENDRO';
