@@ -5,6 +5,7 @@
  *
  * This script creates the SQLite database with all necessary tables
  * Run this ONCE before starting Node-RED for the first time
+ * Existing farming.db files are not migrated here; remove stale local dev DBs and rerun this script after schema changes.
  *
  * Usage: node setup-database.js
  */
@@ -45,15 +46,53 @@ db.exec(`
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         deveui TEXT UNIQUE NOT NULL,
         name TEXT NOT NULL,
-        type_id TEXT NOT NULL CHECK(type_id IN ('KIWI_SENSOR', 'STREGA_VALVE')),
-        user_id INTEGER NOT NULL,
+        type_id TEXT NOT NULL CHECK(type_id IN ('KIWI_SENSOR', 'TEKTELIC_CLOVER', 'STREGA_VALVE', 'DRAGINO_LSN50', 'SENSECAP_S2120')),
+        user_id INTEGER,
+        farm_id TEXT,
         current_state TEXT CHECK(current_state IN ('OPEN', 'CLOSED')),
         target_state TEXT CHECK(target_state IN ('OPEN', 'CLOSED')),
-        soil_moisture_probe_depths_json TEXT,
-        soil_moisture_probe_depths_configured INTEGER NOT NULL DEFAULT 0,
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL,
-        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+        claimed_at TEXT,
+        chirpstack_app_id TEXT,
+        irrigation_zone_id INTEGER,
+        dendro_enabled INTEGER NOT NULL DEFAULT 0,
+        temp_enabled INTEGER NOT NULL DEFAULT 0,
+        is_reference_tree INTEGER NOT NULL DEFAULT 0,
+        sync_version INTEGER DEFAULT 0,
+        deleted_at DATETIME,
+        gateway_device_eui TEXT,
+        strega_model TEXT,
+        rain_gauge_enabled INTEGER DEFAULT 0,
+        flow_meter_enabled INTEGER DEFAULT 0,
+        soil_moisture_probe_depths_json TEXT,
+        soil_moisture_probe_depths_configured INTEGER DEFAULT 0,
+        dendro_force_legacy INTEGER DEFAULT 0,
+        dendro_stroke_mm REAL,
+        dendro_ratio_at_retracted REAL,
+        dendro_ratio_at_extended REAL,
+        dendro_ratio_zero REAL,
+        dendro_ratio_span REAL,
+        dendro_baseline_position_mm REAL,
+        dendro_baseline_mode_used TEXT,
+        dendro_baseline_calibration_signature TEXT,
+        dendro_baseline_pending INTEGER DEFAULT 0,
+        dendro_invert_direction INTEGER DEFAULT 0,
+        chameleon_enabled INTEGER DEFAULT 0,
+        chameleon_swt1_depth_cm REAL,
+        chameleon_swt2_depth_cm REAL,
+        chameleon_swt3_depth_cm REAL,
+        chameleon_swt1_a REAL,
+        chameleon_swt1_b REAL,
+        chameleon_swt1_c REAL,
+        chameleon_swt2_a REAL,
+        chameleon_swt2_b REAL,
+        chameleon_swt2_c REAL,
+        chameleon_swt3_a REAL,
+        chameleon_swt3_b REAL,
+        chameleon_swt3_c REAL,
+        device_mode INTEGER DEFAULT 1,
+        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL
     )
 `);
 console.log('✓ Created devices table');
@@ -67,10 +106,108 @@ db.exec(`
         swt_wm2 REAL,
         light_lux REAL,
         recorded_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        ambient_temperature REAL,
+        relative_humidity REAL,
+        ext_temperature_c REAL,
+        bat_v REAL,
+        adc_ch0v REAL,
+        dendro_position_mm REAL,
+        dendro_valid INTEGER,
+        dendro_delta_mm REAL,
+        rain_count_cumulative INTEGER,
+        rain_tips_delta INTEGER,
+        rain_mm_delta REAL,
+        flow_count_cumulative INTEGER,
+        flow_pulses_delta INTEGER,
+        flow_liters_delta REAL,
+        swt_1 REAL,
+        swt_2 REAL,
+        swt_3 REAL,
+        lsn50_mode_code INTEGER,
+        lsn50_mode_label TEXT,
+        lsn50_mode_observed_at TEXT,
+        rain_mm_per_hour REAL,
+        rain_delta_status TEXT,
+        flow_liters_per_min REAL,
+        flow_delta_status TEXT,
+        counter_interval_seconds INTEGER,
+        rain_mm_per_10min REAL,
+        rain_mm_today REAL,
+        flow_liters_per_10min REAL,
+        flow_liters_today REAL,
+        barometric_pressure_hpa REAL,
+        wind_speed_mps REAL,
+        wind_direction_deg REAL,
+        wind_gust_mps REAL,
+        uv_index REAL,
+        rain_gauge_cumulative_mm REAL,
+        bat_pct REAL,
+        adc_ch1v REAL,
+        dendro_ratio REAL,
+        dendro_mode_used TEXT,
+        dendro_stem_change_um REAL,
+        dendro_position_raw_mm REAL,
+        dendro_saturated INTEGER DEFAULT 0,
+        dendro_saturation_side TEXT,
         FOREIGN KEY (deveui) REFERENCES devices(deveui) ON DELETE CASCADE
     )
 `);
 console.log('✓ Created device_data table');
+
+db.exec(`
+    CREATE TABLE IF NOT EXISTS dendrometer_readings (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        deveui TEXT NOT NULL,
+        position_um REAL NOT NULL,
+        adc_v REAL,
+        bat_v REAL,
+        is_valid INTEGER NOT NULL DEFAULT 1,
+        invalid_reason TEXT,
+        is_outlier INTEGER NOT NULL DEFAULT 0,
+        recorded_at TEXT NOT NULL,
+        adc_ch0v REAL,
+        adc_ch1v REAL,
+        dendro_ratio REAL,
+        dendro_mode_used TEXT,
+        position_raw_um REAL,
+        dendro_saturated INTEGER DEFAULT 0,
+        dendro_saturation_side TEXT,
+        FOREIGN KEY (deveui) REFERENCES devices(deveui) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS chameleon_readings (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        deveui TEXT NOT NULL,
+        recorded_at TEXT NOT NULL,
+        payload_version INTEGER,
+        status_flags INTEGER,
+        i2c_missing INTEGER DEFAULT 0,
+        timeout INTEGER DEFAULT 0,
+        temp_fault INTEGER DEFAULT 0,
+        id_fault INTEGER DEFAULT 0,
+        ch1_open INTEGER DEFAULT 0,
+        ch2_open INTEGER DEFAULT 0,
+        ch3_open INTEGER DEFAULT 0,
+        temp_c REAL,
+        r1_ohm_comp INTEGER,
+        r2_ohm_comp INTEGER,
+        r3_ohm_comp INTEGER,
+        r1_ohm_raw INTEGER,
+        r2_ohm_raw INTEGER,
+        r3_ohm_raw INTEGER,
+        array_id TEXT,
+        adc_ch0v REAL,
+        adc_ch1v REAL,
+        adc_ch4v REAL,
+        bat_v REAL,
+        payload_b64 TEXT,
+        f_port INTEGER,
+        f_cnt INTEGER,
+        created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+        FOREIGN KEY (deveui) REFERENCES devices(deveui) ON DELETE CASCADE
+    )
+`);
+console.log('✓ Created LSN50 extension tables');
 
 // Create indexes for better performance
 db.exec(`
@@ -78,6 +215,9 @@ db.exec(`
     CREATE INDEX IF NOT EXISTS idx_devices_deveui ON devices(deveui);
     CREATE INDEX IF NOT EXISTS idx_device_data_deveui ON device_data(deveui);
     CREATE INDEX IF NOT EXISTS idx_device_data_recorded_at ON device_data(recorded_at);
+    CREATE INDEX IF NOT EXISTS idx_dendro_readings_deveui_time ON dendrometer_readings(deveui, recorded_at);
+    CREATE INDEX IF NOT EXISTS idx_chameleon_readings_deveui_time ON chameleon_readings(deveui, recorded_at);
+    CREATE INDEX IF NOT EXISTS idx_chameleon_readings_array_id ON chameleon_readings(array_id);
 `);
 console.log('✓ Created indexes');
 

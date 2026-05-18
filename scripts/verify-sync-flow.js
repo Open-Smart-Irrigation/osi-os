@@ -10,10 +10,18 @@ const flowPath = path.resolve(__dirname, '..', 'conf', 'full_raspberrypi_bcm27xx
 const nodeRedRoot = path.resolve(__dirname, '..', 'conf', 'full_raspberrypi_bcm27xx_bcm2712', 'files', 'usr', 'share', 'node-red');
 const deployScriptPath = path.resolve(__dirname, '..', 'deploy.sh');
 const nodeRedInitPath = path.resolve(__dirname, '..', 'feeds', 'chirpstack-openwrt-feed', 'apps', 'node-red', 'files', 'node-red.init');
+const chirpstackInitPath = path.resolve(__dirname, '..', 'feeds', 'chirpstack-openwrt-feed', 'chirpstack', 'chirpstack', 'files', 'chirpstack.init');
 const osiServerDefaultsPath = path.resolve(__dirname, '..', 'conf', 'full_raspberrypi_bcm27xx_bcm2712', 'files', 'etc', 'uci-defaults', '96_osi_server_config');
 const sx1301GatewayDefaultPath = path.resolve(__dirname, '..', 'conf', 'full_raspberrypi_bcm27xx_bcm2712', 'files', 'etc', 'uci-defaults', '99_set_sx1301_gateway_id');
 const gatewayIdentityHelperPath = path.resolve(__dirname, '..', 'conf', 'full_raspberrypi_bcm27xx_bcm2712', 'files', 'usr', 'libexec', 'osi-gateway-identity.sh');
 const chirpstackBootstrapPath = path.resolve(__dirname, 'chirpstack-bootstrap.js');
+const chirpstackBootstrapOverlayPath = path.resolve(__dirname, '..', 'conf', 'full_raspberrypi_bcm27xx_bcm2712', 'files', 'usr', 'share', 'node-red', 'chirpstack-bootstrap.js');
+const osiBootstrapInitPath = path.resolve(__dirname, '..', 'conf', 'full_raspberrypi_bcm27xx_bcm2712', 'files', 'etc', 'init.d', 'osi-bootstrap');
+const osiBootstrapEnablePath = path.resolve(__dirname, '..', 'conf', 'full_raspberrypi_bcm27xx_bcm2712', 'files', 'etc', 'uci-defaults', '95_osi_bootstrap_enable');
+const sysupgradeConfPath = path.resolve(__dirname, '..', 'conf', 'full_raspberrypi_bcm27xx_bcm2712', 'files', 'etc', 'sysupgrade.conf');
+const osiDbSeedPath = path.resolve(__dirname, '..', 'conf', 'full_raspberrypi_bcm27xx_bcm2712', 'files', 'etc', 'uci-defaults', '97_osi_db_seed');
+const installOsiOsPath = path.resolve(__dirname, '..', 'scripts', 'install-osi-os.sh');
+const seedSqlPath = path.resolve(__dirname, '..', 'database', 'seed-blank.sql');
 const stregaCodecPath = path.resolve(__dirname, '..', 'conf', 'full_raspberrypi_bcm27xx_bcm2712', 'files', 'usr', 'share', 'node-red', 'codecs', 'strega_gen1_decoder.js');
 const lsn50CodecPath = path.resolve(__dirname, '..', 'conf', 'full_raspberrypi_bcm27xx_bcm2712', 'files', 'usr', 'share', 'node-red', 'codecs', 'dragino_lsn50_decoder.js');
 const seedDatabasePaths = [
@@ -36,10 +44,16 @@ const dendroDrawerPath = path.resolve(__dirname, '..', 'web', 'react-gui', 'src'
 const draginoTempCardPath = path.resolve(__dirname, '..', 'web', 'react-gui', 'src', 'components', 'farming', 'DraginoTempCard.tsx');
 const draginoSettingsModalPath = path.resolve(__dirname, '..', 'web', 'react-gui', 'src', 'components', 'farming', 'DraginoSettingsModal.tsx');
 const draginoDendroCalibrationPath = path.resolve(__dirname, '..', 'web', 'react-gui', 'src', 'components', 'farming', 'DraginoDendroCalibrationSection.tsx');
+const draginoChameleonSwtSectionPath = path.resolve(__dirname, '..', 'web', 'react-gui', 'src', 'components', 'farming', 'DraginoChameleonSwtSection.tsx');
+const irrigationZoneCardPath = path.resolve(__dirname, '..', 'web', 'react-gui', 'src', 'components', 'farming', 'IrrigationZoneCard.tsx');
+const kiwiSensorCardPath = path.resolve(__dirname, '..', 'web', 'react-gui', 'src', 'components', 'farming', 'KiwiSensorCard.tsx');
+const scheduleSectionPath = path.resolve(__dirname, '..', 'web', 'react-gui', 'src', 'components', 'farming', 'ScheduleSection.tsx');
 const senseCapWeatherCardPath = path.resolve(__dirname, '..', 'web', 'react-gui', 'src', 'components', 'farming', 'SenseCapWeatherCard.tsx');
 const windMonitorPath = path.resolve(__dirname, '..', 'web', 'react-gui', 'src', 'components', 'farming', 'WindMonitor.tsx');
+const swtUtilsPath = path.resolve(__dirname, '..', 'web', 'react-gui', 'src', 'utils', 'swt.ts');
 const windUtilsPath = path.resolve(__dirname, '..', 'web', 'react-gui', 'src', 'utils', 'wind.ts');
 const onlineTabPath = path.resolve(__dirname, '..', 'web', 'react-gui', 'src', 'components', 'farming', 'environment', 'OnlineTab.tsx');
+const soilTabPath = path.resolve(__dirname, '..', 'web', 'react-gui', 'src', 'components', 'farming', 'environment', 'SoilTab.tsx');
 const weatherTabPath = path.resolve(__dirname, '..', 'web', 'react-gui', 'src', 'components', 'farming', 'environment', 'WeatherTab.tsx');
 const helperCandidates = [
   path.join(nodeRedRoot, 'node_modules', 'osi-chirpstack-helper'),
@@ -53,16 +67,23 @@ const dendroHelperCandidates = [
   path.join(nodeRedRoot, 'node_modules', 'osi-dendro-helper'),
   path.join(nodeRedRoot, 'osi-dendro-helper')
 ];
+const cloudHttpHelperPath = path.join(nodeRedRoot, 'osi-cloud-http', 'index.js');
+const cloudHttpPackagePath = path.join(nodeRedRoot, 'osi-cloud-http', 'package.json');
 const packageJsonPath = path.join(nodeRedRoot, 'package.json');
 execFileSync(process.execPath, [path.resolve(__dirname, 'verify-communication-contract.js')], { stdio: 'inherit' });
+execFileSync(process.execPath, [path.resolve(__dirname, 'verify-db-schema-consistency.js')], { stdio: 'inherit' });
 const deployScript = fs.readFileSync(deployScriptPath, 'utf8');
 const nodeRedInitScript = fs.readFileSync(nodeRedInitPath, 'utf8');
+const chirpstackInitScript = fs.readFileSync(chirpstackInitPath, 'utf8');
 const osiServerDefaultsScript = fs.readFileSync(osiServerDefaultsPath, 'utf8');
 const sx1301GatewayDefaultScript = fs.readFileSync(sx1301GatewayDefaultPath, 'utf8');
 const gatewayIdentityHelperScript = fs.readFileSync(gatewayIdentityHelperPath, 'utf8');
 const chirpstackBootstrapScript = fs.readFileSync(chirpstackBootstrapPath, 'utf8');
 const stregaCodecSource = fs.existsSync(stregaCodecPath) ? fs.readFileSync(stregaCodecPath, 'utf8') : '';
 const lsn50CodecSource = fs.existsSync(lsn50CodecPath) ? fs.readFileSync(lsn50CodecPath, 'utf8') : '';
+const cloudHttpHelperSource = fs.existsSync(cloudHttpHelperPath) ? fs.readFileSync(cloudHttpHelperPath, 'utf8') : '';
+const cloudHttpPackageSource = fs.existsSync(cloudHttpPackagePath) ? fs.readFileSync(cloudHttpPackagePath, 'utf8') : '';
+const nodeRedPackageSource = fs.readFileSync(packageJsonPath, 'utf8');
 const reactGuiApiSource = fs.readFileSync(reactGuiApiPath, 'utf8');
 const farmingTypesSource = fs.readFileSync(farmingTypesPath, 'utf8');
 const dendroMonitorSource = fs.readFileSync(dendroMonitorPath, 'utf8');
@@ -70,11 +91,19 @@ const dendroDrawerSource = fs.readFileSync(dendroDrawerPath, 'utf8');
 const draginoTempCardSource = fs.readFileSync(draginoTempCardPath, 'utf8');
 const draginoSettingsModalSource = fs.readFileSync(draginoSettingsModalPath, 'utf8');
 const draginoDendroCalibrationSource = fs.readFileSync(draginoDendroCalibrationPath, 'utf8');
-const draginoSettingsSource = `${draginoSettingsModalSource}\n${draginoDendroCalibrationSource}`;
+const draginoChameleonSwtSectionSource = fs.existsSync(draginoChameleonSwtSectionPath)
+  ? fs.readFileSync(draginoChameleonSwtSectionPath, 'utf8')
+  : '';
+const draginoSettingsSource = `${draginoSettingsModalSource}\n${draginoDendroCalibrationSource}\n${draginoChameleonSwtSectionSource}`;
+const irrigationZoneCardSource = fs.readFileSync(irrigationZoneCardPath, 'utf8');
+const kiwiSensorCardSource = fs.readFileSync(kiwiSensorCardPath, 'utf8');
+const scheduleSectionSource = fs.readFileSync(scheduleSectionPath, 'utf8');
 const senseCapWeatherCardSource = fs.readFileSync(senseCapWeatherCardPath, 'utf8');
 const windMonitorSource = fs.readFileSync(windMonitorPath, 'utf8');
+const swtUtilsSource = fs.readFileSync(swtUtilsPath, 'utf8');
 const windUtilsSource = fs.readFileSync(windUtilsPath, 'utf8');
 const onlineTabSource = fs.readFileSync(onlineTabPath, 'utf8');
+const soilTabSource = fs.readFileSync(soilTabPath, 'utf8');
 const weatherTabSource = fs.readFileSync(weatherTabPath, 'utf8');
 const flows = JSON.parse(fs.readFileSync(flowPath, 'utf8'));
 const pendingChecks = [];
@@ -125,6 +154,8 @@ const requiredHttpRoutes = [
   '/api/devices/:deveui/strega/magnet',
   '/api/devices/:deveui/strega/partial-opening',
   '/api/devices/:deveui/strega/flushing',
+  '/api/devices/:deveui/chameleon',
+  '/api/devices/:deveui/chameleon-config',
   '/api/devices/:deveui/dendro-config',
   '/api/devices/:deveui/dendro-baseline/reset',
   '/api/devices/:deveui/zone-assignments',
@@ -192,6 +223,8 @@ const requiredFunctionNodes = [
   'Auth + Parse STREGA Flushing',
   'Authorize + Fanout STREGA Advanced',
   'Format STREGA Advanced Response',
+  'Auth + Set Chameleon Enabled',
+  'Auth + Save Chameleon Config',
   'Auth + Parse Dendro Config',
   'Format Dendro Config Response',
   'Return Device API HTTP 500',
@@ -318,6 +351,19 @@ function expectLibById(nodeId, varName, moduleName, description) {
   const found = libs.some((item) => item && item.var === varName && item.module === moduleName);
   if (!found) {
     fail(`${nodeId} missing ${description}`);
+  } else {
+    console.log(`OK ${nodeId} ${description}`);
+  }
+}
+
+function expectNodeTypeById(nodeId, expectedType, description) {
+  const node = findNodeById(nodeId);
+  if (!node) {
+    fail(`missing node ${nodeId}`);
+    return;
+  }
+  if (node.type !== expectedType) {
+    fail(`${nodeId} expected type ${expectedType}, got ${node.type}: ${description}`);
   } else {
     console.log(`OK ${nodeId} ${description}`);
   }
@@ -1174,6 +1220,21 @@ expectIncludes('Rollback MQTT Broker Config', 'rolled back MQTT credentials', 'r
 expectIncludes('Restore MQTT Broker Config', 'restored MQTT credentials', 'restores prior MQTT config when unlink finalization fails');
 expectIncludes('Schedule Link Restart', '/etc/init.d/node-red restart', 'schedules a Node-RED restart only after successful link completion');
 expectIncludes('Schedule Unlink Restart', '/etc/init.d/node-red restart', 'schedules a Node-RED restart only after successful unlink completion');
+const cloudRestNodeIds = [
+  'al-link-server-auth',
+  'sync-bootstrap-http',
+  'sync-outbox-http',
+  'sync-pending-http',
+  'sync-refresh-http'
+];
+for (const nodeId of cloudRestNodeIds) {
+  expectNodeTypeById(nodeId, 'function', 'uses function node for IPv4 cloud REST');
+  expectLibById(nodeId, 'osiCloudHttp', 'osi-cloud-http', 'imports the IPv4 cloud REST helper');
+  expectIncludesById(nodeId, 'requestJsonIpv4', 'calls requestJsonIpv4');
+  expectIncludesById(nodeId, 'Cloud REST IPv4 request failed', 'preserves IPv4 request failures as message payloads');
+}
+expectIncludes('Run Force Sync', 'osiCloudHttp.requestJsonIpv4', 'uses the shared IPv4 cloud REST helper');
+expectLibById('sync-force-build', 'osiCloudHttp', 'osi-cloud-http', 'imports the IPv4 helper for manual force sync');
 expectIncludes('Run Force Sync', 'COALESCE(u.server_username, u.username) AS claimed_by_username', 'uses linked cloud usernames in force-sync device snapshots');
 expectIncludes('Run Force Sync', 'COALESCE(u.server_username, u.username) AS username', 'uses linked cloud usernames in force-sync zone snapshots');
 expectIncludes('Run Force Sync', 'd.strega_model', 'includes STREGA model metadata in force-sync device snapshots');
@@ -1267,8 +1328,10 @@ expectIncludes('Decode LSN50', 'chameleonPayloadVersion', 'normalizes Chameleon 
 expectIncludes('Decode LSN50', 'chameleonR1OhmComp', 'normalizes Chameleon compensated resistance fields');
 expectIncludes('Decode LSN50', 'rawPayloadB64: msg._rawPayload', 'keeps the raw LoRaWAN payload base64 for Chameleon replay');
 expectIncludes('Apply Config', 'd.modeCodeToStore = d.observedModeCode != null ? d.observedModeCode : effectiveMode;', 'stores observed or configured LSN50 mode on ingest');
-expectIncludes('Apply Config', '} else if (d.isChameleon === true) {', 'adds a dedicated Chameleon branch before dendrometer derivation');
-expectIncludes('Apply Config', 'd.dendroValid = null', 'sets dendrometer validity null for Chameleon payloads');
+expectIncludes('Apply Config', 'chameleon.buildChameleonSwtMetrics', 'derives Chameleon SWT metrics without bypassing dendrometer logic');
+expectIncludes('Apply Config', 'd.swt1Kpa = swt.swt1Kpa;', 'stores derived SWT1 in formattedData');
+expectIncludes('Apply Config', 'if (!dendroEnabled)', 'keeps dendrometer enablement as the persistence gate after Chameleon derivation');
+expectExcludes('Apply Config', '} else if (d.isChameleon === true) {', 'the old dedicated Chameleon bypass branch');
 expectIncludes('Apply Config', 'Chameleon flags 0x', 'surfaces Chameleon status in node status text');
 expectIncludes('Apply Config', 'loadPreviousMod9Sample', 'loads the last persisted MOD9 sample before computing deltas');
 expectIncludes('Apply Config', 'd.counterIntervalSeconds = Number.isFinite(intervalSeconds) && intervalSeconds > 0 ? intervalSeconds : null;', 'computes elapsed seconds between MOD9 uplinks');
@@ -1289,9 +1352,10 @@ expectIncludes('Apply Config', 'd.dendroStemChangeUm = stemChange.stemChangeUm;'
 expectIncludes('Apply Config', 'dendro_baseline_pending = 0,', 'clears the pending-baseline flag when a new valid stem-change baseline is persisted');
 expectIncludes('Insert Chameleon Reading', 'INSERT INTO chameleon_readings', 'persists decoded Chameleon readings locally');
 expectIncludes('Insert Chameleon Reading', 'if (!d || d.isChameleon !== true) return msg;', 'passes non-Chameleon LSN50 payloads downstream');
-expectIncludes('Build Dendrometer Readings INSERT', 'd.isChameleon === true', 'defensively skips dendrometer readings for Chameleon payloads');
+expectExcludes('Build Dendrometer Readings INSERT', 'd.isChameleon === true', 'the old Chameleon dendrometer insert skip');
 expectLibById('lsn50-decode-fn', 'dendro', 'osi-dendro-helper', 'imports osi-dendro-helper in Decode LSN50');
 expectLibById('lsn50-apply-config', 'dendro', 'osi-dendro-helper', 'imports osi-dendro-helper in Apply Config');
+expectLibById('lsn50-apply-config', 'chameleon', 'osi-chameleon-helper', 'imports osi-chameleon-helper in Apply Config');
 expectLibById('chameleon-readings-insert-fn', 'osiDb', 'osi-db-helper', 'imports osi-db-helper in Insert Chameleon Reading');
 expectWireById('lsn50-zone-agg-fn', 'chameleon-readings-insert-fn', 'routes LSN50 flow through Chameleon insert');
 expectWireById('chameleon-readings-insert-fn', 'dendro-readings-insert-fn', 'passes Chameleon insert output to dendrometer insert');
@@ -1317,7 +1381,7 @@ expectIncludesById('lsn50-sql-fn', 'flow_liters_per_min, flow_liters_per_10min, 
 expectIncludesById('lsn50-sql-fn', 'rain_mm_per_10min, rain_mm_today', 'persists normalized and daily rain telemetry into device_data');
 expectIncludesById('lsn50-sql-fn', 'flow_liters_per_10min, flow_liters_today', 'persists normalized and daily flow telemetry into device_data');
 expectIncludesById('lsn50-sql-fn', 'counter_interval_seconds', 'persists elapsed counter interval into device_data');
-expectIncludesById('lsn50-sql-fn', 'adc_ch0v, adc_ch1v,', 'persists both dendrometer ADC channels into device_data');
+expectIncludesById('lsn50-sql-fn', 'adc_ch0v, adc_ch1v, swt_1, swt_2, swt_3,', 'persists dendrometer ADC channels and derived Chameleon SWT into device_data');
 expectIncludesById('lsn50-sql-fn', 'dendro_ratio, dendro_mode_used, dendro_position_raw_mm, dendro_position_mm, dendro_valid, dendro_delta_mm,', 'persists dual-path dendrometer raw and compatibility positions into device_data');
 expectIncludesById('lsn50-sql-fn', 'dendro_stem_change_um,', 'persists baseline-relative stem change into device_data');
 expectIncludesById('lsn50-sql-fn', 'dendro_saturated, dendro_saturation_side,', 'persists dendrometer saturation metadata into device_data');
@@ -1332,6 +1396,38 @@ expectIncludesById('format-devices', 'dd.dendro_position_raw_mm', 'returns raw d
 expectIncludesById('format-devices', 'dd.dendro_stem_change_um', 'returns baseline-relative stem change in GET /api/devices');
 expectIncludesById('format-devices', 'dd.dendro_saturated', 'returns dendrometer saturation state in GET /api/devices');
 expectIncludesById('format-devices', 'dd.dendro_saturation_side', 'returns dendrometer saturation side in GET /api/devices');
+expectIncludesById('format-devices', 'COALESCE(dd.swt_1, dd.swt_wm1) AS swt_1', 'returns canonical SWT channel 1 with legacy Kiwi fallback in GET /api/devices');
+expectIncludesById('format-devices', 'COALESCE(dd.swt_2, dd.swt_wm2) AS swt_2', 'returns canonical SWT channel 2 with legacy Kiwi fallback in GET /api/devices');
+expectIncludesById('format-devices', 'dd.swt_3', 'returns Chameleon SWT channel 3 in GET /api/devices');
+expectIncludesById('format-devices', 'ch.id AS chameleon_reading_id', 'returns latest Chameleon reading row id in GET /api/devices');
+expectIncludesById('format-devices', 'ch.payload_b64 AS chameleon_payload_b64', 'returns latest Chameleon raw payload in GET /api/devices');
+expectIncludesById('format-devices', 'ch.payload_version AS chameleon_payload_version', 'returns latest Chameleon payload version in GET /api/devices');
+expectIncludesById('format-devices', 'ch.status_flags AS chameleon_status_flags', 'returns latest Chameleon status flags in GET /api/devices');
+expectIncludesById('format-devices', 'ch.temp_c AS chameleon_temp_c', 'returns latest Chameleon board temperature in GET /api/devices');
+expectIncludesById('format-devices', 'ch.i2c_missing AS chameleon_i2c_missing', 'returns latest Chameleon I2C-missing flag in GET /api/devices');
+expectIncludesById('format-devices', 'ch.timeout AS chameleon_timeout', 'returns latest Chameleon timeout flag in GET /api/devices');
+expectIncludesById('format-devices', 'ch.temp_fault AS chameleon_temp_fault', 'returns latest Chameleon temp-fault flag in GET /api/devices');
+expectIncludesById('format-devices', 'ch.id_fault AS chameleon_id_fault', 'returns latest Chameleon ID-fault flag in GET /api/devices');
+expectIncludesById('format-devices', 'ch.ch1_open AS chameleon_ch1_open', 'returns latest Chameleon channel-open flag in GET /api/devices');
+expectIncludesById('format-devices', 'ch.ch2_open AS chameleon_ch2_open', 'returns latest Chameleon channel 2 open flag in GET /api/devices');
+expectIncludesById('format-devices', 'ch.ch3_open AS chameleon_ch3_open', 'returns latest Chameleon channel 3 open flag in GET /api/devices');
+expectIncludesById('format-devices', 'ch.r1_ohm_comp AS chameleon_r1_ohm_comp', 'returns latest Chameleon compensated resistance in GET /api/devices');
+expectIncludesById('format-devices', 'ch.r2_ohm_comp AS chameleon_r2_ohm_comp', 'returns latest Chameleon channel 2 compensated resistance in GET /api/devices');
+expectIncludesById('format-devices', 'ch.r3_ohm_comp AS chameleon_r3_ohm_comp', 'returns latest Chameleon channel 3 compensated resistance in GET /api/devices');
+expectIncludesById('format-devices', 'ch.r1_ohm_raw AS chameleon_r1_ohm_raw', 'returns latest Chameleon raw resistance in GET /api/devices');
+expectIncludesById('format-devices', 'ch.r2_ohm_raw AS chameleon_r2_ohm_raw', 'returns latest Chameleon channel 2 raw resistance in GET /api/devices');
+expectIncludesById('format-devices', 'ch.r3_ohm_raw AS chameleon_r3_ohm_raw', 'returns latest Chameleon channel 3 raw resistance in GET /api/devices');
+expectIncludesById('format-devices', 'ch.array_id AS chameleon_array_id', 'returns latest Chameleon array id in GET /api/devices');
+expectIncludesById('format-devices', 'LEFT JOIN (', 'joins latest Chameleon readings in GET /api/devices');
+expectIncludesById('format-devices', '/^[0-9A-F]{16}$/.test(deveui)', 'filters GET /api/devices latest-data lookup to canonical uppercase DevEUIs');
+expectIncludesById('format-devices', 'if (!validDevEuis.length)', 'avoids invalid SQL when no canonical DevEUIs are available');
+expectIncludesById('format-devices', "msg.topic = 'SELECT NULL AS deveui WHERE 0';", 'uses a no-row latest-data query for empty device lookups');
+expectIncludesById('format-devices', "if (!msg.payload || msg.payload.length === 0) {\n  msg.statusCode = 200;\n  msg.payload = [];\n  msg.topic = 'SELECT NULL AS deveui WHERE 0';\n  return msg;\n}", 'sets a sqlite topic before returning an empty device list');
+expectIncludesById('format-devices', "if (!validDevEuis.length) {\n  msg.statusCode = 200;\n  msg.payload = [];\n  msg.topic = 'SELECT NULL AS deveui WHERE 0';\n  return msg;\n}", 'sets a sqlite topic before returning an all-invalid DevEUI list');
+expectIncludesById('format-devices', 'msg.devices_to_format = msg.payload || [];', 'keeps GET /api/devices device rows on the request message');
+expectExcludesById('format-devices', "flow.set('devices_to_format'", 'request-scoped GET /api/devices rows in flow context');
+expectIncludesById('format-devices', 'newer.recorded_at > cr.recorded_at', 'selects the latest Chameleon reading by timestamp');
+expectIncludesById('format-devices', 'newer.recorded_at = cr.recorded_at AND newer.id > cr.id', 'breaks same-timestamp Chameleon ties by row id');
 expectIncludesById('format-devices', 'dd.rain_mm_per_hour', 'returns interval-aware rain rate in GET /api/devices');
 expectIncludesById('format-devices', 'dd.flow_liters_per_min', 'returns interval-aware flow rate in GET /api/devices');
 expectIncludesById('format-devices', 'dd.rain_mm_per_10min', 'returns normalized rain telemetry in GET /api/devices');
@@ -1345,12 +1441,39 @@ expectIncludesById('format-devices', 'dd.uv_index', 'returns S2120 UV in GET /ap
 expectIncludesById('format-devices', 'dd.rain_gauge_cumulative_mm', 'returns S2120 cumulative rain in GET /api/devices');
 expectIncludesById('format-devices', 'dd.bat_pct', 'returns S2120 battery in GET /api/devices');
 expectIncludesById('merge-device-data', 'device_mode: d.device_mode ?? 1', 'returns configured LSN50 mode in GET /api/devices');
+expectIncludesById('merge-device-data', 'const devices = msg.devices_to_format || [];', 'reads GET /api/devices device rows from the request message');
+expectExcludesById('merge-device-data', "flow.get('devices_to_format'", 'request-scoped GET /api/devices rows from flow context');
 expectIncludesById('merge-device-data', 'dendro_force_legacy: d.dendro_force_legacy ?? 0', 'returns the explicit legacy dendrometer override in GET /api/devices');
 expectIncludesById('merge-device-data', 'dendro_stroke_mm: d.dendro_stroke_mm ?? null', 'returns dendrometer stroke calibration in GET /api/devices');
 expectIncludesById('merge-device-data', 'dendro_ratio_at_retracted: d.dendro_ratio_at_retracted ?? null', 'returns dendrometer retracted-ratio calibration in GET /api/devices');
 expectIncludesById('merge-device-data', 'dendro_ratio_at_extended: d.dendro_ratio_at_extended ?? null', 'returns dendrometer extended-ratio calibration in GET /api/devices');
 expectIncludesById('merge-device-data', 'dendro_baseline_pending: d.dendro_baseline_pending ?? 0', 'returns the pending-baseline flag in GET /api/devices');
+expectIncludesById('merge-device-data', 'chameleon_enabled: d.chameleon_enabled ?? 0', 'returns Chameleon enabled config in GET /api/devices');
+expectIncludesById('merge-device-data', 'chameleon_swt1_depth_cm: d.chameleon_swt1_depth_cm ?? null', 'returns Chameleon SWT depth config in GET /api/devices');
+expectIncludesById('merge-device-data', 'chameleon_swt1_a: d.chameleon_swt1_a ?? null', 'returns Chameleon SWT coefficient config in GET /api/devices');
 expectIncludesById('merge-device-data', 'adc_ch1v: latest.adc_ch1v', 'merges dendrometer CH1 voltage into GET /api/devices');
+expectIncludesById('merge-device-data', 'swt_1: latest.swt_1', 'merges Chameleon SWT channel 1 into GET /api/devices');
+expectIncludesById('merge-device-data', 'chameleon_reading_id: d.chameleon_reading_id', 'maps latest Chameleon reading row id from SQL results');
+expectIncludesById('merge-device-data', 'chameleon_payload_b64: d.chameleon_payload_b64', 'maps latest Chameleon raw payload from SQL results');
+expectIncludesById('merge-device-data', 'chameleon_reading_id: latest.chameleon_reading_id', 'merges latest Chameleon reading row id into GET /api/devices');
+expectIncludesById('merge-device-data', 'chameleon_payload_b64: latest.chameleon_payload_b64', 'merges latest Chameleon raw payload into GET /api/devices');
+expectIncludesById('merge-device-data', 'chameleon_payload_version: latest.chameleon_payload_version', 'merges latest Chameleon payload version into GET /api/devices');
+expectIncludesById('merge-device-data', 'chameleon_status_flags: latest.chameleon_status_flags', 'merges latest Chameleon status flags into GET /api/devices');
+expectIncludesById('merge-device-data', 'chameleon_temp_c: latest.chameleon_temp_c', 'merges latest Chameleon board temperature into GET /api/devices');
+expectIncludesById('merge-device-data', 'chameleon_i2c_missing: latest.chameleon_i2c_missing', 'merges latest Chameleon I2C-missing flag into GET /api/devices');
+expectIncludesById('merge-device-data', 'chameleon_timeout: latest.chameleon_timeout', 'merges latest Chameleon timeout flag into GET /api/devices');
+expectIncludesById('merge-device-data', 'chameleon_temp_fault: latest.chameleon_temp_fault', 'merges latest Chameleon temp-fault flag into GET /api/devices');
+expectIncludesById('merge-device-data', 'chameleon_id_fault: latest.chameleon_id_fault', 'merges latest Chameleon ID-fault flag into GET /api/devices');
+expectIncludesById('merge-device-data', 'chameleon_ch1_open: latest.chameleon_ch1_open', 'merges latest Chameleon channel-open flag into GET /api/devices');
+expectIncludesById('merge-device-data', 'chameleon_ch2_open: latest.chameleon_ch2_open', 'merges latest Chameleon channel 2 open flag into GET /api/devices');
+expectIncludesById('merge-device-data', 'chameleon_ch3_open: latest.chameleon_ch3_open', 'merges latest Chameleon channel 3 open flag into GET /api/devices');
+expectIncludesById('merge-device-data', 'chameleon_r1_ohm_comp: latest.chameleon_r1_ohm_comp', 'merges latest Chameleon channel 1 resistance into GET /api/devices');
+expectIncludesById('merge-device-data', 'chameleon_r2_ohm_comp: latest.chameleon_r2_ohm_comp', 'merges latest Chameleon channel 2 resistance into GET /api/devices');
+expectIncludesById('merge-device-data', 'chameleon_r1_ohm_raw: latest.chameleon_r1_ohm_raw', 'merges latest Chameleon raw resistance into GET /api/devices');
+expectIncludesById('merge-device-data', 'chameleon_r2_ohm_raw: latest.chameleon_r2_ohm_raw', 'merges latest Chameleon channel 2 raw resistance into GET /api/devices');
+expectIncludesById('merge-device-data', 'chameleon_r3_ohm_raw: latest.chameleon_r3_ohm_raw', 'merges latest Chameleon channel 3 raw resistance into GET /api/devices');
+expectIncludesById('merge-device-data', 'chameleon_array_id: latest.chameleon_array_id', 'merges latest Chameleon array id into GET /api/devices');
+expectIncludesById('merge-device-data', 'chameleon_r3_ohm_comp: latest.chameleon_r3_ohm_comp', 'merges latest Chameleon channel 3 resistance into GET /api/devices');
 expectIncludesById('merge-device-data', 'dendro_ratio: latest.dendro_ratio', 'merges dendrometer ratio into GET /api/devices');
 expectIncludesById('merge-device-data', 'dendro_mode_used: latest.dendro_mode_used', 'merges dendrometer path metadata into GET /api/devices');
 expectIncludesById('merge-device-data', 'dendro_position_raw_mm: latest.dendro_position_raw_mm', 'merges raw dendrometer position into GET /api/devices');
@@ -1401,6 +1524,8 @@ expectIncludesById('sensor-history-fn', 'flow_liters_per_min', 'allows rate-base
 expectIncludesById('sensor-history-fn', 'rain_mm_per_10min', 'allows normalized rain history queries');
 expectIncludesById('sensor-history-fn', 'flow_liters_per_10min', 'allows normalized flow history queries');
 expectIncludesById('sensor-history-fn', 'counter_interval_seconds', 'allows interval-length history queries');
+expectIncludesById('sensor-history-fn', "swt_1: 'COALESCE(dd.swt_1, dd.swt_wm1)'", 'coalesces canonical SWT1 history across Chameleon and legacy Kiwi rows');
+expectIncludesById('sensor-history-fn', "swt_2: 'COALESCE(dd.swt_2, dd.swt_wm2)'", 'coalesces canonical SWT2 history across Chameleon and legacy Kiwi rows');
 expectIncludesById('sensor-history-fn', 'wind_speed_mps', 'allows S2120 wind-speed history queries');
 expectIncludesById('sensor-history-fn', 'wind_direction_deg', 'allows S2120 wind-direction history queries');
 expectIncludesById('sensor-history-fn', 'wind_gust_mps', 'allows S2120 wind-gust history queries');
@@ -1408,6 +1533,25 @@ expectIncludesById('sensor-history-fn', 'uv_index', 'allows S2120 UV history que
 expectIncludesById('sensor-history-fn', 'barometric_pressure_hpa', 'allows S2120 pressure history queries');
 expectIncludesById('sensor-history-fn', 'rain_gauge_cumulative_mm', 'allows S2120 cumulative-rain history queries');
 expectIncludesById('sensor-history-fn', 'bat_pct', 'allows S2120 battery-percent history queries');
+expectIncludesById('sensor-history-fn', "'swt_3'", 'allows Chameleon SWT history queries');
+expectIncludesById('fn_build_sensor_sql_params', 'COALESCE(dd.swt_1, dd.swt_wm1) AS swt_1', 'exports canonical SWT1 with legacy Kiwi fallback');
+expectIncludesById('fn_build_sensor_sql_params', 'COALESCE(dd.swt_2, dd.swt_wm2) AS swt_2', 'exports canonical SWT2 with legacy Kiwi fallback');
+expectLibById('put-chameleon-enabled-auth-fn', 'crypto', 'crypto', 'imports crypto for Chameleon enabled auth verification');
+expectLibById('put-chameleon-enabled-auth-fn', 'osiDb', 'osi-db-helper', 'uses osi-db-helper for Chameleon enabled persistence');
+expectIncludesById('put-chameleon-enabled-auth-fn', 'function parseChameleonEnabled(value)', 'validates Chameleon enabled payload without broad coercion');
+expectIncludesById('put-chameleon-enabled-auth-fn', "const enabled = parseChameleonEnabled(body.enabled);", 'rejects missing or invalid Chameleon enabled values');
+expectIncludesById('put-chameleon-enabled-auth-fn', "enabled must be a boolean, 1, 0, 'true', 'false', '1', or '0'", 'returns a 400 for invalid Chameleon enabled values');
+expectIncludesById('put-chameleon-enabled-auth-fn', "type_id = 'DRAGINO_LSN50'", 'limits Chameleon enabled updates to LSN50 devices');
+expectExcludesById('put-chameleon-enabled-auth-fn', 'sync_version = COALESCE(sync_version, 0) + 1', 'keeps Chameleon enabled as local-only edge config until a server sync contract exists');
+expectLibById('put-chameleon-config-auth-fn', 'crypto', 'crypto', 'imports crypto for Chameleon config auth verification');
+expectLibById('put-chameleon-config-auth-fn', 'osiDb', 'osi-db-helper', 'uses osi-db-helper for Chameleon config persistence');
+expectIncludesById('put-chameleon-config-auth-fn', 'const body = parseBody(msg.payload);', 'parses Chameleon config payload before opening the database');
+expectIncludesById('put-chameleon-config-auth-fn', 'Math.round(parsed * 1000000) / 1000000', 'rounds Chameleon config numbers to six decimals');
+expectIncludesById('put-chameleon-config-auth-fn', 'No Chameleon config fields supplied', 'rejects empty Chameleon config patches');
+expectExcludesById('put-chameleon-config-auth-fn', 'sync_version = COALESCE(sync_version, 0) + 1', 'keeps Chameleon calibration fields as local-only edge config until a server sync contract exists');
+expectIncludesById('d0b2b1c1a937e16d', 'COALESCE(dd.swt_3, NULL)', 'scheduler can evaluate Chameleon SWT channel 3');
+expectIncludesById('d0b2b1c1a937e16d', "ds.type_id = 'DRAGINO_LSN50' AND COALESCE(ds.chameleon_enabled,0) = 1", 'scheduler includes Chameleon-enabled LSN50 devices');
+expectIncludesById('d0b2b1c1a937e16d', 'CASE WHEN dd.swt_3 IS NULL THEN 0 ELSE 1 END', 'scheduler SWT average counts Chameleon channel 3 only when present');
 expectIncludesById('dendro-history-fn', 'dd.adc_ch1v', 'returns dendrometer CH1 history points');
 expectIncludesById('dendro-history-fn', 'dd.dendro_ratio', 'returns dendrometer ratio history points');
 expectIncludesById('dendro-history-fn', 'dd.dendro_mode_used', 'returns dendrometer path history points');
@@ -1455,6 +1599,11 @@ expectIncludesById('post-dendro-baseline-reset-auth-fn', 'dendro_baseline_calibr
 expectIncludesById('post-dendro-baseline-reset-auth-fn', 'dendro_baseline_pending = 1', 'marks the dendrometer baseline as pending after a manual reset');
 expectFileIncludes('api.ts', reactGuiApiSource, 'resetDendroBaseline: async (deveui: string): Promise<void> => {', 'adds a shared client helper for dendrometer baseline resets');
 expectFileIncludes('api.ts', reactGuiApiSource, "await api.post(`/api/devices/${deveui}/dendro-baseline/reset`);", 'targets the local dendrometer baseline reset endpoint from the shared client helper');
+expectFileIncludes('api.ts', reactGuiApiSource, 'export interface ChameleonConfigPayload', 'types Chameleon SWT calibration API payloads');
+expectFileIncludes('api.ts', reactGuiApiSource, 'setChameleonEnabled: async (deveui: string, enabled: boolean): Promise<void> => {', 'adds a shared client helper for Chameleon enablement');
+expectFileIncludes('api.ts', reactGuiApiSource, "await api.put(`/api/devices/${deveui}/chameleon`, { enabled });", 'targets the local Chameleon enablement endpoint from the shared client helper');
+expectFileIncludes('api.ts', reactGuiApiSource, 'setChameleonConfig: async (deveui: string, payload: ChameleonConfigPayload): Promise<void> => {', 'adds a shared client helper for Chameleon SWT calibration config');
+expectFileIncludes('api.ts', reactGuiApiSource, "await api.put(`/api/devices/${deveui}/chameleon-config`, payload);", 'targets the local Chameleon calibration endpoint from the shared client helper');
 expectFileIncludes('api.ts', reactGuiApiSource, 'position_mm: number | null;', 'types dendrometer history position as nullable');
 expectFileIncludes('api.ts', reactGuiApiSource, 'stem_change_um: toNullableNumber(row?.stem_change_um ?? row?.dendro_stem_change_um)', 'normalizes baseline-relative stem change for dendrometer history');
 expectFileExcludes('api.ts', reactGuiApiSource, 'Number(row?.position_mm ?? row?.dendro_position_mm ?? 0)', 'coercing missing dendrometer history position to zero');
@@ -1463,7 +1612,72 @@ expectFileIncludes('farming.ts', farmingTypesSource, 'id: number | null;', 'allo
 expectFileIncludes('farming.ts', farmingTypesSource, 'position_um: number | null;', 'allows raw-only dendrometer rows to omit calibrated position');
 expectFileIncludes('farming.ts', farmingTypesSource, 'dendro_stem_change_um?: number | null;', 'types the latest stem-change signal on device payloads');
 expectFileIncludes('farming.ts', farmingTypesSource, 'dendro_baseline_pending?: number | null;', 'types the device-level baseline-pending flag');
+expectFileIncludes('farming.ts', farmingTypesSource, 'swt_3?: number | null;', 'types Chameleon SWT channel 3 on latest device payloads');
+expectFileIncludes('farming.ts', farmingTypesSource, 'chameleon_payload_b64?: string | null;', 'types Chameleon raw payload on latest device payloads');
+expectFileIncludes('farming.ts', farmingTypesSource, 'chameleon_enabled?: number;', 'types device-level Chameleon enablement flag');
 expectFileIncludes('api.ts', reactGuiApiSource, 'stem_change_um: number | null;', 'types the dendrometer history stem-change signal');
+
+for (const field of [
+  'swt_1',
+  'swt_2',
+  'swt_3',
+  'chameleon_reading_id',
+  'chameleon_payload_b64',
+  'chameleon_payload_version',
+  'chameleon_status_flags',
+  'chameleon_i2c_missing',
+  'chameleon_timeout',
+  'chameleon_temp_fault',
+  'chameleon_id_fault',
+  'chameleon_ch1_open',
+  'chameleon_ch2_open',
+  'chameleon_ch3_open',
+  'chameleon_temp_c',
+  'chameleon_r1_ohm_comp',
+  'chameleon_r2_ohm_comp',
+  'chameleon_r3_ohm_comp',
+  'chameleon_r1_ohm_raw',
+  'chameleon_r2_ohm_raw',
+  'chameleon_r3_ohm_raw',
+  'chameleon_array_id',
+]) {
+  expectFileIncludes('farming.ts', farmingTypesSource, `${field}?:`, `types latest_data.${field}`);
+}
+
+for (const field of [
+  'chameleon_enabled',
+  'chameleon_swt1_depth_cm',
+  'chameleon_swt2_depth_cm',
+  'chameleon_swt3_depth_cm',
+  'chameleon_swt1_a',
+  'chameleon_swt1_b',
+  'chameleon_swt1_c',
+  'chameleon_swt2_a',
+  'chameleon_swt2_b',
+  'chameleon_swt2_c',
+  'chameleon_swt3_a',
+  'chameleon_swt3_b',
+  'chameleon_swt3_c',
+]) {
+  expectFileIncludes('farming.ts', farmingTypesSource, `${field}?:`, `types top-level Device.${field}`);
+}
+
+for (const field of [
+  'chameleonSwt1DepthCm',
+  'chameleonSwt2DepthCm',
+  'chameleonSwt3DepthCm',
+  'chameleonSwt1A',
+  'chameleonSwt1B',
+  'chameleonSwt1C',
+  'chameleonSwt2A',
+  'chameleonSwt2B',
+  'chameleonSwt2C',
+  'chameleonSwt3A',
+  'chameleonSwt3B',
+  'chameleonSwt3C',
+]) {
+  expectFileIncludes('api.ts', reactGuiApiSource, `${field}?:`, `types ChameleonConfigPayload.${field}`);
+}
 expectFileIncludes('DendrometerMonitor.tsx', dendroMonitorSource, 'Stem change over time', 'labels the basic monitor around the comparable stem-change signal');
 expectFileIncludes('DendrometerMonitor.tsx', dendroMonitorSource, 'Mechanical layer', 'renders mechanical engineering values beneath the stem-change graph');
 expectFileIncludes('DendrometerMonitor.tsx', dendroMonitorSource, 'Current position', 'shows absolute mechanical position below the graph instead of as the headline graph metric');
@@ -1475,8 +1689,28 @@ expectFileExcludes('DraginoTempCard.tsx', draginoTempCardSource, 'DENDROMETER PO
 expectFileIncludes('DraginoTempCard.tsx', draginoTempCardSource, 'dendro_stem_change_um', 'renders the baseline-relative stem change signal on the device card');
 expectFileIncludes('DraginoTempCard.tsx', draginoTempCardSource, 'dendro_baseline_pending === 1', 'suppresses stale stem-change values when the device is awaiting a new baseline');
 expectFileIncludes('DraginoTempCard.tsx', draginoTempCardSource, 'Awaiting baseline', 'keeps the dendrometer card visible while the next valid uplink establishes a new baseline');
+expectFileIncludes('DraginoTempCard.tsx', draginoTempCardSource, 'Chameleon SWT', 'renders Chameleon SWT on the LSN50 card');
+expectFileIncludes('DraginoTempCard.tsx', draginoTempCardSource, "field: 'swt_3'", 'opens history for Chameleon SWT3');
+expectFileExcludes('DraginoTempCard.tsx', draginoTempCardSource, 'ADC INPUT', 'removes generic ADC card when dendrometer is disabled');
+expectFileIncludes('DraginoTempCard.tsx', draginoTempCardSource, "if (value == null) return '—';", 'keeps Chameleon kPa formatting null-safe');
+expectFileIncludes('DraginoTempCard.tsx', draginoTempCardSource, 'No valid Chameleon sample', 'surfaces invalid Chameleon sample state on the LSN50 card');
+expectFileIncludes('DraginoTempCard.tsx', draginoTempCardSource, 'data?.chameleon_i2c_missing === 1 || data?.chameleon_timeout === 1', 'treats Chameleon missing and timeout flags as invalid samples');
 expectFileIncludes('DraginoDendroCalibrationSection.tsx', draginoDendroCalibrationSource, 'Current ratio', 'shows ratio in the dendrometer calibration section instead of on the device card');
 expectFileIncludes('DraginoSettingsModal.tsx', draginoSettingsModalSource, 'Dendrometer calibration', 'adds dendrometer calibration controls to the LSN50 advanced settings');
+expectFileIncludes('DraginoSettingsModal.tsx', draginoSettingsModalSource, "import { DraginoChameleonSwtSection } from './DraginoChameleonSwtSection';", 'imports the Chameleon SWT calibration section');
+expectFileIncludes('DraginoSettingsModal.tsx', draginoSettingsModalSource, "key: 'chameleon_enabled'", 'adds Chameleon SWT to the LSN50 sensor toggle list');
+expectFileIncludes('DraginoSettingsModal.tsx', draginoSettingsModalSource, "label: 'Chameleon SWT'", 'labels the Chameleon SWT sensor toggle');
+expectFileIncludes('DraginoSettingsModal.tsx', draginoSettingsModalSource, 'lsn50API.setChameleonEnabled', 'wires the Chameleon SWT toggle to the local API');
+expectFileIncludes('DraginoSettingsModal.tsx', draginoSettingsModalSource, 'function requiredModeForSensor', 'uses a per-sensor LSN50 mode gate');
+expectFileIncludes('DraginoSettingsModal.tsx', draginoSettingsModalSource, "return 'MOD3';", 'requires MOD3 for Chameleon SWT enablement');
+expectFileIncludes('DraginoSettingsModal.tsx', draginoSettingsModalSource, "return 'MOD9';", 'requires MOD9 for rain and flow counters');
+expectFileIncludes('DraginoSettingsModal.tsx', draginoSettingsModalSource, 'Chameleon SWT requires MOD3', 'surfaces a clear MOD3 guard message for Chameleon enablement');
+expectFileIncludes('DraginoSettingsModal.tsx', draginoSettingsModalSource, 'enabledSensorsIncompatibleWithMode', 'warns before switching away from modes required by enabled sensors');
+expectFileIncludes('DraginoSettingsModal.tsx', draginoSettingsModalSource, 'allows dendrometer in MOD1 or MOD3', 'documents the non-exclusive dendrometer and Chameleon MOD3 mode path');
+expectFileIncludes('DraginoSettingsModal.tsx', draginoSettingsModalSource, "option.key === 'temp_enabled'", 'keeps the MOD1 temperature warning path separate from strict mode gates');
+expectFileIncludes('DraginoSettingsModal.tsx', draginoSettingsModalSource, "return mode !== 'MOD1';", 'warns before switching temperature-enabled LSN50 devices away from MOD1');
+expectFileIncludes('DraginoSettingsModal.tsx', draginoSettingsModalSource, 'title="Chameleon SWT"', 'renders a dedicated Chameleon SWT settings section');
+expectFileIncludes('DraginoSettingsModal.tsx', draginoSettingsModalSource, '<DraginoChameleonSwtSection', 'renders the Chameleon SWT calibration component in the settings modal');
 expectFileIncludes('DraginoDendroCalibrationSection.tsx', draginoDendroCalibrationSource, 'Retracted ratio (0 mm)', 'uses canonical retracted-ratio calibration wording in the advanced settings');
 expectFileIncludes('DraginoDendroCalibrationSection.tsx', draginoDendroCalibrationSource, 'Extended ratio (full stroke)', 'uses canonical extended-ratio calibration wording in the advanced settings');
 expectFileIncludes('DraginoDendroCalibrationSection.tsx', draginoDendroCalibrationSource, 'Capture current ratio', 'allows capturing the live ratio into calibration endpoints');
@@ -1484,6 +1718,33 @@ expectFileIncludes('DraginoDendroCalibrationSection.tsx', draginoDendroCalibrati
 expectFileIncludes('DraginoDendroCalibrationSection.tsx', draginoDendroCalibrationSource, 'Reset stem baseline', 'adds a manual baseline reset action for legacy dendrometers');
 expectFileIncludes('DraginoDendroCalibrationSection.tsx', draginoDendroCalibrationSource, "await lsn50API.resetDendroBaseline(device.deveui)", 'wires the manual baseline reset action to the local API');
 expectFileIncludes('DraginoDendroCalibrationSection.tsx', draginoDendroCalibrationSource, 'Force legacy mode', 'exposes the legacy dendrometer override in the advanced settings');
+expectFileIncludes('DraginoChameleonSwtSection.tsx', draginoChameleonSwtSectionSource, 'Save Chameleon calibration', 'adds a save action for Chameleon SWT calibration');
+expectFileIncludes('DraginoChameleonSwtSection.tsx', draginoChameleonSwtSectionSource, 'Restore workbook defaults', 'allows locally restoring workbook coefficients before save');
+expectFileIncludes('DraginoChameleonSwtSection.tsx', draginoChameleonSwtSectionSource, 'await lsn50API.setChameleonConfig(device.deveui, payload)', 'saves Chameleon SWT calibration through the dedicated local API');
+expectFileIncludes('DraginoChameleonSwtSection.tsx', draginoChameleonSwtSectionSource, '10.71', 'uses the SWT1 workbook fallback coefficient a');
+expectFileIncludes('DraginoChameleonSwtSection.tsx', draginoChameleonSwtSectionSource, '10.40', 'uses the SWT2 workbook fallback coefficient a');
+expectFileIncludes('DraginoChameleonSwtSection.tsx', draginoChameleonSwtSectionSource, '10.33', 'uses the SWT3 workbook fallback coefficient a');
+expectFileIncludes('DraginoChameleonSwtSection.tsx', draginoChameleonSwtSectionSource, 'chameleonSwt1DepthCm', 'sends the SWT1 depth using the camelCase config payload');
+expectFileIncludes('DraginoChameleonSwtSection.tsx', draginoChameleonSwtSectionSource, 'chameleonSwt2B', 'sends representative SWT2 coefficient payload fields');
+expectFileIncludes('DraginoChameleonSwtSection.tsx', draginoChameleonSwtSectionSource, 'chameleonSwt3C', 'sends representative SWT3 coefficient payload fields');
+expectFileIncludes('DraginoChameleonSwtSection.tsx', draginoChameleonSwtSectionSource, 'Math.round(parsed * 100) / 100', 'rounds depth values to two decimals before save');
+expectFileIncludes('DraginoChameleonSwtSection.tsx', draginoChameleonSwtSectionSource, 'Math.round(parsed * 1000000) / 1000000', 'rounds coefficient values to six decimals before save');
+expectFileIncludes('DraginoChameleonSwtSection.tsx', draginoChameleonSwtSectionSource, 'device.latest_data?.swt_1', 'shows live SWT channel 1 values when present');
+expectFileIncludes('DraginoChameleonSwtSection.tsx', draginoChameleonSwtSectionSource, 'device.latest_data?.chameleon_r1_ohm_comp', 'shows live compensated resistance when present');
+expectFileIncludes('DraginoChameleonSwtSection.tsx', draginoChameleonSwtSectionSource, "if (value == null || (typeof value === 'string' && value.trim() === '')) return null;", 'treats nullish and blank live Chameleon telemetry as absent before numeric formatting');
+expectFileIncludes('DraginoChameleonSwtSection.tsx', draginoChameleonSwtSectionSource, 'a: formatNumericInput(device[channel.coefficientKeys.a])', 'keeps absent saved coefficient a values blank instead of rehydrating workbook defaults');
+expectFileIncludes('DraginoChameleonSwtSection.tsx', draginoChameleonSwtSectionSource, 'placeholder={String(channel.defaults[field])}', 'shows Chameleon workbook defaults as coefficient placeholders');
+expectFileIncludes('DraginoChameleonSwtSection.tsx', draginoChameleonSwtSectionSource, 'a: String(channel.defaults.a)', 'keeps Restore workbook defaults as an explicit value-fill action');
+expectFileIncludes('swt.ts', swtUtilsSource, 'toFiniteSwtValue(data?.swt_1) ?? toFiniteSwtValue(data?.swt_wm1)', 'uses canonical SWT1 with legacy Kiwi fallback in shared GUI SWT utilities');
+expectFileIncludes('swt.ts', swtUtilsSource, 'toFiniteSwtValue(data?.swt_2) ?? toFiniteSwtValue(data?.swt_wm2)', 'uses canonical SWT2 with legacy Kiwi fallback in shared GUI SWT utilities');
+expectFileIncludes('IrrigationZoneCard.tsx', irrigationZoneCardSource, 'summarizeSwtValues(collectDeviceSwtValues(devices))', 'computes Soil now from canonical SWT values across sensor families');
+expectFileExcludes('IrrigationZoneCard.tsx', irrigationZoneCardSource, '[data?.swt_wm1, data?.swt_wm2]', 'prevents Soil now from reading only legacy Kiwi SWT values');
+expectFileIncludes('SoilTab.tsx', soilTabSource, 'const swtReadings = collectDeviceSwtValues(devices);', 'computes soil environment SWT from canonical sensor-family-neutral values');
+expectFileIncludes('KiwiSensorCard.tsx', kiwiSensorCardSource, "field: 'swt_1'", 'uses canonical SWT1 for Kiwi live display and history');
+expectFileIncludes('KiwiSensorCard.tsx', kiwiSensorCardSource, "field: 'swt_2'", 'uses canonical SWT2 for Kiwi live display and history');
+expectFileIncludes('KiwiSensorCard.tsx', kiwiSensorCardSource, "soilMoistureProbeDepths.swt_1", 'stores Kiwi SWT1 depth metadata under the canonical key');
+expectFileIncludes('ScheduleSection.tsx', scheduleSectionSource, "if (raw === 'SWT_WM1') return 'SWT_1';", 'normalizes legacy SWT schedule metrics before editing');
+expectFileIncludes('ScheduleSection.tsx', scheduleSectionSource, '<option value="SWT_1">Sensor 1</option>', 'saves new SWT schedules with canonical metric names');
 expectFileExcludes('Dragino settings components', draginoSettingsSource, 'Invert direction', 'removes the ratio inversion toggle from the advanced settings');
 expectFileIncludes('SenseCapWeatherCard.tsx', senseCapWeatherCardSource, 'WindMonitor', 'opens a dedicated wind monitor from the S2120 card');
 expectFileIncludes('SenseCapWeatherCard.tsx', senseCapWeatherCardSource, 'rain_mm_per_10min', 'shows normalized rain history options on the S2120 card');
@@ -1895,7 +2156,29 @@ for (const seedDatabasePath of seedDendroHistoryDatabasePaths) {
 for (const seedDatabasePath of seedDatabasePaths) {
   const relativeSeedPath = path.relative(path.resolve(__dirname, '..'), seedDatabasePath);
   const chameleonColumns = new Set(readTableColumns(seedDatabasePath, 'chameleon_readings'));
+  const deviceColumns = new Set(readTableColumns(seedDatabasePath, 'devices'));
+  const deviceDataColumns = new Set(readTableColumns(seedDatabasePath, 'device_data'));
   const chameleonIndexes = new Set(readTableIndexes(seedDatabasePath, 'chameleon_readings'));
+  expectCondition(
+    deviceColumns.has('chameleon_enabled'),
+    `${relativeSeedPath} includes chameleon_enabled in the bundled devices schema`,
+    `${relativeSeedPath} is missing chameleon_enabled in the bundled devices schema`
+  );
+  expectCondition(
+    deviceColumns.has('chameleon_swt1_depth_cm'),
+    `${relativeSeedPath} includes chameleon_swt1_depth_cm in the bundled devices schema`,
+    `${relativeSeedPath} is missing chameleon_swt1_depth_cm in the bundled devices schema`
+  );
+  expectCondition(
+    deviceColumns.has('chameleon_swt3_c'),
+    `${relativeSeedPath} includes chameleon_swt3_c in the bundled devices schema`,
+    `${relativeSeedPath} is missing chameleon_swt3_c in the bundled devices schema`
+  );
+  expectCondition(
+    deviceDataColumns.has('swt_1'),
+    `${relativeSeedPath} includes swt_1 in the bundled device_data schema`,
+    `${relativeSeedPath} is missing swt_1 in the bundled device_data schema`
+  );
   expectCondition(
     chameleonColumns.has('payload_b64'),
     `${relativeSeedPath} includes payload_b64 in the bundled chameleon_readings schema`,
@@ -1963,6 +2246,71 @@ for (const seedDatabasePath of v2SeedDatabasePaths) {
     `${relativeSeedPath} is missing command_ack_outbox.delivered_at`
   );
 }
+
+// --- seed DB: irrigation_schedules + sync_outbox WS2 columns ---
+for (const seedDatabasePath of v2SeedDatabasePaths) {
+  const relativeSeedPath = path.relative(path.resolve(__dirname, '..'), seedDatabasePath);
+  const scheduleCols = new Set(readTableColumns(seedDatabasePath, 'irrigation_schedules'));
+  expectCondition(
+    scheduleCols.has('irrigation_zone_id') && scheduleCols.has('threshold_kpa'),
+    `${relativeSeedPath} includes irrigation_schedules table`,
+    `${relativeSeedPath} is missing irrigation_schedules table`
+  );
+  const syncOutboxCols = new Set(readTableColumns(seedDatabasePath, 'sync_outbox'));
+  for (const col of ['rejected_at', 'rejection_reason', 'last_retryable_failure_at']) {
+    expectCondition(
+      syncOutboxCols.has(col),
+      `${relativeSeedPath} includes sync_outbox.${col} (WS2)`,
+      `${relativeSeedPath} is missing sync_outbox.${col}`
+    );
+  }
+}
+
+// --- firmware version 0.6.5 ---
+const EXPECTED_VERSION = '0.6.5';
+const osiServerDefaultsContent = fs.existsSync(osiServerDefaultsPath) ? fs.readFileSync(osiServerDefaultsPath, 'utf8') : '';
+expectFileIncludes('96_osi_server_config', osiServerDefaultsContent, `firmware_version=${EXPECTED_VERSION}`, `96_osi_server_config seeds firmware_version ${EXPECTED_VERSION}`);
+expectFileIncludes('node-red.init', nodeRedInitScript, `echo "${EXPECTED_VERSION}"`, `node-red.init fallback version is ${EXPECTED_VERSION}`);
+const flowsRaw = fs.readFileSync(flowPath, 'utf8');
+expectCondition(
+  flowsRaw.includes(`|| '${EXPECTED_VERSION}'`),
+  `flows.json heartbeat fallback version is ${EXPECTED_VERSION}`,
+  `flows.json heartbeat fallback version is not ${EXPECTED_VERSION}`
+);
+
+// --- 97_osi_db_seed ---
+let osiDbSeedScript = '';
+if (fs.existsSync(osiDbSeedPath)) {
+  osiDbSeedScript = fs.readFileSync(osiDbSeedPath, 'utf8');
+  console.log('OK 97_osi_db_seed uci-defaults script present');
+} else {
+  fail(`missing 97_osi_db_seed at ${osiDbSeedPath}`);
+}
+expectFileIncludes('97_osi_db_seed', osiDbSeedScript, '/usr/share/db/farming.db', '97_osi_db_seed seeds from /usr/share/db/farming.db');
+expectFileIncludes('97_osi_db_seed', osiDbSeedScript, '/data/db/farming.db', '97_osi_db_seed seeds to /data/db/farming.db');
+expectFileIncludes('97_osi_db_seed', osiDbSeedScript, '[ -f "$DATA_DB" ]', '97_osi_db_seed skips seed when target DB exists');
+expectFileExcludes('97_osi_db_seed', osiDbSeedScript, 'cp --force', '97_osi_db_seed must not force-overwrite existing DB');
+
+// --- install-osi-os.sh ---
+if (fs.existsSync(installOsiOsPath)) {
+  console.log('OK install-osi-os.sh present');
+} else {
+  fail(`missing install-osi-os.sh at ${installOsiOsPath}`);
+}
+
+// --- database/seed-blank.sql ---
+if (fs.existsSync(seedSqlPath)) {
+  console.log('OK database/seed-blank.sql present');
+  const seedSql = fs.readFileSync(seedSqlPath, 'utf8');
+  expectFileIncludes('seed-blank.sql', seedSql, 'irrigation_schedules', 'seed-blank.sql defines irrigation_schedules table');
+  expectFileIncludes('seed-blank.sql', seedSql, 'rejected_at', 'seed-blank.sql includes sync_outbox.rejected_at (WS2)');
+  expectFileIncludes('seed-blank.sql', seedSql, 'applied_commands', 'seed-blank.sql includes applied_commands table (WS3)');
+  expectFileIncludes('seed-blank.sql', seedSql, 'chameleon_readings', 'seed-blank.sql includes chameleon_readings table');
+  expectFileIncludes('seed-blank.sql', seedSql, 'valve_actuation_expectations', 'seed-blank.sql includes valve_actuation_expectations table (WS1)');
+} else {
+  fail(`missing database/seed-blank.sql at ${seedSqlPath}`);
+}
+
 expectFileIncludes('osi-gateway-identity.sh', gatewayIdentityHelperScript, 'gateway_identity_resolve()', 'defines the shared canonical gateway resolver');
 expectFileIncludes('osi-gateway-identity.sh', gatewayIdentityHelperScript, 'gateway_identity_active_chipset()', 'derives the active concentratord chipset before probing static gateway identifiers');
 expectFileIncludes('osi-gateway-identity.sh', gatewayIdentityHelperScript, 'uci -q get chirpstack-concentratord.@global[0].chipset', 'reads the active concentratord chipset from UCI');
@@ -1986,6 +2334,93 @@ expectFileIncludes('99_set_sx1301_gateway_id', sx1301GatewayDefaultScript, 'reso
 expectFileExcludes('99_set_sx1301_gateway_id', sx1301GatewayDefaultScript, "SECTION='chirpstack-concentratord.@sx1302[0]'", 'hard-coded sx1302 seeding outside active-chipset-aware logic');
 expectFileExcludes('99_set_sx1301_gateway_id', sx1301GatewayDefaultScript, "SECTION='chirpstack-concentratord.@sx1301[0]'", 'hard-coded sx1301 seeding outside active-chipset-aware logic');
 
+// --- osi-bootstrap init script verification ---
+
+function extractOpenWrtStart(fileLabel, content) {
+  const match = String(content || '').match(/^START=(\d+)\s*$/m);
+  if (!match) {
+    fail(`${fileLabel} missing START priority`);
+    return null;
+  }
+  return Number(match[1]);
+}
+
+function rcStartName(start, serviceName) {
+  return `S${String(start).padStart(2, '0')}${serviceName}`;
+}
+
+let osiBootstrapInitScript = '';
+if (fs.existsSync(osiBootstrapInitPath)) {
+  osiBootstrapInitScript = fs.readFileSync(osiBootstrapInitPath, 'utf8');
+  console.log('OK osi-bootstrap init script present');
+} else {
+  fail(`missing osi-bootstrap init script at ${osiBootstrapInitPath}`);
+}
+
+const chirpstackStart = extractOpenWrtStart('chirpstack.init', chirpstackInitScript);
+const nodeRedStart = extractOpenWrtStart('node-red.init', nodeRedInitScript);
+const osiBootstrapStart = extractOpenWrtStart('osi-bootstrap', osiBootstrapInitScript);
+expectEqual(chirpstackStart, 99, 'chirpstack init START priority');
+expectEqual(nodeRedStart, 99, 'node-red init START priority');
+expectEqual(osiBootstrapStart, 99, 'osi-bootstrap init START priority');
+const startupOrder = [
+  { serviceName: 'chirpstack', start: chirpstackStart },
+  { serviceName: 'node-red', start: nodeRedStart },
+  { serviceName: 'osi-bootstrap', start: osiBootstrapStart }
+]
+  .filter((entry) => Number.isFinite(entry.start))
+  .map((entry) => rcStartName(entry.start, entry.serviceName))
+  .sort();
+expectEqual(startupOrder.join(' < '), 'S99chirpstack < S99node-red < S99osi-bootstrap', 'OpenWrt START/name startup order for first-boot provisioning');
+
+let chirpstackBootstrapOverlayScript = '';
+if (fs.existsSync(chirpstackBootstrapOverlayPath)) {
+  chirpstackBootstrapOverlayScript = fs.readFileSync(chirpstackBootstrapOverlayPath, 'utf8');
+  console.log('OK overlay chirpstack-bootstrap.js present');
+  expectEqual(chirpstackBootstrapOverlayScript, chirpstackBootstrapScript, 'overlay chirpstack-bootstrap.js matches scripts/chirpstack-bootstrap.js byte-for-byte');
+} else {
+  fail(`missing overlay chirpstack-bootstrap.js at ${chirpstackBootstrapOverlayPath}`);
+}
+
+expectFileIncludes('osi-bootstrap', osiBootstrapInitScript, 'stamp_valid()', 'init script defines stamp validity check');
+expectFileIncludes('osi-bootstrap', osiBootstrapInitScript, '/etc/osi-bootstrap.done', 'init script uses the canonical stamp file path');
+expectFileIncludes('osi-bootstrap', osiBootstrapInitScript, '/srv/node-red/.chirpstack.env', 'init script checks env file existence');
+expectFileIncludes('osi-bootstrap', osiBootstrapInitScript, "grep -q 'CHIRPSTACK_APP_SENSORS=[0-9a-f]\\{8\\}-'", 'init script validates env file contains valid app UUIDs');
+expectFileIncludes('osi-bootstrap', osiBootstrapInitScript, '/usr/share/node-red/chirpstack-bootstrap.js', 'init script prefers the ROM bootstrap script');
+expectFileIncludes('osi-bootstrap', osiBootstrapInitScript, '/srv/node-red/chirpstack-bootstrap.js', 'init script keeps the live-deploy bootstrap fallback');
+expectFileIncludes('osi-bootstrap', osiBootstrapInitScript, 'bootstrap script not found, will retry next boot', 'init script retries instead of marking done when bootstrap script is missing');
+expectFileExcludes('osi-bootstrap', osiBootstrapInitScript, 'bootstrap script not found, marking done', 'missing-script success path');
+expectFileIncludes('osi-bootstrap', osiBootstrapInitScript, 'curl -sf --max-time 3 http://localhost:8080', 'init script waits for ChirpStack gRPC via curl');
+expectFileIncludes('osi-bootstrap', osiBootstrapInitScript, 'seq 1 24', 'init script retries gRPC health check up to 24 times');
+expectFileIncludes('osi-bootstrap', osiBootstrapInitScript, 'if touch /etc/osi-bootstrap.done; then', 'init script treats stamp write as part of successful provisioning');
+expectFileIncludes('osi-bootstrap', osiBootstrapInitScript, 'provisioned_this_boot=1', 'init script tracks successful first-boot provisioning');
+expectFileIncludes('osi-bootstrap', osiBootstrapInitScript, 'if [ "$provisioned_this_boot" = 1 ]; then', 'init script gates Node-RED restart on successful provisioning');
+expectFileIncludes('osi-bootstrap', osiBootstrapInitScript, '/etc/init.d/node-red restart', 'init script restarts Node-RED after successful provisioning');
+expectFileIncludes('osi-bootstrap', osiBootstrapInitScript, 'logger -t osi-bootstrap', 'init script logs all events with the correct tag');
+expectCondition(!osiBootstrapInitScript.includes('STOP='), 'osi-bootstrap does not set a shutdown priority (one-shot)', 'osi-bootstrap must not set STOP for this one-shot init script');
+
+// uci-defaults activation script
+let osiBootstrapEnableScript = '';
+if (fs.existsSync(osiBootstrapEnablePath)) {
+  osiBootstrapEnableScript = fs.readFileSync(osiBootstrapEnablePath, 'utf8');
+  console.log('OK osi-bootstrap uci-defaults activation script present');
+} else {
+  fail(`missing osi-bootstrap uci-defaults activation script at ${osiBootstrapEnablePath}`);
+}
+
+expectFileIncludes('95_osi_bootstrap_enable', osiBootstrapEnableScript, '/etc/init.d/osi-bootstrap enable', 'activation script enables the osi-bootstrap init on first boot');
+
+// sysupgrade.conf preservation
+let sysupgradeConf = '';
+if (fs.existsSync(sysupgradeConfPath)) {
+  sysupgradeConf = fs.readFileSync(sysupgradeConfPath, 'utf8');
+  console.log('OK sysupgrade.conf present');
+} else {
+  fail(`missing sysupgrade.conf at ${sysupgradeConfPath}`);
+}
+
+expectFileIncludes('sysupgrade.conf', sysupgradeConf, '/etc/osi-bootstrap.done', 'sysupgrade.conf preserves the osi-bootstrap stamp file');
+
 const authNodes = flows.filter((node) => typeof node.func === 'string' && node.func.includes('function getAuthSecret()'));
 for (const insecureNeedle of ['osi-os-default-auth-secret', "env.get('CHIRPSTACK_API_KEY')"]) {
   const offendingNode = authNodes.find((node) => node.func.includes(insecureNeedle));
@@ -2008,6 +2443,18 @@ if (!fs.existsSync(packageJsonPath)) {
     }
   }
 }
+
+expectCondition(!!cloudHttpHelperSource, 'osi-cloud-http helper exists', 'missing osi-cloud-http helper');
+expectFileIncludes('osi-cloud-http/index.js', cloudHttpHelperSource, 'family: 4', 'forces IPv4 DNS/address selection');
+expectFileIncludes('osi-cloud-http/index.js', cloudHttpHelperSource, 'requestJsonIpv4', 'exports requestJsonIpv4');
+expectFileIncludes('osi-cloud-http/index.js', cloudHttpHelperSource, 'setTimeout', 'sets a bounded cloud REST timeout');
+expectFileIncludes('osi-cloud-http/index.js', cloudHttpHelperSource, 'JSON.parse', 'parses JSON responses');
+expectFileIncludes('osi-cloud-http/index.js', cloudHttpHelperSource, "res.on('aborted'", 'rejects aborted response streams');
+expectFileIncludes('osi-cloud-http/index.js', cloudHttpHelperSource, "res.on('error'", 'rejects response stream errors');
+expectFileIncludes('osi-cloud-http/index.js', cloudHttpHelperSource, 'res.complete', 'rejects incomplete response stream closes');
+expectFileIncludes('osi-cloud-http/index.js', cloudHttpHelperSource, 'settled', 'guards cloud REST requests against double settlement');
+expectFileIncludes('osi-cloud-http/package.json', cloudHttpPackageSource, '"name": "osi-cloud-http"', 'declares the helper package name');
+expectFileIncludes('node-red/package.json', nodeRedPackageSource, '"osi-cloud-http": "file:osi-cloud-http"', 'installs the helper package as a local dependency');
 
 const rawDbNodes = flows.filter(
   (node) => typeof node.func === 'string' && node.func.includes("new sqlite3.Database('/data/db/farming.db')")

@@ -10,6 +10,10 @@ DEVICE_EUI_SOURCE="${GATEWAY_IDENTITY_DEVICE_EUI_SOURCE:-persisted}"
 DEVICE_EUI_CONFIDENCE="${GATEWAY_IDENTITY_DEVICE_EUI_CONFIDENCE:-provisional}"
 DEVICE_EUI_LAST_VERIFIED_AT="${GATEWAY_IDENTITY_DEVICE_EUI_LAST_VERIFIED_AT:-}"
 
+# CGOS 4.10.1 uci cannot create a new package file from scratch via 'uci set'.
+# Pre-create the file so that the batch commands below can populate it.
+[ -f /etc/config/osi-server ] || touch /etc/config/osi-server
+
 uci -q batch <<EOF
 set osi-server.cloud=osi_server
 set osi-server.cloud.enabled=0
@@ -19,7 +23,7 @@ set osi-server.cloud.device_eui_confidence=$DEVICE_EUI_CONFIDENCE
 set osi-server.cloud.device_eui_last_verified_at=$DEVICE_EUI_LAST_VERIFIED_AT
 set osi-server.cloud.link_gateway_device_eui=
 set osi-server.cloud.device_type=GATEWAY
-set osi-server.cloud.firmware_version=0.6.0
+set osi-server.cloud.firmware_version=0.6.5
 set osi-server.cloud.server_host=
 set osi-server.cloud.mqtt_password=
 set osi-server.cloud.allow_private_target=0
