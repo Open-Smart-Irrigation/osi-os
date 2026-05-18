@@ -1,6 +1,6 @@
 # Chameleon SWT Integration Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox syntax for tracking.
 
 **Goal:** Convert VIA Chameleon resistance payloads from Dragino LSN50 MOD3 uplinks into calibrated SWT/kPa readings on the edge and expose Chameleon enablement, depths, and calibration values in the LSN50 card.
 
@@ -27,6 +27,21 @@
 - Chameleon and dendrometer can both be enabled. In that mode, one MOD3 uplink stores raw Chameleon readings, derived Chameleon SWT, and derived dendrometer values.
 - No OSI Server GUI or Node-RED cloud UI changes are part of this plan. Edge sync/export changes are limited to preserving local schema compatibility.
 
+## Implementation Notes
+
+- Executed on branch `feature/chameleon-swt-integration` with subagent-driven implementation, per-task spec review, and per-task code-quality review.
+- The focused verifier uses the repo-local SQLite dependency pattern and covers helper math, schema, deploy repair, flow wiring, UI contract, bundled DBs, and live Chameleon field samples.
+- Live deploy repair now verifies the Chameleon columns after applying idempotent `ALTER TABLE` statements. It does not overwrite `/data/db/farming.db`.
+- All six seed DBs listed by `scripts/verify-sync-flow.js` were patched, including the `bcm2708` and `bcm2709` full images.
+- Chameleon config is local-edge configuration in this iteration. The local API updates `devices.updated_at`, but does not increment sync metadata or add OSI Server control-plane fields.
+- `GET /api/devices` uses canonical uppercase 16-hex DevEUI filtering and a deterministic latest-Chameleon anti-join with timestamp plus `id` tie-break.
+- `GET /api/devices` carries the intermediate device list on `msg.devices_to_format`; request-scoped rows must not use flow context across the async SQLite query.
+- When no valid DevEUIs exist in the latest-data query, the function emits a no-row SQL statement instead of returning an incomplete message.
+- Chameleon raw readings continue to be inserted even when `chameleon_enabled=0`; derived `swt_1/2/3` stay null unless Chameleon SWT is enabled.
+- Dendrometer and Chameleon are independent layers on MOD3. Chameleon no longer bypasses dendrometer derivation or dendrometer reading insertion.
+- The GUI treats workbook coefficients as placeholders until explicitly restored or saved. Blank saved values remain blank in the settings form.
+- The LSN50 card renders a dedicated Chameleon SWT section only when `chameleon_enabled=1`, suppresses invalid samples on I2C missing/timeout, and removes the old generic ADC card when dendrometer is disabled.
+
 ## File Structure
 
 - Create `conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-chameleon-helper/package.json`: local Node-RED helper package manifest.
@@ -49,7 +64,7 @@
 **Files:**
 - Create: `scripts/verify-lsn50-chameleon-swt.js`
 
-- [ ] **Step 1: Write the failing verifier**
+- [x] **Step 1: Write the failing verifier**
 
 Create `scripts/verify-lsn50-chameleon-swt.js`:
 
@@ -218,7 +233,7 @@ function tableColumns(dbPath, tableName) {
 });
 ```
 
-- [ ] **Step 2: Run the verifier to confirm it fails**
+- [x] **Step 2: Run the verifier to confirm it fails**
 
 Run:
 
@@ -228,7 +243,7 @@ node scripts/verify-lsn50-chameleon-swt.js
 
 Expected: FAIL because `osi-chameleon-helper/index.js` does not exist.
 
-- [ ] **Step 3: Commit the failing verifier**
+- [x] **Step 3: Commit the failing verifier**
 
 ```bash
 git add scripts/verify-lsn50-chameleon-swt.js
@@ -243,7 +258,7 @@ git commit -m "test: add chameleon swt integration verifier"
 - Modify: `conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/package.json`
 - Modify: `conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/package-lock.json`
 
-- [ ] **Step 1: Add the helper package manifest**
+- [x] **Step 1: Add the helper package manifest**
 
 Create `conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-chameleon-helper/package.json`:
 
@@ -256,7 +271,7 @@ Create `conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-chame
 }
 ```
 
-- [ ] **Step 2: Add the helper implementation**
+- [x] **Step 2: Add the helper implementation**
 
 Create `conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-chameleon-helper/index.js`:
 
@@ -370,7 +385,7 @@ module.exports = {
 };
 ```
 
-- [ ] **Step 3: Register the helper dependency**
+- [x] **Step 3: Register the helper dependency**
 
 Modify `conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/package.json` so `dependencies` includes:
 
@@ -380,7 +395,7 @@ Modify `conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/package.j
 
 Keep the existing dependencies unchanged.
 
-- [ ] **Step 4: Update the lockfile**
+- [x] **Step 4: Update the lockfile**
 
 Run:
 
@@ -391,7 +406,7 @@ npm install --package-lock-only --ignore-scripts
 
 Expected: `package-lock.json` includes `osi-chameleon-helper`.
 
-- [ ] **Step 5: Run the focused verifier**
+- [x] **Step 5: Run the focused verifier**
 
 Run:
 
@@ -401,7 +416,7 @@ node scripts/verify-lsn50-chameleon-swt.js
 
 Expected: still FAIL, now on flow/schema assertions.
 
-- [ ] **Step 6: Commit the helper**
+- [x] **Step 6: Commit the helper**
 
 ```bash
 git add conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/package.json \
@@ -417,7 +432,7 @@ git commit -m "feat: add chameleon swt calibration helper"
 - Modify: six bundled `farming.db` files listed in Task 1
 - Modify: `deploy.sh`
 
-- [ ] **Step 1: Add sync-init schema migrations**
+- [x] **Step 1: Add sync-init schema migrations**
 
 In `sync-init-fn`, add these statements next to the existing `devices` and `device_data` column migrations:
 
@@ -441,7 +456,7 @@ In `sync-init-fn`, add these statements next to the existing `devices` and `devi
 "ALTER TABLE device_data ADD COLUMN swt_3 REAL",
 ```
 
-- [ ] **Step 2: Preserve Chameleon columns in any devices table rebuild**
+- [x] **Step 2: Preserve Chameleon columns in any devices table rebuild**
 
 In the `sync-init-fn` `CREATE TABLE devices_new` statement, add:
 
@@ -479,7 +494,7 @@ chameleon_swt3_b,
 chameleon_swt3_c
 ```
 
-- [ ] **Step 3: Patch all bundled seed DB files**
+- [x] **Step 3: Patch all bundled seed DB files**
 
 Run this one-off script from the repo root:
 
@@ -540,7 +555,7 @@ NODE
 
 Expected: each seed DB prints one line per file, for example `patched database/farming.db`, and no integrity error.
 
-- [ ] **Step 4: Add live deploy schema repair and helper deployment**
+- [x] **Step 4: Add live deploy schema repair and helper deployment**
 
 In `deploy.sh`, add `ensure_chameleon_schema()` after `ensure_dendro_schema()`:
 
@@ -632,7 +647,7 @@ fetch_required "osi-chameleon-helper index.js" \
     "/srv/node-red/osi-chameleon-helper/index.js"
 ```
 
-- [ ] **Step 5: Run schema verification**
+- [x] **Step 5: Run schema verification**
 
 Run:
 
@@ -643,7 +658,7 @@ node scripts/verify-sync-flow.js
 
 Expected: `verify-lsn50-chameleon-swt.js` still FAILS on flow/API assertions; `verify-sync-flow.js` may still FAIL until Task 5 updates old Chameleon expectations.
 
-- [ ] **Step 6: Commit schema and deploy changes**
+- [x] **Step 6: Commit schema and deploy changes**
 
 ```bash
 git add conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/flows.json \
@@ -664,7 +679,7 @@ git commit -m "feat: add chameleon swt schema"
 - Modify: `scripts/verify-lsn50-chameleon-persistence.js`
 - Modify: `scripts/verify-sync-flow.js`
 
-- [ ] **Step 1: Load Chameleon config in the LSN50 config query**
+- [x] **Step 1: Load Chameleon config in the LSN50 config query**
 
 Replace `lsn50-config-query-fn` query with:
 
@@ -689,7 +704,7 @@ msg.topic = [
 return msg;
 ```
 
-- [ ] **Step 2: Import `osi-chameleon-helper` in `lsn50-apply-config`**
+- [x] **Step 2: Import `osi-chameleon-helper` in `lsn50-apply-config`**
 
 Add this entry to the node's `libs` array:
 
@@ -699,7 +714,7 @@ Add this entry to the node's `libs` array:
 
 Keep the existing `osiDb` and `osi-dendro-helper` libs.
 
-- [ ] **Step 3: Replace the Chameleon bypass branch with independent derivation**
+- [x] **Step 3: Replace the Chameleon bypass branch with independent derivation**
 
 Remove the entire `} else if (d.isChameleon === true) {` branch that clears dendrometer state. In the non-MOD9 branch, run Chameleon derivation before the existing `if (!tempEnabled)` and `if (!dendroEnabled)` blocks:
 
@@ -741,7 +756,7 @@ Remove the entire `} else if (d.isChameleon === true) {` branch that clears dend
 
 Keep the existing dendrometer block after this code. This lets `dendro_enabled=1` compute dendrometer values from `adcV/adcCh1V` on the same Chameleon MOD3 uplink.
 
-- [ ] **Step 4: Update Chameleon node status without bypassing dendrometer**
+- [x] **Step 4: Update Chameleon node status without bypassing dendrometer**
 
 Inside the same non-MOD9 branch, after Chameleon derivation and after dendrometer derivation, set status with both layers:
 
@@ -760,7 +775,7 @@ Inside the same non-MOD9 branch, after Chameleon derivation and after dendromete
 
 If the existing dendrometer block already calls `node.status`, place this status block after it so Chameleon status is visible on Chameleon frames.
 
-- [ ] **Step 5: Store SWT values in `device_data`**
+- [x] **Step 5: Store SWT values in `device_data`**
 
 In `lsn50-sql-fn`, add `swt_1, swt_2, swt_3` to the non-MOD9 `INSERT INTO device_data` column list immediately after `adc_ch1v`, and add these values in the same position:
 
@@ -780,7 +795,7 @@ dendro_saturated, dendro_saturation_side,
 lsn50_mode_code, lsn50_mode_label, lsn50_mode_observed_at, recorded_at
 ```
 
-- [ ] **Step 6: Allow Chameleon frames into dendrometer persistence when dendro is enabled**
+- [x] **Step 6: Allow Chameleon frames into dendrometer persistence when dendro is enabled**
 
 Change `dendro-readings-insert-fn` first guard from:
 
@@ -796,7 +811,7 @@ if (!d || d.detectedMode === 9) return null;
 
 The next guard already requires `d.dendroValid` and `d.positionMm`, so Chameleon frames with `dendro_enabled=0` still skip dendrometer persistence.
 
-- [ ] **Step 7: Update verifiers for coexistence**
+- [x] **Step 7: Update verifiers for coexistence**
 
 In `scripts/verify-lsn50-chameleon-persistence.js`, replace assertions that require a dedicated Chameleon branch and Chameleon dendrometer skip with:
 
@@ -810,7 +825,7 @@ assert(!dendroInsert.includes('d.isChameleon === true'), 'dendrometer insert mus
 
 In `scripts/verify-sync-flow.js`, update the corresponding old assertions near the Chameleon section to the same expectations.
 
-- [ ] **Step 8: Run backend verifiers**
+- [x] **Step 8: Run backend verifiers**
 
 Run:
 
@@ -823,7 +838,7 @@ node scripts/verify-sync-flow.js
 
 Expected: the Chameleon SWT verifier still FAILS until API/GET devices/history/scheduler changes land in Task 5. Codec and persistence should PASS.
 
-- [ ] **Step 9: Commit backend derivation**
+- [x] **Step 9: Commit backend derivation**
 
 ```bash
 git add conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/flows.json \
@@ -838,7 +853,7 @@ git commit -m "feat: derive chameleon swt from lsn50 uplinks"
 - Modify: `conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/flows.json`
 - Modify: `scripts/verify-sync-flow.js`
 
-- [ ] **Step 1: Return Chameleon config and latest values from GET `/api/devices`**
+- [x] **Step 1: Return Chameleon config and latest values from GET `/api/devices`**
 
 In `format-devices`, select these `device_data` columns:
 
@@ -854,37 +869,43 @@ Add a latest Chameleon join to the query:
 LEFT JOIN (
   SELECT cr.*
   FROM chameleon_readings cr
-  INNER JOIN (
-    SELECT deveui, MAX(recorded_at) AS max_time
-    FROM chameleon_readings
-    WHERE deveui IN (${deveuiList})
-    GROUP BY deveui
-  ) latest_chameleon
-    ON cr.deveui = latest_chameleon.deveui
-   AND cr.recorded_at = latest_chameleon.max_time
-) cr ON cr.deveui = dd.deveui
+  WHERE cr.recorded_at IS NOT NULL
+    AND cr.deveui IN (${deveuiList})
+    AND NOT EXISTS (
+      SELECT 1
+      FROM chameleon_readings newer
+      WHERE newer.deveui = cr.deveui
+        AND newer.recorded_at IS NOT NULL
+        AND (
+          newer.recorded_at > cr.recorded_at
+          OR (newer.recorded_at = cr.recorded_at AND newer.id > cr.id)
+        )
+    )
+) ch ON ch.deveui = dd.deveui
 ```
 
 Select these latest Chameleon columns:
 
 ```js
-'  cr.payload_version AS chameleon_payload_version,',
-'  cr.status_flags AS chameleon_status_flags,',
-'  cr.i2c_missing AS chameleon_i2c_missing,',
-'  cr.timeout AS chameleon_timeout,',
-'  cr.temp_fault AS chameleon_temp_fault,',
-'  cr.id_fault AS chameleon_id_fault,',
-'  cr.ch1_open AS chameleon_ch1_open,',
-'  cr.ch2_open AS chameleon_ch2_open,',
-'  cr.ch3_open AS chameleon_ch3_open,',
-'  cr.temp_c AS chameleon_temp_c,',
-'  cr.r1_ohm_comp AS chameleon_r1_ohm_comp,',
-'  cr.r2_ohm_comp AS chameleon_r2_ohm_comp,',
-'  cr.r3_ohm_comp AS chameleon_r3_ohm_comp,',
-'  cr.r1_ohm_raw AS chameleon_r1_ohm_raw,',
-'  cr.r2_ohm_raw AS chameleon_r2_ohm_raw,',
-'  cr.r3_ohm_raw AS chameleon_r3_ohm_raw,',
-'  cr.array_id AS chameleon_array_id,',
+'  ch.id AS chameleon_reading_id,',
+'  ch.payload_b64 AS chameleon_payload_b64,',
+'  ch.payload_version AS chameleon_payload_version,',
+'  ch.status_flags AS chameleon_status_flags,',
+'  ch.i2c_missing AS chameleon_i2c_missing,',
+'  ch.timeout AS chameleon_timeout,',
+'  ch.temp_fault AS chameleon_temp_fault,',
+'  ch.id_fault AS chameleon_id_fault,',
+'  ch.ch1_open AS chameleon_ch1_open,',
+'  ch.ch2_open AS chameleon_ch2_open,',
+'  ch.ch3_open AS chameleon_ch3_open,',
+'  ch.temp_c AS chameleon_temp_c,',
+'  ch.r1_ohm_comp AS chameleon_r1_ohm_comp,',
+'  ch.r2_ohm_comp AS chameleon_r2_ohm_comp,',
+'  ch.r3_ohm_comp AS chameleon_r3_ohm_comp,',
+'  ch.r1_ohm_raw AS chameleon_r1_ohm_raw,',
+'  ch.r2_ohm_raw AS chameleon_r2_ohm_raw,',
+'  ch.r3_ohm_raw AS chameleon_r3_ohm_raw,',
+'  ch.array_id AS chameleon_array_id,',
 ```
 
 In `merge-device-data`, copy the selected values into `latest_data` with the same camel/snake style already used by other fields:
@@ -930,7 +951,7 @@ chameleon_swt3_b: d.chameleon_swt3_b ?? null,
 chameleon_swt3_c: d.chameleon_swt3_c ?? null,
 ```
 
-- [ ] **Step 2: Add Chameleon config endpoints**
+- [x] **Step 2: Add Chameleon config endpoints**
 
 Add these HTTP routes near the dendrometer config routes:
 
@@ -1100,7 +1121,7 @@ try {
 }
 ```
 
-- [ ] **Step 3: Allow SWT history fields**
+- [x] **Step 3: Allow SWT history fields**
 
 In `sensor-history-fn`, add these entries to `ALLOWED_FIELDS`:
 
@@ -1108,7 +1129,7 @@ In `sensor-history-fn`, add these entries to `ALLOWED_FIELDS`:
 'swt_1', 'swt_2', 'swt_3'
 ```
 
-- [ ] **Step 4: Include Chameleon-enabled LSN50 devices in scheduler SWT query**
+- [x] **Step 4: Include Chameleon-enabled LSN50 devices in scheduler SWT query**
 
 In `d0b2b1c1a937e16d` (`Build mean query (last hour, all datapoints)`), replace the SWT expression block with:
 
@@ -1130,7 +1151,7 @@ AND (
 )
 ```
 
-- [ ] **Step 5: Allow modern SWT trigger metrics in schedule validation**
+- [x] **Step 5: Allow modern SWT trigger metrics in schedule validation**
 
 In `Verify Zone Ownership`, replace:
 
@@ -1144,7 +1165,7 @@ with:
 const allowed = ['SWT_1', 'SWT_2', 'SWT_3', 'SWT_AVG', 'SWT_WM1', 'SWT_WM2', 'SWT_WM3', 'DENDRO'];
 ```
 
-- [ ] **Step 6: Update sync-flow verifier expectations**
+- [x] **Step 6: Update sync-flow verifier expectations**
 
 Add assertions to `scripts/verify-sync-flow.js`:
 
@@ -1158,7 +1179,7 @@ expectIncludesById('sensor-history-fn', "'swt_3'", 'allows SWT3 history');
 expectIncludesById('d0b2b1c1a937e16d', "ds.type_id = 'DRAGINO_LSN50' AND COALESCE(ds.chameleon_enabled,0) = 1", 'includes Chameleon-enabled LSN50 devices in SWT schedules');
 ```
 
-- [ ] **Step 7: Run backend verifiers**
+- [x] **Step 7: Run backend verifiers**
 
 Run:
 
@@ -1171,7 +1192,7 @@ node scripts/verify-sync-flow.js
 
 Expected: all four PASS.
 
-- [ ] **Step 8: Commit local API and scheduler changes**
+- [x] **Step 8: Commit local API and scheduler changes**
 
 ```bash
 git add conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/flows.json \
@@ -1186,7 +1207,7 @@ git commit -m "feat: expose chameleon swt in edge api"
 - Modify: `web/react-gui/src/services/api.ts`
 - Modify: `scripts/verify-sync-flow.js`
 
-- [ ] **Step 1: Extend Device types**
+- [x] **Step 1: Extend Device types**
 
 Add to `Device.latest_data`:
 
@@ -1231,7 +1252,7 @@ chameleon_swt3_b?: number | null;
 chameleon_swt3_c?: number | null;
 ```
 
-- [ ] **Step 2: Add API payload type**
+- [x] **Step 2: Add API payload type**
 
 Add to `web/react-gui/src/services/api.ts` above `lsn50API`:
 
@@ -1252,7 +1273,7 @@ export interface ChameleonConfigPayload {
 }
 ```
 
-- [ ] **Step 3: Add Chameleon client methods**
+- [x] **Step 3: Add Chameleon client methods**
 
 Add methods to `lsn50API`:
 
@@ -1265,7 +1286,7 @@ setChameleonConfig: async (deveui: string, payload: ChameleonConfigPayload): Pro
 },
 ```
 
-- [ ] **Step 4: Update sync verifier UI/API assertions**
+- [x] **Step 4: Update sync verifier UI/API assertions**
 
 Add to `scripts/verify-sync-flow.js`:
 
@@ -1276,7 +1297,7 @@ expectFileIncludes('api.ts', reactGuiApiSource, 'setChameleonEnabled: async', 'a
 expectFileIncludes('api.ts', reactGuiApiSource, 'setChameleonConfig: async', 'adds Chameleon config API helper');
 ```
 
-- [ ] **Step 5: Run TypeScript and flow verification**
+- [x] **Step 5: Run TypeScript and flow verification**
 
 Run:
 
@@ -1287,7 +1308,7 @@ cd web/react-gui && npm run test:unit
 
 Expected: `verify-sync-flow.js` may still FAIL until GUI components land in Task 7. TypeScript unit tests PASS.
 
-- [ ] **Step 6: Commit types and API client**
+- [x] **Step 6: Commit types and API client**
 
 ```bash
 git add web/react-gui/src/types/farming.ts web/react-gui/src/services/api.ts scripts/verify-sync-flow.js
@@ -1301,7 +1322,7 @@ git commit -m "feat: add chameleon swt api client"
 - Modify: `web/react-gui/src/components/farming/DraginoSettingsModal.tsx`
 - Modify: `scripts/verify-sync-flow.js`
 
-- [ ] **Step 1: Create the Chameleon settings section**
+- [x] **Step 1: Create the Chameleon settings section**
 
 Create `web/react-gui/src/components/farming/DraginoChameleonSwtSection.tsx`:
 
@@ -1459,7 +1480,7 @@ export const DraginoChameleonSwtSection: React.FC<Props> = ({ device, onUpdate }
 };
 ```
 
-- [ ] **Step 2: Add Chameleon to the LSN50 settings modal**
+- [x] **Step 2: Add Chameleon to the LSN50 settings modal**
 
 In `DraginoSettingsModal.tsx`, import the section:
 
@@ -1524,7 +1545,7 @@ Render the dedicated section near the dendrometer calibration section:
 </SettingsSection>
 ```
 
-- [ ] **Step 3: Update verifier UI assertions**
+- [x] **Step 3: Update verifier UI assertions**
 
 Add to `scripts/verify-sync-flow.js`:
 
@@ -1536,7 +1557,7 @@ expectFileIncludes('DraginoChameleonSwtSection.tsx', draginoChameleonSource, 'Sa
 expectFileIncludes('DraginoChameleonSwtSection.tsx', draginoChameleonSource, 'Restore workbook defaults', 'offers workbook coefficient defaults');
 ```
 
-- [ ] **Step 4: Run GUI verification**
+- [x] **Step 4: Run GUI verification**
 
 Run:
 
@@ -1548,7 +1569,7 @@ cd web/react-gui && npm run build
 
 Expected: `verify-sync-flow.js` may still FAIL until card display lands in Task 8. Unit tests and build PASS.
 
-- [ ] **Step 5: Commit settings UI**
+- [x] **Step 5: Commit settings UI**
 
 ```bash
 git add web/react-gui/src/components/farming/DraginoChameleonSwtSection.tsx \
@@ -1563,7 +1584,7 @@ git commit -m "feat: add chameleon calibration settings"
 - Modify: `web/react-gui/src/components/farming/DraginoTempCard.tsx`
 - Modify: `scripts/verify-sync-flow.js`
 
-- [ ] **Step 1: Add Chameleon display helpers**
+- [x] **Step 1: Add Chameleon display helpers**
 
 Add near existing format helpers:
 
@@ -1580,7 +1601,7 @@ function formatKpa(value: number | null | undefined): string {
 }
 ```
 
-- [ ] **Step 2: Compute Chameleon card state**
+- [x] **Step 2: Compute Chameleon card state**
 
 Inside `DraginoTempCard`, add:
 
@@ -1594,7 +1615,7 @@ const chameleonChannels = [
 ] as const;
 ```
 
-- [ ] **Step 3: Render Chameleon SWT cards**
+- [x] **Step 3: Render Chameleon SWT cards**
 
 Place this block after battery and before rain/flow cards:
 
@@ -1641,7 +1662,7 @@ Place this block after battery and before rain/flow cards:
 )}
 ```
 
-- [ ] **Step 4: Hide generic ADC card when dendrometer is disabled**
+- [x] **Step 4: Hide generic ADC card when dendrometer is disabled**
 
 Delete this block:
 
@@ -1662,7 +1683,7 @@ Delete this block:
 
 Do not add a replacement ADC card. Dendrometer-specific ADC diagnostics remain in the dendrometer monitor/calibration UI.
 
-- [ ] **Step 5: Add verifier assertions**
+- [x] **Step 5: Add verifier assertions**
 
 Add to `scripts/verify-sync-flow.js`:
 
@@ -1672,7 +1693,7 @@ expectFileIncludes('DraginoTempCard.tsx', draginoTempCardSource, "field: 'swt_3'
 expectFileExcludes('DraginoTempCard.tsx', draginoTempCardSource, 'ADC INPUT', 'removes generic ADC card when dendrometer is disabled');
 ```
 
-- [ ] **Step 6: Run GUI verification**
+- [x] **Step 6: Run GUI verification**
 
 Run:
 
@@ -1684,7 +1705,7 @@ cd web/react-gui && npm run build
 
 Expected: all PASS.
 
-- [ ] **Step 7: Commit card display**
+- [x] **Step 7: Commit card display**
 
 ```bash
 git add web/react-gui/src/components/farming/DraginoTempCard.tsx scripts/verify-sync-flow.js
@@ -1696,7 +1717,7 @@ git commit -m "feat: show chameleon swt on lsn50 card"
 **Files:**
 - No planned source edits. A verification failure should produce a narrow patch in the exact file named by the failing assertion.
 
-- [ ] **Step 1: Run backend verifiers**
+- [x] **Step 1: Run backend verifiers**
 
 ```bash
 node scripts/verify-lsn50-chameleon-codec.js
@@ -1716,7 +1737,7 @@ verify-sync-flow.js exits with status 0
 
 `verify-sync-flow.js` should exit `0`.
 
-- [ ] **Step 2: Run GUI checks**
+- [x] **Step 2: Run GUI checks**
 
 ```bash
 cd web/react-gui
@@ -1726,14 +1747,15 @@ npm run build
 
 Expected: tests and production build PASS.
 
-- [ ] **Step 3: Inspect git diff for regression risks**
+- [x] **Step 3: Inspect git diff for regression risks**
 
 Run:
 
 ```bash
-git diff --stat HEAD~8..HEAD
-git diff HEAD~8..HEAD -- conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/flows.json | sed -n '1,260p'
-git diff HEAD~8..HEAD -- web/react-gui/src/components/farming/DraginoTempCard.tsx web/react-gui/src/components/farming/DraginoSettingsModal.tsx | sed -n '1,260p'
+BASE=$(git merge-base origin/main HEAD)
+git diff --stat "$BASE"..HEAD
+git diff "$BASE"..HEAD -- conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/flows.json | sed -n '1,260p'
+git diff "$BASE"..HEAD -- web/react-gui/src/components/farming/DraginoTempCard.tsx web/react-gui/src/components/farming/DraginoSettingsModal.tsx | sed -n '1,260p'
 ```
 
 Review must confirm:
@@ -1745,7 +1767,7 @@ Review must confirm:
 - The LSN50 card has no generic ADC display when dendrometer is disabled.
 - The settings modal lets dendrometer and Chameleon toggles both be on.
 
-- [ ] **Step 4: Run a local smoke test with a known Chameleon sample**
+- [x] **Step 4: Run a local smoke test with a known Chameleon sample**
 
 Use the live sample values from the field test:
 
@@ -1777,7 +1799,7 @@ swt2Kpa: 5.56
 swt3Kpa: 6.02
 ```
 
-- [ ] **Step 5: Commit any verification fixes**
+- [x] **Step 5: Commit any verification fixes**
 
 If no fixes are needed:
 
@@ -1803,6 +1825,19 @@ git add conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/flows.json \
         deploy.sh
 git commit -m "fix: complete chameleon swt integration verification"
 ```
+
+## Verification Evidence
+
+Fresh verification run on `2026-05-02` after Task 8 and the invalid-sample regression test:
+
+- `node scripts/verify-lsn50-chameleon-codec.js` -> `LSN50 Chameleon codec checks passed`
+- `node scripts/verify-lsn50-chameleon-persistence.js` -> `LSN50 Chameleon persistence checks passed`
+- `node scripts/verify-lsn50-chameleon-swt.js` -> `LSN50 Chameleon SWT checks passed`
+- `node scripts/verify-sync-flow.js` -> `Sync flow verification passed`
+- `cd web/react-gui && npm run test:unit` -> `23` tests passed, `0` failed
+- `cd web/react-gui && npm run build` -> production build completed; existing browser data freshness and chunk-size warnings remain
+- Chameleon live-sample smoke test returned `{ swt1Kpa: 5.85, swt2Kpa: 5.56, swt3Kpa: 6.02 }`
+- `git diff --check` -> no whitespace errors
 
 ## Self-Review Checklist
 

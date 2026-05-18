@@ -1,6 +1,7 @@
 import React from 'react';
 import { useTranslation } from 'react-i18next';
 import type { Device, LocalEnvironment } from '../../../types/farming';
+import { collectDeviceSwtValues } from '../../../utils/swt';
 
 interface Props {
   local: LocalEnvironment;
@@ -16,12 +17,9 @@ function formatValue(value: number | null | undefined, unit: string, digits = 1)
 
 export const SoilTab: React.FC<Props> = ({ local, devices }) => {
   const { t } = useTranslation('devices');
-  const kiwiReadings = devices.flatMap((device) => {
-    const data = device.latest_data;
-    return [data?.swt_wm1, data?.swt_wm2].filter((value): value is number => value != null && Number.isFinite(value));
-  });
-  const representativeSwt = kiwiReadings.length
-    ? kiwiReadings.reduce((sum, value) => sum + value, 0) / kiwiReadings.length
+  const swtReadings = collectDeviceSwtValues(devices);
+  const representativeSwt = swtReadings.length
+    ? swtReadings.reduce((sum, value) => sum + value, 0) / swtReadings.length
     : null;
   const soilMoistureMetric = local.metrics.find((metric) => metric.key === 'soil_moisture_pct');
   const soilTemperatureMetric = local.metrics.find((metric) => metric.key === 'soil_temperature_c');
