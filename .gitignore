@@ -4,6 +4,9 @@
 # Deploy build artifacts
 /react_gui.tar.gz
 
+# Local scratch / golden images (large, not committed)
+/tmp/
+
 # Hidden files
 /.*
 
