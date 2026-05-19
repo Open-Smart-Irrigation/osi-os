@@ -30,6 +30,10 @@ set network.wwan.netmask='255.255.255.0'
 commit network
 
 delete wireless.radio0.disabled
+set wireless.radio0.country='CH'
+set wireless.radio0.band='2g'
+set wireless.radio0.channel='6'
+set wireless.radio0.htmode='HT20'
 set wireless.default_radio0=wifi-iface
 set wireless.default_radio0.device='radio0'
 set wireless.default_radio0.network='wwan'

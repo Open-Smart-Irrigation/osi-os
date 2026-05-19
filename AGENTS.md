@@ -74,6 +74,7 @@ Broker: `wss://server.opensmartirrigation.org/mqtt`
 - **Removed:** `PUT /api/devices/:deveui/chameleon-config` endpoint and the 9 per-device coefficient columns (`chameleon_swt[123]_[abc]`). Depth columns (`chameleon_swt[123]_depth_cm`) stay.
 - Per-device calibration values entered by hand are discarded in the 2026-05-19 migration. Operators verify post-upgrade that each live array_id has a row in `chameleon_calibrations`.
 - **Release script:** `OSI_ADMIN_TOKEN=… node scripts/refresh-chameleon-calibrations.js` before cutting a release.
+- Apply the generated release seed with `node scripts/apply-chameleon-calibration-seed.js`; it updates every bundled DB copy and fails on an empty calibration snapshot.
 
 ---
 
@@ -100,6 +101,10 @@ Broker: `wss://server.opensmartirrigation.org/mqtt`
 | React source | `web/react-gui/src/` |
 | Node-RED settings | `feeds/chirpstack-openwrt-feed/apps/node-red/files/settings.js` |
 | Sync verifier | `scripts/verify-sync-flow.js` |
+
+Full Raspberry Pi 5 image workflow: [docs/build/rpi5-full-osi-image.md](docs/build/rpi5-full-osi-image.md). Current Pi 5 release images use `CONFIG_TARGET_ROOTFS_PARTSIZE=14336` so the writable overlay fits 16GB-class SD cards. The workflow assumes concentratord is manually configured/enabled after flashing. While Chameleon calibration work is active, a full release image is gated on a non-empty bundled calibration snapshot; development images must call out when that gate is intentionally skipped.
+
+**Profile parity invariant:** `bcm2712 / DEVICE_rpi-5` is the canonical source-of-truth for all OSI runtime payload files (flows, codecs, DB, bootstrap, helpers). `bcm2709 / DEVICE_rpi-2` mirrors that payload byte-for-byte; `scripts/verify-profile-parity.js` enforces this and is chained from `scripts/verify-sync-flow.js`. Any change to a file under `conf/full_raspberrypi_bcm27xx_bcm2712/files/` must also be propagated to `conf/full_raspberrypi_bcm27xx_bcm2709/files/` — the parity check will fail CI otherwise.
 
 ---
 

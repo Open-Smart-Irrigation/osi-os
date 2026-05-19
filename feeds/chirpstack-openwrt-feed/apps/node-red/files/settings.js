@@ -37,7 +37,7 @@ loadChirpstackEnvFile(chirpstackEnvPath);
 
 module.exports = {
     flowFile: "flows.json",
-    userDir: "/var/lib/node-red/.node-red",
+    userDir: "/srv/node-red",
     uiPort: process.env.PORT || 1880,
 
     // Serve React GUI at /gui path

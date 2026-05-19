@@ -38,20 +38,16 @@ grep -r "0\.6\.5" web/react-gui/src/ conf/ README.md CHANGELOG.md
 | `README.md` | `**v<NEW> Alpha**` at the top |
 | `CHANGELOG.md` | New `## [<NEW>] — YYYY-MM-DD` section (see Step 2) |
 
-### Step 1a — Refresh Chameleon calibrations (if applicable)
+### Step 1a — Refresh Chameleon calibrations
 
-Run before cutting a release to bundle known calibrations into the firmware seed DB:
+Run before cutting a full image release to bundle known calibrations into the firmware seed DB. If the Chameleon calibration implementation is still in progress, stop here and do not build a release image yet.
 
 ```bash
 OSI_ADMIN_TOKEN=<token> node scripts/refresh-chameleon-calibrations.js
+node scripts/apply-chameleon-calibration-seed.js
 ```
 
-Review the diff in `database/seeds/chameleon-calibrations.sql` and commit it as part of the release PR. Apply the seed to both canonical DBs:
-
-```bash
-sqlite3 conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/db/farming.db < database/seeds/chameleon-calibrations.sql
-sqlite3 conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/db/farming.db < database/seeds/chameleon-calibrations.sql
-```
+Review the diff in `database/seeds/chameleon-calibrations.sql` and all seeded DB copies, then commit them as part of the release PR. The apply script updates `database/farming.db`, `web/react-gui/farming.db`, and both Raspberry Pi profile DBs. It fails if the generated seed has zero rows; a full release image must not ship with an empty bundled calibration snapshot. A development image may skip this gate only when that decision is explicit in the build notes.
 
 ---
 

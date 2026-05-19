@@ -73,8 +73,8 @@ define Package/node-red/install
 	$(INSTALL_DATA) ./files/node-red.nginx $(1)/etc/nginx/conf.d/node-red.locations
 
 	# Install Node-RED settings and flows
-	$(INSTALL_DIR) $(1)/var/lib/node-red/.node-red
-	$(INSTALL_DATA) ./files/settings.js $(1)/var/lib/node-red/.node-red/settings.js
+	$(INSTALL_DIR) $(1)/srv/node-red
+	$(INSTALL_DATA) ./files/settings.js $(1)/srv/node-red/settings.js
 
 	# Install React GUI static files
 	$(INSTALL_DIR) $(1)/usr/lib/node-red/gui
@@ -87,13 +87,13 @@ define Package/node-red/postinst
 
 # Create node-red user and group if they do not exist
 if ! grep -q "^node-red:" /etc/passwd; then
-    echo "node-red:x:1000:1000:Node-RED:/var/lib/node-red:/bin/false" >> /etc/passwd
+    echo "node-red:x:1000:1000:Node-RED:/srv/node-red:/bin/false" >> /etc/passwd
     echo "node-red:x:1000:" >> /etc/group
 fi
 
 # Create data directory
-mkdir -p /var/lib/node-red/.node-red
-chown -R node-red:node-red /var/lib/node-red
+mkdir -p /srv/node-red
+chown -R node-red:node-red /srv/node-red
 
 exit 0
 endef
