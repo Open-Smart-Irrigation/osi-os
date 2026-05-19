@@ -1,0 +1,39 @@
+#!/bin/sh
+
+[ -f /usr/libexec/osi-gateway-identity.sh ] && . /usr/libexec/osi-gateway-identity.sh
+
+gateway_identity_resolve || true
+gateway_identity_persist || true
+
+DEVICE_EUI="${GATEWAY_IDENTITY_DEVICE_EUI:-}"
+DEVICE_EUI_SOURCE="${GATEWAY_IDENTITY_DEVICE_EUI_SOURCE:-persisted}"
+DEVICE_EUI_CONFIDENCE="${GATEWAY_IDENTITY_DEVICE_EUI_CONFIDENCE:-provisional}"
+DEVICE_EUI_LAST_VERIFIED_AT="${GATEWAY_IDENTITY_DEVICE_EUI_LAST_VERIFIED_AT:-}"
+
+# CGOS 4.10.1 uci cannot create a new package file from scratch via 'uci set'.
+# Pre-create the file so that the batch commands below can populate it.
+[ -f /etc/config/osi-server ] || touch /etc/config/osi-server
+
+uci -q batch <<EOF
+set osi-server.cloud=osi_server
+set osi-server.cloud.enabled=0
+set osi-server.cloud.device_eui=$DEVICE_EUI
+set osi-server.cloud.device_eui_source=$DEVICE_EUI_SOURCE
+set osi-server.cloud.device_eui_confidence=$DEVICE_EUI_CONFIDENCE
+set osi-server.cloud.device_eui_last_verified_at=$DEVICE_EUI_LAST_VERIFIED_AT
+set osi-server.cloud.link_gateway_device_eui=
+set osi-server.cloud.device_type=GATEWAY
+set osi-server.cloud.firmware_version=0.6.5
+set osi-server.cloud.server_host=
+set osi-server.cloud.mqtt_password=
+set osi-server.cloud.allow_private_target=0
+set osi-server.cloud.openagri_weather_url=
+set osi-server.cloud.openagri_weather_username=
+set osi-server.cloud.openagri_weather_password=
+set osi-server.cloud.openagri_weather_bearer_token=
+set osi-server.cloud.openagri_weather_radius_km=10
+set osi-server.cloud.openagri_weather_current_cache_minutes=30
+set osi-server.cloud.openagri_weather_forecast_cache_minutes=120
+commit osi-server
+EOF
+exit 0

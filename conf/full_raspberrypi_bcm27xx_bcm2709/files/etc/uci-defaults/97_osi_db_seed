@@ -1,0 +1,34 @@
+#!/bin/sh
+# Seed the OSI database on first boot.
+# Copies /usr/share/db/farming.db to /data/db/farming.db only when the
+# target is absent.  Does NOT overwrite an existing database.
+# Self-deletes after execution (uci-defaults convention).
+
+SEED_SRC="/usr/share/db/farming.db"
+DATA_DIR="/data/db"
+DATA_DB="$DATA_DIR/farming.db"
+
+if [ ! -f "$SEED_SRC" ]; then
+    logger -t osi-db-seed "seed source $SEED_SRC not found, skipping"
+    exit 0
+fi
+
+if [ -f "$DATA_DB" ]; then
+    logger -t osi-db-seed "$DATA_DB already exists, skipping seed"
+    exit 0
+fi
+
+# Refuse to seed if SQLite sidecar files exist (indicates a partially-written
+# or journal-active database that we must not clobber).
+for sidecar in "$DATA_DB-wal" "$DATA_DB-shm" "$DATA_DB-journal"; do
+    if [ -f "$sidecar" ]; then
+        logger -t osi-db-seed "sidecar $sidecar exists, refusing to seed"
+        exit 1
+    fi
+done
+
+mkdir -p "$DATA_DIR" || { logger -t osi-db-seed "cannot create $DATA_DIR"; exit 1; }
+cp "$SEED_SRC" "$DATA_DB" || { logger -t osi-db-seed "copy failed"; exit 1; }
+
+logger -t osi-db-seed "seeded $DATA_DB from $SEED_SRC"
+exit 0
