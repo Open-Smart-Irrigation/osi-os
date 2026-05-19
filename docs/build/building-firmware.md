@@ -37,7 +37,7 @@ All subsequent build commands run inside this Docker container.
 # Raspberry Pi 5 (primary / recommended)
 make switch-env ENV=full_raspberrypi_bcm27xx_bcm2712
 
-# Raspberry Pi 2/3
+# Raspberry Pi 4 / 400 / 3 / 2
 make switch-env ENV=full_raspberrypi_bcm27xx_bcm2709
 
 # Raspberry Pi 1/Zero
@@ -45,6 +45,15 @@ make switch-env ENV=full_raspberrypi_bcm27xx_bcm2708
 ```
 
 `switch-env` undoes any previously applied patches, updates OpenWrt symlinks, and applies the target's quilt patches.
+
+### Raspberry Pi 4 / 400 / 3 / 2 (universal 32-bit image)
+
+```bash
+make switch-env ENV=full_raspberrypi_bcm27xx_bcm2709
+cd openwrt && make -j$(nproc)
+```
+
+Produces an image at `openwrt/bin/targets/bcm27xx/bcm2709/` that boots on any Pi 2 / 3 / 4 / 400 via the bundled multi-DTB.
 
 ### 4. Update feeds
 
@@ -85,7 +94,7 @@ After a successful build, firmware images are in:
 | Target | Output directory |
 |---|---|
 | Raspberry Pi 5 | `openwrt/bin/targets/bcm27xx/bcm2712/` |
-| Raspberry Pi 2/3 | `openwrt/bin/targets/bcm27xx/bcm2709/` |
+| Raspberry Pi 4 / 400 / 3 / 2 | `openwrt/bin/targets/bcm27xx/bcm2709/` |
 | Raspberry Pi 1/Zero | `openwrt/bin/targets/bcm27xx/bcm2708/` |
 
 Look for files like:

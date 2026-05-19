@@ -90,6 +90,8 @@ Broker: `wss://server.opensmartirrigation.org/mqtt`
 | Node-RED settings | `feeds/chirpstack-openwrt-feed/apps/node-red/files/settings.js` |
 | Sync verifier | `scripts/verify-sync-flow.js` |
 
+**Profile parity invariant:** `bcm2712 / DEVICE_rpi-5` is the canonical source-of-truth for all OSI runtime payload files (flows, codecs, DB, bootstrap, helpers). `bcm2709 / DEVICE_rpi-2` mirrors that payload byte-for-byte; `scripts/verify-profile-parity.js` enforces this and is chained from `scripts/verify-sync-flow.js`. Any change to a file under `conf/full_raspberrypi_bcm27xx_bcm2712/files/` must also be propagated to `conf/full_raspberrypi_bcm27xx_bcm2709/files/` — the parity check will fail CI otherwise.
+
 ---
 
 ## Device catalog
