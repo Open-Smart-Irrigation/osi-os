@@ -3043,4 +3043,16 @@ Promise.all(pendingChecks).finally(() => {
   if (!process.exitCode) {
     console.log('Sync flow verification passed');
   }
+
+  // Profile parity (bcm2709 ↔ bcm2712)
+  const { spawnSync } = require('child_process');
+  const parityResult = spawnSync(
+    process.execPath,
+    [path.resolve(__dirname, 'verify-profile-parity.js')],
+    { stdio: 'inherit' }
+  );
+  if (parityResult.status !== 0) {
+    console.error('verify-profile-parity.js failed');
+    process.exitCode = parityResult.status || 1;
+  }
 });

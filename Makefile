@@ -1,4 +1,4 @@
-.PHONY: build clean init update devshell show-envs switch-env
+.PHONY: build clean init update devshell show-envs switch-env verify-profile-parity
 
 # Build the OpenWrt image.
 # Note: execute this within the devshell.
@@ -62,3 +62,7 @@ switch-env:
 # Clean the OpenWrt environment.
 clean:
 	rm -rf openwrt
+
+# Verify bcm2709 / bcm2712 profile parity.
+verify-profile-parity:
+	node scripts/verify-profile-parity.js
