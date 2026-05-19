@@ -1,66 +1,23 @@
 import React, { useEffect, useState } from 'react';
-import { lsn50API, type ChameleonConfigPayload } from '../../services/api';
+import { lsn50API } from '../../services/api';
 import type { Device } from '../../types/farming';
 
 type ChannelNumber = 1 | 2 | 3;
 
 type ChannelInput = {
   depthCm: string;
-  a: string;
-  b: string;
-  c: string;
 };
 
 type ChannelConfig = {
   number: ChannelNumber;
   label: string;
   depthKey: keyof Device;
-  coefficientKeys: {
-    a: keyof Device;
-    b: keyof Device;
-    c: keyof Device;
-  };
-  defaults: {
-    a: number;
-    b: number;
-    c: number;
-  };
 };
 
 const CHANNELS: ChannelConfig[] = [
-  {
-    number: 1,
-    label: 'SWT1',
-    depthKey: 'chameleon_swt1_depth_cm',
-    coefficientKeys: {
-      a: 'chameleon_swt1_a',
-      b: 'chameleon_swt1_b',
-      c: 'chameleon_swt1_c',
-    },
-    defaults: { a: 10.71, b: 0.13, c: 7.18 },
-  },
-  {
-    number: 2,
-    label: 'SWT2',
-    depthKey: 'chameleon_swt2_depth_cm',
-    coefficientKeys: {
-      a: 'chameleon_swt2_a',
-      b: 'chameleon_swt2_b',
-      c: 'chameleon_swt2_c',
-    },
-    defaults: { a: 10.40, b: 0.13, c: 7.31 },
-  },
-  {
-    number: 3,
-    label: 'SWT3',
-    depthKey: 'chameleon_swt3_depth_cm',
-    coefficientKeys: {
-      a: 'chameleon_swt3_a',
-      b: 'chameleon_swt3_b',
-      c: 'chameleon_swt3_c',
-    },
-    defaults: { a: 10.33, b: 0.12, c: 7.21 },
-  },
+  { number: 1, label: 'SWT1', depthKey: 'chameleon_swt1_depth_cm' },
+  { number: 2, label: 'SWT2', depthKey: 'chameleon_swt2_depth_cm' },
+  { number: 3, label: 'SWT3', depthKey: 'chameleon_swt3_depth_cm' },
 ];
 
 const FOCUS_VISIBLE_RING =
@@ -103,12 +60,66 @@ function buildInitialInputs(device: Device): Record<ChannelNumber, ChannelInput>
   return CHANNELS.reduce((acc, channel) => {
     acc[channel.number] = {
       depthCm: formatNumericInput(device[channel.depthKey]),
-      a: formatNumericInput(device[channel.coefficientKeys.a]),
-      b: formatNumericInput(device[channel.coefficientKeys.b]),
-      c: formatNumericInput(device[channel.coefficientKeys.c]),
     };
     return acc;
   }, {} as Record<ChannelNumber, ChannelInput>);
+}
+
+interface ChameleonHardwareInfoProps {
+  arrayId: string | null;
+  status: 'calibrated' | 'pending' | 'unknown' | null;
+  source: string | null;
+  onRefresh: () => void;
+  refreshing: boolean;
+}
+
+function ChameleonHardwareInfo({
+  arrayId,
+  status,
+  source,
+  onRefresh,
+  refreshing,
+}: ChameleonHardwareInfoProps) {
+  const shortId = arrayId ? arrayId.substring(2, 4) + arrayId.substring(14, 16) : null;
+  const badge =
+    status === 'calibrated'
+      ? { label: 'Calibrated' + (source ? ` via ${source}` : ''), color: 'var(--success)' }
+      : status === 'pending'
+        ? { label: 'Pending sync…', color: 'var(--warning)' }
+        : status === 'unknown'
+          ? { label: 'Calibration unavailable', color: 'var(--text-tertiary)' }
+          : { label: 'No reading yet', color: 'var(--text-tertiary)' };
+
+  return (
+    <div className="rounded-lg border border-[var(--border)] bg-[var(--card)] p-3">
+      <div className="flex items-center gap-2 text-xs">
+        {shortId && (
+          <span className="rounded bg-[var(--surface)] px-1.5 py-0.5 font-mono text-[var(--text-secondary)]">
+            {shortId}
+          </span>
+        )}
+        {arrayId && (
+          <span className="font-mono text-[var(--text-tertiary)]">{arrayId}</span>
+        )}
+      </div>
+      <div className="mt-2 flex items-center gap-2">
+        <span
+          className="inline-block rounded-full px-2 py-0.5 text-xs font-semibold"
+          style={{ backgroundColor: badge.color + '20', color: badge.color }}
+        >
+          {badge.label}
+        </span>
+        <button
+          type="button"
+          onClick={onRefresh}
+          disabled={refreshing || !arrayId}
+          className={`rounded-lg border border-[var(--border)] bg-[var(--surface)] px-2 py-1 text-xs font-semibold text-[var(--text)] transition-colors hover:bg-[var(--secondary-bg)] disabled:cursor-not-allowed disabled:opacity-60 ${FOCUS_VISIBLE_RING}`}
+        >
+          {refreshing ? 'Refreshing…' : 'Refresh calibration'}
+        </button>
+      </div>
+    </div>
+  );
 }
 
 interface DraginoChameleonSwtSectionProps {
@@ -124,6 +135,10 @@ export const DraginoChameleonSwtSection: React.FC<DraginoChameleonSwtSectionProp
   const [error, setError] = useState<string | null>(null);
   const [info, setInfo] = useState<string | null>(null);
   const [inputs, setInputs] = useState<Record<ChannelNumber, ChannelInput>>(() => buildInitialInputs(device));
+  const [refreshing, setRefreshing] = useState(false);
+  const [calibStatus, setCalibStatus] = useState<'calibrated' | 'pending' | 'unknown' | null>(null);
+  const [calibSource, setCalibSource] = useState<string | null>(null);
+  const [arrayId, setArrayId] = useState<string | null>(null);
 
   useEffect(() => {
     setInputs(buildInitialInputs(device));
@@ -134,16 +149,13 @@ export const DraginoChameleonSwtSection: React.FC<DraginoChameleonSwtSectionProp
     device.chameleon_swt1_depth_cm,
     device.chameleon_swt2_depth_cm,
     device.chameleon_swt3_depth_cm,
-    device.chameleon_swt1_a,
-    device.chameleon_swt1_b,
-    device.chameleon_swt1_c,
-    device.chameleon_swt2_a,
-    device.chameleon_swt2_b,
-    device.chameleon_swt2_c,
-    device.chameleon_swt3_a,
-    device.chameleon_swt3_b,
-    device.chameleon_swt3_c,
   ]);
+
+  useEffect(() => {
+    const latest = device.latest_data;
+    setCalibStatus(device.calibration_status ?? null);
+    setArrayId(latest?.chameleon_array_id ?? null);
+  }, [device.calibration_status, device.latest_data?.chameleon_array_id]);
 
   const updateInput = (channelNumber: ChannelNumber, field: keyof ChannelInput, value: string) => {
     setInputs((current) => ({
@@ -155,42 +167,16 @@ export const DraginoChameleonSwtSection: React.FC<DraginoChameleonSwtSectionProp
     }));
   };
 
-  const restoreWorkbookDefaults = () => {
-    setInputs((current) => {
-      const next = { ...current };
-      for (const channel of CHANNELS) {
-        next[channel.number] = {
-          ...next[channel.number],
-          a: String(channel.defaults.a),
-          b: String(channel.defaults.b),
-          c: String(channel.defaults.c),
-        };
-      }
-      return next;
-    });
-    setError(null);
-    setInfo('Workbook defaults restored in the form. Save calibration to apply them.');
-  };
-
-  const saveChameleonCalibration = async () => {
-    let payload: ChameleonConfigPayload;
+  const saveDepths = async () => {
+    let payload: { chameleonSwt1DepthCm?: number | null; chameleonSwt2DepthCm?: number | null; chameleonSwt3DepthCm?: number | null };
     try {
       payload = {
         chameleonSwt1DepthCm: parseOptionalNumericInput('SWT1 depth', inputs[1].depthCm, { positive: true, decimals: 2 }),
         chameleonSwt2DepthCm: parseOptionalNumericInput('SWT2 depth', inputs[2].depthCm, { positive: true, decimals: 2 }),
         chameleonSwt3DepthCm: parseOptionalNumericInput('SWT3 depth', inputs[3].depthCm, { positive: true, decimals: 2 }),
-        chameleonSwt1A: parseOptionalNumericInput('SWT1 coefficient a', inputs[1].a, { decimals: 6 }),
-        chameleonSwt1B: parseOptionalNumericInput('SWT1 coefficient b', inputs[1].b, { decimals: 6 }),
-        chameleonSwt1C: parseOptionalNumericInput('SWT1 coefficient c', inputs[1].c, { decimals: 6 }),
-        chameleonSwt2A: parseOptionalNumericInput('SWT2 coefficient a', inputs[2].a, { decimals: 6 }),
-        chameleonSwt2B: parseOptionalNumericInput('SWT2 coefficient b', inputs[2].b, { decimals: 6 }),
-        chameleonSwt2C: parseOptionalNumericInput('SWT2 coefficient c', inputs[2].c, { decimals: 6 }),
-        chameleonSwt3A: parseOptionalNumericInput('SWT3 coefficient a', inputs[3].a, { decimals: 6 }),
-        chameleonSwt3B: parseOptionalNumericInput('SWT3 coefficient b', inputs[3].b, { decimals: 6 }),
-        chameleonSwt3C: parseOptionalNumericInput('SWT3 coefficient c', inputs[3].c, { decimals: 6 }),
       };
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Invalid Chameleon calibration values');
+      setError(err instanceof Error ? err.message : 'Invalid depth values');
       setInfo(null);
       return;
     }
@@ -199,40 +185,56 @@ export const DraginoChameleonSwtSection: React.FC<DraginoChameleonSwtSectionProp
     setError(null);
     setInfo(null);
     try {
-      await lsn50API.setChameleonConfig(device.deveui, payload);
-      setInfo('Chameleon calibration saved.');
+      await lsn50API.setChameleonDepth(device.deveui, payload);
+      setInfo('Chameleon depths saved.');
       onUpdate();
     } catch {
-      setError('Failed to save Chameleon calibration');
+      setError('Failed to save Chameleon depths');
     } finally {
       setBusy(false);
+    }
+  };
+
+  const handleRefresh = async () => {
+    setRefreshing(true);
+    try {
+      const result = await lsn50API.refreshChameleonCalibration(device.deveui);
+      setCalibStatus(result.status);
+      setCalibSource(result.source ?? null);
+      setInfo(result.status === 'calibrated' ? 'Calibration refreshed.' : 'Calibration not found.');
+    } catch {
+      setError('Failed to refresh calibration');
+    } finally {
+      setRefreshing(false);
     }
   };
 
   const liveSwt1 = formatLiveMetric(device.latest_data?.swt_1, 'kPa', 1);
   const liveSwt2 = formatLiveMetric(device.latest_data?.swt_2, 'kPa', 1);
   const liveSwt3 = formatLiveMetric(device.latest_data?.swt_3, 'kPa', 1);
-  const liveResistance1 = formatLiveMetric(device.latest_data?.chameleon_r1_ohm_comp, 'ohm', 0);
-  const liveResistance2 = formatLiveMetric(device.latest_data?.chameleon_r2_ohm_comp, 'ohm', 0);
-  const liveResistance3 = formatLiveMetric(device.latest_data?.chameleon_r3_ohm_comp, 'ohm', 0);
 
   const liveByChannel: Record<ChannelNumber, Array<{ label: string; value: string }>> = {
-    1: [
-      liveSwt1 ? { label: 'SWT', value: liveSwt1 } : null,
-      liveResistance1 ? { label: 'Compensated R', value: liveResistance1 } : null,
-    ].filter((item): item is { label: string; value: string } => item != null),
-    2: [
-      liveSwt2 ? { label: 'SWT', value: liveSwt2 } : null,
-      liveResistance2 ? { label: 'Compensated R', value: liveResistance2 } : null,
-    ].filter((item): item is { label: string; value: string } => item != null),
-    3: [
-      liveSwt3 ? { label: 'SWT', value: liveSwt3 } : null,
-      liveResistance3 ? { label: 'Compensated R', value: liveResistance3 } : null,
-    ].filter((item): item is { label: string; value: string } => item != null),
+    1: [liveSwt1 ? { label: 'SWT', value: liveSwt1 } : null].filter(
+      (item): item is { label: string; value: string } => item != null,
+    ),
+    2: [liveSwt2 ? { label: 'SWT', value: liveSwt2 } : null].filter(
+      (item): item is { label: string; value: string } => item != null,
+    ),
+    3: [liveSwt3 ? { label: 'SWT', value: liveSwt3 } : null].filter(
+      (item): item is { label: string; value: string } => item != null,
+    ),
   };
 
   return (
     <div className="space-y-3">
+      <ChameleonHardwareInfo
+        arrayId={arrayId}
+        status={calibStatus}
+        source={calibSource}
+        onRefresh={() => void handleRefresh()}
+        refreshing={refreshing}
+      />
+
       <div className="grid gap-3 lg:grid-cols-3">
         {CHANNELS.map((channel) => {
           const channelInput = inputs[channel.number];
@@ -242,7 +244,7 @@ export const DraginoChameleonSwtSection: React.FC<DraginoChameleonSwtSectionProp
               <div className="flex items-start justify-between gap-3">
                 <div>
                   <p className="text-sm font-semibold text-[var(--text)]">{channel.label}</p>
-                  <p className="mt-1 text-xs text-[var(--text-tertiary)]">Depth and calibration coefficients</p>
+                  <p className="mt-1 text-xs text-[var(--text-tertiary)]">Depth</p>
                 </div>
               </div>
 
@@ -258,7 +260,10 @@ export const DraginoChameleonSwtSection: React.FC<DraginoChameleonSwtSectionProp
               )}
 
               <div className="mt-3 space-y-2">
-                <label className="block text-xs font-semibold text-[var(--text-secondary)]" htmlFor={`chameleon-${device.deveui}-${channel.label}-depth`}>
+                <label
+                  className="block text-xs font-semibold text-[var(--text-secondary)]"
+                  htmlFor={`chameleon-${device.deveui}-${channel.label}-depth`}
+                >
                   Depth (cm)
                 </label>
                 <input
@@ -273,25 +278,6 @@ export const DraginoChameleonSwtSection: React.FC<DraginoChameleonSwtSectionProp
                   placeholder="30"
                   className={`w-full rounded-lg border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-sm text-[var(--text)] ${FOCUS_VISIBLE_RING}`}
                 />
-
-                {(['a', 'b', 'c'] as const).map((field) => (
-                  <div key={field}>
-                    <label className="block text-xs font-semibold text-[var(--text-secondary)]" htmlFor={`chameleon-${device.deveui}-${channel.label}-${field}`}>
-                      Coefficient {field}
-                    </label>
-                    <input
-                      id={`chameleon-${device.deveui}-${channel.label}-${field}`}
-                      type="number"
-                      step="0.000001"
-                      inputMode="decimal"
-                      value={channelInput[field]}
-                      disabled={busy}
-                      onChange={(event) => updateInput(channel.number, field, event.target.value)}
-                      placeholder={String(channel.defaults[field])}
-                      className={`mt-1 w-full rounded-lg border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-sm text-[var(--text)] ${FOCUS_VISIBLE_RING}`}
-                    />
-                  </div>
-                ))}
               </div>
             </div>
           );
@@ -301,19 +287,11 @@ export const DraginoChameleonSwtSection: React.FC<DraginoChameleonSwtSectionProp
       <div className="flex flex-col gap-2 sm:flex-row">
         <button
           type="button"
-          onClick={restoreWorkbookDefaults}
-          disabled={busy}
-          className={`rounded-lg border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-sm font-semibold text-[var(--text)] transition-colors hover:bg-[var(--secondary-bg)] disabled:cursor-not-allowed disabled:opacity-60 ${FOCUS_VISIBLE_RING}`}
-        >
-          Restore workbook defaults
-        </button>
-        <button
-          type="button"
-          onClick={() => void saveChameleonCalibration()}
+          onClick={() => void saveDepths()}
           disabled={busy}
           className={`rounded-lg bg-[var(--secondary-bg)] px-3 py-2 text-sm font-semibold text-[var(--text)] transition-colors hover:bg-[var(--border)] disabled:cursor-not-allowed disabled:opacity-60 ${FOCUS_VISIBLE_RING}`}
         >
-          {busy ? 'Saving Chameleon calibration...' : 'Save Chameleon calibration'}
+          {busy ? 'Saving Chameleon depths...' : 'Save Chameleon depths'}
         </button>
       </div>
 

@@ -155,7 +155,8 @@ const requiredHttpRoutes = [
   '/api/devices/:deveui/strega/partial-opening',
   '/api/devices/:deveui/strega/flushing',
   '/api/devices/:deveui/chameleon',
-  '/api/devices/:deveui/chameleon-config',
+  '/api/devices/:deveui/chameleon/refresh-calibration',
+  '/api/devices/:deveui/chameleon/depth',
   '/api/devices/:deveui/dendro-config',
   '/api/devices/:deveui/dendro-baseline/reset',
   '/api/devices/:deveui/zone-assignments',
@@ -224,7 +225,6 @@ const requiredFunctionNodes = [
   'Authorize + Fanout STREGA Advanced',
   'Format STREGA Advanced Response',
   'Auth + Set Chameleon Enabled',
-  'Auth + Save Chameleon Config',
   'Auth + Parse Dendro Config',
   'Format Dendro Config Response',
   'Return Device API HTTP 500',
@@ -1450,8 +1450,11 @@ expectIncludesById('merge-device-data', 'dendro_ratio_at_extended: d.dendro_rati
 expectIncludesById('merge-device-data', 'dendro_baseline_pending: d.dendro_baseline_pending ?? 0', 'returns the pending-baseline flag in GET /api/devices');
 expectIncludesById('merge-device-data', 'chameleon_enabled: d.chameleon_enabled ?? 0', 'returns Chameleon enabled config in GET /api/devices');
 expectIncludesById('merge-device-data', 'chameleon_swt1_depth_cm: d.chameleon_swt1_depth_cm ?? null', 'returns Chameleon SWT depth config in GET /api/devices');
-expectIncludesById('merge-device-data', 'chameleon_swt1_a: d.chameleon_swt1_a ?? null', 'returns Chameleon SWT coefficient config in GET /api/devices');
-expectIncludesById('merge-device-data', 'adc_ch1v: latest.adc_ch1v', 'merges dendrometer CH1 voltage into GET /api/devices');
+// After chameleon V42: coefficient columns are dropped; merge-device-data must NOT reference them
+expectExcludesById('merge-device-data', 'chameleon_swt1_a', 'merge-device-data no longer returns chameleon_swt1_a');
+expectExcludesById('merge-device-data', 'chameleon_swt1_b', 'merge-device-data no longer returns chameleon_swt1_b');
+expectExcludesById('merge-device-data', 'chameleon_swt1_c', 'merge-device-data no longer returns chameleon_swt1_c');
+expectExcludesById('merge-device-data', 'adc_ch1v: latest.adc_ch1v', 'merges dendrometer CH1 voltage into GET /api/devices');
 expectIncludesById('merge-device-data', 'swt_1: latest.swt_1', 'merges Chameleon SWT channel 1 into GET /api/devices');
 expectIncludesById('merge-device-data', 'chameleon_reading_id: d.chameleon_reading_id', 'maps latest Chameleon reading row id from SQL results');
 expectIncludesById('merge-device-data', 'chameleon_payload_b64: d.chameleon_payload_b64', 'maps latest Chameleon raw payload from SQL results');
@@ -1543,12 +1546,6 @@ expectIncludesById('put-chameleon-enabled-auth-fn', "const enabled = parseChamel
 expectIncludesById('put-chameleon-enabled-auth-fn', "enabled must be a boolean, 1, 0, 'true', 'false', '1', or '0'", 'returns a 400 for invalid Chameleon enabled values');
 expectIncludesById('put-chameleon-enabled-auth-fn', "type_id = 'DRAGINO_LSN50'", 'limits Chameleon enabled updates to LSN50 devices');
 expectExcludesById('put-chameleon-enabled-auth-fn', 'sync_version = COALESCE(sync_version, 0) + 1', 'keeps Chameleon enabled as local-only edge config until a server sync contract exists');
-expectLibById('put-chameleon-config-auth-fn', 'crypto', 'crypto', 'imports crypto for Chameleon config auth verification');
-expectLibById('put-chameleon-config-auth-fn', 'osiDb', 'osi-db-helper', 'uses osi-db-helper for Chameleon config persistence');
-expectIncludesById('put-chameleon-config-auth-fn', 'const body = parseBody(msg.payload);', 'parses Chameleon config payload before opening the database');
-expectIncludesById('put-chameleon-config-auth-fn', 'Math.round(parsed * 1000000) / 1000000', 'rounds Chameleon config numbers to six decimals');
-expectIncludesById('put-chameleon-config-auth-fn', 'No Chameleon config fields supplied', 'rejects empty Chameleon config patches');
-expectExcludesById('put-chameleon-config-auth-fn', 'sync_version = COALESCE(sync_version, 0) + 1', 'keeps Chameleon calibration fields as local-only edge config until a server sync contract exists');
 expectIncludesById('d0b2b1c1a937e16d', 'COALESCE(dd.swt_3, NULL)', 'scheduler can evaluate Chameleon SWT channel 3');
 expectIncludesById('d0b2b1c1a937e16d', "ds.type_id = 'DRAGINO_LSN50' AND COALESCE(ds.chameleon_enabled,0) = 1", 'scheduler includes Chameleon-enabled LSN50 devices');
 expectIncludesById('d0b2b1c1a937e16d', 'CASE WHEN dd.swt_3 IS NULL THEN 0 ELSE 1 END', 'scheduler SWT average counts Chameleon channel 3 only when present');
@@ -1599,11 +1596,9 @@ expectIncludesById('post-dendro-baseline-reset-auth-fn', 'dendro_baseline_calibr
 expectIncludesById('post-dendro-baseline-reset-auth-fn', 'dendro_baseline_pending = 1', 'marks the dendrometer baseline as pending after a manual reset');
 expectFileIncludes('api.ts', reactGuiApiSource, 'resetDendroBaseline: async (deveui: string): Promise<void> => {', 'adds a shared client helper for dendrometer baseline resets');
 expectFileIncludes('api.ts', reactGuiApiSource, "await api.post(`/api/devices/${deveui}/dendro-baseline/reset`);", 'targets the local dendrometer baseline reset endpoint from the shared client helper');
-expectFileIncludes('api.ts', reactGuiApiSource, 'export interface ChameleonConfigPayload', 'types Chameleon SWT calibration API payloads');
 expectFileIncludes('api.ts', reactGuiApiSource, 'setChameleonEnabled: async (deveui: string, enabled: boolean): Promise<void> => {', 'adds a shared client helper for Chameleon enablement');
 expectFileIncludes('api.ts', reactGuiApiSource, "await api.put(`/api/devices/${deveui}/chameleon`, { enabled });", 'targets the local Chameleon enablement endpoint from the shared client helper');
-expectFileIncludes('api.ts', reactGuiApiSource, 'setChameleonConfig: async (deveui: string, payload: ChameleonConfigPayload): Promise<void> => {', 'adds a shared client helper for Chameleon SWT calibration config');
-expectFileIncludes('api.ts', reactGuiApiSource, "await api.put(`/api/devices/${deveui}/chameleon-config`, payload);", 'targets the local Chameleon calibration endpoint from the shared client helper');
+expectFileExcludes('api.ts', reactGuiApiSource, 'setChameleonConfig', 'retired the per-device Chameleon coefficient client helper');
 expectFileIncludes('api.ts', reactGuiApiSource, 'position_mm: number | null;', 'types dendrometer history position as nullable');
 expectFileIncludes('api.ts', reactGuiApiSource, 'stem_change_um: toNullableNumber(row?.stem_change_um ?? row?.dendro_stem_change_um)', 'normalizes baseline-relative stem change for dendrometer history');
 expectFileExcludes('api.ts', reactGuiApiSource, 'Number(row?.position_mm ?? row?.dendro_position_mm ?? 0)', 'coercing missing dendrometer history position to zero');
@@ -1649,15 +1644,6 @@ for (const field of [
   'chameleon_swt1_depth_cm',
   'chameleon_swt2_depth_cm',
   'chameleon_swt3_depth_cm',
-  'chameleon_swt1_a',
-  'chameleon_swt1_b',
-  'chameleon_swt1_c',
-  'chameleon_swt2_a',
-  'chameleon_swt2_b',
-  'chameleon_swt2_c',
-  'chameleon_swt3_a',
-  'chameleon_swt3_b',
-  'chameleon_swt3_c',
 ]) {
   expectFileIncludes('farming.ts', farmingTypesSource, `${field}?:`, `types top-level Device.${field}`);
 }
@@ -2168,11 +2154,6 @@ for (const seedDatabasePath of seedDatabasePaths) {
     deviceColumns.has('chameleon_swt1_depth_cm'),
     `${relativeSeedPath} includes chameleon_swt1_depth_cm in the bundled devices schema`,
     `${relativeSeedPath} is missing chameleon_swt1_depth_cm in the bundled devices schema`
-  );
-  expectCondition(
-    deviceColumns.has('chameleon_swt3_c'),
-    `${relativeSeedPath} includes chameleon_swt3_c in the bundled devices schema`,
-    `${relativeSeedPath} is missing chameleon_swt3_c in the bundled devices schema`
   );
   expectCondition(
     deviceDataColumns.has('swt_1'),
@@ -3042,5 +3023,17 @@ function assertCommandRegistry(flows) {
 Promise.all(pendingChecks).finally(() => {
   if (!process.exitCode) {
     console.log('Sync flow verification passed');
+  }
+
+  // Profile parity (bcm2709 ↔ bcm2712)
+  const { spawnSync } = require('child_process');
+  const parityResult = spawnSync(
+    process.execPath,
+    [path.resolve(__dirname, 'verify-profile-parity.js')],
+    { stdio: 'inherit' }
+  );
+  if (parityResult.status !== 0) {
+    console.error('verify-profile-parity.js failed');
+    process.exitCode = parityResult.status || 1;
   }
 });

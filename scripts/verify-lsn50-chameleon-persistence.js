@@ -9,6 +9,9 @@ const repoRoot = path.resolve(__dirname, '..');
 const flowsPath = path.join(repoRoot, 'conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/flows.json');
 const flows = JSON.parse(fs.readFileSync(flowsPath, 'utf8'));
 
+const chameleonHelper = require(path.join(repoRoot,
+  'conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-chameleon-helper'));
+
 function nodeById(id) {
   const node = flows.find((entry) => entry.id === id);
   assert(node, `missing flow node ${id}`);
@@ -55,6 +58,7 @@ async function runFunctionNode(id, msg) {
 
   const fn = new vm.Script(`(async function(msg,node){${source}\n})`).runInNewContext({
     osiDb: { Database: FakeDatabase },
+    chameleon: chameleonHelper,
     Buffer,
     Number,
     String,
@@ -170,6 +174,19 @@ compileFunctionNode('dendro-readings-insert-fn');
   assert.strictEqual(normal.writes[0].params[24], 2, 'f_port is stored when present');
   assert.strictEqual(normal.writes[0].params[25], 123, 'f_cnt is stored when present');
   assert.strictEqual(normal.closeCount, 1, 'normal write closes the database handle');
+
+  // Mixed-case array_id from the codec is normalized to uppercase before insert
+  // so it matches uppercase rows in chameleon_calibrations.
+  const lowerMsg = JSON.parse(JSON.stringify(normalMsg));
+  lowerMsg.formattedData.chameleonArrayId = '286d6adb0f0000f1';
+  const lowered = await runFunctionNode('chameleon-readings-insert-fn', lowerMsg);
+  assert.strictEqual(lowered.writes[0].params[18], '286D6ADB0F0000F1', 'lowercase array_id normalizes to uppercase');
+
+  // Non-hex array_id (corrupt frame, codec bug, etc.) gets nulled instead of stored.
+  const garbageMsg = JSON.parse(JSON.stringify(normalMsg));
+  garbageMsg.formattedData.chameleonArrayId = 'not-a-hex-id-here';
+  const garbage = await runFunctionNode('chameleon-readings-insert-fn', garbageMsg);
+  assert.strictEqual(garbage.writes[0].params[18], null, 'invalid array_id stores NULL');
 
   const faultMsg = JSON.parse(JSON.stringify(normalMsg));
   faultMsg.formattedData.chameleonI2cMissing = 1;
