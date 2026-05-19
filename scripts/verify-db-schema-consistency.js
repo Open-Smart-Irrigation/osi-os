@@ -56,15 +56,6 @@ const schemaContract = {
     'chameleon_swt1_depth_cm',
     'chameleon_swt2_depth_cm',
     'chameleon_swt3_depth_cm',
-    'chameleon_swt1_a',
-    'chameleon_swt1_b',
-    'chameleon_swt1_c',
-    'chameleon_swt2_a',
-    'chameleon_swt2_b',
-    'chameleon_swt2_c',
-    'chameleon_swt3_a',
-    'chameleon_swt3_b',
-    'chameleon_swt3_c',
     'device_mode',
   ],
   device_data: [
@@ -164,13 +155,25 @@ const schemaContract = {
     'payload_b64',
     'f_port',
     'f_cnt',
+    'calibration_status',
     'created_at',
+  ],
+  chameleon_calibrations: [
+    'array_id', 'sensor_id',
+    'sensor1_a', 'sensor1_b', 'sensor1_c', 'sensor1_r2',
+    'sensor2_a', 'sensor2_b', 'sensor2_c', 'sensor2_r2',
+    'sensor3_a', 'sensor3_b', 'sensor3_c', 'sensor3_r2',
+    'test_rig_run_start_date', 'source', 'fetched_at',
+  ],
+  chameleon_calibration_misses: [
+    'array_id', 'last_tried', 'reason',
   ],
 };
 
 const requiredIndexes = {
   dendrometer_readings: ['idx_dendro_readings_deveui_time'],
   chameleon_readings: ['idx_chameleon_readings_deveui_time', 'idx_chameleon_readings_array_id'],
+  chameleon_calibrations: ['idx_chameleon_calibrations_sensor_id'],
 };
 
 function sqlite(dbPath, sql) {

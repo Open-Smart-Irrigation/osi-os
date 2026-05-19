@@ -134,15 +134,6 @@ CREATE TABLE devices (
   chameleon_swt1_depth_cm               REAL,
   chameleon_swt2_depth_cm               REAL,
   chameleon_swt3_depth_cm               REAL,
-  chameleon_swt1_a                      REAL,
-  chameleon_swt1_b                      REAL,
-  chameleon_swt1_c                      REAL,
-  chameleon_swt2_a                      REAL,
-  chameleon_swt2_b                      REAL,
-  chameleon_swt2_c                      REAL,
-  chameleon_swt3_a                      REAL,
-  chameleon_swt3_b                      REAL,
-  chameleon_swt3_c                      REAL,
   FOREIGN KEY (user_id)  REFERENCES users(id)             ON DELETE SET NULL,
   FOREIGN KEY (farm_id)  REFERENCES farms(farm_id)        ON DELETE SET NULL
 );
@@ -538,12 +529,47 @@ CREATE TABLE chameleon_readings (
   payload_b64     TEXT,
   f_port          INTEGER,
   f_cnt           INTEGER,
+  calibration_status TEXT,
   created_at      TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
   FOREIGN KEY (deveui) REFERENCES devices(deveui) ON DELETE CASCADE
 );
 
 CREATE INDEX idx_chameleon_readings_deveui_time ON chameleon_readings(deveui, recorded_at);
 CREATE INDEX idx_chameleon_readings_array_id    ON chameleon_readings(array_id);
+
+-- ---------------------------------------------------------------------------
+-- chameleon_calibrations  (global calibration table keyed by array_id)
+-- ---------------------------------------------------------------------------
+CREATE TABLE chameleon_calibrations (
+  array_id                TEXT PRIMARY KEY,
+  sensor_id               TEXT NOT NULL,
+  sensor1_a               REAL NOT NULL,
+  sensor1_b               REAL NOT NULL,
+  sensor1_c               REAL NOT NULL,
+  sensor1_r2              REAL,
+  sensor2_a               REAL NOT NULL,
+  sensor2_b               REAL NOT NULL,
+  sensor2_c               REAL NOT NULL,
+  sensor2_r2              REAL,
+  sensor3_a               REAL NOT NULL,
+  sensor3_b               REAL NOT NULL,
+  sensor3_c               REAL NOT NULL,
+  sensor3_r2              REAL,
+  test_rig_run_start_date TEXT,
+  source                  TEXT NOT NULL,
+  fetched_at              TEXT NOT NULL
+);
+CREATE INDEX idx_chameleon_calibrations_sensor_id
+  ON chameleon_calibrations(sensor_id);
+
+-- ---------------------------------------------------------------------------
+-- chameleon_calibration_misses  (negative cache, 24h TTL)
+-- ---------------------------------------------------------------------------
+CREATE TABLE chameleon_calibration_misses (
+  array_id   TEXT PRIMARY KEY,
+  last_tried TEXT NOT NULL,
+  reason     TEXT
+);
 
 -- ---------------------------------------------------------------------------
 -- applied_commands  (WS3 — includes retry columns from the start)

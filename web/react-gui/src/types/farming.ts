@@ -77,6 +77,7 @@ export interface Device {
     chameleon_r2_ohm_raw?: number | null;
     chameleon_r3_ohm_raw?: number | null;
     chameleon_array_id?: string | null;
+    calibration_status?: 'calibrated' | 'pending' | 'unknown' | null;
     // SenseCAP S2120 weather station fields
     barometric_pressure_hpa?: number | null;
     wind_speed_mps?: number | null;
@@ -110,15 +111,7 @@ export interface Device {
   chameleon_swt1_depth_cm?: number | null;
   chameleon_swt2_depth_cm?: number | null;
   chameleon_swt3_depth_cm?: number | null;
-  chameleon_swt1_a?: number | null;
-  chameleon_swt1_b?: number | null;
-  chameleon_swt1_c?: number | null;
-  chameleon_swt2_a?: number | null;
-  chameleon_swt2_b?: number | null;
-  chameleon_swt2_c?: number | null;
-  chameleon_swt3_a?: number | null;
-  chameleon_swt3_b?: number | null;
-  chameleon_swt3_c?: number | null;
+  calibration_status?: 'calibrated' | 'pending' | 'unknown' | null;
   strega_model?: StregaModel | string | null;
 
   // Irrigation zone assignment

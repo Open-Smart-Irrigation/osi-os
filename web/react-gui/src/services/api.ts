@@ -365,21 +365,6 @@ function normaliseDendroReading(row: any): DendroReading {
   };
 }
 
-export interface ChameleonConfigPayload {
-  chameleonSwt1DepthCm?: number | null;
-  chameleonSwt2DepthCm?: number | null;
-  chameleonSwt3DepthCm?: number | null;
-  chameleonSwt1A?: number | null;
-  chameleonSwt1B?: number | null;
-  chameleonSwt1C?: number | null;
-  chameleonSwt2A?: number | null;
-  chameleonSwt2B?: number | null;
-  chameleonSwt2C?: number | null;
-  chameleonSwt3A?: number | null;
-  chameleonSwt3B?: number | null;
-  chameleonSwt3C?: number | null;
-}
-
 export const lsn50API = {
   setDendroEnabled: async (deveui: string, enabled: boolean): Promise<void> => {
     await api.put(`/api/devices/${deveui}/dendro`, { enabled });
@@ -421,6 +406,21 @@ export const lsn50API = {
   },
   resetDendroBaseline: async (deveui: string): Promise<void> => {
     await api.post(`/api/devices/${deveui}/dendro-baseline/reset`);
+  },
+  refreshChameleonCalibration: async (deveui: string): Promise<{
+    status: 'calibrated' | 'pending' | 'unknown';
+    source?: string;
+    sensor_id?: string;
+  }> => {
+    const res = await api.post(`/api/devices/${deveui}/chameleon/refresh-calibration`);
+    return res.data;
+  },
+  setChameleonDepth: async (deveui: string, payload: {
+    chameleonSwt1DepthCm?: number | null;
+    chameleonSwt2DepthCm?: number | null;
+    chameleonSwt3DepthCm?: number | null;
+  }): Promise<void> => {
+    await api.put(`/api/devices/${deveui}/chameleon/depth`, payload);
   },
 };
 
