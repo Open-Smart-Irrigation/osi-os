@@ -186,20 +186,12 @@ function all(sql) {
 }
 (async () => {
   await run('PRAGMA busy_timeout=5000');
+  // V42 — kept columns. swt_{1,2,3} on device_data and depth/enabled on devices.
   for (const sql of [
     'ALTER TABLE devices ADD COLUMN chameleon_enabled INTEGER DEFAULT 0',
     'ALTER TABLE devices ADD COLUMN chameleon_swt1_depth_cm REAL',
     'ALTER TABLE devices ADD COLUMN chameleon_swt2_depth_cm REAL',
     'ALTER TABLE devices ADD COLUMN chameleon_swt3_depth_cm REAL',
-    'ALTER TABLE devices ADD COLUMN chameleon_swt1_a REAL',
-    'ALTER TABLE devices ADD COLUMN chameleon_swt1_b REAL',
-    'ALTER TABLE devices ADD COLUMN chameleon_swt1_c REAL',
-    'ALTER TABLE devices ADD COLUMN chameleon_swt2_a REAL',
-    'ALTER TABLE devices ADD COLUMN chameleon_swt2_b REAL',
-    'ALTER TABLE devices ADD COLUMN chameleon_swt2_c REAL',
-    'ALTER TABLE devices ADD COLUMN chameleon_swt3_a REAL',
-    'ALTER TABLE devices ADD COLUMN chameleon_swt3_b REAL',
-    'ALTER TABLE devices ADD COLUMN chameleon_swt3_c REAL',
     'ALTER TABLE device_data ADD COLUMN swt_1 REAL',
     'ALTER TABLE device_data ADD COLUMN swt_2 REAL',
     'ALTER TABLE device_data ADD COLUMN swt_3 REAL'
@@ -211,27 +203,97 @@ function all(sql) {
     }
   }
   await run('UPDATE devices SET chameleon_enabled = 0 WHERE chameleon_enabled IS NULL');
+
+  // V42 — global calibration tables. Calibration values are intrinsic to the
+  // Chameleon hardware (keyed by array_id) and sourced from via.farm via the
+  // cloud sync endpoint. The miss table is a 24h negative cache.
+  await run(`CREATE TABLE IF NOT EXISTS chameleon_calibrations (
+    array_id                TEXT PRIMARY KEY,
+    sensor_id               TEXT NOT NULL,
+    sensor1_a               REAL NOT NULL,
+    sensor1_b               REAL NOT NULL,
+    sensor1_c               REAL NOT NULL,
+    sensor1_r2              REAL,
+    sensor2_a               REAL NOT NULL,
+    sensor2_b               REAL NOT NULL,
+    sensor2_c               REAL NOT NULL,
+    sensor2_r2              REAL,
+    sensor3_a               REAL NOT NULL,
+    sensor3_b               REAL NOT NULL,
+    sensor3_c               REAL NOT NULL,
+    sensor3_r2              REAL,
+    test_rig_run_start_date TEXT,
+    source                  TEXT NOT NULL,
+    fetched_at              TEXT NOT NULL
+  )`);
+  await run('CREATE INDEX IF NOT EXISTS idx_chameleon_calibrations_sensor_id ON chameleon_calibrations(sensor_id)');
+  await run(`CREATE TABLE IF NOT EXISTS chameleon_calibration_misses (
+    array_id   TEXT PRIMARY KEY,
+    last_tried TEXT NOT NULL,
+    reason     TEXT
+  )`);
+
+  // V42 — calibration_status on chameleon_readings. Set by the decoder and the
+  // sync worker to mark whether each reading has a usable calibration.
+  try {
+    await run('ALTER TABLE chameleon_readings ADD COLUMN calibration_status TEXT');
+  } catch (err) {
+    if (!/duplicate column name/i.test(String(err && err.message || err))) throw err;
+  }
+
+  // V42 — drop per-device coefficient columns. The bundled DB no longer has
+  // them; live DBs from pre-V42 builds must drop them so the new flows.json
+  // queries don't try to SELECT non-existent columns. SQLite >= 3.35 supports
+  // ALTER TABLE ... DROP COLUMN; older versions will error and we leave the
+  // columns in place (they're unused but not harmful).
+  for (const name of [
+    'chameleon_swt1_a','chameleon_swt1_b','chameleon_swt1_c',
+    'chameleon_swt2_a','chameleon_swt2_b','chameleon_swt2_c',
+    'chameleon_swt3_a','chameleon_swt3_b','chameleon_swt3_c'
+  ]) {
+    try {
+      await run(`ALTER TABLE devices DROP COLUMN ${name}`);
+    } catch (err) {
+      const msg = String(err && err.message || err);
+      if (/no such column/i.test(msg) || /near "DROP": syntax error/i.test(msg)) continue;
+      throw err;
+    }
+  }
+
+  // V42 — NULL device_data.swt_* rows that join a chameleon reading. Values
+  // computed from the now-dropped per-device coefficients are no longer trusted.
+  // Local backfill repopulates these once calibration arrives from osi-server.
+  // Idempotent: NULL → NULL is a no-op on repeat deploys.
+  await run(`UPDATE device_data
+    SET swt_1 = NULL, swt_2 = NULL, swt_3 = NULL
+    WHERE EXISTS (
+      SELECT 1 FROM chameleon_readings cr
+        WHERE cr.deveui = device_data.deveui
+          AND cr.recorded_at = device_data.recorded_at
+    )
+    AND (swt_1 IS NOT NULL OR swt_2 IS NOT NULL OR swt_3 IS NOT NULL)`);
+
   const deviceNames = new Set((await all('PRAGMA table_info(devices)')).map((row) => row.name));
   const dataNames = new Set((await all('PRAGMA table_info(device_data)')).map((row) => row.name));
+  const readingsNames = new Set((await all('PRAGMA table_info(chameleon_readings)')).map((row) => row.name));
+  const tableNames = new Set((await all("SELECT name FROM sqlite_master WHERE type = 'table'")).map((row) => row.name));
+
   for (const name of [
     'chameleon_enabled',
     'chameleon_swt1_depth_cm',
     'chameleon_swt2_depth_cm',
-    'chameleon_swt3_depth_cm',
-    'chameleon_swt1_a',
-    'chameleon_swt1_b',
-    'chameleon_swt1_c',
-    'chameleon_swt2_a',
-    'chameleon_swt2_b',
-    'chameleon_swt2_c',
-    'chameleon_swt3_a',
-    'chameleon_swt3_b',
-    'chameleon_swt3_c'
+    'chameleon_swt3_depth_cm'
   ]) {
     if (!deviceNames.has(name)) throw new Error('Chameleon devices column is still missing after deploy repair: ' + name);
   }
   for (const name of ['swt_1', 'swt_2', 'swt_3']) {
     if (!dataNames.has(name)) throw new Error('Chameleon device_data column is still missing after deploy repair: ' + name);
+  }
+  if (!readingsNames.has('calibration_status')) {
+    throw new Error('chameleon_readings.calibration_status is still missing after deploy repair');
+  }
+  for (const name of ['chameleon_calibrations', 'chameleon_calibration_misses']) {
+    if (!tableNames.has(name)) throw new Error('Chameleon global table is still missing after deploy repair: ' + name);
   }
   console.log('OK');
   db.close();
