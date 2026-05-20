@@ -151,12 +151,18 @@ function invokeCallback(callback, context, error, result) {
 
 function runQueued(method, args, mapper) {
   const { sql, params, callback } = normalizeArgs(args);
-  const scheduled = enqueueOperation((database) => runRaw(database, method, sql, params));
-  scheduled.then(
-    ({ rows, statement }) => invokeCallback(callback, statement, null, mapper(rows)),
-    (error) => invokeCallback(callback, null, error)
-  );
-  return scheduled;
+  // await callers expect the mapped value (row for .get(), rows[] for .all(),
+  // undefined for .run()) — the mapper has to run on the returned promise, not
+  // only on the callback path.
+  return enqueueOperation((database) => runRaw(database, method, sql, params))
+    .then(({ rows, statement }) => {
+      const mapped = mapper(rows);
+      invokeCallback(callback, statement, null, mapped);
+      return mapped;
+    }, (error) => {
+      invokeCallback(callback, null, error);
+      throw error;
+    });
 }
 
 class DatabaseFacade {
