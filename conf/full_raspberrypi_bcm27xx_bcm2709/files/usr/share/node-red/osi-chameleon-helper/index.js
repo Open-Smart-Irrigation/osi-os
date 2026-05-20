@@ -32,21 +32,6 @@ function normalizeArrayId(arrayId) {
   return /^[0-9A-F]{16}$/.test(upper) ? upper : null;
 }
 
-function calibrationFromArrayId(db, arrayId) {
-  const normalized = normalizeArrayId(arrayId);
-  if (!normalized) return null;
-  const row = db.prepare(
-    'SELECT sensor1_a, sensor1_b, sensor1_c, sensor2_a, sensor2_b, sensor2_c, ' +
-    'sensor3_a, sensor3_b, sensor3_c FROM chameleon_calibrations WHERE array_id = ?'
-  ).get(normalized);
-  if (!row) return null;
-  return {
-    swt1: { a: row.sensor1_a, b: row.sensor1_b, c: row.sensor1_c },
-    swt2: { a: row.sensor2_a, b: row.sensor2_b, c: row.sensor2_c },
-    swt3: { a: row.sensor3_a, b: row.sensor3_b, c: row.sensor3_c },
-  };
-}
-
 function resistanceOhmsToKpa(ohms, coefficients) {
   const resistanceOhms = toFiniteNumber(ohms);
   if (!coefficients || resistanceOhms === null
@@ -81,7 +66,6 @@ function buildChameleonSwtMetrics(sample = {}, options = {}) {
 module.exports = {
   MAX_VALID_RESISTANCE_OHMS,
   normalizeArrayId,
-  calibrationFromArrayId,
   resistanceOhmsToKpa,
   buildChameleonSwtMetrics,
   toFiniteNumber,
