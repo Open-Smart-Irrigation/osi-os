@@ -1,0 +1,44 @@
+#!/bin/sh
+set -eu
+
+SRC=/usr/share/node-red
+DST=/srv/node-red
+
+mkdir -p "$DST" "$DST/node_modules"
+chown node-red:node-red "$DST" "$DST/node_modules" 2>/dev/null || true
+
+if [ -f /usr/share/flows.json ] && [ ! -f "$DST/flows.json" ]; then
+    cp /usr/share/flows.json "$DST/flows.json"
+fi
+
+if [ -f "$SRC/settings.js" ] && [ ! -f "$DST/settings.js" ]; then
+    cp "$SRC/settings.js" "$DST/settings.js"
+fi
+
+if [ -d "$SRC/codecs" ]; then
+    mkdir -p "$DST/codecs"
+    cp -a "$SRC/codecs/." "$DST/codecs/"
+fi
+
+if [ -d "$SRC/node_modules" ]; then
+    cp -a "$SRC/node_modules/." "$DST/node_modules/"
+fi
+
+# Native sqlite must come from the OpenWrt package built for the target CPU.
+rm -rf "$DST/node_modules/sqlite3" "$DST/node_modules/node-red-node-sqlite"
+
+for module in osi-chameleon-helper osi-chirpstack-helper osi-cloud-http osi-db-helper osi-dendro-helper; do
+    if [ -d "$SRC/$module" ]; then
+        rm -rf "$DST/node_modules/$module"
+        cp -a "$SRC/$module" "$DST/node_modules/$module"
+    fi
+done
+
+SQLITE_SRC=/usr/lib/node/node-red/node_modules/node-red-node-sqlite/node_modules/sqlite3
+if [ -d "$SQLITE_SRC" ]; then
+    ln -s "$SQLITE_SRC" "$DST/node_modules/sqlite3"
+fi
+
+chown -R node-red:node-red "$DST" 2>/dev/null || true
+
+exit 0

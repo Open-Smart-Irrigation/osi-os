@@ -16,7 +16,30 @@ PORT="${1:-9876}"
 BASE="http://localhost:$PORT"
 DB_DIR="/data/db"
 DB_PATH="$DB_DIR/farming.db"
-SEED_DB_REL="conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/db/farming.db"
+# Pick the seed DB from the profile matching the running hardware.
+# /proc/device-tree/model is canonical on Raspberry Pi OS / OpenWrt for bcm27xx.
+detect_seed_db_rel() {
+    model=""
+    if [ -r /proc/device-tree/model ]; then
+        model=$(tr -d '\0' </proc/device-tree/model 2>/dev/null || true)
+    fi
+    case "$model" in
+        *"Raspberry Pi 5"*)
+            echo "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/db/farming.db"
+            ;;
+        *"Raspberry Pi 4"*|*"Raspberry Pi 400"*|*"Raspberry Pi 3"*|*"Raspberry Pi 2"*)
+            echo "conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/db/farming.db"
+            ;;
+        *"Raspberry Pi Zero"*|*"Raspberry Pi Model"*)
+            echo "conf/full_raspberrypi_bcm27xx_bcm2708/files/usr/share/db/farming.db"
+            ;;
+        *)
+            # Unknown model — fall back to bcm2712 (the canonical source-of-truth).
+            echo "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/db/farming.db"
+            ;;
+    esac
+}
+SEED_DB_REL="$(detect_seed_db_rel)"
 TMP_DIR="/tmp/osi-os-deploy.$$"
 
 cleanup() {

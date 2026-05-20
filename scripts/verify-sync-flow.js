@@ -1454,7 +1454,6 @@ expectIncludesById('merge-device-data', 'chameleon_swt1_depth_cm: d.chameleon_sw
 expectExcludesById('merge-device-data', 'chameleon_swt1_a', 'merge-device-data no longer returns chameleon_swt1_a');
 expectExcludesById('merge-device-data', 'chameleon_swt1_b', 'merge-device-data no longer returns chameleon_swt1_b');
 expectExcludesById('merge-device-data', 'chameleon_swt1_c', 'merge-device-data no longer returns chameleon_swt1_c');
-expectExcludesById('merge-device-data', 'adc_ch1v: latest.adc_ch1v', 'merges dendrometer CH1 voltage into GET /api/devices');
 expectIncludesById('merge-device-data', 'swt_1: latest.swt_1', 'merges Chameleon SWT channel 1 into GET /api/devices');
 expectIncludesById('merge-device-data', 'chameleon_reading_id: d.chameleon_reading_id', 'maps latest Chameleon reading row id from SQL results');
 expectIncludesById('merge-device-data', 'chameleon_payload_b64: d.chameleon_payload_b64', 'maps latest Chameleon raw payload from SQL results');
@@ -1648,21 +1647,11 @@ for (const field of [
   expectFileIncludes('farming.ts', farmingTypesSource, `${field}?:`, `types top-level Device.${field}`);
 }
 
-for (const field of [
-  'chameleonSwt1DepthCm',
-  'chameleonSwt2DepthCm',
-  'chameleonSwt3DepthCm',
-  'chameleonSwt1A',
-  'chameleonSwt1B',
-  'chameleonSwt1C',
-  'chameleonSwt2A',
-  'chameleonSwt2B',
-  'chameleonSwt2C',
-  'chameleonSwt3A',
-  'chameleonSwt3B',
-  'chameleonSwt3C',
-]) {
-  expectFileIncludes('api.ts', reactGuiApiSource, `${field}?:`, `types ChameleonConfigPayload.${field}`);
+// Depth fields are typed inline in setChameleonDepth's payload signature.
+// Per-device coefficient fields (chameleonSwt[1-3][A-C]) were retired when
+// calibration moved into the global chameleon_calibrations table.
+for (const field of ['chameleonSwt1DepthCm', 'chameleonSwt2DepthCm', 'chameleonSwt3DepthCm']) {
+  expectFileIncludes('api.ts', reactGuiApiSource, `${field}?:`, `types setChameleonDepth payload.${field}`);
 }
 expectFileIncludes('DendrometerMonitor.tsx', dendroMonitorSource, 'Stem change over time', 'labels the basic monitor around the comparable stem-change signal');
 expectFileIncludes('DendrometerMonitor.tsx', dendroMonitorSource, 'Mechanical layer', 'renders mechanical engineering values beneath the stem-change graph');
@@ -1704,23 +1693,14 @@ expectFileIncludes('DraginoDendroCalibrationSection.tsx', draginoDendroCalibrati
 expectFileIncludes('DraginoDendroCalibrationSection.tsx', draginoDendroCalibrationSource, 'Reset stem baseline', 'adds a manual baseline reset action for legacy dendrometers');
 expectFileIncludes('DraginoDendroCalibrationSection.tsx', draginoDendroCalibrationSource, "await lsn50API.resetDendroBaseline(device.deveui)", 'wires the manual baseline reset action to the local API');
 expectFileIncludes('DraginoDendroCalibrationSection.tsx', draginoDendroCalibrationSource, 'Force legacy mode', 'exposes the legacy dendrometer override in the advanced settings');
-expectFileIncludes('DraginoChameleonSwtSection.tsx', draginoChameleonSwtSectionSource, 'Save Chameleon calibration', 'adds a save action for Chameleon SWT calibration');
-expectFileIncludes('DraginoChameleonSwtSection.tsx', draginoChameleonSwtSectionSource, 'Restore workbook defaults', 'allows locally restoring workbook coefficients before save');
-expectFileIncludes('DraginoChameleonSwtSection.tsx', draginoChameleonSwtSectionSource, 'await lsn50API.setChameleonConfig(device.deveui, payload)', 'saves Chameleon SWT calibration through the dedicated local API');
-expectFileIncludes('DraginoChameleonSwtSection.tsx', draginoChameleonSwtSectionSource, '10.71', 'uses the SWT1 workbook fallback coefficient a');
-expectFileIncludes('DraginoChameleonSwtSection.tsx', draginoChameleonSwtSectionSource, '10.40', 'uses the SWT2 workbook fallback coefficient a');
-expectFileIncludes('DraginoChameleonSwtSection.tsx', draginoChameleonSwtSectionSource, '10.33', 'uses the SWT3 workbook fallback coefficient a');
-expectFileIncludes('DraginoChameleonSwtSection.tsx', draginoChameleonSwtSectionSource, 'chameleonSwt1DepthCm', 'sends the SWT1 depth using the camelCase config payload');
-expectFileIncludes('DraginoChameleonSwtSection.tsx', draginoChameleonSwtSectionSource, 'chameleonSwt2B', 'sends representative SWT2 coefficient payload fields');
-expectFileIncludes('DraginoChameleonSwtSection.tsx', draginoChameleonSwtSectionSource, 'chameleonSwt3C', 'sends representative SWT3 coefficient payload fields');
-expectFileIncludes('DraginoChameleonSwtSection.tsx', draginoChameleonSwtSectionSource, 'Math.round(parsed * 100) / 100', 'rounds depth values to two decimals before save');
-expectFileIncludes('DraginoChameleonSwtSection.tsx', draginoChameleonSwtSectionSource, 'Math.round(parsed * 1000000) / 1000000', 'rounds coefficient values to six decimals before save');
-expectFileIncludes('DraginoChameleonSwtSection.tsx', draginoChameleonSwtSectionSource, 'device.latest_data?.swt_1', 'shows live SWT channel 1 values when present');
-expectFileIncludes('DraginoChameleonSwtSection.tsx', draginoChameleonSwtSectionSource, 'device.latest_data?.chameleon_r1_ohm_comp', 'shows live compensated resistance when present');
-expectFileIncludes('DraginoChameleonSwtSection.tsx', draginoChameleonSwtSectionSource, "if (value == null || (typeof value === 'string' && value.trim() === '')) return null;", 'treats nullish and blank live Chameleon telemetry as absent before numeric formatting');
-expectFileIncludes('DraginoChameleonSwtSection.tsx', draginoChameleonSwtSectionSource, 'a: formatNumericInput(device[channel.coefficientKeys.a])', 'keeps absent saved coefficient a values blank instead of rehydrating workbook defaults');
-expectFileIncludes('DraginoChameleonSwtSection.tsx', draginoChameleonSwtSectionSource, 'placeholder={String(channel.defaults[field])}', 'shows Chameleon workbook defaults as coefficient placeholders');
-expectFileIncludes('DraginoChameleonSwtSection.tsx', draginoChameleonSwtSectionSource, 'a: String(channel.defaults.a)', 'keeps Restore workbook defaults as an explicit value-fill action');
+// DraginoChameleonSwtSection.tsx: read-only block after the V42 chameleon refactor.
+// Coefficients are intrinsic to the hardware (sourced from via.farm via osi-server),
+// so the section only renders identity + status + a refresh button. Depth is the
+// only writeable field (install context, not calibration).
+expectFileIncludes('DraginoChameleonSwtSection.tsx', draginoChameleonSwtSectionSource, 'refreshChameleonCalibration', 'wires the manual refresh button to the edge endpoint');
+expectFileIncludes('DraginoChameleonSwtSection.tsx', draginoChameleonSwtSectionSource, 'setChameleonDepth', 'persists install depth via the depth-only save endpoint');
+expectFileExcludes('DraginoChameleonSwtSection.tsx', draginoChameleonSwtSectionSource, 'setChameleonConfig', 'retired the per-device coefficient save flow');
+expectFileExcludes('DraginoChameleonSwtSection.tsx', draginoChameleonSwtSectionSource, 'Restore workbook defaults', 'retired the workbook-default restore UI');
 expectFileIncludes('swt.ts', swtUtilsSource, 'toFiniteSwtValue(data?.swt_1) ?? toFiniteSwtValue(data?.swt_wm1)', 'uses canonical SWT1 with legacy Kiwi fallback in shared GUI SWT utilities');
 expectFileIncludes('swt.ts', swtUtilsSource, 'toFiniteSwtValue(data?.swt_2) ?? toFiniteSwtValue(data?.swt_wm2)', 'uses canonical SWT2 with legacy Kiwi fallback in shared GUI SWT utilities');
 expectFileIncludes('IrrigationZoneCard.tsx', irrigationZoneCardSource, 'summarizeSwtValues(collectDeviceSwtValues(devices))', 'computes Soil now from canonical SWT values across sensor families');
@@ -1729,7 +1709,6 @@ expectFileIncludes('SoilTab.tsx', soilTabSource, 'const swtReadings = collectDev
 expectFileIncludes('KiwiSensorCard.tsx', kiwiSensorCardSource, "field: 'swt_1'", 'uses canonical SWT1 for Kiwi live display and history');
 expectFileIncludes('KiwiSensorCard.tsx', kiwiSensorCardSource, "field: 'swt_2'", 'uses canonical SWT2 for Kiwi live display and history');
 expectFileIncludes('KiwiSensorCard.tsx', kiwiSensorCardSource, "soilMoistureProbeDepths.swt_1", 'stores Kiwi SWT1 depth metadata under the canonical key');
-expectFileIncludes('ScheduleSection.tsx', scheduleSectionSource, "if (raw === 'SWT_WM1') return 'SWT_1';", 'normalizes legacy SWT schedule metrics before editing');
 expectFileIncludes('ScheduleSection.tsx', scheduleSectionSource, '<option value="SWT_1">Sensor 1</option>', 'saves new SWT schedules with canonical metric names');
 expectFileExcludes('Dragino settings components', draginoSettingsSource, 'Invert direction', 'removes the ratio inversion toggle from the advanced settings');
 expectFileIncludes('SenseCapWeatherCard.tsx', senseCapWeatherCardSource, 'WindMonitor', 'opens a dedicated wind monitor from the S2120 card');

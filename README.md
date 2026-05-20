@@ -49,19 +49,19 @@ OSI Server  (optional cloud — remote monitoring & control)
 
 ## Supported Hardware
 
-| Device                       | Target config                      |
-| ---------------------------- | ---------------------------------- |
-| Raspberry Pi 5 (**primary**) | `full_raspberrypi_bcm27xx_bcm2712` |
-| Raspberry Pi 2/3             | `full_raspberrypi_bcm27xx_bcm2709` |
-| Raspberry Pi 1/Zero          | `full_raspberrypi_bcm27xx_bcm2708` |
-| RAK7391                      | `rak_rak7391`                      |
-| RAK7289v2                    | `rak_rak7289v2`                    |
-| RAK7268v2                    | `rak_rak7268v2`                    |
-| RAK7267                      | `rak_rak7267`                      |
-| Seeed SenseCAP M2            | `seeed_sensecap_m2`                |
-| Dragino LPS8N                | `dragino_lps8n`                    |
+| Device                        | Target config                       | Notes                        |
+| ----------------------------- | ----------------------------------- | ---------------------------- |
+| Raspberry Pi 5 (**primary**)  | `full_raspberrypi_bcm27xx_bcm2712`  |                              |
+| Raspberry Pi 4 / 400 / 3 / 2 | `full_raspberrypi_bcm27xx_bcm2709`  | 32-bit ARMv7 universal image |
+| Raspberry Pi 1/Zero           | `full_raspberrypi_bcm27xx_bcm2708`  |                              |
+| RAK7391                       | `rak_rak7391`                       |                              |
+| RAK7289v2                     | `rak_rak7289v2`                     |                              |
+| RAK7268v2                     | `rak_rak7268v2`                     |                              |
+| RAK7267                       | `rak_rak7267`                       |                              |
+| Seeed SenseCAP M2             | `seeed_sensecap_m2`                 |                              |
+| Dragino LPS8N                 | `dragino_lps8n`                     |                              |
 
-> Current active development targets only the Raspberry Pi 5 configuration.
+> Primary target is the Raspberry Pi 5 (`bcm2712`); a universal 32-bit image for Pi 2/3/4/400 is built from `bcm2709`.
 
 ---
 

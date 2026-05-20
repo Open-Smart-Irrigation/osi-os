@@ -401,9 +401,6 @@ export const lsn50API = {
   }): Promise<void> => {
     await api.put(`/api/devices/${deveui}/dendro-config`, payload);
   },
-  setChameleonConfig: async (deveui: string, payload: ChameleonConfigPayload): Promise<void> => {
-    await api.put(`/api/devices/${deveui}/chameleon-config`, payload);
-  },
   resetDendroBaseline: async (deveui: string): Promise<void> => {
     await api.post(`/api/devices/${deveui}/dendro-baseline/reset`);
   },
