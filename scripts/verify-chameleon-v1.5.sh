@@ -19,6 +19,7 @@ set -euo pipefail
 
 DB="${1:?path to farming.db required}"
 HOURS="${2:-13}"
+[[ "$HOURS" =~ ^[0-9]+$ ]] || { echo "HOURS must be a non-negative integer, got: $HOURS" >&2; exit 1; }
 DEUI="A84041A75D5E7CFB"
 
 [ -f "$DB" ] || { echo "DB not found: $DB" >&2; exit 1; }
