@@ -1,0 +1,24 @@
+--- a/readline/readline/configure
++++ b/readline/readline/configure
+@@ -5782,6 +5782,10 @@ $as_echo "#define HAVE_SIG_ATOMIC_T 1" >
+ 
+ fi
+ 
++if test "$ac_cv_type_signal" = void; then
++  bash_cv_void_sighandler=yes
++fi
++
+ { $as_echo "$as_me:${as_lineno-$LINENO}: checking whether signal handlers are of type void" >&5
+ $as_echo_n "checking whether signal handlers are of type void... " >&6; }
+ if ${bash_cv_void_sighandler+:} false; then :
+--- a/readline/readline/signals.c
++++ b/readline/readline/signals.c
+@@ -56,7 +56,7 @@
+ 
+ /* This typedef is equivalent to the one for Function; it allows us
+    to say SigHandler *foo = signal (SIGKILL, SIG_IGN); */
+-typedef RETSIGTYPE SigHandler ();
++typedef RETSIGTYPE SigHandler (int);
+ 
+ #if defined (HAVE_POSIX_SIGNALS)
+ typedef struct sigaction sighandler_cxt;
