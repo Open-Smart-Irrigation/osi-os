@@ -156,6 +156,8 @@ const schemaContract = {
     'f_port',
     'f_cnt',
     'calibration_status',
+    'data_invalid',
+    'comp_pending',
     'created_at',
   ],
   chameleon_calibrations: [
