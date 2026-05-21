@@ -75,6 +75,8 @@ npm run build
 cp -r build/* feeds/chirpstack-openwrt-feed/apps/node-red/files/gui/
 ```
 
+The Vite output directory for this project is `web/react-gui/build`.
+
 ### 6. Build the firmware image
 
 Inside the Docker devshell:

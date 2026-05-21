@@ -4,9 +4,7 @@ This is the release workflow for a fresh Raspberry Pi 5 OSI OS image. The only e
 
 ## Current Build Gate
 
-As of 2026-05-20 this workflow is prepared, but a clean release build should wait until the active Chameleon calibration work is finished and the calibration source is known. Do not produce a "fully functional" release image from a placeholder or empty Chameleon calibration snapshot.
-
-For a development-only image, the Chameleon seed gate may be skipped deliberately. For a release image, the gate is mandatory.
+As of 2026-05-20 this workflow is prepared for a clean release image. Chameleon calibration rows are allowed to be absent from the OSI OS seed database because the authoritative calibration source and admin token live on OSI Server. A complete OSI OS image must include the Chameleon schema, helper, GUI controls, refresh endpoint, sync worker, and runtime OSI Server calibration lookup path.
 
 ## Build Inputs
 
@@ -33,9 +31,7 @@ For a development-only image, the Chameleon seed gate may be skipped deliberatel
 
 ## Chameleon Calibration Seed
 
-Chameleon calibration is offline-first but not invented locally. The release image must bundle the current calibration snapshot once the active Chameleon calibration implementation is finalized.
-
-Run this before every release build:
+Chameleon calibration is offline-first but not invented locally. If a local admin-token calibration dump is available, it can be bundled before a release build:
 
 ```bash
 OSI_ADMIN_TOKEN=<token> node scripts/refresh-chameleon-calibrations.js
@@ -52,7 +48,7 @@ git diff -- database/seeds/chameleon-calibrations.sql \
   conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/db/farming.db
 ```
 
-`scripts/apply-chameleon-calibration-seed.js` intentionally fails if the generated seed contains zero rows. A build with zero bundled rows is allowed only for development, not for a fully functional release image.
+`scripts/apply-chameleon-calibration-seed.js` accepts zero bundled rows by default and records that the image will rely on runtime OSI Server calibration sync. Use `--require-rows` only for an explicit audit build where a local calibration dump is expected.
 
 ## Pre-Build Verification
 
@@ -77,7 +73,7 @@ npm run build
 cd ../..
 rm -rf feeds/chirpstack-openwrt-feed/apps/node-red/files/gui
 mkdir -p feeds/chirpstack-openwrt-feed/apps/node-red/files/gui
-cp -a web/react-gui/dist/. feeds/chirpstack-openwrt-feed/apps/node-red/files/gui/
+cp -a web/react-gui/build/. feeds/chirpstack-openwrt-feed/apps/node-red/files/gui/
 ```
 
 Do not proceed if any verifier fails. The Pi 5 profile is the canonical runtime payload; bcm2709 mirrors it byte-for-byte for OSI payload files.
@@ -133,6 +129,8 @@ grep -E 'location /(gui|auth|api|download)/' "$ROOT/etc/nginx/conf.d/node-red.lo
 sqlite3 "$ROOT/usr/share/db/farming.db" 'SELECT COUNT(*) FROM chameleon_calibrations;'
 ```
 
+The calibration row count may be `0` when the image is configured to fetch calibrations from OSI Server at runtime.
+
 The generated factory image is:
 
 ```text
@@ -172,4 +170,4 @@ Expected:
 - HTTPS `/gui/` needs nginx proxy locations, not only Node-RED on port `1880`.
 - A solid red LED / disappearing LAN can be power-related. The live Pi logged repeated `Undervoltage detected!`; use a known-good Pi 5 PSU before chasing app-level causes.
 - IP addresses can change after Wi-Fi reconnect. Confirm by MAC and `/etc/openwrt_release`, not by stale IP.
-- A build artifact is not complete until `sha256sum -c sha256sums` passes and the rootfs inspection confirms flows, DB, seed script, Node deps, nginx locations, and calibration rows.
+- A build artifact is not complete until `sha256sum -c sha256sums` passes and the rootfs inspection confirms flows, DB, seed script, Node deps, nginx locations, and Chameleon runtime calibration sync support.
