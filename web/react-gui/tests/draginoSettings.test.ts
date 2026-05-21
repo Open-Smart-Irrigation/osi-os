@@ -156,29 +156,29 @@ test('does not render generic ADC input when dendrometer is disabled', () => {
   assert.doesNotMatch(html, /ADC INPUT/);
 });
 
-test('renders absent Chameleon coefficients as blank values with workbook default placeholders', () => {
+test('renders Chameleon depth inputs without coefficient workbook controls', () => {
   const html = renderToStaticMarkup(
     React.createElement(DraginoChameleonSwtSection, {
       device: buildDevice({
         chameleon_enabled: 1,
-        chameleon_swt1_a: null,
-        chameleon_swt1_b: null,
-        chameleon_swt1_c: null,
+        chameleon_swt1_depth_cm: null,
+        chameleon_swt2_depth_cm: 30,
+        chameleon_swt3_depth_cm: null,
       }),
       onUpdate: () => {},
     }),
   );
   const dom = new JSDOM(html);
-  const coefficientA = dom.window.document.getElementById('chameleon-A8404101FD5ECF41-SWT1-a') as HTMLInputElement;
-  const coefficientB = dom.window.document.getElementById('chameleon-A8404101FD5ECF41-SWT1-b') as HTMLInputElement;
-  const coefficientC = dom.window.document.getElementById('chameleon-A8404101FD5ECF41-SWT1-c') as HTMLInputElement;
+  const swt1Depth = dom.window.document.getElementById('chameleon-A8404101FD5ECF41-SWT1-depth') as HTMLInputElement;
+  const swt2Depth = dom.window.document.getElementById('chameleon-A8404101FD5ECF41-SWT2-depth') as HTMLInputElement;
+  const swt3Depth = dom.window.document.getElementById('chameleon-A8404101FD5ECF41-SWT3-depth') as HTMLInputElement;
 
-  assert.equal(coefficientA.value, '');
-  assert.equal(coefficientB.value, '');
-  assert.equal(coefficientC.value, '');
-  assert.equal(coefficientA.placeholder, '10.71');
-  assert.equal(coefficientB.placeholder, '0.13');
-  assert.equal(coefficientC.placeholder, '7.18');
+  assert.equal(swt1Depth.value, '');
+  assert.equal(swt2Depth.value, '30');
+  assert.equal(swt3Depth.value, '');
+  assert.equal(swt1Depth.placeholder, '30');
+  assert.doesNotMatch(html, /Restore workbook defaults/);
+  assert.doesNotMatch(html, /Coefficient/);
 });
 
 test('treats aria-hidden="false" as focusable but excludes aria-hidden="true"', () => {

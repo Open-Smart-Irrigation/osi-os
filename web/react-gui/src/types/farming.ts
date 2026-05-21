@@ -77,7 +77,6 @@ export interface Device {
     chameleon_r2_ohm_raw?: number | null;
     chameleon_r3_ohm_raw?: number | null;
     chameleon_array_id?: string | null;
-    calibration_status?: 'calibrated' | 'pending' | 'unknown' | null;
     // SenseCAP S2120 weather station fields
     barometric_pressure_hpa?: number | null;
     wind_speed_mps?: number | null;

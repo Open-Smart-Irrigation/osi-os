@@ -139,6 +139,7 @@ export const DraginoChameleonSwtSection: React.FC<DraginoChameleonSwtSectionProp
   const [calibStatus, setCalibStatus] = useState<'calibrated' | 'pending' | 'unknown' | null>(null);
   const [calibSource, setCalibSource] = useState<string | null>(null);
   const [arrayId, setArrayId] = useState<string | null>(null);
+  const latestArrayId = device.latest_data?.chameleon_array_id ?? null;
 
   useEffect(() => {
     setInputs(buildInitialInputs(device));
@@ -152,10 +153,9 @@ export const DraginoChameleonSwtSection: React.FC<DraginoChameleonSwtSectionProp
   ]);
 
   useEffect(() => {
-    const latest = device.latest_data;
     setCalibStatus(device.calibration_status ?? null);
-    setArrayId(latest?.chameleon_array_id ?? null);
-  }, [device.calibration_status, device.latest_data?.chameleon_array_id]);
+    setArrayId(latestArrayId);
+  }, [device.calibration_status, latestArrayId]);
 
   const updateInput = (channelNumber: ChannelNumber, field: keyof ChannelInput, value: string) => {
     setInputs((current) => ({
