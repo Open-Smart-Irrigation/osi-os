@@ -8440,26 +8440,27 @@
   },
   {
     "id": "command-ack-http",
-    "type": "http request",
+    "type": "function",
     "z": "93b1537a596e0e6d",
-    "name": "POST Command ACKs to Cloud",
-    "method": "use",
-    "ret": "obj",
-    "paytoqs": "ignore",
-    "url": "",
-    "tls": "",
-    "persist": false,
-    "proxy": "",
-    "insecureHTTPParser": false,
-    "authType": "",
-    "senderr": false,
-    "headers": [],
+    "name": "POST Command ACKs to Cloud IPv4",
     "x": 700,
     "y": 1120,
     "wires": [
       [
         "command-ack-mark-delivered"
       ]
+    ],
+    "func": "return (async () => {\n  try {\n    const result = await osiCloudHttp.requestJsonIpv4({\n      method: msg.method || 'POST',\n      url: msg.url,\n      headers: msg.headers || {},\n      payload: msg.payload,\n      timeoutMs: Number(env.get('OSI_CLOUD_REST_TIMEOUT_MS') || 30000) || 30000\n    });\n    msg.statusCode = result.statusCode;\n    msg.headers = result.headers || {};\n    msg.payload = result.payload;\n    msg._cloudRestIpv4 = result.diagnostics;\n    return msg;\n  } catch (error) {\n    msg.statusCode = 0;\n    msg.headers = {};\n    msg.error = {\n      message: String(error.message || error),\n      code: error.code || null,\n      cloudRestIpv4: error.cloudRestIpv4 || null\n    };\n    msg.payload = {\n      error: 'Command ACK REST IPv4 request failed',\n      detail: String(error.message || error),\n      code: error.code || null\n    };\n    return msg;\n  }\n})();",
+    "outputs": 1,
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [
+      {
+        "var": "osiCloudHttp",
+        "module": "osi-cloud-http"
+      }
     ]
   },
   {
@@ -8467,7 +8468,7 @@
     "type": "function",
     "z": "93b1537a596e0e6d",
     "name": "Mark Command ACKs Delivered",
-    "func": "return (async()=>{\nif (!Array.isArray(msg._commandAckIds) || !msg._commandAckIds.length) return null;\nconst _db = new osiDb.Database('/data/db/farming.db');\nconst run = (sql, params) => new Promise((res,rej) => _db.run(sql, params || [], e => e?rej(e):res()));\nconst close = () => new Promise(res => _db.close(() => res()));\nconst ids = msg._commandAckIds.map((id) => Number(id)).filter((id) => Number.isFinite(id));\nif (!ids.length) { await close(); return null; }\nconst placeholders = ids.map(() => '?').join(',');\ntry {\n  if (msg.statusCode && msg.statusCode >= 200 && msg.statusCode < 300) {\n    await run('UPDATE command_ack_outbox SET delivered_at = ? WHERE id IN (' + placeholders + ')', [new Date().toISOString(), ...ids]);\n  } else {\n    const err = JSON.stringify({ statusCode: msg.statusCode || null, payload: msg.payload || null }).slice(0, 1000);\n    await run('UPDATE command_ack_outbox SET retry_count = retry_count + 1, last_error = ? WHERE id IN (' + placeholders + ')', [err, ...ids]);\n  }\n  await close();\n  return null;\n} catch (e) {\n  try { await close(); } catch (_) {}\n  node.warn('Mark Command ACKs Delivered failed: ' + String(e.message || e));\n  return null;\n}\n})();",
+    "func": "return (async()=>{\nif (!Array.isArray(msg._commandAckIds) || !msg._commandAckIds.length) return null;\nconst _db = new osiDb.Database('/data/db/farming.db');\nconst run = (sql, params) => new Promise((res,rej) => _db.run(sql, params || [], e => e?rej(e):res()));\nconst close = () => new Promise(res => _db.close(() => res()));\nconst ids = msg._commandAckIds.map((id) => Number(id)).filter((id) => Number.isFinite(id));\nif (!ids.length) { await close(); return null; }\nconst placeholders = ids.map(() => '?').join(',');\ntry {\n  if (msg.statusCode && msg.statusCode >= 200 && msg.statusCode < 300) {\n    await run('UPDATE command_ack_outbox SET delivered_at = ?, last_error = NULL WHERE id IN (' + placeholders + ')', [new Date().toISOString(), ...ids]);\n  } else {\n    const err = JSON.stringify({ statusCode: msg.statusCode || null, payload: msg.payload || null }).slice(0, 1000);\n    await run('UPDATE command_ack_outbox SET retry_count = retry_count + 1, last_error = ? WHERE id IN (' + placeholders + ')', [err, ...ids]);\n  }\n  await close();\n  return null;\n} catch (e) {\n  try { await close(); } catch (_) {}\n  node.warn('Mark Command ACKs Delivered failed: ' + String(e.message || e));\n  return null;\n}\n})();",
     "outputs": 1,
     "timeout": 0,
     "noerr": 0,
