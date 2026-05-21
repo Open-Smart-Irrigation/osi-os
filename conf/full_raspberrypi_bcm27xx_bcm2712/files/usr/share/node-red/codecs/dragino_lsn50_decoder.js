@@ -5,8 +5,8 @@ function decodeUplink(input) {
 }
 
 /*
- * Chameleon V1 keeps the stock MOD3 prefix, then appends a 44-byte,
- * big-endian payload. Byte 8 is the Chameleon payload version marker.
+ * Chameleon keeps the stock MOD3 prefix, then appends a big-endian
+ * payload. Byte 8 is the Chameleon payload version marker.
  */
 function readUInt16BE(bytes, offset) {
   return (bytes[offset]<<8 | bytes[offset + 1]);
@@ -39,6 +39,10 @@ function bytesToHex(bytes, offset, length) {
 
 function isChameleonV1Frame(bytes) {
   return bytes.length >= 44 && bytes[8] == 0x01;
+}
+
+function isChameleonV2Frame(bytes) {
+  return bytes.length >= 32 && bytes[8] == 0x02;
 }
 
 function readChameleonResistance(bytes, offset, dataInvalid, channelOpen) {
@@ -75,6 +79,34 @@ function decodeChameleonV1(decode, bytes) {
   decode.Chameleon_R2_Ohm_Raw = readChameleonResistance(bytes, 28, dataInvalid, decode.Chameleon_CH2_Open);
   decode.Chameleon_R3_Ohm_Raw = readChameleonResistance(bytes, 32, dataInvalid, decode.Chameleon_CH3_Open);
   decode.Chameleon_Array_ID = (dataInvalid || decode.Chameleon_ID_Fault) ? "NULL" : bytesToHex(bytes, 36, 8);
+}
+
+function decodeChameleonV2(decode, bytes) {
+  var status_flags = bytes[9];
+  var soil_temp_c_x100 = readInt16BE(bytes, 10);
+  var r1_ohm_comp = readUInt32BE(bytes, 12);
+  var r2_ohm_comp = readUInt32BE(bytes, 16);
+  var r3_ohm_comp = readUInt32BE(bytes, 20);
+  var open_ohm = 10000000;
+
+  decode.Chameleon_Payload_Version = bytes[8];
+  decode.Chameleon_Status_Flags = status_flags;
+  decode.Chameleon_Data_Invalid = (status_flags & 0x01) ? true : false;
+  decode.Chameleon_Temp_Fault = (status_flags & 0x02) ? true : false;
+  decode.Chameleon_ID_Fault = (status_flags & 0x04) ? true : false;
+  decode.Chameleon_CH1_Open = decode.Chameleon_Data_Invalid ? null : (r1_ohm_comp == open_ohm);
+  decode.Chameleon_CH2_Open = decode.Chameleon_Data_Invalid ? null : (r2_ohm_comp == open_ohm);
+  decode.Chameleon_CH3_Open = decode.Chameleon_Data_Invalid ? null : (r3_ohm_comp == open_ohm);
+
+  if(decode.Chameleon_Data_Invalid || decode.Chameleon_Temp_Fault || soil_temp_c_x100 == -12700)
+    decode.Chameleon_TempC = "NULL";
+  else
+    decode.Chameleon_TempC = parseFloat((soil_temp_c_x100 / 100).toFixed(2));
+
+  decode.Chameleon_R1_Ohm_Comp = decode.Chameleon_Data_Invalid || decode.Chameleon_CH1_Open ? "NULL" : r1_ohm_comp;
+  decode.Chameleon_R2_Ohm_Comp = decode.Chameleon_Data_Invalid || decode.Chameleon_CH2_Open ? "NULL" : r2_ohm_comp;
+  decode.Chameleon_R3_Ohm_Comp = decode.Chameleon_Data_Invalid || decode.Chameleon_CH3_Open ? "NULL" : r3_ohm_comp;
+  decode.Chameleon_Array_ID = (decode.Chameleon_Data_Invalid || decode.Chameleon_ID_Fault) ? "NULL" : bytesToHex(bytes, 24, 8);
 }
 
 function Decode(fPort, bytes, variables) {
@@ -139,7 +171,12 @@ if(fPort==0x02)
     decode.ADC_CH0V= (bytes[0]<<8 | bytes[1])/1000;
     decode.ADC_CH1V= (bytes[2]<<8 | bytes[3])/1000;
     decode.ADC_CH4V= (bytes[4]<<8 | bytes[5])/1000;
-    if(isChameleonV1Frame(bytes))
+    if(isChameleonV2Frame(bytes))
+    {
+      decode.BatV= bytes[7]/10;
+      decodeChameleonV2(decode, bytes);
+    }
+    else if(isChameleonV1Frame(bytes))
     {
       decode.BatV= bytes[7]/10;
       decodeChameleonV1(decode, bytes);

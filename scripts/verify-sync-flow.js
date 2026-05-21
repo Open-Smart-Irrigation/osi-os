@@ -955,7 +955,7 @@ if (!refreshInject) {
 
 const bootstrapNode = findNodeByName('Build Cloud Bootstrap');
 if (bootstrapNode) {
-  for (const key of ['sensorData', 'dendroReadings', 'dendroDaily', 'zoneRecommendations', 'zoneEnvironments', 'gatewayLocations', 'irrigationEvents']) {
+  for (const key of ['sensorData', 'dendroReadings', 'chameleonReadings', 'dendroDaily', 'zoneRecommendations', 'zoneEnvironments', 'gatewayLocations', 'irrigationEvents']) {
     if (!bootstrapNode.func.includes(`${key}:`) && !bootstrapNode.func.includes(`${key},`) && !bootstrapNode.func.includes(`const ${key} =`)) {
       fail(`bootstrap payload missing ${key}`);
     } else {
@@ -1327,6 +1327,8 @@ expectIncludes('Decode LSN50', "env.get('CHIRPSTACK_PROFILE_LSN50')", 'filters u
 expectIncludes('Decode LSN50', 'chameleonPayloadVersion', 'normalizes Chameleon payload version from decoder output');
 expectIncludes('Decode LSN50', 'chameleonR1OhmComp', 'normalizes Chameleon compensated resistance fields');
 expectIncludes('Decode LSN50', 'rawPayloadB64: msg._rawPayload', 'keeps the raw LoRaWAN payload base64 for Chameleon replay');
+expectFileIncludes('dragino_lsn50_decoder.js', lsn50CodecSource, 'function isChameleonV2Frame(bytes)', 'ships Chameleon V2 frame detection');
+expectFileIncludes('dragino_lsn50_decoder.js', lsn50CodecSource, 'decode.Chameleon_Data_Invalid', 'ships simplified Chameleon V2 status handling');
 expectIncludes('Apply Config', 'd.modeCodeToStore = d.observedModeCode != null ? d.observedModeCode : effectiveMode;', 'stores observed or configured LSN50 mode on ingest');
 expectIncludes('Apply Config', 'chameleon.buildChameleonSwtMetrics', 'derives Chameleon SWT metrics without bypassing dendrometer logic');
 expectIncludes('Apply Config', 'd.swt1Kpa = swt.swt1Kpa;', 'stores derived SWT1 in formattedData');
@@ -1353,6 +1355,15 @@ expectIncludes('Apply Config', 'dendro_baseline_pending = 0,', 'clears the pendi
 expectIncludesById('lsn50-config-query-fn', 'dendro_baseline_calibration_signature,', 'keeps LSN50 config SELECT valid before the Chameleon calibration-status subquery');
 expectIncludes('Insert Chameleon Reading', 'INSERT INTO chameleon_readings', 'persists decoded Chameleon readings locally');
 expectIncludes('Insert Chameleon Reading', 'if (!d || d.isChameleon !== true) return msg;', 'passes non-Chameleon LSN50 payloads downstream');
+expectIncludes('Sync Init Schema + Triggers', 'CHAMELEON_READING_APPENDED', 'mirrors Chameleon readings into sync outbox');
+expectIncludes('Sync Init Schema + Triggers', "'data_invalid', NEW.data_invalid", 'syncs Chameleon data_invalid status');
+expectIncludes('Build Cloud Bootstrap', 'const chameleonReadingsRows = await q([', 'loads bootstrap Chameleon history before reordering it');
+expectIncludes('Build Cloud Bootstrap', 'const chameleonReadings = chameleonReadingsRows.slice().reverse();', 'replays bootstrap Chameleon history oldest-to-newest');
+expectIncludes('Build Cloud Bootstrap', "'  cr.data_invalid,'", 'includes Chameleon data_invalid in bootstrap readings');
+expectIncludes('Build Cloud Bootstrap', 'FROM chameleon_readings cr', 'loads Chameleon readings from the diagnostic table during bootstrap');
+expectIncludes('Run Force Sync', 'const chameleonReadingsRows = await q([', 'loads force-sync Chameleon history before reordering it');
+expectIncludes('Run Force Sync', 'const chameleonReadings = chameleonReadingsRows.slice().reverse();', 'replays force-sync Chameleon history oldest-to-newest');
+expectIncludes('Run Force Sync', "'  cr.data_invalid,'", 'includes Chameleon data_invalid in force-sync readings');
 expectExcludes('Build Dendrometer Readings INSERT', 'd.isChameleon === true', 'the old Chameleon dendrometer insert skip');
 expectLibById('lsn50-decode-fn', 'dendro', 'osi-dendro-helper', 'imports osi-dendro-helper in Decode LSN50');
 expectLibById('lsn50-apply-config', 'dendro', 'osi-dendro-helper', 'imports osi-dendro-helper in Apply Config');
@@ -2142,6 +2153,11 @@ for (const seedDatabasePath of seedDatabasePaths) {
     deviceDataColumns.has('swt_1'),
     `${relativeSeedPath} includes swt_1 in the bundled device_data schema`,
     `${relativeSeedPath} is missing swt_1 in the bundled device_data schema`
+  );
+  expectCondition(
+    chameleonColumns.has('data_invalid'),
+    `${relativeSeedPath} includes data_invalid in the bundled chameleon_readings schema`,
+    `${relativeSeedPath} is missing data_invalid in the bundled chameleon_readings schema`
   );
   expectCondition(
     chameleonColumns.has('payload_b64'),

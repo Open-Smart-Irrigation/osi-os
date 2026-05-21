@@ -271,6 +271,18 @@ function all(sql) {
     }
   }
 
+  // V43 — data_invalid and comp_pending for Chameleon V2 firmware decoding.
+  for (const sql of [
+    'ALTER TABLE chameleon_readings ADD COLUMN data_invalid INTEGER DEFAULT 0',
+    'ALTER TABLE chameleon_readings ADD COLUMN comp_pending INTEGER DEFAULT 0'
+  ]) {
+    try {
+      await run(sql);
+    } catch (err) {
+      if (!/duplicate column name/i.test(String(err && err.message || err))) throw err;
+    }
+  }
+
   // V42 — drop per-device coefficient columns. The bundled DB no longer has
   // them; live DBs from pre-V42 builds must drop them so the new flows.json
   // queries don't try to SELECT non-existent columns. SQLite >= 3.35 supports
@@ -320,7 +332,7 @@ function all(sql) {
   for (const name of ['swt_1', 'swt_2', 'swt_3']) {
     if (!dataNames.has(name)) throw new Error('Chameleon device_data column is still missing after deploy repair: ' + name);
   }
-  for (const name of ['calibration_status', 'swt_1', 'swt_2', 'swt_3']) {
+  for (const name of ['calibration_status', 'swt_1', 'swt_2', 'swt_3', 'data_invalid', 'comp_pending']) {
     if (!readingsNames.has(name)) throw new Error('chameleon_readings.' + name + ' is still missing after deploy repair');
   }
   for (const name of ['chameleon_calibrations', 'chameleon_calibration_misses']) {
