@@ -161,6 +161,7 @@ function runQueued(method, args, mapper) {
       return mapped;
     }, (error) => {
       invokeCallback(callback, null, error);
+      if (typeof callback === 'function') return undefined;
       throw error;
     });
 }
