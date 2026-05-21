@@ -256,12 +256,19 @@ function all(sql) {
     reason     TEXT
   )`);
 
-  // V42 — calibration_status on chameleon_readings. Set by the decoder and the
-  // sync worker to mark whether each reading has a usable calibration.
-  try {
-    await run('ALTER TABLE chameleon_readings ADD COLUMN calibration_status TEXT');
-  } catch (err) {
-    if (!/duplicate column name/i.test(String(err && err.message || err))) throw err;
+  // V42 — calibration_status, swt_1/2/3, and chameleon_array_id additions.
+  for (const sql of [
+    'ALTER TABLE chameleon_readings ADD COLUMN calibration_status TEXT',
+    'ALTER TABLE chameleon_readings ADD COLUMN swt_1 REAL',
+    'ALTER TABLE chameleon_readings ADD COLUMN swt_2 REAL',
+    'ALTER TABLE chameleon_readings ADD COLUMN swt_3 REAL',
+    'ALTER TABLE devices ADD COLUMN chameleon_array_id TEXT'
+  ]) {
+    try {
+      await run(sql);
+    } catch (err) {
+      if (!/duplicate column name/i.test(String(err && err.message || err))) throw err;
+    }
   }
 
   // V42 — drop per-device coefficient columns. The bundled DB no longer has
@@ -305,15 +312,16 @@ function all(sql) {
     'chameleon_enabled',
     'chameleon_swt1_depth_cm',
     'chameleon_swt2_depth_cm',
-    'chameleon_swt3_depth_cm'
+    'chameleon_swt3_depth_cm',
+    'chameleon_array_id'
   ]) {
     if (!deviceNames.has(name)) throw new Error('Chameleon devices column is still missing after deploy repair: ' + name);
   }
   for (const name of ['swt_1', 'swt_2', 'swt_3']) {
     if (!dataNames.has(name)) throw new Error('Chameleon device_data column is still missing after deploy repair: ' + name);
   }
-  if (!readingsNames.has('calibration_status')) {
-    throw new Error('chameleon_readings.calibration_status is still missing after deploy repair');
+  for (const name of ['calibration_status', 'swt_1', 'swt_2', 'swt_3']) {
+    if (!readingsNames.has(name)) throw new Error('chameleon_readings.' + name + ' is still missing after deploy repair');
   }
   for (const name of ['chameleon_calibrations', 'chameleon_calibration_misses']) {
     if (!tableNames.has(name)) throw new Error('Chameleon global table is still missing after deploy repair: ' + name);
