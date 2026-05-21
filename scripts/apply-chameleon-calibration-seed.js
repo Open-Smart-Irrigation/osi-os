@@ -13,6 +13,7 @@ const dbPaths = [
   'conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/db/farming.db',
   'conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/db/farming.db',
 ];
+const requireRows = process.argv.includes('--require-rows') || process.env.REQUIRE_CHAMELEON_CALIBRATION_ROWS === '1';
 
 function sqlite(dbPath, sql) {
   return execFileSync('sqlite3', [dbPath, sql], { encoding: 'utf8' }).trim();
@@ -27,6 +28,13 @@ if (!fs.existsSync(seedPath)) fail(`missing seed file: ${seedPath}`);
 const seed = fs.readFileSync(seedPath, 'utf8');
 const insertCount = (seed.match(/INSERT OR IGNORE INTO chameleon_calibrations/g) || []).length;
 
+if (insertCount === 0 && requireRows) {
+  fail(
+    'database/seeds/chameleon-calibrations.sql contains no calibration rows. ' +
+    'Run OSI_ADMIN_TOKEN=<token> node scripts/refresh-chameleon-calibrations.js first.',
+  );
+}
+
 for (const rel of dbPaths) {
   const dbPath = path.join(repoRoot, rel);
   if (!fs.existsSync(dbPath)) fail(`missing database: ${rel}`);
@@ -36,10 +44,7 @@ for (const rel of dbPaths) {
 }
 
 if (insertCount === 0) {
-  fail(
-    'database/seeds/chameleon-calibrations.sql contains no calibration rows. ' +
-    'Run OSI_ADMIN_TOKEN=<token> node scripts/refresh-chameleon-calibrations.js first.',
-  );
+  console.log('No bundled Chameleon calibration rows found; image will rely on runtime OSI Server calibration sync.');
+} else {
+  console.log(`Applied ${insertCount} bundled Chameleon calibration row(s).`);
 }
-
-console.log(`Applied ${insertCount} bundled Chameleon calibration row(s).`);

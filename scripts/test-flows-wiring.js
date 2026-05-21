@@ -100,6 +100,29 @@ if (leaks.length > 0) {
 }
 console.log('OK  osiDb.Database: every opening node closes it');
 
+// === Function-node library declaration audit ===
+
+const helperGlobals = [
+    { varName: 'osiDb', moduleName: 'osi-db-helper', rx: /\bosiDb\./ },
+    { varName: 'osiCloudHttp', moduleName: 'osi-cloud-http', rx: /\bosiCloudHttp\./ },
+    { varName: 'chameleon', moduleName: 'osi-chameleon-helper', rx: /\bchameleon\./ },
+    { varName: 'dendro', moduleName: 'osi-dendro-helper', rx: /\bdendro\./ },
+];
+
+for (const node of flows) {
+    if (node.type !== 'function' || typeof node.func !== 'string') continue;
+    const libs = Array.isArray(node.libs) ? node.libs : [];
+    for (const { varName, moduleName, rx } of helperGlobals) {
+        if (!rx.test(node.func)) continue;
+        if (!libs.some((lib) => lib.var === varName && lib.module === moduleName)) {
+            failures.push(`${node.name || '(unnamed)'} [${node.id}] references ${varName} without libs entry ${moduleName}`);
+        }
+    }
+}
+if (!failures.some((failure) => failure.includes('without libs entry'))) {
+    console.log('OK  function node helper globals all declare matching libs entries');
+}
+
 // === WS2/WS3 misc wiring invariants ===
 
 for (const node of flows) {
@@ -113,7 +136,9 @@ for (const node of flows) {
             failures.push(label + ' defines gateway migration preflight without a parameterized run helper');
         }
     }
-    if (node.id === 'sync-force-build' && !/req\.setTimeout\(timeoutMs/.test(node.func)) {
+    if (node.id === 'sync-force-build'
+        && !/req\.setTimeout\(timeoutMs/.test(node.func)
+        && !/timeoutMs:\s*Number\(env\.get\('OSI_CLOUD_REST_TIMEOUT_MS'/.test(node.func)) {
         failures.push(label + ' requestJson lacks a timeout guard');
     }
     if (node.id === 'command-ack-build-batch' && !/gatewayMigrationPendingBootstrap/.test(node.func)) {

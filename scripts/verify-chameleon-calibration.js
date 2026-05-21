@@ -3,15 +3,56 @@
 
 const path = require('path');
 const fs = require('fs');
-const sqlite = require('better-sqlite3');
+const os = require('os');
+const { execFileSync } = require('child_process');
 const helper = require(path.resolve(__dirname, '..',
   'conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-chameleon-helper'));
 
 function fail(msg) { console.error('FAIL:', msg); process.exit(1); }
 function ok(msg) { console.log('ok -', msg); }
 
+function sqlLiteral(value) {
+  if (value === null || value === undefined) return 'NULL';
+  if (typeof value === 'number') return Number.isFinite(value) ? String(value) : 'NULL';
+  return `'${String(value).replace(/'/g, "''")}'`;
+}
+
+function bindSql(sql, params) {
+  let index = 0;
+  // Verifier-only binder: replaces value placeholders, not SQL operators or quoted question marks.
+  return sql.replace(/\?/g, () => {
+    if (index >= params.length) fail('not enough SQL parameters for verifier query');
+    return sqlLiteral(params[index++]);
+  });
+}
+
+function createCliDb() {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'osi-chameleon-verify-'));
+  const dbPath = path.join(dir, 'verify.db');
+  return {
+    exec(sql) {
+      execFileSync('sqlite3', [dbPath], { input: sql, encoding: 'utf8', stdio: ['pipe', 'pipe', 'inherit'] });
+    },
+    prepare(sql) {
+      return {
+        run: (...params) => {
+          execFileSync('sqlite3', [dbPath, bindSql(sql, params)], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'inherit'] });
+        },
+        get: (...params) => {
+          const output = execFileSync('sqlite3', ['-json', dbPath, bindSql(sql, params)], { encoding: 'utf8' }).trim();
+          const rows = output ? JSON.parse(output) : [];
+          return rows[0];
+        },
+      };
+    },
+    cleanup() {
+      fs.rmSync(dir, { recursive: true, force: true });
+    },
+  };
+}
+
 function setup() {
-  const db = sqlite(':memory:');
+  const db = createCliDb();
   db.exec(fs.readFileSync(path.resolve(__dirname, '..', 'database/seed-blank.sql'), 'utf8'));
   db.exec("INSERT INTO users(username, password_hash, created_at) VALUES('test-user','hash',datetime('now'))");
   const userId = db.prepare("SELECT id FROM users WHERE username = 'test-user'").get().id;
@@ -22,8 +63,9 @@ function setup() {
 
 (function () {
   const db = setup();
-  const ts = '2026-05-19T12:00:00.000Z';
-  const arrayId = '28F8B2B40F0000C1';
+  try {
+    const ts = '2026-05-19T12:00:00.000Z';
+    const arrayId = '28F8B2B40F0000C1';
 
   // Test 1: Reading with unknown array_id — calibrationFromArrayId returns null
   db.prepare("INSERT INTO chameleon_readings(deveui, recorded_at, array_id, r1_ohm_comp, r2_ohm_comp, r3_ohm_comp) VALUES(?, ?, ?, ?, ?, ?)")
@@ -47,6 +89,9 @@ function setup() {
   ok('kPa computed for all 3 sensors after calibration insert');
 
   // Test 3: Mixed-case input normalized to uppercase
+  if (helper.normalizeArrayId(arrayId.toLowerCase()) !== arrayId) {
+    fail('normalizeArrayId should canonicalize mixed-case array_id to uppercase');
+  }
   if (helper.calibrationFromArrayId(db, arrayId.toLowerCase()) === null) {
     fail('mixed-case array_id should normalize and hit cache');
   }
@@ -78,5 +123,8 @@ function setup() {
   if (ped.calibrationStatus !== 'pending') fail('expected calibrationStatus=pending, got ' + ped.calibrationStatus);
   ok('calibrationStatus is pending when enabled without calibration');
 
-  console.log('verify-chameleon-calibration PASS');
+    console.log('verify-chameleon-calibration PASS');
+  } finally {
+    db.cleanup();
+  }
 })();

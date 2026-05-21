@@ -1350,13 +1350,17 @@ expectIncludes('Apply Config', 'const delta = dendro.computeDendroDeltaMm({', 'r
 expectIncludes('Apply Config', 'const stemChange = dendro.computeDendroStemChangeUm({', 'derives a baseline-relative stem change signal for the basic card and monitor');
 expectIncludes('Apply Config', 'd.dendroStemChangeUm = stemChange.stemChangeUm;', 'stores the baseline-relative stem change alongside mechanical position');
 expectIncludes('Apply Config', 'dendro_baseline_pending = 0,', 'clears the pending-baseline flag when a new valid stem-change baseline is persisted');
+expectIncludesById('lsn50-config-query-fn', 'dendro_baseline_calibration_signature,', 'keeps LSN50 config SELECT valid before the Chameleon calibration-status subquery');
 expectIncludes('Insert Chameleon Reading', 'INSERT INTO chameleon_readings', 'persists decoded Chameleon readings locally');
 expectIncludes('Insert Chameleon Reading', 'if (!d || d.isChameleon !== true) return msg;', 'passes non-Chameleon LSN50 payloads downstream');
 expectExcludes('Build Dendrometer Readings INSERT', 'd.isChameleon === true', 'the old Chameleon dendrometer insert skip');
 expectLibById('lsn50-decode-fn', 'dendro', 'osi-dendro-helper', 'imports osi-dendro-helper in Decode LSN50');
 expectLibById('lsn50-apply-config', 'dendro', 'osi-dendro-helper', 'imports osi-dendro-helper in Apply Config');
 expectLibById('lsn50-apply-config', 'chameleon', 'osi-chameleon-helper', 'imports osi-chameleon-helper in Apply Config');
+expectIncludesById('lsn50-apply-config', 'await loadChameleonCalibration(d.chameleonArrayId)', 'loads Chameleon calibration through the async SQLite helper in Apply Config');
+expectExcludesById('lsn50-apply-config', 'chameleon.calibrationFromArrayId(cdb', 'does not call the synchronous Chameleon calibration helper with osi-db-helper');
 expectLibById('chameleon-readings-insert-fn', 'osiDb', 'osi-db-helper', 'imports osi-db-helper in Insert Chameleon Reading');
+expectIncludesById('chameleon-readings-insert-fn', 'calibration_status)', 'persists Chameleon calibration_status when inserting readings');
 expectWireById('lsn50-zone-agg-fn', 'chameleon-readings-insert-fn', 'routes LSN50 flow through Chameleon insert');
 expectWireById('chameleon-readings-insert-fn', 'dendro-readings-insert-fn', 'passes Chameleon insert output to dendrometer insert');
 expectLibById('8809bb5239dfb3d4', 'dendro', 'osi-dendro-helper', 'imports osi-dendro-helper in Build Telemetry');
