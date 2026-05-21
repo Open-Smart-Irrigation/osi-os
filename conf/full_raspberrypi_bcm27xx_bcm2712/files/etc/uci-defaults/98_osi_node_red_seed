@@ -15,6 +15,14 @@ if [ -f "$SRC/settings.js" ] && [ ! -f "$DST/settings.js" ]; then
     cp "$SRC/settings.js" "$DST/settings.js"
 fi
 
+if [ -f "$SRC/package.json" ] && [ ! -f "$DST/package.json" ]; then
+    cp "$SRC/package.json" "$DST/package.json"
+fi
+
+if [ -f "$SRC/package-lock.json" ] && [ ! -f "$DST/package-lock.json" ]; then
+    cp "$SRC/package-lock.json" "$DST/package-lock.json"
+fi
+
 if [ -d "$SRC/codecs" ]; then
     mkdir -p "$DST/codecs"
     cp -a "$SRC/codecs/." "$DST/codecs/"
@@ -29,7 +37,8 @@ rm -rf "$DST/node_modules/sqlite3" "$DST/node_modules/node-red-node-sqlite"
 
 for module in osi-chameleon-helper osi-chirpstack-helper osi-cloud-http osi-db-helper osi-dendro-helper; do
     if [ -d "$SRC/$module" ]; then
-        rm -rf "$DST/node_modules/$module"
+        rm -rf "$DST/$module" "$DST/node_modules/$module"
+        cp -a "$SRC/$module" "$DST/$module"
         cp -a "$SRC/$module" "$DST/node_modules/$module"
     fi
 done

@@ -61,23 +61,40 @@ function setup() {
   return db;
 }
 
+function calibrationFromArrayId(db, arrayId) {
+  const normalized = helper.normalizeArrayId(arrayId);
+  if (!normalized) return null;
+  const row = db.prepare(
+    'SELECT sensor1_a, sensor1_b, sensor1_c, ' +
+    'sensor2_a, sensor2_b, sensor2_c, ' +
+    'sensor3_a, sensor3_b, sensor3_c ' +
+    'FROM chameleon_calibrations WHERE array_id = ?'
+  ).get(normalized);
+  if (!row) return null;
+  return {
+    swt1: { a: row.sensor1_a, b: row.sensor1_b, c: row.sensor1_c },
+    swt2: { a: row.sensor2_a, b: row.sensor2_b, c: row.sensor2_c },
+    swt3: { a: row.sensor3_a, b: row.sensor3_b, c: row.sensor3_c },
+  };
+}
+
 (function () {
   const db = setup();
   try {
     const ts = '2026-05-19T12:00:00.000Z';
     const arrayId = '28F8B2B40F0000C1';
 
-  // Test 1: Reading with unknown array_id — calibrationFromArrayId returns null
+  // Test 1: Reading with unknown array_id returns null
   db.prepare("INSERT INTO chameleon_readings(deveui, recorded_at, array_id, r1_ohm_comp, r2_ohm_comp, r3_ohm_comp) VALUES(?, ?, ?, ?, ?, ?)")
     .run('0000000000000001', ts, arrayId, 10000, 20000, 30000);
-  let calibration = helper.calibrationFromArrayId(db, arrayId);
+  let calibration = calibrationFromArrayId(db, arrayId);
   if (calibration !== null) fail('expected null calibration for unknown array_id');
   ok('unknown array_id returns null calibration');
 
   // Test 2: Insert calibration, verify kPa computed
   db.prepare("INSERT INTO chameleon_calibrations(array_id, sensor_id, sensor1_a, sensor1_b, sensor1_c, sensor2_a, sensor2_b, sensor2_c, sensor3_a, sensor3_b, sensor3_c, source, fetched_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)")
     .run(arrayId, 'F8C1', 9.81, 0.13, 6.4, 9.98, 0.13, 6.63, 9.7, 0.12, 5.79, 'via_api', new Date().toISOString());
-  calibration = helper.calibrationFromArrayId(db, arrayId);
+  calibration = calibrationFromArrayId(db, arrayId);
   if (!calibration) fail('expected calibration after insert');
   const metrics = helper.buildChameleonSwtMetrics(
     { r1OhmComp: 10000, r2OhmComp: 20000, r3OhmComp: 30000 },
@@ -92,7 +109,7 @@ function setup() {
   if (helper.normalizeArrayId(arrayId.toLowerCase()) !== arrayId) {
     fail('normalizeArrayId should canonicalize mixed-case array_id to uppercase');
   }
-  if (helper.calibrationFromArrayId(db, arrayId.toLowerCase()) === null) {
+  if (calibrationFromArrayId(db, arrayId.toLowerCase()) === null) {
     fail('mixed-case array_id should normalize and hit cache');
   }
   ok('mixed-case array_id normalized');

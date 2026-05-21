@@ -20,6 +20,7 @@ const osiBootstrapInitPath = path.resolve(__dirname, '..', 'conf', 'full_raspber
 const osiBootstrapEnablePath = path.resolve(__dirname, '..', 'conf', 'full_raspberrypi_bcm27xx_bcm2712', 'files', 'etc', 'uci-defaults', '95_osi_bootstrap_enable');
 const sysupgradeConfPath = path.resolve(__dirname, '..', 'conf', 'full_raspberrypi_bcm27xx_bcm2712', 'files', 'etc', 'sysupgrade.conf');
 const osiDbSeedPath = path.resolve(__dirname, '..', 'conf', 'full_raspberrypi_bcm27xx_bcm2712', 'files', 'etc', 'uci-defaults', '97_osi_db_seed');
+const osiNodeRedSeedPath = path.resolve(__dirname, '..', 'conf', 'full_raspberrypi_bcm27xx_bcm2712', 'files', 'etc', 'uci-defaults', '98_osi_node_red_seed');
 const installOsiOsPath = path.resolve(__dirname, '..', 'scripts', 'install-osi-os.sh');
 const seedSqlPath = path.resolve(__dirname, '..', 'database', 'seed-blank.sql');
 const stregaCodecPath = path.resolve(__dirname, '..', 'conf', 'full_raspberrypi_bcm27xx_bcm2712', 'files', 'usr', 'share', 'node-red', 'codecs', 'strega_gen1_decoder.js');
@@ -1011,6 +1012,9 @@ expectIncludes('Build Sync State', 'dbHealth: {', 'returns a DB health block in 
 expectIncludes('Build Sync State', "journalMode: helperHealth.journalMode || null", 'returns SQLite journal mode in sync state');
 expectIncludes('Build Sync State', "quickCheck: quickCheck.status", 'returns quick-check status in sync state');
 expectIncludes('Build Sync State', "lastError: helperHealth.lastError || null", 'returns helper DB errors in sync state');
+expectIncludes('Build Sync State', 'let _db;', 'keeps DB close handling safe when auth fails before DB open');
+expectIncludes('Build Sync State', 'const statusCode = Number(e.statusCode || e.status || 500) || 500;', 'preserves auth error status codes in sync state responses');
+expectIncludes('Build Sync State', "statusCode === 401\n    ? { message: 'Unauthorized' }", 'returns a bounded 401 response for unauthenticated sync state requests');
 expectIncludes('Build Sync State', 'linkedAuthPackageValid', 'reports linked-auth package validity in sync state');
 expectIncludes('Build Sync State', 'linkedAuthRepairRequired', 'reports linked-auth repair requirements in sync state');
 expectIncludes('Build Sync State', 'migrationCandidateSources', 'reports gateway migration candidate sources in sync state');
@@ -2270,6 +2274,20 @@ expectFileIncludes('97_osi_db_seed', osiDbSeedScript, '/usr/share/db/farming.db'
 expectFileIncludes('97_osi_db_seed', osiDbSeedScript, '/data/db/farming.db', '97_osi_db_seed seeds to /data/db/farming.db');
 expectFileIncludes('97_osi_db_seed', osiDbSeedScript, '[ -f "$DATA_DB" ]', '97_osi_db_seed skips seed when target DB exists');
 expectFileExcludes('97_osi_db_seed', osiDbSeedScript, 'cp --force', '97_osi_db_seed must not force-overwrite existing DB');
+
+// --- 98_osi_node_red_seed ---
+let osiNodeRedSeedScript = '';
+if (fs.existsSync(osiNodeRedSeedPath)) {
+  osiNodeRedSeedScript = fs.readFileSync(osiNodeRedSeedPath, 'utf8');
+  console.log('OK 98_osi_node_red_seed uci-defaults script present');
+} else {
+  fail(`missing 98_osi_node_red_seed at ${osiNodeRedSeedPath}`);
+}
+expectFileIncludes('98_osi_node_red_seed', osiNodeRedSeedScript, 'cp "$SRC/package.json" "$DST/package.json"', 'seeds Node-RED package manifest before runtime startup');
+expectFileIncludes('98_osi_node_red_seed', osiNodeRedSeedScript, 'cp "$SRC/package-lock.json" "$DST/package-lock.json"', 'seeds Node-RED package lock before runtime startup');
+expectFileIncludes('98_osi_node_red_seed', osiNodeRedSeedScript, 'cp -a "$SRC/$module" "$DST/$module"', 'seeds local helper package directories for file dependencies');
+expectFileIncludes('98_osi_node_red_seed', osiNodeRedSeedScript, 'cp -a "$SRC/$module" "$DST/node_modules/$module"', 'seeds local helper packages into runtime node_modules');
+expectFileIncludes('98_osi_node_red_seed', osiNodeRedSeedScript, 'rm -rf "$DST/$module" "$DST/node_modules/$module"', 'replaces stale helper copies in both package locations');
 
 // --- install-osi-os.sh ---
 if (fs.existsSync(installOsiOsPath)) {
