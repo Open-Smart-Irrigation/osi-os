@@ -1564,6 +1564,11 @@ expectIncludesById('put-chameleon-enabled-auth-fn', "const enabled = parseChamel
 expectIncludesById('put-chameleon-enabled-auth-fn', "enabled must be a boolean, 1, 0, 'true', 'false', '1', or '0'", 'returns a 400 for invalid Chameleon enabled values');
 expectIncludesById('put-chameleon-enabled-auth-fn', "type_id = 'DRAGINO_LSN50'", 'limits Chameleon enabled updates to LSN50 devices');
 expectExcludesById('put-chameleon-enabled-auth-fn', 'sync_version = COALESCE(sync_version, 0) + 1', 'keeps Chameleon enabled as local-only edge config until a server sync contract exists');
+expectIncludesById('8b93fa005d78e25f', 'verifyBearer', 'chameleon-depth-auth uses HMAC verifyBearer — not global.get(authCheck)');
+expectExcludesById('8b93fa005d78e25f', "global.get('authCheck')", 'chameleon-depth-auth does not call the dead authCheck global');
+expectIncludesById('44e7d74ff3668e01', 'verifyBearer', 'chameleon-refresh-auth uses HMAC verifyBearer — not global.get(authCheck)');
+expectExcludesById('44e7d74ff3668e01', "global.get('authCheck')", 'chameleon-refresh-auth does not call the dead authCheck global');
+expectIncludesById('bf93cd55db0eb57f', 'COALESCE(sync_version, 0) + 1', 'chameleon-depth-save bumps sync_version to trigger the outbox on depth changes');
 expectIncludesById('d0b2b1c1a937e16d', 'COALESCE(dd.swt_3, NULL)', 'scheduler can evaluate Chameleon SWT channel 3');
 expectIncludesById('d0b2b1c1a937e16d', "ds.type_id = 'DRAGINO_LSN50' AND COALESCE(ds.chameleon_enabled,0) = 1", 'scheduler includes Chameleon-enabled LSN50 devices');
 expectIncludesById('d0b2b1c1a937e16d', 'CASE WHEN dd.swt_3 IS NULL THEN 0 ELSE 1 END', 'scheduler SWT average counts Chameleon channel 3 only when present');
@@ -1774,6 +1779,12 @@ expectIncludes('Sync Init Schema + Triggers', "COALESCE(NEW.soil_moisture_probe_
 expectIncludes('Sync Init Schema + Triggers', "COALESCE(NEW.soil_moisture_probe_depths_configured,0) <> COALESCE(OLD.soil_moisture_probe_depths_configured,0)", 'queues device outbox events when Kiwi soil depth readiness changes locally');
 expectIncludes('Sync Init Schema + Triggers', "'soil_moisture_probe_depths_json', json(COALESCE(NEW.soil_moisture_probe_depths_json, '{}'))", 'mirrors Kiwi soil depth JSON in device outbox payloads');
 expectIncludes('Sync Init Schema + Triggers', "'soil_moisture_probe_depths_configured', COALESCE(NEW.soil_moisture_probe_depths_configured, 0)", 'mirrors Kiwi soil depth readiness in device outbox payloads');
+expectIncludes('Sync Init Schema + Triggers', "COALESCE(NEW.chameleon_swt1_depth_cm,-1) <> COALESCE(OLD.chameleon_swt1_depth_cm,-1)", 'queues device outbox events when Chameleon SWT1 depth changes locally');
+expectIncludes('Sync Init Schema + Triggers', "COALESCE(NEW.chameleon_swt2_depth_cm,-1) <> COALESCE(OLD.chameleon_swt2_depth_cm,-1)", 'queues device outbox events when Chameleon SWT2 depth changes locally');
+expectIncludes('Sync Init Schema + Triggers', "COALESCE(NEW.chameleon_swt3_depth_cm,-1) <> COALESCE(OLD.chameleon_swt3_depth_cm,-1)", 'queues device outbox events when Chameleon SWT3 depth changes locally');
+expectIncludes('Sync Init Schema + Triggers', "'chameleon_swt1_depth_cm', NEW.chameleon_swt1_depth_cm", 'mirrors Chameleon SWT1 depth in device outbox payloads');
+expectIncludes('Sync Init Schema + Triggers', "'chameleon_swt2_depth_cm', NEW.chameleon_swt2_depth_cm", 'mirrors Chameleon SWT2 depth in device outbox payloads');
+expectIncludes('Sync Init Schema + Triggers', "'chameleon_swt3_depth_cm', NEW.chameleon_swt3_depth_cm", 'mirrors Chameleon SWT3 depth in device outbox payloads');
 expectIncludes('Auth + Save Soil Moisture Depths', 'soil_moisture_probe_depths_json = ', 'stores Kiwi soil depth JSON through the local edge endpoint');
 expectIncludes('Auth + Save Soil Moisture Depths', 'soil_moisture_probe_depths_configured = 1', 'marks Kiwi soil depths as configured through the local edge endpoint');
 expectExcludes('Auth + Save Soil Moisture Depths', "node.error('Failed to save soil moisture depths: ' + e.message, msg);", 'soil-depth error forwarding into the tab-wide HTTP catch path');
