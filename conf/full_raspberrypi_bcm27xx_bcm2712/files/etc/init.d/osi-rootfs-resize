@@ -1,0 +1,26 @@
+#!/bin/sh /etc/rc.common
+
+# Run before Node-RED so filesystem growth happens before write-heavy services.
+START=08
+STOP=
+USE_PROCD=0
+
+NEEDS_RESIZE=/etc/osi-rootfs-grow-needs-resize
+STAMP=/etc/osi-rootfs-grow.partitioned
+
+start() {
+  [ -f "$NEEDS_RESIZE" ] || return 0
+  ROOT_SRC="$(findmnt -n -o SOURCE /overlay 2>/dev/null || findmnt -n -o SOURCE / 2>/dev/null)"
+  case "$ROOT_SRC" in
+    /dev/mmcblk0p2) : ;;
+    *) logger -t osi-rootfs-grow "unexpected root source $ROOT_SRC after partition grow; leaving marker"; return 0 ;;
+  esac
+
+  if resize2fs "$ROOT_SRC"; then
+    rm -f "$NEEDS_RESIZE"
+    touch "$STAMP"
+    logger -t osi-rootfs-grow "filesystem grown; partition stamp committed"
+  else
+    logger -t osi-rootfs-grow "resize2fs failed; will retry on next boot"
+  fi
+}

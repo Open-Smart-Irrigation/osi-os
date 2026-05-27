@@ -18,6 +18,12 @@ const chirpstackBootstrapPath = path.resolve(__dirname, 'chirpstack-bootstrap.js
 const chirpstackBootstrapOverlayPath = path.resolve(__dirname, '..', 'conf', 'full_raspberrypi_bcm27xx_bcm2712', 'files', 'usr', 'share', 'node-red', 'chirpstack-bootstrap.js');
 const osiBootstrapInitPath = path.resolve(__dirname, '..', 'conf', 'full_raspberrypi_bcm27xx_bcm2712', 'files', 'etc', 'init.d', 'osi-bootstrap');
 const osiBootstrapEnablePath = path.resolve(__dirname, '..', 'conf', 'full_raspberrypi_bcm27xx_bcm2712', 'files', 'etc', 'uci-defaults', '95_osi_bootstrap_enable');
+const rootfsGrowDefault2712Path = path.resolve(__dirname, '..', 'conf', 'full_raspberrypi_bcm27xx_bcm2712', 'files', 'etc', 'uci-defaults', '90_osi_rootfs_grow');
+const rootfsGrowDefault2709Path = path.resolve(__dirname, '..', 'conf', 'full_raspberrypi_bcm27xx_bcm2709', 'files', 'etc', 'uci-defaults', '90_osi_rootfs_grow');
+const rootfsResizeInit2712Path = path.resolve(__dirname, '..', 'conf', 'full_raspberrypi_bcm27xx_bcm2712', 'files', 'etc', 'init.d', 'osi-rootfs-resize');
+const rootfsResizeInit2709Path = path.resolve(__dirname, '..', 'conf', 'full_raspberrypi_bcm27xx_bcm2709', 'files', 'etc', 'init.d', 'osi-rootfs-resize');
+const fullRpi2712ConfigPath = path.resolve(__dirname, '..', 'conf', 'full_raspberrypi_bcm27xx_bcm2712', '.config');
+const fullRpi2709ConfigPath = path.resolve(__dirname, '..', 'conf', 'full_raspberrypi_bcm27xx_bcm2709', '.config');
 const sysupgradeConfPath = path.resolve(__dirname, '..', 'conf', 'full_raspberrypi_bcm27xx_bcm2712', 'files', 'etc', 'sysupgrade.conf');
 const osiDbSeedPath = path.resolve(__dirname, '..', 'conf', 'full_raspberrypi_bcm27xx_bcm2712', 'files', 'etc', 'uci-defaults', '97_osi_db_seed');
 const osiNodeRedSeedPath = path.resolve(__dirname, '..', 'conf', 'full_raspberrypi_bcm27xx_bcm2712', 'files', 'etc', 'uci-defaults', '98_osi_node_red_seed');
@@ -397,6 +403,14 @@ function expectFileExcludes(fileLabel, content, needle, description) {
     fail(`${fileLabel} still contains ${description}`);
   } else {
     console.log(`OK ${fileLabel} removed ${description}`);
+  }
+}
+
+function expectFileExists(filePath, description) {
+  if (!fs.existsSync(filePath)) {
+    fail(`missing ${description} at ${filePath}`);
+  } else {
+    console.log(`OK ${description}`);
   }
 }
 
@@ -2342,6 +2356,29 @@ expectFileIncludes('99_set_sx1301_gateway_id', sx1301GatewayDefaultScript, 'gate
 expectFileIncludes('99_set_sx1301_gateway_id', sx1301GatewayDefaultScript, 'resolve_fallback_gateway_id()', 'keeps a single MAC-derived fallback path for first-boot concentratord seeding');
 expectFileExcludes('99_set_sx1301_gateway_id', sx1301GatewayDefaultScript, "SECTION='chirpstack-concentratord.@sx1302[0]'", 'hard-coded sx1302 seeding outside active-chipset-aware logic');
 expectFileExcludes('99_set_sx1301_gateway_id', sx1301GatewayDefaultScript, "SECTION='chirpstack-concentratord.@sx1301[0]'", 'hard-coded sx1301 seeding outside active-chipset-aware logic');
+
+// --- rootfs grow helper ---
+expectFileExists(rootfsGrowDefault2712Path, 'bcm2712 ships rootfs grow uci-default');
+expectFileExists(rootfsGrowDefault2709Path, 'bcm2709 ships rootfs grow uci-default');
+expectFileExists(rootfsResizeInit2712Path, 'bcm2712 ships rootfs resize init');
+expectFileExists(rootfsResizeInit2709Path, 'bcm2709 ships rootfs resize init');
+if (fs.existsSync(rootfsGrowDefault2712Path) && fs.existsSync(rootfsResizeInit2712Path)) {
+  const rootfsGrowDefault = fs.readFileSync(rootfsGrowDefault2712Path, 'utf8');
+  const rootfsResizeInit = fs.readFileSync(rootfsResizeInit2712Path, 'utf8');
+  expectFileIncludes('90_osi_rootfs_grow', rootfsGrowDefault, 'parted -s "$DISK"', 'uses parted for in-place partition growth');
+  expectFileIncludes('90_osi_rootfs_grow', rootfsGrowDefault, '[ -f "$NEEDS_RESIZE" ] && exit 0', 'does not re-partition while filesystem resize is pending');
+  expectFileIncludes('90_osi_rootfs_grow', rootfsGrowDefault, 'resizepart $PART 100%', 'grows the root partition to the end of the disk');
+  expectFileIncludes('osi-rootfs-resize', rootfsResizeInit, 'START=08', 'runs filesystem resize before Node-RED startup');
+  expectFileIncludes('osi-rootfs-resize', rootfsResizeInit, 'resize2fs "$ROOT_SRC"', 'grows the mounted filesystem after reboot');
+}
+for (const [label, configPath] of [
+  ['full_raspberrypi_bcm27xx_bcm2712', fullRpi2712ConfigPath],
+  ['full_raspberrypi_bcm27xx_bcm2709', fullRpi2709ConfigPath],
+]) {
+  const config = fs.existsSync(configPath) ? fs.readFileSync(configPath, 'utf8') : '';
+  expectFileIncludes(label, config, 'CONFIG_PACKAGE_parted=y', `${label} includes parted for rootfs grow`);
+  expectFileIncludes(label, config, 'CONFIG_PACKAGE_resize2fs=y', `${label} includes resize2fs for rootfs grow`);
+}
 
 // --- osi-bootstrap init script verification ---
 

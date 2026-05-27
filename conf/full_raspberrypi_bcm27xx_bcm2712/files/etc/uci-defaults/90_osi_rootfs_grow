@@ -1,0 +1,35 @@
+#!/bin/sh
+STAMP=/etc/osi-rootfs-grow.partitioned
+NEEDS_RESIZE=/etc/osi-rootfs-grow-needs-resize
+
+# Exit cleanly when partition growth has completed, or while resize2fs is
+# pending after a successful partition resize. This avoids repeated repartition
+# and reboot cycles if power is lost before the filesystem grow succeeds.
+[ -f "$STAMP" ] && exit 0
+[ -f "$NEEDS_RESIZE" ] && exit 0
+
+ROOT_SRC="$(findmnt -n -o SOURCE /overlay 2>/dev/null || findmnt -n -o SOURCE / 2>/dev/null)"
+case "$ROOT_SRC" in
+  /dev/mmcblk0p2) DISK=/dev/mmcblk0; PART=2 ;;
+  *) logger -t osi-rootfs-grow "unsupported root source $ROOT_SRC; skipping"; exit 0 ;;
+esac
+
+command -v parted >/dev/null 2>&1 || { logger -t osi-rootfs-grow "parted missing; skipping"; exit 0; }
+command -v resize2fs >/dev/null 2>&1 || { logger -t osi-rootfs-grow "resize2fs missing; skipping"; exit 0; }
+
+logger -t osi-rootfs-grow "resizing $DISK partition $PART in place"
+if ! parted -s "$DISK" --align optimal --pretend-input-tty <<EOF
+resizepart $PART 100%
+quit
+EOF
+then
+  logger -t osi-rootfs-grow "parted resizepart failed; leaving partition unchanged"
+  exit 0
+fi
+
+partprobe "$DISK" 2>/dev/null || true
+
+touch "$NEEDS_RESIZE"
+logger -t osi-rootfs-grow "partition resized; rebooting to grow filesystem"
+sync
+reboot
