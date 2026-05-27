@@ -184,7 +184,8 @@
       "tomorrow": "tomorrow",
       "noData": "No forecast available",
       "noLocation": "Set zone coordinates to enable forecast",
-      "hourlyTitle": "Hourly rain (next 24 h)"
+      "hourlyTitle": "Hourly rain (next 24 h)",
+      "unavailable": "Unavailable"
     },
     "metrics": {
       "air_temperature_c": "Air Temp",

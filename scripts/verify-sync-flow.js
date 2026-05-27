@@ -1314,6 +1314,9 @@ expectIncludes('Get Zone Environment Summary', "preferredSource: usingLocal ? 'l
 expectIncludes('Get Zone Environment Summary', 'LEFT JOIN gateway_locations gl ON gl.gateway_device_eui = iz.gateway_device_eui', 'falls back to mirrored gateway coordinates when a zone has no explicit location');
 expectIncludes('Get Zone Environment Summary', 'SELECT date,rainfall_mm,flow_liters,rain_source,computed_at FROM zone_daily_environment', 'uses daily zone environment totals for water summary');
 expectIncludes('Get Zone Environment Summary', 'const water = await buildWaterEnvironment', 'builds a dedicated water summary block');
+expectIncludes('Get Zone Environment Summary', 'weather_provider_unavailable', 'falls back instead of throwing when weather providers fail');
+expectIncludes('Get Zone Environment Summary', 'safeResolveOnlineCurrent', 'wraps online weather section construction');
+expectIncludes('Get Zone Environment Summary', 'safeResolveForecast', 'wraps forecast section construction');
 expectIncludes('Get Zone Environment Summary', 'areaM2: toFiniteNumber(zone && zone.area_m2)', 'exposes zone area in water summary');
 expectIncludes('Get Zone Environment Summary', 'sensorHealth: buildSensorHealth(deviceRows, local)', 'reports water sensor health and warnings');
 expectIncludes('Build Telemetry', 'lsn50_mode_code: observedModeCode', 'publishes observed LSN50 mode in edge telemetry');
