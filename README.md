@@ -10,19 +10,15 @@ Built on [ChirpStack Gateway OS](https://www.chirpstack.io/docs/chirpstack-gatew
 
 ## Features
 
-- **LoRaWAN sensor integration** — TEKTELIC KIWI soil sensors (soil water tension, temperature, humidity, light)
-- **Smart valve control** — Strega smart irrigation valves with OPEN/CLOSE commands
-- **Automated irrigation scheduling** — threshold-based triggers on soil water tension (kPa)
+- **LoRaWAN integration** — Flexible device support, continious addition of sensors and acutators
+- **Automated irrigation scheduling** — threshold-based triggers on soil moisture or dendrometers
 - **Irrigation zones** — group devices into zones with per-zone schedules
 - **Web dashboard** — React-based UI accessible on local Wi-Fi at `http://<device-ip>:1880/gui`
 - **Multi-user support** — individual user accounts per device
 - **Offline-first** — fully functional without internet; cloud sync optional
-- **Sensor data export** — download historical readings as CSV or raw SQLite
 - **OSI Cloud integration** — remote monitoring and gateway control via OSI Server; fan speed control and reboot from anywhere
-- **Dragino LSN50V2 support** — external temperature (DS18B20), ADC, and dendrometer (stem growth) sensor node
-- **SenseCAP S2120 weather station** — 8-in-1 weather station (wind speed/direction, rain, pressure, UV, temperature, humidity); multi-zone assignment; history monitoring
-- **Soil moisture probe depth metadata** — configurable depth labels per KIWI probe channel
 - **Raspberry Pi system monitoring** — CPU temperature, memory usage, CPU load, and fan speed visible in the web dashboard
+  **Forecast** — Weather forecast,agronomic indicators and irrigation prediction (experimental)
 
 ---
 
@@ -49,17 +45,10 @@ OSI Server  (optional cloud — remote monitoring & control)
 
 ## Supported Hardware
 
-| Device                        | Target config                       | Notes                        |
-| ----------------------------- | ----------------------------------- | ---------------------------- |
-| Raspberry Pi 5 (**primary**)  | `full_raspberrypi_bcm27xx_bcm2712`  |                              |
-| Raspberry Pi 4 / 400 / 3 / 2 | `full_raspberrypi_bcm27xx_bcm2709`  | 32-bit ARMv7 universal image |
-| Raspberry Pi 1/Zero           | `full_raspberrypi_bcm27xx_bcm2708`  |                              |
-| RAK7391                       | `rak_rak7391`                       |                              |
-| RAK7289v2                     | `rak_rak7289v2`                     |                              |
-| RAK7268v2                     | `rak_rak7268v2`                     |                              |
-| RAK7267                       | `rak_rak7267`                       |                              |
-| Seeed SenseCAP M2             | `seeed_sensecap_m2`                 |                              |
-| Dragino LPS8N                 | `dragino_lps8n`                     |                              |
+| Device                       | Target config                      | Notes                        |
+| ---------------------------- | ---------------------------------- | ---------------------------- |
+| Raspberry Pi 5 (**primary**) | `full_raspberrypi_bcm27xx_bcm2712` |                              |
+| Raspberry Pi 4 / 400 / 3 / 2 | `full_raspberrypi_bcm27xx_bcm2709` | 32-bit ARMv7 universal image |
 
 > Primary target is the Raspberry Pi 5 (`bcm2712`); a universal 32-bit image for Pi 2/3/4/400 is built from `bcm2709`.
 
@@ -67,13 +56,13 @@ OSI Server  (optional cloud — remote monitoring & control)
 
 ## Supported Field Devices
 
-| Device type | Description |
-| --------------------------------- | ------------------------------------------------------------------- |
-| **KIWI_SENSOR** | Soil water tension (kPa), soil moisture |
-| **DRAGINO_LSN50** | Multi-mode: temperature probe, ADC (dendrometer potentiometer), rain gauge, flow meter |
-| **STREGA_VALVE** | Gen1, Motorized or solenoid irrigation valve |
-| **SENSECAP_S2120** | Weather station (wind, rain, UV, barometric pressure) |
-| **TEKTELIC_CLOVER** | Volumetric water content (%), soil moisture |
+| Device type         | Description                                                                            |
+| ------------------- | -------------------------------------------------------------------------------------- |
+| **KIWI_SENSOR**     | Soil water tension (kPa), soil moisture                                                |
+| **DRAGINO_LSN50**   | Multi-mode: temperature probe, ADC (dendrometer potentiometer), rain gauge, flow meter |
+| **STREGA_VALVE**    | Gen1, Motorized or solenoid irrigation valve                                           |
+| **SENSECAP_S2120**  | Weather station (wind, rain, UV, barometric pressure)                                  |
+| **TEKTELIC_CLOVER** | Volumetric water content (%), soil moisture                                            |
 
 ---
 
@@ -172,11 +161,11 @@ Output images are in `openwrt/bin/targets/bcm27xx/bcm2712/`.
 
 Two ways to get OSI OS running on a Raspberry Pi 5:
 
-| | Path A — Pre-built image | Path B — ChirpStack Gateway OS + deploy |
-|---|---|---|
-| **When to use** | Fastest start; no build tools needed | Latest code from this repo; or no release available for your target |
-| **What you flash** | OSI OS `.img.gz` from the [Releases page](https://github.com/Open-Smart-Irrigation/osi-os/releases) | ChirpStack Gateway OS Full |
-| **After flash** | Open the UI — done | Run `deploy.sh`, then `chirpstack-bootstrap.js` |
+|                    | Path A — Pre-built image                                                                            | Path B — ChirpStack Gateway OS + deploy                             |
+| ------------------ | --------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------- |
+| **When to use**    | Fastest start; no build tools needed                                                                | Latest code from this repo; or no release available for your target |
+| **What you flash** | OSI OS `.img.gz` from the [Releases page](https://github.com/Open-Smart-Irrigation/osi-os/releases) | ChirpStack Gateway OS Full                                          |
+| **After flash**    | Open the UI — done                                                                                  | Run `deploy.sh`, then `chirpstack-bootstrap.js`                     |
 
 ---
 
@@ -185,8 +174,9 @@ Two ways to get OSI OS running on a Raspberry Pi 5:
 1. Download the latest `osi-os-<version>-bcm2712.img.gz` from the [Releases page](https://github.com/Open-Smart-Irrigation/osi-os/releases).
 2. Flash it to a microSD card (e.g. with [Raspberry Pi Imager](https://www.raspberrypi.com/software/) or `dd`).
 3. Boot the Pi — OSI OS starts automatically.
-4. Connect to the Wi-Fi AP `OSI-OS-<mac>` (password `opensmartirrigation`) or find the device on your local network.
-5. Navigate to `http://<device-ip>:1880/gui`.
+4. Connect to the Wi-Fi AP `OSI-OS-<mac>` (password `opensmartirrigation`) and open the configuration page at 192.168.0.1
+5. Proceed the intial Chirpstack setup using the guide (https://www.chirpstack.io/docs/chirpstack-gateway-os/getting-started.html).
+6. Navigate to `http://<device-ip>:1880/gui`.
 
 No further setup required. See [Step 4 — Install Tailscale](#step-4--install-tailscale-remote-access) if you want remote access.
 
@@ -329,10 +319,10 @@ No need to re-run `chirpstack-bootstrap.js` unless ChirpStack was re-provisioned
 
 ## Default Wi-Fi Access Point (first boot)
 
-| Path | SSID | Password | Device IP |
-|------|------|----------|-----------|
-| ChirpStack Gateway OS base (Path B) | `ChirpstackAP-<mac6>` | `ChirpStackAP` | `192.168.0.1` |
-| OSI OS firmware (Path A) | `OSI-OS-<mac6>` | `opensmartirrigation` | `192.168.0.1` |
+| Path                                | SSID                  | Password              | Device IP     |
+| ----------------------------------- | --------------------- | --------------------- | ------------- |
+| ChirpStack Gateway OS base (Path B) | `ChirpstackAP-<mac6>` | `ChirpStackAP`        | `192.168.0.1` |
+| OSI OS firmware (Path A)            | `OSI-OS-<mac6>`       | `opensmartirrigation` | `192.168.0.1` |
 
 ---
 
