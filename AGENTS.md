@@ -140,9 +140,11 @@ cd web/react-gui && npm run build             # frontend build
 
 ## Adding a new device type
 
-1. Update DB schema (`database/farming.db` + `seed-blank.sql`).
+> **Why this is still a manual checklist:** there is no plugin registry — see ADR [`docs/adr/2026-05-28-static-device-plugin-registry.md`](docs/adr/2026-05-28-static-device-plugin-registry.md) for the deferral rationale. Do not propose a plugin system without a concrete second-party candidate.
+
+1. Update DB schema (`database/farming.db` + `seed-blank.sql`). If the change extends the `devices.type_id` `CHECK` list, register an idempotent table-rebuild in `scripts/repair-pi-schema.js` (SQLite cannot alter `CHECK` in place).
 2. Add TypeScript types (`web/react-gui/src/types/farming.ts`).
-3. Add Node-RED ingest flow in `flows.json` (use the `application/+/device/+/event/up` topic).
+3. Add Node-RED ingest flow in `flows.json` (use the `application/+/device/+/event/up` topic; guard the branch head with a `deviceProfileName` filter so other branches don't double-process the same message).
 4. Add catalog / merge logic.
 5. Add React card/component and render in dashboard.
 6. Update bundled DB copies; verify with `scripts/verify-db-schema-consistency.js`.
