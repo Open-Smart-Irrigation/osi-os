@@ -2523,19 +2523,23 @@ Expected: rows show `zone_id = <device's zone id>` and `cid = <UUID prefix>`.
 
 ### F4. `osi-os-deploy-live` wrapper leaks zombie HTTP servers + does not fail-fast on remote errors
 
+**Status:** DONE 2026-05-28. The wrapper at `/home/phil/.local/bin/osi-os-deploy-live` was hardened in place (no PR — file lives outside this repo). See `feedback_deploy_wrapper_hardening.md` in the memory store for the post-fix behaviour contract.
+
 **Surfaced during:** Slice 12 production verification (Uganda, 2026-05-28) — three separate deploy attempts hit `curl: (22) error 404` because a previous wrapper invocation left a python `http.server` zombie bound to port 9876 with a now-deleted `$TMP_DIR`. The wrapper's `trap cleanup` did not actually wait/kill the background process. Worse, when the Pi-side `deploy.sh` curl returned 404, the wrapper's SSH step exited non-zero but the wrapper's outer loop did NOT check `$?` — it cheerfully moved on to ChirpStack bootstrap and Node-RED restart, then reported "Deploy complete" with no indication that the flows.json transfer had silently failed.
 
 **Concrete failure mode observed:** After my first fix to `get-actuations-auth.libs`, I ran the wrapper twice. The first run actually succeeded. The second run 404'd silently (zombie HTTP server). I spent ~30 minutes debugging "why didn't my libs fix land" before noticing the wrapper's previous-run cleanup had failed. A third operator could repeat the same hour-long detour.
 
-**Scope of fix (single repo edit, lives outside this monorepo):**
-1. `cleanup` trap: `kill "$SERVER_PID"; wait "$SERVER_PID" 2>/dev/null; sleep 0.5; ss -tlnp | grep -q ":${PORT}" && kill -9 "$SERVER_PID"`.
-2. SSH step: check `$?` after each remote command; abort the loop on non-zero with a clear "deploy FAILED on $host" message.
-3. Optional: before starting the HTTP server, `ss -tlnp 2>/dev/null | grep -q ":${PORT}"` and refuse to start if the port is bound by anything else.
-4. Optional: have `deploy.sh` itself print a recognizable success sentinel on the last line (e.g. `==> osi-os deploy complete ($commit_sha)`) so the wrapper can grep for it before declaring victory.
+**Shipped fixes:**
+1. **Cleanup escalation** — `cleanup` now does SIGTERM → 5×200ms wait → SIGKILL → wait, for both `SERVER_PID` and a new `SSH_PID`. Explicit INT and TERM traps invoke cleanup and exit with the canonical 130/143 codes.
+2. **Port-in-use pre-check** — wrapper aborts with `exit 1` and a clear error message if `ss -tlnp` shows anything bound to `127.0.0.1:${PORT}` before the server starts.
+3. **Per-host SSH exit-code check** — each remote command is now `if ! run_ssh ...; then FAILED_HOSTS+=("$host"); continue; fi`. Final summary prints `Deploy FAILED on: <hosts>` and exits 1 if any host failed.
+4. **Bonus: `curl -fsSL ... -o file && sh file; rc=$?; rm -f file; exit "$rc"`** replaces the original `curl -fsSL ... | sh` on the remote side. The pipe pattern masked curl's exit code so the remote `sh` always exited 0 even when curl 404'd; the download-then-run pattern correctly propagates curl's exit through SSH.
 
-**Effort:** Small. The wrapper is ~80 lines. Fix is ~15 lines of additions.
+**Skipped:** the optional deploy.sh success sentinel (the per-host SSH exit-code check is sufficient on its own).
 
-**Where the file lives:** `/home/phil/.local/bin/osi-os-deploy-live` — outside this repo. MEMORY.md should record this so future agents can find it.
+**Verification (no Pi needed):** four scenarios all pass — `bash -n` syntax, default host array intact, pre-bound port fail-fast (`exit 1`), unreachable host `192.0.2.99` produces "Deploy FAILED on:" + `exit 1`, and SIGTERM mid-run releases port 9876 within 3s. Documented in the memory entry.
+
+**Where the file lives:** `/home/phil/.local/bin/osi-os-deploy-live` — outside this repo. The path is also captured in MEMORY.md.
 
 ---
 
