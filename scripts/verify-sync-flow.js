@@ -951,25 +951,40 @@ for (const name of requiredFunctionNodes) {
   }
 }
 
-// Global check: any function node that calls into a Node.js core module must
-// have the symbol available at runtime — either declared in `libs`, locally
-// bound via `const X = global.get('X')`, or locally bound via `const X = require('X')`.
+// Global check: any function node that calls into a Node.js core module OR a
+// project-registered Node-RED setting module must have the symbol available at
+// runtime — either declared in the node's `libs` array, locally bound via
+// `const X = global.get('X')`, or locally bound via `const X = require('X')`.
 // Without one of those, the symbol is undefined and the function throws
-// `ReferenceError: <module> is not defined`. See osi-os#7 follow-up:
-// `get-actuations-auth` shipped with crypto.* calls but an empty `libs` array,
-// which logged users out of the SPA because the SPA's axios interceptor
-// treats any 401 as auth expiry.
-const NODE_CORE_MODULES_TO_GUARD = ['crypto', 'fs', 'path', 'os'];
+// `ReferenceError: <module> is not defined`.
+//
+// History of why this guard exists:
+// - `get-actuations-auth` (osi-os#7 follow-up) shipped with crypto.* calls but
+//   an empty `libs` array. SPA's axios interceptor treats the resulting 401 as
+//   auth expiry and silently logs the user out.
+// - `get-actuations-query` (same slice) then shipped with osiDb.Database calls
+//   but an empty `libs` array, surfacing as HTTP 500 "DB error: osiDb is not
+//   defined" on the dashboard panel.
+//
+// The guard list below mirrors every distinct `libs` (var, module) declaration
+// already in use across the deployed flows.json. If you add a new module to
+// settings.js / functionGlobalContext, add it here too.
+const GUARDED_MODULE_VARS = [
+  // Node.js core
+  'crypto', 'fs', 'path', 'os', 'net', 'http', 'https', 'url',
+  // Project-registered helpers (settings.js functionGlobalContext)
+  'osiDb', 'osiCloudHttp', 'chameleon', 'dendro', 'chirpstack', 'bcrypt', 'sqlite3',
+];
 for (const node of flows) {
   if (node.type !== 'function') continue;
   const body = String(node.func || '');
   if (!body) continue;
   const declaredLibs = new Set((node.libs || []).map((entry) => String(entry?.var || '').trim()).filter(Boolean));
-  for (const mod of NODE_CORE_MODULES_TO_GUARD) {
+  for (const mod of GUARDED_MODULE_VARS) {
     const usagePattern = new RegExp(`(?:^|[^A-Za-z0-9_$])${mod}\\.[A-Za-z_$][A-Za-z0-9_$]*\\s*\\(`);
     if (!usagePattern.test(body)) continue;
     if (declaredLibs.has(mod)) continue;
-    // Accept locally-bound aliases: `const fs = global.get('fs')` or `require('fs')`.
+    // Accept locally-bound aliases: `const X = global.get('X')` or `require('X')`.
     const localBindPattern = new RegExp(
       `(?:const|let|var)\\s+${mod}\\s*=\\s*(?:global\\.get\\(['"]${mod}['"]\\)|require\\(['"]${mod}['"]\\))`,
     );
@@ -977,7 +992,7 @@ for (const node of flows) {
     fail(`function node ${node.name || node.id} uses ${mod}.* but does not declare ${mod} in libs nor bind it locally (would throw ReferenceError at runtime)`);
   }
 }
-console.log('OK every function node that uses crypto/fs/path/os has it bound');
+console.log('OK every function node that uses a guarded module has it bound');
 
 const bootstrapInject = flows.find((node) => node.id === 'sync-bootstrap-inject');
 if (!bootstrapInject) {
