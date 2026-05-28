@@ -951,6 +951,34 @@ for (const name of requiredFunctionNodes) {
   }
 }
 
+// Global check: any function node that calls into a Node.js core module must
+// have the symbol available at runtime — either declared in `libs`, locally
+// bound via `const X = global.get('X')`, or locally bound via `const X = require('X')`.
+// Without one of those, the symbol is undefined and the function throws
+// `ReferenceError: <module> is not defined`. See osi-os#7 follow-up:
+// `get-actuations-auth` shipped with crypto.* calls but an empty `libs` array,
+// which logged users out of the SPA because the SPA's axios interceptor
+// treats any 401 as auth expiry.
+const NODE_CORE_MODULES_TO_GUARD = ['crypto', 'fs', 'path', 'os'];
+for (const node of flows) {
+  if (node.type !== 'function') continue;
+  const body = String(node.func || '');
+  if (!body) continue;
+  const declaredLibs = new Set((node.libs || []).map((entry) => String(entry?.var || '').trim()).filter(Boolean));
+  for (const mod of NODE_CORE_MODULES_TO_GUARD) {
+    const usagePattern = new RegExp(`(?:^|[^A-Za-z0-9_$])${mod}\\.[A-Za-z_$][A-Za-z0-9_$]*\\s*\\(`);
+    if (!usagePattern.test(body)) continue;
+    if (declaredLibs.has(mod)) continue;
+    // Accept locally-bound aliases: `const fs = global.get('fs')` or `require('fs')`.
+    const localBindPattern = new RegExp(
+      `(?:const|let|var)\\s+${mod}\\s*=\\s*(?:global\\.get\\(['"]${mod}['"]\\)|require\\(['"]${mod}['"]\\))`,
+    );
+    if (localBindPattern.test(body)) continue;
+    fail(`function node ${node.name || node.id} uses ${mod}.* but does not declare ${mod} in libs nor bind it locally (would throw ReferenceError at runtime)`);
+  }
+}
+console.log('OK every function node that uses crypto/fs/path/os has it bound');
+
 const bootstrapInject = flows.find((node) => node.id === 'sync-bootstrap-inject');
 if (!bootstrapInject) {
   fail('missing sync-bootstrap-inject node');
