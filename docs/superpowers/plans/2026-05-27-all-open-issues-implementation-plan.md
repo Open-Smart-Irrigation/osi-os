@@ -2447,15 +2447,56 @@ These are real bugs or scoped-out improvements surfaced while implementing or ve
 
 ### F2. Operator-triggered STREGA opens leave `zone_id` and `command_id` NULL in `valve_actuation_expectations`
 
+**Status:** Being fixed in-place during Slice 12 verification (not deferred). Implementation guidance below.
+
 **Surfaced during:** Slice 12 production verification (Uganda, 2026-05-28) — the "Recent irrigations" panel was empty even though the operator had opened the valve five times.
 
-**Root cause:** When a STREGA open is initiated from the local dashboard (`POST /api/valve/:deveui`), the `Build actuator_command + DB writes` function node (id `dde8e1ef265e96d7`) builds a cmd msg containing only `{action, duration_minutes, reason, timestamp}` — no `zone_id`, no `command_id`. The downstream STREGA actuator dispatch chain then writes a `valve_actuation_expectations` row with NULLs in both columns. The scheduler-triggered path supplies both (because the scheduler operates per-zone and uses cloud-pulled command IDs), so the gap only affects manually-triggered actuations.
+**Root cause:** When a STREGA open is initiated from the local dashboard (`POST /api/valve/:deveui`), the `Build actuator_command + DB writes` function node (id `dde8e1ef265e96d7`) builds a cmd msg containing only `{action, duration_minutes, reason, timestamp}` — no `zone_id`, no `command_id`. The downstream `Write STREGA Expectation` function (id `write-strega-expectation`) reads zone via `raw.zone_id || raw.zoneId || data.zone_id || data.zoneId || (payload.device && payload.device.zone_id) || null` and command_id via `raw.command_id || raw.commandId || data.commandId || null` — none of these are present on the manual path, so both land NULL. The scheduler-triggered path supplies both (the scheduler operates per-zone and uses cloud-pulled command IDs), so the gap only affects manually-triggered actuations.
 
-**Why it matters beyond Slice 12:** Any downstream consumer that joins on `zone_id` (Slice 12's panel did) or on `command_id` (a future feature linking expectations to cloud `applied_commands` for ACK reconciliation) silently drops operator-triggered actuations. The current Slice 12 workaround (Option A: `LEFT JOIN` zones + authorize via `device.user_id`) hides the gap but doesn't fix the data quality.
+**Why it matters beyond Slice 12:** Any downstream consumer that joins on `zone_id` (Slice 12's panel did) or on `command_id` (a future feature linking expectations to cloud `applied_commands` for ACK reconciliation) silently drops operator-triggered actuations. The Slice 12 panel's Option-A workaround (`LEFT JOIN zones + authorize via device.user_id`) shipped to keep the panel functional, but the data quality must still be fixed.
 
-**Scope of fix:** In `Build actuator_command + DB writes`, after the device-ownership check, read the device's `irrigation_zone_id` from the lookup row (already in scope as `device.irrigation_zone_id`), generate a UUID `command_id`, and include both in the cmd object so the downstream Write STREGA Expectation function persists them. Carefully diff against the scheduler-triggered path so we don't double-set fields when the scheduler already provides them.
+**Implementation:** In `Build actuator_command + DB writes` (`dde8e1ef265e96d7`), after the device-ownership check is satisfied:
 
-**Effort:** Small. Single function-node patch, plus a regression test asserting `zone_id` and `command_id` are populated on a manual-trigger fixture.
+1. The `device` row read by `DB: check device` already contains `irrigation_zone_id` (it's selected via `SELECT * FROM devices WHERE deveui = ?`). Read it: `const zoneId = device.irrigation_zone_id ?? null;`
+2. Generate a UUID: `const commandId = crypto.randomUUID();`. Requires `libs: [{var:'crypto',module:'crypto'}]` on this function node — currently empty libs (caught by the new `verify-sync-flow` guard we added; the verifier WILL fail until libs is fixed).
+3. Add both into the cmd payload:
+   ```js
+   const cmd = {
+     type: 'actuator_command',
+     device: { devEui: deveui },
+     data: {
+       action,
+       duration_minutes: durationMinutes ?? undefined,
+       reason: 'manual_gui',
+       timestamp: nowIso,
+       zone_id: zoneId,
+       command_id: commandId,
+     }
+   };
+   ```
+4. Also expose at the top level so `Write STREGA Expectation`'s legacy lookup paths (`raw.zone_id`, `raw.command_id`) match too — set them on output 1's msg:
+   ```js
+   return [
+     { payload: cmd, _stregaExpectationCommand: { zone_id: zoneId, command_id: commandId, ...rest } },
+     { topic: insertLogSql + "\n" + updateDeviceSql },
+     responseMsg
+   ];
+   ```
+5. Optional but recommended: include `command_id` in the http response body so the dashboard can correlate the queued command with its eventual outcome (`httpOk.command_id = commandId`).
+6. Scheduler path is unchanged — it goes through a different entry point that already supplies these fields. Manual-path `_stregaExpectationCommand` overlay is keyed to msg, not flow context, so no cross-talk.
+
+**Verification:** After fix, manual open via dashboard should produce a `valve_actuation_expectations` row with non-null `zone_id` and `command_id`. Curl test:
+
+```bash
+ssh -i /home/phil/.ssh/id_ed25519 root@<pi> \
+  'sqlite3 -header -column /data/db/farming.db \
+     "SELECT substr(expectation_id,1,8) AS exp, zone_id, substr(command_id,1,8) AS cid, commanded_at \
+      FROM valve_actuation_expectations ORDER BY commanded_at DESC LIMIT 3;"'
+```
+
+Expected: rows show `zone_id = <device's zone id>` and `cid = <UUID prefix>`.
+
+**Effort:** Small. Single function-node patch + libs add + verifier rerun.
 
 ---
 
@@ -2514,6 +2555,58 @@ For traceability — these were called out in the `osi-os#7` close comment but b
 
 - **`NO_MOISTURE_RESPONSE`** status: requires a join into `device_data` over a 30-minute window per actuation to compare SWT before-and-after. Skipped from Slice 12 to keep scope contained. Standalone follow-up: design the moisture-delta query, add it to `Build Query`, extend the status taxonomy, render in the panel.
 - **`SCHEDULER_DECIDED_NO_COMMAND`** status: would require the scheduler to record decisions that didn't translate to a command. Today the scheduler emits a command per decision, so the failure mode isn't observable. Open the follow-up if/when a future scheduler change introduces skip paths.
+
+---
+
+### F7. STREGA reconciliation observer is broken AND lacks LoRa-timing awareness
+
+**Surfaced during:** Slice 12 production verification (Uganda, 2026-05-28) — all 5 manual valve actuations showed red "Open timeout" status badges in the panel, even though the operator confirmed the valve physically opened. The actuation rows had `observed_open_at = NULL` and `reconciliation_state = PENDING_OBSERVATION` forever.
+
+**Two distinct root causes, both real:**
+
+**(a) Schema bug in `STREGA Reconciliation Monitor` (id `strega-reconciliation-monitor`)**
+
+The observer queries:
+
+```sql
+SELECT recorded_at, current_state FROM device_data
+ WHERE UPPER(deveui) = UPPER(?) AND recorded_at >= ?
+ ORDER BY recorded_at DESC LIMIT 1
+```
+
+**The `device_data` table has no `current_state` column.** `device_data` carries only sensor metrics (`swt_wm1`, `swt_wm2`, `ambient_temperature`, `bat_v`, `lsn50_mode_*`, etc.). The query throws `Error: no such column: current_state` on every tick, the function's outer `.catch` swallows it, and **no expectation ever advances**. Every commanded actuation eventually transitions to `STALE_NO_OBSERVATION` at `expected_close_at + 300s`, but `observed_open_at` is never set.
+
+The actual valve state from uplinks IS persisted, but to a different place: `Persist STREGA Uplink` (id `strega-sql-fn`) UPDATEs `devices.current_state` when the reported state differs from the stored value. There's no per-uplink history table for valve state — only the latest value on `devices.current_state` (with `devices.updated_at` recording when it last transitioned).
+
+**(b) Timing semantics: LoRa Class A devices uplink on an interval; the observer doesn't know the interval**
+
+STREGA valves are Class A LoRa devices. The communication model:
+
+1. Operator clicks "Open for 1 min" → cloud → edge → cmd queued on the gateway's downlink queue for this device.
+2. Valve uplinks on its scheduled interval (could be 10 min, 30 min, etc.).
+3. Gateway sends the queued downlink in the receive window after the uplink.
+4. Valve opens, runs for the commanded duration, **auto-closes when the duration elapses**.
+5. Valve uplinks again on its next scheduled interval, this time reporting `current_state = CLOSED`.
+
+**A short open can complete entirely between two uplinks.** If uplink interval is 30 min and commanded duration is 1 min, the valve will have been OPEN and then auto-closed long before the next uplink. The OPEN state is therefore **never observed** — the only observable transition is the eventual CLOSED.
+
+The current observer's grace window (`expected_close_at + 300s`) assumes prompt observability and marks any unobserved expectation as `STALE_NO_OBSERVATION` after just 5 minutes past expected close. For a valve on a 30-min uplink, this is wrong:
+
+- `commanded_at + duration + grace = ~30-35 min worst-case` to even SEE the CLOSED uplink. The current 5-min grace expires inside that window → false alarm.
+- More importantly, "never observed OPEN" is a **legitimate outcome** of any open whose duration is shorter than the uplink interval. The status taxonomy should not treat it as a failure.
+
+**Implementation guidance (full fix):**
+
+1. **Step 1 (schema bug, ~10 lines):** Change the observer's source-of-truth for the device's reported state. Two options:
+   - **Quick:** query `devices.current_state, devices.updated_at` and treat `updated_at` as the "uplink that reported this state" timestamp. Cheap; works as long as `updated_at` is updated only by `strega-sql-fn` (which it is — verified). Risk: future code that writes `devices.updated_at` for other reasons would corrupt the signal.
+   - **Correct:** add a `current_state` column (or a `state_event_at` companion timestamp) to `device_data`, have `strega-sql-fn` write it on every uplink, and have the observer query `device_data` as today. Adds proper per-uplink history; bigger surface (column add, migration, all-three-profile flows.json, repair-pi-schema entry).
+2. **Step 2 (timing-aware grace):** Either store the device's uplink interval on `devices` (likely already known — STREGA has `setUplinkInterval` API) or accept a default `MAX_OBSERVATION_DELAY_SEC = max(uplink_interval, 30 min)`. Replace the hardcoded 300s grace in `RECONCILIATION_GRACE_SEC` with `uplink_interval * 1.5` (clamped to a sane min/max).
+3. **Step 3 (taxonomy):** Introduce a distinct outcome `COMPLETED_UNOBSERVED_OPEN`: when the observer sees a `CLOSED` uplink **after** `commanded_at` but never an OPEN, that's a successful actuation whose OPEN was missed due to the uplink schedule — not a failure. The Slice 12 status mapping should treat this as the normal "Completed" badge, not red.
+4. **Step 4 (the existing 5 stuck rows):** Once the observer is fixed and a fresh uplink with `current_state=CLOSED` arrives, the matching logic will mark the most recent expectation as `OBSERVED_COMPLETE`. Older expectations may stay stale — accept it as cosmetic until they age out of the panel's 50-row window.
+
+**Effort:** Medium. Step 1 quick path is ~15 lines. Step 2-3 are also small but require taxonomy alignment with the Slice 12 panel renderer (`IrrigationOutcomesPanel.tsx`). Step 4 is no work.
+
+**Order of operations:** ship Step 1 first as a hotfix (just fixes the SQL — no panel changes needed, the existing `OBSERVED_RUNNING` / `OBSERVED_COMPLETE` transitions kick in), then Step 2-3 as a follow-up that touches the panel's status taxonomy.
 
 ---
 
