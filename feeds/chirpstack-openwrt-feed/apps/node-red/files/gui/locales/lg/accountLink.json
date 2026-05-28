@@ -1,0 +1,69 @@
+{
+  "title": "Yungibwa ku OSI Server",
+  "navLink": "OSI Server",
+  "backToDashboard": "Ddayo ku Dashboard",
+  "status": {
+    "linked": "Akawunti ya ku OSI Server eyungibbwa",
+    "notLinked": "Tewali kugyungibbwa ku OSI Server",
+    "linkedAs": "Eyungibbwa nga: {{username}}",
+    "linkedSince": "Okuva: {{date}}"
+  },
+  "form": {
+    "serverUrl": "Endabirwamu ya OSI Server",
+    "actionLabel": "Kola",
+    "actionLogin": "Yunga akawunti eyaliwo",
+    "actionRegister": "Tonda akawunti empya",
+    "username": "Erinnya ery'omukozesa ku server",
+    "email": "Email",
+    "password": "Ekigambo ky'okulinda",
+    "submit": "Yungibwa ku OSI Server",
+    "submitting": "Kiyungibwa...",
+    "cancel": "Sazaamu"
+  },
+  "warning": {
+    "title": "Kigambiddwa",
+    "message": "After linking, you must use your OSI Server credentials to log in. OSI OS stores a gateway-specific offline verifier for linked login.",
+    "proceed": "Komezagana"
+  },
+  "success": {
+    "title": "Kiyungibwa bulungi",
+    "message": "Akawunti yo kati eyungiddwa nga {{username}} ku OSI Server.",
+    "claimedDevices": "Ebikozesebwa ebyategekebwa ku server: {{count}}",
+    "skippedDevices": "Ebikozesebwa ebyasazibwaawo (byali byatengeddwa): {{count}}"
+  },
+  "unlink": {
+    "button": "Gyamu ku OSI Server",
+    "confirm": "Oli mukakafu? Oluvannyuma lw'okugyamu, oteekwa okozesa ekigambo kyo ky'okulinda eky'omu bitundu ekya mazima.",
+    "success": "Bagyiddwa ku OSI Server"
+  },
+  "errors": {
+    "networkError": "Teyinziddwa kutuuka ku OSI Server. Kebera endabirwamu n'okuteekateeka kwo kw'omukutu.",
+    "authFailed": "Ebintu by'okuyingira by'OSI Server si bya mazima.",
+    "generic": "Waliwo ensobi. Gezaako nate.",
+    "forceSyncFailed": "Manual sync failed. Please try again."
+  },
+  "sync": {
+    "title": "Manual sync",
+    "description": "Run an immediate recovery sync with OSI Server.",
+    "button": "Force sync now",
+    "running": "Syncing...",
+    "successTitle": "Manual sync completed",
+    "partialTitle": "Manual sync finished with issues",
+    "refreshed": "Sync token refreshed before sync.",
+    "usedCurrentToken": "Using current sync token.",
+    "bootstrap": "Bootstrap applied: {{applied}}, skipped: {{skipped}}",
+    "outbox": "Outbox delivered: {{delivered}} ({{before}} -> {{after}} pending)",
+    "pending": "Pending commands fetched: {{fetched}}, queued for local apply: {{queued}}",
+    "pendingAfterResponse": "Local apply continues after this response returns.",
+    "lastError": "Last error from {{source}}: {{message}}"
+  },
+  "reauth": {
+    "title": "Sync token expired",
+    "description": "Re-authenticate with OSI Server to mint a fresh sync token for this gateway.",
+    "button": "Re-authenticate",
+    "username": "Server Username",
+    "password": "OSI Server Password",
+    "submit": "Refresh connection",
+    "running": "Refreshing..."
+  }
+}

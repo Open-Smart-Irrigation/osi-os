@@ -1,0 +1,21 @@
+{
+  "title": "Open Smart Irrigation Dashboard",
+  "welcome": "Welcome, {{username}}",
+  "addZone": "Add Zone",
+  "addDevice": "Add Device",
+  "logout": "Logout",
+  "loading": "Loading dashboard...",
+  "failedToLoad": "Failed to load data",
+  "autoRefresh": "Auto-refreshing every 10 seconds",
+  "emptyState": {
+    "title": "Welcome to your farm!",
+    "subtitle": "Get started by creating an irrigation zone and adding devices",
+    "createZone": "Create Zone",
+    "addDevice": "Add Device"
+  },
+  "irrigationZones": "Irrigation Zones",
+  "unassignedDevices": "Unassigned Devices",
+  "unassignedSubtitle": "These devices are not assigned to any irrigation zone",
+  "soilSensors": "Soil Sensors",
+  "smartValves": "Smart Valves"
+}

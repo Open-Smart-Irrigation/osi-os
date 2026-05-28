@@ -1,0 +1,140 @@
+{
+  "addModal": {
+    "title": "Gerät hinzufügen",
+    "deviceType": "Gerätetyp",
+    "deviceName": "Gerätename",
+    "deviceNamePlaceholder": "z.B. Nordfeld, Hauptventil",
+    "deveui": "DevEUI",
+    "deveuiPlaceholder": "16 Hexadezimalzeichen",
+    "deveuiHint": "Genau 16 Hexadezimalzeichen eingeben (0-9, A-F)",
+    "deveuiInvalid": "DevEUI muss genau 16 Hexadezimalzeichen enthalten",
+    "adding": "Wird hinzugefügt...",
+    "submit": "Gerät hinzufügen",
+    "failed": "Gerät konnte nicht hinzugefügt werden"
+  },
+  "assignModal": {
+    "title": "Gerät {{zoneName}} zuweisen",
+    "selectDevice": "Gerät auswählen",
+    "selectPlaceholder": "-- Gerät auswählen --",
+    "noDevicesTitle": "Keine nicht zugewiesenen Geräte",
+    "noDevicesSubtitle": "Alle Geräte sind bereits Zonen zugewiesen. Fügen Sie weitere Geräte hinzu oder entfernen Sie sie aus anderen Zonen.",
+    "assigning": "Wird zugewiesen...",
+    "submit": "Gerät zuweisen",
+    "pleaseSelect": "Bitte ein Gerät auswählen",
+    "failed": "Gerät konnte nicht zugewiesen werden"
+  },
+  "createZoneModal": {
+    "title": "Bewässerungszone erstellen",
+    "zoneName": "Zonenname",
+    "zoneNamePlaceholder": "z.B. Garten A, Nordfeld, Obstgarten 1",
+    "zoneNameRequired": "Zonenname ist erforderlich",
+    "creating": "Wird erstellt...",
+    "submit": "Zone erstellen",
+    "failed": "Zone konnte nicht erstellt werden"
+  },
+  "kiwiSensor": {
+    "badge": "KIWI SENSOR",
+    "tooDry": "ZU TROCKEN!",
+    "soilNeedsWater": "Boden benötigt Bewässerung",
+    "removeConfirm": "Dieses Gerät entfernen?",
+    "removeSubtitle": "Das Gerät wird von Ihrem Konto getrennt.",
+    "yesRemove": "Ja, entfernen",
+    "removing": "Wird entfernt...",
+    "failedToRemove": "Gerät konnte nicht entfernt werden",
+    "soilWaterTension1": "BODENWASSERSPANNUNG 1",
+    "soilWaterTension2": "BODENWASSERSPANNUNG 2",
+    "lightIntensity": "LICHTINTENSITÄT",
+    "lastSeen": "Zuletzt gesehen: vor {{minutes}} Minuten"
+  },
+  "stregaValve": {
+    "badge": "STREGA VENTIL",
+    "status": "STATUS",
+    "open": "OFFEN",
+    "closed": "GESCHLOSSEN",
+    "target": "Ziel: {{state}}",
+    "opening": "Wird geöffnet...",
+    "closing": "Wird geschlossen...",
+    "removeConfirm": "Dieses Gerät entfernen?",
+    "removeSubtitle": "Das Gerät wird von Ihrem Konto getrennt.",
+    "yesRemove": "Ja, entfernen",
+    "removing": "Wird entfernt...",
+    "failedToRemove": "Gerät konnte nicht entfernt werden",
+    "lastSeen": "Zuletzt gesehen: vor {{minutes}} Minuten"
+  },
+  "zone": {
+    "deviceCount_one": "{{count}} Gerät",
+    "deviceCount_other": "{{count}} Geräte",
+    "assignDevice": "+ Gerät",
+    "deleteZone": "Löschen",
+    "deleteConfirm": "Diese Zone löschen?",
+    "deleteSubtitle": "Alle Geräte werden aus dieser Zone entfernt. Diese Aktion kann nicht rückgängig gemacht werden.",
+    "yesDelete": "Ja, löschen",
+    "deleting": "Wird gelöscht...",
+    "failedToDelete": "Zone konnte nicht gelöscht werden",
+    "failedToRemoveDevice": "Gerät konnte nicht aus der Zone entfernt werden",
+    "noDevices": "Noch keine Geräte in dieser Zone",
+    "assignFirst": "Erstes Gerät zuweisen",
+    "devicesInZone": "Geräte in dieser Zone:"
+  },
+  "schedule": {
+    "irrigationSchedule": "Bewässerungsplan",
+    "triggerMetric": "Auslösemessgrösse",
+    "soilWaterTension1": "Bodenwasserspannung 1",
+    "soilWaterTension2": "Bodenwasserspannung 2",
+    "average": "Durchschnitt (WM1 + WM2)",
+    "thresholdKpa": "Schwellenwert (kPa)",
+    "duration": "Bewässerungsdauer (Min.)",
+    "enabled": "Aktiviert",
+    "on": "Ein",
+    "off": "Aus",
+    "loadingSchedule": "Plan wird geladen...",
+    "loadFailed": "Plan konnte nicht geladen werden",
+    "saving": "Wird gespeichert...",
+    "saveSchedule": "Plan speichern",
+    "saveFailed": "Plan konnte nicht gespeichert werden",
+    "reload": "Neu laden",
+    "reloadFailed": "Plan konnte nicht neu geladen werden",
+    "saved": "Gespeichert.",
+    "triggerHint": "Auslösen wenn {{metric}} ≥ {{threshold}} kPa (einmal/Tag, 06:00)."
+  },
+  "environment": {
+    "sectionTitle": "Umwelt",
+    "tabs": { "local": "Lokal", "online": "Online", "agronomic": "Agronomisch", "forecast": "Vorhersage" },
+    "source": { "openagri": "OpenAgri", "open_meteo": "Open-Meteo", "local": "Lokale Sensoren", "unavailable": "Nicht verfügbar" },
+    "cache": { "live": "Aktuell", "stale": "Veraltet", "miss": "Keine Daten" },
+    "location": { "zone": "Zonenkoordinaten", "gateway": "Gateway-GPS", "unavailable": "Kein Standort gesetzt" },
+    "local": {
+      "freshSensors": "{{count}} aktuell",
+      "staleSensors_one": "{{count}} veraltet",
+      "staleSensors_other": "{{count}} veraltet",
+      "perDevice": "Messwerte pro Gerät",
+      "noData": "Keine lokalen Sensordaten verfügbar",
+      "observedAt": "Gemessen {{time}}"
+    },
+    "online": {
+      "unavailable": "Keine Online-Wetterdaten für diese Zone verfügbar",
+      "noLocation": "Zonenkoordinaten setzen, um Online-Wetter zu aktivieren",
+      "updatesAt": "Aktualisierung um {{time}}"
+    },
+    "agronomic": {
+      "vpd": "VPD", "dewPoint": "Taupunkt", "heatIndex": "Hitzeindex", "thi": "THI",
+      "et0": "Referenz-ET₀", "kc": "Erntekoeff. Kc", "etc": "Ernte-ET",
+      "noData": "Keine agronomischen Daten verfügbar", "fromSource": "von {{source}}"
+    },
+    "forecast": {
+      "next24h": "Nächste 24 Std.", "next72h": "Nächste 72 Std.", "nextRain": "Nächster Regen",
+      "rainHours": "Regenstunden", "maxHourly": "Max. stündlich",
+      "today": "heute", "tomorrow": "morgen",
+      "noData": "Keine Vorhersage verfügbar",
+      "noLocation": "Zonenkoordinaten setzen, um Vorhersage zu aktivieren",
+      "hourlyTitle": "Stündlicher Regen (nächste 24 Std.)"
+    },
+    "metrics": {
+      "air_temperature_c": "Lufttemp.", "relative_humidity_pct": "Luftfeuchte",
+      "probe_temperature_c": "Sondentemp.", "pressure_hpa": "Luftdruck",
+      "wind_speed_mps": "Wind", "wind_direction_deg": "Windrichtung",
+      "rainfall_mm": "Niederschlag", "light_lux": "Licht",
+      "uv_index": "UV-Index", "soil_temperature_c": "Bodentemp.", "soil_moisture_pct": "Bodenfeuchte"
+    }
+  }
+}

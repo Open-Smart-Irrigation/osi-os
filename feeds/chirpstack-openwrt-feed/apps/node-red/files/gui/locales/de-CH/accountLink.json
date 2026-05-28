@@ -1,0 +1,69 @@
+{
+  "title": "Mit OSI Server verbinden",
+  "navLink": "OSI Server",
+  "backToDashboard": "Zurück zum Dashboard",
+  "status": {
+    "linked": "Konto mit OSI Server verknüpft",
+    "notLinked": "Nicht mit OSI Server verbunden",
+    "linkedAs": "Verknüpft als: {{username}}",
+    "linkedSince": "Seit: {{date}}"
+  },
+  "form": {
+    "serverUrl": "OSI Server URL",
+    "actionLabel": "Aktion",
+    "actionLogin": "Bestehendes Konto verknüpfen",
+    "actionRegister": "Neues Konto erstellen",
+    "username": "Server-Benutzername",
+    "email": "E-Mail",
+    "password": "Passwort",
+    "submit": "Mit OSI Server verbinden",
+    "submitting": "Verbinden...",
+    "cancel": "Abbrechen"
+  },
+  "warning": {
+    "title": "Wichtig",
+    "message": "After linking, you must use your OSI Server credentials to log in. OSI OS stores a gateway-specific offline verifier for linked login.",
+    "proceed": "Fortfahren"
+  },
+  "success": {
+    "title": "Erfolgreich verbunden",
+    "message": "Ihr Konto ist jetzt als {{username}} auf dem OSI Server verknüpft.",
+    "claimedDevices": "Auf dem Server beanspruchte Geräte: {{count}}",
+    "skippedDevices": "Übersprungene Geräte (bereits beansprucht): {{count}}"
+  },
+  "unlink": {
+    "button": "Verbindung zum OSI Server trennen",
+    "confirm": "Sind Sie sicher? Nach dem Trennen müssen Sie Ihr lokales Originalpasswort verwenden.",
+    "success": "Verbindung zum OSI Server getrennt"
+  },
+  "errors": {
+    "networkError": "OSI Server nicht erreichbar. Prüfen Sie die URL und Ihre Internetverbindung.",
+    "authFailed": "Ungültige OSI Server-Anmeldedaten.",
+    "generic": "Ein Fehler ist aufgetreten. Bitte versuchen Sie es erneut.",
+    "forceSyncFailed": "Manual sync failed. Please try again."
+  },
+  "sync": {
+    "title": "Manual sync",
+    "description": "Run an immediate recovery sync with OSI Server.",
+    "button": "Force sync now",
+    "running": "Syncing...",
+    "successTitle": "Manual sync completed",
+    "partialTitle": "Manual sync finished with issues",
+    "refreshed": "Sync token refreshed before sync.",
+    "usedCurrentToken": "Using current sync token.",
+    "bootstrap": "Bootstrap applied: {{applied}}, skipped: {{skipped}}",
+    "outbox": "Outbox delivered: {{delivered}} ({{before}} -> {{after}} pending)",
+    "pending": "Pending commands fetched: {{fetched}}, queued for local apply: {{queued}}",
+    "pendingAfterResponse": "Local apply continues after this response returns.",
+    "lastError": "Last error from {{source}}: {{message}}"
+  },
+  "reauth": {
+    "title": "Sync token expired",
+    "description": "Re-authenticate with OSI Server to mint a fresh sync token for this gateway.",
+    "button": "Re-authenticate",
+    "username": "Server Username",
+    "password": "OSI Server Password",
+    "submit": "Refresh connection",
+    "running": "Refreshing..."
+  }
+}

@@ -1,0 +1,21 @@
+{
+  "title": "Tableau de bord Open Smart Irrigation",
+  "welcome": "Bienvenue, {{username}}",
+  "addZone": "Ajouter une zone",
+  "addDevice": "Ajouter un appareil",
+  "logout": "Déconnexion",
+  "loading": "Chargement du tableau de bord...",
+  "failedToLoad": "Échec du chargement des données",
+  "autoRefresh": "Actualisation automatique toutes les 10 secondes",
+  "emptyState": {
+    "title": "Bienvenue dans votre ferme !",
+    "subtitle": "Commencez par créer une zone d'irrigation et ajouter des appareils",
+    "createZone": "Créer une zone",
+    "addDevice": "Ajouter un appareil"
+  },
+  "irrigationZones": "Zones d'irrigation",
+  "unassignedDevices": "Appareils non assignés",
+  "unassignedSubtitle": "Ces appareils ne sont assignés à aucune zone d'irrigation",
+  "soilSensors": "Capteurs de sol",
+  "smartValves": "Vannes intelligentes"
+}

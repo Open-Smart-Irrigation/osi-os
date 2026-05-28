@@ -1,0 +1,140 @@
+{
+  "addModal": {
+    "title": "Adicionar dispositivo",
+    "deviceType": "Tipo de dispositivo",
+    "deviceName": "Nome do dispositivo",
+    "deviceNamePlaceholder": "ex. Campo Norte, Válvula principal",
+    "deveui": "DevEUI",
+    "deveuiPlaceholder": "16 caracteres hexadecimais",
+    "deveuiHint": "Introduza exatamente 16 caracteres hexadecimais (0-9, A-F)",
+    "deveuiInvalid": "O DevEUI deve ter exatamente 16 caracteres hexadecimais",
+    "adding": "A adicionar...",
+    "submit": "Adicionar dispositivo",
+    "failed": "Falha ao adicionar dispositivo"
+  },
+  "assignModal": {
+    "title": "Atribuir dispositivo a {{zoneName}}",
+    "selectDevice": "Selecionar dispositivo",
+    "selectPlaceholder": "-- Selecionar um dispositivo --",
+    "noDevicesTitle": "Sem dispositivos não atribuídos",
+    "noDevicesSubtitle": "Todos os dispositivos já estão atribuídos a zonas. Adicione mais dispositivos ou remova-os de outras zonas.",
+    "assigning": "A atribuir...",
+    "submit": "Atribuir dispositivo",
+    "pleaseSelect": "Selecione um dispositivo",
+    "failed": "Falha ao atribuir dispositivo"
+  },
+  "createZoneModal": {
+    "title": "Criar zona de rega",
+    "zoneName": "Nome da zona",
+    "zoneNamePlaceholder": "ex. Jardim A, Campo Norte, Pomar 1",
+    "zoneNameRequired": "O nome da zona é obrigatório",
+    "creating": "A criar...",
+    "submit": "Criar zona",
+    "failed": "Falha ao criar zona"
+  },
+  "kiwiSensor": {
+    "badge": "SENSOR KIWI",
+    "tooDry": "DEMASIADO SECO!",
+    "soilNeedsWater": "O solo precisa de rega",
+    "removeConfirm": "Remover este dispositivo?",
+    "removeSubtitle": "O dispositivo será desvinculado da sua conta.",
+    "yesRemove": "Sim, remover",
+    "removing": "A remover...",
+    "failedToRemove": "Falha ao remover dispositivo",
+    "soilWaterTension1": "TENSÃO HÍDRICA DO SOLO 1",
+    "soilWaterTension2": "TENSÃO HÍDRICA DO SOLO 2",
+    "lightIntensity": "INTENSIDADE LUMINOSA",
+    "lastSeen": "Visto há {{minutes}} minutos"
+  },
+  "stregaValve": {
+    "badge": "VÁLVULA STREGA",
+    "status": "ESTADO",
+    "open": "ABERTA",
+    "closed": "FECHADA",
+    "target": "Objetivo: {{state}}",
+    "opening": "A abrir...",
+    "closing": "A fechar...",
+    "removeConfirm": "Remover este dispositivo?",
+    "removeSubtitle": "O dispositivo será desvinculado da sua conta.",
+    "yesRemove": "Sim, remover",
+    "removing": "A remover...",
+    "failedToRemove": "Falha ao remover dispositivo",
+    "lastSeen": "Visto há {{minutes}} minutos"
+  },
+  "zone": {
+    "deviceCount_one": "{{count}} dispositivo",
+    "deviceCount_other": "{{count}} dispositivos",
+    "assignDevice": "+ Dispositivo",
+    "deleteZone": "Eliminar",
+    "deleteConfirm": "Eliminar esta zona?",
+    "deleteSubtitle": "Todos os dispositivos serão removidos desta zona. Esta ação não pode ser desfeita.",
+    "yesDelete": "Sim, eliminar",
+    "deleting": "A eliminar...",
+    "failedToDelete": "Falha ao eliminar zona",
+    "failedToRemoveDevice": "Falha ao remover dispositivo da zona",
+    "noDevices": "Sem dispositivos nesta zona",
+    "assignFirst": "Atribuir primeiro dispositivo",
+    "devicesInZone": "Dispositivos nesta zona:"
+  },
+  "schedule": {
+    "irrigationSchedule": "Programa de rega",
+    "triggerMetric": "Métrica de ativação",
+    "soilWaterTension1": "Tensão hídrica do solo 1",
+    "soilWaterTension2": "Tensão hídrica do solo 2",
+    "average": "Média (WM1 + WM2)",
+    "thresholdKpa": "Limiar (kPa)",
+    "duration": "Duração da rega (min)",
+    "enabled": "Ativado",
+    "on": "Sim",
+    "off": "Não",
+    "loadingSchedule": "A carregar programa...",
+    "loadFailed": "Falha ao carregar programa",
+    "saving": "A guardar...",
+    "saveSchedule": "Guardar programa",
+    "saveFailed": "Falha ao guardar programa",
+    "reload": "Recarregar",
+    "reloadFailed": "Falha ao recarregar programa",
+    "saved": "Guardado.",
+    "triggerHint": "Ativar se {{metric}} ≥ {{threshold}} kPa (uma vez/dia, 06:00)."
+  },
+  "environment": {
+    "sectionTitle": "Ambiente",
+    "tabs": { "local": "Local", "online": "Online", "agronomic": "Agronómico", "forecast": "Previsão" },
+    "source": { "openagri": "OpenAgri", "open_meteo": "Open-Meteo", "local": "Sensores locais", "unavailable": "Indisponível" },
+    "cache": { "live": "Ao vivo", "stale": "Desatualizado", "miss": "Sem dados" },
+    "location": { "zone": "Coordenadas da zona", "gateway": "GPS do gateway", "unavailable": "Sem localização" },
+    "local": {
+      "freshSensors": "{{count}} recente",
+      "staleSensors_one": "{{count}} desatualizado",
+      "staleSensors_other": "{{count}} desatualizados",
+      "perDevice": "Leituras por dispositivo",
+      "noData": "Nenhum dado de sensor local disponível",
+      "observedAt": "Observado {{time}}"
+    },
+    "online": {
+      "unavailable": "Nenhum dado meteorológico online disponível para esta zona",
+      "noLocation": "Defina as coordenadas da zona para ativar o clima online",
+      "updatesAt": "Atualiza às {{time}}"
+    },
+    "agronomic": {
+      "vpd": "VPD", "dewPoint": "Ponto de orvalho", "heatIndex": "Índice de calor", "thi": "THI",
+      "et0": "ET₀ referência", "kc": "Coef. cultura Kc", "etc": "ET cultura",
+      "noData": "Nenhum dado agronómico disponível", "fromSource": "de {{source}}"
+    },
+    "forecast": {
+      "next24h": "Próx. 24 h", "next72h": "Próx. 72 h", "nextRain": "Próxima chuva",
+      "rainHours": "Horas de chuva", "maxHourly": "Máx. por hora",
+      "today": "hoje", "tomorrow": "amanhã",
+      "noData": "Previsão indisponível",
+      "noLocation": "Defina as coordenadas da zona para ativar a previsão",
+      "hourlyTitle": "Chuva por hora (próx. 24 h)"
+    },
+    "metrics": {
+      "air_temperature_c": "Temp. ar", "relative_humidity_pct": "Humidade",
+      "probe_temperature_c": "Temp. sonda", "pressure_hpa": "Pressão",
+      "wind_speed_mps": "Vento", "wind_direction_deg": "Dir. vento",
+      "rainfall_mm": "Chuva", "light_lux": "Luz",
+      "uv_index": "Índice UV", "soil_temperature_c": "Temp. solo", "soil_moisture_pct": "Humidade solo"
+    }
+  }
+}

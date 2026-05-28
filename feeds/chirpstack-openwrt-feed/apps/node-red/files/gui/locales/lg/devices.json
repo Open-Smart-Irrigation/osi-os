@@ -1,0 +1,140 @@
+{
+  "addModal": {
+    "title": "Yongera Ekyuma",
+    "deviceType": "Ekika ky'ekyuma",
+    "deviceName": "Erinnya ly'ekyuma",
+    "deviceNamePlaceholder": "eg. Olusozi olw'omugga, Zzimu enkulu",
+    "deveui": "DevEUI",
+    "deveuiPlaceholder": "Ebyagiro 16 eby'hexadecimal",
+    "deveuiHint": "Yingiza ebyagiro 16 eby'hexadecimal (0-9, A-F)",
+    "deveuiInvalid": "DevEUI eba n'ebyagiro 16 eby'hexadecimal",
+    "adding": "Tikuyongera...",
+    "submit": "Yongera Ekyuma",
+    "failed": "Okuyongera ekyuma kugaanye"
+  },
+  "assignModal": {
+    "title": "Werekeza ekyuma ku {{zoneName}}",
+    "selectDevice": "Londa ekyuma",
+    "selectPlaceholder": "-- Londa ekyuma --",
+    "noDevicesTitle": "Tewali byuma ebitawerekwa",
+    "noDevicesSubtitle": "Ebyuma byonna biwerekeddwa ku bifo. Yongera ebyuma oba biggyewo mu bifo ebirala.",
+    "assigning": "Tikuwerekeza...",
+    "submit": "Werekeza Ekyuma",
+    "pleaseSelect": "Londa ekyuma",
+    "failed": "Okuwerekeza ekyuma kugaanye"
+  },
+  "createZoneModal": {
+    "title": "Tondawo Ekifo ky'okusukkulirira",
+    "zoneName": "Erinnya ly'ekifo",
+    "zoneNamePlaceholder": "eg. Olusozi A, Okuva mu bukiika, Olusuku 1",
+    "zoneNameRequired": "Erinnya ly'ekifo lyetaagisa",
+    "creating": "Tikutondawo...",
+    "submit": "Tondawo Ekifo",
+    "failed": "Okutondawo ekifo kugaanye"
+  },
+  "kiwiSensor": {
+    "badge": "EKYUMA EKY'OKUMANYA KIWI",
+    "tooDry": "OMWAKA MUNGI NNYO!",
+    "soilNeedsWater": "Obutaka butaagira amazzi",
+    "removeConfirm": "Ggyawo ekyuma kino?",
+    "removeSubtitle": "Ekyuma kiggyibwako ku akawunti yo.",
+    "yesRemove": "Yee, Ggyawo",
+    "removing": "Tikuggyawo...",
+    "failedToRemove": "Okuggyawo ekyuma kugaanye",
+    "soilWaterTension1": "OKUZIKA KW'AMAZZI MU BUTAKA 1",
+    "soilWaterTension2": "OKUZIKA KW'AMAZZI MU BUTAKA 2",
+    "lightIntensity": "AKAWAAWA K'OMUSANA",
+    "lastSeen": "Bwagulibwa omulundi gw'omuliko: {{minutes}} edakiika ewedde"
+  },
+  "stregaValve": {
+    "badge": "ZZIMU YA STREGA",
+    "status": "ENKOLAGANA",
+    "open": "GGULE",
+    "closed": "GGANGWE",
+    "target": "Eggwe: {{state}}",
+    "opening": "Tikuggulawo...",
+    "closing": "Tikuganga...",
+    "removeConfirm": "Ggyawo ekyuma kino?",
+    "removeSubtitle": "Ekyuma kiggyibwako ku akawunti yo.",
+    "yesRemove": "Yee, Ggyawo",
+    "removing": "Tikuggyawo...",
+    "failedToRemove": "Okuggyawo ekyuma kugaanye",
+    "lastSeen": "Bwagulibwa omulundi gw'omuliko: {{minutes}} edakiika ewedde"
+  },
+  "zone": {
+    "deviceCount_one": "ekyuma {{count}}",
+    "deviceCount_other": "ebyuma {{count}}",
+    "assignDevice": "+ Ekyuma",
+    "deleteZone": "Sazaamu",
+    "deleteConfirm": "Sazaamu ekifo kino?",
+    "deleteSubtitle": "Ebyuma byonna biggibwako mu kifo kino. Eky'okukola kino tekisobola kukuukula.",
+    "yesDelete": "Yee, Sazaamu",
+    "deleting": "Tikusazaamu...",
+    "failedToDelete": "Okusazaamu ekifo kugaanye",
+    "failedToRemoveDevice": "Okuggyawo ekyuma mu kifo kugaanye",
+    "noDevices": "Tewali byuma mu kifo kino",
+    "assignFirst": "Werekeza Ekyuma Ekyasooka",
+    "devicesInZone": "Ebyuma mu kifo kino:"
+  },
+  "schedule": {
+    "irrigationSchedule": "Nteekateeka y'okusukkulirira",
+    "triggerMetric": "Kigendererwa ky'okutandika",
+    "soilWaterTension1": "Okuzika kw'amazzi mu butaka 1",
+    "soilWaterTension2": "Okuzika kw'amazzi mu butaka 2",
+    "average": "Wakati (WM1 + WM2)",
+    "thresholdKpa": "Ekiraamo (kPa)",
+    "duration": "Ebanga ly'okusukkulirira (edakiika)",
+    "enabled": "Kikolawo",
+    "on": "Yee",
+    "off": "Nedda",
+    "loadingSchedule": "Tikutwala nteekateeka...",
+    "loadFailed": "Okutwala nteekateeka kugaanye",
+    "saving": "Tikutereka...",
+    "saveSchedule": "Tereka nteekateeka",
+    "saveFailed": "Okutereka nteekateeka kugaanye",
+    "reload": "Zaamu",
+    "reloadFailed": "Okuzaamu nteekateeka kugaanye",
+    "saved": "Kitereddwa.",
+    "triggerHint": "Tandika singa {{metric}} ≥ {{threshold}} kPa (omulundi gumu/lunaku, 06:00)."
+  },
+  "environment": {
+    "sectionTitle": "Obutonde",
+    "tabs": { "local": "Eky'omu kitundu", "online": "Ku mukutu", "agronomic": "Eby'okulima", "forecast": "Ebikuubiriza" },
+    "source": { "openagri": "OpenAgri", "open_meteo": "Open-Meteo", "local": "Ebikuuma eby'eggwanga", "unavailable": "Tekyabaawo" },
+    "cache": { "live": "Amaanyi", "stale": "Ekaddiye", "miss": "Tewali makulu" },
+    "location": { "zone": "Entera z'essaza", "gateway": "GPS y'ebbanga", "unavailable": "Tewali kifo" },
+    "local": {
+      "freshSensors": "{{count}} eppya",
+      "staleSensors_one": "{{count}} ekaddiye",
+      "staleSensors_other": "{{count}} ekaddiye",
+      "perDevice": "Ebyofubirwa bya buli kyuma",
+      "noData": "Tewali makulu ga sensor ery'eggwanga",
+      "observedAt": "Kiraabibwa {{time}}"
+    },
+    "online": {
+      "unavailable": "Tewali makulu ga bude ku mukutu ku ssaza lino",
+      "noLocation": "Teeka entera z'essaza okukozesa bude ku mukutu",
+      "updatesAt": "Kusinziiramu ku {{time}}"
+    },
+    "agronomic": {
+      "vpd": "VPD", "dewPoint": "Ekifo ky'amazzi", "heatIndex": "Ebbugumu", "thi": "THI",
+      "et0": "ET₀ ensibuko", "kc": "Kc eby'ebimera", "etc": "ET eby'ebimera",
+      "noData": "Tewali makulu ag'okulima", "fromSource": "okuva {{source}}"
+    },
+    "forecast": {
+      "next24h": "Essawa 24 ezijja", "next72h": "Essawa 72 ezijja", "nextRain": "Enkuba ejja",
+      "rainHours": "Essawa z'enkuba", "maxHourly": "Nnyingi ku ssawa",
+      "today": "leero", "tomorrow": "enkya",
+      "noData": "Tewali bikuubiriza",
+      "noLocation": "Teeka entera z'essaza okukozesa ebikuubiriza",
+      "hourlyTitle": "Enkuba ku ssawa (essawa 24 ezijja)"
+    },
+    "metrics": {
+      "air_temperature_c": "Ebbugumu ery'empewo", "relative_humidity_pct": "Amaanzi mu mpewo",
+      "probe_temperature_c": "Ebbugumu ery'omuzizi", "pressure_hpa": "Okunyigiriza",
+      "wind_speed_mps": "Empewo", "wind_direction_deg": "Akalagirirwa k'empewo",
+      "rainfall_mm": "Enkuba", "light_lux": "Omusana",
+      "uv_index": "Enkomerero ya UV", "soil_temperature_c": "Ebbugumu ery'ettaka", "soil_moisture_pct": "Amaanzi mu ttaka"
+    }
+  }
+}
