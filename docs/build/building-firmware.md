@@ -1,176 +1,225 @@
 # OSI OS — Firmware Build Guide
 
-> **Note:** The firmware build is currently work-in-progress. For day-to-day development and device setup, use the [deploy script workflow](README.md#device-setup) instead.
+For release images, use the full workflow in
+[`rpi5-full-osi-image.md`](rpi5-full-osi-image.md). Despite the historical file
+name, that workflow covers both current release targets:
 
----
+- Raspberry Pi 5: `bcm27xx/bcm2712`, device `rpi-5`.
+- Raspberry Pi 4 / 400 / 3 / 2: `bcm27xx/bcm2709`, device `rpi-2`.
+
+This page is the shorter orientation guide for the OpenWrt build environment.
 
 ## Prerequisites
 
-- [Docker](https://www.docker.com/) and Docker Compose installed
-- At least 20 GB free disk space
-- At least 8 GB RAM recommended
-- Stable internet connection (build downloads several GB of packages)
+- OpenWrt submodule initialized under `openwrt/`.
+- Build dependencies available on the host or inside the Docker devshell.
+- `quilt` available on `PATH` for `make switch-env`.
+- Node/npm available for `web/react-gui`.
+- At least 20 GB free disk space; more is better for dual-target builds.
+- At least 8 GB RAM recommended.
+- Stable internet connection for first-time package/feed downloads.
 
----
+If `quilt` is not installed globally and `sudo` is unavailable, build it from
+the OpenWrt download cache and use the local binary:
 
-## Build Steps
+```bash
+tar -xzf openwrt/dl/quilt-0.68.tar.gz -C /tmp
+cd /tmp/quilt-0.68
+./configure --prefix="$HOME/.local"
+make -j2
+make install
+cd /home/phil/Repos/osi-os
+export PATH="$HOME/.local/bin:$PATH"
+```
 
-### 1. Initialize (first time only)
+## Initialize The Build Tree
+
+First-time setup:
 
 ```bash
 make init
 ```
 
-This clones the OpenWrt source, fetches all feeds (including the ChirpStack OpenWrt feed), and sets up symlinks. Takes 10–15 minutes and downloads ~2 GB.
+This initializes the OpenWrt submodule, copies the feed config, sets the initial
+symlinks, updates feeds, installs feed packages, and initializes quilt.
 
-### 2. Enter the Docker build environment
+If using the Docker devshell:
 
 ```bash
 make devshell
 ```
 
-All subsequent build commands run inside this Docker container.
+The successful 2026-05-22 release builds were run directly on the host with
+`PATH="$HOME/.local/bin:$PATH"` so local `quilt` was available. Either host or
+devshell is acceptable as long as the same verifiers and post-build checks pass.
 
-### 3. Switch to the target configuration
+## Pre-Build Checks
+
+Run from repo root before every release build:
 
 ```bash
-# Raspberry Pi 5 (primary / recommended)
+git status --short --branch
+git fetch --all --prune
+
+node scripts/verify-profile-parity.js
+node scripts/verify-chameleon-calibration.js
+node scripts/verify-db-schema-consistency.js
+node scripts/verify-sync-flow.js
+node scripts/verify-strega-gen1.js
+node scripts/verify-communication-contract.js
+scripts/check-mqtt-topics.sh
+```
+
+Do not build release images if any verifier fails.
+
+If the GUI changed:
+
+```bash
+cd web/react-gui
+npm run test:unit
+npm run build
+cd ../..
+rm -rf feeds/chirpstack-openwrt-feed/apps/node-red/files/gui
+mkdir -p feeds/chirpstack-openwrt-feed/apps/node-red/files/gui
+cp -a web/react-gui/build/. feeds/chirpstack-openwrt-feed/apps/node-red/files/gui/
+```
+
+## Build Commands
+
+### Raspberry Pi 5
+
+```bash
+export PATH="$HOME/.local/bin:$PATH"
 make switch-env ENV=full_raspberrypi_bcm27xx_bcm2712
 
-# Raspberry Pi 4 / 400 / 3 / 2
+mkdir -p tmp
+cd openwrt
+CARGO_BUILD_JOBS=2 make -j4 > ../tmp/build-pi5-full-image.log 2>&1
+cd ..
+```
+
+Output directory:
+
+```text
+openwrt/bin/targets/bcm27xx/bcm2712/
+```
+
+Factory image pattern:
+
+```text
+chirpstack-gateway-os-4.9.0-full-bcm27xx-bcm2712-rpi-5-squashfs-factory.img.gz
+```
+
+### Raspberry Pi 4 / 400 / 3 / 2
+
+```bash
+export PATH="$HOME/.local/bin:$PATH"
 make switch-env ENV=full_raspberrypi_bcm27xx_bcm2709
 
-# Raspberry Pi 1/Zero
-make switch-env ENV=full_raspberrypi_bcm27xx_bcm2708
+cd openwrt
+CARGO_BUILD_JOBS=2 make -j4 > ../tmp/build-pi4-full-image.log 2>&1
+cd ..
 ```
 
-`switch-env` undoes any previously applied patches, updates OpenWrt symlinks, and applies the target's quilt patches.
+Output directory:
 
-### Raspberry Pi 4 / 400 / 3 / 2 (universal 32-bit image)
+```text
+openwrt/bin/targets/bcm27xx/bcm2709/
+```
+
+Factory image pattern:
+
+```text
+chirpstack-gateway-os-4.9.0-full-bcm27xx-bcm2709-rpi-2-squashfs-factory.img.gz
+```
+
+The bcm2709 image is a universal 32-bit ARMv7 image for Pi 2 / 3 / 4 / 400.
+
+## Monitoring
+
+Low CPU during package install, package index, and image generation stages is
+normal. Check progress with:
 
 ```bash
-make switch-env ENV=full_raspberrypi_bcm27xx_bcm2709
-cd openwrt && make -j$(nproc)
+tail -n 80 tmp/build-pi5-full-image.log
+tail -n 80 tmp/build-pi4-full-image.log
+pgrep -af 'make -j4|make\[|mksquashfs|mkfs|gen_rpi|gzip|opkg|ipkg'
 ```
 
-Produces an image at `openwrt/bin/targets/bcm27xx/bcm2709/` that boots on any Pi 2 / 3 / 4 / 400 via the bundled multi-DTB.
+## Post-Build Verification
 
-### 4. Update feeds
+Run checksum verification in each target output directory:
 
 ```bash
-make update
+cd openwrt/bin/targets/bcm27xx/bcm2712
+sha256sum -c sha256sums
+
+cd ../bcm2709
+sha256sum -c sha256sums
 ```
 
-Run this after `switch-env` to ensure all feeds are up to date.
-
-### 5. Build the React GUI
-
-Before building the firmware, build the React frontend and copy it into the Node-RED package:
+Then inspect the generated rootfs. Paths differ by target:
 
 ```bash
-# Run outside the Docker container, in the repo root
-cd web/react-gui
-npm install
-npm run build
-cp -r build/* feeds/chirpstack-openwrt-feed/apps/node-red/files/gui/
+# Pi 5
+ROOT=/home/phil/Repos/osi-os/openwrt/build_dir/target-aarch64_cortex-a76_musl/root-bcm27xx
+
+# Pi 4 / 400 / 3 / 2
+ROOT=/home/phil/Repos/osi-os/openwrt/build_dir/target-arm_cortex-a7+neon-vfpv4_musl_eabi/root-bcm27xx
 ```
 
-The Vite output directory for this project is `web/react-gui/build`.
-
-### 6. Build the firmware image
-
-Inside the Docker devshell:
+For each target:
 
 ```bash
-make
+test -f "$ROOT/etc/uci-defaults/98_osi_node_red_seed"
+test -f "$ROOT/usr/share/flows.json"
+test -f "$ROOT/usr/share/db/farming.db"
+test -f "$ROOT/usr/share/node-red/node_modules/@grpc/grpc-js/package.json"
+test -f "$ROOT/usr/share/node-red/node_modules/@chirpstack/chirpstack-api/package.json"
+test -f "$ROOT/usr/share/node-red/node_modules/google-protobuf/package.json"
+grep -E 'location /(gui|auth|api|download)/' "$ROOT/etc/nginx/conf.d/node-red.locations"
+sqlite3 "$ROOT/usr/share/db/farming.db" 'SELECT COUNT(*) FROM chameleon_calibrations;'
 ```
 
-This takes 1–3 hours depending on hardware. The first build is slowest; subsequent builds reuse cached artifacts.
-
----
-
-## Build Output
-
-After a successful build, firmware images are in:
-
-| Target | Output directory |
-|---|---|
-| Raspberry Pi 5 | `openwrt/bin/targets/bcm27xx/bcm2712/` |
-| Raspberry Pi 4 / 400 / 3 / 2 | `openwrt/bin/targets/bcm27xx/bcm2709/` |
-| Raspberry Pi 1/Zero | `openwrt/bin/targets/bcm27xx/bcm2708/` |
-
-Look for files like:
-- `openwrt-bcm27xx-bcm2712-rpi-5-ext4-factory.img.gz` — for flashing a new SD card
-- `openwrt-bcm27xx-bcm2712-rpi-5-ext4-sysupgrade.img.gz` — for over-the-air upgrades
-
----
-
-## Making Configuration Changes
-
-Run the following commands from inside the `openwrt/` directory (still within devshell):
-
-```bash
-# Interactive package/kernel config
-make menuconfig
-
-# Refresh config after upstream updates
-make defconfig
-```
-
-See the [OpenWrt build system documentation](https://openwrt.org/docs/guide-developer/toolchain/use-buildsystem) for more options.
-
----
+An image is not release-ready until checksum verification and rootfs inspection
+both pass.
 
 ## Troubleshooting
 
-### "No space left on device"
-Free up disk space (20 GB+ required). Clean Docker cache:
+### `quilt: command not found`
+
+Install `quilt` system-wide or build it locally from `openwrt/dl/quilt-0.68.tar.gz`
+as shown above, then rerun with `PATH="$HOME/.local/bin:$PATH"`.
+
+### `image-with-padded-rootfs.patch can be reverse-applied`
+
+This can happen when the OpenWrt tree already contains the rootfs padding logic.
+Proceed only after confirming:
+
 ```bash
-docker system prune -a
+grep -n 'ROOTFSPADDING' openwrt/target/linux/bcm27xx/image/gen_rpi_sdcard_img.sh
 ```
 
-### "Permission denied" errors
-Ensure your user is in the `docker` group:
-```bash
-sudo usermod -aG docker $USER
-newgrp docker
-```
+and after the remaining target patches are applied.
 
 ### Build fails with missing packages
-Run `make update` inside the devshell, then retry. If packages seem corrupted:
-```bash
-make clean && make
-```
 
-### "Feed not found" errors
-Run `make init` again and check your internet connection.
-
-### Rust compilation OOM
-The Jenkinsfile limits Cargo to 2 parallel jobs (`CARGO_BUILD_JOBS=2`). If building locally with more RAM available, you can increase this, but keep it conservative on machines with less than 16 GB.
-
----
-
-## Clean Build
+Run `make update` only when intentionally refreshing feeds for the current
+checkout, then retry. If the feed state is corrupted:
 
 ```bash
 make clean
 make init
-make devshell
-# then inside devshell:
-make switch-env ENV=full_raspberrypi_bcm27xx_bcm2712
-make update
-make
 ```
 
----
+### Rust compilation OOM
 
-## Quick Reference
+Keep `CARGO_BUILD_JOBS=2` unless the build host has enough RAM for more.
+
+### No space left on device
+
+Free disk space. If Docker is used:
 
 ```bash
-# Complete build sequence (Pi 5):
-make init                                          # First time only
-make devshell                                      # Enter Docker environment
-make switch-env ENV=full_raspberrypi_bcm27xx_bcm2712
-make update
-make
+docker system prune -a
 ```
