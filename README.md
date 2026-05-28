@@ -220,6 +220,8 @@ The script deploys `settings.js`, `flows.json`, all Node-RED local helpers (`osi
 
 **Database safety:** `deploy.sh` never overwrites `/data/db/farming.db`. It seeds the bundled `farming.db` only when the target file is absent, and refuses to seed if orphaned SQLite WAL/SHM/journal sidecars exist. On already-provisioned devices the live DB is always preserved.
 
+On first boot after a Path B deploy, OSI OS attempts a one-shot in-place resize of the Raspberry Pi writable partition when the SD layout is the expected two-partition `mmcblk0` layout. The helper uses `parted resizepart` without deleting or recreating the root partition, reboots, then runs `resize2fs` on the next boot. It is idempotent: power loss between the reboot and `resize2fs` is recovered on the next boot. It never touches `/data/db/farming.db`.
+
 <details>
 <summary>Alternative: manual file-by-file deployment (if deploy.sh is not available)</summary>
 

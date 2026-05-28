@@ -5,6 +5,7 @@ import {
   ResponsiveContainer, CartesianGrid,
 } from 'recharts';
 import type { OnlineEnvironment, ForecastEnvironment, DailyForecast, HourlyForecast, EnvironmentLocation } from '../../../types/farming';
+import { formatForecastHighLow } from '../../../utils/forecastFormat';
 import { toCompassDirection } from '../../../utils/wind';
 import { WeatherIcon } from './WeatherIcon';
 
@@ -100,7 +101,9 @@ const RainPill: React.FC<RainPillProps> = ({ label, value, highlight }) => (
 // Daily strip
 
 const DayCard: React.FC<{ day: DailyForecast; isToday: boolean }> = ({ day, isToday }) => {
+  const { t } = useTranslation('devices');
   const rain = day.rainMm ?? 0;
+  const highLow = formatForecastHighLow(day.maxTempC, day.minTempC);
   return (
     <div className={`flex-shrink-0 w-20 flex flex-col items-center gap-1 rounded-xl p-2 border
       ${isToday
@@ -108,12 +111,11 @@ const DayCard: React.FC<{ day: DailyForecast; isToday: boolean }> = ({ day, isTo
         : 'bg-[var(--card)] border-[var(--border)]'}`}>
       <span className="text-xs font-semibold text-[var(--text-secondary)]">{fmtDay(day.date)}</span>
       <WeatherIcon code={day.weatherCode} description={day.description} size={40} animated={!isToday} />
-      {(day.maxTempC != null || day.minTempC != null) && (
-        <span className="text-xs font-medium tabular-nums text-[var(--text)]">
-          {day.maxTempC != null ? `${day.maxTempC.toFixed(0)}\u00B0` : ''}
-          {day.minTempC != null ? <span className="text-[var(--text-tertiary)]">/{day.minTempC.toFixed(0)}\u00B0</span> : ''}
-        </span>
-      )}
+      <span className="text-xs font-medium tabular-nums text-[var(--text)]">
+        {highLow === 'Unavailable'
+          ? t('environment.forecast.unavailable', { defaultValue: 'Unavailable' })
+          : highLow}
+      </span>
       {rain > 0 && (
         <span className={`text-[10px] font-semibold rounded-full px-1.5 py-0.5 border ${rainClass(rain)}`}>
           {rain.toFixed(1)} mm
