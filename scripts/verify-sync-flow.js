@@ -169,7 +169,8 @@ const requiredHttpRoutes = [
   '/api/devices/:deveui/zone-assignments',
   '/api/gateway/location',
   '/api/gateways/:gatewayEui/location',
-  '/api/irrigation-zones/:zone_id/environment-summary'
+  '/api/irrigation-zones/:zone_id/environment-summary',
+  '/api/irrigation/recent-actuations'
 ];
 
 const requiredFunctionNodes = [

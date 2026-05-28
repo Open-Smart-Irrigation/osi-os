@@ -13,6 +13,7 @@ import { CreateZoneModal } from '../components/farming/CreateZoneModal';
 import { LanguageSwitcher } from '../components/LanguageSwitcher';
 import { SystemPanel } from '../components/farming/SystemPanel';
 import { SenseCapWeatherCard } from '../components/farming/SenseCapWeatherCard';
+import { IrrigationOutcomesPanel } from '../components/farming/IrrigationOutcomesPanel';
 import type { Device, IrrigationZone } from '../types/farming';
 
 const devicesFetcher = () => devicesAPI.getAll();
@@ -287,6 +288,11 @@ export const FarmingDashboard: React.FC = () => {
                 </div>
               </div>
             )}
+
+            {/* Recent irrigation outcomes (osi-os#7) */}
+            <div className="mt-8">
+              <IrrigationOutcomesPanel />
+            </div>
 
             {/* Gateway system panel */}
             <div className="mt-8">

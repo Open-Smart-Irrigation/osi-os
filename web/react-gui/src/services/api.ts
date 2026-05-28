@@ -714,6 +714,48 @@ export const environmentAPI = {
     api.get<ZoneEnvironmentSummary>(`/api/irrigation-zones/${zoneId}/environment-summary`).then(r => r.data),
 };
 
+export type IrrigationActuationStatus =
+  | 'PENDING_OPEN'
+  | 'RUNNING'
+  | 'COMPLETED'
+  | 'CANCELLED'
+  | 'COMMAND_FAILED'
+  | 'OPEN_TIMEOUT'
+  | 'CLOSE_TIMEOUT'
+  | 'UNKNOWN';
+
+export interface IrrigationActuation {
+  expectationId: string;
+  deviceEui: string;
+  deviceName: string | null;
+  zoneId: number;
+  zoneName: string | null;
+  commandId: string | null;
+  commandedAt: string;
+  commandedDurationSeconds: number;
+  expectedCloseAt: string;
+  observedOpenAt: string | null;
+  observedCloseAt: string | null;
+  estimatedGrossLiters: number | null;
+  flowRateLpm: number | null;
+  reconciliationState: string;
+  cancelReason: string | null;
+  commandResult: string | null;
+  commandResultDetail: string | null;
+  commandAppliedAt: string | null;
+  status: IrrigationActuationStatus;
+}
+
+export interface IrrigationActuationsResponse {
+  generatedAt: string;
+  actuations: IrrigationActuation[];
+}
+
+export const irrigationOutcomesAPI = {
+  recentActuations: (): Promise<IrrigationActuationsResponse> =>
+    api.get<IrrigationActuationsResponse>('/api/irrigation/recent-actuations').then(r => r.data),
+};
+
 export const s2120API = {
   getZoneAssignments: async (deveui: string): Promise<Array<{ zone_id: number; zone_name: string }>> => {
     const response = await api.get(`/api/devices/${deveui}/zone-assignments`);
