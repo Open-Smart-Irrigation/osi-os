@@ -2427,6 +2427,96 @@ Expected: remaining open issues are only those with explicit blocked verificatio
 
 ---
 
+## Follow-ups discovered during execution
+
+These are real bugs or scoped-out improvements surfaced while implementing or verifying earlier slices. They are NOT covered by any existing GitHub issue at the time of writing. File each as its own issue when picked up; group related ones into a single PR where it makes sense.
+
+### F1. STREGA local-dashboard duplicate-click bug (osi-os GUI)
+
+**Surfaced during:** Slice 12 production verification (Uganda, 2026-05-28).
+
+**Symptom:** Operator hit the red "Cancel irrigation" button on the local Pi dashboard twice in rapid succession → produced 4 × `CLOSE` rows in `actuator_log` 90 seconds apart (entries 29309–29312 on Uganda). Same root cause as `osi-server#27` (cloud LSN50 mode picker): no visible feedback after a successful click, so the operator clicks again, queuing duplicate downlinks.
+
+**Why it wasn't caught by Slice 3:** Slice 3 refactored only the **cloud** frontend (`osi-server/frontend/src/components/farming/StregaValveCard.tsx`) to use `useDownlinkAction` + `DownlinkConfirmModal` + `DownlinkPendingBadge`. The **local** Pi dashboard at `osi-os/web/react-gui/src/components/farming/StregaValveCard.tsx` still has the original "click button → axios.put → set busy → display info text" pattern with no duplicate-click guard.
+
+**Scope of fix:** Port the three Slice 3 primitives (`useDownlinkAction` hook + modal + badge) from `osi-server/frontend/src/` to `osi-os/web/react-gui/src/`. Apply to all button-driven downlink actions in osi-os local cards: STREGA (timed-action, cancel, magnet, partial, flush), Dragino LSN50 (mode, interval, interrupt, warmup), Kiwi (interval, temp/humidity enable). Same i18n key approach, same locale parity follow-up.
+
+**Effort:** Medium. The hook/modal/badge are already written and tested in osi-server; lift-and-shift then rewire each card. Roughly 1 day. Closes the same bug class on the operator's primary local UI surface.
+
+---
+
+### F2. Operator-triggered STREGA opens leave `zone_id` and `command_id` NULL in `valve_actuation_expectations`
+
+**Surfaced during:** Slice 12 production verification (Uganda, 2026-05-28) — the "Recent irrigations" panel was empty even though the operator had opened the valve five times.
+
+**Root cause:** When a STREGA open is initiated from the local dashboard (`POST /api/valve/:deveui`), the `Build actuator_command + DB writes` function node (id `dde8e1ef265e96d7`) builds a cmd msg containing only `{action, duration_minutes, reason, timestamp}` — no `zone_id`, no `command_id`. The downstream STREGA actuator dispatch chain then writes a `valve_actuation_expectations` row with NULLs in both columns. The scheduler-triggered path supplies both (because the scheduler operates per-zone and uses cloud-pulled command IDs), so the gap only affects manually-triggered actuations.
+
+**Why it matters beyond Slice 12:** Any downstream consumer that joins on `zone_id` (Slice 12's panel did) or on `command_id` (a future feature linking expectations to cloud `applied_commands` for ACK reconciliation) silently drops operator-triggered actuations. The current Slice 12 workaround (Option A: `LEFT JOIN` zones + authorize via `device.user_id`) hides the gap but doesn't fix the data quality.
+
+**Scope of fix:** In `Build actuator_command + DB writes`, after the device-ownership check, read the device's `irrigation_zone_id` from the lookup row (already in scope as `device.irrigation_zone_id`), generate a UUID `command_id`, and include both in the cmd object so the downstream Write STREGA Expectation function persists them. Carefully diff against the scheduler-triggered path so we don't double-set fields when the scheduler already provides them.
+
+**Effort:** Small. Single function-node patch, plus a regression test asserting `zone_id` and `command_id` are populated on a manual-trigger fixture.
+
+---
+
+### F3. Bare `CLOSE` STREGA command exists in UI — should be operator-cancel only
+
+**Surfaced during:** Slice 12 verification + operator feedback (2026-05-28): "we do not open and close the valve with the simple commands. we only open for a duration, the valve closes then by itself."
+
+**Issue:** Both the local osi-os dashboard and the cloud osi-server dashboard expose a "Cancel irrigation" button that sends `{action: 'CLOSE'}` to `POST /api/valve/:deveui` (local) or the equivalent server endpoint. The valve auto-closes when the commanded duration elapses, so the only legitimate use of CLOSE is **operator-initiated cancellation of an in-progress duration** — and there is already a dedicated endpoint for that: `POST /api/v1/valves/:deveui/cancel`.
+
+**Risk if left as-is:**
+- Bare CLOSE is the wrong endpoint for cancel (no cancel reason recorded, no `valve_actuation_expectations.cancel_reason` set, no cloud-side cancel event).
+- Operator may misuse it as a manual close after a confused open (which is exactly what the 4× duplicate-click pattern in F1 produced).
+- Slice 12's status taxonomy doesn't distinguish "auto-closed by duration" from "operator-cancelled" because the underlying record doesn't either.
+
+**Scope of fix:**
+1. Local osi-os: change `StregaValveCard.tsx` cancel button to call the `cancelIrrigation` API (`api.ts:177` `POST /api/v1/valves/:deveui/cancel`) instead of `controlValve({action:'CLOSE'})`.
+2. Cloud osi-server: do the same in `frontend/src/components/farming/StregaValveCard.tsx` (probably already correct — verify).
+3. Add a verifier assertion forbidding `{action:'CLOSE'}` calls from any React component.
+4. Add a follow-up: deprecate the CLOSE branch in the `Auth + Validate + Normalize` function node, returning 400 with a message pointing at the cancel endpoint.
+
+**Effort:** Small for steps 1–3. Step 4 is a deprecation that may break ad-hoc scripts — discuss before shipping.
+
+---
+
+### F4. `osi-os-deploy-live` wrapper leaks zombie HTTP servers + does not fail-fast on remote errors
+
+**Surfaced during:** Slice 12 production verification (Uganda, 2026-05-28) — three separate deploy attempts hit `curl: (22) error 404` because a previous wrapper invocation left a python `http.server` zombie bound to port 9876 with a now-deleted `$TMP_DIR`. The wrapper's `trap cleanup` did not actually wait/kill the background process. Worse, when the Pi-side `deploy.sh` curl returned 404, the wrapper's SSH step exited non-zero but the wrapper's outer loop did NOT check `$?` — it cheerfully moved on to ChirpStack bootstrap and Node-RED restart, then reported "Deploy complete" with no indication that the flows.json transfer had silently failed.
+
+**Concrete failure mode observed:** After my first fix to `get-actuations-auth.libs`, I ran the wrapper twice. The first run actually succeeded. The second run 404'd silently (zombie HTTP server). I spent ~30 minutes debugging "why didn't my libs fix land" before noticing the wrapper's previous-run cleanup had failed. A third operator could repeat the same hour-long detour.
+
+**Scope of fix (single repo edit, lives outside this monorepo):**
+1. `cleanup` trap: `kill "$SERVER_PID"; wait "$SERVER_PID" 2>/dev/null; sleep 0.5; ss -tlnp | grep -q ":${PORT}" && kill -9 "$SERVER_PID"`.
+2. SSH step: check `$?` after each remote command; abort the loop on non-zero with a clear "deploy FAILED on $host" message.
+3. Optional: before starting the HTTP server, `ss -tlnp 2>/dev/null | grep -q ":${PORT}"` and refuse to start if the port is bound by anything else.
+4. Optional: have `deploy.sh` itself print a recognizable success sentinel on the last line (e.g. `==> osi-os deploy complete ($commit_sha)`) so the wrapper can grep for it before declaring victory.
+
+**Effort:** Small. The wrapper is ~80 lines. Fix is ~15 lines of additions.
+
+**Where the file lives:** `/home/phil/.local/bin/osi-os-deploy-live` — outside this repo. MEMORY.md should record this so future agents can find it.
+
+---
+
+### F5. POST /api/valve success-path message stripping — FIXED in slice-12 deploy, document for completeness
+
+**Status:** Already fixed and merged (`fc2989dd` 2026-05-28). Recording here so the follow-up audit shows it was discovered during Slice 12 verification, not a planned change.
+
+**Bug:** `Build actuator_command + DB writes` returned three brand-new msg objects on success, including `{statusCode:202, payload:httpOk}` for the http-response output. Without spreading the original `msg`, `msg.res` was lost, http-response never called `.send()`, and the client hung until its 30s axios timeout — at which point the StregaValveCard error handler displayed "Failed to open valve" even though the downlink + DB writes had succeeded. Fixed by `Object.assign({}, msg, {statusCode:202, payload:httpOk})`.
+
+**Related preventive change (future):** add a verify-sync-flow assertion that any function node wiring to an `http response` node must either preserve `msg` (mutate + return `[null, msg]` style) or include `msg.res` in the new object. Hard to write precisely without false positives; defer until a third instance of this bug surfaces.
+
+---
+
+### F6. Slice 12 deferred detectors (re-noted from `osi-os#7` close-out)
+
+For traceability — these were called out in the `osi-os#7` close comment but belong here too:
+
+- **`NO_MOISTURE_RESPONSE`** status: requires a join into `device_data` over a 30-minute window per actuation to compare SWT before-and-after. Skipped from Slice 12 to keep scope contained. Standalone follow-up: design the moisture-delta query, add it to `Build Query`, extend the status taxonomy, render in the panel.
+- **`SCHEDULER_DECIDED_NO_COMMAND`** status: would require the scheduler to record decisions that didn't translate to a command. Today the scheduler emits a command per decision, so the failure mode isn't observable. Open the follow-up if/when a future scheduler change introduces skip paths.
+
+---
+
 ## Execution Order
 
 Order is data-correctness first, quick cross-repo fix next, then Terra model migration before Terra UI consumers, then i18n, then large product additions:
