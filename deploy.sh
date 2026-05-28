@@ -493,6 +493,10 @@ fix_mosquitto_ownership
 echo "--- React GUI ---"
 fetch "react_gui.tar.gz" "$TMP_DIR/react_gui.tar.gz"
 mkdir -p /usr/lib/node-red/gui
+for entry in /usr/lib/node-red/gui/* /usr/lib/node-red/gui/.[!.]* /usr/lib/node-red/gui/..?*; do
+    [ -e "$entry" ] || continue
+    rm -rf "$entry"
+done
 tar xzf "$TMP_DIR/react_gui.tar.gz" -C /usr/lib/node-red/gui/
 echo "OK"
 
