@@ -132,6 +132,20 @@ function normaliseDevice(device: any): Device {
     : configuredFlag === false || configuredFlag === 0
       ? false
       : undefined;
+  const rawActiveActuation = device?.activeValveActuation ?? device?.active_valve_actuation ?? null;
+  const activeValveActuation = rawActiveActuation && typeof rawActiveActuation === 'object' && !Array.isArray(rawActiveActuation)
+    ? {
+        ...rawActiveActuation,
+        expectationId: rawActiveActuation.expectationId ?? rawActiveActuation.expectation_id ?? null,
+        expectation_id: rawActiveActuation.expectation_id ?? rawActiveActuation.expectationId ?? null,
+        reconciliationState: rawActiveActuation.reconciliationState ?? rawActiveActuation.reconciliation_state ?? null,
+        reconciliation_state: rawActiveActuation.reconciliation_state ?? rawActiveActuation.reconciliationState ?? null,
+        commandedAt: rawActiveActuation.commandedAt ?? rawActiveActuation.commanded_at ?? null,
+        commanded_at: rawActiveActuation.commanded_at ?? rawActiveActuation.commandedAt ?? null,
+        expectedCloseAt: rawActiveActuation.expectedCloseAt ?? rawActiveActuation.expected_close_at ?? null,
+        expected_close_at: rawActiveActuation.expected_close_at ?? rawActiveActuation.expectedCloseAt ?? null,
+      }
+    : null;
   return {
     ...device,
     deveui: String(device?.deveui ?? '').trim().toUpperCase(),
@@ -142,6 +156,8 @@ function normaliseDevice(device: any): Device {
     zone_names: Array.isArray(device?.zone_names) ? device.zone_names : null,
     soilMoistureProbeDepths,
     soilMoistureProbeDepthsConfigured,
+    activeValveActuation,
+    active_valve_actuation: activeValveActuation,
   };
 }
 
@@ -174,7 +190,7 @@ export const devicesAPI = {
   },
 
   cancelIrrigation: async (deveui: string, reason: string = 'operator_cancel'): Promise<void> => {
-    await api.post(`/api/v1/valves/${deveui}/cancel`, { reason });
+    await api.post(`/api/valve/${deveui}/cancel`, { reason });
   },
 
   remove: async (deveui: string): Promise<void> => {

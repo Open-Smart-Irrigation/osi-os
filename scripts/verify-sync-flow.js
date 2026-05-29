@@ -148,6 +148,7 @@ const requiredHttpRoutes = [
   '/api/account-link/status',
   '/api/sync/state',
   '/api/sync/force',
+  '/api/valve/:deveui/cancel',
   '/api/devices/:deveui/lsn50/mode',
   '/api/devices/:deveui/lsn50/interval',
   '/api/devices/:deveui/lsn50/interrupt-mode',
@@ -233,6 +234,7 @@ const requiredFunctionNodes = [
   'Auth + Parse STREGA Flushing',
   'Authorize + Fanout STREGA Advanced',
   'Format STREGA Advanced Response',
+  'Cancel STREGA Actuation',
   'Auth + Set Chameleon Enabled',
   'Auth + Parse Dendro Config',
   'Format Dendro Config Response',
@@ -1362,6 +1364,7 @@ expectIncludes('Get Zone Environment Summary', 'LEFT JOIN gateway_locations gl O
 expectIncludes('Get Zone Environment Summary', 'SELECT date,rainfall_mm,flow_liters,rain_source,computed_at FROM zone_daily_environment', 'uses daily zone environment totals for water summary');
 expectIncludes('Get Zone Environment Summary', 'estimatedByDate[localDate] = round((estimatedByDate[localDate] || 0) + liters, 2);', 'sums STREGA expectation liters separately from measured flow meter totals');
 expectIncludes('Get Zone Environment Summary', 'localDateIso(row.commanded_at, zone && zone.timezone)', 'buckets STREGA estimated liters by zone-local date');
+expectIncludes('Get Zone Environment Summary', "COALESCE(reconciliation_state,'') <> 'CANCELLED'", 'excludes cancelled STREGA expectations from estimated irrigation totals');
 expectExcludes('Get Zone Environment Summary', 'substr(commanded_at,1,10)', 'UTC date slicing for STREGA estimated liters');
 expectIncludes('Get Zone Environment Summary', 'irrigationTodayMeasuredLiters', 'returns measured flow-meter liters under an honest field name');
 expectIncludes('Get Zone Environment Summary', 'irrigationTodayEstimatedLiters', 'returns estimated valve-time liters under an honest field name');
@@ -2011,6 +2014,12 @@ expectIncludes('Build STREGA downlink + emit log ctx', 'gatewayDeviceEui: gatewa
 expectIncludes('Build Status + ACK', 'deviceEui: deviceEui', 'includes the actual STREGA valve DevEUI in cloud status payloads');
 expectIncludes('Build Status + ACK', 'gatewayDeviceEui: gatewayDeviceEui', 'includes the gateway transport identity in cloud status payloads');
 expectIncludes('Build Status + ACK', "ctx.commandType || 'VALVE_COMMAND'", 'defaults manual STREGA valve ACK payloads to the cloud command type');
+expectIncludes('Cancel STREGA Actuation', 'chirpstack.createProvisioningClientFromEnv(env)', 'uses shared ChirpStack helper configuration');
+expectIncludes('Cancel STREGA Actuation', 'flushDeviceQueue(deveui)', 'flushes the ChirpStack device queue');
+expectIncludes('Cancel STREGA Actuation', "reconciliation_state='CANCELLED'", 'marks active actuation expectations CANCELLED');
+expectIncludes('Cancel STREGA Actuation', "WHERE expectation_id = (", 'updates only the latest active expectation');
+expectExcludes('Cancel STREGA Actuation', "action: 'CLOSE'", 'bare CLOSE downlink emission from cancel path');
+expectExcludes('Cancel STREGA Actuation', 'return [closeMsg, responseMsg]', 'actuator fanout from cancel path');
 pendingChecks.push((async () => {
   // Fixed fixture values mirror the live command-193 failure; the test has no hardware dependency.
   const gatewayEui = '0016C001F151B1D6';
@@ -2618,6 +2627,15 @@ const helperPath = helperCandidates.find((candidate) => fs.existsSync(candidate)
 if (!helperPath) {
   fail(`missing ChirpStack helper module at one of: ${helperCandidates.join(', ')}`);
 } else {
+  const helperIndexPath = path.join(helperPath, 'index.js');
+  const helperSource = fs.existsSync(helperIndexPath) ? fs.readFileSync(helperIndexPath, 'utf8') : '';
+  expectFileIncludes('osi-chirpstack-helper/index.js', helperSource, 'async getDeviceProfile(', 'adds profile reads so bootstrap can inspect existing ChirpStack codecs');
+  expectFileIncludes('osi-chirpstack-helper/index.js', helperSource, 'async updateDeviceProfile(', 'adds profile updates so bootstrap can repair codec-less ChirpStack profiles');
+  expectFileIncludes('osi-chirpstack-helper/index.js', helperSource, 'new devicePb.FlushDeviceQueueRequest()', 'flushes device queues with the ChirpStack gRPC request type');
+  expectFileIncludes('osi-chirpstack-helper/index.js', helperSource, "grpcInvoke(this.deviceClient, 'flushQueue'", 'flushes device queues through DeviceService.FlushQueue');
+  expectFileExcludes('osi-chirpstack-helper/index.js', helperSource, '`/api/devices/${encodeURIComponent(normalizedDevEui)}/queue`', 'REST device queue path');
+  expectFileExcludes('osi-chirpstack-helper/index.js', helperSource, "requestJson('DELETE'", 'REST device queue DELETE');
+  expectFileExcludes('osi-chirpstack-helper/index.js', helperSource, 'ChirpStack queue flush failed with HTTP', 'REST queue-flush error handling');
   try {
     const helper = require(helperPath);
     for (const exportName of ['createClient', 'createProvisioningClientFromEnv', 'normalizeApiUrl']) {
@@ -2628,10 +2646,6 @@ if (!helperPath) {
       }
     }
   } catch (error) {
-    const helperIndexPath = path.join(helperPath, 'index.js');
-    const helperSource = fs.existsSync(helperIndexPath) ? fs.readFileSync(helperIndexPath, 'utf8') : '';
-    expectFileIncludes('osi-chirpstack-helper/index.js', helperSource, 'async getDeviceProfile(', 'adds profile reads so bootstrap can inspect existing ChirpStack codecs');
-    expectFileIncludes('osi-chirpstack-helper/index.js', helperSource, 'async updateDeviceProfile(', 'adds profile updates so bootstrap can repair codec-less ChirpStack profiles');
     if (error.code === 'MODULE_NOT_FOUND' && helperSource) {
       console.log(`OK helper source present despite missing local runtime deps: ${error.message}`);
       for (const exportName of ['createClient', 'createProvisioningClientFromEnv', 'normalizeApiUrl']) {

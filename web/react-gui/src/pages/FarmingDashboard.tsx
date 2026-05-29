@@ -1,7 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import useSWR from 'swr';
-import { devicesAPI, irrigationZonesAPI } from '../services/api';
+import { devicesAPI, irrigationOutcomesAPI, irrigationZonesAPI } from '../services/api';
 import { useAuth } from '../contexts/AuthContext';
 import { useTranslation } from 'react-i18next';
 import { KiwiSensorCard } from '../components/farming/KiwiSensorCard';
@@ -15,9 +15,11 @@ import { SystemPanel } from '../components/farming/SystemPanel';
 import { SenseCapWeatherCard } from '../components/farming/SenseCapWeatherCard';
 import { IrrigationOutcomesPanel } from '../components/farming/IrrigationOutcomesPanel';
 import type { Device, IrrigationZone } from '../types/farming';
+import type { IrrigationActuationsResponse } from '../services/api';
 
 const devicesFetcher = () => devicesAPI.getAll();
 const zonesFetcher = () => irrigationZonesAPI.getAll();
+const irrigationActuationsFetcher = () => irrigationOutcomesAPI.recentActuations();
 
 export const FarmingDashboard: React.FC = () => {
   const { username, logout } = useAuth();
@@ -46,9 +48,23 @@ export const FarmingDashboard: React.FC = () => {
     }
   );
 
+  const {
+    data: irrigationActuationsResponse,
+    error: irrigationActuationsError,
+    mutate: mutateIrrigationActuations,
+  } = useSWR<IrrigationActuationsResponse>(
+    '/api/irrigation/recent-actuations',
+    irrigationActuationsFetcher,
+    {
+      refreshInterval: 60_000,
+      revalidateOnFocus: true,
+    }
+  );
+
   const handleUpdate = () => {
     mutateDevices();
     mutateZones();
+    mutateIrrigationActuations();
   };
 
   const handleDeviceAdded = () => {
@@ -85,6 +101,11 @@ export const FarmingDashboard: React.FC = () => {
   const unassignedValves = unassignedDevices.filter((d) => d.type_id === 'STREGA_VALVE');
   const unassignedLSN50 = unassignedDevices.filter((d) => d.type_id === 'DRAGINO_LSN50');
   const unassignedS2120 = unassignedDevices.filter((d) => d.type_id === 'SENSECAP_S2120');
+  const irrigationActuations = irrigationActuationsResponse?.actuations ?? [];
+  const zoneTimezones = useMemo(
+    () => new Map((zones ?? []).map((zone) => [zone.id, zone.timezone])),
+    [zones],
+  );
 
   const isLoading = !devices && !devicesError && !zones && !zonesError;
   const error = devicesError || zonesError;
@@ -202,6 +223,7 @@ export const FarmingDashboard: React.FC = () => {
                     unassignedDevices={unassignedDevices}
                     onUpdate={handleUpdate}
                     allZones={(zones ?? []).map((z) => ({ id: z.id, name: z.name }))}
+                    irrigationActuations={irrigationActuations}
                   />
                 ))}
               </div>
@@ -246,6 +268,8 @@ export const FarmingDashboard: React.FC = () => {
                             device={device}
                             onUpdate={handleUpdate}
                             onRemove={handleUpdate}
+                            irrigationActuations={irrigationActuations}
+                            timeZone={device.irrigation_zone_id ? zoneTimezones.get(device.irrigation_zone_id) : undefined}
                           />
                         ))}
                       </div>
@@ -291,7 +315,12 @@ export const FarmingDashboard: React.FC = () => {
 
             {/* Recent irrigation outcomes (osi-os#7) */}
             <div className="mt-8">
-              <IrrigationOutcomesPanel />
+              <IrrigationOutcomesPanel
+                response={irrigationActuationsResponse ?? null}
+                loading={!irrigationActuationsResponse && !irrigationActuationsError}
+                error={irrigationActuationsError instanceof Error ? irrigationActuationsError.message : irrigationActuationsError ? String(irrigationActuationsError) : null}
+                zoneTimezones={zoneTimezones}
+              />
             </div>
 
             {/* Gateway system panel */}

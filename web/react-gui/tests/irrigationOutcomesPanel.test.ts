@@ -6,6 +6,7 @@ import React, { act } from 'react';
 import { I18nextProvider, initReactI18next } from 'react-i18next';
 import i18next from 'i18next';
 import { renderToStaticMarkup } from 'react-dom/server';
+import { cleanup, render, waitFor } from '@testing-library/react';
 
 import { IrrigationOutcomesPanel } from '../src/components/farming/IrrigationOutcomesPanel.tsx';
 import {
@@ -114,4 +115,51 @@ test('actuationFixture builds a row the API contract accepts', () => {
   assert.equal(a.status, 'OPEN_TIMEOUT');
   assert.equal(a.observedOpenAt, null);
   assert.equal(a.commandResultDetail, 'Downlink not acked');
+});
+
+test('renders absolute zone-local datetimes as primary with relative times secondary', async () => {
+  const originalNow = Date.now;
+  Date.now = () => new Date('2026-05-29T10:20:00Z').getTime();
+  const i18n = await buildI18n();
+  const response: IrrigationActuationsResponse = {
+    generatedAt: '2026-05-29T10:20:00Z',
+    actuations: [
+      actuationFixture({
+        commandedAt: '2026-05-29T10:15:00Z',
+        observedOpenAt: '2026-05-29T10:16:00Z',
+        observedCloseAt: '2026-05-29T10:18:00Z',
+      }),
+    ],
+  };
+  const original = irrigationOutcomesAPI.recentActuations;
+  (irrigationOutcomesAPI as { recentActuations: () => Promise<IrrigationActuationsResponse> }).recentActuations = async () => response;
+  const expectedCommanded = new Intl.DateTimeFormat(undefined, {
+    dateStyle: 'medium',
+    timeStyle: 'short',
+    timeZone: 'Europe/Zurich',
+  }).format(new Date('2026-05-29T10:15:00Z'));
+
+  try {
+    const rendered = render(
+      React.createElement(
+        I18nextProvider,
+        { i18n },
+        React.createElement(IrrigationOutcomesPanel, {
+          pollIntervalMs: 0,
+          zoneTimezones: new Map([[12, 'Europe/Zurich']]),
+        } as Record<string, unknown>),
+      ),
+    );
+
+    await rendered.findByText(/Zone 12/);
+    assert.match(document.body.textContent ?? '', new RegExp(expectedCommanded.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+    assert.match(document.body.textContent ?? '', /5 min ago/);
+    assert.match(document.body.textContent ?? '', /Opened:/);
+    assert.match(document.body.textContent ?? '', /Closed:/);
+    await waitFor(() => assert.doesNotMatch(document.body.textContent ?? '', /Loading recent actuations/));
+  } finally {
+    cleanup();
+    irrigationOutcomesAPI.recentActuations = original;
+    Date.now = originalNow;
+  }
 });

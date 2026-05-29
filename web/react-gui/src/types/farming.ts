@@ -90,6 +90,8 @@ export interface Device {
   // Only for Valves
   target_state?: 'OPEN' | 'CLOSED';
   current_state?: 'OPEN' | 'CLOSED';
+  active_valve_actuation?: ValveActuationSummary | null;
+  activeValveActuation?: ValveActuationSummary | null;
 
   // Per-device opt-in flags for optional LSN50 sensors
   dendro_enabled?: number;      // 0 = disabled (default), 1 = OPKON dendrometer on ADC
@@ -118,6 +120,17 @@ export interface Device {
   // Multi-zone assignment — populated for SENSECAP_S2120 only
   zone_ids?: number[] | null;
   zone_names?: string[] | null;
+}
+
+export interface ValveActuationSummary {
+  expectation_id?: string | null;
+  expectationId?: string | null;
+  reconciliation_state?: 'PENDING_OBSERVATION' | 'OBSERVED_RUNNING' | string | null;
+  reconciliationState?: 'PENDING_OBSERVATION' | 'OBSERVED_RUNNING' | string | null;
+  commanded_at?: string | null;
+  commandedAt?: string | null;
+  expected_close_at?: string | null;
+  expectedCloseAt?: string | null;
 }
 
 export interface User {
