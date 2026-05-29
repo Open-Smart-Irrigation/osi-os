@@ -1,8 +1,6 @@
 'use strict';
 
 const grpc = require('@grpc/grpc-js');
-const http = require('http');
-const https = require('https');
 const deviceGrpc = require('@chirpstack/chirpstack-api/api/device_grpc_pb');
 const devicePb = require('@chirpstack/chirpstack-api/api/device_pb');
 const applicationGrpc = require('@chirpstack/chirpstack-api/api/application_grpc_pb');
@@ -58,41 +56,6 @@ function createMetadata(apiKey) {
 
 function createCredentials(normalizedUrl) {
   return normalizedUrl.secure ? grpc.credentials.createSsl() : grpc.credentials.createInsecure();
-}
-
-function requestJson(method, url, apiKey) {
-  return new Promise((resolve, reject) => {
-    const transport = url.protocol === 'https:' ? https : http;
-    const request = transport.request(url, {
-      method,
-      headers: {
-        authorization: `Bearer ${String(apiKey || '').trim()}`,
-        accept: 'application/json'
-      },
-      timeout: 10000
-    }, (response) => {
-      let body = '';
-      response.setEncoding('utf8');
-      response.on('data', (chunk) => { body += chunk; });
-      response.on('end', () => {
-        let parsed = null;
-        if (body.trim()) {
-          try {
-            parsed = JSON.parse(body);
-          } catch (_) {
-            parsed = body;
-          }
-        }
-        resolve({
-          statusCode: response.statusCode || 0,
-          body: parsed
-        });
-      });
-    });
-    request.on('timeout', () => request.destroy(new Error(`ChirpStack ${method} ${url.pathname} timed out`)));
-    request.on('error', reject);
-    request.end();
-  });
 }
 
 function grpcStatusName(code) {
@@ -506,20 +469,12 @@ class ChirpStackClient {
     if (!normalizedDevEui) {
       throw annotateError(new Error('DevEUI is required'), 'flushDeviceQueue');
     }
-    const baseUrl = `${this.apiUrl.parsed.protocol}//${this.apiUrl.parsed.host}`;
-    const queueUrl = new URL(`/api/devices/${encodeURIComponent(normalizedDevEui)}/queue`, baseUrl);
-    const response = await requestJson('DELETE', queueUrl, this.apiKey);
-    if (response.statusCode < 200 || response.statusCode >= 300) {
-      const detail = response.body && typeof response.body === 'object'
-        ? (response.body.message || response.body.error || JSON.stringify(response.body))
-        : String(response.body || '');
-      const error = new Error(`ChirpStack queue flush failed with HTTP ${response.statusCode}${detail ? ': ' + detail : ''}`);
-      error.statusCode = response.statusCode;
-      throw annotateError(error, 'flushDeviceQueue');
-    }
+    const request = new devicePb.FlushDeviceQueueRequest();
+    request.setDevEui(normalizedDevEui);
+    await grpcInvoke(this.deviceClient, 'flushQueue', request, this.metadata, 'flushDeviceQueue');
     return {
       devEui: normalizedDevEui,
-      statusCode: response.statusCode
+      method: 'DeviceService.FlushQueue'
     };
   }
 }

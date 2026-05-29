@@ -2596,6 +2596,15 @@ const helperPath = helperCandidates.find((candidate) => fs.existsSync(candidate)
 if (!helperPath) {
   fail(`missing ChirpStack helper module at one of: ${helperCandidates.join(', ')}`);
 } else {
+  const helperIndexPath = path.join(helperPath, 'index.js');
+  const helperSource = fs.existsSync(helperIndexPath) ? fs.readFileSync(helperIndexPath, 'utf8') : '';
+  expectFileIncludes('osi-chirpstack-helper/index.js', helperSource, 'async getDeviceProfile(', 'adds profile reads so bootstrap can inspect existing ChirpStack codecs');
+  expectFileIncludes('osi-chirpstack-helper/index.js', helperSource, 'async updateDeviceProfile(', 'adds profile updates so bootstrap can repair codec-less ChirpStack profiles');
+  expectFileIncludes('osi-chirpstack-helper/index.js', helperSource, 'new devicePb.FlushDeviceQueueRequest()', 'flushes device queues with the ChirpStack gRPC request type');
+  expectFileIncludes('osi-chirpstack-helper/index.js', helperSource, "grpcInvoke(this.deviceClient, 'flushQueue'", 'flushes device queues through DeviceService.FlushQueue');
+  expectFileExcludes('osi-chirpstack-helper/index.js', helperSource, '`/api/devices/${encodeURIComponent(normalizedDevEui)}/queue`', 'REST device queue path');
+  expectFileExcludes('osi-chirpstack-helper/index.js', helperSource, "requestJson('DELETE'", 'REST device queue DELETE');
+  expectFileExcludes('osi-chirpstack-helper/index.js', helperSource, 'ChirpStack queue flush failed with HTTP', 'REST queue-flush error handling');
   try {
     const helper = require(helperPath);
     for (const exportName of ['createClient', 'createProvisioningClientFromEnv', 'normalizeApiUrl']) {
@@ -2606,10 +2615,6 @@ if (!helperPath) {
       }
     }
   } catch (error) {
-    const helperIndexPath = path.join(helperPath, 'index.js');
-    const helperSource = fs.existsSync(helperIndexPath) ? fs.readFileSync(helperIndexPath, 'utf8') : '';
-    expectFileIncludes('osi-chirpstack-helper/index.js', helperSource, 'async getDeviceProfile(', 'adds profile reads so bootstrap can inspect existing ChirpStack codecs');
-    expectFileIncludes('osi-chirpstack-helper/index.js', helperSource, 'async updateDeviceProfile(', 'adds profile updates so bootstrap can repair codec-less ChirpStack profiles');
     if (error.code === 'MODULE_NOT_FOUND' && helperSource) {
       console.log(`OK helper source present despite missing local runtime deps: ${error.message}`);
       for (const exportName of ['createClient', 'createProvisioningClientFromEnv', 'normalizeApiUrl']) {

@@ -18,6 +18,7 @@ const FLOWS = path.join(REPO, 'conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/s
 const STREGA_CARD = path.join(REPO, 'web/react-gui/src/components/farming/StregaValveCard.tsx');
 const VALVE_CANCEL_BUTTON = path.join(REPO, 'web/react-gui/src/components/farming/ValveCancelButton.tsx');
 const FARMING_TYPES = path.join(REPO, 'web/react-gui/src/types/farming.ts');
+const CHIRPSTACK_HELPER = path.join(REPO, 'conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-chirpstack-helper/index.js');
 
 function readFlows() {
     return JSON.parse(fs.readFileSync(FLOWS, 'utf8'));
@@ -199,6 +200,29 @@ function assertCancelPath() {
     console.log('  ok Explicit cancel path flushes queue without a CLOSE downlink');
 }
 
+function assertQueueFlushUsesGrpc() {
+    const helper = fs.readFileSync(CHIRPSTACK_HELPER, 'utf8');
+    for (const required of [
+        'new devicePb.FlushDeviceQueueRequest()',
+        "grpcInvoke(this.deviceClient, 'flushQueue'",
+        "method: 'DeviceService.FlushQueue'",
+    ]) {
+        if (!helper.includes(required)) {
+            throw new Error(`ChirpStack helper must flush the queue through DeviceService.FlushQueue (${required})`);
+        }
+    }
+    for (const forbidden of [
+        '`/api/devices/${encodeURIComponent(normalizedDevEui)}/queue`',
+        "requestJson('DELETE'",
+        'ChirpStack queue flush failed with HTTP',
+    ]) {
+        if (helper.includes(forbidden)) {
+            throw new Error(`ChirpStack helper must not use REST for queue flush (${forbidden})`);
+        }
+    }
+    console.log('  ok ChirpStack queue flush uses DeviceService.FlushQueue gRPC');
+}
+
 function assertFrontendValveControls() {
     const stregaCard = fs.readFileSync(STREGA_CARD, 'utf8');
     const cancelButton = fs.readFileSync(VALVE_CANCEL_BUTTON, 'utf8');
@@ -236,6 +260,7 @@ function main() {
     assertWriteExpectation();
     assertReconciliationMonitor();
     assertCancelPath();
+    assertQueueFlushUsesGrpc();
     assertFrontendValveControls();
     console.log('verify-command-safety: OK');
 }
