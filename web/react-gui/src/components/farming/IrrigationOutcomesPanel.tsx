@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next';
 import {
   irrigationOutcomesAPI,
   type IrrigationActuation,
+  type IrrigationActuationsResponse,
   type IrrigationActuationStatus,
 } from '../../services/api';
 
@@ -11,6 +12,10 @@ const POLL_INTERVAL_MS = 60_000;
 interface Props {
   /** Polling can be disabled in tests. */
   pollIntervalMs?: number;
+  response?: IrrigationActuationsResponse | null;
+  loading?: boolean;
+  error?: string | null;
+  zoneTimezones?: Map<number, string | null | undefined>;
 }
 
 interface State {
@@ -27,10 +32,24 @@ function formatRelativeTime(iso: string | null): string {
   const t = Date.parse(iso);
   if (!Number.isFinite(t)) return iso;
   const deltaSec = (Date.now() - t) / 1000;
+  if (deltaSec < -60) return `in ${Math.round(Math.abs(deltaSec) / 60)} min`;
+  if (deltaSec < 0) return 'now';
   if (deltaSec < 60) return `${Math.round(deltaSec)}s ago`;
   if (deltaSec < 3600) return `${Math.round(deltaSec / 60)} min ago`;
   if (deltaSec < 86400) return `${Math.round(deltaSec / 3600)} h ago`;
   return `${Math.round(deltaSec / 86400)} d ago`;
+}
+
+function formatAbsoluteDateTime(iso: string | null, timeZone?: string | null): string {
+  if (!iso) return '—';
+  const date = new Date(iso);
+  if (!Number.isFinite(date.getTime())) return iso;
+  const options: Intl.DateTimeFormatOptions = { dateStyle: 'medium', timeStyle: 'short' };
+  try {
+    return new Intl.DateTimeFormat(undefined, timeZone ? { ...options, timeZone } : options).format(date);
+  } catch {
+    return new Intl.DateTimeFormat(undefined, options).format(date);
+  }
 }
 
 function formatDuration(seconds: number): string {
@@ -77,7 +96,25 @@ const StatusBadge: React.FC<{ status: IrrigationActuationStatus }> = ({ status }
   );
 };
 
-const ActuationRow: React.FC<{ row: IrrigationActuation }> = ({ row }) => {
+const TimestampDetail: React.FC<{
+  label: string;
+  iso: string | null;
+  timeZone?: string | null;
+  prefix?: string;
+}> = ({ label, iso, timeZone, prefix }) => {
+  const absolute = formatAbsoluteDateTime(iso, timeZone);
+  const relative = formatRelativeTime(iso);
+  return (
+    <span className="inline-flex min-w-[12rem] max-w-full flex-col gap-0.5" title={`${label}: ${absolute} (${relative})`}>
+      <span>
+        {label}: {prefix ? `${prefix} · ` : ''}<time dateTime={iso ?? undefined}>{absolute}</time>
+      </span>
+      <span className="text-[11px] leading-tight text-[var(--text-tertiary)]">{relative}</span>
+    </span>
+  );
+};
+
+const ActuationRow: React.FC<{ row: IrrigationActuation; timeZone?: string | null }> = ({ row, timeZone }) => {
   const { t } = useTranslation('devices');
   const isFailure = row.status === 'OPEN_TIMEOUT' || row.status === 'CLOSE_TIMEOUT' || row.status === 'COMMAND_FAILED';
   return (
@@ -91,18 +128,25 @@ const ActuationRow: React.FC<{ row: IrrigationActuation }> = ({ row }) => {
         <StatusBadge status={row.status} />
       </div>
       <div className="text-xs text-[var(--text-secondary)] flex flex-wrap gap-x-3 gap-y-0.5">
-        <span>
-          {t('irrigationOutcomes.commanded', { defaultValue: 'Commanded' })}: {formatDuration(row.commandedDurationSeconds)} · {formatRelativeTime(row.commandedAt)}
-        </span>
+        <TimestampDetail
+          label={t('irrigationOutcomes.commanded', { defaultValue: 'Commanded' })}
+          iso={row.commandedAt}
+          timeZone={timeZone}
+          prefix={formatDuration(row.commandedDurationSeconds)}
+        />
         {row.observedOpenAt && (
-          <span>
-            {t('irrigationOutcomes.observedOpen', { defaultValue: 'Opened' })}: {formatRelativeTime(row.observedOpenAt)}
-          </span>
+          <TimestampDetail
+            label={t('irrigationOutcomes.observedOpen', { defaultValue: 'Opened' })}
+            iso={row.observedOpenAt}
+            timeZone={timeZone}
+          />
         )}
         {row.observedCloseAt && (
-          <span>
-            {t('irrigationOutcomes.observedClose', { defaultValue: 'Closed' })}: {formatRelativeTime(row.observedCloseAt)}
-          </span>
+          <TimestampDetail
+            label={t('irrigationOutcomes.observedClose', { defaultValue: 'Closed' })}
+            iso={row.observedCloseAt}
+            timeZone={timeZone}
+          />
         )}
         {row.estimatedGrossLiters != null && (
           <span>
@@ -120,11 +164,20 @@ const ActuationRow: React.FC<{ row: IrrigationActuation }> = ({ row }) => {
   );
 };
 
-export const IrrigationOutcomesPanel: React.FC<Props> = ({ pollIntervalMs = POLL_INTERVAL_MS }) => {
+export const IrrigationOutcomesPanel: React.FC<Props> = ({
+  pollIntervalMs = POLL_INTERVAL_MS,
+  response,
+  loading,
+  error,
+  zoneTimezones,
+}) => {
   const { t } = useTranslation('devices');
   const [state, setState] = useState<State>(INITIAL);
+  const isControlled = response !== undefined || loading !== undefined || error !== undefined;
 
   useEffect(() => {
+    if (isControlled) return;
+
     let cancelled = false;
 
     const fetchOnce = async () => {
@@ -153,7 +206,16 @@ export const IrrigationOutcomesPanel: React.FC<Props> = ({ pollIntervalMs = POLL
       cancelled = true;
       clearInterval(timer);
     };
-  }, [pollIntervalMs]);
+  }, [isControlled, pollIntervalMs]);
+
+  const viewState: State = isControlled
+    ? {
+        loading: loading ?? false,
+        error: error ?? null,
+        generatedAt: response?.generatedAt ?? null,
+        actuations: response?.actuations ?? [],
+      }
+    : state;
 
   return (
     <section className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-4">
@@ -161,35 +223,35 @@ export const IrrigationOutcomesPanel: React.FC<Props> = ({ pollIntervalMs = POLL
         <h2 className="text-[var(--text)] text-base font-semibold">
           {t('irrigationOutcomes.title', { defaultValue: 'Recent irrigations' })}
         </h2>
-        {state.generatedAt && (
+        {viewState.generatedAt && (
           <span className="text-xs text-[var(--text-tertiary)]">
-            {t('irrigationOutcomes.updated', { defaultValue: 'updated' })} {formatRelativeTime(state.generatedAt)}
+            {t('irrigationOutcomes.updated', { defaultValue: 'updated' })} {formatRelativeTime(viewState.generatedAt)}
           </span>
         )}
       </div>
 
-      {state.loading && (
+      {viewState.loading && (
         <p className="text-sm text-[var(--text-tertiary)]">
           {t('irrigationOutcomes.loading', { defaultValue: 'Loading recent actuations…' })}
         </p>
       )}
 
-      {state.error && (
+      {viewState.error && (
         <p className="text-sm text-[var(--error-text, #991b1b)]">
-          {t('irrigationOutcomes.error', { defaultValue: 'Failed to load recent actuations' })}: {state.error}
+          {t('irrigationOutcomes.error', { defaultValue: 'Failed to load recent actuations' })}: {viewState.error}
         </p>
       )}
 
-      {!state.loading && !state.error && state.actuations.length === 0 && (
+      {!viewState.loading && !viewState.error && viewState.actuations.length === 0 && (
         <p className="text-sm text-[var(--text-tertiary)]">
           {t('irrigationOutcomes.empty', { defaultValue: 'No recent irrigations recorded yet.' })}
         </p>
       )}
 
-      {state.actuations.length > 0 && (
+      {viewState.actuations.length > 0 && (
         <ul className="flex flex-col gap-2">
-          {state.actuations.map((row) => (
-            <ActuationRow key={row.expectationId} row={row} />
+          {viewState.actuations.map((row) => (
+            <ActuationRow key={row.expectationId} row={row} timeZone={zoneTimezones?.get(row.zoneId)} />
           ))}
         </ul>
       )}

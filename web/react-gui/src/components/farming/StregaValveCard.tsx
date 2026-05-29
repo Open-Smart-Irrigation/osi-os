@@ -1,6 +1,6 @@
 import React, { useRef, useState, useEffect } from 'react';
 import type { Device, StregaModel } from '../../types/farming';
-import { devicesAPI, stregaAPI, valveAPI } from '../../services/api';
+import { devicesAPI, stregaAPI, valveAPI, type IrrigationActuation } from '../../services/api';
 import { useDismissOnPointerDown } from '../../hooks/useDismissOnPointerDown';
 import { useTranslation } from 'react-i18next';
 import { DeviceCardFooter } from './shared/DeviceCardFooter';
@@ -11,6 +11,8 @@ interface StregaValveCardProps {
   onUpdate: () => void;
   onRemove?: () => void;
   todayLiters?: { value: number; source: 'measured_flow_meter' | 'estimated_duration_flow_rate' | 'unknown' };
+  irrigationActuations?: IrrigationActuation[];
+  timeZone?: string | null;
 }
 
 const MAX_STREGA_INTERVAL_MINUTES = 255;
@@ -54,6 +56,102 @@ export function getDisplayedStregaState(device: Device): 'OPEN' | 'CLOSED' {
 export function shouldShowStregaTargetState(device: Device): boolean {
   return Boolean(device.target_state && device.target_state !== device.current_state);
 }
+
+type ValveFeedbackTone = 'queued' | 'running' | 'closed';
+
+interface ValveActuationFeedback {
+  tone: ValveFeedbackTone;
+  label: string;
+  detail: string | null;
+}
+
+function normalizeDeviceEui(value: string | null | undefined): string {
+  return String(value ?? '').trim().toUpperCase();
+}
+
+function formatTimeOnly(iso: string | null | undefined, timeZone?: string | null): string | null {
+  if (!iso) return null;
+  const date = new Date(iso);
+  if (!Number.isFinite(date.getTime())) return null;
+  const options: Intl.DateTimeFormatOptions = { hour: '2-digit', minute: '2-digit' };
+  try {
+    return new Intl.DateTimeFormat(undefined, timeZone ? { ...options, timeZone } : options).format(date);
+  } catch {
+    return new Intl.DateTimeFormat(undefined, options).format(date);
+  }
+}
+
+function latestActuationForDevice(deviceEui: string, rows: IrrigationActuation[]): IrrigationActuation | null {
+  const normalized = normalizeDeviceEui(deviceEui);
+  if (!normalized) return null;
+  return rows
+    .filter((row) => normalizeDeviceEui(row.deviceEui) === normalized)
+    .sort((a, b) => Date.parse(b.commandedAt) - Date.parse(a.commandedAt))[0] ?? null;
+}
+
+function approximateCommandWindowMinutes(row: IrrigationActuation): number {
+  if (Number.isFinite(row.commandedDurationSeconds) && row.commandedDurationSeconds > 0) {
+    return Math.max(1, Math.round(row.commandedDurationSeconds / 60));
+  }
+  const commanded = Date.parse(row.commandedAt);
+  const expectedClose = Date.parse(row.expectedCloseAt);
+  if (Number.isFinite(commanded) && Number.isFinite(expectedClose) && expectedClose > commanded) {
+    return Math.max(1, Math.round((expectedClose - commanded) / 60_000));
+  }
+  return 1;
+}
+
+export function getStregaActuationFeedback(
+  deviceEui: string,
+  rows: IrrigationActuation[] = [],
+  timeZone?: string | null,
+): ValveActuationFeedback | null {
+  const row = latestActuationForDevice(deviceEui, rows);
+  if (!row) return null;
+
+  if (row.observedCloseAt || row.status === 'COMPLETED') {
+    const closedAt = formatTimeOnly(row.observedCloseAt, timeZone);
+    return {
+      tone: 'closed',
+      label: 'Closed',
+      detail: closedAt ? `Closed at ${closedAt}` : null,
+    };
+  }
+
+  if (row.observedOpenAt || row.status === 'RUNNING') {
+    const closeAt = formatTimeOnly(row.expectedCloseAt, timeZone);
+    return {
+      tone: 'running',
+      label: closeAt ? `OPEN — closes at ${closeAt}` : 'OPEN',
+      detail: null,
+    };
+  }
+
+  if (row.status === 'PENDING_OPEN' || row.reconciliationState === 'PENDING_OBSERVATION') {
+    return {
+      tone: 'queued',
+      label: 'Open queued',
+      detail: `waiting for valve uplink (≈ ${approximateCommandWindowMinutes(row)} min)`,
+    };
+  }
+
+  return null;
+}
+
+const FEEDBACK_STYLES: Record<ValveFeedbackTone, string> = {
+  queued: 'border-amber-300 bg-amber-50 text-amber-900',
+  running: 'border-blue-300 bg-blue-50 text-blue-900',
+  closed: 'border-emerald-300 bg-emerald-50 text-emerald-900',
+};
+
+const ValveActuationBadge: React.FC<{ feedback: ValveActuationFeedback }> = ({ feedback }) => (
+  <div className={`mt-3 rounded-lg border px-3 py-2 text-xs ${FEEDBACK_STYLES[feedback.tone]}`}>
+    <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
+      <span className="font-semibold">{feedback.label}</span>
+      {feedback.detail && <span className="text-current opacity-85">{feedback.detail}</span>}
+    </div>
+  </div>
+);
 
 const ConfigPanel: React.FC<{
   device: Device;
@@ -500,7 +598,14 @@ const ConfigPanel: React.FC<{
   );
 };
 
-export const StregaValveCard: React.FC<StregaValveCardProps> = ({ device, onUpdate, onRemove, todayLiters }) => {
+export const StregaValveCard: React.FC<StregaValveCardProps> = ({
+  device,
+  onUpdate,
+  onRemove,
+  todayLiters,
+  irrigationActuations = [],
+  timeZone,
+}) => {
   const { t } = useTranslation('devices');
   const { t: tc } = useTranslation('common');
   const [loading, setLoading] = useState<'OPEN' | 'CLOSE' | null>(null);
@@ -534,6 +639,7 @@ export const StregaValveCard: React.FC<StregaValveCardProps> = ({ device, onUpda
 
   const displayedState = getDisplayedStregaState(device);
   const isOpen = displayedState === 'OPEN';
+  const actuationFeedback = getStregaActuationFeedback(device.deveui, irrigationActuations, timeZone);
 
   const handleAction = async (action: 'OPEN' | 'CLOSE') => {
     const durationMinutes = Number(openDurationMin);
@@ -666,6 +772,7 @@ export const StregaValveCard: React.FC<StregaValveCardProps> = ({ device, onUpda
             {t('stregaValve.target', { state: device.target_state })}
           </p>
         )}
+        {actuationFeedback && <ValveActuationBadge feedback={actuationFeedback} />}
       </div>
 
       {(fetchedLiters ?? todayLiters) && (

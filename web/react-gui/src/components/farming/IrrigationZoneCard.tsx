@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import type { IrrigationZone, Device, ZoneEnvironmentSummary, ZoneRecommendation } from '../../types/farming';
+import type { IrrigationActuation } from '../../services/api';
 import { dendroAnalyticsAPI, environmentAPI, irrigationZonesAPI } from '../../services/api';
 import { KiwiSensorCard } from './KiwiSensorCard';
 import { DraginoTempCard } from './DraginoTempCard';
@@ -20,6 +21,7 @@ interface IrrigationZoneCardProps {
   unassignedDevices: Device[];
   onUpdate: () => void;
   allZones?: Array<{ id: number; name: string }>;
+  irrigationActuations?: IrrigationActuation[];
 }
 
 function formatWaterValue(value: number | null | undefined, unit: string, digits = 1): string {
@@ -81,6 +83,7 @@ export const IrrigationZoneCard: React.FC<IrrigationZoneCardProps> = ({
   unassignedDevices,
   onUpdate,
   allZones,
+  irrigationActuations = [],
 }) => {
   const { t } = useTranslation('devices');
   const { t: tDashboard } = useTranslation('dashboard');
@@ -486,6 +489,8 @@ export const IrrigationZoneCard: React.FC<IrrigationZoneCardProps> = ({
                           device={device}
                           onUpdate={onUpdate}
                           onRemove={() => handleRemoveDevice(device.deveui)}
+                          irrigationActuations={irrigationActuations}
+                          timeZone={zone.timezone}
                         />
                         {removingDevice === device.deveui && (
                           <div className="absolute inset-0 bg-[var(--overlay)]/70 flex items-center justify-center rounded-xl">

@@ -5,12 +5,13 @@ import React from 'react';
 
 import { StregaValveCard } from '../StregaValveCard';
 import { devicesAPI } from '../../../services/api';
+import type { IrrigationActuation } from '../../../services/api';
 import type { Device } from '../../../types/farming';
 
 vi.mock('react-i18next', () => ({
     useTranslation: () => ({
-        t: (key: string) => key,
-        tc: (key: string) => key,
+        t: (key: string, options?: { defaultValue?: string }) => options?.defaultValue ?? key,
+        tc: (key: string, options?: { defaultValue?: string }) => options?.defaultValue ?? key,
         i18n: { language: 'en' },
     }),
 }));
@@ -44,13 +45,38 @@ const mockDevice: Device = {
     last_seen: '2026-05-17T12:00:00Z',
 };
 
-function renderCard(overrides: Partial<Device> = {}) {
+function actuationFixture(overrides: Partial<IrrigationActuation> = {}): IrrigationActuation {
+    return {
+        expectationId: 'exp-1',
+        deviceEui: mockDevice.deveui,
+        deviceName: mockDevice.name,
+        zoneId: 1,
+        zoneName: 'North block',
+        commandId: 'cmd-1',
+        commandedAt: '2026-05-29T10:00:00Z',
+        commandedDurationSeconds: 600,
+        expectedCloseAt: '2026-05-29T10:10:00Z',
+        observedOpenAt: null,
+        observedCloseAt: null,
+        estimatedGrossLiters: null,
+        flowRateLpm: null,
+        reconciliationState: 'PENDING_OBSERVATION',
+        cancelReason: null,
+        commandResult: null,
+        commandResultDetail: null,
+        commandAppliedAt: null,
+        status: 'PENDING_OPEN',
+        ...overrides,
+    };
+}
+
+function renderCard(overrides: Partial<Device> = {}, props: Record<string, unknown> = {}) {
     const onUpdate = vi.fn();
     const onRemove = vi.fn();
     const todayLiters = { value: 42.5, source: 'estimated_duration_flow_rate' as const };
     const device = { ...mockDevice, ...overrides, type_id: mockDevice.type_id } as Device;
     const result = render(
-        React.createElement(StregaValveCard, { device, onUpdate, onRemove, todayLiters }),
+        React.createElement(StregaValveCard, { device, onUpdate, onRemove, todayLiters, ...props }),
     );
     return { ...result, onUpdate, onRemove, todayLiters };
 }
@@ -82,12 +108,12 @@ describe('StregaValveCard', () => {
 
     it('renders cancel button when valve is OPEN', async () => {
         renderCard({ current_state: 'OPEN' });
-        expect(await screen.findByText('stregaValve.cancelIrrigation')).toBeInTheDocument();
+        expect(await screen.findByText('Cancel irrigation')).toBeInTheDocument();
     });
 
     it('calls cancelIrrigation API on cancel click', async () => {
         renderCard({ current_state: 'OPEN' });
-        const cancelBtn = await screen.findByText('stregaValve.cancelIrrigation');
+        const cancelBtn = await screen.findByText('Cancel irrigation');
         fireEvent.click(cancelBtn);
         await waitFor(() => {
             expect(devicesAPI.cancelIrrigation).toHaveBeenCalledWith(mockDevice.deveui);
@@ -98,5 +124,56 @@ describe('StregaValveCard', () => {
         renderCard();
         expect(await screen.findByText(/42.5 L/)).toBeInTheDocument();
         expect(screen.getByText(/Estimated/)).toBeInTheDocument();
+    });
+
+    it('shows persistent queued feedback from a pending VAE row', async () => {
+        renderCard({}, {
+            irrigationActuations: [
+                actuationFixture({
+                    status: 'PENDING_OPEN',
+                    commandedDurationSeconds: 900,
+                    expectedCloseAt: '2026-05-29T10:15:00Z',
+                }),
+            ],
+        });
+
+        expect(await screen.findByText(/Open queued/i)).toBeInTheDocument();
+        expect(screen.getByText(/waiting for valve uplink/i)).toBeInTheDocument();
+        expect(document.body.textContent).toMatch(/15 min/);
+    });
+
+    it('shows running feedback with the expected close time once the VAE row is observed open', async () => {
+        const expectedCloseLabel = new Intl.DateTimeFormat(undefined, {
+            hour: '2-digit',
+            minute: '2-digit',
+            timeZone: 'America/New_York',
+        }).format(new Date('2026-05-29T10:15:00Z'));
+
+        renderCard({}, {
+            timeZone: 'America/New_York',
+            irrigationActuations: [
+                actuationFixture({
+                    status: 'RUNNING',
+                    observedOpenAt: '2026-05-29T10:01:00Z',
+                    expectedCloseAt: '2026-05-29T10:15:00Z',
+                }),
+            ],
+        });
+
+        expect(await screen.findByText(new RegExp(`OPEN .* closes at ${expectedCloseLabel}`))).toBeInTheDocument();
+    });
+
+    it('shows closed feedback once the VAE row has observed close', async () => {
+        renderCard({}, {
+            irrigationActuations: [
+                actuationFixture({
+                    status: 'COMPLETED',
+                    observedOpenAt: '2026-05-29T10:01:00Z',
+                    observedCloseAt: '2026-05-29T10:09:00Z',
+                }),
+            ],
+        });
+
+        expect(await screen.findByText(/Closed at/i)).toBeInTheDocument();
     });
 });
