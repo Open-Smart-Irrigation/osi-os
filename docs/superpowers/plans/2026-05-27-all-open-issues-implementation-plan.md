@@ -2240,6 +2240,14 @@ git commit -m "feat(irrigation): operational failure detection and dashboard pan
 
 Expected: PASS. After deploy to a live Pi, manually trigger one of the failure paths (queue a command to a powered-off valve, or temporarily set `epsilonKpa=999` to force a missed-response detection) and confirm the row appears on the dashboard.
 
+### Slice 12 follow-ups surfaced during live verification
+
+These were not in the original plan; they came out of the Uganda rollout. Capture so they don't get lost.
+
+- **`zone_irrigation_calibration` is a WS1 schema artefact missing on older Pis.** The `Write STREGA Expectation` function reads `SELECT measured_flow_rate_lpm, measurement_method FROM zone_irrigation_calibration WHERE zone_id = ?` to estimate gross liters. On a Pi predating WS1 the table simply does not exist; the query throws `SQLITE_ERROR: no such table: zone_irrigation_calibration` and the outer `.catch()` silently logs via `node.error` — no `valve_actuation_expectations` row gets inserted. The bug was invisible while `vae.zone_id` was always NULL (the query short-circuited on `zoneId == null`). After the actuator-command fix that populated `zoneId=3` from `Check device ownership + type` and the matching device-response overlay, the query runs and the schema gap surfaces. **Shipped fix:** wrap the calibration read in `try { … } catch (_) { calib = null; }` so the INSERT proceeds with `estimatedLiters=null` on older schemas (commit on `feature/slice-12-irrigation-outcomes`). **Still TODO:** add `zone_irrigation_calibration` to the deploy-time schema repair in `deploy.sh` (alongside the chameleon/dendrometer column repairs) so future Pis converge on the WS1 schema instead of permanently emitting `estimatedLiters=null` for irrigation actuations.
+- **STREGA reconciliation observer (WS1) — schema fix.** Already documented elsewhere in this slice; the observer expects `expected_close_at`, `observed_open_at`, `observed_close_at`, `reconciliation_state` columns. On older Pis these need to be added by `deploy.sh` schema repair, not by Flyway (edge has no Flyway).
+- **LoRa Class A timing model — reconciliation grace period.** Reconciliation must be uplink-interval-aware: a STREGA valve only receives the queued downlink when it next uplinks (Class A). For demo devices on a 60s uplink interval the grace is small; production STREGAs on slower duty cycles need a much larger window before `OPEN_TIMEOUT` / `CLOSE_TIMEOUT` get raised. Concrete next step: read the device's expected uplink interval (column on `devices` or derived from `chirpstack_app_id`) and add `max(2 × uplinkIntervalSeconds, defaultGraceSeconds)` to `expected_close_at` before flagging timeouts.
+
 ---
 
 ## Slice 13: iOS WKWebView Wrapper (Minimum Viable)
