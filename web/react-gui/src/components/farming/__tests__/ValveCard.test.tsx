@@ -69,28 +69,26 @@ describe('StregaValveCard', () => {
         expect(onUpdate).toHaveBeenCalled();
     });
 
-    it('sends CLOSE without duration', async () => {
+    it('does not render cancel control without an active actuation expectation', async () => {
         renderCard({ current_state: 'OPEN' });
-        const closeBtn = await screen.findByRole('button', { name: /closed/ });
-        fireEvent.click(closeBtn);
-        await waitFor(() => {
-            expect(devicesAPI.controlValve).toHaveBeenCalledWith(mockDevice.deveui, {
-                action: 'CLOSE',
-            });
-        });
+        expect(screen.queryByText('stregaValve.cancelQueuedOpen')).not.toBeInTheDocument();
     });
 
-    it('renders cancel button when valve is OPEN', async () => {
-        renderCard({ current_state: 'OPEN' });
-        expect(await screen.findByText('stregaValve.cancelIrrigation')).toBeInTheDocument();
-    });
-
-    it('calls cancelIrrigation API on cancel click', async () => {
-        renderCard({ current_state: 'OPEN' });
-        const cancelBtn = await screen.findByText('stregaValve.cancelIrrigation');
+    it('calls cancelIrrigation API for an active queued open without sending CLOSE', async () => {
+        renderCard({
+            current_state: 'OPEN',
+            activeValveActuation: {
+                expectationId: 'vae-1',
+                reconciliationState: 'PENDING_OBSERVATION',
+            },
+        } as Partial<Device>);
+        const cancelBtn = await screen.findByText('stregaValve.cancelQueuedOpen');
         fireEvent.click(cancelBtn);
         await waitFor(() => {
             expect(devicesAPI.cancelIrrigation).toHaveBeenCalledWith(mockDevice.deveui);
+        });
+        expect(devicesAPI.controlValve).not.toHaveBeenCalledWith(mockDevice.deveui, {
+            action: 'CLOSE',
         });
     });
 

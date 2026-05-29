@@ -55,6 +55,14 @@ export function shouldShowStregaTargetState(device: Device): boolean {
   return Boolean(device.target_state && device.target_state !== device.current_state);
 }
 
+const ACTIVE_VALVE_ACTUATION_STATES = new Set(['PENDING_OBSERVATION', 'OBSERVED_RUNNING']);
+
+export function hasActiveValveActuation(device: Device): boolean {
+  const active = device.activeValveActuation ?? device.active_valve_actuation ?? null;
+  const state = String(active?.reconciliationState ?? active?.reconciliation_state ?? '').trim().toUpperCase();
+  return ACTIVE_VALVE_ACTUATION_STATES.has(state);
+}
+
 const ConfigPanel: React.FC<{
   device: Device;
   onUpdate: () => void;
@@ -503,7 +511,7 @@ const ConfigPanel: React.FC<{
 export const StregaValveCard: React.FC<StregaValveCardProps> = ({ device, onUpdate, onRemove, todayLiters }) => {
   const { t } = useTranslation('devices');
   const { t: tc } = useTranslation('common');
-  const [loading, setLoading] = useState<'OPEN' | 'CLOSE' | null>(null);
+  const [loading, setLoading] = useState<'OPEN' | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isRemoving, setIsRemoving] = useState(false);
   const [showConfirm, setShowConfirm] = useState(false);
@@ -534,24 +542,25 @@ export const StregaValveCard: React.FC<StregaValveCardProps> = ({ device, onUpda
 
   const displayedState = getDisplayedStregaState(device);
   const isOpen = displayedState === 'OPEN';
+  const hasActiveActuation = hasActiveValveActuation(device);
 
-  const handleAction = async (action: 'OPEN' | 'CLOSE') => {
+  const handleOpen = async () => {
     const durationMinutes = Number(openDurationMin);
-    if (action === 'OPEN' && (!Number.isInteger(durationMinutes) || durationMinutes < 1 || durationMinutes > 255)) {
+    if (!Number.isInteger(durationMinutes) || durationMinutes < 1 || durationMinutes > 255) {
       setError(t('stregaValve.invalidOpenDuration', { defaultValue: 'Enter an open duration between 1 and 255 minutes.' }));
       return;
     }
 
-    setLoading(action);
+    setLoading('OPEN');
     setError(null);
     try {
       await devicesAPI.controlValve(device.deveui, {
-        action: action === 'OPEN' ? 'OPEN_FOR_DURATION' : 'CLOSE',
-        ...(action === 'OPEN' ? { duration_seconds: durationMinutes * 60 } : {}),
+        action: 'OPEN_FOR_DURATION',
+        duration_seconds: durationMinutes * 60,
       });
       onUpdate();
     } catch (err: any) {
-      setError(err.response?.data?.message || `Failed to ${action.toLowerCase()} valve`);
+      setError(err.response?.data?.message || 'Failed to open valve');
     } finally {
       setLoading(null);
     }
@@ -680,17 +689,7 @@ export const StregaValveCard: React.FC<StregaValveCardProps> = ({ device, onUpda
         </div>
       )}
 
-      {isOpen && (
-        <div className="mb-3">
-          <ValveCancelButton
-            device={device}
-            onUpdate={onUpdate}
-            onError={(message) => setError(message)}
-          />
-        </div>
-      )}
-
-      <div className="grid grid-cols-2 gap-3">
+      <div className={`grid gap-3 ${hasActiveActuation ? 'grid-cols-2' : 'grid-cols-1'}`}>
         <div>
           <label htmlFor={`strega-duration-${device.deveui}`} className="text-xs text-[var(--text-secondary)]">
             {t('stregaValve.durationMin', { defaultValue: 'Duration (min)' })}
@@ -708,7 +707,7 @@ export const StregaValveCard: React.FC<StregaValveCardProps> = ({ device, onUpda
             className="w-full rounded-lg border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-sm text-[var(--text)]"
           />
           <button
-            onClick={() => handleAction('OPEN')}
+            onClick={handleOpen}
             disabled={loading !== null}
             className="mt-1 w-full bg-[var(--primary)] hover:bg-[var(--primary-hover)] disabled:bg-[var(--border)] text-white font-bold text-base py-3 touch-target rounded-lg transition-colors disabled:cursor-not-allowed disabled:text-[var(--text-disabled)] flex items-center justify-center gap-2"
           >
@@ -722,20 +721,15 @@ export const StregaValveCard: React.FC<StregaValveCardProps> = ({ device, onUpda
             )}
           </button>
         </div>
-        <button
-          onClick={() => handleAction('CLOSE')}
-          disabled={loading !== null}
-          className="bg-[var(--secondary-bg)] hover:bg-[var(--border)] disabled:bg-[var(--border)] text-[var(--text)] font-bold text-base py-3 touch-target rounded-lg transition-colors disabled:cursor-not-allowed disabled:text-[var(--text-disabled)] flex items-center justify-center gap-2"
-        >
-          {loading === 'CLOSE' ? (
-            <>
-              <div className="animate-spin h-5 w-5 border-2 border-white border-t-transparent rounded-full" />
-              {t('stregaValve.closing')}
-            </>
-          ) : (
-            t('stregaValve.closed')
-          )}
-        </button>
+        {hasActiveActuation && (
+          <div className="flex items-end">
+            <ValveCancelButton
+              device={device}
+              onUpdate={onUpdate}
+              onError={(message) => setError(message)}
+            />
+          </div>
+        )}
       </div>
 
       <DeviceCardFooter
