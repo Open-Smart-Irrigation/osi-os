@@ -166,19 +166,23 @@ function assertReconciliationMonitor() {
 function assertCancelPath() {
     const flows = readFlows();
     const httpIn = flows.find(n =>
-        n.type === 'http in' && n.url === '/api/v1/valves/:deveui/cancel'
+        n.type === 'http in' && n.url === '/api/valve/:deveui/cancel'
     );
-    if (!httpIn) throw new Error('Missing HTTP IN node for /api/v1/valves/:deveui/cancel');
+    if (!httpIn) throw new Error('Missing HTTP IN node for /api/valve/:deveui/cancel');
     const fn = flows.find(n =>
         n.type === 'function' && n.name === 'Cancel STREGA Actuation'
     );
     if (!fn) throw new Error('Missing function node "Cancel STREGA Actuation"');
     assertAsyncOsiDb(fn);
     assertNodeLib(fn, 'crypto', 'crypto');
+    assertNodeLib(fn, 'chirpstack', 'osi-chirpstack-helper');
     for (const required of ['verifyBearer', 'user_id', 'Valve is claimed by another user']) {
         if (!fn.func.includes(required)) {
             throw new Error(`Cancel function must perform authenticated ownership checks (${required})`);
         }
+    }
+    if (!fn.func.includes('flushDeviceQueue(deveui)')) {
+        throw new Error('Cancel function must flush the ChirpStack device queue');
     }
     if (!fn.func.includes("'CANCELLED'") && !fn.func.includes('"CANCELLED"')) {
         throw new Error('Cancel function must set reconciliation_state = CANCELLED');
@@ -186,13 +190,13 @@ function assertCancelPath() {
     if (!fn.func.includes('cancel_reason')) {
         throw new Error('Cancel function must record cancel_reason');
     }
-    if (!fn.func.includes('return [null, msg]')) {
+    if (!fn.func.includes('return msg')) {
         throw new Error('Cancel errors must route to the HTTP response output');
     }
-    if (!fn.func.includes('return [closeMsg, responseMsg]')) {
-        throw new Error('Cancel success must emit a CLOSE command and an HTTP response');
+    if (fn.func.includes("action: 'CLOSE'") || fn.func.includes('return [closeMsg, responseMsg]')) {
+        throw new Error('Cancel success must not emit a CLOSE command');
     }
-    console.log('  ok Explicit cancel path present');
+    console.log('  ok Explicit cancel path flushes queue without a CLOSE downlink');
 }
 
 function assertFrontendValveControls() {
@@ -202,15 +206,24 @@ function assertFrontendValveControls() {
     if (!farmingTypes.includes("'OPEN_FOR_DURATION'")) {
         throw new Error('ValveActionRequest must allow OPEN_FOR_DURATION');
     }
-    for (const required of ['Number.isInteger(durationMinutes)', 'durationMinutes < 1', 'durationMinutes > 255', "action === 'OPEN' ? 'OPEN_FOR_DURATION' : 'CLOSE'"]) {
+    for (const required of ['Number.isInteger(durationMinutes)', 'durationMinutes < 1', 'durationMinutes > 255', "action: 'OPEN_FOR_DURATION'"]) {
         if (!stregaCard.includes(required)) {
             throw new Error(`StregaValveCard must validate and send timed open controls (${required})`);
         }
+    }
+    if (stregaCard.includes("action === 'OPEN' ? 'OPEN_FOR_DURATION' : 'CLOSE'")) {
+        throw new Error('StregaValveCard must not send CLOSE from the main valve controls');
+    }
+    if (!stregaCard.includes('hasActiveValveActuation(device)')) {
+        throw new Error('StregaValveCard must gate cancel rendering on an active VAE row');
     }
     for (const required of ['onUpdate?.()', 'onError?.(message)', 'catch (err: any)']) {
         if (!cancelButton.includes(required)) {
             throw new Error(`ValveCancelButton must report cancel success/failure (${required})`);
         }
+    }
+    if (!cancelButton.includes('cancelQueuedOpen')) {
+        throw new Error('ValveCancelButton must label the action as cancelling a queued open');
     }
     console.log('  ok frontend valve controls are duration-bound and report cancel results');
 }

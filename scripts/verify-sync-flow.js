@@ -148,6 +148,7 @@ const requiredHttpRoutes = [
   '/api/account-link/status',
   '/api/sync/state',
   '/api/sync/force',
+  '/api/valve/:deveui/cancel',
   '/api/devices/:deveui/lsn50/mode',
   '/api/devices/:deveui/lsn50/interval',
   '/api/devices/:deveui/lsn50/interrupt-mode',
@@ -232,6 +233,7 @@ const requiredFunctionNodes = [
   'Auth + Parse STREGA Flushing',
   'Authorize + Fanout STREGA Advanced',
   'Format STREGA Advanced Response',
+  'Cancel STREGA Actuation',
   'Auth + Set Chameleon Enabled',
   'Auth + Parse Dendro Config',
   'Format Dendro Config Response',
@@ -1977,6 +1979,12 @@ expectIncludes('Build STREGA downlink + emit log ctx', 'gatewayDeviceEui: gatewa
 expectIncludes('Build Status + ACK', 'deviceEui: deviceEui', 'includes the actual STREGA valve DevEUI in cloud status payloads');
 expectIncludes('Build Status + ACK', 'gatewayDeviceEui: gatewayDeviceEui', 'includes the gateway transport identity in cloud status payloads');
 expectIncludes('Build Status + ACK', "ctx.commandType || 'VALVE_COMMAND'", 'defaults manual STREGA valve ACK payloads to the cloud command type');
+expectIncludes('Cancel STREGA Actuation', 'chirpstack.createProvisioningClientFromEnv(env)', 'uses shared ChirpStack helper configuration');
+expectIncludes('Cancel STREGA Actuation', 'flushDeviceQueue(deveui)', 'flushes the ChirpStack device queue');
+expectIncludes('Cancel STREGA Actuation', "reconciliation_state='CANCELLED'", 'marks active actuation expectations CANCELLED');
+expectIncludes('Cancel STREGA Actuation', "WHERE expectation_id = (", 'updates only the latest active expectation');
+expectExcludes('Cancel STREGA Actuation', "action: 'CLOSE'", 'bare CLOSE downlink emission from cancel path');
+expectExcludes('Cancel STREGA Actuation', 'return [closeMsg, responseMsg]', 'actuator fanout from cancel path');
 pendingChecks.push((async () => {
   // Fixed fixture values mirror the live command-193 failure; the test has no hardware dependency.
   const gatewayEui = '0016C001F151B1D6';
