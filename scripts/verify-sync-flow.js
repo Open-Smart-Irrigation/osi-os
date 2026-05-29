@@ -1447,6 +1447,10 @@ expectIncludesById('strega-sql-fn', 'INSERT INTO device_data (deveui, recorded_a
 expectIncludesById('strega-sql-fn', "UPDATE devices SET current_state = ?, updated_at = ?, sync_version = COALESCE(sync_version, 0) + 1 WHERE deveui = ? AND COALESCE(UPPER(current_state), '') <> ?", 'conditionally updates the canonical local STREGA valve state on uplink');
 expectIncludesById('strega-sql-fn', 'ambient_temperature, relative_humidity, bat_pct', 'stores decoded STREGA telemetry in local device_data columns');
 expectIncludesById('strega-sql-fn', 'current_state: observedState', 'returns the observed local STREGA valve state');
+expectIncludesById('strega-reconciliation-monitor', 'd.current_state', 'reads canonical STREGA valve state from devices');
+expectIncludesById('strega-reconciliation-monitor', 'LEFT JOIN device_data dd ON dd.deveui = d.deveui', 'uses device_data only to find the latest observation timestamp');
+expectIncludesById('strega-reconciliation-monitor', 'ORDER BY dd.recorded_at DESC LIMIT 1', 'uses the newest matching uplink timestamp for reconciliation');
+expectExcludesById('strega-reconciliation-monitor', 'current_state FROM device_data', 'the old invalid device_data.current_state observer query');
 expectExcludesById('strega-sql-fn', 'BEGIN IMMEDIATE;', 'the old manual transaction opener inside the function node');
 expectExcludesById('strega-sql-fn', 'COMMIT;', 'the old manual transaction committer inside the function node');
 expectExcludesById('strega-sql-fn', 'ROLLBACK;', 'the old manual rollback branch inside the function node');
