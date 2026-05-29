@@ -167,7 +167,8 @@ function buildDeviceProfileMessage(input) {
 class ChirpStackClient {
   constructor(config) {
     this.apiUrl = normalizeApiUrl(config && config.apiUrl);
-    this.metadata = createMetadata(config && config.apiKey);
+    this.apiKey = String(config && config.apiKey || '').trim();
+    this.metadata = createMetadata(this.apiKey);
     this.credentials = createCredentials(this.apiUrl);
     this.deviceClient = new deviceGrpc.DeviceServiceClient(this.apiUrl.target, this.credentials);
     this.applicationClient = new applicationGrpc.ApplicationServiceClient(this.apiUrl.target, this.credentials);
@@ -461,6 +462,20 @@ class ChirpStackClient {
     const request = new gatewayPb.UpdateGatewayRequest();
     request.setGateway(gateway);
     return await grpcInvoke(this.gatewayClient, 'update', request, this.metadata, 'updateGatewayLocation');
+  }
+
+  async flushDeviceQueue(devEui) {
+    const normalizedDevEui = normalizeDevEui(devEui);
+    if (!normalizedDevEui) {
+      throw annotateError(new Error('DevEUI is required'), 'flushDeviceQueue');
+    }
+    const request = new devicePb.FlushDeviceQueueRequest();
+    request.setDevEui(normalizedDevEui);
+    await grpcInvoke(this.deviceClient, 'flushQueue', request, this.metadata, 'flushDeviceQueue');
+    return {
+      devEui: normalizedDevEui,
+      method: 'DeviceService.FlushQueue'
+    };
   }
 }
 

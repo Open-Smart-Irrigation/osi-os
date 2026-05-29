@@ -148,6 +148,7 @@ const requiredHttpRoutes = [
   '/api/account-link/status',
   '/api/sync/state',
   '/api/sync/force',
+  '/api/valve/:deveui/cancel',
   '/api/devices/:deveui/lsn50/mode',
   '/api/devices/:deveui/lsn50/interval',
   '/api/devices/:deveui/lsn50/interrupt-mode',
@@ -232,6 +233,7 @@ const requiredFunctionNodes = [
   'Auth + Parse STREGA Flushing',
   'Authorize + Fanout STREGA Advanced',
   'Format STREGA Advanced Response',
+  'Cancel STREGA Actuation',
   'Auth + Set Chameleon Enabled',
   'Auth + Parse Dendro Config',
   'Format Dendro Config Response',
@@ -1447,6 +1449,10 @@ expectIncludesById('strega-sql-fn', 'INSERT INTO device_data (deveui, recorded_a
 expectIncludesById('strega-sql-fn', "UPDATE devices SET current_state = ?, updated_at = ?, sync_version = COALESCE(sync_version, 0) + 1 WHERE deveui = ? AND COALESCE(UPPER(current_state), '') <> ?", 'conditionally updates the canonical local STREGA valve state on uplink');
 expectIncludesById('strega-sql-fn', 'ambient_temperature, relative_humidity, bat_pct', 'stores decoded STREGA telemetry in local device_data columns');
 expectIncludesById('strega-sql-fn', 'current_state: observedState', 'returns the observed local STREGA valve state');
+expectIncludesById('strega-reconciliation-monitor', 'd.current_state', 'reads canonical STREGA valve state from devices');
+expectIncludesById('strega-reconciliation-monitor', 'LEFT JOIN device_data dd ON dd.deveui = d.deveui', 'uses device_data only to find the latest observation timestamp');
+expectIncludesById('strega-reconciliation-monitor', 'ORDER BY dd.recorded_at DESC LIMIT 1', 'uses the newest matching uplink timestamp for reconciliation');
+expectExcludesById('strega-reconciliation-monitor', 'current_state FROM device_data', 'the old invalid device_data.current_state observer query');
 expectExcludesById('strega-sql-fn', 'BEGIN IMMEDIATE;', 'the old manual transaction opener inside the function node');
 expectExcludesById('strega-sql-fn', 'COMMIT;', 'the old manual transaction committer inside the function node');
 expectExcludesById('strega-sql-fn', 'ROLLBACK;', 'the old manual rollback branch inside the function node');
@@ -1977,6 +1983,12 @@ expectIncludes('Build STREGA downlink + emit log ctx', 'gatewayDeviceEui: gatewa
 expectIncludes('Build Status + ACK', 'deviceEui: deviceEui', 'includes the actual STREGA valve DevEUI in cloud status payloads');
 expectIncludes('Build Status + ACK', 'gatewayDeviceEui: gatewayDeviceEui', 'includes the gateway transport identity in cloud status payloads');
 expectIncludes('Build Status + ACK', "ctx.commandType || 'VALVE_COMMAND'", 'defaults manual STREGA valve ACK payloads to the cloud command type');
+expectIncludes('Cancel STREGA Actuation', 'chirpstack.createProvisioningClientFromEnv(env)', 'uses shared ChirpStack helper configuration');
+expectIncludes('Cancel STREGA Actuation', 'flushDeviceQueue(deveui)', 'flushes the ChirpStack device queue');
+expectIncludes('Cancel STREGA Actuation', "reconciliation_state='CANCELLED'", 'marks active actuation expectations CANCELLED');
+expectIncludes('Cancel STREGA Actuation', "WHERE expectation_id = (", 'updates only the latest active expectation');
+expectExcludes('Cancel STREGA Actuation', "action: 'CLOSE'", 'bare CLOSE downlink emission from cancel path');
+expectExcludes('Cancel STREGA Actuation', 'return [closeMsg, responseMsg]', 'actuator fanout from cancel path');
 pendingChecks.push((async () => {
   // Fixed fixture values mirror the live command-193 failure; the test has no hardware dependency.
   const gatewayEui = '0016C001F151B1D6';
@@ -2584,6 +2596,15 @@ const helperPath = helperCandidates.find((candidate) => fs.existsSync(candidate)
 if (!helperPath) {
   fail(`missing ChirpStack helper module at one of: ${helperCandidates.join(', ')}`);
 } else {
+  const helperIndexPath = path.join(helperPath, 'index.js');
+  const helperSource = fs.existsSync(helperIndexPath) ? fs.readFileSync(helperIndexPath, 'utf8') : '';
+  expectFileIncludes('osi-chirpstack-helper/index.js', helperSource, 'async getDeviceProfile(', 'adds profile reads so bootstrap can inspect existing ChirpStack codecs');
+  expectFileIncludes('osi-chirpstack-helper/index.js', helperSource, 'async updateDeviceProfile(', 'adds profile updates so bootstrap can repair codec-less ChirpStack profiles');
+  expectFileIncludes('osi-chirpstack-helper/index.js', helperSource, 'new devicePb.FlushDeviceQueueRequest()', 'flushes device queues with the ChirpStack gRPC request type');
+  expectFileIncludes('osi-chirpstack-helper/index.js', helperSource, "grpcInvoke(this.deviceClient, 'flushQueue'", 'flushes device queues through DeviceService.FlushQueue');
+  expectFileExcludes('osi-chirpstack-helper/index.js', helperSource, '`/api/devices/${encodeURIComponent(normalizedDevEui)}/queue`', 'REST device queue path');
+  expectFileExcludes('osi-chirpstack-helper/index.js', helperSource, "requestJson('DELETE'", 'REST device queue DELETE');
+  expectFileExcludes('osi-chirpstack-helper/index.js', helperSource, 'ChirpStack queue flush failed with HTTP', 'REST queue-flush error handling');
   try {
     const helper = require(helperPath);
     for (const exportName of ['createClient', 'createProvisioningClientFromEnv', 'normalizeApiUrl']) {
@@ -2594,10 +2615,6 @@ if (!helperPath) {
       }
     }
   } catch (error) {
-    const helperIndexPath = path.join(helperPath, 'index.js');
-    const helperSource = fs.existsSync(helperIndexPath) ? fs.readFileSync(helperIndexPath, 'utf8') : '';
-    expectFileIncludes('osi-chirpstack-helper/index.js', helperSource, 'async getDeviceProfile(', 'adds profile reads so bootstrap can inspect existing ChirpStack codecs');
-    expectFileIncludes('osi-chirpstack-helper/index.js', helperSource, 'async updateDeviceProfile(', 'adds profile updates so bootstrap can repair codec-less ChirpStack profiles');
     if (error.code === 'MODULE_NOT_FOUND' && helperSource) {
       console.log(`OK helper source present despite missing local runtime deps: ${error.message}`);
       for (const exportName of ['createClient', 'createProvisioningClientFromEnv', 'normalizeApiUrl']) {
