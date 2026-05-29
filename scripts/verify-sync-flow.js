@@ -1370,6 +1370,8 @@ expectIncludes('Get Zone Environment Summary', 'irrigationTodayMeasuredLiters', 
 expectIncludes('Get Zone Environment Summary', 'irrigationTodayEstimatedLiters', 'returns estimated valve-time liters under an honest field name');
 expectIncludes('Get Zone Environment Summary', 'measuredIrrigationNetMm', 'computes effective mm for measured irrigation separately');
 expectIncludes('Get Zone Environment Summary', 'estimatedIrrigationNetMm', 'computes effective mm for estimated irrigation separately');
+expectIncludes('Get Zone Environment Summary', 'overlayLocalWaterIrrigationSplit(sharedSummary.water, water)', 'preserves local measured/estimated irrigation split when shared server water is displayed');
+expectIncludes('Get Zone Environment Summary', 'water: displayWater,', 'returns the irrigation-split overlay instead of raw shared server water');
 expectIncludes('Save Zone Irrigation Calibration', 'INSERT INTO zone_irrigation_calibration', 'upserts zone irrigation calibration through the local API');
 expectIncludes('Save Zone Irrigation Calibration', 'measured_flow_rate_lpm', 'writes the measured flow rate to the calibration table');
 expectIncludes('Save Zone Irrigation Calibration', 'measurement_method', 'writes the operator-entered measurement method to the calibration table');
