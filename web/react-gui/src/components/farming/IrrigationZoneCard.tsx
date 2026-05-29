@@ -309,11 +309,13 @@ export const IrrigationZoneCard: React.FC<IrrigationZoneCardProps> = ({
               <p className="mt-2 text-2xl font-bold text-sky-700">{formatWaterValue(environmentSummary.water.rainTodayMm, 'mm', 1)}</p>
             </div>
             <div className="rounded-xl bg-white/80 p-3 shadow-sm ring-1 ring-teal-100">
-              <p className="text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)]">Irrigation today</p>
-              <p className="mt-2 text-2xl font-bold text-teal-700">{formatWaterValue(environmentSummary.water.irrigationTodayLiters, 'L', 0)}</p>
-              {environmentSummary.water.irrigationTodayNetMm != null && (
-                <p className="mt-1 text-xs text-[var(--text-secondary)]">{formatWaterValue(environmentSummary.water.irrigationTodayNetMm, 'mm', 1)} effective</p>
-              )}
+              <p className="text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)]">Measured (flow meter)</p>
+              <p className="mt-2 text-2xl font-bold text-teal-700">
+                {formatWaterValue(environmentSummary.water.irrigationTodayMeasuredLiters, 'L', 0)}
+              </p>
+              <p className="mt-1 text-xs text-[var(--text-secondary)]">
+                Estimated (valve time x calibration): {formatWaterValue(environmentSummary.water.irrigationTodayEstimatedLiters, 'L', 0)}
+              </p>
             </div>
             <div className="rounded-xl bg-white/80 p-3 shadow-sm ring-1 ring-cyan-100">
               <p className="text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)]">Next rain</p>

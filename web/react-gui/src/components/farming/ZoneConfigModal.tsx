@@ -64,6 +64,10 @@ export const ZoneConfigModal: React.FC<Props> = ({ isOpen, zone, onClose, onSave
   const [irrigationEfficiencyPct, setIrrigationEfficiencyPct] = useState(
     zone.irrigationEfficiencyPct != null ? String(zone.irrigationEfficiencyPct) : ''
   );
+  const [measuredFlowRateLpm, setMeasuredFlowRateLpm] = useState(
+    zone.measuredFlowRateLpm != null ? String(zone.measuredFlowRateLpm) : ''
+  );
+  const [measurementMethod, setMeasurementMethod] = useState(zone.measurementMethod ?? '');
   const [schedulingMode, setSchedulingMode] = useState<'local' | 'server_preferred'>((zone.schedulingMode ?? 'local') as 'local' | 'server_preferred');
   const [notes, setNotes] = useState(zone.notes ?? '');
   const [timezone, setTimezone] = useState(zone.timezone ?? 'UTC');
@@ -91,6 +95,8 @@ export const ZoneConfigModal: React.FC<Props> = ({ isOpen, zone, onClose, onSave
     setIrrigationMethod(zone.irrigationMethod ?? '');
     setAreaM2(zone.areaM2 != null ? String(zone.areaM2) : '');
     setIrrigationEfficiencyPct(zone.irrigationEfficiencyPct != null ? String(zone.irrigationEfficiencyPct) : '');
+    setMeasuredFlowRateLpm(zone.measuredFlowRateLpm != null ? String(zone.measuredFlowRateLpm) : '');
+    setMeasurementMethod(zone.measurementMethod ?? '');
     setSchedulingMode((zone.schedulingMode ?? 'local') as 'local' | 'server_preferred');
     setNotes(zone.notes ?? '');
     setTimezone(zone.timezone ?? 'UTC');
@@ -180,18 +186,41 @@ export const ZoneConfigModal: React.FC<Props> = ({ isOpen, zone, onClose, onSave
     return { latitude: parsedLatitude, longitude: parsedLongitude };
   };
 
+  const parseCalibrationPayload = () => {
+    const flowRateChanged = (zone.measuredFlowRateLpm != null ? String(zone.measuredFlowRateLpm) : '') !== measuredFlowRateLpm;
+    const methodChanged = (zone.measurementMethod ?? '') !== measurementMethod;
+    if (!flowRateChanged && !methodChanged) return null;
+
+    const trimmedFlowRate = measuredFlowRateLpm.trim();
+    if (!trimmedFlowRate) {
+      throw new Error('Flow rate (L/min) is required to save irrigation calibration.');
+    }
+    const parsedFlowRate = Number(trimmedFlowRate);
+    if (!Number.isFinite(parsedFlowRate) || parsedFlowRate <= 0) {
+      throw new Error('Flow rate (L/min) must be greater than 0.');
+    }
+    return {
+      measuredFlowRateLpm: parsedFlowRate,
+      measurementMethod: measurementMethod.trim() || null,
+    };
+  };
+
   const handleSave = async () => {
     setSaving(true);
     setError(null);
     try {
       const configPayload = buildConfigPayload();
       const locationPayload = parseLocationPayload();
+      const calibrationPayload = parseCalibrationPayload();
       const hasConfigChanges = Object.keys(configPayload).length > 0;
       const locationChanged = locationPayload != null
         && (locationPayload.latitude !== zone.latitude || locationPayload.longitude !== zone.longitude);
 
       if (hasConfigChanges) {
         await irrigationZonesAPI.updateConfig(zone.id, configPayload);
+      }
+      if (calibrationPayload) {
+        await irrigationZonesAPI.updateCalibration(zone.id, calibrationPayload);
       }
       if (locationChanged) {
         await irrigationZonesAPI.setZoneLocation(zone.id, locationPayload);
@@ -376,6 +405,34 @@ export const ZoneConfigModal: React.FC<Props> = ({ isOpen, zone, onClose, onSave
           <hr className="border-[var(--border)]" />
 
           {/* Calibration */}
+          <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)]/70 p-4">
+            <p className="text-xs font-semibold text-[var(--text-tertiary)] uppercase tracking-wide mb-3">Irrigation calibration</p>
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <div>
+                <p className="text-xs font-semibold text-[var(--text-tertiary)] uppercase tracking-wide mb-2">Flow rate (L/min)</p>
+                <input
+                  type="number"
+                  min="0"
+                  step="0.1"
+                  value={measuredFlowRateLpm}
+                  onChange={e => setMeasuredFlowRateLpm(e.target.value)}
+                  placeholder="L/min"
+                  className="w-full bg-[var(--surface)] border border-[var(--border)] text-[var(--text)] rounded-lg px-3 py-2 text-sm placeholder:text-[var(--text-tertiary)]"
+                />
+              </div>
+              <div>
+                <p className="text-xs font-semibold text-[var(--text-tertiary)] uppercase tracking-wide mb-2">Measurement method</p>
+                <input
+                  type="text"
+                  value={measurementMethod}
+                  onChange={e => setMeasurementMethod(e.target.value)}
+                  placeholder="Bucket test, meter read, or other method"
+                  className="w-full bg-[var(--surface)] border border-[var(--border)] text-[var(--text)] rounded-lg px-3 py-2 text-sm placeholder:text-[var(--text-tertiary)]"
+                />
+              </div>
+            </div>
+          </div>
+
           <div>
             <p className="text-xs font-semibold text-[var(--text-tertiary)] uppercase tracking-wide mb-2">Dendro calibration</p>
             <select

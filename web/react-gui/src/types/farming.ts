@@ -220,6 +220,9 @@ export interface IrrigationZone {
   irrigation_method?: string | null;
   area_m2?: number | null;
   irrigation_efficiency_pct?: number | null;
+  measured_flow_rate_lpm?: number | null;
+  measurement_method?: string | null;
+  irrigation_calibration_updated_at?: string | null;
   scheduling_mode?: 'local' | 'server_preferred' | null;
   notes?: string | null;
   calibration_key?: string | null;
@@ -233,6 +236,9 @@ export interface IrrigationZone {
   irrigationMethod?: string | null;
   areaM2?: number | null;
   irrigationEfficiencyPct?: number | null;
+  measuredFlowRateLpm?: number | null;
+  measurementMethod?: string | null;
+  irrigationCalibrationUpdatedAt?: string | null;
   schedulingMode?: 'local' | 'server_preferred' | null;
   varietyCompat?: string | null;
   predictionCardEnabled?: boolean | null;
@@ -392,6 +398,10 @@ export interface WaterEnvironment {
   rainTodayMm: number | null;
   irrigationTodayLiters: number | null;
   irrigationTodayNetMm: number | null;
+  irrigationTodayMeasuredLiters?: number | null;
+  irrigationTodayEstimatedLiters?: number | null;
+  measuredIrrigationNetMm?: number | null;
+  estimatedIrrigationNetMm?: number | null;
   waterNeededTodayMm: number | null;
   balanceTodayMm: number | null;
   next24hRainMm: number | null;
@@ -412,7 +422,12 @@ export interface WaterDay {
   rainMm: number | null;
   irrigationLiters: number | null;
   irrigationNetMm: number | null;
+  measuredIrrigationLiters?: number | null;
+  estimatedIrrigationLiters?: number | null;
+  measuredIrrigationNetMm?: number | null;
+  estimatedIrrigationNetMm?: number | null;
   totalWaterMm: number | null;
+  estimatedTotalWaterMm?: number | null;
 }
 
 export interface SensorHealth {

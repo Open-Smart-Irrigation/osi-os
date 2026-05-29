@@ -54,8 +54,16 @@ function formatAction(code: string | null | undefined): string {
 export const WaterTab: React.FC<Props> = ({ water }) => {
   const { t } = useTranslation('devices');
   const hasSetup = water.areaM2 != null && water.irrigationEfficiencyPct != null;
+  const measuredLiters = water.irrigationTodayMeasuredLiters ?? null;
+  const estimatedLiters = water.irrigationTodayEstimatedLiters ?? null;
+  const measuredNetMm = water.measuredIrrigationNetMm ?? null;
+  const estimatedNetMm = water.estimatedIrrigationNetMm ?? null;
   const chartData = water.daily.map((day) => ({
     ...day,
+    measuredIrrigationLiters: day.measuredIrrigationLiters ?? null,
+    measuredIrrigationNetMm: day.measuredIrrigationNetMm ?? null,
+    estimatedIrrigationLiters: day.estimatedIrrigationLiters ?? null,
+    estimatedIrrigationNetMm: day.estimatedIrrigationNetMm ?? null,
     shortDate: new Date(day.date).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }),
   }));
 
@@ -69,7 +77,7 @@ export const WaterTab: React.FC<Props> = ({ water }) => {
 
   return (
     <div className="flex flex-col gap-4">
-      <div className="grid grid-cols-2 gap-2 lg:grid-cols-4">
+      <div className="grid grid-cols-2 gap-2 lg:grid-cols-5">
         {[
           {
             key: 'rain',
@@ -78,11 +86,18 @@ export const WaterTab: React.FC<Props> = ({ water }) => {
             tone: 'text-sky-700',
           },
           {
-            key: 'irrigation',
-            label: t('environment.water.irrigationToday', { defaultValue: 'Irrigation today' }),
-            value: formatValue(water.irrigationTodayLiters, 'L', 0),
-            detail: hasSetup ? formatValue(water.irrigationTodayNetMm, 'mm', 1) : 'Needs area + efficiency',
+            key: 'measured-irrigation',
+            label: t('environment.water.measuredIrrigationToday', { defaultValue: 'Measured (flow meter)' }),
+            value: formatValue(measuredLiters, 'L', 0),
+            detail: hasSetup ? `${formatValue(measuredNetMm, 'mm', 1)} effective` : 'Needs area + efficiency',
             tone: 'text-teal-700',
+          },
+          {
+            key: 'estimated-irrigation',
+            label: t('environment.water.estimatedIrrigationToday', { defaultValue: 'Estimated (valve time x calibration)' }),
+            value: formatValue(estimatedLiters, 'L', 0),
+            detail: hasSetup ? `${formatValue(estimatedNetMm, 'mm', 1)} effective` : 'Needs area + efficiency',
+            tone: 'text-emerald-700',
           },
           {
             key: 'needed',
@@ -123,7 +138,7 @@ export const WaterTab: React.FC<Props> = ({ water }) => {
               {t('environment.water.weeklyTrend', { defaultValue: '7-day water trend' })}
             </p>
             <p className="mt-1 text-sm text-[var(--text-secondary)]">
-              {water.action?.reasoning ?? t('environment.water.trendNote', { defaultValue: 'Compare rainfall against effective irrigation over the last week.' })}
+              {water.action?.reasoning ?? t('environment.water.trendNote', { defaultValue: 'Compare rainfall against measured and estimated effective irrigation over the last week.' })}
             </p>
           </div>
           <div className="text-xs text-[var(--text-tertiary)]">
@@ -154,16 +169,21 @@ export const WaterTab: React.FC<Props> = ({ water }) => {
                     <div className="rounded-lg border border-[var(--border)] bg-[var(--card)] p-3 text-sm shadow-xl">
                       <p className="mb-1 text-[var(--text-tertiary)]">{label}</p>
                       <p className="font-semibold text-sky-700">Rain: {formatValue(row.rainMm, 'mm', 1)}</p>
-                      <p className="font-semibold text-teal-700">Irrigation: {formatValue(row.irrigationLiters, 'L', 0)}</p>
-                      {row.irrigationNetMm != null && (
-                        <p className="text-[var(--text-secondary)]">Effective irrigation: {formatValue(row.irrigationNetMm, 'mm', 1)}</p>
+                      <p className="font-semibold text-teal-700">Measured (flow meter): {formatValue(row.measuredIrrigationLiters, 'L', 0)}</p>
+                      <p className="font-semibold text-emerald-700">Estimated (valve time x calibration): {formatValue(row.estimatedIrrigationLiters, 'L', 0)}</p>
+                      {row.measuredIrrigationNetMm != null && (
+                        <p className="text-[var(--text-secondary)]">Measured effective: {formatValue(row.measuredIrrigationNetMm, 'mm', 1)}</p>
+                      )}
+                      {row.estimatedIrrigationNetMm != null && (
+                        <p className="text-[var(--text-secondary)]">Estimated effective: {formatValue(row.estimatedIrrigationNetMm, 'mm', 1)}</p>
                       )}
                     </div>
                   );
                 }}
               />
               <Bar dataKey="rainMm" name="Rain" fill="#38bdf8" radius={[6, 6, 0, 0]} />
-              {hasSetup && <Bar dataKey="irrigationNetMm" name="Effective irrigation" fill="#14b8a6" radius={[6, 6, 0, 0]} />}
+              {hasSetup && <Bar dataKey="measuredIrrigationNetMm" name="Measured effective irrigation" fill="#14b8a6" radius={[6, 6, 0, 0]} />}
+              {hasSetup && <Bar dataKey="estimatedIrrigationNetMm" name="Estimated effective irrigation" fill="#22c55e" radius={[6, 6, 0, 0]} />}
             </BarChart>
           </ResponsiveContainer>
         </div>

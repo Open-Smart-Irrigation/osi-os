@@ -186,6 +186,69 @@ function all(sql) {
 NODE
 }
 
+ensure_zone_irrigation_calibration_schema() {
+    echo "--- Live zone irrigation calibration schema repair ---"
+    if [ ! -e "$DB_PATH" ]; then
+        echo "SKIP: no live database at $DB_PATH"
+        return 0
+    fi
+    node <<'NODE'
+const fs = require('fs');
+const dbPath = '/data/db/farming.db';
+if (!fs.existsSync(dbPath)) {
+  console.log('SKIP: no live database at ' + dbPath);
+  process.exit(0);
+}
+const sqlite3 = require('/srv/node-red/node_modules/sqlite3');
+const db = new sqlite3.Database(dbPath);
+function run(sql) {
+  return new Promise((resolve, reject) => db.run(sql, (err) => err ? reject(err) : resolve()));
+}
+function all(sql) {
+  return new Promise((resolve, reject) => db.all(sql, (err, rows) => err ? reject(err) : resolve(rows || [])));
+}
+(async () => {
+  await run('PRAGMA busy_timeout=5000');
+  await run(`CREATE TABLE IF NOT EXISTS zone_irrigation_calibration (
+    zone_id                INTEGER PRIMARY KEY,
+    valve_device_eui       TEXT,
+    measured_flow_rate_lpm REAL,
+    measurement_method     TEXT,
+    measured_at            TEXT,
+    created_at             TEXT,
+    updated_at             TEXT
+  )`);
+  for (const sql of [
+    'ALTER TABLE zone_irrigation_calibration ADD COLUMN valve_device_eui TEXT',
+    'ALTER TABLE zone_irrigation_calibration ADD COLUMN measured_flow_rate_lpm REAL',
+    'ALTER TABLE zone_irrigation_calibration ADD COLUMN measurement_method TEXT',
+    'ALTER TABLE zone_irrigation_calibration ADD COLUMN measured_at TEXT',
+    'ALTER TABLE zone_irrigation_calibration ADD COLUMN created_at TEXT',
+    'ALTER TABLE zone_irrigation_calibration ADD COLUMN updated_at TEXT'
+  ]) {
+    try {
+      await run(sql);
+    } catch (err) {
+      if (!/duplicate column name/i.test(String(err && err.message || err))) throw err;
+    }
+  }
+  const cols = await all('PRAGMA table_info(zone_irrigation_calibration)');
+  const names = new Set(cols.map((row) => row.name));
+  for (const required of ['zone_id', 'measured_flow_rate_lpm', 'measurement_method', 'updated_at']) {
+    if (!names.has(required)) {
+      throw new Error('zone irrigation calibration column is still missing after deploy repair: ' + required);
+    }
+  }
+  console.log('OK');
+  db.close();
+})().catch((err) => {
+  console.error(err && err.stack ? err.stack : err);
+  db.close();
+  process.exit(1);
+});
+NODE
+}
+
 ensure_chameleon_schema() {
     echo "--- Live Chameleon SWT schema repair ---"
     if [ ! -e "$DB_PATH" ]; then
@@ -456,6 +519,7 @@ else
 fi
 
 ensure_dendro_schema
+ensure_zone_irrigation_calibration_schema
 ensure_chameleon_schema
 
 fix_mosquitto_ownership() {

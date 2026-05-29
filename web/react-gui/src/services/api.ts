@@ -196,6 +196,9 @@ function normaliseZone(z: any): IrrigationZone {
     irrigationMethod:  z.irrigationMethod  ?? z.irrigation_method  ?? null,
     areaM2:            z.areaM2            ?? z.area_m2            ?? null,
     irrigationEfficiencyPct: z.irrigationEfficiencyPct ?? z.irrigation_efficiency_pct ?? null,
+    measuredFlowRateLpm: z.measuredFlowRateLpm ?? z.measured_flow_rate_lpm ?? null,
+    measurementMethod: z.measurementMethod ?? z.measurement_method ?? null,
+    irrigationCalibrationUpdatedAt: z.irrigationCalibrationUpdatedAt ?? z.irrigation_calibration_updated_at ?? null,
     schedulingMode:    z.schedulingMode    ?? z.scheduling_mode    ?? 'local',
     notes:             z.notes                                     ?? null,
     timezone:          z.timezone                                  ?? null,
@@ -295,6 +298,13 @@ export const irrigationZonesAPI = {
       payload
     );
     return normaliseZone(response.data);
+  },
+
+  updateCalibration: async (zoneId: number, payload: {
+    measuredFlowRateLpm: number;
+    measurementMethod: string | null;
+  }): Promise<void> => {
+    await api.post(`/api/irrigation-zones/${zoneId}/calibration`, payload);
   },
 
   setZoneLocation: async (zoneId: number, payload: {

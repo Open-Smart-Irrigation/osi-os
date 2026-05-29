@@ -170,6 +170,7 @@ const requiredHttpRoutes = [
   '/api/gateway/location',
   '/api/gateways/:gatewayEui/location',
   '/api/irrigation-zones/:zone_id/environment-summary',
+  '/api/irrigation-zones/:id/calibration',
   '/api/irrigation/recent-actuations'
 ];
 
@@ -248,7 +249,8 @@ const requiredFunctionNodes = [
   'Auth + Set Zone Assignments',
   'Auth + Query Gateway Location',
   'Format Gateway Location Response',
-  'Get Zone Environment Summary'
+  'Get Zone Environment Summary',
+  'Save Zone Irrigation Calibration'
 ];
 
 const directDbOpenCount = flows.filter((node) =>
@@ -1358,6 +1360,34 @@ expectIncludes('Get Zone Environment Summary', "const lib = urlString.startsWith
 expectIncludes('Get Zone Environment Summary', "preferredSource: usingLocal ? 'local'", 'prioritizes local sensor climate over online weather for agronomic metrics');
 expectIncludes('Get Zone Environment Summary', 'LEFT JOIN gateway_locations gl ON gl.gateway_device_eui = iz.gateway_device_eui', 'falls back to mirrored gateway coordinates when a zone has no explicit location');
 expectIncludes('Get Zone Environment Summary', 'SELECT date,rainfall_mm,flow_liters,rain_source,computed_at FROM zone_daily_environment', 'uses daily zone environment totals for water summary');
+expectIncludes('Get Zone Environment Summary', 'estimatedByDate[localDate] = round((estimatedByDate[localDate] || 0) + liters, 2);', 'sums STREGA expectation liters separately from measured flow meter totals');
+expectIncludes('Get Zone Environment Summary', 'localDateIso(row.commanded_at, zone && zone.timezone)', 'buckets STREGA estimated liters by zone-local date');
+expectExcludes('Get Zone Environment Summary', 'substr(commanded_at,1,10)', 'UTC date slicing for STREGA estimated liters');
+expectIncludes('Get Zone Environment Summary', 'irrigationTodayMeasuredLiters', 'returns measured flow-meter liters under an honest field name');
+expectIncludes('Get Zone Environment Summary', 'irrigationTodayEstimatedLiters', 'returns estimated valve-time liters under an honest field name');
+expectIncludes('Get Zone Environment Summary', 'measuredIrrigationNetMm', 'computes effective mm for measured irrigation separately');
+expectIncludes('Get Zone Environment Summary', 'estimatedIrrigationNetMm', 'computes effective mm for estimated irrigation separately');
+expectIncludes('Save Zone Irrigation Calibration', 'INSERT INTO zone_irrigation_calibration', 'upserts zone irrigation calibration through the local API');
+expectIncludes('Save Zone Irrigation Calibration', 'measured_flow_rate_lpm', 'writes the measured flow rate to the calibration table');
+expectIncludes('Save Zone Irrigation Calibration', 'measurement_method', 'writes the operator-entered measurement method to the calibration table');
+expectFileIncludes('deploy.sh', deployScript, 'CREATE TABLE IF NOT EXISTS zone_irrigation_calibration', 'repairs the zone irrigation calibration table during deploy');
+expectFileIncludes('deploy.sh', deployScript, 'measured_flow_rate_lpm REAL,', 'creates a nullable measured flow rate column during deploy repair');
+expectFileIncludes('deploy.sh', deployScript, 'measurement_method     TEXT,', 'creates a nullable measurement method column during deploy repair');
+expectFileIncludes('deploy.sh', deployScript, 'measured_at            TEXT,', 'creates a nullable measured-at column during deploy repair');
+expectFileIncludes('deploy.sh', deployScript, 'created_at             TEXT,', 'creates a nullable created-at column during deploy repair');
+expectFileIncludes('deploy.sh', deployScript, 'updated_at             TEXT', 'creates a nullable updated-at column during deploy repair');
+expectFileExcludes('deploy.sh', deployScript, 'measured_flow_rate_lpm REAL NOT NULL', 'NOT NULL measured flow rate in deploy repair create table');
+expectFileExcludes('deploy.sh', deployScript, 'measurement_method     TEXT NOT NULL', 'NOT NULL measurement method in deploy repair create table');
+expectFileExcludes('deploy.sh', deployScript, 'measured_at            TEXT NOT NULL', 'NOT NULL measured-at timestamp in deploy repair create table');
+expectFileExcludes('deploy.sh', deployScript, 'created_at             TEXT NOT NULL', 'NOT NULL created-at timestamp in deploy repair create table');
+expectFileExcludes('deploy.sh', deployScript, 'updated_at             TEXT NOT NULL', 'NOT NULL updated-at timestamp in deploy repair create table');
+expectFileIncludes('api.ts', reactGuiApiSource, 'updateCalibration: async (zoneId: number', 'adds a shared client helper for zone irrigation calibration');
+expectFileIncludes('api.ts', reactGuiApiSource, "await api.post(`/api/irrigation-zones/${zoneId}/calibration`, payload);", 'targets the local zone irrigation calibration endpoint');
+expectFileIncludes('farming.ts', farmingTypesSource, 'irrigationTodayMeasuredLiters', 'types measured irrigation separately from estimated irrigation');
+expectFileIncludes('farming.ts', farmingTypesSource, 'irrigationTodayEstimatedLiters', 'types estimated irrigation separately from measured irrigation');
+expectFileExcludes('WaterTab.tsx', fs.readFileSync(path.resolve(__dirname, '..', 'web', 'react-gui', 'src', 'components', 'farming', 'environment', 'WaterTab.tsx'), 'utf8'), 'irrigationTodayMeasuredLiters ?? water.irrigationTodayLiters', 'legacy mixed irrigation fallback under the measured label');
+expectFileExcludes('WaterTab.tsx', fs.readFileSync(path.resolve(__dirname, '..', 'web', 'react-gui', 'src', 'components', 'farming', 'environment', 'WaterTab.tsx'), 'utf8'), 'day.measuredIrrigationLiters ?? day.irrigationLiters', 'legacy daily mixed irrigation fallback under the measured label');
+expectFileExcludes('IrrigationZoneCard.tsx', irrigationZoneCardSource, 'irrigationTodayMeasuredLiters ?? environmentSummary.water.irrigationTodayLiters', 'legacy mixed irrigation fallback under the measured label');
 expectIncludes('Get Zone Environment Summary', 'const water = await buildWaterEnvironment', 'builds a dedicated water summary block');
 expectIncludes('Get Zone Environment Summary', 'weather_provider_unavailable', 'falls back instead of throwing when weather providers fail');
 expectIncludes('Get Zone Environment Summary', 'safeResolveOnlineCurrent', 'wraps online weather section construction');
