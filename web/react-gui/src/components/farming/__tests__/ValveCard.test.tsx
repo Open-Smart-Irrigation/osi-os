@@ -8,10 +8,28 @@ import { devicesAPI } from '../../../services/api';
 import type { IrrigationActuation } from '../../../services/api';
 import type { Device } from '../../../types/farming';
 
+const { translateForTest } = vi.hoisted(() => {
+    const testTranslations: Record<string, string> = {
+        'stregaValve.actuationFeedback.closed': 'Translated closed',
+        'stregaValve.actuationFeedback.closedAt': 'Translated closed at {{time}}',
+        'stregaValve.actuationFeedback.open': 'Translated open',
+        'stregaValve.actuationFeedback.openClosesAt': 'Translated open closes at {{time}}',
+        'stregaValve.actuationFeedback.openQueued': 'Translated queued',
+        'stregaValve.actuationFeedback.waitingForUplink': 'Translated waiting {{minutes}} min',
+    };
+
+    return {
+        translateForTest: (key: string, options?: { defaultValue?: string; [key: string]: unknown }): string => {
+            const template = testTranslations[key] ?? options?.defaultValue ?? key;
+            return template.replace(/\{\{(\w+)\}\}/g, (_, name) => String(options?.[name] ?? ''));
+        },
+    };
+});
+
 vi.mock('react-i18next', () => ({
     useTranslation: () => ({
-        t: (key: string, options?: { defaultValue?: string }) => options?.defaultValue ?? key,
-        tc: (key: string, options?: { defaultValue?: string }) => options?.defaultValue ?? key,
+        t: translateForTest,
+        tc: translateForTest,
         i18n: { language: 'en' },
     }),
 }));
@@ -135,8 +153,8 @@ describe('StregaValveCard', () => {
             ],
         });
 
-        expect(await screen.findByText(/Open queued/i)).toBeInTheDocument();
-        expect(screen.getByText(/waiting for valve uplink/i)).toBeInTheDocument();
+        expect(await screen.findByText(/Translated queued/i)).toBeInTheDocument();
+        expect(screen.getByText(/Translated waiting/i)).toBeInTheDocument();
         expect(document.body.textContent).toMatch(/15 min/);
     });
 
@@ -158,7 +176,7 @@ describe('StregaValveCard', () => {
             ],
         });
 
-        expect(await screen.findByText(new RegExp(`OPEN .* closes at ${expectedCloseLabel}`))).toBeInTheDocument();
+        expect(await screen.findByText(`Translated open closes at ${expectedCloseLabel}`)).toBeInTheDocument();
     });
 
     it('shows closed feedback once the VAE row has observed close', async () => {
@@ -172,6 +190,10 @@ describe('StregaValveCard', () => {
             ],
         });
 
-        expect(await screen.findByText(/Closed at/i)).toBeInTheDocument();
+        const expectedCloseLabel = new Intl.DateTimeFormat(undefined, {
+            hour: '2-digit',
+            minute: '2-digit',
+        }).format(new Date('2026-05-29T10:09:00Z'));
+        expect(await screen.findByText(`Translated closed at ${expectedCloseLabel}`)).toBeInTheDocument();
     });
 });

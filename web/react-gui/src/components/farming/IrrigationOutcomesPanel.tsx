@@ -34,6 +34,8 @@ interface State {
   actuations: IrrigationActuation[];
 }
 
+type Translate = (key: string, options?: Record<string, unknown>) => string;
+
 const INITIAL: State = { loading: true, error: null, generatedAt: null, actuations: [] };
 
 function formatRelativeTime(iso: string | null): string {
@@ -110,13 +112,20 @@ interface IrrigationMetricDisplay {
   irrigatedLabel: string | null;
 }
 
-function buildIrrigationMetric(row: IrrigationActuation, zoneContext?: IrrigationOutcomeZoneContext | null): IrrigationMetricDisplay {
+function buildIrrigationMetric(
+  row: IrrigationActuation,
+  zoneContext: IrrigationOutcomeZoneContext | null | undefined,
+  t: Translate,
+): IrrigationMetricDisplay {
   const liters = toNonNegativeFiniteNumber(row.estimatedGrossLiters);
   if (liters == null) {
     return { compactLabel: null, totalVolumeLabel: null, irrigatedLabel: null };
   }
 
-  const totalVolumeLabel = `Total volume: ${formatLiters(liters)}`;
+  const totalVolumeLabel = t('irrigationOutcomes.totalVolume', {
+    defaultValue: 'Total volume: {{liters}}',
+    liters: formatLiters(liters),
+  });
   const areaM2 = toPositiveFiniteNumber(zoneContext?.areaM2);
   if (areaM2 == null) {
     return { compactLabel: totalVolumeLabel, totalVolumeLabel, irrigatedLabel: null };
@@ -124,7 +133,10 @@ function buildIrrigationMetric(row: IrrigationActuation, zoneContext?: Irrigatio
 
   const efficiencyPct = toPositiveFiniteNumber(zoneContext?.irrigationEfficiencyPct);
   const depthMm = efficiencyPct != null ? liters * (efficiencyPct / 100) / areaM2 : liters / areaM2;
-  const irrigatedLabel = `Irrigated: ${formatIrrigationMm(depthMm)}`;
+  const irrigatedLabel = t('irrigationOutcomes.irrigated', {
+    defaultValue: 'Irrigated: {{depth}}',
+    depth: formatIrrigationMm(depthMm),
+  });
   return { compactLabel: irrigatedLabel, totalVolumeLabel, irrigatedLabel };
 }
 
@@ -168,10 +180,17 @@ const TimestampDetail: React.FC<{
   iso: string | null;
   timeZone?: string | null;
 }> = ({ label, iso, timeZone }) => {
+  const { t } = useTranslation('devices');
   const absolute = formatAbsoluteDateTime(iso, timeZone);
   const relative = formatRelativeTime(iso);
+  const title = t('irrigationOutcomes.timestampTitle', {
+    defaultValue: '{{label}}: {{absolute}} ({{relative}})',
+    label,
+    absolute,
+    relative,
+  });
   return (
-    <span className="inline-flex min-w-[12rem] max-w-full flex-col gap-0.5" title={`${label}: ${absolute} (${relative})`}>
+    <span className="inline-flex min-w-[12rem] max-w-full flex-col gap-0.5" title={title}>
       <span>
         {label}: <time dateTime={iso ?? undefined}>{absolute}</time>
       </span>
@@ -185,7 +204,7 @@ const CompactActuationRow: React.FC<{
   zoneContext?: IrrigationOutcomeZoneContext | null;
 }> = ({ row, zoneContext }) => {
   const { t } = useTranslation('devices');
-  const metric = buildIrrigationMetric(row, zoneContext);
+  const metric = buildIrrigationMetric(row, zoneContext, t);
   return (
     <li className="rounded-lg border border-[var(--border)] bg-[var(--card)] p-3 flex flex-col gap-1.5">
       <div className="flex flex-col gap-1">
@@ -212,7 +231,7 @@ const AdvancedActuationRow: React.FC<{
 }> = ({ row, zoneContext }) => {
   const { t } = useTranslation('devices');
   const isFailure = row.status === 'OPEN_TIMEOUT' || row.status === 'CLOSE_TIMEOUT' || row.status === 'COMMAND_FAILED';
-  const metric = buildIrrigationMetric(row, zoneContext);
+  const metric = buildIrrigationMetric(row, zoneContext, t);
   return (
     <li className="rounded-lg border border-[var(--border)] bg-[var(--card)] p-3 flex flex-col gap-1.5">
       <div className="flex items-center justify-between gap-2">

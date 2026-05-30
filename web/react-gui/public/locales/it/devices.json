@@ -59,7 +59,15 @@
     "yesRemove": "Sì, rimuovi",
     "removing": "Rimozione in corso...",
     "failedToRemove": "Impossibile rimuovere il dispositivo",
-    "lastSeen": "Ultimo rilevamento: {{minutes}} minuti fa"
+    "lastSeen": "Ultimo rilevamento: {{minutes}} minuti fa",
+    "actuationFeedback": {
+      "closed": "Chiusa",
+      "closedAt": "Chiusa alle {{time}}",
+      "open": "APERTA",
+      "openClosesAt": "APERTA — chiude alle {{time}}",
+      "openQueued": "Apertura in coda",
+      "waitingForUplink": "in attesa dell'uplink della valvola (≈ {{minutes}} min)"
+    }
   },
   "zone": {
     "deviceCount_one": "{{count}} dispositivo",
@@ -99,10 +107,28 @@
   },
   "environment": {
     "sectionTitle": "Ambiente",
-    "tabs": { "local": "Locale", "online": "Online", "agronomic": "Agronomico", "forecast": "Previsioni" },
-    "source": { "openagri": "OpenAgri", "open_meteo": "Open-Meteo", "local": "Sensori locali", "unavailable": "Non disponibile" },
-    "cache": { "live": "In tempo reale", "stale": "Non aggiornato", "miss": "Nessun dato" },
-    "location": { "zone": "Coordinate zona", "gateway": "GPS gateway", "unavailable": "Nessuna posizione" },
+    "tabs": {
+      "local": "Locale",
+      "online": "Online",
+      "agronomic": "Agronomico",
+      "forecast": "Previsioni"
+    },
+    "source": {
+      "openagri": "OpenAgri",
+      "open_meteo": "Open-Meteo",
+      "local": "Sensori locali",
+      "unavailable": "Non disponibile"
+    },
+    "cache": {
+      "live": "In tempo reale",
+      "stale": "Non aggiornato",
+      "miss": "Nessun dato"
+    },
+    "location": {
+      "zone": "Coordinate zona",
+      "gateway": "GPS gateway",
+      "unavailable": "Nessuna posizione"
+    },
     "local": {
       "freshSensors": "{{count}} recente",
       "staleSensors_one": "{{count}} non aggiornato",
@@ -117,24 +143,67 @@
       "updatesAt": "Aggiornamento alle {{time}}"
     },
     "agronomic": {
-      "vpd": "VPD", "dewPoint": "Punto di rugiada", "heatIndex": "Indice di calore", "thi": "THI",
-      "et0": "ET₀ riferimento", "kc": "Coeff. coltura Kc", "etc": "ET coltura",
-      "noData": "Nessun dato agronomico disponibile", "fromSource": "da {{source}}"
+      "vpd": "VPD",
+      "dewPoint": "Punto di rugiada",
+      "heatIndex": "Indice di calore",
+      "thi": "THI",
+      "et0": "ET₀ riferimento",
+      "kc": "Coeff. coltura Kc",
+      "etc": "ET coltura",
+      "noData": "Nessun dato agronomico disponibile",
+      "fromSource": "da {{source}}"
     },
     "forecast": {
-      "next24h": "Prossime 24 h", "next72h": "Prossime 72 h", "nextRain": "Prossima pioggia",
-      "rainHours": "Ore di pioggia", "maxHourly": "Max. orario",
-      "today": "oggi", "tomorrow": "domani",
+      "next24h": "Prossime 24 h",
+      "next72h": "Prossime 72 h",
+      "nextRain": "Prossima pioggia",
+      "rainHours": "Ore di pioggia",
+      "maxHourly": "Max. orario",
+      "today": "oggi",
+      "tomorrow": "domani",
       "noData": "Previsioni non disponibili",
       "noLocation": "Imposta le coordinate della zona per abilitare le previsioni",
       "hourlyTitle": "Pioggia oraria (prossime 24 h)"
     },
     "metrics": {
-      "air_temperature_c": "Temp. aria", "relative_humidity_pct": "Umidità",
-      "probe_temperature_c": "Temp. sonda", "pressure_hpa": "Pressione",
-      "wind_speed_mps": "Vento", "wind_direction_deg": "Dir. vento",
-      "rainfall_mm": "Pioggia", "light_lux": "Luce",
-      "uv_index": "Indice UV", "soil_temperature_c": "Temp. suolo", "soil_moisture_pct": "Umidità suolo"
+      "air_temperature_c": "Temp. aria",
+      "relative_humidity_pct": "Umidità",
+      "probe_temperature_c": "Temp. sonda",
+      "pressure_hpa": "Pressione",
+      "wind_speed_mps": "Vento",
+      "wind_direction_deg": "Dir. vento",
+      "rainfall_mm": "Pioggia",
+      "light_lux": "Luce",
+      "uv_index": "Indice UV",
+      "soil_temperature_c": "Temp. suolo",
+      "soil_moisture_pct": "Umidità suolo"
+    }
+  },
+  "irrigationOutcomes": {
+    "title": "Irrigazioni recenti",
+    "updated": "aggiornato",
+    "loading": "Caricamento attivazioni recenti…",
+    "error": "Impossibile caricare le attivazioni recenti",
+    "empty": "Nessuna irrigazione recente registrata.",
+    "zoneUnknown": "Zona ?",
+    "duration": "Durata",
+    "totalVolume": "Volume totale: {{liters}}",
+    "irrigated": "Irrigato: {{depth}}",
+    "timestampTitle": "{{label}}: {{absolute}} ({{relative}})",
+    "settings": "Impostazioni irrigazioni recenti",
+    "advancedView": "Vista avanzata",
+    "commanded": "Comandato",
+    "observedOpen": "Apertura confermata",
+    "observedClose": "Chiusura confermata",
+    "status": {
+      "PENDING_OPEN": "Apertura in sospeso",
+      "RUNNING": "In esecuzione",
+      "COMPLETED": "Completato",
+      "CANCELLED": "Annullato",
+      "COMMAND_FAILED": "Comando fallito",
+      "OPEN_TIMEOUT": "Timeout apertura",
+      "CLOSE_TIMEOUT": "Timeout chiusura",
+      "UNKNOWN": "Sconosciuto"
     }
   }
 }

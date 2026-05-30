@@ -24,14 +24,16 @@ if (!navDesc || navDesc.writable || navDesc.set) {
   (globalThis as { navigator?: unknown }).navigator = dom.window.navigator;
 }
 
-async function buildI18n() {
+type DevicesResource = Record<string, unknown>;
+
+async function buildI18n(devicesResource: DevicesResource = {}) {
   const i18n = i18next.createInstance();
   await i18n.use(initReactI18next).init({
     lng: 'en',
     fallbackLng: 'en',
     ns: ['devices'],
     defaultNS: 'devices',
-    resources: { en: { devices: {} } }, // empty — every t() falls through to defaultValue
+    resources: { en: { devices: devicesResource } },
   });
   return i18n;
 }
@@ -95,8 +97,9 @@ async function renderControlledPanel(
     areaM2: 100,
     irrigationEfficiencyPct: 80,
   },
+  devicesResource: DevicesResource = {},
 ) {
-  const i18n = await buildI18n();
+  const i18n = await buildI18n(devicesResource);
   return render(
     React.createElement(
       I18nextProvider,
@@ -274,3 +277,54 @@ test('advanced view setting toggles and persists locally', async () => {
     window.localStorage.clear();
   }
 });
+
+test('uses translated recent irrigation metric, settings, and timestamp-title labels', async () => {
+  window.localStorage.setItem('osi.recentIrrigations.advancedView', 'true');
+  const response = responseWithActuation({
+    commandedAt: '2026-05-29T10:15:00Z',
+    observedOpenAt: '2026-05-29T10:16:00Z',
+    observedCloseAt: '2026-05-29T10:18:00Z',
+    estimatedGrossLiters: 75,
+  });
+  const devicesResource = {
+    irrigationOutcomes: {
+      duration: 'Translated duration',
+      totalVolume: 'Translated volume {{liters}}',
+      irrigated: 'Translated irrigated {{depth}}',
+      settings: 'Translated recent settings',
+      advancedView: 'Translated advanced view',
+      commanded: 'Translated commanded',
+      observedOpen: 'Translated confirmed open',
+      observedClose: 'Translated confirmed close',
+      timestampTitle: '{{label}} @ {{absolute}} / {{relative}}',
+    },
+  };
+
+  try {
+    const rendered = await renderControlledPanel(response, {
+      timeZone: 'Europe/Zurich',
+      areaM2: 100,
+      irrigationEfficiencyPct: 80,
+    }, devicesResource);
+
+    expectText(document.body.textContent ?? '', 'Translated duration: 10 min');
+    expectText(document.body.textContent ?? '', 'Translated volume 75 L');
+    expectText(document.body.textContent ?? '', 'Translated irrigated 0.6 mm');
+    rendered.getByLabelText('Translated recent settings');
+    const titled = Array.from(document.querySelectorAll('[title]'))
+      .map((element) => element.getAttribute('title') ?? '')
+      .find((title) => title.includes('Translated commanded'));
+    assert.ok(titled, 'expected translated timestamp title');
+    assert.match(titled, /Translated commanded @ .+ \/ .+/);
+  } finally {
+    cleanup();
+    window.localStorage.clear();
+  }
+});
+
+function expectText(actual: string, expected: string): void {
+  assert.ok(
+    actual.includes(expected),
+    `expected text to include ${JSON.stringify(expected)}, got ${JSON.stringify(actual)}`,
+  );
+}

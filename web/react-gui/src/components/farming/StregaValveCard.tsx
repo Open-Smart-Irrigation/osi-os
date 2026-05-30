@@ -65,6 +65,13 @@ interface ValveActuationFeedback {
   detail: string | null;
 }
 
+type Translate = (key: string, options?: Record<string, unknown>) => string;
+
+const defaultTranslate: Translate = (_key, options) => {
+  const fallback = typeof options?.defaultValue === 'string' ? options.defaultValue : '';
+  return fallback.replace(/\{\{\s*(\w+)\s*\}\}/g, (_match, name) => String(options?.[name] ?? ''));
+};
+
 function normalizeDeviceEui(value: string | null | undefined): string {
   return String(value ?? '').trim().toUpperCase();
 }
@@ -105,6 +112,7 @@ export function getStregaActuationFeedback(
   deviceEui: string,
   rows: IrrigationActuation[] = [],
   timeZone?: string | null,
+  t: Translate = defaultTranslate,
 ): ValveActuationFeedback | null {
   const row = latestActuationForDevice(deviceEui, rows);
   if (!row) return null;
@@ -113,8 +121,10 @@ export function getStregaActuationFeedback(
     const closedAt = formatTimeOnly(row.observedCloseAt, timeZone);
     return {
       tone: 'closed',
-      label: 'Closed',
-      detail: closedAt ? `Closed at ${closedAt}` : null,
+      label: t('stregaValve.actuationFeedback.closed', { defaultValue: 'Closed' }),
+      detail: closedAt
+        ? t('stregaValve.actuationFeedback.closedAt', { defaultValue: 'Closed at {{time}}', time: closedAt })
+        : null,
     };
   }
 
@@ -122,7 +132,9 @@ export function getStregaActuationFeedback(
     const closeAt = formatTimeOnly(row.expectedCloseAt, timeZone);
     return {
       tone: 'running',
-      label: closeAt ? `OPEN — closes at ${closeAt}` : 'OPEN',
+      label: closeAt
+        ? t('stregaValve.actuationFeedback.openClosesAt', { defaultValue: 'OPEN — closes at {{time}}', time: closeAt })
+        : t('stregaValve.actuationFeedback.open', { defaultValue: 'OPEN' }),
       detail: null,
     };
   }
@@ -130,8 +142,11 @@ export function getStregaActuationFeedback(
   if (row.status === 'PENDING_OPEN' || row.reconciliationState === 'PENDING_OBSERVATION') {
     return {
       tone: 'queued',
-      label: 'Open queued',
-      detail: `waiting for valve uplink (≈ ${approximateCommandWindowMinutes(row)} min)`,
+      label: t('stregaValve.actuationFeedback.openQueued', { defaultValue: 'Open queued' }),
+      detail: t('stregaValve.actuationFeedback.waitingForUplink', {
+        defaultValue: 'waiting for valve uplink (≈ {{minutes}} min)',
+        minutes: approximateCommandWindowMinutes(row),
+      }),
     };
   }
 
@@ -647,7 +662,7 @@ export const StregaValveCard: React.FC<StregaValveCardProps> = ({
 
   const displayedState = getDisplayedStregaState(device);
   const isOpen = displayedState === 'OPEN';
-  const actuationFeedback = getStregaActuationFeedback(device.deveui, irrigationActuations, timeZone);
+  const actuationFeedback = getStregaActuationFeedback(device.deveui, irrigationActuations, timeZone, t);
   const hasActiveActuation = hasActiveValveActuation(device);
 
   const handleOpen = async () => {

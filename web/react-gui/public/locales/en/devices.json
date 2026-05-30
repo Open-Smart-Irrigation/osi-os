@@ -88,7 +88,15 @@
     "applyInterval": "Apply interval",
     "applyingInterval": "Applying interval...",
     "intervalPending": "Closed-box uplink interval change requested for {{minutes}} minute(s). The opened interval stays at 2 minutes.",
-    "failedToSetInterval": "Failed to change Strega uplink interval"
+    "failedToSetInterval": "Failed to change Strega uplink interval",
+    "actuationFeedback": {
+      "closed": "Closed",
+      "closedAt": "Closed at {{time}}",
+      "open": "OPEN",
+      "openClosesAt": "OPEN — closes at {{time}}",
+      "openQueued": "Open queued",
+      "waitingForUplink": "waiting for valve uplink (≈ {{minutes}} min)"
+    }
   },
   "zone": {
     "deviceCount_one": "{{count}} device",
@@ -199,6 +207,33 @@
       "uv_index": "UV Index",
       "soil_temperature_c": "Soil Temp",
       "soil_moisture_pct": "Soil Moisture"
+    }
+  },
+  "irrigationOutcomes": {
+    "title": "Recent irrigations",
+    "updated": "updated",
+    "loading": "Loading recent actuations…",
+    "error": "Failed to load recent actuations",
+    "empty": "No recent irrigations recorded yet.",
+    "zoneUnknown": "Zone ?",
+    "duration": "Duration",
+    "totalVolume": "Total volume: {{liters}}",
+    "irrigated": "Irrigated: {{depth}}",
+    "timestampTitle": "{{label}}: {{absolute}} ({{relative}})",
+    "settings": "Recent irrigations settings",
+    "advancedView": "Advanced view",
+    "commanded": "Commanded",
+    "observedOpen": "Confirmed open",
+    "observedClose": "Confirmed close",
+    "status": {
+      "PENDING_OPEN": "Pending open",
+      "RUNNING": "Running",
+      "COMPLETED": "Completed",
+      "CANCELLED": "Cancelled",
+      "COMMAND_FAILED": "Command failed",
+      "OPEN_TIMEOUT": "Open timeout",
+      "CLOSE_TIMEOUT": "Close timeout",
+      "UNKNOWN": "Unknown"
     }
   }
 }

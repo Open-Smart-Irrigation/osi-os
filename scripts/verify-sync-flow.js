@@ -435,6 +435,54 @@ function expectEqual(actual, expected, description) {
   }
 }
 
+function calibrationCreateTableBlockFrom(content) {
+  const start = content.indexOf('CREATE TABLE IF NOT EXISTS zone_irrigation_calibration');
+  if (start < 0) return '';
+  const updatedAt = content.indexOf('updated_at', start);
+  if (updatedAt < 0) return content.slice(start);
+  const end = content.indexOf(')', updatedAt);
+  return end >= 0 ? content.slice(start, end + 1) : content.slice(start);
+}
+
+function calibrationSchemaColumnsFrom(content) {
+  const createTableBlock = calibrationCreateTableBlockFrom(content);
+  const columns = [];
+  const pattern = /(zone_id\s+INTEGER\s+PRIMARY\s+KEY|valve_device_eui\s+TEXT|measured_flow_rate_lpm\s+REAL|measurement_method\s+TEXT|measured_at\s+TEXT|created_at\s+TEXT|updated_at\s+TEXT)(?:\s+NOT\s+NULL)?/g;
+  let match;
+  while ((match = pattern.exec(createTableBlock)) !== null) {
+    columns.push(match[1].replace(/\s+/g, ' ').trim());
+  }
+  return columns;
+}
+
+function expectCalibrationCreateTableParity() {
+  const node = findNodeByName('Save Zone Irrigation Calibration');
+  if (!node) {
+    fail('missing function node Save Zone Irrigation Calibration');
+    return;
+  }
+  const expectedColumns = [
+    'zone_id INTEGER PRIMARY KEY',
+    'valve_device_eui TEXT',
+    'measured_flow_rate_lpm REAL',
+    'measurement_method TEXT',
+    'measured_at TEXT',
+    'created_at TEXT',
+    'updated_at TEXT',
+  ];
+  const runtimeColumns = calibrationSchemaColumnsFrom(String(node.func || '')).slice(0, expectedColumns.length);
+  const deployColumns = calibrationSchemaColumnsFrom(deployScript).slice(0, expectedColumns.length);
+  if (JSON.stringify(runtimeColumns) !== JSON.stringify(expectedColumns)) {
+    fail(`runtime zone_irrigation_calibration DDL columns differ: ${runtimeColumns.join(', ')}`);
+  } else if (JSON.stringify(deployColumns) !== JSON.stringify(expectedColumns)) {
+    fail(`deploy zone_irrigation_calibration DDL columns differ: ${deployColumns.join(', ')}`);
+  } else if (JSON.stringify(runtimeColumns) !== JSON.stringify(deployColumns)) {
+    fail('runtime and deploy zone_irrigation_calibration DDL columns differ');
+  } else {
+    console.log('OK runtime and deploy zone_irrigation_calibration DDL columns match');
+  }
+}
+
 function expectApprox(actual, expected, epsilon, description) {
   if (!Number.isFinite(actual) || Math.abs(actual - expected) > epsilon) {
     fail(`${description}: expected ${expected} +/- ${epsilon}, got ${actual}`);
@@ -1375,6 +1423,11 @@ expectIncludes('Get Zone Environment Summary', 'water: displayWater,', 'returns 
 expectIncludes('Save Zone Irrigation Calibration', 'INSERT INTO zone_irrigation_calibration', 'upserts zone irrigation calibration through the local API');
 expectIncludes('Save Zone Irrigation Calibration', 'measured_flow_rate_lpm', 'writes the measured flow rate to the calibration table');
 expectIncludes('Save Zone Irrigation Calibration', 'measurement_method', 'writes the operator-entered measurement method to the calibration table');
+expectExcludes('Save Zone Irrigation Calibration', 'measured_flow_rate_lpm REAL NOT NULL', 'NOT NULL measured flow rate in runtime calibration create table');
+expectExcludes('Save Zone Irrigation Calibration', 'measurement_method TEXT NOT NULL', 'NOT NULL measurement method in runtime calibration create table');
+expectExcludes('Save Zone Irrigation Calibration', 'measured_at TEXT NOT NULL', 'NOT NULL measured-at timestamp in runtime calibration create table');
+expectExcludes('Save Zone Irrigation Calibration', 'created_at TEXT NOT NULL', 'NOT NULL created-at timestamp in runtime calibration create table');
+expectExcludes('Save Zone Irrigation Calibration', 'updated_at TEXT NOT NULL', 'NOT NULL updated-at timestamp in runtime calibration create table');
 expectFileIncludes('deploy.sh', deployScript, 'CREATE TABLE IF NOT EXISTS zone_irrigation_calibration', 'repairs the zone irrigation calibration table during deploy');
 expectFileIncludes('deploy.sh', deployScript, 'measured_flow_rate_lpm REAL,', 'creates a nullable measured flow rate column during deploy repair');
 expectFileIncludes('deploy.sh', deployScript, 'measurement_method     TEXT,', 'creates a nullable measurement method column during deploy repair');
@@ -1386,6 +1439,7 @@ expectFileExcludes('deploy.sh', deployScript, 'measurement_method     TEXT NOT N
 expectFileExcludes('deploy.sh', deployScript, 'measured_at            TEXT NOT NULL', 'NOT NULL measured-at timestamp in deploy repair create table');
 expectFileExcludes('deploy.sh', deployScript, 'created_at             TEXT NOT NULL', 'NOT NULL created-at timestamp in deploy repair create table');
 expectFileExcludes('deploy.sh', deployScript, 'updated_at             TEXT NOT NULL', 'NOT NULL updated-at timestamp in deploy repair create table');
+expectCalibrationCreateTableParity();
 expectFileIncludes('api.ts', reactGuiApiSource, 'updateCalibration: async (zoneId: number', 'adds a shared client helper for zone irrigation calibration');
 expectFileIncludes('api.ts', reactGuiApiSource, "await api.post(`/api/irrigation-zones/${zoneId}/calibration`, payload);", 'targets the local zone irrigation calibration endpoint');
 expectFileIncludes('farming.ts', farmingTypesSource, 'irrigationTodayMeasuredLiters', 'types measured irrigation separately from estimated irrigation');
