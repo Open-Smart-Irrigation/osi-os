@@ -8,6 +8,13 @@ import {
 } from '../../services/api';
 
 const POLL_INTERVAL_MS = 60_000;
+const ADVANCED_VIEW_STORAGE_KEY = 'osi.recentIrrigations.advancedView';
+
+export interface IrrigationOutcomeZoneContext {
+  timeZone?: string | null;
+  areaM2?: number | null;
+  irrigationEfficiencyPct?: number | null;
+}
 
 interface Props {
   /** Polling can be disabled in tests. */
@@ -15,6 +22,8 @@ interface Props {
   response?: IrrigationActuationsResponse | null;
   loading?: boolean;
   error?: string | null;
+  zoneContexts?: Map<number, IrrigationOutcomeZoneContext | null | undefined>;
+  /** @deprecated Prefer zoneContexts so depth can use zone area and efficiency. */
   zoneTimezones?: Map<number, string | null | undefined>;
 }
 
@@ -61,6 +70,64 @@ function formatDuration(seconds: number): string {
   return m ? `${h} h ${m} min` : `${h} h`;
 }
 
+function toNonNegativeFiniteNumber(value: number | null | undefined): number | null {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : null;
+}
+
+function toPositiveFiniteNumber(value: number | null | undefined): number | null {
+  return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : null;
+}
+
+function formatLiters(value: number): string {
+  return `${value.toFixed(0)} L`;
+}
+
+function formatIrrigationMm(value: number): string {
+  return `${value.toFixed(1)} mm`;
+}
+
+function readStoredAdvancedView(): boolean {
+  if (typeof window === 'undefined') return false;
+  try {
+    return window.localStorage.getItem(ADVANCED_VIEW_STORAGE_KEY) === 'true';
+  } catch {
+    return false;
+  }
+}
+
+function writeStoredAdvancedView(value: boolean): void {
+  if (typeof window === 'undefined') return;
+  try {
+    window.localStorage.setItem(ADVANCED_VIEW_STORAGE_KEY, value ? 'true' : 'false');
+  } catch {
+    // Preference persistence should not block rendering.
+  }
+}
+
+interface IrrigationMetricDisplay {
+  compactLabel: string | null;
+  totalVolumeLabel: string | null;
+  irrigatedLabel: string | null;
+}
+
+function buildIrrigationMetric(row: IrrigationActuation, zoneContext?: IrrigationOutcomeZoneContext | null): IrrigationMetricDisplay {
+  const liters = toNonNegativeFiniteNumber(row.estimatedGrossLiters);
+  if (liters == null) {
+    return { compactLabel: null, totalVolumeLabel: null, irrigatedLabel: null };
+  }
+
+  const totalVolumeLabel = `Total volume: ${formatLiters(liters)}`;
+  const areaM2 = toPositiveFiniteNumber(zoneContext?.areaM2);
+  if (areaM2 == null) {
+    return { compactLabel: totalVolumeLabel, totalVolumeLabel, irrigatedLabel: null };
+  }
+
+  const efficiencyPct = toPositiveFiniteNumber(zoneContext?.irrigationEfficiencyPct);
+  const depthMm = efficiencyPct != null ? liters * (efficiencyPct / 100) / areaM2 : liters / areaM2;
+  const irrigatedLabel = `Irrigated: ${formatIrrigationMm(depthMm)}`;
+  return { compactLabel: irrigatedLabel, totalVolumeLabel, irrigatedLabel };
+}
+
 const STATUS_STYLES: Record<IrrigationActuationStatus, { bg: string; fg: string; border: string }> = {
   PENDING_OPEN: { bg: 'bg-[var(--warning-soft, #fef3c7)]', fg: 'text-[var(--warning-text, #92400e)]', border: 'border-[var(--warning, #f59e0b)]' },
   RUNNING:      { bg: 'bg-[var(--info-soft, #dbeafe)]',    fg: 'text-[var(--info-text, #1e40af)]',    border: 'border-[var(--info, #3b82f6)]' },
@@ -100,23 +167,52 @@ const TimestampDetail: React.FC<{
   label: string;
   iso: string | null;
   timeZone?: string | null;
-  prefix?: string;
-}> = ({ label, iso, timeZone, prefix }) => {
+}> = ({ label, iso, timeZone }) => {
   const absolute = formatAbsoluteDateTime(iso, timeZone);
   const relative = formatRelativeTime(iso);
   return (
     <span className="inline-flex min-w-[12rem] max-w-full flex-col gap-0.5" title={`${label}: ${absolute} (${relative})`}>
       <span>
-        {label}: {prefix ? `${prefix} · ` : ''}<time dateTime={iso ?? undefined}>{absolute}</time>
+        {label}: <time dateTime={iso ?? undefined}>{absolute}</time>
       </span>
       <span className="text-[11px] leading-tight text-[var(--text-tertiary)]">{relative}</span>
     </span>
   );
 };
 
-const ActuationRow: React.FC<{ row: IrrigationActuation; timeZone?: string | null }> = ({ row, timeZone }) => {
+const CompactActuationRow: React.FC<{
+  row: IrrigationActuation;
+  zoneContext?: IrrigationOutcomeZoneContext | null;
+}> = ({ row, zoneContext }) => {
+  const { t } = useTranslation('devices');
+  const metric = buildIrrigationMetric(row, zoneContext);
+  return (
+    <li className="rounded-lg border border-[var(--border)] bg-[var(--card)] p-3 flex flex-col gap-1.5">
+      <div className="flex flex-col gap-1">
+        <div className="text-sm font-semibold text-[var(--text)]">
+          {row.zoneName ?? t('irrigationOutcomes.zoneUnknown', { defaultValue: 'Zone ?' })}
+        </div>
+        <div className="text-xs text-[var(--text-secondary)] flex flex-wrap gap-x-3 gap-y-0.5">
+          <span>
+            <time dateTime={row.commandedAt}>{formatAbsoluteDateTime(row.commandedAt, zoneContext?.timeZone)}</time>
+          </span>
+          <span>
+            {t('irrigationOutcomes.duration', { defaultValue: 'Duration' })}: {formatDuration(row.commandedDurationSeconds)}
+          </span>
+          {metric.compactLabel && <span>{metric.compactLabel}</span>}
+        </div>
+      </div>
+    </li>
+  );
+};
+
+const AdvancedActuationRow: React.FC<{
+  row: IrrigationActuation;
+  zoneContext?: IrrigationOutcomeZoneContext | null;
+}> = ({ row, zoneContext }) => {
   const { t } = useTranslation('devices');
   const isFailure = row.status === 'OPEN_TIMEOUT' || row.status === 'CLOSE_TIMEOUT' || row.status === 'COMMAND_FAILED';
+  const metric = buildIrrigationMetric(row, zoneContext);
   return (
     <li className="rounded-lg border border-[var(--border)] bg-[var(--card)] p-3 flex flex-col gap-1.5">
       <div className="flex items-center justify-between gap-2">
@@ -128,31 +224,30 @@ const ActuationRow: React.FC<{ row: IrrigationActuation; timeZone?: string | nul
         <StatusBadge status={row.status} />
       </div>
       <div className="text-xs text-[var(--text-secondary)] flex flex-wrap gap-x-3 gap-y-0.5">
+        <span>
+          {t('irrigationOutcomes.duration', { defaultValue: 'Duration' })}: {formatDuration(row.commandedDurationSeconds)}
+        </span>
         <TimestampDetail
           label={t('irrigationOutcomes.commanded', { defaultValue: 'Commanded' })}
           iso={row.commandedAt}
-          timeZone={timeZone}
-          prefix={formatDuration(row.commandedDurationSeconds)}
+          timeZone={zoneContext?.timeZone}
         />
         {row.observedOpenAt && (
           <TimestampDetail
-            label={t('irrigationOutcomes.observedOpen', { defaultValue: 'Opened' })}
+            label={t('irrigationOutcomes.observedOpen', { defaultValue: 'Confirmed open' })}
             iso={row.observedOpenAt}
-            timeZone={timeZone}
+            timeZone={zoneContext?.timeZone}
           />
         )}
         {row.observedCloseAt && (
           <TimestampDetail
-            label={t('irrigationOutcomes.observedClose', { defaultValue: 'Closed' })}
+            label={t('irrigationOutcomes.observedClose', { defaultValue: 'Confirmed close' })}
             iso={row.observedCloseAt}
-            timeZone={timeZone}
+            timeZone={zoneContext?.timeZone}
           />
         )}
-        {row.estimatedGrossLiters != null && (
-          <span>
-            {t('irrigationOutcomes.estLiters', { defaultValue: '~' })} {row.estimatedGrossLiters.toFixed(0)} L
-          </span>
-        )}
+        {metric.totalVolumeLabel && <span>{metric.totalVolumeLabel}</span>}
+        {metric.irrigatedLabel && <span>{metric.irrigatedLabel}</span>}
       </div>
       {isFailure && row.commandResultDetail && (
         <p className="text-xs text-[var(--error-text, #991b1b)] mt-1 italic">{row.commandResultDetail}</p>
@@ -169,10 +264,13 @@ export const IrrigationOutcomesPanel: React.FC<Props> = ({
   response,
   loading,
   error,
+  zoneContexts,
   zoneTimezones,
 }) => {
   const { t } = useTranslation('devices');
   const [state, setState] = useState<State>(INITIAL);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [advancedView, setAdvancedView] = useState(readStoredAdvancedView);
   const isControlled = response !== undefined || loading !== undefined || error !== undefined;
 
   useEffect(() => {
@@ -217,17 +315,59 @@ export const IrrigationOutcomesPanel: React.FC<Props> = ({
       }
     : state;
 
+  const setAdvancedViewPreference = (value: boolean) => {
+    setAdvancedView(value);
+    writeStoredAdvancedView(value);
+  };
+
+  const zoneContextFor = (row: IrrigationActuation): IrrigationOutcomeZoneContext | null => {
+    const configured = zoneContexts?.get(row.zoneId);
+    if (configured) return configured;
+    const timeZone = zoneTimezones?.get(row.zoneId);
+    return timeZone ? { timeZone } : null;
+  };
+
   return (
     <section className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-4">
-      <div className="flex items-center justify-between mb-3">
+      <div className="flex items-center justify-between gap-3 mb-3">
         <h2 className="text-[var(--text)] text-base font-semibold">
           {t('irrigationOutcomes.title', { defaultValue: 'Recent irrigations' })}
         </h2>
-        {viewState.generatedAt && (
-          <span className="text-xs text-[var(--text-tertiary)]">
-            {t('irrigationOutcomes.updated', { defaultValue: 'updated' })} {formatRelativeTime(viewState.generatedAt)}
-          </span>
-        )}
+        <div className="flex items-center gap-2">
+          {viewState.generatedAt && (
+            <span className="text-xs text-[var(--text-tertiary)]">
+              {t('irrigationOutcomes.updated', { defaultValue: 'updated' })} {formatRelativeTime(viewState.generatedAt)}
+            </span>
+          )}
+          <div className="relative">
+            <button
+              type="button"
+              onClick={() => setSettingsOpen((open) => !open)}
+              aria-label={t('irrigationOutcomes.settings', { defaultValue: 'Recent irrigations settings' })}
+              title={t('irrigationOutcomes.settings', { defaultValue: 'Recent irrigations settings' })}
+              className={`p-1.5 rounded-md transition-colors ${
+                settingsOpen
+                  ? 'bg-[var(--primary)] text-white'
+                  : 'text-[var(--text-tertiary)] hover:bg-[var(--card)] hover:text-[var(--text)]'
+              }`}
+            >
+              ⚙
+            </button>
+            {settingsOpen && (
+              <div className="absolute right-0 top-full z-20 mt-2 min-w-48 rounded-lg border border-[var(--border)] bg-[var(--surface)] p-3 text-sm shadow-xl">
+                <label className="flex items-center gap-2 text-[var(--text)]">
+                  <input
+                    type="checkbox"
+                    checked={advancedView}
+                    onChange={(event) => setAdvancedViewPreference(event.currentTarget.checked)}
+                    className="h-4 w-4"
+                  />
+                  <span>{t('irrigationOutcomes.advancedView', { defaultValue: 'Advanced view' })}</span>
+                </label>
+              </div>
+            )}
+          </div>
+        </div>
       </div>
 
       {viewState.loading && (
@@ -250,9 +390,14 @@ export const IrrigationOutcomesPanel: React.FC<Props> = ({
 
       {viewState.actuations.length > 0 && (
         <ul className="flex flex-col gap-2">
-          {viewState.actuations.map((row) => (
-            <ActuationRow key={row.expectationId} row={row} timeZone={zoneTimezones?.get(row.zoneId)} />
-          ))}
+          {viewState.actuations.map((row) => {
+            const zoneContext = zoneContextFor(row);
+            return advancedView ? (
+              <AdvancedActuationRow key={row.expectationId} row={row} zoneContext={zoneContext} />
+            ) : (
+              <CompactActuationRow key={row.expectationId} row={row} zoneContext={zoneContext} />
+            );
+          })}
         </ul>
       )}
     </section>

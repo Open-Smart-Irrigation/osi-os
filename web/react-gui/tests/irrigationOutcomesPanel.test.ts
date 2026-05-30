@@ -2,11 +2,11 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import { JSDOM } from 'jsdom';
-import React, { act } from 'react';
+import React from 'react';
 import { I18nextProvider, initReactI18next } from 'react-i18next';
 import i18next from 'i18next';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { cleanup, render, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, waitFor } from '@testing-library/react';
 
 import { IrrigationOutcomesPanel } from '../src/components/farming/IrrigationOutcomesPanel.tsx';
 import {
@@ -15,7 +15,7 @@ import {
   type IrrigationActuationsResponse,
 } from '../src/services/api.ts';
 
-const dom = new JSDOM('<!doctype html><html><body></body></html>');
+const dom = new JSDOM('<!doctype html><html><body></body></html>', { url: 'http://localhost/' });
 (globalThis as { window?: unknown }).window = dom.window;
 (globalThis as { document?: unknown }).document = dom.window.document;
 // `navigator` is a getter-only on Node ≥21; only set it if the slot is writable.
@@ -81,6 +81,37 @@ async function renderPanel(response: IrrigationActuationsResponse | { error: str
   }
 }
 
+function responseWithActuation(overrides: Partial<IrrigationActuation> = {}): IrrigationActuationsResponse {
+  return {
+    generatedAt: '2026-05-29T10:20:00Z',
+    actuations: [actuationFixture(overrides)],
+  };
+}
+
+async function renderControlledPanel(
+  response: IrrigationActuationsResponse,
+  zoneContext: Record<string, unknown> = {
+    timeZone: 'Europe/Zurich',
+    areaM2: 100,
+    irrigationEfficiencyPct: 80,
+  },
+) {
+  const i18n = await buildI18n();
+  return render(
+    React.createElement(
+      I18nextProvider,
+      { i18n },
+      React.createElement(IrrigationOutcomesPanel, {
+        response,
+        loading: false,
+        error: null,
+        pollIntervalMs: 0,
+        zoneContexts: new Map([[12, zoneContext]]),
+      } as Record<string, unknown>),
+    ),
+  );
+}
+
 test('shows loading state on first render before fetch resolves', async () => {
   // No fetch hook — the static render captures the initial state pre-effect.
   const i18n = await buildI18n();
@@ -117,22 +148,17 @@ test('actuationFixture builds a row the API contract accepts', () => {
   assert.equal(a.commandResultDetail, 'Downlink not acked');
 });
 
-test('renders absolute zone-local datetimes as primary with relative times secondary', async () => {
+test('default view shows commanded date, duration, and effective irrigation depth', async () => {
   const originalNow = Date.now;
   Date.now = () => new Date('2026-05-29T10:20:00Z').getTime();
-  const i18n = await buildI18n();
-  const response: IrrigationActuationsResponse = {
-    generatedAt: '2026-05-29T10:20:00Z',
-    actuations: [
-      actuationFixture({
-        commandedAt: '2026-05-29T10:15:00Z',
-        observedOpenAt: '2026-05-29T10:16:00Z',
-        observedCloseAt: '2026-05-29T10:18:00Z',
-      }),
-    ],
-  };
-  const original = irrigationOutcomesAPI.recentActuations;
-  (irrigationOutcomesAPI as { recentActuations: () => Promise<IrrigationActuationsResponse> }).recentActuations = async () => response;
+  window.localStorage.clear();
+  const response = responseWithActuation({
+    commandedAt: '2026-05-29T10:15:00Z',
+    commandedDurationSeconds: 600,
+    observedOpenAt: '2026-05-29T10:16:00Z',
+    observedCloseAt: '2026-05-29T10:18:00Z',
+    estimatedGrossLiters: 75,
+  });
   const expectedCommanded = new Intl.DateTimeFormat(undefined, {
     dateStyle: 'medium',
     timeStyle: 'short',
@@ -140,26 +166,111 @@ test('renders absolute zone-local datetimes as primary with relative times secon
   }).format(new Date('2026-05-29T10:15:00Z'));
 
   try {
-    const rendered = render(
-      React.createElement(
-        I18nextProvider,
-        { i18n },
-        React.createElement(IrrigationOutcomesPanel, {
-          pollIntervalMs: 0,
-          zoneTimezones: new Map([[12, 'Europe/Zurich']]),
-        } as Record<string, unknown>),
-      ),
-    );
+    const rendered = await renderControlledPanel(response);
 
     await rendered.findByText(/Zone 12/);
     assert.match(document.body.textContent ?? '', new RegExp(expectedCommanded.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
-    assert.match(document.body.textContent ?? '', /5 min ago/);
-    assert.match(document.body.textContent ?? '', /Opened:/);
-    assert.match(document.body.textContent ?? '', /Closed:/);
+    assert.match(document.body.textContent ?? '', /Duration: 10 min/);
+    assert.match(document.body.textContent ?? '', /Irrigated: 0\.6 mm/);
+    assert.doesNotMatch(document.body.textContent ?? '', /Running/);
+    assert.doesNotMatch(document.body.textContent ?? '', /Total volume:/);
+    assert.doesNotMatch(document.body.textContent ?? '', /Confirmed open:/);
+    assert.doesNotMatch(document.body.textContent ?? '', /Confirmed close:/);
     await waitFor(() => assert.doesNotMatch(document.body.textContent ?? '', /Loading recent actuations/));
   } finally {
     cleanup();
-    irrigationOutcomesAPI.recentActuations = original;
     Date.now = originalNow;
+  }
+});
+
+test('default view falls back to gross irrigation depth when efficiency is missing', async () => {
+  window.localStorage.clear();
+  try {
+    await renderControlledPanel(
+      responseWithActuation({ estimatedGrossLiters: 75 }),
+      { timeZone: 'Europe/Zurich', areaM2: 100, irrigationEfficiencyPct: null },
+    );
+
+    assert.match(document.body.textContent ?? '', /Irrigated: 0\.8 mm/);
+  } finally {
+    cleanup();
+  }
+});
+
+test('default view shows total volume when liters exist but area is missing', async () => {
+  window.localStorage.clear();
+  try {
+    await renderControlledPanel(
+      responseWithActuation({ estimatedGrossLiters: 75 }),
+      { timeZone: 'Europe/Zurich', areaM2: null, irrigationEfficiencyPct: 80 },
+    );
+
+    assert.match(document.body.textContent ?? '', /Total volume: 75 L/);
+    assert.doesNotMatch(document.body.textContent ?? '', /Irrigated:/);
+  } finally {
+    cleanup();
+  }
+});
+
+test('default view omits volume and depth placeholders when liters are missing', async () => {
+  window.localStorage.clear();
+  try {
+    await renderControlledPanel(responseWithActuation({ estimatedGrossLiters: null }));
+
+    assert.match(document.body.textContent ?? '', /Duration: 10 min/);
+    assert.doesNotMatch(document.body.textContent ?? '', /Total volume:/);
+    assert.doesNotMatch(document.body.textContent ?? '', /Irrigated:/);
+    assert.doesNotMatch(document.body.textContent ?? '', /Irrigated: —/);
+  } finally {
+    cleanup();
+  }
+});
+
+test('advanced view shows status, total volume, depth, and confirmed timestamps', async () => {
+  window.localStorage.setItem('osi.recentIrrigations.advancedView', 'true');
+  try {
+    await renderControlledPanel(responseWithActuation({
+      observedOpenAt: '2026-05-29T10:16:00Z',
+      observedCloseAt: '2026-05-29T10:18:00Z',
+      estimatedGrossLiters: 75,
+      status: 'COMPLETED',
+    }));
+
+    assert.match(document.body.textContent ?? '', /Completed/);
+    assert.match(document.body.textContent ?? '', /Duration: 10 min/);
+    assert.match(document.body.textContent ?? '', /Total volume: 75 L/);
+    assert.match(document.body.textContent ?? '', /Irrigated: 0\.6 mm/);
+    assert.match(document.body.textContent ?? '', /Confirmed open:/);
+    assert.match(document.body.textContent ?? '', /Confirmed close:/);
+  } finally {
+    cleanup();
+    window.localStorage.clear();
+  }
+});
+
+test('advanced view setting toggles and persists locally', async () => {
+  window.localStorage.clear();
+  const response = responseWithActuation({
+    observedOpenAt: '2026-05-29T10:16:00Z',
+    observedCloseAt: '2026-05-29T10:18:00Z',
+    estimatedGrossLiters: 75,
+  });
+
+  try {
+    const rendered = await renderControlledPanel(response);
+    assert.doesNotMatch(document.body.textContent ?? '', /Confirmed open:/);
+
+    fireEvent.click(rendered.getByLabelText(/Recent irrigations settings/));
+    fireEvent.click(rendered.getByLabelText(/Advanced view/));
+
+    assert.equal(window.localStorage.getItem('osi.recentIrrigations.advancedView'), 'true');
+    assert.match(document.body.textContent ?? '', /Confirmed open:/);
+
+    cleanup();
+    await renderControlledPanel(response);
+    assert.match(document.body.textContent ?? '', /Confirmed open:/);
+  } finally {
+    cleanup();
+    window.localStorage.clear();
   }
 });

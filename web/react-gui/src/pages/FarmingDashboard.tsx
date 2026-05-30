@@ -13,7 +13,10 @@ import { CreateZoneModal } from '../components/farming/CreateZoneModal';
 import { LanguageSwitcher } from '../components/LanguageSwitcher';
 import { SystemPanel } from '../components/farming/SystemPanel';
 import { SenseCapWeatherCard } from '../components/farming/SenseCapWeatherCard';
-import { IrrigationOutcomesPanel } from '../components/farming/IrrigationOutcomesPanel';
+import {
+  IrrigationOutcomesPanel,
+  type IrrigationOutcomeZoneContext,
+} from '../components/farming/IrrigationOutcomesPanel';
 import type { Device, IrrigationZone } from '../types/farming';
 import type { IrrigationActuationsResponse } from '../services/api';
 
@@ -104,6 +107,17 @@ export const FarmingDashboard: React.FC = () => {
   const irrigationActuations = irrigationActuationsResponse?.actuations ?? [];
   const zoneTimezones = useMemo(
     () => new Map((zones ?? []).map((zone) => [zone.id, zone.timezone])),
+    [zones],
+  );
+  const irrigationOutcomeZoneContexts = useMemo(
+    () => new Map<number, IrrigationOutcomeZoneContext>((zones ?? []).map((zone) => [
+      zone.id,
+      {
+        timeZone: zone.timezone ?? null,
+        areaM2: zone.areaM2 ?? zone.area_m2 ?? null,
+        irrigationEfficiencyPct: zone.irrigationEfficiencyPct ?? zone.irrigation_efficiency_pct ?? null,
+      },
+    ])),
     [zones],
   );
 
@@ -319,7 +333,7 @@ export const FarmingDashboard: React.FC = () => {
                 response={irrigationActuationsResponse ?? null}
                 loading={!irrigationActuationsResponse && !irrigationActuationsError}
                 error={irrigationActuationsError instanceof Error ? irrigationActuationsError.message : irrigationActuationsError ? String(irrigationActuationsError) : null}
-                zoneTimezones={zoneTimezones}
+                zoneContexts={irrigationOutcomeZoneContexts}
               />
             </div>
 
