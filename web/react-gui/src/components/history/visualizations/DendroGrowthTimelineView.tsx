@@ -13,7 +13,6 @@ import {
 import type {
   HistoryCardDataResponse,
   HistoryEvent,
-  HistorySeries,
   HistorySeriesPoint,
 } from '../../../history/types';
 
@@ -26,20 +25,62 @@ type ChartRow = {
   timestamp: string;
   label: string;
 } & Record<string, number | string | null>;
+type RenderPoint = {
+  t: string;
+  value: number | null;
+};
+type RenderSeries = {
+  key: string;
+  label: string;
+  unit: string;
+  points: RenderPoint[];
+};
+type RenderEvent = {
+  key: string;
+  t: string;
+  label: string;
+  severity: HistoryEvent['severity'];
+};
 
 const SERIES_COLORS = ['#047857', '#0f766e', '#b45309', '#2563eb'];
 
-function pointValue(point: HistorySeriesPoint): number | null {
-  return point.value ?? point.latest ?? point.mean ?? point.median ?? null;
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
 }
 
-function hasVisiblePoints(series: HistorySeries): boolean {
-  return series.points.some((point) => pointValue(point) !== null);
+function normalizedText(value: unknown): string | null {
+  if (typeof value !== 'string') return null;
+  const trimmed = value.trim();
+  return trimmed ? trimmed : null;
+}
+
+function finiteNumber(value: unknown): number | null {
+  return typeof value === 'number' && Number.isFinite(value) ? value : null;
+}
+
+function pointValue(point: Partial<HistorySeriesPoint> | null | undefined): number | null {
+  if (!isRecord(point)) return null;
+  return (
+    finiteNumber(point.value) ??
+    finiteNumber(point.latest) ??
+    finiteNumber(point.mean) ??
+    finiteNumber(point.median)
+  );
+}
+
+function validTimestamp(value: unknown): string | null {
+  const text = normalizedText(value);
+  if (!text) return null;
+  return Number.isNaN(new Date(text).getTime()) ? null : text;
+}
+
+function hasVisiblePoints(series: RenderSeries): boolean {
+  return series.points.some((point) => point.value !== null);
 }
 
 function formatTimestamp(value: string): string {
   const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return value;
+  if (Number.isNaN(date.getTime())) return '-';
   return new Intl.DateTimeFormat(undefined, {
     month: 'short',
     day: 'numeric',
@@ -56,14 +97,23 @@ function fallbackSeriesLabel(t: HistoryTranslate, seriesId: string): string {
   return t('history.dendroTimeline.series.dendrometer');
 }
 
-function displaySeriesLabel(t: HistoryTranslate, series: HistorySeries): string {
-  const label = series.label.trim();
-  if (label && !label.includes('dendro-src-') && !label.includes('_')) return label;
-  return fallbackSeriesLabel(t, series.id);
+function looksLikeRawSourceToken(value: string): boolean {
+  return (
+    /dendro-src-/i.test(value) ||
+    /\b[0-9a-f]{16}\b/i.test(value) ||
+    value.includes('_') ||
+    /\b(dev[\s_-]?eui|device[\s_-]?eui|raw|channel|adc|rssi|snr|firmware|calibration)\b/i.test(value)
+  );
 }
 
-function displayUnit(series: HistorySeries): string {
-  return series.unit?.trim() || '';
+function displaySeriesLabel(t: HistoryTranslate, series: unknown, sourceId: string): string {
+  const label = normalizedText(isRecord(series) ? series.label : null);
+  if (label && !looksLikeRawSourceToken(label)) return label;
+  return fallbackSeriesLabel(t, sourceId);
+}
+
+function displayUnit(series: unknown): string {
+  return normalizedText(isRecord(series) ? series.unit : null) ?? '';
 }
 
 function formatValue(value: number | null, unit: string): string {
@@ -72,15 +122,37 @@ function formatValue(value: number | null, unit: string): string {
   return unit ? `${formatted} ${unit}` : formatted;
 }
 
-function latestVisibleValue(series: HistorySeries): number | null {
+function latestVisibleValue(series: RenderSeries): number | null {
   for (let index = series.points.length - 1; index >= 0; index -= 1) {
-    const value = pointValue(series.points[index]);
+    const value = series.points[index].value;
     if (value !== null) return value;
   }
   return null;
 }
 
-function buildRows(seriesList: HistorySeries[]): ChartRow[] {
+function normalizeSeriesList(t: HistoryTranslate, seriesList: readonly unknown[]): RenderSeries[] {
+  return seriesList.map((series, index) => {
+    const sourceId = normalizedText(isRecord(series) ? series.id : null) ?? '';
+    const rawPoints = isRecord(series) ? series.points : null;
+    const points = Array.isArray(rawPoints)
+      ? rawPoints.reduce<RenderPoint[]>((accumulator, point) => {
+          const timestamp = validTimestamp(isRecord(point) ? point.t : null);
+          if (!timestamp) return accumulator;
+          accumulator.push({ t: timestamp, value: pointValue(point) });
+          return accumulator;
+        }, [])
+      : [];
+
+    return {
+      key: `series-${index}`,
+      label: displaySeriesLabel(t, series, sourceId),
+      unit: displayUnit(series),
+      points,
+    };
+  });
+}
+
+function buildRows(seriesList: RenderSeries[]): ChartRow[] {
   const rows = new Map<string, ChartRow>();
 
   seriesList.forEach((series) => {
@@ -89,7 +161,7 @@ function buildRows(seriesList: HistorySeries[]): ChartRow[] {
         timestamp: point.t,
         label: formatTimestamp(point.t),
       };
-      existing[series.id] = pointValue(point);
+      existing[series.key] = point.value;
       rows.set(point.t, existing);
     });
   });
@@ -97,7 +169,34 @@ function buildRows(seriesList: HistorySeries[]): ChartRow[] {
   return [...rows.values()].sort((left, right) => left.timestamp.localeCompare(right.timestamp));
 }
 
-function eventTone(event: HistoryEvent): string {
+function normalizeSeverity(value: unknown): HistoryEvent['severity'] {
+  if (value === 'info' || value === 'warning' || value === 'critical' || value === 'success') return value;
+  return 'unknown';
+}
+
+function displayEventLabel(t: HistoryTranslate, event: unknown): string {
+  const label = normalizedText(isRecord(event) ? event.label : null);
+  if (label && !looksLikeRawSourceToken(label)) return label;
+  return t('history.dendroTimeline.eventFallback');
+}
+
+function normalizeEvents(t: HistoryTranslate, events: unknown): RenderEvent[] {
+  if (!Array.isArray(events)) return [];
+  return events.reduce<RenderEvent[]>((accumulator, event, index) => {
+    if (!isRecord(event)) return accumulator;
+    const timestamp = validTimestamp(event.t);
+    if (!timestamp) return accumulator;
+    accumulator.push({
+      key: normalizedText(event.id) ?? `dendro-event-${index}`,
+      t: timestamp,
+      label: displayEventLabel(t, event),
+      severity: normalizeSeverity(event.severity),
+    });
+    return accumulator;
+  }, []);
+}
+
+function eventTone(event: RenderEvent): string {
   if (event.severity === 'warning') return 'border-amber-300 bg-amber-50 text-amber-900';
   if (event.severity === 'critical') return 'border-red-300 bg-red-50 text-red-900';
   if (event.severity === 'success') return 'border-emerald-300 bg-emerald-50 text-emerald-900';
@@ -107,9 +206,10 @@ function eventTone(event: HistoryEvent): string {
 export const DendroGrowthTimelineView: React.FC<DendroGrowthTimelineViewProps> = ({ data }) => {
   const { t: translate } = useTranslation('history');
   const t = translate as HistoryTranslate;
-  const visibleSeries = (data?.series ?? []).filter(hasVisiblePoints);
+  const rawSeries = Array.isArray(data?.series) ? data.series : [];
+  const visibleSeries = normalizeSeriesList(t, rawSeries).filter(hasVisiblePoints);
   const rows = buildRows(visibleSeries);
-  const events = data?.events ?? [];
+  const events = normalizeEvents(t, data?.events);
 
   if (visibleSeries.length === 0 || rows.length === 0) {
     return (
@@ -147,17 +247,16 @@ export const DendroGrowthTimelineView: React.FC<DendroGrowthTimelineViewProps> =
 
       <div className="grid gap-2 sm:grid-cols-3">
         {visibleSeries.map((series) => {
-          const unit = displayUnit(series);
           return (
             <div
-              key={series.id}
+              key={series.key}
               className="rounded-md border border-[var(--border)] bg-[var(--surface)] px-3 py-2"
             >
-              <p className="text-sm font-semibold text-[var(--text)]">{displaySeriesLabel(t, series)}</p>
+              <p className="text-sm font-semibold text-[var(--text)]">{series.label}</p>
               <p className="mt-1 text-xs text-[var(--text-tertiary)]">
-                {formatValue(latestVisibleValue(series), unit)}
+                {formatValue(latestVisibleValue(series), series.unit)}
               </p>
-              {unit && <p className="sr-only">{unit}</p>}
+              {series.unit && <p className="sr-only">{series.unit}</p>}
             </div>
           );
         })}
@@ -171,14 +270,14 @@ export const DendroGrowthTimelineView: React.FC<DendroGrowthTimelineViewProps> =
             <YAxis width={44} />
             <Tooltip labelFormatter={(value) => formatTimestamp(String(value))} />
             {events.map((event) => (
-              <ReferenceLine key={event.id} x={event.t} stroke="#b45309" strokeDasharray="4 4" />
+              <ReferenceLine key={event.key} x={event.t} stroke="#b45309" strokeDasharray="4 4" />
             ))}
             {visibleSeries.map((series, index) => (
               <Line
-                key={series.id}
+                key={series.key}
                 type="monotone"
-                dataKey={series.id}
-                name={displaySeriesLabel(t, series)}
+                dataKey={series.key}
+                name={series.label}
                 stroke={SERIES_COLORS[index % SERIES_COLORS.length]}
                 strokeWidth={2}
                 dot={{ r: 3 }}
@@ -197,7 +296,7 @@ export const DendroGrowthTimelineView: React.FC<DendroGrowthTimelineViewProps> =
           <ol className="mt-2 space-y-2">
             {events.map((event) => (
               <li
-                key={event.id}
+                key={event.key}
                 className={`rounded-md border px-3 py-2 text-sm ${eventTone(event)}`}
               >
                 <span className="font-semibold">{event.label}</span>

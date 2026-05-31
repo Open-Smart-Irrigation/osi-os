@@ -44,8 +44,13 @@ const { translateForTest } = vi.hoisted(() => {
     'history.dendroTimeline.emptyTitle': 'No dendrometer timeline data',
     'history.dendroTimeline.emptyBody': 'Dendrometer readings will appear here when history data is available.',
     'history.dendroTimeline.eventsTitle': 'Timeline events',
+    'history.dendroTimeline.eventFallback': 'Dendrometer event',
     'history.dendroTimeline.noEvents': 'No events in this range',
     'history.dendroTimeline.pointsCount': '{{count}} readings',
+    'history.dendroTimeline.series.stemChange': 'Stem change',
+    'history.dendroTimeline.series.growth': 'Growth',
+    'history.dendroTimeline.series.shrinkage': 'Shrinkage',
+    'history.dendroTimeline.series.dendrometer': 'Dendrometer',
   };
 
   return {
@@ -137,7 +142,7 @@ function historyData(overrides: Partial<HistoryCardDataResponse<'dendro'>> = {})
     series: [
       {
         id: 'dendro-src-A84041FFFF123456-stem-change',
-        label: 'Stem change',
+        label: 'A84041FFFF123456',
         unit: 'um',
         points: [
           { t: '2026-05-30T00:00:00Z', value: 12, coverageConfidence: 'configured' },
@@ -147,7 +152,7 @@ function historyData(overrides: Partial<HistoryCardDataResponse<'dendro'>> = {})
       },
       {
         id: 'dendro-src-A84041FFFF123456-growth',
-        label: 'Growth',
+        label: 'dendro-src-A84041FFFF123456-growth',
         unit: 'um',
         points: [
           { t: '2026-05-30T00:00:00Z', value: 4, coverageConfidence: 'configured' },
@@ -156,7 +161,7 @@ function historyData(overrides: Partial<HistoryCardDataResponse<'dendro'>> = {})
       },
       {
         id: 'dendro-src-A84041FFFF123456-shrinkage',
-        label: 'Shrinkage',
+        label: 'shrinkage_raw',
         unit: 'um',
         points: [{ t: '2026-05-30T12:00:00Z', value: -3, coverageConfidence: 'configured' }],
       },
@@ -204,6 +209,68 @@ describe('HistoryCardFrame Dendro growth timeline', () => {
 
     expect(screen.getByText('No dendrometer timeline data')).toBeInTheDocument();
     expect(screen.getByText('Dendrometer readings will appear here when history data is available.')).toBeInTheDocument();
+  });
+
+  it('renders a stable empty state when dendrometer series payloads are sparse', () => {
+    const sparseSeries = [
+      {
+        id: 'dendro-src-A84041FFFF123456-stem-change',
+        label: 'A84041FFFF123456',
+        unit: 'um',
+        points: null,
+      },
+      {
+        id: 'bad',
+        label: 'raw_label',
+        points: [
+          null,
+          { t: '', value: 18, coverageConfidence: 'unknown' },
+          { t: 'A84041FFFF123456', value: 22, coverageConfidence: 'unknown' },
+          { t: '2026-05-30T00:00:00Z', value: 'not-a-number', coverageConfidence: 'unknown' },
+        ],
+      },
+    ] as unknown as HistoryCardDataResponse<'dendro'>['series'];
+    cardData.current = historyData({ series: sparseSeries, events: [] });
+
+    render(<HistoryCardFrame card={dendroCard()} scope={{ type: 'zone', zoneId: 1 }} />);
+
+    expect(screen.getByText('No dendrometer timeline data')).toBeInTheDocument();
+    expect(screen.queryByText(/A84041FFFF123456/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/raw_label/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/undefined/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/NaN/i)).not.toBeInTheDocument();
+  });
+
+  it('sanitizes sparse dendrometer events before rendering', () => {
+    cardData.current = historyData({
+      events: [
+        null,
+        {
+          id: 'evt-raw',
+          type: 'dendro_stress_window',
+          t: '2026-05-30T12:00:00Z',
+          label: 'dendro-src-A84041FFFF123456-growth',
+          severity: 'warning',
+          metadata: { sourceDeviceEui: 'A84041FFFF123456' },
+        },
+        {
+          id: 'evt-invalid-time',
+          type: 'dendro_stress_window',
+          t: 'A84041FFFF123456',
+          label: 'Raw invalid time',
+          severity: 'warning',
+          metadata: {},
+        },
+      ] as unknown as HistoryCardDataResponse<'dendro'>['events'],
+    });
+
+    render(<HistoryCardFrame card={dendroCard()} scope={{ type: 'zone', zoneId: 1 }} />);
+
+    const timeline = screen.getByRole('region', { name: 'Growth timeline' });
+    expect(within(timeline).getByText('Dendrometer event')).toBeInTheDocument();
+    expect(screen.queryByText(/dendro-src-/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/A84041FFFF123456/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Raw invalid time/i)).not.toBeInTheDocument();
   });
 
   it('keeps non-dendro cards on the existing placeholder surface', () => {
