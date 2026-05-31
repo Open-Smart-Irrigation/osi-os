@@ -3274,6 +3274,13 @@ expectIncludesById('062a0f9bf66d9789', 'fan_available:', 'heartbeat payload incl
 expectIncludesById('062a0f9bf66d9789', '/sys/class/hwmon', 'heartbeat reads fan via hwmon sysfs');
 expectExcludesById('062a0f9bf66d9789', '/sys/class/pwm/pwmchip2', 'heartbeat no longer uses raw PWM sysfs');
 
+// --- Fan Control API: hwmon interface ---
+expectIncludes('Fan Control', 'findFanHwmon', 'uses findFanHwmon helper for device discovery');
+expectIncludes('Fan Control', '/sys/class/hwmon', 'writes fan speed via hwmon sysfs');
+expectIncludes('Fan Control', 'pwm1_enable', 'sets hwmon fan control mode');
+expectIncludes('Fan Control', "pwm1_enable', '2'", 'speed=0 switches to thermal auto mode');
+expectExcludes('Fan Control', '/sys/class/pwm/pwmchip2', 'no longer uses raw PWM sysfs path');
+
 Promise.all(pendingChecks).finally(() => {
   if (!process.exitCode) {
     console.log('Sync flow verification passed');
