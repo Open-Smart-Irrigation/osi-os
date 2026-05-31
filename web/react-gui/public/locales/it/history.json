@@ -71,6 +71,19 @@
         "dendrometer": "Dendrometer"
       }
     },
+    "environmentLineChart": {
+      "title": "Environment trend",
+      "emptyTitle": "No environment trend data",
+      "emptyBody": "Environment readings will appear here when history data is available.",
+      "pointsCount": "{{count}} readings",
+      "series": {
+        "airTemperature": "Air temperature",
+        "humidity": "Relative humidity",
+        "rain": "Rain",
+        "light": "Light",
+        "environment": "Environment"
+      }
+    },
     "cardType": {
       "soil": "Soil",
       "dendro": "Dendro",
