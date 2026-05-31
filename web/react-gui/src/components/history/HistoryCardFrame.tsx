@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { TimelineBrush } from './TimelineBrush';
+import { DendroGrowthTimelineView } from './visualizations/DendroGrowthTimelineView';
 import { useHistoryCardData, type HistoryCardDataScope } from '../../history/useHistoryCardData';
 import { useTimeViewport } from '../../history/useTimeViewport';
 import type {
@@ -141,12 +142,16 @@ export const HistoryCardFrame: React.FC<HistoryCardFrameProps> = ({ card, scope 
           keyboardHelp={t('history.cardFrame.timelineBrushKeyboardHelp')}
         />
 
-        <div className="mt-4 rounded-lg border border-dashed border-[var(--border)] bg-[var(--bg)] p-6">
-          <p className="text-sm font-semibold text-[var(--text)]">{formatViewLabel(t, selectedView)}</p>
-          <p className="mt-2 text-sm text-[var(--text-tertiary)]">
-            {t('history.cardFrame.placeholderBody')}
-          </p>
-        </div>
+        {card.cardType === 'dendro' && selectedView === 'growth-timeline' ? (
+          <DendroGrowthTimelineView data={cardData.data} />
+        ) : (
+          <div className="mt-4 rounded-lg border border-dashed border-[var(--border)] bg-[var(--bg)] p-6">
+            <p className="text-sm font-semibold text-[var(--text)]">{formatViewLabel(t, selectedView)}</p>
+            <p className="mt-2 text-sm text-[var(--text-tertiary)]">
+              {t('history.cardFrame.placeholderBody')}
+            </p>
+          </div>
+        )}
       </div>
     </section>
   );

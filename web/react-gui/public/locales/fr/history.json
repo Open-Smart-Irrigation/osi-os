@@ -54,6 +54,20 @@
       "aggregationBadge": "Aggregation: {{aggregation}}",
       "placeholderBody": "Chart and calendar data will load here when card data APIs are enabled."
     },
+    "dendroTimeline": {
+      "title": "Growth timeline",
+      "emptyTitle": "No dendrometer timeline data",
+      "emptyBody": "Dendrometer readings will appear here when history data is available.",
+      "eventsTitle": "Timeline events",
+      "noEvents": "No events in this range",
+      "pointsCount": "{{count}} readings",
+      "series": {
+        "stemChange": "Stem change",
+        "growth": "Growth",
+        "shrinkage": "Shrinkage",
+        "dendrometer": "Dendrometer"
+      }
+    },
     "cardType": {
       "soil": "Soil",
       "dendro": "Dendro",
