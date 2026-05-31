@@ -32,6 +32,8 @@ const REQUIRED_ENDPOINTS = [
   ['GET', '/api/system/features']
 ].map(([method, url]) => ({ method, url }));
 
+const REQUIRED_ENDPOINT_KEYS = new Set(REQUIRED_ENDPOINTS.map(endpointKey));
+
 function parseArgs(argv) {
   const options = {
     allowMissingHistory: false,
@@ -57,6 +59,11 @@ function parseArgs(argv) {
 
 function endpointKey(endpoint) {
   return `${endpoint.method.toUpperCase()} ${endpoint.url}`;
+}
+
+function isHistoryContractRoute(node) {
+  const url = String(node.url || '').trim();
+  return url === '/api/system/features' || url.startsWith('/api/history');
 }
 
 function normalizeMethod(method) {
@@ -116,17 +123,25 @@ function verify(options) {
   for (const node of flows) {
     if (node.type !== 'http in') continue;
     const key = endpointKey({ method: normalizeMethod(node.method), url: node.url });
+    if (isHistoryContractRoute(node) && !REQUIRED_ENDPOINT_KEYS.has(key)) {
+      failures.push(`unexpected history endpoint node: ${key} (${node.id})`);
+    }
     const entries = httpNodesByEndpoint.get(key) || [];
     entries.push(node);
     httpNodesByEndpoint.set(key, entries);
   }
+
+  const requiredEndpointsPresent = REQUIRED_ENDPOINTS.filter((endpoint) =>
+    (httpNodesByEndpoint.get(endpointKey(endpoint)) || []).length > 0
+  );
+  const allowPendingMissing = options.allowMissingHistory && requiredEndpointsPresent.length === 0;
 
   for (const endpoint of REQUIRED_ENDPOINTS) {
     const key = endpointKey(endpoint);
     const matches = httpNodesByEndpoint.get(key) || [];
 
     if (matches.length === 0) {
-      if (options.allowMissingHistory) {
+      if (allowPendingMissing) {
         pending.push(`${key} is not wired yet`);
       } else {
         failures.push(`missing history endpoint: ${key}`);
@@ -162,7 +177,9 @@ function verify(options) {
   }
 
   if (pending.length) {
-    console.log(`verify-history-api-contract: ${pending.length} pending history endpoint(s) allowed`);
+    console.log(
+      `verify-history-api-contract: ${pending.length} pending history endpoint(s) allowed because no required history endpoints are wired yet`
+    );
   } else {
     console.log('verify-history-api-contract: OK');
   }
