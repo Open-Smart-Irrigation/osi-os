@@ -68,7 +68,7 @@ Slice 0 accepted the implementation-plan defaults because the product owner was 
 
 ### Accepted blockers
 
-- Cloud long-range aggregation over `sensor_data.data_json` JSONB is not acceptable for MVP-scale 30D, Season, or multi-season views. The spec now requires typed rollups or explicit use of existing daily aggregate tables for long ranges.
+- Cloud long-range aggregation over `sensor_data.data_json` JSONB is not acceptable for MVP-scale 30D, Season, or multi-season views. The spec now requires typed hourly/daily rollups for long ranges; existing daily tables are supplemental only.
 - Edge long-range aggregation over TEXT `recorded_at` values is not acceptable without a performance plan. The spec now requires composite indexes, `ANALYZE`, and rollups where raw scans exceed budget.
 - The edge helper module must use a concrete packaging path. The spec now names the existing `/usr/share/node-red/osi-*-helper` pattern and requires mirrored bcm2712/bcm2709 payloads.
 - `range=season` needs explicit season boundaries. Slice 0 accepts `zone_seasons` and hides Season until active boundaries exist.
@@ -137,11 +137,15 @@ Edge:
 - `GET /api/history/zones/:zoneId/cards`
 - `GET /api/history/zones/:zoneId/cards/:cardId/data`
 - `GET /api/history/zones/:zoneId/cards/:cardId/advanced`
+- `GET /api/history/gateways/:gatewayEui/cards`
+- `GET /api/history/gateways/:gatewayEui/cards/:cardId/data`
+- `GET /api/history/gateways/:gatewayEui/cards/:cardId/advanced`
 - workspace and preference endpoints
 
 Cloud:
 
 - Same contract under `/api/v1/history/...`
+- Gateway equivalents use `/api/v1/history/gateways/:gatewayEui/...`
 
 ### Add additive tables
 
@@ -159,7 +163,7 @@ Cloud PostgreSQL:
 - `history_workspaces`
 - `history_workspace_shares` later
 - `zone_seasons`
-- typed hourly/daily rollups or explicit long-range mapping to existing daily aggregates
+- typed hourly/daily rollups for measured card channels
 
 ### Keep card definitions static
 
@@ -180,7 +184,7 @@ Use static in-repo definitions. Do not introduce a dynamic remote plugin system.
 - Implement card data endpoints.
 - Add the edge `osi-history-helper` using the existing bundled helper-module pattern.
 - Add edge composite indexes, `ANALYZE`, cadence derivation, and rollups for long ranges.
-- Add cloud typed rollups or route long ranges through existing daily aggregates.
+- Add cloud typed hourly/daily rollups for long ranges.
 - Add the season model before enabling `range=season`.
 - Add aggregation levels: raw, 15m, hourly, daily, weekly.
 - Add coverage calculation.

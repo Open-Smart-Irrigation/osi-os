@@ -185,7 +185,7 @@ Please return blocking findings first, then non-blocking improvements.
 - Season model: add `zone_seasons` or hide Season until configured.
 - Edge helper packaging: existing `/usr/share/node-red/osi-*-helper` pattern or formal Node-RED contrib package.
 - Edge rollup strategy: `history_channel_rollups` table or on-the-fly helper aggregation using composite indexes only.
-- Cloud long-range aggregation: new typed hourly/daily rollups, existing daily tables for specific channels only, or hybrid.
+- Cloud long-range aggregation: new typed hourly/daily rollups for measured card channels; existing daily tables are supplemental only.
 - Workspace/preference owner identity: edge `users.id` only, edge `users.user_uuid`, linked account UUID, or cloud-only owner.
 - Workspace/preference sync: local-only edge MVP or synced.
 - OSI OS comparison cap: 4 visible panels, fewer panels, or disabled by default.
@@ -198,7 +198,7 @@ Decision defaults if product owner is unreachable:
 
 ```text
 Decision: card-key strategy = hybrid-zone-merged-except-dendro-per-source
-Decision: logical-source-key derivation = zone_uuid + card_type + stable role, with opaque DevEUI only inside backend/advanced metadata
+Decision: logical-source-key derivation = zone_uuid + card_type + stable role, with raw DevEUI only inside backend/advanced metadata; Dendro may use an opaque DevEUI-derived hash
 Decision: season model = add zone_seasons and hide Season until a zone has active boundaries
 Decision: edge helper packaging = existing /usr/share/node-red/osi-*-helper pattern, modeled on osi-dendro-helper
 Decision: edge rollup strategy = history_channel_rollups for 30D and Season, raw/composite-index reads for 12h/24h/7D
@@ -220,7 +220,7 @@ Existing cloud daily table inventory:
 - `irrigation_events`: event stream, not a numeric channel rollup.
 - Prediction day tables: forecast/model output, not measured telemetry rollups.
 
-Therefore, if Slice 0 keeps 30D/Season in cloud MVP, typed rollups are the default unless the product explicitly narrows those ranges by card/channel.
+Therefore, typed rollups are required for 30D/Season measured card channels in cloud MVP. Existing daily tables may add context but do not replace measured-channel rollups.
 
 **Steps:**
 
@@ -414,7 +414,7 @@ git commit -m "feat(history): add cloud history contracts"
 **Schema additions:**
 
 - `zone_seasons`
-- `history_channel_rollups` only if Slice 0 records `Decision: edge rollup strategy = history_channel_rollups`
+- `history_channel_rollups`
 - `history_card_preferences`
 - `history_workspaces`
 - `idx_device_data_deveui_recorded_at`
@@ -441,7 +441,7 @@ Performance verification target:
 
 - 30D single-card aggregation should be planned for p95 under 1.5 s.
 - Season single-card aggregation should be planned for p95 under 2.5 s.
-- If this cannot be met against raw rows, `history_channel_rollups` is required before enabling that range.
+- `history_channel_rollups` is required before enabling 30D or Season on edge.
 
 **Steps:**
 
@@ -564,6 +564,9 @@ Use the correct profile path during implementation: `conf/full_raspberrypi_bcm27
 - `GET /api/history/zones/:zoneId/cards`
 - `GET /api/history/zones/:zoneId/cards/:cardId/data`
 - `GET /api/history/zones/:zoneId/cards/:cardId/advanced`
+- `GET /api/history/gateways/:gatewayEui/cards`
+- `GET /api/history/gateways/:gatewayEui/cards/:cardId/data`
+- `GET /api/history/gateways/:gatewayEui/cards/:cardId/advanced`
 - `GET /api/history/workspaces`
 - `POST /api/history/workspaces`
 - `PUT /api/history/workspaces/:id`
@@ -667,14 +670,13 @@ git commit -m "feat(history): expose edge history APIs"
 
 Performance verification target:
 
-- Cloud 30D/Season single-card data should be planned for p95 under 750 ms from typed rollups or existing daily aggregates.
+- Cloud 30D/Season single-card data should be planned for p95 under 750 ms from typed rollups.
 - Cloud comparison workspace data should be planned for p95 under 1.5 s within the panel cap.
 - If those targets cannot be met, keep the affected range/view behind a feature flag.
 
 **Files:**
 
-- Create: `/home/phil/Repos/osi-server/backend/src/main/resources/db/migration/V<next>__history_data_visualization_rollups.sql` if Slice 0 selects new typed rollups
-- Create: `/home/phil/Repos/osi-server/backend/src/main/resources/db/migration/V<next>__history_data_visualization_foundation.sql` if Slice 0 selects existing daily tables for all MVP long ranges
+- Create: `/home/phil/Repos/osi-server/backend/src/main/resources/db/migration/V<next>__history_data_visualization_rollups.sql`
 - Create: `/home/phil/Repos/osi-server/backend/src/main/java/org/osi/server/history/HistoryController.java`
 - Create: `/home/phil/Repos/osi-server/backend/src/main/java/org/osi/server/history/HistoryService.java`
 - Create: `/home/phil/Repos/osi-server/backend/src/main/java/org/osi/server/history/HistoryCardService.java`
@@ -688,7 +690,7 @@ Performance verification target:
 - `zone_seasons`
 - `history_card_preferences`
 - `history_workspaces`
-- typed hourly/daily rollup table unless Slice 0 explicitly narrows long-range cloud history to existing table coverage
+- typed hourly/daily rollup table for measured card channels
 - optional gateway heartbeat/status history if Slice 0 selected cloud Connectivity Timeline in MVP
 
 **Steps:**
@@ -700,7 +702,7 @@ Performance verification target:
 - [ ] Add Flyway migration.
 - [ ] Add DTOs matching frontend contracts from Slice 1.
 - [ ] Add `HistoryCardService` for derived thematic cards.
-- [ ] Add `HistoryAggregationService` using the Slice 0 source choice. Do not label `zone_daily_environment` or `zone_daily_recommendations` as raw sensor rollups; they are supplemental summaries only.
+- [ ] Add `HistoryAggregationService` using typed hourly/daily rollups for 30D/Season. Do not label `zone_daily_environment` or `zone_daily_recommendations` as raw sensor rollups; they are supplemental summaries only.
 - [ ] Add `HistoryInterpretationService` for local-rule-compatible cloud explanations.
 - [ ] Add `HistoryController` endpoints under `/api/v1/history`.
 - [ ] Add Spring observability for card endpoint timing, aggregation level, raw-vs-rollup source, and truncation events. Use the existing logging/MeterRegistry pattern in the backend if present.
@@ -722,7 +724,7 @@ git commit -m "feat(history): add cloud history APIs"
 **Spec compliance checklist:**
 
 - [ ] Long-range cloud history does not depend on live JSONB extraction.
-- [ ] Existing daily tables are used only for the channel families they actually cover.
+- [ ] Existing daily tables are used only as supplemental context and do not replace measured-channel rollups.
 - [ ] API contract matches edge response fields.
 - [ ] Workspace authorization uses cloud farm/zone access checks.
 - [ ] Cloud workspaces use stable user identity.

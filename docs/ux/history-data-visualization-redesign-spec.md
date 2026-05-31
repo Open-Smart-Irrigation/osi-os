@@ -27,7 +27,7 @@ This document is a technical implementation specification. It intentionally does
 
 The companion review findings are incorporated as hard implementation constraints, not as optional polish:
 
-- Cloud aggregation cannot rely on live JSONB scans for 30D, Season, or multi-season views. MVP must include typed hourly/daily history rollups or explicitly restrict those ranges to existing precomputed daily tables.
+- Cloud aggregation cannot rely on live JSONB scans for 30D, Season, or multi-season views. MVP must include typed hourly/daily history rollups for measured card channels; existing daily tables are supplemental only.
 - Edge aggregation cannot assume cheap timestamp bucket math over `device_data.recorded_at` because it is stored as TEXT. MVP must add composite indexes and precomputed rollups for long ranges.
 - The edge history helper must be a concrete bundled Node-RED helper module with packaging, parity checks, and tests. It must not be left as a vague "helper" idea.
 - `range=season` requires a season data model. If a season model is not accepted, Season must be removed from MVP rather than inferred inconsistently.
@@ -40,7 +40,7 @@ The companion review findings are incorporated as hard implementation constraint
 The product owner was unavailable during Slice 0 execution, so the implementation plan defaults are accepted unless explicitly superseded by a later decision record.
 
 Decision: card-key strategy = hybrid-zone-merged-except-dendro-per-source
-Decision: logical-source-key derivation = zone_uuid + card_type + stable role, with opaque DevEUI only inside backend/advanced metadata
+Decision: logical-source-key derivation = zone_uuid + card_type + stable role, with raw DevEUI only inside backend/advanced metadata; Dendro may use an opaque DevEUI-derived hash
 Decision: season model = add zone_seasons and hide Season until a zone has active boundaries
 Decision: edge helper packaging = existing /usr/share/node-red/osi-*-helper pattern, modeled on osi-dendro-helper
 Decision: edge rollup strategy = history_channel_rollups for 30D and Season, raw/composite-index reads for 12h/24h/7D
@@ -440,6 +440,12 @@ Recommended form:
 {zone_uuid}:{card_type}:{logical_source_key}
 ```
 
+Gateway cards are hub-scoped and use:
+
+```text
+{gateway_eui}:gateway:hub
+```
+
 Examples:
 
 - `zone-uuid:soil:root-zone`
@@ -452,15 +458,16 @@ The API may include source devices only in the Advanced View contract or in back
 
 Accepted Slice 0 strategy:
 
-- Use merged zone cards for Soil, Environment, Irrigation, and Gateway.
+- Use merged zone cards for Soil, Environment, and Irrigation.
+- Use one hub-scoped Gateway card per hub.
 - Use per-source Dendro cards so multiple monitored stems/trees can stay inspectable without exposing DevEUI in the normal farmer UI.
 
 Card key derivation requirement:
 
 - The `logical_source_key` must be deterministic on both edge and cloud.
 - For merged cards, use fixed keys per zone/theme such as `root-zone`, `microclimate`, and `zone-valves`, and merge all eligible sources behind the card.
-- For Dendro per-source cards, derive keys from a stable logical source record, not display names. Acceptable inputs are `zone_uuid`, source role, stable source ordinal, and DevEUI as an opaque backend key.
-- The normal UI must not render DevEUI even if DevEUI participates in the opaque key.
+- For Dendro per-source cards, derive the `logical_source_key` as `dendro-src-{sha256(normalized_deveui).slice(0, 12)}`, where `normalized_deveui` is the uppercase 16-character hex DevEUI after removing separators.
+- The raw DevEUI must not appear in normal UI, routes, logs intended for farmer inspection, or workspace labels. Advanced View may map the opaque key back to raw DevEUI.
 - Card IDs must survive device rename, zone rename, sync replay, and cloud mirror import.
 - Frontend route state, workspace persistence, and preference persistence may use this accepted hybrid strategy.
 
@@ -590,17 +597,31 @@ Gateway constraint:
 
 ### 4.5 Card summary API contract
 
-Edge endpoint:
+Zone card endpoint:
 
 ```text
 GET /api/history/zones/:zoneId/cards
 ```
 
-Cloud endpoint:
+Cloud zone card endpoint:
 
 ```text
 GET /api/v1/history/zones/:zoneId/cards
 ```
+
+Gateway card endpoint:
+
+```text
+GET /api/history/gateways/:gatewayEui/cards
+```
+
+Cloud gateway card endpoint:
+
+```text
+GET /api/v1/history/gateways/:gatewayEui/cards
+```
+
+Zone card responses include Soil, Dendro, Environment, and Irrigation cards. Gateway Card responses are hub-scoped and are fetched through the gateway endpoints.
 
 Response shape:
 
@@ -648,16 +669,28 @@ Rules:
 
 ### 4.6 Card data API contract
 
-Edge endpoint:
+Zone card data endpoint:
 
 ```text
 GET /api/history/zones/:zoneId/cards/:cardId/data?view=soil-profile&range=24h&from=...&to=...&aggregation=auto
 ```
 
-Cloud endpoint:
+Cloud zone card data endpoint:
 
 ```text
 GET /api/v1/history/zones/:zoneId/cards/:cardId/data?view=soil-profile&range=24h&from=...&to=...&aggregation=auto
+```
+
+Gateway card data endpoint:
+
+```text
+GET /api/history/gateways/:gatewayEui/cards/:cardId/data?view=status-overview&range=24h&from=...&to=...&aggregation=auto
+```
+
+Cloud gateway card data endpoint:
+
+```text
+GET /api/v1/history/gateways/:gatewayEui/cards/:cardId/data?view=status-overview&range=24h&from=...&to=...&aggregation=auto
 ```
 
 Response shape:
@@ -776,16 +809,28 @@ Cloud-only interpretation additions may include:
 
 ### 4.7 Advanced View API contract
 
-Edge endpoint:
+Zone card Advanced View endpoint:
 
 ```text
 GET /api/history/zones/:zoneId/cards/:cardId/advanced?from=...&to=...
 ```
 
-Cloud endpoint:
+Cloud zone card Advanced View endpoint:
 
 ```text
 GET /api/v1/history/zones/:zoneId/cards/:cardId/advanced?from=...&to=...
+```
+
+Gateway card Advanced View endpoint:
+
+```text
+GET /api/history/gateways/:gatewayEui/cards/:cardId/advanced?from=...&to=...
+```
+
+Cloud gateway card Advanced View endpoint:
+
+```text
+GET /api/v1/history/gateways/:gatewayEui/cards/:cardId/advanced?from=...&to=...
 ```
 
 Advanced View may expose:
@@ -861,8 +906,8 @@ Implementation guidance:
 
 - The API should accept `aggregation=auto` by default.
 - The response must always report the actual aggregation level used.
-- Edge should compute aggregation locally from SQLite, but 30D and Season views must use precomputed rollups where raw scans exceed the performance budget.
-- Cloud must not perform long-range rollups by live JSONB scans over `sensor_data`. Cloud MVP must include typed hourly/daily rollups or explicitly restrict long ranges to existing precomputed daily tables.
+- Edge should compute 12h/24h/7D aggregation locally from SQLite raw reads with composite indexes. Edge 30D and Season views must use `history_channel_rollups`.
+- Cloud must not perform long-range rollups by live JSONB scans over `sensor_data`. Cloud MVP must include new typed hourly/daily rollups for 30D and Season; existing daily tables are supplemental only.
 - Raw endpoints may remain for compatibility, but the new UI should call card data endpoints.
 
 Performance budget:
@@ -873,7 +918,7 @@ Performance budget:
 | Edge 7D single card | p95 under 750 ms |
 | Edge 30D single card | p95 under 1.5 s, preferably from hourly/daily rollup |
 | Edge Season single card | p95 under 2.5 s, from daily/weekly rollup |
-| Cloud 30D/Season single card | p95 under 750 ms from typed rollup or existing daily aggregate |
+| Cloud 30D/Season single card | p95 under 750 ms from typed rollup |
 | Cloud comparison workspace | p95 under 1.5 s for configured panel cap |
 
 Season requirement:
@@ -1151,6 +1196,7 @@ Edge SQLite table:
 CREATE TABLE history_workspaces (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   user_id INTEGER NOT NULL,
+  owner_user_uuid TEXT,
   zone_id INTEGER,
   name TEXT NOT NULL,
   workspace_json TEXT NOT NULL,
@@ -1202,6 +1248,7 @@ Edge SQLite table:
 ```sql
 CREATE TABLE history_card_preferences (
   user_id INTEGER NOT NULL,
+  owner_user_uuid TEXT,
   zone_id INTEGER NOT NULL,
   card_id TEXT NOT NULL,
   pinned INTEGER NOT NULL DEFAULT 0,
@@ -1656,13 +1703,13 @@ Edge implementation:
 - Coverage should compare observed samples against expected cadence per source/channel.
 - Add composite indexes for raw-range reads: `device_data(deveui, recorded_at)` and any missing `(deveui, recorded_at)` indexes on history tables used by card endpoints.
 - Run `ANALYZE` after adding indexes.
-- Use precomputed hourly/daily rollups for 30D and Season when raw scans exceed the performance budget.
+- Use `history_channel_rollups` for 30D and Season.
 
 Cloud implementation:
 
 - PostgreSQL can compute short-range bucketed aggregations from `sensor_data`, but long-range history must not depend on repeated live JSONB extraction.
 - Prediction and weather overlays should be joined after base bucket computation.
-- MVP must include either typed rollup tables or a declared restriction that 30D/Season use existing daily aggregates only.
+- MVP must include typed hourly/daily rollup tables for 30D and Season. Existing daily tables are supplemental context only, not a substitute for typed measured-channel rollups.
 
 Recommended rollup table shape, adapted per database:
 
@@ -1880,7 +1927,7 @@ Cloud additive tables:
 - `history_workspaces`
 - `history_workspace_shares` post-MVP
 - `zone_seasons`
-- typed hourly/daily history rollup tables, or an explicit mapping to existing daily aggregate tables where they already cover the card
+- typed hourly/daily history rollup tables for measured card channels
 
 Additive indexes:
 
@@ -1961,7 +2008,7 @@ Work:
 - Add static history card definitions to both frontends.
 - Add the edge `osi-history-helper` module with independent tests and minimal Node-RED flow orchestration.
 - Add edge composite indexes, `ANALYZE`, rollup table, and cadence derivation.
-- Add cloud typed rollups or explicitly route 30D/Season through existing daily aggregate tables.
+- Add cloud typed hourly/daily rollups for 30D/Season.
 - Add the zone season model required for `range=season`.
 - Add card summary API on edge and cloud.
 - Add card data API for raw/auto aggregation.
