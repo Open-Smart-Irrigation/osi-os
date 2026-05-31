@@ -377,13 +377,16 @@ function asBoolean(value: unknown): boolean {
   return value === true || value === 1 || value === '1' || value === 'true';
 }
 
-function normaliseSystemFeatureFlags(row: any): SystemFeatureFlags {
+export function normaliseSystemFeatureFlags(row: any): SystemFeatureFlags {
+  const source = row?.features ?? row ?? {};
   return {
-    historyUxEnabled: asBoolean(row?.historyUxEnabled ?? row?.history_ux_enabled),
-    historyComparisonEnabled: asBoolean(row?.historyComparisonEnabled ?? row?.history_comparison_enabled),
-    historyWorkspacesEnabled: asBoolean(row?.historyWorkspacesEnabled ?? row?.history_workspaces_enabled),
-    historyAdvancedOverlaysEnabled: asBoolean(row?.historyAdvancedOverlaysEnabled ?? row?.history_advanced_overlays_enabled),
-    historyCloudAiEnabled: asBoolean(row?.historyCloudAiEnabled ?? row?.history_cloud_ai_enabled),
+    historyUxEnabled: asBoolean(source?.historyUxEnabled ?? source?.history_ux_enabled),
+    historyComparisonEnabled: asBoolean(source?.historyComparisonEnabled ?? source?.history_comparison_enabled),
+    historyWorkspacesEnabled: asBoolean(source?.historyWorkspacesEnabled ?? source?.history_workspaces_enabled),
+    historyAdvancedOverlaysEnabled: asBoolean(
+      source?.historyAdvancedOverlaysEnabled ?? source?.history_advanced_overlays_enabled,
+    ),
+    historyCloudAiEnabled: asBoolean(source?.historyCloudAiEnabled ?? source?.history_cloud_ai_enabled),
   };
 }
 

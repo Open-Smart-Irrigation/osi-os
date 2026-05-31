@@ -1,4 +1,5 @@
 import React from 'react';
+import { useTranslation } from 'react-i18next';
 import { orderHistoryCards } from '../../history/useHistoryCards';
 import type { HistoryCardSummary } from '../../history/types';
 import type { IrrigationZone } from '../../types/farming';
@@ -20,6 +21,7 @@ export const HistorySidebar: React.FC<HistorySidebarProps> = ({
   selectedCardId,
   onSelectCard,
 }) => {
+  const { t } = useTranslation('history');
   const orderedCards = orderHistoryCards(cards);
   const pinnedCards = orderedCards.filter((card) => card.ordering.pinned);
   const availableCards = orderedCards.filter((card) => !card.ordering.pinned);
@@ -28,7 +30,7 @@ export const HistorySidebar: React.FC<HistorySidebarProps> = ({
     <aside className="h-full border-r border-[var(--border)] bg-[var(--surface)] p-4">
       <section>
         <h2 className="text-xs font-bold uppercase tracking-wide text-[var(--text-tertiary)]">
-          Zones
+          {t('history.sidebar.zones')}
         </h2>
         <div className="mt-3 space-y-2">
           {zones.map((zone) => (
@@ -51,23 +53,23 @@ export const HistorySidebar: React.FC<HistorySidebarProps> = ({
 
       <section className="mt-6">
         <h2 className="text-xs font-bold uppercase tracking-wide text-[var(--text-tertiary)]">
-          Pinned cards
+          {t('history.sidebar.pinnedCards')}
         </h2>
-        <CardList cards={pinnedCards} selectedCardId={selectedCardId} onSelectCard={onSelectCard} />
+        <CardList cards={pinnedCards} selectedCardId={selectedCardId} onSelectCard={onSelectCard} emptyLabel={t('history.sidebar.none')} />
       </section>
 
       <section className="mt-6">
         <h2 className="text-xs font-bold uppercase tracking-wide text-[var(--text-tertiary)]">
-          Available cards
+          {t('history.sidebar.availableCards')}
         </h2>
-        <CardList cards={availableCards} selectedCardId={selectedCardId} onSelectCard={onSelectCard} />
+        <CardList cards={availableCards} selectedCardId={selectedCardId} onSelectCard={onSelectCard} emptyLabel={t('history.sidebar.none')} />
       </section>
 
       <section className="mt-6 rounded-lg border border-dashed border-[var(--border)] p-3">
         <h2 className="text-xs font-bold uppercase tracking-wide text-[var(--text-tertiary)]">
-          Saved workspaces
+          {t('history.sidebar.savedWorkspaces')}
         </h2>
-        <p className="mt-2 text-xs text-[var(--text-tertiary)]">Workspace saving is not enabled on this slice.</p>
+        <p className="mt-2 text-xs text-[var(--text-tertiary)]">{t('history.sidebar.workspaceDisabled')}</p>
       </section>
     </aside>
   );
@@ -77,11 +79,12 @@ interface CardListProps {
   cards: HistoryCardSummary[];
   selectedCardId: string | null;
   onSelectCard: (cardId: string) => void;
+  emptyLabel: string;
 }
 
-const CardList: React.FC<CardListProps> = ({ cards, selectedCardId, onSelectCard }) => {
+const CardList: React.FC<CardListProps> = ({ cards, selectedCardId, onSelectCard, emptyLabel }) => {
   if (cards.length === 0) {
-    return <p className="mt-3 text-xs text-[var(--text-tertiary)]">None</p>;
+    return <p className="mt-3 text-xs text-[var(--text-tertiary)]">{emptyLabel}</p>;
   }
 
   return (

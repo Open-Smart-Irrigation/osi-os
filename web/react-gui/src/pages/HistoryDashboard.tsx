@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import useSWR from 'swr';
 import { LanguageSwitcher } from '../components/LanguageSwitcher';
 import { HistoryDesktopShell } from '../components/history/HistoryDesktopShell';
@@ -14,6 +15,8 @@ const zonesFetcher = () => irrigationZonesAPI.getAll();
 
 export const HistoryDashboard: React.FC = () => {
   const { username, logout } = useAuth();
+  const { t } = useTranslation('history');
+  const { t: tc } = useTranslation('common');
   const featureFlags = useFeatureFlags();
   const [selectedZoneId, setSelectedZoneId] = useState<number | null>(null);
   const [selectedCardId, setSelectedCardId] = useState<string | null>(null);
@@ -61,7 +64,7 @@ export const HistoryDashboard: React.FC = () => {
   const availableZones = zones ?? [];
   const shellReady = featureFlags.historyEnabled && availableZones.length > 0 && !zonesError;
   const loadingMessage = featureFlags.historyEnabled && (zonesLoading || cardsLoading)
-    ? 'Loading local history cards...'
+    ? t('history.shell.loadingLocalCards')
     : null;
 
   return (
@@ -71,10 +74,10 @@ export const HistoryDashboard: React.FC = () => {
           <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
             <div>
               <h1 className="text-4xl font-bold text-[var(--header-text)] high-contrast-text">
-                History
+                {t('history.shell.title')}
               </h1>
               <p className="mt-1 text-lg text-[var(--header-subtext)]">
-                Local gateway history for {username}
+                {t('history.shell.subtitle', { username })}
               </p>
             </div>
             <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
@@ -85,14 +88,14 @@ export const HistoryDashboard: React.FC = () => {
                 to="/dashboard"
                 className="rounded-lg bg-[var(--secondary-bg)] px-6 py-3 text-center text-lg font-bold text-[var(--text)] transition-colors hover:bg-[var(--border)]"
               >
-                Legacy dashboard
+                {t('history.nav.legacyDashboard')}
               </Link>
               <button
                 type="button"
                 onClick={logout}
                 className="rounded-lg bg-[var(--secondary-bg)] px-6 py-3 text-lg font-bold text-[var(--text)] transition-colors hover:bg-[var(--border)]"
               >
-                Logout
+                {t('history.nav.logout')}
               </button>
             </div>
           </div>
@@ -102,21 +105,23 @@ export const HistoryDashboard: React.FC = () => {
       <main className="mx-auto max-w-7xl px-4 py-8">
         {!featureFlags.historyEnabled && (
           <section className="rounded-lg border border-[var(--border)] bg-[var(--surface)] p-6">
-            <h2 className="text-2xl font-bold text-[var(--text)]">History is unavailable</h2>
+            <h2 className="text-2xl font-bold text-[var(--text)]">
+              {t('history.shell.unavailableTitle')}
+            </h2>
             <p className="mt-2 max-w-2xl text-[var(--text-tertiary)]">
-              Runtime feature flags keep the new history shell off until the local gateway enables it.
+              {t('history.shell.unavailableBody')}
             </p>
             {featureFlags.error && (
               <div className="mt-4">
                 <p className="text-sm text-[var(--text-tertiary)]">
-                  The feature flag request failed. The legacy dashboard is still available.
+                  {t('history.shell.featureFlagFailed')}
                 </p>
                 <button
                   type="button"
                   onClick={featureFlags.retry}
                   className="mt-3 rounded-md bg-[var(--primary)] px-4 py-2 text-sm font-bold text-white hover:bg-[var(--primary-hover)]"
                 >
-                  Retry
+                  {tc('retry')}
                 </button>
               </div>
             )}
@@ -125,7 +130,9 @@ export const HistoryDashboard: React.FC = () => {
 
         {featureFlags.historyEnabled && zonesError && (
           <section className="rounded-lg border border-[var(--error-bg)] bg-[var(--surface)] p-6">
-            <h2 className="text-2xl font-bold text-[var(--text)]">History zones failed to load</h2>
+            <h2 className="text-2xl font-bold text-[var(--text)]">
+              {t('history.shell.zonesFailedTitle')}
+            </h2>
             <p className="mt-2 text-sm text-[var(--text-tertiary)]">
               {zonesError instanceof Error ? zonesError.message : String(zonesError)}
             </p>
@@ -134,9 +141,11 @@ export const HistoryDashboard: React.FC = () => {
 
         {featureFlags.historyEnabled && !zonesError && availableZones.length === 0 && !zonesLoading && (
           <section className="rounded-lg border border-dashed border-[var(--border)] bg-[var(--surface)] p-6 text-center">
-            <h2 className="text-xl font-bold text-[var(--text)]">No zones yet</h2>
+            <h2 className="text-xl font-bold text-[var(--text)]">
+              {t('history.shell.noZonesTitle')}
+            </h2>
             <p className="mt-2 text-sm text-[var(--text-tertiary)]">
-              Create an irrigation zone from the legacy dashboard before opening thematic history.
+              {t('history.shell.noZonesBody')}
             </p>
           </section>
         )}
@@ -147,13 +156,15 @@ export const HistoryDashboard: React.FC = () => {
 
         {cardsError && (
           <section className="mb-4 rounded-lg border border-[var(--error-bg)] bg-[var(--surface)] p-4">
-            <p className="text-sm font-semibold text-[var(--text)]">History cards failed to load.</p>
+            <p className="text-sm font-semibold text-[var(--text)]">
+              {t('history.shell.cardsFailed')}
+            </p>
             <button
               type="button"
               onClick={refreshCards}
               className="mt-3 rounded-md bg-[var(--primary)] px-4 py-2 text-sm font-bold text-white hover:bg-[var(--primary-hover)]"
             >
-              Retry cards
+              {t('history.shell.retryCards')}
             </button>
           </section>
         )}

@@ -1,4 +1,5 @@
 import React from 'react';
+import { useTranslation } from 'react-i18next';
 import { HistoryCardFrame } from './HistoryCardFrame';
 import { HistorySidebar } from './HistorySidebar';
 import type { HistoryCardSummary } from '../../history/types';
@@ -21,6 +22,8 @@ export const HistoryDesktopShell: React.FC<HistoryDesktopShellProps> = ({
   selectedCard,
   onSelectCard,
 }) => {
+  const { t } = useTranslation('history');
+
   return (
     <div className="hidden min-h-[42rem] overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--bg)] lg:grid lg:grid-cols-[18rem_minmax(0,1fr)_18rem]">
       <HistorySidebar
@@ -35,10 +38,10 @@ export const HistoryDesktopShell: React.FC<HistoryDesktopShellProps> = ({
       <main className="min-w-0 p-4">
         <div className="mb-4 rounded-lg border border-dashed border-[var(--border)] bg-[var(--surface)] px-4 py-3">
           <p className="text-xs font-bold uppercase tracking-wide text-[var(--text-tertiary)]">
-            Toolbar
+            {t('history.desktop.toolbarTitle')}
           </p>
           <p className="mt-1 text-sm text-[var(--text-tertiary)]">
-            Date range, aggregation, export, and sync controls land here in the visualization slice.
+            {t('history.desktop.toolbarPlaceholder')}
           </p>
         </div>
         <HistoryCardFrame card={selectedCard} />
@@ -46,10 +49,10 @@ export const HistoryDesktopShell: React.FC<HistoryDesktopShellProps> = ({
 
       <aside className="border-l border-[var(--border)] bg-[var(--surface)] p-4">
         <h2 className="text-xs font-bold uppercase tracking-wide text-[var(--text-tertiary)]">
-          Inspector
+          {t('history.desktop.inspectorTitle')}
         </h2>
         <p className="mt-3 text-sm text-[var(--text-tertiary)]">
-          Select a timestamp or calendar cell to see interpretation, events, data quality, and advanced metadata.
+          {t('history.desktop.inspectorPlaceholder')}
         </p>
       </aside>
     </div>

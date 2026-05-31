@@ -1,0 +1,92 @@
+{
+  "history": {
+    "nav": {
+      "history": "History",
+      "legacyDashboard": "Legacy dashboard",
+      "logout": "Logout"
+    },
+    "shell": {
+      "title": "History",
+      "subtitle": "Local gateway history for {{username}}",
+      "loadingLocalCards": "Loading local history cards...",
+      "unavailableTitle": "History is unavailable",
+      "unavailableBody": "Runtime feature flags keep the new history shell off until the local gateway enables it.",
+      "featureFlagFailed": "The feature flag request failed. The legacy dashboard is still available.",
+      "zonesFailedTitle": "History zones failed to load",
+      "noZonesTitle": "No zones yet",
+      "noZonesBody": "Create an irrigation zone from the legacy dashboard before opening thematic history.",
+      "cardsFailed": "History cards failed to load.",
+      "retryCards": "Retry cards"
+    },
+    "desktop": {
+      "toolbarTitle": "Toolbar",
+      "toolbarPlaceholder": "Date range, aggregation, export, and sync controls land here in the visualization slice.",
+      "inspectorTitle": "Inspector",
+      "inspectorPlaceholder": "Select a timestamp or calendar cell to see interpretation, events, data quality, and advanced metadata."
+    },
+    "mobile": {
+      "zoneLabel": "Zone"
+    },
+    "sidebar": {
+      "zones": "Zones",
+      "pinnedCards": "Pinned cards",
+      "availableCards": "Available cards",
+      "savedWorkspaces": "Saved workspaces",
+      "workspaceDisabled": "Workspace saving is not enabled on this slice.",
+      "none": "None"
+    },
+    "carousel": {
+      "empty": "No history cards are available for this zone yet.",
+      "ariaLabel": "History card carousel",
+      "cardAriaLabel": "{{title}} card",
+      "cardTypeLabel": "{{cardType}} card",
+      "pinned": "Pinned"
+    },
+    "cardFrame": {
+      "emptyTitle": "Select a history card",
+      "emptyBody": "Choose a zone and thematic card to inspect local history.",
+      "typeHistory": "{{cardType}} history",
+      "viewModes": "{{title}} view modes",
+      "unavailable": "This card is not available for the selected zone.",
+      "placeholderBody": "Chart and calendar data will load here when card data APIs are enabled."
+    },
+    "cardType": {
+      "soil": "Soil",
+      "dendro": "Dendro",
+      "environment": "Environment",
+      "irrigation": "Irrigation",
+      "gateway": "Gateway"
+    },
+    "viewMode": {
+      "soil-profile": "Soil Profile",
+      "line-chart": "Line Chart",
+      "calendar": "Calendar",
+      "irrigation-response": "Irrigation Response",
+      "advanced": "Advanced View",
+      "growth-timeline": "Growth Timeline",
+      "stress-events": "Stress Events",
+      "daily-min-max": "Daily Min/Max",
+      "event-timeline": "Event Timeline",
+      "status-overview": "Status Overview",
+      "connectivity-timeline": "Connectivity Timeline",
+      "local-storage-sync": "Local Storage / Sync State",
+      "power-state": "Power State"
+    },
+    "metadata": {
+      "coverageUnknown": "Coverage unknown",
+      "coverageKnown": "{{coverage}}% coverage",
+      "coverageConfidence": {
+        "configured": "Configured cadence",
+        "derived": "Derived cadence",
+        "unknown": "Cadence unknown"
+      },
+      "syncState": {
+        "local": "Local",
+        "synced": "Synced",
+        "stale": "Stale",
+        "degraded": "Degraded",
+        "unknown": "Unknown"
+      }
+    }
+  }
+}

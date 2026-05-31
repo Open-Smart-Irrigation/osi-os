@@ -10,6 +10,73 @@ import { ThematicCardCarousel } from '../ThematicCardCarousel';
 import { systemAPI, historyAPI, irrigationZonesAPI } from '../../../services/api';
 import type { HistoryCardSummary } from '../../../history/types';
 
+const { translateForTest } = vi.hoisted(() => {
+  const translations: Record<string, string> = {
+    'history.nav.legacyDashboard': 'Legacy dashboard',
+    'history.nav.logout': 'Logout',
+    'history.shell.title': 'History',
+    'history.shell.subtitle': 'Local gateway history for {{username}}',
+    'history.shell.loadingLocalCards': 'Loading local history cards...',
+    'history.shell.unavailableTitle': 'History is unavailable',
+    'history.shell.unavailableBody': 'Runtime feature flags keep the new history shell off until the local gateway enables it.',
+    'history.shell.featureFlagFailed': 'The feature flag request failed. The legacy dashboard is still available.',
+    'history.shell.zonesFailedTitle': 'History zones failed to load',
+    'history.shell.noZonesTitle': 'No zones yet',
+    'history.shell.noZonesBody': 'Create an irrigation zone from the legacy dashboard before opening thematic history.',
+    'history.shell.cardsFailed': 'History cards failed to load.',
+    'history.shell.retryCards': 'Retry cards',
+    'history.desktop.toolbarTitle': 'Toolbar',
+    'history.desktop.toolbarPlaceholder': 'Date range, aggregation, export, and sync controls land here in the visualization slice.',
+    'history.desktop.inspectorTitle': 'Inspector',
+    'history.desktop.inspectorPlaceholder': 'Select a timestamp or calendar cell to see interpretation, events, data quality, and advanced metadata.',
+    'history.mobile.zoneLabel': 'Zone',
+    'history.sidebar.zones': 'Zones',
+    'history.sidebar.pinnedCards': 'Pinned cards',
+    'history.sidebar.availableCards': 'Available cards',
+    'history.sidebar.savedWorkspaces': 'Saved workspaces',
+    'history.sidebar.workspaceDisabled': 'Workspace saving is not enabled on this slice.',
+    'history.sidebar.none': 'None',
+    'history.carousel.empty': 'No history cards are available for this zone yet.',
+    'history.carousel.ariaLabel': 'History card carousel',
+    'history.carousel.cardAriaLabel': '{{title}} card',
+    'history.carousel.cardTypeLabel': '{{cardType}} card',
+    'history.carousel.pinned': 'Pinned',
+    'history.cardFrame.emptyTitle': 'Select a history card',
+    'history.cardFrame.emptyBody': 'Choose a zone and thematic card to inspect local history.',
+    'history.cardFrame.typeHistory': '{{cardType}} history',
+    'history.cardFrame.viewModes': '{{title}} view modes',
+    'history.cardFrame.unavailable': 'This card is not available for the selected zone.',
+    'history.cardFrame.placeholderBody': 'Chart and calendar data will load here when card data APIs are enabled.',
+    'history.cardType.soil': 'Soil',
+    'history.cardType.dendro': 'Dendro',
+    'history.cardType.environment': 'Environment',
+    'history.cardType.irrigation': 'Irrigation',
+    'history.cardType.gateway': 'Gateway',
+    'history.viewMode.soil-profile': 'Soil Profile',
+    'history.viewMode.line-chart': 'Line Chart',
+    'history.viewMode.growth-timeline': 'Growth Timeline',
+    'history.viewMode.stress-events': 'Stress Events',
+    'history.metadata.coverageUnknown': 'Coverage unknown',
+    'history.metadata.coverageKnown': '{{coverage}}% coverage',
+    'history.metadata.coverageConfidence.configured': 'Configured cadence',
+    'history.metadata.coverageConfidence.derived': 'Derived cadence',
+    'history.metadata.coverageConfidence.unknown': 'Cadence unknown',
+    'history.metadata.syncState.local': 'Local',
+    'history.metadata.syncState.synced': 'Synced',
+    'history.metadata.syncState.stale': 'Stale',
+    'history.metadata.syncState.degraded': 'Degraded',
+    'history.metadata.syncState.unknown': 'Unknown',
+    retry: 'Retry',
+  };
+
+  return {
+    translateForTest: (key: string, options?: Record<string, unknown>): string => {
+      const template = translations[key] ?? key;
+      return template.replace(/\{\{(\w+)\}\}/g, (_, name) => String(options?.[name] ?? ''));
+    },
+  };
+});
+
 vi.mock('../../../contexts/AuthContext', () => ({
   useAuth: () => ({
     username: 'operator',
@@ -19,6 +86,12 @@ vi.mock('../../../contexts/AuthContext', () => ({
 
 vi.mock('../../../components/LanguageSwitcher', () => ({
   LanguageSwitcher: () => React.createElement('div', null, 'Language'),
+}));
+
+vi.mock('react-i18next', () => ({
+  useTranslation: () => ({
+    t: translateForTest,
+  }),
 }));
 
 vi.mock('../../../services/api', () => ({

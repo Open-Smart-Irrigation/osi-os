@@ -1,32 +1,54 @@
 import React, { useState } from 'react';
-import type { HistoryCardSummary, HistoryViewMode } from '../../history/types';
+import { useTranslation } from 'react-i18next';
+import type {
+  CoverageConfidence,
+  HistoryCardSummary,
+  HistoryCardType,
+  HistorySyncState,
+  HistoryViewMode,
+} from '../../history/types';
 
 interface HistoryCardFrameProps {
   card: HistoryCardSummary | null;
 }
 
-function formatCoverage(coveragePct: number | null | undefined): string {
-  if (coveragePct === null || coveragePct === undefined) return 'Coverage unknown';
-  return `${Math.round(coveragePct)}% coverage`;
+function formatCoverage(
+  t: (key: string, options?: Record<string, unknown>) => string,
+  coveragePct: number | null | undefined,
+): string {
+  if (coveragePct === null || coveragePct === undefined) return t('history.metadata.coverageUnknown');
+  return t('history.metadata.coverageKnown', { coverage: Math.round(coveragePct) });
 }
 
-function formatViewLabel(view: HistoryViewMode): string {
-  return view
-    .split('-')
-    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
-    .join(' ');
+function formatViewLabel(t: (key: string) => string, view: HistoryViewMode): string {
+  return t(`history.viewMode.${view}`);
+}
+
+function formatCardType(t: (key: string) => string, cardType: HistoryCardType): string {
+  return t(`history.cardType.${cardType}`);
+}
+
+function formatCoverageConfidence(t: (key: string) => string, value: CoverageConfidence): string {
+  return t(`history.metadata.coverageConfidence.${value}`);
+}
+
+function formatSyncState(t: (key: string) => string, value: HistorySyncState): string {
+  return t(`history.metadata.syncState.${value}`);
 }
 
 export const HistoryCardFrame: React.FC<HistoryCardFrameProps> = ({ card }) => {
+  const { t } = useTranslation('history');
   const [viewModesByCard, setViewModesByCard] = useState<Record<string, HistoryViewMode>>({});
 
   if (!card) {
     return (
       <section className="bg-[var(--surface)] border border-[var(--border)] rounded-lg p-6 min-h-[22rem] flex items-center justify-center">
         <div className="text-center">
-          <h2 className="text-xl font-bold text-[var(--text)]">Select a history card</h2>
+          <h2 className="text-xl font-bold text-[var(--text)]">
+            {t('history.cardFrame.emptyTitle')}
+          </h2>
           <p className="mt-2 text-sm text-[var(--text-tertiary)]">
-            Choose a zone and thematic card to inspect local history.
+            {t('history.cardFrame.emptyBody')}
           </p>
         </div>
       </section>
@@ -41,7 +63,7 @@ export const HistoryCardFrame: React.FC<HistoryCardFrameProps> = ({ card }) => {
         <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
           <div>
             <p className="text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)]">
-              {card.cardType} history
+              {t('history.cardFrame.typeHistory', { cardType: formatCardType(t, card.cardType) })}
             </p>
             <h2 className="mt-1 text-2xl font-bold text-[var(--text)]">{card.title}</h2>
             {card.subtitle && (
@@ -50,20 +72,20 @@ export const HistoryCardFrame: React.FC<HistoryCardFrameProps> = ({ card }) => {
           </div>
           <div className="flex flex-wrap gap-2 text-xs">
             <span className="rounded-md border border-[var(--border)] bg-[var(--secondary-bg)] px-2 py-1 text-[var(--text)]">
-              {formatCoverage(card.metadata.coveragePct)}
+              {formatCoverage(t, card.metadata.coveragePct)}
             </span>
             <span className="rounded-md border border-[var(--border)] bg-[var(--secondary-bg)] px-2 py-1 text-[var(--text)]">
-              {card.metadata.coverageConfidence}
+              {formatCoverageConfidence(t, card.metadata.coverageConfidence)}
             </span>
             {card.metadata.syncState && (
               <span className="rounded-md border border-[var(--border)] bg-[var(--secondary-bg)] px-2 py-1 text-[var(--text)]">
-                {card.metadata.syncState}
+                {formatSyncState(t, card.metadata.syncState)}
               </span>
             )}
           </div>
         </div>
 
-        <div className="mt-4 flex flex-wrap gap-2" aria-label={`${card.title} view modes`}>
+        <div className="mt-4 flex flex-wrap gap-2" aria-label={t('history.cardFrame.viewModes', { title: card.title })}>
           {card.views.map((view) => (
             <button
               key={view}
@@ -76,7 +98,7 @@ export const HistoryCardFrame: React.FC<HistoryCardFrameProps> = ({ card }) => {
                   : 'border-[var(--border)] bg-[var(--secondary-bg)] text-[var(--text)] hover:bg-[var(--border)]'
               }`}
             >
-              {formatViewLabel(view)}
+              {formatViewLabel(t, view)}
             </button>
           ))}
         </div>
@@ -85,14 +107,14 @@ export const HistoryCardFrame: React.FC<HistoryCardFrameProps> = ({ card }) => {
       <div className="p-5">
         {!card.availability.available && (
           <div className="mb-4 rounded-lg border border-[var(--warning-bg)] bg-[var(--warning-bg)] px-4 py-3 text-sm text-[var(--warning-text)]">
-            This card is not available for the selected zone.
+            {t('history.cardFrame.unavailable')}
           </div>
         )}
 
         <div className="rounded-lg border border-dashed border-[var(--border)] bg-[var(--bg)] p-6">
-          <p className="text-sm font-semibold text-[var(--text)]">{formatViewLabel(selectedView)}</p>
+          <p className="text-sm font-semibold text-[var(--text)]">{formatViewLabel(t, selectedView)}</p>
           <p className="mt-2 text-sm text-[var(--text-tertiary)]">
-            Chart and calendar data will load here when card data APIs are enabled.
+            {t('history.cardFrame.placeholderBody')}
           </p>
         </div>
       </div>

@@ -1,4 +1,5 @@
 import React from 'react';
+import { useTranslation } from 'react-i18next';
 import { HistoryCardFrame } from './HistoryCardFrame';
 import { ThematicCardCarousel } from './ThematicCardCarousel';
 import type { HistoryCardSummary } from '../../history/types';
@@ -21,11 +22,13 @@ export const HistoryMobileShell: React.FC<HistoryMobileShellProps> = ({
   selectedCard,
   onSelectCard,
 }) => {
+  const { t } = useTranslation('history');
+
   return (
     <div className="space-y-4 lg:hidden">
       <label className="block">
         <span className="text-xs font-bold uppercase tracking-wide text-[var(--text-tertiary)]">
-          Zone
+          {t('history.mobile.zoneLabel')}
         </span>
         <select
           className="mt-2 w-full rounded-lg border border-[var(--border)] bg-[var(--surface)] px-3 py-3 text-[var(--text)]"
