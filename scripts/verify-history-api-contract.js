@@ -104,6 +104,59 @@ function hasHistoryHelperLib(node) {
   );
 }
 
+function findHistoryRouter(flows) {
+  return flows.find((node) =>
+    node.type === 'function' &&
+    String(node.name || '').trim() === 'History API Router'
+  ) || null;
+}
+
+function assertContains(failures, source, needle, description) {
+  if (!source.includes(needle)) {
+    failures.push(`history router missing ${description}`);
+  }
+}
+
+function assertNotContains(failures, source, needle, description) {
+  if (source.includes(needle)) {
+    failures.push(`history router still contains ${description}`);
+  }
+}
+
+function verifyHistoryRouterImplementation(flows, failures) {
+  const router = findHistoryRouter(flows);
+  if (!router) {
+    failures.push('missing History API Router function node');
+    return;
+  }
+
+  const source = String(router.func || '');
+  assertContains(failures, source, 'verifyBearer(msg.req && msg.req.headers && msg.req.headers.authorization)', 'bearer auth gate');
+  assertContains(failures, source, "httpError(404, 'Zone not found or access denied')", 'owned-zone 404 branch');
+  assertContains(failures, source, "httpError(404, 'History card not found')", 'missing-card 404 branch');
+  assertContains(failures, source, 'if (!deveuis.length)', 'empty known-card response branch');
+  assertContains(failures, source, 'supportedRangesForCard(config, scopeContext)', 'date-range availability gating');
+  assertContains(failures, source, 'getActiveZoneSeason', 'active season lookup');
+  assertContains(failures, source, 'zone_seasons', 'zone_seasons-backed season range');
+  assertContains(failures, source, 'Season range is unavailable for this zone', 'season-unavailable 400 contract');
+  assertContains(failures, source, 'Season range uses zone season boundaries; use custom for explicit from/to', 'season explicit-from/to rejection');
+  assertContains(failures, source, 'shouldUseHistoryRollups(scopeContext, range.label, aggregationRequested)', 'long-range rollup gate');
+  assertContains(failures, source, 'soilRowsHaveWarning(latestRows)', 'merged soil summary warning classifier');
+  assertContains(failures, source, 'environmentRowsHaveWarning(latestRows)', 'merged environment summary warning classifier');
+
+  const seasonBranchIndex = source.indexOf("if (rawLabel === 'season')");
+  const explicitRangeIndex = source.indexOf('if (fromRaw || toRaw)');
+  if (seasonBranchIndex === -1 || explicitRangeIndex === -1 || seasonBranchIndex > explicitRangeIndex) {
+    failures.push('history router must resolve/reject season before accepting explicit from/to ranges');
+  }
+
+  assertNotContains(failures, source, "season: 120 * 24 * 60 * 60 * 1000", 'synthetic trailing season range');
+  assertNotContains(failures, source, "useRollups: scopeContext.scope === 'zone'", 'unconditional zone rollup reads');
+  assertNotContains(failures, source, 'supportedRanges: config.supportedRanges.slice()', 'ungated supportedRanges copy');
+  assertNotContains(failures, source, 'latestRows[0]', 'single-row merged summary classification');
+  assertNotContains(failures, source, 'sync_outbox', 'edge sync outbox mutation from local-only history preferences/workspaces');
+}
+
 function readFlows(flowPath) {
   const source = fs.readFileSync(flowPath, 'utf8');
   const parsed = JSON.parse(source);
@@ -166,6 +219,10 @@ function verify(options) {
 
   for (const item of pending) {
     console.log(`PENDING ${item}`);
+  }
+
+  if (!allowPendingMissing) {
+    verifyHistoryRouterImplementation(flows, failures);
   }
 
   if (failures.length) {
