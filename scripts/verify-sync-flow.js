@@ -2688,6 +2688,23 @@ expectFileIncludes('osi-cloud-http/package.json', cloudHttpPackageSource, '"name
 expectFileIncludes('node-red/package.json', nodeRedPackageSource, '"osi-cloud-http": "file:osi-cloud-http"', 'installs the helper package as a local dependency');
 expectFileIncludes('node-red/package.json', nodeRedPackageSource, '"osi-history-helper": "file:osi-history-helper"', 'installs the history helper package as a local dependency');
 
+for (const helperPackage of [
+  'osi-chameleon-helper',
+  'osi-chirpstack-helper',
+  'osi-cloud-http',
+  'osi-db-helper',
+  'osi-dendro-helper',
+  'osi-history-helper'
+]) {
+  const helperNodeModulePath = path.join(nodeRedRoot, 'node_modules', helperPackage);
+  const stat = fs.existsSync(helperNodeModulePath) ? fs.lstatSync(helperNodeModulePath) : null;
+  expectCondition(
+    !!stat && stat.isSymbolicLink(),
+    `node-red/node_modules/${helperPackage} is a tracked local-helper symlink`,
+    `missing tracked node-red/node_modules/${helperPackage} local-helper symlink`
+  );
+}
+
 const rawDbNodes = flows.filter(
   (node) => typeof node.func === 'string' && node.func.includes("new sqlite3.Database('/data/db/farming.db')")
 );
