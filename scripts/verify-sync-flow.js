@@ -287,6 +287,20 @@ function fail(message) {
   process.exitCode = 1;
 }
 
+function runQuietNodeScript(scriptName, description) {
+  try {
+    execFileSync(process.execPath, [path.resolve(__dirname, scriptName)], {
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    console.log(`OK ${description}`);
+  } catch (error) {
+    if (error.stdout) process.stdout.write(error.stdout);
+    if (error.stderr) process.stderr.write(error.stderr);
+    fail(`${scriptName} failed`);
+  }
+}
+
 function findNodeByName(name) {
   return flows.find((node) => node.name === name);
 }
@@ -2779,13 +2793,14 @@ if (!historyHelperPath) {
   fail(`missing history helper module at one of: ${historyHelperCandidates.join(', ')}`);
 } else {
   const historyHelper = require(historyHelperPath);
-  for (const exportName of ['normalizeDeveui', 'deriveCardId', 'deriveCardsForZone', 'deriveGatewayCard', 'classifySoilStatus', 'classifyEnvironmentStatus', 'classifyDendroStatus', 'deriveExpectedCadenceSeconds', 'aggregateRows', 'aggregateDeviceData', 'buildLocalInterpretations']) {
+  for (const exportName of ['normalizeDeveui', 'deriveCardId', 'deriveCardsForZone', 'deriveGatewayCard', 'resolveAggregation', 'classifySoilStatus', 'classifyEnvironmentStatus', 'classifyDendroStatus', 'classifyIrrigationStatus', 'classifyGatewayStatus', 'deriveExpectedCadenceSeconds', 'aggregateRows', 'aggregateDeviceData', 'buildAdvancedMetadataPlaceholder', 'buildLocalInterpretations']) {
     if (typeof historyHelper[exportName] !== 'function') {
       fail(`history helper missing export ${exportName}`);
     } else {
       console.log(`OK history helper exports ${exportName}`);
     }
   }
+  runQuietNodeScript('test-history-helper.js', 'SQL-backed history helper tests pass');
 }
 
 const dendroHelperPath = dendroHelperCandidates.find((candidate) => fs.existsSync(candidate));

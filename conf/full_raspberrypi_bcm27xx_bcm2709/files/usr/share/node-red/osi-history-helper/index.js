@@ -16,6 +16,8 @@ const BUCKET_SECONDS = {
   weekly: 7 * 24 * 60 * 60,
 };
 
+const ALLOWED_AGGREGATIONS = new Set(['raw', '15m', 'hourly', 'daily', 'weekly']);
+
 const ALLOWED_DEVICE_DATA_CHANNELS = new Set([
   'swt_1',
   'swt_2',
@@ -252,12 +254,83 @@ function classifyDendroStatus(input = {}) {
   return { status: 'normal_growth', severity: 'normal', value: roundTo(growthUm ?? mdsUm ?? recoveryRatio) };
 }
 
+function classifyIrrigationStatus(input = {}) {
+  if (input.manualOverride === true || input.manual_override === true) {
+    return { status: 'manual_override', severity: 'info' };
+  }
+  if (input.possibleIneffectiveIrrigation === true || input.possible_ineffective_irrigation === true) {
+    return { status: 'possible_ineffective_irrigation', severity: 'warning' };
+  }
+  const eventCount = firstFinite(input, ['eventCount', 'event_count', 'irrigationEventCount', 'irrigation_event_count']);
+  if (eventCount === null) return { status: 'no_data', severity: 'info', eventCount: null };
+  const highFrequencyThreshold = toFiniteNumber(input.highFrequencyThreshold ?? input.high_frequency_threshold) ?? 3;
+  if (eventCount >= highFrequencyThreshold) {
+    return { status: 'high_irrigation_frequency', severity: 'warning', eventCount: Math.round(eventCount) };
+  }
+  if (eventCount > 0) return { status: 'irrigation_event', severity: 'info', eventCount: Math.round(eventCount) };
+  return { status: 'no_irrigation', severity: 'normal', eventCount: 0 };
+}
+
+function classifyGatewayStatus(input = {}) {
+  const generatedAt = parseTime(input.generatedAt || input.generated_at) ?? Date.now();
+  const lastSeenAt = parseTime(input.lastSeenAt || input.last_seen_at || input.recorded_at);
+  if (lastSeenAt === null) return { status: 'no_data', severity: 'info', lastSeenAt: null };
+  const offlineAfterSeconds = toFiniteNumber(input.offlineAfterSeconds ?? input.offline_after_seconds) ?? (10 * 60);
+  const ageSeconds = Math.max(0, Math.round((generatedAt - lastSeenAt) / 1000));
+  if (ageSeconds > offlineAfterSeconds) {
+    return { status: 'offline', severity: 'warning', lastSeenAt: new Date(lastSeenAt).toISOString(), ageSeconds };
+  }
+  return { status: 'normal', severity: 'normal', lastSeenAt: new Date(lastSeenAt).toISOString(), ageSeconds };
+}
+
 function median(values) {
   const sorted = values.slice().sort((a, b) => a - b);
   if (sorted.length === 0) return null;
   const middle = Math.floor(sorted.length / 2);
   if (sorted.length % 2) return sorted[middle];
   return (sorted[middle - 1] + sorted[middle]) / 2;
+}
+
+function durationSecondsBetween(start, end) {
+  const startMs = parseTime(start);
+  const endMs = parseTime(end);
+  if (startMs === null || endMs === null || endMs <= startMs) return null;
+  return (endMs - startMs) / 1000;
+}
+
+function resolveAggregation(options = {}) {
+  const requested = String(options.aggregation || 'auto').trim().toLowerCase();
+  if (requested !== 'auto') {
+    if (!ALLOWED_AGGREGATIONS.has(requested)) throw new Error(`unsupported aggregation: ${requested}`);
+    return {
+      requested,
+      level: requested,
+      bucketSizeSeconds: requested === 'raw' ? null : BUCKET_SECONDS[requested],
+    };
+  }
+
+  const range = String(options.range || options.rangeLabel || options.range_label || '').trim().toLowerCase();
+  const durationSeconds = durationSecondsBetween(options.start || options.startAt || options.from, options.end || options.endAt || options.to);
+  let level = 'raw';
+  if (range === '7d') {
+    level = 'hourly';
+  } else if (range === '30d') {
+    level = 'daily';
+  } else if (range === 'season') {
+    level = durationSeconds !== null && durationSeconds > (120 * 24 * 60 * 60) ? 'weekly' : 'daily';
+  } else if (durationSeconds !== null) {
+    if (durationSeconds <= 24 * 60 * 60) level = 'raw';
+    else if (durationSeconds <= 48 * 60 * 60) level = '15m';
+    else if (durationSeconds <= 8 * 24 * 60 * 60) level = 'hourly';
+    else if (durationSeconds <= 120 * 24 * 60 * 60) level = 'daily';
+    else level = 'weekly';
+  }
+
+  return {
+    requested: 'auto',
+    level,
+    bucketSizeSeconds: level === 'raw' ? null : BUCKET_SECONDS[level],
+  };
 }
 
 function deriveExpectedCadenceSeconds(options = {}) {
@@ -315,14 +388,151 @@ function statsForValues(values) {
   };
 }
 
-function coverageFor(sampleCount, expectedCadenceSeconds, bucketSeconds, channelCount) {
-  if (!expectedCadenceSeconds || expectedCadenceSeconds <= 0 || !bucketSeconds || !channelCount) return null;
-  const expected = Math.max(1, Math.ceil(bucketSeconds / expectedCadenceSeconds)) * channelCount;
-  return roundTo(Math.min(100, (sampleCount / expected) * 100));
+function rowSourceKey(row, channel) {
+  const raw = row.sourceKey
+    || row.source_key
+    || row.seriesId
+    || row.series_id
+    || row.cardSourceId
+    || row.card_source_id
+    || row.logicalSourceKey
+    || row.logical_source_key
+    || row.deveui
+    || row.device_eui
+    || row.deviceEui
+    || channel.sourceKey
+    || channel.source_key
+    || 'default';
+  return normalizeDeveui(raw) || String(raw || 'default').trim() || 'default';
+}
+
+function sourceChannelKey(sourceKey, channel) {
+  return `${sourceKey}|${channel.id}`;
+}
+
+function configuredCadenceFor(options, sourceKey, channel, key) {
+  const maps = [
+    options.expectedCadences,
+    options.expectedCadenceBySource,
+    options.expectedCadenceSecondsBySource,
+    options.expected_cadences,
+  ].filter((value) => value && typeof value === 'object');
+  const candidates = [key, `${sourceKey}|${channel.field}`, sourceKey, channel.id, channel.field];
+  for (const map of maps) {
+    for (const candidate of candidates) {
+      if (Object.prototype.hasOwnProperty.call(map, candidate)) {
+        const value = map[candidate];
+        const seconds = toFiniteNumber(value && typeof value === 'object' ? value.seconds : value);
+        if (seconds !== null && seconds > 0) return Math.round(seconds);
+      }
+    }
+  }
+  const fallback = toFiniteNumber(options.expectedCadenceSeconds ?? options.configuredCadenceSeconds);
+  return fallback !== null && fallback > 0 ? Math.round(fallback) : null;
+}
+
+function sourceChannelSamples(sortedRows, channels) {
+  const samples = new Map();
+  for (const entry of sortedRows) {
+    for (const channel of channels) {
+      if (toFiniteNumber(entry.row[channel.field]) === null) continue;
+      const sourceKey = rowSourceKey(entry.row, channel);
+      const key = sourceChannelKey(sourceKey, channel);
+      if (!samples.has(key)) {
+        samples.set(key, {
+          key,
+          sourceKey,
+          channelId: channel.id,
+          channelField: channel.field,
+          times: [],
+        });
+      }
+      samples.get(key).times.push(entry.recordedAtMs);
+    }
+  }
+  return samples;
+}
+
+function cadenceFromTimes(times) {
+  const sorted = times.slice().sort((a, b) => a - b);
+  const deltas = [];
+  for (let index = 1; index < sorted.length; index += 1) {
+    const deltaSeconds = (sorted[index] - sorted[index - 1]) / 1000;
+    if (deltaSeconds > 0) deltas.push(deltaSeconds);
+  }
+  const medianDelta = median(deltas);
+  return medianDelta !== null && medianDelta > 0 ? Math.round(medianDelta) : null;
+}
+
+function deriveSourceCadences(sortedRows, channels, options = {}, allowDerived = true) {
+  const samples = sourceChannelSamples(sortedRows, channels);
+  const cadences = {};
+  for (const sample of samples.values()) {
+    const channel = channels.find((candidate) => candidate.id === sample.channelId) || { id: sample.channelId, field: sample.channelField };
+    const configured = configuredCadenceFor(options, sample.sourceKey, channel, sample.key);
+    if (configured !== null) {
+      cadences[sample.key] = {
+        seconds: configured,
+        confidence: 'configured',
+        sourceKey: sample.sourceKey,
+        channelId: sample.channelId,
+      };
+      continue;
+    }
+    const derived = allowDerived ? cadenceFromTimes(sample.times) : null;
+    cadences[sample.key] = {
+      seconds: derived,
+      confidence: derived === null ? 'unknown' : 'derived',
+      sourceKey: sample.sourceKey,
+      channelId: sample.channelId,
+    };
+  }
+  return cadences;
+}
+
+function combineCadenceConfidence(sourceCadences) {
+  const values = Object.values(sourceCadences);
+  if (values.length === 0 || values.some((cadence) => !cadence.seconds || cadence.confidence === 'unknown')) return 'unknown';
+  return values.some((cadence) => cadence.confidence === 'derived') ? 'derived' : 'configured';
+}
+
+function commonCadenceSeconds(sourceCadences) {
+  const seconds = Array.from(new Set(Object.values(sourceCadences).map((cadence) => cadence.seconds).filter(Boolean)));
+  return seconds.length === 1 ? seconds[0] : null;
+}
+
+function coverageForBucket(bucketRows, channels, sourceCadences, bucketSeconds) {
+  if (!bucketSeconds) return { coveragePct: null, coverageConfidence: combineCadenceConfidence(sourceCadences) };
+  const entries = Object.entries(sourceCadences);
+  if (entries.length === 0 || entries.some(([, cadence]) => !cadence.seconds)) {
+    return { coveragePct: null, coverageConfidence: 'unknown' };
+  }
+
+  const observed = {};
+  for (const entry of bucketRows) {
+    for (const channel of channels) {
+      if (toFiniteNumber(entry.row[channel.field]) === null) continue;
+      const key = sourceChannelKey(rowSourceKey(entry.row, channel), channel);
+      observed[key] = (observed[key] || 0) + 1;
+    }
+  }
+
+  let observedTotal = 0;
+  let expectedTotal = 0;
+  for (const [key, cadence] of entries) {
+    observedTotal += observed[key] || 0;
+    expectedTotal += Math.max(1, Math.ceil(bucketSeconds / cadence.seconds));
+  }
+  return {
+    coveragePct: expectedTotal > 0 ? roundTo(Math.min(100, (observedTotal / expectedTotal) * 100)) : null,
+    coverageConfidence: combineCadenceConfidence(sourceCadences),
+  };
 }
 
 function aggregateRows(rows, options = {}) {
-  const aggregation = String(options.aggregation || 'raw');
+  const aggregationInfo = resolveAggregation(options);
+  const aggregation = aggregationInfo.level;
+  const aggregationRequested = options.aggregationRequested || aggregationInfo.requested;
   const channels = normalizeChannels(options.channels);
   const startMs = parseTime(options.start || options.startAt || options.from);
   const endMs = parseTime(options.end || options.endAt || options.to);
@@ -334,8 +544,11 @@ function aggregateRows(rows, options = {}) {
     .filter((entry) => (startMs === null || entry.recordedAtMs >= startMs) && (endMs === null || entry.recordedAtMs < endMs))
     .sort((a, b) => a.recordedAtMs - b.recordedAtMs);
 
-  let cadence = deriveExpectedCadenceSeconds({ configuredCadenceSeconds: options.expectedCadenceSeconds, rows: aggregation === 'raw' ? [] : sortedRows.map((entry) => entry.row) });
-  if (options.expectedCadenceSeconds === null && aggregation === 'raw') cadence = { seconds: null, confidence: 'unknown' };
+  const sourceCadences = deriveSourceCadences(sortedRows, channels, options, aggregation !== 'raw');
+  const cadence = {
+    seconds: commonCadenceSeconds(sourceCadences),
+    confidence: combineCadenceConfidence(sourceCadences),
+  };
 
   if (aggregation === 'raw') {
     const series = {};
@@ -349,10 +562,13 @@ function aggregateRows(rows, options = {}) {
     }
     return {
       aggregation: 'raw',
+      aggregationRequested,
+      bucketSizeSeconds: null,
       source: 'device_data',
       expectedCadenceSeconds: cadence.seconds,
       coverageConfidence: cadence.confidence,
       coveragePct: null,
+      sourceCadences,
       series,
     };
   }
@@ -391,20 +607,25 @@ function aggregateRows(rows, options = {}) {
       };
       bucket.sampleCount += bucket.series[channel.id].sampleCount;
     }
-    bucket.coveragePct = coverageFor(bucket.sampleCount, cadence.seconds, (bucket.bucketEndMs - bucket.bucketStartMs) / 1000, channels.length);
-    bucket.coverageConfidence = cadence.confidence;
+    const coverage = coverageForBucket(bucketRows, channels, sourceCadences, (bucket.bucketEndMs - bucket.bucketStartMs) / 1000);
+    bucket.coveragePct = coverage.coveragePct;
+    bucket.coverageConfidence = coverage.coverageConfidence;
     delete bucket.bucketStartMs;
     delete bucket.bucketEndMs;
   }
 
   const totalSamples = buckets.reduce((sum, bucket) => sum + bucket.sampleCount, 0);
   const totalSeconds = (endMs - startMs) / 1000;
+  const totalCoverage = coverageForBucket(sortedRows, channels, sourceCadences, totalSeconds);
   return {
     aggregation,
+    aggregationRequested,
+    bucketSizeSeconds: aggregationInfo.bucketSizeSeconds,
     source: 'device_data',
     expectedCadenceSeconds: cadence.seconds,
-    coverageConfidence: cadence.confidence,
-    coveragePct: coverageFor(totalSamples, cadence.seconds, totalSeconds, channels.length),
+    coverageConfidence: totalCoverage.coverageConfidence,
+    coveragePct: totalCoverage.coveragePct,
+    sourceCadences,
     buckets,
   };
 }
@@ -505,6 +726,8 @@ function rollupRowsToResult(rows, query, channels) {
     : (buckets.some((bucket) => bucket.coverageConfidence === 'derived') ? 'derived' : 'configured');
   return {
     aggregation: query.aggregation,
+    aggregationRequested: query.aggregationRequested || query.aggregation,
+    bucketSizeSeconds: BUCKET_SECONDS[query.aggregation] || null,
     source: 'history_channel_rollups',
     coverageConfidence: buckets.length ? coverageConfidence : 'unknown',
     coveragePct: coverageValues.length ? roundTo(coverageValues.reduce((sum, value) => sum + value, 0) / coverageValues.length) : null,
@@ -513,21 +736,22 @@ function rollupRowsToResult(rows, query, channels) {
 }
 
 async function aggregateDeviceData(db, query = {}) {
-  const aggregation = String(query.aggregation || 'raw');
+  const aggregationInfo = resolveAggregation(query);
+  const aggregation = aggregationInfo.level;
   const channels = normalizeQueryChannels(query.channels);
   const start = query.start || query.startAt || query.from;
   const end = query.end || query.endAt || query.to;
   if (!start || !end) throw new Error('aggregateDeviceData requires start and end');
 
   const hasRollupIdentity = query.zoneId !== undefined && query.cardType && query.logicalSourceKey;
-  const shouldUseRollups = query.useRollups === true || (query.useRollups !== false && hasRollupIdentity && ['daily', 'weekly', 'season'].includes(aggregation));
+  const shouldUseRollups = query.useRollups === true || (query.useRollups !== false && hasRollupIdentity && ['daily', 'weekly'].includes(aggregation));
   if (shouldUseRollups) {
     const channelIds = channels.map((channel) => channel.id);
     const placeholders = channelIds.map(() => '?').join(',');
     const sql = `SELECT * FROM history_channel_rollups WHERE zone_id = ? AND card_type = ? AND logical_source_key = ? AND bucket_level = ? AND bucket_start >= ? AND bucket_start < ? AND channel_id IN (${placeholders}) ORDER BY bucket_start ASC, channel_id ASC`;
     const params = [query.zoneId, query.cardType, query.logicalSourceKey, aggregation, start, end].concat(channelIds);
     const rows = await dbAll(db, sql, params);
-    return rollupRowsToResult(rows, { ...query, aggregation }, channels);
+    return rollupRowsToResult(rows, { ...query, aggregation, aggregationRequested: aggregationInfo.requested }, channels);
   }
 
   const deveuis = (Array.isArray(query.deveuis) ? query.deveuis : [query.deveui])
@@ -539,7 +763,7 @@ async function aggregateDeviceData(db, query = {}) {
   const sql = `SELECT deveui, recorded_at, ${selectedFields.join(', ')} FROM device_data WHERE deveui IN (${placeholders}) AND recorded_at BETWEEN ? AND ? ORDER BY recorded_at ASC`;
   const params = deveuis.concat([start, end]);
   const rows = await dbAll(db, sql, params);
-  return aggregateRows(rows, { ...query, aggregation, channels, start, end });
+  return aggregateRows(rows, { ...query, aggregation, aggregationRequested: aggregationInfo.requested, channels, start, end });
 }
 
 function hoursBetween(start, end) {
@@ -594,16 +818,51 @@ function buildLocalInterpretations(input = {}) {
   return items;
 }
 
+function buildAdvancedMetadataPlaceholder(input = {}) {
+  const cardType = normalizeCardType(input.cardType || input.card_type) || 'unknown';
+  const sourceDevices = (Array.isArray(input.sourceDevices) ? input.sourceDevices : [])
+    .map((device) => ({
+      deveui: normalizeDeveui(device.deveui || device.device_eui || device.deviceEui),
+      typeId: String(device.type_id || device.typeId || device.type || '').trim().toUpperCase() || null,
+      name: device.name ? String(device.name) : null,
+      firmwareVersion: device.firmware_version || device.firmwareVersion || null,
+    }))
+    .filter((device) => device.deveui)
+    .sort((left, right) => left.deveui.localeCompare(right.deveui));
+  const availableFields = (Array.isArray(input.availableFields) ? input.availableFields : [])
+    .map((field) => String(field || '').trim())
+    .filter(Boolean)
+    .sort();
+
+  return {
+    schemaVersion: 1,
+    cardType,
+    placeholder: true,
+    generatedAt: input.generatedAt || input.generated_at || new Date(0).toISOString(),
+    availableFields,
+    sourceDevices,
+    sections: [
+      { id: 'source-devices', status: sourceDevices.length ? 'available' : 'not_available', itemCount: sourceDevices.length },
+      { id: 'radio-diagnostics', status: availableFields.some((field) => ['rssi', 'snr'].includes(field)) ? 'partial' : 'not_available' },
+      { id: 'raw-payloads', status: availableFields.includes('raw_payload') ? 'partial' : 'not_available' },
+    ],
+  };
+}
+
 module.exports = {
   normalizeDeveui,
   deriveCardId,
   deriveCardsForZone,
   deriveGatewayCard,
+  resolveAggregation,
   classifySoilStatus,
   classifyEnvironmentStatus,
   classifyDendroStatus,
+  classifyIrrigationStatus,
+  classifyGatewayStatus,
   deriveExpectedCadenceSeconds,
   aggregateRows,
   aggregateDeviceData,
+  buildAdvancedMetadataPlaceholder,
   buildLocalInterpretations,
 };
