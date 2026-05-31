@@ -410,6 +410,67 @@ function sourceChannelKey(sourceKey, channel) {
   return `${sourceKey}|${channel.id}`;
 }
 
+function normalizeSourceKey(value) {
+  if (value === null || value === undefined) return null;
+  const raw = typeof value === 'object'
+    ? (value.sourceKey
+      || value.source_key
+      || value.seriesId
+      || value.series_id
+      || value.cardSourceId
+      || value.card_source_id
+      || value.logicalSourceKey
+      || value.logical_source_key
+      || value.deveui
+      || value.device_eui
+      || value.deviceEui
+      || value.id)
+    : value;
+  if (raw === null || raw === undefined) return null;
+  const normalized = normalizeDeveui(raw) || String(raw).trim();
+  return normalized || null;
+}
+
+function requestedSourceKeys(options = {}) {
+  const lists = [
+    options.sourceKeys,
+    options.source_keys,
+    options.requestedSourceKeys,
+    options.requested_source_keys,
+    options.requestedSources,
+    options.requested_sources,
+    options.deveuis,
+    options.deviceEuis,
+    options.device_euis,
+    options.sourceDevices,
+    options.source_devices,
+  ].filter(Array.isArray);
+  const keys = [];
+  const seen = new Set();
+  for (const list of lists) {
+    for (const item of list) {
+      const key = normalizeSourceKey(item);
+      if (!key || seen.has(key)) continue;
+      seen.add(key);
+      keys.push(key);
+    }
+  }
+  return keys;
+}
+
+function addSourceChannelSample(samples, sourceKey, channel) {
+  const key = sourceChannelKey(sourceKey, channel);
+  if (!samples.has(key)) {
+    samples.set(key, {
+      key,
+      sourceKey,
+      channelId: channel.id,
+      channelField: channel.field,
+      times: [],
+    });
+  }
+}
+
 function configuredCadenceFor(options, sourceKey, channel, key) {
   const maps = [
     options.expectedCadences,
@@ -429,6 +490,41 @@ function configuredCadenceFor(options, sourceKey, channel, key) {
   }
   const fallback = toFiniteNumber(options.expectedCadenceSeconds ?? options.configuredCadenceSeconds);
   return fallback !== null && fallback > 0 ? Math.round(fallback) : null;
+}
+
+function seedConfiguredSourceChannelSamples(samples, channels, options = {}) {
+  const fullKeyMaps = [
+    options.expectedCadences,
+    options.expected_cadences,
+  ].filter((value) => value && typeof value === 'object');
+  for (const map of fullKeyMaps) {
+    for (const rawKey of Object.keys(map)) {
+      const separatorIndex = rawKey.indexOf('|');
+      if (separatorIndex <= 0) continue;
+      const sourceKey = normalizeSourceKey(rawKey.slice(0, separatorIndex));
+      const channelKey = rawKey.slice(separatorIndex + 1);
+      const channel = channels.find((candidate) => candidate.id === channelKey || candidate.field === channelKey);
+      if (sourceKey && channel) addSourceChannelSample(samples, sourceKey, channel);
+    }
+  }
+
+  const sourceMaps = [
+    options.expectedCadenceBySource,
+    options.expectedCadenceSecondsBySource,
+  ].filter((value) => value && typeof value === 'object');
+  for (const map of sourceMaps) {
+    for (const rawKey of Object.keys(map)) {
+      const sourceKey = normalizeSourceKey(rawKey);
+      if (!sourceKey) continue;
+      for (const channel of channels) addSourceChannelSample(samples, sourceKey, channel);
+    }
+  }
+}
+
+function seedRequestedSourceChannelSamples(samples, channels, options = {}) {
+  for (const sourceKey of requestedSourceKeys(options)) {
+    for (const channel of channels) addSourceChannelSample(samples, sourceKey, channel);
+  }
 }
 
 function sourceChannelSamples(sortedRows, channels) {
@@ -466,6 +562,8 @@ function cadenceFromTimes(times) {
 
 function deriveSourceCadences(sortedRows, channels, options = {}, allowDerived = true) {
   const samples = sourceChannelSamples(sortedRows, channels);
+  seedConfiguredSourceChannelSamples(samples, channels, options);
+  seedRequestedSourceChannelSamples(samples, channels, options);
   const cadences = {};
   for (const sample of samples.values()) {
     const channel = channels.find((candidate) => candidate.id === sample.channelId) || { id: sample.channelId, field: sample.channelField };
