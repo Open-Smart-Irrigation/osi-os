@@ -1,7 +1,6 @@
 import React from 'react';
 import { useTranslation } from 'react-i18next';
 import type {
-  HistoryAdvancedField,
   HistoryCardDataResponse,
   HistoryCardSummary,
   HistoryEvent,
@@ -17,17 +16,13 @@ interface GatewayStatusOverviewViewProps {
 }
 
 type HistoryTranslate = (key: string, options?: Record<string, unknown>) => string;
-type StatusCategory = 'connectivity' | 'storage' | 'sync' | 'power' | 'system';
+type StatusCategory = 'connectivity' | 'storage' | 'system';
 type MetricKey =
   | 'signal'
   | 'storage'
-  | 'pendingCommands'
-  | 'battery'
   | 'memory'
   | 'cpu'
-  | 'temperature'
-  | 'voltage'
-  | 'power';
+  | 'temperature';
 
 interface StatusItem {
   id: string;
@@ -50,9 +45,7 @@ const UNSAFE_FIELD_PATTERN =
 const CATEGORY_ORDER: Record<StatusCategory, number> = {
   connectivity: 10,
   storage: 20,
-  sync: 30,
-  power: 40,
-  system: 50,
+  system: 30,
 };
 const KNOWN_SYNC_STATES = new Set(['local', 'synced', 'stale', 'degraded', 'unknown']);
 
@@ -123,12 +116,9 @@ function formatNumber(value: number): string {
   return value.toFixed(Math.abs(value) < 10 ? 1 : 0);
 }
 
-function formatMetricValue(t: HistoryTranslate, value: unknown, unit: string | null, metric: MetricKey): string | null {
+function formatMetricValue(t: HistoryTranslate, value: unknown, unit: string | null): string | null {
   const numericValue = normalizeFiniteNumber(value);
   if (numericValue !== null) {
-    if (metric === 'pendingCommands') {
-      return t('history.gatewayStatus.value.pendingCount', { count: Math.max(0, Math.round(numericValue)) });
-    }
     return unit ? `${formatNumber(numericValue)} ${unit}` : formatNumber(numericValue);
   }
 
@@ -148,7 +138,7 @@ function metricStatusValue(t: HistoryTranslate, metricStatus: HistoryMetricStatu
   if (!metricStatus || !isObjectRecord(metricStatus)) return null;
 
   if (metric !== 'signal') {
-    const metricValue = formatMetricValue(t, metricStatus.latest, normalizeText(metricStatus.unit), metric);
+    const metricValue = formatMetricValue(t, metricStatus.latest, normalizeText(metricStatus.unit));
     if (metricValue) return metricValue;
   }
 
@@ -157,7 +147,7 @@ function metricStatusValue(t: HistoryTranslate, metricStatus: HistoryMetricStatu
 
   if (metric === 'signal' && !isFarmerFacingSignalUnit(normalizeText(metricStatus.unit))) return null;
 
-  return formatMetricValue(t, metricStatus.latest, normalizeText(metricStatus.unit), metric);
+  return formatMetricValue(t, metricStatus.latest, normalizeText(metricStatus.unit));
 }
 
 function latestPointValue(point: Partial<HistorySeriesPoint> | null | undefined): unknown {
@@ -182,38 +172,12 @@ function latestSeriesValue(series: Partial<HistorySeries> | null | undefined): F
   return null;
 }
 
-function getAdvancedFields(fields: unknown): FieldCandidate[] {
-  if (!isObjectRecord(fields)) return [];
-
-  return Object.entries(fields).flatMap(([key, rawField]) => {
-    if (!isObjectRecord(rawField)) return [];
-    const field = rawField as Partial<HistoryAdvancedField>;
-    if (field.availability === 'unsupported' || field.availability === 'not_collected_at_time') return [];
-    return [{
-      key: normalizeText(field.field) ?? key,
-      value: field.value,
-      unit: normalizeText(field.unit),
-    }];
-  });
-}
-
 function classifyField(key: string): { category: StatusCategory; metric: MetricKey } | null {
   const normalized = key.toLowerCase().replace(/[_-]+/g, ' ');
   if (!normalized.trim() || UNSAFE_FIELD_PATTERN.test(normalized)) return null;
 
-  if (normalized.includes('pending command') || normalized.includes('pending sync') || normalized.includes('sync pending')) {
-    return { category: 'sync', metric: 'pendingCommands' };
-  }
-  if (normalized.includes('outbox') || normalized.includes('inbox') || normalized.includes('sync queue')) {
-    return { category: 'sync', metric: 'pendingCommands' };
-  }
   if (normalized.includes('storage') || normalized.includes('disk') || normalized.includes('rootfs')) {
     return { category: 'storage', metric: 'storage' };
-  }
-  if (normalized.includes('battery')) return { category: 'power', metric: 'battery' };
-  if (normalized.includes('voltage')) return { category: 'power', metric: 'voltage' };
-  if (normalized.includes('fan') || normalized.includes('thermal') || normalized.includes('power')) {
-    return { category: 'power', metric: 'power' };
   }
   if (normalized.includes('network') || normalized.includes('connect') || normalized.includes('online') || normalized.includes('internet')) {
     return { category: 'connectivity', metric: 'signal' };
@@ -243,21 +207,15 @@ function buildStatusItems(t: HistoryTranslate, card: HistoryCardSummary, data: H
     addStatusItem(items, { category: 'connectivity', metric: 'signal', value: signalValue });
   }
 
-  const batteryValue = metricStatusValue(t, card.metadata.battery, 'battery');
-  if (batteryValue) {
-    addStatusItem(items, { category: 'power', metric: 'battery', value: batteryValue });
-  }
-
   const seriesCandidates = (Array.isArray(data?.series) ? data.series : [])
     .map(latestSeriesValue)
     .filter((candidate): candidate is FieldCandidate => candidate !== null);
-  const advancedCandidates = getAdvancedFields(data?.advancedFields);
 
-  [...seriesCandidates, ...advancedCandidates].forEach((candidate) => {
+  seriesCandidates.forEach((candidate) => {
     const classification = classifyField(candidate.key);
     if (!classification) return;
 
-    const value = formatMetricValue(t, candidate.value, candidate.unit, classification.metric);
+    const value = formatMetricValue(t, candidate.value, candidate.unit);
     if (!value) return;
     addStatusItem(items, { ...classification, value });
   });

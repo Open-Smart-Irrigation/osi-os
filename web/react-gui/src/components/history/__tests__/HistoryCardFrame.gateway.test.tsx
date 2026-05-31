@@ -42,15 +42,10 @@ const { translateForTest } = vi.hoisted(() => {
     'history.gatewayStatus.status.online': 'Online',
     'history.gatewayStatus.category.connectivity': 'Connectivity',
     'history.gatewayStatus.category.storage': 'Storage',
-    'history.gatewayStatus.category.sync': 'Sync',
-    'history.gatewayStatus.category.power': 'Power',
     'history.gatewayStatus.category.system': 'System',
     'history.gatewayStatus.metric.signal': 'Signal',
     'history.gatewayStatus.metric.storage': 'Storage use',
-    'history.gatewayStatus.metric.pendingCommands': 'Pending commands',
-    'history.gatewayStatus.metric.battery': 'Battery',
     'history.gatewayStatus.metric.memory': 'Memory use',
-    'history.gatewayStatus.value.pendingCount': '{{count}} pending',
     'history.gatewayStatus.value.unavailable': 'Not reported',
   };
 
@@ -154,6 +149,12 @@ function historyData(
         unit: '%',
         points: [{ t: '2026-05-31T09:45:00.000Z', value: 68, coverageConfidence: 'configured' }],
       },
+      {
+        id: 'gateway-memory-percent',
+        label: 'memory_percent',
+        unit: '%',
+        points: [{ t: '2026-05-31T09:45:00.000Z', value: 42, coverageConfidence: 'configured' }],
+      },
     ],
     profiles: [],
     events: [
@@ -221,15 +222,11 @@ describe('HistoryCardFrame gateway status overview', () => {
     expect(within(overview).getByText('Online')).toBeInTheDocument();
     expect(within(overview).getByText('Storage')).toBeInTheDocument();
     expect(within(overview).getByText('68 %')).toBeInTheDocument();
-    expect(within(overview).getByText('Sync')).toBeInTheDocument();
-    expect(within(overview).getByText('2 pending')).toBeInTheDocument();
-    expect(within(overview).getByText('Power')).toBeInTheDocument();
-    expect(within(overview).getByText('3.7 V')).toBeInTheDocument();
     expect(within(overview).getByText('System')).toBeInTheDocument();
     expect(within(overview).getByText('42 %')).toBeInTheDocument();
     expect(within(overview).getByText('Sync completed')).toBeInTheDocument();
     expect(within(overview).getByText('Gateway event')).toBeInTheDocument();
-    expect(screen.queryByText(/A84041FFFF123456|device_eui|rssi|dBm|firmware|raw_payload/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/A84041FFFF123456|device_eui|rssi|dBm|firmware|raw_payload|pending|3\.7 V/i)).not.toBeInTheDocument();
   });
 
   it('renders a stable limited-data state for sparse or malformed gateway payloads', () => {

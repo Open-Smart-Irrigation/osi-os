@@ -107,23 +107,16 @@
       "category": {
         "connectivity": "Connectivity",
         "storage": "Storage",
-        "sync": "Sync",
-        "power": "Power",
         "system": "System"
       },
       "metric": {
         "signal": "Signal",
         "storage": "Storage use",
-        "pendingCommands": "Pending commands",
-        "battery": "Battery",
         "memory": "Memory use",
         "cpu": "CPU",
-        "temperature": "Temperature",
-        "voltage": "Voltage",
-        "power": "Power"
+        "temperature": "Temperature"
       },
       "value": {
-        "pendingCount": "{{count}} pending",
         "unavailable": "Not reported"
       }
     },
