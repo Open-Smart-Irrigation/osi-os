@@ -16,6 +16,7 @@ import {
   HistoryI18nKeys,
   WorkspaceSchemaVersion,
   type HistoryCardDataResponse,
+  type HistoryPlatform,
   type HistoryCardSummaryResponse,
   type HistoryWorkspace,
 } from '../src/history/types.ts';
@@ -131,8 +132,13 @@ test('range model chooses the expected default aggregation levels', () => {
 });
 
 test('shared constants expose downstream contract values', () => {
+  const edgePlatform: HistoryPlatform = 'edge';
+  const cloudPlatform: HistoryPlatform = 'cloud';
+
   assert.equal(WorkspaceSchemaVersion, 1);
   assert.deepEqual(maxPanelsByPlatform, { edge: 4, cloud: 8 });
+  assert.equal(edgePlatform, 'edge');
+  assert.equal(cloudPlatform, 'cloud');
   assert.equal(HistoryI18nKeys.card.soil.title, 'history.card.soil.title');
   assert.equal(HistoryI18nKeys.calendar.state.dryStress, 'history.calendar.state.dry_stress');
   assert.equal(HistoryI18nKeys.interpretation.rootZoneDry, 'history.interpretation.rootZoneDry');
@@ -150,9 +156,12 @@ test('representative fixture matches summary, data, workspace, freshness, and av
   assert.equal(fixture.summaries.cards.length, 2);
   assert.equal(fixture.summaries.cards[0].cardType, 'soil');
   assert.equal(fixture.summaries.cards[0].metadata.coverageConfidence, 'configured');
+  assert.equal(fixture.summaries.cards[0].ordering.manualOrder, null);
+  assert.equal(fixture.summaries.cards[0].ordering.criticalAlert, false);
   assert.equal('coverageConfidence' in fixture.summaries.cards[0], false);
   assert.equal('advancedFields' in fixture.summaries.cards[0], false);
   assert.equal(fixture.summaries.cards[1].scope, 'gateway');
+  assert.equal(fixture.summaries.cards[1].metadata.syncState, 'local');
 
   assert.equal(fixture.data.range.timezone, 'Europe/Zurich');
   assert.equal(fixture.data.aggregation.coverageConfidence, 'configured');
@@ -166,4 +175,5 @@ test('representative fixture matches summary, data, workspace, freshness, and av
   assert.equal(fixture.workspace.schemaVersion, WorkspaceSchemaVersion);
   assert.equal(fixture.workspace.limits.platform, 'edge');
   assert.equal(fixture.workspace.limits.maxPanels, maxPanelsByPlatform.edge);
+  assert.ok(['stacked', 'single'].includes(fixture.workspace.layout));
 });

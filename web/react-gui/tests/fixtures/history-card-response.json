@@ -30,7 +30,9 @@
         "ordering": {
           "pinned": false,
           "score": 0.71,
-          "recentRank": 2
+          "recentRank": 2,
+          "manualOrder": null,
+          "criticalAlert": false
         }
       },
       {
@@ -46,7 +48,8 @@
         "metadata": {
           "lastSeenAt": "2026-05-31T09:59:00Z",
           "coveragePct": 100,
-          "coverageConfidence": "derived"
+          "coverageConfidence": "derived",
+          "syncState": "local"
         },
         "availability": {
           "available": true,
@@ -55,7 +58,9 @@
         "ordering": {
           "pinned": true,
           "score": 1,
-          "recentRank": 1
+          "recentRank": 1,
+          "manualOrder": 0,
+          "criticalAlert": false
         }
       }
     ]

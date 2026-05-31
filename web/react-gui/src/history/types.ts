@@ -3,6 +3,7 @@ export type HistoryCardScope = 'zone' | 'gateway';
 export type HistoryRangeLabel = '12h' | '24h' | '7d' | '30d' | 'season' | 'custom';
 export type HistoryAggregationLevel = 'auto' | 'raw' | '15m' | 'hourly' | 'daily' | 'weekly';
 export type HistorySyncState = 'local' | 'synced' | 'stale' | 'degraded' | 'unknown';
+export type HistoryPlatform = 'edge' | 'cloud';
 export type AdvancedFieldAvailability =
   | 'collected'
   | 'not_collected_at_time'
@@ -135,6 +136,8 @@ export interface HistoryCardOrdering {
   pinned: boolean;
   score: number;
   recentRank: number | null;
+  manualOrder?: number | null;
+  criticalAlert?: boolean;
 }
 
 export interface HistoryCardMetadata {
@@ -142,7 +145,8 @@ export interface HistoryCardMetadata {
   battery?: HistoryMetricStatus;
   signal?: HistoryMetricStatus;
   coveragePct?: number | null;
-  coverageConfidence?: CoverageConfidence;
+  coverageConfidence: CoverageConfidence;
+  syncState?: HistorySyncState;
   calibrationStatus?: string | null;
   [key: string]: unknown;
 }
@@ -306,7 +310,7 @@ export interface HistoryWorkspaceRange {
 
 export interface HistoryWorkspaceLimits {
   maxPanels: number;
-  platform: 'edge' | 'cloud';
+  platform: HistoryPlatform;
 }
 
 export interface HistoryWorkspaceInspector {
