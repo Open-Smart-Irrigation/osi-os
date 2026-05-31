@@ -188,6 +188,14 @@ function historyData(
         severity: 'warning',
         metadata: { rssi: -113 },
       },
+      {
+        id: 'evt-pending',
+        type: 'pending_commands',
+        t: '2026-05-31T09:30:00.000Z',
+        label: 'Queue cleared',
+        severity: 'info',
+        metadata: {},
+      },
     ],
     calendar: null,
     interpretations: [],
@@ -242,8 +250,8 @@ describe('HistoryCardFrame gateway status overview', () => {
     expect(within(overview).getByText('Temperature')).toBeInTheDocument();
     expect(within(overview).getByText('61 C')).toBeInTheDocument();
     expect(within(overview).getByText('Sync completed')).toBeInTheDocument();
-    expect(within(overview).getByText('Gateway event')).toBeInTheDocument();
-    expect(screen.queryByText(/A84041FFFF123456|device_eui|rssi|dBm|firmware|raw_payload|pending|3\.7 V/i)).not.toBeInTheDocument();
+    expect(within(overview).getAllByText('Gateway event').length).toBeGreaterThanOrEqual(2);
+    expect(screen.queryByText(/A84041FFFF123456|device_eui|rssi|dBm|firmware|raw_payload|pending|command|Queue cleared|3\.7 V/i)).not.toBeInTheDocument();
   });
 
   it('renders a stable limited-data state for sparse or malformed gateway payloads', () => {

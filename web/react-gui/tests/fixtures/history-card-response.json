@@ -42,7 +42,7 @@
         "title": "Gateway",
         "subtitle": "Hub health and sync",
         "defaultView": "status-overview",
-        "views": ["status-overview", "connectivity-timeline", "local-storage-sync", "power-state", "advanced"],
+        "views": ["status-overview", "connectivity-timeline", "advanced"],
         "supportedRanges": ["12h", "24h", "7d", "30d"],
         "defaultRange": "24h",
         "metadata": {

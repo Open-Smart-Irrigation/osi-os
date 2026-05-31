@@ -37,8 +37,6 @@ export type IrrigationHistoryViewMode =
 export type GatewayHistoryViewMode =
   | 'status-overview'
   | 'connectivity-timeline'
-  | 'local-storage-sync'
-  | 'power-state'
   | 'advanced';
 
 export type HistoryViewMode =

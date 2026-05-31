@@ -138,9 +138,7 @@
       "daily-min-max": "Daily Min/Max",
       "event-timeline": "Event Timeline",
       "status-overview": "Status Overview",
-      "connectivity-timeline": "Connectivity Timeline",
-      "local-storage-sync": "Local Storage / Sync State",
-      "power-state": "Power State"
+      "connectivity-timeline": "Connectivity Timeline"
     },
     "metadata": {
       "coverageUnknown": "Coverage unknown",

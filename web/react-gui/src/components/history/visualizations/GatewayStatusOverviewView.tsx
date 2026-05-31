@@ -40,7 +40,7 @@ interface FieldCandidate {
 
 const RAW_IDENTIFIER_PATTERN = /\b[a-f0-9]{16}\b/i;
 const UNSAFE_FIELD_PATTERN =
-  /(dev_?eui|device_?eui|gateway_?eui|\beui\b|channel|payload|raw|firmware|uci|token|secret|calibration|coefficient|rssi|snr|spreading|frequency|freq|bytes?|lsn50|kiwi|strega)/i;
+  /(dev_?eui|device_?eui|gateway_?eui|\beui\b|channel|payload|raw|firmware|uci|token|secret|calibration|coefficient|rssi|snr|spreading|frequency|freq|bytes?|lsn50|kiwi|strega|pending|command|battery|voltage|fan|power|uptime|reboot)/i;
 
 const CATEGORY_ORDER: Record<StatusCategory, number> = {
   connectivity: 10,
@@ -232,7 +232,10 @@ function eventTone(event: HistoryEvent): string {
 
 function eventLabel(t: HistoryTranslate, event: Partial<HistoryEvent>): string {
   const label = normalizeText(event.label);
-  return label && isSafeDisplayText(label) ? label : t('history.gatewayStatus.eventFallback');
+  const type = normalizeText(event.type);
+  return label && isSafeDisplayText(label) && (!type || !isUnsafeText(type))
+    ? label
+    : t('history.gatewayStatus.eventFallback');
 }
 
 function safeEvents(data: HistoryCardDataResponse | undefined): HistoryEvent[] {

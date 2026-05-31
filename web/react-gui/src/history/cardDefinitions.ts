@@ -108,7 +108,7 @@ export const gatewayCardDefinition = {
   displayName: 'Gateway',
   titleKey: HistoryI18nKeys.card.gateway.title,
   defaultView: 'status-overview',
-  views: ['status-overview', 'connectivity-timeline', 'local-storage-sync', 'power-state', 'advanced'],
+  views: ['status-overview', 'connectivity-timeline', 'advanced'],
   defaultRange: '24h',
   supportedRanges: ['12h', '24h', '7d', '30d'],
   standardOverlays: ['data-gaps'],
@@ -121,7 +121,7 @@ export const gatewayCardDefinition = {
   availabilityRules: ['gateway-known'],
   metadataFields: ['lastSeenAt', 'coveragePct', 'coverageConfidence', 'syncState'],
   calendarStates: ['normal', 'offline', 'no_data'],
-  interpretationRuleIds: ['gateway-sync-state', 'gateway-power-state'],
+  interpretationRuleIds: ['gateway-sync-state'],
 } as const satisfies HistoryCardDefinition<'gateway'>;
 
 export const historyCardDefinitions = [
