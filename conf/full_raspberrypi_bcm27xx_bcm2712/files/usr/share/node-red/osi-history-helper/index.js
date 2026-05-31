@@ -112,10 +112,12 @@ function hasNumber(device, keys) {
 
 function deviceBelongsToZone(device, zone) {
   if (!device || !zone) return false;
-  const zoneId = toFiniteNumber(zone.id);
+  const zoneId = toFiniteNumber(zone.id ?? zone.zone_id);
   const deviceZoneId = toFiniteNumber(device.irrigation_zone_id || device.zone_id);
-  if (zoneId !== null && deviceZoneId !== null) return zoneId === deviceZoneId;
-  return true;
+  if (zoneId !== null) return deviceZoneId === zoneId;
+  const zoneUuid = String(zone.zone_uuid || zone.zoneUuid || '').trim();
+  const deviceZoneUuid = String(device.irrigation_zone_uuid || device.zone_uuid || device.zoneUuid || '').trim();
+  return !!zoneUuid && !!deviceZoneUuid && zoneUuid === deviceZoneUuid;
 }
 
 function isSoilSource(device) {
@@ -160,7 +162,9 @@ function deriveCardsForZone(zone, devices) {
   };
 
   pushMerged('soil', isSoilSource);
-  for (const device of scopedDevices.filter(isDendroSource)) {
+  for (const device of scopedDevices.filter(isDendroSource).slice().sort((left, right) =>
+    String(normalizeDeveui(left.deveui || left.device_eui) || '').localeCompare(String(normalizeDeveui(right.deveui || right.device_eui) || ''))
+  )) {
     const logicalSourceKey = dendroSourceKey(device.deveui || device.device_eui);
     if (logicalSourceKey) {
       cards.push({
@@ -862,6 +866,36 @@ function rollupRowsToResult(rows, query, channels) {
   };
 }
 
+function firstDefinedValue(values) {
+  for (const value of values) {
+    if (value !== undefined && value !== null && value !== '') return value;
+  }
+  return undefined;
+}
+
+function queryDeviceEuis(query = {}) {
+  const values = [];
+  for (const list of [
+    query.deveuis,
+    query.deviceEuis,
+    query.device_euis,
+    query.sourceKeys,
+    query.source_keys,
+    query.sourceDevices,
+    query.source_devices,
+  ]) {
+    if (Array.isArray(list)) values.push(...list);
+  }
+  values.push(
+    query.deveui,
+    query.deviceEui,
+    query.device_eui,
+    query.sourceKey,
+    query.source_key
+  );
+  return Array.from(new Set(values.map(normalizeSourceKey).map(normalizeDeveui).filter(Boolean)));
+}
+
 async function aggregateDeviceData(db, query = {}) {
   const aggregationInfo = resolveAggregation(query);
   const aggregation = aggregationInfo.level;
@@ -870,20 +904,22 @@ async function aggregateDeviceData(db, query = {}) {
   const end = query.end || query.endAt || query.to;
   if (!start || !end) throw new Error('aggregateDeviceData requires start and end');
 
-  const hasRollupIdentity = query.zoneId !== undefined && query.cardType && query.logicalSourceKey;
-  const shouldUseRollups = query.useRollups === true || (query.useRollups !== false && hasRollupIdentity && ['daily', 'weekly'].includes(aggregation));
+  const zoneId = firstDefinedValue([query.zoneId, query.zone_id]);
+  const cardType = firstDefinedValue([query.cardType, query.card_type]);
+  const logicalSourceKey = firstDefinedValue([query.logicalSourceKey, query.logical_source_key]);
+  const useRollups = query.useRollups ?? query.use_rollups;
+  const hasRollupIdentity = zoneId !== undefined && cardType && logicalSourceKey;
+  const shouldUseRollups = useRollups === true || (useRollups !== false && hasRollupIdentity && ['daily', 'weekly'].includes(aggregation));
   if (shouldUseRollups) {
     const channelIds = channels.map((channel) => channel.id);
     const placeholders = channelIds.map(() => '?').join(',');
     const sql = `SELECT * FROM history_channel_rollups WHERE zone_id = ? AND card_type = ? AND logical_source_key = ? AND bucket_level = ? AND bucket_start >= ? AND bucket_start < ? AND channel_id IN (${placeholders}) ORDER BY bucket_start ASC, channel_id ASC`;
-    const params = [query.zoneId, query.cardType, query.logicalSourceKey, aggregation, start, end].concat(channelIds);
+    const params = [zoneId, cardType, logicalSourceKey, aggregation, start, end].concat(channelIds);
     const rows = await dbAll(db, sql, params);
     return rollupRowsToResult(rows, { ...query, aggregation, aggregationRequested: aggregationInfo.requested }, channels);
   }
 
-  const deveuis = (Array.isArray(query.deveuis) ? query.deveuis : [query.deveui])
-    .map(normalizeDeveui)
-    .filter(Boolean);
+  const deveuis = queryDeviceEuis(query);
   if (deveuis.length === 0) throw new Error('aggregateDeviceData requires at least one DevEUI');
   const placeholders = deveuis.map(() => '?').join(',');
   const selectedFields = Array.from(new Set(channels.map((channel) => channel.field)));
