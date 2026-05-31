@@ -1,6 +1,18 @@
 import axios from 'axios';
 import { notifyAuthExpired } from './authEvents';
 import type {
+  HistoryCardSummaryResponse,
+  HistoryCardSummary,
+  HistoryCardType,
+  HistoryCardScope,
+  HistoryViewMode,
+  HistoryRangeLabel,
+  HistoryCardAvailability,
+  HistoryCardOrdering,
+  HistoryCardMetadata,
+  CoverageConfidence,
+} from '../history/types';
+import type {
   Device,
   LoginRequest,
   LoginResponse,
@@ -29,6 +41,14 @@ type ApiErrorPayload = {
   error?: string;
   message?: string;
 };
+
+export interface SystemFeatureFlags {
+  historyUxEnabled: boolean;
+  historyComparisonEnabled: boolean;
+  historyWorkspacesEnabled: boolean;
+  historyAdvancedOverlaysEnabled: boolean;
+  historyCloudAiEnabled: boolean;
+}
 
 export function getApiErrorMessage(error: unknown, fallback: string): string {
   if (axios.isAxiosError<ApiErrorPayload>(error)) {
@@ -353,6 +373,85 @@ function toNullableNumber(value: unknown): number | null {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
+function asBoolean(value: unknown): boolean {
+  return value === true || value === 1 || value === '1' || value === 'true';
+}
+
+function normaliseSystemFeatureFlags(row: any): SystemFeatureFlags {
+  return {
+    historyUxEnabled: asBoolean(row?.historyUxEnabled ?? row?.history_ux_enabled),
+    historyComparisonEnabled: asBoolean(row?.historyComparisonEnabled ?? row?.history_comparison_enabled),
+    historyWorkspacesEnabled: asBoolean(row?.historyWorkspacesEnabled ?? row?.history_workspaces_enabled),
+    historyAdvancedOverlaysEnabled: asBoolean(row?.historyAdvancedOverlaysEnabled ?? row?.history_advanced_overlays_enabled),
+    historyCloudAiEnabled: asBoolean(row?.historyCloudAiEnabled ?? row?.history_cloud_ai_enabled),
+  };
+}
+
+function toCoverageConfidence(value: unknown): CoverageConfidence {
+  return value === 'configured' || value === 'derived' || value === 'unknown'
+    ? value
+    : 'unknown';
+}
+
+function normaliseHistoryCardAvailability(row: any): HistoryCardAvailability {
+  return {
+    available: row?.available !== false,
+    reasons: Array.isArray(row?.reasons) ? row.reasons.map(String) : [],
+  };
+}
+
+function normaliseHistoryCardOrdering(row: any): HistoryCardOrdering {
+  return {
+    pinned: asBoolean(row?.pinned),
+    score: Number(row?.score ?? 0),
+    recentRank: row?.recentRank ?? row?.recent_rank ?? null,
+    manualOrder: row?.manualOrder ?? row?.manual_order ?? null,
+    criticalAlert: row?.criticalAlert ?? row?.critical_alert ?? undefined,
+  };
+}
+
+function normaliseHistoryCardMetadata(row: any): HistoryCardMetadata {
+  return {
+    ...row,
+    lastSeenAt: row?.lastSeenAt ?? row?.last_seen_at ?? null,
+    coveragePct: row?.coveragePct ?? row?.coverage_pct ?? null,
+    coverageConfidence: toCoverageConfidence(row?.coverageConfidence ?? row?.coverage_confidence),
+    syncState: row?.syncState ?? row?.sync_state,
+    calibrationStatus: row?.calibrationStatus ?? row?.calibration_status ?? null,
+  };
+}
+
+function normaliseHistoryCardSummary(row: any): HistoryCardSummary {
+  const cardType = String(row?.cardType ?? row?.card_type ?? 'soil') as HistoryCardType;
+  return {
+    cardId: String(row?.cardId ?? row?.card_id ?? ''),
+    cardType,
+    scope: String(row?.scope ?? 'zone') as HistoryCardScope,
+    title: String(row?.title ?? cardType),
+    subtitle: String(row?.subtitle ?? ''),
+    defaultView: String(row?.defaultView ?? row?.default_view ?? 'line-chart') as HistoryViewMode,
+    views: Array.isArray(row?.views) ? row.views.map(String) as HistoryViewMode[] : [],
+    supportedRanges: Array.isArray(row?.supportedRanges ?? row?.supported_ranges)
+      ? (row.supportedRanges ?? row.supported_ranges).map(String) as HistoryRangeLabel[]
+      : [],
+    defaultRange: String(row?.defaultRange ?? row?.default_range ?? '24h') as HistoryRangeLabel,
+    metadata: normaliseHistoryCardMetadata(row?.metadata ?? {}),
+    availability: normaliseHistoryCardAvailability(row?.availability ?? {}),
+    ordering: normaliseHistoryCardOrdering(row?.ordering ?? {}),
+  };
+}
+
+function normaliseHistoryCardSummaryResponse(row: any): HistoryCardSummaryResponse {
+  const rawCards = Array.isArray(row?.cards) ? row.cards : [];
+  return {
+    zoneId: row?.zoneId ?? row?.zone_id,
+    zoneUuid: row?.zoneUuid ?? row?.zone_uuid,
+    gatewayEui: row?.gatewayEui ?? row?.gateway_eui,
+    generatedAt: String(row?.generatedAt ?? row?.generated_at ?? ''),
+    cards: rawCards.map(normaliseHistoryCardSummary),
+  };
+}
+
 function normaliseDendroHistoryPoint(row: any): DendroHistoryPoint {
   return {
     t: String(row?.t ?? row?.recorded_at ?? ''),
@@ -651,6 +750,10 @@ export const systemAPI = {
     const res = await api.get<SystemStats>('/api/system/stats');
     return res.data;
   },
+  getFeatures: async (): Promise<SystemFeatureFlags> => {
+    const res = await api.get('/api/system/features');
+    return normaliseSystemFeatureFlags(res.data);
+  },
   reboot: async (): Promise<void> => {
     await api.post('/api/system/reboot');
   },
@@ -738,6 +841,13 @@ export const accountLinkAPI = {
 export const environmentAPI = {
   getSummary: (zoneId: number): Promise<ZoneEnvironmentSummary> =>
     api.get<ZoneEnvironmentSummary>(`/api/irrigation-zones/${zoneId}/environment-summary`).then(r => r.data),
+};
+
+export const historyAPI = {
+  getZoneCards: async (zoneId: number): Promise<HistoryCardSummaryResponse> => {
+    const response = await api.get(`/api/history/zones/${zoneId}/cards`);
+    return normaliseHistoryCardSummaryResponse(response.data);
+  },
 };
 
 export type IrrigationActuationStatus =

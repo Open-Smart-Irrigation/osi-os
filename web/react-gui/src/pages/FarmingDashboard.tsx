@@ -12,6 +12,7 @@ import { AddDeviceModal } from '../components/farming/AddDeviceModal';
 import { CreateZoneModal } from '../components/farming/CreateZoneModal';
 import { LanguageSwitcher } from '../components/LanguageSwitcher';
 import { SystemPanel } from '../components/farming/SystemPanel';
+import { useFeatureFlags } from '../history/useFeatureFlags';
 import { SenseCapWeatherCard } from '../components/farming/SenseCapWeatherCard';
 import {
   IrrigationOutcomesPanel,
@@ -28,6 +29,7 @@ export const FarmingDashboard: React.FC = () => {
   const { username, logout } = useAuth();
   const { t } = useTranslation('dashboard');
   const { t: tc } = useTranslation('common');
+  const { historyEnabled } = useFeatureFlags();
   const [isAddDeviceModalOpen, setIsAddDeviceModalOpen] = useState(false);
   const [isCreateZoneModalOpen, setIsCreateZoneModalOpen] = useState(false);
 
@@ -161,6 +163,14 @@ export const FarmingDashboard: React.FC = () => {
                 <span>☁</span>
                 OSI Server
               </Link>
+              {historyEnabled && (
+                <Link
+                  to="/history"
+                  className="w-full sm:w-auto bg-[var(--secondary-bg)] hover:bg-[var(--border)] text-[var(--text)] font-bold text-lg px-6 py-3 touch-target rounded-lg transition-colors flex items-center justify-center"
+                >
+                  History
+                </Link>
+              )}
               <button
                 onClick={logout}
                 className="w-full sm:w-auto bg-[var(--secondary-bg)] hover:bg-[var(--border)] text-[var(--text)] font-bold text-lg px-6 py-3 touch-target rounded-lg transition-colors"

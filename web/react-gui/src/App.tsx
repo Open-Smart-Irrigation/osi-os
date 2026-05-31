@@ -4,6 +4,7 @@ import { PrivateRoute } from './components/PrivateRoute';
 import { Login } from './pages/Login';
 import { Register } from './pages/Register';
 import { FarmingDashboard } from './pages/FarmingDashboard';
+import { HistoryDashboard } from './pages/HistoryDashboard';
 import { AccountLink } from './pages/AccountLink';
 
 function App() {
@@ -30,6 +31,15 @@ function App() {
             element={
               <PrivateRoute>
                 <AccountLink />
+              </PrivateRoute>
+            }
+          />
+
+          <Route
+            path="/history"
+            element={
+              <PrivateRoute>
+                <HistoryDashboard />
               </PrivateRoute>
             }
           />
