@@ -62,13 +62,19 @@ function pointValue(point: Partial<HistorySeriesPoint> | null | undefined): numb
   );
 }
 
+function validTimestamp(value: unknown): string | null {
+  const text = normalizedText(value);
+  if (!text) return null;
+  return Number.isNaN(new Date(text).getTime()) ? null : text;
+}
+
 function hasVisiblePoints(series: RenderSeries): boolean {
   return series.points.some((point) => point.value !== null);
 }
 
 function formatTimestamp(value: string): string {
   const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return value;
+  if (Number.isNaN(date.getTime())) return '-';
   return new Intl.DateTimeFormat(undefined, {
     month: 'short',
     day: 'numeric',
@@ -124,7 +130,7 @@ function normalizeSeriesList(t: HistoryTranslate, seriesList: readonly unknown[]
     const rawPoints = isRecord(series) ? series.points : null;
     const points = Array.isArray(rawPoints)
       ? rawPoints.reduce<RenderPoint[]>((accumulator, point) => {
-          const timestamp = normalizedText(isRecord(point) ? point.t : null);
+          const timestamp = validTimestamp(isRecord(point) ? point.t : null);
           if (!timestamp) return accumulator;
           accumulator.push({ t: timestamp, value: pointValue(point) });
           return accumulator;

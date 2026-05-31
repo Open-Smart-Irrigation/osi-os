@@ -223,6 +223,7 @@ describe('HistoryCardFrame Dendro growth timeline', () => {
         points: [
           null,
           { t: '', value: 18, coverageConfidence: 'unknown' },
+          { t: 'A84041FFFF123456', value: 22, coverageConfidence: 'unknown' },
           { t: '2026-05-30T00:00:00Z', value: 'not-a-number', coverageConfidence: 'unknown' },
         ],
       },
