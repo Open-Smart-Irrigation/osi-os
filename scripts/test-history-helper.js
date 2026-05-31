@@ -26,12 +26,16 @@ const expectedExports = [
   'deriveCardId',
   'deriveCardsForZone',
   'deriveGatewayCard',
+  'resolveAggregation',
   'classifySoilStatus',
   'classifyEnvironmentStatus',
   'classifyDendroStatus',
+  'classifyIrrigationStatus',
+  'classifyGatewayStatus',
   'deriveExpectedCadenceSeconds',
   'aggregateRows',
   'aggregateDeviceData',
+  'buildAdvancedMetadataPlaceholder',
   'buildLocalInterpretations',
 ];
 
@@ -48,6 +52,10 @@ function test(name, fn) {
 
 function iso(minutes) {
   return new Date(Date.UTC(2026, 4, 31, 0, minutes, 0)).toISOString();
+}
+
+function isoDay(day) {
+  return new Date(Date.UTC(2026, 4, 31 + day, 0, 0, 0)).toISOString();
 }
 
 function sqliteEscape(value) {
@@ -155,6 +163,18 @@ test('classifies soil, environment, and dendro status with shared thresholds', (
   assert.strictEqual(helper.classifyDendroStatus({ growthUm: 40, recoveryRatio: 0.8 }).status, 'normal_growth');
 });
 
+test('classifies irrigation and gateway status deterministically', () => {
+  assert.strictEqual(helper.classifyIrrigationStatus({ eventCount: 0 }).status, 'no_irrigation');
+  assert.strictEqual(helper.classifyIrrigationStatus({ eventCount: 1 }).status, 'irrigation_event');
+  assert.strictEqual(helper.classifyIrrigationStatus({ eventCount: 4 }).status, 'high_irrigation_frequency');
+  assert.strictEqual(helper.classifyIrrigationStatus({ possibleIneffectiveIrrigation: true }).status, 'possible_ineffective_irrigation');
+  assert.strictEqual(helper.classifyIrrigationStatus({ manualOverride: true }).status, 'manual_override');
+
+  assert.strictEqual(helper.classifyGatewayStatus({ generatedAt: iso(60) }).status, 'no_data');
+  assert.strictEqual(helper.classifyGatewayStatus({ lastSeenAt: iso(55), generatedAt: iso(60), offlineAfterSeconds: 600 }).status, 'normal');
+  assert.strictEqual(helper.classifyGatewayStatus({ lastSeenAt: iso(0), generatedAt: iso(60), offlineAfterSeconds: 600 }).status, 'offline');
+});
+
 test('derives expected cadence as configured, derived, or unknown', () => {
   assert.deepStrictEqual(
     helper.deriveExpectedCadenceSeconds({ configuredCadenceSeconds: 900 }),
@@ -171,6 +191,29 @@ test('derives expected cadence as configured, derived, or unknown', () => {
   assert.deepStrictEqual(
     helper.deriveExpectedCadenceSeconds({ rows: [{ recorded_at: iso(0) }] }),
     { seconds: null, confidence: 'unknown' }
+  );
+});
+
+test('resolves automatic aggregation from range and reports the actual level', () => {
+  assert.deepStrictEqual(
+    helper.resolveAggregation({ aggregation: 'auto', range: '12h' }),
+    { requested: 'auto', level: 'raw', bucketSizeSeconds: null }
+  );
+  assert.deepStrictEqual(
+    helper.resolveAggregation({ range: '7d', cardType: 'soil' }),
+    { requested: 'auto', level: 'hourly', bucketSizeSeconds: 3600 }
+  );
+  assert.deepStrictEqual(
+    helper.resolveAggregation({ aggregation: 'auto', range: '30d', cardType: 'environment' }),
+    { requested: 'auto', level: 'daily', bucketSizeSeconds: 86400 }
+  );
+  assert.deepStrictEqual(
+    helper.resolveAggregation({ aggregation: 'auto', range: 'season', start: isoDay(0), end: isoDay(160) }),
+    { requested: 'auto', level: 'weekly', bucketSizeSeconds: 604800 }
+  );
+  assert.deepStrictEqual(
+    helper.resolveAggregation({ aggregation: '15m', range: '7d' }),
+    { requested: '15m', level: '15m', bucketSizeSeconds: 900 }
   );
 });
 
@@ -213,6 +256,72 @@ test('aggregates rows into raw, 15m, hourly, daily, and weekly buckets', () => {
     assert.strictEqual(result.aggregation, aggregation);
     assert(result.buckets.length >= 1, `${aggregation} bucket output`);
   }
+
+  const automatic = helper.aggregateRows(rows, { ...base, aggregation: 'auto', range: '7d' });
+  assert.strictEqual(automatic.aggregation, 'hourly');
+  assert.strictEqual(automatic.aggregationRequested, 'auto');
+
+  const omitted = helper.aggregateRows(rows, { ...base, range: '7d' });
+  assert.strictEqual(omitted.aggregation, 'hourly');
+  assert.strictEqual(omitted.aggregationRequested, 'auto');
+});
+
+test('computes coverage from source-aware cadence instead of one mixed median', () => {
+  const rows = [
+    { deveui: 'AA00000000000001', recorded_at: iso(0), swt_1: 10 },
+    { deveui: 'AA00000000000001', recorded_at: iso(15), swt_1: 20 },
+    { deveui: 'AA00000000000001', recorded_at: iso(30), swt_1: 30 },
+    { deveui: 'AA00000000000001', recorded_at: iso(45), swt_1: 40 },
+    { deveui: 'BB00000000000002', recorded_at: iso(0), ambient_temperature: 24 },
+    { deveui: 'BB00000000000002', recorded_at: iso(60), ambient_temperature: 25 },
+    { deveui: 'BB00000000000002', recorded_at: iso(120), ambient_temperature: 26 },
+    { deveui: 'BB00000000000002', recorded_at: iso(180), ambient_temperature: 27 },
+  ];
+  const result = helper.aggregateRows(rows, {
+    aggregation: 'hourly',
+    channels: ['swt_1', 'ambient_temperature'],
+    start: iso(0),
+    end: iso(240),
+  });
+
+  assert.strictEqual(result.coverageConfidence, 'derived');
+  assert.strictEqual(result.sourceCadences['AA00000000000001|swt_1'].seconds, 900);
+  assert.strictEqual(result.sourceCadences['BB00000000000002|ambient_temperature'].seconds, 3600);
+  assert.strictEqual(result.buckets[0].sampleCount, 5);
+  assert.strictEqual(result.buckets[0].coveragePct, 100);
+
+  const configured = helper.aggregateRows(rows.slice(0, 5), {
+    aggregation: 'hourly',
+    channels: ['swt_1', 'ambient_temperature'],
+    start: iso(0),
+    end: iso(60),
+    expectedCadences: {
+      'AA00000000000001|swt_1': 900,
+      'BB00000000000002|ambient_temperature': 3600,
+    },
+  });
+  assert.strictEqual(configured.coverageConfidence, 'configured');
+  assert.strictEqual(configured.buckets[0].coveragePct, 100);
+});
+
+test('builds deterministic advanced metadata placeholders', () => {
+  const metadata = helper.buildAdvancedMetadataPlaceholder({
+    cardType: 'gateway',
+    generatedAt: '2026-05-31T00:00:00.000Z',
+    sourceDevices: [
+      { deveui: 'aa-bb-cc-dd-ee-ff-00-11', type_id: 'GATEWAY', firmware_version: '1.2.3' },
+    ],
+    availableFields: ['rssi', 'snr'],
+  });
+
+  assert.strictEqual(metadata.schemaVersion, 1);
+  assert.strictEqual(metadata.cardType, 'gateway');
+  assert.strictEqual(metadata.placeholder, true);
+  assert.strictEqual(metadata.generatedAt, '2026-05-31T00:00:00.000Z');
+  assert.deepStrictEqual(metadata.availableFields, ['rssi', 'snr']);
+  assert.deepStrictEqual(metadata.sections.map((section) => section.id), ['source-devices', 'radio-diagnostics', 'raw-payloads']);
+  assert.strictEqual(metadata.sourceDevices[0].deveui, 'AABBCCDDEEFF0011');
+  assert.strictEqual(metadata.sourceDevices[0].typeId, 'GATEWAY');
 });
 
 test('builds deterministic local interpretations', () => {
@@ -288,7 +397,28 @@ test('aggregates SQL-backed device_data with parameterized range queries and rol
     assert.strictEqual(rollup.buckets[0].series.swt_1.mean, 20);
     assert.strictEqual(rollup.buckets[0].coveragePct, 12.5);
     assert.match(db.lastQuery.sql, /FROM history_channel_rollups/);
+
+    const autoRollup = await helper.aggregateDeviceData(db, {
+      zoneId: 7,
+      cardType: 'soil',
+      logicalSourceKey: 'root-zone',
+      start: '2026-05-31T00:00:00.000Z',
+      end: '2026-06-30T00:00:00.000Z',
+      range: '30d',
+      aggregation: 'auto',
+      channels: ['swt_1'],
+    });
+    assert.strictEqual(autoRollup.aggregation, 'daily');
+    assert.strictEqual(autoRollup.aggregationRequested, 'auto');
+    assert.strictEqual(autoRollup.source, 'history_channel_rollups');
+    assert.match(db.lastQuery.sql, /FROM history_channel_rollups/);
   } finally {
     db.close();
   }
+});
+
+test('verify-sync-flow chains SQL-backed history helper regression tests', () => {
+  const verifySource = fs.readFileSync(path.join(repoRoot, 'scripts', 'verify-sync-flow.js'), 'utf8');
+  assert.match(verifySource, /test-history-helper\.js/);
+  assert(!/execFileSync\(process\.execPath,\s*\[path\.resolve\(__dirname,\s*['"]verify-sync-flow\.js['"]\)/.test(verifySource), 'verify-sync-flow must not recursively execute itself');
 });
