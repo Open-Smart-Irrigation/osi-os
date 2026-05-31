@@ -146,7 +146,7 @@ function historyData(overrides: Partial<HistoryCardDataResponse<'environment'>> 
       {
         id: 'env-src-A84041FFFF654321-air-temperature',
         label: 'env-src-A84041FFFF654321_air_temperature',
-        unit: 'C',
+        unit: 'A84041FFFF654321_raw_rssi',
         points: [
           { t: '2026-05-30T00:00:00Z', value: 21.4, coverageConfidence: 'configured' },
           { t: '2026-05-30T12:00:00Z', value: 27.2, coverageConfidence: 'configured' },
@@ -214,7 +214,7 @@ describe('HistoryCardFrame environment line chart', () => {
     expect(within(chart).getByText('lx axis')).toBeInTheDocument();
     expect(screen.queryByText(/env-src-/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/A84041FFFF654321/i)).not.toBeInTheDocument();
-    expect(screen.queryByText(/air_temperature|relative_humidity|light_lux|environment_threshold/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/air_temperature|relative_humidity|light_lux|environment_threshold|raw_rssi|rssi/i)).not.toBeInTheDocument();
   });
 
   it('renders a stable empty state when environment series are sparse or missing', () => {

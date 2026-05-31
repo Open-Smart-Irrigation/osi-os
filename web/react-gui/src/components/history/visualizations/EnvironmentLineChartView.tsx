@@ -131,10 +131,12 @@ function fallbackUnit(source: string): string {
 
 function displayUnit(series: unknown, source: string): string {
   const explicitUnit = normalizedText(isRecord(series) ? series.unit : null);
-  if (explicitUnit) return explicitUnit;
+  if (explicitUnit && !looksLikeRawSourceToken(explicitUnit)) return explicitUnit;
   const rawPoints = isRecord(series) ? series.points : null;
   if (Array.isArray(rawPoints)) {
-    const pointUnit = rawPoints.map((point) => (isRecord(point) ? normalizedText(point.unit) : null)).find(Boolean);
+    const pointUnit = rawPoints
+      .map((point) => (isRecord(point) ? normalizedText(point.unit) : null))
+      .find((unit) => unit !== null && !looksLikeRawSourceToken(unit));
     if (pointUnit) return pointUnit;
   }
   return fallbackUnit(source);
