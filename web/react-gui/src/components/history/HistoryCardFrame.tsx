@@ -8,6 +8,7 @@ import type {
   CoverageConfidence,
   HistoryCardSummary,
   HistoryCardType,
+  HistoryAggregationLevel,
   HistorySyncState,
   HistoryViewMode,
 } from '../../history/types';
@@ -41,6 +42,10 @@ function formatCoverageConfidence(t: HistoryTranslate, value: CoverageConfidence
 
 function formatSyncState(t: HistoryTranslate, value: HistorySyncState): string {
   return t(`history.metadata.syncState.${value}`);
+}
+
+function formatAggregation(t: HistoryTranslate, value: HistoryAggregationLevel): string {
+  return t(`history.metadata.aggregation.${value}`);
 }
 
 function getErrorMessage(t: HistoryTranslate, error: unknown): string {
@@ -108,7 +113,7 @@ export const HistoryCardFrame: React.FC<HistoryCardFrameProps> = ({ card, scope 
             )}
             {cardData.data && (
               <span className="rounded-md border border-[var(--border)] bg-[var(--secondary-bg)] px-2 py-1 text-[var(--text)]">
-                {t('history.cardFrame.aggregationBadge', { aggregation: cardData.data.aggregation.level })}
+                {t('history.cardFrame.aggregationBadge', { aggregation: formatAggregation(t, cardData.data.aggregation.level) })}
               </span>
             )}
           </div>

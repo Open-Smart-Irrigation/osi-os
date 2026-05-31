@@ -27,6 +27,8 @@ const { translateForTest } = vi.hoisted(() => {
     'history.metadata.coverageKnown': '{{coverage}}% coverage',
     'history.metadata.coverageConfidence.configured': 'Configured cadence',
     'history.metadata.syncState.local': 'Local',
+    'history.metadata.aggregation.hourly': 'Hourly',
+    'history.metadata.range.24h': '24 hours',
     'history.soilProfile.emptyTitle': 'No soil profile data',
     'history.soilProfile.emptyBody': 'Depth-aware profile readings are not available for this range.',
     'history.soilProfile.depthLabel': '{{depth}} cm',
@@ -138,6 +140,10 @@ describe('HistoryCardFrame soil profile', () => {
     expect(screen.getByText('55 kPa')).toBeInTheDocument();
     expect(screen.getByText('Dry stress')).toBeInTheDocument();
     expect(screen.queryByText('dry_stress')).not.toBeInTheDocument();
+    expect(screen.getByText('Aggregation: Hourly')).toBeInTheDocument();
+    expect(screen.queryByText('Aggregation: hourly')).not.toBeInTheDocument();
+    expect(screen.getAllByText('24 hours').length).toBeGreaterThan(0);
+    expect(screen.queryByText('24h')).not.toBeInTheDocument();
   });
 
   it('renders an empty profile state when the backend returns no profile points', () => {

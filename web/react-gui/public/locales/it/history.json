@@ -107,6 +107,22 @@
         "stale": "Stale",
         "degraded": "Degraded",
         "unknown": "Unknown"
+      },
+      "aggregation": {
+        "auto": "Automatic",
+        "raw": "Raw",
+        "15m": "15 min",
+        "hourly": "Hourly",
+        "daily": "Daily",
+        "weekly": "Weekly"
+      },
+      "range": {
+        "12h": "12 hours",
+        "24h": "24 hours",
+        "7d": "7 days",
+        "30d": "30 days",
+        "season": "Season",
+        "custom": "Custom range"
       }
     }
   }
