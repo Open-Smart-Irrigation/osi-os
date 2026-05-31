@@ -64,13 +64,15 @@ The target UX can build on these existing foundations:
 
 The critical review raised several findings that change implementation planning. These are now reflected in the redesign spec.
 
+Slice 0 accepted the implementation-plan defaults because the product owner was unavailable. The accepted decisions are recorded in the redesign spec and are treated as the planning baseline until a later decision record supersedes them.
+
 ### Accepted blockers
 
 - Cloud long-range aggregation over `sensor_data.data_json` JSONB is not acceptable for MVP-scale 30D, Season, or multi-season views. The spec now requires typed rollups or explicit use of existing daily aggregate tables for long ranges.
 - Edge long-range aggregation over TEXT `recorded_at` values is not acceptable without a performance plan. The spec now requires composite indexes, `ANALYZE`, and rollups where raw scans exceed budget.
 - The edge helper module must use a concrete packaging path. The spec now names the existing `/usr/share/node-red/osi-*-helper` pattern and requires mirrored bcm2712/bcm2709 payloads.
-- `range=season` needs explicit season boundaries. The spec now requires a `zone_seasons` model or hiding/removing Season until configured.
-- Card identity for multi-source themes remains a P1 blocker. API, workspace, and preference work should not begin until merged-vs-per-source behavior is chosen.
+- `range=season` needs explicit season boundaries. Slice 0 accepts `zone_seasons` and hides Season until active boundaries exist.
+- Card identity for multi-source themes is no longer an open blocker. Slice 0 accepts merged zone cards except per-source dendro cards.
 - Comparison mode on OSI OS must be capped and feature-gated until Pi browser performance is validated.
 
 ### Accepted high-priority refinements
@@ -246,18 +248,12 @@ Adjust commands to the actual package scripts before implementation.
 
 Priority 1:
 
-- Should multiple same-theme sources in one zone be merged into one thematic card or shown as separate logical-source cards?
-- Should OSI OS add explicit `zone_seasons`, or should Season be hidden until a season model exists?
-- Should edge workspaces/preferences sync to cloud or stay local-only for MVP?
-- Should edge aggregation/interpretation use the existing bundled `/usr/share/node-red/osi-*-helper` pattern, or a formal Node-RED contrib package?
-- Should cloud 30D/Season aggregation use new typed rollups in MVP, or only existing daily aggregate tables?
-- What comparison panel cap should OSI OS enforce before Pi performance validation?
+- Should any Slice 0 accepted default be overridden before implementation starts?
 
 Priority 2:
 
 - Should ingestion be extended to persist RSSI/SNR/firmware/raw payload for Advanced View?
 - Should alert-aware ordering use existing status signals or a new alert table?
-- Should comparison mode be enabled by default on Pi hardware?
 - Should old diagnostic rows report `not_collected_at_time` after richer RSSI/SNR/raw payload ingestion starts?
 
 Priority 3:

@@ -35,6 +35,24 @@ The companion review findings are incorporated as hard implementation constraint
 - Workspace and preference identity must be sync-safe. Local autoincrement IDs are acceptable for local-only edge storage, but any future sync path must use stable UUID identifiers.
 - Basic comparison on OSI OS is required by the UX target, but it must be panel-capped, feature-gated, and validated on Pi-served mobile/desktop browsers before becoming default.
 
+### 1.2 Accepted Implementation Decisions
+
+The product owner was unavailable during Slice 0 execution, so the implementation plan defaults are accepted unless explicitly superseded by a later decision record.
+
+Decision: card-key strategy = hybrid-zone-merged-except-dendro-per-source
+Decision: logical-source-key derivation = zone_uuid + card_type + stable role, with opaque DevEUI only inside backend/advanced metadata
+Decision: season model = add zone_seasons and hide Season until a zone has active boundaries
+Decision: edge helper packaging = existing /usr/share/node-red/osi-*-helper pattern, modeled on osi-dendro-helper
+Decision: edge rollup strategy = history_channel_rollups for 30D and Season, raw/composite-index reads for 12h/24h/7D
+Decision: cloud long-range aggregation = new typed hourly/daily rollups; existing daily tables are supplemental only
+Decision: workspace owner identity = user_id for local access plus owner_user_uuid from users.user_uuid when available; no edge workspace sync in MVP
+Decision: workspace preference sync = local-only edge MVP, cloud-owned cloud workspaces
+Decision: edge comparison cap = 4 visible panels behind historyComparisonEnabled
+Decision: cloud gateway connectivity = unavailable until heartbeat/status history persistence exists
+Decision: coverage confidence = configured | derived | unknown
+Decision: i18n key prefix = history.*
+Decision: critical alert ordering = pinned cards remain first; critical alerts rank first only among unpinned cards
+
 ## 2. Repository Architecture Summary
 
 ### 2.1 OSI OS frontend
