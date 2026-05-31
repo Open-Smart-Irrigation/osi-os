@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { TimelineBrush } from './TimelineBrush';
+import { SoilProfileView } from './visualizations/SoilProfileView';
 import { useHistoryCardData, type HistoryCardDataScope } from '../../history/useHistoryCardData';
 import { useTimeViewport } from '../../history/useTimeViewport';
 import type {
@@ -42,6 +43,11 @@ function formatSyncState(t: HistoryTranslate, value: HistorySyncState): string {
   return t(`history.metadata.syncState.${value}`);
 }
 
+function getErrorMessage(t: HistoryTranslate, error: unknown): string {
+  if (error instanceof Error && error.message) return error.message;
+  return t('history.cardFrame.cardDataUnknownError');
+}
+
 export const HistoryCardFrame: React.FC<HistoryCardFrameProps> = ({ card, scope }) => {
   const { t: translate } = useTranslation('history');
   const t = translate as HistoryTranslate;
@@ -49,6 +55,7 @@ export const HistoryCardFrame: React.FC<HistoryCardFrameProps> = ({ card, scope 
   const defaultRange = card?.defaultRange ?? '24h';
   const { viewport, setViewport } = useTimeViewport(defaultRange, card?.cardId ?? 'empty');
   const selectedView = card ? viewModesByCard[card.cardId] ?? card.defaultView : 'line-chart';
+  const shouldRenderSoilProfile = card?.cardType === 'soil' && selectedView === 'soil-profile';
   const cardData = useHistoryCardData({
     scope,
     cardId: card?.cardId ?? null,
@@ -141,12 +148,32 @@ export const HistoryCardFrame: React.FC<HistoryCardFrameProps> = ({ card, scope 
           keyboardHelp={t('history.cardFrame.timelineBrushKeyboardHelp')}
         />
 
-        <div className="mt-4 rounded-lg border border-dashed border-[var(--border)] bg-[var(--bg)] p-6">
-          <p className="text-sm font-semibold text-[var(--text)]">{formatViewLabel(t, selectedView)}</p>
-          <p className="mt-2 text-sm text-[var(--text-tertiary)]">
-            {t('history.cardFrame.placeholderBody')}
-          </p>
-        </div>
+        {cardData.isLoading && (
+          <div className="mt-4 flex min-h-[240px] items-center justify-center rounded-lg border border-dashed border-[var(--border)] bg-[var(--bg)] p-6 text-center">
+            <p className="text-sm font-semibold text-[var(--text)]">
+              {t('history.cardFrame.cardDataLoading')}
+            </p>
+          </div>
+        )}
+
+        {!cardData.isLoading && cardData.error && (
+          <div className="mt-4 rounded-lg border border-[var(--warning-bg)] bg-[var(--warning-bg)] px-4 py-3 text-sm text-[var(--warning-text)]">
+            {t('history.cardFrame.cardDataError', { message: getErrorMessage(t, cardData.error) })}
+          </div>
+        )}
+
+        {!cardData.isLoading && !cardData.error && shouldRenderSoilProfile && cardData.data && (
+          <SoilProfileView profiles={Array.isArray(cardData.data.profiles) ? cardData.data.profiles : []} />
+        )}
+
+        {!cardData.isLoading && !cardData.error && (!shouldRenderSoilProfile || !cardData.data) && (
+          <div className="mt-4 rounded-lg border border-dashed border-[var(--border)] bg-[var(--bg)] p-6">
+            <p className="text-sm font-semibold text-[var(--text)]">{formatViewLabel(t, selectedView)}</p>
+            <p className="mt-2 text-sm text-[var(--text-tertiary)]">
+              {t('history.cardFrame.placeholderBody')}
+            </p>
+          </div>
+        )}
       </div>
     </section>
   );

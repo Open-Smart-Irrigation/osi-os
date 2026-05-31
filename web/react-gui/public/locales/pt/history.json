@@ -52,7 +52,17 @@
       "timelineBrush": "Timeline viewport",
       "timelineBrushKeyboardHelp": "Use arrow keys to pan, plus or minus to zoom, and Home or Enter to reset.",
       "aggregationBadge": "Aggregation: {{aggregation}}",
+      "cardDataLoading": "Loading card data...",
+      "cardDataError": "Card data failed to load: {{message}}",
+      "cardDataUnknownError": "Unknown error",
       "placeholderBody": "Chart and calendar data will load here when card data APIs are enabled."
+    },
+    "soilProfile": {
+      "emptyTitle": "No soil profile data",
+      "emptyBody": "Depth-aware profile readings are not available for this range.",
+      "depthLabel": "{{depth}} cm",
+      "depthUnknown": "Depth pending",
+      "valueMissing": "No reading"
     },
     "cardType": {
       "soil": "Soil",
