@@ -916,8 +916,8 @@ Performance budget:
 | --- | --- |
 | Edge 12h/24h single card | p95 under 250 ms after DB query warmup |
 | Edge 7D single card | p95 under 750 ms |
-| Edge 30D single card | p95 under 1.5 s, preferably from hourly/daily rollup |
-| Edge Season single card | p95 under 2.5 s, from daily/weekly rollup |
+| Edge 30D single card | p95 under 1.5 s from `history_channel_rollups` |
+| Edge Season single card | p95 under 2.5 s from `history_channel_rollups` |
 | Cloud 30D/Season single card | p95 under 750 ms from typed rollup |
 | Cloud comparison workspace | p95 under 1.5 s for configured panel cap |
 

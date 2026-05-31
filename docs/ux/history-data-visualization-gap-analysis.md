@@ -69,7 +69,7 @@ Slice 0 accepted the implementation-plan defaults because the product owner was 
 ### Accepted blockers
 
 - Cloud long-range aggregation over `sensor_data.data_json` JSONB is not acceptable for MVP-scale 30D, Season, or multi-season views. The spec now requires typed hourly/daily rollups for long ranges; existing daily tables are supplemental only.
-- Edge long-range aggregation over TEXT `recorded_at` values is not acceptable without a performance plan. The spec now requires composite indexes, `ANALYZE`, and rollups where raw scans exceed budget.
+- Edge long-range aggregation over TEXT `recorded_at` values is not acceptable without a performance plan. The spec now requires composite indexes, `ANALYZE`, and `history_channel_rollups` for Edge 30D and Season.
 - The edge helper module must use a concrete packaging path. The spec now names the existing `/usr/share/node-red/osi-*-helper` pattern and requires mirrored bcm2712/bcm2709 payloads.
 - `range=season` needs explicit season boundaries. Slice 0 accepts `zone_seasons` and hides Season until active boundaries exist.
 - Card identity for multi-source themes is no longer an open blocker. Slice 0 accepts merged zone cards except per-source dendro cards.

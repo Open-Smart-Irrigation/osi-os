@@ -691,7 +691,7 @@ Performance verification target:
 - `history_card_preferences`
 - `history_workspaces`
 - typed hourly/daily rollup table for measured card channels
-- optional gateway heartbeat/status history if Slice 0 selected cloud Connectivity Timeline in MVP
+- gateway heartbeat/status history is deferred in MVP because Slice 0 selected `cloud gateway connectivity = unavailable until heartbeat/status history persistence exists`
 
 **Steps:**
 
