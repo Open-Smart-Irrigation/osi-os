@@ -62,6 +62,7 @@
       "emptyTitle": "No dendrometer timeline data",
       "emptyBody": "Dendrometer readings will appear here when history data is available.",
       "eventsTitle": "Timeline events",
+      "eventFallback": "Dendrometer event",
       "noEvents": "No events in this range",
       "pointsCount": "{{count}} readings",
       "series": {
@@ -76,11 +77,16 @@
       "emptyTitle": "No environment trend data",
       "emptyBody": "Environment readings will appear here when history data is available.",
       "pointsCount": "{{count}} readings",
+      "axisLabel": "{{unit}} axis",
+      "axisNoUnit": "Unitless axis",
       "series": {
         "airTemperature": "Air temperature",
         "humidity": "Relative humidity",
         "rain": "Rain",
         "light": "Light",
+        "pressure": "Pressure",
+        "wind": "Wind",
+        "uv": "UV index",
         "environment": "Environment"
       }
     },
@@ -118,6 +124,31 @@
       },
       "value": {
         "unavailable": "Not reported"
+      }
+    },
+    "irrigationTimeline": {
+      "title": "Irrigation event timeline",
+      "emptyTitle": "No irrigation events",
+      "emptyBody": "Irrigation actions and response windows will appear here when history data is available.",
+      "eventsCount": "{{count}} events",
+      "eventLabel": {
+        "irrigation": "Irrigation event",
+        "scheduled": "Scheduled irrigation",
+        "manualOverride": "Manual override",
+        "possibleIneffective": "Possible ineffective irrigation",
+        "responseWindow": "Response window"
+      },
+      "detail": {
+        "duration": "Duration: {{value}}",
+        "responseWindow": "Response window: {{value}}",
+        "observedResponse": "Observed response: {{value}}"
+      },
+      "severity": {
+        "info": "Info",
+        "warning": "Warning",
+        "critical": "Critical",
+        "success": "Success",
+        "unknown": "Info"
       }
     },
     "cardType": {
