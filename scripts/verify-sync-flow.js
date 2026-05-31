@@ -2082,6 +2082,7 @@ expectIncludes('System Stats', '/sys/class/hwmon', 'detects fan via hwmon sysfs'
 expectIncludes('System Stats', "hwmonName === 'pwmfan'", 'identifies pwmfan hwmon device by name');
 expectIncludes('System Stats', 'pwm1', 'reads fan speed from hwmon pwm1');
 expectExcludes('System Stats', '/sys/class/pwm/pwmchip2', 'no longer uses raw PWM sysfs path');
+expectIncludes('System Stats', 'fanAvailable = false', 'fan defaults to unavailable when no hwmon device found');
 pendingChecks.push((async () => {
   // Fixed fixture values mirror the live command-193 failure; the test has no hardware dependency.
   const gatewayEui = '0016C001F151B1D6';
