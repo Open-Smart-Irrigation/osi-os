@@ -46,6 +46,8 @@ const { translateForTest } = vi.hoisted(() => {
     'history.gatewayStatus.metric.signal': 'Signal',
     'history.gatewayStatus.metric.storage': 'Storage use',
     'history.gatewayStatus.metric.memory': 'Memory use',
+    'history.gatewayStatus.metric.cpu': 'CPU',
+    'history.gatewayStatus.metric.temperature': 'Temperature',
     'history.gatewayStatus.value.unavailable': 'Not reported',
   };
 
@@ -155,6 +157,18 @@ function historyData(
         unit: '%',
         points: [{ t: '2026-05-31T09:45:00.000Z', value: 42, coverageConfidence: 'configured' }],
       },
+      {
+        id: 'gateway-cpu-percent',
+        label: 'cpu_percent',
+        unit: '%',
+        points: [{ t: '2026-05-31T09:45:00.000Z', value: 18, coverageConfidence: 'configured' }],
+      },
+      {
+        id: 'gateway-cpu-temp',
+        label: 'cpu_temp',
+        unit: 'C',
+        points: [{ t: '2026-05-31T09:45:00.000Z', value: 61, coverageConfidence: 'configured' }],
+      },
     ],
     profiles: [],
     events: [
@@ -222,8 +236,11 @@ describe('HistoryCardFrame gateway status overview', () => {
     expect(within(overview).getByText('Online')).toBeInTheDocument();
     expect(within(overview).getByText('Storage')).toBeInTheDocument();
     expect(within(overview).getByText('68 %')).toBeInTheDocument();
-    expect(within(overview).getByText('System')).toBeInTheDocument();
+    expect(within(overview).getAllByText('System').length).toBeGreaterThan(0);
     expect(within(overview).getByText('42 %')).toBeInTheDocument();
+    expect(within(overview).getByText('18 %')).toBeInTheDocument();
+    expect(within(overview).getByText('Temperature')).toBeInTheDocument();
+    expect(within(overview).getByText('61 C')).toBeInTheDocument();
     expect(within(overview).getByText('Sync completed')).toBeInTheDocument();
     expect(within(overview).getByText('Gateway event')).toBeInTheDocument();
     expect(screen.queryByText(/A84041FFFF123456|device_eui|rssi|dBm|firmware|raw_payload|pending|3\.7 V/i)).not.toBeInTheDocument();
