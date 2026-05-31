@@ -12,32 +12,35 @@ interface HistoryCardFrameProps {
   card: HistoryCardSummary | null;
 }
 
+type HistoryTranslate = (key: string, options?: Record<string, unknown>) => string;
+
 function formatCoverage(
-  t: (key: string, options?: Record<string, unknown>) => string,
+  t: HistoryTranslate,
   coveragePct: number | null | undefined,
 ): string {
   if (coveragePct === null || coveragePct === undefined) return t('history.metadata.coverageUnknown');
   return t('history.metadata.coverageKnown', { coverage: Math.round(coveragePct) });
 }
 
-function formatViewLabel(t: (key: string) => string, view: HistoryViewMode): string {
+function formatViewLabel(t: HistoryTranslate, view: HistoryViewMode): string {
   return t(`history.viewMode.${view}`);
 }
 
-function formatCardType(t: (key: string) => string, cardType: HistoryCardType): string {
+function formatCardType(t: HistoryTranslate, cardType: HistoryCardType): string {
   return t(`history.cardType.${cardType}`);
 }
 
-function formatCoverageConfidence(t: (key: string) => string, value: CoverageConfidence): string {
+function formatCoverageConfidence(t: HistoryTranslate, value: CoverageConfidence): string {
   return t(`history.metadata.coverageConfidence.${value}`);
 }
 
-function formatSyncState(t: (key: string) => string, value: HistorySyncState): string {
+function formatSyncState(t: HistoryTranslate, value: HistorySyncState): string {
   return t(`history.metadata.syncState.${value}`);
 }
 
 export const HistoryCardFrame: React.FC<HistoryCardFrameProps> = ({ card }) => {
-  const { t } = useTranslation('history');
+  const { t: translate } = useTranslation('history');
+  const t = translate as HistoryTranslate;
   const [viewModesByCard, setViewModesByCard] = useState<Record<string, HistoryViewMode>>({});
 
   if (!card) {

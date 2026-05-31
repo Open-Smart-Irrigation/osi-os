@@ -9,16 +9,15 @@ interface ThematicCardCarouselProps {
   onSelectCard: (cardId: string) => void;
 }
 
-function cardTypeLabel(t: (key: string) => string, cardType: HistoryCardType): string {
+type HistoryTranslate = (key: string, options?: Record<string, unknown>) => string;
+
+function cardTypeLabel(t: HistoryTranslate, cardType: HistoryCardType): string {
   return t('history.carousel.cardTypeLabel', {
     cardType: t(`history.cardType.${cardType}`),
   });
 }
 
-function coverageLabel(
-  t: (key: string, options?: Record<string, unknown>) => string,
-  card: HistoryCardSummary,
-): string {
+function coverageLabel(t: HistoryTranslate, card: HistoryCardSummary): string {
   const coveragePct = card.metadata.coveragePct;
   return coveragePct === null || coveragePct === undefined
     ? t('history.metadata.coverageUnknown')
@@ -30,7 +29,8 @@ export const ThematicCardCarousel: React.FC<ThematicCardCarouselProps> = ({
   selectedCardId,
   onSelectCard,
 }) => {
-  const { t } = useTranslation('history');
+  const { t: translate } = useTranslation('history');
+  const t = translate as HistoryTranslate;
   const orderedCards = orderHistoryCards(cards);
 
   if (orderedCards.length === 0) {
