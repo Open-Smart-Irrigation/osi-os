@@ -76,11 +76,16 @@
       "emptyTitle": "No environment trend data",
       "emptyBody": "Environment readings will appear here when history data is available.",
       "pointsCount": "{{count}} readings",
+      "axisLabel": "{{unit}} axis",
+      "axisNoUnit": "Unitless axis",
       "series": {
         "airTemperature": "Air temperature",
         "humidity": "Relative humidity",
         "rain": "Rain",
         "light": "Light",
+        "pressure": "Pressure",
+        "wind": "Wind",
+        "uv": "UV index",
         "environment": "Environment"
       }
     },

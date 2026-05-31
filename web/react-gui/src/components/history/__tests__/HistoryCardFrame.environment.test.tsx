@@ -44,10 +44,15 @@ const { translateForTest } = vi.hoisted(() => {
     'history.environmentLineChart.emptyTitle': 'No environment trend data',
     'history.environmentLineChart.emptyBody': 'Environment readings will appear here when history data is available.',
     'history.environmentLineChart.pointsCount': '{{count}} readings',
+    'history.environmentLineChart.axisLabel': '{{unit}} axis',
+    'history.environmentLineChart.axisNoUnit': 'Unitless axis',
     'history.environmentLineChart.series.airTemperature': 'Air temperature',
     'history.environmentLineChart.series.humidity': 'Relative humidity',
     'history.environmentLineChart.series.rain': 'Rain',
     'history.environmentLineChart.series.light': 'Light',
+    'history.environmentLineChart.series.pressure': 'Pressure',
+    'history.environmentLineChart.series.wind': 'Wind',
+    'history.environmentLineChart.series.uv': 'UV index',
     'history.environmentLineChart.series.environment': 'Environment',
   };
 
@@ -165,7 +170,7 @@ function historyData(overrides: Partial<HistoryCardDataResponse<'environment'>> 
       {
         id: 'env-src-A84041FFFF654321-light',
         label: 'light_lux',
-        unit: 'lx',
+        unit: null,
         points: [{ t: '2026-05-30T12:00:00Z', value: 53000, coverageConfidence: 'configured' }],
       },
     ],
@@ -203,6 +208,10 @@ describe('HistoryCardFrame environment line chart', () => {
     expect(within(chart).getByText('54 %')).toBeInTheDocument();
     expect(within(chart).getByText('3.5 mm')).toBeInTheDocument();
     expect(within(chart).getByText('53000 lx')).toBeInTheDocument();
+    expect(within(chart).getByText('C axis')).toBeInTheDocument();
+    expect(within(chart).getByText('% axis')).toBeInTheDocument();
+    expect(within(chart).getByText('mm axis')).toBeInTheDocument();
+    expect(within(chart).getByText('lx axis')).toBeInTheDocument();
     expect(screen.queryByText(/env-src-/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/A84041FFFF654321/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/air_temperature|relative_humidity|light_lux|environment_threshold/i)).not.toBeInTheDocument();
@@ -215,9 +224,15 @@ describe('HistoryCardFrame environment line chart', () => {
           id: 'env-src-A84041FFFF654321-air-temperature',
           label: 'air_temperature',
           unit: 'C',
-          points: [{ t: '2026-05-30T00:00:00Z', value: null, coverageConfidence: 'configured' }],
+          points: [
+            null,
+            { t: '', value: 12, coverageConfidence: 'unknown' },
+            { t: 'A84041FFFF654321', value: 20, coverageConfidence: 'unknown' },
+            { t: '2026-05-30T00:00:00Z', value: 'not-a-number', coverageConfidence: 'unknown' },
+            { t: '2026-05-30T01:00:00Z', value: null, coverageConfidence: 'configured' },
+          ],
         },
-      ],
+      ] as unknown as HistoryCardDataResponse<'environment'>['series'],
       events: [],
     });
 
@@ -225,6 +240,9 @@ describe('HistoryCardFrame environment line chart', () => {
 
     expect(screen.getByText('No environment trend data')).toBeInTheDocument();
     expect(screen.getByText('Environment readings will appear here when history data is available.')).toBeInTheDocument();
+    expect(screen.queryByText(/A84041FFFF654321/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/air_temperature/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/undefined|NaN/i)).not.toBeInTheDocument();
   });
 
   it('keeps non-environment cards on the existing placeholder surface', () => {
