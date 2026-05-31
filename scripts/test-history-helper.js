@@ -353,8 +353,8 @@ test('counts configured or requested silent source channels in coverage', () => 
   const snakeCaseSourceMap = helper.aggregateRows(rows, {
     ...base,
     expected_cadence_seconds_by_source: {
-      AA00000000000001: 900,
-      BB00000000000002: 900,
+      aa00000000000001: 900,
+      'bb00-0000-0000-0002': 900,
     },
   });
   assert.strictEqual(snakeCaseSourceMap.coverageConfidence, 'configured');
