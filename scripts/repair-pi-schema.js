@@ -99,6 +99,8 @@ const historySchema = [
         ON zone_seasons(zone_id, starts_on, ends_on)`,
     `CREATE INDEX IF NOT EXISTS idx_zone_seasons_zone_active
         ON zone_seasons(zone_id, is_active, starts_on, ends_on)`,
+    `CREATE UNIQUE INDEX IF NOT EXISTS idx_zone_seasons_zone_active_unique
+        ON zone_seasons(zone_id) WHERE is_active = 1`,
     `CREATE UNIQUE INDEX IF NOT EXISTS idx_zone_seasons_zone_default
         ON zone_seasons(zone_id) WHERE is_default = 1`,
     `CREATE UNIQUE INDEX IF NOT EXISTS idx_zone_seasons_uuid
@@ -157,6 +159,8 @@ const historySchema = [
         ON history_workspaces(user_id, zone_id)`,
     `CREATE UNIQUE INDEX IF NOT EXISTS idx_history_workspaces_user_default
         ON history_workspaces(user_id, zone_id) WHERE is_default = 1`,
+    `CREATE UNIQUE INDEX IF NOT EXISTS idx_history_workspaces_user_global_default
+        ON history_workspaces(user_id) WHERE is_default = 1 AND zone_id IS NULL`,
     'ANALYZE',
 ];
 

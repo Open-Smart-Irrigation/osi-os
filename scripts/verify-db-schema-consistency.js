@@ -245,6 +245,7 @@ const requiredIndexes = {
   zone_seasons: [
     'idx_zone_seasons_zone_range',
     'idx_zone_seasons_zone_active',
+    'idx_zone_seasons_zone_active_unique',
     'idx_zone_seasons_zone_default',
     'idx_zone_seasons_uuid',
   ],
@@ -260,6 +261,25 @@ const requiredIndexes = {
   history_workspaces: [
     'idx_history_workspaces_user_zone',
     'idx_history_workspaces_user_default',
+    'idx_history_workspaces_user_global_default',
+  ],
+};
+
+const requiredIndexSqlFragments = {
+  idx_zone_seasons_zone_active_unique: [
+    'unique index',
+    'on zone_seasons(zone_id)',
+    'where is_active = 1',
+  ],
+  idx_history_workspaces_user_default: [
+    'unique index',
+    'on history_workspaces(user_id, zone_id)',
+    'where is_default = 1',
+  ],
+  idx_history_workspaces_user_global_default: [
+    'unique index',
+    'on history_workspaces(user_id)',
+    'where is_default = 1 and zone_id is null',
   ],
 };
 
@@ -277,6 +297,15 @@ function indexNames(dbPath, tableName) {
   const output = sqlite(dbPath, `PRAGMA index_list(${tableName});`);
   if (!output) return [];
   return output.split('\n').map((line) => line.split('|')[1]).filter(Boolean);
+}
+
+function indexSql(dbPath, indexName) {
+  const escapedName = indexName.replace(/'/g, "''");
+  return sqlite(dbPath, `SELECT sql FROM sqlite_master WHERE type = 'index' AND name = '${escapedName}';`);
+}
+
+function normalizeSql(sql) {
+  return sql.replace(/\s+/g, ' ').trim().toLowerCase();
 }
 
 function compareSet(label, actualValues, expectedValues) {
@@ -307,6 +336,13 @@ function verifyDb(dbPath) {
     const missing = expectedIndexes.filter((name) => !indexes.includes(name));
     if (missing.length) {
       throw new Error(`${dbPath}:${tableName} missing indexes: ${missing.join(',')}`);
+    }
+  }
+  for (const [indexName, expectedFragments] of Object.entries(requiredIndexSqlFragments)) {
+    const sql = normalizeSql(indexSql(dbPath, indexName));
+    const missingFragments = expectedFragments.filter((fragment) => !sql.includes(fragment));
+    if (missingFragments.length) {
+      throw new Error(`${dbPath}:${indexName} definition drift: ${sql || '<missing>'}`);
     }
   }
   const historyQueryPlan = sqlite(
