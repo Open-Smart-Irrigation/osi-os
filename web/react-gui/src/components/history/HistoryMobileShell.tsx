@@ -49,7 +49,10 @@ export const HistoryMobileShell: React.FC<HistoryMobileShellProps> = ({
         onSelectCard={onSelectCard}
       />
 
-      <HistoryCardFrame card={selectedCard} />
+      <HistoryCardFrame
+        card={selectedCard}
+        scope={selectedZoneId === null ? null : { type: 'zone', zoneId: selectedZoneId }}
+      />
     </div>
   );
 };

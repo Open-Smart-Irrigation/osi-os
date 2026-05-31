@@ -301,6 +301,13 @@ export interface HistoryCardDataResponse<TCardType extends HistoryCardType = His
   advancedFields: Record<string, HistoryAdvancedField>;
 }
 
+export interface HistoryCardDataRequest {
+  view: HistoryViewMode;
+  range: HistoryRangeSelection;
+  aggregation: HistoryAggregationLevel;
+  overlays: readonly HistoryOverlayId[];
+}
+
 export interface HistoryWorkspaceRange {
   mode: 'relative' | 'absolute';
   label: HistoryRangeLabel;

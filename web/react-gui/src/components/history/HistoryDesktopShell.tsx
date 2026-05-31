@@ -2,6 +2,7 @@ import React from 'react';
 import { useTranslation } from 'react-i18next';
 import { HistoryCardFrame } from './HistoryCardFrame';
 import { HistorySidebar } from './HistorySidebar';
+import { maxPanelsByPlatform } from '../../history/platformLimits';
 import type { HistoryCardSummary } from '../../history/types';
 import type { IrrigationZone } from '../../types/farming';
 
@@ -43,8 +44,14 @@ export const HistoryDesktopShell: React.FC<HistoryDesktopShellProps> = ({
           <p className="mt-1 text-sm text-[var(--text-tertiary)]">
             {t('history.desktop.toolbarPlaceholder')}
           </p>
+          <p className="mt-2 text-xs font-semibold text-[var(--text-tertiary)]">
+            {t('history.desktop.maxPanels', { count: maxPanelsByPlatform.edge })}
+          </p>
         </div>
-        <HistoryCardFrame card={selectedCard} />
+        <HistoryCardFrame
+          card={selectedCard}
+          scope={selectedZoneId === null ? null : { type: 'zone', zoneId: selectedZoneId }}
+        />
       </main>
 
       <aside className="border-l border-[var(--border)] bg-[var(--surface)] p-4">

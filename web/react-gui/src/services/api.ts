@@ -2,15 +2,19 @@ import axios from 'axios';
 import { notifyAuthExpired } from './authEvents';
 import type {
   HistoryCardSummaryResponse,
+  HistoryCardDataResponse,
   HistoryCardSummary,
   HistoryCardType,
   HistoryCardScope,
   HistoryViewMode,
   HistoryRangeLabel,
+  HistoryAggregationLevel,
   HistoryCardAvailability,
   HistoryCardOrdering,
   HistoryCardMetadata,
   CoverageConfidence,
+  HistoryRangeSelection,
+  HistoryCardDataRequest,
 } from '../history/types';
 import type {
   Device,
@@ -455,6 +459,65 @@ function normaliseHistoryCardSummaryResponse(row: any): HistoryCardSummaryRespon
   };
 }
 
+function normaliseHistoryRangeSelection(row: any): HistoryRangeSelection {
+  return {
+    label: String(row?.label ?? 'custom') as HistoryRangeLabel,
+    from: row?.from ?? null,
+    to: row?.to ?? null,
+    timezone: String(row?.timezone ?? 'UTC'),
+  };
+}
+
+function normaliseHistoryCardDataResponse(row: any): HistoryCardDataResponse {
+  const aggregation = row?.aggregation ?? {};
+  const limits = row?.limits ?? {};
+  const freshness = row?.freshness ?? {};
+
+  return {
+    cardId: String(row?.cardId ?? row?.card_id ?? ''),
+    cardType: String(row?.cardType ?? row?.card_type ?? 'soil') as HistoryCardType,
+    view: String(row?.view ?? 'line-chart') as HistoryViewMode,
+    range: normaliseHistoryRangeSelection(row?.range ?? {}),
+    aggregation: {
+      level: String(aggregation?.level ?? 'auto') as HistoryAggregationLevel,
+      bucketSizeSeconds: aggregation?.bucketSizeSeconds ?? aggregation?.bucket_size_seconds ?? null,
+      coveragePct: aggregation?.coveragePct ?? aggregation?.coverage_pct ?? null,
+      coverageConfidence: toCoverageConfidence(aggregation?.coverageConfidence ?? aggregation?.coverage_confidence),
+      pointCount: Number(aggregation?.pointCount ?? aggregation?.point_count ?? 0),
+      dominantStatusMethod: aggregation?.dominantStatusMethod ?? aggregation?.dominant_status_method ?? null,
+    },
+    limits: {
+      maxPointsPerSeries: Number(limits?.maxPointsPerSeries ?? limits?.max_points_per_series ?? 0),
+      maxEvents: Number(limits?.maxEvents ?? limits?.max_events ?? 0),
+      maxInterpretations: Number(limits?.maxInterpretations ?? limits?.max_interpretations ?? 0),
+      truncated: asBoolean(limits?.truncated),
+    },
+    series: Array.isArray(row?.series) ? row.series : [],
+    profiles: Array.isArray(row?.profiles) ? row.profiles : [],
+    events: Array.isArray(row?.events) ? row.events : [],
+    calendar: row?.calendar ?? null,
+    interpretations: Array.isArray(row?.interpretations) ? row.interpretations : [],
+    freshness: {
+      dataAsOf: freshness?.dataAsOf ?? freshness?.data_as_of ?? null,
+      syncState: freshness?.syncState ?? freshness?.sync_state ?? 'unknown',
+    },
+    advancedFields: row?.advancedFields ?? row?.advanced_fields ?? {},
+  };
+}
+
+function buildHistoryCardDataParams(request: HistoryCardDataRequest): URLSearchParams {
+  const params = new URLSearchParams({
+    view: request.view,
+    range: request.range.label,
+    timezone: request.range.timezone,
+    aggregation: request.aggregation,
+  });
+  if (request.range.from) params.set('from', request.range.from);
+  if (request.range.to) params.set('to', request.range.to);
+  if (request.overlays.length > 0) params.set('overlays', request.overlays.join(','));
+  return params;
+}
+
 function normaliseDendroHistoryPoint(row: any): DendroHistoryPoint {
   return {
     t: String(row?.t ?? row?.recorded_at ?? ''),
@@ -850,6 +913,29 @@ export const historyAPI = {
   getZoneCards: async (zoneId: number): Promise<HistoryCardSummaryResponse> => {
     const response = await api.get(`/api/history/zones/${zoneId}/cards`);
     return normaliseHistoryCardSummaryResponse(response.data);
+  },
+
+  getZoneCardData: async (
+    zoneId: number,
+    cardId: string,
+    request: HistoryCardDataRequest,
+  ): Promise<HistoryCardDataResponse> => {
+    const params = buildHistoryCardDataParams(request);
+    const response = await api.get(`/api/history/zones/${zoneId}/cards/${encodeURIComponent(cardId)}/data`, { params });
+    return normaliseHistoryCardDataResponse(response.data);
+  },
+
+  getGatewayCardData: async (
+    gatewayEui: string,
+    cardId: string,
+    request: HistoryCardDataRequest,
+  ): Promise<HistoryCardDataResponse> => {
+    const params = buildHistoryCardDataParams(request);
+    const response = await api.get(
+      `/api/history/gateways/${encodeURIComponent(gatewayEui)}/cards/${encodeURIComponent(cardId)}/data`,
+      { params },
+    );
+    return normaliseHistoryCardDataResponse(response.data);
   },
 };
 

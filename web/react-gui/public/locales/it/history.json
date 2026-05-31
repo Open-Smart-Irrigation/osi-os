@@ -21,6 +21,7 @@
     "desktop": {
       "toolbarTitle": "Toolbar",
       "toolbarPlaceholder": "Date range, aggregation, export, and sync controls land here in the visualization slice.",
+      "maxPanels": "Up to {{count}} comparison panels",
       "inspectorTitle": "Inspector",
       "inspectorPlaceholder": "Select a timestamp or calendar cell to see interpretation, events, data quality, and advanced metadata."
     },
@@ -48,6 +49,8 @@
       "typeHistory": "{{cardType}} history",
       "viewModes": "{{title}} view modes",
       "unavailable": "This card is not available for the selected zone.",
+      "timelineBrush": "Timeline viewport",
+      "aggregationBadge": "Aggregation: {{aggregation}}",
       "placeholderBody": "Chart and calendar data will load here when card data APIs are enabled."
     },
     "cardType": {

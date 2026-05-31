@@ -27,6 +27,7 @@ const { translateForTest } = vi.hoisted(() => {
     'history.shell.retryCards': 'Retry cards',
     'history.desktop.toolbarTitle': 'Toolbar',
     'history.desktop.toolbarPlaceholder': 'Date range, aggregation, export, and sync controls land here in the visualization slice.',
+    'history.desktop.maxPanels': 'Up to {{count}} comparison panels',
     'history.desktop.inspectorTitle': 'Inspector',
     'history.desktop.inspectorPlaceholder': 'Select a timestamp or calendar cell to see interpretation, events, data quality, and advanced metadata.',
     'history.mobile.zoneLabel': 'Zone',
@@ -46,6 +47,8 @@ const { translateForTest } = vi.hoisted(() => {
     'history.cardFrame.typeHistory': '{{cardType}} history',
     'history.cardFrame.viewModes': '{{title}} view modes',
     'history.cardFrame.unavailable': 'This card is not available for the selected zone.',
+    'history.cardFrame.timelineBrush': 'Timeline viewport',
+    'history.cardFrame.aggregationBadge': 'Aggregation: {{aggregation}}',
     'history.cardFrame.placeholderBody': 'Chart and calendar data will load here when card data APIs are enabled.',
     'history.cardType.soil': 'Soil',
     'history.cardType.dendro': 'Dendro',
@@ -100,6 +103,8 @@ vi.mock('../../../services/api', () => ({
   },
   historyAPI: {
     getZoneCards: vi.fn(),
+    getZoneCardData: vi.fn(),
+    getGatewayCardData: vi.fn(),
   },
   irrigationZonesAPI: {
     getAll: vi.fn(),
@@ -162,6 +167,37 @@ describe('History shell', () => {
       zoneId: 1,
       generatedAt: '2026-05-31T10:00:00Z',
       cards: [card()],
+    });
+    vi.mocked(historyAPI.getZoneCardData).mockResolvedValue({
+      cardId: 'soil-zone-1',
+      cardType: 'soil',
+      view: 'soil-profile',
+      range: {
+        label: '24h',
+        from: '2026-05-30T10:00:00.000Z',
+        to: '2026-05-31T10:00:00.000Z',
+        timezone: 'UTC',
+      },
+      aggregation: {
+        level: 'raw',
+        bucketSizeSeconds: null,
+        coveragePct: 96,
+        coverageConfidence: 'configured',
+        pointCount: 12,
+      },
+      limits: {
+        maxPointsPerSeries: 1000,
+        maxEvents: 100,
+        maxInterpretations: 20,
+        truncated: false,
+      },
+      series: [],
+      profiles: [],
+      events: [],
+      calendar: null,
+      interpretations: [],
+      freshness: { dataAsOf: '2026-05-31T10:00:00.000Z', syncState: 'local' },
+      advancedFields: {},
     });
   });
 

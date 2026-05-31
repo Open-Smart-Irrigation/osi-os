@@ -1,5 +1,8 @@
 import React, { useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import { TimelineBrush } from './TimelineBrush';
+import { useHistoryCardData, type HistoryCardDataScope } from '../../history/useHistoryCardData';
+import { useTimeViewport } from '../../history/useTimeViewport';
 import type {
   CoverageConfidence,
   HistoryCardSummary,
@@ -10,6 +13,7 @@ import type {
 
 interface HistoryCardFrameProps {
   card: HistoryCardSummary | null;
+  scope: HistoryCardDataScope | null;
 }
 
 type HistoryTranslate = (key: string, options?: Record<string, unknown>) => string;
@@ -38,10 +42,22 @@ function formatSyncState(t: HistoryTranslate, value: HistorySyncState): string {
   return t(`history.metadata.syncState.${value}`);
 }
 
-export const HistoryCardFrame: React.FC<HistoryCardFrameProps> = ({ card }) => {
+export const HistoryCardFrame: React.FC<HistoryCardFrameProps> = ({ card, scope }) => {
   const { t: translate } = useTranslation('history');
   const t = translate as HistoryTranslate;
   const [viewModesByCard, setViewModesByCard] = useState<Record<string, HistoryViewMode>>({});
+  const defaultRange = card?.defaultRange ?? '24h';
+  const { viewport, setViewport } = useTimeViewport(defaultRange, card?.cardId ?? 'empty');
+  const selectedView = card ? viewModesByCard[card.cardId] ?? card.defaultView : 'line-chart';
+  const cardData = useHistoryCardData({
+    scope,
+    cardId: card?.cardId ?? null,
+    view: selectedView,
+    range: viewport.range,
+    aggregation: viewport.aggregation,
+    overlays: [],
+    enabled: Boolean(card?.availability.available),
+  });
 
   if (!card) {
     return (
@@ -57,8 +73,6 @@ export const HistoryCardFrame: React.FC<HistoryCardFrameProps> = ({ card }) => {
       </section>
     );
   }
-
-  const selectedView = viewModesByCard[card.cardId] ?? card.defaultView;
 
   return (
     <section className="bg-[var(--surface)] border border-[var(--border)] rounded-lg min-h-[22rem] overflow-hidden">
@@ -83,6 +97,11 @@ export const HistoryCardFrame: React.FC<HistoryCardFrameProps> = ({ card }) => {
             {card.metadata.syncState && (
               <span className="rounded-md border border-[var(--border)] bg-[var(--secondary-bg)] px-2 py-1 text-[var(--text)]">
                 {formatSyncState(t, card.metadata.syncState)}
+              </span>
+            )}
+            {cardData.data && (
+              <span className="rounded-md border border-[var(--border)] bg-[var(--secondary-bg)] px-2 py-1 text-[var(--text)]">
+                {t('history.cardFrame.aggregationBadge', { aggregation: cardData.data.aggregation.level })}
               </span>
             )}
           </div>
@@ -114,7 +133,14 @@ export const HistoryCardFrame: React.FC<HistoryCardFrameProps> = ({ card }) => {
           </div>
         )}
 
-        <div className="rounded-lg border border-dashed border-[var(--border)] bg-[var(--bg)] p-6">
+        <TimelineBrush
+          viewport={viewport}
+          defaultRange={card.defaultRange}
+          onViewportChange={setViewport}
+          ariaLabel={t('history.cardFrame.timelineBrush')}
+        />
+
+        <div className="mt-4 rounded-lg border border-dashed border-[var(--border)] bg-[var(--bg)] p-6">
           <p className="text-sm font-semibold text-[var(--text)]">{formatViewLabel(t, selectedView)}</p>
           <p className="mt-2 text-sm text-[var(--text-tertiary)]">
             {t('history.cardFrame.placeholderBody')}
