@@ -339,6 +339,28 @@ test('counts configured or requested silent source channels in coverage', () => 
   assert.strictEqual(requestedSilent.sourceCadences['BB00000000000002|swt_1'].seconds, 900);
   assert.strictEqual(requestedSilent.buckets[0].coveragePct, 50);
   assert.strictEqual(requestedSilent.coveragePct, 50);
+
+  const snakeCaseConfigured = helper.aggregateRows(rows, {
+    ...base,
+    source_keys: ['AA00000000000001', 'BB00000000000002'],
+    configured_cadence_seconds: 900,
+  });
+  assert.strictEqual(snakeCaseConfigured.coverageConfidence, 'configured');
+  assert.strictEqual(snakeCaseConfigured.sourceCadences['BB00000000000002|swt_1'].seconds, 900);
+  assert.strictEqual(snakeCaseConfigured.buckets[0].coveragePct, 50);
+  assert.strictEqual(snakeCaseConfigured.coveragePct, 50);
+
+  const snakeCaseSourceMap = helper.aggregateRows(rows, {
+    ...base,
+    expected_cadence_seconds_by_source: {
+      AA00000000000001: 900,
+      BB00000000000002: 900,
+    },
+  });
+  assert.strictEqual(snakeCaseSourceMap.coverageConfidence, 'configured');
+  assert.strictEqual(snakeCaseSourceMap.sourceCadences['BB00000000000002|swt_1'].seconds, 900);
+  assert.strictEqual(snakeCaseSourceMap.buckets[0].coveragePct, 50);
+  assert.strictEqual(snakeCaseSourceMap.coveragePct, 50);
 });
 
 test('builds deterministic advanced metadata placeholders', () => {
