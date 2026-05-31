@@ -362,7 +362,16 @@
         "calibration": "Calibration",
         "prediction": "Prediction",
         "forecast": "Forecast",
-        "pending_commands": "Pending commands"
+        "pending_commands": "Pending commands",
+        "batteryPct": "Battery percent",
+        "batteryVoltage": "Battery voltage",
+        "calibrationStatus": "Calibration status",
+        "firmwareVersion": "Firmware version",
+        "gatewayEui": "Gateway EUI",
+        "logicalSourceKey": "Logical source key",
+        "pendingCommands": "Pending commands",
+        "rawRowCount": "Raw row count",
+        "sourceDeviceCount": "Source device count"
       }
     }
   }

@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import test from 'node:test';
 
@@ -29,6 +29,24 @@ const fixture = JSON.parse(
   data: HistoryCardDataResponse;
   workspace: HistoryWorkspace;
 };
+
+const localeRoot = join(import.meta.dirname, '..', 'public', 'locales');
+
+const emittedAdvancedFieldKeys = [
+  'batteryPct',
+  'batteryVoltage',
+  'calibrationStatus',
+  'firmwareVersion',
+  'gatewayEui',
+  'logicalSourceKey',
+  'pendingCommands',
+  'primaryDeveui',
+  'rawPayload',
+  'rawRowCount',
+  'rssi',
+  'snr',
+  'sourceDeviceCount',
+] as const;
 
 test('every static card definition has a card-specific default view', () => {
   assert.equal(historyCardDefinitions.length, 5);
@@ -176,4 +194,14 @@ test('representative fixture matches summary, data, workspace, freshness, and av
   assert.equal(fixture.workspace.limits.platform, 'edge');
   assert.equal(fixture.workspace.limits.maxPanels, maxPanelsByPlatform.edge);
   assert.ok(['stacked', 'single'].includes(fixture.workspace.layout));
+});
+
+test('history locale files label every emitted advanced field', () => {
+  for (const locale of readdirSync(localeRoot)) {
+    const history = JSON.parse(readFileSync(join(localeRoot, locale, 'history.json'), 'utf8'));
+    const fields = history.history?.advanced?.field ?? {};
+    for (const key of emittedAdvancedFieldKeys) {
+      assert.equal(typeof fields[key], 'string', `${locale} missing history.advanced.field.${key}`);
+    }
+  }
 });
