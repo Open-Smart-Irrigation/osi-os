@@ -139,9 +139,16 @@ function verifyHistoryRouterImplementation(flows, failures) {
   assertContains(failures, source, 'getActiveZoneSeason', 'active season lookup');
   assertContains(failures, source, 'zone_seasons', 'zone_seasons-backed season range');
   assertContains(failures, source, 'Season range is unavailable for this zone', 'season-unavailable 400 contract');
+  assertContains(failures, source, 'Season range uses zone season boundaries; use custom for explicit from/to', 'season explicit-from/to rejection');
   assertContains(failures, source, 'shouldUseHistoryRollups(scopeContext, range.label, aggregationRequested)', 'long-range rollup gate');
   assertContains(failures, source, 'soilRowsHaveWarning(latestRows)', 'merged soil summary warning classifier');
   assertContains(failures, source, 'environmentRowsHaveWarning(latestRows)', 'merged environment summary warning classifier');
+
+  const seasonBranchIndex = source.indexOf("if (rawLabel === 'season')");
+  const explicitRangeIndex = source.indexOf('if (fromRaw || toRaw)');
+  if (seasonBranchIndex === -1 || explicitRangeIndex === -1 || seasonBranchIndex > explicitRangeIndex) {
+    failures.push('history router must resolve/reject season before accepting explicit from/to ranges');
+  }
 
   assertNotContains(failures, source, "season: 120 * 24 * 60 * 60 * 1000", 'synthetic trailing season range');
   assertNotContains(failures, source, "useRollups: scopeContext.scope === 'zone'", 'unconditional zone rollup reads');
