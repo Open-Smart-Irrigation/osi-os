@@ -2077,12 +2077,12 @@ expectIncludes('Cancel STREGA Actuation', "reconciliation_state='CANCELLED'", 'm
 expectIncludes('Cancel STREGA Actuation', "WHERE expectation_id = (", 'updates only the latest active expectation');
 expectExcludes('Cancel STREGA Actuation', "action: 'CLOSE'", 'bare CLOSE downlink emission from cancel path');
 expectExcludes('Cancel STREGA Actuation', 'return [closeMsg, responseMsg]', 'actuator fanout from cancel path');
-// --- System Stats fan detection via hwmon ---
-expectIncludes('System Stats', '/sys/class/hwmon', 'detects fan via hwmon sysfs');
-expectIncludes('System Stats', "hwmonName === 'pwmfan'", 'identifies pwmfan hwmon device by name');
-expectIncludes('System Stats', 'pwm1', 'reads fan speed from hwmon pwm1');
-expectExcludes('System Stats', '/sys/class/pwm/pwmchip2', 'no longer uses raw PWM sysfs path');
-expectIncludes('System Stats', 'fanAvailable = false', 'fan defaults to unavailable when no hwmon device found');
+// --- System Stats fan detection: hwmon preferred, raw PWM fallback ---
+expectIncludes('System Stats', 'findFanControl', 'uses findFanControl helper for dual-path fan discovery');
+expectIncludes('System Stats', '/sys/class/hwmon', 'tries hwmon path first');
+expectIncludes('System Stats', "=== 'pwmfan'", 'identifies pwmfan hwmon device by name');
+expectIncludes('System Stats', '/sys/class/pwm/pwmchip2', 'falls back to raw PWM sysfs when hwmon absent');
+expectIncludes('System Stats', 'fanAvailable = false', 'fan defaults to unavailable when neither path found');
 pendingChecks.push((async () => {
   // Fixed fixture values mirror the live command-193 failure; the test has no hardware dependency.
   const gatewayEui = '0016C001F151B1D6';
@@ -3269,23 +3269,23 @@ function assertCommandRegistry(flows) {
     console.log('  ok Command Type Registry node present with required entries');
 }
 
-// --- Build Heartbeat: fan_available + hwmon ---
+// --- Build Heartbeat: fan_available + dual-path ---
 expectIncludesById('062a0f9bf66d9789', 'fan_available:', 'heartbeat payload includes fan_available field');
-expectIncludesById('062a0f9bf66d9789', '/sys/class/hwmon', 'heartbeat reads fan via hwmon sysfs');
-expectExcludesById('062a0f9bf66d9789', '/sys/class/pwm/pwmchip2', 'heartbeat no longer uses raw PWM sysfs');
+expectIncludesById('062a0f9bf66d9789', '/sys/class/hwmon', 'heartbeat tries hwmon path first');
+expectIncludesById('062a0f9bf66d9789', '/sys/class/pwm/pwmchip2', 'heartbeat falls back to raw PWM when hwmon absent');
 
-// --- Fan Control API: hwmon interface ---
-expectIncludes('Fan Control', 'findFanHwmon', 'uses findFanHwmon helper for device discovery');
-expectIncludes('Fan Control', '/sys/class/hwmon', 'writes fan speed via hwmon sysfs');
-expectIncludes('Fan Control', 'pwm1_enable', 'sets hwmon fan control mode');
-expectIncludes('Fan Control', "pwm1_enable', '2'", 'speed=0 switches to thermal auto mode');
-expectExcludes('Fan Control', '/sys/class/pwm/pwmchip2', 'no longer uses raw PWM sysfs path');
+// --- Fan Control API: dual-path (hwmon preferred, raw PWM fallback) ---
+expectIncludes('Fan Control', 'findFanControl', 'uses findFanControl helper for dual-path fan discovery');
+expectIncludes('Fan Control', '/sys/class/hwmon', 'prefers hwmon sysfs when available');
+expectIncludes('Fan Control', 'pwm1_enable', 'sets hwmon fan control mode when driver is loaded');
+expectIncludes('Fan Control', "pwm1_enable', '2'", 'speed=0 switches to thermal auto mode via hwmon');
+expectIncludes('Fan Control', '/sys/class/pwm/pwmchip2', 'falls back to raw PWM sysfs when hwmon absent');
 
-// --- Route Command SET_FAN: hwmon interface ---
-expectIncludesById('934bf2bc19a8ce22', '/sys/class/hwmon', 'SET_FAN uses hwmon sysfs');
-expectIncludesById('934bf2bc19a8ce22', 'pwm1_enable', 'SET_FAN sets hwmon fan control mode');
-expectIncludesById('934bf2bc19a8ce22', "pwm1_enable', '2'", 'SET_FAN speed=0 switches to thermal auto mode');
-expectExcludesById('934bf2bc19a8ce22', '/sys/class/pwm/pwmchip2', 'SET_FAN no longer uses raw PWM sysfs');
+// --- Route Command SET_FAN: dual-path (hwmon preferred, raw PWM fallback) ---
+expectIncludesById('934bf2bc19a8ce22', '/sys/class/hwmon', 'SET_FAN tries hwmon path first');
+expectIncludesById('934bf2bc19a8ce22', 'pwm1_enable', 'SET_FAN sets hwmon fan control mode when driver is loaded');
+expectIncludesById('934bf2bc19a8ce22', "pwm1_enable', '2'", 'SET_FAN speed=0 switches to thermal auto mode via hwmon');
+expectIncludesById('934bf2bc19a8ce22', '/sys/class/pwm/pwmchip2', 'SET_FAN falls back to raw PWM sysfs when hwmon absent');
 
 Promise.all(pendingChecks).finally(() => {
   if (!process.exitCode) {
