@@ -188,6 +188,21 @@ test('derives expected cadence as configured, derived, or unknown', () => {
     { seconds: 1800, confidence: 'derived' }
   );
 
+  const shiftedRows = [];
+  for (let minutes = 0; minutes < 23 * 24 * 60; minutes += 60) {
+    shiftedRows.push({ recorded_at: iso(minutes) });
+  }
+  for (let minutes = 23 * 24 * 60; minutes <= 30 * 24 * 60; minutes += 24 * 60) {
+    shiftedRows.push({ recorded_at: iso(minutes) });
+  }
+  assert.deepStrictEqual(
+    helper.deriveExpectedCadenceSeconds({
+      rows: shiftedRows,
+      end: iso(30 * 24 * 60),
+    }),
+    { seconds: 86400, confidence: 'derived' }
+  );
+
   assert.deepStrictEqual(
     helper.deriveExpectedCadenceSeconds({ rows: [{ recorded_at: iso(0) }] }),
     { seconds: null, confidence: 'unknown' }
@@ -302,6 +317,26 @@ test('computes coverage from source-aware cadence instead of one mixed median', 
   });
   assert.strictEqual(configured.coverageConfidence, 'configured');
   assert.strictEqual(configured.buckets[0].coveragePct, 100);
+});
+
+test('derives source cadence from the previous 7 days of a long selected range', () => {
+  const rows = [];
+  for (let minutes = 0; minutes < 23 * 24 * 60; minutes += 60) {
+    rows.push({ deveui: 'AA00000000000001', recorded_at: iso(minutes), swt_1: 20 });
+  }
+  for (let minutes = 23 * 24 * 60; minutes <= 30 * 24 * 60; minutes += 24 * 60) {
+    rows.push({ deveui: 'AA00000000000001', recorded_at: iso(minutes), swt_1: 20 });
+  }
+
+  const result = helper.aggregateRows(rows, {
+    aggregation: 'daily',
+    channels: ['swt_1'],
+    start: iso(0),
+    end: iso(30 * 24 * 60),
+  });
+
+  assert.strictEqual(result.coverageConfidence, 'derived');
+  assert.strictEqual(result.sourceCadences['AA00000000000001|swt_1'].seconds, 86400);
 });
 
 test('counts configured or requested silent source channels in coverage', () => {

@@ -16,6 +16,8 @@ const BUCKET_SECONDS = {
   weekly: 7 * 24 * 60 * 60,
 };
 
+const CADENCE_LOOKBACK_MS = 7 * 24 * 60 * 60 * 1000;
+
 const ALLOWED_AGGREGATIONS = new Set(['raw', '15m', 'hourly', 'daily', 'weekly']);
 
 const ALLOWED_DEVICE_DATA_CHANNELS = new Set([
@@ -298,6 +300,18 @@ function durationSecondsBetween(start, end) {
   return (endMs - startMs) / 1000;
 }
 
+function cadenceReferenceMs(options = {}, times = []) {
+  const explicit = parseTime(options.end || options.endAt || options.to || options.referenceAt || options.reference_at);
+  if (explicit !== null) return explicit;
+  return times.length ? Math.max(...times) : null;
+}
+
+function cadenceWindowTimes(times, referenceMs) {
+  if (referenceMs === null) return times;
+  const startMs = referenceMs - CADENCE_LOOKBACK_MS;
+  return times.filter((time) => time >= startMs && time <= referenceMs);
+}
+
 function resolveAggregation(options = {}) {
   const requested = String(options.aggregation || 'auto').trim().toLowerCase();
   if (requested !== 'auto') {
@@ -342,16 +356,10 @@ function deriveExpectedCadenceSeconds(options = {}) {
     .map((row) => parseTime(row.recorded_at || row.recordedAt || row.bucket_start))
     .filter((value) => value !== null)
     .sort((a, b) => a - b);
-  const deltas = [];
-  for (let index = 1; index < times.length; index += 1) {
-    const deltaSeconds = (times[index] - times[index - 1]) / 1000;
-    if (deltaSeconds > 0) deltas.push(deltaSeconds);
-  }
-  const medianDelta = median(deltas);
-  if (medianDelta !== null && medianDelta > 0) {
-    return { seconds: Math.round(medianDelta), confidence: 'derived' };
-  }
-  return { seconds: null, confidence: 'unknown' };
+  const derived = cadenceFromTimes(times, cadenceReferenceMs(options, times));
+  return derived !== null
+    ? { seconds: derived, confidence: 'derived' }
+    : { seconds: null, confidence: 'unknown' };
 }
 
 function normalizeChannels(channels) {
@@ -569,8 +577,8 @@ function sourceChannelSamples(sortedRows, channels) {
   return samples;
 }
 
-function cadenceFromTimes(times) {
-  const sorted = times.slice().sort((a, b) => a - b);
+function cadenceFromTimes(times, referenceMs = null) {
+  const sorted = cadenceWindowTimes(times.slice().sort((a, b) => a - b), referenceMs);
   const deltas = [];
   for (let index = 1; index < sorted.length; index += 1) {
     const deltaSeconds = (sorted[index] - sorted[index - 1]) / 1000;
@@ -584,6 +592,7 @@ function deriveSourceCadences(sortedRows, channels, options = {}, allowDerived =
   const samples = sourceChannelSamples(sortedRows, channels);
   seedConfiguredSourceChannelSamples(samples, channels, options);
   seedRequestedSourceChannelSamples(samples, channels, options);
+  const referenceMs = cadenceReferenceMs(options, sortedRows.map((entry) => entry.recordedAtMs));
   const cadences = {};
   for (const sample of samples.values()) {
     const channel = channels.find((candidate) => candidate.id === sample.channelId) || { id: sample.channelId, field: sample.channelField };
@@ -597,7 +606,7 @@ function deriveSourceCadences(sortedRows, channels, options = {}, allowDerived =
       };
       continue;
     }
-    const derived = allowDerived ? cadenceFromTimes(sample.times) : null;
+    const derived = allowDerived ? cadenceFromTimes(sample.times, referenceMs) : null;
     cadences[sample.key] = {
       seconds: derived,
       confidence: derived === null ? 'unknown' : 'derived',
