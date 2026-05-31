@@ -3281,6 +3281,11 @@ expectIncludes('Fan Control', 'pwm1_enable', 'sets hwmon fan control mode');
 expectIncludes('Fan Control', "pwm1_enable', '2'", 'speed=0 switches to thermal auto mode');
 expectExcludes('Fan Control', '/sys/class/pwm/pwmchip2', 'no longer uses raw PWM sysfs path');
 
+// --- Route Command SET_FAN: hwmon interface ---
+expectIncludesById('934bf2bc19a8ce22', '/sys/class/hwmon', 'SET_FAN uses hwmon sysfs');
+expectIncludesById('934bf2bc19a8ce22', 'pwm1_enable', 'SET_FAN sets hwmon fan control mode');
+expectExcludesById('934bf2bc19a8ce22', '/sys/class/pwm/pwmchip2', 'SET_FAN no longer uses raw PWM sysfs');
+
 Promise.all(pendingChecks).finally(() => {
   if (!process.exitCode) {
     console.log('Sync flow verification passed');
