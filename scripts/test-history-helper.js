@@ -132,12 +132,30 @@ test('derives stable card identifiers without exposing raw dendro DevEUI', () =>
       { deveui: 'AA00000000000001', type_id: 'KIWI_SENSOR', irrigation_zone_id: 7, swt_1: 30, ambient_temperature: 22 },
       { deveui: 'AA00000000000002', type_id: 'DRAGINO_LSN50', irrigation_zone_id: 7, dendro_enabled: 1 },
       { deveui: 'AA00000000000003', type_id: 'STREGA_VALVE', irrigation_zone_id: 7 },
+      { deveui: 'AA00000000000004', type_id: 'KIWI_SENSOR', irrigation_zone_id: null, swt_1: 90 },
+      { deveui: 'AA00000000000005', type_id: 'SENSECAP_S2120', irrigation_zone_id: 99, ambient_temperature: 35 },
     ]
   );
   assert.deepStrictEqual(cards.map((card) => card.cardType).sort(), ['dendro', 'environment', 'irrigation', 'soil']);
   assert(cards.some((card) => card.id === 'zone-uuid:soil:root-zone'));
   assert(cards.some((card) => card.id === 'zone-uuid:environment:microclimate'));
   assert(cards.some((card) => card.id === 'zone-uuid:irrigation:zone-valves'));
+
+  const dendroCards = helper.deriveCardsForZone(
+    { id: 7, zone_uuid: 'zone-uuid' },
+    [
+      { deveui: 'AA00000000000009', type_id: 'DRAGINO_LSN50', irrigation_zone_id: 7, dendro_enabled: 1 },
+      { deveui: 'AA00000000000002', type_id: 'DRAGINO_LSN50', irrigation_zone_id: 7, dendro_enabled: 1 },
+    ]
+  ).filter((card) => card.cardType === 'dendro');
+  const reversedDendroCards = helper.deriveCardsForZone(
+    { id: 7, zone_uuid: 'zone-uuid' },
+    [
+      { deveui: 'AA00000000000002', type_id: 'DRAGINO_LSN50', irrigation_zone_id: 7, dendro_enabled: 1 },
+      { deveui: 'AA00000000000009', type_id: 'DRAGINO_LSN50', irrigation_zone_id: 7, dendro_enabled: 1 },
+    ]
+  ).filter((card) => card.cardType === 'dendro');
+  assert.deepStrictEqual(dendroCards.map((card) => card.id), reversedDendroCards.map((card) => card.id));
 });
 
 test('derives the hub-scoped gateway card id', () => {
@@ -186,6 +204,21 @@ test('derives expected cadence as configured, derived, or unknown', () => {
       rows: [{ recorded_at: iso(0) }, { recorded_at: iso(30) }, { recorded_at: iso(60) }, { recorded_at: iso(90) }],
     }),
     { seconds: 1800, confidence: 'derived' }
+  );
+
+  const shiftedRows = [];
+  for (let minutes = 0; minutes < 23 * 24 * 60; minutes += 60) {
+    shiftedRows.push({ recorded_at: iso(minutes) });
+  }
+  for (let minutes = 23 * 24 * 60; minutes <= 30 * 24 * 60; minutes += 24 * 60) {
+    shiftedRows.push({ recorded_at: iso(minutes) });
+  }
+  assert.deepStrictEqual(
+    helper.deriveExpectedCadenceSeconds({
+      rows: shiftedRows,
+      end: iso(30 * 24 * 60),
+    }),
+    { seconds: 86400, confidence: 'derived' }
   );
 
   assert.deepStrictEqual(
@@ -302,6 +335,26 @@ test('computes coverage from source-aware cadence instead of one mixed median', 
   });
   assert.strictEqual(configured.coverageConfidence, 'configured');
   assert.strictEqual(configured.buckets[0].coveragePct, 100);
+});
+
+test('derives source cadence from the previous 7 days of a long selected range', () => {
+  const rows = [];
+  for (let minutes = 0; minutes < 23 * 24 * 60; minutes += 60) {
+    rows.push({ deveui: 'AA00000000000001', recorded_at: iso(minutes), swt_1: 20 });
+  }
+  for (let minutes = 23 * 24 * 60; minutes <= 30 * 24 * 60; minutes += 24 * 60) {
+    rows.push({ deveui: 'AA00000000000001', recorded_at: iso(minutes), swt_1: 20 });
+  }
+
+  const result = helper.aggregateRows(rows, {
+    aggregation: 'daily',
+    channels: ['swt_1'],
+    start: iso(0),
+    end: iso(30 * 24 * 60),
+  });
+
+  assert.strictEqual(result.coverageConfidence, 'derived');
+  assert.strictEqual(result.sourceCadences['AA00000000000001|swt_1'].seconds, 86400);
 });
 
 test('counts configured or requested silent source channels in coverage', () => {
@@ -429,7 +482,7 @@ test('aggregates SQL-backed device_data with parameterized range queries and rol
     `);
 
     const raw = await helper.aggregateDeviceData(db, {
-      deveuis: ['AA00000000000001', 'AA00000000000002'],
+      device_euis: ['aa-00000000000001', 'AA00000000000002'],
       start: iso(0),
       end: iso(60),
       aggregation: 'hourly',
@@ -456,6 +509,20 @@ test('aggregates SQL-backed device_data with parameterized range queries and rol
     assert.strictEqual(rollup.buckets[0].series.swt_1.mean, 20);
     assert.strictEqual(rollup.buckets[0].coveragePct, 12.5);
     assert.match(db.lastQuery.sql, /FROM history_channel_rollups/);
+
+    const snakeCaseRollup = await helper.aggregateDeviceData(db, {
+      zone_id: 7,
+      card_type: 'soil',
+      logical_source_key: 'root-zone',
+      start: '2026-05-31T00:00:00.000Z',
+      end: '2026-06-01T00:00:00.000Z',
+      aggregation: 'daily',
+      channels: ['swt_1'],
+    });
+    assert.strictEqual(snakeCaseRollup.source, 'history_channel_rollups');
+    assert.strictEqual(snakeCaseRollup.buckets[0].series.swt_1.mean, 20);
+    assert.match(db.lastQuery.sql, /FROM history_channel_rollups/);
+    assert.deepStrictEqual(db.lastQuery.params.slice(0, 6), [7, 'soil', 'root-zone', 'daily', '2026-05-31T00:00:00.000Z', '2026-06-01T00:00:00.000Z']);
 
     const autoRollup = await helper.aggregateDeviceData(db, {
       zoneId: 7,
