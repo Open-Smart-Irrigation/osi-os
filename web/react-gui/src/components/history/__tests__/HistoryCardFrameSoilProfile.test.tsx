@@ -33,6 +33,7 @@ const { translateForTest } = vi.hoisted(() => {
     'history.soilProfile.emptyBody': 'Depth-aware profile readings are not available for this range.',
     'history.soilProfile.depthLabel': '{{depth}} cm',
     'history.soilProfile.depthUnknown': 'Depth pending',
+    'history.soilProfile.labelUnknown': 'Profile {{index}}',
     'history.soilProfile.valueMissing': 'No reading',
     'history.soilProfile.status.dry_stress': 'Dry stress',
     'history.soilProfile.status.optimal': 'Optimal',
@@ -158,6 +159,43 @@ describe('HistoryCardFrame soil profile', () => {
 
     expect(screen.getByText('No soil profile data')).toBeInTheDocument();
     expect(screen.getByText('Depth-aware profile readings are not available for this range.')).toBeInTheDocument();
+  });
+
+  it('renders sparse profile points with safe fallbacks', () => {
+    useHistoryCardDataMock.mockReturnValue({
+      data: data({
+        profiles: [
+          {
+            id: 'sparse-depth',
+            label: '',
+            depthCm: undefined,
+            value: undefined,
+            unit: undefined,
+            status: undefined,
+          } as unknown as HistoryCardDataResponse<'soil'>['profiles'][number],
+          {
+            id: '',
+            label: 'Deep sensor',
+            depthCm: 60,
+            value: Number.NaN,
+            unit: 'kPa',
+            status: '',
+          } as unknown as HistoryCardDataResponse<'soil'>['profiles'][number],
+        ],
+      }),
+      error: undefined,
+      isLoading: false,
+      refresh: vi.fn(),
+    });
+
+    render(<HistoryCardFrame card={card} scope={{ type: 'zone', zoneId: 1 }} />);
+
+    expect(screen.getByText('Profile 1')).toBeInTheDocument();
+    expect(screen.getByText('Depth pending')).toBeInTheDocument();
+    expect(screen.getAllByText('No reading').length).toBe(2);
+    expect(screen.getByText('Deep sensor')).toBeInTheDocument();
+    expect(screen.queryByText(/undefined/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/NaN/i)).not.toBeInTheDocument();
   });
 
   it('renders card-data loading and error states before the soil profile view', () => {

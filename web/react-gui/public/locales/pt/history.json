@@ -69,7 +69,8 @@
         "wet_excess": "Wet excess",
         "mixed": "Mixed",
         "no_data": "No data"
-      }
+      },
+      "labelUnknown": "Profile {{index}}"
     },
     "cardType": {
       "soil": "Soil",
