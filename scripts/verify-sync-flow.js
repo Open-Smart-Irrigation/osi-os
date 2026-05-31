@@ -23,6 +23,7 @@ const rootfsGrowDefault2709Path = path.resolve(__dirname, '..', 'conf', 'full_ra
 const rootfsResizeInit2712Path = path.resolve(__dirname, '..', 'conf', 'full_raspberrypi_bcm27xx_bcm2712', 'files', 'etc', 'init.d', 'osi-rootfs-resize');
 const rootfsResizeInit2709Path = path.resolve(__dirname, '..', 'conf', 'full_raspberrypi_bcm27xx_bcm2709', 'files', 'etc', 'init.d', 'osi-rootfs-resize');
 const fullRpi2712ConfigPath = path.resolve(__dirname, '..', 'conf', 'full_raspberrypi_bcm27xx_bcm2712', '.config');
+const bootConfigPatchPath = path.resolve(__dirname, '..', 'conf', 'full_raspberrypi_bcm27xx_bcm2712', 'patches', 'boot-config.patch');
 const fullRpi2709ConfigPath = path.resolve(__dirname, '..', 'conf', 'full_raspberrypi_bcm27xx_bcm2709', '.config');
 const sysupgradeConfPath = path.resolve(__dirname, '..', 'conf', 'full_raspberrypi_bcm27xx_bcm2712', 'files', 'etc', 'sysupgrade.conf');
 const osiDbSeedPath = path.resolve(__dirname, '..', 'conf', 'full_raspberrypi_bcm27xx_bcm2712', 'files', 'etc', 'uci-defaults', '97_osi_db_seed');
@@ -2541,6 +2542,15 @@ for (const [label, configPath] of [
   const config = fs.existsSync(configPath) ? fs.readFileSync(configPath, 'utf8') : '';
   expectFileIncludes(label, config, 'CONFIG_PACKAGE_parted=y', `${label} includes parted for rootfs grow`);
   expectFileIncludes(label, config, 'CONFIG_PACKAGE_resize2fs=y', `${label} includes resize2fs for rootfs grow`);
+  if (label === 'full_raspberrypi_bcm27xx_bcm2712') {
+    expectFileIncludes(label, config, 'CONFIG_PACKAGE_kmod-hwmon-pwmfan=y', `${label} includes kmod-hwmon-pwmfan for fan thermal control`);
+  }
+}
+
+// --- Pi 5 boot config fan enablement ---
+{
+  const bootPatch = fs.existsSync(bootConfigPatchPath) ? fs.readFileSync(bootConfigPatchPath, 'utf8') : '';
+  expectFileIncludes('boot-config.patch', bootPatch, 'dtparam=cooling_fan=okay', 'boot config enables Pi 5 cooling fan hardware (rp1_pwm1 + cooling_fan DT nodes)');
 }
 
 // --- osi-bootstrap init script verification ---
