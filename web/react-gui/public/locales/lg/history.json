@@ -84,6 +84,49 @@
         "environment": "Environment"
       }
     },
+    "gatewayStatus": {
+      "title": "Gateway status overview",
+      "emptyTitle": "Limited gateway status data",
+      "emptyBody": "Gateway status details will appear here as the hub reports them.",
+      "lastSeen": "Last seen",
+      "dataAsOf": "Data as of",
+      "syncState": "Sync state",
+      "eventsTitle": "Recent gateway events",
+      "noEvents": "No gateway events in this range.",
+      "eventFallback": "Gateway event",
+      "status": {
+        "ok": "OK",
+        "online": "Online",
+        "offline": "Offline",
+        "connected": "Connected",
+        "disconnected": "Disconnected",
+        "degraded": "Degraded",
+        "stale": "Stale",
+        "charging": "Charging"
+      },
+      "category": {
+        "connectivity": "Connectivity",
+        "storage": "Storage",
+        "sync": "Sync",
+        "power": "Power",
+        "system": "System"
+      },
+      "metric": {
+        "signal": "Signal",
+        "storage": "Storage use",
+        "pendingCommands": "Pending commands",
+        "battery": "Battery",
+        "memory": "Memory use",
+        "cpu": "CPU",
+        "temperature": "Temperature",
+        "voltage": "Voltage",
+        "power": "Power"
+      },
+      "value": {
+        "pendingCount": "{{count}} pending",
+        "unavailable": "Not reported"
+      }
+    },
     "cardType": {
       "soil": "Soil",
       "dendro": "Dendro",
