@@ -2077,6 +2077,11 @@ expectIncludes('Cancel STREGA Actuation', "reconciliation_state='CANCELLED'", 'm
 expectIncludes('Cancel STREGA Actuation', "WHERE expectation_id = (", 'updates only the latest active expectation');
 expectExcludes('Cancel STREGA Actuation', "action: 'CLOSE'", 'bare CLOSE downlink emission from cancel path');
 expectExcludes('Cancel STREGA Actuation', 'return [closeMsg, responseMsg]', 'actuator fanout from cancel path');
+// --- System Stats fan detection via hwmon ---
+expectIncludes('System Stats', '/sys/class/hwmon', 'detects fan via hwmon sysfs');
+expectIncludes('System Stats', "hwmonName === 'pwmfan'", 'identifies pwmfan hwmon device by name');
+expectIncludes('System Stats', 'pwm1', 'reads fan speed from hwmon pwm1');
+expectExcludes('System Stats', '/sys/class/pwm/pwmchip2', 'no longer uses raw PWM sysfs path');
 pendingChecks.push((async () => {
   // Fixed fixture values mirror the live command-193 failure; the test has no hardware dependency.
   const gatewayEui = '0016C001F151B1D6';
