@@ -25,6 +25,18 @@ function formatDepth(t: HistoryTranslate, depthCm: number | null | undefined): s
   return t('history.soilProfile.depthLabel', { depth: depthCm });
 }
 
+function humanizeStatus(status: string): string {
+  return status
+    .split('_')
+    .filter(Boolean)
+    .map((part, index) => (index === 0 ? part.charAt(0).toUpperCase() + part.slice(1) : part))
+    .join(' ');
+}
+
+function formatStatus(t: HistoryTranslate, status: string): string {
+  return t(`history.soilProfile.status.${status}`, { defaultValue: humanizeStatus(status) });
+}
+
 export const SoilProfileView: React.FC<SoilProfileViewProps> = ({ profiles }) => {
   const { t: translate } = useTranslation('history');
   const t = translate as HistoryTranslate;
@@ -60,7 +72,7 @@ export const SoilProfileView: React.FC<SoilProfileViewProps> = ({ profiles }) =>
               <p className="truncate text-sm font-semibold text-[var(--text)]">{point.label}</p>
               {point.status && (
                 <p className="mt-1 break-words text-xs font-medium text-[var(--text-tertiary)]">
-                  {point.status}
+                  {formatStatus(t, point.status)}
                 </p>
               )}
             </div>

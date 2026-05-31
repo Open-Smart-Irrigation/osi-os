@@ -32,6 +32,8 @@ const { translateForTest } = vi.hoisted(() => {
     'history.soilProfile.depthLabel': '{{depth}} cm',
     'history.soilProfile.depthUnknown': 'Depth pending',
     'history.soilProfile.valueMissing': 'No reading',
+    'history.soilProfile.status.dry_stress': 'Dry stress',
+    'history.soilProfile.status.optimal': 'Optimal',
   };
 
   return {
@@ -112,7 +114,7 @@ afterEach(() => {
 });
 
 describe('HistoryCardFrame soil profile', () => {
-  it('renders depth-aware profile labels, values, and backend status', () => {
+  it('renders depth-aware profile labels, values, and localized status labels', () => {
     useHistoryCardDataMock.mockReturnValue({
       data: data({
         profiles: [
@@ -130,11 +132,12 @@ describe('HistoryCardFrame soil profile', () => {
     expect(screen.getByText('SWT 1')).toBeInTheDocument();
     expect(screen.getByText('15 cm')).toBeInTheDocument();
     expect(screen.getByText('22 kPa')).toBeInTheDocument();
-    expect(screen.getByText('optimal')).toBeInTheDocument();
+    expect(screen.getByText('Optimal')).toBeInTheDocument();
     expect(screen.getByText('SWT 2')).toBeInTheDocument();
     expect(screen.getByText('45 cm')).toBeInTheDocument();
     expect(screen.getByText('55 kPa')).toBeInTheDocument();
-    expect(screen.getByText('dry_stress')).toBeInTheDocument();
+    expect(screen.getByText('Dry stress')).toBeInTheDocument();
+    expect(screen.queryByText('dry_stress')).not.toBeInTheDocument();
   });
 
   it('renders an empty profile state when the backend returns no profile points', () => {

@@ -62,7 +62,14 @@
       "emptyBody": "Depth-aware profile readings are not available for this range.",
       "depthLabel": "{{depth}} cm",
       "depthUnknown": "Depth pending",
-      "valueMissing": "No reading"
+      "valueMissing": "No reading",
+      "status": {
+        "dry_stress": "Dry stress",
+        "optimal": "Optimal",
+        "wet_excess": "Wet excess",
+        "mixed": "Mixed",
+        "no_data": "No data"
+      }
     },
     "cardType": {
       "soil": "Soil",
