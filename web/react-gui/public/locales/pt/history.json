@@ -84,6 +84,31 @@
         "environment": "Environment"
       }
     },
+    "irrigationTimeline": {
+      "title": "Irrigation event timeline",
+      "emptyTitle": "No irrigation events",
+      "emptyBody": "Irrigation actions and response windows will appear here when history data is available.",
+      "eventsCount": "{{count}} events",
+      "eventLabel": {
+        "irrigation": "Irrigation event",
+        "scheduled": "Scheduled irrigation",
+        "manualOverride": "Manual override",
+        "possibleIneffective": "Possible ineffective irrigation",
+        "responseWindow": "Response window"
+      },
+      "detail": {
+        "duration": "Duration: {{value}}",
+        "responseWindow": "Response window: {{value}}",
+        "observedResponse": "Observed response: {{value}}"
+      },
+      "severity": {
+        "info": "Info",
+        "warning": "Warning",
+        "critical": "Critical",
+        "success": "Success",
+        "unknown": "Info"
+      }
+    },
     "cardType": {
       "soil": "Soil",
       "dendro": "Dendro",

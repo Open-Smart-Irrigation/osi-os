@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { TimelineBrush } from './TimelineBrush';
 import { DendroGrowthTimelineView } from './visualizations/DendroGrowthTimelineView';
 import { EnvironmentLineChartView } from './visualizations/EnvironmentLineChartView';
+import { IrrigationEventTimelineView } from './visualizations/IrrigationEventTimelineView';
 import { SoilProfileView } from './visualizations/SoilProfileView';
 import { useHistoryCardData, type HistoryCardDataScope } from '../../history/useHistoryCardData';
 import { useTimeViewport } from '../../history/useTimeViewport';
@@ -65,6 +66,7 @@ export const HistoryCardFrame: React.FC<HistoryCardFrameProps> = ({ card, scope 
   const shouldRenderSoilProfile = card?.cardType === 'soil' && selectedView === 'soil-profile';
   const shouldRenderDendroGrowth = card?.cardType === 'dendro' && selectedView === 'growth-timeline';
   const shouldRenderEnvironmentLineChart = card?.cardType === 'environment' && selectedView === 'line-chart';
+  const shouldRenderIrrigationEventTimeline = card?.cardType === 'irrigation' && selectedView === 'event-timeline';
   const cardData = useHistoryCardData({
     scope,
     cardId: card?.cardId ?? null,
@@ -183,9 +185,13 @@ export const HistoryCardFrame: React.FC<HistoryCardFrameProps> = ({ card, scope 
           <EnvironmentLineChartView data={cardData.data} />
         )}
 
+        {!cardData.isLoading && !cardData.error && shouldRenderIrrigationEventTimeline && (
+          <IrrigationEventTimelineView data={cardData.data} />
+        )}
+
         {!cardData.isLoading
           && !cardData.error
-          && ((!shouldRenderSoilProfile && !shouldRenderDendroGrowth && !shouldRenderEnvironmentLineChart) || (shouldRenderSoilProfile && !cardData.data)) && (
+          && ((!shouldRenderSoilProfile && !shouldRenderDendroGrowth && !shouldRenderEnvironmentLineChart && !shouldRenderIrrigationEventTimeline) || (shouldRenderSoilProfile && !cardData.data)) && (
           <div className="mt-4 rounded-lg border border-dashed border-[var(--border)] bg-[var(--bg)] p-6">
             <p className="text-sm font-semibold text-[var(--text)]">{formatViewLabel(t, selectedView)}</p>
             <p className="mt-2 text-sm text-[var(--text-tertiary)]">
