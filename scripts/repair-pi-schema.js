@@ -34,11 +34,58 @@ function columns(table) {
         .filter(Boolean);
 }
 
+function query(sql) {
+    return execFileSync('sqlite3', [dbPath, sql], { encoding: 'utf8' }).trim();
+}
+
+function normalizeSql(sql) {
+    return sql.replace(/\s+/g, ' ').trim().toLowerCase();
+}
+
 function addColumnIfMissing(table, name, definition) {
     if (columns(table).includes(name)) {
         return false;
     }
     return exec(`ALTER TABLE ${table} ADD COLUMN ${name} ${definition}`);
+}
+
+function indexSql(indexName) {
+    const escapedName = indexName.replace(/'/g, "''");
+    return query(`SELECT sql FROM sqlite_master WHERE type = 'index' AND name = '${escapedName}';`);
+}
+
+function reportDuplicateHistoryRows() {
+    const activeSeasonDuplicates = query(
+        `SELECT zone_id || ':' || COUNT(*)
+         FROM zone_seasons
+         WHERE is_active = 1
+         GROUP BY zone_id
+         HAVING COUNT(*) > 1`,
+    );
+    if (activeSeasonDuplicates) {
+        console.error(`FAIL: duplicate active zone seasons block idx_zone_seasons_zone_active_unique: ${activeSeasonDuplicates}`);
+    }
+
+    const globalDefaultDuplicates = query(
+        `SELECT user_id || ':' || COUNT(*)
+         FROM history_workspaces
+         WHERE is_default = 1 AND zone_id IS NULL
+         GROUP BY user_id
+         HAVING COUNT(*) > 1`,
+    );
+    if (globalDefaultDuplicates) {
+        console.error(`FAIL: duplicate global default workspaces block idx_history_workspaces_user_global_default: ${globalDefaultDuplicates}`);
+    }
+}
+
+function verifyIndexDefinition(indexName, expectedFragments) {
+    const sql = normalizeSql(indexSql(indexName));
+    const missingFragments = expectedFragments.filter((fragment) => !sql.includes(fragment));
+    if (missingFragments.length) {
+        console.error(`FAIL: missing or malformed index ${indexName}: ${sql || '<missing>'}`);
+        return false;
+    }
+    return true;
 }
 
 console.log(`Repairing ${dbPath}`);
@@ -204,6 +251,29 @@ for (const column of appliedCommandColumns.map(([name]) => name)) {
         console.error(`FAIL: missing applied_commands column after repair: ${column}`);
         process.exit(1);
     }
+}
+
+const criticalHistoryIndexesOk = [
+    verifyIndexDefinition('idx_zone_seasons_zone_active_unique', [
+        'unique index',
+        'on zone_seasons(zone_id)',
+        'where is_active = 1',
+    ]),
+    verifyIndexDefinition('idx_history_workspaces_user_default', [
+        'unique index',
+        'on history_workspaces(user_id, zone_id)',
+        'where is_default = 1',
+    ]),
+    verifyIndexDefinition('idx_history_workspaces_user_global_default', [
+        'unique index',
+        'on history_workspaces(user_id)',
+        'where is_default = 1 and zone_id is null',
+    ]),
+].every(Boolean);
+
+if (!criticalHistoryIndexesOk) {
+    reportDuplicateHistoryRows();
+    process.exit(1);
 }
 
 console.log(`OK: ${applied} repairs applied; all required tables present`);
