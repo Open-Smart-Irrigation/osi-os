@@ -1,36 +1,49 @@
 export const HistoryI18nKeys = {
-  cards: {
+  card: {
     soil: {
-      title: 'history.cards.soil.title',
-      subtitle: 'history.cards.soil.subtitle',
+      title: 'history.card.soil.title',
+      subtitle: 'history.card.soil.subtitle',
     },
     dendro: {
-      title: 'history.cards.dendro.title',
-      subtitle: 'history.cards.dendro.subtitle',
+      title: 'history.card.dendro.title',
+      subtitle: 'history.card.dendro.subtitle',
     },
     environment: {
-      title: 'history.cards.environment.title',
-      subtitle: 'history.cards.environment.subtitle',
+      title: 'history.card.environment.title',
+      subtitle: 'history.card.environment.subtitle',
     },
     irrigation: {
-      title: 'history.cards.irrigation.title',
-      subtitle: 'history.cards.irrigation.subtitle',
+      title: 'history.card.irrigation.title',
+      subtitle: 'history.card.irrigation.subtitle',
     },
     gateway: {
-      title: 'history.cards.gateway.title',
-      subtitle: 'history.cards.gateway.subtitle',
+      title: 'history.card.gateway.title',
+      subtitle: 'history.card.gateway.subtitle',
     },
   },
   calendar: {
     label: 'history.calendar.label',
-    states: {
-      optimal: 'history.calendar.states.optimal',
-      dry: 'history.calendar.states.dry',
-      wet: 'history.calendar.states.wet',
-      irrigated: 'history.calendar.states.irrigated',
-      stress: 'history.calendar.states.stress',
-      offline: 'history.calendar.states.offline',
-      unknown: 'history.calendar.states.unknown',
+    state: {
+      dryStress: 'history.calendar.state.dry_stress',
+      optimal: 'history.calendar.state.optimal',
+      wetExcess: 'history.calendar.state.wet_excess',
+      mixed: 'history.calendar.state.mixed',
+      normalGrowth: 'history.calendar.state.normal_growth',
+      reducedGrowth: 'history.calendar.state.reduced_growth',
+      highShrinkageStress: 'history.calendar.state.high_shrinkage_stress',
+      incompleteNightRecovery: 'history.calendar.state.incomplete_night_recovery',
+      normal: 'history.calendar.state.normal',
+      heatStress: 'history.calendar.state.heat_stress',
+      coldStress: 'history.calendar.state.cold_stress',
+      highHumidity: 'history.calendar.state.high_humidity',
+      rainDay: 'history.calendar.state.rain_day',
+      noIrrigation: 'history.calendar.state.no_irrigation',
+      irrigationEvent: 'history.calendar.state.irrigation_event',
+      highIrrigationFrequency: 'history.calendar.state.high_irrigation_frequency',
+      possibleIneffectiveIrrigation: 'history.calendar.state.possible_ineffective_irrigation',
+      manualOverride: 'history.calendar.state.manual_override',
+      offline: 'history.calendar.state.offline',
+      noData: 'history.calendar.state.no_data',
     },
   },
   interpretation: {

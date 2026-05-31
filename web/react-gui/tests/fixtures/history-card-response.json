@@ -20,6 +20,7 @@
           "battery": { "status": "ok", "latest": 3.62, "unit": "V" },
           "signal": { "status": "unknown" },
           "coveragePct": 94,
+          "coverageConfidence": "configured",
           "calibrationStatus": "calibrated"
         },
         "availability": {
@@ -30,16 +31,7 @@
           "pinned": false,
           "score": 0.71,
           "recentRank": 2
-        },
-        "coverageConfidence": "configured",
-        "advancedFields": [
-          {
-            "field": "chameleonArrayId",
-            "value": "ABCDEF1234567890",
-            "unit": null,
-            "availability": "collected"
-          }
-        ]
+        }
       },
       {
         "cardId": "0011223344556677:gateway:hub",
@@ -53,7 +45,8 @@
         "defaultRange": "24h",
         "metadata": {
           "lastSeenAt": "2026-05-31T09:59:00Z",
-          "coveragePct": 100
+          "coveragePct": 100,
+          "coverageConfidence": "derived"
         },
         "availability": {
           "available": true,
@@ -63,16 +56,7 @@
           "pinned": true,
           "score": 1,
           "recentRank": 1
-        },
-        "coverageConfidence": "derived",
-        "advancedFields": [
-          {
-            "field": "lastCloudSync",
-            "value": "2026-05-31T09:58:00Z",
-            "unit": null,
-            "availability": "collected"
-          }
-        ]
+        }
       }
     ]
   },
@@ -156,7 +140,7 @@
       "days": [
         {
           "date": "2026-05-31",
-          "state": "optimal",
+          "state": "dry_stress",
           "coveragePct": 94,
           "coverageConfidence": "configured"
         }

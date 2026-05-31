@@ -63,21 +63,34 @@ export type HistoryOverlayId =
   | 'threshold-lines'
   | 'soil-depths'
   | 'environment-variables'
-  | 'soil-dendro-shrinkage'
+  | 'soil-tension-dendro-shrinkage'
   | 'temperature-stem-growth'
-  | 'battery-signal-strength'
+  | 'battery-voltage-signal-strength'
   | 'normalized-multi-variable'
   | 'measured-model-prediction'
   | 'cross-card-anomaly';
 
 export type HistoryCalendarState =
+  | 'dry_stress'
   | 'optimal'
-  | 'dry'
-  | 'wet'
-  | 'irrigated'
-  | 'stress'
+  | 'wet_excess'
+  | 'mixed'
+  | 'normal_growth'
+  | 'reduced_growth'
+  | 'high_shrinkage_stress'
+  | 'incomplete_night_recovery'
+  | 'normal'
+  | 'heat_stress'
+  | 'cold_stress'
+  | 'high_humidity'
+  | 'rain_day'
+  | 'no_irrigation'
+  | 'irrigation_event'
+  | 'high_irrigation_frequency'
+  | 'possible_ineffective_irrigation'
+  | 'manual_override'
   | 'offline'
-  | 'unknown';
+  | 'no_data';
 
 export const WorkspaceSchemaVersion = 1;
 export type WorkspaceSchemaVersion = typeof WorkspaceSchemaVersion;
@@ -129,6 +142,7 @@ export interface HistoryCardMetadata {
   battery?: HistoryMetricStatus;
   signal?: HistoryMetricStatus;
   coveragePct?: number | null;
+  coverageConfidence?: CoverageConfidence;
   calibrationStatus?: string | null;
   [key: string]: unknown;
 }
@@ -146,8 +160,6 @@ export interface HistoryCardSummary<TCardType extends HistoryCardType = HistoryC
   metadata: HistoryCardMetadata;
   availability: HistoryCardAvailability;
   ordering: HistoryCardOrdering;
-  coverageConfidence: CoverageConfidence;
-  advancedFields: HistoryAdvancedField[];
 }
 
 export interface HistoryCardSummaryResponse {

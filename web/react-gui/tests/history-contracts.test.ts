@@ -54,7 +54,53 @@ test('gateway is hub-scoped and all other MVP cards are zone-scoped', () => {
   }
 });
 
+test('card definitions expose canonical calendar state vocabularies', () => {
+  assert.deepEqual(historyCardDefinitionsByType.soil.calendarStates, [
+    'dry_stress',
+    'optimal',
+    'wet_excess',
+    'mixed',
+    'no_data',
+  ]);
+  assert.deepEqual(historyCardDefinitionsByType.dendro.calendarStates, [
+    'normal_growth',
+    'reduced_growth',
+    'high_shrinkage_stress',
+    'incomplete_night_recovery',
+    'no_data',
+  ]);
+  assert.deepEqual(historyCardDefinitionsByType.environment.calendarStates, [
+    'normal',
+    'heat_stress',
+    'cold_stress',
+    'high_humidity',
+    'rain_day',
+    'no_data',
+  ]);
+  assert.deepEqual(historyCardDefinitionsByType.irrigation.calendarStates, [
+    'no_irrigation',
+    'irrigation_event',
+    'high_irrigation_frequency',
+    'possible_ineffective_irrigation',
+    'manual_override',
+  ]);
+  assert.deepEqual(historyCardDefinitionsByType.gateway.calendarStates, [
+    'normal',
+    'offline',
+    'no_data',
+  ]);
+});
+
 test('advanced-only overlays are rejected outside Advanced View', () => {
+  assert.deepEqual(historyAdvancedOverlayIds, [
+    'soil-tension-dendro-shrinkage',
+    'temperature-stem-growth',
+    'battery-voltage-signal-strength',
+    'normalized-multi-variable',
+    'measured-model-prediction',
+    'cross-card-anomaly',
+  ]);
+
   for (const definition of historyCardDefinitions) {
     for (const overlayId of historyAdvancedOverlayIds) {
       assert.equal(canUseOverlay(definition.cardType, definition.defaultView, overlayId), false);
@@ -87,25 +133,35 @@ test('range model chooses the expected default aggregation levels', () => {
 test('shared constants expose downstream contract values', () => {
   assert.equal(WorkspaceSchemaVersion, 1);
   assert.deepEqual(maxPanelsByPlatform, { edge: 4, cloud: 8 });
-  assert.equal(HistoryI18nKeys.cards.soil.title, 'history.cards.soil.title');
-  assert.equal(HistoryI18nKeys.calendar.states.dry, 'history.calendar.states.dry');
+  assert.equal(HistoryI18nKeys.card.soil.title, 'history.card.soil.title');
+  assert.equal(HistoryI18nKeys.calendar.state.dryStress, 'history.calendar.state.dry_stress');
   assert.equal(HistoryI18nKeys.interpretation.rootZoneDry, 'history.interpretation.rootZoneDry');
   assert.equal(HistoryI18nKeys.workspace.comparisonMode, 'history.workspace.comparisonMode');
 });
 
 test('representative fixture matches summary, data, workspace, freshness, and availability contracts', () => {
+  assert.deepEqual(Object.keys(fixture.summaries).sort(), [
+    'cards',
+    'gatewayEui',
+    'generatedAt',
+    'zoneId',
+    'zoneUuid',
+  ]);
   assert.equal(fixture.summaries.cards.length, 2);
   assert.equal(fixture.summaries.cards[0].cardType, 'soil');
-  assert.equal(fixture.summaries.cards[0].coverageConfidence, 'configured');
-  assert.equal(fixture.summaries.cards[0].advancedFields[0].availability, 'collected');
+  assert.equal(fixture.summaries.cards[0].metadata.coverageConfidence, 'configured');
+  assert.equal('coverageConfidence' in fixture.summaries.cards[0], false);
+  assert.equal('advancedFields' in fixture.summaries.cards[0], false);
   assert.equal(fixture.summaries.cards[1].scope, 'gateway');
 
   assert.equal(fixture.data.range.timezone, 'Europe/Zurich');
   assert.equal(fixture.data.aggregation.coverageConfidence, 'configured');
   assert.equal(fixture.data.freshness.syncState, 'local');
-  assert.equal(fixture.data.calendar?.days[0].state, 'optimal');
+  assert.equal(fixture.data.calendar?.days[0].state, 'dry_stress');
   assert.equal(fixture.data.series[0].points[0].coverageConfidence, 'configured');
   assert.equal(fixture.data.advancedFields.rssi.availability, 'not_collected_at_time');
+  assert.equal(Array.isArray(fixture.data.calendar?.days), true);
+  assert.equal('states' in (fixture.data.calendar ?? {}), false);
 
   assert.equal(fixture.workspace.schemaVersion, WorkspaceSchemaVersion);
   assert.equal(fixture.workspace.limits.platform, 'edge');

@@ -12,9 +12,9 @@ export const historyStandardOverlayIds = [
 ] as const satisfies readonly HistoryOverlayId[];
 
 export const historyAdvancedOverlayIds = [
-  'soil-dendro-shrinkage',
+  'soil-tension-dendro-shrinkage',
   'temperature-stem-growth',
-  'battery-signal-strength',
+  'battery-voltage-signal-strength',
   'normalized-multi-variable',
   'measured-model-prediction',
   'cross-card-anomaly',
