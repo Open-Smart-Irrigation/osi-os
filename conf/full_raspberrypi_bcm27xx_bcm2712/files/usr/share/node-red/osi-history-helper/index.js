@@ -477,6 +477,8 @@ function configuredCadenceFor(options, sourceKey, channel, key) {
     options.expectedCadenceBySource,
     options.expectedCadenceSecondsBySource,
     options.expected_cadences,
+    options.expected_cadence_by_source,
+    options.expected_cadence_seconds_by_source,
   ].filter((value) => value && typeof value === 'object');
   const candidates = [key, `${sourceKey}|${channel.field}`, sourceKey, channel.id, channel.field];
   for (const map of maps) {
@@ -488,7 +490,12 @@ function configuredCadenceFor(options, sourceKey, channel, key) {
       }
     }
   }
-  const fallback = toFiniteNumber(options.expectedCadenceSeconds ?? options.configuredCadenceSeconds);
+  const fallback = toFiniteNumber(
+    options.expectedCadenceSeconds
+    ?? options.expected_cadence_seconds
+    ?? options.configuredCadenceSeconds
+    ?? options.configured_cadence_seconds
+  );
   return fallback !== null && fallback > 0 ? Math.round(fallback) : null;
 }
 
@@ -511,6 +518,8 @@ function seedConfiguredSourceChannelSamples(samples, channels, options = {}) {
   const sourceMaps = [
     options.expectedCadenceBySource,
     options.expectedCadenceSecondsBySource,
+    options.expected_cadence_by_source,
+    options.expected_cadence_seconds_by_source,
   ].filter((value) => value && typeof value === 'object');
   for (const map of sourceMaps) {
     for (const rawKey of Object.keys(map)) {
