@@ -3,6 +3,7 @@ import { notifyAuthExpired } from './authEvents';
 import type {
   HistoryCardSummaryResponse,
   HistoryCardDataResponse,
+  HistoryAdvancedResponse,
   HistoryCardSummary,
   HistoryCardType,
   HistoryCardScope,
@@ -505,6 +506,31 @@ function normaliseHistoryCardDataResponse(row: any): HistoryCardDataResponse {
   };
 }
 
+function normaliseHistoryAdvancedResponse(row: any): HistoryAdvancedResponse {
+  const aggregation = row?.aggregation ?? {};
+  const freshness = row?.freshness ?? {};
+  return {
+    generatedAt: String(row?.generatedAt ?? row?.generated_at ?? ''),
+    cardId: String(row?.cardId ?? row?.card_id ?? ''),
+    cardType: String(row?.cardType ?? row?.card_type ?? 'soil') as HistoryCardType,
+    range: normaliseHistoryRangeSelection(row?.range ?? {}),
+    aggregation: {
+      level: String(aggregation?.level ?? 'auto') as HistoryAggregationLevel,
+      bucketSizeSeconds: aggregation?.bucketSizeSeconds ?? aggregation?.bucket_size_seconds ?? null,
+      coveragePct: aggregation?.coveragePct ?? aggregation?.coverage_pct ?? null,
+      coverageConfidence: toCoverageConfidence(aggregation?.coverageConfidence ?? aggregation?.coverage_confidence),
+      pointCount: Number(aggregation?.pointCount ?? aggregation?.point_count ?? 0),
+      dominantStatusMethod: aggregation?.dominantStatusMethod ?? aggregation?.dominant_status_method ?? null,
+    },
+    freshness: {
+      dataAsOf: freshness?.dataAsOf ?? freshness?.data_as_of ?? null,
+      syncState: freshness?.syncState ?? freshness?.sync_state ?? 'unknown',
+    },
+    placeholder: row?.placeholder && typeof row.placeholder === 'object' ? row.placeholder : {},
+    advancedFields: row?.advancedFields ?? row?.advanced_fields ?? {},
+  };
+}
+
 function buildHistoryCardDataParams(request: HistoryCardDataRequest): URLSearchParams {
   const params = new URLSearchParams({
     view: request.view,
@@ -925,6 +951,16 @@ export const historyAPI = {
     return normaliseHistoryCardDataResponse(response.data);
   },
 
+  getZoneCardAdvanced: async (
+    zoneId: number,
+    cardId: string,
+    request: HistoryCardDataRequest,
+  ): Promise<HistoryAdvancedResponse> => {
+    const params = buildHistoryCardDataParams(request);
+    const response = await api.get(`/api/history/zones/${zoneId}/cards/${encodeURIComponent(cardId)}/advanced`, { params });
+    return normaliseHistoryAdvancedResponse(response.data);
+  },
+
   getGatewayCardData: async (
     gatewayEui: string,
     cardId: string,
@@ -936,6 +972,19 @@ export const historyAPI = {
       { params },
     );
     return normaliseHistoryCardDataResponse(response.data);
+  },
+
+  getGatewayCardAdvanced: async (
+    gatewayEui: string,
+    cardId: string,
+    request: HistoryCardDataRequest,
+  ): Promise<HistoryAdvancedResponse> => {
+    const params = buildHistoryCardDataParams(request);
+    const response = await api.get(
+      `/api/history/gateways/${encodeURIComponent(gatewayEui)}/cards/${encodeURIComponent(cardId)}/advanced`,
+      { params },
+    );
+    return normaliseHistoryAdvancedResponse(response.data);
   },
 };
 

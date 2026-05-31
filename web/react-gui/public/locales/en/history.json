@@ -217,6 +217,153 @@
         "no_data": "No data"
       },
       "labelUnknown": "Profile {{index}}"
+    },
+    "calendar": {
+      "label": "Calendar",
+      "title": "Calendar",
+      "emptyTitle": "No calendar data",
+      "state": {
+        "dry_stress": "Dry stress",
+        "optimal": "Optimal",
+        "wet_excess": "Wet excess",
+        "mixed": "Mixed",
+        "normal_growth": "Normal growth",
+        "reduced_growth": "Reduced growth",
+        "high_shrinkage_stress": "High shrinkage stress",
+        "incomplete_night_recovery": "Incomplete night recovery",
+        "normal": "Normal",
+        "heat_stress": "Heat stress",
+        "cold_stress": "Cold stress",
+        "high_humidity": "High humidity",
+        "rain_day": "Rain day",
+        "no_irrigation": "No irrigation",
+        "irrigation_event": "Irrigation event",
+        "high_irrigation_frequency": "High irrigation frequency",
+        "possible_ineffective_irrigation": "Possible ineffective irrigation",
+        "manual_override": "Manual override",
+        "offline": "Offline",
+        "no_data": "No data"
+      },
+      "marker": {
+        "irrigation": {
+          "no_irrigation": "No irrigation marker",
+          "irrigation_event": "Irrigation marker",
+          "high_irrigation_frequency": "High frequency marker",
+          "possible_ineffective_irrigation": "Possible ineffective irrigation marker",
+          "manual_override": "Manual override marker"
+        },
+        "rain": "Rain",
+        "sensor_gap": "Sensor gap",
+        "heat_event": "Heat event",
+        "soil": {
+          "dry_stress": "Dry stress marker",
+          "optimal": "Optimal marker",
+          "wet_excess": "Wet marker",
+          "mixed": "Mixed marker"
+        },
+        "dendro": {
+          "normal_growth": "Normal growth marker",
+          "reduced_growth": "Reduced growth marker",
+          "high_shrinkage_stress": "High shrinkage marker",
+          "incomplete_night_recovery": "Incomplete recovery marker"
+        },
+        "environment": {
+          "normal": "Normal marker",
+          "heat_stress": "Heat marker",
+          "cold_stress": "Cold marker",
+          "high_humidity": "High humidity marker",
+          "rain_day": "Rain marker"
+        }
+      },
+      "summary": {
+        "soil": {
+          "dry_stress": "Root zone was dry with {{sampleCount}} samples.",
+          "optimal": "Root zone was optimal with {{sampleCount}} samples.",
+          "wet_excess": "Root zone was wet with {{sampleCount}} samples.",
+          "mixed": "Soil status was mixed across depths.",
+          "no_data": "No soil data was available."
+        },
+        "dendro": {
+          "normal_growth": "Stem growth looked normal.",
+          "reduced_growth": "Stem growth was reduced.",
+          "high_shrinkage_stress": "Stem shrinkage indicated stress.",
+          "incomplete_night_recovery": "Night recovery was incomplete.",
+          "no_data": "No dendrometer data was available."
+        },
+        "environment": {
+          "normal": "Environment was normal.",
+          "heat_stress": "Heat stress was detected.",
+          "cold_stress": "Cold stress was detected.",
+          "high_humidity": "High humidity was detected.",
+          "rain_day": "Rain was detected.",
+          "no_data": "No environment data was available."
+        },
+        "irrigation": {
+          "no_irrigation": "No irrigation occurred.",
+          "irrigation_event": "Irrigation occurred.",
+          "high_irrigation_frequency": "Irrigation frequency was high.",
+          "possible_ineffective_irrigation": "Irrigation may have been ineffective.",
+          "manual_override": "Manual override occurred."
+        },
+        "gateway": {
+          "offline": "Gateway connectivity was offline.",
+          "normal": "Gateway status was normal.",
+          "no_data": "No gateway data was available."
+        }
+      }
+    },
+    "interpretation": {
+      "title": "Interpretation",
+      "noData": {
+        "title": "No data in selected range",
+        "body": "This card is configured, but no measured history was available for the selected range."
+      },
+      "rootZoneDry": {
+        "title": "Root zone entered dry status",
+        "body": "Lower soil tension stayed dry through the selected period."
+      },
+      "environmentStress": {
+        "title": "Environment stress detected",
+        "body": "Environment readings crossed a stress threshold in the selected range."
+      },
+      "extensionUnavailable": {
+        "title": "Cloud context unavailable"
+      },
+      "prediction": {
+        "title": "Prediction context",
+        "body": "Prediction context is available for this zone."
+      },
+      "recommendation": {
+        "irrigate": "Irrigate",
+        "monitor": "Monitor"
+      }
+    },
+    "advanced": {
+      "title": "Advanced diagnostics",
+      "loading": "Loading advanced diagnostics...",
+      "emptyTitle": "No advanced diagnostics",
+      "value": {
+        "unavailable": "Unavailable"
+      },
+      "availability": {
+        "collected": "Collected",
+        "not_collected_at_time": "Not collected then",
+        "unknown_now": "Unknown now",
+        "unsupported": "Unsupported"
+      },
+      "field": {
+        "device_eui": "Device EUI",
+        "primaryDeveui": "Device EUI",
+        "rssi": "RSSI",
+        "snr": "SNR",
+        "raw_payload": "Raw payload",
+        "rawPayload": "Raw payload",
+        "firmware": "Firmware",
+        "calibration": "Calibration",
+        "prediction": "Prediction",
+        "forecast": "Forecast",
+        "pending_commands": "Pending commands"
+      }
     }
   }
 }

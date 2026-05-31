@@ -245,6 +245,12 @@ export interface HistoryCalendarDay {
   state: HistoryCalendarState;
   coveragePct: number | null;
   coverageConfidence: CoverageConfidence;
+  summary?: {
+    key: string;
+    params?: Record<string, unknown>;
+  };
+  metrics?: Record<string, number | string | null>;
+  markers?: HistoryCalendarMarker[];
 }
 
 export interface HistoryCalendar {
@@ -252,14 +258,27 @@ export interface HistoryCalendar {
   days: HistoryCalendarDay[];
 }
 
+export interface HistoryCalendarMarker {
+  type: string;
+  severity: 'info' | 'warning' | 'critical' | 'success' | 'unknown';
+  labelKey: string;
+  params?: Record<string, unknown>;
+}
+
 export interface HistoryInterpretationEvidence {
-  seriesId: string;
-  from: string;
-  to: string;
+  seriesId?: string;
+  from?: string;
+  to?: string;
+  type?: string;
+  status?: string | null;
+  since?: string | null;
+  coveragePct?: number | null;
+  coverageConfidence?: CoverageConfidence;
 }
 
 export interface HistoryInterpretation {
   id: string;
+  ruleId?: string;
   source:
     | 'local-rule'
     | 'forecast'
@@ -268,8 +287,11 @@ export interface HistoryInterpretation {
     | 'satellite'
     | 'weather-adjusted';
   severity: 'info' | 'warning' | 'critical' | 'success' | 'unknown';
-  title: string;
-  body: string;
+  titleKey?: string;
+  bodyKey?: string;
+  params?: Record<string, unknown>;
+  title?: string;
+  body?: string;
   evidence: HistoryInterpretationEvidence[];
   confidence: number | null;
   modelRunId?: string;
@@ -281,6 +303,16 @@ export interface HistoryInterpretation {
 export interface HistoryFreshness {
   dataAsOf: string | null;
   syncState: HistorySyncState;
+}
+
+export interface HistoryAdvancedPlaceholder {
+  schemaVersion?: number;
+  cardType?: HistoryCardType | string;
+  placeholder?: boolean;
+  generatedAt?: string;
+  availableFields?: string[];
+  sourceDevices?: Array<Record<string, unknown>>;
+  sections?: Array<Record<string, unknown>>;
 }
 
 export interface HistoryCardDataResponse<TCardType extends HistoryCardType = HistoryCardType> {
@@ -296,6 +328,17 @@ export interface HistoryCardDataResponse<TCardType extends HistoryCardType = His
   calendar: HistoryCalendar | null;
   interpretations: HistoryInterpretation[];
   freshness: HistoryFreshness;
+  advancedFields: Record<string, HistoryAdvancedField>;
+}
+
+export interface HistoryAdvancedResponse<TCardType extends HistoryCardType = HistoryCardType> {
+  generatedAt: string;
+  cardId: string;
+  cardType: TCardType;
+  range: HistoryRangeSelection;
+  freshness: HistoryFreshness;
+  aggregation: HistoryAggregationMetadata;
+  placeholder: HistoryAdvancedPlaceholder;
   advancedFields: Record<string, HistoryAdvancedField>;
 }
 

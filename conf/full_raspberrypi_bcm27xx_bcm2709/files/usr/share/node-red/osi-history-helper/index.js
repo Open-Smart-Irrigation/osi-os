@@ -981,6 +981,314 @@ function buildLocalInterpretations(input = {}) {
   return items;
 }
 
+function normalizeTimezone(value) {
+  const timezone = String(value || 'UTC').trim() || 'UTC';
+  try {
+    new Intl.DateTimeFormat('en-US', { timeZone: timezone }).format(new Date(0));
+    return timezone;
+  } catch (_) {
+    return 'UTC';
+  }
+}
+
+function localDateKey(value, timezone) {
+  const ms = typeof value === 'number' ? value : parseTime(value);
+  if (ms === null) return null;
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: normalizeTimezone(timezone),
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(new Date(ms));
+  const values = {};
+  for (const part of parts) {
+    if (part.type !== 'literal') values[part.type] = part.value;
+  }
+  return values.year && values.month && values.day ? `${values.year}-${values.month}-${values.day}` : null;
+}
+
+function dateKeyToUtcMs(dateKey) {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(dateKey || ''));
+  if (!match) return null;
+  return Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
+}
+
+function addUtcDays(dateKey, days) {
+  const ms = dateKeyToUtcMs(dateKey);
+  if (ms === null) return null;
+  return new Date(ms + (days * 24 * 60 * 60 * 1000)).toISOString().slice(0, 10);
+}
+
+function calendarRangeDateKeys(input, timezone, observedKeys) {
+  const range = input.range || {};
+  const from = parseTime(range.from || input.from || input.start || input.startAt);
+  const to = parseTime(range.to || input.to || input.end || input.endAt);
+  if (from !== null && to !== null && to > from) {
+    const startKey = localDateKey(from, timezone);
+    const endKey = localDateKey(to - 1, timezone);
+    if (startKey && endKey) {
+      const keys = [];
+      for (let key = startKey; key && key <= endKey; key = addUtcDays(key, 1)) {
+        keys.push(key);
+        if (key === endKey) break;
+      }
+      return keys;
+    }
+  }
+  return Array.from(observedKeys).sort();
+}
+
+function calendarCoverageForDate(input, dateKey, rows) {
+  const byDate = input.coverageByDate || input.coverage_by_date || {};
+  const configured = byDate[dateKey];
+  if (configured && typeof configured === 'object') {
+    return {
+      coveragePct: configured.coveragePct ?? configured.coverage_pct ?? null,
+      coverageConfidence: configured.coverageConfidence || configured.coverage_confidence || 'unknown',
+    };
+  }
+  const values = rows
+    .map((row) => toFiniteNumber(row.coveragePct ?? row.coverage_pct))
+    .filter((value) => value !== null);
+  return {
+    coveragePct: values.length ? roundTo(values.reduce((sum, value) => sum + value, 0) / values.length) : null,
+    coverageConfidence: values.length ? 'derived' : 'unknown',
+  };
+}
+
+function priorityStatus(statuses, priority, fallback) {
+  const present = new Set(statuses.filter((status) => status && status !== 'no_data'));
+  if (present.size === 0) return fallback;
+  for (const status of priority) {
+    if (present.has(status)) return status;
+  }
+  return Array.from(present)[0] || fallback;
+}
+
+function classifySoilDay(rows) {
+  const statuses = rows.map((row) => classifySoilStatus(row).status).filter((status) => status !== 'no_data');
+  const unique = new Set(statuses);
+  if (unique.size === 0) return 'no_data';
+  if (unique.size > 1) return 'mixed';
+  return statuses[0];
+}
+
+function soilDayStatuses(rows) {
+  return Array.from(new Set(rows.map((row) => classifySoilStatus(row).status).filter((status) => status && status !== 'no_data')));
+}
+
+function dendroDayStatuses(rows) {
+  return Array.from(new Set(rows.map((row) => classifyDendroStatus({
+    recoveryRatio: row.recoveryRatio ?? row.recovery_ratio ?? row.dendro_ratio,
+    mdsUm: row.mdsUm ?? row.mds_um,
+    growthUm: row.growthUm ?? row.growth_um ?? row.dendro_stem_change_um,
+  }).status).filter((status) => status && status !== 'no_data')));
+}
+
+function environmentDayStatuses(rows) {
+  return Array.from(new Set(rows.map((row) => classifyEnvironmentStatus(row).status).filter((status) => status && status !== 'no_data')));
+}
+
+function classifyDendroDay(rows) {
+  return priorityStatus(
+    rows.map((row) => classifyDendroStatus({
+      recoveryRatio: row.recoveryRatio ?? row.recovery_ratio ?? row.dendro_ratio,
+      mdsUm: row.mdsUm ?? row.mds_um,
+      growthUm: row.growthUm ?? row.growth_um ?? row.dendro_stem_change_um,
+    }).status),
+    ['incomplete_night_recovery', 'high_shrinkage_stress', 'reduced_growth', 'normal_growth'],
+    'no_data'
+  );
+}
+
+function classifyEnvironmentDay(rows) {
+  return priorityStatus(
+    rows.map((row) => classifyEnvironmentStatus(row).status),
+    ['heat_stress', 'cold_stress', 'high_humidity', 'rain_day', 'normal'],
+    'no_data'
+  );
+}
+
+function eventHasType(event, pattern) {
+  return pattern.test(String(event.type || event.action || event.reason || '').trim());
+}
+
+function classifyIrrigationDay(events) {
+  if (events.some((event) => event.manualOverride === true || event.manual_override === true || eventHasType(event, /manual|override/i))) {
+    return 'manual_override';
+  }
+  if (events.some((event) => event.possibleIneffectiveIrrigation === true || event.possible_ineffective_irrigation === true || eventHasType(event, /ineffective/i))) {
+    return 'possible_ineffective_irrigation';
+  }
+  return classifyIrrigationStatus({ eventCount: events.length }).status;
+}
+
+function classifyGatewayDay(rows, generatedAt) {
+  const sorted = rows
+    .map((row) => row.lastSeenAt || row.last_seen_at || row.recorded_at || row.recordedAt)
+    .filter(Boolean)
+    .sort();
+  return classifyGatewayStatus({
+    generatedAt,
+    lastSeenAt: sorted.length ? sorted[sorted.length - 1] : null,
+  }).status;
+}
+
+function markerSeverityForStatus(status) {
+  if ([
+    'dry_stress',
+    'wet_excess',
+    'high_shrinkage_stress',
+    'incomplete_night_recovery',
+    'heat_stress',
+    'cold_stress',
+    'high_irrigation_frequency',
+    'possible_ineffective_irrigation',
+    'offline',
+  ].includes(status)) return 'warning';
+  if (status === 'no_data') return 'unknown';
+  return 'info';
+}
+
+function buildCalendar(input = {}) {
+  const cardType = normalizeCardType(input.cardType || input.card_type) || 'soil';
+  const timezone = normalizeTimezone(input.timezone || (input.range && input.range.timezone));
+  const rows = Array.isArray(input.rows) ? input.rows : [];
+  const events = Array.isArray(input.events) ? input.events : [];
+  const observedKeys = new Set();
+  const rowsByDate = {};
+  const eventsByDate = {};
+
+  for (const row of rows) {
+    const key = localDateKey(row.recorded_at || row.recordedAt || row.bucket_start || row.t, timezone);
+    if (!key) continue;
+    observedKeys.add(key);
+    if (!rowsByDate[key]) rowsByDate[key] = [];
+    rowsByDate[key].push(row);
+  }
+  for (const event of events) {
+    const key = localDateKey(event.t || event.created_at || event.createdAt || event.recorded_at, timezone);
+    if (!key) continue;
+    observedKeys.add(key);
+    if (!eventsByDate[key]) eventsByDate[key] = [];
+    eventsByDate[key].push(event);
+  }
+
+  const days = calendarRangeDateKeys(input, timezone, observedKeys).map((date) => {
+    const dayRows = rowsByDate[date] || [];
+    const dayEvents = eventsByDate[date] || [];
+    let state = 'no_data';
+    if (cardType === 'soil') state = classifySoilDay(dayRows);
+    else if (cardType === 'dendro') state = classifyDendroDay(dayRows);
+    else if (cardType === 'environment') state = classifyEnvironmentDay(dayRows);
+    else if (cardType === 'irrigation') state = classifyIrrigationDay(dayEvents);
+    else if (cardType === 'gateway') state = classifyGatewayDay(dayRows, input.generatedAt || input.generated_at || new Date(0).toISOString());
+
+    const coverage = calendarCoverageForDate(input, date, dayRows);
+    const sampleCount = dayRows.length;
+    const eventCount = dayEvents.length;
+    let markerStates = state === 'no_data' ? [] : [state];
+    if (cardType === 'soil' && state === 'mixed') markerStates = soilDayStatuses(dayRows);
+    else if (cardType === 'dendro') markerStates = dendroDayStatuses(dayRows);
+    else if (cardType === 'environment') markerStates = environmentDayStatuses(dayRows);
+    return {
+      date,
+      state,
+      coveragePct: coverage.coveragePct,
+      coverageConfidence: coverage.coverageConfidence,
+      summary: {
+        key: `history.calendar.summary.${cardType}.${state}`,
+        params: { sampleCount, eventCount },
+      },
+      metrics: {
+        sampleCount,
+        eventCount,
+      },
+      markers: markerStates.map((markerState) => ({
+        type: 'state',
+        severity: markerSeverityForStatus(markerState),
+        labelKey: `history.calendar.marker.${cardType}.${markerState}`,
+        params: { sampleCount, eventCount },
+      })),
+    };
+  });
+
+  return { timezone, days };
+}
+
+function advancedField(name, value, unit, availability) {
+  return {
+    field: name,
+    value: value === undefined ? null : value,
+    unit: unit === undefined ? null : unit,
+    availability,
+  };
+}
+
+function rowHasOwn(row, keys) {
+  return keys.some((key) => Object.prototype.hasOwnProperty.call(row || {}, key));
+}
+
+function latestRowValue(latestRow, keys) {
+  for (const key of keys) {
+    if (Object.prototype.hasOwnProperty.call(latestRow || {}, key)) return latestRow[key];
+  }
+  return undefined;
+}
+
+function diagnosticAvailability(input, latestRow, keys, supported = true) {
+  if (!supported) return 'unsupported';
+  const collected = new Set((Array.isArray(input.collectedFields) ? input.collectedFields : input.collected_fields || []).map(String));
+  if (keys.some((key) => collected.has(key))) return 'collected';
+  const value = latestRowValue(latestRow, keys);
+  if (value !== undefined && value !== null) return 'collected';
+  if (latestRow && keys.some((key) => rowHasOwn(latestRow, [key]))) return 'not_collected_at_time';
+  if ((Array.isArray(input.latestRows) ? input.latestRows : []).length > 0) return 'not_collected_at_time';
+  return 'unknown_now';
+}
+
+function buildAdvancedDiagnostics(input = {}) {
+  const cardType = normalizeCardType(input.cardType || input.card_type) || 'unknown';
+  const latestRows = Array.isArray(input.latestRows) ? input.latestRows : [];
+  const latestRow = latestRows.slice().sort((left, right) =>
+    (parseTime(right.recorded_at || right.recordedAt) || 0) - (parseTime(left.recorded_at || left.recordedAt) || 0)
+  )[0] || null;
+  const sourceDevices = Array.isArray(input.sourceDevices) ? input.sourceDevices : [];
+  const sourceDevice = sourceDevices[0] || null;
+  const availableFields = new Set();
+  for (const row of latestRows) {
+    for (const key of Object.keys(row || {})) {
+      if (row[key] !== undefined && row[key] !== null) availableFields.add(key);
+    }
+  }
+  const calibrationStatus = input.calibrationStatus ?? input.calibration_status ?? null;
+  const pendingCommandCount = input.pendingCommandCount ?? input.pending_command_count;
+  const gatewayEui = normalizeDeveui(input.gatewayEui || input.gateway_eui);
+  const primaryDeveui = sourceDevice ? normalizeDeveui(sourceDevice.deveui || sourceDevice.device_eui || sourceDevice.deviceEui) : null;
+  const fields = {
+    sourceDeviceCount: advancedField('sourceDeviceCount', sourceDevices.length, null, 'collected'),
+    logicalSourceKey: advancedField('logicalSourceKey', input.logicalSourceKey || input.logical_source_key || null, null, input.logicalSourceKey || input.logical_source_key ? 'collected' : 'unsupported'),
+    primaryDeveui: advancedField('primaryDeveui', primaryDeveui, null, primaryDeveui ? 'collected' : 'unknown_now'),
+    gatewayEui: advancedField('gatewayEui', gatewayEui, null, gatewayEui ? 'collected' : 'unknown_now'),
+    rawRowCount: advancedField('rawRowCount', toFiniteNumber(input.rowCount ?? input.row_count) || 0, null, toFiniteNumber(input.rowCount ?? input.row_count) > 0 ? 'collected' : 'not_collected_at_time'),
+    rssi: advancedField('rssi', latestRowValue(latestRow, ['rssi']), 'dBm', diagnosticAvailability(input, latestRow, ['rssi'])),
+    snr: advancedField('snr', latestRowValue(latestRow, ['snr']), 'dB', diagnosticAvailability(input, latestRow, ['snr'])),
+    batteryVoltage: advancedField('batteryVoltage', latestRowValue(latestRow, ['bat_v', 'battery_voltage']), 'V', diagnosticAvailability(input, latestRow, ['bat_v', 'battery_voltage'])),
+    batteryPct: advancedField('batteryPct', latestRowValue(latestRow, ['bat_pct', 'battery_pct']), '%', diagnosticAvailability(input, latestRow, ['bat_pct', 'battery_pct'])),
+    firmwareVersion: advancedField('firmwareVersion', sourceDevice && (sourceDevice.firmware_version || sourceDevice.firmwareVersion) || null, null, sourceDevice && (sourceDevice.firmware_version || sourceDevice.firmwareVersion) ? 'collected' : 'unknown_now'),
+    rawPayload: advancedField('rawPayload', latestRowValue(latestRow, ['raw_payload', 'payload_raw']), null, diagnosticAvailability(input, latestRow, ['raw_payload', 'payload_raw'])),
+    pendingCommands: advancedField('pendingCommands', pendingCommandCount === undefined ? null : pendingCommandCount, null, cardType === 'gateway' ? (pendingCommandCount === null || pendingCommandCount === undefined ? 'unknown_now' : 'collected') : 'unsupported'),
+    calibrationStatus: advancedField('calibrationStatus', calibrationStatus, null, cardType === 'soil' ? (calibrationStatus ? 'collected' : 'unknown_now') : 'unsupported'),
+  };
+  const placeholder = buildAdvancedMetadataPlaceholder({
+    cardType,
+    generatedAt: input.generatedAt || input.generated_at,
+    sourceDevices,
+    availableFields: Array.from(availableFields).sort(),
+  });
+  return { schemaVersion: 1, placeholder, fields };
+}
+
 function buildAdvancedMetadataPlaceholder(input = {}) {
   const cardType = normalizeCardType(input.cardType || input.card_type) || 'unknown';
   const sourceDevices = (Array.isArray(input.sourceDevices) ? input.sourceDevices : [])
@@ -1027,5 +1335,7 @@ module.exports = {
   aggregateRows,
   aggregateDeviceData,
   buildAdvancedMetadataPlaceholder,
+  buildAdvancedDiagnostics,
+  buildCalendar,
   buildLocalInterpretations,
 };

@@ -1,5 +1,8 @@
 import React, { useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import { AdvancedViewPanel } from './AdvancedViewPanel';
+import { CalendarView } from './CalendarView';
+import { InterpretationList } from './InterpretationList';
 import { TimelineBrush } from './TimelineBrush';
 import { DendroGrowthTimelineView } from './visualizations/DendroGrowthTimelineView';
 import { EnvironmentLineChartView } from './visualizations/EnvironmentLineChartView';
@@ -7,6 +10,7 @@ import { GatewayStatusOverviewView } from './visualizations/GatewayStatusOvervie
 import { IrrigationEventTimelineView } from './visualizations/IrrigationEventTimelineView';
 import { SoilProfileView } from './visualizations/SoilProfileView';
 import { useHistoryCardData, type HistoryCardDataScope } from '../../history/useHistoryCardData';
+import { useHistoryCardAdvancedData } from '../../history/useHistoryCardAdvancedData';
 import { useTimeViewport } from '../../history/useTimeViewport';
 import type {
   CoverageConfidence,
@@ -69,6 +73,8 @@ export const HistoryCardFrame: React.FC<HistoryCardFrameProps> = ({ card, scope 
   const shouldRenderEnvironmentLineChart = card?.cardType === 'environment' && selectedView === 'line-chart';
   const shouldRenderGatewayStatus = card?.cardType === 'gateway' && selectedView === 'status-overview';
   const shouldRenderIrrigationEventTimeline = card?.cardType === 'irrigation' && selectedView === 'event-timeline';
+  const shouldRenderCalendar = selectedView === 'calendar';
+  const shouldRenderAdvanced = selectedView === 'advanced';
   const cardData = useHistoryCardData({
     scope,
     cardId: card?.cardId ?? null,
@@ -77,6 +83,15 @@ export const HistoryCardFrame: React.FC<HistoryCardFrameProps> = ({ card, scope 
     aggregation: viewport.aggregation,
     overlays: [],
     enabled: Boolean(card?.availability.available),
+  });
+  const advancedData = useHistoryCardAdvancedData({
+    scope,
+    cardId: card?.cardId ?? null,
+    view: selectedView,
+    range: viewport.range,
+    aggregation: viewport.aggregation,
+    overlays: [],
+    enabled: Boolean(card?.availability.available && shouldRenderAdvanced),
   });
 
   if (!card) {
@@ -195,13 +210,30 @@ export const HistoryCardFrame: React.FC<HistoryCardFrameProps> = ({ card, scope 
           <IrrigationEventTimelineView data={cardData.data} />
         )}
 
+        {!cardData.isLoading && !cardData.error && shouldRenderCalendar && (
+          <>
+            <CalendarView cardType={card.cardType} calendar={cardData.data?.calendar} />
+            <InterpretationList interpretations={cardData.data?.interpretations ?? []} />
+          </>
+        )}
+
+        {!cardData.isLoading && !cardData.error && shouldRenderAdvanced && (
+          <AdvancedViewPanel
+            data={advancedData.data}
+            isLoading={advancedData.isLoading}
+            error={advancedData.error}
+          />
+        )}
+
         {!cardData.isLoading
           && !cardData.error
           && ((!shouldRenderSoilProfile
             && !shouldRenderDendroGrowth
             && !shouldRenderEnvironmentLineChart
             && !shouldRenderGatewayStatus
-            && !shouldRenderIrrigationEventTimeline)
+            && !shouldRenderIrrigationEventTimeline
+            && !shouldRenderCalendar
+            && !shouldRenderAdvanced)
             || (shouldRenderSoilProfile && !cardData.data)) && (
           <div className="mt-4 rounded-lg border border-dashed border-[var(--border)] bg-[var(--bg)] p-6">
             <p className="text-sm font-semibold text-[var(--text)]">{formatViewLabel(t, selectedView)}</p>

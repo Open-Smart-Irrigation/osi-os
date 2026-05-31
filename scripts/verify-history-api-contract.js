@@ -143,6 +143,9 @@ function verifyHistoryRouterImplementation(flows, failures) {
   assertContains(failures, source, 'shouldUseHistoryRollups(scopeContext, range.label, aggregationRequested)', 'long-range rollup gate');
   assertContains(failures, source, 'soilRowsHaveWarning(latestRows)', 'merged soil summary warning classifier');
   assertContains(failures, source, 'environmentRowsHaveWarning(latestRows)', 'merged environment summary warning classifier');
+  assertContains(failures, source, 'osiHistory.buildCalendar', 'helper-owned calendar classification');
+  assertContains(failures, source, 'osiHistory.buildLocalInterpretations', 'helper-owned local interpretations');
+  assertContains(failures, source, 'osiHistory.buildAdvancedDiagnostics', 'helper-owned advanced diagnostic availability');
 
   const seasonBranchIndex = source.indexOf("if (rawLabel === 'season')");
   const explicitRangeIndex = source.indexOf('if (fromRaw || toRaw)');

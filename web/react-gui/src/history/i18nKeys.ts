@@ -23,6 +23,8 @@ export const HistoryI18nKeys = {
   },
   calendar: {
     label: 'history.calendar.label',
+    title: 'history.calendar.title',
+    emptyTitle: 'history.calendar.emptyTitle',
     state: {
       dryStress: 'history.calendar.state.dry_stress',
       optimal: 'history.calendar.state.optimal',
@@ -53,6 +55,12 @@ export const HistoryI18nKeys = {
     dendroStress: 'history.interpretation.dendroStress',
     environmentStress: 'history.interpretation.environmentStress',
     gatewaySyncState: 'history.interpretation.gatewaySyncState',
+  },
+  advanced: {
+    title: 'history.advanced.title',
+    loading: 'history.advanced.loading',
+    emptyTitle: 'history.advanced.emptyTitle',
+    valueUnavailable: 'history.advanced.value.unavailable',
   },
   workspace: {
     title: 'history.workspace.title',

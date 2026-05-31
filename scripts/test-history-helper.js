@@ -36,6 +36,8 @@ const expectedExports = [
   'aggregateRows',
   'aggregateDeviceData',
   'buildAdvancedMetadataPlaceholder',
+  'buildAdvancedDiagnostics',
+  'buildCalendar',
   'buildLocalInterpretations',
 ];
 
@@ -436,6 +438,120 @@ test('builds deterministic advanced metadata placeholders', () => {
   assert.strictEqual(metadata.sourceDevices[0].typeId, 'GATEWAY');
 });
 
+test('builds theme-specific calendar cells with local timezone dates and summaries', () => {
+  const range = {
+    from: '2026-05-30T22:00:00.000Z',
+    to: '2026-06-02T22:00:00.000Z',
+    timezone: 'Europe/Zurich',
+  };
+
+  const soil = helper.buildCalendar({
+    cardType: 'soil',
+    range,
+    rows: [
+      { recorded_at: '2026-05-31T01:00:00.000Z', swt_1: 82 },
+      { recorded_at: '2026-05-31T02:00:00.000Z', swt_1: 28 },
+      { recorded_at: '2026-06-01T12:00:00.000Z', swt_1: 9 },
+    ],
+    coverageByDate: {
+      '2026-05-31': { coveragePct: 90, coverageConfidence: 'configured' },
+      '2026-06-01': { coveragePct: 40, coverageConfidence: 'derived' },
+    },
+  });
+  assert.strictEqual(soil.timezone, 'Europe/Zurich');
+  assert.deepStrictEqual(soil.days.map((day) => day.date), ['2026-05-31', '2026-06-01', '2026-06-02']);
+  assert.strictEqual(soil.days[0].state, 'mixed');
+  assert.strictEqual(soil.days[0].coveragePct, 90);
+  assert.strictEqual(soil.days[0].summary.key, 'history.calendar.summary.soil.mixed');
+  assert.strictEqual(soil.days[0].metrics.sampleCount, 2);
+  assert(soil.days[0].markers.some((marker) => marker.labelKey === 'history.calendar.marker.soil.dry_stress'));
+  assert.strictEqual(soil.days[1].state, 'wet_excess');
+  assert.strictEqual(soil.days[2].state, 'no_data');
+
+  const dendro = helper.buildCalendar({
+    cardType: 'dendro',
+    timezone: 'UTC',
+    rows: [
+      { recorded_at: '2026-05-31T06:00:00.000Z', dendro_ratio: 0.31 },
+      { recorded_at: '2026-06-01T06:00:00.000Z', dendro_stem_change_um: -5 },
+    ],
+  });
+  assert.strictEqual(dendro.days[0].state, 'incomplete_night_recovery');
+  assert.strictEqual(dendro.days[1].state, 'reduced_growth');
+
+  const environment = helper.buildCalendar({
+    cardType: 'environment',
+    timezone: 'UTC',
+    rows: [
+      { recorded_at: '2026-05-31T14:00:00.000Z', ambient_temperature: 36, relative_humidity: 40 },
+      { recorded_at: '2026-06-01T14:00:00.000Z', ambient_temperature: 21, relative_humidity: 91 },
+      { recorded_at: '2026-06-02T14:00:00.000Z', rain_mm_per_hour: 3 },
+    ],
+  });
+  assert.deepStrictEqual(environment.days.map((day) => day.state), ['heat_stress', 'high_humidity', 'rain_day']);
+
+  const irrigation = helper.buildCalendar({
+    cardType: 'irrigation',
+    timezone: 'UTC',
+    events: [
+      { t: '2026-05-31T06:00:00.000Z', type: 'irrigation', metadata: { durationMinutes: 20 } },
+      { t: '2026-06-01T06:00:00.000Z', type: 'manual_override', metadata: {} },
+      { t: '2026-06-02T06:00:00.000Z', type: 'irrigation', metadata: {} },
+      { t: '2026-06-02T08:00:00.000Z', type: 'irrigation', metadata: {} },
+      { t: '2026-06-02T10:00:00.000Z', type: 'irrigation', metadata: {} },
+    ],
+  });
+  assert.deepStrictEqual(irrigation.days.map((day) => day.state), [
+    'irrigation_event',
+    'manual_override',
+    'high_irrigation_frequency',
+  ]);
+});
+
+test('builds advanced diagnostics with collected, absent, unknown, and unsupported availability', () => {
+  const diagnostics = helper.buildAdvancedDiagnostics({
+    cardType: 'soil',
+    generatedAt: '2026-05-31T00:00:00.000Z',
+    sourceDevices: [
+      { deveui: 'aa-bb-cc-dd-ee-ff-00-11', type_id: 'KIWI_SENSOR', firmware_version: '1.2.3' },
+    ],
+    latestRows: [
+      {
+        recorded_at: '2026-05-31T00:00:00.000Z',
+        rssi: null,
+        snr: 7.5,
+      },
+    ],
+    collectedFields: ['rssi'],
+    rowCount: 5,
+    logicalSourceKey: 'root-zone',
+    gatewayEui: '0011223344556677',
+    calibrationStatus: null,
+  });
+
+  assert.strictEqual(diagnostics.placeholder.placeholder, true);
+  assert.strictEqual(diagnostics.fields.sourceDeviceCount.availability, 'collected');
+  assert.strictEqual(diagnostics.fields.primaryDeveui.availability, 'collected');
+  assert.strictEqual(diagnostics.fields.rssi.availability, 'collected');
+  assert.strictEqual(diagnostics.fields.rssi.value, null);
+  assert.strictEqual(diagnostics.fields.snr.availability, 'collected');
+  assert.strictEqual(diagnostics.fields.batteryVoltage.availability, 'not_collected_at_time');
+  assert.strictEqual(diagnostics.fields.rawPayload.availability, 'not_collected_at_time');
+  assert.strictEqual(diagnostics.fields.pendingCommands.availability, 'unsupported');
+  assert.strictEqual(diagnostics.fields.calibrationStatus.availability, 'unknown_now');
+
+  const gateway = helper.buildAdvancedDiagnostics({
+    cardType: 'gateway',
+    sourceDevices: [],
+    latestRows: [],
+    rowCount: 0,
+    pendingCommandCount: null,
+  });
+  assert.strictEqual(gateway.fields.primaryDeveui.availability, 'unknown_now');
+  assert.strictEqual(gateway.fields.pendingCommands.availability, 'unknown_now');
+  assert.strictEqual(gateway.fields.calibrationStatus.availability, 'unsupported');
+});
+
 test('builds deterministic local interpretations', () => {
   const interpretations = helper.buildLocalInterpretations({
     cardType: 'soil',
@@ -453,6 +569,7 @@ test('builds deterministic local interpretations', () => {
   for (const item of interpretations) {
     assert.strictEqual(item.source, 'local-rule');
     assert(item.titleKey && item.bodyKey, 'interpretation uses locale keys');
+    assert(!item.title && !item.body, 'interpretation prose stays in locale files');
     assert(!item.body || item.body.length < 120, 'structured output should not depend on long prose');
   }
 });
