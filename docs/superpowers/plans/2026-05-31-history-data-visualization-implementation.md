@@ -180,19 +180,19 @@ Please return blocking findings first, then non-blocking improvements.
 
 **Decisions to record:**
 
-- Card identity strategy: merged cards per theme or per-source cards.
-- Deterministic `logical_source_key` derivation.
-- Season model: add `zone_seasons` or hide Season until configured.
-- Edge helper packaging: existing `/usr/share/node-red/osi-*-helper` pattern or formal Node-RED contrib package.
-- Edge rollup strategy: `history_channel_rollups` table or on-the-fly helper aggregation using composite indexes only.
+- Card identity strategy: hybrid merged zone/theme cards except per-source Dendro cards.
+- Deterministic `logical_source_key` derivation: stable role keys, with Dendro allowed to use an opaque DevEUI-derived hash.
+- Season model: add `zone_seasons` and hide Season until a zone has configured active boundaries.
+- Edge helper packaging: existing `/usr/share/node-red/osi-*-helper` pattern, modeled on `osi-dendro-helper`.
+- Edge rollup strategy: `history_channel_rollups` for 30D and Season, with raw/composite-index reads limited to 12h, 24h, and 7D.
 - Cloud long-range aggregation: new typed hourly/daily rollups for measured card channels; existing daily tables are supplemental only.
-- Workspace/preference owner identity: edge `users.id` only, edge `users.user_uuid`, linked account UUID, or cloud-only owner.
-- Workspace/preference sync: local-only edge MVP or synced.
-- OSI OS comparison cap: 4 visible panels, fewer panels, or disabled by default.
-- Cloud Gateway Connectivity Timeline: persist heartbeat/status history in MVP or mark unavailable.
-- Coverage confidence enum: include `configured`, `derived`, `unknown`, or omit coverage when cadence is unknown.
-- i18n key prefix: use `history.card.*`, `history.calendar.*`, `history.interpretation.*`, and `history.workspace.*`, or choose a different prefix.
-- Critical alert ordering: critical alerts may override pinned cards or pinned cards always remain first.
+- Workspace/preference owner identity: edge `user_id` plus `owner_user_uuid` when available; cloud uses stable cloud user identity.
+- Workspace/preference sync: local-only edge MVP and cloud-owned cloud workspaces.
+- OSI OS comparison cap: 4 visible panels behind `historyComparisonEnabled`.
+- Cloud Gateway Connectivity Timeline: unavailable until heartbeat/status history persistence exists.
+- Coverage confidence enum: `configured`, `derived`, `unknown`.
+- i18n key prefix: `history.*`, with `history.card.*`, `history.calendar.*`, `history.interpretation.*`, and `history.workspace.*` sub-prefixes.
+- Critical alert ordering: pinned cards stay first; critical alerts rank first only among unpinned cards.
 
 Decision defaults if product owner is unreachable:
 
@@ -573,6 +573,8 @@ Use the correct profile path during implementation: `conf/full_raspberrypi_bcm27
 - `DELETE /api/history/workspaces/:id`
 - `PUT /api/history/zones/:zoneId/cards/:cardId/preferences`
 - `POST /api/history/zones/:zoneId/cards/:cardId/opened`
+- `PUT /api/history/gateways/:gatewayEui/cards/:cardId/preferences`
+- `POST /api/history/gateways/:gatewayEui/cards/:cardId/opened`
 - `GET /api/system/features`
 
 **API behavior:**
@@ -582,7 +584,7 @@ Use the correct profile path during implementation: `conf/full_raspberrypi_bcm27
 - Return 400 for unsupported range/view/aggregation.
 - Return 404 for inaccessible or unknown zones/cards.
 - Include `limits`, `freshness`, `timezone`, and `syncState`.
-- Keep edge workspaces local-only unless Slice 0 selected sync.
+- Keep edge workspaces local-only for MVP; do not emit sync outbox events for workspace or preference writes.
 
 Feature flag response:
 
@@ -1072,7 +1074,7 @@ git commit -m "feat(history): add cloud calendar and advanced views"
 
 **Repos:** `osi-os`, `osi-server`.
 
-**Context:** Edge preferences/workspaces are local-only unless Slice 0 selected sync. Comparison is stacked panels with shared x-axis and must enforce the panel caps from the spec.
+**Context:** Edge preferences/workspaces are local-only for MVP. Comparison is stacked panels with shared x-axis and must enforce the panel caps from the spec.
 
 Ordering behavior:
 

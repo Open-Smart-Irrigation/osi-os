@@ -27,17 +27,17 @@ This document is a technical implementation specification. It intentionally does
 
 The companion review findings are incorporated as hard implementation constraints, not as optional polish:
 
-- Cloud aggregation cannot rely on live JSONB scans for 30D, Season, or multi-season views. MVP must include typed hourly/daily history rollups for measured card channels; existing daily tables are supplemental only.
-- Edge aggregation cannot assume cheap timestamp bucket math over `device_data.recorded_at` because it is stored as TEXT. MVP must add composite indexes and precomputed rollups for long ranges.
+- Cloud aggregation cannot rely on live JSONB scans for 30D, Season, or multi-season views. MVP must include new typed hourly/daily history rollups; existing precomputed daily tables are supplemental only.
+- Edge aggregation cannot assume cheap timestamp bucket math over `device_data.recorded_at` because it is stored as TEXT. MVP must add composite indexes and use `history_channel_rollups` for 30D and Season.
 - The edge history helper must be a concrete bundled Node-RED helper module with packaging, parity checks, and tests. It must not be left as a vague "helper" idea.
-- `range=season` requires a season data model. If a season model is not accepted, Season must be removed from MVP rather than inferred inconsistently.
-- Card identity for multi-source themes is a P1 product/data-model decision. Frontend/API work should not begin until merged-vs-per-source card identity is resolved.
+- `range=season` requires a `zone_seasons` data model. Season remains hidden for a zone until that zone has active boundaries.
+- Card identity uses the accepted hybrid strategy: merged cards per zone/theme except Dendro cards, which are per logical source.
 - Workspace and preference identity must be sync-safe. Local autoincrement IDs are acceptable for local-only edge storage, but any future sync path must use stable UUID identifiers.
-- Basic comparison on OSI OS is required by the UX target, but it must be panel-capped, feature-gated, and validated on Pi-served mobile/desktop browsers before becoming default.
+- Basic comparison on OSI OS is required by the UX target, but it must stay behind `historyComparisonEnabled`, capped at 4 visible panels, and validated on Pi-served mobile/desktop browsers before broader rollout.
 
-### 1.2 Accepted Implementation Decisions
+### 1.2 Accepted implementation decisions
 
-The product owner was unavailable during Slice 0 execution, so the implementation plan defaults are accepted unless explicitly superseded by a later decision record.
+Slice 0 uses the default decision path because the product owner is unavailable. These decisions are accepted implementation behavior for downstream slices:
 
 Decision: card-key strategy = hybrid-zone-merged-except-dendro-per-source
 Decision: logical-source-key derivation = zone_uuid + card_type + stable role, with raw DevEUI only inside backend/advanced metadata; Dendro may use an opaque DevEUI-derived hash
@@ -373,14 +373,14 @@ Recommended frontend files:
 
 Recommended backend modules:
 
-- Edge: Node-RED endpoints in `flows.json`, with heavy aggregation/interpretation delegated to a static helper module bundled into the image.
+- Edge: Node-RED endpoints in `flows.json`, with heavy aggregation/interpretation delegated to a static helper module bundled into the image using the existing `/usr/share/node-red/osi-*-helper` pattern.
 - Cloud: a new Spring package such as `org.osi.server.history`.
 
 Edge helper packaging requirement:
 
 - Create `conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-history-helper/`.
 - Mirror it to `conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/node-red/osi-history-helper/`.
-- Use the existing helper-module pattern already used by `osi-db-helper`, `osi-dendro-helper`, `osi-chameleon-helper`, and `osi-cloud-http`.
+- Use the existing helper-module pattern already used by `osi-dendro-helper`, `osi-db-helper`, `osi-chameleon-helper`, and `osi-cloud-http`; `osi-dendro-helper` is the implementation model.
 - Load the helper from Node-RED function-node `libs` entries, not by expanding large business logic blocks in `flows.json`.
 - Keep `feeds/chirpstack-openwrt-feed/apps/node-red/files/settings.js` changes minimal. `functionExternalModules` is already enabled.
 - Extend `scripts/verify-profile-parity.js` coverage if helper directories are not already included by the payload parity check.
@@ -469,7 +469,7 @@ Card key derivation requirement:
 - For Dendro per-source cards, derive the `logical_source_key` as `dendro-src-{sha256(normalized_deveui).slice(0, 12)}`, where `normalized_deveui` is the uppercase 16-character hex DevEUI after removing separators.
 - The raw DevEUI must not appear in normal UI, routes, logs intended for farmer inspection, or workspace labels. Advanced View may map the opaque key back to raw DevEUI.
 - Card IDs must survive device rename, zone rename, sync replay, and cloud mirror import.
-- Frontend route state, workspace persistence, and preference persistence may use this accepted hybrid strategy.
+- Frontend route state, workspace persistence, and preference persistence must use this accepted hybrid strategy.
 
 ### 4.4 Required MVP cards
 
@@ -710,6 +710,7 @@ Response shape:
     "level": "raw",
     "bucketSizeSeconds": null,
     "coveragePct": 94,
+    "coverageConfidence": "configured",
     "pointCount": 322,
     "dominantStatusMethod": "soil-status-priority"
   },
@@ -755,6 +756,7 @@ Series point shape:
   "dominantStatus": "optimal",
   "dominantStatusMethod": "soil-status-priority",
   "coveragePct": 100,
+  "coverageConfidence": "configured",
   "count": 3,
   "unit": "kPa",
   "quality": "ok"
@@ -1093,6 +1095,7 @@ Implementation rule:
 - Calendar state, visualization color state, and interpretation text must call the same threshold classifier.
 - Frontend may render labels and colors, but it must not reimplement agronomic thresholds.
 - i18n strings for states and interpretations must live in locale files, not hardcoded English component text.
+- History locale keys must use the `history.*` prefix. Expected sub-prefixes include `history.card.*`, `history.calendar.*`, `history.interpretation.*`, and `history.workspace.*`.
 
 ### 4.11 Cloud interpretation extensions
 
@@ -1186,7 +1189,8 @@ Workspace lifecycle:
 - Missing cards should be retained in the saved JSON but rendered as unavailable panels with a repair/remove action.
 - Deleted zones should make the workspace unavailable rather than silently retargeting it.
 - Shared cloud workspaces must verify zone access at read time; if access is revoked, the API should return 403 for private data and a workspace-level unavailable state.
-- Edge workspaces are local-only for MVP unless sync-safe identity and sync resources are explicitly designed.
+- Edge workspaces are local-only for MVP.
+- Edge workspace records must use `user_id` for local access checks and store `owner_user_uuid` from `users.user_uuid` when available for future migration safety.
 
 ### 4.13 Saved workspace schema
 
@@ -1235,11 +1239,10 @@ CREATE TABLE history_workspace_shares (
 );
 ```
 
-Accepted Slice 0 decision:
+Accepted sync behavior:
 
-- Edge workspaces remain local-only for MVP.
-- Cloud workspaces are cloud-owned.
-- Workspace sync requires a later decision record and sync-schema design before implementation.
+- Edge workspaces and card preferences are local-only in MVP and do not emit sync outbox events.
+- Cloud workspaces are cloud-owned and may be saved/shared through cloud APIs without changing edge workspace state.
 
 ### 4.14 Learned ordering and pinning schema
 
@@ -1249,7 +1252,9 @@ Edge SQLite table:
 CREATE TABLE history_card_preferences (
   user_id INTEGER NOT NULL,
   owner_user_uuid TEXT,
-  zone_id INTEGER NOT NULL,
+  scope_type TEXT NOT NULL CHECK (scope_type IN ('zone', 'gateway')),
+  zone_id INTEGER,
+  gateway_eui TEXT,
   card_id TEXT NOT NULL,
   pinned INTEGER NOT NULL DEFAULT 0,
   manual_order INTEGER,
@@ -1258,8 +1263,19 @@ CREATE TABLE history_card_preferences (
   last_view_mode TEXT,
   hidden INTEGER NOT NULL DEFAULT 0,
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  PRIMARY KEY (user_id, zone_id, card_id)
+  CHECK (
+    (scope_type = 'zone' AND zone_id IS NOT NULL AND gateway_eui IS NULL) OR
+    (scope_type = 'gateway' AND gateway_eui IS NOT NULL AND zone_id IS NULL)
+  )
 );
+
+CREATE UNIQUE INDEX idx_history_card_preferences_zone
+  ON history_card_preferences(user_id, zone_id, card_id)
+  WHERE scope_type = 'zone';
+
+CREATE UNIQUE INDEX idx_history_card_preferences_gateway
+  ON history_card_preferences(user_id, gateway_eui, card_id)
+  WHERE scope_type = 'gateway';
 ```
 
 Cloud PostgreSQL equivalent:
@@ -1267,7 +1283,9 @@ Cloud PostgreSQL equivalent:
 ```sql
 CREATE TABLE history_card_preferences (
   user_id BIGINT NOT NULL REFERENCES users(id),
-  zone_id BIGINT NOT NULL REFERENCES irrigation_zones(id),
+  scope_type TEXT NOT NULL CHECK (scope_type IN ('zone', 'gateway')),
+  zone_id BIGINT REFERENCES irrigation_zones(id),
+  gateway_eui TEXT,
   card_id TEXT NOT NULL,
   pinned BOOLEAN NOT NULL DEFAULT FALSE,
   manual_order INTEGER,
@@ -1276,17 +1294,28 @@ CREATE TABLE history_card_preferences (
   last_view_mode TEXT,
   hidden BOOLEAN NOT NULL DEFAULT FALSE,
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-  PRIMARY KEY (user_id, zone_id, card_id)
+  CHECK (
+    (scope_type = 'zone' AND zone_id IS NOT NULL AND gateway_eui IS NULL) OR
+    (scope_type = 'gateway' AND gateway_eui IS NOT NULL AND zone_id IS NULL)
+  )
 );
+
+CREATE UNIQUE INDEX idx_history_card_preferences_zone
+  ON history_card_preferences(user_id, zone_id, card_id)
+  WHERE scope_type = 'zone';
+
+CREATE UNIQUE INDEX idx_history_card_preferences_gateway
+  ON history_card_preferences(user_id, gateway_eui, card_id)
+  WHERE scope_type = 'gateway';
 ```
 
 Ordering algorithm:
 
 1. Pinned cards first.
-2. Critical alerting cards may rise above unpinned cards.
+2. Critical alerting cards rank first only among unpinned cards.
 3. Manual order is respected inside pinned and unpinned groups.
 4. Frequently opened cards move earlier.
-5. Recently opened cards are remembered per zone.
+5. Recently opened cards are remembered per scope: zone for Soil/Dendro/Environment/Irrigation and gateway for Gateway.
 6. New cards appear after high-use cards until usage exists.
 
 Suggested score:
@@ -1762,6 +1791,7 @@ Expected cadence derivation:
 - Store the derived value in a helper-owned cadence cache or return it in aggregation metadata.
 - Mark coverage confidence as `configured`, `derived`, or `unknown`.
 - If cadence is unknown, return `coveragePct: null` and an interpretation explaining that coverage could not be scored.
+- Card data responses must expose the coverage confidence enum alongside coverage percentage.
 
 Dominant status:
 
@@ -1859,18 +1889,24 @@ Edge:
 
 - `PUT /api/history/zones/:zoneId/cards/:cardId/preferences`
 - `POST /api/history/zones/:zoneId/cards/:cardId/opened`
+- `PUT /api/history/gateways/:gatewayEui/cards/:cardId/preferences`
+- `POST /api/history/gateways/:gatewayEui/cards/:cardId/opened`
 
 Cloud:
 
 - `PUT /api/v1/history/zones/:zoneId/cards/:cardId/preferences`
 - `POST /api/v1/history/zones/:zoneId/cards/:cardId/opened`
+- `PUT /api/v1/history/gateways/:gatewayEui/cards/:cardId/preferences`
+- `POST /api/v1/history/gateways/:gatewayEui/cards/:cardId/opened`
+
+Zone endpoints are valid only for Soil, Dendro, Environment, and Irrigation cards. Gateway preference and open-count writes must use gateway endpoints so the hub-scoped Gateway Card does not depend on an arbitrary selected zone.
 
 ### 6.9 Sync considerations
 
 MVP recommendation:
 
 - Do not change edge/cloud sync contracts for card definitions. Cards are derived from existing synced resources.
-- Keep edge workspaces/preferences local-only unless product requires roaming preferences.
+- Keep edge workspaces/preferences local-only for MVP.
 - Keep cloud workspaces/preferences cloud-owned.
 - Preserve the edge invariant that operational state mutations are explicit. If workspace/preference mutations are not synced, document them as local UI state and do not emit sync outbox events for them.
 

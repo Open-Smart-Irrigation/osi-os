@@ -140,7 +140,9 @@ Edge:
 - `GET /api/history/gateways/:gatewayEui/cards`
 - `GET /api/history/gateways/:gatewayEui/cards/:cardId/data`
 - `GET /api/history/gateways/:gatewayEui/cards/:cardId/advanced`
-- workspace and preference endpoints
+- workspace endpoints
+- zone-scoped preference/opened endpoints for Soil, Dendro, Environment, and Irrigation
+- gateway-scoped preference/opened endpoints for Gateway
 
 Cloud:
 
