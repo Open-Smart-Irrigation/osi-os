@@ -48,6 +48,7 @@ const { translateForTest } = vi.hoisted(() => {
     'history.cardFrame.viewModes': '{{title}} view modes',
     'history.cardFrame.unavailable': 'This card is not available for the selected zone.',
     'history.cardFrame.timelineBrush': 'Timeline viewport',
+    'history.cardFrame.timelineBrushKeyboardHelp': 'Use arrow keys to pan, plus or minus to zoom, and Home or Enter to reset.',
     'history.cardFrame.aggregationBadge': 'Aggregation: {{aggregation}}',
     'history.cardFrame.placeholderBody': 'Chart and calendar data will load here when card data APIs are enabled.',
     'history.cardType.soil': 'Soil',

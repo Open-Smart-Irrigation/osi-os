@@ -50,6 +50,7 @@
       "viewModes": "{{title}} view modes",
       "unavailable": "This card is not available for the selected zone.",
       "timelineBrush": "Timeline viewport",
+      "timelineBrushKeyboardHelp": "Use arrow keys to pan, plus or minus to zoom, and Home or Enter to reset.",
       "aggregationBadge": "Aggregation: {{aggregation}}",
       "placeholderBody": "Chart and calendar data will load here when card data APIs are enabled."
     },

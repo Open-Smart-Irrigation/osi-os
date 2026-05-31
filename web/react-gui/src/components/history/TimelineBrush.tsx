@@ -1,5 +1,10 @@
-import React, { useRef } from 'react';
-import { createDefaultTimeViewport, zoomTimeViewport, type HistoryTimeViewport } from '../../history/useTimeViewport';
+import React, { useId, useRef } from 'react';
+import {
+  createDefaultTimeViewport,
+  panTimeViewport,
+  zoomTimeViewport,
+  type HistoryTimeViewport,
+} from '../../history/useTimeViewport';
 import type { HistoryRangeLabel } from '../../history/types';
 
 interface TimelineBrushProps {
@@ -7,6 +12,7 @@ interface TimelineBrushProps {
   defaultRange: HistoryRangeLabel;
   onViewportChange: (viewport: HistoryTimeViewport) => void;
   ariaLabel: string;
+  keyboardHelp?: string;
 }
 
 function formatBrushLabel(viewport: HistoryTimeViewport): string {
@@ -20,22 +26,51 @@ export const TimelineBrush: React.FC<TimelineBrushProps> = ({
   defaultRange,
   onViewportChange,
   ariaLabel,
+  keyboardHelp,
 }) => {
   const lastTapAt = useRef<number>(0);
+  const keyboardHelpId = useId();
 
   const reset = () => {
     onViewportChange(createDefaultTimeViewport(defaultRange, new Date(), viewport.range.timezone));
+  };
+
+  const handleKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
+    if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
+      event.preventDefault();
+      onViewportChange(panTimeViewport(viewport, event.key === 'ArrowLeft' ? 'left' : 'right'));
+      return;
+    }
+
+    if (event.key === '+' || event.key === '=') {
+      event.preventDefault();
+      onViewportChange(zoomTimeViewport(viewport, -1));
+      return;
+    }
+
+    if (event.key === '-' || event.key === '_') {
+      event.preventDefault();
+      onViewportChange(zoomTimeViewport(viewport, 1));
+      return;
+    }
+
+    if (event.key === 'Home' || event.key === 'Enter') {
+      event.preventDefault();
+      reset();
+    }
   };
 
   return (
     <div
       role="region"
       aria-label={ariaLabel}
+      aria-describedby={keyboardHelp ? keyboardHelpId : undefined}
       tabIndex={0}
       onWheel={(event) => {
         event.preventDefault();
         onViewportChange(zoomTimeViewport(viewport, event.deltaY));
       }}
+      onKeyDown={handleKeyDown}
       onDoubleClick={reset}
       onTouchEnd={() => {
         const now = Date.now();
@@ -53,6 +88,11 @@ export const TimelineBrush: React.FC<TimelineBrushProps> = ({
         <span>{formatBrushLabel(viewport)}</span>
         <span>{viewport.range.label}</span>
       </div>
+      {keyboardHelp && (
+        <p id={keyboardHelpId} className="sr-only">
+          {keyboardHelp}
+        </p>
+      )}
     </div>
   );
 };

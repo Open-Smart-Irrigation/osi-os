@@ -6,6 +6,7 @@ const HOUR_MS = 60 * 60 * 1000;
 const DAY_MS = 24 * HOUR_MS;
 const MIN_VIEWPORT_MS = HOUR_MS;
 const MAX_VIEWPORT_MS = 366 * DAY_MS;
+const PAN_FRACTION = 0.25;
 
 const RANGE_DURATIONS_MS: Record<HistoryRangeLabel, number> = {
   '12h': 12 * HOUR_MS,
@@ -25,15 +26,43 @@ function clampDuration(durationMs: number): number {
   return Math.min(Math.max(durationMs, MIN_VIEWPORT_MS), MAX_VIEWPORT_MS);
 }
 
-function aggregationForDuration(durationMs: number): HistoryAggregationLevel {
-  if (durationMs <= 24 * HOUR_MS) return 'raw';
-  if (durationMs <= 7 * DAY_MS) return 'hourly';
-  if (durationMs <= 30 * DAY_MS) return 'daily';
-  return 'weekly';
-}
-
 function timezoneForBrowser(): string {
   return Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+}
+
+function parseViewportRange(viewport: HistoryTimeViewport): { fromMs: number; toMs: number; durationMs: number } | null {
+  const fromMs = viewport.range.from ? Date.parse(viewport.range.from) : NaN;
+  const toMs = viewport.range.to ? Date.parse(viewport.range.to) : NaN;
+  if (!Number.isFinite(fromMs) || !Number.isFinite(toMs) || toMs <= fromMs) return null;
+  return { fromMs, toMs, durationMs: toMs - fromMs };
+}
+
+function clampRangeToCurrentBoundary(fromMs: number, durationMs: number): { fromMs: number; toMs: number } {
+  const nowMs = Date.now();
+  const toMs = fromMs + durationMs;
+  if (Number.isFinite(nowMs) && toMs > nowMs) {
+    return { fromMs: nowMs - durationMs, toMs: nowMs };
+  }
+  return { fromMs, toMs };
+}
+
+function customViewport(
+  viewport: HistoryTimeViewport,
+  fromMs: number,
+  durationMs: number,
+): HistoryTimeViewport {
+  const range = clampRangeToCurrentBoundary(fromMs, durationMs);
+
+  return {
+    range: {
+      mode: 'absolute',
+      label: 'custom',
+      from: new Date(range.fromMs).toISOString(),
+      to: new Date(range.toMs).toISOString(),
+      timezone: viewport.range.timezone,
+    },
+    aggregation: 'auto',
+  };
 }
 
 export function createDefaultTimeViewport(
@@ -57,26 +86,22 @@ export function createDefaultTimeViewport(
 }
 
 export function zoomTimeViewport(viewport: HistoryTimeViewport, deltaY: number): HistoryTimeViewport {
-  const fromMs = viewport.range.from ? Date.parse(viewport.range.from) : NaN;
-  const toMs = viewport.range.to ? Date.parse(viewport.range.to) : NaN;
-  if (!Number.isFinite(fromMs) || !Number.isFinite(toMs) || toMs <= fromMs) return viewport;
+  const parsedRange = parseViewportRange(viewport);
+  if (!parsedRange) return viewport;
 
-  const currentDurationMs = toMs - fromMs;
+  const { fromMs, durationMs: currentDurationMs } = parsedRange;
   const nextDurationMs = clampDuration(currentDurationMs * (deltaY < 0 ? 0.5 : 2));
   const midpointMs = fromMs + currentDurationMs / 2;
   const nextFromMs = midpointMs - nextDurationMs / 2;
-  const nextToMs = midpointMs + nextDurationMs / 2;
+  return customViewport(viewport, nextFromMs, nextDurationMs);
+}
 
-  return {
-    range: {
-      mode: 'absolute',
-      label: 'custom',
-      from: new Date(nextFromMs).toISOString(),
-      to: new Date(nextToMs).toISOString(),
-      timezone: viewport.range.timezone,
-    },
-    aggregation: aggregationForDuration(nextDurationMs),
-  };
+export function panTimeViewport(viewport: HistoryTimeViewport, direction: 'left' | 'right'): HistoryTimeViewport {
+  const parsedRange = parseViewportRange(viewport);
+  if (!parsedRange) return viewport;
+
+  const offsetMs = parsedRange.durationMs * PAN_FRACTION * (direction === 'left' ? -1 : 1);
+  return customViewport(viewport, parsedRange.fromMs + offsetMs, parsedRange.durationMs);
 }
 
 export function useTimeViewport(defaultRange: HistoryRangeLabel, resetKey: string = defaultRange) {

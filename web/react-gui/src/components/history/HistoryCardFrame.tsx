@@ -138,6 +138,7 @@ export const HistoryCardFrame: React.FC<HistoryCardFrameProps> = ({ card, scope 
           defaultRange={card.defaultRange}
           onViewportChange={setViewport}
           ariaLabel={t('history.cardFrame.timelineBrush')}
+          keyboardHelp={t('history.cardFrame.timelineBrushKeyboardHelp')}
         />
 
         <div className="mt-4 rounded-lg border border-dashed border-[var(--border)] bg-[var(--bg)] p-6">
