@@ -7,6 +7,7 @@ const path = require('path');
 const repoRoot = path.resolve(__dirname, '..');
 
 const seedDatabasePaths = [
+  'conf/base_raspberrypi_bcm27xx_bcm2709/files/usr/share/db/farming.db',
   'conf/base_raspberrypi_bcm27xx_bcm2712/files/usr/share/db/farming.db',
   'conf/full_raspberrypi_bcm27xx_bcm2708/files/usr/share/db/farming.db',
   'conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/db/farming.db',
@@ -170,12 +171,96 @@ const schemaContract = {
   chameleon_calibration_misses: [
     'array_id', 'last_tried', 'reason',
   ],
+  zone_seasons: [
+    'id',
+    'zone_id',
+    'season_uuid',
+    'name',
+    'starts_on',
+    'ends_on',
+    'crop_type',
+    'variety',
+    'phenological_stage',
+    'is_active',
+    'is_default',
+    'created_at',
+    'updated_at',
+  ],
+  history_channel_rollups: [
+    'id',
+    'zone_id',
+    'card_type',
+    'logical_source_key',
+    'channel_id',
+    'bucket_level',
+    'bucket_start',
+    'bucket_end',
+    'min_value',
+    'max_value',
+    'mean_value',
+    'median_value',
+    'latest_value',
+    'dominant_status',
+    'coverage_pct',
+    'coverage_confidence',
+    'sample_count',
+    'event_count',
+    'threshold_crossing_count',
+    'unit',
+    'computed_at',
+  ],
+  history_card_preferences: [
+    'user_id',
+    'owner_user_uuid',
+    'scope_type',
+    'zone_id',
+    'gateway_eui',
+    'card_id',
+    'pinned',
+    'manual_order',
+    'open_count',
+    'last_opened_at',
+    'last_view_mode',
+    'hidden',
+    'updated_at',
+  ],
+  history_workspaces: [
+    'id',
+    'user_id',
+    'owner_user_uuid',
+    'zone_id',
+    'name',
+    'workspace_json',
+    'is_default',
+    'created_at',
+    'updated_at',
+  ],
 };
 
 const requiredIndexes = {
+  device_data: ['idx_device_data_deveui_recorded_at'],
   dendrometer_readings: ['idx_dendro_readings_deveui_time'],
   chameleon_readings: ['idx_chameleon_readings_deveui_time', 'idx_chameleon_readings_array_id'],
   chameleon_calibrations: ['idx_chameleon_calibrations_sensor_id'],
+  zone_seasons: [
+    'idx_zone_seasons_zone_range',
+    'idx_zone_seasons_zone_active',
+    'idx_zone_seasons_zone_default',
+    'idx_zone_seasons_uuid',
+  ],
+  history_channel_rollups: [
+    'idx_history_rollups_zone_card_bucket',
+    'idx_history_rollups_source_channel',
+    'idx_history_rollups_unique_bucket',
+  ],
+  history_card_preferences: [
+    'idx_history_card_preferences_zone',
+    'idx_history_card_preferences_gateway',
+  ],
+  history_workspaces: [
+    'idx_history_workspaces_user_zone',
+    'idx_history_workspaces_user_default',
+  ],
 };
 
 function sqlite(dbPath, sql) {
@@ -223,6 +308,17 @@ function verifyDb(dbPath) {
     if (missing.length) {
       throw new Error(`${dbPath}:${tableName} missing indexes: ${missing.join(',')}`);
     }
+  }
+  const historyQueryPlan = sqlite(
+    dbPath,
+    `EXPLAIN QUERY PLAN
+     SELECT *
+     FROM device_data
+     WHERE deveui IN ('0016C001F11715E2', '0016C001F11715E3', '0016C001F11715E4')
+       AND recorded_at BETWEEN '2026-01-01T00:00:00Z' AND '2026-01-31T23:59:59Z';`,
+  );
+  if (!historyQueryPlan.includes('idx_device_data_deveui_recorded_at')) {
+    throw new Error(`${dbPath}: history raw query did not use idx_device_data_deveui_recorded_at: ${historyQueryPlan}`);
   }
 }
 
