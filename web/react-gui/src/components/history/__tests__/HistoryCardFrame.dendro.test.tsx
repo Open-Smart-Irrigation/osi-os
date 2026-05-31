@@ -44,6 +44,7 @@ const { translateForTest } = vi.hoisted(() => {
     'history.dendroTimeline.emptyTitle': 'No dendrometer timeline data',
     'history.dendroTimeline.emptyBody': 'Dendrometer readings will appear here when history data is available.',
     'history.dendroTimeline.eventsTitle': 'Timeline events',
+    'history.dendroTimeline.eventFallback': 'Dendrometer event',
     'history.dendroTimeline.noEvents': 'No events in this range',
     'history.dendroTimeline.pointsCount': '{{count}} readings',
     'history.dendroTimeline.series.stemChange': 'Stem change',
@@ -216,6 +217,7 @@ describe('HistoryCardFrame Dendro growth timeline', () => {
         id: 'dendro-src-A84041FFFF123456-stem-change',
         label: 'A84041FFFF123456',
         unit: 'um',
+        points: null,
       },
       {
         id: 'bad',
@@ -237,6 +239,38 @@ describe('HistoryCardFrame Dendro growth timeline', () => {
     expect(screen.queryByText(/raw_label/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/undefined/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/NaN/i)).not.toBeInTheDocument();
+  });
+
+  it('sanitizes sparse dendrometer events before rendering', () => {
+    cardData.current = historyData({
+      events: [
+        null,
+        {
+          id: 'evt-raw',
+          type: 'dendro_stress_window',
+          t: '2026-05-30T12:00:00Z',
+          label: 'dendro-src-A84041FFFF123456-growth',
+          severity: 'warning',
+          metadata: { sourceDeviceEui: 'A84041FFFF123456' },
+        },
+        {
+          id: 'evt-invalid-time',
+          type: 'dendro_stress_window',
+          t: 'A84041FFFF123456',
+          label: 'Raw invalid time',
+          severity: 'warning',
+          metadata: {},
+        },
+      ] as unknown as HistoryCardDataResponse<'dendro'>['events'],
+    });
+
+    render(<HistoryCardFrame card={dendroCard()} scope={{ type: 'zone', zoneId: 1 }} />);
+
+    const timeline = screen.getByRole('region', { name: 'Growth timeline' });
+    expect(within(timeline).getByText('Dendrometer event')).toBeInTheDocument();
+    expect(screen.queryByText(/dendro-src-/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/A84041FFFF123456/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Raw invalid time/i)).not.toBeInTheDocument();
   });
 
   it('keeps non-dendro cards on the existing placeholder surface', () => {

@@ -35,6 +35,12 @@ type RenderSeries = {
   unit: string;
   points: RenderPoint[];
 };
+type RenderEvent = {
+  key: string;
+  t: string;
+  label: string;
+  severity: HistoryEvent['severity'];
+};
 
 const SERIES_COLORS = ['#047857', '#0f766e', '#b45309', '#2563eb'];
 
@@ -163,7 +169,34 @@ function buildRows(seriesList: RenderSeries[]): ChartRow[] {
   return [...rows.values()].sort((left, right) => left.timestamp.localeCompare(right.timestamp));
 }
 
-function eventTone(event: HistoryEvent): string {
+function normalizeSeverity(value: unknown): HistoryEvent['severity'] {
+  if (value === 'info' || value === 'warning' || value === 'critical' || value === 'success') return value;
+  return 'unknown';
+}
+
+function displayEventLabel(t: HistoryTranslate, event: unknown): string {
+  const label = normalizedText(isRecord(event) ? event.label : null);
+  if (label && !looksLikeRawSourceToken(label)) return label;
+  return t('history.dendroTimeline.eventFallback');
+}
+
+function normalizeEvents(t: HistoryTranslate, events: unknown): RenderEvent[] {
+  if (!Array.isArray(events)) return [];
+  return events.reduce<RenderEvent[]>((accumulator, event, index) => {
+    if (!isRecord(event)) return accumulator;
+    const timestamp = validTimestamp(event.t);
+    if (!timestamp) return accumulator;
+    accumulator.push({
+      key: normalizedText(event.id) ?? `dendro-event-${index}`,
+      t: timestamp,
+      label: displayEventLabel(t, event),
+      severity: normalizeSeverity(event.severity),
+    });
+    return accumulator;
+  }, []);
+}
+
+function eventTone(event: RenderEvent): string {
   if (event.severity === 'warning') return 'border-amber-300 bg-amber-50 text-amber-900';
   if (event.severity === 'critical') return 'border-red-300 bg-red-50 text-red-900';
   if (event.severity === 'success') return 'border-emerald-300 bg-emerald-50 text-emerald-900';
@@ -176,7 +209,7 @@ export const DendroGrowthTimelineView: React.FC<DendroGrowthTimelineViewProps> =
   const rawSeries = Array.isArray(data?.series) ? data.series : [];
   const visibleSeries = normalizeSeriesList(t, rawSeries).filter(hasVisiblePoints);
   const rows = buildRows(visibleSeries);
-  const events = data?.events ?? [];
+  const events = normalizeEvents(t, data?.events);
 
   if (visibleSeries.length === 0 || rows.length === 0) {
     return (
@@ -237,7 +270,7 @@ export const DendroGrowthTimelineView: React.FC<DendroGrowthTimelineViewProps> =
             <YAxis width={44} />
             <Tooltip labelFormatter={(value) => formatTimestamp(String(value))} />
             {events.map((event) => (
-              <ReferenceLine key={event.id} x={event.t} stroke="#b45309" strokeDasharray="4 4" />
+              <ReferenceLine key={event.key} x={event.t} stroke="#b45309" strokeDasharray="4 4" />
             ))}
             {visibleSeries.map((series, index) => (
               <Line
@@ -263,7 +296,7 @@ export const DendroGrowthTimelineView: React.FC<DendroGrowthTimelineViewProps> =
           <ol className="mt-2 space-y-2">
             {events.map((event) => (
               <li
-                key={event.id}
+                key={event.key}
                 className={`rounded-md border px-3 py-2 text-sm ${eventTone(event)}`}
               >
                 <span className="font-semibold">{event.label}</span>
