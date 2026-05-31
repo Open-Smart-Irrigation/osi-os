@@ -266,10 +266,52 @@ const requiredIndexes = {
 };
 
 const requiredIndexSqlFragments = {
+  idx_device_data_deveui_recorded_at: [
+    'on device_data(deveui, recorded_at)',
+  ],
+  idx_zone_seasons_zone_range: [
+    'on zone_seasons(zone_id, starts_on, ends_on)',
+  ],
+  idx_zone_seasons_zone_active: [
+    'on zone_seasons(zone_id, is_active, starts_on, ends_on)',
+  ],
   idx_zone_seasons_zone_active_unique: [
     'unique index',
     'on zone_seasons(zone_id)',
     'where is_active = 1',
+  ],
+  idx_zone_seasons_zone_default: [
+    'unique index',
+    'on zone_seasons(zone_id)',
+    'where is_default = 1',
+  ],
+  idx_zone_seasons_uuid: [
+    'unique index',
+    'on zone_seasons(season_uuid)',
+    'where season_uuid is not null',
+  ],
+  idx_history_rollups_unique_bucket: [
+    'unique index',
+    'on history_channel_rollups(zone_id, card_type, logical_source_key, channel_id, bucket_level, bucket_start)',
+  ],
+  idx_history_rollups_zone_card_bucket: [
+    'on history_channel_rollups(zone_id, card_type, bucket_level, bucket_start, bucket_end)',
+  ],
+  idx_history_rollups_source_channel: [
+    'on history_channel_rollups(logical_source_key, channel_id, bucket_level, bucket_start)',
+  ],
+  idx_history_card_preferences_zone: [
+    'unique index',
+    'on history_card_preferences(user_id, zone_id, card_id)',
+    "where scope_type = 'zone'",
+  ],
+  idx_history_card_preferences_gateway: [
+    'unique index',
+    'on history_card_preferences(user_id, gateway_eui, card_id)',
+    "where scope_type = 'gateway'",
+  ],
+  idx_history_workspaces_user_zone: [
+    'on history_workspaces(user_id, zone_id)',
   ],
   idx_history_workspaces_user_default: [
     'unique index',
