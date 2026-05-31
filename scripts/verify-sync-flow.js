@@ -3269,6 +3269,11 @@ function assertCommandRegistry(flows) {
     console.log('  ok Command Type Registry node present with required entries');
 }
 
+// --- Build Heartbeat: fan_available + hwmon ---
+expectIncludesById('062a0f9bf66d9789', 'fan_available:', 'heartbeat payload includes fan_available field');
+expectIncludesById('062a0f9bf66d9789', '/sys/class/hwmon', 'heartbeat reads fan via hwmon sysfs');
+expectExcludesById('062a0f9bf66d9789', '/sys/class/pwm/pwmchip2', 'heartbeat no longer uses raw PWM sysfs');
+
 Promise.all(pendingChecks).finally(() => {
   if (!process.exitCode) {
     console.log('Sync flow verification passed');
