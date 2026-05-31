@@ -248,7 +248,7 @@ Adjust commands to the actual package scripts before implementation.
 
 Priority 1:
 
-- Should any Slice 0 accepted default be overridden before implementation starts?
+- No remaining Priority 1 blockers after Slice 0. Accepted defaults in the redesign spec are the implementation baseline unless a later decision record supersedes them.
 
 Priority 2:
 

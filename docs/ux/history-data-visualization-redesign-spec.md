@@ -450,18 +450,19 @@ Examples:
 
 The API may include source devices only in the Advanced View contract or in backend-only metadata. Normal card summaries should not display DevEUI, raw channel IDs, firmware, RSSI, SNR, calibration details, or raw payload data.
 
-Open design decision:
+Accepted Slice 0 strategy:
 
-- If a zone has multiple same-theme sources, the product must decide whether to show one merged card per theme or one card per logical source. See the Grill Me section.
+- Use merged zone cards for Soil, Environment, Irrigation, and Gateway.
+- Use per-source Dendro cards so multiple monitored stems/trees can stay inspectable without exposing DevEUI in the normal farmer UI.
 
 Card key derivation requirement:
 
 - The `logical_source_key` must be deterministic on both edge and cloud.
-- If the product chooses merged cards, use fixed keys per zone/theme such as `root-zone`, `microclimate`, `zone-valves`, and merge all eligible sources behind the card.
-- If the product chooses per-source cards, derive keys from a stable logical source record, not display names. Acceptable inputs are `zone_uuid`, source role, stable source ordinal, Chameleon `array_id`, and DevEUI as an opaque backend key.
+- For merged cards, use fixed keys per zone/theme such as `root-zone`, `microclimate`, and `zone-valves`, and merge all eligible sources behind the card.
+- For Dendro per-source cards, derive keys from a stable logical source record, not display names. Acceptable inputs are `zone_uuid`, source role, stable source ordinal, and DevEUI as an opaque backend key.
 - The normal UI must not render DevEUI even if DevEUI participates in the opaque key.
 - Card IDs must survive device rename, zone rename, sync replay, and cloud mirror import.
-- Frontend route state, workspace persistence, and preference persistence must not ship until the merged-vs-per-source decision is made.
+- Frontend route state, workspace persistence, and preference persistence may use this accepted hybrid strategy.
 
 ### 4.4 Required MVP cards
 
@@ -1188,9 +1189,11 @@ CREATE TABLE history_workspace_shares (
 );
 ```
 
-Open decision:
+Accepted Slice 0 decision:
 
-- Edge workspaces can remain local-only initially, or they can be added to the sync contract. This affects user expectations and migration scope.
+- Edge workspaces remain local-only for MVP.
+- Cloud workspaces are cloud-owned.
+- Workspace sync requires a later decision record and sync-schema design before implementation.
 
 ### 4.14 Learned ordering and pinning schema
 
@@ -2124,9 +2127,9 @@ Modify:
 
 ## 11. Grill Me Questions
 
-### Priority 1 - Must answer before implementation starts
+### Priority 1 - Accepted defaults
 
-1. Should any accepted Slice 0 implementation decision be overridden before production code starts?
+There are no remaining Priority 1 blockers after Slice 0. The accepted implementation decisions in Section 1.2 are the planning baseline unless a later decision record supersedes them.
 
 ### Priority 2 - Needed before implementation planning
 
