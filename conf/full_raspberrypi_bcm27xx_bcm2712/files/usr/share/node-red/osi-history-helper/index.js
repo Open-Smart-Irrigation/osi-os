@@ -471,6 +471,17 @@ function addSourceChannelSample(samples, sourceKey, channel) {
   }
 }
 
+function normalizeCadenceMapKey(rawKey) {
+  const key = String(rawKey || '').trim();
+  const separatorIndex = key.indexOf('|');
+  if (separatorIndex > 0) {
+    const sourceKey = normalizeSourceKey(key.slice(0, separatorIndex)) || key.slice(0, separatorIndex).trim();
+    const channelKey = key.slice(separatorIndex + 1).trim();
+    return sourceKey && channelKey ? `${sourceKey}|${channelKey}` : key;
+  }
+  return normalizeSourceKey(key) || key;
+}
+
 function configuredCadenceFor(options, sourceKey, channel, key) {
   const maps = [
     options.expectedCadences,
@@ -480,11 +491,11 @@ function configuredCadenceFor(options, sourceKey, channel, key) {
     options.expected_cadence_by_source,
     options.expected_cadence_seconds_by_source,
   ].filter((value) => value && typeof value === 'object');
-  const candidates = [key, `${sourceKey}|${channel.field}`, sourceKey, channel.id, channel.field];
+  const candidates = new Set([key, `${sourceKey}|${channel.field}`, sourceKey, channel.id, channel.field]);
   for (const map of maps) {
-    for (const candidate of candidates) {
-      if (Object.prototype.hasOwnProperty.call(map, candidate)) {
-        const value = map[candidate];
+    for (const rawKey of Object.keys(map)) {
+      if (candidates.has(rawKey) || candidates.has(normalizeCadenceMapKey(rawKey))) {
+        const value = map[rawKey];
         const seconds = toFiniteNumber(value && typeof value === 'object' ? value.seconds : value);
         if (seconds !== null && seconds > 0) return Math.round(seconds);
       }
