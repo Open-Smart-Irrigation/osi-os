@@ -164,8 +164,8 @@ function historyData(
         points: [{ t: '2026-05-31T09:45:00.000Z', value: 18, coverageConfidence: 'configured' }],
       },
       {
-        id: 'gateway-cpu-temp',
-        label: 'cpu_temp',
+        id: 'gateway-thermal-temperature',
+        label: 'thermal_temperature',
         unit: 'C',
         points: [{ t: '2026-05-31T09:45:00.000Z', value: 61, coverageConfidence: 'configured' }],
       },

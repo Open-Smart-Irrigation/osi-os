@@ -183,6 +183,7 @@ function classifyField(key: string): { category: StatusCategory; metric: MetricK
     return { category: 'connectivity', metric: 'signal' };
   }
   if (normalized.includes('mem')) return { category: 'system', metric: 'memory' };
+  if (normalized.includes('thermal') && normalized.includes('temp')) return { category: 'system', metric: 'temperature' };
   if (normalized.includes('cpu') && normalized.includes('temp')) return { category: 'system', metric: 'temperature' };
   if (normalized.includes('cpu')) return { category: 'system', metric: 'cpu' };
 
