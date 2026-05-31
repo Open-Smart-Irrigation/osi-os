@@ -183,7 +183,7 @@ function historyData(overrides: Partial<HistoryCardDataResponse<'irrigation'>> =
         id: 'evt-ineffective',
         type: 'possible_ineffective_irrigation',
         t: '2026-05-31T14:00:00Z',
-        label: 'possible_ineffective_irrigation',
+        label: 'RSSI -110 SNR 5 payload 010203 firmware 1.2.3',
         severity: 'warning',
         metadata: {
           expectedResponseWindowMinutes: 240,
@@ -222,6 +222,7 @@ describe('HistoryCardFrame irrigation event timeline', () => {
     expect(within(timeline).getByText('Observed response: moisture increased')).toBeInTheDocument();
     expect(timeline.querySelector('time[dateTime="2026-05-31T06:00:00Z"]')).toBeInTheDocument();
     expect(screen.queryByText(/irrigation_event_raw|manual_override|possible_ineffective_irrigation/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/RSSI|SNR|payload|firmware|010203|1\.2\.3/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/A84041FFFFABCDEF|sourceDeviceEui/i)).not.toBeInTheDocument();
   });
 

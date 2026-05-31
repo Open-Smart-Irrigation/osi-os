@@ -23,7 +23,8 @@ interface RenderableIrrigationEvent {
 }
 
 const DEVICE_EUI_PATTERN = /\b[A-F0-9]{16}\b/i;
-const UNSAFE_LABEL_PATTERN = /raw|src-|source|deveui|deviceeui|device_eui|channel|backend/i;
+const UNSAFE_LABEL_PATTERN =
+  /raw|src-|source|deveui|deviceeui|device_eui|channel|backend|payload|firmware|rssi|snr|pending|command/i;
 const SEVERITIES: readonly IrrigationSeverity[] = ['info', 'warning', 'critical', 'success', 'unknown'];
 
 function normalizeText(value: unknown): string | null {
