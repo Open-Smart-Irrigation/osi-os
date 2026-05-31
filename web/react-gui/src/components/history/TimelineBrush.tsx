@@ -1,4 +1,5 @@
 import React, { useId, useRef } from 'react';
+import { useTranslation } from 'react-i18next';
 import {
   createDefaultTimeViewport,
   panTimeViewport,
@@ -15,10 +16,16 @@ interface TimelineBrushProps {
   keyboardHelp?: string;
 }
 
-function formatBrushLabel(viewport: HistoryTimeViewport): string {
+type HistoryTranslate = (key: string, options?: Record<string, unknown>) => string;
+
+function formatRangeLabel(t: HistoryTranslate, range: HistoryRangeLabel): string {
+  return t(`history.metadata.range.${range}`);
+}
+
+function formatBrushLabel(t: HistoryTranslate, viewport: HistoryTimeViewport): string {
   const from = viewport.range.from ? new Date(viewport.range.from).toLocaleString() : '';
   const to = viewport.range.to ? new Date(viewport.range.to).toLocaleString() : '';
-  return from && to ? `${from} - ${to}` : viewport.range.label;
+  return from && to ? `${from} - ${to}` : formatRangeLabel(t, viewport.range.label);
 }
 
 export const TimelineBrush: React.FC<TimelineBrushProps> = ({
@@ -28,6 +35,8 @@ export const TimelineBrush: React.FC<TimelineBrushProps> = ({
   ariaLabel,
   keyboardHelp,
 }) => {
+  const { t: translate } = useTranslation('history');
+  const t = translate as HistoryTranslate;
   const lastTapAt = useRef<number>(0);
   const keyboardHelpId = useId();
 
@@ -85,8 +94,8 @@ export const TimelineBrush: React.FC<TimelineBrushProps> = ({
         <div className="h-full w-2/3 rounded-full bg-[var(--primary)]" />
       </div>
       <div className="mt-2 flex items-center justify-between gap-3 text-xs text-[var(--text-tertiary)]">
-        <span>{formatBrushLabel(viewport)}</span>
-        <span>{viewport.range.label}</span>
+        <span>{formatBrushLabel(t, viewport)}</span>
+        <span>{formatRangeLabel(t, viewport.range.label)}</span>
       </div>
       {keyboardHelp && (
         <p id={keyboardHelpId} className="sr-only">

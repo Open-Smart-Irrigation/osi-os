@@ -2,12 +2,14 @@ import React, { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { TimelineBrush } from './TimelineBrush';
 import { DendroGrowthTimelineView } from './visualizations/DendroGrowthTimelineView';
+import { SoilProfileView } from './visualizations/SoilProfileView';
 import { useHistoryCardData, type HistoryCardDataScope } from '../../history/useHistoryCardData';
 import { useTimeViewport } from '../../history/useTimeViewport';
 import type {
   CoverageConfidence,
   HistoryCardSummary,
   HistoryCardType,
+  HistoryAggregationLevel,
   HistorySyncState,
   HistoryViewMode,
 } from '../../history/types';
@@ -43,6 +45,15 @@ function formatSyncState(t: HistoryTranslate, value: HistorySyncState): string {
   return t(`history.metadata.syncState.${value}`);
 }
 
+function formatAggregation(t: HistoryTranslate, value: HistoryAggregationLevel): string {
+  return t(`history.metadata.aggregation.${value}`);
+}
+
+function getErrorMessage(t: HistoryTranslate, error: unknown): string {
+  if (error instanceof Error && error.message) return error.message;
+  return t('history.cardFrame.cardDataUnknownError');
+}
+
 export const HistoryCardFrame: React.FC<HistoryCardFrameProps> = ({ card, scope }) => {
   const { t: translate } = useTranslation('history');
   const t = translate as HistoryTranslate;
@@ -50,6 +61,8 @@ export const HistoryCardFrame: React.FC<HistoryCardFrameProps> = ({ card, scope 
   const defaultRange = card?.defaultRange ?? '24h';
   const { viewport, setViewport } = useTimeViewport(defaultRange, card?.cardId ?? 'empty');
   const selectedView = card ? viewModesByCard[card.cardId] ?? card.defaultView : 'line-chart';
+  const shouldRenderSoilProfile = card?.cardType === 'soil' && selectedView === 'soil-profile';
+  const shouldRenderDendroGrowth = card?.cardType === 'dendro' && selectedView === 'growth-timeline';
   const cardData = useHistoryCardData({
     scope,
     cardId: card?.cardId ?? null,
@@ -102,7 +115,7 @@ export const HistoryCardFrame: React.FC<HistoryCardFrameProps> = ({ card, scope 
             )}
             {cardData.data && (
               <span className="rounded-md border border-[var(--border)] bg-[var(--secondary-bg)] px-2 py-1 text-[var(--text)]">
-                {t('history.cardFrame.aggregationBadge', { aggregation: cardData.data.aggregation.level })}
+                {t('history.cardFrame.aggregationBadge', { aggregation: formatAggregation(t, cardData.data.aggregation.level) })}
               </span>
             )}
           </div>
@@ -142,9 +155,31 @@ export const HistoryCardFrame: React.FC<HistoryCardFrameProps> = ({ card, scope 
           keyboardHelp={t('history.cardFrame.timelineBrushKeyboardHelp')}
         />
 
-        {card.cardType === 'dendro' && selectedView === 'growth-timeline' ? (
+        {cardData.isLoading && (
+          <div className="mt-4 flex min-h-[240px] items-center justify-center rounded-lg border border-dashed border-[var(--border)] bg-[var(--bg)] p-6 text-center">
+            <p className="text-sm font-semibold text-[var(--text)]">
+              {t('history.cardFrame.cardDataLoading')}
+            </p>
+          </div>
+        )}
+
+        {!cardData.isLoading && cardData.error && (
+          <div className="mt-4 rounded-lg border border-[var(--warning-bg)] bg-[var(--warning-bg)] px-4 py-3 text-sm text-[var(--warning-text)]">
+            {t('history.cardFrame.cardDataError', { message: getErrorMessage(t, cardData.error) })}
+          </div>
+        )}
+
+        {!cardData.isLoading && !cardData.error && shouldRenderSoilProfile && cardData.data && (
+          <SoilProfileView profiles={Array.isArray(cardData.data.profiles) ? cardData.data.profiles : []} />
+        )}
+
+        {!cardData.isLoading && !cardData.error && shouldRenderDendroGrowth && (
           <DendroGrowthTimelineView data={cardData.data} />
-        ) : (
+        )}
+
+        {!cardData.isLoading
+          && !cardData.error
+          && ((!shouldRenderSoilProfile && !shouldRenderDendroGrowth) || (shouldRenderSoilProfile && !cardData.data)) && (
           <div className="mt-4 rounded-lg border border-dashed border-[var(--border)] bg-[var(--bg)] p-6">
             <p className="text-sm font-semibold text-[var(--text)]">{formatViewLabel(t, selectedView)}</p>
             <p className="mt-2 text-sm text-[var(--text-tertiary)]">

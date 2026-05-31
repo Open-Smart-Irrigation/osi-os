@@ -52,7 +52,10 @@
       "timelineBrush": "Timeline viewport",
       "timelineBrushKeyboardHelp": "Use arrow keys to pan, plus or minus to zoom, and Home or Enter to reset.",
       "aggregationBadge": "Aggregation: {{aggregation}}",
-      "placeholderBody": "Chart and calendar data will load here when card data APIs are enabled."
+      "placeholderBody": "Chart and calendar data will load here when card data APIs are enabled.",
+      "cardDataLoading": "Loading card data...",
+      "cardDataError": "Card data failed to load: {{message}}",
+      "cardDataUnknownError": "Unknown error"
     },
     "dendroTimeline": {
       "title": "Growth timeline",
@@ -104,7 +107,38 @@
         "stale": "Stale",
         "degraded": "Degraded",
         "unknown": "Unknown"
+      },
+      "aggregation": {
+        "auto": "Automatic",
+        "raw": "Raw",
+        "15m": "15 min",
+        "hourly": "Hourly",
+        "daily": "Daily",
+        "weekly": "Weekly"
+      },
+      "range": {
+        "12h": "12 hours",
+        "24h": "24 hours",
+        "7d": "7 days",
+        "30d": "30 days",
+        "season": "Season",
+        "custom": "Custom range"
       }
+    },
+    "soilProfile": {
+      "emptyTitle": "No soil profile data",
+      "emptyBody": "Depth-aware profile readings are not available for this range.",
+      "depthLabel": "{{depth}} cm",
+      "depthUnknown": "Depth pending",
+      "valueMissing": "No reading",
+      "status": {
+        "dry_stress": "Dry stress",
+        "optimal": "Optimal",
+        "wet_excess": "Wet excess",
+        "mixed": "Mixed",
+        "no_data": "No data"
+      },
+      "labelUnknown": "Profile {{index}}"
     }
   }
 }
