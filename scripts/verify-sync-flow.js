@@ -74,6 +74,10 @@ const dendroHelperCandidates = [
   path.join(nodeRedRoot, 'node_modules', 'osi-dendro-helper'),
   path.join(nodeRedRoot, 'osi-dendro-helper')
 ];
+const historyHelperCandidates = [
+  path.join(nodeRedRoot, 'node_modules', 'osi-history-helper'),
+  path.join(nodeRedRoot, 'osi-history-helper')
+];
 const cloudHttpHelperPath = path.join(nodeRedRoot, 'osi-cloud-http', 'index.js');
 const cloudHttpPackagePath = path.join(nodeRedRoot, 'osi-cloud-http', 'package.json');
 const packageJsonPath = path.join(nodeRedRoot, 'package.json');
@@ -2204,6 +2208,8 @@ expectFileIncludes('deploy.sh', deployScript, '"feeds/chirpstack-openwrt-feed/ap
 expectFileIncludes('deploy.sh', deployScript, '"conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/libexec/osi-gateway-identity.sh"', 'deploys the shared gateway identity helper to live devices');
 expectFileIncludes('deploy.sh', deployScript, '"conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-dendro-helper/package.json"', 'deploys the osi-dendro-helper package manifest to live devices');
 expectFileIncludes('deploy.sh', deployScript, '"conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-dendro-helper/index.js"', 'deploys the osi-dendro-helper runtime helper to live devices');
+expectFileIncludes('deploy.sh', deployScript, '"conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-history-helper/package.json"', 'deploys the osi-history-helper package manifest to live devices');
+expectFileIncludes('deploy.sh', deployScript, '"conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-history-helper/index.js"', 'deploys the osi-history-helper runtime helper to live devices');
 expectFileIncludes('deploy.sh', deployScript, '"conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/codecs/strega_gen1_decoder.js"', 'deploys the shipped STREGA ChirpStack decoder to live devices');
 expectFileIncludes('deploy.sh', deployScript, '"conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/codecs/dragino_lsn50_decoder.js"', 'deploys the shipped LSN50 ChirpStack decoder to live devices');
 expectFileIncludes('deploy.sh', deployScript, 'rm -rf "$entry"', 'removes stale hashed GUI assets AND locale files before extracting the rebuilt React bundle (loop covers assets/, locales/, index.html, dotfiles)');
@@ -2476,6 +2482,7 @@ expectFileIncludes('98_osi_node_red_seed', osiNodeRedSeedScript, 'cp "$SRC/packa
 expectFileIncludes('98_osi_node_red_seed', osiNodeRedSeedScript, 'cp -a "$SRC/$module" "$DST/$module"', 'seeds local helper package directories for file dependencies');
 expectFileIncludes('98_osi_node_red_seed', osiNodeRedSeedScript, 'cp -a "$SRC/$module" "$DST/node_modules/$module"', 'seeds local helper packages into runtime node_modules');
 expectFileIncludes('98_osi_node_red_seed', osiNodeRedSeedScript, 'rm -rf "$DST/$module" "$DST/node_modules/$module"', 'replaces stale helper copies in both package locations');
+expectFileIncludes('98_osi_node_red_seed', osiNodeRedSeedScript, 'osi-history-helper', 'seeds the history helper package directory');
 
 // --- install-osi-os.sh ---
 if (fs.existsSync(installOsiOsPath)) {
@@ -2644,7 +2651,7 @@ if (!fs.existsSync(packageJsonPath)) {
   fail(`missing Node-RED package manifest at ${packageJsonPath}`);
 } else {
   const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, 'utf8'));
-  for (const dependency of ['@chirpstack/chirpstack-api', '@grpc/grpc-js', '@rakwireless/field-tester-server', 'bcryptjs', 'node-red-node-sqlite', 'osi-chirpstack-helper', 'osi-db-helper', 'osi-dendro-helper', 'sqlite3']) {
+  for (const dependency of ['@chirpstack/chirpstack-api', '@grpc/grpc-js', '@rakwireless/field-tester-server', 'bcryptjs', 'node-red-node-sqlite', 'osi-chirpstack-helper', 'osi-db-helper', 'osi-dendro-helper', 'osi-history-helper', 'sqlite3']) {
     if (!packageJson.dependencies || !packageJson.dependencies[dependency]) {
       fail(`package.json missing dependency ${dependency}`);
     } else {
@@ -2664,6 +2671,7 @@ expectFileIncludes('osi-cloud-http/index.js', cloudHttpHelperSource, 'res.comple
 expectFileIncludes('osi-cloud-http/index.js', cloudHttpHelperSource, 'settled', 'guards cloud REST requests against double settlement');
 expectFileIncludes('osi-cloud-http/package.json', cloudHttpPackageSource, '"name": "osi-cloud-http"', 'declares the helper package name');
 expectFileIncludes('node-red/package.json', nodeRedPackageSource, '"osi-cloud-http": "file:osi-cloud-http"', 'installs the helper package as a local dependency');
+expectFileIncludes('node-red/package.json', nodeRedPackageSource, '"osi-history-helper": "file:osi-history-helper"', 'installs the history helper package as a local dependency');
 
 const rawDbNodes = flows.filter(
   (node) => typeof node.func === 'string' && node.func.includes("new sqlite3.Database('/data/db/farming.db')")
@@ -2764,6 +2772,20 @@ const dbHelperIndexPath = dbHelperPath ? path.join(dbHelperPath, 'index.js') : n
 if (dbHelperIndexPath && fs.existsSync(dbHelperIndexPath)) {
   const dbHelperSource = fs.readFileSync(dbHelperIndexPath, 'utf8');
   expectFileIncludes('osi-db-helper/index.js', dbHelperSource, 'transaction(', 'exposes the queued helper transaction primitive');
+}
+
+const historyHelperPath = historyHelperCandidates.find((candidate) => fs.existsSync(candidate));
+if (!historyHelperPath) {
+  fail(`missing history helper module at one of: ${historyHelperCandidates.join(', ')}`);
+} else {
+  const historyHelper = require(historyHelperPath);
+  for (const exportName of ['normalizeDeveui', 'deriveCardId', 'deriveCardsForZone', 'deriveGatewayCard', 'classifySoilStatus', 'classifyEnvironmentStatus', 'classifyDendroStatus', 'deriveExpectedCadenceSeconds', 'aggregateRows', 'aggregateDeviceData', 'buildLocalInterpretations']) {
+    if (typeof historyHelper[exportName] !== 'function') {
+      fail(`history helper missing export ${exportName}`);
+    } else {
+      console.log(`OK history helper exports ${exportName}`);
+    }
+  }
 }
 
 const dendroHelperPath = dendroHelperCandidates.find((candidate) => fs.existsSync(candidate));

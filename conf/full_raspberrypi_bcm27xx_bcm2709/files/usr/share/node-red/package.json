@@ -11,6 +11,7 @@
     "osi-cloud-http": "file:osi-cloud-http",
     "osi-dendro-helper": "file:osi-dendro-helper",
     "osi-db-helper": "file:osi-db-helper",
+    "osi-history-helper": "file:osi-history-helper",
     "sqlite3": "^5.1.7"
   }
 }
