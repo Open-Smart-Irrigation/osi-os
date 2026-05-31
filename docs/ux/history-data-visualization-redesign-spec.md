@@ -2034,10 +2034,10 @@ High-risk items:
 
 Dependencies:
 
-- Product decision for multiple same-theme sources per zone.
-- Product decision for workspace/preference sync.
-- Product decision for Season boundaries.
-- Backend decision for edge aggregation helper placement.
+- Implementation must follow the accepted Slice 0 card-key strategy for multi-source zones.
+- Implementation must keep edge workspaces/preferences local-only for MVP.
+- Implementation must add `zone_seasons` before enabling Season.
+- Implementation must use the existing `/usr/share/node-red/osi-*-helper` helper placement pattern.
 - Cloud decision for AI and satellite service boundaries.
 
 ## 10. File-Level Implementation Map
@@ -2124,14 +2124,9 @@ Modify:
 
 ## 11. Grill Me Questions
 
-### Priority 1 - Must answer before spec can be finalized
+### Priority 1 - Must answer before implementation starts
 
-1. For a zone with multiple same-theme sources, should the UI show one merged card per theme, or one thematic card per logical source? Example: two dendrometer LSN50 nodes in one zone could become one `Dendro - Stem Growth` card or two hidden-source Dendro cards.
-2. Confirm the Season data model: should OSI OS add explicit `zone_seasons`, or should Season be removed from MVP until season boundaries exist?
-3. Confirm the edge helper packaging path: use the existing `/usr/share/node-red/osi-*-helper` pattern loaded through function-node `libs`, or package a formal Node-RED contrib module through the OpenWrt feed?
-4. Confirm cloud long-range aggregation: typed hourly/daily rollups in MVP, or restrict 30D/Season to existing daily aggregate tables until rollups exist?
-5. Should card preferences and saved workspaces stay local-only on OSI OS for MVP, or should they be synced to OSI Cloud so learned ordering follows the farmer across devices?
-6. What comparison panel cap should OSI OS enforce on Pi hardware before performance validation: 4 visible panels, fewer, or disabled by default?
+1. Should any accepted Slice 0 implementation decision be overridden before production code starts?
 
 ### Priority 2 - Needed before implementation planning
 
@@ -2140,7 +2135,6 @@ Modify:
 3. Should critical alert promotion use only existing water-stress/freshness signals, or should a new alert/event table be introduced before learned ordering ships?
 4. Should cloud workspaces be shareable in the first cloud phase, or only saved privately with sharing added later?
 5. Should edge workspaces assume one local farmer per Pi, or do we need multi-user local workspace isolation now?
-6. Should cloud Connectivity Timeline persist gateway heartbeat/status history in MVP?
 
 ### Priority 3 - Can be resolved during UI refinement
 
