@@ -304,6 +304,43 @@ test('computes coverage from source-aware cadence instead of one mixed median', 
   assert.strictEqual(configured.buckets[0].coveragePct, 100);
 });
 
+test('counts configured or requested silent source channels in coverage', () => {
+  const rows = [
+    { deveui: 'AA00000000000001', recorded_at: iso(0), swt_1: 10 },
+    { deveui: 'AA00000000000001', recorded_at: iso(15), swt_1: 20 },
+    { deveui: 'AA00000000000001', recorded_at: iso(30), swt_1: 30 },
+    { deveui: 'AA00000000000001', recorded_at: iso(45), swt_1: 40 },
+  ];
+  const base = {
+    aggregation: 'hourly',
+    channels: ['swt_1'],
+    start: iso(0),
+    end: iso(60),
+  };
+
+  const configuredSilent = helper.aggregateRows(rows, {
+    ...base,
+    expectedCadences: {
+      'AA00000000000001|swt_1': 900,
+      'BB00000000000002|swt_1': 900,
+    },
+  });
+  assert.strictEqual(configuredSilent.coverageConfidence, 'configured');
+  assert.strictEqual(configuredSilent.sourceCadences['BB00000000000002|swt_1'].seconds, 900);
+  assert.strictEqual(configuredSilent.buckets[0].coveragePct, 50);
+  assert.strictEqual(configuredSilent.coveragePct, 50);
+
+  const requestedSilent = helper.aggregateRows(rows, {
+    ...base,
+    sourceKeys: ['AA00000000000001', 'BB00000000000002'],
+    expectedCadenceSeconds: 900,
+  });
+  assert.strictEqual(requestedSilent.coverageConfidence, 'configured');
+  assert.strictEqual(requestedSilent.sourceCadences['BB00000000000002|swt_1'].seconds, 900);
+  assert.strictEqual(requestedSilent.buckets[0].coveragePct, 50);
+  assert.strictEqual(requestedSilent.coveragePct, 50);
+});
+
 test('builds deterministic advanced metadata placeholders', () => {
   const metadata = helper.buildAdvancedMetadataPlaceholder({
     cardType: 'gateway',
