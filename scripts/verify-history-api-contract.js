@@ -146,6 +146,12 @@ function verifyHistoryRouterImplementation(flows, failures) {
   assertContains(failures, source, 'osiHistory.buildCalendar', 'helper-owned calendar classification');
   assertContains(failures, source, 'osiHistory.buildLocalInterpretations', 'helper-owned local interpretations');
   assertContains(failures, source, 'osiHistory.buildAdvancedDiagnostics', 'helper-owned advanced diagnostic availability');
+  assertContains(
+    failures,
+    source,
+    "views: ['status-overview', 'connectivity-timeline', 'advanced']",
+    'frontend-supported gateway view list'
+  );
 
   const seasonBranchIndex = source.indexOf("if (rawLabel === 'season')");
   const explicitRangeIndex = source.indexOf('if (fromRaw || toRaw)');
@@ -158,6 +164,8 @@ function verifyHistoryRouterImplementation(flows, failures) {
   assertNotContains(failures, source, 'supportedRanges: config.supportedRanges.slice()', 'ungated supportedRanges copy');
   assertNotContains(failures, source, 'latestRows[0]', 'single-row merged summary classification');
   assertNotContains(failures, source, 'sync_outbox', 'edge sync outbox mutation from local-only history preferences/workspaces');
+  assertNotContains(failures, source, 'local-storage-sync', 'unsupported gateway local storage view');
+  assertNotContains(failures, source, 'power-state', 'unsupported gateway power state view');
 }
 
 function readFlows(flowPath) {
