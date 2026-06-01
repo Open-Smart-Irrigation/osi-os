@@ -38,6 +38,10 @@ function metadataString(value: unknown): string | null {
   return typeof value === 'string' && value.trim() ? value : null;
 }
 
+function workspaceRecordZoneId(record: HistoryWorkspaceRecord): number | null {
+  return record.zoneId ?? record.workspace.zoneId ?? null;
+}
+
 function mergeLiveWorkspaceViewport(
   workspace: HistoryWorkspace,
   viewport: HistoryTimeViewport,
@@ -105,6 +109,12 @@ export const HistoryDashboard: React.FC = () => {
     workspacesEnabled ? '/api/history/workspaces' : null,
     () => historyAPI.getWorkspaces(),
     { revalidateOnFocus: true },
+  );
+  const visibleWorkspaces = useMemo(
+    () => (workspaceResponse?.workspaces ?? []).filter((record) =>
+      selectedZoneId !== null && workspaceRecordZoneId(record) === selectedZoneId,
+    ),
+    [selectedZoneId, workspaceResponse?.workspaces],
   );
 
   useEffect(() => {
@@ -253,6 +263,7 @@ export const HistoryDashboard: React.FC = () => {
   };
 
   const handleLoadWorkspace = (record: HistoryWorkspaceRecord) => {
+    if (workspaceRecordZoneId(record) !== selectedZoneId) return;
     const migrated = migrateHistoryWorkspace(record.workspace, workspaceContext);
     setActiveWorkspace(migrated);
     setActiveWorkspaceId(record.id);
@@ -482,7 +493,7 @@ export const HistoryDashboard: React.FC = () => {
               selectedCard={selectedCard}
               onSelectCard={handleSelectCard}
               workspace={workspace}
-              workspaces={workspaceResponse?.workspaces ?? []}
+              workspaces={visibleWorkspaces}
               activeWorkspaceId={activeWorkspaceId}
               comparisonEnabled={featureFlags.flags.historyComparisonEnabled}
               workspacesEnabled={featureFlags.flags.historyWorkspacesEnabled}

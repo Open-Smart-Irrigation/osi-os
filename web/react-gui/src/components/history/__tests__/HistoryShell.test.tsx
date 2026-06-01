@@ -177,6 +177,29 @@ function card(overrides: Partial<HistoryCardSummary> = {}): HistoryCardSummary {
   };
 }
 
+function workspace(overrides: Partial<HistoryWorkspace> = {}): HistoryWorkspace {
+  return {
+    schemaVersion: 1,
+    farmId: null,
+    hubId: null,
+    zoneId: 1,
+    zoneUuid: null,
+    selectedCards: ['soil-zone-1'],
+    panelOrder: ['soil-zone-1'],
+    collapsedPanels: [],
+    dateRange: { mode: 'relative', label: '24h', from: null, to: null },
+    aggregation: 'raw',
+    viewModesByCard: {},
+    enabledOverlays: {},
+    advancedOverlaySettings: {},
+    limits: { platform: 'edge', maxPanels: 4 },
+    inspector: { selectedTimestamp: null, open: true },
+    pinnedCards: [],
+    layout: 'single',
+    ...overrides,
+  };
+}
+
 describe('History shell', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -485,6 +508,162 @@ describe('History shell', () => {
 
     expect(await screen.findByText('Unavailable panel: missing-card')).toBeInTheDocument();
     expect(screen.getAllByTestId('history-comparison-panel')).toHaveLength(2);
+  });
+
+  it('does not expose saved workspaces from other zones in the selected zone shell', async () => {
+    vi.mocked(systemAPI.getFeatures).mockResolvedValue({
+      historyUxEnabled: true,
+      historyComparisonEnabled: true,
+      historyWorkspacesEnabled: true,
+      historyAdvancedOverlaysEnabled: false,
+      historyCloudAiEnabled: false,
+    });
+    vi.mocked(irrigationZonesAPI.getAll).mockResolvedValue([
+      {
+        id: 1,
+        name: 'North Block',
+        device_count: 0,
+        created_at: '2026-01-01T00:00:00Z',
+        updated_at: '2026-01-01T00:00:00Z',
+        schedule: null,
+      },
+      {
+        id: 2,
+        name: 'South Block',
+        device_count: 0,
+        created_at: '2026-01-01T00:00:00Z',
+        updated_at: '2026-01-01T00:00:00Z',
+        schedule: null,
+      },
+    ]);
+    vi.mocked(historyAPI.getWorkspaces).mockResolvedValue({
+      generatedAt: '2026-05-31T10:00:00Z',
+      workspaces: [
+        {
+          id: 11,
+          userId: 1,
+          ownerUserUuid: null,
+          zoneId: 1,
+          name: 'North workspace',
+          isDefault: false,
+          workspace: workspace(),
+          createdAt: '2026-05-31T10:00:00Z',
+          updatedAt: '2026-05-31T10:00:00Z',
+        },
+        {
+          id: 12,
+          userId: 1,
+          ownerUserUuid: null,
+          zoneId: 2,
+          name: 'South workspace',
+          isDefault: false,
+          workspace: workspace({ zoneId: 2, selectedCards: ['soil-zone-2'], panelOrder: ['soil-zone-2'] }),
+          createdAt: '2026-05-31T10:00:00Z',
+          updatedAt: '2026-05-31T10:00:00Z',
+        },
+      ],
+    });
+
+    renderWithProviders(React.createElement(HistoryDashboard));
+
+    expect(await screen.findByRole('button', { name: 'Load North workspace' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Load South workspace' })).not.toBeInTheDocument();
+  });
+
+  it('saves and updates workspaces against the currently selected zone after switching zones', async () => {
+    vi.mocked(systemAPI.getFeatures).mockResolvedValue({
+      historyUxEnabled: true,
+      historyComparisonEnabled: true,
+      historyWorkspacesEnabled: true,
+      historyAdvancedOverlaysEnabled: false,
+      historyCloudAiEnabled: false,
+    });
+    vi.mocked(irrigationZonesAPI.getAll).mockResolvedValue([
+      {
+        id: 1,
+        name: 'North Block',
+        device_count: 0,
+        created_at: '2026-01-01T00:00:00Z',
+        updated_at: '2026-01-01T00:00:00Z',
+        schedule: null,
+      },
+      {
+        id: 2,
+        name: 'South Block',
+        device_count: 0,
+        created_at: '2026-01-01T00:00:00Z',
+        updated_at: '2026-01-01T00:00:00Z',
+        schedule: null,
+      },
+    ]);
+    vi.mocked(historyAPI.getZoneCards).mockImplementation(async (zoneId) => ({
+      zoneId,
+      generatedAt: '2026-05-31T10:00:00Z',
+      cards: [
+        card({
+          cardId: `soil-zone-${zoneId}`,
+          title: zoneId === 2 ? 'South Soil' : 'North Soil',
+          subtitle: zoneId === 2 ? 'South Block' : 'North Block',
+        }),
+      ],
+    }));
+    vi.mocked(historyAPI.getWorkspaces).mockResolvedValue({
+      generatedAt: '2026-05-31T10:00:00Z',
+      workspaces: [
+        {
+          id: 21,
+          userId: 1,
+          ownerUserUuid: null,
+          zoneId: 1,
+          name: 'North workspace',
+          isDefault: false,
+          workspace: workspace({ zoneId: 1, selectedCards: ['soil-zone-1'], panelOrder: ['soil-zone-1'] }),
+          createdAt: '2026-05-31T10:00:00Z',
+          updatedAt: '2026-05-31T10:00:00Z',
+        },
+        {
+          id: 22,
+          userId: 1,
+          ownerUserUuid: null,
+          zoneId: 2,
+          name: 'South workspace',
+          isDefault: false,
+          workspace: workspace({ zoneId: 2, selectedCards: ['soil-zone-2'], panelOrder: ['soil-zone-2'] }),
+          createdAt: '2026-05-31T10:00:00Z',
+          updatedAt: '2026-05-31T10:00:00Z',
+        },
+      ],
+    });
+
+    renderWithProviders(React.createElement(HistoryDashboard));
+
+    fireEvent.click((await screen.findAllByRole('button', { name: 'South Block' }))[0]);
+    await waitFor(() => {
+      expect(historyAPI.getZoneCards).toHaveBeenCalledWith(2);
+    });
+    expect(await screen.findByRole('button', { name: 'Load South workspace' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Load North workspace' })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Load South workspace' }));
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Update workspace' })).not.toBeDisabled();
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Update workspace' }));
+    await waitFor(() => {
+      expect(historyAPI.updateWorkspace).toHaveBeenCalledWith(
+        22,
+        expect.objectContaining({ name: 'South workspace', zoneId: 2 }),
+      );
+    });
+    expect(vi.mocked(historyAPI.updateWorkspace).mock.calls[0][1].workspace.zoneId).toBe(2);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Save workspace' }));
+    await waitFor(() => {
+      expect(historyAPI.createWorkspace).toHaveBeenCalledWith(
+        expect.objectContaining({ name: 'South workspace', zoneId: 2 }),
+      );
+    });
+    expect(vi.mocked(historyAPI.createWorkspace).mock.calls[0][0].workspace.zoneId).toBe(2);
   });
 
   it('updates saved workspaces with live view and viewport state without dropping workspace fields', async () => {
