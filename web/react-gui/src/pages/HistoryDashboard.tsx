@@ -5,6 +5,7 @@ import useSWR from 'swr';
 import { LanguageSwitcher } from '../components/LanguageSwitcher';
 import { HistoryDesktopShell } from '../components/history/HistoryDesktopShell';
 import { HistoryMobileShell } from '../components/history/HistoryMobileShell';
+import { HistoryMobileHeader } from '../components/history/mobile/HistoryMobileHeader';
 import { useAuth } from '../contexts/AuthContext';
 import { useFeatureFlags } from '../history/useFeatureFlags';
 import { useHistoryCards } from '../history/useHistoryCards';
@@ -33,6 +34,11 @@ import type {
 import type { IrrigationZone } from '../types/farming';
 
 const zonesFetcher = () => irrigationZonesAPI.getAll();
+
+function readIsMobileHistoryViewport(): boolean {
+  if (typeof window === 'undefined') return false;
+  return window.innerWidth < 1024;
+}
 
 function metadataString(value: unknown): string | null {
   return typeof value === 'string' && value.trim() ? value : null;
@@ -74,7 +80,20 @@ export const HistoryDashboard: React.FC = () => {
   const [activeWorkspace, setActiveWorkspace] = useState<HistoryWorkspace | null>(null);
   const [activeWorkspaceId, setActiveWorkspaceId] = useState<number | null>(null);
   const [panelCapWarning, setPanelCapWarning] = useState(false);
+  const [isMobileViewport, setIsMobileViewport] = useState(readIsMobileHistoryViewport);
   const previousSelectedZoneId = useRef<number | null>(null);
+
+  useEffect(() => {
+    const handleResize = () => {
+      setIsMobileViewport(readIsMobileHistoryViewport());
+    };
+
+    handleResize();
+    window.addEventListener('resize', handleResize);
+    return () => {
+      window.removeEventListener('resize', handleResize);
+    };
+  }, []);
 
   const {
     data: zones,
@@ -181,9 +200,9 @@ export const HistoryDashboard: React.FC = () => {
   }, [setViewport, workspaceViewportKey]);
 
   useEffect(() => {
-    if (!selectedZoneId || !selectedCardId || !featureFlags.historyEnabled) return;
+    if (isMobileViewport || !selectedZoneId || !selectedCardId || !featureFlags.historyEnabled) return;
     historyAPI.markZoneCardOpened(selectedZoneId, selectedCardId).catch(() => undefined);
-  }, [featureFlags.historyEnabled, selectedCardId, selectedZoneId]);
+  }, [featureFlags.historyEnabled, isMobileViewport, selectedCardId, selectedZoneId]);
 
   useEffect(() => {
     if (previousSelectedZoneId.current === selectedZoneId) return;
@@ -375,40 +394,44 @@ export const HistoryDashboard: React.FC = () => {
 
   return (
     <div className="min-h-screen bg-[var(--bg)]">
-      <header className="bg-[var(--header-bg)] shadow-xl">
-        <div className="mx-auto max-w-7xl px-4 py-6">
-          <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-            <div>
-              <h1 className="text-4xl font-bold text-[var(--header-text)] high-contrast-text">
-                {t('history.shell.title')}
-              </h1>
-              <p className="mt-1 text-lg text-[var(--header-subtext)]">
-                {t('history.shell.subtitle', { username })}
-              </p>
-            </div>
-            <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
-              <div className="flex justify-center sm:justify-start">
-                <LanguageSwitcher />
+      {isMobileViewport ? (
+        <HistoryMobileHeader onLogout={logout} />
+      ) : (
+        <header className="bg-[var(--header-bg)] shadow-xl">
+          <div className="mx-auto max-w-7xl px-4 py-6">
+            <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <h1 className="text-4xl font-bold text-[var(--header-text)] high-contrast-text">
+                  {t('history.shell.title')}
+                </h1>
+                <p className="mt-1 text-lg text-[var(--header-subtext)]">
+                  {t('history.shell.subtitle', { username })}
+                </p>
               </div>
-              <Link
-                to="/dashboard"
-                className="rounded-lg bg-[var(--secondary-bg)] px-6 py-3 text-center text-lg font-bold text-[var(--text)] transition-colors hover:bg-[var(--border)]"
-              >
-                {t('history.nav.legacyDashboard')}
-              </Link>
-              <button
-                type="button"
-                onClick={logout}
-                className="rounded-lg bg-[var(--secondary-bg)] px-6 py-3 text-lg font-bold text-[var(--text)] transition-colors hover:bg-[var(--border)]"
-              >
-                {t('history.nav.logout')}
-              </button>
+              <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
+                <div className="flex justify-center sm:justify-start">
+                  <LanguageSwitcher />
+                </div>
+                <Link
+                  to="/dashboard"
+                  className="rounded-lg bg-[var(--secondary-bg)] px-6 py-3 text-center text-lg font-bold text-[var(--text)] transition-colors hover:bg-[var(--border)]"
+                >
+                  {t('history.nav.legacyDashboard')}
+                </Link>
+                <button
+                  type="button"
+                  onClick={logout}
+                  className="rounded-lg bg-[var(--secondary-bg)] px-6 py-3 text-lg font-bold text-[var(--text)] transition-colors hover:bg-[var(--border)]"
+                >
+                  {t('history.nav.logout')}
+                </button>
+              </div>
             </div>
           </div>
-        </div>
-      </header>
+        </header>
+      )}
 
-      <main className="mx-auto max-w-7xl px-4 py-8">
+      <main className="mx-auto max-w-7xl px-4 py-4 lg:py-8">
         {!featureFlags.historyEnabled && (
           <section className="rounded-lg border border-[var(--border)] bg-[var(--surface)] p-6">
             <h2 className="text-2xl font-bold text-[var(--text)]">
@@ -476,15 +499,15 @@ export const HistoryDashboard: React.FC = () => {
         )}
 
         {shellReady && (
-          <>
+          isMobileViewport ? (
             <HistoryMobileShell
               zones={availableZones}
               selectedZoneId={selectedZoneId}
               onSelectZone={setSelectedZoneId}
               cards={cards}
-              selectedCard={selectedCard}
-              onSelectCard={handleSelectCard}
+              onTogglePinned={handleTogglePinned}
             />
+          ) : (
             <HistoryDesktopShell
               zones={availableZones}
               selectedZoneId={selectedZoneId}
@@ -513,7 +536,7 @@ export const HistoryDashboard: React.FC = () => {
               onPanelCollapsedChange={handlePanelCollapsedChange}
               onInspectorChange={handleInspectorChange}
             />
-          </>
+          )
         )}
       </main>
     </div>

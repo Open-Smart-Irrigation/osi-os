@@ -81,6 +81,7 @@ export const HistorySidebar: React.FC<HistorySidebarProps> = ({
           pinLabel={t('history.sidebar.pinCard')}
           unpinLabel={t('history.sidebar.unpinCard')}
           emptyLabel={t('history.sidebar.none')}
+          cardAriaLabel={(title) => t('history.carousel.cardAriaLabel', { title })}
         />
       </section>
 
@@ -96,6 +97,7 @@ export const HistorySidebar: React.FC<HistorySidebarProps> = ({
           pinLabel={t('history.sidebar.pinCard')}
           unpinLabel={t('history.sidebar.unpinCard')}
           emptyLabel={t('history.sidebar.none')}
+          cardAriaLabel={(title) => t('history.carousel.cardAriaLabel', { title })}
         />
       </section>
 
@@ -177,6 +179,7 @@ interface CardListProps {
   pinLabel: string;
   unpinLabel: string;
   emptyLabel: string;
+  cardAriaLabel: (title: string) => string;
 }
 
 const CardList: React.FC<CardListProps> = ({
@@ -187,6 +190,7 @@ const CardList: React.FC<CardListProps> = ({
   pinLabel,
   unpinLabel,
   emptyLabel,
+  cardAriaLabel,
 }) => {
   if (cards.length === 0) {
     return <p className="mt-3 text-xs text-[var(--text-tertiary)]">{emptyLabel}</p>;
@@ -205,6 +209,7 @@ const CardList: React.FC<CardListProps> = ({
         >
           <button
             type="button"
+            aria-label={cardAriaLabel(card.title)}
             aria-pressed={card.cardId === selectedCardId}
             onClick={() => onSelectCard(card.cardId)}
             className="block w-full text-left"
