@@ -34,6 +34,16 @@
     "mobile": {
       "zoneLabel": "Zone"
     },
+    "detail": {
+      "backToHistory": "Back to history",
+      "invalidRouteTitle": "History card not available",
+      "invalidRouteBody": "Return to History and choose an available card.",
+      "loading": "Loading history card...",
+      "notFoundTitle": "History card not available",
+      "notFoundBody": "Return to History and choose an available card.",
+      "controlsPlaceholder": "Date range",
+      "inspectorPlaceholder": "Inspector"
+    },
     "sidebar": {
       "zones": "Zones",
       "pinnedCards": "Pinned cards",
