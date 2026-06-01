@@ -29,6 +29,15 @@ function syncLabel(t: HistoryTranslate, syncState: HistorySyncState | undefined)
   return t(`history.metadata.syncState.${syncState ?? 'unknown'}`);
 }
 
+function isRawIdentifierLabel(label: string): boolean {
+  return /^[a-f0-9]{16}$/i.test(label.trim());
+}
+
+function displaySafeSourceLabel(label: string | null): string | null {
+  if (!label || isRawIdentifierLabel(label)) return null;
+  return label;
+}
+
 function detailPath(zoneId: number, card: HistoryCardSummary): string {
   if (card.scope === 'gateway') {
     const gatewayEui = typeof card.metadata.gatewayEui === 'string' ? card.metadata.gatewayEui : null;
@@ -46,7 +55,7 @@ export const HistoryOverviewCard: React.FC<HistoryOverviewCardProps> = ({
 }) => {
   const { t: translate } = useTranslation('history');
   const t = translate as HistoryTranslate;
-  const sourceLabel = formatHistorySourceLabel(t, card);
+  const sourceLabel = displaySafeSourceLabel(formatHistorySourceLabel(t, card));
   const pinned = card.ordering.pinned;
 
   return (
@@ -70,7 +79,9 @@ export const HistoryOverviewCard: React.FC<HistoryOverviewCardProps> = ({
           {onTogglePinned && (
             <button
               type="button"
-              aria-label={pinned ? t('history.overview.unpinCard') : t('history.overview.pinCard')}
+              aria-label={pinned
+                ? t('history.overview.unpinCardForTitle', { title: card.title })
+                : t('history.overview.pinCardForTitle', { title: card.title })}
               onClick={(event) => {
                 event.preventDefault();
                 event.stopPropagation();

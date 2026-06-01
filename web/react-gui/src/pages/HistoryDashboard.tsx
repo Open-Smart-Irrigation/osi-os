@@ -200,9 +200,9 @@ export const HistoryDashboard: React.FC = () => {
   }, [setViewport, workspaceViewportKey]);
 
   useEffect(() => {
-    if (!selectedZoneId || !selectedCardId || !featureFlags.historyEnabled) return;
+    if (isMobileViewport || !selectedZoneId || !selectedCardId || !featureFlags.historyEnabled) return;
     historyAPI.markZoneCardOpened(selectedZoneId, selectedCardId).catch(() => undefined);
-  }, [featureFlags.historyEnabled, selectedCardId, selectedZoneId]);
+  }, [featureFlags.historyEnabled, isMobileViewport, selectedCardId, selectedZoneId]);
 
   useEffect(() => {
     if (previousSelectedZoneId.current === selectedZoneId) return;

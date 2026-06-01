@@ -42,6 +42,8 @@
       "cardTypeLabel": "{{cardType}} card",
       "pinCard": "Pin card",
       "unpinCard": "Unpin card",
+      "pinCardForTitle": "Pin {{title}} card",
+      "unpinCardForTitle": "Unpin {{title}} card",
       "pinned": "Pinned",
       "alert": "Attention"
     },

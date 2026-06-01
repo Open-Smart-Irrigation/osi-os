@@ -33,6 +33,8 @@ const { translateForTest } = vi.hoisted(() => {
     'history.overview.cardTypeLabel': '{{cardType}} card',
     'history.overview.pinCard': 'Pin card',
     'history.overview.unpinCard': 'Unpin card',
+    'history.overview.pinCardForTitle': 'Pin {{title}} card',
+    'history.overview.unpinCardForTitle': 'Unpin {{title}} card',
     'history.overview.pinned': 'Pinned',
     'history.overview.alert': 'Attention',
     'history.source.multipleNamed': '{{count}} sources: {{names}}',
@@ -261,9 +263,27 @@ describe('History mobile overview', () => {
     expect(screen.getByText('Coverage unknown')).toBeInTheDocument();
     expect(screen.getByText('Local')).toBeInTheDocument();
     expect(screen.getByText('Attention')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Pin card' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Pin Soil - Root Zone card' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /Line Chart/i })).not.toBeInTheDocument();
     expect(screen.queryByText(/[A-F0-9]{16}/)).not.toBeInTheDocument();
+  });
+
+  it('does not expose an EUI-like source label in normal overview', () => {
+    renderWithProviders(
+      <HistoryOverviewCard
+        zoneId={12}
+        card={card({
+          sourceDeviceCount: undefined,
+          sourceLabels: [],
+          sourceDevices: [],
+          sourceLabel: 'A84041A75D5E7CFB',
+        })}
+        onTogglePinned={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByRole('link', { name: /Soil - Root Zone/i })).toBeInTheDocument();
+    expect(screen.queryByText('A84041A75D5E7CFB')).not.toBeInTheDocument();
   });
 
   it('keeps the overview card pin button from navigating', () => {
@@ -272,7 +292,7 @@ describe('History mobile overview', () => {
       <HistoryOverviewCard zoneId={12} card={card()} onTogglePinned={onTogglePinned} />,
     );
 
-    fireEvent.click(screen.getByRole('button', { name: 'Pin card' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Pin Soil - Root Zone card' }));
 
     expect(onTogglePinned).toHaveBeenCalledWith('soil-card:root-zone', true);
   });
@@ -288,6 +308,14 @@ describe('History mobile overview', () => {
     expect(screen.queryByRole('region', { name: 'Timeline viewport' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Soil Profile' })).not.toBeInTheDocument();
     expect(screen.queryByText(/[A-F0-9]{16}/)).not.toBeInTheDocument();
+  });
+
+  it('does not mark the first card opened when mobile overview renders', async () => {
+    renderHistoryAtMobileWidth('/history');
+
+    await screen.findByRole('link', { name: /Soil - Root Zone/i });
+
+    expect(historyAPI.markZoneCardOpened).not.toHaveBeenCalled();
   });
 
   it('does not show workspace or comparison controls on mobile overview', async () => {
@@ -316,7 +344,7 @@ describe('History mobile overview', () => {
   it('toggles pinned card preference through the existing history API path', async () => {
     renderHistoryAtMobileWidth('/history');
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Pin card' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Pin Soil - Root Zone card' }));
 
     await waitFor(() => {
       expect(historyAPI.setZoneCardPreference).toHaveBeenCalledWith(
