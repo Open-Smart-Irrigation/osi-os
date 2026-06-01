@@ -11,7 +11,7 @@ import { IrrigationEventTimelineView } from './visualizations/IrrigationEventTim
 import { SoilProfileView } from './visualizations/SoilProfileView';
 import { useHistoryCardData, type HistoryCardDataScope } from '../../history/useHistoryCardData';
 import { useHistoryCardAdvancedData } from '../../history/useHistoryCardAdvancedData';
-import { useTimeViewport } from '../../history/useTimeViewport';
+import { useTimeViewport, type HistoryTimeViewport } from '../../history/useTimeViewport';
 import type {
   CoverageConfidence,
   HistoryCardSummary,
@@ -24,6 +24,8 @@ import type {
 interface HistoryCardFrameProps {
   card: HistoryCardSummary | null;
   scope: HistoryCardDataScope | null;
+  viewport?: HistoryTimeViewport;
+  onViewportChange?: (viewport: HistoryTimeViewport) => void;
 }
 
 type HistoryTranslate = (key: string, options?: Record<string, unknown>) => string;
@@ -61,12 +63,19 @@ function getErrorMessage(t: HistoryTranslate, error: unknown): string {
   return t('history.cardFrame.cardDataUnknownError');
 }
 
-export const HistoryCardFrame: React.FC<HistoryCardFrameProps> = ({ card, scope }) => {
+export const HistoryCardFrame: React.FC<HistoryCardFrameProps> = ({
+  card,
+  scope,
+  viewport: controlledViewport,
+  onViewportChange,
+}) => {
   const { t: translate } = useTranslation('history');
   const t = translate as HistoryTranslate;
   const [viewModesByCard, setViewModesByCard] = useState<Record<string, HistoryViewMode>>({});
   const defaultRange = card?.defaultRange ?? '24h';
-  const { viewport, setViewport } = useTimeViewport(defaultRange, card?.cardId ?? 'empty');
+  const internalViewport = useTimeViewport(defaultRange, card?.cardId ?? 'empty');
+  const viewport = controlledViewport ?? internalViewport.viewport;
+  const setViewport = onViewportChange ?? internalViewport.setViewport;
   const selectedView = card ? viewModesByCard[card.cardId] ?? card.defaultView : 'line-chart';
   const shouldRenderSoilProfile = card?.cardType === 'soil' && selectedView === 'soil-profile';
   const shouldRenderDendroGrowth = card?.cardType === 'dendro' && selectedView === 'growth-timeline';

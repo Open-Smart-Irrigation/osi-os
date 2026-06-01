@@ -394,4 +394,33 @@ export interface HistoryWorkspace {
   [futureField: string]: unknown;
 }
 
+export interface HistoryCardPreference {
+  cardId: string;
+  scope: HistoryCardScope;
+  pinned: boolean;
+  manualOrder: number | null;
+  openCount: number;
+  lastOpenedAt: string | null;
+  lastViewMode: HistoryViewMode | null;
+  hidden: boolean;
+  updatedAt: string;
+}
+
+export interface HistoryWorkspaceRecord {
+  id: number;
+  userId: number;
+  ownerUserUuid: string | null;
+  zoneId: number | null;
+  name: string;
+  isDefault: boolean;
+  workspace: HistoryWorkspace;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface HistoryWorkspaceListResponse {
+  generatedAt: string;
+  workspaces: HistoryWorkspaceRecord[];
+}
+
 export { HistoryI18nKeys } from './i18nKeys.ts';

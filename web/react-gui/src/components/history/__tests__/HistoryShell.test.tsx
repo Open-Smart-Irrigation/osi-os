@@ -28,6 +28,13 @@ const { translateForTest } = vi.hoisted(() => {
     'history.desktop.toolbarTitle': 'Toolbar',
     'history.desktop.toolbarPlaceholder': 'Date range, aggregation, export, and sync controls land here in the visualization slice.',
     'history.desktop.maxPanels': 'Up to {{count}} comparison panels',
+    'history.desktop.singleMode': 'Single',
+    'history.desktop.comparisonMode': 'Comparison',
+    'history.desktop.addPanel': 'Add panel {{title}}',
+    'history.desktop.removePanel': 'Remove panel',
+    'history.desktop.panelLimitWarning': 'Only {{count}} comparison panels can be shown on this edge gateway.',
+    'history.desktop.selectedTimestampNone': 'No timestamp selected',
+    'history.desktop.selectedTimestamp': 'Selected timestamp: {{timestamp}}',
     'history.desktop.inspectorTitle': 'Inspector',
     'history.desktop.inspectorPlaceholder': 'Select a timestamp or calendar cell to see interpretation, events, data quality, and advanced metadata.',
     'history.mobile.zoneLabel': 'Zone',
@@ -36,6 +43,14 @@ const { translateForTest } = vi.hoisted(() => {
     'history.sidebar.availableCards': 'Available cards',
     'history.sidebar.savedWorkspaces': 'Saved workspaces',
     'history.sidebar.workspaceDisabled': 'Workspace saving is not enabled on this slice.',
+    'history.sidebar.workspaceName': 'Workspace name',
+    'history.sidebar.saveWorkspace': 'Save workspace',
+    'history.sidebar.updateWorkspace': 'Update workspace',
+    'history.sidebar.loadWorkspace': 'Load {{name}}',
+    'history.sidebar.deleteWorkspace': 'Delete {{name}}',
+    'history.sidebar.defaultWorkspaceName': 'Local workspace',
+    'history.sidebar.pinCard': 'Pin',
+    'history.sidebar.unpinCard': 'Unpin',
     'history.sidebar.none': 'None',
     'history.carousel.empty': 'No history cards are available for this zone yet.',
     'history.carousel.ariaLabel': 'History card carousel',
@@ -51,6 +66,11 @@ const { translateForTest } = vi.hoisted(() => {
     'history.cardFrame.timelineBrushKeyboardHelp': 'Use arrow keys to pan, plus or minus to zoom, and Home or Enter to reset.',
     'history.cardFrame.aggregationBadge': 'Aggregation: {{aggregation}}',
     'history.cardFrame.placeholderBody': 'Chart and calendar data will load here when card data APIs are enabled.',
+    'history.cardFrame.cardDataLoading': 'Loading card data...',
+    'history.cardFrame.cardDataError': 'Card data failed to load: {{message}}',
+    'history.cardFrame.cardDataUnknownError': 'Unknown error',
+    'history.workspace.unavailablePanel': 'Unavailable panel: {{cardId}}',
+    'history.workspace.repairPanel': 'Remove unavailable panel',
     'history.cardType.soil': 'Soil',
     'history.cardType.dendro': 'Dendro',
     'history.cardType.environment': 'Environment',
@@ -106,6 +126,12 @@ vi.mock('../../../services/api', () => ({
     getZoneCards: vi.fn(),
     getZoneCardData: vi.fn(),
     getGatewayCardData: vi.fn(),
+    markZoneCardOpened: vi.fn(),
+    setZoneCardPreference: vi.fn(),
+    getWorkspaces: vi.fn(),
+    createWorkspace: vi.fn(),
+    updateWorkspace: vi.fn(),
+    deleteWorkspace: vi.fn(),
   },
   irrigationZonesAPI: {
     getAll: vi.fn(),
@@ -200,6 +226,61 @@ describe('History shell', () => {
       freshness: { dataAsOf: '2026-05-31T10:00:00.000Z', syncState: 'local' },
       advancedFields: {},
     });
+    vi.mocked(historyAPI.markZoneCardOpened).mockResolvedValue({
+      cardId: 'soil-zone-1',
+      scope: 'zone',
+      pinned: false,
+      manualOrder: null,
+      openCount: 1,
+      lastOpenedAt: '2026-05-31T10:01:00.000Z',
+      lastViewMode: null,
+      hidden: false,
+      updatedAt: '2026-05-31T10:01:00.000Z',
+    });
+    vi.mocked(historyAPI.setZoneCardPreference).mockResolvedValue({
+      cardId: 'soil-zone-1',
+      scope: 'zone',
+      pinned: true,
+      manualOrder: null,
+      openCount: 1,
+      lastOpenedAt: '2026-05-31T10:01:00.000Z',
+      lastViewMode: null,
+      hidden: false,
+      updatedAt: '2026-05-31T10:01:00.000Z',
+    });
+    vi.mocked(historyAPI.getWorkspaces).mockResolvedValue({
+      generatedAt: '2026-05-31T10:00:00Z',
+      workspaces: [],
+    });
+    vi.mocked(historyAPI.createWorkspace).mockResolvedValue({
+      id: 1,
+      userId: 1,
+      ownerUserUuid: null,
+      zoneId: 1,
+      name: 'Local workspace',
+      isDefault: false,
+      workspace: {
+        schemaVersion: 1,
+        farmId: null,
+        hubId: null,
+        zoneId: 1,
+        zoneUuid: null,
+        selectedCards: ['soil-zone-1'],
+        panelOrder: ['soil-zone-1'],
+        collapsedPanels: [],
+        dateRange: { mode: 'relative', label: '24h', from: null, to: null },
+        aggregation: 'raw',
+        viewModesByCard: {},
+        enabledOverlays: {},
+        advancedOverlaySettings: {},
+        limits: { platform: 'edge', maxPanels: 4 },
+        inspector: { selectedTimestamp: null, open: true },
+        pinnedCards: [],
+        layout: 'single',
+      },
+      createdAt: '2026-05-31T10:00:00Z',
+      updatedAt: '2026-05-31T10:00:00Z',
+    });
   });
 
   it('keeps history unavailable and retryable when runtime feature flags fail', async () => {
@@ -271,5 +352,127 @@ describe('History shell', () => {
 
     fireEvent.click(buttons[1]);
     expect(onSelect).toHaveBeenCalledWith('environment-zone-1');
+  });
+
+  it('marks cards opened so the edge can update open count and last opened ordering hints', async () => {
+    vi.mocked(systemAPI.getFeatures).mockResolvedValue({
+      historyUxEnabled: true,
+      historyComparisonEnabled: false,
+      historyWorkspacesEnabled: false,
+      historyAdvancedOverlaysEnabled: false,
+      historyCloudAiEnabled: false,
+    });
+    vi.mocked(historyAPI.getZoneCards).mockResolvedValue({
+      zoneId: 1,
+      generatedAt: '2026-05-31T10:00:00Z',
+      cards: [
+        card(),
+        card({
+          cardId: 'environment-zone-1',
+          cardType: 'environment',
+          title: 'Environment',
+          defaultView: 'line-chart',
+          views: ['line-chart'],
+          ordering: { pinned: false, score: 20, recentRank: 1 },
+        }),
+      ],
+    });
+
+    renderWithProviders(React.createElement(HistoryDashboard));
+
+    await waitFor(() => {
+      expect(historyAPI.markZoneCardOpened).toHaveBeenCalledWith(1, 'environment-zone-1');
+    });
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Soil card' }));
+
+    await waitFor(() => {
+      expect(historyAPI.markZoneCardOpened).toHaveBeenCalledWith(1, 'soil-zone-1');
+    });
+  });
+
+  it('renders stacked comparison panels with the edge cap and a warning when the cap is exceeded', async () => {
+    vi.mocked(systemAPI.getFeatures).mockResolvedValue({
+      historyUxEnabled: true,
+      historyComparisonEnabled: true,
+      historyWorkspacesEnabled: true,
+      historyAdvancedOverlaysEnabled: false,
+      historyCloudAiEnabled: false,
+    });
+    vi.mocked(historyAPI.getZoneCards).mockResolvedValue({
+      zoneId: 1,
+      generatedAt: '2026-05-31T10:00:00Z',
+      cards: ['soil-1', 'soil-2', 'soil-3', 'soil-4', 'soil-5'].map((cardId, index) =>
+        card({
+          cardId,
+          title: `Soil ${index + 1}`,
+          ordering: { pinned: false, score: 50 - index, recentRank: index + 1 },
+        }),
+      ),
+    });
+
+    renderWithProviders(React.createElement(HistoryDashboard));
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Comparison' }));
+    for (const name of ['Soil 2', 'Soil 3', 'Soil 4', 'Soil 5']) {
+      fireEvent.click(await screen.findByRole('button', { name: `Add panel ${name}` }));
+    }
+
+    await waitFor(() => {
+      expect(screen.getAllByTestId('history-comparison-panel')).toHaveLength(4);
+    });
+    expect(screen.getByText('Only 4 comparison panels can be shown on this edge gateway.')).toBeInTheDocument();
+    expect(screen.getByText('No timestamp selected')).toBeInTheDocument();
+  });
+
+  it('loads saved workspaces and renders dangling card IDs as unavailable panels', async () => {
+    vi.mocked(systemAPI.getFeatures).mockResolvedValue({
+      historyUxEnabled: true,
+      historyComparisonEnabled: true,
+      historyWorkspacesEnabled: true,
+      historyAdvancedOverlaysEnabled: false,
+      historyCloudAiEnabled: false,
+    });
+    vi.mocked(historyAPI.getWorkspaces).mockResolvedValue({
+      generatedAt: '2026-05-31T10:00:00Z',
+      workspaces: [
+        {
+          id: 8,
+          userId: 1,
+          ownerUserUuid: null,
+          zoneId: 1,
+          name: 'Morning check',
+          isDefault: false,
+          workspace: {
+            schemaVersion: 1,
+            farmId: null,
+            hubId: null,
+            zoneId: 1,
+            zoneUuid: null,
+            selectedCards: ['missing-card', 'soil-zone-1'],
+            panelOrder: ['missing-card', 'soil-zone-1'],
+            collapsedPanels: [],
+            dateRange: { mode: 'relative', label: '24h', from: null, to: null },
+            aggregation: 'raw',
+            viewModesByCard: {},
+            enabledOverlays: {},
+            advancedOverlaySettings: {},
+            limits: { platform: 'edge', maxPanels: 4 },
+            inspector: { selectedTimestamp: null, open: true },
+            pinnedCards: [],
+            layout: 'stacked',
+          },
+          createdAt: '2026-05-31T10:00:00Z',
+          updatedAt: '2026-05-31T10:00:00Z',
+        },
+      ],
+    });
+
+    renderWithProviders(React.createElement(HistoryDashboard));
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Load Morning check' }));
+
+    expect(await screen.findByText('Unavailable panel: missing-card')).toBeInTheDocument();
+    expect(screen.getAllByTestId('history-comparison-panel')).toHaveLength(2);
   });
 });

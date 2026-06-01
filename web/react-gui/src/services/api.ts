@@ -16,7 +16,12 @@ import type {
   CoverageConfidence,
   HistoryRangeSelection,
   HistoryCardDataRequest,
+  HistoryCardPreference,
+  HistoryWorkspace,
+  HistoryWorkspaceListResponse,
+  HistoryWorkspaceRecord,
 } from '../history/types';
+import { migrateHistoryWorkspace } from '../history/workspaceModel';
 import type {
   Device,
   LoginRequest,
@@ -531,6 +536,64 @@ function normaliseHistoryAdvancedResponse(row: any): HistoryAdvancedResponse {
   };
 }
 
+function normaliseHistoryCardPreference(row: any): HistoryCardPreference {
+  return {
+    cardId: String(row?.cardId ?? row?.card_id ?? ''),
+    scope: String(row?.scope ?? row?.scope_type ?? 'zone') as HistoryCardScope,
+    pinned: asBoolean(row?.pinned),
+    manualOrder: row?.manualOrder ?? row?.manual_order ?? null,
+    openCount: Number(row?.openCount ?? row?.open_count ?? 0),
+    lastOpenedAt: row?.lastOpenedAt ?? row?.last_opened_at ?? null,
+    lastViewMode: (row?.lastViewMode ?? row?.last_view_mode ?? null) as HistoryViewMode | null,
+    hidden: asBoolean(row?.hidden),
+    updatedAt: String(row?.updatedAt ?? row?.updated_at ?? ''),
+  };
+}
+
+function parseHistoryWorkspacePayload(raw: any): unknown {
+  if (typeof raw !== 'string') return raw;
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return {};
+  }
+}
+
+function normaliseHistoryWorkspaceRecord(row: any): HistoryWorkspaceRecord {
+  const rawWorkspace = parseHistoryWorkspacePayload(row?.workspace ?? row?.workspace_json ?? {});
+  const rawWorkspaceRecord = rawWorkspace && typeof rawWorkspace === 'object' && !Array.isArray(rawWorkspace)
+    ? rawWorkspace as Record<string, any>
+    : {};
+  const zoneId = row?.zoneId ?? row?.zone_id ?? null;
+  const workspace = migrateHistoryWorkspace(rawWorkspace, {
+    platform: 'edge',
+    farmId: rawWorkspaceRecord.farmId ?? rawWorkspaceRecord.farm_id ?? null,
+    hubId: rawWorkspaceRecord.hubId ?? rawWorkspaceRecord.hub_id ?? null,
+    zoneId: zoneId === null || zoneId === undefined ? null : Number(zoneId),
+    zoneUuid: rawWorkspaceRecord.zoneUuid ?? rawWorkspaceRecord.zone_uuid ?? null,
+  });
+
+  return {
+    id: Number(row?.id ?? 0),
+    userId: Number(row?.userId ?? row?.user_id ?? 0),
+    ownerUserUuid: row?.ownerUserUuid ?? row?.owner_user_uuid ?? null,
+    zoneId: zoneId === null || zoneId === undefined ? null : Number(zoneId),
+    name: String(row?.name ?? ''),
+    isDefault: asBoolean(row?.isDefault ?? row?.is_default),
+    workspace,
+    createdAt: String(row?.createdAt ?? row?.created_at ?? ''),
+    updatedAt: String(row?.updatedAt ?? row?.updated_at ?? ''),
+  };
+}
+
+function normaliseHistoryWorkspaceListResponse(row: any): HistoryWorkspaceListResponse {
+  const rows = Array.isArray(row?.workspaces) ? row.workspaces : [];
+  return {
+    generatedAt: String(row?.generatedAt ?? row?.generated_at ?? ''),
+    workspaces: rows.map(normaliseHistoryWorkspaceRecord),
+  };
+}
+
 function buildHistoryCardDataParams(request: HistoryCardDataRequest): URLSearchParams {
   const params = new URLSearchParams({
     view: request.view,
@@ -941,6 +1004,30 @@ export const historyAPI = {
     return normaliseHistoryCardSummaryResponse(response.data);
   },
 
+  setZoneCardPreference: async (
+    zoneId: number,
+    cardId: string,
+    payload: Partial<Pick<HistoryCardPreference, 'pinned' | 'manualOrder' | 'lastViewMode' | 'hidden'>>,
+  ): Promise<HistoryCardPreference> => {
+    const response = await api.put(
+      `/api/history/zones/${zoneId}/cards/${encodeURIComponent(cardId)}/preferences`,
+      payload,
+    );
+    return normaliseHistoryCardPreference(response.data);
+  },
+
+  markZoneCardOpened: async (
+    zoneId: number,
+    cardId: string,
+    payload: Partial<Pick<HistoryCardPreference, 'lastViewMode'>> = {},
+  ): Promise<HistoryCardPreference> => {
+    const response = await api.post(
+      `/api/history/zones/${zoneId}/cards/${encodeURIComponent(cardId)}/opened`,
+      payload,
+    );
+    return normaliseHistoryCardPreference(response.data);
+  },
+
   getZoneCardData: async (
     zoneId: number,
     cardId: string,
@@ -985,6 +1072,38 @@ export const historyAPI = {
       { params },
     );
     return normaliseHistoryAdvancedResponse(response.data);
+  },
+
+  getWorkspaces: async (): Promise<HistoryWorkspaceListResponse> => {
+    const response = await api.get('/api/history/workspaces');
+    return normaliseHistoryWorkspaceListResponse(response.data);
+  },
+
+  createWorkspace: async (payload: {
+    name: string;
+    zoneId: number | null;
+    workspace: HistoryWorkspace;
+    isDefault?: boolean;
+  }): Promise<HistoryWorkspaceRecord> => {
+    const response = await api.post('/api/history/workspaces', payload);
+    return normaliseHistoryWorkspaceRecord(response.data);
+  },
+
+  updateWorkspace: async (
+    workspaceId: number,
+    payload: Partial<{
+      name: string;
+      zoneId: number | null;
+      workspace: HistoryWorkspace;
+      isDefault: boolean;
+    }>,
+  ): Promise<HistoryWorkspaceRecord> => {
+    const response = await api.put(`/api/history/workspaces/${workspaceId}`, payload);
+    return normaliseHistoryWorkspaceRecord(response.data);
+  },
+
+  deleteWorkspace: async (workspaceId: number): Promise<void> => {
+    await api.delete(`/api/history/workspaces/${workspaceId}`);
   },
 };
 

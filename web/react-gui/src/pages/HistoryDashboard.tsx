@@ -8,10 +8,21 @@ import { HistoryMobileShell } from '../components/history/HistoryMobileShell';
 import { useAuth } from '../contexts/AuthContext';
 import { useFeatureFlags } from '../history/useFeatureFlags';
 import { useHistoryCards } from '../history/useHistoryCards';
-import { irrigationZonesAPI } from '../services/api';
+import {
+  buildDefaultHistoryWorkspace,
+  migrateHistoryWorkspace,
+  updateWorkspaceSelectedCards,
+  type HistoryWorkspaceContext,
+} from '../history/workspaceModel';
+import { historyAPI, irrigationZonesAPI } from '../services/api';
+import type { HistoryWorkspace, HistoryWorkspaceRecord } from '../history/types';
 import type { IrrigationZone } from '../types/farming';
 
 const zonesFetcher = () => irrigationZonesAPI.getAll();
+
+function metadataString(value: unknown): string | null {
+  return typeof value === 'string' && value.trim() ? value : null;
+}
 
 export const HistoryDashboard: React.FC = () => {
   const { username, logout } = useAuth();
@@ -20,6 +31,9 @@ export const HistoryDashboard: React.FC = () => {
   const featureFlags = useFeatureFlags();
   const [selectedZoneId, setSelectedZoneId] = useState<number | null>(null);
   const [selectedCardId, setSelectedCardId] = useState<string | null>(null);
+  const [activeWorkspace, setActiveWorkspace] = useState<HistoryWorkspace | null>(null);
+  const [activeWorkspaceId, setActiveWorkspaceId] = useState<number | null>(null);
+  const [panelCapWarning, setPanelCapWarning] = useState(false);
 
   const {
     data: zones,
@@ -46,6 +60,16 @@ export const HistoryDashboard: React.FC = () => {
     refresh: refreshCards,
   } = useHistoryCards(selectedZoneId, featureFlags.historyEnabled);
 
+  const workspacesEnabled = featureFlags.historyEnabled && featureFlags.flags.historyWorkspacesEnabled;
+  const {
+    data: workspaceResponse,
+    mutate: refreshWorkspaces,
+  } = useSWR(
+    workspacesEnabled ? '/api/history/workspaces' : null,
+    () => historyAPI.getWorkspaces(),
+    { revalidateOnFocus: true },
+  );
+
   useEffect(() => {
     if (cards.length === 0) {
       setSelectedCardId(null);
@@ -60,6 +84,122 @@ export const HistoryDashboard: React.FC = () => {
     () => cards.find((card) => card.cardId === selectedCardId) ?? null,
     [cards, selectedCardId],
   );
+
+  const workspaceContext = useMemo<HistoryWorkspaceContext>(() => ({
+    platform: 'edge',
+    farmId: null,
+    hubId: null,
+    zoneId: selectedZoneId,
+    zoneUuid: metadataString(selectedCard?.metadata.zoneUuid),
+  }), [selectedCard?.metadata.zoneUuid, selectedZoneId]);
+
+  const defaultWorkspace = useMemo(
+    () => buildDefaultHistoryWorkspace({
+      cards,
+      selectedCardId,
+      context: workspaceContext,
+      layout: 'single',
+    }),
+    [cards, selectedCardId, workspaceContext],
+  );
+  const workspace = activeWorkspace ?? defaultWorkspace;
+
+  useEffect(() => {
+    if (!selectedZoneId || !selectedCardId || !featureFlags.historyEnabled) return;
+    historyAPI.markZoneCardOpened(selectedZoneId, selectedCardId).catch(() => undefined);
+  }, [featureFlags.historyEnabled, selectedCardId, selectedZoneId]);
+
+  useEffect(() => {
+    setActiveWorkspace(null);
+    setActiveWorkspaceId(null);
+    setPanelCapWarning(false);
+  }, [selectedZoneId]);
+
+  const handleSelectCard = (cardId: string) => {
+    setSelectedCardId(cardId);
+    setPanelCapWarning(false);
+    setActiveWorkspace((current) => {
+      if (!current || current.layout !== 'single') return current;
+      return {
+        ...current,
+        selectedCards: [cardId],
+        panelOrder: [cardId],
+      };
+    });
+  };
+
+  const handleTogglePinned = async (cardId: string, pinned: boolean) => {
+    if (!selectedZoneId) return;
+    await historyAPI.setZoneCardPreference(selectedZoneId, cardId, { pinned });
+    refreshCards();
+  };
+
+  const handleWorkspaceLayoutChange = (layout: HistoryWorkspace['layout']) => {
+    setPanelCapWarning(false);
+    setActiveWorkspace((current) => migrateHistoryWorkspace(
+      {
+        ...(current ?? defaultWorkspace),
+        layout,
+        selectedCards: layout === 'single' && selectedCardId ? [selectedCardId] : (current ?? defaultWorkspace).selectedCards,
+        panelOrder: layout === 'single' && selectedCardId ? [selectedCardId] : (current ?? defaultWorkspace).panelOrder,
+      },
+      workspaceContext,
+    ));
+  };
+
+  const handleToggleComparisonCard = (cardId: string, selected: boolean) => {
+    const baseWorkspace = activeWorkspace ?? migrateHistoryWorkspace(
+      {
+        ...defaultWorkspace,
+        layout: 'stacked',
+      },
+      workspaceContext,
+    );
+    const result = updateWorkspaceSelectedCards(baseWorkspace, cardId, selected);
+    setActiveWorkspace(result.workspace);
+    setPanelCapWarning(result.capped);
+  };
+
+  const handleLoadWorkspace = (record: HistoryWorkspaceRecord) => {
+    const migrated = migrateHistoryWorkspace(record.workspace, workspaceContext);
+    setActiveWorkspace(migrated);
+    setActiveWorkspaceId(record.id);
+    setPanelCapWarning(false);
+    const firstAvailableCardId = migrated.selectedCards.find((cardId) => cards.some((card) => card.cardId === cardId));
+    setSelectedCardId(firstAvailableCardId ?? migrated.selectedCards[0] ?? null);
+  };
+
+  const handleSaveWorkspace = async (name: string) => {
+    if (!workspacesEnabled) return;
+    const saved = await historyAPI.createWorkspace({
+      name,
+      zoneId: selectedZoneId,
+      workspace,
+    });
+    setActiveWorkspace(saved.workspace);
+    setActiveWorkspaceId(saved.id);
+    await refreshWorkspaces();
+  };
+
+  const handleUpdateWorkspace = async (name: string) => {
+    if (!workspacesEnabled || activeWorkspaceId === null) return;
+    const saved = await historyAPI.updateWorkspace(activeWorkspaceId, {
+      name,
+      zoneId: selectedZoneId,
+      workspace,
+    });
+    setActiveWorkspace(saved.workspace);
+    await refreshWorkspaces();
+  };
+
+  const handleDeleteWorkspace = async (workspaceId: number) => {
+    await historyAPI.deleteWorkspace(workspaceId);
+    if (activeWorkspaceId === workspaceId) {
+      setActiveWorkspace(null);
+      setActiveWorkspaceId(null);
+    }
+    await refreshWorkspaces();
+  };
 
   const availableZones = zones ?? [];
   const shellReady = featureFlags.historyEnabled && availableZones.length > 0 && !zonesError;
@@ -177,7 +317,7 @@ export const HistoryDashboard: React.FC = () => {
               onSelectZone={setSelectedZoneId}
               cards={cards}
               selectedCard={selectedCard}
-              onSelectCard={setSelectedCardId}
+              onSelectCard={handleSelectCard}
             />
             <HistoryDesktopShell
               zones={availableZones}
@@ -185,7 +325,20 @@ export const HistoryDashboard: React.FC = () => {
               onSelectZone={setSelectedZoneId}
               cards={cards}
               selectedCard={selectedCard}
-              onSelectCard={setSelectedCardId}
+              onSelectCard={handleSelectCard}
+              workspace={workspace}
+              workspaces={workspaceResponse?.workspaces ?? []}
+              activeWorkspaceId={activeWorkspaceId}
+              comparisonEnabled={featureFlags.flags.historyComparisonEnabled}
+              workspacesEnabled={featureFlags.flags.historyWorkspacesEnabled}
+              panelCapWarning={panelCapWarning}
+              onTogglePinned={handleTogglePinned}
+              onLoadWorkspace={handleLoadWorkspace}
+              onSaveWorkspace={handleSaveWorkspace}
+              onUpdateWorkspace={handleUpdateWorkspace}
+              onDeleteWorkspace={handleDeleteWorkspace}
+              onWorkspaceLayoutChange={handleWorkspaceLayoutChange}
+              onToggleComparisonCard={handleToggleComparisonCard}
             />
           </>
         )}
