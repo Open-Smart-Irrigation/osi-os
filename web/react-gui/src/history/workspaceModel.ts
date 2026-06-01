@@ -1,4 +1,5 @@
 import { maxPanelsByPlatform } from './platformLimits';
+import { defaultAggregationForRange } from './rangeModel';
 import { WorkspaceSchemaVersion } from './types';
 import type {
   HistoryAggregationLevel,
@@ -141,11 +142,20 @@ export function buildDefaultHistoryWorkspace(args: {
 }): HistoryWorkspace {
   const selectedCardId = args.selectedCardId ?? args.cards[0]?.cardId ?? null;
   const selectedCards = selectedCardId ? [selectedCardId] : [];
+  const selectedCard = args.cards.find((card) => card.cardId === selectedCardId) ?? args.cards[0] ?? null;
+  const defaultRange = selectedCard?.defaultRange ?? '24h';
   return migrateHistoryWorkspace(
     {
       selectedCards,
       panelOrder: selectedCards,
       pinnedCards: args.cards.filter((card) => card.ordering.pinned).map((card) => card.cardId),
+      collapsedPanels: [],
+      dateRange: { mode: 'relative', label: defaultRange, from: null, to: null },
+      aggregation: defaultAggregationForRange(defaultRange),
+      viewModesByCard: selectedCard ? { [selectedCard.cardId]: selectedCard.defaultView } : {},
+      enabledOverlays: {},
+      advancedOverlaySettings: {},
+      inspector: { selectedTimestamp: null, open: true },
       layout: args.layout ?? 'single',
     },
     args.context,

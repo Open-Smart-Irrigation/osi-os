@@ -13,10 +13,13 @@ import { useHistoryCardData, type HistoryCardDataScope } from '../../history/use
 import { useHistoryCardAdvancedData } from '../../history/useHistoryCardAdvancedData';
 import { useTimeViewport, type HistoryTimeViewport } from '../../history/useTimeViewport';
 import type {
+  HistoryAdvancedOverlaySettings,
   CoverageConfidence,
   HistoryCardSummary,
   HistoryCardType,
   HistoryAggregationLevel,
+  HistoryOverlayId,
+  HistoryWorkspaceInspector,
   HistorySyncState,
   HistoryViewMode,
 } from '../../history/types';
@@ -26,6 +29,16 @@ interface HistoryCardFrameProps {
   scope: HistoryCardDataScope | null;
   viewport?: HistoryTimeViewport;
   onViewportChange?: (viewport: HistoryTimeViewport) => void;
+  selectedView?: HistoryViewMode;
+  onViewModeChange?: (cardId: string, view: HistoryViewMode) => void;
+  overlays?: readonly HistoryOverlayId[];
+  onOverlaysChange?: (cardId: string, overlays: HistoryOverlayId[]) => void;
+  advancedOverlaySettings?: HistoryAdvancedOverlaySettings;
+  onAdvancedOverlaySettingsChange?: (cardId: string, settings: HistoryAdvancedOverlaySettings) => void;
+  collapsed?: boolean;
+  onCollapsedChange?: (cardId: string, collapsed: boolean) => void;
+  inspector?: HistoryWorkspaceInspector;
+  onInspectorChange?: (inspector: HistoryWorkspaceInspector) => void;
 }
 
 type HistoryTranslate = (key: string, options?: Record<string, unknown>) => string;
@@ -68,6 +81,9 @@ export const HistoryCardFrame: React.FC<HistoryCardFrameProps> = ({
   scope,
   viewport: controlledViewport,
   onViewportChange,
+  selectedView: controlledSelectedView,
+  onViewModeChange,
+  overlays = [],
 }) => {
   const { t: translate } = useTranslation('history');
   const t = translate as HistoryTranslate;
@@ -76,7 +92,7 @@ export const HistoryCardFrame: React.FC<HistoryCardFrameProps> = ({
   const internalViewport = useTimeViewport(defaultRange, card?.cardId ?? 'empty');
   const viewport = controlledViewport ?? internalViewport.viewport;
   const setViewport = onViewportChange ?? internalViewport.setViewport;
-  const selectedView = card ? viewModesByCard[card.cardId] ?? card.defaultView : 'line-chart';
+  const selectedView = card ? controlledSelectedView ?? viewModesByCard[card.cardId] ?? card.defaultView : 'line-chart';
   const shouldRenderSoilProfile = card?.cardType === 'soil' && selectedView === 'soil-profile';
   const shouldRenderDendroGrowth = card?.cardType === 'dendro' && selectedView === 'growth-timeline';
   const shouldRenderEnvironmentLineChart = card?.cardType === 'environment' && selectedView === 'line-chart';
@@ -90,7 +106,7 @@ export const HistoryCardFrame: React.FC<HistoryCardFrameProps> = ({
     view: selectedView,
     range: viewport.range,
     aggregation: viewport.aggregation,
-    overlays: [],
+    overlays,
     enabled: Boolean(card?.availability.available),
   });
   const advancedData = useHistoryCardAdvancedData({
@@ -99,7 +115,7 @@ export const HistoryCardFrame: React.FC<HistoryCardFrameProps> = ({
     view: selectedView,
     range: viewport.range,
     aggregation: viewport.aggregation,
-    overlays: [],
+    overlays,
     enabled: Boolean(card?.availability.available && shouldRenderAdvanced),
   });
 
@@ -157,7 +173,13 @@ export const HistoryCardFrame: React.FC<HistoryCardFrameProps> = ({
               key={view}
               type="button"
               aria-pressed={selectedView === view}
-              onClick={() => setViewModesByCard((current) => ({ ...current, [card.cardId]: view }))}
+              onClick={() => {
+                if (onViewModeChange) {
+                  onViewModeChange(card.cardId, view);
+                  return;
+                }
+                setViewModesByCard((current) => ({ ...current, [card.cardId]: view }));
+              }}
               className={`rounded-md border px-3 py-2 text-sm font-semibold transition-colors ${
                 selectedView === view
                   ? 'border-[var(--primary)] bg-[var(--primary)] text-white'

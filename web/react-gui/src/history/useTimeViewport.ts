@@ -1,6 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { defaultAggregationForRange } from './rangeModel';
-import type { HistoryAggregationLevel, HistoryRangeLabel, HistoryRangeSelection } from './types';
+import type {
+  HistoryAggregationLevel,
+  HistoryRangeLabel,
+  HistoryRangeSelection,
+  HistoryWorkspaceRange,
+} from './types';
 
 const HOUR_MS = 60 * 60 * 1000;
 const DAY_MS = 24 * HOUR_MS;
@@ -82,6 +87,37 @@ export function createDefaultTimeViewport(
       timezone,
     },
     aggregation: defaultAggregationForRange(rangeLabel),
+  };
+}
+
+export function createTimeViewportFromWorkspaceRange(
+  workspaceRange: HistoryWorkspaceRange,
+  aggregation: HistoryAggregationLevel,
+  now = new Date(),
+  timezone = 'UTC',
+): HistoryTimeViewport {
+  const fallback = createDefaultTimeViewport(workspaceRange.label, now, timezone);
+
+  return {
+    range: {
+      mode: workspaceRange.mode,
+      label: workspaceRange.label,
+      from: workspaceRange.from ?? fallback.range.from,
+      to: workspaceRange.to ?? fallback.range.to,
+      timezone,
+    },
+    aggregation,
+  };
+}
+
+export function workspaceRangeFromTimeViewport(
+  viewport: HistoryTimeViewport,
+): HistoryWorkspaceRange {
+  return {
+    mode: viewport.range.mode,
+    label: viewport.range.label,
+    from: viewport.range.from,
+    to: viewport.range.to,
   };
 }
 

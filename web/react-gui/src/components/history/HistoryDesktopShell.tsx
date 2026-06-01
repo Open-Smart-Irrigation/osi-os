@@ -4,8 +4,16 @@ import { HistoryCardFrame } from './HistoryCardFrame';
 import { HistorySidebar } from './HistorySidebar';
 import { maxPanelsByPlatform } from '../../history/platformLimits';
 import { resolveWorkspacePanels } from '../../history/workspaceModel';
-import { useTimeViewport } from '../../history/useTimeViewport';
-import type { HistoryCardSummary, HistoryWorkspace, HistoryWorkspaceRecord } from '../../history/types';
+import type { HistoryTimeViewport } from '../../history/useTimeViewport';
+import type {
+  HistoryAdvancedOverlaySettings,
+  HistoryCardSummary,
+  HistoryOverlayId,
+  HistoryViewMode,
+  HistoryWorkspace,
+  HistoryWorkspaceInspector,
+  HistoryWorkspaceRecord,
+} from '../../history/types';
 import type { IrrigationZone } from '../../types/farming';
 
 interface HistoryDesktopShellProps {
@@ -21,6 +29,7 @@ interface HistoryDesktopShellProps {
   comparisonEnabled: boolean;
   workspacesEnabled: boolean;
   panelCapWarning: boolean;
+  viewport: HistoryTimeViewport;
   onTogglePinned: (cardId: string, pinned: boolean) => void;
   onLoadWorkspace: (workspace: HistoryWorkspaceRecord) => void;
   onSaveWorkspace: (name: string) => void;
@@ -28,6 +37,12 @@ interface HistoryDesktopShellProps {
   onDeleteWorkspace: (workspaceId: number) => void;
   onWorkspaceLayoutChange: (layout: HistoryWorkspace['layout']) => void;
   onToggleComparisonCard: (cardId: string, selected: boolean) => void;
+  onViewportChange: (viewport: HistoryTimeViewport) => void;
+  onCardViewModeChange: (cardId: string, view: HistoryViewMode) => void;
+  onCardOverlaysChange: (cardId: string, overlays: HistoryOverlayId[]) => void;
+  onAdvancedOverlaySettingsChange: (cardId: string, settings: HistoryAdvancedOverlaySettings) => void;
+  onPanelCollapsedChange: (cardId: string, collapsed: boolean) => void;
+  onInspectorChange: (inspector: HistoryWorkspaceInspector) => void;
 }
 
 export const HistoryDesktopShell: React.FC<HistoryDesktopShellProps> = ({
@@ -43,6 +58,7 @@ export const HistoryDesktopShell: React.FC<HistoryDesktopShellProps> = ({
   comparisonEnabled,
   workspacesEnabled,
   panelCapWarning,
+  viewport,
   onTogglePinned,
   onLoadWorkspace,
   onSaveWorkspace,
@@ -50,14 +66,22 @@ export const HistoryDesktopShell: React.FC<HistoryDesktopShellProps> = ({
   onDeleteWorkspace,
   onWorkspaceLayoutChange,
   onToggleComparisonCard,
+  onViewportChange,
+  onCardViewModeChange,
+  onCardOverlaysChange,
+  onAdvancedOverlaySettingsChange,
+  onPanelCollapsedChange,
+  onInspectorChange,
 }) => {
   const { t } = useTranslation('history');
-  const defaultRange = selectedCard?.defaultRange ?? workspace.dateRange.label;
-  const { viewport, setViewport } = useTimeViewport(defaultRange, workspace.selectedCards.join('|') || 'empty');
   const resolvedPanels = resolveWorkspacePanels(workspace, cards);
   const selectedCards = new Set(workspace.selectedCards);
   const showPanelLimitWarning = panelCapWarning || resolvedPanels.droppedPanelCount > 0;
   const selectedTimestamp = workspace.inspector.selectedTimestamp;
+  const selectedViewForCard = (card: HistoryCardSummary): HistoryViewMode =>
+    workspace.viewModesByCard[card.cardId] ?? card.defaultView;
+  const overlaysForCard = (cardId: string): HistoryOverlayId[] =>
+    workspace.enabledOverlays[cardId] ?? [];
 
   return (
     <div className="hidden min-h-[42rem] overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--bg)] lg:grid lg:grid-cols-[18rem_minmax(0,1fr)_18rem]">
@@ -157,7 +181,17 @@ export const HistoryDesktopShell: React.FC<HistoryDesktopShellProps> = ({
                     card={panel.card}
                     scope={selectedZoneId === null ? null : { type: 'zone', zoneId: selectedZoneId }}
                     viewport={viewport}
-                    onViewportChange={setViewport}
+                    onViewportChange={onViewportChange}
+                    selectedView={panel.card ? selectedViewForCard(panel.card) : undefined}
+                    onViewModeChange={onCardViewModeChange}
+                    overlays={overlaysForCard(panel.cardId)}
+                    onOverlaysChange={onCardOverlaysChange}
+                    advancedOverlaySettings={workspace.advancedOverlaySettings[panel.cardId]}
+                    onAdvancedOverlaySettingsChange={onAdvancedOverlaySettingsChange}
+                    collapsed={workspace.collapsedPanels.includes(panel.cardId)}
+                    onCollapsedChange={onPanelCollapsedChange}
+                    inspector={workspace.inspector}
+                    onInspectorChange={onInspectorChange}
                   />
                 ) : (
                   <section className="rounded-lg border border-dashed border-[var(--border)] bg-[var(--surface)] p-5">
@@ -181,7 +215,17 @@ export const HistoryDesktopShell: React.FC<HistoryDesktopShellProps> = ({
             card={selectedCard}
             scope={selectedZoneId === null ? null : { type: 'zone', zoneId: selectedZoneId }}
             viewport={viewport}
-            onViewportChange={setViewport}
+            onViewportChange={onViewportChange}
+            selectedView={selectedCard ? selectedViewForCard(selectedCard) : undefined}
+            onViewModeChange={onCardViewModeChange}
+            overlays={selectedCard ? overlaysForCard(selectedCard.cardId) : []}
+            onOverlaysChange={onCardOverlaysChange}
+            advancedOverlaySettings={selectedCard ? workspace.advancedOverlaySettings[selectedCard.cardId] : undefined}
+            onAdvancedOverlaySettingsChange={onAdvancedOverlaySettingsChange}
+            collapsed={selectedCard ? workspace.collapsedPanels.includes(selectedCard.cardId) : false}
+            onCollapsedChange={onPanelCollapsedChange}
+            inspector={workspace.inspector}
+            onInspectorChange={onInspectorChange}
           />
         )}
       </main>

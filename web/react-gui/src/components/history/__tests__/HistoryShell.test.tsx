@@ -8,7 +8,7 @@ import { SWRConfig } from 'swr';
 import { HistoryDashboard } from '../../../pages/HistoryDashboard';
 import { ThematicCardCarousel } from '../ThematicCardCarousel';
 import { systemAPI, historyAPI, irrigationZonesAPI } from '../../../services/api';
-import type { HistoryCardSummary } from '../../../history/types';
+import type { HistoryCardSummary, HistoryWorkspace } from '../../../history/types';
 
 const { translateForTest } = vi.hoisted(() => {
   const translations: Record<string, string> = {
@@ -281,6 +281,17 @@ describe('History shell', () => {
       createdAt: '2026-05-31T10:00:00Z',
       updatedAt: '2026-05-31T10:00:00Z',
     });
+    vi.mocked(historyAPI.updateWorkspace).mockImplementation(async (workspaceId, payload) => ({
+      id: workspaceId,
+      userId: 1,
+      ownerUserUuid: null,
+      zoneId: payload.zoneId,
+      name: payload.name,
+      isDefault: false,
+      workspace: payload.workspace,
+      createdAt: '2026-05-31T10:00:00Z',
+      updatedAt: '2026-05-31T10:02:00Z',
+    }));
   });
 
   it('keeps history unavailable and retryable when runtime feature flags fail', async () => {
@@ -474,5 +485,102 @@ describe('History shell', () => {
 
     expect(await screen.findByText('Unavailable panel: missing-card')).toBeInTheDocument();
     expect(screen.getAllByTestId('history-comparison-panel')).toHaveLength(2);
+  });
+
+  it('updates saved workspaces with live view and viewport state without dropping workspace fields', async () => {
+    vi.mocked(systemAPI.getFeatures).mockResolvedValue({
+      historyUxEnabled: true,
+      historyComparisonEnabled: true,
+      historyWorkspacesEnabled: true,
+      historyAdvancedOverlaysEnabled: true,
+      historyCloudAiEnabled: false,
+    });
+    const savedWorkspace: HistoryWorkspace = {
+      schemaVersion: 1,
+      farmId: null,
+      hubId: null,
+      zoneId: 1,
+      zoneUuid: 'zone-north',
+      selectedCards: ['soil-zone-1'],
+      panelOrder: ['soil-zone-1'],
+      collapsedPanels: ['soil-zone-1'],
+      dateRange: {
+        mode: 'absolute',
+        label: 'custom',
+        from: '2026-05-30T00:00:00.000Z',
+        to: '2026-05-31T00:00:00.000Z',
+      },
+      aggregation: 'hourly',
+      viewModesByCard: { 'soil-zone-1': 'soil-profile' },
+      enabledOverlays: { 'soil-zone-1': ['data-gaps', 'threshold-lines'] },
+      advancedOverlaySettings: {
+        'soil-zone-1': { normalize: true, separateYAxes: true },
+      },
+      limits: { platform: 'edge', maxPanels: 4 },
+      inspector: { selectedTimestamp: '2026-05-30T12:00:00.000Z', open: false },
+      pinnedCards: ['soil-zone-1'],
+      layout: 'single',
+      futurePanelState: { preserved: true },
+    };
+    vi.mocked(historyAPI.getWorkspaces).mockResolvedValue({
+      generatedAt: '2026-05-31T10:00:00Z',
+      workspaces: [
+        {
+          id: 9,
+          userId: 1,
+          ownerUserUuid: null,
+          zoneId: 1,
+          name: 'Detailed soil',
+          isDefault: false,
+          workspace: savedWorkspace,
+          createdAt: '2026-05-31T10:00:00Z',
+          updatedAt: '2026-05-31T10:00:00Z',
+        },
+      ],
+    });
+
+    renderWithProviders(React.createElement(HistoryDashboard));
+
+    await screen.findByRole('button', { name: 'Soil card' });
+    fireEvent.click(await screen.findByRole('button', { name: 'Load Detailed soil' }));
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Update workspace' })).not.toBeDisabled();
+    });
+    const lineChartButtons = await screen.findAllByRole('button', { name: 'Line Chart' });
+    fireEvent.click(lineChartButtons[1]);
+    fireEvent.wheel(screen.getAllByRole('region', { name: 'Timeline viewport' })[1], { deltaY: -100 });
+    fireEvent.click(screen.getByRole('button', { name: 'Update workspace' }));
+
+    await waitFor(() => {
+      expect(historyAPI.updateWorkspace).toHaveBeenCalledWith(
+        9,
+        expect.objectContaining({ name: 'Detailed soil', zoneId: 1 }),
+      );
+    });
+    const payload = vi.mocked(historyAPI.updateWorkspace).mock.calls[0][1];
+    const assertWorkspaceState = (persistedWorkspace: HistoryWorkspace) => {
+      expect(persistedWorkspace.viewModesByCard).toMatchObject({ 'soil-zone-1': 'line-chart' });
+      expect(persistedWorkspace.dateRange).toMatchObject({
+        mode: 'absolute',
+        label: 'custom',
+      });
+      expect(persistedWorkspace.dateRange.from).not.toBe(savedWorkspace.dateRange.from);
+      expect(persistedWorkspace.aggregation).toBe('auto');
+      expect(persistedWorkspace.enabledOverlays).toEqual(savedWorkspace.enabledOverlays);
+      expect(persistedWorkspace.advancedOverlaySettings).toEqual(savedWorkspace.advancedOverlaySettings);
+      expect(persistedWorkspace.collapsedPanels).toEqual(savedWorkspace.collapsedPanels);
+      expect(persistedWorkspace.inspector).toEqual(savedWorkspace.inspector);
+      expect(persistedWorkspace.futurePanelState).toEqual(savedWorkspace.futurePanelState);
+    };
+    assertWorkspaceState(payload.workspace);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Save workspace' }));
+    await waitFor(() => {
+      expect(historyAPI.createWorkspace).toHaveBeenCalledWith(
+        expect.objectContaining({ name: 'Detailed soil', zoneId: 1 }),
+      );
+    });
+    const createPayload = vi.mocked(historyAPI.createWorkspace).mock.calls[0][0];
+    assertWorkspaceState(createPayload.workspace);
   });
 });

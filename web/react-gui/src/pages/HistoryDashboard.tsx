@@ -14,14 +14,50 @@ import {
   updateWorkspaceSelectedCards,
   type HistoryWorkspaceContext,
 } from '../history/workspaceModel';
+import {
+  createTimeViewportFromWorkspaceRange,
+  useTimeViewport,
+  workspaceRangeFromTimeViewport,
+  type HistoryTimeViewport,
+} from '../history/useTimeViewport';
 import { historyAPI, irrigationZonesAPI } from '../services/api';
-import type { HistoryWorkspace, HistoryWorkspaceRecord } from '../history/types';
+import type {
+  HistoryAdvancedOverlaySettings,
+  HistoryCardSummary,
+  HistoryOverlayId,
+  HistoryViewMode,
+  HistoryWorkspace,
+  HistoryWorkspaceInspector,
+  HistoryWorkspaceRecord,
+} from '../history/types';
 import type { IrrigationZone } from '../types/farming';
 
 const zonesFetcher = () => irrigationZonesAPI.getAll();
 
 function metadataString(value: unknown): string | null {
   return typeof value === 'string' && value.trim() ? value : null;
+}
+
+function mergeLiveWorkspaceViewport(
+  workspace: HistoryWorkspace,
+  viewport: HistoryTimeViewport,
+  cards: readonly HistoryCardSummary[],
+): HistoryWorkspace {
+  const cardById = new Map(cards.map((card) => [card.cardId, card]));
+  const viewModesByCard = { ...workspace.viewModesByCard };
+  for (const cardId of workspace.selectedCards) {
+    const card = cardById.get(cardId);
+    if (card && !viewModesByCard[cardId]) {
+      viewModesByCard[cardId] = card.defaultView;
+    }
+  }
+
+  return {
+    ...workspace,
+    dateRange: workspaceRangeFromTimeViewport(viewport),
+    aggregation: viewport.aggregation,
+    viewModesByCard,
+  };
 }
 
 export const HistoryDashboard: React.FC = () => {
@@ -103,6 +139,35 @@ export const HistoryDashboard: React.FC = () => {
     [cards, selectedCardId, workspaceContext],
   );
   const workspace = activeWorkspace ?? defaultWorkspace;
+  const {
+    viewport,
+    setViewport,
+  } = useTimeViewport(workspace.dateRange.label, workspace.selectedCards.join('|') || 'empty');
+  const workspaceViewportKey = [
+    activeWorkspaceId ?? 'draft',
+    workspace.selectedCards.join('|'),
+    workspace.dateRange.mode,
+    workspace.dateRange.label,
+    workspace.dateRange.from ?? '',
+    workspace.dateRange.to ?? '',
+    workspace.aggregation,
+  ].join(':');
+  const workspaceForPersist = useMemo(
+    () => mergeLiveWorkspaceViewport(workspace, viewport, cards),
+    [cards, viewport, workspace],
+  );
+
+  useEffect(() => {
+    setViewport(createTimeViewportFromWorkspaceRange(
+      workspace.dateRange,
+      workspace.aggregation,
+      new Date(),
+      viewport.range.timezone,
+    ));
+  // Deliberately keyed to workspace-owned viewport fields only. User viewport
+  // gestures update `viewport`; they should not be overwritten by this sync.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [setViewport, workspaceViewportKey]);
 
   useEffect(() => {
     if (!selectedZoneId || !selectedCardId || !featureFlags.historyEnabled) return;
@@ -120,8 +185,9 @@ export const HistoryDashboard: React.FC = () => {
     setPanelCapWarning(false);
     setActiveWorkspace((current) => {
       if (!current || current.layout !== 'single') return current;
+      const baseWorkspace = mergeLiveWorkspaceViewport(current, viewport, cards);
       return {
-        ...current,
+        ...baseWorkspace,
         selectedCards: [cardId],
         panelOrder: [cardId],
       };
@@ -138,7 +204,7 @@ export const HistoryDashboard: React.FC = () => {
     setPanelCapWarning(false);
     setActiveWorkspace((current) => migrateHistoryWorkspace(
       {
-        ...(current ?? defaultWorkspace),
+        ...mergeLiveWorkspaceViewport(current ?? defaultWorkspace, viewport, cards),
         layout,
         selectedCards: layout === 'single' && selectedCardId ? [selectedCardId] : (current ?? defaultWorkspace).selectedCards,
         panelOrder: layout === 'single' && selectedCardId ? [selectedCardId] : (current ?? defaultWorkspace).panelOrder,
@@ -148,12 +214,16 @@ export const HistoryDashboard: React.FC = () => {
   };
 
   const handleToggleComparisonCard = (cardId: string, selected: boolean) => {
-    const baseWorkspace = activeWorkspace ?? migrateHistoryWorkspace(
-      {
-        ...defaultWorkspace,
-        layout: 'stacked',
-      },
-      workspaceContext,
+    const baseWorkspace = mergeLiveWorkspaceViewport(
+      activeWorkspace ?? migrateHistoryWorkspace(
+        {
+          ...defaultWorkspace,
+          layout: 'stacked',
+        },
+        workspaceContext,
+      ),
+      viewport,
+      cards,
     );
     const result = updateWorkspaceSelectedCards(baseWorkspace, cardId, selected);
     setActiveWorkspace(result.workspace);
@@ -174,7 +244,7 @@ export const HistoryDashboard: React.FC = () => {
     const saved = await historyAPI.createWorkspace({
       name,
       zoneId: selectedZoneId,
-      workspace,
+      workspace: workspaceForPersist,
     });
     setActiveWorkspace(saved.workspace);
     setActiveWorkspaceId(saved.id);
@@ -186,7 +256,7 @@ export const HistoryDashboard: React.FC = () => {
     const saved = await historyAPI.updateWorkspace(activeWorkspaceId, {
       name,
       zoneId: selectedZoneId,
-      workspace,
+      workspace: workspaceForPersist,
     });
     setActiveWorkspace(saved.workspace);
     await refreshWorkspaces();
@@ -199,6 +269,69 @@ export const HistoryDashboard: React.FC = () => {
       setActiveWorkspaceId(null);
     }
     await refreshWorkspaces();
+  };
+
+  const handleViewportChange = (nextViewport: HistoryTimeViewport) => {
+    setViewport(nextViewport);
+  };
+
+  const updateWorkspaceDraft = (update: (workspace: HistoryWorkspace) => HistoryWorkspace) => {
+    setActiveWorkspace((current) => update(mergeLiveWorkspaceViewport(current ?? workspace, viewport, cards)));
+  };
+
+  const handleCardViewModeChange = (cardId: string, view: HistoryViewMode) => {
+    updateWorkspaceDraft((current) => ({
+      ...current,
+      viewModesByCard: {
+        ...current.viewModesByCard,
+        [cardId]: view,
+      },
+    }));
+  };
+
+  const handleCardOverlaysChange = (cardId: string, overlays: HistoryOverlayId[]) => {
+    updateWorkspaceDraft((current) => ({
+      ...current,
+      enabledOverlays: {
+        ...current.enabledOverlays,
+        [cardId]: overlays,
+      },
+    }));
+  };
+
+  const handleAdvancedOverlaySettingsChange = (
+    cardId: string,
+    settings: HistoryAdvancedOverlaySettings,
+  ) => {
+    updateWorkspaceDraft((current) => ({
+      ...current,
+      advancedOverlaySettings: {
+        ...current.advancedOverlaySettings,
+        [cardId]: settings,
+      },
+    }));
+  };
+
+  const handlePanelCollapsedChange = (cardId: string, collapsed: boolean) => {
+    updateWorkspaceDraft((current) => {
+      const collapsedPanels = new Set(current.collapsedPanels);
+      if (collapsed) {
+        collapsedPanels.add(cardId);
+      } else {
+        collapsedPanels.delete(cardId);
+      }
+      return {
+        ...current,
+        collapsedPanels: Array.from(collapsedPanels),
+      };
+    });
+  };
+
+  const handleInspectorChange = (inspector: HistoryWorkspaceInspector) => {
+    updateWorkspaceDraft((current) => ({
+      ...current,
+      inspector,
+    }));
   };
 
   const availableZones = zones ?? [];
@@ -332,6 +465,7 @@ export const HistoryDashboard: React.FC = () => {
               comparisonEnabled={featureFlags.flags.historyComparisonEnabled}
               workspacesEnabled={featureFlags.flags.historyWorkspacesEnabled}
               panelCapWarning={panelCapWarning}
+              viewport={viewport}
               onTogglePinned={handleTogglePinned}
               onLoadWorkspace={handleLoadWorkspace}
               onSaveWorkspace={handleSaveWorkspace}
@@ -339,6 +473,12 @@ export const HistoryDashboard: React.FC = () => {
               onDeleteWorkspace={handleDeleteWorkspace}
               onWorkspaceLayoutChange={handleWorkspaceLayoutChange}
               onToggleComparisonCard={handleToggleComparisonCard}
+              onViewportChange={handleViewportChange}
+              onCardViewModeChange={handleCardViewModeChange}
+              onCardOverlaysChange={handleCardOverlaysChange}
+              onAdvancedOverlaySettingsChange={handleAdvancedOverlaySettingsChange}
+              onPanelCollapsedChange={handlePanelCollapsedChange}
+              onInspectorChange={handleInspectorChange}
             />
           </>
         )}
