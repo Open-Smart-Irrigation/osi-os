@@ -32,7 +32,18 @@
       "inspectorPlaceholder": "Select a timestamp or calendar cell to see interpretation, events, data quality, and advanced metadata."
     },
     "mobile": {
-      "zoneLabel": "Zone"
+      "zoneLabel": "Zone",
+      "actions": "History actions",
+      "openActions": "Open history actions"
+    },
+    "overview": {
+      "empty": "No history cards are available for this zone yet.",
+      "openCard": "Open {{title}} history",
+      "cardTypeLabel": "{{cardType}} card",
+      "pinCard": "Pin card",
+      "unpinCard": "Unpin card",
+      "pinned": "Pinned",
+      "alert": "Attention"
     },
     "detail": {
       "backToHistory": "Back to history",

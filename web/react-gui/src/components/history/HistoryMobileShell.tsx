@@ -1,7 +1,7 @@
 import React from 'react';
 import { useTranslation } from 'react-i18next';
-import { HistoryCardFrame } from './HistoryCardFrame';
-import { ThematicCardCarousel } from './ThematicCardCarousel';
+import { orderHistoryCards } from '../../history/useHistoryCards';
+import { HistoryOverviewCard } from './mobile/HistoryOverviewCard';
 import type { HistoryCardSummary } from '../../history/types';
 import type { IrrigationZone } from '../../types/farming';
 
@@ -10,8 +10,7 @@ interface HistoryMobileShellProps {
   selectedZoneId: number | null;
   onSelectZone: (zoneId: number) => void;
   cards: HistoryCardSummary[];
-  selectedCard: HistoryCardSummary | null;
-  onSelectCard: (cardId: string) => void;
+  onTogglePinned: (cardId: string, pinned: boolean) => void;
 }
 
 export const HistoryMobileShell: React.FC<HistoryMobileShellProps> = ({
@@ -19,13 +18,13 @@ export const HistoryMobileShell: React.FC<HistoryMobileShellProps> = ({
   selectedZoneId,
   onSelectZone,
   cards,
-  selectedCard,
-  onSelectCard,
+  onTogglePinned,
 }) => {
   const { t } = useTranslation('history');
+  const orderedCards = orderHistoryCards(cards);
 
   return (
-    <div className="space-y-4 lg:hidden">
+    <div className="space-y-3 lg:hidden">
       <label className="block">
         <span className="text-xs font-bold uppercase tracking-wide text-[var(--text-tertiary)]">
           {t('history.mobile.zoneLabel')}
@@ -43,16 +42,22 @@ export const HistoryMobileShell: React.FC<HistoryMobileShellProps> = ({
         </select>
       </label>
 
-      <ThematicCardCarousel
-        cards={cards}
-        selectedCardId={selectedCard?.cardId ?? null}
-        onSelectCard={onSelectCard}
-      />
-
-      <HistoryCardFrame
-        card={selectedCard}
-        scope={selectedZoneId === null ? null : { type: 'zone', zoneId: selectedZoneId }}
-      />
+      {orderedCards.length === 0 ? (
+        <div className="rounded-lg border border-dashed border-[var(--border)] bg-[var(--surface)] p-5 text-sm text-[var(--text-tertiary)]">
+          {t('history.overview.empty')}
+        </div>
+      ) : (
+        <div className="space-y-3">
+          {orderedCards.map((card) => (
+            <HistoryOverviewCard
+              key={card.cardId}
+              zoneId={selectedZoneId ?? 0}
+              card={card}
+              onTogglePinned={onTogglePinned}
+            />
+          ))}
+        </div>
+      )}
     </div>
   );
 };

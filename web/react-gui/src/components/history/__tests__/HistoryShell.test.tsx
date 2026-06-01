@@ -770,8 +770,8 @@ describe('History shell', () => {
       expect(screen.getByRole('button', { name: 'Update workspace' })).not.toBeDisabled();
     });
     const lineChartButtons = await screen.findAllByRole('button', { name: 'Line Chart' });
-    fireEvent.click(lineChartButtons[1]);
-    fireEvent.wheel(screen.getAllByRole('region', { name: 'Timeline viewport' })[1], { deltaY: -100 });
+    fireEvent.click(lineChartButtons[0]);
+    fireEvent.wheel(screen.getAllByRole('region', { name: 'Timeline viewport' })[0], { deltaY: -100 });
     fireEvent.click(screen.getByRole('button', { name: 'Update workspace' }));
 
     await waitFor(() => {
