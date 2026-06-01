@@ -296,6 +296,39 @@ describe('useVisualizationGestures', () => {
     );
   });
 
+  it('cancels pending inspect when cumulative slow drag becomes a pan', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(fixedNow);
+
+    const target = createGestureTarget();
+    const onViewportChange = vi.fn();
+    const onInspect = vi.fn();
+    const viewport = createDefaultTimeViewport('24h', fixedNow, 'Europe/Zurich');
+    const { result } = renderHook(() =>
+      useVisualizationGestures({
+        viewport,
+        defaultRange: '24h',
+        onViewportChange,
+        onInspect,
+      }),
+    );
+
+    act(() => {
+      result.current.onPointerDown(fakePointerEvent(target, { pointerId: 1, clientX: 110, clientY: 30 }));
+      result.current.onPointerMove(fakePointerEvent(target, { pointerId: 1, clientX: 114, clientY: 30 }));
+      result.current.onPointerMove(fakePointerEvent(target, { pointerId: 1, clientX: 118, clientY: 30 }));
+      vi.advanceTimersByTime(600);
+    });
+
+    expect(onViewportChange).toHaveBeenCalledWith(
+      expect.objectContaining({
+        range: expect.objectContaining({ label: 'custom' }),
+        aggregation: 'auto',
+      }),
+    );
+    expect(onInspect).not.toHaveBeenCalled();
+  });
+
   it('does not treat a completed long press inspect as the first tap of a double tap reset', () => {
     vi.useFakeTimers();
     vi.setSystemTime(fixedNow);

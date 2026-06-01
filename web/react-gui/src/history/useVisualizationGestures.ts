@@ -204,6 +204,7 @@ export function useVisualizationGestures({
       });
 
       if (nextViewport !== viewportRef.current) {
+        clearLongPress();
         publishViewport(nextViewport);
         dragBaselineRef.current = nextPoint;
       }
