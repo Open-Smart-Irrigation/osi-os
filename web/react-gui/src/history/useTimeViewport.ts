@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { defaultAggregationForRange } from './rangeModel';
 import type {
   HistoryAggregationLevel,
@@ -26,6 +26,11 @@ export interface HistoryTimeViewport {
   range: HistoryRangeSelection & { mode: 'relative' | 'absolute' };
   aggregation: HistoryAggregationLevel;
 }
+
+type TimeViewportState = {
+  resetKey: string;
+  viewport: HistoryTimeViewport;
+};
 
 function clampDuration(durationMs: number): number {
   return Math.min(Math.max(durationMs, MIN_VIEWPORT_MS), MAX_VIEWPORT_MS);
@@ -150,24 +155,47 @@ export function panTimeViewport(viewport: HistoryTimeViewport, direction: 'left'
 
 export function useTimeViewport(defaultRange: HistoryRangeLabel, resetKey: string = defaultRange) {
   const timezone = useMemo(timezoneForBrowser, []);
-  const previousResetKey = useRef(resetKey);
-  const [viewport, setViewport] = useState<HistoryTimeViewport>(() =>
-    createDefaultTimeViewport(defaultRange, new Date(), timezone),
+  const createDefaultViewport = useCallback(
+    () => createDefaultTimeViewport(defaultRange, new Date(), timezone),
+    [defaultRange, timezone],
   );
+  const [viewportState, setViewportState] = useState<TimeViewportState>(() => ({
+    resetKey,
+    viewport: createDefaultViewport(),
+  }));
+  const viewport = viewportState.resetKey === resetKey ? viewportState.viewport : createDefaultViewport();
 
   useEffect(() => {
-    if (previousResetKey.current === resetKey) return;
-    previousResetKey.current = resetKey;
-    setViewport(createDefaultTimeViewport(defaultRange, new Date(), timezone));
-  }, [defaultRange, resetKey, timezone]);
+    if (viewportState.resetKey === resetKey) return;
+    setViewportState({
+      resetKey,
+      viewport: createDefaultViewport(),
+    });
+  }, [createDefaultViewport, resetKey, viewportState.resetKey]);
+
+  const setViewport = useCallback((
+    nextViewport: HistoryTimeViewport | ((current: HistoryTimeViewport) => HistoryTimeViewport),
+  ) => {
+    setViewportState((current) => {
+      const currentViewport = current.resetKey === resetKey ? current.viewport : createDefaultViewport();
+      const viewportValue = typeof nextViewport === 'function' ? nextViewport(currentViewport) : nextViewport;
+      return {
+        resetKey,
+        viewport: viewportValue,
+      };
+    });
+  }, [createDefaultViewport, resetKey]);
 
   const reset = useCallback(() => {
-    setViewport(createDefaultTimeViewport(defaultRange, new Date(), timezone));
-  }, [defaultRange, timezone]);
+    setViewportState({
+      resetKey,
+      viewport: createDefaultViewport(),
+    });
+  }, [createDefaultViewport, resetKey]);
 
   const zoom = useCallback((deltaY: number) => {
     setViewport((current) => zoomTimeViewport(current, deltaY));
-  }, []);
+  }, [setViewport]);
 
   return {
     viewport,

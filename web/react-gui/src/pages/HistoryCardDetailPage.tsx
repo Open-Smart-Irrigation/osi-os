@@ -175,26 +175,33 @@ export const HistoryCardDetailPage: React.FC = () => {
     () => (displayCard ? primaryViewModes(displayCard.views) : []),
     [displayCard],
   );
-  const [selectedView, setSelectedView] = useState<HistoryViewMode>('line-chart');
+  const [userSelectedView, setUserSelectedView] = useState<{ cardId: string; view: HistoryViewMode } | null>(null);
   const defaultRange = displayCard?.defaultRange ?? '24h';
-  const timeViewport = useTimeViewport(defaultRange, displayCard?.cardId ?? defaultRange);
-
-  useEffect(() => {
-    setSelectedView(defaultPrimaryViewForCard(displayCard));
-  }, [displayCard]);
-
-  useEffect(() => {
-    if (!displayCard || primaryViews.length === 0) return;
-    if (!primaryViews.includes(selectedView)) {
-      setSelectedView(defaultPrimaryViewForCard(displayCard));
+  const timeViewport = useTimeViewport(
+    defaultRange,
+    displayCard ? `${displayCard.cardId}:${defaultRange}` : defaultRange,
+  );
+  const selectedView = useMemo(() => {
+    if (
+      displayCard
+      && userSelectedView?.cardId === displayCard.cardId
+      && primaryViews.includes(userSelectedView.view)
+    ) {
+      return userSelectedView.view;
     }
-  }, [displayCard, primaryViews, selectedView]);
+    return defaultPrimaryViewForCard(displayCard);
+  }, [displayCard, primaryViews, userSelectedView]);
 
   const handleRangeChange = useCallback((range: HistoryRangeLabel) => {
     timeViewport.setViewport(
       setTimeViewportRange(range, new Date(), timeViewport.viewport.range.timezone),
     );
   }, [timeViewport]);
+
+  const handleViewChange = useCallback((view: HistoryViewMode) => {
+    if (!displayCard) return;
+    setUserSelectedView({ cardId: displayCard.cardId, view });
+  }, [displayCard]);
 
   useEffect(() => {
     if (!featureFlags.historyEnabled || routeScope?.type !== 'zone' || !resolvedCard || !cardId) return;
@@ -257,7 +264,7 @@ export const HistoryCardDetailPage: React.FC = () => {
             <HistoryViewModeSegmentedControl
               activeView={selectedView}
               views={displayCard.views}
-              onViewChange={setSelectedView}
+              onViewChange={handleViewChange}
             />
           )}
         </section>
@@ -268,7 +275,7 @@ export const HistoryCardDetailPage: React.FC = () => {
             viewport={timeViewport.viewport}
             onViewportChange={timeViewport.setViewport}
             selectedView={selectedView}
-            onViewModeChange={(_, view) => setSelectedView(view)}
+            onViewModeChange={(_, view) => handleViewChange(view)}
             showViewModeControls={false}
           />
         </div>

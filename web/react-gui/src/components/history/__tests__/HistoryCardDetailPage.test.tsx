@@ -110,7 +110,12 @@ vi.mock('../../../services/api', () => ({
 
 const historyAPIMock = historyAPI as typeof historyAPI & {
   getGatewayCards: Mock;
+  getZoneCardData: Mock;
 };
+
+function firstZoneCardDataRequest() {
+  return historyAPIMock.getZoneCardData.mock.calls[0]?.[2];
+}
 
 function renderAppAtRoute(hashRoute: string) {
   window.history.replaceState(null, '', `#${hashRoute}`);
@@ -394,6 +399,16 @@ describe('History card detail route', () => {
     expect(thirtyDay).toBeDisabled();
     expect(season).toBeDisabled();
 
+    await waitFor(() => {
+      expect(firstZoneCardDataRequest()).toEqual(
+        expect.objectContaining({
+          view: 'soil-profile',
+          range: expect.objectContaining({ label: '24h' }),
+        }),
+      );
+    });
+    historyAPIMock.getZoneCardData.mockClear();
+
     fireEvent.click(sevenDay);
 
     await waitFor(() => {
@@ -432,6 +447,13 @@ describe('History card detail route', () => {
     expect(screen.queryByRole('button', { name: 'Advanced View' })).not.toBeInTheDocument();
     expect(soilProfile).toHaveAttribute('aria-pressed', 'true');
 
+    await waitFor(() => {
+      expect(firstZoneCardDataRequest()).toEqual(
+        expect.objectContaining({ view: 'soil-profile' }),
+      );
+    });
+    historyAPIMock.getZoneCardData.mockClear();
+
     fireEvent.click(lineChart);
 
     await waitFor(() => {
@@ -442,5 +464,35 @@ describe('History card detail route', () => {
         expect.objectContaining({ view: 'line-chart' }),
       );
     });
+  });
+
+  it('uses the card default range for the first detail data fetch when it is not 24h', async () => {
+    vi.mocked(historyAPI.getZoneCards).mockResolvedValue({
+      zoneId: 12,
+      generatedAt: '2026-05-31T10:00:00Z',
+      cards: [
+        zoneCard({
+          supportedRanges: ['12h', '24h', '7d'],
+          defaultRange: '12h',
+          defaultView: 'soil-profile',
+          views: ['soil-profile', 'line-chart'],
+        }),
+      ],
+    });
+
+    renderAppAtRoute('/history/zones/12/cards/soil-card%3Aroot-zone');
+
+    await screen.findByRole('group', { name: 'Date range' });
+
+    await waitFor(() => {
+      expect(firstZoneCardDataRequest()).toEqual(
+        expect.objectContaining({
+          view: 'soil-profile',
+          range: expect.objectContaining({ label: '12h' }),
+          aggregation: 'raw',
+        }),
+      );
+    });
+    expect(screen.getByRole('button', { name: '12h' })).toHaveAttribute('aria-pressed', 'true');
   });
 });
