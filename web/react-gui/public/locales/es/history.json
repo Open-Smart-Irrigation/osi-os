@@ -55,7 +55,16 @@
       "notFoundTitle": "History card not available",
       "notFoundBody": "Return to History and choose an available card.",
       "controlsPlaceholder": "Date range",
-      "inspectorPlaceholder": "Inspector"
+      "inspectorPlaceholder": "Inspector",
+      "rangeControlLabel": "Date range",
+      "viewControlLabel": "View"
+    },
+    "rangeShort": {
+      "12h": "12h",
+      "24h": "24h",
+      "7d": "7D",
+      "30d": "30D",
+      "season": "Season"
     },
     "sidebar": {
       "zones": "Zones",

@@ -40,6 +40,7 @@ interface HistoryCardFrameProps {
   onCollapsedChange?: (cardId: string, collapsed: boolean) => void;
   inspector?: HistoryWorkspaceInspector;
   onInspectorChange?: (inspector: HistoryWorkspaceInspector) => void;
+  showViewModeControls?: boolean;
 }
 
 type HistoryTranslate = (key: string, options?: Record<string, unknown>) => string;
@@ -85,6 +86,7 @@ export const HistoryCardFrame: React.FC<HistoryCardFrameProps> = ({
   selectedView: controlledSelectedView,
   onViewModeChange,
   overlays = [],
+  showViewModeControls = true,
 }) => {
   const { t: translate } = useTranslation('history');
   const t = translate as HistoryTranslate;
@@ -172,29 +174,31 @@ export const HistoryCardFrame: React.FC<HistoryCardFrameProps> = ({
           </div>
         </div>
 
-        <div className="mt-4 flex flex-wrap gap-2" aria-label={t('history.cardFrame.viewModes', { title: card.title })}>
-          {card.views.map((view) => (
-            <button
-              key={view}
-              type="button"
-              aria-pressed={selectedView === view}
-              onClick={() => {
-                if (onViewModeChange) {
-                  onViewModeChange(card.cardId, view);
-                  return;
-                }
-                setViewModesByCard((current) => ({ ...current, [card.cardId]: view }));
-              }}
-              className={`rounded-md border px-3 py-2 text-sm font-semibold transition-colors ${
-                selectedView === view
-                  ? 'border-[var(--primary)] bg-[var(--primary)] text-white'
-                  : 'border-[var(--border)] bg-[var(--secondary-bg)] text-[var(--text)] hover:bg-[var(--border)]'
-              }`}
-            >
-              {formatViewLabel(t, view)}
-            </button>
-          ))}
-        </div>
+        {showViewModeControls && (
+          <div className="mt-4 flex flex-wrap gap-2" aria-label={t('history.cardFrame.viewModes', { title: card.title })}>
+            {card.views.map((view) => (
+              <button
+                key={view}
+                type="button"
+                aria-pressed={selectedView === view}
+                onClick={() => {
+                  if (onViewModeChange) {
+                    onViewModeChange(card.cardId, view);
+                    return;
+                  }
+                  setViewModesByCard((current) => ({ ...current, [card.cardId]: view }));
+                }}
+                className={`rounded-md border px-3 py-2 text-sm font-semibold transition-colors ${
+                  selectedView === view
+                    ? 'border-[var(--primary)] bg-[var(--primary)] text-white'
+                    : 'border-[var(--border)] bg-[var(--secondary-bg)] text-[var(--text)] hover:bg-[var(--border)]'
+                }`}
+              >
+                {formatViewLabel(t, view)}
+              </button>
+            ))}
+          </div>
+        )}
       </div>
 
       <div className="p-5">
