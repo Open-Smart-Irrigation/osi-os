@@ -436,6 +436,16 @@ function normaliseHistoryCardMetadata(row: any): HistoryCardMetadata {
 
 function normaliseHistoryCardSummary(row: any): HistoryCardSummary {
   const cardType = String(row?.cardType ?? row?.card_type ?? 'soil') as HistoryCardType;
+  const rawSourceDevices = Array.isArray(row?.sourceDevices ?? row?.source_devices)
+    ? (row.sourceDevices ?? row.source_devices)
+    : [];
+  const rawSourceLabels = Array.isArray(row?.sourceLabels ?? row?.source_labels)
+    ? (row.sourceLabels ?? row.source_labels)
+    : [];
+  const sourceDeviceCountRaw = row?.sourceDeviceCount ?? row?.source_device_count;
+  const sourceDeviceCount = typeof sourceDeviceCountRaw === 'number'
+    ? sourceDeviceCountRaw
+    : Number.parseInt(String(sourceDeviceCountRaw ?? ''), 10);
   return {
     cardId: String(row?.cardId ?? row?.card_id ?? ''),
     cardType,
@@ -448,6 +458,16 @@ function normaliseHistoryCardSummary(row: any): HistoryCardSummary {
       ? (row.supportedRanges ?? row.supported_ranges).map(String) as HistoryRangeLabel[]
       : [],
     defaultRange: String(row?.defaultRange ?? row?.default_range ?? '24h') as HistoryRangeLabel,
+    sourceDeviceCount: Number.isFinite(sourceDeviceCount) ? sourceDeviceCount : undefined,
+    sourceLabel: row?.sourceLabel ?? row?.source_label ?? null,
+    sourceLabels: rawSourceLabels.map(String).filter((label: string) => label.trim().length > 0),
+    sourceDevices: rawSourceDevices.map((device: any) => ({
+      name: typeof device?.name === 'string' && device.name.trim() ? device.name.trim() : null,
+      typeId: typeof (device?.typeId ?? device?.type_id) === 'string'
+        ? String(device.typeId ?? device.type_id).trim() || null
+        : null,
+      role: typeof device?.role === 'string' && device.role.trim() ? device.role.trim() : null,
+    })),
     metadata: normaliseHistoryCardMetadata(row?.metadata ?? {}),
     availability: normaliseHistoryCardAvailability(row?.availability ?? {}),
     ordering: normaliseHistoryCardOrdering(row?.ordering ?? {}),

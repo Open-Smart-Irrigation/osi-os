@@ -660,6 +660,41 @@ test('aggregates SQL-backed device_data with parameterized range queries and rol
   }
 });
 
+test('falls back to live device_data when requested rollups are empty', async () => {
+  const db = createCliSqliteDb();
+  try {
+    db.runSql(`
+      INSERT INTO users(id, username, password_hash, created_at, updated_at) VALUES(1, 'user', 'hash', '2026-05-31T00:00:00.000Z', '2026-05-31T00:00:00.000Z');
+      INSERT INTO irrigation_zones(id, name, user_id, zone_uuid, created_at, updated_at) VALUES(7, 'Zone', 1, 'zone-uuid', '2026-05-31T00:00:00.000Z', '2026-05-31T00:00:00.000Z');
+      INSERT INTO devices(deveui, name, type_id, user_id, created_at, updated_at, irrigation_zone_id) VALUES
+        ('AA00000000000001', 'Soil', 'KIWI_SENSOR', 1, '2026-05-31T00:00:00.000Z', '2026-05-31T00:00:00.000Z', 7);
+      INSERT INTO device_data(deveui, recorded_at, swt_1) VALUES
+        ('AA00000000000001', '2026-05-31T00:00:00.000Z', 10),
+        ('AA00000000000001', '2026-05-31T12:00:00.000Z', 30);
+    `);
+
+    const result = await helper.aggregateDeviceData(db, {
+      zoneId: 7,
+      cardType: 'soil',
+      logicalSourceKey: 'root-zone',
+      device_euis: ['AA00000000000001'],
+      start: '2026-05-31T00:00:00.000Z',
+      end: '2026-06-30T00:00:00.000Z',
+      range: '30d',
+      aggregation: 'auto',
+      channels: ['swt_1'],
+      useRollups: true,
+    });
+
+    assert.strictEqual(result.aggregation, 'daily');
+    assert.strictEqual(result.source, 'device_data_fallback');
+    assert.strictEqual(result.buckets[0].series.swt_1.sampleCount, 2);
+    assert.strictEqual(result.buckets[0].series.swt_1.latest, 30);
+  } finally {
+    db.close();
+  }
+});
+
 test('verify-sync-flow chains SQL-backed history helper regression tests', () => {
   const verifySource = fs.readFileSync(path.join(repoRoot, 'scripts', 'verify-sync-flow.js'), 'utf8');
   assert.match(verifySource, /test-history-helper\.js/);

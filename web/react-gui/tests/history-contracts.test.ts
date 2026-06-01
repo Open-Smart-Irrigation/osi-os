@@ -177,6 +177,10 @@ test('representative fixture matches summary, data, workspace, freshness, and av
   assert.equal(fixture.summaries.cards.length, 2);
   assert.equal(fixture.summaries.cards[0].cardType, 'soil');
   assert.equal(fixture.summaries.cards[0].metadata.coverageConfidence, 'configured');
+  assert.equal(fixture.summaries.cards[0].sourceDeviceCount, 2);
+  assert.deepEqual(fixture.summaries.cards[0].sourceLabels, ['Chameleon 1', 'Chameleon 2']);
+  assert.equal(fixture.summaries.cards[0].sourceDevices?.[0]?.name, 'Chameleon 1');
+  assert.equal('deveui' in (fixture.summaries.cards[0].sourceDevices?.[0] ?? {}), false);
   assert.equal(fixture.summaries.cards[0].ordering.manualOrder, null);
   assert.equal(fixture.summaries.cards[0].ordering.criticalAlert, false);
   assert.equal('coverageConfidence' in fixture.summaries.cards[0], false);

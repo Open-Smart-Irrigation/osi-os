@@ -395,6 +395,10 @@
         "rawRowCount": "Raw row count",
         "sourceDeviceCount": "Source device count"
       }
+    },
+    "source": {
+      "multipleNamed": "{{count}} fontes: {{names}}",
+      "multiple": "{{count}} fontes"
     }
   }
 }

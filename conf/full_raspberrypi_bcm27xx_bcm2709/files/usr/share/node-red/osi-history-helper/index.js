@@ -910,23 +910,27 @@ async function aggregateDeviceData(db, query = {}) {
   const useRollups = query.useRollups ?? query.use_rollups;
   const hasRollupIdentity = zoneId !== undefined && cardType && logicalSourceKey;
   const shouldUseRollups = useRollups === true || (useRollups !== false && hasRollupIdentity && ['daily', 'weekly'].includes(aggregation));
+  const deveuis = queryDeviceEuis(query);
   if (shouldUseRollups) {
     const channelIds = channels.map((channel) => channel.id);
     const placeholders = channelIds.map(() => '?').join(',');
     const sql = `SELECT * FROM history_channel_rollups WHERE zone_id = ? AND card_type = ? AND logical_source_key = ? AND bucket_level = ? AND bucket_start >= ? AND bucket_start < ? AND channel_id IN (${placeholders}) ORDER BY bucket_start ASC, channel_id ASC`;
     const params = [zoneId, cardType, logicalSourceKey, aggregation, start, end].concat(channelIds);
     const rows = await dbAll(db, sql, params);
-    return rollupRowsToResult(rows, { ...query, aggregation, aggregationRequested: aggregationInfo.requested }, channels);
+    if (rows.length || deveuis.length === 0) {
+      return rollupRowsToResult(rows, { ...query, aggregation, aggregationRequested: aggregationInfo.requested }, channels);
+    }
   }
 
-  const deveuis = queryDeviceEuis(query);
   if (deveuis.length === 0) throw new Error('aggregateDeviceData requires at least one DevEUI');
   const placeholders = deveuis.map(() => '?').join(',');
   const selectedFields = Array.from(new Set(channels.map((channel) => channel.field)));
   const sql = `SELECT deveui, recorded_at, ${selectedFields.join(', ')} FROM device_data WHERE deveui IN (${placeholders}) AND recorded_at BETWEEN ? AND ? ORDER BY recorded_at ASC`;
   const params = deveuis.concat([start, end]);
   const rows = await dbAll(db, sql, params);
-  return aggregateRows(rows, { ...query, aggregation, aggregationRequested: aggregationInfo.requested, channels, start, end });
+  const result = aggregateRows(rows, { ...query, aggregation, aggregationRequested: aggregationInfo.requested, channels, start, end });
+  if (shouldUseRollups) result.source = 'device_data_fallback';
+  return result;
 }
 
 function hoursBetween(start, end) {

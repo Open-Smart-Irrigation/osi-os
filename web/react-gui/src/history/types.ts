@@ -149,6 +149,12 @@ export interface HistoryCardMetadata {
   [key: string]: unknown;
 }
 
+export interface HistoryCardSourceDevice {
+  name: string | null;
+  typeId: string | null;
+  role: HistoryCardType | string | null;
+}
+
 export interface HistoryCardSummary<TCardType extends HistoryCardType = HistoryCardType> {
   cardId: string;
   cardType: TCardType;
@@ -159,6 +165,10 @@ export interface HistoryCardSummary<TCardType extends HistoryCardType = HistoryC
   views: HistoryViewModeByCardType[TCardType][];
   supportedRanges: HistoryRangeLabel[];
   defaultRange: HistoryRangeLabel;
+  sourceDeviceCount?: number;
+  sourceLabel?: string | null;
+  sourceLabels?: string[];
+  sourceDevices?: HistoryCardSourceDevice[];
   metadata: HistoryCardMetadata;
   availability: HistoryCardAvailability;
   ordering: HistoryCardOrdering;

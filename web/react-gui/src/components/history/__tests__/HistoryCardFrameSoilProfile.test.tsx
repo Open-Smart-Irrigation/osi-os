@@ -21,6 +21,8 @@ const { translateForTest } = vi.hoisted(() => {
     'history.cardFrame.cardDataLoading': 'Loading card data...',
     'history.cardFrame.cardDataError': 'Card data failed to load: {{message}}',
     'history.cardType.soil': 'Soil',
+    'history.source.multipleNamed': '{{count}} sources: {{names}}',
+    'history.source.multiple': '{{count}} sources',
     'history.viewMode.soil-profile': 'Soil Profile',
     'history.viewMode.line-chart': 'Line Chart',
     'history.metadata.coverageUnknown': 'Coverage unknown',
@@ -72,6 +74,12 @@ const card: HistoryCardSummary<'soil'> = {
     coverageConfidence: 'configured',
     syncState: 'local',
   },
+  sourceDeviceCount: 2,
+  sourceLabels: ['Chameleon 1', 'Chameleon 2'],
+  sourceDevices: [
+    { name: 'Chameleon 1', typeId: 'DRAGINO_LSN50', role: 'soil' },
+    { name: 'Chameleon 2', typeId: 'DRAGINO_LSN50', role: 'soil' },
+  ],
   availability: { available: true, reasons: [] },
   ordering: { pinned: false, score: 10, recentRank: 1 },
 };
@@ -117,6 +125,18 @@ afterEach(() => {
 });
 
 describe('HistoryCardFrame soil profile', () => {
+  it('renders display-safe source names in the card header', () => {
+    useHistoryCardDataMock.mockReturnValue({
+      data: data(),
+      isLoading: false,
+      error: null,
+    });
+
+    render(<HistoryCardFrame card={card} scope={{ type: 'zone', zoneId: 1 }} />);
+
+    expect(screen.getByText('2 sources: Chameleon 1, Chameleon 2')).toBeInTheDocument();
+  });
+
   it('renders depth-aware profile labels, values, and localized status labels', () => {
     useHistoryCardDataMock.mockReturnValue({
       data: data({

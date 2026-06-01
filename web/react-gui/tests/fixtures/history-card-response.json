@@ -15,6 +15,13 @@
         "views": ["soil-profile", "line-chart", "calendar", "irrigation-response", "advanced"],
         "supportedRanges": ["12h", "24h", "7d", "30d", "season"],
         "defaultRange": "24h",
+        "sourceDeviceCount": 2,
+        "sourceLabel": null,
+        "sourceLabels": ["Chameleon 1", "Chameleon 2"],
+        "sourceDevices": [
+          { "name": "Chameleon 1", "typeId": "DRAGINO_LSN50", "role": "soil" },
+          { "name": "Chameleon 2", "typeId": "DRAGINO_LSN50", "role": "soil" }
+        ],
         "metadata": {
           "lastSeenAt": "2026-05-31T09:55:00Z",
           "battery": { "status": "ok", "latest": 3.62, "unit": "V" },

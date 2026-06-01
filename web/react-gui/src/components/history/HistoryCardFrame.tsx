@@ -9,6 +9,7 @@ import { EnvironmentLineChartView } from './visualizations/EnvironmentLineChartV
 import { GatewayStatusOverviewView } from './visualizations/GatewayStatusOverviewView';
 import { IrrigationEventTimelineView } from './visualizations/IrrigationEventTimelineView';
 import { SoilProfileView } from './visualizations/SoilProfileView';
+import { formatHistorySourceLabel } from '../../history/sourceLabels';
 import { useHistoryCardData, type HistoryCardDataScope } from '../../history/useHistoryCardData';
 import { useHistoryCardAdvancedData } from '../../history/useHistoryCardAdvancedData';
 import { useTimeViewport, type HistoryTimeViewport } from '../../history/useTimeViewport';
@@ -100,6 +101,7 @@ export const HistoryCardFrame: React.FC<HistoryCardFrameProps> = ({
   const shouldRenderIrrigationEventTimeline = card?.cardType === 'irrigation' && selectedView === 'event-timeline';
   const shouldRenderCalendar = selectedView === 'calendar';
   const shouldRenderAdvanced = selectedView === 'advanced';
+  const sourceLabel = card ? formatHistorySourceLabel(t, card) : null;
   const cardData = useHistoryCardData({
     scope,
     cardId: card?.cardId ?? null,
@@ -145,6 +147,9 @@ export const HistoryCardFrame: React.FC<HistoryCardFrameProps> = ({
             <h2 className="mt-1 text-2xl font-bold text-[var(--text)]">{card.title}</h2>
             {card.subtitle && (
               <p className="mt-1 text-sm text-[var(--text-tertiary)]">{card.subtitle}</p>
+            )}
+            {sourceLabel && (
+              <p className="mt-1 text-sm font-medium text-[var(--text)]">{sourceLabel}</p>
             )}
           </div>
           <div className="flex flex-wrap gap-2 text-xs">

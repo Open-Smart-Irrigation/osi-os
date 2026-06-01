@@ -1,5 +1,6 @@
 import React from 'react';
 import { useTranslation } from 'react-i18next';
+import { formatHistorySourceLabel } from '../../history/sourceLabels';
 import { orderHistoryCards } from '../../history/useHistoryCards';
 import type { HistoryCardSummary, HistoryCardType } from '../../history/types';
 
@@ -46,6 +47,7 @@ export const ThematicCardCarousel: React.FC<ThematicCardCarouselProps> = ({
       <div className="flex snap-x snap-mandatory gap-3">
         {orderedCards.map((card) => {
           const selected = card.cardId === selectedCardId;
+          const sourceLabel = formatHistorySourceLabel(t, card);
           return (
             <button
               key={card.cardId}
@@ -74,6 +76,9 @@ export const ThematicCardCarousel: React.FC<ThematicCardCarouselProps> = ({
               </div>
               {card.subtitle && (
                 <p className="mt-2 text-sm text-[var(--text-tertiary)]">{card.subtitle}</p>
+              )}
+              {sourceLabel && (
+                <p className="mt-2 text-sm font-medium text-[var(--text)]">{sourceLabel}</p>
               )}
               <p className="mt-4 text-xs font-semibold text-[var(--text-tertiary)]">
                 {coverageLabel(t, card)}

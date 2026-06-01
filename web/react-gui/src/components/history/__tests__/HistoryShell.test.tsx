@@ -57,6 +57,8 @@ const { translateForTest } = vi.hoisted(() => {
     'history.carousel.cardAriaLabel': '{{title}} card',
     'history.carousel.cardTypeLabel': '{{cardType}} card',
     'history.carousel.pinned': 'Pinned',
+    'history.source.multipleNamed': '{{count}} sources: {{names}}',
+    'history.source.multiple': '{{count}} sources',
     'history.cardFrame.emptyTitle': 'Select a history card',
     'history.cardFrame.emptyBody': 'Choose a zone and thematic card to inspect local history.',
     'history.cardFrame.typeHistory': '{{cardType}} history',
@@ -386,6 +388,33 @@ describe('History shell', () => {
 
     fireEvent.click(buttons[1]);
     expect(onSelect).toHaveBeenCalledWith('environment-zone-1');
+  });
+
+  it('shows display-safe source names for merged cards without rendering raw hardware ids', () => {
+    render(
+      React.createElement(ThematicCardCarousel, {
+        cards: [
+          card({
+            sourceDeviceCount: 2,
+            sourceLabels: ['Chameleon 1', 'Chameleon 2'],
+            sourceDevices: [
+              { name: 'Chameleon 1', typeId: 'DRAGINO_LSN50', role: 'soil' },
+              { name: 'Chameleon 2', typeId: 'DRAGINO_LSN50', role: 'soil' },
+            ],
+            metadata: {
+              coveragePct: 96,
+              coverageConfidence: 'configured',
+              sourceDeviceEui: 'ABCDEF0123456789',
+            },
+          }),
+        ],
+        selectedCardId: 'soil-zone-1',
+        onSelectCard: vi.fn(),
+      }),
+    );
+
+    expect(screen.getByText('2 sources: Chameleon 1, Chameleon 2')).toBeInTheDocument();
+    expect(screen.queryByText('ABCDEF0123456789')).not.toBeInTheDocument();
   });
 
   it('marks cards opened so the edge can update open count and last opened ordering hints', async () => {

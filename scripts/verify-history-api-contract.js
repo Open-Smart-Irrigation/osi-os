@@ -135,6 +135,7 @@ function verifyHistoryRouterImplementation(flows, failures) {
   assertContains(failures, source, "httpError(404, 'Zone not found or access denied')", 'owned-zone 404 branch');
   assertContains(failures, source, "httpError(404, 'History card not found')", 'missing-card 404 branch');
   assertContains(failures, source, 'if (!deveuis.length)', 'empty known-card response branch');
+  assertContains(failures, source, "typeof device === 'string'", 'latest-row DevEUI string handling');
   assertContains(failures, source, 'supportedRangesForCard(config, scopeContext)', 'date-range availability gating');
   assertContains(failures, source, 'getActiveZoneSeason', 'active season lookup');
   assertContains(failures, source, 'zone_seasons', 'zone_seasons-backed season range');
@@ -142,10 +143,15 @@ function verifyHistoryRouterImplementation(flows, failures) {
   assertContains(failures, source, 'Season range uses zone season boundaries; use custom for explicit from/to', 'season explicit-from/to rejection');
   assertContains(failures, source, 'shouldUseHistoryRollups(scopeContext, range.label, aggregationRequested)', 'long-range rollup gate');
   assertContains(failures, source, 'soilRowsHaveWarning(latestRows)', 'merged soil summary warning classifier');
+  assertContains(failures, source, 'sourceDeviceCount: summarySourceDevices.length', 'display-safe source count in card summaries');
+  assertContains(failures, source, 'sourceLabels: displaySourceLabels(summarySourceDevices)', 'display-safe source labels in card summaries');
   assertContains(failures, source, 'environmentRowsHaveWarning(latestRows)', 'merged environment summary warning classifier');
   assertContains(failures, source, 'osiHistory.buildCalendar', 'helper-owned calendar classification');
   assertContains(failures, source, 'osiHistory.buildLocalInterpretations', 'helper-owned local interpretations');
   assertContains(failures, source, 'osiHistory.buildAdvancedDiagnostics', 'helper-owned advanced diagnostic availability');
+  assertContains(failures, source, 'function latestSeriesPoint', 'soil profile fallback to latest visible series point');
+  assertContains(failures, source, '.find(rowHasSoilProfileValue)', 'soil profile latest row skips rows without SWT values');
+  assertContains(failures, source, 'buildSoilProfiles(latestRows, sourceDevices, series)', 'soil profile builder receives series fallback data');
   assertContains(
     failures,
     source,
