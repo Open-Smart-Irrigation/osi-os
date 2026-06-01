@@ -1,14 +1,17 @@
-import React, { useEffect, useMemo } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import useSWR from 'swr';
 import { HistoryCardFrame } from '../components/history/HistoryCardFrame';
 import { HistoryDetailHeader } from '../components/history/mobile/HistoryDetailHeader';
+import { HistoryRangeSegmentedControl } from '../components/history/mobile/HistoryRangeSegmentedControl';
+import { HistoryViewModeSegmentedControl } from '../components/history/mobile/HistoryViewModeSegmentedControl';
 import { useFeatureFlags } from '../history/useFeatureFlags';
 import { useHistoryCards } from '../history/useHistoryCards';
+import { setTimeViewportRange, useTimeViewport } from '../history/useTimeViewport';
 import { historyAPI, irrigationZonesAPI } from '../services/api';
 import type { HistoryCardDataScope } from '../history/useHistoryCardData';
-import type { HistoryCardSummary, HistoryCardSummaryResponse } from '../history/types';
+import type { HistoryCardSummary, HistoryCardSummaryResponse, HistoryRangeLabel, HistoryViewMode } from '../history/types';
 import type { IrrigationZone } from '../types/farming';
 
 const zonesFetcher = () => irrigationZonesAPI.getAll();
@@ -61,6 +64,16 @@ function sanitizeGatewayRouteCard(
 type DetailRouteScope =
   | { type: 'zone'; zoneId: number }
   | { type: 'gateway'; gatewayEui: string };
+
+function primaryViewModes(views: readonly HistoryViewMode[]): HistoryViewMode[] {
+  return views.filter((view) => view !== 'advanced');
+}
+
+function defaultPrimaryViewForCard(card: HistoryCardSummary | null): HistoryViewMode {
+  if (!card) return 'line-chart';
+  if (card.defaultView !== 'advanced') return card.defaultView;
+  return primaryViewModes(card.views)[0] ?? card.defaultView;
+}
 
 function scopeForCard(card: HistoryCardSummary, routeScope: DetailRouteScope): HistoryCardDataScope | null {
   if (routeScope.type === 'gateway') {
@@ -158,6 +171,37 @@ export const HistoryCardDetailPage: React.FC = () => {
     ),
     [resolvedCard, routeScope, t],
   );
+  const primaryViews = useMemo(
+    () => (displayCard ? primaryViewModes(displayCard.views) : []),
+    [displayCard],
+  );
+  const [userSelectedView, setUserSelectedView] = useState<{ cardId: string; view: HistoryViewMode } | null>(null);
+  const defaultRange = displayCard?.defaultRange ?? '24h';
+  const timeViewport = useTimeViewport(
+    defaultRange,
+    displayCard ? `${displayCard.cardId}:${defaultRange}` : defaultRange,
+  );
+  const selectedView = useMemo(() => {
+    if (
+      displayCard
+      && userSelectedView?.cardId === displayCard.cardId
+      && primaryViews.includes(userSelectedView.view)
+    ) {
+      return userSelectedView.view;
+    }
+    return defaultPrimaryViewForCard(displayCard);
+  }, [displayCard, primaryViews, userSelectedView]);
+
+  const handleRangeChange = useCallback((range: HistoryRangeLabel) => {
+    timeViewport.setViewport(
+      setTimeViewportRange(range, new Date(), timeViewport.viewport.range.timezone),
+    );
+  }, [timeViewport]);
+
+  const handleViewChange = useCallback((view: HistoryViewMode) => {
+    if (!displayCard) return;
+    setUserSelectedView({ cardId: displayCard.cardId, view });
+  }, [displayCard]);
 
   useEffect(() => {
     if (!featureFlags.historyEnabled || routeScope?.type !== 'zone' || !resolvedCard || !cardId) return;
@@ -210,11 +254,30 @@ export const HistoryCardDetailPage: React.FC = () => {
         backHref="/history"
       />
       <main className="flex min-h-[calc(100vh-4rem)] flex-col gap-4 px-4 py-4">
-        <section className="rounded-lg border border-dashed border-[var(--border)] bg-[var(--surface)] px-4 py-3 text-sm font-semibold text-[var(--text-tertiary)]">
-          {t('history.detail.controlsPlaceholder')}
+        <section className="space-y-3">
+          <HistoryRangeSegmentedControl
+            activeRange={timeViewport.viewport.range.label}
+            supportedRanges={displayCard.supportedRanges}
+            onRangeChange={handleRangeChange}
+          />
+          {primaryViews.length > 0 && (
+            <HistoryViewModeSegmentedControl
+              activeView={selectedView}
+              views={displayCard.views}
+              onViewChange={handleViewChange}
+            />
+          )}
         </section>
         <div className="flex-1">
-          <HistoryCardFrame card={displayCard} scope={resolvedScope} />
+          <HistoryCardFrame
+            card={displayCard}
+            scope={resolvedScope}
+            viewport={timeViewport.viewport}
+            onViewportChange={timeViewport.setViewport}
+            selectedView={selectedView}
+            onViewModeChange={(_, view) => handleViewChange(view)}
+            showViewModeControls={false}
+          />
         </div>
         <section className="rounded-lg border border-dashed border-[var(--border)] bg-[var(--surface)] px-4 py-3 text-sm font-semibold text-[var(--text-tertiary)]">
           {t('history.detail.inspectorPlaceholder')}

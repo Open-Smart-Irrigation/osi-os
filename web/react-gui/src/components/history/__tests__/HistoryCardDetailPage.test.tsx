@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, type Mock } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import '@testing-library/jest-dom';
 import React from 'react';
 import { SWRConfig } from 'swr';
@@ -18,6 +18,13 @@ const { translateForTest } = vi.hoisted(() => {
     'history.detail.notFoundBody': 'Return to History and choose an available card.',
     'history.detail.controlsPlaceholder': 'Date range',
     'history.detail.inspectorPlaceholder': 'Inspector',
+    'history.detail.rangeControlLabel': 'Date range',
+    'history.detail.viewControlLabel': 'View',
+    'history.rangeShort.12h': '12h',
+    'history.rangeShort.24h': '24h',
+    'history.rangeShort.7d': '7D',
+    'history.rangeShort.30d': '30D',
+    'history.rangeShort.season': 'Season',
     'history.source.multipleNamed': '{{count}} sources: {{names}}',
     'history.source.multiple': '{{count}} sources',
     'history.cardFrame.emptyTitle': 'Select a history card',
@@ -35,7 +42,9 @@ const { translateForTest } = vi.hoisted(() => {
     'history.cardType.soil': 'Soil',
     'history.cardType.gateway': 'Gateway',
     'history.viewMode.soil-profile': 'Soil Profile',
+    'history.viewMode.line-chart': 'Line Chart',
     'history.viewMode.status-overview': 'Status Overview',
+    'history.viewMode.advanced': 'Advanced View',
     'history.metadata.coverageUnknown': 'Coverage unknown',
     'history.metadata.coverageKnown': '{{coverage}}% coverage',
     'history.metadata.coverageConfidence.configured': 'Configured cadence',
@@ -101,7 +110,12 @@ vi.mock('../../../services/api', () => ({
 
 const historyAPIMock = historyAPI as typeof historyAPI & {
   getGatewayCards: Mock;
+  getZoneCardData: Mock;
 };
+
+function firstZoneCardDataRequest() {
+  return historyAPIMock.getZoneCardData.mock.calls[0]?.[2];
+}
 
 function renderAppAtRoute(hashRoute: string) {
   window.history.replaceState(null, '', `#${hashRoute}`);
@@ -353,5 +367,132 @@ describe('History card detail route', () => {
     expect(historyAPI.getZoneCards).not.toHaveBeenCalled();
     expect(historyAPI.markZoneCardOpened).not.toHaveBeenCalled();
     expect(screen.queryByText('0016C001F11766E7')).not.toBeInTheDocument();
+  });
+
+  it('shows required range controls and refetches card data when a supported range is selected', async () => {
+    vi.mocked(historyAPI.getZoneCards).mockResolvedValue({
+      zoneId: 12,
+      generatedAt: '2026-05-31T10:00:00Z',
+      cards: [
+        zoneCard({
+          supportedRanges: ['12h', '24h', '7d'],
+          defaultRange: '24h',
+        }),
+      ],
+    });
+
+    renderAppAtRoute('/history/zones/12/cards/soil-card%3Aroot-zone');
+
+    const rangeControl = await screen.findByRole('group', { name: 'Date range' });
+    const twelveHour = screen.getByRole('button', { name: '12h' });
+    const twentyFourHour = screen.getByRole('button', { name: '24h' });
+    const sevenDay = screen.getByRole('button', { name: '7D' });
+    const thirtyDay = screen.getByRole('button', { name: '30D' });
+    const season = screen.getByRole('button', { name: 'Season' });
+
+    expect(rangeControl).toContainElement(twelveHour);
+    expect(rangeControl).toContainElement(twentyFourHour);
+    expect(rangeControl).toContainElement(sevenDay);
+    expect(rangeControl).toContainElement(thirtyDay);
+    expect(rangeControl).toContainElement(season);
+    expect(twentyFourHour).toHaveAttribute('aria-pressed', 'true');
+    expect(thirtyDay).toBeDisabled();
+    expect(season).toBeDisabled();
+
+    await waitFor(() => {
+      expect(firstZoneCardDataRequest()).toEqual(
+        expect.objectContaining({
+          view: 'soil-profile',
+          range: expect.objectContaining({ label: '24h' }),
+        }),
+      );
+    });
+    historyAPIMock.getZoneCardData.mockClear();
+
+    fireEvent.click(sevenDay);
+
+    await waitFor(() => {
+      expect(sevenDay).toHaveAttribute('aria-pressed', 'true');
+      expect(historyAPI.getZoneCardData).toHaveBeenCalledWith(
+        12,
+        'soil-card:root-zone',
+        expect.objectContaining({
+          range: expect.objectContaining({ label: '7d' }),
+          aggregation: 'hourly',
+        }),
+      );
+    });
+  });
+
+  it('shows card-specific mobile view controls without exposing Advanced as a primary view', async () => {
+    vi.mocked(historyAPI.getZoneCards).mockResolvedValue({
+      zoneId: 12,
+      generatedAt: '2026-05-31T10:00:00Z',
+      cards: [
+        zoneCard({
+          views: ['soil-profile', 'line-chart', 'advanced'],
+          defaultView: 'soil-profile',
+        }),
+      ],
+    });
+
+    renderAppAtRoute('/history/zones/12/cards/soil-card%3Aroot-zone');
+
+    const viewControl = await screen.findByRole('group', { name: 'View' });
+    const soilProfile = screen.getByRole('button', { name: 'Soil Profile' });
+    const lineChart = screen.getByRole('button', { name: 'Line Chart' });
+
+    expect(viewControl).toContainElement(soilProfile);
+    expect(viewControl).toContainElement(lineChart);
+    expect(screen.queryByRole('button', { name: 'Advanced View' })).not.toBeInTheDocument();
+    expect(soilProfile).toHaveAttribute('aria-pressed', 'true');
+
+    await waitFor(() => {
+      expect(firstZoneCardDataRequest()).toEqual(
+        expect.objectContaining({ view: 'soil-profile' }),
+      );
+    });
+    historyAPIMock.getZoneCardData.mockClear();
+
+    fireEvent.click(lineChart);
+
+    await waitFor(() => {
+      expect(lineChart).toHaveAttribute('aria-pressed', 'true');
+      expect(historyAPI.getZoneCardData).toHaveBeenCalledWith(
+        12,
+        'soil-card:root-zone',
+        expect.objectContaining({ view: 'line-chart' }),
+      );
+    });
+  });
+
+  it('uses the card default range for the first detail data fetch when it is not 24h', async () => {
+    vi.mocked(historyAPI.getZoneCards).mockResolvedValue({
+      zoneId: 12,
+      generatedAt: '2026-05-31T10:00:00Z',
+      cards: [
+        zoneCard({
+          supportedRanges: ['12h', '24h', '7d'],
+          defaultRange: '12h',
+          defaultView: 'soil-profile',
+          views: ['soil-profile', 'line-chart'],
+        }),
+      ],
+    });
+
+    renderAppAtRoute('/history/zones/12/cards/soil-card%3Aroot-zone');
+
+    await screen.findByRole('group', { name: 'Date range' });
+
+    await waitFor(() => {
+      expect(firstZoneCardDataRequest()).toEqual(
+        expect.objectContaining({
+          view: 'soil-profile',
+          range: expect.objectContaining({ label: '12h' }),
+          aggregation: 'raw',
+        }),
+      );
+    });
+    expect(screen.getByRole('button', { name: '12h' })).toHaveAttribute('aria-pressed', 'true');
   });
 });
