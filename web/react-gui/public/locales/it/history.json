@@ -20,7 +20,6 @@
     },
     "desktop": {
       "toolbarTitle": "Toolbar",
-      "toolbarPlaceholder": "Date range, aggregation, export, and sync controls land here in the visualization slice.",
       "maxPanels": "Up to {{count}} comparison panels",
       "singleMode": "Single",
       "comparisonMode": "Comparison",
@@ -340,6 +339,14 @@
       "rootZoneDry": {
         "title": "Root zone entered dry status",
         "body": "Lower soil tension stayed dry through the selected period."
+      },
+      "dataCoverageGap": {
+        "title": "Sensor data is incomplete",
+        "body": "Sensor data was missing during the selected period."
+      },
+      "incompleteNightRecovery": {
+        "title": "Night recovery was incomplete",
+        "body": "The dendrometer did not fully recover overnight during the selected period."
       },
       "environmentStress": {
         "title": "Environment stress detected",

@@ -51,6 +51,11 @@ const emittedAdvancedFieldKeys = [
   'sourceDeviceCount',
 ] as const;
 
+const emittedInterpretationKeys = [
+  'dataCoverageGap',
+  'incompleteNightRecovery',
+] as const;
+
 test('every static card definition has a card-specific default view', () => {
   assert.equal(historyCardDefinitions.length, 5);
 
@@ -209,6 +214,25 @@ test('history locale files label every emitted advanced field', () => {
     const fields = history.history?.advanced?.field ?? {};
     for (const key of emittedAdvancedFieldKeys) {
       assert.equal(typeof fields[key], 'string', `${locale} missing history.advanced.field.${key}`);
+    }
+  }
+});
+
+test('history locale files label emitted interpretation states', () => {
+  for (const locale of readdirSync(localeRoot)) {
+    const history = JSON.parse(readFileSync(join(localeRoot, locale, 'history.json'), 'utf8'));
+    const interpretations = history.history?.interpretation ?? {};
+    for (const key of emittedInterpretationKeys) {
+      assert.equal(
+        typeof interpretations[key]?.title,
+        'string',
+        `${locale} missing history.interpretation.${key}.title`,
+      );
+      assert.equal(
+        typeof interpretations[key]?.body,
+        'string',
+        `${locale} missing history.interpretation.${key}.body`,
+      );
     }
   }
 });
