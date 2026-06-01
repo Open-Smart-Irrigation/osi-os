@@ -36,6 +36,11 @@ function clampDuration(durationMs: number): number {
   return Math.min(Math.max(durationMs, MIN_VIEWPORT_MS), MAX_VIEWPORT_MS);
 }
 
+function clampRatio(ratio: number): number {
+  if (!Number.isFinite(ratio)) return 0.5;
+  return Math.min(Math.max(ratio, 0), 1);
+}
+
 function timezoneForBrowser(): string {
   return Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
 }
@@ -145,12 +150,42 @@ export function zoomTimeViewport(viewport: HistoryTimeViewport, deltaY: number):
   return customViewport(viewport, nextFromMs, nextDurationMs);
 }
 
+export function zoomTimeViewportAtRatio(
+  viewport: HistoryTimeViewport,
+  scale: number,
+  anchorRatio: number,
+): HistoryTimeViewport {
+  const parsedRange = parseViewportRange(viewport);
+  if (!parsedRange || !Number.isFinite(scale) || scale <= 0) return viewport;
+
+  const ratio = clampRatio(anchorRatio);
+  const nextDurationMs = clampDuration(parsedRange.durationMs * scale);
+  const anchorMs = parsedRange.fromMs + parsedRange.durationMs * ratio;
+  const nextFromMs = anchorMs - nextDurationMs * ratio;
+
+  return customViewport(viewport, nextFromMs, nextDurationMs);
+}
+
 export function panTimeViewport(viewport: HistoryTimeViewport, direction: 'left' | 'right'): HistoryTimeViewport {
   const parsedRange = parseViewportRange(viewport);
   if (!parsedRange) return viewport;
 
   const offsetMs = parsedRange.durationMs * PAN_FRACTION * (direction === 'left' ? -1 : 1);
   return customViewport(viewport, parsedRange.fromMs + offsetMs, parsedRange.durationMs);
+}
+
+export function panTimeViewportByRatio(
+  viewport: HistoryTimeViewport,
+  deltaRatio: number,
+): HistoryTimeViewport {
+  const parsedRange = parseViewportRange(viewport);
+  if (!parsedRange || !Number.isFinite(deltaRatio) || deltaRatio === 0) return viewport;
+
+  return customViewport(
+    viewport,
+    parsedRange.fromMs + parsedRange.durationMs * deltaRatio,
+    parsedRange.durationMs,
+  );
 }
 
 export function useTimeViewport(defaultRange: HistoryRangeLabel, resetKey: string = defaultRange) {
