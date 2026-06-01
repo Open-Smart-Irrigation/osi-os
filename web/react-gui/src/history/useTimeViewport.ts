@@ -90,6 +90,14 @@ export function createDefaultTimeViewport(
   };
 }
 
+export function setTimeViewportRange(
+  rangeLabel: HistoryRangeLabel,
+  now = new Date(),
+  timezone = 'UTC',
+): HistoryTimeViewport {
+  return createDefaultTimeViewport(rangeLabel, now, timezone);
+}
+
 export function createTimeViewportFromWorkspaceRange(
   workspaceRange: HistoryWorkspaceRange,
   aggregation: HistoryAggregationLevel,
