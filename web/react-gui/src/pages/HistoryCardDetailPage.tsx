@@ -1,12 +1,14 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import useSWR from 'swr';
-import { HistoryCardFrame } from '../components/history/HistoryCardFrame';
+import { HistoryCardVisualization } from '../components/history/HistoryCardVisualization';
 import { HistoryDetailHeader } from '../components/history/mobile/HistoryDetailHeader';
 import { HistoryRangeSegmentedControl } from '../components/history/mobile/HistoryRangeSegmentedControl';
+import { HistoryVisualizationSurface } from '../components/history/mobile/HistoryVisualizationSurface';
 import { HistoryViewModeSegmentedControl } from '../components/history/mobile/HistoryViewModeSegmentedControl';
 import { useFeatureFlags } from '../history/useFeatureFlags';
+import { useHistoryCardData } from '../history/useHistoryCardData';
 import { useHistoryCards } from '../history/useHistoryCards';
 import { setTimeViewportRange, useTimeViewport } from '../history/useTimeViewport';
 import { historyAPI, irrigationZonesAPI } from '../services/api';
@@ -15,6 +17,8 @@ import type { HistoryCardSummary, HistoryCardSummaryResponse, HistoryRangeLabel,
 import type { IrrigationZone } from '../types/farming';
 
 const zonesFetcher = () => irrigationZonesAPI.getAll();
+const DETAIL_PULL_REFRESH_THRESHOLD_PX = 96;
+const DETAIL_PULL_REFRESH_MAX_HORIZONTAL_PX = 48;
 
 type HistoryTranslate = (key: string, options?: Record<string, unknown>) => string;
 
@@ -75,6 +79,15 @@ function defaultPrimaryViewForCard(card: HistoryCardSummary | null): HistoryView
   return primaryViewModes(card.views)[0] ?? card.defaultView;
 }
 
+function formatRangeLabel(t: HistoryTranslate, range: HistoryRangeLabel): string {
+  if (range === 'custom') return t('history.rangeShort.custom', { defaultValue: 'Custom' });
+  return t(`history.rangeShort.${range}`);
+}
+
+function formatAggregationLabel(t: HistoryTranslate, aggregation: string): string {
+  return t(`history.metadata.aggregation.${aggregation}`);
+}
+
 function scopeForCard(card: HistoryCardSummary, routeScope: DetailRouteScope): HistoryCardDataScope | null {
   if (routeScope.type === 'gateway') {
     return { type: 'gateway', gatewayEui: routeScope.gatewayEui };
@@ -110,6 +123,7 @@ export const HistoryCardDetailPage: React.FC = () => {
   const { zoneId: rawZoneId, gatewayEui: rawGatewayEui, cardId: rawCardId } = useParams();
   const { t: translate } = useTranslation('history');
   const t = translate as HistoryTranslate;
+  const pullStartRef = useRef<{ x: number; y: number } | null>(null);
   const featureFlags = useFeatureFlags();
   const zoneId = Number(rawZoneId);
   const gatewayEui = typeof rawGatewayEui === 'string' && rawGatewayEui.trim() ? rawGatewayEui : null;
@@ -191,6 +205,16 @@ export const HistoryCardDetailPage: React.FC = () => {
     }
     return defaultPrimaryViewForCard(displayCard);
   }, [displayCard, primaryViews, userSelectedView]);
+  const cardData = useHistoryCardData({
+    scope: resolvedScope,
+    cardId: displayCard?.cardId ?? null,
+    view: selectedView,
+    range: timeViewport.viewport.range,
+    aggregation: timeViewport.viewport.aggregation,
+    overlays: [],
+    enabled: Boolean(displayCard?.availability.available && resolvedScope),
+  });
+  const [inspectorSelection, setInspectorSelection] = useState<{ timestamp: string } | null>(null);
 
   const handleRangeChange = useCallback((range: HistoryRangeLabel) => {
     timeViewport.setViewport(
@@ -202,6 +226,30 @@ export const HistoryCardDetailPage: React.FC = () => {
     if (!displayCard) return;
     setUserSelectedView({ cardId: displayCard.cardId, view });
   }, [displayCard]);
+
+  const isVisualizationEvent = useCallback((target: EventTarget | null): boolean => {
+    return target instanceof Element && Boolean(target.closest('[data-testid="history-visualization-surface"]'));
+  }, []);
+
+  const handleScrollRootPointerDown = useCallback((event: React.PointerEvent<HTMLElement>) => {
+    if (isVisualizationEvent(event.target)) {
+      pullStartRef.current = null;
+      return;
+    }
+    pullStartRef.current = { x: event.clientX, y: event.clientY };
+  }, [isVisualizationEvent]);
+
+  const handleScrollRootPointerUp = useCallback((event: React.PointerEvent<HTMLElement>) => {
+    const start = pullStartRef.current;
+    pullStartRef.current = null;
+    if (!start || isVisualizationEvent(event.target)) return;
+
+    const deltaY = event.clientY - start.y;
+    const deltaX = Math.abs(event.clientX - start.x);
+    if (deltaY >= DETAIL_PULL_REFRESH_THRESHOLD_PX && deltaX <= DETAIL_PULL_REFRESH_MAX_HORIZONTAL_PX) {
+      void cardData.refresh();
+    }
+  }, [cardData, isVisualizationEvent]);
 
   useEffect(() => {
     if (!featureFlags.historyEnabled || routeScope?.type !== 'zone' || !resolvedCard || !cardId) return;
@@ -253,7 +301,15 @@ export const HistoryCardDetailPage: React.FC = () => {
         card={displayCard}
         backHref="/history"
       />
-      <main className="flex min-h-[calc(100vh-4rem)] flex-col gap-4 px-4 py-4">
+      <main
+        data-testid="history-detail-scroll-root"
+        className="flex min-h-[calc(100vh-4rem)] flex-col gap-4 px-4 py-4"
+        onPointerDown={handleScrollRootPointerDown}
+        onPointerUp={handleScrollRootPointerUp}
+        onPointerCancel={() => {
+          pullStartRef.current = null;
+        }}
+      >
         <section className="space-y-3">
           <HistoryRangeSegmentedControl
             activeRange={timeViewport.viewport.range.label}
@@ -269,18 +325,30 @@ export const HistoryCardDetailPage: React.FC = () => {
           )}
         </section>
         <div className="flex-1">
-          <HistoryCardFrame
-            card={displayCard}
-            scope={resolvedScope}
+          {!displayCard.availability.available && (
+            <div className="mb-4 rounded-lg border border-[var(--warning-bg)] bg-[var(--warning-bg)] px-4 py-3 text-sm text-[var(--warning-text)]">
+              {t('history.cardFrame.unavailable')}
+            </div>
+          )}
+          <HistoryVisualizationSurface
             viewport={timeViewport.viewport}
+            defaultRange={displayCard.defaultRange}
             onViewportChange={timeViewport.setViewport}
-            selectedView={selectedView}
-            onViewModeChange={(_, view) => handleViewChange(view)}
-            showViewModeControls={false}
-          />
+            onInspect={setInspectorSelection}
+            rangeLabel={formatRangeLabel(t, timeViewport.viewport.range.label)}
+            aggregationLabel={formatAggregationLabel(t, timeViewport.viewport.aggregation)}
+          >
+            <HistoryCardVisualization
+              card={displayCard}
+              data={cardData.data}
+              selectedView={selectedView}
+              isLoading={cardData.isLoading}
+              error={cardData.error}
+            />
+          </HistoryVisualizationSurface>
         </div>
         <section className="rounded-lg border border-dashed border-[var(--border)] bg-[var(--surface)] px-4 py-3 text-sm font-semibold text-[var(--text-tertiary)]">
-          {t('history.detail.inspectorPlaceholder')}
+          {inspectorSelection?.timestamp ?? t('history.detail.inspectorPlaceholder')}
         </section>
       </main>
     </div>

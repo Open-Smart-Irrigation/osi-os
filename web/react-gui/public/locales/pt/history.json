@@ -57,14 +57,17 @@
       "controlsPlaceholder": "Date range",
       "inspectorPlaceholder": "Inspector",
       "rangeControlLabel": "Date range",
-      "viewControlLabel": "View"
+      "viewControlLabel": "View",
+      "visualizationLabel": "History visualization",
+      "visualizationHelp": "Drag to pan, pinch to zoom, double tap to reset, or long press to inspect."
     },
     "rangeShort": {
       "12h": "12h",
       "24h": "24h",
       "7d": "7D",
       "30d": "30D",
-      "season": "Season"
+      "season": "Season",
+      "custom": "Custom"
     },
     "sidebar": {
       "zones": "Zones",

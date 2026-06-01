@@ -1,14 +1,7 @@
 import React, { useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { AdvancedViewPanel } from './AdvancedViewPanel';
-import { CalendarView } from './CalendarView';
-import { InterpretationList } from './InterpretationList';
+import { HistoryCardVisualization } from './HistoryCardVisualization';
 import { TimelineBrush } from './TimelineBrush';
-import { DendroGrowthTimelineView } from './visualizations/DendroGrowthTimelineView';
-import { EnvironmentLineChartView } from './visualizations/EnvironmentLineChartView';
-import { GatewayStatusOverviewView } from './visualizations/GatewayStatusOverviewView';
-import { IrrigationEventTimelineView } from './visualizations/IrrigationEventTimelineView';
-import { SoilProfileView } from './visualizations/SoilProfileView';
 import { formatHistorySourceLabel } from '../../history/sourceLabels';
 import { useHistoryCardData, type HistoryCardDataScope } from '../../history/useHistoryCardData';
 import { useHistoryCardAdvancedData } from '../../history/useHistoryCardAdvancedData';
@@ -73,11 +66,6 @@ function formatAggregation(t: HistoryTranslate, value: HistoryAggregationLevel):
   return t(`history.metadata.aggregation.${value}`);
 }
 
-function getErrorMessage(t: HistoryTranslate, error: unknown): string {
-  if (error instanceof Error && error.message) return error.message;
-  return t('history.cardFrame.cardDataUnknownError');
-}
-
 export const HistoryCardFrame: React.FC<HistoryCardFrameProps> = ({
   card,
   scope,
@@ -96,12 +84,6 @@ export const HistoryCardFrame: React.FC<HistoryCardFrameProps> = ({
   const viewport = controlledViewport ?? internalViewport.viewport;
   const setViewport = onViewportChange ?? internalViewport.setViewport;
   const selectedView = card ? controlledSelectedView ?? viewModesByCard[card.cardId] ?? card.defaultView : 'line-chart';
-  const shouldRenderSoilProfile = card?.cardType === 'soil' && selectedView === 'soil-profile';
-  const shouldRenderDendroGrowth = card?.cardType === 'dendro' && selectedView === 'growth-timeline';
-  const shouldRenderEnvironmentLineChart = card?.cardType === 'environment' && selectedView === 'line-chart';
-  const shouldRenderGatewayStatus = card?.cardType === 'gateway' && selectedView === 'status-overview';
-  const shouldRenderIrrigationEventTimeline = card?.cardType === 'irrigation' && selectedView === 'event-timeline';
-  const shouldRenderCalendar = selectedView === 'calendar';
   const shouldRenderAdvanced = selectedView === 'advanced';
   const sourceLabel = card ? formatHistorySourceLabel(t, card) : null;
   const cardData = useHistoryCardData({
@@ -216,72 +198,16 @@ export const HistoryCardFrame: React.FC<HistoryCardFrameProps> = ({
           keyboardHelp={t('history.cardFrame.timelineBrushKeyboardHelp')}
         />
 
-        {cardData.isLoading && (
-          <div className="mt-4 flex min-h-[240px] items-center justify-center rounded-lg border border-dashed border-[var(--border)] bg-[var(--bg)] p-6 text-center">
-            <p className="text-sm font-semibold text-[var(--text)]">
-              {t('history.cardFrame.cardDataLoading')}
-            </p>
-          </div>
-        )}
-
-        {!cardData.isLoading && cardData.error && (
-          <div className="mt-4 rounded-lg border border-[var(--warning-bg)] bg-[var(--warning-bg)] px-4 py-3 text-sm text-[var(--warning-text)]">
-            {t('history.cardFrame.cardDataError', { message: getErrorMessage(t, cardData.error) })}
-          </div>
-        )}
-
-        {!cardData.isLoading && !cardData.error && shouldRenderSoilProfile && cardData.data && (
-          <SoilProfileView profiles={Array.isArray(cardData.data.profiles) ? cardData.data.profiles : []} />
-        )}
-
-        {!cardData.isLoading && !cardData.error && shouldRenderDendroGrowth && (
-          <DendroGrowthTimelineView data={cardData.data} />
-        )}
-
-        {!cardData.isLoading && !cardData.error && shouldRenderEnvironmentLineChart && (
-          <EnvironmentLineChartView data={cardData.data} />
-        )}
-
-        {!cardData.isLoading && !cardData.error && shouldRenderGatewayStatus && (
-          <GatewayStatusOverviewView card={card} data={cardData.data} />
-        )}
-
-        {!cardData.isLoading && !cardData.error && shouldRenderIrrigationEventTimeline && (
-          <IrrigationEventTimelineView data={cardData.data} />
-        )}
-
-        {!cardData.isLoading && !cardData.error && shouldRenderCalendar && (
-          <>
-            <CalendarView cardType={card.cardType} calendar={cardData.data?.calendar} />
-            <InterpretationList interpretations={cardData.data?.interpretations ?? []} />
-          </>
-        )}
-
-        {!cardData.isLoading && !cardData.error && shouldRenderAdvanced && (
-          <AdvancedViewPanel
-            data={advancedData.data}
-            isLoading={advancedData.isLoading}
-            error={advancedData.error}
-          />
-        )}
-
-        {!cardData.isLoading
-          && !cardData.error
-          && ((!shouldRenderSoilProfile
-            && !shouldRenderDendroGrowth
-            && !shouldRenderEnvironmentLineChart
-            && !shouldRenderGatewayStatus
-            && !shouldRenderIrrigationEventTimeline
-            && !shouldRenderCalendar
-            && !shouldRenderAdvanced)
-            || (shouldRenderSoilProfile && !cardData.data)) && (
-          <div className="mt-4 rounded-lg border border-dashed border-[var(--border)] bg-[var(--bg)] p-6">
-            <p className="text-sm font-semibold text-[var(--text)]">{formatViewLabel(t, selectedView)}</p>
-            <p className="mt-2 text-sm text-[var(--text-tertiary)]">
-              {t('history.cardFrame.placeholderBody')}
-            </p>
-          </div>
-        )}
+        <HistoryCardVisualization
+          card={card}
+          data={cardData.data}
+          selectedView={selectedView}
+          isLoading={cardData.isLoading}
+          error={cardData.error}
+          advancedData={advancedData.data}
+          advancedIsLoading={advancedData.isLoading}
+          advancedError={advancedData.error}
+        />
       </div>
     </section>
   );
