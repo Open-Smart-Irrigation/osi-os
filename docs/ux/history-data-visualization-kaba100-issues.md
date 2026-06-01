@@ -20,6 +20,18 @@ Status as of 2026-06-01 on local branch `feat/history-data-visualization`:
 - Issue 3 is addressed: the History API latest-row lookup now accepts normalized DevEUI strings, so Soil Profile can build profiles from latest valid data.
 - Issue 4 is addressed for empty rollup tables: 30D/Season rollup reads now fall back to live `device_data` when rollups return no rows and source DevEUIs are available.
 
+## Mobile fullscreen redesign decisions
+
+Decision: mobile overview layout = vertical card list
+Decision: mobile detail route = HashRouter route-backed full screen
+Decision: mobile live URL format = #/history/zones/:zoneId/cards/:encodedCardId
+Decision: mobile comparison/workspaces = desktop-only in this redesign round
+Decision: mobile header = compact title row plus overflow actions
+Decision: mobile source filters = Soil and Environment merged cards only
+Decision: gateway card mobile route = #/history/gateways/:gatewayEui/cards/:encodedCardId
+Decision: pinch direction = pinch open narrows range; pinch close widens range
+Decision: pull-to-refresh = overview refreshes zone/card lists; detail refreshes selected card data
+
 ## Findings
 
 ### Issue 1 - Card summaries hide all farmer-facing source labels
@@ -236,6 +248,19 @@ Acceptance criteria:
 - Zone B 30D line chart shows daily soil values when raw data exists.
 - The API never returns empty 30D series solely because rollups have not been populated.
 - The response exposes whether it came from `history_channel_rollups` or fallback live aggregation.
+
+### Issue 5 - Mobile History overview is too dense and does not use a true detail surface
+
+Severity: S1
+
+The mobile History page renders the compact carousel card and the full detail card inline. This duplicates title/source/status information, exposes chart controls before the user opens a card, and leaves no dedicated gesture surface for pinch, pan, long press, and pull-to-refresh.
+
+Required direction:
+
+- `/history` becomes a compact mobile overview.
+- Tapping a thematic card opens `#/history/zones/:zoneId/cards/:cardId`.
+- The full-screen detail route owns range controls, card view modes, source filters, visualization gestures, inspector sheet, and Advanced settings.
+- Pinch open/close inside the visualization is core behavior for narrowing/widening the time range.
 
 ## Consolidated root causes
 

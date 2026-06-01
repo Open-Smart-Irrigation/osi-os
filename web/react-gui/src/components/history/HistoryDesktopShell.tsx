@@ -115,12 +115,17 @@ export const HistoryDesktopShell: React.FC<HistoryDesktopShellProps> = ({
               <p className="text-xs font-bold uppercase tracking-wide text-[var(--text-tertiary)]">
                 {t('history.desktop.toolbarTitle')}
               </p>
-              <p className="mt-1 text-sm text-[var(--text-tertiary)]">
-                {t('history.desktop.toolbarPlaceholder')}
-              </p>
-              <p className="mt-2 text-xs font-semibold text-[var(--text-tertiary)]">
-                {t('history.desktop.maxPanels', { count: maxPanelsByPlatform.edge })}
-              </p>
+              <div className="mt-2 flex flex-wrap gap-2 text-xs font-semibold text-[var(--text-tertiary)]">
+                <span className="rounded-md border border-[var(--border)] bg-[var(--bg)] px-2 py-1">
+                  {viewport.range.label}
+                </span>
+                <span className="rounded-md border border-[var(--border)] bg-[var(--bg)] px-2 py-1">
+                  {t('history.cardFrame.aggregationBadge', { aggregation: viewport.aggregation })}
+                </span>
+                <span className="rounded-md border border-[var(--border)] bg-[var(--bg)] px-2 py-1">
+                  {t('history.desktop.maxPanels', { count: maxPanelsByPlatform.edge })}
+                </span>
+              </div>
             </div>
             {comparisonEnabled && (
               <div className="flex flex-wrap gap-2">

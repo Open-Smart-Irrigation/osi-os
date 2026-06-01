@@ -26,7 +26,6 @@ const { translateForTest } = vi.hoisted(() => {
     'history.shell.cardsFailed': 'History cards failed to load.',
     'history.shell.retryCards': 'Retry cards',
     'history.desktop.toolbarTitle': 'Toolbar',
-    'history.desktop.toolbarPlaceholder': 'Date range, aggregation, export, and sync controls land here in the visualization slice.',
     'history.desktop.maxPanels': 'Up to {{count}} comparison panels',
     'history.desktop.singleMode': 'Single',
     'history.desktop.comparisonMode': 'Comparison',
@@ -348,6 +347,22 @@ describe('History shell', () => {
     });
     expect(await screen.findByRole('button', { name: 'Soil card' })).toBeInTheDocument();
     expect(screen.queryByText('ABCDEF0123456789')).not.toBeInTheDocument();
+  });
+
+  it('does not render implementation placeholder copy in the desktop toolbar', async () => {
+    vi.mocked(systemAPI.getFeatures).mockResolvedValue({
+      historyUxEnabled: true,
+      historyComparisonEnabled: true,
+      historyWorkspacesEnabled: false,
+      historyAdvancedOverlaysEnabled: false,
+      historyCloudAiEnabled: false,
+    });
+
+    renderWithProviders(React.createElement(HistoryDashboard));
+
+    await screen.findByText('Toolbar');
+    await screen.findByText('Aggregation: raw');
+    expect(screen.queryByText(/land here in the visualization slice/i)).not.toBeInTheDocument();
   });
 
   it('orders pinned cards first in the mobile carousel without rendering raw hardware ids', () => {
