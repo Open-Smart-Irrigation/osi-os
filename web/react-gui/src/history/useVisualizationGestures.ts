@@ -33,7 +33,6 @@ interface PinchState {
 
 interface LongPressState {
   pointerId: number;
-  startedAtMs: number;
   point: Point;
   surfaceLeft: number;
   surfaceWidth: number;
@@ -52,12 +51,14 @@ export function useVisualizationGestures({
   onInspect,
 }: UseVisualizationGesturesInput) {
   const activePointersRef = useRef(new Map<number, Point>());
+  const dragBaselineRef = useRef<Point | null>(null);
   const viewportRef = useRef(viewport);
   const onViewportChangeRef = useRef(onViewportChange);
   const onInspectRef = useRef(onInspect);
   const pinchStateRef = useRef<PinchState | null>(null);
   const longPressStateRef = useRef<LongPressState | null>(null);
   const lastTapRef = useRef<TapState | null>(null);
+  const consumedTapPointersRef = useRef(new Set<number>());
 
   useEffect(() => {
     viewportRef.current = viewport;
@@ -149,6 +150,7 @@ export function useVisualizationGestures({
 
     if (activePointers.size === 1) {
       const bounds = event.currentTarget.getBoundingClientRect();
+      dragBaselineRef.current = point;
       clearLongPress();
       const timerId = window.setTimeout(() => {
         const state = longPressStateRef.current;
@@ -157,13 +159,14 @@ export function useVisualizationGestures({
           viewportRef.current,
           anchorRatioForPoint(state.point.x, state.surfaceLeft, state.surfaceWidth),
         );
+        consumedTapPointersRef.current.add(event.pointerId);
+        lastTapRef.current = null;
         longPressStateRef.current = null;
         onInspectRef.current?.({ timestamp });
       }, LONG_PRESS_MS);
 
       longPressStateRef.current = {
         pointerId: event.pointerId,
-        startedAtMs: Date.now(),
         point,
         surfaceLeft: bounds.left,
         surfaceWidth: bounds.width,
@@ -193,14 +196,16 @@ export function useVisualizationGestures({
     activePointers.set(event.pointerId, nextPoint);
 
     if (activePointers.size === 1) {
+      const dragBaseline = dragBaselineRef.current ?? previousPoint;
       const bounds = event.currentTarget.getBoundingClientRect();
       const nextViewport = applyDragPan(viewportRef.current, {
         surfaceWidthPx: bounds.width,
-        deltaXPx: nextPoint.x - previousPoint.x,
+        deltaXPx: nextPoint.x - dragBaseline.x,
       });
 
       if (nextViewport !== viewportRef.current) {
         publishViewport(nextViewport);
+        dragBaselineRef.current = nextPoint;
       }
       return;
     }
@@ -230,7 +235,17 @@ export function useVisualizationGestures({
       pinchStateRef.current = null;
     }
 
-    if (activePointers.size === 0 && previousPoint) {
+    if (activePointers.size === 0) {
+      dragBaselineRef.current = null;
+    } else if (activePointers.size === 1) {
+      dragBaselineRef.current = Array.from(activePointers.values())[0] ?? null;
+    }
+
+    const consumedTap = consumedTapPointersRef.current.delete(event.pointerId);
+    if (consumedTap) {
+      lastTapRef.current = null;
+    }
+    if (activePointers.size === 0 && previousPoint && !consumedTap) {
       lastTapRef.current = { timeMs: Date.now(), point: previousPoint };
     }
   }, [clearLongPress]);

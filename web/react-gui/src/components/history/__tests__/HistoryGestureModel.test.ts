@@ -269,4 +269,69 @@ describe('useVisualizationGestures', () => {
       }),
     );
   });
+
+  it('accumulates slow drag movement until it exceeds the dead zone', () => {
+    const target = createGestureTarget();
+    const onViewportChange = vi.fn();
+    const viewport = createDefaultTimeViewport('24h', fixedNow, 'Europe/Zurich');
+    const { result } = renderHook(() =>
+      useVisualizationGestures({
+        viewport,
+        defaultRange: '24h',
+        onViewportChange,
+      }),
+    );
+
+    act(() => {
+      result.current.onPointerDown(fakePointerEvent(target, { pointerId: 1, clientX: 110, clientY: 30 }));
+      result.current.onPointerMove(fakePointerEvent(target, { pointerId: 1, clientX: 114, clientY: 30 }));
+      result.current.onPointerMove(fakePointerEvent(target, { pointerId: 1, clientX: 118, clientY: 30 }));
+    });
+
+    expect(onViewportChange).toHaveBeenCalledWith(
+      expect.objectContaining({
+        range: expect.objectContaining({ label: 'custom' }),
+        aggregation: 'auto',
+      }),
+    );
+  });
+
+  it('does not treat a completed long press inspect as the first tap of a double tap reset', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(fixedNow);
+
+    const target = createGestureTarget();
+    const onViewportChange = vi.fn();
+    const onInspect = vi.fn();
+    const viewport = {
+      ...createDefaultTimeViewport('24h', fixedNow, 'Europe/Zurich'),
+      range: {
+        mode: 'absolute' as const,
+        label: 'custom' as const,
+        from: '2026-05-31T00:00:00.000Z',
+        to: '2026-05-31T12:00:00.000Z',
+        timezone: 'Europe/Zurich',
+      },
+      aggregation: 'auto' as const,
+    };
+    const { result } = renderHook(() =>
+      useVisualizationGestures({
+        viewport,
+        defaultRange: '24h',
+        onViewportChange,
+        onInspect,
+      }),
+    );
+
+    act(() => {
+      result.current.onPointerDown(fakePointerEvent(target, { pointerId: 1, clientX: 120, clientY: 40 }));
+      vi.advanceTimersByTime(500);
+      result.current.onPointerUp(fakePointerEvent(target, { pointerId: 1, clientX: 120, clientY: 40 }));
+      result.current.onPointerDown(fakePointerEvent(target, { pointerId: 2, clientX: 124, clientY: 42 }));
+      result.current.onPointerUp(fakePointerEvent(target, { pointerId: 2, clientX: 124, clientY: 42 }));
+    });
+
+    expect(onInspect).toHaveBeenCalledTimes(1);
+    expect(onViewportChange).not.toHaveBeenCalled();
+  });
 });
