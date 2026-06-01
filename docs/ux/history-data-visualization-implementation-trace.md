@@ -17,10 +17,10 @@ Trace recorded on 2026-06-01 for Slice 10 final hardening. Scope is traceability
 | 4.11 Cloud interpretation extensions | Cloud may extend interpretation using existing prediction/weather capabilities only; no new AI/satellite product surface. | osi-server | 4, 8 | cf976a7, d476a5f, 86015b8, 157b038, 37042bc | Cloud `HistoryCloudExtensionServiceTest`, `HistoryServiceTest`, and frontend advanced-view tests via full verification. | Implemented |
 | 4.12 Desktop workspace model; 4.13 Saved workspace schema; 4.14 Learned ordering and pinning schema | Desktop defaults to single-card mode; comparison is stacked/capped; saved workspace and preference state persist required fields. Edge remains local-only/sync-deferred; cloud stores user-scoped records. | osi-os / osi-server | 9 | osi-os: bef5b390, 91c95db7, 47133abd, 408b4570; osi-server: 90396c2, 64ce210, e8250bc | Edge `tests/history-workspace-model.test.ts` and `HistoryShell.test.tsx`; cloud `HistoryWorkspaceServiceTest` and frontend workspace tests. | Implemented |
 | 4.15 Overlay policy implementation | Enforce standard overlays versus Advanced-only overlays. | osi-os / osi-server | 1, 8 | osi-os: bebe4026, af732292, 8df17ab7; osi-server: 8b6b4ad, 86015b8, 157b038 | Edge/cloud `advanced-only overlays are rejected outside Advanced View` tests in unit suites. | Implemented |
-| 5 Frontend specification | Add shared mobile/desktop history shell, semantic viewport, inspector, card-specific views, and i18n keys. | osi-os / osi-server | 5, 6, 7, 8, 9 | osi-os: 4723bdee, a9b2c281, 9657662d, aba11891, 9d4ed0c9, af732292, bef5b390; osi-server: 4ee6323, 21786c7, 1ab1992, c3fe4c9, 86015b8, 90396c2 | Edge/cloud `npm run test:unit`; edge/cloud `npm run build`. | Implemented |
+| 5 Frontend specification | Add shared mobile/desktop history shell, semantic viewport, inspector, card-specific views, and i18n keys. | osi-os / osi-server | 5, 6, 7, 8, 9, 10 | osi-os: 4723bdee, a9b2c281, 9657662d, aba11891, 9d4ed0c9, af732292, bef5b390; osi-server: 4ee6323, 21786c7, 1ab1992, c3fe4c9, 86015b8, 90396c2, 778ac16 | Edge/cloud `npm run test:unit`; edge/cloud `npm run build`; cloud `history locale files include every farmer-facing visualization label key`. | Implemented |
 | 6 Backend specification; 6.10 API behavior and observability | New endpoints must enforce auth/access, validate ranges/aggregation, and record observable behavior. | osi-os / osi-server | 3, 4 | osi-os: 68f80ccb, 769f3fbe, 1fa2e0ff; osi-server: cf976a7, ebbd44c, 0f26785, d476a5f | Edge `verify-history-api-contract` confirms router/helper path and endpoint list; cloud `HistoryControllerTest` and `HistoryServiceTest` via `./gradlew test`. | Implemented |
 | 7 Migration plan; 7.3 Backwards compatibility; 7.4 Feature flags | Additive schema and flags; leave legacy dashboard untouched. | osi-os / osi-server | 2, 4, 5, 6 | osi-os: dd9fe750, 1a17f925, 5b8b7344, 4a8cdc54, 4723bdee; osi-server: cf976a7, 21786c7 | Edge `node scripts/verify-db-schema-consistency.js`, `node scripts/verify-sync-flow.js`, frontend flag-gate tests; cloud migration and feature-flag tests via full verification. | Implemented |
-| Slice 10 final hardening | Record traceability, verification evidence, and final self-review without adding product surface. | osi-os | 10 | This commit | Commands listed below; both worktrees checked before and after commit. | Implemented |
+| Slice 10 final hardening | Record traceability, verification evidence, and final self-review without adding product surface. | osi-os / osi-server | 10 | osi-os: 5e451a07; osi-server: 778ac16 | Commands listed below; both worktrees checked before and after commits. | Implemented |
 
 ## Verification Evidence
 
@@ -41,6 +41,7 @@ All commands below were run from the Slice 10 worktrees on 2026-06-01.
 - `cd backend && ./gradlew test`: passed; Gradle reported `BUILD SUCCESSFUL` with tasks up to date. The frontend-toolchain `tsc` blocker did not occur, so targeted backend fallback tests with skipped frontend tasks were not needed.
 - `cd frontend && timeout 240 npm run test:unit`: passed; TSX runner reported 44/44 passing and Vitest reported 22 files / 80 tests passing.
 - `cd frontend && npm run build`: passed; `tsc && vite build` completed with only the existing bundle-size warning.
+- Final review fix `778ac16`: `git diff --check` passed; `cd frontend && npm run test:unit -- HistoryCardFrame HistoryShell historyApi history-contracts` passed with TSX 45/45 and Vitest 8 files / 38 tests; `cd frontend && npm run build` passed with only the existing bundle-size warning.
 
 ## Self-Review Checklist
 
@@ -53,6 +54,6 @@ All commands below were run from the Slice 10 worktrees on 2026-06-01.
 - Legacy dashboard files were not edited in Slice 10 and existing full frontend tests/build passed.
 - Workspaces/preferences are local edge tables and cloud user-scoped records; cross-device sync remains deferred per Slice 0.
 - Panel caps are enforced by `maxPanelsByPlatform` and covered by workspace/shell tests.
-- Farmer-facing strings use history i18n keys and locale files; contract tests cover emitted advanced-field/workspace labels.
+- Farmer-facing strings use history i18n keys and locale files; contract tests cover emitted advanced-field/workspace labels and every farmer-facing history visualization label key across supported locales.
 - No Diagnostics Card was added. Advanced diagnostics remain an Advanced View panel only.
 - Gateway CPU/thermal temperatures remain visible in normal Gateway Status Overview on edge and cloud; tests assert the normal overview renders `Temperature` with the sample `61 C` value.
