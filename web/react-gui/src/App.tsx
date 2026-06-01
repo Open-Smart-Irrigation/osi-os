@@ -5,6 +5,7 @@ import { Login } from './pages/Login';
 import { Register } from './pages/Register';
 import { FarmingDashboard } from './pages/FarmingDashboard';
 import { HistoryDashboard } from './pages/HistoryDashboard';
+import { HistoryCardDetailPage } from './pages/HistoryCardDetailPage';
 import { AccountLink } from './pages/AccountLink';
 
 function App() {
@@ -40,6 +41,24 @@ function App() {
             element={
               <PrivateRoute>
                 <HistoryDashboard />
+              </PrivateRoute>
+            }
+          />
+
+          <Route
+            path="/history/zones/:zoneId/cards/:cardId"
+            element={
+              <PrivateRoute>
+                <HistoryCardDetailPage />
+              </PrivateRoute>
+            }
+          />
+
+          <Route
+            path="/history/gateways/:gatewayEui/cards/:cardId"
+            element={
+              <PrivateRoute>
+                <HistoryCardDetailPage />
               </PrivateRoute>
             }
           />

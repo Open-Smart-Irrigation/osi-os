@@ -1024,6 +1024,11 @@ export const historyAPI = {
     return normaliseHistoryCardSummaryResponse(response.data);
   },
 
+  getGatewayCards: async (gatewayEui: string): Promise<HistoryCardSummaryResponse> => {
+    const response = await api.get(`/api/history/gateways/${encodeURIComponent(gatewayEui)}/cards`);
+    return normaliseHistoryCardSummaryResponse(response.data);
+  },
+
   setZoneCardPreference: async (
     zoneId: number,
     cardId: string,
