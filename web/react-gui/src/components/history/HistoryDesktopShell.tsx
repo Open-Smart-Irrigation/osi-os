@@ -76,7 +76,13 @@ export const HistoryDesktopShell: React.FC<HistoryDesktopShellProps> = ({
   const { t } = useTranslation('history');
   const resolvedPanels = resolveWorkspacePanels(workspace, cards);
   const selectedCards = new Set(workspace.selectedCards);
-  const showPanelLimitWarning = panelCapWarning || resolvedPanels.droppedPanelCount > 0;
+  const showPanelLimitWarning = panelCapWarning
+    || resolvedPanels.droppedPanelCount > 0
+    || (
+      workspace.layout === 'stacked'
+      && workspace.selectedCards.length >= resolvedPanels.maxPanels
+      && cards.length > resolvedPanels.maxPanels
+    );
   const selectedTimestamp = workspace.inspector.selectedTimestamp;
   const selectedViewForCard = (card: HistoryCardSummary): HistoryViewMode =>
     workspace.viewModesByCard[card.cardId] ?? card.defaultView;

@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import useSWR from 'swr';
@@ -70,6 +70,7 @@ export const HistoryDashboard: React.FC = () => {
   const [activeWorkspace, setActiveWorkspace] = useState<HistoryWorkspace | null>(null);
   const [activeWorkspaceId, setActiveWorkspaceId] = useState<number | null>(null);
   const [panelCapWarning, setPanelCapWarning] = useState(false);
+  const previousSelectedZoneId = useRef<number | null>(null);
 
   const {
     data: zones,
@@ -175,6 +176,12 @@ export const HistoryDashboard: React.FC = () => {
   }, [featureFlags.historyEnabled, selectedCardId, selectedZoneId]);
 
   useEffect(() => {
+    if (previousSelectedZoneId.current === selectedZoneId) return;
+    if (previousSelectedZoneId.current === null) {
+      previousSelectedZoneId.current = selectedZoneId;
+      return;
+    }
+    previousSelectedZoneId.current = selectedZoneId;
     setActiveWorkspace(null);
     setActiveWorkspaceId(null);
     setPanelCapWarning(false);
@@ -203,31 +210,46 @@ export const HistoryDashboard: React.FC = () => {
   const handleWorkspaceLayoutChange = (layout: HistoryWorkspace['layout']) => {
     setPanelCapWarning(false);
     setActiveWorkspace((current) => migrateHistoryWorkspace(
-      {
-        ...mergeLiveWorkspaceViewport(current ?? defaultWorkspace, viewport, cards),
-        layout,
-        selectedCards: layout === 'single' && selectedCardId ? [selectedCardId] : (current ?? defaultWorkspace).selectedCards,
-        panelOrder: layout === 'single' && selectedCardId ? [selectedCardId] : (current ?? defaultWorkspace).panelOrder,
-      },
+      (() => {
+        const base = current ?? defaultWorkspace;
+        const fallbackSelectedCardId = selectedCardId ?? cards[0]?.cardId ?? null;
+        const fallbackSelection = fallbackSelectedCardId ? [fallbackSelectedCardId] : [];
+        return {
+          ...mergeLiveWorkspaceViewport(base, viewport, cards),
+          layout,
+          selectedCards: layout === 'single'
+            ? fallbackSelection
+            : base.selectedCards.length > 0
+              ? base.selectedCards
+              : fallbackSelection,
+          panelOrder: layout === 'single'
+            ? fallbackSelection
+            : base.panelOrder.length > 0
+              ? base.panelOrder
+              : fallbackSelection,
+        };
+      })(),
       workspaceContext,
     ));
   };
 
   const handleToggleComparisonCard = (cardId: string, selected: boolean) => {
-    const baseWorkspace = mergeLiveWorkspaceViewport(
-      activeWorkspace ?? migrateHistoryWorkspace(
-        {
-          ...defaultWorkspace,
-          layout: 'stacked',
-        },
-        workspaceContext,
-      ),
-      viewport,
-      cards,
-    );
-    const result = updateWorkspaceSelectedCards(baseWorkspace, cardId, selected);
-    setActiveWorkspace(result.workspace);
-    setPanelCapWarning(result.capped);
+    setActiveWorkspace((current) => {
+      const baseWorkspace = mergeLiveWorkspaceViewport(
+        current ?? migrateHistoryWorkspace(
+          {
+            ...defaultWorkspace,
+            layout: 'stacked',
+          },
+          workspaceContext,
+        ),
+        viewport,
+        cards,
+      );
+      const result = updateWorkspaceSelectedCards(baseWorkspace, cardId, selected);
+      setPanelCapWarning(result.capped);
+      return result.workspace;
+    });
   };
 
   const handleLoadWorkspace = (record: HistoryWorkspaceRecord) => {
