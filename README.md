@@ -18,7 +18,7 @@ Built on [ChirpStack Gateway OS](https://www.chirpstack.io/docs/chirpstack-gatew
 - **Offline-first** — fully functional without internet; cloud sync optional
 - **OSI Cloud integration** — remote monitoring and gateway control via OSI Server; fan speed control and reboot from anywhere
 - **Raspberry Pi system monitoring** — CPU temperature, memory usage, CPU load, and fan speed visible in the web dashboard
-  **Forecast** — Weather forecast,agronomic indicators and irrigation prediction (experimental)
+- **Forecast** — Weather forecast,agronomic indicators and irrigation prediction (experimental)
 
 ---
 
