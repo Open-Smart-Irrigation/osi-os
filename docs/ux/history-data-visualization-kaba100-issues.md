@@ -341,3 +341,46 @@ Screenshots:
 Live DB note:
 
 - The deployed history API backfilled active `Current season` rows for Zone A and Zone B because the live `zone_seasons` table was empty.
+
+## Fullscreen gesture redesign verification rerun
+
+Date: 2026-06-02
+Target: kaba100, `100.93.68.86`
+Branch: `feat/history-data-visualization`
+Deployed GUI commit: `e1803167`
+Deployed History API alignment commit: `760b6118`
+Served GUI asset: `assets/index-Db9tKwoc.js`
+Live safety backup before flow deploy: `/data/db/backups/osi-os-20260602-092926`
+
+Automated Playwright results at 390 x 844:
+
+- Passed: login page fits without scrolling.
+- Passed by screenshot review: language switcher is below the register link. The automated locator emitted a warning because it could not reliably locate both boxes.
+- Passed: dashboard has one-row zone actions, exposes zone `Data` links, and no longer exposes a standalone `History` button.
+- Passed: Zone B `Data` opens `#/history/zones/12`.
+- Passed: fullscreen detail has no range chip row, view-mode chip row, or source-chip row.
+- Passed: normal mode hides raw 16-hex DevEUI identifiers.
+- Passed: Soil Profile renders `Soil layer 1`, `Soil layer 2`, and `Soil layer 3`.
+- Passed: soil layer rows use the required status colours: blue below 22 kPa, green for 22-50 kPa, red above 50 kPa.
+- Passed: vertical swipe inside the visualization changes card view mode.
+- Passed: horizontal swipe inside the visualization changes thematic card where multiple cards exist.
+- Passed: calendar renders a monthly overview with coloured day cells and no `mixed` state wording.
+- Passed: Environment `Daily Min/Max` renders a real chart after the UI requests daily aggregation.
+- Passed: Environment `Stress Events`, Irrigation `Irrigation Response`, and Gateway `Connectivity Timeline` are not selectable in normal mode.
+- Passed: no passive touch event listener console errors were observed.
+
+Screenshots and result artifacts:
+
+- `/home/phil/playwright-osi/screenshots-fullscreen-gesture-2026-06-02/01-login.png`
+- `/home/phil/playwright-osi/screenshots-fullscreen-gesture-2026-06-02/02-dashboard.png`
+- `/home/phil/playwright-osi/screenshots-fullscreen-gesture-2026-06-02/03-zone-b-fullscreen-soil.png`
+- `/home/phil/playwright-osi/screenshots-fullscreen-gesture-2026-06-02/04-zone-b-line-chart.png`
+- `/home/phil/playwright-osi/screenshots-fullscreen-gesture-2026-06-02/05-zone-b-calendar.png`
+- `/home/phil/playwright-osi/screenshots-fullscreen-gesture-2026-06-02/06-zone-a-after-horizontal-swipe.png`
+- `/home/phil/playwright-osi/screenshots-fullscreen-gesture-2026-06-02/07-zone-a-env-daily-min-max.png`
+- `/home/phil/playwright-osi/screenshots-fullscreen-gesture-2026-06-02/results.json`
+- `/home/phil/playwright-osi/screenshots-fullscreen-gesture-2026-06-02/console.log`
+
+Manual verification still required:
+
+- Playwright verified single-finger taps and swipes only. A real-device check by Phil is still required for pinch open, pinch close, and one-finger drag-pan before Slice 6/7 are considered fully accepted.
