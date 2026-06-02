@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { act, render, screen } from '@testing-library/react';
 import '@testing-library/jest-dom';
 import React from 'react';
 
@@ -276,6 +276,7 @@ describe('HistoryVisualizationSurface', () => {
       { clientX: 80, clientY: 90 },
       { clientX: 240, clientY: 90 },
     ]);
+    dispatchTouch(surface, 'touchend', []);
 
     expect(onViewportChange).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -283,6 +284,63 @@ describe('HistoryVisualizationSurface', () => {
         aggregation: 'auto',
       }),
     );
+  });
+
+  it('coalesces live pinch updates to one viewport change per animation frame', () => {
+    const onViewportChange = vi.fn();
+    const frameQueue: FrameRequestCallback[] = [];
+    const requestAnimationFrameSpy = vi
+      .spyOn(window, 'requestAnimationFrame')
+      .mockImplementation((callback: FrameRequestCallback) => {
+        frameQueue.push(callback);
+        return frameQueue.length;
+      });
+    const cancelAnimationFrameSpy = vi
+      .spyOn(window, 'cancelAnimationFrame')
+      .mockImplementation(() => undefined);
+
+    render(
+      <HistoryVisualizationSurface
+        viewport={viewport24h()}
+        defaultRange="24h"
+        onViewportChange={onViewportChange}
+        activeView="line-chart"
+        isZoomed={false}
+      >
+        <div>Soil profile</div>
+      </HistoryVisualizationSurface>,
+    );
+    const surface = screen.getByTestId('history-visualization-surface');
+    prepareSurfaceGeometry(surface);
+
+    dispatchTouch(surface, 'touchstart', [
+      { clientX: 120, clientY: 90 },
+      { clientX: 200, clientY: 90 },
+    ]);
+    dispatchTouch(surface, 'touchmove', [
+      { clientX: 80, clientY: 90 },
+      { clientX: 240, clientY: 90 },
+    ]);
+    dispatchTouch(surface, 'touchmove', [
+      { clientX: 60, clientY: 90 },
+      { clientX: 260, clientY: 90 },
+    ]);
+
+    expect(onViewportChange).not.toHaveBeenCalled();
+    expect(requestAnimationFrameSpy).toHaveBeenCalledTimes(1);
+
+    act(() => {
+      frameQueue.shift()?.(0);
+    });
+
+    expect(onViewportChange).toHaveBeenCalledTimes(1);
+    expect(onViewportChange).toHaveBeenCalledWith(
+      expect.objectContaining({
+        range: expect.objectContaining({ label: 'custom' }),
+        aggregation: 'auto',
+      }),
+    );
+    expect(cancelAnimationFrameSpy).not.toHaveBeenCalled();
   });
 
   it('double tap resets through the gesture hook behavior', () => {

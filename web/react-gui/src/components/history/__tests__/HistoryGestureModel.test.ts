@@ -76,6 +76,28 @@ describe('history gesture model', () => {
     expect(result.aggregation).toBe('auto');
   });
 
+  it('pinch keeps the anchor timestamp under the fingers', () => {
+    const viewport = {
+      range: {
+        mode: 'absolute' as const,
+        label: '7d' as const,
+        from: '2026-05-01T00:00:00.000Z',
+        to: '2026-05-08T00:00:00.000Z',
+        timezone: 'UTC',
+      },
+      aggregation: 'auto' as const,
+    };
+
+    const zoomed = applyPinchZoom(viewport, {
+      previousDistancePx: 80,
+      nextDistancePx: 240,
+      anchorRatio: 0,
+    });
+
+    expect(zoomed.range.from).toBe('2026-05-01T00:00:00.000Z');
+    expect(durationMs(zoomed)).toBeLessThan(durationMs(viewport));
+  });
+
   it('pinch close zooms out to a wider anchored time window', () => {
     const viewport = createDefaultTimeViewport('24h', fixedNow, 'Europe/Zurich');
 

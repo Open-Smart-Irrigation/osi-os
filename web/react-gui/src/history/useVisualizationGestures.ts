@@ -85,6 +85,8 @@ export function useVisualizationGestures({
   const onMonthSwipeRef = useRef(onMonthSwipe);
   const activeGestureRef = useRef<ActiveGestureState | null>(null);
   const lastTapRef = useRef<TapState | null>(null);
+  const pendingViewportRef = useRef<HistoryTimeViewport | null>(null);
+  const frameIdRef = useRef<number | null>(null);
 
   useEffect(() => {
     viewportRef.current = viewport;
@@ -133,6 +135,32 @@ export function useVisualizationGestures({
     viewportRef.current = nextViewport;
     onViewportChangeRef.current(nextViewport);
   }, []);
+
+  const flushPendingViewport = useCallback(() => {
+    const pendingViewport = pendingViewportRef.current;
+    if (frameIdRef.current !== null) {
+      window.cancelAnimationFrame(frameIdRef.current);
+      frameIdRef.current = null;
+    }
+    pendingViewportRef.current = null;
+    if (pendingViewport) {
+      publishViewport(pendingViewport);
+    }
+  }, [publishViewport]);
+
+  const scheduleViewport = useCallback((nextViewport: HistoryTimeViewport) => {
+    viewportRef.current = nextViewport;
+    pendingViewportRef.current = nextViewport;
+    if (frameIdRef.current !== null) return;
+    frameIdRef.current = window.requestAnimationFrame(() => {
+      const pendingViewport = pendingViewportRef.current;
+      frameIdRef.current = null;
+      pendingViewportRef.current = null;
+      if (pendingViewport) {
+        publishViewport(pendingViewport);
+      }
+    });
+  }, [publishViewport]);
 
   const resetViewport = useCallback(() => {
     publishViewport(
@@ -242,7 +270,7 @@ export function useVisualizationGestures({
 
           state.didPinch = true;
           if (nextViewport !== viewportRef.current) {
-            publishViewport(nextViewport);
+            scheduleViewport(nextViewport);
           }
         }
         return;
@@ -276,6 +304,7 @@ export function useVisualizationGestures({
       if (!state) return;
 
       clearLongPress();
+      flushPendingViewport();
       const isTwoFinger = state.startPoints.length >= 2;
       const dx = state.currentPoint.x - state.startPoint.x;
       const dy = state.currentPoint.y - state.startPoint.y;
@@ -315,6 +344,7 @@ export function useVisualizationGestures({
 
     const onTouchCancel = () => {
       clearLongPress();
+      flushPendingViewport();
       activeGestureRef.current = null;
     };
 
@@ -329,8 +359,13 @@ export function useVisualizationGestures({
       element.removeEventListener('touchend', onTouchEnd);
       element.removeEventListener('touchcancel', onTouchCancel);
       clearLongPress();
+      if (frameIdRef.current !== null) {
+        window.cancelAnimationFrame(frameIdRef.current);
+        frameIdRef.current = null;
+      }
+      pendingViewportRef.current = null;
     };
-  }, [clearLongPress, element, maybeResetForDoubleTap, publishViewport]);
+  }, [clearLongPress, element, flushPendingViewport, maybeResetForDoubleTap, publishViewport, scheduleViewport]);
 
   const onDoubleClick = useCallback(() => {
     resetViewport();
