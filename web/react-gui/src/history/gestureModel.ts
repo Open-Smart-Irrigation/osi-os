@@ -8,11 +8,15 @@ const PINCH_RATIO_THRESHOLD = 0.08;
 const DRAG_DEAD_ZONE_PX = 6;
 const LONG_PRESS_MS = 500;
 const LONG_PRESS_CANCEL_MOVEMENT_PX = 10;
+const SWIPE_THRESHOLD_DEFAULT = 40;
+const DRAG_MIN_PX = 8;
 
 export interface Point {
   x: number;
   y: number;
 }
+
+export type TouchGesture = 'pinch' | 'drag' | 'longpress' | 'tap';
 
 export interface PinchZoomInput {
   previousDistancePx: number;
@@ -48,6 +52,34 @@ export function midpoint(a: Point, b: Point): Point {
   };
 }
 
+export function pinchScale(previousDistancePx: number, nextDistancePx: number): number {
+  if (previousDistancePx <= 0 || nextDistancePx <= 0) return 1;
+  return previousDistancePx / nextDistancePx;
+}
+
+export function swipeDirection(
+  delta: { dx: number; dy: number },
+  threshold = SWIPE_THRESHOLD_DEFAULT,
+): 'horizontal' | 'vertical' | null {
+  const absX = Math.abs(delta.dx);
+  const absY = Math.abs(delta.dy);
+  if (Math.max(absX, absY) < threshold) return null;
+  return absX >= absY ? 'horizontal' : 'vertical';
+}
+
+export function classifyTouchGesture(state: {
+  pointerCount: number;
+  movedPx?: number;
+  elapsedMs?: number;
+}): TouchGesture {
+  if (state.pointerCount >= 2) return 'pinch';
+  const movedPx = state.movedPx ?? 0;
+  const elapsedMs = state.elapsedMs ?? 0;
+  if (movedPx >= DRAG_MIN_PX) return 'drag';
+  if (elapsedMs >= LONG_PRESS_MS && movedPx <= LONG_PRESS_CANCEL_MOVEMENT_PX) return 'longpress';
+  return 'tap';
+}
+
 export function anchorRatioForPoint(pointX: number, surfaceLeft: number, surfaceWidth: number): number {
   if (!Number.isFinite(surfaceWidth) || surfaceWidth <= 0) return 0;
   return clampRatio((pointX - surfaceLeft) / surfaceWidth);
@@ -59,10 +91,10 @@ export function applyPinchZoom(
 ): HistoryTimeViewport {
   if (input.previousDistancePx <= 0 || input.nextDistancePx <= 0) return viewport;
 
-  const ratio = input.nextDistancePx / input.previousDistancePx;
-  if (!Number.isFinite(ratio) || Math.abs(ratio - 1) < PINCH_RATIO_THRESHOLD) return viewport;
+  const scale = pinchScale(input.previousDistancePx, input.nextDistancePx);
+  if (!Number.isFinite(scale) || Math.abs(scale - 1) < PINCH_RATIO_THRESHOLD) return viewport;
 
-  return zoomTimeViewportAtRatio(viewport, input.previousDistancePx / input.nextDistancePx, input.anchorRatio);
+  return zoomTimeViewportAtRatio(viewport, scale, input.anchorRatio);
 }
 
 export function applyDragPan(

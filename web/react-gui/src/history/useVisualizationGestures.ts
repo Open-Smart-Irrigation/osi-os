@@ -1,10 +1,12 @@
-import { useCallback, useEffect, useRef, type CSSProperties, type PointerEvent as ReactPointerEvent } from 'react';
+import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react';
 import {
   anchorRatioForPoint,
   applyDragPan,
   applyPinchZoom,
+  classifyTouchGesture,
   distance,
   midpoint,
+  swipeDirection,
   timestampAtSurfaceRatio,
   type Point,
 } from './gestureModel';
@@ -20,23 +22,14 @@ interface InspectSelection {
   timestamp: string;
 }
 
+type SwipeAxis = 'horizontal' | 'vertical';
+
 interface UseVisualizationGesturesInput {
   viewport: HistoryTimeViewport;
   defaultRange: HistoryRangeLabel;
   onViewportChange: (viewport: HistoryTimeViewport) => void;
   onInspect?: (selection: InspectSelection) => void;
-}
-
-interface PinchState {
-  distancePx: number;
-}
-
-interface LongPressState {
-  pointerId: number;
-  point: Point;
-  surfaceLeft: number;
-  surfaceWidth: number;
-  timerId: number;
+  onSwipe?: (direction: SwipeAxis, signedDelta: number) => void;
 }
 
 interface TapState {
@@ -44,13 +37,38 @@ interface TapState {
   point: Point;
 }
 
-function trySetPointerCapture(target: HTMLElement, pointerId: number) {
-  try {
-    target.setPointerCapture?.(pointerId);
-  } catch {
-    // Synthetic browser tests and some cancelled native gestures can reject
-    // capture even though the pointer event is still useful for local gestures.
-  }
+interface ActiveGestureState {
+  startPoint: Point;
+  currentPoint: Point;
+  startTimeMs: number;
+  dragBaseline: Point;
+  surfaceLeft: number;
+  surfaceWidth: number;
+  previousPinchDistancePx: number | null;
+  didPan: boolean;
+  didPinch: boolean;
+  didLongPress: boolean;
+  longPressTimerId: number | null;
+}
+
+function touchPoints(touches: TouchList | Touch[]): Point[] {
+  return Array.from(touches).map((touch) => ({ x: touch.clientX, y: touch.clientY }));
+}
+
+function viewportDurationMs(viewport: HistoryTimeViewport): number | null {
+  const fromMs = viewport.range.from ? Date.parse(viewport.range.from) : NaN;
+  const toMs = viewport.range.to ? Date.parse(viewport.range.to) : NaN;
+  if (!Number.isFinite(fromMs) || !Number.isFinite(toMs) || toMs <= fromMs) return null;
+  return toMs - fromMs;
+}
+
+function isZoomedIn(viewport: HistoryTimeViewport, defaultRange: HistoryRangeLabel): boolean {
+  const currentMs = viewportDurationMs(viewport);
+  const defaultMs = viewportDurationMs(
+    createDefaultTimeViewport(defaultRange, new Date(), viewport.range.timezone),
+  );
+  if (currentMs === null || defaultMs === null) return viewport.range.label === 'custom';
+  return currentMs < defaultMs * 0.98;
 }
 
 export function useVisualizationGestures({
@@ -58,20 +76,24 @@ export function useVisualizationGestures({
   defaultRange,
   onViewportChange,
   onInspect,
+  onSwipe,
 }: UseVisualizationGesturesInput) {
-  const activePointersRef = useRef(new Map<number, Point>());
-  const dragBaselineRef = useRef<Point | null>(null);
+  const [element, setElement] = useState<HTMLElement | null>(null);
   const viewportRef = useRef(viewport);
+  const defaultRangeRef = useRef(defaultRange);
   const onViewportChangeRef = useRef(onViewportChange);
   const onInspectRef = useRef(onInspect);
-  const pinchStateRef = useRef<PinchState | null>(null);
-  const longPressStateRef = useRef<LongPressState | null>(null);
+  const onSwipeRef = useRef(onSwipe);
+  const activeGestureRef = useRef<ActiveGestureState | null>(null);
   const lastTapRef = useRef<TapState | null>(null);
-  const consumedTapPointersRef = useRef(new Set<number>());
 
   useEffect(() => {
     viewportRef.current = viewport;
   }, [viewport]);
+
+  useEffect(() => {
+    defaultRangeRef.current = defaultRange;
+  }, [defaultRange]);
 
   useEffect(() => {
     onViewportChangeRef.current = onViewportChange;
@@ -81,13 +103,16 @@ export function useVisualizationGestures({
     onInspectRef.current = onInspect;
   }, [onInspect]);
 
-  const clearLongPress = useCallback(() => {
-    if (!longPressStateRef.current) return;
-    window.clearTimeout(longPressStateRef.current.timerId);
-    longPressStateRef.current = null;
-  }, []);
+  useEffect(() => {
+    onSwipeRef.current = onSwipe;
+  }, [onSwipe]);
 
-  useEffect(() => clearLongPress, [clearLongPress]);
+  const clearLongPress = useCallback(() => {
+    const activeGesture = activeGestureRef.current;
+    if (!activeGesture?.longPressTimerId) return;
+    window.clearTimeout(activeGesture.longPressTimerId);
+    activeGesture.longPressTimerId = null;
+  }, []);
 
   const publishViewport = useCallback((nextViewport: HistoryTimeViewport) => {
     viewportRef.current = nextViewport;
@@ -95,181 +120,178 @@ export function useVisualizationGestures({
   }, []);
 
   const resetViewport = useCallback(() => {
-    publishViewport(createDefaultTimeViewport(defaultRange, new Date(), viewportRef.current.range.timezone));
-  }, [defaultRange, publishViewport]);
+    publishViewport(
+      createDefaultTimeViewport(defaultRangeRef.current, new Date(), viewportRef.current.range.timezone),
+    );
+  }, [publishViewport]);
 
   const maybeResetForDoubleTap = useCallback((point: Point): boolean => {
-    const previousTap = lastTapRef.current;
-    if (!previousTap) return false;
-
+    const lastTap = lastTapRef.current;
+    if (!lastTap) return false;
     const isDoubleTap =
-      Date.now() - previousTap.timeMs <= DOUBLE_TAP_MS &&
-      distance(previousTap.point, point) <= DOUBLE_TAP_DISTANCE_PX;
-
+      Date.now() - lastTap.timeMs <= DOUBLE_TAP_MS &&
+      distance(lastTap.point, point) <= DOUBLE_TAP_DISTANCE_PX;
     if (!isDoubleTap) return false;
 
     lastTapRef.current = null;
     clearLongPress();
+    activeGestureRef.current = null;
     resetViewport();
     return true;
   }, [clearLongPress, resetViewport]);
 
-  const updatePinchState = useCallback((currentTarget: EventTarget & HTMLElement) => {
-    const activePointers = Array.from(activePointersRef.current.values());
-    if (activePointers.length !== 2) {
-      pinchStateRef.current = null;
-      return;
-    }
+  useEffect(() => {
+    if (!element) return undefined;
 
-    const [first, second] = activePointers;
-    const nextDistancePx = distance(first, second);
-    const previousDistancePx = pinchStateRef.current?.distancePx ?? nextDistancePx;
-    const bounds = currentTarget.getBoundingClientRect();
-    const anchorPoint = midpoint(first, second);
-    const nextViewport = applyPinchZoom(viewportRef.current, {
-      previousDistancePx,
-      nextDistancePx,
-      anchorRatio: anchorRatioForPoint(anchorPoint.x, bounds.left, bounds.width),
-    });
+    const startLongPressTimer = (state: ActiveGestureState) => {
+      state.longPressTimerId = window.setTimeout(() => {
+        const activeGesture = activeGestureRef.current;
+        if (!activeGesture || activeGesture.didPan || activeGesture.didPinch) return;
+        const movedPx = distance(activeGesture.startPoint, activeGesture.currentPoint);
+        if (classifyTouchGesture({ pointerCount: 1, movedPx, elapsedMs: LONG_PRESS_MS }) !== 'longpress') {
+          return;
+        }
 
-    if (nextViewport !== viewportRef.current) {
-      publishViewport(nextViewport);
-      pinchStateRef.current = { distancePx: nextDistancePx };
-      return;
-    }
-
-    if (!pinchStateRef.current) {
-      pinchStateRef.current = { distancePx: nextDistancePx };
-    }
-  }, [publishViewport]);
-
-  const onPointerDown = useCallback((event: ReactPointerEvent<HTMLElement>) => {
-    const point: Point = { x: event.clientX, y: event.clientY };
-    const activePointers = activePointersRef.current;
-    const wasIdle = activePointers.size === 0;
-
-    trySetPointerCapture(event.currentTarget, event.pointerId);
-
-    if (wasIdle && maybeResetForDoubleTap(point)) {
-      activePointers.clear();
-      return;
-    }
-
-    activePointers.set(event.pointerId, point);
-
-    if (activePointers.size === 1) {
-      const bounds = event.currentTarget.getBoundingClientRect();
-      dragBaselineRef.current = point;
-      clearLongPress();
-      const timerId = window.setTimeout(() => {
-        const state = longPressStateRef.current;
-        if (!state || state.pointerId !== event.pointerId) return;
         const timestamp = timestampAtSurfaceRatio(
           viewportRef.current,
-          anchorRatioForPoint(state.point.x, state.surfaceLeft, state.surfaceWidth),
+          anchorRatioForPoint(activeGesture.startPoint.x, activeGesture.surfaceLeft, activeGesture.surfaceWidth),
         );
-        consumedTapPointersRef.current.add(event.pointerId);
+        activeGesture.didLongPress = true;
+        activeGesture.longPressTimerId = null;
         lastTapRef.current = null;
-        longPressStateRef.current = null;
         onInspectRef.current?.({ timestamp });
       }, LONG_PRESS_MS);
+    };
 
-      longPressStateRef.current = {
-        pointerId: event.pointerId,
-        point,
+    const onTouchStart = (event: TouchEvent) => {
+      const points = touchPoints(event.touches);
+      if (points.length === 0) return;
+
+      const bounds = element.getBoundingClientRect();
+      const firstPoint = points[0];
+      if (points.length === 1 && maybeResetForDoubleTap(firstPoint)) return;
+
+      clearLongPress();
+      const state: ActiveGestureState = {
+        startPoint: firstPoint,
+        currentPoint: firstPoint,
+        startTimeMs: Date.now(),
+        dragBaseline: firstPoint,
         surfaceLeft: bounds.left,
         surfaceWidth: bounds.width,
-        timerId,
+        previousPinchDistancePx: points.length >= 2 ? distance(points[0], points[1]) : null,
+        didPan: false,
+        didPinch: points.length >= 2,
+        didLongPress: false,
+        longPressTimerId: null,
       };
-      return;
-    }
+      activeGestureRef.current = state;
 
-    clearLongPress();
-    updatePinchState(event.currentTarget);
-  }, [clearLongPress, maybeResetForDoubleTap, updatePinchState]);
+      if (points.length === 1) {
+        startLongPressTimer(state);
+      }
+    };
 
-  const onPointerMove = useCallback((event: ReactPointerEvent<HTMLElement>) => {
-    const activePointers = activePointersRef.current;
-    const previousPoint = activePointers.get(event.pointerId);
-    if (!previousPoint) return;
+    const onTouchMove = (event: TouchEvent) => {
+      const state = activeGestureRef.current;
+      const points = touchPoints(event.touches);
+      if (!state || points.length === 0) return;
 
-    const nextPoint: Point = { x: event.clientX, y: event.clientY };
+      event.preventDefault();
 
-    if (longPressStateRef.current?.pointerId === event.pointerId) {
-      const movedPx = distance(longPressStateRef.current.point, nextPoint);
-      if (movedPx > LONG_PRESS_CANCEL_MOVEMENT_PX) {
+      if (points.length >= 2) {
+        clearLongPress();
+        const nextDistancePx = distance(points[0], points[1]);
+        const previousDistancePx = state.previousPinchDistancePx ?? nextDistancePx;
+        const anchorPoint = midpoint(points[0], points[1]);
+        const nextViewport = applyPinchZoom(viewportRef.current, {
+          previousDistancePx,
+          nextDistancePx,
+          anchorRatio: anchorRatioForPoint(anchorPoint.x, state.surfaceLeft, state.surfaceWidth),
+        });
+
+        state.currentPoint = anchorPoint;
+        state.previousPinchDistancePx = nextDistancePx;
+        state.didPinch = true;
+
+        if (nextViewport !== viewportRef.current) {
+          publishViewport(nextViewport);
+        }
+        return;
+      }
+
+      const nextPoint = points[0];
+      state.currentPoint = nextPoint;
+
+      if (distance(state.startPoint, nextPoint) > LONG_PRESS_CANCEL_MOVEMENT_PX) {
         clearLongPress();
       }
-    }
 
-    activePointers.set(event.pointerId, nextPoint);
+      if (!isZoomedIn(viewportRef.current, defaultRangeRef.current)) return;
 
-    if (activePointers.size === 1) {
-      const dragBaseline = dragBaselineRef.current ?? previousPoint;
-      const bounds = event.currentTarget.getBoundingClientRect();
       const nextViewport = applyDragPan(viewportRef.current, {
-        surfaceWidthPx: bounds.width,
-        deltaXPx: nextPoint.x - dragBaseline.x,
+        surfaceWidthPx: state.surfaceWidth,
+        deltaXPx: nextPoint.x - state.dragBaseline.x,
       });
 
       if (nextViewport !== viewportRef.current) {
+        state.didPan = true;
         clearLongPress();
+        state.dragBaseline = nextPoint;
         publishViewport(nextViewport);
-        dragBaselineRef.current = nextPoint;
       }
-      return;
-    }
+    };
 
-    if (activePointers.size === 2) {
+    const onTouchEnd = () => {
+      const state = activeGestureRef.current;
+      if (!state) return;
+
       clearLongPress();
-      updatePinchState(event.currentTarget);
-    }
-  }, [clearLongPress, publishViewport, updatePinchState]);
+      const dx = state.currentPoint.x - state.startPoint.x;
+      const dy = state.currentPoint.y - state.startPoint.y;
+      const axis = swipeDirection({ dx, dy });
+      const elapsedMs = Date.now() - state.startTimeMs;
+      const movedPx = distance(state.startPoint, state.currentPoint);
+      const gesture = classifyTouchGesture({ pointerCount: state.didPinch ? 2 : 1, movedPx, elapsedMs });
 
-  const finishPointer = useCallback((event: ReactPointerEvent<HTMLElement>) => {
-    const activePointers = activePointersRef.current;
-    const previousPoint = activePointers.get(event.pointerId);
-    activePointers.delete(event.pointerId);
+      if (!state.didPan && !state.didPinch && !state.didLongPress && axis) {
+        onSwipeRef.current?.(axis, axis === 'horizontal' ? dx : dy);
+      }
 
-    try {
-      event.currentTarget.releasePointerCapture(event.pointerId);
-    } catch {
-      // The browser may already have released capture during cancellation.
-    }
+      if (gesture === 'tap' && !state.didLongPress) {
+        lastTapRef.current = { timeMs: Date.now(), point: state.currentPoint };
+      } else {
+        lastTapRef.current = null;
+      }
 
-    if (longPressStateRef.current?.pointerId === event.pointerId) {
+      activeGestureRef.current = null;
+    };
+
+    const onTouchCancel = () => {
       clearLongPress();
-    }
+      activeGestureRef.current = null;
+    };
 
-    if (activePointers.size < 2) {
-      pinchStateRef.current = null;
-    }
+    element.addEventListener('touchstart', onTouchStart);
+    element.addEventListener('touchmove', onTouchMove, { passive: false });
+    element.addEventListener('touchend', onTouchEnd);
+    element.addEventListener('touchcancel', onTouchCancel);
 
-    if (activePointers.size === 0) {
-      dragBaselineRef.current = null;
-    } else if (activePointers.size === 1) {
-      dragBaselineRef.current = Array.from(activePointers.values())[0] ?? null;
-    }
-
-    const consumedTap = consumedTapPointersRef.current.delete(event.pointerId);
-    if (consumedTap) {
-      lastTapRef.current = null;
-    }
-    if (activePointers.size === 0 && previousPoint && !consumedTap) {
-      lastTapRef.current = { timeMs: Date.now(), point: previousPoint };
-    }
-  }, [clearLongPress]);
+    return () => {
+      element.removeEventListener('touchstart', onTouchStart);
+      element.removeEventListener('touchmove', onTouchMove);
+      element.removeEventListener('touchend', onTouchEnd);
+      element.removeEventListener('touchcancel', onTouchCancel);
+      clearLongPress();
+    };
+  }, [clearLongPress, element, maybeResetForDoubleTap, publishViewport]);
 
   const onDoubleClick = useCallback(() => {
-    clearLongPress();
     resetViewport();
-  }, [clearLongPress, resetViewport]);
+  }, [resetViewport]);
 
   return {
-    onPointerDown,
-    onPointerMove,
-    onPointerUp: finishPointer,
-    onPointerCancel: finishPointer,
+    ref: setElement,
     onDoubleClick,
     style: { touchAction: 'none' } satisfies CSSProperties,
   };

@@ -393,6 +393,31 @@ export const HistoryCardDetailPage: React.FC = () => {
     setEnabledSources({ cardId: displayCard.cardId, keys: valid.length > 0 ? valid : allSourceKeys });
   }, [allSourceKeys, displayCard]);
 
+  const handleVisualizationSwipe = useCallback((direction: 'horizontal' | 'vertical', signedDelta: number) => {
+    if (!displayCard) return;
+
+    if (direction === 'horizontal') {
+      if (routeScope?.type !== 'zone' || orderedRouteCards.length <= 1) return;
+      const currentIndex = orderedRouteCards.findIndex((card) => card.cardId === displayCard.cardId);
+      if (currentIndex < 0) return;
+
+      const nextIndex = signedDelta < 0
+        ? (currentIndex + 1) % orderedRouteCards.length
+        : (currentIndex - 1 + orderedRouteCards.length) % orderedRouteCards.length;
+      const nextCard = orderedRouteCards[nextIndex];
+      navigate(`/history/zones/${routeScope.zoneId}/cards/${encodeURIComponent(routeCardIdForCard(nextCard))}`);
+      return;
+    }
+
+    const views = primaryViewModes(displayCard.views);
+    if (views.length <= 1) return;
+    const currentIndex = Math.max(0, views.indexOf(selectedView));
+    const nextIndex = signedDelta < 0
+      ? (currentIndex + 1) % views.length
+      : (currentIndex - 1 + views.length) % views.length;
+    setUserSelectedView({ cardId: displayCard.cardId, view: views[nextIndex] });
+  }, [displayCard, navigate, orderedRouteCards, routeScope, selectedView]);
+
   const isVisualizationEvent = useCallback((target: EventTarget | null): boolean => {
     return target instanceof Element && Boolean(target.closest(HISTORY_VISUALIZATION_SURFACE_SELECTOR));
   }, []);
@@ -504,6 +529,20 @@ export const HistoryCardDetailPage: React.FC = () => {
     }
   }, [allSourceKeys, displayCard, enabledSources]);
 
+  useEffect(() => {
+    const meta = document.querySelector('meta[name="viewport"]');
+    const previousContent = meta?.getAttribute('content') ?? null;
+    meta?.setAttribute('content', 'width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no');
+    return () => {
+      if (!meta) return;
+      if (previousContent === null) {
+        meta.removeAttribute('content');
+        return;
+      }
+      meta.setAttribute('content', previousContent);
+    };
+  }, []);
+
   if (!validRoute) {
     return (
       <HistoryDetailError
@@ -588,6 +627,7 @@ export const HistoryCardDetailPage: React.FC = () => {
             defaultRange={displayCard.defaultRange}
             onViewportChange={timeViewport.setViewport}
             onInspect={handleInspectTimestamp}
+            onSwipe={handleVisualizationSwipe}
             rangeLabel={formatRangeLabel(t, timeViewport.viewport.range.label)}
             aggregationLabel={formatAggregationLabel(t, timeViewport.viewport.aggregation)}
           >

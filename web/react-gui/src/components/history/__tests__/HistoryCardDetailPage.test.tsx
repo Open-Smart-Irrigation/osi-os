@@ -214,6 +214,35 @@ function pointerDrag(
   fireEvent.pointerUp(element, { pointerId: 1, pointerType, clientX: toX, clientY: toY });
 }
 
+function dispatchTouch(
+  element: HTMLElement,
+  type: 'touchstart' | 'touchmove' | 'touchend' | 'touchcancel',
+  touches: Array<{ clientX: number; clientY: number }>,
+) {
+  const touchList = touches.map((touch, index) => ({
+    identifier: index,
+    target: element,
+    clientX: touch.clientX,
+    clientY: touch.clientY,
+  }));
+  const event =
+    typeof TouchEvent === 'function'
+      ? new TouchEvent(type, {
+          bubbles: true,
+          cancelable: true,
+          touches: touchList as unknown as TouchList,
+          changedTouches: touchList as unknown as TouchList,
+        })
+      : new Event(type, { bubbles: true, cancelable: true });
+
+  if (typeof TouchEvent !== 'function' || !(event instanceof TouchEvent)) {
+    Object.defineProperty(event, 'touches', { value: touchList });
+    Object.defineProperty(event, 'changedTouches', { value: touchList });
+  }
+
+  element.dispatchEvent(event);
+}
+
 function renderAppAtRoute(hashRoute: string) {
   window.history.replaceState(null, '', `#${hashRoute}`);
 
@@ -885,7 +914,7 @@ describe('History card detail route', () => {
 
     const surface = await screen.findByTestId('history-visualization-surface');
     preparePointerTarget(surface);
-    fireEvent.pointerDown(surface, { pointerId: 1, pointerType: 'touch', clientX: 120, clientY: 140 });
+    dispatchTouch(surface, 'touchstart', [{ clientX: 120, clientY: 140 }]);
 
     await act(async () => {
       await new Promise((resolve) => {
@@ -992,7 +1021,7 @@ describe('History card detail route', () => {
     expect(window.location.hash).toContain('/history/zones/12/cards/environment-card%3Amicroclimate');
   });
 
-  it('keeps horizontal drags inside the visualization surface scoped to chart panning', async () => {
+  it('switches to the next thematic card on horizontal swipe inside the visualization surface', async () => {
     vi.mocked(historyAPI.getZoneCards).mockResolvedValue({
       zoneId: 12,
       generatedAt: '2026-05-31T10:00:00Z',
@@ -1020,10 +1049,43 @@ describe('History card detail route', () => {
 
     const surface = screen.getByTestId('history-visualization-surface');
     preparePointerTarget(surface);
-    pointerDrag(surface, { fromX: 280, toX: 80, fromY: 160, toY: 168 });
+    dispatchTouch(surface, 'touchstart', [{ clientX: 280, clientY: 160 }]);
+    dispatchTouch(surface, 'touchmove', [{ clientX: 80, clientY: 168 }]);
+    dispatchTouch(surface, 'touchend', []);
 
-    expect(screen.getByRole('heading', { level: 1, name: 'Soil - Root Zone' })).toBeInTheDocument();
-    expect(window.location.hash).toContain('/history/zones/12/cards/soil-card%3Aroot-zone');
+    await waitFor(() => {
+      expect(screen.getByRole('heading', { level: 1, name: 'Environment - Microclimate' })).toBeInTheDocument();
+    });
+    expect(window.location.hash).toContain('/history/zones/12/cards/environment-card%3Amicroclimate');
+  });
+
+  it('switches to the next view mode on vertical swipe inside the visualization surface', async () => {
+    vi.mocked(historyAPI.getZoneCards).mockResolvedValue({
+      zoneId: 12,
+      generatedAt: '2026-05-31T10:00:00Z',
+      cards: [
+        zoneCard({
+          cardId: 'soil-card:root-zone',
+          title: 'Soil - Root Zone',
+          defaultView: 'soil-profile',
+          views: ['soil-profile', 'line-chart', 'calendar', 'advanced'],
+        }),
+      ],
+    });
+
+    renderAppAtRoute('/history/zones/12/cards/soil-card%3Aroot-zone');
+
+    expect(await screen.findByTestId('view-mode-label')).toHaveTextContent('Soil Profile');
+
+    const surface = screen.getByTestId('history-visualization-surface');
+    preparePointerTarget(surface);
+    dispatchTouch(surface, 'touchstart', [{ clientX: 160, clientY: 260 }]);
+    dispatchTouch(surface, 'touchmove', [{ clientX: 164, clientY: 70 }]);
+    dispatchTouch(surface, 'touchend', []);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('view-mode-label')).toHaveTextContent('Line Chart');
+    });
   });
 
   it('does not refresh detail data on mouse drag outside the visualization surface', async () => {
