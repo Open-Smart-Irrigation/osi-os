@@ -31,16 +31,13 @@ export const Login: React.FC = () => {
 
   return (
     <div className="relative min-h-screen flex items-center justify-center bg-[var(--bg)] px-4">
-      <div className="absolute top-4 right-4">
-        <LanguageSwitcher />
-      </div>
-      <div className="max-w-md w-full bg-[var(--card)] rounded-2xl shadow-2xl border border-[var(--border)] p-8">
-        <div className="text-center mb-8">
-          <img src={osiLogo} alt="OSI OS Logo" className="mx-auto mb-4 h-20 w-20" />
-          <h1 className="text-4xl font-bold text-[var(--text)] mb-2 high-contrast-text">
+      <div className="max-w-md w-full bg-[var(--card)] rounded-2xl shadow-2xl border border-[var(--border)] p-6">
+        <div className="text-center mb-5">
+          <img src={osiLogo} alt="OSI OS Logo" className="mx-auto mb-4 h-14 w-14" />
+          <h1 className="text-3xl font-bold text-[var(--text)] mb-2 high-contrast-text">
             OSI OS v0.6.5 (Alpha)
           </h1>
-          <p className="text-[var(--text-secondary)] text-lg">{t('login.subtitle')}</p>
+          <p className="text-[var(--text-secondary)] text-base">{t('login.subtitle')}</p>
         </div>
 
         {error && (
@@ -49,7 +46,7 @@ export const Login: React.FC = () => {
           </div>
         )}
 
-        <form onSubmit={handleSubmit} className="space-y-6">
+        <form onSubmit={handleSubmit} className="space-y-4">
           <div>
             <label htmlFor="username" className="block text-[var(--text)] text-lg font-semibold mb-2">
               {t('login.username')}
@@ -60,7 +57,7 @@ export const Login: React.FC = () => {
               value={username}
               onChange={(e) => setUsername(e.target.value)}
               required
-              className="w-full px-4 py-4 touch-target bg-white border-2 border-[var(--border)] rounded-lg text-[var(--text)] text-lg placeholder:text-[var(--text-tertiary)] focus:outline-none focus:border-[var(--focus)] focus:ring-2 focus:ring-[var(--focus)]"
+              className="w-full px-4 py-3 touch-target bg-white border-2 border-[var(--border)] rounded-lg text-[var(--text)] text-lg placeholder:text-[var(--text-tertiary)] focus:outline-none focus:border-[var(--focus)] focus:ring-2 focus:ring-[var(--focus)]"
               placeholder={t('login.usernamePlaceholder')}
             />
           </div>
@@ -75,7 +72,7 @@ export const Login: React.FC = () => {
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               required
-              className="w-full px-4 py-4 touch-target bg-white border-2 border-[var(--border)] rounded-lg text-[var(--text)] text-lg placeholder:text-[var(--text-tertiary)] focus:outline-none focus:border-[var(--focus)] focus:ring-2 focus:ring-[var(--focus)]"
+              className="w-full px-4 py-3 touch-target bg-white border-2 border-[var(--border)] rounded-lg text-[var(--text)] text-lg placeholder:text-[var(--text-tertiary)] focus:outline-none focus:border-[var(--focus)] focus:ring-2 focus:ring-[var(--focus)]"
               placeholder={t('login.passwordPlaceholder')}
             />
           </div>
@@ -89,13 +86,16 @@ export const Login: React.FC = () => {
           </button>
         </form>
 
-        <div className="mt-6 text-center">
+        <div className="mt-6 space-y-4 text-center">
           <Link
             to="/register"
             className="text-[var(--primary)] hover:text-[var(--primary-hover)] text-lg font-semibold underline"
           >
             {t('login.noAccount')}
           </Link>
+          <div className="flex justify-center">
+            <LanguageSwitcher />
+          </div>
         </div>
       </div>
     </div>
