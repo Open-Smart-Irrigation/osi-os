@@ -30,6 +30,7 @@ interface HistoryCardVisualizationProps {
   advancedIsLoading?: boolean;
   advancedError?: unknown;
   onInspectDate?: (selection: HistoryCalendarDateSelection) => void;
+  selectedCalendarDate?: string | null;
 }
 
 type HistoryTranslate = (key: string, options?: Record<string, unknown>) => string;
@@ -53,6 +54,7 @@ export const HistoryCardVisualization: React.FC<HistoryCardVisualizationProps> =
   advancedIsLoading = false,
   advancedError = null,
   onInspectDate,
+  selectedCalendarDate = null,
 }) => {
   const { t: translate } = useTranslation('history');
   const t = translate as HistoryTranslate;
@@ -125,7 +127,12 @@ export const HistoryCardVisualization: React.FC<HistoryCardVisualizationProps> =
   if (shouldRenderCalendar) {
     return (
       <>
-        <CalendarView cardType={card.cardType} calendar={data?.calendar} onInspectDate={onInspectDate} />
+        <CalendarView
+          cardType={card.cardType}
+          calendar={data?.calendar}
+          onInspectDate={onInspectDate}
+          selectedDate={selectedCalendarDate}
+        />
         <InterpretationList interpretations={data?.interpretations ?? []} />
       </>
     );

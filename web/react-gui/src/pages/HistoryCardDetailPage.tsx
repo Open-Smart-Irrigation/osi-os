@@ -3,13 +3,17 @@ import { Link, useParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import useSWR from 'swr';
 import { HistoryCardVisualization } from '../components/history/HistoryCardVisualization';
-import type { HistoryCalendarDateSelection } from '../components/history/visualizations/HistoryMonthCalendarView';
 import { HistoryDetailHeader } from '../components/history/mobile/HistoryDetailHeader';
+import {
+  HistoryInspectorSheet,
+  type HistoryInspectorSelection,
+} from '../components/history/mobile/HistoryInspectorSheet';
 import { HistoryRangeSegmentedControl } from '../components/history/mobile/HistoryRangeSegmentedControl';
 import { HistorySourceFilter } from '../components/history/mobile/HistorySourceFilter';
 import { HistoryVisualizationSurface } from '../components/history/mobile/HistoryVisualizationSurface';
 import { HistoryViewModeSegmentedControl } from '../components/history/mobile/HistoryViewModeSegmentedControl';
 import { useFeatureFlags } from '../history/useFeatureFlags';
+import { useHistoryCardAdvancedData } from '../history/useHistoryCardAdvancedData';
 import { useHistoryCardData } from '../history/useHistoryCardData';
 import { useHistoryCards } from '../history/useHistoryCards';
 import { setTimeViewportRange, useTimeViewport } from '../history/useTimeViewport';
@@ -18,8 +22,6 @@ import type { HistoryCardDataScope } from '../history/useHistoryCardData';
 import type {
   HistoryCardSummary,
   HistoryCardSummaryResponse,
-  HistoryCalendarDay,
-  HistoryCalendarMarker,
   HistoryRangeLabel,
   HistoryViewMode,
 } from '../history/types';
@@ -38,9 +40,6 @@ type PullRefreshStart = {
   y: number;
   refreshed: boolean;
 };
-type InspectorSelection =
-  | { kind: 'timestamp'; timestamp: string }
-  | { kind: 'date'; date: string; day: HistoryCalendarDay | null };
 
 function decodeRouteCardId(rawCardId: string | undefined): string | null {
   if (!rawCardId) return null;
@@ -108,28 +107,6 @@ function formatAggregationLabel(t: HistoryTranslate, aggregation: string): strin
   return t(`history.metadata.aggregation.${aggregation}`);
 }
 
-function translateParams(params: Record<string, unknown> | undefined): Record<string, unknown> {
-  return params && typeof params === 'object' ? params : {};
-}
-
-function calendarStateLabel(t: HistoryTranslate, day: HistoryCalendarDay): string {
-  return t(`history.calendar.state.${day.state}`);
-}
-
-function calendarSummaryLabel(t: HistoryTranslate, card: HistoryCardSummary, day: HistoryCalendarDay): string {
-  if (day.summary?.key) return t(day.summary.key, translateParams(day.summary.params));
-  return t(`history.calendar.summary.${card.cardType}.${day.state}`, translateParams(day.metrics));
-}
-
-function calendarCoverageLabel(t: HistoryTranslate, day: HistoryCalendarDay): string {
-  if (day.coveragePct === null || day.coveragePct === undefined) return t('history.metadata.coverageUnknown');
-  return t('history.metadata.coverageKnown', { coverage: Math.round(day.coveragePct) });
-}
-
-function calendarMarkerLabel(t: HistoryTranslate, marker: HistoryCalendarMarker): string {
-  return t(marker.labelKey, translateParams(marker.params));
-}
-
 function isPullRefreshPointerType(pointerType: string): boolean {
   return pointerType === 'touch' || pointerType === 'pen';
 }
@@ -144,8 +121,8 @@ function getPullRefreshScrollTop(scrollRoot: HTMLElement): number {
 }
 
 function calendarDateFromTarget(target: EventTarget | null): string | null {
-  if (!(target instanceof Element)) return null;
-  const dateCell = target.closest('[data-history-calendar-date]');
+  if (!target || typeof (target as Element).closest !== 'function') return null;
+  const dateCell = (target as Element).closest('[data-history-calendar-date]');
   return dateCell?.getAttribute('data-history-calendar-date') ?? null;
 }
 
@@ -252,6 +229,7 @@ export const HistoryCardDetailPage: React.FC = () => {
   );
   const [userSelectedView, setUserSelectedView] = useState<{ cardId: string; view: HistoryViewMode } | null>(null);
   const [selectedSource, setSelectedSource] = useState<{ cardId: string; sourceKey: string | null } | null>(null);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const defaultRange = displayCard?.defaultRange ?? '24h';
   const timeViewport = useTimeViewport(
     defaultRange,
@@ -261,12 +239,13 @@ export const HistoryCardDetailPage: React.FC = () => {
     if (
       displayCard
       && userSelectedView?.cardId === displayCard.cardId
-      && primaryViews.includes(userSelectedView.view)
+      && displayCard.views.includes(userSelectedView.view)
     ) {
       return userSelectedView.view;
     }
     return defaultPrimaryViewForCard(displayCard);
-  }, [displayCard, primaryViews, userSelectedView]);
+  }, [displayCard, userSelectedView]);
+  const shouldRenderAdvanced = selectedView === 'advanced';
   const selectedSourceKey = displayCard && selectedSource?.cardId === displayCard.cardId
     ? selectedSource.sourceKey
     : null;
@@ -278,9 +257,19 @@ export const HistoryCardDetailPage: React.FC = () => {
     aggregation: timeViewport.viewport.aggregation,
     overlays: [],
     sourceKey: selectedSourceKey,
-    enabled: Boolean(displayCard?.availability.available && resolvedScope),
+    enabled: Boolean(displayCard?.availability.available && resolvedScope && !shouldRenderAdvanced),
   });
-  const [inspectorSelection, setInspectorSelection] = useState<InspectorSelection | null>(null);
+  const advancedData = useHistoryCardAdvancedData({
+    scope: resolvedScope,
+    cardId: displayCard?.cardId ?? null,
+    view: selectedView,
+    range: timeViewport.viewport.range,
+    aggregation: timeViewport.viewport.aggregation,
+    overlays: [],
+    sourceKey: selectedSourceKey,
+    enabled: Boolean(displayCard?.availability.available && resolvedScope && shouldRenderAdvanced),
+  });
+  const [inspectorSelection, setInspectorSelection] = useState<HistoryInspectorSelection | null>(null);
   const calendarDaysByDate = useMemo(() => {
     const days = cardData.data?.calendar?.days;
     return new Map((Array.isArray(days) ? days : []).map((day) => [day.date, day]));
@@ -290,11 +279,21 @@ export const HistoryCardDetailPage: React.FC = () => {
     setInspectorSelection({ kind: 'timestamp', timestamp: selection.timestamp });
   }, []);
 
-  const handleInspectDate = useCallback((selection: HistoryCalendarDateSelection) => {
+  const handleInspectDate = useCallback((selection: HistoryInspectorSelection & { kind: 'date' }) => {
     setInspectorSelection({ kind: 'date', date: selection.date, day: selection.day });
   }, []);
 
   const handleScrollRootClick = useCallback((event: React.MouseEvent<HTMLElement>) => {
+    const date = calendarDateFromTarget(event.target);
+    if (date) setInspectorSelection({ kind: 'date', date, day: calendarDaysByDate.get(date) ?? null });
+  }, [calendarDaysByDate]);
+
+  const handleScrollRootCalendarPointer = useCallback((event: React.PointerEvent<HTMLElement>) => {
+    const date = calendarDateFromTarget(event.target);
+    if (date) setInspectorSelection({ kind: 'date', date, day: calendarDaysByDate.get(date) ?? null });
+  }, [calendarDaysByDate]);
+
+  const handleScrollRootCalendarMouse = useCallback((event: React.MouseEvent<HTMLElement>) => {
     const date = calendarDateFromTarget(event.target);
     if (date) setInspectorSelection({ kind: 'date', date, day: calendarDaysByDate.get(date) ?? null });
   }, [calendarDaysByDate]);
@@ -305,10 +304,36 @@ export const HistoryCardDetailPage: React.FC = () => {
     );
   }, [timeViewport]);
 
+  const handleResetRange = useCallback(() => {
+    if (!displayCard) return;
+    setSettingsOpen(false);
+    timeViewport.setViewport(
+      setTimeViewportRange(displayCard.defaultRange, new Date(), timeViewport.viewport.range.timezone),
+    );
+  }, [displayCard, timeViewport]);
+
   const handleViewChange = useCallback((view: HistoryViewMode) => {
     if (!displayCard) return;
     setUserSelectedView({ cardId: displayCard.cardId, view });
   }, [displayCard]);
+
+  const handleAdvancedView = useCallback(() => {
+    if (!displayCard || !displayCard.views.includes('advanced')) return;
+    setSettingsOpen(false);
+    setUserSelectedView({ cardId: displayCard.cardId, view: 'advanced' });
+  }, [displayCard]);
+
+  const handleCardSettings = useCallback(() => {
+    setSettingsOpen(false);
+  }, []);
+
+  const handleCloseInspector = useCallback(() => {
+    setInspectorSelection(null);
+    window.setTimeout(() => {
+      const surface = document.querySelector<HTMLElement>('[data-testid="history-visualization-surface"]');
+      surface?.focus();
+    }, 0);
+  }, []);
 
   const handleSourceChange = useCallback((sourceKey: string | null) => {
     if (!displayCard) return;
@@ -425,11 +450,18 @@ export const HistoryCardDetailPage: React.FC = () => {
         zoneName={resolvedZone?.name ?? null}
         card={displayCard}
         backHref="/history"
+        settingsOpen={settingsOpen}
+        onSettingsToggle={() => setSettingsOpen((open) => !open)}
+        onAdvancedView={handleAdvancedView}
+        onCardSettings={handleCardSettings}
+        onResetRange={handleResetRange}
       />
       <main
         data-testid="history-detail-scroll-root"
         className="flex min-h-[calc(100vh-4rem)] flex-col gap-4 px-4 py-4"
         onPointerDown={handleScrollRootPointerDown}
+        onPointerDownCapture={handleScrollRootCalendarPointer}
+        onMouseDownCapture={handleScrollRootCalendarMouse}
         onPointerUpCapture={handleScrollRootPointerUp}
         onClickCapture={handleScrollRootClick}
         onPointerCancel={() => {
@@ -475,48 +507,22 @@ export const HistoryCardDetailPage: React.FC = () => {
               selectedView={selectedView}
               isLoading={cardData.isLoading}
               error={cardData.error}
+              advancedData={advancedData.data}
+              advancedIsLoading={advancedData.isLoading}
+              advancedError={advancedData.error}
               onInspectDate={handleInspectDate}
+              selectedCalendarDate={inspectorSelection?.kind === 'date' ? inspectorSelection.date : null}
             />
           </HistoryVisualizationSurface>
         </div>
-        <section
-          data-testid="history-detail-inspector"
-          className="rounded-lg border border-dashed border-[var(--border)] bg-[var(--surface)] px-4 py-3 text-sm text-[var(--text-tertiary)]"
-        >
-          {inspectorSelection?.kind === 'timestamp' && (
-            <p className="font-semibold">{inspectorSelection.timestamp}</p>
-          )}
-          {inspectorSelection?.kind === 'date' && (
-            <div className="space-y-1">
-              <p className="font-bold text-[var(--text)]">{inspectorSelection.date}</p>
-              {inspectorSelection.day ? (
-                <>
-                  <p className="font-semibold text-[var(--text)]">
-                    {calendarStateLabel(t, inspectorSelection.day)}
-                  </p>
-                  <p>{displayCard ? calendarSummaryLabel(t, displayCard, inspectorSelection.day) : null}</p>
-                  <p>{calendarCoverageLabel(t, inspectorSelection.day)}</p>
-                  {inspectorSelection.day.markers && inspectorSelection.day.markers.length > 0 && (
-                    <div className="flex flex-wrap gap-1 pt-1">
-                      {inspectorSelection.day.markers.map((marker, index) => (
-                        <span
-                          key={`${marker.type}-${marker.labelKey}-${index}`}
-                          className="rounded-full border border-[var(--border)] px-2 py-0.5 text-xs font-semibold"
-                        >
-                          {calendarMarkerLabel(t, marker)}
-                        </span>
-                      ))}
-                    </div>
-                  )}
-                </>
-              ) : (
-                <p className="font-semibold">{t('history.calendar.state.no_data')}</p>
-              )}
-            </div>
-          )}
-          {!inspectorSelection && t('history.detail.inspectorPlaceholder')}
-        </section>
       </main>
+      <HistoryInspectorSheet
+        card={displayCard}
+        data={cardData.data}
+        selection={inspectorSelection}
+        isOpen={Boolean(inspectorSelection)}
+        onClose={handleCloseInspector}
+      />
     </div>
   );
 };

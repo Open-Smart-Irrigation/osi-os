@@ -501,6 +501,26 @@
     "sourceFilter": {
       "label": "Source",
       "all": "All"
+    },
+    "settings": {
+      "open": "Open card settings",
+      "menuLabel": "Card settings",
+      "advancedView": "Advanced View",
+      "cardSettings": "Card settings",
+      "resetRange": "Reset range"
+    },
+    "inspector": {
+      "title": "Inspector",
+      "context": "Selected point",
+      "close": "Close",
+      "timestamp": "Timestamp",
+      "date": "Date",
+      "source": "Source",
+      "coverage": "Coverage",
+      "syncState": "Sync state",
+      "dataAsOf": "Data as of",
+      "events": "Events",
+      "noInterpretation": "No local interpretation for this selection."
     }
   }
 }
