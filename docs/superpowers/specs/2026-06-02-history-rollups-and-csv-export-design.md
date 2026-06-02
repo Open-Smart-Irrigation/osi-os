@@ -16,6 +16,8 @@ data archive, by:
    rollups, the trailing open bucket is computed live from raw and merged.
 3. **Exporting per-zone CSV** (raw + hourly + daily aggregates) nightly as a download/backup
    artifact, distinct from the chart read-path.
+4. **Retrofitting the legacy device-card history endpoints** to read the same aggregated values
+   (they stay in the UI for now but must consume rollups, not raw dumps, for long ranges).
 
 This replaces today's behaviour where **all** aggregation is recomputed live and the rollup
 table is never written (verified: 0 rollup rows vs 134,337 raw rows on kaba100).
@@ -76,6 +78,10 @@ Node-RED inject (cron 0 2 * * *)
   - Add `writeZoneCsv(zone, day, rows, options)` + `rotateZoneCsv(zone, options)`.
   - Generalise the read path: `aggregateDeviceData` merges rollups (completed buckets) with a
     live-computed trailing bucket instead of all-or-nothing fallback.
+  - Add a `deveui + field → rollup key` resolver used by the legacy endpoints (§4.5).
+- Modify: the legacy `sensor-history` / `dendro-history` function nodes in `flows.json` (both
+  profiles) to route long ranges through the shared aggregation read path (§4.5), preserving the
+  `[{ t, value }]` response.
 - Mirror: the bcm2709 copy of `osi-history-helper/index.js` (byte-for-content).
 - Modify: `conf/.../bcm2712/files/usr/share/flows.json` + bcm2709 mirror
   - Add a `History Rollup Tick` inject (cron `0 2 * * *`) + function node calling the helper.
@@ -177,6 +183,32 @@ bucket_start,bucket_end,timezone,zone,card,source,variable,depth_cm,unit,n,cover
   under `/data/exports/<zoneUuid>/` for zones the user can access. (Download UI is out of scope;
   endpoint + auth are in scope.)
 
+### 4.5 Legacy device-card history endpoints consume the rollups
+
+The old device-card flow (click a value on a device card → legacy history modal) stays for now
+but must read the **same aggregated values** as the new path, so it is cheap and consistent
+instead of dumping raw rows for long ranges.
+
+Endpoints in scope:
+- `GET /api/devices/:deveui/sensor-history?field=<channel>&hours=<n>`
+- `GET /api/devices/:deveui/dendro-history?...` (same treatment)
+
+Behaviour:
+- Map `deveui + field` → the rollup key: resolve the device's zone, derived card, and logical
+  source (reuse `deriveCardsForZone`), with `field` → `channel_id`.
+- Apply the **same duration→level tiering** as `resolveAggregation` (`hours` is the duration):
+  ≤24h → raw (live, unchanged); larger → hourly/daily/weekly via the §4.3 hybrid read
+  (rollups for completed buckets + live trailing bucket).
+- **Response shape is unchanged** — the endpoint still returns `[{ t, value }]`, where for
+  aggregated buckets `t = bucket_start` and `value = latest ?? mean` (the same representative the
+  new charts plot). The legacy frontend (`sensorAPI.getHistory`, `SensorMonitor`,
+  `DendrometerMonitor`) is **not modified** and keeps working.
+- If a device/field cannot be mapped to a rollup key (unassigned device, unknown field), fall
+  back to the current raw query so nothing regresses.
+
+This is additive: no new endpoint, no frontend change, same JSON contract — only the server-side
+data source changes for ranges beyond 24h.
+
 ## 5. Error handling & operability
 
 - The job is best-effort and isolated per zone: a failure on one zone logs and continues to
@@ -221,3 +253,6 @@ bucket_start,bucket_end,timezone,zone,card,source,variable,depth_cm,unit,n,cover
 - Live kaba100: run the job manually; confirm `history_channel_rollups` populates, a 30D query
   reports `source: rollups+live` (not a full raw scan), today's point still updates, and
   `/data/exports/<zone>/` contains the expected CSV files with correct rotation.
+- Legacy endpoint: `sensor-history?hours=24` returns raw points; `hours=720` returns aggregated
+  (daily) points in the unchanged `[{ t, value }]` shape; an unmapped device/field still returns
+  raw. The legacy device-card modal renders unchanged.
