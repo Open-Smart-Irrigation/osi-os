@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
 import type { IrrigationZone, Device, ZoneEnvironmentSummary, ZoneRecommendation } from '../../types/farming';
 import type { IrrigationActuation } from '../../services/api';
 import { dendroAnalyticsAPI, environmentAPI, irrigationZonesAPI } from '../../services/api';
@@ -221,6 +222,12 @@ export const IrrigationZoneCard: React.FC<IrrigationZoneCardProps> = ({
           >
             {t('zone.assignDevice')}
           </button>
+          <Link
+            to={`/history/zones/${zone.id}`}
+            className="touch-target bg-[var(--secondary-bg)] hover:bg-[var(--border)] text-[var(--text)] px-4 py-2 rounded-lg text-sm font-semibold transition-colors flex items-center"
+          >
+            {t('zone.data', 'Data')}
+          </Link>
           <button
             onClick={() => setShowDeleteConfirm(true)}
             disabled={isDeleting}
