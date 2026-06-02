@@ -9,6 +9,7 @@ import {
   type HistoryInspectorSelection,
 } from '../components/history/mobile/HistoryInspectorSheet';
 import { HistoryVisualizationSurface } from '../components/history/mobile/HistoryVisualizationSurface';
+import { historyCardDefinitionsByType } from '../history/cardDefinitions';
 import { useFeatureFlags } from '../history/useFeatureFlags';
 import { useHistoryCardAdvancedData } from '../history/useHistoryCardAdvancedData';
 import { useHistoryCardData } from '../history/useHistoryCardData';
@@ -105,14 +106,23 @@ type DetailRouteScope =
   | { type: 'zone'; zoneId: number }
   | { type: 'gateway'; gatewayEui: string };
 
+function selectableViewsForCard(card: HistoryCardSummary | null): HistoryViewMode[] {
+  if (!card) return [];
+  const definition = historyCardDefinitionsByType[card.cardType];
+  const allowedViews = new Set<HistoryViewMode>(definition.views);
+  const filtered = card.views.filter((view) => allowedViews.has(view));
+  return filtered.length > 0 ? filtered : [...definition.views];
+}
+
 function primaryViewModes(views: readonly HistoryViewMode[]): HistoryViewMode[] {
   return views.filter((view) => view !== 'advanced');
 }
 
 function defaultPrimaryViewForCard(card: HistoryCardSummary | null): HistoryViewMode {
   if (!card) return 'line-chart';
-  if (card.defaultView !== 'advanced') return card.defaultView;
-  return primaryViewModes(card.views)[0] ?? card.defaultView;
+  const selectableViews = selectableViewsForCard(card);
+  if (card.defaultView !== 'advanced' && selectableViews.includes(card.defaultView)) return card.defaultView;
+  return primaryViewModes(selectableViews)[0] ?? card.defaultView;
 }
 
 function formatRangeLabel(t: HistoryTranslate, range: HistoryRangeLabel): string {
@@ -286,10 +296,11 @@ export const HistoryCardDetailPage: React.FC = () => {
     displayCard ? `${displayCard.cardId}:${defaultRange}` : defaultRange,
   );
   const selectedView = useMemo(() => {
+    const selectableViews = selectableViewsForCard(displayCard);
     if (
       displayCard
       && userSelectedView?.cardId === displayCard.cardId
-      && displayCard.views.includes(userSelectedView.view)
+      && selectableViews.includes(userSelectedView.view)
     ) {
       return userSelectedView.view;
     }
@@ -365,7 +376,7 @@ export const HistoryCardDetailPage: React.FC = () => {
   }, [displayCard, timeViewport]);
 
   const handleAdvancedView = useCallback(() => {
-    if (!displayCard || !displayCard.views.includes('advanced')) return;
+    if (!displayCard || !selectableViewsForCard(displayCard).includes('advanced')) return;
     setSettingsOpen(false);
     setUserSelectedView({ cardId: displayCard.cardId, view: 'advanced' });
   }, [displayCard]);
@@ -409,7 +420,7 @@ export const HistoryCardDetailPage: React.FC = () => {
       return;
     }
 
-    const views = primaryViewModes(displayCard.views);
+    const views = primaryViewModes(selectableViewsForCard(displayCard));
     if (views.length <= 1) return;
     const currentIndex = Math.max(0, views.indexOf(selectedView));
     const nextIndex = signedDelta < 0
@@ -588,7 +599,7 @@ export const HistoryCardDetailPage: React.FC = () => {
         card={displayCard}
         backHref="/history"
         settingsOpen={settingsOpen}
-        canOpenAdvanced={displayCard.views.includes('advanced')}
+        canOpenAdvanced={selectableViewsForCard(displayCard).includes('advanced')}
         onSettingsToggle={() => setSettingsOpen((open) => !open)}
         onAdvancedView={handleAdvancedView}
         onResetRange={handleResetRange}

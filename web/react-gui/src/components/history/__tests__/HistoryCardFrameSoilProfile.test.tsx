@@ -145,7 +145,7 @@ describe('HistoryCardFrame soil profile', () => {
       data: data({
         profiles: [
           { id: 'swt-2', label: 'SWT 2', depthCm: 45, value: 55, unit: 'kPa', status: 'dry_stress' },
-          { id: 'swt-1', label: '', depthCm: 15, value: 10, unit: 'kPa', status: 'wet_excess' },
+          { id: 'swt-1', label: 'Soil 1', depthCm: 15, value: 10, unit: 'kPa', status: 'wet_excess' },
         ],
       }),
       error: undefined,
@@ -156,6 +156,7 @@ describe('HistoryCardFrame soil profile', () => {
     render(<HistoryCardFrame card={card} scope={{ type: 'zone', zoneId: 1 }} />);
 
     expect(screen.getByText('Soil layer 1')).toBeInTheDocument();
+    expect(screen.queryByText('Soil 1')).not.toBeInTheDocument();
     expect(screen.getByText('15 cm')).toBeInTheDocument();
     expect(screen.getByText('10 kPa')).toBeInTheDocument();
     expect(screen.getByText('Wet')).toBeInTheDocument();

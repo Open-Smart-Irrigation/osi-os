@@ -26,6 +26,10 @@ function normalizeFiniteNumber(value: unknown): number | null {
   return typeof value === 'number' && Number.isFinite(value) ? value : null;
 }
 
+function isGenericSoilLayerLabel(label: string | null): boolean {
+  return label !== null && /^soil\s+\d+$/i.test(label);
+}
+
 function normalizeProfilePoint(
   t: HistoryTranslate,
   point: Partial<HistoryProfilePoint> | null | undefined,
@@ -101,7 +105,9 @@ export const SoilProfileView: React.FC<SoilProfileViewProps> = ({ profiles }) =>
       <div className="grid gap-3">
         {sortedProfiles.map((point, index) => {
           const visual = soilStatusVisual(point.status);
-          const label = point.label ?? t('history.soilProfile.labelUnknown', { index: index + 1 });
+          const label = point.label && !isGenericSoilLayerLabel(point.label)
+            ? point.label
+            : t('history.soilProfile.labelUnknown', { index: index + 1 });
           const style = visual
             ? {
                 '--soil-row-color': visual.colorVar,

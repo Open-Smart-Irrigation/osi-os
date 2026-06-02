@@ -68,6 +68,7 @@ const { translateForTest } = vi.hoisted(() => {
     'history.cardType.gateway': 'Gateway',
     'history.viewMode.soil-profile': 'Soil Profile',
     'history.viewMode.line-chart': 'Line Chart',
+    'history.viewMode.daily-min-max': 'Daily Min/Max',
     'history.viewMode.calendar': 'Calendar',
     'history.viewMode.status-overview': 'Status Overview',
     'history.viewMode.advanced': 'Advanced View',
@@ -1086,6 +1087,51 @@ describe('History card detail route', () => {
     await waitFor(() => {
       expect(screen.getByTestId('view-mode-label')).toHaveTextContent('Line Chart');
     });
+  });
+
+  it('filters stale API view modes through the frontend selectable-view policy', async () => {
+    vi.mocked(historyAPI.getZoneCards).mockResolvedValue({
+      zoneId: 12,
+      generatedAt: '2026-05-31T10:00:00Z',
+      cards: [
+        zoneCard({
+          cardId: 'environment-card:microclimate',
+          cardType: 'environment',
+          title: 'Environment - Microclimate',
+          subtitle: 'Microclimate',
+          defaultView: 'line-chart',
+          views: ['line-chart', 'daily-min-max', 'calendar', 'stress-events', 'advanced'],
+        }),
+      ],
+    });
+
+    renderAppAtRoute('/history/zones/12/cards/environment-card%3Amicroclimate');
+
+    expect(await screen.findByTestId('view-mode-label')).toHaveTextContent('Line Chart');
+
+    const surface = screen.getByTestId('history-visualization-surface');
+    preparePointerTarget(surface);
+    dispatchTouch(surface, 'touchstart', [{ clientX: 160, clientY: 260 }]);
+    dispatchTouch(surface, 'touchmove', [{ clientX: 164, clientY: 70 }]);
+    dispatchTouch(surface, 'touchend', []);
+    await waitFor(() => {
+      expect(screen.getByTestId('view-mode-label')).toHaveTextContent('Daily Min/Max');
+    });
+
+    dispatchTouch(surface, 'touchstart', [{ clientX: 160, clientY: 260 }]);
+    dispatchTouch(surface, 'touchmove', [{ clientX: 164, clientY: 70 }]);
+    dispatchTouch(surface, 'touchend', []);
+    await waitFor(() => {
+      expect(screen.getByTestId('view-mode-label')).toHaveTextContent('Calendar');
+    });
+
+    dispatchTouch(surface, 'touchstart', [{ clientX: 160, clientY: 260 }]);
+    dispatchTouch(surface, 'touchmove', [{ clientX: 164, clientY: 70 }]);
+    dispatchTouch(surface, 'touchend', []);
+    await waitFor(() => {
+      expect(screen.getByTestId('view-mode-label')).toHaveTextContent('Line Chart');
+    });
+    expect(screen.getByTestId('view-mode-label')).not.toHaveTextContent('stress-events');
   });
 
   it('does not refresh detail data on mouse drag outside the visualization surface', async () => {
