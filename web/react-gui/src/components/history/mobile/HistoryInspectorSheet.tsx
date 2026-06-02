@@ -27,10 +27,6 @@ const DEVICE_EUI_PATTERN = /\b[A-F0-9]{16}\b/i;
 const UNSAFE_EVENT_LABEL_PATTERN =
   /\b(dev[\s_-]?eui|device[\s_-]?eui|gateway[\s_-]?eui|payload|firmware|rssi|snr|raw|channel|backend|token|secret|calibration)\b/i;
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
-}
-
 function translateParams(params: Record<string, unknown> | undefined): Record<string, unknown> {
   return params && typeof params === 'object' ? params : {};
 }
@@ -258,9 +254,6 @@ export const HistoryInspectorSheet: React.FC<HistoryInspectorSheetProps> = ({
                   <div key={event.id} className="rounded-md border border-[var(--border)] bg-[var(--bg)] px-3 py-2">
                     <p className="text-sm font-semibold text-[var(--text)]">{eventLabel(t, event)}</p>
                     <p className="text-xs text-[var(--text-tertiary)]">{formatTimestamp(event.t)}</p>
-                    {isRecord(event.metadata) && typeof event.metadata.category === 'string' && (
-                      <p className="text-xs text-[var(--text-tertiary)]">{event.metadata.category}</p>
-                    )}
                   </div>
                 ))}
               </div>

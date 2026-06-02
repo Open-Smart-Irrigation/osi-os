@@ -652,7 +652,8 @@ describe('History card detail route', () => {
     const menu = screen.getByRole('menu', { name: 'Card settings' });
 
     expect(within(menu).queryByRole('menuitem', { name: 'Advanced View' })).not.toBeInTheDocument();
-    expect(within(menu).getByRole('menuitem', { name: 'Card settings' })).toBeDisabled();
+    expect(within(menu).queryByRole('menuitem', { name: 'Card settings' })).not.toBeInTheDocument();
+    expect(within(menu).getByRole('menuitem', { name: 'Refresh' })).toBeInTheDocument();
   });
 
   it('refreshes selected card data from the settings menu fallback', async () => {

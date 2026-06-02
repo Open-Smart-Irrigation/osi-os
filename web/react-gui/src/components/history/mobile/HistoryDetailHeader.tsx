@@ -94,16 +94,6 @@ export const HistoryDetailHeader: React.FC<HistoryDetailHeaderProps> = ({
               >
                 {t('history.settings.refresh')}
               </button>
-              <button
-                type="button"
-                role="menuitem"
-                disabled
-                aria-disabled="true"
-                title={t('history.settings.cardSettingsUnavailable')}
-                className="block w-full cursor-not-allowed rounded px-3 py-2 text-left text-sm font-semibold text-[var(--text-tertiary)] opacity-60"
-              >
-                {t('history.settings.cardSettings')}
-              </button>
             </div>
           )}
         </div>
