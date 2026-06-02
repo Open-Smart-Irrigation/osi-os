@@ -117,6 +117,21 @@ test('card definitions expose canonical calendar state vocabularies', () => {
   ]);
 });
 
+test('removed placeholder view modes are not selectable', () => {
+  assert.equal(historyCardDefinitionsByType.environment.views.includes('stress-events'), false);
+  assert.equal(historyCardDefinitionsByType.environment.views.includes('daily-min-max'), true);
+  assert.equal(historyCardDefinitionsByType.irrigation.views.includes('irrigation-response'), false);
+  assert.equal(historyCardDefinitionsByType.gateway.views.includes('connectivity-timeline'), false);
+
+  for (const definition of historyCardDefinitions) {
+    assert.equal(
+      definition.views.includes(definition.defaultView),
+      true,
+      `${definition.cardType} default view must be selectable`,
+    );
+  }
+});
+
 test('advanced-only overlays are rejected outside Advanced View', () => {
   assert.deepEqual(historyAdvancedOverlayIds, [
     'soil-tension-dendro-shrinkage',
