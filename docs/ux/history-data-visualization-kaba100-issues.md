@@ -13,12 +13,13 @@ This document records the first live-test issue cluster for the new OSI OS Histo
 
 ## Resolution status
 
-Status as of 2026-06-01 on local branch `feat/history-data-visualization`:
+Status as of 2026-06-02 on local branch `feat/history-data-visualization`:
 
 - Issue 1 is addressed for the merged-card UI: card summaries now carry display-safe source names/counts, and the carousel/card header render those names without showing DevEUI.
 - Issue 2 is partially addressed: Zone B remains one merged Soil card, aligned with the thematic-card model, but the card now exposes `Chameleon 1` and `Chameleon 2` as visible sources. Splitting into two Soil cards remains a product decision because it changes card identity and workspace behavior.
 - Issue 3 is addressed: the History API latest-row lookup now accepts normalized DevEUI strings, so Soil Profile can build profiles from latest valid data.
 - Issue 4 is addressed for empty rollup tables: 30D/Season rollup reads now fall back to live `device_data` when rollups return no rows and source DevEUIs are available.
+- Mobile fullscreen History verification passed on kaba100 after default active seasons were backfilled for existing zones.
 
 ## Mobile fullscreen redesign decisions
 
@@ -296,3 +297,43 @@ Expected:
 - The card summary includes a display-safe indication of `Chameleon 1` and `Chameleon 2`.
 - `24h` Soil Profile returns non-empty `profiles` when recent valid SWT values exist.
 - `30d` returns non-empty daily series when raw data exists, even if rollups are not populated.
+
+## Fullscreen mobile redesign verification
+
+Date: 2026-06-02
+Target: kaba100
+Branch commit: `d5cf05f4`
+
+Passed:
+
+- `/gui/#/history` rendered compact mobile overview cards without inline visualization surfaces or timeline controls.
+- Zone B Soil showed `2 sources: Chameleon 1, Chameleon 2`.
+- Zone B Soil opened `#/history/zones/12/cards/5bf9d958-f886-4faf-8dcf-e84efe76163a%3Asoil%3Aroot-zone`.
+- `12h`, `24h`, `7D`, `30D`, and `Season` controls were visible and enabled.
+- Pinch open narrowed the visible range and requested `range=custom&aggregation=auto`.
+- Pinch close widened the visible range and requested `range=custom&aggregation=auto`.
+- One-finger drag panned the time window.
+- Double tap reset to the Soil card default `24h` range.
+- Long press opened the inspector sheet with timestamp and metadata.
+- Calendar rendered a monthly grid with weekday headers and colored day states.
+- Normal mobile UI did not render raw DevEUI-style identifiers.
+- Advanced View requested the advanced endpoint and exposed diagnostic identifiers only there.
+- Back navigation returned to `#/history`.
+- Desktop History rendered without a framework overlay.
+- No relevant console errors or passive touch listener errors were observed.
+
+Failed:
+
+- None in the strict Slice 9 live gate.
+
+Screenshots:
+
+- `/home/phil/playwright-osi/screenshots/history-mobile-fullscreen/slice-9/overview-mobile.png`
+- `/home/phil/playwright-osi/screenshots/history-mobile-fullscreen/slice-9/detail-mobile.png`
+- `/home/phil/playwright-osi/screenshots/history-mobile-fullscreen/slice-9/detail-after-pinch.png`
+- `/home/phil/playwright-osi/screenshots/history-mobile-fullscreen/slice-9/inspector-mobile.png`
+- `/home/phil/playwright-osi/screenshots/history-mobile-fullscreen/slice-9/desktop.png`
+
+Live DB note:
+
+- The deployed history API backfilled active `Current season` rows for Zone A and Zone B because the live `zone_seasons` table was empty.
