@@ -240,7 +240,7 @@ const DendroGrowthTimelineViewComponent: React.FC<DendroGrowthTimelineViewProps>
       aria-label={t('history.dendroTimeline.title')}
       className="flex min-h-0 flex-1 flex-col"
     >
-      <div className="min-h-0 min-w-0 flex-1">
+      <div className="relative min-h-0 min-w-0 flex-1"><div className="absolute inset-0">
         <ResponsiveContainer width="100%" height="100%">
           <LineChart data={rows} margin={{ top: 10, right: 12, bottom: 0, left: 0 }}>
             <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
@@ -272,7 +272,7 @@ const DendroGrowthTimelineViewComponent: React.FC<DendroGrowthTimelineViewProps>
               />
             ))}
           </LineChart>
-        </ResponsiveContainer>
+        </ResponsiveContainer></div>
       </div>
     </section>
   );

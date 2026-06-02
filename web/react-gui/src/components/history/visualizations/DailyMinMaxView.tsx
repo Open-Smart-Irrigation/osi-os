@@ -219,7 +219,7 @@ const DailyMinMaxViewComponent: React.FC<DailyMinMaxViewProps> = ({ data, window
       {visibleSeries.map(({ series, rows, color }) => {
         return (
           <div key={series.key} className="flex min-h-0 flex-1 flex-col">
-            <div className="min-h-0 min-w-0 flex-1">
+            <div className="relative min-h-0 min-w-0 flex-1"><div className="absolute inset-0">
               <ResponsiveContainer width="100%" height="100%">
                 <ComposedChart data={rows} margin={{ top: 10, right: 12, bottom: 0, left: 4 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
@@ -281,7 +281,7 @@ const DailyMinMaxViewComponent: React.FC<DailyMinMaxViewProps> = ({ data, window
                     connectNulls={false}
                   />
                 </ComposedChart>
-              </ResponsiveContainer>
+              </ResponsiveContainer></div>
             </div>
           </div>
         );
