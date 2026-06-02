@@ -35,10 +35,13 @@ const { translateForTest } = vi.hoisted(() => {
     'history.soilProfile.emptyBody': 'Depth-aware profile readings are not available for this range.',
     'history.soilProfile.depthLabel': '{{depth}} cm',
     'history.soilProfile.depthUnknown': 'Depth pending',
-    'history.soilProfile.labelUnknown': 'Profile {{index}}',
+    'history.soilProfile.labelUnknown': 'Soil layer {{index}}',
     'history.soilProfile.valueMissing': 'No reading',
     'history.soilProfile.status.dry_stress': 'Dry stress',
     'history.soilProfile.status.optimal': 'Optimal',
+    'history.soil.state.wet': 'Wet',
+    'history.soil.state.moist': 'Moist',
+    'history.soil.state.dry': 'Dry',
   };
 
   return {
@@ -142,7 +145,7 @@ describe('HistoryCardFrame soil profile', () => {
       data: data({
         profiles: [
           { id: 'swt-2', label: 'SWT 2', depthCm: 45, value: 55, unit: 'kPa', status: 'dry_stress' },
-          { id: 'swt-1', label: 'SWT 1', depthCm: 15, value: 22, unit: 'kPa', status: 'optimal' },
+          { id: 'swt-1', label: '', depthCm: 15, value: 10, unit: 'kPa', status: 'wet_excess' },
         ],
       }),
       error: undefined,
@@ -152,14 +155,16 @@ describe('HistoryCardFrame soil profile', () => {
 
     render(<HistoryCardFrame card={card} scope={{ type: 'zone', zoneId: 1 }} />);
 
-    expect(screen.getByText('SWT 1')).toBeInTheDocument();
+    expect(screen.getByText('Soil layer 1')).toBeInTheDocument();
     expect(screen.getByText('15 cm')).toBeInTheDocument();
-    expect(screen.getByText('22 kPa')).toBeInTheDocument();
-    expect(screen.getByText('Optimal')).toBeInTheDocument();
+    expect(screen.getByText('10 kPa')).toBeInTheDocument();
+    expect(screen.getByText('Wet')).toBeInTheDocument();
+    expect(screen.getByTestId('soil-profile-row-0')).toHaveStyle('--soil-row-color: var(--soil-wet)');
     expect(screen.getByText('SWT 2')).toBeInTheDocument();
     expect(screen.getByText('45 cm')).toBeInTheDocument();
     expect(screen.getByText('55 kPa')).toBeInTheDocument();
-    expect(screen.getByText('Dry stress')).toBeInTheDocument();
+    expect(screen.getByText('Dry')).toBeInTheDocument();
+    expect(screen.getByTestId('soil-profile-row-1')).toHaveStyle('--soil-row-color: var(--soil-dry)');
     expect(screen.queryByText('dry_stress')).not.toBeInTheDocument();
     expect(screen.getByText('Aggregation: Hourly')).toBeInTheDocument();
     expect(screen.queryByText('Aggregation: hourly')).not.toBeInTheDocument();
@@ -210,7 +215,7 @@ describe('HistoryCardFrame soil profile', () => {
 
     render(<HistoryCardFrame card={card} scope={{ type: 'zone', zoneId: 1 }} />);
 
-    expect(screen.getByText('Profile 1')).toBeInTheDocument();
+    expect(screen.getByText('Soil layer 2')).toBeInTheDocument();
     expect(screen.getByText('Depth pending')).toBeInTheDocument();
     expect(screen.getAllByText('No reading').length).toBe(2);
     expect(screen.getByText('Deep sensor')).toBeInTheDocument();

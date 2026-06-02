@@ -269,7 +269,14 @@
         "mixed": "Mixed",
         "no_data": "No data"
       },
-      "labelUnknown": "Profile {{index}}"
+      "labelUnknown": "Soil layer {{index}}"
+    },
+    "soil": {
+      "state": {
+        "wet": "Wet",
+        "moist": "Moist",
+        "dry": "Dry"
+      }
     },
     "calendar": {
       "label": "Calendar",
