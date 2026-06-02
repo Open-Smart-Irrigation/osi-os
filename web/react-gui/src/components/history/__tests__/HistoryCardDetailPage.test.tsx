@@ -1022,7 +1022,7 @@ describe('History card detail route', () => {
     expect(historyAPI.getZoneCardData).not.toHaveBeenCalled();
   });
 
-  it('switches to the next thematic card on horizontal swipe outside the visualization surface', async () => {
+  it('does not switch thematic cards on one-finger horizontal swipe outside the visualization surface', async () => {
     vi.mocked(historyAPI.getZoneCards).mockResolvedValue({
       zoneId: 12,
       generatedAt: '2026-05-31T10:00:00Z',
@@ -1052,13 +1052,12 @@ describe('History card detail route', () => {
     preparePointerTarget(scrollRoot);
     pointerDrag(scrollRoot, { fromX: 280, toX: 80, fromY: 160, toY: 168 });
 
-    await waitFor(() => {
-      expect(screen.getByRole('heading', { level: 1, name: 'Environment - Microclimate' })).toBeInTheDocument();
-    });
-    expect(window.location.hash).toContain('/history/zones/12/cards/environment-card%3Amicroclimate');
+    expect(screen.getByRole('heading', { level: 1, name: 'Soil - Root Zone' })).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { level: 1, name: 'Environment - Microclimate' })).not.toBeInTheDocument();
+    expect(window.location.hash).toContain('/history/zones/12/cards/soil-card%3Aroot-zone');
   });
 
-  it('switches to the next thematic card on horizontal swipe inside the visualization surface', async () => {
+  it('switches to the next thematic card on two-finger horizontal swipe inside the visualization surface', async () => {
     vi.mocked(historyAPI.getZoneCards).mockResolvedValue({
       zoneId: 12,
       generatedAt: '2026-05-31T10:00:00Z',
@@ -1086,8 +1085,14 @@ describe('History card detail route', () => {
 
     const surface = screen.getByTestId('history-visualization-surface');
     preparePointerTarget(surface);
-    dispatchTouch(surface, 'touchstart', [{ clientX: 280, clientY: 160 }]);
-    dispatchTouch(surface, 'touchmove', [{ clientX: 80, clientY: 168 }]);
+    dispatchTouch(surface, 'touchstart', [
+      { clientX: 240, clientY: 160 },
+      { clientX: 320, clientY: 160 },
+    ]);
+    dispatchTouch(surface, 'touchmove', [
+      { clientX: 40, clientY: 168 },
+      { clientX: 120, clientY: 168 },
+    ]);
     dispatchTouch(surface, 'touchend', []);
 
     await waitFor(() => {

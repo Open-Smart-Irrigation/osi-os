@@ -72,6 +72,41 @@ function dispatchTouch(
   surface.dispatchEvent(event);
 }
 
+function oneFingerSwipe(
+  surface: HTMLElement,
+  {
+    fromX = 160,
+    toX = fromX,
+    fromY = 120,
+    toY = fromY,
+  }: { fromX?: number; toX?: number; fromY?: number; toY?: number },
+) {
+  dispatchTouch(surface, 'touchstart', [{ clientX: fromX, clientY: fromY }]);
+  dispatchTouch(surface, 'touchmove', [{ clientX: toX, clientY: toY }]);
+  dispatchTouch(surface, 'touchend', []);
+}
+
+function twoFingerSwipe(
+  surface: HTMLElement,
+  {
+    fromMidX,
+    toMidX,
+    y = 120,
+    distancePx = 80,
+  }: { fromMidX: number; toMidX: number; y?: number; distancePx?: number },
+) {
+  const half = distancePx / 2;
+  dispatchTouch(surface, 'touchstart', [
+    { clientX: fromMidX - half, clientY: y },
+    { clientX: fromMidX + half, clientY: y },
+  ]);
+  dispatchTouch(surface, 'touchmove', [
+    { clientX: toMidX - half, clientY: y },
+    { clientX: toMidX + half, clientY: y },
+  ]);
+  dispatchTouch(surface, 'touchend', []);
+}
+
 describe('HistoryVisualizationSurface', () => {
   beforeEach(() => {
     vi.useFakeTimers();
@@ -108,14 +143,19 @@ describe('HistoryVisualizationSurface', () => {
     expect(screen.queryByText('Raw')).not.toBeInTheDocument();
   });
 
-  it('reports a horizontal single-finger swipe when the viewport is not zoomed', () => {
-    const onSwipe = vi.fn();
+  it('routes two-finger horizontal swipe to card switching and one-finger vertical to view switching', () => {
+    const onCardSwipe = vi.fn();
+    const onViewSwipe = vi.fn();
     render(
       <HistoryVisualizationSurface
         viewport={viewport24h()}
         defaultRange="24h"
         onViewportChange={vi.fn()}
-        onSwipe={onSwipe}
+        activeView="line-chart"
+        isZoomed={false}
+        onCardSwipe={onCardSwipe}
+        onViewSwipe={onViewSwipe}
+        onMonthSwipe={vi.fn()}
       >
         <div>Soil profile</div>
       </HistoryVisualizationSurface>,
@@ -123,11 +163,65 @@ describe('HistoryVisualizationSurface', () => {
     const surface = screen.getByTestId('history-visualization-surface');
     prepareSurfaceGeometry(surface);
 
-    dispatchTouch(surface, 'touchstart', [{ clientX: 300, clientY: 120 }]);
-    dispatchTouch(surface, 'touchmove', [{ clientX: 120, clientY: 124 }]);
-    dispatchTouch(surface, 'touchend', []);
+    twoFingerSwipe(surface, { fromMidX: 260, toMidX: 120 });
+    oneFingerSwipe(surface, { fromY: 220, toY: 80 });
 
-    expect(onSwipe).toHaveBeenCalledWith('horizontal', -180);
+    expect(onCardSwipe).toHaveBeenCalledWith(-1);
+    expect(onViewSwipe).toHaveBeenCalledWith(-1);
+  });
+
+  it('ignores one-finger horizontal swipe in chart views until zoomed', () => {
+    const onCardSwipe = vi.fn();
+    const onViewSwipe = vi.fn();
+    const onMonthSwipe = vi.fn();
+    const onViewportChange = vi.fn();
+    render(
+      <HistoryVisualizationSurface
+        viewport={viewport24h()}
+        defaultRange="24h"
+        onViewportChange={onViewportChange}
+        activeView="line-chart"
+        isZoomed={false}
+        onCardSwipe={onCardSwipe}
+        onViewSwipe={onViewSwipe}
+        onMonthSwipe={onMonthSwipe}
+      >
+        <div>Soil profile</div>
+      </HistoryVisualizationSurface>,
+    );
+    const surface = screen.getByTestId('history-visualization-surface');
+    prepareSurfaceGeometry(surface);
+
+    oneFingerSwipe(surface, { fromX: 280, toX: 120, fromY: 120, toY: 124 });
+
+    expect(onCardSwipe).not.toHaveBeenCalled();
+    expect(onViewSwipe).not.toHaveBeenCalled();
+    expect(onMonthSwipe).not.toHaveBeenCalled();
+    expect(onViewportChange).not.toHaveBeenCalled();
+  });
+
+  it('routes inner one-finger horizontal swipe in calendar to month switching', () => {
+    const onMonthSwipe = vi.fn();
+    render(
+      <HistoryVisualizationSurface
+        viewport={viewport24h()}
+        defaultRange="24h"
+        onViewportChange={vi.fn()}
+        activeView="calendar"
+        isZoomed={false}
+        onCardSwipe={vi.fn()}
+        onViewSwipe={vi.fn()}
+        onMonthSwipe={onMonthSwipe}
+      >
+        <div>Calendar</div>
+      </HistoryVisualizationSurface>,
+    );
+    const surface = screen.getByTestId('history-visualization-surface');
+    prepareSurfaceGeometry(surface);
+
+    oneFingerSwipe(surface, { fromX: 250, toX: 120, fromY: 120, toY: 124 });
+
+    expect(onMonthSwipe).toHaveBeenCalledWith(-1);
   });
 
   it('pans the viewport on one-finger horizontal drag when zoomed in', () => {
@@ -137,6 +231,8 @@ describe('HistoryVisualizationSurface', () => {
         viewport={zoomedViewport()}
         defaultRange="24h"
         onViewportChange={onViewportChange}
+        activeView="line-chart"
+        isZoomed
       >
         <div>Soil profile</div>
       </HistoryVisualizationSurface>,
@@ -163,6 +259,8 @@ describe('HistoryVisualizationSurface', () => {
         viewport={viewport24h()}
         defaultRange="24h"
         onViewportChange={onViewportChange}
+        activeView="line-chart"
+        isZoomed={false}
       >
         <div>Soil profile</div>
       </HistoryVisualizationSurface>,

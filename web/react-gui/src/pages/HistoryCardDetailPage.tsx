@@ -30,22 +30,8 @@ const zonesFetcher = () => irrigationZonesAPI.getAll();
 const DETAIL_PULL_REFRESH_THRESHOLD_PX = 96;
 const DETAIL_PULL_REFRESH_MAX_HORIZONTAL_PX = 48;
 const DETAIL_PULL_REFRESH_SCROLL_TOP_TOLERANCE_PX = 2;
-const DETAIL_CARD_SWIPE_THRESHOLD_PX = 72;
-const DETAIL_CARD_SWIPE_VERTICAL_RATIO = 0.65;
 const GATEWAY_ROUTE_CARD_ID = 'gateway-hub';
 const HISTORY_VISUALIZATION_SURFACE_SELECTOR = '[data-history-visualization-surface="true"]';
-const HISTORY_CARD_SWIPE_IGNORE_SELECTOR = [
-  HISTORY_VISUALIZATION_SURFACE_SELECTOR,
-  '[data-history-calendar-date]',
-  '[role="grid"]',
-  'a',
-  'button',
-  'input',
-  'select',
-  'textarea',
-  '[role="button"]',
-  '[role="menu"]',
-].join(',');
 
 type HistoryTranslate = (key: string, options?: Record<string, unknown>) => string;
 type PullRefreshStart = {
@@ -53,11 +39,6 @@ type PullRefreshStart = {
   x: number;
   y: number;
   refreshed: boolean;
-};
-type CardSwipeStart = {
-  pointerId: number;
-  x: number;
-  y: number;
 };
 
 function decodeRouteCardId(rawCardId: string | undefined): string | null {
@@ -154,10 +135,6 @@ function calendarDateFromTarget(target: EventTarget | null): string | null {
   return dateCell?.getAttribute('data-history-calendar-date') ?? null;
 }
 
-function isCardSwipeTarget(target: EventTarget | null): boolean {
-  return target instanceof Element && !target.closest(HISTORY_CARD_SWIPE_IGNORE_SELECTOR);
-}
-
 function scopeForCard(card: HistoryCardSummary, routeScope: DetailRouteScope): HistoryCardDataScope | null {
   if (routeScope.type === 'gateway') {
     return { type: 'gateway', gatewayEui: routeScope.gatewayEui };
@@ -221,7 +198,6 @@ export const HistoryCardDetailPage: React.FC = () => {
   const { t: translate } = useTranslation('history');
   const t = translate as HistoryTranslate;
   const pullStartRef = useRef<PullRefreshStart | null>(null);
-  const cardSwipeStartRef = useRef<CardSwipeStart | null>(null);
   const featureFlags = useFeatureFlags();
   const zoneId = Number(rawZoneId);
   const gatewayEui = typeof rawGatewayEui === 'string' && rawGatewayEui.trim() ? rawGatewayEui : null;
@@ -408,50 +384,38 @@ export const HistoryCardDetailPage: React.FC = () => {
     setEnabledSources({ cardId: displayCard.cardId, keys: valid.length > 0 ? valid : allSourceKeys });
   }, [allSourceKeys, displayCard]);
 
-  const handleVisualizationSwipe = useCallback((direction: 'horizontal' | 'vertical', signedDelta: number) => {
+  const handleCardSwipe = useCallback((delta: -1 | 1) => {
+    if (!displayCard || routeScope?.type !== 'zone' || orderedRouteCards.length <= 1) return;
+    const currentIndex = orderedRouteCards.findIndex((card) => card.cardId === displayCard.cardId);
+    if (currentIndex < 0) return;
+
+    const nextIndex = delta < 0
+      ? (currentIndex + 1) % orderedRouteCards.length
+      : (currentIndex - 1 + orderedRouteCards.length) % orderedRouteCards.length;
+    const nextCard = orderedRouteCards[nextIndex];
+    navigate(`/history/zones/${routeScope.zoneId}/cards/${encodeURIComponent(routeCardIdForCard(nextCard))}`);
+  }, [displayCard, navigate, orderedRouteCards, routeScope]);
+
+  const handleViewSwipe = useCallback((delta: -1 | 1) => {
     if (!displayCard) return;
-
-    if (direction === 'horizontal') {
-      if (routeScope?.type !== 'zone' || orderedRouteCards.length <= 1) return;
-      const currentIndex = orderedRouteCards.findIndex((card) => card.cardId === displayCard.cardId);
-      if (currentIndex < 0) return;
-
-      const nextIndex = signedDelta < 0
-        ? (currentIndex + 1) % orderedRouteCards.length
-        : (currentIndex - 1 + orderedRouteCards.length) % orderedRouteCards.length;
-      const nextCard = orderedRouteCards[nextIndex];
-      navigate(`/history/zones/${routeScope.zoneId}/cards/${encodeURIComponent(routeCardIdForCard(nextCard))}`);
-      return;
-    }
-
     const views = primaryViewModes(selectableViewsForCard(displayCard));
     if (views.length <= 1) return;
     const currentIndex = Math.max(0, views.indexOf(selectedView));
-    const nextIndex = signedDelta < 0
+    const nextIndex = delta < 0
       ? (currentIndex + 1) % views.length
       : (currentIndex - 1 + views.length) % views.length;
     setUserSelectedView({ cardId: displayCard.cardId, view: views[nextIndex] });
-  }, [displayCard, navigate, orderedRouteCards, routeScope, selectedView]);
+  }, [displayCard, selectedView]);
+
+  const handleMonthSwipe = useCallback((_delta: -1 | 1) => {
+    // Calendar month state is introduced in Slice 5.
+  }, []);
 
   const isVisualizationEvent = useCallback((target: EventTarget | null): boolean => {
     return target instanceof Element && Boolean(target.closest(HISTORY_VISUALIZATION_SURFACE_SELECTOR));
   }, []);
 
   const handleScrollRootPointerDown = useCallback((event: React.PointerEvent<HTMLElement>) => {
-    if (
-      routeScope?.type === 'zone'
-      && isPullRefreshPointerType(event.pointerType)
-      && isCardSwipeTarget(event.target)
-    ) {
-      cardSwipeStartRef.current = {
-        pointerId: event.pointerId,
-        x: event.clientX,
-        y: event.clientY,
-      };
-    } else {
-      cardSwipeStartRef.current = null;
-    }
-
     const isAtScrollTop = getPullRefreshScrollTop(event.currentTarget) <= DETAIL_PULL_REFRESH_SCROLL_TOP_TOLERANCE_PX;
     if (
       !isPullRefreshPointerType(event.pointerType)
@@ -467,7 +431,7 @@ export const HistoryCardDetailPage: React.FC = () => {
       y: event.clientY,
       refreshed: false,
     };
-  }, [isVisualizationEvent, routeScope?.type]);
+  }, [isVisualizationEvent]);
 
   const handleScrollRootPointerUp = useCallback((event: React.PointerEvent<HTMLElement>) => {
     const selectedDate = calendarDateFromTarget(event.target);
@@ -480,35 +444,6 @@ export const HistoryCardDetailPage: React.FC = () => {
       pullStartRef.current = null;
       return;
     }
-
-    const swipeStart = cardSwipeStartRef.current;
-    if (
-      routeScope?.type === 'zone'
-      && displayCard
-      && swipeStart
-      && swipeStart.pointerId === event.pointerId
-      && isPullRefreshPointerType(event.pointerType)
-      && isCardSwipeTarget(event.target)
-    ) {
-      const deltaX = event.clientX - swipeStart.x;
-      const deltaY = Math.abs(event.clientY - swipeStart.y);
-      const isHorizontalSwipe = Math.abs(deltaX) >= DETAIL_CARD_SWIPE_THRESHOLD_PX
-        && deltaY <= Math.abs(deltaX) * DETAIL_CARD_SWIPE_VERTICAL_RATIO;
-      if (isHorizontalSwipe) {
-        const currentIndex = orderedRouteCards.findIndex((card) => card.cardId === displayCard.cardId);
-        if (currentIndex >= 0 && orderedRouteCards.length > 1) {
-          const nextIndex = deltaX < 0
-            ? (currentIndex + 1) % orderedRouteCards.length
-            : (currentIndex - 1 + orderedRouteCards.length) % orderedRouteCards.length;
-          const nextCard = orderedRouteCards[nextIndex];
-          cardSwipeStartRef.current = null;
-          pullStartRef.current = null;
-          navigate(`/history/zones/${routeScope.zoneId}/cards/${encodeURIComponent(routeCardIdForCard(nextCard))}`);
-          return;
-        }
-      }
-    }
-    cardSwipeStartRef.current = null;
 
     const start = pullStartRef.current;
     if (
@@ -529,7 +464,7 @@ export const HistoryCardDetailPage: React.FC = () => {
       handleRefresh();
     }
     pullStartRef.current = null;
-  }, [calendarDaysByDate, displayCard, handleRefresh, isVisualizationEvent, navigate, orderedRouteCards, routeScope]);
+  }, [calendarDaysByDate, handleRefresh, isVisualizationEvent]);
 
   useEffect(() => {
     if (!featureFlags.historyEnabled || routeScope?.type !== 'zone' || !resolvedCard) return;
@@ -621,7 +556,6 @@ export const HistoryCardDetailPage: React.FC = () => {
         onClickCapture={handleScrollRootClick}
         onPointerCancel={() => {
           pullStartRef.current = null;
-          cardSwipeStartRef.current = null;
         }}
       >
         {!displayCard.availability.available && (
@@ -632,9 +566,13 @@ export const HistoryCardDetailPage: React.FC = () => {
         <HistoryVisualizationSurface
           viewport={timeViewport.viewport}
           defaultRange={displayCard.defaultRange}
+          activeView={selectedView}
+          isZoomed={timeViewport.viewport.range.label === 'custom'}
           onViewportChange={timeViewport.setViewport}
           onInspect={handleInspectTimestamp}
-          onSwipe={handleVisualizationSwipe}
+          onCardSwipe={handleCardSwipe}
+          onViewSwipe={handleViewSwipe}
+          onMonthSwipe={handleMonthSwipe}
           rangeLabel={formatRangeLabel(t, timeViewport.viewport.range.label)}
           aggregationLabel={formatAggregationLabel(t, timeViewport.viewport.aggregation)}
         >

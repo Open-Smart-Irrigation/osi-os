@@ -4,6 +4,7 @@ import {
   anchorRatioForPoint,
   applyDragPan,
   applyPinchZoom,
+  classifyTwoFinger,
   classifyTouchGesture,
   distance,
   midpoint,
@@ -49,6 +50,16 @@ describe('history gesture model', () => {
     expect(classifyTouchGesture({ pointerCount: 1, movedPx: 30, elapsedMs: 120 })).toBe('drag');
     expect(classifyTouchGesture({ pointerCount: 1, movedPx: 3, elapsedMs: 600 })).toBe('longpress');
     expect(classifyTouchGesture({ pointerCount: 1, movedPx: 3, elapsedMs: 120 })).toBe('tap');
+  });
+
+  it('distinguishes two-finger pinch from parallel two-finger swipe', () => {
+    const start = [{ x: 100, y: 200 }, { x: 200, y: 200 }];
+    const apart = [{ x: 60, y: 200 }, { x: 240, y: 200 }];
+    const shifted = [{ x: -20, y: 200 }, { x: 80, y: 200 }];
+
+    expect(classifyTwoFinger(start, apart)).toBe('pinch');
+    expect(classifyTwoFinger(start, shifted)).toBe('swipe');
+    expect(classifyTwoFinger(start, [{ x: 102, y: 200 }, { x: 202, y: 200 }])).toBeNull();
   });
 
   it('pinch open zooms into a narrower anchored time window', () => {

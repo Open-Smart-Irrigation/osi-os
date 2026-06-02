@@ -1,7 +1,7 @@
 import React from 'react';
 import { useTranslation } from 'react-i18next';
 import { useVisualizationGestures } from '../../../history/useVisualizationGestures';
-import type { HistoryRangeLabel } from '../../../history/types';
+import type { HistoryRangeLabel, HistoryViewMode } from '../../../history/types';
 import type { HistoryTimeViewport } from '../../../history/useTimeViewport';
 
 interface InspectSelection {
@@ -11,9 +11,13 @@ interface InspectSelection {
 interface HistoryVisualizationSurfaceProps {
   viewport: HistoryTimeViewport;
   defaultRange: HistoryRangeLabel;
+  activeView?: HistoryViewMode;
+  isZoomed?: boolean;
   onViewportChange: (viewport: HistoryTimeViewport) => void;
   onInspect?: (selection: InspectSelection) => void;
-  onSwipe?: (direction: 'horizontal' | 'vertical', signedDelta: number) => void;
+  onCardSwipe?: (delta: -1 | 1) => void;
+  onViewSwipe?: (delta: -1 | 1) => void;
+  onMonthSwipe?: (delta: -1 | 1) => void;
   rangeLabel?: string;
   aggregationLabel?: string;
   className?: string;
@@ -25,9 +29,13 @@ type HistoryTranslate = (key: string, options?: Record<string, unknown>) => stri
 export const HistoryVisualizationSurface: React.FC<HistoryVisualizationSurfaceProps> = ({
   viewport,
   defaultRange,
+  activeView,
+  isZoomed,
   onViewportChange,
   onInspect,
-  onSwipe,
+  onCardSwipe,
+  onViewSwipe,
+  onMonthSwipe,
   className = '',
   children,
 }) => {
@@ -37,9 +45,13 @@ export const HistoryVisualizationSurface: React.FC<HistoryVisualizationSurfacePr
   const gestureProps = useVisualizationGestures({
     viewport,
     defaultRange,
+    activeView,
+    isZoomed,
     onViewportChange,
     onInspect,
-    onSwipe,
+    onCardSwipe,
+    onViewSwipe,
+    onMonthSwipe,
   });
 
   return (

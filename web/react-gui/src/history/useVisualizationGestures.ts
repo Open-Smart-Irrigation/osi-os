@@ -3,6 +3,7 @@ import {
   anchorRatioForPoint,
   applyDragPan,
   applyPinchZoom,
+  classifyTwoFinger,
   classifyTouchGesture,
   distance,
   midpoint,
@@ -11,25 +12,28 @@ import {
   type Point,
 } from './gestureModel';
 import { createDefaultTimeViewport, type HistoryTimeViewport } from './useTimeViewport';
-import type { HistoryRangeLabel } from './types';
+import type { HistoryRangeLabel, HistoryViewMode } from './types';
 
 const DOUBLE_TAP_MS = 300;
 const DOUBLE_TAP_DISTANCE_PX = 20;
 const LONG_PRESS_MS = 500;
 const LONG_PRESS_CANCEL_MOVEMENT_PX = 10;
+const EDGE_GUTTER_PX = 24;
 
 interface InspectSelection {
   timestamp: string;
 }
 
-type SwipeAxis = 'horizontal' | 'vertical';
-
 interface UseVisualizationGesturesInput {
   viewport: HistoryTimeViewport;
   defaultRange: HistoryRangeLabel;
+  activeView?: HistoryViewMode;
+  isZoomed?: boolean;
   onViewportChange: (viewport: HistoryTimeViewport) => void;
   onInspect?: (selection: InspectSelection) => void;
-  onSwipe?: (direction: SwipeAxis, signedDelta: number) => void;
+  onCardSwipe?: (delta: -1 | 1) => void;
+  onViewSwipe?: (delta: -1 | 1) => void;
+  onMonthSwipe?: (delta: -1 | 1) => void;
 }
 
 interface TapState {
@@ -40,6 +44,8 @@ interface TapState {
 interface ActiveGestureState {
   startPoint: Point;
   currentPoint: Point;
+  startPoints: Point[];
+  currentPoints: Point[];
   startTimeMs: number;
   dragBaseline: Point;
   surfaceLeft: number;
@@ -47,6 +53,7 @@ interface ActiveGestureState {
   previousPinchDistancePx: number | null;
   didPan: boolean;
   didPinch: boolean;
+  didTwoFingerSwipe: boolean;
   didLongPress: boolean;
   longPressTimerId: number | null;
 }
@@ -55,35 +62,27 @@ function touchPoints(touches: TouchList | Touch[]): Point[] {
   return Array.from(touches).map((touch) => ({ x: touch.clientX, y: touch.clientY }));
 }
 
-function viewportDurationMs(viewport: HistoryTimeViewport): number | null {
-  const fromMs = viewport.range.from ? Date.parse(viewport.range.from) : NaN;
-  const toMs = viewport.range.to ? Date.parse(viewport.range.to) : NaN;
-  if (!Number.isFinite(fromMs) || !Number.isFinite(toMs) || toMs <= fromMs) return null;
-  return toMs - fromMs;
-}
-
-function isZoomedIn(viewport: HistoryTimeViewport, defaultRange: HistoryRangeLabel): boolean {
-  const currentMs = viewportDurationMs(viewport);
-  const defaultMs = viewportDurationMs(
-    createDefaultTimeViewport(defaultRange, new Date(), viewport.range.timezone),
-  );
-  if (currentMs === null || defaultMs === null) return viewport.range.label === 'custom';
-  return currentMs < defaultMs * 0.98;
-}
-
 export function useVisualizationGestures({
   viewport,
   defaultRange,
+  activeView = 'line-chart',
+  isZoomed = viewport.range.label === 'custom',
   onViewportChange,
   onInspect,
-  onSwipe,
+  onCardSwipe,
+  onViewSwipe,
+  onMonthSwipe,
 }: UseVisualizationGesturesInput) {
   const [element, setElement] = useState<HTMLElement | null>(null);
   const viewportRef = useRef(viewport);
   const defaultRangeRef = useRef(defaultRange);
+  const activeViewRef = useRef(activeView);
+  const isZoomedRef = useRef(isZoomed);
   const onViewportChangeRef = useRef(onViewportChange);
   const onInspectRef = useRef(onInspect);
-  const onSwipeRef = useRef(onSwipe);
+  const onCardSwipeRef = useRef(onCardSwipe);
+  const onViewSwipeRef = useRef(onViewSwipe);
+  const onMonthSwipeRef = useRef(onMonthSwipe);
   const activeGestureRef = useRef<ActiveGestureState | null>(null);
   const lastTapRef = useRef<TapState | null>(null);
 
@@ -96,6 +95,14 @@ export function useVisualizationGestures({
   }, [defaultRange]);
 
   useEffect(() => {
+    activeViewRef.current = activeView;
+  }, [activeView]);
+
+  useEffect(() => {
+    isZoomedRef.current = isZoomed;
+  }, [isZoomed]);
+
+  useEffect(() => {
     onViewportChangeRef.current = onViewportChange;
   }, [onViewportChange]);
 
@@ -104,8 +111,16 @@ export function useVisualizationGestures({
   }, [onInspect]);
 
   useEffect(() => {
-    onSwipeRef.current = onSwipe;
-  }, [onSwipe]);
+    onCardSwipeRef.current = onCardSwipe;
+  }, [onCardSwipe]);
+
+  useEffect(() => {
+    onViewSwipeRef.current = onViewSwipe;
+  }, [onViewSwipe]);
+
+  useEffect(() => {
+    onMonthSwipeRef.current = onMonthSwipe;
+  }, [onMonthSwipe]);
 
   const clearLongPress = useCallback(() => {
     const activeGesture = activeGestureRef.current;
@@ -175,13 +190,16 @@ export function useVisualizationGestures({
       const state: ActiveGestureState = {
         startPoint: firstPoint,
         currentPoint: firstPoint,
+        startPoints: points,
+        currentPoints: points,
         startTimeMs: Date.now(),
         dragBaseline: firstPoint,
         surfaceLeft: bounds.left,
         surfaceWidth: bounds.width,
         previousPinchDistancePx: points.length >= 2 ? distance(points[0], points[1]) : null,
         didPan: false,
-        didPinch: points.length >= 2,
+        didPinch: false,
+        didTwoFingerSwipe: false,
         didLongPress: false,
         longPressTimerId: null,
       };
@@ -201,33 +219,44 @@ export function useVisualizationGestures({
 
       if (points.length >= 2) {
         clearLongPress();
+        const anchorPoint = midpoint(points[0], points[1]);
+        state.currentPoint = anchorPoint;
+        state.currentPoints = points;
+
+        const twoFingerGesture = classifyTwoFinger(state.startPoints, points);
+        if (twoFingerGesture === 'swipe') {
+          state.didTwoFingerSwipe = true;
+          return;
+        }
+
         const nextDistancePx = distance(points[0], points[1]);
         const previousDistancePx = state.previousPinchDistancePx ?? nextDistancePx;
-        const anchorPoint = midpoint(points[0], points[1]);
-        const nextViewport = applyPinchZoom(viewportRef.current, {
-          previousDistancePx,
-          nextDistancePx,
-          anchorRatio: anchorRatioForPoint(anchorPoint.x, state.surfaceLeft, state.surfaceWidth),
-        });
-
-        state.currentPoint = anchorPoint;
         state.previousPinchDistancePx = nextDistancePx;
-        state.didPinch = true;
 
-        if (nextViewport !== viewportRef.current) {
-          publishViewport(nextViewport);
+        if (twoFingerGesture === 'pinch') {
+          const nextViewport = applyPinchZoom(viewportRef.current, {
+            previousDistancePx,
+            nextDistancePx,
+            anchorRatio: anchorRatioForPoint(anchorPoint.x, state.surfaceLeft, state.surfaceWidth),
+          });
+
+          state.didPinch = true;
+          if (nextViewport !== viewportRef.current) {
+            publishViewport(nextViewport);
+          }
         }
         return;
       }
 
       const nextPoint = points[0];
       state.currentPoint = nextPoint;
+      state.currentPoints = points;
 
       if (distance(state.startPoint, nextPoint) > LONG_PRESS_CANCEL_MOVEMENT_PX) {
         clearLongPress();
       }
 
-      if (!isZoomedIn(viewportRef.current, defaultRangeRef.current)) return;
+      if (!isZoomedRef.current || activeViewRef.current === 'calendar') return;
 
       const nextViewport = applyDragPan(viewportRef.current, {
         surfaceWidthPx: state.surfaceWidth,
@@ -247,15 +276,32 @@ export function useVisualizationGestures({
       if (!state) return;
 
       clearLongPress();
+      const isTwoFinger = state.startPoints.length >= 2;
       const dx = state.currentPoint.x - state.startPoint.x;
       const dy = state.currentPoint.y - state.startPoint.y;
       const axis = swipeDirection({ dx, dy });
       const elapsedMs = Date.now() - state.startTimeMs;
       const movedPx = distance(state.startPoint, state.currentPoint);
-      const gesture = classifyTouchGesture({ pointerCount: state.didPinch ? 2 : 1, movedPx, elapsedMs });
+      const gesture = classifyTouchGesture({ pointerCount: isTwoFinger ? 2 : 1, movedPx, elapsedMs });
 
-      if (!state.didPan && !state.didPinch && !state.didLongPress && axis) {
-        onSwipeRef.current?.(axis, axis === 'horizontal' ? dx : dy);
+      if (isTwoFinger) {
+        const twoFingerGesture = classifyTwoFinger(state.startPoints, state.currentPoints);
+        if (!state.didPinch && (twoFingerGesture === 'swipe' || state.didTwoFingerSwipe)) {
+          const startMidpoint = midpoint(state.startPoints[0], state.startPoints[1]);
+          const currentMidpoint = midpoint(state.currentPoints[0], state.currentPoints[1]);
+          const midDx = currentMidpoint.x - startMidpoint.x;
+          onCardSwipeRef.current?.(midDx < 0 ? -1 : 1);
+        }
+      } else if (!state.didPan && !state.didLongPress && axis) {
+        if (axis === 'vertical') {
+          onViewSwipeRef.current?.(dy < 0 ? -1 : 1);
+        } else if (
+          activeViewRef.current === 'calendar'
+          && state.startPoint.x - state.surfaceLeft >= EDGE_GUTTER_PX
+          && state.surfaceLeft + state.surfaceWidth - state.startPoint.x >= EDGE_GUTTER_PX
+        ) {
+          onMonthSwipeRef.current?.(dx < 0 ? -1 : 1);
+        }
       }
 
       if (gesture === 'tap' && !state.didLongPress) {

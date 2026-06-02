@@ -5,6 +5,8 @@ import {
 } from './useTimeViewport';
 
 const PINCH_RATIO_THRESHOLD = 0.08;
+const TWO_FINGER_PINCH_RATIO = 0.15;
+const TWO_FINGER_SWIPE_PX = 30;
 const DRAG_DEAD_ZONE_PX = 6;
 const LONG_PRESS_MS = 500;
 const LONG_PRESS_CANCEL_MOVEMENT_PX = 10;
@@ -50,6 +52,26 @@ export function midpoint(a: Point, b: Point): Point {
     x: (a.x + b.x) / 2,
     y: (a.y + b.y) / 2,
   };
+}
+
+export function classifyTwoFinger(start: Point[], next: Point[]): 'pinch' | 'swipe' | null {
+  if (start.length < 2 || next.length < 2) return null;
+  const initialDistance = distance(start[0], start[1]);
+  const nextDistance = distance(next[0], next[1]);
+  const distanceRatio = initialDistance > 0
+    ? Math.abs(nextDistance - initialDistance) / initialDistance
+    : 0;
+  const initialMidpoint = midpoint(start[0], start[1]);
+  const nextMidpoint = midpoint(next[0], next[1]);
+  const midpointShiftX = Math.abs(nextMidpoint.x - initialMidpoint.x);
+  if (
+    distanceRatio >= TWO_FINGER_PINCH_RATIO
+    && distanceRatio * initialDistance >= midpointShiftX
+  ) {
+    return 'pinch';
+  }
+  if (midpointShiftX >= TWO_FINGER_SWIPE_PX) return 'swipe';
+  return null;
 }
 
 export function pinchScale(previousDistancePx: number, nextDistancePx: number): number {
