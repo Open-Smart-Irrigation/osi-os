@@ -13,10 +13,11 @@ import type { HistoryCardDataResponse, HistorySeriesPoint } from '../../../histo
 
 interface SoilLineChartViewProps {
   data: HistoryCardDataResponse | undefined;
+  window?: { fromMs: number; toMs: number };
 }
 
 type HistoryTranslate = (key: string, options?: Record<string, unknown>) => string;
-type ChartRow = { timestamp: string } & Record<string, number | string | null>;
+type ChartRow = { timestamp: string; tMs: number } & Record<string, number | string | null>;
 type RenderSeries = {
   key: string;
   label: string;
@@ -60,6 +61,11 @@ function formatTimestamp(value: string): string {
     hour: '2-digit',
     minute: '2-digit',
   }).format(date);
+}
+
+function formatTimestampMs(value: unknown): string {
+  const ms = typeof value === 'number' ? value : Number(value);
+  return Number.isFinite(ms) ? formatTimestamp(new Date(ms).toISOString()) : '-';
 }
 
 function looksLikeRawSourceToken(value: string): boolean {
@@ -116,16 +122,18 @@ function hasVisiblePoints(series: RenderSeries): boolean {
   return series.points.some((point) => point.value !== null);
 }
 
-function buildRows(seriesList: RenderSeries[]): ChartRow[] {
+export function buildNumericRows(seriesList: RenderSeries[]): ChartRow[] {
   const rows = new Map<string, ChartRow>();
   seriesList.forEach((series) => {
     series.points.forEach((point) => {
-      const row = rows.get(point.t) ?? { timestamp: point.t };
+      const tMs = Date.parse(point.t);
+      if (!Number.isFinite(tMs)) return;
+      const row = rows.get(point.t) ?? { timestamp: point.t, tMs };
       row[series.key] = point.value;
       rows.set(point.t, row);
     });
   });
-  return [...rows.values()].sort((left, right) => left.timestamp.localeCompare(right.timestamp));
+  return [...rows.values()].sort((left, right) => left.tMs - right.tMs);
 }
 
 function formatValue(value: number | null, unit: string): string {
@@ -138,12 +146,12 @@ function formatTooltipValue(value: unknown, unit: string): string {
   return typeof value === 'number' && Number.isFinite(value) ? formatValue(value, unit) : '-';
 }
 
-export const SoilLineChartView: React.FC<SoilLineChartViewProps> = ({ data }) => {
+export const SoilLineChartView: React.FC<SoilLineChartViewProps> = ({ data, window: chartWindow }) => {
   const { t: translate } = useTranslation('history');
   const t = translate as HistoryTranslate;
   const rawSeries = Array.isArray(data?.series) ? data.series : [];
   const visibleSeries = normalizeSeriesList(t, rawSeries).filter(hasVisiblePoints);
-  const rows = buildRows(visibleSeries);
+  const rows = buildNumericRows(visibleSeries);
   const seriesByKey = new Map(visibleSeries.map((series) => [series.key, series]));
 
   if (visibleSeries.length === 0 || rows.length === 0) {
@@ -173,10 +181,19 @@ export const SoilLineChartView: React.FC<SoilLineChartViewProps> = ({ data }) =>
         <ResponsiveContainer width="100%" height="100%">
           <LineChart data={rows} margin={{ top: 10, right: 12, bottom: 0, left: 0 }}>
             <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
-            <XAxis dataKey="timestamp" tickFormatter={formatTimestamp} minTickGap={24} />
+            <XAxis
+              dataKey="tMs"
+              type="number"
+              scale="time"
+              domain={chartWindow ? [chartWindow.fromMs, chartWindow.toMs] : ['dataMin', 'dataMax']}
+              allowDataOverflow
+              tickFormatter={formatTimestampMs}
+              minTickGap={24}
+            />
             <YAxis width={52} label={{ value: 'kPa', angle: -90, position: 'insideLeft' }} />
             <Tooltip
-              labelFormatter={(value) => formatTimestamp(String(value))}
+              isAnimationActive={false}
+              labelFormatter={formatTimestampMs}
               formatter={(value, _name, item) => {
                 const series = seriesByKey.get(String(item.dataKey));
                 return [formatTooltipValue(value, series?.unit ?? 'kPa'), series?.label ?? t('history.soilLineChart.series.soil')];
@@ -190,7 +207,8 @@ export const SoilLineChartView: React.FC<SoilLineChartViewProps> = ({ data }) =>
                 name={series.label}
                 stroke={SERIES_COLORS[index % SERIES_COLORS.length]}
                 strokeWidth={2}
-                dot={{ r: 3 }}
+                dot={false}
+                isAnimationActive={false}
                 connectNulls={false}
               />
             ))}

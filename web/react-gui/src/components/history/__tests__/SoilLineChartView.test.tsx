@@ -3,7 +3,7 @@ import React from 'react';
 import { render, screen, within } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 
-import { SoilLineChartView } from '../visualizations/SoilLineChartView';
+import { buildNumericRows, SoilLineChartView } from '../visualizations/SoilLineChartView';
 import type { HistoryCardDataResponse } from '../../../history/types';
 
 class ResizeObserverStub {
@@ -86,6 +86,19 @@ function soilData(overrides: Partial<HistoryCardDataResponse<'soil'>> = {}): His
 }
 
 describe('SoilLineChartView', () => {
+  it('rows carry epoch-ms timestamps for numeric axis clipping', () => {
+    const rows = buildNumericRows([
+      {
+        key: 'swt_1',
+        label: 'Layer 1',
+        unit: 'kPa',
+        points: [{ t: '2026-06-01T00:00:00Z', value: 6 }],
+      },
+    ]);
+
+    expect(rows[0].tMs).toBe(Date.parse('2026-06-01T00:00:00Z'));
+  });
+
   it('renders soil tension chart without label chrome or source identifiers', () => {
     render(<SoilLineChartView data={soilData()} />);
 
