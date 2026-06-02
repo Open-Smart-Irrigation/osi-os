@@ -3,6 +3,7 @@ import { Link, useParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import useSWR from 'swr';
 import { HistoryCardVisualization } from '../components/history/HistoryCardVisualization';
+import type { HistoryCalendarDateSelection } from '../components/history/visualizations/HistoryMonthCalendarView';
 import { HistoryDetailHeader } from '../components/history/mobile/HistoryDetailHeader';
 import { HistoryRangeSegmentedControl } from '../components/history/mobile/HistoryRangeSegmentedControl';
 import { HistoryVisualizationSurface } from '../components/history/mobile/HistoryVisualizationSurface';
@@ -13,7 +14,14 @@ import { useHistoryCards } from '../history/useHistoryCards';
 import { setTimeViewportRange, useTimeViewport } from '../history/useTimeViewport';
 import { historyAPI, irrigationZonesAPI } from '../services/api';
 import type { HistoryCardDataScope } from '../history/useHistoryCardData';
-import type { HistoryCardSummary, HistoryCardSummaryResponse, HistoryRangeLabel, HistoryViewMode } from '../history/types';
+import type {
+  HistoryCardSummary,
+  HistoryCardSummaryResponse,
+  HistoryCalendarDay,
+  HistoryCalendarMarker,
+  HistoryRangeLabel,
+  HistoryViewMode,
+} from '../history/types';
 import type { IrrigationZone } from '../types/farming';
 
 const zonesFetcher = () => irrigationZonesAPI.getAll();
@@ -29,6 +37,9 @@ type PullRefreshStart = {
   y: number;
   refreshed: boolean;
 };
+type InspectorSelection =
+  | { kind: 'timestamp'; timestamp: string }
+  | { kind: 'date'; date: string; day: HistoryCalendarDay | null };
 
 function decodeRouteCardId(rawCardId: string | undefined): string | null {
   if (!rawCardId) return null;
@@ -96,6 +107,28 @@ function formatAggregationLabel(t: HistoryTranslate, aggregation: string): strin
   return t(`history.metadata.aggregation.${aggregation}`);
 }
 
+function translateParams(params: Record<string, unknown> | undefined): Record<string, unknown> {
+  return params && typeof params === 'object' ? params : {};
+}
+
+function calendarStateLabel(t: HistoryTranslate, day: HistoryCalendarDay): string {
+  return t(`history.calendar.state.${day.state}`);
+}
+
+function calendarSummaryLabel(t: HistoryTranslate, card: HistoryCardSummary, day: HistoryCalendarDay): string {
+  if (day.summary?.key) return t(day.summary.key, translateParams(day.summary.params));
+  return t(`history.calendar.summary.${card.cardType}.${day.state}`, translateParams(day.metrics));
+}
+
+function calendarCoverageLabel(t: HistoryTranslate, day: HistoryCalendarDay): string {
+  if (day.coveragePct === null || day.coveragePct === undefined) return t('history.metadata.coverageUnknown');
+  return t('history.metadata.coverageKnown', { coverage: Math.round(day.coveragePct) });
+}
+
+function calendarMarkerLabel(t: HistoryTranslate, marker: HistoryCalendarMarker): string {
+  return t(marker.labelKey, translateParams(marker.params));
+}
+
 function isPullRefreshPointerType(pointerType: string): boolean {
   return pointerType === 'touch' || pointerType === 'pen';
 }
@@ -107,6 +140,12 @@ function getPullRefreshScrollTop(scrollRoot: HTMLElement): number {
     document.documentElement.scrollTop,
     document.body.scrollTop,
   );
+}
+
+function calendarDateFromTarget(target: EventTarget | null): string | null {
+  if (!(target instanceof Element)) return null;
+  const dateCell = target.closest('[data-history-calendar-date]');
+  return dateCell?.getAttribute('data-history-calendar-date') ?? null;
 }
 
 function scopeForCard(card: HistoryCardSummary, routeScope: DetailRouteScope): HistoryCardDataScope | null {
@@ -235,7 +274,24 @@ export const HistoryCardDetailPage: React.FC = () => {
     overlays: [],
     enabled: Boolean(displayCard?.availability.available && resolvedScope),
   });
-  const [inspectorSelection, setInspectorSelection] = useState<{ timestamp: string } | null>(null);
+  const [inspectorSelection, setInspectorSelection] = useState<InspectorSelection | null>(null);
+  const calendarDaysByDate = useMemo(() => {
+    const days = cardData.data?.calendar?.days;
+    return new Map((Array.isArray(days) ? days : []).map((day) => [day.date, day]));
+  }, [cardData.data?.calendar?.days]);
+
+  const handleInspectTimestamp = useCallback((selection: { timestamp: string }) => {
+    setInspectorSelection({ kind: 'timestamp', timestamp: selection.timestamp });
+  }, []);
+
+  const handleInspectDate = useCallback((selection: HistoryCalendarDateSelection) => {
+    setInspectorSelection({ kind: 'date', date: selection.date, day: selection.day });
+  }, []);
+
+  const handleScrollRootClick = useCallback((event: React.MouseEvent<HTMLElement>) => {
+    const date = calendarDateFromTarget(event.target);
+    if (date) setInspectorSelection({ kind: 'date', date, day: calendarDaysByDate.get(date) ?? null });
+  }, [calendarDaysByDate]);
 
   const handleRangeChange = useCallback((range: HistoryRangeLabel) => {
     timeViewport.setViewport(
@@ -271,6 +327,17 @@ export const HistoryCardDetailPage: React.FC = () => {
   }, [isVisualizationEvent]);
 
   const handleScrollRootPointerUp = useCallback((event: React.PointerEvent<HTMLElement>) => {
+    const selectedDate = calendarDateFromTarget(event.target);
+    if (selectedDate) {
+      setInspectorSelection({
+        kind: 'date',
+        date: selectedDate,
+        day: calendarDaysByDate.get(selectedDate) ?? null,
+      });
+      pullStartRef.current = null;
+      return;
+    }
+
     const start = pullStartRef.current;
     if (
       !start
@@ -290,7 +357,7 @@ export const HistoryCardDetailPage: React.FC = () => {
       void cardData.refresh();
     }
     pullStartRef.current = null;
-  }, [cardData, isVisualizationEvent]);
+  }, [calendarDaysByDate, cardData, isVisualizationEvent]);
 
   useEffect(() => {
     if (!featureFlags.historyEnabled || routeScope?.type !== 'zone' || !resolvedCard || !cardId) return;
@@ -346,7 +413,8 @@ export const HistoryCardDetailPage: React.FC = () => {
         data-testid="history-detail-scroll-root"
         className="flex min-h-[calc(100vh-4rem)] flex-col gap-4 px-4 py-4"
         onPointerDown={handleScrollRootPointerDown}
-        onPointerUp={handleScrollRootPointerUp}
+        onPointerUpCapture={handleScrollRootPointerUp}
+        onClickCapture={handleScrollRootClick}
         onPointerCancel={() => {
           pullStartRef.current = null;
         }}
@@ -375,7 +443,7 @@ export const HistoryCardDetailPage: React.FC = () => {
             viewport={timeViewport.viewport}
             defaultRange={displayCard.defaultRange}
             onViewportChange={timeViewport.setViewport}
-            onInspect={setInspectorSelection}
+            onInspect={handleInspectTimestamp}
             rangeLabel={formatRangeLabel(t, timeViewport.viewport.range.label)}
             aggregationLabel={formatAggregationLabel(t, timeViewport.viewport.aggregation)}
           >
@@ -385,11 +453,46 @@ export const HistoryCardDetailPage: React.FC = () => {
               selectedView={selectedView}
               isLoading={cardData.isLoading}
               error={cardData.error}
+              onInspectDate={handleInspectDate}
             />
           </HistoryVisualizationSurface>
         </div>
-        <section className="rounded-lg border border-dashed border-[var(--border)] bg-[var(--surface)] px-4 py-3 text-sm font-semibold text-[var(--text-tertiary)]">
-          {inspectorSelection?.timestamp ?? t('history.detail.inspectorPlaceholder')}
+        <section
+          data-testid="history-detail-inspector"
+          className="rounded-lg border border-dashed border-[var(--border)] bg-[var(--surface)] px-4 py-3 text-sm text-[var(--text-tertiary)]"
+        >
+          {inspectorSelection?.kind === 'timestamp' && (
+            <p className="font-semibold">{inspectorSelection.timestamp}</p>
+          )}
+          {inspectorSelection?.kind === 'date' && (
+            <div className="space-y-1">
+              <p className="font-bold text-[var(--text)]">{inspectorSelection.date}</p>
+              {inspectorSelection.day ? (
+                <>
+                  <p className="font-semibold text-[var(--text)]">
+                    {calendarStateLabel(t, inspectorSelection.day)}
+                  </p>
+                  <p>{displayCard ? calendarSummaryLabel(t, displayCard, inspectorSelection.day) : null}</p>
+                  <p>{calendarCoverageLabel(t, inspectorSelection.day)}</p>
+                  {inspectorSelection.day.markers && inspectorSelection.day.markers.length > 0 && (
+                    <div className="flex flex-wrap gap-1 pt-1">
+                      {inspectorSelection.day.markers.map((marker, index) => (
+                        <span
+                          key={`${marker.type}-${marker.labelKey}-${index}`}
+                          className="rounded-full border border-[var(--border)] px-2 py-0.5 text-xs font-semibold"
+                        >
+                          {calendarMarkerLabel(t, marker)}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                </>
+              ) : (
+                <p className="font-semibold">{t('history.calendar.state.no_data')}</p>
+              )}
+            </div>
+          )}
+          {!inspectorSelection && t('history.detail.inspectorPlaceholder')}
         </section>
       </main>
     </div>
