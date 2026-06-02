@@ -941,8 +941,11 @@ async function aggregateDeviceData(db, query = {}) {
   const logicalSourceKey = firstDefinedValue([query.logicalSourceKey, query.logical_source_key]);
   const useRollups = query.useRollups ?? query.use_rollups;
   const hasRollupIdentity = zoneId !== undefined && cardType && logicalSourceKey;
-  const shouldUseRollups = useRollups === true || (useRollups !== false && hasRollupIdentity && ['daily', 'weekly'].includes(aggregation));
   const deveuis = queryDeviceEuis(query);
+  const hasSourceFilter = deveuis.length > 0;
+  const shouldUseRollups =
+    !hasSourceFilter
+    && (useRollups === true || (useRollups !== false && hasRollupIdentity && ['daily', 'weekly'].includes(aggregation)));
   if (shouldUseRollups) {
     const channelIds = channels.map((channel) => channel.id);
     const placeholders = channelIds.map(() => '?').join(',');

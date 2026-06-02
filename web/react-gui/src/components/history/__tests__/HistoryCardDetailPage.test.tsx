@@ -571,6 +571,26 @@ describe('History card detail route', () => {
     expect(screen.queryByText(/[A-F0-9]{16}/)).not.toBeInTheDocument();
   });
 
+  it('does not render raw sourceLabel values in the normal detail header', async () => {
+    vi.mocked(historyAPI.getZoneCards).mockResolvedValue({
+      zoneId: 12,
+      generatedAt: '2026-05-31T10:00:00Z',
+      cards: [
+        zoneCard({
+          sourceLabels: [],
+          sourceDevices: [],
+          sourceLabel: 'A84041A75D5E7CFB',
+          sourceDeviceCount: 1,
+        }),
+      ],
+    });
+
+    renderAppAtRoute('/history/zones/12/cards/soil-card%3Aroot-zone');
+
+    await screen.findByRole('heading', { name: 'Soil - Root Zone' });
+    expect(screen.queryByText('A84041A75D5E7CFB')).not.toBeInTheDocument();
+  });
+
   it('uses the card default range for the first detail data fetch when it is not 24h', async () => {
     vi.mocked(historyAPI.getZoneCards).mockResolvedValue({
       zoneId: 12,

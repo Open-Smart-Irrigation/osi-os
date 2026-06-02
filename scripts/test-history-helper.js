@@ -691,12 +691,28 @@ test('aggregates SQL-backed device_data with parameterized range queries and rol
     assert.strictEqual(autoRollup.aggregationRequested, 'auto');
     assert.strictEqual(autoRollup.source, 'history_channel_rollups');
     assert.match(db.lastQuery.sql, /FROM history_channel_rollups/);
+
+    const filteredLongRange = await helper.aggregateDeviceData(db, {
+      zoneId: 7,
+      cardType: 'soil',
+      logicalSourceKey: 'root-zone',
+      device_euis: ['AA00000000000001'],
+      start: '2026-05-31T00:00:00.000Z',
+      end: '2026-06-30T00:00:00.000Z',
+      range: '30d',
+      aggregation: 'auto',
+      channels: ['swt_1'],
+    });
+    assert.strictEqual(filteredLongRange.aggregation, 'daily');
+    assert.strictEqual(filteredLongRange.source, 'device_data');
+    assert.match(db.lastQuery.sql, /FROM device_data/);
+    assert.deepStrictEqual(db.lastQuery.params.slice(0, 3), ['AA00000000000001', '2026-05-31T00:00:00.000Z', '2026-06-30T00:00:00.000Z']);
   } finally {
     db.close();
   }
 });
 
-test('falls back to live device_data when requested rollups are empty', async () => {
+test('uses live device_data for long-range source-filtered requests', async () => {
   const db = createCliSqliteDb();
   try {
     db.runSql(`
@@ -723,7 +739,7 @@ test('falls back to live device_data when requested rollups are empty', async ()
     });
 
     assert.strictEqual(result.aggregation, 'daily');
-    assert.strictEqual(result.source, 'device_data_fallback');
+    assert.strictEqual(result.source, 'device_data');
     assert.strictEqual(result.buckets[0].series.swt_1.sampleCount, 2);
     assert.strictEqual(result.buckets[0].series.swt_1.latest, 30);
   } finally {
