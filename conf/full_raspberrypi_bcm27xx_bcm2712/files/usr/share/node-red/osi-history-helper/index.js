@@ -1106,11 +1106,11 @@ function priorityStatus(statuses, priority, fallback) {
 }
 
 function classifySoilDay(rows) {
-  const statuses = rows.map((row) => classifySoilStatus(row).status).filter((status) => status !== 'no_data');
-  const unique = new Set(statuses);
-  if (unique.size === 0) return 'no_data';
-  if (unique.size > 1) return 'mixed';
-  return statuses[0];
+  const values = rows
+    .map((row) => classifySoilStatus(row).value)
+    .filter((value) => value !== null);
+  if (values.length === 0) return 'no_data';
+  return classifySoilStatus({ value: values.reduce((sum, value) => sum + value, 0) / values.length }).status;
 }
 
 function soilDayStatuses(rows) {
@@ -1228,8 +1228,7 @@ function buildCalendar(input = {}) {
     const sampleCount = dayRows.length;
     const eventCount = dayEvents.length;
     let markerStates = state === 'no_data' ? [] : [state];
-    if (cardType === 'soil' && state === 'mixed') markerStates = soilDayStatuses(dayRows);
-    else if (cardType === 'dendro') markerStates = dendroDayStatuses(dayRows);
+    if (cardType === 'dendro') markerStates = dendroDayStatuses(dayRows);
     else if (cardType === 'environment') markerStates = environmentDayStatuses(dayRows);
     return {
       date,
@@ -1367,6 +1366,7 @@ module.exports = {
   deriveGatewayCard,
   resolveAggregation,
   classifySoilStatus,
+  classifySoilDay,
   classifyEnvironmentStatus,
   classifyDendroStatus,
   classifyIrrigationStatus,

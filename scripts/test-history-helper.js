@@ -28,6 +28,7 @@ const expectedExports = [
   'deriveGatewayCard',
   'resolveAggregation',
   'classifySoilStatus',
+  'classifySoilDay',
   'classifyEnvironmentStatus',
   'classifyDendroStatus',
   'classifyIrrigationStatus',
@@ -108,6 +109,13 @@ test('classifySoilStatus uses 22/50 kPa thresholds', () => {
   assert.strictEqual(helper.classifySoilStatus({ value: 35 }).status, 'optimal');
   assert.strictEqual(helper.classifySoilStatus({ value: 50 }).status, 'optimal');
   assert.strictEqual(helper.classifySoilStatus({ value: 51 }).status, 'dry_stress');
+});
+
+test('classifySoilDay averages tension values and never returns mixed', () => {
+  assert.strictEqual(helper.classifySoilDay([{ value: 10 }, { value: 60 }]), 'optimal');
+  assert.strictEqual(helper.classifySoilDay([{ value: 5 }, { value: 15 }]), 'wet_excess');
+  assert.strictEqual(helper.classifySoilDay([{ value: 80 }, { value: 60 }]), 'dry_stress');
+  assert.strictEqual(helper.classifySoilDay([]), 'no_data');
 });
 
 test('derives stable card identifiers without exposing raw dendro DevEUI', () => {
@@ -589,9 +597,9 @@ test('builds theme-specific calendar cells with local timezone dates and summari
   });
   assert.strictEqual(soil.timezone, 'Europe/Zurich');
   assert.deepStrictEqual(soil.days.map((day) => day.date), ['2026-05-31', '2026-06-01', '2026-06-02']);
-  assert.strictEqual(soil.days[0].state, 'mixed');
+  assert.strictEqual(soil.days[0].state, 'dry_stress');
   assert.strictEqual(soil.days[0].coveragePct, 90);
-  assert.strictEqual(soil.days[0].summary.key, 'history.calendar.summary.soil.mixed');
+  assert.strictEqual(soil.days[0].summary.key, 'history.calendar.summary.soil.dry_stress');
   assert.strictEqual(soil.days[0].metrics.sampleCount, 2);
   assert(soil.days[0].markers.some((marker) => marker.labelKey === 'history.calendar.marker.soil.dry_stress'));
   assert.strictEqual(soil.days[1].state, 'wet_excess');
