@@ -1054,6 +1054,25 @@ function addIsoDays(date, days) {
   return new Date(Date.parse(`${date}T00:00:00.000Z`) + days * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
 }
 
+function exportSpanDays(from, to) {
+  const startMs = Date.parse(`${from}T00:00:00.000Z`);
+  const endMs = Date.parse(`${to}T00:00:00.000Z`);
+  if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || endMs < startMs) return 0;
+  return Math.floor((endMs - startMs) / (24 * 60 * 60 * 1000)) + 1;
+}
+
+function assertExportRangeAllowed(scope) {
+  const days = exportSpanDays(scope.from, scope.to);
+  const maxDays = scope.granularity === 'raw' ? 92 : (scope.granularity === 'hourly' ? 730 : null);
+  if (maxDays !== null && days > maxDays) {
+    const error = new Error('range too large for this granularity');
+    error.code = 'RANGE_TOO_LARGE';
+    error.statusCode = 413;
+    error.suggestion = 'choose a coarser granularity';
+    throw error;
+  }
+}
+
 function zoneDateStartIso(date, timezone) {
   let probeMs = Date.parse(`${date}T12:00:00.000Z`);
   for (let attempt = 0; attempt < 5; attempt += 1) {
@@ -1110,7 +1129,7 @@ async function resolveZoneExportScope(db, options = {}) {
   const end = zoneDateStartIso(addIsoDays(to, 1), timezone);
   const devices = await dbAll(db, 'SELECT * FROM devices WHERE deleted_at IS NULL AND irrigation_zone_id = ? ORDER BY deveui ASC', [zoneId]);
   const cards = deriveCardsForZone(zone, devices).filter((card) => normalizeCardType(card.cardType) !== 'gateway');
-  return { zone, timezone, from, to, start, end, devices, cards, granularity: normalizeExportGranularity(options.granularity) };
+  return { zone, timezone, from, to, start, end, devices, cards, granularity: normalizeExportGranularity(options.granularity), nowMs: options.nowMs ?? Date.now() };
 }
 
 async function rawZoneExportRows(db, scope) {
@@ -1168,12 +1187,59 @@ async function rawZoneExportRows(db, scope) {
   return rows;
 }
 
+function exportSourceName(sourceDevices) {
+  if (!Array.isArray(sourceDevices) || sourceDevices.length === 0) return 'Source';
+  if (sourceDevices.length === 1) return displayDeviceName(sourceDevices[0], 0);
+  return `${sourceDevices.length} sources`;
+}
+
+async function aggregateZoneExportRows(db, scope) {
+  const rows = [];
+  const zoneName = String(scope.zone.name || scope.zone.zone_uuid || scope.zone.id);
+  for (const card of scope.cards) {
+    const channels = channelsForCard(card);
+    const sourceDevices = sourceDevicesForCard(card, scope.devices)
+      .slice()
+      .sort((left, right) =>
+        String(normalizeDeveui(left.deveui || left.device_eui) || '').localeCompare(String(normalizeDeveui(right.deveui || right.device_eui) || ''))
+      );
+    const deveuis = uniqueDeveuis(sourceDevices);
+    if (!channels.length || !deveuis.length) continue;
+
+    const sourceName = exportSourceName(sourceDevices);
+    const depthDevice = sourceDevices.length === 1 ? sourceDevices[0] : {};
+    const aggregate = await aggregateDeviceData(db, {
+      zoneId: scope.zone.id,
+      cardType: card.cardType,
+      logicalSourceKey: card.logicalSourceKey,
+      device_euis: deveuis,
+      start: scope.start,
+      end: scope.end,
+      aggregation: scope.granularity,
+      channels,
+      timezone: scope.timezone,
+      nowMs: scope.nowMs,
+    });
+    rows.push(...csvRowsFromAggregate(aggregate, card, depthDevice, sourceName, channels).map((row) => ({
+      ...row,
+      timezone: scope.timezone,
+      zone: zoneName,
+    })));
+  }
+  rows.sort((left, right) => String(left.bucket_start).localeCompare(String(right.bucket_start))
+    || String(left.card).localeCompare(String(right.card))
+    || String(left.source).localeCompare(String(right.source))
+    || String(left.variable).localeCompare(String(right.variable)));
+  return rows;
+}
+
 async function buildZoneExportCsv(db, options = {}) {
   const scope = await resolveZoneExportScope(db, options);
+  assertExportRangeAllowed(scope);
   if (scope.granularity === 'raw') {
     return { columns: RAW_CSV_COLUMNS, rows: await rawZoneExportRows(db, scope) };
   }
-  return { columns: AGG_CSV_COLUMNS, rows: [] };
+  return { columns: AGG_CSV_COLUMNS, rows: await aggregateZoneExportRows(db, scope) };
 }
 
 async function writeZoneCsv(options = {}) {
