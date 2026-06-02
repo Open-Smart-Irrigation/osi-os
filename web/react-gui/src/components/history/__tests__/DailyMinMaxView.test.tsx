@@ -3,7 +3,7 @@ import { render, screen } from '@testing-library/react';
 import React from 'react';
 import { describe, expect, it, vi } from 'vitest';
 
-import { buildNumericRows, DailyMinMaxView } from '../visualizations/DailyMinMaxView';
+import { buildNumericRows, DailyMinMaxView, expandSinglePointRows } from '../visualizations/DailyMinMaxView';
 import type { HistoryCardDataResponse } from '../../../history/types';
 
 const { translateForTest } = vi.hoisted(() => {
@@ -92,6 +92,24 @@ describe('DailyMinMaxView', () => {
     });
 
     expect(rows[0].tMs).toBe(Date.parse('2026-06-01T00:00:00Z'));
+  });
+
+  it('expands a single daily bucket into a segment so Recharts does not force dots', () => {
+    const rows = buildNumericRows({
+      key: 'daily-temp',
+      label: 'Air temperature',
+      unit: 'C',
+      points: [{ t: '2026-06-01T00:00:00Z', min: 11, max: 24, mean: 17 }],
+    });
+
+    const expanded = expandSinglePointRows(rows);
+
+    expect(expanded).toHaveLength(2);
+    expect(expanded[0].tMs).toBeLessThan(rows[0].tMs);
+    expect(expanded[1].tMs).toBeGreaterThan(rows[0].tMs);
+    expect(expanded[0]['daily-temp-min']).toBe(11);
+    expect(expanded[1]['daily-temp-max']).toBe(24);
+    expect(expanded[1]['daily-temp-mean']).toBe(17);
   });
 
   it('renders min/max data as a real chart instead of a placeholder', () => {

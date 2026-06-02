@@ -165,6 +165,22 @@ export function buildNumericRows(series: DailySeries): ChartRow[] {
     .sort((left, right) => left.tMs - right.tMs);
 }
 
+export function expandSinglePointRows(rows: ChartRow[]): ChartRow[] {
+  if (rows.length !== 1) return rows;
+
+  const center = rows[0].tMs;
+  const preferredHalfSegmentMs = 6 * 60 * 60 * 1000;
+  const left = center - preferredHalfSegmentMs;
+  const right = center + preferredHalfSegmentMs;
+
+  return [left, right].map((tMs) => ({
+    ...rows[0],
+    timestamp: new Date(tMs).toISOString(),
+    tMs,
+    label: formatTimestamp(new Date(tMs).toISOString()),
+  }));
+}
+
 function visualWindowsEqual(left: ChartWindow | undefined, right: ChartWindow | undefined): boolean {
   return left?.fromMs === right?.fromMs && left?.toMs === right?.toMs;
 }
@@ -176,7 +192,7 @@ const DailyMinMaxViewComponent: React.FC<DailyMinMaxViewProps> = ({ data, window
     const rawSeries = Array.isArray(data?.series) ? data.series : [];
     return normalizeSeriesList(t, rawSeries).filter(hasDailyRange).map((series, seriesIndex) => ({
       series,
-      rows: buildNumericRows(series),
+      rows: expandSinglePointRows(buildNumericRows(series)),
       color: SERIES_COLORS[seriesIndex % SERIES_COLORS.length],
     }));
   }, [data, t]);
