@@ -226,6 +226,35 @@ describe('useVisualizationGestures', () => {
     });
   });
 
+  it('continues gesture handling when pointer capture is rejected by the browser', () => {
+    const target = createGestureTarget();
+    target.setPointerCapture = vi.fn(() => {
+      throw new DOMException('No active pointer', 'NotFoundError');
+    });
+    const onViewportChange = vi.fn();
+    const viewport = createDefaultTimeViewport('24h', fixedNow, 'Europe/Zurich');
+    const { result } = renderHook(() =>
+      useVisualizationGestures({
+        viewport,
+        defaultRange: '24h',
+        onViewportChange,
+      }),
+    );
+
+    act(() => {
+      result.current.onPointerDown(fakePointerEvent(target, { pointerId: 1, clientX: 110, clientY: 30 }));
+      result.current.onPointerMove(fakePointerEvent(target, { pointerId: 1, clientX: 140, clientY: 30 }));
+    });
+
+    expect(target.setPointerCapture).toHaveBeenCalledWith(1);
+    expect(onViewportChange).toHaveBeenCalledWith(
+      expect.objectContaining({
+        range: expect.objectContaining({ label: 'custom' }),
+        aggregation: 'auto',
+      }),
+    );
+  });
+
   it('resets the viewport on double tap', () => {
     vi.useFakeTimers();
     vi.setSystemTime(fixedNow);

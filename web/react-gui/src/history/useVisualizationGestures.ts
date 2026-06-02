@@ -44,6 +44,15 @@ interface TapState {
   point: Point;
 }
 
+function trySetPointerCapture(target: HTMLElement, pointerId: number) {
+  try {
+    target.setPointerCapture?.(pointerId);
+  } catch {
+    // Synthetic browser tests and some cancelled native gestures can reject
+    // capture even though the pointer event is still useful for local gestures.
+  }
+}
+
 export function useVisualizationGestures({
   viewport,
   defaultRange,
@@ -139,7 +148,7 @@ export function useVisualizationGestures({
     const activePointers = activePointersRef.current;
     const wasIdle = activePointers.size === 0;
 
-    event.currentTarget.setPointerCapture(event.pointerId);
+    trySetPointerCapture(event.currentTarget, event.pointerId);
 
     if (wasIdle && maybeResetForDoubleTap(point)) {
       activePointers.clear();
