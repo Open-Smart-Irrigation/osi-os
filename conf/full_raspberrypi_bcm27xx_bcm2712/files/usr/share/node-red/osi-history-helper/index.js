@@ -20,6 +20,12 @@ const CADENCE_LOOKBACK_MS = 7 * 24 * 60 * 60 * 1000;
 
 const ALLOWED_AGGREGATIONS = new Set(['raw', '15m', 'hourly', 'daily', 'weekly']);
 
+const ROLLUP_WINDOWS = {
+  hourly: 8 * 24 * 60 * 60 * 1000,
+  daily: 120 * 24 * 60 * 60 * 1000,
+  weekly: 370 * 24 * 60 * 60 * 1000,
+};
+
 const ALLOWED_DEVICE_DATA_CHANNELS = new Set([
   'swt_1',
   'swt_2',
@@ -171,6 +177,66 @@ function isIrrigationSource(device) {
 function isDendroSource(device) {
   return String(device && device.type_id || '').toUpperCase() === 'DRAGINO_LSN50'
     && Number(device && device.dendro_enabled || 0) === 1;
+}
+
+function uniqueDeveuis(devices) {
+  return Array.from(new Set((Array.isArray(devices) ? devices : [])
+    .map((device) => normalizeDeveui(device && (device.deveui || device.device_eui || device.deviceEui)))
+    .filter(Boolean)));
+}
+
+function sourceDevicesForCard(card, devices) {
+  const cardType = normalizeCardType(card && card.cardType);
+  const rows = Array.isArray(devices) ? devices : [];
+  if (cardType === 'soil') return rows.filter(isSoilSource);
+  if (cardType === 'environment') return rows.filter(isEnvironmentSource);
+  if (cardType === 'irrigation') return rows.filter(isIrrigationSource);
+  if (cardType === 'dendro') {
+    const sourceKey = String(card && card.logicalSourceKey || '').trim();
+    return rows.filter((device) => isDendroSource(device) && dendroSourceKey(device.deveui || device.device_eui) === sourceKey);
+  }
+  return [];
+}
+
+function channelsForCard(card) {
+  const cardType = normalizeCardType(card && card.cardType);
+  if (cardType === 'soil') {
+    return [
+      { id: 'swt_1', field: 'swt_1', unit: 'kPa' },
+      { id: 'swt_2', field: 'swt_2', unit: 'kPa' },
+      { id: 'swt_3', field: 'swt_3', unit: 'kPa' },
+      { id: 'swt_wm1', field: 'swt_wm1', unit: 'kPa' },
+      { id: 'swt_wm2', field: 'swt_wm2', unit: 'kPa' },
+    ];
+  }
+  if (cardType === 'environment') {
+    return [
+      { id: 'ambient_temperature', field: 'ambient_temperature', unit: 'C' },
+      { id: 'relative_humidity', field: 'relative_humidity', unit: '%' },
+      { id: 'ext_temperature_c', field: 'ext_temperature_c', unit: 'C' },
+      { id: 'light_lux', field: 'light_lux', unit: 'lux' },
+      { id: 'rain_mm_per_hour', field: 'rain_mm_per_hour', unit: 'mm/h' },
+      { id: 'rain_mm_per_10min', field: 'rain_mm_per_10min', unit: 'mm/10min' },
+      { id: 'rain_mm_today', field: 'rain_mm_today', unit: 'mm' },
+      { id: 'rain_mm_delta', field: 'rain_mm_delta', unit: 'mm' },
+      { id: 'wind_speed_mps', field: 'wind_speed_mps', unit: 'm/s' },
+      { id: 'wind_gust_mps', field: 'wind_gust_mps', unit: 'm/s' },
+      { id: 'barometric_pressure_hpa', field: 'barometric_pressure_hpa', unit: 'hPa' },
+      { id: 'uv_index', field: 'uv_index', unit: null },
+    ];
+  }
+  if (cardType === 'dendro') {
+    return [
+      { id: 'dendro_stem_change_um', field: 'dendro_stem_change_um', unit: 'um' },
+      { id: 'dendro_position_mm', field: 'dendro_position_mm', unit: 'mm' },
+      { id: 'dendro_position_raw_mm', field: 'dendro_position_raw_mm', unit: 'mm' },
+      { id: 'dendro_delta_mm', field: 'dendro_delta_mm', unit: 'mm' },
+      { id: 'dendro_ratio', field: 'dendro_ratio', unit: null },
+      { id: 'adc_ch0v', field: 'adc_ch0v', unit: 'V' },
+      { id: 'adc_ch1v', field: 'adc_ch1v', unit: 'V' },
+    ];
+  }
+  return [];
 }
 
 function deriveCardsForZone(zone, devices) {
@@ -923,6 +989,55 @@ async function upsertRollups(db, rows) {
   return count;
 }
 
+async function runRollupJob(db, options = {}) {
+  const startedAt = Date.now();
+  const nowMs = options.nowMs ?? Date.now();
+  const levels = Array.isArray(options.levels) && options.levels.length
+    ? options.levels.filter((level) => Object.prototype.hasOwnProperty.call(ROLLUP_WINDOWS, level))
+    : ['hourly', 'daily', 'weekly'];
+  const zones = await dbAll(db, 'SELECT id, name, zone_uuid, timezone FROM irrigation_zones WHERE deleted_at IS NULL', []);
+  let cardsProcessed = 0;
+  let bucketsUpserted = 0;
+  const errors = [];
+
+  for (const zone of zones) {
+    try {
+      const devices = await dbAll(db, 'SELECT * FROM devices WHERE deleted_at IS NULL AND irrigation_zone_id = ?', [zone.id]);
+      const cards = deriveCardsForZone(zone, devices);
+      for (const card of cards) {
+        const channels = channelsForCard(card);
+        const sourceDevices = sourceDevicesForCard(card, devices);
+        const deveuis = uniqueDeveuis(sourceDevices);
+        if (!channels.length || !deveuis.length) continue;
+        cardsProcessed += 1;
+        const scope = {
+          zoneId: zone.id,
+          cardType: card.cardType,
+          logicalSourceKey: card.logicalSourceKey,
+          channels,
+          deveuis,
+          timezone: zone.timezone || 'UTC',
+        };
+        for (const level of levels) {
+          const rows = await computeRollupBuckets(db, scope, level, ROLLUP_WINDOWS[level], nowMs);
+          bucketsUpserted += await upsertRollups(db, rows);
+        }
+      }
+    } catch (error) {
+      errors.push({ zoneId: zone.id, message: String(error && error.message || error) });
+    }
+  }
+
+  return {
+    generatedAt: new Date(nowMs).toISOString(),
+    zones: zones.length,
+    cardsProcessed,
+    bucketsUpserted,
+    errors,
+    durationMs: Date.now() - startedAt,
+  };
+}
+
 function rollupRowsToResult(rows, query, channels) {
   const channelMap = new Map(channels.map((channel) => [channel.id, channel]));
   const byBucket = new Map();
@@ -1508,6 +1623,7 @@ module.exports = {
   startOfLocalDayMs,
   computeRollupBuckets,
   upsertRollups,
+  runRollupJob,
   aggregateRows,
   aggregateDeviceData,
   buildAdvancedMetadataPlaceholder,

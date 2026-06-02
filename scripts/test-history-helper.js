@@ -37,6 +37,7 @@ const expectedExports = [
   'startOfLocalDayMs',
   'computeRollupBuckets',
   'upsertRollups',
+  'runRollupJob',
   'aggregateRows',
   'aggregateDeviceData',
   'buildAdvancedMetadataPlaceholder',
@@ -523,6 +524,38 @@ test('upsertRollups is idempotent on the unique bucket key', async () => {
     assert.strictEqual(rows.length, 1);
     assert.strictEqual(rows[0].mean_value, 16);
     assert.strictEqual(rows[0].sample_count, 3);
+  } finally {
+    db.close();
+  }
+});
+
+test('runRollupJob populates hourly and daily rollups for a zone', async () => {
+  const db = createCliSqliteDb();
+  try {
+    db.runSql(`
+      INSERT INTO users(id,username,password_hash,created_at,updated_at) VALUES(1,'u','h','2026-05-20T00:00:00.000Z','2026-05-20T00:00:00.000Z');
+      INSERT INTO irrigation_zones(id,name,user_id,zone_uuid,timezone,created_at,updated_at) VALUES(7,'Z',1,'zu','UTC','2026-05-20T00:00:00.000Z','2026-05-20T00:00:00.000Z');
+      INSERT INTO devices(deveui,name,type_id,user_id,irrigation_zone_id,created_at,updated_at) VALUES('AA00000000000001','Soil','KIWI_SENSOR',1,7,'2026-05-20T00:00:00.000Z','2026-05-20T00:00:00.000Z');
+    `);
+    let sql = '';
+    for (let day = 1; day <= 2; day += 1) {
+      for (let hour = 0; hour < 24; hour += 1) {
+        const timestamp = `2026-06-0${day}T${String(hour).padStart(2, '0')}:30:00.000Z`;
+        sql += `INSERT INTO device_data(deveui,recorded_at,swt_1) VALUES('AA00000000000001','${timestamp}',${10 + hour});\n`;
+      }
+    }
+    db.runSql(sql);
+
+    const summary = await helper.runRollupJob(db, { nowMs: Date.parse('2026-06-03T02:00:00.000Z') });
+    assert.ok(summary.bucketsUpserted > 0);
+    const daily = await new Promise((resolve, reject) => {
+      db.all("SELECT * FROM history_channel_rollups WHERE bucket_level='daily'", [], (error, rows) => error ? reject(error) : resolve(rows));
+    });
+    assert.ok(daily.length >= 2, 'has daily buckets for the two days');
+    const hourly = await new Promise((resolve, reject) => {
+      db.all("SELECT * FROM history_channel_rollups WHERE bucket_level='hourly'", [], (error, rows) => error ? reject(error) : resolve(rows));
+    });
+    assert.ok(hourly.length >= 24);
   } finally {
     db.close();
   }
