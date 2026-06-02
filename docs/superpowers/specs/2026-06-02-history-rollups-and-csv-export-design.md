@@ -46,7 +46,7 @@ table is never written (verified: 0 rollup rows vs 134,337 raw rows on kaba100).
 | Persisted levels | **hourly, daily, weekly.** 15m and raw stay live-only (short-range). |
 | Bucket alignment | Daily/weekly buckets align to **zone-local midnight** (`irrigation_zones.timezone`). |
 | Job timing | Nightly inject at **02:00 gateway-local**. Multi-timezone zones far from the gateway are a documented limitation, not handled in MVP. |
-| CSV layout | Per zone: `raw/YYYY-MM-DD.csv`, `hourly/YYYY-MM-DD.csv`, and an appended `daily.csv`. |
+| CSV format | **Long / tidy** (one row per observation), R-readable; per zone: `raw/YYYY-MM-DD.csv`, `hourly/YYYY-MM-DD.csv`, and an appended `daily.csv`. See §4.4 for the exact column schema. |
 | CSV rotation | Prune `raw/` and `hourly/` files older than `HISTORY_CSV_RAW_RETENTION_DAYS` (default 90). `daily.csv` kept indefinitely. |
 
 ## 4. Architecture
@@ -118,17 +118,60 @@ Node-RED inject (cron 0 2 * * *)
 
 ### 4.4 CSV export
 
-- Destination: `/data/exports/<zoneUuid>/`. Created if absent. (`/data` is the persistent
-  partition; never touches `/data/db/farming.db`.)
-- Per nightly run, for the just-completed zone-local day `D`:
-  - `raw/<D>.csv` — columns: `recorded_at, source_label, channel_id, value, unit`.
-  - `hourly/<D>.csv` — columns: `bucket_start, bucket_end, source_label, channel_id, min, max,
-    mean, median, latest, sample_count, coverage_pct, unit`.
-  - append one row per channel for day `D` to `daily.csv` — same columns as hourly at daily
-    grain (idempotent: if `D` already present, rewrite that day's rows, don't duplicate).
-- `source_label` is the display-safe source name; **no raw DevEUI** in CSV unless a future
-  decision adds an "advanced export". (Consistent with the no-DevEUI-in-normal-UI rule.)
-- Rotation after writing: delete `raw/*.csv` and `hourly/*.csv` older than
+Destination: `/data/exports/<zoneUuid>/`. Created if absent. (`/data` is the persistent
+partition; never touches `/data/db/farming.db`.) Per nightly run, for the just-completed
+zone-local day `D`: write `raw/<D>.csv`, `hourly/<D>.csv`, and append day `D` to `daily.csv`.
+
+#### 4.4.1 Format: long / tidy (one row per observation)
+
+The CSV is **long (tidy) format**, not wide: every value is its own row carrying its own
+metadata (source, variable, depth, unit). This is the only layout where a single `depth_cm`
+column can associate with each value (a wide `swt_1,swt_2,swt_3` layout would need separate
+per-column depth fields), and it is what R/tidyverse expects (`readr::read_csv` →
+`dplyr::filter`).
+
+**File conventions (R-readable):**
+- UTF-8, comma-delimited, `\n` line endings, exactly one header row.
+- RFC 4180 quoting: a field is double-quoted only if it contains a comma, double-quote, or
+  newline (e.g. a zone/source name with a comma); embedded quotes doubled.
+- Column names: lowercase `snake_case`, ASCII, no units embedded in names.
+- Timestamps: **ISO 8601 UTC** with `Z` (e.g. `2026-06-02T14:03:21Z`); a separate `timezone`
+  column carries the IANA zone (e.g. `Europe/Zurich`) so analysts can localise.
+- Numbers: `.` decimal separator, no thousands separators, no unit suffixes.
+- Missing values: empty cell (parsed as `NA` by `readr`). Never `null`/`NaN` literals.
+- `variable` uses the canonical DB channel ids (`swt_1`, `swt_2`, `swt_3`, `air_temperature`,
+  `relative_humidity`, `light_lux`, `ext_temperature_c`, `stem_change`, …) — stable, not
+  prettified.
+- `source` is the display-safe sensor name (e.g. `Chameleon 1`). **No raw DevEUI** in the CSV
+  unless a future "advanced export" decision adds it (consistent with the no-DevEUI-in-normal-UI
+  rule).
+- `depth_cm` is numeric for depth-bearing variables (soil layers, from the Chameleon/Kiwi depth
+  fields) and **empty** for variables without a depth (temperature, humidity, dendro, …).
+
+**`raw/<D>.csv` columns:**
+
+```
+timestamp,timezone,zone,card,source,variable,depth_cm,value,unit
+2026-06-02T14:03:21Z,Europe/Zurich,Zone B,soil,Chameleon 1,swt_1,5,6.24,kPa
+2026-06-02T14:03:21Z,Europe/Zurich,Zone B,soil,Chameleon 1,swt_2,10,6.69,kPa
+2026-06-02T14:03:21Z,Europe/Zurich,Zone B,soil,Chameleon 1,swt_3,40,6.86,kPa
+2026-06-02T14:05:00Z,Europe/Zurich,Zone A,environment,Temp1,air_temperature,,21.4,degC
+```
+
+**`hourly/<D>.csv` and `daily.csv` columns** (identical schema; daily is one bucket per day):
+
+```
+bucket_start,bucket_end,timezone,zone,card,source,variable,depth_cm,unit,n,coverage_pct,mean,min,max,median,latest
+2026-06-02T13:00:00Z,2026-06-02T14:00:00Z,Europe/Zurich,Zone B,soil,Chameleon 1,swt_1,5,kPa,4,100,6.30,6.18,6.41,6.29,6.24
+```
+
+- `n` = `sample_count`; `coverage_pct` may be empty when coverage is unknown.
+- `daily.csv` is the long-term archive (kept indefinitely). Append is **idempotent**: if day `D`
+  rows already exist, rewrite that day's rows rather than duplicating.
+
+#### 4.4.2 Rotation & serving
+
+- After writing, delete `raw/*.csv` and `hourly/*.csv` older than
   `HISTORY_CSV_RAW_RETENTION_DAYS` (default 90); keep `daily.csv`.
 - Serving: extend the existing auth-gated `/download-sensordata` pattern to list/serve files
   under `/data/exports/<zoneUuid>/` for zones the user can access. (Download UI is out of scope;
