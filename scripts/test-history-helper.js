@@ -40,6 +40,7 @@ const expectedExports = [
   'runRollupJob',
   'resolveDeviceFieldRollupKey',
   'legacySensorHistory',
+  'buildZoneExportCsv',
   'toCsv',
   'writeZoneCsv',
   'rotateZoneCsv',
@@ -121,6 +122,11 @@ test('exports the history helper contract', () => {
   for (const name of expectedExports) {
     assert.strictEqual(typeof helper[name], 'function', `${name} export`);
   }
+});
+
+test('exports the zone CSV column contracts', () => {
+  assert.deepStrictEqual(helper.RAW_CSV_COLUMNS, ['timestamp', 'timezone', 'zone', 'card', 'source', 'variable', 'depth_cm', 'value', 'unit']);
+  assert.deepStrictEqual(helper.AGG_CSV_COLUMNS, ['bucket_start', 'bucket_end', 'timezone', 'zone', 'card', 'source', 'variable', 'depth_cm', 'unit', 'n', 'coverage_pct', 'mean', 'min', 'max', 'median', 'latest']);
 });
 
 test('classifySoilStatus uses 22/50 kPa thresholds', () => {
@@ -646,6 +652,42 @@ test('writeZoneCsv emits tidy long-format raw and daily files with depth', async
     assert.strictEqual(daily[0], 'bucket_start,bucket_end,timezone,zone,card,source,variable,depth_cm,unit,n,coverage_pct,mean,min,max,median,latest');
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('buildZoneExportCsv raw emits tidy rows with depth and source', async () => {
+  const db = createCliSqliteDb();
+  try {
+    db.runSql(`
+      INSERT INTO users(id,username,password_hash,created_at,updated_at) VALUES(1,'u','h','2026-05-31T00:00:00.000Z','2026-05-31T00:00:00.000Z');
+      INSERT INTO irrigation_zones(id,name,user_id,zone_uuid,timezone,created_at,updated_at) VALUES(12,'Zone B',1,'zb','UTC','2026-05-31T00:00:00.000Z','2026-05-31T00:00:00.000Z');
+      INSERT INTO devices(deveui,name,type_id,user_id,irrigation_zone_id,chameleon_enabled,chameleon_swt1_depth_cm,created_at,updated_at)
+        VALUES('AA00000000000001','Chameleon 1','DRAGINO_LSN50',1,12,1,5,'2026-05-31T00:00:00.000Z','2026-05-31T00:00:00.000Z');
+      INSERT INTO device_data(deveui,recorded_at,swt_1) VALUES
+        ('AA00000000000001','2026-06-01T08:00:00.000Z',6.2),
+        ('AA00000000000001','2026-06-01T09:00:00.000Z',6.4);
+    `);
+    const res = await helper.buildZoneExportCsv(db, {
+      zoneId: 12,
+      from: '2026-06-01',
+      to: '2026-06-01',
+      granularity: 'raw',
+      nowMs: Date.parse('2026-06-03T00:00:00.000Z'),
+    });
+    assert.deepStrictEqual(res.columns, helper.RAW_CSV_COLUMNS);
+    assert.strictEqual(res.rows.length, 2);
+    const swt1 = res.rows.find((row) => row.variable === 'swt_1' && row.value === 6.2);
+    assert.ok(swt1);
+    assert.strictEqual(swt1.timestamp, '2026-06-01T08:00:00.000Z');
+    assert.strictEqual(swt1.timezone, 'UTC');
+    assert.strictEqual(swt1.zone, 'Zone B');
+    assert.strictEqual(swt1.card, 'soil');
+    assert.strictEqual(swt1.source, 'Chameleon 1');
+    assert.strictEqual(swt1.depth_cm, 5);
+    assert.strictEqual(swt1.unit, 'kPa');
+    assert.ok(!res.rows.some((row) => /[A-F0-9]{16}/.test(String(row.source))), 'no raw DevEUI');
+  } finally {
+    db.close();
   }
 });
 

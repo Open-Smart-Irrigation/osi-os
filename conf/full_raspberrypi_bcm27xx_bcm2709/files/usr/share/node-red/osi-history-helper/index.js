@@ -1040,6 +1040,142 @@ function toCsv(columns, rows) {
 const RAW_CSV_COLUMNS = ['timestamp', 'timezone', 'zone', 'card', 'source', 'variable', 'depth_cm', 'value', 'unit'];
 const AGG_CSV_COLUMNS = ['bucket_start', 'bucket_end', 'timezone', 'zone', 'card', 'source', 'variable', 'depth_cm', 'unit', 'n', 'coverage_pct', 'mean', 'min', 'max', 'median', 'latest'];
 
+function normalizeExportDate(value, name) {
+  const date = String(value || '').trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+    const error = new Error(`${name} must be YYYY-MM-DD`);
+    error.statusCode = 400;
+    throw error;
+  }
+  return date;
+}
+
+function addIsoDays(date, days) {
+  return new Date(Date.parse(`${date}T00:00:00.000Z`) + days * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+}
+
+function zoneDateStartIso(date, timezone) {
+  let probeMs = Date.parse(`${date}T12:00:00.000Z`);
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    const startMs = startOfLocalDayMs(probeMs, timezone);
+    const key = localDateKey(startMs, timezone);
+    if (key === date) return new Date(startMs).toISOString();
+    probeMs += key && key < date ? 24 * 60 * 60 * 1000 : -24 * 60 * 60 * 1000;
+  }
+  return new Date(startOfLocalDayMs(Date.parse(`${date}T00:00:00.000Z`), timezone)).toISOString();
+}
+
+function normalizeExportGranularity(value) {
+  const granularity = String(value || 'raw').trim().toLowerCase();
+  if (!['raw', 'hourly', 'daily'].includes(granularity)) {
+    const error = new Error('granularity must be raw, hourly, or daily');
+    error.statusCode = 400;
+    throw error;
+  }
+  return granularity;
+}
+
+async function resolveZoneExportScope(db, options = {}) {
+  const zoneId = Number(options.zoneId ?? options.zone_id);
+  if (!Number.isInteger(zoneId) || zoneId <= 0) {
+    const error = new Error('zoneId is required');
+    error.statusCode = 400;
+    throw error;
+  }
+
+  const zones = await dbAll(db, 'SELECT id, name, zone_uuid, timezone FROM irrigation_zones WHERE id = ? AND deleted_at IS NULL', [zoneId]);
+  const zone = zones[0];
+  if (!zone) {
+    const error = new Error('zone not found');
+    error.statusCode = 404;
+    throw error;
+  }
+
+  const timezone = normalizeTimezone(zone.timezone);
+  const from = normalizeExportDate(options.from, 'from');
+  const to = normalizeExportDate(options.to || options.from, 'to');
+  if (from > to) {
+    const error = new Error('from must be before or equal to to');
+    error.statusCode = 400;
+    throw error;
+  }
+  const today = localDateKey(options.nowMs ?? Date.now(), timezone);
+  if ((today && from > today) || (today && to > today)) {
+    const error = new Error('date range cannot include future days');
+    error.statusCode = 400;
+    throw error;
+  }
+
+  const start = zoneDateStartIso(from, timezone);
+  const end = zoneDateStartIso(addIsoDays(to, 1), timezone);
+  const devices = await dbAll(db, 'SELECT * FROM devices WHERE deleted_at IS NULL AND irrigation_zone_id = ? ORDER BY deveui ASC', [zoneId]);
+  const cards = deriveCardsForZone(zone, devices).filter((card) => normalizeCardType(card.cardType) !== 'gateway');
+  return { zone, timezone, from, to, start, end, devices, cards, granularity: normalizeExportGranularity(options.granularity) };
+}
+
+async function rawZoneExportRows(db, scope) {
+  const rows = [];
+  const zoneName = String(scope.zone.name || scope.zone.zone_uuid || scope.zone.id);
+  for (const card of scope.cards) {
+    const channels = channelsForCard(card);
+    const sourceDevices = sourceDevicesForCard(card, scope.devices)
+      .slice()
+      .sort((left, right) =>
+        String(normalizeDeveui(left.deveui || left.device_eui) || '').localeCompare(String(normalizeDeveui(right.deveui || right.device_eui) || ''))
+      );
+    const deveuis = uniqueDeveuis(sourceDevices);
+    if (!channels.length || !deveuis.length) continue;
+
+    const selectedFields = Array.from(new Set(channels.map((channel) => channel.field)));
+    const placeholders = deveuis.map(() => '?').join(',');
+    const sql = `SELECT deveui, recorded_at, ${selectedFields.join(', ')} FROM device_data WHERE deveui IN (${placeholders}) AND recorded_at >= ? AND recorded_at < ? ORDER BY recorded_at ASC`;
+    const dataRows = await dbAll(db, sql, deveuis.concat([scope.start, scope.end]));
+    const rowsByDeveui = {};
+    for (const row of dataRows) {
+      const key = normalizeDeveui(row.deveui);
+      if (!key) continue;
+      if (!rowsByDeveui[key]) rowsByDeveui[key] = [];
+      rowsByDeveui[key].push(row);
+    }
+
+    sourceDevices.forEach((device, index) => {
+      const deveui = normalizeDeveui(device.deveui || device.device_eui);
+      const sourceRows = rowsByDeveui[deveui] || [];
+      const sourceName = displayDeviceName(device, index);
+      for (const row of sourceRows) {
+        for (const channel of channels) {
+          const value = toFiniteNumber(row[channel.field]);
+          if (value === null) continue;
+          rows.push({
+            timestamp: row.recorded_at,
+            timezone: scope.timezone,
+            zone: zoneName,
+            card: card.cardType,
+            source: sourceName,
+            variable: channel.id,
+            depth_cm: soilDepthCm(device, channel.id),
+            value: roundTo(value),
+            unit: channel.unit || null,
+          });
+        }
+      }
+    });
+  }
+  rows.sort((left, right) => String(left.timestamp).localeCompare(String(right.timestamp))
+    || String(left.card).localeCompare(String(right.card))
+    || String(left.source).localeCompare(String(right.source))
+    || String(left.variable).localeCompare(String(right.variable)));
+  return rows;
+}
+
+async function buildZoneExportCsv(db, options = {}) {
+  const scope = await resolveZoneExportScope(db, options);
+  if (scope.granularity === 'raw') {
+    return { columns: RAW_CSV_COLUMNS, rows: await rawZoneExportRows(db, scope) };
+  }
+  return { columns: AGG_CSV_COLUMNS, rows: [] };
+}
+
 async function writeZoneCsv(options = {}) {
   const fs = require('fs');
   const path = require('path');
@@ -2150,6 +2286,9 @@ module.exports = {
   runRollupJob,
   resolveDeviceFieldRollupKey,
   legacySensorHistory,
+  buildZoneExportCsv,
+  RAW_CSV_COLUMNS,
+  AGG_CSV_COLUMNS,
   toCsv,
   writeZoneCsv,
   rotateZoneCsv,
