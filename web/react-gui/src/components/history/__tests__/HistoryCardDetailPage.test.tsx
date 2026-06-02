@@ -20,6 +20,8 @@ const { translateForTest } = vi.hoisted(() => {
     'history.detail.inspectorPlaceholder': 'Inspector',
     'history.detail.rangeControlLabel': 'Date range',
     'history.detail.viewControlLabel': 'View',
+    'history.detail.visualizationLabel': 'History visualization',
+    'history.detail.visualizationHelp': 'Drag to pan, pinch to zoom, double tap to reset, or long press to inspect.',
     'history.rangeShort.12h': '12h',
     'history.rangeShort.24h': '24h',
     'history.rangeShort.7d': '7D',
@@ -115,6 +117,45 @@ const historyAPIMock = historyAPI as typeof historyAPI & {
 
 function firstZoneCardDataRequest() {
   return historyAPIMock.getZoneCardData.mock.calls[0]?.[2];
+}
+
+function preparePointerTarget(element: HTMLElement, scrollTop = 0) {
+  Object.defineProperty(element, 'getBoundingClientRect', {
+    configurable: true,
+    value: () => ({
+      left: 0,
+      top: 0,
+      width: 320,
+      height: 240,
+      right: 320,
+      bottom: 240,
+      x: 0,
+      y: 0,
+      toJSON: () => ({}),
+    }),
+  });
+  Object.defineProperty(element, 'scrollTop', {
+    configurable: true,
+    writable: true,
+    value: scrollTop,
+  });
+  element.setPointerCapture = vi.fn();
+  element.releasePointerCapture = vi.fn();
+}
+
+function pointerDrag(
+  element: HTMLElement,
+  {
+    fromX = 160,
+    toX = fromX,
+    fromY,
+    toY,
+    pointerType = 'touch',
+  }: { fromX?: number; toX?: number; fromY: number; toY: number; pointerType?: string },
+) {
+  fireEvent.pointerDown(element, { pointerId: 1, pointerType, clientX: fromX, clientY: fromY });
+  fireEvent.pointerMove(element, { pointerId: 1, pointerType, clientX: toX, clientY: toY });
+  fireEvent.pointerUp(element, { pointerId: 1, pointerType, clientX: toX, clientY: toY });
 }
 
 function renderAppAtRoute(hashRoute: string) {
@@ -494,5 +535,71 @@ describe('History card detail route', () => {
       );
     });
     expect(screen.getByRole('button', { name: '12h' })).toHaveAttribute('aria-pressed', 'true');
+  });
+
+  it('renders the selected visualization inside the gesture surface without the desktop timeline brush', async () => {
+    renderAppAtRoute('/history/zones/12/cards/soil-card%3Aroot-zone');
+
+    expect(await screen.findByRole('heading', { level: 1, name: 'Soil - Root Zone' })).toBeInTheDocument();
+    const surface = screen.getByTestId('history-visualization-surface');
+
+    expect(surface).toHaveTextContent('No soil profile data');
+    expect(surface).toHaveStyle({ touchAction: 'none' });
+    expect(screen.queryByRole('region', { name: 'Timeline viewport' })).not.toBeInTheDocument();
+    expect(screen.getByTestId('history-detail-scroll-root')).not.toHaveStyle({ touchAction: 'none' });
+  });
+
+  it('refreshes selected card data on touch pull-down outside the visualization surface at the scroll top', async () => {
+    renderAppAtRoute('/history/zones/12/cards/soil-card%3Aroot-zone');
+
+    await waitFor(() => expect(historyAPI.getZoneCardData).toHaveBeenCalledTimes(1));
+    historyAPIMock.getZoneCardData.mockClear();
+
+    const scrollRoot = screen.getByTestId('history-detail-scroll-root');
+    preparePointerTarget(scrollRoot);
+    pointerDrag(scrollRoot, { fromY: 40, toY: 180 });
+
+    await waitFor(() => {
+      expect(historyAPI.getZoneCardData).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  it('does not refresh detail data on mouse drag outside the visualization surface', async () => {
+    renderAppAtRoute('/history/zones/12/cards/soil-card%3Aroot-zone');
+
+    await waitFor(() => expect(historyAPI.getZoneCardData).toHaveBeenCalledTimes(1));
+    historyAPIMock.getZoneCardData.mockClear();
+
+    const scrollRoot = screen.getByTestId('history-detail-scroll-root');
+    preparePointerTarget(scrollRoot);
+    pointerDrag(scrollRoot, { fromY: 40, toY: 180, pointerType: 'mouse' });
+
+    expect(historyAPI.getZoneCardData).not.toHaveBeenCalled();
+  });
+
+  it('does not refresh detail data on touch pull-down when the scroll root is not at the top', async () => {
+    renderAppAtRoute('/history/zones/12/cards/soil-card%3Aroot-zone');
+
+    await waitFor(() => expect(historyAPI.getZoneCardData).toHaveBeenCalledTimes(1));
+    historyAPIMock.getZoneCardData.mockClear();
+
+    const scrollRoot = screen.getByTestId('history-detail-scroll-root');
+    preparePointerTarget(scrollRoot, 40);
+    pointerDrag(scrollRoot, { fromY: 40, toY: 180, pointerType: 'touch' });
+
+    expect(historyAPI.getZoneCardData).not.toHaveBeenCalled();
+  });
+
+  it('does not refresh detail data on pull-down inside the visualization surface', async () => {
+    renderAppAtRoute('/history/zones/12/cards/soil-card%3Aroot-zone');
+
+    await waitFor(() => expect(historyAPI.getZoneCardData).toHaveBeenCalledTimes(1));
+    historyAPIMock.getZoneCardData.mockClear();
+
+    const surface = screen.getByTestId('history-visualization-surface');
+    preparePointerTarget(surface);
+    pointerDrag(surface, { fromY: 40, toY: 180, pointerType: 'touch' });
+
+    expect(historyAPI.getZoneCardData).not.toHaveBeenCalled();
   });
 });
