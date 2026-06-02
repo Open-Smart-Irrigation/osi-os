@@ -14,12 +14,15 @@ interface DataExportSectionProps {
 const GRANULARITIES: ExportGranularity[] = ['raw', 'hourly', 'daily'];
 
 function errorMessage(error: unknown, fallback: string): string {
+  const responseData = (error as { response?: { data?: { error?: string; suggestion?: string } } })?.response?.data;
+  if (responseData?.error && responseData.suggestion) return `${responseData.error}: ${responseData.suggestion}`;
+  if (responseData?.error) return responseData.error;
   if (error instanceof Error && error.message) return error.message;
   return fallback;
 }
 
 export const DataExportSection: React.FC<DataExportSectionProps> = ({ zoneId, todayIso }) => {
-  const { t } = useTranslation();
+  const { t } = useTranslation('devices');
   const [range, setRange] = useState<RangeValue>({ from: null, to: null });
   const [granularity, setGranularity] = useState<ExportGranularity>('raw');
   const [downloading, setDownloading] = useState(false);

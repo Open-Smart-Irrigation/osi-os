@@ -26,6 +26,9 @@ vi.mock('../../../services/api', () => ({
     updateCalibration: vi.fn().mockResolvedValue(undefined),
     setZoneLocation: vi.fn().mockResolvedValue(undefined),
   },
+  zoneExportAPI: {
+    download: vi.fn().mockResolvedValue(undefined),
+  },
 }));
 
 const zone: IrrigationZone = {
@@ -42,6 +45,20 @@ const zone: IrrigationZone = {
 describe('ZoneConfigModal irrigation calibration', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+  });
+
+  it('renders the data export range calendar for an existing zone', async () => {
+    render(
+      React.createElement(ZoneConfigModal, {
+        isOpen: true,
+        zone,
+        onClose: vi.fn(),
+        onSaved: vi.fn(),
+      }),
+    );
+
+    expect(await screen.findByText('zone.export.title')).toBeInTheDocument();
+    expect(screen.getByTestId('range-calendar')).toBeInTheDocument();
   });
 
   it('saves flow rate and measurement method through the calibration endpoint', async () => {

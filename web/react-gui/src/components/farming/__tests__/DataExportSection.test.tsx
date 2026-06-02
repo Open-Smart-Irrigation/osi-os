@@ -1,6 +1,6 @@
 import '@testing-library/jest-dom/vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { DataExportSection } from '../DataExportSection';
 import { zoneExportAPI } from '../../../services/api';
@@ -21,6 +21,11 @@ vi.mock('react-i18next', () => ({
 }));
 
 describe('DataExportSection', () => {
+  beforeEach(() => {
+    vi.mocked(zoneExportAPI.download).mockReset();
+    vi.mocked(zoneExportAPI.download).mockResolvedValue(undefined);
+  });
+
   it('downloads the selected range and granularity', async () => {
     render(<DataExportSection zoneId={12} todayIso="2026-06-03" />);
 
@@ -47,5 +52,22 @@ describe('DataExportSection', () => {
 
     expect(screen.getByTestId('day-2026-06-01')).toBeEnabled();
     expect(screen.getByTestId('day-2026-06-04')).toBeDisabled();
+  });
+
+  it('shows the server suggestion when a range is too large', async () => {
+    vi.mocked(zoneExportAPI.download).mockRejectedValueOnce({
+      response: {
+        data: {
+          error: 'range too large for this granularity',
+          suggestion: 'choose a coarser granularity',
+        },
+      },
+    });
+    render(<DataExportSection zoneId={12} todayIso="2026-06-03" />);
+
+    fireEvent.doubleClick(screen.getByTestId('day-2026-06-01'));
+    fireEvent.click(screen.getByRole('button', { name: /download/i }));
+
+    expect(await screen.findByText('range too large for this granularity: choose a coarser granularity')).toBeInTheDocument();
   });
 });

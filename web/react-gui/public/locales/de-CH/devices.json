@@ -83,7 +83,22 @@
     "noDevices": "Noch keine Geräte in dieser Zone",
     "assignFirst": "Erstes Gerät zuweisen",
     "devicesInZone": "Geräte in dieser Zone:",
-    "data": "Daten"
+    "data": "Daten",
+    "export": {
+      "title": "Datenexport",
+      "selectRange": "Waehle einen Zeitraum, um Zonendaten herunterzuladen.",
+      "from": "Von",
+      "to": "Bis",
+      "granularity": "Aufloesung",
+      "raw": "Rohdaten",
+      "hourly": "Stuendlich",
+      "daily": "Taeglich",
+      "download": "CSV herunterladen",
+      "downloading": "Wird vorbereitet...",
+      "rangeSummary": "{{from}} bis {{to}}",
+      "error": "Export fehlgeschlagen",
+      "tooLarge": "Zeitraum zu gross. Waehle eine groebere Aufloesung."
+    }
   },
   "schedule": {
     "irrigationSchedule": "Bewässerungsplan",
