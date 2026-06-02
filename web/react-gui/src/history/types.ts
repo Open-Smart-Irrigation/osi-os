@@ -153,6 +153,7 @@ export interface HistoryCardSourceDevice {
   name: string | null;
   typeId: string | null;
   role: HistoryCardType | string | null;
+  sourceKey?: string | null;
 }
 
 export interface HistoryCardSummary<TCardType extends HistoryCardType = HistoryCardType> {
@@ -357,6 +358,7 @@ export interface HistoryCardDataRequest {
   range: HistoryRangeSelection;
   aggregation: HistoryAggregationLevel;
   overlays: readonly HistoryOverlayId[];
+  sourceKey?: string | null;
 }
 
 export interface HistoryWorkspaceRange {

@@ -38,6 +38,7 @@ function getHistoryCardDataKey(options: UseHistoryCardDataOptions): string | nul
     range.timezone,
     options.aggregation,
     [...options.overlays].sort().join(','),
+    options.sourceKey ?? '',
   ].join('|');
 }
 
@@ -63,6 +64,7 @@ export function useHistoryCardData(options: UseHistoryCardDataOptions) {
         range: options.range,
         aggregation: options.aggregation,
         overlays: options.overlays,
+        sourceKey: options.sourceKey,
       }),
     {
       revalidateOnFocus: true,

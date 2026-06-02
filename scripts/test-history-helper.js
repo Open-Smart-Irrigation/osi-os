@@ -167,6 +167,42 @@ test('derives the hub-scoped gateway card id', () => {
   assert.strictEqual(gateway.logicalSourceKey, 'hub');
 });
 
+test('derives display-safe source keys for merged soil and environment cards', () => {
+  const cards = helper.deriveCardsForZone(
+    { id: 7, zone_uuid: 'zone-uuid' },
+    [
+      {
+        deveui: 'A84041A75D5E7CFB',
+        type_id: 'DRAGINO_LSN50',
+        name: 'Chameleon 1',
+        irrigation_zone_id: 7,
+        chameleon_enabled: 1,
+        temp_enabled: 1,
+      },
+      {
+        deveui: 'A84041CE3F5ECF52',
+        type_id: 'DRAGINO_LSN50',
+        name: 'Chameleon 2',
+        irrigation_zone_id: 7,
+        chameleon_enabled: 1,
+        temp_enabled: 1,
+      },
+    ]
+  );
+
+  const soilCard = cards.find((card) => card.cardType === 'soil');
+  const environmentCard = cards.find((card) => card.cardType === 'environment');
+  assert(soilCard, 'soil card');
+  assert(environmentCard, 'environment card');
+  assert.deepStrictEqual(soilCard.sourceDevices.map((device) => device.name), ['Chameleon 1', 'Chameleon 2']);
+  assert.deepStrictEqual(environmentCard.sourceDevices.map((device) => device.name), ['Chameleon 1', 'Chameleon 2']);
+  for (const device of soilCard.sourceDevices.concat(environmentCard.sourceDevices)) {
+    assert.match(device.sourceKey, /^(soil|environment)-src-[0-9a-f]{12}$/);
+    assert(!device.sourceKey.includes('A84041A75D5E7CFB'));
+    assert(!device.sourceKey.includes('A84041CE3F5ECF52'));
+  }
+});
+
 test('classifies soil, environment, and dendro status with shared thresholds', () => {
   assert.strictEqual(helper.classifySoilStatus({ swtKpa: 9 }).status, 'wet_excess');
   assert.strictEqual(helper.classifySoilStatus({ swtKpa: 35 }).status, 'optimal');

@@ -4,10 +4,14 @@ import { AdvancedViewPanel } from './AdvancedViewPanel';
 import { CalendarView } from './CalendarView';
 import { InterpretationList } from './InterpretationList';
 import { DendroGrowthTimelineView } from './visualizations/DendroGrowthTimelineView';
+import { DendroLineChartView } from './visualizations/DendroLineChartView';
+import { DendroStressEventsView } from './visualizations/DendroStressEventsView';
 import { EnvironmentLineChartView } from './visualizations/EnvironmentLineChartView';
 import { GatewayStatusOverviewView } from './visualizations/GatewayStatusOverviewView';
 import type { HistoryCalendarDateSelection } from './visualizations/HistoryMonthCalendarView';
 import { IrrigationEventTimelineView } from './visualizations/IrrigationEventTimelineView';
+import { SoilIrrigationResponseView } from './visualizations/SoilIrrigationResponseView';
+import { SoilLineChartView } from './visualizations/SoilLineChartView';
 import { SoilProfileView } from './visualizations/SoilProfileView';
 import type {
   HistoryAdvancedResponse,
@@ -53,7 +57,11 @@ export const HistoryCardVisualization: React.FC<HistoryCardVisualizationProps> =
   const { t: translate } = useTranslation('history');
   const t = translate as HistoryTranslate;
   const shouldRenderSoilProfile = card.cardType === 'soil' && selectedView === 'soil-profile';
+  const shouldRenderSoilLineChart = card.cardType === 'soil' && selectedView === 'line-chart';
+  const shouldRenderSoilIrrigationResponse = card.cardType === 'soil' && selectedView === 'irrigation-response';
   const shouldRenderDendroGrowth = card.cardType === 'dendro' && selectedView === 'growth-timeline';
+  const shouldRenderDendroLineChart = card.cardType === 'dendro' && selectedView === 'line-chart';
+  const shouldRenderDendroStressEvents = card.cardType === 'dendro' && selectedView === 'stress-events';
   const shouldRenderEnvironmentLineChart = card.cardType === 'environment' && selectedView === 'line-chart';
   const shouldRenderGatewayStatus = card.cardType === 'gateway' && selectedView === 'status-overview';
   const shouldRenderIrrigationEventTimeline = card.cardType === 'irrigation' && selectedView === 'event-timeline';
@@ -82,8 +90,24 @@ export const HistoryCardVisualization: React.FC<HistoryCardVisualizationProps> =
     return <SoilProfileView profiles={Array.isArray(data.profiles) ? data.profiles : []} />;
   }
 
+  if (shouldRenderSoilLineChart) {
+    return <SoilLineChartView data={data} />;
+  }
+
+  if (shouldRenderSoilIrrigationResponse) {
+    return <SoilIrrigationResponseView data={data} />;
+  }
+
   if (shouldRenderDendroGrowth) {
     return <DendroGrowthTimelineView data={data} />;
+  }
+
+  if (shouldRenderDendroLineChart) {
+    return <DendroLineChartView data={data} />;
+  }
+
+  if (shouldRenderDendroStressEvents) {
+    return <DendroStressEventsView data={data} />;
   }
 
   if (shouldRenderEnvironmentLineChart) {

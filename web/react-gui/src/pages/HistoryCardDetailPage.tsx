@@ -6,6 +6,7 @@ import { HistoryCardVisualization } from '../components/history/HistoryCardVisua
 import type { HistoryCalendarDateSelection } from '../components/history/visualizations/HistoryMonthCalendarView';
 import { HistoryDetailHeader } from '../components/history/mobile/HistoryDetailHeader';
 import { HistoryRangeSegmentedControl } from '../components/history/mobile/HistoryRangeSegmentedControl';
+import { HistorySourceFilter } from '../components/history/mobile/HistorySourceFilter';
 import { HistoryVisualizationSurface } from '../components/history/mobile/HistoryVisualizationSurface';
 import { HistoryViewModeSegmentedControl } from '../components/history/mobile/HistoryViewModeSegmentedControl';
 import { useFeatureFlags } from '../history/useFeatureFlags';
@@ -250,6 +251,7 @@ export const HistoryCardDetailPage: React.FC = () => {
     [displayCard],
   );
   const [userSelectedView, setUserSelectedView] = useState<{ cardId: string; view: HistoryViewMode } | null>(null);
+  const [selectedSource, setSelectedSource] = useState<{ cardId: string; sourceKey: string | null } | null>(null);
   const defaultRange = displayCard?.defaultRange ?? '24h';
   const timeViewport = useTimeViewport(
     defaultRange,
@@ -265,6 +267,9 @@ export const HistoryCardDetailPage: React.FC = () => {
     }
     return defaultPrimaryViewForCard(displayCard);
   }, [displayCard, primaryViews, userSelectedView]);
+  const selectedSourceKey = displayCard && selectedSource?.cardId === displayCard.cardId
+    ? selectedSource.sourceKey
+    : null;
   const cardData = useHistoryCardData({
     scope: resolvedScope,
     cardId: displayCard?.cardId ?? null,
@@ -272,6 +277,7 @@ export const HistoryCardDetailPage: React.FC = () => {
     range: timeViewport.viewport.range,
     aggregation: timeViewport.viewport.aggregation,
     overlays: [],
+    sourceKey: selectedSourceKey,
     enabled: Boolean(displayCard?.availability.available && resolvedScope),
   });
   const [inspectorSelection, setInspectorSelection] = useState<InspectorSelection | null>(null);
@@ -302,6 +308,11 @@ export const HistoryCardDetailPage: React.FC = () => {
   const handleViewChange = useCallback((view: HistoryViewMode) => {
     if (!displayCard) return;
     setUserSelectedView({ cardId: displayCard.cardId, view });
+  }, [displayCard]);
+
+  const handleSourceChange = useCallback((sourceKey: string | null) => {
+    if (!displayCard) return;
+    setSelectedSource({ cardId: displayCard.cardId, sourceKey });
   }, [displayCard]);
 
   const isVisualizationEvent = useCallback((target: EventTarget | null): boolean => {
@@ -363,6 +374,12 @@ export const HistoryCardDetailPage: React.FC = () => {
     if (!featureFlags.historyEnabled || routeScope?.type !== 'zone' || !resolvedCard || !cardId) return;
     historyAPI.markZoneCardOpened(routeScope.zoneId, cardId).catch(() => undefined);
   }, [cardId, featureFlags.historyEnabled, resolvedCard, routeScope]);
+
+  useEffect(() => {
+    if (!displayCard || selectedSource?.cardId !== displayCard.cardId || selectedSource.sourceKey === null) return;
+    const validSource = (displayCard.sourceDevices ?? []).some((device) => device.sourceKey === selectedSource.sourceKey);
+    if (!validSource) setSelectedSource(null);
+  }, [displayCard, selectedSource]);
 
   if (!validRoute) {
     return (
@@ -432,6 +449,11 @@ export const HistoryCardDetailPage: React.FC = () => {
               onViewChange={handleViewChange}
             />
           )}
+          <HistorySourceFilter
+            card={displayCard}
+            selectedSourceKey={selectedSourceKey}
+            onSourceChange={handleSourceChange}
+          />
         </section>
         <div className="flex-1">
           {!displayCard.availability.available && (

@@ -60,7 +60,7 @@ describe('useHistoryCardData', () => {
 
   it('keys card data by zone scope, card, view, range, aggregation, and overlays', async () => {
     const { result, rerender } = renderHook(
-      ({ overlays }: { overlays: readonly HistoryOverlayId[] }) =>
+      ({ overlays, sourceKey }: { overlays: readonly HistoryOverlayId[]; sourceKey?: string | null }) =>
         useHistoryCardData({
           scope: { type: 'zone', zoneId: 1 },
           cardId: 'soil-zone-1',
@@ -68,6 +68,7 @@ describe('useHistoryCardData', () => {
           range,
           aggregation: 'hourly',
           overlays,
+          sourceKey,
           enabled: true,
         }),
       {
@@ -84,8 +85,48 @@ describe('useHistoryCardData', () => {
       overlays: ['data-gaps'],
     });
 
-    rerender({ overlays: ['data-gaps', 'rain-events'] });
+    rerender({ overlays: ['data-gaps', 'rain-events'], sourceKey: undefined });
     await waitFor(() => expect(historyAPI.getZoneCardData).toHaveBeenCalledTimes(2));
+  });
+
+  it('keys and requests card data by selected source key', async () => {
+    const { rerender } = renderHook(
+      ({ sourceKey }: { sourceKey?: string | null }) =>
+        useHistoryCardData({
+          scope: { type: 'zone', zoneId: 1 },
+          cardId: 'soil-zone-1',
+          view: 'soil-profile',
+          range,
+          aggregation: 'hourly',
+          overlays: [],
+          sourceKey,
+          enabled: true,
+        }),
+      {
+        wrapper,
+        initialProps: { sourceKey: 'soil-source-1' },
+      },
+    );
+
+    await waitFor(() => expect(historyAPI.getZoneCardData).toHaveBeenCalledTimes(1));
+    expect(historyAPI.getZoneCardData).toHaveBeenLastCalledWith(1, 'soil-zone-1', {
+      view: 'soil-profile',
+      range,
+      aggregation: 'hourly',
+      overlays: [],
+      sourceKey: 'soil-source-1',
+    });
+
+    rerender({ sourceKey: 'soil-source-2' });
+
+    await waitFor(() => expect(historyAPI.getZoneCardData).toHaveBeenCalledTimes(2));
+    expect(historyAPI.getZoneCardData).toHaveBeenLastCalledWith(1, 'soil-zone-1', {
+      view: 'soil-profile',
+      range,
+      aggregation: 'hourly',
+      overlays: [],
+      sourceKey: 'soil-source-2',
+    });
   });
 
   it('does not request card data outside an enabled scope', () => {
