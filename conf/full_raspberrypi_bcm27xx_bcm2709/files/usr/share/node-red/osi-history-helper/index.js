@@ -40,9 +40,20 @@ const ALLOWED_DEVICE_DATA_CHANNELS = new Set([
   'rain_mm_per_10min',
   'rain_mm_today',
   'rain_mm_delta',
+  'rain_count_cumulative',
+  'rain_tips_delta',
+  'flow_count_cumulative',
+  'flow_pulses_delta',
+  'flow_liters_delta',
+  'flow_liters_per_min',
+  'flow_liters_per_10min',
+  'flow_liters_today',
+  'counter_interval_seconds',
   'wind_speed_mps',
+  'wind_direction_deg',
   'wind_gust_mps',
   'barometric_pressure_hpa',
+  'rain_gauge_cumulative_mm',
   'uv_index',
   'bat_v',
   'bat_pct',
@@ -54,6 +65,29 @@ const ALLOWED_DEVICE_DATA_CHANNELS = new Set([
   'dendro_stem_change_um',
   'dendro_ratio',
 ]);
+
+const LEGACY_FIELD_ALIASES = {
+  swt_wm1: 'swt_1',
+  swt_wm2: 'swt_2',
+};
+
+const LEGACY_FIELD_EXPRESSIONS = {
+  swt_wm1: 'COALESCE(dd.swt_1, dd.swt_wm1)',
+  swt_wm2: 'COALESCE(dd.swt_2, dd.swt_wm2)',
+  swt_1: 'COALESCE(dd.swt_1, dd.swt_wm1)',
+  swt_2: 'COALESCE(dd.swt_2, dd.swt_wm2)',
+  swt_3: 'dd.swt_3',
+};
+
+const DENDRO_HISTORY_FIELDS = [
+  'dendro_position_raw_mm',
+  'dendro_position_mm',
+  'dendro_delta_mm',
+  'dendro_stem_change_um',
+  'adc_ch0v',
+  'adc_ch1v',
+  'dendro_ratio',
+];
 
 function toFiniteNumber(value) {
   if (value === null || value === undefined || value === '') return null;
@@ -1349,10 +1383,28 @@ function queryDeviceEuis(query = {}) {
   return Array.from(new Set(values.map(normalizeSourceKey).map(normalizeDeveui).filter(Boolean)));
 }
 
-async function resolveDeviceFieldRollupKey(db, deveui, field) {
+function canonicalHistoryField(field) {
+  const normalized = String(field || '').trim();
+  return LEGACY_FIELD_ALIASES[normalized] || normalized;
+}
+
+function legacyFieldExpression(field) {
+  const normalized = String(field || '').trim();
+  if (!ALLOWED_DEVICE_DATA_CHANNELS.has(normalized)) return null;
+  return LEGACY_FIELD_EXPRESSIONS[normalized] || `dd.${normalized}`;
+}
+
+function optionalUserFilter(options = {}, alias = 'd') {
+  const userId = toFiniteNumber(options.userId ?? options.user_id);
+  return userId === null ? { sql: '', params: [] } : { sql: ` AND ${alias}.user_id = ?`, params: [Math.round(userId)] };
+}
+
+async function resolveDeviceFieldRollupKey(db, deveui, field, options = {}) {
   const normalizedDeveui = normalizeDeveui(deveui);
   const normalizedField = String(field || '').trim();
   if (!normalizedDeveui || !normalizedField) return null;
+  const rollupField = canonicalHistoryField(normalizedField);
+  const ownerFilter = optionalUserFilter(options, 'd');
 
   const deviceRows = await dbAll(db, `
     SELECT
@@ -1366,8 +1418,9 @@ async function resolveDeviceFieldRollupKey(db, deveui, field) {
     WHERE d.deveui = ?
       AND d.deleted_at IS NULL
       AND z.deleted_at IS NULL
+      ${ownerFilter.sql}
     LIMIT 1
-  `, [normalizedDeveui]);
+  `, [normalizedDeveui].concat(ownerFilter.params));
   const device = deviceRows[0];
   if (!device || device.zone_id === null || device.zone_id === undefined) return null;
 
@@ -1377,11 +1430,12 @@ async function resolveDeviceFieldRollupKey(db, deveui, field) {
     zone_uuid: device.zone_uuid,
     timezone: device.zone_timezone || 'UTC',
   };
-  const devices = await dbAll(db, 'SELECT * FROM devices WHERE deleted_at IS NULL AND irrigation_zone_id = ? ORDER BY deveui ASC', [device.zone_id]);
+  const zoneDeviceFilter = optionalUserFilter(options, 'devices');
+  const devices = await dbAll(db, `SELECT * FROM devices WHERE deleted_at IS NULL AND irrigation_zone_id = ?${zoneDeviceFilter.sql} ORDER BY deveui ASC`, [device.zone_id].concat(zoneDeviceFilter.params));
   const cards = deriveCardsForZone(zone, devices);
   for (const card of cards) {
     const channel = channelsForCard(card).find((candidate) =>
-      candidate.id === normalizedField || candidate.field === normalizedField
+      candidate.id === rollupField || candidate.field === rollupField
     );
     if (!channel) continue;
     const sourceDevices = sourceDevicesForCard(card, devices);
@@ -1393,6 +1447,7 @@ async function resolveDeviceFieldRollupKey(db, deveui, field) {
       cardType: card.cardType,
       logicalSourceKey: card.logicalSourceKey,
       channelId: channel.id,
+      field: normalizedField,
       channel,
       channels: [channel],
       deveuis: sourceDeveuis,
@@ -1400,6 +1455,186 @@ async function resolveDeviceFieldRollupKey(db, deveui, field) {
     };
   }
   return null;
+}
+
+async function rawLegacySensorHistory(db, options = {}) {
+  const normalizedDeveui = normalizeDeveui(options.deveui || options.deviceEui || options.device_eui);
+  const field = String(options.field || '').trim();
+  const expression = legacyFieldExpression(field);
+  if (!normalizedDeveui) return [];
+  if (!expression) {
+    const error = new Error('Invalid field');
+    error.statusCode = 400;
+    throw error;
+  }
+  const start = options.start;
+  const end = options.end;
+  if (!start || !end) throw new Error('rawLegacySensorHistory requires start and end');
+  const ownerFilter = optionalUserFilter(options, 'dv');
+  const limit = Math.max(1, Math.min(30000, Math.round(toFiniteNumber(options.limit) || 30000)));
+  const rows = await dbAll(db, `
+    SELECT dd.recorded_at, ${expression} AS value
+    FROM device_data dd
+    JOIN devices dv ON dv.deveui = dd.deveui
+    WHERE dd.deveui = ?
+      ${ownerFilter.sql}
+      AND ${expression} IS NOT NULL
+      AND dd.recorded_at >= ?
+      AND dd.recorded_at < ?
+    ORDER BY dd.recorded_at ASC
+    LIMIT ?
+  `, [normalizedDeveui].concat(ownerFilter.params, [start, end, limit]));
+  return rows.map((row) => ({ t: row.recorded_at, value: toFiniteNumber(row.value) }));
+}
+
+function legacyAggregationForHours(hours) {
+  if (hours <= 24) return 'raw';
+  if (hours <= 48) return '15m';
+  if (hours <= 8 * 24) return 'hourly';
+  if (hours <= 120 * 24) return 'daily';
+  return 'weekly';
+}
+
+function flattenLegacyAggregate(result, channelId) {
+  const points = [];
+  if (Array.isArray(result && result.buckets)) {
+    for (const bucket of result.buckets) {
+      const stats = bucket.series && bucket.series[channelId];
+      if (!stats || Number(stats.sampleCount || 0) === 0) continue;
+      const value = toFiniteNumber(stats.latest) ?? toFiniteNumber(stats.mean);
+      if (value === null) continue;
+      points.push({ t: bucket.bucketStart, value });
+    }
+  } else if (result && result.series && result.series[channelId]) {
+    for (const point of result.series[channelId].points || []) {
+      const value = toFiniteNumber(point.value);
+      if (value !== null) points.push({ t: point.t || point.recorded_at, value });
+    }
+  }
+  return points.sort((left, right) => String(left.t).localeCompare(String(right.t)));
+}
+
+function dendroHistoryRow(row) {
+  return {
+    t: row.recorded_at || row.t,
+    position_raw_mm: toFiniteNumber(row.position_raw_mm ?? row.dendro_position_raw_mm),
+    position_mm: toFiniteNumber(row.position_mm ?? row.dendro_position_mm),
+    delta_mm: toFiniteNumber(row.delta_mm ?? row.dendro_delta_mm),
+    stem_change_um: toFiniteNumber(row.stem_change_um ?? row.dendro_stem_change_um),
+    adc_v: toFiniteNumber(row.adc_v ?? row.adc_ch0v),
+    adc_ch0v: toFiniteNumber(row.adc_ch0v ?? row.adc_v),
+    adc_ch1v: toFiniteNumber(row.adc_ch1v),
+    dendro_ratio: toFiniteNumber(row.dendro_ratio),
+    dendro_mode_used: row.dendro_mode_used || null,
+    saturated: toFiniteNumber(row.saturated ?? row.dendro_saturated),
+    saturation_side: row.saturation_side ?? row.dendro_saturation_side ?? null,
+    valid: toFiniteNumber(row.valid ?? row.dendro_valid) ?? 0,
+  };
+}
+
+async function rawLegacyDendroHistory(db, options = {}) {
+  const normalizedDeveui = normalizeDeveui(options.deveui || options.deviceEui || options.device_eui);
+  if (!normalizedDeveui) return [];
+  const start = options.start;
+  const end = options.end;
+  if (!start || !end) throw new Error('rawLegacyDendroHistory requires start and end');
+  const ownerFilter = optionalUserFilter(options, 'dv');
+  const rows = await dbAll(db, `
+    SELECT
+      dd.recorded_at,
+      dd.dendro_position_raw_mm,
+      dd.dendro_position_mm,
+      dd.dendro_delta_mm,
+      dd.dendro_stem_change_um,
+      dd.adc_ch0v,
+      dd.adc_ch1v,
+      dd.dendro_ratio,
+      dd.dendro_mode_used,
+      dd.dendro_saturated,
+      dd.dendro_saturation_side,
+      COALESCE(dd.dendro_valid, 1) AS dendro_valid
+    FROM device_data dd
+    JOIN devices dv ON dv.deveui = dd.deveui
+    WHERE dd.deveui = ?
+      ${ownerFilter.sql}
+      AND dd.recorded_at >= ?
+      AND dd.recorded_at < ?
+      AND (dd.dendro_position_mm IS NOT NULL OR dd.adc_ch0v IS NOT NULL OR dd.adc_ch1v IS NOT NULL OR dd.dendro_ratio IS NOT NULL)
+    ORDER BY dd.recorded_at ASC
+    LIMIT 30000
+  `, [normalizedDeveui].concat(ownerFilter.params, [start, end]));
+  return rows.map(dendroHistoryRow);
+}
+
+function mergeDendroAggregateField(byTime, field, points) {
+  const propertyMap = {
+    dendro_position_raw_mm: 'position_raw_mm',
+    dendro_position_mm: 'position_mm',
+    dendro_delta_mm: 'delta_mm',
+    dendro_stem_change_um: 'stem_change_um',
+    adc_ch0v: 'adc_ch0v',
+    adc_ch1v: 'adc_ch1v',
+    dendro_ratio: 'dendro_ratio',
+  };
+  const property = propertyMap[field];
+  if (!property) return;
+  for (const point of points || []) {
+    if (!point || !point.t) continue;
+    if (!byTime.has(point.t)) byTime.set(point.t, { t: point.t, valid: 1 });
+    const row = byTime.get(point.t);
+    row[property] = point.value;
+    if (field === 'adc_ch0v') row.adc_v = point.value;
+  }
+}
+
+async function aggregateLegacyDendroHistory(db, options = {}) {
+  const byTime = new Map();
+  for (const field of DENDRO_HISTORY_FIELDS) {
+    const points = await legacySensorHistory(db, { ...options, mode: null, field });
+    mergeDendroAggregateField(byTime, field, points);
+  }
+  return Array.from(byTime.values())
+    .map((row) => dendroHistoryRow(row))
+    .sort((left, right) => String(left.t).localeCompare(String(right.t)));
+}
+
+async function legacySensorHistory(db, options = {}) {
+  const hoursRaw = toFiniteNumber(options.hours);
+  const hours = hoursRaw !== null && hoursRaw > 0 ? hoursRaw : 24;
+  const endMs = options.nowMs ?? Date.now();
+  const end = new Date(endMs).toISOString();
+  const start = new Date(endMs - (hours * 60 * 60 * 1000)).toISOString();
+  const scopedOptions = { ...options, start, end };
+  if (String(options.mode || '').toLowerCase() === 'dendro') {
+    return hours <= 24
+      ? rawLegacyDendroHistory(db, scopedOptions)
+      : aggregateLegacyDendroHistory(db, scopedOptions);
+  }
+
+  const field = String(options.field || '').trim();
+  if (!field) {
+    const error = new Error('Missing field');
+    error.statusCode = 400;
+    throw error;
+  }
+  if (hours <= 24) return rawLegacySensorHistory(db, scopedOptions);
+
+  const key = await resolveDeviceFieldRollupKey(db, options.deveui || options.deviceEui || options.device_eui, field, options);
+  if (!key) return rawLegacySensorHistory(db, scopedOptions);
+  const aggregation = legacyAggregationForHours(hours);
+  const result = await aggregateDeviceData(db, {
+    zoneId: key.zoneId,
+    cardType: key.cardType,
+    logicalSourceKey: key.logicalSourceKey,
+    device_euis: key.deveuis,
+    start,
+    end,
+    aggregation,
+    channels: key.channels,
+    timezone: key.timezone,
+    nowMs: endMs,
+  });
+  return flattenLegacyAggregate(result, key.channelId);
 }
 
 async function aggregateDeviceData(db, query = {}) {
@@ -1911,6 +2146,7 @@ module.exports = {
   upsertRollups,
   runRollupJob,
   resolveDeviceFieldRollupKey,
+  legacySensorHistory,
   toCsv,
   writeZoneCsv,
   rotateZoneCsv,

@@ -1845,21 +1845,12 @@ expectLibById('s2120-zones-put-auth-fn', 'crypto', 'crypto', 'imports crypto for
 expectLibById('s2120-zones-put-auth-fn', 'osiDb', 'osi-db-helper', 'imports osi-db-helper as osiDb');
 expectLibById('put-soil-depth-fn', 'crypto', 'crypto', 'imports crypto for soil-depth auth verification');
 expectLibById('put-soil-depth-fn', 'osiDb', 'osi-db-helper', 'imports osi-db-helper for soil-depth persistence');
-expectIncludesById('sensor-history-fn', 'rain_mm_per_hour', 'allows rate-based rain history queries');
-expectIncludesById('sensor-history-fn', 'flow_liters_per_min', 'allows rate-based flow history queries');
-expectIncludesById('sensor-history-fn', 'rain_mm_per_10min', 'allows normalized rain history queries');
-expectIncludesById('sensor-history-fn', 'flow_liters_per_10min', 'allows normalized flow history queries');
-expectIncludesById('sensor-history-fn', 'counter_interval_seconds', 'allows interval-length history queries');
-expectIncludesById('sensor-history-fn', "swt_1: 'COALESCE(dd.swt_1, dd.swt_wm1)'", 'coalesces canonical SWT1 history across Chameleon and legacy Kiwi rows');
-expectIncludesById('sensor-history-fn', "swt_2: 'COALESCE(dd.swt_2, dd.swt_wm2)'", 'coalesces canonical SWT2 history across Chameleon and legacy Kiwi rows');
-expectIncludesById('sensor-history-fn', 'wind_speed_mps', 'allows S2120 wind-speed history queries');
-expectIncludesById('sensor-history-fn', 'wind_direction_deg', 'allows S2120 wind-direction history queries');
-expectIncludesById('sensor-history-fn', 'wind_gust_mps', 'allows S2120 wind-gust history queries');
-expectIncludesById('sensor-history-fn', 'uv_index', 'allows S2120 UV history queries');
-expectIncludesById('sensor-history-fn', 'barometric_pressure_hpa', 'allows S2120 pressure history queries');
-expectIncludesById('sensor-history-fn', 'rain_gauge_cumulative_mm', 'allows S2120 cumulative-rain history queries');
-expectIncludesById('sensor-history-fn', 'bat_pct', 'allows S2120 battery-percent history queries');
-expectIncludesById('sensor-history-fn', "'swt_3'", 'allows Chameleon SWT history queries');
+expectIncludesById('sensor-history-fn', 'osiHistory.legacySensorHistory', 'routes legacy sensor history through the history helper rollup path');
+expectIncludesById('sensor-history-fn', 'field: field', 'passes the requested legacy field to the helper');
+expectIncludesById('sensor-history-fn', 'userId: auth.userId', 'preserves owner scoping for legacy sensor history');
+expectLibById('sensor-history-fn', 'osiDb', 'osi-db-helper', 'uses osi-db-helper for legacy sensor history');
+expectLibById('sensor-history-fn', 'osiHistory', 'osi-history-helper', 'uses osi-history-helper for legacy sensor history');
+expectLibById('sensor-history-fn', 'crypto', 'crypto', 'imports crypto for legacy sensor history auth verification');
 expectIncludesById('fn_build_sensor_sql_params', 'COALESCE(dd.swt_1, dd.swt_wm1) AS swt_1', 'exports canonical SWT1 with legacy Kiwi fallback');
 expectIncludesById('fn_build_sensor_sql_params', 'COALESCE(dd.swt_2, dd.swt_wm2) AS swt_2', 'exports canonical SWT2 with legacy Kiwi fallback');
 expectLibById('put-chameleon-enabled-auth-fn', 'crypto', 'crypto', 'imports crypto for Chameleon enabled auth verification');
@@ -1892,12 +1883,12 @@ expectIncludesById('bf93cd55db0eb57f', "Device not found", 'chameleon-depth-save
 expectIncludesById('d0b2b1c1a937e16d', 'COALESCE(dd.swt_3, NULL)', 'scheduler can evaluate Chameleon SWT channel 3');
 expectIncludesById('d0b2b1c1a937e16d', "ds.type_id = 'DRAGINO_LSN50' AND COALESCE(ds.chameleon_enabled,0) = 1", 'scheduler includes Chameleon-enabled LSN50 devices');
 expectIncludesById('d0b2b1c1a937e16d', 'CASE WHEN dd.swt_3 IS NULL THEN 0 ELSE 1 END', 'scheduler SWT average counts Chameleon channel 3 only when present');
-expectIncludesById('dendro-history-fn', 'dd.adc_ch1v', 'returns dendrometer CH1 history points');
-expectIncludesById('dendro-history-fn', 'dd.dendro_ratio', 'returns dendrometer ratio history points');
-expectIncludesById('dendro-history-fn', 'dd.dendro_mode_used', 'returns dendrometer path history points');
-expectIncludesById('dendro-history-fn', 'dd.dendro_stem_change_um', 'returns baseline-relative stem change history points');
-expectExcludesById('dendro-history-fn', 'AND dd.dendro_position_mm IS NOT NULL', 'the calibrated-only dendrometer history filter');
-expectIncludesById('dendro-history-fn', '(dd.dendro_position_mm IS NOT NULL OR dd.adc_ch0v IS NOT NULL OR dd.adc_ch1v IS NOT NULL OR dd.dendro_ratio IS NOT NULL)', 'returns raw-only dendrometer history rows from device_data');
+expectIncludesById('dendro-history-fn', 'osiHistory.legacySensorHistory', 'routes legacy dendro history through the history helper rollup path');
+expectIncludesById('dendro-history-fn', "mode: 'dendro'", 'preserves dendrometer history response shape through helper dendro mode');
+expectIncludesById('dendro-history-fn', 'userId: auth.userId', 'preserves owner scoping for legacy dendro history');
+expectLibById('dendro-history-fn', 'osiDb', 'osi-db-helper', 'uses osi-db-helper for legacy dendro history');
+expectLibById('dendro-history-fn', 'osiHistory', 'osi-history-helper', 'uses osi-history-helper for legacy dendro history');
+expectLibById('dendro-history-fn', 'crypto', 'crypto', 'imports crypto for legacy dendro history auth verification');
 expectIncludesById('dendro-history-format', 'adc_ch1v: r.adc_ch1v', 'formats dendrometer CH1 history for the GUI');
 expectIncludesById('dendro-history-format', 'dendro_ratio: r.dendro_ratio', 'formats dendrometer ratio history for the GUI');
 expectIncludesById('dendro-history-format', 'dendro_mode_used: r.dendro_mode_used', 'formats dendrometer path history for the GUI');
@@ -2977,7 +2968,7 @@ if (!historyHelperPath) {
   fail(`missing history helper module at one of: ${historyHelperCandidates.join(', ')}`);
 } else {
   const historyHelper = require(historyHelperPath);
-  for (const exportName of ['normalizeDeveui', 'deriveCardId', 'deriveCardsForZone', 'deriveGatewayCard', 'resolveAggregation', 'classifySoilStatus', 'classifyEnvironmentStatus', 'classifyDendroStatus', 'classifyIrrigationStatus', 'classifyGatewayStatus', 'deriveExpectedCadenceSeconds', 'aggregateRows', 'aggregateDeviceData', 'buildAdvancedMetadataPlaceholder', 'buildLocalInterpretations']) {
+  for (const exportName of ['normalizeDeveui', 'deriveCardId', 'deriveCardsForZone', 'deriveGatewayCard', 'resolveAggregation', 'classifySoilStatus', 'classifyEnvironmentStatus', 'classifyDendroStatus', 'classifyIrrigationStatus', 'classifyGatewayStatus', 'deriveExpectedCadenceSeconds', 'resolveDeviceFieldRollupKey', 'legacySensorHistory', 'aggregateRows', 'aggregateDeviceData', 'buildAdvancedMetadataPlaceholder', 'buildLocalInterpretations']) {
     if (typeof historyHelper[exportName] !== 'function') {
       fail(`history helper missing export ${exportName}`);
     } else {

@@ -39,6 +39,7 @@ const expectedExports = [
   'upsertRollups',
   'runRollupJob',
   'resolveDeviceFieldRollupKey',
+  'legacySensorHistory',
   'toCsv',
   'writeZoneCsv',
   'rotateZoneCsv',
@@ -694,6 +695,100 @@ test('resolves a legacy device field to the matching thematic rollup key', async
 
     const unmapped = await helper.resolveDeviceFieldRollupKey(db, 'AA00000000000001', 'flow_liters_today');
     assert.strictEqual(unmapped, null);
+  } finally {
+    db.close();
+  }
+});
+
+test('legacySensorHistory returns raw 24h points and aggregated long-range points', async () => {
+  const db = createCliSqliteDb();
+  try {
+    db.runSql(`
+      INSERT INTO users(id,username,password_hash,created_at,updated_at) VALUES(1,'u','h','2026-05-20T00:00:00.000Z','2026-05-20T00:00:00.000Z');
+      INSERT INTO irrigation_zones(id,name,user_id,zone_uuid,timezone,created_at,updated_at) VALUES(7,'Zone B',1,'zu','UTC','2026-05-20T00:00:00.000Z','2026-05-20T00:00:00.000Z');
+      INSERT INTO devices(deveui,name,type_id,user_id,irrigation_zone_id,created_at,updated_at)
+        VALUES('AA00000000000001','Soil','KIWI_SENSOR',1,7,'2026-05-20T00:00:00.000Z','2026-05-20T00:00:00.000Z');
+      INSERT INTO device_data(deveui,recorded_at,swt_1,flow_liters_today) VALUES
+        ('AA00000000000001','2026-06-02T09:00:00.000Z',42,8.5);
+      INSERT INTO history_channel_rollups(
+        zone_id, card_type, logical_source_key, channel_id, bucket_level, bucket_start, bucket_end,
+        min_value, max_value, mean_value, median_value, latest_value, dominant_status,
+        coverage_pct, coverage_confidence, sample_count, unit
+      ) VALUES (
+        7, 'soil', 'root-zone', 'swt_1', 'daily', '2026-06-01T00:00:00.000Z', '2026-06-02T00:00:00.000Z',
+        20, 35, 28, 29, 33, 'optimal', 87.5, 'derived', 12, 'kPa'
+      );
+    `);
+
+    const raw = await helper.legacySensorHistory(db, {
+      deveui: 'AA00000000000001',
+      field: 'swt_1',
+      hours: 24,
+      nowMs: Date.parse('2026-06-02T12:00:00.000Z'),
+    });
+    assert.deepStrictEqual(raw, [{ t: '2026-06-02T09:00:00.000Z', value: 42 }]);
+
+    const aggregate = await helper.legacySensorHistory(db, {
+      deveui: 'AA00000000000001',
+      field: 'swt_1',
+      hours: 720,
+      nowMs: Date.parse('2026-06-02T12:00:00.000Z'),
+    });
+    assert.deepStrictEqual(aggregate.map((point) => point.value), [33, 42]);
+    assert.deepStrictEqual(aggregate.map((point) => point.t), [
+      '2026-06-01T00:00:00.000Z',
+      '2026-06-02T00:00:00.000Z',
+    ]);
+
+    const fallback = await helper.legacySensorHistory(db, {
+      deveui: 'AA00000000000001',
+      field: 'flow_liters_today',
+      hours: 720,
+      nowMs: Date.parse('2026-06-02T12:00:00.000Z'),
+    });
+    assert.deepStrictEqual(fallback, [{ t: '2026-06-02T09:00:00.000Z', value: 8.5 }]);
+  } finally {
+    db.close();
+  }
+});
+
+test('legacySensorHistory keeps dendro history response fields stable', async () => {
+  const db = createCliSqliteDb();
+  try {
+    db.runSql(`
+      INSERT INTO users(id,username,password_hash,created_at,updated_at) VALUES(1,'u','h','2026-05-20T00:00:00.000Z','2026-05-20T00:00:00.000Z');
+      INSERT INTO irrigation_zones(id,name,user_id,zone_uuid,timezone,created_at,updated_at) VALUES(7,'Zone B',1,'zu','UTC','2026-05-20T00:00:00.000Z','2026-05-20T00:00:00.000Z');
+      INSERT INTO devices(deveui,name,type_id,user_id,irrigation_zone_id,dendro_enabled,created_at,updated_at)
+        VALUES('AA00000000000001','Dendro','DRAGINO_LSN50',1,7,1,'2026-05-20T00:00:00.000Z','2026-05-20T00:00:00.000Z');
+      INSERT INTO device_data(
+        deveui,recorded_at,dendro_position_raw_mm,dendro_position_mm,dendro_delta_mm,
+        dendro_stem_change_um,adc_ch0v,adc_ch1v,dendro_ratio,dendro_mode_used,dendro_saturated,dendro_saturation_side,dendro_valid
+      ) VALUES (
+        'AA00000000000001','2026-06-02T09:00:00.000Z',11.2,10.9,0.4,120,0.77,0.42,1.83,'ratio',0,NULL,1
+      );
+    `);
+
+    const points = await helper.legacySensorHistory(db, {
+      deveui: 'AA00000000000001',
+      mode: 'dendro',
+      hours: 24,
+      nowMs: Date.parse('2026-06-02T12:00:00.000Z'),
+    });
+    assert.deepStrictEqual(points, [{
+      t: '2026-06-02T09:00:00.000Z',
+      position_raw_mm: 11.2,
+      position_mm: 10.9,
+      delta_mm: 0.4,
+      stem_change_um: 120,
+      adc_v: 0.77,
+      adc_ch0v: 0.77,
+      adc_ch1v: 0.42,
+      dendro_ratio: 1.83,
+      dendro_mode_used: 'ratio',
+      saturated: 0,
+      saturation_side: null,
+      valid: 1,
+    }]);
   } finally {
     db.close();
   }
