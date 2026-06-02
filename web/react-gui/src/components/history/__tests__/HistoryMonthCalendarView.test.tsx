@@ -118,6 +118,65 @@ describe('HistoryMonthCalendarView', () => {
 
     fireEvent.click(screen.getByRole('gridcell', { name: /May 12/i }));
 
+    expect(onInspectDate).toHaveBeenCalledWith(expect.objectContaining({
+      date: '2026-05-12',
+      day: expect.objectContaining({ state: 'normal_growth', coveragePct: 87 }),
+    }));
+  });
+
+  it('keeps calendar touch selection from bubbling into a parent gesture surface', () => {
+    const onInspectDate = vi.fn();
+    const onParentPointerDown = vi.fn();
+
+    render(
+      <div onPointerDown={onParentPointerDown}>
+        <HistoryMonthCalendarView cardType="soil" calendar={soilCalendarMay2026()} onInspectDate={onInspectDate} />
+      </div>,
+    );
+
+    fireEvent.pointerDown(screen.getByRole('gridcell', { name: /May 12/i }), {
+      pointerId: 1,
+      pointerType: 'touch',
+      clientX: 120,
+      clientY: 120,
+    });
+
     expect(onInspectDate).toHaveBeenCalledWith(expect.objectContaining({ date: '2026-05-12' }));
+    expect(onParentPointerDown).not.toHaveBeenCalled();
+  });
+
+  it('renders the latest month when a rolling range spans month boundaries', () => {
+    render(
+      <HistoryMonthCalendarView
+        cardType="soil"
+        calendar={{
+          timezone: 'UTC',
+          days: [
+            {
+              date: '2026-05-31',
+              state: 'optimal',
+              coveragePct: 100,
+              coverageConfidence: 'configured',
+              markers: [],
+            },
+            {
+              date: '2026-06-01',
+              state: 'dry_stress',
+              coveragePct: 91,
+              coverageConfidence: 'configured',
+              markers: [],
+            },
+          ],
+        }}
+        onInspectDate={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByRole('grid', { name: /June 2026/i })).toBeInTheDocument();
+    expect(document.querySelector('[data-history-calendar-date="2026-06-01"]')).toHaveAttribute(
+      'data-state',
+      'dry_stress',
+    );
+    expect(screen.queryByRole('gridcell', { name: /May 31/i })).not.toBeInTheDocument();
   });
 });

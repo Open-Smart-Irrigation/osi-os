@@ -66,8 +66,12 @@ const { translateForTest } = vi.hoisted(() => {
     'history.calendar.weekday.fri': 'Fri',
     'history.calendar.weekday.sat': 'Sat',
     'history.calendar.weekday.sun': 'Sun',
+    'history.calendar.state.no_data': 'No data',
+    'history.calendar.state.dry_stress': 'Dry stress',
     'history.calendar.state.optimal': 'Optimal',
+    'history.calendar.marker.soil.dry_stress': 'Dry stress marker',
     'history.calendar.summary.soil.optimal': 'Root zone was optimal.',
+    'history.calendar.summary.soil.dry_stress': 'Root zone was dry with {{sampleCount}} samples.',
     'history.soilProfile.emptyTitle': 'No soil profile data',
     'history.soilProfile.emptyBody': 'Depth-aware profile readings are not available for this range.',
     'history.gatewayStatus.title': 'Gateway status overview',
@@ -606,10 +610,20 @@ describe('History card detail route', () => {
         days: [
           {
             date: '2026-05-12',
-            state: 'optimal',
+            state: 'dry_stress',
             coveragePct: 96,
             coverageConfidence: 'configured',
-            markers: [],
+            summary: {
+              key: 'history.calendar.summary.soil.dry_stress',
+              params: { sampleCount: 8 },
+            },
+            markers: [
+              {
+                type: 'state',
+                severity: 'warning',
+                labelKey: 'history.calendar.marker.soil.dry_stress',
+              },
+            ],
           },
         ],
       },

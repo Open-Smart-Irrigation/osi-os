@@ -86,10 +86,13 @@ function parseDateParts(value: string): { year: number; month: number; day: numb
 }
 
 function monthKeyForCalendar(calendar: HistoryCalendar): { year: number; month: number } | null {
-  const firstDay = calendar.days.find((day) => parseDateParts(day.date));
-  if (!firstDay) return null;
-  const parts = parseDateParts(firstDay.date);
-  return parts ? { year: parts.year, month: parts.month } : null;
+  const latest = calendar.days.reduce<{ date: string; year: number; month: number } | null>((current, day) => {
+    const parts = parseDateParts(day.date);
+    if (!parts) return current;
+    if (!current || day.date > current.date) return { date: day.date, year: parts.year, month: parts.month };
+    return current;
+  }, null);
+  return latest ? { year: latest.year, month: latest.month } : null;
 }
 
 function formatMonthLabel(calendar: HistoryCalendar, month: { year: number; month: number }): string {
@@ -248,6 +251,12 @@ export const HistoryMonthCalendarView: React.FC<HistoryMonthCalendarViewProps> =
             timestamp: cell.date,
             day: cell.day,
           };
+          const selectCell = () => {
+            onInspectDate?.(inspectSelection);
+          };
+          const stopCalendarGesture = (event: React.SyntheticEvent) => {
+            event.stopPropagation();
+          };
 
           return (
             <button
@@ -258,17 +267,24 @@ export const HistoryMonthCalendarView: React.FC<HistoryMonthCalendarViewProps> =
               data-state={cell.day.state}
               data-card-type={cardType}
               data-history-calendar-date={cell.date}
-              onClick={() => {
-                onInspectDate?.(inspectSelection);
+              onClick={(event) => {
+                stopCalendarGesture(event);
+                selectCell();
               }}
-              onMouseDown={() => {
-                onInspectDate?.(inspectSelection);
+              onMouseDown={(event) => {
+                stopCalendarGesture(event);
+                selectCell();
               }}
+              onMouseUp={stopCalendarGesture}
               onPointerDown={(event) => {
+                stopCalendarGesture(event);
                 if (event.pointerType === 'touch' || event.pointerType === 'pen') {
-                  onInspectDate?.(inspectSelection);
+                  selectCell();
                 }
               }}
+              onPointerMove={stopCalendarGesture}
+              onPointerUp={stopCalendarGesture}
+              onPointerCancel={stopCalendarGesture}
               className={`flex aspect-square min-h-12 flex-col rounded-md border p-1.5 text-left transition focus:outline-none focus:ring-2 focus:ring-[var(--primary)] ${stateTone[cell.day.state] ?? stateTone.no_data}`}
             >
               <span className="text-xs font-bold leading-none sm:text-sm">{cell.dayOfMonth}</span>
