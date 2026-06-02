@@ -40,6 +40,7 @@ const expectedExports = [
   'runRollupJob',
   'toCsv',
   'writeZoneCsv',
+  'rotateZoneCsv',
   'aggregateRows',
   'aggregateDeviceData',
   'buildAdvancedMetadataPlaceholder',
@@ -548,7 +549,7 @@ test('runRollupJob populates hourly and daily rollups for a zone', async () => {
     }
     db.runSql(sql);
 
-    const summary = await helper.runRollupJob(db, { nowMs: Date.parse('2026-06-03T02:00:00.000Z') });
+    const summary = await helper.runRollupJob(db, { nowMs: Date.parse('2026-06-03T02:00:00.000Z'), exportDir: null });
     assert.ok(summary.bucketsUpserted > 0);
     const daily = await new Promise((resolve, reject) => {
       db.all("SELECT * FROM history_channel_rollups WHERE bucket_level='daily'", [], (error, rows) => error ? reject(error) : resolve(rows));
@@ -604,6 +605,63 @@ test('writeZoneCsv emits tidy long-format raw and daily files with depth', async
     const daily = fs.readFileSync(path.join(dir, 'zu', 'daily.csv'), 'utf8').trim().split('\n');
     assert.strictEqual(daily[0], 'bucket_start,bucket_end,timezone,zone,card,source,variable,depth_cm,unit,n,coverage_pct,mean,min,max,median,latest');
   } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('rotateZoneCsv removes old raw and hourly files but keeps daily.csv', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'osi-csv-rotate-'));
+  try {
+    const zone = { id: 7, name: 'Zone B', zone_uuid: 'zu', timezone: 'UTC' };
+    const rawDir = path.join(dir, 'zu', 'raw');
+    const hourlyDir = path.join(dir, 'zu', 'hourly');
+    fs.mkdirSync(rawDir, { recursive: true });
+    fs.mkdirSync(hourlyDir, { recursive: true });
+    fs.writeFileSync(path.join(rawDir, '2026-02-01.csv'), 'old\n');
+    fs.writeFileSync(path.join(rawDir, '2026-06-01.csv'), 'new\n');
+    fs.writeFileSync(path.join(hourlyDir, '2026-02-01.csv'), 'old\n');
+    fs.writeFileSync(path.join(hourlyDir, '2026-06-01.csv'), 'new\n');
+    fs.writeFileSync(path.join(dir, 'zu', 'daily.csv'), 'daily\n');
+
+    await helper.rotateZoneCsv({ exportDir: dir, zone, nowMs: Date.parse('2026-06-02T00:00:00.000Z'), retentionDays: 90 });
+    assert.strictEqual(fs.existsSync(path.join(rawDir, '2026-02-01.csv')), false);
+    assert.strictEqual(fs.existsSync(path.join(hourlyDir, '2026-02-01.csv')), false);
+    assert.strictEqual(fs.existsSync(path.join(rawDir, '2026-06-01.csv')), true);
+    assert.strictEqual(fs.existsSync(path.join(hourlyDir, '2026-06-01.csv')), true);
+    assert.strictEqual(fs.existsSync(path.join(dir, 'zu', 'daily.csv')), true);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('runRollupJob writes per-source CSV exports for the completed local day', async () => {
+  const db = createCliSqliteDb();
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'osi-csv-job-'));
+  try {
+    db.runSql(`
+      INSERT INTO users(id,username,password_hash,created_at,updated_at) VALUES(1,'u','h','2026-05-20T00:00:00.000Z','2026-05-20T00:00:00.000Z');
+      INSERT INTO irrigation_zones(id,name,user_id,zone_uuid,timezone,created_at,updated_at) VALUES(7,'Zone B',1,'zu','UTC','2026-05-20T00:00:00.000Z','2026-05-20T00:00:00.000Z');
+      INSERT INTO devices(deveui,name,type_id,user_id,irrigation_zone_id,chameleon_enabled,chameleon_swt1_depth_cm,created_at,updated_at)
+        VALUES('AA00000000000001','Chameleon 1','DRAGINO_LSN50',1,7,1,5,'2026-05-20T00:00:00.000Z','2026-05-20T00:00:00.000Z');
+      INSERT INTO device_data(deveui,recorded_at,swt_1) VALUES
+        ('AA00000000000001','2026-06-02T08:10:00.000Z',10),
+        ('AA00000000000001','2026-06-02T08:40:00.000Z',20);
+    `);
+
+    const summary = await helper.runRollupJob(db, {
+      nowMs: Date.parse('2026-06-03T02:00:00.000Z'),
+      exportDir: dir,
+      retentionDays: 90,
+    });
+    assert.strictEqual(summary.csvZonesWritten, 1);
+    const raw = fs.readFileSync(path.join(dir, 'zu', 'raw', '2026-06-02.csv'), 'utf8');
+    assert.match(raw, /2026-06-02T08:10:00.000Z,UTC,Zone B,soil,Chameleon 1,swt_1,5,10,kPa/);
+    const hourly = fs.readFileSync(path.join(dir, 'zu', 'hourly', '2026-06-02.csv'), 'utf8');
+    assert.match(hourly, /soil,Chameleon 1,swt_1,5,kPa,2,/);
+    const daily = fs.readFileSync(path.join(dir, 'zu', 'daily.csv'), 'utf8');
+    assert.match(daily, /soil,Chameleon 1,swt_1,5,kPa,2,/);
+  } finally {
+    db.close();
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
