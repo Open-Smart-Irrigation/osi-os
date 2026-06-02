@@ -50,7 +50,7 @@ export const HistoryVisualizationSurface: React.FC<HistoryVisualizationSurfacePr
       role="region"
       aria-label={t('history.detail.visualizationLabel')}
       aria-describedby={helpId}
-      className={`relative min-h-[18rem] rounded-lg border border-[var(--border)] bg-[var(--surface)] p-3 outline-none focus:ring-2 focus:ring-[var(--primary)] ${className}`}
+      className={`relative flex min-h-0 flex-1 flex-col overflow-hidden bg-[var(--bg)] outline-none focus:ring-2 focus:ring-[var(--primary)] ${className}`}
       onDoubleClick={gestureProps.onDoubleClick}
       style={gestureProps.style}
       tabIndex={0}

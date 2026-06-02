@@ -597,7 +597,7 @@ export const HistoryCardDetailPage: React.FC = () => {
   }
 
   return (
-    <div className="min-h-screen bg-[var(--bg)]">
+    <div className="flex min-h-screen flex-col bg-[var(--bg)]">
       <HistoryDetailHeader
         zoneName={resolvedZone?.name ?? null}
         card={displayCard}
@@ -613,7 +613,7 @@ export const HistoryCardDetailPage: React.FC = () => {
       />
       <main
         data-testid="history-detail-scroll-root"
-        className="flex min-h-[calc(100vh-4rem)] flex-col gap-4 px-4 py-4"
+        className="flex min-h-0 flex-1 flex-col"
         onPointerDown={handleScrollRootPointerDown}
         onPointerDownCapture={handleScrollRootCalendarPointer}
         onMouseDownCapture={handleScrollRootCalendarMouse}
@@ -624,41 +624,39 @@ export const HistoryCardDetailPage: React.FC = () => {
           cardSwipeStartRef.current = null;
         }}
       >
-        <div className="flex-1">
-          {!displayCard.availability.available && (
-            <div className="mb-4 rounded-lg border border-[var(--warning-bg)] bg-[var(--warning-bg)] px-4 py-3 text-sm text-[var(--warning-text)]">
-              {t('history.cardFrame.unavailable')}
-            </div>
-          )}
-          <HistoryVisualizationSurface
-            viewport={timeViewport.viewport}
-            defaultRange={displayCard.defaultRange}
-            onViewportChange={timeViewport.setViewport}
-            onInspect={handleInspectTimestamp}
-            onSwipe={handleVisualizationSwipe}
-            rangeLabel={formatRangeLabel(t, timeViewport.viewport.range.label)}
-            aggregationLabel={formatAggregationLabel(t, timeViewport.viewport.aggregation)}
+        {!displayCard.availability.available && (
+          <div className="mx-4 mt-4 rounded-lg border border-[var(--warning-bg)] bg-[var(--warning-bg)] px-4 py-3 text-sm text-[var(--warning-text)]">
+            {t('history.cardFrame.unavailable')}
+          </div>
+        )}
+        <HistoryVisualizationSurface
+          viewport={timeViewport.viewport}
+          defaultRange={displayCard.defaultRange}
+          onViewportChange={timeViewport.setViewport}
+          onInspect={handleInspectTimestamp}
+          onSwipe={handleVisualizationSwipe}
+          rangeLabel={formatRangeLabel(t, timeViewport.viewport.range.label)}
+          aggregationLabel={formatAggregationLabel(t, timeViewport.viewport.aggregation)}
+        >
+          <div
+            data-testid="view-mode-label"
+            className="pointer-events-none absolute left-2 top-1 z-10 text-[10px] font-semibold text-[var(--text-tertiary)]"
           >
-            <div
-              data-testid="view-mode-label"
-              className="pointer-events-none absolute left-2 top-1 z-10 text-[10px] font-semibold text-[var(--text-tertiary)]"
-            >
-              {formatViewLabel(t, selectedView)} · {formatRangeLabel(t, timeViewport.viewport.range.label)}
-            </div>
-            <HistoryCardVisualization
-              card={displayCard}
-              data={cardData.data}
-              selectedView={selectedView}
-              isLoading={cardData.isLoading}
-              error={cardData.error}
-              advancedData={advancedData.data}
-              advancedIsLoading={advancedData.isLoading}
-              advancedError={advancedData.error}
-              onInspectDate={handleInspectDate}
-              selectedCalendarDate={inspectorSelection?.kind === 'date' ? inspectorSelection.date : null}
-            />
-          </HistoryVisualizationSurface>
-        </div>
+            {formatViewLabel(t, selectedView)} · {formatRangeLabel(t, timeViewport.viewport.range.label)}
+          </div>
+          <HistoryCardVisualization
+            card={displayCard}
+            data={cardData.data}
+            selectedView={selectedView}
+            isLoading={cardData.isLoading}
+            error={cardData.error}
+            advancedData={advancedData.data}
+            advancedIsLoading={advancedData.isLoading}
+            advancedError={advancedData.error}
+            onInspectDate={handleInspectDate}
+            selectedCalendarDate={inspectorSelection?.kind === 'date' ? inspectorSelection.date : null}
+          />
+        </HistoryVisualizationSurface>
       </main>
       <HistoryInspectorSheet
         card={displayCard}

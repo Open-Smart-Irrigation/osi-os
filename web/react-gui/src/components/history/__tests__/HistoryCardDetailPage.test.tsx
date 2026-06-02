@@ -635,6 +635,14 @@ describe('History card detail route', () => {
     });
   });
 
+  it('renders the visualization in a single flex-fill container', async () => {
+    renderAppAtRoute('/history/zones/12/cards/soil-card%3Aroot-zone');
+
+    const surface = await screen.findByTestId('history-visualization-surface');
+    expect(surface.className).toMatch(/flex-1/);
+    expect(surface.parentElement?.className ?? '').not.toMatch(/border /);
+  });
+
   it('opens Advanced View from header settings and keeps raw identifiers out of normal mode', async () => {
     vi.mocked(historyAPI.getZoneCards).mockResolvedValue({
       zoneId: 12,
