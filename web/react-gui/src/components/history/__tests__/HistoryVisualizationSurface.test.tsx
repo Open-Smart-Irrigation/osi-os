@@ -424,6 +424,42 @@ describe('HistoryVisualizationSurface', () => {
     expect(onViewportChange).not.toHaveBeenCalled();
   });
 
+  it('keeps emitted visual windows ordered at the zoom clamp bounds', () => {
+    const onVisualWindow = vi.fn();
+    const frameQueue: FrameRequestCallback[] = [];
+    vi.spyOn(window, 'requestAnimationFrame').mockImplementation((callback: FrameRequestCallback) => {
+      frameQueue.push(callback);
+      return frameQueue.length;
+    });
+
+    render(
+      <HistoryVisualizationSurface
+        viewport={viewport24h()}
+        defaultRange="24h"
+        onViewportChange={vi.fn()}
+        onVisualWindow={onVisualWindow}
+        activeView="line-chart"
+        isZoomed={false}
+      >
+        <div>Soil profile</div>
+      </HistoryVisualizationSurface>,
+    );
+    const surface = screen.getByTestId('history-visualization-surface');
+    prepareSurfaceGeometry(surface);
+
+    pinchMove(surface, { startDist: 80, endDist: 20_000 });
+    act(() => {
+      frameQueue.shift()?.(0);
+    });
+
+    expect(onVisualWindow).toHaveBeenCalledTimes(1);
+    const emitted = onVisualWindow.mock.calls[0]?.[0] as { fromMs: number; toMs: number };
+    expect(Number.isFinite(emitted.fromMs)).toBe(true);
+    expect(Number.isFinite(emitted.toMs)).toBe(true);
+    expect(emitted.fromMs).toBeLessThan(emitted.toMs);
+    expect(emitted.toMs - emitted.fromMs).toBeGreaterThanOrEqual(60 * 60 * 1000);
+  });
+
   it('double tap resets through the gesture hook behavior', () => {
     const onViewportChange = vi.fn();
     render(
