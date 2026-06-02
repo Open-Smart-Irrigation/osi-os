@@ -119,7 +119,7 @@ function firstZoneCardDataRequest() {
   return historyAPIMock.getZoneCardData.mock.calls[0]?.[2];
 }
 
-function preparePointerTarget(element: HTMLElement) {
+function preparePointerTarget(element: HTMLElement, scrollTop = 0) {
   Object.defineProperty(element, 'getBoundingClientRect', {
     configurable: true,
     value: () => ({
@@ -134,17 +134,28 @@ function preparePointerTarget(element: HTMLElement) {
       toJSON: () => ({}),
     }),
   });
+  Object.defineProperty(element, 'scrollTop', {
+    configurable: true,
+    writable: true,
+    value: scrollTop,
+  });
   element.setPointerCapture = vi.fn();
   element.releasePointerCapture = vi.fn();
 }
 
 function pointerDrag(
   element: HTMLElement,
-  { fromX = 160, toX = fromX, fromY, toY }: { fromX?: number; toX?: number; fromY: number; toY: number },
+  {
+    fromX = 160,
+    toX = fromX,
+    fromY,
+    toY,
+    pointerType = 'touch',
+  }: { fromX?: number; toX?: number; fromY: number; toY: number; pointerType?: string },
 ) {
-  fireEvent.pointerDown(element, { pointerId: 1, clientX: fromX, clientY: fromY });
-  fireEvent.pointerMove(element, { pointerId: 1, clientX: toX, clientY: toY });
-  fireEvent.pointerUp(element, { pointerId: 1, clientX: toX, clientY: toY });
+  fireEvent.pointerDown(element, { pointerId: 1, pointerType, clientX: fromX, clientY: fromY });
+  fireEvent.pointerMove(element, { pointerId: 1, pointerType, clientX: toX, clientY: toY });
+  fireEvent.pointerUp(element, { pointerId: 1, pointerType, clientX: toX, clientY: toY });
 }
 
 function renderAppAtRoute(hashRoute: string) {
@@ -538,7 +549,7 @@ describe('History card detail route', () => {
     expect(screen.getByTestId('history-detail-scroll-root')).not.toHaveStyle({ touchAction: 'none' });
   });
 
-  it('refreshes selected card data on pull-down outside the visualization surface', async () => {
+  it('refreshes selected card data on touch pull-down outside the visualization surface at the scroll top', async () => {
     renderAppAtRoute('/history/zones/12/cards/soil-card%3Aroot-zone');
 
     await waitFor(() => expect(historyAPI.getZoneCardData).toHaveBeenCalledTimes(1));
@@ -553,6 +564,32 @@ describe('History card detail route', () => {
     });
   });
 
+  it('does not refresh detail data on mouse drag outside the visualization surface', async () => {
+    renderAppAtRoute('/history/zones/12/cards/soil-card%3Aroot-zone');
+
+    await waitFor(() => expect(historyAPI.getZoneCardData).toHaveBeenCalledTimes(1));
+    historyAPIMock.getZoneCardData.mockClear();
+
+    const scrollRoot = screen.getByTestId('history-detail-scroll-root');
+    preparePointerTarget(scrollRoot);
+    pointerDrag(scrollRoot, { fromY: 40, toY: 180, pointerType: 'mouse' });
+
+    expect(historyAPI.getZoneCardData).not.toHaveBeenCalled();
+  });
+
+  it('does not refresh detail data on touch pull-down when the scroll root is not at the top', async () => {
+    renderAppAtRoute('/history/zones/12/cards/soil-card%3Aroot-zone');
+
+    await waitFor(() => expect(historyAPI.getZoneCardData).toHaveBeenCalledTimes(1));
+    historyAPIMock.getZoneCardData.mockClear();
+
+    const scrollRoot = screen.getByTestId('history-detail-scroll-root');
+    preparePointerTarget(scrollRoot, 40);
+    pointerDrag(scrollRoot, { fromY: 40, toY: 180, pointerType: 'touch' });
+
+    expect(historyAPI.getZoneCardData).not.toHaveBeenCalled();
+  });
+
   it('does not refresh detail data on pull-down inside the visualization surface', async () => {
     renderAppAtRoute('/history/zones/12/cards/soil-card%3Aroot-zone');
 
@@ -561,7 +598,7 @@ describe('History card detail route', () => {
 
     const surface = screen.getByTestId('history-visualization-surface');
     preparePointerTarget(surface);
-    pointerDrag(surface, { fromY: 40, toY: 180 });
+    pointerDrag(surface, { fromY: 40, toY: 180, pointerType: 'touch' });
 
     expect(historyAPI.getZoneCardData).not.toHaveBeenCalled();
   });

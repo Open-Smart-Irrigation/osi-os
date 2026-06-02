@@ -82,6 +82,7 @@ describe('HistoryVisualizationSurface', () => {
 
     expect(surface).toHaveTextContent('Soil profile');
     expect(surface).toHaveStyle({ touchAction: 'none' });
+    expect(surface).toHaveAttribute('data-history-visualization-surface', 'true');
     expect(pageRoot).not.toHaveStyle({ touchAction: 'none' });
     expect(screen.getByText('24h')).toBeInTheDocument();
     expect(screen.getByText('Raw')).toBeInTheDocument();

@@ -19,8 +19,16 @@ import type { IrrigationZone } from '../types/farming';
 const zonesFetcher = () => irrigationZonesAPI.getAll();
 const DETAIL_PULL_REFRESH_THRESHOLD_PX = 96;
 const DETAIL_PULL_REFRESH_MAX_HORIZONTAL_PX = 48;
+const DETAIL_PULL_REFRESH_SCROLL_TOP_TOLERANCE_PX = 2;
+const HISTORY_VISUALIZATION_SURFACE_SELECTOR = '[data-history-visualization-surface="true"]';
 
 type HistoryTranslate = (key: string, options?: Record<string, unknown>) => string;
+type PullRefreshStart = {
+  pointerId: number;
+  x: number;
+  y: number;
+  refreshed: boolean;
+};
 
 function decodeRouteCardId(rawCardId: string | undefined): string | null {
   if (!rawCardId) return null;
@@ -88,6 +96,19 @@ function formatAggregationLabel(t: HistoryTranslate, aggregation: string): strin
   return t(`history.metadata.aggregation.${aggregation}`);
 }
 
+function isPullRefreshPointerType(pointerType: string): boolean {
+  return pointerType === 'touch' || pointerType === 'pen';
+}
+
+function getPullRefreshScrollTop(scrollRoot: HTMLElement): number {
+  return Math.max(
+    scrollRoot.scrollTop,
+    window.scrollY,
+    document.documentElement.scrollTop,
+    document.body.scrollTop,
+  );
+}
+
 function scopeForCard(card: HistoryCardSummary, routeScope: DetailRouteScope): HistoryCardDataScope | null {
   if (routeScope.type === 'gateway') {
     return { type: 'gateway', gatewayEui: routeScope.gatewayEui };
@@ -123,7 +144,7 @@ export const HistoryCardDetailPage: React.FC = () => {
   const { zoneId: rawZoneId, gatewayEui: rawGatewayEui, cardId: rawCardId } = useParams();
   const { t: translate } = useTranslation('history');
   const t = translate as HistoryTranslate;
-  const pullStartRef = useRef<{ x: number; y: number } | null>(null);
+  const pullStartRef = useRef<PullRefreshStart | null>(null);
   const featureFlags = useFeatureFlags();
   const zoneId = Number(rawZoneId);
   const gatewayEui = typeof rawGatewayEui === 'string' && rawGatewayEui.trim() ? rawGatewayEui : null;
@@ -228,27 +249,47 @@ export const HistoryCardDetailPage: React.FC = () => {
   }, [displayCard]);
 
   const isVisualizationEvent = useCallback((target: EventTarget | null): boolean => {
-    return target instanceof Element && Boolean(target.closest('[data-testid="history-visualization-surface"]'));
+    return target instanceof Element && Boolean(target.closest(HISTORY_VISUALIZATION_SURFACE_SELECTOR));
   }, []);
 
   const handleScrollRootPointerDown = useCallback((event: React.PointerEvent<HTMLElement>) => {
-    if (isVisualizationEvent(event.target)) {
+    const isAtScrollTop = getPullRefreshScrollTop(event.currentTarget) <= DETAIL_PULL_REFRESH_SCROLL_TOP_TOLERANCE_PX;
+    if (
+      !isPullRefreshPointerType(event.pointerType)
+      || !isAtScrollTop
+      || isVisualizationEvent(event.target)
+    ) {
       pullStartRef.current = null;
       return;
     }
-    pullStartRef.current = { x: event.clientX, y: event.clientY };
+    pullStartRef.current = {
+      pointerId: event.pointerId,
+      x: event.clientX,
+      y: event.clientY,
+      refreshed: false,
+    };
   }, [isVisualizationEvent]);
 
   const handleScrollRootPointerUp = useCallback((event: React.PointerEvent<HTMLElement>) => {
     const start = pullStartRef.current;
-    pullStartRef.current = null;
-    if (!start || isVisualizationEvent(event.target)) return;
+    if (
+      !start
+      || start.pointerId !== event.pointerId
+      || start.refreshed
+      || !isPullRefreshPointerType(event.pointerType)
+      || isVisualizationEvent(event.target)
+    ) {
+      pullStartRef.current = null;
+      return;
+    }
 
     const deltaY = event.clientY - start.y;
     const deltaX = Math.abs(event.clientX - start.x);
     if (deltaY >= DETAIL_PULL_REFRESH_THRESHOLD_PX && deltaX <= DETAIL_PULL_REFRESH_MAX_HORIZONTAL_PX) {
+      start.refreshed = true;
       void cardData.refresh();
     }
+    pullStartRef.current = null;
   }, [cardData, isVisualizationEvent]);
 
   useEffect(() => {

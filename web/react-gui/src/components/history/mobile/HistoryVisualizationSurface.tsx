@@ -45,6 +45,7 @@ export const HistoryVisualizationSurface: React.FC<HistoryVisualizationSurfacePr
   return (
     <div
       data-testid="history-visualization-surface"
+      data-history-visualization-surface="true"
       role="region"
       aria-label={t('history.detail.visualizationLabel')}
       aria-describedby={helpId}
