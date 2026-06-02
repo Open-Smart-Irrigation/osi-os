@@ -73,6 +73,7 @@ function createCliSqliteDb() {
   execFileSync('sqlite3', [dbPath], { input: schema });
 
   const db = {
+    path: dbPath,
     lastQuery: null,
     runSql(sql) {
       execFileSync('sqlite3', [dbPath], { input: sql });
@@ -200,6 +201,90 @@ test('derives display-safe source keys for merged soil and environment cards', (
     assert.match(device.sourceKey, /^(soil|environment)-src-[0-9a-f]{12}$/);
     assert(!device.sourceKey.includes('A84041A75D5E7CFB'));
     assert(!device.sourceKey.includes('A84041CE3F5ECF52'));
+  }
+});
+
+test('repair script backfills current season only for zones without an active/default season', () => {
+  const db = createCliSqliteDb();
+  try {
+    db.runSql(`
+      INSERT INTO users(id, username, password_hash, created_at, user_uuid)
+      VALUES (1, 'tester', 'x', '2026-01-01T00:00:00Z', 'user-uuid');
+      INSERT INTO irrigation_zones(id, name, user_id, zone_uuid, timezone)
+      VALUES
+        (11, 'No Season Zone', 1, 'zone-no-season', 'Europe/Zurich'),
+        (12, 'Existing Season Zone', 1, 'zone-existing-season', 'Europe/Zurich');
+      INSERT INTO zone_seasons(zone_id, name, starts_on, ends_on, is_active, is_default)
+      VALUES (12, 'Custom season', '2026-03-01', '2026-09-30', 1, 1);
+    `);
+
+    execFileSync(process.execPath, [path.join(repoRoot, 'scripts', 'repair-pi-schema.js'), db.path], {
+      encoding: 'utf8',
+    });
+
+    const output = execFileSync('sqlite3', [
+      '-json',
+      db.path,
+      `SELECT zone_id, name, starts_on, ends_on, is_active, is_default
+       FROM zone_seasons
+       ORDER BY zone_id, id`,
+    ], { encoding: 'utf8' }).trim();
+    const seasons = JSON.parse(output);
+    const currentYear = new Date().getUTCFullYear();
+    assert.deepStrictEqual(seasons, [
+      {
+        zone_id: 11,
+        name: 'Current season',
+        starts_on: `${currentYear}-01-01`,
+        ends_on: `${currentYear}-12-31`,
+        is_active: 1,
+        is_default: 1,
+      },
+      {
+        zone_id: 12,
+        name: 'Custom season',
+        starts_on: '2026-03-01',
+        ends_on: '2026-09-30',
+        is_active: 1,
+        is_default: 1,
+      },
+    ]);
+  } finally {
+    db.close();
+  }
+});
+
+test('repair script does not let inactive default seasons keep Season disabled', () => {
+  const db = createCliSqliteDb();
+  try {
+    db.runSql(`
+      INSERT INTO users(id, username, password_hash, created_at, user_uuid)
+      VALUES (1, 'tester', 'x', '2026-01-01T00:00:00Z', 'user-uuid');
+      INSERT INTO irrigation_zones(id, name, user_id, zone_uuid, timezone)
+      VALUES (21, 'Inactive Default Zone', 1, 'zone-inactive-default', 'Europe/Zurich');
+      INSERT INTO zone_seasons(zone_id, name, starts_on, ends_on, is_active, is_default)
+      VALUES (21, 'Old inactive season', '2025-03-01', '2025-09-30', 0, 1);
+    `);
+
+    execFileSync(process.execPath, [path.join(repoRoot, 'scripts', 'repair-pi-schema.js'), db.path], {
+      encoding: 'utf8',
+    });
+
+    const output = execFileSync('sqlite3', [
+      '-json',
+      db.path,
+      `SELECT name, is_active, is_default
+       FROM zone_seasons
+       WHERE zone_id = 21
+       ORDER BY id`,
+    ], { encoding: 'utf8' }).trim();
+    const seasons = JSON.parse(output);
+    assert.deepStrictEqual(seasons, [
+      { name: 'Old inactive season', is_active: 0, is_default: 1 },
+      { name: 'Current season', is_active: 1, is_default: 0 },
+    ]);
+  } finally {
+    db.close();
   }
 });
 

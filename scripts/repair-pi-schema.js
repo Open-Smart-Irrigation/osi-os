@@ -38,6 +38,12 @@ function query(sql) {
     return execFileSync('sqlite3', [dbPath, sql], { encoding: 'utf8' }).trim();
 }
 
+function queryNumber(sql) {
+    const value = query(sql);
+    const number = Number(value);
+    return Number.isFinite(number) ? number : 0;
+}
+
 function normalizeSql(sql) {
     return sql.replace(/\s+/g, ' ').trim().toLowerCase();
 }
@@ -339,6 +345,35 @@ const historySchema = [
 
 for (const stmt of historySchema) {
     if (exec(stmt)) applied++;
+}
+
+const zonesMissingDefaultSeasonBefore = queryNumber(`
+    SELECT COUNT(*)
+    FROM irrigation_zones z
+    WHERE z.deleted_at IS NULL
+      AND NOT EXISTS (
+        SELECT 1 FROM zone_seasons s
+        WHERE s.zone_id = z.id AND s.is_active = 1
+      )
+`);
+
+if (exec(`
+    INSERT INTO zone_seasons(zone_id, name, starts_on, ends_on, is_active, is_default, created_at, updated_at)
+    SELECT z.id, 'Current season', strftime('%Y-01-01', 'now'), strftime('%Y-12-31', 'now'),
+           1,
+           CASE WHEN EXISTS (
+             SELECT 1 FROM zone_seasons s
+             WHERE s.zone_id = z.id AND s.is_default = 1
+           ) THEN 0 ELSE 1 END,
+           datetime('now'), datetime('now')
+    FROM irrigation_zones z
+    WHERE z.deleted_at IS NULL
+      AND NOT EXISTS (
+        SELECT 1 FROM zone_seasons s
+        WHERE s.zone_id = z.id AND s.is_active = 1
+      )
+`)) {
+    applied += zonesMissingDefaultSeasonBefore;
 }
 
 // 4. Column-level repairs for DBs that got an earlier runtime-created ledger.

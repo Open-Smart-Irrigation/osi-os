@@ -139,6 +139,8 @@ function verifyHistoryRouterImplementation(flows, failures) {
   assertContains(failures, source, 'supportedRangesForCard(config, scopeContext)', 'date-range availability gating');
   assertContains(failures, source, 'getActiveZoneSeason', 'active season lookup');
   assertContains(failures, source, 'zone_seasons', 'zone_seasons-backed season range');
+  assertContains(failures, source, "INSERT INTO zone_seasons(zone_id, name, starts_on, ends_on, is_active, is_default", 'runtime default season backfill');
+  assertContains(failures, source, "'Current season'", 'display-safe generated season name');
   assertContains(failures, source, 'Season range is unavailable for this zone', 'season-unavailable 400 contract');
   assertContains(failures, source, 'Season range uses zone season boundaries; use custom for explicit from/to', 'season explicit-from/to rejection');
   assertContains(failures, source, 'shouldUseHistoryRollups(scopeContext, range.label, aggregationRequested)', 'long-range rollup gate');
