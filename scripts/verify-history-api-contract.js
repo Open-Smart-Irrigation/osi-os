@@ -173,6 +173,7 @@ function verifyHistoryRouterImplementation(flows, failures) {
   assertNotContains(failures, source, "useRollups: scopeContext.scope === 'zone'", 'unconditional zone rollup reads');
   assertNotContains(failures, source, 'supportedRanges: config.supportedRanges.slice()', 'ungated supportedRanges copy');
   assertNotContains(failures, source, 'latestRows[0]', 'single-row merged summary classification');
+  assertNotContains(failures, source, 'normalizeCardType(', 'undefined normalizeCardType runtime reference in router');
   assertNotContains(failures, source, 'sync_outbox', 'edge sync outbox mutation from local-only history preferences/workspaces');
   assertNotContains(failures, source, 'local-storage-sync', 'unsupported gateway local storage view');
   assertNotContains(failures, source, 'power-state', 'unsupported gateway power state view');
