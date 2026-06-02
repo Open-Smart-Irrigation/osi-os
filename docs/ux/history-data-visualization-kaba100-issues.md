@@ -302,11 +302,12 @@ Expected:
 
 Date: 2026-06-02
 Target: kaba100
-Branch commit: `d5cf05f4`
+Branch commit: `b7db0937`
 
 Passed:
 
 - `/gui/#/history` rendered compact mobile overview cards without inline visualization surfaces or timeline controls.
+- Pull down on the mobile overview refreshed the selected zone card list.
 - Zone B Soil showed `2 sources: Chameleon 1, Chameleon 2`.
 - Zone B Soil opened `#/history/zones/12/cards/5bf9d958-f886-4faf-8dcf-e84efe76163a%3Asoil%3Aroot-zone`.
 - `12h`, `24h`, `7D`, `30D`, and `Season` controls were visible and enabled.
@@ -316,6 +317,7 @@ Passed:
 - Double tap reset to the Soil card default `24h` range.
 - Long press opened the inspector sheet with timestamp and metadata.
 - Calendar rendered a monthly grid with weekday headers and colored day states.
+- Horizontal swipe on a multi-card detail route switched thematic cards within the selected zone.
 - Normal mobile UI did not render raw DevEUI-style identifiers.
 - Advanced View requested the advanced endpoint and exposed diagnostic identifiers only there.
 - Back navigation returned to `#/history`.
