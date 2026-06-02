@@ -3,7 +3,7 @@ import React from 'react';
 import { render, screen, within } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 
-import { buildNumericRows, DendroGrowthTimelineView } from '../visualizations/DendroGrowthTimelineView';
+import { buildNumericRows, DendroGrowthTimelineView, isGrowthSeries } from '../visualizations/DendroGrowthTimelineView';
 import type { HistoryCardDataResponse } from '../../../history/types';
 
 class ResizeObserverStub {
@@ -82,6 +82,14 @@ describe('DendroGrowthTimelineView', () => {
     ]);
 
     expect(rows[0].tMs).toBe(Date.parse('2026-06-01T00:00:00Z'));
+  });
+
+  it('keeps only the growth (µm / stem) series and drops ratio, position, and delta', () => {
+    expect(isGrowthSeries({ sourceId: 'dendro_stem_change_um', label: 'Stem Change', unit: 'um' })).toBe(true);
+    expect(isGrowthSeries({ sourceId: 'growth', label: 'Growth', unit: 'um' })).toBe(true);
+    expect(isGrowthSeries({ sourceId: 'dendro_ratio', label: 'Ratio', unit: '' })).toBe(false);
+    expect(isGrowthSeries({ sourceId: 'dendro_position_mm', label: 'Position', unit: 'mm' })).toBe(false);
+    expect(isGrowthSeries({ sourceId: 'dendro_delta_mm', label: 'Delta', unit: 'mm' })).toBe(false);
   });
 
   it('renders only the chart, without title, reading count, stat cards, or events list', () => {

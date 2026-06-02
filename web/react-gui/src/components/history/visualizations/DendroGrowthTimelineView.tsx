@@ -35,6 +35,7 @@ type RenderPoint = {
 };
 type RenderSeries = {
   key: string;
+  sourceId: string;
   label: string;
   unit: string;
   points: RenderPoint[];
@@ -141,11 +142,25 @@ function normalizeSeriesList(t: HistoryTranslate, seriesList: readonly unknown[]
 
     return {
       key: `series-${index}`,
+      sourceId,
       label: displaySeriesLabel(t, series, sourceId),
       unit: displayUnit(series),
       points,
     };
   });
+}
+
+/**
+ * The Growth Timeline shows cumulative stem growth only. Recovery ratio, raw position,
+ * and per-interval delta are different metrics on incompatible scales (they flatten the
+ * growth curve against a shared axis) and live in Stress Events / Advanced instead.
+ */
+export function isGrowthSeries(series: { sourceId?: string; label?: string; unit?: string }): boolean {
+  const unit = (series.unit ?? '').toLowerCase().trim();
+  if (unit === 'um' || unit === 'µm') return true;
+  const identity = `${series.sourceId ?? ''} ${series.label ?? ''}`.toLowerCase();
+  if (/ratio|position|delta|shrink/.test(identity)) return false;
+  return /stem|growth/.test(identity);
 }
 
 export function buildNumericRows(seriesList: RenderSeries[]): ChartRow[] {
@@ -210,7 +225,10 @@ const DendroGrowthTimelineViewComponent: React.FC<DendroGrowthTimelineViewProps>
   const t = translate as HistoryTranslate;
   const { visibleSeries, rows, events } = React.useMemo(() => {
     const rawSeries = Array.isArray(data?.series) ? data.series : [];
-    const nextVisibleSeries = normalizeSeriesList(t, rawSeries).filter(hasVisiblePoints);
+    const withPoints = normalizeSeriesList(t, rawSeries).filter(hasVisiblePoints);
+    const growthOnly = withPoints.filter(isGrowthSeries);
+    // Safety: never blank the chart if units/identities are unexpected.
+    const nextVisibleSeries = growthOnly.length > 0 ? growthOnly : withPoints;
     return {
       visibleSeries: nextVisibleSeries,
       rows: buildNumericRows(nextVisibleSeries),
