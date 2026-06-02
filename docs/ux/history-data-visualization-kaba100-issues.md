@@ -384,3 +384,54 @@ Screenshots and result artifacts:
 Manual verification still required:
 
 - Playwright verified single-finger taps and swipes only. A real-device check by Phil is still required for pinch open, pinch close, and one-finger drag-pan before Slice 6/7 are considered fully accepted.
+
+## Fullscreen polish verification
+
+Date: 2026-06-02
+Target: kaba100, `100.93.68.86`
+Branch: `feat/history-data-visualization`
+Deployed GUI commit: `b0892337`
+Served GUI asset: `assets/index-C4qT_Lxd.js`
+Verifier: `/home/phil/playwright-osi/tmp/history-fullscreen-polish-live.js`
+
+Deployment:
+
+- Built `web/react-gui` locally and deployed only the static GUI bundle to `/usr/lib/node-red/gui/` with the tar pipe.
+- Confirmed the served `index-*.js` hash matched the local build: `index-C4qT_Lxd.js`.
+- Created temporary local user `playwright` for browser verification, assigned Zones 3 and 12 plus their devices, then restored Zones 3 and 12 and all assigned devices to `user_id=2` and deleted the temporary user.
+- Did not overwrite `/data/db/farming.db`.
+
+Automated Playwright results:
+
+- Passed: dashboard has no visible `History` button and exposes two zone `Data` links.
+- Passed: Zone B `Data` routes to `#/history/zones/12`.
+- Passed: detail view has no visible `History` or `Back to history` text.
+- Passed: detail header has no inline source subtitle and normal mode hides raw 16-hex DevEUI identifiers.
+- Passed: multi-source header shows the compact `⊟` source control and `...` settings control.
+- Passed: no range or view-mode button rows were visible.
+- Passed: the view-mode label is inside the visualization surface.
+- Passed: portrait visualization surface occupied 91.8% of the viewport height.
+- Passed: Soil Profile rendered `Soil layer 1`, `Soil layer 2`, and `Soil layer 3` rows with colour tinting.
+- Passed: stripped soil line labels were absent (`Soil line chart`, `2 readings`, `Soil 1`, `Soil 2`, `Soil 3`).
+- Passed: calendar rendered a monthly coloured day overview with 30 day cells and no `mixed` wording.
+- Passed: Environment `Daily Min/Max` rendered a real chart.
+- Passed: stripped environment labels were absent (`Environment trend`, `155 readings`, `External temperature`).
+- Passed: Environment `Stress Events`, Irrigation `Irrigation Response`, and Gateway `Connectivity Timeline` were not selectable in normal UI.
+- Passed: landscape detail had no page scroll, a 41.4 px thin header, and a wide chart surface (`844 x 348.6`).
+- Passed: no passive touch event listener console errors were observed.
+
+Screenshots and result artifacts:
+
+- `/home/phil/playwright-osi/screenshots-fullscreen-polish-2026-06-02/01-portrait-dashboard.png`
+- `/home/phil/playwright-osi/screenshots-fullscreen-polish-2026-06-02/02-portrait-zone-b-soil-profile.png`
+- `/home/phil/playwright-osi/screenshots-fullscreen-polish-2026-06-02/03-portrait-zone-b-line-chart.png`
+- `/home/phil/playwright-osi/screenshots-fullscreen-polish-2026-06-02/04-portrait-zone-b-calendar.png`
+- `/home/phil/playwright-osi/screenshots-fullscreen-polish-2026-06-02/05-portrait-zone-a-daily-minmax.png`
+- `/home/phil/playwright-osi/screenshots-fullscreen-polish-2026-06-02/06-landscape-zone-b-soil-profile.png`
+- `/home/phil/playwright-osi/screenshots-fullscreen-polish-2026-06-02/results.json`
+- `/home/phil/playwright-osi/screenshots-fullscreen-polish-2026-06-02/console.log`
+
+Manual verification still required:
+
+- Playwright cannot honestly validate two-finger card swipe, live location-aware pinch, one-finger pan when zoomed, calendar inner-swipe month change, or native screen-edge back-swipe feel.
+- Phil should verify those gestures on a real phone before the gesture-heavy slices are considered fully accepted.
