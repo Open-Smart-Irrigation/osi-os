@@ -27,6 +27,7 @@ type ChartRow = {
   tMs: number;
   label: string;
 } & Record<string, number | string | null>;
+type ChartWindow = { fromMs: number; toMs: number };
 type RenderPoint = {
   t: string;
   value: number | null;
@@ -217,13 +218,25 @@ function eventTone(event: RenderEvent): string {
   return 'border-[var(--border)] bg-[var(--secondary-bg)] text-[var(--text)]';
 }
 
-export const DendroGrowthTimelineView: React.FC<DendroGrowthTimelineViewProps> = ({ data, window: chartWindow }) => {
+function visualWindowsEqual(left: ChartWindow | undefined, right: ChartWindow | undefined): boolean {
+  return left?.fromMs === right?.fromMs && left?.toMs === right?.toMs;
+}
+
+const DendroGrowthTimelineViewComponent: React.FC<DendroGrowthTimelineViewProps> = ({
+  data,
+  window: chartWindow,
+}) => {
   const { t: translate } = useTranslation('history');
   const t = translate as HistoryTranslate;
-  const rawSeries = Array.isArray(data?.series) ? data.series : [];
-  const visibleSeries = normalizeSeriesList(t, rawSeries).filter(hasVisiblePoints);
-  const rows = buildNumericRows(visibleSeries);
-  const events = normalizeEvents(t, data?.events);
+  const { visibleSeries, rows, events } = React.useMemo(() => {
+    const rawSeries = Array.isArray(data?.series) ? data.series : [];
+    const nextVisibleSeries = normalizeSeriesList(t, rawSeries).filter(hasVisiblePoints);
+    return {
+      visibleSeries: nextVisibleSeries,
+      rows: buildNumericRows(nextVisibleSeries),
+      events: normalizeEvents(t, data?.events),
+    };
+  }, [data, t]);
 
   if (visibleSeries.length === 0 || rows.length === 0) {
     return (
@@ -336,3 +349,8 @@ export const DendroGrowthTimelineView: React.FC<DendroGrowthTimelineViewProps> =
     </section>
   );
 };
+
+export const DendroGrowthTimelineView = React.memo(
+  DendroGrowthTimelineViewComponent,
+  (previous, next) => previous.data === next.data && visualWindowsEqual(previous.window, next.window),
+);

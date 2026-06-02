@@ -18,6 +18,7 @@ interface DendroLineChartViewProps {
 
 type HistoryTranslate = (key: string, options?: Record<string, unknown>) => string;
 type ChartRow = { timestamp: string; tMs: number } & Record<string, number | string | null>;
+type ChartWindow = { fromMs: number; toMs: number };
 type RenderSeries = {
   key: string;
   label: string;
@@ -128,12 +129,21 @@ export function buildNumericRows(seriesList: RenderSeries[]): ChartRow[] {
   return [...rows.values()].sort((left, right) => left.tMs - right.tMs);
 }
 
-export const DendroLineChartView: React.FC<DendroLineChartViewProps> = ({ data, window: chartWindow }) => {
+function visualWindowsEqual(left: ChartWindow | undefined, right: ChartWindow | undefined): boolean {
+  return left?.fromMs === right?.fromMs && left?.toMs === right?.toMs;
+}
+
+const DendroLineChartViewComponent: React.FC<DendroLineChartViewProps> = ({ data, window: chartWindow }) => {
   const { t: translate } = useTranslation('history');
   const t = translate as HistoryTranslate;
-  const rawSeries = Array.isArray(data?.series) ? data.series : [];
-  const visibleSeries = normalizeSeriesList(t, rawSeries).filter(hasVisiblePoints);
-  const rows = buildNumericRows(visibleSeries);
+  const { visibleSeries, rows } = React.useMemo(() => {
+    const rawSeries = Array.isArray(data?.series) ? data.series : [];
+    const nextVisibleSeries = normalizeSeriesList(t, rawSeries).filter(hasVisiblePoints);
+    return {
+      visibleSeries: nextVisibleSeries,
+      rows: buildNumericRows(nextVisibleSeries),
+    };
+  }, [data, t]);
 
   if (visibleSeries.length === 0 || rows.length === 0) {
     return (
@@ -192,3 +202,8 @@ export const DendroLineChartView: React.FC<DendroLineChartViewProps> = ({ data, 
     </section>
   );
 };
+
+export const DendroLineChartView = React.memo(
+  DendroLineChartViewComponent,
+  (previous, next) => previous.data === next.data && visualWindowsEqual(previous.window, next.window),
+);

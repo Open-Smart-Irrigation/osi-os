@@ -25,6 +25,7 @@ type ChartRow = {
   tMs: number;
   label: string;
 } & Record<string, number | string | null>;
+type ChartWindow = { fromMs: number; toMs: number };
 type RenderPoint = {
   t: string;
   value: number | null;
@@ -214,13 +215,29 @@ function groupSeriesByUnit(seriesList: RenderSeries[]): Array<{ unit: string; se
   }));
 }
 
-export const EnvironmentLineChartView: React.FC<EnvironmentLineChartViewProps> = ({ data, window: chartWindow }) => {
+function visualWindowsEqual(left: ChartWindow | undefined, right: ChartWindow | undefined): boolean {
+  return left?.fromMs === right?.fromMs && left?.toMs === right?.toMs;
+}
+
+const EnvironmentLineChartViewComponent: React.FC<EnvironmentLineChartViewProps> = ({
+  data,
+  window: chartWindow,
+}) => {
   const { t: translate } = useTranslation('history');
   const t = translate as HistoryTranslate;
-  const rawSeries = Array.isArray(data?.series) ? data.series : [];
-  const visibleSeries = normalizeSeriesList(t, rawSeries).filter(hasVisiblePoints);
-  const rows = buildNumericRows(visibleSeries);
-  const groups = groupSeriesByUnit(visibleSeries);
+  const { visibleSeries, rows, groups } = React.useMemo(() => {
+    const rawSeries = Array.isArray(data?.series) ? data.series : [];
+    const nextVisibleSeries = normalizeSeriesList(t, rawSeries).filter(hasVisiblePoints);
+    return {
+      visibleSeries: nextVisibleSeries,
+      rows: buildNumericRows(nextVisibleSeries),
+      groups: groupSeriesByUnit(nextVisibleSeries).map((group) => ({
+        ...group,
+        rows: buildNumericRows(group.series),
+        seriesByKey: new Map(group.series.map((series) => [series.key, series])),
+      })),
+    };
+  }, [data, t]);
 
   if (visibleSeries.length === 0 || rows.length === 0) {
     return (
@@ -247,8 +264,6 @@ export const EnvironmentLineChartView: React.FC<EnvironmentLineChartViewProps> =
     >
       <div className="space-y-4">
         {groups.map((group, groupIndex) => {
-          const groupRows = buildNumericRows(group.series);
-          const seriesByKey = new Map(group.series.map((series) => [series.key, series]));
           return (
             <div key={group.unit || 'unitless'} className="space-y-2">
               <h4 className="text-sm font-semibold text-[var(--text)]">
@@ -258,7 +273,7 @@ export const EnvironmentLineChartView: React.FC<EnvironmentLineChartViewProps> =
               </h4>
               <div className="h-56 min-w-0">
                 <ResponsiveContainer width="100%" height="100%">
-                  <LineChart data={groupRows} margin={{ top: 10, right: 12, bottom: 0, left: 4 }}>
+                  <LineChart data={group.rows} margin={{ top: 10, right: 12, bottom: 0, left: 4 }}>
                     <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
                     <XAxis
                       dataKey="tMs"
@@ -277,7 +292,7 @@ export const EnvironmentLineChartView: React.FC<EnvironmentLineChartViewProps> =
                       isAnimationActive={false}
                       labelFormatter={formatTimestampMs}
                       formatter={(value, _name, item) => {
-                        const series = seriesByKey.get(String(item.dataKey));
+                        const series = group.seriesByKey.get(String(item.dataKey));
                         return [
                           formatTooltipValue(value, series?.unit ?? ''),
                           series?.label ?? t('history.environmentLineChart.series.environment'),
@@ -307,3 +322,8 @@ export const EnvironmentLineChartView: React.FC<EnvironmentLineChartViewProps> =
     </section>
   );
 };
+
+export const EnvironmentLineChartView = React.memo(
+  EnvironmentLineChartViewComponent,
+  (previous, next) => previous.data === next.data && visualWindowsEqual(previous.window, next.window),
+);

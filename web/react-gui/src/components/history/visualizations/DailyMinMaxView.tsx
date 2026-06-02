@@ -23,6 +23,7 @@ type ChartRow = {
   tMs: number;
   label: string;
 } & Record<string, number | string | null>;
+type ChartWindow = { fromMs: number; toMs: number };
 type DailyPoint = {
   t: string;
   min: number | null;
@@ -164,11 +165,21 @@ export function buildNumericRows(series: DailySeries): ChartRow[] {
     .sort((left, right) => left.tMs - right.tMs);
 }
 
-export const DailyMinMaxView: React.FC<DailyMinMaxViewProps> = ({ data, window: chartWindow }) => {
+function visualWindowsEqual(left: ChartWindow | undefined, right: ChartWindow | undefined): boolean {
+  return left?.fromMs === right?.fromMs && left?.toMs === right?.toMs;
+}
+
+const DailyMinMaxViewComponent: React.FC<DailyMinMaxViewProps> = ({ data, window: chartWindow }) => {
   const { t: translate } = useTranslation('history');
   const t = translate as HistoryTranslate;
-  const rawSeries = Array.isArray(data?.series) ? data.series : [];
-  const visibleSeries = normalizeSeriesList(t, rawSeries).filter(hasDailyRange);
+  const visibleSeries = React.useMemo(() => {
+    const rawSeries = Array.isArray(data?.series) ? data.series : [];
+    return normalizeSeriesList(t, rawSeries).filter(hasDailyRange).map((series, seriesIndex) => ({
+      series,
+      rows: buildNumericRows(series),
+      color: SERIES_COLORS[seriesIndex % SERIES_COLORS.length],
+    }));
+  }, [data, t]);
 
   if (visibleSeries.length === 0) {
     return (
@@ -189,9 +200,7 @@ export const DailyMinMaxView: React.FC<DailyMinMaxViewProps> = ({ data, window: 
       aria-label={t('history.dailyMinMax.title')}
       className="mt-4 space-y-4 rounded-lg border border-[var(--border)] bg-[var(--bg)] p-4 sm:p-5"
     >
-      {visibleSeries.map((series, seriesIndex) => {
-        const rows = buildNumericRows(series);
-        const color = SERIES_COLORS[seriesIndex % SERIES_COLORS.length];
+      {visibleSeries.map(({ series, rows, color }) => {
         return (
           <div key={series.key}>
             <div className="h-56 min-w-0">
@@ -264,3 +273,8 @@ export const DailyMinMaxView: React.FC<DailyMinMaxViewProps> = ({ data, window: 
     </section>
   );
 };
+
+export const DailyMinMaxView = React.memo(
+  DailyMinMaxViewComponent,
+  (previous, next) => previous.data === next.data && visualWindowsEqual(previous.window, next.window),
+);
