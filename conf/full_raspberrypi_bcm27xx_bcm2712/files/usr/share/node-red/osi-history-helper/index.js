@@ -819,6 +819,56 @@ function normalizeQueryChannels(channels) {
   return normalized;
 }
 
+async function computeRollupBuckets(db, scope = {}, level, windowMs, nowMs) {
+  const aggregation = String(level || '').trim();
+  if (!['hourly', 'daily', 'weekly'].includes(aggregation)) throw new Error(`unsupported rollup level: ${level}`);
+  const channels = normalizeQueryChannels(scope.channels);
+  const deveuis = Array.from(new Set((Array.isArray(scope.deveuis) ? scope.deveuis : [])
+    .map(normalizeDeveui)
+    .filter(Boolean)));
+  if (deveuis.length === 0 || channels.length === 0) return [];
+
+  const todayStartMs = startOfLocalDayMs(nowMs ?? Date.now(), scope.timezone || 'UTC');
+  const startMs = todayStartMs - Math.max(0, Number(windowMs || 0));
+  if (!Number.isFinite(startMs) || startMs >= todayStartMs) return [];
+  const start = new Date(startMs).toISOString();
+  const end = new Date(todayStartMs).toISOString();
+  const placeholders = deveuis.map(() => '?').join(',');
+  const selectedFields = Array.from(new Set(channels.map((channel) => channel.field)));
+  const sql = `SELECT deveui, recorded_at, ${selectedFields.join(', ')} FROM device_data WHERE deveui IN (${placeholders}) AND recorded_at >= ? AND recorded_at < ? ORDER BY recorded_at ASC`;
+  const rows = await dbAll(db, sql, deveuis.concat([start, end]));
+  const result = aggregateRows(rows, { aggregation, channels, start, end, expectedCadences: scope.expectedCadences || scope.expected_cadences });
+  const out = [];
+  for (const bucket of result.buckets || []) {
+    for (const channel of channels) {
+      const stats = bucket.series && bucket.series[channel.id];
+      if (!stats || Number(stats.sampleCount || 0) === 0) continue;
+      out.push({
+        zone_id: scope.zoneId ?? scope.zone_id,
+        card_type: normalizeCardType(scope.cardType || scope.card_type),
+        logical_source_key: scope.logicalSourceKey || scope.logical_source_key,
+        channel_id: channel.id,
+        bucket_level: aggregation,
+        bucket_start: bucket.bucketStart,
+        bucket_end: bucket.bucketEnd,
+        min_value: stats.min,
+        max_value: stats.max,
+        mean_value: stats.mean,
+        median_value: stats.median,
+        latest_value: stats.latest,
+        dominant_status: stats.dominantStatus || null,
+        coverage_pct: bucket.coveragePct ?? null,
+        coverage_confidence: bucket.coverageConfidence || 'unknown',
+        sample_count: Number(stats.sampleCount || 0),
+        event_count: Number(stats.eventCount || 0),
+        threshold_crossing_count: Number(stats.thresholdCrossingCount || 0),
+        unit: channel.unit || stats.unit || null,
+      });
+    }
+  }
+  return out;
+}
+
 function rollupRowsToResult(rows, query, channels) {
   const channelMap = new Map(channels.map((channel) => [channel.id, channel]));
   const byBucket = new Map();
@@ -1402,6 +1452,7 @@ module.exports = {
   classifyGatewayStatus,
   deriveExpectedCadenceSeconds,
   startOfLocalDayMs,
+  computeRollupBuckets,
   aggregateRows,
   aggregateDeviceData,
   buildAdvancedMetadataPlaceholder,

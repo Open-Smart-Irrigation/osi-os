@@ -35,6 +35,7 @@ const expectedExports = [
   'classifyGatewayStatus',
   'deriveExpectedCadenceSeconds',
   'startOfLocalDayMs',
+  'computeRollupBuckets',
   'aggregateRows',
   'aggregateDeviceData',
   'buildAdvancedMetadataPlaceholder',
@@ -445,6 +446,37 @@ test('aggregates rows into raw, 15m, hourly, daily, and weekly buckets', () => {
   const omitted = helper.aggregateRows(rows, { ...base, range: '7d' });
   assert.strictEqual(omitted.aggregation, 'hourly');
   assert.strictEqual(omitted.aggregationRequested, 'auto');
+});
+
+test('computeRollupBuckets returns completed buckets for a scope/level', async () => {
+  const db = createCliSqliteDb();
+  try {
+    db.runSql(`
+      INSERT INTO users(id,username,password_hash,created_at,updated_at) VALUES(1,'u','h','2026-05-31T00:00:00.000Z','2026-05-31T00:00:00.000Z');
+      INSERT INTO irrigation_zones(id,name,user_id,zone_uuid,timezone,created_at,updated_at) VALUES(7,'Z',1,'zu','UTC','2026-05-31T00:00:00.000Z','2026-05-31T00:00:00.000Z');
+      INSERT INTO devices(deveui,name,type_id,user_id,irrigation_zone_id,created_at,updated_at) VALUES('AA00000000000001','Soil','KIWI_SENSOR',1,7,'2026-05-31T00:00:00.000Z','2026-05-31T00:00:00.000Z');
+      INSERT INTO device_data(deveui,recorded_at,swt_1) VALUES
+        ('AA00000000000001','2026-06-01T08:10:00.000Z',10),
+        ('AA00000000000001','2026-06-01T08:40:00.000Z',20);
+    `);
+    const scope = {
+      zoneId: 7,
+      cardType: 'soil',
+      logicalSourceKey: 'root-zone',
+      channels: [{ id: 'swt_1', field: 'swt_1', unit: 'kPa' }],
+      deveuis: ['AA00000000000001'],
+      timezone: 'UTC',
+    };
+    const nowMs = Date.parse('2026-06-02T00:00:00.000Z');
+    const rows = await helper.computeRollupBuckets(db, scope, 'hourly', 24 * 3600 * 1000, nowMs);
+    const hour = rows.find((row) => row.channel_id === 'swt_1' && row.bucket_start === '2026-06-01T08:00:00.000Z');
+    assert.ok(hour, 'has the 08:00 bucket');
+    assert.strictEqual(hour.mean_value, 15);
+    assert.strictEqual(hour.bucket_level, 'hourly');
+    assert.ok(rows.every((row) => row.bucket_end <= new Date(helper.startOfLocalDayMs(nowMs, 'UTC')).toISOString()));
+  } finally {
+    db.close();
+  }
 });
 
 test('computes coverage from source-aware cadence instead of one mixed median', () => {
