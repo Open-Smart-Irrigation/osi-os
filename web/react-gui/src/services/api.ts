@@ -1136,6 +1136,31 @@ export const historyAPI = {
   },
 };
 
+export const zoneExportAPI = {
+  download: async (
+    zoneId: number,
+    opts: { from: string; to: string; granularity: 'raw' | 'hourly' | 'daily' },
+  ): Promise<void> => {
+    const response = await api.get(`/api/history/zones/${zoneId}/export.csv`, {
+      params: {
+        from: opts.from,
+        to: opts.to,
+        granularity: opts.granularity,
+      },
+      responseType: 'blob',
+    });
+    const blob = new Blob([response.data], { type: 'text/csv;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = `zone-${zoneId}-${opts.from}_${opts.to}-${opts.granularity}.csv`;
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    URL.revokeObjectURL(url);
+  },
+};
+
 export type IrrigationActuationStatus =
   | 'PENDING_OPEN'
   | 'RUNNING'
