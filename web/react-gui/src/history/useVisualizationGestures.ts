@@ -359,7 +359,8 @@ export function useVisualizationGestures({
           && state.startPoint.x - state.surfaceLeft >= EDGE_GUTTER_PX
           && state.surfaceLeft + state.surfaceWidth - state.startPoint.x >= EDGE_GUTTER_PX
         ) {
-          onMonthSwipeRef.current?.(dx < 0 ? -1 : 1);
+          // Reversed: swipe left advances to the next month (iOS-calendar convention).
+          onMonthSwipeRef.current?.(dx < 0 ? 1 : -1);
         }
       }
 

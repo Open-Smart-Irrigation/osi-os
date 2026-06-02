@@ -806,6 +806,27 @@ describe('History card detail route', () => {
 
     await screen.findByRole('heading', { name: 'Soil - Root Zone' });
     expect(screen.queryByText('A84041A75D5E7CFB')).not.toBeInTheDocument();
+    // The raw DevEUI must not leak into the single-device overlay either.
+    expect(screen.queryByTestId('single-device-label')).not.toBeInTheDocument();
+  });
+
+  it('shows the device name as a small overlay for single-device cards', async () => {
+    vi.mocked(historyAPI.getZoneCards).mockResolvedValue({
+      zoneId: 12,
+      generatedAt: '2026-05-31T10:00:00Z',
+      cards: [
+        zoneCard({
+          sourceDeviceCount: 1,
+          sourceLabels: ['Dendro 3'],
+          sourceDevices: [{ key: 'd1', name: 'Dendro 3', typeId: 'DRAGINO_LSN50', role: 'dendro' }],
+        }),
+      ],
+    });
+
+    renderAppAtRoute('/history/zones/12/cards/soil-card%3Aroot-zone');
+
+    await screen.findByRole('heading', { name: 'Soil - Root Zone' });
+    expect(screen.getByTestId('single-device-label')).toHaveTextContent('Dendro 3');
   });
 
   it('uses the card default range for the first detail data fetch when it is not 24h', async () => {
@@ -961,8 +982,8 @@ describe('History card detail route', () => {
         timezone: 'Europe/Zurich',
         days: [
           {
-            date: request.range.label === 'custom' && request.range.from?.startsWith('2026-05')
-              ? '2026-05-12'
+            date: request.range.label === 'custom' && request.range.from?.startsWith('2026-07')
+              ? '2026-07-12'
               : '2026-06-12',
             state: 'optimal',
             coveragePct: 96,
@@ -993,13 +1014,13 @@ describe('History card detail route', () => {
           view: 'calendar',
           range: expect.objectContaining({
             label: 'custom',
-            from: '2026-05-01T00:00:00.000Z',
-            to: '2026-05-31T23:59:59.999Z',
+            from: '2026-07-01T00:00:00.000Z',
+            to: '2026-07-31T23:59:59.999Z',
           }),
         }),
       );
     });
-    expect(await screen.findByTestId('calendar-cell-2026-05-12')).toBeInTheDocument();
+    expect(await screen.findByTestId('calendar-cell-2026-07-12')).toBeInTheDocument();
   });
 
   it('opens an inspector sheet on long press and returns focus to the visualization when closed', async () => {

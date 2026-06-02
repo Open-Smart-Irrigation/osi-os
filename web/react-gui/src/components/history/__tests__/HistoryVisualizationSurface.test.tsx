@@ -244,7 +244,8 @@ describe('HistoryVisualizationSurface', () => {
 
     oneFingerSwipe(surface, { fromX: 250, toX: 120, fromY: 120, toY: 124 });
 
-    expect(onMonthSwipe).toHaveBeenCalledWith(-1);
+    // Swipe left advances to the next month.
+    expect(onMonthSwipe).toHaveBeenCalledWith(1);
   });
 
   it('pans the viewport on one-finger horizontal drag when zoomed in', () => {

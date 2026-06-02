@@ -351,6 +351,23 @@ export const HistoryCardDetailPage: React.FC = () => {
       : timeViewport.viewport.range),
     [calendarMonthOffset, selectedView, timeViewport.viewport.range],
   );
+  const singleDeviceName = useMemo(() => {
+    if (!displayCard) return null;
+    const count = displayCard.sourceDeviceCount ?? displayCard.sourceDevices?.length ?? 0;
+    if (count !== 1) return null;
+    // Prefer display-safe sources; never surface a raw DevEUI-like identifier.
+    const candidates = [
+      displayCard.sourceDevices?.[0]?.name,
+      displayCard.sourceLabels?.[0],
+      displayCard.sourceLabel,
+    ];
+    for (const candidate of candidates) {
+      if (typeof candidate !== 'string') continue;
+      const value = candidate.trim();
+      if (value && !/^[A-Fa-f0-9]{16}$/.test(value)) return value;
+    }
+    return null;
+  }, [displayCard]);
   const cardData = useHistoryCardData({
     scope: resolvedScope,
     cardId: displayCard?.cardId ?? null,
@@ -655,6 +672,14 @@ export const HistoryCardDetailPage: React.FC = () => {
           >
             {formatViewLabel(t, selectedView)} · {formatRangeLabel(t, timeViewport.viewport.range.label)}
           </div>
+          {singleDeviceName && (
+            <div
+              data-testid="single-device-label"
+              className="pointer-events-none absolute right-2 top-1 z-10 text-[10px] font-medium text-[var(--text)] opacity-40"
+            >
+              {singleDeviceName}
+            </div>
+          )}
           <HistoryCardVisualization
             card={displayCard}
             data={cardData.data}
