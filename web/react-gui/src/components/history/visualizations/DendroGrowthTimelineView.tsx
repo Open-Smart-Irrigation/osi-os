@@ -15,6 +15,7 @@ import type {
   HistoryEvent,
   HistorySeriesPoint,
 } from '../../../history/types';
+import { HISTORY_CHART_MARGIN, consistentUnit, historyTimeXAxis, historyValueYAxis } from './chartAxis';
 
 interface DendroGrowthTimelineViewProps {
   data: HistoryCardDataResponse | undefined;
@@ -242,18 +243,14 @@ const DendroGrowthTimelineViewComponent: React.FC<DendroGrowthTimelineViewProps>
     >
       <div className="relative min-h-0 min-w-0 flex-1"><div className="absolute inset-0">
         <ResponsiveContainer width="100%" height="100%">
-          <LineChart data={rows} margin={{ top: 10, right: 12, bottom: 0, left: 0 }}>
+          <LineChart data={rows} margin={HISTORY_CHART_MARGIN}>
             <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
             <XAxis
-              dataKey="tMs"
-              type="number"
-              scale="time"
+              {...historyTimeXAxis}
               domain={chartWindow ? [chartWindow.fromMs, chartWindow.toMs] : ['dataMin', 'dataMax']}
-              allowDataOverflow
               tickFormatter={formatTimestampMs}
-              minTickGap={24}
             />
-            <YAxis width={44} />
+            <YAxis {...historyValueYAxis(consistentUnit(visibleSeries), 48)} />
             <Tooltip isAnimationActive={false} labelFormatter={formatTimestampMs} />
             {events.map((event) => (
               <ReferenceLine key={event.key} x={event.tMs} stroke="#b45309" strokeDasharray="4 4" />

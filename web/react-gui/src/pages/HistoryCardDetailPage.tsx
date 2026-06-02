@@ -668,7 +668,8 @@ export const HistoryCardDetailPage: React.FC = () => {
         >
           <div
             data-testid="view-mode-label"
-            className="pointer-events-none absolute left-2 top-1 z-10 text-[10px] font-semibold text-[var(--text-tertiary)]"
+            className="pointer-events-none absolute left-1 top-1 z-10 rounded px-1.5 py-0.5 text-[10px] font-semibold text-[var(--text-tertiary)]"
+            style={{ backgroundColor: 'color-mix(in srgb, var(--bg) 82%, transparent)' }}
           >
             {formatViewLabel(t, selectedView)}
             {selectedView !== 'calendar' && ` · ${formatRangeLabel(t, timeViewport.viewport.range.label)}`}
@@ -676,7 +677,8 @@ export const HistoryCardDetailPage: React.FC = () => {
           {singleDeviceName && (
             <div
               data-testid="single-device-label"
-              className="pointer-events-none absolute right-2 top-1 z-10 text-[10px] font-medium text-[var(--text)] opacity-40"
+              className="pointer-events-none absolute right-1 top-1 z-10 rounded px-1.5 py-0.5 text-[10px] font-medium text-[var(--text-secondary)]"
+              style={{ backgroundColor: 'color-mix(in srgb, var(--bg) 82%, transparent)' }}
             >
               {singleDeviceName}
             </div>
