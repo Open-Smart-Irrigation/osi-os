@@ -38,6 +38,8 @@ const expectedExports = [
   'computeRollupBuckets',
   'upsertRollups',
   'runRollupJob',
+  'toCsv',
+  'writeZoneCsv',
   'aggregateRows',
   'aggregateDeviceData',
   'buildAdvancedMetadataPlaceholder',
@@ -558,6 +560,51 @@ test('runRollupJob populates hourly and daily rollups for a zone', async () => {
     assert.ok(hourly.length >= 24);
   } finally {
     db.close();
+  }
+});
+
+test('writeZoneCsv emits tidy long-format raw and daily files with depth', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'osi-csv-'));
+  try {
+    const zone = { id: 7, name: 'Zone B', zone_uuid: 'zu', timezone: 'Europe/Zurich' };
+    const rawRows = [
+      {
+        timestamp: '2026-06-02T14:03:21.000Z',
+        source: 'Chameleon 1',
+        card: 'soil',
+        variable: 'swt_1',
+        depth_cm: 5,
+        value: 6.24,
+        unit: 'kPa',
+      },
+    ];
+    const dailyRows = [
+      {
+        bucket_start: '2026-06-02T00:00:00.000Z',
+        bucket_end: '2026-06-03T00:00:00.000Z',
+        source: 'Chameleon 1',
+        card: 'soil',
+        variable: 'swt_1',
+        depth_cm: 5,
+        unit: 'kPa',
+        n: 96,
+        coverage_pct: 100,
+        mean: 6.3,
+        min: 6.1,
+        max: 6.5,
+        median: 6.3,
+        latest: 6.24,
+      },
+    ];
+
+    await helper.writeZoneCsv({ exportDir: dir, zone, day: '2026-06-02', rawRows, dailyRows });
+    const raw = fs.readFileSync(path.join(dir, 'zu', 'raw', '2026-06-02.csv'), 'utf8').trim().split('\n');
+    assert.strictEqual(raw[0], 'timestamp,timezone,zone,card,source,variable,depth_cm,value,unit');
+    assert.match(raw[1], /Europe\/Zurich,Zone B,soil,Chameleon 1,swt_1,5,6.24,kPa/);
+    const daily = fs.readFileSync(path.join(dir, 'zu', 'daily.csv'), 'utf8').trim().split('\n');
+    assert.strictEqual(daily[0], 'bucket_start,bucket_end,timezone,zone,card,source,variable,depth_cm,unit,n,coverage_pct,mean,min,max,median,latest');
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
   }
 });
 

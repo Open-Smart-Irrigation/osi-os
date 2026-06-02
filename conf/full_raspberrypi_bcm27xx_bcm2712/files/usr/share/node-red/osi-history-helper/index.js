@@ -989,6 +989,55 @@ async function upsertRollups(db, rows) {
   return count;
 }
 
+function csvCell(value) {
+  if (value === null || value === undefined) return '';
+  const stringValue = String(value);
+  return /[",\n\r]/.test(stringValue) ? '"' + stringValue.replace(/"/g, '""') + '"' : stringValue;
+}
+
+function toCsv(columns, rows) {
+  const safeColumns = Array.isArray(columns) ? columns : [];
+  const safeRows = Array.isArray(rows) ? rows : [];
+  return [safeColumns.join(',')]
+    .concat(safeRows.map((row) => safeColumns.map((column) => csvCell(row && row[column])).join(',')))
+    .join('\n') + '\n';
+}
+
+const RAW_CSV_COLUMNS = ['timestamp', 'timezone', 'zone', 'card', 'source', 'variable', 'depth_cm', 'value', 'unit'];
+const AGG_CSV_COLUMNS = ['bucket_start', 'bucket_end', 'timezone', 'zone', 'card', 'source', 'variable', 'depth_cm', 'unit', 'n', 'coverage_pct', 'mean', 'min', 'max', 'median', 'latest'];
+
+async function writeZoneCsv(options = {}) {
+  const fs = require('fs');
+  const path = require('path');
+  const zone = options.zone || {};
+  const zoneUuid = String(zone.zone_uuid || zone.zoneUuid || zone.id || '').trim();
+  const day = String(options.day || '').trim();
+  if (!zoneUuid) throw new Error('writeZoneCsv requires zone.zone_uuid');
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) throw new Error('writeZoneCsv requires day YYYY-MM-DD');
+  const exportDir = String(options.exportDir || '/data/exports');
+  const base = path.join(exportDir, zoneUuid);
+  const timezone = normalizeTimezone(zone.timezone);
+  const zoneName = String(zone.name || zoneUuid);
+  const stamp = (row) => ({ ...(row || {}), timezone, zone: zoneName });
+
+  fs.mkdirSync(path.join(base, 'raw'), { recursive: true });
+  fs.mkdirSync(path.join(base, 'hourly'), { recursive: true });
+  fs.writeFileSync(path.join(base, 'raw', `${day}.csv`), toCsv(RAW_CSV_COLUMNS, (options.rawRows || []).map(stamp)));
+  fs.writeFileSync(path.join(base, 'hourly', `${day}.csv`), toCsv(AGG_CSV_COLUMNS, (options.hourlyRows || []).map(stamp)));
+
+  const dailyPath = path.join(base, 'daily.csv');
+  const nextDailyRows = (options.dailyRows || []).map(stamp);
+  let keptLines = [];
+  if (fs.existsSync(dailyPath)) {
+    const lines = fs.readFileSync(dailyPath, 'utf8').split(/\r?\n/).filter((line) => line.length > 0);
+    keptLines = lines.slice(1).filter((line) => !line.startsWith(day));
+  }
+  const dailyBody = [AGG_CSV_COLUMNS.join(',')]
+    .concat(keptLines)
+    .concat(nextDailyRows.map((row) => AGG_CSV_COLUMNS.map((column) => csvCell(row[column])).join(',')));
+  fs.writeFileSync(dailyPath, dailyBody.join('\n') + '\n');
+}
+
 async function runRollupJob(db, options = {}) {
   const startedAt = Date.now();
   const nowMs = options.nowMs ?? Date.now();
@@ -1655,6 +1704,8 @@ module.exports = {
   computeRollupBuckets,
   upsertRollups,
   runRollupJob,
+  toCsv,
+  writeZoneCsv,
   aggregateRows,
   aggregateDeviceData,
   buildAdvancedMetadataPlaceholder,
