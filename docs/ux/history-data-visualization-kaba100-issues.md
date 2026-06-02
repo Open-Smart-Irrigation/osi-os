@@ -605,3 +605,52 @@ Best solution:
 - Add a shared calendar month-label helper.
 - Use it in both `HistoryMonthCalendarView` and `HistoryCardDetailPage`.
 - Render `Calendar - June 2026` in the persistent top-left context pill while keeping the accessible grid month heading.
+
+## History rollups and nightly CSV export verification
+
+Date: 2026-06-02
+Target: kaba100, `100.93.68.86`
+Branch: `feat/history-rollups-csv`
+Deployed backend commit: `b08dd99b`
+
+Deployment:
+
+- Deployed only Node-RED runtime history files: `/srv/node-red/osi-history-helper/index.js` and `/srv/node-red/flows.json`.
+- Created live backup before replacement: `/srv/node-red/backups/history-rollups-20260602-215459`.
+- Restarted Node-RED and confirmed `node -e "require('/srv/node-red/osi-history-helper')"` exited successfully.
+- Did not overwrite `/data/db/farming.db`.
+- Created temporary local user `playwright`, assigned Zones 3 and 12 plus their devices for API verification, then restored Zones 3 and 12 and their devices to `user_id=2` and deleted the temporary user.
+
+Manual rollup run:
+
+- Endpoint: `POST /api/history/rollups/run`.
+- Result: success.
+- Job duration: `44202 ms` server-reported, `44291 ms` measured by curl.
+- Summary: `zones=2`, `cardsProcessed=7`, `bucketsUpserted=8534`, `csvZonesWritten=2`, `csvRowsWritten=3359`, `errors=[]`.
+
+Rollup table counts:
+
+- `daily`: `1524`
+- `hourly`: `6763`
+- `weekly`: `247`
+
+CSV export checks:
+
+- Files existed under `/data/exports/<zoneUuid>/{raw,hourly}/2026-06-01.csv` and `/data/exports/<zoneUuid>/daily.csv` for both tested zones.
+- Raw header matched tidy schema: `timestamp,timezone,zone,card,source,variable,depth_cm,value,unit`.
+- Aggregate header matched tidy schema: `bucket_start,bucket_end,timezone,zone,card,source,variable,depth_cm,unit,n,coverage_pct,mean,min,max,median,latest`.
+- Soil sample with depth:
+  `2026-06-01T13:58:28.070Z,UTC,Zone B,soil,Chameleon 1,swt_1,5,6.24,kPa`
+
+API verification:
+
+- Zone B card summary returned one merged Soil thematic card with `sourceDeviceCount=2` and source labels `Chameleon 1`, `Chameleon 2`.
+- `GET /api/history/zones/12/cards/.../data?range=30d&aggregation=auto` returned daily aggregated series with `78` total points and `3` points for `2026-06-02`, confirming today remained present.
+- Public card-data payload currently does not expose the helper `source` field. Direct helper verification on the Pi against `/data/db/farming.db` returned `source="rollups+live"`, `aggregation="daily"`, `bucketCount=26`, first bucket `2026-05-04T00:00:00.118Z`, last bucket `2026-06-02T00:00:00.910Z`.
+- `GET /api/devices/A84041A75D5E7CFB/sensor-history?field=swt_1&hours=720` returned `26` aggregated `{t,value}` points.
+- `GET /api/devices/A84041A75D5E7CFB/sensor-history?field=swt_1&hours=24` returned `96` raw `{t,value}` points.
+- `GET /api/devices/A8404101FD5ECF41/dendro-history?hours=24` returned `72` rows and preserved the legacy dendro fields: `position_raw_mm`, `position_mm`, `delta_mm`, `stem_change_um`, `adc_v`, `adc_ch0v`, `adc_ch1v`, `dendro_ratio`, `dendro_mode_used`, `saturated`, `saturation_side`, `valid`.
+
+Follow-up noted:
+
+- If the frontend or diagnostics needs to display whether a card-data response came from `history_channel_rollups`, `device_data`, or `rollups+live`, expose the helper `source` in the public card-data payload. The backend read path already computes it.
