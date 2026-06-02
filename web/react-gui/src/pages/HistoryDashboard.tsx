@@ -506,6 +506,7 @@ export const HistoryDashboard: React.FC = () => {
               onSelectZone={setSelectedZoneId}
               cards={cards}
               onTogglePinned={handleTogglePinned}
+              onRefresh={refreshCards}
             />
           ) : (
             <HistoryDesktopShell

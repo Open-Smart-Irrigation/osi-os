@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Link, useParams } from 'react-router-dom';
+import { Link, useNavigate, useParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import useSWR from 'swr';
 import { HistoryCardVisualization } from '../components/history/HistoryCardVisualization';
@@ -15,7 +15,7 @@ import { HistoryViewModeSegmentedControl } from '../components/history/mobile/Hi
 import { useFeatureFlags } from '../history/useFeatureFlags';
 import { useHistoryCardAdvancedData } from '../history/useHistoryCardAdvancedData';
 import { useHistoryCardData } from '../history/useHistoryCardData';
-import { useHistoryCards } from '../history/useHistoryCards';
+import { orderHistoryCards, useHistoryCards } from '../history/useHistoryCards';
 import { setTimeViewportRange, useTimeViewport } from '../history/useTimeViewport';
 import { historyAPI, irrigationZonesAPI } from '../services/api';
 import type { HistoryCardDataScope } from '../history/useHistoryCardData';
@@ -31,7 +31,21 @@ const zonesFetcher = () => irrigationZonesAPI.getAll();
 const DETAIL_PULL_REFRESH_THRESHOLD_PX = 96;
 const DETAIL_PULL_REFRESH_MAX_HORIZONTAL_PX = 48;
 const DETAIL_PULL_REFRESH_SCROLL_TOP_TOLERANCE_PX = 2;
+const DETAIL_CARD_SWIPE_THRESHOLD_PX = 72;
+const DETAIL_CARD_SWIPE_VERTICAL_RATIO = 0.65;
 const HISTORY_VISUALIZATION_SURFACE_SELECTOR = '[data-history-visualization-surface="true"]';
+const HISTORY_CARD_SWIPE_IGNORE_SELECTOR = [
+  HISTORY_VISUALIZATION_SURFACE_SELECTOR,
+  '[data-history-calendar-date]',
+  '[role="grid"]',
+  'a',
+  'button',
+  'input',
+  'select',
+  'textarea',
+  '[role="button"]',
+  '[role="menu"]',
+].join(',');
 
 type HistoryTranslate = (key: string, options?: Record<string, unknown>) => string;
 type PullRefreshStart = {
@@ -39,6 +53,11 @@ type PullRefreshStart = {
   x: number;
   y: number;
   refreshed: boolean;
+};
+type CardSwipeStart = {
+  pointerId: number;
+  x: number;
+  y: number;
 };
 
 function decodeRouteCardId(rawCardId: string | undefined): string | null {
@@ -126,6 +145,10 @@ function calendarDateFromTarget(target: EventTarget | null): string | null {
   return dateCell?.getAttribute('data-history-calendar-date') ?? null;
 }
 
+function isCardSwipeTarget(target: EventTarget | null): boolean {
+  return target instanceof Element && !target.closest(HISTORY_CARD_SWIPE_IGNORE_SELECTOR);
+}
+
 function scopeForCard(card: HistoryCardSummary, routeScope: DetailRouteScope): HistoryCardDataScope | null {
   if (routeScope.type === 'gateway') {
     return { type: 'gateway', gatewayEui: routeScope.gatewayEui };
@@ -159,9 +182,11 @@ const HistoryDetailError: React.FC<{
 
 export const HistoryCardDetailPage: React.FC = () => {
   const { zoneId: rawZoneId, gatewayEui: rawGatewayEui, cardId: rawCardId } = useParams();
+  const navigate = useNavigate();
   const { t: translate } = useTranslation('history');
   const t = translate as HistoryTranslate;
   const pullStartRef = useRef<PullRefreshStart | null>(null);
+  const cardSwipeStartRef = useRef<CardSwipeStart | null>(null);
   const featureFlags = useFeatureFlags();
   const zoneId = Number(rawZoneId);
   const gatewayEui = typeof rawGatewayEui === 'string' && rawGatewayEui.trim() ? rawGatewayEui : null;
@@ -205,6 +230,10 @@ export const HistoryCardDetailPage: React.FC = () => {
     { revalidateOnFocus: true },
   );
   const routeCards = routeScope?.type === 'gateway' ? gatewayCardsResponse?.cards ?? [] : cards;
+  const orderedRouteCards = useMemo(
+    () => (routeScope?.type === 'zone' ? orderHistoryCards(routeCards) : routeCards),
+    [routeCards, routeScope?.type],
+  );
 
   const resolvedZone = useMemo(
     () => (routeScope?.type === 'zone' ? (zones ?? []).find((zone) => zone.id === routeScope.zoneId) ?? null : null),
@@ -350,6 +379,20 @@ export const HistoryCardDetailPage: React.FC = () => {
   }, []);
 
   const handleScrollRootPointerDown = useCallback((event: React.PointerEvent<HTMLElement>) => {
+    if (
+      routeScope?.type === 'zone'
+      && isPullRefreshPointerType(event.pointerType)
+      && isCardSwipeTarget(event.target)
+    ) {
+      cardSwipeStartRef.current = {
+        pointerId: event.pointerId,
+        x: event.clientX,
+        y: event.clientY,
+      };
+    } else {
+      cardSwipeStartRef.current = null;
+    }
+
     const isAtScrollTop = getPullRefreshScrollTop(event.currentTarget) <= DETAIL_PULL_REFRESH_SCROLL_TOP_TOLERANCE_PX;
     if (
       !isPullRefreshPointerType(event.pointerType)
@@ -365,7 +408,7 @@ export const HistoryCardDetailPage: React.FC = () => {
       y: event.clientY,
       refreshed: false,
     };
-  }, [isVisualizationEvent]);
+  }, [isVisualizationEvent, routeScope?.type]);
 
   const handleScrollRootPointerUp = useCallback((event: React.PointerEvent<HTMLElement>) => {
     const selectedDate = calendarDateFromTarget(event.target);
@@ -378,6 +421,35 @@ export const HistoryCardDetailPage: React.FC = () => {
       pullStartRef.current = null;
       return;
     }
+
+    const swipeStart = cardSwipeStartRef.current;
+    if (
+      routeScope?.type === 'zone'
+      && displayCard
+      && swipeStart
+      && swipeStart.pointerId === event.pointerId
+      && isPullRefreshPointerType(event.pointerType)
+      && isCardSwipeTarget(event.target)
+    ) {
+      const deltaX = event.clientX - swipeStart.x;
+      const deltaY = Math.abs(event.clientY - swipeStart.y);
+      const isHorizontalSwipe = Math.abs(deltaX) >= DETAIL_CARD_SWIPE_THRESHOLD_PX
+        && deltaY <= Math.abs(deltaX) * DETAIL_CARD_SWIPE_VERTICAL_RATIO;
+      if (isHorizontalSwipe) {
+        const currentIndex = orderedRouteCards.findIndex((card) => card.cardId === displayCard.cardId);
+        if (currentIndex >= 0 && orderedRouteCards.length > 1) {
+          const nextIndex = deltaX < 0
+            ? (currentIndex + 1) % orderedRouteCards.length
+            : (currentIndex - 1 + orderedRouteCards.length) % orderedRouteCards.length;
+          const nextCard = orderedRouteCards[nextIndex];
+          cardSwipeStartRef.current = null;
+          pullStartRef.current = null;
+          navigate(`/history/zones/${routeScope.zoneId}/cards/${encodeURIComponent(nextCard.cardId)}`);
+          return;
+        }
+      }
+    }
+    cardSwipeStartRef.current = null;
 
     const start = pullStartRef.current;
     if (
@@ -398,7 +470,7 @@ export const HistoryCardDetailPage: React.FC = () => {
       void cardData.refresh();
     }
     pullStartRef.current = null;
-  }, [calendarDaysByDate, cardData, isVisualizationEvent]);
+  }, [calendarDaysByDate, cardData, displayCard, isVisualizationEvent, navigate, orderedRouteCards, routeScope]);
 
   useEffect(() => {
     if (!featureFlags.historyEnabled || routeScope?.type !== 'zone' || !resolvedCard || !cardId) return;
@@ -472,6 +544,7 @@ export const HistoryCardDetailPage: React.FC = () => {
         onClickCapture={handleScrollRootClick}
         onPointerCancel={() => {
           pullStartRef.current = null;
+          cardSwipeStartRef.current = null;
         }}
       >
         <section className="space-y-3">

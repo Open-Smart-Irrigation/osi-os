@@ -947,6 +947,76 @@ describe('History card detail route', () => {
     });
   });
 
+  it('switches to the next thematic card on horizontal swipe outside the visualization surface', async () => {
+    vi.mocked(historyAPI.getZoneCards).mockResolvedValue({
+      zoneId: 12,
+      generatedAt: '2026-05-31T10:00:00Z',
+      cards: [
+        zoneCard({
+          cardId: 'soil-card:root-zone',
+          title: 'Soil - Root Zone',
+          ordering: { pinned: false, score: 10, recentRank: 1, criticalAlert: false },
+        }),
+        zoneCard({
+          cardId: 'environment-card:microclimate',
+          cardType: 'environment',
+          title: 'Environment - Microclimate',
+          subtitle: 'Microclimate',
+          defaultView: 'line-chart',
+          views: ['line-chart'],
+          ordering: { pinned: false, score: 8, recentRank: 2, criticalAlert: false },
+        }),
+      ],
+    });
+
+    renderAppAtRoute('/history/zones/12/cards/soil-card%3Aroot-zone');
+
+    expect(await screen.findByRole('heading', { level: 1, name: 'Soil - Root Zone' })).toBeInTheDocument();
+
+    const scrollRoot = screen.getByTestId('history-detail-scroll-root');
+    preparePointerTarget(scrollRoot);
+    pointerDrag(scrollRoot, { fromX: 280, toX: 80, fromY: 160, toY: 168 });
+
+    await waitFor(() => {
+      expect(screen.getByRole('heading', { level: 1, name: 'Environment - Microclimate' })).toBeInTheDocument();
+    });
+    expect(window.location.hash).toContain('/history/zones/12/cards/environment-card%3Amicroclimate');
+  });
+
+  it('keeps horizontal drags inside the visualization surface scoped to chart panning', async () => {
+    vi.mocked(historyAPI.getZoneCards).mockResolvedValue({
+      zoneId: 12,
+      generatedAt: '2026-05-31T10:00:00Z',
+      cards: [
+        zoneCard({
+          cardId: 'soil-card:root-zone',
+          title: 'Soil - Root Zone',
+          ordering: { pinned: false, score: 10, recentRank: 1, criticalAlert: false },
+        }),
+        zoneCard({
+          cardId: 'environment-card:microclimate',
+          cardType: 'environment',
+          title: 'Environment - Microclimate',
+          subtitle: 'Microclimate',
+          defaultView: 'line-chart',
+          views: ['line-chart'],
+          ordering: { pinned: false, score: 8, recentRank: 2, criticalAlert: false },
+        }),
+      ],
+    });
+
+    renderAppAtRoute('/history/zones/12/cards/soil-card%3Aroot-zone');
+
+    expect(await screen.findByRole('heading', { level: 1, name: 'Soil - Root Zone' })).toBeInTheDocument();
+
+    const surface = screen.getByTestId('history-visualization-surface');
+    preparePointerTarget(surface);
+    pointerDrag(surface, { fromX: 280, toX: 80, fromY: 160, toY: 168 });
+
+    expect(screen.getByRole('heading', { level: 1, name: 'Soil - Root Zone' })).toBeInTheDocument();
+    expect(window.location.hash).toContain('/history/zones/12/cards/soil-card%3Aroot-zone');
+  });
+
   it('does not refresh detail data on mouse drag outside the visualization surface', async () => {
     renderAppAtRoute('/history/zones/12/cards/soil-card%3Aroot-zone');
 

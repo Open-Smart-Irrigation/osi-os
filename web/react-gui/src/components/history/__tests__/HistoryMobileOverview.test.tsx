@@ -354,4 +354,29 @@ describe('History mobile overview', () => {
       );
     });
   });
+
+  it('refreshes mobile overview cards on pull down outside card controls', async () => {
+    renderHistoryAtMobileWidth('/history');
+
+    const shell = await screen.findByTestId('history-mobile-shell');
+    await screen.findByRole('link', { name: /Soil - Root Zone/i });
+    vi.mocked(historyAPI.getZoneCards).mockClear();
+
+    fireEvent.pointerDown(shell, {
+      pointerId: 1,
+      pointerType: 'touch',
+      clientX: 160,
+      clientY: 12,
+    });
+    fireEvent.pointerUp(shell, {
+      pointerId: 1,
+      pointerType: 'touch',
+      clientX: 164,
+      clientY: 132,
+    });
+
+    await waitFor(() => {
+      expect(historyAPI.getZoneCards).toHaveBeenCalledWith(1);
+    });
+  });
 });
