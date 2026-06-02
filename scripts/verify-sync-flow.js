@@ -1166,6 +1166,7 @@ for (const node of flows) {
   }
 }
 console.log('OK every function node that uses a guarded module has it bound');
+expectIncludes('History Rollup Tick', 'osiHistory.runRollupJob', 'calls the helper rollup job');
 
 const bootstrapInject = flows.find((node) => node.id === 'sync-bootstrap-inject');
 if (!bootstrapInject) {

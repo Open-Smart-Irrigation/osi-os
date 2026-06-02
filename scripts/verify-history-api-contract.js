@@ -29,6 +29,7 @@ const REQUIRED_ENDPOINTS = [
   ['POST', '/api/history/zones/:zoneId/cards/:cardId/opened'],
   ['PUT', '/api/history/gateways/:gatewayEui/cards/:cardId/preferences'],
   ['POST', '/api/history/gateways/:gatewayEui/cards/:cardId/opened'],
+  ['POST', '/api/history/rollups/run'],
   ['GET', '/api/system/features']
 ].map(([method, url]) => ({ method, url }));
 
