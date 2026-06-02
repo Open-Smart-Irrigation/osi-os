@@ -1349,6 +1349,59 @@ function queryDeviceEuis(query = {}) {
   return Array.from(new Set(values.map(normalizeSourceKey).map(normalizeDeveui).filter(Boolean)));
 }
 
+async function resolveDeviceFieldRollupKey(db, deveui, field) {
+  const normalizedDeveui = normalizeDeveui(deveui);
+  const normalizedField = String(field || '').trim();
+  if (!normalizedDeveui || !normalizedField) return null;
+
+  const deviceRows = await dbAll(db, `
+    SELECT
+      d.*,
+      z.id AS zone_id,
+      z.name AS zone_name,
+      z.zone_uuid AS zone_uuid,
+      z.timezone AS zone_timezone
+    FROM devices d
+    JOIN irrigation_zones z ON z.id = d.irrigation_zone_id
+    WHERE d.deveui = ?
+      AND d.deleted_at IS NULL
+      AND z.deleted_at IS NULL
+    LIMIT 1
+  `, [normalizedDeveui]);
+  const device = deviceRows[0];
+  if (!device || device.zone_id === null || device.zone_id === undefined) return null;
+
+  const zone = {
+    id: device.zone_id,
+    name: device.zone_name,
+    zone_uuid: device.zone_uuid,
+    timezone: device.zone_timezone || 'UTC',
+  };
+  const devices = await dbAll(db, 'SELECT * FROM devices WHERE deleted_at IS NULL AND irrigation_zone_id = ? ORDER BY deveui ASC', [device.zone_id]);
+  const cards = deriveCardsForZone(zone, devices);
+  for (const card of cards) {
+    const channel = channelsForCard(card).find((candidate) =>
+      candidate.id === normalizedField || candidate.field === normalizedField
+    );
+    if (!channel) continue;
+    const sourceDevices = sourceDevicesForCard(card, devices);
+    const sourceDeveuis = uniqueDeveuis(sourceDevices);
+    if (!sourceDeveuis.includes(normalizedDeveui)) continue;
+    return {
+      zoneId: Number(device.zone_id),
+      zoneUuid: String(device.zone_uuid || ''),
+      cardType: card.cardType,
+      logicalSourceKey: card.logicalSourceKey,
+      channelId: channel.id,
+      channel,
+      channels: [channel],
+      deveuis: sourceDeveuis,
+      timezone: zone.timezone || 'UTC',
+    };
+  }
+  return null;
+}
+
 async function aggregateDeviceData(db, query = {}) {
   const aggregationInfo = resolveAggregation(query);
   const aggregation = aggregationInfo.level;
@@ -1857,6 +1910,7 @@ module.exports = {
   computeRollupBuckets,
   upsertRollups,
   runRollupJob,
+  resolveDeviceFieldRollupKey,
   toCsv,
   writeZoneCsv,
   rotateZoneCsv,

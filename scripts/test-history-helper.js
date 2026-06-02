@@ -38,6 +38,7 @@ const expectedExports = [
   'computeRollupBuckets',
   'upsertRollups',
   'runRollupJob',
+  'resolveDeviceFieldRollupKey',
   'toCsv',
   'writeZoneCsv',
   'rotateZoneCsv',
@@ -663,6 +664,38 @@ test('runRollupJob writes per-source CSV exports for the completed local day', a
   } finally {
     db.close();
     fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('resolves a legacy device field to the matching thematic rollup key', async () => {
+  const db = createCliSqliteDb();
+  try {
+    db.runSql(`
+      INSERT INTO users(id,username,password_hash,created_at,updated_at) VALUES(1,'u','h','2026-05-20T00:00:00.000Z','2026-05-20T00:00:00.000Z');
+      INSERT INTO irrigation_zones(id,name,user_id,zone_uuid,timezone,created_at,updated_at) VALUES(7,'Zone B',1,'zu','Europe/Zurich','2026-05-20T00:00:00.000Z','2026-05-20T00:00:00.000Z');
+      INSERT INTO devices(deveui,name,type_id,user_id,irrigation_zone_id,chameleon_enabled,temp_enabled,created_at,updated_at)
+        VALUES
+          ('AA00000000000001','Chameleon 1','DRAGINO_LSN50',1,7,1,1,'2026-05-20T00:00:00.000Z','2026-05-20T00:00:00.000Z'),
+          ('AA00000000000002','Chameleon 2','DRAGINO_LSN50',1,7,1,1,'2026-05-20T00:00:00.000Z','2026-05-20T00:00:00.000Z');
+    `);
+
+    const soil = await helper.resolveDeviceFieldRollupKey(db, 'aa-0000-0000-0000-01', 'swt_1');
+    assert.strictEqual(soil.zoneId, 7);
+    assert.strictEqual(soil.zoneUuid, 'zu');
+    assert.strictEqual(soil.cardType, 'soil');
+    assert.strictEqual(soil.logicalSourceKey, 'root-zone');
+    assert.strictEqual(soil.channelId, 'swt_1');
+    assert.deepStrictEqual(soil.deveuis, ['AA00000000000001', 'AA00000000000002']);
+    assert.strictEqual(soil.timezone, 'Europe/Zurich');
+
+    const environment = await helper.resolveDeviceFieldRollupKey(db, 'AA00000000000001', 'ext_temperature_c');
+    assert.strictEqual(environment.cardType, 'environment');
+    assert.strictEqual(environment.logicalSourceKey, 'microclimate');
+
+    const unmapped = await helper.resolveDeviceFieldRollupKey(db, 'AA00000000000001', 'flow_liters_today');
+    assert.strictEqual(unmapped, null);
+  } finally {
+    db.close();
   }
 });
 
