@@ -1031,6 +1031,35 @@ function normalizeTimezone(value) {
   }
 }
 
+function startOfLocalDayMs(nowMs, timezone) {
+  const instantMs = typeof nowMs === 'number' ? nowMs : parseTime(nowMs);
+  if (instantMs === null) throw new Error('startOfLocalDayMs requires a valid instant');
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: normalizeTimezone(timezone),
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false,
+  }).formatToParts(new Date(instantMs)).reduce((acc, part) => {
+    if (part.type !== 'literal') acc[part.type] = part.value;
+    return acc;
+  }, {});
+  const wallClockAsUtcMs = Date.UTC(
+    Number(parts.year),
+    Number(parts.month) - 1,
+    Number(parts.day),
+    Number(parts.hour) % 24,
+    Number(parts.minute),
+    Number(parts.second)
+  );
+  const offsetMs = wallClockAsUtcMs - instantMs;
+  const localMidnightAsUtcMs = Date.UTC(Number(parts.year), Number(parts.month) - 1, Number(parts.day), 0, 0, 0);
+  return localMidnightAsUtcMs - offsetMs;
+}
+
 function localDateKey(value, timezone) {
   const ms = typeof value === 'number' ? value : parseTime(value);
   if (ms === null) return null;
@@ -1372,6 +1401,7 @@ module.exports = {
   classifyIrrigationStatus,
   classifyGatewayStatus,
   deriveExpectedCadenceSeconds,
+  startOfLocalDayMs,
   aggregateRows,
   aggregateDeviceData,
   buildAdvancedMetadataPlaceholder,

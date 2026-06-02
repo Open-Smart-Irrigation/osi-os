@@ -34,6 +34,7 @@ const expectedExports = [
   'classifyIrrigationStatus',
   'classifyGatewayStatus',
   'deriveExpectedCadenceSeconds',
+  'startOfLocalDayMs',
   'aggregateRows',
   'aggregateDeviceData',
   'buildAdvancedMetadataPlaceholder',
@@ -364,6 +365,14 @@ test('derives expected cadence as configured, derived, or unknown', () => {
     helper.deriveExpectedCadenceSeconds({ rows: [{ recorded_at: iso(0) }] }),
     { seconds: null, confidence: 'unknown' }
   );
+});
+
+test('startOfLocalDayMs returns the UTC instant of zone-local midnight', () => {
+  const ms = helper.startOfLocalDayMs(Date.parse('2026-06-02T10:00:00Z'), 'Europe/Zurich');
+  assert.strictEqual(new Date(ms).toISOString(), '2026-06-01T22:00:00.000Z');
+
+  const utc = helper.startOfLocalDayMs(Date.parse('2026-06-02T10:00:00Z'), 'UTC');
+  assert.strictEqual(new Date(utc).toISOString(), '2026-06-02T00:00:00.000Z');
 });
 
 test('resolves automatic aggregation from range and reports the actual level', () => {
