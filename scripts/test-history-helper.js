@@ -952,6 +952,41 @@ test('aggregates SQL-backed device_data with parameterized range queries and rol
   }
 });
 
+test('aggregateDeviceData merges completed rollups with a live trailing bucket', async () => {
+  const db = createCliSqliteDb();
+  try {
+    db.runSql(`
+      INSERT INTO history_channel_rollups(
+        zone_id,card_type,logical_source_key,channel_id,bucket_level,bucket_start,bucket_end,
+        mean_value,latest_value,min_value,max_value,median_value,sample_count,coverage_confidence,unit
+      ) VALUES (
+        7,'soil','root-zone','swt_1','daily','2026-06-01T00:00:00.000Z','2026-06-02T00:00:00.000Z',
+        30,30,28,32,30,12,'derived','kPa'
+      );
+      INSERT INTO device_data(deveui,recorded_at,swt_1) VALUES ('AA00000000000001','2026-06-02T09:00:00.000Z',40);
+    `);
+    const result = await helper.aggregateDeviceData(db, {
+      zoneId: 7,
+      cardType: 'soil',
+      logicalSourceKey: 'root-zone',
+      device_euis: ['AA00000000000001'],
+      start: '2026-06-01T00:00:00.000Z',
+      end: '2026-06-03T00:00:00.000Z',
+      range: '30d',
+      aggregation: 'daily',
+      channels: ['swt_1'],
+      timezone: 'UTC',
+      nowMs: Date.parse('2026-06-02T12:00:00.000Z'),
+    });
+    assert.strictEqual(result.source, 'rollups+live');
+    const days = result.buckets.map((bucket) => bucket.bucketStart);
+    assert.ok(days.includes('2026-06-01T00:00:00.000Z'), 'rollup day present');
+    assert.ok(days.includes('2026-06-02T00:00:00.000Z'), 'live today present');
+  } finally {
+    db.close();
+  }
+});
+
 test('uses live device_data for long-range source-filtered requests', async () => {
   const db = createCliSqliteDb();
   try {

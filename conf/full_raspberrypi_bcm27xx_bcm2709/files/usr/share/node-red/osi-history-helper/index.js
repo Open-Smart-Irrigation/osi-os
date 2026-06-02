@@ -1165,15 +1165,46 @@ async function aggregateDeviceData(db, query = {}) {
   const hasSourceFilter = sourceFilterFlag === true || sourceFilterFlag === 1 || String(sourceFilterFlag || '').toLowerCase() === 'true';
   const shouldUseRollups =
     !hasSourceFilter
-    && (useRollups === true || (useRollups !== false && hasRollupIdentity && ['daily', 'weekly'].includes(aggregation)));
+    && (useRollups === true || (useRollups !== false && hasRollupIdentity && ['hourly', 'daily', 'weekly'].includes(aggregation)));
   if (shouldUseRollups) {
+    const startMs = parseTime(start);
+    const endMs = parseTime(end);
+    if (startMs === null || endMs === null || endMs <= startMs) throw new Error('aggregateDeviceData requires a valid start/end range');
+    const todayStartMs = startOfLocalDayMs(query.nowMs ?? Date.now(), query.timezone || query.time_zone || 'UTC');
+    const splitMs = Math.min(Math.max(todayStartMs, startMs), endMs);
+    const splitIso = new Date(splitMs).toISOString();
     const channelIds = channels.map((channel) => channel.id);
     const placeholders = channelIds.map(() => '?').join(',');
-    const sql = `SELECT * FROM history_channel_rollups WHERE zone_id = ? AND card_type = ? AND logical_source_key = ? AND bucket_level = ? AND bucket_start >= ? AND bucket_start < ? AND channel_id IN (${placeholders}) ORDER BY bucket_start ASC, channel_id ASC`;
-    const params = [zoneId, cardType, logicalSourceKey, aggregation, start, end].concat(channelIds);
-    const rows = await dbAll(db, sql, params);
-    if (rows.length || deveuis.length === 0) {
-      return rollupRowsToResult(rows, { ...query, aggregation, aggregationRequested: aggregationInfo.requested }, channels);
+    let rollupRows = [];
+    if (splitMs > startMs) {
+      const sql = `SELECT * FROM history_channel_rollups WHERE zone_id = ? AND card_type = ? AND logical_source_key = ? AND bucket_level = ? AND bucket_start >= ? AND bucket_start < ? AND channel_id IN (${placeholders}) ORDER BY bucket_start ASC, channel_id ASC`;
+      const params = [zoneId, cardType, logicalSourceKey, aggregation, start, splitIso].concat(channelIds);
+      rollupRows = await dbAll(db, sql, params);
+    }
+    const completed = rollupRowsToResult(rollupRows, { ...query, aggregation, aggregationRequested: aggregationInfo.requested }, channels);
+    let live = null;
+    const hasTrailingWindow = splitMs < endMs;
+    if (hasTrailingWindow && deveuis.length > 0) {
+      const livePlaceholders = deveuis.map(() => '?').join(',');
+      const selectedFields = Array.from(new Set(channels.map((channel) => channel.field)));
+      const sql = `SELECT deveui, recorded_at, ${selectedFields.join(', ')} FROM device_data WHERE deveui IN (${livePlaceholders}) AND recorded_at >= ? AND recorded_at < ? ORDER BY recorded_at ASC`;
+      const rows = await dbAll(db, sql, deveuis.concat([splitIso, end]));
+      live = aggregateRows(rows, { ...query, aggregation, aggregationRequested: aggregationInfo.requested, channels, start: splitIso, end });
+    }
+    if (rollupRows.length || live) {
+      const buckets = (completed.buckets || []).concat(live && live.buckets || [])
+        .sort((left, right) => String(left.bucketStart).localeCompare(String(right.bucketStart)));
+      const coverageValues = buckets.map((bucket) => toFiniteNumber(bucket.coveragePct)).filter((value) => value !== null);
+      const coverageConfidence = buckets.some((bucket) => bucket.coverageConfidence === 'unknown')
+        ? 'unknown'
+        : (buckets.some((bucket) => bucket.coverageConfidence === 'derived') ? 'derived' : (buckets.length ? 'configured' : 'unknown'));
+      return {
+        ...completed,
+        source: rollupRows.length && live ? 'rollups+live' : (rollupRows.length ? 'history_channel_rollups' : 'device_data'),
+        coverageConfidence,
+        coveragePct: coverageValues.length ? roundTo(coverageValues.reduce((sum, value) => sum + value, 0) / coverageValues.length) : null,
+        buckets,
+      };
     }
   }
 
