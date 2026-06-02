@@ -323,9 +323,14 @@ export const HistoryCardDetailPage: React.FC = () => {
     setUserSelectedView({ cardId: displayCard.cardId, view: 'advanced' });
   }, [displayCard]);
 
-  const handleCardSettings = useCallback(() => {
+  const handleRefresh = useCallback(() => {
     setSettingsOpen(false);
-  }, []);
+    if (shouldRenderAdvanced) {
+      void advancedData.refresh();
+      return;
+    }
+    void cardData.refresh();
+  }, [advancedData, cardData, shouldRenderAdvanced]);
 
   const handleCloseInspector = useCallback(() => {
     setInspectorSelection(null);
@@ -451,10 +456,11 @@ export const HistoryCardDetailPage: React.FC = () => {
         card={displayCard}
         backHref="/history"
         settingsOpen={settingsOpen}
+        canOpenAdvanced={displayCard.views.includes('advanced')}
         onSettingsToggle={() => setSettingsOpen((open) => !open)}
         onAdvancedView={handleAdvancedView}
-        onCardSettings={handleCardSettings}
         onResetRange={handleResetRange}
+        onRefresh={handleRefresh}
       />
       <main
         data-testid="history-detail-scroll-root"

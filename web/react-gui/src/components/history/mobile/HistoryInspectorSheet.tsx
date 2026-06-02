@@ -23,6 +23,13 @@ interface HistoryInspectorSheetProps {
 }
 
 type HistoryTranslate = (key: string, options?: Record<string, unknown>) => string;
+const DEVICE_EUI_PATTERN = /\b[A-F0-9]{16}\b/i;
+const UNSAFE_EVENT_LABEL_PATTERN =
+  /\b(dev[\s_-]?eui|device[\s_-]?eui|gateway[\s_-]?eui|payload|firmware|rssi|snr|raw|channel|backend|token|secret|calibration)\b/i;
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
 
 function translateParams(params: Record<string, unknown> | undefined): Record<string, unknown> {
   return params && typeof params === 'object' ? params : {};
@@ -52,6 +59,20 @@ function formatTimestamp(timestamp: string): string {
   return new Date(parsed).toLocaleString();
 }
 
+function isSafeEventLabel(label: string | null | undefined): label is string {
+  return Boolean(label && label.trim())
+    && !DEVICE_EUI_PATTERN.test(label)
+    && !UNSAFE_EVENT_LABEL_PATTERN.test(label);
+}
+
+function eventLabel(t: HistoryTranslate, event: { label?: string | null; type?: string | null }): string {
+  if (isSafeEventLabel(event.label)) return event.label.trim();
+  const type = typeof event.type === 'string' ? event.type.toLowerCase() : '';
+  if (type.includes('irrigation')) return t('history.irrigationTimeline.eventLabel.irrigation');
+  if (type.includes('manual')) return t('history.irrigationTimeline.eventLabel.manualOverride');
+  return t('history.inspector.eventFallback');
+}
+
 function formatSyncState(t: HistoryTranslate, syncState: string | undefined): string {
   return t(`history.metadata.syncState.${syncState ?? 'unknown'}`);
 }
@@ -76,6 +97,7 @@ export const HistoryInspectorSheet: React.FC<HistoryInspectorSheetProps> = ({
   const { t: translate } = useTranslation('history');
   const t = translate as HistoryTranslate;
   const closeButtonRef = useRef<HTMLButtonElement | null>(null);
+  const dialogRef = useRef<HTMLElement | null>(null);
   const sourceLabel = formatHistorySourceLabel(t, card);
   const interpretations = useMemo(() => selectInterpretations(data), [data]);
   const visibleEvents = useMemo(() => (data?.events ?? []).slice(0, 4), [data?.events]);
@@ -85,15 +107,51 @@ export const HistoryInspectorSheet: React.FC<HistoryInspectorSheetProps> = ({
     closeButtonRef.current?.focus();
   }, [isOpen]);
 
+  const handleDialogKeyDown = (event: React.KeyboardEvent<HTMLElement>) => {
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      onClose();
+      return;
+    }
+
+    if (event.key !== 'Tab' || !dialogRef.current) return;
+
+    const focusable = Array.from(
+      dialogRef.current.querySelectorAll<HTMLElement>(
+        'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+      ),
+    );
+    if (focusable.length === 0) return;
+
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+    if (event.shiftKey && document.activeElement === first) {
+      event.preventDefault();
+      last.focus();
+    } else if (!event.shiftKey && document.activeElement === last) {
+      event.preventDefault();
+      first.focus();
+    }
+  };
+
   if (!isOpen || !selection) return null;
 
   return (
-    <div className="fixed inset-x-0 bottom-0 z-30 px-3 pb-3 sm:px-4" role="presentation">
+    <>
+      <button
+        type="button"
+        aria-hidden="true"
+        tabIndex={-1}
+        className="fixed inset-0 z-20 cursor-default bg-black/25"
+        onClick={onClose}
+      />
       <section
+        ref={dialogRef}
         role="dialog"
         aria-modal="true"
         aria-labelledby="history-inspector-title"
-        className="mx-auto max-h-[70vh] max-w-2xl overflow-y-auto rounded-t-lg border border-[var(--border)] bg-[var(--surface)] p-4 shadow-2xl"
+        className="fixed inset-x-3 bottom-3 z-30 mx-auto max-h-[70vh] max-w-2xl overflow-y-auto rounded-t-lg border border-[var(--border)] bg-[var(--surface)] p-4 shadow-2xl sm:inset-x-4"
+        onKeyDown={handleDialogKeyDown}
       >
         <div className="mx-auto mb-3 h-1.5 w-12 rounded-full bg-[var(--border)]" aria-hidden="true" />
         <div className="flex items-start justify-between gap-3">
@@ -198,8 +256,11 @@ export const HistoryInspectorSheet: React.FC<HistoryInspectorSheetProps> = ({
               <div className="space-y-2">
                 {visibleEvents.map((event) => (
                   <div key={event.id} className="rounded-md border border-[var(--border)] bg-[var(--bg)] px-3 py-2">
-                    <p className="text-sm font-semibold text-[var(--text)]">{event.label}</p>
+                    <p className="text-sm font-semibold text-[var(--text)]">{eventLabel(t, event)}</p>
                     <p className="text-xs text-[var(--text-tertiary)]">{formatTimestamp(event.t)}</p>
+                    {isRecord(event.metadata) && typeof event.metadata.category === 'string' && (
+                      <p className="text-xs text-[var(--text-tertiary)]">{event.metadata.category}</p>
+                    )}
                   </div>
                 ))}
               </div>
@@ -215,6 +276,6 @@ export const HistoryInspectorSheet: React.FC<HistoryInspectorSheetProps> = ({
           )}
         </div>
       </section>
-    </div>
+    </>
   );
 };

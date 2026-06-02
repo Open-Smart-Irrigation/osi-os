@@ -9,10 +9,11 @@ interface HistoryDetailHeaderProps {
   card: HistoryCardSummary;
   backHref: string;
   settingsOpen?: boolean;
+  canOpenAdvanced?: boolean;
   onSettingsToggle?: () => void;
   onAdvancedView?: () => void;
-  onCardSettings?: () => void;
   onResetRange?: () => void;
+  onRefresh?: () => void;
 }
 
 type HistoryTranslate = (key: string, options?: Record<string, unknown>) => string;
@@ -22,10 +23,11 @@ export const HistoryDetailHeader: React.FC<HistoryDetailHeaderProps> = ({
   card,
   backHref,
   settingsOpen = false,
+  canOpenAdvanced = false,
   onSettingsToggle,
   onAdvancedView,
-  onCardSettings,
   onResetRange,
+  onRefresh,
 }) => {
   const { t: translate } = useTranslation('history');
   const t = translate as HistoryTranslate;
@@ -66,14 +68,16 @@ export const HistoryDetailHeader: React.FC<HistoryDetailHeaderProps> = ({
               aria-label={t('history.settings.menuLabel')}
               className="absolute right-0 top-full z-20 mt-2 w-44 rounded-md border border-[var(--border)] bg-[var(--surface)] p-1 shadow-lg"
             >
-              <button
-                type="button"
-                role="menuitem"
-                className="block w-full rounded px-3 py-2 text-left text-sm font-semibold text-[var(--text)] hover:bg-[var(--secondary-bg)]"
-                onClick={onAdvancedView}
-              >
-                {t('history.settings.advancedView')}
-              </button>
+              {canOpenAdvanced && (
+                <button
+                  type="button"
+                  role="menuitem"
+                  className="block w-full rounded px-3 py-2 text-left text-sm font-semibold text-[var(--text)] hover:bg-[var(--secondary-bg)]"
+                  onClick={onAdvancedView}
+                >
+                  {t('history.settings.advancedView')}
+                </button>
+              )}
               <button
                 type="button"
                 role="menuitem"
@@ -85,8 +89,18 @@ export const HistoryDetailHeader: React.FC<HistoryDetailHeaderProps> = ({
               <button
                 type="button"
                 role="menuitem"
-                className="block w-full rounded px-3 py-2 text-left text-sm font-semibold text-[var(--text)] opacity-70 hover:bg-[var(--secondary-bg)]"
-                onClick={onCardSettings}
+                className="block w-full rounded px-3 py-2 text-left text-sm font-semibold text-[var(--text)] hover:bg-[var(--secondary-bg)]"
+                onClick={onRefresh}
+              >
+                {t('history.settings.refresh')}
+              </button>
+              <button
+                type="button"
+                role="menuitem"
+                disabled
+                aria-disabled="true"
+                title={t('history.settings.cardSettingsUnavailable')}
+                className="block w-full cursor-not-allowed rounded px-3 py-2 text-left text-sm font-semibold text-[var(--text-tertiary)] opacity-60"
               >
                 {t('history.settings.cardSettings')}
               </button>

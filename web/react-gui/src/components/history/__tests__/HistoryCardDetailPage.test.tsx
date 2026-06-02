@@ -26,7 +26,9 @@ const { translateForTest } = vi.hoisted(() => {
     'history.settings.menuLabel': 'Card settings',
     'history.settings.advancedView': 'Advanced View',
     'history.settings.cardSettings': 'Card settings',
+    'history.settings.cardSettingsUnavailable': 'Card settings are not available yet.',
     'history.settings.resetRange': 'Reset range',
+    'history.settings.refresh': 'Refresh',
     'history.inspector.title': 'Inspector',
     'history.inspector.context': 'Selected point',
     'history.inspector.close': 'Close',
@@ -37,6 +39,7 @@ const { translateForTest } = vi.hoisted(() => {
     'history.inspector.syncState': 'Sync state',
     'history.inspector.dataAsOf': 'Data as of',
     'history.inspector.events': 'Events',
+    'history.inspector.eventFallback': 'History event',
     'history.inspector.noInterpretation': 'No local interpretation for this selection.',
     'history.sourceFilter.label': 'Source',
     'history.sourceFilter.all': 'All',
@@ -101,6 +104,8 @@ const { translateForTest } = vi.hoisted(() => {
     'history.gatewayStatus.status.online': 'Online',
     'history.gatewayStatus.category.system': 'System',
     'history.gatewayStatus.metric.cpu': 'CPU',
+    'history.irrigationTimeline.eventLabel.irrigation': 'Irrigation event',
+    'history.irrigationTimeline.eventLabel.manualOverride': 'Manual override',
     'history.interpretation.title': 'Local interpretation',
     'history.interpretation.rootZoneDry.title': 'Root zone dry',
     'history.interpretation.rootZoneDry.body': 'Dry for {{hoursDry}} hours',
@@ -628,6 +633,42 @@ describe('History card detail route', () => {
     expect(screen.getByText('ABCDEF0123456789')).toBeInTheDocument();
   });
 
+  it('hides Advanced View from settings when the card does not support advanced diagnostics', async () => {
+    vi.mocked(historyAPI.getZoneCards).mockResolvedValue({
+      zoneId: 12,
+      generatedAt: '2026-05-31T10:00:00Z',
+      cards: [
+        zoneCard({
+          views: ['soil-profile', 'line-chart'],
+          defaultView: 'soil-profile',
+        }),
+      ],
+    });
+
+    renderAppAtRoute('/history/zones/12/cards/soil-card%3Aroot-zone');
+
+    await screen.findByRole('heading', { level: 1, name: 'Soil - Root Zone' });
+    fireEvent.click(screen.getByRole('button', { name: 'Open card settings' }));
+    const menu = screen.getByRole('menu', { name: 'Card settings' });
+
+    expect(within(menu).queryByRole('menuitem', { name: 'Advanced View' })).not.toBeInTheDocument();
+    expect(within(menu).getByRole('menuitem', { name: 'Card settings' })).toBeDisabled();
+  });
+
+  it('refreshes selected card data from the settings menu fallback', async () => {
+    renderAppAtRoute('/history/zones/12/cards/soil-card%3Aroot-zone');
+
+    await waitFor(() => expect(historyAPI.getZoneCardData).toHaveBeenCalledTimes(1));
+    historyAPIMock.getZoneCardData.mockClear();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Open card settings' }));
+    fireEvent.click(within(screen.getByRole('menu', { name: 'Card settings' })).getByRole('menuitem', { name: 'Refresh' }));
+
+    await waitFor(() => {
+      expect(historyAPI.getZoneCardData).toHaveBeenCalledTimes(1);
+    });
+  });
+
   it('shows display-safe source chips for merged cards and refetches with sourceKey', async () => {
     vi.mocked(historyAPI.getZoneCards).mockResolvedValue({
       zoneId: 12,
@@ -839,7 +880,7 @@ describe('History card detail route', () => {
           id: 'irrigation-1',
           type: 'irrigation',
           t: '2026-05-31T08:00:00.000Z',
-          label: 'Irrigation event',
+          label: 'raw_payload ABCDEF0123456789',
           severity: 'info',
           metadata: {},
         },
@@ -880,6 +921,7 @@ describe('History card detail route', () => {
     expect(dialog).toHaveTextContent('96% coverage');
     expect(dialog).toHaveTextContent('Local');
     expect(dialog).toHaveTextContent('Irrigation event');
+    expect(dialog).not.toHaveTextContent('raw_payload ABCDEF0123456789');
     expect(screen.getByRole('button', { name: 'Close' })).toHaveFocus();
 
     fireEvent.click(screen.getByRole('button', { name: 'Close' }));

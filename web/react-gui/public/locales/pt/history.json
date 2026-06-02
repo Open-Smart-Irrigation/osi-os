@@ -507,7 +507,9 @@
       "menuLabel": "Card settings",
       "advancedView": "Advanced View",
       "cardSettings": "Card settings",
-      "resetRange": "Reset range"
+      "resetRange": "Reset range",
+      "cardSettingsUnavailable": "Card settings are not available yet.",
+      "refresh": "Refresh"
     },
     "inspector": {
       "title": "Inspector",
@@ -520,7 +522,8 @@
       "syncState": "Sync state",
       "dataAsOf": "Data as of",
       "events": "Events",
-      "noInterpretation": "No local interpretation for this selection."
+      "noInterpretation": "No local interpretation for this selection.",
+      "eventFallback": "History event"
     }
   }
 }
