@@ -554,6 +554,7 @@ describe('History card detail route', () => {
     expect(sourceFilter).toContainElement(chameleonTwo);
     expect(all).toHaveAttribute('aria-pressed', 'true');
     await waitFor(() => {
+      expect(historyAPI.getZoneCardData).toHaveBeenCalled();
       expect(firstZoneCardDataRequest()).toEqual(expect.not.objectContaining({ sourceKey: expect.anything() }));
     });
     historyAPIMock.getZoneCardData.mockClear();

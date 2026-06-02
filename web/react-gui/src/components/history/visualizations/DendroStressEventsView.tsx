@@ -49,6 +49,19 @@ function tone(event: Pick<HistoryEvent, 'severity'>): string {
   return 'border-[var(--border)] bg-[var(--surface)] text-[var(--text)]';
 }
 
+function isDendroStressInterpretation(interpretation: HistoryInterpretation): boolean {
+  const haystack = [
+    interpretation.id,
+    interpretation.ruleId,
+    interpretation.titleKey,
+    interpretation.bodyKey,
+    interpretation.title,
+    interpretation.body,
+    interpretation.evidence?.map((item) => [item.type, item.seriesId, item.status].filter(Boolean).join(' ')).join(' '),
+  ].filter(Boolean).join(' ').toLowerCase();
+  return /dendro|stem|shrink|stress|recovery|growth/.test(haystack);
+}
+
 function interpretationLabel(interpretation: HistoryInterpretation): string | null {
   return normalizedText(interpretation.title) ?? normalizedText(interpretation.body);
 }
@@ -58,6 +71,7 @@ export const DendroStressEventsView: React.FC<DendroStressEventsViewProps> = ({ 
   const t = translate as HistoryTranslate;
   const events = Array.isArray(data?.events) ? data.events : [];
   const interpretations = (Array.isArray(data?.interpretations) ? data.interpretations : [])
+    .filter(isDendroStressInterpretation)
     .map(interpretationLabel)
     .filter((label): label is string => Boolean(label && !looksLikeRawSourceToken(label)));
 

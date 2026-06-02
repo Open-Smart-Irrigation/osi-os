@@ -26,12 +26,14 @@ const { translateForTest } = vi.hoisted(() => {
     'history.soilIrrigationResponse.title': 'Soil irrigation response',
     'history.soilIrrigationResponse.emptyTitle': 'No irrigation response events',
     'history.soilIrrigationResponse.emptyBody': 'No irrigation response events in this range.',
+    'history.soilIrrigationResponse.eventsCount': '{{count}} irrigation events',
     'history.dendroLineChart.title': 'Dendro line chart',
     'history.dendroLineChart.emptyTitle': 'No dendrometer line data',
     'history.dendroLineChart.emptyBody': 'Dendrometer readings will appear here when history data is available.',
     'history.dendroStressEvents.title': 'Dendro stress events',
     'history.dendroStressEvents.emptyTitle': 'No stress events',
     'history.dendroStressEvents.emptyBody': 'No stress events in this range.',
+    'history.dendroStressEvents.eventsCount': '{{count}} stress events',
   };
 
   return {
@@ -117,5 +119,55 @@ describe('History placeholder view replacements', () => {
     expect(
       screen.queryByText('Chart and calendar data will load here when card data APIs are enabled.'),
     ).not.toBeInTheDocument();
+  });
+
+  it('keeps Soil Irrigation Response in its empty state for generic interpretations', () => {
+    render(
+      <HistoryCardVisualization
+        card={card('soil', 'irrigation-response')}
+        data={{
+          ...data('soil', 'irrigation-response'),
+          interpretations: [
+            {
+              id: 'coverage-gap',
+              source: 'local-rule',
+              severity: 'warning',
+              title: 'Sensor data missing during selected period.',
+              evidence: [{ type: 'coverage', coveragePct: 42 }],
+              confidence: null,
+            },
+          ],
+        }}
+        selectedView="irrigation-response"
+      />,
+    );
+
+    expect(screen.getByText('No irrigation response events')).toBeInTheDocument();
+    expect(screen.queryByText('0 irrigation events')).not.toBeInTheDocument();
+  });
+
+  it('keeps Dendro Stress Events in its empty state for generic interpretations', () => {
+    render(
+      <HistoryCardVisualization
+        card={card('dendro', 'stress-events')}
+        data={{
+          ...data('dendro', 'stress-events'),
+          interpretations: [
+            {
+              id: 'coverage-gap',
+              source: 'local-rule',
+              severity: 'warning',
+              title: 'Sensor data missing during selected period.',
+              evidence: [{ type: 'coverage', coveragePct: 42 }],
+              confidence: null,
+            },
+          ],
+        }}
+        selectedView="stress-events"
+      />,
+    );
+
+    expect(screen.getByText('No stress events')).toBeInTheDocument();
+    expect(screen.queryByText('0 stress events')).not.toBeInTheDocument();
   });
 });

@@ -692,6 +692,19 @@ test('aggregates SQL-backed device_data with parameterized range queries and rol
     assert.strictEqual(autoRollup.source, 'history_channel_rollups');
     assert.match(db.lastQuery.sql, /FROM history_channel_rollups/);
 
+    const unfilteredScopedRollup = await helper.aggregateDeviceData(db, {
+      zoneId: 7,
+      cardType: 'soil',
+      logicalSourceKey: 'root-zone',
+      sourceKeys: ['AA00000000000001'],
+      start: '2026-05-31T00:00:00.000Z',
+      end: '2026-06-01T00:00:00.000Z',
+      aggregation: 'daily',
+      channels: ['swt_1'],
+    });
+    assert.strictEqual(unfilteredScopedRollup.source, 'history_channel_rollups');
+    assert.match(db.lastQuery.sql, /FROM history_channel_rollups/);
+
     const filteredLongRange = await helper.aggregateDeviceData(db, {
       zoneId: 7,
       cardType: 'soil',
@@ -702,6 +715,7 @@ test('aggregates SQL-backed device_data with parameterized range queries and rol
       range: '30d',
       aggregation: 'auto',
       channels: ['swt_1'],
+      sourceFilterActive: true,
     });
     assert.strictEqual(filteredLongRange.aggregation, 'daily');
     assert.strictEqual(filteredLongRange.source, 'device_data');
@@ -736,6 +750,7 @@ test('uses live device_data for long-range source-filtered requests', async () =
       aggregation: 'auto',
       channels: ['swt_1'],
       useRollups: true,
+      sourceFilterActive: true,
     });
 
     assert.strictEqual(result.aggregation, 'daily');

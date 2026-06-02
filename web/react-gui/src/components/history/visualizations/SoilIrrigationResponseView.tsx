@@ -51,6 +51,19 @@ function responseText(t: HistoryTranslate, event: HistoryEvent): string | null {
   return null;
 }
 
+function isIrrigationInterpretation(interpretation: HistoryInterpretation): boolean {
+  const haystack = [
+    interpretation.id,
+    interpretation.ruleId,
+    interpretation.titleKey,
+    interpretation.bodyKey,
+    interpretation.title,
+    interpretation.body,
+    interpretation.evidence?.map((item) => [item.type, item.seriesId, item.status].filter(Boolean).join(' ')).join(' '),
+  ].filter(Boolean).join(' ').toLowerCase();
+  return /irrigat|watering|wet response|dry response|manual override/.test(haystack);
+}
+
 function interpretationLabel(interpretation: HistoryInterpretation): string | null {
   return normalizedText(interpretation.title) ?? normalizedText(interpretation.body);
 }
@@ -59,8 +72,9 @@ export const SoilIrrigationResponseView: React.FC<SoilIrrigationResponseViewProp
   const { t: translate } = useTranslation('history');
   const t = translate as HistoryTranslate;
   const events = (Array.isArray(data?.events) ? data.events : [])
-    .filter((event) => String(event.type || '').toLowerCase().includes('irrigation') || isRecord(event.metadata));
+    .filter((event) => String(event.type || '').toLowerCase().includes('irrigation'));
   const interpretations = (Array.isArray(data?.interpretations) ? data.interpretations : [])
+    .filter(isIrrigationInterpretation)
     .map(interpretationLabel)
     .filter((label): label is string => Boolean(label && !looksLikeRawSourceToken(label)));
 
