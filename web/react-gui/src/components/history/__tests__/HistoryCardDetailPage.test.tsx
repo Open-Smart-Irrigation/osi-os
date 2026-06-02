@@ -43,6 +43,8 @@ const { translateForTest } = vi.hoisted(() => {
     'history.inspector.noInterpretation': 'No local interpretation for this selection.',
     'history.sourceFilter.label': 'Source',
     'history.sourceFilter.all': 'All',
+    'history.sources.button': 'Sources',
+    'history.sources.menuLabel': 'Card sources',
     'history.rangeShort.12h': '12h',
     'history.rangeShort.24h': '24h',
     'history.rangeShort.7d': '7D',
@@ -517,7 +519,7 @@ describe('History card detail route', () => {
     expect(screen.queryByText('0016C001F11766E7')).not.toBeInTheDocument();
   });
 
-  it('shows required range controls and refetches card data when a supported range is selected', async () => {
+  it('does not render range controls and still fetches the default range', async () => {
     vi.mocked(historyAPI.getZoneCards).mockResolvedValue({
       zoneId: 12,
       generatedAt: '2026-05-31T10:00:00Z',
@@ -531,21 +533,12 @@ describe('History card detail route', () => {
 
     renderAppAtRoute('/history/zones/12/cards/soil-card%3Aroot-zone');
 
-    const rangeControl = await screen.findByRole('group', { name: 'Date range' });
-    const twelveHour = screen.getByRole('button', { name: '12h' });
-    const twentyFourHour = screen.getByRole('button', { name: '24h' });
-    const sevenDay = screen.getByRole('button', { name: '7D' });
-    const thirtyDay = screen.getByRole('button', { name: '30D' });
-    const season = screen.getByRole('button', { name: 'Season' });
-
-    expect(rangeControl).toContainElement(twelveHour);
-    expect(rangeControl).toContainElement(twentyFourHour);
-    expect(rangeControl).toContainElement(sevenDay);
-    expect(rangeControl).toContainElement(thirtyDay);
-    expect(rangeControl).toContainElement(season);
-    expect(twentyFourHour).toHaveAttribute('aria-pressed', 'true');
-    expect(thirtyDay).toBeDisabled();
-    expect(season).toBeDisabled();
+    await screen.findByRole('heading', { level: 1, name: 'Soil - Root Zone' });
+    expect(screen.queryByRole('group', { name: 'Date range' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '12h' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '24h' })).not.toBeInTheDocument();
+    expect(screen.getByTestId('view-mode-label')).toHaveTextContent(/Soil Profile/i);
+    expect(screen.getByTestId('view-mode-label')).toHaveTextContent(/24h/i);
 
     await waitFor(() => {
       expect(firstZoneCardDataRequest()).toEqual(
@@ -555,24 +548,9 @@ describe('History card detail route', () => {
         }),
       );
     });
-    historyAPIMock.getZoneCardData.mockClear();
-
-    fireEvent.click(sevenDay);
-
-    await waitFor(() => {
-      expect(sevenDay).toHaveAttribute('aria-pressed', 'true');
-      expect(historyAPI.getZoneCardData).toHaveBeenCalledWith(
-        12,
-        'soil-card:root-zone',
-        expect.objectContaining({
-          range: expect.objectContaining({ label: '7d' }),
-          aggregation: 'hourly',
-        }),
-      );
-    });
   });
 
-  it('shows card-specific mobile view controls without exposing Advanced as a primary view', async () => {
+  it('shows a passive card-specific view label without segmented view controls', async () => {
     vi.mocked(historyAPI.getZoneCards).mockResolvedValue({
       zoneId: 12,
       generatedAt: '2026-05-31T10:00:00Z',
@@ -586,30 +564,15 @@ describe('History card detail route', () => {
 
     renderAppAtRoute('/history/zones/12/cards/soil-card%3Aroot-zone');
 
-    const viewControl = await screen.findByRole('group', { name: 'View' });
-    const soilProfile = screen.getByRole('button', { name: 'Soil Profile' });
-    const lineChart = screen.getByRole('button', { name: 'Line Chart' });
-
-    expect(viewControl).toContainElement(soilProfile);
-    expect(viewControl).toContainElement(lineChart);
-    expect(within(viewControl).queryByRole('button', { name: 'Advanced View' })).not.toBeInTheDocument();
-    expect(soilProfile).toHaveAttribute('aria-pressed', 'true');
+    await screen.findByRole('heading', { level: 1, name: 'Soil - Root Zone' });
+    expect(screen.queryByRole('group', { name: 'View' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Line Chart' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Advanced View' })).not.toBeInTheDocument();
+    expect(screen.getByTestId('view-mode-label')).toHaveTextContent(/Soil Profile/i);
 
     await waitFor(() => {
       expect(firstZoneCardDataRequest()).toEqual(
         expect.objectContaining({ view: 'soil-profile' }),
-      );
-    });
-    historyAPIMock.getZoneCardData.mockClear();
-
-    fireEvent.click(lineChart);
-
-    await waitFor(() => {
-      expect(lineChart).toHaveAttribute('aria-pressed', 'true');
-      expect(historyAPI.getZoneCardData).toHaveBeenCalledWith(
-        12,
-        'soil-card:root-zone',
-        expect.objectContaining({ view: 'line-chart' }),
       );
     });
   });
@@ -630,8 +593,8 @@ describe('History card detail route', () => {
 
     expect(await screen.findByRole('heading', { level: 1, name: 'Soil - Root Zone' })).toBeInTheDocument();
     expect(screen.getAllByRole('heading', { level: 1 })).toHaveLength(1);
-    const viewControl = screen.getByRole('group', { name: 'View' });
-    expect(within(viewControl).queryByRole('button', { name: 'Advanced View' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('group', { name: 'View' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Advanced View' })).not.toBeInTheDocument();
     expect(screen.queryByText('ABCDEF0123456789')).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: 'Open card settings' }));
@@ -684,7 +647,7 @@ describe('History card detail route', () => {
     });
   });
 
-  it('shows display-safe source chips for merged cards and refetches with sourceKey', async () => {
+  it('shows display-safe source popover for merged cards and refetches when narrowed', async () => {
     vi.mocked(historyAPI.getZoneCards).mockResolvedValue({
       zoneId: 12,
       generatedAt: '2026-05-31T10:00:00Z',
@@ -702,15 +665,14 @@ describe('History card detail route', () => {
 
     renderAppAtRoute('/history/zones/12/cards/soil-card%3Aroot-zone');
 
-    const sourceFilter = await screen.findByRole('group', { name: 'Source' });
-    const all = screen.getByRole('button', { name: 'All' });
-    const chameleonOne = screen.getByRole('button', { name: 'Chameleon 1' });
-    const chameleonTwo = screen.getByRole('button', { name: 'Chameleon 2' });
+    await screen.findByRole('heading', { level: 1, name: 'Soil - Root Zone' });
+    expect(screen.queryByRole('group', { name: 'Source' })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /Sources/i }));
+    const chameleonOne = screen.getByLabelText('Chameleon 1');
+    const chameleonTwo = screen.getByLabelText('Chameleon 2');
 
-    expect(sourceFilter).toContainElement(all);
-    expect(sourceFilter).toContainElement(chameleonOne);
-    expect(sourceFilter).toContainElement(chameleonTwo);
-    expect(all).toHaveAttribute('aria-pressed', 'true');
+    expect(chameleonOne).toBeChecked();
+    expect(chameleonTwo).toBeChecked();
     await waitFor(() => {
       expect(historyAPI.getZoneCardData).toHaveBeenCalled();
       expect(firstZoneCardDataRequest()).toEqual(expect.not.objectContaining({ sourceKey: expect.anything() }));
@@ -720,11 +682,11 @@ describe('History card detail route', () => {
     fireEvent.click(chameleonTwo);
 
     await waitFor(() => {
-      expect(chameleonTwo).toHaveAttribute('aria-pressed', 'true');
+      expect(chameleonTwo).not.toBeChecked();
       expect(historyAPI.getZoneCardData).toHaveBeenCalledWith(
         12,
         'soil-card:root-zone',
-        expect.objectContaining({ sourceKey: 'soil-source-2' }),
+        expect.objectContaining({ sourceKey: 'soil-source-1' }),
       );
     });
     expect(screen.queryByText(/[A-F0-9]{16}/)).not.toBeInTheDocument();
@@ -766,7 +728,7 @@ describe('History card detail route', () => {
 
     renderAppAtRoute('/history/zones/12/cards/soil-card%3Aroot-zone');
 
-    await screen.findByRole('group', { name: 'Date range' });
+    await screen.findByRole('heading', { level: 1, name: 'Soil - Root Zone' });
 
     await waitFor(() => {
       expect(firstZoneCardDataRequest()).toEqual(
@@ -777,7 +739,8 @@ describe('History card detail route', () => {
         }),
       );
     });
-    expect(screen.getByRole('button', { name: '12h' })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.queryByRole('button', { name: '12h' })).not.toBeInTheDocument();
+    expect(screen.getByTestId('view-mode-label')).toHaveTextContent(/12h/i);
   });
 
   it('renders the selected visualization inside the gesture surface without the desktop timeline brush', async () => {

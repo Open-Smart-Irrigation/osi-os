@@ -84,8 +84,8 @@ describe('HistoryVisualizationSurface', () => {
     expect(surface).toHaveStyle({ touchAction: 'none' });
     expect(surface).toHaveAttribute('data-history-visualization-surface', 'true');
     expect(pageRoot).not.toHaveStyle({ touchAction: 'none' });
-    expect(screen.getByText('24h')).toBeInTheDocument();
-    expect(screen.getByText('Raw')).toBeInTheDocument();
+    expect(screen.queryByText('24h')).not.toBeInTheDocument();
+    expect(screen.queryByText('Raw')).not.toBeInTheDocument();
   });
 
   it('pans the viewport on one-finger horizontal drag', () => {

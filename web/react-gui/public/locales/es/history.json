@@ -546,6 +546,10 @@
         "airTemperature": "Air temperature",
         "environment": "Environment"
       }
+    },
+    "sources": {
+      "button": "Sources",
+      "menuLabel": "Card sources"
     }
   }
 }

@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { formatHistorySourceLabel } from '../../../history/sourceLabels';
 import type { HistoryCardSummary } from '../../../history/types';
+import { HistorySourcePopover, type HistorySourcePopoverSource } from './HistorySourcePopover';
 
 interface HistoryDetailHeaderProps {
   zoneName: string | null;
@@ -14,6 +15,9 @@ interface HistoryDetailHeaderProps {
   onAdvancedView?: () => void;
   onResetRange?: () => void;
   onRefresh?: () => void;
+  sources?: readonly HistorySourcePopoverSource[];
+  enabledSourceKeys?: readonly string[];
+  onSourceKeysChange?: (enabledKeys: string[]) => void;
 }
 
 type HistoryTranslate = (key: string, options?: Record<string, unknown>) => string;
@@ -28,6 +32,9 @@ export const HistoryDetailHeader: React.FC<HistoryDetailHeaderProps> = ({
   onAdvancedView,
   onResetRange,
   onRefresh,
+  sources = [],
+  enabledSourceKeys = [],
+  onSourceKeysChange,
 }) => {
   const { t: translate } = useTranslation('history');
   const t = translate as HistoryTranslate;
@@ -51,6 +58,13 @@ export const HistoryDetailHeader: React.FC<HistoryDetailHeaderProps> = ({
             <p className="truncate text-sm font-medium text-[var(--text)]">{sourceLabel}</p>
           )}
         </div>
+        {onSourceKeysChange && (
+          <HistorySourcePopover
+            sources={sources}
+            enabledKeys={enabledSourceKeys}
+            onChange={onSourceKeysChange}
+          />
+        )}
         <div className="relative">
           <button
             type="button"

@@ -8,10 +8,7 @@ import {
   HistoryInspectorSheet,
   type HistoryInspectorSelection,
 } from '../components/history/mobile/HistoryInspectorSheet';
-import { HistoryRangeSegmentedControl } from '../components/history/mobile/HistoryRangeSegmentedControl';
-import { HistorySourceFilter } from '../components/history/mobile/HistorySourceFilter';
 import { HistoryVisualizationSurface } from '../components/history/mobile/HistoryVisualizationSurface';
-import { HistoryViewModeSegmentedControl } from '../components/history/mobile/HistoryViewModeSegmentedControl';
 import { useFeatureFlags } from '../history/useFeatureFlags';
 import { useHistoryCardAdvancedData } from '../history/useHistoryCardAdvancedData';
 import { useHistoryCardData } from '../history/useHistoryCardData';
@@ -171,6 +168,23 @@ function routeCardIdForCard(card: HistoryCardSummary): string {
   return card.scope === 'gateway' ? GATEWAY_ROUTE_CARD_ID : card.cardId;
 }
 
+function sourceOptionsForCard(card: HistoryCardSummary | null): Array<{ key: string; name: string }> {
+  if (!card || (card.sourceDeviceCount ?? card.sourceDevices?.length ?? 0) <= 1) return [];
+  const seen = new Set<string>();
+  return (card.sourceDevices ?? []).reduce<Array<{ key: string; name: string }>>((options, device) => {
+    const key = typeof device.sourceKey === 'string' ? device.sourceKey.trim() : '';
+    const name = typeof device.name === 'string' ? device.name.trim() : '';
+    if (!key || !name || /\b[A-F0-9]{16}\b/i.test(name) || seen.has(key)) return options;
+    seen.add(key);
+    options.push({ key, name });
+    return options;
+  }, []);
+}
+
+function formatViewLabel(t: HistoryTranslate, view: HistoryViewMode): string {
+  return t(`history.viewMode.${view}`);
+}
+
 const HistoryDetailError: React.FC<{
   title: string;
   body: string;
@@ -263,12 +277,8 @@ export const HistoryCardDetailPage: React.FC = () => {
     ),
     [resolvedCard, routeScope, t],
   );
-  const primaryViews = useMemo(
-    () => (displayCard ? primaryViewModes(displayCard.views) : []),
-    [displayCard],
-  );
   const [userSelectedView, setUserSelectedView] = useState<{ cardId: string; view: HistoryViewMode } | null>(null);
-  const [selectedSource, setSelectedSource] = useState<{ cardId: string; sourceKey: string | null } | null>(null);
+  const [enabledSources, setEnabledSources] = useState<{ cardId: string; keys: string[] } | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const defaultRange = displayCard?.defaultRange ?? '24h';
   const timeViewport = useTimeViewport(
@@ -286,8 +296,16 @@ export const HistoryCardDetailPage: React.FC = () => {
     return defaultPrimaryViewForCard(displayCard);
   }, [displayCard, userSelectedView]);
   const shouldRenderAdvanced = selectedView === 'advanced';
-  const selectedSourceKey = displayCard && selectedSource?.cardId === displayCard.cardId
-    ? selectedSource.sourceKey
+  const sourceOptions = useMemo(() => sourceOptionsForCard(displayCard), [displayCard]);
+  const allSourceKeys = useMemo(() => sourceOptions.map((source) => source.key), [sourceOptions]);
+  const enabledSourceKeys = useMemo(() => {
+    if (!displayCard || sourceOptions.length <= 1) return allSourceKeys;
+    if (enabledSources?.cardId !== displayCard.cardId) return allSourceKeys;
+    const valid = enabledSources.keys.filter((key) => allSourceKeys.includes(key));
+    return valid.length > 0 ? valid : allSourceKeys;
+  }, [allSourceKeys, displayCard, enabledSources, sourceOptions.length]);
+  const selectedSourceKey = sourceOptions.length > 1 && enabledSourceKeys.length === 1
+    ? enabledSourceKeys[0]
     : null;
   const cardData = useHistoryCardData({
     scope: resolvedScope,
@@ -338,12 +356,6 @@ export const HistoryCardDetailPage: React.FC = () => {
     if (date) setInspectorSelection({ kind: 'date', date, day: calendarDaysByDate.get(date) ?? null });
   }, [calendarDaysByDate]);
 
-  const handleRangeChange = useCallback((range: HistoryRangeLabel) => {
-    timeViewport.setViewport(
-      setTimeViewportRange(range, new Date(), timeViewport.viewport.range.timezone),
-    );
-  }, [timeViewport]);
-
   const handleResetRange = useCallback(() => {
     if (!displayCard) return;
     setSettingsOpen(false);
@@ -351,11 +363,6 @@ export const HistoryCardDetailPage: React.FC = () => {
       setTimeViewportRange(displayCard.defaultRange, new Date(), timeViewport.viewport.range.timezone),
     );
   }, [displayCard, timeViewport]);
-
-  const handleViewChange = useCallback((view: HistoryViewMode) => {
-    if (!displayCard) return;
-    setUserSelectedView({ cardId: displayCard.cardId, view });
-  }, [displayCard]);
 
   const handleAdvancedView = useCallback(() => {
     if (!displayCard || !displayCard.views.includes('advanced')) return;
@@ -380,10 +387,11 @@ export const HistoryCardDetailPage: React.FC = () => {
     }, 0);
   }, []);
 
-  const handleSourceChange = useCallback((sourceKey: string | null) => {
+  const handleSourceKeysChange = useCallback((keys: string[]) => {
     if (!displayCard) return;
-    setSelectedSource({ cardId: displayCard.cardId, sourceKey });
-  }, [displayCard]);
+    const valid = keys.filter((key) => allSourceKeys.includes(key));
+    setEnabledSources({ cardId: displayCard.cardId, keys: valid.length > 0 ? valid : allSourceKeys });
+  }, [allSourceKeys, displayCard]);
 
   const isVisualizationEvent = useCallback((target: EventTarget | null): boolean => {
     return target instanceof Element && Boolean(target.closest(HISTORY_VISUALIZATION_SURFACE_SELECTOR));
@@ -489,10 +497,12 @@ export const HistoryCardDetailPage: React.FC = () => {
   }, [featureFlags.historyEnabled, resolvedCard, routeScope]);
 
   useEffect(() => {
-    if (!displayCard || selectedSource?.cardId !== displayCard.cardId || selectedSource.sourceKey === null) return;
-    const validSource = (displayCard.sourceDevices ?? []).some((device) => device.sourceKey === selectedSource.sourceKey);
-    if (!validSource) setSelectedSource(null);
-  }, [displayCard, selectedSource]);
+    if (!displayCard || enabledSources?.cardId !== displayCard.cardId) return;
+    const valid = enabledSources.keys.filter((key) => allSourceKeys.includes(key));
+    if (valid.length !== enabledSources.keys.length || valid.length === 0) {
+      setEnabledSources(valid.length > 0 ? { cardId: displayCard.cardId, keys: valid } : null);
+    }
+  }, [allSourceKeys, displayCard, enabledSources]);
 
   if (!validRoute) {
     return (
@@ -544,6 +554,9 @@ export const HistoryCardDetailPage: React.FC = () => {
         onAdvancedView={handleAdvancedView}
         onResetRange={handleResetRange}
         onRefresh={handleRefresh}
+        sources={sourceOptions}
+        enabledSourceKeys={enabledSourceKeys}
+        onSourceKeysChange={handleSourceKeysChange}
       />
       <main
         data-testid="history-detail-scroll-root"
@@ -558,25 +571,12 @@ export const HistoryCardDetailPage: React.FC = () => {
           cardSwipeStartRef.current = null;
         }}
       >
-        <section className="space-y-3">
-          <HistoryRangeSegmentedControl
-            activeRange={timeViewport.viewport.range.label}
-            supportedRanges={displayCard.supportedRanges}
-            onRangeChange={handleRangeChange}
-          />
-          {primaryViews.length > 0 && (
-            <HistoryViewModeSegmentedControl
-              activeView={selectedView}
-              views={displayCard.views}
-              onViewChange={handleViewChange}
-            />
-          )}
-          <HistorySourceFilter
-            card={displayCard}
-            selectedSourceKey={selectedSourceKey}
-            onSourceChange={handleSourceChange}
-          />
-        </section>
+        <div
+          data-testid="view-mode-label"
+          className="py-1 text-center text-xs font-semibold text-[var(--text-tertiary)]"
+        >
+          {formatViewLabel(t, selectedView)} · {formatRangeLabel(t, timeViewport.viewport.range.label)}
+        </div>
         <div className="flex-1">
           {!displayCard.availability.available && (
             <div className="mb-4 rounded-lg border border-[var(--warning-bg)] bg-[var(--warning-bg)] px-4 py-3 text-sm text-[var(--warning-text)]">

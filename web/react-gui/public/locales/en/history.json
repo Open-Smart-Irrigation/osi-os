@@ -546,6 +546,10 @@
       "events": "Events",
       "noInterpretation": "No local interpretation for this selection.",
       "eventFallback": "History event"
+    },
+    "sources": {
+      "button": "Sources",
+      "menuLabel": "Card sources"
     }
   }
 }

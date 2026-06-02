@@ -26,8 +26,6 @@ export const HistoryVisualizationSurface: React.FC<HistoryVisualizationSurfacePr
   defaultRange,
   onViewportChange,
   onInspect,
-  rangeLabel,
-  aggregationLabel,
   className = '',
   children,
 }) => {
@@ -40,7 +38,6 @@ export const HistoryVisualizationSurface: React.FC<HistoryVisualizationSurfacePr
     onViewportChange,
     onInspect,
   });
-  const badges = [rangeLabel, aggregationLabel].filter((label): label is string => Boolean(label));
 
   return (
     <div
@@ -61,18 +58,6 @@ export const HistoryVisualizationSurface: React.FC<HistoryVisualizationSurfacePr
       <p id={helpId} className="sr-only">
         {t('history.detail.visualizationHelp')}
       </p>
-      {badges.length > 0 && (
-        <div className="mb-3 flex flex-wrap gap-2 text-xs font-semibold text-[var(--text-tertiary)]">
-          {badges.map((label) => (
-            <span
-              key={label}
-              className="rounded-md border border-[var(--border)] bg-[var(--secondary-bg)] px-2 py-1"
-            >
-              {label}
-            </span>
-          ))}
-        </div>
-      )}
       {children}
     </div>
   );
