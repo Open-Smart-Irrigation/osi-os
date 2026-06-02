@@ -450,6 +450,57 @@
     "source": {
       "multipleNamed": "{{count}} fuentes: {{names}}",
       "multiple": "{{count}} fuentes"
+    },
+    "soilLineChart": {
+      "title": "Soil line chart",
+      "emptyTitle": "No soil trend data",
+      "emptyBody": "Soil tension readings will appear here when history data is available.",
+      "pointsCount": "{{count}} readings",
+      "axisLabel": "{{unit}} axis",
+      "series": {
+        "soil1": "Soil 1",
+        "soil2": "Soil 2",
+        "soil3": "Soil 3",
+        "soil": "Soil {{index}}"
+      }
+    },
+    "soilIrrigationResponse": {
+      "title": "Soil irrigation response",
+      "emptyTitle": "No irrigation response events",
+      "emptyBody": "No irrigation response events in this range.",
+      "eventsCount": "{{count}} events",
+      "eventFallback": "Irrigation response",
+      "duration": "Duration: {{value}} min",
+      "interpretationsTitle": "Response notes"
+    },
+    "dendroLineChart": {
+      "title": "Dendro line chart",
+      "emptyTitle": "No dendrometer line data",
+      "emptyBody": "Dendrometer readings will appear here when history data is available.",
+      "pointsCount": "{{count}} readings",
+      "series": {
+        "stemChange": "Stem change",
+        "growth": "Growth",
+        "shrinkage": "Shrinkage",
+        "position": "Position",
+        "dendrometer": "Dendrometer"
+      }
+    },
+    "dendroStressEvents": {
+      "title": "Dendro stress events",
+      "emptyTitle": "No stress events",
+      "emptyBody": "No stress events in this range.",
+      "eventsCount": "{{count}} events",
+      "interpretationsTitle": "Stress notes",
+      "event": {
+        "stress": "Stress event",
+        "shrinkage": "Shrinkage stress",
+        "incompleteRecovery": "Incomplete recovery"
+      }
+    },
+    "sourceFilter": {
+      "label": "Source",
+      "all": "All"
     }
   }
 }

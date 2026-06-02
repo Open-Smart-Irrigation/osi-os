@@ -467,6 +467,9 @@ function normaliseHistoryCardSummary(row: any): HistoryCardSummary {
         ? String(device.typeId ?? device.type_id).trim() || null
         : null,
       role: typeof device?.role === 'string' && device.role.trim() ? device.role.trim() : null,
+      sourceKey: typeof (device?.sourceKey ?? device?.source_key) === 'string'
+        ? String(device.sourceKey ?? device.source_key).trim() || null
+        : null,
     })),
     metadata: normaliseHistoryCardMetadata(row?.metadata ?? {}),
     availability: normaliseHistoryCardAvailability(row?.availability ?? {}),
@@ -624,6 +627,7 @@ function buildHistoryCardDataParams(request: HistoryCardDataRequest): URLSearchP
   if (request.range.from) params.set('from', request.range.from);
   if (request.range.to) params.set('to', request.range.to);
   if (request.overlays.length > 0) params.set('overlays', request.overlays.join(','));
+  if (request.sourceKey) params.set('sourceKey', request.sourceKey);
   return params;
 }
 

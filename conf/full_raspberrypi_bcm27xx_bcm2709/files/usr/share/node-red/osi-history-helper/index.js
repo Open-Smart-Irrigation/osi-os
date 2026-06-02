@@ -83,6 +83,36 @@ function dendroSourceKey(deveui) {
   return `dendro-src-${crypto.createHash('sha256').update(normalized).digest('hex').slice(0, 12)}`;
 }
 
+function displaySafeSourceKey(cardType, device) {
+  const normalized = normalizeDeveui(device && (device.deveui || device.device_eui));
+  if (!normalized) return null;
+  const prefix = normalizeCardType(cardType) || 'source';
+  return `${prefix}-src-${crypto.createHash('sha256').update(normalized).digest('hex').slice(0, 12)}`;
+}
+
+function displayDeviceName(device, index) {
+  const name = String(device && device.name || '').trim();
+  if (name && !/\b[0-9a-fA-F]{16}\b/.test(name)) return name;
+  const typeId = String(device && device.type_id || '').trim();
+  if (typeId) return typeId.replace(/_/g, ' ').toLowerCase().replace(/\b\w/g, function(char) { return char.toUpperCase(); });
+  return 'Source ' + String(index + 1);
+}
+
+function displaySourceDevices(cardType, devices) {
+  return (devices || [])
+    .slice()
+    .sort((left, right) =>
+      String(normalizeDeveui(left.deveui || left.device_eui) || '').localeCompare(String(normalizeDeveui(right.deveui || right.device_eui) || ''))
+    )
+    .map((device, index) => ({
+      name: displayDeviceName(device, index),
+      typeId: String(device && device.type_id || '').trim() || null,
+      role: normalizeCardType(cardType) || null,
+      sourceKey: displaySafeSourceKey(cardType, device),
+    }))
+    .filter((device) => device.sourceKey);
+}
+
 function deriveCardId(options, cardTypeArg, logicalSourceKeyArg) {
   const input = typeof options === 'object' && options !== null
     ? options
@@ -150,13 +180,15 @@ function deriveCardsForZone(zone, devices) {
   const cards = [];
 
   const pushMerged = (cardType, predicate) => {
-    const count = scopedDevices.filter(predicate).length;
+    const sourceDevices = displaySourceDevices(cardType, scopedDevices.filter(predicate));
+    const count = sourceDevices.length;
     if (count > 0) {
       cards.push({
         id: deriveCardId({ zoneUuid, cardType }),
         cardType,
         logicalSourceKey: DEFAULT_SOURCE_KEYS[cardType],
         sourceDeviceCount: count,
+        sourceDevices,
       });
     }
   };
@@ -909,8 +941,12 @@ async function aggregateDeviceData(db, query = {}) {
   const logicalSourceKey = firstDefinedValue([query.logicalSourceKey, query.logical_source_key]);
   const useRollups = query.useRollups ?? query.use_rollups;
   const hasRollupIdentity = zoneId !== undefined && cardType && logicalSourceKey;
-  const shouldUseRollups = useRollups === true || (useRollups !== false && hasRollupIdentity && ['daily', 'weekly'].includes(aggregation));
   const deveuis = queryDeviceEuis(query);
+  const sourceFilterFlag = query.sourceFilterActive ?? query.source_filter_active;
+  const hasSourceFilter = sourceFilterFlag === true || sourceFilterFlag === 1 || String(sourceFilterFlag || '').toLowerCase() === 'true';
+  const shouldUseRollups =
+    !hasSourceFilter
+    && (useRollups === true || (useRollups !== false && hasRollupIdentity && ['daily', 'weekly'].includes(aggregation)));
   if (shouldUseRollups) {
     const channelIds = channels.map((channel) => channel.id);
     const placeholders = channelIds.map(() => '?').join(',');

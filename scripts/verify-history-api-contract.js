@@ -145,6 +145,10 @@ function verifyHistoryRouterImplementation(flows, failures) {
   assertContains(failures, source, 'soilRowsHaveWarning(latestRows)', 'merged soil summary warning classifier');
   assertContains(failures, source, 'sourceDeviceCount: summarySourceDevices.length', 'display-safe source count in card summaries');
   assertContains(failures, source, 'sourceLabels: displaySourceLabels(summarySourceDevices)', 'display-safe source labels in card summaries');
+  assertContains(failures, source, 'sourceKey: displaySafeSourceKey(role, device)', 'display-safe source keys in card summaries');
+  assertContains(failures, source, 'function sourceDevicesForQuery', 'sourceKey query filtering helper');
+  assertContains(failures, source, "httpError(400, 'Unknown history source')", 'invalid sourceKey 400 contract');
+  assertContains(failures, source, 'const sourceDevices = sourceDevicesForQuery(scopeContext, card, query, allSourceDevices)', 'sourceKey-filtered source devices for card data');
   assertContains(failures, source, 'environmentRowsHaveWarning(latestRows)', 'merged environment summary warning classifier');
   assertContains(failures, source, 'osiHistory.buildCalendar', 'helper-owned calendar classification');
   assertContains(failures, source, 'osiHistory.buildLocalInterpretations', 'helper-owned local interpretations');

@@ -167,6 +167,42 @@ test('derives the hub-scoped gateway card id', () => {
   assert.strictEqual(gateway.logicalSourceKey, 'hub');
 });
 
+test('derives display-safe source keys for merged soil and environment cards', () => {
+  const cards = helper.deriveCardsForZone(
+    { id: 7, zone_uuid: 'zone-uuid' },
+    [
+      {
+        deveui: 'A84041A75D5E7CFB',
+        type_id: 'DRAGINO_LSN50',
+        name: 'Chameleon 1',
+        irrigation_zone_id: 7,
+        chameleon_enabled: 1,
+        temp_enabled: 1,
+      },
+      {
+        deveui: 'A84041CE3F5ECF52',
+        type_id: 'DRAGINO_LSN50',
+        name: 'Chameleon 2',
+        irrigation_zone_id: 7,
+        chameleon_enabled: 1,
+        temp_enabled: 1,
+      },
+    ]
+  );
+
+  const soilCard = cards.find((card) => card.cardType === 'soil');
+  const environmentCard = cards.find((card) => card.cardType === 'environment');
+  assert(soilCard, 'soil card');
+  assert(environmentCard, 'environment card');
+  assert.deepStrictEqual(soilCard.sourceDevices.map((device) => device.name), ['Chameleon 1', 'Chameleon 2']);
+  assert.deepStrictEqual(environmentCard.sourceDevices.map((device) => device.name), ['Chameleon 1', 'Chameleon 2']);
+  for (const device of soilCard.sourceDevices.concat(environmentCard.sourceDevices)) {
+    assert.match(device.sourceKey, /^(soil|environment)-src-[0-9a-f]{12}$/);
+    assert(!device.sourceKey.includes('A84041A75D5E7CFB'));
+    assert(!device.sourceKey.includes('A84041CE3F5ECF52'));
+  }
+});
+
 test('classifies soil, environment, and dendro status with shared thresholds', () => {
   assert.strictEqual(helper.classifySoilStatus({ swtKpa: 9 }).status, 'wet_excess');
   assert.strictEqual(helper.classifySoilStatus({ swtKpa: 35 }).status, 'optimal');
@@ -655,12 +691,42 @@ test('aggregates SQL-backed device_data with parameterized range queries and rol
     assert.strictEqual(autoRollup.aggregationRequested, 'auto');
     assert.strictEqual(autoRollup.source, 'history_channel_rollups');
     assert.match(db.lastQuery.sql, /FROM history_channel_rollups/);
+
+    const unfilteredScopedRollup = await helper.aggregateDeviceData(db, {
+      zoneId: 7,
+      cardType: 'soil',
+      logicalSourceKey: 'root-zone',
+      sourceKeys: ['AA00000000000001'],
+      start: '2026-05-31T00:00:00.000Z',
+      end: '2026-06-01T00:00:00.000Z',
+      aggregation: 'daily',
+      channels: ['swt_1'],
+    });
+    assert.strictEqual(unfilteredScopedRollup.source, 'history_channel_rollups');
+    assert.match(db.lastQuery.sql, /FROM history_channel_rollups/);
+
+    const filteredLongRange = await helper.aggregateDeviceData(db, {
+      zoneId: 7,
+      cardType: 'soil',
+      logicalSourceKey: 'root-zone',
+      device_euis: ['AA00000000000001'],
+      start: '2026-05-31T00:00:00.000Z',
+      end: '2026-06-30T00:00:00.000Z',
+      range: '30d',
+      aggregation: 'auto',
+      channels: ['swt_1'],
+      sourceFilterActive: true,
+    });
+    assert.strictEqual(filteredLongRange.aggregation, 'daily');
+    assert.strictEqual(filteredLongRange.source, 'device_data');
+    assert.match(db.lastQuery.sql, /FROM device_data/);
+    assert.deepStrictEqual(db.lastQuery.params.slice(0, 3), ['AA00000000000001', '2026-05-31T00:00:00.000Z', '2026-06-30T00:00:00.000Z']);
   } finally {
     db.close();
   }
 });
 
-test('falls back to live device_data when requested rollups are empty', async () => {
+test('uses live device_data for long-range source-filtered requests', async () => {
   const db = createCliSqliteDb();
   try {
     db.runSql(`
@@ -684,10 +750,11 @@ test('falls back to live device_data when requested rollups are empty', async ()
       aggregation: 'auto',
       channels: ['swt_1'],
       useRollups: true,
+      sourceFilterActive: true,
     });
 
     assert.strictEqual(result.aggregation, 'daily');
-    assert.strictEqual(result.source, 'device_data_fallback');
+    assert.strictEqual(result.source, 'device_data');
     assert.strictEqual(result.buckets[0].series.swt_1.sampleCount, 2);
     assert.strictEqual(result.buckets[0].series.swt_1.latest, 30);
   } finally {

@@ -22,6 +22,8 @@ const { translateForTest } = vi.hoisted(() => {
     'history.detail.viewControlLabel': 'View',
     'history.detail.visualizationLabel': 'History visualization',
     'history.detail.visualizationHelp': 'Drag to pan, pinch to zoom, double tap to reset, or long press to inspect.',
+    'history.sourceFilter.label': 'Source',
+    'history.sourceFilter.all': 'All',
     'history.rangeShort.12h': '12h',
     'history.rangeShort.24h': '24h',
     'history.rangeShort.7d': '7D',
@@ -522,6 +524,72 @@ describe('History card detail route', () => {
         expect.objectContaining({ view: 'line-chart' }),
       );
     });
+  });
+
+  it('shows display-safe source chips for merged cards and refetches with sourceKey', async () => {
+    vi.mocked(historyAPI.getZoneCards).mockResolvedValue({
+      zoneId: 12,
+      generatedAt: '2026-05-31T10:00:00Z',
+      cards: [
+        zoneCard({
+          sourceDeviceCount: 2,
+          sourceLabels: ['Chameleon 1', 'Chameleon 2'],
+          sourceDevices: [
+            { name: 'Chameleon 1', typeId: 'DRAGINO_LSN50', role: 'soil', sourceKey: 'soil-source-1' },
+            { name: 'Chameleon 2', typeId: 'DRAGINO_LSN50', role: 'soil', sourceKey: 'soil-source-2' },
+          ],
+        }),
+      ],
+    });
+
+    renderAppAtRoute('/history/zones/12/cards/soil-card%3Aroot-zone');
+
+    const sourceFilter = await screen.findByRole('group', { name: 'Source' });
+    const all = screen.getByRole('button', { name: 'All' });
+    const chameleonOne = screen.getByRole('button', { name: 'Chameleon 1' });
+    const chameleonTwo = screen.getByRole('button', { name: 'Chameleon 2' });
+
+    expect(sourceFilter).toContainElement(all);
+    expect(sourceFilter).toContainElement(chameleonOne);
+    expect(sourceFilter).toContainElement(chameleonTwo);
+    expect(all).toHaveAttribute('aria-pressed', 'true');
+    await waitFor(() => {
+      expect(historyAPI.getZoneCardData).toHaveBeenCalled();
+      expect(firstZoneCardDataRequest()).toEqual(expect.not.objectContaining({ sourceKey: expect.anything() }));
+    });
+    historyAPIMock.getZoneCardData.mockClear();
+
+    fireEvent.click(chameleonTwo);
+
+    await waitFor(() => {
+      expect(chameleonTwo).toHaveAttribute('aria-pressed', 'true');
+      expect(historyAPI.getZoneCardData).toHaveBeenCalledWith(
+        12,
+        'soil-card:root-zone',
+        expect.objectContaining({ sourceKey: 'soil-source-2' }),
+      );
+    });
+    expect(screen.queryByText(/[A-F0-9]{16}/)).not.toBeInTheDocument();
+  });
+
+  it('does not render raw sourceLabel values in the normal detail header', async () => {
+    vi.mocked(historyAPI.getZoneCards).mockResolvedValue({
+      zoneId: 12,
+      generatedAt: '2026-05-31T10:00:00Z',
+      cards: [
+        zoneCard({
+          sourceLabels: [],
+          sourceDevices: [],
+          sourceLabel: 'A84041A75D5E7CFB',
+          sourceDeviceCount: 1,
+        }),
+      ],
+    });
+
+    renderAppAtRoute('/history/zones/12/cards/soil-card%3Aroot-zone');
+
+    await screen.findByRole('heading', { name: 'Soil - Root Zone' });
+    expect(screen.queryByText('A84041A75D5E7CFB')).not.toBeInTheDocument();
   });
 
   it('uses the card default range for the first detail data fetch when it is not 24h', async () => {
