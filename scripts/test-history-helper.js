@@ -392,6 +392,17 @@ test('startOfLocalDayMs returns the UTC instant of zone-local midnight', () => {
 
   const utc = helper.startOfLocalDayMs(Date.parse('2026-06-02T10:00:00Z'), 'UTC');
   assert.strictEqual(new Date(utc).toISOString(), '2026-06-02T00:00:00.000Z');
+
+  // Regression: the sub-second remainder of `nowMs` must not leak into the boundary,
+  // otherwise daily/weekly bucket_start jitters per run and breaks upsert idempotency.
+  assert.strictEqual(
+    new Date(helper.startOfLocalDayMs(Date.parse('2026-06-02T13:58:28.070Z'), 'UTC')).toISOString(),
+    '2026-06-02T00:00:00.000Z'
+  );
+  assert.strictEqual(
+    new Date(helper.startOfLocalDayMs(Date.parse('2026-06-02T13:58:28.910Z'), 'Europe/Zurich')).toISOString(),
+    '2026-06-01T22:00:00.000Z'
+  );
 });
 
 test('resolves automatic aggregation from range and reports the actual level', () => {
@@ -492,6 +503,33 @@ test('computeRollupBuckets returns completed buckets for a scope/level', async (
     assert.strictEqual(hour.mean_value, 15);
     assert.strictEqual(hour.bucket_level, 'hourly');
     assert.ok(rows.every((row) => row.bucket_end <= new Date(helper.startOfLocalDayMs(nowMs, 'UTC')).toISOString()));
+  } finally {
+    db.close();
+  }
+});
+
+test('computeRollupBuckets bucket_start is stable across run-times (idempotent key)', async () => {
+  const db = createCliSqliteDb();
+  try {
+    db.runSql(`
+      INSERT INTO devices(deveui,name,type_id,user_id,irrigation_zone_id,created_at,updated_at) VALUES('AA00000000000001','Soil','KIWI_SENSOR',1,7,'2026-05-20T00:00:00.000Z','2026-05-20T00:00:00.000Z');
+      INSERT INTO device_data(deveui,recorded_at,swt_1) VALUES
+        ('AA00000000000001','2026-06-01T08:30:00.000Z',10),
+        ('AA00000000000001','2026-06-02T08:30:00.000Z',20);
+    `);
+    const scope = {
+      zoneId: 7, cardType: 'soil', logicalSourceKey: 'root-zone',
+      channels: [{ id: 'swt_1', field: 'swt_1', unit: 'kPa' }],
+      deveuis: ['AA00000000000001'], timezone: 'UTC',
+    };
+    // Two runs at the same clock-day but different sub-second instants must yield identical keys.
+    const r1 = await helper.computeRollupBuckets(db, scope, 'daily', 120 * 24 * 3600 * 1000, Date.parse('2026-06-03T02:00:01.111Z'));
+    const r2 = await helper.computeRollupBuckets(db, scope, 'daily', 120 * 24 * 3600 * 1000, Date.parse('2026-06-03T02:05:09.777Z'));
+    const starts1 = r1.map((row) => row.bucket_start).sort();
+    const starts2 = r2.map((row) => row.bucket_start).sort();
+    assert.ok(starts1.length >= 2, 'has daily buckets');
+    assert.deepStrictEqual(starts1, starts2);
+    assert.ok(starts1.every((s) => s.endsWith('T00:00:00.000Z')), 'daily bucket_start is clean midnight');
   } finally {
     db.close();
   }

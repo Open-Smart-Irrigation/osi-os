@@ -1795,7 +1795,10 @@ function startOfLocalDayMs(nowMs, timezone) {
     Number(parts.minute),
     Number(parts.second)
   );
-  const offsetMs = wallClockAsUtcMs - instantMs;
+  // Floor to whole seconds so the sub-second remainder of `instantMs` does not leak
+  // into the day boundary (which would make daily/weekly bucket_start jitter per run).
+  const instantSecMs = Math.floor(instantMs / 1000) * 1000;
+  const offsetMs = wallClockAsUtcMs - instantSecMs;
   const localMidnightAsUtcMs = Date.UTC(Number(parts.year), Number(parts.month) - 1, Number(parts.day), 0, 0, 0);
   return localMidnightAsUtcMs - offsetMs;
 }
