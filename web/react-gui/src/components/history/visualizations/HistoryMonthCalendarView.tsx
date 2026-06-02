@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react';
+import React, { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import type {
   HistoryCalendar,
@@ -19,6 +19,7 @@ interface HistoryMonthCalendarViewProps {
   cardType: HistoryCardType;
   calendar: HistoryCalendar | null | undefined;
   onInspectDate?: (selection: HistoryCalendarDateSelection) => void;
+  selectedDate?: string | null;
 }
 
 type HistoryTranslate = (key: string, options?: Record<string, unknown>) => string;
@@ -191,6 +192,7 @@ export const HistoryMonthCalendarView: React.FC<HistoryMonthCalendarViewProps> =
   cardType,
   calendar,
   onInspectDate,
+  selectedDate,
 }) => {
   const { t: translate } = useTranslation('history');
   const t = translate as HistoryTranslate;
@@ -198,6 +200,7 @@ export const HistoryMonthCalendarView: React.FC<HistoryMonthCalendarViewProps> =
   const month = calendar ? monthKeyForCalendar(calendar) : null;
   const monthLabel = calendar && month ? formatMonthLabel(calendar, month) : t('history.calendar.title');
   const cells = useMemo(() => (calendar && month ? buildCells(calendar, month) : []), [calendar, month]);
+  const [internalSelectedDate, setInternalSelectedDate] = useState<string | null>(null);
 
   if (!calendar || !month || days.length === 0) {
     return (
@@ -252,6 +255,7 @@ export const HistoryMonthCalendarView: React.FC<HistoryMonthCalendarViewProps> =
             day: cell.day,
           };
           const selectCell = () => {
+            setInternalSelectedDate(cell.date);
             onInspectDate?.(inspectSelection);
           };
           const stopCalendarGesture = (event: React.SyntheticEvent) => {
@@ -264,6 +268,7 @@ export const HistoryMonthCalendarView: React.FC<HistoryMonthCalendarViewProps> =
               type="button"
               role="gridcell"
               aria-label={dayAriaLabel(t, monthLabel, cell.dayOfMonth, cell.day, cardType)}
+              aria-selected={(selectedDate ?? internalSelectedDate) === cell.date}
               data-state={cell.day.state}
               data-card-type={cardType}
               data-history-calendar-date={cell.date}

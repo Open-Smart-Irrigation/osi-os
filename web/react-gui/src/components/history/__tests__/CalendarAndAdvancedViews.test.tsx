@@ -228,7 +228,10 @@ describe('CalendarView', () => {
     expect(within(region).getByRole('gridcell', { name: /Dry stress/i })).toHaveAttribute('data-state', 'dry_stress');
     expect(within(region).getByRole('gridcell', { name: /Optimal/i })).toHaveAttribute('data-state', 'optimal');
     expect(within(region).queryByText('dry_stress')).not.toBeInTheDocument();
-    fireEvent.click(within(region).getByRole('gridcell', { name: /May 31/i }));
+    const may31 = within(region).getByRole('gridcell', { name: /May 31/i });
+    expect(may31).toHaveAttribute('aria-selected', 'false');
+    fireEvent.click(may31);
+    expect(may31).toHaveAttribute('aria-selected', 'true');
     expect(onInspectDate).toHaveBeenCalledWith(expect.objectContaining({ date: '2026-05-31' }));
   });
 });

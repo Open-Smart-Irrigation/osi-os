@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, type Mock } from 'vitest';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import '@testing-library/jest-dom';
 import React from 'react';
 import { SWRConfig } from 'swr';
@@ -22,6 +22,25 @@ const { translateForTest } = vi.hoisted(() => {
     'history.detail.viewControlLabel': 'View',
     'history.detail.visualizationLabel': 'History visualization',
     'history.detail.visualizationHelp': 'Drag to pan, pinch to zoom, double tap to reset, or long press to inspect.',
+    'history.settings.open': 'Open card settings',
+    'history.settings.menuLabel': 'Card settings',
+    'history.settings.advancedView': 'Advanced View',
+    'history.settings.cardSettings': 'Card settings',
+    'history.settings.cardSettingsUnavailable': 'Card settings are not available yet.',
+    'history.settings.resetRange': 'Reset range',
+    'history.settings.refresh': 'Refresh',
+    'history.inspector.title': 'Inspector',
+    'history.inspector.context': 'Selected point',
+    'history.inspector.close': 'Close',
+    'history.inspector.timestamp': 'Timestamp',
+    'history.inspector.date': 'Date',
+    'history.inspector.source': 'Source',
+    'history.inspector.coverage': 'Coverage',
+    'history.inspector.syncState': 'Sync state',
+    'history.inspector.dataAsOf': 'Data as of',
+    'history.inspector.events': 'Events',
+    'history.inspector.eventFallback': 'History event',
+    'history.inspector.noInterpretation': 'No local interpretation for this selection.',
     'history.sourceFilter.label': 'Source',
     'history.sourceFilter.all': 'All',
     'history.rangeShort.12h': '12h',
@@ -85,6 +104,19 @@ const { translateForTest } = vi.hoisted(() => {
     'history.gatewayStatus.status.online': 'Online',
     'history.gatewayStatus.category.system': 'System',
     'history.gatewayStatus.metric.cpu': 'CPU',
+    'history.irrigationTimeline.eventLabel.irrigation': 'Irrigation event',
+    'history.irrigationTimeline.eventLabel.manualOverride': 'Manual override',
+    'history.interpretation.title': 'Local interpretation',
+    'history.interpretation.rootZoneDry.title': 'Root zone dry',
+    'history.interpretation.rootZoneDry.body': 'Dry for {{hoursDry}} hours',
+    'history.advanced.title': 'Advanced diagnostics',
+    'history.advanced.loading': 'Loading advanced diagnostics...',
+    'history.advanced.emptyTitle': 'No advanced diagnostics',
+    'history.advanced.field.primaryDeveui': 'Device EUI',
+    'history.advanced.field.rssi': 'RSSI',
+    'history.advanced.availability.collected': 'Collected',
+    'history.advanced.availability.unknown_now': 'Unknown now',
+    'history.advanced.value.unavailable': 'Unavailable',
   };
 
   return {
@@ -118,6 +150,8 @@ vi.mock('../../../services/api', () => ({
     getGatewayCards: vi.fn(),
     getZoneCardData: vi.fn(),
     getGatewayCardData: vi.fn(),
+    getZoneCardAdvanced: vi.fn(),
+    getGatewayCardAdvanced: vi.fn(),
     markZoneCardOpened: vi.fn(),
   },
   irrigationZonesAPI: {
@@ -132,6 +166,7 @@ vi.mock('../../../services/api', () => ({
 const historyAPIMock = historyAPI as typeof historyAPI & {
   getGatewayCards: Mock;
   getZoneCardData: Mock;
+  getZoneCardAdvanced: Mock;
 };
 
 function firstZoneCardDataRequest() {
@@ -315,6 +350,45 @@ describe('History card detail route', () => {
       interpretations: [],
       freshness: { dataAsOf: '2026-05-31T10:00:00.000Z', syncState: 'local' },
       advancedFields: {},
+    });
+    vi.mocked(historyAPI.getZoneCardAdvanced).mockResolvedValue({
+      generatedAt: '2026-05-31T10:00:00.000Z',
+      cardId: 'soil-card:root-zone',
+      cardType: 'soil',
+      range: {
+        label: '24h',
+        from: '2026-05-30T10:00:00.000Z',
+        to: '2026-05-31T10:00:00.000Z',
+        timezone: 'UTC',
+      },
+      freshness: { dataAsOf: '2026-05-31T10:00:00.000Z', syncState: 'local' },
+      aggregation: {
+        level: 'raw',
+        bucketSizeSeconds: null,
+        coveragePct: 96,
+        coverageConfidence: 'configured',
+        pointCount: 12,
+      },
+      placeholder: {
+        schemaVersion: 1,
+        cardType: 'soil',
+        placeholder: false,
+        generatedAt: '2026-05-31T10:00:00.000Z',
+      },
+      advancedFields: {
+        primaryDeveui: {
+          field: 'primaryDeveui',
+          value: 'ABCDEF0123456789',
+          unit: null,
+          availability: 'collected',
+        },
+        rssi: {
+          field: 'rssi',
+          value: -110,
+          unit: 'dBm',
+          availability: 'collected',
+        },
+      },
     });
     vi.mocked(historyAPI.getGatewayCardData).mockResolvedValue({
       cardId: 'gateway:hub',
@@ -504,7 +578,7 @@ describe('History card detail route', () => {
 
     expect(viewControl).toContainElement(soilProfile);
     expect(viewControl).toContainElement(lineChart);
-    expect(screen.queryByRole('button', { name: 'Advanced View' })).not.toBeInTheDocument();
+    expect(within(viewControl).queryByRole('button', { name: 'Advanced View' })).not.toBeInTheDocument();
     expect(soilProfile).toHaveAttribute('aria-pressed', 'true');
 
     await waitFor(() => {
@@ -523,6 +597,76 @@ describe('History card detail route', () => {
         'soil-card:root-zone',
         expect.objectContaining({ view: 'line-chart' }),
       );
+    });
+  });
+
+  it('opens Advanced View from header settings and keeps raw identifiers out of normal mode', async () => {
+    vi.mocked(historyAPI.getZoneCards).mockResolvedValue({
+      zoneId: 12,
+      generatedAt: '2026-05-31T10:00:00Z',
+      cards: [
+        zoneCard({
+          views: ['soil-profile', 'line-chart', 'advanced'],
+          defaultView: 'soil-profile',
+        }),
+      ],
+    });
+
+    renderAppAtRoute('/history/zones/12/cards/soil-card%3Aroot-zone');
+
+    expect(await screen.findByRole('heading', { level: 1, name: 'Soil - Root Zone' })).toBeInTheDocument();
+    expect(screen.getAllByRole('heading', { level: 1 })).toHaveLength(1);
+    const viewControl = screen.getByRole('group', { name: 'View' });
+    expect(within(viewControl).queryByRole('button', { name: 'Advanced View' })).not.toBeInTheDocument();
+    expect(screen.queryByText('ABCDEF0123456789')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Open card settings' }));
+    const menu = screen.getByRole('menu', { name: 'Card settings' });
+    fireEvent.click(within(menu).getByRole('menuitem', { name: 'Advanced View' }));
+
+    expect(await screen.findByRole('region', { name: 'Advanced diagnostics' })).toBeInTheDocument();
+    expect(historyAPI.getZoneCardAdvanced).toHaveBeenCalledWith(
+      12,
+      'soil-card:root-zone',
+      expect.objectContaining({ view: 'advanced' }),
+    );
+    expect(screen.getByText('ABCDEF0123456789')).toBeInTheDocument();
+  });
+
+  it('hides Advanced View from settings when the card does not support advanced diagnostics', async () => {
+    vi.mocked(historyAPI.getZoneCards).mockResolvedValue({
+      zoneId: 12,
+      generatedAt: '2026-05-31T10:00:00Z',
+      cards: [
+        zoneCard({
+          views: ['soil-profile', 'line-chart'],
+          defaultView: 'soil-profile',
+        }),
+      ],
+    });
+
+    renderAppAtRoute('/history/zones/12/cards/soil-card%3Aroot-zone');
+
+    await screen.findByRole('heading', { level: 1, name: 'Soil - Root Zone' });
+    fireEvent.click(screen.getByRole('button', { name: 'Open card settings' }));
+    const menu = screen.getByRole('menu', { name: 'Card settings' });
+
+    expect(within(menu).queryByRole('menuitem', { name: 'Advanced View' })).not.toBeInTheDocument();
+    expect(within(menu).queryByRole('menuitem', { name: 'Card settings' })).not.toBeInTheDocument();
+    expect(within(menu).getByRole('menuitem', { name: 'Refresh' })).toBeInTheDocument();
+  });
+
+  it('refreshes selected card data from the settings menu fallback', async () => {
+    renderAppAtRoute('/history/zones/12/cards/soil-card%3Aroot-zone');
+
+    await waitFor(() => expect(historyAPI.getZoneCardData).toHaveBeenCalledTimes(1));
+    historyAPIMock.getZoneCardData.mockClear();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Open card settings' }));
+    fireEvent.click(within(screen.getByRole('menu', { name: 'Card settings' })).getByRole('menuitem', { name: 'Refresh' }));
+
+    await waitFor(() => {
+      expect(historyAPI.getZoneCardData).toHaveBeenCalledTimes(1);
     });
   });
 
@@ -704,6 +848,88 @@ describe('History card detail route', () => {
 
     const may12 = await screen.findByRole('gridcell', { name: /May 12/i });
     expect(may12).toHaveAttribute('data-history-calendar-date', '2026-05-12');
+  });
+
+  it('opens an inspector sheet on long press and returns focus to the visualization when closed', async () => {
+    vi.mocked(historyAPI.getZoneCardData).mockResolvedValue({
+      cardId: 'soil-card:root-zone',
+      cardType: 'soil',
+      view: 'soil-profile',
+      range: {
+        label: '24h',
+        from: '2026-05-30T10:00:00.000Z',
+        to: '2026-05-31T10:00:00.000Z',
+        timezone: 'UTC',
+      },
+      aggregation: {
+        level: 'raw',
+        bucketSizeSeconds: null,
+        coveragePct: 96,
+        coverageConfidence: 'configured',
+        pointCount: 12,
+      },
+      limits: {
+        maxPointsPerSeries: 1000,
+        maxEvents: 100,
+        maxInterpretations: 20,
+        truncated: false,
+      },
+      series: [],
+      profiles: [],
+      events: [
+        {
+          id: 'irrigation-1',
+          type: 'irrigation',
+          t: '2026-05-31T08:00:00.000Z',
+          label: 'raw_payload ABCDEF0123456789',
+          severity: 'info',
+          metadata: {},
+        },
+      ],
+      calendar: null,
+      interpretations: [
+        {
+          id: 'root-zone-dry',
+          ruleId: 'root-zone-dry',
+          source: 'local-rule',
+          severity: 'warning',
+          titleKey: 'history.interpretation.rootZoneDry.title',
+          bodyKey: 'history.interpretation.rootZoneDry.body',
+          params: { hoursDry: 9 },
+          evidence: [],
+          confidence: null,
+        },
+      ],
+      freshness: { dataAsOf: '2026-05-31T10:00:00.000Z', syncState: 'local' },
+      advancedFields: {},
+    });
+
+    renderAppAtRoute('/history/zones/12/cards/soil-card%3Aroot-zone');
+
+    const surface = await screen.findByTestId('history-visualization-surface');
+    preparePointerTarget(surface);
+    fireEvent.pointerDown(surface, { pointerId: 1, pointerType: 'touch', clientX: 120, clientY: 140 });
+
+    await act(async () => {
+      await new Promise((resolve) => {
+        window.setTimeout(resolve, 550);
+      });
+    });
+
+    const dialog = await screen.findByRole('dialog', { name: 'Inspector' });
+    expect(dialog).toHaveTextContent('Root zone dry');
+    expect(dialog).toHaveTextContent('Dry for 9 hours');
+    expect(dialog).toHaveTextContent('96% coverage');
+    expect(dialog).toHaveTextContent('Local');
+    expect(dialog).toHaveTextContent('Irrigation event');
+    expect(dialog).not.toHaveTextContent('raw_payload ABCDEF0123456789');
+    expect(screen.getByRole('button', { name: 'Close' })).toHaveFocus();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Close' }));
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog', { name: 'Inspector' })).not.toBeInTheDocument();
+      expect(surface).toHaveFocus();
+    });
   });
 
   it('refreshes selected card data on touch pull-down outside the visualization surface at the scroll top', async () => {
