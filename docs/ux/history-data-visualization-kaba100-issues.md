@@ -302,7 +302,7 @@ Expected:
 
 Date: 2026-06-02
 Target: kaba100
-Branch commit: `b7db0937`
+Branch commit: `01d89d4c`
 
 Passed:
 
@@ -320,6 +320,7 @@ Passed:
 - Horizontal swipe on a multi-card detail route switched thematic cards within the selected zone.
 - Normal mobile UI did not render raw DevEUI-style identifiers.
 - Advanced View requested the advanced endpoint and exposed diagnostic identifiers only there.
+- Pull down in Advanced View refreshed the advanced diagnostics endpoint.
 - Back navigation returned to `#/history`.
 - Desktop History rendered without a framework overlay.
 - No relevant console errors or passive touch listener errors were observed.
