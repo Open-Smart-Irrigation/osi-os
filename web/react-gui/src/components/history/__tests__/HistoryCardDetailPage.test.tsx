@@ -1117,6 +1117,16 @@ describe('History card detail route', () => {
     await waitFor(() => {
       expect(screen.getByTestId('view-mode-label')).toHaveTextContent('Daily Min/Max');
     });
+    await waitFor(() => {
+      expect(historyAPI.getZoneCardData).toHaveBeenLastCalledWith(
+        12,
+        'environment-card:microclimate',
+        expect.objectContaining({
+          view: 'daily-min-max',
+          aggregation: 'daily',
+        }),
+      );
+    });
 
     dispatchTouch(surface, 'touchstart', [{ clientX: 160, clientY: 260 }]);
     dispatchTouch(surface, 'touchmove', [{ clientX: 164, clientY: 70 }]);

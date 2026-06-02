@@ -18,6 +18,7 @@ import { setTimeViewportRange, useTimeViewport } from '../history/useTimeViewpor
 import { historyAPI, irrigationZonesAPI } from '../services/api';
 import type { HistoryCardDataScope } from '../history/useHistoryCardData';
 import type {
+  HistoryAggregationLevel,
   HistoryCardSummary,
   HistoryCardSummaryResponse,
   HistoryRangeLabel,
@@ -318,12 +319,15 @@ export const HistoryCardDetailPage: React.FC = () => {
   const selectedSourceKey = sourceOptions.length > 1 && enabledSourceKeys.length === 1
     ? enabledSourceKeys[0]
     : null;
+  const requestAggregation: HistoryAggregationLevel = selectedView === 'daily-min-max'
+    ? 'daily'
+    : timeViewport.viewport.aggregation;
   const cardData = useHistoryCardData({
     scope: resolvedScope,
     cardId: displayCard?.cardId ?? null,
     view: selectedView,
     range: timeViewport.viewport.range,
-    aggregation: timeViewport.viewport.aggregation,
+    aggregation: requestAggregation,
     overlays: [],
     sourceKey: selectedSourceKey,
     enabled: Boolean(displayCard?.availability.available && resolvedScope && !shouldRenderAdvanced),
