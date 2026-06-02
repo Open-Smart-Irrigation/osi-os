@@ -25,6 +25,12 @@
   --warn-border: #F59E0B;
   --error-bg: #DC2626;
   --error-text: #FFFFFF;
+  --soil-wet: #3B82F6;
+  --soil-wet-bg: #DBEAFE;
+  --soil-moist: #22C55E;
+  --soil-moist-bg: #DCFCE7;
+  --soil-dry: #EF4444;
+  --soil-dry-bg: #FEE2E2;
   --toggle-on: #16A34A;
   --toggle-off: #CBD5E1;
   --overlay: #334155;
