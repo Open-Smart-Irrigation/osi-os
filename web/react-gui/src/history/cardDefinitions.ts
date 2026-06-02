@@ -21,7 +21,7 @@ export const soilCardDefinition = {
   requiredCapabilities: ['soil-water-tension'],
   availabilityRules: ['zone-has-soil-source'],
   metadataFields: ['lastSeenAt', 'battery', 'signal', 'coveragePct', 'coverageConfidence', 'calibrationStatus'],
-  calendarStates: ['dry_stress', 'optimal', 'wet_excess', 'mixed', 'no_data'],
+  calendarStates: ['dry_stress', 'optimal', 'wet_excess', 'no_data'],
   interpretationRuleIds: ['root-zone-dry', 'irrigation-response'],
 } as const satisfies HistoryCardDefinition<'soil'>;
 

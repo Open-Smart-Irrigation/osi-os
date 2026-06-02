@@ -1,5 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import { soilStatusVisual } from '../../../history/soilStatus';
 import type {
   HistoryCalendar,
   HistoryCalendarDay,
@@ -70,6 +71,12 @@ const markerTone: Record<string, string> = {
   data_gap: 'bg-slate-400',
   manual_override: 'bg-violet-500',
 };
+
+const soilCalendarBackgroundByTone = {
+  wet: 'var(--soil-wet-bg)',
+  moist: 'var(--soil-moist-bg)',
+  dry: 'var(--soil-dry-bg)',
+} as const;
 
 function translateParams(params: Record<string, unknown> | undefined): Record<string, unknown> {
   return params && typeof params === 'object' ? params : {};
@@ -248,6 +255,14 @@ export const HistoryMonthCalendarView: React.FC<HistoryMonthCalendarViewProps> =
 
           const markers = Array.isArray(cell.day.markers) ? cell.day.markers : [];
           const label = stateLabel(t, cell.day.state);
+          const soilVisual = cardType === 'soil' ? soilStatusVisual(cell.day.state) : null;
+          const soilBackground = soilVisual ? soilCalendarBackgroundByTone[soilVisual.tone] : null;
+          const style = soilBackground
+            ? {
+                '--calendar-cell-bg': soilBackground,
+                background: soilBackground,
+              } as React.CSSProperties
+            : undefined;
           const inspectSelection = {
             kind: 'date' as const,
             date: cell.date,
@@ -269,9 +284,11 @@ export const HistoryMonthCalendarView: React.FC<HistoryMonthCalendarViewProps> =
               role="gridcell"
               aria-label={dayAriaLabel(t, monthLabel, cell.dayOfMonth, cell.day, cardType)}
               aria-selected={(selectedDate ?? internalSelectedDate) === cell.date}
+              data-testid={`calendar-cell-${cell.date}`}
               data-state={cell.day.state}
               data-card-type={cardType}
               data-history-calendar-date={cell.date}
+              style={style}
               onClick={(event) => {
                 stopCalendarGesture(event);
                 selectCell();

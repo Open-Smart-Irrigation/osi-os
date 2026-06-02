@@ -86,7 +86,6 @@ test('card definitions expose canonical calendar state vocabularies', () => {
     'dry_stress',
     'optimal',
     'wet_excess',
-    'mixed',
     'no_data',
   ]);
   assert.deepEqual(historyCardDefinitionsByType.dendro.calendarStates, [

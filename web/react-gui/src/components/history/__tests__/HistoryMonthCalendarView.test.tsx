@@ -107,8 +107,10 @@ describe('HistoryMonthCalendarView', () => {
   it('colors days by theme-specific state and keeps no-data visually distinct', () => {
     render(<HistoryMonthCalendarView cardType="soil" calendar={soilCalendarMay2026()} onInspectDate={vi.fn()} />);
 
-    expect(screen.getByRole('gridcell', { name: /Dry stress/i })).toHaveAttribute('data-state', 'dry_stress');
-    expect(screen.getByRole('gridcell', { name: /Optimal/i })).toHaveAttribute('data-state', 'optimal');
+    expect(screen.getByTestId('calendar-cell-2026-05-01')).toHaveAttribute('data-state', 'dry_stress');
+    expect(screen.getByTestId('calendar-cell-2026-05-01')).toHaveStyle('--calendar-cell-bg: var(--soil-dry-bg)');
+    expect(screen.getByTestId('calendar-cell-2026-05-12')).toHaveAttribute('data-state', 'optimal');
+    expect(screen.getByTestId('calendar-cell-2026-05-12')).toHaveStyle('--calendar-cell-bg: var(--soil-moist-bg)');
     expect(screen.getByRole('gridcell', { name: /May 31.*No data/i })).toHaveAttribute('data-state', 'no_data');
   });
 
