@@ -670,7 +670,8 @@ export const HistoryCardDetailPage: React.FC = () => {
             data-testid="view-mode-label"
             className="pointer-events-none absolute left-2 top-1 z-10 text-[10px] font-semibold text-[var(--text-tertiary)]"
           >
-            {formatViewLabel(t, selectedView)} · {formatRangeLabel(t, timeViewport.viewport.range.label)}
+            {formatViewLabel(t, selectedView)}
+            {selectedView !== 'calendar' && ` · ${formatRangeLabel(t, timeViewport.viewport.range.label)}`}
           </div>
           {singleDeviceName && (
             <div

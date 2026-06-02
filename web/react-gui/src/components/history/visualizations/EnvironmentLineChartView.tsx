@@ -260,18 +260,18 @@ const EnvironmentLineChartViewComponent: React.FC<EnvironmentLineChartViewProps>
     <section
       role="region"
       aria-label={t('history.environmentLineChart.title')}
-      className="mt-4 space-y-4 rounded-lg border border-[var(--border)] bg-[var(--bg)] p-4 sm:p-5"
+      className="flex min-h-0 flex-1 flex-col"
     >
-      <div className="space-y-4">
+      <div className="flex min-h-0 flex-1 flex-col gap-3">
         {groups.map((group, groupIndex) => {
           return (
-            <div key={group.unit || 'unitless'} className="space-y-2">
-              <h4 className="text-sm font-semibold text-[var(--text)]">
+            <div key={group.unit || 'unitless'} className="flex min-h-0 flex-1 flex-col gap-1">
+              <h4 className="text-xs font-semibold text-[var(--text-tertiary)]">
                 {group.unit
                   ? t('history.environmentLineChart.axisLabel', { unit: group.unit })
                   : t('history.environmentLineChart.axisNoUnit')}
               </h4>
-              <div className="h-56 min-w-0">
+              <div className="min-h-0 min-w-0 flex-1">
                 <ResponsiveContainer width="100%" height="100%">
                   <LineChart data={group.rows} margin={{ top: 10, right: 12, bottom: 0, left: 4 }}>
                     <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />

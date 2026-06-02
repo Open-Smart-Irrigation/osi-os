@@ -214,12 +214,12 @@ const DailyMinMaxViewComponent: React.FC<DailyMinMaxViewProps> = ({ data, window
     <section
       role="region"
       aria-label={t('history.dailyMinMax.title')}
-      className="mt-4 space-y-4 rounded-lg border border-[var(--border)] bg-[var(--bg)] p-4 sm:p-5"
+      className="flex min-h-0 flex-1 flex-col gap-3"
     >
       {visibleSeries.map(({ series, rows, color }) => {
         return (
-          <div key={series.key}>
-            <div className="h-56 min-w-0">
+          <div key={series.key} className="flex min-h-0 flex-1 flex-col">
+            <div className="min-h-0 min-w-0 flex-1">
               <ResponsiveContainer width="100%" height="100%">
                 <ComposedChart data={rows} margin={{ top: 10, right: 12, bottom: 0, left: 4 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
