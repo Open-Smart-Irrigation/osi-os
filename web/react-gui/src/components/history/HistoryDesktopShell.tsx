@@ -207,7 +207,7 @@ export const HistoryDesktopShell: React.FC<HistoryDesktopShellProps> = ({
                 ) : (
                   <section className="rounded-lg border border-dashed border-[var(--border)] bg-[var(--surface)] p-5">
                     <p className="text-sm font-semibold text-[var(--text)]">
-                      {t('history.workspace.unavailablePanel', { cardId: panel.cardId })}
+                      {t('history.workspace.unavailablePanel')}
                     </p>
                     <button
                       type="button"

@@ -107,7 +107,7 @@
       "cardDataUnknownError": "Unknown error"
     },
     "workspace": {
-      "unavailablePanel": "Unavailable panel: {{cardId}}",
+      "unavailablePanel": "Unavailable panel",
       "repairPanel": "Remove unavailable panel"
     },
     "dendroTimeline": {

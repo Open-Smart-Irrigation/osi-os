@@ -70,7 +70,7 @@ const { translateForTest } = vi.hoisted(() => {
     'history.cardFrame.cardDataLoading': 'Loading card data...',
     'history.cardFrame.cardDataError': 'Card data failed to load: {{message}}',
     'history.cardFrame.cardDataUnknownError': 'Unknown error',
-    'history.workspace.unavailablePanel': 'Unavailable panel: {{cardId}}',
+    'history.workspace.unavailablePanel': 'Unavailable panel',
     'history.workspace.repairPanel': 'Remove unavailable panel',
     'history.cardType.soil': 'Soil',
     'history.cardType.dendro': 'Dendro',
@@ -550,7 +550,8 @@ describe('History shell', () => {
 
     fireEvent.click(await screen.findByRole('button', { name: 'Load Morning check' }));
 
-    expect(await screen.findByText('Unavailable panel: missing-card')).toBeInTheDocument();
+    expect(await screen.findByText('Unavailable panel')).toBeInTheDocument();
+    expect(screen.queryByText('missing-card')).not.toBeInTheDocument();
     expect(screen.getAllByTestId('history-comparison-panel')).toHaveLength(2);
   });
 

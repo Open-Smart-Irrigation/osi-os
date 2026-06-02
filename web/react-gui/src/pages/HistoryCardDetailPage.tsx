@@ -467,10 +467,10 @@ export const HistoryCardDetailPage: React.FC = () => {
     const deltaX = Math.abs(event.clientX - start.x);
     if (deltaY >= DETAIL_PULL_REFRESH_THRESHOLD_PX && deltaX <= DETAIL_PULL_REFRESH_MAX_HORIZONTAL_PX) {
       start.refreshed = true;
-      void cardData.refresh();
+      handleRefresh();
     }
     pullStartRef.current = null;
-  }, [calendarDaysByDate, cardData, displayCard, isVisualizationEvent, navigate, orderedRouteCards, routeScope]);
+  }, [calendarDaysByDate, displayCard, handleRefresh, isVisualizationEvent, navigate, orderedRouteCards, routeScope]);
 
   useEffect(() => {
     if (!featureFlags.historyEnabled || routeScope?.type !== 'zone' || !resolvedCard || !cardId) return;

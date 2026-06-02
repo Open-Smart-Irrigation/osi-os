@@ -947,6 +947,38 @@ describe('History card detail route', () => {
     });
   });
 
+  it('refreshes Advanced View diagnostics on touch pull-down when Advanced View is active', async () => {
+    vi.mocked(historyAPI.getZoneCards).mockResolvedValue({
+      zoneId: 12,
+      generatedAt: '2026-05-31T10:00:00Z',
+      cards: [
+        zoneCard({
+          views: ['soil-profile', 'line-chart', 'advanced'],
+          defaultView: 'soil-profile',
+        }),
+      ],
+    });
+
+    renderAppAtRoute('/history/zones/12/cards/soil-card%3Aroot-zone');
+
+    await waitFor(() => expect(historyAPI.getZoneCardData).toHaveBeenCalledTimes(1));
+    fireEvent.click(screen.getByRole('button', { name: 'Open card settings' }));
+    fireEvent.click(within(screen.getByRole('menu', { name: 'Card settings' })).getByRole('menuitem', { name: 'Advanced View' }));
+
+    await waitFor(() => expect(historyAPI.getZoneCardAdvanced).toHaveBeenCalledTimes(1));
+    historyAPIMock.getZoneCardData.mockClear();
+    historyAPIMock.getZoneCardAdvanced.mockClear();
+
+    const scrollRoot = screen.getByTestId('history-detail-scroll-root');
+    preparePointerTarget(scrollRoot);
+    pointerDrag(scrollRoot, { fromY: 40, toY: 180 });
+
+    await waitFor(() => {
+      expect(historyAPI.getZoneCardAdvanced).toHaveBeenCalledTimes(1);
+    });
+    expect(historyAPI.getZoneCardData).not.toHaveBeenCalled();
+  });
+
   it('switches to the next thematic card on horizontal swipe outside the visualization surface', async () => {
     vi.mocked(historyAPI.getZoneCards).mockResolvedValue({
       zoneId: 12,
