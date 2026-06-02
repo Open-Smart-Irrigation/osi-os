@@ -10,6 +10,7 @@ interface HistorySourcePopoverProps {
   sources: readonly HistorySourcePopoverSource[];
   enabledKeys: readonly string[];
   onChange: (enabledKeys: string[]) => void;
+  compact?: boolean;
 }
 
 type HistoryTranslate = (key: string, options?: Record<string, unknown>) => string;
@@ -18,6 +19,7 @@ export const HistorySourcePopover: React.FC<HistorySourcePopoverProps> = ({
   sources,
   enabledKeys,
   onChange,
+  compact = false,
 }) => {
   const { t: translate } = useTranslation('history');
   const t = translate as HistoryTranslate;
@@ -38,7 +40,7 @@ export const HistorySourcePopover: React.FC<HistorySourcePopoverProps> = ({
     <div className="relative">
       <button
         type="button"
-        className="rounded-md border border-[var(--border)] bg-[var(--secondary-bg)] px-3 py-2 text-sm font-bold text-[var(--text)]"
+        className={`rounded-md border border-[var(--border)] bg-[var(--secondary-bg)] text-sm font-bold text-[var(--text)] ${compact ? 'px-2 py-1' : 'px-3 py-2'}`}
         aria-haspopup="menu"
         aria-expanded={open}
         aria-label={t('history.sources.button')}

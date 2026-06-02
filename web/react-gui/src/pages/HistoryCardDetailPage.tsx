@@ -14,6 +14,7 @@ import { useFeatureFlags } from '../history/useFeatureFlags';
 import { useHistoryCardAdvancedData } from '../history/useHistoryCardAdvancedData';
 import { useHistoryCardData } from '../history/useHistoryCardData';
 import { orderHistoryCards, useHistoryCards } from '../history/useHistoryCards';
+import { useOrientation } from '../history/useOrientation';
 import { setTimeViewportRange, useTimeViewport } from '../history/useTimeViewport';
 import { historyAPI, irrigationZonesAPI } from '../services/api';
 import type { HistoryCardDataScope } from '../history/useHistoryCardData';
@@ -230,6 +231,8 @@ export const HistoryCardDetailPage: React.FC = () => {
   const t = translate as HistoryTranslate;
   const pullStartRef = useRef<PullRefreshStart | null>(null);
   const featureFlags = useFeatureFlags();
+  const orientation = useOrientation();
+  const isLandscape = orientation === 'landscape';
   const zoneId = Number(rawZoneId);
   const gatewayEui = typeof rawGatewayEui === 'string' && rawGatewayEui.trim() ? rawGatewayEui : null;
   const cardId = decodeRouteCardId(rawCardId);
@@ -580,10 +583,11 @@ export const HistoryCardDetailPage: React.FC = () => {
   }
 
   return (
-    <div className="flex min-h-screen flex-col bg-[var(--bg)]">
+    <div className={`flex min-h-screen flex-col bg-[var(--bg)] ${isLandscape ? 'h-[100dvh] overflow-hidden' : ''}`}>
       <HistoryDetailHeader
         zoneName={resolvedZone?.name ?? null}
         card={displayCard}
+        compact={isLandscape}
         settingsOpen={settingsOpen}
         canOpenAdvanced={selectableViewsForCard(displayCard).includes('advanced')}
         onSettingsToggle={() => setSettingsOpen((open) => !open)}
@@ -596,7 +600,7 @@ export const HistoryCardDetailPage: React.FC = () => {
       />
       <main
         data-testid="history-detail-scroll-root"
-        className="flex min-h-0 flex-1 flex-col"
+        className={`flex min-h-0 flex-1 flex-col ${isLandscape ? 'overflow-hidden' : ''}`}
         onPointerDown={handleScrollRootPointerDown}
         onPointerDownCapture={handleScrollRootCalendarPointer}
         onMouseDownCapture={handleScrollRootCalendarMouse}

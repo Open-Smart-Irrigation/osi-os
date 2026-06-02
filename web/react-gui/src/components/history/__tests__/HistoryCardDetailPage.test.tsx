@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, type Mock } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach, type Mock } from 'vitest';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import '@testing-library/jest-dom';
 import React from 'react';
@@ -254,6 +254,19 @@ function renderAppAtRoute(hashRoute: string) {
   );
 }
 
+function mockOrientation(isLandscape: boolean) {
+  Object.defineProperty(window, 'matchMedia', {
+    configurable: true,
+    writable: true,
+    value: vi.fn().mockImplementation((query: string) => ({
+      matches: isLandscape && query === '(orientation: landscape)',
+      media: query,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    })),
+  });
+}
+
 function zoneCard(overrides: Partial<HistoryCardSummary> = {}): HistoryCardSummary {
   return {
     cardId: 'soil-card:root-zone',
@@ -466,6 +479,14 @@ describe('History card detail route', () => {
     });
   });
 
+  afterEach(() => {
+    Object.defineProperty(window, 'matchMedia', {
+      configurable: true,
+      writable: true,
+      value: undefined,
+    });
+  });
+
   it('loads the route-backed full-screen detail by zone and encoded card id', async () => {
     renderAppAtRoute('/history/zones/12/cards/soil-card%3Aroot-zone');
 
@@ -641,6 +662,15 @@ describe('History card detail route', () => {
     const surface = await screen.findByTestId('history-visualization-surface');
     expect(surface.className).toMatch(/flex-1/);
     expect(surface.parentElement?.className ?? '').not.toMatch(/border /);
+  });
+
+  it('uses a compact persistent header in landscape orientation', async () => {
+    mockOrientation(true);
+
+    renderAppAtRoute('/history/zones/12/cards/soil-card%3Aroot-zone');
+
+    await screen.findByRole('heading', { level: 1, name: 'Soil - Root Zone' });
+    expect(screen.getByRole('banner').className).toMatch(/py-1/);
   });
 
   it('opens Advanced View from header settings and keeps raw identifiers out of normal mode', async () => {
