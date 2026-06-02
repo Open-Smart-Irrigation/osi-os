@@ -654,3 +654,66 @@ API verification:
 Follow-up noted:
 
 - If the frontend or diagnostics needs to display whether a card-data response came from `history_channel_rollups`, `device_data`, or `rollups+live`, expose the helper `source` in the public card-data payload. The backend read path already computes it.
+
+## Zone CSV range export verification
+
+Date: 2026-06-03
+Target: kaba100, `100.93.68.86`
+Branch: `feat/zone-csv-range-export`
+Deployed commits: through `a946120a`
+
+Deployment:
+
+- Deployed `/srv/node-red/osi-history-helper/index.js`, `/srv/node-red/flows.json`, and the GUI build under `/usr/lib/node-red/gui/`.
+- Restarted Node-RED with `/etc/init.d/node-red restart`.
+- Confirmed `node -e "require('/srv/node-red/osi-history-helper')"` printed `helper-ok`.
+- Confirmed `/gui/` returned HTTP `200`.
+- Confirmed served GUI asset `index-DbddF-7u.js` matched the local build asset.
+- Did not overwrite `/data/db/farming.db`.
+
+Temporary-user handling:
+
+- Created temporary local user `playwright`, reassigned Zones 3 and 12 plus their devices for verification.
+- Restored Zones 3 and 12 and their devices to `user_id=2`.
+- Deleted the temporary `playwright` user.
+- Restore check: `playwright_count=0`, Zone 3 and Zone 12 both `user_id=2`, devices in Zone 3 and Zone 12 both `user_id=2`.
+
+Browser UI verification:
+
+- Opened Zone B settings from the live dashboard.
+- Confirmed the `Data export` settings section rendered.
+- Confirmed the monthly range calendar rendered in the modal.
+- Double-clicked `2026-06-02` and downloaded Raw CSV through the browser download path.
+- Suggested filename: `zone-12-2026-06-02_2026-06-02-raw.csv`.
+- Header: `timestamp,timezone,zone,card,source,variable,depth_cm,value,unit`.
+- Row count: `333`.
+- Soil sample with depth: `2026-06-02T13:58:22.382Z,UTC,Zone B,soil,Chameleon 1,swt_1,5,6.36,kPa`.
+- Raw EUI scan: no `[A-F0-9]{16}` value found in the UI-downloaded CSV.
+
+Endpoint verification:
+
+- Pi clock during verification: `Tue Jun 2 23:08:50 UTC 2026`; Zone B timezone: `UTC`.
+- `GET /api/history/zones/12/export.csv?from=2026-06-02&to=2026-06-02&granularity=raw` returned HTTP `200`.
+- Today/local-current-day raw header matched: `timestamp,timezone,zone,card,source,variable,depth_cm,value,unit`.
+- Today/local-current-day raw row count: `333`.
+- Wide Raw export, `2026-05-01..2026-06-02`: `1,667,425` bytes.
+- Wide Daily export, `2026-05-01..2026-06-02`: `10,414` bytes.
+- Daily header matched: `bucket_start,bucket_end,timezone,zone,card,source,variable,depth_cm,unit,n,coverage_pct,mean,min,max,median,latest`.
+- Oversized Raw export, `2026-01-01..2026-06-02`, returned HTTP `413`.
+- 413 body: `{"error":"range too large for this granularity","suggestion":"choose a coarser granularity"}`.
+- API Raw EUI scan: no raw 16-hex DevEUI found.
+- Daily EUI scan: no raw 16-hex DevEUI found.
+
+Observation:
+
+- Daily aggregate rows for Zone B use display-safe `source=2 sources` because the Soil card merges both Chameleon devices. Those merged aggregate rows leave `depth_cm` blank; raw per-source soil rows include `depth_cm`.
+
+Artifacts:
+
+- `/tmp/kaba100-zone-export-dashboard.png`
+- `/tmp/kaba100-zone-export-settings.png`
+- `/tmp/kaba100-zone-export-after-download.png`
+- `/tmp/kaba100-zone-b-2026-06-02-raw.csv`
+- `/tmp/kaba100-zone-b-2026-06-02-raw-api.csv`
+- `/tmp/kaba100-zone-b-wide-raw.csv`
+- `/tmp/kaba100-zone-b-wide-daily.csv`
