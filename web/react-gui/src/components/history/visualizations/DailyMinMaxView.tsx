@@ -14,11 +14,13 @@ import type { HistoryCardDataResponse, HistorySeriesPoint } from '../../../histo
 
 interface DailyMinMaxViewProps {
   data: HistoryCardDataResponse | undefined;
+  window?: { fromMs: number; toMs: number };
 }
 
 type HistoryTranslate = (key: string, options?: Record<string, unknown>) => string;
 type ChartRow = {
   timestamp: string;
+  tMs: number;
   label: string;
 } & Record<string, number | string | null>;
 type DailyPoint = {
@@ -128,6 +130,11 @@ function formatTimestamp(value: string): string {
   }).format(date);
 }
 
+function formatTimestampMs(value: unknown): string {
+  const ms = typeof value === 'number' ? value : Number(value);
+  return Number.isFinite(ms) ? formatTimestamp(new Date(ms).toISOString()) : '-';
+}
+
 function formatValue(value: number | null, unit: string): string {
   if (value === null) return '-';
   const formatted = Number.isInteger(value) ? String(value) : value.toFixed(1);
@@ -139,19 +146,25 @@ function formatTooltipValue(value: unknown, unit: string): string {
   return '-';
 }
 
-function buildRows(series: DailySeries): ChartRow[] {
+export function buildNumericRows(series: DailySeries): ChartRow[] {
   return series.points
-    .map((point) => ({
-      timestamp: point.t,
-      label: formatTimestamp(point.t),
-      [`${series.key}-min`]: point.min,
-      [`${series.key}-max`]: point.max,
-      [`${series.key}-mean`]: point.mean,
-    }))
-    .sort((left, right) => left.timestamp.localeCompare(right.timestamp));
+    .reduce<ChartRow[]>((rows, point) => {
+      const tMs = Date.parse(point.t);
+      if (!Number.isFinite(tMs)) return rows;
+      rows.push({
+        timestamp: point.t,
+        tMs,
+        label: formatTimestamp(point.t),
+        [`${series.key}-min`]: point.min,
+        [`${series.key}-max`]: point.max,
+        [`${series.key}-mean`]: point.mean,
+      });
+      return rows;
+    }, [])
+    .sort((left, right) => left.tMs - right.tMs);
 }
 
-export const DailyMinMaxView: React.FC<DailyMinMaxViewProps> = ({ data }) => {
+export const DailyMinMaxView: React.FC<DailyMinMaxViewProps> = ({ data, window: chartWindow }) => {
   const { t: translate } = useTranslation('history');
   const t = translate as HistoryTranslate;
   const rawSeries = Array.isArray(data?.series) ? data.series : [];
@@ -177,7 +190,7 @@ export const DailyMinMaxView: React.FC<DailyMinMaxViewProps> = ({ data }) => {
       className="mt-4 space-y-4 rounded-lg border border-[var(--border)] bg-[var(--bg)] p-4 sm:p-5"
     >
       {visibleSeries.map((series, seriesIndex) => {
-        const rows = buildRows(series);
+        const rows = buildNumericRows(series);
         const color = SERIES_COLORS[seriesIndex % SERIES_COLORS.length];
         return (
           <div key={series.key}>
@@ -185,7 +198,15 @@ export const DailyMinMaxView: React.FC<DailyMinMaxViewProps> = ({ data }) => {
               <ResponsiveContainer width="100%" height="100%">
                 <ComposedChart data={rows} margin={{ top: 10, right: 12, bottom: 0, left: 4 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
-                  <XAxis dataKey="timestamp" tickFormatter={formatTimestamp} minTickGap={24} />
+                  <XAxis
+                    dataKey="tMs"
+                    type="number"
+                    scale="time"
+                    domain={chartWindow ? [chartWindow.fromMs, chartWindow.toMs] : ['dataMin', 'dataMax']}
+                    allowDataOverflow
+                    tickFormatter={formatTimestampMs}
+                    minTickGap={24}
+                  />
                   <YAxis
                     width={52}
                     label={
@@ -195,7 +216,8 @@ export const DailyMinMaxView: React.FC<DailyMinMaxViewProps> = ({ data }) => {
                     }
                   />
                   <Tooltip
-                    labelFormatter={(value) => formatTimestamp(String(value))}
+                    isAnimationActive={false}
+                    labelFormatter={formatTimestampMs}
                     formatter={(value, name) => [
                       formatTooltipValue(value, series.unit),
                       String(name),
@@ -209,6 +231,8 @@ export const DailyMinMaxView: React.FC<DailyMinMaxViewProps> = ({ data }) => {
                     fill={color}
                     fillOpacity={0.16}
                     dot={false}
+                    activeDot={false}
+                    isAnimationActive={false}
                   />
                   <Line
                     type="monotone"
@@ -216,7 +240,9 @@ export const DailyMinMaxView: React.FC<DailyMinMaxViewProps> = ({ data }) => {
                     name={t('history.dailyMinMax.tooltipMin')}
                     stroke={color}
                     strokeDasharray="4 3"
-                    dot={{ r: 3 }}
+                    dot={false}
+                    activeDot={false}
+                    isAnimationActive={false}
                   />
                   <Line
                     type="monotone"
@@ -224,7 +250,9 @@ export const DailyMinMaxView: React.FC<DailyMinMaxViewProps> = ({ data }) => {
                     name={t('history.dailyMinMax.tooltipMean')}
                     stroke="#111827"
                     strokeWidth={2}
-                    dot={{ r: 3 }}
+                    dot={false}
+                    activeDot={false}
+                    isAnimationActive={false}
                     connectNulls={false}
                   />
                 </ComposedChart>

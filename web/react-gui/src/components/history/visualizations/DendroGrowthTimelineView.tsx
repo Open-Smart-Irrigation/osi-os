@@ -18,11 +18,13 @@ import type {
 
 interface DendroGrowthTimelineViewProps {
   data: HistoryCardDataResponse | undefined;
+  window?: { fromMs: number; toMs: number };
 }
 
 type HistoryTranslate = (key: string, options?: Record<string, unknown>) => string;
 type ChartRow = {
   timestamp: string;
+  tMs: number;
   label: string;
 } & Record<string, number | string | null>;
 type RenderPoint = {
@@ -38,6 +40,7 @@ type RenderSeries = {
 type RenderEvent = {
   key: string;
   t: string;
+  tMs: number;
   label: string;
   severity: HistoryEvent['severity'];
 };
@@ -87,6 +90,11 @@ function formatTimestamp(value: string): string {
     hour: '2-digit',
     minute: '2-digit',
   }).format(date);
+}
+
+function formatTimestampMs(value: unknown): string {
+  const ms = typeof value === 'number' ? value : Number(value);
+  return Number.isFinite(ms) ? formatTimestamp(new Date(ms).toISOString()) : '-';
 }
 
 function fallbackSeriesLabel(t: HistoryTranslate, seriesId: string): string {
@@ -152,13 +160,16 @@ function normalizeSeriesList(t: HistoryTranslate, seriesList: readonly unknown[]
   });
 }
 
-function buildRows(seriesList: RenderSeries[]): ChartRow[] {
+export function buildNumericRows(seriesList: RenderSeries[]): ChartRow[] {
   const rows = new Map<string, ChartRow>();
 
   seriesList.forEach((series) => {
     series.points.forEach((point) => {
+      const tMs = Date.parse(point.t);
+      if (!Number.isFinite(tMs)) return;
       const existing = rows.get(point.t) ?? {
         timestamp: point.t,
+        tMs,
         label: formatTimestamp(point.t),
       };
       existing[series.key] = point.value;
@@ -166,7 +177,7 @@ function buildRows(seriesList: RenderSeries[]): ChartRow[] {
     });
   });
 
-  return [...rows.values()].sort((left, right) => left.timestamp.localeCompare(right.timestamp));
+  return [...rows.values()].sort((left, right) => left.tMs - right.tMs);
 }
 
 function normalizeSeverity(value: unknown): HistoryEvent['severity'] {
@@ -186,9 +197,12 @@ function normalizeEvents(t: HistoryTranslate, events: unknown): RenderEvent[] {
     if (!isRecord(event)) return accumulator;
     const timestamp = validTimestamp(event.t);
     if (!timestamp) return accumulator;
+    const tMs = Date.parse(timestamp);
+    if (!Number.isFinite(tMs)) return accumulator;
     accumulator.push({
       key: normalizedText(event.id) ?? `dendro-event-${index}`,
       t: timestamp,
+      tMs,
       label: displayEventLabel(t, event),
       severity: normalizeSeverity(event.severity),
     });
@@ -203,12 +217,12 @@ function eventTone(event: RenderEvent): string {
   return 'border-[var(--border)] bg-[var(--secondary-bg)] text-[var(--text)]';
 }
 
-export const DendroGrowthTimelineView: React.FC<DendroGrowthTimelineViewProps> = ({ data }) => {
+export const DendroGrowthTimelineView: React.FC<DendroGrowthTimelineViewProps> = ({ data, window: chartWindow }) => {
   const { t: translate } = useTranslation('history');
   const t = translate as HistoryTranslate;
   const rawSeries = Array.isArray(data?.series) ? data.series : [];
   const visibleSeries = normalizeSeriesList(t, rawSeries).filter(hasVisiblePoints);
-  const rows = buildRows(visibleSeries);
+  const rows = buildNumericRows(visibleSeries);
   const events = normalizeEvents(t, data?.events);
 
   if (visibleSeries.length === 0 || rows.length === 0) {
@@ -266,11 +280,19 @@ export const DendroGrowthTimelineView: React.FC<DendroGrowthTimelineViewProps> =
         <ResponsiveContainer width="100%" height="100%">
           <LineChart data={rows} margin={{ top: 10, right: 12, bottom: 0, left: 0 }}>
             <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
-            <XAxis dataKey="timestamp" tickFormatter={formatTimestamp} minTickGap={24} />
+            <XAxis
+              dataKey="tMs"
+              type="number"
+              scale="time"
+              domain={chartWindow ? [chartWindow.fromMs, chartWindow.toMs] : ['dataMin', 'dataMax']}
+              allowDataOverflow
+              tickFormatter={formatTimestampMs}
+              minTickGap={24}
+            />
             <YAxis width={44} />
-            <Tooltip labelFormatter={(value) => formatTimestamp(String(value))} />
+            <Tooltip isAnimationActive={false} labelFormatter={formatTimestampMs} />
             {events.map((event) => (
-              <ReferenceLine key={event.key} x={event.t} stroke="#b45309" strokeDasharray="4 4" />
+              <ReferenceLine key={event.key} x={event.tMs} stroke="#b45309" strokeDasharray="4 4" />
             ))}
             {visibleSeries.map((series, index) => (
               <Line
@@ -280,7 +302,8 @@ export const DendroGrowthTimelineView: React.FC<DendroGrowthTimelineViewProps> =
                 name={series.label}
                 stroke={SERIES_COLORS[index % SERIES_COLORS.length]}
                 strokeWidth={2}
-                dot={{ r: 3 }}
+                dot={false}
+                isAnimationActive={false}
                 connectNulls={false}
               />
             ))}

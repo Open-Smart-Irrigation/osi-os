@@ -3,7 +3,7 @@ import { render, screen } from '@testing-library/react';
 import React from 'react';
 import { describe, expect, it, vi } from 'vitest';
 
-import { DailyMinMaxView } from '../visualizations/DailyMinMaxView';
+import { buildNumericRows, DailyMinMaxView } from '../visualizations/DailyMinMaxView';
 import type { HistoryCardDataResponse } from '../../../history/types';
 
 const { translateForTest } = vi.hoisted(() => {
@@ -83,6 +83,17 @@ function data(): HistoryCardDataResponse {
 }
 
 describe('DailyMinMaxView', () => {
+  it('rows carry epoch-ms timestamps for numeric axis clipping', () => {
+    const rows = buildNumericRows({
+      key: 'daily-temp',
+      label: 'Air temperature',
+      unit: 'C',
+      points: [{ t: '2026-06-01T00:00:00Z', min: 11, max: 24, mean: 17 }],
+    });
+
+    expect(rows[0].tMs).toBe(Date.parse('2026-06-01T00:00:00Z'));
+  });
+
   it('renders min/max data as a real chart instead of a placeholder', () => {
     render(<DailyMinMaxView data={data()} />);
 

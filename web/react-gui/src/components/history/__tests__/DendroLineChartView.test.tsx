@@ -3,7 +3,7 @@ import React from 'react';
 import { render, screen, within } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 
-import { DendroLineChartView } from '../visualizations/DendroLineChartView';
+import { buildNumericRows, DendroLineChartView } from '../visualizations/DendroLineChartView';
 import type { HistoryCardDataResponse } from '../../../history/types';
 
 class ResizeObserverStub {
@@ -74,6 +74,19 @@ function data(): HistoryCardDataResponse<'dendro'> {
 }
 
 describe('DendroLineChartView', () => {
+  it('rows carry epoch-ms timestamps for numeric axis clipping', () => {
+    const rows = buildNumericRows([
+      {
+        key: 'stem',
+        label: 'Stem change',
+        unit: 'um',
+        points: [{ t: '2026-06-01T00:00:00Z', value: 12 }],
+      },
+    ]);
+
+    expect(rows[0].tMs).toBe(Date.parse('2026-06-01T00:00:00Z'));
+  });
+
   it('renders the line chart without title, reading count, or legend cards', () => {
     render(<DendroLineChartView data={data()} />);
 

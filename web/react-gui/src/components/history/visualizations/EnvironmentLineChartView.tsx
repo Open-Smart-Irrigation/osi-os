@@ -16,11 +16,13 @@ import type {
 
 interface EnvironmentLineChartViewProps {
   data: HistoryCardDataResponse | undefined;
+  window?: { fromMs: number; toMs: number };
 }
 
 type HistoryTranslate = (key: string, options?: Record<string, unknown>) => string;
 type ChartRow = {
   timestamp: string;
+  tMs: number;
   label: string;
 } & Record<string, number | string | null>;
 type RenderPoint = {
@@ -79,6 +81,11 @@ function formatTimestamp(value: string): string {
     hour: '2-digit',
     minute: '2-digit',
   }).format(date);
+}
+
+function formatTimestampMs(value: unknown): string {
+  const ms = typeof value === 'number' ? value : Number(value);
+  return Number.isFinite(ms) ? formatTimestamp(new Date(ms).toISOString()) : '-';
 }
 
 function sourceText(series: unknown): string {
@@ -175,13 +182,16 @@ function normalizeSeriesList(t: HistoryTranslate, seriesList: readonly unknown[]
   });
 }
 
-function buildRows(seriesList: RenderSeries[]): ChartRow[] {
+export function buildNumericRows(seriesList: RenderSeries[]): ChartRow[] {
   const rows = new Map<string, ChartRow>();
 
   seriesList.forEach((series) => {
     series.points.forEach((point) => {
+      const tMs = Date.parse(point.t);
+      if (!Number.isFinite(tMs)) return;
       const existing = rows.get(point.t) ?? {
         timestamp: point.t,
+        tMs,
         label: formatTimestamp(point.t),
       };
       existing[series.key] = point.value;
@@ -189,7 +199,7 @@ function buildRows(seriesList: RenderSeries[]): ChartRow[] {
     });
   });
 
-  return [...rows.values()].sort((left, right) => left.timestamp.localeCompare(right.timestamp));
+  return [...rows.values()].sort((left, right) => left.tMs - right.tMs);
 }
 
 function groupSeriesByUnit(seriesList: RenderSeries[]): Array<{ unit: string; series: RenderSeries[] }> {
@@ -204,12 +214,12 @@ function groupSeriesByUnit(seriesList: RenderSeries[]): Array<{ unit: string; se
   }));
 }
 
-export const EnvironmentLineChartView: React.FC<EnvironmentLineChartViewProps> = ({ data }) => {
+export const EnvironmentLineChartView: React.FC<EnvironmentLineChartViewProps> = ({ data, window: chartWindow }) => {
   const { t: translate } = useTranslation('history');
   const t = translate as HistoryTranslate;
   const rawSeries = Array.isArray(data?.series) ? data.series : [];
   const visibleSeries = normalizeSeriesList(t, rawSeries).filter(hasVisiblePoints);
-  const rows = buildRows(visibleSeries);
+  const rows = buildNumericRows(visibleSeries);
   const groups = groupSeriesByUnit(visibleSeries);
 
   if (visibleSeries.length === 0 || rows.length === 0) {
@@ -237,7 +247,7 @@ export const EnvironmentLineChartView: React.FC<EnvironmentLineChartViewProps> =
     >
       <div className="space-y-4">
         {groups.map((group, groupIndex) => {
-          const groupRows = buildRows(group.series);
+          const groupRows = buildNumericRows(group.series);
           const seriesByKey = new Map(group.series.map((series) => [series.key, series]));
           return (
             <div key={group.unit || 'unitless'} className="space-y-2">
@@ -250,13 +260,22 @@ export const EnvironmentLineChartView: React.FC<EnvironmentLineChartViewProps> =
                 <ResponsiveContainer width="100%" height="100%">
                   <LineChart data={groupRows} margin={{ top: 10, right: 12, bottom: 0, left: 4 }}>
                     <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
-                    <XAxis dataKey="timestamp" tickFormatter={formatTimestamp} minTickGap={24} />
+                    <XAxis
+                      dataKey="tMs"
+                      type="number"
+                      scale="time"
+                      domain={chartWindow ? [chartWindow.fromMs, chartWindow.toMs] : ['dataMin', 'dataMax']}
+                      allowDataOverflow
+                      tickFormatter={formatTimestampMs}
+                      minTickGap={24}
+                    />
                     <YAxis
                       width={52}
                       label={group.unit ? { value: group.unit, angle: -90, position: 'insideLeft' } : undefined}
                     />
                     <Tooltip
-                      labelFormatter={(value) => formatTimestamp(String(value))}
+                      isAnimationActive={false}
+                      labelFormatter={formatTimestampMs}
                       formatter={(value, _name, item) => {
                         const series = seriesByKey.get(String(item.dataKey));
                         return [
@@ -273,7 +292,8 @@ export const EnvironmentLineChartView: React.FC<EnvironmentLineChartViewProps> =
                         name={series.label}
                         stroke={SERIES_COLORS[(groupIndex + index) % SERIES_COLORS.length]}
                         strokeWidth={2}
-                        dot={{ r: 3 }}
+                        dot={false}
+                        isAnimationActive={false}
                         connectNulls={false}
                       />
                     ))}
