@@ -67,6 +67,7 @@ export function useHistoryCardData(options: UseHistoryCardDataOptions) {
         sourceKey: options.sourceKey,
       }),
     {
+      keepPreviousData: true,
       revalidateOnFocus: true,
     },
   );
