@@ -470,8 +470,8 @@ describe('History card detail route', () => {
     renderAppAtRoute('/history/zones/12/cards/soil-card%3Aroot-zone');
 
     expect(await screen.findByRole('heading', { level: 1, name: 'Soil - Root Zone' })).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: /Back to history/i })).toHaveAttribute('href', '#/history');
-    expect(screen.getAllByText('Chameleon 1').length).toBeGreaterThan(0);
+    expect(screen.queryByRole('link', { name: /Back to history/i })).not.toBeInTheDocument();
+    expect(screen.queryByText('Chameleon 1')).not.toBeInTheDocument();
     expect(screen.queryByText('ABCDEF0123456789')).not.toBeInTheDocument();
     await waitFor(() => {
       expect(historyAPI.markZoneCardOpened).toHaveBeenCalledWith(12, 'soil-card:root-zone');
@@ -538,7 +538,7 @@ describe('History card detail route', () => {
     renderAppAtRoute('/history/gateways/0016C001F11766E7/cards/0016C001F11766E7%3Agateway%3Ahub');
 
     expect(await screen.findByRole('heading', { level: 1, name: 'Gateway' })).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: /Back to history/i })).toHaveAttribute('href', '#/history');
+    expect(screen.queryByRole('link', { name: /Back to history/i })).not.toBeInTheDocument();
     await waitFor(() => {
       expect(historyAPIMock.getGatewayCards).toHaveBeenCalledWith('0016C001F11766E7');
       expect(historyAPI.getGatewayCardData).toHaveBeenCalled();
@@ -547,6 +547,32 @@ describe('History card detail route', () => {
     expect(historyAPI.getZoneCards).not.toHaveBeenCalled();
     expect(historyAPI.markZoneCardOpened).not.toHaveBeenCalled();
     expect(screen.queryByText('0016C001F11766E7')).not.toBeInTheDocument();
+  });
+
+  it('header has no back button, inline sources, or visible History text', async () => {
+    vi.mocked(historyAPI.getZoneCards).mockResolvedValue({
+      zoneId: 12,
+      generatedAt: '2026-05-31T10:00:00Z',
+      cards: [
+        zoneCard({
+          sourceDeviceCount: 2,
+          sourceLabels: ['Chameleon 1', 'Chameleon 2'],
+          sourceDevices: [
+            { name: 'Chameleon 1', typeId: 'DRAGINO_LSN50', role: 'soil', sourceKey: 'soil-source-1' },
+            { name: 'Chameleon 2', typeId: 'DRAGINO_LSN50', role: 'soil', sourceKey: 'soil-source-2' },
+          ],
+        }),
+      ],
+    });
+
+    renderAppAtRoute('/history/zones/12/cards/soil-card%3Aroot-zone');
+
+    expect(await screen.findByRole('heading', { level: 1, name: 'Soil - Root Zone' })).toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: /back to history/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /back to history/i })).not.toBeInTheDocument();
+    expect(screen.queryByText(/back to history/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/2 sources/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/\bhistory\b/i)).not.toBeInTheDocument();
   });
 
   it('does not render range controls and still fetches the default range', async () => {
@@ -598,7 +624,9 @@ describe('History card detail route', () => {
     expect(screen.queryByRole('group', { name: 'View' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Line Chart' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Advanced View' })).not.toBeInTheDocument();
-    expect(screen.getByTestId('view-mode-label')).toHaveTextContent(/Soil Profile/i);
+    const overlay = screen.getByTestId('view-mode-label');
+    expect(overlay).toHaveTextContent(/Soil Profile/i);
+    expect(overlay.className).toMatch(/absolute/);
 
     await waitFor(() => {
       expect(firstZoneCardDataRequest()).toEqual(

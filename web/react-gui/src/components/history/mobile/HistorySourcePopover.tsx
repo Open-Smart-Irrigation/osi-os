@@ -41,9 +41,10 @@ export const HistorySourcePopover: React.FC<HistorySourcePopoverProps> = ({
         className="rounded-md border border-[var(--border)] bg-[var(--secondary-bg)] px-3 py-2 text-sm font-bold text-[var(--text)]"
         aria-haspopup="menu"
         aria-expanded={open}
+        aria-label={t('history.sources.button')}
         onClick={() => setOpen((value) => !value)}
       >
-        ⊟ {t('history.sources.button')}
+        ⊟
       </button>
       {open && (
         <div

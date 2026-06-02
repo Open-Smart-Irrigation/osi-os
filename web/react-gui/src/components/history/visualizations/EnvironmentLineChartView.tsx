@@ -153,14 +153,6 @@ function formatTooltipValue(value: unknown, unit: string): string {
   return '-';
 }
 
-function latestVisibleValue(series: RenderSeries): number | null {
-  for (let index = series.points.length - 1; index >= 0; index -= 1) {
-    const value = series.points[index].value;
-    if (value !== null) return value;
-  }
-  return null;
-}
-
 function normalizeSeriesList(t: HistoryTranslate, seriesList: readonly unknown[]): RenderSeries[] {
   return seriesList.map((series, index) => {
     const source = sourceText(series);
@@ -243,31 +235,6 @@ export const EnvironmentLineChartView: React.FC<EnvironmentLineChartViewProps> =
       aria-label={t('history.environmentLineChart.title')}
       className="mt-4 space-y-4 rounded-lg border border-[var(--border)] bg-[var(--bg)] p-4 sm:p-5"
     >
-      <div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
-        <div>
-          <h3 className="text-base font-semibold text-[var(--text)]">
-            {t('history.environmentLineChart.title')}
-          </h3>
-          <p className="text-sm text-[var(--text-tertiary)]">
-            {t('history.environmentLineChart.pointsCount', { count: rows.length })}
-          </p>
-        </div>
-      </div>
-
-      <div className="grid gap-2 sm:grid-cols-4">
-        {visibleSeries.map((series) => (
-          <div
-            key={series.key}
-            className="rounded-md border border-[var(--border)] bg-[var(--surface)] px-3 py-2"
-          >
-            <p className="text-sm font-semibold text-[var(--text)]">{series.label}</p>
-            <p className="mt-1 text-xs text-[var(--text-tertiary)]">
-              {formatValue(latestVisibleValue(series), series.unit)}
-            </p>
-          </div>
-        ))}
-      </div>
-
       <div className="space-y-4">
         {groups.map((group, groupIndex) => {
           const groupRows = buildRows(group.series);

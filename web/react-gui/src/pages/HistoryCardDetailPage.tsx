@@ -601,7 +601,6 @@ export const HistoryCardDetailPage: React.FC = () => {
       <HistoryDetailHeader
         zoneName={resolvedZone?.name ?? null}
         card={displayCard}
-        backHref="/history"
         settingsOpen={settingsOpen}
         canOpenAdvanced={selectableViewsForCard(displayCard).includes('advanced')}
         onSettingsToggle={() => setSettingsOpen((open) => !open)}
@@ -625,12 +624,6 @@ export const HistoryCardDetailPage: React.FC = () => {
           cardSwipeStartRef.current = null;
         }}
       >
-        <div
-          data-testid="view-mode-label"
-          className="py-1 text-center text-xs font-semibold text-[var(--text-tertiary)]"
-        >
-          {formatViewLabel(t, selectedView)} · {formatRangeLabel(t, timeViewport.viewport.range.label)}
-        </div>
         <div className="flex-1">
           {!displayCard.availability.available && (
             <div className="mb-4 rounded-lg border border-[var(--warning-bg)] bg-[var(--warning-bg)] px-4 py-3 text-sm text-[var(--warning-text)]">
@@ -646,6 +639,12 @@ export const HistoryCardDetailPage: React.FC = () => {
             rangeLabel={formatRangeLabel(t, timeViewport.viewport.range.label)}
             aggregationLabel={formatAggregationLabel(t, timeViewport.viewport.aggregation)}
           >
+            <div
+              data-testid="view-mode-label"
+              className="pointer-events-none absolute left-2 top-1 z-10 text-[10px] font-semibold text-[var(--text-tertiary)]"
+            >
+              {formatViewLabel(t, selectedView)} · {formatRangeLabel(t, timeViewport.viewport.range.label)}
+            </div>
             <HistoryCardVisualization
               card={displayCard}
               data={cardData.data}

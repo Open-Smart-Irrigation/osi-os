@@ -86,14 +86,14 @@ function soilData(overrides: Partial<HistoryCardDataResponse<'soil'>> = {}): His
 }
 
 describe('SoilLineChartView', () => {
-  it('renders soil tension series with source-safe labels', () => {
+  it('renders soil tension chart without label chrome or source identifiers', () => {
     render(<SoilLineChartView data={soilData()} />);
 
     const chart = screen.getByRole('region', { name: 'Soil line chart' });
-    expect(within(chart).getByText('Soil 1')).toBeInTheDocument();
-    expect(within(chart).getByText('Soil 2')).toBeInTheDocument();
-    expect(within(chart).getByText('7.4 kPa')).toBeInTheDocument();
-    expect(within(chart).getByText('9.3 kPa')).toBeInTheDocument();
+    expect(within(chart).queryByText('Soil line chart')).not.toBeInTheDocument();
+    expect(within(chart).queryByText(/\breadings\b/i)).not.toBeInTheDocument();
+    expect(within(chart).queryByText('Soil 1')).not.toBeInTheDocument();
+    expect(within(chart).queryByText('Soil 2')).not.toBeInTheDocument();
     expect(screen.queryByText(/[A-F0-9]{16}/)).not.toBeInTheDocument();
     expect(screen.queryByText(/swt_1|soil-source|A84041A75D5E7CFB/i)).not.toBeInTheDocument();
   });

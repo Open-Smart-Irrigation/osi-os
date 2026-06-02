@@ -134,11 +134,6 @@ function formatValue(value: number | null, unit: string): string {
   return unit ? `${formatted} ${unit}` : formatted;
 }
 
-function formatRange(point: DailyPoint, unit: string): string {
-  if (point.min === null || point.max === null) return '-';
-  return `${formatValue(point.min, '')}-${formatValue(point.max, unit)}`;
-}
-
 function formatTooltipValue(value: unknown, unit: string): string {
   if (typeof value === 'number' && Number.isFinite(value)) return formatValue(value, unit);
   return '-';
@@ -181,28 +176,11 @@ export const DailyMinMaxView: React.FC<DailyMinMaxViewProps> = ({ data }) => {
       aria-label={t('history.dailyMinMax.title')}
       className="mt-4 space-y-4 rounded-lg border border-[var(--border)] bg-[var(--bg)] p-4 sm:p-5"
     >
-      <div>
-        <h3 className="text-base font-semibold text-[var(--text)]">{t('history.dailyMinMax.title')}</h3>
-        <p className="text-sm text-[var(--text-tertiary)]">
-          {t('history.dailyMinMax.pointsCount', { count: visibleSeries[0]?.points.length ?? 0 })}
-        </p>
-      </div>
-
       {visibleSeries.map((series, seriesIndex) => {
         const rows = buildRows(series);
         const color = SERIES_COLORS[seriesIndex % SERIES_COLORS.length];
         return (
-          <div key={series.key} className="space-y-3">
-            <div className="grid gap-2 sm:grid-cols-2">
-              {series.points.map((point) => (
-                <div key={point.t} className="rounded-md border border-[var(--border)] bg-[var(--surface)] px-3 py-2">
-                  <p className="text-xs font-semibold text-[var(--text-tertiary)]">{formatTimestamp(point.t)}</p>
-                  <p className="mt-1 text-sm font-semibold text-[var(--text)]">{series.label}</p>
-                  <p className="text-sm text-[var(--text)]">{formatRange(point, series.unit)}</p>
-                </div>
-              ))}
-            </div>
-
+          <div key={series.key}>
             <div className="h-56 min-w-0">
               <ResponsiveContainer width="100%" height="100%">
                 <ComposedChart data={rows} margin={{ top: 10, right: 12, bottom: 0, left: 4 }}>

@@ -200,14 +200,12 @@ describe('HistoryCardFrame environment line chart', () => {
     render(<HistoryCardFrame card={environmentCard()} scope={{ type: 'zone', zoneId: 1 }} />);
 
     const chart = screen.getByRole('region', { name: 'Environment trend' });
-    expect(within(chart).getByText('Air temperature')).toBeInTheDocument();
-    expect(within(chart).getByText('Relative humidity')).toBeInTheDocument();
-    expect(within(chart).getByText('Rain')).toBeInTheDocument();
-    expect(within(chart).getByText('Light')).toBeInTheDocument();
-    expect(within(chart).getByText('27.2 C')).toBeInTheDocument();
-    expect(within(chart).getByText('54 %')).toBeInTheDocument();
-    expect(within(chart).getByText('3.5 mm')).toBeInTheDocument();
-    expect(within(chart).getByText('53000 lx')).toBeInTheDocument();
+    expect(within(chart).queryByText('Environment trend')).not.toBeInTheDocument();
+    expect(within(chart).queryByText(/\breadings\b/i)).not.toBeInTheDocument();
+    expect(within(chart).queryByText('Air temperature')).not.toBeInTheDocument();
+    expect(within(chart).queryByText('Relative humidity')).not.toBeInTheDocument();
+    expect(within(chart).queryByText('Rain')).not.toBeInTheDocument();
+    expect(within(chart).queryByText('Light')).not.toBeInTheDocument();
     expect(within(chart).getByText('C axis')).toBeInTheDocument();
     expect(within(chart).getByText('% axis')).toBeInTheDocument();
     expect(within(chart).getByText('mm axis')).toBeInTheDocument();
