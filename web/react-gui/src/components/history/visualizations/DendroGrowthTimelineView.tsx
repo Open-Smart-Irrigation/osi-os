@@ -125,20 +125,6 @@ function displayUnit(series: unknown): string {
   return normalizedText(isRecord(series) ? series.unit : null) ?? '';
 }
 
-function formatValue(value: number | null, unit: string): string {
-  if (value === null) return '-';
-  const formatted = Number.isInteger(value) ? String(value) : value.toFixed(1);
-  return unit ? `${formatted} ${unit}` : formatted;
-}
-
-function latestVisibleValue(series: RenderSeries): number | null {
-  for (let index = series.points.length - 1; index >= 0; index -= 1) {
-    const value = series.points[index].value;
-    if (value !== null) return value;
-  }
-  return null;
-}
-
 function normalizeSeriesList(t: HistoryTranslate, seriesList: readonly unknown[]): RenderSeries[] {
   return seriesList.map((series, index) => {
     const sourceId = normalizedText(isRecord(series) ? series.id : null) ?? '';
@@ -211,13 +197,6 @@ function normalizeEvents(t: HistoryTranslate, events: unknown): RenderEvent[] {
   }, []);
 }
 
-function eventTone(event: RenderEvent): string {
-  if (event.severity === 'warning') return 'border-amber-300 bg-amber-50 text-amber-900';
-  if (event.severity === 'critical') return 'border-red-300 bg-red-50 text-red-900';
-  if (event.severity === 'success') return 'border-emerald-300 bg-emerald-50 text-emerald-900';
-  return 'border-[var(--border)] bg-[var(--secondary-bg)] text-[var(--text)]';
-}
-
 function visualWindowsEqual(left: ChartWindow | undefined, right: ChartWindow | undefined): boolean {
   return left?.fromMs === right?.fromMs && left?.toMs === right?.toMs;
 }
@@ -259,37 +238,9 @@ const DendroGrowthTimelineViewComponent: React.FC<DendroGrowthTimelineViewProps>
     <section
       role="region"
       aria-label={t('history.dendroTimeline.title')}
-      className="mt-4 space-y-4 rounded-lg border border-[var(--border)] bg-[var(--bg)] p-4 sm:p-5"
+      className="flex min-h-0 flex-1 flex-col"
     >
-      <div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
-        <div>
-          <h3 className="text-base font-semibold text-[var(--text)]">
-            {t('history.dendroTimeline.title')}
-          </h3>
-          <p className="text-sm text-[var(--text-tertiary)]">
-            {t('history.dendroTimeline.pointsCount', { count: rows.length })}
-          </p>
-        </div>
-      </div>
-
-      <div className="grid gap-2 sm:grid-cols-3">
-        {visibleSeries.map((series) => {
-          return (
-            <div
-              key={series.key}
-              className="rounded-md border border-[var(--border)] bg-[var(--surface)] px-3 py-2"
-            >
-              <p className="text-sm font-semibold text-[var(--text)]">{series.label}</p>
-              <p className="mt-1 text-xs text-[var(--text-tertiary)]">
-                {formatValue(latestVisibleValue(series), series.unit)}
-              </p>
-              {series.unit && <p className="sr-only">{series.unit}</p>}
-            </div>
-          );
-        })}
-      </div>
-
-      <div className="h-64 min-w-0">
+      <div className="min-h-0 min-w-0 flex-1">
         <ResponsiveContainer width="100%" height="100%">
           <LineChart data={rows} margin={{ top: 10, right: 12, bottom: 0, left: 0 }}>
             <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
@@ -322,29 +273,6 @@ const DendroGrowthTimelineViewComponent: React.FC<DendroGrowthTimelineViewProps>
             ))}
           </LineChart>
         </ResponsiveContainer>
-      </div>
-
-      <div>
-        <h4 className="text-sm font-semibold text-[var(--text)]">
-          {t('history.dendroTimeline.eventsTitle')}
-        </h4>
-        {events.length > 0 ? (
-          <ol className="mt-2 space-y-2">
-            {events.map((event) => (
-              <li
-                key={event.key}
-                className={`rounded-md border px-3 py-2 text-sm ${eventTone(event)}`}
-              >
-                <span className="font-semibold">{event.label}</span>
-                <span className="ml-2 text-xs opacity-75">{formatTimestamp(event.t)}</span>
-              </li>
-            ))}
-          </ol>
-        ) : (
-          <p className="mt-2 text-sm text-[var(--text-tertiary)]">
-            {t('history.dendroTimeline.noEvents')}
-          </p>
-        )}
       </div>
     </section>
   );

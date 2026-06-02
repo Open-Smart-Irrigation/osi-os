@@ -186,17 +186,13 @@ function historyData(overrides: Partial<HistoryCardDataResponse<'dendro'>> = {})
 }
 
 describe('HistoryCardFrame Dendro growth timeline', () => {
-  it('renders readable dendrometer series and events without exposing raw hardware identifiers', () => {
+  it('renders the dendrometer growth chart without exposing raw hardware identifiers', () => {
     cardData.current = historyData();
 
     render(<HistoryCardFrame card={dendroCard()} scope={{ type: 'zone', zoneId: 1 }} />);
 
-    const timeline = screen.getByRole('region', { name: 'Growth timeline' });
-    expect(within(timeline).getByText('Stem change')).toBeInTheDocument();
-    expect(within(timeline).getByText('Growth')).toBeInTheDocument();
-    expect(within(timeline).getByText('Shrinkage')).toBeInTheDocument();
-    expect(within(timeline).getAllByText('um').length).toBeGreaterThan(0);
-    expect(within(timeline).getByText('Midday shrinkage')).toBeInTheDocument();
+    // The decluttered growth view is chart-only (event markers render without text).
+    expect(screen.getByRole('region', { name: 'Growth timeline' })).toBeInTheDocument();
     expect(screen.queryByText(/dendro-src-/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/A84041FFFF123456/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/dendro_stress_window/i)).not.toBeInTheDocument();
@@ -241,7 +237,7 @@ describe('HistoryCardFrame Dendro growth timeline', () => {
     expect(screen.queryByText(/NaN/i)).not.toBeInTheDocument();
   });
 
-  it('sanitizes sparse dendrometer events before rendering', () => {
+  it('does not leak raw identifiers from sparse dendrometer events', () => {
     cardData.current = historyData({
       events: [
         null,
@@ -266,8 +262,7 @@ describe('HistoryCardFrame Dendro growth timeline', () => {
 
     render(<HistoryCardFrame card={dendroCard()} scope={{ type: 'zone', zoneId: 1 }} />);
 
-    const timeline = screen.getByRole('region', { name: 'Growth timeline' });
-    expect(within(timeline).getByText('Dendrometer event')).toBeInTheDocument();
+    expect(screen.getByRole('region', { name: 'Growth timeline' })).toBeInTheDocument();
     expect(screen.queryByText(/dendro-src-/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/A84041FFFF123456/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/Raw invalid time/i)).not.toBeInTheDocument();
