@@ -810,6 +810,26 @@ function dbAll(db, sql, params) {
   });
 }
 
+function dbRun(db, sql, params) {
+  return new Promise((resolve, reject) => {
+    if (!db || typeof db.run !== 'function') return reject(new Error('upsertRollups requires db.run'));
+    try {
+      if (db.run.length >= 3) {
+        db.run(sql, params, function(error) {
+          if (error) return reject(error);
+          return resolve(this && typeof this.changes === 'number' ? this.changes : 0);
+        });
+        return undefined;
+      }
+      const result = db.run(sql, params);
+      if (result && typeof result.then === 'function') return result.then(resolve, reject);
+      return resolve(result && typeof result.changes === 'number' ? result.changes : 0);
+    } catch (error) {
+      return reject(error);
+    }
+  });
+}
+
 function normalizeQueryChannels(channels) {
   const normalized = normalizeChannels(channels);
   if (normalized.length === 0) throw new Error('aggregateDeviceData requires channels');
@@ -867,6 +887,40 @@ async function computeRollupBuckets(db, scope = {}, level, windowMs, nowMs) {
     }
   }
   return out;
+}
+
+async function upsertRollups(db, rows) {
+  if (!Array.isArray(rows) || rows.length === 0) return 0;
+  const cols = [
+    'zone_id',
+    'card_type',
+    'logical_source_key',
+    'channel_id',
+    'bucket_level',
+    'bucket_start',
+    'bucket_end',
+    'min_value',
+    'max_value',
+    'mean_value',
+    'median_value',
+    'latest_value',
+    'dominant_status',
+    'coverage_pct',
+    'coverage_confidence',
+    'sample_count',
+    'event_count',
+    'threshold_crossing_count',
+    'unit',
+  ];
+  const keyCols = new Set(['zone_id', 'card_type', 'logical_source_key', 'channel_id', 'bucket_level', 'bucket_start']);
+  const updateCols = cols.filter((col) => !keyCols.has(col));
+  const sql = `INSERT INTO history_channel_rollups (${cols.join(',')}) VALUES (${cols.map(() => '?').join(',')}) ON CONFLICT(zone_id,card_type,logical_source_key,channel_id,bucket_level,bucket_start) DO UPDATE SET ${updateCols.map((col) => `${col}=excluded.${col}`).join(', ')}`;
+  let count = 0;
+  for (const row of rows) {
+    await dbRun(db, sql, cols.map((col) => row[col] ?? null));
+    count += 1;
+  }
+  return count;
 }
 
 function rollupRowsToResult(rows, query, channels) {
@@ -1453,6 +1507,7 @@ module.exports = {
   deriveExpectedCadenceSeconds,
   startOfLocalDayMs,
   computeRollupBuckets,
+  upsertRollups,
   aggregateRows,
   aggregateDeviceData,
   buildAdvancedMetadataPlaceholder,

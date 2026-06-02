@@ -36,6 +36,7 @@ const expectedExports = [
   'deriveExpectedCadenceSeconds',
   'startOfLocalDayMs',
   'computeRollupBuckets',
+  'upsertRollups',
   'aggregateRows',
   'aggregateDeviceData',
   'buildAdvancedMetadataPlaceholder',
@@ -88,6 +89,17 @@ function createCliSqliteDb() {
       try {
         const output = execFileSync('sqlite3', ['-json', dbPath, rendered], { encoding: 'utf8' }).trim();
         cb(null, output ? JSON.parse(output) : []);
+      } catch (error) {
+        cb(error);
+      }
+    },
+    run(sql, params, cb) {
+      db.lastQuery = { sql, params: Array.isArray(params) ? params.slice() : [] };
+      let index = 0;
+      const rendered = sql.replace(/\?/g, () => sqliteEscape(db.lastQuery.params[index++]));
+      try {
+        execFileSync('sqlite3', [dbPath], { input: rendered });
+        cb(null);
       } catch (error) {
         cb(error);
       }
@@ -474,6 +486,43 @@ test('computeRollupBuckets returns completed buckets for a scope/level', async (
     assert.strictEqual(hour.mean_value, 15);
     assert.strictEqual(hour.bucket_level, 'hourly');
     assert.ok(rows.every((row) => row.bucket_end <= new Date(helper.startOfLocalDayMs(nowMs, 'UTC')).toISOString()));
+  } finally {
+    db.close();
+  }
+});
+
+test('upsertRollups is idempotent on the unique bucket key', async () => {
+  const db = createCliSqliteDb();
+  try {
+    const base = {
+      zone_id: 7,
+      card_type: 'soil',
+      logical_source_key: 'root-zone',
+      channel_id: 'swt_1',
+      bucket_level: 'hourly',
+      bucket_start: '2026-06-01T08:00:00.000Z',
+      bucket_end: '2026-06-01T09:00:00.000Z',
+      min_value: 10,
+      max_value: 20,
+      mean_value: 15,
+      median_value: 15,
+      latest_value: 20,
+      dominant_status: null,
+      coverage_pct: 100,
+      coverage_confidence: 'derived',
+      sample_count: 2,
+      event_count: 0,
+      threshold_crossing_count: 0,
+      unit: 'kPa',
+    };
+    await helper.upsertRollups(db, [base]);
+    await helper.upsertRollups(db, [{ ...base, mean_value: 16, sample_count: 3 }]);
+    const rows = await new Promise((resolve, reject) => {
+      db.all('SELECT mean_value, sample_count FROM history_channel_rollups', [], (error, result) => error ? reject(error) : resolve(result));
+    });
+    assert.strictEqual(rows.length, 1);
+    assert.strictEqual(rows[0].mean_value, 16);
+    assert.strictEqual(rows[0].sample_count, 3);
   } finally {
     db.close();
   }
