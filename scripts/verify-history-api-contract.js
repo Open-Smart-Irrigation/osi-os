@@ -161,7 +161,25 @@ function verifyHistoryRouterImplementation(flows, failures) {
   assertContains(
     failures,
     source,
-    "views: ['status-overview', 'connectivity-timeline', 'advanced']",
+    "{ id: 'ext_temperature_c', field: 'ext_temperature_c', label: 'External Temperature', unit: 'C' }",
+    'external temperature environment channel'
+  );
+  assertContains(
+    failures,
+    source,
+    "views: ['line-chart', 'daily-min-max', 'calendar', 'advanced']",
+    'frontend-supported environment view list'
+  );
+  assertContains(
+    failures,
+    source,
+    "views: ['event-timeline', 'calendar', 'advanced']",
+    'frontend-supported irrigation view list'
+  );
+  assertContains(
+    failures,
+    source,
+    "views: ['status-overview', 'advanced']",
     'frontend-supported gateway view list'
   );
 
@@ -179,6 +197,9 @@ function verifyHistoryRouterImplementation(flows, failures) {
   assertNotContains(failures, source, 'sync_outbox', 'edge sync outbox mutation from local-only history preferences/workspaces');
   assertNotContains(failures, source, 'local-storage-sync', 'unsupported gateway local storage view');
   assertNotContains(failures, source, 'power-state', 'unsupported gateway power state view');
+  assertNotContains(failures, source, "views: ['line-chart', 'daily-min-max', 'calendar', 'stress-events', 'advanced']", 'unsupported environment stress-events view');
+  assertNotContains(failures, source, "views: ['event-timeline', 'calendar', 'irrigation-response', 'advanced']", 'unsupported irrigation response view');
+  assertNotContains(failures, source, "views: ['status-overview', 'connectivity-timeline', 'advanced']", 'unsupported gateway connectivity timeline view');
 }
 
 function readFlows(flowPath) {
