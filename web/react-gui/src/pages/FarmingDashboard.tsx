@@ -12,7 +12,6 @@ import { AddDeviceModal } from '../components/farming/AddDeviceModal';
 import { CreateZoneModal } from '../components/farming/CreateZoneModal';
 import { LanguageSwitcher } from '../components/LanguageSwitcher';
 import { SystemPanel } from '../components/farming/SystemPanel';
-import { useFeatureFlags } from '../history/useFeatureFlags';
 import { SenseCapWeatherCard } from '../components/farming/SenseCapWeatherCard';
 import {
   IrrigationOutcomesPanel,
@@ -29,8 +28,6 @@ export const FarmingDashboard: React.FC = () => {
   const { username, logout } = useAuth();
   const { t } = useTranslation('dashboard');
   const { t: tc } = useTranslation('common');
-  const { t: th } = useTranslation('history');
-  const { historyEnabled } = useFeatureFlags();
   const [isAddDeviceModalOpen, setIsAddDeviceModalOpen] = useState(false);
   const [isCreateZoneModalOpen, setIsCreateZoneModalOpen] = useState(false);
 
@@ -139,42 +136,34 @@ export const FarmingDashboard: React.FC = () => {
               </h1>
               <p className="text-[var(--header-subtext)] text-lg mt-1">{t('welcome', { username })}</p>
             </div>
-            <div className="flex flex-col sm:flex-row sm:flex-wrap gap-2 sm:gap-3">
-              <div className="w-full sm:w-auto flex justify-center sm:justify-start">
+            <div className="flex max-w-full flex-row flex-nowrap items-center gap-2 overflow-x-auto">
+              <div className="shrink-0">
                 <LanguageSwitcher />
               </div>
               <button
                 onClick={() => setIsCreateZoneModalOpen(true)}
-                className="w-full sm:w-auto bg-[var(--primary)] hover:bg-[var(--primary-hover)] text-white font-bold text-lg px-6 py-3 touch-target rounded-lg transition-colors shadow-lg flex items-center justify-center gap-2"
+                className="shrink-0 bg-[var(--primary)] hover:bg-[var(--primary-hover)] text-white font-bold text-sm px-3 py-2 touch-target rounded-lg transition-colors shadow-lg flex items-center justify-center gap-1"
               >
-                <span className="text-2xl">+</span>
+                <span className="text-lg">+</span>
                 {t('addZone')}
               </button>
               <button
                 onClick={() => setIsAddDeviceModalOpen(true)}
-                className="w-full sm:w-auto bg-[var(--primary)] hover:bg-[var(--primary-hover)] text-white font-bold text-lg px-6 py-3 touch-target rounded-lg transition-colors shadow-lg flex items-center justify-center gap-2"
+                className="shrink-0 bg-[var(--primary)] hover:bg-[var(--primary-hover)] text-white font-bold text-sm px-3 py-2 touch-target rounded-lg transition-colors shadow-lg flex items-center justify-center gap-1"
               >
-                <span className="text-2xl">+</span>
+                <span className="text-lg">+</span>
                 {t('addDevice')}
               </button>
               <Link
                 to="/account-link"
-                className="w-full sm:w-auto bg-[var(--secondary-bg)] hover:bg-[var(--border)] text-[var(--text)] font-bold text-lg px-6 py-3 touch-target rounded-lg transition-colors flex items-center justify-center gap-2"
+                className="shrink-0 bg-[var(--secondary-bg)] hover:bg-[var(--border)] text-[var(--text)] font-bold text-sm px-3 py-2 touch-target rounded-lg transition-colors flex items-center justify-center gap-1"
               >
                 <span>☁</span>
                 OSI Server
               </Link>
-              {historyEnabled && (
-                <Link
-                  to="/history"
-                  className="w-full sm:w-auto bg-[var(--secondary-bg)] hover:bg-[var(--border)] text-[var(--text)] font-bold text-lg px-6 py-3 touch-target rounded-lg transition-colors flex items-center justify-center"
-                >
-                  {th('history.nav.history')}
-                </Link>
-              )}
               <button
                 onClick={logout}
-                className="w-full sm:w-auto bg-[var(--secondary-bg)] hover:bg-[var(--border)] text-[var(--text)] font-bold text-lg px-6 py-3 touch-target rounded-lg transition-colors"
+                className="shrink-0 bg-[var(--secondary-bg)] hover:bg-[var(--border)] text-[var(--text)] font-bold text-sm px-3 py-2 touch-target rounded-lg transition-colors"
               >
                 {t('logout')}
               </button>
