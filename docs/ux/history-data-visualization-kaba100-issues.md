@@ -435,3 +435,55 @@ Manual verification still required:
 
 - Playwright cannot honestly validate two-finger card swipe, live location-aware pinch, one-finger pan when zoomed, calendar inner-swipe month change, or native screen-edge back-swipe feel.
 - Phil should verify those gestures on a real phone before the gesture-heavy slices are considered fully accepted.
+
+## Smooth history visualization verification
+
+Date: 2026-06-02
+Target: kaba100, `100.93.68.86`
+Branch: `feat/history-data-visualization`
+Deployed GUI commit: `2b93ab15`
+Served GUI asset: `assets/index-BOcN4r38.js`
+Verifier: `/home/phil/playwright-osi/tmp/history-smooth-visualization-live.js`
+
+Deployment:
+
+- Built `web/react-gui` locally and deployed only the static GUI bundle to `/usr/lib/node-red/gui/` with the tar pipe.
+- Confirmed the served `index-*.js` hash matched the local build: `index-BOcN4r38.js`.
+- Created temporary local user `playwright`, assigned Zones 3 and 12 plus their devices for browser verification, then restored Zones 3 and 12 and all assigned devices to `user_id=2` and deleted the temporary user.
+- Did not overwrite `/data/db/farming.db`.
+
+Automated Playwright results:
+
+- Passed: portrait visualization surface occupied 91.8% of the viewport height.
+- Passed: normal mode hid raw 16-hex DevEUI identifiers.
+- Passed: Soil Profile kept `Soil layer 1`, `Soil layer 2`, and `Soil layer 3` rows.
+- Passed: Soil Profile colours remained intact; live Zone B rows were blue/wet for values below 22 kPa.
+- Passed: vertical swipe reached Soil `Line Chart`.
+- Passed: Soil line chart rendered with zero Recharts point dots and zero active draw animations.
+- Passed: calendar rendered a monthly coloured day overview with 30 day cells and no `mixed` wording.
+- Passed after fix: Environment `Daily Min/Max` rendered a chart with zero Recharts point dots and zero active draw animations.
+- Passed: no passive touch event listener console errors were observed.
+- Passed: landscape detail had no page scroll, a 41.4 px thin header, and a wide chart surface (`844 x 348.6`).
+
+Live-found fix:
+
+- First Playwright run failed because `Daily Min/Max` emitted three Recharts dot elements for a single daily bucket (`recharts-area-dot`, two `recharts-line-dot`).
+- Root cause: Recharts forces dots when `Line` or `Area` receives exactly one point, even when `dot={false}`.
+- Fix commit: `2b93ab15` expands a single daily bucket into a short flat segment before rendering so Recharts uses paths instead of forced dots.
+- Regression coverage: `DailyMinMaxView.test.tsx` now asserts single-bucket expansion preserves min/max/mean values.
+
+Screenshots and result artifacts:
+
+- `/home/phil/playwright-osi/screenshots-smooth-history-2026-06-02/01-dashboard.png`
+- `/home/phil/playwright-osi/screenshots-smooth-history-2026-06-02/02-zone-b-soil-profile.png`
+- `/home/phil/playwright-osi/screenshots-smooth-history-2026-06-02/03-zone-b-line-chart.png`
+- `/home/phil/playwright-osi/screenshots-smooth-history-2026-06-02/04-zone-b-calendar.png`
+- `/home/phil/playwright-osi/screenshots-smooth-history-2026-06-02/05-zone-a-daily-minmax.png`
+- `/home/phil/playwright-osi/screenshots-smooth-history-2026-06-02/06-landscape-zone-b.png`
+- `/home/phil/playwright-osi/screenshots-smooth-history-2026-06-02/results.json`
+- `/home/phil/playwright-osi/screenshots-smooth-history-2026-06-02/console.log`
+
+Manual verification still required:
+
+- Playwright verified static visual behavior and single-finger view swipes only.
+- Phil still needs to verify real-device pinch open, pinch close, and one-finger drag-pan feel because Playwright cannot honestly judge two-finger continuous smoothness.
