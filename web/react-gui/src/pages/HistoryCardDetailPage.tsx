@@ -22,6 +22,7 @@ import type {
   HistoryCardSummary,
   HistoryCardSummaryResponse,
   HistoryRangeLabel,
+  HistoryRangeSelection,
   HistoryViewMode,
 } from '../history/types';
 import type { IrrigationZone } from '../types/farming';
@@ -114,6 +115,36 @@ function formatRangeLabel(t: HistoryTranslate, range: HistoryRangeLabel): string
 
 function formatAggregationLabel(t: HistoryTranslate, aggregation: string): string {
   return t(`history.metadata.aggregation.${aggregation}`);
+}
+
+function monthRangeFromViewport(range: HistoryRangeSelection, monthOffset: number): HistoryRangeSelection {
+  const baseMs = Date.parse(range.to ?? range.from ?? '');
+  const baseDate = Number.isFinite(baseMs) ? new Date(baseMs) : new Date();
+  const monthStart = new Date(Date.UTC(
+    baseDate.getUTCFullYear(),
+    baseDate.getUTCMonth() + monthOffset,
+    1,
+    0,
+    0,
+    0,
+    0,
+  ));
+  const nextMonthStart = new Date(Date.UTC(
+    baseDate.getUTCFullYear(),
+    baseDate.getUTCMonth() + monthOffset + 1,
+    1,
+    0,
+    0,
+    0,
+    0,
+  ));
+
+  return {
+    label: 'custom',
+    from: monthStart.toISOString(),
+    to: new Date(nextMonthStart.getTime() - 1).toISOString(),
+    timezone: range.timezone,
+  };
 }
 
 function isPullRefreshPointerType(pointerType: string): boolean {
@@ -266,6 +297,7 @@ export const HistoryCardDetailPage: React.FC = () => {
   );
   const [userSelectedView, setUserSelectedView] = useState<{ cardId: string; view: HistoryViewMode } | null>(null);
   const [enabledSources, setEnabledSources] = useState<{ cardId: string; keys: string[] } | null>(null);
+  const [calendarMonthOffset, setCalendarMonthOffset] = useState(0);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const defaultRange = displayCard?.defaultRange ?? '24h';
   const timeViewport = useTimeViewport(
@@ -298,11 +330,17 @@ export const HistoryCardDetailPage: React.FC = () => {
   const requestAggregation: HistoryAggregationLevel = selectedView === 'daily-min-max'
     ? 'daily'
     : timeViewport.viewport.aggregation;
+  const requestRange = useMemo(
+    () => (selectedView === 'calendar'
+      ? monthRangeFromViewport(timeViewport.viewport.range, calendarMonthOffset)
+      : timeViewport.viewport.range),
+    [calendarMonthOffset, selectedView, timeViewport.viewport.range],
+  );
   const cardData = useHistoryCardData({
     scope: resolvedScope,
     cardId: displayCard?.cardId ?? null,
     view: selectedView,
-    range: timeViewport.viewport.range,
+    range: requestRange,
     aggregation: requestAggregation,
     overlays: [],
     sourceKey: selectedSourceKey,
@@ -407,8 +445,8 @@ export const HistoryCardDetailPage: React.FC = () => {
     setUserSelectedView({ cardId: displayCard.cardId, view: views[nextIndex] });
   }, [displayCard, selectedView]);
 
-  const handleMonthSwipe = useCallback((_delta: -1 | 1) => {
-    // Calendar month state is introduced in Slice 5.
+  const handleMonthSwipe = useCallback((delta: -1 | 1) => {
+    setCalendarMonthOffset((offset) => offset + delta);
   }, []);
 
   const isVisualizationEvent = useCallback((target: EventTarget | null): boolean => {
@@ -478,6 +516,16 @@ export const HistoryCardDetailPage: React.FC = () => {
       setEnabledSources(valid.length > 0 ? { cardId: displayCard.cardId, keys: valid } : null);
     }
   }, [allSourceKeys, displayCard, enabledSources]);
+
+  useEffect(() => {
+    setCalendarMonthOffset(0);
+  }, [
+    displayCard?.cardId,
+    selectedView,
+    timeViewport.viewport.range.label,
+    timeViewport.viewport.range.from,
+    timeViewport.viewport.range.to,
+  ]);
 
   useEffect(() => {
     const meta = document.querySelector('meta[name="viewport"]');

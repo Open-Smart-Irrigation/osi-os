@@ -893,6 +893,85 @@ describe('History card detail route', () => {
     expect(may12).toHaveAttribute('data-history-calendar-date', '2026-05-12');
   });
 
+  it('changes the visible calendar month on inner horizontal calendar swipe', async () => {
+    vi.mocked(historyAPI.getZoneCards).mockResolvedValue({
+      zoneId: 12,
+      generatedAt: '2026-06-15T12:00:00Z',
+      cards: [
+        zoneCard({
+          defaultView: 'calendar',
+          views: ['calendar'],
+          supportedRanges: ['30d'],
+          defaultRange: '30d',
+        }),
+      ],
+    });
+    vi.mocked(historyAPI.getZoneCardData).mockImplementation(async (_zoneId, _cardId, request) => ({
+      cardId: 'soil-card:root-zone',
+      cardType: 'soil',
+      view: 'calendar',
+      range: request.range,
+      aggregation: {
+        level: 'daily',
+        bucketSizeSeconds: 86400,
+        coveragePct: 96,
+        coverageConfidence: 'configured',
+        pointCount: 1,
+      },
+      limits: {
+        maxPointsPerSeries: 1000,
+        maxEvents: 100,
+        maxInterpretations: 20,
+        truncated: false,
+      },
+      series: [],
+      profiles: [],
+      events: [],
+      calendar: {
+        timezone: 'Europe/Zurich',
+        days: [
+          {
+            date: request.range.label === 'custom' && request.range.from?.startsWith('2026-05')
+              ? '2026-05-12'
+              : '2026-06-12',
+            state: 'optimal',
+            coveragePct: 96,
+            coverageConfidence: 'configured',
+            markers: [],
+          },
+        ],
+      },
+      interpretations: [],
+      freshness: { dataAsOf: '2026-06-15T12:00:00.000Z', syncState: 'local' },
+      advancedFields: {},
+    }));
+
+    renderAppAtRoute('/history/zones/12/cards/soil-card%3Aroot-zone');
+
+    expect(await screen.findByRole('grid')).toBeInTheDocument();
+    const surface = screen.getByTestId('history-visualization-surface');
+    preparePointerTarget(surface);
+    dispatchTouch(surface, 'touchstart', [{ clientX: 250, clientY: 160 }]);
+    dispatchTouch(surface, 'touchmove', [{ clientX: 120, clientY: 164 }]);
+    dispatchTouch(surface, 'touchend', []);
+
+    await waitFor(() => {
+      expect(historyAPI.getZoneCardData).toHaveBeenLastCalledWith(
+        12,
+        'soil-card:root-zone',
+        expect.objectContaining({
+          view: 'calendar',
+          range: expect.objectContaining({
+            label: 'custom',
+            from: '2026-05-01T00:00:00.000Z',
+            to: '2026-05-31T23:59:59.999Z',
+          }),
+        }),
+      );
+    });
+    expect(await screen.findByTestId('calendar-cell-2026-05-12')).toBeInTheDocument();
+  });
+
   it('opens an inspector sheet on long press and returns focus to the visualization when closed', async () => {
     vi.mocked(historyAPI.getZoneCardData).mockResolvedValue({
       cardId: 'soil-card:root-zone',
