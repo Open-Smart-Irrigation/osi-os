@@ -143,6 +143,21 @@
         "environment": "Environment"
       }
     },
+    "dailyMinMax": {
+      "title": "Daily Min/Max",
+      "emptyTitle": "No daily min/max data",
+      "emptyBody": "Daily minimum and maximum readings are not available for this range.",
+      "pointsCount": "{{count}} days",
+      "axisLabel": "{{unit}}",
+      "axisNoUnit": "Value",
+      "tooltipMin": "Min",
+      "tooltipMax": "Max",
+      "tooltipMean": "Mean",
+      "series": {
+        "airTemperature": "Air temperature",
+        "environment": "Environment"
+      }
+    },
     "gatewayStatus": {
       "title": "Gateway status overview",
       "emptyTitle": "Limited gateway status data",

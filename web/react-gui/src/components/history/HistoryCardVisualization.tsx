@@ -6,6 +6,7 @@ import { InterpretationList } from './InterpretationList';
 import { DendroGrowthTimelineView } from './visualizations/DendroGrowthTimelineView';
 import { DendroLineChartView } from './visualizations/DendroLineChartView';
 import { DendroStressEventsView } from './visualizations/DendroStressEventsView';
+import { DailyMinMaxView } from './visualizations/DailyMinMaxView';
 import { EnvironmentLineChartView } from './visualizations/EnvironmentLineChartView';
 import { GatewayStatusOverviewView } from './visualizations/GatewayStatusOverviewView';
 import type { HistoryCalendarDateSelection } from './visualizations/HistoryMonthCalendarView';
@@ -65,6 +66,7 @@ export const HistoryCardVisualization: React.FC<HistoryCardVisualizationProps> =
   const shouldRenderDendroLineChart = card.cardType === 'dendro' && selectedView === 'line-chart';
   const shouldRenderDendroStressEvents = card.cardType === 'dendro' && selectedView === 'stress-events';
   const shouldRenderEnvironmentLineChart = card.cardType === 'environment' && selectedView === 'line-chart';
+  const shouldRenderDailyMinMax = card.cardType === 'environment' && selectedView === 'daily-min-max';
   const shouldRenderGatewayStatus = card.cardType === 'gateway' && selectedView === 'status-overview';
   const shouldRenderIrrigationEventTimeline = card.cardType === 'irrigation' && selectedView === 'event-timeline';
   const shouldRenderCalendar = selectedView === 'calendar';
@@ -114,6 +116,10 @@ export const HistoryCardVisualization: React.FC<HistoryCardVisualizationProps> =
 
   if (shouldRenderEnvironmentLineChart) {
     return <EnvironmentLineChartView data={data} />;
+  }
+
+  if (shouldRenderDailyMinMax) {
+    return <DailyMinMaxView data={data} />;
   }
 
   if (shouldRenderGatewayStatus) {

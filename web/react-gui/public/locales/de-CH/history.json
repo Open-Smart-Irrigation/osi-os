@@ -531,6 +531,21 @@
       "events": "Events",
       "noInterpretation": "No local interpretation for this selection.",
       "eventFallback": "History event"
+    },
+    "dailyMinMax": {
+      "title": "Daily Min/Max",
+      "emptyTitle": "No daily min/max data",
+      "emptyBody": "Daily minimum and maximum readings are not available for this range.",
+      "pointsCount": "{{count}} days",
+      "axisLabel": "{{unit}}",
+      "axisNoUnit": "Value",
+      "tooltipMin": "Min",
+      "tooltipMax": "Max",
+      "tooltipMean": "Mean",
+      "series": {
+        "airTemperature": "Air temperature",
+        "environment": "Environment"
+      }
     }
   }
 }
