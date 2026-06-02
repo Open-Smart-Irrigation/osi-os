@@ -11,7 +11,12 @@ import {
   timestampAtSurfaceRatio,
   type Point,
 } from './gestureModel';
-import { createDefaultTimeViewport, type HistoryTimeViewport } from './useTimeViewport';
+import {
+  createDefaultTimeViewport,
+  visualWindowFromTimeViewport,
+  type HistoryTimeViewport,
+  type HistoryVisualWindow,
+} from './useTimeViewport';
 import type { HistoryRangeLabel, HistoryViewMode } from './types';
 
 const DOUBLE_TAP_MS = 300;
@@ -31,6 +36,7 @@ interface UseVisualizationGesturesInput {
   isZoomed?: boolean;
   onViewportChange: (viewport: HistoryTimeViewport) => void;
   onInspect?: (selection: InspectSelection) => void;
+  onVisualWindow?: (window: HistoryVisualWindow) => void;
   onCardSwipe?: (delta: -1 | 1) => void;
   onViewSwipe?: (delta: -1 | 1) => void;
   onMonthSwipe?: (delta: -1 | 1) => void;
@@ -69,6 +75,7 @@ export function useVisualizationGestures({
   isZoomed = viewport.range.label === 'custom',
   onViewportChange,
   onInspect,
+  onVisualWindow,
   onCardSwipe,
   onViewSwipe,
   onMonthSwipe,
@@ -80,12 +87,14 @@ export function useVisualizationGestures({
   const isZoomedRef = useRef(isZoomed);
   const onViewportChangeRef = useRef(onViewportChange);
   const onInspectRef = useRef(onInspect);
+  const onVisualWindowRef = useRef(onVisualWindow);
   const onCardSwipeRef = useRef(onCardSwipe);
   const onViewSwipeRef = useRef(onViewSwipe);
   const onMonthSwipeRef = useRef(onMonthSwipe);
   const activeGestureRef = useRef<ActiveGestureState | null>(null);
   const lastTapRef = useRef<TapState | null>(null);
-  const pendingViewportRef = useRef<HistoryTimeViewport | null>(null);
+  const pendingVisualViewportRef = useRef<HistoryTimeViewport | null>(null);
+  const pendingCommitViewportRef = useRef<HistoryTimeViewport | null>(null);
   const frameIdRef = useRef<number | null>(null);
 
   useEffect(() => {
@@ -113,6 +122,10 @@ export function useVisualizationGestures({
   }, [onInspect]);
 
   useEffect(() => {
+    onVisualWindowRef.current = onVisualWindow;
+  }, [onVisualWindow]);
+
+  useEffect(() => {
     onCardSwipeRef.current = onCardSwipe;
   }, [onCardSwipe]);
 
@@ -136,37 +149,54 @@ export function useVisualizationGestures({
     onViewportChangeRef.current(nextViewport);
   }, []);
 
-  const flushPendingViewport = useCallback(() => {
-    const pendingViewport = pendingViewportRef.current;
+  const clearPendingVisualFrame = useCallback(() => {
     if (frameIdRef.current !== null) {
       window.cancelAnimationFrame(frameIdRef.current);
       frameIdRef.current = null;
     }
-    pendingViewportRef.current = null;
+    pendingVisualViewportRef.current = null;
+  }, []);
+
+  const emitVisualWindow = useCallback((nextViewport: HistoryTimeViewport) => {
+    const nextWindow = visualWindowFromTimeViewport(nextViewport);
+    if (nextWindow) onVisualWindowRef.current?.(nextWindow);
+  }, []);
+
+  const scheduleVisualViewport = useCallback((nextViewport: HistoryTimeViewport) => {
+    viewportRef.current = nextViewport;
+    pendingCommitViewportRef.current = nextViewport;
+    pendingVisualViewportRef.current = nextViewport;
+    if (frameIdRef.current !== null) return;
+    frameIdRef.current = window.requestAnimationFrame(() => {
+      const pendingViewport = pendingVisualViewportRef.current;
+      frameIdRef.current = null;
+      pendingVisualViewportRef.current = null;
+      if (pendingViewport) {
+        emitVisualWindow(pendingViewport);
+      }
+    });
+  }, [emitVisualWindow]);
+
+  const commitPendingViewport = useCallback(() => {
+    const pendingViewport = pendingCommitViewportRef.current;
+    clearPendingVisualFrame();
+    pendingCommitViewportRef.current = null;
     if (pendingViewport) {
       publishViewport(pendingViewport);
     }
-  }, [publishViewport]);
+  }, [clearPendingVisualFrame, publishViewport]);
 
-  const scheduleViewport = useCallback((nextViewport: HistoryTimeViewport) => {
-    viewportRef.current = nextViewport;
-    pendingViewportRef.current = nextViewport;
-    if (frameIdRef.current !== null) return;
-    frameIdRef.current = window.requestAnimationFrame(() => {
-      const pendingViewport = pendingViewportRef.current;
-      frameIdRef.current = null;
-      pendingViewportRef.current = null;
-      if (pendingViewport) {
-        publishViewport(pendingViewport);
-      }
-    });
-  }, [publishViewport]);
+  const cancelPendingViewport = useCallback(() => {
+    clearPendingVisualFrame();
+    pendingCommitViewportRef.current = null;
+  }, [clearPendingVisualFrame]);
 
   const resetViewport = useCallback(() => {
+    cancelPendingViewport();
     publishViewport(
       createDefaultTimeViewport(defaultRangeRef.current, new Date(), viewportRef.current.range.timezone),
     );
-  }, [publishViewport]);
+  }, [cancelPendingViewport, publishViewport]);
 
   const maybeResetForDoubleTap = useCallback((point: Point): boolean => {
     const lastTap = lastTapRef.current;
@@ -270,7 +300,7 @@ export function useVisualizationGestures({
 
           state.didPinch = true;
           if (nextViewport !== viewportRef.current) {
-            scheduleViewport(nextViewport);
+            scheduleVisualViewport(nextViewport);
           }
         }
         return;
@@ -295,7 +325,7 @@ export function useVisualizationGestures({
         state.didPan = true;
         clearLongPress();
         state.dragBaseline = nextPoint;
-        publishViewport(nextViewport);
+        scheduleVisualViewport(nextViewport);
       }
     };
 
@@ -304,7 +334,7 @@ export function useVisualizationGestures({
       if (!state) return;
 
       clearLongPress();
-      flushPendingViewport();
+      commitPendingViewport();
       const isTwoFinger = state.startPoints.length >= 2;
       const dx = state.currentPoint.x - state.startPoint.x;
       const dy = state.currentPoint.y - state.startPoint.y;
@@ -344,7 +374,7 @@ export function useVisualizationGestures({
 
     const onTouchCancel = () => {
       clearLongPress();
-      flushPendingViewport();
+      cancelPendingViewport();
       activeGestureRef.current = null;
     };
 
@@ -363,9 +393,18 @@ export function useVisualizationGestures({
         window.cancelAnimationFrame(frameIdRef.current);
         frameIdRef.current = null;
       }
-      pendingViewportRef.current = null;
+      pendingVisualViewportRef.current = null;
+      pendingCommitViewportRef.current = null;
     };
-  }, [clearLongPress, element, flushPendingViewport, maybeResetForDoubleTap, publishViewport, scheduleViewport]);
+  }, [
+    cancelPendingViewport,
+    clearLongPress,
+    commitPendingViewport,
+    element,
+    maybeResetForDoubleTap,
+    publishViewport,
+    scheduleVisualViewport,
+  ]);
 
   const onDoubleClick = useCallback(() => {
     resetViewport();

@@ -107,6 +107,29 @@ function twoFingerSwipe(
   dispatchTouch(surface, 'touchend', []);
 }
 
+function pinchMove(
+  surface: HTMLElement,
+  {
+    centerX = 160,
+    centerY = 90,
+    startDist = 80,
+    endDist = 200,
+  }: { centerX?: number; centerY?: number; startDist?: number; endDist?: number } = {},
+) {
+  dispatchTouch(surface, 'touchstart', [
+    { clientX: centerX - startDist / 2, clientY: centerY },
+    { clientX: centerX + startDist / 2, clientY: centerY },
+  ]);
+  dispatchTouch(surface, 'touchmove', [
+    { clientX: centerX - endDist / 2, clientY: centerY },
+    { clientX: centerX + endDist / 2, clientY: centerY },
+  ]);
+}
+
+function pinchEnd(surface: HTMLElement) {
+  dispatchTouch(surface, 'touchend', []);
+}
+
 describe('HistoryVisualizationSurface', () => {
   beforeEach(() => {
     vi.useFakeTimers();
@@ -286,7 +309,8 @@ describe('HistoryVisualizationSurface', () => {
     );
   });
 
-  it('coalesces live pinch updates to one viewport change per animation frame', () => {
+  it('pinch move updates visual window only and release commits the viewport', () => {
+    const onVisualWindow = vi.fn();
     const onViewportChange = vi.fn();
     const frameQueue: FrameRequestCallback[] = [];
     const requestAnimationFrameSpy = vi
@@ -304,6 +328,62 @@ describe('HistoryVisualizationSurface', () => {
         viewport={viewport24h()}
         defaultRange="24h"
         onViewportChange={onViewportChange}
+        onVisualWindow={onVisualWindow}
+        activeView="line-chart"
+        isZoomed={false}
+      >
+        <div>Soil profile</div>
+      </HistoryVisualizationSurface>,
+    );
+    const surface = screen.getByTestId('history-visualization-surface');
+    prepareSurfaceGeometry(surface);
+
+    pinchMove(surface, { startDist: 80, endDist: 160 });
+
+    expect(onVisualWindow).not.toHaveBeenCalled();
+    expect(onViewportChange).not.toHaveBeenCalled();
+    expect(requestAnimationFrameSpy).toHaveBeenCalledTimes(1);
+
+    act(() => {
+      frameQueue.shift()?.(0);
+    });
+
+    expect(onVisualWindow).toHaveBeenCalledTimes(1);
+    expect(onVisualWindow).toHaveBeenCalledWith(
+      expect.objectContaining({
+        fromMs: expect.any(Number),
+        toMs: expect.any(Number),
+      }),
+    );
+    expect(onViewportChange).not.toHaveBeenCalled();
+
+    pinchEnd(surface);
+
+    expect(onViewportChange).toHaveBeenCalledTimes(1);
+    expect(onViewportChange).toHaveBeenCalledWith(
+      expect.objectContaining({
+        range: expect.objectContaining({ label: 'custom' }),
+        aggregation: 'auto',
+      }),
+    );
+    expect(cancelAnimationFrameSpy).not.toHaveBeenCalled();
+  });
+
+  it('coalesces live pinch visual-window updates to one callback per animation frame', () => {
+    const onVisualWindow = vi.fn();
+    const onViewportChange = vi.fn();
+    const frameQueue: FrameRequestCallback[] = [];
+    vi.spyOn(window, 'requestAnimationFrame').mockImplementation((callback: FrameRequestCallback) => {
+      frameQueue.push(callback);
+      return frameQueue.length;
+    });
+
+    render(
+      <HistoryVisualizationSurface
+        viewport={viewport24h()}
+        defaultRange="24h"
+        onViewportChange={onViewportChange}
+        onVisualWindow={onVisualWindow}
         activeView="line-chart"
         isZoomed={false}
       >
@@ -326,21 +406,22 @@ describe('HistoryVisualizationSurface', () => {
       { clientX: 260, clientY: 90 },
     ]);
 
+    expect(onVisualWindow).not.toHaveBeenCalled();
     expect(onViewportChange).not.toHaveBeenCalled();
-    expect(requestAnimationFrameSpy).toHaveBeenCalledTimes(1);
+    expect(frameQueue).toHaveLength(1);
 
     act(() => {
       frameQueue.shift()?.(0);
     });
 
-    expect(onViewportChange).toHaveBeenCalledTimes(1);
-    expect(onViewportChange).toHaveBeenCalledWith(
+    expect(onVisualWindow).toHaveBeenCalledTimes(1);
+    expect(onVisualWindow).toHaveBeenCalledWith(
       expect.objectContaining({
-        range: expect.objectContaining({ label: 'custom' }),
-        aggregation: 'auto',
+        fromMs: expect.any(Number),
+        toMs: expect.any(Number),
       }),
     );
-    expect(cancelAnimationFrameSpy).not.toHaveBeenCalled();
+    expect(onViewportChange).not.toHaveBeenCalled();
   });
 
   it('double tap resets through the gesture hook behavior', () => {

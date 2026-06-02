@@ -20,6 +20,7 @@ import type {
   HistoryCardSummary,
   HistoryViewMode,
 } from '../../history/types';
+import type { HistoryVisualWindow } from '../../history/useTimeViewport';
 
 interface HistoryCardVisualizationProps {
   card: HistoryCardSummary;
@@ -30,6 +31,7 @@ interface HistoryCardVisualizationProps {
   advancedData?: HistoryAdvancedResponse | undefined;
   advancedIsLoading?: boolean;
   advancedError?: unknown;
+  window?: HistoryVisualWindow;
   onInspectDate?: (selection: HistoryCalendarDateSelection) => void;
   selectedCalendarDate?: string | null;
 }
@@ -54,6 +56,7 @@ export const HistoryCardVisualization: React.FC<HistoryCardVisualizationProps> =
   advancedData,
   advancedIsLoading = false,
   advancedError = null,
+  window: chartWindow,
   onInspectDate,
   selectedCalendarDate = null,
 }) => {
@@ -95,7 +98,7 @@ export const HistoryCardVisualization: React.FC<HistoryCardVisualizationProps> =
   }
 
   if (shouldRenderSoilLineChart) {
-    return <SoilLineChartView data={data} />;
+    return <SoilLineChartView data={data} window={chartWindow} />;
   }
 
   if (shouldRenderSoilIrrigationResponse) {
@@ -103,11 +106,11 @@ export const HistoryCardVisualization: React.FC<HistoryCardVisualizationProps> =
   }
 
   if (shouldRenderDendroGrowth) {
-    return <DendroGrowthTimelineView data={data} />;
+    return <DendroGrowthTimelineView data={data} window={chartWindow} />;
   }
 
   if (shouldRenderDendroLineChart) {
-    return <DendroLineChartView data={data} />;
+    return <DendroLineChartView data={data} window={chartWindow} />;
   }
 
   if (shouldRenderDendroStressEvents) {
@@ -115,11 +118,11 @@ export const HistoryCardVisualization: React.FC<HistoryCardVisualizationProps> =
   }
 
   if (shouldRenderEnvironmentLineChart) {
-    return <EnvironmentLineChartView data={data} />;
+    return <EnvironmentLineChartView data={data} window={chartWindow} />;
   }
 
   if (shouldRenderDailyMinMax) {
-    return <DailyMinMaxView data={data} />;
+    return <DailyMinMaxView data={data} window={chartWindow} />;
   }
 
   if (shouldRenderGatewayStatus) {

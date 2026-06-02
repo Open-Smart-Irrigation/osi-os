@@ -27,6 +27,11 @@ export interface HistoryTimeViewport {
   aggregation: HistoryAggregationLevel;
 }
 
+export interface HistoryVisualWindow {
+  fromMs: number;
+  toMs: number;
+}
+
 type TimeViewportState = {
   resetKey: string;
   viewport: HistoryTimeViewport;
@@ -50,6 +55,11 @@ function parseViewportRange(viewport: HistoryTimeViewport): { fromMs: number; to
   const toMs = viewport.range.to ? Date.parse(viewport.range.to) : NaN;
   if (!Number.isFinite(fromMs) || !Number.isFinite(toMs) || toMs <= fromMs) return null;
   return { fromMs, toMs, durationMs: toMs - fromMs };
+}
+
+export function visualWindowFromTimeViewport(viewport: HistoryTimeViewport): HistoryVisualWindow | null {
+  const parsed = parseViewportRange(viewport);
+  return parsed ? { fromMs: parsed.fromMs, toMs: parsed.toMs } : null;
 }
 
 function clampRangeToCurrentBoundary(fromMs: number, durationMs: number): { fromMs: number; toMs: number } {

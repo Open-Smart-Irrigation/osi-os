@@ -15,7 +15,13 @@ import { useHistoryCardAdvancedData } from '../history/useHistoryCardAdvancedDat
 import { useHistoryCardData } from '../history/useHistoryCardData';
 import { orderHistoryCards, useHistoryCards } from '../history/useHistoryCards';
 import { useOrientation } from '../history/useOrientation';
-import { setTimeViewportRange, useTimeViewport } from '../history/useTimeViewport';
+import {
+  setTimeViewportRange,
+  useTimeViewport,
+  visualWindowFromTimeViewport,
+  type HistoryTimeViewport,
+  type HistoryVisualWindow,
+} from '../history/useTimeViewport';
 import { historyAPI, irrigationZonesAPI } from '../services/api';
 import type { HistoryCardDataScope } from '../history/useHistoryCardData';
 import type {
@@ -301,6 +307,7 @@ export const HistoryCardDetailPage: React.FC = () => {
   const [userSelectedView, setUserSelectedView] = useState<{ cardId: string; view: HistoryViewMode } | null>(null);
   const [enabledSources, setEnabledSources] = useState<{ cardId: string; keys: string[] } | null>(null);
   const [calendarMonthOffset, setCalendarMonthOffset] = useState(0);
+  const [visualWindow, setVisualWindow] = useState<HistoryVisualWindow | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const defaultRange = displayCard?.defaultRange ?? '24h';
   const timeViewport = useTimeViewport(
@@ -333,6 +340,11 @@ export const HistoryCardDetailPage: React.FC = () => {
   const requestAggregation: HistoryAggregationLevel = selectedView === 'daily-min-max'
     ? 'daily'
     : timeViewport.viewport.aggregation;
+  const committedWindow = useMemo(
+    () => visualWindowFromTimeViewport(timeViewport.viewport),
+    [timeViewport.viewport],
+  );
+  const chartWindow = visualWindow ?? committedWindow ?? undefined;
   const requestRange = useMemo(
     () => (selectedView === 'calendar'
       ? monthRangeFromViewport(timeViewport.viewport.range, calendarMonthOffset)
@@ -391,10 +403,16 @@ export const HistoryCardDetailPage: React.FC = () => {
   const handleResetRange = useCallback(() => {
     if (!displayCard) return;
     setSettingsOpen(false);
+    setVisualWindow(null);
     timeViewport.setViewport(
       setTimeViewportRange(displayCard.defaultRange, new Date(), timeViewport.viewport.range.timezone),
     );
   }, [displayCard, timeViewport]);
+
+  const handleViewportChange = useCallback((nextViewport: HistoryTimeViewport) => {
+    setVisualWindow(null);
+    timeViewport.setViewport(nextViewport);
+  }, [timeViewport]);
 
   const handleAdvancedView = useCallback(() => {
     if (!displayCard || !selectableViewsForCard(displayCard).includes('advanced')) return;
@@ -522,8 +540,10 @@ export const HistoryCardDetailPage: React.FC = () => {
 
   useEffect(() => {
     setCalendarMonthOffset(0);
+    setVisualWindow(null);
   }, [
     displayCard?.cardId,
+    selectedSourceKey,
     selectedView,
     timeViewport.viewport.range.label,
     timeViewport.viewport.range.from,
@@ -620,8 +640,9 @@ export const HistoryCardDetailPage: React.FC = () => {
           defaultRange={displayCard.defaultRange}
           activeView={selectedView}
           isZoomed={timeViewport.viewport.range.label === 'custom'}
-          onViewportChange={timeViewport.setViewport}
+          onViewportChange={handleViewportChange}
           onInspect={handleInspectTimestamp}
+          onVisualWindow={setVisualWindow}
           onCardSwipe={handleCardSwipe}
           onViewSwipe={handleViewSwipe}
           onMonthSwipe={handleMonthSwipe}
@@ -643,6 +664,7 @@ export const HistoryCardDetailPage: React.FC = () => {
             advancedData={advancedData.data}
             advancedIsLoading={advancedData.isLoading}
             advancedError={advancedData.error}
+            window={chartWindow}
             onInspectDate={handleInspectDate}
             selectedCalendarDate={inspectorSelection?.kind === 'date' ? inspectorSelection.date : null}
           />

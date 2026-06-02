@@ -1210,6 +1210,56 @@ describe('History card detail route', () => {
     expect(window.location.hash).toContain('/history/zones/12/cards/environment-card%3Amicroclimate');
   });
 
+  it('clips the chart during pinch without refetching until release', async () => {
+    const frameQueue: FrameRequestCallback[] = [];
+    vi.spyOn(window, 'requestAnimationFrame').mockImplementation((callback: FrameRequestCallback) => {
+      frameQueue.push(callback);
+      return frameQueue.length;
+    });
+    vi.mocked(historyAPI.getZoneCards).mockResolvedValue({
+      zoneId: 12,
+      generatedAt: '2026-05-31T10:00:00Z',
+      cards: [
+        zoneCard({
+          views: ['line-chart'],
+          defaultView: 'line-chart',
+        }),
+      ],
+    });
+
+    renderAppAtRoute('/history/zones/12/cards/soil-card%3Aroot-zone');
+
+    await waitFor(() => expect(historyAPI.getZoneCardData).toHaveBeenCalledTimes(1));
+    historyAPIMock.getZoneCardData.mockClear();
+
+    const surface = screen.getByTestId('history-visualization-surface');
+    preparePointerTarget(surface);
+    dispatchTouch(surface, 'touchstart', [
+      { clientX: 120, clientY: 160 },
+      { clientX: 200, clientY: 160 },
+    ]);
+    dispatchTouch(surface, 'touchmove', [
+      { clientX: 80, clientY: 160 },
+      { clientX: 240, clientY: 160 },
+    ]);
+    act(() => {
+      frameQueue.shift()?.(0);
+    });
+
+    expect(historyAPI.getZoneCardData).not.toHaveBeenCalled();
+
+    dispatchTouch(surface, 'touchend', []);
+
+    await waitFor(() => expect(historyAPI.getZoneCardData).toHaveBeenCalledTimes(1));
+    expect(historyAPI.getZoneCardData).toHaveBeenLastCalledWith(
+      12,
+      'soil-card:root-zone',
+      expect.objectContaining({
+        range: expect.objectContaining({ label: 'custom' }),
+      }),
+    );
+  });
+
   it('switches to the next view mode on vertical swipe inside the visualization surface', async () => {
     vi.mocked(historyAPI.getZoneCards).mockResolvedValue({
       zoneId: 12,
