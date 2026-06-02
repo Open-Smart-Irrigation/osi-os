@@ -101,8 +101,8 @@ export const SoilProfileView: React.FC<SoilProfileViewProps> = ({ profiles }) =>
   }
 
   return (
-    <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-4 pt-6">
-      <div className="grid gap-3">
+    <div className="flex min-h-0 flex-1 flex-col overflow-y-auto px-4 py-4">
+      <div className="grid gap-3 my-auto">
         {sortedProfiles.map((point, index) => {
           const visual = soilStatusVisual(point.status);
           const label = point.label && !isGenericSoilLayerLabel(point.label)

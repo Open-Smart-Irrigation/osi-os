@@ -332,7 +332,7 @@ describe('History mobile overview', () => {
     renderHistoryAtMobileWidth('/history');
 
     await screen.findByRole('heading', { name: 'History' });
-    expect(screen.getByRole('link', { name: /Soil - Root Zone/i })).toHaveAttribute(
+    expect(await screen.findByRole('link', { name: /Soil - Root Zone/i })).toHaveAttribute(
       'href',
       '/history/zones/1/cards/soil-card%3Aroot-zone',
     );
