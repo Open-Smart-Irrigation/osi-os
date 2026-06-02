@@ -6,6 +6,7 @@ import { InterpretationList } from './InterpretationList';
 import { DendroGrowthTimelineView } from './visualizations/DendroGrowthTimelineView';
 import { EnvironmentLineChartView } from './visualizations/EnvironmentLineChartView';
 import { GatewayStatusOverviewView } from './visualizations/GatewayStatusOverviewView';
+import type { HistoryCalendarDateSelection } from './visualizations/HistoryMonthCalendarView';
 import { IrrigationEventTimelineView } from './visualizations/IrrigationEventTimelineView';
 import { SoilProfileView } from './visualizations/SoilProfileView';
 import type {
@@ -24,6 +25,7 @@ interface HistoryCardVisualizationProps {
   advancedData?: HistoryAdvancedResponse | undefined;
   advancedIsLoading?: boolean;
   advancedError?: unknown;
+  onInspectDate?: (selection: HistoryCalendarDateSelection) => void;
 }
 
 type HistoryTranslate = (key: string, options?: Record<string, unknown>) => string;
@@ -46,6 +48,7 @@ export const HistoryCardVisualization: React.FC<HistoryCardVisualizationProps> =
   advancedData,
   advancedIsLoading = false,
   advancedError = null,
+  onInspectDate,
 }) => {
   const { t: translate } = useTranslation('history');
   const t = translate as HistoryTranslate;
@@ -98,7 +101,7 @@ export const HistoryCardVisualization: React.FC<HistoryCardVisualizationProps> =
   if (shouldRenderCalendar) {
     return (
       <>
-        <CalendarView cardType={card.cardType} calendar={data?.calendar} />
+        <CalendarView cardType={card.cardType} calendar={data?.calendar} onInspectDate={onInspectDate} />
         <InterpretationList interpretations={data?.interpretations ?? []} />
       </>
     );

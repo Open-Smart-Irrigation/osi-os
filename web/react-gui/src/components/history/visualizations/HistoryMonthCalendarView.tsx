@@ -1,0 +1,296 @@
+import React, { useMemo } from 'react';
+import { useTranslation } from 'react-i18next';
+import type {
+  HistoryCalendar,
+  HistoryCalendarDay,
+  HistoryCalendarMarker,
+  HistoryCalendarState,
+  HistoryCardType,
+} from '../../../history/types';
+
+export interface HistoryCalendarDateSelection {
+  kind: 'date';
+  date: string;
+  timestamp: string;
+  day: HistoryCalendarDay;
+}
+
+interface HistoryMonthCalendarViewProps {
+  cardType: HistoryCardType;
+  calendar: HistoryCalendar | null | undefined;
+  onInspectDate?: (selection: HistoryCalendarDateSelection) => void;
+}
+
+type HistoryTranslate = (key: string, options?: Record<string, unknown>) => string;
+
+type CalendarCell =
+  | { kind: 'blank'; key: string }
+  | { kind: 'day'; key: string; date: string; dayOfMonth: number; day: HistoryCalendarDay };
+
+const WEEKDAY_KEYS = [
+  'history.calendar.weekday.mon',
+  'history.calendar.weekday.tue',
+  'history.calendar.weekday.wed',
+  'history.calendar.weekday.thu',
+  'history.calendar.weekday.fri',
+  'history.calendar.weekday.sat',
+  'history.calendar.weekday.sun',
+] as const;
+
+const stateTone: Record<HistoryCalendarState, string> = {
+  dry_stress: 'border-amber-300 bg-amber-50 text-amber-950',
+  optimal: 'border-emerald-300 bg-emerald-50 text-emerald-950',
+  wet_excess: 'border-sky-300 bg-sky-50 text-sky-950',
+  mixed: 'border-purple-300 bg-purple-50 text-purple-950',
+  normal_growth: 'border-emerald-300 bg-emerald-50 text-emerald-950',
+  reduced_growth: 'border-amber-300 bg-amber-50 text-amber-950',
+  high_shrinkage_stress: 'border-red-300 bg-red-50 text-red-950',
+  incomplete_night_recovery: 'border-orange-300 bg-orange-50 text-orange-950',
+  normal: 'border-emerald-300 bg-emerald-50 text-emerald-950',
+  heat_stress: 'border-red-300 bg-red-50 text-red-950',
+  cold_stress: 'border-sky-300 bg-sky-50 text-sky-950',
+  high_humidity: 'border-cyan-300 bg-cyan-50 text-cyan-950',
+  rain_day: 'border-blue-300 bg-blue-50 text-blue-950',
+  no_irrigation: 'border-slate-300 bg-slate-50 text-slate-900',
+  irrigation_event: 'border-blue-300 bg-blue-50 text-blue-950',
+  high_irrigation_frequency: 'border-amber-300 bg-amber-50 text-amber-950',
+  possible_ineffective_irrigation: 'border-orange-300 bg-orange-50 text-orange-950',
+  manual_override: 'border-violet-300 bg-violet-50 text-violet-950',
+  offline: 'border-red-300 bg-red-50 text-red-950',
+  no_data: 'border-[var(--border)] bg-[var(--surface)] text-[var(--text-tertiary)] opacity-70',
+};
+
+const markerTone: Record<string, string> = {
+  irrigation: 'bg-blue-500',
+  irrigation_event: 'bg-blue-500',
+  rain: 'bg-sky-500',
+  heat_event: 'bg-red-500',
+  sensor_gap: 'bg-slate-400',
+  data_gap: 'bg-slate-400',
+  manual_override: 'bg-violet-500',
+};
+
+function translateParams(params: Record<string, unknown> | undefined): Record<string, unknown> {
+  return params && typeof params === 'object' ? params : {};
+}
+
+function parseDateParts(value: string): { year: number; month: number; day: number } | null {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+  if (!match) return null;
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  if (!Number.isInteger(year) || !Number.isInteger(month) || !Number.isInteger(day)) return null;
+  if (month < 1 || month > 12 || day < 1 || day > 31) return null;
+  return { year, month, day };
+}
+
+function monthKeyForCalendar(calendar: HistoryCalendar): { year: number; month: number } | null {
+  const firstDay = calendar.days.find((day) => parseDateParts(day.date));
+  if (!firstDay) return null;
+  const parts = parseDateParts(firstDay.date);
+  return parts ? { year: parts.year, month: parts.month } : null;
+}
+
+function formatMonthLabel(calendar: HistoryCalendar, month: { year: number; month: number }): string {
+  const timezone = calendar.timezone || 'UTC';
+  const monthDate = new Date(Date.UTC(month.year, month.month - 1, 15, 12));
+  return new Intl.DateTimeFormat(undefined, {
+    month: 'long',
+    year: 'numeric',
+    timeZone: timezone,
+  }).format(monthDate);
+}
+
+function weekdayOffsetForMondayStart(year: number, month: number): number {
+  const day = new Date(Date.UTC(year, month - 1, 1, 12)).getUTCDay();
+  return (day + 6) % 7;
+}
+
+function daysInMonth(year: number, month: number): number {
+  return new Date(Date.UTC(year, month, 0, 12)).getUTCDate();
+}
+
+function buildCells(calendar: HistoryCalendar, month: { year: number; month: number }): CalendarCell[] {
+  const daysByDate = new Map(calendar.days.map((day) => [day.date, day]));
+  const leadingBlanks = weekdayOffsetForMondayStart(month.year, month.month);
+  const totalDays = daysInMonth(month.year, month.month);
+  const cells: CalendarCell[] = [];
+
+  for (let index = 0; index < leadingBlanks; index += 1) {
+    cells.push({ kind: 'blank', key: `blank-leading-${index}` });
+  }
+
+  for (let dayOfMonth = 1; dayOfMonth <= totalDays; dayOfMonth += 1) {
+    const date = `${month.year}-${String(month.month).padStart(2, '0')}-${String(dayOfMonth).padStart(2, '0')}`;
+    cells.push({
+      kind: 'day',
+      key: date,
+      date,
+      dayOfMonth,
+      day: daysByDate.get(date) ?? {
+        date,
+        state: 'no_data',
+        coveragePct: null,
+        coverageConfidence: 'unknown',
+        markers: [],
+      },
+    });
+  }
+
+  while (cells.length % 7 !== 0) {
+    cells.push({ kind: 'blank', key: `blank-trailing-${cells.length}` });
+  }
+
+  return cells;
+}
+
+function stateLabel(t: HistoryTranslate, state: HistoryCalendarState): string {
+  return t(`history.calendar.state.${state}`);
+}
+
+function summaryLabel(t: HistoryTranslate, day: HistoryCalendarDay, cardType: HistoryCardType): string {
+  if (day.summary?.key) return t(day.summary.key, translateParams(day.summary.params));
+  return t(`history.calendar.summary.${cardType}.${day.state}`, translateParams(day.metrics));
+}
+
+function markerLabel(t: HistoryTranslate, marker: HistoryCalendarMarker): string {
+  return t(marker.labelKey, translateParams(marker.params));
+}
+
+function coverageLabel(t: HistoryTranslate, day: HistoryCalendarDay): string {
+  if (day.coveragePct === null || day.coveragePct === undefined) return t('history.metadata.coverageUnknown');
+  return t('history.metadata.coverageKnown', { coverage: Math.round(day.coveragePct) });
+}
+
+function markerClass(marker: HistoryCalendarMarker): string {
+  return markerTone[marker.type] ?? 'bg-[var(--text-tertiary)]';
+}
+
+function dayAriaLabel(
+  t: HistoryTranslate,
+  monthLabel: string,
+  dayOfMonth: number,
+  day: HistoryCalendarDay,
+  cardType: HistoryCardType,
+): string {
+  const markers = Array.isArray(day.markers) ? day.markers.map((marker) => markerLabel(t, marker)) : [];
+  return [
+    `${monthLabel.replace(/\s+\d{4}$/, '')} ${dayOfMonth}`,
+    stateLabel(t, day.state),
+    summaryLabel(t, day, cardType),
+    coverageLabel(t, day),
+    ...markers,
+  ].filter(Boolean).join(', ');
+}
+
+export const HistoryMonthCalendarView: React.FC<HistoryMonthCalendarViewProps> = ({
+  cardType,
+  calendar,
+  onInspectDate,
+}) => {
+  const { t: translate } = useTranslation('history');
+  const t = translate as HistoryTranslate;
+  const days = Array.isArray(calendar?.days) ? calendar.days : [];
+  const month = calendar ? monthKeyForCalendar(calendar) : null;
+  const monthLabel = calendar && month ? formatMonthLabel(calendar, month) : t('history.calendar.title');
+  const cells = useMemo(() => (calendar && month ? buildCells(calendar, month) : []), [calendar, month]);
+
+  if (!calendar || !month || days.length === 0) {
+    return (
+      <section
+        role="region"
+        aria-label={t('history.calendar.title')}
+        className="mt-4 flex min-h-[240px] items-center justify-center rounded-lg border border-dashed border-[var(--border)] bg-[var(--bg)] p-6 text-center"
+      >
+        <p className="text-sm font-semibold text-[var(--text)]">{t('history.calendar.emptyTitle')}</p>
+      </section>
+    );
+  }
+
+  return (
+    <section
+      role="region"
+      aria-label={t('history.calendar.title')}
+      className="mt-4 rounded-lg border border-[var(--border)] bg-[var(--bg)] p-3 sm:p-4"
+    >
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+        <h3 className="text-base font-semibold text-[var(--text)]">{monthLabel}</h3>
+        <span className="text-xs font-semibold text-[var(--text-tertiary)]">{calendar.timezone || 'UTC'}</span>
+      </div>
+      <div role="grid" aria-label={monthLabel} className="grid grid-cols-7 gap-1 sm:gap-2">
+        {WEEKDAY_KEYS.map((key) => (
+          <div
+            key={key}
+            role="columnheader"
+            className="pb-1 text-center text-[0.65rem] font-bold uppercase text-[var(--text-tertiary)] sm:text-xs"
+          >
+            {t(key)}
+          </div>
+        ))}
+        {cells.map((cell) => {
+          if (cell.kind === 'blank') {
+            return (
+              <div
+                key={cell.key}
+                role="gridcell"
+                aria-label="blank"
+                className="aspect-square rounded-md border border-transparent"
+              />
+            );
+          }
+
+          const markers = Array.isArray(cell.day.markers) ? cell.day.markers : [];
+          const label = stateLabel(t, cell.day.state);
+          const inspectSelection = {
+            kind: 'date' as const,
+            date: cell.date,
+            timestamp: cell.date,
+            day: cell.day,
+          };
+
+          return (
+            <button
+              key={cell.key}
+              type="button"
+              role="gridcell"
+              aria-label={dayAriaLabel(t, monthLabel, cell.dayOfMonth, cell.day, cardType)}
+              data-state={cell.day.state}
+              data-card-type={cardType}
+              data-history-calendar-date={cell.date}
+              onClick={() => {
+                onInspectDate?.(inspectSelection);
+              }}
+              onMouseDown={() => {
+                onInspectDate?.(inspectSelection);
+              }}
+              onPointerDown={(event) => {
+                if (event.pointerType === 'touch' || event.pointerType === 'pen') {
+                  onInspectDate?.(inspectSelection);
+                }
+              }}
+              className={`flex aspect-square min-h-12 flex-col rounded-md border p-1.5 text-left transition focus:outline-none focus:ring-2 focus:ring-[var(--primary)] ${stateTone[cell.day.state] ?? stateTone.no_data}`}
+            >
+              <span className="text-xs font-bold leading-none sm:text-sm">{cell.dayOfMonth}</span>
+              <span className="mt-auto line-clamp-2 text-[0.58rem] font-semibold leading-tight sm:text-[0.68rem]">
+                {label}
+              </span>
+              {markers.length > 0 && (
+                <span className="mt-1 flex gap-0.5" aria-hidden="true">
+                  {markers.slice(0, 5).map((marker, index) => (
+                    <span
+                      key={`${marker.type}-${marker.labelKey}-${index}`}
+                      data-marker-dot="true"
+                      data-marker-type={marker.type}
+                      className={`h-1.5 w-1.5 rounded-full ${markerClass(marker)}`}
+                    />
+                  ))}
+                </span>
+              )}
+            </button>
+          );
+        })}
+      </div>
+    </section>
+  );
+};

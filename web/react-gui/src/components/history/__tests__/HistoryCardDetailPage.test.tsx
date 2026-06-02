@@ -45,6 +45,7 @@ const { translateForTest } = vi.hoisted(() => {
     'history.cardType.gateway': 'Gateway',
     'history.viewMode.soil-profile': 'Soil Profile',
     'history.viewMode.line-chart': 'Line Chart',
+    'history.viewMode.calendar': 'Calendar',
     'history.viewMode.status-overview': 'Status Overview',
     'history.viewMode.advanced': 'Advanced View',
     'history.metadata.coverageUnknown': 'Coverage unknown',
@@ -55,6 +56,18 @@ const { translateForTest } = vi.hoisted(() => {
     'history.metadata.syncState.synced': 'Synced',
     'history.metadata.syncState.unknown': 'Unknown',
     'history.metadata.aggregation.raw': 'Raw',
+    'history.metadata.aggregation.daily': 'Daily',
+    'history.calendar.title': 'Calendar',
+    'history.calendar.emptyTitle': 'No calendar data',
+    'history.calendar.weekday.mon': 'Mon',
+    'history.calendar.weekday.tue': 'Tue',
+    'history.calendar.weekday.wed': 'Wed',
+    'history.calendar.weekday.thu': 'Thu',
+    'history.calendar.weekday.fri': 'Fri',
+    'history.calendar.weekday.sat': 'Sat',
+    'history.calendar.weekday.sun': 'Sun',
+    'history.calendar.state.optimal': 'Optimal',
+    'history.calendar.summary.soil.optimal': 'Root zone was optimal.',
     'history.soilProfile.emptyTitle': 'No soil profile data',
     'history.soilProfile.emptyBody': 'Depth-aware profile readings are not available for this range.',
     'history.gatewayStatus.title': 'Gateway status overview',
@@ -547,6 +560,68 @@ describe('History card detail route', () => {
     expect(surface).toHaveStyle({ touchAction: 'none' });
     expect(screen.queryByRole('region', { name: 'Timeline viewport' })).not.toBeInTheDocument();
     expect(screen.getByTestId('history-detail-scroll-root')).not.toHaveStyle({ touchAction: 'none' });
+  });
+
+  it('renders tappable calendar dates on the detail route', async () => {
+    vi.mocked(historyAPI.getZoneCards).mockResolvedValue({
+      zoneId: 12,
+      generatedAt: '2026-05-31T10:00:00Z',
+      cards: [
+        zoneCard({
+          defaultView: 'calendar',
+          views: ['calendar'],
+          supportedRanges: ['30d'],
+          defaultRange: '30d',
+        }),
+      ],
+    });
+    vi.mocked(historyAPI.getZoneCardData).mockResolvedValue({
+      cardId: 'soil-card:root-zone',
+      cardType: 'soil',
+      view: 'calendar',
+      range: {
+        label: '30d',
+        from: '2026-05-01T00:00:00.000Z',
+        to: '2026-05-31T23:59:59.999Z',
+        timezone: 'Europe/Zurich',
+      },
+      aggregation: {
+        level: 'daily',
+        bucketSizeSeconds: 86400,
+        coveragePct: 96,
+        coverageConfidence: 'configured',
+        pointCount: 1,
+      },
+      limits: {
+        maxPointsPerSeries: 1000,
+        maxEvents: 100,
+        maxInterpretations: 20,
+        truncated: false,
+      },
+      series: [],
+      profiles: [],
+      events: [],
+      calendar: {
+        timezone: 'Europe/Zurich',
+        days: [
+          {
+            date: '2026-05-12',
+            state: 'optimal',
+            coveragePct: 96,
+            coverageConfidence: 'configured',
+            markers: [],
+          },
+        ],
+      },
+      interpretations: [],
+      freshness: { dataAsOf: '2026-05-12T10:00:00.000Z', syncState: 'local' },
+      advancedFields: {},
+    });
+
+    renderAppAtRoute('/history/zones/12/cards/soil-card%3Aroot-zone');
+
+    const may12 = await screen.findByRole('gridcell', { name: /May 12/i });
+    expect(may12).toHaveAttribute('data-history-calendar-date', '2026-05-12');
   });
 
   it('refreshes selected card data on touch pull-down outside the visualization surface at the scroll top', async () => {

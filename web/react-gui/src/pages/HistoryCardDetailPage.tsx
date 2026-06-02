@@ -3,6 +3,7 @@ import { Link, useParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import useSWR from 'swr';
 import { HistoryCardVisualization } from '../components/history/HistoryCardVisualization';
+import type { HistoryCalendarDateSelection } from '../components/history/visualizations/HistoryMonthCalendarView';
 import { HistoryDetailHeader } from '../components/history/mobile/HistoryDetailHeader';
 import { HistoryRangeSegmentedControl } from '../components/history/mobile/HistoryRangeSegmentedControl';
 import { HistoryVisualizationSurface } from '../components/history/mobile/HistoryVisualizationSurface';
@@ -13,7 +14,12 @@ import { useHistoryCards } from '../history/useHistoryCards';
 import { setTimeViewportRange, useTimeViewport } from '../history/useTimeViewport';
 import { historyAPI, irrigationZonesAPI } from '../services/api';
 import type { HistoryCardDataScope } from '../history/useHistoryCardData';
-import type { HistoryCardSummary, HistoryCardSummaryResponse, HistoryRangeLabel, HistoryViewMode } from '../history/types';
+import type {
+  HistoryCardSummary,
+  HistoryCardSummaryResponse,
+  HistoryRangeLabel,
+  HistoryViewMode,
+} from '../history/types';
 import type { IrrigationZone } from '../types/farming';
 
 const zonesFetcher = () => irrigationZonesAPI.getAll();
@@ -29,6 +35,7 @@ type PullRefreshStart = {
   y: number;
   refreshed: boolean;
 };
+type InspectorSelection = { kind: 'timestamp'; timestamp: string } | { kind: 'date'; date: string };
 
 function decodeRouteCardId(rawCardId: string | undefined): string | null {
   if (!rawCardId) return null;
@@ -107,6 +114,12 @@ function getPullRefreshScrollTop(scrollRoot: HTMLElement): number {
     document.documentElement.scrollTop,
     document.body.scrollTop,
   );
+}
+
+function calendarDateFromTarget(target: EventTarget | null): string | null {
+  if (!(target instanceof Element)) return null;
+  const dateCell = target.closest('[data-history-calendar-date]');
+  return dateCell?.getAttribute('data-history-calendar-date') ?? null;
 }
 
 function scopeForCard(card: HistoryCardSummary, routeScope: DetailRouteScope): HistoryCardDataScope | null {
@@ -235,7 +248,20 @@ export const HistoryCardDetailPage: React.FC = () => {
     overlays: [],
     enabled: Boolean(displayCard?.availability.available && resolvedScope),
   });
-  const [inspectorSelection, setInspectorSelection] = useState<{ timestamp: string } | null>(null);
+  const [inspectorSelection, setInspectorSelection] = useState<InspectorSelection | null>(null);
+
+  const handleInspectTimestamp = useCallback((selection: { timestamp: string }) => {
+    setInspectorSelection({ kind: 'timestamp', timestamp: selection.timestamp });
+  }, []);
+
+  const handleInspectDate = useCallback((selection: HistoryCalendarDateSelection) => {
+    setInspectorSelection({ kind: 'date', date: selection.date });
+  }, []);
+
+  const handleScrollRootClick = useCallback((event: React.MouseEvent<HTMLElement>) => {
+    const date = calendarDateFromTarget(event.target);
+    if (date) setInspectorSelection({ kind: 'date', date });
+  }, []);
 
   const handleRangeChange = useCallback((range: HistoryRangeLabel) => {
     timeViewport.setViewport(
@@ -271,6 +297,13 @@ export const HistoryCardDetailPage: React.FC = () => {
   }, [isVisualizationEvent]);
 
   const handleScrollRootPointerUp = useCallback((event: React.PointerEvent<HTMLElement>) => {
+    const selectedDate = calendarDateFromTarget(event.target);
+    if (selectedDate) {
+      setInspectorSelection({ kind: 'date', date: selectedDate });
+      pullStartRef.current = null;
+      return;
+    }
+
     const start = pullStartRef.current;
     if (
       !start
@@ -346,7 +379,8 @@ export const HistoryCardDetailPage: React.FC = () => {
         data-testid="history-detail-scroll-root"
         className="flex min-h-[calc(100vh-4rem)] flex-col gap-4 px-4 py-4"
         onPointerDown={handleScrollRootPointerDown}
-        onPointerUp={handleScrollRootPointerUp}
+        onPointerUpCapture={handleScrollRootPointerUp}
+        onClickCapture={handleScrollRootClick}
         onPointerCancel={() => {
           pullStartRef.current = null;
         }}
@@ -375,7 +409,7 @@ export const HistoryCardDetailPage: React.FC = () => {
             viewport={timeViewport.viewport}
             defaultRange={displayCard.defaultRange}
             onViewportChange={timeViewport.setViewport}
-            onInspect={setInspectorSelection}
+            onInspect={handleInspectTimestamp}
             rangeLabel={formatRangeLabel(t, timeViewport.viewport.range.label)}
             aggregationLabel={formatAggregationLabel(t, timeViewport.viewport.aggregation)}
           >
@@ -385,11 +419,16 @@ export const HistoryCardDetailPage: React.FC = () => {
               selectedView={selectedView}
               isLoading={cardData.isLoading}
               error={cardData.error}
+              onInspectDate={handleInspectDate}
             />
           </HistoryVisualizationSurface>
         </div>
         <section className="rounded-lg border border-dashed border-[var(--border)] bg-[var(--surface)] px-4 py-3 text-sm font-semibold text-[var(--text-tertiary)]">
-          {inspectorSelection?.timestamp ?? t('history.detail.inspectorPlaceholder')}
+          {inspectorSelection?.kind === 'timestamp'
+            ? inspectorSelection.timestamp
+            : inspectorSelection?.kind === 'date'
+              ? inspectorSelection.date
+              : t('history.detail.inspectorPlaceholder')}
         </section>
       </main>
     </div>

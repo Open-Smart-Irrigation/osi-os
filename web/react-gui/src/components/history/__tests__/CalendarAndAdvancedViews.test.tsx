@@ -36,8 +36,17 @@ const { translateForTest } = vi.hoisted(() => {
     'history.metadata.aggregation.daily': 'Daily',
     'history.calendar.title': 'Calendar',
     'history.calendar.emptyTitle': 'No calendar data',
+    'history.calendar.weekday.mon': 'Mon',
+    'history.calendar.weekday.tue': 'Tue',
+    'history.calendar.weekday.wed': 'Wed',
+    'history.calendar.weekday.thu': 'Thu',
+    'history.calendar.weekday.fri': 'Fri',
+    'history.calendar.weekday.sat': 'Sat',
+    'history.calendar.weekday.sun': 'Sun',
+    'history.calendar.state.no_data': 'No data',
     'history.calendar.state.dry_stress': 'Dry stress',
     'history.calendar.state.optimal': 'Optimal',
+    'history.calendar.summary.soil.no_data': 'No soil data',
     'history.calendar.summary.soil.dry_stress': '{{sampleCount}} samples showed dry stress',
     'history.calendar.summary.soil.optimal': '{{sampleCount}} samples looked optimal',
     'history.calendar.marker.soil.dry_stress': 'Dry stress marker',
@@ -107,7 +116,7 @@ function calendar(): HistoryCalendar {
         ],
       },
       {
-        date: '2026-06-01',
+        date: '2026-05-30',
         state: 'optimal',
         coveragePct: null,
         coverageConfidence: 'unknown',
@@ -208,16 +217,19 @@ afterEach(() => {
 });
 
 describe('CalendarView', () => {
-  it('renders backend-provided states, summaries, markers, and timezone without recomputing labels', () => {
-    render(<CalendarView cardType="soil" calendar={calendar()} />);
+  it('renders backend-provided states in a month grid without recomputing labels', () => {
+    const onInspectDate = vi.fn();
+    render(<CalendarView cardType="soil" calendar={calendar()} onInspectDate={onInspectDate} />);
 
     const region = screen.getByRole('region', { name: 'Calendar' });
+    expect(within(region).getByRole('grid', { name: /May 2026/i })).toBeInTheDocument();
+    expect(within(region).getByRole('columnheader', { name: 'Mon' })).toBeInTheDocument();
     expect(within(region).getByText('Europe/Zurich')).toBeInTheDocument();
-    expect(within(region).getByText('Dry stress')).toBeInTheDocument();
-    expect(within(region).getByText('8 samples showed dry stress')).toBeInTheDocument();
-    expect(within(region).getByText('Dry stress marker')).toBeInTheDocument();
-    expect(within(region).getByText('92% coverage')).toBeInTheDocument();
+    expect(within(region).getByRole('gridcell', { name: /Dry stress/i })).toHaveAttribute('data-state', 'dry_stress');
+    expect(within(region).getByRole('gridcell', { name: /Optimal/i })).toHaveAttribute('data-state', 'optimal');
     expect(within(region).queryByText('dry_stress')).not.toBeInTheDocument();
+    fireEvent.click(within(region).getByRole('gridcell', { name: /May 31/i }));
+    expect(onInspectDate).toHaveBeenCalledWith(expect.objectContaining({ date: '2026-05-31' }));
   });
 });
 
