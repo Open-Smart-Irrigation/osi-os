@@ -1167,6 +1167,7 @@ for (const node of flows) {
 }
 console.log('OK every function node that uses a guarded module has it bound');
 expectIncludes('History Rollup Tick', 'osiHistory.runRollupJob', 'calls the helper rollup job');
+expectIncludes('History API Router', 'osiHistory.buildZoneExportCsv', 'builds the zone CSV export via the helper');
 
 const bootstrapInject = flows.find((node) => node.id === 'sync-bootstrap-inject');
 if (!bootstrapInject) {
@@ -2968,7 +2969,7 @@ if (!historyHelperPath) {
   fail(`missing history helper module at one of: ${historyHelperCandidates.join(', ')}`);
 } else {
   const historyHelper = require(historyHelperPath);
-  for (const exportName of ['normalizeDeveui', 'deriveCardId', 'deriveCardsForZone', 'deriveGatewayCard', 'resolveAggregation', 'classifySoilStatus', 'classifyEnvironmentStatus', 'classifyDendroStatus', 'classifyIrrigationStatus', 'classifyGatewayStatus', 'deriveExpectedCadenceSeconds', 'resolveDeviceFieldRollupKey', 'legacySensorHistory', 'aggregateRows', 'aggregateDeviceData', 'buildAdvancedMetadataPlaceholder', 'buildLocalInterpretations']) {
+  for (const exportName of ['normalizeDeveui', 'deriveCardId', 'deriveCardsForZone', 'deriveGatewayCard', 'resolveAggregation', 'classifySoilStatus', 'classifyEnvironmentStatus', 'classifyDendroStatus', 'classifyIrrigationStatus', 'classifyGatewayStatus', 'deriveExpectedCadenceSeconds', 'resolveDeviceFieldRollupKey', 'legacySensorHistory', 'buildZoneExportCsv', 'aggregateRows', 'aggregateDeviceData', 'buildAdvancedMetadataPlaceholder', 'buildLocalInterpretations']) {
     if (typeof historyHelper[exportName] !== 'function') {
       fail(`history helper missing export ${exportName}`);
     } else {

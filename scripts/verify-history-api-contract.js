@@ -27,6 +27,7 @@ const REQUIRED_ENDPOINTS = [
   ['DELETE', '/api/history/workspaces/:id'],
   ['PUT', '/api/history/zones/:zoneId/cards/:cardId/preferences'],
   ['POST', '/api/history/zones/:zoneId/cards/:cardId/opened'],
+  ['GET', '/api/history/zones/:zoneId/export.csv'],
   ['PUT', '/api/history/gateways/:gatewayEui/cards/:cardId/preferences'],
   ['POST', '/api/history/gateways/:gatewayEui/cards/:cardId/opened'],
   ['POST', '/api/history/rollups/run'],
@@ -156,6 +157,7 @@ function verifyHistoryRouterImplementation(flows, failures) {
   assertContains(failures, source, 'osiHistory.buildCalendar', 'helper-owned calendar classification');
   assertContains(failures, source, 'osiHistory.buildLocalInterpretations', 'helper-owned local interpretations');
   assertContains(failures, source, 'osiHistory.buildAdvancedDiagnostics', 'helper-owned advanced diagnostic availability');
+  assertContains(failures, source, 'osiHistory.buildZoneExportCsv', 'zone CSV range export helper call');
   assertContains(failures, source, 'function latestSeriesPoint', 'soil profile fallback to latest visible series point');
   assertContains(failures, source, '.find(rowHasSoilProfileValue)', 'soil profile latest row skips rows without SWT values');
   assertContains(failures, source, 'buildSoilProfiles(latestRows, sourceDevices, series)', 'soil profile builder receives series fallback data');
