@@ -446,6 +446,15 @@ describe('History card detail route', () => {
     });
   });
 
+  it('resolves a zone route without card id to the first ordered card', async () => {
+    renderAppAtRoute('/history/zones/12');
+
+    expect(await screen.findByRole('heading', { level: 1, name: 'Soil - Root Zone' })).toBeInTheDocument();
+    await waitFor(() => {
+      expect(historyAPI.markZoneCardOpened).toHaveBeenCalledWith(12, 'soil-card:root-zone');
+    });
+  });
+
   it('shows a safe not-found state when the card id is not in the selected zone', async () => {
     renderAppAtRoute('/history/zones/12/cards/missing-card');
 

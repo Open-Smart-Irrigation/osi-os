@@ -201,7 +201,7 @@ export const HistoryCardDetailPage: React.FC = () => {
   const zoneId = Number(rawZoneId);
   const gatewayEui = typeof rawGatewayEui === 'string' && rawGatewayEui.trim() ? rawGatewayEui : null;
   const cardId = decodeRouteCardId(rawCardId);
-  const validZoneRoute = Number.isInteger(zoneId) && zoneId > 0 && Boolean(cardId);
+  const validZoneRoute = Number.isInteger(zoneId) && zoneId > 0;
   const validGatewayRoute = Boolean(gatewayEui && cardId);
   const validRoute = validZoneRoute || validGatewayRoute;
   const routeScope = useMemo<DetailRouteScope | null>(() => {
@@ -250,8 +250,9 @@ export const HistoryCardDetailPage: React.FC = () => {
     [routeScope, zones],
   );
   const resolvedCard = useMemo(
-    () => routeCards.find((card) => isRouteMatchForCard(cardId, card)) ?? null,
-    [cardId, routeCards],
+    () => routeCards.find((card) => isRouteMatchForCard(cardId, card))
+      ?? (!cardId ? orderedRouteCards[0] ?? null : null),
+    [cardId, orderedRouteCards, routeCards],
   );
   const resolvedScope = resolvedCard && routeScope ? scopeForCard(resolvedCard, routeScope) : null;
   const displayCard = useMemo(
@@ -483,9 +484,9 @@ export const HistoryCardDetailPage: React.FC = () => {
   }, [calendarDaysByDate, displayCard, handleRefresh, isVisualizationEvent, navigate, orderedRouteCards, routeScope]);
 
   useEffect(() => {
-    if (!featureFlags.historyEnabled || routeScope?.type !== 'zone' || !resolvedCard || !cardId) return;
+    if (!featureFlags.historyEnabled || routeScope?.type !== 'zone' || !resolvedCard) return;
     historyAPI.markZoneCardOpened(routeScope.zoneId, resolvedCard.cardId).catch(() => undefined);
-  }, [cardId, featureFlags.historyEnabled, resolvedCard, routeScope]);
+  }, [featureFlags.historyEnabled, resolvedCard, routeScope]);
 
   useEffect(() => {
     if (!displayCard || selectedSource?.cardId !== displayCard.cardId || selectedSource.sourceKey === null) return;

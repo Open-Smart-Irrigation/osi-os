@@ -46,6 +46,15 @@ function App() {
           />
 
           <Route
+            path="/history/zones/:zoneId"
+            element={
+              <PrivateRoute>
+                <HistoryCardDetailPage />
+              </PrivateRoute>
+            }
+          />
+
+          <Route
             path="/history/zones/:zoneId/cards/:cardId"
             element={
               <PrivateRoute>
