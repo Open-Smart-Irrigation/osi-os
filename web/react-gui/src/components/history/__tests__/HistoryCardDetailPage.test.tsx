@@ -461,7 +461,7 @@ describe('History card detail route', () => {
       generatedAt: '2026-05-31T10:00:00Z',
       cards: [
         zoneCard({
-          cardId: 'gateway:hub',
+          cardId: '0016C001F11766E7:gateway:hub',
           cardType: 'gateway',
           scope: 'gateway',
           title: 'Gateway',
@@ -479,11 +479,16 @@ describe('History card detail route', () => {
       ],
     });
 
-    renderAppAtRoute('/history/zones/12/cards/gateway%3Ahub');
+    renderAppAtRoute('/history/zones/12/cards/gateway-hub');
 
     expect(await screen.findByRole('heading', { level: 1, name: 'Gateway' })).toBeInTheDocument();
     await waitFor(() => {
-      expect(historyAPI.getGatewayCardData).toHaveBeenCalled();
+      expect(historyAPI.getGatewayCardData).toHaveBeenCalledWith(
+        '0016C001F11766E7',
+        '0016C001F11766E7:gateway:hub',
+        expect.objectContaining({ view: 'status-overview' }),
+      );
+      expect(historyAPI.markZoneCardOpened).toHaveBeenCalledWith(12, '0016C001F11766E7:gateway:hub');
     });
     expect(screen.queryByText(/[A-F0-9]{16}/)).not.toBeInTheDocument();
   });

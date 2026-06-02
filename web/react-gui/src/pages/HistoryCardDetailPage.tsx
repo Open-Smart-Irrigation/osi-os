@@ -33,6 +33,7 @@ const DETAIL_PULL_REFRESH_MAX_HORIZONTAL_PX = 48;
 const DETAIL_PULL_REFRESH_SCROLL_TOP_TOLERANCE_PX = 2;
 const DETAIL_CARD_SWIPE_THRESHOLD_PX = 72;
 const DETAIL_CARD_SWIPE_VERTICAL_RATIO = 0.65;
+const GATEWAY_ROUTE_CARD_ID = 'gateway-hub';
 const HISTORY_VISUALIZATION_SURFACE_SELECTOR = '[data-history-visualization-surface="true"]';
 const HISTORY_CARD_SWIPE_IGNORE_SELECTOR = [
   HISTORY_VISUALIZATION_SURFACE_SELECTOR,
@@ -161,6 +162,15 @@ function scopeForCard(card: HistoryCardSummary, routeScope: DetailRouteScope): H
   return { type: 'zone', zoneId: routeScope.zoneId };
 }
 
+function isRouteMatchForCard(routeCardId: string | null, card: HistoryCardSummary): boolean {
+  if (card.cardId === routeCardId) return true;
+  return card.scope === 'gateway' && routeCardId === GATEWAY_ROUTE_CARD_ID;
+}
+
+function routeCardIdForCard(card: HistoryCardSummary): string {
+  return card.scope === 'gateway' ? GATEWAY_ROUTE_CARD_ID : card.cardId;
+}
+
 const HistoryDetailError: React.FC<{
   title: string;
   body: string;
@@ -240,7 +250,7 @@ export const HistoryCardDetailPage: React.FC = () => {
     [routeScope, zones],
   );
   const resolvedCard = useMemo(
-    () => routeCards.find((card) => card.cardId === cardId) ?? null,
+    () => routeCards.find((card) => isRouteMatchForCard(cardId, card)) ?? null,
     [cardId, routeCards],
   );
   const resolvedScope = resolvedCard && routeScope ? scopeForCard(resolvedCard, routeScope) : null;
@@ -444,7 +454,7 @@ export const HistoryCardDetailPage: React.FC = () => {
           const nextCard = orderedRouteCards[nextIndex];
           cardSwipeStartRef.current = null;
           pullStartRef.current = null;
-          navigate(`/history/zones/${routeScope.zoneId}/cards/${encodeURIComponent(nextCard.cardId)}`);
+          navigate(`/history/zones/${routeScope.zoneId}/cards/${encodeURIComponent(routeCardIdForCard(nextCard))}`);
           return;
         }
       }
@@ -474,7 +484,7 @@ export const HistoryCardDetailPage: React.FC = () => {
 
   useEffect(() => {
     if (!featureFlags.historyEnabled || routeScope?.type !== 'zone' || !resolvedCard || !cardId) return;
-    historyAPI.markZoneCardOpened(routeScope.zoneId, cardId).catch(() => undefined);
+    historyAPI.markZoneCardOpened(routeScope.zoneId, resolvedCard.cardId).catch(() => undefined);
   }, [cardId, featureFlags.historyEnabled, resolvedCard, routeScope]);
 
   useEffect(() => {

@@ -286,6 +286,37 @@ describe('History mobile overview', () => {
     expect(screen.queryByText('A84041A75D5E7CFB')).not.toBeInTheDocument();
   });
 
+  it('uses a display-safe route slug for gateway cards in the normal overview', () => {
+    renderWithProviders(
+      <HistoryOverviewCard
+        zoneId={12}
+        card={card({
+          cardId: '0016C001F11766E7:gateway:hub',
+          cardType: 'gateway',
+          scope: 'gateway',
+          title: 'Gateway',
+          subtitle: 'Hub status',
+          sourceLabels: [],
+          sourceDevices: [],
+          sourceDeviceCount: undefined,
+          metadata: {
+            coveragePct: 100,
+            coverageConfidence: 'unknown',
+            gatewayDeviceEui: '0016C001F11766E7',
+            syncState: 'synced',
+          },
+        })}
+        onTogglePinned={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByRole('link', { name: /Gateway/i })).toHaveAttribute(
+      'href',
+      '/history/zones/12/cards/gateway-hub',
+    );
+    expect(screen.queryByText('0016C001F11766E7')).not.toBeInTheDocument();
+  });
+
   it('keeps the overview card pin button from navigating', () => {
     const onTogglePinned = vi.fn();
     renderWithProviders(

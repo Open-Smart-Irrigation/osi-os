@@ -11,6 +11,7 @@ interface HistoryOverviewCardProps {
 }
 
 type HistoryTranslate = (key: string, options?: Record<string, unknown>) => string;
+const GATEWAY_ROUTE_CARD_ID = 'gateway-hub';
 
 function cardTypeLabel(t: HistoryTranslate, cardType: HistoryCardType): string {
   return t('history.overview.cardTypeLabel', {
@@ -40,10 +41,7 @@ function displaySafeSourceLabel(label: string | null): string | null {
 
 function detailPath(zoneId: number, card: HistoryCardSummary): string {
   if (card.scope === 'gateway') {
-    const gatewayEui = typeof card.metadata.gatewayEui === 'string' ? card.metadata.gatewayEui : null;
-    if (gatewayEui) {
-      return `/history/gateways/${encodeURIComponent(gatewayEui)}/cards/${encodeURIComponent(card.cardId)}`;
-    }
+    return `/history/zones/${zoneId}/cards/${GATEWAY_ROUTE_CARD_ID}`;
   }
   return `/history/zones/${zoneId}/cards/${encodeURIComponent(card.cardId)}`;
 }
