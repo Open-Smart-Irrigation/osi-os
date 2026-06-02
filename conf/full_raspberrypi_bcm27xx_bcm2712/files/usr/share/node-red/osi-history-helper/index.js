@@ -240,14 +240,14 @@ function meanFinite(values) {
 
 function classifySoilStatus(input = {}) {
   const thresholds = input.thresholds || {};
-  const wetKpa = toFiniteNumber(thresholds.wetKpa) ?? 15;
-  const dryKpa = toFiniteNumber(thresholds.dryKpa) ?? 70;
+  const wetKpa = toFiniteNumber(thresholds.wetKpa) ?? 22;
+  const dryKpa = toFiniteNumber(thresholds.dryKpa) ?? 50;
   const value = firstFinite(input, ['swtKpa', 'swt_kpa', 'value'])
     ?? meanFinite([input.swt_1, input.swt_2, input.swt_3, input.swt_wm1, input.swt_wm2]);
 
   if (value === null) return { status: 'no_data', severity: 'info', value: null };
-  if (value >= dryKpa) return { status: 'dry_stress', severity: 'warning', value: roundTo(value), thresholds: { wetKpa, dryKpa } };
-  if (value <= wetKpa) return { status: 'wet_excess', severity: 'warning', value: roundTo(value), thresholds: { wetKpa, dryKpa } };
+  if (value > dryKpa) return { status: 'dry_stress', severity: 'warning', value: roundTo(value), thresholds: { wetKpa, dryKpa } };
+  if (value < wetKpa) return { status: 'wet_excess', severity: 'warning', value: roundTo(value), thresholds: { wetKpa, dryKpa } };
   return { status: 'optimal', severity: 'normal', value: roundTo(value), thresholds: { wetKpa, dryKpa } };
 }
 

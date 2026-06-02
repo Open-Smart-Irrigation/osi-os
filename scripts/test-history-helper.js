@@ -102,6 +102,14 @@ test('exports the history helper contract', () => {
   }
 });
 
+test('classifySoilStatus uses 22/50 kPa thresholds', () => {
+  assert.strictEqual(helper.classifySoilStatus({ value: 10 }).status, 'wet_excess');
+  assert.strictEqual(helper.classifySoilStatus({ value: 22 }).status, 'optimal');
+  assert.strictEqual(helper.classifySoilStatus({ value: 35 }).status, 'optimal');
+  assert.strictEqual(helper.classifySoilStatus({ value: 50 }).status, 'optimal');
+  assert.strictEqual(helper.classifySoilStatus({ value: 51 }).status, 'dry_stress');
+});
+
 test('derives stable card identifiers without exposing raw dendro DevEUI', () => {
   assert.strictEqual(helper.normalizeDeveui('aa-bb cc:dd:ee:ff:00:11'), 'AABBCCDDEEFF0011');
   assert.strictEqual(helper.normalizeDeveui('not-a-deveui'), null);
