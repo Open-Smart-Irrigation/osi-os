@@ -67,10 +67,14 @@ flows.json: http in  GET /api/history/zones/:zoneId/export.csv
   AND recorded_at >= ? AND recorded_at < ? ORDER BY recorded_at`; emit one tidy row per
   (timestamp, channel) with `value`, `unit`, `depth_cm` (from the source's depth fields),
   `source`, `card`, `zone`, `timezone`. Columns = `RAW_CSV_COLUMNS`.
-- **hourly/daily:** for each card/source/channel, call the existing rollups+live read over the
-  range at that level; emit one tidy row per (bucket, channel) with
-  `bucket_start/bucket_end, n, coverage_pct, mean, min, max, median, latest, depth_cm, …`.
-  Columns = `AGG_CSV_COLUMNS`.
+- **hourly/daily:** aggregate **per physical source device**, not per merged card source. For
+  each source device of each card, aggregate that device's channels over the range at the chosen
+  level (computed live from `device_data`, bypassing the merged rollup) and emit one tidy row per
+  (bucket, channel) with the device's display-safe `source` name and its own `depth_cm`. This
+  keeps per-sensor and per-depth fidelity for multi-source cards (a 2-Chameleon zone exports two
+  source rows per channel, each with its depth — not a blended `source="2 sources"` with blank
+  depth). Columns = `AGG_CSV_COLUMNS`. (Rationale: the merged rollup is keyed by the card's single
+  logical source, so reading it conflates same-named channels across devices.)
 - Returns `{ columns, rows }` (or a row iterator for streaming). Reuse `toCsv`/`csvCell`.
 - No raw DevEUI in any column (display-safe `source`), consistent with the rollups spec.
 
