@@ -691,47 +691,49 @@ test('buildZoneExportCsv raw emits tidy rows with depth and source', async () =>
   }
 });
 
-test('buildZoneExportCsv daily uses completed rollups plus today live rows', async () => {
+test('buildZoneExportCsv aggregate keeps per-source rows with depth for merged cards', async () => {
   const db = createCliSqliteDb();
   try {
     db.runSql(`
       INSERT INTO users(id,username,password_hash,created_at,updated_at) VALUES(1,'u','h','2026-05-31T00:00:00.000Z','2026-05-31T00:00:00.000Z');
       INSERT INTO irrigation_zones(id,name,user_id,zone_uuid,timezone,created_at,updated_at) VALUES(12,'Zone B',1,'zb','UTC','2026-05-31T00:00:00.000Z','2026-05-31T00:00:00.000Z');
       INSERT INTO devices(deveui,name,type_id,user_id,irrigation_zone_id,chameleon_enabled,chameleon_swt1_depth_cm,created_at,updated_at)
-        VALUES('AA00000000000001','Chameleon 1','DRAGINO_LSN50',1,12,1,5,'2026-05-31T00:00:00.000Z','2026-05-31T00:00:00.000Z');
-      INSERT INTO history_channel_rollups(
-        zone_id, card_type, logical_source_key, channel_id, bucket_level, bucket_start, bucket_end,
-        min_value, max_value, mean_value, median_value, latest_value, dominant_status,
-        coverage_pct, coverage_confidence, sample_count, unit
-      ) VALUES (
-        12, 'soil', 'root-zone', 'swt_1', 'daily', '2026-06-01T00:00:00.000Z', '2026-06-02T00:00:00.000Z',
-        6.1, 6.8, 6.4, 6.3, 6.5, 'optimal', 96.5, 'configured', 24, 'kPa'
-      );
+        VALUES
+          ('AA00000000000001','Chameleon 1','DRAGINO_LSN50',1,12,1,5,'2026-05-31T00:00:00.000Z','2026-05-31T00:00:00.000Z'),
+          ('AA00000000000002','Chameleon 2','DRAGINO_LSN50',1,12,1,15,'2026-05-31T00:00:00.000Z','2026-05-31T00:00:00.000Z');
       INSERT INTO device_data(deveui,recorded_at,swt_1) VALUES
-        ('AA00000000000001','2026-06-02T08:00:00.000Z',7.1),
-        ('AA00000000000001','2026-06-02T09:00:00.000Z',7.5);
+        ('AA00000000000001','2026-06-01T08:00:00.000Z',6.0),
+        ('AA00000000000001','2026-06-01T09:00:00.000Z',6.4),
+        ('AA00000000000002','2026-06-01T08:00:00.000Z',7.0),
+        ('AA00000000000002','2026-06-01T09:00:00.000Z',7.4);
     `);
     const res = await helper.buildZoneExportCsv(db, {
       zoneId: 12,
       from: '2026-06-01',
-      to: '2026-06-02',
+      to: '2026-06-01',
       granularity: 'daily',
-      nowMs: Date.parse('2026-06-02T12:00:00.000Z'),
+      nowMs: Date.parse('2026-06-03T00:00:00.000Z'),
     });
     assert.deepStrictEqual(res.columns, helper.AGG_CSV_COLUMNS);
-    const completed = res.rows.find((row) => row.bucket_start === '2026-06-01T00:00:00.000Z' && row.variable === 'swt_1');
-    const live = res.rows.find((row) => row.bucket_start === '2026-06-02T00:00:00.000Z' && row.variable === 'swt_1');
-    assert.ok(completed);
-    assert.ok(live);
-    assert.strictEqual(completed.zone, 'Zone B');
-    assert.strictEqual(completed.card, 'soil');
-    assert.strictEqual(completed.source, 'Chameleon 1');
-    assert.strictEqual(completed.depth_cm, 5);
-    assert.strictEqual(completed.unit, 'kPa');
-    assert.strictEqual(completed.n, 24);
-    assert.strictEqual(completed.latest, 6.5);
-    assert.strictEqual(live.latest, 7.5);
-    assert.strictEqual(live.n, 2);
+    const swt1Rows = res.rows.filter((row) => row.variable === 'swt_1');
+    assert.strictEqual(swt1Rows.length, 2);
+    assert.ok(!swt1Rows.some((row) => row.source === '2 sources'), 'no blended source label');
+    assert.ok(!swt1Rows.some((row) => row.depth_cm === '' || row.depth_cm === null || row.depth_cm === undefined), 'no blank soil depth');
+    const c1 = swt1Rows.find((row) => row.source === 'Chameleon 1');
+    const c2 = swt1Rows.find((row) => row.source === 'Chameleon 2');
+    assert.ok(c1, 'Chameleon 1 row present');
+    assert.ok(c2, 'Chameleon 2 row present');
+    assert.strictEqual(c1.zone, 'Zone B');
+    assert.strictEqual(c1.card, 'soil');
+    assert.strictEqual(c1.depth_cm, 5);
+    assert.strictEqual(c1.unit, 'kPa');
+    assert.strictEqual(c1.n, 2);
+    assert.strictEqual(c1.mean, 6.2);
+    assert.strictEqual(c1.latest, 6.4);
+    assert.strictEqual(c2.depth_cm, 15);
+    assert.strictEqual(c2.n, 2);
+    assert.strictEqual(c2.mean, 7.2);
+    assert.strictEqual(c2.latest, 7.4);
     assert.ok(!res.rows.some((row) => /[A-F0-9]{16}/.test(String(row.source))), 'no raw DevEUI');
   } finally {
     db.close();

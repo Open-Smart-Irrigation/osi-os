@@ -1187,12 +1187,6 @@ async function rawZoneExportRows(db, scope) {
   return rows;
 }
 
-function exportSourceName(sourceDevices) {
-  if (!Array.isArray(sourceDevices) || sourceDevices.length === 0) return 'Source';
-  if (sourceDevices.length === 1) return displayDeviceName(sourceDevices[0], 0);
-  return `${sourceDevices.length} sources`;
-}
-
 async function aggregateZoneExportRows(db, scope) {
   const rows = [];
   const zoneName = String(scope.zone.name || scope.zone.zone_uuid || scope.zone.id);
@@ -1203,28 +1197,33 @@ async function aggregateZoneExportRows(db, scope) {
       .sort((left, right) =>
         String(normalizeDeveui(left.deveui || left.device_eui) || '').localeCompare(String(normalizeDeveui(right.deveui || right.device_eui) || ''))
       );
-    const deveuis = uniqueDeveuis(sourceDevices);
-    if (!channels.length || !deveuis.length) continue;
+    if (!channels.length || !sourceDevices.length) continue;
 
-    const sourceName = exportSourceName(sourceDevices);
-    const depthDevice = sourceDevices.length === 1 ? sourceDevices[0] : {};
-    const aggregate = await aggregateDeviceData(db, {
-      zoneId: scope.zone.id,
-      cardType: card.cardType,
-      logicalSourceKey: card.logicalSourceKey,
-      device_euis: deveuis,
-      start: scope.start,
-      end: scope.end,
-      aggregation: scope.granularity,
-      channels,
-      timezone: scope.timezone,
-      nowMs: scope.nowMs,
-    });
-    rows.push(...csvRowsFromAggregate(aggregate, card, depthDevice, sourceName, channels).map((row) => ({
-      ...row,
-      timezone: scope.timezone,
-      zone: zoneName,
-    })));
+    let index = 0;
+    for (const device of sourceDevices) {
+      const sourceName = displayDeviceName(device, index);
+      index += 1;
+      const deveui = normalizeDeveui(device.deveui || device.device_eui);
+      if (!deveui) continue;
+      const aggregate = await aggregateDeviceData(db, {
+        zoneId: scope.zone.id,
+        cardType: card.cardType,
+        logicalSourceKey: card.logicalSourceKey,
+        device_euis: [deveui],
+        sourceFilterActive: true,
+        start: scope.start,
+        end: scope.end,
+        aggregation: scope.granularity,
+        channels,
+        timezone: scope.timezone,
+        nowMs: scope.nowMs,
+      });
+      rows.push(...csvRowsFromAggregate(aggregate, card, device, sourceName, channels).map((row) => ({
+        ...row,
+        timezone: scope.timezone,
+        zone: zoneName,
+      })));
+    }
   }
   rows.sort((left, right) => String(left.bucket_start).localeCompare(String(right.bucket_start))
     || String(left.card).localeCompare(String(right.card))
