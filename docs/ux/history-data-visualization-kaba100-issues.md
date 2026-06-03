@@ -717,3 +717,60 @@ Artifacts:
 - `/tmp/kaba100-zone-b-2026-06-02-raw-api.csv`
 - `/tmp/kaba100-zone-b-wide-raw.csv`
 - `/tmp/kaba100-zone-b-wide-daily.csv`
+
+## Zone CSV per-source aggregate verification
+
+Date: 2026-06-03
+Target: kaba100, `100.93.68.86`
+Branch: `feat/zone-csv-range-export`
+Deployed commits: through `439b5b3a`
+
+Deployment:
+
+- Deployed only `/srv/node-red/osi-history-helper/index.js`.
+- Restarted Node-RED with `/etc/init.d/node-red restart`.
+- Confirmed `node -e "require('/srv/node-red/osi-history-helper')"` printed `helper-ok`.
+- Confirmed `/gui/` returned HTTP `200`.
+- Did not overwrite `/data/db/farming.db`.
+
+Temporary-user handling:
+
+- Created temporary local user `playwright`, reassigned Zones 3 and 12 plus their devices for verification.
+- Restored Zones 3 and 12 and their devices to `user_id=2`.
+- Deleted the temporary `playwright` user.
+- Restore check: `playwright_count=0`, Zone 3 and Zone 12 both `user_id=2`, devices in Zone 3 and Zone 12 both `user_id=2`.
+
+Requested live check:
+
+- `GET /api/history/zones/12/export.csv?from=2026-06-01&to=2026-06-02&granularity=daily` returned HTTP `200`.
+- The CSV contained `Chameleon 1` soil rows only.
+- Root cause: live Zone B `Chameleon 2` has `device_data` rows in that range, but zero `swt_1`, `swt_2`, or `swt_3` values. Its historical soil values end on `2026-05-28T05:05:48.462Z`.
+- This is a live-data limitation for the requested date range, not a remaining merged-export bug.
+
+Per-source aggregate verification on overlapping live data:
+
+- `GET /api/history/zones/12/export.csv?from=2026-05-27&to=2026-05-28&granularity=daily` returned HTTP `200`.
+- Header matched: `bucket_start,bucket_end,timezone,zone,card,source,variable,depth_cm,unit,n,coverage_pct,mean,min,max,median,latest`.
+- Soil sources found: `Chameleon 1`, `Chameleon 2`.
+- No `source=2 sources` rows found.
+- No blank `depth_cm` values found on soil rows.
+- No raw 16-hex DevEUI found.
+- Sample `Chameleon 1` row:
+  `2026-05-27T00:00:00.000Z,2026-05-28T00:00:00.000Z,UTC,Zone B,soil,Chameleon 1,swt_1,5,kPa,288,,4.103,3.71,4.45,4.16,4.45`
+- Sample `Chameleon 2` row:
+  `2026-05-27T00:00:00.000Z,2026-05-28T00:00:00.000Z,UTC,Zone B,soil,Chameleon 2,swt_1,5,kPa,218,,1.621,1.01,2.18,1.65,1.01`
+
+Raw/range guard regression checks:
+
+- `GET /api/history/zones/12/export.csv?from=2026-05-27&to=2026-05-27&granularity=raw` returned Raw header `timestamp,timezone,zone,card,source,variable,depth_cm,value,unit`.
+- Raw sources found: `Chameleon 1`, `Chameleon 2`.
+- Raw soil rows had no blank `depth_cm` values and no raw 16-hex DevEUI.
+- Oversized Raw export, `2026-01-01..2026-06-02`, still returned HTTP `413`.
+- 413 body remained: `{"error":"range too large for this granularity","suggestion":"choose a coarser granularity"}`.
+
+Artifacts:
+
+- `/tmp/kaba100-zone-b-daily-per-source.csv`
+- `/tmp/kaba100-zone-b-daily-per-source-overlap.csv`
+- `/tmp/kaba100-zone-b-raw-per-source-overlap.csv`
+- `/tmp/kaba100-zone-b-oversize-raw-per-source.json`
