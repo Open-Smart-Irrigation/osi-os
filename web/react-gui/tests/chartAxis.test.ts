@@ -4,6 +4,7 @@ import test from 'node:test';
 import {
   formatTimeTick,
   formatWindowCaption,
+  HISTORY_CHART_MARGIN,
   timeTickTier,
 } from '../src/components/history/visualizations/chartAxis.ts';
 
@@ -87,4 +88,11 @@ test('formatWindowCaption summarizes the visible zoom window', () => {
   );
   assert.equal(formatWindowCaption(Number.NaN, jun5Morning), '-');
   assert.equal(formatWindowCaption(jun8Morning, jun5Morning), '-');
+});
+
+test('history chart margin keeps time ticks above mobile browser chrome', () => {
+  assert.ok(
+    HISTORY_CHART_MARGIN.bottom >= 24,
+    'bottom chart margin should reserve visible space below x-axis tick labels',
+  );
 });

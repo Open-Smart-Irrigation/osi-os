@@ -7,7 +7,8 @@ import type { CSSProperties } from 'react';
  */
 
 // `top: 20` keeps the top y-axis tick clear of the in-chart view-mode/device labels.
-export const HISTORY_CHART_MARGIN = { top: 20, right: 16, bottom: 6, left: 8 } as const;
+// `bottom: 28` keeps x-axis ticks above mobile browser chrome and home indicators.
+export const HISTORY_CHART_MARGIN = { top: 20, right: 16, bottom: 28, left: 8 } as const;
 
 const DAY_MS = 86_400_000;
 const AXIS_TICK: CSSProperties = { fontSize: 11, fill: 'var(--text-tertiary)' };

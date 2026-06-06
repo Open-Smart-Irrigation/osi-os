@@ -17,6 +17,7 @@ globalThis.ResizeObserver = ResizeObserverStub;
 const { translateForTest } = vi.hoisted(() => {
   const translations: Record<string, string> = {
     'history.cardFrame.placeholderBody': 'Chart and calendar data will load here when card data APIs are enabled.',
+    'history.cardFrame.cardDataLoading': 'Loading card data...',
     'history.viewMode.line-chart': 'Line Chart',
     'history.viewMode.irrigation-response': 'Irrigation Response',
     'history.viewMode.stress-events': 'Stress Events',
@@ -76,6 +77,7 @@ function card(
 function data(
   cardType: 'soil' | 'dendro',
   view: HistoryViewMode,
+  hasSeries = false,
 ): HistoryCardDataResponse<'soil' | 'dendro'> {
   return {
     cardId: `zone-1:${cardType}:source`,
@@ -90,7 +92,19 @@ function data(
       pointCount: 0,
     },
     limits: { maxPointsPerSeries: 1000, maxEvents: 100, maxInterpretations: 20, truncated: false },
-    series: [],
+    series: hasSeries
+      ? [
+          {
+            id: 'soil-1',
+            label: 'Soil 1',
+            unit: 'kPa',
+            points: [
+              { t: '2026-05-30T06:00:00Z', value: 42, coverageConfidence: 'unknown' },
+              { t: '2026-05-30T12:00:00Z', value: 48, coverageConfidence: 'unknown' },
+            ],
+          },
+        ]
+      : [],
     profiles: [],
     events: [],
     calendar: null,
@@ -169,5 +183,36 @@ describe('History placeholder view replacements', () => {
 
     expect(screen.getByText('No stress events')).toBeInTheDocument();
     expect(screen.queryByText('0 stress events')).not.toBeInTheDocument();
+  });
+
+  it('keeps previous chart data mounted while a refetch is loading', () => {
+    render(
+      <HistoryCardVisualization
+        card={card('soil', 'line-chart')}
+        data={data('soil', 'line-chart', true)}
+        selectedView="line-chart"
+        isLoading
+      />,
+    );
+
+    expect(screen.getByRole('region', { name: 'Soil line chart' })).toBeInTheDocument();
+    expect(screen.queryByText('Loading card data...')).not.toBeInTheDocument();
+  });
+
+  it('does not render stale chart data from a different card while loading', () => {
+    render(
+      <HistoryCardVisualization
+        card={card('soil', 'line-chart')}
+        data={{
+          ...data('soil', 'line-chart', true),
+          cardId: 'zone-1:soil:other-source',
+        }}
+        selectedView="line-chart"
+        isLoading
+      />,
+    );
+
+    expect(screen.getByText('Loading card data...')).toBeInTheDocument();
+    expect(screen.queryByRole('region', { name: 'Soil line chart' })).not.toBeInTheDocument();
   });
 });

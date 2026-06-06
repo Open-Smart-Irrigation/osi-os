@@ -74,8 +74,9 @@ export const HistoryCardVisualization: React.FC<HistoryCardVisualizationProps> =
   const shouldRenderIrrigationEventTimeline = card.cardType === 'irrigation' && selectedView === 'event-timeline';
   const shouldRenderCalendar = selectedView === 'calendar';
   const shouldRenderAdvanced = selectedView === 'advanced';
+  const currentData = data?.cardId === card.cardId && data.cardType === card.cardType ? data : undefined;
 
-  if (isLoading) {
+  if (isLoading && !currentData) {
     return (
       <div className="mt-4 flex min-h-[240px] items-center justify-center rounded-lg border border-dashed border-[var(--border)] bg-[var(--bg)] p-6 text-center">
         <p className="text-sm font-semibold text-[var(--text)]">
@@ -93,44 +94,44 @@ export const HistoryCardVisualization: React.FC<HistoryCardVisualizationProps> =
     );
   }
 
-  if (shouldRenderSoilProfile && data) {
-    return <SoilProfileView profiles={Array.isArray(data.profiles) ? data.profiles : []} />;
+  if (shouldRenderSoilProfile && currentData) {
+    return <SoilProfileView profiles={Array.isArray(currentData.profiles) ? currentData.profiles : []} />;
   }
 
   if (shouldRenderSoilLineChart) {
-    return <SoilLineChartView data={data} window={chartWindow} />;
+    return <SoilLineChartView data={currentData} window={chartWindow} />;
   }
 
   if (shouldRenderSoilIrrigationResponse) {
-    return <SoilIrrigationResponseView data={data} />;
+    return <SoilIrrigationResponseView data={currentData} />;
   }
 
   if (shouldRenderDendroGrowth) {
-    return <DendroGrowthTimelineView data={data} window={chartWindow} />;
+    return <DendroGrowthTimelineView data={currentData} window={chartWindow} />;
   }
 
   if (shouldRenderDendroLineChart) {
-    return <DendroLineChartView data={data} window={chartWindow} />;
+    return <DendroLineChartView data={currentData} window={chartWindow} />;
   }
 
   if (shouldRenderDendroStressEvents) {
-    return <DendroStressEventsView data={data} />;
+    return <DendroStressEventsView data={currentData} />;
   }
 
   if (shouldRenderEnvironmentLineChart) {
-    return <EnvironmentLineChartView data={data} window={chartWindow} />;
+    return <EnvironmentLineChartView data={currentData} window={chartWindow} />;
   }
 
   if (shouldRenderDailyMinMax) {
-    return <DailyMinMaxView data={data} window={chartWindow} />;
+    return <DailyMinMaxView data={currentData} window={chartWindow} />;
   }
 
   if (shouldRenderGatewayStatus) {
-    return <GatewayStatusOverviewView card={card} data={data} />;
+    return <GatewayStatusOverviewView card={card} data={currentData} />;
   }
 
   if (shouldRenderIrrigationEventTimeline) {
-    return <IrrigationEventTimelineView data={data} />;
+    return <IrrigationEventTimelineView data={currentData} />;
   }
 
   if (shouldRenderCalendar) {
@@ -138,11 +139,11 @@ export const HistoryCardVisualization: React.FC<HistoryCardVisualizationProps> =
       <>
         <CalendarView
           cardType={card.cardType}
-          calendar={data?.calendar}
+          calendar={currentData?.calendar}
           onInspectDate={onInspectDate}
           selectedDate={selectedCalendarDate}
         />
-        <InterpretationList interpretations={data?.interpretations ?? []} />
+        <InterpretationList interpretations={currentData?.interpretations ?? []} />
       </>
     );
   }
