@@ -10,7 +10,7 @@ import {
   YAxis,
 } from 'recharts';
 import type { HistoryCardDataResponse, HistorySeriesPoint } from '../../../history/types';
-import { HISTORY_CHART_MARGIN, historyTimeXAxis, historyValueYAxis } from './chartAxis';
+import { HISTORY_CHART_MARGIN, formatTimeTick, historyTimeXAxis, historyValueYAxis } from './chartAxis';
 
 interface SoilLineChartViewProps {
   data: HistoryCardDataResponse | undefined;
@@ -164,6 +164,9 @@ const SoilLineChartViewComponent: React.FC<SoilLineChartViewProps> = ({ data, wi
       seriesByKey: new Map(nextVisibleSeries.map((series) => [series.key, series])),
     };
   }, [data, t]);
+  const spanMs = chartWindow
+    ? chartWindow.toMs - chartWindow.fromMs
+    : (rows.length ? rows[rows.length - 1].tMs - rows[0].tMs : 0);
 
   if (visibleSeries.length === 0 || rows.length === 0) {
     return (
@@ -195,7 +198,7 @@ const SoilLineChartViewComponent: React.FC<SoilLineChartViewProps> = ({ data, wi
             <XAxis
               {...historyTimeXAxis}
               domain={chartWindow ? [chartWindow.fromMs, chartWindow.toMs] : ['dataMin', 'dataMax']}
-              tickFormatter={formatTimestampMs}
+              tickFormatter={(value) => formatTimeTick(Number(value), spanMs)}
             />
             <YAxis {...historyValueYAxis('kPa', 52)} />
             <Tooltip

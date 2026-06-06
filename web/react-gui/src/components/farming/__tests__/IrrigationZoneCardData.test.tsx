@@ -57,5 +57,20 @@ describe('IrrigationZoneCard Data entry', () => {
 
     const dataLink = screen.getByRole('link', { name: /data/i });
     expect(dataLink).toHaveAttribute('href', '/history/zones/12');
+    expect(dataLink).toHaveClass(
+      'touch-target',
+      'bg-[var(--success-border)]',
+      'hover:bg-green-700',
+      'text-white',
+      'px-4',
+      'py-2',
+      'rounded-lg',
+      'text-sm',
+      'font-semibold',
+      'transition-colors',
+      'inline-flex',
+      'items-center',
+      'justify-center',
+    );
   });
 });

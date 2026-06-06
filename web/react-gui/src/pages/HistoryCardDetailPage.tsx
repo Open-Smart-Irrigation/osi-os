@@ -9,6 +9,7 @@ import {
   type HistoryInspectorSelection,
 } from '../components/history/mobile/HistoryInspectorSheet';
 import { HistoryVisualizationSurface } from '../components/history/mobile/HistoryVisualizationSurface';
+import { formatWindowCaption } from '../components/history/visualizations/chartAxis';
 import { historyCardDefinitionsByType } from '../history/cardDefinitions';
 import { useFeatureFlags } from '../history/useFeatureFlags';
 import { useHistoryCardAdvancedData } from '../history/useHistoryCardAdvancedData';
@@ -345,6 +346,12 @@ export const HistoryCardDetailPage: React.FC = () => {
     [timeViewport.viewport],
   );
   const chartWindow = visualWindow ?? committedWindow ?? undefined;
+  const visibleRangeLabel = useMemo(() => {
+    const fallback = formatRangeLabel(t, timeViewport.viewport.range.label);
+    if (timeViewport.viewport.range.label !== 'custom' || !chartWindow) return fallback;
+    const caption = formatWindowCaption(chartWindow.fromMs, chartWindow.toMs);
+    return caption === '-' ? fallback : caption;
+  }, [chartWindow, t, timeViewport.viewport.range.label]);
   const requestRange = useMemo(
     () => (selectedView === 'calendar'
       ? monthRangeFromViewport(timeViewport.viewport.range, calendarMonthOffset)
@@ -663,7 +670,7 @@ export const HistoryCardDetailPage: React.FC = () => {
           onCardSwipe={handleCardSwipe}
           onViewSwipe={handleViewSwipe}
           onMonthSwipe={handleMonthSwipe}
-          rangeLabel={formatRangeLabel(t, timeViewport.viewport.range.label)}
+          rangeLabel={visibleRangeLabel}
           aggregationLabel={formatAggregationLabel(t, timeViewport.viewport.aggregation)}
         >
           <div
@@ -672,7 +679,7 @@ export const HistoryCardDetailPage: React.FC = () => {
             style={{ backgroundColor: 'color-mix(in srgb, var(--bg) 82%, transparent)' }}
           >
             {formatViewLabel(t, selectedView)}
-            {selectedView !== 'calendar' && ` · ${formatRangeLabel(t, timeViewport.viewport.range.label)}`}
+            {selectedView !== 'calendar' && ` · ${visibleRangeLabel}`}
           </div>
           {singleDeviceName && (
             <div

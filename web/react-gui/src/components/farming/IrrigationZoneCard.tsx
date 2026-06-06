@@ -224,7 +224,7 @@ export const IrrigationZoneCard: React.FC<IrrigationZoneCardProps> = ({
           </button>
           <Link
             to={`/history/zones/${zone.id}`}
-            className="touch-target bg-[var(--secondary-bg)] hover:bg-[var(--border)] text-[var(--text)] px-4 py-2 rounded-lg text-sm font-semibold transition-colors flex items-center"
+            className="touch-target bg-[var(--success-border)] hover:bg-green-700 text-white px-4 py-2 rounded-lg text-sm font-semibold transition-colors inline-flex items-center justify-center"
           >
             {t('zone.data', 'Data')}
           </Link>

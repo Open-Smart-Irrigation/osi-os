@@ -13,7 +13,7 @@ import type {
   HistoryCardDataResponse,
   HistorySeriesPoint,
 } from '../../../history/types';
-import { HISTORY_CHART_MARGIN, historyTimeXAxis, historyValueYAxis } from './chartAxis';
+import { HISTORY_CHART_MARGIN, formatTimeTick, historyTimeXAxis, historyValueYAxis } from './chartAxis';
 
 interface EnvironmentLineChartViewProps {
   data: HistoryCardDataResponse | undefined;
@@ -239,6 +239,9 @@ const EnvironmentLineChartViewComponent: React.FC<EnvironmentLineChartViewProps>
       })),
     };
   }, [data, t]);
+  const spanMs = chartWindow
+    ? chartWindow.toMs - chartWindow.fromMs
+    : (rows.length ? rows[rows.length - 1].tMs - rows[0].tMs : 0);
 
   if (visibleSeries.length === 0 || rows.length === 0) {
     return (
@@ -279,7 +282,7 @@ const EnvironmentLineChartViewComponent: React.FC<EnvironmentLineChartViewProps>
                     <XAxis
                       {...historyTimeXAxis}
                       domain={chartWindow ? [chartWindow.fromMs, chartWindow.toMs] : ['dataMin', 'dataMax']}
-                      tickFormatter={formatTimestampMs}
+                      tickFormatter={(value) => formatTimeTick(Number(value), spanMs)}
                     />
                     <YAxis {...historyValueYAxis(group.unit || undefined, 52)} />
                     <Tooltip

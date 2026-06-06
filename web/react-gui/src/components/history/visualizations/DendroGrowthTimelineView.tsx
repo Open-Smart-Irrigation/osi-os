@@ -15,7 +15,7 @@ import type {
   HistoryEvent,
   HistorySeriesPoint,
 } from '../../../history/types';
-import { HISTORY_CHART_MARGIN, consistentUnit, historyTimeXAxis, historyValueYAxis } from './chartAxis';
+import { HISTORY_CHART_MARGIN, consistentUnit, formatTimeTick, historyTimeXAxis, historyValueYAxis } from './chartAxis';
 
 interface DendroGrowthTimelineViewProps {
   data: HistoryCardDataResponse | undefined;
@@ -235,6 +235,9 @@ const DendroGrowthTimelineViewComponent: React.FC<DendroGrowthTimelineViewProps>
       events: normalizeEvents(t, data?.events),
     };
   }, [data, t]);
+  const spanMs = chartWindow
+    ? chartWindow.toMs - chartWindow.fromMs
+    : (rows.length ? rows[rows.length - 1].tMs - rows[0].tMs : 0);
 
   if (visibleSeries.length === 0 || rows.length === 0) {
     return (
@@ -266,7 +269,7 @@ const DendroGrowthTimelineViewComponent: React.FC<DendroGrowthTimelineViewProps>
             <XAxis
               {...historyTimeXAxis}
               domain={chartWindow ? [chartWindow.fromMs, chartWindow.toMs] : ['dataMin', 'dataMax']}
-              tickFormatter={formatTimestampMs}
+              tickFormatter={(value) => formatTimeTick(Number(value), spanMs)}
             />
             <YAxis {...historyValueYAxis(consistentUnit(visibleSeries), 48)} />
             <Tooltip isAnimationActive={false} labelFormatter={formatTimestampMs} />

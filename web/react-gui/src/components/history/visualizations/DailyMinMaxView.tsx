@@ -11,7 +11,7 @@ import {
   YAxis,
 } from 'recharts';
 import type { HistoryCardDataResponse, HistorySeriesPoint } from '../../../history/types';
-import { HISTORY_CHART_MARGIN, historyTimeXAxis, historyValueYAxis } from './chartAxis';
+import { HISTORY_CHART_MARGIN, formatTimeTick, historyTimeXAxis, historyValueYAxis } from './chartAxis';
 
 interface DailyMinMaxViewProps {
   data: HistoryCardDataResponse | undefined;
@@ -218,6 +218,10 @@ const DailyMinMaxViewComponent: React.FC<DailyMinMaxViewProps> = ({ data, window
       className="flex min-h-0 flex-1 flex-col gap-3"
     >
       {visibleSeries.map(({ series, rows, color }) => {
+        const spanMs = chartWindow
+          ? chartWindow.toMs - chartWindow.fromMs
+          : (rows.length ? rows[rows.length - 1].tMs - rows[0].tMs : 0);
+
         return (
           <div key={series.key} className="flex min-h-0 flex-1 flex-col">
             <div className="relative min-h-0 min-w-0 flex-1"><div className="absolute inset-0">
@@ -227,7 +231,7 @@ const DailyMinMaxViewComponent: React.FC<DailyMinMaxViewProps> = ({ data, window
                   <XAxis
                     {...historyTimeXAxis}
                     domain={chartWindow ? [chartWindow.fromMs, chartWindow.toMs] : ['dataMin', 'dataMax']}
-                    tickFormatter={formatTimestampMs}
+                    tickFormatter={(value) => formatTimeTick(Number(value), spanMs)}
                   />
                   <YAxis
                     {...historyValueYAxis(
