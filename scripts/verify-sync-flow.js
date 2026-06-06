@@ -2821,6 +2821,14 @@ if (!historyHelperPath) {
   runQuietNodeScript('test-history-helper.js', 'SQL-backed history helper tests pass');
 }
 
+expectIncludesById('history-api-router-fn', 'phaseMs=', 'logs per-phase timing for history endpoint performance triage');
+expectIncludesById('history-api-router-fn', 'function markPhase(', 'defines a phase timing helper for single execution phases');
+expectIncludesById('history-api-router-fn', 'function addPhase(', 'defines a phase timing helper for repeated helper calls');
+expectIncludesById('history-api-router-fn', 'phaseSummary(historyPhases)', 'formats phase timing in history API logs');
+expectIncludesById('history-api-router-fn', "addPhase('latestDeviceRows'", 'tracks latest device row lookup timing');
+expectIncludesById('history-api-router-fn', "addPhase('latestChameleonRows'", 'tracks latest Chameleon row lookup timing');
+expectIncludesById('history-api-router-fn', "markPhase('aggregate'", 'tracks aggregation helper timing');
+
 const dendroHelperPath = dendroHelperCandidates.find((candidate) => fs.existsSync(candidate));
 if (!dendroHelperPath) {
   fail(`missing dendro helper module at one of: ${dendroHelperCandidates.join(', ')}`);

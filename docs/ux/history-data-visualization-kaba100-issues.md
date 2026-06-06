@@ -487,3 +487,104 @@ Manual verification still required:
 
 - Playwright verified static visual behavior and single-finger view swipes only.
 - Phil still needs to verify real-device pinch open, pinch close, and one-finger drag-pan feel because Playwright cannot honestly judge two-finger continuous smoothness.
+
+## Loading and label polish issues
+
+Date opened: 2026-06-07
+Target: kaba100, `100.93.68.86`
+Branch: `feat/history-data-visualization`
+Plan: `docs/superpowers/plans/2026-06-07-history-loading-and-label-polish.md`
+
+### Issue HLOAD-1 - History API loading time needs measurement and targeted optimization
+
+Observed:
+
+- Zone B card summary API via local Node-RED measured about `0.88 s`.
+- Zone B 24h soil line data via local Node-RED measured about `0.95 s`.
+- Zone B 7D soil line data via local Node-RED measured about `1.07 s`.
+- Raw indexed SQLite 7D two-device `device_data` range query measured about `0.01-0.02 s`.
+- Current `getLatestChameleonRows` query measured about `1.10 s`; per-device latest lookup using `idx_chameleon_readings_deveui_time` measured about `0.01 s`.
+
+Root issue:
+
+- The primary confirmed delay is not the raw history range scan. The latest Chameleon row lookup is a candidate bottleneck used by soil card summary and data responses.
+- Additional likely overhead exists in repeated schema guards, duplicate SWR request keys, and backend SQL sorting that is repeated in JavaScript.
+- The current evidence has an ordering/methodology gap: direct SQLite timing for `getLatestChameleonRows` was slower than one observed full card-summary HTTP request, so it cannot by itself prove in-request dominance. Phase timing must be collected before applying the query rewrite.
+
+Best solution:
+
+- Add a repeatable API timing harness and per-phase History API Router logging first.
+- If phase timing confirms latest Chameleon lookup is material, fix `getLatestChameleonRows` to use indexed per-device `ORDER BY recorded_at DESC, id DESC LIMIT 1`.
+- Then reduce duplicate frontend refetches and remove avoidable helper SQL sorting.
+- Treat performance targets as optimization targets; if they are missed, use phase evidence to choose the next bottleneck instead of adding speculative fixes.
+
+### Issue HUX-1 - Line chart label overlaps/conflicts with Zone B context
+
+Observed:
+
+- The fullscreen header renders the zone name as a separate eyebrow.
+- The visualization renders a top-left absolute view/range pill.
+- On mobile this creates too much top-left label clutter around the line chart.
+
+Root issue:
+
+- Zone identity and visualization context are rendered as separate labels in adjacent top-left areas.
+
+Best solution:
+
+- Move zone identity into the main card title.
+- Render the detail title as `Soil Moisture Zone B`.
+- Keep the top-left visualization pill for view/range/month context only.
+- Apply the zone-title pattern to all zone-scoped thematic card details; gateway cards keep their base title because they are not zone scoped.
+
+### Issue HUX-2 - Soil Card title is still `Soil - Root Zone`
+
+Observed:
+
+- The History API Router card config still returns `title: 'Soil - Root Zone'`.
+- Several frontend tests still use `Soil - Root Zone` fixtures.
+
+Root issue:
+
+- The old implementation title survived the fullscreen redesign and does not match the new farmer-facing naming.
+
+Best solution:
+
+- Rename the base Soil Card title to `Soil Moisture` in the backend card summary config and update affected frontend fixtures/tests.
+- Do not add or edit `history.card.soil.title` locale keys in this slice; current detail UI reads the backend card summary title, while `history.cardType.soil` remains the generic type label.
+- Compose the zone-specific detail title in the route/header layer, not by mutating card identity.
+
+### Issue HUX-3 - Soil line chart uses `Soil 1`, `Soil 2`, `Soil 3` instead of depth labels
+
+Observed:
+
+- `SoilLineChartView` derives labels from `series.id` and `series.label`.
+- `HistoryCardDataResponse.profiles` already carries `depthCm`, but the line chart does not use it.
+
+Root issue:
+
+- Soil depth metadata and line-series labels are disconnected in the frontend.
+
+Best solution:
+
+- Use `profiles[].depthCm` to label matching soil series as `5 cm`, `10 cm`, etc.
+- Fall back to `Sensor 1`, `Sensor 2`, `Sensor 3` when depth is unavailable.
+- If two visible series share the same depth, disambiguate with the sensor number, for example `5 cm - Sensor 1`.
+- Continue hiding raw DevEUI and `swt_*` labels from normal UI.
+
+### Issue HUX-4 - Calendar view month context is not visible enough
+
+Observed:
+
+- `HistoryMonthCalendarView` computes and renders a month heading inside the calendar section.
+- The persistent fullscreen top-left pill shows only `Calendar` for calendar view.
+
+Root issue:
+
+- The month label is scoped to the grid content and can be visually lost in the compact fullscreen layout; the persistent context label does not include it.
+
+Best solution:
+
+- Add a shared calendar month-label helper.
+- Use it in both `HistoryMonthCalendarView` and `HistoryCardDetailPage`.
+- Render `Calendar - June 2026` in the persistent top-left context pill while keeping the accessible grid month heading.
