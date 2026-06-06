@@ -125,8 +125,8 @@ test('exports the history helper contract', () => {
 });
 
 test('exports the zone CSV column contracts', () => {
-  assert.deepStrictEqual(helper.RAW_CSV_COLUMNS, ['timestamp', 'timezone', 'zone', 'card', 'source', 'variable', 'depth_cm', 'value', 'unit']);
-  assert.deepStrictEqual(helper.AGG_CSV_COLUMNS, ['bucket_start', 'bucket_end', 'timezone', 'zone', 'card', 'source', 'variable', 'depth_cm', 'unit', 'n', 'coverage_pct', 'mean', 'min', 'max', 'median', 'latest']);
+  assert.deepStrictEqual(helper.RAW_CSV_COLUMNS, ['timestamp', 'timezone', 'zone', 'card', 'source', 'array_id', 'variable', 'depth_cm', 'value', 'unit']);
+  assert.deepStrictEqual(helper.AGG_CSV_COLUMNS, ['bucket_start', 'bucket_end', 'timezone', 'zone', 'card', 'source', 'array_id', 'variable', 'depth_cm', 'unit', 'n', 'coverage_pct', 'mean', 'min', 'max', 'median', 'latest']);
 });
 
 test('classifySoilStatus uses 22/50 kPa thresholds', () => {
@@ -618,6 +618,7 @@ test('writeZoneCsv emits tidy long-format raw and daily files with depth', async
       {
         timestamp: '2026-06-02T14:03:21.000Z',
         source: 'Chameleon 1',
+        array_id: 'ARR-009',
         card: 'soil',
         variable: 'swt_1',
         depth_cm: 5,
@@ -630,6 +631,7 @@ test('writeZoneCsv emits tidy long-format raw and daily files with depth', async
         bucket_start: '2026-06-02T00:00:00.000Z',
         bucket_end: '2026-06-03T00:00:00.000Z',
         source: 'Chameleon 1',
+        array_id: 'ARR-009',
         card: 'soil',
         variable: 'swt_1',
         depth_cm: 5,
@@ -646,10 +648,10 @@ test('writeZoneCsv emits tidy long-format raw and daily files with depth', async
 
     await helper.writeZoneCsv({ exportDir: dir, zone, day: '2026-06-02', rawRows, dailyRows });
     const raw = fs.readFileSync(path.join(dir, 'zu', 'raw', '2026-06-02.csv'), 'utf8').trim().split('\n');
-    assert.strictEqual(raw[0], 'timestamp,timezone,zone,card,source,variable,depth_cm,value,unit');
-    assert.match(raw[1], /Europe\/Zurich,Zone B,soil,Chameleon 1,swt_1,5,6.24,kPa/);
+    assert.strictEqual(raw[0], 'timestamp,timezone,zone,card,source,array_id,variable,depth_cm,value,unit');
+    assert.match(raw[1], /Europe\/Zurich,Zone B,soil,Chameleon 1,ARR-009,swt_1,5,6.24,kPa/);
     const daily = fs.readFileSync(path.join(dir, 'zu', 'daily.csv'), 'utf8').trim().split('\n');
-    assert.strictEqual(daily[0], 'bucket_start,bucket_end,timezone,zone,card,source,variable,depth_cm,unit,n,coverage_pct,mean,min,max,median,latest');
+    assert.strictEqual(daily[0], 'bucket_start,bucket_end,timezone,zone,card,source,array_id,variable,depth_cm,unit,n,coverage_pct,mean,min,max,median,latest');
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
@@ -666,6 +668,9 @@ test('buildZoneExportCsv raw emits tidy rows with depth and source', async () =>
       INSERT INTO device_data(deveui,recorded_at,swt_1) VALUES
         ('AA00000000000001','2026-06-01T08:00:00.000Z',6.2),
         ('AA00000000000001','2026-06-01T09:00:00.000Z',6.4);
+      INSERT INTO chameleon_readings(deveui,recorded_at,array_id) VALUES
+        ('AA00000000000001','2026-06-01T08:00:00.000Z','ARR-001'),
+        ('AA00000000000001','2026-06-01T09:00:00.000Z','ARR-001');
     `);
     const res = await helper.buildZoneExportCsv(db, {
       zoneId: 12,
@@ -683,6 +688,7 @@ test('buildZoneExportCsv raw emits tidy rows with depth and source', async () =>
     assert.strictEqual(swt1.zone, 'Zone B');
     assert.strictEqual(swt1.card, 'soil');
     assert.strictEqual(swt1.source, 'Chameleon 1');
+    assert.strictEqual(swt1.array_id, 'ARR-001');
     assert.strictEqual(swt1.depth_cm, 5);
     assert.strictEqual(swt1.unit, 'kPa');
     assert.ok(!res.rows.some((row) => /[A-F0-9]{16}/.test(String(row.source))), 'no raw DevEUI');
@@ -706,6 +712,11 @@ test('buildZoneExportCsv aggregate keeps per-source rows with depth for merged c
         ('AA00000000000001','2026-06-01T09:00:00.000Z',6.4),
         ('AA00000000000002','2026-06-01T08:00:00.000Z',7.0),
         ('AA00000000000002','2026-06-01T09:00:00.000Z',7.4);
+      INSERT INTO chameleon_readings(deveui,recorded_at,array_id) VALUES
+        ('AA00000000000001','2026-06-01T08:00:00.000Z','ARR-001'),
+        ('AA00000000000001','2026-06-01T09:00:00.000Z','ARR-001'),
+        ('AA00000000000002','2026-06-01T08:00:00.000Z','ARR-002'),
+        ('AA00000000000002','2026-06-01T09:00:00.000Z','ARR-002');
     `);
     const res = await helper.buildZoneExportCsv(db, {
       zoneId: 12,
@@ -723,6 +734,8 @@ test('buildZoneExportCsv aggregate keeps per-source rows with depth for merged c
     const c2 = swt1Rows.find((row) => row.source === 'Chameleon 2');
     assert.ok(c1, 'Chameleon 1 row present');
     assert.ok(c2, 'Chameleon 2 row present');
+    assert.strictEqual(c1.array_id, 'ARR-001');
+    assert.strictEqual(c2.array_id, 'ARR-002');
     assert.strictEqual(c1.zone, 'Zone B');
     assert.strictEqual(c1.card, 'soil');
     assert.strictEqual(c1.depth_cm, 5);
@@ -785,7 +798,7 @@ test('buildZoneExportCsv returns header-only row sets for empty valid ranges', a
     });
     assert.deepStrictEqual(res.columns, helper.RAW_CSV_COLUMNS);
     assert.deepStrictEqual(res.rows, []);
-    assert.strictEqual(helper.toCsv(res.columns, res.rows), 'timestamp,timezone,zone,card,source,variable,depth_cm,value,unit\n');
+    assert.strictEqual(helper.toCsv(res.columns, res.rows), 'timestamp,timezone,zone,card,source,array_id,variable,depth_cm,value,unit\n');
   } finally {
     db.close();
   }
@@ -828,6 +841,9 @@ test('runRollupJob writes per-source CSV exports for the completed local day', a
       INSERT INTO device_data(deveui,recorded_at,swt_1) VALUES
         ('AA00000000000001','2026-06-02T08:10:00.000Z',10),
         ('AA00000000000001','2026-06-02T08:40:00.000Z',20);
+      INSERT INTO chameleon_readings(deveui,recorded_at,array_id) VALUES
+        ('AA00000000000001','2026-06-02T08:10:00.000Z','ARR-007'),
+        ('AA00000000000001','2026-06-02T08:40:00.000Z','ARR-007');
     `);
 
     const summary = await helper.runRollupJob(db, {
@@ -837,11 +853,11 @@ test('runRollupJob writes per-source CSV exports for the completed local day', a
     });
     assert.strictEqual(summary.csvZonesWritten, 1);
     const raw = fs.readFileSync(path.join(dir, 'zu', 'raw', '2026-06-02.csv'), 'utf8');
-    assert.match(raw, /2026-06-02T08:10:00.000Z,UTC,Zone B,soil,Chameleon 1,swt_1,5,10,kPa/);
+    assert.match(raw, /2026-06-02T08:10:00.000Z,UTC,Zone B,soil,Chameleon 1,ARR-007,swt_1,5,10,kPa/);
     const hourly = fs.readFileSync(path.join(dir, 'zu', 'hourly', '2026-06-02.csv'), 'utf8');
-    assert.match(hourly, /soil,Chameleon 1,swt_1,5,kPa,2,/);
+    assert.match(hourly, /soil,Chameleon 1,ARR-007,swt_1,5,kPa,2,/);
     const daily = fs.readFileSync(path.join(dir, 'zu', 'daily.csv'), 'utf8');
-    assert.match(daily, /soil,Chameleon 1,swt_1,5,kPa,2,/);
+    assert.match(daily, /soil,Chameleon 1,ARR-007,swt_1,5,kPa,2,/);
   } finally {
     db.close();
     fs.rmSync(dir, { recursive: true, force: true });

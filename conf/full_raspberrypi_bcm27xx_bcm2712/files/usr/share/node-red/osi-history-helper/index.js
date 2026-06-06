@@ -1037,8 +1037,8 @@ function toCsv(columns, rows) {
     .join('\n') + '\n';
 }
 
-const RAW_CSV_COLUMNS = ['timestamp', 'timezone', 'zone', 'card', 'source', 'variable', 'depth_cm', 'value', 'unit'];
-const AGG_CSV_COLUMNS = ['bucket_start', 'bucket_end', 'timezone', 'zone', 'card', 'source', 'variable', 'depth_cm', 'unit', 'n', 'coverage_pct', 'mean', 'min', 'max', 'median', 'latest'];
+const RAW_CSV_COLUMNS = ['timestamp', 'timezone', 'zone', 'card', 'source', 'array_id', 'variable', 'depth_cm', 'value', 'unit'];
+const AGG_CSV_COLUMNS = ['bucket_start', 'bucket_end', 'timezone', 'zone', 'card', 'source', 'array_id', 'variable', 'depth_cm', 'unit', 'n', 'coverage_pct', 'mean', 'min', 'max', 'median', 'latest'];
 
 function normalizeExportDate(value, name) {
   const date = String(value || '').trim();
@@ -1149,6 +1149,7 @@ async function rawZoneExportRows(db, scope) {
     const placeholders = deveuis.map(() => '?').join(',');
     const sql = `SELECT deveui, recorded_at, ${selectedFields.join(', ')} FROM device_data WHERE deveui IN (${placeholders}) AND recorded_at >= ? AND recorded_at < ? ORDER BY recorded_at ASC`;
     const dataRows = await dbAll(db, sql, deveuis.concat([scope.start, scope.end]));
+    const arrayIdByDeveui = await resolveDeviceArrayIds(db, deveuis, scope.start, scope.end);
     const rowsByDeveui = {};
     for (const row of dataRows) {
       const key = normalizeDeveui(row.deveui);
@@ -1161,6 +1162,7 @@ async function rawZoneExportRows(db, scope) {
       const deveui = normalizeDeveui(device.deveui || device.device_eui);
       const sourceRows = rowsByDeveui[deveui] || [];
       const sourceName = displayDeviceName(device, index);
+      const arrayId = arrayIdByDeveui[deveui] || null;
       for (const row of sourceRows) {
         for (const channel of channels) {
           const value = toFiniteNumber(row[channel.field]);
@@ -1171,6 +1173,7 @@ async function rawZoneExportRows(db, scope) {
             zone: zoneName,
             card: card.cardType,
             source: sourceName,
+            array_id: arrayId,
             variable: channel.id,
             depth_cm: soilDepthCm(device, channel.id),
             value: roundTo(value),
@@ -1199,6 +1202,7 @@ async function aggregateZoneExportRows(db, scope) {
       );
     if (!channels.length || !sourceDevices.length) continue;
 
+    const arrayIdByDeveui = await resolveDeviceArrayIds(db, uniqueDeveuis(sourceDevices), scope.start, scope.end);
     let index = 0;
     for (const device of sourceDevices) {
       const sourceName = displayDeviceName(device, index);
@@ -1218,7 +1222,7 @@ async function aggregateZoneExportRows(db, scope) {
         timezone: scope.timezone,
         nowMs: scope.nowMs,
       });
-      rows.push(...csvRowsFromAggregate(aggregate, card, device, sourceName, channels).map((row) => ({
+      rows.push(...csvRowsFromAggregate(aggregate, card, device, sourceName, channels, arrayIdByDeveui[deveui] || null).map((row) => ({
         ...row,
         timezone: scope.timezone,
         zone: zoneName,
@@ -1327,7 +1331,29 @@ function soilDepthCm(device, channelId) {
   return null;
 }
 
-function csvRowsFromAggregate(aggregate, card, device, sourceName, channels) {
+// Resolve the latest Chameleon array_id seen per source device over [start, end).
+// array_id lives in chameleon_readings (per uplink), surfaced app-side as a
+// device-level attribute. Returns a map deveui -> array_id (display-safe id).
+async function resolveDeviceArrayIds(db, deveuis, start, end) {
+  const map = {};
+  const list = Array.from(new Set((deveuis || []).map((value) => normalizeDeveui(value)).filter(Boolean)));
+  if (!list.length) return map;
+  const placeholders = list.map(() => '?').join(',');
+  const sql = `SELECT deveui, array_id, MAX(recorded_at) AS latest FROM chameleon_readings WHERE deveui IN (${placeholders}) AND array_id IS NOT NULL AND recorded_at >= ? AND recorded_at < ? GROUP BY deveui`;
+  let rows = [];
+  try {
+    rows = await dbAll(db, sql, list.concat([start, end]));
+  } catch (err) {
+    return map; // chameleon_readings may be absent on older schemas; degrade gracefully
+  }
+  for (const row of rows || []) {
+    const key = normalizeDeveui(row.deveui);
+    if (key && row.array_id != null && row.array_id !== '') map[key] = String(row.array_id);
+  }
+  return map;
+}
+
+function csvRowsFromAggregate(aggregate, card, device, sourceName, channels, arrayId) {
   const rows = [];
   for (const bucket of aggregate.buckets || []) {
     for (const channel of channels) {
@@ -1338,6 +1364,7 @@ function csvRowsFromAggregate(aggregate, card, device, sourceName, channels) {
         bucket_end: bucket.bucketEnd,
         card: card.cardType,
         source: sourceName,
+        array_id: arrayId == null ? null : arrayId,
         variable: channel.id,
         depth_cm: soilDepthCm(device, channel.id),
         unit: channel.unit || stats.unit || null,
@@ -1371,6 +1398,7 @@ async function buildZoneCsvRows(db, zone, devices, cards, dayStartIso, dayEndIso
     const placeholders = deveuis.map(() => '?').join(',');
     const sql = `SELECT deveui, recorded_at, ${selectedFields.join(', ')} FROM device_data WHERE deveui IN (${placeholders}) AND recorded_at >= ? AND recorded_at < ? ORDER BY recorded_at ASC`;
     const rows = await dbAll(db, sql, deveuis.concat([dayStartIso, dayEndIso]));
+    const arrayIdByDeveui = await resolveDeviceArrayIds(db, deveuis, dayStartIso, dayEndIso);
     const rowsByDeveui = {};
     for (const row of rows) {
       const key = normalizeDeveui(row.deveui);
@@ -1383,6 +1411,7 @@ async function buildZoneCsvRows(db, zone, devices, cards, dayStartIso, dayEndIso
       const deveui = normalizeDeveui(device.deveui || device.device_eui);
       const sourceRows = rowsByDeveui[deveui] || [];
       const sourceName = displayDeviceName(device, index);
+      const arrayId = arrayIdByDeveui[deveui] || null;
       for (const row of sourceRows) {
         for (const channel of channels) {
           const value = toFiniteNumber(row[channel.field]);
@@ -1391,6 +1420,7 @@ async function buildZoneCsvRows(db, zone, devices, cards, dayStartIso, dayEndIso
             timestamp: row.recorded_at,
             card: card.cardType,
             source: sourceName,
+            array_id: arrayId,
             variable: channel.id,
             depth_cm: soilDepthCm(device, channel.id),
             value: roundTo(value),
@@ -1399,9 +1429,9 @@ async function buildZoneCsvRows(db, zone, devices, cards, dayStartIso, dayEndIso
         }
       }
       const hourly = aggregateRows(sourceRows, { aggregation: 'hourly', channels, start: dayStartIso, end: dayEndIso });
-      hourlyRows.push(...csvRowsFromAggregate(hourly, card, device, sourceName, channels));
+      hourlyRows.push(...csvRowsFromAggregate(hourly, card, device, sourceName, channels, arrayId));
       const daily = aggregateRows(sourceRows, { aggregation: 'daily', channels, start: dayStartIso, end: dayEndIso });
-      dailyRows.push(...csvRowsFromAggregate(daily, card, device, sourceName, channels));
+      dailyRows.push(...csvRowsFromAggregate(daily, card, device, sourceName, channels, arrayId));
     });
   }
   return { rawRows, hourlyRows, dailyRows };
