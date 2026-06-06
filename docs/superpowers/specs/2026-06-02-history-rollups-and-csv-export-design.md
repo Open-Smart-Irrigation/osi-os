@@ -151,24 +151,29 @@ per-column depth fields), and it is what R/tidyverse expects (`readr::read_csv` 
 - `source` is the display-safe sensor name (e.g. `Chameleon 1`). **No raw DevEUI** in the CSV
   unless a future "advanced export" decision adds it (consistent with the no-DevEUI-in-normal-UI
   rule).
+- `array_id` is the Chameleon sensor-array identifier (from `chameleon_readings.array_id`),
+  resolved per source device as the latest array seen within the export range. It is a
+  display-safe hardware identifier (not the LoRa DevEUI) that lets analysts join readings back to
+  a physical Chameleon module / calibration record. **Empty** for sources without a Chameleon
+  array (Kiwi, S2120, valves, …).
 - `depth_cm` is numeric for depth-bearing variables (soil layers, from the Chameleon/Kiwi depth
   fields) and **empty** for variables without a depth (temperature, humidity, dendro, …).
 
 **`raw/<D>.csv` columns:**
 
 ```
-timestamp,timezone,zone,card,source,variable,depth_cm,value,unit
-2026-06-02T14:03:21Z,Europe/Zurich,Zone B,soil,Chameleon 1,swt_1,5,6.24,kPa
-2026-06-02T14:03:21Z,Europe/Zurich,Zone B,soil,Chameleon 1,swt_2,10,6.69,kPa
-2026-06-02T14:03:21Z,Europe/Zurich,Zone B,soil,Chameleon 1,swt_3,40,6.86,kPa
-2026-06-02T14:05:00Z,Europe/Zurich,Zone A,environment,Temp1,air_temperature,,21.4,degC
+timestamp,timezone,zone,card,source,array_id,variable,depth_cm,value,unit
+2026-06-02T14:03:21Z,Europe/Zurich,Zone B,soil,Chameleon 1,ARR-001,swt_1,5,6.24,kPa
+2026-06-02T14:03:21Z,Europe/Zurich,Zone B,soil,Chameleon 1,ARR-001,swt_2,10,6.69,kPa
+2026-06-02T14:03:21Z,Europe/Zurich,Zone B,soil,Chameleon 1,ARR-001,swt_3,40,6.86,kPa
+2026-06-02T14:05:00Z,Europe/Zurich,Zone A,environment,Temp1,,air_temperature,,21.4,degC
 ```
 
 **`hourly/<D>.csv` and `daily.csv` columns** (identical schema; daily is one bucket per day):
 
 ```
-bucket_start,bucket_end,timezone,zone,card,source,variable,depth_cm,unit,n,coverage_pct,mean,min,max,median,latest
-2026-06-02T13:00:00Z,2026-06-02T14:00:00Z,Europe/Zurich,Zone B,soil,Chameleon 1,swt_1,5,kPa,4,100,6.30,6.18,6.41,6.29,6.24
+bucket_start,bucket_end,timezone,zone,card,source,array_id,variable,depth_cm,unit,n,coverage_pct,mean,min,max,median,latest
+2026-06-02T13:00:00Z,2026-06-02T14:00:00Z,Europe/Zurich,Zone B,soil,Chameleon 1,ARR-001,swt_1,5,kPa,4,100,6.30,6.18,6.41,6.29,6.24
 ```
 
 - `n` = `sample_count`; `coverage_pct` may be empty when coverage is unknown.

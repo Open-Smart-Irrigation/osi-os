@@ -75,6 +75,10 @@ flows.json: http in  GET /api/history/zones/:zoneId/export.csv
   source rows per channel, each with its depth — not a blended `source="2 sources"` with blank
   depth). Columns = `AGG_CSV_COLUMNS`. (Rationale: the merged rollup is keyed by the card's single
   logical source, so reading it conflates same-named channels across devices.)
+- Each source row also carries an `array_id` column — the Chameleon sensor-array id
+  (`chameleon_readings.array_id`), resolved per source device as the latest array seen in the
+  range — so analysts can join back to a physical module / calibration. Empty for non-Chameleon
+  sources. Display-safe (not the LoRa DevEUI).
 - Returns `{ columns, rows }` (or a row iterator for streaming). Reuse `toCsv`/`csvCell`.
 - No raw DevEUI in any column (display-safe `source`), consistent with the rollups spec.
 
