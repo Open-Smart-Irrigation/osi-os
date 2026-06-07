@@ -18,6 +18,7 @@ import {
   desktopBoundsForData,
   desktopCardHeaderTitle,
   desktopRailCardLabel,
+  desktopSourceOptions,
   selectableDesktopViews,
 } from '../../../history/desktopHistory';
 import type { HistoryCardDataScope } from '../../../history/useHistoryCardData';
@@ -83,13 +84,19 @@ export const HistoryDesktopDetail: React.FC<HistoryDesktopDetailProps> = ({
   );
   const [activePreset, setActivePreset] = useState<HistoryRangeLabel>(defaultRange as HistoryRangeLabel);
   const [selectedView, setSelectedView] = useState<HistoryViewMode>(() => defaultDesktopView(selectedCard));
+  const [selectedSourceKey, setSelectedSourceKey] = useState<string | null>(null);
   const [mode, setMode] = useState<DesktopMode>('focus');
   const viewOptions = useMemo(() => selectableDesktopViews(selectedCard), [selectedCard]);
+  const sourceOptions = useMemo(() => desktopSourceOptions(selectedCard), [selectedCard]);
   const shouldRenderAdvanced = selectedView === 'advanced';
 
   useEffect(() => {
     setSelectedView(defaultDesktopView(selectedCard));
   }, [selectedCard.cardId, selectedCard.defaultView]);
+
+  useEffect(() => {
+    setSelectedSourceKey(null);
+  }, [selectedCard.cardId]);
 
   // Derive request range from viewport (shared between focus and compare modes)
   const rangeRequest: HistoryRangeSelection = useMemo(
@@ -109,6 +116,7 @@ export const HistoryDesktopDetail: React.FC<HistoryDesktopDetailProps> = ({
     range: rangeRequest,
     aggregation: 'raw',
     overlays: [],
+    sourceKey: selectedSourceKey,
     enabled: Boolean(selectedCard.availability.available && !shouldRenderAdvanced),
   });
 
@@ -119,6 +127,7 @@ export const HistoryDesktopDetail: React.FC<HistoryDesktopDetailProps> = ({
     range: rangeRequest,
     aggregation: 'raw',
     overlays: [],
+    sourceKey: selectedSourceKey,
     enabled: Boolean(selectedCard.availability.available && shouldRenderAdvanced),
   });
 
@@ -250,6 +259,29 @@ export const HistoryDesktopDetail: React.FC<HistoryDesktopDetailProps> = ({
         <div className="flex shrink-0 items-center justify-between border-b border-[var(--border)] bg-[var(--surface)] px-4 py-2">
           <div className="flex items-center gap-3">
             <h2 className="text-base font-semibold text-[var(--text)]">{headerTitle}</h2>
+            {sourceOptions.length > 0 ? (
+              <div
+                role="group"
+                aria-label={t('history.desktop.sourceSelectorLabel', { defaultValue: 'Sources' })}
+                className="flex overflow-hidden rounded border border-[var(--border)]"
+              >
+                {sourceOptions.map((source) => (
+                  <button
+                    key={source.key ?? 'all'}
+                    type="button"
+                    aria-pressed={selectedSourceKey === source.key}
+                    onClick={() => setSelectedSourceKey(source.key)}
+                    className={`px-2 py-1 text-xs font-semibold transition-colors ${
+                      selectedSourceKey === source.key
+                        ? 'bg-[var(--primary)] text-white'
+                        : 'bg-[var(--secondary-bg)] text-[var(--text)] hover:bg-[var(--border)]'
+                    }`}
+                  >
+                    {source.label}
+                  </button>
+                ))}
+              </div>
+            ) : null}
             {/* Focus | Compare segmented control */}
             <div
               role="group"

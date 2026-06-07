@@ -6,6 +6,7 @@ import { SWRConfig } from 'swr';
 
 import { HistoryDesktopDetail } from '../desktop/HistoryDesktopDetail';
 import type { HistoryCardSummary } from '../../../history/types';
+import { useHistoryCardData } from '../../../history/useHistoryCardData';
 import type { HistoryCardDataScope } from '../../../history/useHistoryCardData';
 
 // Mock the translation hook
@@ -303,6 +304,82 @@ describe('HistoryDesktopDetail', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Advanced View' }));
 
     expect(screen.getByTestId('card-visualization')).toHaveAttribute('data-selected-view', 'advanced');
+  });
+
+  it('renders All plus display-safe source buttons for a merged Soil card', () => {
+    const card = makeCard({
+      sourceDeviceCount: 2,
+      sourceLabels: ['Chameleon 1', 'Chameleon 2'],
+      sourceDevices: [
+        { name: 'Chameleon 1', typeId: 'DRAGINO_LSN50', role: 'soil', sourceKey: 'soil-src-one' },
+        { name: 'Chameleon 2', typeId: 'DRAGINO_LSN50', role: 'soil', sourceKey: 'soil-src-two' },
+      ],
+    });
+    renderDesktopDetail([card], card);
+
+    expect(screen.getByRole('button', { name: 'All' })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByRole('button', { name: 'Chameleon 1' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Chameleon 2' })).toBeInTheDocument();
+  });
+
+  it('passes the selected source key into desktop card data requests', () => {
+    const card = makeCard({
+      sourceDeviceCount: 2,
+      sourceLabels: ['Chameleon 1', 'Chameleon 2'],
+      sourceDevices: [
+        { name: 'Chameleon 1', typeId: 'DRAGINO_LSN50', role: 'soil', sourceKey: 'soil-src-one' },
+        { name: 'Chameleon 2', typeId: 'DRAGINO_LSN50', role: 'soil', sourceKey: 'soil-src-two' },
+      ],
+    });
+    renderDesktopDetail([card], card);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Chameleon 2' }));
+
+    const lastCall = vi.mocked(useHistoryCardData).mock.calls.at(-1)?.[0];
+    expect(lastCall).toEqual(expect.objectContaining({ sourceKey: 'soil-src-two' }));
+    expect(screen.getByRole('button', { name: 'Chameleon 2' })).toHaveAttribute('aria-pressed', 'true');
+  });
+
+  it('resets the selected source to All when the selected card changes', () => {
+    const soil = makeCard({
+      cardId: 'soil',
+      sourceDeviceCount: 2,
+      sourceLabels: ['Chameleon 1', 'Chameleon 2'],
+      sourceDevices: [
+        { name: 'Chameleon 1', typeId: 'DRAGINO_LSN50', role: 'soil', sourceKey: 'soil-src-one' },
+        { name: 'Chameleon 2', typeId: 'DRAGINO_LSN50', role: 'soil', sourceKey: 'soil-src-two' },
+      ],
+    });
+    const env = makeCard({
+      cardId: 'env',
+      cardType: 'environment',
+      title: 'Environment - Microclimate',
+      defaultView: 'line-chart',
+      views: ['line-chart', 'daily-min-max', 'calendar', 'advanced'],
+      sourceDeviceCount: 1,
+      sourceLabels: ['Weather station'],
+      sourceDevices: [
+        { name: 'Weather station', typeId: 'SENSECAP_S2120', role: 'environment', sourceKey: 'env-src-one' },
+      ],
+    });
+    const onCardSelect = vi.fn();
+    const { rerender } = render(
+      <SWRConfig value={{ provider: () => new Map(), dedupingInterval: 0 }}>
+        <HistoryDesktopDetail cards={[soil, env]} selectedCard={soil} zoneName="Zone A" scope={baseScope} onCardSelect={onCardSelect} />
+      </SWRConfig>,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Chameleon 2' }));
+    expect(vi.mocked(useHistoryCardData).mock.calls.at(-1)?.[0]).toEqual(expect.objectContaining({ sourceKey: 'soil-src-two' }));
+
+    rerender(
+      <SWRConfig value={{ provider: () => new Map(), dedupingInterval: 0 }}>
+        <HistoryDesktopDetail cards={[soil, env]} selectedCard={env} zoneName="Zone A" scope={baseScope} onCardSelect={onCardSelect} />
+      </SWRConfig>,
+    );
+
+    expect(screen.queryByRole('button', { name: 'Chameleon 2' })).not.toBeInTheDocument();
+    expect(vi.mocked(useHistoryCardData).mock.calls.at(-1)?.[0]).toEqual(expect.objectContaining({ sourceKey: null }));
   });
 
   it('clicking zoom-in (+) narrows the overview-window width', () => {
