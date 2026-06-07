@@ -1030,3 +1030,24 @@ Artifacts:
 - `/tmp/kaba100-zone-b-daily-per-source-overlap.csv`
 - `/tmp/kaba100-zone-b-raw-per-source-overlap.csv`
 - `/tmp/kaba100-zone-b-oversize-raw-per-source.json`
+
+## Status After Desktop Live Fixes - 2026-06-07
+
+Verified on kaba100 after GUI-only static deploy to `/usr/lib/node-red/gui/`.
+
+- Served bundle: `/gui/assets/index-wPoYK-WG.js`.
+- Zone B desktop title renders as `Soil Moisture Zone B`.
+- Zone B remains one merged Soil Moisture card with `All`, `Chameleon 1`, and `Chameleon 2` source controls.
+- Zone B Line Chart renders a nonblank Recharts SVG; responsive chart container measured `1216 x 783`.
+- Zone A desktop rail exposes distinct Dendro labels from the API: `Dendro 4`, `Dendro1`, `Dendro 5`, `Dendro 3`, `Dendro 2`.
+- Zone A focus view renders a nonblank Recharts SVG; responsive chart container measured `1216 x 763`.
+- Compare mode renders 2 synchronized panels in the structural Playwright check.
+- Normal desktop mode did not expose raw 16-hex DevEUI values.
+- Mobile route still uses the fullscreen gesture detail instead of the desktop rail/control layout.
+- Playwright reported no console errors and no page errors.
+- Screenshots and machine-readable result: `/home/phil/playwright-osi/screenshots-desktop-live-fixes-2026-06-07/`.
+
+Live verification notes:
+
+- Mouse-wheel zoom feel, drag-pan feel, and crosshair smoothness still need a human on-device pass.
+- The label `Dendro1` is preserved from the device name as provided by the API; spacing normalization can be handled as a later polish issue if desired.
