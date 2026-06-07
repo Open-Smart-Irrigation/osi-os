@@ -2828,6 +2828,9 @@ expectIncludesById('history-api-router-fn', 'phaseSummary(historyPhases)', 'form
 expectIncludesById('history-api-router-fn', "addPhase('latestDeviceRows'", 'tracks latest device row lookup timing');
 expectIncludesById('history-api-router-fn', "addPhase('latestChameleonRows'", 'tracks latest Chameleon row lookup timing');
 expectIncludesById('history-api-router-fn', "markPhase('aggregate'", 'tracks aggregation helper timing');
+expectIncludesById('history-api-router-fn', 'const HISTORY_SCHEMA_GUARD_VERSION =', 'defines a version marker for the history schema guard');
+expectIncludesById('history-api-router-fn', "global.get('historySchemaGuardVersion')", 'caches the history schema guard version in Node-RED global context');
+expectIncludesById('history-api-router-fn', "global.set('historySchemaGuardVersion', HISTORY_SCHEMA_GUARD_VERSION)", 'stores the applied history schema guard version');
 expectIncludesById('history-api-router-fn', 'ORDER BY dd.recorded_at DESC, dd.id DESC LIMIT 1', 'uses deterministic time-first latest device row lookup');
 expectIncludesById('history-api-router-fn', 'ORDER BY cr.recorded_at DESC, cr.id DESC LIMIT 1', 'uses deterministic time-first latest Chameleon row lookup');
 expectExcludesById('history-api-router-fn', 'MAX(id) AS max_id FROM device_data', 'latest device row MAX(id) lookup');
