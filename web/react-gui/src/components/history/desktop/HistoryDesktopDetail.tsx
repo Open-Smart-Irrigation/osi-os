@@ -1,0 +1,284 @@
+import React, { useCallback, useMemo, useState } from 'react';
+import { useTranslation } from 'react-i18next';
+import { HistoryCardVisualization } from '../HistoryCardVisualization';
+import { HistoryOverviewStrip } from './HistoryOverviewStrip';
+import {
+  resetViewport,
+  zoomViewport,
+  type HistoryViewport,
+  type ViewportBounds,
+} from '../../../history/historyViewport';
+import { useChartMouseInteractions } from '../../../history/useChartMouseInteractions';
+import { useHistoryCardData } from '../../../history/useHistoryCardData';
+import type { HistoryCardDataScope } from '../../../history/useHistoryCardData';
+import type {
+  HistoryCardSummary,
+  HistoryRangeLabel,
+  HistoryViewMode,
+} from '../../../history/types';
+import type { HistoryVisualWindow } from '../../../history/useTimeViewport';
+
+const HOUR_MS = 60 * 60 * 1000;
+const DAY_MS = 24 * HOUR_MS;
+
+const PRESET_SPANS_MS: Record<string, number> = {
+  '24h': 24 * HOUR_MS,
+  '7d': 7 * DAY_MS,
+  '30d': 30 * DAY_MS,
+  season: 180 * DAY_MS,
+};
+
+const PRESET_LABELS: Array<{ key: HistoryRangeLabel; label: string }> = [
+  { key: '24h', label: '24h' },
+  { key: '7d', label: '7D' },
+  { key: '30d', label: '30D' },
+  { key: 'season', label: 'Season' },
+];
+
+function defaultSpanMsForRange(range: HistoryRangeLabel): number {
+  return PRESET_SPANS_MS[range] ?? 24 * HOUR_MS;
+}
+
+function normalizedCardTitle(card: HistoryCardSummary): string {
+  const raw = card.title.trim();
+  if (!raw || /^[A-Fa-f0-9]{16}$/.test(raw)) return card.cardType;
+  return raw;
+}
+
+function composeDetailTitle(card: HistoryCardSummary, zoneName: string | null): string {
+  const title = normalizedCardTitle(card);
+  const zone = typeof zoneName === 'string' ? zoneName.trim() : '';
+  if (card.scope !== 'zone' || !zone || title.toLocaleLowerCase().includes(zone.toLocaleLowerCase())) return title;
+  return `${title} ${zone}`;
+}
+
+export interface HistoryDesktopDetailProps {
+  cards: HistoryCardSummary[];
+  selectedCard: HistoryCardSummary;
+  zoneName: string | null;
+  scope: HistoryCardDataScope;
+  onCardSelect: (card: HistoryCardSummary) => void;
+}
+
+type HistoryTranslate = (key: string, options?: Record<string, unknown>) => string;
+
+export const HistoryDesktopDetail: React.FC<HistoryDesktopDetailProps> = ({
+  cards,
+  selectedCard,
+  zoneName,
+  scope,
+  onCardSelect,
+}) => {
+  const { t: translate } = useTranslation('history');
+  const t = translate as HistoryTranslate;
+
+  const defaultRange = selectedCard.defaultRange ?? '24h';
+  const defaultView = (selectedCard.defaultView ?? 'line-chart') as HistoryViewMode;
+  const defaultSpanMs = defaultSpanMsForRange(defaultRange);
+
+  const now = Date.now();
+  const initialBounds: ViewportBounds = { minMs: now - defaultSpanMs * 2, maxMs: now };
+  const [bounds, setBounds] = useState<ViewportBounds>(initialBounds);
+  const [viewport, setViewport] = useState<HistoryViewport>(() =>
+    resetViewport(initialBounds, defaultSpanMs),
+  );
+  const [activePreset, setActivePreset] = useState<HistoryRangeLabel>(defaultRange as HistoryRangeLabel);
+  const [selectedView] = useState<HistoryViewMode>(defaultView);
+
+  // Derive request range from viewport
+  const requestRange = useMemo(
+    () => ({
+      label: 'custom' as HistoryRangeLabel,
+      from: new Date(bounds.minMs).toISOString(),
+      to: new Date(bounds.maxMs).toISOString(),
+      timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC',
+    }),
+    [bounds],
+  );
+
+  const cardData = useHistoryCardData({
+    scope,
+    cardId: selectedCard.cardId,
+    view: selectedView,
+    range: requestRange,
+    aggregation: 'raw',
+    overlays: [],
+    enabled: Boolean(selectedCard.availability.available),
+  });
+
+  // Derive bounds from loaded series timestamps (fall back to preset range)
+  const derivedBounds = useMemo(() => {
+    const series = cardData.data?.series ?? [];
+    let minMs = Infinity;
+    let maxMs = -Infinity;
+    for (const s of series) {
+      for (const pt of s.points ?? []) {
+        const ms = Date.parse(pt.t);
+        if (Number.isFinite(ms)) {
+          if (ms < minMs) minMs = ms;
+          if (ms > maxMs) maxMs = ms;
+        }
+      }
+    }
+    if (Number.isFinite(minMs) && Number.isFinite(maxMs) && maxMs > minMs) {
+      return { minMs, maxMs };
+    }
+    return null;
+  }, [cardData.data]);
+
+  const effectiveBounds = derivedBounds ?? bounds;
+
+  // Chart window passed to visualization (matches HistoryVisualWindow shape)
+  const chartWindow: HistoryVisualWindow = viewport;
+
+  const handleReset = useCallback(() => {
+    const nextSpan = defaultSpanMsForRange(activePreset);
+    setViewport(resetViewport(effectiveBounds, nextSpan));
+  }, [activePreset, effectiveBounds]);
+
+  const { ref: chartRef } = useChartMouseInteractions({
+    viewport,
+    bounds: effectiveBounds,
+    onViewportChange: setViewport,
+    onReset: handleReset,
+  });
+
+  const handlePreset = useCallback((rangeLabel: HistoryRangeLabel) => {
+    const spanMs = defaultSpanMsForRange(rangeLabel);
+    const nowMs = Date.now();
+    const nextBounds: ViewportBounds = { minMs: nowMs - spanMs * 4, maxMs: nowMs };
+    setBounds(nextBounds);
+    setViewport(resetViewport(nextBounds, spanMs));
+    setActivePreset(rangeLabel);
+  }, []);
+
+  const handleZoomIn = useCallback(() => {
+    const center = (viewport.fromMs + viewport.toMs) / 2;
+    setViewport(zoomViewport(viewport, effectiveBounds, center, 0.8));
+  }, [viewport, effectiveBounds]);
+
+  const handleZoomOut = useCallback(() => {
+    const center = (viewport.fromMs + viewport.toMs) / 2;
+    setViewport(zoomViewport(viewport, effectiveBounds, center, 1.25));
+  }, [viewport, effectiveBounds]);
+
+  const handleResetButton = useCallback(() => {
+    const spanMs = defaultSpanMsForRange(activePreset);
+    setViewport(resetViewport(effectiveBounds, spanMs));
+  }, [activePreset, effectiveBounds]);
+
+  const headerTitle = composeDetailTitle(selectedCard, zoneName);
+
+  return (
+    <div className="flex h-full min-h-0 flex-row overflow-hidden">
+      {/* Left rail: card list */}
+      <nav
+        aria-label={t('history.desktop.railLabel', { defaultValue: 'History cards' })}
+        className="flex w-56 shrink-0 flex-col overflow-y-auto border-r border-[var(--border)] bg-[var(--surface)]"
+      >
+        <ul className="flex flex-col gap-0.5 p-2">
+          {cards.map((card) => {
+            const cardTitle = normalizedCardTitle(card);
+            const isSelected = card.cardId === selectedCard.cardId;
+            return (
+              <li key={card.cardId}>
+                <button
+                  type="button"
+                  aria-current={isSelected ? 'true' : undefined}
+                  onClick={() => onCardSelect(card)}
+                  className={`w-full rounded-md px-3 py-2 text-left text-sm font-medium transition-colors ${
+                    isSelected
+                      ? 'bg-[var(--primary)] text-white'
+                      : 'text-[var(--text)] hover:bg-[var(--border)] hover:text-[var(--text)]'
+                  }`}
+                >
+                  {cardTitle}
+                </button>
+              </li>
+            );
+          })}
+        </ul>
+      </nav>
+
+      {/* Main content */}
+      <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
+        {/* Header */}
+        <div className="flex shrink-0 items-center justify-between border-b border-[var(--border)] bg-[var(--surface)] px-4 py-2">
+          <h2 className="text-base font-semibold text-[var(--text)]">{headerTitle}</h2>
+          {/* Range presets */}
+          <div className="flex items-center gap-1">
+            {PRESET_LABELS.map(({ key, label }) => (
+              <button
+                key={key}
+                type="button"
+                aria-pressed={activePreset === key}
+                onClick={() => handlePreset(key)}
+                className={`rounded px-2 py-1 text-xs font-semibold transition-colors ${
+                  activePreset === key
+                    ? 'bg-[var(--primary)] text-white'
+                    : 'border border-[var(--border)] bg-[var(--secondary-bg)] text-[var(--text)] hover:bg-[var(--border)]'
+                }`}
+              >
+                {label}
+              </button>
+            ))}
+            {/* Zoom controls */}
+            <div className="ml-2 flex items-center gap-1">
+              <button
+                type="button"
+                aria-label={t('history.desktop.zoomIn', { defaultValue: 'Zoom in' })}
+                onClick={handleZoomIn}
+                className="rounded border border-[var(--border)] bg-[var(--secondary-bg)] px-2 py-1 text-xs font-bold text-[var(--text)] hover:bg-[var(--border)]"
+              >
+                +
+              </button>
+              <button
+                type="button"
+                aria-label={t('history.desktop.zoomOut', { defaultValue: 'Zoom out' })}
+                onClick={handleZoomOut}
+                className="rounded border border-[var(--border)] bg-[var(--secondary-bg)] px-2 py-1 text-xs font-bold text-[var(--text)] hover:bg-[var(--border)]"
+              >
+                −
+              </button>
+              <button
+                type="button"
+                aria-label={t('history.desktop.resetZoom', { defaultValue: 'Reset zoom' })}
+                onClick={handleResetButton}
+                className="rounded border border-[var(--border)] bg-[var(--secondary-bg)] px-2 py-1 text-xs font-semibold text-[var(--text)] hover:bg-[var(--border)]"
+              >
+                ↺
+              </button>
+            </div>
+          </div>
+        </div>
+
+        {/* Chart region */}
+        <div
+          ref={chartRef}
+          data-testid="desktop-chart-surface"
+          tabIndex={0}
+          className="relative min-h-0 flex-1 cursor-crosshair overflow-hidden bg-[var(--bg)] outline-none focus:ring-2 focus:ring-[var(--primary)]"
+          style={{ userSelect: 'none' }}
+        >
+          <HistoryCardVisualization
+            card={selectedCard}
+            data={cardData.data}
+            selectedView={selectedView}
+            isLoading={cardData.isLoading}
+            error={cardData.error}
+            window={chartWindow}
+          />
+        </div>
+
+        {/* Overview strip */}
+        <div className="shrink-0 px-3 pb-2">
+          <HistoryOverviewStrip
+            bounds={effectiveBounds}
+            viewport={viewport}
+            onChange={setViewport}
+          />
+        </div>
+      </div>
+    </div>
+  );
+};
