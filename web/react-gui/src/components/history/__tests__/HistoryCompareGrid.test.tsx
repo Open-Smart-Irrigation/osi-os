@@ -177,6 +177,8 @@ describe('HistoryCompareGrid', () => {
       const wrapper = panel.querySelector('[data-testid="compare-panel-visualization"]');
       expect(wrapper).toHaveClass('min-h-0');
       expect(wrapper).toHaveClass('flex-1');
+      expect(wrapper).toHaveClass('flex');
+      expect(wrapper).toHaveClass('flex-col');
     }
   });
 

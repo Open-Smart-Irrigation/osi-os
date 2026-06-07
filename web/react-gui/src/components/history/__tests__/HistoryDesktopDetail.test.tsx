@@ -235,6 +235,8 @@ describe('HistoryDesktopDetail', () => {
     expect(surface).toHaveClass('flex-col');
     expect(surface.firstElementChild).toHaveClass('min-h-0');
     expect(surface.firstElementChild).toHaveClass('flex-1');
+    expect(surface.firstElementChild).toHaveClass('flex');
+    expect(surface.firstElementChild).toHaveClass('flex-col');
   });
 
   it('renders card-specific view buttons for the selected Soil card', () => {

@@ -42,7 +42,7 @@ const ComparePanel: React.FC<ComparePanelProps> = ({ card, scope, viewport, rang
         <span className="text-sm font-medium text-[var(--text)]">{desktopRailCardLabel(card)}</span>
       </div>
       {/* Visualization */}
-      <div data-testid="compare-panel-visualization" className="min-h-0 flex-1">
+      <div data-testid="compare-panel-visualization" className="flex min-h-0 flex-1 flex-col">
         <HistoryCardVisualization
           card={card}
           data={cardData.data}

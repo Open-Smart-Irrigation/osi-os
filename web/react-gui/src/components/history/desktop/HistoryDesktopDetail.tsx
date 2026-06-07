@@ -388,7 +388,7 @@ export const HistoryDesktopDetail: React.FC<HistoryDesktopDetailProps> = ({
               className="relative flex min-h-0 flex-1 flex-col cursor-crosshair overflow-hidden bg-[var(--bg)] outline-none focus:ring-2 focus:ring-[var(--primary)]"
               style={{ userSelect: 'none' }}
             >
-              <div className="min-h-0 flex-1">
+              <div className="flex min-h-0 flex-1 flex-col">
                 <HistoryCardVisualization
                   card={selectedCard}
                   data={cardData.data}
