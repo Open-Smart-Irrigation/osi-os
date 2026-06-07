@@ -12,6 +12,15 @@ import type { HistoryCardDataScope } from '../../../history/useHistoryCardData';
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({
     t: (key: string, opts?: Record<string, unknown>) => {
+      const labels: Record<string, string> = {
+        'history.viewMode.soil-profile': 'Soil Profile',
+        'history.viewMode.line-chart': 'Line Chart',
+        'history.viewMode.calendar': 'Calendar',
+        'history.viewMode.irrigation-response': 'Irrigation Response',
+        'history.viewMode.advanced': 'Advanced View',
+        'history.viewMode.daily-min-max': 'Daily Min/Max',
+      };
+      if (labels[key]) return labels[key];
       if (opts?.defaultValue) return opts.defaultValue as string;
       return key;
     },
@@ -32,10 +41,31 @@ vi.mock('../../../history/useHistoryCardData', async (importOriginal) => {
   };
 });
 
+vi.mock('../../../history/useHistoryCardAdvancedData', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../../history/useHistoryCardAdvancedData')>();
+  return {
+    ...actual,
+    useHistoryCardAdvancedData: vi.fn(() => ({
+      data: { cardId: 'soil-card:root-zone', cardType: 'soil', advancedFields: {} },
+      error: null,
+      isLoading: false,
+      refresh: vi.fn(),
+    })),
+  };
+});
+
 // HistoryCardVisualization makes Recharts calls that don't work in jsdom; stub lightly
 vi.mock('../HistoryCardVisualization', () => ({
-  HistoryCardVisualization: ({ card }: { card: HistoryCardSummary }) =>
-    React.createElement('div', { 'data-testid': 'card-visualization' }, `Visualization: ${card.cardId}`),
+  HistoryCardVisualization: ({ card, selectedView }: { card: HistoryCardSummary; selectedView: string }) =>
+    React.createElement(
+      'div',
+      {
+        'data-testid': 'card-visualization',
+        'data-card-id': card.cardId,
+        'data-selected-view': selectedView,
+      },
+      `Visualization: ${card.cardId}:${selectedView}`,
+    ),
 }));
 
 function makeCard(overrides: Partial<HistoryCardSummary> = {}): HistoryCardSummary {
@@ -204,6 +234,75 @@ describe('HistoryDesktopDetail', () => {
     expect(surface).toHaveClass('flex-col');
     expect(surface.firstElementChild).toHaveClass('min-h-0');
     expect(surface.firstElementChild).toHaveClass('flex-1');
+  });
+
+  it('renders card-specific view buttons for the selected Soil card', () => {
+    const card = makeCard({
+      views: ['soil-profile', 'line-chart', 'calendar', 'irrigation-response', 'advanced'],
+    });
+    renderDesktopDetail([card], card);
+
+    expect(screen.getByRole('button', { name: 'Soil Profile' })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByRole('button', { name: 'Line Chart' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Calendar' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Irrigation Response' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Advanced View' })).toBeInTheDocument();
+  });
+
+  it('switches the selected view without changing card route state', () => {
+    const card = makeCard({
+      views: ['soil-profile', 'line-chart', 'calendar', 'irrigation-response', 'advanced'],
+    });
+    renderDesktopDetail([card], card);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Line Chart' }));
+
+    expect(screen.getByTestId('card-visualization')).toHaveAttribute('data-selected-view', 'line-chart');
+    expect(screen.getByRole('button', { name: 'Line Chart' })).toHaveAttribute('aria-pressed', 'true');
+  });
+
+  it('resets the selected view when the selected card changes', () => {
+    const soil = makeCard({
+      cardId: 'soil',
+      defaultView: 'soil-profile',
+      views: ['soil-profile', 'line-chart', 'calendar'],
+    });
+    const env = makeCard({
+      cardId: 'env',
+      cardType: 'environment',
+      title: 'Environment - Microclimate',
+      defaultView: 'line-chart',
+      views: ['line-chart', 'daily-min-max', 'calendar', 'advanced'],
+    });
+    const onCardSelect = vi.fn();
+    const { rerender } = render(
+      <SWRConfig value={{ provider: () => new Map(), dedupingInterval: 0 }}>
+        <HistoryDesktopDetail cards={[soil, env]} selectedCard={soil} zoneName="Zone A" scope={baseScope} onCardSelect={onCardSelect} />
+      </SWRConfig>,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Calendar' }));
+    expect(screen.getByTestId('card-visualization')).toHaveAttribute('data-selected-view', 'calendar');
+
+    rerender(
+      <SWRConfig value={{ provider: () => new Map(), dedupingInterval: 0 }}>
+        <HistoryDesktopDetail cards={[soil, env]} selectedCard={env} zoneName="Zone A" scope={baseScope} onCardSelect={onCardSelect} />
+      </SWRConfig>,
+    );
+
+    expect(screen.getByTestId('card-visualization')).toHaveAttribute('data-selected-view', 'line-chart');
+    expect(screen.getByRole('button', { name: 'Daily Min/Max' })).toBeInTheDocument();
+  });
+
+  it('uses Advanced View when the card-specific Advanced button is selected', () => {
+    const card = makeCard({
+      views: ['soil-profile', 'line-chart', 'calendar', 'irrigation-response', 'advanced'],
+    });
+    renderDesktopDetail([card], card);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Advanced View' }));
+
+    expect(screen.getByTestId('card-visualization')).toHaveAttribute('data-selected-view', 'advanced');
   });
 
   it('clicking zoom-in (+) narrows the overview-window width', () => {

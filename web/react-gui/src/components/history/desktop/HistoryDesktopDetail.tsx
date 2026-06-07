@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { HistoryCardVisualization } from '../HistoryCardVisualization';
 import { HistoryOverviewStrip } from './HistoryOverviewStrip';
@@ -11,11 +11,14 @@ import {
   type ViewportBounds,
 } from '../../../history/historyViewport';
 import { useChartMouseInteractions } from '../../../history/useChartMouseInteractions';
+import { useHistoryCardAdvancedData } from '../../../history/useHistoryCardAdvancedData';
 import { useHistoryCardData } from '../../../history/useHistoryCardData';
 import {
+  defaultDesktopView,
   desktopBoundsForData,
   desktopCardHeaderTitle,
   desktopRailCardLabel,
+  selectableDesktopViews,
 } from '../../../history/desktopHistory';
 import type { HistoryCardDataScope } from '../../../history/useHistoryCardData';
 import type {
@@ -70,7 +73,6 @@ export const HistoryDesktopDetail: React.FC<HistoryDesktopDetailProps> = ({
   const t = translate as HistoryTranslate;
 
   const defaultRange = selectedCard.defaultRange ?? '24h';
-  const defaultView = (selectedCard.defaultView ?? 'line-chart') as HistoryViewMode;
   const defaultSpanMs = defaultSpanMsForRange(defaultRange);
 
   const now = Date.now();
@@ -80,8 +82,14 @@ export const HistoryDesktopDetail: React.FC<HistoryDesktopDetailProps> = ({
     resetViewport(initialBounds, defaultSpanMs),
   );
   const [activePreset, setActivePreset] = useState<HistoryRangeLabel>(defaultRange as HistoryRangeLabel);
-  const [selectedView] = useState<HistoryViewMode>(defaultView);
+  const [selectedView, setSelectedView] = useState<HistoryViewMode>(() => defaultDesktopView(selectedCard));
   const [mode, setMode] = useState<DesktopMode>('focus');
+  const viewOptions = useMemo(() => selectableDesktopViews(selectedCard), [selectedCard]);
+  const shouldRenderAdvanced = selectedView === 'advanced';
+
+  useEffect(() => {
+    setSelectedView(defaultDesktopView(selectedCard));
+  }, [selectedCard.cardId, selectedCard.defaultView]);
 
   // Derive request range from viewport (shared between focus and compare modes)
   const rangeRequest: HistoryRangeSelection = useMemo(
@@ -101,7 +109,17 @@ export const HistoryDesktopDetail: React.FC<HistoryDesktopDetailProps> = ({
     range: rangeRequest,
     aggregation: 'raw',
     overlays: [],
-    enabled: Boolean(selectedCard.availability.available),
+    enabled: Boolean(selectedCard.availability.available && !shouldRenderAdvanced),
+  });
+
+  const advancedData = useHistoryCardAdvancedData({
+    scope,
+    cardId: selectedCard.cardId,
+    view: selectedView,
+    range: rangeRequest,
+    aggregation: 'raw',
+    overlays: [],
+    enabled: Boolean(selectedCard.availability.available && shouldRenderAdvanced),
   });
 
   // Derive bounds from loaded series timestamps (fall back to preset range)
@@ -260,6 +278,27 @@ export const HistoryDesktopDetail: React.FC<HistoryDesktopDetailProps> = ({
           </div>
           {/* Range presets + zoom — always visible so the shared viewport can be adjusted in either mode */}
           <div className="flex items-center gap-1">
+            <div
+              role="group"
+              aria-label={t('history.desktop.viewSelectorLabel', { defaultValue: 'Card view' })}
+              className="mr-2 flex overflow-hidden rounded border border-[var(--border)]"
+            >
+              {viewOptions.map(({ view, labelKey }) => (
+                <button
+                  key={view}
+                  type="button"
+                  aria-pressed={selectedView === view}
+                  onClick={() => setSelectedView(view)}
+                  className={`px-2 py-1 text-xs font-semibold transition-colors ${
+                    selectedView === view
+                      ? 'bg-[var(--primary)] text-white'
+                      : 'bg-[var(--secondary-bg)] text-[var(--text)] hover:bg-[var(--border)]'
+                  }`}
+                >
+                  {t(labelKey)}
+                </button>
+              ))}
+            </div>
             {PRESET_LABELS.map(({ key, label }) => (
               <button
                 key={key}
@@ -324,6 +363,9 @@ export const HistoryDesktopDetail: React.FC<HistoryDesktopDetailProps> = ({
                   selectedView={selectedView}
                   isLoading={cardData.isLoading}
                   error={cardData.error}
+                  advancedData={advancedData.data}
+                  advancedIsLoading={advancedData.isLoading}
+                  advancedError={advancedData.error}
                   window={chartWindow}
                 />
               </div>
