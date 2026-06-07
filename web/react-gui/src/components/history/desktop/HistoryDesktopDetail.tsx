@@ -162,11 +162,6 @@ export const HistoryDesktopDetail: React.FC<HistoryDesktopDetailProps> = ({
     setViewport(zoomViewport(viewport, effectiveBounds, center, 1.25));
   }, [viewport, effectiveBounds]);
 
-  const handleResetButton = useCallback(() => {
-    const spanMs = defaultSpanMsForRange(activePreset);
-    setViewport(resetViewport(effectiveBounds, spanMs));
-  }, [activePreset, effectiveBounds]);
-
   const headerTitle = composeDetailTitle(selectedCard, zoneName);
 
   return (
@@ -243,7 +238,7 @@ export const HistoryDesktopDetail: React.FC<HistoryDesktopDetailProps> = ({
               <button
                 type="button"
                 aria-label={t('history.desktop.resetZoom', { defaultValue: 'Reset zoom' })}
-                onClick={handleResetButton}
+                onClick={handleReset}
                 className="rounded border border-[var(--border)] bg-[var(--secondary-bg)] px-2 py-1 text-xs font-semibold text-[var(--text)] hover:bg-[var(--border)]"
               >
                 ↺

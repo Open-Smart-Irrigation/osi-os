@@ -195,4 +195,20 @@ describe('HistoryDesktopDetail', () => {
     const surface = screen.getByTestId('desktop-chart-surface');
     expect(surface).toContainElement(screen.getByTestId('card-visualization'));
   });
+
+  it('clicking zoom-in (+) narrows the overview-window width', () => {
+    const card = makeCard();
+    renderDesktopDetail([card], card);
+
+    const window = screen.getByTestId('overview-window');
+    const widthBefore = window.style.width;
+
+    fireEvent.click(screen.getByRole('button', { name: 'Zoom in' }));
+
+    const widthAfter = window.style.width;
+    // After zooming in the viewport span shrinks, so the overview window becomes narrower.
+    // Both values are percentage strings like "50%"; compare as floats.
+    const parsePct = (s: string) => parseFloat(s);
+    expect(parsePct(widthAfter)).toBeLessThan(parsePct(widthBefore));
+  });
 });

@@ -468,7 +468,7 @@ export const HistoryCardDetailPage: React.FC = () => {
     aggregation: requestAggregation,
     overlays: [],
     sourceKey: selectedSourceKey,
-    enabled: Boolean(displayCard?.availability.available && resolvedScope && !shouldRenderAdvanced),
+    enabled: Boolean(displayCard?.availability.available && resolvedScope && !shouldRenderAdvanced && !isDesktop),
   });
   const advancedData = useHistoryCardAdvancedData({
     scope: resolvedScope,
@@ -718,10 +718,13 @@ export const HistoryCardDetailPage: React.FC = () => {
   }
 
   if (isDesktop && desktopSelectedCard && desktopScope) {
+    const desktopCards = routeScope?.type === 'gateway'
+      ? orderedRouteCards.map((card) => sanitizeGatewayRouteCard(t, card, routeScope.gatewayEui))
+      : orderedRouteCards;
     return (
       <div className="flex h-screen flex-col overflow-hidden bg-[var(--bg)]">
         <HistoryDesktopDetail
-          cards={orderedRouteCards}
+          cards={desktopCards}
           selectedCard={desktopSelectedCard}
           zoneName={resolvedZone?.name ?? null}
           scope={desktopScope}
