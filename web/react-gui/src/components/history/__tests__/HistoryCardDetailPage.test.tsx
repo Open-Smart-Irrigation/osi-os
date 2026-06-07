@@ -570,7 +570,7 @@ describe('History card detail route', () => {
     expect(screen.queryByText('0016C001F11766E7')).not.toBeInTheDocument();
   });
 
-  it('header has no back button, inline sources, or visible History text', async () => {
+  it('header shows source names without back button or visible History text', async () => {
     vi.mocked(historyAPI.getZoneCards).mockResolvedValue({
       zoneId: 12,
       generatedAt: '2026-05-31T10:00:00Z',
@@ -592,7 +592,7 @@ describe('History card detail route', () => {
     expect(screen.queryByRole('link', { name: /back to history/i })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /back to history/i })).not.toBeInTheDocument();
     expect(screen.queryByText(/back to history/i)).not.toBeInTheDocument();
-    expect(screen.queryByText(/2 sources/i)).not.toBeInTheDocument();
+    expect(screen.getByText('2 sources: Chameleon 1, Chameleon 2')).toBeInTheDocument();
     expect(screen.queryByText(/\bhistory\b/i)).not.toBeInTheDocument();
   });
 
@@ -762,6 +762,7 @@ describe('History card detail route', () => {
     renderAppAtRoute('/history/zones/12/cards/soil-card%3Aroot-zone');
 
     await screen.findByRole('heading', { level: 1, name: 'Soil Moisture North Block' });
+    expect(screen.getByText('2 sources: Chameleon 1, Chameleon 2')).toBeInTheDocument();
     expect(screen.queryByRole('group', { name: 'Source' })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: /Sources/i }));
     const chameleonOne = screen.getByLabelText('Chameleon 1');
