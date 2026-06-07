@@ -13,6 +13,23 @@ This document records the first live-test issue cluster for the new OSI OS Histo
 
 ## Resolution status
 
+Status as of 2026-06-07 on local branch `feat/history-data-visualization`:
+
+- Deployed kaba100 commit: `ebe565b2`.
+- Served GUI assets after deploy: `assets/index-COEn1bSV.js`, `assets/index-DOU047vb.css`.
+- Runtime deploy backup: `/data/db/backups/osi-os-20260607-001136/runtime-backup.tar.gz`.
+- Node-RED status after deploy: `running`; MQTT uplink subscription restored on `application/+/device/+/event/up`.
+- Zone B History API now returns one merged `Soil Moisture` card with `sourceDeviceCount: 2` and display-safe source names `Chameleon 1`, `Chameleon 2`.
+- Fullscreen detail header now shows `Soil Moisture Zone B` and `2 sources: Chameleon 1, Chameleon 2`.
+- Source menu exposes both `Chameleon 1` and `Chameleon 2`; raw `swt_*` and DevEUI labels were not visible in the Playwright smoke check.
+- Soil line/profile API returns depth metadata for Zone B: `5 cm`, `10 cm`, `40 cm`.
+- Post-deploy timing, Zone B, 7 measured runs after 2 warmups:
+  - `zone-cards`: p50 14 ms, p95 19 ms.
+  - `card-data-24h`: p50 26 ms, p95 29 ms.
+  - `card-data-7d`: p50 110 ms, p95 153 ms.
+  - `card-data-30d`: p50 41 ms, p95 44 ms.
+- Remaining observability note: `[history-api] phaseMs` lines did not appear in `logread` on kaba100, even though endpoint timings are healthy. Follow up by confirming where Node-RED `node.log` output is routed on the OpenWrt image.
+
 Status as of 2026-06-02 on local branch `feat/history-data-visualization`:
 
 - Issue 1 is addressed for the merged-card UI: card summaries now carry display-safe source names/counts, and the carousel/card header render those names without showing DevEUI.
