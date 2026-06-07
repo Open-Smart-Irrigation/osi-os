@@ -70,7 +70,8 @@ export function useChartMouseInteractions({ viewport, bounds, onViewportChange, 
       window.removeEventListener('mouseup', onUp);
       el.removeEventListener('mouseleave', onLeave);
       el.removeEventListener('dblclick', onDouble);
-      if (frame.current != null) cancelAnimationFrame(frame.current);
+      if (frame.current != null) { cancelAnimationFrame(frame.current); frame.current = null; }
+      pending.current = null;
     };
   }, [viewport, bounds, commit, onReset]);
 
