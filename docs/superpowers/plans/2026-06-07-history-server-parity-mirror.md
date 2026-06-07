@@ -2,9 +2,20 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Port the recent osi-os history polish (SWR de-duplication, calendar month context, "Soil Moisture" rename, source-name header) into the osi-server cloud frontend so both history UIs behave consistently.
+**Goal:** Bring the osi-server cloud history frontend to full parity with the osi-os `feat/history-data-visualization` branch — the UX polish, the new history-view UX modules (source labels, soil status, mobile gesture surface), and the data contract — so the two history experiences match.
 
 **Architecture:** Behavioral port across a diverged frontend. osi-server shares component *names* with osi-os but the files differ, so each task names the exact osi-server file and shows the concrete change. The osi-os edge perf fixes (latest-row query, schema-guard cache, helper `ORDER BY`, phase timing) are SQLite/Node-RED specific and are **not** ported — Task 6 records the parity verification instead.
+
+**Full-branch parity audit (2026-06-07) — what this plan does and does NOT cover:**
+
+- **Already at parity (no work):** the entire history **API surface** — osi-server exposes every osi-os route at `/api/v1/history` (`zones/.../cards`, `/data`, `/advanced`, `/opened`, `/preferences`, gateway equivalents, `/workspaces` CRUD). History **rollups** exist on both sides (`HistoryRollupRepository`, `JdbcHistoryRollupRepository`).
+- **Covered here:** UX polish (Phase 1: SWR de-dup, calendar month, Soil Moisture rename, source names) + full frontend UX parity (Phase 2: contract drift, `sourceLabels`/`soilStatus`, mobile gesture surface).
+- **Covered by sibling plans:** desktop mode → `2026-06-07-history-desktop-mode.md`.
+- **NOT covered — separate sequenced work (CSV export):** CSV export is **designed but unbuilt everywhere** (osi-os has specs/plans only). Per the agreed order, build it on **edge first** by executing the existing osi-os plans, **then** mirror to cloud:
+  1. `docs/superpowers/plans/2026-06-02-history-rollups-and-csv-export.md` (edge)
+  2. `docs/superpowers/plans/2026-06-03-zone-csv-range-export.md` (edge)
+  3. `docs/superpowers/plans/2026-06-03-zone-csv-export-per-source-aggregates.md` (edge)
+  4. **Cloud CSV export plan — to be authored once the edge CSV lands** (mirrors whatever the edge implements; not written speculatively).
 
 **Tech Stack:** Vite + React 18 + TypeScript, SWR, Recharts, Vitest + Testing Library, i18next. Repo: `/home/phil/Repos/osi-server`, branch `feat/history-data-visualization`.
 
@@ -28,6 +39,8 @@ cd /home/phil/Repos/osi-server && git status --short --branch
 Expected: on `feat/history-data-visualization`. Stash unrelated edits to `AGENTS.md` if they would be swept into commits.
 
 ---
+
+# Phase 1 — UX polish parity
 
 ## Task 1: SWR de-duplication for card data
 
@@ -439,7 +452,148 @@ git commit -m "fix(history): show cloud card source names; record edge parity"
 
 ---
 
-## Task 7: Full verification
+# Phase 2 — Full history-view frontend parity
+
+## Task 7: History contract drift audit
+
+**Files:**
+- Modify: `frontend/src/history/types.ts`
+- Modify (if needed): `backend/src/main/java/org/osi/server/history/dto/*.java`
+
+The osi-os `history/types.ts` (439 lines) carries newer types absent from the server `types.ts` (411 lines). Confirmed missing type names: `HistoryCardPreference`, `HistoryCardSourceDevice`, `HistoryWorkspaceListResponse` (some may exist under different names — verify before adding).
+
+- [ ] **Step 1: Diff the two contract files.**
+
+Run:
+
+```bash
+cd /home/phil/Repos
+diff <(grep -E "export (interface|type) " osi-os/web/react-gui/src/history/types.ts | sort) \
+     <(grep -E "export (interface|type) " osi-server/frontend/src/history/types.ts | sort)
+```
+
+Record every osi-os type/field not present (or renamed) on the server.
+
+- [ ] **Step 2: Add the missing types to the server contract.**
+
+For each genuinely-missing type (start with `HistoryCardSourceDevice` — the display-safe `{ name, typeId, role, sourceStatus? }` source descriptor used by source labels), copy the osi-os definition into `frontend/src/history/types.ts`, adjusting only cross-references. Do **not** add a type the server already models differently — note those as intentional divergences in `docs/history-edge-parity.md`.
+
+- [ ] **Step 3: Verify the backend DTO matches for any new response field.**
+
+For any added field that the server backend must populate (e.g. `sourceDevices` on the card summary), confirm the Java DTO in `backend/src/main/java/org/osi/server/history/dto/` already serializes it; if not, add the field to the DTO and its builder. If the field is frontend-only (display formatting), no backend change is needed.
+
+- [ ] **Step 4: Verify and commit.**
+
+Run: `cd /home/phil/Repos/osi-server/frontend && npx tsc --noEmit && npx vitest run src/components/history`
+Expected: type-checks clean; tests pass.
+
+```bash
+cd /home/phil/Repos/osi-server
+git add frontend/src/history/types.ts backend/src/main/java/org/osi/server/history/dto docs/history-edge-parity.md
+git commit -m "fix(history): align cloud history contract with edge types"
+```
+
+---
+
+## Task 8: Port source labels and soil status modules
+
+**Files:**
+- Create: `frontend/src/history/sourceLabels.ts` (port from `osi-os/web/react-gui/src/history/sourceLabels.ts`)
+- Create: `frontend/src/history/soilStatus.ts` (port from `osi-os/web/react-gui/src/history/soilStatus.ts`)
+- Create: `frontend/src/history/__tests__/sourceLabels.test.ts` and `soilStatus.test.ts`
+
+- [ ] **Step 1: Read both osi-os modules and their existing tests.**
+
+Open `osi-os/web/react-gui/src/history/sourceLabels.ts` and `soilStatus.ts` (plus any `__tests__` for them). These are pure helper modules (display-safe source naming; soil tension → status classification). Note their exact exports and imported types.
+
+- [ ] **Step 2: Port the test first.**
+
+Copy the osi-os test for each module into `frontend/src/history/__tests__/`, adjusting import paths. If osi-os has no standalone test, write one asserting the key behaviors (source label hides DevEUI and falls back to `Sensor N`; soil status thresholds: <22 kPa wet, 22–50 optimal, >50 dry — confirm exact thresholds from the osi-os source).
+
+- [ ] **Step 3: Run and watch fail, then port the module.**
+
+Run: `cd frontend && npx vitest run src/history/__tests__/sourceLabels.test.ts src/history/__tests__/soilStatus.test.ts`
+Expected: FAIL (module not found) → copy each module verbatim, adjust imports to the server `types.ts` → PASS.
+
+- [ ] **Step 4: Wire them where the server renders source/soil text.**
+
+Replace ad-hoc source/soil-status formatting in the server history components (the shells, `SoilProfileView`, calendar markers) with calls into these modules, so cloud and edge classify identically. Keep raw DevEUI in Advanced View only.
+
+- [ ] **Step 5: Verify and commit.**
+
+Run: `cd frontend && npx vitest run src/components/history`
+Expected: PASS.
+
+```bash
+git add frontend/src/history/sourceLabels.ts frontend/src/history/soilStatus.ts frontend/src/history/__tests__/sourceLabels.test.ts frontend/src/history/__tests__/soilStatus.test.ts frontend/src/components/history
+git commit -m "feat(history): port source-label and soil-status helpers to cloud"
+```
+
+---
+
+## Task 9: Port the mobile gesture surface and fullscreen detail
+
+**Files:**
+- Create: `frontend/src/history/gestureModel.ts`, `useVisualizationGestures.ts`, `useOrientation.ts`, `useTimeViewport.ts` (port from osi-os; `useTimeViewport.ts` only if the server lacks it)
+- Create: `frontend/src/components/history/mobile/*` and a route-backed `HistoryCardDetailPage` equivalent (port from osi-os)
+- Modify: the server history route/`HistoryDashboard.tsx` to open the fullscreen mobile detail on tap
+- Test: port the osi-os mobile detail tests
+
+This is the largest port: it brings osi-os's mobile fullscreen gesture experience (pinch-zoom, pan, card/view swipe, pull-to-refresh) to the cloud frontend so cloud mobile-web matches edge.
+
+- [ ] **Step 1: Inventory the osi-os mobile surface.**
+
+Run:
+
+```bash
+cd /home/phil/Repos/osi-os
+ls web/react-gui/src/components/history/mobile/
+sed -n '1,40p' web/react-gui/src/history/gestureModel.ts
+sed -n '1,40p' web/react-gui/src/history/useVisualizationGestures.ts
+```
+
+List every file in `components/history/mobile/`, the gesture model's exported reducer/types, and the `HistoryCardDetailPage` route wiring. This is the port manifest.
+
+- [ ] **Step 2: Port the pure gesture model first (TDD).**
+
+Copy `gestureModel.ts` and its test into `frontend/src/history/`. Run the test (`npx vitest run src/history/__tests__/gestureModel.test.ts`) — expect FAIL (missing) then PASS after copy. The gesture model is DOM-free, so it ports verbatim.
+
+- [ ] **Step 3: Port `useOrientation`, `useTimeViewport`, `useVisualizationGestures`.**
+
+Copy each hook, adjusting imports. Confirm the server doesn't already have `useTimeViewport` (osi-os has it; server `history/` did not list it) — if absent, port it; if present, reconcile to the osi-os version and note divergence.
+
+- [ ] **Step 4: Port the `mobile/` components and the detail page.**
+
+Copy `components/history/mobile/*` and the `HistoryCardDetailPage` into the server tree. Rewire data access to the server hooks (`useHistoryCardData` etc. — same names) and the server router (HashRouter route `#/history/zones/:zoneId/cards/:encodedCardId`, matching the edge URL format). Reuse the server's existing visualization components (`SoilProfileView`, `EnvironmentLineChartView`, `CalendarView`, etc.) inside the ported frame.
+
+- [ ] **Step 5: Gate mobile vs desktop.**
+
+In the server history entry (`HistoryDashboard.tsx`), render the ported fullscreen mobile detail below the desktop breakpoint (reuse `useIsDesktop` from the desktop-mode plan) and the desktop shell above it. Tapping a card on mobile opens the fullscreen detail route.
+
+- [ ] **Step 6: Port the mobile tests and verify.**
+
+Copy the osi-os mobile detail tests, adjust imports, and run:
+
+```bash
+cd frontend && npx vitest run src/components/history && npm run build
+```
+
+Expected: PASS; build succeeds.
+
+- [ ] **Step 7: Commit.**
+
+```bash
+git add frontend/src/history/gestureModel.ts frontend/src/history/useVisualizationGestures.ts frontend/src/history/useOrientation.ts frontend/src/history/useTimeViewport.ts frontend/src/components/history/mobile frontend/src/components/history/__tests__ frontend/src/pages
+git commit -m "feat(history): port mobile gesture fullscreen detail to cloud"
+```
+
+Review gate: request review with a mobile-width screenshot of the cloud Zone B fullscreen detail (pinch/pan/swipe) before starting Phase 3.
+
+---
+
+# Phase 3 — Verification
+
+## Task 10: Full verification
 
 - [ ] **Step 1: Run the frontend unit suite and build.**
 
@@ -470,7 +624,9 @@ Expected: PASS.
 
 ## Self-Review notes (already applied)
 
-- Spec coverage: SWR de-dup (T1-2), calendar month (T3-4), Soil Moisture rename (T5), source names (T6), backend parity verification (T6 doc), depth-labels resolution documented as already-satisfied (T5 note).
+- Full-branch parity coverage: API surface already at parity (audit note in header); UX polish (Phase 1: T1-6); contract drift (T7); source-label/soil-status modules (T8); mobile gesture fullscreen surface (T9); verification (T10). Desktop mode is the sibling plan; CSV export is sequenced separately (edge-first) per the header roadmap.
+- Spec coverage within Phase 1: SWR de-dup (T1-2), calendar month (T3-4), Soil Moisture rename (T5), source names (T6), backend parity verification (T6 doc), depth-labels resolution documented as already-satisfied (T5 note).
 - No `revalidateOnFocus`/`dedupingInterval` drift: both hooks use `revalidateOnFocus: false` + `dedupingInterval: 1_500`.
 - `canonicalIsoMinute` signature identical in both hooks and matches osi-os.
-- Tasks requiring osi-server-specific component discovery (T4 header wiring, T5 locale paths, T6 source fields) include an explicit read/grep step because the cloud components diverge from osi-os.
+- Tasks requiring osi-server-specific component discovery (T4 header wiring, T5 locale paths, T6 source fields, T7-T9 ports) include an explicit read/grep step because the cloud components diverge from osi-os.
+- Port tasks (T8, T9) reuse the same `useIsDesktop` hook introduced in the desktop-mode plan — run that plan's Task B9/B4 first, or port `useIsDesktop` as part of T9 Step 5.

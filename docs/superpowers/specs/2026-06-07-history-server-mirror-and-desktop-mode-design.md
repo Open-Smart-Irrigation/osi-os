@@ -12,6 +12,14 @@ Two workstreams in one combined spec:
 1. **W1 — Server parity mirror.** Bring the recent osi-os history polish (label/UX and the user-visible parts of the loading work) into osi-server so the two history UIs stay consistent.
 2. **W2 — Desktop mode.** Add a mouse-native desktop history experience to **both** repos: scroll-to-zoom, drag-to-pan, hover crosshair, an overview/brush strip, and an ad-hoc Compare view. Designed once, implemented in each frontend.
 
+### Full-branch parity scope (added 2026-06-07 after review)
+
+The request is **full-branch parity to the server**, not just the recent polish. Audit result:
+
+- **History API/contract:** osi-server **already** exposes every osi-os history route at `/api/v1/history` (cards, data, advanced, opened, preferences, gateway equivalents, workspaces CRUD). Rollups exist on both. The backend "new history view" is already adapted.
+- **Frontend parity gaps (W1, expanded):** (G1) small contract drift — server `types.ts` lacks `HistoryCardPreference`, `HistoryCardSourceDevice`, `HistoryWorkspaceListResponse`; (G2) missing UX modules — `sourceLabels.ts`, `soilStatus.ts`, and the **mobile gesture surface** (`gestureModel.ts`, `useVisualizationGestures.ts`, `useOrientation.ts`) plus the fullscreen mobile detail. **Decision: full UX parity including mobile gestures.** Added as Phase 2 of the W1 plan.
+- **CSV export (G3):** designed but **unbuilt everywhere** (osi-os has specs/plans only). **Decision: edge-first, then cloud.** Execute the existing osi-os edge CSV plans, then author a cloud CSV plan mirroring the edge result. Sequenced after W1/W2; tracked in the W1 plan header roadmap.
+
 ## Background and current state
 
 The two repos share a common history ancestor but have **diverged**:
