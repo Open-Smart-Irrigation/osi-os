@@ -654,6 +654,14 @@ export const HistoryCardDetailPage: React.FC = () => {
 
   useEffect(() => {
     setCalendarMonthOffset(0);
+  }, [
+    displayCard?.cardId,
+    selectedSourceKey,
+    selectedView,
+    timeViewport.viewport.range.label,
+  ]);
+
+  useEffect(() => {
     setVisualWindow(null);
     setExportOpen(false);
   }, [
