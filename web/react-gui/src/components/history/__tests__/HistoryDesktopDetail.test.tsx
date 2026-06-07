@@ -20,6 +20,7 @@ vi.mock('react-i18next', () => ({
         'history.viewMode.irrigation-response': 'Irrigation Response',
         'history.viewMode.advanced': 'Advanced View',
         'history.viewMode.daily-min-max': 'Daily Min/Max',
+        'history.viewMode.growth-timeline': 'Growth Timeline',
       };
       if (labels[key]) return labels[key];
       if (opts?.defaultValue) return opts.defaultValue as string;
@@ -306,6 +307,23 @@ describe('HistoryDesktopDetail', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Advanced View' }));
 
     expect(screen.getByTestId('card-visualization')).toHaveAttribute('data-selected-view', 'advanced');
+  });
+
+  it('requests daily aggregation when Daily Min/Max is selected', () => {
+    const card = makeCard({
+      cardType: 'environment',
+      title: 'Environment - Microclimate',
+      defaultView: 'line-chart',
+      views: ['line-chart', 'daily-min-max', 'calendar', 'advanced'],
+    });
+    renderDesktopDetail([card], card);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Daily Min/Max' }));
+
+    expect(screen.getByTestId('card-visualization')).toHaveAttribute('data-selected-view', 'daily-min-max');
+    expect(vi.mocked(useHistoryCardData).mock.calls.at(-1)?.[0]).toEqual(
+      expect.objectContaining({ view: 'daily-min-max', aggregation: 'daily' }),
+    );
   });
 
   it('renders All plus display-safe source buttons for a merged Soil card', () => {

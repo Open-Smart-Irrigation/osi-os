@@ -1,6 +1,12 @@
-import React, { useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { HistoryCardVisualization } from '../HistoryCardVisualization';
-import { desktopRailCardLabel } from '../../../history/desktopHistory';
+import {
+  commonDesktopCompareViews,
+  defaultDesktopCompareView,
+  desktopAggregationForView,
+  desktopRailCardLabel,
+} from '../../../history/desktopHistory';
 import { useHistoryCardData } from '../../../history/useHistoryCardData';
 import type { HistoryCardDataScope } from '../../../history/useHistoryCardData';
 import type { HistoryViewport } from '../../../history/historyViewport';
@@ -15,19 +21,24 @@ const MAX_COMPARE_PANELS = 4;
 interface ComparePanelProps {
   card: HistoryCardSummary;
   scope: HistoryCardDataScope;
+  selectedView: HistoryViewMode;
   viewport: HistoryViewport;
   rangeRequest: HistoryRangeSelection;
 }
 
-const ComparePanel: React.FC<ComparePanelProps> = ({ card, scope, viewport, rangeRequest }) => {
-  const defaultView = (card.defaultView ?? 'line-chart') as HistoryViewMode;
-
+const ComparePanel: React.FC<ComparePanelProps> = ({
+  card,
+  scope,
+  selectedView,
+  viewport,
+  rangeRequest,
+}) => {
   const cardData = useHistoryCardData({
     scope,
     cardId: card.cardId,
-    view: defaultView,
+    view: selectedView,
     range: rangeRequest,
-    aggregation: 'raw',
+    aggregation: desktopAggregationForView(selectedView),
     overlays: [],
     enabled: Boolean(card.availability.available),
   });
@@ -46,7 +57,7 @@ const ComparePanel: React.FC<ComparePanelProps> = ({ card, scope, viewport, rang
         <HistoryCardVisualization
           card={card}
           data={cardData.data}
-          selectedView={defaultView}
+          selectedView={selectedView}
           isLoading={cardData.isLoading}
           error={cardData.error}
           window={viewport}
@@ -73,15 +84,20 @@ function defaultSelectedIds(cards: HistoryCardSummary[]): string[] {
     .map((c) => c.cardId);
 }
 
+type HistoryTranslate = (key: string, options?: Record<string, unknown>) => string;
+
 export const HistoryCompareGrid: React.FC<HistoryCompareGridProps> = ({
   cards,
   scope,
   viewport,
   rangeRequest,
 }) => {
+  const { t: translate } = useTranslation('history');
+  const t = translate as HistoryTranslate;
   const [selectedCardIds, setSelectedCardIds] = useState<string[]>(() =>
     defaultSelectedIds(cards),
   );
+  const [selectedCompareView, setSelectedCompareView] = useState<HistoryViewMode | null>(null);
 
   function handleToggle(cardId: string) {
     setSelectedCardIds((prev) => {
@@ -98,12 +114,55 @@ export const HistoryCompareGrid: React.FC<HistoryCompareGridProps> = ({
   }
 
   const atMax = selectedCardIds.length >= MAX_COMPARE_PANELS;
-  const selectedCards = cards.filter((c) => selectedCardIds.includes(c.cardId));
+  const selectedCards = useMemo(
+    () => cards.filter((c) => selectedCardIds.includes(c.cardId)),
+    [cards, selectedCardIds],
+  );
+  const compareViewOptions = useMemo(
+    () => commonDesktopCompareViews(selectedCards),
+    [selectedCards],
+  );
+  const resolvedCompareView = useMemo(() => {
+    const allowedViews = compareViewOptions.map((entry) => entry.view);
+    if (selectedCompareView && allowedViews.includes(selectedCompareView)) {
+      return selectedCompareView;
+    }
+    return defaultDesktopCompareView(selectedCards);
+  }, [compareViewOptions, selectedCards, selectedCompareView]);
+
+  useEffect(() => {
+    if (selectedCompareView !== resolvedCompareView) {
+      setSelectedCompareView(resolvedCompareView);
+    }
+  }, [resolvedCompareView, selectedCompareView]);
 
   return (
     <div className="flex h-full min-h-0 flex-col overflow-hidden">
       {/* Checklist header */}
       <div className="shrink-0 overflow-x-auto border-b border-[var(--border)] bg-[var(--surface)] px-4 py-2">
+        {compareViewOptions.length > 0 && resolvedCompareView ? (
+          <div
+            role="group"
+            aria-label={t('history.desktop.compareViewSelectorLabel', { defaultValue: 'Compare view' })}
+            className="mb-2 flex w-fit overflow-hidden rounded border border-[var(--border)]"
+          >
+            {compareViewOptions.map(({ view, labelKey }) => (
+              <button
+                key={view}
+                type="button"
+                aria-pressed={resolvedCompareView === view}
+                onClick={() => setSelectedCompareView(view)}
+                className={`px-2 py-1 text-xs font-semibold transition-colors ${
+                  resolvedCompareView === view
+                    ? 'bg-[var(--primary)] text-white'
+                    : 'bg-[var(--secondary-bg)] text-[var(--text)] hover:bg-[var(--border)]'
+                }`}
+              >
+                {t(labelKey)}
+              </button>
+            ))}
+          </div>
+        ) : null}
         <fieldset className="border-none p-0">
           <legend className="sr-only">Select up to {MAX_COMPARE_PANELS} cards to compare</legend>
           <div className="flex flex-wrap gap-x-4 gap-y-1">
@@ -145,6 +204,7 @@ export const HistoryCompareGrid: React.FC<HistoryCompareGridProps> = ({
             key={card.cardId}
             card={card}
             scope={scope}
+            selectedView={resolvedCompareView ?? ((card.defaultView ?? 'line-chart') as HistoryViewMode)}
             viewport={viewport}
             rangeRequest={rangeRequest}
           />

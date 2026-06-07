@@ -1,6 +1,6 @@
 import { historyCardDefinitionsByType } from './cardDefinitions';
 import type { ViewportBounds } from './historyViewport';
-import type { HistoryCardSummary, HistoryViewMode } from './types';
+import type { HistoryAggregationLevel, HistoryCardSummary, HistoryViewMode } from './types';
 
 export interface DesktopSourceOption {
   key: string | null;
@@ -95,6 +95,31 @@ export function selectableDesktopViews(card: HistoryCardSummary): DesktopViewOpt
 export function defaultDesktopView(card: HistoryCardSummary): HistoryViewMode {
   const views = selectableDesktopViews(card).map((entry) => entry.view);
   return views.includes(card.defaultView) ? card.defaultView : views[0] ?? card.defaultView;
+}
+
+const COMPARE_EXCLUDED_VIEWS = new Set<HistoryViewMode>(['advanced']);
+
+export function commonDesktopCompareViews(cards: readonly HistoryCardSummary[]): DesktopViewOption[] {
+  if (cards.length === 0) return [];
+
+  const [firstCard, ...restCards] = cards;
+  const sharedViews = restCards.map(
+    (card) => new Set(selectableDesktopViews(card).map((entry) => entry.view)),
+  );
+
+  return selectableDesktopViews(firstCard).filter(({ view }) =>
+    !COMPARE_EXCLUDED_VIEWS.has(view)
+    && sharedViews.every((views) => views.has(view)),
+  );
+}
+
+export function defaultDesktopCompareView(cards: readonly HistoryCardSummary[]): HistoryViewMode | null {
+  const views = commonDesktopCompareViews(cards).map((entry) => entry.view);
+  return views.includes('line-chart') ? 'line-chart' : views[0] ?? null;
+}
+
+export function desktopAggregationForView(view: HistoryViewMode): HistoryAggregationLevel {
+  return view === 'daily-min-max' ? 'daily' : 'raw';
 }
 
 export function desktopBoundsForData(requested: ViewportBounds, dataBounds: ViewportBounds | null): ViewportBounds {

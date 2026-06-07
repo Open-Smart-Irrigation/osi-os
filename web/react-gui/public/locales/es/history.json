@@ -24,6 +24,7 @@
       "modeFocus": "Focus",
       "modeCompare": "Compare",
       "viewSelectorLabel": "Card view",
+      "compareViewSelectorLabel": "Compare view",
       "sourceSelectorLabel": "Sources",
       "chartSurfaceLabel": "History chart, use arrow keys to pan and plus or minus to zoom",
       "zoomIn": "Zoom in",

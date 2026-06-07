@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
+  commonDesktopCompareViews,
   defaultDesktopView,
+  desktopAggregationForView,
   desktopBoundsForData,
   desktopCardHeaderTitle,
   desktopRailCardLabel,
@@ -103,6 +105,28 @@ describe('desktopHistory helpers', () => {
 
   it('falls back to the first selectable view when default view is not selectable', () => {
     expect(defaultDesktopView(card({ defaultView: 'advanced', views: ['line-chart', 'calendar'] }))).toBe('line-chart');
+  });
+
+  it('keeps only non-advanced views shared by every selected comparison card', () => {
+    const soil = card({
+      views: ['soil-profile', 'line-chart', 'calendar', 'irrigation-response', 'advanced'],
+    });
+    const environment = card({
+      cardType: 'environment',
+      defaultView: 'line-chart',
+      views: ['line-chart', 'daily-min-max', 'calendar', 'advanced'],
+    });
+
+    expect(commonDesktopCompareViews([soil, environment]).map((entry) => entry.view)).toEqual([
+      'line-chart',
+      'calendar',
+    ]);
+  });
+
+  it('uses daily aggregation for Daily Min/Max and raw aggregation for other desktop views', () => {
+    expect(desktopAggregationForView('daily-min-max')).toBe('daily');
+    expect(desktopAggregationForView('line-chart')).toBe('raw');
+    expect(desktopAggregationForView('calendar')).toBe('raw');
   });
 
   it('unions requested bounds and data bounds so the viewport remains representable', () => {

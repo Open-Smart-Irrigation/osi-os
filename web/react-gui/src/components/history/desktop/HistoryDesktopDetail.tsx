@@ -15,6 +15,7 @@ import { useHistoryCardAdvancedData } from '../../../history/useHistoryCardAdvan
 import { useHistoryCardData } from '../../../history/useHistoryCardData';
 import {
   defaultDesktopView,
+  desktopAggregationForView,
   desktopBoundsForData,
   desktopCardHeaderTitle,
   desktopRailCardLabel,
@@ -114,7 +115,7 @@ export const HistoryDesktopDetail: React.FC<HistoryDesktopDetailProps> = ({
     cardId: selectedCard.cardId,
     view: selectedView,
     range: rangeRequest,
-    aggregation: 'raw',
+    aggregation: desktopAggregationForView(selectedView),
     overlays: [],
     sourceKey: selectedSourceKey,
     enabled: Boolean(selectedCard.availability.available && !shouldRenderAdvanced),
@@ -125,7 +126,7 @@ export const HistoryDesktopDetail: React.FC<HistoryDesktopDetailProps> = ({
     cardId: selectedCard.cardId,
     view: selectedView,
     range: rangeRequest,
-    aggregation: 'raw',
+    aggregation: desktopAggregationForView(selectedView),
     overlays: [],
     sourceKey: selectedSourceKey,
     enabled: Boolean(selectedCard.availability.available && shouldRenderAdvanced),
@@ -310,27 +311,29 @@ export const HistoryDesktopDetail: React.FC<HistoryDesktopDetailProps> = ({
           </div>
           {/* Range presets + zoom — always visible so the shared viewport can be adjusted in either mode */}
           <div className="flex items-center gap-1">
-            <div
-              role="group"
-              aria-label={t('history.desktop.viewSelectorLabel', { defaultValue: 'Card view' })}
-              className="mr-2 flex overflow-hidden rounded border border-[var(--border)]"
-            >
-              {viewOptions.map(({ view, labelKey }) => (
-                <button
-                  key={view}
-                  type="button"
-                  aria-pressed={selectedView === view}
-                  onClick={() => setSelectedView(view)}
-                  className={`px-2 py-1 text-xs font-semibold transition-colors ${
-                    selectedView === view
-                      ? 'bg-[var(--primary)] text-white'
-                      : 'bg-[var(--secondary-bg)] text-[var(--text)] hover:bg-[var(--border)]'
-                  }`}
-                >
-                  {t(labelKey)}
-                </button>
-              ))}
-            </div>
+            {mode === 'focus' ? (
+              <div
+                role="group"
+                aria-label={t('history.desktop.viewSelectorLabel', { defaultValue: 'Card view' })}
+                className="mr-2 flex overflow-hidden rounded border border-[var(--border)]"
+              >
+                {viewOptions.map(({ view, labelKey }) => (
+                  <button
+                    key={view}
+                    type="button"
+                    aria-pressed={selectedView === view}
+                    onClick={() => setSelectedView(view)}
+                    className={`px-2 py-1 text-xs font-semibold transition-colors ${
+                      selectedView === view
+                        ? 'bg-[var(--primary)] text-white'
+                        : 'bg-[var(--secondary-bg)] text-[var(--text)] hover:bg-[var(--border)]'
+                    }`}
+                  >
+                    {t(labelKey)}
+                  </button>
+                ))}
+              </div>
+            ) : null}
             {PRESET_LABELS.map(({ key, label }) => (
               <button
                 key={key}

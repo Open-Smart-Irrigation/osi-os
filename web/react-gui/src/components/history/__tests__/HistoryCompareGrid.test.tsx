@@ -6,14 +6,26 @@ import { SWRConfig } from 'swr';
 
 import { HistoryCompareGrid } from '../desktop/HistoryCompareGrid';
 import type { HistoryCardSummary } from '../../../history/types';
+import { useHistoryCardData } from '../../../history/useHistoryCardData';
 import type { HistoryCardDataScope } from '../../../history/useHistoryCardData';
 import type { HistoryViewport } from '../../../history/historyViewport';
 
 // Mock translation hook
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({
-    t: (key: string, opts?: Record<string, unknown>) =>
-      opts?.defaultValue ? (opts.defaultValue as string) : key,
+    t: (key: string, opts?: Record<string, unknown>) => {
+      const labels: Record<string, string> = {
+        'history.viewMode.soil-profile': 'Soil Profile',
+        'history.viewMode.line-chart': 'Line Chart',
+        'history.viewMode.calendar': 'Calendar',
+        'history.viewMode.irrigation-response': 'Irrigation Response',
+        'history.viewMode.advanced': 'Advanced View',
+        'history.viewMode.daily-min-max': 'Daily Min/Max',
+        'history.viewMode.event-timeline': 'Event Timeline',
+      };
+      if (labels[key]) return labels[key];
+      return opts?.defaultValue ? (opts.defaultValue as string) : key;
+    },
   }),
 }));
 
@@ -46,9 +58,11 @@ vi.mock('../../../history/useHistoryCardData', async (importOriginal) => {
 vi.mock('../HistoryCardVisualization', () => ({
   HistoryCardVisualization: ({
     card,
+    selectedView,
     window: chartWindow,
   }: {
     card: HistoryCardSummary;
+    selectedView: string;
     window?: { fromMs: number; toMs: number };
   }) =>
     React.createElement(
@@ -56,10 +70,11 @@ vi.mock('../HistoryCardVisualization', () => ({
       {
         'data-testid': 'card-visualization',
         'data-card-id': card.cardId,
+        'data-selected-view': selectedView,
         'data-from-ms': chartWindow?.fromMs,
         'data-to-ms': chartWindow?.toMs,
       },
-      `Visualization: ${card.cardId}`,
+      `Visualization: ${card.cardId}:${selectedView}`,
     ),
 }));
 
@@ -223,6 +238,115 @@ describe('HistoryCompareGrid', () => {
     expect(panels).toHaveLength(1);
     // Only card 1's visualization should remain
     expect(screen.queryByText('Visualization: card-0')).not.toBeInTheDocument();
-    expect(screen.getByText('Visualization: card-1')).toBeInTheDocument();
+    expect(screen.getByText('Visualization: card-1:line-chart')).toBeInTheDocument();
+  });
+
+  it('shows only shared non-advanced views for selected comparison cards', () => {
+    const soil = makeCard({
+      cardId: 'soil',
+      title: 'Soil Moisture',
+      views: ['soil-profile', 'line-chart', 'calendar', 'irrigation-response', 'advanced'],
+    });
+    const environment = makeCard({
+      cardId: 'environment',
+      cardType: 'environment',
+      title: 'Environment',
+      defaultView: 'line-chart',
+      views: ['line-chart', 'daily-min-max', 'calendar', 'advanced'],
+    });
+
+    renderGrid([soil, environment]);
+
+    expect(screen.getByRole('button', { name: 'Line Chart' })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByRole('button', { name: 'Calendar' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Soil Profile' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Daily Min/Max' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Advanced View' })).not.toBeInTheDocument();
+  });
+
+  it('changes the selected comparison view for every selected panel', () => {
+    const soil = makeCard({
+      cardId: 'soil',
+      title: 'Soil Moisture',
+      views: ['soil-profile', 'line-chart', 'calendar', 'irrigation-response', 'advanced'],
+    });
+    const environment = makeCard({
+      cardId: 'environment',
+      cardType: 'environment',
+      title: 'Environment',
+      defaultView: 'line-chart',
+      views: ['line-chart', 'daily-min-max', 'calendar', 'advanced'],
+    });
+    renderGrid([soil, environment]);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Calendar' }));
+
+    for (const visualization of screen.getAllByTestId('card-visualization')) {
+      expect(visualization).toHaveAttribute('data-selected-view', 'calendar');
+    }
+    expect(vi.mocked(useHistoryCardData).mock.calls.slice(-2).map((call) => call[0].view)).toEqual([
+      'calendar',
+      'calendar',
+    ]);
+  });
+
+  it('requests daily aggregation when a shared Daily Min/Max comparison view is selected', () => {
+    const first = makeCard({
+      cardId: 'env-1',
+      cardType: 'environment',
+      title: 'Environment 1',
+      defaultView: 'line-chart',
+      views: ['line-chart', 'daily-min-max', 'calendar', 'advanced'],
+    });
+    const second = makeCard({
+      cardId: 'env-2',
+      cardType: 'environment',
+      title: 'Environment 2',
+      defaultView: 'line-chart',
+      views: ['line-chart', 'daily-min-max', 'calendar', 'advanced'],
+    });
+    renderGrid([first, second]);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Daily Min/Max' }));
+
+    for (const visualization of screen.getAllByTestId('card-visualization')) {
+      expect(visualization).toHaveAttribute('data-selected-view', 'daily-min-max');
+    }
+    expect(vi.mocked(useHistoryCardData).mock.calls.slice(-2).map((call) => call[0].aggregation)).toEqual([
+      'daily',
+      'daily',
+    ]);
+  });
+
+  it('resets the shared comparison view when a newly selected card does not support it', () => {
+    const soil = makeCard({
+      cardId: 'soil',
+      title: 'Soil Moisture',
+      views: ['soil-profile', 'line-chart', 'calendar', 'irrigation-response', 'advanced'],
+    });
+    const environment = makeCard({
+      cardId: 'environment',
+      cardType: 'environment',
+      title: 'Environment',
+      defaultView: 'line-chart',
+      views: ['line-chart', 'daily-min-max', 'calendar', 'advanced'],
+    });
+    const irrigation = makeCard({
+      cardId: 'irrigation',
+      cardType: 'irrigation',
+      title: 'Irrigation',
+      defaultView: 'event-timeline',
+      views: ['event-timeline', 'calendar', 'advanced'],
+    });
+    renderGrid([soil, environment, irrigation]);
+
+    expect(screen.getByRole('button', { name: 'Line Chart' })).toHaveAttribute('aria-pressed', 'true');
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Irrigation' }));
+
+    expect(screen.queryByRole('button', { name: 'Line Chart' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Calendar' })).toHaveAttribute('aria-pressed', 'true');
+    for (const visualization of screen.getAllByTestId('card-visualization')) {
+      expect(visualization).toHaveAttribute('data-selected-view', 'calendar');
+    }
   });
 });
