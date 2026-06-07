@@ -169,6 +169,17 @@ describe('HistoryCompareGrid', () => {
     }
   });
 
+  it('wraps each panel visualization in a flex height container', () => {
+    const cards = makeCards(2);
+    renderGrid(cards);
+    const panels = screen.getAllByTestId('compare-panel');
+    for (const panel of panels) {
+      const wrapper = panel.querySelector('[data-testid="compare-panel-visualization"]');
+      expect(wrapper).toHaveClass('min-h-0');
+      expect(wrapper).toHaveClass('flex-1');
+    }
+  });
+
   it('disables the checkbox for unselected cards when 4 are already selected', () => {
     const cards = makeCards(5);
     renderGrid(cards);

@@ -12,6 +12,11 @@ import {
 } from '../../../history/historyViewport';
 import { useChartMouseInteractions } from '../../../history/useChartMouseInteractions';
 import { useHistoryCardData } from '../../../history/useHistoryCardData';
+import {
+  desktopBoundsForData,
+  desktopCardHeaderTitle,
+  desktopRailCardLabel,
+} from '../../../history/desktopHistory';
 import type { HistoryCardDataScope } from '../../../history/useHistoryCardData';
 import type {
   HistoryCardSummary,
@@ -42,19 +47,6 @@ const PRESET_LABELS: Array<{ key: HistoryRangeLabel; label: string }> = [
 
 function defaultSpanMsForRange(range: HistoryRangeLabel): number {
   return PRESET_SPANS_MS[range] ?? 24 * HOUR_MS;
-}
-
-function normalizedCardTitle(card: HistoryCardSummary): string {
-  const raw = card.title.trim();
-  if (!raw || /^[A-Fa-f0-9]{16}$/.test(raw)) return card.cardType;
-  return raw;
-}
-
-function composeDetailTitle(card: HistoryCardSummary, zoneName: string | null): string {
-  const title = normalizedCardTitle(card);
-  const zone = typeof zoneName === 'string' ? zoneName.trim() : '';
-  if (card.scope !== 'zone' || !zone || title.toLocaleLowerCase().includes(zone.toLocaleLowerCase())) return title;
-  return `${title} ${zone}`;
 }
 
 export interface HistoryDesktopDetailProps {
@@ -132,7 +124,7 @@ export const HistoryDesktopDetail: React.FC<HistoryDesktopDetailProps> = ({
     return null;
   }, [cardData.data]);
 
-  const effectiveBounds = derivedBounds ?? bounds;
+  const effectiveBounds = desktopBoundsForData(bounds, derivedBounds);
 
   // Chart window passed to visualization (matches HistoryVisualWindow shape)
   const chartWindow: HistoryVisualWindow = viewport;
@@ -201,7 +193,7 @@ export const HistoryDesktopDetail: React.FC<HistoryDesktopDetailProps> = ({
     [viewport, effectiveBounds, handleReset],
   );
 
-  const headerTitle = composeDetailTitle(selectedCard, zoneName);
+  const headerTitle = desktopCardHeaderTitle(selectedCard, zoneName);
 
   return (
     <div className="flex h-full min-h-0 flex-row overflow-hidden">
@@ -212,7 +204,7 @@ export const HistoryDesktopDetail: React.FC<HistoryDesktopDetailProps> = ({
       >
         <ul className="flex flex-col gap-0.5 p-2">
           {cards.map((card) => {
-            const cardTitle = normalizedCardTitle(card);
+            const cardTitle = desktopRailCardLabel(card);
             const isSelected = card.cardId === selectedCard.cardId;
             return (
               <li key={card.cardId}>
@@ -322,17 +314,19 @@ export const HistoryDesktopDetail: React.FC<HistoryDesktopDetailProps> = ({
               tabIndex={0}
               aria-label={t('history.desktop.chartSurfaceLabel', { defaultValue: 'History chart, use arrow keys to pan and plus or minus to zoom' })}
               onKeyDown={handleKeyDown}
-              className="relative min-h-0 flex-1 cursor-crosshair overflow-hidden bg-[var(--bg)] outline-none focus:ring-2 focus:ring-[var(--primary)]"
+              className="relative flex min-h-0 flex-1 flex-col cursor-crosshair overflow-hidden bg-[var(--bg)] outline-none focus:ring-2 focus:ring-[var(--primary)]"
               style={{ userSelect: 'none' }}
             >
-              <HistoryCardVisualization
-                card={selectedCard}
-                data={cardData.data}
-                selectedView={selectedView}
-                isLoading={cardData.isLoading}
-                error={cardData.error}
-                window={chartWindow}
-              />
+              <div className="min-h-0 flex-1">
+                <HistoryCardVisualization
+                  card={selectedCard}
+                  data={cardData.data}
+                  selectedView={selectedView}
+                  isLoading={cardData.isLoading}
+                  error={cardData.error}
+                  window={chartWindow}
+                />
+              </div>
             </div>
 
             {/* Overview strip */}

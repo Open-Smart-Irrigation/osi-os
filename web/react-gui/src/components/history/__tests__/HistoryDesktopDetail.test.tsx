@@ -196,6 +196,16 @@ describe('HistoryDesktopDetail', () => {
     expect(surface).toContainElement(screen.getByTestId('card-visualization'));
   });
 
+  it('provides a flex height contract for Recharts visualizations', () => {
+    const card = makeCard();
+    renderDesktopDetail([card], card);
+    const surface = screen.getByTestId('desktop-chart-surface');
+    expect(surface).toHaveClass('flex');
+    expect(surface).toHaveClass('flex-col');
+    expect(surface.firstElementChild).toHaveClass('min-h-0');
+    expect(surface.firstElementChild).toHaveClass('flex-1');
+  });
+
   it('clicking zoom-in (+) narrows the overview-window width', () => {
     const card = makeCard();
     renderDesktopDetail([card], card);

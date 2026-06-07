@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { HistoryCardVisualization } from '../HistoryCardVisualization';
+import { desktopRailCardLabel } from '../../../history/desktopHistory';
 import { useHistoryCardData } from '../../../history/useHistoryCardData';
 import type { HistoryCardDataScope } from '../../../history/useHistoryCardData';
 import type { HistoryViewport } from '../../../history/historyViewport';
@@ -38,10 +39,10 @@ const ComparePanel: React.FC<ComparePanelProps> = ({ card, scope, viewport, rang
     >
       {/* Panel header */}
       <div className="shrink-0 border-b border-[var(--border)] bg-[var(--surface)] px-3 py-1.5">
-        <span className="text-sm font-medium text-[var(--text)]">{card.title || card.cardType}</span>
+        <span className="text-sm font-medium text-[var(--text)]">{desktopRailCardLabel(card)}</span>
       </div>
       {/* Visualization */}
-      <div className="min-h-0 flex-1">
+      <div data-testid="compare-panel-visualization" className="min-h-0 flex-1">
         <HistoryCardVisualization
           card={card}
           data={cardData.data}
@@ -110,7 +111,7 @@ export const HistoryCompareGrid: React.FC<HistoryCompareGridProps> = ({
               const isChecked = selectedCardIds.includes(card.cardId);
               // Disable the checkbox when the cap is reached and this card is NOT selected
               const isDisabled = atMax && !isChecked;
-              const label = card.title || card.cardType;
+              const label = desktopRailCardLabel(card);
               const checkboxId = `compare-check-${card.cardId}`;
               return (
                 <label

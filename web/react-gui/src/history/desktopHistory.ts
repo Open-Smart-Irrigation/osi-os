@@ -36,6 +36,7 @@ function sourceCount(card: HistoryCardSummary): number {
 }
 
 function singleSourceLabel(card: HistoryCardSummary): string | null {
+  if (card.cardType !== 'dendro') return null;
   if (sourceCount(card) !== 1) return null;
   return safeHistoryLabel(card.sourceLabel ?? card.sourceLabels?.[0] ?? card.sourceDevices?.[0]?.name);
 }
