@@ -229,6 +229,7 @@ export interface HistorySeries {
   id: string;
   label: string;
   unit: string | null;
+  depthCm?: number | null;
   points: HistorySeriesPoint[];
 }
 

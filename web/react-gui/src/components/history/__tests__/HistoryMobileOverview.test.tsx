@@ -135,7 +135,7 @@ function card(overrides: Partial<HistoryCardSummary> = {}): HistoryCardSummary {
     cardId: 'soil-card:root-zone',
     cardType: 'soil',
     scope: 'zone',
-    title: 'Soil - Root Zone',
+    title: 'Soil Moisture',
     subtitle: 'Root-zone tension',
     defaultView: 'soil-profile',
     views: ['soil-profile', 'line-chart'],
@@ -255,7 +255,7 @@ describe('History mobile overview', () => {
       <HistoryOverviewCard zoneId={12} card={card()} onTogglePinned={vi.fn()} />,
     );
 
-    expect(screen.getByRole('link', { name: /Soil - Root Zone/i })).toHaveAttribute(
+    expect(screen.getByRole('link', { name: /Soil Moisture/i })).toHaveAttribute(
       'href',
       '/history/zones/12/cards/soil-card%3Aroot-zone',
     );
@@ -263,7 +263,7 @@ describe('History mobile overview', () => {
     expect(screen.getByText('Coverage unknown')).toBeInTheDocument();
     expect(screen.getByText('Local')).toBeInTheDocument();
     expect(screen.getByText('Attention')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Pin Soil - Root Zone card' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Pin Soil Moisture card' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /Line Chart/i })).not.toBeInTheDocument();
     expect(screen.queryByText(/[A-F0-9]{16}/)).not.toBeInTheDocument();
   });
@@ -282,7 +282,7 @@ describe('History mobile overview', () => {
       />,
     );
 
-    expect(screen.getByRole('link', { name: /Soil - Root Zone/i })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: /Soil Moisture/i })).toBeInTheDocument();
     expect(screen.queryByText('A84041A75D5E7CFB')).not.toBeInTheDocument();
   });
 
@@ -323,7 +323,7 @@ describe('History mobile overview', () => {
       <HistoryOverviewCard zoneId={12} card={card()} onTogglePinned={onTogglePinned} />,
     );
 
-    fireEvent.click(screen.getByRole('button', { name: 'Pin Soil - Root Zone card' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Pin Soil Moisture card' }));
 
     expect(onTogglePinned).toHaveBeenCalledWith('soil-card:root-zone', true);
   });
@@ -332,7 +332,7 @@ describe('History mobile overview', () => {
     renderHistoryAtMobileWidth('/history');
 
     await screen.findByRole('heading', { name: 'History' });
-    expect(await screen.findByRole('link', { name: /Soil - Root Zone/i })).toHaveAttribute(
+    expect(await screen.findByRole('link', { name: /Soil Moisture/i })).toHaveAttribute(
       'href',
       '/history/zones/1/cards/soil-card%3Aroot-zone',
     );
@@ -344,7 +344,7 @@ describe('History mobile overview', () => {
   it('does not mark the first card opened when mobile overview renders', async () => {
     renderHistoryAtMobileWidth('/history');
 
-    await screen.findByRole('link', { name: /Soil - Root Zone/i });
+    await screen.findByRole('link', { name: /Soil Moisture/i });
 
     expect(historyAPI.markZoneCardOpened).not.toHaveBeenCalled();
   });
@@ -375,7 +375,7 @@ describe('History mobile overview', () => {
   it('toggles pinned card preference through the existing history API path', async () => {
     renderHistoryAtMobileWidth('/history');
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Pin Soil - Root Zone card' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Pin Soil Moisture card' }));
 
     await waitFor(() => {
       expect(historyAPI.setZoneCardPreference).toHaveBeenCalledWith(
@@ -390,7 +390,7 @@ describe('History mobile overview', () => {
     renderHistoryAtMobileWidth('/history');
 
     const shell = await screen.findByTestId('history-mobile-shell');
-    await screen.findByRole('link', { name: /Soil - Root Zone/i });
+    await screen.findByRole('link', { name: /Soil Moisture/i });
     vi.mocked(historyAPI.getZoneCards).mockClear();
 
     fireEvent.pointerDown(shell, {

@@ -3,7 +3,7 @@ import React from 'react';
 import { render, screen, within } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 
-import { buildNumericRows, SoilLineChartView } from '../visualizations/SoilLineChartView';
+import { buildNumericRows, SoilLineChartView, soilSeriesDisplayLabel } from '../visualizations/SoilLineChartView';
 import type { HistoryCardDataResponse } from '../../../history/types';
 
 class ResizeObserverStub {
@@ -25,6 +25,7 @@ const { translateForTest } = vi.hoisted(() => {
     'history.soilLineChart.series.soil2': 'Soil 2',
     'history.soilLineChart.series.soil3': 'Soil 3',
     'history.soilLineChart.series.soil': 'Soil',
+    'history.soilLineChart.series.sensor': 'Sensor {{index}}',
   };
 
   return {
@@ -97,6 +98,12 @@ describe('SoilLineChartView', () => {
     ]);
 
     expect(rows[0].tMs).toBe(Date.parse('2026-06-01T00:00:00Z'));
+  });
+
+  it('prefers soil depth labels and disambiguates duplicate depths', () => {
+    expect(soilSeriesDisplayLabel(translateForTest, { id: 'swt_1', label: 'SWT 1', depthCm: 5 }, 0)).toBe('5 cm');
+    expect(soilSeriesDisplayLabel(translateForTest, { id: 'swt_2', label: 'SWT 2', depthCm: 5 }, 1, true)).toBe('5 cm - Sensor 2');
+    expect(soilSeriesDisplayLabel(translateForTest, { id: 'swt_3', label: 'SWT 3' }, 2)).toBe('Sensor 3');
   });
 
   it('renders soil tension chart without label chrome or source identifiers', () => {

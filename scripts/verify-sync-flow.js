@@ -2832,6 +2832,10 @@ expectIncludesById('history-api-router-fn', 'ORDER BY dd.recorded_at DESC, dd.id
 expectIncludesById('history-api-router-fn', 'ORDER BY cr.recorded_at DESC, cr.id DESC LIMIT 1', 'uses deterministic time-first latest Chameleon row lookup');
 expectExcludesById('history-api-router-fn', 'MAX(id) AS max_id FROM device_data', 'latest device row MAX(id) lookup');
 expectExcludesById('history-api-router-fn', 'MAX(id) AS max_id FROM chameleon_readings', 'latest Chameleon row MAX(id) lookup');
+expectIncludesById('history-api-router-fn', "title: 'Soil Moisture'", 'uses the farmer-facing Soil Moisture card title');
+expectExcludesById('history-api-router-fn', "title: 'Soil - Root Zone'", 'old Soil - Root Zone card title');
+expectIncludesById('history-api-router-fn', 'function soilChannelDepths(', 'centralizes soil channel depth lookup for history views');
+expectIncludesById('history-api-router-fn', 'seriesWithDepth({ id: channel.id', 'adds depth metadata to soil line series');
 
 const dendroHelperPath = dendroHelperCandidates.find((candidate) => fs.existsSync(candidate));
 if (!dendroHelperPath) {

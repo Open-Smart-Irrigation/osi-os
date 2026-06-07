@@ -20,6 +20,18 @@ interface HistoryDetailHeaderProps {
 
 type HistoryTranslate = (key: string, options?: Record<string, unknown>) => string;
 
+function normalizedText(value: string | null | undefined): string | null {
+  const trimmed = typeof value === 'string' ? value.trim() : '';
+  return trimmed ? trimmed : null;
+}
+
+function detailTitle(card: HistoryCardSummary, zoneName: string | null): string {
+  const title = normalizedText(card.title) ?? card.cardType;
+  const zone = normalizedText(zoneName);
+  if (card.scope !== 'zone' || !zone || title.toLocaleLowerCase().includes(zone.toLocaleLowerCase())) return title;
+  return `${title} ${zone}`;
+}
+
 export const HistoryDetailHeader: React.FC<HistoryDetailHeaderProps> = ({
   zoneName,
   card,
@@ -36,16 +48,18 @@ export const HistoryDetailHeader: React.FC<HistoryDetailHeaderProps> = ({
 }) => {
   const { t: translate } = useTranslation('history');
   const t = translate as HistoryTranslate;
+  const title = detailTitle(card, zoneName);
+  const eyebrow = t(`history.cardType.${card.cardType}`);
 
   return (
     <header className={`sticky top-0 z-10 border-b border-[var(--border)] bg-[var(--surface)] shadow-sm ${compact ? 'px-3 py-1' : 'px-4 py-3'}`}>
       <div className={`flex items-center ${compact ? 'gap-2' : 'gap-3'}`}>
         <div className="min-w-0 flex-1">
           <p className={`truncate font-semibold uppercase tracking-wide text-[var(--text-tertiary)] ${compact ? 'text-[0.62rem] leading-tight' : 'text-xs'}`}>
-            {zoneName ?? t(`history.cardType.${card.cardType}`)}
+            {eyebrow}
           </p>
           <h1 className={`truncate font-bold text-[var(--text)] ${compact ? 'text-base leading-tight' : 'text-xl'}`}>
-            {card.title}
+            {title}
           </h1>
         </div>
         {onSourceKeysChange && (

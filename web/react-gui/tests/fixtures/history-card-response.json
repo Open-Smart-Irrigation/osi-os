@@ -9,7 +9,7 @@
         "cardId": "zone-uuid:soil:root-zone",
         "cardType": "soil",
         "scope": "zone",
-        "title": "Soil - Root Zone",
+        "title": "Soil Moisture",
         "subtitle": "Root-zone tension",
         "defaultView": "soil-profile",
         "views": ["soil-profile", "line-chart", "calendar", "irrigation-response", "advanced"],

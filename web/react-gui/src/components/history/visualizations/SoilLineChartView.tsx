@@ -24,6 +24,7 @@ type RenderSeries = {
   key: string;
   label: string;
   unit: string;
+  depthCm: number | null;
   points: Array<{ t: string; value: number | null }>;
 };
 
@@ -80,19 +81,40 @@ function looksLikeRawSourceToken(value: string): boolean {
   );
 }
 
-function fallbackSeriesLabel(t: HistoryTranslate, source: string, index: number): string {
-  const normalized = source.toLowerCase();
-  if (/swt[_\s-]*1/.test(normalized)) return t('history.soilLineChart.series.soil1');
-  if (/swt[_\s-]*2/.test(normalized)) return t('history.soilLineChart.series.soil2');
-  if (/swt[_\s-]*3/.test(normalized)) return t('history.soilLineChart.series.soil3');
-  return t('history.soilLineChart.series.soil', { index: index + 1, defaultValue: `Soil ${index + 1}` });
+function formatDepthLabel(depthCm: number): string {
+  return `${Number.isInteger(depthCm) ? String(depthCm) : depthCm.toFixed(1)} cm`;
 }
 
-function displaySeriesLabel(t: HistoryTranslate, series: unknown, index: number): string {
-  const id = normalizedText(isRecord(series) ? series.id : null) ?? '';
+function seriesDepthCm(series: unknown): number | null {
+  if (!isRecord(series)) return null;
+  return finiteNumber(series.depthCm) ?? finiteNumber(series.depth_cm);
+}
+
+function depthKey(depthCm: number | null): string | null {
+  return depthCm === null ? null : String(depthCm);
+}
+
+function fallbackSeriesLabel(t: HistoryTranslate, index: number): string {
+  return t('history.soilLineChart.series.sensor', { index: index + 1, defaultValue: `Sensor ${index + 1}` });
+}
+
+export function soilSeriesDisplayLabel(
+  t: HistoryTranslate,
+  series: unknown,
+  index: number,
+  duplicateDepth = false,
+): string {
+  const depthCm = seriesDepthCm(series);
+  if (depthCm !== null) {
+    const depthLabel = formatDepthLabel(depthCm);
+    return duplicateDepth
+      ? `${depthLabel} - ${fallbackSeriesLabel(t, index)}`
+      : depthLabel;
+  }
+
   const label = normalizedText(isRecord(series) ? series.label : null);
   if (label && !looksLikeRawSourceToken(label)) return label;
-  return fallbackSeriesLabel(t, `${id} ${label ?? ''}`, index);
+  return fallbackSeriesLabel(t, index);
 }
 
 function displayUnit(series: unknown): string {
@@ -101,8 +123,16 @@ function displayUnit(series: unknown): string {
 }
 
 function normalizeSeriesList(t: HistoryTranslate, seriesList: readonly unknown[]): RenderSeries[] {
+  const depthCounts = new Map<string, number>();
+  seriesList.forEach((series) => {
+    const key = depthKey(seriesDepthCm(series));
+    if (key) depthCounts.set(key, (depthCounts.get(key) ?? 0) + 1);
+  });
+
   return seriesList.map((series, index) => {
     const rawPoints = isRecord(series) ? series.points : null;
+    const seriesDepth = seriesDepthCm(series);
+    const duplicateDepth = (depthCounts.get(depthKey(seriesDepth) ?? '') ?? 0) > 1;
     const points = Array.isArray(rawPoints)
       ? rawPoints.reduce<Array<{ t: string; value: number | null }>>((accumulator, point) => {
           const timestamp = validTimestamp(isRecord(point) ? point.t : null);
@@ -113,8 +143,9 @@ function normalizeSeriesList(t: HistoryTranslate, seriesList: readonly unknown[]
       : [];
     return {
       key: `series-${index}`,
-      label: displaySeriesLabel(t, series, index),
+      label: soilSeriesDisplayLabel(t, series, index, duplicateDepth),
       unit: displayUnit(series),
+      depthCm: seriesDepth,
       points,
     };
   });

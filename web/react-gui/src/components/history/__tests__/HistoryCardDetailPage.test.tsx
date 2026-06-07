@@ -272,7 +272,7 @@ function zoneCard(overrides: Partial<HistoryCardSummary> = {}): HistoryCardSumma
     cardId: 'soil-card:root-zone',
     cardType: 'soil',
     scope: 'zone',
-    title: 'Soil - Root Zone',
+    title: 'Soil Moisture',
     subtitle: 'North Block',
     defaultView: 'soil-profile',
     views: ['soil-profile'],
@@ -490,7 +490,7 @@ describe('History card detail route', () => {
   it('loads the route-backed full-screen detail by zone and encoded card id', async () => {
     renderAppAtRoute('/history/zones/12/cards/soil-card%3Aroot-zone');
 
-    expect(await screen.findByRole('heading', { level: 1, name: 'Soil - Root Zone' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { level: 1, name: 'Soil Moisture North Block' })).toBeInTheDocument();
     expect(screen.queryByRole('link', { name: /Back to history/i })).not.toBeInTheDocument();
     expect(screen.queryByText('Chameleon 1')).not.toBeInTheDocument();
     expect(screen.queryByText('ABCDEF0123456789')).not.toBeInTheDocument();
@@ -502,7 +502,7 @@ describe('History card detail route', () => {
   it('resolves a zone route without card id to the first ordered card', async () => {
     renderAppAtRoute('/history/zones/12');
 
-    expect(await screen.findByRole('heading', { level: 1, name: 'Soil - Root Zone' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { level: 1, name: 'Soil Moisture North Block' })).toBeInTheDocument();
     await waitFor(() => {
       expect(historyAPI.markZoneCardOpened).toHaveBeenCalledWith(12, 'soil-card:root-zone');
     });
@@ -588,7 +588,7 @@ describe('History card detail route', () => {
 
     renderAppAtRoute('/history/zones/12/cards/soil-card%3Aroot-zone');
 
-    expect(await screen.findByRole('heading', { level: 1, name: 'Soil - Root Zone' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { level: 1, name: 'Soil Moisture North Block' })).toBeInTheDocument();
     expect(screen.queryByRole('link', { name: /back to history/i })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /back to history/i })).not.toBeInTheDocument();
     expect(screen.queryByText(/back to history/i)).not.toBeInTheDocument();
@@ -610,7 +610,7 @@ describe('History card detail route', () => {
 
     renderAppAtRoute('/history/zones/12/cards/soil-card%3Aroot-zone');
 
-    await screen.findByRole('heading', { level: 1, name: 'Soil - Root Zone' });
+    await screen.findByRole('heading', { level: 1, name: 'Soil Moisture North Block' });
     expect(screen.queryByRole('group', { name: 'Date range' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '12h' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '24h' })).not.toBeInTheDocument();
@@ -641,7 +641,7 @@ describe('History card detail route', () => {
 
     renderAppAtRoute('/history/zones/12/cards/soil-card%3Aroot-zone');
 
-    await screen.findByRole('heading', { level: 1, name: 'Soil - Root Zone' });
+    await screen.findByRole('heading', { level: 1, name: 'Soil Moisture North Block' });
     expect(screen.queryByRole('group', { name: 'View' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Line Chart' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Advanced View' })).not.toBeInTheDocument();
@@ -669,7 +669,7 @@ describe('History card detail route', () => {
 
     renderAppAtRoute('/history/zones/12/cards/soil-card%3Aroot-zone');
 
-    await screen.findByRole('heading', { level: 1, name: 'Soil - Root Zone' });
+    await screen.findByRole('heading', { level: 1, name: 'Soil Moisture North Block' });
     expect(screen.getByRole('banner').className).toMatch(/py-1/);
   });
 
@@ -687,7 +687,7 @@ describe('History card detail route', () => {
 
     renderAppAtRoute('/history/zones/12/cards/soil-card%3Aroot-zone');
 
-    expect(await screen.findByRole('heading', { level: 1, name: 'Soil - Root Zone' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { level: 1, name: 'Soil Moisture North Block' })).toBeInTheDocument();
     expect(screen.getAllByRole('heading', { level: 1 })).toHaveLength(1);
     expect(screen.queryByRole('group', { name: 'View' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Advanced View' })).not.toBeInTheDocument();
@@ -720,7 +720,7 @@ describe('History card detail route', () => {
 
     renderAppAtRoute('/history/zones/12/cards/soil-card%3Aroot-zone');
 
-    await screen.findByRole('heading', { level: 1, name: 'Soil - Root Zone' });
+    await screen.findByRole('heading', { level: 1, name: 'Soil Moisture North Block' });
     fireEvent.click(screen.getByRole('button', { name: 'Open card settings' }));
     const menu = screen.getByRole('menu', { name: 'Card settings' });
 
@@ -761,7 +761,7 @@ describe('History card detail route', () => {
 
     renderAppAtRoute('/history/zones/12/cards/soil-card%3Aroot-zone');
 
-    await screen.findByRole('heading', { level: 1, name: 'Soil - Root Zone' });
+    await screen.findByRole('heading', { level: 1, name: 'Soil Moisture North Block' });
     expect(screen.queryByRole('group', { name: 'Source' })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: /Sources/i }));
     const chameleonOne = screen.getByLabelText('Chameleon 1');
@@ -804,7 +804,7 @@ describe('History card detail route', () => {
 
     renderAppAtRoute('/history/zones/12/cards/soil-card%3Aroot-zone');
 
-    await screen.findByRole('heading', { name: 'Soil - Root Zone' });
+    await screen.findByRole('heading', { name: 'Soil Moisture North Block' });
     expect(screen.queryByText('A84041A75D5E7CFB')).not.toBeInTheDocument();
     // The raw DevEUI must not leak into the single-device overlay either.
     expect(screen.queryByTestId('single-device-label')).not.toBeInTheDocument();
@@ -825,7 +825,7 @@ describe('History card detail route', () => {
 
     renderAppAtRoute('/history/zones/12/cards/soil-card%3Aroot-zone');
 
-    await screen.findByRole('heading', { name: 'Soil - Root Zone' });
+    await screen.findByRole('heading', { name: 'Soil Moisture North Block' });
     expect(screen.getByTestId('single-device-label')).toHaveTextContent('Dendro 3');
   });
 
@@ -845,7 +845,7 @@ describe('History card detail route', () => {
 
     renderAppAtRoute('/history/zones/12/cards/soil-card%3Aroot-zone');
 
-    await screen.findByRole('heading', { level: 1, name: 'Soil - Root Zone' });
+    await screen.findByRole('heading', { level: 1, name: 'Soil Moisture North Block' });
 
     await waitFor(() => {
       expect(firstZoneCardDataRequest()).toEqual(
@@ -863,7 +863,7 @@ describe('History card detail route', () => {
   it('renders the selected visualization inside the gesture surface without the desktop timeline brush', async () => {
     renderAppAtRoute('/history/zones/12/cards/soil-card%3Aroot-zone');
 
-    expect(await screen.findByRole('heading', { level: 1, name: 'Soil - Root Zone' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { level: 1, name: 'Soil Moisture North Block' })).toBeInTheDocument();
     const surface = screen.getByTestId('history-visualization-surface');
 
     expect(surface).toHaveTextContent('No soil profile data');
@@ -1159,7 +1159,7 @@ describe('History card detail route', () => {
       cards: [
         zoneCard({
           cardId: 'soil-card:root-zone',
-          title: 'Soil - Root Zone',
+          title: 'Soil Moisture',
           ordering: { pinned: false, score: 10, recentRank: 1, criticalAlert: false },
         }),
         zoneCard({
@@ -1176,14 +1176,14 @@ describe('History card detail route', () => {
 
     renderAppAtRoute('/history/zones/12/cards/soil-card%3Aroot-zone');
 
-    expect(await screen.findByRole('heading', { level: 1, name: 'Soil - Root Zone' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { level: 1, name: 'Soil Moisture North Block' })).toBeInTheDocument();
 
     const scrollRoot = screen.getByTestId('history-detail-scroll-root');
     preparePointerTarget(scrollRoot);
     pointerDrag(scrollRoot, { fromX: 280, toX: 80, fromY: 160, toY: 168 });
 
-    expect(screen.getByRole('heading', { level: 1, name: 'Soil - Root Zone' })).toBeInTheDocument();
-    expect(screen.queryByRole('heading', { level: 1, name: 'Environment - Microclimate' })).not.toBeInTheDocument();
+    expect(screen.getByRole('heading', { level: 1, name: 'Soil Moisture North Block' })).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { level: 1, name: 'Environment - Microclimate North Block' })).not.toBeInTheDocument();
     expect(window.location.hash).toContain('/history/zones/12/cards/soil-card%3Aroot-zone');
   });
 
@@ -1194,7 +1194,7 @@ describe('History card detail route', () => {
       cards: [
         zoneCard({
           cardId: 'soil-card:root-zone',
-          title: 'Soil - Root Zone',
+          title: 'Soil Moisture',
           ordering: { pinned: false, score: 10, recentRank: 1, criticalAlert: false },
         }),
         zoneCard({
@@ -1211,7 +1211,7 @@ describe('History card detail route', () => {
 
     renderAppAtRoute('/history/zones/12/cards/soil-card%3Aroot-zone');
 
-    expect(await screen.findByRole('heading', { level: 1, name: 'Soil - Root Zone' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { level: 1, name: 'Soil Moisture North Block' })).toBeInTheDocument();
 
     const surface = screen.getByTestId('history-visualization-surface');
     preparePointerTarget(surface);
@@ -1226,7 +1226,7 @@ describe('History card detail route', () => {
     dispatchTouch(surface, 'touchend', []);
 
     await waitFor(() => {
-      expect(screen.getByRole('heading', { level: 1, name: 'Environment - Microclimate' })).toBeInTheDocument();
+      expect(screen.getByRole('heading', { level: 1, name: 'Environment - Microclimate North Block' })).toBeInTheDocument();
     });
     expect(window.location.hash).toContain('/history/zones/12/cards/environment-card%3Amicroclimate');
   });
@@ -1288,7 +1288,7 @@ describe('History card detail route', () => {
       cards: [
         zoneCard({
           cardId: 'soil-card:root-zone',
-          title: 'Soil - Root Zone',
+          title: 'Soil Moisture',
           defaultView: 'soil-profile',
           views: ['soil-profile', 'line-chart', 'calendar', 'advanced'],
         }),
