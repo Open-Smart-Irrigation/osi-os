@@ -559,9 +559,21 @@ function createMockOsiDb(queryHandler) {
           .catch((error) => cb(error));
       }
 
-      run(_sql, params, callback) {
+      run(sql, params, callback) {
         const cb = typeof params === 'function' ? params : callback;
-        if (cb) cb(null);
+        const runParams = typeof params === 'function' ? undefined : params;
+        const promise = Promise.resolve()
+          .then(() => {
+            if (typeof queryHandler.run === 'function') {
+              return queryHandler.run(String(sql), runParams);
+            }
+            return null;
+          });
+        if (!cb) return promise;
+        promise
+          .then(() => cb(null))
+          .catch((error) => cb(error));
+        return undefined;
       }
 
       close(callback) {

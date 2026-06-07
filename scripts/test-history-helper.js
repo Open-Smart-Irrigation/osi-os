@@ -747,6 +747,8 @@ test('aggregates SQL-backed device_data with parameterized range queries and rol
     assert.strictEqual(raw.buckets[0].series.swt_1.sampleCount, 3);
     assert.match(db.lastQuery.sql, /deveui IN \(\?,\?\)/);
     assert.match(db.lastQuery.sql, /recorded_at BETWEEN \? AND \?/);
+    assert.match(db.lastQuery.sql, /ORDER BY deveui ASC, recorded_at ASC/);
+    assert(!/ORDER BY recorded_at ASC\b/.test(db.lastQuery.sql), 'query must not sort by recorded_at alone');
     assert(!db.lastQuery.sql.includes('AA00000000000001'), 'query must keep DevEUIs in params');
     assert.deepStrictEqual(db.lastQuery.params.slice(0, 4), ['AA00000000000001', 'AA00000000000002', iso(0), iso(60)]);
 

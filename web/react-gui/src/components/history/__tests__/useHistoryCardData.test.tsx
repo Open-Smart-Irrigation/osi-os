@@ -144,6 +144,50 @@ describe('useHistoryCardData', () => {
     });
   });
 
+  it('keeps the cache key stable when a visible window changes only within the same minute', async () => {
+    const initialRange: HistoryRangeSelection = {
+      label: 'custom',
+      from: '2026-05-30T12:00:10.000Z',
+      to: '2026-05-31T12:00:20.000Z',
+      timezone: 'UTC',
+    };
+    const sameMinuteRange: HistoryRangeSelection = {
+      label: 'custom',
+      from: '2026-05-30T12:00:45.000Z',
+      to: '2026-05-31T12:00:55.000Z',
+      timezone: 'UTC',
+    };
+    const { rerender } = renderHook(
+      ({ selectedRange }: { selectedRange: HistoryRangeSelection }) =>
+        useHistoryCardData({
+          scope: { type: 'zone', zoneId: 1 },
+          cardId: 'soil-zone-1',
+          view: 'soil-profile',
+          range: selectedRange,
+          aggregation: 'hourly',
+          overlays: [],
+          enabled: true,
+        }),
+      {
+        wrapper,
+        initialProps: { selectedRange: initialRange },
+      },
+    );
+
+    await waitFor(() => expect(historyAPI.getZoneCardData).toHaveBeenCalledTimes(1));
+
+    rerender({ selectedRange: sameMinuteRange });
+    await Promise.resolve();
+
+    expect(historyAPI.getZoneCardData).toHaveBeenCalledTimes(1);
+    expect(historyAPI.getZoneCardData).toHaveBeenLastCalledWith(1, 'soil-zone-1', {
+      view: 'soil-profile',
+      range: initialRange,
+      aggregation: 'hourly',
+      overlays: [],
+    });
+  });
+
   it('does not request card data outside an enabled scope', () => {
     renderHook(
       () =>

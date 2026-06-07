@@ -23,6 +23,13 @@ function scopeKey(scope: HistoryCardDataScope): string {
   return scope.type === 'zone' ? `zone:${scope.zoneId}` : `gateway:${scope.gatewayEui}`;
 }
 
+function canonicalIsoMinute(value: string | null | undefined): string {
+  if (!value) return '';
+  const ms = Date.parse(value);
+  if (!Number.isFinite(ms)) return value;
+  return new Date(Math.floor(ms / 60_000) * 60_000).toISOString();
+}
+
 function getHistoryCardDataKey(options: UseHistoryCardDataOptions): string | null {
   if (!options.enabled || !options.scope || !options.cardId) return null;
 
@@ -33,8 +40,8 @@ function getHistoryCardDataKey(options: UseHistoryCardDataOptions): string | nul
     options.cardId,
     options.view,
     range.label,
-    range.from ?? '',
-    range.to ?? '',
+    canonicalIsoMinute(range.from),
+    canonicalIsoMinute(range.to),
     range.timezone,
     options.aggregation,
     [...options.overlays].sort().join(','),
@@ -68,7 +75,8 @@ export function useHistoryCardData(options: UseHistoryCardDataOptions) {
       }),
     {
       keepPreviousData: true,
-      revalidateOnFocus: true,
+      revalidateOnFocus: false,
+      dedupingInterval: 1_500,
     },
   );
 

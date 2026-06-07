@@ -961,7 +961,7 @@ async function aggregateDeviceData(db, query = {}) {
   if (deveuis.length === 0) throw new Error('aggregateDeviceData requires at least one DevEUI');
   const placeholders = deveuis.map(() => '?').join(',');
   const selectedFields = Array.from(new Set(channels.map((channel) => channel.field)));
-  const sql = `SELECT deveui, recorded_at, ${selectedFields.join(', ')} FROM device_data WHERE deveui IN (${placeholders}) AND recorded_at BETWEEN ? AND ? ORDER BY recorded_at ASC`;
+  const sql = `SELECT deveui, recorded_at, ${selectedFields.join(', ')} FROM device_data WHERE deveui IN (${placeholders}) AND recorded_at BETWEEN ? AND ? ORDER BY deveui ASC, recorded_at ASC`;
   const params = deveuis.concat([start, end]);
   const rows = await dbAll(db, sql, params);
   const result = aggregateRows(rows, { ...query, aggregation, aggregationRequested: aggregationInfo.requested, channels, start, end });
