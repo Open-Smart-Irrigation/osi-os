@@ -2,6 +2,7 @@ import React, { useCallback, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { HistoryCardVisualization } from '../HistoryCardVisualization';
 import { HistoryOverviewStrip } from './HistoryOverviewStrip';
+import { HistoryCompareGrid } from './HistoryCompareGrid';
 import {
   resetViewport,
   zoomViewport,
@@ -15,9 +16,12 @@ import type { HistoryCardDataScope } from '../../../history/useHistoryCardData';
 import type {
   HistoryCardSummary,
   HistoryRangeLabel,
+  HistoryRangeSelection,
   HistoryViewMode,
 } from '../../../history/types';
 import type { HistoryVisualWindow } from '../../../history/useTimeViewport';
+
+type DesktopMode = 'focus' | 'compare';
 
 const HOUR_MS = 60 * 60 * 1000;
 const DAY_MS = 24 * HOUR_MS;
@@ -85,9 +89,10 @@ export const HistoryDesktopDetail: React.FC<HistoryDesktopDetailProps> = ({
   );
   const [activePreset, setActivePreset] = useState<HistoryRangeLabel>(defaultRange as HistoryRangeLabel);
   const [selectedView] = useState<HistoryViewMode>(defaultView);
+  const [mode, setMode] = useState<DesktopMode>('focus');
 
-  // Derive request range from viewport
-  const requestRange = useMemo(
+  // Derive request range from viewport (shared between focus and compare modes)
+  const rangeRequest: HistoryRangeSelection = useMemo(
     () => ({
       label: 'custom' as HistoryRangeLabel,
       from: new Date(bounds.minMs).toISOString(),
@@ -101,7 +106,7 @@ export const HistoryDesktopDetail: React.FC<HistoryDesktopDetailProps> = ({
     scope,
     cardId: selectedCard.cardId,
     view: selectedView,
-    range: requestRange,
+    range: rangeRequest,
     aggregation: 'raw',
     overlays: [],
     enabled: Boolean(selectedCard.availability.available),
@@ -233,8 +238,35 @@ export const HistoryDesktopDetail: React.FC<HistoryDesktopDetailProps> = ({
       <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
         {/* Header */}
         <div className="flex shrink-0 items-center justify-between border-b border-[var(--border)] bg-[var(--surface)] px-4 py-2">
-          <h2 className="text-base font-semibold text-[var(--text)]">{headerTitle}</h2>
-          {/* Range presets */}
+          <div className="flex items-center gap-3">
+            <h2 className="text-base font-semibold text-[var(--text)]">{headerTitle}</h2>
+            {/* Focus | Compare segmented control */}
+            <div
+              role="group"
+              aria-label={t('history.desktop.modeLabel', { defaultValue: 'View mode' })}
+              className="flex overflow-hidden rounded border border-[var(--border)]"
+            >
+              {(['focus', 'compare'] as const).map((m) => (
+                <button
+                  key={m}
+                  type="button"
+                  aria-pressed={mode === m}
+                  data-testid={`mode-${m}`}
+                  onClick={() => setMode(m)}
+                  className={`px-3 py-1 text-xs font-semibold capitalize transition-colors ${
+                    mode === m
+                      ? 'bg-[var(--primary)] text-white'
+                      : 'bg-[var(--secondary-bg)] text-[var(--text)] hover:bg-[var(--border)]'
+                  }`}
+                >
+                  {m === 'focus'
+                    ? t('history.desktop.modeFocus', { defaultValue: 'Focus' })
+                    : t('history.desktop.modeCompare', { defaultValue: 'Compare' })}
+                </button>
+              ))}
+            </div>
+          </div>
+          {/* Range presets + zoom — always visible so the shared viewport can be adjusted in either mode */}
           <div className="flex items-center gap-1">
             {PRESET_LABELS.map(({ key, label }) => (
               <button
@@ -281,34 +313,48 @@ export const HistoryDesktopDetail: React.FC<HistoryDesktopDetailProps> = ({
           </div>
         </div>
 
-        {/* Chart region */}
-        <div
-          ref={chartRef}
-          data-testid="desktop-chart-surface"
-          tabIndex={0}
-          aria-label={t('history.desktop.chartSurfaceLabel', { defaultValue: 'History chart, use arrow keys to pan and plus or minus to zoom' })}
-          onKeyDown={handleKeyDown}
-          className="relative min-h-0 flex-1 cursor-crosshair overflow-hidden bg-[var(--bg)] outline-none focus:ring-2 focus:ring-[var(--primary)]"
-          style={{ userSelect: 'none' }}
-        >
-          <HistoryCardVisualization
-            card={selectedCard}
-            data={cardData.data}
-            selectedView={selectedView}
-            isLoading={cardData.isLoading}
-            error={cardData.error}
-            window={chartWindow}
-          />
-        </div>
+        {mode === 'focus' ? (
+          <>
+            {/* Chart region — focus mode */}
+            <div
+              ref={chartRef}
+              data-testid="desktop-chart-surface"
+              tabIndex={0}
+              aria-label={t('history.desktop.chartSurfaceLabel', { defaultValue: 'History chart, use arrow keys to pan and plus or minus to zoom' })}
+              onKeyDown={handleKeyDown}
+              className="relative min-h-0 flex-1 cursor-crosshair overflow-hidden bg-[var(--bg)] outline-none focus:ring-2 focus:ring-[var(--primary)]"
+              style={{ userSelect: 'none' }}
+            >
+              <HistoryCardVisualization
+                card={selectedCard}
+                data={cardData.data}
+                selectedView={selectedView}
+                isLoading={cardData.isLoading}
+                error={cardData.error}
+                window={chartWindow}
+              />
+            </div>
 
-        {/* Overview strip */}
-        <div className="shrink-0 px-3 pb-2">
-          <HistoryOverviewStrip
-            bounds={effectiveBounds}
-            viewport={viewport}
-            onChange={setViewport}
-          />
-        </div>
+            {/* Overview strip */}
+            <div className="shrink-0 px-3 pb-2">
+              <HistoryOverviewStrip
+                bounds={effectiveBounds}
+                viewport={viewport}
+                onChange={setViewport}
+              />
+            </div>
+          </>
+        ) : (
+          /* Compare mode — shared viewport is passed to all panels */
+          <div className="min-h-0 flex-1 overflow-hidden">
+            <HistoryCompareGrid
+              cards={cards}
+              scope={scope}
+              viewport={viewport}
+              rangeRequest={rangeRequest}
+            />
+          </div>
+        )}
       </div>
     </div>
   );
