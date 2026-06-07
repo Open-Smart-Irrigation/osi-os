@@ -10,6 +10,7 @@ import {
 } from '../components/history/mobile/HistoryInspectorSheet';
 import { HistoryVisualizationSurface } from '../components/history/mobile/HistoryVisualizationSurface';
 import { formatWindowCaption } from '../components/history/visualizations/chartAxis';
+import { formatHistoryCalendarMonthLabel } from '../history/calendarMonth';
 import { historyCardDefinitionsByType } from '../history/cardDefinitions';
 import { useFeatureFlags } from '../history/useFeatureFlags';
 import { useHistoryCardAdvancedData } from '../history/useHistoryCardAdvancedData';
@@ -212,6 +213,17 @@ function formatViewLabel(t: HistoryTranslate, view: HistoryViewMode): string {
   return t(`history.viewMode.${view}`);
 }
 
+function detailViewModeLabel(
+  t: HistoryTranslate,
+  selectedView: HistoryViewMode,
+  visibleRangeLabel: string,
+  calendarMonthLabel: string | null,
+): string {
+  const viewLabel = formatViewLabel(t, selectedView);
+  if (selectedView === 'calendar') return calendarMonthLabel ? `${viewLabel} - ${calendarMonthLabel}` : viewLabel;
+  return `${viewLabel} - ${visibleRangeLabel}`;
+}
+
 const HistoryDetailError: React.FC<{
   title: string;
   body: string;
@@ -400,6 +412,11 @@ export const HistoryCardDetailPage: React.FC = () => {
     const days = cardData.data?.calendar?.days;
     return new Map((Array.isArray(days) ? days : []).map((day) => [day.date, day]));
   }, [cardData.data?.calendar?.days]);
+  const calendarMonthLabel = useMemo(
+    () => formatHistoryCalendarMonthLabel(cardData.data?.calendar),
+    [cardData.data?.calendar],
+  );
+  const viewModeLabel = detailViewModeLabel(t, selectedView, visibleRangeLabel, calendarMonthLabel);
 
   const handleInspectTimestamp = useCallback((selection: { timestamp: string }) => {
     setInspectorSelection({ kind: 'timestamp', timestamp: selection.timestamp });
@@ -678,8 +695,7 @@ export const HistoryCardDetailPage: React.FC = () => {
             className="pointer-events-none absolute left-1 top-1 z-10 rounded px-1.5 py-0.5 text-[10px] font-semibold text-[var(--text-tertiary)]"
             style={{ backgroundColor: 'color-mix(in srgb, var(--bg) 82%, transparent)' }}
           >
-            {formatViewLabel(t, selectedView)}
-            {selectedView !== 'calendar' && ` · ${visibleRangeLabel}`}
+            {viewModeLabel}
           </div>
           {singleDeviceName && (
             <div

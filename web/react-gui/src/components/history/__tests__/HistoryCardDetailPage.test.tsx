@@ -942,6 +942,7 @@ describe('History card detail route', () => {
 
     const may12 = await screen.findByRole('gridcell', { name: /May 12/i });
     expect(may12).toHaveAttribute('data-history-calendar-date', '2026-05-12');
+    expect(screen.getByTestId('view-mode-label')).toHaveTextContent('Calendar - May 2026');
   });
 
   it('changes the visible calendar month on inner horizontal calendar swipe', async () => {
@@ -1000,6 +1001,7 @@ describe('History card detail route', () => {
     renderAppAtRoute('/history/zones/12/cards/soil-card%3Aroot-zone');
 
     expect(await screen.findByRole('grid')).toBeInTheDocument();
+    expect(screen.getByTestId('view-mode-label')).toHaveTextContent('Calendar - June 2026');
     const surface = screen.getByTestId('history-visualization-surface');
     preparePointerTarget(surface);
     dispatchTouch(surface, 'touchstart', [{ clientX: 250, clientY: 160 }]);
@@ -1021,6 +1023,7 @@ describe('History card detail route', () => {
       );
     });
     expect(await screen.findByTestId('calendar-cell-2026-07-12')).toBeInTheDocument();
+    expect(screen.getByTestId('view-mode-label')).toHaveTextContent('Calendar - July 2026');
   });
 
   it('opens an inspector sheet on long press and returns focus to the visualization when closed', async () => {

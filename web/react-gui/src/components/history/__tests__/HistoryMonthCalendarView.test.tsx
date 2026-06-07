@@ -4,6 +4,7 @@ import React from 'react';
 import { describe, expect, it, vi } from 'vitest';
 
 import { HistoryMonthCalendarView } from '../visualizations/HistoryMonthCalendarView';
+import { formatHistoryCalendarMonthLabel } from '../../../history/calendarMonth';
 import type { HistoryCalendar } from '../../../history/types';
 
 const { translateForTest } = vi.hoisted(() => {
@@ -95,6 +96,49 @@ function dendroCalendarMay2026(): HistoryCalendar {
 }
 
 describe('HistoryMonthCalendarView', () => {
+  it('formats the active month from calendar data for shared detail context', () => {
+    const calendarWithJuneDays: HistoryCalendar = {
+      timezone: 'UTC',
+      days: [
+        {
+          date: '2026-06-05',
+          state: 'optimal',
+          coveragePct: 100,
+          coverageConfidence: 'configured',
+          markers: [],
+        },
+      ],
+    };
+    const calendarSpanningMayAndJune: HistoryCalendar = {
+      timezone: 'UTC',
+      days: [
+        {
+          date: '2026-05-31',
+          state: 'optimal',
+          coveragePct: 100,
+          coverageConfidence: 'configured',
+          markers: [],
+        },
+        {
+          date: '2026-06-01',
+          state: 'dry_stress',
+          coveragePct: 91,
+          coverageConfidence: 'configured',
+          markers: [],
+        },
+      ],
+    };
+    const calendarWithPacificKiritimatiTimezone: HistoryCalendar = {
+      ...calendarWithJuneDays,
+      timezone: 'Pacific/Kiritimati',
+    };
+
+    expect(formatHistoryCalendarMonthLabel(calendarWithJuneDays)).toMatch(/June 2026/);
+    expect(formatHistoryCalendarMonthLabel(calendarSpanningMayAndJune)).toMatch(/June 2026/);
+    expect(formatHistoryCalendarMonthLabel(null)).toBeNull();
+    expect(formatHistoryCalendarMonthLabel(calendarWithPacificKiritimatiTimezone)).toMatch(/June 2026/);
+  });
+
   it('renders a recognizable month grid with weekday headers', () => {
     render(<HistoryMonthCalendarView cardType="soil" calendar={soilCalendarMay2026()} onInspectDate={vi.fn()} />);
 

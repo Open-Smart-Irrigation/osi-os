@@ -1,5 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import { formatHistoryCalendarMonthLabel, latestCalendarMonth } from '../../../history/calendarMonth';
 import { soilStatusVisual } from '../../../history/soilStatus';
 import type {
   HistoryCalendar,
@@ -80,37 +81,6 @@ const soilCalendarBackgroundByTone = {
 
 function translateParams(params: Record<string, unknown> | undefined): Record<string, unknown> {
   return params && typeof params === 'object' ? params : {};
-}
-
-function parseDateParts(value: string): { year: number; month: number; day: number } | null {
-  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
-  if (!match) return null;
-  const year = Number(match[1]);
-  const month = Number(match[2]);
-  const day = Number(match[3]);
-  if (!Number.isInteger(year) || !Number.isInteger(month) || !Number.isInteger(day)) return null;
-  if (month < 1 || month > 12 || day < 1 || day > 31) return null;
-  return { year, month, day };
-}
-
-function monthKeyForCalendar(calendar: HistoryCalendar): { year: number; month: number } | null {
-  const latest = calendar.days.reduce<{ date: string; year: number; month: number } | null>((current, day) => {
-    const parts = parseDateParts(day.date);
-    if (!parts) return current;
-    if (!current || day.date > current.date) return { date: day.date, year: parts.year, month: parts.month };
-    return current;
-  }, null);
-  return latest ? { year: latest.year, month: latest.month } : null;
-}
-
-function formatMonthLabel(calendar: HistoryCalendar, month: { year: number; month: number }): string {
-  const timezone = calendar.timezone || 'UTC';
-  const monthDate = new Date(Date.UTC(month.year, month.month - 1, 15, 12));
-  return new Intl.DateTimeFormat(undefined, {
-    month: 'long',
-    year: 'numeric',
-    timeZone: timezone,
-  }).format(monthDate);
 }
 
 function weekdayOffsetForMondayStart(year: number, month: number): number {
@@ -204,8 +174,8 @@ export const HistoryMonthCalendarView: React.FC<HistoryMonthCalendarViewProps> =
   const { t: translate } = useTranslation('history');
   const t = translate as HistoryTranslate;
   const days = Array.isArray(calendar?.days) ? calendar.days : [];
-  const month = calendar ? monthKeyForCalendar(calendar) : null;
-  const monthLabel = calendar && month ? formatMonthLabel(calendar, month) : t('history.calendar.title');
+  const month = latestCalendarMonth(calendar);
+  const monthLabel = formatHistoryCalendarMonthLabel(calendar) ?? t('history.calendar.title');
   const cells = useMemo(() => (calendar && month ? buildCells(calendar, month) : []), [calendar, month]);
   const [internalSelectedDate, setInternalSelectedDate] = useState<string | null>(null);
 
