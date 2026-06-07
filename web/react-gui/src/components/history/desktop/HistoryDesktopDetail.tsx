@@ -89,7 +89,11 @@ export const HistoryDesktopDetail: React.FC<HistoryDesktopDetailProps> = ({
   const [mode, setMode] = useState<DesktopMode>('focus');
   const viewOptions = useMemo(() => selectableDesktopViews(selectedCard), [selectedCard]);
   const sourceOptions = useMemo(() => desktopSourceOptions(selectedCard), [selectedCard]);
-  const shouldRenderAdvanced = selectedView === 'advanced';
+  const selectedViewForCard = useMemo(() => {
+    const allowedViews = viewOptions.map((entry) => entry.view);
+    return allowedViews.includes(selectedView) ? selectedView : defaultDesktopView(selectedCard);
+  }, [selectedCard, selectedView, viewOptions]);
+  const shouldRenderAdvanced = selectedViewForCard === 'advanced';
 
   useEffect(() => {
     setSelectedView(defaultDesktopView(selectedCard));
@@ -113,9 +117,9 @@ export const HistoryDesktopDetail: React.FC<HistoryDesktopDetailProps> = ({
   const cardData = useHistoryCardData({
     scope,
     cardId: selectedCard.cardId,
-    view: selectedView,
+    view: selectedViewForCard,
     range: rangeRequest,
-    aggregation: desktopAggregationForView(selectedView),
+    aggregation: desktopAggregationForView(selectedViewForCard),
     overlays: [],
     sourceKey: selectedSourceKey,
     enabled: Boolean(selectedCard.availability.available && !shouldRenderAdvanced),
@@ -124,9 +128,9 @@ export const HistoryDesktopDetail: React.FC<HistoryDesktopDetailProps> = ({
   const advancedData = useHistoryCardAdvancedData({
     scope,
     cardId: selectedCard.cardId,
-    view: selectedView,
+    view: selectedViewForCard,
     range: rangeRequest,
-    aggregation: desktopAggregationForView(selectedView),
+    aggregation: desktopAggregationForView(selectedViewForCard),
     overlays: [],
     sourceKey: selectedSourceKey,
     enabled: Boolean(selectedCard.availability.available && shouldRenderAdvanced),
@@ -321,10 +325,10 @@ export const HistoryDesktopDetail: React.FC<HistoryDesktopDetailProps> = ({
                   <button
                     key={view}
                     type="button"
-                    aria-pressed={selectedView === view}
+                    aria-pressed={selectedViewForCard === view}
                     onClick={() => setSelectedView(view)}
                     className={`px-2 py-1 text-xs font-semibold transition-colors ${
-                      selectedView === view
+                      selectedViewForCard === view
                         ? 'bg-[var(--primary)] text-white'
                         : 'bg-[var(--secondary-bg)] text-[var(--text)] hover:bg-[var(--border)]'
                     }`}
@@ -395,7 +399,7 @@ export const HistoryDesktopDetail: React.FC<HistoryDesktopDetailProps> = ({
                 <HistoryCardVisualization
                   card={selectedCard}
                   data={cardData.data}
-                  selectedView={selectedView}
+                  selectedView={selectedViewForCard}
                   isLoading={cardData.isLoading}
                   error={cardData.error}
                   advancedData={advancedData.data}

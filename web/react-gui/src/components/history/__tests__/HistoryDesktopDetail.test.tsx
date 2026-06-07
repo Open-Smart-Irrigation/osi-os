@@ -298,6 +298,41 @@ describe('HistoryDesktopDetail', () => {
     expect(screen.getByRole('button', { name: 'Daily Min/Max' })).toBeInTheDocument();
   });
 
+  it('does not request the previous card view while switching cards', () => {
+    const dendro = makeCard({
+      cardId: 'dendro',
+      cardType: 'dendro',
+      title: 'Dendro - Growth Timeline',
+      defaultView: 'growth-timeline',
+      views: ['growth-timeline', 'line-chart', 'stress-events', 'calendar', 'advanced'],
+    });
+    const env = makeCard({
+      cardId: 'env',
+      cardType: 'environment',
+      title: 'Environment - Microclimate',
+      defaultView: 'line-chart',
+      views: ['line-chart', 'daily-min-max', 'calendar', 'advanced'],
+    });
+    const onCardSelect = vi.fn();
+    const { rerender } = render(
+      <SWRConfig value={{ provider: () => new Map(), dedupingInterval: 0 }}>
+        <HistoryDesktopDetail cards={[dendro, env]} selectedCard={dendro} zoneName="Zone A" scope={baseScope} onCardSelect={onCardSelect} />
+      </SWRConfig>,
+    );
+
+    rerender(
+      <SWRConfig value={{ provider: () => new Map(), dedupingInterval: 0 }}>
+        <HistoryDesktopDetail cards={[dendro, env]} selectedCard={env} zoneName="Zone A" scope={baseScope} onCardSelect={onCardSelect} />
+      </SWRConfig>,
+    );
+
+    const envRequests = vi.mocked(useHistoryCardData).mock.calls
+      .map((call) => call[0])
+      .filter((request) => request.cardId === 'env');
+    expect(envRequests).not.toContainEqual(expect.objectContaining({ view: 'growth-timeline' }));
+    expect(envRequests.at(-1)).toEqual(expect.objectContaining({ view: 'line-chart' }));
+  });
+
   it('uses Advanced View when the card-specific Advanced button is selected', () => {
     const card = makeCard({
       views: ['soil-profile', 'line-chart', 'calendar', 'irrigation-response', 'advanced'],
