@@ -101,7 +101,14 @@ export function zoomViewport(vp: HistoryViewport, bounds: ViewportBounds, anchor
 }
 
 export function panViewport(vp: HistoryViewport, bounds: ViewportBounds, deltaMs: number): HistoryViewport {
-  return clampSpanToBounds(vp.fromMs + deltaMs, vp.toMs + deltaMs, bounds);
+  // Pan preserves span exactly — do NOT route through clampSpanToBounds, whose
+  // MIN_SPAN_MS floor would inflate a sub-5-minute window while panning.
+  const span = vp.toMs - vp.fromMs;
+  let nextFrom = vp.fromMs + deltaMs;
+  if (nextFrom < bounds.minMs) nextFrom = bounds.minMs;
+  if (nextFrom + span > bounds.maxMs) nextFrom = bounds.maxMs - span;
+  if (nextFrom < bounds.minMs) nextFrom = bounds.minMs;
+  return { fromMs: nextFrom, toMs: nextFrom + span };
 }
 
 export function resetViewport(bounds: ViewportBounds, defaultSpanMs: number): HistoryViewport {
