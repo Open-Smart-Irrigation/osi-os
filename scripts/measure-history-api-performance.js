@@ -77,8 +77,8 @@ async function measure(label, pathname) {
 
 function pickFirstCardId(cardsBody) {
   const cards = Array.isArray(cardsBody && cardsBody.cards) ? cardsBody.cards : Array.isArray(cardsBody) ? cardsBody : [];
-  const preferred = cards.find((card) => card && card.cardType === 'soil') || cards.find((card) => card && card.id);
-  return preferred && preferred.id ? String(preferred.id) : '';
+  const preferred = cards.find((card) => card && card.cardType === 'soil') || cards.find((card) => card && (card.cardId || card.id));
+  return preferred && (preferred.cardId || preferred.id) ? String(preferred.cardId || preferred.id) : '';
 }
 
 async function main() {
@@ -93,7 +93,7 @@ async function main() {
     return;
   }
 
-  for (const range of ['24h', '7D', '30D']) {
+  for (const range of ['24h', '7d', '30d']) {
     const dataPath = `/api/history/zones/${encodeURIComponent(zoneId)}/cards/${encodeURIComponent(cardId)}/data?range=${encodeURIComponent(range)}`;
     await measure(`card-data-${range}`, dataPath);
   }
