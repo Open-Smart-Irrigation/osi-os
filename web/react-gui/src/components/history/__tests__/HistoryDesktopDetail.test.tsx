@@ -211,4 +211,122 @@ describe('HistoryDesktopDetail', () => {
     const parsePct = (s: string) => parseFloat(s);
     expect(parsePct(widthAfter)).toBeLessThan(parsePct(widthBefore));
   });
+
+  // --- Keyboard controls ---
+
+  it('has aria-label on chart surface describing keyboard controls', () => {
+    const card = makeCard();
+    renderDesktopDetail([card], card);
+    const surface = screen.getByTestId('desktop-chart-surface');
+    expect(surface).toHaveAttribute('aria-label');
+    // label must mention arrows and zoom/plus/minus so screen-reader users understand
+    const label = surface.getAttribute('aria-label') ?? '';
+    expect(label.toLowerCase()).toMatch(/arrow/);
+    expect(label.toLowerCase()).toMatch(/pan|zoom/);
+  });
+
+  it('ArrowRight keydown pans the viewport later in time (overview-window left% increases)', () => {
+    const card = makeCard();
+    renderDesktopDetail([card], card);
+
+    // The initial viewport sits at the right edge of bounds (resetViewport anchors to maxMs),
+    // so panning right would be clamped. Pan left first to create headroom.
+    const surface = screen.getByTestId('desktop-chart-surface');
+    fireEvent.keyDown(surface, { key: 'ArrowLeft' });
+
+    const overviewWindow = screen.getByTestId('overview-window');
+    const leftAfterLeft = parseFloat(overviewWindow.style.left);
+
+    fireEvent.keyDown(surface, { key: 'ArrowRight' });
+    const leftAfterRight = parseFloat(overviewWindow.style.left);
+
+    expect(leftAfterRight).toBeGreaterThan(leftAfterLeft);
+  });
+
+  it('ArrowLeft keydown pans the viewport earlier in time (overview-window left% decreases)', () => {
+    const card = makeCard();
+    renderDesktopDetail([card], card);
+
+    // First pan right so there is room to pan back left
+    const surface = screen.getByTestId('desktop-chart-surface');
+    fireEvent.keyDown(surface, { key: 'ArrowRight' });
+
+    const overviewWindow = screen.getByTestId('overview-window');
+    const leftAfterRight = parseFloat(overviewWindow.style.left);
+
+    fireEvent.keyDown(surface, { key: 'ArrowLeft' });
+    const leftAfterLeft = parseFloat(overviewWindow.style.left);
+
+    expect(leftAfterLeft).toBeLessThan(leftAfterRight);
+  });
+
+  it('+ keydown narrows the overview-window width (zoom in)', () => {
+    const card = makeCard();
+    renderDesktopDetail([card], card);
+
+    const overviewWindow = screen.getByTestId('overview-window');
+    const widthBefore = parseFloat(overviewWindow.style.width);
+
+    const surface = screen.getByTestId('desktop-chart-surface');
+    fireEvent.keyDown(surface, { key: '+' });
+
+    const widthAfter = parseFloat(overviewWindow.style.width);
+    expect(widthAfter).toBeLessThan(widthBefore);
+  });
+
+  it('= keydown also narrows the overview-window width (zoom in, unshifted + key)', () => {
+    const card = makeCard();
+    renderDesktopDetail([card], card);
+
+    const overviewWindow = screen.getByTestId('overview-window');
+    const widthBefore = parseFloat(overviewWindow.style.width);
+
+    const surface = screen.getByTestId('desktop-chart-surface');
+    fireEvent.keyDown(surface, { key: '=' });
+
+    const widthAfter = parseFloat(overviewWindow.style.width);
+    expect(widthAfter).toBeLessThan(widthBefore);
+  });
+
+  it('- keydown widens the overview-window width (zoom out)', () => {
+    // First zoom in so we have room to zoom out
+    const card = makeCard();
+    renderDesktopDetail([card], card);
+
+    const surface = screen.getByTestId('desktop-chart-surface');
+    fireEvent.keyDown(surface, { key: '+' });
+    fireEvent.keyDown(surface, { key: '+' });
+
+    const overviewWindow = screen.getByTestId('overview-window');
+    const widthAfterZoomIn = parseFloat(overviewWindow.style.width);
+
+    fireEvent.keyDown(surface, { key: '-' });
+    const widthAfterZoomOut = parseFloat(overviewWindow.style.width);
+
+    expect(widthAfterZoomOut).toBeGreaterThan(widthAfterZoomIn);
+  });
+
+  it('0 keydown resets the viewport to the default span', () => {
+    const card = makeCard();
+    renderDesktopDetail([card], card);
+
+    const overviewWindow = screen.getByTestId('overview-window');
+    const widthInitial = parseFloat(overviewWindow.style.width);
+
+    // Zoom in several times to change the viewport
+    const surface = screen.getByTestId('desktop-chart-surface');
+    fireEvent.keyDown(surface, { key: '+' });
+    fireEvent.keyDown(surface, { key: '+' });
+    fireEvent.keyDown(surface, { key: '+' });
+
+    const widthZoomed = parseFloat(overviewWindow.style.width);
+    expect(widthZoomed).toBeLessThan(widthInitial);
+
+    // Reset
+    fireEvent.keyDown(surface, { key: '0' });
+    const widthAfterReset = parseFloat(overviewWindow.style.width);
+
+    // After reset the width should be back close to the initial value
+    expect(widthAfterReset).toBeCloseTo(widthInitial, 0);
+  });
 });

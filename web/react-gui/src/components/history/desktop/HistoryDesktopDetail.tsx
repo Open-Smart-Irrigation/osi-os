@@ -5,6 +5,7 @@ import { HistoryOverviewStrip } from './HistoryOverviewStrip';
 import {
   resetViewport,
   zoomViewport,
+  panViewport,
   type HistoryViewport,
   type ViewportBounds,
 } from '../../../history/historyViewport';
@@ -162,6 +163,39 @@ export const HistoryDesktopDetail: React.FC<HistoryDesktopDetailProps> = ({
     setViewport(zoomViewport(viewport, effectiveBounds, center, 1.25));
   }, [viewport, effectiveBounds]);
 
+  const handleKeyDown = useCallback(
+    (e: React.KeyboardEvent<HTMLDivElement>) => {
+      const span = viewport.toMs - viewport.fromMs;
+      const center = (viewport.fromMs + viewport.toMs) / 2;
+      switch (e.key) {
+        case 'ArrowRight':
+          e.preventDefault();
+          setViewport(panViewport(viewport, effectiveBounds, span * 0.1));
+          break;
+        case 'ArrowLeft':
+          e.preventDefault();
+          setViewport(panViewport(viewport, effectiveBounds, -span * 0.1));
+          break;
+        case '+':
+        case '=':
+          e.preventDefault();
+          setViewport(zoomViewport(viewport, effectiveBounds, center, 0.8));
+          break;
+        case '-':
+          e.preventDefault();
+          setViewport(zoomViewport(viewport, effectiveBounds, center, 1.25));
+          break;
+        case '0':
+          e.preventDefault();
+          handleReset();
+          break;
+        default:
+          break;
+      }
+    },
+    [viewport, effectiveBounds, handleReset],
+  );
+
   const headerTitle = composeDetailTitle(selectedCard, zoneName);
 
   return (
@@ -252,6 +286,8 @@ export const HistoryDesktopDetail: React.FC<HistoryDesktopDetailProps> = ({
           ref={chartRef}
           data-testid="desktop-chart-surface"
           tabIndex={0}
+          aria-label={t('history.desktop.chartSurfaceLabel', { defaultValue: 'History chart, use arrow keys to pan and plus or minus to zoom' })}
+          onKeyDown={handleKeyDown}
           className="relative min-h-0 flex-1 cursor-crosshair overflow-hidden bg-[var(--bg)] outline-none focus:ring-2 focus:ring-[var(--primary)]"
           style={{ userSelect: 'none' }}
         >
