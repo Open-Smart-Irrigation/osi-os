@@ -468,7 +468,7 @@
         "soil1": "Soil 1",
         "soil2": "Soil 2",
         "soil3": "Soil 3",
-        "soil": "Soil {{index}}",
+        "soil": "Suolo {{index}}",
         "sensor": "Sensor {{index}}"
       }
     },

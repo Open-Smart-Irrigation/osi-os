@@ -999,6 +999,9 @@ git commit -m "feat(history): add cloud gateway status view"
 - [ ] Irrigation default view is Event Timeline.
 - [ ] Gateway has Status Overview.
 - [ ] Swipe/pan/zoom target boundaries are explicit.
+- [ ] Phone layouts keep primary controls at 44px minimum touch height.
+- [ ] Phone layouts render without clipped labels or overlapping controls at 360px viewport width.
+- [ ] Phone interactions do not depend on hover-only affordances and keep browser back/scroll gestures usable.
 - [ ] Recharts usage remains contained behind visualization components.
 
 **Mandatory review loop:**
@@ -1232,6 +1235,7 @@ git commit -m "fix(history): address final verification findings"
 - [ ] No Diagnostics Card exists.
 - [ ] Card-specific view modes are implemented.
 - [ ] Mobile-first controls exist with fallbacks for browser gesture conflicts.
+- [ ] Mobile-first controls meet iPhone/Android touch targets, avoid clipped labels at 360px width, and do not rely on hover-only actions.
 - [ ] Desktop single-card mode is default.
 - [ ] Comparison mode is stacked and capped.
 - [ ] Calendar states are theme-specific.

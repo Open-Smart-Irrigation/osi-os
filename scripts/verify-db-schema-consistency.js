@@ -346,6 +346,11 @@ function indexSql(dbPath, indexName) {
   return sqlite(dbPath, `SELECT sql FROM sqlite_master WHERE type = 'index' AND name = '${escapedName}';`);
 }
 
+function tableSql(dbPath, tableName) {
+  const escapedName = tableName.replace(/'/g, "''");
+  return sqlite(dbPath, `SELECT sql FROM sqlite_master WHERE type = 'table' AND name = '${escapedName}';`);
+}
+
 function normalizeSql(sql) {
   return sql.replace(/\s+/g, ' ').trim().toLowerCase();
 }
@@ -372,6 +377,9 @@ function verifyDb(dbPath) {
   }
   for (const [tableName, expectedColumns] of Object.entries(schemaContract)) {
     compareSet(`${dbPath}:${tableName} columns`, columnNames(dbPath, tableName), expectedColumns);
+  }
+  if (!tableSql(dbPath, 'devices').includes("'AQUASCOPE_LORAIN'")) {
+    throw new Error(`${dbPath}: devices.type_id CHECK is missing AQUASCOPE_LORAIN`);
   }
   for (const [tableName, expectedIndexes] of Object.entries(requiredIndexes)) {
     const indexes = indexNames(dbPath, tableName);
@@ -402,6 +410,12 @@ function verifyDb(dbPath) {
 
 const explicitPaths = process.argv.slice(2);
 const dbPaths = explicitPaths.length ? explicitPaths.map((entry) => path.resolve(entry)) : seedDatabasePaths;
+
+const seedSqlPath = path.join(repoRoot, 'database', 'seed-blank.sql');
+const seedSql = fs.readFileSync(seedSqlPath, 'utf8');
+if (!seedSql.includes("'AQUASCOPE_LORAIN'")) {
+  throw new Error(`${path.relative(repoRoot, seedSqlPath)}: devices.type_id CHECK is missing AQUASCOPE_LORAIN`);
+}
 
 for (const dbPath of dbPaths) {
   verifyDb(dbPath);

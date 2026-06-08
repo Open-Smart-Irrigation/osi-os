@@ -1,5 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import path from 'node:path';
 import { formatForecastHighLow } from '../src/utils/forecastFormat';
 
 test('formats high/low when both finite', () => {
@@ -14,4 +16,34 @@ test('returns Unavailable when either side is null', () => {
 
 test('treats 0 as a valid value, not Unavailable', () => {
   assert.equal(formatForecastHighLow(0, -3), '0°/-3°');
+});
+
+test('edge environment summary emits the frontend daily and hourly forecast contract', () => {
+  const flowsPath = path.resolve(
+    import.meta.dirname,
+    '../../../conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/flows.json'
+  );
+  const flows = JSON.parse(fs.readFileSync(flowsPath, 'utf8'));
+  const node = flows.find((entry: { name?: string }) => entry.name === 'Get Zone Environment Summary');
+  assert.ok(node && typeof node.func === 'string', 'Get Zone Environment Summary function node is present');
+
+  const buildForecastStart = node.func.indexOf('function buildForecastSection');
+  const buildAgronomicStart = node.func.indexOf('function buildAgronomic');
+  assert.notEqual(buildForecastStart, -1, 'buildForecastSection is present');
+  assert.notEqual(buildAgronomicStart, -1, 'buildAgronomic follows buildForecastSection');
+
+  const buildForecastSection = node.func.slice(buildForecastStart, buildAgronomicStart);
+  for (const field of ['description:', 'weatherCode:', 'maxTempC:', 'minTempC:', 'rainProbabilityPct:', 'tempC:']) {
+    assert.match(buildForecastSection, new RegExp(`\\b${field.replace(':', '')}:`));
+  }
+});
+
+test('weather forecast tabs keep summary controls usable on phone-width screens', () => {
+  const componentRoot = path.resolve(import.meta.dirname, '../src/components/farming/environment');
+  for (const fileName of ['ForecastTab.tsx', 'WeatherTab.tsx']) {
+    const source = fs.readFileSync(path.join(componentRoot, fileName), 'utf8');
+    assert.match(source, /grid-cols-2\s+sm:grid-cols-4/, `${fileName} uses two summary columns before the small breakpoint`);
+    assert.match(source, /snap-x/, `${fileName} keeps daily forecast cards swipe-snappable`);
+    assert.match(source, /min-h-\[44px\]/, `${fileName} keeps forecast summary touch targets at least 44px tall`);
+  }
 });

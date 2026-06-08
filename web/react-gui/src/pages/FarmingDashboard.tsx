@@ -13,6 +13,7 @@ import { CreateZoneModal } from '../components/farming/CreateZoneModal';
 import { LanguageSwitcher } from '../components/LanguageSwitcher';
 import { SystemPanel } from '../components/farming/SystemPanel';
 import { SenseCapWeatherCard } from '../components/farming/SenseCapWeatherCard';
+import { LoRainGaugeCard } from '../components/farming/LoRainGaugeCard';
 import {
   IrrigationOutcomesPanel,
   type IrrigationOutcomeZoneContext,
@@ -104,6 +105,7 @@ export const FarmingDashboard: React.FC = () => {
   const unassignedValves = unassignedDevices.filter((d) => d.type_id === 'STREGA_VALVE');
   const unassignedLSN50 = unassignedDevices.filter((d) => d.type_id === 'DRAGINO_LSN50');
   const unassignedS2120 = unassignedDevices.filter((d) => d.type_id === 'SENSECAP_S2120');
+  const unassignedLoRain = unassignedDevices.filter((d) => d.type_id === 'AQUASCOPE_LORAIN');
   const irrigationActuations = irrigationActuationsResponse?.actuations ?? [];
   const zoneTimezones = useMemo(
     () => new Map((zones ?? []).map((zone) => [zone.id, zone.timezone])),
@@ -318,6 +320,22 @@ export const FarmingDashboard: React.FC = () => {
                             device={device}
                             allZones={(zones ?? []).map((z) => ({ id: z.id, name: z.name }))}
                             onUpdate={handleUpdate}
+                          />
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Unassigned Aqua-Scope LoRain Gauges */}
+                  {unassignedLoRain.length > 0 && (
+                    <div className="mt-6">
+                      <h3 className="text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)] mb-3">Aqua-Scope LoRain Gauges</h3>
+                      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                        {unassignedLoRain.map((device) => (
+                          <LoRainGaugeCard
+                            key={device.deveui}
+                            device={device}
+                            onRemove={handleUpdate}
                           />
                         ))}
                       </div>
