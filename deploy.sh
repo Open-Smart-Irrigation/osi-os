@@ -476,6 +476,14 @@ fetch_required "osi-dendro-helper index.js" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-dendro-helper/index.js" \
     "/srv/node-red/osi-dendro-helper/index.js"
 
+fetch_required "osi-history-helper package.json" \
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-history-helper/package.json" \
+    "/srv/node-red/osi-history-helper/package.json"
+
+fetch_required "osi-history-helper index.js" \
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-history-helper/index.js" \
+    "/srv/node-red/osi-history-helper/index.js"
+
 fetch_required "osi-chameleon-helper package.json" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-chameleon-helper/package.json" \
     "/srv/node-red/osi-chameleon-helper/package.json"
@@ -507,6 +515,10 @@ fetch_required "LSN50 codec" \
 fetch_required "S2120 codec" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/codecs/sensecap_s2120_decoder.js" \
     "/srv/node-red/codecs/sensecap_s2120_decoder.js"
+
+fetch_required "LoRain codec" \
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/codecs/aquascope_lorain_decoder.js" \
+    "/srv/node-red/codecs/aquascope_lorain_decoder.js"
 
 echo "--- Node-RED runtime dependencies ---"
 npm_log="$TMP_DIR/npm-install.log"

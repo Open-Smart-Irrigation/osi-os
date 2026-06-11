@@ -8,7 +8,7 @@
     "preview": "vite preview",
     "test:unit": "npm run test:unit:tsx-runner && npm run test:unit:vitest",
     "test:unit:tsx-runner": "tsx --test 'tests/**/*.test.ts'",
-    "test:unit:vitest": "vitest run src/components/farming/__tests__"
+    "test:unit:vitest": "vitest run src/components/farming/__tests__ src/components/history/__tests__ --passWithNoTests"
   },
   "dependencies": {
     "axios": "^1.13.2",

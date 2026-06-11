@@ -82,7 +82,8 @@
     "failedToRemoveDevice": "Okuggyawo ekyuma mu kifo kugaanye",
     "noDevices": "Tewali byuma mu kifo kino",
     "assignFirst": "Werekeza Ekyuma Ekyasooka",
-    "devicesInZone": "Ebyuma mu kifo kino:"
+    "devicesInZone": "Ebyuma mu kifo kino:",
+    "data": "Data"
   },
   "schedule": {
     "irrigationSchedule": "Nteekateeka y'okusukkulirira",

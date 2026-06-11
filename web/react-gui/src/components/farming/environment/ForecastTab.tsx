@@ -58,7 +58,7 @@ function rainClass(mm: number): string {
 interface RainPillProps { label: string; value: string; highlight?: boolean }
 
 const RainPill: React.FC<RainPillProps> = ({ label, value, highlight }) => (
-  <div className={`flex flex-col items-center rounded-xl px-3 py-2 border ${highlight
+  <div className={`flex min-h-[44px] flex-col items-center justify-center rounded-xl px-3 py-2 border ${highlight
     ? 'bg-blue-50 border-blue-200'
     : 'bg-[var(--card)] border-[var(--border)]'}`}>
     <span className="text-[10px] uppercase tracking-widest text-[var(--text-tertiary)] font-semibold mb-0.5">{label}</span>
@@ -75,13 +75,13 @@ const DayCard: React.FC<{ day: DailyForecast; isToday: boolean }> = ({ day, isTo
   const rain = day.rainMm ?? 0;
   const highLow = formatForecastHighLow(day.maxTempC, day.minTempC);
   return (
-    <div className={`flex-shrink-0 w-20 flex flex-col items-center gap-1 rounded-xl p-2 border
+    <div className={`snap-start flex-shrink-0 w-24 flex flex-col items-center gap-1 rounded-xl p-2 border
       ${isToday
         ? 'bg-[var(--primary)]/10 border-[var(--primary)]'
         : 'bg-[var(--card)] border-[var(--border)]'}`}>
       <span className="text-xs font-semibold text-[var(--text-secondary)]">{fmtDay(day.date)}</span>
       <WeatherIcon code={day.weatherCode} description={day.description} size={40} animated={!isToday} />
-      <span className="text-xs font-medium tabular-nums text-[var(--text)]">
+      <span className="min-h-[16px] text-xs font-medium tabular-nums text-[var(--text)] whitespace-nowrap">
         {highLow === 'Unavailable'
           ? t('environment.forecast.unavailable', { defaultValue: 'Unavailable' })
           : highLow}
@@ -202,7 +202,7 @@ export const ForecastTab: React.FC<Props> = ({ forecast, location }) => {
   return (
     <div className="flex flex-col gap-4">
       {/* Rain summary pills */}
-      <div className="grid grid-cols-4 gap-2">
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
         <RainPill
           label={t('environment.forecast.next24h', { defaultValue: 'Next 24 h' })}
           value={`${rf.totalNext24hMm.toFixed(1)} mm`}
@@ -227,7 +227,7 @@ export const ForecastTab: React.FC<Props> = ({ forecast, location }) => {
 
       {/* Daily strip */}
       {rf.daily.length > 0 && (
-        <div className="flex gap-2 overflow-x-auto pb-1 -mx-1 px-1">
+        <div className="flex snap-x snap-mandatory gap-2 overflow-x-auto pb-1 -mx-1 px-1">
           {rf.daily.map(day => (
             <DayCard
               key={day.date}

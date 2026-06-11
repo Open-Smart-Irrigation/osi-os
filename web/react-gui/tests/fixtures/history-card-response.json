@@ -1,0 +1,225 @@
+{
+  "summaries": {
+    "zoneId": 12,
+    "zoneUuid": "zone-uuid",
+    "gatewayEui": "0011223344556677",
+    "generatedAt": "2026-05-31T10:00:00Z",
+    "cards": [
+      {
+        "cardId": "zone-uuid:soil:root-zone",
+        "cardType": "soil",
+        "scope": "zone",
+        "title": "Soil Moisture",
+        "subtitle": "Root-zone tension",
+        "defaultView": "soil-profile",
+        "views": ["soil-profile", "line-chart", "calendar", "irrigation-response", "advanced"],
+        "supportedRanges": ["12h", "24h", "7d", "30d", "season"],
+        "defaultRange": "24h",
+        "sourceDeviceCount": 2,
+        "sourceLabel": null,
+        "sourceLabels": ["Chameleon 1", "Chameleon 2"],
+        "sourceDevices": [
+          { "name": "Chameleon 1", "typeId": "DRAGINO_LSN50", "role": "soil" },
+          { "name": "Chameleon 2", "typeId": "DRAGINO_LSN50", "role": "soil" }
+        ],
+        "metadata": {
+          "lastSeenAt": "2026-05-31T09:55:00Z",
+          "battery": { "status": "ok", "latest": 3.62, "unit": "V" },
+          "signal": { "status": "unknown" },
+          "coveragePct": 94,
+          "coverageConfidence": "configured",
+          "calibrationStatus": "calibrated"
+        },
+        "availability": {
+          "available": true,
+          "reasons": []
+        },
+        "ordering": {
+          "pinned": false,
+          "score": 0.71,
+          "recentRank": 2,
+          "manualOrder": null,
+          "criticalAlert": false
+        }
+      },
+      {
+        "cardId": "0011223344556677:gateway:hub",
+        "cardType": "gateway",
+        "scope": "gateway",
+        "title": "Gateway",
+        "subtitle": "Hub health and sync",
+        "defaultView": "status-overview",
+        "views": ["status-overview", "connectivity-timeline", "advanced"],
+        "supportedRanges": ["12h", "24h", "7d", "30d"],
+        "defaultRange": "24h",
+        "metadata": {
+          "lastSeenAt": "2026-05-31T09:59:00Z",
+          "coveragePct": 100,
+          "coverageConfidence": "derived",
+          "syncState": "local"
+        },
+        "availability": {
+          "available": true,
+          "reasons": []
+        },
+        "ordering": {
+          "pinned": true,
+          "score": 1,
+          "recentRank": 1,
+          "manualOrder": 0,
+          "criticalAlert": false
+        }
+      }
+    ]
+  },
+  "data": {
+    "cardId": "zone-uuid:soil:root-zone",
+    "cardType": "soil",
+    "view": "soil-profile",
+    "range": {
+      "label": "24h",
+      "from": "2026-05-30T10:00:00Z",
+      "to": "2026-05-31T10:00:00Z",
+      "timezone": "Europe/Zurich"
+    },
+    "aggregation": {
+      "level": "raw",
+      "bucketSizeSeconds": null,
+      "coveragePct": 94,
+      "coverageConfidence": "configured",
+      "pointCount": 2,
+      "dominantStatusMethod": "soil-status-priority"
+    },
+    "limits": {
+      "maxPointsPerSeries": 2000,
+      "maxEvents": 200,
+      "maxInterpretations": 20,
+      "truncated": false
+    },
+    "series": [
+      {
+        "id": "soil-swt-60cm",
+        "label": "SWT 60 cm",
+        "unit": "kPa",
+        "points": [
+          {
+            "t": "2026-05-31T09:45:00Z",
+            "bucketStart": "2026-05-31T09:45:00Z",
+            "bucketEnd": "2026-05-31T10:00:00Z",
+            "value": 41.2,
+            "min": 39.1,
+            "max": 44,
+            "mean": 41.8,
+            "median": 41.7,
+            "latest": 42.1,
+            "dominantStatus": "optimal",
+            "dominantStatusMethod": "soil-status-priority",
+            "coveragePct": 100,
+            "coverageConfidence": "configured",
+            "count": 3,
+            "unit": "kPa",
+            "quality": "ok"
+          }
+        ]
+      }
+    ],
+    "profiles": [
+      {
+        "id": "root-zone",
+        "label": "Root zone",
+        "depthCm": 60,
+        "value": 41.2,
+        "unit": "kPa",
+        "status": "optimal"
+      }
+    ],
+    "events": [
+      {
+        "id": "event-id",
+        "type": "irrigation",
+        "t": "2026-05-31T06:00:00Z",
+        "end": "2026-05-31T06:20:00Z",
+        "label": "Irrigation",
+        "severity": "info",
+        "metadata": {
+          "durationMinutes": 20,
+          "source": "schedule"
+        }
+      }
+    ],
+    "calendar": {
+      "timezone": "Europe/Zurich",
+      "days": [
+        {
+          "date": "2026-05-31",
+          "state": "dry_stress",
+          "coveragePct": 94,
+          "coverageConfidence": "configured"
+        }
+      ]
+    },
+    "interpretations": [
+      {
+        "id": "rule-root-zone-dry",
+        "source": "local-rule",
+        "severity": "warning",
+        "title": "Root zone entered dry status",
+        "body": "Root zone entered dry status 9 hours ago.",
+        "evidence": [
+          {
+            "seriesId": "soil-swt-60cm",
+            "from": "2026-05-31T01:00:00Z",
+            "to": "2026-05-31T10:00:00Z"
+          }
+        ],
+        "confidence": null
+      }
+    ],
+    "freshness": {
+      "dataAsOf": "2026-05-31T09:55:00Z",
+      "syncState": "local"
+    },
+    "advancedFields": {
+      "rssi": {
+        "field": "rssi",
+        "value": null,
+        "unit": "dBm",
+        "availability": "not_collected_at_time"
+      }
+    }
+  },
+  "workspace": {
+    "schemaVersion": 1,
+    "farmId": 1,
+    "hubId": "0011223344556677",
+    "zoneId": 12,
+    "zoneUuid": "zone-uuid",
+    "selectedCards": ["zone-uuid:soil:root-zone"],
+    "panelOrder": ["zone-uuid:soil:root-zone"],
+    "collapsedPanels": [],
+    "dateRange": {
+      "mode": "relative",
+      "label": "7d",
+      "from": null,
+      "to": null
+    },
+    "aggregation": "auto",
+    "viewModesByCard": {
+      "zone-uuid:soil:root-zone": "soil-profile"
+    },
+    "enabledOverlays": {
+      "zone-uuid:soil:root-zone": ["irrigation-events", "rain-events"]
+    },
+    "advancedOverlaySettings": {},
+    "limits": {
+      "maxPanels": 4,
+      "platform": "edge"
+    },
+    "inspector": {
+      "selectedTimestamp": null,
+      "open": true
+    },
+    "pinnedCards": ["zone-uuid:soil:root-zone"],
+    "layout": "stacked"
+  }
+}

@@ -1,6 +1,28 @@
 import axios from 'axios';
 import { notifyAuthExpired } from './authEvents';
 import type {
+  HistoryCardSummaryResponse,
+  HistoryCardDataResponse,
+  HistoryAdvancedResponse,
+  HistoryCardSummary,
+  HistoryCardType,
+  HistoryCardScope,
+  HistoryViewMode,
+  HistoryRangeLabel,
+  HistoryAggregationLevel,
+  HistoryCardAvailability,
+  HistoryCardOrdering,
+  HistoryCardMetadata,
+  CoverageConfidence,
+  HistoryRangeSelection,
+  HistoryCardDataRequest,
+  HistoryCardPreference,
+  HistoryWorkspace,
+  HistoryWorkspaceListResponse,
+  HistoryWorkspaceRecord,
+} from '../history/types';
+import { migrateHistoryWorkspace } from '../history/workspaceModel';
+import type {
   Device,
   LoginRequest,
   LoginResponse,
@@ -29,6 +51,14 @@ type ApiErrorPayload = {
   error?: string;
   message?: string;
 };
+
+export interface SystemFeatureFlags {
+  historyUxEnabled: boolean;
+  historyComparisonEnabled: boolean;
+  historyWorkspacesEnabled: boolean;
+  historyAdvancedOverlaysEnabled: boolean;
+  historyCloudAiEnabled: boolean;
+}
 
 export function getApiErrorMessage(error: unknown, fallback: string): string {
   if (axios.isAxiosError<ApiErrorPayload>(error)) {
@@ -353,6 +383,254 @@ function toNullableNumber(value: unknown): number | null {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
+function asBoolean(value: unknown): boolean {
+  return value === true || value === 1 || value === '1' || value === 'true';
+}
+
+export function normaliseSystemFeatureFlags(row: any): SystemFeatureFlags {
+  const source = row?.features ?? row ?? {};
+  return {
+    historyUxEnabled: asBoolean(source?.historyUxEnabled ?? source?.history_ux_enabled),
+    historyComparisonEnabled: asBoolean(source?.historyComparisonEnabled ?? source?.history_comparison_enabled),
+    historyWorkspacesEnabled: asBoolean(source?.historyWorkspacesEnabled ?? source?.history_workspaces_enabled),
+    historyAdvancedOverlaysEnabled: asBoolean(
+      source?.historyAdvancedOverlaysEnabled ?? source?.history_advanced_overlays_enabled,
+    ),
+    historyCloudAiEnabled: asBoolean(source?.historyCloudAiEnabled ?? source?.history_cloud_ai_enabled),
+  };
+}
+
+function toCoverageConfidence(value: unknown): CoverageConfidence {
+  return value === 'configured' || value === 'derived' || value === 'unknown'
+    ? value
+    : 'unknown';
+}
+
+function normaliseHistoryCardAvailability(row: any): HistoryCardAvailability {
+  return {
+    available: row?.available !== false,
+    reasons: Array.isArray(row?.reasons) ? row.reasons.map(String) : [],
+  };
+}
+
+function normaliseHistoryCardOrdering(row: any): HistoryCardOrdering {
+  return {
+    pinned: asBoolean(row?.pinned),
+    score: Number(row?.score ?? 0),
+    recentRank: row?.recentRank ?? row?.recent_rank ?? null,
+    manualOrder: row?.manualOrder ?? row?.manual_order ?? null,
+    criticalAlert: row?.criticalAlert ?? row?.critical_alert ?? undefined,
+  };
+}
+
+function normaliseHistoryCardMetadata(row: any): HistoryCardMetadata {
+  return {
+    ...row,
+    lastSeenAt: row?.lastSeenAt ?? row?.last_seen_at ?? null,
+    coveragePct: row?.coveragePct ?? row?.coverage_pct ?? null,
+    coverageConfidence: toCoverageConfidence(row?.coverageConfidence ?? row?.coverage_confidence),
+    syncState: row?.syncState ?? row?.sync_state,
+    calibrationStatus: row?.calibrationStatus ?? row?.calibration_status ?? null,
+  };
+}
+
+function normaliseHistoryCardSummary(row: any): HistoryCardSummary {
+  const cardType = String(row?.cardType ?? row?.card_type ?? 'soil') as HistoryCardType;
+  const rawSourceDevices = Array.isArray(row?.sourceDevices ?? row?.source_devices)
+    ? (row.sourceDevices ?? row.source_devices)
+    : [];
+  const rawSourceLabels = Array.isArray(row?.sourceLabels ?? row?.source_labels)
+    ? (row.sourceLabels ?? row.source_labels)
+    : [];
+  const sourceDeviceCountRaw = row?.sourceDeviceCount ?? row?.source_device_count;
+  const sourceDeviceCount = typeof sourceDeviceCountRaw === 'number'
+    ? sourceDeviceCountRaw
+    : Number.parseInt(String(sourceDeviceCountRaw ?? ''), 10);
+  return {
+    cardId: String(row?.cardId ?? row?.card_id ?? ''),
+    cardType,
+    scope: String(row?.scope ?? 'zone') as HistoryCardScope,
+    title: String(row?.title ?? cardType),
+    subtitle: String(row?.subtitle ?? ''),
+    defaultView: String(row?.defaultView ?? row?.default_view ?? 'line-chart') as HistoryViewMode,
+    views: Array.isArray(row?.views) ? row.views.map(String) as HistoryViewMode[] : [],
+    supportedRanges: Array.isArray(row?.supportedRanges ?? row?.supported_ranges)
+      ? (row.supportedRanges ?? row.supported_ranges).map(String) as HistoryRangeLabel[]
+      : [],
+    defaultRange: String(row?.defaultRange ?? row?.default_range ?? '24h') as HistoryRangeLabel,
+    sourceDeviceCount: Number.isFinite(sourceDeviceCount) ? sourceDeviceCount : undefined,
+    sourceLabel: row?.sourceLabel ?? row?.source_label ?? null,
+    sourceLabels: rawSourceLabels.map(String).filter((label: string) => label.trim().length > 0),
+    sourceDevices: rawSourceDevices.map((device: any) => ({
+      name: typeof device?.name === 'string' && device.name.trim() ? device.name.trim() : null,
+      typeId: typeof (device?.typeId ?? device?.type_id) === 'string'
+        ? String(device.typeId ?? device.type_id).trim() || null
+        : null,
+      role: typeof device?.role === 'string' && device.role.trim() ? device.role.trim() : null,
+      sourceKey: typeof (device?.sourceKey ?? device?.source_key) === 'string'
+        ? String(device.sourceKey ?? device.source_key).trim() || null
+        : null,
+    })),
+    metadata: normaliseHistoryCardMetadata(row?.metadata ?? {}),
+    availability: normaliseHistoryCardAvailability(row?.availability ?? {}),
+    ordering: normaliseHistoryCardOrdering(row?.ordering ?? {}),
+  };
+}
+
+function normaliseHistoryCardSummaryResponse(row: any): HistoryCardSummaryResponse {
+  const rawCards = Array.isArray(row?.cards) ? row.cards : [];
+  return {
+    zoneId: row?.zoneId ?? row?.zone_id,
+    zoneUuid: row?.zoneUuid ?? row?.zone_uuid,
+    gatewayEui: row?.gatewayEui ?? row?.gateway_eui,
+    generatedAt: String(row?.generatedAt ?? row?.generated_at ?? ''),
+    cards: rawCards.map(normaliseHistoryCardSummary),
+  };
+}
+
+function normaliseHistoryRangeSelection(row: any): HistoryRangeSelection {
+  return {
+    label: String(row?.label ?? 'custom') as HistoryRangeLabel,
+    from: row?.from ?? null,
+    to: row?.to ?? null,
+    timezone: String(row?.timezone ?? 'UTC'),
+  };
+}
+
+function normaliseHistoryCardDataResponse(row: any): HistoryCardDataResponse {
+  const aggregation = row?.aggregation ?? {};
+  const limits = row?.limits ?? {};
+  const freshness = row?.freshness ?? {};
+
+  return {
+    cardId: String(row?.cardId ?? row?.card_id ?? ''),
+    cardType: String(row?.cardType ?? row?.card_type ?? 'soil') as HistoryCardType,
+    view: String(row?.view ?? 'line-chart') as HistoryViewMode,
+    range: normaliseHistoryRangeSelection(row?.range ?? {}),
+    aggregation: {
+      level: String(aggregation?.level ?? 'auto') as HistoryAggregationLevel,
+      bucketSizeSeconds: aggregation?.bucketSizeSeconds ?? aggregation?.bucket_size_seconds ?? null,
+      coveragePct: aggregation?.coveragePct ?? aggregation?.coverage_pct ?? null,
+      coverageConfidence: toCoverageConfidence(aggregation?.coverageConfidence ?? aggregation?.coverage_confidence),
+      pointCount: Number(aggregation?.pointCount ?? aggregation?.point_count ?? 0),
+      dominantStatusMethod: aggregation?.dominantStatusMethod ?? aggregation?.dominant_status_method ?? null,
+    },
+    limits: {
+      maxPointsPerSeries: Number(limits?.maxPointsPerSeries ?? limits?.max_points_per_series ?? 0),
+      maxEvents: Number(limits?.maxEvents ?? limits?.max_events ?? 0),
+      maxInterpretations: Number(limits?.maxInterpretations ?? limits?.max_interpretations ?? 0),
+      truncated: asBoolean(limits?.truncated),
+    },
+    series: Array.isArray(row?.series) ? row.series : [],
+    profiles: Array.isArray(row?.profiles) ? row.profiles : [],
+    events: Array.isArray(row?.events) ? row.events : [],
+    calendar: row?.calendar ?? null,
+    interpretations: Array.isArray(row?.interpretations) ? row.interpretations : [],
+    freshness: {
+      dataAsOf: freshness?.dataAsOf ?? freshness?.data_as_of ?? null,
+      syncState: freshness?.syncState ?? freshness?.sync_state ?? 'unknown',
+    },
+    advancedFields: row?.advancedFields ?? row?.advanced_fields ?? {},
+  };
+}
+
+function normaliseHistoryAdvancedResponse(row: any): HistoryAdvancedResponse {
+  const aggregation = row?.aggregation ?? {};
+  const freshness = row?.freshness ?? {};
+  return {
+    generatedAt: String(row?.generatedAt ?? row?.generated_at ?? ''),
+    cardId: String(row?.cardId ?? row?.card_id ?? ''),
+    cardType: String(row?.cardType ?? row?.card_type ?? 'soil') as HistoryCardType,
+    range: normaliseHistoryRangeSelection(row?.range ?? {}),
+    aggregation: {
+      level: String(aggregation?.level ?? 'auto') as HistoryAggregationLevel,
+      bucketSizeSeconds: aggregation?.bucketSizeSeconds ?? aggregation?.bucket_size_seconds ?? null,
+      coveragePct: aggregation?.coveragePct ?? aggregation?.coverage_pct ?? null,
+      coverageConfidence: toCoverageConfidence(aggregation?.coverageConfidence ?? aggregation?.coverage_confidence),
+      pointCount: Number(aggregation?.pointCount ?? aggregation?.point_count ?? 0),
+      dominantStatusMethod: aggregation?.dominantStatusMethod ?? aggregation?.dominant_status_method ?? null,
+    },
+    freshness: {
+      dataAsOf: freshness?.dataAsOf ?? freshness?.data_as_of ?? null,
+      syncState: freshness?.syncState ?? freshness?.sync_state ?? 'unknown',
+    },
+    placeholder: row?.placeholder && typeof row.placeholder === 'object' ? row.placeholder : {},
+    advancedFields: row?.advancedFields ?? row?.advanced_fields ?? {},
+  };
+}
+
+function normaliseHistoryCardPreference(row: any): HistoryCardPreference {
+  return {
+    cardId: String(row?.cardId ?? row?.card_id ?? ''),
+    scope: String(row?.scope ?? row?.scope_type ?? 'zone') as HistoryCardScope,
+    pinned: asBoolean(row?.pinned),
+    manualOrder: row?.manualOrder ?? row?.manual_order ?? null,
+    openCount: Number(row?.openCount ?? row?.open_count ?? 0),
+    lastOpenedAt: row?.lastOpenedAt ?? row?.last_opened_at ?? null,
+    lastViewMode: (row?.lastViewMode ?? row?.last_view_mode ?? null) as HistoryViewMode | null,
+    hidden: asBoolean(row?.hidden),
+    updatedAt: String(row?.updatedAt ?? row?.updated_at ?? ''),
+  };
+}
+
+function parseHistoryWorkspacePayload(raw: any): unknown {
+  if (typeof raw !== 'string') return raw;
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return {};
+  }
+}
+
+function normaliseHistoryWorkspaceRecord(row: any): HistoryWorkspaceRecord {
+  const rawWorkspace = parseHistoryWorkspacePayload(row?.workspace ?? row?.workspace_json ?? {});
+  const rawWorkspaceRecord = rawWorkspace && typeof rawWorkspace === 'object' && !Array.isArray(rawWorkspace)
+    ? rawWorkspace as Record<string, any>
+    : {};
+  const zoneId = row?.zoneId ?? row?.zone_id ?? null;
+  const workspace = migrateHistoryWorkspace(rawWorkspace, {
+    platform: 'edge',
+    farmId: rawWorkspaceRecord.farmId ?? rawWorkspaceRecord.farm_id ?? null,
+    hubId: rawWorkspaceRecord.hubId ?? rawWorkspaceRecord.hub_id ?? null,
+    zoneId: zoneId === null || zoneId === undefined ? null : Number(zoneId),
+    zoneUuid: rawWorkspaceRecord.zoneUuid ?? rawWorkspaceRecord.zone_uuid ?? null,
+  });
+
+  return {
+    id: Number(row?.id ?? 0),
+    userId: Number(row?.userId ?? row?.user_id ?? 0),
+    ownerUserUuid: row?.ownerUserUuid ?? row?.owner_user_uuid ?? null,
+    zoneId: zoneId === null || zoneId === undefined ? null : Number(zoneId),
+    name: String(row?.name ?? ''),
+    isDefault: asBoolean(row?.isDefault ?? row?.is_default),
+    workspace,
+    createdAt: String(row?.createdAt ?? row?.created_at ?? ''),
+    updatedAt: String(row?.updatedAt ?? row?.updated_at ?? ''),
+  };
+}
+
+function normaliseHistoryWorkspaceListResponse(row: any): HistoryWorkspaceListResponse {
+  const rows = Array.isArray(row?.workspaces) ? row.workspaces : [];
+  return {
+    generatedAt: String(row?.generatedAt ?? row?.generated_at ?? ''),
+    workspaces: rows.map(normaliseHistoryWorkspaceRecord),
+  };
+}
+
+function buildHistoryCardDataParams(request: HistoryCardDataRequest): URLSearchParams {
+  const params = new URLSearchParams({
+    view: request.view,
+    range: request.range.label,
+    timezone: request.range.timezone,
+    aggregation: request.aggregation,
+  });
+  if (request.range.from) params.set('from', request.range.from);
+  if (request.range.to) params.set('to', request.range.to);
+  if (request.overlays.length > 0) params.set('overlays', request.overlays.join(','));
+  if (request.sourceKey) params.set('sourceKey', request.sourceKey);
+  return params;
+}
+
 function normaliseDendroHistoryPoint(row: any): DendroHistoryPoint {
   return {
     t: String(row?.t ?? row?.recorded_at ?? ''),
@@ -651,6 +929,10 @@ export const systemAPI = {
     const res = await api.get<SystemStats>('/api/system/stats');
     return res.data;
   },
+  getFeatures: async (): Promise<SystemFeatureFlags> => {
+    const res = await api.get('/api/system/features');
+    return normaliseSystemFeatureFlags(res.data);
+  },
   reboot: async (): Promise<void> => {
     await api.post('/api/system/reboot');
   },
@@ -738,6 +1020,120 @@ export const accountLinkAPI = {
 export const environmentAPI = {
   getSummary: (zoneId: number): Promise<ZoneEnvironmentSummary> =>
     api.get<ZoneEnvironmentSummary>(`/api/irrigation-zones/${zoneId}/environment-summary`).then(r => r.data),
+};
+
+export const historyAPI = {
+  getZoneCards: async (zoneId: number): Promise<HistoryCardSummaryResponse> => {
+    const response = await api.get(`/api/history/zones/${zoneId}/cards`);
+    return normaliseHistoryCardSummaryResponse(response.data);
+  },
+
+  getGatewayCards: async (gatewayEui: string): Promise<HistoryCardSummaryResponse> => {
+    const response = await api.get(`/api/history/gateways/${encodeURIComponent(gatewayEui)}/cards`);
+    return normaliseHistoryCardSummaryResponse(response.data);
+  },
+
+  setZoneCardPreference: async (
+    zoneId: number,
+    cardId: string,
+    payload: Partial<Pick<HistoryCardPreference, 'pinned' | 'manualOrder' | 'lastViewMode' | 'hidden'>>,
+  ): Promise<HistoryCardPreference> => {
+    const response = await api.put(
+      `/api/history/zones/${zoneId}/cards/${encodeURIComponent(cardId)}/preferences`,
+      payload,
+    );
+    return normaliseHistoryCardPreference(response.data);
+  },
+
+  markZoneCardOpened: async (
+    zoneId: number,
+    cardId: string,
+    payload: Partial<Pick<HistoryCardPreference, 'lastViewMode'>> = {},
+  ): Promise<HistoryCardPreference> => {
+    const response = await api.post(
+      `/api/history/zones/${zoneId}/cards/${encodeURIComponent(cardId)}/opened`,
+      payload,
+    );
+    return normaliseHistoryCardPreference(response.data);
+  },
+
+  getZoneCardData: async (
+    zoneId: number,
+    cardId: string,
+    request: HistoryCardDataRequest,
+  ): Promise<HistoryCardDataResponse> => {
+    const params = buildHistoryCardDataParams(request);
+    const response = await api.get(`/api/history/zones/${zoneId}/cards/${encodeURIComponent(cardId)}/data`, { params });
+    return normaliseHistoryCardDataResponse(response.data);
+  },
+
+  getZoneCardAdvanced: async (
+    zoneId: number,
+    cardId: string,
+    request: HistoryCardDataRequest,
+  ): Promise<HistoryAdvancedResponse> => {
+    const params = buildHistoryCardDataParams(request);
+    const response = await api.get(`/api/history/zones/${zoneId}/cards/${encodeURIComponent(cardId)}/advanced`, { params });
+    return normaliseHistoryAdvancedResponse(response.data);
+  },
+
+  getGatewayCardData: async (
+    gatewayEui: string,
+    cardId: string,
+    request: HistoryCardDataRequest,
+  ): Promise<HistoryCardDataResponse> => {
+    const params = buildHistoryCardDataParams(request);
+    const response = await api.get(
+      `/api/history/gateways/${encodeURIComponent(gatewayEui)}/cards/${encodeURIComponent(cardId)}/data`,
+      { params },
+    );
+    return normaliseHistoryCardDataResponse(response.data);
+  },
+
+  getGatewayCardAdvanced: async (
+    gatewayEui: string,
+    cardId: string,
+    request: HistoryCardDataRequest,
+  ): Promise<HistoryAdvancedResponse> => {
+    const params = buildHistoryCardDataParams(request);
+    const response = await api.get(
+      `/api/history/gateways/${encodeURIComponent(gatewayEui)}/cards/${encodeURIComponent(cardId)}/advanced`,
+      { params },
+    );
+    return normaliseHistoryAdvancedResponse(response.data);
+  },
+
+  getWorkspaces: async (): Promise<HistoryWorkspaceListResponse> => {
+    const response = await api.get('/api/history/workspaces');
+    return normaliseHistoryWorkspaceListResponse(response.data);
+  },
+
+  createWorkspace: async (payload: {
+    name: string;
+    zoneId: number | null;
+    workspace: HistoryWorkspace;
+    isDefault?: boolean;
+  }): Promise<HistoryWorkspaceRecord> => {
+    const response = await api.post('/api/history/workspaces', payload);
+    return normaliseHistoryWorkspaceRecord(response.data);
+  },
+
+  updateWorkspace: async (
+    workspaceId: number,
+    payload: Partial<{
+      name: string;
+      zoneId: number | null;
+      workspace: HistoryWorkspace;
+      isDefault: boolean;
+    }>,
+  ): Promise<HistoryWorkspaceRecord> => {
+    const response = await api.put(`/api/history/workspaces/${workspaceId}`, payload);
+    return normaliseHistoryWorkspaceRecord(response.data);
+  },
+
+  deleteWorkspace: async (workspaceId: number): Promise<void> => {
+    await api.delete(`/api/history/workspaces/${workspaceId}`);
+  },
 };
 
 export type IrrigationActuationStatus =

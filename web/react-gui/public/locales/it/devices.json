@@ -82,7 +82,8 @@
     "failedToRemoveDevice": "Impossibile rimuovere il dispositivo dalla zona",
     "noDevices": "Nessun dispositivo in questa zona",
     "assignFirst": "Assegna il primo dispositivo",
-    "devicesInZone": "Dispositivi in questa zona:"
+    "devicesInZone": "Dispositivi in questa zona:",
+    "data": "Dati"
   },
   "schedule": {
     "irrigationSchedule": "Programma di irrigazione",

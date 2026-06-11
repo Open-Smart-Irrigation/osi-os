@@ -82,7 +82,8 @@
     "failedToRemoveDevice": "Falha ao remover dispositivo da zona",
     "noDevices": "Sem dispositivos nesta zona",
     "assignFirst": "Atribuir primeiro dispositivo",
-    "devicesInZone": "Dispositivos nesta zona:"
+    "devicesInZone": "Dispositivos nesta zona:",
+    "data": "Dados"
   },
   "schedule": {
     "irrigationSchedule": "Programa de rega",

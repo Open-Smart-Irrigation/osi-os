@@ -111,7 +111,8 @@
     "failedToRemoveDevice": "Failed to remove device from zone",
     "noDevices": "No devices in this zone yet",
     "assignFirst": "Assign First Device",
-    "devicesInZone": "Devices in this zone:"
+    "devicesInZone": "Devices in this zone:",
+    "data": "Data"
   },
   "schedule": {
     "irrigationSchedule": "Irrigation Schedule",

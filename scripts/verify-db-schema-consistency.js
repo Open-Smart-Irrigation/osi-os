@@ -7,6 +7,7 @@ const path = require('path');
 const repoRoot = path.resolve(__dirname, '..');
 
 const seedDatabasePaths = [
+  'conf/base_raspberrypi_bcm27xx_bcm2709/files/usr/share/db/farming.db',
   'conf/base_raspberrypi_bcm27xx_bcm2712/files/usr/share/db/farming.db',
   'conf/full_raspberrypi_bcm27xx_bcm2708/files/usr/share/db/farming.db',
   'conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/db/farming.db',
@@ -170,12 +171,158 @@ const schemaContract = {
   chameleon_calibration_misses: [
     'array_id', 'last_tried', 'reason',
   ],
+  zone_seasons: [
+    'id',
+    'zone_id',
+    'season_uuid',
+    'name',
+    'starts_on',
+    'ends_on',
+    'crop_type',
+    'variety',
+    'phenological_stage',
+    'is_active',
+    'is_default',
+    'created_at',
+    'updated_at',
+  ],
+  history_channel_rollups: [
+    'id',
+    'zone_id',
+    'card_type',
+    'logical_source_key',
+    'channel_id',
+    'bucket_level',
+    'bucket_start',
+    'bucket_end',
+    'min_value',
+    'max_value',
+    'mean_value',
+    'median_value',
+    'latest_value',
+    'dominant_status',
+    'coverage_pct',
+    'coverage_confidence',
+    'sample_count',
+    'event_count',
+    'threshold_crossing_count',
+    'unit',
+    'computed_at',
+  ],
+  history_card_preferences: [
+    'user_id',
+    'owner_user_uuid',
+    'scope_type',
+    'zone_id',
+    'gateway_eui',
+    'card_id',
+    'pinned',
+    'manual_order',
+    'open_count',
+    'last_opened_at',
+    'last_view_mode',
+    'hidden',
+    'updated_at',
+  ],
+  history_workspaces: [
+    'id',
+    'user_id',
+    'owner_user_uuid',
+    'zone_id',
+    'name',
+    'workspace_json',
+    'is_default',
+    'created_at',
+    'updated_at',
+  ],
 };
 
 const requiredIndexes = {
+  device_data: ['idx_device_data_deveui_recorded_at'],
   dendrometer_readings: ['idx_dendro_readings_deveui_time'],
   chameleon_readings: ['idx_chameleon_readings_deveui_time', 'idx_chameleon_readings_array_id'],
   chameleon_calibrations: ['idx_chameleon_calibrations_sensor_id'],
+  zone_seasons: [
+    'idx_zone_seasons_zone_range',
+    'idx_zone_seasons_zone_active',
+    'idx_zone_seasons_zone_active_unique',
+    'idx_zone_seasons_zone_default',
+    'idx_zone_seasons_uuid',
+  ],
+  history_channel_rollups: [
+    'idx_history_rollups_zone_card_bucket',
+    'idx_history_rollups_source_channel',
+    'idx_history_rollups_unique_bucket',
+  ],
+  history_card_preferences: [
+    'idx_history_card_preferences_zone',
+    'idx_history_card_preferences_gateway',
+  ],
+  history_workspaces: [
+    'idx_history_workspaces_user_zone',
+    'idx_history_workspaces_user_default',
+    'idx_history_workspaces_user_global_default',
+  ],
+};
+
+const requiredIndexSqlFragments = {
+  idx_device_data_deveui_recorded_at: [
+    'on device_data(deveui, recorded_at)',
+  ],
+  idx_zone_seasons_zone_range: [
+    'on zone_seasons(zone_id, starts_on, ends_on)',
+  ],
+  idx_zone_seasons_zone_active: [
+    'on zone_seasons(zone_id, is_active, starts_on, ends_on)',
+  ],
+  idx_zone_seasons_zone_active_unique: [
+    'unique index',
+    'on zone_seasons(zone_id)',
+    'where is_active = 1',
+  ],
+  idx_zone_seasons_zone_default: [
+    'unique index',
+    'on zone_seasons(zone_id)',
+    'where is_default = 1',
+  ],
+  idx_zone_seasons_uuid: [
+    'unique index',
+    'on zone_seasons(season_uuid)',
+    'where season_uuid is not null',
+  ],
+  idx_history_rollups_unique_bucket: [
+    'unique index',
+    'on history_channel_rollups(zone_id, card_type, logical_source_key, channel_id, bucket_level, bucket_start)',
+  ],
+  idx_history_rollups_zone_card_bucket: [
+    'on history_channel_rollups(zone_id, card_type, bucket_level, bucket_start, bucket_end)',
+  ],
+  idx_history_rollups_source_channel: [
+    'on history_channel_rollups(logical_source_key, channel_id, bucket_level, bucket_start)',
+  ],
+  idx_history_card_preferences_zone: [
+    'unique index',
+    'on history_card_preferences(user_id, zone_id, card_id)',
+    "where scope_type = 'zone'",
+  ],
+  idx_history_card_preferences_gateway: [
+    'unique index',
+    'on history_card_preferences(user_id, gateway_eui, card_id)',
+    "where scope_type = 'gateway'",
+  ],
+  idx_history_workspaces_user_zone: [
+    'on history_workspaces(user_id, zone_id)',
+  ],
+  idx_history_workspaces_user_default: [
+    'unique index',
+    'on history_workspaces(user_id, zone_id)',
+    'where is_default = 1',
+  ],
+  idx_history_workspaces_user_global_default: [
+    'unique index',
+    'on history_workspaces(user_id)',
+    'where is_default = 1 and zone_id is null',
+  ],
 };
 
 function sqlite(dbPath, sql) {
@@ -192,6 +339,20 @@ function indexNames(dbPath, tableName) {
   const output = sqlite(dbPath, `PRAGMA index_list(${tableName});`);
   if (!output) return [];
   return output.split('\n').map((line) => line.split('|')[1]).filter(Boolean);
+}
+
+function indexSql(dbPath, indexName) {
+  const escapedName = indexName.replace(/'/g, "''");
+  return sqlite(dbPath, `SELECT sql FROM sqlite_master WHERE type = 'index' AND name = '${escapedName}';`);
+}
+
+function tableSql(dbPath, tableName) {
+  const escapedName = tableName.replace(/'/g, "''");
+  return sqlite(dbPath, `SELECT sql FROM sqlite_master WHERE type = 'table' AND name = '${escapedName}';`);
+}
+
+function normalizeSql(sql) {
+  return sql.replace(/\s+/g, ' ').trim().toLowerCase();
 }
 
 function compareSet(label, actualValues, expectedValues) {
@@ -217,6 +378,9 @@ function verifyDb(dbPath) {
   for (const [tableName, expectedColumns] of Object.entries(schemaContract)) {
     compareSet(`${dbPath}:${tableName} columns`, columnNames(dbPath, tableName), expectedColumns);
   }
+  if (!tableSql(dbPath, 'devices').includes("'AQUASCOPE_LORAIN'")) {
+    throw new Error(`${dbPath}: devices.type_id CHECK is missing AQUASCOPE_LORAIN`);
+  }
   for (const [tableName, expectedIndexes] of Object.entries(requiredIndexes)) {
     const indexes = indexNames(dbPath, tableName);
     const missing = expectedIndexes.filter((name) => !indexes.includes(name));
@@ -224,10 +388,34 @@ function verifyDb(dbPath) {
       throw new Error(`${dbPath}:${tableName} missing indexes: ${missing.join(',')}`);
     }
   }
+  for (const [indexName, expectedFragments] of Object.entries(requiredIndexSqlFragments)) {
+    const sql = normalizeSql(indexSql(dbPath, indexName));
+    const missingFragments = expectedFragments.filter((fragment) => !sql.includes(fragment));
+    if (missingFragments.length) {
+      throw new Error(`${dbPath}:${indexName} definition drift: ${sql || '<missing>'}`);
+    }
+  }
+  const historyQueryPlan = sqlite(
+    dbPath,
+    `EXPLAIN QUERY PLAN
+     SELECT *
+     FROM device_data
+     WHERE deveui IN ('0016C001F11715E2', '0016C001F11715E3', '0016C001F11715E4')
+       AND recorded_at BETWEEN '2026-01-01T00:00:00Z' AND '2026-01-31T23:59:59Z';`,
+  );
+  if (!historyQueryPlan.includes('idx_device_data_deveui_recorded_at')) {
+    throw new Error(`${dbPath}: history raw query did not use idx_device_data_deveui_recorded_at: ${historyQueryPlan}`);
+  }
 }
 
 const explicitPaths = process.argv.slice(2);
 const dbPaths = explicitPaths.length ? explicitPaths.map((entry) => path.resolve(entry)) : seedDatabasePaths;
+
+const seedSqlPath = path.join(repoRoot, 'database', 'seed-blank.sql');
+const seedSql = fs.readFileSync(seedSqlPath, 'utf8');
+if (!seedSql.includes("'AQUASCOPE_LORAIN'")) {
+  throw new Error(`${path.relative(repoRoot, seedSqlPath)}: devices.type_id CHECK is missing AQUASCOPE_LORAIN`);
+}
 
 for (const dbPath of dbPaths) {
   verifyDb(dbPath);

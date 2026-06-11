@@ -82,7 +82,8 @@
     "failedToRemoveDevice": "Impossible de retirer l'appareil de la zone",
     "noDevices": "Aucun appareil dans cette zone",
     "assignFirst": "Assigner le premier appareil",
-    "devicesInZone": "Appareils dans cette zone :"
+    "devicesInZone": "Appareils dans cette zone :",
+    "data": "Donnees"
   },
   "schedule": {
     "irrigationSchedule": "Planning d'irrigation",

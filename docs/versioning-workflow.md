@@ -179,18 +179,26 @@ Pi order for this project:
 
 If `osi-server` has changes to deploy alongside this OSI OS release:
 
-```bash
-# On VPS — pull and rebuild backend only
-ssh -i ~/.ssh/osi_server_rollout rocky@83.228.220.63 '
-  git -C /home/rocky/docker/osi-server pull --ff-only origin main &&
-  cd /home/rocky/docker/osi-server/docker &&
-  docker compose build backend &&
-  docker compose up -d backend
-'
+Cloud environments:
 
-# Verify startup (~20 s)
-ssh -i ~/.ssh/osi_server_rollout rocky@83.228.220.63 \
-  'docker logs osi-backend 2>&1 | grep -E "Started|ERROR" | tail -5'
+| Role | Host |
+|------|------|
+| Production | `osicloud.ch` |
+| Test | `server.opensmartirrigation.org` (`57.129.7.196`) |
+
+Do not store production SSH credentials, private keys, or host aliases in this repo or local agent memory. Use an ephemeral SSH key supplied for the specific rollout.
+
+Run the deploy through SSH with the rollout key. Replace the host with the selected cloud environment from the table.
+
+```bash
+ssh -i /path/to/ephemeral-key rocky@osicloud.ch <<'REMOTE'
+set -e
+git -C /home/rocky/docker/osi-server pull --ff-only origin main
+cd /home/rocky/docker/osi-server/docker
+docker compose build backend
+docker compose up -d backend
+docker logs osi-backend 2>&1 | grep -E "Started|ERROR" | tail -5
+REMOTE
 ```
 
 > **Never** run `docker compose up -d --build` (builds all services, overwhelms the VPS).
