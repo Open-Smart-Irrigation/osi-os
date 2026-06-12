@@ -159,6 +159,12 @@ cd web/react-gui && npm run build             # frontend build
 - Schema changes go via migrations or idempotent SQL — never replace `farming.db`.
 - Stale `/srv/node-red/.chirpstack.env` `DEVICE_EUI*` values can override runtime identity; remove during repair. Canonical EUI is uppercase and comes from the helper / UCI path.
 
+## Production cloud access
+
+- `osicloud.ch` is the production OSI Server. Treat any SSH access to that host, including through a local alias or loaded SSH key, as restricted production access.
+- Do not connect to `osicloud.ch`, inspect its files, read its environment, copy secrets from it, or run commands there unless the user explicitly asks for production/`osicloud.ch` access in the current turn.
+- A working SSH key or successful `ssh` check is not permission. Ambiguous requests such as "the other server" are not enough; clarify or use the test host instead.
+
 ---
 
 ## Security
