@@ -39,6 +39,7 @@ const LSN50_INTERRUPT_MODE_OPTIONS = [
 
 const MAX_LSN50_INTERVAL_MINUTES = Math.floor(0xffffff / 60);
 const MAX_LSN50_5V_WARMUP_MS = 65535;
+const DEFAULT_DENDRO_WARMUP_MS = 3000;
 
 function requiredModeForSensor(key: SensorKey): Lsn50Mode | null {
   if (key === 'chameleon_enabled') {
@@ -150,7 +151,9 @@ export const DraginoSettingsModal: React.FC<DraginoSettingsModalProps> = ({
   const [intervalMinutesInput, setIntervalMinutesInput] = useState('');
   const [intervalInfo, setIntervalInfo] = useState<string | null>(null);
   const [interruptModeInput, setInterruptModeInput] = useState('0');
-  const [warmupMillisecondsInput, setWarmupMillisecondsInput] = useState('');
+  const [warmupMillisecondsInput, setWarmupMillisecondsInput] = useState(
+    device.dendro_enabled === 1 ? String(DEFAULT_DENDRO_WARMUP_MS) : ''
+  );
   const [externalSensorInfo, setExternalSensorInfo] = useState<string | null>(null);
   const [showAdvanced, setShowAdvanced] = useState(false);
   const dialogRef = useRef<HTMLDivElement | null>(null);
