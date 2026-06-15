@@ -39,6 +39,7 @@ const LSN50_INTERRUPT_MODE_OPTIONS = [
 
 const MAX_LSN50_INTERVAL_MINUTES = Math.floor(0xffffff / 60);
 const MAX_LSN50_5V_WARMUP_MS = 65535;
+const DEFAULT_DENDRO_WARMUP_MS = 3000;
 
 function requiredModeForSensor(key: SensorKey): Lsn50Mode | null {
   if (key === 'chameleon_enabled') {
@@ -150,7 +151,13 @@ export const DraginoSettingsModal: React.FC<DraginoSettingsModalProps> = ({
   const [intervalMinutesInput, setIntervalMinutesInput] = useState('');
   const [intervalInfo, setIntervalInfo] = useState<string | null>(null);
   const [interruptModeInput, setInterruptModeInput] = useState('0');
-  const [warmupMillisecondsInput, setWarmupMillisecondsInput] = useState('');
+  // Warm-up default is applied in two phases: (1) here on mount if dendrometer is already enabled,
+  // and (2) via the effect below if dendrometer gets enabled while the modal stays open.
+  const [warmupMillisecondsInput, setWarmupMillisecondsInput] = useState(
+    device.dendro_enabled === 1 ? String(DEFAULT_DENDRO_WARMUP_MS) : ''
+  );
+  // Tracks whether the operator has edited the warm-up field, so auto-defaulting never clobbers input.
+  const warmupTouchedRef = useRef(false);
   const [externalSensorInfo, setExternalSensorInfo] = useState<string | null>(null);
   const [showAdvanced, setShowAdvanced] = useState(false);
   const dialogRef = useRef<HTMLDivElement | null>(null);
@@ -176,6 +183,14 @@ export const DraginoSettingsModal: React.FC<DraginoSettingsModalProps> = ({
   useEffect(() => {
     onCloseRef.current = onClose;
   }, [onClose]);
+
+  // If dendrometer gets enabled while the modal is open, seed the recommended 3 s warm-up —
+  // but only when the field is still empty and the operator hasn't edited it.
+  useEffect(() => {
+    if (device.dendro_enabled === 1 && !warmupTouchedRef.current) {
+      setWarmupMillisecondsInput((prev) => (prev === '' ? String(DEFAULT_DENDRO_WARMUP_MS) : prev));
+    }
+  }, [device.dendro_enabled]);
 
   useEffect(() => {
     openerRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
@@ -553,7 +568,10 @@ export const DraginoSettingsModal: React.FC<DraginoSettingsModalProps> = ({
                     inputMode="numeric"
                     value={warmupMillisecondsInput}
                     disabled={busy === 'warmup'}
-                    onChange={(event) => setWarmupMillisecondsInput(event.target.value)}
+                    onChange={(event) => {
+                      warmupTouchedRef.current = true;
+                      setWarmupMillisecondsInput(event.target.value);
+                    }}
                     placeholder="1000"
                     className={`w-full rounded-lg border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-sm text-[var(--text)] ${FOCUS_VISIBLE_RING}`}
                   />
