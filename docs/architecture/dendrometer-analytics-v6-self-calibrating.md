@@ -75,12 +75,19 @@ Replace the hardcoded `DendroCalibration` built-ins with a DB-backed lookup:
   using a small in-code NOAA solar-position utility (no new dependency). Pre-dawn tracks sunrise; afternoon tracks
   solar-noon + offset. Fall back to the fixed 05–07h / 13–16h windows when latitude/longitude are missing. The full-day
   fallback for empty windows is retained.
-- **(c) Confidence gating fix.** Unify the two quality notions: `dataQuality="insufficient"` forces
-  `lowConfidence = true`, so sparse days cannot drive the zone decision. Raise the sample floors
-  (`MIN_SAMPLES_DAY`, window minimums) to defensible values tied to the expected uplink cadence.
+- **(c) Confidence gating fix.** Unify the two quality notions so a day below the confident-sample floor
+  (`MIN_SAMPLES_FOR_CONFIDENT_DAY`, shared with the `dataQuality="insufficient"` band) is low-confidence and cannot
+  drive the zone decision. Raise the sample floors (`MIN_SAMPLES_DAY`, window minimums) to defensible values tied to the
+  expected uplink cadence. **This is an intentional behavior change versus v5** (sparse days that v5 might have classified
+  no longer drive irrigation); the baseline-accumulation path is unaffected because it already excludes `insufficient`
+  days. "Behavior-preserving" elsewhere refers only to internal refactors being equivalent to the prior v6 code, not to
+  parity with v5.
 - **(d) Recovery / VPD consistency.** Replace the `mdsNorm` / `MDS_ref` criteria in `updateRecoveryVerification` and
   `applyVpdStressAdjustment` with `TWD_rel`-based criteria (e.g. recovery passes when `TWD_rel` is below the mild
-  threshold and trending down over N days), consistent with the new classifier.
+  threshold and trending down over N days), consistent with the new classifier. Note `TWD_rel` is the **day**
+  (afternoon) deficit, whereas the pre-v6 VPD override compared the **night** deficit; since day ≥ night, the same
+  `0.5`/`0.8` cutoffs trigger somewhat more readily — intentional with the move to `TWD_rel`, and to be revisited once
+  thresholds are field-calibrated.
 
 ### 4. Companion config item — LSN50 sensor warm-up (osi-os, not firmware)
 
