@@ -154,6 +154,8 @@ export const DraginoSettingsModal: React.FC<DraginoSettingsModalProps> = ({
   const [warmupMillisecondsInput, setWarmupMillisecondsInput] = useState(
     device.dendro_enabled === 1 ? String(DEFAULT_DENDRO_WARMUP_MS) : ''
   );
+  // Tracks whether the operator has edited the warm-up field, so auto-defaulting never clobbers input.
+  const warmupTouchedRef = useRef(false);
   const [externalSensorInfo, setExternalSensorInfo] = useState<string | null>(null);
   const [showAdvanced, setShowAdvanced] = useState(false);
   const dialogRef = useRef<HTMLDivElement | null>(null);
@@ -179,6 +181,14 @@ export const DraginoSettingsModal: React.FC<DraginoSettingsModalProps> = ({
   useEffect(() => {
     onCloseRef.current = onClose;
   }, [onClose]);
+
+  // If dendrometer gets enabled while the modal is open, seed the recommended 3 s warm-up —
+  // but only when the field is still empty and the operator hasn't edited it.
+  useEffect(() => {
+    if (device.dendro_enabled === 1 && !warmupTouchedRef.current) {
+      setWarmupMillisecondsInput((prev) => (prev === '' ? String(DEFAULT_DENDRO_WARMUP_MS) : prev));
+    }
+  }, [device.dendro_enabled]);
 
   useEffect(() => {
     openerRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
@@ -556,7 +566,10 @@ export const DraginoSettingsModal: React.FC<DraginoSettingsModalProps> = ({
                     inputMode="numeric"
                     value={warmupMillisecondsInput}
                     disabled={busy === 'warmup'}
-                    onChange={(event) => setWarmupMillisecondsInput(event.target.value)}
+                    onChange={(event) => {
+                      warmupTouchedRef.current = true;
+                      setWarmupMillisecondsInput(event.target.value);
+                    }}
                     placeholder="1000"
                     className={`w-full rounded-lg border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-sm text-[var(--text)] ${FOCUS_VISIBLE_RING}`}
                   />
