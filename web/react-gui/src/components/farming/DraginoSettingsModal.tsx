@@ -151,6 +151,8 @@ export const DraginoSettingsModal: React.FC<DraginoSettingsModalProps> = ({
   const [intervalMinutesInput, setIntervalMinutesInput] = useState('');
   const [intervalInfo, setIntervalInfo] = useState<string | null>(null);
   const [interruptModeInput, setInterruptModeInput] = useState('0');
+  // Warm-up default is applied in two phases: (1) here on mount if dendrometer is already enabled,
+  // and (2) via the effect below if dendrometer gets enabled while the modal stays open.
   const [warmupMillisecondsInput, setWarmupMillisecondsInput] = useState(
     device.dendro_enabled === 1 ? String(DEFAULT_DENDRO_WARMUP_MS) : ''
   );
