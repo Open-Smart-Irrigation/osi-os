@@ -79,7 +79,7 @@ const RecoveryRatioBar: React.FC<{ value: number }> = ({ value }) => {
 export const DendrometerTreeCard: React.FC<Props> = ({ device, today, history, onOpenMonitor }) => {
   const baselineComplete = today?.baseline_complete === 1;
   const stress = today?.tree_state_v5 ?? today?.stress_level ?? 'none';
-  const cfg = STRESS_CONFIG[stress] ?? STRESS_CONFIG.none;
+  const cfg = STRESS_CONFIG[stress] ?? STRESS_CONFIG.unknown;
   const hasData = today != null;
   const borderClass = !hasData || !baselineComplete ? 'border-l-gray-300' : cfg.border;
 

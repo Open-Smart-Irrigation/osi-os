@@ -263,7 +263,9 @@ export interface CreateZoneRequest {
 
 // ---- Dendrometer analytics types ----
 
-export type StressLevel = 'none' | 'mild' | 'moderate' | 'significant' | 'severe';
+// 'unknown' is emitted by the backend for low-confidence / insufficient-data days
+// (e.g. sparse first days). Renderers must handle it, not just the five graded levels.
+export type StressLevel = 'none' | 'mild' | 'moderate' | 'significant' | 'severe' | 'unknown';
 export type IrrigationAction =
   | 'decrease_20'
   | 'decrease_10'

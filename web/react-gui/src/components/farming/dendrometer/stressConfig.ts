@@ -61,6 +61,16 @@ export const STRESS_CONFIG: Record<StressLevel, StressConfig> = {
     hex: '#7f1d1d',
     hexLight: '#fecaca',
   },
+  // Low-confidence / insufficient-data day — neutral grey, not a graded stress level.
+  unknown: {
+    label: 'Unknown',
+    dots: 0,
+    border: 'border-l-gray-400',
+    badgeBg: 'bg-gray-100',
+    badgeText: 'text-gray-700',
+    hex: '#6b7280',
+    hexLight: '#f3f4f6',
+  },
 };
 
 export interface ActionConfig {

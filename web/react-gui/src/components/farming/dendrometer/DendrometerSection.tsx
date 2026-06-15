@@ -244,7 +244,7 @@ interface ZoneSummaryProps {
 }
 
 const ZoneSummaryRow: React.FC<ZoneSummaryProps> = ({ stress, rainfall, water, deviceCount }) => {
-  const cfg = STRESS_CONFIG[stress as keyof typeof STRESS_CONFIG] ?? STRESS_CONFIG.none;
+  const cfg = STRESS_CONFIG[stress as keyof typeof STRESS_CONFIG] ?? STRESS_CONFIG.unknown;
   return (
     <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-[var(--text-tertiary)]">
       <span>

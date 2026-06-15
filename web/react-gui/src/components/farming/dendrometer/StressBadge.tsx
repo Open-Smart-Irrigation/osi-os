@@ -8,7 +8,7 @@ interface Props {
 }
 
 export const StressBadge: React.FC<Props> = ({ level, size = 'md' }) => {
-  const cfg = STRESS_CONFIG[level];
+  const cfg = STRESS_CONFIG[level] ?? STRESS_CONFIG.unknown;
   const dots = '●'.repeat(cfg.dots) + '○'.repeat(5 - cfg.dots);
   const textSize = size === 'sm' ? 'text-xs' : 'text-sm';
   const padding  = size === 'sm' ? 'px-2 py-0.5' : 'px-2.5 py-1';

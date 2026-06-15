@@ -78,7 +78,7 @@ const IndicatorsTable: React.FC<{ rows: DendroDaily[] }> = ({ rows }) => {
         </thead>
         <tbody>
           {ordered.map(row => {
-            const cfg = STRESS_CONFIG[row.stress_level];
+            const cfg = STRESS_CONFIG[row.stress_level] ?? STRESS_CONFIG.unknown;
             return (
               <tr key={row.date} className="border-b border-[var(--border)] hover:bg-[var(--surface)]">
                 <td className="py-2 pr-4 text-[var(--text-secondary)] whitespace-nowrap">{fmtDate(row.date)}</td>
@@ -338,7 +338,7 @@ const ErrorMsg = ({ msg }: { msg: string }) => (
 export const DendrometerMonitor: React.FC<Props> = ({ device, daily, onClose }) => {
   const [tab, setTab] = useState<Tab>('indicators');
   const stress = daily[0]?.stress_level ?? 'none';
-  const cfg    = STRESS_CONFIG[stress];
+  const cfg    = STRESS_CONFIG[stress] ?? STRESS_CONFIG.unknown;
 
   return (
     <div className="fixed inset-0 z-50 flex">
