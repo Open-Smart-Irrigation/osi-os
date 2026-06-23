@@ -241,7 +241,9 @@ function dispatchTouch(
     Object.defineProperty(event, 'changedTouches', { value: touchList });
   }
 
-  element.dispatchEvent(event);
+  act(() => {
+    element.dispatchEvent(event);
+  });
 }
 
 function renderAppAtRoute(hashRoute: string) {
@@ -1003,6 +1005,9 @@ describe('History card detail route', () => {
 
     expect(await screen.findByRole('grid')).toBeInTheDocument();
     expect(screen.getByTestId('view-mode-label')).toHaveTextContent('Calendar - June 2026');
+    await act(async () => {
+      await Promise.resolve();
+    });
     const surface = screen.getByTestId('history-visualization-surface');
     preparePointerTarget(surface);
     dispatchTouch(surface, 'touchstart', [{ clientX: 250, clientY: 160 }]);
