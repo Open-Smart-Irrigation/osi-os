@@ -1,16 +1,15 @@
 import React, { useState, useMemo } from 'react';
-import { Link } from 'react-router-dom';
 import useSWR from 'swr';
 import { devicesAPI, irrigationOutcomesAPI, irrigationZonesAPI } from '../services/api';
 import { useAuth } from '../contexts/AuthContext';
 import { useTranslation } from 'react-i18next';
+import { DashboardHeader } from '../components/DashboardHeader';
 import { KiwiSensorCard } from '../components/farming/KiwiSensorCard';
 import { StregaValveCard } from '../components/farming/StregaValveCard';
 import { DraginoTempCard } from '../components/farming/DraginoTempCard';
 import { IrrigationZoneCard } from '../components/farming/IrrigationZoneCard';
 import { AddDeviceModal } from '../components/farming/AddDeviceModal';
 import { CreateZoneModal } from '../components/farming/CreateZoneModal';
-import { LanguageSwitcher } from '../components/LanguageSwitcher';
 import { SystemPanel } from '../components/farming/SystemPanel';
 import { SenseCapWeatherCard } from '../components/farming/SenseCapWeatherCard';
 import { LoRainGaugeCard } from '../components/farming/LoRainGaugeCard';
@@ -128,51 +127,12 @@ export const FarmingDashboard: React.FC = () => {
 
   return (
     <div className="min-h-screen bg-[var(--bg)]">
-      {/* Header */}
-      <header className="bg-[var(--header-bg)] shadow-xl">
-        <div className="max-w-7xl mx-auto px-4 py-6">
-          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-            <div>
-              <h1 className="text-4xl font-bold text-[var(--header-text)] high-contrast-text">
-                OSI OS Dashboard
-              </h1>
-              <p className="text-[var(--header-subtext)] text-lg mt-1">{t('welcome', { username })}</p>
-            </div>
-            <div className="flex max-w-full flex-row flex-nowrap items-center gap-2 overflow-x-auto">
-              <div className="shrink-0">
-                <LanguageSwitcher />
-              </div>
-              <button
-                onClick={() => setIsCreateZoneModalOpen(true)}
-                className="shrink-0 bg-[var(--primary)] hover:bg-[var(--primary-hover)] text-white font-bold text-sm px-3 py-2 touch-target rounded-lg transition-colors shadow-lg flex items-center justify-center gap-1"
-              >
-                <span className="text-lg">+</span>
-                {t('addZone')}
-              </button>
-              <button
-                onClick={() => setIsAddDeviceModalOpen(true)}
-                className="shrink-0 bg-[var(--primary)] hover:bg-[var(--primary-hover)] text-white font-bold text-sm px-3 py-2 touch-target rounded-lg transition-colors shadow-lg flex items-center justify-center gap-1"
-              >
-                <span className="text-lg">+</span>
-                {t('addDevice')}
-              </button>
-              <Link
-                to="/account-link"
-                className="shrink-0 bg-[var(--secondary-bg)] hover:bg-[var(--border)] text-[var(--text)] font-bold text-sm px-3 py-2 touch-target rounded-lg transition-colors flex items-center justify-center gap-1"
-              >
-                <span>☁</span>
-                OSI Server
-              </Link>
-              <button
-                onClick={logout}
-                className="shrink-0 bg-[var(--secondary-bg)] hover:bg-[var(--border)] text-[var(--text)] font-bold text-sm px-3 py-2 touch-target rounded-lg transition-colors"
-              >
-                {t('logout')}
-              </button>
-            </div>
-          </div>
-        </div>
-      </header>
+      <DashboardHeader
+        username={username}
+        onAddZone={() => setIsCreateZoneModalOpen(true)}
+        onAddDevice={() => setIsAddDeviceModalOpen(true)}
+        onLogout={logout}
+      />
 
       {/* Main Content */}
       <main className="max-w-7xl mx-auto px-4 py-8">

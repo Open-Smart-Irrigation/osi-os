@@ -11,8 +11,6 @@
   "accountMenu": {
     "osiServer": "OSI Server"
   },
-  "addZone": "Zone hinzufügen",
-  "addDevice": "Gerät hinzufügen",
   "logout": "Abmelden",
   "loading": "Dashboard wird geladen...",
   "failedToLoad": "Daten konnten nicht geladen werden",

@@ -98,7 +98,7 @@ export const HeaderMenu: React.FC<HeaderMenuProps> = ({
         className={`flex items-center justify-center gap-1.5 rounded-lg font-bold transition-colors ${triggerClassName}`}
       >
         {label}
-        <span aria-hidden="true" className="text-xs opacity-70">{open ? '▲' : '▼'}</span>
+        <span aria-hidden="true" className="text-xs opacity-70">{open ? '^' : 'v'}</span>
       </button>
 
       {open && (

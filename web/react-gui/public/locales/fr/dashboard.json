@@ -11,8 +11,6 @@
   "accountMenu": {
     "osiServer": "OSI Server"
   },
-  "addZone": "Ajouter une zone",
-  "addDevice": "Ajouter un appareil",
   "logout": "Déconnexion",
   "loading": "Chargement du tableau de bord...",
   "failedToLoad": "Échec du chargement des données",
