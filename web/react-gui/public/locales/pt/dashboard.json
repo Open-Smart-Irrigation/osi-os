@@ -1,6 +1,16 @@
 {
   "title": "Painel Open Smart Irrigation",
   "welcome": "Bem-vindo, {{username}}",
+  "add": "Adicionar",
+  "addMenu": {
+    "zone": "Adicionar zona",
+    "device": "Adicionar dispositivo"
+  },
+  "data": "Dados",
+  "account": "Conta",
+  "accountMenu": {
+    "osiServer": "OSI Server"
+  },
   "addZone": "Adicionar zona",
   "addDevice": "Adicionar dispositivo",
   "logout": "Terminar sessão",

@@ -1,6 +1,16 @@
 {
   "title": "Pulezidenti w'Open Smart Irrigation",
   "welcome": "Tukwanirizza, {{username}}",
+  "add": "Yongera",
+  "addMenu": {
+    "zone": "Yongera Ekifo",
+    "device": "Yongera Ekyuma"
+  },
+  "data": "Data",
+  "account": "Akaawunti",
+  "accountMenu": {
+    "osiServer": "OSI Server"
+  },
   "addZone": "Yongera Ekifo",
   "addDevice": "Yongera Ekyuma",
   "logout": "Fuluma",
