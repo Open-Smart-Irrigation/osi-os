@@ -88,6 +88,9 @@ Sources:
   behavior and needs a separate field trial.
 - Do not schedule the Pi hotspot off by default in v1; daytime/night schedules
   are optional field-test policy, not the first shipped profile default.
+- Do not remove the basic LuCI or ChirpStack first-configuration GUI.
+- Do not stretch edge-cloud sync cadences beyond the maintenance-window gate
+  without measuring power, command latency, and cloud-contract effects.
 - Do not contact production `osicloud.ch` during implementation or validation
   unless explicitly requested in that same session.
 
@@ -149,6 +152,34 @@ These defaults are in scope for the first implementation. They are conservative:
 they remove idle work and unused hardware paths without changing local irrigation
 or LoRa ingest semantics.
 
+The initial audit suggestions consolidate into these decisions:
+
+- **Separate image variant:** create `lowpower_raspberrypi_bcm27xx_bcm2709`
+  instead of weakening the universal bcm2709 release image for Pi 2/3/4/400.
+- **Wi-Fi/AP:** keep the Pi hotspot on by default for local access and first
+  configuration, but lower its transmit power. AP opt-in, Ethernet-first setup,
+  and daytime-only AP schedules stay field-test policy.
+- **UART/GPS/USB gadget:** make UART/GPS and `dwc2` USB gadget behavior opt-in.
+  Keep SPI for the LoRa HAT. Keep I2C only when the measured hardware profile
+  requires it.
+- **Remote access:** remove Pi-side VPN stacks and let the Puli own remote
+  access during the maintenance window.
+- **LuCI/admin surface:** keep basic LuCI and ChirpStack setup pages; trim only
+  extras that are not needed for first setup or local recovery.
+- **ChirpStack variants:** keep only the local ChirpStack server, the configured
+  RPi concentratord target, Mosquitto, and the MQTT forwarder path used by OSI.
+  Remove mesh, UDP, unused concentratord targets, and matching LuCI pages.
+- **Node-RED runtime load:** consolidate duplicate uplink MQTT subscriptions,
+  disable active debug nodes, and remove disabled simulation/development tabs
+  from the low-power payload.
+- **Redis:** target no Redis, but verify a complete boot and ingest path before
+  treating it as removable.
+- **Kernel/runtime options:** audit debug/minidump options such as debugfs,
+  KALLSYMS, debug kernel, debug info, kexec, crash dump, vmcore/kcore, and
+  disable what the OpenWrt bcm2709 target can safely drop.
+- **Sync cadence:** gate cloud work by the maintenance window first. Further
+  cadence changes need measurements and explicit cloud-contract review.
+
 ### Cloud And Remote Services
 
 - Remove Pi-side Tailscale, OpenVPN, WireGuard, PPP/PPPoE, watchcat, and the
@@ -204,6 +235,8 @@ or LoRa ingest semantics.
   into one ingest router before device-specific processing. This should be a
   behavior-preserving runtime cleanup and can ship through the canonical payload
   if tests prove parity.
+- Keep the current edge-cloud cadence semantics inside the open maintenance
+  window until power measurements show that slower intervals are needed.
 
 ### Package And Service Set
 
@@ -228,14 +261,20 @@ or LoRa ingest semantics.
 - Remove diagnostic and development utilities unless they are part of the
   hardware acceptance checklist. Keep enough shell/network tooling for local
   status and recovery over the Pi hotspot.
+- Audit and disable kernel/runtime debug options where safe for the low-power
+  target: debugfs, KALLSYMS, debug kernel, debug info, kexec, crash dump, and
+  vmcore/kcore. Treat this as a minimal-image and idle-overhead cleanup; do not
+  let it block the higher-value radio, USB, VPN, and daemon savings.
 
 ### Field-Test-Only Options
 
 These are not v1 defaults:
 
 - Pi hotspot daytime-only schedule.
+- Ethernet-first first-boot setup with Pi AP opt-in instead of always-on.
 - LoRa concentrator sleep windows.
 - Stronger CPU underclocking than the first conservative cap.
+- Slower in-window sync cadences than the current edge-cloud contract.
 - Always-powered Puli with Puli-side cellular scheduling.
 - Replacing GL-XE300 with GL-XE3000 Puli AX or another GL.iNet model because
   GL-XE300 Tailscale is unstable.
@@ -342,6 +381,9 @@ Static and build acceptance:
 12. Node-RED low-power verification confirms no active debug nodes, no disabled
     development/simulation tabs in the shipped payload, and one MQTT ingress
     subscription for `application/+/device/+/event/up`.
+13. Low-power OpenWrt config audits and disables safe-to-drop kernel debug/crash
+    options, including debugfs, KALLSYMS, debug kernel, debug info, kexec, crash
+    dump, and vmcore/kcore where the bcm2709 target still boots and verifies.
 
 Hardware acceptance:
 
@@ -380,6 +422,8 @@ Functional acceptance:
    through the Puli route.
 10. Outside the window, the Pi Ethernet path connected to the Puli is down and
     Pi USB VBUS is off.
+11. In-window sync cadence changes are not accepted without measurement evidence
+    and an explicit review of command-latency and cloud-sync contract effects.
 
 ## Fallbacks
 
