@@ -72,6 +72,8 @@ Sources:
    operating locally, sync is deferred, and no local database is replaced.
 8. Remove Pi-side remote-access daemons from the low-power image; remote
    maintenance reaches the Pi through the Puli's Ethernet LAN during the window.
+9. Apply conservative low-power defaults for radios, USB, unused peripherals,
+   background cloud polling, development flows, and non-required packages.
 
 ## Non-Goals
 
@@ -82,6 +84,10 @@ Sources:
 - Do not expose Pi management services directly over LTE; expose them only on
   the local Pi hotspot and Puli-connected Ethernet LAN.
 - Do not guarantee cloud-originated commands outside the maintenance window.
+- Do not sleep the LoRa concentrator in v1; missing sensor uplinks changes edge
+  behavior and needs a separate field trial.
+- Do not schedule the Pi hotspot off by default in v1; daytime/night schedules
+  are optional field-test policy, not the first shipped profile default.
 - Do not contact production `osicloud.ch` during implementation or validation
   unless explicitly requested in that same session.
 
@@ -96,7 +102,7 @@ standard profiles. The low-power profile opts into them through profile-specific
 configuration. This keeps the Pi 5 and standard Pi 4 images behavior-compatible
 while avoiding a forked Node-RED or helper payload.
 
-The low-power profile has three cooperating pieces:
+The low-power profile has four cooperating pieces:
 
 1. Maintenance-window controller
    - Owns the daily one-hour window.
@@ -134,6 +140,96 @@ The low-power profile has three cooperating pieces:
      WireGuard tools, Redis if confirmed unused by OSI runtime, unused
      ChirpStack mesh/UDP forwarder variants, USB gadget/device-mode support,
      and UART/GPS defaults when no GPS is installed.
+
+## V1 Low-Power Defaults
+
+These defaults are in scope for the first implementation. They are conservative:
+they remove idle work and unused hardware paths without changing local irrigation
+or LoRa ingest semantics.
+
+### Cloud And Remote Services
+
+- Remove Pi-side Tailscale, OpenVPN, WireGuard, PPP/PPPoE, watchcat, and the
+  Tailscale first-boot autoconnect script from the low-power image.
+- Keep Pi SSH and the local API reachable only from the Pi hotspot and the Puli
+  Ethernet LAN. Do not expose Pi management directly over LTE.
+- Gate all cloud-facing Node-RED work on the maintenance-window state:
+  bootstrap sync, outbox event flush, pending-command polling, command ACK flush,
+  sync-token refresh, Chameleon calibration lookup, cloud MQTT heartbeat,
+  cloud MQTT telemetry/status publishing, and OpenAgri weather fetches.
+- Outside the window, leave outbox/ACK rows pending locally and suppress cloud
+  network attempts rather than letting them fail repeatedly.
+
+### Network And Radios
+
+- Keep the Pi hotspot always on in v1, using the existing 2.4 GHz HT20 AP
+  profile, but add a low-power UCI default for reduced transmit power.
+- Keep Puli Wi-Fi disabled and use Puli Ethernet for Pi maintenance traffic.
+- Bring Pi Ethernet up only during the Puli window. After the window closes and
+  USB power is removed, bring the Puli-facing Ethernet path down.
+- Keep LoRa concentrator service available whenever the configured concentrator
+  is enabled. Do not add LoRa sleep windows in v1.
+
+### USB And Boot Peripherals
+
+- Add `uhubctl` and default Pi USB VBUS off outside the maintenance window.
+- Remove USB gadget/device-mode defaults, including the Pi boot `dtoverlay=dwc2`
+  path, from the low-power profile.
+- Remove USB serial, USB HID, USB audio, and USB storage support unless a
+  specific measured field setup requires them.
+- Keep SPI enabled for the LoRa HAT.
+- Disable UART/GPS defaults unless the installation explicitly includes a GPS
+  receiver. The existing `osi-gateway-gps` sidecar remains out of the default
+  low-power runtime.
+- Disable I2C by default unless the selected HAT, RTC, or sensor stack requires
+  it in the measured installation.
+- Disable display/audio/LED-oriented defaults: HDMI/display output, onboard
+  audio modules, and non-essential LEDs where the Pi/OpenWrt target supports it.
+
+### CPU And Runtime Load
+
+- Use a conservative CPU governor and frequency cap for the low-power profile.
+  The cap is accepted only if local GUI/API latency, Node-RED scheduler latency,
+  ChirpStack ingest, and STREGA command handling remain within field-test
+  thresholds.
+- Keep SQLite durability settings unchanged unless a separate data-integrity
+  review approves a change. Power saving must not trade away edge canonicality.
+- Keep Node-RED logging at `info` or lower and disable active debug nodes in the
+  shipped low-power flow.
+- Remove disabled development/simulation tabs from the low-power payload:
+  `Field testing`, `Simulations (Dev)`, and `Dendro Live Sim`.
+- Consolidate duplicate `application/+/device/+/event/up` MQTT subscriptions
+  into one ingest router before device-specific processing. This should be a
+  behavior-preserving runtime cleanup and can ship through the canonical payload
+  if tests prove parity.
+
+### Package And Service Set
+
+- Remove LuCI package manager UI and non-required LuCI admin modules from the
+  low-power image. Keep only the pieces required by the local OSI GUI/API proxy,
+  hotspot, and firewall.
+- Remove Pi-side VPN packages: `tailscale`, `openvpn-openssl`, and
+  `wireguard-tools`.
+- Remove unused ChirpStack mesh and UDP forwarder variants. Keep only the local
+  ChirpStack server, the configured RPi concentratord target, Mosquitto, and the
+  MQTT forwarder path needed by the local gateway.
+- Target no Redis in the low-power image. The implementation must verify a full
+  boot and ChirpStack/Node-RED ingest path without Redis; if that fails, Redis
+  stays disabled by default until the dependency is understood.
+- Remove diagnostic and development utilities unless they are part of the
+  hardware acceptance checklist. Keep enough shell/network tooling for local
+  status and recovery over the Pi hotspot.
+
+### Field-Test-Only Options
+
+These are not v1 defaults:
+
+- Pi hotspot daytime-only schedule.
+- LoRa concentrator sleep windows.
+- Stronger CPU underclocking than the first conservative cap.
+- Always-powered Puli with Puli-side cellular scheduling.
+- Replacing GL-XE300 with GL-XE3000 Puli AX or another GL.iNet model because
+  GL-XE300 Tailscale is unstable.
 
 ## Maintenance Window Flow
 
@@ -222,6 +318,17 @@ Static and build acceptance:
 5. `make switch-env ENV=lowpower_raspberrypi_bcm27xx_bcm2709` succeeds.
 6. OpenWrt config normalization keeps `CONFIG_PACKAGE_uhubctl=y`.
 7. The low-power image builds at least once before field testing.
+8. Low-power OpenWrt config excludes Pi-side `tailscale`, `openvpn-openssl`,
+   `wireguard-tools`, PPP/PPPoE, watchcat, USB gadget/device-mode, USB storage,
+   USB audio, and non-required USB serial/HID support.
+9. Low-power boot config keeps SPI enabled and disables `dtoverlay=dwc2`,
+   UART/GPS defaults, display/audio defaults, and I2C unless the selected
+   hardware profile explicitly requires I2C.
+10. Low-power payload either removes Redis or proves Redis is disabled and not
+    required by the ChirpStack/Node-RED ingest smoke test.
+11. Node-RED low-power verification confirms no active debug nodes, no disabled
+    development/simulation tabs in the shipped payload, and one MQTT ingress
+    subscription for `application/+/device/+/event/up`.
 
 Hardware acceptance:
 
@@ -238,6 +345,9 @@ Hardware acceptance:
    tailnet connection and exposes the Pi LAN route for the full window.
 8. If Puli Tailscale is unstable or unsupported, the low-power Pi image remains
    valid, but remote shell maintenance is marked unsupported for that router.
+9. CPU governor/frequency defaults do not break local GUI/API responsiveness,
+   scheduled irrigation checks, ChirpStack uplink processing, or STREGA command
+   handling during a field acceptance run.
 
 Functional acceptance:
 
@@ -250,6 +360,13 @@ Functional acceptance:
 6. The low-power Pi image contains no Tailscale, OpenVPN, or WireGuard daemon.
 7. Pi SSH/API access over the Puli path is possible only through the Puli's LAN
    and, if enabled, its Puli-hosted Tailscale subnet route.
+8. Outside the window, cloud sync timers do not make network attempts; they
+   leave pending work queued locally.
+9. During the window, bootstrap sync, outbox flush, pending-command polling,
+   command ACK flush, cloud MQTT, calibration lookup, and weather fetches run
+   through the Puli route.
+10. Outside the window, the Pi Ethernet path connected to the Puli is down and
+    Pi USB VBUS is off.
 
 ## Fallbacks
 
