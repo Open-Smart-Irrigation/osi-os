@@ -136,10 +136,12 @@ The low-power profile has four cooperating pieces:
      DHCP/DNS/firewall pieces needed by the Pi hotspot.
    - Adds `uhubctl`.
    - Removes or disables obvious non-required idle services in the low-power
-     image, starting with LuCI package-manager UI, Tailscale, OpenVPN,
-     WireGuard tools, Redis if confirmed unused by OSI runtime, unused
+     image, starting with LuCI package-manager/watchcat extras, Tailscale,
+     OpenVPN, WireGuard tools, Redis if confirmed unused by OSI runtime, unused
      ChirpStack mesh/UDP forwarder variants, USB gadget/device-mode support,
      and UART/GPS defaults when no GPS is installed.
+   - Keeps the basic LuCI web UI and ChirpStack LuCI configuration screens
+     required for first setup.
 
 ## V1 Low-Power Defaults
 
@@ -205,9 +207,16 @@ or LoRa ingest semantics.
 
 ### Package And Service Set
 
-- Remove LuCI package manager UI and non-required LuCI admin modules from the
-  low-power image. Keep only the pieces required by the local OSI GUI/API proxy,
-  hotspot, and firewall.
+- Keep the basic LuCI web UI for first configuration, including the LuCI nginx
+  integration, LuCI base/admin modules, network/status/system screens, firewall
+  screen, and one standard theme.
+- Keep the ChirpStack LuCI configuration screens required for first setup:
+  applications/server, ChirpStack server, RPi concentratord target, and the
+  MQTT forwarder path used by the local gateway.
+- Remove only LuCI extras that are not needed for first setup or local recovery:
+  package manager UI, watchcat UI, remote-access protocol UI for removed VPNs,
+  and ChirpStack mesh/UDP UI variants when their matching runtime packages are
+  removed from the low-power profile.
 - Remove Pi-side VPN packages: `tailscale`, `openvpn-openssl`, and
   `wireguard-tools`.
 - Remove unused ChirpStack mesh and UDP forwarder variants. Keep only the local
@@ -324,9 +333,13 @@ Static and build acceptance:
 9. Low-power boot config keeps SPI enabled and disables `dtoverlay=dwc2`,
    UART/GPS defaults, display/audio defaults, and I2C unless the selected
    hardware profile explicitly requires I2C.
-10. Low-power payload either removes Redis or proves Redis is disabled and not
+10. Low-power OpenWrt config keeps the basic LuCI GUI and ChirpStack first-setup
+    GUI: LuCI nginx integration, base/admin/network/status/system/firewall
+    screens, one standard theme, and the ChirpStack server/concentratord/MQTT
+    forwarder configuration screens needed by the local gateway.
+11. Low-power payload either removes Redis or proves Redis is disabled and not
     required by the ChirpStack/Node-RED ingest smoke test.
-11. Node-RED low-power verification confirms no active debug nodes, no disabled
+12. Node-RED low-power verification confirms no active debug nodes, no disabled
     development/simulation tabs in the shipped payload, and one MQTT ingress
     subscription for `application/+/device/+/event/up`.
 
