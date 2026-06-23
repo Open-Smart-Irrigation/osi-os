@@ -1,11 +1,11 @@
 import '@testing-library/jest-dom/vitest';
-import { render, screen } from '@testing-library/react';
-import React from 'react';
+import { cleanup, render, screen } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { IrrigationZoneCard } from '../IrrigationZoneCard';
 import type { IrrigationZone } from '../../../types/farming';
+import { isDesktopBrowser } from '../../../utils/isDesktopBrowser';
 
 vi.mock('../../../services/api', () => ({
   dendroAnalyticsAPI: {
@@ -19,6 +19,10 @@ vi.mock('../../../services/api', () => ({
     removeDevice: vi.fn().mockResolvedValue(undefined),
     updateConfig: vi.fn().mockResolvedValue(undefined),
   },
+}));
+
+vi.mock('../../../utils/isDesktopBrowser', () => ({
+  isDesktopBrowser: vi.fn(() => false),
 }));
 
 vi.mock('react-i18next', () => ({
@@ -42,18 +46,31 @@ const zone = {
   schedule: null,
 } as IrrigationZone;
 
+function renderCard() {
+  render(
+    <MemoryRouter>
+      <IrrigationZoneCard
+        zone={zone}
+        devices={[]}
+        unassignedDevices={[]}
+        onUpdate={vi.fn()}
+      />
+    </MemoryRouter>,
+  );
+}
+
+beforeEach(() => {
+  vi.mocked(isDesktopBrowser).mockReturnValue(false);
+});
+
+afterEach(() => {
+  cleanup();
+  vi.clearAllMocks();
+});
+
 describe('IrrigationZoneCard Data entry', () => {
-  it('renders a Data link to the zone fullscreen history view', () => {
-    render(
-      <MemoryRouter>
-        <IrrigationZoneCard
-          zone={zone}
-          devices={[]}
-          unassignedDevices={[]}
-          onUpdate={vi.fn()}
-        />
-      </MemoryRouter>,
-    );
+  it('renders a mobile Data link to the zone fullscreen history view', () => {
+    renderCard();
 
     const dataLink = screen.getByRole('link', { name: /data/i });
     expect(dataLink).toHaveAttribute('href', '/history/zones/12');
@@ -72,5 +89,12 @@ describe('IrrigationZoneCard Data entry', () => {
       'items-center',
       'justify-center',
     );
+  });
+
+  it('hides the zone-card Data link on desktop browsers', () => {
+    vi.mocked(isDesktopBrowser).mockReturnValue(true);
+    renderCard();
+
+    expect(screen.queryByRole('link', { name: /data/i })).not.toBeInTheDocument();
   });
 });
