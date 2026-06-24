@@ -10,6 +10,7 @@ import {
   type DeviceLocationSupport,
 } from '../../services/deviceLocation';
 import { CROP_GROUPS } from './cropKc';
+import { DataExportSection } from './DataExportSection';
 
 interface Props {
   isOpen: boolean;
@@ -258,6 +259,7 @@ export const ZoneConfigModal: React.FC<Props> = ({ isOpen, zone, onClose, onSave
   };
 
   const canRequestDeviceLocation = Boolean(deviceLocationSupport?.available && !deviceLocationLoading);
+  const todayIso = new Date().toISOString().slice(0, 10);
   const deviceLocationStatusClass = deviceLocationSupport?.available
     ? 'bg-emerald-100 text-emerald-800'
     : deviceLocationSupport?.reason === 'permission_denied'
@@ -283,6 +285,10 @@ export const ZoneConfigModal: React.FC<Props> = ({ isOpen, zone, onClose, onSave
           {error && (
             <div className="bg-red-50 border border-red-200 text-red-800 rounded-lg px-3 py-2 text-sm">{error}</div>
           )}
+
+          <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)]/70 p-4">
+            <DataExportSection zoneId={zone.id} todayIso={todayIso} />
+          </div>
 
           <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)]/70 p-4">
             <div className="flex items-center justify-between gap-3">

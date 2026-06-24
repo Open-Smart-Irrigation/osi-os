@@ -83,7 +83,22 @@
     "noDevices": "Nessun dispositivo in questa zona",
     "assignFirst": "Assegna il primo dispositivo",
     "devicesInZone": "Dispositivi in questa zona:",
-    "data": "Dati"
+    "data": "Dati",
+    "export": {
+      "title": "Esporta dati",
+      "selectRange": "Scegli un intervallo di date per scaricare i dati della zona.",
+      "from": "Da",
+      "to": "A",
+      "granularity": "Granularita",
+      "raw": "Grezzi",
+      "hourly": "Orario",
+      "daily": "Giornaliero",
+      "download": "Scarica CSV",
+      "downloading": "Preparazione...",
+      "rangeSummary": "{{from}} a {{to}}",
+      "error": "Esportazione non riuscita",
+      "tooLarge": "Intervallo troppo grande. Scegli una granularita piu ampia."
+    }
   },
   "schedule": {
     "irrigationSchedule": "Programma di irrigazione",
