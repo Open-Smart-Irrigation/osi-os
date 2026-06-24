@@ -2964,7 +2964,7 @@ if (!historyHelperPath) {
   fail(`missing history helper module at one of: ${historyHelperCandidates.join(', ')}`);
 } else {
   const historyHelper = require(historyHelperPath);
-  for (const exportName of ['normalizeDeveui', 'deriveCardId', 'deriveCardsForZone', 'deriveGatewayCard', 'resolveAggregation', 'classifySoilStatus', 'classifyEnvironmentStatus', 'classifyDendroStatus', 'classifyIrrigationStatus', 'classifyGatewayStatus', 'deriveExpectedCadenceSeconds', 'aggregateRows', 'aggregateDeviceData', 'buildAdvancedMetadataPlaceholder', 'buildLocalInterpretations']) {
+  for (const exportName of ['normalizeDeveui', 'deriveCardId', 'deriveCardsForZone', 'deriveGatewayCard', 'resolveAggregation', 'classifySoilStatus', 'classifyEnvironmentStatus', 'classifyDendroStatus', 'classifyIrrigationStatus', 'classifyGatewayStatus', 'deriveExpectedCadenceSeconds', 'buildZoneExportCsv', 'toCsv', 'writeZoneCsv', 'rotateZoneCsv', 'aggregateRows', 'aggregateDeviceData', 'buildAdvancedMetadataPlaceholder', 'buildLocalInterpretations']) {
     if (typeof historyHelper[exportName] !== 'function') {
       fail(`history helper missing export ${exportName}`);
     } else {
