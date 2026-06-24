@@ -2972,6 +2972,7 @@ if (!historyHelperPath) {
     }
   }
   runQuietNodeScript('test-history-helper.js', 'SQL-backed history helper tests pass');
+  runQuietNodeScript('verify-channel-manifest-parity.js', 'edge channel ids match canonical manifest');
 }
 
 expectIncludesById('history-api-router-fn', 'phaseMs=', 'logs per-phase timing for history endpoint performance triage');
