@@ -27,29 +27,26 @@ const RESPONSE_MODE_LABELS: Record<string, string> = {
   aggressive:   'Aggressive — extend duration strongly at high stress',
 };
 
-export const EDGE_TRIGGER_METRICS = ['SWT_WM1', 'SWT_WM2', 'SWT_AVG', 'DENDRO'] as const;
+export const EDGE_TRIGGER_METRICS = ['SWT_1', 'SWT_2', 'SWT_3', 'SWT_AVG', 'DENDRO'] as const;
 
 export function normalizeTriggerMetric(value: string | null | undefined): TriggerMetric {
   switch (String(value ?? '').trim().toUpperCase()) {
     case 'SWT_WM1':
-    case 'SWT_1':
-      return 'SWT_WM1';
+    case 'SWT_1': return 'SWT_1';
     case 'SWT_WM2':
-    case 'SWT_2':
-      return 'SWT_WM2';
-    case 'SWT_AVG':
+    case 'SWT_2': return 'SWT_2';
     case 'SWT_WM3':
-    case 'SWT_3':
-      return 'SWT_AVG';
-    case 'DENDRO':
-      return 'DENDRO';
-    default:
-      return 'SWT_WM1';
+    case 'SWT_3': return 'SWT_3';
+    case 'SWT_AVG': return 'SWT_AVG';
+    case 'VWC': return 'VWC';
+    case 'DENDRO': return 'DENDRO';
+    default: return 'SWT_1';
   }
 }
 
 export function schedulerTypeFromMetric(metric: string): SchedulerType {
   if (normalizeTriggerMetric(metric) === 'DENDRO') return 'DENDRO';
+  if (normalizeTriggerMetric(metric) === 'VWC') return 'VWC';
   return 'SWT';
 }
 

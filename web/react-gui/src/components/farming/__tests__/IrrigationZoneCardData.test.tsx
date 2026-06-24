@@ -21,6 +21,11 @@ vi.mock('../../../services/api', () => ({
   },
 }));
 
+vi.mock('../ScheduleSection', () => ({
+  ScheduleSection: () => null,
+  normalizeTriggerMetric: (v: string) => v,
+}));
+
 vi.mock('../../../utils/isDesktopBrowser', () => ({
   isDesktopBrowser: vi.fn(() => false),
 }));
@@ -96,5 +101,19 @@ describe('IrrigationZoneCard Data entry', () => {
     renderCard();
 
     expect(screen.queryByRole('link', { name: /data/i })).not.toBeInTheDocument();
+  });
+
+  it('labels a canonical SWT_1 schedule as soil tension (S1)', () => {
+    vi.mocked(isDesktopBrowser).mockReturnValue(false);
+    const scheduledZone = {
+      ...zone,
+      schedule: { enabled: true, trigger_metric: 'SWT_1', threshold_kpa: 30, irrigation_zone_id: 12 },
+    } as unknown as IrrigationZone;
+    render(
+      <MemoryRouter>
+        <IrrigationZoneCard zone={scheduledZone} devices={[]} unassignedDevices={[]} onUpdate={vi.fn()} />
+      </MemoryRouter>,
+    );
+    expect(screen.getByText(/Soil tension \(S1\)/)).toBeInTheDocument();
   });
 });
