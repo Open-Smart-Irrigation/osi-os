@@ -1,4 +1,4 @@
-import type { CSSProperties } from 'react';
+import type { CSSProperties, SVGProps } from 'react';
 
 /**
  * Shared axis styling for the fullscreen history charts so every view follows the
@@ -11,8 +11,8 @@ import type { CSSProperties } from 'react';
 export const HISTORY_CHART_MARGIN = { top: 20, right: 16, bottom: 28, left: 8 } as const;
 
 const DAY_MS = 86_400_000;
-const AXIS_TICK: CSSProperties = { fontSize: 11, fill: 'var(--text-tertiary)' };
-const X_AXIS_TICK: CSSProperties = { fontSize: 10, fill: 'var(--text-tertiary)' };
+const AXIS_TICK: SVGProps<SVGTextElement> = { fontSize: 11, fill: 'var(--text-tertiary)' };
+const X_AXIS_TICK: SVGProps<SVGTextElement> = { fontSize: 10, fill: 'var(--text-tertiary)' };
 const AXIS_STROKE = 'var(--border)';
 const DATE_RANGE_SEPARATOR = ' – ';
 
