@@ -152,7 +152,7 @@ function normaliseDevice(device: any): Device {
   const soilMoistureProbeDepths = rawDepths && typeof rawDepths === 'object' && !Array.isArray(rawDepths)
     ? Object.fromEntries(
         Object.entries(rawDepths)
-          .map(([key, value]) => [String(key), Number(value)])
+          .map(([key, value]) => [String(key), Number(value)] as [string, number])
           .filter(([, value]) => Number.isFinite(value) && value > 0)
       )
     : undefined;

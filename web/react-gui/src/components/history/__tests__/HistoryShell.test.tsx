@@ -8,7 +8,7 @@ import { SWRConfig } from 'swr';
 import { HistoryDashboard } from '../../../pages/HistoryDashboard';
 import { ThematicCardCarousel } from '../ThematicCardCarousel';
 import { systemAPI, historyAPI, irrigationZonesAPI } from '../../../services/api';
-import type { HistoryCardSummary, HistoryWorkspace } from '../../../history/types';
+import type { HistoryCardSummary, HistoryWorkspace, HistoryWorkspaceRecord } from '../../../history/types';
 
 const { translateForTest } = vi.hoisted(() => {
   const translations: Record<string, string> = {
@@ -305,17 +305,19 @@ describe('History shell', () => {
       createdAt: '2026-05-31T10:00:00Z',
       updatedAt: '2026-05-31T10:00:00Z',
     });
-    vi.mocked(historyAPI.updateWorkspace).mockImplementation(async (workspaceId, payload) => ({
-      id: workspaceId,
-      userId: 1,
-      ownerUserUuid: null,
-      zoneId: payload.zoneId,
-      name: payload.name,
-      isDefault: false,
-      workspace: payload.workspace,
-      createdAt: '2026-05-31T10:00:00Z',
-      updatedAt: '2026-05-31T10:02:00Z',
-    }));
+    vi.mocked(historyAPI.updateWorkspace).mockImplementation(async (workspaceId, payload) => {
+      return {
+        id: workspaceId,
+        userId: 1,
+        ownerUserUuid: null,
+        zoneId: payload.zoneId,
+        name: payload.name,
+        isDefault: false,
+        workspace: payload.workspace,
+        createdAt: '2026-05-31T10:00:00Z',
+        updatedAt: '2026-05-31T10:02:00Z',
+      } as unknown as HistoryWorkspaceRecord;
+    });
   });
 
   it('keeps history unavailable and retryable when runtime feature flags fail', async () => {
@@ -700,7 +702,7 @@ describe('History shell', () => {
         expect.objectContaining({ name: 'South workspace', zoneId: 2 }),
       );
     });
-    expect(vi.mocked(historyAPI.updateWorkspace).mock.calls[0][1].workspace.zoneId).toBe(2);
+    expect(vi.mocked(historyAPI.updateWorkspace).mock.calls[0][1].workspace!.zoneId).toBe(2);
 
     fireEvent.click(screen.getByRole('button', { name: 'Save workspace' }));
     await waitFor(() => {
@@ -796,7 +798,7 @@ describe('History shell', () => {
       expect(persistedWorkspace.inspector).toEqual(savedWorkspace.inspector);
       expect(persistedWorkspace.futurePanelState).toEqual(savedWorkspace.futurePanelState);
     };
-    assertWorkspaceState(payload.workspace);
+    assertWorkspaceState(payload.workspace!);
 
     fireEvent.click(screen.getByRole('button', { name: 'Save workspace' }));
     await waitFor(() => {

@@ -170,7 +170,7 @@ const StatusBadge: React.FC<{ status: IrrigationActuationStatus }> = ({ status }
   const style = STATUS_STYLES[status];
   return (
     <span className={`inline-flex items-center gap-1 rounded-md border px-2 py-0.5 text-xs font-semibold ${style.bg} ${style.fg} ${style.border}`}>
-      {statusLabel(status, t)}
+      {statusLabel(status, t as Translate)}
     </span>
   );
 };
@@ -204,7 +204,7 @@ const CompactActuationRow: React.FC<{
   zoneContext?: IrrigationOutcomeZoneContext | null;
 }> = ({ row, zoneContext }) => {
   const { t } = useTranslation('devices');
-  const metric = buildIrrigationMetric(row, zoneContext, t);
+  const metric = buildIrrigationMetric(row, zoneContext, t as Translate);
   return (
     <li className="rounded-lg border border-[var(--border)] bg-[var(--card)] p-3 flex flex-col gap-1.5">
       <div className="flex flex-col gap-1">
@@ -231,7 +231,7 @@ const AdvancedActuationRow: React.FC<{
 }> = ({ row, zoneContext }) => {
   const { t } = useTranslation('devices');
   const isFailure = row.status === 'OPEN_TIMEOUT' || row.status === 'CLOSE_TIMEOUT' || row.status === 'COMMAND_FAILED';
-  const metric = buildIrrigationMetric(row, zoneContext, t);
+  const metric = buildIrrigationMetric(row, zoneContext, t as Translate);
   return (
     <li className="rounded-lg border border-[var(--border)] bg-[var(--card)] p-3 flex flex-col gap-1.5">
       <div className="flex items-center justify-between gap-2">

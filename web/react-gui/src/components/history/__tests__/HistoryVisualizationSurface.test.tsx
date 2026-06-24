@@ -58,8 +58,8 @@ function dispatchTouch(
       ? new TouchEvent(type, {
           bubbles: true,
           cancelable: true,
-          touches: touchList as unknown as TouchList,
-          changedTouches: touchList as unknown as TouchList,
+          touches: Array.from(touchList as unknown as TouchList),
+          changedTouches: Array.from(touchList as unknown as TouchList),
         })
       : new Event(type, { bubbles: true, cancelable: true });
 

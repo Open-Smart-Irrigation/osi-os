@@ -59,9 +59,9 @@ const mockDevice: Device = {
     strega_model: 'STREGA_VALVE',
     dendro_ratio_at_retracted: null,
     dendro_ratio_at_extended: null,
-    dendro_baseline_pending: false,
+    dendro_baseline_pending: 0,
     last_seen: '2026-05-17T12:00:00Z',
-};
+} as unknown as Device;
 
 function actuationFixture(overrides: Partial<IrrigationActuation> = {}): IrrigationActuation {
     return {

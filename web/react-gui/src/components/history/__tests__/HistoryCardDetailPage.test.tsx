@@ -231,8 +231,8 @@ function dispatchTouch(
       ? new TouchEvent(type, {
           bubbles: true,
           cancelable: true,
-          touches: touchList as unknown as TouchList,
-          changedTouches: touchList as unknown as TouchList,
+          touches: Array.from(touchList as unknown as TouchList),
+          changedTouches: Array.from(touchList as unknown as TouchList),
         })
       : new Event(type, { bubbles: true, cancelable: true });
 
@@ -821,7 +821,7 @@ describe('History card detail route', () => {
         zoneCard({
           sourceDeviceCount: 1,
           sourceLabels: ['Dendro 3'],
-          sourceDevices: [{ key: 'd1', name: 'Dendro 3', typeId: 'DRAGINO_LSN50', role: 'dendro' }],
+          sourceDevices: [{ sourceKey: 'd1', name: 'Dendro 3', typeId: 'DRAGINO_LSN50', role: 'dendro' }],
         }),
       ],
     });

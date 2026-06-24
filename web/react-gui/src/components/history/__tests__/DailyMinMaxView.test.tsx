@@ -79,7 +79,7 @@ function data(): HistoryCardDataResponse {
     profiles: [],
     calendar: null,
     advanced: null,
-  };
+  } as unknown as HistoryCardDataResponse;
 }
 
 describe('DailyMinMaxView', () => {

@@ -56,9 +56,10 @@ function formatTimestamp(timestamp: string): string {
 }
 
 function isSafeEventLabel(label: string | null | undefined): label is string {
-  return Boolean(label && label.trim())
-    && !DEVICE_EUI_PATTERN.test(label)
-    && !UNSAFE_EVENT_LABEL_PATTERN.test(label);
+  const s = (label ?? '').trim();
+  return Boolean(s)
+    && !DEVICE_EUI_PATTERN.test(s)
+    && !UNSAFE_EVENT_LABEL_PATTERN.test(s);
 }
 
 function eventLabel(t: HistoryTranslate, event: { label?: string | null; type?: string | null }): string {
@@ -261,7 +262,7 @@ export const HistoryInspectorSheet: React.FC<HistoryInspectorSheetProps> = ({
           )}
 
           {interpretations.length > 0 ? (
-            <InterpretationList interpretations={interpretations} />
+            <InterpretationList interpretations={[...interpretations]} />
           ) : (
             <p className="rounded-md border border-[var(--border)] bg-[var(--bg)] px-3 py-2 text-sm text-[var(--text-tertiary)]">
               {t('history.inspector.noInterpretation')}

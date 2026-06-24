@@ -662,7 +662,7 @@ export const StregaValveCard: React.FC<StregaValveCardProps> = ({
 
   const displayedState = getDisplayedStregaState(device);
   const isOpen = displayedState === 'OPEN';
-  const actuationFeedback = getStregaActuationFeedback(device.deveui, irrigationActuations, timeZone, t);
+  const actuationFeedback = getStregaActuationFeedback(device.deveui, irrigationActuations, timeZone, t as Translate);
   const hasActiveActuation = hasActiveValveActuation(device);
 
   const handleOpen = async () => {
