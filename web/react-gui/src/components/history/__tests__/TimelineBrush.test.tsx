@@ -1,7 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen } from '@testing-library/react';
 import '@testing-library/jest-dom';
-import React from 'react';
 
 import { TimelineBrush } from '../TimelineBrush';
 import { createDefaultTimeViewport, zoomTimeViewport } from '../../../history/useTimeViewport';

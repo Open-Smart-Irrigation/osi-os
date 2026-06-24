@@ -1,7 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, render, screen } from '@testing-library/react';
 import '@testing-library/jest-dom';
-import React from 'react';
 
 import { HistoryVisualizationSurface } from '../mobile/HistoryVisualizationSurface';
 import { createDefaultTimeViewport } from '../../../history/useTimeViewport';
