@@ -752,6 +752,47 @@ function coverageForBucket(bucketRows, channels, sourceCadences, bucketSeconds) 
   };
 }
 
+function aggregationBuckets(startMs, endMs, aggregation, bucketSeconds, timezone) {
+  const buckets = [];
+  if (aggregation !== 'daily') {
+    for (let bucketStartMs = startMs; bucketStartMs < endMs; bucketStartMs += bucketSeconds * 1000) {
+      const bucketEndMs = Math.min(endMs, bucketStartMs + bucketSeconds * 1000);
+      buckets.push({
+        bucketStartMs,
+        bucketEndMs,
+        bucketStart: new Date(bucketStartMs).toISOString(),
+        bucketEnd: new Date(bucketEndMs).toISOString(),
+        series: {},
+        sampleCount: 0,
+        eventCount: 0,
+        thresholdCrossingCount: 0,
+      });
+    }
+    return buckets;
+  }
+
+  let bucketStartMs = startMs;
+  let dateKey = localDateKey(bucketStartMs, timezone) || new Date(bucketStartMs).toISOString().slice(0, 10);
+  while (bucketStartMs < endMs) {
+    const nextDateKey = addIsoDays(dateKey, 1);
+    const nextStartMs = Date.parse(zoneDateStartIso(nextDateKey, timezone));
+    const bucketEndMs = Math.min(endMs, Number.isFinite(nextStartMs) && nextStartMs > bucketStartMs ? nextStartMs : bucketStartMs + bucketSeconds * 1000);
+    buckets.push({
+      bucketStartMs,
+      bucketEndMs,
+      bucketStart: new Date(bucketStartMs).toISOString(),
+      bucketEnd: new Date(bucketEndMs).toISOString(),
+      series: {},
+      sampleCount: 0,
+      eventCount: 0,
+      thresholdCrossingCount: 0,
+    });
+    bucketStartMs = bucketEndMs;
+    dateKey = nextDateKey;
+  }
+  return buckets;
+}
+
 function aggregateRows(rows, options = {}) {
   const aggregationInfo = resolveAggregation(options);
   const aggregation = aggregationInfo.level;
@@ -800,20 +841,7 @@ function aggregateRows(rows, options = {}) {
   if (!bucketSeconds) throw new Error(`unsupported aggregation: ${aggregation}`);
   if (startMs === null || endMs === null || endMs <= startMs) throw new Error('aggregateRows requires a valid start/end range for bucketed aggregation');
 
-  const buckets = [];
-  for (let bucketStartMs = startMs; bucketStartMs < endMs; bucketStartMs += bucketSeconds * 1000) {
-    const bucketEndMs = Math.min(endMs, bucketStartMs + bucketSeconds * 1000);
-    buckets.push({
-      bucketStartMs,
-      bucketEndMs,
-      bucketStart: new Date(bucketStartMs).toISOString(),
-      bucketEnd: new Date(bucketEndMs).toISOString(),
-      series: {},
-      sampleCount: 0,
-      eventCount: 0,
-      thresholdCrossingCount: 0,
-    });
-  }
+  const buckets = aggregationBuckets(startMs, endMs, aggregation, bucketSeconds, options.timezone);
 
   for (const bucket of buckets) {
     const bucketRows = sortedRows.filter((entry) => entry.recordedAtMs >= bucket.bucketStartMs && entry.recordedAtMs < bucket.bucketEndMs);
@@ -1031,7 +1059,7 @@ async function aggregateDeviceData(db, query = {}) {
 
 function csvCell(value) {
   if (value === null || value === undefined) return '';
-  const stringValue = String(value);
+  const stringValue = typeof value !== 'number' && /^[=+\-@]/.test(String(value)) ? `'${String(value)}` : String(value);
   return /[",\n\r]/.test(stringValue) ? '"' + stringValue.replace(/"/g, '""') + '"' : stringValue;
 }
 
@@ -1048,7 +1076,15 @@ const AGG_CSV_COLUMNS = ['bucket_start', 'bucket_end', 'timezone', 'zone', 'card
 
 function normalizeExportDate(value, name) {
   const date = String(value || '').trim();
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(date);
+  let canonical = null;
+  if (match) {
+    const year = Number(match[1]);
+    const parsed = new Date(Date.UTC(year, Number(match[2]) - 1, Number(match[3])));
+    parsed.setUTCFullYear(year);
+    canonical = Number.isFinite(parsed.getTime()) ? parsed.toISOString().slice(0, 10) : null;
+  }
+  if (canonical !== date) {
     const error = new Error(`${name} must be YYYY-MM-DD`);
     error.statusCode = 400;
     throw error;
@@ -1462,18 +1498,42 @@ function startOfLocalDayMs(nowMs, timezone) {
     if (part.type !== 'literal') acc[part.type] = part.value;
     return acc;
   }, {});
-  const wallClockAsUtcMs = Date.UTC(
+  const targetWallClockMs = Date.UTC(
     Number(parts.year),
     Number(parts.month) - 1,
     Number(parts.day),
-    Number(parts.hour) % 24,
-    Number(parts.minute),
-    Number(parts.second)
+    0,
+    0,
+    0
   );
-  const instantSecMs = Math.floor(instantMs / 1000) * 1000;
-  const offsetMs = wallClockAsUtcMs - instantSecMs;
-  const localMidnightAsUtcMs = Date.UTC(Number(parts.year), Number(parts.month) - 1, Number(parts.day), 0, 0, 0);
-  return localMidnightAsUtcMs - offsetMs;
+  let candidateMs = targetWallClockMs;
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    const candidateParts = new Intl.DateTimeFormat('en-US', {
+      timeZone: normalizeTimezone(timezone),
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hour12: false,
+    }).formatToParts(new Date(candidateMs)).reduce((acc, part) => {
+      if (part.type !== 'literal') acc[part.type] = part.value;
+      return acc;
+    }, {});
+    const candidateWallClockMs = Date.UTC(
+      Number(candidateParts.year),
+      Number(candidateParts.month) - 1,
+      Number(candidateParts.day),
+      Number(candidateParts.hour) % 24,
+      Number(candidateParts.minute),
+      Number(candidateParts.second)
+    );
+    const deltaMs = candidateWallClockMs - targetWallClockMs;
+    if (deltaMs === 0) return candidateMs;
+    candidateMs -= deltaMs;
+  }
+  return candidateMs;
 }
 
 function localDateKey(value, timezone) {

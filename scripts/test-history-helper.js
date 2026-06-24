@@ -34,6 +34,10 @@ const expectedExports = [
   'classifyIrrigationStatus',
   'classifyGatewayStatus',
   'deriveExpectedCadenceSeconds',
+  'buildZoneExportCsv',
+  'toCsv',
+  'writeZoneCsv',
+  'rotateZoneCsv',
   'aggregateRows',
   'aggregateDeviceData',
   'buildAdvancedMetadataPlaceholder',
@@ -101,6 +105,21 @@ test('exports the history helper contract', () => {
   for (const name of expectedExports) {
     assert.strictEqual(typeof helper[name], 'function', `${name} export`);
   }
+});
+
+test('exports the zone CSV column contracts', () => {
+  assert.deepStrictEqual(helper.RAW_CSV_COLUMNS, ['timestamp', 'timezone', 'zone', 'card', 'source', 'array_id', 'variable', 'depth_cm', 'value', 'unit']);
+  assert.deepStrictEqual(helper.AGG_CSV_COLUMNS, ['bucket_start', 'bucket_end', 'timezone', 'zone', 'card', 'source', 'array_id', 'variable', 'depth_cm', 'unit', 'n', 'coverage_pct', 'mean', 'min', 'max', 'median', 'latest']);
+});
+
+test('toCsv neutralizes spreadsheet formulas in text cells', () => {
+  const csv = helper.toCsv(['zone', 'source', 'array_id', 'value'], [{
+    zone: '=Zone',
+    source: '+Source',
+    array_id: '@ARRAY',
+    value: 12.5,
+  }]);
+  assert.strictEqual(csv, "zone,source,array_id,value\n'=Zone,'+Source,'@ARRAY,12.5\n");
 });
 
 test('classifySoilStatus uses 22/50 kPa thresholds', () => {
@@ -708,6 +727,314 @@ test('builds deterministic local interpretations', () => {
     assert(item.titleKey && item.bodyKey, 'interpretation uses locale keys');
     assert(!item.title && !item.body, 'interpretation prose stays in locale files');
     assert(!item.body || item.body.length < 120, 'structured output should not depend on long prose');
+  }
+});
+
+test('writeZoneCsv emits tidy long-format raw and daily files with depth', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'osi-csv-'));
+  try {
+    const zone = { id: 7, name: 'Zone B', zone_uuid: 'zu', timezone: 'Europe/Zurich' };
+    const rawRows = [
+      {
+        timestamp: '2026-06-02T14:03:21.000Z',
+        source: 'Chameleon 1',
+        array_id: 'ARR-009',
+        card: 'soil',
+        variable: 'swt_1',
+        depth_cm: 5,
+        value: 6.24,
+        unit: 'kPa',
+      },
+    ];
+    const dailyRows = [
+      {
+        bucket_start: '2026-06-02T00:00:00.000Z',
+        bucket_end: '2026-06-03T00:00:00.000Z',
+        source: 'Chameleon 1',
+        array_id: 'ARR-009',
+        card: 'soil',
+        variable: 'swt_1',
+        depth_cm: 5,
+        unit: 'kPa',
+        n: 96,
+        coverage_pct: 100,
+        mean: 6.3,
+        min: 6.1,
+        max: 6.5,
+        median: 6.3,
+        latest: 6.24,
+      },
+    ];
+
+    await helper.writeZoneCsv({ exportDir: dir, zone, day: '2026-06-02', rawRows, dailyRows });
+    const raw = fs.readFileSync(path.join(dir, 'zu', 'raw', '2026-06-02.csv'), 'utf8').trim().split('\n');
+    assert.strictEqual(raw[0], 'timestamp,timezone,zone,card,source,array_id,variable,depth_cm,value,unit');
+    assert.match(raw[1], /Europe\/Zurich,Zone B,soil,Chameleon 1,ARR-009,swt_1,5,6.24,kPa/);
+    const daily = fs.readFileSync(path.join(dir, 'zu', 'daily.csv'), 'utf8').trim().split('\n');
+    assert.strictEqual(daily[0], 'bucket_start,bucket_end,timezone,zone,card,source,array_id,variable,depth_cm,unit,n,coverage_pct,mean,min,max,median,latest');
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('buildZoneExportCsv raw emits tidy rows with depth and source', async () => {
+  const db = createCliSqliteDb();
+  try {
+    db.runSql(`
+      INSERT INTO users(id,username,password_hash,created_at,updated_at) VALUES(1,'u','h','2026-05-31T00:00:00.000Z','2026-05-31T00:00:00.000Z');
+      INSERT INTO irrigation_zones(id,name,user_id,zone_uuid,timezone,created_at,updated_at) VALUES(12,'Zone B',1,'zb','UTC','2026-05-31T00:00:00.000Z','2026-05-31T00:00:00.000Z');
+      INSERT INTO devices(deveui,name,type_id,user_id,irrigation_zone_id,chameleon_enabled,chameleon_swt1_depth_cm,created_at,updated_at)
+        VALUES('AA00000000000001','Chameleon 1','DRAGINO_LSN50',1,12,1,5,'2026-05-31T00:00:00.000Z','2026-05-31T00:00:00.000Z');
+      INSERT INTO device_data(deveui,recorded_at,swt_1) VALUES
+        ('AA00000000000001','2026-06-01T08:00:00.000Z',6.2),
+        ('AA00000000000001','2026-06-01T09:00:00.000Z',6.4);
+      INSERT INTO chameleon_readings(deveui,recorded_at,array_id) VALUES
+        ('AA00000000000001','2026-06-01T08:00:00.000Z','ARR-001'),
+        ('AA00000000000001','2026-06-01T09:00:00.000Z','ARR-001');
+    `);
+    const res = await helper.buildZoneExportCsv(db, {
+      zoneId: 12,
+      from: '2026-06-01',
+      to: '2026-06-01',
+      granularity: 'raw',
+      nowMs: Date.parse('2026-06-03T00:00:00.000Z'),
+    });
+    assert.deepStrictEqual(res.columns, helper.RAW_CSV_COLUMNS);
+    assert.strictEqual(res.rows.length, 2);
+    const swt1 = res.rows.find((row) => row.variable === 'swt_1' && row.value === 6.2);
+    assert.ok(swt1);
+    assert.strictEqual(swt1.timestamp, '2026-06-01T08:00:00.000Z');
+    assert.strictEqual(swt1.timezone, 'UTC');
+    assert.strictEqual(swt1.zone, 'Zone B');
+    assert.strictEqual(swt1.card, 'soil');
+    assert.strictEqual(swt1.source, 'Chameleon 1');
+    assert.strictEqual(swt1.array_id, 'ARR-001');
+    assert.strictEqual(swt1.depth_cm, 5);
+    assert.strictEqual(swt1.unit, 'kPa');
+    assert.ok(!res.rows.some((row) => /[A-F0-9]{16}/.test(String(row.source))), 'no raw DevEUI');
+  } finally {
+    db.close();
+  }
+});
+
+test('buildZoneExportCsv aggregate keeps per-source rows with depth for merged cards', async () => {
+  const db = createCliSqliteDb();
+  try {
+    db.runSql(`
+      INSERT INTO users(id,username,password_hash,created_at,updated_at) VALUES(1,'u','h','2026-05-31T00:00:00.000Z','2026-05-31T00:00:00.000Z');
+      INSERT INTO irrigation_zones(id,name,user_id,zone_uuid,timezone,created_at,updated_at) VALUES(12,'Zone B',1,'zb','UTC','2026-05-31T00:00:00.000Z','2026-05-31T00:00:00.000Z');
+      INSERT INTO devices(deveui,name,type_id,user_id,irrigation_zone_id,chameleon_enabled,chameleon_swt1_depth_cm,created_at,updated_at)
+        VALUES
+          ('AA00000000000001','Chameleon 1','DRAGINO_LSN50',1,12,1,5,'2026-05-31T00:00:00.000Z','2026-05-31T00:00:00.000Z'),
+          ('AA00000000000002','Chameleon 2','DRAGINO_LSN50',1,12,1,15,'2026-05-31T00:00:00.000Z','2026-05-31T00:00:00.000Z');
+      INSERT INTO device_data(deveui,recorded_at,swt_1) VALUES
+        ('AA00000000000001','2026-06-01T08:00:00.000Z',6.0),
+        ('AA00000000000001','2026-06-01T09:00:00.000Z',6.4),
+        ('AA00000000000002','2026-06-01T08:00:00.000Z',7.0),
+        ('AA00000000000002','2026-06-01T09:00:00.000Z',7.4);
+      INSERT INTO chameleon_readings(deveui,recorded_at,array_id) VALUES
+        ('AA00000000000001','2026-06-01T08:00:00.000Z','ARR-001'),
+        ('AA00000000000001','2026-06-01T09:00:00.000Z','ARR-001'),
+        ('AA00000000000002','2026-06-01T08:00:00.000Z','ARR-002'),
+        ('AA00000000000002','2026-06-01T09:00:00.000Z','ARR-002');
+    `);
+    const res = await helper.buildZoneExportCsv(db, {
+      zoneId: 12,
+      from: '2026-06-01',
+      to: '2026-06-01',
+      granularity: 'daily',
+      nowMs: Date.parse('2026-06-03T00:00:00.000Z'),
+    });
+    assert.deepStrictEqual(res.columns, helper.AGG_CSV_COLUMNS);
+    const swt1Rows = res.rows.filter((row) => row.variable === 'swt_1');
+    assert.strictEqual(swt1Rows.length, 2);
+    assert.ok(!swt1Rows.some((row) => row.source === '2 sources'), 'no blended source label');
+    assert.ok(!swt1Rows.some((row) => row.depth_cm === '' || row.depth_cm === null || row.depth_cm === undefined), 'no blank soil depth');
+    const c1 = swt1Rows.find((row) => row.source === 'Chameleon 1');
+    const c2 = swt1Rows.find((row) => row.source === 'Chameleon 2');
+    assert.ok(c1, 'Chameleon 1 row present');
+    assert.ok(c2, 'Chameleon 2 row present');
+    assert.strictEqual(c1.array_id, 'ARR-001');
+    assert.strictEqual(c2.array_id, 'ARR-002');
+    assert.strictEqual(c1.zone, 'Zone B');
+    assert.strictEqual(c1.card, 'soil');
+    assert.strictEqual(c1.depth_cm, 5);
+    assert.strictEqual(c1.unit, 'kPa');
+    assert.strictEqual(c1.n, 2);
+    assert.strictEqual(c1.mean, 6.2);
+    assert.strictEqual(c1.latest, 6.4);
+    assert.strictEqual(c2.depth_cm, 15);
+    assert.strictEqual(c2.n, 2);
+    assert.strictEqual(c2.mean, 7.2);
+    assert.strictEqual(c2.latest, 7.4);
+    assert.ok(!res.rows.some((row) => /[A-F0-9]{16}/.test(String(row.source))), 'no raw DevEUI');
+  } finally {
+    db.close();
+  }
+});
+
+test('buildZoneExportCsv daily keeps Europe Zurich DST samples in the correct local day', async () => {
+  const db = createCliSqliteDb();
+  try {
+    db.runSql(`
+      INSERT INTO users(id,username,password_hash,created_at,updated_at) VALUES(1,'u','h','2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z');
+      INSERT INTO irrigation_zones(id,name,user_id,zone_uuid,timezone,created_at,updated_at) VALUES(12,'Zone B',1,'zb','Europe/Zurich','2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z');
+      INSERT INTO devices(deveui,name,type_id,user_id,irrigation_zone_id,chameleon_enabled,chameleon_swt1_depth_cm,created_at,updated_at)
+        VALUES('AA00000000000001','Chameleon 1','DRAGINO_LSN50',1,12,1,5,'2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z');
+      INSERT INTO device_data(deveui,recorded_at,swt_1) VALUES
+        ('AA00000000000001','2026-03-29T00:30:00.000Z',10),
+        ('AA00000000000001','2026-03-29T22:30:00.000Z',20),
+        ('AA00000000000001','2026-03-30T00:30:00.000Z',22),
+        ('AA00000000000001','2026-10-25T20:30:00.000Z',30),
+        ('AA00000000000001','2026-10-25T22:30:00.000Z',40),
+        ('AA00000000000001','2026-10-25T23:30:00.000Z',50);
+    `);
+
+    const spring = await helper.buildZoneExportCsv(db, {
+      zoneId: 12,
+      from: '2026-03-29',
+      to: '2026-03-30',
+      granularity: 'daily',
+      nowMs: Date.parse('2026-11-01T00:00:00.000Z'),
+    });
+    assert.deepStrictEqual(
+      spring.rows.filter((row) => row.variable === 'swt_1').map((row) => ({
+        bucket_start: row.bucket_start,
+        bucket_end: row.bucket_end,
+        n: row.n,
+        mean: row.mean,
+        latest: row.latest,
+      })),
+      [
+        { bucket_start: '2026-03-28T23:00:00.000Z', bucket_end: '2026-03-29T22:00:00.000Z', n: 1, mean: 10, latest: 10 },
+        { bucket_start: '2026-03-29T22:00:00.000Z', bucket_end: '2026-03-30T22:00:00.000Z', n: 2, mean: 21, latest: 22 },
+      ]
+    );
+
+    const fall = await helper.buildZoneExportCsv(db, {
+      zoneId: 12,
+      from: '2026-10-25',
+      to: '2026-10-26',
+      granularity: 'daily',
+      nowMs: Date.parse('2026-11-01T00:00:00.000Z'),
+    });
+    assert.deepStrictEqual(
+      fall.rows.filter((row) => row.variable === 'swt_1').map((row) => ({
+        bucket_start: row.bucket_start,
+        bucket_end: row.bucket_end,
+        n: row.n,
+        mean: row.mean,
+        latest: row.latest,
+      })),
+      [
+        { bucket_start: '2026-10-24T22:00:00.000Z', bucket_end: '2026-10-25T23:00:00.000Z', n: 2, mean: 35, latest: 40 },
+        { bucket_start: '2026-10-25T23:00:00.000Z', bucket_end: '2026-10-26T23:00:00.000Z', n: 1, mean: 50, latest: 50 },
+      ]
+    );
+  } finally {
+    db.close();
+  }
+});
+
+test('buildZoneExportCsv rejects over-large raw ranges with a coarser granularity suggestion', async () => {
+  const db = createCliSqliteDb();
+  try {
+    db.runSql(`
+      INSERT INTO users(id,username,password_hash,created_at,updated_at) VALUES(1,'u','h','2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z');
+      INSERT INTO irrigation_zones(id,name,user_id,zone_uuid,timezone,created_at,updated_at) VALUES(12,'Zone B',1,'zb','UTC','2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z');
+    `);
+    await assert.rejects(
+      () => helper.buildZoneExportCsv(db, {
+        zoneId: 12,
+        from: '2026-01-01',
+        to: '2026-04-15',
+        granularity: 'raw',
+        nowMs: Date.parse('2026-06-03T00:00:00.000Z'),
+      }),
+      (error) => {
+        assert.strictEqual(error.code, 'RANGE_TOO_LARGE');
+        assert.strictEqual(error.statusCode, 413);
+        assert.match(error.suggestion, /coarser granularity/);
+        return true;
+      }
+    );
+  } finally {
+    db.close();
+  }
+});
+
+test('buildZoneExportCsv rejects impossible calendar dates', async () => {
+  const db = createCliSqliteDb();
+  try {
+    db.runSql(`
+      INSERT INTO users(id,username,password_hash,created_at,updated_at) VALUES(1,'u','h','2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z');
+      INSERT INTO irrigation_zones(id,name,user_id,zone_uuid,timezone,created_at,updated_at) VALUES(12,'Zone B',1,'zb','UTC','2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z');
+    `);
+    await assert.rejects(
+      () => helper.buildZoneExportCsv(db, {
+        zoneId: 12,
+        from: '2026-02-31',
+        to: '2026-02-31',
+        granularity: 'raw',
+        nowMs: Date.parse('2026-06-03T00:00:00.000Z'),
+      }),
+      (error) => {
+        assert.strictEqual(error.statusCode, 400);
+        assert.match(error.message, /from must be YYYY-MM-DD/);
+        return true;
+      }
+    );
+  } finally {
+    db.close();
+  }
+});
+
+test('buildZoneExportCsv returns header-only row sets for empty valid ranges', async () => {
+  const db = createCliSqliteDb();
+  try {
+    db.runSql(`
+      INSERT INTO users(id,username,password_hash,created_at,updated_at) VALUES(1,'u','h','2026-06-01T00:00:00.000Z','2026-06-01T00:00:00.000Z');
+      INSERT INTO irrigation_zones(id,name,user_id,zone_uuid,timezone,created_at,updated_at) VALUES(12,'Zone B',1,'zb','UTC','2026-06-01T00:00:00.000Z','2026-06-01T00:00:00.000Z');
+      INSERT INTO devices(deveui,name,type_id,user_id,irrigation_zone_id,chameleon_enabled,chameleon_swt1_depth_cm,created_at,updated_at)
+        VALUES('AA00000000000001','Chameleon 1','DRAGINO_LSN50',1,12,1,5,'2026-06-01T00:00:00.000Z','2026-06-01T00:00:00.000Z');
+    `);
+    const res = await helper.buildZoneExportCsv(db, {
+      zoneId: 12,
+      from: '2026-06-01',
+      to: '2026-06-01',
+      granularity: 'raw',
+      nowMs: Date.parse('2026-06-03T00:00:00.000Z'),
+    });
+    assert.deepStrictEqual(res.columns, helper.RAW_CSV_COLUMNS);
+    assert.deepStrictEqual(res.rows, []);
+    assert.strictEqual(helper.toCsv(res.columns, res.rows), 'timestamp,timezone,zone,card,source,array_id,variable,depth_cm,value,unit\n');
+  } finally {
+    db.close();
+  }
+});
+
+test('rotateZoneCsv removes old raw and hourly files but keeps daily.csv', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'osi-csv-rotate-'));
+  try {
+    const zone = { id: 7, name: 'Zone B', zone_uuid: 'zu', timezone: 'UTC' };
+    const rawDir = path.join(dir, 'zu', 'raw');
+    const hourlyDir = path.join(dir, 'zu', 'hourly');
+    fs.mkdirSync(rawDir, { recursive: true });
+    fs.mkdirSync(hourlyDir, { recursive: true });
+    fs.writeFileSync(path.join(rawDir, '2026-02-01.csv'), 'old\n');
+    fs.writeFileSync(path.join(rawDir, '2026-06-01.csv'), 'new\n');
+    fs.writeFileSync(path.join(hourlyDir, '2026-02-01.csv'), 'old\n');
+    fs.writeFileSync(path.join(hourlyDir, '2026-06-01.csv'), 'new\n');
+    fs.writeFileSync(path.join(dir, 'zu', 'daily.csv'), 'daily\n');
+
+    await helper.rotateZoneCsv({ exportDir: dir, zone, nowMs: Date.parse('2026-06-02T00:00:00.000Z'), retentionDays: 90 });
+    assert.strictEqual(fs.existsSync(path.join(rawDir, '2026-02-01.csv')), false);
+    assert.strictEqual(fs.existsSync(path.join(hourlyDir, '2026-02-01.csv')), false);
+    assert.strictEqual(fs.existsSync(path.join(rawDir, '2026-06-01.csv')), true);
+    assert.strictEqual(fs.existsSync(path.join(hourlyDir, '2026-06-01.csv')), true);
+    assert.strictEqual(fs.existsSync(path.join(dir, 'zu', 'daily.csv')), true);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
   }
 });
 
