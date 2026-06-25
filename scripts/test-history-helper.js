@@ -46,6 +46,20 @@ const expectedExports = [
   'buildLocalInterpretations',
 ];
 
+const TIDY_CSV_COLUMNS = [
+  'timestamp',
+  'site',
+  'zone',
+  'series_label',
+  'card_type',
+  'source_key',
+  'channel_key',
+  'depth_cm',
+  'array_id',
+  'unit',
+  'value',
+];
+
 function test(name, fn) {
   Promise.resolve()
     .then(fn)
@@ -108,8 +122,8 @@ test('exports the history helper contract', () => {
 });
 
 test('exports the zone CSV column contracts', () => {
-  assert.deepStrictEqual(helper.RAW_CSV_COLUMNS, ['timestamp', 'timezone', 'zone', 'card', 'source', 'array_id', 'variable', 'depth_cm', 'value', 'unit']);
-  assert.deepStrictEqual(helper.AGG_CSV_COLUMNS, ['bucket_start', 'bucket_end', 'timezone', 'zone', 'card', 'source', 'array_id', 'variable', 'depth_cm', 'unit', 'n', 'coverage_pct', 'mean', 'min', 'max', 'median', 'latest']);
+  assert.deepStrictEqual(helper.RAW_CSV_COLUMNS, TIDY_CSV_COLUMNS);
+  assert.deepStrictEqual(helper.AGG_CSV_COLUMNS, TIDY_CSV_COLUMNS);
 });
 
 test('toCsv neutralizes spreadsheet formulas in text cells', () => {
@@ -737,41 +751,39 @@ test('writeZoneCsv emits tidy long-format raw and daily files with depth', async
     const rawRows = [
       {
         timestamp: '2026-06-02T14:03:21.000Z',
-        source: 'Chameleon 1',
-        array_id: 'ARR-009',
-        card: 'soil',
-        variable: 'swt_1',
+        site: 'HUB-1',
+        series_label: 'Chameleon 1 - Soil tension (S1)',
+        card_type: 'soil',
+        source_key: 'soil-src-abc123',
+        channel_key: 'swt_1',
         depth_cm: 5,
-        value: 6.24,
+        array_id: 'ARR-009',
         unit: 'kPa',
+        value: 6.24,
       },
     ];
     const dailyRows = [
       {
-        bucket_start: '2026-06-02T00:00:00.000Z',
-        bucket_end: '2026-06-03T00:00:00.000Z',
-        source: 'Chameleon 1',
-        array_id: 'ARR-009',
-        card: 'soil',
-        variable: 'swt_1',
+        timestamp: '2026-06-02T00:00:00.000Z',
+        site: 'HUB-1',
+        series_label: 'Chameleon 1 - Soil tension (S1)',
+        card_type: 'soil',
+        source_key: 'soil-src-abc123',
+        channel_key: 'swt_1',
         depth_cm: 5,
+        array_id: 'ARR-009',
         unit: 'kPa',
-        n: 96,
-        coverage_pct: 100,
-        mean: 6.3,
-        min: 6.1,
-        max: 6.5,
-        median: 6.3,
-        latest: 6.24,
+        value: 6.3,
       },
     ];
 
     await helper.writeZoneCsv({ exportDir: dir, zone, day: '2026-06-02', rawRows, dailyRows });
     const raw = fs.readFileSync(path.join(dir, 'zu', 'raw', '2026-06-02.csv'), 'utf8').trim().split('\n');
-    assert.strictEqual(raw[0], 'timestamp,timezone,zone,card,source,array_id,variable,depth_cm,value,unit');
-    assert.match(raw[1], /Europe\/Zurich,Zone B,soil,Chameleon 1,ARR-009,swt_1,5,6.24,kPa/);
+    assert.strictEqual(raw[0], TIDY_CSV_COLUMNS.join(','));
+    assert.strictEqual(raw[1], '2026-06-02T14:03:21.000Z,HUB-1,Zone B,Chameleon 1 - Soil tension (S1),soil,soil-src-abc123,swt_1,5,ARR-009,kPa,6.24');
     const daily = fs.readFileSync(path.join(dir, 'zu', 'daily.csv'), 'utf8').trim().split('\n');
-    assert.strictEqual(daily[0], 'bucket_start,bucket_end,timezone,zone,card,source,array_id,variable,depth_cm,unit,n,coverage_pct,mean,min,max,median,latest');
+    assert.strictEqual(daily[0], TIDY_CSV_COLUMNS.join(','));
+    assert.strictEqual(daily[1], '2026-06-02T00:00:00.000Z,HUB-1,Zone B,Chameleon 1 - Soil tension (S1),soil,soil-src-abc123,swt_1,5,ARR-009,kPa,6.3');
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
@@ -799,19 +811,22 @@ test('buildZoneExportCsv raw emits tidy rows with depth and source', async () =>
       granularity: 'raw',
       nowMs: Date.parse('2026-06-03T00:00:00.000Z'),
     });
-    assert.deepStrictEqual(res.columns, helper.RAW_CSV_COLUMNS);
+    assert.deepStrictEqual(res.columns, TIDY_CSV_COLUMNS);
     assert.strictEqual(res.rows.length, 2);
-    const swt1 = res.rows.find((row) => row.variable === 'swt_1' && row.value === 6.2);
+    const expectedSourceKey = `soil-src-${crypto.createHash('sha256').update('AA00000000000001').digest('hex').slice(0, 12)}`;
+    const swt1 = res.rows.find((row) => row.channel_key === 'swt_1' && row.value === 6.2);
     assert.ok(swt1);
     assert.strictEqual(swt1.timestamp, '2026-06-01T08:00:00.000Z');
-    assert.strictEqual(swt1.timezone, 'UTC');
+    assert.strictEqual(swt1.site, 'UNKNOWN');
     assert.strictEqual(swt1.zone, 'Zone B');
-    assert.strictEqual(swt1.card, 'soil');
-    assert.strictEqual(swt1.source, 'Chameleon 1');
-    assert.strictEqual(swt1.array_id, 'ARR-001');
+    assert.strictEqual(swt1.series_label, 'Chameleon 1 - Soil tension (S1)');
+    assert.strictEqual(swt1.card_type, 'soil');
+    assert.strictEqual(swt1.source_key, expectedSourceKey);
+    assert.strictEqual(swt1.channel_key, 'swt_1');
     assert.strictEqual(swt1.depth_cm, 5);
+    assert.strictEqual(swt1.array_id, 'ARR-001');
     assert.strictEqual(swt1.unit, 'kPa');
-    assert.ok(!res.rows.some((row) => /[A-F0-9]{16}/.test(String(row.source))), 'no raw DevEUI');
+    assert.ok(!res.rows.some((row) => /[A-F0-9]{16}/.test(String(row.series_label))), 'no raw DevEUI');
   } finally {
     db.close();
   }
@@ -845,29 +860,26 @@ test('buildZoneExportCsv aggregate keeps per-source rows with depth for merged c
       granularity: 'daily',
       nowMs: Date.parse('2026-06-03T00:00:00.000Z'),
     });
-    assert.deepStrictEqual(res.columns, helper.AGG_CSV_COLUMNS);
-    const swt1Rows = res.rows.filter((row) => row.variable === 'swt_1');
+    assert.deepStrictEqual(res.columns, TIDY_CSV_COLUMNS);
+    const swt1Rows = res.rows.filter((row) => row.channel_key === 'swt_1');
     assert.strictEqual(swt1Rows.length, 2);
-    assert.ok(!swt1Rows.some((row) => row.source === '2 sources'), 'no blended source label');
+    assert.ok(!swt1Rows.some((row) => row.series_label === '2 sources'), 'no blended source label');
     assert.ok(!swt1Rows.some((row) => row.depth_cm === '' || row.depth_cm === null || row.depth_cm === undefined), 'no blank soil depth');
-    const c1 = swt1Rows.find((row) => row.source === 'Chameleon 1');
-    const c2 = swt1Rows.find((row) => row.source === 'Chameleon 2');
+    const c1 = swt1Rows.find((row) => row.series_label === 'Chameleon 1 - Soil tension (S1)');
+    const c2 = swt1Rows.find((row) => row.series_label === 'Chameleon 2 - Soil tension (S1)');
     assert.ok(c1, 'Chameleon 1 row present');
     assert.ok(c2, 'Chameleon 2 row present');
     assert.strictEqual(c1.array_id, 'ARR-001');
     assert.strictEqual(c2.array_id, 'ARR-002');
     assert.strictEqual(c1.zone, 'Zone B');
-    assert.strictEqual(c1.card, 'soil');
+    assert.strictEqual(c1.card_type, 'soil');
+    assert.strictEqual(c1.channel_key, 'swt_1');
     assert.strictEqual(c1.depth_cm, 5);
     assert.strictEqual(c1.unit, 'kPa');
-    assert.strictEqual(c1.n, 2);
-    assert.strictEqual(c1.mean, 6.2);
-    assert.strictEqual(c1.latest, 6.4);
+    assert.strictEqual(c1.value, 6.2);
     assert.strictEqual(c2.depth_cm, 15);
-    assert.strictEqual(c2.n, 2);
-    assert.strictEqual(c2.mean, 7.2);
-    assert.strictEqual(c2.latest, 7.4);
-    assert.ok(!res.rows.some((row) => /[A-F0-9]{16}/.test(String(row.source))), 'no raw DevEUI');
+    assert.strictEqual(c2.value, 7.2);
+    assert.ok(!res.rows.some((row) => /[A-F0-9]{16}/.test(String(row.series_label))), 'no raw DevEUI');
   } finally {
     db.close();
   }
@@ -898,16 +910,13 @@ test('buildZoneExportCsv daily keeps Europe Zurich DST samples in the correct lo
       nowMs: Date.parse('2026-11-01T00:00:00.000Z'),
     });
     assert.deepStrictEqual(
-      spring.rows.filter((row) => row.variable === 'swt_1').map((row) => ({
-        bucket_start: row.bucket_start,
-        bucket_end: row.bucket_end,
-        n: row.n,
-        mean: row.mean,
-        latest: row.latest,
+      spring.rows.filter((row) => row.channel_key === 'swt_1').map((row) => ({
+        timestamp: row.timestamp,
+        value: row.value,
       })),
       [
-        { bucket_start: '2026-03-28T23:00:00.000Z', bucket_end: '2026-03-29T22:00:00.000Z', n: 1, mean: 10, latest: 10 },
-        { bucket_start: '2026-03-29T22:00:00.000Z', bucket_end: '2026-03-30T22:00:00.000Z', n: 2, mean: 21, latest: 22 },
+        { timestamp: '2026-03-28T23:00:00.000Z', value: 10 },
+        { timestamp: '2026-03-29T22:00:00.000Z', value: 21 },
       ]
     );
 
@@ -919,16 +928,13 @@ test('buildZoneExportCsv daily keeps Europe Zurich DST samples in the correct lo
       nowMs: Date.parse('2026-11-01T00:00:00.000Z'),
     });
     assert.deepStrictEqual(
-      fall.rows.filter((row) => row.variable === 'swt_1').map((row) => ({
-        bucket_start: row.bucket_start,
-        bucket_end: row.bucket_end,
-        n: row.n,
-        mean: row.mean,
-        latest: row.latest,
+      fall.rows.filter((row) => row.channel_key === 'swt_1').map((row) => ({
+        timestamp: row.timestamp,
+        value: row.value,
       })),
       [
-        { bucket_start: '2026-10-24T22:00:00.000Z', bucket_end: '2026-10-25T23:00:00.000Z', n: 2, mean: 35, latest: 40 },
-        { bucket_start: '2026-10-25T23:00:00.000Z', bucket_end: '2026-10-26T23:00:00.000Z', n: 1, mean: 50, latest: 50 },
+        { timestamp: '2026-10-24T22:00:00.000Z', value: 35 },
+        { timestamp: '2026-10-25T23:00:00.000Z', value: 50 },
       ]
     );
   } finally {
@@ -1007,7 +1013,7 @@ test('buildZoneExportCsv returns header-only row sets for empty valid ranges', a
     });
     assert.deepStrictEqual(res.columns, helper.RAW_CSV_COLUMNS);
     assert.deepStrictEqual(res.rows, []);
-    assert.strictEqual(helper.toCsv(res.columns, res.rows), 'timestamp,timezone,zone,card,source,array_id,variable,depth_cm,value,unit\n');
+    assert.strictEqual(helper.toCsv(res.columns, res.rows), `${TIDY_CSV_COLUMNS.join(',')}\n`);
   } finally {
     db.close();
   }

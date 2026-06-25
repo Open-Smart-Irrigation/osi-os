@@ -196,38 +196,38 @@ function channelsForCard(card) {
   const cardType = normalizeCardType(card && card.cardType);
   if (cardType === 'soil') {
     return [
-      { id: 'swt_1', field: 'swt_1', unit: 'kPa' },
-      { id: 'swt_2', field: 'swt_2', unit: 'kPa' },
-      { id: 'swt_3', field: 'swt_3', unit: 'kPa' },
-      { id: 'swt_wm1', field: 'swt_wm1', unit: 'kPa' },
-      { id: 'swt_wm2', field: 'swt_wm2', unit: 'kPa' },
+      { id: 'swt_1', field: 'swt_1', unit: 'kPa', label: 'Soil tension (S1)' },
+      { id: 'swt_2', field: 'swt_2', unit: 'kPa', label: 'Soil tension (S2)' },
+      { id: 'swt_3', field: 'swt_3', unit: 'kPa', label: 'Soil tension (S3)' },
+      { id: 'swt_wm1', field: 'swt_wm1', unit: 'kPa', label: 'Soil tension (S1)' },
+      { id: 'swt_wm2', field: 'swt_wm2', unit: 'kPa', label: 'Soil tension (S2)' },
     ];
   }
   if (cardType === 'environment') {
     return [
-      { id: 'ambient_temperature', field: 'ambient_temperature', unit: 'C' },
-      { id: 'relative_humidity', field: 'relative_humidity', unit: '%' },
-      { id: 'ext_temperature_c', field: 'ext_temperature_c', unit: 'C' },
-      { id: 'light_lux', field: 'light_lux', unit: 'lux' },
-      { id: 'rain_mm_per_hour', field: 'rain_mm_per_hour', unit: 'mm/h' },
-      { id: 'rain_mm_per_10min', field: 'rain_mm_per_10min', unit: 'mm/10min' },
-      { id: 'rain_mm_today', field: 'rain_mm_today', unit: 'mm' },
-      { id: 'rain_mm_delta', field: 'rain_mm_delta', unit: 'mm' },
-      { id: 'wind_speed_mps', field: 'wind_speed_mps', unit: 'm/s' },
-      { id: 'wind_gust_mps', field: 'wind_gust_mps', unit: 'm/s' },
-      { id: 'barometric_pressure_hpa', field: 'barometric_pressure_hpa', unit: 'hPa' },
-      { id: 'uv_index', field: 'uv_index', unit: null },
+      { id: 'ambient_temperature', field: 'ambient_temperature', unit: '°C', label: 'Ambient temperature' },
+      { id: 'relative_humidity', field: 'relative_humidity', unit: '%', label: 'Relative humidity' },
+      { id: 'ext_temperature_c', field: 'ext_temperature_c', unit: '°C', label: 'External temperature' },
+      { id: 'light_lux', field: 'light_lux', unit: 'lux', label: 'Light' },
+      { id: 'rain_mm_per_hour', field: 'rain_mm_per_hour', unit: 'mm/h', label: 'Rain rate' },
+      { id: 'rain_mm_per_10min', field: 'rain_mm_per_10min', unit: 'mm/10min', label: 'Rain (10 min)' },
+      { id: 'rain_mm_today', field: 'rain_mm_today', unit: 'mm', label: 'Rain today' },
+      { id: 'rain_mm_delta', field: 'rain_mm_delta', unit: 'mm', label: 'Rain delta' },
+      { id: 'wind_speed_mps', field: 'wind_speed_mps', unit: 'm/s', label: 'Wind speed' },
+      { id: 'wind_gust_mps', field: 'wind_gust_mps', unit: 'm/s', label: 'Wind gust' },
+      { id: 'barometric_pressure_hpa', field: 'barometric_pressure_hpa', unit: 'hPa', label: 'Pressure' },
+      { id: 'uv_index', field: 'uv_index', unit: null, label: 'UV index' },
     ];
   }
   if (cardType === 'dendro') {
     return [
-      { id: 'dendro_stem_change_um', field: 'dendro_stem_change_um', unit: 'um' },
-      { id: 'dendro_position_mm', field: 'dendro_position_mm', unit: 'mm' },
-      { id: 'dendro_position_raw_mm', field: 'dendro_position_raw_mm', unit: 'mm' },
-      { id: 'dendro_delta_mm', field: 'dendro_delta_mm', unit: 'mm' },
-      { id: 'dendro_ratio', field: 'dendro_ratio', unit: null },
-      { id: 'adc_ch0v', field: 'adc_ch0v', unit: 'V' },
-      { id: 'adc_ch1v', field: 'adc_ch1v', unit: 'V' },
+      { id: 'dendro_stem_change_um', field: 'dendro_stem_change_um', unit: 'µm', label: 'Stem change' },
+      { id: 'dendro_position_mm', field: 'dendro_position_mm', unit: 'mm', label: 'Position' },
+      { id: 'dendro_position_raw_mm', field: 'dendro_position_raw_mm', unit: 'mm', label: 'Position (raw)' },
+      { id: 'dendro_delta_mm', field: 'dendro_delta_mm', unit: 'mm', label: 'Delta' },
+      { id: 'dendro_ratio', field: 'dendro_ratio', unit: null, label: 'Ratio' },
+      { id: 'adc_ch0v', field: 'adc_ch0v', unit: 'V', label: 'ADC ch0' },
+      { id: 'adc_ch1v', field: 'adc_ch1v', unit: 'V', label: 'ADC ch1' },
     ];
   }
   return [];
@@ -1071,8 +1071,9 @@ function toCsv(columns, rows) {
     .join('\n') + '\n';
 }
 
-const RAW_CSV_COLUMNS = ['timestamp', 'timezone', 'zone', 'card', 'source', 'array_id', 'variable', 'depth_cm', 'value', 'unit'];
-const AGG_CSV_COLUMNS = ['bucket_start', 'bucket_end', 'timezone', 'zone', 'card', 'source', 'array_id', 'variable', 'depth_cm', 'unit', 'n', 'coverage_pct', 'mean', 'min', 'max', 'median', 'latest'];
+const TIDY_CSV_COLUMNS = ['timestamp', 'site', 'zone', 'series_label', 'card_type', 'source_key', 'channel_key', 'depth_cm', 'array_id', 'unit', 'value'];
+const RAW_CSV_COLUMNS = TIDY_CSV_COLUMNS;
+const AGG_CSV_COLUMNS = TIDY_CSV_COLUMNS;
 
 function normalizeExportDate(value, name) {
   const date = String(value || '').trim();
@@ -1171,7 +1172,35 @@ async function resolveZoneExportScope(db, options = {}) {
   const end = zoneDateStartIso(addIsoDays(to, 1), timezone);
   const devices = await dbAll(db, 'SELECT * FROM devices WHERE deleted_at IS NULL AND irrigation_zone_id = ? ORDER BY deveui ASC', [zoneId]);
   const cards = deriveCardsForZone(zone, devices).filter((card) => normalizeCardType(card.cardType) !== 'gateway');
-  return { zone, timezone, from, to, start, end, devices, cards, granularity: normalizeExportGranularity(options.granularity), nowMs: options.nowMs ?? Date.now() };
+  const site = String(options.site || process.env.DEVICE_EUI || process.env.GATEWAY_DEVICE_EUI || 'UNKNOWN').trim().toUpperCase() || 'UNKNOWN';
+  return { zone, timezone, from, to, start, end, devices, cards, site, granularity: normalizeExportGranularity(options.granularity), nowMs: options.nowMs ?? Date.now() };
+}
+
+function seriesLabel(sourceName, channel) {
+  return [sourceName, channel && (channel.label || channel.id)].filter(Boolean).join(' - ');
+}
+
+function sourceKeyForCsv(card, device) {
+  const cardType = normalizeCardType(card && card.cardType);
+  if (cardType === 'dendro') return dendroSourceKey(device && (device.deveui || device.device_eui)) || String(card && card.logicalSourceKey || '').trim();
+  return displaySafeSourceKey(cardType, device) || String(card && card.logicalSourceKey || '').trim();
+}
+
+function tidyCsvRow(input) {
+  const row = input || {};
+  return {
+    timestamp: row.timestamp ?? row.bucket_start ?? '',
+    site: row.site ?? '',
+    zone: row.zone ?? '',
+    series_label: row.series_label ?? (row.source && (row.channel_label || row.variable) ? `${row.source} - ${row.channel_label || row.variable}` : ''),
+    card_type: row.card_type ?? row.card ?? '',
+    source_key: row.source_key ?? row.logical_source_key ?? '',
+    channel_key: row.channel_key ?? row.variable ?? '',
+    depth_cm: row.depth_cm ?? '',
+    array_id: row.array_id ?? '',
+    unit: row.unit ?? '',
+    value: row.value ?? row.mean ?? '',
+  };
 }
 
 async function rawZoneExportRows(db, scope) {
@@ -1211,24 +1240,25 @@ async function rawZoneExportRows(db, scope) {
           if (value === null) continue;
           rows.push({
             timestamp: row.recorded_at,
-            timezone: scope.timezone,
+            site: scope.site,
             zone: zoneName,
-            card: card.cardType,
-            source: sourceName,
-            array_id: arrayId,
-            variable: channel.id,
+            series_label: seriesLabel(sourceName, channel),
+            card_type: card.cardType,
+            source_key: sourceKeyForCsv(card, device),
+            channel_key: channel.id,
             depth_cm: soilDepthCm(device, channel.id),
-            value: roundTo(value),
+            array_id: arrayId,
             unit: channel.unit || null,
+            value: roundTo(value),
           });
         }
       }
     });
   }
   rows.sort((left, right) => String(left.timestamp).localeCompare(String(right.timestamp))
-    || String(left.card).localeCompare(String(right.card))
-    || String(left.source).localeCompare(String(right.source))
-    || String(left.variable).localeCompare(String(right.variable)));
+    || String(left.card_type).localeCompare(String(right.card_type))
+    || String(left.source_key).localeCompare(String(right.source_key))
+    || String(left.channel_key).localeCompare(String(right.channel_key)));
   return rows;
 }
 
@@ -1264,17 +1294,16 @@ async function aggregateZoneExportRows(db, scope) {
         timezone: scope.timezone,
         nowMs: scope.nowMs,
       });
-      rows.push(...csvRowsFromAggregate(aggregate, card, device, sourceName, channels, arrayIdByDeveui[deveui] || null).map((row) => ({
-        ...row,
-        timezone: scope.timezone,
+      rows.push(...csvRowsFromAggregate(aggregate, card, device, sourceName, channels, arrayIdByDeveui[deveui] || null, {
+        site: scope.site,
         zone: zoneName,
-      })));
+      }));
     }
   }
-  rows.sort((left, right) => String(left.bucket_start).localeCompare(String(right.bucket_start))
-    || String(left.card).localeCompare(String(right.card))
-    || String(left.source).localeCompare(String(right.source))
-    || String(left.variable).localeCompare(String(right.variable)));
+  rows.sort((left, right) => String(left.timestamp).localeCompare(String(right.timestamp))
+    || String(left.card_type).localeCompare(String(right.card_type))
+    || String(left.source_key).localeCompare(String(right.source_key))
+    || String(left.channel_key).localeCompare(String(right.channel_key)));
   return rows;
 }
 
@@ -1297,9 +1326,8 @@ async function writeZoneCsv(options = {}) {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) throw new Error('writeZoneCsv requires day YYYY-MM-DD');
   const exportDir = String(options.exportDir || '/data/exports');
   const base = path.join(exportDir, zoneUuid);
-  const timezone = normalizeTimezone(zone.timezone);
   const zoneName = String(zone.name || zoneUuid);
-  const stamp = (row) => ({ ...(row || {}), timezone, zone: zoneName });
+  const stamp = (row) => tidyCsvRow({ ...(row || {}), zone: row && row.zone ? row.zone : zoneName });
 
   fs.mkdirSync(path.join(base, 'raw'), { recursive: true });
   fs.mkdirSync(path.join(base, 'hourly'), { recursive: true });
@@ -1392,28 +1420,24 @@ async function resolveDeviceArrayIds(db, deveuis, start, end) {
   return map;
 }
 
-function csvRowsFromAggregate(aggregate, card, device, sourceName, channels, arrayId) {
+function csvRowsFromAggregate(aggregate, card, device, sourceName, channels, arrayId, context = {}) {
   const rows = [];
   for (const bucket of aggregate.buckets || []) {
     for (const channel of channels) {
       const stats = bucket.series && bucket.series[channel.id];
       if (!stats || Number(stats.sampleCount || 0) === 0) continue;
       rows.push({
-        bucket_start: bucket.bucketStart,
-        bucket_end: bucket.bucketEnd,
-        card: card.cardType,
-        source: sourceName,
-        array_id: arrayId == null ? null : arrayId,
-        variable: channel.id,
+        timestamp: bucket.bucketStart,
+        site: context.site || '',
+        zone: context.zone || '',
+        series_label: seriesLabel(sourceName, channel),
+        card_type: card.cardType,
+        source_key: sourceKeyForCsv(card, device),
+        channel_key: channel.id,
         depth_cm: soilDepthCm(device, channel.id),
+        array_id: arrayId == null ? null : arrayId,
         unit: channel.unit || stats.unit || null,
-        n: Number(stats.sampleCount || 0),
-        coverage_pct: bucket.coveragePct,
-        mean: stats.mean,
-        min: stats.min,
-        max: stats.max,
-        median: stats.median,
-        latest: stats.latest,
+        value: stats.mean,
       });
     }
   }
