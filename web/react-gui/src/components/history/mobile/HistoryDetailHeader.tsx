@@ -8,8 +8,10 @@ interface HistoryDetailHeaderProps {
   zoneName: string | null;
   card: HistoryCardSummary;
   settingsOpen?: boolean;
+  canExport?: boolean;
   canOpenAdvanced?: boolean;
   onSettingsToggle?: () => void;
+  onExport?: () => void;
   onAdvancedView?: () => void;
   onResetRange?: () => void;
   onRefresh?: () => void;
@@ -37,8 +39,10 @@ export const HistoryDetailHeader: React.FC<HistoryDetailHeaderProps> = ({
   zoneName,
   card,
   settingsOpen = false,
+  canExport = false,
   canOpenAdvanced = false,
   onSettingsToggle,
+  onExport,
   onAdvancedView,
   onResetRange,
   onRefresh,
@@ -76,6 +80,16 @@ export const HistoryDetailHeader: React.FC<HistoryDetailHeaderProps> = ({
             onChange={onSourceKeysChange}
             compact={compact}
           />
+        )}
+        {canExport && (
+          <button
+            type="button"
+            className={`rounded-md border border-[var(--border)] bg-[var(--secondary-bg)] text-sm font-bold text-[var(--text)] ${compact ? 'px-2 py-1' : 'px-3 py-2'}`}
+            aria-label={t('history.export.open')}
+            onClick={onExport}
+          >
+            {t('history.export.open')}
+          </button>
         )}
         <div className="relative">
           <button
