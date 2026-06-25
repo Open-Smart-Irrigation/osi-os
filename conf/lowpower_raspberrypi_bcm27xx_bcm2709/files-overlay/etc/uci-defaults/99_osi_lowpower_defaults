@@ -1,0 +1,24 @@
+#!/bin/sh
+
+uci -q batch <<'EOF'
+set osi-lowpower.main.enabled='1'
+set osi-lowpower.main.window_mode='daily'
+set osi-lowpower.main.window_start='02:00'
+set osi-lowpower.main.window_duration_minutes='60'
+set osi-lowpower.main.usb_control='1'
+set osi-lowpower.main.usb_hubs='1-1 2'
+set osi-lowpower.main.eth_control='1'
+set osi-lowpower.main.eth_ifname='eth0'
+set osi-lowpower.main.wifi_txpower='12'
+set osi-lowpower.main.state_file='/var/run/osi-lowpower/window.env'
+set osi-lowpower.main.cloud_window_required='1'
+set osi-lowpower.main.disable_pi_tailscale='1'
+set osi-gateway-gps.main.enabled='0'
+set osi-gateway-gps.main.poll_interval='300'
+commit osi-lowpower
+commit osi-gateway-gps
+EOF
+
+/etc/init.d/osi-lowpower enable >/dev/null 2>&1 || true
+
+exit 0

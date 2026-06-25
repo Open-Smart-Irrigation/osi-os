@@ -41,7 +41,15 @@ switch-env:
 	
 	@echo "Switching configuration"
 	rm -f conf/files conf/patches conf/.config
-	ln -s ${ENV}/files conf/files
+	if [ -d "conf/${ENV}/files-overlay" ]; then \
+		rm -rf ".tmp-openwrt-files/${ENV}"; \
+		mkdir -p ".tmp-openwrt-files/${ENV}"; \
+		cp -a "conf/${ENV}/files/." ".tmp-openwrt-files/${ENV}/"; \
+		cp -a "conf/${ENV}/files-overlay/." ".tmp-openwrt-files/${ENV}/"; \
+		ln -s "../.tmp-openwrt-files/${ENV}" conf/files; \
+	else \
+		ln -s ${ENV}/files conf/files; \
+	fi
 	ln -s ${ENV}/patches conf/patches
 	ln -s ${ENV}/.config conf/.config
 	

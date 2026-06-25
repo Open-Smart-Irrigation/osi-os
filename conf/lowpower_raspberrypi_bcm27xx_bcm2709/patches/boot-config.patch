@@ -1,0 +1,17 @@
+Index: openwrt/target/linux/bcm27xx/image/config.txt
+===================================================================
+--- openwrt.orig/target/linux/bcm27xx/image/config.txt
++++ openwrt/target/linux/bcm27xx/image/config.txt
+@@ -14 +14,11 @@
+-# Place your custom settings here.
++dtparam=spi=on
++dtparam=audio=off
++hdmi_blanking=2
++dtparam=act_led_trigger=none
++dtparam=act_led_activelow=off
++dtparam=pwr_led_trigger=none
++dtparam=pwr_led_activelow=off
++
++# Uncomment the line below when shield uses PIN26 as GPIO7"
++#dtoverlay=spi0-1cs
++

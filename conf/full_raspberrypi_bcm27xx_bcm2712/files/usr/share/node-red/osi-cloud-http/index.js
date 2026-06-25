@@ -1,9 +1,11 @@
 'use strict';
 
+const fs = require('fs');
 const http = require('http');
 const https = require('https');
 
 const DEFAULT_TIMEOUT_MS = 30000;
+const DEFAULT_LOWPOWER_STATE_FILE = '/var/run/osi-lowpower/window.env';
 
 function hasHeader(headers, wanted) {
   const needle = String(wanted || '').toLowerCase();
@@ -45,8 +47,90 @@ function normalizeRequest(input) {
   return { method, parsed, headers, body, timeoutMs };
 }
 
+function parseLowPowerStateFile(raw) {
+  const values = {};
+  String(raw || '').split(/\r?\n/).forEach((line) => {
+    const match = line.match(/^\s*([A-Z0-9_]+)=(.*)\s*$/);
+    if (!match) return;
+    let value = match[2] || '';
+    if (
+      (value.startsWith("'") && value.endsWith("'")) ||
+      (value.startsWith('"') && value.endsWith('"'))
+    ) {
+      value = value.slice(1, -1);
+    }
+    values[match[1]] = value;
+  });
+  return values;
+}
+
+function lowPowerWindowStatus(options) {
+  const deps = options || {};
+  const env = deps.env || process.env;
+  const runtimeFs = deps.fs || fs;
+  const stateFile = String(env.OSI_LOWPOWER_STATE_FILE || DEFAULT_LOWPOWER_STATE_FILE).trim() || DEFAULT_LOWPOWER_STATE_FILE;
+
+  if (env.OSI_LOWPOWER_WINDOWED_SYNC !== '1') {
+    return {
+      enabled: false,
+      stateFile,
+      state: 'disabled',
+      open: true,
+      reason: 'low-power disabled',
+      values: {}
+    };
+  }
+
+  let values;
+  try {
+    values = parseLowPowerStateFile(runtimeFs.readFileSync(stateFile, 'utf8'));
+  } catch (_) {
+    return {
+      enabled: true,
+      stateFile,
+      state: 'missing',
+      open: false,
+      reason: 'state file missing',
+      values: {}
+    };
+  }
+
+  const state = String(values.OSI_LOWPOWER_WINDOW_STATE || 'missing').trim().toLowerCase() || 'missing';
+  const open = state === 'open';
+  return {
+    enabled: true,
+    stateFile,
+    state,
+    open,
+    reason: String(values.OSI_LOWPOWER_REASON || (open ? 'window open' : 'window closed')).trim(),
+    values
+  };
+}
+
+function assertLowPowerCloudWindowOpen(options) {
+  const status = lowPowerWindowStatus(options);
+  if (!status.enabled || status.open) return status;
+  const error = new Error(`low-power cloud window is closed (${status.stateFile}, state=${status.state})`);
+  error.code = 'OSI_LOWPOWER_WINDOW_CLOSED';
+  error.statusCode = 425;
+  error.lowPowerWindowStatus = status;
+  throw error;
+}
+
 function requestJsonIpv4(input) {
-  const request = normalizeRequest(input);
+  const requestInput = Object.assign({}, input || {});
+  const lowPowerBypass = requestInput.lowPowerBypass === true;
+  delete requestInput.lowPowerBypass;
+
+  if (!lowPowerBypass) {
+    try {
+      assertLowPowerCloudWindowOpen();
+    } catch (error) {
+      return Promise.reject(error);
+    }
+  }
+
+  const request = normalizeRequest(requestInput);
   const transport = request.parsed.protocol === 'https:' ? https : http;
   const diagnostics = {
     family: 4,
@@ -118,5 +202,7 @@ function requestJsonIpv4(input) {
 }
 
 module.exports = {
+  lowPowerWindowStatus,
+  assertLowPowerCloudWindowOpen,
   requestJsonIpv4
 };

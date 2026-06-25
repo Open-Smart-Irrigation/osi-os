@@ -89,6 +89,8 @@ start_service() {
     local openagri_weather_radius_km=$(uci -q get osi-server.cloud.openagri_weather_radius_km 2>/dev/null || echo "10")
     local openagri_weather_current_cache_minutes=$(uci -q get osi-server.cloud.openagri_weather_current_cache_minutes 2>/dev/null || echo "30")
     local openagri_weather_forecast_cache_minutes=$(uci -q get osi-server.cloud.openagri_weather_forecast_cache_minutes 2>/dev/null || echo "120")
+    local osi_lowpower_windowed_sync=$(uci -q get osi-lowpower.main.cloud_window_required 2>/dev/null || echo "0")
+    local osi_lowpower_state_file=$(uci -q get osi-lowpower.main.state_file 2>/dev/null || echo "/var/run/osi-lowpower/window.env")
 
     # ChirpStack application and device profile IDs (per-installation)
     local cs_app_sensors=$(resolve_chirpstack_value osi-server.cloud.chirpstack_app_sensors CHIRPSTACK_APP_SENSORS)
@@ -155,6 +157,8 @@ NODE
         OPENAGRI_WEATHER_RADIUS_KM="$openagri_weather_radius_km" \
         OPENAGRI_WEATHER_CURRENT_CACHE_MINUTES="$openagri_weather_current_cache_minutes" \
         OPENAGRI_WEATHER_FORECAST_CACHE_MINUTES="$openagri_weather_forecast_cache_minutes" \
+        OSI_LOWPOWER_WINDOWED_SYNC="$osi_lowpower_windowed_sync" \
+        OSI_LOWPOWER_STATE_FILE="$osi_lowpower_state_file" \
         CHIRPSTACK_APP_SENSORS="$cs_app_sensors" \
         CHIRPSTACK_APP_ACTUATORS="$cs_app_actuators" \
         CHIRPSTACK_APP_FIELD_TESTER="$cs_app_field_tester" \

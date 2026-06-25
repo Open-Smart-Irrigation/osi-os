@@ -3420,9 +3420,28 @@
     "y": 100,
     "wires": [
       [
-        "d769e9face3844d5"
+        "f0a2000000000001"
       ]
     ]
+  },
+  {
+    "id": "f0a2000000000001",
+    "type": "function",
+    "z": "93b1537a596e0e6d",
+    "name": "Low-power cloud MQTT gate",
+    "outputs": 1,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 410,
+    "y": 100,
+    "wires": [
+      [
+        "d769e9face3844d5"
+      ]
+    ],
+    "func": "const enabled = String(env.get('OSI_LOWPOWER_WINDOWED_SYNC') || '').trim() === '1';\nconst stateFile = String(env.get('OSI_LOWPOWER_STATE_FILE') || '/var/run/osi-lowpower/window.env').trim() || '/var/run/osi-lowpower/window.env';\n\nfunction parseState(raw) {\n  const values = {};\n  String(raw || '').split(/\\r?\\n/).forEach((line) => {\n    const match = line.match(/^\\s*([A-Z0-9_]+)=(.*)\\s*$/);\n    if (!match) return;\n    values[match[1]] = match[2] || '';\n  });\n  return values;\n}\n\nif (!enabled) {\n  node.status({ fill: 'grey', shape: 'ring', text: 'low-power off' });\n  return msg;\n}\n\nconst runtimeFs = global.get('fs');\nif (!runtimeFs) {\n  node.status({ fill: 'red', shape: 'ring', text: 'fs unavailable' });\n  return null;\n}\n\nlet values;\ntry {\n  values = parseState(runtimeFs.readFileSync(stateFile, 'utf8'));\n} catch (_) {\n  node.status({ fill: 'yellow', shape: 'ring', text: 'window closed' });\n  return null;\n}\n\nconst state = String(values.OSI_LOWPOWER_WINDOW_STATE || 'missing').trim().toLowerCase();\nif (state === 'open') {\n  node.status({ fill: 'green', shape: 'dot', text: 'window open' });\n  return msg;\n}\nnode.status({ fill: 'yellow', shape: 'ring', text: 'window closed' });\nreturn null;"
   },
   {
     "id": "d769e9face3844d5",
@@ -3487,9 +3506,28 @@
     "y": 200,
     "wires": [
       [
-        "9b38464d56b05ae0"
+        "f0a2000000000002"
       ]
     ]
+  },
+  {
+    "id": "f0a2000000000002",
+    "type": "function",
+    "z": "93b1537a596e0e6d",
+    "name": "Low-power cloud MQTT gate",
+    "outputs": 1,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 420,
+    "y": 200,
+    "wires": [
+      [
+        "9b38464d56b05ae0"
+      ]
+    ],
+    "func": "const enabled = String(env.get('OSI_LOWPOWER_WINDOWED_SYNC') || '').trim() === '1';\nconst stateFile = String(env.get('OSI_LOWPOWER_STATE_FILE') || '/var/run/osi-lowpower/window.env').trim() || '/var/run/osi-lowpower/window.env';\n\nfunction parseState(raw) {\n  const values = {};\n  String(raw || '').split(/\\r?\\n/).forEach((line) => {\n    const match = line.match(/^\\s*([A-Z0-9_]+)=(.*)\\s*$/);\n    if (!match) return;\n    values[match[1]] = match[2] || '';\n  });\n  return values;\n}\n\nif (!enabled) {\n  node.status({ fill: 'grey', shape: 'ring', text: 'low-power off' });\n  return msg;\n}\n\nconst runtimeFs = global.get('fs');\nif (!runtimeFs) {\n  node.status({ fill: 'red', shape: 'ring', text: 'fs unavailable' });\n  return null;\n}\n\nlet values;\ntry {\n  values = parseState(runtimeFs.readFileSync(stateFile, 'utf8'));\n} catch (_) {\n  node.status({ fill: 'yellow', shape: 'ring', text: 'window closed' });\n  return null;\n}\n\nconst state = String(values.OSI_LOWPOWER_WINDOW_STATE || 'missing').trim().toLowerCase();\nif (state === 'open') {\n  node.status({ fill: 'green', shape: 'dot', text: 'window open' });\n  return msg;\n}\nnode.status({ fill: 'yellow', shape: 'ring', text: 'window closed' });\nreturn null;"
   },
   {
     "id": "9b38464d56b05ae0",
@@ -3531,7 +3569,7 @@
         "4f4a765f36cee6f3"
       ],
       [
-        "9d5e3035c3d069c4",
+        "f0a2000000000005",
         "command-ack-queue-rest"
       ],
       [
@@ -3605,9 +3643,28 @@
     "y": 340,
     "wires": [
       [
-        "d83e38164efbb860"
+        "f0a2000000000003"
       ]
     ]
+  },
+  {
+    "id": "f0a2000000000003",
+    "type": "function",
+    "z": "93b1537a596e0e6d",
+    "name": "Low-power cloud MQTT gate",
+    "outputs": 1,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 1130,
+    "y": 340,
+    "wires": [
+      [
+        "d83e38164efbb860"
+      ]
+    ],
+    "func": "const enabled = String(env.get('OSI_LOWPOWER_WINDOWED_SYNC') || '').trim() === '1';\nconst stateFile = String(env.get('OSI_LOWPOWER_STATE_FILE') || '/var/run/osi-lowpower/window.env').trim() || '/var/run/osi-lowpower/window.env';\n\nfunction parseState(raw) {\n  const values = {};\n  String(raw || '').split(/\\r?\\n/).forEach((line) => {\n    const match = line.match(/^\\s*([A-Z0-9_]+)=(.*)\\s*$/);\n    if (!match) return;\n    values[match[1]] = match[2] || '';\n  });\n  return values;\n}\n\nif (!enabled) {\n  node.status({ fill: 'grey', shape: 'ring', text: 'low-power off' });\n  return msg;\n}\n\nconst runtimeFs = global.get('fs');\nif (!runtimeFs) {\n  node.status({ fill: 'red', shape: 'ring', text: 'fs unavailable' });\n  return null;\n}\n\nlet values;\ntry {\n  values = parseState(runtimeFs.readFileSync(stateFile, 'utf8'));\n} catch (_) {\n  node.status({ fill: 'yellow', shape: 'ring', text: 'window closed' });\n  return null;\n}\n\nconst state = String(values.OSI_LOWPOWER_WINDOW_STATE || 'missing').trim().toLowerCase();\nif (state === 'open') {\n  node.status({ fill: 'green', shape: 'dot', text: 'window open' });\n  return msg;\n}\nnode.status({ fill: 'yellow', shape: 'ring', text: 'window closed' });\nreturn null;"
   },
   {
     "id": "d83e38164efbb860",
@@ -3658,12 +3715,31 @@
     "y": 420,
     "wires": [
       [
-        "c338bc61bee49337"
+        "f0a2000000000004"
       ],
       [
         "command-ack-queue-rest"
       ]
     ]
+  },
+  {
+    "id": "f0a2000000000004",
+    "type": "function",
+    "z": "93b1537a596e0e6d",
+    "name": "Low-power cloud MQTT gate",
+    "outputs": 1,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 440,
+    "y": 400,
+    "wires": [
+      [
+        "c338bc61bee49337"
+      ]
+    ],
+    "func": "const enabled = String(env.get('OSI_LOWPOWER_WINDOWED_SYNC') || '').trim() === '1';\nconst stateFile = String(env.get('OSI_LOWPOWER_STATE_FILE') || '/var/run/osi-lowpower/window.env').trim() || '/var/run/osi-lowpower/window.env';\n\nfunction parseState(raw) {\n  const values = {};\n  String(raw || '').split(/\\r?\\n/).forEach((line) => {\n    const match = line.match(/^\\s*([A-Z0-9_]+)=(.*)\\s*$/);\n    if (!match) return;\n    values[match[1]] = match[2] || '';\n  });\n  return values;\n}\n\nif (!enabled) {\n  node.status({ fill: 'grey', shape: 'ring', text: 'low-power off' });\n  return msg;\n}\n\nconst runtimeFs = global.get('fs');\nif (!runtimeFs) {\n  node.status({ fill: 'red', shape: 'ring', text: 'fs unavailable' });\n  return null;\n}\n\nlet values;\ntry {\n  values = parseState(runtimeFs.readFileSync(stateFile, 'utf8'));\n} catch (_) {\n  node.status({ fill: 'yellow', shape: 'ring', text: 'window closed' });\n  return null;\n}\n\nconst state = String(values.OSI_LOWPOWER_WINDOW_STATE || 'missing').trim().toLowerCase();\nif (state === 'open') {\n  node.status({ fill: 'green', shape: 'dot', text: 'window open' });\n  return msg;\n}\nnode.status({ fill: 'yellow', shape: 'ring', text: 'window closed' });\nreturn null;"
   },
   {
     "id": "c338bc61bee49337",
@@ -3682,6 +3758,25 @@
     "x": 600,
     "y": 400,
     "wires": []
+  },
+  {
+    "id": "f0a2000000000005",
+    "type": "function",
+    "z": "93b1537a596e0e6d",
+    "name": "Low-power cloud MQTT gate",
+    "outputs": 1,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 460,
+    "y": 440,
+    "wires": [
+      [
+        "9d5e3035c3d069c4"
+      ]
+    ],
+    "func": "const enabled = String(env.get('OSI_LOWPOWER_WINDOWED_SYNC') || '').trim() === '1';\nconst stateFile = String(env.get('OSI_LOWPOWER_STATE_FILE') || '/var/run/osi-lowpower/window.env').trim() || '/var/run/osi-lowpower/window.env';\n\nfunction parseState(raw) {\n  const values = {};\n  String(raw || '').split(/\\r?\\n/).forEach((line) => {\n    const match = line.match(/^\\s*([A-Z0-9_]+)=(.*)\\s*$/);\n    if (!match) return;\n    values[match[1]] = match[2] || '';\n  });\n  return values;\n}\n\nif (!enabled) {\n  node.status({ fill: 'grey', shape: 'ring', text: 'low-power off' });\n  return msg;\n}\n\nconst runtimeFs = global.get('fs');\nif (!runtimeFs) {\n  node.status({ fill: 'red', shape: 'ring', text: 'fs unavailable' });\n  return null;\n}\n\nlet values;\ntry {\n  values = parseState(runtimeFs.readFileSync(stateFile, 'utf8'));\n} catch (_) {\n  node.status({ fill: 'yellow', shape: 'ring', text: 'window closed' });\n  return null;\n}\n\nconst state = String(values.OSI_LOWPOWER_WINDOW_STATE || 'missing').trim().toLowerCase();\nif (state === 'open') {\n  node.status({ fill: 'green', shape: 'dot', text: 'window open' });\n  return msg;\n}\nnode.status({ fill: 'yellow', shape: 'ring', text: 'window closed' });\nreturn null;"
   },
   {
     "id": "9d5e3035c3d069c4",
@@ -4621,10 +4716,32 @@
     "y": 220,
     "wires": [
       [
-        "al-link-server-auth"
+        "f0a1000000000009"
       ],
       [
         "al-link-resp"
+      ]
+    ]
+  },
+  {
+    "id": "f0a1000000000009",
+    "type": "function",
+    "z": "account-link-tab",
+    "name": "Low-power account-link REST gate",
+    "func": "const enabled = String(env.get('OSI_LOWPOWER_WINDOWED_SYNC') || '').trim() === '1';\nconst stateFile = String(env.get('OSI_LOWPOWER_STATE_FILE') || '/var/run/osi-lowpower/window.env').trim() || '/var/run/osi-lowpower/window.env';\n\nfunction parseState(raw) {\n  const values = {};\n  String(raw || '').split(/\\r?\\n/).forEach((line) => {\n    const match = line.match(/^\\s*([A-Z0-9_]+)=(.*)\\s*$/);\n    if (!match) return;\n    values[match[1]] = match[2] || '';\n  });\n  return values;\n}\n\nfunction block(reason, state) {\n  node.status({ fill: 'yellow', shape: 'ring', text: 'window closed' });\n  msg.statusCode = 425;\n  msg.headers = {};\n  msg.payload = {\n    message: 'Cloud maintenance window is closed. Run /etc/init.d/osi-lowpower open before linking.',\n    code: 'OSI_LOWPOWER_WINDOW_CLOSED',\n    reason,\n    state: state || 'closed',\n    stateFile\n  };\n  return [null, msg];\n}\n\nif (!enabled) {\n  node.status({ fill: 'grey', shape: 'ring', text: 'low-power off' });\n  return [msg, null];\n}\n\nconst runtimeFs = global.get('fs');\nif (!runtimeFs) return block('Node-RED fs global is unavailable', 'missing');\n\nlet values;\ntry {\n  values = parseState(runtimeFs.readFileSync(stateFile, 'utf8'));\n} catch (_) {\n  return block('state file missing', 'missing');\n}\n\nconst state = String(values.OSI_LOWPOWER_WINDOW_STATE || 'missing').trim().toLowerCase();\nif (state === 'open') {\n  node.status({ fill: 'green', shape: 'dot', text: 'window open' });\n  return [msg, null];\n}\nreturn block(values.OSI_LOWPOWER_REASON || 'window closed', state);",
+    "outputs": 2,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 1080,
+    "y": 220,
+    "wires": [
+      [
+        "al-link-server-auth"
+      ],
+      [
+        "al-link-handle-auth"
       ]
     ]
   },
@@ -5451,7 +5568,7 @@
         "cs-reg-cloud-ack-fn"
       ],
       [
-        "sync-force-build"
+        "f0a1000000000005"
       ]
     ],
     "x": 800,
@@ -5704,9 +5821,29 @@
     "y": 940,
     "wires": [
       [
-        "sync-bootstrap-http"
+        "f0a1000000000001"
       ]
     ]
+  },
+  {
+    "id": "f0a1000000000001",
+    "type": "function",
+    "z": "93b1537a596e0e6d",
+    "name": "Low-power cloud REST gate",
+    "outputs": 2,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 510,
+    "y": 940,
+    "wires": [
+      [
+        "sync-bootstrap-http"
+      ],
+      []
+    ],
+    "func": "const enabled = String(env.get('OSI_LOWPOWER_WINDOWED_SYNC') || '').trim() === '1';\nconst stateFile = String(env.get('OSI_LOWPOWER_STATE_FILE') || '/var/run/osi-lowpower/window.env').trim() || '/var/run/osi-lowpower/window.env';\n\nfunction parseState(raw) {\n  const values = {};\n  String(raw || '').split(/\\r?\\n/).forEach((line) => {\n    const match = line.match(/^\\s*([A-Z0-9_]+)=(.*)\\s*$/);\n    if (!match) return;\n    values[match[1]] = match[2] || '';\n  });\n  return values;\n}\n\nfunction block(reason, state) {\n  node.status({ fill: 'yellow', shape: 'ring', text: 'window closed' });\n  if (msg && msg.req && msg.res) {\n    msg.statusCode = 425;\n    msg.payload = {\n      error: 'low_power_window_closed',\n      code: 'OSI_LOWPOWER_WINDOW_CLOSED',\n      message: 'Cloud maintenance window is closed. Run /etc/init.d/osi-lowpower open before this operation.',\n      reason,\n      state: state || 'closed',\n      stateFile\n    };\n    return [null, msg];\n  }\n  return [null, null];\n}\n\nif (!enabled) {\n  node.status({ fill: 'grey', shape: 'ring', text: 'low-power off' });\n  return [msg, null];\n}\n\nconst runtimeFs = global.get('fs');\nif (!runtimeFs) return block('Node-RED fs global is unavailable', 'missing');\n\nlet values;\ntry {\n  values = parseState(runtimeFs.readFileSync(stateFile, 'utf8'));\n} catch (_) {\n  return block('state file missing', 'missing');\n}\n\nconst state = String(values.OSI_LOWPOWER_WINDOW_STATE || 'missing').trim().toLowerCase();\nif (state === 'open') {\n  node.status({ fill: 'green', shape: 'dot', text: 'window open' });\n  return [msg, null];\n}\nreturn block(values.OSI_LOWPOWER_REASON || 'window closed', state);"
   },
   {
     "id": "sync-bootstrap-http",
@@ -5799,9 +5936,29 @@
     "y": 1000,
     "wires": [
       [
-        "sync-outbox-http"
+        "f0a1000000000002"
       ]
     ]
+  },
+  {
+    "id": "f0a1000000000002",
+    "type": "function",
+    "z": "93b1537a596e0e6d",
+    "name": "Low-power cloud REST gate",
+    "outputs": 2,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 530,
+    "y": 1000,
+    "wires": [
+      [
+        "sync-outbox-http"
+      ],
+      []
+    ],
+    "func": "const enabled = String(env.get('OSI_LOWPOWER_WINDOWED_SYNC') || '').trim() === '1';\nconst stateFile = String(env.get('OSI_LOWPOWER_STATE_FILE') || '/var/run/osi-lowpower/window.env').trim() || '/var/run/osi-lowpower/window.env';\n\nfunction parseState(raw) {\n  const values = {};\n  String(raw || '').split(/\\r?\\n/).forEach((line) => {\n    const match = line.match(/^\\s*([A-Z0-9_]+)=(.*)\\s*$/);\n    if (!match) return;\n    values[match[1]] = match[2] || '';\n  });\n  return values;\n}\n\nfunction block(reason, state) {\n  node.status({ fill: 'yellow', shape: 'ring', text: 'window closed' });\n  if (msg && msg.req && msg.res) {\n    msg.statusCode = 425;\n    msg.payload = {\n      error: 'low_power_window_closed',\n      code: 'OSI_LOWPOWER_WINDOW_CLOSED',\n      message: 'Cloud maintenance window is closed. Run /etc/init.d/osi-lowpower open before this operation.',\n      reason,\n      state: state || 'closed',\n      stateFile\n    };\n    return [null, msg];\n  }\n  return [null, null];\n}\n\nif (!enabled) {\n  node.status({ fill: 'grey', shape: 'ring', text: 'low-power off' });\n  return [msg, null];\n}\n\nconst runtimeFs = global.get('fs');\nif (!runtimeFs) return block('Node-RED fs global is unavailable', 'missing');\n\nlet values;\ntry {\n  values = parseState(runtimeFs.readFileSync(stateFile, 'utf8'));\n} catch (_) {\n  return block('state file missing', 'missing');\n}\n\nconst state = String(values.OSI_LOWPOWER_WINDOW_STATE || 'missing').trim().toLowerCase();\nif (state === 'open') {\n  node.status({ fill: 'green', shape: 'dot', text: 'window open' });\n  return [msg, null];\n}\nreturn block(values.OSI_LOWPOWER_REASON || 'window closed', state);"
   },
   {
     "id": "sync-outbox-http",
@@ -5895,9 +6052,29 @@
     "y": 1060,
     "wires": [
       [
-        "sync-pending-http"
+        "f0a1000000000003"
       ]
     ]
+  },
+  {
+    "id": "f0a1000000000003",
+    "type": "function",
+    "z": "93b1537a596e0e6d",
+    "name": "Low-power cloud REST gate",
+    "outputs": 2,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 530,
+    "y": 1060,
+    "wires": [
+      [
+        "sync-pending-http"
+      ],
+      []
+    ],
+    "func": "const enabled = String(env.get('OSI_LOWPOWER_WINDOWED_SYNC') || '').trim() === '1';\nconst stateFile = String(env.get('OSI_LOWPOWER_STATE_FILE') || '/var/run/osi-lowpower/window.env').trim() || '/var/run/osi-lowpower/window.env';\n\nfunction parseState(raw) {\n  const values = {};\n  String(raw || '').split(/\\r?\\n/).forEach((line) => {\n    const match = line.match(/^\\s*([A-Z0-9_]+)=(.*)\\s*$/);\n    if (!match) return;\n    values[match[1]] = match[2] || '';\n  });\n  return values;\n}\n\nfunction block(reason, state) {\n  node.status({ fill: 'yellow', shape: 'ring', text: 'window closed' });\n  if (msg && msg.req && msg.res) {\n    msg.statusCode = 425;\n    msg.payload = {\n      error: 'low_power_window_closed',\n      code: 'OSI_LOWPOWER_WINDOW_CLOSED',\n      message: 'Cloud maintenance window is closed. Run /etc/init.d/osi-lowpower open before this operation.',\n      reason,\n      state: state || 'closed',\n      stateFile\n    };\n    return [null, msg];\n  }\n  return [null, null];\n}\n\nif (!enabled) {\n  node.status({ fill: 'grey', shape: 'ring', text: 'low-power off' });\n  return [msg, null];\n}\n\nconst runtimeFs = global.get('fs');\nif (!runtimeFs) return block('Node-RED fs global is unavailable', 'missing');\n\nlet values;\ntry {\n  values = parseState(runtimeFs.readFileSync(stateFile, 'utf8'));\n} catch (_) {\n  return block('state file missing', 'missing');\n}\n\nconst state = String(values.OSI_LOWPOWER_WINDOW_STATE || 'missing').trim().toLowerCase();\nif (state === 'open') {\n  node.status({ fill: 'green', shape: 'dot', text: 'window open' });\n  return [msg, null];\n}\nreturn block(values.OSI_LOWPOWER_REASON || 'window closed', state);"
   },
   {
     "id": "sync-pending-http",
@@ -6048,9 +6225,29 @@
     "y": 1180,
     "wires": [
       [
-        "sync-refresh-http"
+        "f0a1000000000004"
       ]
     ]
+  },
+  {
+    "id": "f0a1000000000004",
+    "type": "function",
+    "z": "93b1537a596e0e6d",
+    "name": "Low-power cloud REST gate",
+    "outputs": 2,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 530,
+    "y": 1180,
+    "wires": [
+      [
+        "sync-refresh-http"
+      ],
+      []
+    ],
+    "func": "const enabled = String(env.get('OSI_LOWPOWER_WINDOWED_SYNC') || '').trim() === '1';\nconst stateFile = String(env.get('OSI_LOWPOWER_STATE_FILE') || '/var/run/osi-lowpower/window.env').trim() || '/var/run/osi-lowpower/window.env';\n\nfunction parseState(raw) {\n  const values = {};\n  String(raw || '').split(/\\r?\\n/).forEach((line) => {\n    const match = line.match(/^\\s*([A-Z0-9_]+)=(.*)\\s*$/);\n    if (!match) return;\n    values[match[1]] = match[2] || '';\n  });\n  return values;\n}\n\nfunction block(reason, state) {\n  node.status({ fill: 'yellow', shape: 'ring', text: 'window closed' });\n  if (msg && msg.req && msg.res) {\n    msg.statusCode = 425;\n    msg.payload = {\n      error: 'low_power_window_closed',\n      code: 'OSI_LOWPOWER_WINDOW_CLOSED',\n      message: 'Cloud maintenance window is closed. Run /etc/init.d/osi-lowpower open before this operation.',\n      reason,\n      state: state || 'closed',\n      stateFile\n    };\n    return [null, msg];\n  }\n  return [null, null];\n}\n\nif (!enabled) {\n  node.status({ fill: 'grey', shape: 'ring', text: 'low-power off' });\n  return [msg, null];\n}\n\nconst runtimeFs = global.get('fs');\nif (!runtimeFs) return block('Node-RED fs global is unavailable', 'missing');\n\nlet values;\ntry {\n  values = parseState(runtimeFs.readFileSync(stateFile, 'utf8'));\n} catch (_) {\n  return block('state file missing', 'missing');\n}\n\nconst state = String(values.OSI_LOWPOWER_WINDOW_STATE || 'missing').trim().toLowerCase();\nif (state === 'open') {\n  node.status({ fill: 'green', shape: 'dot', text: 'window open' });\n  return [msg, null];\n}\nreturn block(values.OSI_LOWPOWER_REASON || 'window closed', state);"
   },
   {
     "id": "sync-refresh-http",
@@ -6111,9 +6308,31 @@
     "y": 1240,
     "wires": [
       [
-        "sync-force-build"
+        "f0a1000000000005"
       ]
     ]
+  },
+  {
+    "id": "f0a1000000000005",
+    "type": "function",
+    "z": "93b1537a596e0e6d",
+    "name": "Low-power cloud REST gate",
+    "outputs": 2,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 270,
+    "y": 1240,
+    "wires": [
+      [
+        "sync-force-build"
+      ],
+      [
+        "sync-force-response"
+      ]
+    ],
+    "func": "const enabled = String(env.get('OSI_LOWPOWER_WINDOWED_SYNC') || '').trim() === '1';\nconst stateFile = String(env.get('OSI_LOWPOWER_STATE_FILE') || '/var/run/osi-lowpower/window.env').trim() || '/var/run/osi-lowpower/window.env';\n\nfunction parseState(raw) {\n  const values = {};\n  String(raw || '').split(/\\r?\\n/).forEach((line) => {\n    const match = line.match(/^\\s*([A-Z0-9_]+)=(.*)\\s*$/);\n    if (!match) return;\n    values[match[1]] = match[2] || '';\n  });\n  return values;\n}\n\nfunction block(reason, state) {\n  node.status({ fill: 'yellow', shape: 'ring', text: 'window closed' });\n  if (msg && msg.req && msg.res) {\n    msg.statusCode = 425;\n    msg.payload = {\n      error: 'low_power_window_closed',\n      code: 'OSI_LOWPOWER_WINDOW_CLOSED',\n      message: 'Cloud maintenance window is closed. Run /etc/init.d/osi-lowpower open before this operation.',\n      reason,\n      state: state || 'closed',\n      stateFile\n    };\n    return [null, msg];\n  }\n  return [null, null];\n}\n\nif (!enabled) {\n  node.status({ fill: 'grey', shape: 'ring', text: 'low-power off' });\n  return [msg, null];\n}\n\nconst runtimeFs = global.get('fs');\nif (!runtimeFs) return block('Node-RED fs global is unavailable', 'missing');\n\nlet values;\ntry {\n  values = parseState(runtimeFs.readFileSync(stateFile, 'utf8'));\n} catch (_) {\n  return block('state file missing', 'missing');\n}\n\nconst state = String(values.OSI_LOWPOWER_WINDOW_STATE || 'missing').trim().toLowerCase();\nif (state === 'open') {\n  node.status({ fill: 'green', shape: 'dot', text: 'window open' });\n  return [msg, null];\n}\nreturn block(values.OSI_LOWPOWER_REASON || 'window closed', state);"
   },
   {
     "id": "sync-force-build",
@@ -8387,7 +8606,7 @@
     "y": 500,
     "wires": [
       [
-        "9d5e3035c3d069c4"
+        "f0a2000000000005"
       ]
     ]
   },
@@ -8437,9 +8656,29 @@
     "y": 1120,
     "wires": [
       [
-        "command-ack-http"
+        "f0a1000000000006"
       ]
     ]
+  },
+  {
+    "id": "f0a1000000000006",
+    "type": "function",
+    "z": "93b1537a596e0e6d",
+    "name": "Low-power cloud REST gate",
+    "outputs": 2,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 540,
+    "y": 1120,
+    "wires": [
+      [
+        "command-ack-http"
+      ],
+      []
+    ],
+    "func": "const enabled = String(env.get('OSI_LOWPOWER_WINDOWED_SYNC') || '').trim() === '1';\nconst stateFile = String(env.get('OSI_LOWPOWER_STATE_FILE') || '/var/run/osi-lowpower/window.env').trim() || '/var/run/osi-lowpower/window.env';\n\nfunction parseState(raw) {\n  const values = {};\n  String(raw || '').split(/\\r?\\n/).forEach((line) => {\n    const match = line.match(/^\\s*([A-Z0-9_]+)=(.*)\\s*$/);\n    if (!match) return;\n    values[match[1]] = match[2] || '';\n  });\n  return values;\n}\n\nfunction block(reason, state) {\n  node.status({ fill: 'yellow', shape: 'ring', text: 'window closed' });\n  if (msg && msg.req && msg.res) {\n    msg.statusCode = 425;\n    msg.payload = {\n      error: 'low_power_window_closed',\n      code: 'OSI_LOWPOWER_WINDOW_CLOSED',\n      message: 'Cloud maintenance window is closed. Run /etc/init.d/osi-lowpower open before this operation.',\n      reason,\n      state: state || 'closed',\n      stateFile\n    };\n    return [null, msg];\n  }\n  return [null, null];\n}\n\nif (!enabled) {\n  node.status({ fill: 'grey', shape: 'ring', text: 'low-power off' });\n  return [msg, null];\n}\n\nconst runtimeFs = global.get('fs');\nif (!runtimeFs) return block('Node-RED fs global is unavailable', 'missing');\n\nlet values;\ntry {\n  values = parseState(runtimeFs.readFileSync(stateFile, 'utf8'));\n} catch (_) {\n  return block('state file missing', 'missing');\n}\n\nconst state = String(values.OSI_LOWPOWER_WINDOW_STATE || 'missing').trim().toLowerCase();\nif (state === 'open') {\n  node.status({ fill: 'green', shape: 'dot', text: 'window open' });\n  return [msg, null];\n}\nreturn block(values.OSI_LOWPOWER_REASON || 'window closed', state);"
   },
   {
     "id": "command-ack-http",
@@ -8773,7 +9012,7 @@
     "func": "return (async () => {\n  const db = new osiDb.Database('/data/db/farming.db');\n  const q = (sql, params = []) => new Promise((res, rej) => db.all(sql, params, (e, r) => e ? rej(e) : res(r || [])));\n  const close = () => new Promise(res => db.close(() => res()));\n\n  try {\n    const rows = await q(\n      \"SELECT DISTINCT upper(cr.array_id) AS array_id \" +\n      \"FROM chameleon_readings cr \" +\n      \"WHERE cr.array_id IS NOT NULL \" +\n      \"AND NOT EXISTS (SELECT 1 FROM chameleon_calibrations cc WHERE cc.array_id = upper(cr.array_id)) \" +\n      \"AND NOT EXISTS ( \" +\n      \"  SELECT 1 FROM chameleon_calibration_misses cm \" +\n      \"  WHERE cm.array_id = upper(cr.array_id) \" +\n      \"    AND datetime(cm.last_tried) > datetime('now', '-24 hours') \" +\n      \")\"\n    );\n    await close();\n\n    if (!rows.length) return null;\n\n    msg.payload = { array_ids: rows.map(r => r.array_id) };\n    return msg;\n  } catch (e) {\n    try { await close(); } catch (_) {}\n    node.warn('calibration-missing-query failed: ' + e.message);\n    return null;\n  }\n})();",
     "wires": [
       [
-        "9443f279758ee186"
+        "f0a1000000000007"
       ]
     ],
     "outputs": 1,
@@ -8785,6 +9024,26 @@
         "module": "osi-db-helper"
       }
     ]
+  },
+  {
+    "id": "f0a1000000000007",
+    "type": "function",
+    "z": "93b1537a596e0e6d",
+    "name": "Low-power cloud REST gate",
+    "outputs": 2,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 410,
+    "y": 1260,
+    "wires": [
+      [
+        "9443f279758ee186"
+      ],
+      []
+    ],
+    "func": "const enabled = String(env.get('OSI_LOWPOWER_WINDOWED_SYNC') || '').trim() === '1';\nconst stateFile = String(env.get('OSI_LOWPOWER_STATE_FILE') || '/var/run/osi-lowpower/window.env').trim() || '/var/run/osi-lowpower/window.env';\n\nfunction parseState(raw) {\n  const values = {};\n  String(raw || '').split(/\\r?\\n/).forEach((line) => {\n    const match = line.match(/^\\s*([A-Z0-9_]+)=(.*)\\s*$/);\n    if (!match) return;\n    values[match[1]] = match[2] || '';\n  });\n  return values;\n}\n\nfunction block(reason, state) {\n  node.status({ fill: 'yellow', shape: 'ring', text: 'window closed' });\n  if (msg && msg.req && msg.res) {\n    msg.statusCode = 425;\n    msg.payload = {\n      error: 'low_power_window_closed',\n      code: 'OSI_LOWPOWER_WINDOW_CLOSED',\n      message: 'Cloud maintenance window is closed. Run /etc/init.d/osi-lowpower open before this operation.',\n      reason,\n      state: state || 'closed',\n      stateFile\n    };\n    return [null, msg];\n  }\n  return [null, null];\n}\n\nif (!enabled) {\n  node.status({ fill: 'grey', shape: 'ring', text: 'low-power off' });\n  return [msg, null];\n}\n\nconst runtimeFs = global.get('fs');\nif (!runtimeFs) return block('Node-RED fs global is unavailable', 'missing');\n\nlet values;\ntry {\n  values = parseState(runtimeFs.readFileSync(stateFile, 'utf8'));\n} catch (_) {\n  return block('state file missing', 'missing');\n}\n\nconst state = String(values.OSI_LOWPOWER_WINDOW_STATE || 'missing').trim().toLowerCase();\nif (state === 'open') {\n  node.status({ fill: 'green', shape: 'dot', text: 'window open' });\n  return [msg, null];\n}\nreturn block(values.OSI_LOWPOWER_REASON || 'window closed', state);"
   },
   {
     "id": "9443f279758ee186",
@@ -8908,7 +9167,7 @@
     "y": 2170,
     "wires": [
       [
-        "287c82fcf06bcda4"
+        "f0a1000000000008"
       ],
       [
         "947468797ba7595b"
@@ -8920,6 +9179,28 @@
         "module": "osi-db-helper"
       }
     ]
+  },
+  {
+    "id": "f0a1000000000008",
+    "type": "function",
+    "z": "device-api-tab",
+    "name": "Low-power cloud REST gate",
+    "outputs": 2,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 550,
+    "y": 2170,
+    "wires": [
+      [
+        "287c82fcf06bcda4"
+      ],
+      [
+        "947468797ba7595b"
+      ]
+    ],
+    "func": "const enabled = String(env.get('OSI_LOWPOWER_WINDOWED_SYNC') || '').trim() === '1';\nconst stateFile = String(env.get('OSI_LOWPOWER_STATE_FILE') || '/var/run/osi-lowpower/window.env').trim() || '/var/run/osi-lowpower/window.env';\n\nfunction parseState(raw) {\n  const values = {};\n  String(raw || '').split(/\\r?\\n/).forEach((line) => {\n    const match = line.match(/^\\s*([A-Z0-9_]+)=(.*)\\s*$/);\n    if (!match) return;\n    values[match[1]] = match[2] || '';\n  });\n  return values;\n}\n\nfunction block(reason, state) {\n  node.status({ fill: 'yellow', shape: 'ring', text: 'window closed' });\n  if (msg && msg.req && msg.res) {\n    msg.statusCode = 425;\n    msg.payload = {\n      error: 'low_power_window_closed',\n      code: 'OSI_LOWPOWER_WINDOW_CLOSED',\n      message: 'Cloud maintenance window is closed. Run /etc/init.d/osi-lowpower open before this operation.',\n      reason,\n      state: state || 'closed',\n      stateFile\n    };\n    return [null, msg];\n  }\n  return [null, null];\n}\n\nif (!enabled) {\n  node.status({ fill: 'grey', shape: 'ring', text: 'low-power off' });\n  return [msg, null];\n}\n\nconst runtimeFs = global.get('fs');\nif (!runtimeFs) return block('Node-RED fs global is unavailable', 'missing');\n\nlet values;\ntry {\n  values = parseState(runtimeFs.readFileSync(stateFile, 'utf8'));\n} catch (_) {\n  return block('state file missing', 'missing');\n}\n\nconst state = String(values.OSI_LOWPOWER_WINDOW_STATE || 'missing').trim().toLowerCase();\nif (state === 'open') {\n  node.status({ fill: 'green', shape: 'dot', text: 'window open' });\n  return [msg, null];\n}\nreturn block(values.OSI_LOWPOWER_REASON || 'window closed', state);"
   },
   {
     "id": "287c82fcf06bcda4",

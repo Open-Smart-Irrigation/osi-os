@@ -7,6 +7,11 @@
 AUTHKEY_FILE="/etc/tailscale/authkey"
 HOSTNAME=$(uci -q get system.@system[0].hostname 2>/dev/null || echo "osi-device")
 
+if [ "$(uci -q get osi-lowpower.main.disable_pi_tailscale 2>/dev/null)" = "1" ]; then
+    logger -t tailscale-init "Low-power profile disables Pi-side Tailscale autoconnect"
+    exit 0
+fi
+
 if [ ! -f "$AUTHKEY_FILE" ]; then
     logger -t tailscale-init "No authkey found at $AUTHKEY_FILE — skipping auto-connect"
     exit 0

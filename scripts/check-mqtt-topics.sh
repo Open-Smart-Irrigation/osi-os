@@ -7,6 +7,7 @@ FLOWS=(
     conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/flows.json
     conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/flows.json
     conf/full_raspberrypi_bcm27xx_bcm2708/files/usr/share/flows.json
+    conf/lowpower_raspberrypi_bcm27xx_bcm2709/files/usr/share/flows.json
 )
 
 UUID_RE='[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}'

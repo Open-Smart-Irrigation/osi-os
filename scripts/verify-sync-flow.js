@@ -425,6 +425,44 @@ function expectWireById(nodeId, targetId, description) {
   }
 }
 
+function upstreamNodes(targetId) {
+  return flows.filter((node) => {
+    if (!Array.isArray(node.wires)) return false;
+    return node.wires.some((output) => Array.isArray(output) && output.includes(targetId));
+  });
+}
+
+function expectLowPowerGate(targetId, gateName, requiredNeedles, description, blockedTargetId) {
+  const candidates = upstreamNodes(targetId).filter((node) => node.type === 'function' && node.name === gateName);
+  if (candidates.length !== 1) {
+    fail(`${targetId} expected exactly one upstream ${gateName} by id for ${description}, found ${candidates.length}`);
+    return;
+  }
+  const gate = candidates[0];
+  const func = String(gate.func || '');
+  for (const needle of requiredNeedles) {
+    if (!func.includes(needle)) {
+      fail(`${gate.id} missing ${needle} for ${description}`);
+    } else {
+      console.log(`OK ${gate.id} ${description} contains ${needle}`);
+    }
+  }
+  const firstOutput = Array.isArray(gate.wires) && Array.isArray(gate.wires[0]) ? gate.wires[0] : [];
+  if (!firstOutput.includes(targetId)) {
+    fail(`${gate.id} first output must wire to ${targetId}`);
+  } else {
+    console.log(`OK ${gate.id} first output wires to ${targetId}`);
+  }
+  if (blockedTargetId) {
+    const secondOutput = Array.isArray(gate.wires) && Array.isArray(gate.wires[1]) ? gate.wires[1] : [];
+    if (!secondOutput.includes(blockedTargetId)) {
+      fail(`${gate.id} blocked output must wire to ${blockedTargetId}`);
+    } else {
+      console.log(`OK ${gate.id} blocked output wires to ${blockedTargetId}`);
+    }
+  }
+}
+
 function expectFileIncludes(fileLabel, content, needle, description) {
   if (!content.includes(needle)) {
     fail(`${fileLabel} missing ${description}`);
@@ -1394,7 +1432,7 @@ expectWireById('command-dedupe-dispatch', 'command-ack-queue-rest', 'routes dupl
 expectWireById('c8628cffe45f64f7', 'command-ack-queue-rest', 'routes STREGA command ACKs through the durable ACK queue');
 expectWireById('cs-reg-cloud-ack-fn', 'command-ack-queue-rest', 'routes special command ACKs through the durable ACK queue');
 expectWireById('lsn50-mode-ack-link-in', 'command-ack-queue-rest', 'routes LSN50 command ACKs through the durable ACK queue');
-expectWireById('command-ack-queue-rest', '9d5e3035c3d069c4', 'preserves MQTT command ACK telemetry after durable queueing');
+expectWireById('command-ack-queue-rest', 'f0a2000000000005', 'preserves MQTT command ACK telemetry after durable queueing through the low-power gate');
 const outboxRetentionTick = findNodeById('outbox-retention-tick');
 expectCondition(
   !!outboxRetentionTick,
@@ -1474,6 +1512,52 @@ for (const nodeId of cloudRestNodeIds) {
   expectIncludesById(nodeId, 'requestJsonIpv4', 'calls requestJsonIpv4');
   expectIncludesById(nodeId, 'Cloud REST IPv4 request failed', 'preserves IPv4 request failures as message payloads');
 }
+expectLowPowerGate(
+  'al-link-server-auth',
+  'Low-power account-link REST gate',
+  [
+    'OSI_LOWPOWER_WINDOWED_SYNC',
+    'OSI_LOWPOWER_STATE_FILE',
+    'Cloud maintenance window is closed',
+    'Run /etc/init.d/osi-lowpower open before linking',
+    'return [null, msg]'
+  ],
+  'friendly low-power account-link gate',
+  'al-link-handle-auth'
+);
+[
+  ['sync-bootstrap-http', null],
+  ['sync-outbox-http', null],
+  ['sync-pending-http', null],
+  ['sync-refresh-http', null],
+  ['sync-force-build', 'sync-force-response'],
+  ['command-ack-http', null],
+  ['9443f279758ee186', null],
+  ['287c82fcf06bcda4', '947468797ba7595b'],
+].forEach(([nodeId, blockedTargetId]) => {
+  expectLowPowerGate(
+    nodeId,
+    'Low-power cloud REST gate',
+    ['OSI_LOWPOWER_WINDOWED_SYNC', 'OSI_LOWPOWER_STATE_FILE', 'OSI_LOWPOWER_WINDOW_STATE', 'return [null, null]', 'OSI_LOWPOWER_WINDOW_CLOSED'],
+    'low-power REST cloud gate',
+    blockedTargetId
+  );
+});
+[
+  'd769e9face3844d5',
+  '9b38464d56b05ae0',
+  'd83e38164efbb860',
+  'c338bc61bee49337',
+  '9d5e3035c3d069c4',
+].forEach((nodeId) => {
+  expectLowPowerGate(
+    nodeId,
+    'Low-power cloud MQTT gate',
+    ['OSI_LOWPOWER_WINDOWED_SYNC', 'OSI_LOWPOWER_STATE_FILE', 'OSI_LOWPOWER_WINDOW_STATE', 'return null'],
+    'low-power MQTT cloud gate',
+    null
+  );
+});
 expectIncludes('Run Force Sync', 'osiCloudHttp.requestJsonIpv4', 'uses the shared IPv4 cloud REST helper');
 expectLibById('sync-force-build', 'osiCloudHttp', 'osi-cloud-http', 'imports the IPv4 helper for manual force sync');
 expectIncludes('Run Force Sync', 'COALESCE(u.server_username, u.username) AS claimed_by_username', 'uses linked cloud usernames in force-sync device snapshots');
@@ -2332,6 +2416,9 @@ expectFileIncludes('node-red.init', nodeRedInitScript, 'DEVICE_EUI="$device_eui"
 expectFileIncludes('node-red.init', nodeRedInitScript, 'DEVICE_EUI_CONFIDENCE="$device_eui_confidence"', 'exports gateway identity confidence into the Node-RED runtime environment');
 expectFileIncludes('node-red.init', nodeRedInitScript, 'LINK_GATEWAY_DEVICE_EUI="$link_gateway_device_eui"', 'exports the linked gateway identity into the Node-RED runtime environment');
 expectFileIncludes('node-red.init', nodeRedInitScript, 'ALLOW_PRIVATE_SERVER_URLS="$allow_private_server_urls"', 'exports the private-target override into the Node-RED runtime environment');
+expectFileIncludes('node-red.init', nodeRedInitScript, 'osi_lowpower_windowed_sync=$(uci -q get osi-lowpower.main.cloud_window_required', 'reads low-power cloud gating from UCI');
+expectFileIncludes('node-red.init', nodeRedInitScript, 'OSI_LOWPOWER_WINDOWED_SYNC="$osi_lowpower_windowed_sync"', 'exports low-power cloud gating into Node-RED');
+expectFileIncludes('node-red.init', nodeRedInitScript, 'OSI_LOWPOWER_STATE_FILE="$osi_lowpower_state_file"', 'exports low-power state-file path into Node-RED');
 expectFileIncludes('96_osi_server_config', osiServerDefaultsScript, '. /usr/libexec/osi-gateway-identity.sh', 'uses the shared gateway identity helper for first-boot seeding');
 expectFileIncludes('96_osi_server_config', osiServerDefaultsScript, 'gateway_identity_resolve', 'resolves the canonical gateway identity during UCI seeding');
 expectFileIncludes('96_osi_server_config', osiServerDefaultsScript, 'gateway_identity_persist', 'persists canonical gateway identity during UCI seeding');
@@ -2828,6 +2915,11 @@ if (!fs.existsSync(packageJsonPath)) {
 expectCondition(!!cloudHttpHelperSource, 'osi-cloud-http helper exists', 'missing osi-cloud-http helper');
 expectFileIncludes('osi-cloud-http/index.js', cloudHttpHelperSource, 'family: 4', 'forces IPv4 DNS/address selection');
 expectFileIncludes('osi-cloud-http/index.js', cloudHttpHelperSource, 'requestJsonIpv4', 'exports requestJsonIpv4');
+expectFileIncludes('osi-cloud-http/index.js', cloudHttpHelperSource, 'lowPowerWindowStatus', 'exports low-power window status helper');
+expectFileIncludes('osi-cloud-http/index.js', cloudHttpHelperSource, 'assertLowPowerCloudWindowOpen', 'exports low-power window assertion helper');
+expectFileIncludes('osi-cloud-http/index.js', cloudHttpHelperSource, 'OSI_LOWPOWER_WINDOWED_SYNC', 'checks low-power sync gating env var');
+expectFileIncludes('osi-cloud-http/index.js', cloudHttpHelperSource, 'OSI_LOWPOWER_WINDOW_CLOSED', 'returns a stable closed-window error code');
+expectFileIncludes('osi-cloud-http/index.js', cloudHttpHelperSource, 'delete requestInput.lowPowerBypass', 'consumes lowPowerBypass before request normalization');
 expectFileIncludes('osi-cloud-http/index.js', cloudHttpHelperSource, 'setTimeout', 'sets a bounded cloud REST timeout');
 expectFileIncludes('osi-cloud-http/index.js', cloudHttpHelperSource, 'JSON.parse', 'parses JSON responses');
 expectFileIncludes('osi-cloud-http/index.js', cloudHttpHelperSource, "res.on('aborted'", 'rejects aborted response streams');
@@ -2837,6 +2929,8 @@ expectFileIncludes('osi-cloud-http/index.js', cloudHttpHelperSource, 'settled', 
 expectFileIncludes('osi-cloud-http/package.json', cloudHttpPackageSource, '"name": "osi-cloud-http"', 'declares the helper package name');
 expectFileIncludes('node-red/package.json', nodeRedPackageSource, '"osi-cloud-http": "file:osi-cloud-http"', 'installs the helper package as a local dependency');
 expectFileIncludes('node-red/package.json', nodeRedPackageSource, '"osi-history-helper": "file:osi-history-helper"', 'installs the history helper package as a local dependency');
+runQuietNodeScript('test-lowpower-controller.js', 'low-power controller behavior tests pass');
+runQuietNodeScript('test-lowpower-cloud-http.js', 'low-power cloud HTTP helper tests pass');
 
 for (const helperPackage of [
   'osi-chameleon-helper',
@@ -3769,5 +3863,15 @@ Promise.all(pendingChecks).finally(() => {
   if (parityResult.status !== 0) {
     console.error('verify-profile-parity.js failed');
     process.exitCode = parityResult.status || 1;
+  }
+
+  const lowPowerResult = spawnSync(
+    process.execPath,
+    [path.resolve(__dirname, 'verify-lowpower-profile.js')],
+    { stdio: 'inherit' }
+  );
+  if (lowPowerResult.status !== 0) {
+    console.error('verify-lowpower-profile.js failed');
+    process.exitCode = lowPowerResult.status || 1;
   }
 });
