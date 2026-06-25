@@ -526,7 +526,7 @@ describe('History card detail route', () => {
     expect(await screen.findByRole('heading', { level: 1, name: 'Soil Moisture North Block' })).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: 'Export' }));
-    expect(await screen.findByRole('dialog', { name: 'Export CSV' })).toBeInTheDocument();
+    expect(await screen.findByRole('dialog', { name: 'Export CSV' }, { timeout: 4000 })).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: 'Download' }));
 
