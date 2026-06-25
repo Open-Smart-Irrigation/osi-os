@@ -157,6 +157,8 @@ function verifyHistoryRouterImplementation(flows, failures) {
   assertContains(failures, source, 'osiHistory.buildLocalInterpretations', 'helper-owned local interpretations');
   assertContains(failures, source, 'osiHistory.buildAdvancedDiagnostics', 'helper-owned advanced diagnostic availability');
   assertContains(failures, source, 'osiHistory.buildZoneExportCsv', 'helper-owned zone CSV export');
+  assertContains(failures, source, 'channels', 'zone CSV export forwards channels query param');
+  assertContains(failures, source, 'site:', 'zone CSV export forwards gateway site id');
   assertContains(failures, source, 'respondCsv(200, filename, osiHistory.toCsv(result.columns, result.rows))', 'CSV download response');
   assertContains(failures, source, 'payload.suggestion = error.suggestion', 'structured CSV export suggestions');
   assertContains(failures, source, 'function latestSeriesPoint', 'soil profile fallback to latest visible series point');

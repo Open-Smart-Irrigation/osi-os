@@ -832,6 +832,110 @@ test('buildZoneExportCsv raw emits tidy rows with depth and source', async () =>
   }
 });
 
+test('buildZoneExportCsv channels filter keeps only requested canonical channel keys', async () => {
+  const db = createCliSqliteDb();
+  try {
+    db.runSql(`
+      INSERT INTO users(id,username,password_hash,created_at,updated_at) VALUES(1,'u','h','2026-05-31T00:00:00.000Z','2026-05-31T00:00:00.000Z');
+      INSERT INTO irrigation_zones(id,name,user_id,zone_uuid,timezone,created_at,updated_at) VALUES(12,'Zone B',1,'zb','UTC','2026-05-31T00:00:00.000Z','2026-05-31T00:00:00.000Z');
+      INSERT INTO devices(deveui,name,type_id,user_id,irrigation_zone_id,chameleon_enabled,chameleon_swt1_depth_cm,chameleon_swt2_depth_cm,created_at,updated_at)
+        VALUES('AA00000000000001','Chameleon 1','DRAGINO_LSN50',1,12,1,5,15,'2026-05-31T00:00:00.000Z','2026-05-31T00:00:00.000Z');
+      INSERT INTO device_data(deveui,recorded_at,swt_1,swt_2) VALUES
+        ('AA00000000000001','2026-06-01T08:00:00.000Z',6.2,8.4);
+    `);
+    const res = await helper.buildZoneExportCsv(db, {
+      zoneId: 12,
+      from: '2026-06-01',
+      to: '2026-06-01',
+      granularity: 'raw',
+      channels: ['swt_1'],
+      nowMs: Date.parse('2026-06-03T00:00:00.000Z'),
+    });
+    assert.ok(res.rows.length > 0);
+    assert.deepStrictEqual(Array.from(new Set(res.rows.map((row) => row.channel_key))), ['swt_1']);
+  } finally {
+    db.close();
+  }
+});
+
+test('buildZoneExportCsv accepts legacy aliases but emits canonical channel keys', async () => {
+  const db = createCliSqliteDb();
+  try {
+    db.runSql(`
+      INSERT INTO users(id,username,password_hash,created_at,updated_at) VALUES(1,'u','h','2026-05-31T00:00:00.000Z','2026-05-31T00:00:00.000Z');
+      INSERT INTO irrigation_zones(id,name,user_id,zone_uuid,timezone,created_at,updated_at) VALUES(12,'Zone B',1,'zb','UTC','2026-05-31T00:00:00.000Z','2026-05-31T00:00:00.000Z');
+      INSERT INTO devices(deveui,name,type_id,user_id,irrigation_zone_id,chameleon_enabled,chameleon_swt1_depth_cm,created_at,updated_at)
+        VALUES('AA00000000000001','Chameleon 1','DRAGINO_LSN50',1,12,1,5,'2026-05-31T00:00:00.000Z','2026-05-31T00:00:00.000Z');
+      INSERT INTO device_data(deveui,recorded_at,swt_1,swt_wm1) VALUES
+        ('AA00000000000001','2026-06-01T08:00:00.000Z',6.2,61.2);
+    `);
+    const res = await helper.buildZoneExportCsv(db, {
+      zoneId: 12,
+      from: '2026-06-01',
+      to: '2026-06-01',
+      granularity: 'raw',
+      channels: ['swt_wm1'],
+      nowMs: Date.parse('2026-06-03T00:00:00.000Z'),
+    });
+    assert.ok(res.rows.length > 0);
+    assert.ok(res.rows.every((row) => row.channel_key === 'swt_1'));
+  } finally {
+    db.close();
+  }
+});
+
+test('buildZoneExportCsv rejects unknown channels with a structured 400', async () => {
+  const db = createCliSqliteDb();
+  try {
+    db.runSql(`
+      INSERT INTO users(id,username,password_hash,created_at,updated_at) VALUES(1,'u','h','2026-05-31T00:00:00.000Z','2026-05-31T00:00:00.000Z');
+      INSERT INTO irrigation_zones(id,name,user_id,zone_uuid,timezone,created_at,updated_at) VALUES(12,'Zone B',1,'zb','UTC','2026-05-31T00:00:00.000Z','2026-05-31T00:00:00.000Z');
+    `);
+    await assert.rejects(
+      () => helper.buildZoneExportCsv(db, {
+        zoneId: 12,
+        from: '2026-06-01',
+        to: '2026-06-01',
+        granularity: 'raw',
+        channels: ['not_in_manifest'],
+        nowMs: Date.parse('2026-06-03T00:00:00.000Z'),
+      }),
+      (error) => {
+        assert.strictEqual(error.statusCode, 400);
+        assert.match(error.message, /unknown channel/i);
+        return true;
+      }
+    );
+  } finally {
+    db.close();
+  }
+});
+
+test('buildZoneExportCsv accepts manifest-valid channels with no local edge source', async () => {
+  const db = createCliSqliteDb();
+  try {
+    db.runSql(`
+      INSERT INTO users(id,username,password_hash,created_at,updated_at) VALUES(1,'u','h','2026-05-31T00:00:00.000Z','2026-05-31T00:00:00.000Z');
+      INSERT INTO irrigation_zones(id,name,user_id,zone_uuid,timezone,created_at,updated_at) VALUES(12,'Zone B',1,'zb','UTC','2026-05-31T00:00:00.000Z','2026-05-31T00:00:00.000Z');
+      INSERT INTO devices(deveui,name,type_id,user_id,irrigation_zone_id,chameleon_enabled,chameleon_swt1_depth_cm,created_at,updated_at)
+        VALUES('AA00000000000001','Chameleon 1','DRAGINO_LSN50',1,12,1,5,'2026-05-31T00:00:00.000Z','2026-05-31T00:00:00.000Z');
+      INSERT INTO device_data(deveui,recorded_at,swt_1) VALUES
+        ('AA00000000000001','2026-06-01T08:00:00.000Z',6.2);
+    `);
+    const res = await helper.buildZoneExportCsv(db, {
+      zoneId: 12,
+      from: '2026-06-01',
+      to: '2026-06-01',
+      granularity: 'raw',
+      channels: ['vwc'],
+      nowMs: Date.parse('2026-06-03T00:00:00.000Z'),
+    });
+    assert.deepStrictEqual(res.rows, []);
+  } finally {
+    db.close();
+  }
+});
+
 test('buildZoneExportCsv aggregate keeps per-source rows with depth for merged cards', async () => {
   const db = createCliSqliteDb();
   try {

@@ -2,44 +2,64 @@
 
 const fs = require('fs');
 const path = require('path');
+const vm = require('vm');
 
 const repoRoot = path.resolve(__dirname, '..');
 const manifestPath = path.join(repoRoot, 'web', 'react-gui', 'src', 'channels', 'channels.json');
-const helperPath = path.join(
-  repoRoot,
-  'conf',
-  'full_raspberrypi_bcm27xx_bcm2712',
-  'files',
-  'usr',
-  'share',
-  'node-red',
-  'osi-history-helper',
-  'index.js'
-);
+const helperPaths = [
+  path.join(
+    repoRoot,
+    'conf',
+    'full_raspberrypi_bcm27xx_bcm2712',
+    'files',
+    'usr',
+    'share',
+    'node-red',
+    'osi-history-helper',
+    'index.js'
+  ),
+  path.join(
+    repoRoot,
+    'conf',
+    'full_raspberrypi_bcm27xx_bcm2709',
+    'files',
+    'usr',
+    'share',
+    'node-red',
+    'osi-history-helper',
+    'index.js'
+  ),
+];
 
 function readText(filePath) {
   return fs.readFileSync(filePath, 'utf8');
 }
 
-function loadManifestKeysAndAliases() {
+function loadManifestContract() {
   const manifest = JSON.parse(readText(manifestPath));
   if (!Array.isArray(manifest)) {
     throw new Error(`expected manifest array in ${path.relative(repoRoot, manifestPath)}`);
   }
 
   const allowed = new Set();
+  const exportable = new Set();
+  const aliases = {};
   for (const entry of manifest) {
     if (!entry || typeof entry.key !== 'string' || !entry.key.trim()) {
       throw new Error('manifest entry is missing a non-empty key');
     }
     allowed.add(entry.key);
+    if (entry.exportable === true && entry.deprecated !== true) {
+      exportable.add(entry.key);
+    }
     for (const alias of Array.isArray(entry.legacyAliases) ? entry.legacyAliases : []) {
       if (typeof alias === 'string' && alias.trim()) {
         allowed.add(alias);
+        aliases[alias] = entry.key;
       }
     }
   }
-  return allowed;
+  return { allowed, exportable, aliases };
 }
 
 function findMatching(source, openIndex, openChar, closeChar) {
@@ -126,6 +146,29 @@ function extractStringLiterals(source) {
   return values;
 }
 
+function extractObjectStringMap(source, constantName) {
+  const declaration = `const ${constantName}`;
+  const declarationIndex = source.indexOf(declaration);
+  if (declarationIndex === -1) {
+    throw new Error(`missing ${constantName} declaration`);
+  }
+  const openBrace = source.indexOf('{', declarationIndex);
+  if (openBrace === -1) {
+    throw new Error(`missing object initializer for ${constantName}`);
+  }
+  const closeBrace = findMatching(source, openBrace, '{', '}');
+  const objectLiteral = source.slice(openBrace, closeBrace + 1);
+  const parsed = vm.runInNewContext(`(${objectLiteral})`, Object.create(null));
+  const result = {};
+  for (const [key, value] of Object.entries(parsed || {})) {
+    if (typeof value !== 'string' || !value.trim()) {
+      throw new Error(`${constantName}.${key} is not a non-empty string`);
+    }
+    result[key] = value;
+  }
+  return result;
+}
+
 function extractChannelsForCardPropertyValues(source, propertyName) {
   const body = extractNamedFunctionBody(source, 'channelsForCard');
   const values = [];
@@ -149,25 +192,58 @@ function assertCovered(ids, allowed, label) {
   }
 }
 
-try {
-  const allowedManifestIds = loadManifestKeysAndAliases();
-  const helperSource = readText(helperPath);
+function assertSameSet(actualIds, expectedSet, label) {
+  const actual = Array.from(new Set(actualIds)).sort();
+  const expected = Array.from(expectedSet).sort();
+  if (actual.join('\n') !== expected.join('\n')) {
+    const missing = expected.filter((id) => !actual.includes(id));
+    const extra = actual.filter((id) => !expected.includes(id));
+    throw new Error(`${label} mismatch; missing=[${missing.join(', ')}] extra=[${extra.join(', ')}]`);
+  }
+  console.log(`OK ${label} exactly matches channels manifest (${actual.length} ids)`);
+}
 
-  assertCovered(
-    extractChannelsForCardPropertyValues(helperSource, 'id'),
-    allowedManifestIds,
-    'channelsForCard id'
-  );
-  assertCovered(
-    extractChannelsForCardPropertyValues(helperSource, 'field'),
-    allowedManifestIds,
-    'channelsForCard field'
-  );
-  assertCovered(
-    extractNewSetStringEntries(helperSource, 'ALLOWED_DEVICE_DATA_CHANNELS'),
-    allowedManifestIds,
-    'ALLOWED_DEVICE_DATA_CHANNELS'
-  );
+function assertSameMap(actual, expected, label) {
+  const actualEntries = Object.entries(actual).sort(([left], [right]) => left.localeCompare(right));
+  const expectedEntries = Object.entries(expected).sort(([left], [right]) => left.localeCompare(right));
+  if (JSON.stringify(actualEntries) !== JSON.stringify(expectedEntries)) {
+    throw new Error(`${label} mismatch; actual=${JSON.stringify(actualEntries)} expected=${JSON.stringify(expectedEntries)}`);
+  }
+  console.log(`OK ${label} exactly matches channels manifest (${actualEntries.length} aliases)`);
+}
+
+try {
+  const manifest = loadManifestContract();
+  for (const helperPath of helperPaths) {
+    const helperSource = readText(helperPath);
+    const helperLabel = path.relative(repoRoot, helperPath);
+
+    assertCovered(
+      extractChannelsForCardPropertyValues(helperSource, 'id'),
+      manifest.allowed,
+      `${helperLabel} channelsForCard id`
+    );
+    assertCovered(
+      extractChannelsForCardPropertyValues(helperSource, 'field'),
+      manifest.allowed,
+      `${helperLabel} channelsForCard field`
+    );
+    assertCovered(
+      extractNewSetStringEntries(helperSource, 'ALLOWED_DEVICE_DATA_CHANNELS'),
+      manifest.allowed,
+      `${helperLabel} ALLOWED_DEVICE_DATA_CHANNELS`
+    );
+    assertSameSet(
+      extractNewSetStringEntries(helperSource, 'VALID_EXPORT_CHANNEL_KEYS'),
+      manifest.exportable,
+      `${helperLabel} VALID_EXPORT_CHANNEL_KEYS`
+    );
+    assertSameMap(
+      extractObjectStringMap(helperSource, 'LEGACY_CHANNEL_ALIASES'),
+      manifest.aliases,
+      `${helperLabel} LEGACY_CHANNEL_ALIASES`
+    );
+  }
 
   console.log('Channel manifest parity verification passed');
 } catch (error) {

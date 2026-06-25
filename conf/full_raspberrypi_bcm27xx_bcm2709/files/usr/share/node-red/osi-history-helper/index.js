@@ -49,6 +49,40 @@ const ALLOWED_DEVICE_DATA_CHANNELS = new Set([
   'dendro_ratio',
 ]);
 
+const VALID_EXPORT_CHANNEL_KEYS = new Set([
+  'swt_1',
+  'swt_2',
+  'swt_3',
+  'vwc',
+  'ambient_temperature',
+  'relative_humidity',
+  'light_lux',
+  'ext_temperature_c',
+  'rain_mm_per_hour',
+  'rain_mm_per_10min',
+  'rain_mm_today',
+  'rain_mm_delta',
+  'wind_speed_mps',
+  'wind_gust_mps',
+  'barometric_pressure_hpa',
+  'uv_index',
+  'dendro_stem_change_um',
+  'dendro_position_mm',
+  'dendro_position_raw_mm',
+  'dendro_delta_mm',
+  'dendro_ratio',
+  'adc_ch0v',
+  'adc_ch1v',
+]);
+
+const LEGACY_CHANNEL_ALIASES = {
+  swt_wm1: 'swt_1',
+  swt_wm2: 'swt_2',
+  temperature: 'ambient_temperature',
+  humidity: 'relative_humidity',
+  light: 'light_lux',
+};
+
 function toFiniteNumber(value) {
   if (value === null || value === undefined || value === '') return null;
   const number = Number(value);
@@ -196,11 +230,9 @@ function channelsForCard(card) {
   const cardType = normalizeCardType(card && card.cardType);
   if (cardType === 'soil') {
     return [
-      { id: 'swt_1', field: 'swt_1', unit: 'kPa', label: 'Soil tension (S1)' },
-      { id: 'swt_2', field: 'swt_2', unit: 'kPa', label: 'Soil tension (S2)' },
+      { id: 'swt_1', field: 'swt_1', fields: ['swt_1', 'swt_wm1'], unit: 'kPa', label: 'Soil tension (S1)' },
+      { id: 'swt_2', field: 'swt_2', fields: ['swt_2', 'swt_wm2'], unit: 'kPa', label: 'Soil tension (S2)' },
       { id: 'swt_3', field: 'swt_3', unit: 'kPa', label: 'Soil tension (S3)' },
-      { id: 'swt_wm1', field: 'swt_wm1', unit: 'kPa', label: 'Soil tension (S1)' },
-      { id: 'swt_wm2', field: 'swt_wm2', unit: 'kPa', label: 'Soil tension (S2)' },
     ];
   }
   if (cardType === 'environment') {
@@ -461,11 +493,31 @@ function deriveExpectedCadenceSeconds(options = {}) {
 function normalizeChannels(channels) {
   return (Array.isArray(channels) ? channels : [])
     .map((channel) => {
-      if (typeof channel === 'string') return { id: channel, field: channel };
+      if (typeof channel === 'string') return { id: channel, field: channel, fields: [channel] };
       if (!channel || typeof channel !== 'object') return null;
-      return { id: channel.id || channel.field, field: channel.field || channel.id, unit: channel.unit || null };
+      const field = channel.field || channel.id;
+      return {
+        id: channel.id || field,
+        field,
+        fields: Array.isArray(channel.fields) && channel.fields.length ? channel.fields : [field],
+        unit: channel.unit || null,
+        label: channel.label || null,
+      };
     })
     .filter((channel) => channel && channel.id && channel.field);
+}
+
+function channelFieldNames(channel) {
+  return Array.from(new Set((Array.isArray(channel && channel.fields) && channel.fields.length ? channel.fields : [channel && channel.field])
+    .filter(Boolean)));
+}
+
+function channelValue(row, channel) {
+  for (const field of channelFieldNames(channel)) {
+    const value = toFiniteNumber(row && row[field]);
+    if (value !== null) return value;
+  }
+  return null;
 }
 
 function bucketStartFor(ms, startMs, bucketSeconds) {
@@ -655,7 +707,7 @@ function sourceChannelSamples(sortedRows, channels) {
   const samples = new Map();
   for (const entry of sortedRows) {
     for (const channel of channels) {
-      if (toFiniteNumber(entry.row[channel.field]) === null) continue;
+      if (channelValue(entry.row, channel) === null) continue;
       const sourceKey = rowSourceKey(entry.row, channel);
       const key = sourceChannelKey(sourceKey, channel);
       if (!samples.has(key)) {
@@ -734,7 +786,7 @@ function coverageForBucket(bucketRows, channels, sourceCadences, bucketSeconds) 
   const observed = {};
   for (const entry of bucketRows) {
     for (const channel of channels) {
-      if (toFiniteNumber(entry.row[channel.field]) === null) continue;
+      if (channelValue(entry.row, channel) === null) continue;
       const key = sourceChannelKey(rowSourceKey(entry.row, channel), channel);
       observed[key] = (observed[key] || 0) + 1;
     }
@@ -820,7 +872,7 @@ function aggregateRows(rows, options = {}) {
       series[channel.id] = {
         unit: channel.unit || null,
         points: sortedRows
-          .map((entry) => ({ recordedAt: new Date(entry.recordedAtMs).toISOString(), value: toFiniteNumber(entry.row[channel.field]) }))
+          .map((entry) => ({ recordedAt: new Date(entry.recordedAtMs).toISOString(), value: channelValue(entry.row, channel) }))
           .filter((point) => point.value !== null),
       };
     }
@@ -846,7 +898,7 @@ function aggregateRows(rows, options = {}) {
   for (const bucket of buckets) {
     const bucketRows = sortedRows.filter((entry) => entry.recordedAtMs >= bucket.bucketStartMs && entry.recordedAtMs < bucket.bucketEndMs);
     for (const channel of channels) {
-      const stats = statsForValues(bucketRows.map((entry) => ({ value: entry.row[channel.field], recordedAtMs: entry.recordedAtMs })));
+      const stats = statsForValues(bucketRows.map((entry) => ({ value: channelValue(entry.row, channel), recordedAtMs: entry.recordedAtMs })));
       bucket.series[channel.id] = stats ? { ...stats, unit: channel.unit || null } : {
         min: null,
         max: null,
@@ -902,7 +954,8 @@ function normalizeQueryChannels(channels) {
   const normalized = normalizeChannels(channels);
   if (normalized.length === 0) throw new Error('aggregateDeviceData requires channels');
   for (const channel of normalized) {
-    if (!ALLOWED_DEVICE_DATA_CHANNELS.has(channel.field)) throw new Error(`unsupported device_data channel: ${channel.field}`);
+    const unsupportedField = channelFieldNames(channel).find((field) => !ALLOWED_DEVICE_DATA_CHANNELS.has(field));
+    if (unsupportedField) throw new Error(`unsupported device_data channel: ${unsupportedField}`);
   }
   return normalized;
 }
@@ -1048,7 +1101,7 @@ async function aggregateDeviceData(db, query = {}) {
 
   if (deveuis.length === 0) throw new Error('aggregateDeviceData requires at least one DevEUI');
   const placeholders = deveuis.map(() => '?').join(',');
-  const selectedFields = Array.from(new Set(channels.map((channel) => channel.field)));
+  const selectedFields = Array.from(new Set(channels.flatMap(channelFieldNames)));
   const sql = `SELECT deveui, recorded_at, ${selectedFields.join(', ')} FROM device_data WHERE deveui IN (${placeholders}) AND recorded_at BETWEEN ? AND ? ORDER BY deveui ASC, recorded_at ASC`;
   const params = deveuis.concat([start, end]);
   const rows = await dbAll(db, sql, params);
@@ -1137,6 +1190,31 @@ function normalizeExportGranularity(value) {
   return granularity;
 }
 
+function canonicalChannelKey(value) {
+  const key = String(value || '').trim().toLowerCase();
+  if (!key) return null;
+  if (Object.prototype.hasOwnProperty.call(LEGACY_CHANNEL_ALIASES, key)) return LEGACY_CHANNEL_ALIASES[key];
+  if (VALID_EXPORT_CHANNEL_KEYS.has(key)) return key;
+  const error = new Error(`unknown channel: ${key}`);
+  error.statusCode = 400;
+  throw error;
+}
+
+function normalizeExportChannels(input) {
+  const raw = Array.isArray(input)
+    ? input
+    : String(input || '').split(',');
+  const normalized = [];
+  const seen = new Set();
+  for (const value of raw) {
+    const key = canonicalChannelKey(value);
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    normalized.push(key);
+  }
+  return normalized.length ? new Set(normalized) : null;
+}
+
 async function resolveZoneExportScope(db, options = {}) {
   const zoneId = Number(options.zoneId ?? options.zone_id);
   if (!Number.isInteger(zoneId) || zoneId <= 0) {
@@ -1173,7 +1251,7 @@ async function resolveZoneExportScope(db, options = {}) {
   const devices = await dbAll(db, 'SELECT * FROM devices WHERE deleted_at IS NULL AND irrigation_zone_id = ? ORDER BY deveui ASC', [zoneId]);
   const cards = deriveCardsForZone(zone, devices).filter((card) => normalizeCardType(card.cardType) !== 'gateway');
   const site = String(options.site || process.env.DEVICE_EUI || process.env.GATEWAY_DEVICE_EUI || 'UNKNOWN').trim().toUpperCase() || 'UNKNOWN';
-  return { zone, timezone, from, to, start, end, devices, cards, site, granularity: normalizeExportGranularity(options.granularity), nowMs: options.nowMs ?? Date.now() };
+  return { zone, timezone, from, to, start, end, devices, cards, site, requestedChannelKeys: normalizeExportChannels(options.channels), granularity: normalizeExportGranularity(options.granularity), nowMs: options.nowMs ?? Date.now() };
 }
 
 function seriesLabel(sourceName, channel) {
@@ -1203,11 +1281,18 @@ function tidyCsvRow(input) {
   };
 }
 
+function exportChannelsForCard(card, scope) {
+  const channels = channelsForCard(card);
+  return scope && scope.requestedChannelKeys
+    ? channels.filter((channel) => scope.requestedChannelKeys.has(channel.id))
+    : channels;
+}
+
 async function rawZoneExportRows(db, scope) {
   const rows = [];
   const zoneName = String(scope.zone.name || scope.zone.zone_uuid || scope.zone.id);
   for (const card of scope.cards) {
-    const channels = channelsForCard(card);
+    const channels = exportChannelsForCard(card, scope);
     const sourceDevices = sourceDevicesForCard(card, scope.devices)
       .slice()
       .sort((left, right) =>
@@ -1216,7 +1301,7 @@ async function rawZoneExportRows(db, scope) {
     const deveuis = uniqueDeveuis(sourceDevices);
     if (!channels.length || !deveuis.length) continue;
 
-    const selectedFields = Array.from(new Set(channels.map((channel) => channel.field)));
+    const selectedFields = Array.from(new Set(channels.flatMap(channelFieldNames)));
     const placeholders = deveuis.map(() => '?').join(',');
     const sql = `SELECT deveui, recorded_at, ${selectedFields.join(', ')} FROM device_data WHERE deveui IN (${placeholders}) AND recorded_at >= ? AND recorded_at < ? ORDER BY recorded_at ASC`;
     const dataRows = await dbAll(db, sql, deveuis.concat([scope.start, scope.end]));
@@ -1236,7 +1321,7 @@ async function rawZoneExportRows(db, scope) {
       const arrayId = arrayIdByDeveui[deveui] || null;
       for (const row of sourceRows) {
         for (const channel of channels) {
-          const value = toFiniteNumber(row[channel.field]);
+          const value = channelValue(row, channel);
           if (value === null) continue;
           rows.push({
             timestamp: row.recorded_at,
@@ -1266,7 +1351,7 @@ async function aggregateZoneExportRows(db, scope) {
   const rows = [];
   const zoneName = String(scope.zone.name || scope.zone.zone_uuid || scope.zone.id);
   for (const card of scope.cards) {
-    const channels = channelsForCard(card);
+    const channels = exportChannelsForCard(card, scope);
     const sourceDevices = sourceDevicesForCard(card, scope.devices)
       .slice()
       .sort((left, right) =>
