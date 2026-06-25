@@ -93,6 +93,7 @@
       "raw": "Crudo",
       "hourly": "Por hora",
       "daily": "Diario",
+      "fullExport": "Exportacion completa",
       "download": "Descargar CSV",
       "downloading": "Preparando...",
       "rangeSummary": "{{from}} a {{to}}",

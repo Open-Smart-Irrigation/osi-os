@@ -93,6 +93,7 @@
       "raw": "Brut",
       "hourly": "Horaire",
       "daily": "Quotidien",
+      "fullExport": "Export complet",
       "download": "Telecharger CSV",
       "downloading": "Preparation...",
       "rangeSummary": "{{from}} a {{to}}",

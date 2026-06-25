@@ -93,6 +93,7 @@
       "raw": "Raw",
       "hourly": "Hourly",
       "daily": "Daily",
+      "fullExport": "Full export",
       "download": "Download CSV",
       "downloading": "Preparing...",
       "rangeSummary": "{{from}} to {{to}}",

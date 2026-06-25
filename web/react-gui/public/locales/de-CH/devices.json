@@ -93,6 +93,7 @@
       "raw": "Rohdaten",
       "hourly": "Stuendlich",
       "daily": "Taeglich",
+      "fullExport": "Vollstaendiger Export",
       "download": "CSV herunterladen",
       "downloading": "Wird vorbereitet...",
       "rangeSummary": "{{from}} bis {{to}}",

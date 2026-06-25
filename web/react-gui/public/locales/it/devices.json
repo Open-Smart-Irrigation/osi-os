@@ -93,6 +93,7 @@
       "raw": "Grezzi",
       "hourly": "Orario",
       "daily": "Giornaliero",
+      "fullExport": "Esportazione completa",
       "download": "Scarica CSV",
       "downloading": "Preparazione...",
       "rangeSummary": "{{from}} a {{to}}",
