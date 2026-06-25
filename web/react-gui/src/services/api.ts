@@ -1141,14 +1141,16 @@ export type ZoneExportGranularity = 'raw' | 'hourly' | 'daily';
 export const zoneExportAPI = {
   download: async (
     zoneId: number,
-    opts: { from: string; to: string; granularity: ZoneExportGranularity },
+    opts: { from: string; to: string; granularity: ZoneExportGranularity; channels?: string[] },
   ): Promise<void> => {
+    const params: Record<string, string> = {
+      from: opts.from,
+      to: opts.to,
+      granularity: opts.granularity,
+    };
+    if (opts.channels?.length) params.channels = opts.channels.join(',');
     const response = await api.get(`/api/history/zones/${zoneId}/export.csv`, {
-      params: {
-        from: opts.from,
-        to: opts.to,
-        granularity: opts.granularity,
-      },
+      params,
       responseType: 'blob',
     });
     const blob = new Blob([response.data], { type: 'text/csv;charset=utf-8' });

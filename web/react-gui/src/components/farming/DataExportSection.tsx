@@ -9,6 +9,8 @@ type ExportGranularity = 'raw' | 'hourly' | 'daily';
 interface DataExportSectionProps {
   zoneId: number;
   todayIso: string;
+  defaultChannels?: string[];
+  initialRange?: RangeValue;
 }
 
 const GRANULARITIES: ExportGranularity[] = ['raw', 'hourly', 'daily'];
@@ -21,23 +23,35 @@ function errorMessage(error: unknown, fallback: string): string {
   return fallback;
 }
 
-export const DataExportSection: React.FC<DataExportSectionProps> = ({ zoneId, todayIso }) => {
+export const DataExportSection: React.FC<DataExportSectionProps> = ({
+  zoneId,
+  todayIso,
+  defaultChannels = [],
+  initialRange,
+}) => {
   const { t } = useTranslation('devices');
-  const [range, setRange] = useState<RangeValue>({ from: null, to: null });
+  const [range, setRange] = useState<RangeValue>(initialRange ?? { from: null, to: null });
   const [granularity, setGranularity] = useState<ExportGranularity>('raw');
+  const [fullExport, setFullExport] = useState(defaultChannels.length === 0);
   const [downloading, setDownloading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const from = range.from;
   const to = range.to || range.from;
   const canDownload = Boolean(from && to && !downloading);
+  const hasDefaultChannels = defaultChannels.length > 0;
 
   const handleDownload = async () => {
     if (!from || !to) return;
     setDownloading(true);
     setError(null);
     try {
-      await zoneExportAPI.download(zoneId, { from, to, granularity });
+      await zoneExportAPI.download(zoneId, {
+        from,
+        to,
+        granularity,
+        channels: hasDefaultChannels && !fullExport ? defaultChannels : undefined,
+      });
     } catch (err) {
       setError(errorMessage(err, t('zone.export.error')));
     } finally {
@@ -53,6 +67,18 @@ export const DataExportSection: React.FC<DataExportSectionProps> = ({ zoneId, to
       </div>
 
       <RangeCalendar value={range} onChange={setRange} todayIso={todayIso} />
+
+      {hasDefaultChannels && (
+        <label className="flex items-center gap-2 text-sm text-[var(--text)]">
+          <input
+            type="checkbox"
+            checked={fullExport}
+            onChange={(event) => setFullExport(event.target.checked)}
+            className="h-4 w-4 rounded border-[var(--border)]"
+          />
+          {t('zone.export.fullExport')}
+        </label>
+      )}
 
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-[1fr_auto]">
         <label className="text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)]">

@@ -41,6 +41,35 @@ describe('DataExportSection', () => {
     });
   });
 
+  it('uses default channels until the full export toggle is selected', async () => {
+    render(
+      <DataExportSection
+        zoneId={12}
+        todayIso="2026-06-03"
+        defaultChannels={['swt_1']}
+        initialRange={{ from: '2026-06-01', to: '2026-06-02' }}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /download/i }));
+    await waitFor(() => {
+      expect(zoneExportAPI.download).toHaveBeenCalledWith(12, expect.objectContaining({
+        from: '2026-06-01',
+        to: '2026-06-02',
+        channels: ['swt_1'],
+      }));
+    });
+
+    fireEvent.click(screen.getByRole('checkbox', { name: 'zone.export.fullExport' }));
+    fireEvent.click(screen.getByRole('button', { name: /download/i }));
+
+    await waitFor(() => {
+      expect(zoneExportAPI.download).toHaveBeenLastCalledWith(12, expect.not.objectContaining({
+        channels: expect.anything(),
+      }));
+    });
+  });
+
   it('disables download until a range is chosen', () => {
     render(<DataExportSection zoneId={12} todayIso="2026-06-03" />);
 
