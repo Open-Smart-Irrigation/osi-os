@@ -59,7 +59,7 @@ function loadManifestContract() {
       }
     }
   }
-  return { allowed, exportable, aliases };
+  return { allowed, exportable, aliases, entries: manifest };
 }
 
 function findMatching(source, openIndex, openChar, closeChar) {
@@ -169,6 +169,24 @@ function extractObjectStringMap(source, constantName) {
   return result;
 }
 
+function extractConstantArray(source, constantName) {
+  const declaration = `const ${constantName}`;
+  const declarationIndex = source.indexOf(declaration);
+  if (declarationIndex === -1) {
+    throw new Error(`missing ${constantName} declaration`);
+  }
+  const openBracket = source.indexOf('[', declarationIndex);
+  if (openBracket === -1) {
+    throw new Error(`missing array initializer for ${constantName}`);
+  }
+  const closeBracket = findMatching(source, openBracket, '[', ']');
+  const parsed = vm.runInNewContext(source.slice(openBracket, closeBracket + 1), Object.create(null));
+  if (!Array.isArray(parsed) || parsed.length === 0) {
+    throw new Error(`${constantName} static parse found zero entries`);
+  }
+  return parsed;
+}
+
 function extractChannelsForCardPropertyValues(source, propertyName) {
   const body = extractNamedFunctionBody(source, 'channelsForCard');
   const values = [];
@@ -212,11 +230,56 @@ function assertSameMap(actual, expected, label) {
   console.log(`OK ${label} exactly matches channels manifest (${actualEntries.length} aliases)`);
 }
 
+function normalizeAnalysisChannel(entry) {
+  return {
+    key: entry.key,
+    unit: entry.unit ?? null,
+    label: entry.label,
+    cardType: entry.cardType,
+    edgeField: entry.edgeField ?? null,
+    exportable: entry.exportable === true,
+    deprecated: entry.deprecated === true,
+  };
+}
+
+function expectedAnalysisChannels(manifestEntries) {
+  const analysisCardTypes = new Set(['soil', 'environment', 'dendro']);
+  return manifestEntries
+    .filter((entry) =>
+      entry.exportable === true &&
+      entry.deprecated !== true &&
+      analysisCardTypes.has(entry.cardType)
+    )
+    .map(normalizeAnalysisChannel);
+}
+
+function assertSameAnalysisChannels(actualEntries, expectedEntries, label) {
+  const actual = actualEntries.map(normalizeAnalysisChannel);
+  const expected = expectedEntries.map(normalizeAnalysisChannel);
+  const actualKeys = actual.map((entry) => entry.key).sort();
+  const expectedKeys = expected.map((entry) => entry.key).sort();
+  if (actualKeys.join('\n') !== expectedKeys.join('\n')) {
+    const missing = expectedKeys.filter((id) => !actualKeys.includes(id));
+    const extra = actualKeys.filter((id) => !expectedKeys.includes(id));
+    throw new Error(`${label} key mismatch; missing=[${missing.join(', ')}] extra=[${extra.join(', ')}]`);
+  }
+  for (const expectedEntry of expected) {
+    const actualEntry = actual.find((entry) => entry.key === expectedEntry.key);
+    if (JSON.stringify(actualEntry) !== JSON.stringify(expectedEntry)) {
+      throw new Error(`${label} metadata mismatch for ${expectedEntry.key}; actual=${JSON.stringify(actualEntry)} expected=${JSON.stringify(expectedEntry)}`);
+    }
+  }
+  console.log(`OK ${label} exactly matches active analysis channels manifest metadata (${actual.length} channels)`);
+}
+
 try {
   const manifest = loadManifestContract();
   for (const helperPath of helperPaths) {
     const helperSource = readText(helperPath);
     const helperLabel = path.relative(repoRoot, helperPath);
+    const analysisPath = path.join(path.dirname(helperPath), 'analysis.js');
+    const analysisSource = readText(analysisPath);
+    const analysisLabel = path.relative(repoRoot, analysisPath);
 
     assertCovered(
       extractChannelsForCardPropertyValues(helperSource, 'id'),
@@ -242,6 +305,11 @@ try {
       extractObjectStringMap(helperSource, 'LEGACY_CHANNEL_ALIASES'),
       manifest.aliases,
       `${helperLabel} LEGACY_CHANNEL_ALIASES`
+    );
+    assertSameAnalysisChannels(
+      extractConstantArray(analysisSource, 'CHANNELS'),
+      expectedAnalysisChannels(manifest.entries),
+      `${analysisLabel} CHANNELS`
     );
   }
 
