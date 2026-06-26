@@ -1,3 +1,4 @@
+import { lazy, Suspense } from 'react';
 import { HashRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider } from './contexts/AuthContext';
 import { PrivateRoute } from './components/PrivateRoute';
@@ -7,6 +8,10 @@ import { FarmingDashboard } from './pages/FarmingDashboard';
 import { HistoryDashboard } from './pages/HistoryDashboard';
 import { HistoryCardDetailPage } from './pages/HistoryCardDetailPage';
 import { AccountLink } from './pages/AccountLink';
+
+const AnalysisRoute = lazy(() =>
+  import('./pages/AnalysisRoute').then((module) => ({ default: module.AnalysisRoute })),
+);
 
 function App() {
   return (
@@ -41,6 +46,17 @@ function App() {
             element={
               <PrivateRoute>
                 <HistoryDashboard />
+              </PrivateRoute>
+            }
+          />
+
+          <Route
+            path="/analysis"
+            element={
+              <PrivateRoute>
+                <Suspense fallback={<div className="p-6 text-sm text-[var(--text-secondary)]">Loading analysis...</div>}>
+                  <AnalysisRoute />
+                </Suspense>
               </PrivateRoute>
             }
           />

@@ -73,9 +73,9 @@ describe('DashboardHeader (osi-os)', () => {
     expect(onAddDevice).toHaveBeenCalledOnce();
   });
 
-  it('shows the desktop Data link to /history', () => {
+  it('points the desktop Data link to the analysis view', () => {
     renderHeader();
-    expect(screen.getByRole('link', { name: 'Data' })).toHaveAttribute('href', '/history');
+    expect(screen.getByRole('link', { name: 'Data' })).toHaveAttribute('href', '/analysis');
   });
 
   it('hides the Data link on mobile/tablet browsers', () => {

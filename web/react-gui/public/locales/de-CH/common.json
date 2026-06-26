@@ -3,5 +3,91 @@
   "loading": "Laden...",
   "delete": "Löschen",
   "na": "N/A",
-  "retry": "Erneut versuchen"
+  "retry": "Erneut versuchen",
+  "analysis": {
+    "title": "Datenanalyse",
+    "axis": {
+      "rename": "Achsenbeschriftung umbenennen"
+    },
+    "backToDashboard": "← Zurück zum Dashboard",
+    "loadError": "Analysedaten konnten nicht geladen werden.",
+    "pooled": {
+      "tooltip": "Korreliert die Punkte aller Zonen als einen kombinierten Datensatz, zusätzlich zu jeder Zone einzeln."
+    },
+    "empty": "Wählen Sie eine oder mehrere Reihen aus, um Zonen zu vergleichen.",
+    "catalog": {
+      "loading": "Verfügbare Reihen werden geladen..."
+    },
+    "series": {
+      "loading": "Reihen werden geladen..."
+    },
+    "aggregation": {
+      "label": "Aggregation",
+      "hourly": "Stündlich",
+      "daily": "Täglich"
+    },
+    "preset": {
+      "metricLabel": "Metrik über Zonen"
+    },
+    "tray": {
+      "label": "Analysereihen",
+      "title": "Reihen",
+      "search": "Nach Zonen oder Geräten suchen",
+      "unknownSite": "Unbekannter Standort",
+      "reason": {
+        "unsupported": "Nicht unterstützt",
+        "available_no_recent_data": "Keine aktuellen Daten verfügbar"
+      }
+    },
+    "range": {
+      "label": "Analysezeitraum",
+      "custom": "Benutzerdefiniert",
+      "from": "Von",
+      "to": "Bis",
+      "apply": "Anwenden",
+      "invalid": "Der Start muss vor dem Ende liegen."
+    },
+    "mode": {
+      "label": "Analysemodus",
+      "timeline": "Zeitverlauf",
+      "correlation": "Korrelation"
+    },
+    "layout": {
+      "label": "Layout",
+      "stacked": "Gestapelt",
+      "overlaid": "Überlagert",
+      "smallMultiples": "Kleine Vielfache"
+    },
+    "toggle": {
+      "normalize": "Normalisieren"
+    },
+    "export": {
+      "csv": "CSV exportieren",
+      "png": "PNG exportieren",
+      "allZonesCsv": "CSV für alle Zonen exportieren"
+    },
+    "legend": {
+      "label": "Diagrammlegende",
+      "rename": "Reihe umbenennen"
+    },
+    "views": {
+      "title": "Gespeicherte Ansichten",
+      "save": "Ansicht speichern",
+      "namePlaceholder": "Diese Ansicht benennen",
+      "delete": "Ansicht löschen",
+      "empty": "Noch keine gespeicherten Ansichten."
+    },
+    "droppedNotice": "{{count}} Serien konnten nicht geladen werden",
+    "correlation": {
+      "comingSoon": "Das Korrelations-Streudiagramm ist für den nächsten Ausbauschritt geplant.",
+      "needTwoChannels": "Fügen Sie Reihen für mindestens zwei verschiedene Kanäle hinzu, um sie zu vergleichen.",
+      "x": "X-Kanal",
+      "y": "Y-Kanal",
+      "pooled": "Zusammengefasst (alle Zonen)",
+      "zone": "Zone",
+      "droppedPairs": "Verworfen",
+      "insufficient": "unzureichend (n={{n}})",
+      "exploratory": "Nur explorativ — Pearson-r über ausgerichtete Buckets; kein Signifikanztest."
+    }
+  }
 }

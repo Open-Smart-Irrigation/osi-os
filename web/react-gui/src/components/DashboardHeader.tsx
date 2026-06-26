@@ -45,7 +45,7 @@ export const DashboardHeader: React.FC<DashboardHeaderProps> = ({
 
             {showDesktopData && (
               <Link
-                to="/history"
+                to="/analysis"
                 className="shrink-0 bg-emerald-700 hover:bg-emerald-800 text-white font-bold text-sm px-3 py-2 touch-target rounded-lg transition-colors shadow-lg"
               >
                 {t('data')}
