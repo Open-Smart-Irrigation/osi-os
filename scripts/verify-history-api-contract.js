@@ -30,7 +30,11 @@ const REQUIRED_ENDPOINTS = [
   ['POST', '/api/history/zones/:zoneId/cards/:cardId/opened'],
   ['PUT', '/api/history/gateways/:gatewayEui/cards/:cardId/preferences'],
   ['POST', '/api/history/gateways/:gatewayEui/cards/:cardId/opened'],
-  ['GET', '/api/system/features']
+  ['GET', '/api/system/features'],
+  ['GET', '/api/analysis/channels'],
+  ['POST', '/api/analysis/series'],
+  ['GET', '/api/analysis/views'],
+  ['POST', '/api/analysis/views']
 ].map(([method, url]) => ({ method, url }));
 
 const REQUIRED_ENDPOINT_KEYS = new Set(REQUIRED_ENDPOINTS.map(endpointKey));
@@ -64,7 +68,7 @@ function endpointKey(endpoint) {
 
 function isHistoryContractRoute(node) {
   const url = String(node.url || '').trim();
-  return url === '/api/system/features' || url.startsWith('/api/history');
+  return url === '/api/system/features' || url.startsWith('/api/history') || url.startsWith('/api/analysis');
 }
 
 function normalizeMethod(method) {
@@ -109,6 +113,13 @@ function findHistoryRouter(flows) {
   return flows.find((node) =>
     node.type === 'function' &&
     String(node.name || '').trim() === 'History API Router'
+  ) || null;
+}
+
+function findAnalysisRouter(flows) {
+  return flows.find((node) =>
+    node.type === 'function' &&
+    String(node.name || '').trim() === 'Analysis API Router'
   ) || null;
 }
 
@@ -208,6 +219,23 @@ function verifyHistoryRouterImplementation(flows, failures) {
   assertNotContains(failures, source, "views: ['status-overview', 'connectivity-timeline', 'advanced']", 'unsupported gateway connectivity timeline view');
 }
 
+function verifyAnalysisRouterImplementation(flows, failures) {
+  const router = findAnalysisRouter(flows);
+  if (!router) {
+    failures.push('missing Analysis API Router function node');
+    return;
+  }
+
+  const source = String(router.func || '');
+  assertContains(failures, source, 'verifyBearer(msg.req && msg.req.headers && msg.req.headers.authorization)', 'analysis bearer auth gate');
+  assertContains(failures, source, 'osiHistory.buildAnalysisCatalog', 'analysis /channels calls buildAnalysisCatalog');
+  assertContains(failures, source, 'osiHistory.resolveAnalysisSeries', 'analysis /series calls resolveAnalysisSeries');
+  assertContains(failures, source, 'osiHistory.listAnalysisViews', 'analysis /views calls listAnalysisViews');
+  assertContains(failures, source, 'osiHistory.saveAnalysisView', 'analysis /views POST calls saveAnalysisView');
+  assertContains(failures, source, 'payload.suggestion = error.suggestion', 'structured analysis suggestions');
+  assertNotContains(failures, source, 'sync_outbox', 'edge sync outbox mutation from local-only analysis views');
+}
+
 function readFlows(flowPath) {
   const source = fs.readFileSync(flowPath, 'utf8');
   const parsed = JSON.parse(source);
@@ -274,6 +302,7 @@ function verify(options) {
 
   if (!allowPendingMissing) {
     verifyHistoryRouterImplementation(flows, failures);
+    verifyAnalysisRouterImplementation(flows, failures);
   }
 
   if (failures.length) {
