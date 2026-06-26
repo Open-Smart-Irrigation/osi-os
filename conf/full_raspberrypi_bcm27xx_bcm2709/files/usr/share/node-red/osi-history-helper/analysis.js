@@ -361,20 +361,15 @@ function createAnalysis(deps) {
       if (remaining <= 0) {
         throw tooLarge('range too large', 'Narrow the date range or pick a coarser granularity.');
       }
-      const probeRows = await dbAll(
-        db,
-        'SELECT 1 AS present FROM device_data WHERE deveui = ? AND recorded_at >= ? AND recorded_at < ? LIMIT ?',
-        [deveui, range.from, range.to, remaining + 1]
-      );
-      if (probeRows.length > remaining) {
-        throw tooLarge('range too large', 'Narrow the date range or pick a coarser granularity.');
-      }
-      rawRowsScanned += probeRows.length;
       const rows = await dbAll(
         db,
-        `SELECT deveui, recorded_at, ${fields.join(', ')} FROM device_data WHERE deveui = ? AND recorded_at >= ? AND recorded_at < ? ORDER BY recorded_at ASC`,
-        [deveui, range.from, range.to]
+        `SELECT deveui, recorded_at, ${fields.join(', ')} FROM device_data WHERE deveui = ? AND recorded_at >= ? AND recorded_at < ? ORDER BY recorded_at ASC LIMIT ?`,
+        [deveui, range.from, range.to, remaining + 1]
       );
+      if (rows.length > remaining) {
+        throw tooLarge('range too large', 'Narrow the date range or pick a coarser granularity.');
+      }
+      rawRowsScanned += rows.length;
       for (const { entry, meta } of entries) {
         const aggregate = aggregateRows(rows, {
           aggregation: options.aggregation,

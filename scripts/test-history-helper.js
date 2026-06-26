@@ -65,6 +65,8 @@ const TIDY_CSV_COLUMNS = [
   'value',
 ];
 
+const SQLITE_JSON_MAX_BUFFER = 16 * 1024 * 1024;
+
 function test(name, fn) {
   Promise.resolve()
     .then(fn)
@@ -122,7 +124,7 @@ function createCliSqliteDb() {
       let index = 0;
       const rendered = sql.replace(/\?/g, () => sqliteEscape(db.lastQuery.params[index++]));
       try {
-        const output = execFileSync('sqlite3', ['-json', dbPath, rendered], { encoding: 'utf8' }).trim();
+        const output = execFileSync('sqlite3', ['-json', dbPath, rendered], { encoding: 'utf8', maxBuffer: SQLITE_JSON_MAX_BUFFER }).trim();
         cb(null, output ? JSON.parse(output) : []);
       } catch (error) {
         cb(error);
@@ -359,6 +361,30 @@ test('resolveAnalysisSeries rejects over the raw-row scan cap per request', asyn
         return true;
       }
     );
+  } finally {
+    db.close();
+  }
+});
+
+test('resolveAnalysisSeries enforces raw-row cap on the data query', async () => {
+  const db = await analysisFixtureDb();
+  try {
+    const cat = await helper.buildAnalysisCatalog(db, { deviceEui: 'EUI', userId: 1 });
+    const swt1 = cat.channels.find((entry) => entry.channelKey === 'swt_1');
+    await helper.resolveAnalysisSeries(db, {
+      deviceEui: 'EUI',
+      userId: 1,
+      selectors: [{ seriesId: swt1.seriesId }],
+      range: { from: '2026-06-01T00:00:00.000Z', to: '2026-06-02T00:00:00.000Z' },
+      aggregation: 'auto',
+    });
+    const dataQuery = db.queries.find((query) =>
+      /\bSELECT\s+deveui,\s+recorded_at\b/i.test(query.sql) &&
+      /\bFROM\s+device_data\b/i.test(query.sql)
+    );
+    assert.ok(dataQuery, 'series resolver runs a device_data query');
+    assert.match(dataQuery.sql, /\bLIMIT\s+\?/i);
+    assert.ok(!db.queries.some((query) => /SELECT 1 AS present FROM device_data/i.test(query.sql)), 'series resolver must not pre-scan with a separate cap probe');
   } finally {
     db.close();
   }
