@@ -29,6 +29,10 @@ const CHANNELS = [
 ];
 
 const CHANNELS_BY_KEY = new Map(CHANNELS.map((channel) => [channel.key, channel]));
+const ANALYSIS_EDGE_FIELDS = new Set(CHANNELS.map((channel) => channel.edgeField).filter(Boolean));
+const MAX_SELECTED_SERIES = 25;
+const MAX_RAW_ROWS = 30000;
+const MAX_RANGE_DAYS = 400;
 
 function analysisSeriesId(zoneId, cardType, sourceKey, channelKey) {
   return crypto
@@ -96,6 +100,68 @@ function channelMeta(channelKey) {
   };
 }
 
+function sqlIdent(field) {
+  const name = String(field || '').trim();
+  if (!ANALYSIS_EDGE_FIELDS.has(name)) {
+    const error = new Error(`unsupported analysis field: ${name}`);
+    error.statusCode = 400;
+    throw error;
+  }
+  return name;
+}
+
+function unique(values) {
+  return Array.from(new Set(values));
+}
+
+function tooLarge(message, suggestion) {
+  const error = new Error(message);
+  error.statusCode = 413;
+  error.suggestion = suggestion;
+  return error;
+}
+
+function normalizeRange(range = {}) {
+  const from = range.from || range.start || range.startAt;
+  const to = range.to || range.end || range.endAt;
+  const fromMs = Date.parse(from);
+  const toMs = Date.parse(to);
+  if (!Number.isFinite(fromMs) || !Number.isFinite(toMs) || toMs <= fromMs) {
+    const error = new Error('range requires from before to');
+    error.statusCode = 400;
+    throw error;
+  }
+  const spanDays = (toMs - fromMs) / (24 * 60 * 60 * 1000);
+  if (spanDays > MAX_RANGE_DAYS) {
+    throw tooLarge('range too large', 'Narrow the date range.');
+  }
+  return {
+    from: new Date(fromMs).toISOString(),
+    to: new Date(toMs).toISOString(),
+  };
+}
+
+function aggToPoints(aggregate, channelKey) {
+  const rawPoints = aggregate && aggregate.series && aggregate.series[channelKey] && aggregate.series[channelKey].points;
+  if (Array.isArray(rawPoints)) {
+    return rawPoints.map((point) => ({
+      t: point.recordedAt,
+      value: point.value,
+      count: 1,
+      quality: null,
+    }));
+  }
+  return (aggregate && aggregate.buckets || []).map((bucket) => {
+    const stats = bucket.series && bucket.series[channelKey] || {};
+    return {
+      t: bucket.bucketStart,
+      value: stats.mean ?? null,
+      count: Number(stats.sampleCount || 0),
+      quality: bucket.coverageConfidence || null,
+    };
+  });
+}
+
 function displaySafeDeviceContext(device) {
   return {
     deviceType: device && (device.type_id || device.typeId),
@@ -107,10 +173,12 @@ function displaySafeDeviceContext(device) {
 
 function createAnalysis(deps) {
   const {
+    aggregateRows,
     dbAll,
     deriveCardsForZone,
     displayDeviceName,
     normalizeDeveui,
+    resolveAggregation,
     soilDepthCm,
     sourceDevicesForCard,
     sourceKeyForCsv,
@@ -163,9 +231,99 @@ function createAnalysis(deps) {
     return { generatedAt: new Date().toISOString(), channels, entriesById };
   }
 
+  async function resolveAnalysisSeries(db, options = {}) {
+    const ids = (Array.isArray(options.selectors) ? options.selectors : [])
+      .map((selector) => selector && selector.seriesId)
+      .filter(Boolean);
+    if (ids.length > MAX_SELECTED_SERIES) {
+      throw tooLarge('too many selected series', 'Select fewer series.');
+    }
+
+    const range = normalizeRange(options.range || options);
+    const aggregationInfo = resolveAggregation({
+      aggregation: options.aggregation,
+      from: range.from,
+      to: range.to,
+    });
+    const { entriesById } = await buildAnalysisCatalog(db, options);
+    const series = [];
+    const dropped = [];
+    const byDeveui = new Map();
+
+    for (const id of ids) {
+      const entry = entriesById.get(id);
+      if (!entry) {
+        dropped.push({ seriesId: id, reason: 'unknown' });
+        continue;
+      }
+      const meta = channelMeta(entry.channelKey);
+      if (!meta.edgeField) {
+        dropped.push({ seriesId: id, reason: 'unsupported' });
+        continue;
+      }
+      const key = entry.deveui;
+      if (!byDeveui.has(key)) byDeveui.set(key, []);
+      byDeveui.get(key).push({ entry, meta });
+    }
+
+    let rawRowsScanned = 0;
+    for (const [deveui, entries] of byDeveui) {
+      const fields = unique(entries.map(({ meta }) => meta.edgeField)).map(sqlIdent);
+      const remaining = MAX_RAW_ROWS - rawRowsScanned;
+      if (remaining <= 0) {
+        throw tooLarge('range too large', 'Narrow the date range or pick a coarser granularity.');
+      }
+      const probeRows = await dbAll(
+        db,
+        'SELECT 1 AS present FROM device_data WHERE deveui = ? AND recorded_at >= ? AND recorded_at < ? LIMIT ?',
+        [deveui, range.from, range.to, remaining + 1]
+      );
+      if (probeRows.length > remaining) {
+        throw tooLarge('range too large', 'Narrow the date range or pick a coarser granularity.');
+      }
+      rawRowsScanned += probeRows.length;
+      const rows = await dbAll(
+        db,
+        `SELECT deveui, recorded_at, ${fields.join(', ')} FROM device_data WHERE deveui = ? AND recorded_at >= ? AND recorded_at < ? ORDER BY recorded_at ASC`,
+        [deveui, range.from, range.to]
+      );
+      for (const { entry, meta } of entries) {
+        const aggregate = aggregateRows(rows, {
+          aggregation: options.aggregation,
+          aggregationRequested: aggregationInfo.requested,
+          channels: [{ id: entry.channelKey, field: meta.edgeField, unit: entry.unit }],
+          from: range.from,
+          to: range.to,
+        });
+        series.push({
+          seriesId: entry.seriesId,
+          resolved: {
+            hubEui: entry.hubEui,
+            zoneId: entry.zoneId,
+            cardType: entry.cardType,
+            sourceKey: entry.sourceKey,
+            channelKey: entry.channelKey,
+          },
+          label: entry.displayName,
+          unit: entry.unit,
+          points: aggToPoints(aggregate, entry.channelKey),
+          truncated: false,
+        });
+      }
+    }
+
+    return {
+      range,
+      aggregation: { requested: aggregationInfo.requested, applied: aggregationInfo.level },
+      series,
+      dropped,
+    };
+  }
+
   return {
     analysisSeriesId,
     buildAnalysisCatalog,
+    resolveAnalysisSeries,
   };
 }
 

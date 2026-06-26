@@ -25,6 +25,7 @@ const expectedExports = [
   'normalizeDeveui',
   'analysisSeriesId',
   'buildAnalysisCatalog',
+  'resolveAnalysisSeries',
   'deriveCardId',
   'deriveCardsForZone',
   'deriveGatewayCard',
@@ -176,6 +177,108 @@ test('buildAnalysisCatalog enumerates metadata-only per-source-device channels w
     assert.ok(vwc, 'has manifest-valid vwc channel');
     assert.strictEqual(vwc.availability, 'unsupported');
     assert.ok(!db.queries.some((query) => /\bFROM\s+device_data\b/i.test(query.sql)), 'catalog must not scan history rows');
+  } finally {
+    db.close();
+  }
+});
+
+test('resolveAnalysisSeries aggregates per-device points and drops unknown ids', async () => {
+  const db = await analysisFixtureDb();
+  try {
+    const cat = await helper.buildAnalysisCatalog(db, { deviceEui: 'EUI' });
+    const swt1 = cat.channels.find((entry) => entry.channelKey === 'swt_1');
+    const res = await helper.resolveAnalysisSeries(db, {
+      deviceEui: 'EUI',
+      selectors: [{ seriesId: swt1.seriesId }, { seriesId: 'deadbeefdeadbeef' }],
+      range: { from: '2026-06-01T00:00:00.000Z', to: '2026-06-02T00:00:00.000Z' },
+      aggregation: 'auto',
+    });
+    assert.strictEqual(res.series.length, 1);
+    assert.strictEqual(res.series[0].resolved.channelKey, 'swt_1');
+    assert.strictEqual(res.series[0].resolved.sourceKey, swt1.sourceKey);
+    assert.strictEqual(res.series[0].points.length, 3);
+    assert.deepStrictEqual(res.dropped, [{ seriesId: 'deadbeefdeadbeef', reason: 'unknown' }]);
+  } finally {
+    db.close();
+  }
+});
+
+test('resolveAnalysisSeries rejects over the selected-series cap', async () => {
+  const db = await analysisFixtureDb();
+  try {
+    const selectors = Array.from({ length: 26 }, (_, index) => ({ seriesId: `id${index}` }));
+    await assert.rejects(
+      () => helper.resolveAnalysisSeries(db, {
+        deviceEui: 'EUI',
+        selectors,
+        range: { from: '2026-06-01T00:00:00.000Z', to: '2026-06-02T00:00:00.000Z' },
+        aggregation: 'auto',
+      }),
+      (error) => {
+        assert.strictEqual(error.statusCode, 413);
+        assert.match(String(error.suggestion), /fewer series/i);
+        return true;
+      }
+    );
+  } finally {
+    db.close();
+  }
+});
+
+test('resolveAnalysisSeries rejects ranges over four hundred days', async () => {
+  const db = await analysisFixtureDb();
+  try {
+    const cat = await helper.buildAnalysisCatalog(db, { deviceEui: 'EUI' });
+    const swt1 = cat.channels.find((entry) => entry.channelKey === 'swt_1');
+    await assert.rejects(
+      () => helper.resolveAnalysisSeries(db, {
+        deviceEui: 'EUI',
+        selectors: [{ seriesId: swt1.seriesId }],
+        range: { from: '2025-01-01T00:00:00.000Z', to: '2026-06-15T00:00:00.000Z' },
+        aggregation: 'auto',
+      }),
+      (error) => {
+        assert.strictEqual(error.statusCode, 413);
+        assert.match(String(error.suggestion), /range/i);
+        return true;
+      }
+    );
+  } finally {
+    db.close();
+  }
+});
+
+test('resolveAnalysisSeries rejects over the raw-row scan cap per request', async () => {
+  const db = await analysisFixtureDb();
+  try {
+    db.runSql(`
+      WITH RECURSIVE seq(n) AS (
+        VALUES(0)
+        UNION ALL
+        SELECT n + 1 FROM seq WHERE n < 30000
+      )
+      INSERT INTO device_data(deveui, recorded_at, swt_1)
+      SELECT
+        'AA00000000000001',
+        strftime('%Y-%m-%dT%H:%M:%fZ', '2026-06-01T00:00:00Z', '+' || n || ' seconds'),
+        10
+      FROM seq;
+    `);
+    const cat = await helper.buildAnalysisCatalog(db, { deviceEui: 'EUI' });
+    const swt1 = cat.channels.find((entry) => entry.channelKey === 'swt_1');
+    await assert.rejects(
+      () => helper.resolveAnalysisSeries(db, {
+        deviceEui: 'EUI',
+        selectors: [{ seriesId: swt1.seriesId }],
+        range: { from: '2026-06-01T00:00:00.000Z', to: '2026-06-02T00:00:00.000Z' },
+        aggregation: 'auto',
+      }),
+      (error) => {
+        assert.strictEqual(error.statusCode, 413);
+        assert.match(String(error.suggestion), /range|granularity/i);
+        return true;
+      }
+    );
   } finally {
     db.close();
   }

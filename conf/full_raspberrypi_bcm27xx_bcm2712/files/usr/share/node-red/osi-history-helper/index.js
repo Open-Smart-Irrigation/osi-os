@@ -1975,10 +1975,12 @@ function buildAdvancedMetadataPlaceholder(input = {}) {
 }
 
 const analysis = createAnalysis({
+  aggregateRows,
   dbAll,
   deriveCardsForZone,
   displayDeviceName,
   normalizeDeveui,
+  resolveAggregation,
   soilDepthCm,
   sourceDevicesForCard,
   sourceKeyForCsv,
@@ -1988,6 +1990,7 @@ module.exports = {
   normalizeDeveui,
   analysisSeriesId: analysis.analysisSeriesId,
   buildAnalysisCatalog: analysis.buildAnalysisCatalog,
+  resolveAnalysisSeries: analysis.resolveAnalysisSeries,
   deriveCardId,
   deriveCardsForZone,
   deriveGatewayCard,
