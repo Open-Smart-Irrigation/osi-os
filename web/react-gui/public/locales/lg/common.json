@@ -23,8 +23,11 @@
     },
     "aggregation": {
       "label": "Okugatta data",
+      "raw": "Nga bwe kiri",
+      "fifteenMinute": "Ddakiika 15",
       "hourly": "Buli saawa",
-      "daily": "Buli lunaku"
+      "daily": "Buli lunaku",
+      "weekly": "Buli wiiki"
     },
     "preset": {
       "metricLabel": "Ekigero mu zone zonna"

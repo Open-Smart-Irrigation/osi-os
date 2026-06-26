@@ -23,8 +23,11 @@
     },
     "aggregation": {
       "label": "Aggregazione",
+      "raw": "Grezza",
+      "fifteenMinute": "15 minuti",
       "hourly": "Oraria",
-      "daily": "Giornaliera"
+      "daily": "Giornaliera",
+      "weekly": "Settimanale"
     },
     "preset": {
       "metricLabel": "Metrica tra zone"

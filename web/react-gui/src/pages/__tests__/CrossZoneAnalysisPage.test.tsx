@@ -41,6 +41,7 @@ const getSeries = vi.fn();
 const STORAGE_KEY = 'osi.analysis.workspace.v1';
 const ambientTemperatureSeriesId = '52f63dffa76919e6';
 const legacyTemperatureSeriesId = 'aa7ae37051ff2a50';
+let appliedAggregation = 'hourly';
 let catalogState: {
   catalog: AnalysisCatalogResponse | null;
   isLoading: boolean;
@@ -62,7 +63,7 @@ vi.mock('../../analysis/useAnalysisSeries', () => ({
           to: '2026-06-07T23:59:59Z',
           timezone: 'UTC',
         },
-        aggregation: { requested: 'auto', applied: 'hourly', bucketSizeSeconds: 3600 },
+        aggregation: { requested: 'auto', applied: appliedAggregation, bucketSizeSeconds: 3600 },
         grid: { stepSeconds: 3600, from: '2026-06-01T00:00:00Z', to: '2026-06-07T23:59:59Z', bucketCount: 1 },
         series: [],
         dropped: [],
@@ -119,7 +120,13 @@ vi.mock('../../analysis/useAnalysisViews', () => ({
 
 import { CrossZoneAnalysisPage } from '../CrossZoneAnalysisPage';
 
-afterEach(() => { cleanup(); vi.clearAllMocks(); localStorage.clear(); catalogState = loadedCatalogState(); });
+afterEach(() => {
+  cleanup();
+  vi.clearAllMocks();
+  localStorage.clear();
+  appliedAggregation = 'hourly';
+  catalogState = loadedCatalogState();
+});
 
 describe('CrossZoneAnalysisPage', () => {
   it('does not request legacy series ids before the catalog is available and migrates once it loads', () => {
@@ -188,6 +195,39 @@ describe('CrossZoneAnalysisPage', () => {
     fireEvent.click(screen.getByText('SWT 1'));
     expect(screen.getByText('analysis.aggregation.label')).toBeInTheDocument();
     expect(screen.getByText('analysis.aggregation.hourly')).toBeInTheDocument();
+  });
+
+  it('labels the backend 15m aggregation level without falling back to hourly', () => {
+    catalogState = loadedCatalogState();
+    appliedAggregation = '15m';
+    render(<CrossZoneAnalysisPage />, { wrapper: MemoryRouter });
+
+    fireEvent.click(screen.getByText('SWT 1'));
+
+    expect(screen.getByText('analysis.aggregation.fifteenMinute')).toBeInTheDocument();
+    expect(screen.queryByText('analysis.aggregation.hourly')).not.toBeInTheDocument();
+  });
+
+  it('labels the backend weekly aggregation level without falling back to hourly', () => {
+    catalogState = loadedCatalogState();
+    appliedAggregation = 'weekly';
+    render(<CrossZoneAnalysisPage />, { wrapper: MemoryRouter });
+
+    fireEvent.click(screen.getByText('SWT 1'));
+
+    expect(screen.getByText('analysis.aggregation.weekly')).toBeInTheDocument();
+    expect(screen.queryByText('analysis.aggregation.hourly')).not.toBeInTheDocument();
+  });
+
+  it('renders unknown backend aggregation values as their raw label', () => {
+    catalogState = loadedCatalogState();
+    appliedAggregation = '10m';
+    render(<CrossZoneAnalysisPage />, { wrapper: MemoryRouter });
+
+    fireEvent.click(screen.getByText('SWT 1'));
+
+    expect(screen.getByText('10m')).toBeInTheDocument();
+    expect(screen.queryByText('analysis.aggregation.hourly')).not.toBeInTheDocument();
   });
 
   it('passes the current username to the export menu', () => {

@@ -125,6 +125,22 @@ export function CrossZoneAnalysisPage() {
       .map((channel) => ({ seriesId: channel.seriesId }));
     updateWorkspace((currentWorkspace) => ({ ...currentWorkspace, selectors }));
   };
+  const aggregationLabel = (applied: string) => {
+    switch (applied) {
+      case 'raw':
+        return t('analysis.aggregation.raw');
+      case '15m':
+        return t('analysis.aggregation.fifteenMinute');
+      case 'hourly':
+        return t('analysis.aggregation.hourly');
+      case 'daily':
+        return t('analysis.aggregation.daily');
+      case 'weekly':
+        return t('analysis.aggregation.weekly');
+      default:
+        return applied;
+    }
+  };
 
   return (
     <div className="analysis-page flex h-screen flex-col bg-slate-100 text-slate-950">
@@ -185,9 +201,7 @@ export function CrossZoneAnalysisPage() {
                 <div className="inline-flex w-fit items-center gap-1.5 rounded bg-slate-100 px-2 py-1 text-xs text-slate-600">
                   <span className="font-medium">{t('analysis.aggregation.label')}</span>
                   <span>
-                    {t(data.aggregation.applied === 'daily'
-                      ? 'analysis.aggregation.daily'
-                      : 'analysis.aggregation.hourly')}
+                    {aggregationLabel(data.aggregation.applied)}
                   </span>
                 </div>
               ) : null}

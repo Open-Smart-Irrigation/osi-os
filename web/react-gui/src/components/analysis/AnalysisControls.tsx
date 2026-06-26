@@ -63,7 +63,7 @@ export function AnalysisControls({
   const customFromMs = Date.parse(customFrom);
   const customToMs = Date.parse(customTo);
   const hasCustomValues = customFrom.length > 0 && customTo.length > 0;
-  const customValid = hasCustomValues && Number.isFinite(customFromMs) && Number.isFinite(customToMs) && customFromMs <= customToMs;
+  const customValid = hasCustomValues && Number.isFinite(customFromMs) && Number.isFinite(customToMs) && customFromMs < customToMs;
   const customInvalid = hasCustomValues && !customValid;
   const showCustom = customOpen || rangeLabel === 'custom';
   const segBtn = (active: boolean) => [

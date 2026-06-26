@@ -23,8 +23,11 @@
     },
     "aggregation": {
       "label": "Agrégation",
+      "raw": "Brute",
+      "fifteenMinute": "15 minutes",
       "hourly": "Horaire",
-      "daily": "Quotidienne"
+      "daily": "Quotidienne",
+      "weekly": "Hebdomadaire"
     },
     "preset": {
       "metricLabel": "Métrique entre zones"

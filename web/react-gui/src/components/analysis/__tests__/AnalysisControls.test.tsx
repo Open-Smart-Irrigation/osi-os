@@ -121,4 +121,16 @@ describe('AnalysisControls', () => {
     expect(screen.getByRole('button', { name: 'analysis.range.apply' })).toBeDisabled();
     expect(onRangeChange).not.toHaveBeenCalled();
   });
+
+  it('blocks an equal start and end custom range', () => {
+    const onRangeChange = vi.fn();
+    renderControls({ onRangeChange });
+    fireEvent.click(screen.getByRole('button', { name: 'analysis.range.custom' }));
+    fireEvent.change(screen.getByLabelText('analysis.range.from'), { target: { value: '2026-06-02T00:00' } });
+    fireEvent.change(screen.getByLabelText('analysis.range.to'), { target: { value: '2026-06-02T00:00' } });
+    expect(screen.getByText('analysis.range.invalid')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'analysis.range.apply' })).toBeDisabled();
+    fireEvent.click(screen.getByRole('button', { name: 'analysis.range.apply' }));
+    expect(onRangeChange).not.toHaveBeenCalled();
+  });
 });

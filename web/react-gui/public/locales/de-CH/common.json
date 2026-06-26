@@ -23,8 +23,11 @@
     },
     "aggregation": {
       "label": "Aggregation",
+      "raw": "Rohdaten",
+      "fifteenMinute": "15 Minuten",
       "hourly": "Stündlich",
-      "daily": "Täglich"
+      "daily": "Täglich",
+      "weekly": "Wöchentlich"
     },
     "preset": {
       "metricLabel": "Metrik über Zonen"

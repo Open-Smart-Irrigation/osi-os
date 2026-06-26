@@ -14,6 +14,23 @@ function series(zoneId: number, channelKey: string, values: (number | null)[]): 
   };
 }
 
+function timestampedSeries(zoneId: number, channelKey: string, values: Array<[string, number | null]>): AnalysisSeries {
+  return {
+    seriesId: `${zoneId}-${channelKey}`,
+    resolved: { hubEui: null, zoneId, cardType: 'soil', sourceKey: 'root-zone', channelKey },
+    label: `Zone ${zoneId} ${channelKey}`,
+    unit: 'x',
+    coveragePct: 100,
+    points: values.map(([hour, value]) => ({
+      t: `2026-06-18T${hour}:00:00Z`,
+      value,
+      count: value === null ? 0 : 1,
+      quality: value === null ? 'gap' : 'ok',
+    })),
+    truncated: false,
+  };
+}
+
 function ramp(n: number, f: (i: number) => number): (number | null)[] {
   return Array.from({ length: n }, (_, i) => f(i));
 }
@@ -57,6 +74,19 @@ describe('zonePairs', () => {
     expect(zonePairs(series, 'dendro_stem_change_um', 'ext_temperature_c', zoneNames)[0].label).toBe('North Block');
     // no catalog name → fallback
     expect(zonePairs(series, 'dendro_stem_change_um', 'ext_temperature_c')[0].label).toBe('Zone 9');
+  });
+
+  it('pairs sparse series by matching timestamps instead of array index', () => {
+    const x = timestampedSeries(1, 'soil', [['00', 1], ['01', 2], ['02', 3]]);
+    const y = timestampedSeries(1, 'dendro', [['01', 20], ['02', 30], ['03', 40]]);
+
+    expect(zonePairs([x, y], 'soil', 'dendro')).toEqual([
+      { zoneId: 1, label: 'Zone 1', points: [[2, 20], [3, 30]] },
+    ]);
+
+    const result = computeCorrelation([x, y], 'soil', 'dendro', { minSamples: 1 });
+    expect(result.groups[0].n).toBe(2);
+    expect(result.groups[0].droppedPairs).toBe(2);
   });
 });
 

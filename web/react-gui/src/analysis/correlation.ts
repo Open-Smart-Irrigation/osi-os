@@ -57,19 +57,28 @@ function pearson(pairs: Pair[]): number | null {
   return cov / denom;
 }
 
-/** Pairwise deletion over index-aligned buckets (series share the canonical grid). */
+/** Pairwise deletion over exact timestamp intersections. */
 function pairsFor(xSeries: AnalysisSeries, ySeries: AnalysisSeries): { pairs: Pair[]; dropped: number } {
-  const len = Math.min(xSeries.points.length, ySeries.points.length);
+  const yByTimestamp = new Map(ySeries.points.map((point) => [point.t, point.value]));
+  const xTimestamps = new Set<string>();
   const pairs: Pair[] = [];
   let dropped = 0;
-  for (let i = 0; i < len; i++) {
-    const x = xSeries.points[i].value;
-    const y = ySeries.points[i].value;
-    if (x === null || y === null) {
+  for (const point of xSeries.points) {
+    xTimestamps.add(point.t);
+    if (!yByTimestamp.has(point.t)) {
+      dropped += 1;
+      continue;
+    }
+    const x = point.value;
+    const y = yByTimestamp.get(point.t);
+    if (x === null || y === null || y === undefined) {
       dropped += 1;
       continue;
     }
     pairs.push({ x, y });
+  }
+  for (const point of ySeries.points) {
+    if (!xTimestamps.has(point.t)) dropped += 1;
   }
   return { pairs, dropped };
 }
