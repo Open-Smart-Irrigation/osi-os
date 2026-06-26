@@ -18,7 +18,7 @@ Adding a new LoRaWAN device type to OSI OS today requires coordinated edits acro
 7. `scripts/repair-pi-schema.js` — register a table-rebuild step if the new type changes the `devices.type_id` CHECK list (SQLite cannot alter constraints in place).
 8. `scripts/verify-*.js` — extend the relevant verifiers.
 
-The current device catalog (KIWI_SENSOR, STREGA_VALVE, DRAGINO_LSN50, TEKTELIC_CLOVER, SENSECAP_S2120, plus the Chameleon and MClimate work in flight) was added this way. The result is correct but every addition risks forgetting one of the eight steps, and the contract is implicit — readers must reverse-engineer it from existing additions.
+The current device catalog (KIWI_SENSOR, STREGA_VALVE, DRAGINO_LSN50, TEKTELIC_CLOVER, SENSECAP_S2120, AQUASCOPE_LORAIN, plus the Chameleon calibration surface and MClimate work in flight) was added this way. The result is correct but every addition risks forgetting one of the eight steps, and the contract is implicit — readers must reverse-engineer it from existing additions.
 
 The issue body of `#8` asks for a "plugin system" to make this self-contained.
 

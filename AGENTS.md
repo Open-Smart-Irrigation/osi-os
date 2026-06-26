@@ -55,6 +55,8 @@ Broker: `wss://server.opensmartirrigation.org/mqtt`
 | `devices/{eui}/status` | Valve state | On change |
 | `devices/{eui}/command_ack` | Command result | Per command |
 
+**Fan telemetry/control:** gateway stats expose `fan_available`, `fan_mode`, `fan_value`, and `fan_max`; cloud fan control arrives as `SET_FAN`. The current Node-RED fan path uses raw PWM sysfs (`/sys/class/pwm/pwmchip2/pwm3`). If the Pi 5 kernel `pwm-fan` driver is enabled through `dtparam=cooling_fan=okay` and `kmod-hwmon-pwmfan`, switch fan detection/control to the `pwmfan` hwmon device (`/sys/class/hwmon/*/pwm1`, `pwm1_enable`) because the driver owns the raw PWM channel and direct writes can fail with `EBUSY`.
+
 ---
 
 ## Sync model
@@ -102,7 +104,7 @@ Broker: `wss://server.opensmartirrigation.org/mqtt`
 | Node-RED settings | `feeds/chirpstack-openwrt-feed/apps/node-red/files/settings.js` |
 | Sync verifier | `scripts/verify-sync-flow.js` |
 
-Full Raspberry Pi image workflow: [docs/build/rpi5-full-osi-image.md](docs/build/rpi5-full-osi-image.md). Current Pi 5 and Pi 4/400/3/2 release images use `CONFIG_TARGET_ROOTFS_PARTSIZE=14336` so the writable overlay fits 16GB-class SD cards. The workflow assumes concentratord is manually configured/enabled after flashing. Chameleon calibration rows may be absent from the OSI OS seed DB because the authoritative calibration source and admin token live on OSI Server; image completeness is gated on schema, helper, GUI, refresh endpoint, sync worker, and runtime calibration lookup support.
+Full Raspberry Pi image workflow: [docs/build/rpi5-full-osi-image.md](docs/build/rpi5-full-osi-image.md). Current Pi 5 and Pi 4/400/3/2 release images use `CONFIG_TARGET_ROOTFS_PARTSIZE=14336` so the writable overlay fits 16GB-class SD cards. Path B images also ship a one-shot rootfs grow path (`90_osi_rootfs_grow` + `osi-rootfs-resize`) that uses `parted resizepart`, reboots, then retries `resize2fs` until the mounted filesystem grows successfully. The workflow assumes concentratord is manually configured/enabled after flashing. Chameleon calibration rows may be absent from the OSI OS seed DB because the authoritative calibration source and admin token live on OSI Server; image completeness is gated on schema, helper, GUI, refresh endpoint, sync worker, and runtime calibration lookup support.
 
 **Profile parity invariant:** `bcm2712 / DEVICE_rpi-5` is the canonical source-of-truth for all OSI runtime payload files (flows, codecs, DB, bootstrap, helpers). `bcm2709 / DEVICE_rpi-2` mirrors that payload byte-for-byte; `scripts/verify-profile-parity.js` enforces this and is chained from `scripts/verify-sync-flow.js`. Any change to a file under `conf/full_raspberrypi_bcm27xx_bcm2712/files/` must also be propagated to `conf/full_raspberrypi_bcm27xx_bcm2709/files/` — the parity check will fail CI otherwise.
 
@@ -116,9 +118,16 @@ Full Raspberry Pi image workflow: [docs/build/rpi5-full-osi-image.md](docs/build
 | TEKTELIC_CLOVER | Sensors | (same as Kiwi) | VWC, temp, humidity |
 | DRAGINO_LSN50 | Sensors | LSN50 | Ext temp, ADC (dendrometer, rain, flow) |
 | SENSECAP_S2120 | Sensors | S2120 | Wind, rain, pressure, UV, temp/humidity |
+| AQUASCOPE_LORAIN | Sensors | LoRain | Interval rain, ambient temp, battery |
 | STREGA_VALVE | Actuators | STREGA | Valve state, battery |
 
 **SWT canonicalization:** `device_data.swt_1`, `swt_2`, `swt_3` (kPa) are the canonical channels. Legacy `swt_wm1` / `swt_wm2` are read-only aliases for old rows.
+
+**Aqua-Scope LoRain:** `AQUASCOPE_LORAIN` is the Aqua-Scope LoRain / `RANLWE01` rain gauge, provisioned into ChirpStack `Sensors` as LoRaWAN 1.0.3 OTAA Class A. Public onboarding uses FPort `10`; the legacy firmware decoder uses FPort `2`, so `aquascope_lorain_decoder.js` accepts both. JoinEUI/AppEUI is `4943485448592021`; AppKey is retrieved from Aqua-Scope with DevEUI + email and must not be stored in this repo. Payload command `0x06 0x81` reports raw 0.5 mm steps: the decoder keeps vendor `rainlevel` as raw steps and exposes normalized `rain_mm_delta` in millimeters. LoRain rainfall is interval rainfall, not cumulative; duplicate or out-of-order timestamps must not aggregate twice. Assigned LoRain gauges update `zone_daily_environment` with `rain_source='aquascope_lorain'`.
+
+**STREGA timed irrigation:** user-facing opens are `OPEN_FOR_DURATION`; normal close is the valve's own timed close, not a bare `CLOSE` command. Operator cancellation uses `POST /api/v1/valves/:deveui/cancel`, flushes the ChirpStack device queue, and marks the latest active `valve_actuation_expectations` row `CANCELLED`. Actuation expectations store `commanded_at`, duration, `expected_close_at`, observed open/close timestamps, `reconciliation_state`, and optional `estimated_gross_liters`. Active states are `PENDING_OBSERVATION` and `OBSERVED_RUNNING`. `zone_irrigation_calibration` stores per-zone flow-rate measurements used for estimates; if it is absent on an older Pi, actuation rows still insert with null estimated volume. `zone_daily_environment.flow_liters` remains measured flow-meter data only; estimated valve-time volume stays separate. The reconciliation monitor reads STREGA state from `devices.current_state` and recent uplink time from `device_data.recorded_at`.
+
+**Agroscope dendrometer controller draft:** [docs/architecture/agroscope-dendrometer-controller.md](docs/architecture/agroscope-dendrometer-controller.md) captures the future opt-in `controller_mode='dendrometer'` architecture. It is recommendation-only, edge-authoritative, and not current shipped behavior.
 
 **MQTT IN topic rule:** all Node-RED MQTT IN nodes must subscribe to `application/+/device/+/event/up`. ChirpStack generates per-installation application UUIDs at bootstrap; hardcoded UUIDs break silently. Device-type discrimination is done downstream via `CHIRPSTACK_PROFILE_*` env vars and `deviceProfileName` fallback. Enforced by `scripts/check-mqtt-topics.sh`.
 
@@ -129,6 +138,7 @@ Full Raspberry Pi image workflow: [docs/build/rpi5-full-osi-image.md](docs/build
 ```bash
 node scripts/verify-sync-flow.js              # sync implementation
 node scripts/verify-strega-gen1.js            # STREGA Gen1 decoder
+node scripts/verify-lorain-codec.js           # Aqua-Scope LoRain decoder
 node scripts/verify-communication-contract.js # contract preflight
 scripts/check-mqtt-topics.sh                  # MQTT IN topic compliance
 

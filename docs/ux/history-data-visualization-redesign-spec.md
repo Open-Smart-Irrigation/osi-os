@@ -4,7 +4,7 @@ Status: draft for implementation planning
 Scope: OSI OS edge dashboard and OSI Server / OSI Cloud dashboard
 Last reviewed against code: 2026-05-31
 Companion gap analysis: [history-data-visualization-gap-analysis.md](history-data-visualization-gap-analysis.md)
-Implementation plan: [2026-05-31-history-data-visualization-implementation.md](../superpowers/plans/2026-05-31-history-data-visualization-implementation.md)
+Implementation trace: [history-data-visualization-implementation-trace.md](history-data-visualization-implementation-trace.md)
 
 ## 1. Objective
 
