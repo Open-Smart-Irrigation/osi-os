@@ -26,6 +26,8 @@ const expectedExports = [
   'analysisSeriesId',
   'buildAnalysisCatalog',
   'resolveAnalysisSeries',
+  'listAnalysisViews',
+  'saveAnalysisView',
   'deriveCardId',
   'deriveCardsForZone',
   'deriveGatewayCard',
@@ -101,6 +103,19 @@ function createCliSqliteDb() {
     runSql(sql) {
       execFileSync('sqlite3', [dbPath], { input: sql });
     },
+    run(sql, params, cb) {
+      db.lastQuery = { sql, params: Array.isArray(params) ? params.slice() : [] };
+      db.queries.push(db.lastQuery);
+      let index = 0;
+      const rendered = sql.replace(/\?/g, () => sqliteEscape(db.lastQuery.params[index++]));
+      try {
+        execFileSync('sqlite3', [dbPath], { input: rendered });
+        if (typeof cb === 'function') cb.call({}, null);
+      } catch (error) {
+        if (typeof cb === 'function') cb(error);
+        else throw error;
+      }
+    },
     all(sql, params, cb) {
       db.lastQuery = { sql, params: Array.isArray(params) ? params.slice() : [] };
       db.queries.push(db.lastQuery);
@@ -148,6 +163,10 @@ test('exports the history helper contract', () => {
 test('exports the zone CSV column contracts', () => {
   assert.deepStrictEqual(helper.RAW_CSV_COLUMNS, TIDY_CSV_COLUMNS);
   assert.deepStrictEqual(helper.AGG_CSV_COLUMNS, TIDY_CSV_COLUMNS);
+});
+
+test('exports the analysis views schema contract', () => {
+  assert.match(helper.ANALYSIS_VIEWS_SCHEMA, /CREATE TABLE IF NOT EXISTS analysis_views/);
 });
 
 test('analysisSeriesId is a stable 16-hex hash of the tuple', () => {
@@ -282,6 +301,56 @@ test('resolveAnalysisSeries rejects over the raw-row scan cap per request', asyn
   } finally {
     db.close();
   }
+});
+
+test('analysis_views round-trips per user and drops stale series ids on read', async () => {
+  const db = await analysisFixtureDb();
+  try {
+    db.runSql(helper.ANALYSIS_VIEWS_SCHEMA);
+    const cat = await helper.buildAnalysisCatalog(db, { deviceEui: 'EUI' });
+    const live = cat.channels[0].seriesId;
+    await helper.saveAnalysisView(db, { userId: 1, ownerUserUuid: 'u-1' }, {
+      name: 'My view',
+      selectors: [{ seriesId: live }, { seriesId: 'stalexxxxxxxxxx0' }],
+      schemaVersion: 1,
+    });
+    const views = await helper.listAnalysisViews(db, { userId: 1, deviceEui: 'EUI' });
+    assert.strictEqual(views.length, 1);
+    assert.deepStrictEqual(views[0].selectors.map((selector) => selector.seriesId), [live]);
+    assert.deepStrictEqual(views[0].droppedSeriesIds, ['stalexxxxxxxxxx0']);
+  } finally {
+    db.close();
+  }
+});
+
+test('saveAnalysisView rejects an empty or oversized name', async () => {
+  const db = await analysisFixtureDb();
+  try {
+    db.runSql(helper.ANALYSIS_VIEWS_SCHEMA);
+    await assert.rejects(
+      () => helper.saveAnalysisView(db, { userId: 1 }, { name: '', selectors: [] }),
+      (error) => {
+        assert.strictEqual(error.statusCode, 400);
+        return true;
+      }
+    );
+    await assert.rejects(
+      () => helper.saveAnalysisView(db, { userId: 1 }, '{bad-json'),
+      (error) => {
+        assert.strictEqual(error.statusCode, 400);
+        return true;
+      }
+    );
+  } finally {
+    db.close();
+  }
+});
+
+test('deploy script repairs analysis_views without reseeding the live database', () => {
+  const deploy = fs.readFileSync(path.join(repoRoot, 'deploy.sh'), 'utf8');
+  assert.match(deploy, /CREATE TABLE IF NOT EXISTS analysis_views/);
+  assert.match(deploy, /Live analysis views schema repair/);
+  assert.match(deploy, /osi-history-helper\/analysis\.js/);
 });
 
 test('toCsv neutralizes spreadsheet formulas in text cells', () => {

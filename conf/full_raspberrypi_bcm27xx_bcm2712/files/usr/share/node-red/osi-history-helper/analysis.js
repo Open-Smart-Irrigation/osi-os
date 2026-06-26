@@ -33,6 +33,19 @@ const ANALYSIS_EDGE_FIELDS = new Set(CHANNELS.map((channel) => channel.edgeField
 const MAX_SELECTED_SERIES = 25;
 const MAX_RAW_ROWS = 30000;
 const MAX_RANGE_DAYS = 400;
+const MAX_VIEW_NAME_LENGTH = 120;
+
+const ANALYSIS_VIEWS_SCHEMA = `CREATE TABLE IF NOT EXISTS analysis_views (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL,
+  owner_user_uuid TEXT,
+  name TEXT NOT NULL,
+  view_json TEXT NOT NULL,
+  is_default INTEGER NOT NULL DEFAULT 0 CHECK (is_default IN (0,1)),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+)`;
 
 function analysisSeriesId(zoneId, cardType, sourceKey, channelKey) {
   return crypto
@@ -121,6 +134,31 @@ function tooLarge(message, suggestion) {
   return error;
 }
 
+function badRequest(message) {
+  const error = new Error(message);
+  error.statusCode = 400;
+  return error;
+}
+
+function dbRun(db, sql, params) {
+  return new Promise((resolve, reject) => {
+    if (!db || typeof db.run !== 'function') return reject(new Error('analysis views require db.run'));
+    try {
+      if (db.run.length >= 3) {
+        db.run(sql, params, function(error) {
+          error ? reject(error) : resolve(this || {});
+        });
+        return undefined;
+      }
+      const result = db.run(sql, params);
+      if (result && typeof result.then === 'function') return result.then(resolve, reject);
+      return resolve(result || {});
+    } catch (error) {
+      return reject(error);
+    }
+  });
+}
+
 function normalizeRange(range = {}) {
   const from = range.from || range.start || range.startAt;
   const to = range.to || range.end || range.endAt;
@@ -160,6 +198,55 @@ function aggToPoints(aggregate, channelKey) {
       quality: bucket.coverageConfidence || null,
     };
   });
+}
+
+function userIdFor(input = {}) {
+  const userId = Number(input.userId ?? input.user_id);
+  if (!Number.isInteger(userId) || userId <= 0) throw badRequest('userId is required');
+  return userId;
+}
+
+function normalizeViewPayload(view = {}) {
+  let parsed;
+  try {
+    parsed = typeof view === 'string' ? JSON.parse(view) : { ...(view || {}) };
+  } catch (error) {
+    throw badRequest('view payload must be valid JSON');
+  }
+  const name = String(parsed.name || '').trim();
+  if (!name || name.length > MAX_VIEW_NAME_LENGTH) throw badRequest('view name is required and must be 120 characters or fewer');
+  const selectors = Array.isArray(parsed.selectors) ? parsed.selectors : [];
+  const normalizedSelectors = [];
+  for (const selector of selectors) {
+    const seriesId = String(selector && selector.seriesId || '').trim();
+    if (!seriesId) throw badRequest('view selectors require seriesId');
+    normalizedSelectors.push({ ...selector, seriesId });
+  }
+  return {
+    ...parsed,
+    name,
+    selectors: normalizedSelectors,
+    schemaVersion: parsed.schemaVersion || 1,
+  };
+}
+
+function parseViewRow(row) {
+  let parsed;
+  try {
+    parsed = JSON.parse(row.view_json);
+  } catch (error) {
+    parsed = { schemaVersion: 1, name: row.name, selectors: [] };
+  }
+  return {
+    ...parsed,
+    id: row.id,
+    userId: row.user_id,
+    ownerUserUuid: row.owner_user_uuid || null,
+    name: row.name,
+    isDefault: Number(row.is_default || 0) === 1,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
 }
 
 function displaySafeDeviceContext(device) {
@@ -320,14 +407,72 @@ function createAnalysis(deps) {
     };
   }
 
+  async function listAnalysisViews(db, user = {}) {
+    const userId = userIdFor(user);
+    const rows = await dbAll(
+      db,
+      'SELECT * FROM analysis_views WHERE user_id = ? ORDER BY updated_at DESC, id DESC',
+      [userId]
+    );
+    const { entriesById } = await buildAnalysisCatalog(db, user);
+    return rows.map((row) => {
+      const view = parseViewRow(row);
+      const selectors = Array.isArray(view.selectors) ? view.selectors : [];
+      const kept = [];
+      const droppedSeriesIds = [];
+      for (const selector of selectors) {
+        const seriesId = String(selector && selector.seriesId || '').trim();
+        if (seriesId && entriesById.has(seriesId)) kept.push({ ...selector, seriesId });
+        else if (seriesId) droppedSeriesIds.push(seriesId);
+      }
+      return { ...view, selectors: kept, droppedSeriesIds };
+    });
+  }
+
+  async function saveAnalysisView(db, user = {}, view = {}) {
+    const userId = userIdFor(user);
+    const ownerUserUuid = String(user.ownerUserUuid || user.owner_user_uuid || '').trim() || null;
+    const payload = normalizeViewPayload(view);
+    const isDefault = payload.isDefault || payload.is_default ? 1 : 0;
+    const viewJson = JSON.stringify(payload);
+    const id = Number(payload.id);
+
+    if (Number.isInteger(id) && id > 0) {
+      await dbRun(
+        db,
+        'UPDATE analysis_views SET owner_user_uuid = ?, name = ?, view_json = ?, is_default = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND user_id = ?',
+        [ownerUserUuid, payload.name, viewJson, isDefault, id, userId]
+      );
+      const rows = await dbAll(db, 'SELECT * FROM analysis_views WHERE id = ? AND user_id = ?', [id, userId]);
+      if (!rows.length) {
+        const error = new Error('analysis view not found');
+        error.statusCode = 404;
+        throw error;
+      }
+      return parseViewRow(rows[0]);
+    }
+
+    await dbRun(
+      db,
+      'INSERT INTO analysis_views(user_id, owner_user_uuid, name, view_json, is_default) VALUES (?, ?, ?, ?, ?)',
+      [userId, ownerUserUuid, payload.name, viewJson, isDefault]
+    );
+    const rows = await dbAll(db, 'SELECT * FROM analysis_views WHERE user_id = ? ORDER BY id DESC LIMIT 1', [userId]);
+    return parseViewRow(rows[0]);
+  }
+
   return {
+    ANALYSIS_VIEWS_SCHEMA,
     analysisSeriesId,
     buildAnalysisCatalog,
+    listAnalysisViews,
     resolveAnalysisSeries,
+    saveAnalysisView,
   };
 }
 
 module.exports = {
+  ANALYSIS_VIEWS_SCHEMA,
   analysisSeriesId,
   createAnalysis,
 };

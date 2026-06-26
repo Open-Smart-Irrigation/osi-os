@@ -1988,9 +1988,12 @@ const analysis = createAnalysis({
 
 module.exports = {
   normalizeDeveui,
+  ANALYSIS_VIEWS_SCHEMA: analysis.ANALYSIS_VIEWS_SCHEMA,
   analysisSeriesId: analysis.analysisSeriesId,
   buildAnalysisCatalog: analysis.buildAnalysisCatalog,
+  listAnalysisViews: analysis.listAnalysisViews,
   resolveAnalysisSeries: analysis.resolveAnalysisSeries,
+  saveAnalysisView: analysis.saveAnalysisView,
   deriveCardId,
   deriveCardsForZone,
   deriveGatewayCard,
