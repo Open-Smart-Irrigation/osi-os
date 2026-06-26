@@ -1,6 +1,7 @@
 'use strict';
 
 const crypto = require('crypto');
+const { createAnalysis } = require('./analysis');
 
 const DEFAULT_SOURCE_KEYS = {
   soil: 'root-zone',
@@ -1973,8 +1974,20 @@ function buildAdvancedMetadataPlaceholder(input = {}) {
   };
 }
 
+const analysis = createAnalysis({
+  dbAll,
+  deriveCardsForZone,
+  displayDeviceName,
+  normalizeDeveui,
+  soilDepthCm,
+  sourceDevicesForCard,
+  sourceKeyForCsv,
+});
+
 module.exports = {
   normalizeDeveui,
+  analysisSeriesId: analysis.analysisSeriesId,
+  buildAnalysisCatalog: analysis.buildAnalysisCatalog,
   deriveCardId,
   deriveCardsForZone,
   deriveGatewayCard,

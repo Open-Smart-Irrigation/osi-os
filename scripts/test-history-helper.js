@@ -23,6 +23,8 @@ const helper = require(helperPath);
 
 const expectedExports = [
   'normalizeDeveui',
+  'analysisSeriesId',
+  'buildAnalysisCatalog',
   'deriveCardId',
   'deriveCardsForZone',
   'deriveGatewayCard',
@@ -94,11 +96,13 @@ function createCliSqliteDb() {
   const db = {
     path: dbPath,
     lastQuery: null,
+    queries: [],
     runSql(sql) {
       execFileSync('sqlite3', [dbPath], { input: sql });
     },
     all(sql, params, cb) {
       db.lastQuery = { sql, params: Array.isArray(params) ? params.slice() : [] };
+      db.queries.push(db.lastQuery);
       let index = 0;
       const rendered = sql.replace(/\?/g, () => sqliteEscape(db.lastQuery.params[index++]));
       try {
@@ -115,6 +119,25 @@ function createCliSqliteDb() {
   return db;
 }
 
+async function analysisFixtureDb() {
+  const db = createCliSqliteDb();
+  db.runSql(`
+    INSERT INTO users(id, username, password_hash, created_at, updated_at, user_uuid)
+    VALUES (1, 'analysis-user', 'x', '2026-06-01T00:00:00.000Z', '2026-06-01T00:00:00.000Z', 'user-uuid');
+    INSERT INTO irrigation_zones(id, name, user_id, zone_uuid, timezone, gateway_device_eui)
+    VALUES (12, 'Analysis Zone', 1, 'analysis-zone', 'UTC', '0016C001F11766E7');
+    INSERT INTO devices(deveui, name, type_id, user_id, irrigation_zone_id, chameleon_swt1_depth_cm, created_at, updated_at)
+    VALUES ('AA00000000000001', 'Kiwi One', 'KIWI_SENSOR', 1, 12, 15, '2026-06-01T00:00:00.000Z', '2026-06-01T00:00:00.000Z');
+    INSERT INTO device_data(deveui, recorded_at, swt_1)
+    VALUES
+      ('AA00000000000001', '2026-06-01T00:00:00.000Z', 10),
+      ('AA00000000000001', '2026-06-01T01:00:00.000Z', 20),
+      ('AA00000000000001', '2026-06-01T02:00:00.000Z', 30);
+  `);
+  db.queries = [];
+  return db;
+}
+
 test('exports the history helper contract', () => {
   for (const name of expectedExports) {
     assert.strictEqual(typeof helper[name], 'function', `${name} export`);
@@ -124,6 +147,38 @@ test('exports the history helper contract', () => {
 test('exports the zone CSV column contracts', () => {
   assert.deepStrictEqual(helper.RAW_CSV_COLUMNS, TIDY_CSV_COLUMNS);
   assert.deepStrictEqual(helper.AGG_CSV_COLUMNS, TIDY_CSV_COLUMNS);
+});
+
+test('analysisSeriesId is a stable 16-hex hash of the tuple', () => {
+  const id = helper.analysisSeriesId(12, 'soil', 'soil-1', 'swt_1');
+  assert.match(id, /^[0-9a-f]{16}$/);
+  const expected = crypto.createHash('sha256').update('12|soil|soil-1|swt_1').digest('hex').slice(0, 16);
+  assert.strictEqual(id, expected);
+  assert.strictEqual(helper.analysisSeriesId(12, 'soil', 'soil-1', 'swt_1'), id);
+});
+
+test('buildAnalysisCatalog enumerates metadata-only per-source-device channels with availability', async () => {
+  const db = await analysisFixtureDb();
+  try {
+    const { channels, entriesById } = await helper.buildAnalysisCatalog(db, { deviceEui: '0016C001F11766E7' });
+    const swt1 = channels.find((entry) => entry.channelKey === 'swt_1');
+    assert.ok(swt1, 'has a swt_1 series');
+    assert.strictEqual(swt1.hubEui, '0016C001F11766E7');
+    assert.strictEqual(swt1.zoneId, 12);
+    assert.strictEqual(swt1.zoneName, 'Analysis Zone');
+    assert.strictEqual(swt1.cardType, 'soil');
+    assert.strictEqual(swt1.deviceName, 'Kiwi One');
+    assert.strictEqual(swt1.depthCm, 15);
+    assert.strictEqual(swt1.availability, 'available');
+    assert.strictEqual(swt1.seriesId, helper.analysisSeriesId(swt1.zoneId, 'soil', swt1.sourceKey, 'swt_1'));
+    assert.strictEqual(entriesById.get(swt1.seriesId).deveui, 'AA00000000000001');
+    const vwc = channels.find((entry) => entry.channelKey === 'vwc');
+    assert.ok(vwc, 'has manifest-valid vwc channel');
+    assert.strictEqual(vwc.availability, 'unsupported');
+    assert.ok(!db.queries.some((query) => /\bFROM\s+device_data\b/i.test(query.sql)), 'catalog must not scan history rows');
+  } finally {
+    db.close();
+  }
 });
 
 test('toCsv neutralizes spreadsheet formulas in text cells', () => {
