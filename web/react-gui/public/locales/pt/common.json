@@ -63,8 +63,7 @@
     },
     "export": {
       "csv": "Exportar CSV",
-      "png": "Exportar PNG",
-      "allZonesCsv": "Exportar CSV de todas as zonas"
+      "png": "Exportar PNG"
     },
     "legend": {
       "label": "Legenda do gráfico",

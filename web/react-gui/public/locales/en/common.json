@@ -63,8 +63,7 @@
     },
     "export": {
       "csv": "Export CSV",
-      "png": "Export PNG",
-      "allZonesCsv": "Export all zones CSV"
+      "png": "Export PNG"
     },
     "legend": {
       "label": "Chart legend",
