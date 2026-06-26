@@ -44,9 +44,10 @@ export function CrossZoneAnalysisPage() {
   const { t } = useTranslation();
   const { username } = useAuth();
   const [workspace, setWorkspace] = useState<AnalysisWorkspaceState>(() => loadWorkspace() ?? createDefaultWorkspace());
+  const [viewSaveError, setViewSaveError] = useState<unknown>(null);
   const chartRef = useRef<EChartHandle>(null);
   const { catalog, isLoading: catalogLoading, error: catalogError } = useAnalysisCatalog();
-  const { views, saveView } = useAnalysisViews();
+  const { views, saveView, error: viewsError } = useAnalysisViews();
 
   const activeWorkspace = useMemo(
     () => (catalog ? migrateWorkspaceSeriesIds(workspace, catalog.channels) : workspace),
@@ -81,6 +82,22 @@ export function CrossZoneAnalysisPage() {
   );
   const updateWorkspace = (mutate: (workspace: AnalysisWorkspaceState) => AnalysisWorkspaceState) => {
     setWorkspace((currentWorkspace) => mutate(catalog ? migrateWorkspaceSeriesIds(currentWorkspace, catalog.channels) : currentWorkspace));
+  };
+  const saveCurrentView = async (name: string) => {
+    setViewSaveError(null);
+    try {
+      await saveView({ name, viewJson: toViewJson(activeWorkspace), isDefault: false });
+    } catch (error) {
+      setViewSaveError(error);
+    }
+  };
+  const loadView = (view: (typeof views)[number]) => {
+    setViewSaveError(null);
+    setWorkspace(
+      catalog
+        ? migrateWorkspaceSeriesIds(fromViewJson(view.viewJson), catalog.channels)
+        : fromViewJson(view.viewJson),
+    );
   };
 
   const selectedIds = activeWorkspace.selectors.map((s) => s.seriesId);
@@ -120,7 +137,7 @@ export function CrossZoneAnalysisPage() {
         </div>
       </header>
 
-      {(catalogError || seriesError) && (
+      {(catalogError || seriesError || viewsError || viewSaveError) && (
         <div className="border-b border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
           {t('analysis.loadError')}
         </div>
@@ -139,13 +156,9 @@ export function CrossZoneAnalysisPage() {
             <AnalysisViewsMenu
               views={views}
               onSave={(name) => {
-                void saveView({ name, viewJson: toViewJson(activeWorkspace), isDefault: false });
+                void saveCurrentView(name);
               }}
-              onLoad={(view) => setWorkspace(
-                catalog
-                  ? migrateWorkspaceSeriesIds(fromViewJson(view.viewJson), catalog.channels)
-                  : fromViewJson(view.viewJson),
-              )}
+              onLoad={loadView}
             />
           </div>
         </aside>

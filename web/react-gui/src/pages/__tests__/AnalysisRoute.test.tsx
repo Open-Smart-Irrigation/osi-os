@@ -20,7 +20,7 @@ afterEach(() => {
 });
 
 describe('AnalysisRoute', () => {
-  it('renders analysis on desktop', () => {
+  it('renders analysis on desktop', async () => {
     vi.mocked(isDesktopBrowser).mockReturnValue(true);
     render(
       <MemoryRouter initialEntries={['/analysis']}>
@@ -29,7 +29,7 @@ describe('AnalysisRoute', () => {
         </Routes>
       </MemoryRouter>,
     );
-    expect(screen.getByText('analysis page')).toBeInTheDocument();
+    expect(await screen.findByText('analysis page')).toBeInTheDocument();
   });
 
   it('redirects mobile users to history', () => {

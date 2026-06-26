@@ -8,6 +8,7 @@ import type { AnalysisCatalogEntry, AnalysisCatalogResponse } from '../../analys
 vi.mock('react-i18next', () => ({ useTranslation: () => ({ t: (k: string) => k }) }));
 vi.mock('../../components/analysis/EChart', () => ({ EChart: () => <div data-testid="echart" /> }));
 const exportMenuProps = vi.fn();
+const saveViewMock = vi.fn();
 vi.mock('../../components/analysis/AnalysisExportMenu', () => ({
   AnalysisExportMenu: (props: {
     username?: string | null;
@@ -17,8 +18,19 @@ vi.mock('../../components/analysis/AnalysisExportMenu', () => ({
   },
 }));
 vi.mock('../../components/analysis/AnalysisViewsMenu', () => ({
-  AnalysisViewsMenu: ({ onLoad, views }: { onLoad: (view: unknown) => void; views: unknown[] }) => (
-    <button type="button" data-testid="load-view" onClick={() => onLoad(views[0])}>load</button>
+  AnalysisViewsMenu: ({
+    onLoad,
+    onSave,
+    views,
+  }: {
+    onLoad: (view: unknown) => void;
+    onSave: (name: string) => void;
+    views: unknown[];
+  }) => (
+    <div>
+      <button type="button" data-testid="load-view" onClick={() => onLoad(views[0])}>load</button>
+      <button type="button" data-testid="save-view" onClick={() => onSave('Broken save')}>save</button>
+    </div>
   ),
 }));
 vi.mock('../../contexts/AuthContext', () => ({
@@ -100,7 +112,7 @@ vi.mock('../../analysis/useAnalysisViews', () => ({
     ],
     isLoading: false,
     error: undefined,
-    saveView: vi.fn(),
+    saveView: saveViewMock,
     refresh: vi.fn(),
   }),
 }));
@@ -157,6 +169,16 @@ describe('CrossZoneAnalysisPage', () => {
     expect(getSeries).toHaveBeenLastCalledWith(
       expect.objectContaining({ selectors: [{ seriesId: 's1' }] }),
     );
+  });
+
+  it('shows a visible error when saving a view fails', async () => {
+    catalogState = loadedCatalogState();
+    saveViewMock.mockRejectedValueOnce(new Error('save failed'));
+    render(<CrossZoneAnalysisPage />, { wrapper: MemoryRouter });
+
+    fireEvent.click(screen.getByTestId('save-view'));
+
+    expect(await screen.findByText('analysis.loadError')).toBeInTheDocument();
   });
 
   it('shows the applied aggregation level once series data is loaded', () => {
