@@ -38,6 +38,11 @@ function query(sql) {
     return execFileSync('sqlite3', [dbPath, sql], { encoding: 'utf8' }).trim();
 }
 
+function queryJson(sql) {
+    const output = execFileSync('sqlite3', ['-json', dbPath, sql], { encoding: 'utf8' }).trim();
+    return output ? JSON.parse(output) : [];
+}
+
 function queryNumber(sql) {
     const value = query(sql);
     const number = Number(value);
@@ -220,6 +225,157 @@ function verifyIndexDefinition(indexName, expectedFragments) {
     return true;
 }
 
+function quoteIdent(identifier) {
+    return `"${String(identifier).replace(/"/g, '""')}"`;
+}
+
+function ensureDeviceTypeCheckIncludesLorain() {
+    const devicesSql = query("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'devices';");
+    if (devicesSql.includes("'AQUASCOPE_LORAIN'")) {
+        return false;
+    }
+
+    const deviceColumns = [
+        'id',
+        'deveui',
+        'name',
+        'type_id',
+        'user_id',
+        'farm_id',
+        'current_state',
+        'target_state',
+        'created_at',
+        'updated_at',
+        'claimed_at',
+        'chirpstack_app_id',
+        'irrigation_zone_id',
+        'dendro_enabled',
+        'temp_enabled',
+        'is_reference_tree',
+        'sync_version',
+        'deleted_at',
+        'gateway_device_eui',
+        'strega_model',
+        'rain_gauge_enabled',
+        'flow_meter_enabled',
+        'soil_moisture_probe_depths_json',
+        'soil_moisture_probe_depths_configured',
+        'dendro_ratio_at_retracted',
+        'dendro_ratio_at_extended',
+        'dendro_force_legacy',
+        'dendro_stroke_mm',
+        'dendro_ratio_zero',
+        'dendro_ratio_span',
+        'dendro_baseline_position_mm',
+        'dendro_baseline_mode_used',
+        'dendro_baseline_calibration_signature',
+        'dendro_baseline_pending',
+        'dendro_invert_direction',
+        'device_mode',
+        'chameleon_enabled',
+        'chameleon_swt1_depth_cm',
+        'chameleon_swt2_depth_cm',
+        'chameleon_swt3_depth_cm',
+    ];
+    const existingColumns = new Set(columns('devices'));
+    const copyColumns = deviceColumns.filter((column) => existingColumns.has(column));
+    const copyColumnSql = copyColumns.map(quoteIdent).join(', ');
+    const deviceArtifacts = queryJson(`
+        SELECT type, name, sql
+        FROM sqlite_master
+        WHERE tbl_name = 'devices'
+          AND type = 'index'
+          AND sql IS NOT NULL
+        ORDER BY type, name
+    `).map((row) => row.sql).filter(Boolean);
+    const dependentTriggers = queryJson(`
+        SELECT name, sql
+        FROM sqlite_master
+        WHERE type = 'trigger'
+          AND sql IS NOT NULL
+          AND sql LIKE '%devices%'
+        ORDER BY name
+    `);
+    const dropDependentTriggerSql = dependentTriggers
+        .map((row) => `DROP TRIGGER IF EXISTS ${quoteIdent(row.name)};`)
+        .join('\n');
+    const artifacts = [
+        ...deviceArtifacts,
+        ...dependentTriggers.map((row) => row.sql).filter(Boolean),
+    ];
+
+    const rebuildSql = `
+        PRAGMA foreign_keys = OFF;
+        BEGIN TRANSACTION;
+        ${dropDependentTriggerSql}
+        CREATE TABLE devices_lorain_repair (
+          id                                    INTEGER PRIMARY KEY AUTOINCREMENT,
+          deveui                                TEXT UNIQUE NOT NULL,
+          name                                  TEXT NOT NULL,
+          type_id                               TEXT NOT NULL CHECK(type_id IN (
+                                                  'KIWI_SENSOR','STREGA_VALVE','DRAGINO_LSN50',
+                                                  'TEKTELIC_CLOVER','SENSECAP_S2120','AQUASCOPE_LORAIN')),
+          user_id                               INTEGER NULL,
+          farm_id                               TEXT NULL,
+          current_state                         TEXT CHECK(current_state IN ('OPEN','CLOSED')),
+          target_state                          TEXT CHECK(target_state IN ('OPEN','CLOSED')),
+          created_at                            TEXT NOT NULL,
+          updated_at                            TEXT NOT NULL,
+          claimed_at                            TEXT NULL,
+          chirpstack_app_id                     TEXT,
+          irrigation_zone_id                    INTEGER REFERENCES irrigation_zones(id) ON DELETE SET NULL,
+          dendro_enabled                        INTEGER NOT NULL DEFAULT 0,
+          temp_enabled                          INTEGER NOT NULL DEFAULT 0,
+          is_reference_tree                     INTEGER NOT NULL DEFAULT 0,
+          sync_version                          INTEGER DEFAULT 0,
+          deleted_at                            DATETIME,
+          gateway_device_eui                    TEXT,
+          strega_model                          TEXT,
+          rain_gauge_enabled                    INTEGER DEFAULT 0,
+          flow_meter_enabled                    INTEGER DEFAULT 0,
+          soil_moisture_probe_depths_json       TEXT,
+          soil_moisture_probe_depths_configured INTEGER DEFAULT 0,
+          dendro_ratio_at_retracted             REAL,
+          dendro_ratio_at_extended              REAL,
+          dendro_force_legacy                   INTEGER DEFAULT 0,
+          dendro_stroke_mm                      REAL,
+          dendro_ratio_zero                     REAL,
+          dendro_ratio_span                     REAL,
+          dendro_baseline_position_mm           REAL,
+          dendro_baseline_mode_used             TEXT,
+          dendro_baseline_calibration_signature TEXT,
+          dendro_baseline_pending               INTEGER DEFAULT 0,
+          dendro_invert_direction               INTEGER DEFAULT 0,
+          device_mode                           INTEGER DEFAULT 1,
+          chameleon_enabled                     INTEGER DEFAULT 0,
+          chameleon_swt1_depth_cm               REAL,
+          chameleon_swt2_depth_cm               REAL,
+          chameleon_swt3_depth_cm               REAL,
+          FOREIGN KEY (user_id)  REFERENCES users(id)             ON DELETE SET NULL,
+          FOREIGN KEY (farm_id)  REFERENCES farms(farm_id)        ON DELETE SET NULL
+        );
+        INSERT INTO devices_lorain_repair (${copyColumnSql})
+        SELECT ${copyColumnSql}
+        FROM devices;
+        DROP TABLE devices;
+        ALTER TABLE devices_lorain_repair RENAME TO devices;
+        COMMIT;
+        PRAGMA foreign_keys = ON;
+    `;
+
+    if (!exec(rebuildSql)) {
+        console.error('FAIL: devices table rebuild failed while adding AQUASCOPE_LORAIN');
+        process.exit(1);
+    }
+    for (const artifactSql of artifacts) {
+        if (!exec(artifactSql)) {
+            console.error('FAIL: failed to restore devices-dependent schema artifact');
+            process.exit(1);
+        }
+    }
+    return true;
+}
+
 console.log(`Repairing ${dbPath}`);
 
 // 1. Base tables
@@ -388,6 +544,8 @@ const appliedCommandColumns = [
 for (const [name, definition] of appliedCommandColumns) {
     if (addColumnIfMissing('applied_commands', name, definition)) applied++;
 }
+
+if (ensureDeviceTypeCheckIncludesLorain()) applied++;
 
 // 5. Verify
 const tables = execFileSync('sqlite3', [dbPath, ".tables"], { encoding: 'utf8' }).split(/\s+/);

@@ -97,7 +97,7 @@ CREATE TABLE devices (
   name                                  TEXT NOT NULL,
   type_id                               TEXT NOT NULL CHECK(type_id IN (
                                           'KIWI_SENSOR','STREGA_VALVE','DRAGINO_LSN50',
-                                          'TEKTELIC_CLOVER','SENSECAP_S2120')),
+                                          'TEKTELIC_CLOVER','SENSECAP_S2120','AQUASCOPE_LORAIN')),
   user_id                               INTEGER NULL,
   farm_id                               TEXT NULL,
   current_state                         TEXT CHECK(current_state IN ('OPEN','CLOSED')),

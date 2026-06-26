@@ -7,6 +7,7 @@ import { KiwiSensorCard } from './KiwiSensorCard';
 import { DraginoTempCard } from './DraginoTempCard';
 import { StregaValveCard } from './StregaValveCard';
 import { SenseCapWeatherCard } from './SenseCapWeatherCard';
+import { LoRainGaugeCard } from './LoRainGaugeCard';
 import { ScheduleSection } from './ScheduleSection';
 import { AssignDeviceModal } from './AssignDeviceModal';
 import { DendrometerSection } from './dendrometer/DendrometerSection';
@@ -131,6 +132,7 @@ export const IrrigationZoneCard: React.FC<IrrigationZoneCardProps> = ({
   const stregaValves = devices.filter((d) => d.type_id === 'STREGA_VALVE');
   const lsn50Nodes = devices.filter((d) => d.type_id === 'DRAGINO_LSN50');
   const s2120Stations = devices.filter((d) => d.type_id === 'SENSECAP_S2120');
+  const loRainGauges = devices.filter((d) => d.type_id === 'AQUASCOPE_LORAIN');
 
   const hasDendroDevices = lsn50Nodes.some(d => d.dendro_enabled === 1);
   const schedMetric = zone.schedule?.triggerMetric ?? zone.schedule?.trigger_metric;
@@ -546,6 +548,28 @@ export const IrrigationZoneCard: React.FC<IrrigationZoneCardProps> = ({
                           onRemove={() => handleRemoveDevice(device.deveui)}
                           onUpdate={onUpdate}
                           allZones={allZones ?? [{ id: zone.id, name: zone.name }]}
+                        />
+                        {removingDevice === device.deveui && (
+                          <div className="absolute inset-0 bg-[var(--overlay)]/70 flex items-center justify-center rounded-xl">
+                            <div className="animate-spin h-8 w-8 border-4 border-[var(--primary)] border-t-transparent rounded-full" />
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Rain Gauges */}
+              {loRainGauges.length > 0 && (
+                <div className="mb-5">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)] mb-3">Rain Gauges</p>
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                    {loRainGauges.map((device) => (
+                      <div key={device.deveui} className="relative">
+                        <LoRainGaugeCard
+                          device={device}
+                          onRemove={() => handleRemoveDevice(device.deveui)}
                         />
                         {removingDevice === device.deveui && (
                           <div className="absolute inset-0 bg-[var(--overlay)]/70 flex items-center justify-center rounded-xl">

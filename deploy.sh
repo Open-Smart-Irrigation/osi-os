@@ -516,6 +516,10 @@ fetch_required "S2120 codec" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/codecs/sensecap_s2120_decoder.js" \
     "/srv/node-red/codecs/sensecap_s2120_decoder.js"
 
+fetch_required "LoRain codec" \
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/codecs/aquascope_lorain_decoder.js" \
+    "/srv/node-red/codecs/aquascope_lorain_decoder.js"
+
 echo "--- Node-RED runtime dependencies ---"
 npm_log="$TMP_DIR/npm-install.log"
 if cd /srv/node-red && npm install --omit=dev --no-fund --no-audit >"$npm_log" 2>&1; then

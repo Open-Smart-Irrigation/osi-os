@@ -31,6 +31,7 @@ const installOsiOsPath = path.resolve(__dirname, '..', 'scripts', 'install-osi-o
 const seedSqlPath = path.resolve(__dirname, '..', 'database', 'seed-blank.sql');
 const stregaCodecPath = path.resolve(__dirname, '..', 'conf', 'full_raspberrypi_bcm27xx_bcm2712', 'files', 'usr', 'share', 'node-red', 'codecs', 'strega_gen1_decoder.js');
 const lsn50CodecPath = path.resolve(__dirname, '..', 'conf', 'full_raspberrypi_bcm27xx_bcm2712', 'files', 'usr', 'share', 'node-red', 'codecs', 'dragino_lsn50_decoder.js');
+const lorainCodecPath = path.resolve(__dirname, '..', 'conf', 'full_raspberrypi_bcm27xx_bcm2712', 'files', 'usr', 'share', 'node-red', 'codecs', 'aquascope_lorain_decoder.js');
 const seedDatabasePaths = [
   path.resolve(__dirname, '..', 'conf', 'base_raspberrypi_bcm27xx_bcm2712', 'files', 'usr', 'share', 'db', 'farming.db'),
   path.resolve(__dirname, '..', 'conf', 'full_raspberrypi_bcm27xx_bcm2708', 'files', 'usr', 'share', 'db', 'farming.db'),
@@ -46,9 +47,11 @@ const seedDendroHistoryDatabasePaths = [
 const batPctDatabasePaths = seedDatabasePaths;
 const reactGuiApiPath = path.resolve(__dirname, '..', 'web', 'react-gui', 'src', 'services', 'api.ts');
 const farmingTypesPath = path.resolve(__dirname, '..', 'web', 'react-gui', 'src', 'types', 'farming.ts');
+const farmingDashboardPath = path.resolve(__dirname, '..', 'web', 'react-gui', 'src', 'pages', 'FarmingDashboard.tsx');
 const dendroMonitorPath = path.resolve(__dirname, '..', 'web', 'react-gui', 'src', 'components', 'farming', 'DendrometerMonitor.tsx');
 const dendroDrawerPath = path.resolve(__dirname, '..', 'web', 'react-gui', 'src', 'components', 'farming', 'dendrometer', 'DendrometerMonitor.tsx');
 const draginoTempCardPath = path.resolve(__dirname, '..', 'web', 'react-gui', 'src', 'components', 'farming', 'DraginoTempCard.tsx');
+const loRainGaugeCardPath = path.resolve(__dirname, '..', 'web', 'react-gui', 'src', 'components', 'farming', 'LoRainGaugeCard.tsx');
 const draginoSettingsModalPath = path.resolve(__dirname, '..', 'web', 'react-gui', 'src', 'components', 'farming', 'DraginoSettingsModal.tsx');
 const draginoDendroCalibrationPath = path.resolve(__dirname, '..', 'web', 'react-gui', 'src', 'components', 'farming', 'DraginoDendroCalibrationSection.tsx');
 const draginoChameleonSwtSectionPath = path.resolve(__dirname, '..', 'web', 'react-gui', 'src', 'components', 'farming', 'DraginoChameleonSwtSection.tsx');
@@ -62,6 +65,7 @@ const windUtilsPath = path.resolve(__dirname, '..', 'web', 'react-gui', 'src', '
 const onlineTabPath = path.resolve(__dirname, '..', 'web', 'react-gui', 'src', 'components', 'farming', 'environment', 'OnlineTab.tsx');
 const soilTabPath = path.resolve(__dirname, '..', 'web', 'react-gui', 'src', 'components', 'farming', 'environment', 'SoilTab.tsx');
 const weatherTabPath = path.resolve(__dirname, '..', 'web', 'react-gui', 'src', 'components', 'farming', 'environment', 'WeatherTab.tsx');
+const localTabPath = path.resolve(__dirname, '..', 'web', 'react-gui', 'src', 'components', 'farming', 'environment', 'LocalTab.tsx');
 const helperCandidates = [
   path.join(nodeRedRoot, 'node_modules', 'osi-chirpstack-helper'),
   path.join(nodeRedRoot, 'osi-chirpstack-helper')
@@ -93,14 +97,17 @@ const gatewayIdentityHelperScript = fs.readFileSync(gatewayIdentityHelperPath, '
 const chirpstackBootstrapScript = fs.readFileSync(chirpstackBootstrapPath, 'utf8');
 const stregaCodecSource = fs.existsSync(stregaCodecPath) ? fs.readFileSync(stregaCodecPath, 'utf8') : '';
 const lsn50CodecSource = fs.existsSync(lsn50CodecPath) ? fs.readFileSync(lsn50CodecPath, 'utf8') : '';
+const lorainCodecSource = fs.existsSync(lorainCodecPath) ? fs.readFileSync(lorainCodecPath, 'utf8') : '';
 const cloudHttpHelperSource = fs.existsSync(cloudHttpHelperPath) ? fs.readFileSync(cloudHttpHelperPath, 'utf8') : '';
 const cloudHttpPackageSource = fs.existsSync(cloudHttpPackagePath) ? fs.readFileSync(cloudHttpPackagePath, 'utf8') : '';
 const nodeRedPackageSource = fs.readFileSync(packageJsonPath, 'utf8');
 const reactGuiApiSource = fs.readFileSync(reactGuiApiPath, 'utf8');
 const farmingTypesSource = fs.readFileSync(farmingTypesPath, 'utf8');
+const farmingDashboardSource = fs.readFileSync(farmingDashboardPath, 'utf8');
 const dendroMonitorSource = fs.readFileSync(dendroMonitorPath, 'utf8');
 const dendroDrawerSource = fs.readFileSync(dendroDrawerPath, 'utf8');
 const draginoTempCardSource = fs.readFileSync(draginoTempCardPath, 'utf8');
+const loRainGaugeCardSource = fs.existsSync(loRainGaugeCardPath) ? fs.readFileSync(loRainGaugeCardPath, 'utf8') : '';
 const draginoSettingsModalSource = fs.readFileSync(draginoSettingsModalPath, 'utf8');
 const draginoDendroCalibrationSource = fs.readFileSync(draginoDendroCalibrationPath, 'utf8');
 const draginoChameleonSwtSectionSource = fs.existsSync(draginoChameleonSwtSectionPath)
@@ -117,6 +124,7 @@ const windUtilsSource = fs.readFileSync(windUtilsPath, 'utf8');
 const onlineTabSource = fs.readFileSync(onlineTabPath, 'utf8');
 const soilTabSource = fs.readFileSync(soilTabPath, 'utf8');
 const weatherTabSource = fs.readFileSync(weatherTabPath, 'utf8');
+const localTabSource = fs.readFileSync(localTabPath, 'utf8');
 const flows = JSON.parse(fs.readFileSync(flowPath, 'utf8'));
 const pendingChecks = [];
 
@@ -251,6 +259,9 @@ const requiredFunctionNodes = [
   'Persist STREGA Uplink',
   'Process S2120',
   'Aggregate Zone Rain',
+  'Process LoRain',
+  'Build LoRain SQL INSERT',
+  'Aggregate LoRain Zone Rain',
   'Insert Chameleon Reading',
   'Get Zone Assignments',
   'Auth + Set Zone Assignments',
@@ -559,9 +570,30 @@ function createMockOsiDb(queryHandler) {
           .catch((error) => cb(error));
       }
 
-      run(_sql, params, callback) {
+      run(sql, params, callback) {
         const cb = typeof params === 'function' ? params : callback;
-        if (cb) cb(null);
+        const operation = Promise.resolve()
+          .then(() => {
+            if (typeof queryHandler.run === 'function') {
+              return queryHandler.run(String(sql));
+            }
+            return undefined;
+          });
+
+        if (!cb) {
+          return operation;
+        }
+
+        return operation.then(
+          () => {
+            cb(null);
+            return undefined;
+          },
+          (error) => {
+            cb(error);
+            return undefined;
+          }
+        );
       }
 
       close(callback) {
@@ -570,6 +602,78 @@ function createMockOsiDb(queryHandler) {
     },
   };
 }
+
+pendingChecks.push((async () => {
+  const seenSql = [];
+  const queryHandler = () => [];
+  queryHandler.run = (sql) => {
+    seenSql.push(sql);
+    return Promise.resolve();
+  };
+  const db = new (createMockOsiDb(queryHandler).Database)();
+
+  const result = db.run('SELECT 1');
+  expectCondition(
+    result && typeof result.then === 'function',
+    'mock osiDb run returns a thenable without a callback',
+    'mock osiDb run did not return a thenable without a callback'
+  );
+  await result;
+  expectEqual(seenSql[0], 'SELECT 1', 'mock osiDb run forwards SQL to queryHandler.run');
+})().catch((error) => {
+  fail(`failed to execute mock osiDb run promise fixture: ${error.message}`);
+}));
+
+pendingChecks.push((async () => {
+  const queryHandler = () => [];
+  queryHandler.run = () => Promise.reject(new Error('boom'));
+  const db = new (createMockOsiDb(queryHandler).Database)();
+
+  let rejectedError = null;
+  try {
+    await db.run('SELECT 1');
+  } catch (error) {
+    rejectedError = error;
+  }
+  expectCondition(
+    rejectedError instanceof Error && rejectedError.message === 'boom',
+    'mock osiDb run rejects promise-style callers when queryHandler.run fails',
+    'mock osiDb run did not reject promise-style callers with boom'
+  );
+})().catch((error) => {
+  fail(`failed to execute mock osiDb run rejection fixture: ${error.message}`);
+}));
+
+pendingChecks.push((async () => {
+  const queryHandler = () => [];
+  queryHandler.run = () => Promise.reject(new Error('boom'));
+  const db = new (createMockOsiDb(queryHandler).Database)();
+
+  let callbackError = null;
+  const result = db.run('SELECT 1', (error) => {
+    callbackError = error;
+  });
+
+  let rejectedError = null;
+  try {
+    await result;
+  } catch (error) {
+    rejectedError = error;
+  }
+
+  expectCondition(
+    callbackError instanceof Error && callbackError.message === 'boom',
+    'mock osiDb run reports errors to callback-style callers',
+    'mock osiDb run did not report boom to the callback-style caller'
+  );
+  expectEqual(
+    rejectedError,
+    null,
+    'mock osiDb run does not reject callback-style callers after invoking the callback'
+  );
+})().catch((error) => {
+  fail(`failed to execute mock osiDb run callback-mode fixture: ${error.message}`);
+}));
 
 function loadCommonJsFromSource(source, filename, injectedModules = {}) {
   const moduleInstance = { exports: {} };
@@ -1707,6 +1811,27 @@ expectIncludesById('s2120-rain-agg-fn', 'const rainToday = sn(d.rainMmToday != n
 expectIncludesById('s2120-rain-agg-fn', 'MAX(COALESCE(rainfall_mm,0)+${rainDelta}, ${rainToday})', 'keeps S2120 zone totals caught up with device daily rain');
 expectLibById('s2120-process-fn', 'osiDb', 'osi-db-helper', 'imports osi-db-helper as osiDb');
 expectLibById('s2120-rain-agg-fn', 'osiDb', 'osi-db-helper', 'imports osi-db-helper as osiDb');
+const lorainMqttNode = findNodeById('lorain-mqtt-in');
+if (!lorainMqttNode) {
+  fail('missing LoRain MQTT input node');
+} else if (lorainMqttNode.topic !== 'application/+/device/+/event/up') {
+  fail(`LoRain MQTT input must use wildcard ChirpStack topic, found ${lorainMqttNode.topic}`);
+} else {
+  console.log('OK LoRain MQTT input uses application/+/device/+/event/up');
+}
+expectIncludesById('catalog-response', 'AQUASCOPE_LORAIN', 'exposes LoRain in the device catalog');
+expectIncludesById('post-devices-insert', 'CHIRPSTACK_PROFILE_LORAIN', 'maps local LoRain registration to the LoRain ChirpStack profile');
+expectIncludesById('post-devices-insert', '4943485448592021', 'sets the Aqua-Scope LoRain JoinEUI for local registration');
+expectIncludesById('cs-reg-cloud-fn', 'CHIRPSTACK_PROFILE_LORAIN', 'maps cloud LoRain registration to the LoRain ChirpStack profile');
+expectIncludesById('cs-reg-cloud-fn', '4943485448592021', 'sets the Aqua-Scope LoRain JoinEUI for cloud registration');
+expectIncludesById('lorain-process-fn', 'CHIRPSTACK_PROFILE_LORAIN', 'filters LoRain uplinks by profile ID');
+expectIncludesById('lorain-process-fn', 'AQUASCOPE_LORAIN', 'guards LoRain uplinks by local device type');
+expectIncludesById('lorain-process-fn', 'duplicate_or_out_of_order', 'skips duplicate or out-of-order LoRain interval rain');
+expectIncludesById('lorain-process-fn', 'rainMmPer10Min', 'computes normalized LoRain rain telemetry per 10 minutes');
+expectIncludesById('lorain-sql-fn', 'rain_tips_delta', 'persists LoRain tip deltas');
+expectIncludesById('lorain-rain-agg-fn', 'aquascope_lorain', 'labels LoRain zone rainfall source');
+expectLibById('lorain-process-fn', 'osiDb', 'osi-db-helper', 'imports osi-db-helper as osiDb');
+expectLibById('lorain-rain-agg-fn', 'osiDb', 'osi-db-helper', 'imports osi-db-helper as osiDb');
 expectLibById('merge-device-data', 'osiDb', 'osi-db-helper', 'imports osi-db-helper as osiDb for S2120 enrichment');
 expectLibById('s2120-zones-get-fn', 'crypto', 'crypto', 'imports crypto for auth verification');
 expectLibById('s2120-zones-get-fn', 'osiDb', 'osi-db-helper', 'imports osi-db-helper as osiDb');
@@ -1928,6 +2053,15 @@ expectFileIncludes('SenseCapWeatherCard.tsx', senseCapWeatherCardSource, 'WindMo
 expectFileIncludes('SenseCapWeatherCard.tsx', senseCapWeatherCardSource, 'rain_mm_per_10min', 'shows normalized rain history options on the S2120 card');
 expectFileIncludes('SenseCapWeatherCard.tsx', senseCapWeatherCardSource, 'formatCounterStatus', 'renders human-readable rain-counter state on the S2120 card');
 expectFileIncludes('SenseCapWeatherCard.tsx', senseCapWeatherCardSource, 'formatWindDirection', 'uses shared wind-direction formatting on the S2120 card');
+expectFileIncludes('farming.ts', farmingTypesSource, 'AQUASCOPE_LORAIN', 'types Aqua-Scope LoRain as a supported device');
+expectFileIncludes('LoRainGaugeCard.tsx', loRainGaugeCardSource, 'rain_mm_delta', 'renders LoRain interval rainfall');
+expectFileIncludes('LoRainGaugeCard.tsx', loRainGaugeCardSource, 'rain_mm_per_10min', 'shows normalized LoRain rain-rate history options');
+expectFileIncludes('LoRainGaugeCard.tsx', loRainGaugeCardSource, 'devicesAPI.remove', 'removes LoRain devices through the existing device API');
+expectFileIncludes('FarmingDashboard.tsx', farmingDashboardSource, "d.type_id === 'AQUASCOPE_LORAIN'", 'groups unassigned LoRain gauges');
+expectFileIncludes('FarmingDashboard.tsx', farmingDashboardSource, '<LoRainGaugeCard', 'renders unassigned LoRain gauges');
+expectFileIncludes('IrrigationZoneCard.tsx', irrigationZoneCardSource, "d.type_id === 'AQUASCOPE_LORAIN'", 'groups assigned LoRain gauges');
+expectFileIncludes('IrrigationZoneCard.tsx', irrigationZoneCardSource, '<LoRainGaugeCard', 'renders assigned LoRain gauges');
+expectFileIncludes('LocalTab.tsx', localTabSource, 'AQUASCOPE_LORAIN', 'styles LoRain devices in local environment breakdowns');
 expectFileIncludes('WindMonitor.tsx', windMonitorSource, "sensorAPI.getHistory(deveui, 'wind_speed_mps', hours)", 'loads wind-speed history in the dedicated S2120 wind monitor');
 expectFileIncludes('WindMonitor.tsx', windMonitorSource, "sensorAPI.getHistory(deveui, 'wind_gust_mps', hours)", 'loads wind-gust history in the dedicated S2120 wind monitor');
 expectFileIncludes('WindMonitor.tsx', windMonitorSource, "sensorAPI.getHistory(deveui, 'wind_direction_deg', hours)", 'loads wind-direction history in the dedicated S2120 wind monitor');
@@ -2215,6 +2349,13 @@ expectFileIncludes('chirpstack-bootstrap.js', chirpstackBootstrapScript, "getOrC
 expectFileIncludes('chirpstack-bootstrap.js', chirpstackBootstrapScript, "CFG.lsn50CodecPath", 'tracks the shipped LSN50 decoder path in bootstrap config');
 expectFileIncludes('chirpstack-bootstrap.js', chirpstackBootstrapScript, "readCodecScript(CFG.lsn50CodecPath, 'LSN50')", 'loads the shipped LSN50 decoder during bootstrap');
 expectFileIncludes('chirpstack-bootstrap.js', chirpstackBootstrapScript, "getOrCreateProfileWithCodec(client, tenantId, CFG.profileLsn50Name", 'creates or repairs the OSI LSN50 profile with a payload codec');
+expectFileIncludes('chirpstack-bootstrap.js', chirpstackBootstrapScript, 'CS_PROFILE_LORAIN_NAME', 'allows overriding the LoRain profile name during bootstrap');
+expectFileIncludes('chirpstack-bootstrap.js', chirpstackBootstrapScript, 'LORAIN_CODEC_PATH', 'allows overriding the LoRain decoder path during bootstrap');
+expectFileIncludes('chirpstack-bootstrap.js', chirpstackBootstrapScript, 'CFG.lorainCodecPath', 'tracks the shipped LoRain decoder path in bootstrap config');
+expectFileIncludes('chirpstack-bootstrap.js', chirpstackBootstrapScript, "readCodecScript(CFG.lorainCodecPath, 'LoRain')", 'loads the shipped LoRain decoder during bootstrap');
+expectFileIncludes('chirpstack-bootstrap.js', chirpstackBootstrapScript, "getOrCreateProfileWithCodec(client, tenantId, CFG.profileLorainName", 'creates or repairs the OSI LoRain profile with a payload codec');
+expectFileIncludes('chirpstack-bootstrap.js', chirpstackBootstrapScript, 'CHIRPSTACK_PROFILE_LORAIN', 'writes the LoRain ChirpStack profile ID for Node-RED');
+expectFileIncludes('chirpstack-bootstrap.js', chirpstackBootstrapScript, 'chirpstack_profile_lorain', 'persists the LoRain profile ID to UCI');
 expectFileIncludes('deploy.sh', deployScript, 'run_communication_preflight()', 'runs communication validation before deploy artifacts are copied');
 expectFileIncludes('deploy.sh', deployScript, 'scripts/verify-communication-contract.js', 'uses the focused communication contract verifier during deploy preflight');
 expectFileIncludes('deploy.sh', deployScript, 'scripts/diagnose-pi-communication.sh', 'fetches the required communication diagnostic during deploy preflight');
@@ -2227,6 +2368,7 @@ expectFileIncludes('deploy.sh', deployScript, '"conf/full_raspberrypi_bcm27xx_bc
 expectFileIncludes('deploy.sh', deployScript, '"conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-history-helper/index.js"', 'deploys the osi-history-helper runtime helper to live devices');
 expectFileIncludes('deploy.sh', deployScript, '"conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/codecs/strega_gen1_decoder.js"', 'deploys the shipped STREGA ChirpStack decoder to live devices');
 expectFileIncludes('deploy.sh', deployScript, '"conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/codecs/dragino_lsn50_decoder.js"', 'deploys the shipped LSN50 ChirpStack decoder to live devices');
+expectFileIncludes('deploy.sh', deployScript, '"conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/codecs/aquascope_lorain_decoder.js"', 'deploys the shipped LoRain ChirpStack decoder to live devices');
 expectFileIncludes('deploy.sh', deployScript, 'rm -rf "$entry"', 'removes stale hashed GUI assets AND locale files before extracting the rebuilt React bundle (loop covers assets/, locales/, index.html, dotfiles)');
 expectFileIncludes('deploy.sh', deployScript, 'chmod 755 /etc/init.d/node-red', 'keeps the deployed Node-RED init script executable');
 expectFileIncludes('deploy.sh', deployScript, 'ALTER TABLE devices ADD COLUMN dendro_ratio_at_retracted REAL', 'repairs the live DB with the canonical dendrometer retracted-ratio column during deploy');
@@ -2762,6 +2904,9 @@ expectFileIncludes('strega_gen1_decoder.js', stregaCodecSource, 'function Decode
 expectFileIncludes('dragino_lsn50_decoder.js', lsn50CodecSource, 'function decodeUplink(input)', 'ships the LSN50 ChirpStack decoder entry point');
 expectFileIncludes('dragino_lsn50_decoder.js', lsn50CodecSource, 'decode.Work_mode="3ADC+IIC";', 'ships the working MOD3 decoder path from the live LSN50 profile');
 expectFileIncludes('dragino_lsn50_decoder.js', lsn50CodecSource, 'decode.ADC_CH1V= (bytes[2]<<8 | bytes[3])/1000;', 'ships the working LSN50 CH1 decoder logic');
+expectFileIncludes('aquascope_lorain_decoder.js', lorainCodecSource, 'function decodeUplink(input)', 'ships the LoRain ChirpStack decoder entry point');
+expectFileIncludes('aquascope_lorain_decoder.js', lorainCodecSource, 'data.rain_mm_delta = round(sensorValue * 0.5, 1);', 'normalizes LoRain tips to millimeters');
+expectFileIncludes('aquascope_lorain_decoder.js', lorainCodecSource, 'fPort !== 10 && fPort !== 2', 'accepts current LoRain FPort 10 and legacy FPort 2 only');
 
 const dbHelperPath = dbHelperCandidates.find((candidate) => fs.existsSync(candidate));
 if (!dbHelperPath) {
@@ -3088,6 +3233,279 @@ if (!dendroHelperPath) {
         return [];
       };
     }
+
+    function buildLorainFixture(options = {}) {
+      const rainMmDelta = options.rainMmDelta ?? 1.5;
+      const object = {
+        rainlevel: options.rainLevel ?? 3,
+        ambient_temperature: options.ambientTemperature ?? 20.5,
+        bat_v: options.batV ?? 3.3,
+      };
+      if (options.includeRainMmDelta !== false) {
+        object.rain_mm_delta = rainMmDelta;
+      }
+      if (options.includeRainTipsDelta !== false) {
+        object.rain_tips_delta = options.rainTipsDelta ?? 3;
+      }
+      return {
+        payload: {
+          deviceInfo: {
+            devEui: 'ABC123',
+            deviceProfileId: options.profileId ?? 'profile-lorain',
+            deviceProfileName: options.profileName ?? 'OSI Aqua-Scope LoRain',
+          },
+          time: options.timestamp || '2026-04-21T10:00:00.000Z',
+          object,
+        },
+      };
+    }
+
+    function createLorainQueryHandler(options = {}) {
+      return (sql) => {
+        if (sql.includes('SELECT type_id FROM devices')) {
+          return [{ type_id: options.deviceType || 'AQUASCOPE_LORAIN' }];
+        }
+        if (sql.includes('SELECT recorded_at') && sql.includes('recorded_at >=') && sql.includes('rain_mm_delta IS NOT NULL')) {
+          return options.duplicateOrFuture ? [options.duplicateOrFuture] : [];
+        }
+        if (sql.includes('SELECT recorded_at') && sql.includes('recorded_at <') && sql.includes('rain_mm_delta IS NOT NULL')) {
+          return options.previousSample ? [options.previousSample] : [];
+        }
+        if (sql.includes('SELECT COALESCE(SUM(rain_mm_delta), 0) AS rain_mm_today')) {
+          return [{ rain_mm_today: options.todayTotal ?? 0 }];
+        }
+        return [];
+      };
+    }
+
+    pendingChecks.push((async () => {
+      const rejected = await executeFunctionNodeById(
+        'lorain-process-fn',
+        buildLorainFixture({ profileId: 'profile-s2120', profileName: 'SenseCAP S2120' }),
+        {
+          env: { CHIRPSTACK_PROFILE_LORAIN: 'profile-lorain' },
+          scope: {
+            osiDb: createMockOsiDb(createLorainQueryHandler()),
+          },
+        }
+      );
+      expectCondition(
+        Array.isArray(rejected) && rejected[0] === null && rejected[1] === null,
+        'LoRain branch rejects non-LoRain profiles',
+        'LoRain branch accepted a non-LoRain profile'
+      );
+    })().catch((error) => {
+      fail(`failed to execute non-LoRain rejection fixture: ${error.message}`);
+    }));
+
+    pendingChecks.push((async () => {
+      const [processedMsg, rainOut] = await executeFunctionNodeById(
+        'lorain-process-fn',
+        buildLorainFixture(),
+        {
+          env: { CHIRPSTACK_PROFILE_LORAIN: 'profile-lorain' },
+          scope: {
+            osiDb: createMockOsiDb(createLorainQueryHandler({ todayTotal: 1.2 })),
+          },
+        }
+      );
+      const formatted = processedMsg.formattedData || {};
+      expectEqual(formatted.rainDeltaStatus, 'ok', 'LoRain first interval sample is valid rain');
+      expectApprox(formatted.rainMmDelta, 1.5, 0.000001, 'LoRain fixture preserves interval rain delta');
+      expectEqual(formatted.rainTipsDelta, 3, 'LoRain fixture preserves tip count');
+      expectEqual(formatted.counterIntervalSeconds, null, 'LoRain first interval sample does not fabricate elapsed seconds');
+      expectEqual(formatted.rainMmPer10Min, null, 'LoRain first interval sample does not fabricate a rate');
+      expectApprox(formatted.rainMmToday, 2.7, 0.000001, 'LoRain fixture accumulates local-day rain totals');
+      expectCondition(!!rainOut, 'LoRain first interval sample emits zone-rain update', 'LoRain first interval sample did not emit zone-rain update');
+    })().catch((error) => {
+      fail(`failed to execute first-sample LoRain fixture: ${error.message}`);
+    }));
+
+    pendingChecks.push((async () => {
+      const [processedMsg] = await executeFunctionNodeById(
+        'lorain-process-fn',
+        buildLorainFixture({
+          includeRainMmDelta: false,
+          includeRainTipsDelta: false,
+          rainLevel: 3,
+        }),
+        {
+          env: { CHIRPSTACK_PROFILE_LORAIN: 'profile-lorain' },
+          scope: {
+            osiDb: createMockOsiDb(createLorainQueryHandler({ todayTotal: 1.2 })),
+          },
+        }
+      );
+      const formatted = processedMsg.formattedData || {};
+      expectApprox(formatted.rainMmDelta, 1.5, 0.000001, 'LoRain raw rainlevel fixture converts 0.5 mm steps to millimeters');
+      expectEqual(formatted.rainTipsDelta, 3, 'LoRain raw rainlevel fixture uses raw rainlevel as tip count');
+    })().catch((error) => {
+      fail(`failed to execute raw-rainlevel LoRain fixture: ${error.message}`);
+    }));
+
+    pendingChecks.push((async () => {
+      const [processedMsg] = await executeFunctionNodeById(
+        'lorain-process-fn',
+        buildLorainFixture({
+          rainMmDelta: 2.0,
+          rainLevel: 3,
+          includeRainTipsDelta: false,
+        }),
+        {
+          env: { CHIRPSTACK_PROFILE_LORAIN: 'profile-lorain' },
+          scope: {
+            osiDb: createMockOsiDb(createLorainQueryHandler({ todayTotal: 1.2 })),
+          },
+        }
+      );
+      const formatted = processedMsg.formattedData || {};
+      expectApprox(formatted.rainMmDelta, 2.0, 0.000001, 'LoRain normalized rain_mm_delta wins over disagreeing raw rainlevel fallback');
+      expectEqual(formatted.rainTipsDelta, 3, 'LoRain disagreeing-source fixture still uses raw rainlevel as fallback tip count');
+    })().catch((error) => {
+      fail(`failed to execute disagreeing-source LoRain fixture: ${error.message}`);
+    }));
+
+    pendingChecks.push((async () => {
+      const [processedMsg, rainOut] = await executeFunctionNodeById(
+        'lorain-process-fn',
+        buildLorainFixture({
+          includeRainMmDelta: false,
+          includeRainTipsDelta: false,
+          rainLevel: -1,
+        }),
+        {
+          env: { CHIRPSTACK_PROFILE_LORAIN: 'profile-lorain' },
+          scope: {
+            osiDb: createMockOsiDb(createLorainQueryHandler({ todayTotal: 1.2 })),
+          },
+        }
+      );
+      const formatted = processedMsg.formattedData || {};
+      expectEqual(formatted.rainDeltaStatus, 'invalid_rain_delta', 'LoRain negative rain fixture marks invalid rain');
+      expectEqual(formatted.rainMmDelta, null, 'LoRain negative rain fixture does not persist a negative rain delta');
+      expectEqual(rainOut, null, 'LoRain negative rain fixture does not emit a zone-rain update');
+    })().catch((error) => {
+      fail(`failed to execute negative-rain LoRain fixture: ${error.message}`);
+    }));
+
+    pendingChecks.push((async () => {
+      const [processedMsg, rainOut] = await executeFunctionNodeById(
+        'lorain-process-fn',
+        buildLorainFixture(),
+        {
+          env: { CHIRPSTACK_PROFILE_LORAIN: 'profile-lorain' },
+          scope: {
+            osiDb: createMockOsiDb(createLorainQueryHandler({
+              previousSample: { recorded_at: '2026-04-21T09:50:00.000Z' },
+              todayTotal: 1.2,
+            })),
+          },
+        }
+      );
+      const formatted = processedMsg.formattedData || {};
+      expectEqual(formatted.rainDeltaStatus, 'ok', 'LoRain interval fixture marks valid rain');
+      expectApprox(formatted.rainMmPerHour, 9, 0.000001, 'LoRain interval fixture computes hourly rain rate');
+      expectApprox(formatted.rainMmPer10Min, 1.5, 0.000001, 'LoRain interval fixture computes normalized rain per 10 minutes');
+      expectEqual(formatted.counterIntervalSeconds, 600, 'LoRain interval fixture stores elapsed seconds');
+      expectCondition(!!rainOut, 'LoRain interval fixture emits zone-rain update', 'LoRain interval fixture did not emit zone-rain update');
+    })().catch((error) => {
+      fail(`failed to execute valid-interval LoRain fixture: ${error.message}`);
+    }));
+
+    pendingChecks.push((async () => {
+      const [processedMsg, rainOut] = await executeFunctionNodeById(
+        'lorain-process-fn',
+        buildLorainFixture(),
+        {
+          env: { CHIRPSTACK_PROFILE_LORAIN: 'profile-lorain' },
+          scope: {
+            osiDb: createMockOsiDb(createLorainQueryHandler({
+              duplicateOrFuture: { recorded_at: '2026-04-21T10:00:00.000Z' },
+              todayTotal: 1.2,
+            })),
+          },
+        }
+      );
+      const formatted = processedMsg.formattedData || {};
+      expectEqual(formatted.rainDeltaStatus, 'duplicate_or_out_of_order', 'LoRain duplicate fixture skips duplicate timestamps');
+      expectEqual(formatted.rainMmDelta, null, 'LoRain duplicate fixture does not emit a duplicate rain delta');
+      expectEqual(rainOut, null, 'LoRain duplicate fixture does not emit a zone-rain update');
+    })().catch((error) => {
+      fail(`failed to execute duplicate-timestamp LoRain fixture: ${error.message}`);
+    }));
+
+    pendingChecks.push(executeFunctionNodeById('lorain-sql-fn', {
+      formattedData: {
+        devEui: 'ABC123',
+        timestamp: '2026-04-21T10:00:00.000Z',
+        ambientTemperature: 20.5,
+        batV: 3.3,
+        rainTipsDelta: 3,
+        rainMmDelta: 1.5,
+        rainMmPerHour: 9,
+        rainMmPer10Min: 1.5,
+        rainMmToday: 2.7,
+        counterIntervalSeconds: 600,
+        rainDeltaStatus: 'ok',
+      },
+    }).then((sqlMsg) => {
+      const sql = String((sqlMsg && (sqlMsg.topic || sqlMsg.payload)) || '');
+      expectCondition(
+        sql.includes('rain_tips_delta') && sql.includes('rain_mm_delta') && sql.includes('rain_mm_per_10min'),
+        'LoRain SQL insert persists normalized rain telemetry',
+        'LoRain SQL insert is missing normalized rain telemetry columns'
+      );
+      expectCondition(
+        sql.includes('3.3') && sql.includes('1.5') && sql.includes("'ok'"),
+        'LoRain SQL insert includes battery, rain-rate values, and status',
+        'LoRain SQL insert is missing battery, rain-rate values, or status'
+      );
+    }).catch((error) => {
+      fail(`failed to execute LoRain SQL fixture: ${error.message}`);
+    }));
+
+    pendingChecks.push((async () => {
+      const writes = [];
+      const queryHandler = (sql) => {
+        if (sql.includes('SELECT d.irrigation_zone_id AS zone_id')) {
+          return [{ zone_id: 7, timezone: 'Europe/Zurich' }];
+        }
+        return [];
+      };
+      queryHandler.run = (sql) => {
+        writes.push(sql);
+      };
+      await executeFunctionNodeById(
+        'lorain-rain-agg-fn',
+        {
+          formattedData: {
+            devEui: 'ABC123',
+            timestamp: '2026-04-21T10:00:00.000Z',
+            rainDeltaStatus: 'ok',
+            rainMmDelta: 1.5,
+            rainMmToday: 2.7,
+          },
+        },
+        {
+          scope: {
+            osiDb: createMockOsiDb(queryHandler),
+          },
+        }
+      );
+      const sql = writes.join('\n');
+      expectCondition(
+        sql.includes('zone_daily_environment') && sql.includes('aquascope_lorain'),
+        'LoRain zone aggregate writes source aquascope_lorain',
+        'LoRain zone aggregate did not write aquascope_lorain source'
+      );
+      expectCondition(
+        sql.includes('MAX(COALESCE(rainfall_mm,0)+1.5, 2.7)'),
+        'LoRain zone aggregate adds deltas while honoring device daily total',
+        'LoRain zone aggregate did not preserve delta-plus-daily total behavior'
+      );
+    })().catch((error) => {
+      fail(`failed to execute LoRain zone aggregate fixture: ${error.message}`);
+    }));
 
     pendingChecks.push((async () => {
       const processedMsg = await executeFunctionNodeById(
