@@ -18,31 +18,17 @@ type EdgeAnalysisView = Partial<AnalysisViewJson> & {
 };
 
 const DEFAULT_RANGE: AnalysisRange = { mode: 'relative', label: '7d', from: null, to: null };
-const VIEW_FIELD_NAMES = [
-  'id',
-  'name',
-  'schemaVersion',
-  'selectors',
-  'range',
-  'mode',
-  'layout',
-  'toggles',
-  'labelOverrides',
-  'axisLabelOverrides',
-  'isDefault',
-  'is_default',
-  'updatedAt',
-  'updated_at',
-  'createdAt',
-  'created_at',
-] as const;
-
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
 }
 
 function requireEdgeAnalysisView(raw: unknown, message: string): EdgeAnalysisView {
-  if (!isRecord(raw) || !VIEW_FIELD_NAMES.some((field) => field in raw)) {
+  if (
+    !isRecord(raw)
+    || raw.id === undefined
+    || raw.name === undefined
+    || !Array.isArray(raw.selectors)
+  ) {
     throw new Error(message);
   }
 

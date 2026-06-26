@@ -65,11 +65,15 @@ describe('edge analysis API adapters', () => {
     expect(() => adaptEdgeViewsResponse({ generatedAt: '2026-06-26T09:00:00.000Z' })).toThrow(
       /Invalid analysis views response/,
     );
+    expect(() => adaptEdgeViewsResponse([{ id: 1, name: 'A' }])).toThrow(/Invalid analysis view response/);
   });
 
   it('throws for malformed saved-view responses', () => {
     expect(() => adaptEdgeSavedViewResponse({})).toThrow(/Invalid analysis saved view response/);
     expect(() => adaptEdgeSavedViewResponse({ view: {} })).toThrow(/Invalid analysis saved view response/);
+    expect(() => adaptEdgeSavedViewResponse({ view: { name: 'x' } })).toThrow(
+      /Invalid analysis saved view response/,
+    );
   });
 
   it('flattens copied frontend save requests for POST /api/analysis/views', () => {

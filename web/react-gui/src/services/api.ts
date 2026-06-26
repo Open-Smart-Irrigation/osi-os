@@ -12,6 +12,7 @@ import {
   adaptEdgeViewsResponse,
   toEdgeAnalysisViewPayload,
 } from '../analysis/edgeAnalysisApi';
+import { resolveAnalysisRangeForRequest } from '../analysis/range';
 import type {
   HistoryCardSummaryResponse,
   HistoryCardDataResponse,
@@ -1041,7 +1042,10 @@ export const analysisAPI = {
   },
 
   getSeries: async (request: AnalysisSeriesRequest): Promise<AnalysisSeriesResponse> => {
-    const response = await api.post<AnalysisSeriesResponse>('/api/analysis/series', request);
+    const response = await api.post<AnalysisSeriesResponse>('/api/analysis/series', {
+      ...request,
+      range: resolveAnalysisRangeForRequest(request.range),
+    });
     return response.data;
   },
 
