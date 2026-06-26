@@ -16,6 +16,7 @@ import { ZoneConfigModal } from './ZoneConfigModal';
 import { AdvancedScheduleDrawer } from './AdvancedScheduleDrawer';
 import { useTranslation } from 'react-i18next';
 import { collectDeviceSwtValues, summarizeSwtValues } from '../../utils/swt';
+import { isDesktopBrowser } from '../../utils/isDesktopBrowser';
 
 interface IrrigationZoneCardProps {
   zone: IrrigationZone;
@@ -140,6 +141,7 @@ export const IrrigationZoneCard: React.FC<IrrigationZoneCardProps> = ({
   const cropType = zone.cropType;
   const soilType = zone.soilType;
   const soilNow = summarizeSwtValues(collectDeviceSwtValues(devices));
+  const showZoneDataLink = !isDesktopBrowser();
 
   useEffect(() => {
     let cancelled = false;
@@ -224,12 +226,14 @@ export const IrrigationZoneCard: React.FC<IrrigationZoneCardProps> = ({
           >
             {t('zone.assignDevice')}
           </button>
-          <Link
-            to={`/history/zones/${zone.id}`}
-            className="touch-target bg-[var(--success-border)] hover:bg-green-700 text-white px-4 py-2 rounded-lg text-sm font-semibold transition-colors inline-flex items-center justify-center"
-          >
-            {t('zone.data', 'Data')}
-          </Link>
+          {showZoneDataLink && (
+            <Link
+              to={`/history/zones/${zone.id}`}
+              className="touch-target bg-[var(--success-border)] hover:bg-green-700 text-white px-4 py-2 rounded-lg text-sm font-semibold transition-colors inline-flex items-center justify-center"
+            >
+              {t('zone.data', 'Data')}
+            </Link>
+          )}
           <button
             onClick={() => setShowDeleteConfirm(true)}
             disabled={isDeleting}

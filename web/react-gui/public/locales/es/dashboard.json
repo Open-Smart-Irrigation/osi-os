@@ -1,8 +1,16 @@
 {
   "title": "Panel de control Open Smart Irrigation",
   "welcome": "Bienvenido, {{username}}",
-  "addZone": "Añadir zona",
-  "addDevice": "Añadir dispositivo",
+  "add": "Añadir",
+  "addMenu": {
+    "zone": "Añadir zona",
+    "device": "Añadir dispositivo"
+  },
+  "data": "Datos",
+  "account": "Cuenta",
+  "accountMenu": {
+    "osiServer": "OSI Server"
+  },
   "logout": "Cerrar sesión",
   "loading": "Cargando panel de control...",
   "failedToLoad": "Error al cargar los datos",

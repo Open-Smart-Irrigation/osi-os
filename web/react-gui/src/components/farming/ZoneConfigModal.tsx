@@ -259,6 +259,7 @@ export const ZoneConfigModal: React.FC<Props> = ({ isOpen, zone, onClose, onSave
   };
 
   const canRequestDeviceLocation = Boolean(deviceLocationSupport?.available && !deviceLocationLoading);
+  const todayIso = new Date().toISOString().slice(0, 10);
   const deviceLocationStatusClass = deviceLocationSupport?.available
     ? 'bg-emerald-100 text-emerald-800'
     : deviceLocationSupport?.reason === 'permission_denied'
@@ -271,7 +272,6 @@ export const ZoneConfigModal: React.FC<Props> = ({ isOpen, zone, onClose, onSave
       : deviceLocationSupportLoading
         ? 'Checking…'
         : 'Unavailable';
-  const todayIso = new Date().toISOString().slice(0, 10);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">

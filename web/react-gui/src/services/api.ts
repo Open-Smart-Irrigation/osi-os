@@ -1,6 +1,19 @@
 import axios from 'axios';
 import { notifyAuthExpired } from './authEvents';
 import type {
+  AnalysisCatalogResponse,
+  AnalysisSeriesRequest,
+  AnalysisSeriesResponse,
+  AnalysisViewRequest,
+  AnalysisViewResponse,
+} from '../analysis/types';
+import {
+  adaptEdgeSavedViewResponse,
+  adaptEdgeViewsResponse,
+  toEdgeAnalysisViewPayload,
+} from '../analysis/edgeAnalysisApi';
+import { resolveAnalysisRangeForRequest } from '../analysis/range';
+import type {
   HistoryCardSummaryResponse,
   HistoryCardDataResponse,
   HistoryAdvancedResponse,
@@ -152,7 +165,7 @@ function normaliseDevice(device: any): Device {
   const soilMoistureProbeDepths = rawDepths && typeof rawDepths === 'object' && !Array.isArray(rawDepths)
     ? Object.fromEntries(
         Object.entries(rawDepths)
-          .map(([key, value]) => [String(key), Number(value)])
+          .map(([key, value]) => [String(key), Number(value)] as [string, number])
           .filter(([, value]) => Number.isFinite(value) && value > 0)
       )
     : undefined;
@@ -1022,6 +1035,31 @@ export const environmentAPI = {
     api.get<ZoneEnvironmentSummary>(`/api/irrigation-zones/${zoneId}/environment-summary`).then(r => r.data),
 };
 
+export const analysisAPI = {
+  getChannels: async (): Promise<AnalysisCatalogResponse> => {
+    const response = await api.get<AnalysisCatalogResponse>('/api/analysis/channels');
+    return response.data;
+  },
+
+  getSeries: async (request: AnalysisSeriesRequest): Promise<AnalysisSeriesResponse> => {
+    const response = await api.post<AnalysisSeriesResponse>('/api/analysis/series', {
+      ...request,
+      range: resolveAnalysisRangeForRequest(request.range),
+    });
+    return response.data;
+  },
+
+  listViews: async (): Promise<AnalysisViewResponse[]> => {
+    const response = await api.get<unknown>('/api/analysis/views');
+    return adaptEdgeViewsResponse(response.data);
+  },
+
+  saveView: async (request: AnalysisViewRequest): Promise<AnalysisViewResponse> => {
+    const response = await api.post<unknown>('/api/analysis/views', toEdgeAnalysisViewPayload(request));
+    return adaptEdgeSavedViewResponse(response.data);
+  },
+};
+
 export const historyAPI = {
   getZoneCards: async (zoneId: number): Promise<HistoryCardSummaryResponse> => {
     const response = await api.get(`/api/history/zones/${zoneId}/cards`);
@@ -1136,17 +1174,21 @@ export const historyAPI = {
   },
 };
 
+export type ZoneExportGranularity = 'raw' | 'hourly' | 'daily';
+
 export const zoneExportAPI = {
   download: async (
     zoneId: number,
-    opts: { from: string; to: string; granularity: 'raw' | 'hourly' | 'daily' },
+    opts: { from: string; to: string; granularity: ZoneExportGranularity; channels?: string[] },
   ): Promise<void> => {
+    const params: Record<string, string> = {
+      from: opts.from,
+      to: opts.to,
+      granularity: opts.granularity,
+    };
+    if (opts.channels?.length) params.channels = opts.channels.join(',');
     const response = await api.get(`/api/history/zones/${zoneId}/export.csv`, {
-      params: {
-        from: opts.from,
-        to: opts.to,
-        granularity: opts.granularity,
-      },
+      params,
       responseType: 'blob',
     });
     const blob = new Blob([response.data], { type: 'text/csv;charset=utf-8' });

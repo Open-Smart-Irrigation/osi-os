@@ -5,7 +5,7 @@ import React from 'react';
 import { SWRConfig } from 'swr';
 
 import App from '../../../App';
-import { historyAPI, irrigationZonesAPI, systemAPI } from '../../../services/api';
+import { historyAPI, irrigationZonesAPI, systemAPI, zoneExportAPI } from '../../../services/api';
 import type { HistoryCardSummary } from '../../../history/types';
 
 const { translateForTest } = vi.hoisted(() => {
@@ -29,6 +29,8 @@ const { translateForTest } = vi.hoisted(() => {
     'history.settings.cardSettingsUnavailable': 'Card settings are not available yet.',
     'history.settings.resetRange': 'Reset range',
     'history.settings.refresh': 'Refresh',
+    'history.export.open': 'Export',
+    'history.export.title': 'Export CSV',
     'history.inspector.title': 'Inspector',
     'history.inspector.context': 'Selected point',
     'history.inspector.close': 'Close',
@@ -120,6 +122,16 @@ const { translateForTest } = vi.hoisted(() => {
     'history.advanced.availability.collected': 'Collected',
     'history.advanced.availability.unknown_now': 'Unknown now',
     'history.advanced.value.unavailable': 'Unavailable',
+    'zone.export.title': 'Export data',
+    'zone.export.selectRange': 'Select range',
+    'zone.export.granularity': 'Granularity',
+    'zone.export.raw': 'Raw',
+    'zone.export.hourly': 'Hourly',
+    'zone.export.daily': 'Daily',
+    'zone.export.download': 'Download',
+    'zone.export.downloading': 'Downloading',
+    'zone.export.fullExport': 'Full export',
+    'zone.export.rangeSummary': '{{from}} to {{to}}',
   };
 
   return {
@@ -160,6 +172,9 @@ vi.mock('../../../services/api', () => ({
   irrigationZonesAPI: {
     getAll: vi.fn(),
   },
+  zoneExportAPI: {
+    download: vi.fn(),
+  },
   authAPI: {
     login: vi.fn(),
     register: vi.fn(),
@@ -170,6 +185,9 @@ const historyAPIMock = historyAPI as typeof historyAPI & {
   getGatewayCards: Mock;
   getZoneCardData: Mock;
   getZoneCardAdvanced: Mock;
+};
+const zoneExportAPIMock = zoneExportAPI as typeof zoneExportAPI & {
+  download: Mock;
 };
 
 function firstZoneCardDataRequest() {
@@ -231,8 +249,8 @@ function dispatchTouch(
       ? new TouchEvent(type, {
           bubbles: true,
           cancelable: true,
-          touches: touchList as unknown as TouchList,
-          changedTouches: touchList as unknown as TouchList,
+          touches: Array.from(touchList as unknown as TouchList),
+          changedTouches: Array.from(touchList as unknown as TouchList),
         })
       : new Event(type, { bubbles: true, cancelable: true });
 
@@ -241,7 +259,9 @@ function dispatchTouch(
     Object.defineProperty(event, 'changedTouches', { value: touchList });
   }
 
-  element.dispatchEvent(event);
+  act(() => {
+    element.dispatchEvent(event);
+  });
 }
 
 function renderAppAtRoute(hashRoute: string) {
@@ -477,6 +497,7 @@ describe('History card detail route', () => {
       hidden: false,
       updatedAt: '2026-05-31T10:01:00.000Z',
     });
+    vi.mocked(zoneExportAPI.download).mockResolvedValue(undefined);
   });
 
   afterEach(() => {
@@ -497,6 +518,31 @@ describe('History card detail route', () => {
     await waitFor(() => {
       expect(historyAPI.markZoneCardOpened).toHaveBeenCalledWith(12, 'soil-card:root-zone');
     });
+  });
+
+  it('opens a mobile export sheet with canonical open-card channels', async () => {
+    renderAppAtRoute('/history/zones/12/cards/soil-card%3Aroot-zone');
+
+    expect(await screen.findByRole('heading', { level: 1, name: 'Soil Moisture North Block' })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Export' }));
+    expect(await screen.findByRole('dialog', { name: 'Export CSV' }, { timeout: 4000 })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Download' }));
+
+    await waitFor(() => {
+      expect(zoneExportAPIMock.download).toHaveBeenCalledWith(
+        12,
+        expect.objectContaining({ channels: ['swt_1', 'swt_2', 'swt_3', 'vwc'] }),
+      );
+    });
+  });
+
+  it('hides mobile export for gateway cards', async () => {
+    renderAppAtRoute('/history/gateways/0016C001F11766E7/cards/0016C001F11766E7%3Agateway%3Ahub');
+
+    expect(await screen.findByRole('heading', { level: 1, name: 'Gateway' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Export' })).not.toBeInTheDocument();
   });
 
   it('resolves a zone route without card id to the first ordered card', async () => {
@@ -819,7 +865,7 @@ describe('History card detail route', () => {
         zoneCard({
           sourceDeviceCount: 1,
           sourceLabels: ['Dendro 3'],
-          sourceDevices: [{ key: 'd1', name: 'Dendro 3', typeId: 'DRAGINO_LSN50', role: 'dendro' }],
+          sourceDevices: [{ sourceKey: 'd1', name: 'Dendro 3', typeId: 'DRAGINO_LSN50', role: 'dendro' }],
         }),
       ],
     });
@@ -1003,6 +1049,9 @@ describe('History card detail route', () => {
 
     expect(await screen.findByRole('grid')).toBeInTheDocument();
     expect(screen.getByTestId('view-mode-label')).toHaveTextContent('Calendar - June 2026');
+    await act(async () => {
+      await Promise.resolve();
+    });
     const surface = screen.getByTestId('history-visualization-surface');
     preparePointerTarget(surface);
     dispatchTouch(surface, 'touchstart', [{ clientX: 250, clientY: 160 }]);

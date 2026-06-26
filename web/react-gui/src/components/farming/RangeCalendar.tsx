@@ -14,7 +14,12 @@ interface RangeCalendarProps {
   todayIso: string;
 }
 
-const WEEKDAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+// Monday-first weekday headers, localized to the runtime locale (matches the
+// month label below). 2024-01-01 is a Monday.
+const WEEKDAY_FORMATTER = new Intl.DateTimeFormat(undefined, { weekday: 'short', timeZone: 'UTC' });
+const WEEKDAYS = Array.from({ length: 7 }, (_, index) =>
+  WEEKDAY_FORMATTER.format(new Date(Date.UTC(2024, 0, 1 + index))),
+);
 
 function initialMonth(value: RangeValue, todayIso: string): { year: number; month: number } {
   const date = value.from || todayIso;
@@ -50,7 +55,7 @@ export const RangeCalendar: React.FC<RangeCalendarProps> = ({ value, onChange, t
           className="h-9 w-9 rounded-lg border border-[var(--border)] text-lg text-[var(--text)]"
           aria-label="Previous month"
         >
-          ‹
+          {'<'}
         </button>
         <p className="text-sm font-semibold text-[var(--text)]">{monthLabel}</p>
         <button
@@ -59,7 +64,7 @@ export const RangeCalendar: React.FC<RangeCalendarProps> = ({ value, onChange, t
           className="h-9 w-9 rounded-lg border border-[var(--border)] text-lg text-[var(--text)]"
           aria-label="Next month"
         >
-          ›
+          {'>'}
         </button>
       </div>
 

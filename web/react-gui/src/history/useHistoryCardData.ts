@@ -1,12 +1,8 @@
 import useSWR from 'swr';
 import { historyAPI } from '../services/api';
 import type {
-  HistoryAggregationLevel,
   HistoryCardDataRequest,
   HistoryCardDataResponse,
-  HistoryOverlayId,
-  HistoryRangeSelection,
-  HistoryViewMode,
 } from './types';
 
 export type HistoryCardDataScope =

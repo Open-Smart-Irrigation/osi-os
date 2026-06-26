@@ -31,7 +31,6 @@ function isGenericSoilLayerLabel(label: string | null): boolean {
 }
 
 function normalizeProfilePoint(
-  t: HistoryTranslate,
   point: Partial<HistoryProfilePoint> | null | undefined,
   index: number,
 ): RenderableProfilePoint {
@@ -82,7 +81,7 @@ export const SoilProfileView: React.FC<SoilProfileViewProps> = ({ profiles }) =>
   const { t: translate } = useTranslation('history');
   const t = translate as HistoryTranslate;
   const sortedProfiles = profiles
-    .map((point, index) => normalizeProfilePoint(t, point, index))
+    .map((point, index) => normalizeProfilePoint(point, index))
     .sort(compareProfileDepth);
 
   if (sortedProfiles.length === 0) {

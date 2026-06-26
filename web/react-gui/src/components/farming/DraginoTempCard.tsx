@@ -62,12 +62,6 @@ function formatKpa(value: number | null | undefined): string {
   return Number.isFinite(numeric) ? `${numeric.toFixed(1)} kPa` : '—';
 }
 
-function formatDendroRangeState(saturationSide: string | null | undefined): string {
-  if (saturationSide === 'low') return 'Below retracted';
-  if (saturationSide === 'high') return 'Above extended';
-  return 'In range';
-}
-
 const FOCUS_VISIBLE_RING =
   'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--surface)]';
 

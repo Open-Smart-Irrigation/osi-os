@@ -1,6 +1,5 @@
 import '@testing-library/jest-dom/vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
-import React from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { devicesAPI } from '../../../services/api';
@@ -27,7 +26,7 @@ const lorainDevice: Device = {
   claimed_by_user_uuid: 'uuid-1',
   dendro_ratio_at_retracted: null,
   dendro_ratio_at_extended: null,
-  dendro_baseline_pending: false,
+  dendro_baseline_pending: 0,
   last_seen: '2026-05-17T12:00:00Z',
   latest_data: {
     ambient_temperature: 20.5,
@@ -39,7 +38,7 @@ const lorainDevice: Device = {
     counter_interval_seconds: 600,
     rain_delta_status: 'ok',
   },
-};
+} as unknown as Device;
 
 describe('LoRainGaugeCard', () => {
   beforeEach(() => {

@@ -23,6 +23,11 @@ const helper = require(helperPath);
 
 const expectedExports = [
   'normalizeDeveui',
+  'analysisSeriesId',
+  'buildAnalysisCatalog',
+  'resolveAnalysisSeries',
+  'listAnalysisViews',
+  'saveAnalysisView',
   'deriveCardId',
   'deriveCardsForZone',
   'deriveGatewayCard',
@@ -51,6 +56,22 @@ const expectedExports = [
   'buildCalendar',
   'buildLocalInterpretations',
 ];
+
+const TIDY_CSV_COLUMNS = [
+  'timestamp',
+  'site',
+  'zone',
+  'series_label',
+  'card_type',
+  'source_key',
+  'channel_key',
+  'depth_cm',
+  'array_id',
+  'unit',
+  'value',
+];
+
+const SQLITE_JSON_MAX_BUFFER = 16 * 1024 * 1024;
 
 function test(name, fn) {
   Promise.resolve()
@@ -86,27 +107,31 @@ function createCliSqliteDb() {
   const db = {
     path: dbPath,
     lastQuery: null,
+    queries: [],
     runSql(sql) {
       execFileSync('sqlite3', [dbPath], { input: sql });
     },
-    all(sql, params, cb) {
-      db.lastQuery = { sql, params: Array.isArray(params) ? params.slice() : [] };
-      let index = 0;
-      const rendered = sql.replace(/\?/g, () => sqliteEscape(db.lastQuery.params[index++]));
-      try {
-        const output = execFileSync('sqlite3', ['-json', dbPath, rendered], { encoding: 'utf8' }).trim();
-        cb(null, output ? JSON.parse(output) : []);
-      } catch (error) {
-        cb(error);
-      }
-    },
     run(sql, params, cb) {
       db.lastQuery = { sql, params: Array.isArray(params) ? params.slice() : [] };
+      db.queries.push(db.lastQuery);
       let index = 0;
       const rendered = sql.replace(/\?/g, () => sqliteEscape(db.lastQuery.params[index++]));
       try {
         execFileSync('sqlite3', [dbPath], { input: rendered });
-        cb(null);
+        if (typeof cb === 'function') cb.call({}, null);
+      } catch (error) {
+        if (typeof cb === 'function') cb(error);
+        else throw error;
+      }
+    },
+    all(sql, params, cb) {
+      db.lastQuery = { sql, params: Array.isArray(params) ? params.slice() : [] };
+      db.queries.push(db.lastQuery);
+      let index = 0;
+      const rendered = sql.replace(/\?/g, () => sqliteEscape(db.lastQuery.params[index++]));
+      try {
+        const output = execFileSync('sqlite3', ['-json', dbPath, rendered], { encoding: 'utf8', maxBuffer: SQLITE_JSON_MAX_BUFFER }).trim();
+        cb(null, output ? JSON.parse(output) : []);
       } catch (error) {
         cb(error);
       }
@@ -118,6 +143,49 @@ function createCliSqliteDb() {
   return db;
 }
 
+async function analysisFixtureDb() {
+  const db = createCliSqliteDb();
+  db.runSql(`
+    INSERT INTO users(id, username, password_hash, created_at, updated_at, user_uuid)
+    VALUES (1, 'analysis-user', 'x', '2026-06-01T00:00:00.000Z', '2026-06-01T00:00:00.000Z', 'user-uuid');
+    INSERT INTO irrigation_zones(id, name, user_id, zone_uuid, timezone, gateway_device_eui)
+    VALUES (12, 'Analysis Zone', 1, 'analysis-zone', 'UTC', '0016C001F11766E7');
+    INSERT INTO devices(deveui, name, type_id, user_id, irrigation_zone_id, chameleon_swt1_depth_cm, created_at, updated_at)
+    VALUES ('AA00000000000001', 'Kiwi One', 'KIWI_SENSOR', 1, 12, 15, '2026-06-01T00:00:00.000Z', '2026-06-01T00:00:00.000Z');
+    INSERT INTO device_data(deveui, recorded_at, swt_1)
+    VALUES
+      ('AA00000000000001', '2026-06-01T00:00:00.000Z', 10),
+      ('AA00000000000001', '2026-06-01T01:00:00.000Z', 20),
+      ('AA00000000000001', '2026-06-01T02:00:00.000Z', 30);
+  `);
+  db.queries = [];
+  return db;
+}
+
+async function multiUserAnalysisFixtureDb() {
+  const db = createCliSqliteDb();
+  db.runSql(`
+    INSERT INTO users(id, username, password_hash, created_at, updated_at, user_uuid)
+    VALUES
+      (1, 'analysis-user-one', 'x', '2026-06-01T00:00:00.000Z', '2026-06-01T00:00:00.000Z', 'user-one-uuid'),
+      (2, 'analysis-user-two', 'x', '2026-06-01T00:00:00.000Z', '2026-06-01T00:00:00.000Z', 'user-two-uuid');
+    INSERT INTO irrigation_zones(id, name, user_id, zone_uuid, timezone, gateway_device_eui)
+    VALUES
+      (12, 'User One Zone', 1, 'analysis-zone-one', 'UTC', '0016C001F11766E7'),
+      (22, 'User Two Zone', 2, 'analysis-zone-two', 'UTC', '0016C001F11766E7');
+    INSERT INTO devices(deveui, name, type_id, user_id, irrigation_zone_id, created_at, updated_at)
+    VALUES
+      ('AA00000000000001', 'Kiwi One', 'KIWI_SENSOR', 1, 12, '2026-06-01T00:00:00.000Z', '2026-06-01T00:00:00.000Z'),
+      ('BB00000000000002', 'Kiwi Two', 'KIWI_SENSOR', 2, 22, '2026-06-01T00:00:00.000Z', '2026-06-01T00:00:00.000Z');
+    INSERT INTO device_data(deveui, recorded_at, swt_1)
+    VALUES
+      ('AA00000000000001', '2026-06-01T00:00:00.000Z', 10),
+      ('BB00000000000002', '2026-06-01T00:00:00.000Z', 20);
+  `);
+  db.queries = [];
+  return db;
+}
+
 test('exports the history helper contract', () => {
   for (const name of expectedExports) {
     assert.strictEqual(typeof helper[name], 'function', `${name} export`);
@@ -125,8 +193,267 @@ test('exports the history helper contract', () => {
 });
 
 test('exports the zone CSV column contracts', () => {
-  assert.deepStrictEqual(helper.RAW_CSV_COLUMNS, ['timestamp', 'timezone', 'zone', 'card', 'source', 'array_id', 'variable', 'depth_cm', 'value', 'unit']);
-  assert.deepStrictEqual(helper.AGG_CSV_COLUMNS, ['bucket_start', 'bucket_end', 'timezone', 'zone', 'card', 'source', 'array_id', 'variable', 'depth_cm', 'unit', 'n', 'coverage_pct', 'mean', 'min', 'max', 'median', 'latest']);
+  assert.deepStrictEqual(helper.RAW_CSV_COLUMNS, TIDY_CSV_COLUMNS);
+  assert.deepStrictEqual(helper.AGG_CSV_COLUMNS, TIDY_CSV_COLUMNS);
+});
+
+test('exports the analysis views schema contract', () => {
+  assert.match(helper.ANALYSIS_VIEWS_SCHEMA, /CREATE TABLE IF NOT EXISTS analysis_views/);
+});
+
+test('analysisSeriesId is a stable 16-hex hash of the tuple', () => {
+  const id = helper.analysisSeriesId(12, 'soil', 'soil-1', 'swt_1');
+  assert.match(id, /^[0-9a-f]{16}$/);
+  const expected = crypto.createHash('sha256').update('12|soil|soil-1|swt_1').digest('hex').slice(0, 16);
+  assert.strictEqual(id, expected);
+  assert.strictEqual(helper.analysisSeriesId(12, 'soil', 'soil-1', 'swt_1'), id);
+});
+
+test('buildAnalysisCatalog enumerates metadata-only per-source-device channels with availability', async () => {
+  const db = await analysisFixtureDb();
+  try {
+    const { channels, entriesById } = await helper.buildAnalysisCatalog(db, { deviceEui: '0016C001F11766E7', userId: 1 });
+    const swt1 = channels.find((entry) => entry.channelKey === 'swt_1');
+    assert.ok(swt1, 'has a swt_1 series');
+    assert.strictEqual(swt1.hubEui, '0016C001F11766E7');
+    assert.strictEqual(swt1.zoneId, 12);
+    assert.strictEqual(swt1.zoneName, 'Analysis Zone');
+    assert.strictEqual(swt1.cardType, 'soil');
+    assert.strictEqual(swt1.deviceName, 'Kiwi One');
+    assert.strictEqual(swt1.depthCm, 15);
+    assert.strictEqual(swt1.availability, 'available');
+    assert.strictEqual(swt1.seriesId, helper.analysisSeriesId(swt1.zoneId, 'soil', swt1.sourceKey, 'swt_1'));
+    assert.strictEqual(entriesById.get(swt1.seriesId).deveui, 'AA00000000000001');
+    const vwc = channels.find((entry) => entry.channelKey === 'vwc');
+    assert.ok(vwc, 'has manifest-valid vwc channel');
+    assert.strictEqual(vwc.availability, 'unsupported');
+    assert.ok(!db.queries.some((query) => /\bFROM\s+device_data\b/i.test(query.sql)), 'catalog must not scan history rows');
+  } finally {
+    db.close();
+  }
+});
+
+test('buildAnalysisCatalog scopes zones and devices to the authenticated user', async () => {
+  const db = await multiUserAnalysisFixtureDb();
+  try {
+    const { channels } = await helper.buildAnalysisCatalog(db, { deviceEui: '0016C001F11766E7', userId: 1 });
+    const zoneNames = Array.from(new Set(channels.map((entry) => entry.zoneName))).sort();
+    const deviceNames = Array.from(new Set(channels.map((entry) => entry.deviceName))).sort();
+    assert.deepStrictEqual(zoneNames, ['User One Zone']);
+    assert.deepStrictEqual(deviceNames, ['Kiwi One']);
+  } finally {
+    db.close();
+  }
+});
+
+test('resolveAnalysisSeries aggregates per-device points and drops unknown ids', async () => {
+  const db = await analysisFixtureDb();
+  try {
+    const cat = await helper.buildAnalysisCatalog(db, { deviceEui: 'EUI', userId: 1 });
+    const swt1 = cat.channels.find((entry) => entry.channelKey === 'swt_1');
+    const res = await helper.resolveAnalysisSeries(db, {
+      deviceEui: 'EUI',
+      userId: 1,
+      selectors: [{ seriesId: swt1.seriesId }, { seriesId: 'deadbeefdeadbeef' }],
+      range: { from: '2026-06-01T00:00:00.000Z', to: '2026-06-02T00:00:00.000Z' },
+      aggregation: 'auto',
+    });
+    assert.strictEqual(res.series.length, 1);
+    assert.strictEqual(res.series[0].resolved.channelKey, 'swt_1');
+    assert.strictEqual(res.series[0].resolved.sourceKey, swt1.sourceKey);
+    assert.strictEqual(res.series[0].points.length, 3);
+    assert.deepStrictEqual(res.dropped, [{ seriesId: 'deadbeefdeadbeef', reason: 'unknown' }]);
+  } finally {
+    db.close();
+  }
+});
+
+test('resolveAnalysisSeries drops series ids outside the authenticated user catalog', async () => {
+  const db = await multiUserAnalysisFixtureDb();
+  try {
+    const userTwoCatalog = await helper.buildAnalysisCatalog(db, { deviceEui: 'EUI', userId: 2 });
+    const userTwoSwt = userTwoCatalog.channels.find((entry) => entry.zoneName === 'User Two Zone' && entry.channelKey === 'swt_1');
+    assert.ok(userTwoSwt, 'fixture has user two analysis series');
+    const res = await helper.resolveAnalysisSeries(db, {
+      deviceEui: 'EUI',
+      userId: 1,
+      selectors: [{ seriesId: userTwoSwt.seriesId }],
+      range: { from: '2026-06-01T00:00:00.000Z', to: '2026-06-02T00:00:00.000Z' },
+      aggregation: 'auto',
+    });
+    assert.strictEqual(res.series.length, 0);
+    assert.deepStrictEqual(res.dropped, [{ seriesId: userTwoSwt.seriesId, reason: 'unknown' }]);
+  } finally {
+    db.close();
+  }
+});
+
+test('resolveAnalysisSeries rejects over the selected-series cap', async () => {
+  const db = await analysisFixtureDb();
+  try {
+    const selectors = Array.from({ length: 26 }, (_, index) => ({ seriesId: `id${index}` }));
+    await assert.rejects(
+      () => helper.resolveAnalysisSeries(db, {
+        deviceEui: 'EUI',
+        userId: 1,
+        selectors,
+        range: { from: '2026-06-01T00:00:00.000Z', to: '2026-06-02T00:00:00.000Z' },
+        aggregation: 'auto',
+      }),
+      (error) => {
+        assert.strictEqual(error.statusCode, 413);
+        assert.match(String(error.suggestion), /fewer series/i);
+        return true;
+      }
+    );
+  } finally {
+    db.close();
+  }
+});
+
+test('resolveAnalysisSeries rejects ranges over four hundred days', async () => {
+  const db = await analysisFixtureDb();
+  try {
+    const cat = await helper.buildAnalysisCatalog(db, { deviceEui: 'EUI', userId: 1 });
+    const swt1 = cat.channels.find((entry) => entry.channelKey === 'swt_1');
+    await assert.rejects(
+      () => helper.resolveAnalysisSeries(db, {
+        deviceEui: 'EUI',
+        userId: 1,
+        selectors: [{ seriesId: swt1.seriesId }],
+        range: { from: '2025-01-01T00:00:00.000Z', to: '2026-06-15T00:00:00.000Z' },
+        aggregation: 'auto',
+      }),
+      (error) => {
+        assert.strictEqual(error.statusCode, 413);
+        assert.match(String(error.suggestion), /range/i);
+        return true;
+      }
+    );
+  } finally {
+    db.close();
+  }
+});
+
+test('resolveAnalysisSeries rejects over the raw-row scan cap per request', async () => {
+  const db = await analysisFixtureDb();
+  try {
+    db.runSql(`
+      WITH RECURSIVE seq(n) AS (
+        VALUES(0)
+        UNION ALL
+        SELECT n + 1 FROM seq WHERE n < 30000
+      )
+      INSERT INTO device_data(deveui, recorded_at, swt_1)
+      SELECT
+        'AA00000000000001',
+        strftime('%Y-%m-%dT%H:%M:%fZ', '2026-06-01T00:00:00Z', '+' || n || ' seconds'),
+        10
+      FROM seq;
+    `);
+    const cat = await helper.buildAnalysisCatalog(db, { deviceEui: 'EUI', userId: 1 });
+    const swt1 = cat.channels.find((entry) => entry.channelKey === 'swt_1');
+    await assert.rejects(
+      () => helper.resolveAnalysisSeries(db, {
+        deviceEui: 'EUI',
+        userId: 1,
+        selectors: [{ seriesId: swt1.seriesId }],
+        range: { from: '2026-06-01T00:00:00.000Z', to: '2026-06-02T00:00:00.000Z' },
+        aggregation: 'auto',
+      }),
+      (error) => {
+        assert.strictEqual(error.statusCode, 413);
+        assert.match(String(error.suggestion), /range|granularity/i);
+        return true;
+      }
+    );
+  } finally {
+    db.close();
+  }
+});
+
+test('resolveAnalysisSeries enforces raw-row cap on the data query', async () => {
+  const db = await analysisFixtureDb();
+  try {
+    const cat = await helper.buildAnalysisCatalog(db, { deviceEui: 'EUI', userId: 1 });
+    const swt1 = cat.channels.find((entry) => entry.channelKey === 'swt_1');
+    await helper.resolveAnalysisSeries(db, {
+      deviceEui: 'EUI',
+      userId: 1,
+      selectors: [{ seriesId: swt1.seriesId }],
+      range: { from: '2026-06-01T00:00:00.000Z', to: '2026-06-02T00:00:00.000Z' },
+      aggregation: 'auto',
+    });
+    const dataQuery = db.queries.find((query) =>
+      /\bSELECT\s+deveui,\s+recorded_at\b/i.test(query.sql) &&
+      /\bFROM\s+device_data\b/i.test(query.sql)
+    );
+    assert.ok(dataQuery, 'series resolver runs a device_data query');
+    assert.match(dataQuery.sql, /\bLIMIT\s+\?/i);
+    assert.ok(!db.queries.some((query) => /SELECT 1 AS present FROM device_data/i.test(query.sql)), 'series resolver must not pre-scan with a separate cap probe');
+  } finally {
+    db.close();
+  }
+});
+
+test('analysis_views round-trips per user and drops stale series ids on read', async () => {
+  const db = await analysisFixtureDb();
+  try {
+    db.runSql(helper.ANALYSIS_VIEWS_SCHEMA);
+    const cat = await helper.buildAnalysisCatalog(db, { deviceEui: 'EUI', userId: 1 });
+    const live = cat.channels[0].seriesId;
+    await helper.saveAnalysisView(db, { userId: 1, ownerUserUuid: 'u-1' }, {
+      name: 'My view',
+      selectors: [{ seriesId: live }, { seriesId: 'stalexxxxxxxxxx0' }],
+      schemaVersion: 1,
+    });
+    const views = await helper.listAnalysisViews(db, { userId: 1, deviceEui: 'EUI' });
+    assert.strictEqual(views.length, 1);
+    assert.deepStrictEqual(views[0].selectors.map((selector) => selector.seriesId), [live]);
+    assert.deepStrictEqual(views[0].droppedSeriesIds, ['stalexxxxxxxxxx0']);
+  } finally {
+    db.close();
+  }
+});
+
+test('saveAnalysisView rejects an empty or oversized name', async () => {
+  const db = await analysisFixtureDb();
+  try {
+    db.runSql(helper.ANALYSIS_VIEWS_SCHEMA);
+    await assert.rejects(
+      () => helper.saveAnalysisView(db, { userId: 1 }, { name: '', selectors: [] }),
+      (error) => {
+        assert.strictEqual(error.statusCode, 400);
+        return true;
+      }
+    );
+    await assert.rejects(
+      () => helper.saveAnalysisView(db, { userId: 1 }, '{bad-json'),
+      (error) => {
+        assert.strictEqual(error.statusCode, 400);
+        return true;
+      }
+    );
+  } finally {
+    db.close();
+  }
+});
+
+test('deploy script repairs analysis_views without reseeding the live database', () => {
+  const deploy = fs.readFileSync(path.join(repoRoot, 'deploy.sh'), 'utf8');
+  assert.match(deploy, /CREATE TABLE IF NOT EXISTS analysis_views/);
+  assert.match(deploy, /Live analysis views schema repair/);
+  assert.match(deploy, /osi-history-helper\/analysis\.js/);
+});
+
+test('toCsv neutralizes spreadsheet formulas in text cells', () => {
+  const csv = helper.toCsv(['zone', 'source', 'array_id', 'value'], [{
+    zone: '=Zone',
+    source: '+Source',
+    array_id: '@ARRAY',
+    value: 12.5,
+  }]);
+  assert.strictEqual(csv, "zone,source,array_id,value\n'=Zone,'+Source,'@ARRAY,12.5\n");
 });
 
 test('classifySoilStatus uses 22/50 kPa thresholds', () => {
@@ -610,386 +937,6 @@ test('runRollupJob populates hourly and daily rollups for a zone', async () => {
   }
 });
 
-test('writeZoneCsv emits tidy long-format raw and daily files with depth', async () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'osi-csv-'));
-  try {
-    const zone = { id: 7, name: 'Zone B', zone_uuid: 'zu', timezone: 'Europe/Zurich' };
-    const rawRows = [
-      {
-        timestamp: '2026-06-02T14:03:21.000Z',
-        source: 'Chameleon 1',
-        array_id: 'ARR-009',
-        card: 'soil',
-        variable: 'swt_1',
-        depth_cm: 5,
-        value: 6.24,
-        unit: 'kPa',
-      },
-    ];
-    const dailyRows = [
-      {
-        bucket_start: '2026-06-02T00:00:00.000Z',
-        bucket_end: '2026-06-03T00:00:00.000Z',
-        source: 'Chameleon 1',
-        array_id: 'ARR-009',
-        card: 'soil',
-        variable: 'swt_1',
-        depth_cm: 5,
-        unit: 'kPa',
-        n: 96,
-        coverage_pct: 100,
-        mean: 6.3,
-        min: 6.1,
-        max: 6.5,
-        median: 6.3,
-        latest: 6.24,
-      },
-    ];
-
-    await helper.writeZoneCsv({ exportDir: dir, zone, day: '2026-06-02', rawRows, dailyRows });
-    const raw = fs.readFileSync(path.join(dir, 'zu', 'raw', '2026-06-02.csv'), 'utf8').trim().split('\n');
-    assert.strictEqual(raw[0], 'timestamp,timezone,zone,card,source,array_id,variable,depth_cm,value,unit');
-    assert.match(raw[1], /Europe\/Zurich,Zone B,soil,Chameleon 1,ARR-009,swt_1,5,6.24,kPa/);
-    const daily = fs.readFileSync(path.join(dir, 'zu', 'daily.csv'), 'utf8').trim().split('\n');
-    assert.strictEqual(daily[0], 'bucket_start,bucket_end,timezone,zone,card,source,array_id,variable,depth_cm,unit,n,coverage_pct,mean,min,max,median,latest');
-  } finally {
-    fs.rmSync(dir, { recursive: true, force: true });
-  }
-});
-
-test('buildZoneExportCsv raw emits tidy rows with depth and source', async () => {
-  const db = createCliSqliteDb();
-  try {
-    db.runSql(`
-      INSERT INTO users(id,username,password_hash,created_at,updated_at) VALUES(1,'u','h','2026-05-31T00:00:00.000Z','2026-05-31T00:00:00.000Z');
-      INSERT INTO irrigation_zones(id,name,user_id,zone_uuid,timezone,created_at,updated_at) VALUES(12,'Zone B',1,'zb','UTC','2026-05-31T00:00:00.000Z','2026-05-31T00:00:00.000Z');
-      INSERT INTO devices(deveui,name,type_id,user_id,irrigation_zone_id,chameleon_enabled,chameleon_swt1_depth_cm,created_at,updated_at)
-        VALUES('AA00000000000001','Chameleon 1','DRAGINO_LSN50',1,12,1,5,'2026-05-31T00:00:00.000Z','2026-05-31T00:00:00.000Z');
-      INSERT INTO device_data(deveui,recorded_at,swt_1) VALUES
-        ('AA00000000000001','2026-06-01T08:00:00.000Z',6.2),
-        ('AA00000000000001','2026-06-01T09:00:00.000Z',6.4);
-      INSERT INTO chameleon_readings(deveui,recorded_at,array_id) VALUES
-        ('AA00000000000001','2026-06-01T08:00:00.000Z','ARR-001'),
-        ('AA00000000000001','2026-06-01T09:00:00.000Z','ARR-001');
-    `);
-    const res = await helper.buildZoneExportCsv(db, {
-      zoneId: 12,
-      from: '2026-06-01',
-      to: '2026-06-01',
-      granularity: 'raw',
-      nowMs: Date.parse('2026-06-03T00:00:00.000Z'),
-    });
-    assert.deepStrictEqual(res.columns, helper.RAW_CSV_COLUMNS);
-    assert.strictEqual(res.rows.length, 2);
-    const swt1 = res.rows.find((row) => row.variable === 'swt_1' && row.value === 6.2);
-    assert.ok(swt1);
-    assert.strictEqual(swt1.timestamp, '2026-06-01T08:00:00.000Z');
-    assert.strictEqual(swt1.timezone, 'UTC');
-    assert.strictEqual(swt1.zone, 'Zone B');
-    assert.strictEqual(swt1.card, 'soil');
-    assert.strictEqual(swt1.source, 'Chameleon 1');
-    assert.strictEqual(swt1.array_id, 'ARR-001');
-    assert.strictEqual(swt1.depth_cm, 5);
-    assert.strictEqual(swt1.unit, 'kPa');
-    assert.ok(!res.rows.some((row) => /[A-F0-9]{16}/.test(String(row.source))), 'no raw DevEUI');
-  } finally {
-    db.close();
-  }
-});
-
-test('buildZoneExportCsv aggregate keeps per-source rows with depth for merged cards', async () => {
-  const db = createCliSqliteDb();
-  try {
-    db.runSql(`
-      INSERT INTO users(id,username,password_hash,created_at,updated_at) VALUES(1,'u','h','2026-05-31T00:00:00.000Z','2026-05-31T00:00:00.000Z');
-      INSERT INTO irrigation_zones(id,name,user_id,zone_uuid,timezone,created_at,updated_at) VALUES(12,'Zone B',1,'zb','UTC','2026-05-31T00:00:00.000Z','2026-05-31T00:00:00.000Z');
-      INSERT INTO devices(deveui,name,type_id,user_id,irrigation_zone_id,chameleon_enabled,chameleon_swt1_depth_cm,created_at,updated_at)
-        VALUES
-          ('AA00000000000001','Chameleon 1','DRAGINO_LSN50',1,12,1,5,'2026-05-31T00:00:00.000Z','2026-05-31T00:00:00.000Z'),
-          ('AA00000000000002','Chameleon 2','DRAGINO_LSN50',1,12,1,15,'2026-05-31T00:00:00.000Z','2026-05-31T00:00:00.000Z');
-      INSERT INTO device_data(deveui,recorded_at,swt_1) VALUES
-        ('AA00000000000001','2026-06-01T08:00:00.000Z',6.0),
-        ('AA00000000000001','2026-06-01T09:00:00.000Z',6.4),
-        ('AA00000000000002','2026-06-01T08:00:00.000Z',7.0),
-        ('AA00000000000002','2026-06-01T09:00:00.000Z',7.4);
-      INSERT INTO chameleon_readings(deveui,recorded_at,array_id) VALUES
-        ('AA00000000000001','2026-06-01T08:00:00.000Z','ARR-001'),
-        ('AA00000000000001','2026-06-01T09:00:00.000Z','ARR-001'),
-        ('AA00000000000002','2026-06-01T08:00:00.000Z','ARR-002'),
-        ('AA00000000000002','2026-06-01T09:00:00.000Z','ARR-002');
-    `);
-    const res = await helper.buildZoneExportCsv(db, {
-      zoneId: 12,
-      from: '2026-06-01',
-      to: '2026-06-01',
-      granularity: 'daily',
-      nowMs: Date.parse('2026-06-03T00:00:00.000Z'),
-    });
-    assert.deepStrictEqual(res.columns, helper.AGG_CSV_COLUMNS);
-    const swt1Rows = res.rows.filter((row) => row.variable === 'swt_1');
-    assert.strictEqual(swt1Rows.length, 2);
-    assert.ok(!swt1Rows.some((row) => row.source === '2 sources'), 'no blended source label');
-    assert.ok(!swt1Rows.some((row) => row.depth_cm === '' || row.depth_cm === null || row.depth_cm === undefined), 'no blank soil depth');
-    const c1 = swt1Rows.find((row) => row.source === 'Chameleon 1');
-    const c2 = swt1Rows.find((row) => row.source === 'Chameleon 2');
-    assert.ok(c1, 'Chameleon 1 row present');
-    assert.ok(c2, 'Chameleon 2 row present');
-    assert.strictEqual(c1.array_id, 'ARR-001');
-    assert.strictEqual(c2.array_id, 'ARR-002');
-    assert.strictEqual(c1.zone, 'Zone B');
-    assert.strictEqual(c1.card, 'soil');
-    assert.strictEqual(c1.depth_cm, 5);
-    assert.strictEqual(c1.unit, 'kPa');
-    assert.strictEqual(c1.n, 2);
-    assert.strictEqual(c1.mean, 6.2);
-    assert.strictEqual(c1.latest, 6.4);
-    assert.strictEqual(c2.depth_cm, 15);
-    assert.strictEqual(c2.n, 2);
-    assert.strictEqual(c2.mean, 7.2);
-    assert.strictEqual(c2.latest, 7.4);
-    assert.ok(!res.rows.some((row) => /[A-F0-9]{16}/.test(String(row.source))), 'no raw DevEUI');
-  } finally {
-    db.close();
-  }
-});
-
-test('buildZoneExportCsv rejects over-large raw ranges with a coarser granularity suggestion', async () => {
-  const db = createCliSqliteDb();
-  try {
-    db.runSql(`
-      INSERT INTO users(id,username,password_hash,created_at,updated_at) VALUES(1,'u','h','2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z');
-      INSERT INTO irrigation_zones(id,name,user_id,zone_uuid,timezone,created_at,updated_at) VALUES(12,'Zone B',1,'zb','UTC','2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z');
-    `);
-    await assert.rejects(
-      () => helper.buildZoneExportCsv(db, {
-        zoneId: 12,
-        from: '2026-01-01',
-        to: '2026-04-15',
-        granularity: 'raw',
-        nowMs: Date.parse('2026-06-03T00:00:00.000Z'),
-      }),
-      (error) => {
-        assert.strictEqual(error.code, 'RANGE_TOO_LARGE');
-        assert.strictEqual(error.statusCode, 413);
-        assert.match(error.suggestion, /coarser granularity/);
-        return true;
-      }
-    );
-  } finally {
-    db.close();
-  }
-});
-
-test('buildZoneExportCsv returns header-only row sets for empty valid ranges', async () => {
-  const db = createCliSqliteDb();
-  try {
-    db.runSql(`
-      INSERT INTO users(id,username,password_hash,created_at,updated_at) VALUES(1,'u','h','2026-06-01T00:00:00.000Z','2026-06-01T00:00:00.000Z');
-      INSERT INTO irrigation_zones(id,name,user_id,zone_uuid,timezone,created_at,updated_at) VALUES(12,'Zone B',1,'zb','UTC','2026-06-01T00:00:00.000Z','2026-06-01T00:00:00.000Z');
-      INSERT INTO devices(deveui,name,type_id,user_id,irrigation_zone_id,chameleon_enabled,chameleon_swt1_depth_cm,created_at,updated_at)
-        VALUES('AA00000000000001','Chameleon 1','DRAGINO_LSN50',1,12,1,5,'2026-06-01T00:00:00.000Z','2026-06-01T00:00:00.000Z');
-    `);
-    const res = await helper.buildZoneExportCsv(db, {
-      zoneId: 12,
-      from: '2026-06-01',
-      to: '2026-06-01',
-      granularity: 'raw',
-      nowMs: Date.parse('2026-06-03T00:00:00.000Z'),
-    });
-    assert.deepStrictEqual(res.columns, helper.RAW_CSV_COLUMNS);
-    assert.deepStrictEqual(res.rows, []);
-    assert.strictEqual(helper.toCsv(res.columns, res.rows), 'timestamp,timezone,zone,card,source,array_id,variable,depth_cm,value,unit\n');
-  } finally {
-    db.close();
-  }
-});
-
-test('rotateZoneCsv removes old raw and hourly files but keeps daily.csv', async () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'osi-csv-rotate-'));
-  try {
-    const zone = { id: 7, name: 'Zone B', zone_uuid: 'zu', timezone: 'UTC' };
-    const rawDir = path.join(dir, 'zu', 'raw');
-    const hourlyDir = path.join(dir, 'zu', 'hourly');
-    fs.mkdirSync(rawDir, { recursive: true });
-    fs.mkdirSync(hourlyDir, { recursive: true });
-    fs.writeFileSync(path.join(rawDir, '2026-02-01.csv'), 'old\n');
-    fs.writeFileSync(path.join(rawDir, '2026-06-01.csv'), 'new\n');
-    fs.writeFileSync(path.join(hourlyDir, '2026-02-01.csv'), 'old\n');
-    fs.writeFileSync(path.join(hourlyDir, '2026-06-01.csv'), 'new\n');
-    fs.writeFileSync(path.join(dir, 'zu', 'daily.csv'), 'daily\n');
-
-    await helper.rotateZoneCsv({ exportDir: dir, zone, nowMs: Date.parse('2026-06-02T00:00:00.000Z'), retentionDays: 90 });
-    assert.strictEqual(fs.existsSync(path.join(rawDir, '2026-02-01.csv')), false);
-    assert.strictEqual(fs.existsSync(path.join(hourlyDir, '2026-02-01.csv')), false);
-    assert.strictEqual(fs.existsSync(path.join(rawDir, '2026-06-01.csv')), true);
-    assert.strictEqual(fs.existsSync(path.join(hourlyDir, '2026-06-01.csv')), true);
-    assert.strictEqual(fs.existsSync(path.join(dir, 'zu', 'daily.csv')), true);
-  } finally {
-    fs.rmSync(dir, { recursive: true, force: true });
-  }
-});
-
-test('runRollupJob writes per-source CSV exports for the completed local day', async () => {
-  const db = createCliSqliteDb();
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'osi-csv-job-'));
-  try {
-    db.runSql(`
-      INSERT INTO users(id,username,password_hash,created_at,updated_at) VALUES(1,'u','h','2026-05-20T00:00:00.000Z','2026-05-20T00:00:00.000Z');
-      INSERT INTO irrigation_zones(id,name,user_id,zone_uuid,timezone,created_at,updated_at) VALUES(7,'Zone B',1,'zu','UTC','2026-05-20T00:00:00.000Z','2026-05-20T00:00:00.000Z');
-      INSERT INTO devices(deveui,name,type_id,user_id,irrigation_zone_id,chameleon_enabled,chameleon_swt1_depth_cm,created_at,updated_at)
-        VALUES('AA00000000000001','Chameleon 1','DRAGINO_LSN50',1,7,1,5,'2026-05-20T00:00:00.000Z','2026-05-20T00:00:00.000Z');
-      INSERT INTO device_data(deveui,recorded_at,swt_1) VALUES
-        ('AA00000000000001','2026-06-02T08:10:00.000Z',10),
-        ('AA00000000000001','2026-06-02T08:40:00.000Z',20);
-      INSERT INTO chameleon_readings(deveui,recorded_at,array_id) VALUES
-        ('AA00000000000001','2026-06-02T08:10:00.000Z','ARR-007'),
-        ('AA00000000000001','2026-06-02T08:40:00.000Z','ARR-007');
-    `);
-
-    const summary = await helper.runRollupJob(db, {
-      nowMs: Date.parse('2026-06-03T02:00:00.000Z'),
-      exportDir: dir,
-      retentionDays: 90,
-    });
-    assert.strictEqual(summary.csvZonesWritten, 1);
-    const raw = fs.readFileSync(path.join(dir, 'zu', 'raw', '2026-06-02.csv'), 'utf8');
-    assert.match(raw, /2026-06-02T08:10:00.000Z,UTC,Zone B,soil,Chameleon 1,ARR-007,swt_1,5,10,kPa/);
-    const hourly = fs.readFileSync(path.join(dir, 'zu', 'hourly', '2026-06-02.csv'), 'utf8');
-    assert.match(hourly, /soil,Chameleon 1,ARR-007,swt_1,5,kPa,2,/);
-    const daily = fs.readFileSync(path.join(dir, 'zu', 'daily.csv'), 'utf8');
-    assert.match(daily, /soil,Chameleon 1,ARR-007,swt_1,5,kPa,2,/);
-  } finally {
-    db.close();
-    fs.rmSync(dir, { recursive: true, force: true });
-  }
-});
-
-test('resolves a legacy device field to the matching thematic rollup key', async () => {
-  const db = createCliSqliteDb();
-  try {
-    db.runSql(`
-      INSERT INTO users(id,username,password_hash,created_at,updated_at) VALUES(1,'u','h','2026-05-20T00:00:00.000Z','2026-05-20T00:00:00.000Z');
-      INSERT INTO irrigation_zones(id,name,user_id,zone_uuid,timezone,created_at,updated_at) VALUES(7,'Zone B',1,'zu','Europe/Zurich','2026-05-20T00:00:00.000Z','2026-05-20T00:00:00.000Z');
-      INSERT INTO devices(deveui,name,type_id,user_id,irrigation_zone_id,chameleon_enabled,temp_enabled,created_at,updated_at)
-        VALUES
-          ('AA00000000000001','Chameleon 1','DRAGINO_LSN50',1,7,1,1,'2026-05-20T00:00:00.000Z','2026-05-20T00:00:00.000Z'),
-          ('AA00000000000002','Chameleon 2','DRAGINO_LSN50',1,7,1,1,'2026-05-20T00:00:00.000Z','2026-05-20T00:00:00.000Z');
-    `);
-
-    const soil = await helper.resolveDeviceFieldRollupKey(db, 'aa-0000-0000-0000-01', 'swt_1');
-    assert.strictEqual(soil.zoneId, 7);
-    assert.strictEqual(soil.zoneUuid, 'zu');
-    assert.strictEqual(soil.cardType, 'soil');
-    assert.strictEqual(soil.logicalSourceKey, 'root-zone');
-    assert.strictEqual(soil.channelId, 'swt_1');
-    assert.deepStrictEqual(soil.deveuis, ['AA00000000000001', 'AA00000000000002']);
-    assert.strictEqual(soil.timezone, 'Europe/Zurich');
-
-    const environment = await helper.resolveDeviceFieldRollupKey(db, 'AA00000000000001', 'ext_temperature_c');
-    assert.strictEqual(environment.cardType, 'environment');
-    assert.strictEqual(environment.logicalSourceKey, 'microclimate');
-
-    const unmapped = await helper.resolveDeviceFieldRollupKey(db, 'AA00000000000001', 'flow_liters_today');
-    assert.strictEqual(unmapped, null);
-  } finally {
-    db.close();
-  }
-});
-
-test('legacySensorHistory returns raw 24h points and aggregated long-range points', async () => {
-  const db = createCliSqliteDb();
-  try {
-    db.runSql(`
-      INSERT INTO users(id,username,password_hash,created_at,updated_at) VALUES(1,'u','h','2026-05-20T00:00:00.000Z','2026-05-20T00:00:00.000Z');
-      INSERT INTO irrigation_zones(id,name,user_id,zone_uuid,timezone,created_at,updated_at) VALUES(7,'Zone B',1,'zu','UTC','2026-05-20T00:00:00.000Z','2026-05-20T00:00:00.000Z');
-      INSERT INTO devices(deveui,name,type_id,user_id,irrigation_zone_id,created_at,updated_at)
-        VALUES('AA00000000000001','Soil','KIWI_SENSOR',1,7,'2026-05-20T00:00:00.000Z','2026-05-20T00:00:00.000Z');
-      INSERT INTO device_data(deveui,recorded_at,swt_1,flow_liters_today) VALUES
-        ('AA00000000000001','2026-06-02T09:00:00.000Z',42,8.5);
-      INSERT INTO history_channel_rollups(
-        zone_id, card_type, logical_source_key, channel_id, bucket_level, bucket_start, bucket_end,
-        min_value, max_value, mean_value, median_value, latest_value, dominant_status,
-        coverage_pct, coverage_confidence, sample_count, unit
-      ) VALUES (
-        7, 'soil', 'root-zone', 'swt_1', 'daily', '2026-06-01T00:00:00.000Z', '2026-06-02T00:00:00.000Z',
-        20, 35, 28, 29, 33, 'optimal', 87.5, 'derived', 12, 'kPa'
-      );
-    `);
-
-    const raw = await helper.legacySensorHistory(db, {
-      deveui: 'AA00000000000001',
-      field: 'swt_1',
-      hours: 24,
-      nowMs: Date.parse('2026-06-02T12:00:00.000Z'),
-    });
-    assert.deepStrictEqual(raw, [{ t: '2026-06-02T09:00:00.000Z', value: 42 }]);
-
-    const aggregate = await helper.legacySensorHistory(db, {
-      deveui: 'AA00000000000001',
-      field: 'swt_1',
-      hours: 720,
-      nowMs: Date.parse('2026-06-02T12:00:00.000Z'),
-    });
-    assert.deepStrictEqual(aggregate.map((point) => point.value), [33, 42]);
-    assert.deepStrictEqual(aggregate.map((point) => point.t), [
-      '2026-06-01T00:00:00.000Z',
-      '2026-06-02T00:00:00.000Z',
-    ]);
-
-    const fallback = await helper.legacySensorHistory(db, {
-      deveui: 'AA00000000000001',
-      field: 'flow_liters_today',
-      hours: 720,
-      nowMs: Date.parse('2026-06-02T12:00:00.000Z'),
-    });
-    assert.deepStrictEqual(fallback, [{ t: '2026-06-02T09:00:00.000Z', value: 8.5 }]);
-  } finally {
-    db.close();
-  }
-});
-
-test('legacySensorHistory keeps dendro history response fields stable', async () => {
-  const db = createCliSqliteDb();
-  try {
-    db.runSql(`
-      INSERT INTO users(id,username,password_hash,created_at,updated_at) VALUES(1,'u','h','2026-05-20T00:00:00.000Z','2026-05-20T00:00:00.000Z');
-      INSERT INTO irrigation_zones(id,name,user_id,zone_uuid,timezone,created_at,updated_at) VALUES(7,'Zone B',1,'zu','UTC','2026-05-20T00:00:00.000Z','2026-05-20T00:00:00.000Z');
-      INSERT INTO devices(deveui,name,type_id,user_id,irrigation_zone_id,dendro_enabled,created_at,updated_at)
-        VALUES('AA00000000000001','Dendro','DRAGINO_LSN50',1,7,1,'2026-05-20T00:00:00.000Z','2026-05-20T00:00:00.000Z');
-      INSERT INTO device_data(
-        deveui,recorded_at,dendro_position_raw_mm,dendro_position_mm,dendro_delta_mm,
-        dendro_stem_change_um,adc_ch0v,adc_ch1v,dendro_ratio,dendro_mode_used,dendro_saturated,dendro_saturation_side,dendro_valid
-      ) VALUES (
-        'AA00000000000001','2026-06-02T09:00:00.000Z',11.2,10.9,0.4,120,0.77,0.42,1.83,'ratio',0,NULL,1
-      );
-    `);
-
-    const points = await helper.legacySensorHistory(db, {
-      deveui: 'AA00000000000001',
-      mode: 'dendro',
-      hours: 24,
-      nowMs: Date.parse('2026-06-02T12:00:00.000Z'),
-    });
-    assert.deepStrictEqual(points, [{
-      t: '2026-06-02T09:00:00.000Z',
-      position_raw_mm: 11.2,
-      position_mm: 10.9,
-      delta_mm: 0.4,
-      stem_change_um: 120,
-      adc_v: 0.77,
-      adc_ch0v: 0.77,
-      adc_ch1v: 0.42,
-      dendro_ratio: 1.83,
-      dendro_mode_used: 'ratio',
-      saturated: 0,
-      saturation_side: null,
-      valid: 1,
-    }]);
-  } finally {
-    db.close();
-  }
-});
-
 test('computes coverage from source-aware cadence instead of one mixed median', () => {
   const rows = [
     { deveui: 'AA00000000000001', recorded_at: iso(0), swt_1: 10 },
@@ -1260,6 +1207,572 @@ test('builds deterministic local interpretations', () => {
     assert(item.titleKey && item.bodyKey, 'interpretation uses locale keys');
     assert(!item.title && !item.body, 'interpretation prose stays in locale files');
     assert(!item.body || item.body.length < 120, 'structured output should not depend on long prose');
+  }
+});
+
+test('writeZoneCsv emits tidy long-format raw and daily files with depth', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'osi-csv-'));
+  try {
+    const zone = { id: 7, name: 'Zone B', zone_uuid: 'zu', timezone: 'Europe/Zurich' };
+    const rawRows = [
+      {
+        timestamp: '2026-06-02T14:03:21.000Z',
+        site: 'HUB-1',
+        series_label: 'Chameleon 1 - Soil tension (S1)',
+        card_type: 'soil',
+        source_key: 'soil-src-abc123',
+        channel_key: 'swt_1',
+        depth_cm: 5,
+        array_id: 'ARR-009',
+        unit: 'kPa',
+        value: 6.24,
+      },
+    ];
+    const dailyRows = [
+      {
+        timestamp: '2026-06-02T00:00:00.000Z',
+        site: 'HUB-1',
+        series_label: 'Chameleon 1 - Soil tension (S1)',
+        card_type: 'soil',
+        source_key: 'soil-src-abc123',
+        channel_key: 'swt_1',
+        depth_cm: 5,
+        array_id: 'ARR-009',
+        unit: 'kPa',
+        value: 6.3,
+      },
+    ];
+
+    await helper.writeZoneCsv({ exportDir: dir, zone, day: '2026-06-02', rawRows, dailyRows });
+    const raw = fs.readFileSync(path.join(dir, 'zu', 'raw', '2026-06-02.csv'), 'utf8').trim().split('\n');
+    assert.strictEqual(raw[0], TIDY_CSV_COLUMNS.join(','));
+    assert.strictEqual(raw[1], '2026-06-02T14:03:21.000Z,HUB-1,Zone B,Chameleon 1 - Soil tension (S1),soil,soil-src-abc123,swt_1,5,ARR-009,kPa,6.24');
+    const daily = fs.readFileSync(path.join(dir, 'zu', 'daily.csv'), 'utf8').trim().split('\n');
+    assert.strictEqual(daily[0], TIDY_CSV_COLUMNS.join(','));
+    assert.strictEqual(daily[1], '2026-06-02T00:00:00.000Z,HUB-1,Zone B,Chameleon 1 - Soil tension (S1),soil,soil-src-abc123,swt_1,5,ARR-009,kPa,6.3');
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('buildZoneExportCsv raw emits tidy rows with depth and source', async () => {
+  const db = createCliSqliteDb();
+  try {
+    db.runSql(`
+      INSERT INTO users(id,username,password_hash,created_at,updated_at) VALUES(1,'u','h','2026-05-31T00:00:00.000Z','2026-05-31T00:00:00.000Z');
+      INSERT INTO irrigation_zones(id,name,user_id,zone_uuid,timezone,created_at,updated_at) VALUES(12,'Zone B',1,'zb','UTC','2026-05-31T00:00:00.000Z','2026-05-31T00:00:00.000Z');
+      INSERT INTO devices(deveui,name,type_id,user_id,irrigation_zone_id,chameleon_enabled,chameleon_swt1_depth_cm,created_at,updated_at)
+        VALUES('AA00000000000001','Chameleon 1','DRAGINO_LSN50',1,12,1,5,'2026-05-31T00:00:00.000Z','2026-05-31T00:00:00.000Z');
+      INSERT INTO device_data(deveui,recorded_at,swt_1) VALUES
+        ('AA00000000000001','2026-06-01T08:00:00.000Z',6.2),
+        ('AA00000000000001','2026-06-01T09:00:00.000Z',6.4);
+      INSERT INTO chameleon_readings(deveui,recorded_at,array_id) VALUES
+        ('AA00000000000001','2026-06-01T08:00:00.000Z','ARR-001'),
+        ('AA00000000000001','2026-06-01T09:00:00.000Z','ARR-001');
+    `);
+    const res = await helper.buildZoneExportCsv(db, {
+      zoneId: 12,
+      from: '2026-06-01',
+      to: '2026-06-01',
+      granularity: 'raw',
+      nowMs: Date.parse('2026-06-03T00:00:00.000Z'),
+    });
+    assert.deepStrictEqual(res.columns, TIDY_CSV_COLUMNS);
+    assert.strictEqual(res.rows.length, 2);
+    const expectedSourceKey = `soil-src-${crypto.createHash('sha256').update('AA00000000000001').digest('hex').slice(0, 12)}`;
+    const swt1 = res.rows.find((row) => row.channel_key === 'swt_1' && row.value === 6.2);
+    assert.ok(swt1);
+    assert.strictEqual(swt1.timestamp, '2026-06-01T08:00:00.000Z');
+    assert.strictEqual(swt1.site, 'UNKNOWN');
+    assert.strictEqual(swt1.zone, 'Zone B');
+    assert.strictEqual(swt1.series_label, 'Chameleon 1 - Soil tension (S1)');
+    assert.strictEqual(swt1.card_type, 'soil');
+    assert.strictEqual(swt1.source_key, expectedSourceKey);
+    assert.strictEqual(swt1.channel_key, 'swt_1');
+    assert.strictEqual(swt1.depth_cm, 5);
+    assert.strictEqual(swt1.array_id, 'ARR-001');
+    assert.strictEqual(swt1.unit, 'kPa');
+    assert.ok(!res.rows.some((row) => /[A-F0-9]{16}/.test(String(row.series_label))), 'no raw DevEUI');
+  } finally {
+    db.close();
+  }
+});
+
+test('buildZoneExportCsv channels filter keeps only requested canonical channel keys', async () => {
+  const db = createCliSqliteDb();
+  try {
+    db.runSql(`
+      INSERT INTO users(id,username,password_hash,created_at,updated_at) VALUES(1,'u','h','2026-05-31T00:00:00.000Z','2026-05-31T00:00:00.000Z');
+      INSERT INTO irrigation_zones(id,name,user_id,zone_uuid,timezone,created_at,updated_at) VALUES(12,'Zone B',1,'zb','UTC','2026-05-31T00:00:00.000Z','2026-05-31T00:00:00.000Z');
+      INSERT INTO devices(deveui,name,type_id,user_id,irrigation_zone_id,chameleon_enabled,chameleon_swt1_depth_cm,chameleon_swt2_depth_cm,created_at,updated_at)
+        VALUES('AA00000000000001','Chameleon 1','DRAGINO_LSN50',1,12,1,5,15,'2026-05-31T00:00:00.000Z','2026-05-31T00:00:00.000Z');
+      INSERT INTO device_data(deveui,recorded_at,swt_1,swt_2) VALUES
+        ('AA00000000000001','2026-06-01T08:00:00.000Z',6.2,8.4);
+    `);
+    const res = await helper.buildZoneExportCsv(db, {
+      zoneId: 12,
+      from: '2026-06-01',
+      to: '2026-06-01',
+      granularity: 'raw',
+      channels: ['swt_1'],
+      nowMs: Date.parse('2026-06-03T00:00:00.000Z'),
+    });
+    assert.ok(res.rows.length > 0);
+    assert.deepStrictEqual(Array.from(new Set(res.rows.map((row) => row.channel_key))), ['swt_1']);
+  } finally {
+    db.close();
+  }
+});
+
+test('buildZoneExportCsv accepts legacy aliases but emits canonical channel keys', async () => {
+  const db = createCliSqliteDb();
+  try {
+    db.runSql(`
+      INSERT INTO users(id,username,password_hash,created_at,updated_at) VALUES(1,'u','h','2026-05-31T00:00:00.000Z','2026-05-31T00:00:00.000Z');
+      INSERT INTO irrigation_zones(id,name,user_id,zone_uuid,timezone,created_at,updated_at) VALUES(12,'Zone B',1,'zb','UTC','2026-05-31T00:00:00.000Z','2026-05-31T00:00:00.000Z');
+      INSERT INTO devices(deveui,name,type_id,user_id,irrigation_zone_id,chameleon_enabled,chameleon_swt1_depth_cm,created_at,updated_at)
+        VALUES('AA00000000000001','Chameleon 1','DRAGINO_LSN50',1,12,1,5,'2026-05-31T00:00:00.000Z','2026-05-31T00:00:00.000Z');
+      INSERT INTO device_data(deveui,recorded_at,swt_1,swt_wm1) VALUES
+        ('AA00000000000001','2026-06-01T08:00:00.000Z',6.2,61.2);
+    `);
+    const res = await helper.buildZoneExportCsv(db, {
+      zoneId: 12,
+      from: '2026-06-01',
+      to: '2026-06-01',
+      granularity: 'raw',
+      channels: ['swt_wm1'],
+      nowMs: Date.parse('2026-06-03T00:00:00.000Z'),
+    });
+    assert.ok(res.rows.length > 0);
+    assert.ok(res.rows.every((row) => row.channel_key === 'swt_1'));
+  } finally {
+    db.close();
+  }
+});
+
+test('buildZoneExportCsv rejects unknown channels with a structured 400', async () => {
+  const db = createCliSqliteDb();
+  try {
+    db.runSql(`
+      INSERT INTO users(id,username,password_hash,created_at,updated_at) VALUES(1,'u','h','2026-05-31T00:00:00.000Z','2026-05-31T00:00:00.000Z');
+      INSERT INTO irrigation_zones(id,name,user_id,zone_uuid,timezone,created_at,updated_at) VALUES(12,'Zone B',1,'zb','UTC','2026-05-31T00:00:00.000Z','2026-05-31T00:00:00.000Z');
+    `);
+    await assert.rejects(
+      () => helper.buildZoneExportCsv(db, {
+        zoneId: 12,
+        from: '2026-06-01',
+        to: '2026-06-01',
+        granularity: 'raw',
+        channels: ['not_in_manifest'],
+        nowMs: Date.parse('2026-06-03T00:00:00.000Z'),
+      }),
+      (error) => {
+        assert.strictEqual(error.statusCode, 400);
+        assert.match(error.message, /unknown channel/i);
+        return true;
+      }
+    );
+  } finally {
+    db.close();
+  }
+});
+
+test('buildZoneExportCsv accepts manifest-valid channels with no local edge source', async () => {
+  const db = createCliSqliteDb();
+  try {
+    db.runSql(`
+      INSERT INTO users(id,username,password_hash,created_at,updated_at) VALUES(1,'u','h','2026-05-31T00:00:00.000Z','2026-05-31T00:00:00.000Z');
+      INSERT INTO irrigation_zones(id,name,user_id,zone_uuid,timezone,created_at,updated_at) VALUES(12,'Zone B',1,'zb','UTC','2026-05-31T00:00:00.000Z','2026-05-31T00:00:00.000Z');
+      INSERT INTO devices(deveui,name,type_id,user_id,irrigation_zone_id,chameleon_enabled,chameleon_swt1_depth_cm,created_at,updated_at)
+        VALUES('AA00000000000001','Chameleon 1','DRAGINO_LSN50',1,12,1,5,'2026-05-31T00:00:00.000Z','2026-05-31T00:00:00.000Z');
+      INSERT INTO device_data(deveui,recorded_at,swt_1) VALUES
+        ('AA00000000000001','2026-06-01T08:00:00.000Z',6.2);
+    `);
+    const res = await helper.buildZoneExportCsv(db, {
+      zoneId: 12,
+      from: '2026-06-01',
+      to: '2026-06-01',
+      granularity: 'raw',
+      channels: ['vwc'],
+      nowMs: Date.parse('2026-06-03T00:00:00.000Z'),
+    });
+    assert.deepStrictEqual(res.rows, []);
+  } finally {
+    db.close();
+  }
+});
+
+test('buildZoneExportCsv aggregate keeps per-source rows with depth for merged cards', async () => {
+  const db = createCliSqliteDb();
+  try {
+    db.runSql(`
+      INSERT INTO users(id,username,password_hash,created_at,updated_at) VALUES(1,'u','h','2026-05-31T00:00:00.000Z','2026-05-31T00:00:00.000Z');
+      INSERT INTO irrigation_zones(id,name,user_id,zone_uuid,timezone,created_at,updated_at) VALUES(12,'Zone B',1,'zb','UTC','2026-05-31T00:00:00.000Z','2026-05-31T00:00:00.000Z');
+      INSERT INTO devices(deveui,name,type_id,user_id,irrigation_zone_id,chameleon_enabled,chameleon_swt1_depth_cm,created_at,updated_at)
+        VALUES
+          ('AA00000000000001','Chameleon 1','DRAGINO_LSN50',1,12,1,5,'2026-05-31T00:00:00.000Z','2026-05-31T00:00:00.000Z'),
+          ('AA00000000000002','Chameleon 2','DRAGINO_LSN50',1,12,1,15,'2026-05-31T00:00:00.000Z','2026-05-31T00:00:00.000Z');
+      INSERT INTO device_data(deveui,recorded_at,swt_1) VALUES
+        ('AA00000000000001','2026-06-01T08:00:00.000Z',6.0),
+        ('AA00000000000001','2026-06-01T09:00:00.000Z',6.4),
+        ('AA00000000000002','2026-06-01T08:00:00.000Z',7.0),
+        ('AA00000000000002','2026-06-01T09:00:00.000Z',7.4);
+      INSERT INTO chameleon_readings(deveui,recorded_at,array_id) VALUES
+        ('AA00000000000001','2026-06-01T08:00:00.000Z','ARR-001'),
+        ('AA00000000000001','2026-06-01T09:00:00.000Z','ARR-001'),
+        ('AA00000000000002','2026-06-01T08:00:00.000Z','ARR-002'),
+        ('AA00000000000002','2026-06-01T09:00:00.000Z','ARR-002');
+    `);
+    const res = await helper.buildZoneExportCsv(db, {
+      zoneId: 12,
+      from: '2026-06-01',
+      to: '2026-06-01',
+      granularity: 'daily',
+      nowMs: Date.parse('2026-06-03T00:00:00.000Z'),
+    });
+    assert.deepStrictEqual(res.columns, TIDY_CSV_COLUMNS);
+    const swt1Rows = res.rows.filter((row) => row.channel_key === 'swt_1');
+    assert.strictEqual(swt1Rows.length, 2);
+    assert.ok(!swt1Rows.some((row) => row.series_label === '2 sources'), 'no blended source label');
+    assert.ok(!swt1Rows.some((row) => row.depth_cm === '' || row.depth_cm === null || row.depth_cm === undefined), 'no blank soil depth');
+    const c1 = swt1Rows.find((row) => row.series_label === 'Chameleon 1 - Soil tension (S1)');
+    const c2 = swt1Rows.find((row) => row.series_label === 'Chameleon 2 - Soil tension (S1)');
+    assert.ok(c1, 'Chameleon 1 row present');
+    assert.ok(c2, 'Chameleon 2 row present');
+    assert.strictEqual(c1.array_id, 'ARR-001');
+    assert.strictEqual(c2.array_id, 'ARR-002');
+    assert.strictEqual(c1.zone, 'Zone B');
+    assert.strictEqual(c1.card_type, 'soil');
+    assert.strictEqual(c1.channel_key, 'swt_1');
+    assert.strictEqual(c1.depth_cm, 5);
+    assert.strictEqual(c1.unit, 'kPa');
+    assert.strictEqual(c1.value, 6.2);
+    assert.strictEqual(c2.depth_cm, 15);
+    assert.strictEqual(c2.value, 7.2);
+    assert.ok(!res.rows.some((row) => /[A-F0-9]{16}/.test(String(row.series_label))), 'no raw DevEUI');
+  } finally {
+    db.close();
+  }
+});
+
+test('buildZoneExportCsv daily keeps Europe Zurich DST samples in the correct local day', async () => {
+  const db = createCliSqliteDb();
+  try {
+    db.runSql(`
+      INSERT INTO users(id,username,password_hash,created_at,updated_at) VALUES(1,'u','h','2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z');
+      INSERT INTO irrigation_zones(id,name,user_id,zone_uuid,timezone,created_at,updated_at) VALUES(12,'Zone B',1,'zb','Europe/Zurich','2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z');
+      INSERT INTO devices(deveui,name,type_id,user_id,irrigation_zone_id,chameleon_enabled,chameleon_swt1_depth_cm,created_at,updated_at)
+        VALUES('AA00000000000001','Chameleon 1','DRAGINO_LSN50',1,12,1,5,'2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z');
+      INSERT INTO device_data(deveui,recorded_at,swt_1) VALUES
+        ('AA00000000000001','2026-03-29T00:30:00.000Z',10),
+        ('AA00000000000001','2026-03-29T22:30:00.000Z',20),
+        ('AA00000000000001','2026-03-30T00:30:00.000Z',22),
+        ('AA00000000000001','2026-10-25T20:30:00.000Z',30),
+        ('AA00000000000001','2026-10-25T22:30:00.000Z',40),
+        ('AA00000000000001','2026-10-25T23:30:00.000Z',50);
+    `);
+
+    const spring = await helper.buildZoneExportCsv(db, {
+      zoneId: 12,
+      from: '2026-03-29',
+      to: '2026-03-30',
+      granularity: 'daily',
+      nowMs: Date.parse('2026-11-01T00:00:00.000Z'),
+    });
+    assert.deepStrictEqual(
+      spring.rows.filter((row) => row.channel_key === 'swt_1').map((row) => ({
+        timestamp: row.timestamp,
+        value: row.value,
+      })),
+      [
+        { timestamp: '2026-03-28T23:00:00.000Z', value: 10 },
+        { timestamp: '2026-03-29T22:00:00.000Z', value: 21 },
+      ]
+    );
+
+    const fall = await helper.buildZoneExportCsv(db, {
+      zoneId: 12,
+      from: '2026-10-25',
+      to: '2026-10-26',
+      granularity: 'daily',
+      nowMs: Date.parse('2026-11-01T00:00:00.000Z'),
+    });
+    assert.deepStrictEqual(
+      fall.rows.filter((row) => row.channel_key === 'swt_1').map((row) => ({
+        timestamp: row.timestamp,
+        value: row.value,
+      })),
+      [
+        { timestamp: '2026-10-24T22:00:00.000Z', value: 35 },
+        { timestamp: '2026-10-25T23:00:00.000Z', value: 50 },
+      ]
+    );
+  } finally {
+    db.close();
+  }
+});
+
+test('buildZoneExportCsv rejects over-large raw ranges with a coarser granularity suggestion', async () => {
+  const db = createCliSqliteDb();
+  try {
+    db.runSql(`
+      INSERT INTO users(id,username,password_hash,created_at,updated_at) VALUES(1,'u','h','2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z');
+      INSERT INTO irrigation_zones(id,name,user_id,zone_uuid,timezone,created_at,updated_at) VALUES(12,'Zone B',1,'zb','UTC','2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z');
+    `);
+    await assert.rejects(
+      () => helper.buildZoneExportCsv(db, {
+        zoneId: 12,
+        from: '2026-01-01',
+        to: '2026-04-15',
+        granularity: 'raw',
+        nowMs: Date.parse('2026-06-03T00:00:00.000Z'),
+      }),
+      (error) => {
+        assert.strictEqual(error.code, 'RANGE_TOO_LARGE');
+        assert.strictEqual(error.statusCode, 413);
+        assert.match(error.suggestion, /coarser granularity/);
+        return true;
+      }
+    );
+  } finally {
+    db.close();
+  }
+});
+
+test('buildZoneExportCsv rejects impossible calendar dates', async () => {
+  const db = createCliSqliteDb();
+  try {
+    db.runSql(`
+      INSERT INTO users(id,username,password_hash,created_at,updated_at) VALUES(1,'u','h','2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z');
+      INSERT INTO irrigation_zones(id,name,user_id,zone_uuid,timezone,created_at,updated_at) VALUES(12,'Zone B',1,'zb','UTC','2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z');
+    `);
+    await assert.rejects(
+      () => helper.buildZoneExportCsv(db, {
+        zoneId: 12,
+        from: '2026-02-31',
+        to: '2026-02-31',
+        granularity: 'raw',
+        nowMs: Date.parse('2026-06-03T00:00:00.000Z'),
+      }),
+      (error) => {
+        assert.strictEqual(error.statusCode, 400);
+        assert.match(error.message, /from must be YYYY-MM-DD/);
+        return true;
+      }
+    );
+  } finally {
+    db.close();
+  }
+});
+
+test('buildZoneExportCsv returns header-only row sets for empty valid ranges', async () => {
+  const db = createCliSqliteDb();
+  try {
+    db.runSql(`
+      INSERT INTO users(id,username,password_hash,created_at,updated_at) VALUES(1,'u','h','2026-06-01T00:00:00.000Z','2026-06-01T00:00:00.000Z');
+      INSERT INTO irrigation_zones(id,name,user_id,zone_uuid,timezone,created_at,updated_at) VALUES(12,'Zone B',1,'zb','UTC','2026-06-01T00:00:00.000Z','2026-06-01T00:00:00.000Z');
+      INSERT INTO devices(deveui,name,type_id,user_id,irrigation_zone_id,chameleon_enabled,chameleon_swt1_depth_cm,created_at,updated_at)
+        VALUES('AA00000000000001','Chameleon 1','DRAGINO_LSN50',1,12,1,5,'2026-06-01T00:00:00.000Z','2026-06-01T00:00:00.000Z');
+    `);
+    const res = await helper.buildZoneExportCsv(db, {
+      zoneId: 12,
+      from: '2026-06-01',
+      to: '2026-06-01',
+      granularity: 'raw',
+      nowMs: Date.parse('2026-06-03T00:00:00.000Z'),
+    });
+    assert.deepStrictEqual(res.columns, helper.RAW_CSV_COLUMNS);
+    assert.deepStrictEqual(res.rows, []);
+    assert.strictEqual(helper.toCsv(res.columns, res.rows), `${TIDY_CSV_COLUMNS.join(',')}\n`);
+  } finally {
+    db.close();
+  }
+});
+
+test('rotateZoneCsv removes old raw and hourly files but keeps daily.csv', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'osi-csv-rotate-'));
+  try {
+    const zone = { id: 7, name: 'Zone B', zone_uuid: 'zu', timezone: 'UTC' };
+    const rawDir = path.join(dir, 'zu', 'raw');
+    const hourlyDir = path.join(dir, 'zu', 'hourly');
+    fs.mkdirSync(rawDir, { recursive: true });
+    fs.mkdirSync(hourlyDir, { recursive: true });
+    fs.writeFileSync(path.join(rawDir, '2026-02-01.csv'), 'old\n');
+    fs.writeFileSync(path.join(rawDir, '2026-06-01.csv'), 'new\n');
+    fs.writeFileSync(path.join(hourlyDir, '2026-02-01.csv'), 'old\n');
+    fs.writeFileSync(path.join(hourlyDir, '2026-06-01.csv'), 'new\n');
+    fs.writeFileSync(path.join(dir, 'zu', 'daily.csv'), 'daily\n');
+
+    await helper.rotateZoneCsv({ exportDir: dir, zone, nowMs: Date.parse('2026-06-02T00:00:00.000Z'), retentionDays: 90 });
+    assert.strictEqual(fs.existsSync(path.join(rawDir, '2026-02-01.csv')), false);
+    assert.strictEqual(fs.existsSync(path.join(hourlyDir, '2026-02-01.csv')), false);
+    assert.strictEqual(fs.existsSync(path.join(rawDir, '2026-06-01.csv')), true);
+    assert.strictEqual(fs.existsSync(path.join(hourlyDir, '2026-06-01.csv')), true);
+    assert.strictEqual(fs.existsSync(path.join(dir, 'zu', 'daily.csv')), true);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('runRollupJob writes per-source CSV exports for the completed local day', async () => {
+  const db = createCliSqliteDb();
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'osi-csv-job-'));
+  try {
+    db.runSql(`
+      INSERT INTO users(id,username,password_hash,created_at,updated_at) VALUES(1,'u','h','2026-05-20T00:00:00.000Z','2026-05-20T00:00:00.000Z');
+      INSERT INTO irrigation_zones(id,name,user_id,zone_uuid,timezone,created_at,updated_at) VALUES(7,'Zone B',1,'zu','UTC','2026-05-20T00:00:00.000Z','2026-05-20T00:00:00.000Z');
+      INSERT INTO devices(deveui,name,type_id,user_id,irrigation_zone_id,chameleon_enabled,chameleon_swt1_depth_cm,created_at,updated_at)
+        VALUES('AA00000000000001','Chameleon 1','DRAGINO_LSN50',1,7,1,5,'2026-05-20T00:00:00.000Z','2026-05-20T00:00:00.000Z');
+      INSERT INTO device_data(deveui,recorded_at,swt_1) VALUES
+        ('AA00000000000001','2026-06-02T08:10:00.000Z',10),
+        ('AA00000000000001','2026-06-02T08:40:00.000Z',20);
+      INSERT INTO chameleon_readings(deveui,recorded_at,array_id) VALUES
+        ('AA00000000000001','2026-06-02T08:10:00.000Z','ARR-007'),
+        ('AA00000000000001','2026-06-02T08:40:00.000Z','ARR-007');
+    `);
+
+    const summary = await helper.runRollupJob(db, {
+      nowMs: Date.parse('2026-06-03T02:00:00.000Z'),
+      exportDir: dir,
+      retentionDays: 90,
+    });
+    assert.strictEqual(summary.csvZonesWritten, 1);
+    const raw = fs.readFileSync(path.join(dir, 'zu', 'raw', '2026-06-02.csv'), 'utf8');
+    assert.match(raw, /^timestamp,site,zone,series_label,card_type,source_key,channel_key,depth_cm,array_id,unit,value/m);
+    assert.match(raw, /2026-06-02T08:10:00.000Z,UNKNOWN,Zone B,Chameleon 1 - Soil tension \(S1\),soil,soil-src-[0-9a-f]{12},swt_1,5,ARR-007,kPa,10/);
+    const hourly = fs.readFileSync(path.join(dir, 'zu', 'hourly', '2026-06-02.csv'), 'utf8');
+    assert.match(hourly, /2026-06-02T08:00:00.000Z,UNKNOWN,Zone B,Chameleon 1 - Soil tension \(S1\),soil,soil-src-[0-9a-f]{12},swt_1,5,ARR-007,kPa,15/);
+    const daily = fs.readFileSync(path.join(dir, 'zu', 'daily.csv'), 'utf8');
+    assert.match(daily, /2026-06-02T00:00:00.000Z,UNKNOWN,Zone B,Chameleon 1 - Soil tension \(S1\),soil,soil-src-[0-9a-f]{12},swt_1,5,ARR-007,kPa,15/);
+  } finally {
+    db.close();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('resolves a legacy device field to the matching thematic rollup key', async () => {
+  const db = createCliSqliteDb();
+  try {
+    db.runSql(`
+      INSERT INTO users(id,username,password_hash,created_at,updated_at) VALUES(1,'u','h','2026-05-20T00:00:00.000Z','2026-05-20T00:00:00.000Z');
+      INSERT INTO irrigation_zones(id,name,user_id,zone_uuid,timezone,created_at,updated_at) VALUES(7,'Zone B',1,'zu','Europe/Zurich','2026-05-20T00:00:00.000Z','2026-05-20T00:00:00.000Z');
+      INSERT INTO devices(deveui,name,type_id,user_id,irrigation_zone_id,chameleon_enabled,temp_enabled,created_at,updated_at)
+        VALUES
+          ('AA00000000000001','Chameleon 1','DRAGINO_LSN50',1,7,1,1,'2026-05-20T00:00:00.000Z','2026-05-20T00:00:00.000Z'),
+          ('AA00000000000002','Chameleon 2','DRAGINO_LSN50',1,7,1,1,'2026-05-20T00:00:00.000Z','2026-05-20T00:00:00.000Z');
+    `);
+
+    const soil = await helper.resolveDeviceFieldRollupKey(db, 'aa-0000-0000-0000-01', 'swt_1');
+    assert.strictEqual(soil.zoneId, 7);
+    assert.strictEqual(soil.zoneUuid, 'zu');
+    assert.strictEqual(soil.cardType, 'soil');
+    assert.strictEqual(soil.logicalSourceKey, 'root-zone');
+    assert.strictEqual(soil.channelId, 'swt_1');
+    assert.deepStrictEqual(soil.deveuis, ['AA00000000000001', 'AA00000000000002']);
+    assert.strictEqual(soil.timezone, 'Europe/Zurich');
+
+    const environment = await helper.resolveDeviceFieldRollupKey(db, 'AA00000000000001', 'ext_temperature_c');
+    assert.strictEqual(environment.cardType, 'environment');
+    assert.strictEqual(environment.logicalSourceKey, 'microclimate');
+
+    const unmapped = await helper.resolveDeviceFieldRollupKey(db, 'AA00000000000001', 'flow_liters_today');
+    assert.strictEqual(unmapped, null);
+  } finally {
+    db.close();
+  }
+});
+
+test('legacySensorHistory returns raw 24h points and aggregated long-range points', async () => {
+  const db = createCliSqliteDb();
+  try {
+    db.runSql(`
+      INSERT INTO users(id,username,password_hash,created_at,updated_at) VALUES(1,'u','h','2026-05-20T00:00:00.000Z','2026-05-20T00:00:00.000Z');
+      INSERT INTO irrigation_zones(id,name,user_id,zone_uuid,timezone,created_at,updated_at) VALUES(7,'Zone B',1,'zu','UTC','2026-05-20T00:00:00.000Z','2026-05-20T00:00:00.000Z');
+      INSERT INTO devices(deveui,name,type_id,user_id,irrigation_zone_id,created_at,updated_at)
+        VALUES('AA00000000000001','Soil','KIWI_SENSOR',1,7,'2026-05-20T00:00:00.000Z','2026-05-20T00:00:00.000Z');
+      INSERT INTO device_data(deveui,recorded_at,swt_1,flow_liters_today) VALUES
+        ('AA00000000000001','2026-06-02T09:00:00.000Z',42,8.5);
+      INSERT INTO history_channel_rollups(
+        zone_id, card_type, logical_source_key, channel_id, bucket_level, bucket_start, bucket_end,
+        min_value, max_value, mean_value, median_value, latest_value, dominant_status,
+        coverage_pct, coverage_confidence, sample_count, unit
+      ) VALUES (
+        7, 'soil', 'root-zone', 'swt_1', 'daily', '2026-06-01T00:00:00.000Z', '2026-06-02T00:00:00.000Z',
+        20, 35, 28, 29, 33, 'optimal', 87.5, 'derived', 12, 'kPa'
+      );
+    `);
+
+    const raw = await helper.legacySensorHistory(db, {
+      deveui: 'AA00000000000001',
+      field: 'swt_1',
+      hours: 24,
+      nowMs: Date.parse('2026-06-02T12:00:00.000Z'),
+    });
+    assert.deepStrictEqual(raw, [{ t: '2026-06-02T09:00:00.000Z', value: 42 }]);
+
+    const aggregate = await helper.legacySensorHistory(db, {
+      deveui: 'AA00000000000001',
+      field: 'swt_1',
+      hours: 720,
+      nowMs: Date.parse('2026-06-02T12:00:00.000Z'),
+    });
+    assert.deepStrictEqual(aggregate.map((point) => point.value), [33, 42]);
+    assert.deepStrictEqual(aggregate.map((point) => point.t), [
+      '2026-06-01T00:00:00.000Z',
+      '2026-06-02T00:00:00.000Z',
+    ]);
+
+    const fallback = await helper.legacySensorHistory(db, {
+      deveui: 'AA00000000000001',
+      field: 'flow_liters_today',
+      hours: 720,
+      nowMs: Date.parse('2026-06-02T12:00:00.000Z'),
+    });
+    assert.deepStrictEqual(fallback, [{ t: '2026-06-02T09:00:00.000Z', value: 8.5 }]);
+  } finally {
+    db.close();
+  }
+});
+
+test('legacySensorHistory keeps dendro history response fields stable', async () => {
+  const db = createCliSqliteDb();
+  try {
+    db.runSql(`
+      INSERT INTO users(id,username,password_hash,created_at,updated_at) VALUES(1,'u','h','2026-05-20T00:00:00.000Z','2026-05-20T00:00:00.000Z');
+      INSERT INTO irrigation_zones(id,name,user_id,zone_uuid,timezone,created_at,updated_at) VALUES(7,'Zone B',1,'zu','UTC','2026-05-20T00:00:00.000Z','2026-05-20T00:00:00.000Z');
+      INSERT INTO devices(deveui,name,type_id,user_id,irrigation_zone_id,dendro_enabled,created_at,updated_at)
+        VALUES('AA00000000000001','Dendro','DRAGINO_LSN50',1,7,1,'2026-05-20T00:00:00.000Z','2026-05-20T00:00:00.000Z');
+      INSERT INTO device_data(
+        deveui,recorded_at,dendro_position_raw_mm,dendro_position_mm,dendro_delta_mm,
+        dendro_stem_change_um,adc_ch0v,adc_ch1v,dendro_ratio,dendro_mode_used,dendro_saturated,dendro_saturation_side,dendro_valid
+      ) VALUES (
+        'AA00000000000001','2026-06-02T09:00:00.000Z',11.2,10.9,0.4,120,0.77,0.42,1.83,'ratio',0,NULL,1
+      );
+    `);
+
+    const points = await helper.legacySensorHistory(db, {
+      deveui: 'AA00000000000001',
+      mode: 'dendro',
+      hours: 24,
+      nowMs: Date.parse('2026-06-02T12:00:00.000Z'),
+    });
+    assert.deepStrictEqual(points, [{
+      t: '2026-06-02T09:00:00.000Z',
+      position_raw_mm: 11.2,
+      position_mm: 10.9,
+      delta_mm: 0.4,
+      stem_change_um: 120,
+      adc_v: 0.77,
+      adc_ch0v: 0.77,
+      adc_ch1v: 0.42,
+      dendro_ratio: 1.83,
+      dendro_mode_used: 'ratio',
+      saturated: 0,
+      saturation_side: null,
+      valid: 1,
+    }]);
+  } finally {
+    db.close();
   }
 });
 

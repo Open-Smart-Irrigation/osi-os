@@ -97,7 +97,8 @@
       "downloading": "Preparing...",
       "rangeSummary": "{{from}} to {{to}}",
       "error": "Export failed",
-      "tooLarge": "Range too large. Choose a coarser granularity."
+      "tooLarge": "Range too large. Choose a coarser granularity.",
+      "fullExport": "Full export"
     }
   },
   "schedule": {

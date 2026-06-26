@@ -249,6 +249,57 @@ function all(sql) {
 NODE
 }
 
+ensure_analysis_views_schema() {
+    echo "--- Live analysis views schema repair ---"
+    if [ ! -e "$DB_PATH" ]; then
+        echo "SKIP: no live database at $DB_PATH"
+        return 0
+    fi
+    node <<'NODE'
+const fs = require('fs');
+const dbPath = '/data/db/farming.db';
+if (!fs.existsSync(dbPath)) {
+  console.log('SKIP: no live database at ' + dbPath);
+  process.exit(0);
+}
+const sqlite3 = require('/srv/node-red/node_modules/sqlite3');
+const db = new sqlite3.Database(dbPath);
+function run(sql) {
+  return new Promise((resolve, reject) => db.run(sql, (err) => err ? reject(err) : resolve()));
+}
+function all(sql) {
+  return new Promise((resolve, reject) => db.all(sql, (err, rows) => err ? reject(err) : resolve(rows || [])));
+}
+(async () => {
+  await run('PRAGMA busy_timeout=5000');
+  await run(`CREATE TABLE IF NOT EXISTS analysis_views (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    owner_user_uuid TEXT,
+    name TEXT NOT NULL,
+    view_json TEXT NOT NULL,
+    is_default INTEGER NOT NULL DEFAULT 0 CHECK (is_default IN (0,1)),
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+  )`);
+  const cols = await all('PRAGMA table_info(analysis_views)');
+  const names = new Set(cols.map((row) => row.name));
+  for (const required of ['id', 'user_id', 'owner_user_uuid', 'name', 'view_json', 'is_default', 'created_at', 'updated_at']) {
+    if (!names.has(required)) {
+      throw new Error('analysis_views column is still missing after deploy repair: ' + required);
+    }
+  }
+  console.log('OK');
+  db.close();
+})().catch((err) => {
+  console.error(err && err.stack ? err.stack : err);
+  db.close();
+  process.exit(1);
+});
+NODE
+}
+
 ensure_chameleon_schema() {
     echo "--- Live Chameleon SWT schema repair ---"
     if [ ! -e "$DB_PATH" ]; then
@@ -484,6 +535,10 @@ fetch_required "osi-history-helper index.js" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-history-helper/index.js" \
     "/srv/node-red/osi-history-helper/index.js"
 
+fetch_required "osi-history-helper analysis.js" \
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-history-helper/analysis.js" \
+    "/srv/node-red/osi-history-helper/analysis.js"
+
 fetch_required "osi-chameleon-helper package.json" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-chameleon-helper/package.json" \
     "/srv/node-red/osi-chameleon-helper/package.json"
@@ -532,6 +587,7 @@ fi
 
 ensure_dendro_schema
 ensure_zone_irrigation_calibration_schema
+ensure_analysis_views_schema
 ensure_chameleon_schema
 
 fix_mosquitto_ownership() {

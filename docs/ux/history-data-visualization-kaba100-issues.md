@@ -510,7 +510,7 @@ Manual verification still required:
 Date opened: 2026-06-07
 Target: kaba100, `100.93.68.86`
 Branch: `feat/history-data-visualization`
-Plan: `docs/superpowers/plans/2026-06-07-history-loading-and-label-polish.md`
+Tracking: this section is the active issue record; the transient implementation plan was removed during plan-file cleanup.
 
 ### Issue HLOAD-1 - History API loading time needs measurement and targeted optimization
 

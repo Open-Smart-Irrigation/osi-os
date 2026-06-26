@@ -16,6 +16,7 @@ const DEFAULT_FLOW_PATH = path.resolve(
 
 const REQUIRED_ENDPOINTS = [
   ['GET', '/api/history/zones/:zoneId/cards'],
+  ['GET', '/api/history/zones/:zoneId/export.csv'],
   ['GET', '/api/history/zones/:zoneId/cards/:cardId/data'],
   ['GET', '/api/history/zones/:zoneId/cards/:cardId/advanced'],
   ['GET', '/api/history/gateways/:gatewayEui/cards'],
@@ -27,11 +28,14 @@ const REQUIRED_ENDPOINTS = [
   ['DELETE', '/api/history/workspaces/:id'],
   ['PUT', '/api/history/zones/:zoneId/cards/:cardId/preferences'],
   ['POST', '/api/history/zones/:zoneId/cards/:cardId/opened'],
-  ['GET', '/api/history/zones/:zoneId/export.csv'],
   ['PUT', '/api/history/gateways/:gatewayEui/cards/:cardId/preferences'],
   ['POST', '/api/history/gateways/:gatewayEui/cards/:cardId/opened'],
   ['POST', '/api/history/rollups/run'],
-  ['GET', '/api/system/features']
+  ['GET', '/api/system/features'],
+  ['GET', '/api/analysis/channels'],
+  ['POST', '/api/analysis/series'],
+  ['GET', '/api/analysis/views'],
+  ['POST', '/api/analysis/views']
 ].map(([method, url]) => ({ method, url }));
 
 const REQUIRED_ENDPOINT_KEYS = new Set(REQUIRED_ENDPOINTS.map(endpointKey));
@@ -65,7 +69,7 @@ function endpointKey(endpoint) {
 
 function isHistoryContractRoute(node) {
   const url = String(node.url || '').trim();
-  return url === '/api/system/features' || url.startsWith('/api/history');
+  return url === '/api/system/features' || url.startsWith('/api/history') || url.startsWith('/api/analysis');
 }
 
 function normalizeMethod(method) {
@@ -113,6 +117,13 @@ function findHistoryRouter(flows) {
   ) || null;
 }
 
+function findAnalysisRouter(flows) {
+  return flows.find((node) =>
+    node.type === 'function' &&
+    String(node.name || '').trim() === 'Analysis API Router'
+  ) || null;
+}
+
 function assertContains(failures, source, needle, description) {
   if (!source.includes(needle)) {
     failures.push(`history router missing ${description}`);
@@ -157,7 +168,11 @@ function verifyHistoryRouterImplementation(flows, failures) {
   assertContains(failures, source, 'osiHistory.buildCalendar', 'helper-owned calendar classification');
   assertContains(failures, source, 'osiHistory.buildLocalInterpretations', 'helper-owned local interpretations');
   assertContains(failures, source, 'osiHistory.buildAdvancedDiagnostics', 'helper-owned advanced diagnostic availability');
-  assertContains(failures, source, 'osiHistory.buildZoneExportCsv', 'zone CSV range export helper call');
+  assertContains(failures, source, 'osiHistory.buildZoneExportCsv', 'helper-owned zone CSV export');
+  assertContains(failures, source, 'channels', 'zone CSV export forwards channels query param');
+  assertContains(failures, source, 'site:', 'zone CSV export forwards gateway site id');
+  assertContains(failures, source, 'respondCsv(200, filename, osiHistory.toCsv(result.columns, result.rows))', 'CSV download response');
+  assertContains(failures, source, 'payload.suggestion = error.suggestion', 'structured CSV export suggestions');
   assertContains(failures, source, 'function latestSeriesPoint', 'soil profile fallback to latest visible series point');
   assertContains(failures, source, '.find(rowHasSoilProfileValue)', 'soil profile latest row skips rows without SWT values');
   assertContains(failures, source, 'buildSoilProfiles(latestRows, sourceDevices, series)', 'soil profile builder receives series fallback data');
@@ -203,6 +218,25 @@ function verifyHistoryRouterImplementation(flows, failures) {
   assertNotContains(failures, source, "views: ['line-chart', 'daily-min-max', 'calendar', 'stress-events', 'advanced']", 'unsupported environment stress-events view');
   assertNotContains(failures, source, "views: ['event-timeline', 'calendar', 'irrigation-response', 'advanced']", 'unsupported irrigation response view');
   assertNotContains(failures, source, "views: ['status-overview', 'connectivity-timeline', 'advanced']", 'unsupported gateway connectivity timeline view');
+}
+
+function verifyAnalysisRouterImplementation(flows, failures) {
+  const router = findAnalysisRouter(flows);
+  if (!router) {
+    failures.push('missing Analysis API Router function node');
+    return;
+  }
+
+  const source = String(router.func || '');
+  assertContains(failures, source, 'verifyBearer(msg.req && msg.req.headers && msg.req.headers.authorization)', 'analysis bearer auth gate');
+  assertContains(failures, source, 'osiHistory.buildAnalysisCatalog', 'analysis /channels calls buildAnalysisCatalog');
+  assertContains(failures, source, 'buildAnalysisCatalog(db, { deviceEui: deviceEui, userId: auth.userId })', 'analysis /channels scopes catalog to authenticated user');
+  assertContains(failures, source, 'osiHistory.resolveAnalysisSeries', 'analysis /series calls resolveAnalysisSeries');
+  assertContains(failures, source, 'userId: auth.userId', 'analysis /series scopes resolver to authenticated user');
+  assertContains(failures, source, 'osiHistory.listAnalysisViews', 'analysis /views calls listAnalysisViews');
+  assertContains(failures, source, 'osiHistory.saveAnalysisView', 'analysis /views POST calls saveAnalysisView');
+  assertContains(failures, source, 'payload.suggestion = error.suggestion', 'structured analysis suggestions');
+  assertNotContains(failures, source, 'sync_outbox', 'edge sync outbox mutation from local-only analysis views');
 }
 
 function readFlows(flowPath) {
@@ -271,6 +305,7 @@ function verify(options) {
 
   if (!allowPendingMissing) {
     verifyHistoryRouterImplementation(flows, failures);
+    verifyAnalysisRouterImplementation(flows, failures);
   }
 
   if (failures.length) {

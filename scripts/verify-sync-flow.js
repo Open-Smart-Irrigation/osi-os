@@ -2973,7 +2973,7 @@ if (!historyHelperPath) {
   fail(`missing history helper module at one of: ${historyHelperCandidates.join(', ')}`);
 } else {
   const historyHelper = require(historyHelperPath);
-  for (const exportName of ['normalizeDeveui', 'deriveCardId', 'deriveCardsForZone', 'deriveGatewayCard', 'resolveAggregation', 'classifySoilStatus', 'classifyEnvironmentStatus', 'classifyDendroStatus', 'classifyIrrigationStatus', 'classifyGatewayStatus', 'deriveExpectedCadenceSeconds', 'resolveDeviceFieldRollupKey', 'legacySensorHistory', 'buildZoneExportCsv', 'aggregateRows', 'aggregateDeviceData', 'buildAdvancedMetadataPlaceholder', 'buildLocalInterpretations']) {
+  for (const exportName of ['normalizeDeveui', 'analysisSeriesId', 'buildAnalysisCatalog', 'resolveAnalysisSeries', 'listAnalysisViews', 'saveAnalysisView', 'deriveCardId', 'deriveCardsForZone', 'deriveGatewayCard', 'resolveAggregation', 'classifySoilStatus', 'classifyEnvironmentStatus', 'classifyDendroStatus', 'classifyIrrigationStatus', 'classifyGatewayStatus', 'deriveExpectedCadenceSeconds', 'startOfLocalDayMs', 'computeRollupBuckets', 'upsertRollups', 'runRollupJob', 'resolveDeviceFieldRollupKey', 'legacySensorHistory', 'buildZoneExportCsv', 'toCsv', 'writeZoneCsv', 'rotateZoneCsv', 'aggregateRows', 'aggregateDeviceData', 'buildAdvancedMetadataPlaceholder', 'buildCalendar', 'buildLocalInterpretations']) {
     if (typeof historyHelper[exportName] !== 'function') {
       fail(`history helper missing export ${exportName}`);
     } else {
@@ -2981,6 +2981,7 @@ if (!historyHelperPath) {
     }
   }
   runQuietNodeScript('test-history-helper.js', 'SQL-backed history helper tests pass');
+  runQuietNodeScript('verify-channel-manifest-parity.js', 'edge channel ids match canonical manifest');
 }
 
 expectIncludesById('history-api-router-fn', 'phaseMs=', 'logs per-phase timing for history endpoint performance triage');

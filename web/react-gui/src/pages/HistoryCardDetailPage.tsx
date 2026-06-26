@@ -8,7 +8,9 @@ import {
   HistoryInspectorSheet,
   type HistoryInspectorSelection,
 } from '../components/history/mobile/HistoryInspectorSheet';
+import { HistoryExportSheet } from '../components/history/mobile/HistoryExportSheet';
 import { HistoryVisualizationSurface } from '../components/history/mobile/HistoryVisualizationSurface';
+import { cardChannels, cardChannelsForSource, type ChannelSourceContext } from '../channels/registry';
 import { formatWindowCaption } from '../components/history/visualizations/chartAxis';
 import { formatHistoryCalendarMonthLabel } from '../history/calendarMonth';
 import { historyCardDefinitionsByType } from '../history/cardDefinitions';
@@ -26,6 +28,7 @@ import {
 } from '../history/useTimeViewport';
 import { historyAPI, irrigationZonesAPI } from '../services/api';
 import type { HistoryCardDataScope } from '../history/useHistoryCardData';
+import type { RangeValue } from '../components/farming/rangeCalendarModel';
 import type {
   HistoryAggregationLevel,
   HistoryCardSummary,
@@ -209,6 +212,53 @@ function sourceOptionsForCard(card: HistoryCardSummary | null): Array<{ key: str
   }, []);
 }
 
+function metadataBoolean(card: HistoryCardSummary, key: string): boolean | null {
+  const value = card.metadata[key];
+  return typeof value === 'boolean' ? value : null;
+}
+
+function exportSourceContextForCard(
+  card: HistoryCardSummary,
+  selectedSourceKey: string | null,
+): ChannelSourceContext | undefined {
+  const sourceDevices = card.sourceDevices ?? [];
+  const source = selectedSourceKey
+    ? sourceDevices.find((device) => device.sourceKey === selectedSourceKey)
+    : sourceDevices.length === 1 ? sourceDevices[0] : null;
+  if (!source?.typeId) return undefined;
+
+  if (card.cardType === 'soil') {
+    const chameleonEnabled = metadataBoolean(card, 'chameleonEnabled') ?? metadataBoolean(card, 'chameleon_enabled');
+    return chameleonEnabled === true ? { deviceType: source.typeId, chameleonEnabled } : undefined;
+  }
+
+  if (card.cardType === 'environment') {
+    if (source.typeId === 'KIWI_SENSOR') return { deviceType: source.typeId };
+    if (source.typeId === 'DRAGINO_LSN50') {
+      const tempEnabled = metadataBoolean(card, 'tempEnabled') ?? metadataBoolean(card, 'temp_enabled');
+      return typeof tempEnabled === 'boolean' ? { deviceType: source.typeId, tempEnabled } : undefined;
+    }
+  }
+
+  return undefined;
+}
+
+function isoDate(value: string | null | undefined): string | null {
+  const parsed = Date.parse(value ?? '');
+  if (!Number.isFinite(parsed)) return null;
+  return new Date(parsed).toISOString().slice(0, 10);
+}
+
+function todayIsoDate(): string {
+  return new Date().toISOString().slice(0, 10);
+}
+
+function exportRangeFromViewport(range: HistoryTimeViewport['range'], todayIso: string): RangeValue {
+  const from = isoDate(range.from) ?? todayIso;
+  const to = isoDate(range.to) ?? from;
+  return { from, to };
+}
+
 function formatViewLabel(t: HistoryTranslate, view: HistoryViewMode): string {
   return t(`history.viewMode.${view}`);
 }
@@ -322,6 +372,7 @@ export const HistoryCardDetailPage: React.FC = () => {
   const [calendarMonthOffset, setCalendarMonthOffset] = useState(0);
   const [visualWindow, setVisualWindow] = useState<HistoryVisualWindow | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [exportOpen, setExportOpen] = useState(false);
   const defaultRange = displayCard?.defaultRange ?? '24h';
   const timeViewport = useTimeViewport(
     defaultRange,
@@ -350,6 +401,19 @@ export const HistoryCardDetailPage: React.FC = () => {
   const selectedSourceKey = sourceOptions.length > 1 && enabledSourceKeys.length === 1
     ? enabledSourceKeys[0]
     : null;
+  const exportDefaultChannels = useMemo(() => {
+    if (!displayCard) return [];
+    const sourceContext = exportSourceContextForCard(displayCard, selectedSourceKey);
+    return sourceContext
+      ? cardChannelsForSource(displayCard.cardType, sourceContext)
+      : cardChannels(displayCard.cardType);
+  }, [displayCard, selectedSourceKey]);
+  const canExport = resolvedScope?.type === 'zone' && exportDefaultChannels.length > 0;
+  const todayIso = useMemo(todayIsoDate, []);
+  const exportInitialRange = useMemo(
+    () => exportRangeFromViewport(timeViewport.viewport.range, todayIso),
+    [timeViewport.viewport.range, todayIso],
+  );
   const requestAggregation: HistoryAggregationLevel = selectedView === 'daily-min-max'
     ? 'daily'
     : timeViewport.viewport.aggregation;
@@ -582,6 +646,7 @@ export const HistoryCardDetailPage: React.FC = () => {
   useEffect(() => {
     setCalendarMonthOffset(0);
     setVisualWindow(null);
+    setExportOpen(false);
   }, [
     displayCard?.cardId,
     selectedSourceKey,
@@ -650,8 +715,10 @@ export const HistoryCardDetailPage: React.FC = () => {
         card={displayCard}
         compact={isLandscape}
         settingsOpen={settingsOpen}
+        canExport={canExport}
         canOpenAdvanced={selectableViewsForCard(displayCard).includes('advanced')}
         onSettingsToggle={() => setSettingsOpen((open) => !open)}
+        onExport={() => setExportOpen(true)}
         onAdvancedView={handleAdvancedView}
         onResetRange={handleResetRange}
         onRefresh={handleRefresh}
@@ -728,6 +795,16 @@ export const HistoryCardDetailPage: React.FC = () => {
         isOpen={Boolean(inspectorSelection)}
         onClose={handleCloseInspector}
       />
+      {resolvedScope.type === 'zone' && (
+        <HistoryExportSheet
+          isOpen={exportOpen && canExport}
+          onClose={() => setExportOpen(false)}
+          zoneId={resolvedScope.zoneId}
+          todayIso={todayIso}
+          defaultChannels={exportDefaultChannels}
+          initialRange={exportInitialRange}
+        />
+      )}
     </div>
   );
 };

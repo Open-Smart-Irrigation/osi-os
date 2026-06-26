@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { fireEvent, render, screen, waitFor, act } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import '@testing-library/jest-dom';
 import React from 'react';
 
@@ -59,9 +59,9 @@ const mockDevice: Device = {
     strega_model: 'STREGA_VALVE',
     dendro_ratio_at_retracted: null,
     dendro_ratio_at_extended: null,
-    dendro_baseline_pending: false,
+    dendro_baseline_pending: 0,
     last_seen: '2026-05-17T12:00:00Z',
-};
+} as unknown as Device;
 
 function actuationFixture(overrides: Partial<IrrigationActuation> = {}): IrrigationActuation {
     return {

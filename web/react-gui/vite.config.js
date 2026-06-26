@@ -1,6 +1,14 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 
+const analysisEchartsVendorPattern = /(?:^|[\\/])node_modules[\\/](?:echarts|zrender)(?:[\\/]|$)/
+
+export function manualChunksForVendor(id) {
+  if (analysisEchartsVendorPattern.test(id)) {
+    return 'analysis-echarts'
+  }
+}
+
 export default defineConfig({
   plugins: [react()],
   base: '/gui/',  // Must match httpStaticRoot in Node-RED settings.js
@@ -24,6 +32,13 @@ export default defineConfig({
   },
   build: {
     outDir: 'build',  // Changed to match docker-compose volume
-    emptyOutDir: true
+    emptyOutDir: true,
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          return manualChunksForVendor(id)
+        },
+      },
+    },
   }
 })

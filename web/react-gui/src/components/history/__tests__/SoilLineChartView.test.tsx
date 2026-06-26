@@ -1,5 +1,4 @@
 import '@testing-library/jest-dom';
-import React from 'react';
 import { render, screen, within } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 
@@ -93,6 +92,7 @@ describe('SoilLineChartView', () => {
         key: 'swt_1',
         label: 'Layer 1',
         unit: 'kPa',
+        depthCm: null,
         points: [{ t: '2026-06-01T00:00:00Z', value: 6 }],
       },
     ]);

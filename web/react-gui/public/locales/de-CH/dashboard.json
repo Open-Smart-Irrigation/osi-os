@@ -1,8 +1,16 @@
 {
   "title": "Open Smart Irrigation Dashboard",
   "welcome": "Willkommen, {{username}}",
-  "addZone": "Zone hinzufügen",
-  "addDevice": "Gerät hinzufügen",
+  "add": "Hinzufügen",
+  "addMenu": {
+    "zone": "Zone hinzufügen",
+    "device": "Gerät hinzufügen"
+  },
+  "data": "Daten",
+  "account": "Konto",
+  "accountMenu": {
+    "osiServer": "OSI Server"
+  },
   "logout": "Abmelden",
   "loading": "Dashboard wird geladen...",
   "failedToLoad": "Daten konnten nicht geladen werden",

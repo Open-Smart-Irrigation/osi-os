@@ -97,7 +97,8 @@
       "downloading": "Preparation...",
       "rangeSummary": "{{from}} a {{to}}",
       "error": "Echec de export",
-      "tooLarge": "Plage trop grande. Choisissez une granularite plus large."
+      "tooLarge": "Plage trop grande. Choisissez une granularite plus large.",
+      "fullExport": "Export complet"
     }
   },
   "schedule": {

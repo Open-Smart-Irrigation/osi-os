@@ -3,5 +3,93 @@
   "loading": "A carregar...",
   "delete": "Eliminar",
   "na": "N/D",
-  "retry": "Tentar novamente"
+  "retry": "Tentar novamente",
+  "analysis": {
+    "title": "Análise de dados",
+    "axis": {
+      "rename": "Renomear o rótulo do eixo"
+    },
+    "backToDashboard": "← Voltar ao painel",
+    "loadError": "Não foi possível carregar os dados de análise.",
+    "pooled": {
+      "tooltip": "Correlaciona os pontos de todas as zonas como um único conjunto combinado, além de cada zona separadamente."
+    },
+    "empty": "Selecione uma ou mais séries para começar a comparar zonas.",
+    "catalog": {
+      "loading": "A carregar séries disponíveis..."
+    },
+    "series": {
+      "loading": "A carregar séries..."
+    },
+    "aggregation": {
+      "label": "Agregação",
+      "raw": "Sem agregação",
+      "fifteenMinute": "15 minutos",
+      "hourly": "Horária",
+      "daily": "Diária",
+      "weekly": "Semanal"
+    },
+    "preset": {
+      "metricLabel": "Métrica entre zonas"
+    },
+    "tray": {
+      "label": "Séries de análise",
+      "title": "Séries",
+      "search": "Pesquisar zonas ou dispositivos",
+      "unknownSite": "Local desconhecido",
+      "reason": {
+        "unsupported": "Não suportado",
+        "available_no_recent_data": "Sem dados recentes disponíveis"
+      }
+    },
+    "range": {
+      "label": "Intervalo de análise",
+      "custom": "Personalizado",
+      "from": "De",
+      "to": "Até",
+      "apply": "Aplicar",
+      "invalid": "O início deve ser anterior ao fim."
+    },
+    "mode": {
+      "label": "Modo de análise",
+      "timeline": "Linha do tempo",
+      "correlation": "Correlação"
+    },
+    "layout": {
+      "label": "Disposição",
+      "stacked": "Empilhado",
+      "overlaid": "Sobreposto",
+      "smallMultiples": "Múltiplos pequenos"
+    },
+    "toggle": {
+      "normalize": "Normalizar"
+    },
+    "export": {
+      "csv": "Exportar CSV",
+      "png": "Exportar PNG"
+    },
+    "legend": {
+      "label": "Legenda do gráfico",
+      "rename": "Renomear série"
+    },
+    "views": {
+      "title": "Vistas guardadas",
+      "save": "Guardar vista",
+      "namePlaceholder": "Dê um nome a esta vista",
+      "delete": "Eliminar vista",
+      "empty": "Ainda não há vistas guardadas."
+    },
+    "droppedNotice": "{{count}} séries não puderam ser carregadas",
+    "correlation": {
+      "comingSoon": "O gráfico de dispersão de correlação está planeado para a próxima fase.",
+      "needTwoChannels": "Adicione séries de pelo menos dois canais diferentes para compará-las.",
+      "x": "Canal X",
+      "y": "Canal Y",
+      "pooled": "Agregado (todas as zonas)",
+      "zone": "Zona",
+      "droppedPairs": "Descartados",
+      "insufficient": "insuficiente (n={{n}})",
+      "exploratory": "Apenas exploratório — r de Pearson sobre intervalos alinhados; não é um teste de significância."
+    }
+  }
 }

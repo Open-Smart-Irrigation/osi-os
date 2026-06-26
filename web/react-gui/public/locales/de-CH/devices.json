@@ -97,7 +97,8 @@
       "downloading": "Wird vorbereitet...",
       "rangeSummary": "{{from}} bis {{to}}",
       "error": "Export fehlgeschlagen",
-      "tooLarge": "Zeitraum zu gross. Waehle eine groebere Aufloesung."
+      "tooLarge": "Zeitraum zu gross. Waehle eine groebere Aufloesung.",
+      "fullExport": "Vollstaendiger Export"
     }
   },
   "schedule": {

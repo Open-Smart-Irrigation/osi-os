@@ -1,6 +1,7 @@
 'use strict';
 
 const crypto = require('crypto');
+const { createAnalysis } = require('./analysis');
 
 const DEFAULT_SOURCE_KEYS = {
   soil: 'root-zone',
@@ -40,20 +41,9 @@ const ALLOWED_DEVICE_DATA_CHANNELS = new Set([
   'rain_mm_per_10min',
   'rain_mm_today',
   'rain_mm_delta',
-  'rain_count_cumulative',
-  'rain_tips_delta',
-  'flow_count_cumulative',
-  'flow_pulses_delta',
-  'flow_liters_delta',
-  'flow_liters_per_min',
-  'flow_liters_per_10min',
-  'flow_liters_today',
-  'counter_interval_seconds',
   'wind_speed_mps',
-  'wind_direction_deg',
   'wind_gust_mps',
   'barometric_pressure_hpa',
-  'rain_gauge_cumulative_mm',
   'uv_index',
   'bat_v',
   'bat_pct',
@@ -65,6 +55,55 @@ const ALLOWED_DEVICE_DATA_CHANNELS = new Set([
   'dendro_stem_change_um',
   'dendro_ratio',
 ]);
+
+const LEGACY_SENSOR_HISTORY_FIELDS = new Set([
+  ...ALLOWED_DEVICE_DATA_CHANNELS,
+  'rain_count_cumulative',
+  'rain_tips_delta',
+  'flow_count_cumulative',
+  'flow_pulses_delta',
+  'flow_liters_delta',
+  'flow_liters_per_min',
+  'flow_liters_per_10min',
+  'flow_liters_today',
+  'counter_interval_seconds',
+  'wind_direction_deg',
+  'rain_gauge_cumulative_mm',
+]);
+
+const VALID_EXPORT_CHANNEL_KEYS = new Set([
+  'swt_1',
+  'swt_2',
+  'swt_3',
+  'vwc',
+  'ambient_temperature',
+  'relative_humidity',
+  'light_lux',
+  'ext_temperature_c',
+  'rain_mm_per_hour',
+  'rain_mm_per_10min',
+  'rain_mm_today',
+  'rain_mm_delta',
+  'wind_speed_mps',
+  'wind_gust_mps',
+  'barometric_pressure_hpa',
+  'uv_index',
+  'dendro_stem_change_um',
+  'dendro_position_mm',
+  'dendro_position_raw_mm',
+  'dendro_delta_mm',
+  'dendro_ratio',
+  'adc_ch0v',
+  'adc_ch1v',
+]);
+
+const LEGACY_CHANNEL_ALIASES = {
+  swt_wm1: 'swt_1',
+  swt_wm2: 'swt_2',
+  temperature: 'ambient_temperature',
+  humidity: 'relative_humidity',
+  light: 'light_lux',
+};
 
 const LEGACY_FIELD_ALIASES = {
   swt_wm1: 'swt_1',
@@ -236,38 +275,36 @@ function channelsForCard(card) {
   const cardType = normalizeCardType(card && card.cardType);
   if (cardType === 'soil') {
     return [
-      { id: 'swt_1', field: 'swt_1', unit: 'kPa' },
-      { id: 'swt_2', field: 'swt_2', unit: 'kPa' },
-      { id: 'swt_3', field: 'swt_3', unit: 'kPa' },
-      { id: 'swt_wm1', field: 'swt_wm1', unit: 'kPa' },
-      { id: 'swt_wm2', field: 'swt_wm2', unit: 'kPa' },
+      { id: 'swt_1', field: 'swt_1', fields: ['swt_1', 'swt_wm1'], unit: 'kPa', label: 'Soil tension (S1)' },
+      { id: 'swt_2', field: 'swt_2', fields: ['swt_2', 'swt_wm2'], unit: 'kPa', label: 'Soil tension (S2)' },
+      { id: 'swt_3', field: 'swt_3', unit: 'kPa', label: 'Soil tension (S3)' },
     ];
   }
   if (cardType === 'environment') {
     return [
-      { id: 'ambient_temperature', field: 'ambient_temperature', unit: 'C' },
-      { id: 'relative_humidity', field: 'relative_humidity', unit: '%' },
-      { id: 'ext_temperature_c', field: 'ext_temperature_c', unit: 'C' },
-      { id: 'light_lux', field: 'light_lux', unit: 'lux' },
-      { id: 'rain_mm_per_hour', field: 'rain_mm_per_hour', unit: 'mm/h' },
-      { id: 'rain_mm_per_10min', field: 'rain_mm_per_10min', unit: 'mm/10min' },
-      { id: 'rain_mm_today', field: 'rain_mm_today', unit: 'mm' },
-      { id: 'rain_mm_delta', field: 'rain_mm_delta', unit: 'mm' },
-      { id: 'wind_speed_mps', field: 'wind_speed_mps', unit: 'm/s' },
-      { id: 'wind_gust_mps', field: 'wind_gust_mps', unit: 'm/s' },
-      { id: 'barometric_pressure_hpa', field: 'barometric_pressure_hpa', unit: 'hPa' },
-      { id: 'uv_index', field: 'uv_index', unit: null },
+      { id: 'ambient_temperature', field: 'ambient_temperature', unit: '°C', label: 'Ambient temperature' },
+      { id: 'relative_humidity', field: 'relative_humidity', unit: '%', label: 'Relative humidity' },
+      { id: 'ext_temperature_c', field: 'ext_temperature_c', unit: '°C', label: 'External temperature' },
+      { id: 'light_lux', field: 'light_lux', unit: 'lux', label: 'Light' },
+      { id: 'rain_mm_per_hour', field: 'rain_mm_per_hour', unit: 'mm/h', label: 'Rain rate' },
+      { id: 'rain_mm_per_10min', field: 'rain_mm_per_10min', unit: 'mm/10min', label: 'Rain (10 min)' },
+      { id: 'rain_mm_today', field: 'rain_mm_today', unit: 'mm', label: 'Rain today' },
+      { id: 'rain_mm_delta', field: 'rain_mm_delta', unit: 'mm', label: 'Rain delta' },
+      { id: 'wind_speed_mps', field: 'wind_speed_mps', unit: 'm/s', label: 'Wind speed' },
+      { id: 'wind_gust_mps', field: 'wind_gust_mps', unit: 'm/s', label: 'Wind gust' },
+      { id: 'barometric_pressure_hpa', field: 'barometric_pressure_hpa', unit: 'hPa', label: 'Pressure' },
+      { id: 'uv_index', field: 'uv_index', unit: null, label: 'UV index' },
     ];
   }
   if (cardType === 'dendro') {
     return [
-      { id: 'dendro_stem_change_um', field: 'dendro_stem_change_um', unit: 'um' },
-      { id: 'dendro_position_mm', field: 'dendro_position_mm', unit: 'mm' },
-      { id: 'dendro_position_raw_mm', field: 'dendro_position_raw_mm', unit: 'mm' },
-      { id: 'dendro_delta_mm', field: 'dendro_delta_mm', unit: 'mm' },
-      { id: 'dendro_ratio', field: 'dendro_ratio', unit: null },
-      { id: 'adc_ch0v', field: 'adc_ch0v', unit: 'V' },
-      { id: 'adc_ch1v', field: 'adc_ch1v', unit: 'V' },
+      { id: 'dendro_stem_change_um', field: 'dendro_stem_change_um', unit: 'µm', label: 'Stem change' },
+      { id: 'dendro_position_mm', field: 'dendro_position_mm', unit: 'mm', label: 'Position' },
+      { id: 'dendro_position_raw_mm', field: 'dendro_position_raw_mm', unit: 'mm', label: 'Position (raw)' },
+      { id: 'dendro_delta_mm', field: 'dendro_delta_mm', unit: 'mm', label: 'Delta' },
+      { id: 'dendro_ratio', field: 'dendro_ratio', unit: null, label: 'Ratio' },
+      { id: 'adc_ch0v', field: 'adc_ch0v', unit: 'V', label: 'ADC ch0' },
+      { id: 'adc_ch1v', field: 'adc_ch1v', unit: 'V', label: 'ADC ch1' },
     ];
   }
   return [];
@@ -501,11 +538,31 @@ function deriveExpectedCadenceSeconds(options = {}) {
 function normalizeChannels(channels) {
   return (Array.isArray(channels) ? channels : [])
     .map((channel) => {
-      if (typeof channel === 'string') return { id: channel, field: channel };
+      if (typeof channel === 'string') return { id: channel, field: channel, fields: [channel] };
       if (!channel || typeof channel !== 'object') return null;
-      return { id: channel.id || channel.field, field: channel.field || channel.id, unit: channel.unit || null };
+      const field = channel.field || channel.id;
+      return {
+        id: channel.id || field,
+        field,
+        fields: Array.isArray(channel.fields) && channel.fields.length ? channel.fields : [field],
+        unit: channel.unit || null,
+        label: channel.label || null,
+      };
     })
     .filter((channel) => channel && channel.id && channel.field);
+}
+
+function channelFieldNames(channel) {
+  return Array.from(new Set((Array.isArray(channel && channel.fields) && channel.fields.length ? channel.fields : [channel && channel.field])
+    .filter(Boolean)));
+}
+
+function channelValue(row, channel) {
+  for (const field of channelFieldNames(channel)) {
+    const value = toFiniteNumber(row && row[field]);
+    if (value !== null) return value;
+  }
+  return null;
 }
 
 function bucketStartFor(ms, startMs, bucketSeconds) {
@@ -695,7 +752,7 @@ function sourceChannelSamples(sortedRows, channels) {
   const samples = new Map();
   for (const entry of sortedRows) {
     for (const channel of channels) {
-      if (toFiniteNumber(entry.row[channel.field]) === null) continue;
+      if (channelValue(entry.row, channel) === null) continue;
       const sourceKey = rowSourceKey(entry.row, channel);
       const key = sourceChannelKey(sourceKey, channel);
       if (!samples.has(key)) {
@@ -774,7 +831,7 @@ function coverageForBucket(bucketRows, channels, sourceCadences, bucketSeconds) 
   const observed = {};
   for (const entry of bucketRows) {
     for (const channel of channels) {
-      if (toFiniteNumber(entry.row[channel.field]) === null) continue;
+      if (channelValue(entry.row, channel) === null) continue;
       const key = sourceChannelKey(rowSourceKey(entry.row, channel), channel);
       observed[key] = (observed[key] || 0) + 1;
     }
@@ -790,6 +847,47 @@ function coverageForBucket(bucketRows, channels, sourceCadences, bucketSeconds) 
     coveragePct: expectedTotal > 0 ? roundTo(Math.min(100, (observedTotal / expectedTotal) * 100)) : null,
     coverageConfidence: combineCadenceConfidence(sourceCadences),
   };
+}
+
+function aggregationBuckets(startMs, endMs, aggregation, bucketSeconds, timezone) {
+  const buckets = [];
+  if (aggregation !== 'daily') {
+    for (let bucketStartMs = startMs; bucketStartMs < endMs; bucketStartMs += bucketSeconds * 1000) {
+      const bucketEndMs = Math.min(endMs, bucketStartMs + bucketSeconds * 1000);
+      buckets.push({
+        bucketStartMs,
+        bucketEndMs,
+        bucketStart: new Date(bucketStartMs).toISOString(),
+        bucketEnd: new Date(bucketEndMs).toISOString(),
+        series: {},
+        sampleCount: 0,
+        eventCount: 0,
+        thresholdCrossingCount: 0,
+      });
+    }
+    return buckets;
+  }
+
+  let bucketStartMs = startMs;
+  let dateKey = localDateKey(bucketStartMs, timezone) || new Date(bucketStartMs).toISOString().slice(0, 10);
+  while (bucketStartMs < endMs) {
+    const nextDateKey = addIsoDays(dateKey, 1);
+    const nextStartMs = Date.parse(zoneDateStartIso(nextDateKey, timezone));
+    const bucketEndMs = Math.min(endMs, Number.isFinite(nextStartMs) && nextStartMs > bucketStartMs ? nextStartMs : bucketStartMs + bucketSeconds * 1000);
+    buckets.push({
+      bucketStartMs,
+      bucketEndMs,
+      bucketStart: new Date(bucketStartMs).toISOString(),
+      bucketEnd: new Date(bucketEndMs).toISOString(),
+      series: {},
+      sampleCount: 0,
+      eventCount: 0,
+      thresholdCrossingCount: 0,
+    });
+    bucketStartMs = bucketEndMs;
+    dateKey = nextDateKey;
+  }
+  return buckets;
 }
 
 function aggregateRows(rows, options = {}) {
@@ -819,7 +917,7 @@ function aggregateRows(rows, options = {}) {
       series[channel.id] = {
         unit: channel.unit || null,
         points: sortedRows
-          .map((entry) => ({ recordedAt: new Date(entry.recordedAtMs).toISOString(), value: toFiniteNumber(entry.row[channel.field]) }))
+          .map((entry) => ({ recordedAt: new Date(entry.recordedAtMs).toISOString(), value: channelValue(entry.row, channel) }))
           .filter((point) => point.value !== null),
       };
     }
@@ -840,25 +938,12 @@ function aggregateRows(rows, options = {}) {
   if (!bucketSeconds) throw new Error(`unsupported aggregation: ${aggregation}`);
   if (startMs === null || endMs === null || endMs <= startMs) throw new Error('aggregateRows requires a valid start/end range for bucketed aggregation');
 
-  const buckets = [];
-  for (let bucketStartMs = startMs; bucketStartMs < endMs; bucketStartMs += bucketSeconds * 1000) {
-    const bucketEndMs = Math.min(endMs, bucketStartMs + bucketSeconds * 1000);
-    buckets.push({
-      bucketStartMs,
-      bucketEndMs,
-      bucketStart: new Date(bucketStartMs).toISOString(),
-      bucketEnd: new Date(bucketEndMs).toISOString(),
-      series: {},
-      sampleCount: 0,
-      eventCount: 0,
-      thresholdCrossingCount: 0,
-    });
-  }
+  const buckets = aggregationBuckets(startMs, endMs, aggregation, bucketSeconds, options.timezone);
 
   for (const bucket of buckets) {
     const bucketRows = sortedRows.filter((entry) => entry.recordedAtMs >= bucket.bucketStartMs && entry.recordedAtMs < bucket.bucketEndMs);
     for (const channel of channels) {
-      const stats = statsForValues(bucketRows.map((entry) => ({ value: entry.row[channel.field], recordedAtMs: entry.recordedAtMs })));
+      const stats = statsForValues(bucketRows.map((entry) => ({ value: channelValue(entry.row, channel), recordedAtMs: entry.recordedAtMs })));
       bucket.series[channel.id] = stats ? { ...stats, unit: channel.unit || null } : {
         min: null,
         max: null,
@@ -934,7 +1019,8 @@ function normalizeQueryChannels(channels) {
   const normalized = normalizeChannels(channels);
   if (normalized.length === 0) throw new Error('aggregateDeviceData requires channels');
   for (const channel of normalized) {
-    if (!ALLOWED_DEVICE_DATA_CHANNELS.has(channel.field)) throw new Error(`unsupported device_data channel: ${channel.field}`);
+    const unsupportedField = channelFieldNames(channel).find((field) => !ALLOWED_DEVICE_DATA_CHANNELS.has(field));
+    if (unsupportedField) throw new Error(`unsupported device_data channel: ${unsupportedField}`);
   }
   return normalized;
 }
@@ -954,10 +1040,10 @@ async function computeRollupBuckets(db, scope = {}, level, windowMs, nowMs) {
   const start = new Date(startMs).toISOString();
   const end = new Date(todayStartMs).toISOString();
   const placeholders = deveuis.map(() => '?').join(',');
-  const selectedFields = Array.from(new Set(channels.map((channel) => channel.field)));
+  const selectedFields = Array.from(new Set(channels.flatMap(channelFieldNames)));
   const sql = `SELECT deveui, recorded_at, ${selectedFields.join(', ')} FROM device_data WHERE deveui IN (${placeholders}) AND recorded_at >= ? AND recorded_at < ? ORDER BY recorded_at ASC`;
   const rows = await dbAll(db, sql, deveuis.concat([start, end]));
-  const result = aggregateRows(rows, { aggregation, channels, start, end, expectedCadences: scope.expectedCadences || scope.expected_cadences });
+  const result = aggregateRows(rows, { aggregation, channels, start, end, timezone: scope.timezone, expectedCadences: scope.expectedCadences || scope.expected_cadences });
   const out = [];
   for (const bucket of result.buckets || []) {
     for (const channel of channels) {
@@ -1021,488 +1107,6 @@ async function upsertRollups(db, rows) {
     count += 1;
   }
   return count;
-}
-
-function csvCell(value) {
-  if (value === null || value === undefined) return '';
-  const stringValue = String(value);
-  return /[",\n\r]/.test(stringValue) ? '"' + stringValue.replace(/"/g, '""') + '"' : stringValue;
-}
-
-function toCsv(columns, rows) {
-  const safeColumns = Array.isArray(columns) ? columns : [];
-  const safeRows = Array.isArray(rows) ? rows : [];
-  return [safeColumns.join(',')]
-    .concat(safeRows.map((row) => safeColumns.map((column) => csvCell(row && row[column])).join(',')))
-    .join('\n') + '\n';
-}
-
-const RAW_CSV_COLUMNS = ['timestamp', 'timezone', 'zone', 'card', 'source', 'array_id', 'variable', 'depth_cm', 'value', 'unit'];
-const AGG_CSV_COLUMNS = ['bucket_start', 'bucket_end', 'timezone', 'zone', 'card', 'source', 'array_id', 'variable', 'depth_cm', 'unit', 'n', 'coverage_pct', 'mean', 'min', 'max', 'median', 'latest'];
-
-function normalizeExportDate(value, name) {
-  const date = String(value || '').trim();
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
-    const error = new Error(`${name} must be YYYY-MM-DD`);
-    error.statusCode = 400;
-    throw error;
-  }
-  return date;
-}
-
-function addIsoDays(date, days) {
-  return new Date(Date.parse(`${date}T00:00:00.000Z`) + days * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
-}
-
-function exportSpanDays(from, to) {
-  const startMs = Date.parse(`${from}T00:00:00.000Z`);
-  const endMs = Date.parse(`${to}T00:00:00.000Z`);
-  if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || endMs < startMs) return 0;
-  return Math.floor((endMs - startMs) / (24 * 60 * 60 * 1000)) + 1;
-}
-
-function assertExportRangeAllowed(scope) {
-  const days = exportSpanDays(scope.from, scope.to);
-  const maxDays = scope.granularity === 'raw' ? 92 : (scope.granularity === 'hourly' ? 730 : null);
-  if (maxDays !== null && days > maxDays) {
-    const error = new Error('range too large for this granularity');
-    error.code = 'RANGE_TOO_LARGE';
-    error.statusCode = 413;
-    error.suggestion = 'choose a coarser granularity';
-    throw error;
-  }
-}
-
-function zoneDateStartIso(date, timezone) {
-  let probeMs = Date.parse(`${date}T12:00:00.000Z`);
-  for (let attempt = 0; attempt < 5; attempt += 1) {
-    const startMs = startOfLocalDayMs(probeMs, timezone);
-    const key = localDateKey(startMs, timezone);
-    if (key === date) return new Date(startMs).toISOString();
-    probeMs += key && key < date ? 24 * 60 * 60 * 1000 : -24 * 60 * 60 * 1000;
-  }
-  return new Date(startOfLocalDayMs(Date.parse(`${date}T00:00:00.000Z`), timezone)).toISOString();
-}
-
-function normalizeExportGranularity(value) {
-  const granularity = String(value || 'raw').trim().toLowerCase();
-  if (!['raw', 'hourly', 'daily'].includes(granularity)) {
-    const error = new Error('granularity must be raw, hourly, or daily');
-    error.statusCode = 400;
-    throw error;
-  }
-  return granularity;
-}
-
-async function resolveZoneExportScope(db, options = {}) {
-  const zoneId = Number(options.zoneId ?? options.zone_id);
-  if (!Number.isInteger(zoneId) || zoneId <= 0) {
-    const error = new Error('zoneId is required');
-    error.statusCode = 400;
-    throw error;
-  }
-
-  const zones = await dbAll(db, 'SELECT id, name, zone_uuid, timezone FROM irrigation_zones WHERE id = ? AND deleted_at IS NULL', [zoneId]);
-  const zone = zones[0];
-  if (!zone) {
-    const error = new Error('zone not found');
-    error.statusCode = 404;
-    throw error;
-  }
-
-  const timezone = normalizeTimezone(zone.timezone);
-  const from = normalizeExportDate(options.from, 'from');
-  const to = normalizeExportDate(options.to || options.from, 'to');
-  if (from > to) {
-    const error = new Error('from must be before or equal to to');
-    error.statusCode = 400;
-    throw error;
-  }
-  const today = localDateKey(options.nowMs ?? Date.now(), timezone);
-  if ((today && from > today) || (today && to > today)) {
-    const error = new Error('date range cannot include future days');
-    error.statusCode = 400;
-    throw error;
-  }
-
-  const start = zoneDateStartIso(from, timezone);
-  const end = zoneDateStartIso(addIsoDays(to, 1), timezone);
-  const devices = await dbAll(db, 'SELECT * FROM devices WHERE deleted_at IS NULL AND irrigation_zone_id = ? ORDER BY deveui ASC', [zoneId]);
-  const cards = deriveCardsForZone(zone, devices).filter((card) => normalizeCardType(card.cardType) !== 'gateway');
-  return { zone, timezone, from, to, start, end, devices, cards, granularity: normalizeExportGranularity(options.granularity), nowMs: options.nowMs ?? Date.now() };
-}
-
-async function rawZoneExportRows(db, scope) {
-  const rows = [];
-  const zoneName = String(scope.zone.name || scope.zone.zone_uuid || scope.zone.id);
-  for (const card of scope.cards) {
-    const channels = channelsForCard(card);
-    const sourceDevices = sourceDevicesForCard(card, scope.devices)
-      .slice()
-      .sort((left, right) =>
-        String(normalizeDeveui(left.deveui || left.device_eui) || '').localeCompare(String(normalizeDeveui(right.deveui || right.device_eui) || ''))
-      );
-    const deveuis = uniqueDeveuis(sourceDevices);
-    if (!channels.length || !deveuis.length) continue;
-
-    const selectedFields = Array.from(new Set(channels.map((channel) => channel.field)));
-    const placeholders = deveuis.map(() => '?').join(',');
-    const sql = `SELECT deveui, recorded_at, ${selectedFields.join(', ')} FROM device_data WHERE deveui IN (${placeholders}) AND recorded_at >= ? AND recorded_at < ? ORDER BY recorded_at ASC`;
-    const dataRows = await dbAll(db, sql, deveuis.concat([scope.start, scope.end]));
-    const arrayIdByDeveui = await resolveDeviceArrayIds(db, deveuis, scope.start, scope.end);
-    const rowsByDeveui = {};
-    for (const row of dataRows) {
-      const key = normalizeDeveui(row.deveui);
-      if (!key) continue;
-      if (!rowsByDeveui[key]) rowsByDeveui[key] = [];
-      rowsByDeveui[key].push(row);
-    }
-
-    sourceDevices.forEach((device, index) => {
-      const deveui = normalizeDeveui(device.deveui || device.device_eui);
-      const sourceRows = rowsByDeveui[deveui] || [];
-      const sourceName = displayDeviceName(device, index);
-      const arrayId = arrayIdByDeveui[deveui] || null;
-      for (const row of sourceRows) {
-        for (const channel of channels) {
-          const value = toFiniteNumber(row[channel.field]);
-          if (value === null) continue;
-          rows.push({
-            timestamp: row.recorded_at,
-            timezone: scope.timezone,
-            zone: zoneName,
-            card: card.cardType,
-            source: sourceName,
-            array_id: arrayId,
-            variable: channel.id,
-            depth_cm: soilDepthCm(device, channel.id),
-            value: roundTo(value),
-            unit: channel.unit || null,
-          });
-        }
-      }
-    });
-  }
-  rows.sort((left, right) => String(left.timestamp).localeCompare(String(right.timestamp))
-    || String(left.card).localeCompare(String(right.card))
-    || String(left.source).localeCompare(String(right.source))
-    || String(left.variable).localeCompare(String(right.variable)));
-  return rows;
-}
-
-async function aggregateZoneExportRows(db, scope) {
-  const rows = [];
-  const zoneName = String(scope.zone.name || scope.zone.zone_uuid || scope.zone.id);
-  for (const card of scope.cards) {
-    const channels = channelsForCard(card);
-    const sourceDevices = sourceDevicesForCard(card, scope.devices)
-      .slice()
-      .sort((left, right) =>
-        String(normalizeDeveui(left.deveui || left.device_eui) || '').localeCompare(String(normalizeDeveui(right.deveui || right.device_eui) || ''))
-      );
-    if (!channels.length || !sourceDevices.length) continue;
-
-    const arrayIdByDeveui = await resolveDeviceArrayIds(db, uniqueDeveuis(sourceDevices), scope.start, scope.end);
-    let index = 0;
-    for (const device of sourceDevices) {
-      const sourceName = displayDeviceName(device, index);
-      index += 1;
-      const deveui = normalizeDeveui(device.deveui || device.device_eui);
-      if (!deveui) continue;
-      const aggregate = await aggregateDeviceData(db, {
-        zoneId: scope.zone.id,
-        cardType: card.cardType,
-        logicalSourceKey: card.logicalSourceKey,
-        device_euis: [deveui],
-        sourceFilterActive: true,
-        start: scope.start,
-        end: scope.end,
-        aggregation: scope.granularity,
-        channels,
-        timezone: scope.timezone,
-        nowMs: scope.nowMs,
-      });
-      rows.push(...csvRowsFromAggregate(aggregate, card, device, sourceName, channels, arrayIdByDeveui[deveui] || null).map((row) => ({
-        ...row,
-        timezone: scope.timezone,
-        zone: zoneName,
-      })));
-    }
-  }
-  rows.sort((left, right) => String(left.bucket_start).localeCompare(String(right.bucket_start))
-    || String(left.card).localeCompare(String(right.card))
-    || String(left.source).localeCompare(String(right.source))
-    || String(left.variable).localeCompare(String(right.variable)));
-  return rows;
-}
-
-async function buildZoneExportCsv(db, options = {}) {
-  const scope = await resolveZoneExportScope(db, options);
-  assertExportRangeAllowed(scope);
-  if (scope.granularity === 'raw') {
-    return { columns: RAW_CSV_COLUMNS, rows: await rawZoneExportRows(db, scope) };
-  }
-  return { columns: AGG_CSV_COLUMNS, rows: await aggregateZoneExportRows(db, scope) };
-}
-
-async function writeZoneCsv(options = {}) {
-  const fs = require('fs');
-  const path = require('path');
-  const zone = options.zone || {};
-  const zoneUuid = String(zone.zone_uuid || zone.zoneUuid || zone.id || '').trim();
-  const day = String(options.day || '').trim();
-  if (!zoneUuid) throw new Error('writeZoneCsv requires zone.zone_uuid');
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) throw new Error('writeZoneCsv requires day YYYY-MM-DD');
-  const exportDir = String(options.exportDir || '/data/exports');
-  const base = path.join(exportDir, zoneUuid);
-  const timezone = normalizeTimezone(zone.timezone);
-  const zoneName = String(zone.name || zoneUuid);
-  const stamp = (row) => ({ ...(row || {}), timezone, zone: zoneName });
-
-  fs.mkdirSync(path.join(base, 'raw'), { recursive: true });
-  fs.mkdirSync(path.join(base, 'hourly'), { recursive: true });
-  fs.writeFileSync(path.join(base, 'raw', `${day}.csv`), toCsv(RAW_CSV_COLUMNS, (options.rawRows || []).map(stamp)));
-  fs.writeFileSync(path.join(base, 'hourly', `${day}.csv`), toCsv(AGG_CSV_COLUMNS, (options.hourlyRows || []).map(stamp)));
-
-  const dailyPath = path.join(base, 'daily.csv');
-  const nextDailyRows = (options.dailyRows || []).map(stamp);
-  let keptLines = [];
-  if (fs.existsSync(dailyPath)) {
-    const lines = fs.readFileSync(dailyPath, 'utf8').split(/\r?\n/).filter((line) => line.length > 0);
-    keptLines = lines.slice(1).filter((line) => !line.startsWith(day));
-  }
-  const dailyBody = [AGG_CSV_COLUMNS.join(',')]
-    .concat(keptLines)
-    .concat(nextDailyRows.map((row) => AGG_CSV_COLUMNS.map((column) => csvCell(row[column])).join(',')));
-  fs.writeFileSync(dailyPath, dailyBody.join('\n') + '\n');
-}
-
-async function rotateZoneCsv(options = {}) {
-  const fs = require('fs');
-  const path = require('path');
-  const zone = options.zone || {};
-  const zoneUuid = String(zone.zone_uuid || zone.zoneUuid || zone.id || '').trim();
-  if (!zoneUuid) throw new Error('rotateZoneCsv requires zone.zone_uuid');
-  const exportDir = String(options.exportDir || '/data/exports');
-  const retentionDays = Math.max(0, Number(options.retentionDays ?? options.retention_days ?? 90));
-  const nowMs = options.nowMs ?? Date.now();
-  const cutoffKey = new Date(nowMs - (retentionDays * 24 * 60 * 60 * 1000)).toISOString().slice(0, 10);
-  const base = path.join(exportDir, zoneUuid);
-  for (const folder of ['raw', 'hourly']) {
-    const dir = path.join(base, folder);
-    if (!fs.existsSync(dir)) continue;
-    for (const name of fs.readdirSync(dir)) {
-      const match = /^(\d{4}-\d{2}-\d{2})\.csv$/.exec(name);
-      if (match && match[1] < cutoffKey) {
-        fs.rmSync(path.join(dir, name), { force: true });
-      }
-    }
-  }
-}
-
-function parseDepthJson(value) {
-  if (!value) return null;
-  try {
-    const parsed = typeof value === 'string' ? JSON.parse(value) : value;
-    if (Array.isArray(parsed)) return parsed;
-    if (parsed && typeof parsed === 'object') return parsed;
-  } catch (_) {
-    return null;
-  }
-  return null;
-}
-
-function soilDepthCm(device, channelId) {
-  const direct = {
-    swt_1: device && device.chameleon_swt1_depth_cm,
-    swt_2: device && device.chameleon_swt2_depth_cm,
-    swt_3: device && device.chameleon_swt3_depth_cm,
-  }[channelId];
-  const directNumber = toFiniteNumber(direct);
-  if (directNumber !== null) return directNumber;
-  const configured = parseDepthJson(device && device.soil_moisture_probe_depths_json);
-  if (Array.isArray(configured)) {
-    const index = { swt_1: 0, swt_2: 1, swt_3: 2, swt_wm1: 0, swt_wm2: 1 }[channelId];
-    return index === undefined ? null : toFiniteNumber(configured[index]);
-  }
-  if (configured && typeof configured === 'object') {
-    return toFiniteNumber(configured[channelId] ?? configured[channelId.replace('_', '')] ?? configured[channelId.toUpperCase()]);
-  }
-  return null;
-}
-
-// Resolve the latest Chameleon array_id seen per source device over [start, end).
-// array_id lives in chameleon_readings (per uplink), surfaced app-side as a
-// device-level attribute. Returns a map deveui -> array_id (display-safe id).
-async function resolveDeviceArrayIds(db, deveuis, start, end) {
-  const map = {};
-  const list = Array.from(new Set((deveuis || []).map((value) => normalizeDeveui(value)).filter(Boolean)));
-  if (!list.length) return map;
-  const placeholders = list.map(() => '?').join(',');
-  const sql = `SELECT deveui, array_id, MAX(recorded_at) AS latest FROM chameleon_readings WHERE deveui IN (${placeholders}) AND array_id IS NOT NULL AND recorded_at >= ? AND recorded_at < ? GROUP BY deveui`;
-  let rows = [];
-  try {
-    rows = await dbAll(db, sql, list.concat([start, end]));
-  } catch (err) {
-    return map; // chameleon_readings may be absent on older schemas; degrade gracefully
-  }
-  for (const row of rows || []) {
-    const key = normalizeDeveui(row.deveui);
-    if (key && row.array_id != null && row.array_id !== '') map[key] = String(row.array_id);
-  }
-  return map;
-}
-
-function csvRowsFromAggregate(aggregate, card, device, sourceName, channels, arrayId) {
-  const rows = [];
-  for (const bucket of aggregate.buckets || []) {
-    for (const channel of channels) {
-      const stats = bucket.series && bucket.series[channel.id];
-      if (!stats || Number(stats.sampleCount || 0) === 0) continue;
-      rows.push({
-        bucket_start: bucket.bucketStart,
-        bucket_end: bucket.bucketEnd,
-        card: card.cardType,
-        source: sourceName,
-        array_id: arrayId == null ? null : arrayId,
-        variable: channel.id,
-        depth_cm: soilDepthCm(device, channel.id),
-        unit: channel.unit || stats.unit || null,
-        n: Number(stats.sampleCount || 0),
-        coverage_pct: bucket.coveragePct,
-        mean: stats.mean,
-        min: stats.min,
-        max: stats.max,
-        median: stats.median,
-        latest: stats.latest,
-      });
-    }
-  }
-  return rows;
-}
-
-async function buildZoneCsvRows(db, zone, devices, cards, dayStartIso, dayEndIso) {
-  const rawRows = [];
-  const hourlyRows = [];
-  const dailyRows = [];
-  for (const card of cards || []) {
-    const channels = channelsForCard(card);
-    const sourceDevices = sourceDevicesForCard(card, devices)
-      .slice()
-      .sort((left, right) =>
-        String(normalizeDeveui(left.deveui || left.device_eui) || '').localeCompare(String(normalizeDeveui(right.deveui || right.device_eui) || ''))
-      );
-    const deveuis = uniqueDeveuis(sourceDevices);
-    if (!channels.length || !deveuis.length) continue;
-    const selectedFields = Array.from(new Set(channels.map((channel) => channel.field)));
-    const placeholders = deveuis.map(() => '?').join(',');
-    const sql = `SELECT deveui, recorded_at, ${selectedFields.join(', ')} FROM device_data WHERE deveui IN (${placeholders}) AND recorded_at >= ? AND recorded_at < ? ORDER BY recorded_at ASC`;
-    const rows = await dbAll(db, sql, deveuis.concat([dayStartIso, dayEndIso]));
-    const arrayIdByDeveui = await resolveDeviceArrayIds(db, deveuis, dayStartIso, dayEndIso);
-    const rowsByDeveui = {};
-    for (const row of rows) {
-      const key = normalizeDeveui(row.deveui);
-      if (!key) continue;
-      if (!rowsByDeveui[key]) rowsByDeveui[key] = [];
-      rowsByDeveui[key].push(row);
-    }
-
-    sourceDevices.forEach((device, index) => {
-      const deveui = normalizeDeveui(device.deveui || device.device_eui);
-      const sourceRows = rowsByDeveui[deveui] || [];
-      const sourceName = displayDeviceName(device, index);
-      const arrayId = arrayIdByDeveui[deveui] || null;
-      for (const row of sourceRows) {
-        for (const channel of channels) {
-          const value = toFiniteNumber(row[channel.field]);
-          if (value === null) continue;
-          rawRows.push({
-            timestamp: row.recorded_at,
-            card: card.cardType,
-            source: sourceName,
-            array_id: arrayId,
-            variable: channel.id,
-            depth_cm: soilDepthCm(device, channel.id),
-            value: roundTo(value),
-            unit: channel.unit || null,
-          });
-        }
-      }
-      const hourly = aggregateRows(sourceRows, { aggregation: 'hourly', channels, start: dayStartIso, end: dayEndIso });
-      hourlyRows.push(...csvRowsFromAggregate(hourly, card, device, sourceName, channels, arrayId));
-      const daily = aggregateRows(sourceRows, { aggregation: 'daily', channels, start: dayStartIso, end: dayEndIso });
-      dailyRows.push(...csvRowsFromAggregate(daily, card, device, sourceName, channels, arrayId));
-    });
-  }
-  return { rawRows, hourlyRows, dailyRows };
-}
-
-async function runRollupJob(db, options = {}) {
-  const startedAt = Date.now();
-  const nowMs = options.nowMs ?? Date.now();
-  const exportDir = options.exportDir === undefined ? '/data/exports' : options.exportDir;
-  const retentionDays = Number(options.retentionDays ?? options.retention_days ?? process.env.HISTORY_CSV_RAW_RETENTION_DAYS ?? 90) || 90;
-  const levels = Array.isArray(options.levels) && options.levels.length
-    ? options.levels.filter((level) => Object.prototype.hasOwnProperty.call(ROLLUP_WINDOWS, level))
-    : ['hourly', 'daily', 'weekly'];
-  const zones = await dbAll(db, 'SELECT id, name, zone_uuid, timezone FROM irrigation_zones WHERE deleted_at IS NULL', []);
-  let cardsProcessed = 0;
-  let bucketsUpserted = 0;
-  let csvZonesWritten = 0;
-  let csvRowsWritten = 0;
-  const errors = [];
-
-  for (const zone of zones) {
-    try {
-      const devices = await dbAll(db, 'SELECT * FROM devices WHERE deleted_at IS NULL AND irrigation_zone_id = ?', [zone.id]);
-      const cards = deriveCardsForZone(zone, devices);
-      for (const card of cards) {
-        const channels = channelsForCard(card);
-        const sourceDevices = sourceDevicesForCard(card, devices);
-        const deveuis = uniqueDeveuis(sourceDevices);
-        if (!channels.length || !deveuis.length) continue;
-        cardsProcessed += 1;
-        const scope = {
-          zoneId: zone.id,
-          cardType: card.cardType,
-          logicalSourceKey: card.logicalSourceKey,
-          channels,
-          deveuis,
-          timezone: zone.timezone || 'UTC',
-        };
-        for (const level of levels) {
-          const rows = await computeRollupBuckets(db, scope, level, ROLLUP_WINDOWS[level], nowMs);
-          bucketsUpserted += await upsertRollups(db, rows);
-        }
-      }
-      if (exportDir) {
-        const timezone = zone.timezone || 'UTC';
-        const dayEndMs = startOfLocalDayMs(nowMs, timezone);
-        const dayStartMs = dayEndMs - (24 * 60 * 60 * 1000);
-        const dayStartIso = new Date(dayStartMs).toISOString();
-        const dayEndIso = new Date(dayEndMs).toISOString();
-        const day = localDateKey(dayStartMs, timezone);
-        const csvRows = await buildZoneCsvRows(db, zone, devices, cards, dayStartIso, dayEndIso);
-        await writeZoneCsv({ exportDir, zone, day, rawRows: csvRows.rawRows, hourlyRows: csvRows.hourlyRows, dailyRows: csvRows.dailyRows });
-        await rotateZoneCsv({ exportDir, zone, nowMs, retentionDays });
-        csvZonesWritten += 1;
-        csvRowsWritten += csvRows.rawRows.length + csvRows.hourlyRows.length + csvRows.dailyRows.length;
-      }
-    } catch (error) {
-      errors.push({ zoneId: zone.id, message: String(error && error.message || error) });
-    }
-  }
-
-  return {
-    generatedAt: new Date(nowMs).toISOString(),
-    zones: zones.length,
-    cardsProcessed,
-    bucketsUpserted,
-    csvZonesWritten,
-    csvRowsWritten,
-    errors,
-    durationMs: Date.now() - startedAt,
-  };
 }
 
 function rollupRowsToResult(rows, query, channels) {
@@ -1614,6 +1218,78 @@ function queryDeviceEuis(query = {}) {
   return Array.from(new Set(values.map(normalizeSourceKey).map(normalizeDeveui).filter(Boolean)));
 }
 
+async function aggregateDeviceData(db, query = {}) {
+  const aggregationInfo = resolveAggregation(query);
+  const aggregation = aggregationInfo.level;
+  const channels = normalizeQueryChannels(query.channels);
+  const start = query.start || query.startAt || query.from;
+  const end = query.end || query.endAt || query.to;
+  if (!start || !end) throw new Error('aggregateDeviceData requires start and end');
+
+  const zoneId = firstDefinedValue([query.zoneId, query.zone_id]);
+  const cardType = firstDefinedValue([query.cardType, query.card_type]);
+  const logicalSourceKey = firstDefinedValue([query.logicalSourceKey, query.logical_source_key]);
+  const useRollups = query.useRollups ?? query.use_rollups;
+  const hasRollupIdentity = zoneId !== undefined && cardType && logicalSourceKey;
+  const deveuis = queryDeviceEuis(query);
+  const sourceFilterFlag = query.sourceFilterActive ?? query.source_filter_active;
+  const hasSourceFilter = sourceFilterFlag === true || sourceFilterFlag === 1 || String(sourceFilterFlag || '').toLowerCase() === 'true';
+  const shouldUseRollups =
+    !hasSourceFilter
+    && (useRollups === true || (useRollups !== false && hasRollupIdentity && ['hourly', 'daily', 'weekly'].includes(aggregation)));
+  if (shouldUseRollups) {
+    const startMs = parseTime(start);
+    const endMs = parseTime(end);
+    if (startMs === null || endMs === null || endMs <= startMs) throw new Error('aggregateDeviceData requires a valid start/end range');
+    const todayStartMs = startOfLocalDayMs(query.nowMs ?? Date.now(), query.timezone || query.time_zone || 'UTC');
+    const splitMs = Math.min(Math.max(todayStartMs, startMs), endMs);
+    const splitIso = new Date(splitMs).toISOString();
+    const channelIds = channels.map((channel) => channel.id);
+    const placeholders = channelIds.map(() => '?').join(',');
+    let rollupRows = [];
+    if (splitMs > startMs) {
+      const sql = `SELECT * FROM history_channel_rollups WHERE zone_id = ? AND card_type = ? AND logical_source_key = ? AND bucket_level = ? AND bucket_start >= ? AND bucket_start < ? AND channel_id IN (${placeholders}) ORDER BY bucket_start ASC, channel_id ASC`;
+      const params = [zoneId, cardType, logicalSourceKey, aggregation, start, splitIso].concat(channelIds);
+      rollupRows = await dbAll(db, sql, params);
+    }
+    const completed = rollupRowsToResult(rollupRows, { ...query, aggregation, aggregationRequested: aggregationInfo.requested }, channels);
+    let live = null;
+    const hasTrailingWindow = splitMs < endMs;
+    if (hasTrailingWindow && deveuis.length > 0) {
+      const livePlaceholders = deveuis.map(() => '?').join(',');
+      const selectedFields = Array.from(new Set(channels.flatMap(channelFieldNames)));
+      const sql = `SELECT deveui, recorded_at, ${selectedFields.join(', ')} FROM device_data WHERE deveui IN (${livePlaceholders}) AND recorded_at >= ? AND recorded_at < ? ORDER BY recorded_at ASC`;
+      const rows = await dbAll(db, sql, deveuis.concat([splitIso, end]));
+      live = aggregateRows(rows, { ...query, aggregation, aggregationRequested: aggregationInfo.requested, channels, start: splitIso, end });
+    }
+    if (rollupRows.length || live) {
+      const buckets = (completed.buckets || []).concat(live && live.buckets || [])
+        .sort((left, right) => String(left.bucketStart).localeCompare(String(right.bucketStart)));
+      const coverageValues = buckets.map((bucket) => toFiniteNumber(bucket.coveragePct)).filter((value) => value !== null);
+      const coverageConfidence = buckets.some((bucket) => bucket.coverageConfidence === 'unknown')
+        ? 'unknown'
+        : (buckets.some((bucket) => bucket.coverageConfidence === 'derived') ? 'derived' : (buckets.length ? 'configured' : 'unknown'));
+      return {
+        ...completed,
+        source: rollupRows.length && live ? 'rollups+live' : (rollupRows.length ? 'history_channel_rollups' : 'device_data'),
+        coverageConfidence,
+        coveragePct: coverageValues.length ? roundTo(coverageValues.reduce((sum, value) => sum + value, 0) / coverageValues.length) : null,
+        buckets,
+      };
+    }
+  }
+
+  if (deveuis.length === 0) throw new Error('aggregateDeviceData requires at least one DevEUI');
+  const placeholders = deveuis.map(() => '?').join(',');
+  const selectedFields = Array.from(new Set(channels.flatMap(channelFieldNames)));
+  const sql = `SELECT deveui, recorded_at, ${selectedFields.join(', ')} FROM device_data WHERE deveui IN (${placeholders}) AND recorded_at BETWEEN ? AND ? ORDER BY deveui ASC, recorded_at ASC`;
+  const params = deveuis.concat([start, end]);
+  const rows = await dbAll(db, sql, params);
+  const result = aggregateRows(rows, { ...query, aggregation, aggregationRequested: aggregationInfo.requested, channels, start, end });
+  if (shouldUseRollups) result.source = 'device_data_fallback';
+  return result;
+}
+
 function canonicalHistoryField(field) {
   const normalized = String(field || '').trim();
   return LEGACY_FIELD_ALIASES[normalized] || normalized;
@@ -1621,7 +1297,7 @@ function canonicalHistoryField(field) {
 
 function legacyFieldExpression(field) {
   const normalized = String(field || '').trim();
-  if (!ALLOWED_DEVICE_DATA_CHANNELS.has(normalized)) return null;
+  if (!LEGACY_SENSOR_HISTORY_FIELDS.has(normalized)) return null;
   return LEGACY_FIELD_EXPRESSIONS[normalized] || `dd.${normalized}`;
 }
 
@@ -1739,7 +1415,7 @@ function flattenLegacyAggregate(result, channelId) {
   } else if (result && result.series && result.series[channelId]) {
     for (const point of result.series[channelId].points || []) {
       const value = toFiniteNumber(point.value);
-      if (value !== null) points.push({ t: point.t || point.recorded_at, value });
+      if (value !== null) points.push({ t: point.t || point.recorded_at || point.recordedAt, value });
     }
   }
   return points.sort((left, right) => String(left.t).localeCompare(String(right.t)));
@@ -1868,76 +1544,503 @@ async function legacySensorHistory(db, options = {}) {
   return flattenLegacyAggregate(result, key.channelId);
 }
 
-async function aggregateDeviceData(db, query = {}) {
-  const aggregationInfo = resolveAggregation(query);
-  const aggregation = aggregationInfo.level;
-  const channels = normalizeQueryChannels(query.channels);
-  const start = query.start || query.startAt || query.from;
-  const end = query.end || query.endAt || query.to;
-  if (!start || !end) throw new Error('aggregateDeviceData requires start and end');
+function csvCell(value) {
+  if (value === null || value === undefined) return '';
+  const stringValue = typeof value !== 'number' && /^[=+\-@]/.test(String(value)) ? `'${String(value)}` : String(value);
+  return /[",\n\r]/.test(stringValue) ? '"' + stringValue.replace(/"/g, '""') + '"' : stringValue;
+}
 
-  const zoneId = firstDefinedValue([query.zoneId, query.zone_id]);
-  const cardType = firstDefinedValue([query.cardType, query.card_type]);
-  const logicalSourceKey = firstDefinedValue([query.logicalSourceKey, query.logical_source_key]);
-  const useRollups = query.useRollups ?? query.use_rollups;
-  const hasRollupIdentity = zoneId !== undefined && cardType && logicalSourceKey;
-  const deveuis = queryDeviceEuis(query);
-  const sourceFilterFlag = query.sourceFilterActive ?? query.source_filter_active;
-  const hasSourceFilter = sourceFilterFlag === true || sourceFilterFlag === 1 || String(sourceFilterFlag || '').toLowerCase() === 'true';
-  const shouldUseRollups =
-    !hasSourceFilter
-    && (useRollups === true || (useRollups !== false && hasRollupIdentity && ['hourly', 'daily', 'weekly'].includes(aggregation)));
-  if (shouldUseRollups) {
-    const startMs = parseTime(start);
-    const endMs = parseTime(end);
-    if (startMs === null || endMs === null || endMs <= startMs) throw new Error('aggregateDeviceData requires a valid start/end range');
-    const todayStartMs = startOfLocalDayMs(query.nowMs ?? Date.now(), query.timezone || query.time_zone || 'UTC');
-    const splitMs = Math.min(Math.max(todayStartMs, startMs), endMs);
-    const splitIso = new Date(splitMs).toISOString();
-    const channelIds = channels.map((channel) => channel.id);
-    const placeholders = channelIds.map(() => '?').join(',');
-    let rollupRows = [];
-    if (splitMs > startMs) {
-      const sql = `SELECT * FROM history_channel_rollups WHERE zone_id = ? AND card_type = ? AND logical_source_key = ? AND bucket_level = ? AND bucket_start >= ? AND bucket_start < ? AND channel_id IN (${placeholders}) ORDER BY bucket_start ASC, channel_id ASC`;
-      const params = [zoneId, cardType, logicalSourceKey, aggregation, start, splitIso].concat(channelIds);
-      rollupRows = await dbAll(db, sql, params);
+function toCsv(columns, rows) {
+  const safeColumns = Array.isArray(columns) ? columns : [];
+  const safeRows = Array.isArray(rows) ? rows : [];
+  return [safeColumns.join(',')]
+    .concat(safeRows.map((row) => safeColumns.map((column) => csvCell(row && row[column])).join(',')))
+    .join('\n') + '\n';
+}
+
+const TIDY_CSV_COLUMNS = ['timestamp', 'site', 'zone', 'series_label', 'card_type', 'source_key', 'channel_key', 'depth_cm', 'array_id', 'unit', 'value'];
+const RAW_CSV_COLUMNS = TIDY_CSV_COLUMNS;
+const AGG_CSV_COLUMNS = TIDY_CSV_COLUMNS;
+
+function normalizeExportDate(value, name) {
+  const date = String(value || '').trim();
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(date);
+  let canonical = null;
+  if (match) {
+    const year = Number(match[1]);
+    const parsed = new Date(Date.UTC(year, Number(match[2]) - 1, Number(match[3])));
+    parsed.setUTCFullYear(year);
+    canonical = Number.isFinite(parsed.getTime()) ? parsed.toISOString().slice(0, 10) : null;
+  }
+  if (canonical !== date) {
+    const error = new Error(`${name} must be YYYY-MM-DD`);
+    error.statusCode = 400;
+    throw error;
+  }
+  return date;
+}
+
+function addIsoDays(date, days) {
+  return new Date(Date.parse(`${date}T00:00:00.000Z`) + days * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+}
+
+function exportSpanDays(from, to) {
+  const startMs = Date.parse(`${from}T00:00:00.000Z`);
+  const endMs = Date.parse(`${to}T00:00:00.000Z`);
+  if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || endMs < startMs) return 0;
+  return Math.floor((endMs - startMs) / (24 * 60 * 60 * 1000)) + 1;
+}
+
+function assertExportRangeAllowed(scope) {
+  const days = exportSpanDays(scope.from, scope.to);
+  const maxDays = scope.granularity === 'raw' ? 92 : (scope.granularity === 'hourly' ? 730 : null);
+  if (maxDays !== null && days > maxDays) {
+    const error = new Error('range too large for this granularity');
+    error.code = 'RANGE_TOO_LARGE';
+    error.statusCode = 413;
+    error.suggestion = 'choose a coarser granularity';
+    throw error;
+  }
+}
+
+function zoneDateStartIso(date, timezone) {
+  let probeMs = Date.parse(`${date}T12:00:00.000Z`);
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    const startMs = startOfLocalDayMs(probeMs, timezone);
+    const key = localDateKey(startMs, timezone);
+    if (key === date) return new Date(startMs).toISOString();
+    probeMs += key && key < date ? 24 * 60 * 60 * 1000 : -24 * 60 * 60 * 1000;
+  }
+  return new Date(startOfLocalDayMs(Date.parse(`${date}T00:00:00.000Z`), timezone)).toISOString();
+}
+
+function normalizeExportGranularity(value) {
+  const granularity = String(value || 'raw').trim().toLowerCase();
+  if (!['raw', 'hourly', 'daily'].includes(granularity)) {
+    const error = new Error('granularity must be raw, hourly, or daily');
+    error.statusCode = 400;
+    throw error;
+  }
+  return granularity;
+}
+
+function canonicalChannelKey(value) {
+  const key = String(value || '').trim().toLowerCase();
+  if (!key) return null;
+  if (Object.prototype.hasOwnProperty.call(LEGACY_CHANNEL_ALIASES, key)) return LEGACY_CHANNEL_ALIASES[key];
+  if (VALID_EXPORT_CHANNEL_KEYS.has(key)) return key;
+  const error = new Error(`unknown channel: ${key}`);
+  error.statusCode = 400;
+  throw error;
+}
+
+function normalizeExportChannels(input) {
+  const raw = Array.isArray(input)
+    ? input
+    : String(input || '').split(',');
+  const normalized = [];
+  const seen = new Set();
+  for (const value of raw) {
+    const key = canonicalChannelKey(value);
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    normalized.push(key);
+  }
+  return normalized.length ? new Set(normalized) : null;
+}
+
+async function resolveZoneExportScope(db, options = {}) {
+  const zoneId = Number(options.zoneId ?? options.zone_id);
+  if (!Number.isInteger(zoneId) || zoneId <= 0) {
+    const error = new Error('zoneId is required');
+    error.statusCode = 400;
+    throw error;
+  }
+
+  const zones = await dbAll(db, 'SELECT id, name, zone_uuid, timezone FROM irrigation_zones WHERE id = ? AND deleted_at IS NULL', [zoneId]);
+  const zone = zones[0];
+  if (!zone) {
+    const error = new Error('zone not found');
+    error.statusCode = 404;
+    throw error;
+  }
+
+  const timezone = normalizeTimezone(zone.timezone);
+  const from = normalizeExportDate(options.from, 'from');
+  const to = normalizeExportDate(options.to || options.from, 'to');
+  if (from > to) {
+    const error = new Error('from must be before or equal to to');
+    error.statusCode = 400;
+    throw error;
+  }
+  const today = localDateKey(options.nowMs ?? Date.now(), timezone);
+  if ((today && from > today) || (today && to > today)) {
+    const error = new Error('date range cannot include future days');
+    error.statusCode = 400;
+    throw error;
+  }
+
+  const start = zoneDateStartIso(from, timezone);
+  const end = zoneDateStartIso(addIsoDays(to, 1), timezone);
+  const devices = await dbAll(db, 'SELECT * FROM devices WHERE deleted_at IS NULL AND irrigation_zone_id = ? ORDER BY deveui ASC', [zoneId]);
+  const cards = deriveCardsForZone(zone, devices).filter((card) => normalizeCardType(card.cardType) !== 'gateway');
+  const site = String(options.site || process.env.DEVICE_EUI || process.env.GATEWAY_DEVICE_EUI || 'UNKNOWN').trim().toUpperCase() || 'UNKNOWN';
+  return { zone, timezone, from, to, start, end, devices, cards, site, requestedChannelKeys: normalizeExportChannels(options.channels), granularity: normalizeExportGranularity(options.granularity), nowMs: options.nowMs ?? Date.now() };
+}
+
+function seriesLabel(sourceName, channel) {
+  return [sourceName, channel && (channel.label || channel.id)].filter(Boolean).join(' - ');
+}
+
+function sourceKeyForCsv(card, device) {
+  const cardType = normalizeCardType(card && card.cardType);
+  if (cardType === 'dendro') return dendroSourceKey(device && (device.deveui || device.device_eui)) || String(card && card.logicalSourceKey || '').trim();
+  return displaySafeSourceKey(cardType, device) || String(card && card.logicalSourceKey || '').trim();
+}
+
+function tidyCsvRow(input) {
+  const row = input || {};
+  return {
+    timestamp: row.timestamp ?? row.bucket_start ?? '',
+    site: row.site ?? '',
+    zone: row.zone ?? '',
+    series_label: row.series_label ?? (row.source && (row.channel_label || row.variable) ? `${row.source} - ${row.channel_label || row.variable}` : ''),
+    card_type: row.card_type ?? row.card ?? '',
+    source_key: row.source_key ?? row.logical_source_key ?? '',
+    channel_key: row.channel_key ?? row.variable ?? '',
+    depth_cm: row.depth_cm ?? '',
+    array_id: row.array_id ?? '',
+    unit: row.unit ?? '',
+    value: row.value ?? row.mean ?? '',
+  };
+}
+
+function exportChannelsForCard(card, scope) {
+  const channels = channelsForCard(card);
+  return scope && scope.requestedChannelKeys
+    ? channels.filter((channel) => scope.requestedChannelKeys.has(channel.id))
+    : channels;
+}
+
+async function rawZoneExportRows(db, scope) {
+  const rows = [];
+  const zoneName = String(scope.zone.name || scope.zone.zone_uuid || scope.zone.id);
+  for (const card of scope.cards) {
+    const channels = exportChannelsForCard(card, scope);
+    const sourceDevices = sourceDevicesForCard(card, scope.devices)
+      .slice()
+      .sort((left, right) =>
+        String(normalizeDeveui(left.deveui || left.device_eui) || '').localeCompare(String(normalizeDeveui(right.deveui || right.device_eui) || ''))
+      );
+    const deveuis = uniqueDeveuis(sourceDevices);
+    if (!channels.length || !deveuis.length) continue;
+
+    const selectedFields = Array.from(new Set(channels.flatMap(channelFieldNames)));
+    const placeholders = deveuis.map(() => '?').join(',');
+    const sql = `SELECT deveui, recorded_at, ${selectedFields.join(', ')} FROM device_data WHERE deveui IN (${placeholders}) AND recorded_at >= ? AND recorded_at < ? ORDER BY recorded_at ASC`;
+    const dataRows = await dbAll(db, sql, deveuis.concat([scope.start, scope.end]));
+    const arrayIdByDeveui = await resolveDeviceArrayIds(db, deveuis, scope.start, scope.end);
+    const rowsByDeveui = {};
+    for (const row of dataRows) {
+      const key = normalizeDeveui(row.deveui);
+      if (!key) continue;
+      if (!rowsByDeveui[key]) rowsByDeveui[key] = [];
+      rowsByDeveui[key].push(row);
     }
-    const completed = rollupRowsToResult(rollupRows, { ...query, aggregation, aggregationRequested: aggregationInfo.requested }, channels);
-    let live = null;
-    const hasTrailingWindow = splitMs < endMs;
-    if (hasTrailingWindow && deveuis.length > 0) {
-      const livePlaceholders = deveuis.map(() => '?').join(',');
-      const selectedFields = Array.from(new Set(channels.map((channel) => channel.field)));
-      const sql = `SELECT deveui, recorded_at, ${selectedFields.join(', ')} FROM device_data WHERE deveui IN (${livePlaceholders}) AND recorded_at >= ? AND recorded_at < ? ORDER BY recorded_at ASC`;
-      const rows = await dbAll(db, sql, deveuis.concat([splitIso, end]));
-      live = aggregateRows(rows, { ...query, aggregation, aggregationRequested: aggregationInfo.requested, channels, start: splitIso, end });
+
+    sourceDevices.forEach((device, index) => {
+      const deveui = normalizeDeveui(device.deveui || device.device_eui);
+      const sourceRows = rowsByDeveui[deveui] || [];
+      const sourceName = displayDeviceName(device, index);
+      const arrayId = arrayIdByDeveui[deveui] || null;
+      for (const row of sourceRows) {
+        for (const channel of channels) {
+          const value = channelValue(row, channel);
+          if (value === null) continue;
+          rows.push({
+            timestamp: row.recorded_at,
+            site: scope.site,
+            zone: zoneName,
+            series_label: seriesLabel(sourceName, channel),
+            card_type: card.cardType,
+            source_key: sourceKeyForCsv(card, device),
+            channel_key: channel.id,
+            depth_cm: soilDepthCm(device, channel.id),
+            array_id: arrayId,
+            unit: channel.unit || null,
+            value: roundTo(value),
+          });
+        }
+      }
+    });
+  }
+  rows.sort((left, right) => String(left.timestamp).localeCompare(String(right.timestamp))
+    || String(left.card_type).localeCompare(String(right.card_type))
+    || String(left.source_key).localeCompare(String(right.source_key))
+    || String(left.channel_key).localeCompare(String(right.channel_key)));
+  return rows;
+}
+
+async function aggregateZoneExportRows(db, scope) {
+  const rows = [];
+  const zoneName = String(scope.zone.name || scope.zone.zone_uuid || scope.zone.id);
+  for (const card of scope.cards) {
+    const channels = exportChannelsForCard(card, scope);
+    const sourceDevices = sourceDevicesForCard(card, scope.devices)
+      .slice()
+      .sort((left, right) =>
+        String(normalizeDeveui(left.deveui || left.device_eui) || '').localeCompare(String(normalizeDeveui(right.deveui || right.device_eui) || ''))
+      );
+    if (!channels.length || !sourceDevices.length) continue;
+
+    const arrayIdByDeveui = await resolveDeviceArrayIds(db, uniqueDeveuis(sourceDevices), scope.start, scope.end);
+    let index = 0;
+    for (const device of sourceDevices) {
+      const sourceName = displayDeviceName(device, index);
+      index += 1;
+      const deveui = normalizeDeveui(device.deveui || device.device_eui);
+      if (!deveui) continue;
+      const aggregate = await aggregateDeviceData(db, {
+        zoneId: scope.zone.id,
+        cardType: card.cardType,
+        logicalSourceKey: card.logicalSourceKey,
+        device_euis: [deveui],
+        sourceFilterActive: true,
+        start: scope.start,
+        end: scope.end,
+        aggregation: scope.granularity,
+        channels,
+        timezone: scope.timezone,
+        nowMs: scope.nowMs,
+      });
+      rows.push(...csvRowsFromAggregate(aggregate, card, device, sourceName, channels, arrayIdByDeveui[deveui] || null, {
+        site: scope.site,
+        zone: zoneName,
+      }));
     }
-    if (rollupRows.length || live) {
-      const buckets = (completed.buckets || []).concat(live && live.buckets || [])
-        .sort((left, right) => String(left.bucketStart).localeCompare(String(right.bucketStart)));
-      const coverageValues = buckets.map((bucket) => toFiniteNumber(bucket.coveragePct)).filter((value) => value !== null);
-      const coverageConfidence = buckets.some((bucket) => bucket.coverageConfidence === 'unknown')
-        ? 'unknown'
-        : (buckets.some((bucket) => bucket.coverageConfidence === 'derived') ? 'derived' : (buckets.length ? 'configured' : 'unknown'));
-      return {
-        ...completed,
-        source: rollupRows.length && live ? 'rollups+live' : (rollupRows.length ? 'history_channel_rollups' : 'device_data'),
-        coverageConfidence,
-        coveragePct: coverageValues.length ? roundTo(coverageValues.reduce((sum, value) => sum + value, 0) / coverageValues.length) : null,
-        buckets,
-      };
+  }
+  rows.sort((left, right) => String(left.timestamp).localeCompare(String(right.timestamp))
+    || String(left.card_type).localeCompare(String(right.card_type))
+    || String(left.source_key).localeCompare(String(right.source_key))
+    || String(left.channel_key).localeCompare(String(right.channel_key)));
+  return rows;
+}
+
+async function buildZoneExportCsv(db, options = {}) {
+  const scope = await resolveZoneExportScope(db, options);
+  assertExportRangeAllowed(scope);
+  if (scope.granularity === 'raw') {
+    return { columns: RAW_CSV_COLUMNS, rows: await rawZoneExportRows(db, scope) };
+  }
+  return { columns: AGG_CSV_COLUMNS, rows: await aggregateZoneExportRows(db, scope) };
+}
+
+async function writeZoneCsv(options = {}) {
+  const fs = require('fs');
+  const path = require('path');
+  const zone = options.zone || {};
+  const zoneUuid = String(zone.zone_uuid || zone.zoneUuid || zone.id || '').trim();
+  const day = String(options.day || '').trim();
+  if (!zoneUuid) throw new Error('writeZoneCsv requires zone.zone_uuid');
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) throw new Error('writeZoneCsv requires day YYYY-MM-DD');
+  const exportDir = String(options.exportDir || '/data/exports');
+  const base = path.join(exportDir, zoneUuid);
+  const zoneName = String(zone.name || zoneUuid);
+  const stamp = (row) => tidyCsvRow({ ...(row || {}), zone: row && row.zone ? row.zone : zoneName });
+
+  fs.mkdirSync(path.join(base, 'raw'), { recursive: true });
+  fs.mkdirSync(path.join(base, 'hourly'), { recursive: true });
+  fs.writeFileSync(path.join(base, 'raw', `${day}.csv`), toCsv(RAW_CSV_COLUMNS, (options.rawRows || []).map(stamp)));
+  fs.writeFileSync(path.join(base, 'hourly', `${day}.csv`), toCsv(AGG_CSV_COLUMNS, (options.hourlyRows || []).map(stamp)));
+
+  const dailyPath = path.join(base, 'daily.csv');
+  const nextDailyRows = (options.dailyRows || []).map(stamp);
+  let keptLines = [];
+  if (fs.existsSync(dailyPath)) {
+    const lines = fs.readFileSync(dailyPath, 'utf8').split(/\r?\n/).filter((line) => line.length > 0);
+    keptLines = lines.slice(1).filter((line) => !line.startsWith(day));
+  }
+  const dailyBody = [AGG_CSV_COLUMNS.join(',')]
+    .concat(keptLines)
+    .concat(nextDailyRows.map((row) => AGG_CSV_COLUMNS.map((column) => csvCell(row[column])).join(',')));
+  fs.writeFileSync(dailyPath, dailyBody.join('\n') + '\n');
+}
+
+async function rotateZoneCsv(options = {}) {
+  const fs = require('fs');
+  const path = require('path');
+  const zone = options.zone || {};
+  const zoneUuid = String(zone.zone_uuid || zone.zoneUuid || zone.id || '').trim();
+  if (!zoneUuid) throw new Error('rotateZoneCsv requires zone.zone_uuid');
+  const exportDir = String(options.exportDir || '/data/exports');
+  const retentionDays = Math.max(0, Number(options.retentionDays ?? options.retention_days ?? 90));
+  const nowMs = options.nowMs ?? Date.now();
+  const cutoffKey = new Date(nowMs - (retentionDays * 24 * 60 * 60 * 1000)).toISOString().slice(0, 10);
+  const base = path.join(exportDir, zoneUuid);
+  for (const folder of ['raw', 'hourly']) {
+    const dir = path.join(base, folder);
+    if (!fs.existsSync(dir)) continue;
+    for (const name of fs.readdirSync(dir)) {
+      const match = /^(\d{4}-\d{2}-\d{2})\.csv$/.exec(name);
+      if (match && match[1] < cutoffKey) {
+        fs.rmSync(path.join(dir, name), { force: true });
+      }
+    }
+  }
+}
+
+async function buildZoneCsvRows(db, zone, day, nowMs) {
+  const scope = await resolveZoneExportScope(db, {
+    zoneId: zone.id,
+    from: day,
+    to: day,
+    nowMs,
+  });
+  return {
+    rawRows: await rawZoneExportRows(db, { ...scope, granularity: 'raw' }),
+    hourlyRows: await aggregateZoneExportRows(db, { ...scope, granularity: 'hourly' }),
+    dailyRows: await aggregateZoneExportRows(db, { ...scope, granularity: 'daily' }),
+  };
+}
+
+async function runRollupJob(db, options = {}) {
+  const startedAt = Date.now();
+  const nowMs = options.nowMs ?? Date.now();
+  const exportDir = options.exportDir === undefined ? '/data/exports' : options.exportDir;
+  const retentionDays = Number(options.retentionDays ?? options.retention_days ?? process.env.HISTORY_CSV_RAW_RETENTION_DAYS ?? 90) || 90;
+  const levels = Array.isArray(options.levels) && options.levels.length
+    ? options.levels.filter((level) => Object.prototype.hasOwnProperty.call(ROLLUP_WINDOWS, level))
+    : ['hourly', 'daily', 'weekly'];
+  const zones = await dbAll(db, 'SELECT id, name, zone_uuid, timezone FROM irrigation_zones WHERE deleted_at IS NULL', []);
+  let cardsProcessed = 0;
+  let bucketsUpserted = 0;
+  let csvZonesWritten = 0;
+  let csvRowsWritten = 0;
+  const errors = [];
+
+  for (const zone of zones) {
+    try {
+      const devices = await dbAll(db, 'SELECT * FROM devices WHERE deleted_at IS NULL AND irrigation_zone_id = ?', [zone.id]);
+      const cards = deriveCardsForZone(zone, devices);
+      for (const card of cards) {
+        const channels = channelsForCard(card);
+        const sourceDevices = sourceDevicesForCard(card, devices);
+        const deveuis = uniqueDeveuis(sourceDevices);
+        if (!channels.length || !deveuis.length) continue;
+        cardsProcessed += 1;
+        const scope = {
+          zoneId: zone.id,
+          cardType: card.cardType,
+          logicalSourceKey: card.logicalSourceKey,
+          channels,
+          deveuis,
+          timezone: zone.timezone || 'UTC',
+        };
+        for (const level of levels) {
+          const rows = await computeRollupBuckets(db, scope, level, ROLLUP_WINDOWS[level], nowMs);
+          bucketsUpserted += await upsertRollups(db, rows);
+        }
+      }
+      if (exportDir) {
+        const timezone = zone.timezone || 'UTC';
+        const dayEndMs = startOfLocalDayMs(nowMs, timezone);
+        const dayStartMs = dayEndMs - (24 * 60 * 60 * 1000);
+        const day = localDateKey(dayStartMs, timezone);
+        const csvRows = await buildZoneCsvRows(db, zone, day, dayEndMs);
+        await writeZoneCsv({ exportDir, zone, day, rawRows: csvRows.rawRows, hourlyRows: csvRows.hourlyRows, dailyRows: csvRows.dailyRows });
+        await rotateZoneCsv({ exportDir, zone, nowMs, retentionDays });
+        csvZonesWritten += 1;
+        csvRowsWritten += csvRows.rawRows.length + csvRows.hourlyRows.length + csvRows.dailyRows.length;
+      }
+    } catch (error) {
+      errors.push({ zoneId: zone.id, message: String(error && error.message || error) });
     }
   }
 
-  if (deveuis.length === 0) throw new Error('aggregateDeviceData requires at least one DevEUI');
-  const placeholders = deveuis.map(() => '?').join(',');
-  const selectedFields = Array.from(new Set(channels.map((channel) => channel.field)));
-  const sql = `SELECT deveui, recorded_at, ${selectedFields.join(', ')} FROM device_data WHERE deveui IN (${placeholders}) AND recorded_at BETWEEN ? AND ? ORDER BY deveui ASC, recorded_at ASC`;
-  const params = deveuis.concat([start, end]);
-  const rows = await dbAll(db, sql, params);
-  const result = aggregateRows(rows, { ...query, aggregation, aggregationRequested: aggregationInfo.requested, channels, start, end });
-  if (shouldUseRollups) result.source = 'device_data_fallback';
-  return result;
+  return {
+    generatedAt: new Date(nowMs).toISOString(),
+    zones: zones.length,
+    cardsProcessed,
+    bucketsUpserted,
+    csvZonesWritten,
+    csvRowsWritten,
+    errors,
+    durationMs: Date.now() - startedAt,
+  };
+}
+
+function parseDepthJson(value) {
+  if (!value) return null;
+  try {
+    const parsed = typeof value === 'string' ? JSON.parse(value) : value;
+    if (Array.isArray(parsed)) return parsed;
+    if (parsed && typeof parsed === 'object') return parsed;
+  } catch (_) {
+    return null;
+  }
+  return null;
+}
+
+function soilDepthCm(device, channelId) {
+  const direct = {
+    swt_1: device && device.chameleon_swt1_depth_cm,
+    swt_2: device && device.chameleon_swt2_depth_cm,
+    swt_3: device && device.chameleon_swt3_depth_cm,
+  }[channelId];
+  const directNumber = toFiniteNumber(direct);
+  if (directNumber !== null) return directNumber;
+  const configured = parseDepthJson(device && device.soil_moisture_probe_depths_json);
+  if (Array.isArray(configured)) {
+    const index = { swt_1: 0, swt_2: 1, swt_3: 2, swt_wm1: 0, swt_wm2: 1 }[channelId];
+    return index === undefined ? null : toFiniteNumber(configured[index]);
+  }
+  if (configured && typeof configured === 'object') {
+    return toFiniteNumber(configured[channelId] ?? configured[channelId.replace('_', '')] ?? configured[channelId.toUpperCase()]);
+  }
+  return null;
+}
+
+async function resolveDeviceArrayIds(db, deveuis, start, end) {
+  const map = {};
+  const list = Array.from(new Set((deveuis || []).map((value) => normalizeDeveui(value)).filter(Boolean)));
+  if (!list.length) return map;
+  const placeholders = list.map(() => '?').join(',');
+  const sql = `SELECT deveui, array_id, MAX(recorded_at) AS latest FROM chameleon_readings WHERE deveui IN (${placeholders}) AND array_id IS NOT NULL AND recorded_at >= ? AND recorded_at < ? GROUP BY deveui`;
+  let rows = [];
+  try {
+    rows = await dbAll(db, sql, list.concat([start, end]));
+  } catch (_) {
+    return map;
+  }
+  for (const row of rows || []) {
+    const key = normalizeDeveui(row.deveui);
+    if (key && row.array_id != null && row.array_id !== '') map[key] = String(row.array_id);
+  }
+  return map;
+}
+
+function csvRowsFromAggregate(aggregate, card, device, sourceName, channels, arrayId, context = {}) {
+  const rows = [];
+  for (const bucket of aggregate.buckets || []) {
+    for (const channel of channels) {
+      const stats = bucket.series && bucket.series[channel.id];
+      if (!stats || Number(stats.sampleCount || 0) === 0) continue;
+      rows.push({
+        timestamp: bucket.bucketStart,
+        site: context.site || '',
+        zone: context.zone || '',
+        series_label: seriesLabel(sourceName, channel),
+        card_type: card.cardType,
+        source_key: sourceKeyForCsv(card, device),
+        channel_key: channel.id,
+        depth_cm: soilDepthCm(device, channel.id),
+        array_id: arrayId == null ? null : arrayId,
+        unit: channel.unit || stats.unit || null,
+        value: stats.mean,
+      });
+    }
+  }
+  return rows;
 }
 
 function hoursBetween(start, end) {
@@ -2018,20 +2121,42 @@ function startOfLocalDayMs(nowMs, timezone) {
     if (part.type !== 'literal') acc[part.type] = part.value;
     return acc;
   }, {});
-  const wallClockAsUtcMs = Date.UTC(
+  const targetWallClockMs = Date.UTC(
     Number(parts.year),
     Number(parts.month) - 1,
     Number(parts.day),
-    Number(parts.hour) % 24,
-    Number(parts.minute),
-    Number(parts.second)
+    0,
+    0,
+    0
   );
-  // Floor to whole seconds so the sub-second remainder of `instantMs` does not leak
-  // into the day boundary (which would make daily/weekly bucket_start jitter per run).
-  const instantSecMs = Math.floor(instantMs / 1000) * 1000;
-  const offsetMs = wallClockAsUtcMs - instantSecMs;
-  const localMidnightAsUtcMs = Date.UTC(Number(parts.year), Number(parts.month) - 1, Number(parts.day), 0, 0, 0);
-  return localMidnightAsUtcMs - offsetMs;
+  let candidateMs = targetWallClockMs;
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    const candidateParts = new Intl.DateTimeFormat('en-US', {
+      timeZone: normalizeTimezone(timezone),
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hour12: false,
+    }).formatToParts(new Date(candidateMs)).reduce((acc, part) => {
+      if (part.type !== 'literal') acc[part.type] = part.value;
+      return acc;
+    }, {});
+    const candidateWallClockMs = Date.UTC(
+      Number(candidateParts.year),
+      Number(candidateParts.month) - 1,
+      Number(candidateParts.day),
+      Number(candidateParts.hour) % 24,
+      Number(candidateParts.minute),
+      Number(candidateParts.second)
+    );
+    const deltaMs = candidateWallClockMs - targetWallClockMs;
+    if (deltaMs === 0) return candidateMs;
+    candidateMs -= deltaMs;
+  }
+  return candidateMs;
 }
 
 function localDateKey(value, timezone) {
@@ -2362,8 +2487,26 @@ function buildAdvancedMetadataPlaceholder(input = {}) {
   };
 }
 
+const analysis = createAnalysis({
+  aggregateRows,
+  dbAll,
+  deriveCardsForZone,
+  displayDeviceName,
+  normalizeDeveui,
+  resolveAggregation,
+  soilDepthCm,
+  sourceDevicesForCard,
+  sourceKeyForCsv,
+});
+
 module.exports = {
   normalizeDeveui,
+  ANALYSIS_VIEWS_SCHEMA: analysis.ANALYSIS_VIEWS_SCHEMA,
+  analysisSeriesId: analysis.analysisSeriesId,
+  buildAnalysisCatalog: analysis.buildAnalysisCatalog,
+  listAnalysisViews: analysis.listAnalysisViews,
+  resolveAnalysisSeries: analysis.resolveAnalysisSeries,
+  saveAnalysisView: analysis.saveAnalysisView,
   deriveCardId,
   deriveCardsForZone,
   deriveGatewayCard,
@@ -2375,12 +2518,12 @@ module.exports = {
   classifyIrrigationStatus,
   classifyGatewayStatus,
   deriveExpectedCadenceSeconds,
-  startOfLocalDayMs,
-  computeRollupBuckets,
-  upsertRollups,
-  runRollupJob,
-  resolveDeviceFieldRollupKey,
   legacySensorHistory,
+  resolveDeviceFieldRollupKey,
+  runRollupJob,
+  upsertRollups,
+  computeRollupBuckets,
+  startOfLocalDayMs,
   buildZoneExportCsv,
   RAW_CSV_COLUMNS,
   AGG_CSV_COLUMNS,

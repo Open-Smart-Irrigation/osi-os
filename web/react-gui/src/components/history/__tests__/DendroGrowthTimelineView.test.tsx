@@ -1,5 +1,4 @@
 import '@testing-library/jest-dom/vitest';
-import React from 'react';
 import { render, screen, within } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 
@@ -75,6 +74,7 @@ describe('DendroGrowthTimelineView', () => {
     const rows = buildNumericRows([
       {
         key: 'growth',
+        sourceId: 'growth',
         label: 'Growth',
         unit: 'um',
         points: [{ t: '2026-06-01T00:00:00Z', value: 3 }],

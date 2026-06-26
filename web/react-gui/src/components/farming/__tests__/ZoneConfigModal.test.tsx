@@ -31,6 +31,16 @@ vi.mock('../../../services/api', () => ({
   },
 }));
 
+vi.mock('react-i18next', () => ({
+  useTranslation: () => ({
+    t: (key: string, params?: Record<string, string>) => {
+      if (key === 'zone.export.title') return 'Data export';
+      if (key === 'zone.export.rangeSummary') return `${params?.from ?? ''} to ${params?.to ?? ''}`;
+      return key;
+    },
+  }),
+}));
+
 const zone: IrrigationZone = {
   id: 42,
   name: 'North Block',
@@ -57,7 +67,7 @@ describe('ZoneConfigModal irrigation calibration', () => {
       }),
     );
 
-    expect(await screen.findByText('zone.export.title')).toBeInTheDocument();
+    expect(await screen.findByText('Data export')).toBeInTheDocument();
     expect(screen.getByTestId('range-calendar')).toBeInTheDocument();
   });
 

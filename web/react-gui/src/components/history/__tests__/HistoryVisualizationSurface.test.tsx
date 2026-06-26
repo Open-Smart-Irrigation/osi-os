@@ -1,7 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, render, screen } from '@testing-library/react';
 import '@testing-library/jest-dom';
-import React from 'react';
 
 import { HistoryVisualizationSurface } from '../mobile/HistoryVisualizationSurface';
 import { createDefaultTimeViewport } from '../../../history/useTimeViewport';
@@ -59,8 +58,8 @@ function dispatchTouch(
       ? new TouchEvent(type, {
           bubbles: true,
           cancelable: true,
-          touches: touchList as unknown as TouchList,
-          changedTouches: touchList as unknown as TouchList,
+          touches: Array.from(touchList as unknown as TouchList),
+          changedTouches: Array.from(touchList as unknown as TouchList),
         })
       : new Event(type, { bubbles: true, cancelable: true });
 
