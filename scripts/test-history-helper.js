@@ -154,6 +154,30 @@ async function analysisFixtureDb() {
   return db;
 }
 
+async function multiUserAnalysisFixtureDb() {
+  const db = createCliSqliteDb();
+  db.runSql(`
+    INSERT INTO users(id, username, password_hash, created_at, updated_at, user_uuid)
+    VALUES
+      (1, 'analysis-user-one', 'x', '2026-06-01T00:00:00.000Z', '2026-06-01T00:00:00.000Z', 'user-one-uuid'),
+      (2, 'analysis-user-two', 'x', '2026-06-01T00:00:00.000Z', '2026-06-01T00:00:00.000Z', 'user-two-uuid');
+    INSERT INTO irrigation_zones(id, name, user_id, zone_uuid, timezone, gateway_device_eui)
+    VALUES
+      (12, 'User One Zone', 1, 'analysis-zone-one', 'UTC', '0016C001F11766E7'),
+      (22, 'User Two Zone', 2, 'analysis-zone-two', 'UTC', '0016C001F11766E7');
+    INSERT INTO devices(deveui, name, type_id, user_id, irrigation_zone_id, created_at, updated_at)
+    VALUES
+      ('AA00000000000001', 'Kiwi One', 'KIWI_SENSOR', 1, 12, '2026-06-01T00:00:00.000Z', '2026-06-01T00:00:00.000Z'),
+      ('BB00000000000002', 'Kiwi Two', 'KIWI_SENSOR', 2, 22, '2026-06-01T00:00:00.000Z', '2026-06-01T00:00:00.000Z');
+    INSERT INTO device_data(deveui, recorded_at, swt_1)
+    VALUES
+      ('AA00000000000001', '2026-06-01T00:00:00.000Z', 10),
+      ('BB00000000000002', '2026-06-01T00:00:00.000Z', 20);
+  `);
+  db.queries = [];
+  return db;
+}
+
 test('exports the history helper contract', () => {
   for (const name of expectedExports) {
     assert.strictEqual(typeof helper[name], 'function', `${name} export`);
@@ -180,7 +204,7 @@ test('analysisSeriesId is a stable 16-hex hash of the tuple', () => {
 test('buildAnalysisCatalog enumerates metadata-only per-source-device channels with availability', async () => {
   const db = await analysisFixtureDb();
   try {
-    const { channels, entriesById } = await helper.buildAnalysisCatalog(db, { deviceEui: '0016C001F11766E7' });
+    const { channels, entriesById } = await helper.buildAnalysisCatalog(db, { deviceEui: '0016C001F11766E7', userId: 1 });
     const swt1 = channels.find((entry) => entry.channelKey === 'swt_1');
     assert.ok(swt1, 'has a swt_1 series');
     assert.strictEqual(swt1.hubEui, '0016C001F11766E7');
@@ -201,13 +225,27 @@ test('buildAnalysisCatalog enumerates metadata-only per-source-device channels w
   }
 });
 
+test('buildAnalysisCatalog scopes zones and devices to the authenticated user', async () => {
+  const db = await multiUserAnalysisFixtureDb();
+  try {
+    const { channels } = await helper.buildAnalysisCatalog(db, { deviceEui: '0016C001F11766E7', userId: 1 });
+    const zoneNames = Array.from(new Set(channels.map((entry) => entry.zoneName))).sort();
+    const deviceNames = Array.from(new Set(channels.map((entry) => entry.deviceName))).sort();
+    assert.deepStrictEqual(zoneNames, ['User One Zone']);
+    assert.deepStrictEqual(deviceNames, ['Kiwi One']);
+  } finally {
+    db.close();
+  }
+});
+
 test('resolveAnalysisSeries aggregates per-device points and drops unknown ids', async () => {
   const db = await analysisFixtureDb();
   try {
-    const cat = await helper.buildAnalysisCatalog(db, { deviceEui: 'EUI' });
+    const cat = await helper.buildAnalysisCatalog(db, { deviceEui: 'EUI', userId: 1 });
     const swt1 = cat.channels.find((entry) => entry.channelKey === 'swt_1');
     const res = await helper.resolveAnalysisSeries(db, {
       deviceEui: 'EUI',
+      userId: 1,
       selectors: [{ seriesId: swt1.seriesId }, { seriesId: 'deadbeefdeadbeef' }],
       range: { from: '2026-06-01T00:00:00.000Z', to: '2026-06-02T00:00:00.000Z' },
       aggregation: 'auto',
@@ -222,6 +260,26 @@ test('resolveAnalysisSeries aggregates per-device points and drops unknown ids',
   }
 });
 
+test('resolveAnalysisSeries drops series ids outside the authenticated user catalog', async () => {
+  const db = await multiUserAnalysisFixtureDb();
+  try {
+    const userTwoCatalog = await helper.buildAnalysisCatalog(db, { deviceEui: 'EUI', userId: 2 });
+    const userTwoSwt = userTwoCatalog.channels.find((entry) => entry.zoneName === 'User Two Zone' && entry.channelKey === 'swt_1');
+    assert.ok(userTwoSwt, 'fixture has user two analysis series');
+    const res = await helper.resolveAnalysisSeries(db, {
+      deviceEui: 'EUI',
+      userId: 1,
+      selectors: [{ seriesId: userTwoSwt.seriesId }],
+      range: { from: '2026-06-01T00:00:00.000Z', to: '2026-06-02T00:00:00.000Z' },
+      aggregation: 'auto',
+    });
+    assert.strictEqual(res.series.length, 0);
+    assert.deepStrictEqual(res.dropped, [{ seriesId: userTwoSwt.seriesId, reason: 'unknown' }]);
+  } finally {
+    db.close();
+  }
+});
+
 test('resolveAnalysisSeries rejects over the selected-series cap', async () => {
   const db = await analysisFixtureDb();
   try {
@@ -229,6 +287,7 @@ test('resolveAnalysisSeries rejects over the selected-series cap', async () => {
     await assert.rejects(
       () => helper.resolveAnalysisSeries(db, {
         deviceEui: 'EUI',
+        userId: 1,
         selectors,
         range: { from: '2026-06-01T00:00:00.000Z', to: '2026-06-02T00:00:00.000Z' },
         aggregation: 'auto',
@@ -247,11 +306,12 @@ test('resolveAnalysisSeries rejects over the selected-series cap', async () => {
 test('resolveAnalysisSeries rejects ranges over four hundred days', async () => {
   const db = await analysisFixtureDb();
   try {
-    const cat = await helper.buildAnalysisCatalog(db, { deviceEui: 'EUI' });
+    const cat = await helper.buildAnalysisCatalog(db, { deviceEui: 'EUI', userId: 1 });
     const swt1 = cat.channels.find((entry) => entry.channelKey === 'swt_1');
     await assert.rejects(
       () => helper.resolveAnalysisSeries(db, {
         deviceEui: 'EUI',
+        userId: 1,
         selectors: [{ seriesId: swt1.seriesId }],
         range: { from: '2025-01-01T00:00:00.000Z', to: '2026-06-15T00:00:00.000Z' },
         aggregation: 'auto',
@@ -283,11 +343,12 @@ test('resolveAnalysisSeries rejects over the raw-row scan cap per request', asyn
         10
       FROM seq;
     `);
-    const cat = await helper.buildAnalysisCatalog(db, { deviceEui: 'EUI' });
+    const cat = await helper.buildAnalysisCatalog(db, { deviceEui: 'EUI', userId: 1 });
     const swt1 = cat.channels.find((entry) => entry.channelKey === 'swt_1');
     await assert.rejects(
       () => helper.resolveAnalysisSeries(db, {
         deviceEui: 'EUI',
+        userId: 1,
         selectors: [{ seriesId: swt1.seriesId }],
         range: { from: '2026-06-01T00:00:00.000Z', to: '2026-06-02T00:00:00.000Z' },
         aggregation: 'auto',
@@ -307,7 +368,7 @@ test('analysis_views round-trips per user and drops stale series ids on read', a
   const db = await analysisFixtureDb();
   try {
     db.runSql(helper.ANALYSIS_VIEWS_SCHEMA);
-    const cat = await helper.buildAnalysisCatalog(db, { deviceEui: 'EUI' });
+    const cat = await helper.buildAnalysisCatalog(db, { deviceEui: 'EUI', userId: 1 });
     const live = cat.channels[0].seriesId;
     await helper.saveAnalysisView(db, { userId: 1, ownerUserUuid: 'u-1' }, {
       name: 'My view',
