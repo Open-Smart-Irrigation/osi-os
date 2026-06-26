@@ -1,6 +1,14 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 
+const analysisEchartsVendorPattern = /(?:^|[\\/])node_modules[\\/](?:echarts|zrender)(?:[\\/]|$)/
+
+export function manualChunksForVendor(id) {
+  if (analysisEchartsVendorPattern.test(id)) {
+    return 'analysis-echarts'
+  }
+}
+
 export default defineConfig({
   plugins: [react()],
   base: '/gui/',  // Must match httpStaticRoot in Node-RED settings.js
@@ -28,9 +36,7 @@ export default defineConfig({
     rollupOptions: {
       output: {
         manualChunks(id) {
-          if (id.includes('/node_modules/echarts') || id.includes('/node_modules/zrender')) {
-            return 'analysis-echarts';
-          }
+          return manualChunksForVendor(id)
         },
       },
     },
