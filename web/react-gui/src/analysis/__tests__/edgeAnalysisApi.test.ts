@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { AnalysisViewRequest } from '../types';
 import {
   adaptEdgeAnalysisView,
+  adaptEdgeSavedViewResponse,
   adaptEdgeViewsResponse,
   toEdgeAnalysisViewPayload,
 } from '../edgeAnalysisApi';
@@ -45,6 +46,30 @@ describe('edge analysis API adapters', () => {
   it('unwraps GET /api/analysis/views response wrappers', () => {
     expect(adaptEdgeViewsResponse({ views: [{ id: 1, name: 'A', selectors: [] }] })).toHaveLength(1);
     expect(adaptEdgeViewsResponse([{ id: 2, name: 'B', selectors: [] }])).toHaveLength(1);
+  });
+
+  it('supports snake_case view metadata from edge rows', () => {
+    const view = adaptEdgeAnalysisView({
+      id: 5,
+      name: 'Default',
+      selectors: [],
+      is_default: true,
+      updated_at: '2026-06-26T09:00:00.000Z',
+    });
+
+    expect(view.isDefault).toBe(true);
+    expect(view.updatedAt).toBe('2026-06-26T09:00:00.000Z');
+  });
+
+  it('throws for malformed GET /api/analysis/views payloads', () => {
+    expect(() => adaptEdgeViewsResponse({ generatedAt: '2026-06-26T09:00:00.000Z' })).toThrow(
+      /Invalid analysis views response/,
+    );
+  });
+
+  it('throws for malformed saved-view responses', () => {
+    expect(() => adaptEdgeSavedViewResponse({})).toThrow(/Invalid analysis saved view response/);
+    expect(() => adaptEdgeSavedViewResponse({ view: {} })).toThrow(/Invalid analysis saved view response/);
   });
 
   it('flattens copied frontend save requests for POST /api/analysis/views', () => {

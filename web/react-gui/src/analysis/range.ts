@@ -8,6 +8,7 @@ const RELATIVE_RANGE_MS: Record<string, number> = {
   '24h': 24 * HOUR_MS,
   '7d': 7 * DAY_MS,
   '30d': 30 * DAY_MS,
+  '90d': 90 * DAY_MS,
   season: 180 * DAY_MS,
 };
 

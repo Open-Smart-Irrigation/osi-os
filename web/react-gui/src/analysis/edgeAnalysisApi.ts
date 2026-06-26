@@ -18,43 +18,81 @@ type EdgeAnalysisView = Partial<AnalysisViewJson> & {
 };
 
 const DEFAULT_RANGE: AnalysisRange = { mode: 'relative', label: '7d', from: null, to: null };
+const VIEW_FIELD_NAMES = [
+  'id',
+  'name',
+  'schemaVersion',
+  'selectors',
+  'range',
+  'mode',
+  'layout',
+  'toggles',
+  'labelOverrides',
+  'axisLabelOverrides',
+  'isDefault',
+  'is_default',
+  'updatedAt',
+  'updated_at',
+  'createdAt',
+  'created_at',
+] as const;
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+function requireEdgeAnalysisView(raw: unknown, message: string): EdgeAnalysisView {
+  if (!isRecord(raw) || !VIEW_FIELD_NAMES.some((field) => field in raw)) {
+    throw new Error(message);
+  }
+
+  return raw as EdgeAnalysisView;
+}
 
 export function adaptEdgeAnalysisView(raw: EdgeAnalysisView): AnalysisViewResponse {
-  const schemaVersion = Number(raw.schemaVersion ?? 1);
+  const view = requireEdgeAnalysisView(raw, 'Invalid analysis view response');
+  const schemaVersion = Number(view.schemaVersion ?? 1);
   const viewJson: AnalysisViewJson = {
     schemaVersion,
-    selectors: Array.isArray(raw.selectors) ? raw.selectors : [],
-    range: raw.range ?? DEFAULT_RANGE,
-    mode: raw.mode ?? 'timeline',
-    layout: raw.layout ?? 'stacked',
-    toggles: raw.toggles ?? {},
-    labelOverrides: raw.labelOverrides ?? {},
-    axisLabelOverrides: raw.axisLabelOverrides ?? {},
+    selectors: Array.isArray(view.selectors) ? view.selectors : [],
+    range: view.range ?? DEFAULT_RANGE,
+    mode: view.mode ?? 'timeline',
+    layout: view.layout ?? 'stacked',
+    toggles: view.toggles ?? {},
+    labelOverrides: view.labelOverrides ?? {},
+    axisLabelOverrides: view.axisLabelOverrides ?? {},
   };
 
   return {
-    id: Number(raw.id ?? 0),
-    name: String(raw.name ?? ''),
+    id: Number(view.id ?? 0),
+    name: String(view.name ?? ''),
     viewJson,
     schemaVersion,
-    isDefault: raw.isDefault === true || raw.is_default === true,
-    updatedAt: String(raw.updatedAt ?? raw.updated_at ?? raw.createdAt ?? raw.created_at ?? ''),
+    isDefault: view.isDefault === true || view.is_default === true,
+    updatedAt: String(view.updatedAt ?? view.updated_at ?? view.createdAt ?? view.created_at ?? ''),
   };
 }
 
 export function adaptEdgeViewsResponse(payload: unknown): AnalysisViewResponse[] {
-  const rawViews = Array.isArray(payload)
-    ? payload
-    : Array.isArray((payload as { views?: unknown[] } | null)?.views)
-      ? (payload as { views: unknown[] }).views
-      : [];
+  let rawViews: unknown[];
+  if (Array.isArray(payload)) {
+    rawViews = payload;
+  } else if (isRecord(payload) && 'views' in payload) {
+    if (!Array.isArray(payload.views)) {
+      throw new Error('Invalid analysis views response');
+    }
+    rawViews = payload.views;
+  } else {
+    throw new Error('Invalid analysis views response');
+  }
 
   return rawViews.map((view) => adaptEdgeAnalysisView(view as EdgeAnalysisView));
 }
 
 export function adaptEdgeSavedViewResponse(payload: unknown): AnalysisViewResponse {
-  const raw = (payload as { view?: unknown } | null)?.view ?? payload;
-  return adaptEdgeAnalysisView(raw as EdgeAnalysisView);
+  const raw = isRecord(payload) && 'view' in payload ? payload.view : payload;
+  const view = requireEdgeAnalysisView(raw, 'Invalid analysis saved view response');
+  return adaptEdgeAnalysisView(view);
 }
 
 export function toEdgeAnalysisViewPayload(request: AnalysisViewRequest): Record<string, unknown> {

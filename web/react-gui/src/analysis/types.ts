@@ -41,7 +41,7 @@ export interface AnalysisPoint {
   t: string;
   value: number | null;
   count: number;
-  quality: string;
+  quality: string | null;
 }
 
 export interface AnalysisResolved {

@@ -22,6 +22,15 @@ describe('resolveAnalysisRangeForRequest', () => {
     expect(resolveAnalysisRangeForRequest(relative('season'), now).from).toBe('2025-12-28T12:00:00.000Z');
   });
 
+  it('resolves relative 90d ranges emitted by copied analysis controls', () => {
+    expect(resolveAnalysisRangeForRequest(relative('90d'), now)).toEqual({
+      mode: 'absolute',
+      label: '90d',
+      from: '2026-03-28T12:00:00.000Z',
+      to: '2026-06-26T12:00:00.000Z',
+    });
+  });
+
   it('keeps explicit ranges when both bounds are present', () => {
     const explicit: AnalysisRange = {
       mode: 'absolute',
