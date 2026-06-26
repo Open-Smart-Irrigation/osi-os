@@ -30,6 +30,22 @@ function renderControls(overrides: Partial<ComponentProps<typeof AnalysisControl
   return props;
 }
 
+function toDatetimeLocalValue(iso: string): string {
+  const date = new Date(iso);
+  const pad = (value: number) => String(value).padStart(2, '0');
+  return [
+    date.getFullYear(),
+    '-',
+    pad(date.getMonth() + 1),
+    '-',
+    pad(date.getDate()),
+    'T',
+    pad(date.getHours()),
+    ':',
+    pad(date.getMinutes()),
+  ].join('');
+}
+
 describe('AnalysisControls', () => {
   it('emits range and mode changes', () => {
     const onRangeChange = vi.fn();
@@ -80,6 +96,19 @@ describe('AnalysisControls', () => {
       from: new Date('2026-06-01T00:00').toISOString(),
       to: new Date('2026-06-02T12:30').toISOString(),
     });
+  });
+
+  it('hydrates saved custom range bounds into datetime-local inputs', () => {
+    const from = '2026-06-01T08:15:00.000Z';
+    const to = '2026-06-02T17:45:00.000Z';
+    renderControls({
+      rangeLabel: 'custom',
+      range: { mode: 'custom', label: 'custom', from, to },
+    });
+
+    expect(screen.getByLabelText('analysis.range.from')).toHaveValue(toDatetimeLocalValue(from));
+    expect(screen.getByLabelText('analysis.range.to')).toHaveValue(toDatetimeLocalValue(to));
+    expect(screen.getByRole('button', { name: 'analysis.range.apply' })).toBeEnabled();
   });
 
   it('blocks a reversed custom range', () => {

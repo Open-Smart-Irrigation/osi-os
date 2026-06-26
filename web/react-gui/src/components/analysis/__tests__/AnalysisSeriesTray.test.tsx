@@ -97,4 +97,46 @@ describe('AnalysisSeriesTray', () => {
     expect(screen.getByRole('button', { name: /SWT 10cm/i })).toBeInTheDocument();
     expect(screen.queryByText(/soil-src-deadbeefcafe/)).not.toBeInTheDocument();
   });
+
+  it('keeps zones with duplicate names separate by zone id', () => {
+    const duplicateNamedZones: AnalysisCatalogEntry[] = [
+      {
+        seriesId: 'zone-10-swt',
+        hubEui: 'HUB-1',
+        zoneId: 10,
+        zoneName: 'East',
+        cardType: 'soil',
+        sourceKey: 'root-zone',
+        channelKey: 'swt_1',
+        displayName: 'SWT 1',
+        unit: 'kPa',
+        availability: 'available',
+        deviceName: null,
+        depthCm: null,
+      },
+      {
+        seriesId: 'zone-20-swt',
+        hubEui: 'HUB-1',
+        zoneId: 20,
+        zoneName: 'East',
+        cardType: 'soil',
+        sourceKey: 'root-zone',
+        channelKey: 'swt_2',
+        displayName: 'SWT 2',
+        unit: 'kPa',
+        availability: 'available',
+        deviceName: null,
+        depthCm: null,
+      },
+    ];
+    const onAdd = vi.fn();
+
+    render(<AnalysisSeriesTray channels={duplicateNamedZones} selectedIds={[]} onAdd={onAdd} onRemove={vi.fn()} />);
+
+    expect(screen.getAllByText('East')).toHaveLength(2);
+    fireEvent.click(screen.getByRole('button', { name: /SWT 1/i }));
+    fireEvent.click(screen.getByRole('button', { name: /SWT 2/i }));
+    expect(onAdd).toHaveBeenNthCalledWith(1, 'zone-10-swt');
+    expect(onAdd).toHaveBeenNthCalledWith(2, 'zone-20-swt');
+  });
 });

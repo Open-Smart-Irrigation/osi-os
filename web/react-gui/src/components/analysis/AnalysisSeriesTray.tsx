@@ -13,12 +13,15 @@ interface AnalysisSeriesTrayProps {
 
 interface ZoneGroup {
   // null = no hub/site on the catalog entry; the label is resolved with i18n at render time.
+  key: string;
   site: string | null;
+  zoneId: number;
   zoneName: string;
   devices: DeviceGroup[];
 }
 
 interface DeviceGroup {
+  key: string;
   deviceName: string | null;
   channels: AnalysisCatalogEntry[];
 }
@@ -29,10 +32,10 @@ function groupChannels(channels: AnalysisCatalogEntry[]): ZoneGroup[] {
   const deviceIndex = new Map<string, DeviceGroup>();
   for (const channel of channels) {
     const site = channel.hubEui;
-    const key = `${site ?? ''}|${channel.zoneName}`;
+    const key = `${site ?? ''}|${channel.zoneId}`;
     let group = index.get(key);
     if (!group) {
-      group = { site, zoneName: channel.zoneName, devices: [] };
+      group = { key, site, zoneId: channel.zoneId, zoneName: channel.zoneName, devices: [] };
       index.set(key, group);
       groups.push(group);
     }
@@ -40,7 +43,7 @@ function groupChannels(channels: AnalysisCatalogEntry[]): ZoneGroup[] {
     const deviceKey = `${key}|${deviceName ?? `${channel.cardType}:${channel.sourceKey}`}`;
     let deviceGroup = deviceIndex.get(deviceKey);
     if (!deviceGroup) {
-      deviceGroup = { deviceName, channels: [] };
+      deviceGroup = { key: deviceKey, deviceName, channels: [] };
       deviceIndex.set(deviceKey, deviceGroup);
       group.devices.push(deviceGroup);
     }
@@ -96,10 +99,10 @@ export function AnalysisSeriesTray({ channels, selectedIds, onAdd, onRemove }: A
       />
       <div className="flex flex-col gap-3 overflow-y-auto">
         {groups.map((group) => (
-          <div key={`${group.site ?? ''}-${group.zoneName}`} className="flex flex-col">
+          <div key={group.key} className="flex flex-col">
             <div className="mb-1 px-1 text-xs font-medium text-slate-700">{group.zoneName}</div>
             {group.devices.map((deviceGroup) => (
-              <div key={deviceGroup.deviceName ?? deviceGroup.channels[0]?.sourceKey ?? 'source'} className="mb-2 last:mb-0">
+              <div key={deviceGroup.key} className="mb-2 last:mb-0">
                 {deviceGroup.deviceName ? (
                   <div className="mb-1 px-1 text-xs font-semibold text-slate-800">{deviceGroup.deviceName}</div>
                 ) : null}

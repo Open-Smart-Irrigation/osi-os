@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { AnalysisRange, AnalysisWorkspaceMode, TimelineLayout } from '../../analysis/types';
 
@@ -10,6 +10,7 @@ const LAYOUTS: TimelineLayout[] = ['stacked', 'overlaid', 'small-multiples'];
 
 interface AnalysisControlsProps {
   rangeLabel: string;
+  range?: AnalysisRange;
   mode: AnalysisWorkspaceMode;
   layout: TimelineLayout;
   toggles: { normalize: boolean };
@@ -25,8 +26,27 @@ function inputToIso(value: string): string | null {
   return new Date(ms).toISOString();
 }
 
+function isoToDatetimeLocal(value: string | null | undefined): string {
+  if (!value) return '';
+  const date = new Date(value);
+  if (!Number.isFinite(date.getTime())) return '';
+  const pad = (part: number) => String(part).padStart(2, '0');
+  return [
+    date.getFullYear(),
+    '-',
+    pad(date.getMonth() + 1),
+    '-',
+    pad(date.getDate()),
+    'T',
+    pad(date.getHours()),
+    ':',
+    pad(date.getMinutes()),
+  ].join('');
+}
+
 export function AnalysisControls({
   rangeLabel,
+  range,
   mode,
   layout,
   toggles,
@@ -37,9 +57,9 @@ export function AnalysisControls({
 }: AnalysisControlsProps) {
   const { t: translate } = useTranslation();
   const t = translate as AnalysisTranslate;
-  const [customOpen, setCustomOpen] = useState(rangeLabel === 'custom');
-  const [customFrom, setCustomFrom] = useState('');
-  const [customTo, setCustomTo] = useState('');
+  const [customOpen, setCustomOpen] = useState(rangeLabel === 'custom' || range?.label === 'custom');
+  const [customFrom, setCustomFrom] = useState(() => isoToDatetimeLocal(range?.from));
+  const [customTo, setCustomTo] = useState(() => isoToDatetimeLocal(range?.to));
   const customFromMs = Date.parse(customFrom);
   const customToMs = Date.parse(customTo);
   const hasCustomValues = customFrom.length > 0 && customTo.length > 0;
@@ -51,6 +71,13 @@ export function AnalysisControls({
     active ? 'bg-slate-900 text-white' : 'bg-white text-slate-700 hover:bg-slate-100',
   ].join(' ');
   const layoutLabelKey = (value: TimelineLayout) => (value === 'small-multiples' ? 'smallMultiples' : value);
+
+  useEffect(() => {
+    if (rangeLabel !== 'custom' && range?.label !== 'custom') return;
+    setCustomOpen(true);
+    setCustomFrom(isoToDatetimeLocal(range?.from));
+    setCustomTo(isoToDatetimeLocal(range?.to));
+  }, [rangeLabel, range?.label, range?.from, range?.to]);
 
   const applyCustomRange = () => {
     if (!customValid) return;
