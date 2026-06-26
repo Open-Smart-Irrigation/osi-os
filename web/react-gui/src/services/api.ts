@@ -1,6 +1,18 @@
 import axios from 'axios';
 import { notifyAuthExpired } from './authEvents';
 import type {
+  AnalysisCatalogResponse,
+  AnalysisSeriesRequest,
+  AnalysisSeriesResponse,
+  AnalysisViewRequest,
+  AnalysisViewResponse,
+} from '../analysis/types';
+import {
+  adaptEdgeSavedViewResponse,
+  adaptEdgeViewsResponse,
+  toEdgeAnalysisViewPayload,
+} from '../analysis/edgeAnalysisApi';
+import type {
   HistoryCardSummaryResponse,
   HistoryCardDataResponse,
   HistoryAdvancedResponse,
@@ -1020,6 +1032,28 @@ export const accountLinkAPI = {
 export const environmentAPI = {
   getSummary: (zoneId: number): Promise<ZoneEnvironmentSummary> =>
     api.get<ZoneEnvironmentSummary>(`/api/irrigation-zones/${zoneId}/environment-summary`).then(r => r.data),
+};
+
+export const analysisAPI = {
+  getChannels: async (): Promise<AnalysisCatalogResponse> => {
+    const response = await api.get<AnalysisCatalogResponse>('/api/analysis/channels');
+    return response.data;
+  },
+
+  getSeries: async (request: AnalysisSeriesRequest): Promise<AnalysisSeriesResponse> => {
+    const response = await api.post<AnalysisSeriesResponse>('/api/analysis/series', request);
+    return response.data;
+  },
+
+  listViews: async (): Promise<AnalysisViewResponse[]> => {
+    const response = await api.get<unknown>('/api/analysis/views');
+    return adaptEdgeViewsResponse(response.data);
+  },
+
+  saveView: async (request: AnalysisViewRequest): Promise<AnalysisViewResponse> => {
+    const response = await api.post<unknown>('/api/analysis/views', toEdgeAnalysisViewPayload(request));
+    return adaptEdgeSavedViewResponse(response.data);
+  },
 };
 
 export const historyAPI = {
