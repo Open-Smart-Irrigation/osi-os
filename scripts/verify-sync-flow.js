@@ -350,6 +350,34 @@ function expectExcludes(nodeName, needle, description) {
   }
 }
 
+function expectSyncInitDevicesRebuildForeignKeyFence() {
+  const nodeName = 'Sync Init Schema + Triggers';
+  const node = findNodeByName(nodeName);
+  if (!node) {
+    fail(`missing function node ${nodeName}`);
+    return;
+  }
+  const func = String(node.func || '');
+  const foreignKeysOff = func.indexOf('"PRAGMA foreign_keys=OFF"');
+  const createDevicesNew = func.indexOf('"CREATE TABLE IF NOT EXISTS devices_new');
+  const renameDevicesOld = func.indexOf('"ALTER TABLE devices RENAME TO devices_old"');
+  const renameDevicesNew = func.indexOf('"ALTER TABLE devices_new RENAME TO devices"');
+  const finalDropDevicesOld = func.lastIndexOf('"DROP TABLE IF EXISTS devices_old"');
+  const foreignKeysOn = func.indexOf('"PRAGMA foreign_keys=ON"', finalDropDevicesOld);
+  const safeOrder =
+    foreignKeysOff >= 0 &&
+    createDevicesNew > foreignKeysOff &&
+    renameDevicesOld > createDevicesNew &&
+    renameDevicesNew > renameDevicesOld &&
+    finalDropDevicesOld > renameDevicesNew &&
+    foreignKeysOn > finalDropDevicesOld;
+  if (!safeOrder) {
+    fail(`${nodeName} does not fence the devices table rebuild with PRAGMA foreign_keys=OFF/ON`);
+  } else {
+    console.log(`OK ${nodeName} fences devices table rebuild with foreign_keys OFF/ON`);
+  }
+}
+
 function expectIncludesById(nodeId, needle, description) {
   const node = findNodeById(nodeId);
   if (!node) {
@@ -1293,6 +1321,7 @@ expectIncludes('Build Special Command ACK', 'authSyncOutcome', 'includes linked-
 expectIncludes('Build Special Command ACK', 'forceSyncQueued', 'includes force-sync queue state in the ACK payload');
 expectIncludes('Sync Init Schema + Triggers', 'AFTER INSERT ON dendrometer_daily', 'emits dendro daily outbox rows from dendrometer_daily');
 expectIncludes('Sync Init Schema + Triggers', 'AFTER UPDATE ON dendrometer_daily', 'updates dendro daily outbox rows from dendrometer_daily');
+expectSyncInitDevicesRebuildForeignKeyFence();
 expectIncludes('Sync Init Schema + Triggers', 'COALESCE(server_username, username)', 'emits linked cloud usernames in device outbox events');
 expectIncludes('Sync Init Schema + Triggers', 'ALTER TABLE devices ADD COLUMN strega_model TEXT', 'adds the STREGA model metadata column');
 expectIncludes('Sync Init Schema + Triggers', "'current_state', NEW.current_state", 'mirrors STREGA current state changes into device outbox events');
