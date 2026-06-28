@@ -30,6 +30,7 @@ const osiDbSeedPath = path.resolve(__dirname, '..', 'conf', 'full_raspberrypi_bc
 const osiNodeRedSeedPath = path.resolve(__dirname, '..', 'conf', 'full_raspberrypi_bcm27xx_bcm2712', 'files', 'etc', 'uci-defaults', '98_osi_node_red_seed');
 const installOsiOsPath = path.resolve(__dirname, '..', 'scripts', 'install-osi-os.sh');
 const seedSqlPath = path.resolve(__dirname, '..', 'database', 'seed-blank.sql');
+const seedSqlSource = fs.readFileSync(seedSqlPath, 'utf8');
 const stregaCodecPath = path.resolve(__dirname, '..', 'conf', 'full_raspberrypi_bcm27xx_bcm2712', 'files', 'usr', 'share', 'node-red', 'codecs', 'strega_gen1_decoder.js');
 const lsn50CodecPath = path.resolve(__dirname, '..', 'conf', 'full_raspberrypi_bcm27xx_bcm2712', 'files', 'usr', 'share', 'node-red', 'codecs', 'dragino_lsn50_decoder.js');
 const lorainCodecPath = path.resolve(__dirname, '..', 'conf', 'full_raspberrypi_bcm27xx_bcm2712', 'files', 'usr', 'share', 'node-red', 'codecs', 'aquascope_lorain_decoder.js');
@@ -1287,6 +1288,10 @@ expectIncludes('Finalize linked account state', "auth_mode = ?", 'finalizes link
 expectIncludes('Finalize linked account state', 'server_offline_verifier_version = ?', 'persists the synced offline verifier version locally');
 expectIncludes('Finalize linked account state', 'last_auth_sync_status = ?', 'marks linked auth as up to date after local-sync finalization');
 expectIncludes('Finalize linked account state', 'return [null, msg];', 'can stop before reporting link success');
+expectIncludes('Finalize linked account state', 'INSERT INTO sync_link_state', 'persists sync_link_state on successful account link');
+expectIncludes('Finalize linked account state', "flow.set('account_linked', true)", 'sets account_linked flow flag on successful account link');
+expectIncludes('Clear linked account state', 'UPDATE sync_link_state', 'marks sync_link_state unlinked during unlink');
+expectIncludes('Clear linked account state', "flow.set('account_linked', false)", 'clears account_linked flow flag during unlink');
 expectIncludes('Set Download Headers', 'Database download is disabled', 'keeps database download disabled');
 expectIncludes('Lookup Auth User', 'ORDER BY CASE WHEN username = ?', 'prefers local username matches');
 expectIncludes('Process Result', 'Multiple accounts match this username', 'rejects ambiguous linked logins');
@@ -1351,6 +1356,17 @@ expectIncludes('Sync Init Schema + Triggers', "'prediction_card_enabled', COALES
 expectIncludes('Sync Init Schema + Triggers', 'COALESCE(NEW.prediction_card_enabled,0) <> COALESCE(OLD.prediction_card_enabled,0)', 'queues outbox events when the prediction-card flag changes');
 expectIncludes('Sync Init Schema + Triggers', "'rain_mm_per_10min', NEW.rain_mm_per_10min", 'mirrors normalized rain telemetry into device-data sync events');
 expectIncludes('Sync Init Schema + Triggers', "'flow_liters_per_10min', NEW.flow_liters_per_10min", 'mirrors normalized flow telemetry into device-data sync events');
+expectIncludes('Sync Init Schema + Triggers', 'CREATE TABLE IF NOT EXISTS sync_link_state', 'creates sync link state table at runtime');
+for (const triggerName of [
+  'trg_sync_zones_outbox_au',
+  'trg_sync_devices_outbox_au',
+  'trg_sync_schedules_outbox_au',
+  'trg_gateway_locations_outbox_ai',
+  'trg_gateway_locations_outbox_au',
+]) {
+  expectFileIncludes('seed-blank.sql', seedSqlSource, triggerName, `defines ${triggerName}`);
+}
+expectFileIncludes('seed-blank.sql', seedSqlSource, 'sync_link_state', 'link-gates sync triggers');
 expectIncludes('Sync Init Schema + Triggers', 'SELECT name FROM devices WHERE deveui = NEW.deveui AND deleted_at IS NULL', 'ignores deleted devices when mirroring device-data names into the outbox');
 expectIncludes('Sync Init Schema + Triggers', 'SELECT type_id FROM devices WHERE deveui = NEW.deveui AND deleted_at IS NULL', 'ignores deleted devices when mirroring device-data types into the outbox');
 expectIncludes('Sync Init Schema + Triggers', 'SELECT irrigation_zone_id FROM devices WHERE deveui = NEW.deveui AND deleted_at IS NULL', 'ignores deleted devices when mirroring device-data zone bindings into the outbox');

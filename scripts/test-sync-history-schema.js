@@ -28,6 +28,11 @@ function tableNamesWhere(whereClause) {
   return output ? output.split('\n') : [];
 }
 
+function scalar(sql) {
+  const output = sqlite(sql);
+  return output === '' ? 0 : Number(output);
+}
+
 try {
   exec(schema);
 
@@ -41,6 +46,18 @@ try {
 
   const indexNames = new Set(tableNamesWhere("type='index' AND tbl_name='irrigation_events'"));
   if (!indexNames.has('idx_irrigation_events_event_uuid')) throw new Error('missing idx_irrigation_events_event_uuid');
+
+  exec("INSERT INTO users(id, username, password_hash, created_at, user_uuid) VALUES(1, 'local', 'x', '2026-06-28T10:00:00.000Z', 'user-1')");
+  exec("INSERT INTO irrigation_zones(id, user_id, name, zone_uuid, gateway_device_eui, sync_version) VALUES(1, 1, 'Zone 1', 'zone-1', '0016C001F11715E2', 1)");
+  if (scalar('SELECT COUNT(*) FROM sync_outbox;') !== 0) {
+    throw new Error('unlinked structural insert created outbox row');
+  }
+
+  exec("INSERT INTO sync_link_state(peer_node, linked, gateway_device_eui, updated_at) VALUES('cloud', 1, '0016C001F11715E2', '2026-06-28T10:00:00.000Z')");
+  exec("UPDATE irrigation_zones SET name='Zone linked', sync_version=2 WHERE id=1");
+  if (scalar("SELECT COUNT(*) FROM sync_outbox WHERE aggregate_type='ZONE';") !== 1) {
+    throw new Error('linked structural update did not create outbox row');
+  }
 
   console.log('OK sync history schema');
 } finally {

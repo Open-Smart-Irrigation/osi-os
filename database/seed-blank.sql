@@ -985,25 +985,31 @@ CREATE TRIGGER trg_sync_zones_outbox_au
 AFTER UPDATE ON irrigation_zones
 FOR EACH ROW
 WHEN
-  COALESCE(NEW.name,'') <> COALESCE(OLD.name,'') OR
-  COALESCE(NEW.zone_uuid,'') <> COALESCE(OLD.zone_uuid,'') OR
-  COALESCE(NEW.gateway_device_eui,'') <> COALESCE(OLD.gateway_device_eui,'') OR
-  COALESCE(NEW.timezone,'') <> COALESCE(OLD.timezone,'') OR
-  COALESCE(NEW.latitude,'') <> COALESCE(OLD.latitude,'') OR
-  COALESCE(NEW.longitude,'') <> COALESCE(OLD.longitude,'') OR
-  COALESCE(NEW.phenological_stage,'') <> COALESCE(OLD.phenological_stage,'') OR
-  COALESCE(NEW.calibration_key,'') <> COALESCE(OLD.calibration_key,'') OR
-  COALESCE(NEW.crop_type,'') <> COALESCE(OLD.crop_type,'') OR
-  COALESCE(NEW.variety,'') <> COALESCE(OLD.variety,'') OR
-  COALESCE(NEW.soil_type,'') <> COALESCE(OLD.soil_type,'') OR
-  COALESCE(NEW.irrigation_method,'') <> COALESCE(OLD.irrigation_method,'') OR
-  COALESCE(NEW.area_m2,'') <> COALESCE(OLD.area_m2,'') OR
-  COALESCE(NEW.irrigation_efficiency_pct,'') <> COALESCE(OLD.irrigation_efficiency_pct,'') OR
-  COALESCE(NEW.scheduling_mode,'local') <> COALESCE(OLD.scheduling_mode,'local') OR
-  COALESCE(NEW.prediction_card_enabled,0) <> COALESCE(OLD.prediction_card_enabled,0) OR
-  COALESCE(NEW.notes,'') <> COALESCE(OLD.notes,'') OR
-  COALESCE(NEW.deleted_at,'') <> COALESCE(OLD.deleted_at,'') OR
-  COALESCE(NEW.sync_version,0) <> COALESCE(OLD.sync_version,0)
+  EXISTS (
+    SELECT 1 FROM sync_link_state
+     WHERE peer_node = 'cloud' AND linked = 1
+  )
+  AND (
+    COALESCE(NEW.name,'') <> COALESCE(OLD.name,'') OR
+    COALESCE(NEW.zone_uuid,'') <> COALESCE(OLD.zone_uuid,'') OR
+    COALESCE(NEW.gateway_device_eui,'') <> COALESCE(OLD.gateway_device_eui,'') OR
+    COALESCE(NEW.timezone,'') <> COALESCE(OLD.timezone,'') OR
+    COALESCE(NEW.latitude,'') <> COALESCE(OLD.latitude,'') OR
+    COALESCE(NEW.longitude,'') <> COALESCE(OLD.longitude,'') OR
+    COALESCE(NEW.phenological_stage,'') <> COALESCE(OLD.phenological_stage,'') OR
+    COALESCE(NEW.calibration_key,'') <> COALESCE(OLD.calibration_key,'') OR
+    COALESCE(NEW.crop_type,'') <> COALESCE(OLD.crop_type,'') OR
+    COALESCE(NEW.variety,'') <> COALESCE(OLD.variety,'') OR
+    COALESCE(NEW.soil_type,'') <> COALESCE(OLD.soil_type,'') OR
+    COALESCE(NEW.irrigation_method,'') <> COALESCE(OLD.irrigation_method,'') OR
+    COALESCE(NEW.area_m2,'') <> COALESCE(OLD.area_m2,'') OR
+    COALESCE(NEW.irrigation_efficiency_pct,'') <> COALESCE(OLD.irrigation_efficiency_pct,'') OR
+    COALESCE(NEW.scheduling_mode,'local') <> COALESCE(OLD.scheduling_mode,'local') OR
+    COALESCE(NEW.prediction_card_enabled,0) <> COALESCE(OLD.prediction_card_enabled,0) OR
+    COALESCE(NEW.notes,'') <> COALESCE(OLD.notes,'') OR
+    COALESCE(NEW.deleted_at,'') <> COALESCE(OLD.deleted_at,'') OR
+    COALESCE(NEW.sync_version,0) <> COALESCE(OLD.sync_version,0)
+  )
 BEGIN
   INSERT INTO sync_outbox(
     event_uuid, aggregate_type, aggregate_key, op, payload_json,
@@ -1062,19 +1068,25 @@ CREATE TRIGGER trg_sync_devices_outbox_au
 AFTER UPDATE ON devices
 FOR EACH ROW
 WHEN
-  COALESCE(NEW.user_id,'') <> COALESCE(OLD.user_id,'') OR
-  COALESCE(NEW.irrigation_zone_id,'') <> COALESCE(OLD.irrigation_zone_id,'') OR
-  COALESCE(NEW.dendro_enabled,0) <> COALESCE(OLD.dendro_enabled,0) OR
-  COALESCE(NEW.temp_enabled,0) <> COALESCE(OLD.temp_enabled,0) OR
-  COALESCE(NEW.rain_gauge_enabled,0) <> COALESCE(OLD.rain_gauge_enabled,0) OR
-  COALESCE(NEW.flow_meter_enabled,0) <> COALESCE(OLD.flow_meter_enabled,0) OR
-  COALESCE(NEW.is_reference_tree,0) <> COALESCE(OLD.is_reference_tree,0) OR
-  COALESCE(NEW.name,'') <> COALESCE(OLD.name,'') OR
-  COALESCE(NEW.strega_model,'') <> COALESCE(OLD.strega_model,'') OR
-  COALESCE(NEW.soil_moisture_probe_depths_json,'') <> COALESCE(OLD.soil_moisture_probe_depths_json,'') OR
-  COALESCE(NEW.soil_moisture_probe_depths_configured,0) <> COALESCE(OLD.soil_moisture_probe_depths_configured,0) OR
-  COALESCE(NEW.deleted_at,'') <> COALESCE(OLD.deleted_at,'') OR
-  COALESCE(NEW.sync_version,0) <> COALESCE(OLD.sync_version,0)
+  EXISTS (
+    SELECT 1 FROM sync_link_state
+     WHERE peer_node = 'cloud' AND linked = 1
+  )
+  AND (
+    COALESCE(NEW.user_id,'') <> COALESCE(OLD.user_id,'') OR
+    COALESCE(NEW.irrigation_zone_id,'') <> COALESCE(OLD.irrigation_zone_id,'') OR
+    COALESCE(NEW.dendro_enabled,0) <> COALESCE(OLD.dendro_enabled,0) OR
+    COALESCE(NEW.temp_enabled,0) <> COALESCE(OLD.temp_enabled,0) OR
+    COALESCE(NEW.rain_gauge_enabled,0) <> COALESCE(OLD.rain_gauge_enabled,0) OR
+    COALESCE(NEW.flow_meter_enabled,0) <> COALESCE(OLD.flow_meter_enabled,0) OR
+    COALESCE(NEW.is_reference_tree,0) <> COALESCE(OLD.is_reference_tree,0) OR
+    COALESCE(NEW.name,'') <> COALESCE(OLD.name,'') OR
+    COALESCE(NEW.strega_model,'') <> COALESCE(OLD.strega_model,'') OR
+    COALESCE(NEW.soil_moisture_probe_depths_json,'') <> COALESCE(OLD.soil_moisture_probe_depths_json,'') OR
+    COALESCE(NEW.soil_moisture_probe_depths_configured,0) <> COALESCE(OLD.soil_moisture_probe_depths_configured,0) OR
+    COALESCE(NEW.deleted_at,'') <> COALESCE(OLD.deleted_at,'') OR
+    COALESCE(NEW.sync_version,0) <> COALESCE(OLD.sync_version,0)
+  )
 BEGIN
   INSERT INTO sync_outbox(
     event_uuid, aggregate_type, aggregate_key, op, payload_json,
@@ -1133,13 +1145,19 @@ CREATE TRIGGER trg_sync_schedules_outbox_au
 AFTER UPDATE ON irrigation_schedules
 FOR EACH ROW
 WHEN
-  COALESCE(NEW.trigger_metric,'') <> COALESCE(OLD.trigger_metric,'') OR
-  COALESCE(NEW.threshold_kpa,0) <> COALESCE(OLD.threshold_kpa,0) OR
-  COALESCE(NEW.enabled,0) <> COALESCE(OLD.enabled,0) OR
-  COALESCE(NEW.duration_minutes,0) <> COALESCE(OLD.duration_minutes,0) OR
-  COALESCE(NEW.response_mode,'') <> COALESCE(OLD.response_mode,'') OR
-  COALESCE(NEW.deleted_at,'') <> COALESCE(OLD.deleted_at,'') OR
-  COALESCE(NEW.sync_version,0) <> COALESCE(OLD.sync_version,0)
+  EXISTS (
+    SELECT 1 FROM sync_link_state
+     WHERE peer_node = 'cloud' AND linked = 1
+  )
+  AND (
+    COALESCE(NEW.trigger_metric,'') <> COALESCE(OLD.trigger_metric,'') OR
+    COALESCE(NEW.threshold_kpa,0) <> COALESCE(OLD.threshold_kpa,0) OR
+    COALESCE(NEW.enabled,0) <> COALESCE(OLD.enabled,0) OR
+    COALESCE(NEW.duration_minutes,0) <> COALESCE(OLD.duration_minutes,0) OR
+    COALESCE(NEW.response_mode,'') <> COALESCE(OLD.response_mode,'') OR
+    COALESCE(NEW.deleted_at,'') <> COALESCE(OLD.deleted_at,'') OR
+    COALESCE(NEW.sync_version,0) <> COALESCE(OLD.sync_version,0)
+  )
 BEGIN
   INSERT INTO sync_outbox(
     event_uuid, aggregate_type, aggregate_key, op, payload_json,
@@ -1566,6 +1584,10 @@ END;
 CREATE TRIGGER trg_gateway_locations_outbox_ai
 AFTER INSERT ON gateway_locations
 FOR EACH ROW
+WHEN EXISTS (
+  SELECT 1 FROM sync_link_state
+   WHERE peer_node = 'cloud' AND linked = 1
+)
 BEGIN
   INSERT INTO sync_outbox(
     event_uuid, aggregate_type, aggregate_key, op, payload_json,
@@ -1604,19 +1626,25 @@ CREATE TRIGGER trg_gateway_locations_outbox_au
 AFTER UPDATE ON gateway_locations
 FOR EACH ROW
 WHEN
-  COALESCE(NEW.latitude,'')                      <> COALESCE(OLD.latitude,'') OR
-  COALESCE(NEW.longitude,'')                     <> COALESCE(OLD.longitude,'') OR
-  COALESCE(NEW.altitude_m,'')                    <> COALESCE(OLD.altitude_m,'') OR
-  COALESCE(NEW.accuracy_m,'')                    <> COALESCE(OLD.accuracy_m,'') OR
-  COALESCE(NEW.hdop,'')                          <> COALESCE(OLD.hdop,'') OR
-  COALESCE(NEW.satellites,'')                    <> COALESCE(OLD.satellites,'') OR
-  COALESCE(NEW.fix_mode,'')                      <> COALESCE(OLD.fix_mode,'') OR
-  COALESCE(NEW.status,'')                        <> COALESCE(OLD.status,'') OR
-  COALESCE(NEW.source,'')                        <> COALESCE(OLD.source,'') OR
-  COALESCE(NEW.native_concentratord_status,'')   <> COALESCE(OLD.native_concentratord_status,'') OR
-  COALESCE(NEW.chirpstack_mirror_status,'')      <> COALESCE(OLD.chirpstack_mirror_status,'') OR
-  COALESCE(NEW.last_good_fix_at,'')              <> COALESCE(OLD.last_good_fix_at,'') OR
-  COALESCE(NEW.sync_version,0)                   <> COALESCE(OLD.sync_version,0)
+  EXISTS (
+    SELECT 1 FROM sync_link_state
+     WHERE peer_node = 'cloud' AND linked = 1
+  )
+  AND (
+    COALESCE(NEW.latitude,'')                    <> COALESCE(OLD.latitude,'') OR
+    COALESCE(NEW.longitude,'')                   <> COALESCE(OLD.longitude,'') OR
+    COALESCE(NEW.altitude_m,'')                  <> COALESCE(OLD.altitude_m,'') OR
+    COALESCE(NEW.accuracy_m,'')                  <> COALESCE(OLD.accuracy_m,'') OR
+    COALESCE(NEW.hdop,'')                        <> COALESCE(OLD.hdop,'') OR
+    COALESCE(NEW.satellites,'')                  <> COALESCE(OLD.satellites,'') OR
+    COALESCE(NEW.fix_mode,'')                    <> COALESCE(OLD.fix_mode,'') OR
+    COALESCE(NEW.status,'')                      <> COALESCE(OLD.status,'') OR
+    COALESCE(NEW.source,'')                      <> COALESCE(OLD.source,'') OR
+    COALESCE(NEW.native_concentratord_status,'') <> COALESCE(OLD.native_concentratord_status,'') OR
+    COALESCE(NEW.chirpstack_mirror_status,'')    <> COALESCE(OLD.chirpstack_mirror_status,'') OR
+    COALESCE(NEW.last_good_fix_at,'')            <> COALESCE(OLD.last_good_fix_at,'') OR
+    COALESCE(NEW.sync_version,0)                 <> COALESCE(OLD.sync_version,0)
+  )
 BEGIN
   INSERT INTO sync_outbox(
     event_uuid, aggregate_type, aggregate_key, op, payload_json,
