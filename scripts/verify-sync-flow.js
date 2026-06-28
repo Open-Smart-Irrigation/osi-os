@@ -1379,6 +1379,7 @@ for (const triggerName of [
   'trg_dp_dendro_daily_outbox_ai',
   'trg_dp_dendro_daily_outbox_au',
   'trg_dp_irrigation_events_outbox_ai',
+  'trg_dp_irrigation_events_outbox_au_event_uuid',
   'trg_dp_zone_env_outbox_ai',
   'trg_dp_zone_env_outbox_au',
   'trg_dp_zone_recs_outbox_ai',
@@ -1407,6 +1408,8 @@ expectIncludes('Sync Init Schema + Triggers', 'sync_history_dirty_keys(peer_node
 expectIncludes('Sync Init Schema + Triggers', 'ALTER TABLE sync_history_cursors ADD COLUMN last_shadow_acked_id INTEGER', 'adds shadow cursor id progress at runtime');
 expectIncludes('Sync Init Schema + Triggers', 'ALTER TABLE sync_history_cursors ADD COLUMN last_shadow_acked_key TEXT', 'adds shadow cursor key progress at runtime');
 expectIncludes('Sync Init Schema + Triggers', 'ALTER TABLE sync_history_cursors ADD COLUMN last_shadow_error TEXT', 'adds shadow cursor error state at runtime');
+expectIncludes('Sync Init Schema + Triggers', 'lower(hex(randomblob(8)))', 'uses random irrigation UUID fallback instead of a hardcoded gateway');
+expectIncludes('Sync Init Schema + Triggers', "'event_uuid', NEW.event_uuid", 'mirrors stable irrigation event UUIDs in outbox payloads');
 expectIncludes('Sync Init Schema + Triggers', 'SELECT irrigation_zone_id FROM devices WHERE deveui = NEW.deveui AND deleted_at IS NULL', 'ignores deleted devices when mirroring device-data zone bindings into the outbox');
 expectIncludes('Sync Init Schema + Triggers', 'SELECT gateway_device_eui FROM devices WHERE deveui = NEW.deveui AND deleted_at IS NULL', 'ignores deleted devices when mirroring device-data gateway bindings into the outbox');
 expectIncludes('Sync Init Schema + Triggers', 'SELECT zone_uuid FROM irrigation_zones WHERE id = NEW.zone_id AND deleted_at IS NULL', 'ignores deleted zones when mirroring zone environment rows into the outbox');

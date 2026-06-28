@@ -110,13 +110,26 @@ try {
     throw new Error('zone environment dirty key did not use zone_uuid');
   }
 
+  exec('DELETE FROM sync_outbox');
   exec("INSERT INTO irrigation_events(id, user_id, irrigation_zone_id, action, payload_json, event_uuid) VALUES(1, 1, 1, 'OPEN', '{}', 'irrig-0016C001F11715E2-000000000001')");
   if (text('SELECT event_uuid FROM irrigation_events WHERE id=1;') !== 'irrig-0016C001F11715E2-000000000001') {
     throw new Error('irrigation event uuid mismatch');
   }
   exec("INSERT INTO irrigation_events(id, user_id, irrigation_zone_id, action, payload_json) VALUES(2, 1, 1, 'CLOSE', '{}')");
-  if (text('SELECT event_uuid FROM irrigation_events WHERE id=2;') !== 'irrig-0016C001F11715E2-000000000002') {
-    throw new Error('irrigation event uuid backfill mismatch');
+  const eventUuid = text('SELECT event_uuid FROM irrigation_events WHERE id=2;');
+  if (!/^irrig-0016C001F11715E2-000000000002$/.test(eventUuid)) {
+    throw new Error('irrigation event uuid trigger did not use zone gateway EUI');
+  }
+  if (text("SELECT json_extract(payload_json, '$.event_uuid') FROM sync_outbox WHERE aggregate_type='IRRIGATION_EVENT' AND json_extract(payload_json, '$.event_id') = 2;") !== eventUuid) {
+    throw new Error('irrigation event outbox payload did not include stable event_uuid');
+  }
+  exec("INSERT INTO irrigation_zones(id, user_id, name, zone_uuid, gateway_device_eui, sync_version) VALUES(2, 1, 'No Gateway', 'zone-2', NULL, 1)");
+  exec("UPDATE irrigation_zones SET gateway_device_eui=NULL WHERE id=2");
+  exec("UPDATE sync_link_state SET gateway_device_eui=NULL WHERE peer_node='cloud'");
+  exec("INSERT INTO irrigation_events(id, user_id, irrigation_zone_id, action, payload_json) VALUES(3, 1, 2, 'OPEN', '{}')");
+  const fallbackUuid = text('SELECT event_uuid FROM irrigation_events WHERE id=3;');
+  if (fallbackUuid.includes('0016C001F11715E2')) {
+    throw new Error('irrigation event uuid used hardcoded production fallback');
   }
 
   console.log('OK sync history schema');

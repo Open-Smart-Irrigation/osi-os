@@ -401,6 +401,10 @@ const requiredIndexSqlFragments = {
     'on history_workspaces(user_id)',
     'where is_default = 1 and zone_id is null',
   ],
+  idx_irrigation_events_event_uuid: [
+    'unique index',
+    'on irrigation_events(event_uuid)',
+  ],
 };
 
 function sqlite(dbPath, sql) {

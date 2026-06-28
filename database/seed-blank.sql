@@ -258,7 +258,8 @@ BEGIN
   UPDATE irrigation_events
   SET event_uuid = 'irrig-' || COALESCE(
     (SELECT gateway_device_eui FROM irrigation_zones WHERE id = NEW.irrigation_zone_id AND deleted_at IS NULL),
-    '0016C001F11715E2'
+    (SELECT gateway_device_eui FROM sync_link_state WHERE peer_node = 'cloud'),
+    lower(hex(randomblob(8)))
   ) || '-' || printf('%012d', NEW.id)
   WHERE id = NEW.id;
 END;
@@ -1741,10 +1742,12 @@ END;
 CREATE TRIGGER trg_dp_irrigation_events_outbox_ai
 AFTER INSERT ON irrigation_events
 FOR EACH ROW
-WHEN EXISTS (
-  SELECT 1 FROM sync_link_state
-   WHERE peer_node = 'cloud' AND linked = 1
-)
+WHEN NEW.event_uuid IS NOT NULL
+ AND NEW.event_uuid <> ''
+ AND EXISTS (
+   SELECT 1 FROM sync_link_state
+    WHERE peer_node = 'cloud' AND linked = 1
+ )
 BEGIN
   INSERT INTO sync_outbox(
     event_uuid, aggregate_type, aggregate_key, op, payload_json,
@@ -1752,14 +1755,15 @@ BEGIN
   ) VALUES (
     lower(hex(randomblob(16))),
     'IRRIGATION_EVENT',
-    CAST(NEW.id AS TEXT),
+    NEW.event_uuid,
     'IRRIGATION_EVENT_APPENDED',
     json_object(
+      'event_uuid',          NEW.event_uuid,
       'event_id',            NEW.id,
       'user_id',             NEW.user_id,
       'irrigation_zone_id',  NEW.irrigation_zone_id,
       'zone_uuid',           (SELECT zone_uuid FROM irrigation_zones WHERE id=NEW.irrigation_zone_id AND deleted_at IS NULL),
-      'gateway_device_eui',  COALESCE((SELECT gateway_device_eui FROM irrigation_zones WHERE id=NEW.irrigation_zone_id AND deleted_at IS NULL),'0016C001F11715E2'),
+      'gateway_device_eui',  COALESCE((SELECT gateway_device_eui FROM irrigation_zones WHERE id=NEW.irrigation_zone_id AND deleted_at IS NULL),(SELECT gateway_device_eui FROM sync_link_state WHERE peer_node='cloud')),
       'action',              NEW.action,
       'reason',              NEW.reason,
       'aggregate_kpa',       NEW.aggregate_kpa,
@@ -1770,7 +1774,47 @@ BEGIN
     ),
     0,
     strftime('%Y-%m-%dT%H:%M:%fZ','now'),
-    COALESCE((SELECT gateway_device_eui FROM irrigation_zones WHERE id=NEW.irrigation_zone_id AND deleted_at IS NULL),'0016C001F11715E2')
+    COALESCE((SELECT gateway_device_eui FROM irrigation_zones WHERE id=NEW.irrigation_zone_id AND deleted_at IS NULL),(SELECT gateway_device_eui FROM sync_link_state WHERE peer_node='cloud'))
+  );
+END;
+
+CREATE TRIGGER trg_dp_irrigation_events_outbox_au_event_uuid
+AFTER UPDATE OF event_uuid ON irrigation_events
+FOR EACH ROW
+WHEN (OLD.event_uuid IS NULL OR OLD.event_uuid = '')
+ AND NEW.event_uuid IS NOT NULL
+ AND NEW.event_uuid <> ''
+ AND EXISTS (
+   SELECT 1 FROM sync_link_state
+    WHERE peer_node = 'cloud' AND linked = 1
+ )
+BEGIN
+  INSERT INTO sync_outbox(
+    event_uuid, aggregate_type, aggregate_key, op, payload_json,
+    sync_version, occurred_at, gateway_device_eui
+  ) VALUES (
+    lower(hex(randomblob(16))),
+    'IRRIGATION_EVENT',
+    NEW.event_uuid,
+    'IRRIGATION_EVENT_APPENDED',
+    json_object(
+      'event_uuid',          NEW.event_uuid,
+      'event_id',            NEW.id,
+      'user_id',             NEW.user_id,
+      'irrigation_zone_id',  NEW.irrigation_zone_id,
+      'zone_uuid',           (SELECT zone_uuid FROM irrigation_zones WHERE id=NEW.irrigation_zone_id AND deleted_at IS NULL),
+      'gateway_device_eui',  COALESCE((SELECT gateway_device_eui FROM irrigation_zones WHERE id=NEW.irrigation_zone_id AND deleted_at IS NULL),(SELECT gateway_device_eui FROM sync_link_state WHERE peer_node='cloud')),
+      'action',              NEW.action,
+      'reason',              NEW.reason,
+      'aggregate_kpa',       NEW.aggregate_kpa,
+      'threshold_kpa',       NEW.threshold_kpa,
+      'duration_minutes',    NEW.duration_minutes,
+      'valve_deveui',        NEW.valve_deveui,
+      'payload_json',        NEW.payload_json
+    ),
+    0,
+    strftime('%Y-%m-%dT%H:%M:%fZ','now'),
+    COALESCE((SELECT gateway_device_eui FROM irrigation_zones WHERE id=NEW.irrigation_zone_id AND deleted_at IS NULL),(SELECT gateway_device_eui FROM sync_link_state WHERE peer_node='cloud'))
   );
 END;
 
