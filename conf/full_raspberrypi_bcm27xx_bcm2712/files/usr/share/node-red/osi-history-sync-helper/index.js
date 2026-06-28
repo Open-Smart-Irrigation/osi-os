@@ -37,8 +37,20 @@ function encodeReal(value) {
   return buffer.toString('hex');
 }
 
+function encodeInteger(value) {
+  if (typeof value === 'number' && Number.isInteger(value)) return String(value);
+  if (typeof value === 'string' && /^-?\d+$/.test(value.trim())) return String(Number(value));
+  throw new Error(`invalid INTEGER ${value}`);
+}
+
+function encodeBoolean(value) {
+  if (value === true || value === 1 || value === '1') return true;
+  if (value === false || value === 0 || value === '0') return false;
+  throw new Error(`invalid BOOLEAN ${value}`);
+}
+
 function encodeJson(value) {
-  if (value === null || value === undefined || value === '') return null;
+  if (value === null || value === undefined) return null;
   const parsed = typeof value === 'string' ? JSON.parse(value) : value;
   return canonicalJson(parsed);
 }
@@ -46,9 +58,9 @@ function encodeJson(value) {
 function encodeValue(type, value) {
   if (value === null || value === undefined) return null;
   if (type === 'TEXT') return String(value);
-  if (type === 'INTEGER') return String(Number.parseInt(value, 10));
+  if (type === 'INTEGER') return encodeInteger(value);
   if (type === 'REAL') return encodeReal(value);
-  if (type === 'BOOLEAN') return !!Number(value);
+  if (type === 'BOOLEAN') return encodeBoolean(value);
   if (type === 'TIMESTAMP') return encodeTimestamp(value);
   if (type === 'JSON') return encodeJson(value);
   throw new Error(`unsupported hash type ${type}`);

@@ -21,6 +21,17 @@ assert.deepStrictEqual(helper.buildCanonicalColumns('device_data', row), [
   ['swt_2', 'REAL', null],
   ['dendro_valid', 'BOOLEAN', true]
 ]);
+assert.throws(() => helper.buildCanonicalColumns('device_data', {
+  id: '12x',
+  deveui: 'A84041CAFECAFE01',
+  recorded_at: '2026-06-28T10:00:00Z'
+}), /invalid INTEGER/);
+assert.throws(() => helper.buildCanonicalColumns('device_data', {
+  id: 125,
+  deveui: 'A84041CAFECAFE01',
+  recorded_at: '2026-06-28T10:00:00Z',
+  dendro_valid: 'maybe'
+}), /invalid BOOLEAN/);
 assert.strictEqual(
   helper.hashHistoryRow('device_data', 'DEVICE_DATA|0016C001F11715E2|123', row),
   '39eb29940bfb23a1d5b84a573daf646e48c5e4e768d2068385fa5083fd62a371'

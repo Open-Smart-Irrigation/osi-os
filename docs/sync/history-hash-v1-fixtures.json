@@ -39,6 +39,28 @@
         ["recommendation_json", "JSON", "{\"a\":1,\"b\":null}"]
       ],
       "expectedSha256": "96c335b96ef460e48f55ecb04b4b58d76d43007fa1f973e24a0ced6fe29c6b71"
+    },
+    {
+      "name": "device-data-negative-zero-and-false",
+      "tableName": "device_data",
+      "historyKey": "DEVICE_DATA|0016C001F11715E2|124",
+      "sourceRow": {
+        "id": 124,
+        "deveui": "A84041CAFECAFE01",
+        "recorded_at": "2026-06-28T10:05:00Z",
+        "swt_1": -0.0,
+        "swt_2": 0,
+        "dendro_valid": 0
+      },
+      "expectedColumns": [
+        ["id", "INTEGER", "124"],
+        ["deveui", "TEXT", "A84041CAFECAFE01"],
+        ["recorded_at", "TIMESTAMP", "2026-06-28T10:05:00.000Z"],
+        ["swt_1", "REAL", "0000000000000000"],
+        ["swt_2", "REAL", "0000000000000000"],
+        ["dendro_valid", "BOOLEAN", false]
+      ],
+      "expectedSha256": "8148f466939b62abb86a5613ae47432a8933fdf9a1983ef5a8f4e113e8dbc653"
     }
   ]
 }
