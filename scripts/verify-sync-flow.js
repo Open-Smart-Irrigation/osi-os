@@ -1289,8 +1289,11 @@ expectIncludes('Finalize linked account state', 'server_offline_verifier_version
 expectIncludes('Finalize linked account state', 'last_auth_sync_status = ?', 'marks linked auth as up to date after local-sync finalization');
 expectIncludes('Finalize linked account state', 'return [null, msg];', 'can stop before reporting link success');
 expectIncludes('Finalize linked account state', 'INSERT INTO sync_link_state', 'persists sync_link_state on successful account link');
+expectIncludes('Finalize linked account state', 'normalizeGatewayDeviceEui', 'linked account state normalizes gateway EUI');
 expectIncludes('Finalize linked account state', "flow.set('account_linked', true)", 'sets account_linked flow flag on successful account link');
 expectIncludes('Clear linked account state', 'UPDATE sync_link_state', 'marks sync_link_state unlinked during unlink');
+expectIncludes('Clear linked account state', 'server_url=NULL', 'unlink clears sync_link_state server URL');
+expectIncludes('Clear linked account state', 'gateway_device_eui=NULL', 'unlink clears sync_link_state gateway identity');
 expectIncludes('Clear linked account state', "flow.set('account_linked', false)", 'clears account_linked flow flag during unlink');
 expectIncludes('Set Download Headers', 'Database download is disabled', 'keeps database download disabled');
 expectIncludes('Lookup Auth User', 'ORDER BY CASE WHEN username = ?', 'prefers local username matches');
@@ -1411,6 +1414,8 @@ expectIncludes('Build History Batch', "require('/usr/share/node-red/osi-history-
 expectIncludes('Build History Batch', "phase: 'shadow'", 'runs history sync in shadow mode first');
 expectIncludes('Build History Batch', 'hashVersion: 1', 'uses history hash v1');
 expectIncludes('Build History Batch', '/api/v1/sync/edge/history/batches', 'posts history batches to the v1 history endpoint');
+expectIncludes('Build History Batch', 'if (!syncToken)', 'history batch fails closed without sync token');
+expectIncludes('Build History Batch', 'return null', 'history batch stops before unauthenticated post');
 expectExcludes('Build History Batch', 'replace(//$/', 'malformed trailing slash normalizer in history sync builder');
 expectIncludes('Build History Batch', 'SELECT * FROM device_data WHERE id > ? ORDER BY id ASC LIMIT ?', 'uses id cursor for device_data history');
 expectIncludes('Build History Batch', 'helper.hashHistoryRow', 'hashes raw rows through shared helper');
@@ -1423,6 +1428,8 @@ expectIncludes('Mark History Batch ACK', 'ackedThroughId', 'history batch marker
 expectIncludes('Mark History Batch ACK', "flow.set('history_sync_v1_confirmed', true)", 'records successful history shadow confirmation');
 expectIncludes('Build History Manifest', 'SELECT table_name, segment_key, hash_version, canonical_row_count,', 'builds history manifests from cached segments');
 expectIncludes('Build History Manifest', '/api/v1/sync/edge/history/manifests', 'posts history manifests to the v1 manifest endpoint');
+expectIncludes('Build History Manifest', 'if (!syncToken)', 'history manifest fails closed without sync token');
+expectIncludes('Build History Manifest', 'return null', 'history manifest stops before unauthenticated post');
 expectFileIncludes('seed-blank.sql', seedSqlSource, 'trg_sync_device_data_dirty_au', 'raw correction dirty-key trigger exists before raw trigger removal');
 expectExcludes('Sync Init Schema + Triggers', '" + gateway + "', 'malformed literal gateway fallback SQL in sync triggers');
 expectExcludes('Sync Init Schema + Triggers', '\'" + gatewaySql + "\'', 'double-quoted gatewaySql fallback fragments in sync init SQL');
