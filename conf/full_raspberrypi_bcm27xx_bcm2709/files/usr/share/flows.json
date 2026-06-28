@@ -5860,6 +5860,96 @@
     ]
   },
   {
+    "id": "sync-history-inject",
+    "type": "inject",
+    "z": "93b1537a596e0e6d",
+    "name": "Sync History Shadow Batch",
+    "props": [
+      {
+        "p": "payload"
+      }
+    ],
+    "repeat": "60",
+    "crontab": "",
+    "once": true,
+    "onceDelay": "25",
+    "topic": "",
+    "payload": "",
+    "payloadType": "date",
+    "x": 180,
+    "y": 1180,
+    "wires": [
+      [
+        "sync-history-build"
+      ]
+    ]
+  },
+  {
+    "id": "sync-history-build",
+    "type": "function",
+    "z": "93b1537a596e0e6d",
+    "name": "Build History Batch",
+    "func": "return (async()=>{\nconst helper = require('/usr/share/node-red/osi-history-sync-helper');\nconst batchSize = 250;\nconst tableName = 'device_data';\nconst gatewayEui = String(flow.get('gateway_device_eui') || flow.get('al_gateway_device_eui') || '').trim().toUpperCase();\nconst linked = !!flow.get('account_linked');\nconst _db = new osiDb.Database('/data/db/farming.db');\nconst q = (sql, params = []) => new Promise((res,rej) => _db.all(sql, params, (e,r) => e?rej(e):res(r||[])));\nconst close = () => new Promise(res => _db.close(() => res()));\nfunction normalizeCloudServerUrl(value) {\n  return String(value || '').trim().replace(/\\/$/, '');\n}\nfunction normalizeGatewayDeviceEui(value) {\n  const raw = String(value || '').trim().replace(/[^0-9a-fA-F]/g, '').toUpperCase();\n  if (!raw) return '';\n  if (raw.length === 16) return raw === '0101010101010101' ? '' : raw;\n  if (raw.length === 12) return raw.slice(0, 6) + 'FFFE' + raw.slice(6);\n  return '';\n}\nfunction setSyncState(patch) {\n  const current = flow.get('sync_state') || {};\n  flow.set('sync_state', Object.assign({}, current, patch));\n}\ntry {\n  const linkRows = await q(\"SELECT linked, server_url, gateway_device_eui FROM sync_link_state WHERE peer_node='cloud' LIMIT 1\");\n  const linkState = linkRows[0] || {};\n  const targetRows = await q(\"SELECT server_url, server_sync_token FROM users WHERE server_url IS NOT NULL AND server_url <> '' ORDER BY server_linked_at DESC, id DESC LIMIT 1\");\n  const target = targetRows[0] || {};\n  const serverUrl = normalizeCloudServerUrl(linkState.server_url || target.server_url);\n  const syncToken = String(target.server_sync_token || env.get('CLOUD_SYNC_TOKEN') || env.get('SYNC_TOKEN') || '').trim();\n  const effectiveGatewayEui = normalizeGatewayDeviceEui(gatewayEui || linkState.gateway_device_eui || env.get('DEVICE_EUI'));\n  if ((!linked && Number(linkState.linked || 0) !== 1) || !effectiveGatewayEui || !serverUrl) {\n    await close();\n    return null;\n  }\n  msg.historyTable = tableName;\n  msg.method = 'POST';\n  msg.url = serverUrl + '/api/v1/sync/edge/history/batches';\n  msg.headers = { 'Content-Type': 'application/json', 'X-OSI-History-Protocol': '1' };\n  if (syncToken) msg.headers.Authorization = 'Bearer ' + syncToken;\n  msg.payload = {\n    protocolVersion: 1,\n    gatewayDeviceEui: effectiveGatewayEui,\n    batchId: Date.now().toString(36),\n    tableName,\n    phase: 'shadow',\n    hashVersion: 1,\n    cursor: { batchSize, helperLoaded: !!helper.hashHistoryRow },\n    rows: []\n  };\n  await close();\n  return msg;\n} catch (e) {\n  try { await close(); } catch (_) {}\n  setSyncState({ lastHistorySyncError: { at: new Date().toISOString(), source: 'history-build', message: String(e.message || e) } });\n  node.warn('History batch build failed: ' + e.message);\n  return null;\n}\n})();",
+    "outputs": 1,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [
+      {
+        "var": "osiDb",
+        "module": "osi-db-helper"
+      }
+    ],
+    "x": 430,
+    "y": 1180,
+    "wires": [
+      [
+        "sync-history-http"
+      ]
+    ]
+  },
+  {
+    "id": "sync-history-http",
+    "type": "function",
+    "z": "93b1537a596e0e6d",
+    "name": "POST History Batch",
+    "func": "return (async () => {\n  if (!msg || !msg.url) return null;\n  try {\n    const result = await osiCloudHttp.requestJsonIpv4({\n      method: msg.method || 'POST',\n      url: msg.url,\n      headers: msg.headers || {},\n      payload: msg.payload,\n      timeoutMs: Number(env.get('OSI_CLOUD_REST_TIMEOUT_MS') || 30000) || 30000\n    });\n    msg.statusCode = result.statusCode;\n    msg.headers = result.headers || {};\n    msg.payload = result.payload;\n    msg._cloudRestIpv4 = result.diagnostics;\n    return msg;\n  } catch (error) {\n    msg.statusCode = 0;\n    msg.headers = {};\n    msg.error = {\n      message: String(error.message || error),\n      code: error.code || null,\n      cloudRestIpv4: error.cloudRestIpv4 || null\n    };\n    msg.payload = {\n      error: 'History batch REST IPv4 request failed',\n      detail: String(error.message || error),\n      code: error.code || null\n    };\n    return msg;\n  }\n})();",
+    "outputs": 1,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [
+      {
+        "var": "osiCloudHttp",
+        "module": "osi-cloud-http"
+      }
+    ],
+    "x": 700,
+    "y": 1180,
+    "wires": [
+      [
+        "sync-history-mark"
+      ]
+    ]
+  },
+  {
+    "id": "sync-history-mark",
+    "type": "function",
+    "z": "93b1537a596e0e6d",
+    "name": "Mark History Batch ACK",
+    "func": "return (async()=>{\nfunction setSyncState(patch) {\n  const current = flow.get('sync_state') || {};\n  flow.set('sync_state', Object.assign({}, current, patch));\n}\nconst now = new Date().toISOString();\nif (msg.statusCode && (msg.statusCode < 200 || msg.statusCode >= 300)) {\n  setSyncState({ lastHistorySyncError: { at: now, source: 'history-batch', message: 'History batch delivery failed', statusCode: Number(msg.statusCode) } });\n  return null;\n}\nconst payload = msg.payload && typeof msg.payload === 'object' ? msg.payload : {};\nsetSyncState({\n  lastHistoryShadowSyncAt: now,\n  lastHistoryShadowTable: msg.historyTable || payload.tableName || null,\n  lastHistoryShadowBatchId: payload.batchId || (msg.payload && msg.payload.batchId) || null,\n  lastHistoryShadowAccepted: payload.shadowAccepted !== false,\n  lastHistorySyncError: null,\n  updatedAt: now\n});\nflow.set('history_sync_v1_confirmed', true);\nreturn null;\n})();",
+    "outputs": 1,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 970,
+    "y": 1180,
+    "wires": [
+      []
+    ]
+  },
+  {
     "id": "sync-pending-inject",
     "type": "inject",
     "z": "93b1537a596e0e6d",

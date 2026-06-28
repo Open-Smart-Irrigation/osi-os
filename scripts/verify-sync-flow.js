@@ -1390,6 +1390,13 @@ expectIncludes('Sync Init Schema + Triggers', 'SELECT zone_uuid FROM irrigation_
 expectIncludes('Sync Init Schema + Triggers', 'SELECT gateway_device_eui FROM irrigation_zones WHERE id = NEW.zone_id AND deleted_at IS NULL', 'ignores deleted zones when mirroring zone environment gateway bindings into the outbox');
 expectIncludes('Sync Init Schema + Triggers', 'SELECT zone_uuid FROM irrigation_zones WHERE id = NEW.irrigation_zone_id AND deleted_at IS NULL', 'ignores deleted zones when mirroring irrigation events into the outbox');
 expectIncludes('Sync Init Schema + Triggers', 'SELECT gateway_device_eui FROM irrigation_zones WHERE id = NEW.irrigation_zone_id AND deleted_at IS NULL', 'ignores deleted zones when mirroring irrigation event gateway bindings into the outbox');
+expectIncludes('Build History Batch', "require('/usr/share/node-red/osi-history-sync-helper')", 'loads history sync helper');
+expectIncludes('Build History Batch', "phase: 'shadow'", 'runs history sync in shadow mode first');
+expectIncludes('Build History Batch', 'hashVersion: 1', 'uses history hash v1');
+expectIncludes('Build History Batch', '/api/v1/sync/edge/history/batches', 'posts history batches to the v1 history endpoint');
+expectExcludes('Build History Batch', 'replace(//$/', 'malformed trailing slash normalizer in history sync builder');
+expectIncludes('POST History Batch', 'osiCloudHttp.requestJsonIpv4', 'uses the shared IPv4 cloud HTTP helper for history batches');
+expectIncludes('Mark History Batch ACK', "flow.set('history_sync_v1_confirmed', true)", 'records successful history shadow confirmation');
 expectExcludes('Sync Init Schema + Triggers', '" + gateway + "', 'malformed literal gateway fallback SQL in sync triggers');
 expectExcludes('Sync Init Schema + Triggers', '\'" + gatewaySql + "\'', 'double-quoted gatewaySql fallback fragments in sync init SQL');
 const migrationPreflightNodes = ['Build Cloud Bootstrap', 'Build Edge Event Batch', 'Build Pending Command Pull', 'Run Force Sync'];
