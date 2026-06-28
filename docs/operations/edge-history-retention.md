@@ -89,3 +89,15 @@ Any future startup migration that rebuilds a parent table referenced by
 must fence the swap with `PRAGMA foreign_keys=OFF` and restore
 `PRAGMA foreign_keys=ON` immediately after the final drop. The sync verifier
 guards the known `devices` rebuild case.
+
+## History Sync V1 Rollout Guardrails
+
+- Do not remove raw history outbox triggers on a field gateway until shadow
+  history sync has completed a full raw-table backfill.
+- Do not import recovered outbox history into `/data/db/farming.db` without a
+  timestamped backup of `/data/db/`, `/srv/node-red/`, and
+  `/usr/lib/node-red/gui/`.
+- Do not prune server-extra edge-sourced rows without two manifest confirmations
+  or explicit operator approval.
+- Keep legacy `/edge/events` and `/edge/bootstrap` compatibility until every
+  supported OSI OS image advertises `history_sync_v1`.
