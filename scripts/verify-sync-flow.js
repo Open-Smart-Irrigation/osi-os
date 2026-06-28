@@ -88,6 +88,8 @@ const cloudHttpPackagePath = path.join(nodeRedRoot, 'osi-cloud-http', 'package.j
 const packageJsonPath = path.join(nodeRedRoot, 'package.json');
 execFileSync(process.execPath, [path.resolve(__dirname, 'verify-communication-contract.js')], { stdio: 'inherit' });
 execFileSync(process.execPath, [path.resolve(__dirname, 'verify-db-schema-consistency.js')], { stdio: 'inherit' });
+execFileSync(process.execPath, [path.resolve(__dirname, 'test-sync-history-schema.js')], { stdio: 'inherit' });
+execFileSync(process.execPath, [path.resolve(__dirname, 'verify-history-hash-fixtures.js')], { stdio: 'inherit' });
 execFileSync(process.execPath, [path.resolve(__dirname, 'verify-history-api-contract.js'), '--allow-missing-history'], { stdio: 'inherit' });
 const deployScript = fs.readFileSync(deployScriptPath, 'utf8');
 const nodeRedInitScript = fs.readFileSync(nodeRedInitPath, 'utf8');

@@ -238,6 +238,7 @@ CREATE TABLE irrigation_events (
   duration_minutes   INTEGER,
   valve_deveui       TEXT,
   payload_json       TEXT,
+  event_uuid         TEXT,
   created_at         TEXT NOT NULL DEFAULT (datetime('now')),
   FOREIGN KEY (user_id)            REFERENCES users(id),
   FOREIGN KEY (irrigation_zone_id) REFERENCES irrigation_zones(id)
@@ -247,6 +248,7 @@ CREATE INDEX idx_irrig_events_user_created_at ON irrigation_events(user_id, crea
 CREATE INDEX idx_irrig_events_zone_created_at ON irrigation_events(irrigation_zone_id, created_at);
 CREATE INDEX idx_irrig_events_created_at      ON irrigation_events(created_at);
 CREATE INDEX idx_irrigation_events_zone_id    ON irrigation_events(irrigation_zone_id, id DESC);
+CREATE UNIQUE INDEX idx_irrigation_events_event_uuid ON irrigation_events(event_uuid);
 
 -- ---------------------------------------------------------------------------
 -- actuator_log
@@ -497,6 +499,72 @@ CREATE TABLE sync_cursor (
   last_event_at        TEXT,
   last_event_uuid      TEXT,
   last_full_backfill_at TEXT
+);
+
+CREATE TABLE sync_link_state (
+  peer_node TEXT PRIMARY KEY,
+  linked INTEGER NOT NULL DEFAULT 0,
+  server_url TEXT,
+  cloud_user_id TEXT,
+  gateway_device_eui TEXT,
+  updated_at TEXT NOT NULL
+);
+
+CREATE TABLE sync_history_cursors (
+  peer_node TEXT NOT NULL,
+  table_name TEXT NOT NULL,
+  state TEXT NOT NULL DEFAULT 'backfill',
+  snapshot_high_id INTEGER,
+  last_acked_id INTEGER,
+  last_acked_key TEXT,
+  backfill_started_at TEXT,
+  backfill_completed_at TEXT,
+  last_batch_id TEXT,
+  last_batch_at TEXT,
+  retry_count INTEGER NOT NULL DEFAULT 0,
+  next_attempt_at TEXT,
+  last_error TEXT,
+  PRIMARY KEY (peer_node, table_name)
+);
+
+CREATE TABLE sync_history_dirty_keys (
+  peer_node TEXT NOT NULL,
+  table_name TEXT NOT NULL,
+  row_key TEXT NOT NULL,
+  change_kind TEXT NOT NULL DEFAULT 'correction',
+  source_row_id INTEGER,
+  changed_at TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'pending',
+  attempts INTEGER NOT NULL DEFAULT 0,
+  next_attempt_at TEXT,
+  last_error TEXT,
+  PRIMARY KEY (peer_node, table_name, row_key)
+);
+
+CREATE TABLE sync_history_segments (
+  peer_node TEXT NOT NULL,
+  table_name TEXT NOT NULL,
+  segment_key TEXT NOT NULL,
+  hash_version INTEGER NOT NULL,
+  canonical_row_count INTEGER NOT NULL,
+  syncable_row_count INTEGER NOT NULL,
+  syncable_payload_hash TEXT NOT NULL,
+  quarantined_count INTEGER NOT NULL DEFAULT 0,
+  covered_max_id INTEGER,
+  computed_at TEXT NOT NULL,
+  PRIMARY KEY (peer_node, table_name, segment_key, hash_version)
+);
+
+CREATE TABLE sync_history_quarantine (
+  peer_node TEXT NOT NULL,
+  table_name TEXT NOT NULL,
+  history_key TEXT NOT NULL,
+  payload_hash TEXT,
+  reason TEXT NOT NULL,
+  first_seen_at TEXT NOT NULL,
+  last_seen_at TEXT NOT NULL,
+  attempts INTEGER NOT NULL DEFAULT 1,
+  PRIMARY KEY (peer_node, table_name, history_key)
 );
 
 -- ---------------------------------------------------------------------------
