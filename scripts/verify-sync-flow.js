@@ -1436,8 +1436,11 @@ expectIncludes('Mark History Batch ACK', 'last_shadow_acked_id', 'stores shadow 
 expectIncludes('Mark History Batch ACK', 'last_shadow_acked_key', 'stores shadow ACK key separately from durable ACKs');
 expectIncludes('Mark History Batch ACK', 'history-shadow-ack', 'reports shadow ACK errors without confirming durable mirror writes');
 expectIncludes('Build History Manifest', 'SELECT table_name, segment_key, hash_version, canonical_row_count,', 'builds history manifests from cached segments');
+expectIncludes('Build History Manifest', "].join('\\n')", 'uses a real newline separator for history manifest SQL');
+expectExcludes('Build History Manifest', "].join('\\\\n')", 'does not use a literal backslash-n separator for history manifest SQL');
 expectIncludes('Build History Manifest', '/api/v1/sync/edge/history/manifests', 'posts history manifests to the v1 manifest endpoint');
 expectIncludes('Build History Manifest', 'if (!syncToken)', 'history manifest fails closed without sync token');
+expectIncludes('Build History Manifest', 'lastHistoryManifestIdleAt', 'history manifest builder skips empty manifest posts');
 expectIncludes('Build History Manifest', 'return null', 'history manifest stops before unauthenticated post');
 expectFileIncludes('seed-blank.sql', seedSqlSource, 'trg_sync_device_data_dirty_au', 'raw correction dirty-key trigger exists before raw trigger removal');
 expectExcludes('Sync Init Schema + Triggers', '" + gateway + "', 'malformed literal gateway fallback SQL in sync triggers');
