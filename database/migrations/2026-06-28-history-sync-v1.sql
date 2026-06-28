@@ -67,6 +67,9 @@ CREATE TABLE IF NOT EXISTS sync_history_quarantine (
   PRIMARY KEY (peer_node, table_name, history_key)
 );
 
+ALTER TABLE chameleon_readings ADD COLUMN data_invalid INTEGER DEFAULT 0;
+ALTER TABLE chameleon_readings ADD COLUMN comp_pending INTEGER DEFAULT 0;
+
 ALTER TABLE irrigation_events ADD COLUMN event_uuid TEXT;
 UPDATE irrigation_events
 SET event_uuid = 'irrig-' || COALESCE(

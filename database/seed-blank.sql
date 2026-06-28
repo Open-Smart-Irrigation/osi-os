@@ -616,6 +616,8 @@ CREATE TABLE chameleon_readings (
   f_port          INTEGER,
   f_cnt           INTEGER,
   calibration_status TEXT,
+  data_invalid    INTEGER DEFAULT 0,
+  comp_pending    INTEGER DEFAULT 0,
   created_at      TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
   FOREIGN KEY (deveui) REFERENCES devices(deveui) ON DELETE CASCADE
 );
