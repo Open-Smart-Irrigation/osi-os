@@ -250,6 +250,19 @@ CREATE INDEX idx_irrig_events_created_at      ON irrigation_events(created_at);
 CREATE INDEX idx_irrigation_events_zone_id    ON irrigation_events(irrigation_zone_id, id DESC);
 CREATE UNIQUE INDEX idx_irrigation_events_event_uuid ON irrigation_events(event_uuid);
 
+CREATE TRIGGER trg_sync_irrigation_events_uuid_ai
+AFTER INSERT ON irrigation_events
+FOR EACH ROW
+WHEN NEW.event_uuid IS NULL OR NEW.event_uuid = ''
+BEGIN
+  UPDATE irrigation_events
+  SET event_uuid = 'irrig-' || COALESCE(
+    (SELECT gateway_device_eui FROM irrigation_zones WHERE id = NEW.irrigation_zone_id AND deleted_at IS NULL),
+    '0016C001F11715E2'
+  ) || '-' || printf('%012d', NEW.id)
+  WHERE id = NEW.id;
+END;
+
 -- ---------------------------------------------------------------------------
 -- actuator_log
 -- ---------------------------------------------------------------------------

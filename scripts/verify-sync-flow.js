@@ -1355,6 +1355,10 @@ expectIncludes('Sync Init Schema + Triggers', "'irrigation_efficiency_pct', NEW.
 expectIncludes('Sync Init Schema + Triggers', "'prediction_card_enabled', COALESCE(NEW.prediction_card_enabled, 0)", 'mirrors prediction-card changes into zone sync events');
 expectIncludes('Sync Init Schema + Triggers', 'COALESCE(NEW.prediction_card_enabled,0) <> COALESCE(OLD.prediction_card_enabled,0)', 'queues outbox events when the prediction-card flag changes');
 expectIncludes('Sync Init Schema + Triggers', 'CREATE TABLE IF NOT EXISTS sync_link_state', 'creates sync link state table at runtime');
+expectIncludes('Sync Init Schema + Triggers', 'UPDATE irrigation_events SET event_uuid =', 'backfills stable irrigation event UUIDs at runtime');
+expectIncludes('Sync Init Schema + Triggers', 'CREATE TRIGGER trg_sync_irrigation_events_uuid_ai', 'creates stable irrigation event UUID trigger at runtime');
+expectFileIncludes('seed-blank.sql', seedSqlSource, 'idx_irrigation_events_event_uuid', 'irrigation events have stable sync identity');
+expectFileIncludes('seed-blank.sql', seedSqlSource, 'trg_sync_irrigation_events_uuid_ai', 'fresh DBs create stable irrigation event UUIDs');
 for (const triggerName of [
   'trg_sync_zones_outbox_au',
   'trg_sync_devices_outbox_au',

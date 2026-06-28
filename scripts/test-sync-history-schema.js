@@ -33,6 +33,10 @@ function scalar(sql) {
   return output === '' ? 0 : Number(output);
 }
 
+function text(sql) {
+  return sqlite(sql);
+}
+
 try {
   exec(schema);
 
@@ -81,6 +85,15 @@ try {
   exec("INSERT INTO zone_daily_environment(zone_id, date, rainfall_mm, computed_at) VALUES(1, '2026-06-28', 2.5, '2026-06-28T10:00:00.000Z')");
   if (scalar("SELECT COUNT(*) FROM sync_history_dirty_keys WHERE table_name='zone_daily_environment' AND row_key='ZONE_ENVIRONMENT|zone-1|2026-06-28';") !== 1) {
     throw new Error('zone environment dirty key did not use zone_uuid');
+  }
+
+  exec("INSERT INTO irrigation_events(id, user_id, irrigation_zone_id, action, payload_json, event_uuid) VALUES(1, 1, 1, 'OPEN', '{}', 'irrig-0016C001F11715E2-000000000001')");
+  if (text('SELECT event_uuid FROM irrigation_events WHERE id=1;') !== 'irrig-0016C001F11715E2-000000000001') {
+    throw new Error('irrigation event uuid mismatch');
+  }
+  exec("INSERT INTO irrigation_events(id, user_id, irrigation_zone_id, action, payload_json) VALUES(2, 1, 1, 'CLOSE', '{}')");
+  if (text('SELECT event_uuid FROM irrigation_events WHERE id=2;') !== 'irrig-0016C001F11715E2-000000000002') {
+    throw new Error('irrigation event uuid backfill mismatch');
   }
 
   console.log('OK sync history schema');
