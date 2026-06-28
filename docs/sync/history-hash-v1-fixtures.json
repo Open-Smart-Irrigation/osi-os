@@ -1,0 +1,44 @@
+{
+  "fixtureSet": "history-hash-v1",
+  "hashVersion": 1,
+  "fixtures": [
+    {
+      "name": "device-data-null-and-real",
+      "tableName": "device_data",
+      "historyKey": "DEVICE_DATA|0016C001F11715E2|123",
+      "sourceRow": {
+        "id": 123,
+        "deveui": "A84041CAFECAFE01",
+        "recorded_at": "2026-06-28T10:00:00Z",
+        "swt_1": 1,
+        "swt_2": null,
+        "dendro_valid": 1
+      },
+      "expectedColumns": [
+        ["id", "INTEGER", "123"],
+        ["deveui", "TEXT", "A84041CAFECAFE01"],
+        ["recorded_at", "TIMESTAMP", "2026-06-28T10:00:00.000Z"],
+        ["swt_1", "REAL", "3ff0000000000000"],
+        ["swt_2", "REAL", null],
+        ["dendro_valid", "BOOLEAN", true]
+      ],
+      "expectedSha256": "39eb29940bfb23a1d5b84a573daf646e48c5e4e768d2068385fa5083fd62a371"
+    },
+    {
+      "name": "json-sorted-keys",
+      "tableName": "zone_daily_recommendations",
+      "historyKey": "ZONE_RECOMMENDATION|zone-uuid-1|2026-06-28",
+      "sourceRow": {
+        "zone_uuid": "zone-uuid-1",
+        "date": "2026-06-28",
+        "recommendation_json": "{\"b\":null,\"a\":1}"
+      },
+      "expectedColumns": [
+        ["zone_uuid", "TEXT", "zone-uuid-1"],
+        ["date", "TEXT", "2026-06-28"],
+        ["recommendation_json", "JSON", "{\"a\":1,\"b\":null}"]
+      ],
+      "expectedSha256": "96c335b96ef460e48f55ecb04b4b58d76d43007fa1f973e24a0ced6fe29c6b71"
+    }
+  ]
+}
