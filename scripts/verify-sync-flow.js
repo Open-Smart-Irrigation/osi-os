@@ -1370,6 +1370,23 @@ for (const triggerName of [
 }
 expectFileIncludes('seed-blank.sql', seedSqlSource, 'sync_link_state', 'link-gates sync triggers');
 for (const triggerName of [
+  'trg_dp_device_data_outbox_ai',
+  'trg_dp_chameleon_readings_outbox_ai',
+  'trg_dp_dendro_readings_outbox_ai',
+  'trg_dp_dendro_daily_outbox_ai',
+  'trg_dp_dendro_daily_outbox_au',
+  'trg_dp_irrigation_events_outbox_ai',
+  'trg_dp_zone_env_outbox_ai',
+  'trg_dp_zone_env_outbox_au',
+  'trg_dp_zone_recs_outbox_ai',
+  'trg_dp_zone_recs_outbox_au',
+]) {
+  expectIncludes('Sync Init Schema + Triggers', triggerName, `creates ${triggerName} at runtime`);
+  expectFileIncludes('seed-blank.sql', seedSqlSource, triggerName, `defines ${triggerName}`);
+}
+expectIncludes('Sync Init Schema + Triggers', "WHERE peer_node = 'cloud' AND linked = 1", 'outbox triggers are link-gated at runtime');
+expectFileIncludes('seed-blank.sql', seedSqlSource, "WHERE peer_node = 'cloud' AND linked = 1", 'seed outbox triggers are link-gated');
+for (const triggerName of [
   'trg_sync_device_data_dirty_au',
   'trg_sync_chameleon_readings_dirty_au',
   'trg_sync_dendro_readings_dirty_au',
@@ -1407,20 +1424,6 @@ expectIncludes('Mark History Batch ACK', "flow.set('history_sync_v1_confirmed', 
 expectIncludes('Build History Manifest', 'SELECT table_name, segment_key, hash_version, canonical_row_count,', 'builds history manifests from cached segments');
 expectIncludes('Build History Manifest', '/api/v1/sync/edge/history/manifests', 'posts history manifests to the v1 manifest endpoint');
 expectFileIncludes('seed-blank.sql', seedSqlSource, 'trg_sync_device_data_dirty_au', 'raw correction dirty-key trigger exists before raw trigger removal');
-for (const removedRawTrigger of [
-  'trg_dp_device_data_outbox_ai',
-  'trg_dp_dendro_readings_outbox_ai',
-]) {
-  expectFileExcludes('seed-blank.sql', seedSqlSource, removedRawTrigger, `removed ${removedRawTrigger} from seed raw outbox triggers`);
-}
-for (const removedRawTrigger of [
-  'trg_dp_device_data_outbox_ai',
-  'trg_dp_chameleon_readings_outbox_ai',
-  'trg_dp_dendro_readings_outbox_ai',
-]) {
-  expectIncludes('Sync Init Schema + Triggers', `DROP TRIGGER IF EXISTS ${removedRawTrigger}`, `drops legacy ${removedRawTrigger} at runtime`);
-  expectExcludes('Sync Init Schema + Triggers', `CREATE TRIGGER ${removedRawTrigger}`, `does not recreate legacy ${removedRawTrigger} at runtime`);
-}
 expectExcludes('Sync Init Schema + Triggers', '" + gateway + "', 'malformed literal gateway fallback SQL in sync triggers');
 expectExcludes('Sync Init Schema + Triggers', '\'" + gatewaySql + "\'', 'double-quoted gatewaySql fallback fragments in sync init SQL');
 const migrationPreflightNodes = ['Build Cloud Bootstrap', 'Build Edge Event Batch', 'Build Pending Command Pull', 'Run Force Sync'];

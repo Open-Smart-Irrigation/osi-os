@@ -62,6 +62,13 @@ try {
   if (scalar("SELECT COUNT(*) FROM sync_outbox WHERE aggregate_type='DEVICE_DATA';") !== 0) {
     throw new Error('never-linked raw device_data insert created outbox row');
   }
+  exec("INSERT INTO zone_daily_environment(zone_id, date, rainfall_mm, computed_at) VALUES(1, '2026-06-27', 1.0, '2026-06-28T09:00:00.000Z')");
+  exec("INSERT INTO zone_daily_recommendations(zone_id, date, recommendation_json, computed_at) VALUES(1, '2026-06-27', '{}', '2026-06-28T09:00:00.000Z')");
+  exec("INSERT INTO dendrometer_daily(deveui, date, computed_at) VALUES('A84041CAFECAFE01', '2026-06-27', '2026-06-28T09:00:00.000Z')");
+  exec("INSERT INTO irrigation_events(id, user_id, irrigation_zone_id, action, payload_json) VALUES(50, 1, 1, 'OPEN', '{}')");
+  if (scalar('SELECT COUNT(*) FROM sync_outbox;') !== 0) {
+    throw new Error('unlinked derived or irrigation insert created outbox row');
+  }
 
   exec("INSERT INTO sync_link_state(peer_node, linked, gateway_device_eui, updated_at) VALUES('cloud', 1, '0016C001F11715E2', '2026-06-28T10:00:00.000Z')");
   exec("UPDATE irrigation_zones SET name='Zone linked', sync_version=2 WHERE id=1");
@@ -71,6 +78,17 @@ try {
 
   exec("INSERT INTO sync_history_dirty_keys(peer_node, table_name, row_key, changed_at) SELECT 'cloud', 'sentinel', 'sentinel', '2026-06-28T10:00:00.000Z' WHERE 0");
   exec("INSERT INTO device_data(id, deveui, recorded_at, swt_1) VALUES(101, 'A84041CAFECAFE01', '2026-06-28T10:00:00.000Z', 10.0)");
+  if (scalar("SELECT COUNT(*) FROM sync_outbox WHERE aggregate_type='DEVICE_DATA';") !== 1) {
+    throw new Error('linked device_data insert lost legacy durable outbox coverage');
+  }
+  exec("INSERT INTO chameleon_readings(id, deveui, recorded_at) VALUES(11, 'A84041CAFECAFE01', '2026-06-28T10:01:00.000Z')");
+  if (scalar("SELECT COUNT(*) FROM sync_outbox WHERE aggregate_type='CHAMELEON_READING';") !== 1) {
+    throw new Error('linked chameleon_readings insert lost legacy durable outbox coverage');
+  }
+  exec("INSERT INTO dendrometer_readings(id, deveui, position_um, recorded_at) VALUES(12, 'A84041CAFECAFE01', 1200.0, '2026-06-28T10:02:00.000Z')");
+  if (scalar("SELECT COUNT(*) FROM sync_outbox WHERE aggregate_type='DENDRO_READING';") !== 1) {
+    throw new Error('linked dendrometer_readings insert lost legacy durable outbox coverage');
+  }
   exec("UPDATE device_data SET swt_1=11.0 WHERE id=101");
   if (scalar("SELECT COUNT(*) FROM sync_history_dirty_keys WHERE table_name='device_data' AND row_key='DEVICE_DATA|0016C001F11715E2|101';") !== 1) {
     throw new Error('linked raw correction did not create dirty key');
@@ -78,8 +96,8 @@ try {
 
   exec('DELETE FROM sync_outbox');
   exec("INSERT INTO device_data(id, deveui, recorded_at) VALUES(202, 'A84041CAFECAFE01', '2026-06-28T11:00:00.000Z')");
-  if (scalar("SELECT COUNT(*) FROM sync_outbox WHERE aggregate_type='DEVICE_DATA';") !== 0) {
-    throw new Error('linked raw device_data insert still creates outbox row');
+  if (scalar("SELECT COUNT(*) FROM sync_outbox WHERE aggregate_type='DEVICE_DATA';") !== 1) {
+    throw new Error('linked raw device_data insert did not create legacy outbox row');
   }
 
   exec("INSERT INTO zone_daily_environment(zone_id, date, rainfall_mm, computed_at) VALUES(1, '2026-06-28', 2.5, '2026-06-28T10:00:00.000Z')");

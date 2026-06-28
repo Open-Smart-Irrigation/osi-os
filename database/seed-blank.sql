@@ -1197,6 +1197,172 @@ BEGIN
   );
 END;
 
+-- device_data → sync_outbox (insert)
+CREATE TRIGGER trg_dp_device_data_outbox_ai
+AFTER INSERT ON device_data
+FOR EACH ROW
+WHEN EXISTS (
+  SELECT 1 FROM sync_link_state
+   WHERE peer_node = 'cloud' AND linked = 1
+)
+BEGIN
+  INSERT INTO sync_outbox(
+    event_uuid, aggregate_type, aggregate_key, op, payload_json,
+    sync_version, occurred_at, gateway_device_eui
+  ) VALUES (
+    lower(hex(randomblob(16))),
+    'DEVICE_DATA',
+    COALESCE(NEW.deveui,'') || '|' || COALESCE(NEW.recorded_at,''),
+    'DEVICE_DATA_APPENDED',
+    json_object(
+      'device_eui',            NEW.deveui,
+      'device_name',           (SELECT name    FROM devices WHERE deveui=NEW.deveui AND deleted_at IS NULL),
+      'device_type',           (SELECT type_id FROM devices WHERE deveui=NEW.deveui AND deleted_at IS NULL),
+      'zone_id',               (SELECT irrigation_zone_id FROM devices WHERE deveui=NEW.deveui AND deleted_at IS NULL),
+      'zone_uuid',             (SELECT iz.zone_uuid FROM devices d LEFT JOIN irrigation_zones iz ON iz.id=d.irrigation_zone_id AND iz.deleted_at IS NULL WHERE d.deveui=NEW.deveui AND d.deleted_at IS NULL),
+      'gateway_device_eui',    COALESCE((SELECT gateway_device_eui FROM devices WHERE deveui=NEW.deveui AND deleted_at IS NULL),'0016C001F11715E2'),
+      'recorded_at',           NEW.recorded_at,
+      'swt_wm1',               NEW.swt_wm1,
+      'swt_wm2',               NEW.swt_wm2,
+      'swt_1',                 NEW.swt_1,
+      'swt_2',                 NEW.swt_2,
+      'swt_3',                 NEW.swt_3,
+      'light_lux',             NEW.light_lux,
+      'ambient_temperature',   NEW.ambient_temperature,
+      'relative_humidity',     NEW.relative_humidity,
+      'ext_temperature_c',     NEW.ext_temperature_c,
+      'bat_v',                 NEW.bat_v,
+      'adc_ch0v',              NEW.adc_ch0v,
+      'dendro_position_mm',    NEW.dendro_position_mm,
+      'dendro_valid',          NEW.dendro_valid,
+      'dendro_delta_mm',       NEW.dendro_delta_mm,
+      'dendro_stem_change_um', NEW.dendro_stem_change_um,
+      'adc_ch1v',              NEW.adc_ch1v,
+      'dendro_ratio',          NEW.dendro_ratio,
+      'dendro_mode_used',      NEW.dendro_mode_used,
+      'lsn50_mode_code',       NEW.lsn50_mode_code,
+      'lsn50_mode_label',      NEW.lsn50_mode_label,
+      'lsn50_mode_observed_at', NEW.lsn50_mode_observed_at,
+      'rain_count_cumulative', NEW.rain_count_cumulative,
+      'rain_tips_delta',       NEW.rain_tips_delta,
+      'rain_mm_delta',         NEW.rain_mm_delta,
+      'rain_mm_per_hour',      NEW.rain_mm_per_hour,
+      'rain_mm_per_10min',     NEW.rain_mm_per_10min,
+      'rain_mm_today',         NEW.rain_mm_today,
+      'rain_delta_status',     NEW.rain_delta_status,
+      'flow_count_cumulative', NEW.flow_count_cumulative,
+      'flow_pulses_delta',     NEW.flow_pulses_delta,
+      'flow_liters_delta',     NEW.flow_liters_delta,
+      'flow_liters_per_min',   NEW.flow_liters_per_min,
+      'flow_liters_per_10min', NEW.flow_liters_per_10min,
+      'flow_liters_today',     NEW.flow_liters_today,
+      'flow_delta_status',     NEW.flow_delta_status,
+      'counter_interval_seconds', NEW.counter_interval_seconds,
+      'barometric_pressure_hpa',  NEW.barometric_pressure_hpa,
+      'wind_speed_mps',        NEW.wind_speed_mps,
+      'wind_direction_deg',    NEW.wind_direction_deg,
+      'wind_gust_mps',         NEW.wind_gust_mps,
+      'uv_index',              NEW.uv_index,
+      'rain_gauge_cumulative_mm', NEW.rain_gauge_cumulative_mm,
+      'bat_pct',               NEW.bat_pct
+    ),
+    0,
+    strftime('%Y-%m-%dT%H:%M:%fZ','now'),
+    COALESCE((SELECT gateway_device_eui FROM devices WHERE deveui=NEW.deveui AND deleted_at IS NULL),'0016C001F11715E2')
+  );
+END;
+
+-- chameleon_readings → sync_outbox (insert)
+CREATE TRIGGER trg_dp_chameleon_readings_outbox_ai
+AFTER INSERT ON chameleon_readings
+FOR EACH ROW
+WHEN EXISTS (
+  SELECT 1 FROM sync_link_state
+   WHERE peer_node = 'cloud' AND linked = 1
+)
+BEGIN
+  INSERT INTO sync_outbox(
+    event_uuid, aggregate_type, aggregate_key, op, payload_json,
+    sync_version, occurred_at, gateway_device_eui
+  ) VALUES (
+    lower(hex(randomblob(16))),
+    'CHAMELEON_READING',
+    COALESCE(NEW.deveui,'') || '|' || COALESCE(NEW.recorded_at,''),
+    'CHAMELEON_READING_APPENDED',
+    json_object(
+      'device_eui',           NEW.deveui,
+      'recorded_at',          NEW.recorded_at,
+      'payload_version',      NEW.payload_version,
+      'status_flags',         NEW.status_flags,
+      'i2c_missing',          NEW.i2c_missing,
+      'timeout',              NEW.timeout,
+      'temp_fault',           NEW.temp_fault,
+      'id_fault',             NEW.id_fault,
+      'ch1_open',             NEW.ch1_open,
+      'ch2_open',             NEW.ch2_open,
+      'ch3_open',             NEW.ch3_open,
+      'temp_c',               NEW.temp_c,
+      'r1_ohm_comp',          NEW.r1_ohm_comp,
+      'r2_ohm_comp',          NEW.r2_ohm_comp,
+      'r3_ohm_comp',          NEW.r3_ohm_comp,
+      'r1_ohm_raw',           NEW.r1_ohm_raw,
+      'r2_ohm_raw',           NEW.r2_ohm_raw,
+      'r3_ohm_raw',           NEW.r3_ohm_raw,
+      'array_id',             NEW.array_id,
+      'adc_ch0v',             NEW.adc_ch0v,
+      'adc_ch1v',             NEW.adc_ch1v,
+      'adc_ch4v',             NEW.adc_ch4v,
+      'bat_v',                NEW.bat_v,
+      'payload_b64',          NEW.payload_b64,
+      'f_port',               NEW.f_port,
+      'f_cnt',                NEW.f_cnt,
+      'calibration_status',   NEW.calibration_status,
+      'zone_id',              (SELECT irrigation_zone_id FROM devices WHERE deveui=NEW.deveui AND deleted_at IS NULL),
+      'zone_uuid',            (SELECT iz.zone_uuid FROM devices d LEFT JOIN irrigation_zones iz ON iz.id=d.irrigation_zone_id AND iz.deleted_at IS NULL WHERE d.deveui=NEW.deveui AND d.deleted_at IS NULL),
+      'gateway_device_eui',   COALESCE((SELECT gateway_device_eui FROM devices WHERE deveui=NEW.deveui AND deleted_at IS NULL),'0016C001F11715E2')
+    ),
+    0,
+    strftime('%Y-%m-%dT%H:%M:%fZ','now'),
+    COALESCE((SELECT gateway_device_eui FROM devices WHERE deveui=NEW.deveui AND deleted_at IS NULL),'0016C001F11715E2')
+  );
+END;
+
+-- dendrometer_readings → sync_outbox (insert)
+CREATE TRIGGER trg_dp_dendro_readings_outbox_ai
+AFTER INSERT ON dendrometer_readings
+FOR EACH ROW
+WHEN EXISTS (
+  SELECT 1 FROM sync_link_state
+   WHERE peer_node = 'cloud' AND linked = 1
+)
+BEGIN
+  INSERT INTO sync_outbox(
+    event_uuid, aggregate_type, aggregate_key, op, payload_json,
+    sync_version, occurred_at, gateway_device_eui
+  ) VALUES (
+    lower(hex(randomblob(16))),
+    'DENDRO_READING',
+    COALESCE(NEW.deveui,'') || '|' || COALESCE(NEW.recorded_at,''),
+    'DENDRO_READING_APPENDED',
+    json_object(
+      'device_eui',     NEW.deveui,
+      'position_um',    NEW.position_um,
+      'adc_v',          NEW.adc_v,
+      'bat_v',          NEW.bat_v,
+      'is_valid',       NEW.is_valid,
+      'invalid_reason', NEW.invalid_reason,
+      'is_outlier',     NEW.is_outlier,
+      'recorded_at',    NEW.recorded_at,
+      'zone_id',        (SELECT irrigation_zone_id FROM devices WHERE deveui=NEW.deveui AND deleted_at IS NULL),
+      'zone_uuid',      (SELECT iz.zone_uuid FROM devices d LEFT JOIN irrigation_zones iz ON iz.id=d.irrigation_zone_id AND iz.deleted_at IS NULL WHERE d.deveui=NEW.deveui AND d.deleted_at IS NULL),
+      'gateway_device_eui', COALESCE((SELECT gateway_device_eui FROM devices WHERE deveui=NEW.deveui AND deleted_at IS NULL),'0016C001F11715E2')
+    ),
+    0,
+    strftime('%Y-%m-%dT%H:%M:%fZ','now'),
+    COALESCE((SELECT gateway_device_eui FROM devices WHERE deveui=NEW.deveui AND deleted_at IS NULL),'0016C001F11715E2')
+  );
+END;
+
 -- Raw-history correction dirty keys
 CREATE TRIGGER trg_sync_device_data_dirty_au
 AFTER UPDATE ON device_data
@@ -1444,6 +1610,10 @@ END;
 CREATE TRIGGER trg_dp_dendro_daily_outbox_ai
 AFTER INSERT ON dendrometer_daily
 FOR EACH ROW
+WHEN EXISTS (
+  SELECT 1 FROM sync_link_state
+   WHERE peer_node = 'cloud' AND linked = 1
+)
 BEGIN
   INSERT INTO sync_outbox(
     event_uuid, aggregate_type, aggregate_key, op, payload_json,
@@ -1504,6 +1674,10 @@ END;
 CREATE TRIGGER trg_dp_dendro_daily_outbox_au
 AFTER UPDATE ON dendrometer_daily
 FOR EACH ROW
+WHEN EXISTS (
+  SELECT 1 FROM sync_link_state
+   WHERE peer_node = 'cloud' AND linked = 1
+)
 BEGIN
   INSERT INTO sync_outbox(
     event_uuid, aggregate_type, aggregate_key, op, payload_json,
@@ -1564,6 +1738,10 @@ END;
 CREATE TRIGGER trg_dp_irrigation_events_outbox_ai
 AFTER INSERT ON irrigation_events
 FOR EACH ROW
+WHEN EXISTS (
+  SELECT 1 FROM sync_link_state
+   WHERE peer_node = 'cloud' AND linked = 1
+)
 BEGIN
   INSERT INTO sync_outbox(
     event_uuid, aggregate_type, aggregate_key, op, payload_json,
@@ -1597,6 +1775,10 @@ END;
 CREATE TRIGGER trg_dp_zone_env_outbox_ai
 AFTER INSERT ON zone_daily_environment
 FOR EACH ROW
+WHEN EXISTS (
+  SELECT 1 FROM sync_link_state
+   WHERE peer_node = 'cloud' AND linked = 1
+)
 BEGIN
   INSERT INTO sync_outbox(
     event_uuid, aggregate_type, aggregate_key, op, payload_json,
@@ -1626,6 +1808,10 @@ END;
 CREATE TRIGGER trg_dp_zone_env_outbox_au
 AFTER UPDATE ON zone_daily_environment
 FOR EACH ROW
+WHEN EXISTS (
+  SELECT 1 FROM sync_link_state
+   WHERE peer_node = 'cloud' AND linked = 1
+)
 BEGIN
   INSERT INTO sync_outbox(
     event_uuid, aggregate_type, aggregate_key, op, payload_json,
@@ -1655,6 +1841,10 @@ END;
 CREATE TRIGGER trg_dp_zone_recs_outbox_ai
 AFTER INSERT ON zone_daily_recommendations
 FOR EACH ROW
+WHEN EXISTS (
+  SELECT 1 FROM sync_link_state
+   WHERE peer_node = 'cloud' AND linked = 1
+)
 BEGIN
   INSERT INTO sync_outbox(
     event_uuid, aggregate_type, aggregate_key, op, payload_json,
@@ -1696,6 +1886,10 @@ END;
 CREATE TRIGGER trg_dp_zone_recs_outbox_au
 AFTER UPDATE ON zone_daily_recommendations
 FOR EACH ROW
+WHEN EXISTS (
+  SELECT 1 FROM sync_link_state
+   WHERE peer_node = 'cloud' AND linked = 1
+)
 BEGIN
   INSERT INTO sync_outbox(
     event_uuid, aggregate_type, aggregate_key, op, payload_json,
