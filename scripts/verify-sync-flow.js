@@ -1395,7 +1395,11 @@ expectIncludes('Build History Batch', "phase: 'shadow'", 'runs history sync in s
 expectIncludes('Build History Batch', 'hashVersion: 1', 'uses history hash v1');
 expectIncludes('Build History Batch', '/api/v1/sync/edge/history/batches', 'posts history batches to the v1 history endpoint');
 expectExcludes('Build History Batch', 'replace(//$/', 'malformed trailing slash normalizer in history sync builder');
+expectIncludes('Build History Batch', 'SELECT * FROM device_data WHERE id > ? ORDER BY id ASC LIMIT ?', 'uses id cursor for device_data history');
+expectIncludes('Build History Batch', 'helper.hashHistoryRow', 'hashes raw rows through shared helper');
+expectIncludes('Build History Batch', 'snapshot_high_id', 'captures raw backfill high-water mark');
 expectIncludes('POST History Batch', 'osiCloudHttp.requestJsonIpv4', 'uses the shared IPv4 cloud HTTP helper for history batches');
+expectIncludes('Mark History Batch ACK', "phase === 'shadow'", 'keeps raw cursor non-durable while shadowing');
 expectIncludes('Mark History Batch ACK', "flow.set('history_sync_v1_confirmed', true)", 'records successful history shadow confirmation');
 expectExcludes('Sync Init Schema + Triggers', '" + gateway + "', 'malformed literal gateway fallback SQL in sync triggers');
 expectExcludes('Sync Init Schema + Triggers', '\'" + gatewaySql + "\'', 'double-quoted gatewaySql fallback fragments in sync init SQL');

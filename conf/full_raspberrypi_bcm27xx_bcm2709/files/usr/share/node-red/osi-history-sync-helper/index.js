@@ -103,10 +103,20 @@ function cursorPatchFromResponse(response) {
   return { last_acked_key: String(response.ackedThroughKey), last_error: null, retry_count: 0 };
 }
 
+function isBackfillComplete(cursor) {
+  return cursor && cursor.snapshot_high_id != null && Number(cursor.last_acked_id || 0) >= Number(cursor.snapshot_high_id);
+}
+
+function batchPhase(cursor) {
+  return isBackfillComplete(cursor) ? 'tail' : 'backfill';
+}
+
 module.exports = {
   buildCanonicalColumns,
   hashHistoryRow,
   historyKey,
   nextRawQuery,
-  cursorPatchFromResponse
+  cursorPatchFromResponse,
+  isBackfillComplete,
+  batchPhase
 };
