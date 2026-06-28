@@ -59,6 +59,19 @@ try {
     throw new Error('linked structural update did not create outbox row');
   }
 
+  exec("INSERT INTO sync_history_dirty_keys(peer_node, table_name, row_key, changed_at) SELECT 'cloud', 'sentinel', 'sentinel', '2026-06-28T10:00:00.000Z' WHERE 0");
+  exec("INSERT INTO devices(deveui, name, type_id, user_id, irrigation_zone_id, created_at, updated_at, gateway_device_eui) VALUES('A84041CAFECAFE01', 'LSN50', 'DRAGINO_LSN50', 1, 1, '2026-06-28T10:00:00.000Z', '2026-06-28T10:00:00.000Z', '0016C001F11715E2')");
+  exec("INSERT INTO device_data(id, deveui, recorded_at, swt_1) VALUES(101, 'A84041CAFECAFE01', '2026-06-28T10:00:00.000Z', 10.0)");
+  exec("UPDATE device_data SET swt_1=11.0 WHERE id=101");
+  if (scalar("SELECT COUNT(*) FROM sync_history_dirty_keys WHERE table_name='device_data' AND row_key='DEVICE_DATA|0016C001F11715E2|101';") !== 1) {
+    throw new Error('linked raw correction did not create dirty key');
+  }
+
+  exec("INSERT INTO zone_daily_environment(zone_id, date, rainfall_mm, computed_at) VALUES(1, '2026-06-28', 2.5, '2026-06-28T10:00:00.000Z')");
+  if (scalar("SELECT COUNT(*) FROM sync_history_dirty_keys WHERE table_name='zone_daily_environment' AND row_key='ZONE_ENVIRONMENT|zone-1|2026-06-28';") !== 1) {
+    throw new Error('zone environment dirty key did not use zone_uuid');
+  }
+
   console.log('OK sync history schema');
 } finally {
   fs.rmSync(tmpDir, { recursive: true, force: true });

@@ -1184,6 +1184,247 @@ BEGIN
   );
 END;
 
+-- Raw-history correction dirty keys
+CREATE TRIGGER trg_sync_device_data_dirty_au
+AFTER UPDATE ON device_data
+FOR EACH ROW
+WHEN EXISTS (
+  SELECT 1 FROM sync_link_state
+   WHERE peer_node = 'cloud' AND linked = 1
+)
+BEGIN
+  INSERT INTO sync_history_dirty_keys(peer_node, table_name, row_key, change_kind, source_row_id, changed_at)
+  VALUES(
+    'cloud',
+    'device_data',
+    'DEVICE_DATA|' || COALESCE((SELECT gateway_device_eui FROM devices WHERE deveui = NEW.deveui AND deleted_at IS NULL), (SELECT gateway_device_eui FROM sync_link_state WHERE peer_node = 'cloud'), '') || '|' || NEW.id,
+    'correction',
+    NEW.id,
+    strftime('%Y-%m-%dT%H:%M:%fZ','now')
+  )
+  ON CONFLICT(peer_node, table_name, row_key) DO UPDATE SET
+    change_kind = excluded.change_kind,
+    source_row_id = excluded.source_row_id,
+    changed_at = excluded.changed_at,
+    status = 'pending',
+    attempts = 0,
+    next_attempt_at = NULL,
+    last_error = NULL;
+END;
+
+CREATE TRIGGER trg_sync_chameleon_readings_dirty_au
+AFTER UPDATE ON chameleon_readings
+FOR EACH ROW
+WHEN EXISTS (
+  SELECT 1 FROM sync_link_state
+   WHERE peer_node = 'cloud' AND linked = 1
+)
+BEGIN
+  INSERT INTO sync_history_dirty_keys(peer_node, table_name, row_key, change_kind, source_row_id, changed_at)
+  VALUES(
+    'cloud',
+    'chameleon_readings',
+    'CHAMELEON_READING|' || COALESCE((SELECT gateway_device_eui FROM devices WHERE deveui = NEW.deveui AND deleted_at IS NULL), (SELECT gateway_device_eui FROM sync_link_state WHERE peer_node = 'cloud'), '') || '|' || NEW.id,
+    'correction',
+    NEW.id,
+    strftime('%Y-%m-%dT%H:%M:%fZ','now')
+  )
+  ON CONFLICT(peer_node, table_name, row_key) DO UPDATE SET
+    change_kind = excluded.change_kind,
+    source_row_id = excluded.source_row_id,
+    changed_at = excluded.changed_at,
+    status = 'pending',
+    attempts = 0,
+    next_attempt_at = NULL,
+    last_error = NULL;
+END;
+
+CREATE TRIGGER trg_sync_dendro_readings_dirty_au
+AFTER UPDATE ON dendrometer_readings
+FOR EACH ROW
+WHEN EXISTS (
+  SELECT 1 FROM sync_link_state
+   WHERE peer_node = 'cloud' AND linked = 1
+)
+BEGIN
+  INSERT INTO sync_history_dirty_keys(peer_node, table_name, row_key, change_kind, source_row_id, changed_at)
+  VALUES(
+    'cloud',
+    'dendrometer_readings',
+    'DENDRO_READING|' || COALESCE((SELECT gateway_device_eui FROM devices WHERE deveui = NEW.deveui AND deleted_at IS NULL), (SELECT gateway_device_eui FROM sync_link_state WHERE peer_node = 'cloud'), '') || '|' || NEW.id,
+    'correction',
+    NEW.id,
+    strftime('%Y-%m-%dT%H:%M:%fZ','now')
+  )
+  ON CONFLICT(peer_node, table_name, row_key) DO UPDATE SET
+    change_kind = excluded.change_kind,
+    source_row_id = excluded.source_row_id,
+    changed_at = excluded.changed_at,
+    status = 'pending',
+    attempts = 0,
+    next_attempt_at = NULL,
+    last_error = NULL;
+END;
+
+-- Derived-history dirty keys
+CREATE TRIGGER trg_sync_zone_env_dirty_ai
+AFTER INSERT ON zone_daily_environment
+FOR EACH ROW
+WHEN EXISTS (
+  SELECT 1 FROM sync_link_state
+   WHERE peer_node = 'cloud' AND linked = 1
+)
+BEGIN
+  INSERT INTO sync_history_dirty_keys(peer_node, table_name, row_key, change_kind, changed_at)
+  VALUES(
+    'cloud',
+    'zone_daily_environment',
+    'ZONE_ENVIRONMENT|' || COALESCE((SELECT zone_uuid FROM irrigation_zones WHERE id = NEW.zone_id AND deleted_at IS NULL), '') || '|' || NEW.date,
+    'upsert',
+    strftime('%Y-%m-%dT%H:%M:%fZ','now')
+  )
+  ON CONFLICT(peer_node, table_name, row_key) DO UPDATE SET
+    change_kind = excluded.change_kind,
+    changed_at = excluded.changed_at,
+    status = 'pending',
+    attempts = 0,
+    next_attempt_at = NULL,
+    last_error = NULL;
+END;
+
+CREATE TRIGGER trg_sync_zone_env_dirty_au
+AFTER UPDATE ON zone_daily_environment
+FOR EACH ROW
+WHEN EXISTS (
+  SELECT 1 FROM sync_link_state
+   WHERE peer_node = 'cloud' AND linked = 1
+)
+BEGIN
+  INSERT INTO sync_history_dirty_keys(peer_node, table_name, row_key, change_kind, changed_at)
+  VALUES(
+    'cloud',
+    'zone_daily_environment',
+    'ZONE_ENVIRONMENT|' || COALESCE((SELECT zone_uuid FROM irrigation_zones WHERE id = NEW.zone_id AND deleted_at IS NULL), '') || '|' || NEW.date,
+    'upsert',
+    strftime('%Y-%m-%dT%H:%M:%fZ','now')
+  )
+  ON CONFLICT(peer_node, table_name, row_key) DO UPDATE SET
+    change_kind = excluded.change_kind,
+    changed_at = excluded.changed_at,
+    status = 'pending',
+    attempts = 0,
+    next_attempt_at = NULL,
+    last_error = NULL;
+END;
+
+CREATE TRIGGER trg_sync_zone_recs_dirty_ai
+AFTER INSERT ON zone_daily_recommendations
+FOR EACH ROW
+WHEN EXISTS (
+  SELECT 1 FROM sync_link_state
+   WHERE peer_node = 'cloud' AND linked = 1
+)
+BEGIN
+  INSERT INTO sync_history_dirty_keys(peer_node, table_name, row_key, change_kind, source_row_id, changed_at)
+  VALUES(
+    'cloud',
+    'zone_daily_recommendations',
+    'ZONE_RECOMMENDATION|' || COALESCE((SELECT zone_uuid FROM irrigation_zones WHERE id = NEW.zone_id AND deleted_at IS NULL), '') || '|' || NEW.date,
+    'upsert',
+    NEW.id,
+    strftime('%Y-%m-%dT%H:%M:%fZ','now')
+  )
+  ON CONFLICT(peer_node, table_name, row_key) DO UPDATE SET
+    change_kind = excluded.change_kind,
+    source_row_id = excluded.source_row_id,
+    changed_at = excluded.changed_at,
+    status = 'pending',
+    attempts = 0,
+    next_attempt_at = NULL,
+    last_error = NULL;
+END;
+
+CREATE TRIGGER trg_sync_zone_recs_dirty_au
+AFTER UPDATE ON zone_daily_recommendations
+FOR EACH ROW
+WHEN EXISTS (
+  SELECT 1 FROM sync_link_state
+   WHERE peer_node = 'cloud' AND linked = 1
+)
+BEGIN
+  INSERT INTO sync_history_dirty_keys(peer_node, table_name, row_key, change_kind, source_row_id, changed_at)
+  VALUES(
+    'cloud',
+    'zone_daily_recommendations',
+    'ZONE_RECOMMENDATION|' || COALESCE((SELECT zone_uuid FROM irrigation_zones WHERE id = NEW.zone_id AND deleted_at IS NULL), '') || '|' || NEW.date,
+    'upsert',
+    NEW.id,
+    strftime('%Y-%m-%dT%H:%M:%fZ','now')
+  )
+  ON CONFLICT(peer_node, table_name, row_key) DO UPDATE SET
+    change_kind = excluded.change_kind,
+    source_row_id = excluded.source_row_id,
+    changed_at = excluded.changed_at,
+    status = 'pending',
+    attempts = 0,
+    next_attempt_at = NULL,
+    last_error = NULL;
+END;
+
+CREATE TRIGGER trg_sync_dendro_daily_dirty_ai
+AFTER INSERT ON dendrometer_daily
+FOR EACH ROW
+WHEN EXISTS (
+  SELECT 1 FROM sync_link_state
+   WHERE peer_node = 'cloud' AND linked = 1
+)
+BEGIN
+  INSERT INTO sync_history_dirty_keys(peer_node, table_name, row_key, change_kind, source_row_id, changed_at)
+  VALUES(
+    'cloud',
+    'dendrometer_daily',
+    'DENDRO_DAILY|' || NEW.deveui || '|' || NEW.date,
+    'upsert',
+    NEW.id,
+    strftime('%Y-%m-%dT%H:%M:%fZ','now')
+  )
+  ON CONFLICT(peer_node, table_name, row_key) DO UPDATE SET
+    change_kind = excluded.change_kind,
+    source_row_id = excluded.source_row_id,
+    changed_at = excluded.changed_at,
+    status = 'pending',
+    attempts = 0,
+    next_attempt_at = NULL,
+    last_error = NULL;
+END;
+
+CREATE TRIGGER trg_sync_dendro_daily_dirty_au
+AFTER UPDATE ON dendrometer_daily
+FOR EACH ROW
+WHEN EXISTS (
+  SELECT 1 FROM sync_link_state
+   WHERE peer_node = 'cloud' AND linked = 1
+)
+BEGIN
+  INSERT INTO sync_history_dirty_keys(peer_node, table_name, row_key, change_kind, source_row_id, changed_at)
+  VALUES(
+    'cloud',
+    'dendrometer_daily',
+    'DENDRO_DAILY|' || NEW.deveui || '|' || NEW.date,
+    'upsert',
+    NEW.id,
+    strftime('%Y-%m-%dT%H:%M:%fZ','now')
+  )
+  ON CONFLICT(peer_node, table_name, row_key) DO UPDATE SET
+    change_kind = excluded.change_kind,
+    source_row_id = excluded.source_row_id,
+    changed_at = excluded.changed_at,
+    status = 'pending',
+    attempts = 0,
+    next_attempt_at = NULL,
+    last_error = NULL;
+END;
+
 -- device_data → sync_outbox
 CREATE TRIGGER trg_dp_device_data_outbox_ai
 AFTER INSERT ON device_data

@@ -1367,6 +1367,21 @@ for (const triggerName of [
   expectFileIncludes('seed-blank.sql', seedSqlSource, triggerName, `defines ${triggerName}`);
 }
 expectFileIncludes('seed-blank.sql', seedSqlSource, 'sync_link_state', 'link-gates sync triggers');
+for (const triggerName of [
+  'trg_sync_device_data_dirty_au',
+  'trg_sync_chameleon_readings_dirty_au',
+  'trg_sync_dendro_readings_dirty_au',
+  'trg_sync_zone_env_dirty_ai',
+  'trg_sync_zone_env_dirty_au',
+  'trg_sync_zone_recs_dirty_ai',
+  'trg_sync_zone_recs_dirty_au',
+  'trg_sync_dendro_daily_dirty_ai',
+  'trg_sync_dendro_daily_dirty_au',
+]) {
+  expectIncludes('Sync Init Schema + Triggers', triggerName, `creates ${triggerName} at runtime`);
+  expectFileIncludes('seed-blank.sql', seedSqlSource, triggerName, `defines ${triggerName}`);
+}
+expectIncludes('Sync Init Schema + Triggers', 'sync_history_dirty_keys(peer_node, table_name, row_key', 'records history dirty keys at runtime');
 expectIncludes('Sync Init Schema + Triggers', 'SELECT name FROM devices WHERE deveui = NEW.deveui AND deleted_at IS NULL', 'ignores deleted devices when mirroring device-data names into the outbox');
 expectIncludes('Sync Init Schema + Triggers', 'SELECT type_id FROM devices WHERE deveui = NEW.deveui AND deleted_at IS NULL', 'ignores deleted devices when mirroring device-data types into the outbox');
 expectIncludes('Sync Init Schema + Triggers', 'SELECT irrigation_zone_id FROM devices WHERE deveui = NEW.deveui AND deleted_at IS NULL', 'ignores deleted devices when mirroring device-data zone bindings into the outbox');
