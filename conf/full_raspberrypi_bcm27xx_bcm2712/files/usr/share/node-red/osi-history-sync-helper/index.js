@@ -111,6 +111,26 @@ function batchPhase(cursor) {
   return isBackfillComplete(cursor) ? 'tail' : 'backfill';
 }
 
+function shouldApplyDurableAck(batch, capabilities) {
+  return batch &&
+    batch.phase !== 'shadow' &&
+    capabilities &&
+    capabilities.history_mirror_write_v1_confirmed === true;
+}
+
+function segmentKey(tableName, row) {
+  if (tableName === 'device_data' || tableName === 'chameleon_readings' || tableName === 'dendrometer_readings') {
+    return `${row.deveui}|${String(row.recorded_at).slice(0, 10)}`;
+  }
+  if (tableName === 'zone_daily_environment' || tableName === 'zone_daily_recommendations') {
+    return `${row.zone_uuid}|${row.date}`;
+  }
+  if (tableName === 'dendrometer_daily') {
+    return `${row.deveui}|${row.date}`;
+  }
+  throw new Error(`unsupported segment table ${tableName}`);
+}
+
 module.exports = {
   buildCanonicalColumns,
   hashHistoryRow,
@@ -118,5 +138,7 @@ module.exports = {
   nextRawQuery,
   cursorPatchFromResponse,
   isBackfillComplete,
-  batchPhase
+  batchPhase,
+  shouldApplyDurableAck,
+  segmentKey
 };

@@ -1399,8 +1399,14 @@ expectIncludes('Build History Batch', 'SELECT * FROM device_data WHERE id > ? OR
 expectIncludes('Build History Batch', 'helper.hashHistoryRow', 'hashes raw rows through shared helper');
 expectIncludes('Build History Batch', 'snapshot_high_id', 'captures raw backfill high-water mark');
 expectIncludes('POST History Batch', 'osiCloudHttp.requestJsonIpv4', 'uses the shared IPv4 cloud HTTP helper for history batches');
-expectIncludes('Mark History Batch ACK', "phase === 'shadow'", 'keeps raw cursor non-durable while shadowing');
+expectIncludes('Mark History Batch ACK', '!durableHistoryAck', 'keeps raw cursor non-durable while shadowing');
+expectIncludes('Mark History Batch ACK', 'helper.shouldApplyDurableAck', 'uses helper gate before applying durable history ACKs');
+expectIncludes('Mark History Batch ACK', 'history_mirror_write_v1_confirmed', 'durable ACK requires confirmed server mirror writes');
+expectIncludes('Mark History Batch ACK', 'ackedThroughId', 'history batch marker handles explicit ACK before raw trigger removal');
 expectIncludes('Mark History Batch ACK', "flow.set('history_sync_v1_confirmed', true)", 'records successful history shadow confirmation');
+expectIncludes('Build History Manifest', 'SELECT table_name, segment_key, hash_version, canonical_row_count,', 'builds history manifests from cached segments');
+expectIncludes('Build History Manifest', '/api/v1/sync/edge/history/manifests', 'posts history manifests to the v1 manifest endpoint');
+expectFileIncludes('seed-blank.sql', seedSqlSource, 'trg_sync_device_data_dirty_au', 'raw correction dirty-key trigger exists before raw trigger removal');
 expectExcludes('Sync Init Schema + Triggers', '" + gateway + "', 'malformed literal gateway fallback SQL in sync triggers');
 expectExcludes('Sync Init Schema + Triggers', '\'" + gatewaySql + "\'', 'double-quoted gatewaySql fallback fragments in sync init SQL');
 const migrationPreflightNodes = ['Build Cloud Bootstrap', 'Build Edge Event Batch', 'Build Pending Command Pull', 'Run Force Sync'];

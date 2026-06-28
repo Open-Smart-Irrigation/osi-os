@@ -5937,7 +5937,7 @@
     "type": "function",
     "z": "93b1537a596e0e6d",
     "name": "Mark History Batch ACK",
-    "func": "return (async()=>{\nconst helper = require('/usr/share/node-red/osi-history-sync-helper');\nconst _db = new osiDb.Database('/data/db/farming.db');\nconst run = (sql, params = []) => new Promise((res,rej) => _db.run(sql, params, (e) => e?rej(e):res()));\nconst close = () => new Promise(res => _db.close(() => res()));\nfunction setSyncState(patch) {\n  const current = flow.get('sync_state') || {};\n  flow.set('sync_state', Object.assign({}, current, patch));\n}\nconst now = new Date().toISOString();\nconst batch = msg._historyBatch || {};\nconst tableName = batch.tableName || msg.historyTable || 'device_data';\nconst phase = batch.phase || 'shadow';\ntry {\n  if (!msg.statusCode || msg.statusCode < 200 || msg.statusCode >= 300) {\n    const message = msg.error && msg.error.message ? msg.error.message : 'History batch delivery failed';\n    await run(\"UPDATE sync_history_cursors SET retry_count=retry_count+1, last_error=?, last_batch_id=?, last_batch_at=? WHERE peer_node='cloud' AND table_name=?\", [message, batch.batchId || null, now, tableName]);\n    setSyncState({ lastHistorySyncError: { at: now, source: 'history-batch', message, statusCode: Number(msg.statusCode || 0) } });\n    await close();\n    return null;\n  }\n  const payload = msg.payload && typeof msg.payload === 'object' ? msg.payload : {};\n  const patch = phase === 'shadow' ? { last_error: null, retry_count: 0 } : helper.cursorPatchFromResponse(payload);\n  await run(\"UPDATE sync_history_cursors SET last_batch_id=?, last_batch_at=?, last_error=?, retry_count=? WHERE peer_node='cloud' AND table_name=?\", [batch.batchId || payload.batchId || null, now, patch.last_error || null, Number(patch.retry_count || 0), tableName]);\n  setSyncState({\n    lastHistoryShadowSyncAt: now,\n    lastHistoryShadowTable: tableName,\n    lastHistoryShadowBatchId: batch.batchId || payload.batchId || null,\n    lastHistoryShadowRowCount: Number(batch.rowCount || 0),\n    lastHistoryShadowAccepted: payload.shadowAccepted !== false,\n    lastHistorySyncError: null,\n    updatedAt: now\n  });\n  flow.set('history_sync_v1_confirmed', true);\n  await close();\n  return null;\n} catch (e) {\n  try { await close(); } catch (_) {}\n  setSyncState({ lastHistorySyncError: { at: now, source: 'history-mark', message: String(e.message || e) } });\n  node.warn('History batch mark failed: ' + e.message);\n  return null;\n}\n})();",
+    "func": "return (async()=>{\nconst helper = require('/usr/share/node-red/osi-history-sync-helper');\nconst _db = new osiDb.Database('/data/db/farming.db');\nconst run = (sql, params = []) => new Promise((res,rej) => _db.run(sql, params, (e) => e?rej(e):res()));\nconst close = () => new Promise(res => _db.close(() => res()));\nfunction setSyncState(patch) {\n  const current = flow.get('sync_state') || {};\n  flow.set('sync_state', Object.assign({}, current, patch));\n}\nconst now = new Date().toISOString();\nconst batch = msg._historyBatch || {};\nconst tableName = batch.tableName || msg.historyTable || 'device_data';\nconst responsePayload = msg.payload && typeof msg.payload === 'object' ? msg.payload : {};\nconst phase = responsePayload.phase || msg.historyPhase || batch.phase || 'shadow';\ntry {\n  if (!msg.statusCode || msg.statusCode < 200 || msg.statusCode >= 300) {\n    const message = msg.error && msg.error.message ? msg.error.message : 'History batch delivery failed';\n    await run(\"UPDATE sync_history_cursors SET retry_count=retry_count+1, last_error=?, last_batch_id=?, last_batch_at=? WHERE peer_node='cloud' AND table_name=?\", [message, batch.batchId || null, now, tableName]);\n    setSyncState({ lastHistorySyncError: { at: now, source: 'history-batch', message, statusCode: Number(msg.statusCode || 0) } });\n    await close();\n    return null;\n  }\n  const durableHistoryAck = helper.shouldApplyDurableAck(\n    { phase: responsePayload.phase || msg.historyPhase || batch.phase },\n    { history_mirror_write_v1_confirmed: !!flow.get('history_mirror_write_v1_confirmed') }\n  );\n  if (!durableHistoryAck) {\n    // Shadow responses update observability fields only; they never advance last_acked_id.\n    await run(\"UPDATE sync_history_cursors SET last_batch_id=?, last_batch_at=?, last_error=NULL, retry_count=0 WHERE peer_node='cloud' AND table_name=?\", [batch.batchId || responsePayload.batchId || null, now, tableName]);\n    setSyncState({\n      lastHistoryShadowSyncAt: now,\n      lastHistoryShadowTable: tableName,\n      lastHistoryShadowBatchId: batch.batchId || responsePayload.batchId || null,\n      lastHistoryShadowRowCount: Number(batch.rowCount || 0),\n      lastHistoryShadowAccepted: responsePayload.shadowAccepted !== false,\n      lastHistorySyncError: null,\n      updatedAt: now\n    });\n    flow.set('history_sync_v1_confirmed', true);\n    await close();\n    return null;\n  }\n  const patch = helper.cursorPatchFromResponse(responsePayload);\n  if (patch.last_acked_id != null) {\n    await run(\"UPDATE sync_history_cursors SET last_acked_id=?, last_batch_id=?, last_batch_at=?, last_error=?, retry_count=? WHERE peer_node='cloud' AND table_name=?\", [patch.last_acked_id, batch.batchId || responsePayload.batchId || null, now, patch.last_error || null, Number(patch.retry_count || 0), tableName]);\n  } else if (patch.last_acked_key != null) {\n    await run(\"UPDATE sync_history_cursors SET last_acked_key=?, last_batch_id=?, last_batch_at=?, last_error=?, retry_count=? WHERE peer_node='cloud' AND table_name=?\", [patch.last_acked_key, batch.batchId || responsePayload.batchId || null, now, patch.last_error || null, Number(patch.retry_count || 0), tableName]);\n  } else {\n    await run(\"UPDATE sync_history_cursors SET last_batch_id=?, last_batch_at=?, last_error=?, retry_count=retry_count+1 WHERE peer_node='cloud' AND table_name=?\", [batch.batchId || responsePayload.batchId || null, now, patch.last_error || 'missing ACK boundary', tableName]);\n  }\n  setSyncState({\n    lastHistoryDurableAckAt: now,\n    lastHistoryAckedThroughId: responsePayload.ackedThroughId || null,\n    lastHistoryAckedThroughKey: responsePayload.ackedThroughKey || null,\n    lastHistorySyncError: patch.last_error ? { at: now, source: 'history-ack', message: patch.last_error } : null,\n    updatedAt: now\n  });\n  flow.set('history_sync_v1_confirmed', true);\n  await close();\n  return null;\n} catch (e) {\n  try { await close(); } catch (_) {}\n  setSyncState({ lastHistorySyncError: { at: now, source: 'history-mark', message: String(e.message || e) } });\n  node.warn('History batch mark failed: ' + e.message);\n  return null;\n}\n})();",
     "outputs": 1,
     "noerr": 0,
     "initialize": "",
@@ -5950,6 +5950,96 @@
     ],
     "x": 970,
     "y": 1180,
+    "wires": [
+      []
+    ]
+  },
+  {
+    "id": "sync-history-manifest-inject",
+    "type": "inject",
+    "z": "93b1537a596e0e6d",
+    "name": "Sync History Manifest",
+    "props": [
+      {
+        "p": "payload"
+      }
+    ],
+    "repeat": "300",
+    "crontab": "",
+    "once": true,
+    "onceDelay": "35",
+    "topic": "",
+    "payload": "",
+    "payloadType": "date",
+    "x": 180,
+    "y": 1240,
+    "wires": [
+      [
+        "sync-history-manifest-build"
+      ]
+    ]
+  },
+  {
+    "id": "sync-history-manifest-build",
+    "type": "function",
+    "z": "93b1537a596e0e6d",
+    "name": "Build History Manifest",
+    "func": "return (async()=>{\nconst _db = new osiDb.Database('/data/db/farming.db');\nconst q = (sql, params = []) => new Promise((res,rej) => _db.all(sql, params, (e,r) => e?rej(e):res(r||[])));\nconst close = () => new Promise(res => _db.close(() => res()));\nfunction normalizeCloudServerUrl(value) {\n  return String(value || '').trim().replace(/\\/$/, '');\n}\nfunction normalizeGatewayDeviceEui(value) {\n  const raw = String(value || '').trim().replace(/[^0-9a-fA-F]/g, '').toUpperCase();\n  if (!raw) return '';\n  if (raw.length === 16) return raw === '0101010101010101' ? '' : raw;\n  if (raw.length === 12) return raw.slice(0, 6) + 'FFFE' + raw.slice(6);\n  return '';\n}\nfunction setSyncState(patch) {\n  const current = flow.get('sync_state') || {};\n  flow.set('sync_state', Object.assign({}, current, patch));\n}\ntry {\n  const linkRows = await q(\"SELECT linked, server_url, gateway_device_eui FROM sync_link_state WHERE peer_node='cloud' LIMIT 1\");\n  const linkState = linkRows[0] || {};\n  const targetRows = await q(\"SELECT server_url, server_sync_token FROM users WHERE server_url IS NOT NULL AND server_url <> '' ORDER BY server_linked_at DESC, id DESC LIMIT 1\");\n  const target = targetRows[0] || {};\n  const linked = !!flow.get('account_linked') || Number(linkState.linked || 0) === 1;\n  const serverUrl = normalizeCloudServerUrl(linkState.server_url || target.server_url);\n  const syncToken = String(target.server_sync_token || env.get('CLOUD_SYNC_TOKEN') || env.get('SYNC_TOKEN') || '').trim();\n  const gatewayEui = normalizeGatewayDeviceEui(linkState.gateway_device_eui || env.get('DEVICE_EUI'));\n  if (!linked || !gatewayEui || !serverUrl) {\n    await close();\n    return null;\n  }\n  const rows = await q([\n    'SELECT table_name, segment_key, hash_version, canonical_row_count,',\n    '       syncable_row_count, quarantined_count, syncable_payload_hash',\n    'FROM sync_history_segments',\n    \"WHERE peer_node = 'cloud'\",\n    'ORDER BY table_name, segment_key',\n    'LIMIT 500'\n  ].join('\\\\n'));\n  msg.method = 'POST';\n  msg.url = serverUrl + '/api/v1/sync/edge/history/manifests';\n  msg.headers = { 'Content-Type': 'application/json', 'X-OSI-History-Protocol': '1' };\n  if (syncToken) msg.headers.Authorization = 'Bearer ' + syncToken;\n  msg.payload = {\n    gatewayDeviceEui: gatewayEui,\n    generatedAt: new Date().toISOString(),\n    segments: rows.map((row) => ({\n      tableName: row.table_name,\n      segmentKey: row.segment_key,\n      hashVersion: Number(row.hash_version),\n      canonicalRowCount: Number(row.canonical_row_count),\n      syncableRowCount: Number(row.syncable_row_count),\n      quarantinedCount: Number(row.quarantined_count),\n      syncablePayloadHash: row.syncable_payload_hash\n    }))\n  };\n  msg.historyManifestSegmentCount = rows.length;\n  await close();\n  return msg;\n} catch (e) {\n  try { await close(); } catch (_) {}\n  setSyncState({ lastHistoryManifestError: { at: new Date().toISOString(), message: String(e.message || e) } });\n  node.warn('History manifest build failed: ' + e.message);\n  return null;\n}\n})();",
+    "outputs": 1,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [
+      {
+        "var": "osiDb",
+        "module": "osi-db-helper"
+      }
+    ],
+    "x": 430,
+    "y": 1240,
+    "wires": [
+      [
+        "sync-history-manifest-http"
+      ]
+    ]
+  },
+  {
+    "id": "sync-history-manifest-http",
+    "type": "function",
+    "z": "93b1537a596e0e6d",
+    "name": "POST History Manifest",
+    "func": "return (async () => {\n  if (!msg || !msg.url) return null;\n  try {\n    const result = await osiCloudHttp.requestJsonIpv4({\n      method: msg.method || 'POST',\n      url: msg.url,\n      headers: msg.headers || {},\n      payload: msg.payload,\n      timeoutMs: Number(env.get('OSI_CLOUD_REST_TIMEOUT_MS') || 30000) || 30000\n    });\n    msg.statusCode = result.statusCode;\n    msg.headers = result.headers || {};\n    msg.payload = result.payload;\n    msg._cloudRestIpv4 = result.diagnostics;\n    return msg;\n  } catch (error) {\n    msg.statusCode = 0;\n    msg.error = { message: String(error.message || error), code: error.code || null };\n    msg.payload = { error: 'History manifest REST IPv4 request failed', detail: String(error.message || error), code: error.code || null };\n    return msg;\n  }\n})();",
+    "outputs": 1,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [
+      {
+        "var": "osiCloudHttp",
+        "module": "osi-cloud-http"
+      }
+    ],
+    "x": 710,
+    "y": 1240,
+    "wires": [
+      [
+        "sync-history-manifest-mark"
+      ]
+    ]
+  },
+  {
+    "id": "sync-history-manifest-mark",
+    "type": "function",
+    "z": "93b1537a596e0e6d",
+    "name": "Mark History Manifest ACK",
+    "func": "return (async()=>{\nfunction setSyncState(patch) {\n  const current = flow.get('sync_state') || {};\n  flow.set('sync_state', Object.assign({}, current, patch));\n}\nconst now = new Date().toISOString();\nif (!msg.statusCode || msg.statusCode < 200 || msg.statusCode >= 300) {\n  setSyncState({ lastHistoryManifestError: { at: now, statusCode: Number(msg.statusCode || 0), message: msg.error && msg.error.message ? msg.error.message : 'History manifest delivery failed' } });\n  return null;\n}\nsetSyncState({\n  lastHistoryManifestAt: now,\n  lastHistoryManifestSegmentCount: Number(msg.historyManifestSegmentCount || 0),\n  lastHistoryManifestError: null,\n  updatedAt: now\n});\nreturn null;\n})();",
+    "outputs": 1,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 990,
+    "y": 1240,
     "wires": [
       []
     ]

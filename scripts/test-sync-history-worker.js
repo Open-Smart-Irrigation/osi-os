@@ -38,4 +38,11 @@ assert.deepStrictEqual(helper.cursorPatchFromResponse({
 assert.strictEqual(helper.isBackfillComplete({ snapshot_high_id: 123, last_acked_id: 123 }), true);
 assert.strictEqual(helper.isBackfillComplete({ snapshot_high_id: 124, last_acked_id: 123 }), false);
 
+assert.strictEqual(helper.shouldApplyDurableAck({ phase: 'shadow' }, { history_mirror_write_v1_confirmed: true }), false);
+assert.strictEqual(helper.shouldApplyDurableAck({ phase: 'backfill' }, { history_mirror_write_v1_confirmed: false }), false);
+assert.strictEqual(helper.shouldApplyDurableAck({ phase: 'backfill' }, { history_mirror_write_v1_confirmed: true }), true);
+
+const segment = helper.segmentKey('device_data', { deveui: 'A84041CAFECAFE01', recorded_at: '2026-06-28T10:00:00.000Z' });
+assert.strictEqual(segment, 'A84041CAFECAFE01|2026-06-28');
+
 console.log('OK sync history worker helper');
