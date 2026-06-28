@@ -90,17 +90,25 @@ function nextRawQuery(tableName) {
 }
 
 function cursorPatchFromResponse(response) {
-  const first = Array.isArray(response.results) ? response.results[0] : null;
-  if (first && first.status === 'REJECTED_PERMANENT') {
-    return { last_error: `permanent: ${first.reason || 'rejected'}`, next_attempt_at: '9999-12-31T00:00:00.000Z' };
+  const results = Array.isArray(response.results) ? response.results : [];
+  const permanent = results.find((result) => result && result.status === 'REJECTED_PERMANENT');
+  const patch = {};
+  if (response.ackedThroughId != null) {
+    patch.last_acked_id = Number(response.ackedThroughId);
+  } else if (response.ackedThroughKey != null) {
+    patch.last_acked_key = String(response.ackedThroughKey);
+  }
+  if (permanent) {
+    patch.last_error = `permanent: ${permanent.reason || 'rejected'}`;
+    patch.next_attempt_at = '9999-12-31T00:00:00.000Z';
+    return patch;
   }
   if (response.ackedThroughId == null && response.ackedThroughKey == null) {
     return { last_error: 'missing ACK boundary' };
   }
-  if (response.ackedThroughId != null) {
-    return { last_acked_id: Number(response.ackedThroughId), last_error: null, retry_count: 0 };
-  }
-  return { last_acked_key: String(response.ackedThroughKey), last_error: null, retry_count: 0 };
+  patch.last_error = null;
+  patch.retry_count = 0;
+  return patch;
 }
 
 function isBackfillComplete(cursor) {

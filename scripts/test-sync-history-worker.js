@@ -35,6 +35,18 @@ assert.deepStrictEqual(helper.cursorPatchFromResponse({
   results: [{ historyKey: 'DEVICE_DATA|0016C001F11715E2|124', status: 'REJECTED_PERMANENT', reason: 'unsupported_hash_version' }]
 }), { last_error: 'permanent: unsupported_hash_version', next_attempt_at: '9999-12-31T00:00:00.000Z' });
 
+assert.deepStrictEqual(helper.cursorPatchFromResponse({
+  ackedThroughId: 123,
+  results: [
+    { historyKey: 'DEVICE_DATA|0016C001F11715E2|123', status: 'APPLIED' },
+    { historyKey: 'DEVICE_DATA|0016C001F11715E2|124', status: 'REJECTED_PERMANENT', reason: 'hash_mismatch' }
+  ]
+}), {
+  last_acked_id: 123,
+  last_error: 'permanent: hash_mismatch',
+  next_attempt_at: '9999-12-31T00:00:00.000Z'
+});
+
 assert.strictEqual(helper.isBackfillComplete({ snapshot_high_id: 123, last_acked_id: 123 }), true);
 assert.strictEqual(helper.isBackfillComplete({ snapshot_high_id: 124, last_acked_id: 123 }), false);
 

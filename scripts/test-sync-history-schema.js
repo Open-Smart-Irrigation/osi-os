@@ -45,6 +45,11 @@ try {
     if (!names.has(name)) throw new Error(`missing ${name}`);
   }
 
+  const cursorColumns = columnNames('sync_history_cursors');
+  for (const name of ['last_shadow_acked_id', 'last_shadow_acked_key', 'last_shadow_error']) {
+    if (!cursorColumns.includes(name)) throw new Error(`missing sync_history_cursors.${name}`);
+  }
+
   const irrigationColumns = columnNames('irrigation_events');
   if (!irrigationColumns.includes('event_uuid')) throw new Error('missing irrigation_events.event_uuid');
 

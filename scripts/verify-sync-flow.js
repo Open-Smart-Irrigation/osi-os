@@ -1404,6 +1404,9 @@ for (const triggerName of [
   expectFileIncludes('seed-blank.sql', seedSqlSource, triggerName, `defines ${triggerName}`);
 }
 expectIncludes('Sync Init Schema + Triggers', 'sync_history_dirty_keys(peer_node, table_name, row_key', 'records history dirty keys at runtime');
+expectIncludes('Sync Init Schema + Triggers', 'ALTER TABLE sync_history_cursors ADD COLUMN last_shadow_acked_id INTEGER', 'adds shadow cursor id progress at runtime');
+expectIncludes('Sync Init Schema + Triggers', 'ALTER TABLE sync_history_cursors ADD COLUMN last_shadow_acked_key TEXT', 'adds shadow cursor key progress at runtime');
+expectIncludes('Sync Init Schema + Triggers', 'ALTER TABLE sync_history_cursors ADD COLUMN last_shadow_error TEXT', 'adds shadow cursor error state at runtime');
 expectIncludes('Sync Init Schema + Triggers', 'SELECT irrigation_zone_id FROM devices WHERE deveui = NEW.deveui AND deleted_at IS NULL', 'ignores deleted devices when mirroring device-data zone bindings into the outbox');
 expectIncludes('Sync Init Schema + Triggers', 'SELECT gateway_device_eui FROM devices WHERE deveui = NEW.deveui AND deleted_at IS NULL', 'ignores deleted devices when mirroring device-data gateway bindings into the outbox');
 expectIncludes('Sync Init Schema + Triggers', 'SELECT zone_uuid FROM irrigation_zones WHERE id = NEW.zone_id AND deleted_at IS NULL', 'ignores deleted zones when mirroring zone environment rows into the outbox');
@@ -1418,6 +1421,7 @@ expectIncludes('Build History Batch', 'if (!syncToken)', 'history batch fails cl
 expectIncludes('Build History Batch', 'return null', 'history batch stops before unauthenticated post');
 expectExcludes('Build History Batch', 'replace(//$/', 'malformed trailing slash normalizer in history sync builder');
 expectIncludes('Build History Batch', 'SELECT * FROM device_data WHERE id > ? ORDER BY id ASC LIMIT ?', 'uses id cursor for device_data history');
+expectIncludes('Build History Batch', 'lastShadowAckedId', 'uses shadow ACK progress while shadowing');
 expectIncludes('Build History Batch', 'helper.hashHistoryRow', 'hashes raw rows through shared helper');
 expectIncludes('Build History Batch', 'snapshot_high_id', 'captures raw backfill high-water mark');
 expectIncludes('POST History Batch', 'osiCloudHttp.requestJsonIpv4', 'uses the shared IPv4 cloud HTTP helper for history batches');
@@ -1425,7 +1429,9 @@ expectIncludes('Mark History Batch ACK', '!durableHistoryAck', 'keeps raw cursor
 expectIncludes('Mark History Batch ACK', 'helper.shouldApplyDurableAck', 'uses helper gate before applying durable history ACKs');
 expectIncludes('Mark History Batch ACK', 'history_mirror_write_v1_confirmed', 'durable ACK requires confirmed server mirror writes');
 expectIncludes('Mark History Batch ACK', 'ackedThroughId', 'history batch marker handles explicit ACK before raw trigger removal');
-expectIncludes('Mark History Batch ACK', "flow.set('history_sync_v1_confirmed', true)", 'records successful history shadow confirmation');
+expectIncludes('Mark History Batch ACK', 'last_shadow_acked_id', 'stores shadow ACK id separately from durable ACKs');
+expectIncludes('Mark History Batch ACK', 'last_shadow_acked_key', 'stores shadow ACK key separately from durable ACKs');
+expectIncludes('Mark History Batch ACK', 'history-shadow-ack', 'reports shadow ACK errors without confirming durable mirror writes');
 expectIncludes('Build History Manifest', 'SELECT table_name, segment_key, hash_version, canonical_row_count,', 'builds history manifests from cached segments');
 expectIncludes('Build History Manifest', '/api/v1/sync/edge/history/manifests', 'posts history manifests to the v1 manifest endpoint');
 expectIncludes('Build History Manifest', 'if (!syncToken)', 'history manifest fails closed without sync token');
