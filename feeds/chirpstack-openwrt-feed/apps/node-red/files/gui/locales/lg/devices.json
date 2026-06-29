@@ -24,7 +24,7 @@
     "failed": "Okuwerekeza ekyuma kugaanye"
   },
   "createZoneModal": {
-    "title": "Tondawo Ekifo ky'okusukkulirira",
+    "title": "Tondawo Ekifo",
     "zoneName": "Erinnya ly'ekifo",
     "zoneNamePlaceholder": "eg. Olusozi A, Okuva mu bukiika, Olusuku 1",
     "zoneNameRequired": "Erinnya ly'ekifo lyetaagisa",
@@ -83,7 +83,23 @@
     "noDevices": "Tewali byuma mu kifo kino",
     "assignFirst": "Werekeza Ekyuma Ekyasooka",
     "devicesInZone": "Ebyuma mu kifo kino:",
-    "data": "Data"
+    "data": "Data",
+    "export": {
+      "title": "Data export",
+      "selectRange": "Choose a date range to download zone data.",
+      "from": "From",
+      "to": "To",
+      "granularity": "Granularity",
+      "raw": "Raw",
+      "hourly": "Hourly",
+      "daily": "Daily",
+      "download": "Download CSV",
+      "downloading": "Preparing...",
+      "rangeSummary": "{{from}} to {{to}}",
+      "error": "Export failed",
+      "tooLarge": "Range too large. Choose a coarser granularity.",
+      "fullExport": "Full export"
+    }
   },
   "schedule": {
     "irrigationSchedule": "Nteekateeka y'okusukkulirira",

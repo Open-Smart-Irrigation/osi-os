@@ -24,7 +24,7 @@
     "failed": "Falha ao atribuir dispositivo"
   },
   "createZoneModal": {
-    "title": "Criar zona de rega",
+    "title": "Criar zona",
     "zoneName": "Nome da zona",
     "zoneNamePlaceholder": "ex. Jardim A, Campo Norte, Pomar 1",
     "zoneNameRequired": "O nome da zona é obrigatório",
@@ -83,7 +83,23 @@
     "noDevices": "Sem dispositivos nesta zona",
     "assignFirst": "Atribuir primeiro dispositivo",
     "devicesInZone": "Dispositivos nesta zona:",
-    "data": "Dados"
+    "data": "Dados",
+    "export": {
+      "title": "Exportar dados",
+      "selectRange": "Escolha um intervalo de datas para baixar dados da zona.",
+      "from": "De",
+      "to": "Ate",
+      "granularity": "Granularidade",
+      "raw": "Bruto",
+      "hourly": "Horario",
+      "daily": "Diario",
+      "download": "Baixar CSV",
+      "downloading": "Preparando...",
+      "rangeSummary": "{{from}} ate {{to}}",
+      "error": "Falha na exportacao",
+      "tooLarge": "Intervalo muito grande. Escolha uma granularidade mais ampla.",
+      "fullExport": "Exportacao completa"
+    }
   },
   "schedule": {
     "irrigationSchedule": "Programa de rega",
