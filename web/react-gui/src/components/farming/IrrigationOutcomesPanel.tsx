@@ -9,6 +9,7 @@ import {
 
 const POLL_INTERVAL_MS = 60_000;
 const ADVANCED_VIEW_STORAGE_KEY = 'osi.recentIrrigations.advancedView';
+const RECENT_IRRIGATION_DISPLAY_LIMIT = 5;
 
 export interface IrrigationOutcomeZoneContext {
   timeZone?: string | null;
@@ -333,6 +334,7 @@ export const IrrigationOutcomesPanel: React.FC<Props> = ({
         actuations: response?.actuations ?? [],
       }
     : state;
+  const displayActuations = viewState.actuations.slice(0, RECENT_IRRIGATION_DISPLAY_LIMIT);
 
   const setAdvancedViewPreference = (value: boolean) => {
     setAdvancedView(value);
@@ -401,15 +403,15 @@ export const IrrigationOutcomesPanel: React.FC<Props> = ({
         </p>
       )}
 
-      {!viewState.loading && !viewState.error && viewState.actuations.length === 0 && (
+      {!viewState.loading && !viewState.error && displayActuations.length === 0 && (
         <p className="text-sm text-[var(--text-tertiary)]">
           {t('irrigationOutcomes.empty', { defaultValue: 'No recent irrigations recorded yet.' })}
         </p>
       )}
 
-      {viewState.actuations.length > 0 && (
+      {displayActuations.length > 0 && (
         <ul className="flex flex-col gap-2">
-          {viewState.actuations.map((row) => {
+          {displayActuations.map((row) => {
             const zoneContext = zoneContextFor(row);
             return advancedView ? (
               <AdvancedActuationRow key={row.expectationId} row={row} zoneContext={zoneContext} />
