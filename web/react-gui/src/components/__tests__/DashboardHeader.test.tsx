@@ -9,6 +9,7 @@ import { DashboardHeader } from '../DashboardHeader';
 
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({
+    i18n: { language: 'en' },
     t: (key: string, options?: Record<string, unknown>) => {
       const map: Record<string, string> = {
         add: 'Add',
@@ -55,9 +56,13 @@ afterEach(() => {
 });
 
 describe('DashboardHeader (osi-os)', () => {
-  it('renders the OSI OS title, welcome text, and language switcher', () => {
+  it('renders the AgroLink title, Agroscope Balken, welcome text, and language switcher', () => {
     renderHeader();
-    expect(screen.getByRole('heading', { name: 'OSI OS Dashboard' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'AgroLink Dashboard' })).toBeInTheDocument();
+    expect(screen.getByRole('img', { name: 'Agroscope Balken' })).toHaveAttribute(
+      'src',
+      expect.stringContaining('balken-horizontal-en'),
+    );
     expect(screen.getByText('Welcome farmer')).toBeInTheDocument();
     expect(screen.getByLabelText('language switcher')).toBeInTheDocument();
   });
