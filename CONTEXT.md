@@ -48,6 +48,10 @@ _Avoid_: GUI-only AgroLink, OSI OS operator label
 The gateway Wi-Fi access point name pattern: `AgroLink-${GWID_END}`.
 _Avoid_: OSI-OS-${GWID_END}, AgroLink-OSI-${GWID_END}
 
+**AgroLink supported profiles**:
+The Agroscope branch targets the full Raspberry Pi 5 profile (`bcm2712`) and the full Raspberry Pi 4 profile path (`bcm2709` in this repo's shared Pi 2/3/4/400 target). Other profiles are out of scope for first-slice AgroLink branding.
+_Avoid_: global SSID rename, bcm2708 support, base profile branding, RAK profile branding
+
 **Stable gateway hostname**:
 The existing OSI OS hostname behavior, retained for the branding slice instead of renaming hostnames to AgroLink.
 _Avoid_: agrolink-${GWID_END}, agrolink-gateway-${GWID_END}
@@ -85,6 +89,7 @@ _Avoid_: renaming storage or API contracts as part of the first branding slice
 - **Login screen attribution** preserves OSI OS as the underlying platform identity.
 - **AgroLink operator identity** extends the product name beyond the GUI while retaining OSI OS attribution where needed.
 - **AgroLink SSID** is one concrete surface of **AgroLink operator identity**.
+- **AgroLink supported profiles** limit SSID and firmware-payload branding to the two supported Raspberry Pi full profiles.
 - **Stable gateway hostname** keeps low-level device identity separate from human-facing **AgroLink operator identity**.
 - **Central brand config** defines the first branding slice without introducing a full build-variant system.
 - **Login hoch logo** and **Dashboard Balken header** are the visual identity surfaces for the first branding slice.
@@ -120,6 +125,9 @@ _Avoid_: renaming storage or API contracts as part of the first branding slice
 > **Dev:** "What Wi-Fi AP name should the branded gateway broadcast?"
 > **Domain expert:** "Use AgroLink-${GWID_END}."
 
+> **Dev:** "Should every profile with a ChirpStack AP script get the AgroLink SSID?"
+> **Domain expert:** "No. This branch supports Pi 4 and Pi 5 only, so only the two full Raspberry Pi profiles are in scope."
+
 > **Dev:** "Should the hostname change to AgroLink too?"
 > **Domain expert:** "No. Keep existing hostname behavior; change human-facing labels and SSID."
 
@@ -146,6 +154,7 @@ _Avoid_: renaming storage or API contracts as part of the first branding slice
 - "platform name" could mean an Agroscope-prefixed OSI name. Resolved: use **AgroLink** and keep OSI OS as attribution.
 - "AgroLink scope" could mean GUI-only. Resolved: use **AgroLink operator identity** for GUI, local AP/SSID, build labels, and visible system identity text.
 - "SSID compatibility" could keep the old OSI-OS prefix. Resolved: use **AgroLink SSID** for the branded build.
+- "SSID file inventory" could imply a repo-wide AP rename. Resolved: only **AgroLink supported profiles** are changed; full `bcm2708`, base profiles, and RAK profiles stay unchanged.
 - "system label" could include hostname renaming. Resolved: preserve **Stable gateway hostname** and use AgroLink for human-facing labels and SSID only.
 - "branding implementation" could mean editing strings wherever they appear. Resolved: use **Central brand config** as the source of truth.
 - "visual treatment" could mean approximate brand-colored UI accents. Resolved: use **Login hoch logo** and **Dashboard Balken header** from official Agroscope assets.
