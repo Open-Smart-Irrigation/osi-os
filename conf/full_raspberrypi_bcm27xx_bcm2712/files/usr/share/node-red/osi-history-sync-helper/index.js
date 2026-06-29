@@ -9,10 +9,58 @@ const TABLE_COLUMNS = {
     ['swt_2', 'REAL'],
     ['dendro_valid', 'BOOLEAN']
   ],
+  chameleon_readings: [
+    ['id', 'INTEGER'],
+    ['deveui', 'TEXT'],
+    ['recorded_at', 'TIMESTAMP'],
+    ['payload_version', 'INTEGER'],
+    ['status_flags', 'INTEGER'],
+    ['data_invalid', 'BOOLEAN'],
+    ['comp_pending', 'BOOLEAN'],
+    ['f_port', 'INTEGER'],
+    ['f_cnt', 'INTEGER'],
+    ['calibration_status', 'TEXT']
+  ],
+  dendrometer_readings: [
+    ['id', 'INTEGER'],
+    ['deveui', 'TEXT'],
+    ['recorded_at', 'TIMESTAMP'],
+    ['position_um', 'REAL'],
+    ['is_valid', 'BOOLEAN'],
+    ['is_outlier', 'BOOLEAN'],
+    ['dendro_saturated', 'BOOLEAN']
+  ],
+  dendrometer_daily: [
+    ['deveui', 'TEXT'],
+    ['date', 'TEXT'],
+    ['mds_um', 'REAL'],
+    ['twd_um', 'REAL'],
+    ['stress_level', 'TEXT'],
+    ['computed_at', 'TIMESTAMP']
+  ],
+  zone_daily_environment: [
+    ['zone_uuid', 'TEXT'],
+    ['date', 'TEXT'],
+    ['rainfall_mm', 'REAL'],
+    ['flow_liters', 'REAL'],
+    ['rain_source', 'TEXT'],
+    ['computed_at', 'TIMESTAMP']
+  ],
   zone_daily_recommendations: [
     ['zone_uuid', 'TEXT'],
     ['date', 'TEXT'],
     ['recommendation_json', 'JSON']
+  ],
+  irrigation_events: [
+    ['event_uuid', 'TEXT'],
+    ['created_at', 'TIMESTAMP'],
+    ['action', 'TEXT'],
+    ['reason', 'TEXT'],
+    ['aggregate_kpa', 'REAL'],
+    ['threshold_kpa', 'REAL'],
+    ['duration_minutes', 'INTEGER'],
+    ['valve_deveui', 'TEXT'],
+    ['payload_json', 'JSON']
   ]
 };
 
@@ -38,8 +86,9 @@ function encodeReal(value) {
 }
 
 function encodeInteger(value) {
-  if (typeof value === 'number' && Number.isInteger(value)) return String(value);
-  if (typeof value === 'string' && /^-?\d+$/.test(value.trim())) return String(Number(value));
+  if (typeof value === 'number' && Number.isInteger(value) && Number.isSafeInteger(value)) return String(value);
+  if (typeof value === 'bigint') return value.toString();
+  if (typeof value === 'string' && /^-?\d+$/.test(value.trim())) return BigInt(value.trim()).toString();
   throw new Error(`invalid INTEGER ${value}`);
 }
 
@@ -106,7 +155,7 @@ function cursorPatchFromResponse(response) {
   const permanent = results.find((result) => result && result.status === 'REJECTED_PERMANENT');
   const patch = {};
   if (response.ackedThroughId != null) {
-    patch.last_acked_id = Number(response.ackedThroughId);
+    patch.last_acked_id = encodeInteger(response.ackedThroughId);
   } else if (response.ackedThroughKey != null) {
     patch.last_acked_key = String(response.ackedThroughKey);
   }
@@ -124,7 +173,8 @@ function cursorPatchFromResponse(response) {
 }
 
 function isBackfillComplete(cursor) {
-  return cursor && cursor.snapshot_high_id != null && Number(cursor.last_acked_id || 0) >= Number(cursor.snapshot_high_id);
+  if (!cursor || cursor.snapshot_high_id == null) return false;
+  return BigInt(encodeInteger(cursor.last_acked_id || 0)) >= BigInt(encodeInteger(cursor.snapshot_high_id));
 }
 
 function batchPhase(cursor) {

@@ -466,6 +466,32 @@ function expectFileIncludes(fileLabel, content, needle, description) {
   }
 }
 
+function triggerSql(content, triggerName) {
+  const pattern = new RegExp(`CREATE TRIGGER ${triggerName}[\\s\\S]*?END;`);
+  const match = String(content || '').match(pattern);
+  return match ? match[0] : '';
+}
+
+function normalizeSqlForSubstring(content) {
+  return String(content || '')
+    .replace(/\s*=\s*/g, '=')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function expectTriggerIncludes(fileLabel, content, triggerName, needle, description) {
+  const sql = triggerSql(content, triggerName);
+  if (!sql) {
+    fail(`${fileLabel} missing trigger ${triggerName}`);
+    return;
+  }
+  if (!normalizeSqlForSubstring(sql).includes(normalizeSqlForSubstring(needle))) {
+    fail(`${fileLabel} ${triggerName} missing ${description}`);
+  } else {
+    console.log(`OK ${fileLabel} ${triggerName} ${description}`);
+  }
+}
+
 function expectFileExcludes(fileLabel, content, needle, description) {
   if (content.includes(needle)) {
     fail(`${fileLabel} still contains ${description}`);
@@ -1293,6 +1319,7 @@ expectIncludes('Finalize linked account state', 'INSERT INTO sync_link_state', '
 expectIncludes('Finalize linked account state', 'normalizeGatewayDeviceEui', 'linked account state normalizes gateway EUI');
 expectIncludes('Finalize linked account state', "flow.set('account_linked', true)", 'sets account_linked flow flag on successful account link');
 expectIncludes('Clear linked account state', 'UPDATE sync_link_state', 'marks sync_link_state unlinked during unlink');
+expectIncludes('Clear linked account state', 'linked=0', 'clears sync_link_state linked flag during unlink');
 expectIncludes('Clear linked account state', 'server_url=NULL', 'unlink clears sync_link_state server URL');
 expectIncludes('Clear linked account state', 'gateway_device_eui=NULL', 'unlink clears sync_link_state gateway identity');
 expectIncludes('Clear linked account state', "flow.set('account_linked', false)", 'clears account_linked flow flag during unlink');
@@ -1363,6 +1390,7 @@ expectIncludes('Sync Init Schema + Triggers', 'UPDATE irrigation_events SET even
 expectIncludes('Sync Init Schema + Triggers', 'CREATE TRIGGER trg_sync_irrigation_events_uuid_ai', 'creates stable irrigation event UUID trigger at runtime');
 expectFileIncludes('seed-blank.sql', seedSqlSource, 'idx_irrigation_events_event_uuid', 'irrigation events have stable sync identity');
 expectFileIncludes('seed-blank.sql', seedSqlSource, 'trg_sync_irrigation_events_uuid_ai', 'fresh DBs create stable irrigation event UUIDs');
+const syncInitSource = String(findNodeByName('Sync Init Schema + Triggers')?.func || '');
 for (const triggerName of [
   'trg_sync_zones_outbox_au',
   'trg_sync_devices_outbox_au',
@@ -1371,6 +1399,8 @@ for (const triggerName of [
   'trg_gateway_locations_outbox_au',
 ]) {
   expectFileIncludes('seed-blank.sql', seedSqlSource, triggerName, `defines ${triggerName}`);
+  expectTriggerIncludes('seed-blank.sql', seedSqlSource, triggerName, "WHERE peer_node = 'cloud' AND linked = 1", 'cloud link gate');
+  expectTriggerIncludes('Sync Init Schema + Triggers', syncInitSource, triggerName, "WHERE peer_node = 'cloud' AND linked = 1", 'cloud link gate');
 }
 expectFileIncludes('seed-blank.sql', seedSqlSource, 'sync_link_state', 'link-gates sync triggers');
 for (const triggerName of [
@@ -1388,9 +1418,9 @@ for (const triggerName of [
 ]) {
   expectIncludes('Sync Init Schema + Triggers', triggerName, `creates ${triggerName} at runtime`);
   expectFileIncludes('seed-blank.sql', seedSqlSource, triggerName, `defines ${triggerName}`);
+  expectTriggerIncludes('seed-blank.sql', seedSqlSource, triggerName, "WHERE peer_node = 'cloud' AND linked = 1", 'cloud link gate');
+  expectTriggerIncludes('Sync Init Schema + Triggers', syncInitSource, triggerName, "WHERE peer_node = 'cloud' AND linked = 1", 'cloud link gate');
 }
-expectIncludes('Sync Init Schema + Triggers', "WHERE peer_node = 'cloud' AND linked = 1", 'outbox triggers are link-gated at runtime');
-expectFileIncludes('seed-blank.sql', seedSqlSource, "WHERE peer_node = 'cloud' AND linked = 1", 'seed outbox triggers are link-gated');
 for (const triggerName of [
   'trg_sync_device_data_dirty_au',
   'trg_sync_chameleon_readings_dirty_au',
@@ -1409,7 +1439,8 @@ expectIncludes('Sync Init Schema + Triggers', 'sync_history_dirty_keys(peer_node
 expectIncludes('Sync Init Schema + Triggers', 'ALTER TABLE sync_history_cursors ADD COLUMN last_shadow_acked_id INTEGER', 'adds shadow cursor id progress at runtime');
 expectIncludes('Sync Init Schema + Triggers', 'ALTER TABLE sync_history_cursors ADD COLUMN last_shadow_acked_key TEXT', 'adds shadow cursor key progress at runtime');
 expectIncludes('Sync Init Schema + Triggers', 'ALTER TABLE sync_history_cursors ADD COLUMN last_shadow_error TEXT', 'adds shadow cursor error state at runtime');
-expectIncludes('Sync Init Schema + Triggers', 'lower(hex(randomblob(8)))', 'uses random irrigation UUID fallback instead of a hardcoded gateway');
+expectIncludes('Sync Init Schema + Triggers', 'missing_gateway_device_eui', 'fails closed when irrigation UUID generation lacks a gateway identity');
+expectExcludes('Sync Init Schema + Triggers', 'lower(hex(randomblob(8)))', 'random irrigation UUID fallback');
 expectIncludes('Sync Init Schema + Triggers', "'event_uuid', NEW.event_uuid", 'mirrors stable irrigation event UUIDs in outbox payloads');
 expectIncludes('Sync Init Schema + Triggers', 'SELECT irrigation_zone_id FROM devices WHERE deveui = NEW.deveui AND deleted_at IS NULL', 'ignores deleted devices when mirroring device-data zone bindings into the outbox');
 expectIncludes('Sync Init Schema + Triggers', 'SELECT gateway_device_eui FROM devices WHERE deveui = NEW.deveui AND deleted_at IS NULL', 'ignores deleted devices when mirroring device-data gateway bindings into the outbox');
@@ -1425,6 +1456,7 @@ expectIncludes('Build History Batch', 'if (!syncToken)', 'history batch fails cl
 expectIncludes('Build History Batch', 'return null', 'history batch stops before unauthenticated post');
 expectExcludes('Build History Batch', 'replace(//$/', 'malformed trailing slash normalizer in history sync builder');
 expectIncludes('Build History Batch', 'SELECT * FROM device_data WHERE id > ? ORDER BY id ASC LIMIT ?', 'uses id cursor for device_data history');
+expectIncludes('Build History Batch', 'next_attempt_at', 'honors history cursor retry backoff before building a batch');
 expectIncludes('Build History Batch', 'lastShadowAckedId', 'uses shadow ACK progress while shadowing');
 expectIncludes('Build History Batch', 'helper.hashHistoryRow', 'hashes raw rows through shared helper');
 expectIncludes('Build History Batch', 'snapshot_high_id', 'captures raw backfill high-water mark');

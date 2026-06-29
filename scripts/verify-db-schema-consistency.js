@@ -410,6 +410,51 @@ const requiredIndexSqlFragments = {
   ],
 };
 
+const requiredTriggerSqlFragments = {
+  trg_sync_irrigation_events_uuid_ai: [
+    'missing_gateway_device_eui',
+    "printf('%015d', new.id)",
+  ],
+  trg_dp_irrigation_events_outbox_ai: [
+    'not exists',
+    "aggregate_type='irrigation_event'",
+    "aggregate_key=new.event_uuid",
+  ],
+  trg_dp_irrigation_events_outbox_au_event_uuid: [
+    'not exists',
+    "aggregate_type='irrigation_event'",
+    "aggregate_key=new.event_uuid",
+  ],
+  trg_dp_chameleon_readings_outbox_ai: [
+    "'data_invalid', coalesce(new.data_invalid,0)",
+    "'comp_pending', coalesce(new.comp_pending,0)",
+  ],
+  trg_sync_device_data_dirty_au: [
+    "select gateway_device_eui from devices where deveui = new.deveui",
+    "<> '' begin",
+  ],
+  trg_sync_chameleon_readings_dirty_au: [
+    "select gateway_device_eui from devices where deveui = new.deveui",
+    "<> '' begin",
+  ],
+  trg_sync_dendro_readings_dirty_au: [
+    "select gateway_device_eui from devices where deveui = new.deveui",
+    "<> '' begin",
+  ],
+  trg_sync_zone_env_dirty_ai: [
+    "'zone-id:' || new.zone_id",
+  ],
+  trg_sync_zone_recs_dirty_ai: [
+    "'zone-id:' || new.zone_id",
+  ],
+};
+
+const forbiddenTriggerSqlFragments = {
+  trg_sync_irrigation_events_uuid_ai: [
+    'randomblob(8)',
+  ],
+};
+
 function sqlite(dbPath, sql) {
   return execFileSync('sqlite3', [dbPath, sql], { encoding: 'utf8' }).trim();
 }
@@ -434,6 +479,11 @@ function indexSql(dbPath, indexName) {
 function tableSql(dbPath, tableName) {
   const escapedName = tableName.replace(/'/g, "''");
   return sqlite(dbPath, `SELECT sql FROM sqlite_master WHERE type = 'table' AND name = '${escapedName}';`);
+}
+
+function triggerSql(dbPath, triggerName) {
+  const escapedName = triggerName.replace(/'/g, "''");
+  return sqlite(dbPath, `SELECT sql FROM sqlite_master WHERE type = 'trigger' AND name = '${escapedName}';`);
 }
 
 function normalizeSql(sql) {
@@ -478,6 +528,20 @@ function verifyDb(dbPath) {
     const missingFragments = expectedFragments.filter((fragment) => !sql.includes(fragment));
     if (missingFragments.length) {
       throw new Error(`${dbPath}:${indexName} definition drift: ${sql || '<missing>'}`);
+    }
+  }
+  for (const [triggerName, expectedFragments] of Object.entries(requiredTriggerSqlFragments)) {
+    const sql = normalizeSql(triggerSql(dbPath, triggerName));
+    const missingFragments = expectedFragments.filter((fragment) => !sql.includes(fragment));
+    if (missingFragments.length) {
+      throw new Error(`${dbPath}:${triggerName} definition drift: ${sql || '<missing>'}`);
+    }
+  }
+  for (const [triggerName, forbiddenFragments] of Object.entries(forbiddenTriggerSqlFragments)) {
+    const sql = normalizeSql(triggerSql(dbPath, triggerName));
+    const presentFragments = forbiddenFragments.filter((fragment) => sql.includes(fragment));
+    if (presentFragments.length) {
+      throw new Error(`${dbPath}:${triggerName} contains forbidden trigger fragments: ${presentFragments.join(',')}`);
     }
   }
   const historyQueryPlan = sqlite(
