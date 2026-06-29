@@ -95,7 +95,7 @@ export const HeaderMenu: React.FC<HeaderMenuProps> = ({
         onKeyDown={onTriggerKeyDown}
         aria-haspopup="menu"
         aria-expanded={open}
-        className={`flex items-center justify-center gap-1.5 rounded-lg font-bold transition-colors ${triggerClassName}`}
+        className={`flex w-full items-center justify-center gap-1.5 rounded-lg font-bold transition-colors ${triggerClassName}`}
       >
         {label}
         <span aria-hidden="true" className="text-xs opacity-70">{open ? '^' : 'v'}</span>
@@ -105,7 +105,7 @@ export const HeaderMenu: React.FC<HeaderMenuProps> = ({
         <div
           role="menu"
           onKeyDown={onMenuKeyDown}
-          className={`absolute ${align === 'right' ? 'right-0' : 'left-0'} top-full z-50 mt-1 min-w-[180px] rounded-xl border border-[var(--border)] bg-[var(--card)] py-1 shadow-xl`}
+          className={`absolute ${align === 'right' ? 'right-0' : 'left-0'} top-full z-50 mt-1 min-w-[180px] rounded-xl border border-[var(--border)] bg-[var(--surface)] py-1 shadow-xl`}
         >
           {items.map((item, index) =>
             item.to ? (

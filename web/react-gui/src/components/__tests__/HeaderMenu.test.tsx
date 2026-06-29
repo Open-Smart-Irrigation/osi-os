@@ -32,6 +32,17 @@ describe('HeaderMenu (osi-os)', () => {
     expect(screen.queryByRole('menuitem', { name: 'Logout' })).not.toBeInTheDocument();
   });
 
+  it('fills its wrapper so compact header buttons align consistently', () => {
+    renderMenu();
+    expect(screen.getByRole('button', { name: 'Account' })).toHaveClass('w-full');
+  });
+
+  it('uses the shared header menu surface color', () => {
+    renderMenu();
+    fireEvent.click(screen.getByRole('button', { name: 'Account' }));
+    expect(screen.getByRole('menu')).toHaveClass('bg-[var(--surface)]');
+  });
+
   it('focuses the first item on open', () => {
     renderMenu();
     fireEvent.click(screen.getByRole('button', { name: 'Account' }));

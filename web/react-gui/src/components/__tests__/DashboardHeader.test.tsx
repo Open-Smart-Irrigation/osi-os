@@ -73,6 +73,27 @@ describe('DashboardHeader (osi-os)', () => {
     expect(onAddDevice).toHaveBeenCalledOnce();
   });
 
+  it('uses the wrapping server-style action layout so header menus are not clipped', () => {
+    renderHeader();
+
+    const addMenuWrapper = screen.getByRole('button', { name: 'Add' }).closest('div');
+    expect(addMenuWrapper).toHaveClass('w-[calc(50%-4px)]');
+    expect(addMenuWrapper).toHaveClass('sm:w-auto');
+
+    const actionGroup = addMenuWrapper?.parentElement;
+    expect(actionGroup).toHaveClass('flex-wrap');
+    expect(actionGroup).not.toHaveClass('overflow-x-auto');
+  });
+
+  it('opens the Add menu from the left edge on compact layouts', () => {
+    renderHeader();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Add' }));
+
+    expect(screen.getByRole('menu')).toHaveClass('left-0');
+    expect(screen.getByRole('menu')).not.toHaveClass('right-0');
+  });
+
   it('points the desktop Data link to the analysis view', () => {
     renderHeader();
     expect(screen.getByRole('link', { name: 'Data' })).toHaveAttribute('href', '/analysis');

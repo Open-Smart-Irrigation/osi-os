@@ -32,11 +32,12 @@ export const DashboardHeader: React.FC<DashboardHeaderProps> = ({
             <p className="text-[var(--header-subtext)] text-lg mt-1">{t('welcome', { username })}</p>
           </div>
 
-          <div className="flex max-w-full flex-row flex-nowrap items-center gap-2 overflow-x-auto">
+          <div className="flex flex-wrap items-center justify-end gap-2 sm:gap-3">
             <HeaderMenu
               label={t('add')}
-              className="shrink-0"
-              triggerClassName="bg-[var(--primary)] hover:bg-[var(--primary-hover)] text-white text-sm px-3 py-2 touch-target shadow-lg"
+              className="w-[calc(50%-4px)] sm:w-auto"
+              triggerClassName="bg-[var(--primary)] hover:bg-[var(--primary-hover)] text-white text-lg px-6 py-3"
+              align="left"
               items={[
                 { key: 'zone', label: t('addMenu.zone'), onSelect: onAddZone },
                 { key: 'device', label: t('addMenu.device'), onSelect: onAddDevice },
@@ -46,7 +47,7 @@ export const DashboardHeader: React.FC<DashboardHeaderProps> = ({
             {showDesktopData && (
               <Link
                 to="/analysis"
-                className="shrink-0 bg-emerald-700 hover:bg-emerald-800 text-white font-bold text-sm px-3 py-2 touch-target rounded-lg transition-colors shadow-lg"
+                className="w-[calc(50%-4px)] sm:w-auto bg-emerald-700 hover:bg-emerald-800 text-white font-bold text-lg px-6 py-3 rounded-lg transition-colors shadow-lg text-center"
               >
                 {t('data')}
               </Link>
@@ -54,14 +55,14 @@ export const DashboardHeader: React.FC<DashboardHeaderProps> = ({
 
             <span className="hidden sm:block w-px self-stretch bg-[var(--border)]" aria-hidden="true" />
 
-            <div className="shrink-0">
-              <LanguageSwitcher />
+            <div className="w-[calc(50%-4px)] sm:w-auto">
+              <LanguageSwitcher triggerClassName="w-full justify-center px-6 py-3 text-lg sm:w-auto" />
             </div>
 
             <HeaderMenu
               label={t('account')}
-              className="shrink-0"
-              triggerClassName="bg-slate-900 hover:bg-slate-800 text-white text-sm px-3 py-2 touch-target"
+              className="w-[calc(50%-4px)] sm:w-auto"
+              triggerClassName="bg-slate-900 hover:bg-slate-800 text-white text-lg px-6 py-3"
               items={[
                 { key: 'osi-server', label: t('accountMenu.osiServer'), to: '/account-link' },
                 { key: 'logout', label: t('logout'), onSelect: onLogout },
