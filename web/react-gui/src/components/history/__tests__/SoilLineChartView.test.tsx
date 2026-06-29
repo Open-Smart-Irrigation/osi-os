@@ -2,7 +2,12 @@ import '@testing-library/jest-dom';
 import { render, screen, within } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 
-import { buildNumericRows, SoilLineChartView, soilSeriesDisplayLabel } from '../visualizations/SoilLineChartView';
+import {
+  buildNumericRows,
+  SoilLineChartView,
+  soilSeriesDisplayLabel,
+  soilSeriesShouldShowDots,
+} from '../visualizations/SoilLineChartView';
 import type { HistoryCardDataResponse } from '../../../history/types';
 
 class ResizeObserverStub {
@@ -98,6 +103,34 @@ describe('SoilLineChartView', () => {
     ]);
 
     expect(rows[0].tMs).toBe(Date.parse('2026-06-01T00:00:00Z'));
+  });
+
+  it('marks sparse recovery segments so points after outages remain visible', () => {
+    expect(soilSeriesShouldShowDots({
+      key: 'swt_1',
+      label: 'Layer 1',
+      unit: 'kPa',
+      depthCm: null,
+      points: [
+        { t: '2026-06-24T06:00:00Z', value: 5 },
+        { t: '2026-06-29T20:00:00Z', value: 20 },
+        { t: '2026-06-29T21:00:00Z', value: 21 },
+      ],
+    })).toBe(true);
+  });
+
+  it('keeps dots hidden for continuous hourly soil series', () => {
+    expect(soilSeriesShouldShowDots({
+      key: 'swt_1',
+      label: 'Layer 1',
+      unit: 'kPa',
+      depthCm: null,
+      points: [
+        { t: '2026-06-24T06:00:00Z', value: 5 },
+        { t: '2026-06-24T07:00:00Z', value: 6 },
+        { t: '2026-06-24T08:00:00Z', value: 7 },
+      ],
+    })).toBe(false);
   });
 
   it('prefers soil depth labels and disambiguates duplicate depths', () => {
