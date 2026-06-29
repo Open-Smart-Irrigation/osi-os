@@ -59,6 +59,72 @@ describe('AgroLink branding source contracts', () => {
     }
   });
 
+  it('uses zone terminology in dashboard and create-zone copy', () => {
+    const expectedDashboardCopy: Record<string, {
+      emptyStateSubtitle: string;
+      irrigationZones: string;
+      unassignedSubtitle: string;
+    }> = {
+      en: {
+        emptyStateSubtitle: 'Get started by creating a zone and adding devices',
+        irrigationZones: 'Zones',
+        unassignedSubtitle: 'These devices are not assigned to any zone',
+      },
+      'de-CH': {
+        emptyStateSubtitle: 'Erstellen Sie eine Zone und fügen Sie Geräte hinzu',
+        irrigationZones: 'Zonen',
+        unassignedSubtitle: 'Diese Geräte sind keiner Zone zugewiesen',
+      },
+      fr: {
+        emptyStateSubtitle: 'Commencez par créer une zone et ajouter des appareils',
+        irrigationZones: 'Zones',
+        unassignedSubtitle: 'Ces appareils ne sont assignés à aucune zone',
+      },
+      it: {
+        emptyStateSubtitle: 'Inizia creando una zona e aggiungendo dispositivi',
+        irrigationZones: 'Zone',
+        unassignedSubtitle: 'Questi dispositivi non sono assegnati a nessuna zona',
+      },
+      es: {
+        emptyStateSubtitle: 'Comienza creando una zona y añadiendo dispositivos',
+        irrigationZones: 'Zonas',
+        unassignedSubtitle: 'Estos dispositivos no están asignados a ninguna zona',
+      },
+      pt: {
+        emptyStateSubtitle: 'Comece por criar uma zona e adicionar dispositivos',
+        irrigationZones: 'Zonas',
+        unassignedSubtitle: 'Estes dispositivos não estão atribuídos a nenhuma zona',
+      },
+      lg: {
+        emptyStateSubtitle: "Tandika nga otondawo ekifo n'okuwaayo ebyuma",
+        irrigationZones: 'Ebifo',
+        unassignedSubtitle: 'Ebyuma ebino tebiwerekeddwa ku kifo kyonna',
+      },
+    };
+
+    const expectedCreateZoneTitles: Record<string, string> = {
+      en: 'Create Zone',
+      'de-CH': 'Zone erstellen',
+      fr: 'Créer une zone',
+      it: 'Crea zona',
+      es: 'Crear zona',
+      pt: 'Criar zona',
+      lg: 'Tondawo Ekifo',
+    };
+
+    for (const [locale, copy] of Object.entries(expectedDashboardCopy)) {
+      const dashboard = readReactJson(`public/locales/${locale}/dashboard.json`);
+      assert.equal(dashboard.emptyState.subtitle, copy.emptyStateSubtitle, `${locale} dashboard empty state`);
+      assert.equal(dashboard.irrigationZones, copy.irrigationZones, `${locale} dashboard zone heading`);
+      assert.equal(dashboard.unassignedSubtitle, copy.unassignedSubtitle, `${locale} dashboard unassigned subtitle`);
+    }
+
+    for (const [locale, title] of Object.entries(expectedCreateZoneTitles)) {
+      const devices = readReactJson(`public/locales/${locale}/devices.json`);
+      assert.equal(devices.createZoneModal.title, title, `${locale} create-zone title`);
+    }
+  });
+
   it('keeps user-visible locale copy on zone terminology', () => {
     const localeRoot = path.join(reactRoot, 'public', 'locales');
     const forbidden = [
@@ -70,6 +136,12 @@ describe('AgroLink branding source contracts', () => {
       /zones d'irrigation/i,
       /zona di irrigazione/i,
       /zone di irrigazione/i,
+      /zona de riego/i,
+      /zonas de riego/i,
+      /zona de rega/i,
+      /zonas de rega/i,
+      /ekifo ky'okusukkulirira/i,
+      /ebifo by'okusukkulirira/i,
     ];
 
     const offenders = listJsonFiles(localeRoot).flatMap((filePath) => {

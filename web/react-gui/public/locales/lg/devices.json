@@ -24,7 +24,7 @@
     "failed": "Okuwerekeza ekyuma kugaanye"
   },
   "createZoneModal": {
-    "title": "Tondawo Ekifo ky'okusukkulirira",
+    "title": "Tondawo Ekifo",
     "zoneName": "Erinnya ly'ekifo",
     "zoneNamePlaceholder": "eg. Olusozi A, Okuva mu bukiika, Olusuku 1",
     "zoneNameRequired": "Erinnya ly'ekifo lyetaagisa",

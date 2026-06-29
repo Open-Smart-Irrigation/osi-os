@@ -17,13 +17,13 @@
   "autoRefresh": "Atualização automática a cada 10 segundos",
   "emptyState": {
     "title": "Bem-vindo à sua quinta!",
-    "subtitle": "Comece por criar uma zona de rega e adicionar dispositivos",
+    "subtitle": "Comece por criar uma zona e adicionar dispositivos",
     "createZone": "Criar zona",
     "addDevice": "Adicionar dispositivo"
   },
-  "irrigationZones": "Zonas de rega",
+  "irrigationZones": "Zonas",
   "unassignedDevices": "Dispositivos não atribuídos",
-  "unassignedSubtitle": "Estes dispositivos não estão atribuídos a nenhuma zona de rega",
+  "unassignedSubtitle": "Estes dispositivos não estão atribuídos a nenhuma zona",
   "soilSensors": "Sensores de solo",
   "smartValves": "Válvulas inteligentes"
 }
