@@ -89,3 +89,40 @@ Any future startup migration that rebuilds a parent table referenced by
 must fence the swap with `PRAGMA foreign_keys=OFF` and restore
 `PRAGMA foreign_keys=ON` immediately after the final drop. The sync verifier
 guards the known `devices` rebuild case.
+
+## Deploy guard: linked gateways must keep history sync enabled
+
+The history-sync rollout introduced `sync_link_state` as the peer gate for
+structural outbox rows and history-sync jobs. Existing field gateways may
+already be linked through `users.auth_mode='server'`; deploy and startup
+migrations must preserve that link by ensuring:
+
+```sql
+SELECT COUNT(*)
+  FROM users
+ WHERE auth_mode = 'server'
+   AND server_url IS NOT NULL
+   AND trim(server_url) <> '';
+```
+
+implies:
+
+```sql
+SELECT COUNT(*)
+  FROM sync_link_state
+ WHERE peer_node = 'cloud'
+   AND linked = 1
+   AND gateway_device_eui IS NOT NULL
+   AND trim(gateway_device_eui) <> '';
+```
+
+If the first query returns rows and the second returns `0`, the gateway is
+linked for account/auth state but its link-gated sync triggers and history jobs
+will not produce new work. The local data will keep accumulating in
+`/data/db/farming.db`, while the cloud analysis mirror becomes stale.
+
+`deploy.sh` must repair this state from `users` and the canonical gateway EUI
+before Node-RED is restarted. Do not seed this table from `linked_users`; that
+table is not present on current field databases. After repair, verify the next
+uplink creates new sync/history work and backfill the gap that accumulated while
+the gate was empty.

@@ -1285,6 +1285,31 @@ expectIncludes('Finalize linked account state', "auth_mode = ?", 'finalizes link
 expectIncludes('Finalize linked account state', 'server_offline_verifier_version = ?', 'persists the synced offline verifier version locally');
 expectIncludes('Finalize linked account state', 'last_auth_sync_status = ?', 'marks linked auth as up to date after local-sync finalization');
 expectIncludes('Finalize linked account state', 'return [null, msg];', 'can stop before reporting link success');
+expectIncludes(
+  'Finalize linked account state',
+  'INSERT INTO sync_link_state(peer_node, linked, server_url, cloud_user_id, gateway_device_eui, updated_at)',
+  'persists sync_link_state when account link succeeds'
+);
+expectIncludes(
+  'Finalize linked account state',
+  'ON CONFLICT(peer_node) DO UPDATE SET',
+  'upserts sync_link_state idempotently during account link'
+);
+expectIncludes(
+  'Finalize linked account state',
+  "normalizeGatewayDeviceEui(env.get('LINK_GATEWAY_DEVICE_EUI'))",
+  'prefers linked gateway identity when finalizing sync_link_state'
+);
+expectIncludes(
+  'Clear linked account state',
+  "UPDATE sync_link_state SET linked=0",
+  'marks cloud sync_link_state unlinked during account unlink'
+);
+expectIncludes(
+  'Clear linked account state',
+  "WHERE peer_node='cloud'",
+  'updates only the cloud sync_link_state row during unlink'
+);
 expectIncludes('Set Download Headers', 'Database download is disabled', 'keeps database download disabled');
 expectIncludes('Lookup Auth User', 'ORDER BY CASE WHEN username = ?', 'prefers local username matches');
 expectIncludes('Process Result', 'Multiple accounts match this username', 'rejects ambiguous linked logins');
@@ -1339,6 +1364,9 @@ expectIncludes('Sync Init Schema + Triggers', 'ALTER TABLE users ADD COLUMN last
 expectIncludes('Sync Init Schema + Triggers', 'ALTER TABLE users ADD COLUMN last_auth_sync_error TEXT', 'adds the linked-auth error column to users');
 expectIncludes('Sync Init Schema + Triggers', "UPDATE users SET last_auth_sync_status = 'up_to_date'", 'backfills linked server users with an up-to-date auth status');
 expectIncludes('Sync Init Schema + Triggers', "UPDATE users SET last_auth_sync_status = 'repair_required'", 'marks invalid linked-auth packages for repair during sync init');
+expectIncludes('Sync Init Schema + Triggers', 'CREATE TABLE IF NOT EXISTS sync_link_state', 'creates sync link state table at runtime');
+expectIncludes('Sync Init Schema + Triggers', "FROM users WHERE auth_mode = 'server'", 'backfills sync_link_state from existing linked users during runtime upgrade');
+expectExcludes('Sync Init Schema + Triggers', 'FROM linked_users', 'obsolete linked_users table for sync_link_state backfill');
 expectIncludes('Sync Init Schema + Triggers', "const gatewaySql = /^[0-9A-F]{16}$/.test(gateway)", 'uses a canonical gateway-or-NULL SQL fallback during sync init');
 expectIncludes('Sync Init Schema + Triggers', 'ALTER TABLE device_data ADD COLUMN rain_mm_per_10min REAL', 'adds normalized rain telemetry storage');
 expectIncludes('Sync Init Schema + Triggers', 'ALTER TABLE device_data ADD COLUMN flow_liters_per_10min REAL', 'adds normalized flow telemetry storage');
@@ -2415,6 +2443,17 @@ expectFileIncludes('deploy.sh', deployScript, 'UPDATE devices SET dendro_ratio_a
 expectFileIncludes('deploy.sh', deployScript, '/etc/init.d/osi-gateway-gps stop || true', 'stops the retired gateway GPS sidecar during deploy');
 expectFileIncludes('deploy.sh', deployScript, '/etc/init.d/osi-gateway-gps disable || true', 'disables the retired gateway GPS sidecar during deploy');
 expectFileIncludes('deploy.sh', deployScript, 'rm -f /etc/init.d/osi-gateway-gps /usr/bin/osi-gateway-gps.js', 'removes the retired gateway GPS sidecar files during deploy');
+expectFileIncludes('deploy.sh', deployScript, 'validate_node_red_runtime_dependencies()', 'defines a field-safe Node-RED runtime dependency validator');
+expectFileIncludes('deploy.sh', deployScript, "require('@chirpstack/chirpstack-api/api/device_grpc_pb')", 'validates the ChirpStack generated device gRPC module instead of the package root');
+expectFileIncludes('deploy.sh', deployScript, "require('sqlite3')", 'validates the existing sqlite3 native module before attempting npm install');
+expectFileIncludes('deploy.sh', deployScript, 'if validate_node_red_runtime_dependencies; then', 'skips npm install when deployed Node-RED runtime dependencies are already usable');
+expectFileIncludes('deploy.sh', deployScript, 'npm install --omit=dev --no-fund --no-audit --ignore-scripts', 'tries a no-lifecycle npm install before any native rebuild fallback');
+expectFileExcludes('deploy.sh', deployScript, 'if cd /srv/node-red && npm install --omit=dev --no-fund --no-audit >"$npm_log" 2>&1; then', 'unconditional native npm install during live deploy');
+expectFileIncludes('deploy.sh', deployScript, 'ensure_sync_link_state()', 'validates edge sync link-state during deploy');
+expectFileIncludes('deploy.sh', deployScript, 'PRAGMA table_info(sync_link_state)', 'validates sync_link_state schema during deploy');
+expectFileIncludes('deploy.sh', deployScript, 'sync_link_state column is missing and cannot be repaired safely', 'fails deploy clearly for unrecoverable sync_link_state schema drift');
+expectFileIncludes('deploy.sh', deployScript, "linked users exist but sync_link_state has no linked cloud row", 'detects linked gateways whose sync_link_state was not migrated');
+expectFileIncludes('deploy.sh', deployScript, 'INSERT INTO sync_link_state', 'repairs sync_link_state from existing linked users during deploy');
 for (const seedDatabasePath of seedDatabasePaths) {
   const relativeSeedPath = path.relative(path.resolve(__dirname, '..'), seedDatabasePath);
   const columns = new Set(readTableColumns(seedDatabasePath, 'devices'));
@@ -2443,6 +2482,14 @@ for (const seedDatabasePath of seedDatabasePaths) {
     `${relativeSeedPath} includes device_mode in the bundled devices schema`,
     `${relativeSeedPath} is missing device_mode in the bundled devices schema`
   );
+  const syncLinkStateColumns = new Set(readTableColumns(seedDatabasePath, 'sync_link_state'));
+  for (const name of ['peer_node', 'linked', 'server_url', 'cloud_user_id', 'gateway_device_eui', 'updated_at']) {
+    expectCondition(
+      syncLinkStateColumns.has(name),
+      `${relativeSeedPath} includes sync_link_state.${name} in the bundled schema`,
+      `${relativeSeedPath} is missing sync_link_state.${name} in the bundled schema`
+    );
+  }
   const deviceDataColumns = new Set(readTableColumns(seedDatabasePath, 'device_data'));
   expectCondition(
     deviceDataColumns.has('adc_ch1v'),
@@ -2694,6 +2741,9 @@ if (fs.existsSync(seedSqlPath)) {
   expectFileIncludes('seed-blank.sql', seedSql, 'applied_commands', 'seed-blank.sql includes applied_commands table (WS3)');
   expectFileIncludes('seed-blank.sql', seedSql, 'chameleon_readings', 'seed-blank.sql includes chameleon_readings table');
   expectFileIncludes('seed-blank.sql', seedSql, 'valve_actuation_expectations', 'seed-blank.sql includes valve_actuation_expectations table (WS1)');
+  expectFileIncludes('seed-blank.sql', seedSql, 'CREATE TABLE sync_link_state', 'seed-blank.sql defines sync_link_state');
+  expectFileIncludes('seed-blank.sql', seedSql, 'peer_node          TEXT PRIMARY KEY', 'seed-blank.sql keys sync_link_state by peer_node');
+  expectFileIncludes('seed-blank.sql', seedSql, 'gateway_device_eui TEXT', 'seed-blank.sql stores sync_link_state gateway identity');
 } else {
   fail(`missing database/seed-blank.sql at ${seedSqlPath}`);
 }

@@ -500,6 +500,18 @@ CREATE TABLE sync_cursor (
 );
 
 -- ---------------------------------------------------------------------------
+-- sync_link_state
+-- ---------------------------------------------------------------------------
+CREATE TABLE sync_link_state (
+  peer_node          TEXT PRIMARY KEY,
+  linked            INTEGER NOT NULL DEFAULT 0,
+  server_url        TEXT,
+  cloud_user_id     TEXT,
+  gateway_device_eui TEXT,
+  updated_at        TEXT NOT NULL
+);
+
+-- ---------------------------------------------------------------------------
 -- chameleon_readings
 -- ---------------------------------------------------------------------------
 CREATE TABLE chameleon_readings (

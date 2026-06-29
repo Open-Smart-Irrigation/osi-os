@@ -186,6 +186,14 @@ const schemaContract = {
     'created_at',
     'updated_at',
   ],
+  sync_link_state: [
+    'peer_node',
+    'linked',
+    'server_url',
+    'cloud_user_id',
+    'gateway_device_eui',
+    'updated_at',
+  ],
   history_channel_rollups: [
     'id',
     'zone_id',

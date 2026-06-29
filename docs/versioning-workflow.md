@@ -161,6 +161,7 @@ ssh root@<pi-ip> 'uci set osi-server.cloud.firmware_version=<NEW> && uci commit 
 # Verify
 ssh root@<pi-ip> 'uci get osi-server.cloud.firmware_version'   # → <NEW>
 ssh root@<pi-ip> 'cat /srv/node-red/node_modules/osi-cloud-http/index.js | head -1'  # → 'use strict';
+ssh root@<pi-ip> "sqlite3 /data/db/farming.db \"SELECT CASE WHEN EXISTS (SELECT 1 FROM users WHERE auth_mode='server' AND server_url IS NOT NULL AND trim(server_url) <> '') THEN (SELECT COUNT(*) FROM sync_link_state WHERE peer_node='cloud' AND linked=1) ELSE 1 END;\""  # → 1 for linked gateways
 ```
 
 Kill the server when done:
@@ -216,6 +217,7 @@ On each Pi after Node-RED restarts:
 - [ ] Dashboard loads without console errors
 - [ ] Latest heartbeat visible in osi-server cloud (within 90 s)
 - [ ] `osi-cloud-http` module resolves: `cat /srv/node-red/node_modules/osi-cloud-http/index.js | head -1`
+- [ ] Linked gateways have `sync_link_state(peer_node='cloud', linked=1)`; if not, stop before trusting cloud analysis freshness.
 
 ---
 

@@ -157,6 +157,13 @@ This guard is acceptable on low-volume structural triggers. Raw-history insert
 triggers are removed entirely and therefore do not pay a hot-path guard cost.
 Raw-history update triggers only enqueue bounded dirty keys when linked.
 
+Upgrade invariant: an already-linked gateway is identified by
+`users.auth_mode='server'` and a non-empty `users.server_url`. Runtime startup,
+image migrations, and `deploy.sh` must backfill `sync_link_state('cloud')` from
+that existing `users` row and the canonical gateway EUI before link-gated
+triggers are trusted. Do not read `linked_users` for this migration; current
+field databases do not contain that table.
+
 ## 6. Data Classification
 
 ### 6.1 Structural Outbox

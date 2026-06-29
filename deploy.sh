@@ -65,6 +65,149 @@ fetch_required() {
     echo "OK"
 }
 
+refresh_local_node_red_helpers() {
+    echo "--- Node-RED local helpers ---"
+    mkdir -p /srv/node-red/node_modules
+    for module in osi-chameleon-helper \
+                  osi-chirpstack-helper \
+                  osi-cloud-http \
+                  osi-db-helper \
+                  osi-dendro-helper \
+                  osi-history-helper; do
+        if [ -d "/srv/node-red/$module" ]; then
+            rm -rf "/srv/node-red/node_modules/$module"
+            cp -a "/srv/node-red/$module" "/srv/node-red/node_modules/$module"
+        fi
+    done
+    echo "OK"
+}
+
+validate_node_red_runtime_dependencies() {
+    (
+        cd /srv/node-red
+        node <<'NODE'
+const fs = require('fs');
+
+const explicitModuleChecks = [
+  ['@chirpstack/chirpstack-api/api/device_grpc_pb', () => require('@chirpstack/chirpstack-api/api/device_grpc_pb')],
+  ['sqlite3', () => require('sqlite3')],
+];
+
+const requiredModules = [
+  '@chirpstack/chirpstack-api/api/device_pb',
+  '@chirpstack/chirpstack-api/api/application_grpc_pb',
+  '@chirpstack/chirpstack-api/api/application_pb',
+  '@chirpstack/chirpstack-api/api/tenant_grpc_pb',
+  '@chirpstack/chirpstack-api/api/tenant_pb',
+  '@chirpstack/chirpstack-api/api/device_profile_grpc_pb',
+  '@chirpstack/chirpstack-api/api/device_profile_pb',
+  '@chirpstack/chirpstack-api/api/gateway_grpc_pb',
+  '@chirpstack/chirpstack-api/api/gateway_pb',
+  '@chirpstack/chirpstack-api/common/common_pb',
+  '@grpc/grpc-js',
+  'bcryptjs',
+  'google-protobuf',
+  'osi-chameleon-helper',
+  'osi-chirpstack-helper',
+  'osi-cloud-http',
+  'osi-db-helper',
+  'osi-dendro-helper',
+  'osi-history-helper',
+];
+
+const advisoryFiles = [
+  'node_modules/@rakwireless/field-tester-server/package.json',
+];
+
+const optionalAlternatives = [
+  [
+    'node-red-node-sqlite',
+    'node_modules/node-red-node-sqlite/package.json',
+    '/usr/lib/node/node-red/node_modules/node-red-node-sqlite/package.json',
+  ],
+];
+
+let ok = true;
+for (const [moduleName, load] of explicitModuleChecks) {
+  try {
+    load();
+  } catch (error) {
+    ok = false;
+    const message = error && error.message ? error.message : String(error);
+    console.error('missing or unusable Node-RED module: ' + moduleName + ' - ' + message);
+  }
+}
+
+for (const moduleName of requiredModules) {
+  try {
+    require(moduleName);
+  } catch (error) {
+    ok = false;
+    const message = error && error.message ? error.message : String(error);
+    console.error('missing or unusable Node-RED module: ' + moduleName + ' - ' + message);
+  }
+}
+
+for (const filePath of advisoryFiles) {
+  if (!fs.existsSync(filePath)) {
+    console.error('WARN: optional Node-RED runtime package file is missing: ' + filePath);
+  }
+}
+
+for (const [label, ...paths] of optionalAlternatives) {
+  if (!paths.some((filePath) => fs.existsSync(filePath))) {
+    ok = false;
+    console.error('missing Node-RED runtime package: ' + label + ' (' + paths.join(' or ') + ')');
+  }
+}
+
+process.exit(ok ? 0 : 1);
+NODE
+    )
+}
+
+install_node_red_runtime_dependencies_if_needed() {
+    echo "--- Node-RED runtime dependencies ---"
+    refresh_local_node_red_helpers
+    if validate_node_red_runtime_dependencies; then
+        echo "OK: existing Node-RED runtime dependencies are usable"
+        return 0
+    fi
+
+    echo "WARN: Node-RED runtime dependencies incomplete; trying npm install without lifecycle scripts" >&2
+    npm_log="$TMP_DIR/npm-install.log"
+    if cd /srv/node-red && npm install --omit=dev --no-fund --no-audit --ignore-scripts >"$npm_log" 2>&1; then
+        tail -20 "$npm_log"
+    else
+        tail -80 "$npm_log" >&2
+        echo "WARN: npm install --ignore-scripts failed" >&2
+    fi
+
+    refresh_local_node_red_helpers
+    if validate_node_red_runtime_dependencies; then
+        echo "OK: Node-RED runtime dependencies are usable after no-lifecycle install"
+        return 0
+    fi
+
+    echo "WARN: Node-RED runtime dependencies still incomplete; trying full npm install" >&2
+    npm_full_log="$TMP_DIR/npm-install-full.log"
+    if cd /srv/node-red && npm install --omit=dev --no-fund --no-audit >"$npm_full_log" 2>&1; then
+        tail -20 "$npm_full_log"
+    else
+        tail -80 "$npm_full_log" >&2
+        echo "ERROR: npm install failed and Node-RED runtime dependencies are still incomplete" >&2
+        echo "Hint: field Pi images may lack the Python/toolchain needed for sqlite3 native rebuilds; preserve a working /srv/node-red/node_modules or deploy target-built modules." >&2
+        return 1
+    fi
+
+    refresh_local_node_red_helpers
+    validate_node_red_runtime_dependencies || {
+        echo "ERROR: Node-RED runtime dependency validation failed after npm install" >&2
+        return 1
+    }
+    echo "OK: Node-RED runtime dependencies are usable after full install"
+}
+
 run_communication_preflight() {
     echo "--- Communication preflight ---"
     preflight_dir="$TMP_DIR/preflight"
@@ -462,6 +605,134 @@ function all(sql) {
 NODE
 }
 
+ensure_sync_link_state() {
+    echo "--- Sync link-state gate ---"
+    if [ ! -e "$DB_PATH" ]; then
+        echo "SKIP: no live database at $DB_PATH"
+        return 0
+    fi
+    node <<'NODE'
+const fs = require('fs');
+const cp = require('child_process');
+const dbPath = '/data/db/farming.db';
+if (!fs.existsSync(dbPath)) {
+  console.log('SKIP: no live database at ' + dbPath);
+  process.exit(0);
+}
+const sqlite3 = require('/srv/node-red/node_modules/sqlite3');
+const db = new sqlite3.Database(dbPath);
+function run(sql, params = []) {
+  return new Promise((resolve, reject) => db.run(sql, params, (err) => err ? reject(err) : resolve()));
+}
+function all(sql, params = []) {
+  return new Promise((resolve, reject) => db.all(sql, params, (err, rows) => err ? reject(err) : resolve(rows || [])));
+}
+function normalizeGatewayDeviceEui(value) {
+  const raw = String(value || '').trim().replace(/[^0-9a-fA-F]/g, '').toUpperCase();
+  if (!raw) return '';
+  if (raw.length === 16) return raw === '0101010101010101' ? '' : raw;
+  if (raw.length === 12) return raw.slice(0, 6) + 'FFFE' + raw.slice(6);
+  return '';
+}
+function readUci(key) {
+  try {
+    return String(cp.execFileSync('/bin/sh', ['-lc', 'uci -q get ' + key + ' 2>/dev/null || true'], { encoding: 'utf8' }) || '').trim();
+  } catch (_) {
+    return '';
+  }
+}
+(async () => {
+  await run('PRAGMA busy_timeout=5000');
+  await run(`CREATE TABLE IF NOT EXISTS sync_link_state (
+    peer_node TEXT PRIMARY KEY,
+    linked INTEGER NOT NULL DEFAULT 0,
+    server_url TEXT,
+    cloud_user_id TEXT,
+    gateway_device_eui TEXT,
+    updated_at TEXT NOT NULL
+  )`);
+  const linkStateColumns = new Set((await all('PRAGMA table_info(sync_link_state)')).map((row) => row.name));
+  for (const requiredColumn of ['peer_node', 'linked']) {
+    if (!linkStateColumns.has(requiredColumn)) {
+      throw new Error('sync_link_state column is missing and cannot be repaired safely: ' + requiredColumn);
+    }
+  }
+  for (const [columnName, columnType] of [
+    ['server_url', 'TEXT'],
+    ['cloud_user_id', 'TEXT'],
+    ['gateway_device_eui', 'TEXT'],
+    ['updated_at', 'TEXT']
+  ]) {
+    if (!linkStateColumns.has(columnName)) {
+      await run(`ALTER TABLE sync_link_state ADD COLUMN ${columnName} ${columnType}`);
+    }
+  }
+  const linkedUsers = await all(`
+    SELECT id, username, server_url, cloud_user_id, server_linked_at
+      FROM users
+     WHERE auth_mode = 'server'
+       AND server_url IS NOT NULL
+       AND trim(server_url) <> ''
+     ORDER BY COALESCE(server_linked_at, '') DESC, id DESC
+     LIMIT 1`);
+  if (!linkedUsers.length) {
+    console.log('OK: no linked users; sync_link_state may remain unlinked');
+    db.close();
+    return;
+  }
+
+  const linkedRows = await all("SELECT peer_node FROM sync_link_state WHERE peer_node='cloud' AND linked=1 LIMIT 1");
+  const gatewayRows = await all(`
+    SELECT gateway_device_eui FROM devices
+     WHERE deleted_at IS NULL
+       AND gateway_device_eui IS NOT NULL
+       AND trim(gateway_device_eui) <> ''
+     UNION ALL
+    SELECT gateway_device_eui FROM irrigation_zones
+     WHERE deleted_at IS NULL
+       AND gateway_device_eui IS NOT NULL
+       AND trim(gateway_device_eui) <> ''
+     LIMIT 1`);
+  const gatewayDeviceEui = normalizeGatewayDeviceEui(readUci('osi-server.cloud.link_gateway_device_eui'))
+    || normalizeGatewayDeviceEui(readUci('osi-server.cloud.device_eui'))
+    || normalizeGatewayDeviceEui(gatewayRows[0] && gatewayRows[0].gateway_device_eui);
+  if (!gatewayDeviceEui) {
+    throw new Error('linked users exist but no gateway EUI is available to repair sync_link_state');
+  }
+  if (!linkedRows.length) {
+    console.error('WARN: linked users exist but sync_link_state has no linked cloud row; repairing from users');
+  }
+  const user = linkedUsers[0];
+  await run(
+    `INSERT INTO sync_link_state(peer_node, linked, server_url, cloud_user_id, gateway_device_eui, updated_at)
+       VALUES('cloud', 1, ?, ?, ?, ?)
+       ON CONFLICT(peer_node) DO UPDATE SET
+         linked=1,
+         server_url=excluded.server_url,
+         cloud_user_id=excluded.cloud_user_id,
+         gateway_device_eui=excluded.gateway_device_eui,
+         updated_at=excluded.updated_at`,
+    [
+      String(user.server_url || '').trim(),
+      user.cloud_user_id == null ? null : String(user.cloud_user_id),
+      gatewayDeviceEui,
+      new Date().toISOString()
+    ]
+  );
+  const okRows = await all("SELECT COUNT(*) AS count FROM sync_link_state WHERE peer_node='cloud' AND linked=1 AND gateway_device_eui IS NOT NULL AND trim(gateway_device_eui) <> ''");
+  if (!okRows[0] || Number(okRows[0].count) !== 1) {
+    throw new Error('sync_link_state validation failed after deploy repair');
+  }
+  console.log('OK: sync_link_state linked for cloud gateway ' + gatewayDeviceEui);
+  db.close();
+})().catch((err) => {
+  console.error(err && err.stack ? err.stack : err);
+  db.close();
+  process.exit(1);
+});
+NODE
+}
+
 echo "=== OSI OS Deploy ==="
 echo "Source: $BASE"
 
@@ -575,20 +846,13 @@ fetch_required "LoRain codec" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/codecs/aquascope_lorain_decoder.js" \
     "/srv/node-red/codecs/aquascope_lorain_decoder.js"
 
-echo "--- Node-RED runtime dependencies ---"
-npm_log="$TMP_DIR/npm-install.log"
-if cd /srv/node-red && npm install --omit=dev --no-fund --no-audit >"$npm_log" 2>&1; then
-    tail -20 "$npm_log"
-else
-    tail -80 "$npm_log" >&2
-    echo "ERROR: npm install failed" >&2
-    exit 1
-fi
+install_node_red_runtime_dependencies_if_needed
 
 ensure_dendro_schema
 ensure_zone_irrigation_calibration_schema
 ensure_analysis_views_schema
 ensure_chameleon_schema
+ensure_sync_link_state
 
 fix_mosquitto_ownership() {
     echo "--- Mosquitto ownership ---"

@@ -35,6 +35,12 @@ that invariant and is also chained from `scripts/verify-sync-flow.js`.
   avoiding the edge of nominal card capacity.
 - `node-red-node-sqlite` must be built into both images. The native `sqlite3`
   module comes from this OpenWrt package, not from bundled npm modules.
+- History-sync link-state migrations must backfill existing linked gateways
+  from `users.auth_mode='server'` plus the canonical gateway EUI. Do not seed
+  `sync_link_state` from `linked_users`; that table is not present on current
+  field databases. `deploy.sh` and `scripts/verify-sync-flow.js` must catch a
+  linked `users` row with no linked `sync_link_state('cloud')` row before a
+  rollout is considered safe.
 - `/srv/node-red` is the Node-RED runtime directory. Do not use
   `/var/lib/node-red/.node-red`; `/var` is tmp-backed in this image family.
 - `/etc/uci-defaults/98_osi_node_red_seed` seeds `/srv/node-red` on first boot
