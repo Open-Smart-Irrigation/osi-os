@@ -134,19 +134,20 @@ for the dashboard title and horizontal Balken image. The header keeps its
 existing actions, language switcher, account menu, responsive wrapping, and
 welcome text behavior.
 
-`web/react-gui/src/pages/Register.tsx` and
-`web/react-gui/public/locales/{en,de-CH,fr,it}/auth.json` should remove stale
-Open Smart Irrigation product copy from the register path. The register screen
-does not need a new logo unless the implementation can reuse the login branding
-without increasing layout risk.
+`web/react-gui/src/pages/Register.tsx` and all supported
+`web/react-gui/public/locales/*/auth.json` files should remove stale Open Smart
+Irrigation product copy from the register path. The register screen does not
+need a new logo unless the implementation can reuse the login branding without
+increasing layout risk.
 
-`web/react-gui/public/locales/{en,de-CH,fr,it}/dashboard.json` should replace
-visible irrigation-only wording with zone wording where that copy is rendered.
-The dashboard title itself is owned by the brand module, not by the
-`dashboard.title` locale key, to avoid drift between a constant and an unused
-forward-looking translation. Existing account-link copy that names `OSI Server`
-stays as-is because it names the sync/cloud service, not the edge platform
-brand.
+`web/react-gui/public/locales/*/dashboard.json` should set the dormant
+`dashboard.title` key to `AgroLink Dashboard` so stale Open Smart Irrigation
+product copy does not survive in locale resources. The rendered dashboard title
+itself is still owned by the brand module, not by the `dashboard.title` locale
+key. Dashboard locale files should also replace visible irrigation-only wording
+with zone wording where that copy is rendered. Existing account-link copy that
+names `OSI Server` stays as-is because it names the sync/cloud service, not the
+edge platform brand.
 
 `web/react-gui/public/locales/*/history.json`,
 `web/react-gui/public/locales/*/dashboard.json`, and
@@ -206,10 +207,14 @@ The implementation plan should include focused tests before implementation:
    `Powered by OSI OS` are rendered.
 4. A focused terminology check proves no user-visible locale copy still uses
    `irrigation zone` or `Irrigation Zones`.
-5. A focused SSID check proves both supported AP scripts contain
+5. A focused product-copy check proves no locale resource still uses Open Smart
+   Irrigation as the GUI product name.
+6. The brand resolver test directory must be included in the `npm run
+   test:unit` Vitest allow-list so it is not only run by a one-off command.
+7. A focused SSID check proves both supported AP scripts contain
    `AgroLink-${GWID_END}` and the Pi 4/Pi 5 AP files stay byte-identical for
    parity.
-6. Locale JSON changes are covered through the React build and any existing
+8. Locale JSON changes are covered through the React build and any existing
    i18n loading tests.
 
 Verification commands:
@@ -222,6 +227,7 @@ diff -qr web/react-gui/build feeds/chirpstack-openwrt-feed/apps/node-red/files/g
 rg -n 'set wireless\.default_radio0\.ssid="AgroLink-\$\{GWID_END\}"' \
   conf/full_raspberrypi_bcm27xx_bcm2712/files/etc/uci-defaults/99_config_chirpstack_ap \
   conf/full_raspberrypi_bcm27xx_bcm2709/files/etc/uci-defaults/99_config_chirpstack_ap
+! rg -n "Open Smart Irrigation|Open Smart irrigation" web/react-gui/public/locales
 cmp -s \
   conf/full_raspberrypi_bcm27xx_bcm2712/files/etc/uci-defaults/99_config_chirpstack_ap \
   conf/full_raspberrypi_bcm27xx_bcm2709/files/etc/uci-defaults/99_config_chirpstack_ap
