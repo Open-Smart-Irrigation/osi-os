@@ -24,7 +24,7 @@
     "failed": "Impossible d'assigner l'appareil"
   },
   "createZoneModal": {
-    "title": "Créer une zone d'irrigation",
+    "title": "Créer une zone",
     "zoneName": "Nom de la zone",
     "zoneNamePlaceholder": "ex. Jardin A, Champ Nord, Verger 1",
     "zoneNameRequired": "Le nom de la zone est requis",

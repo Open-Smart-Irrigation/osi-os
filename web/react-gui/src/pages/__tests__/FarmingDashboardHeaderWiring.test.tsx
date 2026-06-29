@@ -34,7 +34,7 @@ vi.mock('react-i18next', () => ({
         'emptyState.subtitle': 'Get started',
         'emptyState.createZone': 'Create Zone',
         'emptyState.addDevice': 'Add Device',
-        irrigationZones: 'Irrigation Zones',
+        irrigationZones: 'Zones',
         unassignedDevices: 'Unassigned Devices',
         unassignedSubtitle: 'These devices are not assigned',
         soilSensors: 'Soil Sensors',

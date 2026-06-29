@@ -1,0 +1,96 @@
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import path from 'node:path';
+import { describe, it } from 'node:test';
+import { fileURLToPath } from 'node:url';
+
+const testDir = path.dirname(fileURLToPath(import.meta.url));
+const reactRoot = path.resolve(testDir, '..');
+const repoRoot = path.resolve(reactRoot, '..', '..');
+
+function readText(relativePath: string): string {
+  return fs.readFileSync(path.join(repoRoot, relativePath), 'utf8');
+}
+
+function readReactJson(relativePath: string): any {
+  return JSON.parse(fs.readFileSync(path.join(reactRoot, relativePath), 'utf8'));
+}
+
+function listJsonFiles(dir: string): string[] {
+  return fs.readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+    const fullPath = path.join(dir, entry.name);
+    if (entry.isDirectory()) return listJsonFiles(fullPath);
+    return entry.isFile() && entry.name.endsWith('.json') ? [fullPath] : [];
+  });
+}
+
+describe('AgroLink branding source contracts', () => {
+  it('uses AgroLink auth copy in supported brand languages', () => {
+    const expectedRegisterSubtitles: Record<string, string> = {
+      en: 'Register for AgroLink',
+      'de-CH': 'Für AgroLink registrieren',
+      fr: "S'inscrire à AgroLink",
+      it: 'Registrati ad AgroLink',
+      es: 'Regístrate en AgroLink',
+      pt: 'Registe-se no AgroLink',
+      lg: 'Wandiika mu AgroLink',
+    };
+
+    for (const [locale, registerSubtitle] of Object.entries(expectedRegisterSubtitles)) {
+      const auth = readReactJson(`public/locales/${locale}/auth.json`);
+      assert.equal(auth.login.title, 'AgroLink', `${locale} login title`);
+      assert.equal(auth.register.subtitle, registerSubtitle, `${locale} register subtitle`);
+    }
+  });
+
+  it('does not leave Open Smart Irrigation product copy in locale resources', () => {
+    const localeRoot = path.join(reactRoot, 'public', 'locales');
+    const offenders = listJsonFiles(localeRoot).filter((filePath) => (
+      /open smart irrigation/i.test(fs.readFileSync(filePath, 'utf8'))
+    ));
+
+    assert.deepEqual(offenders.map((filePath) => path.relative(reactRoot, filePath)), []);
+  });
+
+  it('keeps dormant dashboard title keys aligned with the brand module', () => {
+    for (const locale of ['en', 'de-CH', 'fr', 'it', 'es', 'pt', 'lg']) {
+      const dashboard = readReactJson(`public/locales/${locale}/dashboard.json`);
+      assert.equal(dashboard.title, 'AgroLink Dashboard', `${locale} dashboard title`);
+    }
+  });
+
+  it('keeps user-visible locale copy on zone terminology', () => {
+    const localeRoot = path.join(reactRoot, 'public', 'locales');
+    const forbidden = [
+      /irrigation zone/i,
+      /irrigation zones/i,
+      /bewässerungszone/i,
+      /bewässerungszonen/i,
+      /zone d'irrigation/i,
+      /zones d'irrigation/i,
+      /zona di irrigazione/i,
+      /zone di irrigazione/i,
+    ];
+
+    const offenders = listJsonFiles(localeRoot).flatMap((filePath) => {
+      const text = fs.readFileSync(filePath, 'utf8');
+      return forbidden
+        .filter((pattern) => pattern.test(text))
+        .map((pattern) => `${path.relative(reactRoot, filePath)} matches ${pattern}`);
+    });
+
+    assert.deepEqual(offenders, []);
+  });
+
+  it('sets the AgroLink SSID only on supported full Raspberry Pi profiles', () => {
+    const pi5Ap = 'conf/full_raspberrypi_bcm27xx_bcm2712/files/etc/uci-defaults/99_config_chirpstack_ap';
+    const pi4Ap = 'conf/full_raspberrypi_bcm27xx_bcm2709/files/etc/uci-defaults/99_config_chirpstack_ap';
+    const unsupportedPi1Ap = 'conf/full_raspberrypi_bcm27xx_bcm2708/files/etc/uci-defaults/99_config_chirpstack_ap';
+    const expectedLine = 'set wireless.default_radio0.ssid="AgroLink-${GWID_END}"';
+
+    assert.ok(readText(pi5Ap).includes(expectedLine), 'Pi 5 AP script uses AgroLink SSID');
+    assert.ok(readText(pi4Ap).includes(expectedLine), 'Pi 4 AP script uses AgroLink SSID');
+    assert.equal(readText(pi4Ap), readText(pi5Ap), 'supported Pi 4/Pi 5 AP scripts must match');
+    assert.doesNotMatch(readText(unsupportedPi1Ap), /AgroLink/);
+  });
+});
