@@ -1264,12 +1264,19 @@ CREATE TRIGGER trg_sync_device_data_dirty_au
 AFTER UPDATE ON device_data
 FOR EACH ROW
 WHEN EXISTS (SELECT 1 FROM sync_link_state WHERE peer_node='cloud' AND linked=1)
+  AND COALESCE(
+    (SELECT gateway_device_eui FROM devices WHERE deveui=NEW.deveui AND deleted_at IS NULL),
+    (SELECT gateway_device_eui FROM sync_link_state WHERE peer_node='cloud')
+  ) IS NOT NULL
 BEGIN
   INSERT INTO sync_history_dirty_keys(peer_node, table_name, row_key, change_kind, source_row_id, changed_at)
   VALUES(
     'cloud',
     'device_data',
-    'DEVICE_DATA|' || COALESCE((SELECT gateway_device_eui FROM devices WHERE deveui=NEW.deveui), (SELECT gateway_device_eui FROM sync_link_state WHERE peer_node='cloud'), '') || '|' || NEW.id,
+    'DEVICE_DATA|' || COALESCE(
+      (SELECT gateway_device_eui FROM devices WHERE deveui=NEW.deveui AND deleted_at IS NULL),
+      (SELECT gateway_device_eui FROM sync_link_state WHERE peer_node='cloud')
+    ) || '|' || NEW.id,
     'correction',
     NEW.id,
     strftime('%Y-%m-%dT%H:%M:%fZ','now')
@@ -1501,13 +1508,19 @@ function cursorPatchFromResponse(response) {
     return { last_error: 'missing ACK boundary' };
   }
   if (response.ackedThroughId != null) {
-    return { last_acked_id: Number(response.ackedThroughId), last_error: null, retry_count: 0 };
+    return { last_acked_id: String(response.ackedThroughId), last_error: null, retry_count: 0 };
   }
   return { last_acked_key: String(response.ackedThroughKey), last_error: null, retry_count: 0 };
 }
 
 module.exports = { buildCanonicalColumns, hashHistoryRow, historyKey, nextRawQuery, cursorPatchFromResponse };
 ```
+
+The packaged Node-RED helper remains self-contained because it ships under
+`/usr/share/node-red`. To keep the duplicate hash implementation honest, the
+verifier must run the same golden fixtures through `scripts/lib/history-hash-v1.js`
+and both profile helper copies, and must assert byte-for-byte helper parity
+between `bcm2712` and `bcm2709`.
 
 Create `package.json`:
 
@@ -2073,6 +2086,7 @@ for (HistoryBatchRequest.Row row : request.rows()) {
     } catch (IllegalArgumentException validationFailure) {
         quarantineRepository.upsert(gatewayEui, request.tableName(), row.historyKey(), request.hashVersion(), row.payloadHash(), validationFailure.getMessage());
         results.add(new HistoryBatchResponse.RowResult(row.historyKey(), HistoryBatchResponse.Status.QUARANTINED, validationFailure.getMessage()));
+        // Safe to include in the ACK prefix only if this transaction commits.
         ackedThroughId = maxCursorId(ackedThroughId, row.historyKey());
         ackedThroughKey = row.historyKey();
         continue;
@@ -2104,6 +2118,12 @@ for (HistoryBatchRequest.Row row : request.rows()) {
     }
 }
 ```
+
+Do not return an ACK boundary from a transaction that has rolled back. In this
+implementation, retryable failures are represented as row results only when the
+method can return normally and commit prior row-index/quarantine writes. If a
+later failure marks the transaction rollback-only or propagates, no response
+body should be used by the edge to advance its cursor.
 
 The server must return `REJECTED_PERMANENT` for `unsupported_hash_version`; the
 edge helper in Task 6 turns that into a non-immediate retry so an unsupported
@@ -2384,9 +2404,8 @@ await exec("INSERT INTO irrigation_events(id, irrigation_zone_id, action, payloa
 const irrig = await all("SELECT event_uuid FROM irrigation_events WHERE id=1");
 if (irrig[0].event_uuid !== 'irrig-0016C001F11715E2-000000000001') throw new Error('irrigation event uuid mismatch');
 await exec("INSERT INTO irrigation_events(id, irrigation_zone_id, action, payload_json) VALUES(2, 1, 'CLOSE', '{}')");
-await exec("UPDATE irrigation_events SET event_uuid='irrig-0016C001F11715E2-' || printf('%012d', id) WHERE event_uuid IS NULL OR event_uuid=''");
 const backfilled = await all("SELECT event_uuid FROM irrigation_events WHERE id=2");
-if (backfilled[0].event_uuid !== 'irrig-0016C001F11715E2-000000000002') throw new Error('irrigation event uuid backfill mismatch');
+if (backfilled[0].event_uuid !== 'irrig-0016C001F11715E2-000000000000002') throw new Error('irrigation event uuid trigger mismatch');
 ```
 
 - [ ] **Step 2: Backfill existing irrigation event UUIDs**
@@ -2401,7 +2420,7 @@ if (!/^[0-9A-F]{16}$/.test(gatewayEui)) {
 }
 await run([
   "UPDATE irrigation_events",
-  "SET event_uuid = 'irrig-' || ? || '-' || printf('%012d', id)",
+  "SET event_uuid = 'irrig-' || ? || '-' || printf('%015d', id)",
   "WHERE event_uuid IS NULL OR event_uuid = ''"
 ].join(' '), [gatewayEui]);
 ```

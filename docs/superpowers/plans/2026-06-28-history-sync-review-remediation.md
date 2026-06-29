@@ -601,8 +601,16 @@ Use the same implementation in `scripts/lib/history-hash-v1.js` and both helper 
 
 ```js
 function encodeInteger(value) {
-  if (typeof value === 'number' && Number.isInteger(value)) return String(value);
-  if (typeof value === 'string' && /^-?\d+$/.test(value.trim())) return String(Number(value));
+  if (typeof value === 'number' && Number.isInteger(value)) {
+    if (!Number.isSafeInteger(value)) throw new Error(`INTEGER exceeds safe range ${value}`);
+    return String(value);
+  }
+  if (typeof value === 'bigint') return value.toString();
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    if (!/^-?\d+$/.test(trimmed)) throw new Error(`invalid INTEGER ${value}`);
+    return BigInt(trimmed).toString();
+  }
   throw new Error(`invalid INTEGER ${value}`);
 }
 
@@ -872,11 +880,17 @@ Expected: FAIL on fallback or migration coverage.
 Use this expression in seed and runtime trigger:
 
 ```sql
-'irrig-' || COALESCE(
+SELECT CASE WHEN COALESCE(
   (SELECT gateway_device_eui FROM irrigation_zones WHERE id = NEW.irrigation_zone_id AND deleted_at IS NULL),
-  (SELECT gateway_device_eui FROM sync_link_state WHERE peer_node = 'cloud'),
-  lower(hex(randomblob(8)))
-) || '-' || printf('%012d', NEW.id)
+  (SELECT gateway_device_eui FROM sync_link_state WHERE peer_node = 'cloud')
+) IS NULL THEN RAISE(ABORT, 'missing_gateway_device_eui') END;
+
+UPDATE irrigation_events
+SET event_uuid = 'irrig-' || COALESCE(
+  (SELECT gateway_device_eui FROM irrigation_zones WHERE id = NEW.irrigation_zone_id AND deleted_at IS NULL),
+  (SELECT gateway_device_eui FROM sync_link_state WHERE peer_node = 'cloud')
+) || '-' || printf('%015d', NEW.id)
+WHERE id = NEW.id;
 ```
 
 - [ ] **Step 4: Avoid outbox/UUID trigger ordering risk**
@@ -900,9 +914,13 @@ In `database/migrations/2026-06-28-history-sync-v1.sql`, after adding the column
 UPDATE irrigation_events
 SET event_uuid = 'irrig-' || COALESCE(
   (SELECT gateway_device_eui FROM irrigation_zones WHERE irrigation_zones.id = irrigation_events.irrigation_zone_id AND deleted_at IS NULL),
-  lower(hex(randomblob(8)))
-) || '-' || printf('%012d', id)
-WHERE event_uuid IS NULL OR event_uuid = '';
+  (SELECT gateway_device_eui FROM sync_link_state WHERE peer_node = 'cloud')
+) || '-' || printf('%015d', id)
+WHERE (event_uuid IS NULL OR event_uuid = '')
+  AND COALESCE(
+    (SELECT gateway_device_eui FROM irrigation_zones WHERE irrigation_zones.id = irrigation_events.irrigation_zone_id AND deleted_at IS NULL),
+    (SELECT gateway_device_eui FROM sync_link_state WHERE peer_node = 'cloud')
+  ) IS NOT NULL;
 ```
 
 Runtime sync init should also run the same backfill after attempting `ALTER TABLE`.
