@@ -235,6 +235,80 @@ const schemaContract = {
     'created_at',
     'updated_at',
   ],
+  irrigation_events: [
+    'id',
+    'user_id',
+    'irrigation_zone_id',
+    'action',
+    'reason',
+    'aggregate_kpa',
+    'threshold_kpa',
+    'duration_minutes',
+    'valve_deveui',
+    'payload_json',
+    'event_uuid',
+    'created_at',
+  ],
+  sync_link_state: [
+    'peer_node',
+    'linked',
+    'server_url',
+    'cloud_user_id',
+    'gateway_device_eui',
+    'updated_at',
+  ],
+  sync_history_cursors: [
+    'peer_node',
+    'table_name',
+    'state',
+    'snapshot_high_id',
+    'last_acked_id',
+    'last_acked_key',
+    'last_shadow_acked_id',
+    'last_shadow_acked_key',
+    'last_shadow_error',
+    'backfill_started_at',
+    'backfill_completed_at',
+    'last_batch_id',
+    'last_batch_at',
+    'retry_count',
+    'next_attempt_at',
+    'last_error',
+  ],
+  sync_history_dirty_keys: [
+    'peer_node',
+    'table_name',
+    'row_key',
+    'change_kind',
+    'source_row_id',
+    'changed_at',
+    'status',
+    'attempts',
+    'next_attempt_at',
+    'last_error',
+  ],
+  sync_history_segments: [
+    'peer_node',
+    'table_name',
+    'segment_key',
+    'hash_version',
+    'canonical_row_count',
+    'syncable_row_count',
+    'syncable_payload_hash',
+    'quarantined_count',
+    'covered_max_id',
+    'computed_at',
+  ],
+  sync_history_quarantine: [
+    'peer_node',
+    'table_name',
+    'history_key',
+    'payload_hash',
+    'reason',
+    'first_seen_at',
+    'last_seen_at',
+    'attempts',
+  ],
 };
 
 const requiredIndexes = {
@@ -262,6 +336,13 @@ const requiredIndexes = {
     'idx_history_workspaces_user_zone',
     'idx_history_workspaces_user_default',
     'idx_history_workspaces_user_global_default',
+  ],
+  irrigation_events: [
+    'idx_irrig_events_user_created_at',
+    'idx_irrig_events_zone_created_at',
+    'idx_irrig_events_created_at',
+    'idx_irrigation_events_zone_id',
+    'idx_irrigation_events_event_uuid',
   ],
 };
 
@@ -323,6 +404,84 @@ const requiredIndexSqlFragments = {
     'on history_workspaces(user_id)',
     'where is_default = 1 and zone_id is null',
   ],
+  idx_irrigation_events_event_uuid: [
+    'unique index',
+    'on irrigation_events(event_uuid)',
+  ],
+};
+
+const requiredTriggerSqlFragments = {
+  trg_sync_irrigation_events_uuid_ai: [
+    'missing_gateway_device_eui',
+    "where peer_node = 'cloud' and linked = 1",
+    "nullif(trim(",
+    'insert into sync_outbox',
+    "aggregate_type='irrigation_event'",
+    'not exists',
+    "printf('%015d', new.id)",
+  ],
+  trg_dp_irrigation_events_outbox_ai: [
+    'not exists',
+    "aggregate_type='irrigation_event'",
+    "aggregate_key=new.event_uuid",
+  ],
+  trg_dp_irrigation_events_outbox_au_event_uuid: [
+    'not exists',
+    "aggregate_type='irrigation_event'",
+    "aggregate_key=new.event_uuid",
+  ],
+  trg_dp_chameleon_readings_outbox_ai: [
+    "'data_invalid', coalesce(new.data_invalid,0)",
+    "'comp_pending', coalesce(new.comp_pending,0)",
+  ],
+  trg_sync_device_data_dirty_au: [
+    "select gateway_device_eui from devices where deveui = new.deveui",
+    "<> '' begin",
+  ],
+  trg_sync_chameleon_readings_dirty_au: [
+    "select gateway_device_eui from devices where deveui = new.deveui",
+    "<> '' begin",
+  ],
+  trg_sync_dendro_readings_dirty_au: [
+    "select gateway_device_eui from devices where deveui = new.deveui",
+    "<> '' begin",
+  ],
+  trg_sync_zone_env_dirty_ai: [
+    "'zone-id:' || new.zone_id",
+  ],
+  trg_sync_zone_env_dirty_au: [
+    "'zone-id:' || new.zone_id",
+  ],
+  trg_sync_zone_recs_dirty_ai: [
+    "'zone-id:' || new.zone_id",
+  ],
+  trg_sync_zone_recs_dirty_au: [
+    "'zone-id:' || new.zone_id",
+  ],
+  trg_dp_dendro_readings_outbox_ai: [
+    "nullif(trim(",
+    "select gateway_device_eui from sync_link_state where peer_node = 'cloud'",
+    "'gateway_device_eui', coalesce(nullif(trim(",
+  ],
+  trg_gateway_locations_outbox_ai: [
+    "nullif(trim(new.gateway_device_eui)",
+    "aggregate_key",
+    "'gateway_device_eui', coalesce(nullif(trim(new.gateway_device_eui)",
+  ],
+  trg_gateway_locations_outbox_au: [
+    "nullif(trim(new.gateway_device_eui)",
+    "aggregate_key",
+    "'gateway_device_eui', coalesce(nullif(trim(new.gateway_device_eui)",
+  ],
+};
+
+const forbiddenTriggerSqlFragments = {
+  trg_sync_irrigation_events_uuid_ai: [
+    'randomblob(8)',
+  ],
+  trg_dp_dendro_readings_outbox_ai: [
+    "'0016c001f11715e2'",
+  ],
 };
 
 function sqlite(dbPath, sql) {
@@ -349,6 +508,11 @@ function indexSql(dbPath, indexName) {
 function tableSql(dbPath, tableName) {
   const escapedName = tableName.replace(/'/g, "''");
   return sqlite(dbPath, `SELECT sql FROM sqlite_master WHERE type = 'table' AND name = '${escapedName}';`);
+}
+
+function triggerSql(dbPath, triggerName) {
+  const escapedName = triggerName.replace(/'/g, "''");
+  return sqlite(dbPath, `SELECT sql FROM sqlite_master WHERE type = 'trigger' AND name = '${escapedName}';`);
 }
 
 function normalizeSql(sql) {
@@ -393,6 +557,20 @@ function verifyDb(dbPath) {
     const missingFragments = expectedFragments.filter((fragment) => !sql.includes(fragment));
     if (missingFragments.length) {
       throw new Error(`${dbPath}:${indexName} definition drift: ${sql || '<missing>'}`);
+    }
+  }
+  for (const [triggerName, expectedFragments] of Object.entries(requiredTriggerSqlFragments)) {
+    const sql = normalizeSql(triggerSql(dbPath, triggerName));
+    const missingFragments = expectedFragments.filter((fragment) => !sql.includes(fragment));
+    if (missingFragments.length) {
+      throw new Error(`${dbPath}:${triggerName} definition drift: ${sql || '<missing>'}`);
+    }
+  }
+  for (const [triggerName, forbiddenFragments] of Object.entries(forbiddenTriggerSqlFragments)) {
+    const sql = normalizeSql(triggerSql(dbPath, triggerName));
+    const presentFragments = forbiddenFragments.filter((fragment) => sql.includes(fragment));
+    if (presentFragments.length) {
+      throw new Error(`${dbPath}:${triggerName} contains forbidden trigger fragments: ${presentFragments.join(',')}`);
     }
   }
   const historyQueryPlan = sqlite(

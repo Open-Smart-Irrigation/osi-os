@@ -30,6 +30,7 @@ const osiDbSeedPath = path.resolve(__dirname, '..', 'conf', 'full_raspberrypi_bc
 const osiNodeRedSeedPath = path.resolve(__dirname, '..', 'conf', 'full_raspberrypi_bcm27xx_bcm2712', 'files', 'etc', 'uci-defaults', '98_osi_node_red_seed');
 const installOsiOsPath = path.resolve(__dirname, '..', 'scripts', 'install-osi-os.sh');
 const seedSqlPath = path.resolve(__dirname, '..', 'database', 'seed-blank.sql');
+const seedSqlSource = fs.readFileSync(seedSqlPath, 'utf8');
 const stregaCodecPath = path.resolve(__dirname, '..', 'conf', 'full_raspberrypi_bcm27xx_bcm2712', 'files', 'usr', 'share', 'node-red', 'codecs', 'strega_gen1_decoder.js');
 const lsn50CodecPath = path.resolve(__dirname, '..', 'conf', 'full_raspberrypi_bcm27xx_bcm2712', 'files', 'usr', 'share', 'node-red', 'codecs', 'dragino_lsn50_decoder.js');
 const lorainCodecPath = path.resolve(__dirname, '..', 'conf', 'full_raspberrypi_bcm27xx_bcm2712', 'files', 'usr', 'share', 'node-red', 'codecs', 'aquascope_lorain_decoder.js');
@@ -88,6 +89,9 @@ const cloudHttpPackagePath = path.join(nodeRedRoot, 'osi-cloud-http', 'package.j
 const packageJsonPath = path.join(nodeRedRoot, 'package.json');
 execFileSync(process.execPath, [path.resolve(__dirname, 'verify-communication-contract.js')], { stdio: 'inherit' });
 execFileSync(process.execPath, [path.resolve(__dirname, 'verify-db-schema-consistency.js')], { stdio: 'inherit' });
+execFileSync(process.execPath, [path.resolve(__dirname, 'test-sync-history-schema.js')], { stdio: 'inherit' });
+execFileSync(process.execPath, [path.resolve(__dirname, 'test-sync-history-worker.js')], { stdio: 'inherit' });
+execFileSync(process.execPath, [path.resolve(__dirname, 'verify-history-hash-fixtures.js')], { stdio: 'inherit' });
 execFileSync(process.execPath, [path.resolve(__dirname, 'verify-history-api-contract.js'), '--allow-missing-history'], { stdio: 'inherit' });
 const deployScript = fs.readFileSync(deployScriptPath, 'utf8');
 const nodeRedInitScript = fs.readFileSync(nodeRedInitPath, 'utf8');
@@ -459,6 +463,32 @@ function expectFileIncludes(fileLabel, content, needle, description) {
     fail(`${fileLabel} missing ${description}`);
   } else {
     console.log(`OK ${fileLabel} ${description}`);
+  }
+}
+
+function triggerSql(content, triggerName) {
+  const pattern = new RegExp(`CREATE TRIGGER ${triggerName}[\\s\\S]*?END;`);
+  const match = String(content || '').match(pattern);
+  return match ? match[0] : '';
+}
+
+function normalizeSqlForSubstring(content) {
+  return String(content || '')
+    .replace(/\s*=\s*/g, '=')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function expectTriggerIncludes(fileLabel, content, triggerName, needle, description) {
+  const sql = triggerSql(content, triggerName);
+  if (!sql) {
+    fail(`${fileLabel} missing trigger ${triggerName}`);
+    return;
+  }
+  if (!normalizeSqlForSubstring(sql).includes(normalizeSqlForSubstring(needle))) {
+    fail(`${fileLabel} ${triggerName} missing ${description}`);
+  } else {
+    console.log(`OK ${fileLabel} ${triggerName} ${description}`);
   }
 }
 
@@ -1285,6 +1315,14 @@ expectIncludes('Finalize linked account state', "auth_mode = ?", 'finalizes link
 expectIncludes('Finalize linked account state', 'server_offline_verifier_version = ?', 'persists the synced offline verifier version locally');
 expectIncludes('Finalize linked account state', 'last_auth_sync_status = ?', 'marks linked auth as up to date after local-sync finalization');
 expectIncludes('Finalize linked account state', 'return [null, msg];', 'can stop before reporting link success');
+expectIncludes('Finalize linked account state', 'INSERT INTO sync_link_state', 'persists sync_link_state on successful account link');
+expectIncludes('Finalize linked account state', 'normalizeGatewayDeviceEui', 'linked account state normalizes gateway EUI');
+expectIncludes('Finalize linked account state', "flow.set('account_linked', true)", 'sets account_linked flow flag on successful account link');
+expectIncludes('Clear linked account state', 'UPDATE sync_link_state', 'marks sync_link_state unlinked during unlink');
+expectIncludes('Clear linked account state', 'linked=0', 'clears sync_link_state linked flag during unlink');
+expectIncludes('Clear linked account state', 'server_url=NULL', 'unlink clears sync_link_state server URL');
+expectIncludes('Clear linked account state', 'gateway_device_eui=NULL', 'unlink clears sync_link_state gateway identity');
+expectIncludes('Clear linked account state', "flow.set('account_linked', false)", 'clears account_linked flow flag during unlink');
 expectIncludes('Set Download Headers', 'Database download is disabled', 'keeps database download disabled');
 expectIncludes('Lookup Auth User', 'ORDER BY CASE WHEN username = ?', 'prefers local username matches');
 expectIncludes('Process Result', 'Multiple accounts match this username', 'rejects ambiguous linked logins');
@@ -1347,16 +1385,97 @@ expectIncludes('Sync Init Schema + Triggers', "'area_m2', NEW.area_m2", 'mirrors
 expectIncludes('Sync Init Schema + Triggers', "'irrigation_efficiency_pct', NEW.irrigation_efficiency_pct", 'mirrors irrigation efficiency changes into zone sync events');
 expectIncludes('Sync Init Schema + Triggers', "'prediction_card_enabled', COALESCE(NEW.prediction_card_enabled, 0)", 'mirrors prediction-card changes into zone sync events');
 expectIncludes('Sync Init Schema + Triggers', 'COALESCE(NEW.prediction_card_enabled,0) <> COALESCE(OLD.prediction_card_enabled,0)', 'queues outbox events when the prediction-card flag changes');
-expectIncludes('Sync Init Schema + Triggers', "'rain_mm_per_10min', NEW.rain_mm_per_10min", 'mirrors normalized rain telemetry into device-data sync events');
-expectIncludes('Sync Init Schema + Triggers', "'flow_liters_per_10min', NEW.flow_liters_per_10min", 'mirrors normalized flow telemetry into device-data sync events');
-expectIncludes('Sync Init Schema + Triggers', 'SELECT name FROM devices WHERE deveui = NEW.deveui AND deleted_at IS NULL', 'ignores deleted devices when mirroring device-data names into the outbox');
-expectIncludes('Sync Init Schema + Triggers', 'SELECT type_id FROM devices WHERE deveui = NEW.deveui AND deleted_at IS NULL', 'ignores deleted devices when mirroring device-data types into the outbox');
+expectIncludes('Sync Init Schema + Triggers', 'CREATE TABLE IF NOT EXISTS sync_link_state', 'creates sync link state table at runtime');
+expectIncludes('Sync Init Schema + Triggers', 'UPDATE irrigation_events SET event_uuid =', 'backfills stable irrigation event UUIDs at runtime');
+expectIncludes('Sync Init Schema + Triggers', 'CREATE TRIGGER trg_sync_irrigation_events_uuid_ai', 'creates stable irrigation event UUID trigger at runtime');
+expectFileIncludes('seed-blank.sql', seedSqlSource, 'idx_irrigation_events_event_uuid', 'irrigation events have stable sync identity');
+expectFileIncludes('seed-blank.sql', seedSqlSource, 'trg_sync_irrigation_events_uuid_ai', 'fresh DBs create stable irrigation event UUIDs');
+const syncInitSource = String(findNodeByName('Sync Init Schema + Triggers')?.func || '');
+for (const triggerName of [
+  'trg_sync_zones_outbox_au',
+  'trg_sync_devices_outbox_au',
+  'trg_sync_schedules_outbox_au',
+  'trg_gateway_locations_outbox_ai',
+  'trg_gateway_locations_outbox_au',
+]) {
+  expectFileIncludes('seed-blank.sql', seedSqlSource, triggerName, `defines ${triggerName}`);
+  expectTriggerIncludes('seed-blank.sql', seedSqlSource, triggerName, "WHERE peer_node = 'cloud' AND linked = 1", 'cloud link gate');
+  expectTriggerIncludes('Sync Init Schema + Triggers', syncInitSource, triggerName, "WHERE peer_node = 'cloud' AND linked = 1", 'cloud link gate');
+}
+expectFileIncludes('seed-blank.sql', seedSqlSource, 'sync_link_state', 'link-gates sync triggers');
+for (const triggerName of [
+  'trg_dp_device_data_outbox_ai',
+  'trg_dp_chameleon_readings_outbox_ai',
+  'trg_dp_dendro_readings_outbox_ai',
+  'trg_dp_dendro_daily_outbox_ai',
+  'trg_dp_dendro_daily_outbox_au',
+  'trg_dp_irrigation_events_outbox_ai',
+  'trg_dp_irrigation_events_outbox_au_event_uuid',
+  'trg_dp_zone_env_outbox_ai',
+  'trg_dp_zone_env_outbox_au',
+  'trg_dp_zone_recs_outbox_ai',
+  'trg_dp_zone_recs_outbox_au',
+]) {
+  expectIncludes('Sync Init Schema + Triggers', triggerName, `creates ${triggerName} at runtime`);
+  expectFileIncludes('seed-blank.sql', seedSqlSource, triggerName, `defines ${triggerName}`);
+  expectTriggerIncludes('seed-blank.sql', seedSqlSource, triggerName, "WHERE peer_node = 'cloud' AND linked = 1", 'cloud link gate');
+  expectTriggerIncludes('Sync Init Schema + Triggers', syncInitSource, triggerName, "WHERE peer_node = 'cloud' AND linked = 1", 'cloud link gate');
+}
+for (const triggerName of [
+  'trg_sync_device_data_dirty_au',
+  'trg_sync_chameleon_readings_dirty_au',
+  'trg_sync_dendro_readings_dirty_au',
+  'trg_sync_zone_env_dirty_ai',
+  'trg_sync_zone_env_dirty_au',
+  'trg_sync_zone_recs_dirty_ai',
+  'trg_sync_zone_recs_dirty_au',
+  'trg_sync_dendro_daily_dirty_ai',
+  'trg_sync_dendro_daily_dirty_au',
+]) {
+  expectIncludes('Sync Init Schema + Triggers', triggerName, `creates ${triggerName} at runtime`);
+  expectFileIncludes('seed-blank.sql', seedSqlSource, triggerName, `defines ${triggerName}`);
+}
+expectIncludes('Sync Init Schema + Triggers', 'sync_history_dirty_keys(peer_node, table_name, row_key', 'records history dirty keys at runtime');
+expectIncludes('Sync Init Schema + Triggers', 'ALTER TABLE sync_history_cursors ADD COLUMN last_shadow_acked_id INTEGER', 'adds shadow cursor id progress at runtime');
+expectIncludes('Sync Init Schema + Triggers', 'ALTER TABLE sync_history_cursors ADD COLUMN last_shadow_acked_key TEXT', 'adds shadow cursor key progress at runtime');
+expectIncludes('Sync Init Schema + Triggers', 'ALTER TABLE sync_history_cursors ADD COLUMN last_shadow_error TEXT', 'adds shadow cursor error state at runtime');
+expectIncludes('Sync Init Schema + Triggers', 'missing_gateway_device_eui', 'fails closed when irrigation UUID generation lacks a gateway identity');
+expectExcludes('Sync Init Schema + Triggers', 'lower(hex(randomblob(8)))', 'random irrigation UUID fallback');
+expectTriggerIncludes('Sync Init Schema + Triggers', syncInitSource, 'trg_dp_irrigation_events_outbox_ai', "'event_uuid', NEW.event_uuid", 'mirrors stable irrigation event UUIDs in outbox payloads');
 expectIncludes('Sync Init Schema + Triggers', 'SELECT irrigation_zone_id FROM devices WHERE deveui = NEW.deveui AND deleted_at IS NULL', 'ignores deleted devices when mirroring device-data zone bindings into the outbox');
 expectIncludes('Sync Init Schema + Triggers', 'SELECT gateway_device_eui FROM devices WHERE deveui = NEW.deveui AND deleted_at IS NULL', 'ignores deleted devices when mirroring device-data gateway bindings into the outbox');
 expectIncludes('Sync Init Schema + Triggers', 'SELECT zone_uuid FROM irrigation_zones WHERE id = NEW.zone_id AND deleted_at IS NULL', 'ignores deleted zones when mirroring zone environment rows into the outbox');
 expectIncludes('Sync Init Schema + Triggers', 'SELECT gateway_device_eui FROM irrigation_zones WHERE id = NEW.zone_id AND deleted_at IS NULL', 'ignores deleted zones when mirroring zone environment gateway bindings into the outbox');
 expectIncludes('Sync Init Schema + Triggers', 'SELECT zone_uuid FROM irrigation_zones WHERE id = NEW.irrigation_zone_id AND deleted_at IS NULL', 'ignores deleted zones when mirroring irrigation events into the outbox');
 expectIncludes('Sync Init Schema + Triggers', 'SELECT gateway_device_eui FROM irrigation_zones WHERE id = NEW.irrigation_zone_id AND deleted_at IS NULL', 'ignores deleted zones when mirroring irrigation event gateway bindings into the outbox');
+expectIncludes('Build History Batch', "require('/usr/share/node-red/osi-history-sync-helper')", 'loads history sync helper');
+expectIncludes('Build History Batch', "phase: 'shadow'", 'runs history sync in shadow mode first');
+expectIncludes('Build History Batch', 'hashVersion: 1', 'uses history hash v1');
+expectIncludes('Build History Batch', '/api/v1/sync/edge/history/batches', 'posts history batches to the v1 history endpoint');
+expectIncludes('Build History Batch', 'if (!syncToken)', 'history batch fails closed without sync token');
+expectIncludes('Build History Batch', 'return null', 'history batch stops before unauthenticated post');
+expectExcludes('Build History Batch', 'replace(//$/', 'malformed trailing slash normalizer in history sync builder');
+expectIncludes('Build History Batch', 'SELECT * FROM device_data WHERE id > ? ORDER BY id ASC LIMIT ?', 'uses id cursor for device_data history');
+expectIncludes('Build History Batch', 'next_attempt_at', 'honors history cursor retry backoff before building a batch');
+expectIncludes('Build History Batch', 'lastShadowAckedId', 'uses shadow ACK progress while shadowing');
+expectIncludes('Build History Batch', 'helper.hashHistoryRow', 'hashes raw rows through shared helper');
+expectIncludes('Build History Batch', 'snapshot_high_id', 'captures raw backfill high-water mark');
+expectIncludes('POST History Batch', 'osiCloudHttp.requestJsonIpv4', 'uses the shared IPv4 cloud HTTP helper for history batches');
+expectIncludes('Mark History Batch ACK', '!durableHistoryAck', 'keeps raw cursor non-durable while shadowing');
+expectIncludes('Mark History Batch ACK', 'helper.shouldApplyDurableAck', 'uses helper gate before applying durable history ACKs');
+expectIncludes('Mark History Batch ACK', 'history_mirror_write_v1_confirmed', 'durable ACK requires confirmed server mirror writes');
+expectIncludes('Mark History Batch ACK', 'ackedThroughId', 'history batch marker handles explicit ACK before raw trigger removal');
+expectIncludes('Mark History Batch ACK', 'last_shadow_acked_id', 'stores shadow ACK id separately from durable ACKs');
+expectIncludes('Mark History Batch ACK', 'last_shadow_acked_key', 'stores shadow ACK key separately from durable ACKs');
+expectIncludes('Mark History Batch ACK', 'history-shadow-ack', 'reports shadow ACK errors without confirming durable mirror writes');
+expectIncludes('Build History Manifest', 'SELECT table_name, segment_key, hash_version, canonical_row_count,', 'builds history manifests from cached segments');
+expectIncludes('Build History Manifest', "].join('\\n')", 'uses a real newline separator for history manifest SQL');
+expectExcludes('Build History Manifest', "].join('\\\\n')", 'does not use a literal backslash-n separator for history manifest SQL');
+expectIncludes('Build History Manifest', '/api/v1/sync/edge/history/manifests', 'posts history manifests to the v1 manifest endpoint');
+expectIncludes('Build History Manifest', 'if (!syncToken)', 'history manifest fails closed without sync token');
+expectIncludes('Build History Manifest', 'lastHistoryManifestIdleAt', 'history manifest builder skips empty manifest posts');
+expectIncludes('Build History Manifest', 'return null', 'history manifest stops before unauthenticated post');
+expectFileIncludes('seed-blank.sql', seedSqlSource, 'trg_sync_device_data_dirty_au', 'raw correction dirty-key trigger exists before raw trigger removal');
 expectExcludes('Sync Init Schema + Triggers', '" + gateway + "', 'malformed literal gateway fallback SQL in sync triggers');
 expectExcludes('Sync Init Schema + Triggers', '\'" + gatewaySql + "\'', 'double-quoted gatewaySql fallback fragments in sync init SQL');
 const migrationPreflightNodes = ['Build Cloud Bootstrap', 'Build Edge Event Batch', 'Build Pending Command Pull', 'Run Force Sync'];
@@ -1672,8 +1791,6 @@ expectIncludes('Apply Config', 'dendro_baseline_pending = 0,', 'clears the pendi
 expectIncludesById('lsn50-config-query-fn', 'dendro_baseline_calibration_signature,', 'keeps LSN50 config SELECT valid before the Chameleon calibration-status subquery');
 expectIncludes('Insert Chameleon Reading', 'INSERT INTO chameleon_readings', 'persists decoded Chameleon readings locally');
 expectIncludes('Insert Chameleon Reading', 'if (!d || d.isChameleon !== true) return msg;', 'passes non-Chameleon LSN50 payloads downstream');
-expectIncludes('Sync Init Schema + Triggers', 'CHAMELEON_READING_APPENDED', 'mirrors Chameleon readings into sync outbox');
-expectIncludes('Sync Init Schema + Triggers', "'data_invalid', NEW.data_invalid", 'syncs Chameleon data_invalid status');
 expectIncludes('Build Cloud Bootstrap', 'const chameleonReadingsRows = await q([', 'loads bootstrap Chameleon history before reordering it');
 expectIncludes('Build Cloud Bootstrap', 'const chameleonReadings = chameleonReadingsRows.slice().reverse();', 'replays bootstrap Chameleon history oldest-to-newest');
 expectIncludes('Build Cloud Bootstrap', "'  cr.data_invalid,'", 'includes Chameleon data_invalid in bootstrap readings');
@@ -2180,7 +2297,6 @@ expectIncludes('Sync Init Schema + Triggers', 'ALTER TABLE dendrometer_readings 
 expectIncludes('Sync Init Schema + Triggers', 'ALTER TABLE dendrometer_readings ADD COLUMN adc_ch1v REAL', 'adds CH1 storage to dendrometer_readings');
 expectIncludes('Sync Init Schema + Triggers', 'ALTER TABLE dendrometer_readings ADD COLUMN dendro_ratio REAL', 'adds ratio storage to dendrometer_readings');
 expectIncludes('Sync Init Schema + Triggers', 'ALTER TABLE dendrometer_readings ADD COLUMN dendro_mode_used TEXT', 'adds path metadata storage to dendrometer_readings');
-expectIncludes('Sync Init Schema + Triggers', "'lsn50_mode_code', NEW.lsn50_mode_code", 'mirrors observed LSN50 mode in device_data outbox events');
 expectIncludes('Auth + Parse LSN50 Mode', "Mode must be one of MOD1..MOD9", 'validates supported LSN50 modes on the local API');
 expectIncludes('Auth + Parse LSN50 Interval', "Minutes must be a whole number between 1 and ", 'validates LSN50 uplink interval minutes on the local API');
 expectIncludes('Auth + Parse LSN50 Interrupt', "Interrupt mode must be between 0 and 3", 'validates LSN50 interrupt-mode values on the local API');

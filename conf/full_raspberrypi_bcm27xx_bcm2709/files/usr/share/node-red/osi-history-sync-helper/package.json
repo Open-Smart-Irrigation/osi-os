@@ -1,0 +1,6 @@
+{
+  "name": "osi-history-sync-helper",
+  "version": "1.0.0",
+  "description": "Edge-to-cloud history sync protocol helper; separate from osi-history-helper GUI/history API helper.",
+  "main": "index.js"
+}

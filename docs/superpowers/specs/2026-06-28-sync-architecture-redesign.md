@@ -242,7 +242,7 @@ Backfill existing rows once using the hub EUI from `sync_link_state` or the
 same UCI/identity helper used by sync linking:
 
 ```text
-event_uuid = 'irrig-' || <gateway_device_eui> || '-' || printf('%012d', id)
+event_uuid = 'irrig-' || <gateway_device_eui> || '-' || printf('%015d', id)
 ```
 
 `origin_gateway_eui` is not added to `irrigation_events` solely for this
@@ -647,9 +647,14 @@ Processing:
 10. If a server dependency is temporarily unavailable, return
    `RETRYABLE_ERROR` and stop the ACK prefix before that row.
 
-The server must commit table writes, index writes, quarantine records, and the
-explicit `ackedThroughId` or `ackedThroughKey` boundary in one transaction
-before ACKing cursor advancement.
+The server must return an `ackedThroughId` or `ackedThroughKey` only for the
+prefix whose effects are durable. Table writes, row-index writes, quarantine
+records, and the returned ACK boundary must succeed or fail together. If a
+later row triggers an exception that rolls the transaction back, the server must
+not expose the speculative ACK boundary from the rolled-back attempt; either let
+the request fail without an ACK body, or assemble the response only after the
+transaction outcome is known. Retryable row results are safe only when the
+method returns normally and commits all prior prefix effects.
 
 ### 10.3 Explicit Table Mappers
 

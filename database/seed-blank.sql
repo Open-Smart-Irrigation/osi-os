@@ -238,6 +238,7 @@ CREATE TABLE irrigation_events (
   duration_minutes   INTEGER,
   valve_deveui       TEXT,
   payload_json       TEXT,
+  event_uuid         TEXT,
   created_at         TEXT NOT NULL DEFAULT (datetime('now')),
   FOREIGN KEY (user_id)            REFERENCES users(id),
   FOREIGN KEY (irrigation_zone_id) REFERENCES irrigation_zones(id)
@@ -247,6 +248,64 @@ CREATE INDEX idx_irrig_events_user_created_at ON irrigation_events(user_id, crea
 CREATE INDEX idx_irrig_events_zone_created_at ON irrigation_events(irrigation_zone_id, created_at);
 CREATE INDEX idx_irrig_events_created_at      ON irrigation_events(created_at);
 CREATE INDEX idx_irrigation_events_zone_id    ON irrigation_events(irrigation_zone_id, id DESC);
+CREATE UNIQUE INDEX idx_irrigation_events_event_uuid ON irrigation_events(event_uuid);
+
+CREATE TRIGGER trg_sync_irrigation_events_uuid_ai
+AFTER INSERT ON irrigation_events
+FOR EACH ROW
+WHEN NEW.event_uuid IS NULL OR NEW.event_uuid = ''
+BEGIN
+  SELECT CASE WHEN EXISTS (
+    SELECT 1 FROM sync_link_state WHERE peer_node = 'cloud' AND linked = 1
+  )
+  AND COALESCE(
+    NULLIF(trim((SELECT gateway_device_eui FROM irrigation_zones WHERE id = NEW.irrigation_zone_id AND deleted_at IS NULL)), ''),
+    NULLIF(trim((SELECT gateway_device_eui FROM sync_link_state WHERE peer_node = 'cloud')), '')
+  ) IS NULL THEN RAISE(ABORT, 'missing_gateway_device_eui') END;
+  UPDATE irrigation_events
+  SET event_uuid = 'irrig-' || COALESCE(
+    NULLIF(trim((SELECT gateway_device_eui FROM irrigation_zones WHERE id = NEW.irrigation_zone_id AND deleted_at IS NULL)), ''),
+    NULLIF(trim((SELECT gateway_device_eui FROM sync_link_state WHERE peer_node = 'cloud')), '')
+  ) || '-' || printf('%015d', NEW.id)
+  WHERE id = NEW.id
+    AND COALESCE(
+      NULLIF(trim((SELECT gateway_device_eui FROM irrigation_zones WHERE id = NEW.irrigation_zone_id AND deleted_at IS NULL)), ''),
+      NULLIF(trim((SELECT gateway_device_eui FROM sync_link_state WHERE peer_node = 'cloud')), '')
+    ) IS NOT NULL;
+  INSERT INTO sync_outbox(
+    event_uuid, aggregate_type, aggregate_key, op, payload_json,
+    sync_version, occurred_at, gateway_device_eui
+  )
+  SELECT
+    lower(hex(randomblob(16))),
+    'IRRIGATION_EVENT',
+    event_uuid,
+    'IRRIGATION_EVENT_APPENDED',
+    json_object(
+      'event_uuid',          event_uuid,
+      'event_id',            id,
+      'user_id',             user_id,
+      'irrigation_zone_id',  irrigation_zone_id,
+      'zone_uuid',           (SELECT zone_uuid FROM irrigation_zones WHERE id=irrigation_zone_id AND deleted_at IS NULL),
+      'gateway_device_eui',  COALESCE(NULLIF(trim((SELECT gateway_device_eui FROM irrigation_zones WHERE id=irrigation_zone_id AND deleted_at IS NULL)),''),NULLIF(trim((SELECT gateway_device_eui FROM sync_link_state WHERE peer_node='cloud')),'')),
+      'action',              action,
+      'reason',              reason,
+      'aggregate_kpa',       aggregate_kpa,
+      'threshold_kpa',       threshold_kpa,
+      'duration_minutes',    duration_minutes,
+      'valve_deveui',        valve_deveui,
+      'payload_json',        payload_json
+    ),
+    0,
+    strftime('%Y-%m-%dT%H:%M:%fZ','now'),
+    COALESCE(NULLIF(trim((SELECT gateway_device_eui FROM irrigation_zones WHERE id=irrigation_zone_id AND deleted_at IS NULL)),''),NULLIF(trim((SELECT gateway_device_eui FROM sync_link_state WHERE peer_node='cloud')),''))
+  FROM irrigation_events
+  WHERE id = NEW.id
+    AND irrigation_events.event_uuid IS NOT NULL
+    AND irrigation_events.event_uuid <> ''
+    AND EXISTS (SELECT 1 FROM sync_link_state WHERE peer_node = 'cloud' AND linked = 1)
+    AND NOT EXISTS (SELECT 1 FROM sync_outbox WHERE aggregate_type='IRRIGATION_EVENT' AND aggregate_key=irrigation_events.event_uuid);
+END;
 
 -- ---------------------------------------------------------------------------
 -- actuator_log
@@ -499,6 +558,100 @@ CREATE TABLE sync_cursor (
   last_full_backfill_at TEXT
 );
 
+CREATE TABLE sync_link_state (
+  peer_node TEXT PRIMARY KEY,
+  linked INTEGER NOT NULL DEFAULT 0,
+  server_url TEXT,
+  cloud_user_id TEXT,
+  gateway_device_eui TEXT,
+  updated_at TEXT NOT NULL
+);
+
+INSERT INTO sync_link_state(peer_node, linked, server_url, cloud_user_id, gateway_device_eui, updated_at)
+SELECT
+  'cloud',
+  1,
+  server_url,
+  CAST(cloud_user_id AS TEXT),
+  COALESCE(
+    (SELECT gateway_device_eui FROM irrigation_zones WHERE gateway_device_eui IS NOT NULL AND trim(gateway_device_eui) <> '' ORDER BY id LIMIT 1),
+    (SELECT gateway_device_eui FROM devices WHERE gateway_device_eui IS NOT NULL AND trim(gateway_device_eui) <> '' ORDER BY id LIMIT 1)
+  ),
+  strftime('%Y-%m-%dT%H:%M:%fZ','now')
+FROM users
+WHERE server_url IS NOT NULL
+  AND trim(server_url) <> ''
+  AND server_sync_token IS NOT NULL
+  AND trim(server_sync_token) <> ''
+ORDER BY server_linked_at DESC, id DESC
+LIMIT 1
+ON CONFLICT(peer_node) DO UPDATE SET
+  linked = 1,
+  server_url = excluded.server_url,
+  cloud_user_id = excluded.cloud_user_id,
+  gateway_device_eui = COALESCE(sync_link_state.gateway_device_eui, excluded.gateway_device_eui),
+  updated_at = excluded.updated_at;
+
+CREATE TABLE sync_history_cursors (
+  peer_node TEXT NOT NULL,
+  table_name TEXT NOT NULL,
+  state TEXT NOT NULL DEFAULT 'backfill',
+  snapshot_high_id INTEGER,
+  last_acked_id INTEGER,
+  last_acked_key TEXT,
+  last_shadow_acked_id INTEGER,
+  last_shadow_acked_key TEXT,
+  last_shadow_error TEXT,
+  backfill_started_at TEXT,
+  backfill_completed_at TEXT,
+  last_batch_id TEXT,
+  last_batch_at TEXT,
+  retry_count INTEGER NOT NULL DEFAULT 0,
+  next_attempt_at TEXT,
+  last_error TEXT,
+  PRIMARY KEY (peer_node, table_name)
+);
+
+CREATE TABLE sync_history_dirty_keys (
+  peer_node TEXT NOT NULL,
+  table_name TEXT NOT NULL,
+  row_key TEXT NOT NULL,
+  change_kind TEXT NOT NULL DEFAULT 'correction',
+  source_row_id INTEGER,
+  changed_at TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'pending',
+  attempts INTEGER NOT NULL DEFAULT 0,
+  next_attempt_at TEXT,
+  last_error TEXT,
+  PRIMARY KEY (peer_node, table_name, row_key)
+);
+
+CREATE TABLE sync_history_segments (
+  peer_node TEXT NOT NULL,
+  table_name TEXT NOT NULL,
+  segment_key TEXT NOT NULL,
+  hash_version INTEGER NOT NULL,
+  canonical_row_count INTEGER NOT NULL,
+  syncable_row_count INTEGER NOT NULL,
+  syncable_payload_hash TEXT NOT NULL,
+  quarantined_count INTEGER NOT NULL DEFAULT 0,
+  covered_max_id INTEGER,
+  computed_at TEXT NOT NULL,
+  PRIMARY KEY (peer_node, table_name, segment_key, hash_version)
+);
+
+CREATE TABLE sync_history_quarantine (
+  peer_node TEXT NOT NULL,
+  table_name TEXT NOT NULL,
+  history_key TEXT NOT NULL,
+  payload_hash TEXT,
+  reason TEXT NOT NULL,
+  first_seen_at TEXT NOT NULL,
+  last_seen_at TEXT NOT NULL,
+  attempts INTEGER NOT NULL DEFAULT 1,
+  PRIMARY KEY (peer_node, table_name, history_key)
+);
+
 -- ---------------------------------------------------------------------------
 -- chameleon_readings
 -- ---------------------------------------------------------------------------
@@ -531,6 +684,8 @@ CREATE TABLE chameleon_readings (
   f_port          INTEGER,
   f_cnt           INTEGER,
   calibration_status TEXT,
+  data_invalid    INTEGER DEFAULT 0,
+  comp_pending    INTEGER DEFAULT 0,
   created_at      TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
   FOREIGN KEY (deveui) REFERENCES devices(deveui) ON DELETE CASCADE
 );
@@ -917,25 +1072,31 @@ CREATE TRIGGER trg_sync_zones_outbox_au
 AFTER UPDATE ON irrigation_zones
 FOR EACH ROW
 WHEN
-  COALESCE(NEW.name,'') <> COALESCE(OLD.name,'') OR
-  COALESCE(NEW.zone_uuid,'') <> COALESCE(OLD.zone_uuid,'') OR
-  COALESCE(NEW.gateway_device_eui,'') <> COALESCE(OLD.gateway_device_eui,'') OR
-  COALESCE(NEW.timezone,'') <> COALESCE(OLD.timezone,'') OR
-  COALESCE(NEW.latitude,'') <> COALESCE(OLD.latitude,'') OR
-  COALESCE(NEW.longitude,'') <> COALESCE(OLD.longitude,'') OR
-  COALESCE(NEW.phenological_stage,'') <> COALESCE(OLD.phenological_stage,'') OR
-  COALESCE(NEW.calibration_key,'') <> COALESCE(OLD.calibration_key,'') OR
-  COALESCE(NEW.crop_type,'') <> COALESCE(OLD.crop_type,'') OR
-  COALESCE(NEW.variety,'') <> COALESCE(OLD.variety,'') OR
-  COALESCE(NEW.soil_type,'') <> COALESCE(OLD.soil_type,'') OR
-  COALESCE(NEW.irrigation_method,'') <> COALESCE(OLD.irrigation_method,'') OR
-  COALESCE(NEW.area_m2,'') <> COALESCE(OLD.area_m2,'') OR
-  COALESCE(NEW.irrigation_efficiency_pct,'') <> COALESCE(OLD.irrigation_efficiency_pct,'') OR
-  COALESCE(NEW.scheduling_mode,'local') <> COALESCE(OLD.scheduling_mode,'local') OR
-  COALESCE(NEW.prediction_card_enabled,0) <> COALESCE(OLD.prediction_card_enabled,0) OR
-  COALESCE(NEW.notes,'') <> COALESCE(OLD.notes,'') OR
-  COALESCE(NEW.deleted_at,'') <> COALESCE(OLD.deleted_at,'') OR
-  COALESCE(NEW.sync_version,0) <> COALESCE(OLD.sync_version,0)
+  EXISTS (
+    SELECT 1 FROM sync_link_state
+     WHERE peer_node = 'cloud' AND linked = 1
+  )
+  AND (
+    COALESCE(NEW.name,'') <> COALESCE(OLD.name,'') OR
+    COALESCE(NEW.zone_uuid,'') <> COALESCE(OLD.zone_uuid,'') OR
+    COALESCE(NEW.gateway_device_eui,'') <> COALESCE(OLD.gateway_device_eui,'') OR
+    COALESCE(NEW.timezone,'') <> COALESCE(OLD.timezone,'') OR
+    COALESCE(NEW.latitude,'') <> COALESCE(OLD.latitude,'') OR
+    COALESCE(NEW.longitude,'') <> COALESCE(OLD.longitude,'') OR
+    COALESCE(NEW.phenological_stage,'') <> COALESCE(OLD.phenological_stage,'') OR
+    COALESCE(NEW.calibration_key,'') <> COALESCE(OLD.calibration_key,'') OR
+    COALESCE(NEW.crop_type,'') <> COALESCE(OLD.crop_type,'') OR
+    COALESCE(NEW.variety,'') <> COALESCE(OLD.variety,'') OR
+    COALESCE(NEW.soil_type,'') <> COALESCE(OLD.soil_type,'') OR
+    COALESCE(NEW.irrigation_method,'') <> COALESCE(OLD.irrigation_method,'') OR
+    COALESCE(NEW.area_m2,'') <> COALESCE(OLD.area_m2,'') OR
+    COALESCE(NEW.irrigation_efficiency_pct,'') <> COALESCE(OLD.irrigation_efficiency_pct,'') OR
+    COALESCE(NEW.scheduling_mode,'local') <> COALESCE(OLD.scheduling_mode,'local') OR
+    COALESCE(NEW.prediction_card_enabled,0) <> COALESCE(OLD.prediction_card_enabled,0) OR
+    COALESCE(NEW.notes,'') <> COALESCE(OLD.notes,'') OR
+    COALESCE(NEW.deleted_at,'') <> COALESCE(OLD.deleted_at,'') OR
+    COALESCE(NEW.sync_version,0) <> COALESCE(OLD.sync_version,0)
+  )
 BEGIN
   INSERT INTO sync_outbox(
     event_uuid, aggregate_type, aggregate_key, op, payload_json,
@@ -994,19 +1155,25 @@ CREATE TRIGGER trg_sync_devices_outbox_au
 AFTER UPDATE ON devices
 FOR EACH ROW
 WHEN
-  COALESCE(NEW.user_id,'') <> COALESCE(OLD.user_id,'') OR
-  COALESCE(NEW.irrigation_zone_id,'') <> COALESCE(OLD.irrigation_zone_id,'') OR
-  COALESCE(NEW.dendro_enabled,0) <> COALESCE(OLD.dendro_enabled,0) OR
-  COALESCE(NEW.temp_enabled,0) <> COALESCE(OLD.temp_enabled,0) OR
-  COALESCE(NEW.rain_gauge_enabled,0) <> COALESCE(OLD.rain_gauge_enabled,0) OR
-  COALESCE(NEW.flow_meter_enabled,0) <> COALESCE(OLD.flow_meter_enabled,0) OR
-  COALESCE(NEW.is_reference_tree,0) <> COALESCE(OLD.is_reference_tree,0) OR
-  COALESCE(NEW.name,'') <> COALESCE(OLD.name,'') OR
-  COALESCE(NEW.strega_model,'') <> COALESCE(OLD.strega_model,'') OR
-  COALESCE(NEW.soil_moisture_probe_depths_json,'') <> COALESCE(OLD.soil_moisture_probe_depths_json,'') OR
-  COALESCE(NEW.soil_moisture_probe_depths_configured,0) <> COALESCE(OLD.soil_moisture_probe_depths_configured,0) OR
-  COALESCE(NEW.deleted_at,'') <> COALESCE(OLD.deleted_at,'') OR
-  COALESCE(NEW.sync_version,0) <> COALESCE(OLD.sync_version,0)
+  EXISTS (
+    SELECT 1 FROM sync_link_state
+     WHERE peer_node = 'cloud' AND linked = 1
+  )
+  AND (
+    COALESCE(NEW.user_id,'') <> COALESCE(OLD.user_id,'') OR
+    COALESCE(NEW.irrigation_zone_id,'') <> COALESCE(OLD.irrigation_zone_id,'') OR
+    COALESCE(NEW.dendro_enabled,0) <> COALESCE(OLD.dendro_enabled,0) OR
+    COALESCE(NEW.temp_enabled,0) <> COALESCE(OLD.temp_enabled,0) OR
+    COALESCE(NEW.rain_gauge_enabled,0) <> COALESCE(OLD.rain_gauge_enabled,0) OR
+    COALESCE(NEW.flow_meter_enabled,0) <> COALESCE(OLD.flow_meter_enabled,0) OR
+    COALESCE(NEW.is_reference_tree,0) <> COALESCE(OLD.is_reference_tree,0) OR
+    COALESCE(NEW.name,'') <> COALESCE(OLD.name,'') OR
+    COALESCE(NEW.strega_model,'') <> COALESCE(OLD.strega_model,'') OR
+    COALESCE(NEW.soil_moisture_probe_depths_json,'') <> COALESCE(OLD.soil_moisture_probe_depths_json,'') OR
+    COALESCE(NEW.soil_moisture_probe_depths_configured,0) <> COALESCE(OLD.soil_moisture_probe_depths_configured,0) OR
+    COALESCE(NEW.deleted_at,'') <> COALESCE(OLD.deleted_at,'') OR
+    COALESCE(NEW.sync_version,0) <> COALESCE(OLD.sync_version,0)
+  )
 BEGIN
   INSERT INTO sync_outbox(
     event_uuid, aggregate_type, aggregate_key, op, payload_json,
@@ -1065,13 +1232,19 @@ CREATE TRIGGER trg_sync_schedules_outbox_au
 AFTER UPDATE ON irrigation_schedules
 FOR EACH ROW
 WHEN
-  COALESCE(NEW.trigger_metric,'') <> COALESCE(OLD.trigger_metric,'') OR
-  COALESCE(NEW.threshold_kpa,0) <> COALESCE(OLD.threshold_kpa,0) OR
-  COALESCE(NEW.enabled,0) <> COALESCE(OLD.enabled,0) OR
-  COALESCE(NEW.duration_minutes,0) <> COALESCE(OLD.duration_minutes,0) OR
-  COALESCE(NEW.response_mode,'') <> COALESCE(OLD.response_mode,'') OR
-  COALESCE(NEW.deleted_at,'') <> COALESCE(OLD.deleted_at,'') OR
-  COALESCE(NEW.sync_version,0) <> COALESCE(OLD.sync_version,0)
+  EXISTS (
+    SELECT 1 FROM sync_link_state
+     WHERE peer_node = 'cloud' AND linked = 1
+  )
+  AND (
+    COALESCE(NEW.trigger_metric,'') <> COALESCE(OLD.trigger_metric,'') OR
+    COALESCE(NEW.threshold_kpa,0) <> COALESCE(OLD.threshold_kpa,0) OR
+    COALESCE(NEW.enabled,0) <> COALESCE(OLD.enabled,0) OR
+    COALESCE(NEW.duration_minutes,0) <> COALESCE(OLD.duration_minutes,0) OR
+    COALESCE(NEW.response_mode,'') <> COALESCE(OLD.response_mode,'') OR
+    COALESCE(NEW.deleted_at,'') <> COALESCE(OLD.deleted_at,'') OR
+    COALESCE(NEW.sync_version,0) <> COALESCE(OLD.sync_version,0)
+  )
 BEGIN
   INSERT INTO sync_outbox(
     event_uuid, aggregate_type, aggregate_key, op, payload_json,
@@ -1098,10 +1271,18 @@ BEGIN
   );
 END;
 
--- device_data → sync_outbox
+-- device_data → sync_outbox (insert)
 CREATE TRIGGER trg_dp_device_data_outbox_ai
 AFTER INSERT ON device_data
 FOR EACH ROW
+WHEN EXISTS (
+  SELECT 1 FROM sync_link_state
+   WHERE peer_node = 'cloud' AND linked = 1
+)
+AND COALESCE(
+  NULLIF(trim((SELECT gateway_device_eui FROM devices WHERE deveui = NEW.deveui AND deleted_at IS NULL)), ''),
+  NULLIF(trim((SELECT gateway_device_eui FROM sync_link_state WHERE peer_node = 'cloud')), '')
+) IS NOT NULL
 BEGIN
   INSERT INTO sync_outbox(
     event_uuid, aggregate_type, aggregate_key, op, payload_json,
@@ -1169,10 +1350,76 @@ BEGIN
   );
 END;
 
+-- chameleon_readings → sync_outbox (insert)
+CREATE TRIGGER trg_dp_chameleon_readings_outbox_ai
+AFTER INSERT ON chameleon_readings
+FOR EACH ROW
+WHEN EXISTS (
+  SELECT 1 FROM sync_link_state
+   WHERE peer_node = 'cloud' AND linked = 1
+)
+AND COALESCE((SELECT gateway_device_eui FROM devices WHERE deveui = NEW.deveui AND deleted_at IS NULL), (SELECT gateway_device_eui FROM sync_link_state WHERE peer_node = 'cloud'), '') <> ''
+BEGIN
+  INSERT INTO sync_outbox(
+    event_uuid, aggregate_type, aggregate_key, op, payload_json,
+    sync_version, occurred_at, gateway_device_eui
+  ) VALUES (
+    lower(hex(randomblob(16))),
+    'CHAMELEON_READING',
+    COALESCE(NEW.deveui,'') || '|' || COALESCE(NEW.recorded_at,''),
+    'CHAMELEON_READING_APPENDED',
+    json_object(
+      'device_eui',           NEW.deveui,
+      'recorded_at',          NEW.recorded_at,
+      'payload_version',      NEW.payload_version,
+      'status_flags',         NEW.status_flags,
+      'i2c_missing',          NEW.i2c_missing,
+      'timeout',              NEW.timeout,
+      'temp_fault',           NEW.temp_fault,
+      'id_fault',             NEW.id_fault,
+      'ch1_open',             NEW.ch1_open,
+      'ch2_open',             NEW.ch2_open,
+      'ch3_open',             NEW.ch3_open,
+      'temp_c',               NEW.temp_c,
+      'r1_ohm_comp',          NEW.r1_ohm_comp,
+      'r2_ohm_comp',          NEW.r2_ohm_comp,
+      'r3_ohm_comp',          NEW.r3_ohm_comp,
+      'r1_ohm_raw',           NEW.r1_ohm_raw,
+      'r2_ohm_raw',           NEW.r2_ohm_raw,
+      'r3_ohm_raw',           NEW.r3_ohm_raw,
+      'array_id',             NEW.array_id,
+      'adc_ch0v',             NEW.adc_ch0v,
+      'adc_ch1v',             NEW.adc_ch1v,
+      'adc_ch4v',             NEW.adc_ch4v,
+      'bat_v',                NEW.bat_v,
+      'payload_b64',          NEW.payload_b64,
+      'f_port',               NEW.f_port,
+      'f_cnt',                NEW.f_cnt,
+      'calibration_status',   NEW.calibration_status,
+      'data_invalid',         COALESCE(NEW.data_invalid,0),
+      'comp_pending',         COALESCE(NEW.comp_pending,0),
+      'zone_id',              (SELECT irrigation_zone_id FROM devices WHERE deveui=NEW.deveui AND deleted_at IS NULL),
+      'zone_uuid',            (SELECT iz.zone_uuid FROM devices d LEFT JOIN irrigation_zones iz ON iz.id=d.irrigation_zone_id AND iz.deleted_at IS NULL WHERE d.deveui=NEW.deveui AND d.deleted_at IS NULL),
+      'gateway_device_eui',   COALESCE((SELECT gateway_device_eui FROM devices WHERE deveui=NEW.deveui AND deleted_at IS NULL),'0016C001F11715E2')
+    ),
+    0,
+    strftime('%Y-%m-%dT%H:%M:%fZ','now'),
+    COALESCE((SELECT gateway_device_eui FROM devices WHERE deveui=NEW.deveui AND deleted_at IS NULL),'0016C001F11715E2')
+  );
+END;
+
 -- dendrometer_readings → sync_outbox (insert)
 CREATE TRIGGER trg_dp_dendro_readings_outbox_ai
 AFTER INSERT ON dendrometer_readings
 FOR EACH ROW
+WHEN EXISTS (
+  SELECT 1 FROM sync_link_state
+   WHERE peer_node = 'cloud' AND linked = 1
+)
+AND COALESCE(
+  NULLIF(trim((SELECT gateway_device_eui FROM devices WHERE deveui = NEW.deveui AND deleted_at IS NULL)), ''),
+  NULLIF(trim((SELECT gateway_device_eui FROM sync_link_state WHERE peer_node = 'cloud')), '')
+) IS NOT NULL
 BEGIN
   INSERT INTO sync_outbox(
     event_uuid, aggregate_type, aggregate_key, op, payload_json,
@@ -1183,28 +1430,278 @@ BEGIN
     COALESCE(NEW.deveui,'') || '|' || COALESCE(NEW.recorded_at,''),
     'DENDRO_READING_APPENDED',
     json_object(
-      'device_eui',    NEW.deveui,
-      'position_um',   NEW.position_um,
-      'adc_v',         NEW.adc_v,
-      'bat_v',         NEW.bat_v,
-      'is_valid',      NEW.is_valid,
+      'device_eui',     NEW.deveui,
+      'position_um',    NEW.position_um,
+      'adc_v',          NEW.adc_v,
+      'bat_v',          NEW.bat_v,
+      'is_valid',       NEW.is_valid,
       'invalid_reason', NEW.invalid_reason,
-      'is_outlier',    NEW.is_outlier,
-      'recorded_at',   NEW.recorded_at,
-      'zone_id',       (SELECT irrigation_zone_id FROM devices WHERE deveui=NEW.deveui AND deleted_at IS NULL),
-      'zone_uuid',     (SELECT iz.zone_uuid FROM devices d LEFT JOIN irrigation_zones iz ON iz.id=d.irrigation_zone_id AND iz.deleted_at IS NULL WHERE d.deveui=NEW.deveui AND d.deleted_at IS NULL),
-      'gateway_device_eui', COALESCE((SELECT gateway_device_eui FROM devices WHERE deveui=NEW.deveui AND deleted_at IS NULL),'0016C001F11715E2')
+      'is_outlier',     NEW.is_outlier,
+      'recorded_at',    NEW.recorded_at,
+      'zone_id',        (SELECT irrigation_zone_id FROM devices WHERE deveui=NEW.deveui AND deleted_at IS NULL),
+      'zone_uuid',      (SELECT iz.zone_uuid FROM devices d LEFT JOIN irrigation_zones iz ON iz.id=d.irrigation_zone_id AND iz.deleted_at IS NULL WHERE d.deveui=NEW.deveui AND d.deleted_at IS NULL),
+      'gateway_device_eui', COALESCE(NULLIF(trim((SELECT gateway_device_eui FROM devices WHERE deveui=NEW.deveui AND deleted_at IS NULL)),''),NULLIF(trim((SELECT gateway_device_eui FROM sync_link_state WHERE peer_node='cloud')),''))
     ),
     0,
     strftime('%Y-%m-%dT%H:%M:%fZ','now'),
-    COALESCE((SELECT gateway_device_eui FROM devices WHERE deveui=NEW.deveui AND deleted_at IS NULL),'0016C001F11715E2')
+    COALESCE(NULLIF(trim((SELECT gateway_device_eui FROM devices WHERE deveui=NEW.deveui AND deleted_at IS NULL)),''),NULLIF(trim((SELECT gateway_device_eui FROM sync_link_state WHERE peer_node='cloud')),''))
   );
 END;
+
+-- Raw-history correction dirty keys
+CREATE TRIGGER trg_sync_device_data_dirty_au
+AFTER UPDATE ON device_data
+FOR EACH ROW
+WHEN EXISTS (
+  SELECT 1 FROM sync_link_state
+   WHERE peer_node = 'cloud' AND linked = 1
+)
+AND COALESCE((SELECT gateway_device_eui FROM devices WHERE deveui = NEW.deveui AND deleted_at IS NULL), (SELECT gateway_device_eui FROM sync_link_state WHERE peer_node = 'cloud'), '') <> ''
+BEGIN
+  INSERT INTO sync_history_dirty_keys(peer_node, table_name, row_key, change_kind, source_row_id, changed_at)
+  VALUES(
+    'cloud',
+    'device_data',
+    'DEVICE_DATA|' || COALESCE((SELECT gateway_device_eui FROM devices WHERE deveui = NEW.deveui AND deleted_at IS NULL), (SELECT gateway_device_eui FROM sync_link_state WHERE peer_node = 'cloud'), '') || '|' || NEW.id,
+    'correction',
+    NEW.id,
+    strftime('%Y-%m-%dT%H:%M:%fZ','now')
+  )
+  ON CONFLICT(peer_node, table_name, row_key) DO UPDATE SET
+    change_kind = excluded.change_kind,
+    source_row_id = excluded.source_row_id,
+    changed_at = excluded.changed_at,
+    status = 'pending',
+    attempts = 0,
+    next_attempt_at = NULL,
+    last_error = NULL;
+END;
+
+CREATE TRIGGER trg_sync_chameleon_readings_dirty_au
+AFTER UPDATE ON chameleon_readings
+FOR EACH ROW
+WHEN EXISTS (
+  SELECT 1 FROM sync_link_state
+   WHERE peer_node = 'cloud' AND linked = 1
+)
+AND COALESCE((SELECT gateway_device_eui FROM devices WHERE deveui = NEW.deveui AND deleted_at IS NULL), (SELECT gateway_device_eui FROM sync_link_state WHERE peer_node = 'cloud'), '') <> ''
+BEGIN
+  INSERT INTO sync_history_dirty_keys(peer_node, table_name, row_key, change_kind, source_row_id, changed_at)
+  VALUES(
+    'cloud',
+    'chameleon_readings',
+    'CHAMELEON_READING|' || COALESCE((SELECT gateway_device_eui FROM devices WHERE deveui = NEW.deveui AND deleted_at IS NULL), (SELECT gateway_device_eui FROM sync_link_state WHERE peer_node = 'cloud'), '') || '|' || NEW.id,
+    'correction',
+    NEW.id,
+    strftime('%Y-%m-%dT%H:%M:%fZ','now')
+  )
+  ON CONFLICT(peer_node, table_name, row_key) DO UPDATE SET
+    change_kind = excluded.change_kind,
+    source_row_id = excluded.source_row_id,
+    changed_at = excluded.changed_at,
+    status = 'pending',
+    attempts = 0,
+    next_attempt_at = NULL,
+    last_error = NULL;
+END;
+
+CREATE TRIGGER trg_sync_dendro_readings_dirty_au
+AFTER UPDATE ON dendrometer_readings
+FOR EACH ROW
+WHEN EXISTS (
+  SELECT 1 FROM sync_link_state
+   WHERE peer_node = 'cloud' AND linked = 1
+)
+AND COALESCE((SELECT gateway_device_eui FROM devices WHERE deveui = NEW.deveui AND deleted_at IS NULL), (SELECT gateway_device_eui FROM sync_link_state WHERE peer_node = 'cloud'), '') <> ''
+BEGIN
+  INSERT INTO sync_history_dirty_keys(peer_node, table_name, row_key, change_kind, source_row_id, changed_at)
+  VALUES(
+    'cloud',
+    'dendrometer_readings',
+    'DENDRO_READING|' || COALESCE((SELECT gateway_device_eui FROM devices WHERE deveui = NEW.deveui AND deleted_at IS NULL), (SELECT gateway_device_eui FROM sync_link_state WHERE peer_node = 'cloud'), '') || '|' || NEW.id,
+    'correction',
+    NEW.id,
+    strftime('%Y-%m-%dT%H:%M:%fZ','now')
+  )
+  ON CONFLICT(peer_node, table_name, row_key) DO UPDATE SET
+    change_kind = excluded.change_kind,
+    source_row_id = excluded.source_row_id,
+    changed_at = excluded.changed_at,
+    status = 'pending',
+    attempts = 0,
+    next_attempt_at = NULL,
+    last_error = NULL;
+END;
+
+-- Derived-history dirty keys
+CREATE TRIGGER trg_sync_zone_env_dirty_ai
+AFTER INSERT ON zone_daily_environment
+FOR EACH ROW
+WHEN EXISTS (
+  SELECT 1 FROM sync_link_state
+   WHERE peer_node = 'cloud' AND linked = 1
+)
+BEGIN
+  INSERT INTO sync_history_dirty_keys(peer_node, table_name, row_key, change_kind, changed_at)
+  VALUES(
+    'cloud',
+    'zone_daily_environment',
+    'ZONE_ENVIRONMENT|' || COALESCE((SELECT zone_uuid FROM irrigation_zones WHERE id = NEW.zone_id AND deleted_at IS NULL), 'zone-id:' || NEW.zone_id) || '|' || NEW.date,
+    'upsert',
+    strftime('%Y-%m-%dT%H:%M:%fZ','now')
+  )
+  ON CONFLICT(peer_node, table_name, row_key) DO UPDATE SET
+    change_kind = excluded.change_kind,
+    changed_at = excluded.changed_at,
+    status = 'pending',
+    attempts = 0,
+    next_attempt_at = NULL,
+    last_error = NULL;
+END;
+
+CREATE TRIGGER trg_sync_zone_env_dirty_au
+AFTER UPDATE ON zone_daily_environment
+FOR EACH ROW
+WHEN EXISTS (
+  SELECT 1 FROM sync_link_state
+   WHERE peer_node = 'cloud' AND linked = 1
+)
+BEGIN
+  INSERT INTO sync_history_dirty_keys(peer_node, table_name, row_key, change_kind, changed_at)
+  VALUES(
+    'cloud',
+    'zone_daily_environment',
+    'ZONE_ENVIRONMENT|' || COALESCE((SELECT zone_uuid FROM irrigation_zones WHERE id = NEW.zone_id AND deleted_at IS NULL), 'zone-id:' || NEW.zone_id) || '|' || NEW.date,
+    'upsert',
+    strftime('%Y-%m-%dT%H:%M:%fZ','now')
+  )
+  ON CONFLICT(peer_node, table_name, row_key) DO UPDATE SET
+    change_kind = excluded.change_kind,
+    changed_at = excluded.changed_at,
+    status = 'pending',
+    attempts = 0,
+    next_attempt_at = NULL,
+    last_error = NULL;
+END;
+
+CREATE TRIGGER trg_sync_zone_recs_dirty_ai
+AFTER INSERT ON zone_daily_recommendations
+FOR EACH ROW
+WHEN EXISTS (
+  SELECT 1 FROM sync_link_state
+   WHERE peer_node = 'cloud' AND linked = 1
+)
+BEGIN
+  INSERT INTO sync_history_dirty_keys(peer_node, table_name, row_key, change_kind, source_row_id, changed_at)
+  VALUES(
+    'cloud',
+    'zone_daily_recommendations',
+    'ZONE_RECOMMENDATION|' || COALESCE((SELECT zone_uuid FROM irrigation_zones WHERE id = NEW.zone_id AND deleted_at IS NULL), 'zone-id:' || NEW.zone_id) || '|' || NEW.date,
+    'upsert',
+    NEW.id,
+    strftime('%Y-%m-%dT%H:%M:%fZ','now')
+  )
+  ON CONFLICT(peer_node, table_name, row_key) DO UPDATE SET
+    change_kind = excluded.change_kind,
+    source_row_id = excluded.source_row_id,
+    changed_at = excluded.changed_at,
+    status = 'pending',
+    attempts = 0,
+    next_attempt_at = NULL,
+    last_error = NULL;
+END;
+
+CREATE TRIGGER trg_sync_zone_recs_dirty_au
+AFTER UPDATE ON zone_daily_recommendations
+FOR EACH ROW
+WHEN EXISTS (
+  SELECT 1 FROM sync_link_state
+   WHERE peer_node = 'cloud' AND linked = 1
+)
+BEGIN
+  INSERT INTO sync_history_dirty_keys(peer_node, table_name, row_key, change_kind, source_row_id, changed_at)
+  VALUES(
+    'cloud',
+    'zone_daily_recommendations',
+    'ZONE_RECOMMENDATION|' || COALESCE((SELECT zone_uuid FROM irrigation_zones WHERE id = NEW.zone_id AND deleted_at IS NULL), 'zone-id:' || NEW.zone_id) || '|' || NEW.date,
+    'upsert',
+    NEW.id,
+    strftime('%Y-%m-%dT%H:%M:%fZ','now')
+  )
+  ON CONFLICT(peer_node, table_name, row_key) DO UPDATE SET
+    change_kind = excluded.change_kind,
+    source_row_id = excluded.source_row_id,
+    changed_at = excluded.changed_at,
+    status = 'pending',
+    attempts = 0,
+    next_attempt_at = NULL,
+    last_error = NULL;
+END;
+
+CREATE TRIGGER trg_sync_dendro_daily_dirty_ai
+AFTER INSERT ON dendrometer_daily
+FOR EACH ROW
+WHEN EXISTS (
+  SELECT 1 FROM sync_link_state
+   WHERE peer_node = 'cloud' AND linked = 1
+)
+BEGIN
+  INSERT INTO sync_history_dirty_keys(peer_node, table_name, row_key, change_kind, source_row_id, changed_at)
+  VALUES(
+    'cloud',
+    'dendrometer_daily',
+    'DENDRO_DAILY|' || NEW.deveui || '|' || NEW.date,
+    'upsert',
+    NEW.id,
+    strftime('%Y-%m-%dT%H:%M:%fZ','now')
+  )
+  ON CONFLICT(peer_node, table_name, row_key) DO UPDATE SET
+    change_kind = excluded.change_kind,
+    source_row_id = excluded.source_row_id,
+    changed_at = excluded.changed_at,
+    status = 'pending',
+    attempts = 0,
+    next_attempt_at = NULL,
+    last_error = NULL;
+END;
+
+CREATE TRIGGER trg_sync_dendro_daily_dirty_au
+AFTER UPDATE ON dendrometer_daily
+FOR EACH ROW
+WHEN EXISTS (
+  SELECT 1 FROM sync_link_state
+   WHERE peer_node = 'cloud' AND linked = 1
+)
+BEGIN
+  INSERT INTO sync_history_dirty_keys(peer_node, table_name, row_key, change_kind, source_row_id, changed_at)
+  VALUES(
+    'cloud',
+    'dendrometer_daily',
+    'DENDRO_DAILY|' || NEW.deveui || '|' || NEW.date,
+    'upsert',
+    NEW.id,
+    strftime('%Y-%m-%dT%H:%M:%fZ','now')
+  )
+  ON CONFLICT(peer_node, table_name, row_key) DO UPDATE SET
+    change_kind = excluded.change_kind,
+    source_row_id = excluded.source_row_id,
+    changed_at = excluded.changed_at,
+    status = 'pending',
+    attempts = 0,
+    next_attempt_at = NULL,
+    last_error = NULL;
+END;
+
+
 
 -- dendrometer_daily → sync_outbox (insert)
 CREATE TRIGGER trg_dp_dendro_daily_outbox_ai
 AFTER INSERT ON dendrometer_daily
 FOR EACH ROW
+WHEN EXISTS (
+  SELECT 1 FROM sync_link_state
+   WHERE peer_node = 'cloud' AND linked = 1
+)
 BEGIN
   INSERT INTO sync_outbox(
     event_uuid, aggregate_type, aggregate_key, op, payload_json,
@@ -1265,6 +1762,10 @@ END;
 CREATE TRIGGER trg_dp_dendro_daily_outbox_au
 AFTER UPDATE ON dendrometer_daily
 FOR EACH ROW
+WHEN EXISTS (
+  SELECT 1 FROM sync_link_state
+   WHERE peer_node = 'cloud' AND linked = 1
+)
 BEGIN
   INSERT INTO sync_outbox(
     event_uuid, aggregate_type, aggregate_key, op, payload_json,
@@ -1325,6 +1826,20 @@ END;
 CREATE TRIGGER trg_dp_irrigation_events_outbox_ai
 AFTER INSERT ON irrigation_events
 FOR EACH ROW
+WHEN NEW.event_uuid IS NOT NULL
+ AND NEW.event_uuid <> ''
+ AND EXISTS (
+   SELECT 1 FROM sync_link_state
+    WHERE peer_node = 'cloud' AND linked = 1
+ )
+ AND COALESCE(
+   NULLIF(trim((SELECT gateway_device_eui FROM irrigation_zones WHERE id = NEW.irrigation_zone_id AND deleted_at IS NULL)), ''),
+   NULLIF(trim((SELECT gateway_device_eui FROM sync_link_state WHERE peer_node = 'cloud')), '')
+ ) IS NOT NULL
+ AND NOT EXISTS (
+   SELECT 1 FROM sync_outbox
+    WHERE aggregate_type='IRRIGATION_EVENT' AND aggregate_key=NEW.event_uuid
+ )
 BEGIN
   INSERT INTO sync_outbox(
     event_uuid, aggregate_type, aggregate_key, op, payload_json,
@@ -1332,14 +1847,15 @@ BEGIN
   ) VALUES (
     lower(hex(randomblob(16))),
     'IRRIGATION_EVENT',
-    CAST(NEW.id AS TEXT),
+    NEW.event_uuid,
     'IRRIGATION_EVENT_APPENDED',
     json_object(
+      'event_uuid',          NEW.event_uuid,
       'event_id',            NEW.id,
       'user_id',             NEW.user_id,
       'irrigation_zone_id',  NEW.irrigation_zone_id,
       'zone_uuid',           (SELECT zone_uuid FROM irrigation_zones WHERE id=NEW.irrigation_zone_id AND deleted_at IS NULL),
-      'gateway_device_eui',  COALESCE((SELECT gateway_device_eui FROM irrigation_zones WHERE id=NEW.irrigation_zone_id AND deleted_at IS NULL),'0016C001F11715E2'),
+      'gateway_device_eui',  COALESCE(NULLIF(trim((SELECT gateway_device_eui FROM irrigation_zones WHERE id=NEW.irrigation_zone_id AND deleted_at IS NULL)),''),NULLIF(trim((SELECT gateway_device_eui FROM sync_link_state WHERE peer_node='cloud')),'')),
       'action',              NEW.action,
       'reason',              NEW.reason,
       'aggregate_kpa',       NEW.aggregate_kpa,
@@ -1350,7 +1866,55 @@ BEGIN
     ),
     0,
     strftime('%Y-%m-%dT%H:%M:%fZ','now'),
-    COALESCE((SELECT gateway_device_eui FROM irrigation_zones WHERE id=NEW.irrigation_zone_id AND deleted_at IS NULL),'0016C001F11715E2')
+    COALESCE(NULLIF(trim((SELECT gateway_device_eui FROM irrigation_zones WHERE id=NEW.irrigation_zone_id AND deleted_at IS NULL)),''),NULLIF(trim((SELECT gateway_device_eui FROM sync_link_state WHERE peer_node='cloud')),''))
+  );
+END;
+
+CREATE TRIGGER trg_dp_irrigation_events_outbox_au_event_uuid
+AFTER UPDATE OF event_uuid ON irrigation_events
+FOR EACH ROW
+WHEN (OLD.event_uuid IS NULL OR OLD.event_uuid = '')
+ AND NEW.event_uuid IS NOT NULL
+ AND NEW.event_uuid <> ''
+ AND EXISTS (
+   SELECT 1 FROM sync_link_state
+    WHERE peer_node = 'cloud' AND linked = 1
+ )
+ AND COALESCE(
+   NULLIF(trim((SELECT gateway_device_eui FROM irrigation_zones WHERE id = NEW.irrigation_zone_id AND deleted_at IS NULL)), ''),
+   NULLIF(trim((SELECT gateway_device_eui FROM sync_link_state WHERE peer_node = 'cloud')), '')
+ ) IS NOT NULL
+ AND NOT EXISTS (
+   SELECT 1 FROM sync_outbox
+    WHERE aggregate_type='IRRIGATION_EVENT' AND aggregate_key=NEW.event_uuid
+ )
+BEGIN
+  INSERT INTO sync_outbox(
+    event_uuid, aggregate_type, aggregate_key, op, payload_json,
+    sync_version, occurred_at, gateway_device_eui
+  ) VALUES (
+    lower(hex(randomblob(16))),
+    'IRRIGATION_EVENT',
+    NEW.event_uuid,
+    'IRRIGATION_EVENT_APPENDED',
+    json_object(
+      'event_uuid',          NEW.event_uuid,
+      'event_id',            NEW.id,
+      'user_id',             NEW.user_id,
+      'irrigation_zone_id',  NEW.irrigation_zone_id,
+      'zone_uuid',           (SELECT zone_uuid FROM irrigation_zones WHERE id=NEW.irrigation_zone_id AND deleted_at IS NULL),
+      'gateway_device_eui',  COALESCE(NULLIF(trim((SELECT gateway_device_eui FROM irrigation_zones WHERE id=NEW.irrigation_zone_id AND deleted_at IS NULL)),''),NULLIF(trim((SELECT gateway_device_eui FROM sync_link_state WHERE peer_node='cloud')),'')),
+      'action',              NEW.action,
+      'reason',              NEW.reason,
+      'aggregate_kpa',       NEW.aggregate_kpa,
+      'threshold_kpa',       NEW.threshold_kpa,
+      'duration_minutes',    NEW.duration_minutes,
+      'valve_deveui',        NEW.valve_deveui,
+      'payload_json',        NEW.payload_json
+    ),
+    0,
+    strftime('%Y-%m-%dT%H:%M:%fZ','now'),
+    COALESCE(NULLIF(trim((SELECT gateway_device_eui FROM irrigation_zones WHERE id=NEW.irrigation_zone_id AND deleted_at IS NULL)),''),NULLIF(trim((SELECT gateway_device_eui FROM sync_link_state WHERE peer_node='cloud')),''))
   );
 END;
 
@@ -1358,6 +1922,10 @@ END;
 CREATE TRIGGER trg_dp_zone_env_outbox_ai
 AFTER INSERT ON zone_daily_environment
 FOR EACH ROW
+WHEN EXISTS (
+  SELECT 1 FROM sync_link_state
+   WHERE peer_node = 'cloud' AND linked = 1
+)
 BEGIN
   INSERT INTO sync_outbox(
     event_uuid, aggregate_type, aggregate_key, op, payload_json,
@@ -1387,6 +1955,10 @@ END;
 CREATE TRIGGER trg_dp_zone_env_outbox_au
 AFTER UPDATE ON zone_daily_environment
 FOR EACH ROW
+WHEN EXISTS (
+  SELECT 1 FROM sync_link_state
+   WHERE peer_node = 'cloud' AND linked = 1
+)
 BEGIN
   INSERT INTO sync_outbox(
     event_uuid, aggregate_type, aggregate_key, op, payload_json,
@@ -1416,6 +1988,10 @@ END;
 CREATE TRIGGER trg_dp_zone_recs_outbox_ai
 AFTER INSERT ON zone_daily_recommendations
 FOR EACH ROW
+WHEN EXISTS (
+  SELECT 1 FROM sync_link_state
+   WHERE peer_node = 'cloud' AND linked = 1
+)
 BEGIN
   INSERT INTO sync_outbox(
     event_uuid, aggregate_type, aggregate_key, op, payload_json,
@@ -1457,6 +2033,10 @@ END;
 CREATE TRIGGER trg_dp_zone_recs_outbox_au
 AFTER UPDATE ON zone_daily_recommendations
 FOR EACH ROW
+WHEN EXISTS (
+  SELECT 1 FROM sync_link_state
+   WHERE peer_node = 'cloud' AND linked = 1
+)
 BEGIN
   INSERT INTO sync_outbox(
     event_uuid, aggregate_type, aggregate_key, op, payload_json,
@@ -1498,6 +2078,14 @@ END;
 CREATE TRIGGER trg_gateway_locations_outbox_ai
 AFTER INSERT ON gateway_locations
 FOR EACH ROW
+WHEN EXISTS (
+  SELECT 1 FROM sync_link_state
+   WHERE peer_node = 'cloud' AND linked = 1
+)
+AND COALESCE(
+  NULLIF(trim(NEW.gateway_device_eui), ''),
+  NULLIF(trim((SELECT gateway_device_eui FROM sync_link_state WHERE peer_node = 'cloud')), '')
+) IS NOT NULL
 BEGIN
   INSERT INTO sync_outbox(
     event_uuid, aggregate_type, aggregate_key, op, payload_json,
@@ -1505,10 +2093,10 @@ BEGIN
   ) VALUES (
     lower(hex(randomblob(16))),
     'GATEWAY_LOCATION',
-    NEW.gateway_device_eui,
+    COALESCE(NULLIF(trim(NEW.gateway_device_eui),''),NULLIF(trim((SELECT gateway_device_eui FROM sync_link_state WHERE peer_node='cloud')),'')),
     'GATEWAY_LOCATION_UPSERTED',
     json_object(
-      'gateway_device_eui',           NEW.gateway_device_eui,
+      'gateway_device_eui',           COALESCE(NULLIF(trim(NEW.gateway_device_eui),''),NULLIF(trim((SELECT gateway_device_eui FROM sync_link_state WHERE peer_node='cloud')),'')),
       'latitude',                     NEW.latitude,
       'longitude',                    NEW.longitude,
       'altitude_m',                   NEW.altitude_m,
@@ -1527,7 +2115,7 @@ BEGIN
     ),
     NEW.sync_version,
     strftime('%Y-%m-%dT%H:%M:%fZ','now'),
-    NEW.gateway_device_eui
+    COALESCE(NULLIF(trim(NEW.gateway_device_eui),''),NULLIF(trim((SELECT gateway_device_eui FROM sync_link_state WHERE peer_node='cloud')),''))
   );
 END;
 
@@ -1536,19 +2124,29 @@ CREATE TRIGGER trg_gateway_locations_outbox_au
 AFTER UPDATE ON gateway_locations
 FOR EACH ROW
 WHEN
-  COALESCE(NEW.latitude,'')                      <> COALESCE(OLD.latitude,'') OR
-  COALESCE(NEW.longitude,'')                     <> COALESCE(OLD.longitude,'') OR
-  COALESCE(NEW.altitude_m,'')                    <> COALESCE(OLD.altitude_m,'') OR
-  COALESCE(NEW.accuracy_m,'')                    <> COALESCE(OLD.accuracy_m,'') OR
-  COALESCE(NEW.hdop,'')                          <> COALESCE(OLD.hdop,'') OR
-  COALESCE(NEW.satellites,'')                    <> COALESCE(OLD.satellites,'') OR
-  COALESCE(NEW.fix_mode,'')                      <> COALESCE(OLD.fix_mode,'') OR
-  COALESCE(NEW.status,'')                        <> COALESCE(OLD.status,'') OR
-  COALESCE(NEW.source,'')                        <> COALESCE(OLD.source,'') OR
-  COALESCE(NEW.native_concentratord_status,'')   <> COALESCE(OLD.native_concentratord_status,'') OR
-  COALESCE(NEW.chirpstack_mirror_status,'')      <> COALESCE(OLD.chirpstack_mirror_status,'') OR
-  COALESCE(NEW.last_good_fix_at,'')              <> COALESCE(OLD.last_good_fix_at,'') OR
-  COALESCE(NEW.sync_version,0)                   <> COALESCE(OLD.sync_version,0)
+  EXISTS (
+    SELECT 1 FROM sync_link_state
+     WHERE peer_node = 'cloud' AND linked = 1
+  )
+  AND COALESCE(
+    NULLIF(trim(NEW.gateway_device_eui), ''),
+    NULLIF(trim((SELECT gateway_device_eui FROM sync_link_state WHERE peer_node = 'cloud')), '')
+  ) IS NOT NULL
+  AND (
+    COALESCE(NEW.latitude,'')                    <> COALESCE(OLD.latitude,'') OR
+    COALESCE(NEW.longitude,'')                   <> COALESCE(OLD.longitude,'') OR
+    COALESCE(NEW.altitude_m,'')                  <> COALESCE(OLD.altitude_m,'') OR
+    COALESCE(NEW.accuracy_m,'')                  <> COALESCE(OLD.accuracy_m,'') OR
+    COALESCE(NEW.hdop,'')                        <> COALESCE(OLD.hdop,'') OR
+    COALESCE(NEW.satellites,'')                  <> COALESCE(OLD.satellites,'') OR
+    COALESCE(NEW.fix_mode,'')                    <> COALESCE(OLD.fix_mode,'') OR
+    COALESCE(NEW.status,'')                      <> COALESCE(OLD.status,'') OR
+    COALESCE(NEW.source,'')                      <> COALESCE(OLD.source,'') OR
+    COALESCE(NEW.native_concentratord_status,'') <> COALESCE(OLD.native_concentratord_status,'') OR
+    COALESCE(NEW.chirpstack_mirror_status,'')    <> COALESCE(OLD.chirpstack_mirror_status,'') OR
+    COALESCE(NEW.last_good_fix_at,'')            <> COALESCE(OLD.last_good_fix_at,'') OR
+    COALESCE(NEW.sync_version,0)                 <> COALESCE(OLD.sync_version,0)
+  )
 BEGIN
   INSERT INTO sync_outbox(
     event_uuid, aggregate_type, aggregate_key, op, payload_json,
@@ -1556,10 +2154,10 @@ BEGIN
   ) VALUES (
     lower(hex(randomblob(16))),
     'GATEWAY_LOCATION',
-    NEW.gateway_device_eui,
+    COALESCE(NULLIF(trim(NEW.gateway_device_eui),''),NULLIF(trim((SELECT gateway_device_eui FROM sync_link_state WHERE peer_node='cloud')),'')),
     'GATEWAY_LOCATION_UPSERTED',
     json_object(
-      'gateway_device_eui',           NEW.gateway_device_eui,
+      'gateway_device_eui',           COALESCE(NULLIF(trim(NEW.gateway_device_eui),''),NULLIF(trim((SELECT gateway_device_eui FROM sync_link_state WHERE peer_node='cloud')),'')),
       'latitude',                     NEW.latitude,
       'longitude',                    NEW.longitude,
       'altitude_m',                   NEW.altitude_m,
@@ -1578,6 +2176,6 @@ BEGIN
     ),
     NEW.sync_version,
     strftime('%Y-%m-%dT%H:%M:%fZ','now'),
-    NEW.gateway_device_eui
+    COALESCE(NULLIF(trim(NEW.gateway_device_eui),''),NULLIF(trim((SELECT gateway_device_eui FROM sync_link_state WHERE peer_node='cloud')),''))
   );
 END;
