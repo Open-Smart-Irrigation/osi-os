@@ -83,6 +83,132 @@
         ["dendro_valid", "BOOLEAN", true]
       ],
       "expectedSha256": "b13604f91805f2e45324937f3f2446cc2e62d884d3aeba4f772b0c463caf1beb"
+    },
+    {
+      "name": "chameleon-reading-booleans-and-counters",
+      "tableName": "chameleon_readings",
+      "historyKey": "CHAMELEON_READING|0016C001F11715E2|77",
+      "sourceRow": {
+        "id": 77,
+        "deveui": "A84041CAFECAFE01",
+        "recorded_at": "2026-06-28T11:00:00Z",
+        "payload_version": 3,
+        "status_flags": 5,
+        "data_invalid": 0,
+        "comp_pending": 1,
+        "f_port": 2,
+        "f_cnt": 42,
+        "calibration_status": "calibrated"
+      },
+      "expectedColumns": [
+        ["id", "INTEGER", "77"],
+        ["deveui", "TEXT", "A84041CAFECAFE01"],
+        ["recorded_at", "TIMESTAMP", "2026-06-28T11:00:00.000Z"],
+        ["payload_version", "INTEGER", "3"],
+        ["status_flags", "INTEGER", "5"],
+        ["data_invalid", "BOOLEAN", false],
+        ["comp_pending", "BOOLEAN", true],
+        ["f_port", "INTEGER", "2"],
+        ["f_cnt", "INTEGER", "42"],
+        ["calibration_status", "TEXT", "calibrated"]
+      ],
+      "expectedSha256": "e6c3e7854e76afc4893a891b56cb26cb3652fd5e38353116ce26a49993749631"
+    },
+    {
+      "name": "dendrometer-reading-real-and-flags",
+      "tableName": "dendrometer_readings",
+      "historyKey": "DENDRO_READING|0016C001F11715E2|88",
+      "sourceRow": {
+        "id": 88,
+        "deveui": "A84041CAFECAFE01",
+        "recorded_at": "2026-06-28T11:05:00Z",
+        "position_um": 1250.5,
+        "is_valid": 1,
+        "is_outlier": 0,
+        "dendro_saturated": 1
+      },
+      "expectedColumns": [
+        ["id", "INTEGER", "88"],
+        ["deveui", "TEXT", "A84041CAFECAFE01"],
+        ["recorded_at", "TIMESTAMP", "2026-06-28T11:05:00.000Z"],
+        ["position_um", "REAL", "40938a0000000000"],
+        ["is_valid", "BOOLEAN", true],
+        ["is_outlier", "BOOLEAN", false],
+        ["dendro_saturated", "BOOLEAN", true]
+      ],
+      "expectedSha256": "ebbb92174f8e51cbad70053d42a953e587bdbcf2eaaf8c376cd2768a6ce34384"
+    },
+    {
+      "name": "dendrometer-daily-null-real",
+      "tableName": "dendrometer_daily",
+      "historyKey": "DENDRO_DAILY|0016C001F11715E2|2026-06-28",
+      "sourceRow": {
+        "deveui": "A84041CAFECAFE01",
+        "date": "2026-06-28",
+        "mds_um": null,
+        "twd_um": -12.25,
+        "stress_level": "moderate",
+        "computed_at": "2026-06-29T00:00:00Z"
+      },
+      "expectedColumns": [
+        ["deveui", "TEXT", "A84041CAFECAFE01"],
+        ["date", "TEXT", "2026-06-28"],
+        ["mds_um", "REAL", null],
+        ["twd_um", "REAL", "c028800000000000"],
+        ["stress_level", "TEXT", "moderate"],
+        ["computed_at", "TIMESTAMP", "2026-06-29T00:00:00.000Z"]
+      ],
+      "expectedSha256": "017dac0e62b4c10b3aa087dd230f19162abd548608c8e47bfc440f36e0d11292"
+    },
+    {
+      "name": "zone-environment-rain-and-flow",
+      "tableName": "zone_daily_environment",
+      "historyKey": "ZONE_ENVIRONMENT|zone-uuid-1|2026-06-28",
+      "sourceRow": {
+        "zone_uuid": "zone-uuid-1",
+        "date": "2026-06-28",
+        "rainfall_mm": 3.75,
+        "flow_liters": 120,
+        "rain_source": "aquascope_lorain",
+        "computed_at": "2026-06-29T00:05:00Z"
+      },
+      "expectedColumns": [
+        ["zone_uuid", "TEXT", "zone-uuid-1"],
+        ["date", "TEXT", "2026-06-28"],
+        ["rainfall_mm", "REAL", "400e000000000000"],
+        ["flow_liters", "REAL", "405e000000000000"],
+        ["rain_source", "TEXT", "aquascope_lorain"],
+        ["computed_at", "TIMESTAMP", "2026-06-29T00:05:00.000Z"]
+      ],
+      "expectedSha256": "b0ef7b2e0dba629cc613a708fae7a3cba77c49b53f813d1c02ff59710f9ba06f"
+    },
+    {
+      "name": "irrigation-event-json-payload",
+      "tableName": "irrigation_events",
+      "historyKey": "IRRIGATION_EVENT|irrig-0016C001F11715E2-000000000000123",
+      "sourceRow": {
+        "event_uuid": "irrig-0016C001F11715E2-000000000000123",
+        "created_at": "2026-06-28T11:10:00Z",
+        "action": "OPEN",
+        "reason": "schedule",
+        "aggregate_kpa": 18.5,
+        "threshold_kpa": 20,
+        "duration_minutes": 15,
+        "valve_deveui": "A84041VALVE0001",
+        "payload_json": "{\"z\":2,\"a\":[3,1]}"
+      },
+      "expectedColumns": [
+        ["event_uuid", "TEXT", "irrig-0016C001F11715E2-000000000000123"],
+        ["created_at", "TIMESTAMP", "2026-06-28T11:10:00.000Z"],
+        ["action", "TEXT", "OPEN"],
+        ["reason", "TEXT", "schedule"],
+        ["aggregate_kpa", "REAL", "4032800000000000"],
+        ["threshold_kpa", "REAL", "4034000000000000"],
+        ["duration_minutes", "INTEGER", "15"],
+        ["valve_deveui", "TEXT", "A84041VALVE0001"],
+        ["payload_json", "JSON", "{\"a\":[3,1],\"z\":2}"]
+      ],
+      "expectedSha256": "170c335d14222546a2a5df50df330eeeec9b84757c60b4c74f4adacf15a3a42d"
     }
   ]
 }

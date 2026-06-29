@@ -1441,7 +1441,7 @@ expectIncludes('Sync Init Schema + Triggers', 'ALTER TABLE sync_history_cursors 
 expectIncludes('Sync Init Schema + Triggers', 'ALTER TABLE sync_history_cursors ADD COLUMN last_shadow_error TEXT', 'adds shadow cursor error state at runtime');
 expectIncludes('Sync Init Schema + Triggers', 'missing_gateway_device_eui', 'fails closed when irrigation UUID generation lacks a gateway identity');
 expectExcludes('Sync Init Schema + Triggers', 'lower(hex(randomblob(8)))', 'random irrigation UUID fallback');
-expectIncludes('Sync Init Schema + Triggers', "'event_uuid', NEW.event_uuid", 'mirrors stable irrigation event UUIDs in outbox payloads');
+expectTriggerIncludes('Sync Init Schema + Triggers', syncInitSource, 'trg_dp_irrigation_events_outbox_ai', "'event_uuid', NEW.event_uuid", 'mirrors stable irrigation event UUIDs in outbox payloads');
 expectIncludes('Sync Init Schema + Triggers', 'SELECT irrigation_zone_id FROM devices WHERE deveui = NEW.deveui AND deleted_at IS NULL', 'ignores deleted devices when mirroring device-data zone bindings into the outbox');
 expectIncludes('Sync Init Schema + Triggers', 'SELECT gateway_device_eui FROM devices WHERE deveui = NEW.deveui AND deleted_at IS NULL', 'ignores deleted devices when mirroring device-data gateway bindings into the outbox');
 expectIncludes('Sync Init Schema + Triggers', 'SELECT zone_uuid FROM irrigation_zones WHERE id = NEW.zone_id AND deleted_at IS NULL', 'ignores deleted zones when mirroring zone environment rows into the outbox');

@@ -102,6 +102,12 @@ function assertHistorySchemaAndTriggers(label) {
   exec("INSERT INTO zone_daily_recommendations(zone_id, date, recommendation_json, computed_at) VALUES(1, '2026-06-27', '{}', '2026-06-28T09:00:00.000Z')");
   exec("INSERT INTO dendrometer_daily(deveui, date, computed_at) VALUES('A84041CAFECAFE01', '2026-06-27', '2026-06-28T09:00:00.000Z')");
   exec("INSERT INTO irrigation_events(id, user_id, irrigation_zone_id, action, payload_json) VALUES(50, 1, 1, 'OPEN', '{}')");
+  exec("UPDATE sync_link_state SET gateway_device_eui=NULL WHERE peer_node='cloud'");
+  exec("INSERT INTO irrigation_zones(id, user_id, name, zone_uuid, gateway_device_eui, sync_version) VALUES(20, 1, 'Offline Missing Gateway', 'zone-offline-missing-gateway', NULL, 1)");
+  exec("INSERT INTO irrigation_events(id, user_id, irrigation_zone_id, action, payload_json) VALUES(51, 1, 20, 'OPEN', '{}')");
+  if (scalar("SELECT COUNT(*) FROM sync_outbox WHERE aggregate_type='IRRIGATION_EVENT';") !== 0) {
+    throw new Error(`${label}: never-linked irrigation event with missing gateway created outbox row`);
+  }
   if (scalar('SELECT COUNT(*) FROM sync_outbox;') !== 0) {
     throw new Error(`${label}: unlinked derived or irrigation insert created outbox row`);
   }
@@ -124,10 +130,17 @@ function assertHistorySchemaAndTriggers(label) {
   if (text("SELECT json_extract(payload_json, '$.data_invalid') || '|' || json_extract(payload_json, '$.comp_pending') FROM sync_outbox WHERE aggregate_type='CHAMELEON_READING';") !== '1|1') {
     throw new Error(`${label}: chameleon outbox payload omitted new validity flags`);
   }
+  exec("UPDATE devices SET gateway_device_eui=NULL WHERE deveui='A84041CAFECAFE01'");
+  exec("UPDATE sync_link_state SET gateway_device_eui='0016C001F11715E3' WHERE peer_node='cloud'");
   exec("INSERT INTO dendrometer_readings(id, deveui, position_um, recorded_at) VALUES(12, 'A84041CAFECAFE01', 1200.0, '2026-06-28T10:02:00.000Z')");
   if (scalar("SELECT COUNT(*) FROM sync_outbox WHERE aggregate_type='DENDRO_READING';") !== 1) {
     throw new Error(`${label}: linked dendrometer_readings insert lost legacy durable outbox coverage`);
   }
+  if (text("SELECT json_extract(payload_json, '$.gateway_device_eui') || '|' || gateway_device_eui FROM sync_outbox WHERE aggregate_type='DENDRO_READING';") !== '0016C001F11715E3|0016C001F11715E3') {
+    throw new Error(`${label}: dendrometer reading outbox did not use resolved sync_link_state gateway EUI`);
+  }
+  exec("UPDATE devices SET gateway_device_eui='0016C001F11715E2' WHERE deveui='A84041CAFECAFE01'");
+  exec("UPDATE sync_link_state SET gateway_device_eui='0016C001F11715E2' WHERE peer_node='cloud'");
   exec("UPDATE device_data SET swt_1=11.0 WHERE id=101");
   if (scalar("SELECT COUNT(*) FROM sync_history_dirty_keys WHERE table_name='device_data' AND row_key='DEVICE_DATA|0016C001F11715E2|101';") !== 1) {
     throw new Error(`${label}: linked raw correction did not create dirty key`);
@@ -171,10 +184,18 @@ function assertHistorySchemaAndTriggers(label) {
   if (text("SELECT json_extract(payload_json, '$.event_uuid') FROM sync_outbox WHERE aggregate_type='IRRIGATION_EVENT' AND json_extract(payload_json, '$.event_id') = 2;") !== eventUuid) {
     throw new Error(`${label}: irrigation event outbox payload did not include stable event_uuid`);
   }
+  exec('DELETE FROM sync_outbox');
+  exec("INSERT INTO gateway_locations(gateway_device_eui, latitude, longitude, status, source, updated_at) VALUES('', 47.1001, 8.1002, 'fix', 'gpsd', '2026-06-28T10:03:00.000Z')");
+  if (text("SELECT aggregate_key || '|' || json_extract(payload_json, '$.gateway_device_eui') || '|' || gateway_device_eui FROM sync_outbox WHERE aggregate_type='GATEWAY_LOCATION';") !== '0016C001F11715E2|0016C001F11715E2|0016C001F11715E2') {
+    throw new Error(`${label}: gateway location outbox did not use resolved sync_link_state gateway EUI`);
+  }
   exec("INSERT INTO irrigation_zones(id, user_id, name, zone_uuid, gateway_device_eui, sync_version) VALUES(2, 1, 'No Gateway', 'zone-2', NULL, 1)");
   exec("UPDATE irrigation_zones SET gateway_device_eui=NULL WHERE id=2");
   exec("UPDATE sync_link_state SET gateway_device_eui=NULL WHERE peer_node='cloud'");
   execFails("INSERT INTO irrigation_events(id, user_id, irrigation_zone_id, action, payload_json) VALUES(3, 1, 2, 'OPEN', '{}')", 'missing_gateway_device_eui');
+  exec("UPDATE irrigation_zones SET gateway_device_eui='   ' WHERE id=2");
+  exec("UPDATE sync_link_state SET gateway_device_eui='   ' WHERE peer_node='cloud'");
+  execFails("INSERT INTO irrigation_events(id, user_id, irrigation_zone_id, action, payload_json) VALUES(4, 1, 2, 'OPEN', '{}')", 'missing_gateway_device_eui');
 
   console.log(`OK sync history schema ${label}`);
 }

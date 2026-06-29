@@ -98,10 +98,14 @@ ALTER TABLE chameleon_readings ADD COLUMN comp_pending INTEGER DEFAULT 0;
 ALTER TABLE irrigation_events ADD COLUMN event_uuid TEXT;
 UPDATE irrigation_events
 SET event_uuid = 'irrig-' || COALESCE(
-  (SELECT gateway_device_eui FROM irrigation_zones WHERE irrigation_zones.id = irrigation_events.irrigation_zone_id AND deleted_at IS NULL),
-  (SELECT gateway_device_eui FROM sync_link_state WHERE peer_node = 'cloud')
+  NULLIF(trim((SELECT gateway_device_eui FROM irrigation_zones WHERE irrigation_zones.id = irrigation_events.irrigation_zone_id AND deleted_at IS NULL)), ''),
+  NULLIF(trim((SELECT gateway_device_eui FROM sync_link_state WHERE peer_node = 'cloud')), '')
 ) || '-' || printf('%015d', id)
-WHERE event_uuid IS NULL OR event_uuid = '';
+WHERE (event_uuid IS NULL OR event_uuid = '')
+  AND COALESCE(
+    NULLIF(trim((SELECT gateway_device_eui FROM irrigation_zones WHERE irrigation_zones.id = irrigation_events.irrigation_zone_id AND deleted_at IS NULL)), ''),
+    NULLIF(trim((SELECT gateway_device_eui FROM sync_link_state WHERE peer_node = 'cloud')), '')
+  ) IS NOT NULL;
 CREATE UNIQUE INDEX IF NOT EXISTS idx_irrigation_events_event_uuid
   ON irrigation_events(event_uuid);
 
@@ -296,7 +300,10 @@ WHEN EXISTS (
   SELECT 1 FROM sync_link_state
    WHERE peer_node = 'cloud' AND linked = 1
 )
-AND COALESCE((SELECT gateway_device_eui FROM devices WHERE deveui = NEW.deveui AND deleted_at IS NULL), (SELECT gateway_device_eui FROM sync_link_state WHERE peer_node = 'cloud'), '') <> ''
+AND COALESCE(
+  NULLIF(trim(NEW.gateway_device_eui), ''),
+  NULLIF(trim((SELECT gateway_device_eui FROM sync_link_state WHERE peer_node = 'cloud')), '')
+) IS NOT NULL
 BEGIN
   INSERT INTO sync_outbox(
     event_uuid, aggregate_type, aggregate_key, op, payload_json,
@@ -304,10 +311,10 @@ BEGIN
   ) VALUES (
     lower(hex(randomblob(16))),
     'GATEWAY_LOCATION',
-    NEW.gateway_device_eui,
+    COALESCE(NULLIF(trim(NEW.gateway_device_eui),''),NULLIF(trim((SELECT gateway_device_eui FROM sync_link_state WHERE peer_node='cloud')),'')),
     'GATEWAY_LOCATION_UPSERTED',
     json_object(
-      'gateway_device_eui',           NEW.gateway_device_eui,
+      'gateway_device_eui',           COALESCE(NULLIF(trim(NEW.gateway_device_eui),''),NULLIF(trim((SELECT gateway_device_eui FROM sync_link_state WHERE peer_node='cloud')),'')),
       'latitude',                     NEW.latitude,
       'longitude',                    NEW.longitude,
       'altitude_m',                   NEW.altitude_m,
@@ -326,7 +333,7 @@ BEGIN
     ),
     NEW.sync_version,
     strftime('%Y-%m-%dT%H:%M:%fZ','now'),
-    NEW.gateway_device_eui
+    COALESCE(NULLIF(trim(NEW.gateway_device_eui),''),NULLIF(trim((SELECT gateway_device_eui FROM sync_link_state WHERE peer_node='cloud')),''))
   );
 END;
 
@@ -339,6 +346,10 @@ WHEN
     SELECT 1 FROM sync_link_state
      WHERE peer_node = 'cloud' AND linked = 1
   )
+  AND COALESCE(
+    NULLIF(trim(NEW.gateway_device_eui), ''),
+    NULLIF(trim((SELECT gateway_device_eui FROM sync_link_state WHERE peer_node = 'cloud')), '')
+  ) IS NOT NULL
   AND (
     COALESCE(NEW.latitude,'')                    <> COALESCE(OLD.latitude,'') OR
     COALESCE(NEW.longitude,'')                   <> COALESCE(OLD.longitude,'') OR
@@ -361,10 +372,10 @@ BEGIN
   ) VALUES (
     lower(hex(randomblob(16))),
     'GATEWAY_LOCATION',
-    NEW.gateway_device_eui,
+    COALESCE(NULLIF(trim(NEW.gateway_device_eui),''),NULLIF(trim((SELECT gateway_device_eui FROM sync_link_state WHERE peer_node='cloud')),'')),
     'GATEWAY_LOCATION_UPSERTED',
     json_object(
-      'gateway_device_eui',           NEW.gateway_device_eui,
+      'gateway_device_eui',           COALESCE(NULLIF(trim(NEW.gateway_device_eui),''),NULLIF(trim((SELECT gateway_device_eui FROM sync_link_state WHERE peer_node='cloud')),'')),
       'latitude',                     NEW.latitude,
       'longitude',                    NEW.longitude,
       'altitude_m',                   NEW.altitude_m,
@@ -383,7 +394,7 @@ BEGIN
     ),
     NEW.sync_version,
     strftime('%Y-%m-%dT%H:%M:%fZ','now'),
-    NEW.gateway_device_eui
+    COALESCE(NULLIF(trim(NEW.gateway_device_eui),''),NULLIF(trim((SELECT gateway_device_eui FROM sync_link_state WHERE peer_node='cloud')),''))
   );
 END;
 
@@ -528,7 +539,10 @@ WHEN EXISTS (
   SELECT 1 FROM sync_link_state
    WHERE peer_node = 'cloud' AND linked = 1
 )
-AND COALESCE((SELECT gateway_device_eui FROM devices WHERE deveui = NEW.deveui AND deleted_at IS NULL), (SELECT gateway_device_eui FROM sync_link_state WHERE peer_node = 'cloud'), '') <> ''
+AND COALESCE(
+  NULLIF(trim((SELECT gateway_device_eui FROM devices WHERE deveui = NEW.deveui AND deleted_at IS NULL)), ''),
+  NULLIF(trim((SELECT gateway_device_eui FROM sync_link_state WHERE peer_node = 'cloud')), '')
+) IS NOT NULL
 BEGIN
   INSERT INTO sync_outbox(
     event_uuid, aggregate_type, aggregate_key, op, payload_json,
@@ -549,11 +563,11 @@ BEGIN
       'recorded_at',    NEW.recorded_at,
       'zone_id',        (SELECT irrigation_zone_id FROM devices WHERE deveui=NEW.deveui AND deleted_at IS NULL),
       'zone_uuid',      (SELECT iz.zone_uuid FROM devices d LEFT JOIN irrigation_zones iz ON iz.id=d.irrigation_zone_id AND iz.deleted_at IS NULL WHERE d.deveui=NEW.deveui AND d.deleted_at IS NULL),
-      'gateway_device_eui', COALESCE((SELECT gateway_device_eui FROM devices WHERE deveui=NEW.deveui AND deleted_at IS NULL),'0016C001F11715E2')
+      'gateway_device_eui', COALESCE(NULLIF(trim((SELECT gateway_device_eui FROM devices WHERE deveui=NEW.deveui AND deleted_at IS NULL)),''),NULLIF(trim((SELECT gateway_device_eui FROM sync_link_state WHERE peer_node='cloud')),''))
     ),
     0,
     strftime('%Y-%m-%dT%H:%M:%fZ','now'),
-    COALESCE((SELECT gateway_device_eui FROM devices WHERE deveui=NEW.deveui AND deleted_at IS NULL),'0016C001F11715E2')
+    COALESCE(NULLIF(trim((SELECT gateway_device_eui FROM devices WHERE deveui=NEW.deveui AND deleted_at IS NULL)),''),NULLIF(trim((SELECT gateway_device_eui FROM sync_link_state WHERE peer_node='cloud')),''))
   );
 END;
 
@@ -1097,16 +1111,23 @@ AFTER INSERT ON irrigation_events
 FOR EACH ROW
 WHEN NEW.event_uuid IS NULL OR NEW.event_uuid = ''
 BEGIN
-  SELECT CASE WHEN COALESCE(
-    (SELECT gateway_device_eui FROM irrigation_zones WHERE id = NEW.irrigation_zone_id AND deleted_at IS NULL),
-    (SELECT gateway_device_eui FROM sync_link_state WHERE peer_node = 'cloud')
+  SELECT CASE WHEN EXISTS (
+    SELECT 1 FROM sync_link_state WHERE peer_node = 'cloud' AND linked = 1
+  )
+  AND COALESCE(
+    NULLIF(trim((SELECT gateway_device_eui FROM irrigation_zones WHERE id = NEW.irrigation_zone_id AND deleted_at IS NULL)), ''),
+    NULLIF(trim((SELECT gateway_device_eui FROM sync_link_state WHERE peer_node = 'cloud')), '')
   ) IS NULL THEN RAISE(ABORT, 'missing_gateway_device_eui') END;
   UPDATE irrigation_events
   SET event_uuid = 'irrig-' || COALESCE(
-    (SELECT gateway_device_eui FROM irrigation_zones WHERE id = NEW.irrigation_zone_id AND deleted_at IS NULL),
-    (SELECT gateway_device_eui FROM sync_link_state WHERE peer_node = 'cloud')
+    NULLIF(trim((SELECT gateway_device_eui FROM irrigation_zones WHERE id = NEW.irrigation_zone_id AND deleted_at IS NULL)), ''),
+    NULLIF(trim((SELECT gateway_device_eui FROM sync_link_state WHERE peer_node = 'cloud')), '')
   ) || '-' || printf('%015d', NEW.id)
-  WHERE id = NEW.id;
+  WHERE id = NEW.id
+    AND COALESCE(
+      NULLIF(trim((SELECT gateway_device_eui FROM irrigation_zones WHERE id = NEW.irrigation_zone_id AND deleted_at IS NULL)), ''),
+      NULLIF(trim((SELECT gateway_device_eui FROM sync_link_state WHERE peer_node = 'cloud')), '')
+    ) IS NOT NULL;
   INSERT INTO sync_outbox(
     event_uuid, aggregate_type, aggregate_key, op, payload_json,
     sync_version, occurred_at, gateway_device_eui
@@ -1122,7 +1143,7 @@ BEGIN
       'user_id',             user_id,
       'irrigation_zone_id',  irrigation_zone_id,
       'zone_uuid',           (SELECT zone_uuid FROM irrigation_zones WHERE id=irrigation_zone_id AND deleted_at IS NULL),
-      'gateway_device_eui',  COALESCE((SELECT gateway_device_eui FROM irrigation_zones WHERE id=irrigation_zone_id AND deleted_at IS NULL),(SELECT gateway_device_eui FROM sync_link_state WHERE peer_node='cloud')),
+      'gateway_device_eui',  COALESCE(NULLIF(trim((SELECT gateway_device_eui FROM irrigation_zones WHERE id=irrigation_zone_id AND deleted_at IS NULL)),''),NULLIF(trim((SELECT gateway_device_eui FROM sync_link_state WHERE peer_node='cloud')),'')),
       'action',              action,
       'reason',              reason,
       'aggregate_kpa',       aggregate_kpa,
@@ -1133,9 +1154,11 @@ BEGIN
     ),
     0,
     strftime('%Y-%m-%dT%H:%M:%fZ','now'),
-    COALESCE((SELECT gateway_device_eui FROM irrigation_zones WHERE id=irrigation_zone_id AND deleted_at IS NULL),(SELECT gateway_device_eui FROM sync_link_state WHERE peer_node='cloud'))
+    COALESCE(NULLIF(trim((SELECT gateway_device_eui FROM irrigation_zones WHERE id=irrigation_zone_id AND deleted_at IS NULL)),''),NULLIF(trim((SELECT gateway_device_eui FROM sync_link_state WHERE peer_node='cloud')),''))
   FROM irrigation_events
   WHERE id = NEW.id
+    AND irrigation_events.event_uuid IS NOT NULL
+    AND irrigation_events.event_uuid <> ''
     AND EXISTS (SELECT 1 FROM sync_link_state WHERE peer_node = 'cloud' AND linked = 1)
     AND NOT EXISTS (SELECT 1 FROM sync_outbox WHERE aggregate_type='IRRIGATION_EVENT' AND aggregate_key=irrigation_events.event_uuid);
 END;
@@ -1152,6 +1175,10 @@ WHEN NEW.event_uuid IS NOT NULL
 	   SELECT 1 FROM sync_link_state
 	    WHERE peer_node = 'cloud' AND linked = 1
 	 )
+ AND COALESCE(
+   NULLIF(trim((SELECT gateway_device_eui FROM irrigation_zones WHERE id = NEW.irrigation_zone_id AND deleted_at IS NULL)), ''),
+   NULLIF(trim((SELECT gateway_device_eui FROM sync_link_state WHERE peer_node = 'cloud')), '')
+ ) IS NOT NULL
  AND NOT EXISTS (
    SELECT 1 FROM sync_outbox
     WHERE aggregate_type='IRRIGATION_EVENT' AND aggregate_key=NEW.event_uuid
@@ -1171,7 +1198,7 @@ BEGIN
       'user_id',             NEW.user_id,
       'irrigation_zone_id',  NEW.irrigation_zone_id,
       'zone_uuid',           (SELECT zone_uuid FROM irrigation_zones WHERE id=NEW.irrigation_zone_id AND deleted_at IS NULL),
-      'gateway_device_eui',  COALESCE((SELECT gateway_device_eui FROM irrigation_zones WHERE id=NEW.irrigation_zone_id AND deleted_at IS NULL),(SELECT gateway_device_eui FROM sync_link_state WHERE peer_node='cloud')),
+      'gateway_device_eui',  COALESCE(NULLIF(trim((SELECT gateway_device_eui FROM irrigation_zones WHERE id=NEW.irrigation_zone_id AND deleted_at IS NULL)),''),NULLIF(trim((SELECT gateway_device_eui FROM sync_link_state WHERE peer_node='cloud')),'')),
       'action',              NEW.action,
       'reason',              NEW.reason,
       'aggregate_kpa',       NEW.aggregate_kpa,
@@ -1182,7 +1209,7 @@ BEGIN
     ),
     0,
     strftime('%Y-%m-%dT%H:%M:%fZ','now'),
-    COALESCE((SELECT gateway_device_eui FROM irrigation_zones WHERE id=NEW.irrigation_zone_id AND deleted_at IS NULL),(SELECT gateway_device_eui FROM sync_link_state WHERE peer_node='cloud'))
+    COALESCE(NULLIF(trim((SELECT gateway_device_eui FROM irrigation_zones WHERE id=NEW.irrigation_zone_id AND deleted_at IS NULL)),''),NULLIF(trim((SELECT gateway_device_eui FROM sync_link_state WHERE peer_node='cloud')),''))
   );
 END;
 
@@ -1196,6 +1223,10 @@ WHEN (OLD.event_uuid IS NULL OR OLD.event_uuid = '')
 	   SELECT 1 FROM sync_link_state
 	    WHERE peer_node = 'cloud' AND linked = 1
 	 )
+ AND COALESCE(
+   NULLIF(trim((SELECT gateway_device_eui FROM irrigation_zones WHERE id = NEW.irrigation_zone_id AND deleted_at IS NULL)), ''),
+   NULLIF(trim((SELECT gateway_device_eui FROM sync_link_state WHERE peer_node = 'cloud')), '')
+ ) IS NOT NULL
  AND NOT EXISTS (
    SELECT 1 FROM sync_outbox
     WHERE aggregate_type='IRRIGATION_EVENT' AND aggregate_key=NEW.event_uuid
@@ -1215,7 +1246,7 @@ BEGIN
       'user_id',             NEW.user_id,
       'irrigation_zone_id',  NEW.irrigation_zone_id,
       'zone_uuid',           (SELECT zone_uuid FROM irrigation_zones WHERE id=NEW.irrigation_zone_id AND deleted_at IS NULL),
-      'gateway_device_eui',  COALESCE((SELECT gateway_device_eui FROM irrigation_zones WHERE id=NEW.irrigation_zone_id AND deleted_at IS NULL),(SELECT gateway_device_eui FROM sync_link_state WHERE peer_node='cloud')),
+      'gateway_device_eui',  COALESCE(NULLIF(trim((SELECT gateway_device_eui FROM irrigation_zones WHERE id=NEW.irrigation_zone_id AND deleted_at IS NULL)),''),NULLIF(trim((SELECT gateway_device_eui FROM sync_link_state WHERE peer_node='cloud')),'')),
       'action',              NEW.action,
       'reason',              NEW.reason,
       'aggregate_kpa',       NEW.aggregate_kpa,
@@ -1226,6 +1257,6 @@ BEGIN
     ),
     0,
     strftime('%Y-%m-%dT%H:%M:%fZ','now'),
-    COALESCE((SELECT gateway_device_eui FROM irrigation_zones WHERE id=NEW.irrigation_zone_id AND deleted_at IS NULL),(SELECT gateway_device_eui FROM sync_link_state WHERE peer_node='cloud'))
+    COALESCE(NULLIF(trim((SELECT gateway_device_eui FROM irrigation_zones WHERE id=NEW.irrigation_zone_id AND deleted_at IS NULL)),''),NULLIF(trim((SELECT gateway_device_eui FROM sync_link_state WHERE peer_node='cloud')),''))
   );
 END;

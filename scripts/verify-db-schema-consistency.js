@@ -413,6 +413,11 @@ const requiredIndexSqlFragments = {
 const requiredTriggerSqlFragments = {
   trg_sync_irrigation_events_uuid_ai: [
     'missing_gateway_device_eui',
+    "where peer_node = 'cloud' and linked = 1",
+    "nullif(trim(",
+    'insert into sync_outbox',
+    "aggregate_type='irrigation_event'",
+    'not exists',
     "printf('%015d', new.id)",
   ],
   trg_dp_irrigation_events_outbox_ai: [
@@ -444,14 +449,38 @@ const requiredTriggerSqlFragments = {
   trg_sync_zone_env_dirty_ai: [
     "'zone-id:' || new.zone_id",
   ],
+  trg_sync_zone_env_dirty_au: [
+    "'zone-id:' || new.zone_id",
+  ],
   trg_sync_zone_recs_dirty_ai: [
     "'zone-id:' || new.zone_id",
+  ],
+  trg_sync_zone_recs_dirty_au: [
+    "'zone-id:' || new.zone_id",
+  ],
+  trg_dp_dendro_readings_outbox_ai: [
+    "nullif(trim(",
+    "select gateway_device_eui from sync_link_state where peer_node = 'cloud'",
+    "'gateway_device_eui', coalesce(nullif(trim(",
+  ],
+  trg_gateway_locations_outbox_ai: [
+    "nullif(trim(new.gateway_device_eui)",
+    "aggregate_key",
+    "'gateway_device_eui', coalesce(nullif(trim(new.gateway_device_eui)",
+  ],
+  trg_gateway_locations_outbox_au: [
+    "nullif(trim(new.gateway_device_eui)",
+    "aggregate_key",
+    "'gateway_device_eui', coalesce(nullif(trim(new.gateway_device_eui)",
   ],
 };
 
 const forbiddenTriggerSqlFragments = {
   trg_sync_irrigation_events_uuid_ai: [
     'randomblob(8)',
+  ],
+  trg_dp_dendro_readings_outbox_ai: [
+    "'0016c001f11715e2'",
   ],
 };
 
