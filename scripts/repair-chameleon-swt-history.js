@@ -110,6 +110,8 @@ function normalizeArrayId(value) {
 function loadChameleonHelper() {
   const candidates = [
     path.join(__dirname, '..', 'conf', 'full_raspberrypi_bcm27xx_bcm2712', 'files', 'usr', 'share', 'node-red', 'osi-chameleon-helper'),
+    '/srv/node-red/osi-chameleon-helper',
+    '/srv/node-red/node_modules/osi-chameleon-helper',
     '/usr/share/node-red/osi-chameleon-helper',
   ];
   for (const candidate of candidates) {
