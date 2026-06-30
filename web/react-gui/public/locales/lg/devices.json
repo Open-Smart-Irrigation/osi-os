@@ -24,7 +24,7 @@
     "failed": "Okuwerekeza ekyuma kugaanye"
   },
   "createZoneModal": {
-    "title": "Tondawo Ekifo ky'okusukkulirira",
+    "title": "Tondawo Ekifo",
     "zoneName": "Erinnya ly'ekifo",
     "zoneNamePlaceholder": "eg. Olusozi A, Okuva mu bukiika, Olusuku 1",
     "zoneNameRequired": "Erinnya ly'ekifo lyetaagisa",
@@ -85,20 +85,20 @@
     "devicesInZone": "Ebyuma mu kifo kino:",
     "data": "Data",
     "export": {
-      "title": "Data export",
-      "selectRange": "Choose a date range to download zone data.",
-      "from": "From",
-      "to": "To",
-      "granularity": "Granularity",
-      "raw": "Raw",
-      "hourly": "Hourly",
-      "daily": "Daily",
-      "download": "Download CSV",
-      "downloading": "Preparing...",
-      "rangeSummary": "{{from}} to {{to}}",
-      "error": "Export failed",
-      "tooLarge": "Range too large. Choose a coarser granularity.",
-      "fullExport": "Full export"
+      "title": "Fulumya data",
+      "selectRange": "Londa ebbanga ly'ennaku okusobola okuwanula data y'ekifo.",
+      "from": "Okuva",
+      "to": "Okutuuka",
+      "granularity": "Obuzito bw'obudde",
+      "raw": "Ebitali bikyusiddwa",
+      "hourly": "Buli saawa",
+      "daily": "Buli lunaku",
+      "download": "Wanula CSV",
+      "downloading": "Kitegekebwa...",
+      "rangeSummary": "{{from}} okutuuka {{to}}",
+      "error": "Okufulumya kulemereddwa",
+      "tooLarge": "Ebbanga ddene nnyo. Londa obuzito obunene.",
+      "fullExport": "Okufulumya kwonna"
     }
   },
   "schedule": {

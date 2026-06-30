@@ -3,5 +3,93 @@
   "loading": "Tikuyitamu...",
   "delete": "Sazaamu",
   "na": "Tebaawo",
-  "retry": "Gezaako nate"
+  "retry": "Gezaako nate",
+  "analysis": {
+    "title": "Okwekenneenya kwa data",
+    "axis": {
+      "rename": "Kyusa erinnya ly'omulongo"
+    },
+    "backToDashboard": "← Ddayo ku Dashboard",
+    "loadError": "Ebikwata ku kwekenneenya tebisobodde okutikkibwa.",
+    "pooled": {
+      "tooltip": "Okugatta obubonero bw'ebitundu byonna nga ekitebe kimu, wamu n'ekitundu kyonna kye kimu."
+    },
+    "empty": "Londa olunyiriri lumu oba okusingawo okutandika okugeraageranya ebitundu.",
+    "catalog": {
+      "loading": "Ennyiriri eziriwo zitikkibwa..."
+    },
+    "series": {
+      "loading": "Ennyiriri zitikkibwa..."
+    },
+    "aggregation": {
+      "label": "Okugatta data",
+      "raw": "Nga bwe kiri",
+      "fifteenMinute": "Ddakiika 15",
+      "hourly": "Buli saawa",
+      "daily": "Buli lunaku",
+      "weekly": "Buli wiiki"
+    },
+    "preset": {
+      "metricLabel": "Ekigero mu zone zonna"
+    },
+    "tray": {
+      "label": "Ennyiriri z'okwekenneenya",
+      "title": "Ennyiriri",
+      "search": "Noonya zoozi oba ebyuma",
+      "unknownSite": "Ekifo tekimanyiddwa",
+      "reason": {
+        "unsupported": "Tewagirwa",
+        "available_no_recent_data": "Tewali biwandiiko bipya"
+      }
+    },
+    "range": {
+      "label": "Ekiseera ky'okwekenneenya",
+      "custom": "Ekikolebwa ggwe",
+      "from": "Okuva",
+      "to": "Okutuuka",
+      "apply": "Kozesa",
+      "invalid": "Entandikwa erina okuba nga eri mbere y'enkomerero."
+    },
+    "mode": {
+      "label": "Enkola y'okwekenneenya",
+      "timeline": "Olunyiriri lw'ebiseera",
+      "correlation": "Enkolagana"
+    },
+    "layout": {
+      "label": "Entegeka",
+      "stacked": "Ebiteekeddwa waggulu w'ebirala",
+      "overlaid": "Ebiteekeddwa wamu",
+      "smallMultiples": "Ebifaananyi ebitono ebingi"
+    },
+    "toggle": {
+      "normalize": "Kiteekemu omutindo"
+    },
+    "export": {
+      "csv": "Gyamu CSV",
+      "png": "Gyamu PNG"
+    },
+    "legend": {
+      "label": "Ekiraga ebiri ku chart",
+      "rename": "Kyusa erinnya ly'olunyiriri"
+    },
+    "views": {
+      "title": "Endaba eziterekeddwa",
+      "save": "Tereka endaba",
+      "namePlaceholder": "Tuuma endaba eno erinnya",
+      "delete": "Sangula endaba",
+      "empty": "Tewali ndaba ziterekeddwa."
+    },
+    "droppedNotice": "{{count}} series tezaasobola kusomebwa",
+    "correlation": {
+      "comingSoon": "Scatter y'enkolagana etegekeddwa mu kitundu ekiddako.",
+      "needTwoChannels": "Yongerako ennyiriri z'emikutu waakiri ebiri egy'enjawulo okuzigeraageranya.",
+      "x": "Omukutu X",
+      "y": "Omukutu Y",
+      "pooled": "Bikunganyiziddwa (ebitundu byonna)",
+      "zone": "Ekitundu",
+      "droppedPairs": "Ebisuliddwa",
+      "insufficient": "tekimala (n={{n}})",
+      "exploratory": "Kya kugezesa kyokka — Pearson r ku buckets ezitereezeddwa; si kugezesa kwa significance."
+    }
+  }
 }

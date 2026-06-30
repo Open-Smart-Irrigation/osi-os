@@ -1,5 +1,5 @@
 {
-  "title": "Pulezidenti w'Open Smart Irrigation",
+  "title": "AgroLink Dashboard",
   "welcome": "Tukwanirizza, {{username}}",
   "add": "Yongera",
   "addMenu": {
@@ -17,13 +17,13 @@
   "autoRefresh": "Tikukyusaamu buli myaka 10",
   "emptyState": {
     "title": "Tukwanirizza ku nnimiro yo!",
-    "subtitle": "Tandika nga otondawo ekifo ky'okusukkulirira n'okuwaayo ebyuma",
+    "subtitle": "Tandika nga otondawo ekifo n'okuwaayo ebyuma",
     "createZone": "Tondawo Ekifo",
     "addDevice": "Yongera Ekyuma"
   },
-  "irrigationZones": "Ebifo by'okusukkulirira",
+  "irrigationZones": "Ebifo",
   "unassignedDevices": "Ebyuma ebitawerekwa",
-  "unassignedSubtitle": "Ebyuma ebino tebiwerekeddwa ku kifo kyonna ky'okusukkulirira",
+  "unassignedSubtitle": "Ebyuma ebino tebiwerekeddwa ku kifo kyonna",
   "soilSensors": "Ebyuma eby'obutaka",
   "smartValves": "Zzimu ez'amagezi"
 }

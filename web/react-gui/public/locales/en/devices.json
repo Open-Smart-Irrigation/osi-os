@@ -24,7 +24,7 @@
     "failed": "Failed to assign device"
   },
   "createZoneModal": {
-    "title": "Create Irrigation Zone",
+    "title": "Create Zone",
     "zoneName": "Zone Name",
     "zoneNamePlaceholder": "e.g., Garden A, North Field, Orchard 1",
     "zoneNameRequired": "Zone name is required",
