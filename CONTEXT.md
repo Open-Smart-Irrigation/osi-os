@@ -17,11 +17,11 @@ The first implementation slice that changes Agroscope-facing identity only, with
 _Avoid_: Research network MVP, dendrometer controller
 
 **Operator-visible identity**:
-The subset of branding visible in the GUI and local operator surfaces such as build labels, login text, and system identity strings.
+The subset of branding visible in the GUI and local operator surfaces such as login text, dashboard text, local AP/SSID, and user-facing local labels. Build labels, hostnames, image profile names, and low-level system identity strings stay out of scope.
 _Avoid_: Full image identity
 
 **Official Agroscope assets**:
-Agroscope-provided logo, colors, and copy from `/home/phil/kDrive/OSI OS/Agroscope/Logo Agroscope`, used as the only source for first-slice visual branding.
+Agroscope-provided logo, colors, and copy from the official branding package provided outside this repository, used as the only source for first-slice visual branding.
 _Avoid_: Public-brand guesswork, approximate Agroscope styling
 
 **Brand language set**:
@@ -41,7 +41,7 @@ The exact login screen subtitle shown below **AgroLink**: "Powered by OSI OS".
 _Avoid_: Powered by Open Smart Irrigation, OSI-powered
 
 **AgroLink operator identity**:
-The use of **AgroLink** across primary GUI screens and local operator-visible surfaces such as AP/SSID, build labels, and visible system identity text.
+The use of **AgroLink** across primary GUI screens and local operator-visible surfaces such as AP/SSID and user-facing local labels, without changing build labels, hostnames, image profile names, or low-level system identity text.
 _Avoid_: GUI-only AgroLink, OSI OS operator label
 
 **AgroLink SSID**:
@@ -87,7 +87,7 @@ _Avoid_: renaming storage or API contracts as part of the first branding slice
 - **Italian branding coverage** is part of the **Branding slice**.
 - **AgroLink** is the product name shown on the login screen and primary GUI surfaces.
 - **Login screen attribution** preserves OSI OS as the underlying platform identity.
-- **AgroLink operator identity** extends the product name beyond the GUI while retaining OSI OS attribution where needed.
+- **AgroLink operator identity** extends the product name beyond the GUI only to local AP/SSID and user-facing local labels while retaining OSI OS attribution where needed.
 - **AgroLink SSID** is one concrete surface of **AgroLink operator identity**.
 - **AgroLink supported profiles** limit SSID and firmware-payload branding to the two supported Raspberry Pi full profiles.
 - **Stable gateway hostname** keeps low-level device identity separate from human-facing **AgroLink operator identity**.
@@ -105,7 +105,7 @@ _Avoid_: renaming storage or API contracts as part of the first branding slice
 > **Domain expert:** "No. First only branding."
 
 > **Dev:** "Should branding stop at the GUI or extend into the local system?"
-> **Domain expert:** "Use GUI plus local system identity, but do not rename the full image profile yet."
+> **Domain expert:** "Use GUI plus local AP/SSID and user-facing local labels, but do not rename the full image profile or system identity."
 
 > **Dev:** "Should I look up Agroscope colors and logos?"
 > **Domain expert:** "No. Use official assets that we provide."
@@ -120,7 +120,7 @@ _Avoid_: renaming storage or API contracts as part of the first branding slice
 > **Domain expert:** "Show AgroLink, with Powered by OSI OS below."
 
 > **Dev:** "Should AgroLink be only a GUI name?"
-> **Domain expert:** "No. Use AgroLink in GUI plus operator-visible local identity surfaces."
+> **Domain expert:** "No. Use AgroLink in GUI plus local AP/SSID and user-facing local labels."
 
 > **Dev:** "What Wi-Fi AP name should the branded gateway broadcast?"
 > **Domain expert:** "Use AgroLink-${GWID_END}."
@@ -147,12 +147,12 @@ _Avoid_: renaming storage or API contracts as part of the first branding slice
 
 - "Reckenholz" was initially used as shorthand for the target branch. Resolved: use **Agroscope research network** for the variant and **Reckenholz site** only for initial deployment context.
 - "first" could mean a functional research MVP or a branded build. Resolved: the first deliverable is the **Branding slice** only.
-- "branding surface" could mean GUI-only, operator-visible system identity, or full image identity. Resolved: target **Operator-visible identity** for this slice.
+- "branding surface" could mean GUI-only, local AP/SSID and visible labels, low-level system identity, or full image identity. Resolved: target **Operator-visible identity** for this slice while leaving build labels, hostnames, and system identity out of scope.
 - "Agroscope branding" could mean inferred public web styling. Resolved: only **Official Agroscope assets** should define logo, color, and copy.
 - "primary language" could follow the Reckenholz site language. Resolved: English is primary for the Agroscope-branded build; German, French, and Italian are secondary.
 - "Italian coverage" could be future-only despite official Italian assets existing. Resolved: include **Italian branding coverage** in the first slice.
 - "platform name" could mean an Agroscope-prefixed OSI name. Resolved: use **AgroLink** and keep OSI OS as attribution.
-- "AgroLink scope" could mean GUI-only. Resolved: use **AgroLink operator identity** for GUI, local AP/SSID, build labels, and visible system identity text.
+- "AgroLink scope" could mean GUI-only. Resolved: use **AgroLink operator identity** for GUI, local AP/SSID, and user-facing local labels only.
 - "SSID compatibility" could keep the old OSI-OS prefix. Resolved: use **AgroLink SSID** for the branded build.
 - "SSID file inventory" could imply a repo-wide AP rename. Resolved: only **AgroLink supported profiles** are changed; full `bcm2708`, base profiles, and RAK profiles stay unchanged.
 - "system label" could include hostname renaming. Resolved: preserve **Stable gateway hostname** and use AgroLink for human-facing labels and SSID only.

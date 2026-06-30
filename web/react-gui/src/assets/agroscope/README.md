@@ -1,8 +1,7 @@
 # Agroscope Assets
 
-These assets are copied from the official Agroscope branding folder:
-
-`/home/phil/kDrive/OSI OS/Agroscope/Logo Agroscope`
+These assets are copied from the official Agroscope branding package provided
+outside this repository.
 
 Login hoch logos:
 

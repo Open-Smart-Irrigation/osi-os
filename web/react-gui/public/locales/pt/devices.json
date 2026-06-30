@@ -86,19 +86,19 @@
     "data": "Dados",
     "export": {
       "title": "Exportar dados",
-      "selectRange": "Escolha um intervalo de datas para baixar dados da zona.",
+      "selectRange": "Escolha um intervalo de datas para descarregar dados da zona.",
       "from": "De",
-      "to": "Ate",
+      "to": "Até",
       "granularity": "Granularidade",
       "raw": "Bruto",
-      "hourly": "Horario",
-      "daily": "Diario",
-      "download": "Baixar CSV",
-      "downloading": "Preparando...",
-      "rangeSummary": "{{from}} ate {{to}}",
-      "error": "Falha na exportacao",
-      "tooLarge": "Intervalo muito grande. Escolha uma granularidade mais ampla.",
-      "fullExport": "Exportacao completa"
+      "hourly": "Horário",
+      "daily": "Diário",
+      "download": "Descarregar CSV",
+      "downloading": "A preparar...",
+      "rangeSummary": "{{from}} até {{to}}",
+      "error": "Falha na exportação",
+      "tooLarge": "Intervalo demasiado grande. Escolha uma granularidade mais ampla.",
+      "fullExport": "Exportação completa"
     }
   },
   "schedule": {

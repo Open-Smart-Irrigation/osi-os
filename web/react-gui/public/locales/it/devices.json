@@ -89,7 +89,7 @@
       "selectRange": "Scegli un intervallo di date per scaricare i dati della zona.",
       "from": "Da",
       "to": "A",
-      "granularity": "Granularita",
+      "granularity": "Granularità",
       "raw": "Grezzi",
       "hourly": "Orario",
       "daily": "Giornaliero",
@@ -97,7 +97,7 @@
       "downloading": "Preparazione...",
       "rangeSummary": "{{from}} a {{to}}",
       "error": "Esportazione non riuscita",
-      "tooLarge": "Intervallo troppo grande. Scegli una granularita piu ampia.",
+      "tooLarge": "Intervallo troppo grande. Scegli una granularità più ampia.",
       "fullExport": "Esportazione completa"
     }
   },

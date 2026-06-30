@@ -16,6 +16,10 @@ function readReactJson(relativePath: string): any {
   return JSON.parse(fs.readFileSync(path.join(reactRoot, relativePath), 'utf8'));
 }
 
+function readJsonAt(root: string, relativePath: string): any {
+  return JSON.parse(fs.readFileSync(path.join(root, relativePath), 'utf8'));
+}
+
 function listJsonFiles(dir: string): string[] {
   return fs.readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
     const fullPath = path.join(dir, entry.name);
@@ -25,6 +29,22 @@ function listJsonFiles(dir: string): string[] {
 }
 
 describe('AgroLink branding source contracts', () => {
+  it('keeps source locale resources mirrored into the shipped GUI feed bundle', () => {
+    const sourceLocaleRoot = path.join(reactRoot, 'public', 'locales');
+    const feedLocaleRoot = path.join(repoRoot, 'feeds/chirpstack-openwrt-feed/apps/node-red/files/gui/locales');
+
+    for (const locale of ['en', 'de-CH', 'fr', 'it', 'es', 'pt', 'lg']) {
+      for (const namespace of ['auth.json', 'dashboard.json', 'devices.json', 'history.json']) {
+        const relativePath = path.join(locale, namespace);
+        assert.deepEqual(
+          readJsonAt(feedLocaleRoot, relativePath),
+          readJsonAt(sourceLocaleRoot, relativePath),
+          `${relativePath} is mirrored into the feed GUI bundle`,
+        );
+      }
+    }
+  });
+
   it('uses AgroLink auth copy in supported brand languages', () => {
     const expectedRegisterSubtitles: Record<string, string> = {
       en: 'Register for AgroLink',
@@ -125,6 +145,113 @@ describe('AgroLink branding source contracts', () => {
     }
   });
 
+  it('localizes thematic history empty-zone copy in all bundled locales', () => {
+    const expectedNoZonesBody: Record<string, string> = {
+      en: 'Create a zone from the legacy dashboard before opening thematic history.',
+      'de-CH': 'Erstellen Sie eine Zone im Legacy-Dashboard, bevor Sie die thematische Historie öffnen.',
+      fr: "Créez une zone depuis le tableau de bord hérité avant d'ouvrir l'historique thématique.",
+      it: 'Crea una zona dalla dashboard legacy prima di aprire la cronologia tematica.',
+      es: 'Crea una zona desde el panel heredado antes de abrir el historial temático.',
+      pt: 'Crie uma zona no painel legado antes de abrir o histórico temático.',
+      lg: "Tondawo ekifo okuva ku dashboard enkadde nga tonnaggula ebyafaayo by'omulamwa.",
+    };
+
+    for (const [locale, noZonesBody] of Object.entries(expectedNoZonesBody)) {
+      const history = readReactJson(`public/locales/${locale}/history.json`);
+      assert.equal(history.history.shell.noZonesBody, noZonesBody, `${locale} history empty-zone copy`);
+    }
+  });
+
+  it('keeps data export copy polished in secondary bundled locales', () => {
+    const expectedExportCopy: Record<string, {
+      data: string;
+      export: Record<string, string>;
+    }> = {
+      fr: {
+        data: 'Données',
+        export: {
+          title: 'Export des données',
+          selectRange: 'Choisissez une plage de dates pour télécharger les données de la zone.',
+          from: 'De',
+          to: 'À',
+          granularity: 'Granularité',
+          raw: 'Brut',
+          hourly: 'Horaire',
+          daily: 'Quotidien',
+          download: 'Télécharger le CSV',
+          downloading: 'Préparation...',
+          rangeSummary: '{{from}} à {{to}}',
+          error: "Échec de l'export",
+          tooLarge: 'Plage trop grande. Choisissez une granularité plus large.',
+          fullExport: 'Export complet',
+        },
+      },
+      it: {
+        data: 'Dati',
+        export: {
+          title: 'Esporta dati',
+          selectRange: "Scegli un intervallo di date per scaricare i dati della zona.",
+          from: 'Da',
+          to: 'A',
+          granularity: 'Granularità',
+          raw: 'Grezzi',
+          hourly: 'Orario',
+          daily: 'Giornaliero',
+          download: 'Scarica CSV',
+          downloading: 'Preparazione...',
+          rangeSummary: '{{from}} a {{to}}',
+          error: 'Esportazione non riuscita',
+          tooLarge: "Intervallo troppo grande. Scegli una granularità più ampia.",
+          fullExport: 'Esportazione completa',
+        },
+      },
+      pt: {
+        data: 'Dados',
+        export: {
+          title: 'Exportar dados',
+          selectRange: 'Escolha um intervalo de datas para descarregar dados da zona.',
+          from: 'De',
+          to: 'Até',
+          granularity: 'Granularidade',
+          raw: 'Bruto',
+          hourly: 'Horário',
+          daily: 'Diário',
+          download: 'Descarregar CSV',
+          downloading: 'A preparar...',
+          rangeSummary: '{{from}} até {{to}}',
+          error: 'Falha na exportação',
+          tooLarge: 'Intervalo demasiado grande. Escolha uma granularidade mais ampla.',
+          fullExport: 'Exportação completa',
+        },
+      },
+      lg: {
+        data: 'Data',
+        export: {
+          title: 'Fulumya data',
+          selectRange: "Londa ebbanga ly'ennaku okusobola okuwanula data y'ekifo.",
+          from: 'Okuva',
+          to: 'Okutuuka',
+          granularity: "Obuzito bw'obudde",
+          raw: 'Ebitali bikyusiddwa',
+          hourly: 'Buli saawa',
+          daily: 'Buli lunaku',
+          download: 'Wanula CSV',
+          downloading: 'Kitegekebwa...',
+          rangeSummary: '{{from}} okutuuka {{to}}',
+          error: 'Okufulumya kulemereddwa',
+          tooLarge: 'Ebbanga ddene nnyo. Londa obuzito obunene.',
+          fullExport: 'Okufulumya kwonna',
+        },
+      },
+    };
+
+    for (const [locale, expected] of Object.entries(expectedExportCopy)) {
+      const devices = readReactJson(`public/locales/${locale}/devices.json`);
+      assert.equal(devices.zone.data, expected.data, `${locale} data label`);
+      assert.deepEqual(devices.zone.export, expected.export, `${locale} export copy`);
+    }
+  });
+
   it('keeps user-visible locale copy on zone terminology', () => {
     const localeRoot = path.join(reactRoot, 'public', 'locales');
     const forbidden = [
@@ -152,6 +279,10 @@ describe('AgroLink branding source contracts', () => {
     });
 
     assert.deepEqual(offenders, []);
+  });
+
+  it('does not keep the old OSI logo asset after the login screen moved to Agroscope assets', () => {
+    assert.equal(fs.existsSync(path.join(reactRoot, 'src/assets/osi_logo.png')), false);
   });
 
   it('sets the AgroLink SSID only on supported full Raspberry Pi profiles', () => {

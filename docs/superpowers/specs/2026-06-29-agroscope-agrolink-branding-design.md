@@ -13,9 +13,8 @@ is not the product name or product boundary.
 1. Present the edge GUI as **AgroLink** for Agroscope operators.
 2. Keep **OSI OS** visible as the underlying platform via the login subtitle:
    `Powered by OSI OS`.
-3. Use official Agroscope assets from
-   `/home/phil/kDrive/OSI OS/Agroscope/Logo Agroscope`; do not approximate the
-   logo, colors, or Balken treatment.
+3. Use official Agroscope assets from the branding package provided outside
+   this repository; do not approximate the logo, colors, or Balken treatment.
 4. Make English the primary branding language and include German, French, and
    Italian assets in the first slice.
 5. Change the gateway access point SSID pattern to `AgroLink-${GWID_END}` for

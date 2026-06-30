@@ -14,7 +14,7 @@
       "featureFlagFailed": "The feature flag request failed. The legacy dashboard is still available.",
       "zonesFailedTitle": "History zones failed to load",
       "noZonesTitle": "No zones yet",
-      "noZonesBody": "Create a zone from the legacy dashboard before opening thematic history.",
+      "noZonesBody": "Crie uma zona no painel legado antes de abrir o histórico temático.",
       "cardsFailed": "History cards failed to load.",
       "retryCards": "Retry cards"
     },

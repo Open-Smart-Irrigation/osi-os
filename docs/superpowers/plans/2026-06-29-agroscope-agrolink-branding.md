@@ -27,7 +27,7 @@
 - Create: `web/react-gui/src/assets/agroscope/README.md`
   - Provenance for copied official Agroscope assets.
 - Create: `web/react-gui/src/assets/agroscope/logo-{en,de,fr,it}-hoch.png`
-  - Official WBF Agroscope hoch logos copied from `/home/phil/kDrive/OSI OS/Agroscope/Logo Agroscope`.
+  - Official WBF Agroscope hoch logos copied from the provided Agroscope branding package.
 - Create: `web/react-gui/src/assets/agroscope/balken-horizontal-{en,de,fr,it}.png`
   - Horizontal dashboard Balken assets generated from official vertical A4 Balken assets.
 - Create: `web/react-gui/src/pages/__tests__/Login.branding.test.tsx`
@@ -151,23 +151,24 @@ Run from the repo root:
 
 ```bash
 mkdir -p web/react-gui/src/assets/agroscope
+export AGROSCOPE_BRAND_ASSET_DIR=/path/to/official/agroscope/logo-folder
 
-cp "/home/phil/kDrive/OSI OS/Agroscope/Logo Agroscope/96447-WBF_agroscope_e_rgb_pos_hoch.png" \
+cp "$AGROSCOPE_BRAND_ASSET_DIR/96447-WBF_agroscope_e_rgb_pos_hoch.png" \
   web/react-gui/src/assets/agroscope/logo-en-hoch.png
-cp "/home/phil/kDrive/OSI OS/Agroscope/Logo Agroscope/96443-WBF_agroscope_d_rgb_pos_hoch.png" \
+cp "$AGROSCOPE_BRAND_ASSET_DIR/96443-WBF_agroscope_d_rgb_pos_hoch.png" \
   web/react-gui/src/assets/agroscope/logo-de-hoch.png
-cp "/home/phil/kDrive/OSI OS/Agroscope/Logo Agroscope/96451-WBF_agroscope_f_rgb_pos_hoch.png" \
+cp "$AGROSCOPE_BRAND_ASSET_DIR/96451-WBF_agroscope_f_rgb_pos_hoch.png" \
   web/react-gui/src/assets/agroscope/logo-fr-hoch.png
-cp "/home/phil/kDrive/OSI OS/Agroscope/Logo Agroscope/96455-WBF_agroscope_i_rgb_pos_hoch.png" \
+cp "$AGROSCOPE_BRAND_ASSET_DIR/96455-WBF_agroscope_i_rgb_pos_hoch.png" \
   web/react-gui/src/assets/agroscope/logo-it-hoch.png
 
-magick "/home/phil/kDrive/OSI OS/Agroscope/Logo Agroscope/96432-A_Balken_A4_en.png" -rotate 90 \
+magick "$AGROSCOPE_BRAND_ASSET_DIR/96432-A_Balken_A4_en.png" -rotate 90 \
   web/react-gui/src/assets/agroscope/balken-horizontal-en.png
-magick "/home/phil/kDrive/OSI OS/Agroscope/Logo Agroscope/96457-A_Balken_A4_de.png" -rotate 90 \
+magick "$AGROSCOPE_BRAND_ASSET_DIR/96457-A_Balken_A4_de.png" -rotate 90 \
   web/react-gui/src/assets/agroscope/balken-horizontal-de.png
-magick "/home/phil/kDrive/OSI OS/Agroscope/Logo Agroscope/96433-A_Balken_A4_fr.png" -rotate 90 \
+magick "$AGROSCOPE_BRAND_ASSET_DIR/96433-A_Balken_A4_fr.png" -rotate 90 \
   web/react-gui/src/assets/agroscope/balken-horizontal-fr.png
-magick "/home/phil/kDrive/OSI OS/Agroscope/Logo Agroscope/96434-A_Balken_A4_it.png" -rotate 90 \
+magick "$AGROSCOPE_BRAND_ASSET_DIR/96434-A_Balken_A4_it.png" -rotate 90 \
   web/react-gui/src/assets/agroscope/balken-horizontal-it.png
 
 identify -format '%f %wx%h\n' web/react-gui/src/assets/agroscope/*.png
@@ -182,9 +183,8 @@ Create `web/react-gui/src/assets/agroscope/README.md`:
 ```md
 # Agroscope Assets
 
-These assets are copied from the official Agroscope branding folder:
-
-`/home/phil/kDrive/OSI OS/Agroscope/Logo Agroscope`
+These assets are copied from the official Agroscope branding package provided
+outside this repository.
 
 Login hoch logos:
 
@@ -892,11 +892,26 @@ Set these exact keys in source devices locale files:
 "createZoneModal": {
   "title": "Crea zona"
 }
+
+// web/react-gui/public/locales/es/devices.json
+"createZoneModal": {
+  "title": "Crear zona"
+}
+
+// web/react-gui/public/locales/pt/devices.json
+"createZoneModal": {
+  "title": "Criar zona"
+}
+
+// web/react-gui/public/locales/lg/devices.json
+"createZoneModal": {
+  "title": "Tondawo Ekifo"
+}
 ```
 
 - [ ] **Step 6: Update history no-zones fallback copy**
 
-In each of these files, set `history.shell.noZonesBody` to `Create a zone from the legacy dashboard before opening thematic history.`:
+In each of these files, set `history.shell.noZonesBody` to localized zone-first copy:
 
 ```text
 web/react-gui/public/locales/en/history.json
