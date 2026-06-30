@@ -16,7 +16,8 @@
 - **Never reseed/overwrite a live DB.** All operations are additive or backed-up; tests use throwaway temp DBs only.
 - **`PRAGMA foreign_keys=OFF` is a no-op inside an open transaction** (verified, SQLite 3.53). Any FK toggle must occur outside `BEGIN…COMMIT`, on the same connection.
 - **No swallowed errors.** A failed migration aborts the run; `status=failed` + `error` is written on a clean connection after rollback.
-- **Migration file naming:** `database/migrations/NNNN__<slug>.sql`, zero-padded 4-digit monotonic version; first line header comment `-- risk: additive` or `-- risk: destructive`.
+- **Migration file naming:** `database/migrations/ordered/NNNN__<slug>.sql`, zero-padded 4-digit **contiguous** version (1,2,3,…); first line header comment `-- risk: additive` or `-- risk: destructive`.
+- **New directory `database/migrations/ordered/`** (not the top-level `database/migrations/`). The existing top-level `database/migrations/*.sql` are legacy one-off scripts **referenced** by `scripts/migrate-strega-tables.js` and `scripts/migrate-applied-commands.js`; they are left untouched, and the ordered runner reads only the `ordered/` subdirectory. (This refines Spec 1's `database/migrations/` path, which is occupied.)
 - This plan is **Phase 1 only.** Phase 2 (drift migrations + consumer rewiring), Phase 3 (deploy state machine, pre-start gate, CI standup in both repos), and Phase 4 (hardware validation) are separate plans per [Spec 1](../specs/2026-06-30-edge-schema-migration-foundation-design.md).
 
 ---
@@ -66,6 +67,15 @@ test('cliRunner exec throws on bad SQL', async () => {
   const r = cliRunner(db);
   await assert.rejects(() => r.exec('CREATE TABLE ;'));
 });
+
+test('exec is fail-fast: a mid-script error rolls back the whole transaction (no partial commit)', async () => {
+  const db = tmpDb();
+  const r = cliRunner(db);
+  await assert.rejects(() =>
+    r.exec('BEGIN;\nCREATE TABLE a (x);\nINSERT INTO nonexist VALUES (1);\nCREATE TABLE b (y);\nCOMMIT;'));
+  const tables = await r.all("SELECT name FROM sqlite_master WHERE type='table'");
+  assert.deepEqual(tables, [], 'neither table created — -bail prevented fall-through to COMMIT');
+});
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
@@ -87,7 +97,9 @@ function cliRunner(dbPath) {
   return {
     dbPath,
     async exec(sqlText) {
-      execFileSync('sqlite3', [dbPath], { input: sqlText, encoding: 'utf8' });
+      // -bail: stop at the first error so a failing statement cannot fall through to COMMIT
+      // and commit partial work (verified: without -bail, sqlite3 reaches COMMIT on error).
+      execFileSync('sqlite3', ['-bail', dbPath], { input: sqlText, encoding: 'utf8' });
     },
     async all(sql) {
       const out = execFileSync('sqlite3', ['-json', dbPath, sql], { encoding: 'utf8' }).trim();
@@ -103,7 +115,7 @@ module.exports = { cliRunner };
 - [ ] **Step 4: Run test to verify it passes**
 
 Run: `node --test lib/osi-migrate/__tests__/runner-iface.test.js`
-Expected: PASS (3 tests).
+Expected: PASS (4 tests).
 
 - [ ] **Step 5: Commit**
 
@@ -360,7 +372,7 @@ git commit -m "feat(migrate): schema_migrations ledger with success/failure reco
 
 **Interfaces:**
 - Consumes: `cliRunner` (Task 1).
-- Produces: `computeFingerprints(runner) -> Promise<Array<{object_type, object_name, fingerprint}>>`. Derived from `PRAGMA table_xinfo`, `foreign_key_list`, `index_list`, `index_xinfo`, and trigger bodies — **not** raw SQL text — tagged with SQLite version + a `NORMALIZER_VERSION` constant. Exposes `NORMALIZER_VERSION`.
+- Produces: `computeFingerprints(runner) -> Promise<Array<{object_type, object_name, fingerprint}>>`. Derived from PRAGMA structural info (`table_xinfo`, `foreign_key_list`, `index_list`, `index_xinfo`) **plus** normalized `sqlite_master.sql` to capture CHECK constraints and partial-index predicates that PRAGMA omits; tagged with SQLite version + `NORMALIZER_VERSION`. Whitespace is collapsed but case preserved. Exposes `NORMALIZER_VERSION`.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -401,6 +413,33 @@ test('whitespace-only trigger differences fingerprint identically', async () => 
   const fb = (await computeFingerprints(b)).find((x) => x.object_type === 'trigger');
   assert.equal(fa.fingerprint, fb.fingerprint);
 });
+
+test('CHECK constraint change is detected (the LORAIN drift class)', async () => {
+  const a = cliRunner(tmpDb()); const b = cliRunner(tmpDb());
+  await a.exec("CREATE TABLE d (id INTEGER, t TEXT CHECK(t IN ('A')));");
+  await b.exec("CREATE TABLE d (id INTEGER, t TEXT CHECK(t IN ('A','B')));");
+  const fa = (await computeFingerprints(a)).find((x) => x.object_name === 'd');
+  const fb = (await computeFingerprints(b)).find((x) => x.object_name === 'd');
+  assert.notEqual(fa.fingerprint, fb.fingerprint);
+});
+
+test('partial-index predicate change is detected', async () => {
+  const a = cliRunner(tmpDb()); const b = cliRunner(tmpDb());
+  await a.exec('CREATE TABLE t (x INTEGER); CREATE INDEX ix ON t(x) WHERE x IS NOT NULL;');
+  await b.exec('CREATE TABLE t (x INTEGER); CREATE INDEX ix ON t(x) WHERE x > 0;');
+  const fa = (await computeFingerprints(a)).find((x) => x.object_type === 'index' && x.object_name === 'ix');
+  const fb = (await computeFingerprints(b)).find((x) => x.object_type === 'index' && x.object_name === 'ix');
+  assert.notEqual(fa.fingerprint, fb.fingerprint);
+});
+
+test('trigger string-literal case is significant', async () => {
+  const a = cliRunner(tmpDb()); const b = cliRunner(tmpDb());
+  await a.exec("CREATE TABLE t (s TEXT); CREATE TRIGGER g AFTER INSERT ON t BEGIN UPDATE t SET s='A'; END;");
+  await b.exec("CREATE TABLE t (s TEXT); CREATE TRIGGER g AFTER INSERT ON t BEGIN UPDATE t SET s='a'; END;");
+  const fa = (await computeFingerprints(a)).find((x) => x.object_type === 'trigger');
+  const fb = (await computeFingerprints(b)).find((x) => x.object_type === 'trigger');
+  assert.notEqual(fa.fingerprint, fb.fingerprint);
+});
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
@@ -415,15 +454,15 @@ Expected: FAIL — `Cannot find module '../fingerprints'`.
 'use strict';
 const crypto = require('node:crypto');
 
-const NORMALIZER_VERSION = 1;
+const NORMALIZER_VERSION = 2;
 
 function hash(obj) {
   return crypto.createHash('sha256').update(JSON.stringify(obj)).digest('hex');
 }
 
-// Normalize a trigger body so whitespace differences do not change the fingerprint.
+// Collapse whitespace only — PRESERVE case. String literals ('A' vs 'a') must fingerprint differently.
 function normalizeSql(sql) {
-  return String(sql).replace(/\s+/g, ' ').trim().toLowerCase();
+  return String(sql || '').replace(/\s+/g, ' ').trim();
 }
 
 async function computeFingerprints(runner) {
@@ -431,23 +470,28 @@ async function computeFingerprints(runner) {
   const tag = { normalizer: NORMALIZER_VERSION, sqlite: version };
   const out = [];
 
-  const tables = await runner.all(
-    "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name");
-  for (const { name } of tables) {
+  // master DDL captures what PRAGMA omits: table CHECK constraints, partial-index WHERE, defaults.
+  const master = await runner.all(
+    "SELECT type, name, sql FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' AND sql IS NOT NULL ORDER BY type, name");
+  const ddl = {};
+  for (const m of master) ddl[`${m.type}|${m.name}`] = normalizeSql(m.sql);
+
+  for (const { name } of master.filter((m) => m.type === 'table')) {
     const columns = await runner.all(`PRAGMA table_xinfo(${name})`);
     const fks = await runner.all(`PRAGMA foreign_key_list(${name})`);
     const indexes = await runner.all(`PRAGMA index_list(${name})`);
     const indexCols = {};
     for (const idx of indexes) indexCols[idx.name] = await runner.all(`PRAGMA index_xinfo(${idx.name})`);
     out.push({ object_type: 'table', object_name: name,
-      fingerprint: hash({ tag, columns, fks, indexes, indexCols }) });
+      fingerprint: hash({ tag, columns, fks, indexes, indexCols, ddl: ddl[`table|${name}`] }) });
   }
-
-  const triggers = await runner.all(
-    "SELECT name, sql FROM sqlite_master WHERE type='trigger' ORDER BY name");
-  for (const { name, sql } of triggers) {
+  for (const { name } of master.filter((m) => m.type === 'index')) {
+    out.push({ object_type: 'index', object_name: name,
+      fingerprint: hash({ tag, ddl: ddl[`index|${name}`] }) });
+  }
+  for (const { name } of master.filter((m) => m.type === 'trigger')) {
     out.push({ object_type: 'trigger', object_name: name,
-      fingerprint: hash({ tag, body: normalizeSql(sql) }) });
+      fingerprint: hash({ tag, body: ddl[`trigger|${name}`] }) });
   }
   return out;
 }
@@ -458,7 +502,7 @@ module.exports = { computeFingerprints, NORMALIZER_VERSION };
 - [ ] **Step 4: Run test to verify it passes**
 
 Run: `node --test lib/osi-migrate/__tests__/fingerprints.test.js`
-Expected: PASS (2 tests).
+Expected: PASS (5 tests).
 
 - [ ] **Step 5: Commit**
 
@@ -499,6 +543,19 @@ test('backupDb makes an integrity-passing copy that round-trips data', async () 
   const rows = await cliRunner(bk).all('SELECT v FROM t');
   assert.deepEqual(rows, [{ v: 'x' }]);
 });
+
+test('backupDb captures data on a WAL-mode DB', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'osimig-bkwal-'));
+  const db = path.join(dir, 'farming.db');
+  const r = cliRunner(db);
+  await r.exec("PRAGMA journal_mode=WAL; CREATE TABLE t (id INTEGER PRIMARY KEY, v TEXT); INSERT INTO t (v) VALUES ('wal');");
+  const bk = await backupDb(db);
+  assert.deepEqual(await cliRunner(bk).all('SELECT v FROM t'), [{ v: 'wal' }]);
+});
+
+test('backupDb refuses a missing source DB (an empty fresh DB is not a real backup)', async () => {
+  await assert.rejects(() => backupDb('/nonexistent/dir/farming.db'), /does not exist/);
+});
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
@@ -512,11 +569,15 @@ Expected: FAIL — `Cannot find module '../backup'`.
 // lib/osi-migrate/backup.js
 'use strict';
 const { execFileSync } = require('node:child_process');
+const fs = require('node:fs');
 
 // Online backup via the SQLite CLI `.backup` dot-command (consistent even with an active WAL),
 // then open + integrity_check the copy. Runtime adapter (node-sqlite3 `.backup()`) follows the
 // same contract in a later phase.
 async function backupDb(dbPath) {
+  if (!fs.existsSync(dbPath)) {
+    throw new Error(`refusing to back up: source DB does not exist: ${dbPath}`);
+  }
   const stamp = new Date().toISOString().replace(/[:.]/g, '-');
   const backupPath = `${dbPath}.bak-${stamp}`;
   execFileSync('sqlite3', [dbPath, `.backup '${backupPath}'`], { encoding: 'utf8' });
@@ -531,7 +592,7 @@ module.exports = { backupDb };
 - [ ] **Step 4: Run test to verify it passes**
 
 Run: `node --test lib/osi-migrate/__tests__/backup.test.js`
-Expected: PASS (1 test).
+Expected: PASS (3 tests).
 
 - [ ] **Step 5: Commit**
 
@@ -734,15 +795,29 @@ DROP TABLE devices;
 ALTER TABLE devices_new RENAME TO devices;
 `;
 
+test('composeDestructiveScript toggles FK OUTSIDE the transaction (regression guard for Spec 1 §9.8)', () => {
+  const { composeDestructiveScript } = require('../runner');
+  const s = composeDestructiveScript('DROP TABLE devices;');
+  const off = s.indexOf('PRAGMA foreign_keys=OFF');
+  const begin = s.indexOf('BEGIN IMMEDIATE');
+  const commit = s.indexOf('COMMIT');
+  const on = s.indexOf('PRAGMA foreign_keys=ON');
+  assert.ok(off >= 0 && begin > off, 'FK off must come before BEGIN');
+  assert.ok(commit > begin && on > commit, 'FK on must come after COMMIT');
+});
+
 test('destructive migration preserves child rows (FK fence effective) when writers stopped', async () => {
   const { db, dir } = fixture({
     '0001__base.sql': "-- risk: additive\nCREATE TABLE devices (id INTEGER PRIMARY KEY, type_id TEXT CHECK(type_id IN ('A')));\nCREATE TABLE child (id INTEGER PRIMARY KEY, dev INTEGER REFERENCES devices(id) ON DELETE CASCADE);\n",
-    '0002__rebuild.sql': DESTRUCTIVE,
   });
   const r = cliRunner(db);
+  // Apply the baseline FIRST, then seed data against the real schema.
+  await applyPending(r, { migrationsDir: dir, appVersion: '0.6' });
   await r.exec("PRAGMA foreign_keys=ON; INSERT INTO devices (id,type_id) VALUES (1,'A'); INSERT INTO child (id,dev) VALUES (10,1);");
+  // Now introduce and apply the destructive rebuild.
+  fs.writeFileSync(path.join(dir, '0002__rebuild.sql'), DESTRUCTIVE);
   await applyPending(r, { migrationsDir: dir, appVersion: '0.6', writersStopped: true });
-  assert.deepEqual(await r.all('SELECT id FROM child'), [{ id: 10 }], 'child rows survive the rebuild');
+  assert.deepEqual(await r.all('SELECT id FROM child'), [{ id: 10 }], 'child rows survive (FK was off during DROP)');
 });
 
 test('destructive migration refuses unless writersStopped', async () => {
@@ -778,13 +853,17 @@ Replace the `applyDestructive` stub in `lib/osi-migrate/runner.js` and add the t
 ```js
 const { computeFingerprints } = require('./fingerprints');
 
+// One connection: FK toggle stays OUTSIDE the transaction (PRAGMA foreign_keys is a no-op inside one).
+function composeDestructiveScript(sql) {
+  return `PRAGMA foreign_keys=OFF;\nBEGIN IMMEDIATE;\n${sql}\nCOMMIT;\nPRAGMA foreign_keys=ON;`;
+}
+
 async function applyDestructive(runner, m, writersStopped) {
   if (!writersStopped) {
     throw new Error(`migration ${m.name} is destructive; refuse to run unless writers are stopped (deploy/pre-start)`);
   }
   const backupPath = await backupDb(runner.dbPath);
-  // One connection: FK toggle stays OUTSIDE the transaction (PRAGMA foreign_keys is a no-op inside one).
-  await runner.exec(`PRAGMA foreign_keys=OFF;\nBEGIN IMMEDIATE;\n${m.sql}\nCOMMIT;\nPRAGMA foreign_keys=ON;`);
+  await runner.exec(composeDestructiveScript(m.sql));
   return backupPath;
 }
 
@@ -821,7 +900,7 @@ async function verifyHead(runner, { migrationsDir }) {
 }
 ```
 
-After a successful `applyPending` run (end of the loop, before `return`), call `await syncFingerprints(runner);`. Update `module.exports` to add `bootstrapFresh`, `verifyHead`, `syncFingerprints`. Update `index.js`:
+After a successful `applyPending` run (end of the loop, before `return`), call `await syncFingerprints(runner);`. Update `module.exports` to add `bootstrapFresh`, `verifyHead`, `syncFingerprints`, `composeDestructiveScript`. Update `index.js`:
 
 ```js
 // lib/osi-migrate/index.js
@@ -833,7 +912,7 @@ module.exports = { applyPending, bootstrapFresh, verifyHead };
 - [ ] **Step 4: Run test to verify it passes**
 
 Run: `node --test lib/osi-migrate/__tests__/runner-destructive.test.js`
-Expected: PASS (3 tests).
+Expected: PASS (4 tests).
 
 - [ ] **Step 5: Run the whole module test suite**
 
@@ -852,7 +931,7 @@ git commit -m "feat(migrate): destructive path (FK outside txn) + bootstrapFresh
 ### Task 8: `0001` baseline migration + seed-replay verifier
 
 **Files:**
-- Create: `database/migrations/0001__baseline.sql` (generated from `database/seed-blank.sql`)
+- Create: `database/migrations/ordered/0001__baseline.sql` (generated from `database/seed-blank.sql`)
 - Create: `scripts/verify-seed-replay.js`
 - Test: `lib/osi-migrate/__tests__/seed-replay.test.js`
 
@@ -865,14 +944,15 @@ git commit -m "feat(migrate): destructive path (FK outside txn) + bootstrapFresh
 Generate `0001__baseline.sql` as the current canonical schema. Run:
 
 ```bash
+mkdir -p database/migrations/ordered
 { echo '-- risk: additive'; \
   echo '-- Generated baseline: equals database/seed-blank.sql schema (tables, indexes, triggers).'; \
-  grep -vE '^\s*--' database/seed-blank.sql; } > database/migrations/0001__baseline.sql
+  grep -vE '^\s*--' database/seed-blank.sql; } > database/migrations/ordered/0001__baseline.sql
 ```
 
 Then confirm it loads under one `sqlite3` process without error:
 
-Run: `sqlite3 "$(mktemp -u).db" < database/migrations/0001__baseline.sql && echo OK`
+Run: `sqlite3 "$(mktemp -u).db" < database/migrations/ordered/0001__baseline.sql && echo OK`
 Expected: `OK`
 
 - [ ] **Step 2: Write the failing test**
@@ -892,7 +972,7 @@ const REPO = path.resolve(__dirname, '../../..');
 test('empty DB + replay(migrations) fingerprints == empty DB + seed-blank.sql', async () => {
   const replayDb = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'osimig-rep-')), 'r.db');
   await bootstrapFresh(cliRunner(replayDb), {
-    migrationsDir: path.join(REPO, 'database/migrations'), appVersion: 'test',
+    migrationsDir: path.join(REPO, 'database/migrations/ordered'), appVersion: 'test',
   });
   const seedDb = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'osimig-seed-')), 's.db');
   const seedR = cliRunner(seedDb);
@@ -925,7 +1005,7 @@ const { computeFingerprints } = require('../lib/osi-migrate/fingerprints');
 (async () => {
   const repo = path.resolve(__dirname, '..');
   const replayDb = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'seedreplay-')), 'r.db');
-  await bootstrapFresh(cliRunner(replayDb), { migrationsDir: path.join(repo, 'database/migrations'), appVersion: 'ci' });
+  await bootstrapFresh(cliRunner(replayDb), { migrationsDir: path.join(repo, 'database/migrations/ordered'), appVersion: 'ci' });
   const seedDb = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'seedreplay-')), 's.db');
   const seedR = cliRunner(seedDb);
   await seedR.exec(fs.readFileSync(path.join(repo, 'database/seed-blank.sql'), 'utf8'));
@@ -947,7 +1027,7 @@ Expected: `verify-seed-replay: OK`
 - [ ] **Step 6: Commit**
 
 ```bash
-git add database/migrations/0001__baseline.sql scripts/verify-seed-replay.js lib/osi-migrate/__tests__/seed-replay.test.js
+git add database/migrations/ordered/0001__baseline.sql scripts/verify-seed-replay.js lib/osi-migrate/__tests__/seed-replay.test.js
 git commit -m "feat(migrate): 0001 baseline + seed-vs-replay verifier"
 ```
 
@@ -973,10 +1053,12 @@ const path = require('node:path');
 const { loadMigrations } = require('../lib/osi-migrate/migrations-loader');
 
 try {
-  const migrations = loadMigrations(path.resolve(__dirname, '../database/migrations'));
+  const migrations = loadMigrations(path.resolve(__dirname, '../database/migrations/ordered'));
   let prev = 0;
   for (const m of migrations) {
-    if (m.version <= prev) throw new Error(`non-monotonic version at ${m.name}`);
+    if (m.version !== prev + 1) {
+      throw new Error(`non-contiguous version at ${m.name} (expected ${prev + 1}, got ${m.version})`);
+    }
     prev = m.version;
   }
   if (migrations.length === 0) throw new Error('no migrations found');
@@ -1045,7 +1127,9 @@ git commit -m "ci(migrate): migration invariants + seed-replay in CI"
 - `bootstrapFresh` / `verifyHead` (§5) → Task 7.
 - `0001` baseline + seed==replay verifier (§3.5, §4, §7) → Task 8.
 - `verify-migrations` + CI (§8) → Task 9.
-- **Deferred to later plans (correctly out of Phase-1 scope):** consumer rewiring of `flows.json`/`dendro-compute-fn`/`repair-pi-schema.js` (P2); deploy state machine + pre-start gate (P3); osi-server CI standup (P3); hardware validation (P4); the actual drift migrations incl. LORAIN CHECK rebuild and the 92+79 ADD COLUMNs (P2, which will use the Task-7 destructive path).
+- **Deferred to later plans (correctly out of Phase-1 scope):** consumer rewiring of `flows.json`/`dendro-compute-fn`/`repair-pi-schema.js` (P2); deploy state machine + pre-start gate (P3); osi-server CI standup (P3); hardware validation (P4); the actual drift migrations incl. LORAIN CHECK rebuild and the 92+79 ADD COLUMNs (P2, which will use the Task-7 destructive path); **dirty-data preflight for `CREATE UNIQUE INDEX`** (Spec 1 §9.7) — deferred to P2, where the first unique-index/destructive drift migrations land.
+
+**Round-4 plan-review fixes incorporated (verified against SQLite 3.53):** `sqlite3 -bail` so a failing migration cannot fall through to `COMMIT` (Task 1, + partial-commit regression test); ordered migrations live in a **new** `database/migrations/ordered/` because the top-level dir holds legacy *referenced* scripts (Tasks 8–9); fingerprints include normalized `sqlite_master.sql` so **CHECK constraints and partial-index predicates** are detected — the exact LORAIN drift class — and trigger string-literal case is significant (Task 4); the destructive test applies the baseline before seeding data and adds a direct FK-off-before-`BEGIN` regression guard (Task 7); `backupDb` refuses a missing source and is WAL-tested (Task 5); `verify-migrations` enforces **contiguous** versions (Task 9).
 
 **Placeholder scan:** No "TBD"/"add error handling"/"similar to Task N" — every code step contains runnable code. The Task-6 `applyDestructive` stub is intentionally a throwing placeholder *replaced in Task 7*, with a Task-7 test asserting the replacement.
 
