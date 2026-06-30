@@ -1,0 +1,19 @@
+name: Edge Migrations
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+jobs:
+  migrations:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Install sqlite3 CLI
+        run: sudo apt-get update && sudo apt-get install -y sqlite3
+      - run: node --test lib/osi-migrate/__tests__/*.test.js
+      - run: node scripts/verify-migrations.js
+      - run: node scripts/verify-seed-replay.js

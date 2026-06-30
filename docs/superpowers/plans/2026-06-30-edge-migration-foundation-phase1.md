@@ -1108,8 +1108,11 @@ Expected: all three succeed (tests pass; both verifiers print `OK`).
 
 - [ ] **Step 5: Commit**
 
+The repo's `.gitignore` has `/.*`, which ignores NEW `.github/` files even though existing `.github/` content (FUNDING, ISSUE_TEMPLATE, `workflows/typecheck.yml`) is tracked. Add a one-time exception so CI workflows are trackable, then commit:
+
 ```bash
-git add scripts/verify-migrations.js .github/workflows/migrations.yml
+grep -qxF '!/.github/' .gitignore || printf '\n# Track CI workflows / .github content (the /.* rule would otherwise ignore them)\n!/.github/\n' >> .gitignore
+git add .gitignore scripts/verify-migrations.js .github/workflows/migrations.yml
 git commit -m "ci(migrate): migration invariants + seed-replay in CI"
 ```
 
