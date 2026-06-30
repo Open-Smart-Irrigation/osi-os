@@ -77,6 +77,8 @@ Broker: `wss://server.opensmartirrigation.org/mqtt`
 - **Node-RED sync worker** queries missing calibrations every 30s alongside pending commands, fetches from `/api/v1/sync/chameleon/calibrations/lookup`, persists locally, and runs local backfill.
 - **Removed:** `PUT /api/devices/:deveui/chameleon-config` endpoint and the 9 per-device coefficient columns (`chameleon_swt[123]_[abc]`). Depth columns (`chameleon_swt[123]_depth_cm`) stay.
 - Per-device calibration values entered by hand are discarded in the 2026-05-19 migration. Operators verify post-upgrade that each live array_id has a row in `chameleon_calibrations`.
+- Chameleon SWT analysis reads canonical kPa values from `device_data.swt_1`, `swt_2`, and `swt_3`. `chameleon_readings.swt_1`, `swt_2`, and `swt_3` are diagnostic mirrors beside raw Chameleon payload data.
+- Deploy-time schema repair may add missing Chameleon columns, but must not blank or rewrite `device_data.swt_*`. Historical Chameleon SWT corrections must use `scripts/repair-chameleon-swt-history.js` after a DB backup and must queue corrected `DEVICE_DATA_APPENDED` events when cloud parity needs to catch up. See [docs/operations/chameleon-swt-history-repair.md](docs/operations/chameleon-swt-history-repair.md).
 - **Release script:** `OSI_ADMIN_TOKEN=… node scripts/refresh-chameleon-calibrations.js` before cutting a release.
 - Apply the generated release seed with `node scripts/apply-chameleon-calibration-seed.js`; it updates every bundled DB copy and fails on an empty calibration snapshot.
 

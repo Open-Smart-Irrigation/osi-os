@@ -85,6 +85,9 @@ assertIncludes(syncInit, 'CREATE TABLE IF NOT EXISTS chameleon_readings', 'schem
 assertIncludes(syncInit, 'idx_chameleon_readings_deveui_time', 'schema indexes by device/time');
 assertIncludes(syncInit, 'idx_chameleon_readings_array_id', 'schema indexes array id');
 assertIncludes(syncInit, 'data_invalid INTEGER DEFAULT 0', 'schema creates chameleon_readings.data_invalid');
+assertIncludes(syncInit, 'ALTER TABLE chameleon_readings ADD COLUMN swt_1 REAL', 'schema migrates chameleon_readings.swt_1');
+assertIncludes(syncInit, 'ALTER TABLE chameleon_readings ADD COLUMN swt_2 REAL', 'schema migrates chameleon_readings.swt_2');
+assertIncludes(syncInit, 'ALTER TABLE chameleon_readings ADD COLUMN swt_3 REAL', 'schema migrates chameleon_readings.swt_3');
 
 const decode = funcOf('lsn50-decode-fn');
 assertIncludes(decode, 'isChameleon', 'decode marks chameleon payloads');
@@ -111,6 +114,10 @@ assertIncludes(chameleonInsert, 'rawPayloadB64 is ChirpStack data.data', 'insert
 assertIncludes(chameleonInsert, 'const statusFlags = toInt(d.chameleonStatusFlags);', 'insert normalizes status flags once');
 assertIncludes(chameleonInsert, 'const dataInvalidFlag = dataInvalid ? 1 : 0;', 'insert stores computed data_invalid');
 assertIncludes(chameleonInsert, 'const tempInvalid = dataInvalid || toInt(d.chameleonTempFault) === 1;', 'insert explicitly nulls temp_c on temp_fault');
+assertIncludes(chameleonInsert, 'swt_1,swt_2,swt_3', 'insert stores derived Chameleon SWT diagnostics');
+assertIncludes(chameleonInsert, 'const swt1Kpa = dataInvalid ? null : toNum(d.swt1Kpa);', 'insert normalizes derived SWT1');
+assertIncludes(chameleonInsert, 'const swt2Kpa = dataInvalid ? null : toNum(d.swt2Kpa);', 'insert normalizes derived SWT2');
+assertIncludes(chameleonInsert, 'const swt3Kpa = dataInvalid ? null : toNum(d.swt3Kpa);', 'insert normalizes derived SWT3');
 assertIncludes(chameleonInsert, "statusFlags == null ? 'grey' : (statusFlags ? 'yellow' : 'green')", 'insert status handles unknown flags');
 assertIncludes(chameleonInsert, 'return msg;', 'insert function passes through downstream flow');
 
@@ -163,9 +170,13 @@ compileFunctionNode('dendro-readings-insert-fn');
       adcCh1V: 0.521,
       adcCh4V: 0.002,
       batV: 3.6,
+      swt1Kpa: 9.0,
+      swt2Kpa: 32.85,
+      swt3Kpa: 67.05,
       rawPayloadB64: 'AAECAwQ=',
       fPort: 2,
       fCnt: 123,
+      calibrationStatus: 'calibrated',
     },
   };
   const normal = await runFunctionNode('chameleon-readings-insert-fn', normalMsg);
@@ -177,8 +188,9 @@ compileFunctionNode('dendro-readings-insert-fn');
   //         ch1_open(10) ch2_open(11) ch3_open(12) temp_c(13) r1_ohm_comp(14)
   //         r2_ohm_comp(15) r3_ohm_comp(16) r1_ohm_raw(17) r2_ohm_raw(18) r3_ohm_raw(19)
   //         array_id(20) adc_ch0v(21) adc_ch1v(22) adc_ch4v(23) bat_v(24)
-  //         payload_b64(25) f_port(26) f_cnt(27) calibration_status(28)
-  assert.strictEqual(normal.writes[0].params.length, 29, 'normal write uses all insert parameters');
+  //         swt_1(25) swt_2(26) swt_3(27) payload_b64(28) f_port(29)
+  //         f_cnt(30) calibration_status(31)
+  assert.strictEqual(normal.writes[0].params.length, 32, 'normal write uses all insert parameters');
   assert.strictEqual(normal.writes[0].params[0], 'A84041FFFFFFFFFF', 'devEui is stored uppercase');
   assert.strictEqual(normal.writes[0].params[4], 0, 'data_invalid is stored for valid data');
   assert.strictEqual(normal.writes[0].params[5], 0, 'comp_pending flag is persisted');
@@ -187,9 +199,13 @@ compileFunctionNode('dendro-readings-insert-fn');
   assert.strictEqual(normal.writes[0].params[14], 1168, 'r1_ohm_comp is stored for valid data');
   assert.strictEqual(normal.writes[0].params[17], 1168, 'r1_ohm_raw is stored for valid data');
   assert.strictEqual(normal.writes[0].params[20], '286D6ADB0F0000F1', 'array_id is stored for valid data');
-  assert.strictEqual(normal.writes[0].params[25], 'AAECAwQ=', 'payload_b64 stores the LoRaWAN payload base64');
-  assert.strictEqual(normal.writes[0].params[26], 2, 'f_port is stored when present');
-  assert.strictEqual(normal.writes[0].params[27], 123, 'f_cnt is stored when present');
+  assert.strictEqual(normal.writes[0].params[25], 9.0, 'swt_1 is stored for valid calibrated data');
+  assert.strictEqual(normal.writes[0].params[26], 32.85, 'swt_2 is stored for valid calibrated data');
+  assert.strictEqual(normal.writes[0].params[27], 67.05, 'swt_3 is stored for valid calibrated data');
+  assert.strictEqual(normal.writes[0].params[28], 'AAECAwQ=', 'payload_b64 stores the LoRaWAN payload base64');
+  assert.strictEqual(normal.writes[0].params[29], 2, 'f_port is stored when present');
+  assert.strictEqual(normal.writes[0].params[30], 123, 'f_cnt is stored when present');
+  assert.strictEqual(normal.writes[0].params[31], 'calibrated', 'calibration_status is stored when present');
   assert.strictEqual(normal.closeCount, 1, 'normal write closes the database handle');
   assertStatus(normal.statuses[0], { fill: 'green', shape: 'dot', text: 'Chameleon stored a84041ffffffffff' }, 'valid flags show green status');
 
@@ -212,6 +228,7 @@ compileFunctionNode('dendro-readings-insert-fn');
   assert.strictEqual(v2.writes[0].params[17], null, 'v2 omitted r1_ohm_raw stores NULL');
   assert.strictEqual(v2.writes[0].params[18], null, 'v2 omitted r2_ohm_raw stores NULL');
   assert.strictEqual(v2.writes[0].params[19], null, 'v2 omitted r3_ohm_raw stores NULL');
+  assert.strictEqual(v2.writes[0].params[25], 9.0, 'v2 swt_1 is stored for valid calibrated data');
 
   const v2InvalidMsg = JSON.parse(JSON.stringify(v2Msg));
   v2InvalidMsg.formattedData.chameleonStatusFlags = 1;
@@ -238,6 +255,9 @@ compileFunctionNode('dendro-readings-insert-fn');
   assert.strictEqual(v2Invalid.writes[0].params[15], null, 'v2 r2_ohm_comp is nulled when data_invalid is set');
   assert.strictEqual(v2Invalid.writes[0].params[16], null, 'v2 r3_ohm_comp is nulled when data_invalid is set');
   assert.strictEqual(v2Invalid.writes[0].params[20], null, 'v2 array_id is nulled when data_invalid is set');
+  assert.strictEqual(v2Invalid.writes[0].params[25], null, 'v2 swt_1 is nulled when data_invalid is set');
+  assert.strictEqual(v2Invalid.writes[0].params[26], null, 'v2 swt_2 is nulled when data_invalid is set');
+  assert.strictEqual(v2Invalid.writes[0].params[27], null, 'v2 swt_3 is nulled when data_invalid is set');
   assertStatus(v2Invalid.statuses[0], { fill: 'yellow', shape: 'dot', text: 'Chameleon stored a84041ffffffffff' }, 'nonzero flags show yellow status');
 
   const faultMsg = JSON.parse(JSON.stringify(normalMsg));
@@ -273,7 +293,7 @@ compileFunctionNode('dendro-readings-insert-fn');
   const emptyFields = await runFunctionNode('chameleon-readings-insert-fn', emptyFieldMsg);
   assert.strictEqual(emptyFields.writes[0].params[13], null, 'empty temp string stores NULL');
   assert.strictEqual(emptyFields.writes[0].params[14], null, 'empty resistance string stores NULL');
-  assert.strictEqual(emptyFields.writes[0].params[27], null, 'missing fCnt stores NULL');
+  assert.strictEqual(emptyFields.writes[0].params[30], null, 'missing fCnt stores NULL');
 
   console.log('LSN50 Chameleon persistence checks passed');
 })().catch((error) => {

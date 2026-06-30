@@ -559,18 +559,9 @@ function all(sql) {
     }
   }
 
-  // V42 — NULL device_data.swt_* rows that join a chameleon reading. Values
-  // computed from the now-dropped per-device coefficients are no longer trusted.
-  // Local backfill repopulates these once calibration arrives from osi-server.
-  // Idempotent: NULL → NULL is a no-op on repeat deploys.
-  await run(`UPDATE device_data
-    SET swt_1 = NULL, swt_2 = NULL, swt_3 = NULL
-    WHERE EXISTS (
-      SELECT 1 FROM chameleon_readings cr
-        WHERE cr.deveui = device_data.deveui
-          AND cr.recorded_at = device_data.recorded_at
-    )
-    AND (swt_1 IS NOT NULL OR swt_2 IS NOT NULL OR swt_3 IS NOT NULL)`);
+  // Schema repair intentionally does not mutate device_data.swt_*.
+  // Historical Chameleon SWT corrections must use scripts/repair-chameleon-swt-history.js
+  // so valid calibrated rows are preserved across repeat deploys.
 
   const deviceNames = new Set((await all('PRAGMA table_info(devices)')).map((row) => row.name));
   const dataNames = new Set((await all('PRAGMA table_info(device_data)')).map((row) => row.name));

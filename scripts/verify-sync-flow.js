@@ -1700,8 +1700,15 @@ expectIncludes('Apply Config', 'dendro_baseline_pending = 0,', 'clears the pendi
 expectIncludesById('lsn50-config-query-fn', 'dendro_baseline_calibration_signature,', 'keeps LSN50 config SELECT valid before the Chameleon calibration-status subquery');
 expectIncludes('Insert Chameleon Reading', 'INSERT INTO chameleon_readings', 'persists decoded Chameleon readings locally');
 expectIncludes('Insert Chameleon Reading', 'if (!d || d.isChameleon !== true) return msg;', 'passes non-Chameleon LSN50 payloads downstream');
+expectIncludesById('sync-init-fn', 'ALTER TABLE chameleon_readings ADD COLUMN swt_1 REAL', 'runtime schema migrates chameleon_readings.swt_1');
+expectIncludesById('sync-init-fn', 'ALTER TABLE chameleon_readings ADD COLUMN swt_2 REAL', 'runtime schema migrates chameleon_readings.swt_2');
+expectIncludesById('sync-init-fn', 'ALTER TABLE chameleon_readings ADD COLUMN swt_3 REAL', 'runtime schema migrates chameleon_readings.swt_3');
+expectIncludesById('chameleon-readings-insert-fn', 'swt_1,swt_2,swt_3', 'persists derived Chameleon SWT diagnostics');
 expectIncludes('Sync Init Schema + Triggers', 'CHAMELEON_READING_APPENDED', 'mirrors Chameleon readings into sync outbox');
 expectIncludes('Sync Init Schema + Triggers', "'data_invalid', NEW.data_invalid", 'syncs Chameleon data_invalid status');
+expectIncludes('Sync Init Schema + Triggers', "'swt_1', NEW.swt_1", 'syncs Chameleon diagnostic SWT1');
+expectIncludes('Sync Init Schema + Triggers', "'swt_2', NEW.swt_2", 'syncs Chameleon diagnostic SWT2');
+expectIncludes('Sync Init Schema + Triggers', "'swt_3', NEW.swt_3", 'syncs Chameleon diagnostic SWT3');
 expectIncludes('Build Cloud Bootstrap', 'const chameleonReadingsRows = await q([', 'loads bootstrap Chameleon history before reordering it');
 expectIncludes('Build Cloud Bootstrap', 'const chameleonReadings = chameleonReadingsRows.slice().reverse();', 'replays bootstrap Chameleon history oldest-to-newest');
 expectIncludes('Build Cloud Bootstrap', "'  cr.data_invalid,'", 'includes Chameleon data_invalid in bootstrap readings');
@@ -2440,6 +2447,8 @@ expectFileIncludes('deploy.sh', deployScript, 'ALTER TABLE devices ADD COLUMN de
 expectFileIncludes('deploy.sh', deployScript, 'ALTER TABLE devices ADD COLUMN dendro_ratio_at_extended REAL', 'repairs the live DB with the canonical dendrometer extended-ratio column during deploy');
 expectFileIncludes('deploy.sh', deployScript, 'UPDATE devices SET dendro_ratio_at_retracted = CASE', 'backfills the canonical dendrometer retracted-ratio column during deploy');
 expectFileIncludes('deploy.sh', deployScript, 'UPDATE devices SET dendro_ratio_at_extended = CASE', 'backfills the canonical dendrometer extended-ratio column during deploy');
+expectFileIncludes('deploy.sh', deployScript, 'Schema repair intentionally does not mutate device_data.swt_*', 'documents that deploy preserves existing Chameleon SWT history');
+expectFileExcludes('deploy.sh', deployScript, 'SET swt_1 = NULL, swt_2 = NULL, swt_3 = NULL', 'deploy does not blanket-null Chameleon SWT history during schema repair');
 expectFileIncludes('deploy.sh', deployScript, '/etc/init.d/osi-gateway-gps stop || true', 'stops the retired gateway GPS sidecar during deploy');
 expectFileIncludes('deploy.sh', deployScript, '/etc/init.d/osi-gateway-gps disable || true', 'disables the retired gateway GPS sidecar during deploy');
 expectFileIncludes('deploy.sh', deployScript, 'rm -f /etc/init.d/osi-gateway-gps /usr/bin/osi-gateway-gps.js', 'removes the retired gateway GPS sidecar files during deploy');
@@ -2608,6 +2617,13 @@ for (const seedDatabasePath of seedDatabasePaths) {
     `${relativeSeedPath} includes r1_ohm_comp in the bundled chameleon_readings schema`,
     `${relativeSeedPath} is missing r1_ohm_comp in the bundled chameleon_readings schema`
   );
+  for (const column of ['swt_1', 'swt_2', 'swt_3']) {
+    expectCondition(
+      chameleonColumns.has(column),
+      `${relativeSeedPath} includes ${column} in the bundled chameleon_readings schema`,
+      `${relativeSeedPath} is missing ${column} in the bundled chameleon_readings schema`
+    );
+  }
   expectCondition(
     chameleonColumns.has('f_cnt'),
     `${relativeSeedPath} includes f_cnt in the bundled chameleon_readings schema`,
