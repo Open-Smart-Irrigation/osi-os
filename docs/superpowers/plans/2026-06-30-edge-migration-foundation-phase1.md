@@ -6,7 +6,7 @@
 
 **Architecture:** A dialect-pure-SQLite Node module `lib/osi-migrate/` applies ordered, checksummed migration files exactly once, recording each in a `schema_migrations` ledger with per-object semantic fingerprints. Each migration is applied as a **single `sqlite3` process** (one connection) so a destructive migration can toggle `PRAGMA foreign_keys` *outside* its `BEGIN IMMEDIATE … COMMIT` atomically; ledger writes use a separate connection so a failed/rolled-back migration still records `status=failed`. Runtime (Node-RED) will later use a node-sqlite3 adapter over the same interface — **out of scope for Phase 1**.
 
-**Tech Stack:** Node.js (dev: v22; Pi runtime: v20), `node:test` + `node:assert/strict` (built-in, no new deps), the `sqlite3` CLI 3.53 via `node:child_process.execFileSync` (matches `scripts/repair-pi-schema.js`), `node:crypto` (sha256). Tests run with `node --test`.
+**Tech Stack:** Node.js (dev: v22; Pi runtime: v20), `node:test` + `node:assert/strict` (built-in, no new deps), the `sqlite3` CLI 3.53 via `node:child_process.execFileSync` (matches `scripts/repair-pi-schema.js`), `node:crypto` (sha256). Run tests with the **glob** form `node --test lib/osi-migrate/__tests__/*.test.js` — a bare directory path is NOT discovered on Node ≥22 (verified); Node reports `# pass N` in TAP.
 
 ## Global Constraints
 
@@ -916,8 +916,8 @@ Expected: PASS (4 tests).
 
 - [ ] **Step 5: Run the whole module test suite**
 
-Run: `node --test lib/osi-migrate/__tests__/`
-Expected: PASS (all files).
+Run: `node --test lib/osi-migrate/__tests__/*.test.js`
+Expected: PASS (all files; Node prints `# pass N` in TAP — "PASS (N tests)" elsewhere is shorthand for that).
 
 - [ ] **Step 6: Commit**
 
@@ -1096,14 +1096,14 @@ jobs:
           node-version: '20'
       - name: Install sqlite3 CLI
         run: sudo apt-get update && sudo apt-get install -y sqlite3
-      - run: node --test lib/osi-migrate/__tests__/
+      - run: node --test lib/osi-migrate/__tests__/*.test.js
       - run: node scripts/verify-migrations.js
       - run: node scripts/verify-seed-replay.js
 ```
 
 - [ ] **Step 4: Verify the workflow YAML parses and the commands it runs pass locally**
 
-Run: `node --test lib/osi-migrate/__tests__/ && node scripts/verify-migrations.js && node scripts/verify-seed-replay.js`
+Run: `node --test lib/osi-migrate/__tests__/*.test.js && node scripts/verify-migrations.js && node scripts/verify-seed-replay.js`
 Expected: all three succeed (tests pass; both verifiers print `OK`).
 
 - [ ] **Step 5: Commit**
