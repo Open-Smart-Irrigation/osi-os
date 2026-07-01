@@ -83,7 +83,23 @@
     "noDevices": "Tewali byuma mu kifo kino",
     "assignFirst": "Werekeza Ekyuma Ekyasooka",
     "devicesInZone": "Ebyuma mu kifo kino:",
-    "data": "Data"
+    "data": "Data",
+    "export": {
+      "title": "Fulumya data",
+      "selectRange": "Londa ebbanga ly'ennaku okusobola okuwanula data y'ekifo.",
+      "from": "Okuva",
+      "to": "Okutuuka",
+      "granularity": "Obuzito bw'obudde",
+      "raw": "Ebitali bifunze",
+      "hourly": "Buli ssaawa",
+      "daily": "Buli lunaku",
+      "download": "Wanula CSV",
+      "downloading": "Kitegekebwa...",
+      "rangeSummary": "{{from}} okutuuka {{to}}",
+      "error": "Okufulumya kulemereddwa",
+      "tooLarge": "Ebbanga ddene nnyo. Londa obuzito obunene.",
+      "fullExport": "Fulumya byonna"
+    }
   },
   "schedule": {
     "irrigationSchedule": "Nteekateeka y'okusukkulirira",

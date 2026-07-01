@@ -18,7 +18,7 @@
   "emptyState": {
     "title": "Welcome to your farm!",
     "subtitle": "Get started by creating an irrigation zone and adding devices",
-    "createZone": "Create Zone",
+    "createZone": "Create Irrigation Zone",
     "addDevice": "Add Device"
   },
   "irrigationZones": "Irrigation Zones",
