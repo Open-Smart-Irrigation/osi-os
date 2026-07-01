@@ -302,6 +302,7 @@ export const HistoryCardDetailPage: React.FC = () => {
   const featureFlags = useFeatureFlags();
   const orientation = useOrientation();
   const isLandscape = orientation === 'landscape';
+  const resetKeyRef = useRef<string | null>(null);
   const zoneId = Number(rawZoneId);
   const gatewayEui = typeof rawGatewayEui === 'string' && rawGatewayEui.trim() ? rawGatewayEui : null;
   const cardId = decodeRouteCardId(rawCardId);
@@ -481,6 +482,24 @@ export const HistoryCardDetailPage: React.FC = () => {
     [cardData.data?.calendar],
   );
   const viewModeLabel = detailViewModeLabel(t, selectedView, visibleRangeLabel, calendarMonthLabel);
+  const detailResetKey = useMemo(() => {
+    if (!displayCard) return null;
+    return JSON.stringify([
+      displayCard.cardId,
+      selectedSourceKey,
+      selectedView,
+      timeViewport.viewport.range.label,
+      timeViewport.viewport.range.from,
+      timeViewport.viewport.range.to,
+    ]);
+  }, [
+    displayCard,
+    selectedSourceKey,
+    selectedView,
+    timeViewport.viewport.range.from,
+    timeViewport.viewport.range.label,
+    timeViewport.viewport.range.to,
+  ]);
 
   const handleInspectTimestamp = useCallback((selection: { timestamp: string }) => {
     setInspectorSelection({ kind: 'timestamp', timestamp: selection.timestamp });
@@ -644,17 +663,17 @@ export const HistoryCardDetailPage: React.FC = () => {
   }, [allSourceKeys, displayCard, enabledSources]);
 
   useEffect(() => {
+    if (!detailResetKey) return;
+    if (resetKeyRef.current === null) {
+      resetKeyRef.current = detailResetKey;
+      return;
+    }
+    if (resetKeyRef.current === detailResetKey) return;
+    resetKeyRef.current = detailResetKey;
     setCalendarMonthOffset(0);
     setVisualWindow(null);
     setExportOpen(false);
-  }, [
-    displayCard?.cardId,
-    selectedSourceKey,
-    selectedView,
-    timeViewport.viewport.range.label,
-    timeViewport.viewport.range.from,
-    timeViewport.viewport.range.to,
-  ]);
+  }, [detailResetKey]);
 
   useEffect(() => {
     const meta = document.querySelector('meta[name="viewport"]');

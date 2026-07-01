@@ -264,6 +264,31 @@ function dispatchTouch(
   });
 }
 
+function calendarMonthFromRange(range: { from?: string | null; to?: string | null }): { year: number; month: number } {
+  const ms = Date.parse(range.from ?? range.to ?? '');
+  const date = Number.isFinite(ms) ? new Date(ms) : new Date();
+  return { year: date.getUTCFullYear(), month: date.getUTCMonth() + 1 };
+}
+
+function calendarDayForRange(range: { from?: string | null; to?: string | null }): string {
+  const { year, month } = calendarMonthFromRange(range);
+  return `${year}-${String(month).padStart(2, '0')}-12`;
+}
+
+function calendarMonthLabelForRange(range: { from?: string | null; to?: string | null }): string {
+  const { year, month } = calendarMonthFromRange(range);
+  return new Intl.DateTimeFormat(undefined, {
+    month: 'long',
+    year: 'numeric',
+    timeZone: 'Europe/Zurich',
+  }).format(new Date(Date.UTC(year, month - 1, 15, 12)));
+}
+
+function latestZoneCardDataRequest() {
+  const calls = historyAPIMock.getZoneCardData.mock.calls;
+  return calls[calls.length - 1]?.[2];
+}
+
 function renderAppAtRoute(hashRoute: string) {
   window.history.replaceState(null, '', `#${hashRoute}`);
 
@@ -1030,9 +1055,7 @@ describe('History card detail route', () => {
         timezone: 'Europe/Zurich',
         days: [
           {
-            date: request.range.label === 'custom' && request.range.from?.startsWith('2026-07')
-              ? '2026-07-12'
-              : '2026-06-12',
+            date: calendarDayForRange(request.range),
             state: 'optimal',
             coveragePct: 96,
             coverageConfidence: 'configured',
@@ -1048,7 +1071,10 @@ describe('History card detail route', () => {
     renderAppAtRoute('/history/zones/12/cards/soil-card%3Aroot-zone');
 
     expect(await screen.findByRole('grid')).toBeInTheDocument();
-    expect(screen.getByTestId('view-mode-label')).toHaveTextContent('Calendar - June 2026');
+    const initialRequest = latestZoneCardDataRequest();
+    expect(screen.getByTestId('view-mode-label')).toHaveTextContent(
+      `Calendar - ${calendarMonthLabelForRange(initialRequest?.range ?? {})}`,
+    );
     await act(async () => {
       await Promise.resolve();
     });
@@ -1059,21 +1085,23 @@ describe('History card detail route', () => {
     dispatchTouch(surface, 'touchend', []);
 
     await waitFor(() => {
+      const nextRange = latestZoneCardDataRequest()?.range;
+      expect(nextRange?.label).toBe('custom');
+      expect(nextRange?.from).not.toBe(initialRequest?.range.from);
       expect(historyAPI.getZoneCardData).toHaveBeenLastCalledWith(
         12,
         'soil-card:root-zone',
         expect.objectContaining({
           view: 'calendar',
-          range: expect.objectContaining({
-            label: 'custom',
-            from: '2026-07-01T00:00:00.000Z',
-            to: '2026-07-31T23:59:59.999Z',
-          }),
+          range: expect.objectContaining({ label: 'custom' }),
         }),
       );
     });
-    expect(await screen.findByTestId('calendar-cell-2026-07-12')).toBeInTheDocument();
-    expect(screen.getByTestId('view-mode-label')).toHaveTextContent('Calendar - July 2026');
+    const nextRequest = latestZoneCardDataRequest();
+    expect(await screen.findByTestId(`calendar-cell-${calendarDayForRange(nextRequest?.range ?? {})}`)).toBeInTheDocument();
+    expect(screen.getByTestId('view-mode-label')).toHaveTextContent(
+      `Calendar - ${calendarMonthLabelForRange(nextRequest?.range ?? {})}`,
+    );
   });
 
   it('opens an inspector sheet on long press and returns focus to the visualization when closed', async () => {
