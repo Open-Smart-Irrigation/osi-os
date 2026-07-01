@@ -197,7 +197,7 @@ const path = require('node:path');
 const crypto = require('node:crypto');
 
 const NAME_RE = /^(\d{4})__([a-z0-9_]+)\.sql$/;
-const RISK_RE = /^--\s*risk:\s*(additive|destructive)\s*$/m;
+const RISK_RE = /^(?:\uFEFF)?(?:[ \t]*\r?\n)*--\s*risk:\s*(additive|destructive)\s*(?:\r?\n|$)/;
 
 function loadMigrations(dir) {
   const out = [];
@@ -209,7 +209,8 @@ function loadMigrations(dir) {
     const version = Number(match[1]);
     if (seen.has(version)) throw new Error(`duplicate migration version: ${version}`);
     seen.add(version);
-    const sql = fs.readFileSync(path.join(dir, file), 'utf8');
+    const raw = fs.readFileSync(path.join(dir, file));
+    const sql = raw.toString('utf8');
     const risk = RISK_RE.exec(sql);
     if (!risk) throw new Error(`migration ${file} missing '-- risk: additive|destructive' header`);
     out.push({
@@ -218,7 +219,7 @@ function loadMigrations(dir) {
       slug: match[2],
       risk: risk[1],
       sql,
-      checksum: crypto.createHash('sha256').update(sql).digest('hex'),
+      checksum: crypto.createHash('sha256').update(raw).digest('hex'),
     });
   }
   return out.sort((a, b) => a.version - b.version);
@@ -253,7 +254,7 @@ git commit -m "feat(migrate): ordered migration loader with risk class + checksu
   - `ensureLedger(runner): Promise<void>` — creates `schema_migrations` and `schema_object_fingerprints` if absent.
   - `getApplied(runner): Promise<Array<{version, name, checksum, status}>>` ordered by version.
   - `recordSuccess(runner, {version,name,checksum,appVersion,backupPath}): Promise<void>`
-  - `recordFailure(runner, {version,name,checksum,appVersion,error}): Promise<void>` — writes `status='failed'`.
+  - `recordFailure(runner, {version,name,checksum,appVersion,backupPath,error}): Promise<void>` — writes `status='failed'` and preserves any verified backup path.
   - `sqlQuote(value): string` — SQLite string-literal quoting for internal values.
 
 - [ ] **Step 1: Write the failing test**
@@ -279,7 +280,7 @@ test('recordSuccess and recordFailure persist with status', async () => {
   const r = cliRunner(tmpDb());
   await ensureLedger(r);
   await recordSuccess(r, { version: 1, name: '0001__a.sql', checksum: 'abc', appVersion: '0.6', backupPath: '' });
-  await recordFailure(r, { version: 2, name: '0002__b.sql', checksum: 'def', appVersion: '0.6', error: "it's broken" });
+  await recordFailure(r, { version: 2, name: '0002__b.sql', checksum: 'def', appVersion: '0.6', backupPath: '/tmp/farming.db.bak', error: "it's broken" });
   const rows = await getApplied(r);
   assert.deepEqual(rows.map((x) => [x.version, x.status]), [[1, 'applied'], [2, 'failed']]);
 });
@@ -338,13 +339,13 @@ async function recordSuccess(runner, { version, name, checksum, appVersion, back
              'applied', NULL, ${sqlQuote(appVersion || '')}, ${sqlQuote(backupPath || '')});`);
 }
 
-async function recordFailure(runner, { version, name, checksum, appVersion, error }) {
+async function recordFailure(runner, { version, name, checksum, appVersion, backupPath, error }) {
   const now = new Date().toISOString();
   await runner.exec(
     `INSERT OR REPLACE INTO schema_migrations
        (version, name, checksum, applied_at, finished_at, status, error, app_version, backup_path)
-     VALUES (${version}, ${sqlQuote(name)}, ${sqlQuote(checksum)}, ${sqlQuote(now)}, ${sqlQuote(now)},
-             'failed', ${sqlQuote(error || '')}, ${sqlQuote(appVersion || '')}, NULL);`);
+     VALUES (${version}, ${sqlQuote(name)}, ${sqlQuote(checksum)}, NULL, ${sqlQuote(now)},
+             'failed', ${sqlQuote(error || '')}, ${sqlQuote(appVersion || '')}, ${sqlQuote(backupPath || '')});`);
 }
 
 module.exports = { ensureLedger, getApplied, recordSuccess, recordFailure, sqlQuote };
@@ -372,7 +373,7 @@ git commit -m "feat(migrate): schema_migrations ledger with success/failure reco
 
 **Interfaces:**
 - Consumes: `cliRunner` (Task 1).
-- Produces: `computeFingerprints(runner) -> Promise<Array<{object_type, object_name, fingerprint}>>`. Derived from PRAGMA structural info (`table_xinfo`, `foreign_key_list`, `index_list`, `index_xinfo`) **plus** normalized `sqlite_master.sql` to capture CHECK constraints and partial-index predicates that PRAGMA omits; tagged with SQLite version + `NORMALIZER_VERSION`. Whitespace is collapsed but case preserved. Exposes `NORMALIZER_VERSION`.
+- Produces: `computeFingerprints(runner) -> Promise<Array<{object_type, object_name, fingerprint}>>`. Derived from PRAGMA structural info (`table_xinfo`, `foreign_key_list`, `index_list`, `index_xinfo`) **plus** normalized `sqlite_master.sql` to capture CHECK constraints and partial-index predicates that PRAGMA omits; tagged with `NORMALIZER_VERSION` only so harmless SQLite engine upgrades do not change the digest. Whitespace is collapsed but case preserved. Exposes `NORMALIZER_VERSION`; record `sqlite_version()` separately as diagnostics if needed.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -465,9 +466,12 @@ function normalizeSql(sql) {
   return String(sql || '').replace(/\s+/g, ' ').trim();
 }
 
+function quoteIdent(name) {
+  return `"${String(name).replace(/"/g, '""')}"`;
+}
+
 async function computeFingerprints(runner) {
-  const version = (await runner.all('SELECT sqlite_version() AS v'))[0].v;
-  const tag = { normalizer: NORMALIZER_VERSION, sqlite: version };
+  const tag = { normalizer: NORMALIZER_VERSION };
   const out = [];
 
   // master DDL captures what PRAGMA omits: table CHECK constraints, partial-index WHERE, defaults.
@@ -477,11 +481,12 @@ async function computeFingerprints(runner) {
   for (const m of master) ddl[`${m.type}|${m.name}`] = normalizeSql(m.sql);
 
   for (const { name } of master.filter((m) => m.type === 'table')) {
-    const columns = await runner.all(`PRAGMA table_xinfo(${name})`);
-    const fks = await runner.all(`PRAGMA foreign_key_list(${name})`);
-    const indexes = await runner.all(`PRAGMA index_list(${name})`);
+    const quotedName = quoteIdent(name);
+    const columns = await runner.all(`PRAGMA table_xinfo(${quotedName})`);
+    const fks = await runner.all(`PRAGMA foreign_key_list(${quotedName})`);
+    const indexes = await runner.all(`PRAGMA index_list(${quotedName})`);
     const indexCols = {};
-    for (const idx of indexes) indexCols[idx.name] = await runner.all(`PRAGMA index_xinfo(${idx.name})`);
+    for (const idx of indexes) indexCols[idx.name] = await runner.all(`PRAGMA index_xinfo(${quoteIdent(idx.name)})`);
     out.push({ object_type: 'table', object_name: name,
       fingerprint: hash({ tag, columns, fks, indexes, indexCols, ddl: ddl[`table|${name}`] }) });
   }
@@ -496,7 +501,7 @@ async function computeFingerprints(runner) {
   return out;
 }
 
-module.exports = { computeFingerprints, NORMALIZER_VERSION };
+module.exports = { computeFingerprints, NORMALIZER_VERSION, quoteIdent };
 ```
 
 - [ ] **Step 4: Run test to verify it passes**
@@ -678,7 +683,7 @@ Expected: FAIL — `Cannot find module '../index'`.
 // lib/osi-migrate/runner.js
 'use strict';
 const { loadMigrations } = require('./migrations-loader');
-const { ensureLedger, getApplied, recordSuccess, recordFailure } = require('./ledger');
+const { ensureLedger, getApplied, recordFailure, markRepairRequired, successInsertSql } = require('./ledger');
 const { backupDb } = require('./backup');
 const { cliRunner } = require('./runner-iface');
 
@@ -692,24 +697,41 @@ async function applyPending(runner, { migrationsDir, appVersion, writersStopped 
     const prior = appliedOk.get(m.version);
     if (prior) {
       if (prior.checksum !== m.checksum) {
+        await markRepairRequired(runner, {
+          version: m.version,
+          error: `checksum mismatch for applied migration ${m.name}`,
+        });
         throw new Error(`repair_required: checksum mismatch for applied migration ${m.name}`);
       }
       continue; // already applied, unchanged
     }
     let backupPath = '';
+    let committed = false;
     try {
+      const ledgerInsert = successInsertSql({ version: m.version, name: m.name, checksum: m.checksum, appVersion, backupPath: '' });
       if (m.risk === 'destructive') {
-        backupPath = await applyDestructive(runner, m, writersStopped);
+        if (!writersStopped) {
+          throw new Error(`migration ${m.name} is destructive; refuse to run unless writers are stopped (deploy/pre-start)`);
+        }
+        backupPath = await backupDb(runner.dbPath);
+        const insertWithBackup = successInsertSql({ version: m.version, name: m.name, checksum: m.checksum, appVersion, backupPath });
+        await runner.exec(composeDestructiveScript(m.sql, insertWithBackup));
       } else {
-        await runner.exec(`BEGIN IMMEDIATE;\n${m.sql}\nCOMMIT;`);
+        await runner.exec(`BEGIN IMMEDIATE;\n${m.sql}\n${ledgerInsert}\nCOMMIT;`);
       }
+      committed = true;
       await postflight(runner, m);
-      await recordSuccess(runner, { version: m.version, name: m.name, checksum: m.checksum, appVersion, backupPath });
     } catch (err) {
       // Clean connection: the failed migration's transaction has rolled back at process exit.
-      await recordFailure(cliRunner(runner.dbPath), {
-        version: m.version, name: m.name, checksum: m.checksum, appVersion, error: String(err.message || err),
-      });
+      const rec = cliRunner(runner.dbPath);
+      if (committed) {
+        await markRepairRequired(rec, { version: m.version, error: String(err.message || err) });
+      } else {
+        await recordFailure(rec, {
+          version: m.version, name: m.name, checksum: m.checksum, appVersion, backupPath,
+          error: String(err.message || err),
+        });
+      }
       throw err;
     }
   }
@@ -854,21 +876,21 @@ Replace the `applyDestructive` stub in `lib/osi-migrate/runner.js` and add the t
 const { computeFingerprints } = require('./fingerprints');
 
 // One connection: FK toggle stays OUTSIDE the transaction (PRAGMA foreign_keys is a no-op inside one).
-function composeDestructiveScript(sql) {
-  return `PRAGMA foreign_keys=OFF;\nBEGIN IMMEDIATE;\n${sql}\nCOMMIT;\nPRAGMA foreign_keys=ON;`;
-}
-
-async function applyDestructive(runner, m, writersStopped) {
-  if (!writersStopped) {
-    throw new Error(`migration ${m.name} is destructive; refuse to run unless writers are stopped (deploy/pre-start)`);
-  }
-  const backupPath = await backupDb(runner.dbPath);
-  await runner.exec(composeDestructiveScript(m.sql));
-  return backupPath;
+function composeDestructiveScript(sql, ledgerInsert = '') {
+  return `PRAGMA foreign_keys=OFF;\nBEGIN IMMEDIATE;\n${sql}\n${ledgerInsert}\nCOMMIT;\nPRAGMA foreign_keys=ON;`;
 }
 
 async function bootstrapFresh(runner, opts) {
+  await assertFreshDatabase(runner);
   return applyPending(runner, { ...opts, writersStopped: true });
+}
+
+async function assertFreshDatabase(runner) {
+  const existing = await runner.all(
+    "SELECT type, name FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' ORDER BY type, name LIMIT 1");
+  if (existing.length) {
+    throw new Error(`bootstrapFresh requires an empty/uninitialized database; found ${existing[0].type} ${existing[0].name}`);
+  }
 }
 
 async function syncFingerprints(runner) {
