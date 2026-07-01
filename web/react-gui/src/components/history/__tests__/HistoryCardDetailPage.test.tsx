@@ -501,6 +501,7 @@ describe('History card detail route', () => {
   });
 
   afterEach(() => {
+    vi.useRealTimers();
     Object.defineProperty(window, 'matchMedia', {
       configurable: true,
       writable: true,
@@ -993,6 +994,9 @@ describe('History card detail route', () => {
   });
 
   it('changes the visible calendar month on inner horizontal calendar swipe', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-06-15T12:00:00.000Z'));
+
     vi.mocked(historyAPI.getZoneCards).mockResolvedValue({
       zoneId: 12,
       generatedAt: '2026-06-15T12:00:00Z',
