@@ -156,7 +156,10 @@ export const HistoryDesktopDetail: React.FC<HistoryDesktopDetailProps> = ({
     return null;
   }, [cardData.data]);
 
-  const effectiveBounds = desktopBoundsForData(bounds, derivedBounds);
+  const effectiveBounds = useMemo(
+    () => desktopBoundsForData(bounds, derivedBounds),
+    [bounds, derivedBounds],
+  );
 
   // Chart window passed to visualization (matches HistoryVisualWindow shape)
   const chartWindow: HistoryVisualWindow = viewport;
@@ -282,7 +285,7 @@ export const HistoryDesktopDetail: React.FC<HistoryDesktopDetailProps> = ({
                         : 'bg-[var(--secondary-bg)] text-[var(--text)] hover:bg-[var(--border)]'
                     }`}
                   >
-                    {source.label}
+                    {source.labelKey ? t(source.labelKey, { defaultValue: source.label }) : source.label}
                   </button>
                 ))}
               </div>
@@ -416,6 +419,7 @@ export const HistoryDesktopDetail: React.FC<HistoryDesktopDetailProps> = ({
                 bounds={effectiveBounds}
                 viewport={viewport}
                 onChange={setViewport}
+                ariaLabel={t('history.desktop.rangeOverviewLabel', { defaultValue: 'Time range overview' })}
               />
             </div>
           </>

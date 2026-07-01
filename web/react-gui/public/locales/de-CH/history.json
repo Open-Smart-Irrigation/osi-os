@@ -19,27 +19,28 @@
       "retryCards": "Retry cards"
     },
     "desktop": {
-      "toolbarTitle": "Toolbar",
-      "modeLabel": "Desktop mode",
-      "modeFocus": "Focus",
-      "modeCompare": "Compare",
-      "viewSelectorLabel": "Card view",
-      "compareViewSelectorLabel": "Compare view",
-      "sourceSelectorLabel": "Sources",
-      "chartSurfaceLabel": "History chart, use arrow keys to pan and plus or minus to zoom",
-      "zoomIn": "Zoom in",
-      "zoomOut": "Zoom out",
-      "resetZoom": "Reset zoom",
-      "maxPanels": "Up to {{count}} comparison panels",
-      "singleMode": "Single",
-      "comparisonMode": "Comparison",
-      "addPanel": "Add panel {{title}}",
-      "removePanel": "Remove panel",
-      "panelLimitWarning": "Only {{count}} comparison panels can be shown on this edge gateway.",
-      "selectedTimestampNone": "No timestamp selected",
-      "selectedTimestamp": "Selected timestamp: {{timestamp}}",
-      "inspectorTitle": "Inspector",
-      "inspectorPlaceholder": "Select a timestamp or calendar cell to see interpretation, events, data quality, and advanced metadata."
+      "toolbarTitle": "Werkzeugleiste",
+      "modeLabel": "Desktop-Modus",
+      "modeFocus": "Fokus",
+      "modeCompare": "Vergleichen",
+      "viewSelectorLabel": "Kartenansicht",
+      "compareViewSelectorLabel": "Vergleichsansicht",
+      "sourceSelectorLabel": "Quellen",
+      "rangeOverviewLabel": "Zeitbereichsübersicht",
+      "chartSurfaceLabel": "Verlaufsdiagramm, mit Pfeiltasten verschieben und mit Plus oder Minus zoomen",
+      "zoomIn": "Hineinzoomen",
+      "zoomOut": "Herauszoomen",
+      "resetZoom": "Zoom zurücksetzen",
+      "maxPanels": "Bis zu {{count}} Vergleichsansichten",
+      "singleMode": "Einzeln",
+      "comparisonMode": "Vergleich",
+      "addPanel": "Panel {{title}} hinzufügen",
+      "removePanel": "Panel entfernen",
+      "panelLimitWarning": "Auf diesem Edge-Gateway können nur {{count}} Vergleichsansichten angezeigt werden.",
+      "selectedTimestampNone": "Kein Zeitstempel ausgewählt",
+      "selectedTimestamp": "Ausgewählter Zeitstempel: {{timestamp}}",
+      "inspectorTitle": "Inspektor",
+      "inspectorPlaceholder": "Wählen Sie einen Zeitstempel oder eine Kalenderzelle aus, um Interpretation, Ereignisse, Datenqualität und erweiterte Metadaten zu sehen."
     },
     "mobile": {
       "zoneLabel": "Zone",
@@ -518,7 +519,7 @@
     },
     "sourceFilter": {
       "label": "Source",
-      "all": "All"
+      "all": "Alle"
     },
     "settings": {
       "open": "Open card settings",

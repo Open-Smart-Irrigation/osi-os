@@ -68,6 +68,17 @@ const { translateForTest } = vi.hoisted(() => {
     'history.cardFrame.cardDataUnknownError': 'Unknown error',
     'history.cardType.soil': 'Soil',
     'history.cardType.gateway': 'Gateway',
+    'history.desktop.modeLabel': 'View mode',
+    'history.desktop.modeFocus': 'Focus',
+    'history.desktop.modeCompare': 'Compare',
+    'history.desktop.viewSelectorLabel': 'Card view',
+    'history.desktop.compareViewSelectorLabel': 'Compare view',
+    'history.desktop.sourceSelectorLabel': 'Sources',
+    'history.desktop.chartSurfaceLabel': 'History chart, use arrow keys to pan and plus or minus to zoom',
+    'history.desktop.zoomIn': 'Zoom in',
+    'history.desktop.zoomOut': 'Zoom out',
+    'history.desktop.resetZoom': 'Reset zoom',
+    'history.desktop.railLabel': 'History cards',
     'history.viewMode.soil-profile': 'Soil Profile',
     'history.viewMode.line-chart': 'Line Chart',
     'history.viewMode.daily-min-max': 'Daily Min/Max',
@@ -294,6 +305,19 @@ function mockOrientation(isLandscape: boolean) {
     writable: true,
     value: vi.fn().mockImplementation((query: string) => ({
       matches: isLandscape && query === '(orientation: landscape)',
+      media: query,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    })),
+  });
+}
+
+function mockViewport({ isDesktop = false, isLandscape = false }: { isDesktop?: boolean; isLandscape?: boolean }) {
+  Object.defineProperty(window, 'matchMedia', {
+    configurable: true,
+    writable: true,
+    value: vi.fn().mockImplementation((query: string) => ({
+      matches: (isDesktop && query.includes('min-width')) || (isLandscape && query === '(orientation: landscape)'),
       media: query,
       addEventListener: vi.fn(),
       removeEventListener: vi.fn(),
@@ -634,6 +658,39 @@ describe('History card detail route', () => {
     expect(historyAPI.getZoneCards).not.toHaveBeenCalled();
     expect(historyAPI.markZoneCardOpened).not.toHaveBeenCalled();
     expect(screen.queryByText('0016C001F11766E7')).not.toBeInTheDocument();
+  });
+
+  it('keeps selected desktop gateway cards on the sanitized data path', async () => {
+    mockViewport({ isDesktop: true });
+    vi.mocked(historyAPIMock.getGatewayCards).mockResolvedValue({
+      gatewayEui: '0016C001F11766E7',
+      generatedAt: '2026-05-31T10:00:00Z',
+      cards: [
+        gatewayCard({
+          cardId: '0016C001F11766E7:gateway:hub',
+          title: 'Primary gateway',
+          subtitle: 'Hub status',
+        }),
+        gatewayCard({
+          cardId: '0016C001F11766E7:gateway:secondary',
+          title: 'Gateway 0016C001F11766E7',
+          subtitle: 'Hub 0016C001F11766E7',
+          sourceLabels: ['0016C001F11766E7'],
+        }),
+      ],
+    });
+
+    renderAppAtRoute('/history/gateways/0016C001F11766E7/cards/0016C001F11766E7%3Agateway%3Ahub');
+
+    await waitFor(() => {
+      expect(screen.getAllByText('Primary gateway').length).toBeGreaterThan(0);
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Gateway' }));
+
+    await waitFor(() => {
+      expect(screen.getAllByText('Gateway').length).toBeGreaterThan(0);
+    });
+    expect(screen.queryByText(/0016C001F11766E7/)).not.toBeInTheDocument();
   });
 
   it('header shows source names without back button or visible History text', async () => {

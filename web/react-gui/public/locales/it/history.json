@@ -19,27 +19,28 @@
       "retryCards": "Retry cards"
     },
     "desktop": {
-      "toolbarTitle": "Toolbar",
-      "modeLabel": "Desktop mode",
+      "toolbarTitle": "Barra strumenti",
+      "modeLabel": "Modalità desktop",
       "modeFocus": "Focus",
-      "modeCompare": "Compare",
-      "viewSelectorLabel": "Card view",
-      "compareViewSelectorLabel": "Compare view",
-      "sourceSelectorLabel": "Sources",
-      "chartSurfaceLabel": "History chart, use arrow keys to pan and plus or minus to zoom",
-      "zoomIn": "Zoom in",
-      "zoomOut": "Zoom out",
-      "resetZoom": "Reset zoom",
-      "maxPanels": "Up to {{count}} comparison panels",
-      "singleMode": "Single",
-      "comparisonMode": "Comparison",
-      "addPanel": "Add panel {{title}}",
-      "removePanel": "Remove panel",
-      "panelLimitWarning": "Only {{count}} comparison panels can be shown on this edge gateway.",
-      "selectedTimestampNone": "No timestamp selected",
-      "selectedTimestamp": "Selected timestamp: {{timestamp}}",
-      "inspectorTitle": "Inspector",
-      "inspectorPlaceholder": "Select a timestamp or calendar cell to see interpretation, events, data quality, and advanced metadata."
+      "modeCompare": "Confronta",
+      "viewSelectorLabel": "Vista scheda",
+      "compareViewSelectorLabel": "Vista confronto",
+      "sourceSelectorLabel": "Fonti",
+      "rangeOverviewLabel": "Panoramica intervallo temporale",
+      "chartSurfaceLabel": "Grafico storico, usa le frecce per spostarti e più o meno per zoomare",
+      "zoomIn": "Ingrandisci",
+      "zoomOut": "Riduci",
+      "resetZoom": "Reimposta zoom",
+      "maxPanels": "Fino a {{count}} pannelli di confronto",
+      "singleMode": "Singolo",
+      "comparisonMode": "Confronto",
+      "addPanel": "Aggiungi pannello {{title}}",
+      "removePanel": "Rimuovi pannello",
+      "panelLimitWarning": "Su questo gateway edge possono essere mostrati solo {{count}} pannelli di confronto.",
+      "selectedTimestampNone": "Nessun timestamp selezionato",
+      "selectedTimestamp": "Timestamp selezionato: {{timestamp}}",
+      "inspectorTitle": "Ispettore",
+      "inspectorPlaceholder": "Seleziona un timestamp o una cella del calendario per vedere interpretazione, eventi, qualità dei dati e metadati avanzati."
     },
     "mobile": {
       "zoneLabel": "Zone",
@@ -518,7 +519,7 @@
     },
     "sourceFilter": {
       "label": "Source",
-      "all": "All"
+      "all": "Tutte"
     },
     "settings": {
       "open": "Open card settings",

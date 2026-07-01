@@ -442,6 +442,41 @@ describe('HistoryDesktopDetail', () => {
     expect(lastHistoryCardDataRequest()).toEqual(expect.objectContaining({ sourceKey: null }));
   });
 
+  it('uses each selected compare card own data scope', () => {
+    const soil = makeCard({
+      cardId: 'soil',
+      cardType: 'soil',
+      scope: 'zone',
+      title: 'Soil Moisture',
+      defaultView: 'line-chart',
+      views: ['line-chart'],
+    });
+    const gateway = makeCard({
+      cardId: '0016C001F11766E7:gateway:hub',
+      cardType: 'gateway',
+      scope: 'gateway',
+      title: 'Gateway',
+      defaultView: 'status-overview',
+      views: ['status-overview'],
+      metadata: {
+        coverageConfidence: 'unknown',
+        gatewayDeviceEui: '0016C001F11766E7',
+      },
+    });
+    renderDesktopDetail([soil, gateway], soil, 'Zone A', { type: 'zone', zoneId: 12 });
+
+    fireEvent.click(screen.getByTestId('mode-compare'));
+
+    const compareRequests = vi.mocked(useHistoryCardData).mock.calls
+      .map((call) => call[0])
+      .filter((request) => request.cardId === soil.cardId || request.cardId === gateway.cardId);
+
+    expect(compareRequests).toEqual(expect.arrayContaining([
+      expect.objectContaining({ cardId: soil.cardId, scope: { type: 'zone', zoneId: 12 } }),
+      expect.objectContaining({ cardId: gateway.cardId, scope: { type: 'gateway', gatewayEui: '0016C001F11766E7' } }),
+    ]));
+  });
+
   it('clicking zoom-in (+) narrows the overview-window width', () => {
     const card = makeCard();
     renderDesktopDetail([card], card);

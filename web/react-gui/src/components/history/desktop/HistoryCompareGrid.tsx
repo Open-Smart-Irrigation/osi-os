@@ -20,7 +20,7 @@ const MAX_COMPARE_PANELS = 4;
 
 interface ComparePanelProps {
   card: HistoryCardSummary;
-  scope: HistoryCardDataScope;
+  scope: HistoryCardDataScope | null;
   selectedView: HistoryViewMode;
   viewport: HistoryViewport;
   rangeRequest: HistoryRangeSelection;
@@ -40,7 +40,7 @@ const ComparePanel: React.FC<ComparePanelProps> = ({
     range: rangeRequest,
     aggregation: desktopAggregationForView(selectedView),
     overlays: [],
-    enabled: Boolean(card.availability.available),
+    enabled: Boolean(card.availability.available && scope),
   });
 
   return (
@@ -74,6 +74,19 @@ export interface HistoryCompareGridProps {
   scope: HistoryCardDataScope;
   viewport: HistoryViewport;
   rangeRequest: HistoryRangeSelection;
+}
+
+function gatewayEuiForCard(card: HistoryCardSummary): string | null {
+  const gatewayEui = card.metadata.gatewayDeviceEui ?? card.metadata.gateway_device_eui ?? card.metadata.gatewayEui;
+  return typeof gatewayEui === 'string' && gatewayEui.trim() ? gatewayEui : null;
+}
+
+function scopeForCompareCard(card: HistoryCardSummary, baseScope: HistoryCardDataScope): HistoryCardDataScope | null {
+  if (baseScope.type === 'gateway') return baseScope;
+  if (card.scope !== 'gateway') return baseScope;
+
+  const gatewayEui = gatewayEuiForCard(card);
+  return gatewayEui ? { type: 'gateway', gatewayEui } : null;
 }
 
 function defaultSelectedIds(cards: HistoryCardSummary[]): string[] {
@@ -203,7 +216,7 @@ export const HistoryCompareGrid: React.FC<HistoryCompareGridProps> = ({
           <ComparePanel
             key={card.cardId}
             card={card}
-            scope={scope}
+            scope={scopeForCompareCard(card, scope)}
             selectedView={resolvedCompareView ?? ((card.defaultView ?? 'line-chart') as HistoryViewMode)}
             viewport={viewport}
             rangeRequest={rangeRequest}

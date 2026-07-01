@@ -19,27 +19,28 @@
       "retryCards": "Retry cards"
     },
     "desktop": {
-      "toolbarTitle": "Toolbar",
-      "modeLabel": "Desktop mode",
+      "toolbarTitle": "Barre d’outils",
+      "modeLabel": "Mode bureau",
       "modeFocus": "Focus",
-      "modeCompare": "Compare",
-      "viewSelectorLabel": "Card view",
-      "compareViewSelectorLabel": "Compare view",
+      "modeCompare": "Comparer",
+      "viewSelectorLabel": "Vue de la carte",
+      "compareViewSelectorLabel": "Vue de comparaison",
       "sourceSelectorLabel": "Sources",
-      "chartSurfaceLabel": "History chart, use arrow keys to pan and plus or minus to zoom",
-      "zoomIn": "Zoom in",
-      "zoomOut": "Zoom out",
-      "resetZoom": "Reset zoom",
-      "maxPanels": "Up to {{count}} comparison panels",
-      "singleMode": "Single",
-      "comparisonMode": "Comparison",
-      "addPanel": "Add panel {{title}}",
-      "removePanel": "Remove panel",
-      "panelLimitWarning": "Only {{count}} comparison panels can be shown on this edge gateway.",
-      "selectedTimestampNone": "No timestamp selected",
-      "selectedTimestamp": "Selected timestamp: {{timestamp}}",
-      "inspectorTitle": "Inspector",
-      "inspectorPlaceholder": "Select a timestamp or calendar cell to see interpretation, events, data quality, and advanced metadata."
+      "rangeOverviewLabel": "Aperçu de la période",
+      "chartSurfaceLabel": "Graphique d’historique, utilisez les flèches pour déplacer et plus ou moins pour zoomer",
+      "zoomIn": "Zoom avant",
+      "zoomOut": "Zoom arrière",
+      "resetZoom": "Réinitialiser le zoom",
+      "maxPanels": "Jusqu’à {{count}} panneaux de comparaison",
+      "singleMode": "Individuel",
+      "comparisonMode": "Comparaison",
+      "addPanel": "Ajouter le panneau {{title}}",
+      "removePanel": "Retirer le panneau",
+      "panelLimitWarning": "Seuls {{count}} panneaux de comparaison peuvent être affichés sur cette passerelle edge.",
+      "selectedTimestampNone": "Aucun horodatage sélectionné",
+      "selectedTimestamp": "Horodatage sélectionné : {{timestamp}}",
+      "inspectorTitle": "Inspecteur",
+      "inspectorPlaceholder": "Sélectionnez un horodatage ou une cellule du calendrier pour voir l’interprétation, les événements, la qualité des données et les métadonnées avancées."
     },
     "mobile": {
       "zoneLabel": "Zone",
@@ -518,7 +519,7 @@
     },
     "sourceFilter": {
       "label": "Source",
-      "all": "All"
+      "all": "Toutes"
     },
     "settings": {
       "open": "Open card settings",

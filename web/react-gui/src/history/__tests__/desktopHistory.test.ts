@@ -69,9 +69,22 @@ describe('desktopHistory helpers', () => {
 
   it('builds All plus display-safe source options for merged cards', () => {
     expect(desktopSourceOptions(card())).toEqual([
-      { key: null, label: 'All' },
+      { key: null, label: 'All', labelKey: 'history.sourceFilter.all' },
       { key: 'soil-src-one', label: 'Chameleon 1' },
       { key: 'soil-src-two', label: 'Chameleon 2' },
+    ]);
+  });
+
+  it('keeps duplicate-named source devices selectable by source key', () => {
+    expect(desktopSourceOptions(card({
+      sourceDevices: [
+        { name: 'Chameleon', typeId: 'DRAGINO_LSN50', role: 'soil', sourceKey: 'soil-src-one' },
+        { name: 'Chameleon', typeId: 'DRAGINO_LSN50', role: 'soil', sourceKey: 'soil-src-two' },
+      ],
+    }))).toEqual([
+      { key: null, label: 'All', labelKey: 'history.sourceFilter.all' },
+      { key: 'soil-src-one', label: 'Chameleon' },
+      { key: 'soil-src-two', label: 'Chameleon' },
     ]);
   });
 
@@ -84,7 +97,7 @@ describe('desktopHistory helpers', () => {
     }));
 
     expect(options).toEqual([
-      { key: null, label: 'All' },
+      { key: null, label: 'All', labelKey: 'history.sourceFilter.all' },
       { key: 'safe', label: 'Chameleon 1' },
     ]);
   });
@@ -97,6 +110,14 @@ describe('desktopHistory helpers', () => {
       'irrigation-response',
       'advanced',
     ]);
+  });
+
+  it('falls back to the card default view when the card type definition is unknown', () => {
+    expect(selectableDesktopViews(card({
+      cardType: 'legacy' as HistoryCardSummary['cardType'],
+      defaultView: 'line-chart',
+      views: ['line-chart'],
+    })).map((entry) => entry.view)).toEqual(['line-chart']);
   });
 
   it('chooses the card default view when it is selectable', () => {

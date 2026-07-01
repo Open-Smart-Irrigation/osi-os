@@ -5,6 +5,7 @@ import type { HistoryAggregationLevel, HistoryCardSummary, HistoryViewMode } fro
 export interface DesktopSourceOption {
   key: string | null;
   label: string;
+  labelKey?: string;
 }
 
 export interface DesktopViewOption {
@@ -73,7 +74,7 @@ export function desktopSourceOptions(card: HistoryCardSummary): DesktopSourceOpt
   const sources = (card.sourceDevices ?? []).reduce<DesktopSourceOption[]>((options, device) => {
     const key = cleanText(device.sourceKey);
     const label = safeHistoryLabel(device.name);
-    if (!key || !label || options.some((option) => option.key === key || option.label === label)) {
+    if (!key || !label || options.some((option) => option.key === key)) {
       return options;
     }
     options.push({ key, label });
@@ -81,11 +82,17 @@ export function desktopSourceOptions(card: HistoryCardSummary): DesktopSourceOpt
   }, []);
 
   if (sources.length === 0) return [];
-  return [{ key: null, label: 'All' }, ...sources];
+  return [{ key: null, label: 'All', labelKey: 'history.sourceFilter.all' }, ...sources];
 }
 
 export function selectableDesktopViews(card: HistoryCardSummary): DesktopViewOption[] {
   const definition = historyCardDefinitionsByType[card.cardType];
+  if (!definition) {
+    const fallbackViews = card.views.length > 0
+      ? card.views
+      : [card.defaultView];
+    return fallbackViews.map((view) => ({ view: view as HistoryViewMode, labelKey: `history.viewMode.${view}` }));
+  }
   const allowedViews = new Set<HistoryViewMode>(definition.views as readonly HistoryViewMode[]);
   const views = card.views.filter((view): view is HistoryViewMode => allowedViews.has(view));
   const resolved = views.length > 0 ? views : [card.defaultView as HistoryViewMode];

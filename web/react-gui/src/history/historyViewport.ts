@@ -24,12 +24,7 @@ export function zoomViewport(vp: HistoryViewport, bounds: ViewportBounds, anchor
 }
 
 export function panViewport(vp: HistoryViewport, bounds: ViewportBounds, deltaMs: number): HistoryViewport {
-  const span = vp.toMs - vp.fromMs;
-  let nextFrom = vp.fromMs + deltaMs;
-  if (nextFrom < bounds.minMs) nextFrom = bounds.minMs;
-  if (nextFrom + span > bounds.maxMs) nextFrom = bounds.maxMs - span;
-  if (nextFrom < bounds.minMs) nextFrom = bounds.minMs;
-  return { fromMs: nextFrom, toMs: nextFrom + span };
+  return clampSpanToBounds(vp.fromMs + deltaMs, vp.toMs + deltaMs, bounds);
 }
 
 export function resetViewport(bounds: ViewportBounds, defaultSpanMs: number): HistoryViewport {

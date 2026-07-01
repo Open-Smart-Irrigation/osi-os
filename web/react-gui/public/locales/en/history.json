@@ -26,6 +26,7 @@
       "viewSelectorLabel": "Card view",
       "compareViewSelectorLabel": "Compare view",
       "sourceSelectorLabel": "Sources",
+      "rangeOverviewLabel": "Time range overview",
       "chartSurfaceLabel": "History chart, use arrow keys to pan and plus or minus to zoom",
       "zoomIn": "Zoom in",
       "zoomOut": "Zoom out",

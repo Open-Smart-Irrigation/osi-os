@@ -370,10 +370,18 @@ export const HistoryCardDetailPage: React.FC = () => {
     ),
     [resolvedCard, routeScope, t],
   );
+  const desktopCards = useMemo(
+    () => (
+      routeScope?.type === 'gateway'
+        ? orderedRouteCards.map((card) => sanitizeGatewayRouteCard(t, card, routeScope.gatewayEui))
+        : orderedRouteCards
+    ),
+    [orderedRouteCards, routeScope, t],
+  );
   const [desktopSelectedCardId, setDesktopSelectedCardId] = useState<string | null>(null);
   const desktopSelectedCard = useMemo(
-    () => (desktopSelectedCardId ? (orderedRouteCards.find((c) => c.cardId === desktopSelectedCardId) ?? displayCard) : displayCard),
-    [desktopSelectedCardId, orderedRouteCards, displayCard],
+    () => (desktopSelectedCardId ? (desktopCards.find((c) => c.cardId === desktopSelectedCardId) ?? displayCard) : displayCard),
+    [desktopSelectedCardId, desktopCards, displayCard],
   );
   const desktopScope = desktopSelectedCard && routeScope ? scopeForCard(desktopSelectedCard, routeScope) : null;
   const [userSelectedView, setUserSelectedView] = useState<{ cardId: string; view: HistoryViewMode } | null>(null);
@@ -726,9 +734,6 @@ export const HistoryCardDetailPage: React.FC = () => {
   }
 
   if (isDesktop && desktopSelectedCard && desktopScope) {
-    const desktopCards = routeScope?.type === 'gateway'
-      ? orderedRouteCards.map((card) => sanitizeGatewayRouteCard(t, card, routeScope.gatewayEui))
-      : orderedRouteCards;
     return (
       <div className="flex h-screen flex-col overflow-hidden bg-[var(--bg)]">
         <HistoryDesktopDetail

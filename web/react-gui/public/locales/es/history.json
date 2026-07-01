@@ -19,27 +19,28 @@
       "retryCards": "Retry cards"
     },
     "desktop": {
-      "toolbarTitle": "Toolbar",
-      "modeLabel": "Desktop mode",
-      "modeFocus": "Focus",
-      "modeCompare": "Compare",
-      "viewSelectorLabel": "Card view",
-      "compareViewSelectorLabel": "Compare view",
-      "sourceSelectorLabel": "Sources",
-      "chartSurfaceLabel": "History chart, use arrow keys to pan and plus or minus to zoom",
-      "zoomIn": "Zoom in",
-      "zoomOut": "Zoom out",
-      "resetZoom": "Reset zoom",
-      "maxPanels": "Up to {{count}} comparison panels",
-      "singleMode": "Single",
-      "comparisonMode": "Comparison",
-      "addPanel": "Add panel {{title}}",
-      "removePanel": "Remove panel",
-      "panelLimitWarning": "Only {{count}} comparison panels can be shown on this edge gateway.",
-      "selectedTimestampNone": "No timestamp selected",
-      "selectedTimestamp": "Selected timestamp: {{timestamp}}",
+      "toolbarTitle": "Barra de herramientas",
+      "modeLabel": "Modo de escritorio",
+      "modeFocus": "Enfoque",
+      "modeCompare": "Comparar",
+      "viewSelectorLabel": "Vista de tarjeta",
+      "compareViewSelectorLabel": "Vista de comparación",
+      "sourceSelectorLabel": "Fuentes",
+      "rangeOverviewLabel": "Resumen del intervalo de tiempo",
+      "chartSurfaceLabel": "Gráfico de historial, use las flechas para desplazar y más o menos para acercar",
+      "zoomIn": "Acercar",
+      "zoomOut": "Alejar",
+      "resetZoom": "Restablecer zoom",
+      "maxPanels": "Hasta {{count}} paneles de comparación",
+      "singleMode": "Individual",
+      "comparisonMode": "Comparación",
+      "addPanel": "Añadir panel {{title}}",
+      "removePanel": "Quitar panel",
+      "panelLimitWarning": "Solo se pueden mostrar {{count}} paneles de comparación en esta pasarela edge.",
+      "selectedTimestampNone": "Ninguna marca de tiempo seleccionada",
+      "selectedTimestamp": "Marca de tiempo seleccionada: {{timestamp}}",
       "inspectorTitle": "Inspector",
-      "inspectorPlaceholder": "Select a timestamp or calendar cell to see interpretation, events, data quality, and advanced metadata."
+      "inspectorPlaceholder": "Seleccione una marca de tiempo o celda del calendario para ver interpretación, eventos, calidad de datos y metadatos avanzados."
     },
     "mobile": {
       "zoneLabel": "Zone",
@@ -518,7 +519,7 @@
     },
     "sourceFilter": {
       "label": "Source",
-      "all": "All"
+      "all": "Todo"
     },
     "settings": {
       "open": "Open card settings",

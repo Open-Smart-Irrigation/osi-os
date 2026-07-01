@@ -29,7 +29,12 @@ describe('historyViewport', () => {
     const vp = { fromMs: 100_000, toMs: 200_000 };
     const next = panViewport(vp, bounds, -500_000);
     expect(next.fromMs).toBe(0);
-    expect(next.toMs).toBe(100_000);
+    expect(next.toMs).toBe(MIN_SPAN_MS);
+  });
+
+  it('pans a viewport wider than the bounds without returning out-of-bounds dates', () => {
+    const next = panViewport({ fromMs: -100_000, toMs: 1_200_000 }, bounds, 50_000);
+    expect(next).toEqual({ fromMs: 0, toMs: 1_000_000 });
   });
 
   it('reset returns the default range clamped to bounds', () => {
