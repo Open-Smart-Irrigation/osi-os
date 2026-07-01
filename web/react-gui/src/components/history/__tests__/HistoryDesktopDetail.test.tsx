@@ -121,6 +121,11 @@ function renderDesktopDetail(
   );
 }
 
+function lastHistoryCardDataRequest() {
+  const calls = vi.mocked(useHistoryCardData).mock.calls;
+  return calls[calls.length - 1]?.[0];
+}
+
 describe('HistoryDesktopDetail', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -330,7 +335,7 @@ describe('HistoryDesktopDetail', () => {
       .map((call) => call[0])
       .filter((request) => request.cardId === 'env');
     expect(envRequests).not.toContainEqual(expect.objectContaining({ view: 'growth-timeline' }));
-    expect(envRequests.at(-1)).toEqual(expect.objectContaining({ view: 'line-chart' }));
+    expect(envRequests[envRequests.length - 1]).toEqual(expect.objectContaining({ view: 'line-chart' }));
   });
 
   it('uses Advanced View when the card-specific Advanced button is selected', () => {
@@ -356,7 +361,7 @@ describe('HistoryDesktopDetail', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Daily Min/Max' }));
 
     expect(screen.getByTestId('card-visualization')).toHaveAttribute('data-selected-view', 'daily-min-max');
-    expect(vi.mocked(useHistoryCardData).mock.calls.at(-1)?.[0]).toEqual(
+    expect(lastHistoryCardDataRequest()).toEqual(
       expect.objectContaining({ view: 'daily-min-max', aggregation: 'daily' }),
     );
   });
@@ -390,7 +395,7 @@ describe('HistoryDesktopDetail', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Chameleon 2' }));
 
-    const lastCall = vi.mocked(useHistoryCardData).mock.calls.at(-1)?.[0];
+    const lastCall = lastHistoryCardDataRequest();
     expect(lastCall).toEqual(expect.objectContaining({ sourceKey: 'soil-src-two' }));
     expect(screen.getByRole('button', { name: 'Chameleon 2' })).toHaveAttribute('aria-pressed', 'true');
   });
@@ -425,7 +430,7 @@ describe('HistoryDesktopDetail', () => {
     );
 
     fireEvent.click(screen.getByRole('button', { name: 'Chameleon 2' }));
-    expect(vi.mocked(useHistoryCardData).mock.calls.at(-1)?.[0]).toEqual(expect.objectContaining({ sourceKey: 'soil-src-two' }));
+    expect(lastHistoryCardDataRequest()).toEqual(expect.objectContaining({ sourceKey: 'soil-src-two' }));
 
     rerender(
       <SWRConfig value={{ provider: () => new Map(), dedupingInterval: 0 }}>
@@ -434,7 +439,7 @@ describe('HistoryDesktopDetail', () => {
     );
 
     expect(screen.queryByRole('button', { name: 'Chameleon 2' })).not.toBeInTheDocument();
-    expect(vi.mocked(useHistoryCardData).mock.calls.at(-1)?.[0]).toEqual(expect.objectContaining({ sourceKey: null }));
+    expect(lastHistoryCardDataRequest()).toEqual(expect.objectContaining({ sourceKey: null }));
   });
 
   it('clicking zoom-in (+) narrows the overview-window width', () => {

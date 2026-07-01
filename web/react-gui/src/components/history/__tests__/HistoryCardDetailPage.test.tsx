@@ -194,6 +194,20 @@ function firstZoneCardDataRequest() {
   return historyAPIMock.getZoneCardData.mock.calls[0]?.[2];
 }
 
+function calendarFixtureDateForRange(from: string | null | undefined, to: string | null | undefined): string {
+  const parsed = Date.parse(from ?? to ?? '');
+  const base = Number.isFinite(parsed) ? new Date(parsed) : new Date('2026-06-01T00:00:00.000Z');
+  return new Date(Date.UTC(base.getUTCFullYear(), base.getUTCMonth(), 12)).toISOString().slice(0, 10);
+}
+
+function calendarMonthLabelForDate(date: string): string {
+  return new Intl.DateTimeFormat('en-US', {
+    month: 'long',
+    year: 'numeric',
+    timeZone: 'UTC',
+  }).format(new Date(`${date}T00:00:00.000Z`));
+}
+
 function preparePointerTarget(element: HTMLElement, scrollTop = 0) {
   Object.defineProperty(element, 'getBoundingClientRect', {
     configurable: true,
@@ -524,6 +538,12 @@ describe('History card detail route', () => {
     renderAppAtRoute('/history/zones/12/cards/soil-card%3Aroot-zone');
 
     expect(await screen.findByRole('heading', { level: 1, name: 'Soil Moisture North Block' })).toBeInTheDocument();
+    await waitFor(() => {
+      expect(historyAPI.getZoneCardData).toHaveBeenCalled();
+    });
+    await act(async () => {
+      await Promise.resolve();
+    });
 
     fireEvent.click(screen.getByRole('button', { name: 'Export' }));
     expect(await screen.findByRole('dialog', { name: 'Export CSV' }, { timeout: 4000 })).toBeInTheDocument();
@@ -1030,9 +1050,7 @@ describe('History card detail route', () => {
         timezone: 'Europe/Zurich',
         days: [
           {
-            date: request.range.label === 'custom' && request.range.from?.startsWith('2026-07')
-              ? '2026-07-12'
-              : '2026-06-12',
+            date: calendarFixtureDateForRange(request.range.from, request.range.to),
             state: 'optimal',
             coveragePct: 96,
             coverageConfidence: 'configured',
@@ -1048,7 +1066,9 @@ describe('History card detail route', () => {
     renderAppAtRoute('/history/zones/12/cards/soil-card%3Aroot-zone');
 
     expect(await screen.findByRole('grid')).toBeInTheDocument();
-    expect(screen.getByTestId('view-mode-label')).toHaveTextContent('Calendar - June 2026');
+    const initialRequest = historyAPIMock.getZoneCardData.mock.calls[0]?.[2];
+    const initialDate = calendarFixtureDateForRange(initialRequest?.range.from, initialRequest?.range.to);
+    expect(screen.getByTestId('view-mode-label')).toHaveTextContent(`Calendar - ${calendarMonthLabelForDate(initialDate)}`);
     await act(async () => {
       await Promise.resolve();
     });
@@ -1058,6 +1078,28 @@ describe('History card detail route', () => {
     dispatchTouch(surface, 'touchmove', [{ clientX: 120, clientY: 164 }]);
     dispatchTouch(surface, 'touchend', []);
 
+    const initialFrom = Date.parse(initialRequest?.range.from ?? '');
+    const initialMonth = new Date(initialFrom);
+    const expectedNextMonthStart = new Date(Date.UTC(
+      initialMonth.getUTCFullYear(),
+      initialMonth.getUTCMonth() + 1,
+      1,
+      0,
+      0,
+      0,
+      0,
+    ));
+    const expectedNextMonthEnd = new Date(Date.UTC(
+      expectedNextMonthStart.getUTCFullYear(),
+      expectedNextMonthStart.getUTCMonth() + 1,
+      1,
+      0,
+      0,
+      0,
+      0,
+    ) - 1);
+    const nextDate = calendarFixtureDateForRange(expectedNextMonthStart.toISOString(), expectedNextMonthEnd.toISOString());
+
     await waitFor(() => {
       expect(historyAPI.getZoneCardData).toHaveBeenLastCalledWith(
         12,
@@ -1066,14 +1108,14 @@ describe('History card detail route', () => {
           view: 'calendar',
           range: expect.objectContaining({
             label: 'custom',
-            from: '2026-07-01T00:00:00.000Z',
-            to: '2026-07-31T23:59:59.999Z',
+            from: expectedNextMonthStart.toISOString(),
+            to: expectedNextMonthEnd.toISOString(),
           }),
         }),
       );
     });
-    expect(await screen.findByTestId('calendar-cell-2026-07-12')).toBeInTheDocument();
-    expect(screen.getByTestId('view-mode-label')).toHaveTextContent('Calendar - July 2026');
+    expect(await screen.findByTestId(`calendar-cell-${nextDate}`)).toBeInTheDocument();
+    expect(screen.getByTestId('view-mode-label')).toHaveTextContent(`Calendar - ${calendarMonthLabelForDate(nextDate)}`);
   });
 
   it('opens an inspector sheet on long press and returns focus to the visualization when closed', async () => {
