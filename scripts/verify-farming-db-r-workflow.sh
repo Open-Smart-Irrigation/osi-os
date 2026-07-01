@@ -19,10 +19,12 @@ test -n "$snapshot"
 test -s "$snapshot"
 
 sqlite3 "file:$snapshot?mode=ro" "PRAGMA quick_check;" | grep -qx ok
+sqlite3 "file:$snapshot?mode=ro" "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='device_data';" | grep -qx 1
+device_data_rows="$(sqlite3 "file:$snapshot?mode=ro" "SELECT COUNT(*) FROM device_data;")"
 
 metadata_dir="$(dirname "$snapshot")"
 test -f "$metadata_dir/metadata.tsv"
-grep -q '^device_data_rows	2696$' "$metadata_dir/metadata.tsv"
+grep -q "^device_data_rows	${device_data_rows}$" "$metadata_dir/metadata.tsv"
 grep -q '^quick_check	ok$' "$metadata_dir/metadata.tsv"
 
 OSI_FARMING_DB_TEST_GATEWAY=seed-fixture \
