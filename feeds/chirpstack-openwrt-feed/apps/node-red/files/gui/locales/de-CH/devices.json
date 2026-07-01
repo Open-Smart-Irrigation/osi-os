@@ -24,7 +24,7 @@
     "failed": "Gerät konnte nicht zugewiesen werden"
   },
   "createZoneModal": {
-    "title": "Zone erstellen",
+    "title": "Bewässerungszone erstellen",
     "zoneName": "Zonenname",
     "zoneNamePlaceholder": "z.B. Garten A, Nordfeld, Obstgarten 1",
     "zoneNameRequired": "Zonenname ist erforderlich",

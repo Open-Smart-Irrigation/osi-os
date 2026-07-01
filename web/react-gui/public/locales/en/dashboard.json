@@ -1,5 +1,5 @@
 {
-  "title": "AgroLink Dashboard",
+  "title": "Open Smart Irrigation Dashboard",
   "welcome": "Welcome, {{username}}",
   "add": "Add",
   "addMenu": {
@@ -17,13 +17,13 @@
   "autoRefresh": "Auto-refreshing every 10 seconds",
   "emptyState": {
     "title": "Welcome to your farm!",
-    "subtitle": "Get started by creating a zone and adding devices",
-    "createZone": "Create Zone",
+    "subtitle": "Get started by creating an irrigation zone and adding devices",
+    "createZone": "Create Irrigation Zone",
     "addDevice": "Add Device"
   },
-  "irrigationZones": "Zones",
+  "irrigationZones": "Irrigation Zones",
   "unassignedDevices": "Unassigned Devices",
-  "unassignedSubtitle": "These devices are not assigned to any zone",
+  "unassignedSubtitle": "These devices are not assigned to any irrigation zone",
   "soilSensors": "Soil Sensors",
   "smartValves": "Smart Valves"
 }

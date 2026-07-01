@@ -1,9 +1,9 @@
 import React, { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
+import osiLogo from '../assets/osi_logo.png';
 import { useTranslation } from 'react-i18next';
 import { LanguageSwitcher } from '../components/LanguageSwitcher';
-import { AGROLINK_BRAND, resolveAgroscopeAssets } from '../branding/agrolink';
 
 export const Login: React.FC = () => {
   const [username, setUsername] = useState('');
@@ -12,8 +12,7 @@ export const Login: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
   const { login } = useAuth();
-  const { t, i18n } = useTranslation('auth');
-  const { logoHoch } = resolveAgroscopeAssets(i18n.language);
+  const { t } = useTranslation('auth');
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -34,15 +33,11 @@ export const Login: React.FC = () => {
     <div className="relative min-h-screen flex items-center justify-center bg-[var(--bg)] px-4">
       <div className="max-w-md w-full bg-[var(--card)] rounded-2xl shadow-2xl border border-[var(--border)] p-6">
         <div className="text-center mb-5">
-          <img
-            src={logoHoch}
-            alt="Agroscope"
-            className="mx-auto mb-5 h-24 w-auto max-w-full object-contain"
-          />
+          <img src={osiLogo} alt="OSI OS Logo" className="mx-auto mb-4 h-14 w-14" />
           <h1 className="text-3xl font-bold text-[var(--text)] mb-2 high-contrast-text">
-            {AGROLINK_BRAND.productName}
+            OSI OS v0.6.5 (Alpha)
           </h1>
-          <p className="text-[var(--text-secondary)] text-base">{AGROLINK_BRAND.loginSubtitle}</p>
+          <p className="text-[var(--text-secondary)] text-base">{t('login.subtitle')}</p>
         </div>
 
         {error && (

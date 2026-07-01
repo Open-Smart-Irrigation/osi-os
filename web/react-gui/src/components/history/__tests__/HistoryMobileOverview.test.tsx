@@ -22,7 +22,7 @@ const { translateForTest } = vi.hoisted(() => {
     'history.shell.featureFlagFailed': 'The feature flag request failed. The legacy dashboard is still available.',
     'history.shell.zonesFailedTitle': 'History zones failed to load',
     'history.shell.noZonesTitle': 'No zones yet',
-    'history.shell.noZonesBody': 'Create a zone from the legacy dashboard before opening thematic history.',
+    'history.shell.noZonesBody': 'Create an irrigation zone from the legacy dashboard before opening thematic history.',
     'history.shell.cardsFailed': 'History cards failed to load.',
     'history.shell.retryCards': 'Retry cards',
     'history.mobile.actions': 'History actions',

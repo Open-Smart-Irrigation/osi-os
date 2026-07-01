@@ -24,7 +24,7 @@
     "failed": "Impossible d'assigner l'appareil"
   },
   "createZoneModal": {
-    "title": "Créer une zone",
+    "title": "Créer une zone d'irrigation",
     "zoneName": "Nom de la zone",
     "zoneNamePlaceholder": "ex. Jardin A, Champ Nord, Verger 1",
     "zoneNameRequired": "Le nom de la zone est requis",
@@ -93,7 +93,7 @@
       "raw": "Brut",
       "hourly": "Horaire",
       "daily": "Quotidien",
-      "download": "Télécharger le CSV",
+      "download": "Télécharger CSV",
       "downloading": "Préparation...",
       "rangeSummary": "{{from}} à {{to}}",
       "error": "Échec de l'export",
