@@ -15,7 +15,9 @@
                 "CLOSE",
                 "SET_CHAMELEON_CONFIG",
                 "REGISTER_DEVICE",
-                "REBOOT_DEVICE"
+                "REBOOT_DEVICE",
+                "REMOVE_DEVICE_FROM_ZONE",
+                "UNCLAIM_DEVICE"
             ]
         },
         "device_eui": {"type": "string", "pattern": "^[0-9A-F]{16}$"},

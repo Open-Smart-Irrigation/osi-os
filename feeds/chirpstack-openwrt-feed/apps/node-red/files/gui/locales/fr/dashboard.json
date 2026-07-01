@@ -1,8 +1,16 @@
 {
   "title": "Tableau de bord Open Smart Irrigation",
   "welcome": "Bienvenue, {{username}}",
-  "addZone": "Ajouter une zone",
-  "addDevice": "Ajouter un appareil",
+  "add": "Ajouter",
+  "addMenu": {
+    "zone": "Ajouter une zone",
+    "device": "Ajouter un appareil"
+  },
+  "data": "Données",
+  "account": "Compte",
+  "accountMenu": {
+    "osiServer": "OSI Server"
+  },
   "logout": "Déconnexion",
   "loading": "Chargement du tableau de bord...",
   "failedToLoad": "Échec du chargement des données",

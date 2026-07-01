@@ -29,7 +29,7 @@
     "zoneNamePlaceholder": "e.g., Garden A, North Field, Orchard 1",
     "zoneNameRequired": "Zone name is required",
     "creating": "Creating...",
-    "submit": "Create Zone",
+    "submit": "Create Irrigation Zone",
     "failed": "Failed to create zone"
   },
   "kiwiSensor": {
@@ -112,7 +112,23 @@
     "noDevices": "No devices in this zone yet",
     "assignFirst": "Assign First Device",
     "devicesInZone": "Devices in this zone:",
-    "data": "Data"
+    "data": "Data",
+    "export": {
+      "title": "Data export",
+      "selectRange": "Pick a date range to download zone data.",
+      "from": "From",
+      "to": "To",
+      "granularity": "Granularity",
+      "raw": "Raw",
+      "hourly": "Hourly",
+      "daily": "Daily",
+      "download": "Download CSV",
+      "downloading": "Preparing...",
+      "rangeSummary": "{{from}} to {{to}}",
+      "error": "Export failed",
+      "tooLarge": "Range too large. Choose a coarser granularity.",
+      "fullExport": "Full export"
+    }
   },
   "schedule": {
     "irrigationSchedule": "Irrigation Schedule",

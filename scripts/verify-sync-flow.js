@@ -1537,6 +1537,7 @@ expectIncludesById('cmd-type-registry', 'REMOVE_DEVICE_FROM_ZONE:', 'allows clou
 expectIncludesById('cmd-type-registry', 'UNCLAIM_DEVICE:', 'allows cloud device-unclaim commands through the pending-command guard');
 expectIncludes('Reject Indefinite Open', 'REMOVE_DEVICE_FROM_ZONE:', 'fallback command registry allows zone-detach commands before startup registry loads');
 expectIncludes('Reject Indefinite Open', 'UNCLAIM_DEVICE:', 'fallback command registry allows device-unclaim commands before startup registry loads');
+expectIncludes('Build UPDATE SQL', 'cmd.device_eui', 'accepts schema-shaped device_eui payloads for device-scoped SQL commands');
 expectWireById('sync-pending-split', 'reject-indefinite-open', 'routes pending cloud commands through the indefinite-open guard before the replay ledger');
 expectWireById('sync-force-build', 'reject-indefinite-open', 'routes force-sync replayed commands through the indefinite-open guard before the replay ledger');
 expectWireById('reject-indefinite-open', 'command-dedupe-dispatch', 'routes guarded cloud commands through the replay ledger');
