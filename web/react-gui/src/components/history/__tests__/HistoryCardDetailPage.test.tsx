@@ -68,6 +68,17 @@ const { translateForTest } = vi.hoisted(() => {
     'history.cardFrame.cardDataUnknownError': 'Unknown error',
     'history.cardType.soil': 'Soil',
     'history.cardType.gateway': 'Gateway',
+    'history.desktop.modeLabel': 'View mode',
+    'history.desktop.modeFocus': 'Focus',
+    'history.desktop.modeCompare': 'Compare',
+    'history.desktop.viewSelectorLabel': 'Card view',
+    'history.desktop.compareViewSelectorLabel': 'Compare view',
+    'history.desktop.sourceSelectorLabel': 'Sources',
+    'history.desktop.chartSurfaceLabel': 'History chart, use arrow keys to pan and plus or minus to zoom',
+    'history.desktop.zoomIn': 'Zoom in',
+    'history.desktop.zoomOut': 'Zoom out',
+    'history.desktop.resetZoom': 'Reset zoom',
+    'history.desktop.railLabel': 'History cards',
     'history.viewMode.soil-profile': 'Soil Profile',
     'history.viewMode.line-chart': 'Line Chart',
     'history.viewMode.daily-min-max': 'Daily Min/Max',
@@ -194,6 +205,20 @@ function firstZoneCardDataRequest() {
   return historyAPIMock.getZoneCardData.mock.calls[0]?.[2];
 }
 
+function calendarFixtureDateForRange(from: string | null | undefined, to: string | null | undefined): string {
+  const parsed = Date.parse(from ?? to ?? '');
+  const base = Number.isFinite(parsed) ? new Date(parsed) : new Date('2026-06-01T00:00:00.000Z');
+  return new Date(Date.UTC(base.getUTCFullYear(), base.getUTCMonth(), 12)).toISOString().slice(0, 10);
+}
+
+function calendarMonthLabelForDate(date: string): string {
+  return new Intl.DateTimeFormat('en-US', {
+    month: 'long',
+    year: 'numeric',
+    timeZone: 'UTC',
+  }).format(new Date(`${date}T00:00:00.000Z`));
+}
+
 function preparePointerTarget(element: HTMLElement, scrollTop = 0) {
   Object.defineProperty(element, 'getBoundingClientRect', {
     configurable: true,
@@ -280,6 +305,19 @@ function mockOrientation(isLandscape: boolean) {
     writable: true,
     value: vi.fn().mockImplementation((query: string) => ({
       matches: isLandscape && query === '(orientation: landscape)',
+      media: query,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    })),
+  });
+}
+
+function mockViewport({ isDesktop = false, isLandscape = false }: { isDesktop?: boolean; isLandscape?: boolean }) {
+  Object.defineProperty(window, 'matchMedia', {
+    configurable: true,
+    writable: true,
+    value: vi.fn().mockImplementation((query: string) => ({
+      matches: (isDesktop && query.includes('min-width')) || (isLandscape && query === '(orientation: landscape)'),
       media: query,
       addEventListener: vi.fn(),
       removeEventListener: vi.fn(),
@@ -525,6 +563,12 @@ describe('History card detail route', () => {
     renderAppAtRoute('/history/zones/12/cards/soil-card%3Aroot-zone');
 
     expect(await screen.findByRole('heading', { level: 1, name: 'Soil Moisture North Block' })).toBeInTheDocument();
+    await waitFor(() => {
+      expect(historyAPI.getZoneCardData).toHaveBeenCalled();
+    });
+    await act(async () => {
+      await Promise.resolve();
+    });
 
     fireEvent.click(screen.getByRole('button', { name: 'Export' }));
     expect(await screen.findByRole('dialog', { name: 'Export CSV' }, { timeout: 4000 })).toBeInTheDocument();
@@ -615,6 +659,39 @@ describe('History card detail route', () => {
     expect(historyAPI.getZoneCards).not.toHaveBeenCalled();
     expect(historyAPI.markZoneCardOpened).not.toHaveBeenCalled();
     expect(screen.queryByText('0016C001F11766E7')).not.toBeInTheDocument();
+  });
+
+  it('keeps selected desktop gateway cards on the sanitized data path', async () => {
+    mockViewport({ isDesktop: true });
+    vi.mocked(historyAPIMock.getGatewayCards).mockResolvedValue({
+      gatewayEui: '0016C001F11766E7',
+      generatedAt: '2026-05-31T10:00:00Z',
+      cards: [
+        gatewayCard({
+          cardId: '0016C001F11766E7:gateway:hub',
+          title: 'Primary gateway',
+          subtitle: 'Hub status',
+        }),
+        gatewayCard({
+          cardId: '0016C001F11766E7:gateway:secondary',
+          title: 'Gateway 0016C001F11766E7',
+          subtitle: 'Hub 0016C001F11766E7',
+          sourceLabels: ['0016C001F11766E7'],
+        }),
+      ],
+    });
+
+    renderAppAtRoute('/history/gateways/0016C001F11766E7/cards/0016C001F11766E7%3Agateway%3Ahub');
+
+    await waitFor(() => {
+      expect(screen.getAllByText('Primary gateway').length).toBeGreaterThan(0);
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Gateway' }));
+
+    await waitFor(() => {
+      expect(screen.getAllByText('Gateway').length).toBeGreaterThan(0);
+    });
+    expect(screen.queryByText(/0016C001F11766E7/)).not.toBeInTheDocument();
   });
 
   it('header shows source names without back button or visible History text', async () => {
@@ -1034,9 +1111,7 @@ describe('History card detail route', () => {
         timezone: 'Europe/Zurich',
         days: [
           {
-            date: request.range.label === 'custom' && request.range.from?.startsWith('2026-07')
-              ? '2026-07-12'
-              : '2026-06-12',
+            date: calendarFixtureDateForRange(request.range.from, request.range.to),
             state: 'optimal',
             coveragePct: 96,
             coverageConfidence: 'configured',
@@ -1052,7 +1127,9 @@ describe('History card detail route', () => {
     renderAppAtRoute('/history/zones/12/cards/soil-card%3Aroot-zone');
 
     expect(await screen.findByRole('grid')).toBeInTheDocument();
-    expect(screen.getByTestId('view-mode-label')).toHaveTextContent('Calendar - June 2026');
+    const initialRequest = historyAPIMock.getZoneCardData.mock.calls[0]?.[2];
+    const initialDate = calendarFixtureDateForRange(initialRequest?.range.from, initialRequest?.range.to);
+    expect(screen.getByTestId('view-mode-label')).toHaveTextContent(`Calendar - ${calendarMonthLabelForDate(initialDate)}`);
     await act(async () => {
       await Promise.resolve();
     });
@@ -1062,6 +1139,28 @@ describe('History card detail route', () => {
     dispatchTouch(surface, 'touchmove', [{ clientX: 120, clientY: 164 }]);
     dispatchTouch(surface, 'touchend', []);
 
+    const initialFrom = Date.parse(initialRequest?.range.from ?? '');
+    const initialMonth = new Date(initialFrom);
+    const expectedNextMonthStart = new Date(Date.UTC(
+      initialMonth.getUTCFullYear(),
+      initialMonth.getUTCMonth() + 1,
+      1,
+      0,
+      0,
+      0,
+      0,
+    ));
+    const expectedNextMonthEnd = new Date(Date.UTC(
+      expectedNextMonthStart.getUTCFullYear(),
+      expectedNextMonthStart.getUTCMonth() + 1,
+      1,
+      0,
+      0,
+      0,
+      0,
+    ) - 1);
+    const nextDate = calendarFixtureDateForRange(expectedNextMonthStart.toISOString(), expectedNextMonthEnd.toISOString());
+
     await waitFor(() => {
       expect(historyAPI.getZoneCardData).toHaveBeenLastCalledWith(
         12,
@@ -1070,14 +1169,14 @@ describe('History card detail route', () => {
           view: 'calendar',
           range: expect.objectContaining({
             label: 'custom',
-            from: '2026-07-01T00:00:00.000Z',
-            to: '2026-07-31T23:59:59.999Z',
+            from: expectedNextMonthStart.toISOString(),
+            to: expectedNextMonthEnd.toISOString(),
           }),
         }),
       );
     });
-    expect(await screen.findByTestId('calendar-cell-2026-07-12')).toBeInTheDocument();
-    expect(screen.getByTestId('view-mode-label')).toHaveTextContent('Calendar - July 2026');
+    expect(await screen.findByTestId(`calendar-cell-${nextDate}`)).toBeInTheDocument();
+    expect(screen.getByTestId('view-mode-label')).toHaveTextContent(`Calendar - ${calendarMonthLabelForDate(nextDate)}`);
   });
 
   it('opens an inspector sheet on long press and returns focus to the visualization when closed', async () => {

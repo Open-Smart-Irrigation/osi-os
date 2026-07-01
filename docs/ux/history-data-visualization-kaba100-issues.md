@@ -13,6 +13,262 @@ This document records the first live-test issue cluster for the new OSI OS Histo
 
 ## Resolution status
 
+Status as of 2026-06-07 on desktop branch `feat/history-desktop-mode`:
+
+- Deployed GUI-only asset on kaba100: `assets/index-aqwOWdjh.js`.
+- Deployment method: static tar extract into `/usr/lib/node-red/gui/` only.
+- Safety confirmation: `/data/db/farming.db`, DB sidecars, Node-RED flows, and Node-RED config were not touched during this desktop GUI deployment.
+- Product decision: Zone B remains one merged `Soil Moisture` thematic card; desktop must expose `All` / per-source controls inside that card instead of splitting Soil into multiple cards.
+- Desktop route under test: `http://100.93.68.86:1880/gui/#/history/zones/12` and `#/history/zones/3`.
+- Browser QA artifacts:
+  - `/home/phil/playwright-osi/screenshots-desktop-gui-2026-06-07/desktop-zone-b-focus.png`
+  - `/home/phil/playwright-osi/screenshots-desktop-gui-2026-06-07/desktop-zone-b-compare.png`
+  - `/home/phil/playwright-osi/screenshots-desktop-gui-2026-06-07/mobile-zone-b-history.png`
+  - `/home/phil/playwright-osi/screenshots-desktop-debug-2026-06-07/zone-a-focus.png`
+
+### Desktop issue 2026-06-07-A - Desktop has no card-specific view selector
+
+Severity: S0 for desktop usability
+
+Symptom:
+
+- Zone B desktop detail only shows the default `Soil Profile` / soil layer view.
+- There is no visible control to switch Soil to `Line Chart`, `Calendar`, `Irrigation Response`, or `Advanced`.
+- The header contains only `Focus | Compare`, range presets, and zoom buttons.
+
+Code evidence:
+
+- `HistoryDesktopDetail` initializes the selected view but never exposes a setter:
+
+```ts
+const [selectedView] = useState<HistoryViewMode>(defaultView);
+```
+
+- The desktop header renders mode, range, and zoom controls only.
+- `HistoryCardDetailPage` has mobile view-selection logic, but desktop does not reuse it.
+
+Root cause:
+
+Desktop mode treats `selectedView` as a fixed default instead of a card-specific user state. This conflicts with the UX spec, which requires card-specific view modes and no global view-mode selector.
+
+Required fix:
+
+- Add a desktop card-specific view selector to `HistoryDesktopDetail`.
+- The selector must use `selectedCard.views`, filtered through the existing card definitions, and reset to the selected card default when the user changes cards.
+- Wire `selectedView` into:
+  - the card data request;
+  - compare-panel defaults;
+  - `HistoryCardVisualization`;
+  - Advanced View data loading when `selectedView === 'advanced'`.
+
+Acceptance criteria:
+
+- Zone B Soil desktop exposes `Soil Profile`, `Line Chart`, `Calendar`, `Irrigation Response`, and `Advanced`.
+- Switching views fetches/renders the matching card data without leaving the route.
+- Changing cards resets the active view to the new card's default unless a saved preference is explicitly introduced.
+
+### Desktop issue 2026-06-07-B - Recharts desktop views collapse to zero height
+
+Severity: S0 for desktop chart visibility
+
+Symptom:
+
+- Zone A desktop detail appears blank, but there is no user-visible error and no console error.
+- Compare mode panels can show headers but no chart content.
+- Playwright DOM evidence for Zone A focus:
+  - `desktop-chart-surface`: height `805px`.
+  - chart region: height `20px`.
+  - `.recharts-responsive-container`: height `0px`.
+  - no `svg` and no Recharts wrapper are mounted.
+
+Live API evidence:
+
+- Zone A card data endpoints return valid series:
+  - Dendro cards return 3-4 series and hundreds of points for 48h/7D.
+  - Environment card returns `ext_temperature_c` series with hundreds of points.
+- Therefore the blank view is not caused by missing backend data.
+
+Code evidence:
+
+- `HistoryDesktopDetail` renders the visualization directly inside a non-flex block container:
+
+```tsx
+<div data-testid="desktop-chart-surface" className="relative min-h-0 flex-1 ...">
+  <HistoryCardVisualization ... />
+</div>
+```
+
+- Recharts-based visualization roots use `flex-1` and nested `ResponsiveContainer height="100%"`, for example `DendroGrowthTimelineView`, `DendroLineChartView`, `EnvironmentLineChartView`, `DailyMinMaxView`, and `SoilLineChartView`.
+- `flex-1` on a child has no useful effect when the parent is not a flex container, so the nested `ResponsiveContainer` receives zero height.
+
+Root cause:
+
+The desktop chart surface does not provide a flex/height contract that Recharts views require. Recharts silently renders no SVG when its responsive container has zero height, which explains the blank UI with no error.
+
+Required fix:
+
+- Make the desktop focus chart surface a flex column container.
+- Wrap `HistoryCardVisualization` in a `min-h-0 flex-1` container, or make the surface itself provide the `flex flex-col` contract expected by chart views.
+- Apply the same height contract to `HistoryCompareGrid` panel visualization wrappers.
+- Do not paper over this by adding arbitrary fixed chart heights to each individual visualization unless a shared surface contract proves insufficient.
+
+Acceptance criteria:
+
+- On Zone A desktop focus, `.recharts-responsive-container` has non-zero height and a chart `svg` is mounted.
+- Dendro Growth Timeline and Environment Line Chart render visible axes/series.
+- Compare mode renders 2-4 nonblank panels when the selected cards have data.
+
+### Desktop issue 2026-06-07-C - Desktop viewport bounds can exceed live data bounds
+
+Severity: S1
+
+Symptom:
+
+- Zone B desktop 24h/Season can produce overview styles like `left=-176%` and `width=276%`.
+- After clicking zoom in, the overview clamps to `left=0%`, `width=100%`.
+- Zoom out and brush dragging then become no-ops.
+
+Live evidence:
+
+- Zone B data is recent but narrower than the requested display window.
+- Initial viewport and preset ranges are based on `Date.now()`, while `effectiveBounds` is replaced by data-derived min/max when data loads.
+- When the requested viewport is wider than the returned data extent, the overview math computes negative/oversized percentages.
+
+Root cause:
+
+`effectiveBounds` is allowed to shrink to the data extent, while `viewport` can remain the larger requested date range. The brush/zoom layer then receives inconsistent bounds and viewport state.
+
+Required fix:
+
+- Keep request-range bounds and visible viewport in one coherent model.
+- Recommended MVP fix: compute `effectiveBounds` as the union of requested bounds and derived data bounds, not the derived data bounds alone.
+- Clamp viewport only against bounds that include the selected requested window.
+- Use the selected preset/viewport range consistently in the API request; do not let `bounds`, `viewport`, and `activePreset` diverge silently.
+
+Acceptance criteria:
+
+- Overview window percentages stay within `0..100%` for 24h, 7D, 30D, and Season.
+- Zoom in, zoom out, reset, and brush drag all change state when a smaller-than-full viewport exists.
+- No negative or greater-than-100% overview style is produced in normal operation.
+
+### Desktop issue 2026-06-07-D - Zone B source state is not visible enough
+
+Severity: S1
+
+Symptom:
+
+- Zone B has two assigned Chameleon sources, but desktop shows one `Soil Moisture` card and no source selector.
+- The API returns `sourceDeviceCount: 2`, `sourceLabels: ["Chameleon 1", "Chameleon 2"]`, and source devices with display-safe names.
+- Per-source data currently differs:
+  - `Chameleon 1` returns SWT series/profiles.
+  - `Chameleon 2` returns no SWT series/profiles in the sampled 7D range.
+
+Live device evidence:
+
+```json
+{
+  "name": "Chameleon 2",
+  "last_seen": "2026-06-07T09:20:09.036Z",
+  "calibration_status": "pending",
+  "swt": [null, null, null],
+  "chameleon_i2c_missing": 1,
+  "chameleon_array_id": null
+}
+```
+
+```json
+{
+  "name": "Chameleon 1",
+  "last_seen": "2026-06-07T09:22:55.602Z",
+  "calibration_status": "calibrated",
+  "swt": [6.52, 7.23, 34.95],
+  "chameleon_i2c_missing": 0,
+  "chameleon_array_id": "289200D40F000091"
+}
+```
+
+Root cause:
+
+The backend is currently using a merged Soil card, which is acceptable for the thematic-card model, but the desktop UI does not expose the merged card's source list or source availability. The farmer sees one card and cannot tell that one contributing source is healthy while another is currently missing Chameleon/I2C data.
+
+Required fix:
+
+- Add a desktop source selector for multi-source cards:
+  - `All`
+  - `Chameleon 1`
+  - `Chameleon 2`
+- Pass the selected source's `sourceKey` to `useHistoryCardData`.
+- Show source availability metadata next to each source option when available:
+  - last seen;
+  - data present / no current data;
+  - calibration status;
+  - Chameleon/I2C missing status when surfaced by the API.
+- Keep raw DevEUI hidden in normal desktop mode.
+
+Acceptance criteria:
+
+- Zone B desktop makes both sources visible without showing raw DevEUI.
+- Selecting `Chameleon 1` shows data.
+- Selecting `Chameleon 2` shows an explicit no-soil-data / sensor-missing state instead of silently looking like the whole card is broken.
+
+### Desktop issue 2026-06-07-E - Zone A cards are not distinguishable enough
+
+Severity: S2
+
+Symptom:
+
+- Zone A returns five Dendro cards, but all appear as `Dendro - Growth Timeline` in the desktop rail.
+- Source labels exist in the API (`Dendro1`, `Dendro 2`, `Dendro 3`, etc.), but the desktop rail/header does not include them.
+
+Root cause:
+
+The desktop rail uses `card.title` only. For single-source cards, `sourceLabel` is the farmer-facing differentiator and should be part of the normal-mode label.
+
+Required fix:
+
+- In the desktop rail, render a display-safe source label for single-source cards.
+- Recommended label shape:
+  - rail: `Dendro 3`
+  - header: `Dendro 3 - Growth Timeline Zone A`
+  - fallback when no source label exists: current card title.
+- Do not expose DevEUI or `dendro-src-*` card tokens.
+
+Acceptance criteria:
+
+- Zone A's five Dendro cards are distinguishable in the left rail.
+- The selected Dendro card title includes the farmer-facing source label.
+
+## Desktop fix plan for next implementation pass
+
+1. Fix chart height first.
+   - Update `HistoryDesktopDetail` and `HistoryCompareGrid` so every desktop visualization is inside a flex column container with a non-zero `min-h-0 flex-1` contract.
+   - Verify Zone A focus mounts a non-zero `.recharts-responsive-container` and an `svg`.
+
+2. Fix viewport/bounds state.
+   - Stop replacing requested bounds with narrower data-derived bounds.
+   - Use a union/clamped model so the overview strip cannot produce negative or greater-than-100% percentages.
+   - Verify range presets, zoom buttons, wheel zoom, reset, and brush drag after 24h/7D/30D/Season.
+
+3. Add the desktop card-specific view selector.
+   - Replace fixed `selectedView` state with a setter.
+   - Render view options from `selectedCard.views`.
+   - Wire Advanced View data separately.
+   - Verify Zone B Soil can switch to Line Chart and Calendar.
+
+4. Add desktop source visibility and filtering.
+   - Show display-safe source labels in the rail/header.
+   - Add `All` / per-source selection for multi-source cards.
+   - Pass `sourceKey` into card data requests.
+   - Show an explicit source-level no-data state for sources like Zone B `Chameleon 2`.
+
+5. Improve desktop QA coverage.
+   - Add component tests for view-selector state and source-selector requests.
+   - Add Playwright live checks for:
+     - Zone B Soil Profile -> Line Chart -> Calendar;
+     - Zone A Dendro/Environment nonblank Recharts SVG;
+     - no raw 16-hex DevEUI in normal mode;
+     - source selector shows Chameleon names and filters data.
+
 Status as of 2026-06-07 on local branch `feat/history-data-visualization`:
 
 - Deployed kaba100 commit: `ebe565b2`.
@@ -774,3 +1030,24 @@ Artifacts:
 - `/tmp/kaba100-zone-b-daily-per-source-overlap.csv`
 - `/tmp/kaba100-zone-b-raw-per-source-overlap.csv`
 - `/tmp/kaba100-zone-b-oversize-raw-per-source.json`
+
+## Status After Desktop Live Fixes - 2026-06-07
+
+Verified on kaba100 after GUI-only static deploy to `/usr/lib/node-red/gui/`.
+
+- Served bundle: `/gui/assets/index-wPoYK-WG.js`.
+- Zone B desktop title renders as `Soil Moisture Zone B`.
+- Zone B remains one merged Soil Moisture card with `All`, `Chameleon 1`, and `Chameleon 2` source controls.
+- Zone B Line Chart renders a nonblank Recharts SVG; responsive chart container measured `1216 x 783`.
+- Zone A desktop rail exposes distinct Dendro labels from the API: `Dendro 4`, `Dendro1`, `Dendro 5`, `Dendro 3`, `Dendro 2`.
+- Zone A focus view renders a nonblank Recharts SVG; responsive chart container measured `1216 x 763`.
+- Compare mode renders 2 synchronized panels in the structural Playwright check.
+- Normal desktop mode did not expose raw 16-hex DevEUI values.
+- Mobile route still uses the fullscreen gesture detail instead of the desktop rail/control layout.
+- Playwright reported no console errors and no page errors.
+- Screenshots and machine-readable result: `/home/phil/playwright-osi/screenshots-desktop-live-fixes-2026-06-07/`.
+
+Live verification notes:
+
+- Mouse-wheel zoom feel, drag-pan feel, and crosshair smoothness still need a human on-device pass.
+- The label `Dendro1` is preserved from the device name as provided by the API; spacing normalization can be handled as a later polish issue if desired.

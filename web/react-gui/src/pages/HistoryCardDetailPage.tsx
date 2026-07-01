@@ -11,6 +11,7 @@ import {
 import { HistoryExportSheet } from '../components/history/mobile/HistoryExportSheet';
 import { HistoryVisualizationSurface } from '../components/history/mobile/HistoryVisualizationSurface';
 import { cardChannels, cardChannelsForSource, type ChannelSourceContext } from '../channels/registry';
+import { HistoryDesktopDetail } from '../components/history/desktop/HistoryDesktopDetail';
 import { formatWindowCaption } from '../components/history/visualizations/chartAxis';
 import { formatHistoryCalendarMonthLabel } from '../history/calendarMonth';
 import { historyCardDefinitionsByType } from '../history/cardDefinitions';
@@ -18,6 +19,7 @@ import { useFeatureFlags } from '../history/useFeatureFlags';
 import { useHistoryCardAdvancedData } from '../history/useHistoryCardAdvancedData';
 import { useHistoryCardData } from '../history/useHistoryCardData';
 import { orderHistoryCards, useHistoryCards } from '../history/useHistoryCards';
+import { useIsDesktop } from '../history/useIsDesktop';
 import { useOrientation } from '../history/useOrientation';
 import {
   setTimeViewportRange,
@@ -302,6 +304,7 @@ export const HistoryCardDetailPage: React.FC = () => {
   const featureFlags = useFeatureFlags();
   const orientation = useOrientation();
   const isLandscape = orientation === 'landscape';
+  const isDesktop = useIsDesktop();
   const zoneId = Number(rawZoneId);
   const gatewayEui = typeof rawGatewayEui === 'string' && rawGatewayEui.trim() ? rawGatewayEui : null;
   const cardId = decodeRouteCardId(rawCardId);
@@ -367,6 +370,20 @@ export const HistoryCardDetailPage: React.FC = () => {
     ),
     [resolvedCard, routeScope, t],
   );
+  const desktopCards = useMemo(
+    () => (
+      routeScope?.type === 'gateway'
+        ? orderedRouteCards.map((card) => sanitizeGatewayRouteCard(t, card, routeScope.gatewayEui))
+        : orderedRouteCards
+    ),
+    [orderedRouteCards, routeScope, t],
+  );
+  const [desktopSelectedCardId, setDesktopSelectedCardId] = useState<string | null>(null);
+  const desktopSelectedCard = useMemo(
+    () => (desktopSelectedCardId ? (desktopCards.find((c) => c.cardId === desktopSelectedCardId) ?? displayCard) : displayCard),
+    [desktopSelectedCardId, desktopCards, displayCard],
+  );
+  const desktopScope = desktopSelectedCard && routeScope ? scopeForCard(desktopSelectedCard, routeScope) : null;
   const [userSelectedView, setUserSelectedView] = useState<{ cardId: string; view: HistoryViewMode } | null>(null);
   const [enabledSources, setEnabledSources] = useState<{ cardId: string; keys: string[] } | null>(null);
   const [calendarMonthOffset, setCalendarMonthOffset] = useState(0);
@@ -459,7 +476,7 @@ export const HistoryCardDetailPage: React.FC = () => {
     aggregation: requestAggregation,
     overlays: [],
     sourceKey: selectedSourceKey,
-    enabled: Boolean(displayCard?.availability.available && resolvedScope && !shouldRenderAdvanced),
+    enabled: Boolean(displayCard?.availability.available && resolvedScope && !shouldRenderAdvanced && !isDesktop),
   });
   const advancedData = useHistoryCardAdvancedData({
     scope: resolvedScope,
@@ -645,6 +662,14 @@ export const HistoryCardDetailPage: React.FC = () => {
 
   useEffect(() => {
     setCalendarMonthOffset(0);
+  }, [
+    displayCard?.cardId,
+    selectedSourceKey,
+    selectedView,
+    timeViewport.viewport.range.label,
+  ]);
+
+  useEffect(() => {
     setVisualWindow(null);
     setExportOpen(false);
   }, [
@@ -705,6 +730,20 @@ export const HistoryCardDetailPage: React.FC = () => {
         body={t('history.detail.notFoundBody')}
         backLabel={t('history.detail.backToHistory')}
       />
+    );
+  }
+
+  if (isDesktop && desktopSelectedCard && desktopScope) {
+    return (
+      <div className="flex h-screen flex-col overflow-hidden bg-[var(--bg)]">
+        <HistoryDesktopDetail
+          cards={desktopCards}
+          selectedCard={desktopSelectedCard}
+          zoneName={resolvedZone?.name ?? null}
+          scope={desktopScope}
+          onCardSelect={(card) => setDesktopSelectedCardId(card.cardId)}
+        />
+      </div>
     );
   }
 

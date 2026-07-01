@@ -1,0 +1,228 @@
+import React, { useEffect, useMemo, useState } from 'react';
+import { useTranslation } from 'react-i18next';
+import { HistoryCardVisualization } from '../HistoryCardVisualization';
+import {
+  commonDesktopCompareViews,
+  defaultDesktopCompareView,
+  desktopAggregationForView,
+  desktopRailCardLabel,
+} from '../../../history/desktopHistory';
+import { useHistoryCardData } from '../../../history/useHistoryCardData';
+import type { HistoryCardDataScope } from '../../../history/useHistoryCardData';
+import type { HistoryViewport } from '../../../history/historyViewport';
+import type { HistoryCardSummary, HistoryRangeSelection, HistoryViewMode } from '../../../history/types';
+
+const MAX_COMPARE_PANELS = 4;
+
+// ---------- ComparePanel ----------
+// One mounted child component per card so each has its own useHistoryCardData call.
+// Mounting/unmounting whole children as the selection changes is hooks-safe.
+
+interface ComparePanelProps {
+  card: HistoryCardSummary;
+  scope: HistoryCardDataScope | null;
+  selectedView: HistoryViewMode;
+  viewport: HistoryViewport;
+  rangeRequest: HistoryRangeSelection;
+}
+
+const ComparePanel: React.FC<ComparePanelProps> = ({
+  card,
+  scope,
+  selectedView,
+  viewport,
+  rangeRequest,
+}) => {
+  const cardData = useHistoryCardData({
+    scope,
+    cardId: card.cardId,
+    view: selectedView,
+    range: rangeRequest,
+    aggregation: desktopAggregationForView(selectedView),
+    overlays: [],
+    enabled: Boolean(card.availability.available && scope),
+  });
+
+  return (
+    <div
+      data-testid="compare-panel"
+      className="flex min-h-0 flex-col overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--bg)]"
+    >
+      {/* Panel header */}
+      <div className="shrink-0 border-b border-[var(--border)] bg-[var(--surface)] px-3 py-1.5">
+        <span className="text-sm font-medium text-[var(--text)]">{desktopRailCardLabel(card)}</span>
+      </div>
+      {/* Visualization */}
+      <div data-testid="compare-panel-visualization" className="flex min-h-0 flex-1 flex-col">
+        <HistoryCardVisualization
+          card={card}
+          data={cardData.data}
+          selectedView={selectedView}
+          isLoading={cardData.isLoading}
+          error={cardData.error}
+          window={viewport}
+        />
+      </div>
+    </div>
+  );
+};
+
+// ---------- HistoryCompareGrid ----------
+
+export interface HistoryCompareGridProps {
+  cards: HistoryCardSummary[];
+  scope: HistoryCardDataScope;
+  viewport: HistoryViewport;
+  rangeRequest: HistoryRangeSelection;
+}
+
+function gatewayEuiForCard(card: HistoryCardSummary): string | null {
+  const gatewayEui = card.metadata.gatewayDeviceEui ?? card.metadata.gateway_device_eui ?? card.metadata.gatewayEui;
+  return typeof gatewayEui === 'string' && gatewayEui.trim() ? gatewayEui : null;
+}
+
+function scopeForCompareCard(card: HistoryCardSummary, baseScope: HistoryCardDataScope): HistoryCardDataScope | null {
+  if (baseScope.type === 'gateway') return baseScope;
+  if (card.scope !== 'gateway') return baseScope;
+
+  const gatewayEui = gatewayEuiForCard(card);
+  return gatewayEui ? { type: 'gateway', gatewayEui } : null;
+}
+
+function defaultSelectedIds(cards: HistoryCardSummary[]): string[] {
+  // Pre-select the first 2 available cards (or fewer if the list is shorter)
+  return cards
+    .filter((c) => c.availability.available)
+    .slice(0, 2)
+    .map((c) => c.cardId);
+}
+
+type HistoryTranslate = (key: string, options?: Record<string, unknown>) => string;
+
+export const HistoryCompareGrid: React.FC<HistoryCompareGridProps> = ({
+  cards,
+  scope,
+  viewport,
+  rangeRequest,
+}) => {
+  const { t: translate } = useTranslation('history');
+  const t = translate as HistoryTranslate;
+  const [selectedCardIds, setSelectedCardIds] = useState<string[]>(() =>
+    defaultSelectedIds(cards),
+  );
+  const [selectedCompareView, setSelectedCompareView] = useState<HistoryViewMode | null>(null);
+
+  function handleToggle(cardId: string) {
+    setSelectedCardIds((prev) => {
+      if (prev.includes(cardId)) {
+        // Deselect
+        return prev.filter((id) => id !== cardId);
+      }
+      if (prev.length >= MAX_COMPARE_PANELS) {
+        // Cap enforced — no-op
+        return prev;
+      }
+      return [...prev, cardId];
+    });
+  }
+
+  const atMax = selectedCardIds.length >= MAX_COMPARE_PANELS;
+  const selectedCards = useMemo(
+    () => cards.filter((c) => selectedCardIds.includes(c.cardId)),
+    [cards, selectedCardIds],
+  );
+  const compareViewOptions = useMemo(
+    () => commonDesktopCompareViews(selectedCards),
+    [selectedCards],
+  );
+  const resolvedCompareView = useMemo(() => {
+    const allowedViews = compareViewOptions.map((entry) => entry.view);
+    if (selectedCompareView && allowedViews.includes(selectedCompareView)) {
+      return selectedCompareView;
+    }
+    return defaultDesktopCompareView(selectedCards);
+  }, [compareViewOptions, selectedCards, selectedCompareView]);
+
+  useEffect(() => {
+    if (selectedCompareView !== resolvedCompareView) {
+      setSelectedCompareView(resolvedCompareView);
+    }
+  }, [resolvedCompareView, selectedCompareView]);
+
+  return (
+    <div className="flex h-full min-h-0 flex-col overflow-hidden">
+      {/* Checklist header */}
+      <div className="shrink-0 overflow-x-auto border-b border-[var(--border)] bg-[var(--surface)] px-4 py-2">
+        {compareViewOptions.length > 0 && resolvedCompareView ? (
+          <div
+            role="group"
+            aria-label={t('history.desktop.compareViewSelectorLabel', { defaultValue: 'Compare view' })}
+            className="mb-2 flex w-fit overflow-hidden rounded border border-[var(--border)]"
+          >
+            {compareViewOptions.map(({ view, labelKey }) => (
+              <button
+                key={view}
+                type="button"
+                aria-pressed={resolvedCompareView === view}
+                onClick={() => setSelectedCompareView(view)}
+                className={`px-2 py-1 text-xs font-semibold transition-colors ${
+                  resolvedCompareView === view
+                    ? 'bg-[var(--primary)] text-white'
+                    : 'bg-[var(--secondary-bg)] text-[var(--text)] hover:bg-[var(--border)]'
+                }`}
+              >
+                {t(labelKey)}
+              </button>
+            ))}
+          </div>
+        ) : null}
+        <fieldset className="border-none p-0">
+          <legend className="sr-only">Select up to {MAX_COMPARE_PANELS} cards to compare</legend>
+          <div className="flex flex-wrap gap-x-4 gap-y-1">
+            {cards.map((card) => {
+              const isChecked = selectedCardIds.includes(card.cardId);
+              // Disable the checkbox when the cap is reached and this card is NOT selected
+              const isDisabled = atMax && !isChecked;
+              const label = desktopRailCardLabel(card);
+              const checkboxId = `compare-check-${card.cardId}`;
+              return (
+                <label
+                  key={card.cardId}
+                  htmlFor={checkboxId}
+                  className={`flex cursor-pointer items-center gap-1.5 text-sm ${
+                    isDisabled ? 'cursor-not-allowed opacity-40' : 'text-[var(--text)]'
+                  }`}
+                >
+                  <input
+                    id={checkboxId}
+                    type="checkbox"
+                    checked={isChecked}
+                    disabled={isDisabled}
+                    onChange={() => handleToggle(card.cardId)}
+                    aria-label={label}
+                    className="h-3.5 w-3.5 accent-[var(--primary)]"
+                  />
+                  <span>{label}</span>
+                </label>
+              );
+            })}
+          </div>
+        </fieldset>
+      </div>
+
+      {/* Panels grid — 1 col on narrow, 2 cols on wider screens */}
+      <div className="grid min-h-0 flex-1 auto-rows-fr grid-cols-1 gap-3 overflow-auto p-3 sm:grid-cols-2">
+        {selectedCards.map((card) => (
+          <ComparePanel
+            key={card.cardId}
+            card={card}
+            scope={scopeForCompareCard(card, scope)}
+            selectedView={resolvedCompareView ?? ((card.defaultView ?? 'line-chart') as HistoryViewMode)}
+            viewport={viewport}
+            rangeRequest={rangeRequest}
+          />
+        ))}
+      </div>
+    </div>
+  );
+};
