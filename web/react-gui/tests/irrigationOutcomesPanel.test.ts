@@ -90,6 +90,21 @@ function responseWithActuation(overrides: Partial<IrrigationActuation> = {}): Ir
   };
 }
 
+function responseWithActuations(count: number): IrrigationActuationsResponse {
+  return {
+    generatedAt: '2026-05-29T10:20:00Z',
+    actuations: Array.from({ length: count }, (_, index) => actuationFixture({
+      expectationId: `exp-${index + 1}`,
+      commandId: `cmd-uuid-${index + 1}`,
+      deviceEui: `70B3D57708000${String(index + 1).padStart(3, '0')}`,
+      deviceName: `Valve ${index + 1}`,
+      zoneId: 12,
+      zoneName: `Zone ${index + 1}`,
+      commandedAt: new Date(Date.parse('2026-05-29T10:20:00Z') - index * 60_000).toISOString(),
+    })),
+  };
+}
+
 async function renderControlledPanel(
   response: IrrigationActuationsResponse,
   zoneContext: Record<string, unknown> = {
@@ -186,6 +201,21 @@ test('default view shows commanded date, duration, and effective irrigation dept
   }
 });
 
+test('default view renders only the five newest recent irrigations', async () => {
+  window.localStorage.clear();
+  try {
+    await renderControlledPanel(responseWithActuations(7));
+
+    for (let i = 1; i <= 5; i += 1) {
+      assert.match(document.body.textContent ?? '', new RegExp(`Zone ${i}(?!\\d)`));
+    }
+    assert.doesNotMatch(document.body.textContent ?? '', /Zone 6(?!\d)/);
+    assert.doesNotMatch(document.body.textContent ?? '', /Zone 7(?!\d)/);
+  } finally {
+    cleanup();
+  }
+});
+
 test('default view falls back to gross irrigation depth when efficiency is missing', async () => {
   window.localStorage.clear();
   try {
@@ -245,6 +275,25 @@ test('advanced view shows status, total volume, depth, and confirmed timestamps'
     assert.match(document.body.textContent ?? '', /Irrigated: 0\.6 mm/);
     assert.match(document.body.textContent ?? '', /Confirmed open:/);
     assert.match(document.body.textContent ?? '', /Confirmed close:/);
+  } finally {
+    cleanup();
+    window.localStorage.clear();
+  }
+});
+
+test('advanced view renders only the five newest recent irrigations', async () => {
+  window.localStorage.setItem('osi.recentIrrigations.advancedView', 'true');
+  try {
+    await renderControlledPanel(responseWithActuations(7));
+
+    for (let i = 1; i <= 5; i += 1) {
+      assert.match(document.body.textContent ?? '', new RegExp(`Zone ${i}(?!\\d)`));
+      assert.match(document.body.textContent ?? '', new RegExp(`Valve ${i}(?!\\d)`));
+    }
+    assert.doesNotMatch(document.body.textContent ?? '', /Zone 6(?!\d)/);
+    assert.doesNotMatch(document.body.textContent ?? '', /Valve 6(?!\d)/);
+    assert.doesNotMatch(document.body.textContent ?? '', /Zone 7(?!\d)/);
+    assert.doesNotMatch(document.body.textContent ?? '', /Valve 7(?!\d)/);
   } finally {
     cleanup();
     window.localStorage.clear();
