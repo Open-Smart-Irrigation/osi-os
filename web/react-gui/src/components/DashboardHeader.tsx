@@ -3,7 +3,6 @@ import { Link } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { HeaderMenu } from './HeaderMenu';
 import { LanguageSwitcher } from './LanguageSwitcher';
-import { AGROLINK_BRAND, resolveAgroscopeAssets } from '../branding/agrolink';
 import { isDesktopBrowser } from '../utils/isDesktopBrowser';
 
 interface DashboardHeaderProps {
@@ -19,22 +18,16 @@ export const DashboardHeader: React.FC<DashboardHeaderProps> = ({
   onAddDevice,
   onLogout,
 }) => {
-  const { t, i18n } = useTranslation('dashboard');
-  const { balkenHorizontal } = resolveAgroscopeAssets(i18n.language);
+  const { t } = useTranslation('dashboard');
   const showDesktopData = isDesktopBrowser();
 
   return (
-    <header className="bg-[var(--header-bg)] shadow-xl overflow-hidden">
-      <img
-        src={balkenHorizontal}
-        alt="Agroscope Balken"
-        className="block h-10 w-full object-cover object-left"
-      />
+    <header className="bg-[var(--header-bg)] shadow-xl">
       <div className="max-w-7xl mx-auto px-4 py-6">
         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
           <div>
             <h1 className="text-4xl font-bold text-[var(--header-text)] high-contrast-text">
-              {AGROLINK_BRAND.dashboardTitle}
+              OSI OS Dashboard
             </h1>
             <p className="text-[var(--header-subtext)] text-lg mt-1">{t('welcome', { username })}</p>
           </div>

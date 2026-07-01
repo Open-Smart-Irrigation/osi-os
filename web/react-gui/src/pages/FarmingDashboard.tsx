@@ -41,7 +41,7 @@ export const FarmingDashboard: React.FC = () => {
     }
   );
 
-  // Fetch zones
+  // Fetch irrigation zones
   const { data: zones, error: zonesError, mutate: mutateZones } = useSWR<IrrigationZone[]>(
     '/api/irrigation-zones',
     zonesFetcher,
@@ -185,7 +185,7 @@ export const FarmingDashboard: React.FC = () => {
               </div>
             )}
 
-            {/* Zones Section */}
+            {/* Irrigation Zones Section */}
             {zones.length > 0 && (
               <div className="mb-8">
                 <h2 className="text-2xl font-bold text-[var(--text)] mb-4 high-contrast-text">

@@ -24,7 +24,7 @@
     "failed": "Error al asignar el dispositivo"
   },
   "createZoneModal": {
-    "title": "Crear zona",
+    "title": "Crear zona de riego",
     "zoneName": "Nombre de la zona",
     "zoneNamePlaceholder": "ej. Jardín A, Campo Norte, Huerto 1",
     "zoneNameRequired": "El nombre de la zona es obligatorio",
@@ -83,23 +83,7 @@
     "noDevices": "No hay dispositivos en esta zona",
     "assignFirst": "Asignar primer dispositivo",
     "devicesInZone": "Dispositivos en esta zona:",
-    "data": "Datos",
-    "export": {
-      "title": "Exportar datos",
-      "selectRange": "Elige un rango de fechas para descargar datos de la zona.",
-      "from": "Desde",
-      "to": "Hasta",
-      "granularity": "Granularidad",
-      "raw": "Crudo",
-      "hourly": "Por hora",
-      "daily": "Diario",
-      "download": "Descargar CSV",
-      "downloading": "Preparando...",
-      "rangeSummary": "{{from}} a {{to}}",
-      "error": "Error de exportacion",
-      "tooLarge": "Rango demasiado grande. Elige una granularidad mas amplia.",
-      "fullExport": "Exportacion completa"
-    }
+    "data": "Datos"
   },
   "schedule": {
     "irrigationSchedule": "Programa de riego",

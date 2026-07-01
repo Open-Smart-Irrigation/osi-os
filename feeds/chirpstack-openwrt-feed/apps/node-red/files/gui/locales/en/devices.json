@@ -24,7 +24,7 @@
     "failed": "Failed to assign device"
   },
   "createZoneModal": {
-    "title": "Create Zone",
+    "title": "Create Irrigation Zone",
     "zoneName": "Zone Name",
     "zoneNamePlaceholder": "e.g., Garden A, North Field, Orchard 1",
     "zoneNameRequired": "Zone name is required",
@@ -112,23 +112,7 @@
     "noDevices": "No devices in this zone yet",
     "assignFirst": "Assign First Device",
     "devicesInZone": "Devices in this zone:",
-    "data": "Data",
-    "export": {
-      "title": "Data export",
-      "selectRange": "Pick a date range to download zone data.",
-      "from": "From",
-      "to": "To",
-      "granularity": "Granularity",
-      "raw": "Raw",
-      "hourly": "Hourly",
-      "daily": "Daily",
-      "download": "Download CSV",
-      "downloading": "Preparing...",
-      "rangeSummary": "{{from}} to {{to}}",
-      "error": "Export failed",
-      "tooLarge": "Range too large. Choose a coarser granularity.",
-      "fullExport": "Full export"
-    }
+    "data": "Data"
   },
   "schedule": {
     "irrigationSchedule": "Irrigation Schedule",

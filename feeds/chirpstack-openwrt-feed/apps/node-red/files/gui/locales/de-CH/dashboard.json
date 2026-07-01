@@ -1,29 +1,21 @@
 {
-  "title": "AgroLink Dashboard",
+  "title": "Open Smart Irrigation Dashboard",
   "welcome": "Willkommen, {{username}}",
-  "add": "Hinzufügen",
-  "addMenu": {
-    "zone": "Zone hinzufügen",
-    "device": "Gerät hinzufügen"
-  },
-  "data": "Daten",
-  "account": "Konto",
-  "accountMenu": {
-    "osiServer": "OSI Server"
-  },
+  "addZone": "Zone hinzufügen",
+  "addDevice": "Gerät hinzufügen",
   "logout": "Abmelden",
   "loading": "Dashboard wird geladen...",
   "failedToLoad": "Daten konnten nicht geladen werden",
   "autoRefresh": "Automatische Aktualisierung alle 10 Sekunden",
   "emptyState": {
     "title": "Willkommen auf Ihrem Hof!",
-    "subtitle": "Erstellen Sie eine Zone und fügen Sie Geräte hinzu",
+    "subtitle": "Erstellen Sie eine Bewässerungszone und fügen Sie Geräte hinzu",
     "createZone": "Zone erstellen",
     "addDevice": "Gerät hinzufügen"
   },
-  "irrigationZones": "Zonen",
+  "irrigationZones": "Bewässerungszonen",
   "unassignedDevices": "Nicht zugewiesene Geräte",
-  "unassignedSubtitle": "Diese Geräte sind keiner Zone zugewiesen",
+  "unassignedSubtitle": "Diese Geräte sind keiner Bewässerungszone zugewiesen",
   "soilSensors": "Bodensensoren",
   "smartValves": "Intelligente Ventile"
 }

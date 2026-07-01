@@ -24,7 +24,7 @@
     "failed": "Error al asignar el dispositivo"
   },
   "createZoneModal": {
-    "title": "Crear zona",
+    "title": "Crear zona de riego",
     "zoneName": "Nombre de la zona",
     "zoneNamePlaceholder": "ej. Jardín A, Campo Norte, Huerto 1",
     "zoneNameRequired": "El nombre de la zona es obligatorio",
