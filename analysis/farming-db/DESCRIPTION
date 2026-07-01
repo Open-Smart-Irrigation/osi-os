@@ -1,0 +1,12 @@
+Package: osifarmingdb
+Title: OSI Farming DB Analysis Workspace
+Version: 0.1.0
+Description: Local R helpers for opening OSI OS farming.db telemetry snapshots.
+License: MIT
+Encoding: UTF-8
+Imports:
+    DBI,
+    RSQLite,
+    dplyr,
+    dbplyr,
+    lubridate
