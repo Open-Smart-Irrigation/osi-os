@@ -24,7 +24,7 @@
     "failed": "Falha ao atribuir dispositivo"
   },
   "createZoneModal": {
-    "title": "Criar zona",
+    "title": "Criar zona de rega",
     "zoneName": "Nome da zona",
     "zoneNamePlaceholder": "ex. Jardim A, Campo Norte, Pomar 1",
     "zoneNameRequired": "O nome da zona é obrigatório",
@@ -97,7 +97,7 @@
       "downloading": "A preparar...",
       "rangeSummary": "{{from}} até {{to}}",
       "error": "Falha na exportação",
-      "tooLarge": "Intervalo demasiado grande. Escolha uma granularidade mais ampla.",
+      "tooLarge": "Intervalo muito grande. Escolha uma granularidade mais ampla.",
       "fullExport": "Exportação completa"
     }
   },

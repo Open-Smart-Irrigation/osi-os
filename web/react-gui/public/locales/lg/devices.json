@@ -24,7 +24,7 @@
     "failed": "Okuwerekeza ekyuma kugaanye"
   },
   "createZoneModal": {
-    "title": "Tondawo Ekifo",
+    "title": "Tondawo Ekifo ky'okusukkulirira",
     "zoneName": "Erinnya ly'ekifo",
     "zoneNamePlaceholder": "eg. Olusozi A, Okuva mu bukiika, Olusuku 1",
     "zoneNameRequired": "Erinnya ly'ekifo lyetaagisa",
@@ -90,15 +90,15 @@
       "from": "Okuva",
       "to": "Okutuuka",
       "granularity": "Obuzito bw'obudde",
-      "raw": "Ebitali bikyusiddwa",
-      "hourly": "Buli saawa",
+      "raw": "Ebitali bifunze",
+      "hourly": "Buli ssaawa",
       "daily": "Buli lunaku",
       "download": "Wanula CSV",
       "downloading": "Kitegekebwa...",
       "rangeSummary": "{{from}} okutuuka {{to}}",
       "error": "Okufulumya kulemereddwa",
       "tooLarge": "Ebbanga ddene nnyo. Londa obuzito obunene.",
-      "fullExport": "Okufulumya kwonna"
+      "fullExport": "Fulumya byonna"
     }
   },
   "schedule": {
