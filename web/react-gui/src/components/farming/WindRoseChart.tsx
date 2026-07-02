@@ -24,6 +24,27 @@ function readTheme(): WindRoseTheme {
   };
 }
 
+function useWindRoseTheme(): WindRoseTheme {
+  const [theme, setTheme] = React.useState<WindRoseTheme>(() => readTheme());
+
+  React.useEffect(() => {
+    if (typeof window === 'undefined' || typeof MutationObserver === 'undefined') {
+      return undefined;
+    }
+
+    const refreshTheme = () => setTheme(readTheme());
+    const observer = new MutationObserver(refreshTheme);
+    observer.observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ['class', 'data-theme', 'style'],
+    });
+
+    return () => observer.disconnect();
+  }, []);
+
+  return theme;
+}
+
 // Orientation: N at top (startAngle 90), sectors clockwise NNE -> E -> S -> W.
 export function buildWindRoseOption(rose: WindRose, theme: WindRoseTheme): Record<string, unknown> {
   const directions = rose.sectors.map((sector) => sector.direction);
@@ -65,7 +86,11 @@ export function buildWindRoseOption(rose: WindRose, theme: WindRoseTheme): Recor
 }
 
 export const WindRoseChart: React.FC<{ rose: WindRose }> = ({ rose }) => {
-  const option = React.useMemo(() => buildWindRoseOption(rose, readTheme()), [rose]);
+  const theme = useWindRoseTheme();
+  const option = React.useMemo(
+    () => buildWindRoseOption(rose, theme),
+    [rose, theme.axisLabel, theme.axisLine, theme.legendText, theme.splitLine],
+  );
 
   return (
     <div style={{ width: '100%', height: 340 }}>

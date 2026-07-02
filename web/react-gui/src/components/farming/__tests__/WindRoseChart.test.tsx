@@ -1,8 +1,18 @@
-import { describe, expect, it, vi } from 'vitest';
-import { buildWindRoseOption, type WindRoseTheme } from '../WindRoseChart';
+import { act, cleanup, render, waitFor } from '@testing-library/react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { buildWindRoseOption, WindRoseChart, type WindRoseTheme } from '../WindRoseChart';
 import { computeWindRose } from '../../../utils/wind';
 
-vi.mock('../../analysis/EChart', () => ({ EChart: () => null }));
+const { echartOptionSpy } = vi.hoisted(() => ({
+  echartOptionSpy: vi.fn(),
+}));
+
+vi.mock('../../analysis/EChart', () => ({
+  EChart: ({ option }: { option: Record<string, unknown> }) => {
+    echartOptionSpy(option);
+    return <div data-testid="wind-rose-echart" />;
+  },
+}));
 
 const THEME: WindRoseTheme = {
   axisLine: '#111',
@@ -11,11 +21,22 @@ const THEME: WindRoseTheme = {
   legendText: '#444',
 };
 
+const rose = computeWindRose([
+  { wind_speed_mps: 3.5, wind_direction_deg: 90 },
+  { wind_speed_mps: 6, wind_direction_deg: 200 },
+]);
+
+beforeEach(() => {
+  echartOptionSpy.mockClear();
+  document.documentElement.removeAttribute('style');
+});
+
+afterEach(() => {
+  cleanup();
+  document.documentElement.removeAttribute('style');
+});
+
 describe('buildWindRoseOption', () => {
-  const rose = computeWindRose([
-    { wind_speed_mps: 3.5, wind_direction_deg: 90 },
-    { wind_speed_mps: 6, wind_direction_deg: 200 },
-  ]);
   const option = buildWindRoseOption(rose, THEME) as any;
 
   it('produces a polar coordinate system', () => {
@@ -47,5 +68,33 @@ describe('buildWindRoseOption', () => {
 
   it('lists the speed-bin labels in the legend', () => {
     expect(option.legend.data).toEqual(rose.speedBins.map((b) => b.label));
+  });
+});
+
+describe('WindRoseChart', () => {
+  function latestOption(): any {
+    const calls = echartOptionSpy.mock.calls;
+    return calls[calls.length - 1]?.[0];
+  }
+
+  it('refreshes chart theme colors when CSS variables change without new rose data', async () => {
+    document.documentElement.style.setProperty('--border', '#111111');
+    document.documentElement.style.setProperty('--text-secondary', '#222222');
+
+    render(<WindRoseChart rose={rose} />);
+
+    await waitFor(() => {
+      expect(latestOption()?.legend.textStyle.color).toBe('#222222');
+    });
+
+    act(() => {
+      document.documentElement.style.setProperty('--border', '#333333');
+      document.documentElement.style.setProperty('--text-secondary', '#444444');
+    });
+
+    await waitFor(() => {
+      expect(latestOption()?.legend.textStyle.color).toBe('#444444');
+      expect(latestOption()?.angleAxis.axisLine.lineStyle.color).toBe('#333333');
+    });
   });
 });
