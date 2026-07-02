@@ -47,3 +47,16 @@ We would revisit a declarative schema model (the rejected approach) only if **al
 
 - **Full declarative DDL codegen (the superseded draft).** Rejected: premature for a polyglot, drift-prone, small-team system with one live production edge DB; the cross-dialect gap forces endless escape hatches; and a final-state model cannot express the safe migration path for live data.
 - **Ordered migrations with no contract package at all.** Rejected as the end state: it fixes field-safety but lets typed payload/event semantics drift between repos (exactly the `REMOVE_DEVICE_FROM_ZONE`/`UNCLAIM_DEVICE` class). It is the correct *first increment* — hence Spec 1 first, with the narrow contract Tranche A in parallel.
+
+## Boot-path migration cutover (Option B) — trigger conditions
+
+The edge migration runner (Phase 1) exists but does not yet run on-device; the
+Node-RED boot node still owns inline schema DDL (frozen — see AGENTS.md). Replacing
+it with the runner is deferred until a real runtime migration need appears, AND the
+deploy/boot machinery is designed first (preflight fingerprint, backup provenance,
+fail-closed behavior, rollback, observability, post-boot verification) and rehearsed
+on a copied production DB + rebuildable demo gateways. Promote Option B only when a
+non-trivial production-bound schema change appears: a table rebuild, trigger
+replacement, destructive cleanup, data backfill, or an ordering-sensitive migration.
+Cleaning up the ~81 redundant inline ADD COLUMNs (and greening verify-sync-flow) is
+part of this cutover, not a standalone task. Until then: freeze + guard the boot node.

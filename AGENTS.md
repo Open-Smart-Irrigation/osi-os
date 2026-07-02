@@ -67,6 +67,17 @@ Broker: `wss://server.opensmartirrigation.org/mqtt`
 - Tables: `sync_outbox` (pending → cloud), `sync_inbox` (dedupe incoming), `sync_cursor` (progress).
 - SQLite startup migrations must preserve local history. If a parent table such as `devices` is rebuilt with a drop/rename swap, fence the swap with `PRAGMA foreign_keys=OFF` and restore `PRAGMA foreign_keys=ON` after the final drop; otherwise `ON DELETE CASCADE` child tables such as `device_data` and `chameleon_readings` can be wiped on Node-RED startup. See [docs/operations/edge-history-retention.md](docs/operations/edge-history-retention.md).
 
+### Boot-DDL freeze (edge schema)
+
+`sync-init-fn` (Node-RED "Sync Init Schema + Triggers") performs schema DDL inline
+on every boot (incl. ~93 ADD COLUMNs, 81 of them redundant with the seed — the cause
+of verify-sync-flow's pre-existing `duplicate column` failures). This node is FROZEN:
+do not add new schema behavior there. New schema changes go through the migration
+runner (`lib/osi-migrate`). `scripts/verify-runtime-schema-parity.js` (CI-gated) fails
+if the shipped flow DOWNGRADES `database/seed-blank.sql` (devices CHECK / triggers).
+Replacing the inline boot DDL with the runner ("Option B") is a separate boot-path
+project — see the ADR trigger conditions.
+
 ### Chameleon calibration global table
 
 - `chameleon_calibrations` — keyed by `array_id` (uppercase 16-char hex). Source via.farm; bundled into firmware seed before release.

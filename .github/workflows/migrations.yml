@@ -21,3 +21,4 @@ jobs:
       - run: node --test lib/osi-migrate/__tests__/*.test.js
       - run: node scripts/verify-migrations.js
       - run: node scripts/verify-seed-replay.js
+      - run: node scripts/verify-runtime-schema-parity.js
