@@ -20,7 +20,7 @@ interface SoilLineChartViewProps {
 type HistoryTranslate = (key: string, options?: Record<string, unknown>) => string;
 type ChartRow = { timestamp: string; tMs: number } & Record<string, number | string | null>;
 type ChartWindow = { fromMs: number; toMs: number };
-type RenderSeries = {
+export type RenderSeries = {
   key: string;
   label: string;
   unit: string;
@@ -29,6 +29,7 @@ type RenderSeries = {
 };
 
 const SERIES_COLORS = ['#2563eb', '#059669', '#d97706', '#7c3aed'];
+const MAX_CONTINUOUS_GAP_MS = 90 * 60 * 1000;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
@@ -155,6 +156,30 @@ function hasVisiblePoints(series: RenderSeries): boolean {
   return series.points.some((point) => point.value !== null);
 }
 
+export function soilSeriesShouldShowDots(series: RenderSeries): boolean {
+  let previousVisibleIndex: number | null = null;
+  let previousVisibleMs: number | null = null;
+  let visibleCount = 0;
+
+  for (let index = 0; index < series.points.length; index += 1) {
+    const point = series.points[index];
+    if (point.value === null) continue;
+    const currentMs = Date.parse(point.t);
+    if (!Number.isFinite(currentMs)) continue;
+
+    visibleCount += 1;
+    if (previousVisibleIndex !== null && previousVisibleMs !== null) {
+      if (index - previousVisibleIndex > 1) return true;
+      if (currentMs - previousVisibleMs > MAX_CONTINUOUS_GAP_MS) return true;
+    }
+
+    previousVisibleIndex = index;
+    previousVisibleMs = currentMs;
+  }
+
+  return visibleCount === 1;
+}
+
 export function buildNumericRows(seriesList: RenderSeries[]): ChartRow[] {
   const rows = new Map<string, ChartRow>();
   seriesList.forEach((series) => {
@@ -248,7 +273,7 @@ const SoilLineChartViewComponent: React.FC<SoilLineChartViewProps> = ({ data, wi
                 name={series.label}
                 stroke={SERIES_COLORS[index % SERIES_COLORS.length]}
                 strokeWidth={2}
-                dot={false}
+                dot={soilSeriesShouldShowDots(series) ? { r: 3, strokeWidth: 1 } : false}
                 isAnimationActive={false}
                 connectNulls={false}
               />
