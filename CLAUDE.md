@@ -23,3 +23,7 @@ Primary target: Raspberry Pi 5 (`full_raspberrypi_bcm27xx_bcm2712`).
 5. `web/react-gui/src/` — dashboard source
 6. [docs/build/building-firmware.md](docs/build/building-firmware.md) — firmware build (only if rebuilding the OS)
 7. [docs/versioning-workflow.md](docs/versioning-workflow.md) — release checklist
+
+## Session Closeout
+
+When the user says `finish the session`, follow [AGENTS.md](AGENTS.md) session closeout and run `scripts/session-closeout.sh`.
