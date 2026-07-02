@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { lazy, Suspense, useEffect, useMemo, useState } from 'react';
 import {
   Area,
   CartesianGrid,
@@ -10,7 +10,13 @@ import {
   YAxis,
 } from 'recharts';
 import { sensorAPI, type SensorHistoryPoint } from '../../services/api';
-import { formatWindDirection, roundWindDirectionDegrees, toCompassDirection } from '../../utils/wind';
+import { computeWindRose, formatWindDirection } from '../../utils/wind';
+
+const WindRoseChart = lazy(() =>
+  import('./WindRoseChart').then((module) => ({ default: module.WindRoseChart })),
+);
+
+const MIN_ROSE_SAMPLES = 10;
 
 interface Props {
   deveui: string;
@@ -155,18 +161,7 @@ export const WindMonitor: React.FC<Props> = ({ deveui, deviceName, onClose }) =>
   const currentDirection = directionPoints.length ? directionPoints[directionPoints.length - 1].wind_direction_deg : null;
   const hasChartData = speedValues.length > 0 || gustValues.length > 0;
   const hasAnyData = hasChartData || directionPoints.length > 0;
-
-  const sampledDirectionPoints = useMemo(() => {
-    if (!directionPoints.length) return [];
-    const maxSamples = 10;
-    const step = Math.max(1, Math.ceil(directionPoints.length / maxSamples));
-    const sampled = directionPoints.filter((_, index) => index % step === 0);
-    const lastPoint = directionPoints[directionPoints.length - 1];
-    if (sampled[sampled.length - 1]?.t !== lastPoint.t) {
-      sampled.push(lastPoint);
-    }
-    return sampled;
-  }, [directionPoints]);
+  const windRose = useMemo(() => computeWindRose(data), [data]);
 
   return (
     <div
@@ -293,38 +288,24 @@ export const WindMonitor: React.FC<Props> = ({ deveui, deviceName, onClose }) =>
 
               <div>
                 <div className="mb-3 flex items-center justify-between gap-3">
-                  <h3 className="font-bold text-[var(--text)]">Direction history</h3>
-                  <p className="text-xs text-[var(--text-tertiary)]">{directionPoints.length} samples</p>
+                  <h3 className="font-bold text-[var(--text)]">Wind rose (direction × speed)</h3>
+                  <p className="text-xs text-[var(--text-tertiary)]">
+                    {windRose.validSamples} samples · {Math.round(windRose.calmPct)}% calm
+                  </p>
                 </div>
-                {sampledDirectionPoints.length > 0 ? (
-                  <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
-                    {sampledDirectionPoints.map((point) => {
-                      const rounded = roundWindDirectionDegrees(point.wind_direction_deg);
-                      const compass = toCompassDirection(point.wind_direction_deg);
-                      return (
-                        <div key={point.t} className="rounded-lg border border-[var(--border)] bg-[var(--card)] p-3">
-                          <div className="mb-2 flex items-center gap-3">
-                            <span
-                              className="inline-block text-2xl text-[var(--primary)]"
-                              style={{ transform: `rotate(${rounded ?? 0}deg)` }}
-                            >
-                              ↑
-                            </span>
-                            <div>
-                              <p className="font-semibold text-[var(--text)]">{compass ?? '—'}</p>
-                              <p className="text-xs text-[var(--text-tertiary)]">
-                                {rounded != null ? `${rounded}°` : '—'}
-                              </p>
-                            </div>
-                          </div>
-                          <p className="text-xs text-[var(--text-tertiary)]">{fmtTick(point.t, hours)}</p>
-                        </div>
-                      );
-                    })}
-                  </div>
+                {windRose.validSamples >= MIN_ROSE_SAMPLES ? (
+                  <Suspense
+                    fallback={
+                      <div className="flex h-[340px] items-center justify-center">
+                        <div className="h-8 w-8 animate-spin rounded-full border-4 border-[var(--primary)] border-t-transparent" />
+                      </div>
+                    }
+                  >
+                    <WindRoseChart rose={windRose} />
+                  </Suspense>
                 ) : (
                   <div className="rounded-lg bg-[var(--card)] p-4 text-sm text-[var(--text-tertiary)]">
-                    No wind-direction samples are available in this window.
+                    Not enough wind data to plot a rose in this window.
                   </div>
                 )}
               </div>
