@@ -181,6 +181,7 @@ cd web/react-gui && npm run build             # frontend build
 - **Never** overwrite `/data/db/farming.db` on a running or previously provisioned Pi. `deploy.sh` only seeds on a fresh device (target file absent and no orphaned WAL/SHM/journal sidecars).
 - Before risky repair: timestamped backup at `/data/db/backups/osi-os-<timestamp>` covering `/data/db/`, `/srv/node-red/`, `/usr/lib/node-red/gui/`, `flows.json`, `settings.js`.
 - Schema changes go via migrations or idempotent SQL — never replace `farming.db`.
+- **Stale-stamp recovery:** if `applyPending`/`verifyHead` report fingerprint drift after a crash between a migration commit and its stamp, and the live schema is confirmed correct, re-baseline with `node scripts/restamp-fingerprints.js /data/db/farming.db`. This is the ONLY sanctioned way to overwrite the fingerprint baseline; do not hand-edit `schema_object_fingerprints`.
 - Stale `/srv/node-red/.chirpstack.env` `DEVICE_EUI*` values can override runtime identity; remove during repair. Canonical EUI is uppercase and comes from the helper / UCI path.
 
 ## Production cloud access
