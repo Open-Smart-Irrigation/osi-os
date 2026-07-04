@@ -22,3 +22,14 @@ test('restamp-fingerprints re-baselines a stale stamp', async () => {
   assert.strictEqual((await verifyHead(r, { migrationsDir: dir })).ok, true,
     'restamp makes the live schema the new baseline');
 });
+
+test('restamp-fingerprints refuses a nonexistent DB path (does not create/stamp an empty file)', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'restamp-missing-'));
+  const missing = path.join(root, 'nope.db');
+  let status = 0;
+  try {
+    execFileSync('node', [path.join(__dirname, 'restamp-fingerprints.js'), missing], { encoding: 'utf8' });
+  } catch (e) { status = e.status; }
+  assert.strictEqual(status, 2, 'must exit 2 for a missing DB');
+  assert.strictEqual(fs.existsSync(missing), false, 'must NOT create the file');
+});
