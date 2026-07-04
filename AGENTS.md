@@ -78,6 +78,18 @@ if the shipped flow DOWNGRADES `database/seed-blank.sql` (devices CHECK / trigge
 Replacing the inline boot DDL with the runner ("Option B") is a separate boot-path
 project — see the ADR trigger conditions.
 
+The boot node remains frozen for *schema* changes; the guarded + fail-closed `devices`
+rebuild (2026-07, both profiles) is the sanctioned exception, because it is a safety
+fix rather than new schema behavior: the rebuild only runs when the live `devices`
+CHECK is missing a required `type_id`, copies rows with a plain `INSERT` inside
+`_db.transaction()` (a CHECK violation throws → ROLLBACK, `devices` left intact —
+no more silent `INSERT OR IGNORE` drops), and restores `PRAGMA foreign_keys=ON` in a
+`finally` on every exit path; errors are surfaced via `node.error`, never swallowed.
+Merge gate for any further touch to this block: `verify-runtime-schema-parity.js` +
+`verify-profile-parity.js` + `verify-devices-rebuild-fence.js` +
+`node --test scripts/rehearse-devices-rebuild.test.js` green, plus a production-copy
+rehearsal.
+
 ### Migration risk classes
 
 - `additive` — append-only schema (new tables, columns, indexes, views, triggers). No backup, no transaction fence.

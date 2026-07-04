@@ -15,7 +15,7 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-node@v4
         with:
-          node-version: '20'  # node --test with explicit file paths works on Node 20; bare directory/glob requires Node >=22
+          node-version: '22'  # node:sqlite (used by rehearse-devices-rebuild) requires Node >=22.5
       - name: Install sqlite3 CLI
         run: sudo apt-get update && sudo apt-get install -y sqlite3
       - run: node --test lib/osi-migrate/__tests__/*.test.js
@@ -23,3 +23,5 @@ jobs:
       - run: node scripts/verify-migrations.js
       - run: node scripts/verify-seed-replay.js
       - run: node scripts/verify-runtime-schema-parity.js
+      - run: node scripts/verify-devices-rebuild-fence.js
+      - run: node --test scripts/rehearse-devices-rebuild.test.js

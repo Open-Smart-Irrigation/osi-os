@@ -355,30 +355,33 @@ function expectExcludes(nodeName, needle, description) {
 }
 
 function expectSyncInitDevicesRebuildForeignKeyFence() {
-  const nodeName = 'Sync Init Schema + Triggers';
-  const node = findNodeByName(nodeName);
+  const nodeId = 'sync-init-fn';
+  const node = findNodeById(nodeId);
   if (!node) {
-    fail(`missing function node ${nodeName}`);
+    fail(`missing function node ${nodeId}`);
     return;
   }
   const func = String(node.func || '');
-  const foreignKeysOff = func.indexOf('"PRAGMA foreign_keys=OFF"');
-  const createDevicesNew = func.indexOf('"CREATE TABLE IF NOT EXISTS devices_new');
-  const renameDevicesOld = func.indexOf('"ALTER TABLE devices RENAME TO devices_old"');
-  const renameDevicesNew = func.indexOf('"ALTER TABLE devices_new RENAME TO devices"');
-  const finalDropDevicesOld = func.lastIndexOf('"DROP TABLE IF EXISTS devices_old"');
-  const foreignKeysOn = func.indexOf('"PRAGMA foreign_keys=ON"', finalDropDevicesOld);
-  const safeOrder =
-    foreignKeysOff >= 0 &&
-    createDevicesNew > foreignKeysOff &&
-    renameDevicesOld > createDevicesNew &&
-    renameDevicesNew > renameDevicesOld &&
-    finalDropDevicesOld > renameDevicesNew &&
-    foreignKeysOn > finalDropDevicesOld;
-  if (!safeOrder) {
-    fail(`${nodeName} does not fence the devices table rebuild with PRAGMA foreign_keys=OFF/ON`);
+  const problems = [];
+  if (/INSERT OR IGNORE INTO devices_new/.test(func)) {
+    problems.push('devices copy still uses INSERT OR IGNORE (silent drop)');
+  }
+  if (!/_db\.transaction\s*\(/.test(func)) {
+    problems.push('rebuild not inside _db.transaction()');
+  }
+  if (!/REQUIRED_TYPES[\s\S]*needsRebuild/.test(func)) {
+    problems.push('rebuild not guarded by the live CHECK');
+  }
+  const off = func.indexOf('foreign_keys=OFF');
+  const on = func.indexOf('foreign_keys=ON');
+  const fin = func.indexOf('finally');
+  if (off < 0 || on < 0 || !(fin >= 0 && fin < on)) {
+    problems.push('FK fence must restore foreign_keys=ON in a finally');
+  }
+  if (problems.length) {
+    fail(`${nodeId} devices rebuild fence broken: ${problems.join('; ')}`);
   } else {
-    console.log(`OK ${nodeName} fences devices table rebuild with foreign_keys OFF/ON`);
+    console.log(`OK ${nodeId} guards + fail-closes the devices rebuild (transaction, live-CHECK guard, FK fence in finally)`);
   }
 }
 
