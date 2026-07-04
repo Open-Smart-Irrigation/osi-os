@@ -70,8 +70,9 @@ Broker: `wss://server.opensmartirrigation.org/mqtt`
 ### Boot-DDL freeze (edge schema)
 
 `sync-init-fn` (Node-RED "Sync Init Schema + Triggers") performs schema DDL inline
-on every boot (incl. ~93 ADD COLUMNs, 81 of them redundant with the seed — the cause
-of verify-sync-flow's pre-existing `duplicate column` failures). This node is FROZEN:
+on every boot (incl. ~93 ADD COLUMNs, 81 of them redundant with the seed; the
+verifier's past `duplicate column` failures were the stale upgrade-test baseline,
+issue #84 — not this node). This node is FROZEN:
 do not add new schema behavior there. New schema changes go through the migration
 runner (`lib/osi-migrate`). `scripts/verify-runtime-schema-parity.js` (CI-gated) fails
 if the shipped flow DOWNGRADES `database/seed-blank.sql` (devices CHECK / triggers).
