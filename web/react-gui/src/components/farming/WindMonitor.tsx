@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { lazy, Suspense, useEffect, useMemo, useState } from 'react';
 import {
   Area,
   CartesianGrid,
@@ -10,7 +10,13 @@ import {
   YAxis,
 } from 'recharts';
 import { sensorAPI, type SensorHistoryPoint } from '../../services/api';
-import { formatWindDirection, roundWindDirectionDegrees, toCompassDirection } from '../../utils/wind';
+import { computeWindRose, formatWindDirection, type WindSample } from '../../utils/wind';
+
+const WindRoseChart = lazy(() =>
+  import('./WindRoseChart').then((module) => ({ default: module.WindRoseChart })),
+);
+
+const MIN_ROSE_SAMPLES = 10;
 
 interface Props {
   deveui: string;
@@ -32,6 +38,25 @@ const TIME_WINDOWS = [
   { label: '30 d', hours: 720 },
   { label: '90 d', hours: 2160 },
 ];
+
+class WindRoseErrorBoundary extends React.Component<{ children: React.ReactNode }, { hasError: boolean }> {
+  state = { hasError: false };
+
+  static getDerivedStateFromError() {
+    return { hasError: true };
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="rounded-lg bg-[var(--card)] p-4 text-sm text-[var(--text-tertiary)]">
+          Unable to load wind rose chart.
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
 
 function fmtTick(iso: string, hours: number): string {
   const d = new Date(iso);
@@ -82,6 +107,50 @@ function mergeSeries(
   return Array.from(map.values()).sort((left, right) => new Date(left.t).getTime() - new Date(right.t).getTime());
 }
 
+function timestampMs(timestamp: string): number | null {
+  const value = new Date(timestamp).getTime();
+  return Number.isFinite(value) ? value : null;
+}
+
+function finiteRows(rows: SensorHistoryPoint[]): Array<SensorHistoryPoint & { ms: number }> {
+  return rows
+    .map((row) => ({ ...row, ms: timestampMs(row.t) }))
+    .filter((row): row is SensorHistoryPoint & { ms: number } => row.ms != null && Number.isFinite(row.value))
+    .sort((left, right) => left.ms - right.ms);
+}
+
+function pairWindRoseSamples(speedRows: SensorHistoryPoint[], directionRows: SensorHistoryPoint[]): WindSample[] {
+  const speed = finiteRows(speedRows);
+  const direction = finiteRows(directionRows);
+  if (!speed.length || !direction.length) {
+    return [];
+  }
+
+  const directionByTimestamp = new Map(direction.map((row) => [row.t, row]));
+  const lastStep = speed.length > 1 ? Math.max(0, speed[speed.length - 1].ms - speed[speed.length - 2].ms) : 0;
+  let directionIndex = 0;
+
+  return speed.flatMap((speedRow, index): WindSample[] => {
+    const exact = directionByTimestamp.get(speedRow.t);
+    if (exact) {
+      return [{ wind_speed_mps: speedRow.value, wind_direction_deg: exact.value }];
+    }
+
+    const bucketStart = speedRow.ms;
+    const bucketEnd = speed[index + 1]?.ms ?? (lastStep > 0 ? bucketStart + lastStep : bucketStart + 1);
+    while (directionIndex < direction.length && direction[directionIndex].ms < bucketStart) {
+      directionIndex += 1;
+    }
+
+    const bucketDirection = direction[directionIndex];
+    if (!bucketDirection || bucketDirection.ms >= bucketEnd) {
+      return [];
+    }
+
+    return [{ wind_speed_mps: speedRow.value, wind_direction_deg: bucketDirection.value }];
+  });
+}
+
 const WindTooltip = ({ active, payload, label, hours }: any) => {
   if (!active || !payload?.length) return null;
   const point = payload[0]?.payload as WindHistoryPoint | undefined;
@@ -106,6 +175,7 @@ const WindTooltip = ({ active, payload, label, hours }: any) => {
 export const WindMonitor: React.FC<Props> = ({ deveui, deviceName, onClose }) => {
   const [hours, setHours] = useState(24);
   const [data, setData] = useState<WindHistoryPoint[]>([]);
+  const [windRoseSamples, setWindRoseSamples] = useState<WindSample[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -122,6 +192,7 @@ export const WindMonitor: React.FC<Props> = ({ deveui, deviceName, onClose }) =>
       .then(([speedRows, gustRows, directionRows]) => {
         if (!cancelled) {
           setData(mergeSeries(speedRows, gustRows, directionRows));
+          setWindRoseSamples(pairWindRoseSamples(speedRows, directionRows));
           setLoading(false);
         }
       })
@@ -155,18 +226,7 @@ export const WindMonitor: React.FC<Props> = ({ deveui, deviceName, onClose }) =>
   const currentDirection = directionPoints.length ? directionPoints[directionPoints.length - 1].wind_direction_deg : null;
   const hasChartData = speedValues.length > 0 || gustValues.length > 0;
   const hasAnyData = hasChartData || directionPoints.length > 0;
-
-  const sampledDirectionPoints = useMemo(() => {
-    if (!directionPoints.length) return [];
-    const maxSamples = 10;
-    const step = Math.max(1, Math.ceil(directionPoints.length / maxSamples));
-    const sampled = directionPoints.filter((_, index) => index % step === 0);
-    const lastPoint = directionPoints[directionPoints.length - 1];
-    if (sampled[sampled.length - 1]?.t !== lastPoint.t) {
-      sampled.push(lastPoint);
-    }
-    return sampled;
-  }, [directionPoints]);
+  const windRose = useMemo(() => computeWindRose(windRoseSamples), [windRoseSamples]);
 
   return (
     <div
@@ -293,38 +353,26 @@ export const WindMonitor: React.FC<Props> = ({ deveui, deviceName, onClose }) =>
 
               <div>
                 <div className="mb-3 flex items-center justify-between gap-3">
-                  <h3 className="font-bold text-[var(--text)]">Direction history</h3>
-                  <p className="text-xs text-[var(--text-tertiary)]">{directionPoints.length} samples</p>
+                  <h3 className="font-bold text-[var(--text)]">Wind rose (direction × speed)</h3>
+                  <p className="text-xs text-[var(--text-tertiary)]">
+                    {windRose.validSamples} samples · {Math.round(windRose.calmPct)}% calm
+                  </p>
                 </div>
-                {sampledDirectionPoints.length > 0 ? (
-                  <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
-                    {sampledDirectionPoints.map((point) => {
-                      const rounded = roundWindDirectionDegrees(point.wind_direction_deg);
-                      const compass = toCompassDirection(point.wind_direction_deg);
-                      return (
-                        <div key={point.t} className="rounded-lg border border-[var(--border)] bg-[var(--card)] p-3">
-                          <div className="mb-2 flex items-center gap-3">
-                            <span
-                              className="inline-block text-2xl text-[var(--primary)]"
-                              style={{ transform: `rotate(${rounded ?? 0}deg)` }}
-                            >
-                              ↑
-                            </span>
-                            <div>
-                              <p className="font-semibold text-[var(--text)]">{compass ?? '—'}</p>
-                              <p className="text-xs text-[var(--text-tertiary)]">
-                                {rounded != null ? `${rounded}°` : '—'}
-                              </p>
-                            </div>
-                          </div>
-                          <p className="text-xs text-[var(--text-tertiary)]">{fmtTick(point.t, hours)}</p>
+                {windRose.validSamples >= MIN_ROSE_SAMPLES ? (
+                  <WindRoseErrorBoundary key={`${hours}-${windRose.validSamples}`}>
+                    <Suspense
+                      fallback={
+                        <div className="flex h-[340px] items-center justify-center">
+                          <div className="h-8 w-8 animate-spin rounded-full border-4 border-[var(--primary)] border-t-transparent" />
                         </div>
-                      );
-                    })}
-                  </div>
+                      }
+                    >
+                      <WindRoseChart rose={windRose} />
+                    </Suspense>
+                  </WindRoseErrorBoundary>
                 ) : (
                   <div className="rounded-lg bg-[var(--card)] p-4 text-sm text-[var(--text-tertiary)]">
-                    No wind-direction samples are available in this window.
+                    Not enough wind data to plot a rose in this window.
                   </div>
                 )}
               </div>
