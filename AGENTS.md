@@ -78,6 +78,12 @@ if the shipped flow DOWNGRADES `database/seed-blank.sql` (devices CHECK / trigge
 Replacing the inline boot DDL with the runner ("Option B") is a separate boot-path
 project — see the ADR trigger conditions.
 
+### Migration risk classes
+
+- `additive` — append-only schema (new tables, columns, indexes, views, triggers). No backup, no transaction fence.
+- `destructive` — schema mutation (drop/rename/rebuild/alter). Requires `writersStopped=true` (deploy pre-start), toggles `PRAGMA foreign_keys` outside the transaction, and takes a backup. Fenced: `BEGIN`/`COMMIT` inside the FK toggle.
+- `data` — data backfill/mutation: takes an online backup, applies in a normal transaction (no FK fence, no writers-stopped gate). Run at deploy (a long backfill holds the write lock past the 5s runtime busy timeout); write it idempotently against the pre-migration row format.
+
 ### Chameleon calibration global table
 
 - `chameleon_calibrations` — keyed by `array_id` (uppercase 16-char hex). Source via.farm; bundled into firmware seed before release.
