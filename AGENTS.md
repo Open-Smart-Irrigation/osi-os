@@ -78,6 +78,12 @@ if the shipped flow DOWNGRADES `database/seed-blank.sql` (devices CHECK / trigge
 Replacing the inline boot DDL with the runner ("Option B") is a separate boot-path
 project — see the ADR trigger conditions.
 
+### Migration risk classes
+
+- `additive` — append-only schema (new tables, columns, indexes, views, triggers). No backup, no transaction fence.
+- `destructive` — schema mutation (drop/rename/rebuild/alter). Requires `writersStopped=true` (deploy pre-start), toggles `PRAGMA foreign_keys` outside the transaction, and takes a backup. Fenced: `BEGIN`/`COMMIT` inside the FK toggle.
+- `data` — data backfill/mutation: takes an online backup, applies in a normal transaction (no FK fence, no writers-stopped gate). Run at deploy (a long backfill holds the write lock past the 5s runtime busy timeout); write it idempotently against the pre-migration row format.
+
 ### Chameleon calibration global table
 
 - `chameleon_calibrations` — keyed by `array_id` (uppercase 16-char hex). Source via.farm; bundled into firmware seed before release.
@@ -181,6 +187,7 @@ cd web/react-gui && npm run build             # frontend build
 - **Never** overwrite `/data/db/farming.db` on a running or previously provisioned Pi. `deploy.sh` only seeds on a fresh device (target file absent and no orphaned WAL/SHM/journal sidecars).
 - Before risky repair: timestamped backup at `/data/db/backups/osi-os-<timestamp>` covering `/data/db/`, `/srv/node-red/`, `/usr/lib/node-red/gui/`, `flows.json`, `settings.js`.
 - Schema changes go via migrations or idempotent SQL — never replace `farming.db`.
+- **Stale-stamp recovery:** if `applyPending`/`verifyHead` report fingerprint drift after a crash between a migration commit and its stamp, and the live schema is confirmed correct, re-baseline with `node scripts/restamp-fingerprints.js /data/db/farming.db`. This is the ONLY sanctioned way to overwrite the fingerprint baseline; do not hand-edit `schema_object_fingerprints`.
 - Stale `/srv/node-red/.chirpstack.env` `DEVICE_EUI*` values can override runtime identity; remove during repair. Canonical EUI is uppercase and comes from the helper / UCI path.
 
 ## Production cloud access
