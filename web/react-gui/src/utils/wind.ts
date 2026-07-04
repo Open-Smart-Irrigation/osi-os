@@ -82,6 +82,10 @@ export function computeWindRose(samples: WindSample[], options: WindRoseOptions 
   const speedBins = options.speedBins ?? DEFAULT_WIND_SPEED_BINS;
   const calmThreshold = options.calmThreshold ?? DEFAULT_CALM_THRESHOLD;
 
+  if (speedBins.length === 0) {
+    throw new Error('speedBins must contain at least one bin');
+  }
+
   const counts: number[][] = COMPASS_POINTS.map(() => speedBins.map(() => 0));
   let validSamples = 0;
   let calmSamples = 0;

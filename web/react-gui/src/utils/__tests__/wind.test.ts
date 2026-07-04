@@ -90,6 +90,13 @@ describe('computeWindRose', () => {
     expect(rose.calmSamples).toBe(1);
   });
 
+  it('rejects an empty custom speed-bin set', () => {
+    expect(() => computeWindRose(
+      [{ wind_speed_mps: 3, wind_direction_deg: 90 }],
+      { speedBins: [] },
+    )).toThrow('speedBins must contain at least one bin');
+  });
+
   it('reports 100% calm and zero petals when every sample is calm', () => {
     const rose = computeWindRose([
       { wind_speed_mps: 0.1, wind_direction_deg: 10 },

@@ -10,7 +10,7 @@ import {
   YAxis,
 } from 'recharts';
 import { sensorAPI, type SensorHistoryPoint } from '../../services/api';
-import { computeWindRose, formatWindDirection } from '../../utils/wind';
+import { computeWindRose, formatWindDirection, type WindSample } from '../../utils/wind';
 
 const WindRoseChart = lazy(() =>
   import('./WindRoseChart').then((module) => ({ default: module.WindRoseChart })),
@@ -38,6 +38,25 @@ const TIME_WINDOWS = [
   { label: '30 d', hours: 720 },
   { label: '90 d', hours: 2160 },
 ];
+
+class WindRoseErrorBoundary extends React.Component<{ children: React.ReactNode }, { hasError: boolean }> {
+  state = { hasError: false };
+
+  static getDerivedStateFromError() {
+    return { hasError: true };
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="rounded-lg bg-[var(--card)] p-4 text-sm text-[var(--text-tertiary)]">
+          Unable to load wind rose chart.
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
 
 function fmtTick(iso: string, hours: number): string {
   const d = new Date(iso);
@@ -88,6 +107,50 @@ function mergeSeries(
   return Array.from(map.values()).sort((left, right) => new Date(left.t).getTime() - new Date(right.t).getTime());
 }
 
+function timestampMs(timestamp: string): number | null {
+  const value = new Date(timestamp).getTime();
+  return Number.isFinite(value) ? value : null;
+}
+
+function finiteRows(rows: SensorHistoryPoint[]): Array<SensorHistoryPoint & { ms: number }> {
+  return rows
+    .map((row) => ({ ...row, ms: timestampMs(row.t) }))
+    .filter((row): row is SensorHistoryPoint & { ms: number } => row.ms != null && Number.isFinite(row.value))
+    .sort((left, right) => left.ms - right.ms);
+}
+
+function pairWindRoseSamples(speedRows: SensorHistoryPoint[], directionRows: SensorHistoryPoint[]): WindSample[] {
+  const speed = finiteRows(speedRows);
+  const direction = finiteRows(directionRows);
+  if (!speed.length || !direction.length) {
+    return [];
+  }
+
+  const directionByTimestamp = new Map(direction.map((row) => [row.t, row]));
+  const lastStep = speed.length > 1 ? Math.max(0, speed[speed.length - 1].ms - speed[speed.length - 2].ms) : 0;
+  let directionIndex = 0;
+
+  return speed.flatMap((speedRow, index): WindSample[] => {
+    const exact = directionByTimestamp.get(speedRow.t);
+    if (exact) {
+      return [{ wind_speed_mps: speedRow.value, wind_direction_deg: exact.value }];
+    }
+
+    const bucketStart = speedRow.ms;
+    const bucketEnd = speed[index + 1]?.ms ?? (lastStep > 0 ? bucketStart + lastStep : bucketStart + 1);
+    while (directionIndex < direction.length && direction[directionIndex].ms < bucketStart) {
+      directionIndex += 1;
+    }
+
+    const bucketDirection = direction[directionIndex];
+    if (!bucketDirection || bucketDirection.ms >= bucketEnd) {
+      return [];
+    }
+
+    return [{ wind_speed_mps: speedRow.value, wind_direction_deg: bucketDirection.value }];
+  });
+}
+
 const WindTooltip = ({ active, payload, label, hours }: any) => {
   if (!active || !payload?.length) return null;
   const point = payload[0]?.payload as WindHistoryPoint | undefined;
@@ -112,6 +175,7 @@ const WindTooltip = ({ active, payload, label, hours }: any) => {
 export const WindMonitor: React.FC<Props> = ({ deveui, deviceName, onClose }) => {
   const [hours, setHours] = useState(24);
   const [data, setData] = useState<WindHistoryPoint[]>([]);
+  const [windRoseSamples, setWindRoseSamples] = useState<WindSample[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -128,6 +192,7 @@ export const WindMonitor: React.FC<Props> = ({ deveui, deviceName, onClose }) =>
       .then(([speedRows, gustRows, directionRows]) => {
         if (!cancelled) {
           setData(mergeSeries(speedRows, gustRows, directionRows));
+          setWindRoseSamples(pairWindRoseSamples(speedRows, directionRows));
           setLoading(false);
         }
       })
@@ -161,7 +226,7 @@ export const WindMonitor: React.FC<Props> = ({ deveui, deviceName, onClose }) =>
   const currentDirection = directionPoints.length ? directionPoints[directionPoints.length - 1].wind_direction_deg : null;
   const hasChartData = speedValues.length > 0 || gustValues.length > 0;
   const hasAnyData = hasChartData || directionPoints.length > 0;
-  const windRose = useMemo(() => computeWindRose(data), [data]);
+  const windRose = useMemo(() => computeWindRose(windRoseSamples), [windRoseSamples]);
 
   return (
     <div
@@ -294,15 +359,17 @@ export const WindMonitor: React.FC<Props> = ({ deveui, deviceName, onClose }) =>
                   </p>
                 </div>
                 {windRose.validSamples >= MIN_ROSE_SAMPLES ? (
-                  <Suspense
-                    fallback={
-                      <div className="flex h-[340px] items-center justify-center">
-                        <div className="h-8 w-8 animate-spin rounded-full border-4 border-[var(--primary)] border-t-transparent" />
-                      </div>
-                    }
-                  >
-                    <WindRoseChart rose={windRose} />
-                  </Suspense>
+                  <WindRoseErrorBoundary key={`${hours}-${windRose.validSamples}`}>
+                    <Suspense
+                      fallback={
+                        <div className="flex h-[340px] items-center justify-center">
+                          <div className="h-8 w-8 animate-spin rounded-full border-4 border-[var(--primary)] border-t-transparent" />
+                        </div>
+                      }
+                    >
+                      <WindRoseChart rose={windRose} />
+                    </Suspense>
+                  </WindRoseErrorBoundary>
                 ) : (
                   <div className="rounded-lg bg-[var(--card)] p-4 text-sm text-[var(--text-tertiary)]">
                     Not enough wind data to plot a rose in this window.
