@@ -14,6 +14,12 @@ for (const fp of FLOWS) {
   if (!/REQUIRED_TYPES[\s\S]*needsRebuild/.test(func)) problems.push(`${rel}: rebuild not guarded by the live CHECK`);
   const off = func.indexOf('foreign_keys=OFF'), on = func.indexOf('foreign_keys=ON'), fin = func.indexOf('finally');
   if (off < 0 || on < 0 || !(fin >= 0 && fin < on)) problems.push(`${rel}: FK fence must restore foreign_keys=ON in a finally`);
+  // Stale-table safety: a leftover devices_new from a prior crash must be dropped first.
+  if (!/DROP TABLE IF EXISTS devices_new/.test(func)) problems.push(`${rel}: rebuild must DROP TABLE IF EXISTS devices_new before rebuilding`);
+  // On-device safety: only t.* inside the transaction executor; a facade-level _db.* there
+  // deadlocks on-device (separate operationQueue slot waiting on the in-flight transaction).
+  const txm = /_db\.transaction\(async \(t\) => \{([\s\S]*?)\}\);/.exec(func);
+  if (txm && /_db\./.test(txm[1])) problems.push(`${rel}: no _db.* calls inside the transaction executor (use t.*; _db.* deadlocks on-device)`);
 }
 if (problems.length) { console.error('verify-devices-rebuild-fence: FAIL'); problems.forEach((p) => console.error('  - ' + p)); process.exit(1); }
 console.log(`verify-devices-rebuild-fence: OK (${FLOWS.length} flows)`); process.exit(0);

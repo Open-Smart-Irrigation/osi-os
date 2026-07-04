@@ -33,3 +33,10 @@ test('legit upgrade: rebuild succeeds, rows preserved, CHECK gains AQUASCOPE_LOR
   assert.strictEqual(code, 0, JSON.stringify(json));
   assert.strictEqual(json.hasLorain, true);
 });
+
+test('extra drifted type: set-equality guard rebuilds and converges the CHECK (drops the extra), rows preserved', () => {
+  const { json, code } = runCase('extra-type');
+  assert.strictEqual(code, 0, JSON.stringify(json));
+  assert.strictEqual(json.skipped, false); // must NOT tolerate the extra type (RED under the old missing-only guard)
+  assert.strictEqual(json.rowsPreserved, true);
+});

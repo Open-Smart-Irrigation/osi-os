@@ -71,6 +71,11 @@ function seed(db, mode) {
   } else if (mode === 'legit-upgrade') {
     reseedDevicesCheck(db, REQUIRED.filter((t) => t !== 'AQUASCOPE_LORAIN'));
     sh(db, row('AAAA000000000005', 'KIWI_SENSOR') + row('AAAA000000000006', 'STREGA_VALVE'));
+  } else if (mode === 'extra-type') {
+    // All 6 required + an extra drifted type, no offending rows: the set-equality guard must
+    // rebuild and CONVERGE the CHECK back to exactly the 6 canonical types (drop the extra).
+    reseedDevicesCheck(db, REQUIRED.concat(['BOGUS_TYPE']));
+    sh(db, row('AAAA000000000007', 'KIWI_SENSOR') + row('AAAA000000000008', 'STREGA_VALVE'));
   } else if (mode !== 'existing') throw new Error(`unknown case ${mode}`);
 }
 
@@ -100,6 +105,8 @@ async function main() {
   if (mode === 'healthy' || mode === 'existing') result.ok = result.skipped && result.rowsPreserved;
   else if (mode === 'would-drop') result.ok = result.rowsPreserved && result.errorSurfaced; // no silent drop, surfaced as ABORTED
   else if (mode === 'legit-upgrade') result.ok = result.rowsPreserved && result.hasLorain;
+  // extra-type: guard must NOT skip (it rebuilt), rows preserved, and the drifted extra type is gone.
+  else if (mode === 'extra-type') result.ok = !result.skipped && result.rowsPreserved && !/'BOGUS_TYPE'/.test(after.ddl);
   console.log(JSON.stringify(result));
   process.exit(result.ok ? 0 : 1);
 }
