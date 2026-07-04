@@ -38,7 +38,7 @@ We would revisit a declarative schema model (the rejected approach) only if **al
 
 ## Consequences
 
-- The edge gains a real, auditable migration system it currently lacks, eliminating the every-boot mutation class that caused the history-loss incident.
+- The edge gains a real, auditable migration system it currently lacks. The boot node's every-boot mutation class (which caused the history-loss incident) is de-fanged by the guarded fail-closed rebuild (see the boot-node-devices-rebuild plan) and will be fully eliminated once the boot-path cutover (Option B) moves DDL to the runner.
 - Each repo evolves its own DDL freely; coordination happens at the payload boundary, where it belongs.
 - Two efforts result: Spec 1 (edge migration foundation) is the safety-critical, pre-production deliverable; Spec 2's narrow **Tranche A** (command/event codegen + merge-gate CI) runs **in parallel** to close the live contract-drift class, while the rest of Spec 2 (full payload contract, release-compatibility, versioning — **Tranche B**) follows later.
 - Column renames (e.g. `deveui`→`device_eui`) and any edge↔cloud `contract_version` negotiation are out of scope here and, if pursued, sit behind the Spec 2 contract once it exists.
