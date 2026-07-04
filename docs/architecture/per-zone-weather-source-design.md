@@ -71,8 +71,11 @@ Behind it, each source is a **`WeatherProvider`**:
 1. `auto` → the existing cascade (OpenAgri → AgroMonitoring → Open-Meteo).
 2. explicit source `X` → try `X`; on empty/error → Auto cascade.
 3. `local` → S2120 for current/measured; **forecast** → Auto cascade.
-4. The result carries `requestedSource` and `actualSource`; consumers that store a source label (v6's
-   `vpdSource`) record `actualSource`.
+4. The cloud result surfaces **`actualSource`** (already carried by `WeatherSnapshot.source` and the
+   current/forecast types); consumers that store a source label (v6's `vpdSource`) record it.
+   **`requestedSource` is not a cloud return value** — the "Source: X (fallback from Y)" string is composed
+   at the **edge** (Phase 3), which knows the requested source from the zone config and the actual source
+   from the response. For a merged `auto` forecast, `actualSource` is the merge's primary label (approximate).
 
 `WeatherLookupService`'s cascade becomes the resolver's internal "auto" strategy (kept, not duplicated).
 `WeatherProperties` (endpoints/keys/cache) is unchanged and reused.

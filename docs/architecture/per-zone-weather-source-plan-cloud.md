@@ -163,14 +163,23 @@ git commit -m "feat(weather): WeatherSource enum + IrrigationZone.weatherSource"
 - Consumes: `IrrigationZone.setWeatherSource(String)`.
 - Produces: edge→cloud sync of `weather_source`; unknown values normalized to `auto` on write.
 
-- [ ] **Step 1: Add the mapping** where the zone-config upsert sets `calibration_key`/`crop_type` (near `zone.setCalibrationKey(...)`), add:
+- [ ] **Step 1: Add the mapping** where the zone-config upsert sets `calibration_key`/`crop_type`
+(`EdgeSyncService.java:691-692`), add — **preserve-when-absent** (an edge that omits the field must NOT
+reset a set value; the edge phase ships later, so every current sync omits it):
 
 ```java
-        zone.setWeatherSource(
-                WeatherSource.fromKey(str(payload, "weather_source", "weatherSource")).key());
+        zone.setWeatherSource(Optional.ofNullable(str(payload, "weather_source", "weatherSource"))
+                .map(v -> WeatherSource.fromKey(v).key())
+                .orElse(zone.getWeatherSource()));
 ```
 
-> Using `WeatherSource.fromKey(...).key()` normalizes any unknown/blank value to `"auto"` defensively. Ensure `org.osi.server.analytics.WeatherSource` is imported.
+> `.map(WeatherSource.fromKey(...).key())` normalizes any unknown value to `"auto"`; `.orElse(existing)`
+> keeps the current value when the payload omits the key. Ensure `org.osi.server.analytics.WeatherSource`
+> and `java.util.Optional` are imported.
+
+- [ ] **Step 1b: Add a regression test** proving a `ZONE_CONFIG_UPSERTED` payload WITHOUT `weather_source`
+leaves an already-set value intact (e.g. pre-set a zone to `"meteoswiss"`, sync a payload lacking the key,
+assert it is still `"meteoswiss"`), and a payload WITH the key applies/normalizes it.
 
 - [ ] **Step 2: Compile + run the sync tests**
 
@@ -592,6 +601,27 @@ git commit -m "feat(weather): prediction honors authoritative weather_source"
 - [ ] Manual/integration: set a test zone to each source; confirm the resolved provenance (`vpdSource`, tab source label) matches, and MeteoSwiss outside CH falls back.
 
 ---
+
+## Revisions from architecture review (apply before executing the referenced tasks)
+
+These corrections came from a review against the live code; they are load-bearing.
+
+- **R1 — Task 3 (fixed inline):** preserve-when-absent sync (an edge that omits the field must not reset a set value).
+- **R2 — Task 5 test/constructor:** `MeteoSwissWeatherService` is a Spring service constructed like `OpenMeteoService` (a `RestTemplateBuilder`/`RestTemplate` dependency), so the no-arg `new MeteoSwissWeatherService()` in the sketch test won't compile. Make the coverage guard a package-private `static boolean withinSwissCoverage(double lat, double lon)` and test it directly (no construction/network): `withinSwissCoverage(0.3, 32.6)` false, `withinSwissCoverage(47.0, 8.0)` true; test `source()` on an instance built with a real `RestTemplateBuilder`.
+- **R3 — Task 7: delete `WeatherLookupService`.** After the dendro refactor it has zero production callers; a single entry point must not leave a second orphaned one. Delete it and migrate its test's auto-cascade assertions into `WeatherResolverTest`. The resolver's `dayProviderChain` becomes the sole auto-cascade definition.
+- **R4 — Provenance de-scoped from the cloud.** The resolver returns data with `actualSource` already carried by `WeatherSnapshot.source` (and the current/forecast types). The "Source: X (fallback from Y)" string is composed at the **edge** (Phase 3), which knows the requested source (zone config) and the actual source (response); no `ResolvedWeather<T>` wrapper is added on the cloud. For a merged auto forecast, `actualSource` is the merge's primary label (approximate — documented).
+- **R5 — Task 8 is the highest-risk task; make the `auto` invariant explicit.** `ZoneEnvironmentService` is not a simple chain:
+  - **Cache key must include the source** (`ZoneEnvironmentService.java:814-819` is `kind|edge/cloud|lat|lon|tz`) or same-coordinate zones with different sources collide and a source change serves stale data for 30/120 min.
+  - **AUTO forecast is a MERGE, not first-non-empty.** Open-Meteo is always merged in because it is the only ET0 supplier (OpenAgri/Agro hardcode `et0=null`: `OpenAgriWeatherService.java:411-420`, `AgroMonitoringWeatherService.java:369-378`) and `buildAgronomicEnvironment` reads `et0MmDay()` (`:603`) → ETc → water action. The resolver's `auto` forecast must invoke the existing `mergeForecasts` pipeline. Corollary (spec-consistent, document as a capability exception like local-forecast): an explicit `openagri`/`agromonitoring` zone loses ET0 → water-needed degrades to the heuristic.
+  - **Resolved location, not zone lat/lon:** current/forecast run on `resolveLocation(zone,…)` which falls back to **gateway coordinates** when zone lat/lon are null (`:743-766`); the resolver's current/forecast entry points must take the resolved location (or absorb `resolveLocation` + `GatewayLocationRepository`), not gate on `zone.getLatitude()==null`.
+  - **Timezone parity:** `resolveTimezone` falls back to `ZoneId.of("UTC")` (id `"UTC"`) vs the day path's `ZoneOffset.UTC` (id `"Z"`); `getId()` is an API query param and cache-key part — keep the service resolving tz and pass it in.
+  - Keep caching + stale-fallback in the service (`:647-650, :678-681`); the resolver returns fresh values only.
+  - **LOCAL current is unspecified — recommend:** scope `local` to "S2120 for the Local-environment panel + cascade for API current/forecast" for the first cut (avoids adding `WeatherStationZoneRepository`/`DeviceRepository` to the resolver and synthesizing a `WeatherCurrentData(source="local")`); or add a dedicated LOCAL-current task if a synthesized current is wanted.
+  - **Test churn:** `ZoneEnvironmentServiceTest` constructs positionally at **7 sites** (`:38-51`) — all need the resolver arg; assert an `auto` zone yields identical output to before.
+- **R6 — Task 9: cover BOTH forcing paths via a decision table.** The observed blend (`:317-381`) is half of it: `buildForecastForcing` (`:400-430`) is untouched → would ignore `weather_source` (spec violation), and its location comes from `ZoneEffectiveGeometryService`. The observed path runs on `getDailyArchive → DailyWeatherRecord`, a method **only** on Agro + OpenMeteo (not on `WeatherProvider`; OpenAgri/MeteoSwiss have no archive), so "use only the selected source" is unimplementable for `openagri`/`meteoswiss` — decide the archive-less fallback and whether `WeatherProvider` gains an optional archive capability. AUTO observed is per-field merged (`mergeArchiveRecord :383-398`) with rain precedence station→`environment.getRainfallMm()`→archive (`:357-364`). Produce a table: source × {tempMin, tempMax, rain, et0} × {observed, forecast} → which provider supplies it and whether `ZoneDailyEnvironment` rainfall is still consulted. **Test churn:** `PredictionInputAssemblerTest` constructs at **2 sites** (`:123, :526`).
+- **R7 — Coverage note:** `DendroController` (`:82`), `HistoryCloudExtensionService` (`:97`), `IrrigationZoneController` (`:577`) read weather only via `ZoneEnvironmentService.buildSummary` → covered transitively by Task 8 (no separate task).
+
+**Gate:** R1 (done), R2/R3/R4 are mechanical. **Tasks 8 (R5) and 9 (R6) are "design-complete required" gates** — fill in the explicit invariants / decision table before an implementer starts them.
 
 ## Edge (spec Phase 3) — separate plan
 
