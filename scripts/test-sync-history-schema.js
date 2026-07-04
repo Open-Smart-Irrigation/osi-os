@@ -7,12 +7,23 @@ const { execFileSync } = require('child_process');
 const repoRoot = path.resolve(__dirname, '..');
 const currentSchema = fs.readFileSync(path.join(repoRoot, 'database', 'seed-blank.sql'), 'utf8');
 const migrationSql = fs.readFileSync(path.join(repoRoot, 'database', 'migrations', '2026-06-28-history-sync-v1.sql'), 'utf8');
-const baseRef = process.env.OSI_HISTORY_BASE_REF || 'main';
+// Upgrade-path baseline: last main commit whose seed-blank.sql predates the
+// 2026-06-28 history-sync-v1 migration (682f7c1f^1). 'main' stopped being a
+// valid baseline when PR #70 merged the migrated schema into the seed itself.
+// Shallow (depth-1) clones cannot resolve this SHA and SKIP the upgrade leg.
+// Assertions added to assertHistorySchemaAndTriggers must not depend on
+// post-baseline schema unless gated on the label, or this leg fails spuriously.
+const PRE_HISTORY_SYNC_BASE_SHA = '0d925c6f16a3a8145bf464737783e4baff41eeea';
+const baseRef = process.env.OSI_HISTORY_BASE_REF || PRE_HISTORY_SYNC_BASE_SHA;
 let mainSchema = null;
 try {
-  mainSchema = execFileSync('git', ['show', `${baseRef}:database/seed-blank.sql`], { encoding: 'utf8' });
+  mainSchema = execFileSync('git', ['show', `${baseRef}:database/seed-blank.sql`], { cwd: repoRoot, encoding: 'utf8' });
 } catch (error) {
   console.warn(`SKIP upgrade-path test: cannot read ${baseRef}:database/seed-blank.sql (${error.message})`);
+}
+if (mainSchema && mainSchema.includes('data_invalid')) {
+  console.warn(`SKIP upgrade-path test: ${baseRef}:database/seed-blank.sql already contains the history-sync-v1 columns; set OSI_HISTORY_BASE_REF to a pre-migration commit to restore upgrade coverage`);
+  mainSchema = null;
 }
 const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'osi-sync-history-schema-'));
 let dbPath = '';
@@ -211,7 +222,7 @@ try {
       "INSERT INTO irrigation_zones(id, user_id, name, zone_uuid, gateway_device_eui, sync_version) VALUES(90, 90, 'Linked Zone', 'zone-linked', '0016C001F11715E2', 1)",
       migrationSql
     ]);
-    assertHistorySchemaAndTriggers('main seed + history migration');
+    assertHistorySchemaAndTriggers('base seed + history migration');
   }
 
   console.log('OK sync history schema');
