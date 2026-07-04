@@ -23,6 +23,7 @@ analytics — reads from the zone's selected source, consistently, on both the c
 | Default | `auto` = today's cascade (OpenAgri → AgroMonitoring → Open-Meteo). Zero behavior change for existing zones. |
 | Fallback | **Preferred + transparent fallback:** try the selected source; on no data, fall back to the Auto cascade. Always surface which source actually answered (provenance). |
 | `local` semantics | S2120 supplies **measured/current** only; forecast falls back to the Auto cascade (S2120 has no forecast). |
+| Blend consumers | **Explicit source is authoritative** — for consumers that today blend sources (`ZoneEnvironmentService` forecast merge; `PredictionInputAssembler` S2120-station + AgroMonitoring + Open-Meteo blend), an explicit `weather_source` **replaces the blend** with that provider (+ transparent fallback). `auto` preserves today's blend/cascade exactly (zero change for existing zones). `local` = S2120 measured + cascade forecast. |
 | MeteoSwiss coverage | Switzerland only; returns empty elsewhere → fallback. Shown in the UI with a "Switzerland only" note. |
 | Edge MeteoSwiss | **Full parity** — the edge gets a real MeteoSwiss fetcher too (not deferred). |
 | Architecture | **Single source-aware resolver** per side; existing per-provider services become pluggable providers behind it. |
