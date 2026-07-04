@@ -33,3 +33,40 @@ test('linked + delivered + no pending history = healthy; a reject or pending his
   assert.strictEqual(res.pendingHistory, 1);
   assert.strictEqual(res.healthy, false);
 });
+
+test('CLI: nonexistent DB path exits non-zero with clean JSON error (not stack trace)', () => {
+  assert.throws(
+    () => execFileSync('node', ['scripts/check-sync-parity.js', '/nonexistent/nope.db'], { encoding: 'utf8' }),
+    (e) => {
+      assert.strictEqual(e.status, 1);
+      const parsed = JSON.parse(e.stdout);
+      assert.strictEqual(parsed.healthy, false);
+      assert(typeof parsed.error === 'string');
+      return true;
+    }
+  );
+});
+
+test('rejected_at non-null flips healthy to false and increments rejected counter', () => {
+  const db = mkDb(1);
+  execFileSync('sqlite3', ['-bail', db], { input:
+    "INSERT INTO sync_outbox VALUES ('a','2026-07-03T00:00:00Z','2026-07-03T00:00:01Z',NULL);" });
+  assert.strictEqual(checkSyncParity(db, { maxPendingAgeSec: 3600 }).healthy, true);
+
+  execFileSync('sqlite3', ['-bail', db], { input:
+    "INSERT INTO sync_outbox VALUES ('b','2026-07-03T00:00:00Z',NULL,'2026-07-03T00:00:02Z');" });
+  const res = checkSyncParity(db, { maxPendingAgeSec: 3600 });
+  assert.strictEqual(res.rejected, 1);
+  assert.strictEqual(res.healthy, false);
+});
+
+test('missing cloud link row → linked=false and healthy=false', () => {
+  const db = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'par-')), 'farming.db');
+  execFileSync('sqlite3', ['-bail', db], { input:
+    'CREATE TABLE sync_link_state (peer_node TEXT PRIMARY KEY, linked INTEGER NOT NULL DEFAULT 0);' +
+    'CREATE TABLE sync_outbox (event_uuid TEXT PRIMARY KEY, occurred_at TEXT NOT NULL, delivered_at TEXT, rejected_at TEXT);' +
+    'CREATE TABLE sync_history_dirty_keys (peer_node TEXT, table_name TEXT, row_key TEXT, changed_at TEXT NOT NULL, status TEXT NOT NULL DEFAULT \'pending\', PRIMARY KEY(peer_node,table_name,row_key));' });
+  const res = checkSyncParity(db, { maxPendingAgeSec: 3600 });
+  assert.strictEqual(res.linked, false);
+  assert.strictEqual(res.healthy, false);
+});

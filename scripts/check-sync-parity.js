@@ -27,9 +27,14 @@ function checkSyncParity(dbPath, { maxPendingAgeSec = 3600 } = {}) {
 }
 
 if (require.main === module) {
-  const res = checkSyncParity(process.argv[2] || '/data/db/farming.db', {});
-  console.log(JSON.stringify(res, null, 2));
-  process.exit(res.healthy ? 0 : 1);
+  try {
+    const res = checkSyncParity(process.argv[2] || '/data/db/farming.db', {});
+    console.log(JSON.stringify(res, null, 2));
+    process.exit(res.healthy ? 0 : 1);
+  } catch (e) {
+    console.log(JSON.stringify({ healthy: false, error: e.message }, null, 2));
+    process.exit(1);
+  }
 }
 
 module.exports = { checkSyncParity };

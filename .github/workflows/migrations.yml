@@ -15,7 +15,7 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '20'  # node --test with explicit file paths works on Node 20; bare directory/glob requires Node >=22
       - name: Install sqlite3 CLI
         run: sudo apt-get update && sudo apt-get install -y sqlite3
       - run: node --test lib/osi-migrate/__tests__/*.test.js
