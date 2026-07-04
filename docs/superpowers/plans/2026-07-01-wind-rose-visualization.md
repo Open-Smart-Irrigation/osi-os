@@ -245,6 +245,9 @@ function speedBinIndex(speed: number, bins: WindSpeedBin[]): number {
 
 export function computeWindRose(samples: WindSample[], options: WindRoseOptions = {}): WindRose {
   const speedBins = options.speedBins ?? DEFAULT_WIND_SPEED_BINS;
+  if (speedBins.length === 0) {
+    throw new Error('speedBins must contain at least one bin');
+  }
   const calmThreshold = options.calmThreshold ?? DEFAULT_CALM_THRESHOLD;
 
   // counts[sectorIndex][binIndex]
