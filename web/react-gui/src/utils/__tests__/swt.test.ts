@@ -32,6 +32,10 @@ describe('pfToKpa', () => {
     expect(pfToKpa(null)).toBeNull();
     expect(pfToKpa(Number.NaN)).toBeNull();
   });
+
+  it('returns null when conversion overflows finite kPa', () => {
+    expect(pfToKpa(400)).toBeNull();
+  });
 });
 
 describe('formatSwtValue', () => {
@@ -45,9 +49,9 @@ describe('formatSwtValue', () => {
     expect(formatSwtValue(10, 'pF')).toBe('2.00 pF');
   });
 
-  it('labels non-positive tension as saturated under pF', () => {
-    expect(formatSwtValue(0, 'pF')).toBe('saturated');
-    expect(formatSwtValue(-1, 'pF')).toBe('saturated');
+  it('returns null for non-positive tension under pF so callers can render a localized placeholder', () => {
+    expect(formatSwtValue(0, 'pF')).toBeNull();
+    expect(formatSwtValue(-1, 'pF')).toBeNull();
   });
 
   it('keeps showing raw kPa for non-positive tension under kPa', () => {

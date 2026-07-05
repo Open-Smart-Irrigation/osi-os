@@ -41,7 +41,8 @@ export function kpaToPf(kpa: unknown): number | null {
 export function pfToKpa(pf: unknown): number | null {
   const value = toFiniteSwtValue(pf);
   if (value === null) return null;
-  return Math.pow(10, value) / 10;
+  const result = Math.pow(10, value) / 10;
+  return Number.isFinite(result) ? result : null;
 }
 
 export function formatSwtValue(kpa: unknown, unit: SwtUnit): string | null {
@@ -49,7 +50,7 @@ export function formatSwtValue(kpa: unknown, unit: SwtUnit): string | null {
   if (value === null) return null;
   if (unit === 'pF') {
     const pf = kpaToPf(value);
-    return pf === null ? 'saturated' : `${pf.toFixed(2)} pF`;
+    return pf === null ? null : `${pf.toFixed(2)} pF`;
   }
   return `${value.toFixed(1)} kPa`;
 }
