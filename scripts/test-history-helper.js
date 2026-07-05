@@ -45,6 +45,7 @@ const expectedExports = [
   'runRollupJob',
   'resolveDeviceFieldRollupKey',
   'legacySensorHistory',
+  'legacyRainDailyHistory',
   'buildZoneExportCsv',
   'toCsv',
   'writeZoneCsv',
@@ -1729,6 +1730,72 @@ test('legacySensorHistory returns raw 24h points and aggregated long-range point
       nowMs: Date.parse('2026-06-02T12:00:00.000Z'),
     });
     assert.deepStrictEqual(fallback, [{ t: '2026-06-02T09:00:00.000Z', value: 8.5 }]);
+  } finally {
+    db.close();
+  }
+});
+
+test('legacyRainDailyHistory sums rain deltas per local day with a tz offset', async () => {
+  const db = createCliSqliteDb();
+  try {
+    db.runSql(`
+      INSERT INTO users(id,username,password_hash,created_at,updated_at) VALUES(1,'u','h','2026-05-20T00:00:00.000Z','2026-05-20T00:00:00.000Z');
+      INSERT INTO devices(deveui,name,type_id,user_id,created_at,updated_at)
+        VALUES('AA00000000000002','Weather','SENSECAP_S2120',1,'2026-05-20T00:00:00.000Z','2026-05-20T00:00:00.000Z');
+      INSERT INTO device_data(deveui,recorded_at,rain_mm_delta) VALUES
+        ('AA00000000000002','2026-06-20T12:00:00.000Z',9.9),
+        ('AA00000000000002','2026-06-30T22:30:00.000Z',1.2),
+        ('AA00000000000002','2026-07-01T05:00:00.000Z',0.4),
+        ('AA00000000000002','2026-07-01T23:00:00.000Z',2.0),
+        ('AA00000000000002','2026-07-02T10:00:00.000Z',0),
+        ('AA00000000000002','2026-07-02T11:00:00.000Z',NULL);
+    `);
+
+    // At UTC+2: 06-30T22:30Z and 07-01T05:00Z land on local 2026-07-01;
+    // 07-01T23:00Z and 07-02T10:00Z land on local 2026-07-02.
+    // NULL deltas are excluded; the 06-20 row is outside the 7-day window
+    // (window start = 2026-06-25T22:00:00Z for now=07-02T12:00Z, tz +120).
+    const week = await helper.legacyRainDailyHistory(db, {
+      deveui: 'AA00000000000002',
+      days: 7,
+      tzOffsetMin: 120,
+      userId: 1,
+      nowMs: Date.parse('2026-07-02T12:00:00.000Z'),
+    });
+    assert.deepStrictEqual(week, [
+      { day: '2026-07-01', total_mm: 1.6, samples: 2 },
+      { day: '2026-07-02', total_mm: 2, samples: 2 },
+    ]);
+
+    const today = await helper.legacyRainDailyHistory(db, {
+      deveui: 'AA00000000000002',
+      days: 1,
+      tzOffsetMin: 120,
+      userId: 1,
+      nowMs: Date.parse('2026-07-02T12:00:00.000Z'),
+    });
+    assert.deepStrictEqual(today, [{ day: '2026-07-02', total_mm: 2, samples: 2 }]);
+
+    const otherUser = await helper.legacyRainDailyHistory(db, {
+      deveui: 'AA00000000000002',
+      days: 7,
+      tzOffsetMin: 120,
+      userId: 999,
+      nowMs: Date.parse('2026-07-02T12:00:00.000Z'),
+    });
+    assert.deepStrictEqual(otherUser, []);
+
+    // Clamping: days -> 366, tz offset -> +840 minutes; start param proves both.
+    const clamped = await helper.legacyRainDailyHistory(db, {
+      deveui: 'AA00000000000002',
+      days: 99999,
+      tzOffsetMin: 99999,
+      userId: 1,
+      nowMs: Date.parse('2026-07-02T12:00:00.000Z'),
+    });
+    assert.ok(Array.isArray(clamped));
+    assert.strictEqual(db.lastQuery.params[0], '840 minutes');
+    assert.strictEqual(db.lastQuery.params[3], '2025-07-02T10:00:00.000Z');
   } finally {
     db.close();
   }

@@ -1544,6 +1544,54 @@ async function legacySensorHistory(db, options = {}) {
   return flattenLegacyAggregate(result, key.channelId);
 }
 
+const RAIN_HISTORY_MAX_DAYS = 366;
+const RAIN_HISTORY_MAX_TZ_OFFSET_MIN = 840;
+const RAIN_DAY_MS = 24 * 60 * 60 * 1000;
+
+// Daily rainfall totals for one device, bucketed by *local* calendar day.
+// tzOffsetMin = minutes to ADD to UTC to get local wall time (JS convention:
+// -new Date().getTimezoneOffset()). Uses SUM over rain_mm_delta because the
+// generic rollup path (statsForValues) has no sum statistic and its
+// latest-per-bucket reduction under-reports interval deltas.
+async function legacyRainDailyHistory(db, options = {}) {
+  const normalizedDeveui = normalizeDeveui(options.deveui || options.deviceEui || options.device_eui);
+  if (!normalizedDeveui) return [];
+  const daysRaw = toFiniteNumber(options.days);
+  const days = Math.max(1, Math.min(RAIN_HISTORY_MAX_DAYS, Math.round(daysRaw === null ? 7 : daysRaw)));
+  const offsetRaw = toFiniteNumber(options.tzOffsetMin ?? options.tz_offset_min);
+  const tzOffsetMin = Math.max(
+    -RAIN_HISTORY_MAX_TZ_OFFSET_MIN,
+    Math.min(RAIN_HISTORY_MAX_TZ_OFFSET_MIN, Math.round(offsetRaw === null ? 0 : offsetRaw))
+  );
+  const nowMs = options.nowMs ?? Date.now();
+  const offsetMs = tzOffsetMin * 60 * 1000;
+  // Start of the local day (days - 1) days back, converted back to UTC.
+  const localTodayStartMs = Math.floor((nowMs + offsetMs) / RAIN_DAY_MS) * RAIN_DAY_MS - offsetMs;
+  const start = new Date(localTodayStartMs - (days - 1) * RAIN_DAY_MS).toISOString();
+  const end = new Date(nowMs).toISOString();
+  const ownerFilter = optionalUserFilter(options, 'dv');
+  const rows = await dbAll(db, `
+    SELECT
+      date(dd.recorded_at, ?) AS day,
+      SUM(dd.rain_mm_delta) AS total_mm,
+      COUNT(*) AS samples
+    FROM device_data dd
+    JOIN devices dv ON dv.deveui = dd.deveui
+    WHERE dd.deveui = ?
+      ${ownerFilter.sql}
+      AND dd.rain_mm_delta IS NOT NULL
+      AND dd.recorded_at >= ?
+      AND dd.recorded_at < ?
+    GROUP BY day
+    ORDER BY day ASC
+  `, [`${tzOffsetMin} minutes`, normalizedDeveui].concat(ownerFilter.params, [start, end]));
+  return rows.map((row) => ({
+    day: String(row.day),
+    total_mm: roundTo(row.total_mm, 3) ?? 0,
+    samples: Number(row.samples || 0) || 0,
+  }));
+}
+
 function csvCell(value) {
   if (value === null || value === undefined) return '';
   const stringValue = typeof value !== 'number' && /^[=+\-@]/.test(String(value)) ? `'${String(value)}` : String(value);
@@ -2519,6 +2567,7 @@ module.exports = {
   classifyGatewayStatus,
   deriveExpectedCadenceSeconds,
   legacySensorHistory,
+  legacyRainDailyHistory,
   resolveDeviceFieldRollupKey,
   runRollupJob,
   upsertRollups,
