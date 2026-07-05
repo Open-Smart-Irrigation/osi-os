@@ -15,7 +15,8 @@ import { EnvironmentCard } from './environment/EnvironmentCard';
 import { ZoneConfigModal } from './ZoneConfigModal';
 import { AdvancedScheduleDrawer } from './AdvancedScheduleDrawer';
 import { useTranslation } from 'react-i18next';
-import { collectDeviceSwtValues, summarizeSwtValues } from '../../utils/swt';
+import { useDisplayPreferences } from '../../utils/displayPreferences';
+import { collectDeviceSwtValues, formatSwtValue, summarizeSwtValues } from '../../utils/swt';
 import { isDesktopBrowser } from '../../utils/isDesktopBrowser';
 
 interface IrrigationZoneCardProps {
@@ -91,6 +92,7 @@ export const IrrigationZoneCard: React.FC<IrrigationZoneCardProps> = ({
   const { t } = useTranslation('devices');
   const { t: tDashboard } = useTranslation('dashboard');
   const { t: tc } = useTranslation('common');
+  const { swtUnit } = useDisplayPreferences();
   const [zoneCollapsed, setZoneCollapsed] = useState(true);
   const [devicesCollapsed, setDevicesCollapsed] = useState(true);
   const [isDeleting, setIsDeleting] = useState(false);
@@ -350,7 +352,7 @@ export const IrrigationZoneCard: React.FC<IrrigationZoneCardProps> = ({
             <div className="rounded-xl border border-[var(--border)] bg-white/70 px-3 py-2">
               <p className="text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)]">Soil now</p>
               <p className="mt-1 text-lg font-semibold text-[var(--text)]">
-                {soilNow.swt != null ? `${soilNow.swt.toFixed(1)} kPa` : '—'}
+                {formatSwtValue(soilNow.swt, swtUnit) ?? '—'}
               </p>
               <p className="text-sm text-[var(--text-secondary)]">{soilNow.label}</p>
             </div>

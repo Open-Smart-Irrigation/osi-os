@@ -1,7 +1,8 @@
 import React from 'react';
 import { useTranslation } from 'react-i18next';
 import type { Device, LocalEnvironment } from '../../../types/farming';
-import { collectDeviceSwtValues } from '../../../utils/swt';
+import { useDisplayPreferences } from '../../../utils/displayPreferences';
+import { collectDeviceSwtValues, formatSwtValue } from '../../../utils/swt';
 
 interface Props {
   local: LocalEnvironment;
@@ -17,6 +18,7 @@ function formatValue(value: number | null | undefined, unit: string, digits = 1)
 
 export const SoilTab: React.FC<Props> = ({ local, devices }) => {
   const { t } = useTranslation('devices');
+  const { swtUnit } = useDisplayPreferences();
   const swtReadings = collectDeviceSwtValues(devices);
   const representativeSwt = swtReadings.length
     ? swtReadings.reduce((sum, value) => sum + value, 0) / swtReadings.length
@@ -44,7 +46,7 @@ export const SoilTab: React.FC<Props> = ({ local, devices }) => {
           {hasSwt && hasVwc ? (
             <div className="mt-2 flex items-baseline gap-3">
               <span className="text-2xl font-bold tabular-nums text-[var(--text)]">
-                {representativeSwt!.toFixed(1)} kPa
+                {formatSwtValue(representativeSwt, swtUnit)}
               </span>
               <span className="text-2xl font-bold tabular-nums text-[var(--text)]">
                 {soilMoistureMetric!.median.toFixed(1)} %
@@ -52,7 +54,7 @@ export const SoilTab: React.FC<Props> = ({ local, devices }) => {
             </div>
           ) : hasSwt ? (
             <p className="mt-2 text-2xl font-bold tabular-nums text-[var(--text)]">
-              {representativeSwt!.toFixed(1)} kPa
+              {formatSwtValue(representativeSwt, swtUnit)}
             </p>
           ) : hasVwc ? (
             <p className="mt-2 text-2xl font-bold tabular-nums text-[var(--text)]">

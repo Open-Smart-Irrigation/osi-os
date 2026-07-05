@@ -58,4 +58,8 @@ describe('formatSwtValue', () => {
     expect(formatSwtValue(null, 'kPa')).toBeNull();
     expect(formatSwtValue(undefined, 'pF')).toBeNull();
   });
+
+  it('lets callers keep their placeholder for missing readings', () => {
+    expect(formatSwtValue(null, 'pF') ?? '—').toBe('—');
+  });
 });
