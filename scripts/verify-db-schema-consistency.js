@@ -171,6 +171,44 @@ const schemaContract = {
   chameleon_calibration_misses: [
     'array_id', 'last_tried', 'reason',
   ],
+  gateway_health_samples: [
+    'id',
+    'gateway_device_eui',
+    'sampled_at',
+    'cpu_temp_c',
+    'mem_percent',
+    'load_1',
+    'load_5',
+    'load_15',
+    'fan_value',
+    'throttled',
+    'created_at',
+  ],
+  gateway_health_hourly: [
+    'gateway_device_eui',
+    'hour_start',
+    'sample_count',
+    'cpu_temp_c_min',
+    'cpu_temp_c_mean',
+    'cpu_temp_c_max',
+    'mem_percent_min',
+    'mem_percent_mean',
+    'mem_percent_max',
+    'load_1_min',
+    'load_1_mean',
+    'load_1_max',
+    'load_5_min',
+    'load_5_mean',
+    'load_5_max',
+    'load_15_min',
+    'load_15_mean',
+    'load_15_max',
+    'fan_value_min',
+    'fan_value_mean',
+    'fan_value_max',
+    'throttled_max',
+    'computed_at',
+  ],
   zone_seasons: [
     'id',
     'zone_id',
@@ -316,6 +354,8 @@ const requiredIndexes = {
   dendrometer_readings: ['idx_dendro_readings_deveui_time'],
   chameleon_readings: ['idx_chameleon_readings_deveui_time', 'idx_chameleon_readings_array_id'],
   chameleon_calibrations: ['idx_chameleon_calibrations_sensor_id'],
+  gateway_health_samples: ['idx_gateway_health_samples_eui_time', 'idx_gateway_health_samples_time'],
+  gateway_health_hourly: ['idx_gateway_health_hourly_time'],
   zone_seasons: [
     'idx_zone_seasons_zone_range',
     'idx_zone_seasons_zone_active',
@@ -349,6 +389,15 @@ const requiredIndexes = {
 const requiredIndexSqlFragments = {
   idx_device_data_deveui_recorded_at: [
     'on device_data(deveui, recorded_at)',
+  ],
+  idx_gateway_health_samples_eui_time: [
+    'on gateway_health_samples(gateway_device_eui, sampled_at)',
+  ],
+  idx_gateway_health_samples_time: [
+    'on gateway_health_samples(sampled_at)',
+  ],
+  idx_gateway_health_hourly_time: [
+    'on gateway_health_hourly(hour_start)',
   ],
   idx_zone_seasons_zone_range: [
     'on zone_seasons(zone_id, starts_on, ends_on)',
