@@ -141,6 +141,29 @@ function roundTo(value, decimals = 3) {
   return Math.round(number * factor) / factor;
 }
 
+// pF = log10(tension in hPa); 1 kPa = 10 hPa. Non-positive tension has no pF.
+function kpaToPf(kpa) {
+  const value = toFiniteNumber(kpa);
+  if (value === null || value <= 0) return null;
+  return Math.log10(value * 10);
+}
+
+function isSwtKpaChannel(channel) {
+  return Boolean(channel) && channel.unit === 'kPa' && /^swt_/.test(String(channel.id || ''));
+}
+
+function pfExportRow(kpaRow, channel) {
+  const pf = kpaToPf(kpaRow.value);
+  if (pf === null) return null;
+  return {
+    ...kpaRow,
+    series_label: `${kpaRow.series_label} (pF)`,
+    channel_key: `${channel.id}_pf`,
+    unit: 'pF',
+    value: roundTo(pf, 4),
+  };
+}
+
 function parseTime(value) {
   const ms = Date.parse(value);
   return Number.isFinite(ms) ? ms : null;
@@ -1805,7 +1828,7 @@ async function rawZoneExportRows(db, scope) {
         for (const channel of channels) {
           const value = channelValue(row, channel);
           if (value === null) continue;
-          rows.push({
+          const csvRow = {
             timestamp: row.recorded_at,
             site: scope.site,
             zone: zoneName,
@@ -1817,7 +1840,12 @@ async function rawZoneExportRows(db, scope) {
             array_id: arrayId,
             unit: channel.unit || null,
             value: roundTo(value),
-          });
+          };
+          rows.push(csvRow);
+          if (isSwtKpaChannel(channel)) {
+            const pfRow = pfExportRow(csvRow, channel);
+            if (pfRow) rows.push(pfRow);
+          }
         }
       }
     });
@@ -2073,7 +2101,7 @@ function csvRowsFromAggregate(aggregate, card, device, sourceName, channels, arr
     for (const channel of channels) {
       const stats = bucket.series && bucket.series[channel.id];
       if (!stats || Number(stats.sampleCount || 0) === 0) continue;
-      rows.push({
+      const csvRow = {
         timestamp: bucket.bucketStart,
         site: context.site || '',
         zone: context.zone || '',
@@ -2085,7 +2113,12 @@ function csvRowsFromAggregate(aggregate, card, device, sourceName, channels, arr
         array_id: arrayId == null ? null : arrayId,
         unit: channel.unit || stats.unit || null,
         value: stats.mean,
-      });
+      };
+      rows.push(csvRow);
+      if (isSwtKpaChannel(channel)) {
+        const pfRow = pfExportRow(csvRow, channel);
+        if (pfRow) rows.push(pfRow);
+      }
     }
   }
   return rows;
@@ -2559,6 +2592,7 @@ module.exports = {
   deriveCardsForZone,
   deriveGatewayCard,
   resolveAggregation,
+  kpaToPf,
   classifySoilStatus,
   classifySoilDay,
   classifyEnvironmentStatus,
