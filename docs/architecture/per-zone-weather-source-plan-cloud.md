@@ -647,14 +647,21 @@ Not covered here. The edge work (Node-RED "resolve weather for zone" function + 
 
 ## Tasks 8 & 9 — full specification (supersedes the Task 8/9 sketches and revisions R5/R6)
 
-### Cross-cutting rule — ET0 is always Open-Meteo
-`weather_source` governs the **observable** fields (rain, temperature, humidity, and the forecast used by the
-rain-skip). **Reference ET0 is always sourced from Open-Meteo, regardless of `weather_source`**, because it is
-the only provider that supplies ET0 (OpenAgri/AgroMonitoring hardcode `et0=null`:
-`OpenAgriWeatherService.java:411-420`, `AgroMonitoringWeatherService.java:369-378`) and ET0 drives ETc →
-`waterNeededTodayMm` → the water action (`ZoneEnvironmentService.java:603-622`). Treat ET0 as a derived
-agronomic supplement, not a selectable source. **[DECISION — confirm.]** The strict-authoritative alternative
-would let an explicit non-Open-Meteo zone lose ET0 and degrade the water action to the heuristic.
+### Cross-cutting rule — ET0 via tiered computation (source-consistent)
+`weather_source` governs the observable fields (rain, temperature, humidity, forecast). **ET0 is resolved per
+source/day by `Et0Resolver`** (Tasks E1–E5) using this tier hierarchy, so an explicit source gets a
+source-consistent ET0 instead of borrowing Open-Meteo's:
+1. **Native ET0** carried on the (possibly merged) day record — only Open-Meteo supplies one today
+   (`et0_fao_evapotranspiration`; OpenAgri/AgroMonitoring hardcode `et0=null`: `OpenAgriWeatherService.java:411-420`,
+   `AgroMonitoringWeatherService.java:369-378, 413-422`). Use it verbatim.
+2. **FAO-56 Penman-Monteith computed by us** when the day record carries the full input set (Tmin/Tmax +
+   mean RH + wind + solar radiation); the default whenever the data is present.
+3. **Hargreaves-Samani** (Tmin/Tmax + latitude + day-of-year) fallback otherwise.
+
+**`auto` stays byte-identical:** its forecast/archive merge still folds in Open-Meteo's native ET0 (tier 1),
+so ETc → `waterNeededTodayMm` → the water action (`ZoneEnvironmentService.java:603-622, :348`) is unchanged.
+ET0 is read in exactly two places — `buildAgronomicEnvironment` (`:603-605`) and `buildObservedForcing`
+(`:375`) — both now call `Et0Resolver` on the resolved day/record instead of reading `et0MmDay()` raw.
 
 ### Task 8 — `ZoneEnvironmentService` honors `weather_source`
 
@@ -681,7 +688,7 @@ applies to the day path via `WeatherResolver`; this merge path is deliberately s
   - `LOCAL` needs no synthesized current — the agronomic layer already prefers S2120 climate via `hasLocalClimate` (`:599-601`).
 - [ ] **Step 4: Forecast selection** (`getForecast`, `:653-682`) — merge preserved, source picks the primary:
   - `AUTO` / `LOCAL` → today's exact merge: `primary = edgeCompatible ? OpenAgri : mergeForecasts(OpenAgri, Agro)`; then `mergeForecasts(primary, OpenMeteo)`.
-  - explicit external `X` → `primary = X.getForecast(...)` (or the auto primary if `X` empty); then `mergeForecasts(primary, OpenMeteo)` — **Open-Meteo always merged for ET0** (cross-cutting rule). (When `X == open_meteo`, skip the redundant second fetch — reuse the primary instead of `mergeForecasts(OpenMeteo, OpenMeteo)`.)
+  - explicit external `X` → `primary = X.getForecast(...)` (or the auto primary if `X` empty); then `mergeForecasts(primary, OpenMeteo)` — Open-Meteo stays merged so **`auto`** retains its native ET0 (tier 1); for an explicit source, ET0 is resolved by `Et0Resolver` at read (`buildAgronomicEnvironment`, see the ET0 section). (When `X == open_meteo`, skip the redundant second fetch — reuse the primary instead of `mergeForecasts(OpenMeteo, OpenMeteo)`.)
 - [ ] **Step 5: Tests.** Extend `ZoneEnvironmentServiceTest`: an `auto` zone yields byte-identical current+forecast to before (regression guard); an explicit `open_meteo` zone's current is Open-Meteo; an explicit source still yields non-null ET0 in `buildAgronomicEnvironment`. Update the 7 construction sites. Run `./gradlew test --tests "org.osi.server.analytics.*" -x buildFrontend -x buildTerraIntelligenceFrontend`.
 - [ ] **Step 6: Commit** `feat(weather): ZoneEnvironmentService honors weather_source (source-keyed cache, ET0-always-open-meteo)`.
 
@@ -709,11 +716,11 @@ public `resolveForecastData` and passing `WeatherSource.fromKey(zone.getWeatherS
   |---|---|
   | tempMin / tempMax | *station (S2120) if `hasTemperatureRange`* → **selected archive** (temp) |
   | rain | *station `rainMm`* → *`ZoneDailyEnvironment` row (see note)* → **selected archive** (precip) |
-  | et0 | **Open-Meteo archive always** (cross-cutting rule) — supplemented even for `agromonitoring` |
+  | et0 | via **`Et0Resolver`** on the resolved archive record: native (Open-Meteo) → PM if inputs present → Hargreaves |
 
   - **"selected archive" is authoritative — one rule, no cross-provider fallback:**
     - explicit `open_meteo` → OpenMeteo archive **only** (temp/rain/et0).
-    - explicit `agromonitoring` → Agro archive for temp/rain; ET0 from a supplementary OpenMeteo archive fetch (implementer must still call `openMeteoService.getDailyArchive` solely for et0).
+    - explicit `agromonitoring` → Agro archive for temp/rain; ET0 = `Et0Resolver` on that record (PM if the Agro archive carries RH/wind/radiation, else Hargreaves) — no supplementary OpenMeteo fetch.
     - `auto` / `local` / `openagri` / `meteoswiss` → the current **auto archive** = `mergeArchiveRecord(agro, openMeteo)` (openagri/meteoswiss have no archive of their own; `AgroMonitoringWeatherService.java:413-422` archive et0 is always null so OpenMeteo already fills it — this is exactly today's behavior).
     - For an archive-capable explicit source, missing days/fields stay **null** (no fall-through to the other provider) — that is what "authoritative" means; the station/environment precedence above still fills where present.
   - Note (rain is **row-gated**, not value-gated): if a `ZoneDailyEnvironment` row exists for the day but `getRainfallMm()` is null, rain stays null and the archive is NOT consulted (`PredictionInputAssembler.java:357-364`) — preserve this exactly for `auto`.
@@ -721,5 +728,56 @@ public `resolveForecastData` and passing `WeatherSource.fromKey(zone.getWeatherS
 - [ ] **Step 3: Tests.** `auto` zone → identical observed+forecast forcing as before; explicit `open_meteo` → observed archive gap-fill from OpenMeteo only, ET0 present; explicit `agromonitoring` → temp from Agro, ET0 still present; explicit `meteoswiss` → auto-archive fallback with ET0. Run `./gradlew test --tests "org.osi.server.prediction.*" -x buildFrontend -x buildTerraIntelligenceFrontend`.
 - [ ] **Step 4: Commit** `feat(weather): prediction observed+forecast forcing honor weather_source`.
 
-**Gate status:** with this section, Tasks 8 and 9 are design-complete. The only open confirmation is the
-ET0-always-Open-Meteo decision above.
+**Gate status:** Tasks 8 and 9 are design-complete; ET0 is handled by the tiered `Et0Resolver` (Tasks E1–E5).
+
+---
+
+## ET0 computation (Tasks E1–E5) — implements the tiered ET0 rule
+
+E1–E4 build the framework (only additive record fields — no fetch changes); E5 populates PM inputs per
+provider so tier 2 (Penman-Monteith) activates where a source supplies the data. Do E1→E2→E3→E4 before
+wiring `Et0Resolver` into Tasks 8/9; E5 can follow. Both ET0 functions are pure and tested against the
+FAO-56 worked examples.
+
+### Task E1: `WeatherMath.hargreavesEt0`
+**Files:** modify `analytics/WeatherMath.java`; test `analytics/WeatherMathEt0Test.java`.
+Pure `static Double hargreavesEt0(double tMinC, double tMaxC, double latDeg, int dayOfYear)`:
+extraterrestrial radiation `Ra` [MJ m⁻² d⁻¹] from lat + day-of-year (FAO-56 eqs. 21–25: `dr`, `δ`, `ωs`,
+`Gsc = 0.0820`); `ET0 = 0.0023·(Tmean+17.8)·√(Tmax−Tmin)·Ra_mm`, `Ra_mm = 0.408·Ra`. Test against a FAO-56
+worked example within ±0.1 mm/day; `Tmax < Tmin` or NaN → `null`.
+
+### Task E2: `WeatherMath.fao56Et0`
+Pure `static Double fao56Et0(double tMinC, double tMaxC, double meanRhPct, double windSpeedMs,
+double solarRadMjM2, Double elevationM, double latDeg, int dayOfYear)` — FAO-56 Penman-Monteith (eq. 6):
+slope `Δ`; psychrometric `γ` from pressure `P` (elevation formula; **sea-level default when `elevationM`
+null**); `es`/`ea` from Tmax/Tmin/RH; net radiation `Rn` from `Rs`, `Ra`, albedo 0.23, net longwave; `G = 0`;
+wind `u2` = 10 m→2 m conversion. Test against the FAO-56 Chapter-4 worked example within ±0.2 mm/day; any
+required input NaN → `null`.
+
+### Task E3: enrich daily-record types with PM inputs (additive)
+Add nullable `meanRelativeHumidityPct`, `windSpeedMs`, `solarRadiationMjM2` to `WeatherForecastData.Day` and
+`DailyWeatherRecord`. Give each a compact secondary constructor defaulting the three to `null` so existing
+callers/tests don't churn. No behavior change until E5 populates them.
+
+### Task E4: `Et0Resolver` + wire into read sites
+**Files:** create `analytics/Et0Resolver.java`; test `analytics/Et0ResolverTest.java`; modify
+`ZoneEnvironmentService.java`, `PredictionInputAssembler.java`.
+`Double resolve(Double nativeEt0, Double tMinC, Double tMaxC, Double meanRhPct, Double windMs, Double solarMj,
+Double elevationM, double latDeg, int dayOfYear)`: (1) `nativeEt0 != null` → return it; (2) Tmin/Tmax + RH +
+wind + solar all present → `fao56Et0`; (3) Tmin/Tmax present → `hargreavesEt0`; (4) else `null`. Unit-test
+each tier. Wire it into `buildAgronomicEnvironment` (`ZoneEnvironmentService.java:603-605`, forecast day) and
+`buildObservedForcing` (`PredictionInputAssembler.java:375`, archive record), passing the resolved location's
+lat + optional elevation + the day's date. **`auto` regression:** the merged day still carries Open-Meteo's
+native et0 → tier 1 → byte-identical.
+
+### Task E5: populate PM inputs per provider
+- **Open-Meteo** → keep native et0 (tier 1); no change.
+- **MeteoSwiss** (built in Task 5): also fetch global radiation (`gre000h0`), wind (`fu3010h0`), and relative
+  humidity (`ure200h0`) and populate the E3 fields, so a MeteoSwiss zone reaches tier-2 PM (the
+  Agroscope-alignment case). Missing humidity → tier-3 Hargreaves.
+- **OpenAgri / AgroMonitoring** → populate whichever of RH/wind/radiation their API exposes; radiation absent
+  (likely) → tier-3 Hargreaves. Verify each API's fields in its mapping.
+- **Elevation** optional (FAO sea-level pressure default when unknown); a later enhancement can store zone
+  elevation or use Open-Meteo's returned `elevation`.
+- **Provenance:** the ET0 source label becomes `native|fao56|hargreaves` (extend where `vpdSource`/`joinSources`
+  surface it) so the tier used is visible.
