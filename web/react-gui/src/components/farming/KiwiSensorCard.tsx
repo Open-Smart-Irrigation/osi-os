@@ -5,7 +5,8 @@ import { useDismissOnPointerDown } from '../../hooks/useDismissOnPointerDown';
 import { useTranslation } from 'react-i18next';
 import { SensorMonitor } from './SensorMonitor';
 import { DeviceCardFooter } from './shared/DeviceCardFooter';
-import { canonicalSwtChannels } from '../../utils/swt';
+import { useDisplayPreferences } from '../../utils/displayPreferences';
+import { canonicalSwtChannels, formatSwtValue } from '../../utils/swt';
 
 interface KiwiSensorCardProps {
   device: Device;
@@ -308,6 +309,7 @@ export const KiwiSensorCard: React.FC<KiwiSensorCardProps> = ({ device, onRemove
   const { t: tc } = useTranslation('common');
   const { light_lux, ambient_temperature, relative_humidity } = device.latest_data;
   const [swt1, swt2] = canonicalSwtChannels(device.latest_data);
+  const { swtUnit } = useDisplayPreferences();
   const lastSeenStr = device.last_seen ?? null;
   const lastSeen = lastSeenStr ? new Date(lastSeenStr) : null;
   const minutesAgo = lastSeen
@@ -428,7 +430,7 @@ export const KiwiSensorCard: React.FC<KiwiSensorCardProps> = ({ device, onRemove
           <p className="text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)] mb-1">
             {sensorLabel(device, 'swt_1', t('kiwiSensor.soilWaterTension1'))}
           </p>
-          {renderValue('swt_1', swt1 != null ? `${swt1.toFixed(1)} kPa` : null)}
+          {renderValue('swt_1', formatSwtValue(swt1, swtUnit))}
         </div>
 
         {swt2 != null && (
@@ -436,7 +438,7 @@ export const KiwiSensorCard: React.FC<KiwiSensorCardProps> = ({ device, onRemove
             <p className="text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)] mb-1">
               {sensorLabel(device, 'swt_2', t('kiwiSensor.soilWaterTension2'))}
             </p>
-            {renderValue('swt_2', `${swt2.toFixed(1)} kPa`)}
+            {renderValue('swt_2', formatSwtValue(swt2, swtUnit))}
           </div>
         )}
 

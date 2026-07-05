@@ -5,6 +5,8 @@ import { DendrometerMonitor } from './DendrometerMonitor';
 import { DraginoSettingsModal } from './DraginoSettingsModal';
 import { SensorMonitor } from './SensorMonitor';
 import { DeviceCardFooter } from './shared/DeviceCardFooter';
+import { useDisplayPreferences } from '../../utils/displayPreferences';
+import { formatSwtValue } from '../../utils/swt';
 
 function formatCounterInterval(seconds: number | null | undefined): string | null {
   const value = Number(seconds);
@@ -56,12 +58,6 @@ function formatDepthLabel(value: number | null | undefined): string | null {
   return `${Number.isInteger(numeric) ? numeric.toFixed(0) : numeric.toFixed(1)} cm`;
 }
 
-function formatKpa(value: number | null | undefined): string {
-  if (value == null) return '—';
-  const numeric = Number(value);
-  return Number.isFinite(numeric) ? `${numeric.toFixed(1)} kPa` : '—';
-}
-
 const FOCUS_VISIBLE_RING =
   'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--surface)]';
 
@@ -74,6 +70,7 @@ interface DraginoTempCardProps {
 export const DraginoTempCard: React.FC<DraginoTempCardProps> = ({ device, onRemove, onUpdate }) => {
   const data = device.latest_data;
   const lastSeenStr = device.last_seen ?? null;
+  const { swtUnit } = useDisplayPreferences();
   const lastSeen = lastSeenStr ? new Date(lastSeenStr) : null;
   const minutesAgo = lastSeen ? Math.floor((Date.now() - lastSeen.getTime()) / (1000 * 60)) : null;
   const dendroEnabled = device.dendro_enabled === 1;
@@ -295,7 +292,7 @@ export const DraginoTempCard: React.FC<DraginoTempCardProps> = ({ device, onRemo
                       <span className="block text-sm font-semibold text-[var(--text)]">{channel.label}</span>
                       <span className="block text-xs text-[var(--text-tertiary)]">{formatDepthLabel(channel.depth) || 'Depth unset'}</span>
                     </span>
-                    <span className="text-lg font-bold tabular-nums text-[var(--text)]">{formatKpa(channel.value)}</span>
+                    <span className="text-lg font-bold tabular-nums text-[var(--text)]">{formatSwtValue(channel.value, swtUnit) ?? '—'}</span>
                   </button>
                 ))}
               </div>

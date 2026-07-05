@@ -39,6 +39,7 @@ const expectedExports = [
   'classifyIrrigationStatus',
   'classifyGatewayStatus',
   'deriveExpectedCadenceSeconds',
+  'kpaToPf',
   'startOfLocalDayMs',
   'computeRollupBuckets',
   'upsertRollups',
@@ -1279,7 +1280,7 @@ test('buildZoneExportCsv raw emits tidy rows with depth and source', async () =>
       nowMs: Date.parse('2026-06-03T00:00:00.000Z'),
     });
     assert.deepStrictEqual(res.columns, TIDY_CSV_COLUMNS);
-    assert.strictEqual(res.rows.length, 2);
+    assert.strictEqual(res.rows.length, 4);
     const expectedSourceKey = `soil-src-${crypto.createHash('sha256').update('AA00000000000001').digest('hex').slice(0, 12)}`;
     const swt1 = res.rows.find((row) => row.channel_key === 'swt_1' && row.value === 6.2);
     assert.ok(swt1);
@@ -1319,7 +1320,7 @@ test('buildZoneExportCsv channels filter keeps only requested canonical channel 
       nowMs: Date.parse('2026-06-03T00:00:00.000Z'),
     });
     assert.ok(res.rows.length > 0);
-    assert.deepStrictEqual(Array.from(new Set(res.rows.map((row) => row.channel_key))), ['swt_1']);
+    assert.deepStrictEqual(Array.from(new Set(res.rows.map((row) => row.channel_key))).sort(), ['swt_1', 'swt_1_pf']);
   } finally {
     db.close();
   }
@@ -1345,7 +1346,105 @@ test('buildZoneExportCsv accepts legacy aliases but emits canonical channel keys
       nowMs: Date.parse('2026-06-03T00:00:00.000Z'),
     });
     assert.ok(res.rows.length > 0);
-    assert.ok(res.rows.every((row) => row.channel_key === 'swt_1'));
+    assert.ok(res.rows.every((row) => row.channel_key === 'swt_1' || row.channel_key === 'swt_1_pf'));
+  } finally {
+    db.close();
+  }
+});
+
+test('kpaToPf matches the contract golden vectors', () => {
+  assert.ok(Math.abs(helper.kpaToPf(10) - 2) < 1e-12);
+  assert.ok(Math.abs(helper.kpaToPf(30) - 2.4771212547196626) < 1e-12);
+  assert.ok(Math.abs(helper.kpaToPf(60) - 2.7781512503836436) < 1e-12);
+  assert.ok(Math.abs(helper.kpaToPf(300) - 3.4771212547196626) < 1e-12);
+  assert.strictEqual(helper.kpaToPf(0), null);
+  assert.strictEqual(helper.kpaToPf(-4), null);
+  assert.strictEqual(helper.kpaToPf(null), null);
+  assert.strictEqual(helper.kpaToPf('nope'), null);
+});
+
+test('raw zone export pairs every SWT kPa row with a derived pF row', async () => {
+  const db = createCliSqliteDb();
+  try {
+    db.runSql(`
+      INSERT INTO users(id,username,password_hash,created_at,updated_at) VALUES(1,'u','h','2026-05-31T00:00:00.000Z','2026-05-31T00:00:00.000Z');
+      INSERT INTO irrigation_zones(id,name,user_id,zone_uuid,timezone,created_at,updated_at) VALUES(12,'Zone B',1,'zb','UTC','2026-05-31T00:00:00.000Z','2026-05-31T00:00:00.000Z');
+      INSERT INTO devices(deveui,name,type_id,user_id,irrigation_zone_id,chameleon_enabled,chameleon_swt1_depth_cm,created_at,updated_at)
+        VALUES('AA00000000000001','Chameleon 1','DRAGINO_LSN50',1,12,1,5,'2026-05-31T00:00:00.000Z','2026-05-31T00:00:00.000Z');
+      INSERT INTO device_data(deveui,recorded_at,swt_1) VALUES
+        ('AA00000000000001','2026-06-01T08:00:00.000Z',6.2);
+    `);
+    const res = await helper.buildZoneExportCsv(db, {
+      zoneId: 12,
+      from: '2026-06-01',
+      to: '2026-06-01',
+      granularity: 'raw',
+      nowMs: Date.parse('2026-06-03T00:00:00.000Z'),
+    });
+    assert.strictEqual(res.rows.length, 2);
+    const kpaRow = res.rows.find((row) => row.channel_key === 'swt_1');
+    const pfRow = res.rows.find((row) => row.channel_key === 'swt_1_pf');
+    assert.ok(kpaRow, 'kPa row present');
+    assert.ok(pfRow, 'pF row present');
+    assert.strictEqual(pfRow.unit, 'pF');
+    assert.strictEqual(pfRow.value, 1.7924);
+    assert.strictEqual(pfRow.timestamp, kpaRow.timestamp);
+    assert.strictEqual(pfRow.depth_cm, kpaRow.depth_cm);
+    assert.strictEqual(pfRow.source_key, kpaRow.source_key);
+    assert.strictEqual(pfRow.series_label, `${kpaRow.series_label} (pF)`);
+  } finally {
+    db.close();
+  }
+});
+
+test('zone export emits no pF row for non-positive kPa values', async () => {
+  const db = createCliSqliteDb();
+  try {
+    db.runSql(`
+      INSERT INTO users(id,username,password_hash,created_at,updated_at) VALUES(1,'u','h','2026-05-31T00:00:00.000Z','2026-05-31T00:00:00.000Z');
+      INSERT INTO irrigation_zones(id,name,user_id,zone_uuid,timezone,created_at,updated_at) VALUES(12,'Zone B',1,'zb','UTC','2026-05-31T00:00:00.000Z','2026-05-31T00:00:00.000Z');
+      INSERT INTO devices(deveui,name,type_id,user_id,irrigation_zone_id,chameleon_enabled,created_at,updated_at)
+        VALUES('AA00000000000001','Chameleon 1','DRAGINO_LSN50',1,12,1,'2026-05-31T00:00:00.000Z','2026-05-31T00:00:00.000Z');
+      INSERT INTO device_data(deveui,recorded_at,swt_1) VALUES
+        ('AA00000000000001','2026-06-01T08:00:00.000Z',0);
+    `);
+    const res = await helper.buildZoneExportCsv(db, {
+      zoneId: 12,
+      from: '2026-06-01',
+      to: '2026-06-01',
+      granularity: 'raw',
+      nowMs: Date.parse('2026-06-03T00:00:00.000Z'),
+    });
+    assert.ok(res.rows.some((row) => row.channel_key === 'swt_1' && row.value === 0), 'kPa zero row kept');
+    assert.ok(!res.rows.some((row) => row.channel_key === 'swt_1_pf'), 'no pF row for saturated soil');
+  } finally {
+    db.close();
+  }
+});
+
+test('aggregate zone export derives pF from the aggregated kPa mean', async () => {
+  const db = createCliSqliteDb();
+  try {
+    db.runSql(`
+      INSERT INTO users(id,username,password_hash,created_at,updated_at) VALUES(1,'u','h','2026-05-31T00:00:00.000Z','2026-05-31T00:00:00.000Z');
+      INSERT INTO irrigation_zones(id,name,user_id,zone_uuid,timezone,created_at,updated_at) VALUES(12,'Zone B',1,'zb','UTC','2026-05-31T00:00:00.000Z','2026-05-31T00:00:00.000Z');
+      INSERT INTO devices(deveui,name,type_id,user_id,irrigation_zone_id,chameleon_enabled,created_at,updated_at)
+        VALUES('AA00000000000001','Chameleon 1','DRAGINO_LSN50',1,12,1,'2026-05-31T00:00:00.000Z','2026-05-31T00:00:00.000Z');
+      INSERT INTO device_data(deveui,recorded_at,swt_1) VALUES
+        ('AA00000000000001','2026-06-01T08:10:00.000Z',6.2),
+        ('AA00000000000001','2026-06-01T08:20:00.000Z',6.4);
+    `);
+    const res = await helper.buildZoneExportCsv(db, {
+      zoneId: 12,
+      from: '2026-06-01',
+      to: '2026-06-01',
+      granularity: 'hourly',
+      nowMs: Date.parse('2026-06-03T00:00:00.000Z'),
+    });
+    const pfRow = res.rows.find((row) => row.channel_key === 'swt_1_pf');
+    assert.ok(pfRow, 'aggregate pF row present');
+    assert.strictEqual(pfRow.unit, 'pF');
+    assert.strictEqual(pfRow.value, 1.7993);
   } finally {
     db.close();
   }

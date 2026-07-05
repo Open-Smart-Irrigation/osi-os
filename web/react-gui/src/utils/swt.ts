@@ -28,3 +28,29 @@ export function summarizeSwtValues(values: number[]): { label: string; swt: numb
   if (mean < 60) return { label: 'Moderate', swt: mean };
   return { label: 'Dry', swt: mean };
 }
+
+export type SwtUnit = 'kPa' | 'pF';
+
+// pF = log10(tension in hPa); 1 kPa = 10 hPa. Non-positive tension has no pF.
+export function kpaToPf(kpa: unknown): number | null {
+  const value = toFiniteSwtValue(kpa);
+  if (value === null || value <= 0) return null;
+  return Math.log10(value * 10);
+}
+
+export function pfToKpa(pf: unknown): number | null {
+  const value = toFiniteSwtValue(pf);
+  if (value === null) return null;
+  const result = Math.pow(10, value) / 10;
+  return Number.isFinite(result) ? result : null;
+}
+
+export function formatSwtValue(kpa: unknown, unit: SwtUnit): string | null {
+  const value = toFiniteSwtValue(kpa);
+  if (value === null) return null;
+  if (unit === 'pF') {
+    const pf = kpaToPf(value);
+    return pf === null ? null : `${pf.toFixed(2)} pF`;
+  }
+  return `${value.toFixed(1)} kPa`;
+}

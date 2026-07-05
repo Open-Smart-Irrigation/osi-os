@@ -1,6 +1,8 @@
 import React, { useEffect, useState } from 'react';
 import { lsn50API } from '../../services/api';
 import type { Device } from '../../types/farming';
+import { useDisplayPreferences } from '../../utils/displayPreferences';
+import { formatSwtValue } from '../../utils/swt';
 
 type ChannelNumber = 1 | 2 | 3;
 
@@ -27,13 +29,6 @@ function formatNumericInput(value: unknown): string {
   if (value == null) return '';
   const numeric = Number(value);
   return Number.isFinite(numeric) ? String(numeric) : '';
-}
-
-function formatLiveMetric(value: unknown, unit: string, decimals: number): string | null {
-  if (value == null || (typeof value === 'string' && value.trim() === '')) return null;
-  const numeric = Number(value);
-  if (!Number.isFinite(numeric)) return null;
-  return `${numeric.toFixed(decimals)} ${unit}`;
 }
 
 function parseOptionalNumericInput(
@@ -139,6 +134,7 @@ export const DraginoChameleonSwtSection: React.FC<DraginoChameleonSwtSectionProp
   const [calibStatus, setCalibStatus] = useState<'calibrated' | 'pending' | 'unknown' | null>(null);
   const [calibSource, setCalibSource] = useState<string | null>(null);
   const [arrayId, setArrayId] = useState<string | null>(null);
+  const { swtUnit } = useDisplayPreferences();
   const latestArrayId = device.latest_data?.chameleon_array_id ?? null;
 
   useEffect(() => {
@@ -209,9 +205,9 @@ export const DraginoChameleonSwtSection: React.FC<DraginoChameleonSwtSectionProp
     }
   };
 
-  const liveSwt1 = formatLiveMetric(device.latest_data?.swt_1, 'kPa', 1);
-  const liveSwt2 = formatLiveMetric(device.latest_data?.swt_2, 'kPa', 1);
-  const liveSwt3 = formatLiveMetric(device.latest_data?.swt_3, 'kPa', 1);
+  const liveSwt1 = formatSwtValue(device.latest_data?.swt_1, swtUnit);
+  const liveSwt2 = formatSwtValue(device.latest_data?.swt_2, swtUnit);
+  const liveSwt3 = formatSwtValue(device.latest_data?.swt_3, swtUnit);
 
   const liveByChannel: Record<ChannelNumber, Array<{ label: string; value: string }>> = {
     1: [liveSwt1 ? { label: 'SWT', value: liveSwt1 } : null].filter(
