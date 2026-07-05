@@ -920,8 +920,10 @@ describe('RainMonitor', () => {
 
     fireEvent.click(screen.getByRole('button', { name: '7 d' }));
 
-    expect(await screen.findByText('3.4 mm')).toBeInTheDocument(); // window total == wettest day only
-    expect(screen.getByText('RAINY DAYS')).toBeInTheDocument();
+    await screen.findByText('RAINY DAYS');
+    // Window total and wettest day are both 3.4 mm (the only rainy day) —
+    // two tiles render the same text.
+    expect(screen.getAllByText('3.4 mm')).toHaveLength(2);
     expect(screen.getByText('1')).toBeInTheDocument(); // only the wettest day counts as rainy
   });
 });
