@@ -1,8 +1,10 @@
 # Global Settings Page — Design
 
 **Date:** 2026-07-05
-**Status:** Draft for user review
-**Scope:** osi-os React GUI.
+**Status:** Revised after expert review (see
+`docs/superpowers/prompts/swt-pf-settings-spec-review/review-2026-07-05.md`) —
+ready for planning.
+**Scope:** osi-os React GUI (plus one edge bulk-timezone endpoint).
 
 ## Problem
 
@@ -74,7 +76,14 @@ Theme should be implemented through CSS custom properties, not per-component con
 html[data-theme='dark']
 ```
 
-The app should set `document.documentElement.dataset.theme` from the stored preference. Components that already read CSS variables, such as charts, should continue to work when the root theme changes.
+The app should set `document.documentElement.dataset.theme` from the stored preference.
+
+**Reality check on scope (from code inspection):** the `:root` variable set exists (`index.css`) but `var(--…)` usage is largely confined to `App.css`/`index.css`, while the `.tsx` components carry roughly 194 hardcoded hex colors in inline styles. Flipping root variables will restyle the shell and leave most card/chart interiors light. Therefore:
+
+- The first shippable dark increment covers the **app shell**: header, page backgrounds, card container surfaces, and primary typography via the existing variables.
+- Chart and data-visualization interiors are **explicitly exempt** — they keep a light card surface in dark mode until their inline hex colors are swept component-by-component. `WindRoseChart` (which already observes `data-theme` via a MutationObserver) is the reference pattern for making a chart theme-aware.
+- The settings page ships independently of the theme slice; dark mode must not block it.
+- Shell-first dark mode with visibly light chart cards is the accepted, non-broken increment; each subsequent component sweep is its own small change.
 
 Future color themes can extend the same mechanism, but the first increment includes only light, dark, and system.
 
@@ -118,20 +127,33 @@ Do not silently overwrite all existing zones when the user merely changes the de
 
 The UI should show the number of zones that will be changed before applying. The action should be all-or-nothing from the user's perspective: if any update fails, report the failure and refresh zone state rather than pretending all zones changed.
 
-Timezone input must validate against browser-supported IANA zones where available. If validation support is missing, accept non-empty strings but show that they must be IANA names.
+**Bulk-apply semantics (edge):** the endpoint executes a single ownership-scoped statement —
+
+```sql
+UPDATE irrigation_zones
+   SET timezone = ?, updated_at = ?, sync_version = sync_version + 1
+ WHERE user_id = ? AND deleted_at IS NULL AND timezone <> ?
+```
+
+— which is atomic by construction, so all-or-nothing comes free. The existing zone `AFTER UPDATE` trigger already includes `timezone` in its change-detection list and emits one `UPSERT_ZONE` sync event per changed row, so cloud sync rides existing rails with no new sync machinery. Align the `sync_version` handling with the existing per-zone `PUT /api/irrigation-zones/:zone_id/timezone` handler. The response reports rows actually changed (`updatedZones`), not rows matched.
+
+The confirmation dialog must state the real blast radius: the change affects scheduler timing, new daily rollups, and history range boundaries **from now on**; already-recorded daily history is not recomputed.
+
+**Validation:** client-side against `Intl.supportedValuesOf('timeZone')`. Edge-side, validate with a `new Intl.DateTimeFormat('en', { timeZone: tz })` try/catch — but first verify the on-device Node build ships full ICU; if it is small-icu, fall back to client-side validation plus a server-side sanity pattern, and document that in the plan. Do not accept arbitrary non-empty strings silently.
+
+**Default-timezone visibility:** the zone-creation form must display the effective timezone it will use (from `resolvePreferredTimezone()`: stored preference → browser `Intl` zone → `'UTC'`), so the per-browser nature of the local default is visible rather than silent.
 
 ### Data And Refresh
 
 Add only low-risk display defaults in the first increment:
 
 ```text
-Default history range: Card default | 12h | 24h | 7d | 30d | Season
 Auto-refresh dashboard: On | Off
 ```
 
-`Card default` preserves the current per-card defaults. Choosing a concrete range overrides the default range used when opening history cards, but it must not remove each card's supported-range limits.
-
 Auto-refresh should control frontend polling/refresh behavior only. It must not change sensor uplink intervals, LoRaWAN device settings, or scheduler cadence.
+
+A global `Default history range` setting was considered and **cut from the first increment**: per-card range preferences already exist server-side (`PUT /api/history/zones/:zoneId/cards/:cardId/preferences`), and a second, competing default would create precedence confusion for no proven need.
 
 ### About/Operational Context
 
@@ -145,7 +167,6 @@ Use local browser persistence for the first increment:
 osi.display.swtUnit = 'kPa' | 'pF'
 osi.display.dashboardDensity = 'comfortable' | 'compact'
 osi.display.theme = 'light' | 'dark' | 'system'
-osi.display.historyDefaultRange = string
 osi.display.dashboardAutoRefresh = 'on' | 'off'
 osi.defaults.timezone = IANA timezone string
 ```
@@ -173,15 +194,15 @@ Consumers should not read localStorage directly. This keeps unit formatting and 
 SWT rendering should call a shared formatter:
 
 ```text
-formatSwtValue({ kpa, pf }, preferredUnit)
+formatSwtValue({ kpa }, preferredUnit)
 ```
 
-This prevents each card/chart from inventing its own pF fallback behavior.
+The formatter derives pF from kPa via the shared converters (see the pF spec: kPa is the only stored measurement unit). This prevents each card/chart from inventing its own pF fallback behavior.
 
-Bulk timezone changes should use a dedicated edge API if available:
+Bulk timezone changes use a dedicated edge endpoint. To stay in the existing route namespace (all zone operations live under `/api/irrigation-zones/…`), the endpoint is:
 
 ```text
-PUT /api/settings/zones/timezone
+PUT /api/irrigation-zones/timezone
 ```
 
 Payload:
@@ -196,7 +217,7 @@ Response:
 { "timezone": "Europe/Zurich", "updatedZones": 12 }
 ```
 
-If the implementation starts by looping over existing per-zone config APIs, the UI must still present it as one action with clear progress and error handling. The dedicated endpoint is the cleaner target because it can validate, update, and report the bulk change consistently.
+The dedicated endpoint is required (not optional): a frontend loop over per-zone APIs cannot be atomic, while the single scoped UPDATE described under Time And Zones is. It validates, updates, and reports the bulk change in one place.
 
 ## UI Rules
 
@@ -216,8 +237,8 @@ Required verification:
 - Header tests prove the language switcher is replaced by a settings entry point.
 - Settings page tests prove language can be changed from the page.
 - Preference tests prove SWT unit is persisted and reloaded.
-- Theme tests prove light/dark/system preferences set the document theme and survive reload.
-- Timezone tests prove the default timezone persists locally and the bulk apply action updates zones only after confirmation.
+- Theme tests prove light/dark/system preferences set the document theme, survive reload, and that exempted chart surfaces keep their light styling in dark mode.
+- Timezone tests prove the default timezone persists locally, the zone-creation form shows the effective timezone, and the bulk apply action updates only the authenticated user's zones, only after confirmation, emitting one `UPSERT_ZONE` outbox row per changed zone (assert against SQLite) and reporting the actual changed count.
 - Display tests prove a component renders kPa or pF based on the global preference.
 - Schedule tests prove the threshold unit selector remains explicit and independent of global display preference.
 - Regression tests prove auto-refresh preference does not change device uplink intervals or scheduler cadence.
@@ -230,3 +251,5 @@ Required verification:
 - Do not remove existing history card-specific settings menus; those are local to history cards, not global app settings.
 - Do not silently bulk-update existing zones when changing a default timezone.
 - Do not add multiple branded color palettes in the first increment; dark mode is the first additional theme.
+- Do not add a global default-history-range preference in the first increment (see Data And Refresh).
+- No settings-driven change may alter scheduler or irrigation-event semantics: the SWT unit preference is display-only; the schedule editor's explicit unit selector is the only semantic unit control.
