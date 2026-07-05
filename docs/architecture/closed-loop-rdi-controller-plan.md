@@ -78,10 +78,14 @@ CREATE TABLE IF NOT EXISTS dendro_rdi_daily (
 
 ## Task 3: Surface the continuous zone `TWD_rel`
 The controller needs the zone's continuous aggregated deficit. `DendroAnalyticsService.aggregateZoneStress`
-already computes `p75 = percentile(filteredVals, 0.75)` internally but the `ZoneAggregation` record only
-returns the stress *level*. Add the continuous value.
-- [ ] Add a `Double zoneTwdRel` component to the `ZoneAggregation` record and populate it with the computed
-  `p75` (null when no TWD data). Update all `new ZoneAggregation(...)` call sites in `aggregateZoneStress`.
+already computes `p75 = percentile(filteredVals, 0.75)` internally (line ~541). The `ZoneAggregation` record
+today is 6-field:
+`record ZoneAggregation(String zoneStress, List<TreeResult> usableTrees, int usableTreeCount, int lowConfidenceTreeCount, int outlierFilteredTreeCount, Double zoneConfidenceScore)`.
+Add a 7th component for the continuous deficit.
+- [ ] Add a trailing `Double zoneTwdRel` component to the `ZoneAggregation` record. There are **5**
+  `new ZoneAggregation(...)` call sites: the two early-returns (no-usable-trees ~L489, unknown ~L510) are
+  **above** the `p75` computation, so they pass `null`; the three later sites (~L557 severe-quorum, ~L570
+  significant-quorum, ~L579 normal) pass `p75`.
 - [ ] Test: `aggregateZoneStress` returns a non-null `zoneTwdRel` equal to the 75th percentile for a set of
   trees; null when trees have no `twdDayUm`. Run `./gradlew test --tests "org.osi.server.analytics.DendroAnalytics*" -x buildFrontend -x buildTerraIntelligenceFrontend`.
 - [ ] Commit `feat(rdi): surface continuous zone TWD_rel from aggregation`.
@@ -96,7 +100,7 @@ returns the stress *level*. Add the continuous value.
   - `record RdiState(double integral, Double lastError, double kp, double ki, String status, LocalDate pendingDate)`;
   - `record RdiResult(double adjustment, double error, double integralAfter, String status)`;
   - a **propose** step: `RdiResult propose(double observedTwdRel, double setpoint, double forecastRainMm, boolean lowConfidence, RdiState state, LocalDate day)` computing `e`, the clamped `Kp·e + integral` output, rain-freeze, and returning the proposal (state's integral unchanged at propose);
-  - a **close/observe** step: `RdiState observeNextDay(double nextObservedTwdRel, double setpoint, boolean lowConfidence, RdiState state, long daysElapsed)` that, only when confident and `0 < |output| < maxAdj`, advances `integral += Ki·e` exactly once (scaled/guarded for `daysElapsed`), sets `lastError`, and returns the new state.
+  - a **close/observe** step: `RdiState observeNextDay(double nextObservedTwdRel, double setpoint, boolean lowConfidence, RdiState state, long daysElapsed)` that computes `e = nextObservedTwdRel − setpoint` and the *tentative* output `output = Kp·e + state.integral()` (pre-update integral); only when confident and the tentative output is unsaturated (`0 < |output| < maxAdj`) does it advance `integral += Ki·e` exactly once (scaled/guarded for `daysElapsed`); always sets `lastError`, and returns the new state. (Anti-windup gates on this close-time tentative output, not the prior day's proposed output.)
   - Gains from explicit config (constructor/params), never DB-overrides-config silently.
 - [ ] Tests green. Commit `feat(rdi): corrected PI controller (first-error, anti-windup, gap-safe)`.
 
@@ -118,10 +122,13 @@ returns the stress *level*. Add the continuous value.
   2. **close** yesterday's pending cycle if present: observe today's `zoneAggregation.zoneTwdRel()` vs the
      setpoint → `rdiController.observeNextDay(...)` → updated state;
   3. resolve setpoint via `RdiSetpoint.resolve(zone, cal, phenoMod)`;
-  4. obtain forecast rain (reuse the per-zone weather source: `weatherResolver.getForecast(zone)` next-day
-     daily rain; fall back to `rainfallMm`);
-  5. `RdiResult r = rdiController.propose(zoneTwdRel, setpoint, forecastRainMm, lowConfidence, state, today)`
-     where `lowConfidence` = the zone had no reliable data (`UNKNOWN_STRESS.equals(zoneSt)` or all trees low-confidence);
+  4. obtain forecast rain from the per-zone weather source — the resolver's only method is
+     `getWeatherForDay(zone, LocalDate)`, so query next-day: `double forecastRainMm =
+     weatherResolver.getWeatherForDay(zone, today.plusDays(1)).map(WeatherSnapshot::precipitationMm).orElse(rainfallMm);`
+     (`precipitationMm` is a primitive `double`; `rainfallMm` — today's already-resolved value at L139 — is the fallback);
+  5. `RdiResult r = rdiController.propose(zoneAggregation.zoneTwdRel(), setpoint, forecastRainMm, lowConfidence, state, today)`
+     where `boolean lowConfidence = UNKNOWN_STRESS.equals(zoneAggregation.zoneStress()) || zoneAggregation.usableTreeCount() == 0 || zoneAggregation.zoneTwdRel() == null;`
+     (guard the null `zoneTwdRel` from the early-return sites so a no-data zone skips rather than NPEs);
   6. persist a `dendro_rdi_daily` row (observed, setpoint(+source), error, adjustment, integral_after,
      forecast_rain, low_confidence, status) and save the updated `dendro_rdi_state` (pending_date=today);
   7. **do not** modify `decision`, `rec.setIrrigationAction(...)`, schedule policy, or actuation.
