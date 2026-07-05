@@ -21,6 +21,7 @@ jobs:
       - run: node --test lib/osi-migrate/__tests__/*.test.js
       - run: node --test scripts/check-sync-parity.test.js scripts/restamp-fingerprints.test.js
       - run: node scripts/test-history-helper.js
+      - run: node --test scripts/test-health-helper.js
       - run: node scripts/verify-migrations.js
       - run: node scripts/verify-seed-replay.js
       - run: node scripts/verify-runtime-schema-parity.js

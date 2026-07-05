@@ -28,16 +28,32 @@ const REQUIRED_GATHER_LIBS = [
 const PROFILES = [
   {
     name: 'bcm2712',
+    nodeRedRoot: path.join(
+      REPO_ROOT,
+      'conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red'
+    ),
     flowsPath: path.join(
       REPO_ROOT,
       'conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/flows.json'
     ),
+    seedPath: path.join(
+      REPO_ROOT,
+      'conf/full_raspberrypi_bcm27xx_bcm2712/files/etc/uci-defaults/98_osi_node_red_seed'
+    ),
   },
   {
     name: 'bcm2709',
+    nodeRedRoot: path.join(
+      REPO_ROOT,
+      'conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/node-red'
+    ),
     flowsPath: path.join(
       REPO_ROOT,
       'conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/flows.json'
+    ),
+    seedPath: path.join(
+      REPO_ROOT,
+      'conf/full_raspberrypi_bcm27xx_bcm2709/files/etc/uci-defaults/98_osi_node_red_seed'
     ),
   },
 ];
@@ -81,6 +97,33 @@ function parseFlow(profile) {
     fail(profile.name, `failed to parse ${profile.flowsPath}: ${err.message}`);
     return null;
   }
+}
+
+function parseJsonFile(profile, label, filePath) {
+  try {
+    return JSON.parse(fs.readFileSync(filePath, 'utf8'));
+  } catch (err) {
+    fail(profile, `failed to parse ${label} at ${filePath}: ${err.message}`);
+    return null;
+  }
+}
+
+function parseSeedHelperModules(profile, seedPath) {
+  let source;
+  try {
+    source = fs.readFileSync(seedPath, 'utf8');
+  } catch (err) {
+    fail(profile, `failed to read first-boot seed script at ${seedPath}: ${err.message}`);
+    return new Set();
+  }
+
+  const modules = new Set();
+  for (const match of source.matchAll(/for\s+module\s+in\s+([^;\n]+);\s+do/g)) {
+    for (const moduleName of match[1].trim().split(/\s+/)) {
+      if (moduleName) modules.add(moduleName);
+    }
+  }
+  return modules;
 }
 
 function sortedKeys(obj) {
@@ -368,6 +411,83 @@ function assertGatherNode(profile, gatherNode) {
   compileAsyncBody(profile, 'Gather Edge Health', gatherNode.func);
 }
 
+function assertExactObject(profile, label, actual, expected) {
+  assert(
+    profile,
+    JSON.stringify(actual) === JSON.stringify(expected),
+    `${label} expected ${JSON.stringify(expected)}, got ${JSON.stringify(actual)}`
+  );
+}
+
+function assertPackagedGatherLibs(profile, gatherNode) {
+  if (!gatherNode || !Array.isArray(gatherNode.libs)) return;
+
+  const moduleNames = [...new Set(
+    gatherNode.libs
+      .map((lib) => lib && lib.module)
+      .filter((moduleName) => typeof moduleName === 'string' && moduleName.length > 0)
+  )];
+  const packageJson = parseJsonFile(profile.name, 'node-red/package.json', path.join(profile.nodeRedRoot, 'package.json'));
+  const packageLock = parseJsonFile(profile.name, 'node-red/package-lock.json', path.join(profile.nodeRedRoot, 'package-lock.json'));
+  const seedModules = parseSeedHelperModules(profile.name, profile.seedPath);
+
+  for (const moduleName of moduleNames) {
+    assert(
+      profile.name,
+      packageJson && packageJson.dependencies && packageJson.dependencies[moduleName] === `file:${moduleName}`,
+      `node-red/package.json missing ${moduleName}: file:${moduleName}`
+    );
+
+    const lockRootDependencies = packageLock && packageLock.packages && packageLock.packages[''] && packageLock.packages[''].dependencies;
+    assert(
+      profile.name,
+      lockRootDependencies && lockRootDependencies[moduleName] === `file:${moduleName}`,
+      `node-red/package-lock.json root dependencies missing ${moduleName}: file:${moduleName}`
+    );
+
+    const lockPackages = packageLock && packageLock.packages;
+    assertExactObject(
+      profile.name,
+      `node-red/package-lock.json node_modules/${moduleName}`,
+      lockPackages && lockPackages[`node_modules/${moduleName}`],
+      { resolved: moduleName, link: true }
+    );
+    assertExactObject(
+      profile.name,
+      `node-red/package-lock.json ${moduleName}`,
+      lockPackages && lockPackages[moduleName],
+      { version: '1.0.0' }
+    );
+
+    const nodeModulePath = path.join(profile.nodeRedRoot, 'node_modules', moduleName);
+    let stat = null;
+    try {
+      stat = fs.lstatSync(nodeModulePath);
+    } catch (err) {
+      fail(profile.name, `node-red/node_modules/${moduleName} missing: ${err.message}`);
+    }
+    assert(
+      profile.name,
+      stat && stat.isSymbolicLink(),
+      `node-red/node_modules/${moduleName} must be a symlink`
+    );
+    if (stat && stat.isSymbolicLink()) {
+      const target = fs.readlinkSync(nodeModulePath);
+      assert(
+        profile.name,
+        target === `../${moduleName}`,
+        `node-red/node_modules/${moduleName} symlink target expected ../${moduleName}, got ${target}`
+      );
+    }
+
+    assert(
+      profile.name,
+      seedModules.has(moduleName),
+      `first-boot seed helper loop missing ${moduleName}`
+    );
+  }
+}
+
 function assertInjectWiring(profile, injectNode) {
   assert(profile, injectNode, `heartbeat inject node ${INJECT_ID} is missing`);
   if (!injectNode) return;
@@ -388,6 +508,7 @@ for (const { profile, parsed } of parsedProfiles) {
   if (!parsed) continue;
   assertBuildNode(profile.name, parsed.byId[BUILD_ID]);
   assertGatherNode(profile.name, parsed.byId[GATHER_ID]);
+  assertPackagedGatherLibs(profile, parsed.byId[GATHER_ID]);
   assertInjectWiring(profile.name, parsed.byId[INJECT_ID]);
 }
 
