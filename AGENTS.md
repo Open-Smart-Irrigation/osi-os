@@ -4,6 +4,8 @@ Operational source of truth for `osi-os`. The edge is canonical; `osi-server` mi
 
 Sister repo: [`osi-server`](../osi-server/AGENTS.md).
 
+> **How to work here:** [docs/engineering-playbook.md](docs/engineering-playbook.md) — the working loop (verify reality → written plan → adversarial review → exact execution → independent verification), the thinking tools, and the failure modes this repo has already paid for. Read it before your first non-trivial change; hold every PR to its §8 definition of done.
+
 ---
 
 ## Architecture
@@ -253,4 +255,9 @@ Keep closeout updates factual. Never delete ambiguous files without asking.
 
 ## Issues
 
-Tracked at https://github.com/Open-Smart-Irrigation/osi-os/issues. Open areas: S2120 history (#33), LSN50 ADC display (#34), i18n (#47).
+Tracked at https://github.com/Open-Smart-Irrigation/osi-os/issues. Don't trust this
+list or any issue body blindly — re-verify against current `main` before planning
+(several issues have turned out already-fixed or mostly stale). Long-running open
+areas as of 2026-07-05: i18n (#47), lossless edge→cloud backup (#56), rootfs
+auto-grow (#50), Uganda live-ops (#55, #64, #87), dendro scheduling (#22), Mclimate
+valve (#18), and the schema-hardening roadmap (#88–#90, gated — see its plan docs).
