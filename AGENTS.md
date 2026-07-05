@@ -57,6 +57,8 @@ Broker: `wss://server.opensmartirrigation.org/mqtt`
 
 **Fan telemetry/control:** gateway stats expose `fan_available`, `fan_mode`, `fan_value`, and `fan_max`; cloud fan control arrives as `SET_FAN`. The current Node-RED fan path uses raw PWM sysfs (`/sys/class/pwm/pwmchip2/pwm3`). If the Pi 5 kernel `pwm-fan` driver is enabled through `dtparam=cooling_fan=okay` and `kmod-hwmon-pwmfan`, switch fan detection/control to the `pwmfan` hwmon device (`/sys/class/hwmon/*/pwm1`, `pwm1_enable`) because the driver owns the raw PWM channel and direct writes can fail with `EBUSY`.
 
+**Gateway health persistence:** the same CPU/memory/load/fan facts the 60 s heartbeat reports are also persisted locally (osi-os #68) via its own 60s inject `gateway-health-sample-tick`: `gateway_health_samples` (raw, default 14 d) and `gateway_health_hourly` (min/mean/max rollups, default 365 d) in `/data/db/farming.db`, written by the `Persist Gateway Health` node and rolled up + pruned daily at 02:10 by `Gateway Health Rollup`. Includes the best-effort `get_throttled` bitfield. Schema: `database/migrations/ordered/0002__gateway_health.sql`; local-only (not cloud-synced) in v1. Operator guide: [docs/operations/edge-history-retention.md](docs/operations/edge-history-retention.md).
+
 ---
 
 ## Sync model
@@ -174,6 +176,7 @@ node scripts/verify-strega-gen1.js            # STREGA Gen1 decoder
 node scripts/verify-lorain-codec.js           # Aqua-Scope LoRain decoder
 node scripts/verify-communication-contract.js # contract preflight
 scripts/check-mqtt-topics.sh                  # MQTT IN topic compliance
+node --test scripts/test-gateway-health-persistence.js  # gateway health persistence guard
 
 cd web/react-gui && npm run test:unit         # frontend unit tests
 cd web/react-gui && npm run build             # frontend build

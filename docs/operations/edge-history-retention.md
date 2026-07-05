@@ -101,3 +101,103 @@ guards the known `devices` rebuild case.
   or explicit operator approval.
 - Keep legacy `/edge/events` and `/edge/bootstrap` compatibility until every
   supported OSI OS image advertises `history_sync_v1`.
+
+## Gateway health telemetry (CPU / memory / load / fan / throttling)
+
+Since ordered migration `database/migrations/ordered/0002__gateway_health.sql`
+(2026-07, osi-os #68), every gateway persists its own 60 s heartbeat locally in
+`/data/db/farming.db`. This closes the gap found during the 2026-06-28 kaba100
+Chameleon-1 I2C outage analysis: before this, CPU temperature/load/fan state
+was live MQTT telemetry only, so "was the Pi throttling when the gap started?"
+could not be answered from the edge database.
+
+### What is stored
+
+| Table | Grain | Retention (default) | Written by |
+|---|---|---|---|
+| `gateway_health_samples` | 1 row / 60 s heartbeat | 14 days (`OSI_HEALTH_RAW_RETENTION_DAYS`) | `Persist Gateway Health` node, own 60 s inject `gateway-health-sample-tick` |
+| `gateway_health_hourly` | 1 row / gateway / closed UTC hour, `min/mean/max` + `sample_count` | 365 days (`OSI_HEALTH_HOURLY_RETENTION_DAYS`) | `Gateway Health Rollup` node, daily at 02:10 |
+
+Columns per sample: `gateway_device_eui`, `sampled_at` (ISO UTC), `cpu_temp_c`,
+`mem_percent`, `load_1/5/15`, `fan_value` (PWM 0–255, NULL when no fan), and
+`throttled` — the raw Raspberry Pi firmware `get_throttled` bitfield read from
+`/sys/devices/platform/soc/soc:firmware/get_throttled` (NULL when the kernel
+does not expose it). Bits: `0x1` under-voltage now, `0x2` ARM frequency capped
+now, `0x4` currently throttled, `0x8` soft temperature limit now; the same bits
+shifted left 16 (`0x10000`…`0x80000`) mean "has occurred since boot".
+
+The rollup job is idempotent (`INSERT OR REPLACE` over every closed hour still
+inside the raw window), so nights where the Pi was powered off self-heal on the
+next run. A **gap in `gateway_health_samples` rows is itself evidence** that
+Node-RED (or the Pi) was down for that window. This data is local-only: it is
+NOT synced to OSI Server in v1 (the cloud already receives live heartbeats).
+
+### How to query it
+
+Pis do not ship the `sqlite3` CLI. Either copy the DB off the Pi
+(`scripts/download-farming-db.sh`) and query locally, or run node on the Pi:
+
+```
+node -e "const s=require('/srv/node-red/node_modules/sqlite3');const d=new s.Database('/data/db/farming.db');d.all('SELECT COUNT(*) AS n, MAX(sampled_at) AS last FROM gateway_health_samples',(e,r)=>{console.log(e?String(e):JSON.stringify(r));d.close();});"
+```
+
+Hourly overview for an outage window (per gateway + time window):
+
+```sql
+SELECT hour_start, sample_count,
+       ROUND(cpu_temp_c_max,1)  AS cpu_max_c,
+       ROUND(mem_percent_max,0) AS mem_max_pct,
+       ROUND(load_1_max,2)      AS load1_max,
+       fan_value_max, throttled_max
+FROM gateway_health_hourly
+WHERE gateway_device_eui = '0016C001F11766E7'
+  AND hour_start >= '2026-06-27T00:00:00Z'
+  AND hour_start <  '2026-06-29T00:00:00Z'
+ORDER BY hour_start;
+```
+
+Minute-level detail around a suspected gap (raw window, last 14 days):
+
+```sql
+SELECT sampled_at, cpu_temp_c, mem_percent, load_1, fan_value, throttled
+FROM gateway_health_samples
+WHERE gateway_device_eui = '0016C001F11766E7'
+  AND sampled_at >= '2026-06-28T08:30:00Z'
+  AND sampled_at <  '2026-06-28T10:30:00Z'
+ORDER BY sampled_at;
+```
+
+"Was it throttling?" summary for a window:
+
+```sql
+SELECT COUNT(*) AS samples,
+       SUM(CASE WHEN (throttled & 0x4) != 0 THEN 1 ELSE 0 END) AS throttled_now_samples,
+       MAX(cpu_temp_c) AS max_temp_c
+FROM gateway_health_samples
+WHERE gateway_device_eui = '0016C001F11766E7'
+  AND sampled_at >= '2026-06-28T08:00:00Z'
+  AND sampled_at <  '2026-06-28T12:00:00Z';
+```
+
+Heartbeat/sampling gaps > 5 min (downtime candidates):
+
+```sql
+SELECT prev_at, sampled_at,
+       ROUND((julianday(sampled_at) - julianday(prev_at)) * 1440, 1) AS gap_min
+FROM (SELECT sampled_at, LAG(sampled_at) OVER (ORDER BY sampled_at) AS prev_at
+      FROM gateway_health_samples
+      WHERE gateway_device_eui = '0016C001F11766E7')
+WHERE prev_at IS NOT NULL
+  AND (julianday(sampled_at) - julianday(prev_at)) * 1440 > 5
+ORDER BY sampled_at;
+```
+
+### Rollout to a live Pi
+
+`deploy.sh` applies migration 0002 automatically (`ensure_gateway_health_schema`,
+which fetches and executes the migration file — additive-only, idempotent)
+before the operator restarts Node-RED. Post-deploy check: run the node
+one-liner above ~2 minutes after `/etc/init.d/node-red restart` and expect
+`n >= 1` with a fresh `last` timestamp. The first hourly rollups appear after
+the next 02:10 tick (or trigger `Gateway Health Rollup Tick` manually in the
+Node-RED editor).

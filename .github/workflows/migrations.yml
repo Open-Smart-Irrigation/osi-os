@@ -25,3 +25,4 @@ jobs:
       - run: node scripts/verify-runtime-schema-parity.js
       - run: node scripts/verify-devices-rebuild-fence.js
       - run: node --test scripts/rehearse-devices-rebuild.test.js
+      - run: node --test scripts/test-gateway-health-persistence.js

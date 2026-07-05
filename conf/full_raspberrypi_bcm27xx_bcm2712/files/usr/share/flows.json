@@ -8780,6 +8780,102 @@
     ]
   },
   {
+    "id": "gateway-health-sample-tick",
+    "type": "inject",
+    "z": "93b1537a596e0e6d",
+    "name": "Gateway Health Sample Tick",
+    "props": [
+      {
+        "p": "payload"
+      }
+    ],
+    "repeat": "60",
+    "crontab": "",
+    "once": true,
+    "onceDelay": "5",
+    "topic": "",
+    "payload": "",
+    "payloadType": "date",
+    "x": 170,
+    "y": 1180,
+    "wires": [
+      [
+        "gateway-health-persist-fn"
+      ]
+    ]
+  },
+  {
+    "id": "gateway-health-persist-fn",
+    "type": "function",
+    "z": "93b1537a596e0e6d",
+    "name": "Persist Gateway Health",
+    "func": "// Persist Gateway Health Sample (issue #68).\n// Self-samples on its own 60s inject (gateway-health-sample-tick) and writes\n// gateway_health_samples so outage analysis can query historical\n// CPU/memory/load/fan/throttle state per gateway+window. Read logic below\n// is copied verbatim from the Build Heartbeat node so DB values match what\n// the cloud heartbeat sees at the same cadence — Build Heartbeat itself and\n// its MQTT wiring are untouched.\n// Schema: database/migrations/ordered/0002__gateway_health.sql. If that\n// migration has not reached this Pi yet, skip quietly with a status hint.\nvar INSERT_SQL = \"INSERT INTO gateway_health_samples (gateway_device_eui, sampled_at, cpu_temp_c, mem_percent, load_1, load_5, load_15, fan_value, throttled) VALUES (?,?,?,?,?,?,?,?,?)\";\n\nfunction findFanControl(fs) {\n  try {\n    var dirs = fs.readdirSync('/sys/class/hwmon');\n    for (var i = 0; i < dirs.length; i++) {\n      try {\n        var n = fs.readFileSync('/sys/class/hwmon/' + dirs[i] + '/name', 'utf8').trim();\n        if (n === 'pwmfan') return { type: 'hwmon', path: '/sys/class/hwmon/' + dirs[i] };\n      } catch(e) {}\n    }\n  } catch(e) {}\n  try {\n    fs.accessSync('/sys/class/pwm/pwmchip2');\n    return { type: 'pwm', path: '/sys/class/pwm/pwmchip2' };\n  } catch(e) {}\n  return null;\n}\nvar eui = env.get('DEVICE_EUI') || 'UNKNOWN';\n\nvar os = global.get('os');\nvar fs = global.get('fs');\nvar cpuTemp = null, memPercent = null, load1 = null, load5 = null, load15 = null, fanValue = null;\nvar fanAvailable = false;\n\ntry { cpuTemp = Math.round(parseInt(fs.readFileSync('/sys/class/thermal/thermal_zone0/temp', 'utf8').trim()) / 100) / 10; } catch(e) {}\ntry {\n    var tm = os.totalmem(), fm = os.freemem();\n    memPercent = Math.round(((tm - fm) / tm) * 100);\n} catch(e) {}\ntry {\n    var la = os.loadavg();\n    load1 = Math.round(la[0] * 100) / 100;\n    load5 = Math.round(la[1] * 100) / 100;\n    load15 = Math.round(la[2] * 100) / 100;\n} catch(e) {}\ntry {\n    var fanCtrl = findFanControl(fs);\n    if (fanCtrl) {\n        if (fanCtrl.type === 'hwmon') {\n            var pwm1Val = parseInt(fs.readFileSync(fanCtrl.path + '/pwm1', 'utf8').trim()) || 0;\n            fanAvailable = true;\n            fanValue = pwm1Val;\n        } else {\n            var pwmChan = fanCtrl.path + '/pwm3';\n            var period = parseInt(fs.readFileSync(pwmChan + '/period', 'utf8').trim());\n            var duty   = parseInt(fs.readFileSync(pwmChan + '/duty_cycle', 'utf8').trim());\n            fanAvailable = true;\n            fanValue = Math.round((1 - duty / period) * 255);\n        }\n    }\n} catch(e) {}\n\n// Best-effort Raspberry Pi firmware throttle bitfield. Plain sysfs read (no\n// subprocess spawn every 60s). NULL when the sysfs node is absent.\nvar throttled = null;\ntry {\n    var rawThrottled = fs.readFileSync('/sys/devices/platform/soc/soc:firmware/get_throttled', 'utf8').trim();\n    var parsedThrottled = parseInt(rawThrottled.replace(/^0x/i, ''), 16);\n    if (!isNaN(parsedThrottled)) { throttled = parsedThrottled; }\n} catch (e) {}\n\nvar sampled_at = new Date().toISOString();\nvar params = [\n    eui,\n    sampled_at,\n    cpuTemp,\n    memPercent,\n    load1,\n    load5,\n    load15,\n    fanAvailable ? fanValue : null,\n    throttled\n];\n\nreturn (async () => {\n    const _db = new osiDb.Database('/data/db/farming.db');\n    const run = (sql, p) => new Promise((res, rej) => _db.run(sql, p || [], (e) => e ? rej(e) : res()));\n    const close = () => new Promise((res) => _db.close(() => res()));\n    try {\n        await run(INSERT_SQL, params);\n        await close();\n        context.set('lastError', null);\n        node.status({ fill: 'green', shape: 'dot', text: 'sample ' + String(sampled_at).slice(11, 19) + 'Z' });\n    } catch (e) {\n        try { await close(); } catch (_) {}\n        var errText = String(e.message || e);\n        if (/no such table/i.test(errText)) {\n            node.status({ fill: 'yellow', shape: 'ring', text: 'gateway_health_samples missing (run deploy migration)' });\n        } else {\n            node.status({ fill: 'red', shape: 'ring', text: errText.slice(0, 40) });\n            if (context.get('lastError') !== errText) {\n                context.set('lastError', errText);\n                node.warn('Persist Gateway Health failed: ' + errText);\n            }\n        }\n    }\n    return null;\n})();",
+    "outputs": 1,
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [
+      {
+        "var": "osiDb",
+        "module": "osi-db-helper"
+      }
+    ],
+    "x": 430,
+    "y": 1180,
+    "wires": [
+      []
+    ]
+  },
+  {
+    "id": "gateway-health-rollup-tick",
+    "type": "inject",
+    "z": "93b1537a596e0e6d",
+    "name": "Gateway Health Rollup Tick",
+    "props": [
+      {
+        "p": "payload"
+      }
+    ],
+    "repeat": "",
+    "crontab": "10 2 * * *",
+    "once": false,
+    "onceDelay": 0.1,
+    "topic": "",
+    "payload": "",
+    "payloadType": "date",
+    "x": 170,
+    "y": 1240,
+    "wires": [
+      [
+        "gateway-health-rollup-fn"
+      ]
+    ]
+  },
+  {
+    "id": "gateway-health-rollup-fn",
+    "type": "function",
+    "z": "93b1537a596e0e6d",
+    "name": "Gateway Health Rollup",
+    "func": "// Gateway Health Rollup + Retention (issue #68). Daily at 02:10 via\n// gateway-health-rollup-tick. Idempotent: re-aggregates every CLOSED hour\n// still present in gateway_health_samples with INSERT OR REPLACE, so missed\n// nights self-heal as long as raw retention (default 14d) exceeds the gap.\n// Then prunes raw samples and old hourly rollups.\nvar ROLLUP_SQL = \"INSERT OR REPLACE INTO gateway_health_hourly (gateway_device_eui, hour_start, sample_count, cpu_temp_c_min, cpu_temp_c_mean, cpu_temp_c_max, mem_percent_min, mem_percent_mean, mem_percent_max, load_1_min, load_1_mean, load_1_max, load_5_min, load_5_mean, load_5_max, load_15_min, load_15_mean, load_15_max, fan_value_min, fan_value_mean, fan_value_max, throttled_max, computed_at) SELECT gateway_device_eui, strftime('%Y-%m-%dT%H:00:00Z', sampled_at), COUNT(*), MIN(cpu_temp_c), AVG(cpu_temp_c), MAX(cpu_temp_c), MIN(mem_percent), AVG(mem_percent), MAX(mem_percent), MIN(load_1), AVG(load_1), MAX(load_1), MIN(load_5), AVG(load_5), MAX(load_5), MIN(load_15), AVG(load_15), MAX(load_15), MIN(fan_value), AVG(fan_value), MAX(fan_value), MAX(throttled), strftime('%Y-%m-%dT%H:%M:%fZ','now') FROM gateway_health_samples WHERE sampled_at < strftime('%Y-%m-%dT%H:00:00.000Z','now') GROUP BY gateway_device_eui, strftime('%Y-%m-%dT%H:00:00Z', sampled_at)\";\nvar rawDays = parseInt(String(env.get('OSI_HEALTH_RAW_RETENTION_DAYS') || '14').trim(), 10);\nif (!isFinite(rawDays) || rawDays < 1) { rawDays = 14; }\nvar hourlyDays = parseInt(String(env.get('OSI_HEALTH_HOURLY_RETENTION_DAYS') || '365').trim(), 10);\nif (!isFinite(hourlyDays) || hourlyDays < 1) { hourlyDays = 365; }\nvar rawCutoff = new Date(Math.floor((Date.now() - rawDays * 86400000) / 3600000) * 3600000).toISOString();\nvar hourlyCutoff = new Date(Date.now() - hourlyDays * 86400000).toISOString();\n\nreturn (async () => {\n    const _db = new osiDb.Database('/data/db/farming.db');\n    const q = (sql, p) => new Promise((res, rej) => _db.all(sql, p || [], (e, r) => e ? rej(e) : res(r || [])));\n    const run = (sql, p) => new Promise((res, rej) => _db.run(sql, p || [], (e) => e ? rej(e) : res()));\n    const close = () => new Promise((res) => _db.close(() => res()));\n    try {\n        await run(ROLLUP_SQL);\n        const staleRaw = await q('SELECT COUNT(*) AS n FROM gateway_health_samples WHERE sampled_at < ?', [rawCutoff]);\n        const rawPruned = Number((staleRaw[0] || {}).n || 0);\n        if (rawPruned > 0) {\n            await run('DELETE FROM gateway_health_samples WHERE sampled_at < ?', [rawCutoff]);\n        }\n        const staleHourly = await q('SELECT COUNT(*) AS n FROM gateway_health_hourly WHERE hour_start < ?', [hourlyCutoff]);\n        const hourlyPruned = Number((staleHourly[0] || {}).n || 0);\n        if (hourlyPruned > 0) {\n            await run('DELETE FROM gateway_health_hourly WHERE hour_start < ?', [hourlyCutoff]);\n        }\n        if (rawPruned > 0 || hourlyPruned > 0) {\n            try { await run('PRAGMA wal_checkpoint(TRUNCATE)'); } catch (_) {}\n        }\n        const totals = await q('SELECT (SELECT COUNT(*) FROM gateway_health_samples) AS raw_rows, (SELECT COUNT(*) FROM gateway_health_hourly) AS hourly_rows');\n        await close();\n        const t = totals[0] || {};\n        node.status({ fill: 'green', shape: 'dot', text: 'raw ' + (t.raw_rows || 0) + ' / hourly ' + (t.hourly_rows || 0) + ', pruned ' + rawPruned + '+' + hourlyPruned });\n        msg.payload = {\n            rawRows: Number(t.raw_rows || 0),\n            hourlyRows: Number(t.hourly_rows || 0),\n            rawPruned: rawPruned,\n            hourlyPruned: hourlyPruned,\n            rawCutoff: rawCutoff,\n            hourlyCutoff: hourlyCutoff\n        };\n        return msg;\n    } catch (e) {\n        try { await close(); } catch (_) {}\n        var errText = String(e.message || e);\n        if (/no such table/i.test(errText)) {\n            node.status({ fill: 'yellow', shape: 'ring', text: 'gateway_health tables missing (run deploy migration)' });\n            return null;\n        }\n        node.warn('Gateway Health Rollup failed: ' + errText);\n        node.status({ fill: 'red', shape: 'ring', text: errText.slice(0, 40) });\n        return null;\n    }\n})();",
+    "outputs": 1,
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [
+      {
+        "var": "osiDb",
+        "module": "osi-db-helper"
+      }
+    ],
+    "x": 430,
+    "y": 1240,
+    "wires": [
+      []
+    ]
+  },
+  {
     "id": "cmd-type-registry-trigger",
     "type": "inject",
     "z": "sys-admin-tab",
