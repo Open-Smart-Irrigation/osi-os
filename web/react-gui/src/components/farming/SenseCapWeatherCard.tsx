@@ -4,6 +4,7 @@ import { useDismissOnPointerDown } from '../../hooks/useDismissOnPointerDown';
 import { devicesAPI, getApiErrorMessage, s2120API } from '../../services/api';
 import type { Device } from '../../types/farming';
 import { formatWindDirection } from '../../utils/wind';
+import { RainMonitor } from './RainMonitor';
 import { SensorMonitor } from './SensorMonitor';
 import { WindMonitor } from './WindMonitor';
 import { DeviceCardFooter } from './shared/DeviceCardFooter';
@@ -159,6 +160,7 @@ export const SenseCapWeatherCard: React.FC<Props> = ({ device, onRemove, onUpdat
   const [error, setError] = useState<string | null>(null);
   const [sensorMonitor, setSensorMonitor] = useState<SensorMonitorConfig | null>(null);
   const [showWindMonitor, setShowWindMonitor] = useState(false);
+  const [showRainMonitor, setShowRainMonitor] = useState(false);
 
   const intervalLabel = formatCounterInterval(data.counter_interval_seconds);
   const rainStatusLabel = formatCounterStatus(data.rain_delta_status);
@@ -311,18 +313,7 @@ export const SenseCapWeatherCard: React.FC<Props> = ({ device, onRemove, onUpdat
         <div className="rounded-lg bg-[var(--card)] p-3">
           <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)]">Rain Today</p>
           <button
-            onClick={() => setSensorMonitor({
-              field: 'rain_mm_delta',
-              initialField: 'rain_mm_delta',
-              label: 'Rainfall',
-              unit: 'mm',
-              color: '#2563eb',
-              decimals: 1,
-              seriesOptions: [
-                { field: 'rain_mm_delta', label: 'This interval', unit: 'mm', color: '#2563eb', decimals: 1 },
-                { field: 'rain_mm_per_10min', label: 'Per 10 min (rate)', unit: 'mm', color: '#1d4ed8', decimals: 1 },
-              ],
-            })}
+            onClick={() => setShowRainMonitor(true)}
             className="cursor-pointer text-left text-2xl font-bold tabular-nums text-[var(--text)] underline decoration-dotted underline-offset-4 transition-colors hover:text-[var(--primary)]"
             title="View history"
             style={{ color: '#2563eb' }}
@@ -408,6 +399,13 @@ export const SenseCapWeatherCard: React.FC<Props> = ({ device, onRemove, onUpdat
           deveui={device.deveui}
           deviceName={device.name}
           onClose={() => setShowWindMonitor(false)}
+        />
+      )}
+      {showRainMonitor && (
+        <RainMonitor
+          deveui={device.deveui}
+          deviceName={device.name}
+          onClose={() => setShowRainMonitor(false)}
         />
       )}
     </div>

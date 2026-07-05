@@ -4196,6 +4196,53 @@
     ]
   },
   {
+    "id": "rain-history-http",
+    "type": "http in",
+    "z": "device-api-tab",
+    "name": "GET /api/devices/:deveui/rain-history",
+    "url": "/api/devices/:deveui/rain-history",
+    "method": "get",
+    "x": 160,
+    "y": 2160,
+    "wires": [
+      [
+        "rain-history-fn"
+      ]
+    ]
+  },
+  {
+    "id": "rain-history-fn",
+    "type": "function",
+    "z": "device-api-tab",
+    "name": "Auth + Daily Rain History",
+    "func": "return (async () => {\nfunction getAuthSecret() {\n  const configured = String(env.get('AUTH_TOKEN_SECRET') || env.get('JWT_SECRET') || '').trim();\n  if (configured) return configured;\n  const fs = global.get('fs');\n  const secretPaths = ['/data/db/osi_auth_token_secret', '/var/lib/node-red/.node-red/osi_auth_token_secret'];\n  if (fs) {\n    for (const secretPath of secretPaths) {\n      try {\n        const existing = String(fs.readFileSync(secretPath, 'utf8') || '').trim();\n        if (existing) return existing;\n      } catch (_) {}\n    }\n    const generated = crypto.randomBytes(48).toString('hex');\n    for (const secretPath of secretPaths) {\n      try {\n        fs.writeFileSync(secretPath, generated + '\\n', { mode: 0o600 });\n        return generated;\n      } catch (_) {}\n    }\n  }\n  const err = new Error('AUTH_TOKEN_SECRET or JWT_SECRET must be configured');\n  err.statusCode = 500;\n  throw err;\n}\nfunction toBase64Url(input) {\n  return Buffer.from(input).toString('base64').replace(/\\+/g, '-').replace(/\\//g, '_').replace(/=+$/g, '');\n}\nfunction fromBase64Url(input) {\n  let value = String(input || '').replace(/-/g, '+').replace(/_/g, '/');\n  while (value.length % 4) value += '=';\n  return Buffer.from(value, 'base64');\n}\nfunction verifyBearer(authHeader) {\n  if (!authHeader || !authHeader.startsWith('Bearer ')) {\n    const err = new Error('Unauthorized');\n    err.statusCode = 401;\n    throw err;\n  }\n  const token = authHeader.substring(7).trim();\n  const parts = token.split('.');\n  if (parts.length !== 2 || !parts[0] || !parts[1]) {\n    const err = new Error('Invalid token');\n    err.statusCode = 401;\n    throw err;\n  }\n  const payloadB64 = parts[0];\n  const sig = parts[1];\n  const expectedSig = toBase64Url(crypto.createHmac('sha256', getAuthSecret()).update(payloadB64).digest());\n  const sigBuf = Buffer.from(sig, 'utf8');\n  const expectedBuf = Buffer.from(expectedSig, 'utf8');\n  if (sigBuf.length !== expectedBuf.length || !crypto.timingSafeEqual(sigBuf, expectedBuf)) {\n    const err = new Error('Invalid token');\n    err.statusCode = 401;\n    throw err;\n  }\n  let payload;\n  try {\n    payload = JSON.parse(fromBase64Url(payloadB64).toString('utf8'));\n  } catch (_) {\n    const err = new Error('Invalid token');\n    err.statusCode = 401;\n    throw err;\n  }\n  const userId = Number(payload.userId);\n  const username = String(payload.username || '').trim();\n  const exp = Number(payload.exp || 0);\n  if (!Number.isFinite(userId) || !username) {\n    const err = new Error('Invalid token');\n    err.statusCode = 401;\n    throw err;\n  }\n  if (exp && Date.now() > exp) {\n    const err = new Error('Token expired');\n    err.statusCode = 401;\n    throw err;\n  }\n  return { userId, username };\n}\nfunction respond(statusCode, payload) {\n  msg.statusCode = statusCode;\n  msg.payload = payload;\n  return msg;\n}\nfunction normalizeDeveuiParam() {\n  const deveui = String(msg.req && msg.req.params && msg.req.params.deveui || '').trim().toUpperCase();\n  if (!deveui) {\n    const err = new Error('Missing deveui');\n    err.statusCode = 400;\n    throw err;\n  }\n  return deveui;\n}\nfunction parseDays() {\n  const daysRaw = Number(msg.req && msg.req.query && msg.req.query.days);\n  return Number.isFinite(daysRaw) && daysRaw > 0 ? daysRaw : 7;\n}\nfunction parseTzOffsetMin() {\n  const offsetRaw = Number(msg.req && msg.req.query && msg.req.query.tz_offset_min);\n  return Number.isFinite(offsetRaw) ? offsetRaw : 0;\n}\n\n  let db = null;\n  const closeDb = function() {\n    return db ? new Promise(function(resolve) { db.close(function() { resolve(); }); }) : Promise.resolve();\n  };\n  try {\n    const auth = verifyBearer(msg.req && msg.req.headers && msg.req.headers.authorization);\n    const deveui = normalizeDeveuiParam();\n    db = new osiDb.Database('/data/db/farming.db');\n    const points = await osiHistory.legacyRainDailyHistory(db, {\n      deveui: deveui,\n      days: parseDays(),\n      tzOffsetMin: parseTzOffsetMin(),\n      userId: auth.userId,\n      nowMs: Date.now(),\n    });\n    return respond(200, points);\n  } catch (error) {\n    const statusCode = Number(error && (error.statusCode || error.status) || 500) || 500;\n    return respond(statusCode, { message: error && error.message ? error.message : 'Unable to load rain history' });\n  } finally {\n    try { await closeDb(); } catch (_) {}\n  }\n})();\n",
+    "outputs": 1,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [
+      {
+        "var": "osiDb",
+        "module": "osi-db-helper"
+      },
+      {
+        "var": "osiHistory",
+        "module": "osi-history-helper"
+      },
+      {
+        "var": "crypto",
+        "module": "crypto"
+      }
+    ],
+    "x": 440,
+    "y": 2160,
+    "wires": [
+      [
+        "device-response"
+      ]
+    ]
+  },
+  {
     "id": "sys-admin-tab",
     "type": "tab",
     "label": "System Admin",
