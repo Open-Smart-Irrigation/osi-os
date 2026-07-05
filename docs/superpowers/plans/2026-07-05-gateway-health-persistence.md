@@ -188,7 +188,9 @@ for (const flowPath of FLOW_PATHS) {
     assert.equal(tick.type, 'inject');
     assert.equal(tick.repeat, '60');
     assert.deepEqual(tick.wires, [['gateway-health-persist-fn']]);
-    assert.ok(!byId['062a0f9bf66d9789'], 'node 062a0f9bf66d9789 (old Build Heartbeat tee id) must not appear in the editor');
+    const hb = byId['062a0f9bf66d9789'];
+    assert.ok(hb, 'Build Heartbeat node missing');
+    assert.deepEqual(hb.wires, [['d769e9face3844d5']], 'Build Heartbeat wiring must stay untouched (no tee)');
   });
 
   test(`${rel}: persist node shape (libs, close, INSERT SQL, self-sampling)`, () => {
