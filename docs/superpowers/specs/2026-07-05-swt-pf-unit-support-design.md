@@ -124,10 +124,15 @@ Display precision: pF at 2 decimals, kPa under existing rules, per the Unit Rule
 
 ## CSV Export
 
-CSV export always includes both kPa and pF for each SWT channel, by default:
+CSV export always includes both kPa and pF for each SWT channel, by default. The
+export is tidy long format (`…,channel_key,…,unit,value`); each SWT kPa row is
+paired with a derived pF row (`channel_key` gains the `_pf` suffix, `unit` is
+`pF`, value rounded to 4 decimals):
 
 ```text
-swt_1_kpa,swt_1_pf,swt_2_kpa,swt_2_pf,swt_3_kpa,swt_3_pf
+timestamp,...,channel_key,...,unit,value
+2026-06-01T08:00:00.000Z,...,swt_1,...,kPa,6.2
+2026-06-01T08:00:00.000Z,...,swt_1_pf,...,pF,1.7924
 ```
 
 pF columns are **computed at export time** from the kPa value in hand. Both the on-demand zone export and the persisted `/data/exports` rollup CSVs funnel through `rawZoneExportRows`/`aggregateZoneExportRows` in `osi-history-helper`, so this is a single choke point — and the guarantee holds for *all* history, including every row recorded before this feature exists, with no backfill.
