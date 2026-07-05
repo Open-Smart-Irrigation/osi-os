@@ -26,7 +26,7 @@ closed-loop + RDI hold the tree at target with less water than the open-loop rul
 | Decision | Choice |
 |---|---|
 | Paradigm | Closed-loop **PI** (P + I, no D — signal too noisy for D; Agroscope drops it too), daily cadence. |
-| Signal | v6's existing continuous zone-aggregated `TWD_rel` (75th-pct across non-ref trees). No new signal. |
+| Signal | v6's existing per-tree relative deficit `TWD_rel` (`twdDay/mdsMaxReferenceUm`), aggregated at the 75th percentile across the MAD-filtered non-ref trees. Note: v6 today computes its zone p75 over **µm `TWD_day`**, not `TWD_rel` — this adds a p75 over the existing per-tree `twdRel` (same trees/filter), so the observed signal shares the setpoint's dimensionless scale. No new *sensor* signal. |
 | Comparison | **2-way shadow:** current open-loop v6 vs new v6-closed-loop-RDI, both on `TWD_rel`. Compute-only; no actuation, no edge changes. |
 | Output | A continuous recommended water-volume adjustment (the smooth analogue of v6's `increase_X% / decrease_X%`). |
 | RDI setpoint | **Hybrid:** default derived from v6's per-crop DB calibration + phenology (target the *mild* deficit band); optional per-zone `rdi_target_override`. |
@@ -35,9 +35,11 @@ closed-loop + RDI hold the tree at target with less water than the open-loop rul
 
 ## Where it plugs into v6
 
-`DendroAnalyticsService.computeForZone(...)` already computes the zone-aggregated `TWD_rel` and calls the
-open-loop `irrDecision(...) → ActionResult` (which still drives the persisted recommendation + actuation).
-We add, **after** that and only when the zone opts in:
+`DendroAnalyticsService.computeForZone(...)` aggregates per-tree stress and calls the open-loop
+`irrDecision(...) → ActionResult` (which still drives the persisted recommendation + actuation). We surface a
+zone-aggregated `TWD_rel` (a p75 over the existing per-tree `twdRel`, dimensionless) and add, **after**
+`irrDecision` and only when the zone opts in — in a separate `REQUIRES_NEW` transaction so a shadow failure
+can never roll back v6's per-run transaction:
 
 1. `RdiController.decide(zone, observedTwdRel, setpoint, forecastRainMm, lowConfidence, state)` → an
    `RdiResult` (recommended adjustment + controller internals).
@@ -58,7 +60,10 @@ Daily, per opted-in zone:
   setpoint → update the integral. This is the closed loop.
 - **Corrected against Agroscope's PID defects** (from the assessment [P6]):
   - integrate the **first** error (Agroscope skipped it);
-  - **no double-integration** — the integral advances exactly once per closed cycle;
+  - **no double-integration** — the integral advances exactly once per closed cycle; only a *prior-day*
+    pending cycle closes (`pendingDate < today`), so a same-day recompute never re-integrates;
+  - **never integrate a frozen cycle** — a proposal made under forecast-rain freeze is marked `frozen` and its
+    next-day close skips the integral (it would otherwise learn from rain, not from the controller);
   - **proper anti-windup** — integral accrues only when the output is unsaturated (`−maxAdj < raw < +maxAdj`);
   - **dt / gap handling** — scale or **skip** integration across missing or low-confidence days (reuse v6's
     `lowConfidence`); never treat non-adjacent days as adjacent;
@@ -115,6 +120,7 @@ Actuating on the shadow (a later, opt-in phase); edge changes; the full Agroscop
 | Flyway migration | `dendro_rdi_state`, `dendro_rdi_daily` tables; `irrigation_zones.rdi_shadow_enabled` + `rdi_target_override` |
 | `IrrigationZone` | two fields |
 | `RdiController` (new) + `RdiResult`/`RdiState` | the corrected PI control law |
-| `DendroAnalyticsService.computeForZone` | invoke the controller for opted-in zones; persist shadow; do not touch actuation |
+| `RdiShadowService` (new) | `REQUIRES_NEW` orchestration (close → setpoint → propose → upsert), isolating shadow failures from v6's transaction |
+| `DendroAnalyticsService.computeForZone` | surface p75 over `twdRel`; call `RdiShadowService` for opted-in zones (try/catch); do not touch actuation |
 | repos/entities for the two new tables | persistence + warm-restart |
 | a minimal compare read endpoint | side-by-side per zone/day |
