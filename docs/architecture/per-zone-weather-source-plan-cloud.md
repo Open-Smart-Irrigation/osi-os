@@ -755,20 +755,45 @@ wind `u2` = 10 m→2 m conversion. Test against the FAO-56 Chapter-4 worked exam
 required input NaN → `null`.
 
 ### Task E3: enrich daily-record types with PM inputs (additive)
-Add nullable `meanRelativeHumidityPct`, `windSpeedMs`, `solarRadiationMjM2` to `WeatherForecastData.Day` and
-`DailyWeatherRecord`. Give each a compact secondary constructor defaulting the three to `null` so existing
-callers/tests don't churn. No behavior change until E5 populates them.
+Add nullable `meanRelativeHumidityPct`, `windSpeedMs`, `solarRadiationMjM2` to `WeatherForecastData.Day`
+(→ 9 fields) and `DailyWeatherRecord` (→ 9 fields). **For a Java record the canonical constructor is the
+full-arg one**, so to avoid churn: make the new 9-arg the canonical, then add an **explicit 6-arg overload
+preserving the old arity that delegates** (`this(date, …, null, null, null)`). Existing `new …Day(6 args)` /
+`new DailyWeatherRecord(6 args)` then still compile. Without that overload this breaks **~15 `Day` call sites**
+(4 production: `OpenMeteoService.java:164`, `AgroMonitoringWeatherService.java:370`, `OpenAgriWeatherService.java:412`,
+`ZoneEnvironmentService.java:792`; ~11 test) and **~25 `DailyWeatherRecord` call sites** (3 production:
+`OpenMeteoService.java:215`, `AgroMonitoringWeatherService.java:414`, `PredictionInputAssembler.java:390`; ~22
+test). No behavior change until E5 populates the new fields.
 
-### Task E4: `Et0Resolver` + wire into read sites
+### Task E4: `Et0Resolver` + wire in (resolve UPSTREAM, where inputs still exist)
 **Files:** create `analytics/Et0Resolver.java`; test `analytics/Et0ResolverTest.java`; modify
-`ZoneEnvironmentService.java`, `PredictionInputAssembler.java`.
-`Double resolve(Double nativeEt0, Double tMinC, Double tMaxC, Double meanRhPct, Double windMs, Double solarMj,
-Double elevationM, double latDeg, int dayOfYear)`: (1) `nativeEt0 != null` → return it; (2) Tmin/Tmax + RH +
-wind + solar all present → `fao56Et0`; (3) Tmin/Tmax present → `hargreavesEt0`; (4) else `null`. Unit-test
-each tier. Wire it into `buildAgronomicEnvironment` (`ZoneEnvironmentService.java:603-605`, forecast day) and
-`buildObservedForcing` (`PredictionInputAssembler.java:375`, archive record), passing the resolved location's
-lat + optional elevation + the day's date. **`auto` regression:** the merged day still carries Open-Meteo's
-native et0 → tier 1 → byte-identical.
+`ZoneEnvironmentService.java`, `PredictionInputAssembler.java`, and the `ZoneEnvironmentSummary.ForecastDay`
+record.
+
+- **Return a tier-labeled result, not a bare Double:** `Et0Result resolve(Double nativeEt0, Double tMinC,
+  Double tMaxC, Double meanRhPct, Double windMs, Double solarMj, Double elevationM, double latDeg, int
+  dayOfYear)` where `record Et0Result(Double value, String tier)` and `tier ∈ {native, fao56, hargreaves,
+  unavailable}`: (1) `nativeEt0 != null` → `(nativeEt0, "native")`; (2) Tmin/Tmax + RH + wind + solar all
+  present → `(fao56Et0(...), "fao56")`; (3) Tmin/Tmax present → `(hargreavesEt0(...), "hargreaves")`; (4) else
+  `(null, "unavailable")`. Unit-test each tier.
+- **CRITICAL — resolve upstream, not at the summary read.** ET0 is consumed at
+  `buildAgronomicEnvironment` (`ZoneEnvironmentService.java:603-605`) from `forecast.rainFocus().daily().get(0)`,
+  a `ZoneEnvironmentSummary.ForecastDay` — a *derived* record built in `buildForecastEnvironment` (`:185`,
+  mapping at `~:539-554`) that **drops the PM inputs** (`windSpeedMps` hardcoded null `:549`; `ForecastDay`
+  `:173-186` has no RH/solar). So resolve ET0 **inside `buildForecastEnvironment`**, where the raw
+  E3-enriched `WeatherForecastData.Day` AND the resolved `location` both exist: for `daily.get(0)` (or each
+  day), call `et0Resolver.resolve(day.et0MmDay(), day.tempMinC(), day.tempMaxC(), day.meanRelativeHumidityPct(),
+  day.windSpeedMs(), day.solarRadiationMjM2(), elevation, location.latitude(), day.date().getDayOfYear())` and
+  store `result.value()` in `ForecastDay.et0MmDay` and **add a `String et0Source` field to `ForecastDay`** =
+  `result.tier()`. `buildAgronomicEnvironment` then reads the already-resolved `et0MmDay` (no signature change)
+  and uses `et0Source` for provenance — **replace the `et0 != null ? "open_meteo" : "unavailable"` hardcode at
+  `:612`** with the tier label.
+- **Observed path (`PredictionInputAssembler.java:375`)** resolves at the read site (fable-confirmed in scope):
+  `location.latitude()`, `archive.date()` (→ `dayOfYear`), and the E3-enriched `DailyWeatherRecord` inputs are
+  all available; use `result.value()` for the forcing's et0 and fold `result.tier()` into `joinSources`.
+- **`auto` regression:** the merged day/archive still carries Open-Meteo's native et0 → tier 1 → byte-identical
+  value AND `et0Source == "native"` (was effectively `"open_meteo"`; if any test asserts the exact string,
+  update it to `"native"`).
 
 ### Task E5: populate PM inputs per provider
 - **Open-Meteo** → keep native et0 (tier 1); no change.
@@ -779,5 +804,6 @@ native et0 → tier 1 → byte-identical.
   (likely) → tier-3 Hargreaves. Verify each API's fields in its mapping.
 - **Elevation** optional (FAO sea-level pressure default when unknown); a later enhancement can store zone
   elevation or use Open-Meteo's returned `elevation`.
-- **Provenance:** the ET0 source label becomes `native|fao56|hargreaves` (extend where `vpdSource`/`joinSources`
-  surface it) so the tier used is visible.
+- **Provenance:** carried by `Et0Result.tier()` (Task E4) → stored on `ForecastDay.et0Source` and folded into
+  the prediction `joinSources`; the `ZoneEnvironmentService.java:612` `"open_meteo"` hardcode is replaced in E4.
+  Values: `native | fao56 | hargreaves | unavailable`.
