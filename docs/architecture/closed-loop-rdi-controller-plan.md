@@ -61,7 +61,7 @@ CREATE TABLE IF NOT EXISTS dendro_rdi_daily (
     integral_after   DOUBLE PRECISION,
     forecast_rain_mm DOUBLE PRECISION,
     low_confidence   BOOLEAN NOT NULL DEFAULT false,
-    status           VARCHAR(20) NOT NULL DEFAULT 'proposed',
+    status           VARCHAR(20) NOT NULL DEFAULT 'pending',  -- idle | pending | frozen | closed
     created_at       TIMESTAMP NOT NULL DEFAULT now(),
     CONSTRAINT uq_rdi_daily UNIQUE (zone_id, date)
 );
@@ -150,7 +150,7 @@ in a try/catch that logs and swallows. A shadow failure then rolls back only the
   `DendroRdiStateRepository`, `DendroRdiDailyRepository`) with:
   `@Transactional(propagation = Propagation.REQUIRES_NEW) void runShadow(IrrigationZone zone, DendroCalibration cal, double phenoMod, LocalDate today, Double zoneTwdRel, boolean lowConfidence, double rainfallMm)`:
   1. `RdiState state = rdiStateRepository.findByZoneId(zone.getId()).map(DendroRdiState::toState).orElseGet(() -> defaultState(gains))`;
-  2. **close** a *prior-day* pending cycle only — guard `state.pendingDate() != null && state.pendingDate().isBefore(today)` (H2: without this, a same-day re-run — manual recompute exists at `DendroController` `recompute`, and v6 upserts — would close today's own cycle and double-integrate). Compute `daysElapsed = DAYS.between(state.pendingDate(), today)`; `state = rdiController.observeNextDay(zoneTwdRel, setpoint(prevDay), lowConfidence, state, daysElapsed)` (observed may be null → carried, no integrate);
+  2. **close** a *prior-day* pending cycle only — guard `state.pendingDate() != null && state.pendingDate().isBefore(today)` (H2: without this, a same-day re-run — manual recompute exists at `DendroController` `recompute`, and v6 upserts — would close today's own cycle and double-integrate). The setpoint to close against is the one the pending proposal used: read it from that day's row, `double prevSetpoint = dendroRdiDailyRepository.findByZoneIdAndDate(zone.getId(), state.pendingDate()).map(DendroRdiDaily::getSetpoint).orElse(RdiSetpoint.resolve(zone, cal, phenoMod).value())`. Then `daysElapsed = DAYS.between(state.pendingDate(), today)`; `state = rdiController.observeNextDay(zoneTwdRel, prevSetpoint, lowConfidence, state, daysElapsed)` (observed may be null → carried, no integrate);
   3. resolve setpoint via `RdiSetpoint.resolve(zone, cal, phenoMod)`;
   4. forecast rain — `WeatherResolver` may be null in tests (M3: v6 guards `weatherResolver != null` at L135), so:
      `double forecastRainMm = (weatherResolver == null) ? rainfallMm : weatherResolver.getWeatherForDay(zone, today.plusDays(1)).map(WeatherSnapshot::precipitationMm).orElse(rainfallMm);`
@@ -175,9 +175,12 @@ in a try/catch that logs and swallows. A shadow failure then rolls back only the
   `rainfallMm`, `phenoMod`, `cal`, `zoneAggregation` are all already in scope at `:194`.)
 - [ ] **Isolation regression tests:** (a) an opted-in zone's `ZoneDailyRecommendation.irrigationAction` /
   reasoning / actuation is byte-identical to a run with the shadow disabled; (b) a `rdi_shadow_enabled=false`
-  zone writes no `dendro_rdi_daily` row; (c) **poison test** — with `rdiShadowService` stubbed to throw,
-  v6's `ZoneDailyRecommendation` for the zone (and other zones in the same run) still persists (proves the
-  `REQUIRES_NEW` + try/catch isolation).
+  zone writes no `dendro_rdi_daily` row; (c) **poison test (integration, `@SpringBootTest`/`@DataJpaTest`
+  with a real transaction)** — use the **real** `RdiShadowService` bean but wire its `DendroRdiDailyRepository`
+  to throw on save (e.g. a Mockito spy that throws, or a duplicate-key insert), then assert v6's
+  `ZoneDailyRecommendation` for that zone AND another zone in the same `computeForAllZones()` run still commit.
+  (A mock `rdiShadowService` that throws would never touch the DB, so it would pass even without
+  `REQUIRES_NEW` — it must be a real bean writing in its own tx to actually prove the isolation.)
 - [ ] Fix any `new DendroAnalyticsService(...)` test construction sites for the added `rdiShadowService`
   dependency (`grep -rn "new DendroAnalyticsService(" backend/src/test` — **4 sites**:
   `DendroAnalyticsWeatherResolverTest`, `DendroAnalyticsRecomputeRegressionTest`, `DendroAnalyticsScenarioTest`,
