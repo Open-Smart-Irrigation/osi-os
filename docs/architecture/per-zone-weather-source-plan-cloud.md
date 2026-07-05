@@ -619,7 +619,7 @@ These corrections came from a review against the live code; they are load-bearin
   - **LOCAL current is unspecified — recommend:** scope `local` to "S2120 for the Local-environment panel + cascade for API current/forecast" for the first cut (avoids adding `WeatherStationZoneRepository`/`DeviceRepository` to the resolver and synthesizing a `WeatherCurrentData(source="local")`); or add a dedicated LOCAL-current task if a synthesized current is wanted.
   - **Test churn:** `ZoneEnvironmentServiceTest` constructs positionally at **7 sites** (`:38-51`) — all need the resolver arg; assert an `auto` zone yields identical output to before.
 - **R6 — Task 9: cover BOTH forcing paths via a decision table.** The observed blend (`:317-381`) is half of it: `buildForecastForcing` (`:400-430`) is untouched → would ignore `weather_source` (spec violation), and its location comes from `ZoneEffectiveGeometryService`. The observed path runs on `getDailyArchive → DailyWeatherRecord`, a method **only** on Agro + OpenMeteo (not on `WeatherProvider`; OpenAgri/MeteoSwiss have no archive), so "use only the selected source" is unimplementable for `openagri`/`meteoswiss` — decide the archive-less fallback and whether `WeatherProvider` gains an optional archive capability. AUTO observed is per-field merged (`mergeArchiveRecord :383-398`) with rain precedence station→`environment.getRainfallMm()`→archive (`:357-364`). Produce a table: source × {tempMin, tempMax, rain, et0} × {observed, forecast} → which provider supplies it and whether `ZoneDailyEnvironment` rainfall is still consulted. **Test churn:** `PredictionInputAssemblerTest` constructs at **2 sites** (`:123, :526`).
-- **R7 — Coverage note:** `DendroController` (`:82`), `HistoryCloudExtensionService` (`:97`), `IrrigationZoneController` (`:577`) read weather only via `ZoneEnvironmentService.buildSummary` → covered transitively by Task 8 (no separate task).
+- **R7 — Coverage note:** `DendroController` (`:82`), `HistoryCloudExtensionService` (`:97`), `IrrigationZoneController` (`:577`), and `EdgeSyncService` (`:396`) read weather only via `ZoneEnvironmentService.buildSummary` → covered transitively by Task 8 (no separate task).
 
 **Gate:** R1 (done), R2/R3/R4 are mechanical. **Tasks 8 (R5) and 9 (R6) are "design-complete required" gates** — fill in the explicit invariants / decision table before an implementer starts them.
 
@@ -634,7 +634,8 @@ Not covered here. The edge work (Node-RED "resolve weather for zone" function + 
 | `weather_source` column + field | 1, 2 |
 | enum + default `auto` + unknown→auto | 2 |
 | edge→cloud sync of the field | 3 |
-| single resolver + pluggable providers | 4, 6, 8 |
+| single resolver (day path) + pluggable providers | 4, 6 |
+| source-aware blend consumers (env tab, prediction) | 8, 9 |
 | MeteoSwiss provider (CH-only, fallback) | 5 |
 | explicit-source-authoritative + `auto` unchanged | 6, 8, 9 |
 | `local` = S2120 measured + cascade forecast | 6, 8 |
@@ -671,13 +672,16 @@ applies to the day path via `WeatherResolver`; this merge path is deliberately s
   `cacheKey(kind, location, edgeCompatible, source)` → `kind|edge/cloud|lat|lon|tz|source.key()` (extend
   `ZoneEnvironmentService.java:814-819`). Keep `resolveLocation(zone,tz)` (gateway fallback, `:743-766`) and
   `resolveTimezone` (`"UTC"` id) unchanged — do NOT gate on `zone.getLatitude()==null`.
+  **Interim caller:** `getForecast` also feeds `resolveForecastData` (`ZoneEnvironmentService.java:230/233-243`,
+  used by `buildForecastEnvironment` `:504`) — update its body to pass a zone-derived source (or `AUTO`) so it
+  compiles; Task 9 promotes that to a real `WeatherSource` parameter on the public method.
 - [ ] **Step 3: Current selection** (`getCurrentWeather`, `:627-651`):
   - `AUTO` / `LOCAL` → today's exact chain: `edgeCompatible ? OpenAgri.or(OpenMeteo) : OpenAgri.or(Agro).or(OpenMeteo)`.
   - explicit external `X` → `X.getCurrentConditions(...).or(<the auto chain>)`. (MeteoSwiss current is empty in the first cut → falls through.)
   - `LOCAL` needs no synthesized current — the agronomic layer already prefers S2120 climate via `hasLocalClimate` (`:599-601`).
 - [ ] **Step 4: Forecast selection** (`getForecast`, `:653-682`) — merge preserved, source picks the primary:
   - `AUTO` / `LOCAL` → today's exact merge: `primary = edgeCompatible ? OpenAgri : mergeForecasts(OpenAgri, Agro)`; then `mergeForecasts(primary, OpenMeteo)`.
-  - explicit external `X` → `primary = X.getForecast(...)` (or the auto primary if `X` empty); then `mergeForecasts(primary, OpenMeteo)` — **Open-Meteo always merged for ET0** (cross-cutting rule).
+  - explicit external `X` → `primary = X.getForecast(...)` (or the auto primary if `X` empty); then `mergeForecasts(primary, OpenMeteo)` — **Open-Meteo always merged for ET0** (cross-cutting rule). (When `X == open_meteo`, skip the redundant second fetch — reuse the primary instead of `mergeForecasts(OpenMeteo, OpenMeteo)`.)
 - [ ] **Step 5: Tests.** Extend `ZoneEnvironmentServiceTest`: an `auto` zone yields byte-identical current+forecast to before (regression guard); an explicit `open_meteo` zone's current is Open-Meteo; an explicit source still yields non-null ET0 in `buildAgronomicEnvironment`. Update the 7 construction sites. Run `./gradlew test --tests "org.osi.server.analytics.*" -x buildFrontend -x buildTerraIntelligenceFrontend`.
 - [ ] **Step 6: Commit** `feat(weather): ZoneEnvironmentService honors weather_source (source-keyed cache, ET0-always-open-meteo)`.
 
@@ -685,8 +689,13 @@ applies to the day path via `WeatherResolver`; this merge path is deliberately s
 
 **Files:** modify `PredictionInputAssembler.java` and `ZoneEnvironmentService.resolveForecastData(...)` signature;
 test `PredictionInputAssemblerTest.java`. **No new constructor dependency** on the assembler (it reads
-`zone.getWeatherSource()`); grep `resolveForecastData(` for callers before changing its signature; the 2
-`PredictionInputAssemblerTest` sites (`:123, :526`) change only if a signature ripples to them.
+`zone.getWeatherSource()`) — the 2 constructor sites (`:123, :526`) are unaffected. **Test churn is the
+`resolveForecastData` mock stubs:** `PredictionInputAssemblerTest` stubs the 3-arg method at **7 sites**
+(`:187, :328, :429, :576, :666, :754, :841`) — all break on the signature change; update each.
+Interim (from Task 8): when `getForecast` gained a `WeatherSource` param, `resolveForecastData`'s body
+(`ZoneEnvironmentService.java:230`; the 2-arg overload has zero production callers) was made to pass a
+zone-derived source (or `AUTO`); this task formalizes that by adding the `WeatherSource` parameter to the
+public `resolveForecastData` and passing `WeatherSource.fromKey(zone.getWeatherSource())` from the assembler.
 
 - [ ] **Step 1: Forecast path.** `buildForecastForcing` (`:400-430`) delegates to
   `zoneEnvironmentService.resolveForecastData(location, edgeCompatible, now)`. Add a `WeatherSource source`
@@ -698,16 +707,17 @@ test `PredictionInputAssemblerTest.java`. **No new constructor dependency** on t
 
   | Field | Precedence |
   |---|---|
-  | tempMin / tempMax | *station (S2120) if `hasTemperatureRange`* → selected-source archive → auto archive |
-  | rain | *station `rainMm`* → *`ZoneDailyEnvironment.getRainfallMm`* → selected-source archive precip → auto archive precip |
-  | et0 | **Open-Meteo archive always** (cross-cutting rule) |
+  | tempMin / tempMax | *station (S2120) if `hasTemperatureRange`* → **selected archive** (temp) |
+  | rain | *station `rainMm`* → *`ZoneDailyEnvironment` row (see note)* → **selected archive** (precip) |
+  | et0 | **Open-Meteo archive always** (cross-cutting rule) — supplemented even for `agromonitoring` |
 
-  - "selected-source archive" = the selected source's `getDailyArchive` IF archive-capable (**only `open_meteo` and `agromonitoring` implement it**); "auto archive" = the current `mergeArchiveRecord(agro, openMeteo)`.
-  - explicit `open_meteo` → archive = OpenMeteo only (+ its ET0).
-  - explicit `agromonitoring` → archive = Agro for temp/rain; ET0 from OpenMeteo (supplement).
-  - explicit `openagri` / `meteoswiss` → **no archive capability** → fall back to the auto archive (documented exception).
-  - `local` / `auto` → current behavior (station-first + agro+openMeteo archive).
-  - `WeatherProvider` gains **no** archive method; archive stays the concrete `getDailyArchive` on Agro/OpenMeteo, selected by source. Keep `joinSources` provenance and the station/environment precedence exactly.
+  - **"selected archive" is authoritative — one rule, no cross-provider fallback:**
+    - explicit `open_meteo` → OpenMeteo archive **only** (temp/rain/et0).
+    - explicit `agromonitoring` → Agro archive for temp/rain; ET0 from a supplementary OpenMeteo archive fetch (implementer must still call `openMeteoService.getDailyArchive` solely for et0).
+    - `auto` / `local` / `openagri` / `meteoswiss` → the current **auto archive** = `mergeArchiveRecord(agro, openMeteo)` (openagri/meteoswiss have no archive of their own; `AgroMonitoringWeatherService.java:413-422` archive et0 is always null so OpenMeteo already fills it — this is exactly today's behavior).
+    - For an archive-capable explicit source, missing days/fields stay **null** (no fall-through to the other provider) — that is what "authoritative" means; the station/environment precedence above still fills where present.
+  - Note (rain is **row-gated**, not value-gated): if a `ZoneDailyEnvironment` row exists for the day but `getRainfallMm()` is null, rain stays null and the archive is NOT consulted (`PredictionInputAssembler.java:357-364`) — preserve this exactly for `auto`.
+  - Only Agro (`getDailyArchive`) and OpenMeteo (`getDailyArchive`) are archive-capable; `WeatherProvider` gains **no** archive method (archive stays the concrete method, selected by source in the assembler). Keep `joinSources` provenance and the station/environment precedence exactly.
 - [ ] **Step 3: Tests.** `auto` zone → identical observed+forecast forcing as before; explicit `open_meteo` → observed archive gap-fill from OpenMeteo only, ET0 present; explicit `agromonitoring` → temp from Agro, ET0 still present; explicit `meteoswiss` → auto-archive fallback with ET0. Run `./gradlew test --tests "org.osi.server.prediction.*" -x buildFrontend -x buildTerraIntelligenceFrontend`.
 - [ ] **Step 4: Commit** `feat(weather): prediction observed+forecast forcing honor weather_source`.
 
