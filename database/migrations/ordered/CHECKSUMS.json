@@ -1,4 +1,5 @@
 {
   "0001__baseline.sql": "bdb890ec961fc8384e0eb8f577d739c8e85199252dc827a2bba58fb64d655a54",
-  "0002__gateway_health.sql": "2e076e48aeea00f43e8412f60b73f1a6577c246986829cd2ce6fe3f918831b12"
+  "0002__gateway_health.sql": "2e076e48aeea00f43e8412f60b73f1a6577c246986829cd2ce6fe3f918831b12",
+  "0003__stamp_contract_version_and_zone_op_split.sql": "23b5ffebfafff0f2b975bfbf37e9c8214d04f5d68bb798dbcbcbee7b483eddc4"
 }
