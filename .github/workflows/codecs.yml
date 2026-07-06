@@ -1,0 +1,24 @@
+name: Codec Verifiers
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+jobs:
+  codecs:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: node scripts/verify-strega-gen1.js
+      - run: node scripts/verify-lsn50-chameleon-codec.js
+      - run: node scripts/verify-lorain-codec.js
+      - run: node scripts/verify-s2120-codec.js
+      - run: node scripts/verify-codec-robustness.js
+      - run: node scripts/verify-profile-parity.js
