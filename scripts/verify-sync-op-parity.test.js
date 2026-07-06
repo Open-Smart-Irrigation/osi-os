@@ -45,6 +45,13 @@ function copyFixtureTree() {
   return tmp;
 }
 
+function writeServerFixture(source) {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'sync-op-server-'));
+  const fixture = path.join(tmp, 'EdgeSyncService.java');
+  fs.writeFileSync(fixture, source);
+  return fixture;
+}
+
 test('parity check reports a bogus flow op', () => {
   const fixtureRoot = copyFixtureTree();
   const flowPath = path.join(fixtureRoot, 'conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/flows.json');
@@ -88,6 +95,99 @@ test('server extractor reads all applyEvent switch labels', () => {
   assert(result.ops.includes('DEVICE_ASSIGNED'));
   assert(result.ops.includes('ZONE_CONFIG_UPSERTED'));
   assert(result.ops.includes('ZONE_LOCATION_UPSERTED'));
+});
+
+test('server extractor reads canonical applyEvent overload switch labels', () => {
+  const fixture = writeServerFixture(`
+class EdgeSyncService {
+    private boolean applyEvent(String gatewayDeviceEui, SyncEventRecord event, boolean dryRun) {
+        Map<String, Object> payload = payloadWithOp(event);
+        switch (event.op()) {
+            case "DEVICE_DATA_APPENDED" -> {
+                if (!dryRun) upsertSensorData(payload);
+                return true;
+            }
+            case "ZONE_UPSERTED", "ZONE_CONFIG_UPSERTED" -> {
+                if (!dryRun) upsertZone(payload, gatewayDeviceEui);
+                return true;
+            }
+            default -> {
+                if (dryRun) return false;
+                throw new IllegalArgumentException("unknown_op: " + event.op());
+            }
+        }
+    }
+}
+`);
+
+  const result = extractServerOps(fixture);
+
+  assert.deepEqual(result.errors, []);
+  assert.deepEqual(result.ops, ['DEVICE_DATA_APPENDED', 'ZONE_CONFIG_UPSERTED', 'ZONE_UPSERTED']);
+});
+
+test('parity check reports runtime dispatch switch missing an op even if an allow list includes it', () => {
+  const fixtureRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'sync-op-parity-'));
+  const schemaPath = path.join(fixtureRoot, 'events.schema.json');
+  const flowPath = path.join(fixtureRoot, 'flows.json');
+  const serverSource = writeServerFixture(`
+class EdgeSyncService {
+    private static final Set<String> SUPPORTED_EVENT_OPS = Set.of(
+            "DEVICE_DATA_APPENDED",
+            "ZONE_CONFIG_UPSERTED"
+    );
+
+    private boolean applyEvent(String gatewayDeviceEui, SyncEventRecord event, boolean dryRun) {
+        Map<String, Object> payload = payloadWithOp(event);
+        switch (event.op()) {
+            case "DEVICE_DATA_APPENDED" -> {
+                if (!dryRun) upsertSensorData(payload);
+                return true;
+            }
+            default -> {
+                if (dryRun) return false;
+                throw new IllegalArgumentException("unknown_op: " + event.op());
+            }
+        }
+    }
+}
+`);
+  fs.writeFileSync(schemaPath, JSON.stringify({
+    type: 'object',
+    properties: {
+      op: { enum: ['DEVICE_DATA_APPENDED', 'ZONE_CONFIG_UPSERTED'] },
+      payload: {
+        type: 'object',
+        required: ['contract_version'],
+        properties: { contract_version: { type: 'integer', const: 1 } },
+      },
+    },
+  }));
+  fs.writeFileSync(flowPath, JSON.stringify([
+    {
+      id: 'fixture',
+      name: 'Fixture sync inserts',
+      type: 'function',
+      func: `
+msg.topic = "INSERT INTO sync_outbox(event_uuid, aggregate_type, aggregate_key, op, payload_json, sync_version, occurred_at) VALUES ('evt-1', 'DEVICE_DATA', 'dev-1', 'DEVICE_DATA_APPENDED', json_object('contract_version', 1), 1, '2026-07-05T00:00:00Z')";
+node.send(msg);
+msg.topic = "INSERT INTO sync_outbox(event_uuid, aggregate_type, aggregate_key, op, payload_json, sync_version, occurred_at) VALUES ('evt-2', 'ZONE_CONFIG', 'zone-1', 'ZONE_CONFIG_UPSERTED', json_object('contract_version', 1), 1, '2026-07-05T00:00:01Z')";
+return msg;
+`,
+    },
+  ]));
+
+  const result = checkSyncOpParity({
+    root: fixtureRoot,
+    schemaPath,
+    serverSource,
+    flowSources: [{ name: 'fixture', path: 'flows.json' }],
+    sqlSources: [],
+    databaseSources: [],
+  });
+
+  assert.equal(result.ok, false);
+  assert.match(result.message, /server missing from union: ZONE_CONFIG_UPSERTED/);
 });
 
 test('server extractor ignores non-case quoted constants in applyEvent', () => {

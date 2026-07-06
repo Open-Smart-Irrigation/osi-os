@@ -245,6 +245,93 @@ function extractJavaSwitchCaseLabels(source) {
   return labels;
 }
 
+function findMatchingJavaParen(source, openIndex) {
+  let depth = 0;
+  let inLineComment = false;
+  let inBlockComment = false;
+  for (let i = openIndex; i < source.length; i++) {
+    const ch = source[i];
+    const next = source[i + 1];
+    if (inLineComment) {
+      if (ch === '\n') inLineComment = false;
+      continue;
+    }
+    if (inBlockComment) {
+      if (ch === '*' && next === '/') {
+        inBlockComment = false;
+        i++;
+      }
+      continue;
+    }
+    if (ch === '/' && next === '/') {
+      inLineComment = true;
+      i++;
+    } else if (ch === '/' && next === '*') {
+      inBlockComment = true;
+      i++;
+    } else if (ch === '"' || ch === "'") {
+      i = skipJavaQuotedLiteral(source, i) - 1;
+    } else if (ch === '(') {
+      depth++;
+    } else if (ch === ')') {
+      depth--;
+      if (depth === 0) return i;
+    }
+  }
+  return -1;
+}
+
+function parseJavaSwitch(source, switchIndex) {
+  const selectorOpen = skipWhitespace(source, switchIndex + 'switch'.length);
+  if (source[selectorOpen] !== '(') return null;
+  const selectorClose = findMatchingJavaParen(source, selectorOpen);
+  if (selectorClose < 0) return null;
+  const selector = source.slice(selectorOpen + 1, selectorClose);
+  const bodyOpen = skipWhitespace(source, selectorClose + 1);
+  if (source[bodyOpen] !== '{') return null;
+  const bodyClose = findMatchingBrace(source, bodyOpen);
+  if (bodyClose < 0) return null;
+  return {
+    selector,
+    body: source.slice(bodyOpen + 1, bodyClose),
+    end: bodyClose + 1,
+  };
+}
+
+function findJavaEventOpSwitches(source) {
+  const switches = [];
+  for (let i = 0; i < source.length;) {
+    const ch = source[i];
+    const next = source[i + 1];
+    if (ch === '/' && next === '/') {
+      const end = source.indexOf('\n', i + 2);
+      i = end < 0 ? source.length : end + 1;
+      continue;
+    }
+    if (ch === '/' && next === '*') {
+      const end = source.indexOf('*/', i + 2);
+      i = end < 0 ? source.length : end + 2;
+      continue;
+    }
+    if (ch === '"' || ch === "'") {
+      i = skipJavaQuotedLiteral(source, i);
+      continue;
+    }
+    if (startsWithWord(source, i, 'switch')) {
+      const parsed = parseJavaSwitch(source, i);
+      if (parsed) {
+        if (/^\s*event\s*\.\s*op\s*\(\s*\)\s*$/.test(parsed.selector)) {
+          switches.push(parsed);
+        }
+        i = parsed.end;
+        continue;
+      }
+    }
+    i++;
+  }
+  return switches;
+}
+
 function splitTopLevelComma(source) {
   const parts = [];
   let start = 0;
@@ -548,33 +635,14 @@ function extractServerOps(serverSource) {
     return { ops: [], errors: [`EdgeSyncService.java not found at ${serverSource}`] };
   }
   const source = readUtf8(serverSource);
-  const start = source.indexOf('private void applyEvent(String gatewayDeviceEui, SyncEventRecord event)');
-  if (start < 0) {
-    return { ops: [], errors: ['EdgeSyncService.applyEvent method not found'] };
+  const switches = findJavaEventOpSwitches(source);
+  if (switches.length === 0) {
+    return { ops: [], errors: ['EdgeSyncService canonical switch(event.op()) not found'] };
   }
-  const methodOpen = source.indexOf('{', start);
-  if (methodOpen < 0) {
-    return { ops: [], errors: ['EdgeSyncService.applyEvent opening brace not found'] };
+  if (switches.length > 1) {
+    return { ops: [], errors: [`EdgeSyncService must have exactly one switch(event.op()); found ${switches.length}`] };
   }
-  const methodEnd = findMatchingBrace(source, methodOpen);
-  if (methodEnd < 0) {
-    return { ops: [], errors: ['EdgeSyncService.applyEvent closing brace not found'] };
-  }
-  const methodBody = source.slice(methodOpen + 1, methodEnd);
-  const switchMatch = /switch\s*\(\s*event\.op\(\)\s*\)/.exec(methodBody);
-  if (!switchMatch) {
-    return { ops: [], errors: ['EdgeSyncService.applyEvent switch(event.op()) not found'] };
-  }
-  const switchStart = methodOpen + 1 + switchMatch.index;
-  const switchOpen = source.indexOf('{', switchStart);
-  if (switchOpen < 0 || switchOpen > methodEnd) {
-    return { ops: [], errors: ['EdgeSyncService.applyEvent switch opening brace not found'] };
-  }
-  const switchEnd = findMatchingBrace(source, switchOpen);
-  if (switchEnd < 0 || switchEnd > methodEnd) {
-    return { ops: [], errors: ['EdgeSyncService.applyEvent switch closing brace not found'] };
-  }
-  const switchBody = source.slice(switchOpen + 1, switchEnd);
+  const switchBody = switches[0].body;
   const ops = [];
   for (const label of extractJavaSwitchCaseLabels(switchBody)) {
     ops.push(...extractQuotedConstants(label));
