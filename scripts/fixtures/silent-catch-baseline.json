@@ -1,0 +1,15 @@
+{
+  "description": "Ratchet baseline for empty catch blocks in maintained Node-RED function nodes. Update counts downward in the same commit that removes silent catches.",
+  "generatedFrom": "origin/main 22cffe6d",
+  "pattern": "catch\\s*\\(\\s*\\w*\\s*\\)\\s*\\{\\s*\\}",
+  "profiles": {
+    "bcm2712": {
+      "path": "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/flows.json",
+      "silentCatchCount": 247
+    },
+    "bcm2709": {
+      "path": "conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/flows.json",
+      "silentCatchCount": 247
+    }
+  }
+}
