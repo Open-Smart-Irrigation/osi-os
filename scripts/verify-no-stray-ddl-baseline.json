@@ -1,0 +1,58 @@
+{
+  "version": 3,
+  "baseRef": "origin/main",
+  "markers": [
+    "CREATE TABLE",
+    "ALTER TABLE",
+    "CREATE UNIQUE INDEX",
+    "CREATE INDEX",
+    "CREATE TRIGGER",
+    "DROP TABLE",
+    "DROP TRIGGER",
+    "writable_schema"
+  ],
+  "notes": [
+    "This file is DOCUMENTATION of today's known DDL owners, not the enforcement gate.",
+    "The enforcement gate is scripts/verify-no-stray-ddl.js comparing HEAD counts against",
+    "--base-ref (default origin/main) per surface/marker; see the script header.",
+    "Known owners of the current counts: the two request-path CREATE TABLE",
+    "valve_actuation_expectations occurrences in flows.json function nodes; deploy.sh",
+    "ensure_* helpers, analysis_views, chameleon calibration, and chameleon_readings DDL."
+  ],
+  "files": {
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/flows.json": {
+      "createTable": 33,
+      "alterTable": 216,
+      "createUniqueIndex": 7,
+      "createIndex": 28,
+      "createTrigger": 31,
+      "dropTable": 3,
+      "dropTrigger": 31,
+      "writableSchema": 2,
+      "total": 351
+    },
+    "conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/flows.json": {
+      "createTable": 33,
+      "alterTable": 216,
+      "createUniqueIndex": 7,
+      "createIndex": 28,
+      "createTrigger": 31,
+      "dropTable": 3,
+      "dropTrigger": 31,
+      "writableSchema": 2,
+      "total": 351
+    },
+    "deploy.sh": {
+      "createTable": 4,
+      "alterTable": 24,
+      "createUniqueIndex": 0,
+      "createIndex": 1,
+      "createTrigger": 0,
+      "dropTable": 0,
+      "dropTrigger": 0,
+      "writableSchema": 0,
+      "total": 29
+    }
+  },
+  "total": 731
+}
