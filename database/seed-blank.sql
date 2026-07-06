@@ -1106,7 +1106,23 @@ BEGIN
     lower(hex(randomblob(16))),
     'ZONE',
     COALESCE(NEW.zone_uuid, lower(hex(randomblob(16)))),
-    CASE WHEN NEW.deleted_at IS NOT NULL THEN 'ZONE_DELETED' ELSE 'ZONE_UPSERTED' END,
+    CASE
+      WHEN NEW.deleted_at IS NOT NULL THEN 'ZONE_DELETED'
+      WHEN COALESCE(NEW.latitude,'') <> COALESCE(OLD.latitude,'') OR
+           COALESCE(NEW.longitude,'') <> COALESCE(OLD.longitude,'') THEN 'ZONE_LOCATION_UPSERTED'
+      WHEN COALESCE(NEW.phenological_stage,'') <> COALESCE(OLD.phenological_stage,'') OR
+           COALESCE(NEW.calibration_key,'') <> COALESCE(OLD.calibration_key,'') OR
+           COALESCE(NEW.crop_type,'') <> COALESCE(OLD.crop_type,'') OR
+           COALESCE(NEW.variety,'') <> COALESCE(OLD.variety,'') OR
+           COALESCE(NEW.soil_type,'') <> COALESCE(OLD.soil_type,'') OR
+           COALESCE(NEW.irrigation_method,'') <> COALESCE(OLD.irrigation_method,'') OR
+           COALESCE(NEW.area_m2,'') <> COALESCE(OLD.area_m2,'') OR
+           COALESCE(NEW.irrigation_efficiency_pct,'') <> COALESCE(OLD.irrigation_efficiency_pct,'') OR
+           COALESCE(NEW.scheduling_mode,'local') <> COALESCE(OLD.scheduling_mode,'local') OR
+           COALESCE(NEW.prediction_card_enabled,0) <> COALESCE(OLD.prediction_card_enabled,0) OR
+           COALESCE(NEW.notes,'') <> COALESCE(OLD.notes,'') THEN 'ZONE_CONFIG_UPSERTED'
+      ELSE 'ZONE_UPSERTED'
+    END,
     json_object(
       'contract_version', 1,
       'zone_uuid',                NEW.zone_uuid,

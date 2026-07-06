@@ -5,15 +5,20 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const { execFileSync } = require('node:child_process');
+const { execFileSync, spawnSync } = require('node:child_process');
 
 const { checkSyncOpParity, extractFlowOps, extractServerOps } = require('./verify-sync-op-parity');
 
 const ROOT = path.resolve(__dirname, '..');
+const SERVER_RELATIVE_SOURCE = path.join('backend', 'src', 'main', 'java', 'org', 'osi', 'server', 'sync', 'EdgeSyncService.java');
 const SERVER_SOURCE_CANDIDATES = [
-  process.env.OSI_SERVER_EDGE_SYNC_SERVICE,
-  '/home/phil/Repos/osi-server/backend/src/main/java/org/osi/server/sync/EdgeSyncService.java',
-  '/home/phil/Repos/osi-server/.worktrees/sync-contract-tranche-a/backend/src/main/java/org/osi/server/sync/EdgeSyncService.java',
+  process.env.OSI_SERVER_EDGE_SYNC_SERVICE
+    ? (path.isAbsolute(process.env.OSI_SERVER_EDGE_SYNC_SERVICE)
+      ? process.env.OSI_SERVER_EDGE_SYNC_SERVICE
+      : path.resolve(ROOT, process.env.OSI_SERVER_EDGE_SYNC_SERVICE))
+    : null,
+  path.resolve(ROOT, '..', 'osi-server', SERVER_RELATIVE_SOURCE),
+  path.resolve(ROOT, '..', '..', '..', 'osi-server', SERVER_RELATIVE_SOURCE),
 ].filter(Boolean);
 const SERVER_SOURCE = SERVER_SOURCE_CANDIDATES.find((candidate) => fs.existsSync(candidate)) ||
   SERVER_SOURCE_CANDIDATES[0];
@@ -251,6 +256,35 @@ return msg;
   assert.deepEqual(result.ops, ['DEVICE_DATA_APPENDED']);
 });
 
+test('flow extractor handles INSERT OR IGNORE/REPLACE sync_outbox inserts', () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'sync-op-flow-'));
+  const flowPath = path.join(tmp, 'flows.json');
+  fs.writeFileSync(flowPath, JSON.stringify([
+    {
+      id: 'fixture',
+      name: 'Insert conflict fixture',
+      type: 'function',
+      func: `
+msg.topic = \`INSERT OR IGNORE INTO sync_outbox
+  (event_uuid, aggregate_type, aggregate_key, op, payload_json, sync_version, occurred_at)
+VALUES
+  ('evt-1', 'DEVICE_DATA', 'device-1', 'DEVICE_DATA_APPENDED', json_object('contract_version', 1), 1, '2026-07-05T00:00:00Z')\`;
+msg.topic2 = \`INSERT OR REPLACE INTO sync_outbox
+  (event_uuid, aggregate_type, aggregate_key, op, payload_json, sync_version, occurred_at)
+VALUES
+  ('evt-2', 'ZONE', 'zone-1', 'ZONE_UPSERTED', json_object('contract_version', 1), 2, '2026-07-05T00:00:01Z')\`;
+return msg;
+`
+    }
+  ]));
+
+  const result = extractFlowOps(flowPath);
+
+  assert.deepEqual(result.errors, []);
+  assert.deepEqual(result.payloadsMissingContractVersion, []);
+  assert.deepEqual(result.ops, ['DEVICE_DATA_APPENDED', 'ZONE_UPSERTED']);
+});
+
 test('flow extractor rejects nested-only contract_version payloads', () => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'sync-op-flow-'));
   const flowPath = path.join(tmp, 'flows.json');
@@ -302,6 +336,109 @@ END;
   assert.equal(result.ok, false);
   assert.match(result.message, /seed-sql:fixture/);
   assert.match(result.message, /payload_json missing contract_version/);
+});
+
+test('parity check accepts seed SQL trigger ops as a canonical subset', () => {
+  const fixtureRoot = copyFixtureTree();
+  const databaseDir = path.join(fixtureRoot, 'database');
+  fs.mkdirSync(databaseDir, { recursive: true });
+  const seedPath = path.join(databaseDir, 'seed-blank.sql');
+  fs.writeFileSync(seedPath, `
+CREATE TRIGGER trg_fixture_seed
+AFTER INSERT ON device_data
+FOR EACH ROW
+BEGIN
+  INSERT INTO sync_outbox(event_uuid, aggregate_type, aggregate_key, op, payload_json, sync_version, occurred_at)
+  VALUES ('evt-1', 'DEVICE_DATA', 'device-1', 'DEVICE_DATA_APPENDED', json_object('contract_version', 1), 1, '2026-07-05T00:00:00Z');
+END;
+`);
+
+  const result = checkSyncOpParity({
+    root: fixtureRoot,
+    serverSource: path.join(fixtureRoot, 'server/EdgeSyncService.java'),
+    sqlSources: [{ name: 'seed-sql:fixture', path: seedPath }],
+    databaseSources: [],
+  });
+
+  assert.equal(result.ok, true, result.message);
+});
+
+test('parity check rejects seed SQL trigger ops outside the canonical enum union', () => {
+  const fixtureRoot = copyFixtureTree();
+  const databaseDir = path.join(fixtureRoot, 'database');
+  fs.mkdirSync(databaseDir, { recursive: true });
+  const seedPath = path.join(databaseDir, 'seed-blank.sql');
+  fs.writeFileSync(seedPath, `
+CREATE TRIGGER trg_fixture_seed
+AFTER INSERT ON device_data
+FOR EACH ROW
+BEGIN
+  INSERT INTO sync_outbox(event_uuid, aggregate_type, aggregate_key, op, payload_json, sync_version, occurred_at)
+  VALUES ('evt-1', 'DEVICE_DATA', 'device-1', 'BOGUS_SEED_ONLY_OP', json_object('contract_version', 1), 1, '2026-07-05T00:00:00Z');
+END;
+`);
+
+  const result = checkSyncOpParity({
+    root: fixtureRoot,
+    serverSource: path.join(fixtureRoot, 'server/EdgeSyncService.java'),
+    sqlSources: [{ name: 'seed-sql:fixture', path: seedPath }],
+    databaseSources: [],
+  });
+
+  assert.equal(result.ok, false);
+  assert.match(result.message, /seed-sql:fixture/);
+  assert.match(result.message, /BOGUS_SEED_ONLY_OP/);
+});
+
+test('parity check rejects bundled DB trigger ops outside the canonical enum union', () => {
+  const fixtureRoot = copyFixtureTree();
+  const dbPath = path.join(fixtureRoot, 'fixture.db');
+  execFileSync('sqlite3', [dbPath], {
+    input: `
+CREATE TABLE device_data(deveui TEXT, recorded_at TEXT);
+CREATE TABLE sync_outbox(
+  event_uuid TEXT,
+  aggregate_type TEXT,
+  aggregate_key TEXT,
+  op TEXT,
+  payload_json TEXT,
+  sync_version INTEGER,
+  occurred_at TEXT
+);
+CREATE TRIGGER trg_fixture_db
+AFTER INSERT ON device_data
+FOR EACH ROW
+BEGIN
+  INSERT INTO sync_outbox(event_uuid, aggregate_type, aggregate_key, op, payload_json, sync_version, occurred_at)
+  VALUES ('evt-1', 'DEVICE_DATA', 'device-1', 'BOGUS_DB_ONLY_OP', json_object('contract_version', 1), 1, '2026-07-05T00:00:00Z');
+END;
+`,
+    encoding: 'utf8',
+  });
+
+  const result = checkSyncOpParity({
+    root: fixtureRoot,
+    serverSource: path.join(fixtureRoot, 'server/EdgeSyncService.java'),
+    sqlSources: [],
+    databaseSources: [{ name: 'db:fixture', path: dbPath }],
+  });
+
+  assert.equal(result.ok, false);
+  assert.match(result.message, /db:fixture/);
+  assert.match(result.message, /BOGUS_DB_ONLY_OP/);
+});
+
+test('CLI fails loudly when explicit OSI_SERVER_EDGE_SYNC_SERVICE is missing', () => {
+  const missing = path.join(os.tmpdir(), 'missing-EdgeSyncService.java');
+  const result = spawnSync(process.execPath, [path.join(ROOT, 'scripts/verify-sync-op-parity.js')], {
+    cwd: ROOT,
+    env: Object.assign({}, process.env, { OSI_SERVER_EDGE_SYNC_SERVICE: missing }),
+    encoding: 'utf8',
+  });
+
+  assert.notEqual(result.status, 0);
+  assert.match(`${result.stdout}\n${result.stderr}`, /OSI_SERVER_EDGE_SYNC_SERVICE/);
+  assert.match(`${result.stdout}\n${result.stderr}`, /missing-EdgeSyncService\.java/);
 });
 
 test('parity check reports bundled DB trigger payloads missing contract_version', () => {

@@ -6,13 +6,7 @@ const path = require('node:path');
 const { execFileSync } = require('node:child_process');
 
 const REPO_ROOT = path.resolve(__dirname, '..');
-const SERVER_SOURCE_CANDIDATES = [
-  process.env.OSI_SERVER_EDGE_SYNC_SERVICE,
-  '/home/phil/Repos/osi-server/backend/src/main/java/org/osi/server/sync/EdgeSyncService.java',
-  '/home/phil/Repos/osi-server/.worktrees/sync-contract-tranche-a/backend/src/main/java/org/osi/server/sync/EdgeSyncService.java',
-].filter(Boolean);
-const DEFAULT_SERVER_SOURCE = SERVER_SOURCE_CANDIDATES.find((candidate) => fs.existsSync(candidate)) ||
-  SERVER_SOURCE_CANDIDATES[0];
+const SERVER_RELATIVE_SOURCE = path.join('backend', 'src', 'main', 'java', 'org', 'osi', 'server', 'sync', 'EdgeSyncService.java');
 const FLOW_SOURCES = [
   {
     name: 'bcm2712',
@@ -62,6 +56,31 @@ const DATABASE_SOURCES = [
 
 function readUtf8(file) {
   return fs.readFileSync(file, 'utf8');
+}
+
+function uniquePaths(paths) {
+  return [...new Set(paths)];
+}
+
+function fallbackServerSourceCandidates(root = REPO_ROOT) {
+  return uniquePaths([
+    path.resolve(root, '..', 'osi-server', SERVER_RELATIVE_SOURCE),
+    path.resolve(root, '..', '..', '..', 'osi-server', SERVER_RELATIVE_SOURCE),
+  ]);
+}
+
+function resolveDefaultServerSource(root = REPO_ROOT) {
+  const explicit = process.env.OSI_SERVER_EDGE_SYNC_SERVICE;
+  if (explicit) {
+    const resolved = path.isAbsolute(explicit) ? explicit : path.resolve(root, explicit);
+    if (!fs.existsSync(resolved)) {
+      throw new Error(`OSI_SERVER_EDGE_SYNC_SERVICE points to missing EdgeSyncService.java: ${explicit} (${resolved})`);
+    }
+    return resolved;
+  }
+
+  const candidates = fallbackServerSourceCandidates(root);
+  return candidates.find((candidate) => fs.existsSync(candidate)) || candidates[0];
 }
 
 function skipWhitespace(source, index) {
@@ -514,7 +533,7 @@ function addOpLocation(ops, op, location) {
 function collectSyncOutboxOpsFromSource(source, locationPrefix, result) {
   if (!/sync_outbox/i.test(source)) return;
 
-  const insertRe = /insert\s+into\s+sync_outbox\b/ig;
+  const insertRe = /insert\s+(?:or\s+(?:abort|fail|ignore|replace|rollback)\s+)?into\s+sync_outbox\b/ig;
   let match;
   while ((match = insertRe.exec(source)) !== null) {
     const index = match.index;
@@ -673,7 +692,7 @@ function formatDiff(name, baselineName, diff) {
 function checkSyncOpParity(options = {}) {
   const root = path.resolve(options.root || REPO_ROOT);
   const schemaPath = options.schemaPath || path.join(root, 'docs/contracts/sync-schema/events.schema.json');
-  const serverSource = options.serverSource || DEFAULT_SERVER_SOURCE;
+  const serverSource = options.serverSource || resolveDefaultServerSource(root);
   const flowSources = options.flowSources === undefined ? FLOW_SOURCES : options.flowSources;
   const sqlSources = options.sqlSources === undefined ? SQL_SOURCES : options.sqlSources;
   const databaseSources = options.databaseSources === undefined ? DATABASE_SOURCES : options.databaseSources;
@@ -688,13 +707,13 @@ function checkSyncOpParity(options = {}) {
   const sqlResults = sqlSources.map((source) => ({
     name: source.name,
     path: sourcePath(source),
-    checkOps: false,
+    checkOps: 'subset',
     ...extractSqlOps(sourcePath(source), source.name),
   }));
   const databaseResults = databaseSources.map((source) => ({
     name: source.name,
     path: sourcePath(source),
-    checkOps: false,
+    checkOps: 'subset',
     ...extractDatabaseOps(sourcePath(source)),
   }));
   const schemaResult = {
@@ -710,8 +729,10 @@ function checkSyncOpParity(options = {}) {
     ...extractServerOps(serverSource),
   };
   const sources = [...flowResults, ...sqlResults, ...databaseResults, schemaResult, serverResult];
-  const opSources = sources.filter((source) => source.checkOps !== false);
-  const allOps = [...new Set(opSources.flatMap((source) => source.ops))].sort();
+  const canonicalSources = sources.filter((source) => source.checkOps === true);
+  const subsetSources = sources.filter((source) => source.checkOps === 'subset');
+  const allOps = [...new Set(canonicalSources.flatMap((source) => source.ops))].sort();
+  const canonicalOps = new Set(allOps);
   const lines = [];
   let ok = true;
 
@@ -728,12 +749,20 @@ function checkSyncOpParity(options = {}) {
     }
   }
 
-  for (const source of opSources) {
+  for (const source of canonicalSources) {
     const diff = diffSets(allOps, source.ops);
     const diffLines = formatDiff(source.name, 'union', diff);
     if (diffLines.length) {
       ok = false;
       lines.push(...diffLines);
+    }
+  }
+
+  for (const source of subsetSources) {
+    const extras = source.ops.filter((op) => !canonicalOps.has(op));
+    if (extras.length) {
+      ok = false;
+      lines.push(`  ${source.name} extra vs union: ${extras.join(', ')}`);
     }
   }
 
@@ -746,7 +775,10 @@ function checkSyncOpParity(options = {}) {
 }
 
 function main() {
-  const result = checkSyncOpParity({ serverSource: process.argv[2] || DEFAULT_SERVER_SOURCE });
+  const serverSource = process.argv[2]
+    ? (path.isAbsolute(process.argv[2]) ? process.argv[2] : path.resolve(process.cwd(), process.argv[2]))
+    : resolveDefaultServerSource(REPO_ROOT);
+  const result = checkSyncOpParity({ serverSource });
   console.log(result.message);
   if (!result.ok) {
     console.error('verify-sync-op-parity: FAIL');
@@ -773,4 +805,5 @@ module.exports = {
   extractServerOps,
   extractSqlOps,
   payloadHasTopLevelContractVersion,
+  resolveDefaultServerSource,
 };

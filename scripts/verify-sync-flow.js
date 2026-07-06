@@ -1311,6 +1311,7 @@ expectIncludes('Build Sync State', 'const statusCode = Number(e.statusCode || e.
 expectIncludes('Build Sync State', "statusCode === 401\n    ? { message: 'Unauthorized' }", 'returns a bounded 401 response for unauthenticated sync state requests');
 expectIncludes('Build Sync State', 'linkedAuthPackageValid', 'reports linked-auth package validity in sync state');
 expectIncludes('Build Sync State', 'linkedAuthRepairRequired', 'reports linked-auth repair requirements in sync state');
+expectIncludes('Build Sync State', 'delivered_at IS NULL AND rejected_at IS NULL', 'excludes terminal rejected outbox events from pending outbox count');
 expectIncludes('Build Sync State', 'migrationCandidateSources', 'reports gateway migration candidate sources in sync state');
 expectIncludes('Build Sync State', 'rejectedMigrationCandidates', 'reports rejected gateway migration candidates in sync state');
 expectIncludes('Finalize linked account state', 'UPDATE users SET server_username = ?', 'commits linked-account DB state only after MQTT persistence');
@@ -1516,8 +1517,16 @@ expectIncludes('Mark Bootstrap Synced', "gatewayMigration.migrated", 'recognizes
 expectIncludes('Mark Bootstrap Synced', 'gatewayMigrationPendingBootstrap = false', 'resumes normal sync after repair bootstrap succeeds');
 expectIncludes('Build Edge Event Batch', 'gatewayMigrationPaused', 'suppresses event delivery while gateway migration is paused');
 expectIncludes('Build Edge Event Batch', "'X-OSI-Sync-Protocol': '2'", 'opts edge event delivery into sync protocol v2');
+expectIncludes('Build Edge Event Batch', 'delivered_at IS NULL AND rejected_at IS NULL', 'excludes terminal rejected outbox events from normal delivery batches');
 expectIncludes('Mark Synced Events Delivered', 'terminalStatuses', 'marks delivered only for terminal protocol-v2 event results');
 expectIncludes('Mark Synced Events Delivered', "result.status || '').trim().toUpperCase()", 'parses per-event protocol-v2 result statuses');
+expectIncludes('Mark Synced Events Delivered', 'rejectedIds', 'tracks rejected protocol-v2 event results separately from delivered results');
+expectIncludes('Mark Synced Events Delivered', 'rejection_reason', 'stores rejected protocol-v2 event reasons in sync_outbox');
+expectIncludes('Mark Synced Events Delivered', 'UPDATE sync_outbox SET rejected_at', 'marks rejected protocol-v2 event results without setting delivered_at');
+expectIncludes('Run Force Sync', 'rejectedIds', 'tracks rejected force-sync event results separately from delivered results');
+expectIncludes('Run Force Sync', 'rejection_reason', 'stores rejected force-sync event reasons in sync_outbox');
+expectIncludes('Run Force Sync', 'UPDATE sync_outbox SET rejected_at', 'marks rejected force-sync event results without setting delivered_at');
+expectIncludes('Run Force Sync', 'delivered_at IS NULL AND rejected_at IS NULL', 'excludes terminal rejected outbox events from force-sync delivery batches');
 expectIncludes('Build Pending Command Pull', 'gatewayMigrationPaused', 'suppresses pending-command polling while gateway migration is paused');
 expectIncludes('Build Pending Command Pull', "'X-OSI-Sync-Protocol': '2'", 'opts pending-command polling into command lease protocol v2');
 expectIncludes('Replay Pending Commands', 'msg.payload.commands', 'accepts protocol-v2 pending-command envelopes');

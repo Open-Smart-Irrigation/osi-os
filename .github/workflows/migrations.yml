@@ -16,8 +16,15 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: Open-Smart-Irrigation/osi-server
+          token: ${{ secrets.OSI_SERVER_RO_TOKEN }}
           path: osi-server
           persist-credentials: false
+      - name: Verify osi-server checkout
+        run: |
+          test -f osi-server/backend/src/main/java/org/osi/server/sync/EdgeSyncService.java || {
+            echo "::error::osi-server checkout missing EdgeSyncService.java. Configure OSI_SERVER_RO_TOKEN with read access to Open-Smart-Irrigation/osi-server."
+            exit 1
+          }
       - uses: actions/setup-node@v4
         with:
           node-version: '22'  # node:sqlite (used by rehearse-devices-rebuild) requires Node >=22.5
@@ -32,6 +39,7 @@ jobs:
       - run: node scripts/verify-devices-rebuild-fence.js
       - run: node --test scripts/rehearse-devices-rebuild.test.js
       - run: node --test scripts/test-gateway-health-persistence.js
+      - run: node scripts/test-contract-schemas.js
       - run: node --test scripts/verify-sync-op-parity.test.js
         env:
           OSI_SERVER_EDGE_SYNC_SERVICE: osi-server/backend/src/main/java/org/osi/server/sync/EdgeSyncService.java
