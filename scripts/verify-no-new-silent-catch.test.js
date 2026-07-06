@@ -20,6 +20,18 @@ test('counts empty catch blocks only in function node source', () => {
   });
 });
 
+test('counts optional catch binding empty blocks', () => {
+  const flow = [
+    { type: 'function', func: 'try { work(); } catch {}' },
+    { type: 'function', func: 'try { work(); } catch { node.warn("visible"); }' },
+  ];
+
+  assert.deepStrictEqual(countSilentCatchesInFlow(flow), {
+    functionNodeCount: 2,
+    silentCatchCount: 1,
+  });
+});
+
 test('fails on increased or stale-lower counts against the baseline', () => {
   const baseline = {
     profiles: {

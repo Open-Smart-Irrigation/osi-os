@@ -6,7 +6,7 @@ const path = require('path');
 
 const REPO_ROOT = path.resolve(__dirname, '..');
 const BASELINE_PATH = path.join(__dirname, 'fixtures', 'silent-catch-baseline.json');
-const EMPTY_CATCH_RE = /catch\s*\(\s*\w*\s*\)\s*\{\s*\}/g;
+const EMPTY_CATCH_RE = /catch\s*(?:\(\s*\w*\s*\))?\s*\{\s*\}/g;
 
 function countSilentCatchesInFlow(flow) {
   let functionNodeCount = 0;
