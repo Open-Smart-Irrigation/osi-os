@@ -160,4 +160,3 @@ try {
   console.error(`verify-no-stray-ddl: FAIL — ${e.message}`);
   process.exit(1);
 }
-
