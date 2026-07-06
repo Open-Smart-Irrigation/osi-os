@@ -2,7 +2,7 @@
 
 **Status:** Draft — spec. **Tranche A** (command/event codegen) is plannable now and runs **in parallel** with Spec 1; **Tranche B** (full payload contract, release-compatibility, versioning) needs its own brainstorm later. See §7.
 **Created:** 2026-06-30
-**Scope:** Both repos — the edge↔cloud payload/protocol contract surface. **No DDL.**
+**Scope:** Both repos — the edge↔cloud payload/protocol contract surface. **No new DDL project.**
 **Decision record:** [ADR — Schema and cross-repo contract ownership](../../adr/2026-06-30-schema-and-contract-ownership.md)
 **Relationship to Spec 1:** Tranche A runs in parallel with [Edge Schema Migration Foundation](./2026-06-30-edge-schema-migration-foundation-design.md) (Spec 1); both stand up CI in both repos, so they coordinate on the shared CI workflow.
 **Depends on:** the CI workflow Spec 1 introduces (shared); otherwise independent of Spec 1's runtime.
@@ -71,8 +71,10 @@ This package may exist **only if**:
 
 The narrow, executable slice that closes the live drift class. Decisions for it are fixed here:
 
-- **Scope:** generate, for both repos, the enums that exist in the schema **today** — **command-type** enums (`commands.schema.json`) and **resource/aggregate-type** enums (`events.schema.json` `resource_type`: ZONE, DEVICE, SCHEDULE, ZONE_CONFIG, ZONE_LOCATION, DEVICE_DATA, GATEWAY) — plus their required-field shapes; commit them; wire **real imports** in the edge (GUI / flow validation) and cloud (issuer / sync mapper); add the merge-gate CI (§5, §6).
-- **No op/event-name enum exists yet.** `events.schema.json` carries `resource_type`, not op names like `DEVICE_DATA_APPENDED`. Tranche A does **not** invent one. If op-name parity is wanted, adding an `op` enum to `events.schema.json` is the explicit *opening change* of Tranche A's plan (small, contained) — it is not an assumed deliverable of this spec.
+- **Scope:** generate and verify, for both repos, the enums that exist in the schema **today** — **command-type** enums (`commands.schema.json`) and the event operation enum (`events.schema.json` `properties.op.enum`) — plus their required-field shapes; commit them; wire **real imports** in the edge (GUI / flow validation) and cloud (issuer / sync mapper); add the merge-gate CI (§5, §6).
+- **Event op enum is in scope for this tranche.** `events.schema.json` now carries explicit operation names such as `DEVICE_DATA_APPENDED`, `ZONE_LOCATION_UPSERTED`, and `ZONE_CONFIG_UPSERTED`; Tranche A verifies the schema enum, edge emitters, shipped trigger definitions, and cloud `EdgeSyncService` switch stay aligned.
+- **Zone op split:** `ZONE_LOCATION_UPSERTED` and `ZONE_CONFIG_UPSERTED` are explicit edge event ops in this tranche. The zone outbox trigger intentionally gives location changes precedence over config changes, so a mixed location+config zone update emits `ZONE_LOCATION_UPSERTED`; config-only edits emit `ZONE_CONFIG_UPSERTED`; structural zone edits still emit `ZONE_UPSERTED`; deletes emit `ZONE_DELETED`.
+- **Boot trigger touch:** the shipped `sync-init-fn` boot schema block remains frozen for new schema behavior. This tranche only mirrors the already-existing zone outbox trigger definition for contract-parity hardening, so fresh and legacy boot paths do not emit server-unknown ops. Replacing boot DDL with the migration runner remains out of scope.
 - **Source format:** extend the existing per-file JSON Schemas in `docs/contracts/sync-schema/` (the documented source of truth) — no new catalog format.
 - **Generator location:** osi-os is canonical; osi-server consumes the committed generated output (per `sync-schema/README.md`).
 - **First consumers:** the command/event enums that drifted (the `REMOVE_DEVICE_FROM_ZONE`/`UNCLAIM_DEVICE` class). Richer payload DTOs stay hand-written initially.

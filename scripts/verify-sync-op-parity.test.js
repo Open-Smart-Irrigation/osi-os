@@ -57,6 +57,72 @@ function writeServerFixture(source) {
   return fixture;
 }
 
+function createSeedBlankDb() {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'sync-op-seed-db-'));
+  const dbPath = path.join(tmp, 'farming.db');
+  execFileSync('sqlite3', ['-bail', dbPath], {
+    input: fs.readFileSync(path.join(ROOT, 'database/seed-blank.sql'), 'utf8'),
+    encoding: 'utf8',
+  });
+  return dbPath;
+}
+
+function sqliteExec(dbPath, sql) {
+  execFileSync('sqlite3', ['-bail', dbPath], { input: sql, encoding: 'utf8' });
+}
+
+function sqliteJson(dbPath, sql) {
+  const output = execFileSync('sqlite3', ['-json', dbPath, sql], { encoding: 'utf8' }).trim();
+  return output ? JSON.parse(output) : [];
+}
+
+function installLinkedUser(dbPath) {
+  sqliteExec(dbPath, `
+INSERT INTO users(username, password_hash, created_at, updated_at, user_uuid)
+VALUES ('sync-op-test-user', 'hash', '2026-07-06T00:00:00Z', '2026-07-06T00:00:00Z', 'sync-op-user-uuid');
+
+INSERT INTO sync_link_state(peer_node, linked, server_url, cloud_user_id, gateway_device_eui, updated_at)
+VALUES ('cloud', 1, 'https://sync.test.invalid', 'cloud-user-1', '0016C001F11715E2', '2026-07-06T00:00:00Z')
+ON CONFLICT(peer_node) DO UPDATE SET
+  linked = excluded.linked,
+  server_url = excluded.server_url,
+  cloud_user_id = excluded.cloud_user_id,
+  gateway_device_eui = excluded.gateway_device_eui,
+  updated_at = excluded.updated_at;
+`);
+}
+
+function createZone(dbPath, label) {
+  const safeLabel = label.replace(/[^a-z0-9_]/gi, '_');
+  sqliteExec(dbPath, `
+INSERT INTO irrigation_zones(
+  name, user_id, created_at, updated_at, timezone, zone_uuid, gateway_device_eui,
+  sync_version, area_m2, irrigation_efficiency_pct, scheduling_mode,
+  latitude, longitude, phenological_stage, calibration_key, crop_type,
+  variety, soil_type, irrigation_method, notes, prediction_card_enabled
+)
+VALUES (
+  'Zone ${safeLabel}', 1, '2026-07-06T00:00:00Z', '2026-07-06T00:00:00Z', 'UTC',
+  'zone-${safeLabel}', '0016C001F11715E2', 1, 1000, 85, 'local',
+  47.0001, 8.0001, 'default', 'default', 'wheat',
+  'standard', 'loam', 'drip', 'initial notes', 0
+);
+DELETE FROM sync_outbox;
+`);
+  return sqliteJson(dbPath, "SELECT id FROM irrigation_zones WHERE zone_uuid = 'zone-" + safeLabel + "';")[0].id;
+}
+
+function assertZoneUpdateOp(dbPath, zoneId, updateSet, expectedOp) {
+  sqliteExec(dbPath, `
+DELETE FROM sync_outbox;
+UPDATE irrigation_zones
+SET ${updateSet}, updated_at = '2026-07-06T00:01:00Z'
+WHERE id = ${zoneId};
+`);
+  const rows = sqliteJson(dbPath, 'SELECT op FROM sync_outbox ORDER BY rowid;');
+  assert.deepEqual(rows.map((row) => row.op), [expectedOp]);
+}
+
 test('parity check reports a bogus flow op', () => {
   const fixtureRoot = copyFixtureTree();
   const flowPath = path.join(fixtureRoot, 'conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/flows.json');
@@ -228,6 +294,42 @@ test('server extractor ignores commented-out case labels inside applyEvent switc
   assert.deepEqual(result.errors, []);
   assert.equal(result.ops.includes('BOGUS_COMMENTED_CASE'), false);
   assert.equal(result.ops.includes('BOGUS_BLOCK_COMMENTED_CASE'), false);
+});
+
+test('seed zone outbox trigger emits location config structural and delete ops', () => {
+  const dbPath = createSeedBlankDb();
+  installLinkedUser(dbPath);
+
+  assertZoneUpdateOp(
+    dbPath,
+    createZone(dbPath, 'location_only'),
+    'latitude = 47.1001, longitude = 8.1001',
+    'ZONE_LOCATION_UPSERTED'
+  );
+  assertZoneUpdateOp(
+    dbPath,
+    createZone(dbPath, 'config_only'),
+    "crop_type = 'maize', notes = 'config changed'",
+    'ZONE_CONFIG_UPSERTED'
+  );
+  assertZoneUpdateOp(
+    dbPath,
+    createZone(dbPath, 'location_and_config'),
+    "latitude = 47.2002, crop_type = 'barley'",
+    'ZONE_LOCATION_UPSERTED'
+  );
+  assertZoneUpdateOp(
+    dbPath,
+    createZone(dbPath, 'structural'),
+    "name = 'Renamed structural zone'",
+    'ZONE_UPSERTED'
+  );
+  assertZoneUpdateOp(
+    dbPath,
+    createZone(dbPath, 'deleted'),
+    "deleted_at = '2026-07-06T00:02:00Z'",
+    'ZONE_DELETED'
+  );
 });
 
 test('flow extractor handles lowercase and multiline sync_outbox inserts', () => {
