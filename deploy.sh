@@ -562,6 +562,14 @@ fetch_required "osi-db-helper index.js" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-db-helper/index.js" \
     "/srv/node-red/osi-db-helper/index.js"
 
+fetch_required "osi-health-helper package.json" \
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-health-helper/package.json" \
+    "/srv/node-red/osi-health-helper/package.json"
+
+fetch_required "osi-health-helper index.js" \
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-health-helper/index.js" \
+    "/srv/node-red/osi-health-helper/index.js"
+
 fetch_required "osi-dendro-helper package.json" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-dendro-helper/package.json" \
     "/srv/node-red/osi-dendro-helper/package.json"
