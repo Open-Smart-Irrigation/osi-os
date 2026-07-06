@@ -169,4 +169,5 @@ test('verify-migrations accepts the committed ordered migration checksum manifes
 
   assert.equal(result.status, 0, result.stderr || result.stdout);
   assert.match(result.stdout, /checksum manifest OK/);
+  assert.match(result.stdout, /base immutability OK/);
 });
