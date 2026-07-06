@@ -13,6 +13,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
+          # verify-sync-flow resolves pinned historical seed baselines via git show.
           fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
@@ -28,6 +29,7 @@ jobs:
       - run: node scripts/verify-migrations.js
       - run: node scripts/verify-no-stray-ddl.js
       - run: node scripts/verify-seed-replay.js
+      - run: node scripts/verify-sync-flow.js
       - run: node scripts/verify-runtime-schema-parity.js
       - run: node scripts/verify-devices-rebuild-fence.js
       - run: node scripts/verify-heartbeat-health.js
