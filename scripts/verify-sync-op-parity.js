@@ -5,8 +5,13 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const REPO_ROOT = path.resolve(__dirname, '..');
-const DEFAULT_SERVER_SOURCE = process.env.OSI_SERVER_EDGE_SYNC_SERVICE ||
-  '/home/phil/Repos/osi-server/.worktrees/sync-contract-tranche-a/backend/src/main/java/org/osi/server/sync/EdgeSyncService.java';
+const SERVER_SOURCE_CANDIDATES = [
+  process.env.OSI_SERVER_EDGE_SYNC_SERVICE,
+  '/home/phil/Repos/osi-server/backend/src/main/java/org/osi/server/sync/EdgeSyncService.java',
+  '/home/phil/Repos/osi-server/.worktrees/sync-contract-tranche-a/backend/src/main/java/org/osi/server/sync/EdgeSyncService.java',
+].filter(Boolean);
+const DEFAULT_SERVER_SOURCE = SERVER_SOURCE_CANDIDATES.find((candidate) => fs.existsSync(candidate)) ||
+  SERVER_SOURCE_CANDIDATES[0];
 const FLOW_SOURCES = [
   {
     name: 'bcm2712',

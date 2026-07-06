@@ -9,8 +9,13 @@ const path = require('node:path');
 const { checkSyncOpParity, extractServerOps } = require('./verify-sync-op-parity');
 
 const ROOT = path.resolve(__dirname, '..');
-const SERVER_SOURCE = process.env.OSI_SERVER_EDGE_SYNC_SERVICE ||
-  '/home/phil/Repos/osi-server/.worktrees/sync-contract-tranche-a/backend/src/main/java/org/osi/server/sync/EdgeSyncService.java';
+const SERVER_SOURCE_CANDIDATES = [
+  process.env.OSI_SERVER_EDGE_SYNC_SERVICE,
+  '/home/phil/Repos/osi-server/backend/src/main/java/org/osi/server/sync/EdgeSyncService.java',
+  '/home/phil/Repos/osi-server/.worktrees/sync-contract-tranche-a/backend/src/main/java/org/osi/server/sync/EdgeSyncService.java',
+].filter(Boolean);
+const SERVER_SOURCE = SERVER_SOURCE_CANDIDATES.find((candidate) => fs.existsSync(candidate)) ||
+  SERVER_SOURCE_CANDIDATES[0];
 
 function copyFixtureTree() {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'sync-op-parity-'));
@@ -52,6 +57,22 @@ test('parity check reports a bogus flow op', () => {
 
   assert.equal(result.ok, false);
   assert.match(result.message, /BOGUS_TEST_OP/);
+  assert.match(result.message, /flows:bcm2712/);
+});
+
+test('parity check reports event payloads missing contract_version', () => {
+  const fixtureRoot = copyFixtureTree();
+  const flowPath = path.join(fixtureRoot, 'conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/flows.json');
+  const flow = fs.readFileSync(flowPath, 'utf8').replace(/'contract_version', 1,\s*/, '');
+  fs.writeFileSync(flowPath, flow);
+
+  const result = checkSyncOpParity({
+    root: fixtureRoot,
+    serverSource: path.join(fixtureRoot, 'server/EdgeSyncService.java'),
+  });
+
+  assert.equal(result.ok, false);
+  assert.match(result.message, /payload_json missing contract_version/);
   assert.match(result.message, /flows:bcm2712/);
 });
 
