@@ -2,13 +2,24 @@
 
 const test = require('node:test');
 const assert = require('node:assert');
+const fs = require('node:fs');
 const os = require('node:os');
+const childProcess = require('node:child_process');
 const { DatabaseSync } = require('node:sqlite');
+
+const HEALTH_HELPER_MODULE =
+  '../conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-health-helper';
+const HEALTH_HELPER_FILE = require.resolve(HEALTH_HELPER_MODULE);
+
+function requireHealthHelperFresh() {
+  delete require.cache[HEALTH_HELPER_FILE];
+  return require(HEALTH_HELPER_MODULE);
+}
 
 const {
   gatherEdgeHealth,
   structuralSignature
-} = require('../conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-health-helper');
+} = requireHealthHelperFresh();
 
 const PUBLIC_HEALTH_KEYS = [
   'schema_sig',
@@ -313,4 +324,58 @@ test('hung database returns all-null health within timeout', async () => {
 
   assert.deepStrictEqual(health, ALL_NULL_HEALTH);
   assert(elapsedMs < 500);
+});
+
+test('disk df fallback is async, bounded, and cannot outlive gather timeout', async (t) => {
+  const diskPath = os.tmpdir();
+  const originalStatfsSync = fs.statfsSync;
+  const originalExecFile = childProcess.execFile;
+  const originalExecFileSync = childProcess.execFileSync;
+  let execFileCall = null;
+
+  fs.statfsSync = () => {
+    throw new Error('statfs unavailable');
+  };
+  childProcess.execFile = (...args) => {
+    execFileCall = args;
+    return { kill() {} };
+  };
+  childProcess.execFileSync = () => {
+    throw new Error('execFileSync fallback must not be used');
+  };
+
+  t.after(() => {
+    fs.statfsSync = originalStatfsSync;
+    childProcess.execFile = originalExecFile;
+    childProcess.execFileSync = originalExecFileSync;
+    delete require.cache[HEALTH_HELPER_FILE];
+  });
+
+  const db = makeFacadeShim();
+  try {
+    await modernSchema(db);
+    const { gatherEdgeHealth: gatherWithPatchedDependencies } = requireHealthHelperFresh();
+
+    const start = Date.now();
+    const health = await gatherWithPatchedDependencies(db, { timeoutMs: 50, diskPath });
+    const elapsedMs = Date.now() - start;
+
+    assert.deepStrictEqual(health, ALL_NULL_HEALTH);
+    assert(elapsedMs < 500);
+    assert(execFileCall, 'df fallback should use async execFile');
+    assert.strictEqual(execFileCall[0], 'df');
+    assert.deepStrictEqual(execFileCall[1], ['-kP', diskPath]);
+    assert.strictEqual(typeof execFileCall[2].timeout, 'number');
+    assert(execFileCall[2].timeout > 0);
+    assert.strictEqual(typeof execFileCall[2].maxBuffer, 'number');
+    assert(execFileCall[2].maxBuffer > 0);
+  } finally {
+    db.close();
+  }
+});
+
+test('disk df fallback source does not use synchronous child process collection', () => {
+  const source = fs.readFileSync(HEALTH_HELPER_FILE, 'utf8');
+
+  assert.doesNotMatch(source, /\bexecFileSync\b/);
 });

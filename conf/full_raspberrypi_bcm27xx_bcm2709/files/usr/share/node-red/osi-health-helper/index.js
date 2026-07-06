@@ -2,7 +2,7 @@
 
 const crypto = require('node:crypto');
 const fs = require('node:fs');
-const { execFileSync } = require('node:child_process');
+const childProcess = require('node:child_process');
 
 function allNullHealth() {
   return {
@@ -97,7 +97,38 @@ function roundedFreePct(available, total) {
   return Math.max(0, Math.min(100, Math.round((free / blocks) * 100)));
 }
 
-function diskFreePct(diskPath) {
+function boundedTimeoutMs(timeoutMs) {
+  const value = Number(timeoutMs);
+  return Number.isFinite(value) && value > 0 ? Math.ceil(value) : 4000;
+}
+
+function dfDiskFreePct(diskPath, timeoutMs) {
+  return new Promise((resolve, reject) => {
+    childProcess.execFile(
+      'df',
+      ['-kP', diskPath],
+      { encoding: 'utf8', timeout: boundedTimeoutMs(timeoutMs), maxBuffer: 16 * 1024 },
+      (error, stdout) => {
+        if (error) {
+          reject(error);
+          return;
+        }
+        try {
+          const lines = String(stdout || '').trim().split(/\r?\n/).filter(Boolean);
+          if (lines.length < 2) throw new Error('df output missing data row');
+          const columns = lines[1].trim().split(/\s+/);
+          const total = Number(columns[1]);
+          const available = Number(columns[3]);
+          resolve(roundedFreePct(available, total));
+        } catch (parseError) {
+          reject(parseError);
+        }
+      }
+    );
+  });
+}
+
+async function diskFreePct(diskPath, timeoutMs) {
   try {
     if (typeof fs.statfsSync === 'function') {
       const stats = fs.statfsSync(diskPath);
@@ -105,16 +136,10 @@ function diskFreePct(diskPath) {
     }
   } catch (_) {}
 
-  const output = execFileSync('df', ['-kP', diskPath], { encoding: 'utf8' }).trim();
-  const lines = output.split(/\r?\n/).filter(Boolean);
-  if (lines.length < 2) throw new Error('df output missing data row');
-  const columns = lines[1].trim().split(/\s+/);
-  const total = Number(columns[1]);
-  const available = Number(columns[3]);
-  return roundedFreePct(available, total);
+  return await dfDiskFreePct(diskPath, timeoutMs);
 }
 
-async function gatherWork(db, diskPath) {
+async function gatherWork(db, diskPath, timeoutMs) {
   const health = allNullHealth();
 
   try {
@@ -161,7 +186,7 @@ async function gatherWork(db, diskPath) {
   } catch (_) {}
 
   try {
-    health.disk_free_pct = diskFreePct(diskPath);
+    health.disk_free_pct = await diskFreePct(diskPath, timeoutMs);
   } catch (_) {}
 
   return health;
@@ -183,7 +208,7 @@ function gatherEdgeHealth(db, options = {}) {
     const timer = setTimeout(() => finish(allNullHealth()), timeoutMs);
 
     Promise.resolve()
-      .then(() => gatherWork(db, diskPath))
+      .then(() => gatherWork(db, diskPath, timeoutMs))
       .then(
         (health) => {
           clearTimeout(timer);
