@@ -6,7 +6,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 
-const { checkSyncOpParity, extractServerOps } = require('./verify-sync-op-parity');
+const { checkSyncOpParity, extractFlowOps, extractServerOps } = require('./verify-sync-op-parity');
 
 const ROOT = path.resolve(__dirname, '..');
 const SERVER_SOURCE_CANDIDATES = [
@@ -83,4 +83,45 @@ test('server extractor reads all applyEvent switch labels', () => {
   assert(result.ops.includes('DEVICE_ASSIGNED'));
   assert(result.ops.includes('ZONE_CONFIG_UPSERTED'));
   assert(result.ops.includes('ZONE_LOCATION_UPSERTED'));
+});
+
+test('server extractor ignores non-case quoted constants in applyEvent', () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'sync-op-server-'));
+  const fixture = path.join(tmp, 'EdgeSyncService.java');
+  const source = fs.readFileSync(SERVER_SOURCE, 'utf8').replace(
+    'private void applyEvent(String gatewayDeviceEui, SyncEventRecord event) {',
+    'private void applyEvent(String gatewayDeviceEui, SyncEventRecord event) {\n        String ignoredForParity = "BOGUS_NON_CASE_OP";'
+  );
+  fs.writeFileSync(fixture, source);
+
+  const result = extractServerOps(fixture);
+
+  assert.deepEqual(result.errors, []);
+  assert.equal(result.ops.includes('BOGUS_NON_CASE_OP'), false);
+});
+
+test('flow extractor handles lowercase and multiline sync_outbox inserts', () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'sync-op-flow-'));
+  const flowPath = path.join(tmp, 'flows.json');
+  fs.writeFileSync(flowPath, JSON.stringify([
+    {
+      id: 'fixture',
+      name: 'Lowercase insert fixture',
+      type: 'function',
+      func: `
+msg.topic = \`insert
+  into sync_outbox
+    (event_uuid, aggregate_type, aggregate_key, op, payload_json, sync_version, occurred_at)
+  values
+    ('evt-1', 'DEVICE_DATA', 'device-1', 'DEVICE_DATA_APPENDED', json_object('contract_version', 1), 1, '2026-07-05T00:00:00Z')\`;
+return msg;
+`
+    }
+  ]));
+
+  const result = extractFlowOps(flowPath);
+
+  assert.deepEqual(result.errors, []);
+  assert.deepEqual(result.payloadsMissingContractVersion, []);
+  assert.deepEqual(result.ops, ['DEVICE_DATA_APPENDED']);
 });

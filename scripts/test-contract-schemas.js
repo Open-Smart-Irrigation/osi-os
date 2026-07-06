@@ -11,14 +11,55 @@ function loadSchema(name) {
 
 let ok = true;
 
-// L5: events.schema.json sync_version minimum must be 0
+// L5: events.schema.json syncVersion minimum must be 0
 const eventsSchema = loadSchema('events.schema.json');
-const svMin = eventsSchema.properties && eventsSchema.properties.sync_version && eventsSchema.properties.sync_version.minimum;
+const svMin = eventsSchema.properties && eventsSchema.properties.syncVersion && eventsSchema.properties.syncVersion.minimum;
 if (svMin !== 0) {
-    console.error(`FAIL L5: events.schema.json sync_version minimum is ${svMin}, expected 0`);
+    console.error(`FAIL L5: events.schema.json syncVersion minimum is ${svMin}, expected 0`);
     ok = false;
 } else {
-    console.log('OK  L5: sync_version minimum is 0');
+    console.log('OK  L5: syncVersion minimum is 0');
+}
+
+const eventPayload = eventsSchema.properties && eventsSchema.properties.payload;
+const eventPayloadContractVersion = eventPayload && eventPayload.properties && eventPayload.properties.contract_version;
+if (!eventPayload || !Array.isArray(eventPayload.required) || !eventPayload.required.includes('contract_version')) {
+    console.error('FAIL schema: event payload does not require contract_version');
+    ok = false;
+} else if (!eventPayloadContractVersion || eventPayloadContractVersion.type !== 'integer' || eventPayloadContractVersion.const !== 1) {
+    console.error('FAIL schema: event payload contract_version is not integer const 1');
+    ok = false;
+} else {
+    console.log('OK  schema: event payload requires contract_version const 1');
+}
+
+const sampleEvent = {
+    eventUuid: 'event-fixture-1',
+    aggregateType: 'DEVICE_DATA',
+    aggregateKey: 'device-fixture-1',
+    op: 'DEVICE_DATA_APPENDED',
+    syncVersion: 1,
+    occurredAt: '2026-07-05T00:00:00.000Z',
+    payload: {
+        contract_version: 1,
+        device_eui: 'DEVICE_FIXTURE_1'
+    }
+};
+const eventRequired = eventsSchema.required || [];
+const eventProps = eventsSchema.properties || {};
+const sampleMissing = eventRequired.filter((property) => !(property in sampleEvent));
+const sampleExtras = Object.keys(sampleEvent).filter((property) => !eventProps[property]);
+if (sampleMissing.length || (eventsSchema.additionalProperties === false && sampleExtras.length)) {
+    console.error(`FAIL schema: real V2 event sample does not match required envelope; missing=${sampleMissing.join(',') || '(none)'} extra=${sampleExtras.join(',') || '(none)'}`);
+    ok = false;
+} else if (!eventsSchema.properties.op.enum.includes(sampleEvent.op)) {
+    console.error(`FAIL schema: real V2 event sample op ${sampleEvent.op} is not in event op enum`);
+    ok = false;
+} else if (sampleEvent.payload.contract_version !== eventPayloadContractVersion.const) {
+    console.error('FAIL schema: real V2 event sample payload contract_version does not match schema const');
+    ok = false;
+} else {
+    console.log('OK  schema: real V2 event sample matches event envelope');
 }
 
 // M7: commands.schema.json SET_STREGA_TIMED_ACTION must not require duration_seconds

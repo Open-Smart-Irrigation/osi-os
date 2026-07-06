@@ -58,6 +58,62 @@ function findMatchingParen(source, openIndex) {
   return -1;
 }
 
+function findMatchingBrace(source, openIndex) {
+  let depth = 0;
+  let inSingle = false;
+  let inDouble = false;
+  let inLineComment = false;
+  let inBlockComment = false;
+  for (let i = openIndex; i < source.length; i++) {
+    const ch = source[i];
+    const next = source[i + 1];
+    if (inLineComment) {
+      if (ch === '\n') inLineComment = false;
+      continue;
+    }
+    if (inBlockComment) {
+      if (ch === '*' && next === '/') {
+        inBlockComment = false;
+        i++;
+      }
+      continue;
+    }
+    if (inSingle) {
+      if (ch === '\\') {
+        i++;
+      } else if (ch === "'") {
+        inSingle = false;
+      }
+      continue;
+    }
+    if (inDouble) {
+      if (ch === '\\') {
+        i++;
+      } else if (ch === '"') {
+        inDouble = false;
+      }
+      continue;
+    }
+    if (ch === '/' && next === '/') {
+      inLineComment = true;
+      i++;
+    } else if (ch === '/' && next === '*') {
+      inBlockComment = true;
+      i++;
+    } else if (ch === "'") {
+      inSingle = true;
+    } else if (ch === '"') {
+      inDouble = true;
+    } else if (ch === '{') {
+      depth++;
+    } else if (ch === '}') {
+      depth--;
+      if (depth === 0) return i;
+    }
+  }
+  return -1;
+}
+
 function splitTopLevelComma(source) {
   const parts = [];
   let start = 0;
@@ -135,8 +191,12 @@ function extractQuotedConstants(source) {
   return values;
 }
 
+function indexOfInsensitive(source, needle, startIndex = 0) {
+  return source.toLowerCase().indexOf(needle.toLowerCase(), startIndex);
+}
+
 function parseSyncOutboxInsert(source, index) {
-  const tableIndex = source.indexOf('sync_outbox', index);
+  const tableIndex = indexOfInsensitive(source, 'sync_outbox', index);
   if (tableIndex < 0) return null;
   const colsOpen = source.indexOf('(', tableIndex);
   if (colsOpen < 0) return null;
@@ -187,15 +247,17 @@ function extractFlowOps(flowPath) {
 
   for (const node of flows) {
     const source = [node.func, node.initialize, node.finalize].filter(Boolean).join('\n');
-    if (!source.includes('sync_outbox')) continue;
+    if (!/sync_outbox/i.test(source)) continue;
 
-    let index = 0;
-    while ((index = source.indexOf('INSERT INTO sync_outbox', index)) >= 0) {
+    const insertRe = /insert\s+into\s+sync_outbox\b/ig;
+    let match;
+    while ((match = insertRe.exec(source)) !== null) {
+      const index = match.index;
       const parsed = parseSyncOutboxInsert(source, index);
       const location = `${node.name || node.id || 'unnamed node'}@${index}`;
       if (!parsed || parsed.error) {
         errors.push(`${location}: ${parsed ? parsed.error : 'unable to parse insert'}`);
-        index += 'INSERT INTO sync_outbox'.length;
+        insertRe.lastIndex = index + match[0].length;
         continue;
       }
 
@@ -210,7 +272,7 @@ function extractFlowOps(flowPath) {
       if (!/'contract_version'\s*,\s*1\b/.test(parsed.payloadExpression)) {
         payloadsMissingContractVersion.push(location);
       }
-      index += 'INSERT INTO sync_outbox'.length;
+      insertRe.lastIndex = index + match[0].length;
     }
   }
 
@@ -229,11 +291,20 @@ function extractSchemaOps(schemaPath) {
     : [];
   const errors = [];
   if (ops.length === 0) errors.push('events.schema.json properties.op.enum is missing or empty');
-  const contractVersion = schema.properties && schema.properties.contract_version;
+  const payload = schema.properties && schema.properties.payload;
+  const payloadRequired = payload && Array.isArray(payload.required) ? payload.required : [];
+  const contractVersion = payload && payload.properties && payload.properties.contract_version;
+  if (!payload) {
+    errors.push('events.schema.json properties.payload is missing');
+  } else if (!payloadRequired.includes('contract_version')) {
+    errors.push('events.schema.json payload.required must include contract_version');
+  }
   if (!contractVersion) {
-    errors.push('events.schema.json properties.contract_version is missing');
+    errors.push('events.schema.json properties.payload.properties.contract_version is missing');
   } else if (contractVersion.type !== 'integer') {
-    errors.push('events.schema.json contract_version must be an integer');
+    errors.push('events.schema.json payload contract_version must be an integer');
+  } else if (contractVersion.const !== 1) {
+    errors.push('events.schema.json payload contract_version const must be 1');
   }
   return { ops: [...new Set(ops)].sort(), errors };
 }
@@ -247,11 +318,36 @@ function extractServerOps(serverSource) {
   if (start < 0) {
     return { ops: [], errors: ['EdgeSyncService.applyEvent method not found'] };
   }
-  const end = source.indexOf('\n    private void recordOutboxMirror', start);
-  if (end < 0) {
-    return { ops: [], errors: ['EdgeSyncService.applyEvent end marker not found'] };
+  const methodOpen = source.indexOf('{', start);
+  if (methodOpen < 0) {
+    return { ops: [], errors: ['EdgeSyncService.applyEvent opening brace not found'] };
   }
-  return { ops: [...new Set(extractQuotedConstants(source.slice(start, end)))].sort(), errors: [] };
+  const methodEnd = findMatchingBrace(source, methodOpen);
+  if (methodEnd < 0) {
+    return { ops: [], errors: ['EdgeSyncService.applyEvent closing brace not found'] };
+  }
+  const methodBody = source.slice(methodOpen + 1, methodEnd);
+  const switchMatch = /switch\s*\(\s*event\.op\(\)\s*\)/.exec(methodBody);
+  if (!switchMatch) {
+    return { ops: [], errors: ['EdgeSyncService.applyEvent switch(event.op()) not found'] };
+  }
+  const switchStart = methodOpen + 1 + switchMatch.index;
+  const switchOpen = source.indexOf('{', switchStart);
+  if (switchOpen < 0 || switchOpen > methodEnd) {
+    return { ops: [], errors: ['EdgeSyncService.applyEvent switch opening brace not found'] };
+  }
+  const switchEnd = findMatchingBrace(source, switchOpen);
+  if (switchEnd < 0 || switchEnd > methodEnd) {
+    return { ops: [], errors: ['EdgeSyncService.applyEvent switch closing brace not found'] };
+  }
+  const switchBody = source.slice(switchOpen + 1, switchEnd);
+  const ops = [];
+  const caseRe = /\bcase\s+([\s\S]*?)\s*(?:->|:)/g;
+  let match;
+  while ((match = caseRe.exec(switchBody)) !== null) {
+    ops.push(...extractQuotedConstants(match[1]));
+  }
+  return { ops: [...new Set(ops)].sort(), errors: [] };
 }
 
 function diffSets(expected, actual) {
