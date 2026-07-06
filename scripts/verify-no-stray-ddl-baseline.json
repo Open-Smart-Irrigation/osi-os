@@ -1,0 +1,29 @@
+{
+  "version": 1,
+  "markers": [
+    "CREATE TABLE",
+    "ALTER TABLE",
+    "writable_schema"
+  ],
+  "files": {
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/flows.json": {
+      "createTable": 33,
+      "alterTable": 216,
+      "writableSchema": 2,
+      "total": 251
+    },
+    "conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/flows.json": {
+      "createTable": 33,
+      "alterTable": 216,
+      "writableSchema": 2,
+      "total": 251
+    },
+    "deploy.sh": {
+      "createTable": 4,
+      "alterTable": 24,
+      "writableSchema": 0,
+      "total": 28
+    }
+  },
+  "total": 530
+}
