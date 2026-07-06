@@ -19,7 +19,7 @@ jobs:
       - name: Install sqlite3 CLI
         run: sudo apt-get update && sudo apt-get install -y sqlite3
       - run: node --test lib/osi-migrate/__tests__/*.test.js
-      - run: node --test scripts/check-sync-parity.test.js scripts/restamp-fingerprints.test.js scripts/verify-no-new-silent-catch.test.js
+      - run: node --test scripts/check-sync-parity.test.js scripts/restamp-fingerprints.test.js scripts/verify-no-new-silent-catch.test.js scripts/test-error-recording-flow.js
       - run: node scripts/test-history-helper.js
       - run: node scripts/verify-migrations.js
       - run: node scripts/verify-seed-replay.js
