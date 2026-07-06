@@ -1,0 +1,29 @@
+name: crossrepo-probe
+on:
+  pull_request:
+    branches: [ main ]
+permissions:
+  contents: read
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Try cross-repo checkout of private osi-server (default GITHUB_TOKEN, no explicit token)
+        id: crossrepo
+        continue-on-error: true
+        uses: actions/checkout@v4
+        with:
+          repository: Open-Smart-Irrigation/osi-server
+          path: osi-server
+          persist-credentials: false
+      - name: Report result
+        run: |
+          if [ -f osi-server/backend/src/main/java/org/osi/server/sync/EdgeSyncService.java ]; then
+            echo "CROSSREPO_CHECKOUT=SUCCESS (default token can clone private osi-server)"
+          else
+            echo "CROSSREPO_CHECKOUT=FAILED (default token cannot clone private osi-server — needs a secret)"
+            exit 1
+          fi
