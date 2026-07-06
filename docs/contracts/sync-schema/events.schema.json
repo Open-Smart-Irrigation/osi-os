@@ -1,22 +1,54 @@
 {
     "$schema": "http://json-schema.org/draft-07/schema#",
     "$id": "https://contracts.opensmartirrigation.org/sync-schema/events.schema.json",
-    "title": "Sync Event Payload",
+    "title": "Sync Event",
     "type": "object",
-    "required": ["event_uuid", "resource_type", "resource_id", "sync_version", "payload"],
+    "required": ["eventUuid", "aggregateType", "aggregateKey", "op", "syncVersion", "payload"],
     "additionalProperties": false,
     "properties": {
-        "event_uuid": {"type": "string", "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"},
-        "resource_type": {
+        "eventUuid": {"type": "string", "minLength": 1},
+        "aggregateType": {
             "type": "string",
-            "description": "Event stream aggregate type. ZONE, DEVICE, and SCHEDULE payloads are described in resources.schema.json; ZONE_CONFIG, ZONE_LOCATION, DEVICE_DATA, and GATEWAY are event-only aggregates with command- or telemetry-specific payloads.",
-            "enum": ["ZONE", "DEVICE", "SCHEDULE", "ZONE_CONFIG", "ZONE_LOCATION", "DEVICE_DATA", "GATEWAY"]
+            "description": "Event stream aggregate type. ZONE, DEVICE, and SCHEDULE payloads are described in resources.schema.json; other aggregates are event-only command or telemetry payloads.",
+            "minLength": 1
         },
-        "resource_id": {"type": "string", "minLength": 1},
-        "sync_version": {"type": "integer", "minimum": 0},
-        "payload": {"type": "object"},
-        "is_tombstone": {"type": "boolean"},
-        "payload_hash": {"type": ["string", "null"], "pattern": "^[0-9a-f]{64}$"},
-        "recorded_at": {"type": "string", "format": "date-time"}
+        "aggregateKey": {"type": "string", "minLength": 1},
+        "op": {
+            "type": "string",
+            "description": "Sync event operation emitted by the edge and handled by the cloud EdgeSyncService applyEvent switch.",
+            "enum": [
+                "CHAMELEON_READING_APPENDED",
+                "DENDRO_DAILY_UPSERTED",
+                "DENDRO_READING_APPENDED",
+                "DEVICE_ASSIGNED",
+                "DEVICE_DATA_APPENDED",
+                "DEVICE_FLAGS_UPDATED",
+                "DEVICE_UNASSIGNED",
+                "DEVICE_UNCLAIMED",
+                "GATEWAY_LOCATION_UPSERTED",
+                "IRRIGATION_EVENT_APPENDED",
+                "SCHEDULE_UPSERTED",
+                "ZONE_CONFIG_UPSERTED",
+                "ZONE_DELETED",
+                "ZONE_ENVIRONMENT_APPENDED",
+                "ZONE_LOCATION_UPSERTED",
+                "ZONE_RECOMMENDATION_UPSERTED",
+                "ZONE_UPSERTED"
+            ]
+        },
+        "syncVersion": {"type": "integer", "minimum": 0},
+        "occurredAt": {"type": ["string", "null"], "format": "date-time"},
+        "payload": {
+            "type": "object",
+            "required": ["contract_version"],
+            "additionalProperties": true,
+            "properties": {
+                "contract_version": {
+                    "type": "integer",
+                    "const": 1,
+                    "description": "Sync event contract version stamped into every emitted sync_outbox payload JSON."
+                }
+            }
+        }
     }
 }
