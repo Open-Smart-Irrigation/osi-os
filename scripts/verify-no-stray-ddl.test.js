@@ -5,6 +5,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+const crypto = require('node:crypto');
 const { spawnSync } = require('node:child_process');
 
 const repoRoot = path.resolve(__dirname, '..');
@@ -29,6 +30,27 @@ function runVerifier(args = []) {
   });
 }
 
+function hashString(value) {
+  return crypto.createHash('sha256').update(value).digest('hex');
+}
+
+function occurrence(marker, source, text, snippet) {
+  return {
+    marker,
+    source,
+    stringHash: hashString(text),
+    snippet,
+  };
+}
+
+const createTableText = 'db.exec("CREATE TABLE IF NOT EXISTS t (id INTEGER)")';
+const createTableOccurrence = occurrence(
+  'createTable',
+  '/0/func',
+  createTableText,
+  'CREATE TABLE IF NOT EXISTS t (id INTEGER)'
+);
+
 const baseline = {
   version: 1,
   markers: [
@@ -38,6 +60,7 @@ const baseline = {
     'CREATE INDEX',
     'CREATE TRIGGER',
     'DROP TABLE',
+    'DROP TRIGGER',
     'writable_schema',
   ],
   files: {
@@ -48,8 +71,10 @@ const baseline = {
       createIndex: 0,
       createTrigger: 0,
       dropTable: 0,
+      dropTrigger: 0,
       writableSchema: 0,
       total: 1,
+      occurrences: [createTableOccurrence],
     },
     'deploy.sh': {
       createTable: 0,
@@ -58,8 +83,10 @@ const baseline = {
       createIndex: 0,
       createTrigger: 0,
       dropTable: 0,
+      dropTrigger: 0,
       writableSchema: 0,
       total: 0,
+      occurrences: [],
     },
   },
   total: 1,
@@ -69,7 +96,7 @@ test('verify-no-stray-ddl accepts files that match the committed baseline exactl
   const { root, baselinePath } = writeFixture(
     {
       'flows.json': JSON.stringify([
-        { type: 'function', func: 'db.exec("CREATE TABLE IF NOT EXISTS t (id INTEGER)")' },
+        { type: 'function', func: createTableText },
       ]),
       'deploy.sh': '#!/bin/sh\ntrue\n',
     },
@@ -89,6 +116,32 @@ test('verify-no-stray-ddl accepts files that match the committed baseline exactl
 
   assert.equal(result.status, 0, result.stderr || result.stdout);
   assert.match(result.stdout, /OK \(total 1 matches baseline 1\)/);
+});
+
+test('verify-no-stray-ddl rejects same-count DDL substitutions by occurrence identity', () => {
+  const { root, baselinePath } = writeFixture(
+    {
+      'flows.json': JSON.stringify([
+        { type: 'function', func: 'db.exec("CREATE TABLE IF NOT EXISTS renamed (id INTEGER)")' },
+      ]),
+      'deploy.sh': '#!/bin/sh\ntrue\n',
+    },
+    baseline
+  );
+
+  const result = runVerifier([
+    '--root',
+    root,
+    '--baseline',
+    baselinePath,
+    '--surface',
+    'flows.json',
+    '--surface',
+    'deploy.sh',
+  ]);
+
+  assert.notEqual(result.status, 0, result.stdout);
+  assert.match(result.stderr, /flows\.json occurrence set differs from baseline/);
 });
 
 test('verify-no-stray-ddl rejects an added tracked DDL marker above the baseline', () => {
@@ -162,8 +215,10 @@ test('verify-no-stray-ddl counts each flow string separately', () => {
         createIndex: 0,
         createTrigger: 0,
         dropTable: 0,
+        dropTrigger: 0,
         writableSchema: 0,
         total: 0,
+        occurrences: [],
       },
     },
     total: 0,
@@ -189,6 +244,49 @@ test('verify-no-stray-ddl counts each flow string separately', () => {
 
   assert.equal(result.status, 0, result.stderr || result.stdout);
   assert.match(result.stdout, /OK \(total 0 matches baseline 0\)/);
+});
+
+test('verify-no-stray-ddl tracks DROP TRIGGER markers', () => {
+  const zeroBaseline = {
+    ...baseline,
+    files: {
+      ...baseline.files,
+      'flows.json': {
+        createTable: 0,
+        alterTable: 0,
+        createUniqueIndex: 0,
+        createIndex: 0,
+        createTrigger: 0,
+        dropTable: 0,
+        dropTrigger: 0,
+        writableSchema: 0,
+        total: 0,
+        occurrences: [],
+      },
+    },
+    total: 0,
+  };
+  const { root, baselinePath } = writeFixture(
+    {
+      'flows.json': JSON.stringify([{ type: 'function', func: 'db.exec("DROP TRIGGER old_trigger")' }]),
+      'deploy.sh': '#!/bin/sh\ntrue\n',
+    },
+    zeroBaseline
+  );
+
+  const result = runVerifier([
+    '--root',
+    root,
+    '--baseline',
+    baselinePath,
+    '--surface',
+    'flows.json',
+    '--surface',
+    'deploy.sh',
+  ]);
+
+  assert.notEqual(result.status, 0, result.stdout);
+  assert.match(result.stderr, /dropTrigger: 1 != 0/);
 });
 
 test('verify-no-stray-ddl accepts the committed shipped-surface baseline', () => {
