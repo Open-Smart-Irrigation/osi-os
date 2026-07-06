@@ -240,6 +240,18 @@ Read the repo-owned `architect.yaml` and `RULES.yaml` overlays before edits. See
 
 ---
 
+## Agent skills
+
+Field manuals for agents live in `.claude/skills/` (Agent Skills spec: SKILL.md + `name`/`description` frontmatter). Claude Code and OpenCode auto-discover that path; `.agents/skills` is a committed symlink to it for `.agents`-convention tools (Codex, Gemini CLI, …) — never materialize a copy there. Index:
+
+- `osi-debugging-playbook` — symptom→triage table + verifier toolbox; load when investigating any edge failure or data gap.
+- `osi-live-ops-runbook` — deploy/repair/post-check procedures for live Pis; load before touching a real gateway.
+- `osi-flows-json-editing` — script-only flows.json editing rules; load before ANY Node-RED flow change.
+- `osi-schema-change-control` — migrations, risk classes, frozen boot DDL, parity gates; load before ANY schema change.
+- `osi-agronomy-sensors-reference` — domain pack (SWT/pF, Chameleon, dendrometry, rain, LoRaWAN as used here); load when touching sensor semantics or displays.
+- `osi-config-and-flags` — UCI/env/flag catalog incl. DEVICE_EUI resolution; load when configuring or provisioning.
+- `osi-hardest-problem-campaign` — deferred stub; do not author without maintainer input.
+
 ## Session closeout
 
 When the user says `finish the session`:
