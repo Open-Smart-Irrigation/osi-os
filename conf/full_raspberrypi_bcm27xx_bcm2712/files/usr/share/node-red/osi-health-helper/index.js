@@ -190,7 +190,7 @@ async function gatherWork(db, diskPath, timeoutMs) {
     const rawOldest = row ? row.s : 0;
     health.sync_oldest_age_s = pending > 0 && (rawOldest === null || rawOldest === undefined)
       ? Number.MAX_SAFE_INTEGER
-      : Number(rawOldest || 0);
+      : Math.max(0, Number(rawOldest || 0));
   } catch (_) {}
 
   try {
