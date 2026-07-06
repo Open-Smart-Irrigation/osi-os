@@ -10187,5 +10187,458 @@
         "history-api-response"
       ]
     ]
+  },
+  {
+    "id": "record-error-fn",
+    "type": "function",
+    "z": "93b1537a596e0e6d",
+    "name": "Record Error",
+    "func": "const now = Date.now();\nconst err = msg.error || msg._error || {};\nconst source = err.source || msg._error?.source || {};\nconst rawMessage = err.message || msg.payload?.message || String(err || 'unknown error');\nconst message = String(rawMessage || 'unknown error').slice(0, 120);\nconst src = String(source.name || source.id || source.type || msg.topic || 'unknown');\n\nconst counts = global.get('error_counts') || {};\nconst previousTotal = Number(counts.total || 0);\ncounts.total = Number.isFinite(previousTotal) ? previousTotal + 1 : 1;\ncounts.last = { at: now, src, message };\nglobal.set('error_counts', counts);\n\nconst limitMs = 60000;\nconst warned = flow.get('record_error_warned') || {};\nfor (const key of Object.keys(warned)) {\n  if (now - Number(warned[key] || 0) > limitMs * 10) {\n    delete warned[key];\n  }\n}\n\nconst lastWarned = Number(warned[message] || 0);\nif (!lastWarned || now - lastWarned >= limitMs) {\n  warned[message] = now;\n  node.warn(src + ': ' + message);\n}\nflow.set('record_error_warned', warned);\n\nreturn null;",
+    "outputs": 1,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 1750,
+    "y": 1340,
+    "wires": [
+      []
+    ]
+  },
+  {
+    "id": "record-error-link-out-auth",
+    "type": "link out",
+    "z": "auth-tab",
+    "name": "Record Error (link)",
+    "mode": "link",
+    "links": [
+      "record-error-link-in"
+    ],
+    "x": 1170,
+    "y": 540,
+    "wires": []
+  },
+  {
+    "id": "record-error-link-out-device-api",
+    "type": "link out",
+    "z": "device-api-tab",
+    "name": "Record Error (link)",
+    "mode": "link",
+    "links": [
+      "record-error-link-in"
+    ],
+    "x": 1230,
+    "y": 2450,
+    "wires": []
+  },
+  {
+    "id": "record-error-link-out-scheduler",
+    "type": "link out",
+    "z": "c2b43a6c6e7d2c11",
+    "name": "Record Error (link)",
+    "mode": "link",
+    "links": [
+      "record-error-link-in"
+    ],
+    "x": 1070,
+    "y": 780,
+    "wires": []
+  },
+  {
+    "id": "record-error-link-out-kiwi",
+    "type": "link out",
+    "z": "49e87447205bb849",
+    "name": "Record Error (link)",
+    "mode": "link",
+    "links": [
+      "record-error-link-in"
+    ],
+    "x": 1620,
+    "y": 380,
+    "wires": []
+  },
+  {
+    "id": "record-error-link-out-strega",
+    "type": "link out",
+    "z": "8a18de184886c8a8",
+    "name": "Record Error (link)",
+    "mode": "link",
+    "links": [
+      "record-error-link-in"
+    ],
+    "x": 1420,
+    "y": 500,
+    "wires": []
+  },
+  {
+    "id": "record-error-link-out-field-testing",
+    "type": "link out",
+    "z": "a3f03829ad106e10",
+    "name": "Record Error (link)",
+    "mode": "link",
+    "links": [
+      "record-error-link-in"
+    ],
+    "x": 1070,
+    "y": 600,
+    "wires": []
+  },
+  {
+    "id": "record-error-link-out-download",
+    "type": "link out",
+    "z": "7d4f3e45f4b0d111",
+    "name": "Record Error (link)",
+    "mode": "link",
+    "links": [
+      "record-error-link-in"
+    ],
+    "x": 420,
+    "y": 300,
+    "wires": []
+  },
+  {
+    "id": "record-error-link-out-lsn50",
+    "type": "link out",
+    "z": "lsn50-tab",
+    "name": "Record Error (link)",
+    "mode": "link",
+    "links": [
+      "record-error-link-in"
+    ],
+    "x": 1580,
+    "y": 540,
+    "wires": []
+  },
+  {
+    "id": "record-error-link-out-system-admin",
+    "type": "link out",
+    "z": "sys-admin-tab",
+    "name": "Record Error (link)",
+    "mode": "link",
+    "links": [
+      "record-error-link-in"
+    ],
+    "x": 660,
+    "y": 480,
+    "wires": []
+  },
+  {
+    "id": "record-error-link-out-account-link",
+    "type": "link out",
+    "z": "account-link-tab",
+    "name": "Record Error (link)",
+    "mode": "link",
+    "links": [
+      "record-error-link-in"
+    ],
+    "x": 3180,
+    "y": 540,
+    "wires": []
+  },
+  {
+    "id": "record-error-link-out-dendro-analytics",
+    "type": "link out",
+    "z": "dendro-analytics-tab",
+    "name": "Record Error (link)",
+    "mode": "link",
+    "links": [
+      "record-error-link-in"
+    ],
+    "x": 900,
+    "y": 900,
+    "wires": []
+  },
+  {
+    "id": "record-error-link-out-s2120",
+    "type": "link out",
+    "z": "s2120-tab",
+    "name": "Record Error (link)",
+    "mode": "link",
+    "links": [
+      "record-error-link-in"
+    ],
+    "x": 660,
+    "y": 260,
+    "wires": []
+  },
+  {
+    "id": "record-error-link-out-history-api",
+    "type": "link out",
+    "z": "history-api-tab",
+    "name": "Record Error (link)",
+    "mode": "link",
+    "links": [
+      "record-error-link-in"
+    ],
+    "x": 900,
+    "y": 1060,
+    "wires": []
+  },
+  {
+    "id": "record-error-link-out-lorain",
+    "type": "link out",
+    "z": "lorain-tab",
+    "name": "Record Error (link)",
+    "mode": "link",
+    "links": [
+      "record-error-link-in"
+    ],
+    "x": 900,
+    "y": 240,
+    "wires": []
+  },
+  {
+    "id": "record-error-link-in",
+    "type": "link in",
+    "z": "93b1537a596e0e6d",
+    "name": "Record Error (link)",
+    "links": [
+      "record-error-link-out-auth",
+      "record-error-link-out-device-api",
+      "record-error-link-out-scheduler",
+      "record-error-link-out-kiwi",
+      "record-error-link-out-strega",
+      "record-error-link-out-field-testing",
+      "record-error-link-out-download",
+      "record-error-link-out-lsn50",
+      "record-error-link-out-system-admin",
+      "record-error-link-out-account-link",
+      "record-error-link-out-dendro-analytics",
+      "record-error-link-out-s2120",
+      "record-error-link-out-history-api",
+      "record-error-link-out-lorain"
+    ],
+    "x": 1590,
+    "y": 1340,
+    "wires": [
+      [
+        "record-error-fn"
+      ]
+    ]
+  },
+  {
+    "id": "record-error-catch-auth",
+    "type": "catch",
+    "z": "auth-tab",
+    "name": "Catch unhandled errors",
+    "scope": null,
+    "uncaught": false,
+    "x": 1030,
+    "y": 540,
+    "wires": [
+      [
+        "record-error-link-out-auth"
+      ]
+    ]
+  },
+  {
+    "id": "record-error-catch-device-api",
+    "type": "catch",
+    "z": "device-api-tab",
+    "name": "Catch unhandled errors",
+    "scope": null,
+    "uncaught": false,
+    "x": 1090,
+    "y": 2450,
+    "wires": [
+      [
+        "record-error-link-out-device-api"
+      ]
+    ]
+  },
+  {
+    "id": "record-error-catch-scheduler",
+    "type": "catch",
+    "z": "c2b43a6c6e7d2c11",
+    "name": "Catch unhandled errors",
+    "scope": null,
+    "uncaught": false,
+    "x": 930,
+    "y": 780,
+    "wires": [
+      [
+        "record-error-link-out-scheduler"
+      ]
+    ]
+  },
+  {
+    "id": "record-error-catch-kiwi",
+    "type": "catch",
+    "z": "49e87447205bb849",
+    "name": "Catch unhandled errors",
+    "scope": null,
+    "uncaught": false,
+    "x": 1480,
+    "y": 380,
+    "wires": [
+      [
+        "record-error-link-out-kiwi"
+      ]
+    ]
+  },
+  {
+    "id": "record-error-catch-strega",
+    "type": "catch",
+    "z": "8a18de184886c8a8",
+    "name": "Catch unhandled errors",
+    "scope": null,
+    "uncaught": false,
+    "x": 1280,
+    "y": 500,
+    "wires": [
+      [
+        "record-error-link-out-strega"
+      ]
+    ]
+  },
+  {
+    "id": "record-error-catch-field-testing",
+    "type": "catch",
+    "z": "a3f03829ad106e10",
+    "name": "Catch unhandled errors",
+    "scope": null,
+    "uncaught": false,
+    "x": 930,
+    "y": 600,
+    "wires": [
+      [
+        "record-error-link-out-field-testing"
+      ]
+    ]
+  },
+  {
+    "id": "record-error-catch-download",
+    "type": "catch",
+    "z": "7d4f3e45f4b0d111",
+    "name": "Catch unhandled errors",
+    "scope": null,
+    "uncaught": false,
+    "x": 280,
+    "y": 300,
+    "wires": [
+      [
+        "record-error-link-out-download"
+      ]
+    ]
+  },
+  {
+    "id": "record-error-catch-cloud-sync",
+    "type": "catch",
+    "z": "93b1537a596e0e6d",
+    "name": "Catch unhandled errors",
+    "scope": null,
+    "uncaught": false,
+    "x": 1530,
+    "y": 1340,
+    "wires": [
+      [
+        "record-error-fn"
+      ]
+    ]
+  },
+  {
+    "id": "record-error-catch-lsn50",
+    "type": "catch",
+    "z": "lsn50-tab",
+    "name": "Catch unhandled errors",
+    "scope": null,
+    "uncaught": false,
+    "x": 1440,
+    "y": 540,
+    "wires": [
+      [
+        "record-error-link-out-lsn50"
+      ]
+    ]
+  },
+  {
+    "id": "record-error-catch-system-admin",
+    "type": "catch",
+    "z": "sys-admin-tab",
+    "name": "Catch unhandled errors",
+    "scope": null,
+    "uncaught": false,
+    "x": 520,
+    "y": 480,
+    "wires": [
+      [
+        "record-error-link-out-system-admin"
+      ]
+    ]
+  },
+  {
+    "id": "record-error-catch-account-link",
+    "type": "catch",
+    "z": "account-link-tab",
+    "name": "Catch unhandled errors",
+    "scope": null,
+    "uncaught": false,
+    "x": 3040,
+    "y": 540,
+    "wires": [
+      [
+        "record-error-link-out-account-link"
+      ]
+    ]
+  },
+  {
+    "id": "record-error-catch-dendro-analytics",
+    "type": "catch",
+    "z": "dendro-analytics-tab",
+    "name": "Catch unhandled errors",
+    "scope": null,
+    "uncaught": false,
+    "x": 760,
+    "y": 900,
+    "wires": [
+      [
+        "record-error-link-out-dendro-analytics"
+      ]
+    ]
+  },
+  {
+    "id": "record-error-catch-s2120",
+    "type": "catch",
+    "z": "s2120-tab",
+    "name": "Catch unhandled errors",
+    "scope": null,
+    "uncaught": false,
+    "x": 520,
+    "y": 260,
+    "wires": [
+      [
+        "record-error-link-out-s2120"
+      ]
+    ]
+  },
+  {
+    "id": "record-error-catch-history-api",
+    "type": "catch",
+    "z": "history-api-tab",
+    "name": "Catch unhandled errors",
+    "scope": null,
+    "uncaught": false,
+    "x": 760,
+    "y": 1060,
+    "wires": [
+      [
+        "record-error-link-out-history-api"
+      ]
+    ]
+  },
+  {
+    "id": "record-error-catch-lorain",
+    "type": "catch",
+    "z": "lorain-tab",
+    "name": "Catch unhandled errors",
+    "scope": null,
+    "uncaught": false,
+    "x": 760,
+    "y": 240,
+    "wires": [
+      [
+        "record-error-link-out-lorain"
+      ]
+    ]
   }
 ]
