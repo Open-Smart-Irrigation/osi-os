@@ -3401,7 +3401,8 @@
     "y": 100,
     "wires": [
       [
-        "062a0f9bf66d9789"
+        "062a0f9bf66d9789",
+        "2a4f142e3e9b6d80"
       ]
     ]
   },
@@ -3410,7 +3411,7 @@
     "type": "function",
     "z": "93b1537a596e0e6d",
     "name": "Build Heartbeat",
-    "func": "function findFanControl(fs) {\n  try {\n    var dirs = fs.readdirSync('/sys/class/hwmon');\n    for (var i = 0; i < dirs.length; i++) {\n      try {\n        var n = fs.readFileSync('/sys/class/hwmon/' + dirs[i] + '/name', 'utf8').trim();\n        if (n === 'pwmfan') return { type: 'hwmon', path: '/sys/class/hwmon/' + dirs[i] };\n      } catch(e) {}\n    }\n  } catch(e) {}\n  try {\n    fs.accessSync('/sys/class/pwm/pwmchip2');\n    return { type: 'pwm', path: '/sys/class/pwm/pwmchip2' };\n  } catch(e) {}\n  return null;\n}\nvar eui = env.get('DEVICE_EUI') || 'UNKNOWN';\nvar deviceType = env.get('DEVICE_TYPE') || 'GATEWAY';\nvar fw = env.get('FIRMWARE_VERSION') || '0.6.5';\n\nvar os = global.get('os');\nvar fs = global.get('fs');\nvar cpuTemp = null, memPercent = null, load1 = null, load5 = null, load15 = null, fanValue = null;\nvar fanAvailable = false;\n\ntry { cpuTemp = Math.round(parseInt(fs.readFileSync('/sys/class/thermal/thermal_zone0/temp', 'utf8').trim()) / 100) / 10; } catch(e) {}\ntry {\n    var tm = os.totalmem(), fm = os.freemem();\n    memPercent = Math.round(((tm - fm) / tm) * 100);\n} catch(e) {}\ntry {\n    var la = os.loadavg();\n    load1 = Math.round(la[0] * 100) / 100;\n    load5 = Math.round(la[1] * 100) / 100;\n    load15 = Math.round(la[2] * 100) / 100;\n} catch(e) {}\ntry {\n    var fanCtrl = findFanControl(fs);\n    if (fanCtrl) {\n        if (fanCtrl.type === 'hwmon') {\n            var pwm1Val = parseInt(fs.readFileSync(fanCtrl.path + '/pwm1', 'utf8').trim()) || 0;\n            fanAvailable = true;\n            fanValue = pwm1Val;\n        } else {\n            var pwmChan = fanCtrl.path + '/pwm3';\n            var period = parseInt(fs.readFileSync(pwmChan + '/period', 'utf8').trim());\n            var duty   = parseInt(fs.readFileSync(pwmChan + '/duty_cycle', 'utf8').trim());\n            fanAvailable = true;\n            fanValue = Math.round((1 - duty / period) * 255);\n        }\n    }\n} catch(e) {}\n\nmsg.topic = 'devices/' + eui + '/heartbeat';\nmsg.payload = JSON.stringify({\n    deviceEui: eui,\n    deviceType: deviceType,\n    firmwareVersion: fw,\n    timestamp: new Date().toISOString(),\n    ip: null,\n    cpu_temp_c: cpuTemp,\n    mem_percent: memPercent,\n    load_1: load1,\n    load_5: load5,\n    load_15: load15,\n    fan_available: fanAvailable,\n    fan_value: fanValue\n});\nmsg.qos = 1;\nreturn msg;",
+    "func": "function findFanControl(fs) {\n  try {\n    var dirs = fs.readdirSync('/sys/class/hwmon');\n    for (var i = 0; i < dirs.length; i++) {\n      try {\n        var n = fs.readFileSync('/sys/class/hwmon/' + dirs[i] + '/name', 'utf8').trim();\n        if (n === 'pwmfan') return { type: 'hwmon', path: '/sys/class/hwmon/' + dirs[i] };\n      } catch(e) {}\n    }\n  } catch(e) {}\n  try {\n    fs.accessSync('/sys/class/pwm/pwmchip2');\n    return { type: 'pwm', path: '/sys/class/pwm/pwmchip2' };\n  } catch(e) {}\n  return null;\n}\nvar eui = env.get('DEVICE_EUI') || 'UNKNOWN';\nvar deviceType = env.get('DEVICE_TYPE') || 'GATEWAY';\nvar fw = env.get('FIRMWARE_VERSION') || '0.6.5';\n\nvar os = global.get('os');\nvar fs = global.get('fs');\nvar cpuTemp = null, memPercent = null, load1 = null, load5 = null, load15 = null, fanValue = null;\nvar fanAvailable = false;\n\ntry { cpuTemp = Math.round(parseInt(fs.readFileSync('/sys/class/thermal/thermal_zone0/temp', 'utf8').trim()) / 100) / 10; } catch(e) {}\ntry {\n    var tm = os.totalmem(), fm = os.freemem();\n    memPercent = Math.round(((tm - fm) / tm) * 100);\n} catch(e) {}\ntry {\n    var la = os.loadavg();\n    load1 = Math.round(la[0] * 100) / 100;\n    load5 = Math.round(la[1] * 100) / 100;\n    load15 = Math.round(la[2] * 100) / 100;\n} catch(e) {}\ntry {\n    var fanCtrl = findFanControl(fs);\n    if (fanCtrl) {\n        if (fanCtrl.type === 'hwmon') {\n            var pwm1Val = parseInt(fs.readFileSync(fanCtrl.path + '/pwm1', 'utf8').trim()) || 0;\n            fanAvailable = true;\n            fanValue = pwm1Val;\n        } else {\n            var pwmChan = fanCtrl.path + '/pwm3';\n            var period = parseInt(fs.readFileSync(pwmChan + '/period', 'utf8').trim());\n            var duty   = parseInt(fs.readFileSync(pwmChan + '/duty_cycle', 'utf8').trim());\n            fanAvailable = true;\n            fanValue = Math.round((1 - duty / period) * 255);\n        }\n    }\n} catch(e) {}\n\nfunction healthValue(source, key) {\n  if (!source) return null;\n  var value = source[key];\n  if (value === null) return null;\n  if (typeof value === 'string') return value;\n  if (typeof value === 'boolean') return value;\n  if (typeof value === 'number') return Number.isFinite(value) ? value : null;\n  return null;\n}\nconst _h = global.get('edge_health');\nconst STALE_MS = 180000;\nconst freshHealth = _h && typeof _h === 'object' && Number.isFinite(_h.at) && (Date.now() - _h.at) < STALE_MS;\nconst health = freshHealth ? {\n  schema_sig: healthValue(_h, 'schema_sig'),\n  sync_linked: healthValue(_h, 'sync_linked'),\n  sync_pending: healthValue(_h, 'sync_pending'),\n  sync_oldest_age_s: healthValue(_h, 'sync_oldest_age_s'),\n  sync_rejected: healthValue(_h, 'sync_rejected'),\n  sync_dirty_pending: healthValue(_h, 'sync_dirty_pending'),\n  disk_free_pct: healthValue(_h, 'disk_free_pct')\n} : {\n  schema_sig: null,\n  sync_linked: null,\n  sync_pending: null,\n  sync_oldest_age_s: null,\n  sync_rejected: null,\n  sync_dirty_pending: null,\n  disk_free_pct: null\n};\n\nmsg.topic = 'devices/' + eui + '/heartbeat';\nmsg.payload = JSON.stringify({\n    deviceEui: eui,\n    deviceType: deviceType,\n    firmwareVersion: fw,\n    timestamp: new Date().toISOString(),\n    ip: null,\n    cpu_temp_c: cpuTemp,\n    mem_percent: memPercent,\n    load_1: load1,\n    load_5: load5,\n    load_15: load15,\n    fan_available: fanAvailable,\n    fan_value: fanValue,\n    health: health\n});\nmsg.qos = 1;\nreturn msg;",
     "outputs": 1,
     "noerr": 0,
     "initialize": "",
@@ -3422,6 +3423,32 @@
       [
         "d769e9face3844d5"
       ]
+    ]
+  },
+  {
+    "id": "2a4f142e3e9b6d80",
+    "type": "function",
+    "z": "93b1537a596e0e6d",
+    "name": "Gather Edge Health",
+    "func": "const _db = new osiDb.Database('/data/db/farming.db');\ntry {\n  global.set('edge_health', Object.assign({at: Date.now()}, await osiHealth.gatherEdgeHealth(_db)));\n} finally {\n  _db.close(()=>{});\n}\nreturn null;",
+    "outputs": 1,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [
+      {
+        "var": "osiHealth",
+        "module": "osi-health-helper"
+      },
+      {
+        "var": "osiDb",
+        "module": "osi-db-helper"
+      }
+    ],
+    "x": 360,
+    "y": 140,
+    "wires": [
+      []
     ]
   },
   {
@@ -10158,6 +10185,459 @@
     "wires": [
       [
         "history-api-response"
+      ]
+    ]
+  },
+  {
+    "id": "record-error-fn",
+    "type": "function",
+    "z": "93b1537a596e0e6d",
+    "name": "Record Error",
+    "func": "const now = Date.now();\nconst err = msg.error || msg._error || {};\nconst source = err.source || msg._error?.source || {};\nconst rawMessage = err.message || msg.payload?.message || String(err || 'unknown error');\nconst message = String(rawMessage || 'unknown error').slice(0, 120);\nconst src = String(source.name || source.id || source.type || msg.topic || 'unknown');\n\nconst counts = global.get('error_counts') || {};\nconst previousTotal = Number(counts.total || 0);\ncounts.total = Number.isFinite(previousTotal) ? previousTotal + 1 : 1;\ncounts.last = { at: now, src, message };\nglobal.set('error_counts', counts);\n\nconst limitMs = 60000;\nconst warned = flow.get('record_error_warned') || {};\nfor (const key of Object.keys(warned)) {\n  if (now - Number(warned[key] || 0) > limitMs * 10) {\n    delete warned[key];\n  }\n}\n\nconst lastWarned = Number(warned[message] || 0);\nif (!lastWarned || now - lastWarned >= limitMs) {\n  warned[message] = now;\n  node.warn(src + ': ' + message);\n}\nflow.set('record_error_warned', warned);\n\nreturn null;",
+    "outputs": 1,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 1750,
+    "y": 1340,
+    "wires": [
+      []
+    ]
+  },
+  {
+    "id": "record-error-link-out-auth",
+    "type": "link out",
+    "z": "auth-tab",
+    "name": "Record Error (link)",
+    "mode": "link",
+    "links": [
+      "record-error-link-in"
+    ],
+    "x": 1170,
+    "y": 540,
+    "wires": []
+  },
+  {
+    "id": "record-error-link-out-device-api",
+    "type": "link out",
+    "z": "device-api-tab",
+    "name": "Record Error (link)",
+    "mode": "link",
+    "links": [
+      "record-error-link-in"
+    ],
+    "x": 1230,
+    "y": 2450,
+    "wires": []
+  },
+  {
+    "id": "record-error-link-out-scheduler",
+    "type": "link out",
+    "z": "c2b43a6c6e7d2c11",
+    "name": "Record Error (link)",
+    "mode": "link",
+    "links": [
+      "record-error-link-in"
+    ],
+    "x": 1070,
+    "y": 780,
+    "wires": []
+  },
+  {
+    "id": "record-error-link-out-kiwi",
+    "type": "link out",
+    "z": "49e87447205bb849",
+    "name": "Record Error (link)",
+    "mode": "link",
+    "links": [
+      "record-error-link-in"
+    ],
+    "x": 1620,
+    "y": 380,
+    "wires": []
+  },
+  {
+    "id": "record-error-link-out-strega",
+    "type": "link out",
+    "z": "8a18de184886c8a8",
+    "name": "Record Error (link)",
+    "mode": "link",
+    "links": [
+      "record-error-link-in"
+    ],
+    "x": 1420,
+    "y": 500,
+    "wires": []
+  },
+  {
+    "id": "record-error-link-out-field-testing",
+    "type": "link out",
+    "z": "a3f03829ad106e10",
+    "name": "Record Error (link)",
+    "mode": "link",
+    "links": [
+      "record-error-link-in"
+    ],
+    "x": 1070,
+    "y": 600,
+    "wires": []
+  },
+  {
+    "id": "record-error-link-out-download",
+    "type": "link out",
+    "z": "7d4f3e45f4b0d111",
+    "name": "Record Error (link)",
+    "mode": "link",
+    "links": [
+      "record-error-link-in"
+    ],
+    "x": 420,
+    "y": 300,
+    "wires": []
+  },
+  {
+    "id": "record-error-link-out-lsn50",
+    "type": "link out",
+    "z": "lsn50-tab",
+    "name": "Record Error (link)",
+    "mode": "link",
+    "links": [
+      "record-error-link-in"
+    ],
+    "x": 1580,
+    "y": 540,
+    "wires": []
+  },
+  {
+    "id": "record-error-link-out-system-admin",
+    "type": "link out",
+    "z": "sys-admin-tab",
+    "name": "Record Error (link)",
+    "mode": "link",
+    "links": [
+      "record-error-link-in"
+    ],
+    "x": 660,
+    "y": 480,
+    "wires": []
+  },
+  {
+    "id": "record-error-link-out-account-link",
+    "type": "link out",
+    "z": "account-link-tab",
+    "name": "Record Error (link)",
+    "mode": "link",
+    "links": [
+      "record-error-link-in"
+    ],
+    "x": 3180,
+    "y": 540,
+    "wires": []
+  },
+  {
+    "id": "record-error-link-out-dendro-analytics",
+    "type": "link out",
+    "z": "dendro-analytics-tab",
+    "name": "Record Error (link)",
+    "mode": "link",
+    "links": [
+      "record-error-link-in"
+    ],
+    "x": 900,
+    "y": 900,
+    "wires": []
+  },
+  {
+    "id": "record-error-link-out-s2120",
+    "type": "link out",
+    "z": "s2120-tab",
+    "name": "Record Error (link)",
+    "mode": "link",
+    "links": [
+      "record-error-link-in"
+    ],
+    "x": 660,
+    "y": 260,
+    "wires": []
+  },
+  {
+    "id": "record-error-link-out-history-api",
+    "type": "link out",
+    "z": "history-api-tab",
+    "name": "Record Error (link)",
+    "mode": "link",
+    "links": [
+      "record-error-link-in"
+    ],
+    "x": 900,
+    "y": 1060,
+    "wires": []
+  },
+  {
+    "id": "record-error-link-out-lorain",
+    "type": "link out",
+    "z": "lorain-tab",
+    "name": "Record Error (link)",
+    "mode": "link",
+    "links": [
+      "record-error-link-in"
+    ],
+    "x": 900,
+    "y": 240,
+    "wires": []
+  },
+  {
+    "id": "record-error-link-in",
+    "type": "link in",
+    "z": "93b1537a596e0e6d",
+    "name": "Record Error (link)",
+    "links": [
+      "record-error-link-out-auth",
+      "record-error-link-out-device-api",
+      "record-error-link-out-scheduler",
+      "record-error-link-out-kiwi",
+      "record-error-link-out-strega",
+      "record-error-link-out-field-testing",
+      "record-error-link-out-download",
+      "record-error-link-out-lsn50",
+      "record-error-link-out-system-admin",
+      "record-error-link-out-account-link",
+      "record-error-link-out-dendro-analytics",
+      "record-error-link-out-s2120",
+      "record-error-link-out-history-api",
+      "record-error-link-out-lorain"
+    ],
+    "x": 1590,
+    "y": 1340,
+    "wires": [
+      [
+        "record-error-fn"
+      ]
+    ]
+  },
+  {
+    "id": "record-error-catch-auth",
+    "type": "catch",
+    "z": "auth-tab",
+    "name": "Catch unhandled errors",
+    "scope": null,
+    "uncaught": false,
+    "x": 1030,
+    "y": 540,
+    "wires": [
+      [
+        "record-error-link-out-auth"
+      ]
+    ]
+  },
+  {
+    "id": "record-error-catch-device-api",
+    "type": "catch",
+    "z": "device-api-tab",
+    "name": "Catch unhandled errors",
+    "scope": null,
+    "uncaught": false,
+    "x": 1090,
+    "y": 2450,
+    "wires": [
+      [
+        "record-error-link-out-device-api"
+      ]
+    ]
+  },
+  {
+    "id": "record-error-catch-scheduler",
+    "type": "catch",
+    "z": "c2b43a6c6e7d2c11",
+    "name": "Catch unhandled errors",
+    "scope": null,
+    "uncaught": false,
+    "x": 930,
+    "y": 780,
+    "wires": [
+      [
+        "record-error-link-out-scheduler"
+      ]
+    ]
+  },
+  {
+    "id": "record-error-catch-kiwi",
+    "type": "catch",
+    "z": "49e87447205bb849",
+    "name": "Catch unhandled errors",
+    "scope": null,
+    "uncaught": false,
+    "x": 1480,
+    "y": 380,
+    "wires": [
+      [
+        "record-error-link-out-kiwi"
+      ]
+    ]
+  },
+  {
+    "id": "record-error-catch-strega",
+    "type": "catch",
+    "z": "8a18de184886c8a8",
+    "name": "Catch unhandled errors",
+    "scope": null,
+    "uncaught": false,
+    "x": 1280,
+    "y": 500,
+    "wires": [
+      [
+        "record-error-link-out-strega"
+      ]
+    ]
+  },
+  {
+    "id": "record-error-catch-field-testing",
+    "type": "catch",
+    "z": "a3f03829ad106e10",
+    "name": "Catch unhandled errors",
+    "scope": null,
+    "uncaught": false,
+    "x": 930,
+    "y": 600,
+    "wires": [
+      [
+        "record-error-link-out-field-testing"
+      ]
+    ]
+  },
+  {
+    "id": "record-error-catch-download",
+    "type": "catch",
+    "z": "7d4f3e45f4b0d111",
+    "name": "Catch unhandled errors",
+    "scope": null,
+    "uncaught": false,
+    "x": 280,
+    "y": 300,
+    "wires": [
+      [
+        "record-error-link-out-download"
+      ]
+    ]
+  },
+  {
+    "id": "record-error-catch-cloud-sync",
+    "type": "catch",
+    "z": "93b1537a596e0e6d",
+    "name": "Catch unhandled errors",
+    "scope": null,
+    "uncaught": false,
+    "x": 1530,
+    "y": 1340,
+    "wires": [
+      [
+        "record-error-fn"
+      ]
+    ]
+  },
+  {
+    "id": "record-error-catch-lsn50",
+    "type": "catch",
+    "z": "lsn50-tab",
+    "name": "Catch unhandled errors",
+    "scope": null,
+    "uncaught": false,
+    "x": 1440,
+    "y": 540,
+    "wires": [
+      [
+        "record-error-link-out-lsn50"
+      ]
+    ]
+  },
+  {
+    "id": "record-error-catch-system-admin",
+    "type": "catch",
+    "z": "sys-admin-tab",
+    "name": "Catch unhandled errors",
+    "scope": null,
+    "uncaught": false,
+    "x": 520,
+    "y": 480,
+    "wires": [
+      [
+        "record-error-link-out-system-admin"
+      ]
+    ]
+  },
+  {
+    "id": "record-error-catch-account-link",
+    "type": "catch",
+    "z": "account-link-tab",
+    "name": "Catch unhandled errors",
+    "scope": null,
+    "uncaught": false,
+    "x": 3040,
+    "y": 540,
+    "wires": [
+      [
+        "record-error-link-out-account-link"
+      ]
+    ]
+  },
+  {
+    "id": "record-error-catch-dendro-analytics",
+    "type": "catch",
+    "z": "dendro-analytics-tab",
+    "name": "Catch unhandled errors",
+    "scope": null,
+    "uncaught": false,
+    "x": 760,
+    "y": 900,
+    "wires": [
+      [
+        "record-error-link-out-dendro-analytics"
+      ]
+    ]
+  },
+  {
+    "id": "record-error-catch-s2120",
+    "type": "catch",
+    "z": "s2120-tab",
+    "name": "Catch unhandled errors",
+    "scope": null,
+    "uncaught": false,
+    "x": 520,
+    "y": 260,
+    "wires": [
+      [
+        "record-error-link-out-s2120"
+      ]
+    ]
+  },
+  {
+    "id": "record-error-catch-history-api",
+    "type": "catch",
+    "z": "history-api-tab",
+    "name": "Catch unhandled errors",
+    "scope": null,
+    "uncaught": false,
+    "x": 760,
+    "y": 1060,
+    "wires": [
+      [
+        "record-error-link-out-history-api"
+      ]
+    ]
+  },
+  {
+    "id": "record-error-catch-lorain",
+    "type": "catch",
+    "z": "lorain-tab",
+    "name": "Catch unhandled errors",
+    "scope": null,
+    "uncaught": false,
+    "x": 760,
+    "y": 240,
+    "wires": [
+      [
+        "record-error-link-out-lorain"
       ]
     ]
   }
