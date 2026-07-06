@@ -1,7 +1,7 @@
 {
   "description": "Ratchet baseline for empty catch blocks in maintained Node-RED function nodes. Update counts downward in the same commit that removes silent catches.",
-  "generatedFrom": "origin/main 22cffe6d",
-  "pattern": "catch\\s*(?:\\(\\s*\\w*\\s*\\))?\\s*\\{\\s*\\}",
+  "generatedFrom": "feat/surface-swallowed-errors 3bb12e08 (regenerated with broadened detector: comment-only/semicolon-only/destructured catch bodies, empty promise .catch(), and initialize/finalize fields; count unchanged at 247/247)",
+  "pattern": "catch\\s*(?:\\([^)]*\\))?\\s*\\{(?:\\s|;|//[^\\n]*|/\\*[\\s\\S]*?\\*/)*\\}  |  \\.catch\\s*\\(\\s*(?:(?:\\([^)]*\\)|[A-Za-z_$][\\w$]*)\\s*=>\\s*\\{(?:\\s|;|//[^\\n]*|/\\*[\\s\\S]*?\\*/)*\\}|function\\s*[A-Za-z_$][\\w$]*?\\s*\\([^)]*\\)\\s*\\{(?:\\s|;|//[^\\n]*|/\\*[\\s\\S]*?\\*/)*\\})\\s*\\)",
   "profiles": {
     "bcm2712": {
       "path": "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/flows.json",

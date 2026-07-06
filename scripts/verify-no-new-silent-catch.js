@@ -6,7 +6,50 @@ const path = require('path');
 
 const REPO_ROOT = path.resolve(__dirname, '..');
 const BASELINE_PATH = path.join(__dirname, 'fixtures', 'silent-catch-baseline.json');
-const EMPTY_CATCH_RE = /catch\s*(?:\(\s*\w*\s*\))?\s*\{\s*\}/g;
+
+// A catch body is "silent" if it contains nothing but whitespace, bare
+// semicolons, and/or comments (line or block) -- i.e. nothing that could
+// possibly surface the error. This deliberately covers evasion forms like
+// `catch(e){ /* ignore */ }`, `catch(e){;}`, and `catch({message}){}` in
+// addition to the truly-empty `catch(){}` / `catch{}` / `catch(e){}`.
+const EMPTY_BODY_INNER = String.raw`(?:\s|;|//[^\n]*|/\*[\s\S]*?\*/)*`;
+
+// try/catch: `catch`, an optional binding of any (non-nested-brace) content
+// -- covers no binding, a simple identifier, and destructured bindings like
+// `{message}` or `[a, b]` -- followed by a body that is empty per the above.
+const EMPTY_TRY_CATCH_RE = new RegExp(
+  String.raw`catch\s*(?:\([^)]*\))?\s*\{${EMPTY_BODY_INNER}\}`,
+  'g',
+);
+
+// Promise-style `.catch(handler)` where handler is an arrow function or a
+// function expression with an empty-per-the-above body, e.g.
+// `.catch(() => {})`, `.catch((e) => {})`, `.catch(function(){})`,
+// `.catch(function (err) { })`.
+const EMPTY_PROMISE_CATCH_RE = new RegExp(
+  String.raw`\.catch\s*\(\s*(?:` +
+    // arrow function: (args) => { ...empty... }  or  arg => { ...empty... }
+    String.raw`(?:\([^)]*\)|[A-Za-z_$][\w$]*)\s*=>\s*\{${EMPTY_BODY_INNER}\}` +
+    String.raw`|` +
+    // function expression: function(args) { ...empty... }
+    String.raw`function\s*[A-Za-z_$][\w$]*?\s*\([^)]*\)\s*\{${EMPTY_BODY_INNER}\}` +
+    String.raw`)\s*\)`,
+  'g',
+);
+
+function countMatches(source, regex) {
+  const matches = source.match(regex);
+  return matches ? matches.length : 0;
+}
+
+function countSilentCatchesInSource(source) {
+  if (typeof source !== 'string' || source.length === 0) {
+    return 0;
+  }
+  return countMatches(source, EMPTY_TRY_CATCH_RE) + countMatches(source, EMPTY_PROMISE_CATCH_RE);
+}
+
+const SCANNED_FUNCTION_FIELDS = ['func', 'initialize', 'finalize'];
 
 function countSilentCatchesInFlow(flow) {
   let functionNodeCount = 0;
@@ -18,8 +61,9 @@ function countSilentCatchesInFlow(flow) {
     }
 
     functionNodeCount += 1;
-    const matches = node.func.match(EMPTY_CATCH_RE);
-    silentCatchCount += matches ? matches.length : 0;
+    for (const field of SCANNED_FUNCTION_FIELDS) {
+      silentCatchCount += countSilentCatchesInSource(node[field]);
+    }
   }
 
   return { functionNodeCount, silentCatchCount };
