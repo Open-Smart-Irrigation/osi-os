@@ -152,6 +152,7 @@ BEGIN
     COALESCE(NEW.zone_uuid, lower(hex(randomblob(16)))),
     CASE WHEN NEW.deleted_at IS NOT NULL THEN 'ZONE_DELETED' ELSE 'ZONE_UPSERTED' END,
     json_object(
+      'contract_version', 1,
       'zone_uuid',                NEW.zone_uuid,
       'name',                     NEW.name,
       'gateway_device_eui',       COALESCE(NEW.gateway_device_eui,'0016C001F11715E2'),
@@ -222,6 +223,7 @@ BEGIN
       ELSE 'DEVICE_FLAGS_UPDATED'
     END,
     json_object(
+      'contract_version', 1,
       'device_eui',                        NEW.deveui,
       'name',                              NEW.name,
       'type',                              NEW.type_id,
@@ -276,6 +278,7 @@ BEGIN
     COALESCE((SELECT zone_uuid FROM irrigation_zones WHERE id = NEW.irrigation_zone_id AND deleted_at IS NULL),''),
     'SCHEDULE_UPSERTED',
     json_object(
+      'contract_version', 1,
       'zone_uuid',       (SELECT zone_uuid FROM irrigation_zones WHERE id = NEW.irrigation_zone_id AND deleted_at IS NULL),
       'trigger_metric',  NEW.trigger_metric,
       'threshold_kpa',   NEW.threshold_kpa,
@@ -314,6 +317,7 @@ BEGIN
     COALESCE(NULLIF(trim(NEW.gateway_device_eui),''),NULLIF(trim((SELECT gateway_device_eui FROM sync_link_state WHERE peer_node='cloud')),'')),
     'GATEWAY_LOCATION_UPSERTED',
     json_object(
+      'contract_version', 1,
       'gateway_device_eui',           COALESCE(NULLIF(trim(NEW.gateway_device_eui),''),NULLIF(trim((SELECT gateway_device_eui FROM sync_link_state WHERE peer_node='cloud')),'')),
       'latitude',                     NEW.latitude,
       'longitude',                    NEW.longitude,
@@ -375,6 +379,7 @@ BEGIN
     COALESCE(NULLIF(trim(NEW.gateway_device_eui),''),NULLIF(trim((SELECT gateway_device_eui FROM sync_link_state WHERE peer_node='cloud')),'')),
     'GATEWAY_LOCATION_UPSERTED',
     json_object(
+      'contract_version', 1,
       'gateway_device_eui',           COALESCE(NULLIF(trim(NEW.gateway_device_eui),''),NULLIF(trim((SELECT gateway_device_eui FROM sync_link_state WHERE peer_node='cloud')),'')),
       'latitude',                     NEW.latitude,
       'longitude',                    NEW.longitude,
@@ -417,6 +422,7 @@ BEGIN
     COALESCE(NEW.deveui,'') || '|' || COALESCE(NEW.recorded_at,''),
     'DEVICE_DATA_APPENDED',
     json_object(
+      'contract_version', 1,
       'device_eui',            NEW.deveui,
       'device_name',           (SELECT name    FROM devices WHERE deveui=NEW.deveui AND deleted_at IS NULL),
       'device_type',           (SELECT type_id FROM devices WHERE deveui=NEW.deveui AND deleted_at IS NULL),
@@ -492,6 +498,7 @@ BEGIN
     COALESCE(NEW.deveui,'') || '|' || COALESCE(NEW.recorded_at,''),
     'CHAMELEON_READING_APPENDED',
     json_object(
+      'contract_version', 1,
       'device_eui',           NEW.deveui,
       'recorded_at',          NEW.recorded_at,
       'payload_version',      NEW.payload_version,
@@ -553,6 +560,7 @@ BEGIN
     COALESCE(NEW.deveui,'') || '|' || COALESCE(NEW.recorded_at,''),
     'DENDRO_READING_APPENDED',
     json_object(
+      'contract_version', 1,
       'device_eui',     NEW.deveui,
       'position_um',    NEW.position_um,
       'adc_v',          NEW.adc_v,
@@ -839,6 +847,7 @@ BEGIN
     COALESCE(NEW.deveui,'') || '|' || COALESCE(NEW.date,''),
     'DENDRO_DAILY_UPSERTED',
     json_object(
+      'contract_version', 1,
       'device_eui',            NEW.deveui,
       'zone_id',               (SELECT irrigation_zone_id FROM devices WHERE deveui=NEW.deveui AND deleted_at IS NULL),
       'zone_uuid',             (SELECT iz.zone_uuid FROM devices d LEFT JOIN irrigation_zones iz ON iz.id=d.irrigation_zone_id AND iz.deleted_at IS NULL WHERE d.deveui=NEW.deveui AND d.deleted_at IS NULL),
@@ -903,6 +912,7 @@ BEGIN
     COALESCE(NEW.deveui,'') || '|' || COALESCE(NEW.date,''),
     'DENDRO_DAILY_UPSERTED',
     json_object(
+      'contract_version', 1,
       'device_eui',            NEW.deveui,
       'zone_id',               (SELECT irrigation_zone_id FROM devices WHERE deveui=NEW.deveui AND deleted_at IS NULL),
       'zone_uuid',             (SELECT iz.zone_uuid FROM devices d LEFT JOIN irrigation_zones iz ON iz.id=d.irrigation_zone_id AND iz.deleted_at IS NULL WHERE d.deveui=NEW.deveui AND d.deleted_at IS NULL),
@@ -967,6 +977,7 @@ BEGIN
     COALESCE((SELECT zone_uuid FROM irrigation_zones WHERE id=NEW.zone_id AND deleted_at IS NULL),'') || '|' || COALESCE(NEW.date,''),
     'ZONE_ENVIRONMENT_APPENDED',
     json_object(
+      'contract_version', 1,
       'zone_id',            NEW.zone_id,
       'zone_uuid',          (SELECT zone_uuid FROM irrigation_zones WHERE id=NEW.zone_id AND deleted_at IS NULL),
       'date',               NEW.date,
@@ -1000,6 +1011,7 @@ BEGIN
     COALESCE((SELECT zone_uuid FROM irrigation_zones WHERE id=NEW.zone_id AND deleted_at IS NULL),'') || '|' || COALESCE(NEW.date,''),
     'ZONE_ENVIRONMENT_APPENDED',
     json_object(
+      'contract_version', 1,
       'zone_id',            NEW.zone_id,
       'zone_uuid',          (SELECT zone_uuid FROM irrigation_zones WHERE id=NEW.zone_id AND deleted_at IS NULL),
       'date',               NEW.date,
@@ -1033,6 +1045,7 @@ BEGIN
     COALESCE((SELECT zone_uuid FROM irrigation_zones WHERE id=NEW.zone_id AND deleted_at IS NULL),'') || '|' || COALESCE(NEW.date,''),
     'ZONE_RECOMMENDATION_UPSERTED',
     json_object(
+      'contract_version', 1,
       'zone_id',                       NEW.zone_id,
       'zone_uuid',                     (SELECT zone_uuid FROM irrigation_zones WHERE id=NEW.zone_id AND deleted_at IS NULL),
       'date',                          NEW.date,
@@ -1078,6 +1091,7 @@ BEGIN
     COALESCE((SELECT zone_uuid FROM irrigation_zones WHERE id=NEW.zone_id AND deleted_at IS NULL),'') || '|' || COALESCE(NEW.date,''),
     'ZONE_RECOMMENDATION_UPSERTED',
     json_object(
+      'contract_version', 1,
       'zone_id',                       NEW.zone_id,
       'zone_uuid',                     (SELECT zone_uuid FROM irrigation_zones WHERE id=NEW.zone_id AND deleted_at IS NULL),
       'date',                          NEW.date,
@@ -1138,6 +1152,7 @@ BEGIN
     event_uuid,
     'IRRIGATION_EVENT_APPENDED',
     json_object(
+      'contract_version', 1,
       'event_uuid',          event_uuid,
       'event_id',            id,
       'user_id',             user_id,
@@ -1193,6 +1208,7 @@ BEGIN
     NEW.event_uuid,
     'IRRIGATION_EVENT_APPENDED',
     json_object(
+      'contract_version', 1,
       'event_uuid',          NEW.event_uuid,
       'event_id',            NEW.id,
       'user_id',             NEW.user_id,
@@ -1241,6 +1257,7 @@ BEGIN
     NEW.event_uuid,
     'IRRIGATION_EVENT_APPENDED',
     json_object(
+      'contract_version', 1,
       'event_uuid',          NEW.event_uuid,
       'event_id',            NEW.id,
       'user_id',             NEW.user_id,

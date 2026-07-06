@@ -3,6 +3,7 @@
 
 const fs = require('node:fs');
 const path = require('node:path');
+const { execFileSync } = require('node:child_process');
 
 const REPO_ROOT = path.resolve(__dirname, '..');
 const SERVER_SOURCE_CANDIDATES = [
@@ -20,6 +21,42 @@ const FLOW_SOURCES = [
   {
     name: 'bcm2709',
     path: 'conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/flows.json',
+  },
+];
+const SQL_SOURCES = [
+  {
+    name: 'seed-sql',
+    path: 'database/seed-blank.sql',
+  },
+];
+const DATABASE_SOURCES = [
+  {
+    name: 'db:base-bcm2709',
+    path: 'conf/base_raspberrypi_bcm27xx_bcm2709/files/usr/share/db/farming.db',
+  },
+  {
+    name: 'db:base-bcm2712',
+    path: 'conf/base_raspberrypi_bcm27xx_bcm2712/files/usr/share/db/farming.db',
+  },
+  {
+    name: 'db:full-bcm2708',
+    path: 'conf/full_raspberrypi_bcm27xx_bcm2708/files/usr/share/db/farming.db',
+  },
+  {
+    name: 'db:full-bcm2709',
+    path: 'conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/db/farming.db',
+  },
+  {
+    name: 'db:full-bcm2712',
+    path: 'conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/db/farming.db',
+  },
+  {
+    name: 'db:database',
+    path: 'database/farming.db',
+  },
+  {
+    name: 'db:react-gui',
+    path: 'web/react-gui/farming.db',
   },
 ];
 
@@ -114,6 +151,100 @@ function findMatchingBrace(source, openIndex) {
   return -1;
 }
 
+function skipJavaQuotedLiteral(source, index) {
+  const quote = source[index];
+  if (quote === '"' && source[index + 1] === '"' && source[index + 2] === '"') {
+    for (let i = index + 3; i < source.length; i++) {
+      if (source[i] === '"' && source[i + 1] === '"' && source[i + 2] === '"') return i + 3;
+    }
+    return source.length;
+  }
+
+  for (let i = index + 1; i < source.length; i++) {
+    if (source[i] === '\\') {
+      i++;
+    } else if (source[i] === quote) {
+      return i + 1;
+    }
+  }
+  return source.length;
+}
+
+function startsWithWord(source, index, word) {
+  return source.startsWith(word, index) &&
+    isWordBoundary(source, index - 1) &&
+    isWordBoundary(source, index + word.length);
+}
+
+function readJavaCaseLabel(source, startIndex) {
+  let depth = 0;
+  let text = '';
+  for (let i = startIndex; i < source.length;) {
+    const ch = source[i];
+    const next = source[i + 1];
+    if (ch === '/' && next === '/') {
+      const end = source.indexOf('\n', i + 2);
+      i = end < 0 ? source.length : end + 1;
+      continue;
+    }
+    if (ch === '/' && next === '*') {
+      const end = source.indexOf('*/', i + 2);
+      i = end < 0 ? source.length : end + 2;
+      continue;
+    }
+    if (ch === '"' || ch === "'") {
+      const end = skipJavaQuotedLiteral(source, i);
+      text += source.slice(i, end);
+      i = end;
+      continue;
+    }
+    if (ch === '(' || ch === '[' || ch === '{') {
+      depth++;
+    } else if (ch === ')' || ch === ']' || ch === '}') {
+      depth = Math.max(0, depth - 1);
+    } else if (depth === 0 && ch === ':') {
+      return { text, end: i + 1 };
+    } else if (depth === 0 && ch === '-' && next === '>') {
+      return { text, end: i + 2 };
+    }
+    text += ch;
+    i++;
+  }
+  return null;
+}
+
+function extractJavaSwitchCaseLabels(source) {
+  const labels = [];
+  for (let i = 0; i < source.length;) {
+    const ch = source[i];
+    const next = source[i + 1];
+    if (ch === '/' && next === '/') {
+      const end = source.indexOf('\n', i + 2);
+      i = end < 0 ? source.length : end + 1;
+      continue;
+    }
+    if (ch === '/' && next === '*') {
+      const end = source.indexOf('*/', i + 2);
+      i = end < 0 ? source.length : end + 2;
+      continue;
+    }
+    if (ch === '"' || ch === "'") {
+      i = skipJavaQuotedLiteral(source, i);
+      continue;
+    }
+    if (startsWithWord(source, i, 'case')) {
+      const label = readJavaCaseLabel(source, i + 'case'.length);
+      if (label) {
+        labels.push(label.text);
+        i = label.end;
+        continue;
+      }
+    }
+    i++;
+  }
+  return labels;
+}
+
 function splitTopLevelComma(source) {
   const parts = [];
   let start = 0;
@@ -147,6 +278,55 @@ function splitTopLevelComma(source) {
 
 function isWordBoundary(source, index) {
   return index < 0 || index >= source.length || !/[A-Za-z0-9_]/.test(source[index]);
+}
+
+function readTopLevelFunctionArgs(source, functionName) {
+  const cursor = skipWhitespace(source, 0);
+  const endName = cursor + functionName.length;
+  if (
+    source.slice(cursor, endName).toLowerCase() !== functionName.toLowerCase() ||
+    !isWordBoundary(source, cursor - 1) ||
+    !isWordBoundary(source, endName)
+  ) {
+    return null;
+  }
+  const openIndex = skipWhitespace(source, endName);
+  if (source[openIndex] !== '(') return null;
+  const closeIndex = findMatchingParen(source, openIndex);
+  if (closeIndex < 0) return null;
+  if (skipWhitespace(source, closeIndex + 1) !== source.length) return null;
+  return source.slice(openIndex + 1, closeIndex);
+}
+
+function parseSqlStringLiteral(source) {
+  const trimmed = source.trim();
+  if (!trimmed.startsWith("'")) return null;
+  let value = '';
+  for (let i = 1; i < trimmed.length; i++) {
+    const ch = trimmed[i];
+    const next = trimmed[i + 1];
+    if (ch === "'" && next === "'") {
+      value += "'";
+      i++;
+    } else if (ch === "'") {
+      return skipWhitespace(trimmed, i + 1) === trimmed.length ? value : null;
+    } else {
+      value += ch;
+    }
+  }
+  return null;
+}
+
+function payloadHasTopLevelContractVersion(payloadExpression) {
+  const argsSource = readTopLevelFunctionArgs(payloadExpression, 'json_object');
+  if (argsSource === null) return false;
+  const args = splitTopLevelComma(argsSource);
+  for (let i = 0; i + 1 < args.length; i += 2) {
+    if (parseSqlStringLiteral(args[i]) === 'contract_version') {
+      return args[i + 1].trim() === '1';
+    }
+  }
+  return false;
 }
 
 function findTopLevelKeyword(source, keyword, startIndex) {
@@ -239,49 +419,103 @@ function parseSyncOutboxInsert(source, index) {
   };
 }
 
+function addOpLocation(ops, op, location) {
+  if (!ops.has(op)) ops.set(op, []);
+  ops.get(op).push(location);
+}
+
+function collectSyncOutboxOpsFromSource(source, locationPrefix, result) {
+  if (!/sync_outbox/i.test(source)) return;
+
+  const insertRe = /insert\s+into\s+sync_outbox\b/ig;
+  let match;
+  while ((match = insertRe.exec(source)) !== null) {
+    const index = match.index;
+    const parsed = parseSyncOutboxInsert(source, index);
+    const location = `${locationPrefix}@${index}`;
+    if (!parsed || parsed.error) {
+      result.errors.push(`${location}: ${parsed ? parsed.error : 'unable to parse insert'}`);
+      insertRe.lastIndex = index + match[0].length;
+      continue;
+    }
+
+    const literals = extractQuotedConstants(parsed.opExpression);
+    if (literals.length === 0) {
+      result.errors.push(`${location}: op expression has no quoted op literal`);
+    }
+    for (const op of literals) {
+      addOpLocation(result.locations, op, location);
+    }
+    if (!payloadHasTopLevelContractVersion(parsed.payloadExpression)) {
+      result.payloadsMissingContractVersion.push(location);
+    }
+    insertRe.lastIndex = index + match[0].length;
+  }
+}
+
+function formatOpsResult(result) {
+  return {
+    ops: [...result.locations.keys()].sort(),
+    locations: result.locations,
+    payloadsMissingContractVersion: result.payloadsMissingContractVersion,
+    errors: result.errors,
+  };
+}
+
 function extractFlowOps(flowPath) {
   const flows = JSON.parse(readUtf8(flowPath));
-  const ops = new Map();
-  const payloadsMissingContractVersion = [];
-  const errors = [];
+  const result = {
+    locations: new Map(),
+    payloadsMissingContractVersion: [],
+    errors: [],
+  };
 
   for (const node of flows) {
     const source = [node.func, node.initialize, node.finalize].filter(Boolean).join('\n');
-    if (!/sync_outbox/i.test(source)) continue;
-
-    const insertRe = /insert\s+into\s+sync_outbox\b/ig;
-    let match;
-    while ((match = insertRe.exec(source)) !== null) {
-      const index = match.index;
-      const parsed = parseSyncOutboxInsert(source, index);
-      const location = `${node.name || node.id || 'unnamed node'}@${index}`;
-      if (!parsed || parsed.error) {
-        errors.push(`${location}: ${parsed ? parsed.error : 'unable to parse insert'}`);
-        insertRe.lastIndex = index + match[0].length;
-        continue;
-      }
-
-      const literals = extractQuotedConstants(parsed.opExpression);
-      if (literals.length === 0) {
-        errors.push(`${location}: op expression has no quoted op literal`);
-      }
-      for (const op of literals) {
-        if (!ops.has(op)) ops.set(op, []);
-        ops.get(op).push(location);
-      }
-      if (!/'contract_version'\s*,\s*1\b/.test(parsed.payloadExpression)) {
-        payloadsMissingContractVersion.push(location);
-      }
-      insertRe.lastIndex = index + match[0].length;
-    }
+    collectSyncOutboxOpsFromSource(source, node.name || node.id || 'unnamed node', result);
   }
 
-  return {
-    ops: [...ops.keys()].sort(),
-    locations: ops,
-    payloadsMissingContractVersion,
-    errors,
+  return formatOpsResult(result);
+}
+
+function extractSqlOps(sqlPath, sourceName = path.basename(sqlPath)) {
+  if (!fs.existsSync(sqlPath)) {
+    return { ops: [], locations: new Map(), payloadsMissingContractVersion: [], errors: [`SQL source not found at ${sqlPath}`] };
+  }
+  const result = {
+    locations: new Map(),
+    payloadsMissingContractVersion: [],
+    errors: [],
   };
+  collectSyncOutboxOpsFromSource(readUtf8(sqlPath), sourceName, result);
+  return formatOpsResult(result);
+}
+
+function extractDatabaseOps(dbPath) {
+  if (!fs.existsSync(dbPath)) {
+    return { ops: [], locations: new Map(), payloadsMissingContractVersion: [], errors: [`database not found at ${dbPath}`] };
+  }
+  const result = {
+    locations: new Map(),
+    payloadsMissingContractVersion: [],
+    errors: [],
+  };
+  let rows = [];
+  try {
+    const output = execFileSync('sqlite3', [
+      '-readonly',
+      '-json',
+      dbPath,
+      "SELECT name, sql FROM sqlite_master WHERE type = 'trigger' AND lower(sql) LIKE '%sync_outbox%' ORDER BY name;",
+    ], { encoding: 'utf8' }).trim();
+    rows = output ? JSON.parse(output) : [];
+  } catch (error) {
+    result.errors.push(`unable to read sync_outbox triggers from ${dbPath}: ${error.message}`);
+  }
+  for (const row of rows) {
+    collectSyncOutboxOpsFromSource(String(row.sql || ''), row.name || 'unnamed trigger', result);
+  }
+  return formatOpsResult(result);
 }
 
 function extractSchemaOps(schemaPath) {
@@ -342,10 +576,8 @@ function extractServerOps(serverSource) {
   }
   const switchBody = source.slice(switchOpen + 1, switchEnd);
   const ops = [];
-  const caseRe = /\bcase\s+([\s\S]*?)\s*(?:->|:)/g;
-  let match;
-  while ((match = caseRe.exec(switchBody)) !== null) {
-    ops.push(...extractQuotedConstants(match[1]));
+  for (const label of extractJavaSwitchCaseLabels(switchBody)) {
+    ops.push(...extractQuotedConstants(label));
   }
   return { ops: [...new Set(ops)].sort(), errors: [] };
 }
@@ -374,24 +606,44 @@ function checkSyncOpParity(options = {}) {
   const root = path.resolve(options.root || REPO_ROOT);
   const schemaPath = options.schemaPath || path.join(root, 'docs/contracts/sync-schema/events.schema.json');
   const serverSource = options.serverSource || DEFAULT_SERVER_SOURCE;
+  const flowSources = options.flowSources === undefined ? FLOW_SOURCES : options.flowSources;
+  const sqlSources = options.sqlSources === undefined ? SQL_SOURCES : options.sqlSources;
+  const databaseSources = options.databaseSources === undefined ? DATABASE_SOURCES : options.databaseSources;
+  const sourcePath = (entry) => path.resolve(root, entry.path);
 
-  const flowResults = FLOW_SOURCES.map((flow) => ({
+  const flowResults = flowSources.map((flow) => ({
     name: `flows:${flow.name}`,
-    path: path.join(root, flow.path),
-    ...extractFlowOps(path.join(root, flow.path)),
+    path: sourcePath(flow),
+    checkOps: true,
+    ...extractFlowOps(sourcePath(flow)),
+  }));
+  const sqlResults = sqlSources.map((source) => ({
+    name: source.name,
+    path: sourcePath(source),
+    checkOps: false,
+    ...extractSqlOps(sourcePath(source), source.name),
+  }));
+  const databaseResults = databaseSources.map((source) => ({
+    name: source.name,
+    path: sourcePath(source),
+    checkOps: false,
+    ...extractDatabaseOps(sourcePath(source)),
   }));
   const schemaResult = {
     name: 'schema',
     path: schemaPath,
+    checkOps: true,
     ...extractSchemaOps(schemaPath),
   };
   const serverResult = {
     name: 'server',
     path: serverSource,
+    checkOps: true,
     ...extractServerOps(serverSource),
   };
-  const sources = [...flowResults, schemaResult, serverResult];
-  const allOps = [...new Set(sources.flatMap((source) => source.ops))].sort();
+  const sources = [...flowResults, ...sqlResults, ...databaseResults, schemaResult, serverResult];
+  const opSources = sources.filter((source) => source.checkOps !== false);
+  const allOps = [...new Set(opSources.flatMap((source) => source.ops))].sort();
   const lines = [];
   let ok = true;
 
@@ -408,7 +660,7 @@ function checkSyncOpParity(options = {}) {
     }
   }
 
-  for (const source of sources) {
+  for (const source of opSources) {
     const diff = diffSets(allOps, source.ops);
     const diffLines = formatDiff(source.name, 'union', diff);
     if (diffLines.length) {
@@ -447,7 +699,10 @@ if (require.main === module) {
 
 module.exports = {
   checkSyncOpParity,
+  extractDatabaseOps,
   extractFlowOps,
   extractSchemaOps,
   extractServerOps,
+  extractSqlOps,
+  payloadHasTopLevelContractVersion,
 };
