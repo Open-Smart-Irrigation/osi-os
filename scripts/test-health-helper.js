@@ -18,7 +18,8 @@ function requireHealthHelperFresh() {
 
 const {
   gatherEdgeHealth,
-  structuralSignature
+  structuralSignature,
+  compareByCodepoint
 } = requireHealthHelperFresh();
 
 const PUBLIC_HEALTH_KEYS = [
@@ -190,6 +191,39 @@ test('Uganda-shape schema resolves with null sync fields but keeps schema and di
   }
 });
 
+test('sync_outbox missing rejected_at column degrades sync_pending to null', async () => {
+  const db = makeFacadeShim();
+  try {
+    await db.exec(`
+      CREATE TABLE devices (
+        deveui TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        type_id TEXT NOT NULL,
+        updated_at TEXT
+      );
+      CREATE TABLE sync_link_state (
+        peer_node TEXT PRIMARY KEY,
+        linked INTEGER NOT NULL DEFAULT 0
+      );
+      CREATE TABLE sync_outbox (
+        event_uuid TEXT PRIMARY KEY,
+        occurred_at TEXT NOT NULL,
+        delivered_at TEXT
+      );
+      INSERT INTO devices(deveui, name, type_id, updated_at)
+      VALUES ('0016C001F1000001', 'gateway', 'KIWI_SENSOR', '2026-07-05T00:00:00Z');
+      INSERT INTO sync_link_state(peer_node, linked) VALUES ('cloud', 1);
+    `);
+
+    const health = await gatherEdgeHealth(db, { timeoutMs: 1000, diskPath: os.tmpdir() });
+
+    assertPublicHealthShape(health);
+    assert.strictEqual(health.sync_pending, null);
+  } finally {
+    db.close();
+  }
+});
+
 test('sync backlog counters count pending, rejected, and dirty pending rows independently', async () => {
   const db = makeFacadeShim();
   try {
@@ -307,6 +341,14 @@ test('structural schema signature changes when trigger name changes', async () =
     first.close();
     renamed.close();
   }
+});
+
+test('index-name sort is codepoint-ordered, not locale-ordered', () => {
+  // 'B' (0x42) precedes 'a' (0x61) by codepoint; every common locale sorts
+  // them the other way (case-insensitive: a before B). This pins the sort to
+  // codepoint order so the structural signature is identical across ICU builds.
+  assert.deepStrictEqual(['a', 'B'].slice().sort(compareByCodepoint), ['B', 'a']);
+  assert.deepStrictEqual(['idx_b', 'idx_A', 'idx_a'].slice().sort(compareByCodepoint), ['idx_A', 'idx_a', 'idx_b']);
 });
 
 test('hung database returns all-null health within timeout', async () => {

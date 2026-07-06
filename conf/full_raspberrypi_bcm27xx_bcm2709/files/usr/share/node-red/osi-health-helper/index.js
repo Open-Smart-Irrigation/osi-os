@@ -35,6 +35,14 @@ function toCount(row) {
   return Number(row && row.c != null ? row.c : 0);
 }
 
+function compareByCodepoint(left, right) {
+  const a = String(left);
+  const b = String(right);
+  if (a < b) return -1;
+  if (a > b) return 1;
+  return 0;
+}
+
 async function structuralSignature(db) {
   const tables = await queryAll(
     db,
@@ -56,7 +64,7 @@ async function structuralSignature(db) {
 
     const indexRows = (await queryAll(db, `PRAGMA index_list(${quoteIdentifier(tableName)})`))
       .slice()
-      .sort((left, right) => String(left.name).localeCompare(String(right.name)));
+      .sort((left, right) => compareByCodepoint(left.name, right.name));
     const indexes = [];
     for (const index of indexRows) {
       const indexName = index.name;
@@ -224,5 +232,6 @@ function gatherEdgeHealth(db, options = {}) {
 
 module.exports = {
   structuralSignature,
-  gatherEdgeHealth
+  gatherEdgeHealth,
+  compareByCodepoint
 };
