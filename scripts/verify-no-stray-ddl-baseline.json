@@ -3,27 +3,43 @@
   "markers": [
     "CREATE TABLE",
     "ALTER TABLE",
+    "CREATE UNIQUE INDEX",
+    "CREATE INDEX",
+    "CREATE TRIGGER",
+    "DROP TABLE",
     "writable_schema"
   ],
   "files": {
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/flows.json": {
       "createTable": 33,
       "alterTable": 216,
+      "createUniqueIndex": 7,
+      "createIndex": 28,
+      "createTrigger": 31,
+      "dropTable": 3,
       "writableSchema": 2,
-      "total": 251
+      "total": 320
     },
     "conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/flows.json": {
       "createTable": 33,
       "alterTable": 216,
+      "createUniqueIndex": 7,
+      "createIndex": 28,
+      "createTrigger": 31,
+      "dropTable": 3,
       "writableSchema": 2,
-      "total": 251
+      "total": 320
     },
     "deploy.sh": {
       "createTable": 4,
       "alterTable": 24,
+      "createUniqueIndex": 0,
+      "createIndex": 1,
+      "createTrigger": 0,
+      "dropTable": 0,
       "writableSchema": 0,
-      "total": 28
+      "total": 29
     }
   },
-  "total": 530
+  "total": 669
 }

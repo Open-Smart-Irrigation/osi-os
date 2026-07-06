@@ -13,8 +13,13 @@ const DEFAULT_SURFACES = [
 const MARKERS = [
   ['createTable', /\bCREATE\s+TABLE\b/gi],
   ['alterTable', /\bALTER\s+TABLE\b/gi],
+  ['createUniqueIndex', /\bCREATE\s+UNIQUE\s+INDEX\b/gi],
+  ['createIndex', /\bCREATE\s+(?!UNIQUE\s+)INDEX\b/gi],
+  ['createTrigger', /\bCREATE\s+TRIGGER\b/gi],
+  ['dropTable', /\bDROP\s+TABLE\b/gi],
   ['writableSchema', /\bwritable_schema\b/gi],
 ];
+const MARKER_KEYS = MARKERS.map(([key]) => key);
 
 function parseArgs(argv) {
   const options = {
@@ -57,23 +62,26 @@ function collectStrings(value, out) {
   }
 }
 
-function surfaceText(root, relativePath) {
+function surfaceTexts(root, relativePath) {
   const filePath = path.join(root, relativePath);
   const raw = fs.readFileSync(filePath, 'utf8');
-  if (!relativePath.endsWith('flows.json')) return raw;
+  if (!relativePath.endsWith('flows.json')) return [raw];
 
   const strings = [];
   collectStrings(JSON.parse(raw), strings);
-  return strings.join('\n');
+  return strings;
 }
 
-function countMarkers(text) {
+function countMarkers(texts) {
   const counts = {};
   let total = 0;
   for (const [key, pattern] of MARKERS) {
-    const matches = text.match(pattern) || [];
-    counts[key] = matches.length;
-    total += matches.length;
+    let markerTotal = 0;
+    for (const text of texts) {
+      markerTotal += (text.match(pattern) || []).length;
+    }
+    counts[key] = markerTotal;
+    total += markerTotal;
   }
   counts.total = total;
   return counts;
@@ -102,17 +110,18 @@ function readBaseline(baselinePath) {
 }
 
 function compareCounts(relativePath, actual, baseline) {
-  const over = [];
-  for (const key of ['createTable', 'alterTable', 'writableSchema', 'total']) {
-    const allowed = baseline[key];
-    if (typeof allowed !== 'number') {
-      over.push(`${key}: missing baseline`);
-    } else if (actual[key] > allowed) {
-      over.push(`${key}: ${actual[key]} > ${allowed}`);
+  const differences = [];
+  for (const key of [...MARKER_KEYS, 'total']) {
+    const expected = baseline[key];
+    if (typeof expected !== 'number') {
+      differences.push(`${key}: missing baseline`);
+    } else if (actual[key] !== expected) {
+      const relation = key === 'total' ? (actual[key] > expected ? '>' : '<') : '!=';
+      differences.push(`${key}: ${actual[key]} ${relation} ${expected}`);
     }
   }
-  if (over.length > 0) {
-    return `${relativePath} exceeds baseline (${over.join(', ')})`;
+  if (differences.length > 0) {
+    return `${relativePath} differs from baseline (${differences.join(', ')})`;
   }
   return null;
 }
@@ -130,7 +139,7 @@ function verify(options) {
       continue;
     }
 
-    const counts = countMarkers(surfaceText(options.root, relativePath));
+    const counts = countMarkers(surfaceTexts(options.root, relativePath));
     total += counts.total;
     const failure = compareCounts(relativePath, counts, expected);
     if (failure) failures.push(failure);
@@ -142,8 +151,8 @@ function verify(options) {
     }
   }
 
-  if (total > baseline.total) {
-    failures.push(`total exceeds baseline (${total} > ${baseline.total})`);
+  if (total !== baseline.total) {
+    failures.push(`total differs from baseline (${total} ${total > baseline.total ? '>' : '<'} ${baseline.total})`);
   }
 
   return { ok: failures.length === 0, failures, total, baselineTotal: baseline.total };
@@ -154,7 +163,7 @@ try {
   if (!result.ok) {
     throw new Error(result.failures.join('; '));
   }
-  console.log(`verify-no-stray-ddl: OK (total ${result.total} <= baseline ${result.baselineTotal})`);
+  console.log(`verify-no-stray-ddl: OK (total ${result.total} matches baseline ${result.baselineTotal})`);
   process.exit(0);
 } catch (e) {
   console.error(`verify-no-stray-ddl: FAIL — ${e.message}`);

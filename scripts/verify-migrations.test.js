@@ -80,6 +80,22 @@ test('verify-migrations rejects migration files missing from the checksum manife
   assert.match(result.stderr, /missing checksum manifest entry for 0002__later\.sql/);
 });
 
+test('verify-migrations rejects checksum manifest entries without migration files', () => {
+  const baseline = '-- risk: additive\nCREATE TABLE t (id INTEGER PRIMARY KEY);\n';
+  const dir = tempOrderedDir(
+    { '0001__baseline.sql': baseline },
+    {
+      '0001__baseline.sql': sha256(baseline),
+      '0002__stale.sql': sha256('-- risk: additive\nALTER TABLE t ADD COLUMN stale TEXT;\n'),
+    }
+  );
+
+  const result = runVerifier(['--migrations-dir', dir]);
+
+  assert.notEqual(result.status, 0, result.stdout);
+  assert.match(result.stderr, /checksum manifest entry has no migration file: 0002__stale\.sql/);
+});
+
 test('verify-migrations accepts the committed ordered migration checksum manifest', () => {
   assert.equal(
     fs.existsSync(path.join(repoRoot, 'database/migrations/ordered/CHECKSUMS.json')),

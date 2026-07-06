@@ -31,17 +31,33 @@ function runVerifier(args = []) {
 
 const baseline = {
   version: 1,
-  markers: ['CREATE TABLE', 'ALTER TABLE', 'writable_schema'],
+  markers: [
+    'CREATE TABLE',
+    'ALTER TABLE',
+    'CREATE UNIQUE INDEX',
+    'CREATE INDEX',
+    'CREATE TRIGGER',
+    'DROP TABLE',
+    'writable_schema',
+  ],
   files: {
     'flows.json': {
       createTable: 1,
       alterTable: 0,
+      createUniqueIndex: 0,
+      createIndex: 0,
+      createTrigger: 0,
+      dropTable: 0,
       writableSchema: 0,
       total: 1,
     },
     'deploy.sh': {
       createTable: 0,
       alterTable: 0,
+      createUniqueIndex: 0,
+      createIndex: 0,
+      createTrigger: 0,
+      dropTable: 0,
       writableSchema: 0,
       total: 0,
     },
@@ -49,7 +65,7 @@ const baseline = {
   total: 1,
 };
 
-test('verify-no-stray-ddl accepts files at or below the committed baseline', () => {
+test('verify-no-stray-ddl accepts files that match the committed baseline exactly', () => {
   const { root, baselinePath } = writeFixture(
     {
       'flows.json': JSON.stringify([
@@ -72,10 +88,10 @@ test('verify-no-stray-ddl accepts files at or below the committed baseline', () 
   ]);
 
   assert.equal(result.status, 0, result.stderr || result.stdout);
-  assert.match(result.stdout, /OK \(total 1 <= baseline 1\)/);
+  assert.match(result.stdout, /OK \(total 1 matches baseline 1\)/);
 });
 
-test('verify-no-stray-ddl rejects an added DDL marker above the baseline', () => {
+test('verify-no-stray-ddl rejects an added tracked DDL marker above the baseline', () => {
   const { root, baselinePath } = writeFixture(
     {
       'flows.json': JSON.stringify([
@@ -83,7 +99,7 @@ test('verify-no-stray-ddl rejects an added DDL marker above the baseline', () =>
           type: 'function',
           func:
             'db.exec("CREATE TABLE IF NOT EXISTS t (id INTEGER)");\n' +
-            'db.exec("ALTER TABLE t ADD COLUMN name TEXT");',
+            'db.exec("CREATE INDEX idx_t_name ON t(name)");',
         },
       ]),
       'deploy.sh': '#!/bin/sh\ntrue\n',
@@ -103,9 +119,76 @@ test('verify-no-stray-ddl rejects an added DDL marker above the baseline', () =>
   ]);
 
   assert.notEqual(result.status, 0, result.stdout);
-  assert.match(result.stderr, /flows\.json exceeds baseline/);
-  assert.match(result.stderr, /alterTable: 1 > 0/);
+  assert.match(result.stderr, /flows\.json differs from baseline/);
+  assert.match(result.stderr, /createIndex: 1 != 0/);
   assert.match(result.stderr, /total: 2 > 1/);
+});
+
+test('verify-no-stray-ddl rejects actual counts below the baseline to avoid stale slack', () => {
+  const { root, baselinePath } = writeFixture(
+    {
+      'flows.json': JSON.stringify([{ type: 'function', func: 'return msg;' }]),
+      'deploy.sh': '#!/bin/sh\ntrue\n',
+    },
+    baseline
+  );
+
+  const result = runVerifier([
+    '--root',
+    root,
+    '--baseline',
+    baselinePath,
+    '--surface',
+    'flows.json',
+    '--surface',
+    'deploy.sh',
+  ]);
+
+  assert.notEqual(result.status, 0, result.stdout);
+  assert.match(result.stderr, /flows\.json differs from baseline/);
+  assert.match(result.stderr, /createTable: 0 != 1/);
+  assert.match(result.stderr, /total: 0 < 1/);
+});
+
+test('verify-no-stray-ddl counts each flow string separately', () => {
+  const splitKeywordBaseline = {
+    ...baseline,
+    files: {
+      ...baseline.files,
+      'flows.json': {
+        createTable: 0,
+        alterTable: 0,
+        createUniqueIndex: 0,
+        createIndex: 0,
+        createTrigger: 0,
+        dropTable: 0,
+        writableSchema: 0,
+        total: 0,
+      },
+    },
+    total: 0,
+  };
+  const { root, baselinePath } = writeFixture(
+    {
+      'flows.json': JSON.stringify(['CREATE', 'TABLE should not combine with the prior string']),
+      'deploy.sh': '#!/bin/sh\ntrue\n',
+    },
+    splitKeywordBaseline
+  );
+
+  const result = runVerifier([
+    '--root',
+    root,
+    '--baseline',
+    baselinePath,
+    '--surface',
+    'flows.json',
+    '--surface',
+    'deploy.sh',
+  ]);
+
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+  assert.match(result.stdout, /OK \(total 0 matches baseline 0\)/);
 });
 
 test('verify-no-stray-ddl accepts the committed shipped-surface baseline', () => {
