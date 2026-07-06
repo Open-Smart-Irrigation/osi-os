@@ -21,3 +21,8 @@
 
 # Track CI workflows / .github content (the /.* rule would otherwise ignore them)
 !/.github/
+
+# Track the agent skill library only; keep the rest of .claude/ (settings, local state) ignored
+!/.claude/
+/.claude/*
+!/.claude/skills/
