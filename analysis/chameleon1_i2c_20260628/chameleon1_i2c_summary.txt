@@ -1,0 +1,16 @@
+rows=3379
+first_utc=2026-06-17T00:02:21.306000+00:00
+latest_utc=2026-06-28T18:19:57.459000+00:00
+good_rows=1886
+i2c_missing_rows=1493
+other_invalid_rows=0
+swt_rows=1886
+last_i2c_missing_utc=2026-06-28T17:24:57.270000+00:00
+first_good_after_last_i2c_utc=2026-06-28T17:29:57.652000+00:00
+latest_state=good
+latest_f_cnt=714
+latest_swt_1=5.54
+latest_swt_2=7.0
+latest_swt_3=2.57
+max_gap_min=43.40
+cadence_gaps_over_7_5_min=3
