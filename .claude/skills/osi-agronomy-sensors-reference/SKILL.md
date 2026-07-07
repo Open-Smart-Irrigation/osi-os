@@ -59,7 +59,7 @@ sensor capability, not a shipped field.
 `deviceCardBattery.ts`, `buildDeviceFooterMeta`) prefers a real `bat_pct` and
 **falls back to a voltage-derived percent from `bat_v`** using a fixed LSN50
 discharge curve (`getBatteryPercentFromVoltage`, 2.1 V = 0%, 3.6 V = 100%,
-clamped) when `bat_pct` is absent. `DraginoTempCard.tsx` passes both
+clamped) when `bat_pct` is absent or not a valid finite 0-100 value. `DraginoTempCard.tsx` passes both
 `batteryPercent={bat_pct}` and `batteryVoltage={bat_v}`, so `DRAGINO_LSN50`
 devices that only report `bat_v` still show a footer percentage. This closed
 GitHub issue #51 (`osi-os`); it supersedes any older note claiming the LSN50

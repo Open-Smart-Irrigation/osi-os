@@ -164,7 +164,7 @@ an unknown credential.
 | Restart Node-RED | `/etc/init.d/node-red restart` |
 | Free a leaked local port | `pkill -9 -f 'http.server 9876'` |
 | SSH to a gateway | `ssh -i ~/.ssh/<key> -o IdentitiesOnly=yes root@<pi-ip>` |
-| Filter SSH banner noise | pipe through `grep -v "post-quantum\|store now"` |
+| Filter SSH banner noise | pipe through `grep -v -e 'post-quantum' -e 'store now'` (portable; BusyBox grep lacks BRE alternation) |
 | Re-baseline a drifted fingerprint | `node scripts/restamp-fingerprints.js /data/db/farming.db` (on-Pi path) |
 
 ---
@@ -201,7 +201,7 @@ dev workstation unless noted.
    instead of piping into `sh`:
    ```bash
    ssh -R 9876:localhost:9876 root@<pi-ip> \
-     'curl -fsSL http://localhost:9876/deploy.sh -o /tmp/osi-os-deploy.sh && sh /tmp/osi-os-deploy.sh; rc=$?; rm -f /tmp/osi-os-deploy.sh; exit "$rc"'
+     'curl -fsSL http://127.0.0.1:9876/deploy.sh -o /tmp/osi-os-deploy.sh && sh /tmp/osi-os-deploy.sh; rc=$?; rm -f /tmp/osi-os-deploy.sh; exit "$rc"'
    ```
    **Why download-then-run instead of `curl ... | sh`:** in a pipe, the shell's exit
    status is the last command's (`sh`'s), not `curl`'s. If `curl` 404s (local
@@ -290,7 +290,7 @@ deviation as a signal to stop and investigate before telling the operator it's d
 | GUI bundle rotated | `ls /usr/lib/node-red/gui/assets/` | New `index-<hash>.js` filename different from the pre-deploy listing (Vite content-hashes build output; `web/react-gui/vite.config.js` sets `base: '/gui/'`) |
 | Node-RED up | `curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:1880/gui` | `301` (redirect into the SPA route) |
 | Zone CSV export route auth-gated | `curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:1880/api/history/zones/1/export.csv` | `401` — this route (`GET /api/history/zones/:zoneId/export.csv` in `flows.json`, tab `history-api-tab`) requires a Bearer token via `verifyBearer`; `401` without a token means the route loaded and is enforcing auth correctly. `404`/`500` means the route or its router function failed to load — treat as broken, not healthy. |
-| ChirpStack profile env vars present | `grep -E 'CHIRPSTACK_PROFILE_(RAK10701|S2120)' /srv/node-red/.chirpstack.env` (path/semantics) | Both present. Flag semantics and full variable list: `osi-config-and-flags`. |
+| ChirpStack profile env vars present | `grep -e 'CHIRPSTACK_PROFILE_RAK10701' -e 'CHIRPSTACK_PROFILE_S2120' /srv/node-red/.chirpstack.env` (path/semantics; pipe-free form keeps this table row rendering) | Both present. Flag semantics and full variable list: `osi-config-and-flags`. |
 | Gateway health samples fresh | `sqlite3 /data/db/farming.db "SELECT gateway_device_eui, sampled_at FROM gateway_health_samples ORDER BY sampled_at DESC LIMIT 3;"` | Rows within the last ~60 s (the 60 s heartbeat inject also persists this table; schema at `database/migrations/ordered/0002__gateway_health.sql`) |
 
 Use `127.0.0.1`, not `localhost`, for every on-Pi curl (see BusyBox traps below).
@@ -346,7 +346,7 @@ alone):
   gateways prints a post-quantum key exchange notice from the server side. Filter it
   out of scripted output rather than treating it as an error:
   ```bash
-  ssh ... 2>&1 | grep -v "post-quantum\|store now"
+  ssh ... 2>&1 | grep -v -e 'post-quantum' -e 'store now'
   ```
 
 ---
@@ -358,8 +358,12 @@ alone):
 `/srv/node-red/.chirpstack.env` can carry a stale `DEVICE_EUI*` value that overrides
 the runtime identity even after UCI has been corrected. During an identity repair,
 remove or regenerate this file so the helper/UCI path (canonical, uppercase EUI)
-is what actually takes effect. Full flag semantics and where this file's other
-variables come from: `osi-config-and-flags`.
+is what actually takes effect. **Save a copy first**: the same file carries the
+`CHIRPSTACK_APP_*`/`CHIRPSTACK_PROFILE_*` values, and `CHIRPSTACK_PROFILE_LORAIN`
+reaches the Node-RED runtime ONLY through this file (`node-red.init` does not
+export it from UCI) — a regenerated env missing it silently breaks LoRain ingest
+until the ChirpStack bootstrap rewrites the file. Full flag semantics and where
+this file's other variables come from: `osi-config-and-flags`.
 
 ### Changing DEVICE_EUI breaks linked login
 

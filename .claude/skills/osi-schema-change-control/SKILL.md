@@ -79,7 +79,7 @@ outside the one sanctioned exception.
 | Backfill / data correction against existing rows | New `data` ordered migration | Backup + normal transaction; no FK fence; no writers-stopped gate; must be idempotent against the pre-migration row shape. |
 | `devices.type_id` CHECK needs a new device type on a **live** Pi today | The guarded fail-closed rebuild already shipped in `sync-init-fn` (sanctioned exception) + `scripts/repair-pi-schema.js` entry | Do not add a second rebuild path; extend the existing `REQUIRED_TYPES` set and its parity surfaces (`verify-runtime-schema-parity.js`, `verify-db-schema-consistency.js`) — subject to the full boot-node merge gate below (four verifiers + production-copy rehearsal). |
 | Idempotent additive repair needed on live Pis at deploy time (e.g. a new column) | `deploy.sh` `ensure_*` function | Follows the `ensure_dendro_schema` / `ensure_gateway_health_schema` precedent: `ALTER TABLE ... ADD COLUMN`, catching `duplicate column name` as a no-op. Never used for anything destructive. |
-| Any other on-device schema mutation | Not currently supported without a boot-path project | See "Option B" below; do not invent a new ad hoc mutation path. |
+| Any other on-device schema mutation | Not currently supported without a boot-path project | See the Option B boot-path project in the ADR (`docs/adr/2026-06-30-schema-and-contract-ownership.md`); do not invent a new ad hoc mutation path. |
 
 ## The model: ownership, migrations, risk classes
 
@@ -455,8 +455,11 @@ that live without also reading `osi-live-ops-runbook`.
    `database/migrations/ordered/0003__your_slug.sql` (next contiguous 4-digit
    version) with a `-- risk: additive` header as the first line, then your
    `CREATE TABLE`/`ALTER TABLE ... ADD COLUMN`/`CREATE INDEX`/`CREATE TRIGGER`
-   statements. Prefer `IF NOT EXISTS` on new objects so the file is safely
-   re-runnable, matching the `0002` precedent.
+   statements. Prefer `IF NOT EXISTS` on object-creation statements (tables,
+   indexes, triggers) so the file is safely re-runnable, matching the `0002`
+   precedent. `ALTER TABLE ... ADD COLUMN` has no `IF NOT EXISTS` in SQLite —
+   its live-Pi delivery goes through a deploy-time `ensure_*` function that
+   treats `duplicate column name` as a no-op (see the decision table above).
 2. **Update `database/seed-blank.sql`.** Append the equivalent DDL so a fresh
    database created from the seed ends up schema-identical to one built by
    replaying all ordered migrations. `verify-seed-replay.js` is the automatic
