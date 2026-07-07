@@ -17,7 +17,8 @@
                 "REGISTER_DEVICE",
                 "REBOOT_DEVICE",
                 "REMOVE_DEVICE_FROM_ZONE",
-                "UNCLAIM_DEVICE"
+                "UNCLAIM_DEVICE",
+                "WORK_REQUEST_STATUS"
             ]
         },
         "device_eui": {"type": "string", "pattern": "^[0-9A-F]{16}$"},
@@ -31,7 +32,12 @@
         "issued_at": {"type": "string", "format": "date-time"},
         "expires_at": {"type": ["string", "null"], "format": "date-time"},
         "config": {"type": ["object", "null"]},
-        "reason": {"type": ["string", "null"]}
+        "request_id": {"type": ["string", "null"]},
+        "status": {"type": ["string", "null"]},
+        "reason": {"type": ["string", "null"]},
+        "human_message": {"type": ["string", "null"]},
+        "released_version": {"type": ["string", "null"]},
+        "updated_at": {"type": ["string", "null"], "format": "date-time"}
     },
     "allOf": [
         {
@@ -49,6 +55,16 @@
                 "required": ["amount"],
                 "properties": {
                     "amount": {"type": "integer", "minimum": 1}
+                }
+            }
+        },
+        {
+            "if": {"properties": {"command_type": {"const": "WORK_REQUEST_STATUS"}}},
+            "then": {
+                "required": ["request_id", "status"],
+                "properties": {
+                    "request_id": {"type": "string"},
+                    "status": {"type": "string"}
                 }
             }
         }

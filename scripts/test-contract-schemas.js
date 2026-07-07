@@ -62,6 +62,44 @@ if (sampleMissing.length || (eventsSchema.additionalProperties === false && samp
     console.log('OK  schema: real V2 event sample matches event envelope');
 }
 
+const sampleWorkRequestEvent = {
+    eventUuid: 'req-0016C001F11715E2-20260708T120000Z',
+    aggregateType: 'WORK_REQUEST',
+    aggregateKey: '019ff001-1111-7222-8333-aaaaaaaaaaaa',
+    op: 'WORK_REQUEST_SUBMITTED',
+    syncVersion: 1,
+    occurredAt: '2026-07-08T12:00:00.000Z',
+    payload: {
+        contract_version: 1,
+        schema_version: 1,
+        request_id: '019ff001-1111-7222-8333-aaaaaaaaaaaa',
+        type: 'bug',
+        title: 'Pump status is confusing',
+        description: 'The dashboard says the pump is open after I closed it.',
+        area: 'dashboard',
+        severity: 'annoying',
+        consent_public: true,
+        consent_diagnostics: true,
+        gateway_device_eui: '0016C001F11715E2',
+        diagnostics: { sync: { pending_outbox_count: 0 } },
+        gui_user: { local_user_id: 7, username: 'field-user' }
+    }
+};
+const workRequestSampleMissing = eventRequired.filter((property) => !(property in sampleWorkRequestEvent));
+const workRequestSampleExtras = Object.keys(sampleWorkRequestEvent).filter((property) => !eventProps[property]);
+if (workRequestSampleMissing.length || (eventsSchema.additionalProperties === false && workRequestSampleExtras.length)) {
+    console.error(`FAIL schema: WORK_REQUEST_SUBMITTED sample does not match required envelope; missing=${workRequestSampleMissing.join(',') || '(none)'} extra=${workRequestSampleExtras.join(',') || '(none)'}`);
+    ok = false;
+} else if (!eventsSchema.properties.op.enum.includes(sampleWorkRequestEvent.op)) {
+    console.error(`FAIL schema: WORK_REQUEST_SUBMITTED sample op ${sampleWorkRequestEvent.op} is not in event op enum`);
+    ok = false;
+} else if (sampleWorkRequestEvent.payload.contract_version !== eventPayloadContractVersion.const) {
+    console.error('FAIL schema: WORK_REQUEST_SUBMITTED sample payload contract_version does not match schema const');
+    ok = false;
+} else {
+    console.log('OK  schema: WORK_REQUEST_SUBMITTED sample matches event envelope');
+}
+
 // M7: commands.schema.json SET_STREGA_TIMED_ACTION must not require duration_seconds
 const cmdSchema = loadSchema('commands.schema.json');
 const commandIdPattern = new RegExp(cmdSchema.properties.command_id.pattern);
@@ -97,6 +135,13 @@ if (!hasAmount) {
     ok = false;
 } else {
     console.log('OK  M7: amount property present in commands.schema.json');
+}
+
+if (!cmdSchema.properties.command_type.enum.includes('WORK_REQUEST_STATUS')) {
+    console.error('FAIL schema: commands.schema.json missing WORK_REQUEST_STATUS command_type');
+    ok = false;
+} else {
+    console.log('OK  schema: WORK_REQUEST_STATUS command_type present');
 }
 
 const openForDurationRule = allOf.find(rule =>
