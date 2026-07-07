@@ -98,6 +98,18 @@ vs `dendro_rdi_daily.adjustment`, alongside the realized zone `TWD_rel` (did the
 and actual water applied. A read endpoint / view exposes the side-by-side for evaluation. (Detailed
 visualization is out of scope for this spec — the data is persisted; a minimal compare endpoint is in scope.)
 
+**What the shadow measures — and what it does NOT (read before drawing conclusions).** The shadow never
+actuates, so the `TWD_rel` it observes is the tree's response to **v6's** watering, not its own. The loop is
+therefore *open in reality*. Consequently `dendro_rdi_daily.adjustment` reads as **"the fractional change from
+v6's realized watering needed to reach the RDI setpoint"** — a genuinely useful signal (e.g. a persistently
+negative railed integral means "v6 is over-watering vs the mild-deficit target by ≈ maxAdj"). It is **not** the
+counterfactual trajectory of a tree under closed-loop control, which is never observed. Two corollaries:
+(1) v6's discrete deltas compound on a running schedule volume while the shadow's fraction is an offset off a
+nominal base, so the two series are **not** naively subtractable; (2) with `waterDeliveredLiters` currently
+hard-coded to 0 and no metering join, **"liters saved at equal quality" is not computable from the persisted
+data** — Task 8 shows *direction and headroom*, not realized savings. Quantifying savings needs a later slice
+that persists the base/running volume (or v6's fractional-from-nominal). Do not over-claim the comparison.
+
 ## Testing
 
 - **PI math** unit tests: first-error integration, no double-integration, anti-windup at saturation,

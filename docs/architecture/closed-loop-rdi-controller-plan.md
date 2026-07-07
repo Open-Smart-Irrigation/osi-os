@@ -108,26 +108,35 @@ Double zoneTwdRel = relVals.isEmpty() ? null : percentile(relVals, 0.75);
 ## Task 4: `RdiController` (corrected PI) + `RdiResult`/`RdiState`
 Status vocabulary (used by `RdiState.status` / `dendro_rdi_daily.status`): `idle` (no pending cycle),
 `pending` (proposed, awaiting next-day close), `frozen` (proposed under rain feed-forward — must NOT integrate
-at close), `closed` (cycle integrated).
+at close), `closed` (cycle integrated), `skipped` (low-confidence / no-signal day — a row is recorded for
+audit, but no P/I math runs and **no new pending cycle is opened**).
 - [ ] Write failing tests (`RdiControllerTest`): (a) first error IS integrated; (b) calling the close phase
   twice does NOT double-integrate; (c) anti-windup — integral does not grow when the tentative output is
   saturated (`|Kp·e + integral| ≥ maxAdj`); (d) a low-confidence day SKIPS the integral update and carries
   state; (e) a multi-day gap scales/skips rather than treating non-adjacent days as adjacent; (f) output is
   clamped to `±maxAdj`; (g) forecast rain above threshold freezes the proposal (`status=frozen`, non-positive
   adjustment, no integral update); (h) closing a `frozen` cycle does NOT integrate (learns nothing from rain);
-  (i) closing with a `null` observed value (no-data day) does NOT throw and does NOT integrate.
+  (i) closing with a `null` observed value (no-data day) does NOT throw and does NOT integrate;
+  (j) **`propose` with a `null` observed value (or `lowConfidence=true`) does NOT throw, returns a `skipped`
+  no-op (adjustment 0, integral unchanged), and does NOT open a pending cycle** — the symmetric guard to (i).
 - [ ] Implement `RdiController` with:
   - `record RdiState(double integral, Double lastError, double kp, double ki, String status, LocalDate pendingDate)`;
   - `record RdiResult(double adjustment, double error, double integralAfter, String status)`;
-  - a **propose** step: `RdiResult propose(double observedTwdRel, double setpoint, double forecastRainMm, boolean lowConfidence, RdiState state, LocalDate day)` computing `e = observedTwdRel − setpoint`, the clamped `Kp·e + integral` output, and rain-freeze (if `forecastRainMm ≥ rainThreshold`: `status=frozen`, `adjustment = min(0, clamped)`); returns the proposal — **state's integral is unchanged at propose**;
+  - a **propose** step: `RdiResult propose(Double observedTwdRel, double setpoint, double forecastRainMm, boolean lowConfidence, RdiState state, LocalDate day)` — **`observedTwdRel` is nullable** (null on baseline warm-up / low-confidence). If `observedTwdRel == null || lowConfidence`: short-circuit to `new RdiResult(0.0, 0.0, state.integral(), "skipped")` — no P/I math, no NPE. Otherwise compute `e = observedTwdRel − setpoint`, the clamped `Kp·e + integral` output, and rain-freeze (if `forecastRainMm ≥ rainThreshold`: `status=frozen`, `adjustment = min(0, clamped)`); returns the proposal — **state's integral is unchanged at propose**;
   - a **close/observe** step: `RdiState observeNextDay(Double nextObservedTwdRel, double setpoint, boolean lowConfidence, RdiState state, long daysElapsed)` — accepts a **nullable** observed (M1). It integrates exactly once, and ONLY when **all** hold: `nextObservedTwdRel != null`, `!lowConfidence`, `state.status()` is not `frozen`, and the *tentative* output `output = Kp·e + state.integral()` (pre-update integral, `e = nextObservedTwdRel − setpoint`) is unsaturated (`|output| < maxAdj` — no lower bound). When integrating: `integral += Ki·e` scaled/guarded for `daysElapsed` (skip when `daysElapsed > maxGapDays`); set `lastError`; `status=closed`. Otherwise carry state unchanged except `status` (skip-integration cases keep the pending cycle open). Anti-windup gates on this close-time tentative output, not the prior day's proposed output.
   - Gains from explicit config (constructor/params), never DB-overrides-config silently.
 - [ ] Tests green. Commit `feat(rdi): corrected PI controller (first-error, anti-windup, gap/frozen/null-safe)`.
 
 ## Task 5: Hybrid RDI setpoint
-- [ ] `RdiSetpoint.resolve(IrrigationZone zone, DendroCalibration cal, double phenoMod)`:
-  `zone.getRdiTargetOverride() != null ? (override, "override") : (cal.stressThresholdsRelative().mild() * phenoMod, "derived")`.
-- [ ] Test: override wins when set; else derived = mild-relative × phenoMod; the source label is correct.
+- [ ] `RdiSetpoint.resolve(IrrigationZone zone, DendroCalibration cal, double phenoMod)` returns
+  `record ResolvedSetpoint(double value, String source)`:
+  `zone.getRdiTargetOverride() != null ? new ResolvedSetpoint(zone.getRdiTargetOverride(), "override") : new ResolvedSetpoint(cal.stressThresholdsRelative().mild() * phenoMod, "derived")`.
+- [ ] Test: override wins when set; else `value` = mild-relative × phenoMod and `source` = "derived"; override path `source` = "override".
+
+> **Conservative by design (shadow phase).** The derived default targets the *none/mild onset* threshold, and
+> since the observed signal is the p75 (driest quartile), most trees sit in "none" — a cautious deficit that
+> leaves RDI savings on the table. That is intentional for a non-actuating shadow; **retune the setpoint (toward
+> mid-mild-band) and the gains before any actuation phase.** The per-zone `rdi_target_override` de-risks it now.
 - [ ] Commit `feat(rdi): hybrid RDI setpoint (derived from calibration + per-zone override)`.
 
 ## Task 6: Persistence entities + repos
@@ -151,12 +160,20 @@ in a try/catch that logs and swallows. A shadow failure then rolls back only the
   `@Transactional(propagation = Propagation.REQUIRES_NEW) void runShadow(IrrigationZone zone, DendroCalibration cal, double phenoMod, LocalDate today, Double zoneTwdRel, boolean lowConfidence, double rainfallMm)`:
   1. `RdiState state = rdiStateRepository.findByZoneId(zone.getId()).map(DendroRdiState::toState).orElseGet(() -> defaultState(gains))`;
   2. **close** a *prior-day* pending cycle only — guard `state.pendingDate() != null && state.pendingDate().isBefore(today)` (H2: without this, a same-day re-run — manual recompute exists at `DendroController` `recompute`, and v6 upserts — would close today's own cycle and double-integrate). The setpoint to close against is the one the pending proposal used: read it from that day's row, `double prevSetpoint = dendroRdiDailyRepository.findByZoneIdAndDate(zone.getId(), state.pendingDate()).map(DendroRdiDaily::getSetpoint).orElse(RdiSetpoint.resolve(zone, cal, phenoMod).value())`. Then `daysElapsed = DAYS.between(state.pendingDate(), today)`; `state = rdiController.observeNextDay(zoneTwdRel, prevSetpoint, lowConfidence, state, daysElapsed)` (observed may be null → carried, no integrate);
-  3. resolve setpoint via `RdiSetpoint.resolve(zone, cal, phenoMod)`;
+  3. `ResolvedSetpoint sp = RdiSetpoint.resolve(zone, cal, phenoMod)` (use `sp.value()` below, persist `sp.source()`);
   4. forecast rain — `WeatherResolver` may be null in tests (M3: v6 guards `weatherResolver != null` at L135), so:
      `double forecastRainMm = (weatherResolver == null) ? rainfallMm : weatherResolver.getWeatherForDay(zone, today.plusDays(1)).map(WeatherSnapshot::precipitationMm).orElse(rainfallMm);`
      (`precipitationMm` is a primitive `double`; `rainfallMm` — today's value passed in from L139 — is the fallback);
-  5. `RdiResult r = rdiController.propose(zoneTwdRel, setpoint, forecastRainMm, lowConfidence, state, today)`;
-  6. **upsert** `dendro_rdi_daily` via `findByZoneIdAndDate(zoneId, today)` (update else insert — never blind-insert into `uq_rdi_daily`): observed, setpoint(+source), error, adjustment, integral_after, forecast_rain, low_confidence, status (`frozen` if rain-frozen else `pending`). Save updated `dendro_rdi_state` with `pending_date = today`, `status` matching.
+  5. `RdiResult r = rdiController.propose(zoneTwdRel, sp.value(), forecastRainMm, lowConfidence, state, today)`
+     (pass the nullable `zoneTwdRel` directly — `propose` short-circuits null/low-confidence to `status=skipped`);
+  6. **upsert** `dendro_rdi_daily` via `findByZoneIdAndDate(zoneId, today)` (update else insert — never blind-insert
+     into `uq_rdi_daily`): `zoneTwdRel` as observed, `sp.value()` as setpoint + `sp.source()` as setpoint_source,
+     `r.error()`, `r.adjustment()`, `r.integralAfter()`, forecast_rain, `low_confidence`, `r.status()`. **A
+     `skipped` day still writes its row** (the whole point of recording low-confidence days). Then save
+     `dendro_rdi_state`: set `pending_date = today` and `status = r.status()` **only when `r.status()` is
+     `pending` or `frozen`** (a real cycle to close tomorrow); on `skipped`, leave `pending_date` and the
+     prior cycle's `status` **unchanged** (so an already-open cycle keeps waiting and its `daysElapsed` grows —
+     do not overwrite it with a non-cycle), and persist only the (possibly close-updated) integral/lastError.
 - [ ] In `DendroAnalyticsService.computeForZone`, AFTER `ActionResult decision = irrDecision(...)` (`:194`) and
   the existing persistence, add — guarded by `zone.isRdiShadowEnabled()`:
   ```java
@@ -173,6 +190,12 @@ in a try/catch that logs and swallows. A shadow failure then rolls back only the
   ```
   **Do not** modify `decision`, `rec.setIrrigationAction(...)`, schedule policy, or actuation. (`today`,
   `rainfallMm`, `phenoMod`, `cal`, `zoneAggregation` are all already in scope at `:194`.)
+- [ ] **Two guards to bake in:** (i) in the `catch`, besides logging, increment a shadow-failure counter (if a
+  Micrometer `MeterRegistry` is available, `Counter` `rdi.shadow.failures`; else a static `AtomicLong` logged
+  periodically) so a silently-100%-failing shadow is visible beyond log grep. (ii) Inside `runShadow`, read only
+  the already-loaded scalar fields of the passed `zone` (`getId()`, `getRdiTargetOverride()`,
+  `isRdiShadowEnabled()`); do **not** traverse any lazy `zone` association across the `REQUIRES_NEW` boundary
+  (`LazyInitializationException` risk) — pass any needed derived values (`cal`, `phenoMod`) in as parameters.
 - [ ] **Isolation regression tests:** (a) an opted-in zone's `ZoneDailyRecommendation.irrigationAction` /
   reasoning / actuation is byte-identical to a run with the shadow disabled; (b) a `rdi_shadow_enabled=false`
   zone writes no `dendro_rdi_daily` row; (c) **poison test (integration, `@SpringBootTest`/`@DataJpaTest`
@@ -193,6 +216,12 @@ in a try/catch that logs and swallows. A shadow failure then rolls back only the
   → per date: v6's `irrigationAction` (from `ZoneDailyRecommendation`) + the `dendro_rdi_daily` fields
   (observed_twd_rel, setpoint, error, adjustment). No new computation — just join the two persisted series.
 - [ ] Test the endpoint returns the joined series for a zone with both present. Commit `feat(rdi): shadow-vs-v6 compare endpoint`.
+
+> **Interpretation (carry into the endpoint doc/response).** The shadow observes v6's realized `TWD_rel` (it
+> never actuates), so `adjustment` is **"delta vs v6 to reach the RDI setpoint,"** not a standalone closed-loop
+> trajectory, and the two series are not naively subtractable. Quantifying "liters saved" needs a later slice
+> that persists the base/running water volume (`waterDeliveredLiters` is currently 0). See the spec's
+> "What the shadow measures — and what it does NOT." **Out of scope here.**
 
 ## Final verification
 - [ ] `./gradlew test -x buildFrontend -x buildTerraIntelligenceFrontend` → BUILD SUCCESSFUL.
