@@ -58,6 +58,10 @@ import type {
   Lsn50Mode,
   StregaModel,
   ZoneEnvironmentSummary,
+  SupportDiagnosticsPreview,
+  SupportRequest,
+  SupportRequestCreateRequest,
+  SupportRequestCreateResponse,
 } from '../types/farming';
 
 type ApiErrorPayload = {
@@ -1262,6 +1266,15 @@ export interface IrrigationActuationsResponse {
 export const irrigationOutcomesAPI = {
   recentActuations: (): Promise<IrrigationActuationsResponse> =>
     api.get<IrrigationActuationsResponse>('/api/irrigation/recent-actuations').then(r => r.data),
+};
+
+export const supportRequestsAPI = {
+  list: async (): Promise<SupportRequest[]> =>
+    api.get<SupportRequest[]>('/api/improvement-requests').then((r) => r.data),
+  diagnosticsPreview: async (route?: string): Promise<SupportDiagnosticsPreview> =>
+    api.get<SupportDiagnosticsPreview>('/api/improvement-requests/diagnostics-preview', { params: { route } }).then((r) => r.data),
+  create: async (request: SupportRequestCreateRequest): Promise<SupportRequestCreateResponse> =>
+    api.post<SupportRequestCreateResponse>('/api/improvement-requests', request).then((r) => r.data),
 };
 
 export const s2120API = {
