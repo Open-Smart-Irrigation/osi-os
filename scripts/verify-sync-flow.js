@@ -1571,8 +1571,10 @@ expectLibById('improvement-requests-api-router', 'crypto', 'crypto', 'declares c
 expectIncludesById('improvement-requests-api-router', 'function verifyBearer', 'contains the local HMAC bearer verifier');
 expectIncludesById('improvement-requests-api-router', 'consent_public !== true', 'requires explicit public consent');
 expectIncludesById('improvement-requests-api-router', 'const consentDiagnostics = boolValue(body.consent_diagnostics, true)', 'honors diagnostics consent before collecting private diagnostics');
+expectIncludesById('improvement-requests-api-router', 'const diagnostics = consentDiagnostics ? await buildDiagnostics(q, body) : {}', 'builds private diagnostics only when diagnostics consent is granted');
 expectIncludesById('improvement-requests-api-router', "consentDiagnostics ? JSON.stringify(diagnostics) : '{}'", 'stores empty diagnostics when diagnostics consent is declined');
 expectIncludesById('improvement-requests-api-router', 'function diagnosticsPreviewPayload', 'builds a display-redacted diagnostics preview');
+expectIncludesById('improvement-requests-api-router', 'diagnostics: diagnosticsPreviewPayload(diagnostics)', 'returns the display-redacted diagnostics preview payload');
 expectIncludesById('improvement-requests-api-router', "gateway_device_eui: preview.gateway_identity.gateway_device_eui ? '[REDACTED_EUI]' : null", 'redacts raw gateway EUI in diagnostics preview');
 expectIncludesById('improvement-requests-api-router', 'INSERT INTO improvement_requests', 'inserts local field requests');
 expectIncludesById('improvement-requests-api-router', 'WORK_REQUEST_SUBMITTED', 'documents trigger-emitted WORK_REQUEST_SUBMITTED intake contract');
