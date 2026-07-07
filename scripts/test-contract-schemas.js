@@ -152,7 +152,7 @@ for (const type of ['S2120_WEATHER', 'GATEWAY']) {
 }
 
 const triggerMetrics = resourcesSchema.definitions.Schedule.properties.trigger_metric.enum || [];
-const expectedTriggerMetrics = ['SWT_WM1', 'SWT_WM2', 'SWT_AVG', 'DENDRO'];
+const expectedTriggerMetrics = ['SWT_WM1', 'SWT_WM2', 'SWT_AVG', 'SWT_1', 'SWT_2', 'SWT_3', 'DENDRO'];
 if (triggerMetrics.join(',') !== expectedTriggerMetrics.join(',')) {
     console.error(`FAIL schema: trigger_metric enum is ${triggerMetrics.join(',')}, expected ${expectedTriggerMetrics.join(',')}`);
     ok = false;
