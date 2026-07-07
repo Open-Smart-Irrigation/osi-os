@@ -1,6 +1,13 @@
 # Schema-Driven Code Generation for osi-os ↔ osi-server
 
-**Status:** Draft — spec
+> **SUPERSEDED — do not implement.** Rejected by the accepted ADR
+> [2026-06-30-schema-and-contract-ownership](../../adr/2026-06-30-schema-and-contract-ownership.md)
+> after four independent expert reviews: no shared SQLite↔Postgres DDL generator;
+> edge DDL is owned by ordered migrations, cloud DDL by Flyway, cross-repo
+> compatibility by versioned sync contracts. Kept only as the reasoning record
+> the ADR references. Its flip conditions are listed in the ADR.
+
+**Status:** Superseded by ADR 2026-06-30 (was: Draft — spec)
 **Created:** 2026-06-30
 **Scope:** Both repos (osi-os canonical, osi-server mirror)
 
