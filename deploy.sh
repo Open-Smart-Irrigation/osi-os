@@ -626,6 +626,10 @@ fetch_required "LoRain codec" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/codecs/aquascope_lorain_decoder.js" \
     "/srv/node-red/codecs/aquascope_lorain_decoder.js"
 
+fetch_required "Agroscope uplink transform" \
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/codecs/agroscope_uplink_transform.js" \
+    "/srv/node-red/codecs/agroscope_uplink_transform.js"
+
 echo "--- Node-RED runtime dependencies ---"
 npm_log="$TMP_DIR/npm-install.log"
 if cd /srv/node-red && npm install --omit=dev --no-fund --no-audit >"$npm_log" 2>&1; then
