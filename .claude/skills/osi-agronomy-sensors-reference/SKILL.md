@@ -452,7 +452,7 @@ sed -n '1,40p' docs/architecture/dendrometer-analytics-v6.md
 grep -n "et0\|Et0" ../osi-server/backend/src/main/java/org/osi/server/analytics/WeatherMath.java  # sister-repo checkout required, path relative to this repo root
 
 # Rain aggregation (S2120 cumulative-delta status machine; LoRain interval decoder)
-grep -n "rainDeltaStatus" conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/flows.json
+grep -n "rainDeltaStatus\|rain_delta_status" conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/flows.json
 sed -n '1,130p' conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/codecs/aquascope_lorain_decoder.js
 
 # Battery footer fallback behavior (confirm issue #51 / bat_v fallback still present)

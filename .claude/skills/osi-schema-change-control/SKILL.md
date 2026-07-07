@@ -528,7 +528,7 @@ node --test lib/osi-migrate/__tests__/*.test.js         # runner unit tests (ris
 find . -name farming.db -not -path '*/node_modules/*'  | sort   # should list exactly 7 paths
 ls database/migrations/ordered/                         # current migration set (0001, 0002 as of 2026-07-06)
 ls .github/workflows/ && cat .github/workflows/migrations.yml .github/workflows/verify-sync-flow.yml   # what CI actually gates (both workflows)
-grep -rn "osi-migrate\|applyPending\|bootstrapFresh\|verifyHead" --include=*.js --include=*.sh . | grep -v node_modules   # re-confirm the runner has no on-device caller
+grep -rn "osi-migrate\|applyPending\|bootstrapFresh\|verifyHead" scripts/ lib/ deploy.sh conf/ feeds/chirpstack-openwrt-feed/apps/node-red/files/ --exclude-dir=node_modules   # re-confirm no on-device caller (covers flows.json + init files, not just *.js/*.sh)
 ```
 
 All commands above were run against this worktree on 2026-07-06 and returned the

@@ -242,7 +242,7 @@ Verified full set of env vars it writes (`writeEnvFile` / `envVars` object in
 | `CHIRPSTACK_PROFILE_CLOVER` | **Alias** — intentionally set to the same UUID as `CHIRPSTACK_PROFILE_RAK10701` (compatibility alias for the RAK10701 field tester profile, not a separate profile) | `chirpstack_profile_clover` |
 | `CHIRPSTACK_PROFILE_RAK10701` | RAK Field Tester profile UUID | `chirpstack_profile_rak10701` |
 | `CHIRPSTACK_PROFILE_S2120` | SenseCAP S2120 profile UUID | `chirpstack_profile_s2120` |
-| `CHIRPSTACK_PROFILE_LORAIN` | Aqua-Scope LoRain profile UUID | **none** — no UCI mapping exists; env-file only (see section 1 note) |
+| `CHIRPSTACK_PROFILE_LORAIN` | Aqua-Scope LoRain profile UUID | `chirpstack_profile_lorain` — mapped to UCI by `chirpstack-bootstrap.js`, but **not exported by `node-red.init`** (runtime sees it via the env-file path only; see section 1 note) |
 
 All `CHIRPSTACK_APP_*`/`CHIRPSTACK_PROFILE_*` values are validated as
 ChirpStack UUIDs (`assertValidUciValue`, regex

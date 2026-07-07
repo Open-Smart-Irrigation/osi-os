@@ -96,11 +96,21 @@ TS=$(date +%Y%m%d-%H%M%S)
 LABEL="pre-repair"          # e.g. "pre-eui-fix", "pre-fingerprint-restamp"
 BK="/data/db/backups/${LABEL}-${TS}"
 mkdir -p "$BK"
-cp -a /data/db/farming.db "$BK/farming.db" 2>/dev/null || true
-cp -a /data/db/farming.db-wal "$BK/farming.db-wal" 2>/dev/null || true
-cp -a /data/db/farming.db-shm "$BK/farming.db-shm" 2>/dev/null || true
+# Primary DB: prefer a consistent ONLINE backup (safe while Node-RED writes);
+# fall back to a fail-FAST raw copy. Never silence a failed primary backup.
+sqlite3 /data/db/farming.db ".backup '$BK/farming.db'" \
+  || cp -a /data/db/farming.db "$BK/farming.db" \
+  || { echo "FATAL: primary DB backup failed - do NOT proceed with the repair"; exit 1; }
+# For a raw copy of a live DB, stop writers first (/etc/init.d/node-red stop) or
+# accept that the sidecars below are required to make the copy consistent.
+for f in farming.db-wal farming.db-shm farming.db-journal; do
+  [ -e "/data/db/$f" ] && cp -a "/data/db/$f" "$BK/$f"
+done
 cp -a /srv/node-red/flows.json "$BK/flows.json"
 cp -a /srv/node-red/settings.js "$BK/settings.js"
+cp -a /srv/node-red/flows_cred.json "$BK/flows_cred.json" 2>/dev/null || true  # MQTT credentials
+# ChirpStack state — REQUIRED before any direct chirpstack.sqlite edit
+[ -e /srv/chirpstack/chirpstack.sqlite ] && cp -a /srv/chirpstack/chirpstack.sqlite "$BK/chirpstack.sqlite"
 mkdir -p "$BK/gui"
 cp -a /usr/lib/node-red/gui/. "$BK/gui/" 2>/dev/null || true
 echo "Backup at $BK"
