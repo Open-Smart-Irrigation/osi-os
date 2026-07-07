@@ -594,6 +594,12 @@ function verifyDb(dbPath) {
   if (!tableSql(dbPath, 'devices').includes("'AQUASCOPE_LORAIN'")) {
     throw new Error(`${dbPath}: devices.type_id CHECK is missing AQUASCOPE_LORAIN`);
   }
+  const scheduleSql = tableSql(dbPath, 'irrigation_schedules');
+  for (const metric of ["'SWT_1'", "'SWT_2'", "'SWT_3'", "'DENDRO'"]) {
+    if (!scheduleSql.includes(metric)) {
+      throw new Error(`${dbPath}: irrigation_schedules.trigger_metric CHECK is missing ${metric}`);
+    }
+  }
   for (const [tableName, expectedIndexes] of Object.entries(requiredIndexes)) {
     const indexes = indexNames(dbPath, tableName);
     const missing = expectedIndexes.filter((name) => !indexes.includes(name));
@@ -642,6 +648,9 @@ const seedSqlPath = path.join(repoRoot, 'database', 'seed-blank.sql');
 const seedSql = fs.readFileSync(seedSqlPath, 'utf8');
 if (!seedSql.includes("'AQUASCOPE_LORAIN'")) {
   throw new Error(`${path.relative(repoRoot, seedSqlPath)}: devices.type_id CHECK is missing AQUASCOPE_LORAIN`);
+}
+if (!seedSql.includes("CHECK (trigger_metric IN ('SWT_WM1','SWT_WM2','SWT_AVG','SWT_1','SWT_2','SWT_3','DENDRO'))")) {
+  throw new Error(`${path.relative(repoRoot, seedSqlPath)}: irrigation_schedules.trigger_metric CHECK does not match the canonical 7-value vocabulary`);
 }
 
 for (const dbPath of dbPaths) {

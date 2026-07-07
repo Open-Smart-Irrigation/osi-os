@@ -36,8 +36,8 @@
             "required": ["zone_id", "trigger_metric"],
             "properties": {
                 "zone_id": {"type": "integer", "minimum": 1},
-                "trigger_metric": {"type": "string", "enum": ["SWT_WM1","SWT_WM2","SWT_AVG","DENDRO"]},
-                "trigger_value": {"type": "number"},
+                "trigger_metric": {"type": "string", "enum": ["SWT_WM1","SWT_WM2","SWT_AVG","SWT_1","SWT_2","SWT_3","DENDRO"]},
+                "threshold_kpa": {"type": "number"},
                 "irrigation_duration_min": {"type": "integer", "minimum": 1},
                 "enabled": {"type": "boolean"},
                 "deleted_at": {"type": ["string", "null"], "format": "date-time"}
