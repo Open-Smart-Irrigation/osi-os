@@ -21,3 +21,14 @@
 
 # Track CI workflows / .github content (the /.* rule would otherwise ignore them)
 !/.github/
+
+# Track the agent skill library only; keep the rest of .claude/ (settings, local state) ignored
+!/.claude/
+/.claude/*
+!/.claude/skills/
+# .agents/skills is a committed symlink to .claude/skills for .agents-convention
+# tools (Codex, Gemini CLI, ...); OpenCode reads .claude/skills directly.
+# Only the skills symlink is tracked; everything else under .agents/ stays ignored.
+!/.agents/
+/.agents/*
+!/.agents/skills

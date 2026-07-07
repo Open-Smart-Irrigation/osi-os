@@ -27,5 +27,11 @@ jobs:
       # history schema/worker tests, history API contract, helper tests, and
       # profile parity). Must end with "All parity checks passed."
       - run: node scripts/verify-sync-flow.js
+      - name: Skill-library symlink parity (.agents/skills must alias .claude/skills)
+        run: |
+          test "$(readlink .agents/skills)" = "../.claude/skills"
+          # gitignore must stay narrow: arbitrary .agents/ files ignored, symlink tracked
+          git check-ignore -q .agents/notes.txt
+          git ls-files --error-unmatch .agents/skills > /dev/null
       - name: Guard against silent upgrade-leg skip
         run: node scripts/test-sync-history-schema.js 2>&1 | tee /tmp/schema.out && grep -q "base seed + history migration" /tmp/schema.out
