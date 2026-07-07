@@ -15,6 +15,7 @@
 - Branch off `feat/rdi-shadow-controller` (slice C builds on the RDI shadow, PR #49, not yet merged). Commit per task.
 
 ## File structure
+
 | File | Action |
 |---|---|
 | `analytics/AgroscopeWaterInput.java` | Create (helper: daily measured mm) |
@@ -162,6 +163,7 @@ the raw sub-daily `watermeter_processing` path from `flow_count_cumulative`.
   `flow_liters/areaM2`. (No separate commit — verified when C's oracle lands.)
 
 ## Self-review (coverage map)
+
 | Spec item | Task |
 |---|---|
 | measured water_input_mm = flow_liters/areaM2 | 1 |

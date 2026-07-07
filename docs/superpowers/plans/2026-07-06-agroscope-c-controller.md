@@ -169,7 +169,7 @@ AgroscopeState observeNextDay(Double stressNext, double setpoint, boolean lowCon
     double eNext = setpoint - stressNext;
     double nextTarget = buildDose(eNext, waterInputNext, s);
     double integral = (0.0 < nextTarget && nextTarget < MAX_DOSE_MM) ? s.integral() + s.ki() * eNext : s.integral();
-    return new AgroscopeState(integral, eNext, s.kp(), s.ki(), "closed", null, null);
+    return new AgroscopeState(integral, eNext, s.kp(), s.ki(), "closed", null);
 }
 ```
 Config gains are constructor defaults; `AgroscopeState` loaded from DB **overrides** them (reproduce gain-reload). Rain-freeze here only forces `dose=0`/`status=frozen`; the eventual next-day close still integrates (faithful to `main.py`).
