@@ -100,39 +100,109 @@ start_service() {
     local cs_profile_clover=$(resolve_chirpstack_value osi-server.cloud.chirpstack_profile_clover CHIRPSTACK_PROFILE_CLOVER)
     local cs_profile_rak10701=$(resolve_chirpstack_value osi-server.cloud.chirpstack_profile_rak10701 CHIRPSTACK_PROFILE_RAK10701)
     local cs_profile_s2120=$(resolve_chirpstack_value osi-server.cloud.chirpstack_profile_s2120 CHIRPSTACK_PROFILE_S2120)
+    local agroscope_forward_enabled=$(resolve_chirpstack_value osi-server.cloud.agroscope_forward_enabled AGROSCOPE_FORWARD_ENABLED)
+    local agroscope_mqtt_host=$(resolve_chirpstack_value osi-server.cloud.agroscope_mqtt_host AGROSCOPE_MQTT_HOST)
+    local agroscope_mqtt_port=$(resolve_chirpstack_value osi-server.cloud.agroscope_mqtt_port AGROSCOPE_MQTT_PORT)
+    local agroscope_mqtt_username=$(resolve_chirpstack_value osi-server.cloud.agroscope_mqtt_username AGROSCOPE_MQTT_USERNAME)
+    local agroscope_mqtt_password=$(resolve_chirpstack_value osi-server.cloud.agroscope_mqtt_password AGROSCOPE_MQTT_PASSWORD)
+    [ -n "$agroscope_forward_enabled" ] || agroscope_forward_enabled="0"
+    [ -n "$agroscope_mqtt_host" ] || agroscope_mqtt_host="51.107.5.147"
+    [ -n "$agroscope_mqtt_port" ] || agroscope_mqtt_port="1883"
+    local agroscope_forward_normalized
+    local agroscope_runtime_mqtt_host="127.0.0.1"
+    local agroscope_runtime_mqtt_port="1883"
+    agroscope_forward_normalized="$(printf '%s' "$agroscope_forward_enabled" | tr 'ABCDEFGHIJKLMNOPQRSTUVWXYZ' 'abcdefghijklmnopqrstuvwxyz')"
+    case "$agroscope_forward_normalized" in
+        1|true|yes|on)
+            agroscope_runtime_mqtt_host="$agroscope_mqtt_host"
+            agroscope_runtime_mqtt_port="$agroscope_mqtt_port"
+            ;;
+    esac
 
-    # Auto-provision flows_cred.json with OSI Cloud MQTT broker credentials.
+    # Auto-provision flows_cred.json with MQTT broker credentials.
     # Node-RED does not expand env vars in credential fields or MQTT client IDs,
-    # so we write the credential file and concrete client ID from UCI values.
-    # Only written when both EUI and password are set.
+    # so we write credential entries and concrete broker runtime values here.
     local cred_file="/srv/$PACKAGE_NAME/flows_cred.json"
     local flow_file="/srv/$PACKAGE_NAME/flows.json"
-    local broker_node_id="ec43625ea99685a6"
-    if [ -n "$device_eui" ] && [ -n "$mqtt_password" ]; then
-        local expected_creds="{\"${broker_node_id}\":{\"user\":\"${device_eui}\",\"password\":\"${mqtt_password}\"}}"
-        local current_creds=""
-        [ -f "$cred_file" ] && current_creds=$(cat "$cred_file" 2>/dev/null)
-        if [ "$current_creds" != "$expected_creds" ]; then
-            printf '%s' "$expected_creds" > "$cred_file"
-        fi
-        if [ -f "$flow_file" ]; then
-            FLOW_FILE="$flow_file" BROKER_NODE_ID="$broker_node_id" DEVICE_EUI_VALUE="$device_eui" node <<'NODE'
+    local cloud_broker_node_id="ec43625ea99685a6"
+    local agroscope_broker_node_id="agroscope-mqtt-broker"
+    if [ -f "$flow_file" ]; then
+        FLOW_FILE="$flow_file" \
+        CRED_FILE="$cred_file" \
+        CLOUD_BROKER_NODE_ID="$cloud_broker_node_id" \
+        DEVICE_EUI_VALUE="$device_eui" \
+        DEVICE_MQTT_PASSWORD_VALUE="$mqtt_password" \
+        AGROSCOPE_BROKER_NODE_ID="$agroscope_broker_node_id" \
+        AGROSCOPE_MQTT_HOST_VALUE="$agroscope_runtime_mqtt_host" \
+        AGROSCOPE_MQTT_PORT_VALUE="$agroscope_runtime_mqtt_port" \
+        AGROSCOPE_MQTT_USERNAME_VALUE="$agroscope_mqtt_username" \
+        AGROSCOPE_MQTT_PASSWORD_VALUE="$agroscope_mqtt_password" \
+        node <<'NODE'
 const fs = require('fs');
 const flowFile = process.env.FLOW_FILE;
-const brokerNodeId = process.env.BROKER_NODE_ID;
+const credFile = process.env.CRED_FILE;
+const cloudBrokerNodeId = process.env.CLOUD_BROKER_NODE_ID;
 const deviceEui = process.env.DEVICE_EUI_VALUE;
+const deviceMqttPassword = process.env.DEVICE_MQTT_PASSWORD_VALUE;
+const agroscopeBrokerNodeId = process.env.AGROSCOPE_BROKER_NODE_ID;
+const agroscopeHost = process.env.AGROSCOPE_MQTT_HOST_VALUE || '127.0.0.1';
+const agroscopePort = process.env.AGROSCOPE_MQTT_PORT_VALUE || '1883';
+const agroscopeUsername = process.env.AGROSCOPE_MQTT_USERNAME_VALUE || '';
+const agroscopePassword = process.env.AGROSCOPE_MQTT_PASSWORD_VALUE || '';
+
+function readJson(filePath, fallback) {
+  try {
+    if (fs.existsSync(filePath)) return JSON.parse(fs.readFileSync(filePath, 'utf8') || '{}');
+  } catch (_) {}
+  return fallback;
+}
+
 try {
   const flows = JSON.parse(fs.readFileSync(flowFile, 'utf8'));
-  const broker = flows.find((node) => node && node.id === brokerNodeId);
-  if (broker && broker.clientid !== `device_${deviceEui}`) {
-    broker.clientid = `device_${deviceEui}`;
-    fs.writeFileSync(flowFile, JSON.stringify(flows, null, 2));
+  const creds = readJson(credFile, {});
+  let credsChanged = false;
+  let flowsChanged = false;
+
+  if (deviceEui && deviceMqttPassword) {
+    const nextCloudCreds = { user: deviceEui, password: deviceMqttPassword };
+    if (JSON.stringify(creds[cloudBrokerNodeId] || {}) !== JSON.stringify(nextCloudCreds)) {
+      creds[cloudBrokerNodeId] = nextCloudCreds;
+      credsChanged = true;
+    }
   }
+
+  if (agroscopeUsername && agroscopePassword) {
+    const nextAgroscopeCreds = { user: agroscopeUsername, password: agroscopePassword };
+    if (JSON.stringify(creds[agroscopeBrokerNodeId] || {}) !== JSON.stringify(nextAgroscopeCreds)) {
+      creds[agroscopeBrokerNodeId] = nextAgroscopeCreds;
+      credsChanged = true;
+    }
+  }
+
+  const cloudBroker = flows.find((node) => node && node.id === cloudBrokerNodeId);
+  if (cloudBroker && deviceEui && cloudBroker.clientid !== `device_${deviceEui}`) {
+    cloudBroker.clientid = `device_${deviceEui}`;
+    flowsChanged = true;
+  }
+
+  const agroscopeBroker = flows.find((node) => node && node.id === agroscopeBrokerNodeId);
+  if (agroscopeBroker) {
+    if (agroscopeBroker.broker !== agroscopeHost) {
+      agroscopeBroker.broker = agroscopeHost;
+      flowsChanged = true;
+    }
+    if (agroscopeBroker.port !== agroscopePort) {
+      agroscopeBroker.port = agroscopePort;
+      flowsChanged = true;
+    }
+  }
+
+  if (credsChanged) fs.writeFileSync(credFile, JSON.stringify(creds));
+  if (flowsChanged) fs.writeFileSync(flowFile, JSON.stringify(flows, null, 2) + '\n');
 } catch (error) {
-  console.error('[node-red.init] unable to update OSI Cloud MQTT client ID:', error.message);
+  console.error('[node-red.init] unable to update MQTT runtime config:', error.message);
 }
 NODE
-        fi
     fi
 
     procd_open_instance
@@ -163,7 +233,10 @@ NODE
         CHIRPSTACK_PROFILE_LSN50="$cs_profile_lsn50" \
         CHIRPSTACK_PROFILE_CLOVER="$cs_profile_clover" \
         CHIRPSTACK_PROFILE_RAK10701="$cs_profile_rak10701" \
-        CHIRPSTACK_PROFILE_S2120="$cs_profile_s2120"
+        CHIRPSTACK_PROFILE_S2120="$cs_profile_s2120" \
+        AGROSCOPE_FORWARD_ENABLED="$agroscope_forward_enabled" \
+        AGROSCOPE_MQTT_HOST="$agroscope_runtime_mqtt_host" \
+        AGROSCOPE_MQTT_PORT="$agroscope_runtime_mqtt_port"
     procd_set_param respawn 3600 5 -1
     procd_close_instance
 }

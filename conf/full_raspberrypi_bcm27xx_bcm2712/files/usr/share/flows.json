@@ -2648,7 +2648,8 @@
     "y": 160,
     "wires": [
       [
-        "83b9d39aac66b765"
+        "83b9d39aac66b765",
+        "agroscope-forward-fn"
       ]
     ]
   },
@@ -10640,5 +10641,70 @@
         "record-error-link-out-lorain"
       ]
     ]
+  },
+  {
+    "id": "agroscope-mqtt-broker",
+    "type": "mqtt-broker",
+    "name": "Agroscope IoT Broker",
+    "broker": "127.0.0.1",
+    "port": "1883",
+    "clientid": "",
+    "autoConnect": true,
+    "usetls": false,
+    "protocolVersion": "4",
+    "keepalive": "60",
+    "cleansession": true,
+    "birthTopic": "",
+    "birthQos": "0",
+    "birthPayload": "",
+    "birthMsg": {},
+    "closeTopic": "",
+    "closeQos": "0",
+    "closePayload": "",
+    "closeMsg": {},
+    "willTopic": "",
+    "willQos": "0",
+    "willPayload": "",
+    "willMsg": {},
+    "userProps": "",
+    "sessionExpiry": ""
+  },
+  {
+    "id": "agroscope-forward-fn",
+    "type": "function",
+    "z": "49e87447205bb849",
+    "name": "Forward Agroscope Dendro",
+    "func": "const enabled = String(env.get('AGROSCOPE_FORWARD_ENABLED') || '').trim().toLowerCase();\nif (!['1', 'true', 'yes', 'on'].includes(enabled)) {\n  node.status({ fill: 'grey', shape: 'ring', text: 'Agroscope forwarding disabled' });\n  return null;\n}\n\nlet data = msg.payload;\nif (typeof data === 'string') {\n  try {\n    data = JSON.parse(data);\n  } catch (error) {\n    node.error('Agroscope forward invalid JSON: ' + error.message, msg);\n    return null;\n  }\n}\nif (!data || !data.deviceInfo) return null;\n\nconst info = data.deviceInfo || {};\nconst profileName = String(info.deviceProfileName || data.deviceProfileName || '').toUpperCase();\nif (profileName.indexOf('DENDRO') < 0 && profileName.indexOf('LSN50') < 0 && profileName.indexOf('DRAGINO') < 0) {\n  return null;\n}\n\nlet transform;\ntry {\n  transform = require('/srv/node-red/codecs/agroscope_uplink_transform');\n} catch (error) {\n  node.error('Agroscope transform unavailable: ' + error.message, msg);\n  return null;\n}\n\nconst result = transform.toAgroscopeUplink(data);\nif (!result) return null;\n\nmsg.topic = result.topic;\nmsg.payload = result.payload;\nmsg.qos = 1;\nnode.status({ fill: 'blue', shape: 'dot', text: result.topic });\nreturn msg;",
+    "outputs": 1,
+    "timeout": "",
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 390,
+    "y": 320,
+    "wires": [
+      [
+        "agroscope-mqtt-out"
+      ]
+    ]
+  },
+  {
+    "id": "agroscope-mqtt-out",
+    "type": "mqtt out",
+    "z": "49e87447205bb849",
+    "name": "Dendro to Agroscope IoT",
+    "topic": "",
+    "qos": "1",
+    "retain": "false",
+    "respTopic": "",
+    "contentType": "application/json",
+    "userProps": "",
+    "correl": "",
+    "expiry": "",
+    "broker": "agroscope-mqtt-broker",
+    "x": 660,
+    "y": 320,
+    "wires": []
   }
 ]
