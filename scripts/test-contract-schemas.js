@@ -144,6 +144,33 @@ if (!cmdSchema.properties.command_type.enum.includes('WORK_REQUEST_STATUS')) {
     console.log('OK  schema: WORK_REQUEST_STATUS command_type present');
 }
 
+const workRequestStatusRule = allOf.find(rule =>
+    rule.if && rule.if.properties && rule.if.properties.command_type &&
+    rule.if.properties.command_type.const === 'WORK_REQUEST_STATUS'
+);
+const workRequestStatusRequired = workRequestStatusRule &&
+    workRequestStatusRule.then &&
+    workRequestStatusRule.then.required || [];
+const workRequestStatusRequestIdType = workRequestStatusRule &&
+    workRequestStatusRule.then &&
+    workRequestStatusRule.then.properties &&
+    workRequestStatusRule.then.properties.request_id &&
+    workRequestStatusRule.then.properties.request_id.type;
+const workRequestStatusStatusType = workRequestStatusRule &&
+    workRequestStatusRule.then &&
+    workRequestStatusRule.then.properties &&
+    workRequestStatusRule.then.properties.status &&
+    workRequestStatusRule.then.properties.status.type;
+if (!workRequestStatusRequired.includes('request_id') || !workRequestStatusRequired.includes('status')) {
+    console.error('FAIL schema: WORK_REQUEST_STATUS does not require request_id and status');
+    ok = false;
+} else if (workRequestStatusRequestIdType !== 'string' || workRequestStatusStatusType !== 'string') {
+    console.error('FAIL schema: WORK_REQUEST_STATUS request_id/status can still be null');
+    ok = false;
+} else {
+    console.log('OK  schema: WORK_REQUEST_STATUS requires non-null request_id and status');
+}
+
 const openForDurationRule = allOf.find(rule =>
     rule.if && rule.if.properties && rule.if.properties.command_type &&
     rule.if.properties.command_type.const === 'OPEN_FOR_DURATION'

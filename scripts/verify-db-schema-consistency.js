@@ -561,6 +561,22 @@ const requiredTriggerSqlFragments = {
   trg_improvement_requests_outbox_ai: [
     'work_request_submitted',
     'contract_version',
+    "'schema_version', 1",
+    "'request_id', new.request_uuid",
+    "'type', new.type",
+    "'title', new.title",
+    "'description', new.description",
+    "'area', new.area",
+    "'severity', new.severity",
+    "'consent_public'",
+    "'consent_diagnostics'",
+    "'diagnostics', json(new.diagnostics_json)",
+    "'gateway_device_eui', new.gateway_device_eui",
+    "'gui_user'",
+    "'local_user_id', new.user_id",
+    "'sync_version', new.sync_version",
+    "'occurred_at', new.submitted_at",
+    "'work-request-' || new.request_uuid",
   ],
 };
 
