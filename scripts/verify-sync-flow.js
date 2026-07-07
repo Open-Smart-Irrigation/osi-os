@@ -1545,6 +1545,36 @@ expectIncludes('Queue REST Command ACK', 'INSERT INTO command_ack_outbox', 'queu
 expectIncludes('Build Command ACK Batch', '/command-acks', 'posts queued command ACKs to the sync REST endpoint');
 expectIncludes('Build Command ACK Batch', "'X-OSI-Sync-Protocol': '2'", 'opts REST command ACKs into sync protocol v2');
 expectIncludes('Mark Command ACKs Delivered', 'UPDATE command_ack_outbox SET delivered_at', 'marks REST command ACK rows delivered only after a successful response');
+expectIncludesById('sync-pending-split', "commandType === 'WORK_REQUEST_STATUS'", 'routes WORK_REQUEST_STATUS before the actuator replay guard');
+expectCondition(
+  findNodeById('sync-pending-split')?.outputs === 2,
+  'sync-pending-split has separate normal/status outputs',
+  'sync-pending-split must have two outputs for normal commands and WORK_REQUEST_STATUS'
+);
+expectCondition(
+  JSON.stringify(findNodeById('sync-pending-split')?.wires || []) === JSON.stringify([['reject-indefinite-open'], ['work-request-status-apply']]),
+  'sync-pending-split routes WORK_REQUEST_STATUS to status apply',
+  'sync-pending-split must route normal commands to reject-indefinite-open and status commands to work-request-status-apply'
+);
+expectLibById('work-request-status-apply', 'osiDb', 'osi-db-helper', 'declares osiDb for local improvement_requests status updates');
+expectIncludesById('work-request-status-apply', 'UPDATE improvement_requests SET cloud_status', 'updates improvement request cloud status fields');
+expectIncludesById('work-request-status-apply', 'last_status_at', 'records the cloud status timestamp');
+expectWireById('work-request-status-apply', 'command-ack-queue-rest', 'queues WORK_REQUEST_STATUS ACKs through the durable ACK queue');
+for (const actuatorNodeId of ['reject-indefinite-open', 'command-dedupe-dispatch', '934bf2bc19a8ce22', 'cdbaa3891d40d7a1', 'write-strega-expectation']) {
+  expectExcludesById(actuatorNodeId, 'WORK_REQUEST_STATUS', 'WORK_REQUEST_STATUS actuator/downlink handling');
+}
+for (const actuatorNodeId of ['cmd-type-registry', 'reject-indefinite-open', 'command-dedupe-dispatch', '934bf2bc19a8ce22', 'cdbaa3891d40d7a1', 'write-strega-expectation']) {
+  expectExcludesById(actuatorNodeId, 'WORK_REQUEST_SUBMITTED', 'WORK_REQUEST_SUBMITTED actuator/downlink handling');
+}
+expectLibById('improvement-requests-api-router', 'osiDb', 'osi-db-helper', 'declares osiDb for field request intake');
+expectLibById('improvement-requests-api-router', 'crypto', 'crypto', 'declares crypto for verifyBearer');
+expectIncludesById('improvement-requests-api-router', 'function verifyBearer', 'contains the local HMAC bearer verifier');
+expectIncludesById('improvement-requests-api-router', 'consent_public !== true', 'requires explicit public consent');
+expectIncludesById('improvement-requests-api-router', 'INSERT INTO improvement_requests', 'inserts local field requests');
+expectIncludesById('improvement-requests-api-router', 'WORK_REQUEST_SUBMITTED', 'documents trigger-emitted WORK_REQUEST_SUBMITTED intake contract');
+expectFileIncludes('seed-blank.sql', seedSqlSource, 'trg_improvement_requests_outbox_ai', 'improvement request trigger exists');
+expectFileIncludes('seed-blank.sql', seedSqlSource, "'WORK_REQUEST_SUBMITTED'", 'improvement request trigger emits WORK_REQUEST_SUBMITTED');
+expectFileIncludes('seed-blank.sql', seedSqlSource, "'WORK_REQUEST'", 'improvement request trigger emits WORK_REQUEST aggregate type');
 expectIncludesById('cmd-type-registry', 'REMOVE_DEVICE_FROM_ZONE:', 'allows cloud zone-detach commands through the pending-command guard');
 expectIncludesById('cmd-type-registry', 'UNCLAIM_DEVICE:', 'allows cloud device-unclaim commands through the pending-command guard');
 expectIncludes('Reject Indefinite Open', 'REMOVE_DEVICE_FROM_ZONE:', 'fallback command registry allows zone-detach commands before startup registry loads');
