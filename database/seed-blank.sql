@@ -149,7 +149,7 @@ CREATE INDEX idx_devices_irrigation_zone_id ON devices(irrigation_zone_id);
 CREATE TABLE irrigation_schedules (
   id                  INTEGER PRIMARY KEY AUTOINCREMENT,
   irrigation_zone_id  INTEGER NOT NULL,
-  trigger_metric      TEXT NOT NULL CHECK (trigger_metric IN ('SWT_WM1','SWT_WM2','SWT_AVG')),
+  trigger_metric      TEXT NOT NULL CHECK (trigger_metric IN ('SWT_WM1','SWT_WM2','SWT_AVG','SWT_1','SWT_2','SWT_3','DENDRO')),
   threshold_kpa       REAL NOT NULL,
   enabled             INTEGER NOT NULL DEFAULT 1,
   last_triggered_at   TEXT,
