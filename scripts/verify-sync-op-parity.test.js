@@ -17,6 +17,7 @@ const SERVER_SOURCE_CANDIDATES = [
       ? process.env.OSI_SERVER_EDGE_SYNC_SERVICE
       : path.resolve(ROOT, process.env.OSI_SERVER_EDGE_SYNC_SERVICE))
     : null,
+  path.resolve(ROOT, '..', '..', '..', 'osi-server', '.worktrees', path.basename(ROOT), SERVER_RELATIVE_SOURCE),
   path.resolve(ROOT, '..', 'osi-server', SERVER_RELATIVE_SOURCE),
   path.resolve(ROOT, '..', '..', '..', 'osi-server', SERVER_RELATIVE_SOURCE),
 ].filter(Boolean);
