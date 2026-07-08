@@ -62,10 +62,6 @@ function formatWaterAction(code: string | null | undefined): string {
   }
 }
 
-function formatSchedulingMode(mode: string | null | undefined): string {
-  return mode === 'server_preferred' ? 'Server when fresh' : 'Local scheduling';
-}
-
 function formatDisplayMode(mode: string | null | undefined): string {
   switch (mode) {
     case 'shared_server':
@@ -104,7 +100,6 @@ export const IrrigationZoneCard: React.FC<IrrigationZoneCardProps> = ({
   const [removingDevice, setRemovingDevice] = useState<string | null>(null);
   const [environmentSummary, setEnvironmentSummary] = useState<ZoneEnvironmentSummary | null>(null);
   const [latestZoneRecommendation, setLatestZoneRecommendation] = useState<ZoneRecommendation | null>(null);
-  const [dismissedDriftAt, setDismissedDriftAt] = useState<string | null>(null);
 
   const handleDeleteZone = async () => {
     setIsDeleting(true);
@@ -172,26 +167,6 @@ export const IrrigationZoneCard: React.FC<IrrigationZoneCardProps> = ({
       window.clearInterval(interval);
     };
   }, [hasDendroDevices, zone.id]);
-
-  useEffect(() => {
-    setDismissedDriftAt(null);
-  }, [environmentSummary?.generatedAt, zone.id]);
-
-  const handleUseServerScheduling = async () => {
-    try {
-      await irrigationZonesAPI.updateConfig(zone.id, { schedulingMode: 'server_preferred' });
-      onUpdate();
-    } catch (err: any) {
-      setError(err.response?.data?.detail || err.response?.data?.message || 'Failed to switch scheduling source');
-    }
-  };
-
-  const driftPrompt = environmentSummary?.drift?.active
-    && environmentSummary.display?.schedulingMode !== 'server_preferred'
-    && environmentSummary.drift.canSwitchScheduling
-    && dismissedDriftAt !== environmentSummary.generatedAt
-      ? environmentSummary.drift
-      : null;
 
   return (
     <div className="bg-[var(--surface)] border-2 border-[var(--border)] rounded-xl p-6 shadow-lg mb-6">
@@ -305,20 +280,12 @@ export const IrrigationZoneCard: React.FC<IrrigationZoneCardProps> = ({
                 <span className="rounded-full border border-[var(--border)] bg-[var(--surface)] px-2 py-0.5 font-semibold text-[var(--primary)]">
                   {formatDisplayMode(environmentSummary.display?.mode)}
                 </span>
-                <span className="rounded-full border border-[var(--border)] bg-[var(--surface)] px-2 py-0.5 font-semibold text-[var(--text-secondary)]">
-                  {formatSchedulingMode(environmentSummary.display?.schedulingMode ?? zone.schedulingMode)}
-                </span>
               </div>
             </div>
           </div>
           {environmentSummary.display?.fallbackReason && (
             <div className="mt-3 rounded-xl border border-[var(--warn-border)] bg-[var(--warn-bg)] px-3 py-2 text-sm text-[var(--warn-text)]">
               {environmentSummary.display.fallbackReason}
-            </div>
-          )}
-          {environmentSummary.display?.schedulingMode === 'server_preferred' && (
-            <div className="mt-3 rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-sm text-[var(--text-secondary)]">
-              This zone follows OSI Server recommendations when they are fresh, with automatic local fallback if the link becomes stale.
             </div>
           )}
           <div className="mt-4 grid grid-cols-2 gap-2 lg:grid-cols-4">
@@ -370,34 +337,6 @@ export const IrrigationZoneCard: React.FC<IrrigationZoneCardProps> = ({
               </div>
             )}
           </div>
-          {driftPrompt && (
-            <div className="mt-3 rounded-xl border border-[var(--warn-border)] bg-[var(--warn-bg)] px-3 py-3 text-sm text-[var(--warn-text)]">
-              <p className="font-semibold">Local and OSI Server recommendations are drifting.</p>
-              <p className="mt-1">{driftPrompt.reason}</p>
-              <div className="mt-2 flex flex-wrap gap-2 text-xs text-[var(--warn-text)]">
-                <span className="rounded-full bg-[var(--card)] px-2 py-1 font-medium">
-                  Local: {formatWaterAction(driftPrompt.localActionCode)}
-                </span>
-                <span className="rounded-full bg-[var(--card)] px-2 py-1 font-medium">
-                  Server: {formatWaterAction(driftPrompt.serverActionCode)}
-                </span>
-              </div>
-              <div className="mt-3 flex flex-wrap gap-2">
-                <button
-                  onClick={() => setDismissedDriftAt(environmentSummary.generatedAt)}
-                  className="rounded-lg border border-[var(--warn-border)] bg-[var(--card)] px-3 py-1.5 text-sm font-semibold text-[var(--warn-text)]"
-                >
-                  Keep local
-                </button>
-                <button
-                  onClick={() => void handleUseServerScheduling()}
-                  className="rounded-lg bg-[var(--warn-border)] px-3 py-1.5 text-sm font-semibold text-white"
-                >
-                  Use server scheduling
-                </button>
-              </div>
-            </div>
-          )}
         </div>
       )}
 

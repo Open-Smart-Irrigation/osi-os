@@ -69,12 +69,10 @@ export const ZoneConfigModal: React.FC<Props> = ({ isOpen, zone, onClose, onSave
     zone.measuredFlowRateLpm != null ? String(zone.measuredFlowRateLpm) : ''
   );
   const [measurementMethod, setMeasurementMethod] = useState(zone.measurementMethod ?? '');
-  const [schedulingMode, setSchedulingMode] = useState<'local' | 'server_preferred'>((zone.schedulingMode ?? 'local') as 'local' | 'server_preferred');
   const [notes, setNotes] = useState(zone.notes ?? '');
   const [timezone, setTimezone] = useState(zone.timezone ?? 'UTC');
   const [phenologicalStage, setPhenologicalStage] = useState(zone.phenologicalStage ?? 'default');
   const [calibrationKey, setCalibrationKey] = useState(zone.calibrationKey ?? 'default');
-  const [predictionCardEnabled, setPredictionCardEnabled] = useState(zone.predictionCardEnabled ?? false);
   const [latitude, setLatitude] = useState(zone.latitude != null ? String(zone.latitude) : '');
   const [longitude, setLongitude] = useState(zone.longitude != null ? String(zone.longitude) : '');
   const [saving, setSaving] = useState(false);
@@ -98,12 +96,10 @@ export const ZoneConfigModal: React.FC<Props> = ({ isOpen, zone, onClose, onSave
     setIrrigationEfficiencyPct(zone.irrigationEfficiencyPct != null ? String(zone.irrigationEfficiencyPct) : '');
     setMeasuredFlowRateLpm(zone.measuredFlowRateLpm != null ? String(zone.measuredFlowRateLpm) : '');
     setMeasurementMethod(zone.measurementMethod ?? '');
-    setSchedulingMode((zone.schedulingMode ?? 'local') as 'local' | 'server_preferred');
     setNotes(zone.notes ?? '');
     setTimezone(zone.timezone ?? 'UTC');
     setPhenologicalStage(zone.phenologicalStage ?? 'default');
     setCalibrationKey(zone.calibrationKey ?? 'default');
-    setPredictionCardEnabled(zone.predictionCardEnabled ?? false);
     setLatitude(zone.latitude != null ? String(zone.latitude) : '');
     setLongitude(zone.longitude != null ? String(zone.longitude) : '');
     setDeviceLocationError(null);
@@ -143,12 +139,10 @@ export const ZoneConfigModal: React.FC<Props> = ({ isOpen, zone, onClose, onSave
       irrigationMethod?: string | null;
       areaM2?: number | null;
       irrigationEfficiencyPct?: number | null;
-      schedulingMode?: 'local' | 'server_preferred' | null;
       notes?: string | null;
       timezone?: string | null;
       phenologicalStage?: string | null;
       calibrationKey?: string | null;
-      predictionCardEnabled?: boolean;
     } = {};
 
     if ((zone.cropType ?? '') !== cropType) payload.cropType = cropType || null;
@@ -159,14 +153,10 @@ export const ZoneConfigModal: React.FC<Props> = ({ isOpen, zone, onClose, onSave
     if ((zone.irrigationEfficiencyPct != null ? String(zone.irrigationEfficiencyPct) : '') !== irrigationEfficiencyPct) {
       payload.irrigationEfficiencyPct = irrigationEfficiencyPct.trim() ? Number(irrigationEfficiencyPct) : null;
     }
-    if ((zone.schedulingMode ?? 'local') !== schedulingMode) payload.schedulingMode = schedulingMode;
     if ((zone.notes ?? '') !== notes) payload.notes = notes || null;
     if ((zone.timezone ?? 'UTC') !== timezone) payload.timezone = timezone;
     if ((zone.phenologicalStage ?? 'default') !== phenologicalStage) payload.phenologicalStage = phenologicalStage;
     if ((zone.calibrationKey ?? 'default') !== calibrationKey) payload.calibrationKey = calibrationKey;
-    if ((zone.predictionCardEnabled ?? false) !== predictionCardEnabled) {
-      payload.predictionCardEnabled = predictionCardEnabled;
-    }
 
     return payload;
   };
@@ -290,28 +280,6 @@ export const ZoneConfigModal: React.FC<Props> = ({ isOpen, zone, onClose, onSave
             <DataExportSection zoneId={zone.id} todayIso={todayIso} />
           </div>
 
-          <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)]/70 p-4">
-            <div className="flex items-center justify-between gap-3">
-              <div>
-                <p className="text-sm font-semibold text-[var(--text)]">Prediction Advisory</p>
-                <p className="text-xs text-[var(--text-tertiary)] mt-0.5">
-                  Show the prediction advisory panel for this zone once the synced edge/server state agrees on the change.
-                </p>
-              </div>
-              <button
-                type="button"
-                role="switch"
-                aria-checked={predictionCardEnabled}
-                onClick={() => setPredictionCardEnabled(value => !value)}
-                className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors focus:outline-none ${predictionCardEnabled ? 'bg-[var(--primary)]' : 'bg-[var(--border)]'}`}
-              >
-                <span
-                  className={`pointer-events-none inline-block h-5 w-5 rounded-full bg-white shadow-sm transition-transform ${predictionCardEnabled ? 'translate-x-5' : 'translate-x-0'}`}
-                />
-              </button>
-            </div>
-          </div>
-
           {/* Crop & Variety */}
           <div>
             <p className="text-xs font-semibold text-[var(--text-tertiary)] uppercase tracking-wide mb-2">Crop</p>
@@ -375,7 +343,6 @@ export const ZoneConfigModal: React.FC<Props> = ({ isOpen, zone, onClose, onSave
                 placeholder="m²"
                 className="w-full bg-[var(--surface)] border border-[var(--border)] text-[var(--text)] rounded-lg px-3 py-2 text-sm placeholder:text-[var(--text-tertiary)]"
               />
-              <p className="mt-1 text-xs text-[var(--text-tertiary)]">Used to convert irrigation liters into effective mm for the water balance.</p>
             </div>
             <div>
               <p className="text-xs font-semibold text-[var(--text-tertiary)] uppercase tracking-wide mb-2">Irrigation efficiency</p>
@@ -389,23 +356,7 @@ export const ZoneConfigModal: React.FC<Props> = ({ isOpen, zone, onClose, onSave
                 placeholder="%"
                 className="w-full bg-[var(--surface)] border border-[var(--border)] text-[var(--text)] rounded-lg px-3 py-2 text-sm placeholder:text-[var(--text-tertiary)]"
               />
-              <p className="mt-1 text-xs text-[var(--text-tertiary)]">Enter the estimated share of delivered water that reaches the crop root zone.</p>
             </div>
-          </div>
-
-          <div>
-            <p className="text-xs font-semibold text-[var(--text-tertiary)] uppercase tracking-wide mb-2">Scheduling source</p>
-            <select
-              value={schedulingMode}
-              onChange={e => setSchedulingMode(e.target.value as 'local' | 'server_preferred')}
-              className="w-full bg-[var(--surface)] border border-[var(--border)] text-[var(--text)] rounded-lg px-3 py-2 text-sm"
-            >
-              <option value="local">Local edge logic (recommended)</option>
-              <option value="server_preferred">OSI Server when fresh</option>
-            </select>
-            <p className="mt-1 text-xs text-[var(--text-tertiary)]">
-              Irrigation always falls back to local logic if the server recommendation becomes stale.
-            </p>
           </div>
 
           <hr className="border-[var(--border)]" />
@@ -448,7 +399,6 @@ export const ZoneConfigModal: React.FC<Props> = ({ isOpen, zone, onClose, onSave
             >
               {CALIBRATION_KEYS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
             </select>
-            <p className="text-xs text-[var(--text-tertiary)] mt-1">Selects species-specific stress thresholds for dendrometer analysis.</p>
           </div>
 
           {/* Phenological stage */}
@@ -461,7 +411,6 @@ export const ZoneConfigModal: React.FC<Props> = ({ isOpen, zone, onClose, onSave
             >
               {PHENOLOGICAL_STAGES.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
             </select>
-            <p className="text-xs text-[var(--text-tertiary)] mt-1">Adjusts stress sensitivity for the current growth phase.</p>
           </div>
 
           {/* Timezone */}
@@ -474,7 +423,6 @@ export const ZoneConfigModal: React.FC<Props> = ({ isOpen, zone, onClose, onSave
               placeholder="e.g. Europe/Rome"
               className="w-full bg-[var(--surface)] border border-[var(--border)] text-[var(--text)] rounded-lg px-3 py-2 text-sm placeholder:text-[var(--text-tertiary)]"
             />
-            <p className="text-xs text-[var(--text-tertiary)] mt-1">Used to align nightly min/max extraction windows. IANA timezone (e.g. Europe/Rome).</p>
           </div>
 
           <div>
@@ -495,17 +443,12 @@ export const ZoneConfigModal: React.FC<Props> = ({ isOpen, zone, onClose, onSave
                 className="w-full bg-[var(--surface)] border border-[var(--border)] text-[var(--text)] rounded-lg px-3 py-2 text-sm placeholder:text-[var(--text-tertiary)]"
               />
             </div>
-            <p className="text-xs text-[var(--text-tertiary)] mt-1">Used for weather and VPD lookup. Save both coordinates together.</p>
           </div>
 
           <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)]/70 p-3">
             <div className="flex items-center justify-between gap-3">
               <div>
                 <p className="text-xs font-semibold text-[var(--text-tertiary)] uppercase tracking-wide">Device GPS</p>
-                <p className="text-sm text-[var(--text)]">Use your phone or browser location for this zone.</p>
-                <p className="text-xs text-[var(--text-tertiary)] mt-1">
-                  Fills latitude and longitude from this device. Review timezone separately if the farm is in a different timezone.
-                </p>
               </div>
               <button
                 type="button"

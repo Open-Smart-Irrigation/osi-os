@@ -229,6 +229,28 @@ describe('IrrigationZoneCard Data entry', () => {
     expect(waterCard.className).not.toContain('sky-100');
   });
 
+  it('does not expose scheduling-source controls in the water balance card', async () => {
+    apiMocks.getSummary.mockResolvedValue({
+      ...environmentSummary,
+      drift: {
+        active: true,
+        reason: 'Server and local recommendations diverged.',
+        localActionCode: 'monitor_today',
+        serverActionCode: 'irrigate_today',
+        canSwitchScheduling: true,
+      },
+    });
+
+    renderCard([dendroDevice]);
+    fireEvent.click(screen.getByRole('heading', { name: 'Zone B' }));
+
+    expect(await screen.findByText('Water balance')).toBeInTheDocument();
+    expect(screen.queryByText('Local scheduling')).not.toBeInTheDocument();
+    expect(screen.queryByText('Server when fresh')).not.toBeInTheDocument();
+    expect(screen.queryByText('Local and OSI Server recommendations are drifting.')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Use server scheduling' })).not.toBeInTheDocument();
+  });
+
   it('enables the advisory surface when prediction advisory is opted in', async () => {
     window.localStorage.setItem('osi.modules.predictionAdvisory', 'true');
 

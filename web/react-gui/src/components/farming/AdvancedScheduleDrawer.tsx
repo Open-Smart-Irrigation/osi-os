@@ -324,9 +324,6 @@ const AnalysisTab: React.FC<{
 
         <Field label="d_max window (pre-dawn)" value="23:00 – 07:00 local" />
         <Field label="d_min window (midday)"   value="10:00 – 16:00 local" />
-        <p className="text-xs text-[var(--text-tertiary)] py-2">
-          IANA timezone (e.g. Europe/Rome). Used to align nightly min/max extraction windows.
-        </p>
       </Section>
 
       {/* ── TWD method ── */}

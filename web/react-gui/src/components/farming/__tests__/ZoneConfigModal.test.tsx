@@ -98,4 +98,44 @@ describe('ZoneConfigModal irrigation calibration', () => {
     expect(onSaved).toHaveBeenCalled();
     expect(onClose).toHaveBeenCalled();
   });
+
+  it('does not expose retired prediction advisory or scheduling source controls', async () => {
+    const onSaved = vi.fn();
+    const onClose = vi.fn();
+    render(
+      React.createElement(ZoneConfigModal, {
+        isOpen: true,
+        zone: {
+          ...zone,
+          schedulingMode: 'server_preferred',
+          predictionCardEnabled: true,
+        },
+        onClose,
+        onSaved,
+      }),
+    );
+
+    expect(await screen.findByText('Data export')).toBeInTheDocument();
+    expect(screen.queryByText('Prediction Advisory')).not.toBeInTheDocument();
+    expect(screen.queryByText('Scheduling source')).not.toBeInTheDocument();
+    expect(screen.queryByText('Used to convert irrigation liters into effective mm for the water balance.')).not.toBeInTheDocument();
+    expect(screen.queryByText('Enter the estimated share of delivered water that reaches the crop root zone.')).not.toBeInTheDocument();
+    expect(screen.queryByText('Used to align nightly min/max extraction windows. IANA timezone (e.g. Europe/Rome).')).not.toBeInTheDocument();
+    expect(screen.queryByText('Selects species-specific stress thresholds for dendrometer analysis.')).not.toBeInTheDocument();
+    expect(screen.queryByText('Adjusts stress sensitivity for the current growth phase.')).not.toBeInTheDocument();
+    expect(screen.queryByText('Used for weather and VPD lookup. Save both coordinates together.')).not.toBeInTheDocument();
+    expect(screen.queryByText('Use your phone or browser location for this zone.')).not.toBeInTheDocument();
+    expect(screen.queryByText('Fills latitude and longitude from this device. Review timezone separately if the farm is in a different timezone.')).not.toBeInTheDocument();
+
+    fireEvent.change(screen.getByPlaceholderText('Any additional info about this zone…'), {
+      target: { value: 'Use local schedule defaults.' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+    await waitFor(() => {
+      expect(irrigationZonesAPI.updateConfig).toHaveBeenCalledWith(42, {
+        notes: 'Use local schedule defaults.',
+      });
+    });
+  });
 });
