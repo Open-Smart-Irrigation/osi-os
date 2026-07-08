@@ -208,7 +208,7 @@ describe('IrrigationZoneCard Data entry', () => {
 
     expect(screen.queryByTestId('schedule-section')).not.toBeInTheDocument();
     expect(screen.queryByTestId('environment-card')).not.toBeInTheDocument();
-    expect(screen.queryByText('Water Today')).not.toBeInTheDocument();
+    expect(screen.queryByText('Water balance')).not.toBeInTheDocument();
     expect(screen.getByTestId('dendrometer-section')).toHaveTextContent('advisory-off');
   });
 
@@ -218,7 +218,7 @@ describe('IrrigationZoneCard Data entry', () => {
     renderCard([dendroDevice]);
     fireEvent.click(screen.getByRole('heading', { name: 'Zone B' }));
 
-    expect(await screen.findByText('Water Today')).toBeInTheDocument();
+    expect(await screen.findByText('Water balance')).toBeInTheDocument();
     expect(screen.getByTestId('schedule-section')).toBeInTheDocument();
     expect(screen.getByTestId('environment-card')).toBeInTheDocument();
     expect(screen.getByTestId('dendrometer-section')).toHaveTextContent('advisory-off');

@@ -123,7 +123,7 @@
     "triggerHint": "Tandika singa {{metric}} ≥ {{threshold}} kPa (omulundi gumu/lunaku, 06:00)."
   },
   "environment": {
-    "sectionTitle": "Obutonde",
+    "sectionTitle": "Environment & weather forecast",
     "tabs": {
       "local": "Eky'omu kitundu",
       "online": "Ku mukutu",

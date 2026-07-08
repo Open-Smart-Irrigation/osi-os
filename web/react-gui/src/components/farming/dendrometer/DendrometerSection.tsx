@@ -65,6 +65,19 @@ export const DendrometerSection: React.FC<Props> = ({ zone, devices, predictionA
 
   const today     = zoneRecs[0] ?? null;
   const history7  = [...zoneRecs].reverse().slice(-7); // oldest-first for dots
+  const advisoryBanner = predictionAdvisoryEnabled && !loading && !error
+    ? (
+        today ? (
+          <IrrigationActionBanner
+            action={today.irrigation_action}
+            reasoning={today.action_reasoning}
+            history={history7.map(r => ({ date: r.date, stress: r.zone_stress_summary }))}
+          />
+        ) : (
+          <NoDataBanner />
+        )
+      )
+    : null;
 
   return (
     <>
@@ -81,6 +94,12 @@ export const DendrometerSection: React.FC<Props> = ({ zone, devices, predictionA
             ▾
           </span>
         </button>
+
+        {advisoryBanner && (
+          <div className="mt-3">
+            {advisoryBanner}
+          </div>
+        )}
 
         {!collapsed && (
           <div className="mt-3 flex flex-col gap-4">
@@ -99,19 +118,6 @@ export const DendrometerSection: React.FC<Props> = ({ zone, devices, predictionA
 
             {!loading && !error && (
               <>
-                {predictionAdvisoryEnabled && (
-                  today ? (
-                    <IrrigationActionBanner
-                      action={today.irrigation_action}
-                      reasoning={today.action_reasoning}
-                      history={history7.map(r => ({ date: r.date, stress: r.zone_stress_summary }))}
-                    />
-                  ) : (
-                    <NoDataBanner />
-                  )
-                )}
-
-                {/* Confidence pill — after action banner */}
                 <ConfidencePill
                   zoneRec={today}
                   dailyMap={dailyMap}

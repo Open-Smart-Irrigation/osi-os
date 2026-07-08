@@ -123,7 +123,7 @@
     "triggerHint": "Auslösen wenn {{metric}} ≥ {{threshold}} kPa (einmal/Tag, 06:00)."
   },
   "environment": {
-    "sectionTitle": "Umwelt",
+    "sectionTitle": "Umgebung & Wettervorhersage",
     "tabs": {
       "local": "Lokal",
       "online": "Online",

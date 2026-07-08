@@ -294,7 +294,7 @@ export const IrrigationZoneCard: React.FC<IrrigationZoneCardProps> = ({
         <div data-testid="water-today-card" className="mb-4 rounded-2xl border border-[var(--border)] bg-[var(--card)] p-4">
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div>
-              <p className="text-xs font-bold uppercase tracking-[0.18em] text-[var(--primary)]">Water Today</p>
+              <p className="text-xs font-bold uppercase tracking-[0.18em] text-[var(--primary)]">Water balance</p>
               <p className="mt-1 text-sm text-[var(--text-secondary)]">
                 {environmentSummary.water.action?.reasoning ?? 'Daily rain, irrigation, and crop demand summary for this zone.'}
               </p>

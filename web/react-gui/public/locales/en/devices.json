@@ -152,7 +152,7 @@
     "triggerHint": "Trigger if {{metric}} ≥ {{threshold}} kPa (once/day, 06:00)."
   },
   "environment": {
-    "sectionTitle": "Environment",
+    "sectionTitle": "Environment & weather forecast",
     "tabs": {
       "local": "Local",
       "online": "Online",

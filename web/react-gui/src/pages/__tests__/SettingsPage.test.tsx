@@ -59,8 +59,8 @@ vi.mock('react-i18next', () => ({
         modulesTitle: 'Modules',
         predictionAdvisory: 'Prediction advisory',
         predictionAdvisoryWarning: 'Experimental, do not use for production!',
-        waterCard: 'Water card',
-        environmentCard: 'Environment card',
+        waterCard: 'Water balance',
+        environmentCard: 'Environment & weather forecast',
         irrigationSchedule: 'Irrigation schedule',
         schedulerDisableConfirm: 'Disable all active irrigation schedules before hiding this module?',
         schedulerDisableSuccess_one: 'Disabled {{count}} active schedule.',
@@ -204,9 +204,9 @@ describe('SettingsPage', () => {
     expect(moduleRows).toHaveLength(4);
     expect(moduleRows.map((row) => row.textContent)).toEqual([
       expect.stringContaining('Prediction advisory'),
-      expect.stringContaining('Water card'),
+      expect.stringContaining('Water balance'),
       expect.stringContaining('Irrigation schedule'),
-      expect.stringContaining('Environment card'),
+      expect.stringContaining('Environment & weather forecast'),
     ]);
     expect(within(moduleRows[0]).getByRole('button', { name: 'Off' })).toHaveAttribute('aria-pressed', 'true');
     expect(within(moduleRows[1]).getByRole('button', { name: 'On' })).toHaveAttribute('aria-pressed', 'true');
@@ -293,7 +293,7 @@ describe('SettingsPage', () => {
     const userRequest = screen.getByRole('region', { name: 'User request' });
     fireEvent.click(within(userRequest).getByRole('button', { name: 'Bug fix' }));
     fireEvent.change(within(userRequest).getByLabelText('Title'), {
-      target: { value: 'Water card layout breaks' },
+      target: { value: 'Water balance layout breaks' },
     });
     fireEvent.change(within(userRequest).getByLabelText('Email address (optional)'), {
       target: { value: 'farmer@example.com' },
@@ -314,7 +314,7 @@ describe('SettingsPage', () => {
 
     await waitFor(() => expect(supportRequestsAPI.create).toHaveBeenCalledWith({
       type: 'bug',
-      title: 'Water card layout breaks',
+      title: 'Water balance layout breaks',
       contact_email: 'farmer@example.com',
       description: 'The water card shifts in dark mode on desktop.',
       expected: null,
