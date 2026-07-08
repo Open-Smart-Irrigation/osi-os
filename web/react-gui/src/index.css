@@ -36,6 +36,41 @@
   --overlay: #334155;
 }
 
+html[data-theme='dark'] {
+  --bg: #101413;
+  --surface: #171D1B;
+  --card: #202623;
+  --text: #F4F7F5;
+  --text-secondary: #C3CCC7;
+  --text-tertiary: #91A09A;
+  --text-disabled: #65736D;
+  --border: #3A4540;
+  --focus: #2DD4BF;
+  --primary: #2DD4BF;
+  --primary-hover: #14B8A6;
+  --secondary-bg: #26322E;
+  --header-bg: #0B302C;
+  --header-text: #F8FFFC;
+  --header-subtext: #B7E4DA;
+  --success-bg: #123326;
+  --success-text: #BBF7D0;
+  --success-border: #22C55E;
+  --warn-bg: #3A2B0B;
+  --warn-text: #FDE68A;
+  --warn-border: #F59E0B;
+  --error-bg: #7F1D1D;
+  --error-text: #FEE2E2;
+  --soil-wet: #60A5FA;
+  --soil-wet-bg: #172B48;
+  --soil-moist: #4ADE80;
+  --soil-moist-bg: #173827;
+  --soil-dry: #F87171;
+  --soil-dry-bg: #3B1717;
+  --toggle-on: #22C55E;
+  --toggle-off: #4B5A54;
+  --overlay: #050807;
+}
+
 /* Custom base styles */
 body {
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
