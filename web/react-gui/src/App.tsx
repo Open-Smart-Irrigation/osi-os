@@ -8,6 +8,7 @@ import { FarmingDashboard } from './pages/FarmingDashboard';
 import { HistoryDashboard } from './pages/HistoryDashboard';
 import { HistoryCardDetailPage } from './pages/HistoryCardDetailPage';
 import { AccountLink } from './pages/AccountLink';
+import { SettingsPage } from './pages/SettingsPage';
 
 const AnalysisRoute = lazy(() =>
   import('./pages/AnalysisRoute').then((module) => ({ default: module.AnalysisRoute })),
@@ -37,6 +38,15 @@ function App() {
             element={
               <PrivateRoute>
                 <AccountLink />
+              </PrivateRoute>
+            }
+          />
+
+          <Route
+            path="/settings"
+            element={
+              <PrivateRoute>
+                <SettingsPage />
               </PrivateRoute>
             }
           />

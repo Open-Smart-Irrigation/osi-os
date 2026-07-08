@@ -5,6 +5,7 @@ import type en_dashboard from '../../public/locales/en/dashboard.json';
 import type en_devices   from '../../public/locales/en/devices.json';
 import type en_accountLink from '../../public/locales/en/accountLink.json';
 import type en_history from '../../public/locales/en/history.json';
+import type en_settings from '../../public/locales/en/settings.json';
 
 declare module 'i18next' {
   interface CustomTypeOptions {
@@ -16,6 +17,7 @@ declare module 'i18next' {
       devices:   typeof en_devices;
       accountLink: typeof en_accountLink;
       history: typeof en_history;
+      settings: typeof en_settings;
     };
   }
 }
