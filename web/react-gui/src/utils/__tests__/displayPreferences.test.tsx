@@ -102,6 +102,18 @@ describe('display preferences', () => {
     }
   });
 
+  it('trims timezone values when storing, reading, and resolving preferences', () => {
+    writeDisplayPreferences({ defaultTimezone: '  Europe/Zurich  ' });
+
+    expect(window.localStorage.getItem('osi.defaults.timezone')).toBe('Europe/Zurich');
+    expect(readDisplayPreferences().defaultTimezone).toBe('Europe/Zurich');
+    expect(resolvePreferredTimezone()).toBe('Europe/Zurich');
+
+    window.localStorage.setItem('osi.defaults.timezone', '  UTC  ');
+    expect(readDisplayPreferences().defaultTimezone).toBe('UTC');
+    expect(resolvePreferredTimezone()).toBe('UTC');
+  });
+
   it('returns defaults when storage is unavailable', () => {
     const originalStorage = window.localStorage;
     try {

@@ -68,6 +68,11 @@ function readBooleanPreference(key: string, fallback: boolean): boolean {
   return fallback;
 }
 
+function normalizeStoredString(value: string | null | undefined): string | null {
+  const normalized = value?.trim();
+  return normalized ? normalized : null;
+}
+
 function dispatchPreferencesEvent(): void {
   try {
     window.dispatchEvent(new Event(PREFERENCES_EVENT));
@@ -88,14 +93,14 @@ export function readDisplayPreferences(): DisplayPreferences {
   const storedDensity = readStorage(DASHBOARD_DENSITY_KEY);
   const dashboardDensity: DashboardDensity = storedDensity === 'compact' ? 'compact' : 'comfortable';
   const dashboardAutoRefresh = readStorage(DASHBOARD_AUTO_REFRESH_KEY) === 'off' ? 'off' : 'on';
-  const storedTimezone = readStorage(DEFAULT_TIMEZONE_KEY);
+  const storedTimezone = normalizeStoredString(readStorage(DEFAULT_TIMEZONE_KEY));
 
   return {
     swtUnit,
     theme,
     dashboardDensity,
     dashboardAutoRefresh,
-    defaultTimezone: storedTimezone && storedTimezone.trim() ? storedTimezone : null,
+    defaultTimezone: storedTimezone,
     modules: {
       predictionAdvisory: readBooleanPreference(MODULE_KEYS.predictionAdvisory, DEFAULT_MODULES.predictionAdvisory),
       environment: readBooleanPreference(MODULE_KEYS.environment, DEFAULT_MODULES.environment),
@@ -115,7 +120,7 @@ export function writeDisplayPreferences(next: Partial<DisplayPreferences>): void
     writeStorage(DASHBOARD_AUTO_REFRESH_KEY, next.dashboardAutoRefresh);
   }
   if (Object.prototype.hasOwnProperty.call(next, 'defaultTimezone')) {
-    writeStorage(DEFAULT_TIMEZONE_KEY, next.defaultTimezone && next.defaultTimezone.trim() ? next.defaultTimezone : null);
+    writeStorage(DEFAULT_TIMEZONE_KEY, normalizeStoredString(next.defaultTimezone));
   }
   if (next.modules) {
     writeStorage(MODULE_KEYS.predictionAdvisory, String(next.modules.predictionAdvisory));
@@ -131,12 +136,12 @@ export function applyThemePreference(theme: ThemePreference): void {
 }
 
 export function resolvePreferredTimezone(): string {
-  const stored = readStorage(DEFAULT_TIMEZONE_KEY);
-  if (stored && stored.trim()) return stored;
+  const stored = normalizeStoredString(readStorage(DEFAULT_TIMEZONE_KEY));
+  if (stored) return stored;
 
   try {
-    const browserTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
-    if (browserTimezone && browserTimezone.trim()) return browserTimezone;
+    const browserTimezone = normalizeStoredString(Intl.DateTimeFormat().resolvedOptions().timeZone);
+    if (browserTimezone) return browserTimezone;
   } catch {
     // Fall through to the explicit default.
   }
