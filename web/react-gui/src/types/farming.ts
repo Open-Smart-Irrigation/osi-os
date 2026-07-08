@@ -575,6 +575,99 @@ export interface HourlyForecast {
   windSpeedMps: number | null;
 }
 
+// ---- Field-originated support and improvement requests ----
+export type SupportRequestType = 'bug' | 'improvement' | 'feedback';
+
+export type SupportRequestArea =
+  | 'dashboard'
+  | 'history'
+  | 'analysis'
+  | 'copy'
+  | 'watering'
+  | 'sync'
+  | 'devices'
+  | 'system'
+  | 'other';
+
+export type SupportRequestSeverity = 'cant_work' | 'workaround' | 'annoying' | 'idea';
+
+export type SupportRequestLocalStatus =
+  | 'QUEUED'
+  | 'SUBMITTED'
+  | 'SYNCED'
+  | 'FAILED_RETRYABLE'
+  | 'FAILED_PERMANENT';
+
+export type SupportRequestCloudStatus =
+  | 'SUBMITTED'
+  | 'TRIAGED'
+  | 'BEING_REVIEWED'
+  | 'NEEDS_INFO'
+  | 'ISSUE_ONLY'
+  | 'ISSUE_OPEN'
+  | 'NOT_PLANNED'
+  | 'RELEASED'
+  | 'REJECTED'
+  | 'DUPLICATE'
+  | 'AWAITING_APPROVAL'
+  | 'AGENT_RUNNING'
+  | 'VERIFYING'
+  | 'PR_OPEN'
+  | 'IN_REVIEW'
+  | 'MERGED'
+  | 'CLOSED'
+  | 'AGENT_FAILED';
+
+export type SupportDiagnosticsValue =
+  | string
+  | number
+  | boolean
+  | null
+  | SupportDiagnosticsValue[]
+  | { [key: string]: SupportDiagnosticsValue };
+
+export interface SupportDiagnosticsPreview {
+  generated_at: string | null;
+  diagnostics: Record<string, SupportDiagnosticsValue> | null;
+}
+
+export interface SupportRequest {
+  request_id: string;
+  type: SupportRequestType;
+  title: string;
+  description_preview: string | null;
+  area: SupportRequestArea;
+  severity: SupportRequestSeverity;
+  local_status: SupportRequestLocalStatus;
+  cloud_status: SupportRequestCloudStatus | null;
+  cloud_reason?: string | null;
+  cloud_human_message?: string | null;
+  released_version?: string | null;
+  submitted_at?: string | null;
+  last_status_at?: string | null;
+  updated_at?: string | null;
+}
+
+export interface SupportRequestCreateRequest {
+  type: SupportRequestType;
+  title: string;
+  description: string;
+  expected?: string | null;
+  actual?: string | null;
+  steps?: string | null;
+  area: SupportRequestArea;
+  severity: SupportRequestSeverity;
+  consent_public: true;
+  consent_diagnostics: boolean;
+  route?: string | null;
+  current_route?: string | null;
+}
+
+export interface SupportRequestCreateResponse {
+  request_id: string;
+  local_status: SupportRequestLocalStatus;
+}
+
 /** One raw dendrometer reading from dendrometer_readings table */
 export interface DendroReading {
   id: number | null;

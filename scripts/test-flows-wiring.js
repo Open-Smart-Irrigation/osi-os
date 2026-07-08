@@ -17,6 +17,19 @@ const byId = Object.fromEntries(flows.filter((n) => n.id).map((n) => [n.id, n]))
 
 let failures = [];
 
+function hasLib(node, varName, moduleName) {
+    const libs = Array.isArray(node && node.libs) ? node.libs : [];
+    return libs.some((lib) => lib.var === varName && lib.module === moduleName);
+}
+
+function findHttpIn(method, url) {
+    return flows.find((node) =>
+        node.type === 'http in'
+        && String(node.method || '').toLowerCase() === method
+        && node.url === url
+    );
+}
+
 function assertWires(nodeId, expectedWires, label) {
     const node = byId[nodeId];
     if (!node) {
@@ -30,6 +43,79 @@ function assertWires(nodeId, expectedWires, label) {
         return;
     }
     console.log(`OK  ${label}`);
+}
+
+// === Field request intake + status apply wiring ===
+
+for (const route of [
+    { method: 'get', url: '/api/improvement-requests' },
+    { method: 'get', url: '/api/improvement-requests/diagnostics-preview' },
+    { method: 'post', url: '/api/improvement-requests' },
+]) {
+    const node = findHttpIn(route.method, route.url);
+    if (!node) {
+        failures.push(`Field requests: missing HTTP IN ${route.method.toUpperCase()} ${route.url}`);
+        continue;
+    }
+    if (JSON.stringify(node.wires || []) !== JSON.stringify([['improvement-requests-api-router']])) {
+        failures.push(`Field requests: ${route.method.toUpperCase()} ${route.url} does not wire to improvement-requests-api-router`);
+        continue;
+    }
+    console.log(`OK  Field requests: ${route.method.toUpperCase()} ${route.url} present`);
+}
+
+const intakeRouter = byId['improvement-requests-api-router'];
+if (!intakeRouter) {
+    failures.push('Field requests: improvement-requests-api-router not found');
+} else {
+    if (!hasLib(intakeRouter, 'osiDb', 'osi-db-helper')) {
+        failures.push('Field requests: improvement-requests-api-router missing osiDb lib binding');
+    }
+    if (!/\.close\s*\(/.test(intakeRouter.func || '')) {
+        failures.push('Field requests: improvement-requests-api-router opens DB without .close(');
+    }
+    if (hasLib(intakeRouter, 'osiDb', 'osi-db-helper') && /\.close\s*\(/.test(intakeRouter.func || '')) {
+        console.log('OK  Field requests: intake router declares osiDb and closes DB');
+    }
+}
+
+const pendingSplit = byId['sync-pending-split'];
+if (!pendingSplit) {
+    failures.push('Field requests: sync-pending-split not found');
+} else {
+    if (pendingSplit.outputs !== 2) {
+        failures.push(`Field requests: sync-pending-split expected 2 outputs, got ${pendingSplit.outputs}`);
+    }
+    const wires = JSON.stringify(pendingSplit.wires || []);
+    const expected = JSON.stringify([['reject-indefinite-open'], ['work-request-status-apply']]);
+    if (wires !== expected) {
+        failures.push(`Field requests: sync-pending-split expected wires ${expected}, got ${wires}`);
+    }
+    if (pendingSplit.outputs === 2 && wires === expected) {
+        console.log('OK  Field requests: pending commands split status updates away from actuator path');
+    }
+}
+
+const statusApply = byId['work-request-status-apply'];
+if (!statusApply) {
+    failures.push('Field requests: work-request-status-apply not found');
+} else {
+    if (!hasLib(statusApply, 'osiDb', 'osi-db-helper')) {
+        failures.push('Field requests: work-request-status-apply missing osiDb lib binding');
+    }
+    if (!/UPDATE\s+improvement_requests/i.test(statusApply.func || '')) {
+        failures.push('Field requests: work-request-status-apply does not update improvement_requests');
+    }
+    if (JSON.stringify(statusApply.wires || []) !== JSON.stringify([['command-ack-queue-rest']])) {
+        failures.push('Field requests: work-request-status-apply does not wire to command-ack-queue-rest');
+    }
+    if (
+        hasLib(statusApply, 'osiDb', 'osi-db-helper')
+        && /UPDATE\s+improvement_requests/i.test(statusApply.func || '')
+        && JSON.stringify(statusApply.wires || []) === JSON.stringify([['command-ack-queue-rest']])
+    ) {
+        console.log('OK  Field requests: status apply updates improvement_requests and queues ACK');
+    }
 }
 
 // === WS1 STREGA wiring (C5 / H2 / L1 / M8) ===

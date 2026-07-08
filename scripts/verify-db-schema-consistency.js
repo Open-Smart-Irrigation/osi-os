@@ -347,6 +347,32 @@ const schemaContract = {
     'last_seen_at',
     'attempts',
   ],
+  improvement_requests: [
+    'request_uuid',
+    'user_id',
+    'type',
+    'title',
+    'description',
+    'expected',
+    'actual',
+    'steps',
+    'area',
+    'severity',
+    'consent_diagnostics',
+    'consent_public',
+    'diagnostics_json',
+    'gateway_device_eui',
+    'local_status',
+    'cloud_status',
+    'cloud_reason',
+    'cloud_human_message',
+    'released_version',
+    'submitted_at',
+    'last_status_at',
+    'created_at',
+    'updated_at',
+    'sync_version',
+  ],
 };
 
 const requiredIndexes = {
@@ -383,6 +409,10 @@ const requiredIndexes = {
     'idx_irrig_events_created_at',
     'idx_irrigation_events_zone_id',
     'idx_irrigation_events_event_uuid',
+  ],
+  improvement_requests: [
+    'idx_improvement_requests_user_created_at',
+    'idx_improvement_requests_status',
   ],
 };
 
@@ -457,6 +487,12 @@ const requiredIndexSqlFragments = {
     'unique index',
     'on irrigation_events(event_uuid)',
   ],
+  idx_improvement_requests_user_created_at: [
+    'on improvement_requests(user_id, created_at desc)',
+  ],
+  idx_improvement_requests_status: [
+    'on improvement_requests(local_status, cloud_status, updated_at desc)',
+  ],
 };
 
 const requiredTriggerSqlFragments = {
@@ -521,6 +557,26 @@ const requiredTriggerSqlFragments = {
     "nullif(trim(new.gateway_device_eui)",
     "aggregate_key",
     "'gateway_device_eui', coalesce(nullif(trim(new.gateway_device_eui)",
+  ],
+  trg_improvement_requests_outbox_ai: [
+    'work_request_submitted',
+    'contract_version',
+    "'schema_version', 1",
+    "'request_id', new.request_uuid",
+    "'type', new.type",
+    "'title', new.title",
+    "'description', new.description",
+    "'area', new.area",
+    "'severity', new.severity",
+    "'consent_public'",
+    "'consent_diagnostics'",
+    "'diagnostics', json(new.diagnostics_json)",
+    "'gateway_device_eui', new.gateway_device_eui",
+    "'gui_user'",
+    "'local_user_id', new.user_id",
+    "'sync_version', new.sync_version",
+    "'occurred_at', new.submitted_at",
+    "'work-request-' || new.request_uuid",
   ],
 };
 

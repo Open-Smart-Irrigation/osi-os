@@ -505,6 +505,49 @@ function all(s) { return new Promise((resolve, reject) => db.all(s, (err, rows) 
 NODE
 }
 
+ensure_improvement_requests_schema() {
+    echo "--- Live improvement requests schema (ordered migration 0005) ---"
+    if [ ! -e "$DB_PATH" ]; then
+        echo "SKIP: no live database at $DB_PATH"
+        return 0
+    fi
+    fetch "database/migrations/ordered/0005__field_work_requests.sql" "$TMP_DIR/0005__field_work_requests.sql"
+    OSI_MIGRATION_SQL="$TMP_DIR/0005__field_work_requests.sql" node <<'NODE'
+const fs = require('fs');
+const dbPath = '/data/db/farming.db';
+if (!fs.existsSync(dbPath)) {
+  console.log('SKIP: no live database at ' + dbPath);
+  process.exit(0);
+}
+// Single source of DDL truth: execute the ordered-migration file itself.
+// Guard: only additive migrations may be applied through this deploy hook.
+const sql = fs.readFileSync(process.env.OSI_MIGRATION_SQL, 'utf8');
+if (!/^--\s*risk:\s*additive\s*(\r?\n|$)/.test(sql)) {
+  console.error('ERROR: refusing to apply a non-additive migration via deploy repair');
+  process.exit(1);
+}
+const sqlite3 = require('/srv/node-red/node_modules/sqlite3');
+const db = new sqlite3.Database(dbPath);
+function run(s) { return new Promise((resolve, reject) => db.run(s, (err) => err ? reject(err) : resolve())); }
+function exec(s) { return new Promise((resolve, reject) => db.exec(s, (err) => err ? reject(err) : resolve())); }
+function all(s) { return new Promise((resolve, reject) => db.all(s, (err, rows) => err ? reject(err) : resolve(rows || []))); }
+(async () => {
+  await run('PRAGMA busy_timeout=5000');
+  await exec(sql);
+  const tables = new Set((await all("SELECT name FROM sqlite_master WHERE type = 'table'")).map((r) => r.name));
+  if (!tables.has('improvement_requests')) {
+    throw new Error('improvement_requests table still missing after deploy repair');
+  }
+  console.log('OK');
+  db.close();
+})().catch((err) => {
+  console.error(err && err.stack ? err.stack : err);
+  db.close();
+  process.exit(1);
+});
+NODE
+}
+
 echo "=== OSI OS Deploy ==="
 echo "Source: $BASE"
 
@@ -645,6 +688,7 @@ ensure_zone_irrigation_calibration_schema
 ensure_analysis_views_schema
 ensure_chameleon_schema
 ensure_gateway_health_schema
+ensure_improvement_requests_schema
 
 fix_mosquitto_ownership() {
     echo "--- Mosquitto ownership ---"

@@ -11,6 +11,11 @@ const FLOWS = [
   'conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/flows.json',
   'conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/flows.json',
 ].map((p) => path.join(repo, p));
+const MIGRATION_OWNED_TRIGGERS = new Set([
+  // 0005__field_work_requests.sql is delivered by seed DBs and deploy.sh's
+  // additive migration repair. Do not add it to the frozen sync-init-fn boot DDL.
+  'trg_improvement_requests_outbox_ai',
+]);
 
 function q(db, sql) {
   const out = execFileSync('sqlite3', ['-json', db, sql], { encoding: 'utf8' }).trim();
@@ -29,11 +34,17 @@ const canonDb = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'parity-')), 'ca
 execFileSync('sqlite3', ['-bail', canonDb], { input: fs.readFileSync(SEED, 'utf8'), encoding: 'utf8' });
 const canonDevices = checkTypes((q(canonDb, "SELECT sql FROM sqlite_master WHERE name='devices'")[0] || {}).sql);
 const canonTriggers = new Set(q(canonDb, "SELECT name FROM sqlite_master WHERE type='trigger'").map((r) => r.name));
+const runtimeCanonTriggers = new Set([...canonTriggers].filter((name) => !MIGRATION_OWNED_TRIGGERS.has(name)));
 
 const setEq = (a, b) => a.size === b.size && [...a].every((x) => b.has(x));
 const diff = (a, b) => [...a].filter((x) => !b.has(x));
 
 const problems = [];
+for (const triggerName of MIGRATION_OWNED_TRIGGERS) {
+  if (!canonTriggers.has(triggerName)) {
+    problems.push(`migration-owned trigger ${triggerName} is not present in the canonical seed`);
+  }
+}
 for (const flowPath of FLOWS) {
   const rel = path.relative(repo, flowPath);
   const raw = fs.readFileSync(flowPath, 'utf8');
@@ -49,8 +60,8 @@ for (const flowPath of FLOWS) {
 
   // (b) triggers — created across MULTIPLE flow nodes, so compare the WHOLE flow text.
   const flowTriggers = triggerNames(raw);
-  if (!setEq(flowTriggers, canonTriggers)) {
-    problems.push(`${rel}: flow trigger set != canonical seed. missing=[${diff(canonTriggers, flowTriggers)}] extra=[${diff(flowTriggers, canonTriggers)}]`);
+  if (!setEq(flowTriggers, runtimeCanonTriggers)) {
+    problems.push(`${rel}: runtime flow trigger set != canonical runtime trigger set. missing=[${diff(runtimeCanonTriggers, flowTriggers)}] extra=[${diff(flowTriggers, runtimeCanonTriggers)}]`);
   }
 }
 
@@ -59,5 +70,5 @@ if (problems.length) {
   for (const p of problems) console.error(`  - ${p}`);
   process.exit(1);
 }
-console.log(`verify-runtime-schema-parity: OK (${FLOWS.length} flows: devices CHECK + trigger parity)`);
+console.log(`verify-runtime-schema-parity: OK (${FLOWS.length} flows: devices CHECK + runtime trigger parity)`);
 process.exit(0);

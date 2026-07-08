@@ -21,6 +21,23 @@ jobs:
           token: ${{ secrets.OSI_SERVER_RO_TOKEN }}
           path: osi-server
           persist-credentials: false
+      - name: Prefer matching osi-server branch
+        env:
+          OSI_SERVER_RO_TOKEN: ${{ secrets.OSI_SERVER_RO_TOKEN }}
+          OSI_SERVER_REF: ${{ github.head_ref || github.ref_name }}
+        run: |
+          set -euo pipefail
+          cd osi-server
+          auth_header="$(printf 'x-access-token:%s' "$OSI_SERVER_RO_TOKEN" | base64 | tr -d '\n')"
+          if git -c "http.https://github.com/.extraheader=AUTHORIZATION: basic ${auth_header}" \
+              ls-remote --exit-code --heads origin "$OSI_SERVER_REF" >/dev/null; then
+            git -c "http.https://github.com/.extraheader=AUTHORIZATION: basic ${auth_header}" \
+              fetch --depth=1 origin "refs/heads/${OSI_SERVER_REF}"
+            git checkout --detach FETCH_HEAD
+            echo "Using osi-server branch ${OSI_SERVER_REF}"
+          else
+            echo "No osi-server branch ${OSI_SERVER_REF}; using default checkout"
+          fi
       - name: Verify osi-server checkout
         run: |
           test -f osi-server/backend/src/main/java/org/osi/server/sync/EdgeSyncService.java || {

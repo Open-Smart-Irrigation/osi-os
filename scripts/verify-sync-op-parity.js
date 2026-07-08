@@ -53,6 +53,11 @@ const DATABASE_SOURCES = [
     path: 'web/react-gui/farming.db',
   },
 ];
+const SQL_OWNED_EVENT_OPS = new Set([
+  // Emitted by 0005__field_work_requests.sql / seed DB trigger, not by
+  // flows.json. The server must still handle it and the schema must declare it.
+  'WORK_REQUEST_SUBMITTED',
+]);
 
 function readUtf8(file) {
   return fs.readFileSync(file, 'utf8');
@@ -63,7 +68,9 @@ function uniquePaths(paths) {
 }
 
 function fallbackServerSourceCandidates(root = REPO_ROOT) {
+  const worktreeName = path.basename(root);
   return uniquePaths([
+    path.resolve(root, '..', '..', '..', 'osi-server', '.worktrees', worktreeName, SERVER_RELATIVE_SOURCE),
     path.resolve(root, '..', 'osi-server', SERVER_RELATIVE_SOURCE),
     path.resolve(root, '..', '..', '..', 'osi-server', SERVER_RELATIVE_SOURCE),
   ]);
@@ -750,8 +757,13 @@ function checkSyncOpParity(options = {}) {
   }
 
   for (const source of canonicalSources) {
-    const diff = diffSets(allOps, source.ops);
-    const diffLines = formatDiff(source.name, 'union', diff);
+    const isFlowSource = source.name.startsWith('flows:');
+    const expectedOps = isFlowSource
+      ? allOps.filter((op) => !SQL_OWNED_EVENT_OPS.has(op))
+      : allOps;
+    const baselineName = isFlowSource ? 'flow-required union' : 'union';
+    const diff = diffSets(expectedOps, source.ops);
+    const diffLines = formatDiff(source.name, baselineName, diff);
     if (diffLines.length) {
       ok = false;
       lines.push(...diffLines);

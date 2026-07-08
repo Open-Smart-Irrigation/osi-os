@@ -17,7 +17,7 @@ export const DashboardHeader: React.FC<DashboardHeaderProps> = ({
   onAddDevice,
   onLogout,
 }) => {
-  const { t } = useTranslation(['dashboard', 'settings']);
+  const { t } = useTranslation(['dashboard', 'support', 'settings']);
   const showDesktopData = isDesktopBrowser();
 
   return (
@@ -67,6 +67,7 @@ export const DashboardHeader: React.FC<DashboardHeaderProps> = ({
               triggerClassName="bg-slate-900 hover:bg-slate-800 text-white text-lg px-6 py-3"
               items={[
                 { key: 'osi-server', label: t('accountMenu.osiServer'), to: '/account-link' },
+                { key: 'support-requests', label: t('support:navLabel'), to: '/support-requests' },
                 { key: 'logout', label: t('logout'), onSelect: onLogout },
               ]}
             />
