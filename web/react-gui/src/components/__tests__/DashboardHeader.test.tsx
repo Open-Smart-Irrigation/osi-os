@@ -110,11 +110,11 @@ describe('DashboardHeader (osi-os)', () => {
     expect(screen.queryByRole('link', { name: 'Data' })).not.toBeInTheDocument();
   });
 
-  it('puts OSI Server, Support Requests, and Logout in the Account menu', () => {
+  it('puts OSI Server and Logout in the Account menu', () => {
     const { onLogout } = renderHeader();
     fireEvent.click(screen.getByRole('button', { name: 'Account' }));
     expect(screen.getByRole('menuitem', { name: 'OSI Server' })).toHaveAttribute('href', '/account-link');
-    expect(screen.getByRole('menuitem', { name: 'Support & Requests' })).toHaveAttribute('href', '/support-requests');
+    expect(screen.queryByRole('menuitem', { name: 'Support & Requests' })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('menuitem', { name: 'Logout' }));
     expect(onLogout).toHaveBeenCalledOnce();
   });

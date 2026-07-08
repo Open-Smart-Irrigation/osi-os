@@ -19,7 +19,7 @@ vi.mock('react-i18next', () => ({
 vi.mock('../../i18n/config', () => ({
   SUPPORTED_LANGUAGES: [
     { code: 'en', label: 'English' },
-    { code: 'de-CH', label: 'Deutsch (CH)' },
+    { code: 'de-CH', label: 'Deutsch' },
     { code: 'fr', label: 'Français' },
   ],
 }));
@@ -33,12 +33,12 @@ describe('LanguageSwitcher', () => {
   it('uses the same menu-button shape as the dashboard header controls', () => {
     render(<LanguageSwitcher triggerClassName="px-6 py-3 text-lg w-full" />);
 
-    const trigger = screen.getByRole('button', { name: /EN/ });
+    const trigger = screen.getByRole('button', { name: 'English' });
     expect(trigger).toHaveClass('w-full');
     expect(screen.queryByRole('combobox')).not.toBeInTheDocument();
 
     fireEvent.click(trigger);
-    fireEvent.click(screen.getByRole('button', { name: 'Deutsch (CH)' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Deutsch' }));
 
     expect(i18nMock.changeLanguage).toHaveBeenCalledWith('de-CH');
   });

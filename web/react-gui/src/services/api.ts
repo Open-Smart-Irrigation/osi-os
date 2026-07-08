@@ -377,6 +377,11 @@ export const irrigationZonesAPI = {
   }): Promise<void> => {
     await api.put(`/api/irrigation-zones/${zoneId}/location`, payload);
   },
+
+  disableAllSchedules: async (): Promise<{ disabledSchedules: number }> => {
+    const response = await api.post<{ disabledSchedules?: number }>('/api/irrigation-zones/schedules/disable-all');
+    return { disabledSchedules: Number(response.data?.disabledSchedules ?? 0) };
+  },
 };
 
 export interface DendroHistoryPoint {

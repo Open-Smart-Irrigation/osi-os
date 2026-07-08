@@ -74,8 +74,11 @@ if (!intakeRouter) {
     if (!/\.close\s*\(/.test(intakeRouter.func || '')) {
         failures.push('Field requests: improvement-requests-api-router opens DB without .close(');
     }
-    if (hasLib(intakeRouter, 'osiDb', 'osi-db-helper') && /\.close\s*\(/.test(intakeRouter.func || '')) {
-        console.log('OK  Field requests: intake router declares osiDb and closes DB');
+    if (!/contact_email/i.test(intakeRouter.func || '')) {
+        failures.push('Field requests: improvement-requests-api-router does not persist contact_email');
+    }
+    if (hasLib(intakeRouter, 'osiDb', 'osi-db-helper') && /\.close\s*\(/.test(intakeRouter.func || '') && /contact_email/i.test(intakeRouter.func || '')) {
+        console.log('OK  Field requests: intake router declares osiDb, closes DB, and persists contact_email');
     }
 }
 
@@ -234,6 +237,48 @@ for (const node of flows) {
         if (!/const rawZoneIds =/.test(node.func) || !/Number\.isInteger/.test(node.func)) {
             failures.push(label + ' does not reject malformed zone_ids before deleting assignments');
         }
+    }
+}
+
+// === Global Settings module gates ===
+
+const disableAllSchedulesHttp = flows.find((node) => (
+    node.type === 'http in'
+    && node.method === 'post'
+    && node.url === '/api/irrigation-zones/schedules/disable-all'
+));
+if (!disableAllSchedulesHttp) {
+    failures.push('settings modules: missing POST /api/irrigation-zones/schedules/disable-all endpoint');
+} else {
+    console.log('OK  settings modules: bulk schedule-disable endpoint present');
+}
+
+const disableAllSchedulesFn = flows.find((node) => (
+    node.type === 'function'
+    && node.name === 'Disable All Schedules'
+));
+if (!disableAllSchedulesFn || typeof disableAllSchedulesFn.func !== 'string') {
+    failures.push('settings modules: missing Disable All Schedules function');
+} else {
+    const func = disableAllSchedulesFn.func;
+    if (!/verifyBearer/.test(func)) {
+        failures.push('settings modules: Disable All Schedules must verify bearer auth');
+    }
+    if (!/UPDATE\s+irrigation_schedules/i.test(func) || !/SET\s+enabled\s*=\s*0/i.test(func)) {
+        failures.push('settings modules: Disable All Schedules must deactivate irrigation_schedules.enabled');
+    }
+    if (!/irrigation_zones/.test(func) || !/user_id/.test(func)) {
+        failures.push('settings modules: Disable All Schedules must scope updates to the authenticated user zones');
+    }
+    if (!/disabledSchedules/.test(func)) {
+        failures.push('settings modules: Disable All Schedules response must report disabledSchedules');
+    }
+    if (/\b(valve|downlink|strega|chirpstack|mqtt|device_queue)\b/i.test(func)) {
+        failures.push('settings modules: Disable All Schedules must not touch valve/downlink command paths');
+    }
+    const libs = Array.isArray(disableAllSchedulesFn.libs) ? disableAllSchedulesFn.libs : [];
+    if (!libs.some((lib) => lib.var === 'osiDb' && lib.module === 'osi-db-helper')) {
+        failures.push('settings modules: Disable All Schedules must use osi-db-helper');
     }
 }
 

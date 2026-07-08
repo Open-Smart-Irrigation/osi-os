@@ -587,6 +587,7 @@ CREATE TABLE IF NOT EXISTS improvement_requests (
   created_at                TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at                TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   sync_version              INTEGER NOT NULL DEFAULT 1,
+  contact_email             TEXT,
   FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 );
 
@@ -614,6 +615,7 @@ BEGIN
       'request_id', NEW.request_uuid,
       'type', NEW.type,
       'title', NEW.title,
+      'contact_email', NEW.contact_email,
       'description', NEW.description,
       'expected', NEW.expected,
       'actual', NEW.actual,

@@ -48,9 +48,9 @@ export function MetricAcrossZonesPicker({ channels, onApply }: MetricAcrossZones
   return (
     <section
       aria-label={t('analysis.preset.metricLabel')}
-      className="mt-3 rounded-md border border-slate-200 bg-slate-50 p-3"
+      className="mt-3 rounded-md border border-[var(--border)] bg-[var(--card)] p-3"
     >
-      <h2 className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
+      <h2 className="mb-2 text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)]">
         {t('analysis.preset.metricLabel')}
       </h2>
       <div className="flex flex-wrap gap-2">
@@ -60,11 +60,11 @@ export function MetricAcrossZonesPicker({ channels, onApply }: MetricAcrossZones
             type="button"
             aria-label={optionLabel(option)}
             onClick={() => onApply(option.channelKey)}
-            className="inline-flex items-center gap-2 rounded-md border border-slate-200 bg-white px-2.5 py-1.5 text-sm font-medium text-slate-800 transition-colors hover:bg-slate-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-slate-500 focus-visible:ring-offset-1"
+            className="inline-flex items-center gap-2 rounded-md border border-[var(--border)] bg-[var(--surface)] px-2.5 py-1.5 text-sm font-medium text-[var(--text)] transition-colors hover:bg-[var(--secondary-bg)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus)] focus-visible:ring-offset-1"
           >
             <span>{option.displayName}</span>
             {option.unit ? (
-              <span className="rounded bg-slate-100 px-1.5 py-0.5 text-xs font-normal text-slate-600">
+              <span className="rounded bg-[var(--card)] px-1.5 py-0.5 text-xs font-normal text-[var(--text-secondary)]">
                 {prettyUnit(option.unit)}
               </span>
             ) : null}

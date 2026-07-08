@@ -45,6 +45,25 @@ describe('display preferences', () => {
     expect(readDisplayPreferences()).toEqual({ ...defaultPreferences, theme: 'dark' });
   });
 
+  it('persists and reloads dashboard module preferences', () => {
+    writeDisplayPreferences({
+      modules: {
+        predictionAdvisory: true,
+        environment: false,
+        waterCard: false,
+        schedulerUi: false,
+      },
+    });
+
+    expect(window.localStorage.getItem('osi.modules.fieldWorkRequests')).toBeNull();
+    expect(readDisplayPreferences().modules).toEqual({
+      predictionAdvisory: true,
+      environment: false,
+      waterCard: false,
+      schedulerUi: false,
+    });
+  });
+
   it('treats unknown stored values as kPa', () => {
     window.localStorage.setItem('osi.display.swtUnit', 'bars');
     expect(readDisplayPreferences()).toEqual(defaultPreferences);

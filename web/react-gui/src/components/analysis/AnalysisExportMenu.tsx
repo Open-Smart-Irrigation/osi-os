@@ -40,7 +40,7 @@ export function AnalysisExportMenu({
         type="button"
         disabled={disabled}
         onClick={exportCsv}
-        className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+        className="rounded-md border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-sm font-medium text-[var(--text)] hover:bg-[var(--secondary-bg)] disabled:opacity-50"
       >
         {t('analysis.export.csv')}
       </button>
@@ -48,7 +48,7 @@ export function AnalysisExportMenu({
         type="button"
         disabled={disabled}
         onClick={exportPng}
-        className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+        className="rounded-md border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-sm font-medium text-[var(--text)] hover:bg-[var(--secondary-bg)] disabled:opacity-50"
       >
         {t('analysis.export.png')}
       </button>

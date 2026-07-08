@@ -84,8 +84,8 @@ export function AnalysisSeriesTray({ channels, selectedIds, onAdd, onRemove }: A
   return (
     <section className="analysis-series-tray flex flex-col gap-1 text-sm" aria-label={t('analysis.tray.label')}>
       <div className="flex items-center justify-between px-1">
-        <h2 className="text-xs font-semibold uppercase tracking-wide text-slate-500">{t('analysis.tray.title')}</h2>
-        <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-600">
+        <h2 className="text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)]">{t('analysis.tray.title')}</h2>
+        <span className="rounded-full bg-[var(--card)] px-2 py-0.5 text-xs font-medium text-[var(--text-secondary)]">
           {selectedIds.length}
         </span>
       </div>
@@ -95,16 +95,16 @@ export function AnalysisSeriesTray({ channels, selectedIds, onAdd, onRemove }: A
         placeholder={t('analysis.tray.search')}
         value={query}
         onChange={(e) => setQuery(e.target.value)}
-        className="mb-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm outline-none transition focus:border-slate-500 focus:ring-2 focus:ring-slate-300"
+        className="mb-1 w-full rounded-md border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-sm text-[var(--text)] outline-none transition focus:border-[var(--focus)] focus:ring-2 focus:ring-[var(--focus)]"
       />
       <div className="flex flex-col gap-3 overflow-y-auto">
         {groups.map((group) => (
           <div key={group.key} className="flex flex-col">
-            <div className="mb-1 px-1 text-xs font-medium text-slate-700">{group.zoneName}</div>
+            <div className="mb-1 px-1 text-xs font-medium text-[var(--text-secondary)]">{group.zoneName}</div>
             {group.devices.map((deviceGroup) => (
               <div key={deviceGroup.key} className="mb-2 last:mb-0">
                 {deviceGroup.deviceName ? (
-                  <div className="mb-1 px-1 text-xs font-semibold text-slate-800">{deviceGroup.deviceName}</div>
+                  <div className="mb-1 px-1 text-xs font-semibold text-[var(--text)]">{deviceGroup.deviceName}</div>
                 ) : null}
                 <ul className="flex flex-col gap-1">
                   {deviceGroup.channels.map((c) => {
@@ -120,27 +120,27 @@ export function AnalysisSeriesTray({ channels, selectedIds, onAdd, onRemove }: A
                           aria-disabled={disabled}
                           onClick={() => (isSelected ? onRemove(c.seriesId) : onAdd(c.seriesId))}
                           className={[
-                            'flex w-full items-center gap-2 rounded-md border px-2 py-1.5 text-left transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-slate-500 focus-visible:ring-offset-1',
+                            'flex w-full items-center gap-2 rounded-md border px-2 py-1.5 text-left transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus)] focus-visible:ring-offset-1',
                             disabled
-                              ? 'cursor-not-allowed border-slate-100 bg-slate-50 text-slate-400'
+                              ? 'cursor-not-allowed border-[var(--border)] bg-[var(--surface)] text-[var(--text-disabled)]'
                               : isSelected
-                                ? 'border-teal-300 bg-teal-50 text-slate-900'
-                                : 'border-slate-200 bg-white text-slate-800 hover:bg-slate-50',
+                                ? 'border-[var(--primary)] bg-[var(--card)] text-[var(--text)]'
+                                : 'border-[var(--border)] bg-[var(--card)] text-[var(--text-secondary)] hover:bg-[var(--secondary-bg)]',
                           ].join(' ')}
                         >
                           <span className="min-w-0 flex-1">
                             <span className="block truncate font-medium">{channelLabel(c)}</span>
-                            <span className="block truncate text-xs text-slate-500">{c.cardType}</span>
+                            <span className="block truncate text-xs text-[var(--text-tertiary)]">{c.cardType}</span>
                             {disabled && reasonKey ? (
-                              <span className="block truncate text-xs text-slate-500">{t(reasonKey)}</span>
+                              <span className="block truncate text-xs text-[var(--text-tertiary)]">{t(reasonKey)}</span>
                             ) : null}
                           </span>
                           {c.unit ? (
-                            <span className="shrink-0 rounded bg-slate-100 px-1.5 py-0.5 text-xs text-slate-600">
+                            <span className="shrink-0 rounded bg-[var(--surface)] px-1.5 py-0.5 text-xs text-[var(--text-secondary)]">
                               {c.unit}
                             </span>
                           ) : null}
-                          <span className="w-4 shrink-0 text-teal-600" aria-hidden>
+                          <span className="w-4 shrink-0 text-[var(--primary)]" aria-hidden>
                             {isSelected ? '✓' : ''}
                           </span>
                         </button>

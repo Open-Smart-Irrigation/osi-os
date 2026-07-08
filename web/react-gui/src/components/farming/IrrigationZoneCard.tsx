@@ -92,7 +92,7 @@ export const IrrigationZoneCard: React.FC<IrrigationZoneCardProps> = ({
   const { t } = useTranslation('devices');
   const { t: tDashboard } = useTranslation('dashboard');
   const { t: tc } = useTranslation('common');
-  const { swtUnit } = useDisplayPreferences();
+  const { swtUnit, modules } = useDisplayPreferences();
   const [zoneCollapsed, setZoneCollapsed] = useState(true);
   const [devicesCollapsed, setDevicesCollapsed] = useState(true);
   const [isDeleting, setIsDeleting] = useState(false);
@@ -290,11 +290,11 @@ export const IrrigationZoneCard: React.FC<IrrigationZoneCardProps> = ({
       {!zoneCollapsed && (
       <>
 
-      {environmentSummary?.water && (
-        <div className="mb-4 rounded-2xl border border-sky-100 bg-[linear-gradient(135deg,#f0f9ff,white_55%,#ecfeff)] p-4">
+      {modules.waterCard && environmentSummary?.water && (
+        <div data-testid="water-today-card" className="mb-4 rounded-2xl border border-[var(--border)] bg-[var(--card)] p-4">
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div>
-              <p className="text-xs font-bold uppercase tracking-[0.18em] text-sky-700">Water Today</p>
+              <p className="text-xs font-bold uppercase tracking-[0.18em] text-[var(--primary)]">Water Today</p>
               <p className="mt-1 text-sm text-[var(--text-secondary)]">
                 {environmentSummary.water.action?.reasoning ?? 'Daily rain, irrigation, and crop demand summary for this zone.'}
               </p>
@@ -302,54 +302,54 @@ export const IrrigationZoneCard: React.FC<IrrigationZoneCardProps> = ({
             <div className="flex flex-col items-end gap-1 text-xs text-[var(--text-tertiary)]">
               <div>Updated {environmentSummary.water.observedAt ? new Date(environmentSummary.water.observedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '—'}</div>
               <div className="flex flex-wrap justify-end gap-1">
-                <span className="rounded-full border border-sky-200 bg-white/80 px-2 py-0.5 font-semibold text-sky-700">
+                <span className="rounded-full border border-[var(--border)] bg-[var(--surface)] px-2 py-0.5 font-semibold text-[var(--primary)]">
                   {formatDisplayMode(environmentSummary.display?.mode)}
                 </span>
-                <span className="rounded-full border border-[var(--border)] bg-white/80 px-2 py-0.5 font-semibold text-[var(--text-secondary)]">
+                <span className="rounded-full border border-[var(--border)] bg-[var(--surface)] px-2 py-0.5 font-semibold text-[var(--text-secondary)]">
                   {formatSchedulingMode(environmentSummary.display?.schedulingMode ?? zone.schedulingMode)}
                 </span>
               </div>
             </div>
           </div>
           {environmentSummary.display?.fallbackReason && (
-            <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+            <div className="mt-3 rounded-xl border border-[var(--warn-border)] bg-[var(--warn-bg)] px-3 py-2 text-sm text-[var(--warn-text)]">
               {environmentSummary.display.fallbackReason}
             </div>
           )}
           {environmentSummary.display?.schedulingMode === 'server_preferred' && (
-            <div className="mt-3 rounded-xl border border-cyan-200 bg-cyan-50 px-3 py-2 text-sm text-cyan-900">
+            <div className="mt-3 rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-sm text-[var(--text-secondary)]">
               This zone follows OSI Server recommendations when they are fresh, with automatic local fallback if the link becomes stale.
             </div>
           )}
           <div className="mt-4 grid grid-cols-2 gap-2 lg:grid-cols-4">
-            <div className="rounded-xl bg-white/80 p-3 shadow-sm ring-1 ring-sky-100">
+            <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-3 shadow-sm">
               <p className="text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)]">Rain today</p>
-              <p className="mt-2 text-2xl font-bold text-sky-700">{formatWaterValue(environmentSummary.water.rainTodayMm, 'mm', 1)}</p>
+              <p className="mt-2 text-2xl font-bold text-[var(--primary)]">{formatWaterValue(environmentSummary.water.rainTodayMm, 'mm', 1)}</p>
             </div>
-            <div className="rounded-xl bg-white/80 p-3 shadow-sm ring-1 ring-teal-100">
+            <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-3 shadow-sm">
               <p className="text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)]">Measured (flow meter)</p>
-              <p className="mt-2 text-2xl font-bold text-teal-700">
+              <p className="mt-2 text-2xl font-bold text-[var(--success-text)]">
                 {formatWaterValue(environmentSummary.water.irrigationTodayMeasuredLiters, 'L', 0)}
               </p>
               <p className="mt-1 text-xs text-[var(--text-secondary)]">
                 Estimated (valve time x calibration): {formatWaterValue(environmentSummary.water.irrigationTodayEstimatedLiters, 'L', 0)}
               </p>
             </div>
-            <div className="rounded-xl bg-white/80 p-3 shadow-sm ring-1 ring-cyan-100">
+            <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-3 shadow-sm">
               <p className="text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)]">Next rain</p>
-              <p className="mt-2 text-2xl font-bold text-cyan-700">{formatWaterValue(environmentSummary.water.next24hRainMm, 'mm', 1)}</p>
+              <p className="mt-2 text-2xl font-bold text-[var(--primary)]">{formatWaterValue(environmentSummary.water.next24hRainMm, 'mm', 1)}</p>
               <p className="mt-1 text-xs text-[var(--text-secondary)]">Forecast next 24 h</p>
             </div>
-            <div className="rounded-xl bg-white/80 p-3 shadow-sm ring-1 ring-amber-100">
+            <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-3 shadow-sm">
               <p className="text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)]">Action</p>
-              <p className="mt-2 text-2xl font-bold text-amber-700">{formatWaterAction(environmentSummary.water.action?.code)}</p>
+              <p className="mt-2 text-2xl font-bold text-[var(--warn-text)]">{formatWaterAction(environmentSummary.water.action?.code)}</p>
               <p className="mt-1 text-xs text-[var(--text-secondary)]">
                 {environmentSummary.water.action?.source === 'dendro' ? 'Driven by dendrometer recommendation' : 'Driven by water balance'}
               </p>
             </div>
           </div>
           <div className="mt-3 grid gap-2 md:grid-cols-2">
-            <div className="rounded-xl border border-[var(--border)] bg-white/70 px-3 py-2">
+            <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3 py-2">
               <p className="text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)]">Soil now</p>
               <p className="mt-1 text-lg font-semibold text-[var(--text)]">
                 {formatSwtValue(soilNow.swt, swtUnit) ?? '—'}
@@ -357,7 +357,7 @@ export const IrrigationZoneCard: React.FC<IrrigationZoneCardProps> = ({
               <p className="text-sm text-[var(--text-secondary)]">{soilNow.label}</p>
             </div>
             {hasDendroDevices && (
-              <div className="rounded-xl border border-[var(--border)] bg-white/70 px-3 py-2">
+              <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3 py-2">
                 <p className="text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)]">Tree stress</p>
                 <p className="mt-1 text-lg font-semibold text-[var(--text)]">
                   {latestZoneRecommendation?.zone_stress_summary?.replace(/_/g, ' ') ?? 'Awaiting recommendation'}
@@ -371,27 +371,27 @@ export const IrrigationZoneCard: React.FC<IrrigationZoneCardProps> = ({
             )}
           </div>
           {driftPrompt && (
-            <div className="mt-3 rounded-xl border border-amber-300 bg-amber-50 px-3 py-3 text-sm text-amber-950">
+            <div className="mt-3 rounded-xl border border-[var(--warn-border)] bg-[var(--warn-bg)] px-3 py-3 text-sm text-[var(--warn-text)]">
               <p className="font-semibold">Local and OSI Server recommendations are drifting.</p>
               <p className="mt-1">{driftPrompt.reason}</p>
-              <div className="mt-2 flex flex-wrap gap-2 text-xs text-amber-900">
-                <span className="rounded-full bg-white/70 px-2 py-1 font-medium">
+              <div className="mt-2 flex flex-wrap gap-2 text-xs text-[var(--warn-text)]">
+                <span className="rounded-full bg-[var(--card)] px-2 py-1 font-medium">
                   Local: {formatWaterAction(driftPrompt.localActionCode)}
                 </span>
-                <span className="rounded-full bg-white/70 px-2 py-1 font-medium">
+                <span className="rounded-full bg-[var(--card)] px-2 py-1 font-medium">
                   Server: {formatWaterAction(driftPrompt.serverActionCode)}
                 </span>
               </div>
               <div className="mt-3 flex flex-wrap gap-2">
                 <button
                   onClick={() => setDismissedDriftAt(environmentSummary.generatedAt)}
-                  className="rounded-lg border border-amber-300 bg-white px-3 py-1.5 text-sm font-semibold text-amber-900"
+                  className="rounded-lg border border-[var(--warn-border)] bg-[var(--card)] px-3 py-1.5 text-sm font-semibold text-[var(--warn-text)]"
                 >
                   Keep local
                 </button>
                 <button
                   onClick={() => void handleUseServerScheduling()}
-                  className="rounded-lg bg-amber-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-amber-700"
+                  className="rounded-lg bg-[var(--warn-border)] px-3 py-1.5 text-sm font-semibold text-white"
                 >
                   Use server scheduling
                 </button>
@@ -440,17 +440,23 @@ export const IrrigationZoneCard: React.FC<IrrigationZoneCardProps> = ({
       )}
 
       {/* Schedule Section */}
-      <ScheduleSection
-        zoneId={zone.id}
-        zoneName={zone.name}
-        onAdvancedOpen={() => setShowAdvancedDrawer(true)}
-      />
+      {modules.schedulerUi && (
+        <ScheduleSection
+          zoneId={zone.id}
+          zoneName={zone.name}
+          onAdvancedOpen={() => setShowAdvancedDrawer(true)}
+        />
+      )}
 
       {/* Dendrometer Monitoring Section */}
-      <DendrometerSection zone={zone} devices={lsn50Nodes} />
+      <DendrometerSection
+        zone={zone}
+        devices={lsn50Nodes}
+        predictionAdvisoryEnabled={modules.predictionAdvisory}
+      />
 
       {/* Environment Section */}
-      <EnvironmentCard zone={zone} devices={devices} />
+      {modules.environment && <EnvironmentCard zone={zone} devices={devices} />}
 
       {/* Devices in Zone — collapsible */}
       <div className="mt-6 border-t border-[var(--border)] pt-5">

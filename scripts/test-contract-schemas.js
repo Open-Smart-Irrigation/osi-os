@@ -75,6 +75,7 @@ const sampleWorkRequestEvent = {
         request_id: '019ff001-1111-7222-8333-aaaaaaaaaaaa',
         type: 'bug',
         title: 'Pump status is confusing',
+        contact_email: 'farmer@example.com',
         description: 'The dashboard says the pump is open after I closed it.',
         area: 'dashboard',
         severity: 'annoying',

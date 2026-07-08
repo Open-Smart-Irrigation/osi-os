@@ -11,9 +11,10 @@ interface Props {
   zone: IrrigationZone;
   /** All devices assigned to this zone */
   devices: Device[];
+  predictionAdvisoryEnabled?: boolean;
 }
 
-export const DendrometerSection: React.FC<Props> = ({ zone, devices }) => {
+export const DendrometerSection: React.FC<Props> = ({ zone, devices, predictionAdvisoryEnabled = false }) => {
   const [collapsed, setCollapsed] = useState(true);
   const [loading, setLoading]     = useState(true);
   const [error, setError]         = useState<string | null>(null);
@@ -37,7 +38,9 @@ export const DendrometerSection: React.FC<Props> = ({ zone, devices }) => {
       try {
         const [dailyResults, recs] = await Promise.all([
           Promise.all(dendroDevices.map(d => dendroAnalyticsAPI.getDailyIndicators(d.deveui!, 30))),
-          dendroAnalyticsAPI.getZoneRecommendations(zone.id, 30),
+          predictionAdvisoryEnabled
+            ? dendroAnalyticsAPI.getZoneRecommendations(zone.id, 30)
+            : Promise.resolve([]),
         ]);
         if (cancelled) return;
 
@@ -56,7 +59,7 @@ export const DendrometerSection: React.FC<Props> = ({ zone, devices }) => {
 
     load();
     return () => { cancelled = true; };
-  }, [zone.id, devices.map(d => d.deveui).join(',')]);
+  }, [zone.id, devices.map(d => d.deveui).join(','), predictionAdvisoryEnabled]);
 
   if (dendroDevices.length === 0) return null;
 
@@ -96,15 +99,16 @@ export const DendrometerSection: React.FC<Props> = ({ zone, devices }) => {
 
             {!loading && !error && (
               <>
-                {/* Zone recommendation banner */}
-                {today ? (
-                  <IrrigationActionBanner
-                    action={today.irrigation_action}
-                    reasoning={today.action_reasoning}
-                    history={history7.map(r => ({ date: r.date, stress: r.zone_stress_summary }))}
-                  />
-                ) : (
-                  <NoDataBanner />
+                {predictionAdvisoryEnabled && (
+                  today ? (
+                    <IrrigationActionBanner
+                      action={today.irrigation_action}
+                      reasoning={today.action_reasoning}
+                      history={history7.map(r => ({ date: r.date, stress: r.zone_stress_summary }))}
+                    />
+                  ) : (
+                    <NoDataBanner />
+                  )
                 )}
 
                 {/* Confidence pill — after action banner */}

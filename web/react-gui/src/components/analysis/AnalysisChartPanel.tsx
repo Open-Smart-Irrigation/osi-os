@@ -110,7 +110,7 @@ export function AnalysisChartPanel({ series, mode, layout, toggles, channelMeta,
           onChange={(e) => setDraft(e.target.value)}
           onBlur={() => commitAxis()}
           onKeyDown={(e) => { if (e.key==='Enter') commitAxis(); if (e.key==='Escape') setEditing(null); }}
-          className="absolute z-10 w-48 rounded border border-slate-300 px-1 py-0.5 text-xs bg-white"
+          className="absolute z-10 w-48 rounded border border-[var(--border)] bg-[var(--surface)] px-1 py-0.5 text-xs text-[var(--text)]"
           style={{ left: editing.x, top: editing.y }}
         />
       )}

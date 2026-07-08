@@ -36,7 +36,7 @@ export function AnalysisChartLegend({ series, onRename }: AnalysisChartLegendPro
   return (
     <ul className="mt-3 flex flex-wrap items-center justify-center gap-x-4 gap-y-2" aria-label={t('analysis.legend.label')}>
       {series.map((s, i) => (
-        <li key={s.seriesId} className="flex items-center gap-1.5 text-xs text-slate-700">
+        <li key={s.seriesId} className="flex items-center gap-1.5 text-xs text-[var(--text-secondary)]">
           <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ backgroundColor: seriesColor(i) }} aria-hidden />
           {editingId === s.seriesId ? (
             <input
@@ -48,7 +48,7 @@ export function AnalysisChartLegend({ series, onRename }: AnalysisChartLegendPro
                 if (e.key === 'Enter') commit(s.seriesId);
                 if (e.key === 'Escape') setEditingId(null);
               }}
-              className="w-40 rounded border border-slate-300 px-1 py-0.5 text-xs focus:border-slate-500 focus:outline-none"
+              className="w-40 rounded border border-[var(--border)] bg-[var(--surface)] px-1 py-0.5 text-xs text-[var(--text)] focus:border-[var(--focus)] focus:outline-none"
               aria-label={t('analysis.legend.rename')}
             />
           ) : (
@@ -56,7 +56,7 @@ export function AnalysisChartLegend({ series, onRename }: AnalysisChartLegendPro
               type="button"
               onClick={() => startEdit(s)}
               title={t('analysis.legend.rename')}
-              className="rounded px-0.5 hover:bg-slate-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-slate-400"
+              className="rounded px-0.5 hover:bg-[var(--secondary-bg)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus)]"
             >
               {s.label}
             </button>

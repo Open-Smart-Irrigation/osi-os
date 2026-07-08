@@ -5,7 +5,7 @@ import HttpBackend from 'i18next-http-backend';
 
 export const SUPPORTED_LANGUAGES = [
   { code: 'en',    label: 'English' },
-  { code: 'de-CH', label: 'Deutsch (CH)' },
+  { code: 'de-CH', label: 'Deutsch' },
   { code: 'fr',    label: 'Français' },
   { code: 'it',    label: 'Italiano' },
   { code: 'es',    label: 'Español' },

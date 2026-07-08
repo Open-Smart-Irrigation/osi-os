@@ -1,18 +1,23 @@
 import '@testing-library/jest-dom/vitest';
-import { cleanup, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { IrrigationZoneCard } from '../IrrigationZoneCard';
-import type { IrrigationZone } from '../../../types/farming';
+import type { Device, IrrigationZone, ZoneEnvironmentSummary } from '../../../types/farming';
 import { isDesktopBrowser } from '../../../utils/isDesktopBrowser';
+
+const apiMocks = vi.hoisted(() => ({
+  getZoneRecommendations: vi.fn(),
+  getSummary: vi.fn(),
+}));
 
 vi.mock('../../../services/api', () => ({
   dendroAnalyticsAPI: {
-    getZoneRecommendations: vi.fn().mockResolvedValue([]),
+    getZoneRecommendations: apiMocks.getZoneRecommendations,
   },
   environmentAPI: {
-    getSummary: vi.fn().mockResolvedValue(null),
+    getSummary: apiMocks.getSummary,
   },
   irrigationZonesAPI: {
     delete: vi.fn().mockResolvedValue(undefined),
@@ -22,8 +27,20 @@ vi.mock('../../../services/api', () => ({
 }));
 
 vi.mock('../ScheduleSection', () => ({
-  ScheduleSection: () => null,
+  ScheduleSection: () => <div data-testid="schedule-section" />,
   normalizeTriggerMetric: (v: string) => v,
+}));
+
+vi.mock('../environment/EnvironmentCard', () => ({
+  EnvironmentCard: () => <div data-testid="environment-card" />,
+}));
+
+vi.mock('../dendrometer/DendrometerSection', () => ({
+  DendrometerSection: ({ predictionAdvisoryEnabled }: { predictionAdvisoryEnabled: boolean }) => (
+    <div data-testid="dendrometer-section">
+      {predictionAdvisoryEnabled ? 'advisory-on' : 'advisory-off'}
+    </div>
+  ),
 }));
 
 vi.mock('../../../utils/isDesktopBrowser', () => ({
@@ -51,12 +68,67 @@ const zone = {
   schedule: null,
 } as IrrigationZone;
 
-function renderCard() {
+const dendroDevice = {
+  deveui: 'A84041A75D5E7CFB',
+  name: 'Dendro 1',
+  type_id: 'DRAGINO_LSN50',
+  latest_data: {},
+  dendro_enabled: 1,
+} as Device;
+
+const environmentSummary = {
+  zoneId: 12,
+  zoneName: 'Zone B',
+  generatedAt: '2026-07-08T10:00:00.000Z',
+  location: { source: 'gateway', latitude: null, longitude: null, timezone: 'UTC' },
+  water: {
+    available: true,
+    observedAt: '2026-07-08T09:55:00.000Z',
+    areaM2: 100,
+    irrigationEfficiencyPct: 80,
+    rainTodayMm: 4.2,
+    irrigationTodayLiters: 100,
+    irrigationTodayNetMm: 0.8,
+    irrigationTodayMeasuredLiters: 100,
+    irrigationTodayEstimatedLiters: 120,
+    measuredIrrigationNetMm: 0.8,
+    estimatedIrrigationNetMm: 1,
+    waterNeededTodayMm: 3,
+    balanceTodayMm: 1.2,
+    next24hRainMm: 2.1,
+    action: { code: 'monitor_today', source: 'water_balance', reasoning: 'Rain covered demand.', recommendationDate: null },
+    daily: [],
+    sensorHealth: {
+      sensorCount: 2,
+      freshSensorCount: 2,
+      staleSensorCount: 0,
+      rainGaugePresent: true,
+      flowMeterPresent: true,
+      warnings: [],
+    },
+  },
+  local: {} as ZoneEnvironmentSummary['local'],
+  online: { available: false, cacheStatus: 'miss' } as ZoneEnvironmentSummary['online'],
+  agronomic: {} as ZoneEnvironmentSummary['agronomic'],
+  forecast: { available: false } as ZoneEnvironmentSummary['forecast'],
+  display: {
+    mode: 'unlinked_local',
+    schedulingMode: 'local',
+    sourceLabel: 'Local only',
+    sharedGeneratedAt: null,
+    sharedObservedAt: null,
+    lastReceivedAt: null,
+    fallbackReason: null,
+  },
+  drift: null,
+} as ZoneEnvironmentSummary;
+
+function renderCard(devices: Device[] = []) {
   render(
     <MemoryRouter>
       <IrrigationZoneCard
         zone={zone}
-        devices={[]}
+        devices={devices}
         unassignedDevices={[]}
         onUpdate={vi.fn()}
       />
@@ -65,7 +137,12 @@ function renderCard() {
 }
 
 beforeEach(() => {
+  window.localStorage.clear();
   vi.mocked(isDesktopBrowser).mockReturnValue(false);
+  apiMocks.getZoneRecommendations.mockReset();
+  apiMocks.getZoneRecommendations.mockResolvedValue([]);
+  apiMocks.getSummary.mockReset();
+  apiMocks.getSummary.mockResolvedValue(null);
 });
 
 afterEach(() => {
@@ -115,5 +192,49 @@ describe('IrrigationZoneCard Data entry', () => {
       </MemoryRouter>,
     );
     expect(screen.getByText(/Soil tension \(S1\)/)).toBeInTheDocument();
+  });
+
+  it('uses module preferences to gate schedule, environment, water, and advisory surfaces', async () => {
+    apiMocks.getSummary.mockResolvedValue(environmentSummary);
+    window.localStorage.setItem('osi.modules.schedulerUi', 'false');
+    window.localStorage.setItem('osi.modules.environment', 'false');
+    window.localStorage.setItem('osi.modules.waterCard', 'false');
+    window.localStorage.setItem('osi.modules.predictionAdvisory', 'false');
+
+    renderCard([dendroDevice]);
+    fireEvent.click(screen.getByRole('heading', { name: 'Zone B' }));
+
+    await waitFor(() => expect(apiMocks.getSummary).toHaveBeenCalled());
+
+    expect(screen.queryByTestId('schedule-section')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('environment-card')).not.toBeInTheDocument();
+    expect(screen.queryByText('Water Today')).not.toBeInTheDocument();
+    expect(screen.getByTestId('dendrometer-section')).toHaveTextContent('advisory-off');
+  });
+
+  it('shows gated dashboard modules by default and uses theme variables for the water card shell', async () => {
+    apiMocks.getSummary.mockResolvedValue(environmentSummary);
+
+    renderCard([dendroDevice]);
+    fireEvent.click(screen.getByRole('heading', { name: 'Zone B' }));
+
+    expect(await screen.findByText('Water Today')).toBeInTheDocument();
+    expect(screen.getByTestId('schedule-section')).toBeInTheDocument();
+    expect(screen.getByTestId('environment-card')).toBeInTheDocument();
+    expect(screen.getByTestId('dendrometer-section')).toHaveTextContent('advisory-off');
+
+    const waterCard = screen.getByTestId('water-today-card');
+    expect(waterCard).toHaveClass('bg-[var(--card)]');
+    expect(waterCard.className).not.toContain('white_55%');
+    expect(waterCard.className).not.toContain('sky-100');
+  });
+
+  it('enables the advisory surface when prediction advisory is opted in', async () => {
+    window.localStorage.setItem('osi.modules.predictionAdvisory', 'true');
+
+    renderCard([dendroDevice]);
+    fireEvent.click(screen.getByRole('heading', { name: 'Zone B' }));
+
+    expect(screen.getByTestId('dendrometer-section')).toHaveTextContent('advisory-on');
   });
 });

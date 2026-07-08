@@ -635,6 +635,7 @@ export interface SupportRequest {
   request_id: string;
   type: SupportRequestType;
   title: string;
+  contact_email?: string | null;
   description_preview: string | null;
   area: SupportRequestArea;
   severity: SupportRequestSeverity;
@@ -651,6 +652,7 @@ export interface SupportRequest {
 export interface SupportRequestCreateRequest {
   type: SupportRequestType;
   title: string;
+  contact_email?: string | null;
   description: string;
   expected?: string | null;
   actual?: string | null;

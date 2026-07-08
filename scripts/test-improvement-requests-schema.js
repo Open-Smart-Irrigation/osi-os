@@ -26,13 +26,14 @@ try {
     VALUES (7, 'field-user', 'hash', '2026-07-08T11:59:00.000Z', '2026-07-08T11:59:00.000Z');
 
     INSERT INTO improvement_requests(
-      request_uuid, user_id, type, title, description, area, severity,
+      request_uuid, user_id, type, title, contact_email, description, area, severity,
       consent_public, consent_diagnostics, diagnostics_json, gateway_device_eui, submitted_at
     ) VALUES (
       '019ff001-1111-7222-8333-aaaaaaaaaaaa',
       7,
       'bug',
       'Pump status is confusing',
+      'farmer@example.com',
       'The dashboard says the pump is open after I closed it.',
       'dashboard',
       'annoying',
@@ -72,6 +73,9 @@ try {
   }
   if (payload.request_id !== '019ff001-1111-7222-8333-aaaaaaaaaaaa') {
     throw new Error(`expected payload.request_id to match inserted request UUID, got ${payload.request_id}`);
+  }
+  if (payload.contact_email !== 'farmer@example.com') {
+    throw new Error(`expected payload.contact_email farmer@example.com, got ${payload.contact_email}`);
   }
 
   console.log('PASS: improvement_requests schema emits WORK_REQUEST_SUBMITTED outbox payload');

@@ -4,11 +4,12 @@ import { SUPPORTED_LANGUAGES } from '../i18n/config';
 
 interface LanguageSwitcherProps {
   triggerClassName?: string;
+  menuAlign?: 'left' | 'right';
 }
 
 const DEFAULT_TRIGGER_CLASS = 'px-3 py-2 text-sm';
 
-export const LanguageSwitcher: React.FC<LanguageSwitcherProps> = ({ triggerClassName }) => {
+export const LanguageSwitcher: React.FC<LanguageSwitcherProps> = ({ triggerClassName, menuAlign = 'right' }) => {
   const { i18n } = useTranslation();
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
@@ -42,12 +43,12 @@ export const LanguageSwitcher: React.FC<LanguageSwitcherProps> = ({ triggerClass
         className={`flex items-center gap-1.5 rounded-lg bg-[var(--secondary-bg)] hover:bg-[var(--border)] text-[var(--text)] font-semibold transition-colors ${triggerClassName ?? DEFAULT_TRIGGER_CLASS}`}
         title="Change language"
       >
-        Lang {current.code.toUpperCase()}
-        <span className="text-xs opacity-60">{open ? '^' : 'v'}</span>
+        {current.label}
+        <span aria-hidden="true" className="text-xs opacity-60">{open ? '^' : 'v'}</span>
       </button>
 
       {open && (
-        <div className="absolute right-0 top-full z-50 mt-1 min-w-[160px] rounded-xl border border-[var(--border)] bg-[var(--surface)] py-1 shadow-xl">
+        <div className={`absolute top-full z-50 mt-1 min-w-[160px] rounded-xl border border-[var(--border)] bg-[var(--surface)] py-1 shadow-xl ${menuAlign === 'left' ? 'left-0' : 'right-0'}`}>
           {SUPPORTED_LANGUAGES.map((lang) => (
             <button
               key={lang.code}

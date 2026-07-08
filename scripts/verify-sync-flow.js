@@ -1577,6 +1577,7 @@ expectIncludesById('improvement-requests-api-router', 'function diagnosticsPrevi
 expectIncludesById('improvement-requests-api-router', 'diagnostics: diagnosticsPreviewPayload(diagnostics)', 'returns the display-redacted diagnostics preview payload');
 expectIncludesById('improvement-requests-api-router', "gateway_device_eui: preview.gateway_identity.gateway_device_eui ? '[REDACTED_EUI]' : null", 'redacts raw gateway EUI in diagnostics preview');
 expectIncludesById('improvement-requests-api-router', 'INSERT INTO improvement_requests', 'inserts local field requests');
+expectIncludesById('improvement-requests-api-router', 'contact_email', 'persists optional contact email separately from redacted request text');
 expectIncludesById('improvement-requests-api-router', 'WORK_REQUEST_SUBMITTED', 'documents trigger-emitted WORK_REQUEST_SUBMITTED intake contract');
 expectFileIncludes('seed-blank.sql', seedSqlSource, 'trg_improvement_requests_outbox_ai', 'improvement request trigger exists');
 expectFileIncludes('seed-blank.sql', seedSqlSource, "'WORK_REQUEST_SUBMITTED'", 'improvement request trigger emits WORK_REQUEST_SUBMITTED');

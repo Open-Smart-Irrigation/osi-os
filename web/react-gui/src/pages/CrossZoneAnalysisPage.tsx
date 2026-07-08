@@ -143,32 +143,32 @@ export function CrossZoneAnalysisPage() {
   };
 
   return (
-    <div className="analysis-page flex h-screen flex-col bg-slate-100 text-slate-950">
-      <header className="shrink-0 border-b border-slate-800 bg-slate-950 text-white">
+    <div className="analysis-page flex h-screen flex-col bg-[var(--bg)] text-[var(--text)]">
+      <header className="shrink-0 border-b border-[var(--border)] bg-[var(--header-bg)] text-[var(--header-text)]">
         <div className="mx-auto max-w-[1600px] px-4 py-4">
           <div>
-            <Link to="/dashboard" className="text-sm font-medium text-slate-300 hover:text-white">{t('analysis.backToDashboard')}</Link>
+            <Link to="/dashboard" className="text-sm font-medium text-[var(--header-subtext)] hover:text-[var(--header-text)]">{t('analysis.backToDashboard')}</Link>
             <h1 className="mt-2 text-3xl font-semibold">{t('analysis.title')}</h1>
           </div>
         </div>
       </header>
 
       {(catalogError || seriesError || viewsError || viewSaveError) && (
-        <div className="border-b border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+        <div className="border-b border-[var(--warn-border)] bg-[var(--warn-bg)] px-4 py-3 text-sm text-[var(--warn-text)]">
           {t('analysis.loadError')}
         </div>
       )}
 
       <div className="analysis-layout mx-auto flex min-h-0 w-full max-w-[1600px] flex-1 flex-col gap-4 overflow-hidden px-4 py-4 lg:flex-row">
-        <aside className="analysis-sidebar overflow-y-auto rounded-lg border border-slate-200 bg-white p-4 shadow-sm lg:w-[320px] lg:shrink-0">
+        <aside className="analysis-sidebar overflow-y-auto rounded-lg border border-[var(--border)] bg-[var(--surface)] p-4 shadow-sm lg:w-[320px] lg:shrink-0">
           <AnalysisSeriesTray
             channels={catalog?.channels ?? []}
             selectedIds={selectedIds}
             onAdd={(id) => updateWorkspace((currentWorkspace) => addSeries(currentWorkspace, id))}
             onRemove={(id) => updateWorkspace((currentWorkspace) => removeSeries(currentWorkspace, id))}
           />
-          {catalogLoading && <p className="mt-3 text-sm text-slate-500">{t('analysis.catalog.loading')}</p>}
-          <div className="mt-4 border-t border-slate-200 pt-4">
+          {catalogLoading && <p className="mt-3 text-sm text-[var(--text-tertiary)]">{t('analysis.catalog.loading')}</p>}
+          <div className="mt-4 border-t border-[var(--border)] pt-4">
             <AnalysisViewsMenu
               views={views}
               onSave={(name) => {
@@ -178,7 +178,7 @@ export function CrossZoneAnalysisPage() {
             />
           </div>
         </aside>
-        <main className="analysis-main flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+        <main className="analysis-main flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto rounded-lg border border-[var(--border)] bg-[var(--surface)] p-4 shadow-sm">
           <div className="flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
             <div className="flex flex-col gap-2">
               <AnalysisControls
@@ -198,7 +198,7 @@ export function CrossZoneAnalysisPage() {
                 onToggle={(key, value) => updateWorkspace((currentWorkspace) => setToggle(currentWorkspace, key, value))}
               />
               {data?.aggregation.applied ? (
-                <div className="inline-flex w-fit items-center gap-1.5 rounded bg-slate-100 px-2 py-1 text-xs text-slate-600">
+                <div className="inline-flex w-fit items-center gap-1.5 rounded border border-[var(--border)] bg-[var(--card)] px-2 py-1 text-xs text-[var(--text-secondary)]">
                   <span className="font-medium">{t('analysis.aggregation.label')}</span>
                   <span>
                     {aggregationLabel(data.aggregation.applied)}
@@ -219,13 +219,13 @@ export function CrossZoneAnalysisPage() {
               username={username}
             />
           </div>
-          {seriesLoading && <p className="mt-4 text-sm text-slate-500">{t('analysis.series.loading')}</p>}
+          {seriesLoading && <p className="mt-4 text-sm text-[var(--text-tertiary)]">{t('analysis.series.loading')}</p>}
           {data?.dropped && data.dropped.length > 0 && (
-            <div className="mt-2 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded px-3 py-1.5" role="alert">
+            <div className="mt-2 rounded border border-[var(--warn-border)] bg-[var(--warn-bg)] px-3 py-1.5 text-xs text-[var(--warn-text)]" role="alert">
               {t('analysis.droppedNotice', { count: data.dropped.length, defaultValue: '{{count}} series could not be loaded' })}
             </div>
           )}
-          <div className="mt-4 min-h-0 flex-1 rounded-lg border border-slate-200 bg-slate-50 p-3">
+          <div data-testid="analysis-chart-shell" className="mt-4 min-h-0 flex-1 rounded-lg border border-[var(--border)] bg-[var(--card)] p-3">
             <AnalysisChartPanel
               series={displayedSeries}
               mode={activeWorkspace.mode}

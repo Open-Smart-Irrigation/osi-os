@@ -56,7 +56,7 @@ export function CorrelationPanel({ series, channelMeta, zoneNameById, chartRef }
 
   if (channels.length < 2) {
     return (
-      <div className="flex min-h-[320px] items-center justify-center rounded-md border border-dashed border-slate-300 bg-white px-4 text-center text-sm text-slate-600">
+      <div className="flex min-h-[320px] items-center justify-center rounded-md border border-dashed border-[var(--border)] bg-[var(--card)] px-4 text-center text-sm text-[var(--text-secondary)]">
         {t('analysis.correlation.needTwoChannels')}
       </div>
     );
@@ -66,21 +66,21 @@ export function CorrelationPanel({ series, channelMeta, zoneNameById, chartRef }
 
   return (
     <div className="analysis-correlation flex h-full min-h-[500px] flex-col gap-4">
-      <div className="flex flex-wrap items-end gap-3 rounded-md border border-slate-200 bg-white p-3">
-        <label className="flex min-w-44 flex-col gap-1 text-xs font-medium text-slate-600">
+      <div className="flex flex-wrap items-end gap-3 rounded-md border border-[var(--border)] bg-[var(--card)] p-3">
+        <label className="flex min-w-44 flex-col gap-1 text-xs font-medium text-[var(--text-secondary)]">
           {t('analysis.correlation.x')}
           <select
-            className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-normal text-slate-950"
+            className="rounded-md border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-sm font-normal text-[var(--text)]"
             value={x}
             onChange={(e) => setChannelX(canonicalize(e.target.value))}
           >
             {channels.map((c) => <option key={c} value={c}>{axisLabel(c, channelMeta)}</option>)}
           </select>
         </label>
-        <label className="flex min-w-44 flex-col gap-1 text-xs font-medium text-slate-600">
+        <label className="flex min-w-44 flex-col gap-1 text-xs font-medium text-[var(--text-secondary)]">
           {t('analysis.correlation.y')}
           <select
-            className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-normal text-slate-950"
+            className="rounded-md border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-sm font-normal text-[var(--text)]"
             value={y}
             onChange={(e) => setChannelY(canonicalize(e.target.value))}
           >
@@ -89,7 +89,7 @@ export function CorrelationPanel({ series, channelMeta, zoneNameById, chartRef }
             ))}
           </select>
         </label>
-        <label className="flex items-center gap-2 rounded-md border border-slate-200 px-3 py-2 text-sm text-slate-700">
+        <label className="flex items-center gap-2 rounded-md border border-[var(--border)] px-3 py-2 text-sm text-[var(--text-secondary)]">
           <input
             type="checkbox"
             checked={pooled}
@@ -100,13 +100,13 @@ export function CorrelationPanel({ series, channelMeta, zoneNameById, chartRef }
         </label>
       </div>
 
-      <div className="min-h-[320px] flex-1 rounded-md border border-slate-200 bg-white p-2">
+      <div className="min-h-[320px] flex-1 rounded-md border border-[var(--border)] bg-[var(--card)] p-2">
         <EChart ref={chartRef} option={option} className="h-full min-h-[320px]" />
       </div>
 
-      <div className="overflow-x-auto rounded-md border border-slate-200 bg-white">
+      <div className="overflow-x-auto rounded-md border border-[var(--border)] bg-[var(--card)]">
         <table className="min-w-full text-left text-sm">
-          <thead className="bg-slate-100 text-xs uppercase text-slate-600">
+          <thead className="bg-[var(--surface)] text-xs uppercase text-[var(--text-secondary)]">
             <tr>
               <th className="px-3 py-2 font-semibold">{t('analysis.correlation.zone')}</th>
               <th className="px-3 py-2 font-semibold">n</th>
@@ -114,13 +114,13 @@ export function CorrelationPanel({ series, channelMeta, zoneNameById, chartRef }
               <th className="px-3 py-2 font-semibold">r</th>
             </tr>
           </thead>
-          <tbody className="divide-y divide-slate-200">
+          <tbody className="divide-y divide-[var(--border)]">
             {rows.map((group) => (
               <tr key={group.zoneId ?? 'pooled'}>
-                <td className="px-3 py-2 font-medium text-slate-900">{group.label}</td>
-                <td className="px-3 py-2 text-slate-700">{group.n}</td>
-                <td className="px-3 py-2 text-slate-700">{group.droppedPairs}</td>
-                <td className="px-3 py-2 text-slate-700">
+                <td className="px-3 py-2 font-medium text-[var(--text)]">{group.label}</td>
+                <td className="px-3 py-2 text-[var(--text-secondary)]">{group.n}</td>
+                <td className="px-3 py-2 text-[var(--text-secondary)]">{group.droppedPairs}</td>
+                <td className="px-3 py-2 text-[var(--text-secondary)]">
                   {group.suppressed
                     ? t('analysis.correlation.insufficient', { n: group.n })
                     : group.r?.toFixed(2)}
@@ -130,7 +130,7 @@ export function CorrelationPanel({ series, channelMeta, zoneNameById, chartRef }
           </tbody>
         </table>
       </div>
-      <p className="text-xs text-slate-500">{t('analysis.correlation.exploratory')}</p>
+      <p className="text-xs text-[var(--text-tertiary)]">{t('analysis.correlation.exploratory')}</p>
     </div>
   );
 }

@@ -129,6 +129,24 @@ afterEach(() => {
 });
 
 describe('CrossZoneAnalysisPage', () => {
+  it('uses theme variable surfaces for the analysis shell instead of hard-coded light classes', () => {
+    catalogState = loadedCatalogState();
+    const { container } = render(<CrossZoneAnalysisPage />, { wrapper: MemoryRouter });
+
+    const page = container.querySelector('.analysis-page');
+    const sidebar = container.querySelector('.analysis-sidebar');
+    const main = container.querySelector('.analysis-main');
+    const chartShell = container.querySelector('[data-testid="analysis-chart-shell"]');
+
+    expect(page).toHaveClass('bg-[var(--bg)]', 'text-[var(--text)]');
+    expect(sidebar).toHaveClass('bg-[var(--surface)]', 'border-[var(--border)]');
+    expect(main).toHaveClass('bg-[var(--surface)]', 'border-[var(--border)]');
+    expect(chartShell).toHaveClass('bg-[var(--card)]', 'border-[var(--border)]');
+    expect(page?.className).not.toContain('bg-slate-100');
+    expect(sidebar?.className).not.toContain('bg-white');
+    expect(main?.className).not.toContain('bg-white');
+  });
+
   it('does not request legacy series ids before the catalog is available and migrates once it loads', () => {
     catalogState = { catalog: null, isLoading: true, error: undefined };
     localStorage.setItem(STORAGE_KEY, JSON.stringify({

@@ -67,8 +67,8 @@ export function AnalysisControls({
   const customInvalid = hasCustomValues && !customValid;
   const showCustom = customOpen || rangeLabel === 'custom';
   const segBtn = (active: boolean) => [
-    'px-3 py-1.5 text-sm font-medium transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-slate-500 focus-visible:ring-inset',
-    active ? 'bg-slate-900 text-white' : 'bg-white text-slate-700 hover:bg-slate-100',
+    'px-3 py-1.5 text-sm font-medium transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus)] focus-visible:ring-inset',
+    active ? 'bg-[var(--primary)] text-white' : 'bg-[var(--card)] text-[var(--text-secondary)] hover:bg-[var(--secondary-bg)]',
   ].join(' ');
   const layoutLabelKey = (value: TimelineLayout) => (value === 'small-multiples' ? 'smallMultiples' : value);
 
@@ -91,7 +91,7 @@ export function AnalysisControls({
     <div className="analysis-controls flex flex-col gap-3">
       <div className="flex flex-wrap items-center gap-4">
         <div
-          className="analysis-control-group analysis-ranges inline-flex overflow-hidden rounded-md border border-slate-300 divide-x divide-slate-300"
+          className="analysis-control-group analysis-ranges inline-flex overflow-hidden rounded-md border border-[var(--border)] divide-x divide-[var(--border)]"
           role="group"
           aria-label={t('analysis.range.label')}
         >
@@ -115,7 +115,7 @@ export function AnalysisControls({
           ))}
         </div>
         <div
-          className="analysis-control-group analysis-modes inline-flex overflow-hidden rounded-md border border-slate-300 divide-x divide-slate-300"
+          className="analysis-control-group analysis-modes inline-flex overflow-hidden rounded-md border border-[var(--border)] divide-x divide-[var(--border)]"
           role="group"
           aria-label={t('analysis.mode.label')}
         >
@@ -134,7 +134,7 @@ export function AnalysisControls({
         {mode === 'timeline' ? (
           <>
             <div
-              className="analysis-control-group analysis-layouts inline-flex overflow-hidden rounded-md border border-slate-300 divide-x divide-slate-300"
+              className="analysis-control-group analysis-layouts inline-flex overflow-hidden rounded-md border border-[var(--border)] divide-x divide-[var(--border)]"
               role="group"
               aria-label={t('analysis.layout.label')}
             >
@@ -151,10 +151,10 @@ export function AnalysisControls({
               ))}
             </div>
             <div className="analysis-toggle-group flex flex-wrap items-center gap-3">
-              <label className="flex items-center gap-2 text-sm text-slate-700">
+              <label className="flex items-center gap-2 text-sm text-[var(--text-secondary)]">
                 <input
                   type="checkbox"
-                  className="h-4 w-4 rounded border-slate-300 text-slate-900 focus:ring-2 focus:ring-slate-500"
+                  className="h-4 w-4 rounded border-[var(--border)] text-[var(--primary)] focus:ring-2 focus:ring-[var(--focus)]"
                   checked={toggles.normalize}
                   onChange={(e) => onToggle('normalize', e.target.checked)}
                   aria-label={t('analysis.toggle.normalize')}
@@ -166,36 +166,36 @@ export function AnalysisControls({
         ) : null}
       </div>
       {showCustom ? (
-        <div className="flex flex-wrap items-end gap-3 rounded-md border border-slate-200 bg-slate-50 p-3">
-          <label className="flex flex-col gap-1 text-xs font-medium text-slate-600">
+        <div className="flex flex-wrap items-end gap-3 rounded-md border border-[var(--border)] bg-[var(--card)] p-3">
+          <label className="flex flex-col gap-1 text-xs font-medium text-[var(--text-secondary)]">
             {t('analysis.range.from')}
             <input
               type="datetime-local"
               value={customFrom}
               onChange={(e) => setCustomFrom(e.target.value)}
               aria-label={t('analysis.range.from')}
-              className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-normal text-slate-950 focus:outline-none focus:ring-2 focus:ring-slate-500"
+              className="rounded-md border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-sm font-normal text-[var(--text)] focus:outline-none focus:ring-2 focus:ring-[var(--focus)]"
             />
           </label>
-          <label className="flex flex-col gap-1 text-xs font-medium text-slate-600">
+          <label className="flex flex-col gap-1 text-xs font-medium text-[var(--text-secondary)]">
             {t('analysis.range.to')}
             <input
               type="datetime-local"
               value={customTo}
               onChange={(e) => setCustomTo(e.target.value)}
               aria-label={t('analysis.range.to')}
-              className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-normal text-slate-950 focus:outline-none focus:ring-2 focus:ring-slate-500"
+              className="rounded-md border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-sm font-normal text-[var(--text)] focus:outline-none focus:ring-2 focus:ring-[var(--focus)]"
             />
           </label>
           <button
             type="button"
             onClick={applyCustomRange}
             disabled={!customValid}
-            className="rounded-md bg-slate-900 px-3 py-2 text-sm font-medium text-white transition hover:bg-slate-700 disabled:cursor-not-allowed disabled:bg-slate-300 disabled:text-slate-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-slate-500 focus-visible:ring-offset-1"
+            className="rounded-md bg-[var(--primary)] px-3 py-2 text-sm font-medium text-white transition hover:bg-[var(--primary-hover)] disabled:cursor-not-allowed disabled:bg-[var(--toggle-off)] disabled:text-[var(--text-disabled)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus)] focus-visible:ring-offset-1"
           >
             {t('analysis.range.apply')}
           </button>
-          {customInvalid ? <p className="text-sm text-amber-700">{t('analysis.range.invalid')}</p> : null}
+          {customInvalid ? <p className="text-sm text-[var(--warn-text)]">{t('analysis.range.invalid')}</p> : null}
         </div>
       ) : null}
     </div>
