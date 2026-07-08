@@ -9,6 +9,7 @@ import { HistoryDashboard } from './pages/HistoryDashboard';
 import { HistoryCardDetailPage } from './pages/HistoryCardDetailPage';
 import { AccountLink } from './pages/AccountLink';
 import { SupportRequests } from './pages/SupportRequests';
+import { SettingsPage } from './pages/SettingsPage';
 
 const AnalysisRoute = lazy(() =>
   import('./pages/AnalysisRoute').then((module) => ({ default: module.AnalysisRoute })),
@@ -47,6 +48,15 @@ function App() {
             element={
               <PrivateRoute>
                 <SupportRequests />
+              </PrivateRoute>
+            }
+          />
+
+          <Route
+            path="/settings"
+            element={
+              <PrivateRoute>
+                <SettingsPage />
               </PrivateRoute>
             }
           />

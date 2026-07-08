@@ -16,6 +16,7 @@ vi.mock('react-i18next', () => ({
         'addMenu.zone': 'Zone',
         'addMenu.device': 'Device',
         data: 'Data',
+        'settings:entryPoint': 'Settings',
         account: 'Account',
         'accountMenu.osiServer': 'OSI Server',
         'support:navLabel': 'Support & Requests',
@@ -28,7 +29,7 @@ vi.mock('react-i18next', () => ({
 }));
 
 vi.mock('../LanguageSwitcher', () => ({
-  LanguageSwitcher: () => <div aria-label="language switcher" />,
+  LanguageSwitcher: () => <button title="Change language">Lang EN</button>,
 }));
 
 vi.mock('../../utils/isDesktopBrowser', () => ({
@@ -57,11 +58,13 @@ afterEach(() => {
 });
 
 describe('DashboardHeader (osi-os)', () => {
-  it('renders the OSI OS title, welcome text, and language switcher', () => {
+  it('renders the OSI OS title, welcome text, and Settings entry without a standalone language switcher', () => {
     renderHeader();
     expect(screen.getByRole('heading', { name: 'Open Smart Irrigation Dashboard' })).toBeInTheDocument();
     expect(screen.getByText('Welcome farmer')).toBeInTheDocument();
-    expect(screen.getByLabelText('language switcher')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Lang/i })).not.toBeInTheDocument();
+    expect(screen.queryByTitle('Change language')).not.toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Settings' })).toHaveAttribute('href', '/settings');
   });
 
   it('fires add callbacks from the Add menu', () => {

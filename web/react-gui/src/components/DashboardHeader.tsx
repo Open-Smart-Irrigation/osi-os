@@ -2,7 +2,6 @@ import React from 'react';
 import { Link } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { HeaderMenu } from './HeaderMenu';
-import { LanguageSwitcher } from './LanguageSwitcher';
 import { isDesktopBrowser } from '../utils/isDesktopBrowser';
 
 interface DashboardHeaderProps {
@@ -18,7 +17,7 @@ export const DashboardHeader: React.FC<DashboardHeaderProps> = ({
   onAddDevice,
   onLogout,
 }) => {
-  const { t } = useTranslation(['dashboard', 'support']);
+  const { t } = useTranslation(['dashboard', 'support', 'settings']);
   const showDesktopData = isDesktopBrowser();
 
   return (
@@ -55,9 +54,12 @@ export const DashboardHeader: React.FC<DashboardHeaderProps> = ({
 
             <span className="hidden sm:block w-px self-stretch bg-[var(--border)]" aria-hidden="true" />
 
-            <div className="w-[calc(50%-4px)] sm:w-auto">
-              <LanguageSwitcher triggerClassName="w-full justify-center px-6 py-3 text-lg sm:w-auto" />
-            </div>
+            <Link
+              to="/settings"
+              className="w-[calc(50%-4px)] sm:w-auto rounded-lg bg-[var(--secondary-bg)] px-6 py-3 text-center text-lg font-bold text-[var(--text)] shadow-lg transition-colors hover:bg-[var(--border)]"
+            >
+              {t('settings:entryPoint')}
+            </Link>
 
             <HeaderMenu
               label={t('account')}
