@@ -126,9 +126,9 @@ function buildBaseline(root, surfaces) {
       'Enforcement is scripts/verify-flows-size-ratchet.js comparing HEAD against --base-ref',
       '(default origin/main): per-node-id ceilings, per-profile total may only decrease, and',
       'the thin-node heuristic on newly-added node ids. See the script header.',
-      'The DD3 charter cites 1,017,468 as the scoreboard start; the real measured baseline at',
-      'introduction (main @ 612987d9, 2026-07-08) is 1,039,554 per profile - the earlier figure',
-      'was captured before nodes grew. Git-anchoring means the enforced number self-updates.',
+      'The DD3 charter cites 1,017,468 as the scoreboard start; plan-write measured 1,039,554.',
+      'The real measured baseline at introduction (origin/main @ 5e04b8a2, 2026-07-10) is',
+      '1,064,794 per profile after #117. Git-anchoring means the enforced number self-updates.',
     ],
     files,
   };
