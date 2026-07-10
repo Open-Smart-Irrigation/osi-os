@@ -13,6 +13,8 @@
     "osi-db-helper": "file:osi-db-helper",
     "osi-history-helper": "file:osi-history-helper",
     "osi-health-helper": "file:osi-health-helper",
-    "sqlite3": "^5.1.7"
+    "sqlite3": "^5.1.7",
+    "osi-history-sync-helper": "file:osi-history-sync-helper",
+    "osi-lib": "file:osi-lib"
   }
 }

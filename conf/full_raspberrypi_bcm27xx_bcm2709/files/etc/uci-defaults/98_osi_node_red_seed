@@ -35,7 +35,7 @@ fi
 # Native sqlite must come from the OpenWrt package built for the target CPU.
 rm -rf "$DST/node_modules/sqlite3" "$DST/node_modules/node-red-node-sqlite"
 
-for module in osi-chameleon-helper osi-chirpstack-helper osi-cloud-http osi-db-helper osi-dendro-helper osi-history-helper osi-health-helper; do
+for module in osi-chameleon-helper osi-chirpstack-helper osi-cloud-http osi-db-helper osi-dendro-helper osi-history-helper osi-history-sync-helper osi-health-helper osi-lib; do
     if [ -d "$SRC/$module" ]; then
         rm -rf "$DST/$module" "$DST/node_modules/$module"
         cp -a "$SRC/$module" "$DST/$module"
