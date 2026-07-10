@@ -62,7 +62,7 @@ outside the one sanctioned exception.
 
 | Never | Why |
 |---|---|
-| Hand-edit `schema_object_fingerprints` | It is a computed baseline (SHA-256 over live DDL + `PRAGMA table_xinfo`/`foreign_key_list`/`index_list`/`index_xinfo`). A hand edit desyncs the stamp from the real schema and the next `applyPending` either falsely passes or falsely refuses. The only sanctioned re-baseline is `scripts/restamp-fingerprints.js` (see below). |
+| Hand-edit `schema_object_fingerprints` | It is a computed baseline (SHA-256 over live DDL + `PRAGMA table_xinfo`/`foreign_key_list`/`index_list`/`index_xinfo`). A hand edit desyncs the stamp from the real schema and the next `applyPending` either falsely passes or falsely refuses. The only sanctioned re-baselines are `scripts/restamp-fingerprints.js` (recompute fingerprints of a confirmed-good live schema) and `scripts/baseline-existing-db.js` (semantic-gated first baseline of a pre-ledger device — Option B Stage 0, spec 2026-07-07). |
 | Reseed or overwrite `/data/db/farming.db` on a provisioned Pi | `deploy.sh`'s `seed_db_if_missing` only seeds when the file is absent *and* no WAL/SHM/journal sidecars exist; it refuses otherwise. Overwriting destroys irreplaceable farm history. |
 | Add new schema behavior to `sync-init-fn` (the boot node) | It is FROZEN (AGENTS.md "Boot-DDL freeze"). New schema goes through the migration runner's ordered files, even though the runner doesn't execute on-device yet — freezing the boot node is what makes eventual cutover (Option B) tractable. |
 | Modify an already-merged `database/migrations/ordered/NNNN__slug.sql` file | Migrations are checksummed (SHA-256 of the raw file bytes, `lib/osi-migrate/migrations-loader.js`). Changing a merged file makes the ledger's stored checksum mismatch the file on next apply, which the runner treats as `repair_required` and refuses to proceed past. |
@@ -401,12 +401,14 @@ against a specific Pi, safely) is out of scope here — see `osi-live-ops-runboo
 
 ## Restamp rules
 
-`scripts/restamp-fingerprints.js` is the **only** sanctioned way to re-baseline
-`schema_object_fingerprints`. It takes a DB path, refuses if the path doesn't
-exist (specifically to avoid the `sqlite3` CLI silently creating an empty file at
-a typoed path and "successfully" restamping that instead), and calls
-`syncFingerprints` directly — recomputing live fingerprints and replacing the
-whole `schema_object_fingerprints` table with them.
+`scripts/restamp-fingerprints.js` and `scripts/baseline-existing-db.js` (Option B
+Stage 0 — semantic-gated ledger baseline + fingerprint sync for pre-ledger
+devices) are the **only** sanctioned ways to re-baseline
+`schema_object_fingerprints`. `restamp-fingerprints.js` takes a DB path, refuses
+if the path doesn't exist (specifically to avoid the `sqlite3` CLI silently
+creating an empty file at a typoed path and "successfully" restamping that
+instead), and calls `syncFingerprints` directly — recomputing live fingerprints
+and replacing the whole `schema_object_fingerprints` table with them.
 
 **When it applies:** only after a crash between a migration's schema commit and
 its fingerprint stamp, where the live schema has been independently confirmed
@@ -438,8 +440,12 @@ appropriate to reach for at all.
 - **Hand-writing SQL against `schema_object_fingerprints` or
   `schema_migrations`.** Both are runner-owned bookkeeping tables
   (`lib/osi-migrate/ledger.js`, `ensureLedger`), not part of `seed-blank.sql` or
-  the bundled DBs. Exactly one sanctioned tool exists for fingerprints
-  (`restamp-fingerprints.js`); none for hand-editing `schema_migrations` rows.
+  the bundled DBs. Exactly two sanctioned tools write these tables outside the
+  runner: `restamp-fingerprints.js` (fingerprints only) and
+  `baseline-existing-db.js` (semantic-gated ledger baseline + fingerprints;
+  Option B Stage 0). Hand-editing either table directly remains forbidden.
+  (`scripts/repair-sync-outbox-v2.js` is a sanctioned, temporary pre-baseline
+  additive repair — not a ledger tool; delete it once the fleet is baselined.)
 - **Forgetting the FK fence direction/order.** `PRAGMA foreign_keys` is a no-op
   inside an already-open transaction — set it `OFF` *before* `BEGIN`, restore it
   `ON` in a `finally` so it fires even when the rebuild throws.
