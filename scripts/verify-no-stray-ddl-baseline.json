@@ -16,8 +16,8 @@
     "The enforcement gate is scripts/verify-no-stray-ddl.js comparing HEAD counts against",
     "--base-ref (default origin/main) per surface/marker; see the script header.",
     "Known owners of the current counts: the two request-path CREATE TABLE",
-    "valve_actuation_expectations occurrences in flows.json function nodes; deploy.sh",
-    "ensure_* helpers, analysis_views, chameleon calibration, and chameleon_readings DDL."
+    "valve_actuation_expectations occurrences in flows.json function nodes.",
+    "deploy.sh must stay free of inline DDL; it fetches the ordered migration runner instead."
   ],
   "files": {
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/flows.json": {
@@ -43,16 +43,16 @@
       "total": 351
     },
     "deploy.sh": {
-      "createTable": 4,
-      "alterTable": 24,
+      "createTable": 0,
+      "alterTable": 0,
       "createUniqueIndex": 0,
-      "createIndex": 1,
+      "createIndex": 0,
       "createTrigger": 0,
       "dropTable": 0,
-      "dropTrigger": 1,
+      "dropTrigger": 0,
       "writableSchema": 0,
-      "total": 30
+      "total": 0
     }
   },
-  "total": 732
+  "total": 702
 }
