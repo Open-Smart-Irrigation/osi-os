@@ -36,10 +36,16 @@ Exit contract: `0` = PASS (advance the rollout); `1` = FAIL with a reason summar
 
 `deploy kaba100 → gate kaba100 → deploy Silvan → gate Silvan` — Uganda only inside its #87 window with this same gate as the final verification step (the heartbeat is the only remote post-migration signal Uganda has, per the Option B plan). The gate does not deploy, does not roll back (payload atomicity/rollback is item 5.3), and does not orchestrate the fleet — it is the go/no-go check between manual steps. Its first live validation is item 0.1's own deploy of the merged flows to the demo gateways.
 
+## Fable review findings (2026-07-10) — applied
+
+**HIGH — Schema-changing deploys hard-fail the gate as designed.** `accepted-schema-signatures` is static server config (`@Value`). A freshly deployed new sig yields `schema_sig_not_accepted`; the gate cannot pass until the server config is edited AND the backend restarted. **Fix applied:** when `--expect-schema-sig <sig>` is supplied AND the reported `schemaSig` matches it, the gate **suppresses** `schema_sig_not_accepted` as a verdict reason — the operator's explicit `--expect-schema-sig` assertion overrides the server's stale allowlist for this specific deploy. The runbook (§D) must include the allowlist-update sequence: (1) deploy the gateway; (2) run the gate with `--expect-schema-sig <new-sig>`; (3) after the gate passes, update the server's `accepted-schema-signatures` and restart the backend so subsequent heartbeat monitoring doesn't false-alarm. The new sig is derivable from the Stage-0 rehearsal copy (`node -e "require('./lib/osi-migrate').verifyHead(cliRunner('<db>'), {migrationsDir: '...'}).then(console.log)"`).
+
+**MEDIUM — Error-delta baseline is sticky.** `errors_total` never decreases and is captured once as the baseline. One transient unrelated error early in the window fails every subsequent poll on criterion 4 (error-delta), making §C.5's reset-and-retry dead for that criterion. **Fix applied:** on a failed poll that resets the consecutive count, also re-capture the error-delta baseline from the next poll's `errors_total`. This makes the gate judge whether errors are *still rising*, not whether they rose at any point during the window.
+
 ## Non-goals
 
 - No automatic rollback (5.3), no fleet orchestration/parallel rollout, no Pi-side agent or SSH from the gate (server-verdict only — works from any operator machine that can reach the cloud).
-- No server verdict changes: error-delta judgment lives in the gate by design; `schema_sig` acceptance stays the server's existing allowlist mechanism (re-harvesting accepted sigs after a schema deploy is the existing #100 operational step, referenced not changed).
+- No server verdict changes: error-delta judgment lives in the gate by design; `schema_sig` acceptance stays the server's existing allowlist mechanism (re-harvesting accepted sigs after a schema deploy is the existing #100 operational step, referenced not changed). **However:** the gate's `--expect-schema-sig` override (Fable review fix above) allows a schema-changing deploy to pass without waiting for the server config update.
 - No fix for #107 (`schema_sig` CHECK-blindness) — the gate consumes whatever signature mechanism exists; Stage 0's shared normalization is that fix's seam.
 
 ## Definition of Done

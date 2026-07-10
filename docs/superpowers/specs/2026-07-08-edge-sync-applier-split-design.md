@@ -91,9 +91,12 @@ class GatewayLocationApplier implements SyncEventApplier {
 `EdgeSyncService` gains an injected `List<SyncEventApplier>` (Spring collects all beans implementing the interface) folded once into a `Map<String, SyncEventApplier>` at construction:
 
 ```java
-// in EdgeSyncService, built once from the injected List<SyncEventApplier>:
-private final Map<String, SyncEventApplier> appliersByOp; // op -> applier, from supportedOps()
+// in EdgeSyncService — initialized empty, populated in @PostConstruct:
+private final List<SyncEventApplier> syncEventAppliers;       // Lombok includes this (uninitialized final)
+private final Map<String, SyncEventApplier> appliersByOp = new HashMap<>();  // Lombok SKIPS this (has initializer)
 ```
+
+**Why the initializer matters (Lombok `@RequiredArgsConstructor` rule):** Lombok generates constructor parameters only for **uninitialized** `final` fields. `syncEventAppliers` (no initializer) gets a constructor parameter — Spring injects all `SyncEventApplier` beans into it. `appliersByOp` (has `= new HashMap<>()` initializer) is excluded — it starts as an empty map, populated by the `@PostConstruct` fold below. Without the initializer, Lombok would add `appliersByOp` to the constructor and Spring would try to inject a `Map<String, SyncEventApplier>` bean, which doesn't exist.
 
 Built via `@PostConstruct` with a **duplicate-op guard**: if two appliers claim the same op, fail fast at startup (`IllegalStateException`) — a wiring bug must not silently shadow. **Lombok interaction (verified):** `EdgeSyncService` is `@Service @RequiredArgsConstructor`; keep that annotation, add `private final List<SyncEventApplier> appliers` (Lombok includes it in the generated constructor), and fold it to the `Map` in a `@PostConstruct` method — not in a constructor body, which `@RequiredArgsConstructor` owns. **Convention note:** Spring `List<T>` multi-bean collection injection + a fold-to-`Map` is a standard Spring idiom but is **new to this repo** (verified: no existing multi-bean `List<T>` collection injection and no `Collectors.toMap`/`@PostConstruct` fold in `src/main` — the only `List<T>` fields are hand-parsed config lists like `RateLimitFilter.trustedProxyMatchers`). It is not "the house pattern"; it is a standard idiom introduced here. Verify at implementation time that no newer `Map<String, ...>` bean-collection convention exists — if one does, prefer it.
 

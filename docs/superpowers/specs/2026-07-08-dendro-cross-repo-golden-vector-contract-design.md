@@ -37,17 +37,26 @@ The contract is scoped to the **envelope-compute layer** both sides expose as a 
 docs/contracts/dendro/
   README.md                      # source-of-truth + bytewise-mirror rule + divergence rule (this item adds it)
   cases/
-    <case-name>.input.json       # { method: "stepwise"|"linear", maxGrowthUmPerDay: <num>,
-                                  #   points: [ { date:"YYYY-MM-DD", d_max_um:<num>, d_min_um:<num>, anchor_eligible:true }, ... ] }
-    <case-name>.expected.json    # { results: [ { date:"YYYY-MM-DD", envelope_ref_um:<num>,
-                                  #               twd_night_um:<num>, twd_day_um:<num>, mds_um:<num> }, ... ] }
+    <case-name>.input.json       # { method: "stepwise", maxGrowthUmPerDay: null,
+                                  #   points: [ { date:"YYYY-MM-DD", d_max_um:<int>, d_min_um:<int> }, ... ] }
+    <case-name>.expected.json    # { results: [ { date:"YYYY-MM-DD", envelope_ref_um:<int>,
+                                  #               twd_night_um:<int>, twd_day_um:<int>, mds_um:<int> }, ... ] }
   MANIFEST.json                  # { schemaVersion:<int>, cases:[ "<name>", ... ] }
 ```
 
 - **Input granularity = `DailyPoint`, not raw telemetry (§C boundary).** Each `points[]` entry maps 1:1 to the edge module's `computeEnvelope` sequence element (`{dMax, dMin}` + date) and to the server's `EnvelopeTwd.DailyPoint(date, dMax, dMin, anchorEligible)`. The raw-reading→dMax/dMin extraction is out of *this* contract (the server's `extractExtremes` is service-private); it is covered by the edge's own 2.2 unit tests. This keeps both sides on a pure, deterministic function.
-- **Fixture field names (§ground-truth 2 refined):** input `d_max_um`/`d_min_um`/`date`/`anchor_eligible` and output `envelope_ref_um`/`twd_night_um`/`twd_day_um`/`mds_um` are all `dendrometer_daily` **column names** (the schema both repos mirror; edge columns == `DendroDaily.java`/`EnvelopeTwd.EnvelopeResult` snake_case). At the `DailyPoint`/envelope level the shared vocabulary is the `dendrometer_daily` schema, NOT `channels.json` (which covers raw telemetry channels one layer earlier, and is the field-name truth for the raw-reading layer that this cross-repo contract does not span). Neither name set is invented by this item.
-- **No wall-clock, no weather input.** The asserted pure units (`EnvelopeTwd.compute`, edge `computeEnvelope`) take no clock and no weather — determinism is by construction, no stub needed, no `computedAt` field required at this layer. (The `irrDecision`/`computedAt` concern from 2.2 §B belongs to the irrigation-decision layer, which is NOT in this cross-repo contract — only the envelope/TWD/MDS core is.)
+
+**Fixture constraints (Fable review HIGH 2026-07-10 — tightened from the original):**
+
+1. **Stepwise method only.** The server's `EnvelopeTwd.compute` has `method` as a parameter but `EnvelopeResult.envelopeRef`/`twdNight`/`twdDay` are always stepwise — `linear` exists only as separate `twdNightLin`/`twdDayLin` accessors with no linear ref. A `method:"linear"` fixture cannot be asserted as designed. Restrict all cases to `method: "stepwise"`.
+2. **All points eligible, no growth cap.** The edge `computeEnvelope` has NO `anchor_eligible` concept and NO `maxGrowthUmPerDay` — these are server-only features (the server's pipeline fills `anchorEligible` from `!lowConfidence` and applies `MAX_ANCHOR_GROWTH_UM_PER_DAY`). Any case with `anchor_eligible: false` or a binding growth cap is red-at-introduction with no implementation having "moved." Fixtures omit `anchor_eligible` (server runner defaults it to `true`) and set `maxGrowthUmPerDay: null` (disabled).
+3. **Integer µm inputs.** Both sides share `round(x, 0)` but apply it at different layers: the server's `EnvelopeTwd.compute` returns unrounded doubles (rounding is in `DendroAnalyticsService` lines 375–377), while the edge rounds the running envelope ref per day inside the loop (affecting subsequent anchor comparisons). Exact equality holds only if fixture inputs are integer µm — an unstated constraint that must be explicit. All `d_max_um`/`d_min_um` values in fixtures are integers.
+
+- **Fixture field names (§ground-truth 2 refined):** input `d_max_um`/`d_min_um`/`date` and output `envelope_ref_um`/`twd_night_um`/`twd_day_um`/`mds_um` are all `dendrometer_daily` **column names** (the schema both repos mirror; edge columns == `DendroDaily.java`/`EnvelopeTwd.EnvelopeResult` snake_case). At the `DailyPoint`/envelope level the shared vocabulary is the `dendrometer_daily` schema, NOT `channels.json` (which covers raw telemetry channels one layer earlier). Neither name set is invented by this item.
+- **No wall-clock, no weather input.** The asserted pure units (`EnvelopeTwd.compute`, edge `computeEnvelope`) take no clock and no weather — determinism is by construction, no stub needed, no `computedAt` field required at this layer.
 - **Numeric tolerance:** expected values are pre-rounded to the shared `round(...)` precision (envelope/TWD/MDS are µm integers — both sides `round(x, 0)`). The contract is **exact equality on the rounded values**, not float-epsilon — a rounding divergence is a real finding to surface.
+
+**Plan/spec reconciliation (Fable review MEDIUM):** the plan's Step 1.1 must use the spec's `DailyPoint` shape (`{method, maxGrowthUmPerDay, points: [{date, d_max_um, d_min_um}]}`) for `*.input.json`, NOT 2.2's end-to-end shape (`{zones, devices, readings, priorState, computedAt}`). The spec §C's whole argument depends on the `DailyPoint` boundary — an executor following the plan literally would break it.
 
 ### B. osi-os side — run fixtures against `osi-dendro-analytics` (node --test)
 

@@ -26,6 +26,22 @@
 
 If any gate is ☐, STOP. Do not proceed. Filling these rows with real evidence is what flips this runbook from NOT-READY to READY.
 
+## Accepted residual: `applyBootstrap` single-transaction hazard (Fable review 2026-07-10)
+
+**1.B4 hardens the events path (`applyEventsV2`) but explicitly scopes out `applyBootstrap` (1.B4 spec Non-goals).** `applyBootstrap` (`:98`) wraps all bootstrap collections in a single `@Transactional` — the same poison-batch semantics 1.B4 fixes for events. Uganda's catch-up window, with no `sync_outbox` today, will lead with **bootstraps** (the edge POSTs a full bootstrap every 6 hours and on every Force Sync), not outbox replay. The program's "weeks-stale gateway replaying backlog" framing doesn't exactly match Uganda's shape.
+
+**Mitigations that keep this from being critical:**
+- Bootstrap payloads are LIMIT-bounded (500/500/500/365/365/365/200 per collection — verified in `Build Cloud Bootstrap` inject node) and upsert-idempotent.
+- The failure mode is a wedged, endlessly-retried ~2–3k-row transaction on the VPS — visible (server logs), bounded (finite payload), and transient (the next bootstrap cycle retries the whole thing).
+- This is NOT the dedup-row-loss class 1.B4 fixes (bootstraps don't go through the inbox/watermark path).
+
+**Monitoring during the window:** after Uganda deploys and starts bootstrapping:
+1. Watch the test-server logs for repeated `applyBootstrap` failures (`docker logs osi-backend 2>&1 | grep -i bootstrap`).
+2. If a bootstrap batch fails repeatedly, manually apply the collections piecemeal (the bootstrap endpoint accepts partial payloads) or temporarily increase Postgres `statement_timeout`.
+3. The window is complete when `sync_link_state.linked=1` on Uganda AND at least one bootstrap cycle completes without error on the server.
+
+**Future hardening (not a gate for 2.1):** per-collection transactions in `applyBootstrap` (a modest change: wrap each `for (Map<String, Object> ... : request.<collection>())` loop in its own `@Transactional`) would close this residual for all gateways. Filed for the next sync-hardening round, not blocking Uganda.
+
 ## Why Uganda is special (the facts that make this a one-window operation)
 
 - **Uganda is missing whole sync tables.** Unlike kaba100/Silvan, Uganda's DB has **no `sync_outbox` and no `sync_link_state`** (plan Decision paragraph: "Uganda additionally has no `sync_outbox` at all (zero cloud backup)"). Stage 0's `repair-sync-outbox-v2.js` explicitly refuses a DB whose `sync_outbox` is absent entirely (that is this #87 whole-table gap, Stage 0 §D(d) — out of Stage 0's scope, in this runbook's scope). So Uganda needs an **additive catch-up artifact that CREATEs the missing tables + triggers first**, before the standard baseline path can run.

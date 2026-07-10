@@ -9,7 +9,33 @@
 
 **Architecture (spec §A–§E):** A Node module `scripts/deploy-payload-swap.js` owns the pure, testable filesystem logic: `stagePayload(root, stamp, srcFlows)` writes `payloads/<stamp>/flows.json`; `flipTo(root, stamp)` atomically re-points `flows.json` (via a temp-symlink + `rename`, the JS equivalent of `ln -sfn`); `currentTarget(root)` / `previousStamp(root)` read the layout; `prunePayloads(root, keepN)` retains the newest N dirs (the backup-rotation idiom); `rollback(root)` flips to the previous stamp. `deploy.sh` calls this module for the swap, then invokes 0.2's gate; on non-zero it calls `rollback` + restarts. The migrate-a-copy step (1.B1's writers-stopped/backup `applyPending`) runs BEFORE the flip and aborts the deploy on failure — the common bad-flows failure then rolls back via symlink with the DB untouched.
 
+## CRITICAL: Composed deploy.sh ordering with 1.B1 (Fable review 2026-07-10)
+
+**5.3 OWNS the re-ordering of deploy.sh's stage→migrate→flip sequence.** As written, 5.3 flips the symlink at :535 (the old flows-write region) and 1.B1's `run_schema_migration` runs at :643 (the old `ensure_*` slot). Composed order would be **flip→migrate→probe**, violating DD10's "migration fails → abort BEFORE the flip." On migration failure with `set -e`, the script aborts at :643 and 5.3's rollback block at :681 **never executes** — new payload live, restored old-schema DB, no rollback.
+
+**The fix (this plan owns it):** deploy.sh's sequence becomes:
+1. **Stage** the new flows into `payloads/<stamp>/` at :535 (nothing live touched)
+2. **Migrate** at :643 (1.B1's `run_schema_migration` — writers stopped, backup, restore-on-failure)
+3. **Flip + restart + probe + auto-rollback** in the post-migrate block (where the old :681 "React GUI" region starts)
+
+This means the `flipTo` call moves OUT of the :535 region and INTO the post-migrate block. The :535 region only stages; the flip happens after a successful migration (or after a no-op migration for additive-only deploys). A migration failure aborts before the flip — old payload still live, DB restored by 1.B1, exactly as DD10 requires.
+
+**Whichever of 5.3/1.B1 merges second re-anchors its line references** — both plans anchor edits by line numbers that the other's merge will shift. Both plans include a re-anchor verification step.
+
+**Trap interaction with 1.B1:** 1.B1's `run_schema_migration` sets `trap restart_node_red EXIT INT TERM`. This plan's rollback block must chain with 1.B1's trap, not replace it. The rollback block (Task 2, Step 2.3) is written so it runs AFTER Node-RED has been restarted by 1.B1's trap — the probe runs against the already-restarted Node-RED, and rollback flips the symlink then restarts again.
+
 **Tech Stack:** POSIX `sh` (`deploy.sh`, BusyBox `ash` on the Pi), Node.js (`node:test`, `node:fs`, no new deps) for the swap module, GitHub Actions (`migrations.yml`).
+
+## Rebase protocol (all plans anchoring on line numbers)
+
+**Main has progressed since this plan was written** (2026-07-08). Line numbers cited below (e.g. `deploy.sh:535`, `:643`, `:681`) are verified against main as of that date but may drift as other PRs merge. **Before executing any task that references a line number:**
+
+1. `git rebase main` (or merge main into the feature branch).
+2. Re-verify every line reference: `grep -n '<anchor text>' deploy.sh` for each anchor cited in the task.
+3. If a reference has shifted, update the step's line number in your working notes — do NOT edit this plan file (it is the reviewed plan of record; line shifts are expected and handled at execution time).
+4. If the anchor text itself is GONE (not just shifted), STOP — another plan likely merged a conflicting change. Check git log for the commit that removed it and reconcile.
+
+This protocol applies to 1.B1 as well — both plans edit `deploy.sh` and whichever merges second must re-anchor.
 
 ## Global Constraints
 
@@ -20,6 +46,10 @@
 - **Same-filesystem atomicity:** the staging dir and the `flows.json` symlink live under `/srv/node-red/`, same filesystem — so the symlink `rename` is atomic, not a cross-device copy. deploy.sh verifies same-fs placement before the first flip.
 - **NEVER overwrite `/data/db/farming.db`** (the standing guardrail) — 5.3 changes only the flows payload path, not the DB seed logic (`seed_db_if_missing`, lines 104-127, is untouched).
 - CI (`migrations.yml`) green at every commit.
+
+## Known limitation: payload staging scope (Fable review 2026-07-10)
+
+The spec §A defines the staged payload as "flows.json, settings.js, package.json, the GUI bundle reference." This plan stages **only `flows.json`** — `settings.js` is overwritten in place every deploy, and helper modules (`osi-history-sync-helper`, future `osi-zone-env`…) are fetched in place under `/srv/node-red/`. This is acceptable for Phase 0–2 (the only extracted module is `osi-history-helper`, which is flows-version-coupled). As DD4 extraction proceeds (Phases 2–4), the rollback unit and the behavior unit **diverge**: rolling back flows but not a module leaves old flows calling the new module API. `osiLib` quarantine (DD2/1.A1) makes this fail-visible (503 + `error_counts`), not fail-silent, which is the right degradation. **When the second extraction lands (2.4 or 4.2), revisit this plan to stage the full payload directory** (flows + settings.js + `osi-*` module tree), so rollback fidelity doesn't erode as the codebase matures.
 
 ## Non-goals (do not do these)
 
@@ -324,7 +354,7 @@ swap_call() {
 }
 ```
 
-- [ ] **Step 2.2: Replace the in-place flows.json write with a staged write + flip** — replace the block at lines 535-537:
+- [ ] **Step 2.2: Replace the in-place flows.json write with a STAGE-ONLY write (NO flip yet)** — replace the block at lines 535-537:
 
 ```sh
 fetch_required "flows.json" \
@@ -332,59 +362,82 @@ fetch_required "flows.json" \
     "/srv/node-red/flows.json"
 ```
 
-with the staged form:
+with the stage-only form:
 
 ```sh
-echo "--- flows.json (staged payload) ---"
+echo "--- flows.json (staged payload — flip deferred to post-migrate) ---"
 STAGED_FLOWS="$TMP_DIR/flows.json"
 fetch "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/flows.json" "$STAGED_FLOWS"
-# Stage into payloads/<stamp>/ (nothing live is touched yet), then flip the symlink.
+# Stage into payloads/<stamp>/ — NOTHING LIVE IS TOUCHED YET.
+# The symlink flip happens AFTER the schema migration succeeds (Step 2.3),
+# so a migration failure leaves the old payload live and the DB restored (DD10).
 swap_call stagePayload "$DEPLOY_STAMP" "$STAGED_FLOWS" >/dev/null
-# Record the pre-flip current stamp so a probe failure can roll back to it.
 PREV_STAMP="$(swap_call currentStamp || true)"
-swap_call flipTo "$DEPLOY_STAMP" >/dev/null
-echo "OK: flipped /srv/node-red/flows.json -> payloads/$DEPLOY_STAMP (was: ${PREV_STAMP:-none})"
+echo "OK: staged payloads/$DEPLOY_STAMP (current: ${PREV_STAMP:-none}; flip deferred)"
 ```
 
-(Note: the migrate-a-copy step is 1.B1's `ensure_*`-successor and runs at the existing lines 643-647 block — untouched here. Per spec §B/§C, on this codebase the migration runs after the flip today; **the auto-rollback in Step 2.3 covers the bad-flows case, and the runbook (§C) states that a migration that has already committed is NOT auto-undone.** When 1.B1 lands its writers-stopped/backup runner, it re-orders migrate-before-flip; 5.3's flip + rollback block is unchanged. This ordering caveat is called out in HARD-DECISIONS.)
+**The flip is NOT here.** It moves to Step 2.3 (the post-migrate block), after 1.B1's `run_schema_migration` at :643 succeeds. This is the load-bearing re-ordering from the Fable review: stage→migrate→flip, not flip→migrate→probe. A migration failure now aborts before the flip — old payload still live, DB restored by 1.B1, exactly as DD10 requires.
 
-- [ ] **Step 2.3: Add the post-restart probe + auto-rollback block** — immediately BEFORE the `echo "--- React GUI ---"` line (currently line 681), insert:
+- [ ] **Step 2.3: Add the post-migrate FLIP + probe + auto-rollback block** — immediately BEFORE the `echo "--- React GUI ---"` line (currently line 681), insert. **This is where the symlink flip happens — AFTER the migration at :643 succeeded (or was a no-op).** The DD10 sequence is now: stage (:535) → migrate (:643) → flip+restart+probe (here):
 
 ```sh
-echo "--- Post-deploy health probe + auto-rollback (5.3 / DD10) ---"
+echo "--- Flip payload + health probe + auto-rollback (5.3 / DD10) ---"
+# The migration at :643 succeeded (or was a no-op). NOW flip the symlink to the
+# new payload. If the migration had failed, set -e would have aborted the script
+# before reaching this point — old payload still live, DB restored by 1.B1.
+swap_call flipTo "$DEPLOY_STAMP" >/dev/null
+echo "OK: flipped /srv/node-red/flows.json -> payloads/$DEPLOY_STAMP"
+
 # Restart Node-RED onto the newly-flipped payload, then run 0.2's canary gate.
+# NOTE: if 1.B1's run_schema_migration ran, its trap already restarted Node-RED.
+# A second restart is harmless and ensures we're running the flipped payload.
 /etc/init.d/node-red restart || true
 
 # 0.2's health probe is the post-check (N=5 consecutive healthy heartbeats, server
 # verdict, disk, error-delta). It is a CONSUMED contract — deploy does not re-implement it.
 # exit 0 = PASS, 1 = FAIL, 2 = couldn't-judge (treated as fail for a self-rolling deploy).
-CANARY_JS="$TMP_DIR/deploy-canary-gate.js"
-if fetch "scripts/deploy-canary-gate.js" "$CANARY_JS" 2>/dev/null && [ -s "$CANARY_JS" ]; then
-    if node "$CANARY_JS"; then
-        echo "OK: health probe PASSED — committing payload $DEPLOY_STAMP"
-        swap_call prunePayloads "$PAYLOAD_KEEP_N" >/dev/null
+#
+# IMPORTANT: the probe runs OPERATOR-SIDE (see 0.2 spec). On the Pi, we run a
+# LOCAL health self-check only — heartbeat freshness + Node-RED process alive +
+# /gui returns 301. The cloud-verdict gate (schema_sig, error-delta) is the
+# OPERATOR's responsibility after deploy exits (via 0.2's gate from their machine).
+PROBE_OK=1
+if pgrep -f 'node-red' >/dev/null 2>&1; then
+    # Give Node-RED a few seconds to start its HTTP listener
+    sleep 5
+    if wget -q -O /dev/null --spider "http://127.0.0.1:1880/gui" 2>/dev/null; then
+        echo "OK: local health self-check PASSED (Node-RED alive, /gui reachable)"
+        PROBE_OK=0
     else
-        probe_rc=$?
-        echo "ALERT: health probe returned $probe_rc — AUTO-ROLLING-BACK the flows payload" >&2
-        if [ -n "${PREV_STAMP:-}" ]; then
-            swap_call flipTo "$PREV_STAMP" >/dev/null
-            /etc/init.d/node-red restart || true
-            echo "ROLLED BACK: flows.json -> payloads/$PREV_STAMP; Node-RED restarted on last-known-good payload" >&2
-            echo "NOTE: any DB migration that already committed is NOT auto-undone (DD10) — restore is an operator call via 1.B1's backup." >&2
-            exit 1
-        else
-            echo "ERROR: no previous payload to roll back to (first deploy under staged scheme). Payload $DEPLOY_STAMP left live; investigate." >&2
-            exit 1
-        fi
+        echo "WARN: Node-RED process alive but /gui not reachable after 5s" >&2
     fi
 else
-    echo "WARN: 0.2 canary gate (scripts/deploy-canary-gate.js) not available on the source; skipping auto-rollback probe." >&2
-    echo "WARN: payload $DEPLOY_STAMP is live but UNVERIFIED. Deploy 0.2 to enable the self-rolling-back post-check." >&2
+    echo "ALERT: Node-RED process not found after restart" >&2
+fi
+
+if [ "$PROBE_OK" = "0" ]; then
+    echo "OK: committing payload $DEPLOY_STAMP"
     swap_call prunePayloads "$PAYLOAD_KEEP_N" >/dev/null
+else
+    echo "ALERT: local health self-check FAILED — AUTO-ROLLING-BACK the flows payload" >&2
+    if [ -n "${PREV_STAMP:-}" ]; then
+        swap_call flipTo "$PREV_STAMP" >/dev/null
+        /etc/init.d/node-red restart || true
+        echo "ROLLED BACK: flows.json -> payloads/$PREV_STAMP; Node-RED restarted on last-known-good payload" >&2
+        echo "NOTE: any DB migration that already committed is NOT auto-undone (DD10) — restore is an operator call via 1.B1's backup." >&2
+        echo "NOTE: run 0.2's deploy-canary-gate.js from your operator machine to get the full cloud verdict." >&2
+        exit 1
+    else
+        echo "ERROR: no previous payload to roll back to (first deploy under staged scheme). Payload $DEPLOY_STAMP left live; investigate." >&2
+        exit 1
+    fi
 fi
 ```
 
-(The `fetch ... 2>/dev/null && [ -s ]` gate makes the probe **fail-open when 0.2 is not yet deployed** — the deploy still completes as it does today, loudly noting the missing gate — so this slice does not hard-depend on 0.2 having merged first. When 0.2 lands, the probe + auto-rollback engage automatically.)
+**Three design changes from the original plan (Fable review 2026-07-10):**
+1. **The flip is HERE, not at :535.** Stage→migrate→flip, per DD10.
+2. **The probe is a LOCAL self-check, not 0.2's cloud gate.** The 0.2 spec is explicit: the cloud admin gate runs operator-side with an admin JWT (`OSI_ADMIN_TOKEN`), not on the Pi. Shipping admin credentials to every gateway violates the credential policy. The on-Pi self-check is: Node-RED process alive + `/gui` returns a response. The full cloud verdict (schema_sig, error-delta, server health) runs from the operator's machine after deploy exits.
+3. **No `deploy-canary-gate.js` fetch onto the Pi.** The operator runs `node scripts/deploy-canary-gate.js --gateway-eui <EUI>` from their workstation after deploy exits successfully. The Pi only does the local smoke test.
 
 - [ ] **Step 2.4: Update the final "Next steps" note** — the trailing echo block (lines 691-694) tells the operator to restart Node-RED manually; with the probe now restarting it, adjust the wording. Change:
 

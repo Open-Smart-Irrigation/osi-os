@@ -11,6 +11,23 @@
 
 **Tech Stack:** Java 17 / Spring Boot 3.4.3, Lombok (`@Component @RequiredArgsConstructor`; the registry fold is `@PostConstruct`, not a constructor body), Testcontainers Postgres 16 (via 1.B4's `PostgresSyncTestBase`), JUnit 5 + Mockito + AssertJ.
 
+## Independent review findings (2026-07-08, verified against live code + 1.B4 spec+plan)
+
+This plan was produced by a writer whose reviewer subagent died mid-review (noted in `refactor-program-2026-open-decisions.md` §2). The following review verified every ground-truth claim against the current `EdgeSyncService.java` (93,412 bytes / 1,817 lines on `main`) and the 1.B4 spec+plan. **All claims confirmed; no correctness issues found.** Two implementation traps identified and annotated inline below.
+
+**Verified ground truth (all correct):**
+- Switch at `:423-486`: 12 cases, 17 op strings. `GATEWAY_LOCATION_UPSERTED` at `:456-459`.
+- `upsertGatewayLocation` at `:1178-1213`: helper call list matches (verified: `normalizeGatewayDeviceEui` `:1378`, `str`, `numDoubleObj` `:1323/1328/1333`, `numIntegerObj` `:1338/1343`, `nullableStr` `:1373`, `parseNullableInstant` 2-arg `:1353` + 3-arg `:1357`, `isStale` `:1398`).
+- Dual callers: switch `:457` + `applyBootstrap` `:157` — both confirmed. Private method must NOT be deleted.
+- `numLong` returns boxed `Long` (`:1432`). The `Optional.ofNullable(numLong(..., 0L)).orElse(0L)` at `:1187` is redundant (the default path can never return null), but correctly preserved verbatim.
+- `SyncEventRecord` is a public record nested inside `EdgeSyncService` (`:1589-1600`). The interface's `EdgeSyncService.SyncEventRecord` reference is consistent with 1.B4's pattern (`SyncOpDispatcher` and `SyncEventTxExecutor` both reference it the same way).
+- 1.B4's `SyncOpDispatcher` (1.B4 plan `:915-918`) delegates `supports()` → `applyEvent(eui, event, true)` and `apply()` → `applyEvent(eui, event)` (1.B4 plan `:1124-1133`). Modifying `applyEvent`'s internals (registry before switch) transparently routes through the dispatcher — the anonymous `SyncOpDispatcher` is genuinely untouched.
+- Helper methods have ~170 call sites across `EdgeSyncService` — the "~100 other call sites" estimate is conservative; the private methods must stay.
+
+**Trap 1 — Lombok `@RequiredArgsConstructor` and `appliersByOp` (annotated in Step 3.2):** the `appliersByOp` field MUST have an initializer (`= new HashMap<>()`). Without it, Lombok includes it in the generated constructor and Spring tries to inject a `Map<String, SyncEventApplier>` bean — which doesn't exist. The spec's §C code snippet originally omitted the initializer (fixed 2026-07-08); the plan's Step 3.2 has always had the correct form.
+
+**Trap 2 — `@Import` completeness under `@DataJpaTest` (annotated in Step 4.1):** `EdgeSyncService`'s `List<SyncEventApplier>` is populated only by `@Import`'d applier beans in a slice test. A missing `@Import` builds a partial registry — tests pass but don't match production wiring. As appliers are added, the `@Import` set in every sync IT must grow in lockstep.
+
 ## Global Constraints
 
 - **All code changes in osi-server only.** Branch `feat/sync-applier-split`; commit per task; open a PR at the end; **do not merge it.** Never modify anything under `/home/phil/Repos/osi-os`.
@@ -147,7 +164,8 @@ git commit -m "feat(sync): GatewayLocationApplier + isolation test — the DD12 
 
 - [ ] **Step 3.2: Inject the applier list + build the registry** — in `EdgeSyncService`:
   - Add `private final List<SyncEventApplier> syncEventAppliers;` (Lombok `@RequiredArgsConstructor` includes it — do NOT hand-write a constructor).
-  - Add `private final Map<String, SyncEventApplier> appliersByOp = new HashMap<>();` and a `@PostConstruct void buildApplierRegistry()` that folds `syncEventAppliers` into it, throwing `IllegalStateException` if two appliers claim the same op (fail-fast, spec §C). **Verify no existing `Map<String,...>` bean-collection convention exists** (spec §C notes this idiom is new to the repo) — if one does, use it.
+  - Add `private final Map<String, SyncEventApplier> appliersByOp = new HashMap<>();` — **the `= new HashMap<>()` initializer is load-bearing (Trap 1 from review findings):** Lombok's `@RequiredArgsConstructor` generates constructor parameters only for **uninitialized** `final` fields. With the initializer, Lombok skips `appliersByOp` (it's already assigned); without it, Lombok adds a `Map<String, SyncEventApplier>` constructor parameter and Spring fails to inject a bean of that type. The field starts empty; `@PostConstruct` populates it. `final` prevents reassignment but allows mutation (`.put()`).
+  - Add a `@PostConstruct void buildApplierRegistry()` that folds `syncEventAppliers` into `appliersByOp`, throwing `IllegalStateException` if two appliers claim the same op (fail-fast, spec §C). **Verify no existing `Map<String,...>` bean-collection convention exists** (spec §C notes this idiom is new to the repo) — if one does, use it.
 
 - [ ] **Step 3.3: Rewrite `applyEvent` to consult the registry before the switch** — at the top of `applyEvent(gatewayDeviceEui, event, dryRun)`, after the `event.op() == null` guard, insert:
 
@@ -159,7 +177,7 @@ if (applier != null) {
 }
 ```
 
-Then **delete the `GATEWAY_LOCATION_UPSERTED` case** from the switch (the `case "GATEWAY_LOCATION_UPSERTED" -> { if (!dryRun) upsertGatewayLocation(payload, gatewayDeviceEui); return true; }` block). Leave the other 11 cases and `default` exactly as-is. **Delete the now-unused private `upsertGatewayLocation` method** from `EdgeSyncService` (its logic now lives in the applier) — confirm via grep it has no other caller (`applyBootstrap` calls it at `:1173`-region! — VERIFY: if `applyBootstrap` still calls `upsertGatewayLocation`, do NOT delete it; keep the private method for the bootstrap path and let the applier hold its own copy, OR route bootstrap through the applier. **Default safe choice: keep `EdgeSyncService.upsertGatewayLocation` for `applyBootstrap`'s use; the applier holds the moved copy.** Duplication is acceptable and convert-on-touch will resolve it when `applyBootstrap` is next touched — do not expand scope to refactor bootstrap here.).
+Then **delete the `GATEWAY_LOCATION_UPSERTED` case** from the switch (the `case "GATEWAY_LOCATION_UPSERTED" -> { if (!dryRun) upsertGatewayLocation(payload, gatewayDeviceEui); return true; }` block). Leave the other 11 cases and `default` exactly as-is. **Do NOT delete `EdgeSyncService.upsertGatewayLocation`** — `applyBootstrap` calls it at `:157` (verified: `upsertGatewayLocation(gatewayLocation, request.gatewayDeviceEui())`). The applier holds a moved copy of the body; the private method stays for the bootstrap path. This is deliberate bounded duplication — routing `applyBootstrap` through the applier would be a bootstrap-path behavior change (5.5 territory, different blast radius). Convert-on-touch resolves it when `applyBootstrap` is next touched. Run `grep -n 'upsertGatewayLocation' EdgeSyncService.java` to confirm the call site still exists before proceeding.
 
 - [ ] **Step 3.4: Run the regression net (green — behavior preservation)**
 

@@ -7,9 +7,30 @@
 
 **Goal:** Ship one CI verifier, `scripts/verify-flows-size-ratchet.js`, that enforces three ratchets against both maintained `flows.json` profiles, git-anchored to the base ref (default `origin/main`) exactly like `verify-no-stray-ddl.js`, with a committed documentation baseline (`scripts/verify-flows-size-ratchet-baseline.json`) for offline honesty:
 
-1. **Per-node size ceiling** — no existing function node (keyed by node **id**) may grow beyond its base-ref `func` length; any function node **id not present in the base ref** (a newly added node) must be ≤ 4096 chars.
-2. **Total-embedded-JS scoreboard** — the sum of every function node's `func` length, per profile, may only **decrease** vs the base ref (the strangler's scoreboard).
+1. **Per-node size ceiling** — no existing function node (keyed by node **id**) may grow beyond its base-ref `func` length **unless the growth is explicitly budgeted** (see §Growth allowance below); any function node **id not present in the base ref** (a newly added node) must be ≤ 4096 chars.
+2. **Total-embedded-JS scoreboard** — the sum of every function node's `func` length, per profile, may only **decrease or stay equal** vs the base ref (the strangler's scoreboard). A PR that adds net JS (e.g. a new device integration node) must pair it with an extraction that removes at least as much — or use the growth-allowance mechanism.
 3. **New-node-must-be-thin heuristic** — a newly added function node (id absent from the base ref) that exceeds a heuristic size floor must look like a thin adapter, not a re-embedded monolith: it must either declare+call `osiLib.require(...)` **or** contain no oversized SQL string literal (a literal ≥ `SQL_LITERAL_MAX` chars containing a DDL/DML keyword). A node that is both large-with-a-fat-SQL-literal and does not load through `osi-lib` is exactly the anti-pattern extraction exists to prevent, and fails.
+
+### Growth allowance mechanism (Fable review CRITICAL 2026-07-10)
+
+**Problem:** Rules 1 and 2 as originally stated **block items 3.1 (narrow-waist writer) and 5.6 (time integrity) as planned.** 3.1 adds new flow nodes + registry entries (net JS increase); 5.6 grows three existing nodes inline (timestamp clamp, scheduler guard, heartbeat fields). Neither downstream plan mentions the ratchet in its gates.
+
+**Fix:** a committed `scripts/verify-flows-size-ratchet-allowances.json` file that explicitly budgets growth for specific nodes and total:
+
+```json
+{
+  "_comment": "Explicit growth allowances. Each entry must cite the program item and justification. Consumed-or-deleted: remove the entry when the growth is offset by extraction.",
+  "node_allowances": {
+    "9b3afb405207302e": { "delta": 200, "reason": "5.6 timestamp clamp (3 lines)" },
+    "cmd-type-registry": { "delta": 100, "reason": "3.1 UC512 registry entry" }
+  },
+  "total_allowance": { "delta": 500, "reason": "3.1 UC512 integration adds net JS; offset by 2.2 extraction in the same phase" }
+}
+```
+
+The verifier checks: per-node growth ≤ base-ref size + any node-specific allowance; total ≤ base-ref total + total_allowance. An allowance is **consumed-or-deleted** (per the ADR invariant): the PR that uses the allowance must cite it; the next extraction that offsets the growth deletes the entry. This keeps the ratchet honest (it still catches accidental growth) while making planned, justified growth landable.
+
+**Downstream plans must be updated** to cite the ratchet allowance in their gates when they add net JS. This is noted as a cross-item coordination item, not deferred.
 
 Wired into `.github/workflows/migrations.yml`. Both profiles enforced. Zero `flows.json` edits.
 

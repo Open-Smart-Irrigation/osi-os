@@ -13,7 +13,14 @@
 - **30** `DROP TRIGGER IF EXISTS` + **30** `CREATE TRIGGER` (the trigger convergence — this is behavior, not just schema; see Boundary below).
 - The sanctioned fail-closed `devices`-CHECK rebuild block (PR #86) — ~5 `devices_new` statements (7 raw string occurrences of `devices_new`; the count is the rebuild block, not a literal grep total).
 
-Separately, **request-path DDL** runs `CREATE TABLE IF NOT EXISTS valve_actuation_expectations` in **two** function nodes (verified: `zone-env-fn` "Get Zone Environment Summary" and `get-actuations-query` "Build Query") — DDL executed on an HTTP request path, the other genus the stray-DDL guard freezes.
+Separately, **request-path DDL** runs `CREATE TABLE IF NOT EXISTS` in multiple HTTP-path function nodes. **CORRECTED enumeration (Fable review CRITICAL 2026-07-10 — original claimed 2 tables in 2 nodes; actual is 10 CREATEs across 5 nodes):**
+- `zone-env-fn` (4): `zone_shared_environment`, `gateway_locations`, `zone_weather_cache`, `valve_actuation_expectations` + ALTER TABLE migrations array
+- `get-actuations-query` (1): `valve_actuation_expectations`
+- `history-api-router-fn` (3 + 6 indexes + seed INSERT): `zone_seasons`, `history_card_preferences`, `history_workspaces` — deferred from 4.2's extraction scope to here
+- `get-zones-query` (1): lazy table creation
+- `zone-calibration-fn` (1): lazy table creation
+
+Sub-step 2a's removal list must cover **all 10**, not just the 2 originally claimed. Each lazily-created table becomes seed/migration-owned; the request path assumes it exists post-baseline. The guard test's assertion that `zone_weather_cache` CREATE remains is **wrong** (contradicts the DoD) and must be corrected.
 
 This inline boot-DDL is the last piece of the pre-runner schema world. It is why a gateway on the wrong schema is currently self-healing on boot (good) but also un-auditable and un-versioned (bad) and blocks the runner from being the sole schema authority. Once Stage 1 delivers schema via the ledgered runner and the fleet has converged, the boot-DDL is dead weight whose *removal* makes the runner the single source of truth (ADR goal). **Stage 2 removes it — but only after the fleet is provably safe without the on-boot self-heal.**
 
