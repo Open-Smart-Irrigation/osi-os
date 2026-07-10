@@ -42,7 +42,7 @@ def delete_branch(branch: str, cwd: Path) -> None:
 
 def cherry_pick_pr(pr_branch: str, cwd: Path) -> bool:
     """Merge a PR branch into the current branch."""
-    r = run_git(["merge", f"origin/{pr_branch}", "--no-ff",
+    r = run_git(["merge", pr_branch, "--no-ff",
                  "-m", f"Merge {pr_branch} into bundle"], cwd=cwd)
     if r.returncode != 0 and "CONFLICT" in (r.stdout + r.stderr):
         run_git(["merge", "--abort"], cwd=cwd)
