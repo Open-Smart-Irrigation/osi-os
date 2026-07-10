@@ -4,5 +4,6 @@
   "0003__stamp_contract_version_and_zone_op_split.sql": "23b5ffebfafff0f2b975bfbf37e9c8214d04f5d68bb798dbcbcbee7b483eddc4",
   "0004__widen_schedule_trigger_metric_check.sql": "cf3e3bc4b085f6768986746f7858218a850ee57cad58cccf7f3ed8bc4b51c3c3",
   "0005__field_work_requests.sql": "d4cc1302c1f8a977a110a8655d28a51cbd2fd68a1bab6a21eab6a1eaef4304c5",
-  "0006__improvement_request_contact_email.sql": "6ea99b190d82a5110aa742cfbbeaf037c7c8bb77627cd5d49d915359a3bafc05"
+  "0006__improvement_request_contact_email.sql": "6ea99b190d82a5110aa742cfbbeaf037c7c8bb77627cd5d49d915359a3bafc05",
+  "0007__sync_outbox_eviction_index.sql": "21d44ae8338c9f6be2602ff40133830f229261fbef4bef869c86b55cafbca970"
 }
