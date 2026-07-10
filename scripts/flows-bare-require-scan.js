@@ -10,7 +10,7 @@
 const { builtinModules } = require('module');
 
 const NODE_BUILTINS = new Set([...builtinModules, ...builtinModules.map((m) => 'node:' + m)]);
-const BARE_REQUIRE_PATTERN = /(?<![\w$.])require\(\s*['"]([^'"]+)['"]\s*\)/g;
+const BARE_REQUIRE_PATTERN = /(?<![\w$.])require\(\s*['"`]([^'"`]+)['"`]\s*\)/g;
 
 function scanFunctionNodes(flows) {
   const findings = [];

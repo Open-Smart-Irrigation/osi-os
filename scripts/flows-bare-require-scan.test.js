@@ -34,3 +34,8 @@ test('multiple offenders in one body are all reported', () => {
   const flows = [fn('Two Bads', "require('/a'); require('/b');")];
   assert.equal(scanFunctionNodes(flows).length, 2);
 });
+
+test('template-literal bare require FAILS too', () => {
+  const flows = [fn('Backtick Node', "const helper = require(`/srv/node-red/x`);\nreturn msg;")];
+  assert.deepEqual(scanFunctionNodes(flows), [{ node: 'Backtick Node', spec: '/srv/node-red/x' }]);
+});
