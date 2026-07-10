@@ -42,7 +42,7 @@ def ssh(gw: GatewayConfig, cmd: str, timeout: int = 60) -> subprocess.CompletedP
 
 
 def pre_deploy_backup(gw: GatewayConfig, timestamp: str) -> BackupResult:
-    # Deploy the backup script to the Pi
+    ssh(gw, f"mkdir -p {gw.backup_dir}")
     scp_to_pi(gw, PI_SCRIPTS / "backup-pre-deploy.sh", f"{gw.backup_dir}/backup-pre-deploy.sh")
     scp_to_pi(gw, PI_SCRIPTS / "restore-pre-deploy.sh", f"{gw.backup_dir}/restore-pre-deploy.sh")
     ssh(gw, f"chmod +x {gw.backup_dir}/backup-pre-deploy.sh {gw.backup_dir}/restore-pre-deploy.sh")
