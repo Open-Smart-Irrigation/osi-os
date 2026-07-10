@@ -1207,7 +1207,7 @@ const GUARDED_MODULE_VARS = [
   // Node.js core
   'crypto', 'fs', 'path', 'os', 'net', 'http', 'https', 'url',
   // Project-registered helpers (settings.js functionGlobalContext)
-  'osiDb', 'osiCloudHttp', 'chameleon', 'dendro', 'chirpstack', 'bcrypt', 'sqlite3',
+  'osiDb', 'osiCloudHttp', 'chameleon', 'dendro', 'chirpstack', 'bcrypt', 'sqlite3', 'osiLib',
 ];
 for (const node of flows) {
   if (node.type !== 'function') continue;
@@ -1227,6 +1227,15 @@ for (const node of flows) {
   }
 }
 console.log('OK every function node that uses a guarded module has it bound');
+// Bare-require ratchet (refactor-program 1.A1, spec §D): no function node may
+// bare-require a non-builtin. Scan logic + test vectors live in
+// scripts/flows-bare-require-scan.js; canonical flows only (profile parity
+// guarantees the mirror is byte-identical).
+const { scanFunctionNodes } = require('./flows-bare-require-scan');
+for (const finding of scanFunctionNodes(flows)) {
+  fail(`function node ${finding.node} bare-requires '${finding.spec}' — load via osiLib.require(...) declared in libs (see docs/superpowers/specs/2026-07-07-osi-lib-loader-design.md)`);
+}
+console.log('OK no function node bare-requires a non-builtin module');
 expectIncludes('History Rollup Tick', 'osiHistory.runRollupJob', 'calls the helper rollup job');
 expectIncludes('History API Router', 'osiHistory.buildZoneExportCsv', 'builds the zone CSV export via the helper');
 
