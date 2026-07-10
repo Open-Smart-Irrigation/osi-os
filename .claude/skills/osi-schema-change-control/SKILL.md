@@ -199,10 +199,12 @@ already-integrity-checked backup.
 migration named by that manifest, `scripts/migrate-cli.js`,
 `scripts/baseline-existing-db.js`, `scripts/repair-sync-outbox-v2.js`,
 `scripts/semantic-schema-compare.js`, and the required `lib/osi-migrate` modules.
-It then stops Node-RED, checkpoints WAL, inspects `schema_migrations`, performs
-the temporary pre-baseline `sync_outbox` v2-column repair and semantic baseline
-only when the DB has no ledger rows yet, and calls `migrate-cli.js` with
-`--backup-dir /data/backups/migrate`.
+It ensures the `sqlite3` CLI is present, attempting `opkg install sqlite3-cli`
+before refusing. It then stops Node-RED, waits up to 30 seconds for the process to
+exit, checkpoints WAL, inspects `schema_migrations`, performs the temporary
+pre-baseline `sync_outbox` v2-column repair and semantic baseline only when the
+DB has no ledger rows yet, and calls `migrate-cli.js` with `--backup-dir
+/data/backups/migrate`.
 
 That is still **not** a boot-time path. `flows.json`, the Node-RED init script,
 and `sync-init-fn` must not call `applyPending` or grow new schema behavior.
@@ -372,11 +374,12 @@ on an existing DB, it now uses one path: `run_schema_migration()`.
 2. It fetches the Stage 0 pre-baseline helpers and the required
    `lib/osi-migrate` modules into `$TMP_DIR`, so the on-device script runs the
    same ledgered code as CI.
-3. It stops Node-RED before any live DB write, chains its restart with the
-   existing cleanup trap, checkpoints WAL, inspects `schema_migrations`, and
-   only on DBs with no ledger rows runs `repair-sync-outbox-v2.js` followed by
-   `baseline-existing-db.js`. It checkpoints again, then invokes
-   `migrate-cli.js`.
+3. It ensures the `sqlite3` CLI exists (`opkg install sqlite3-cli` if needed),
+   stops Node-RED before any live DB write, chains its restart with the existing
+   cleanup trap, waits up to 30 seconds for the process to exit, checkpoints WAL,
+   inspects `schema_migrations`, and only on DBs with no ledger rows runs
+   `repair-sync-outbox-v2.js` followed by `baseline-existing-db.js`. It
+   checkpoints again, then invokes `migrate-cli.js`.
 4. `migrate-cli.js` calls `applyPending(..., writersStopped: true)` and uses a
    persistent pre-migration byte-image backup directory:
    `/data/backups/migrate` (or `MIGRATE_BACKUP_DIR` if explicitly overridden).

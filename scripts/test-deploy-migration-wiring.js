@@ -66,6 +66,7 @@ test('deploy migration wiring fetches the runner, Stage 0 helpers, and semantic 
 
 test('deploy migration wiring stops writers, checkpoints WAL, baselines, and applies in order', () => {
   const stopIdx = indexOf('/etc/init.d/node-red stop');
+  const pgrepIdx = indexOf("pgrep -f 'node-red'");
   const firstCheckpointIdx = indexOf('if ! checkpoint_live_db; then');
   const ledgerIdx = indexOf("SELECT 1 FROM sqlite_master WHERE type='table' AND name='schema_migrations' LIMIT 1;");
   const ledgerRowsIdx = indexOf('SELECT COUNT(*) FROM schema_migrations;');
@@ -75,6 +76,7 @@ test('deploy migration wiring stops writers, checkpoints WAL, baselines, and app
   const migrateIdx = indexOf('node "$TMP_DIR/scripts/migrate-cli.js" "$DB_PATH" --backup-dir "$backup_dir" --migrations-dir "$migrations_dir"');
 
   assert.ok(stopIdx < firstCheckpointIdx, 'Node-RED must stop before checkpointing');
+  assert.ok(stopIdx < pgrepIdx && pgrepIdx < firstCheckpointIdx, 'Node-RED process poll must precede checkpointing');
   assert.ok(firstCheckpointIdx < ledgerIdx, 'checkpoint must precede ledger inspection');
   assert.ok(ledgerIdx < ledgerRowsIdx, 'ledger presence check must precede row-count inspection');
   assert.ok(ledgerRowsIdx < repairIdx, 'pre-baseline repair only runs after ledger row-count inspection');
@@ -82,6 +84,17 @@ test('deploy migration wiring stops writers, checkpoints WAL, baselines, and app
   assert.ok(baselineIdx < secondCheckpointIdx, 'baseline writes must be checkpointed before byte-copy backup');
   assert.ok(secondCheckpointIdx < migrateIdx, 'second checkpoint must precede migrate-cli');
   assert.match(deploy, /SKIP: schema_migrations ledger already has rows/);
+});
+
+test('deploy migration wiring provisions sqlite3-cli before refusing', () => {
+  const ensureIdx = indexOf('ensure_sqlite3_cli()');
+  const installIdx = indexOf('opkg install sqlite3-cli');
+  const callIdx = indexOf('if ! ensure_sqlite3_cli; then');
+
+  assert.ok(ensureIdx < installIdx, 'ensure_sqlite3_cli must own opkg provisioning');
+  assert.ok(installIdx < callIdx, 'function must be defined before use');
+  assert.match(deploy, /opkg update/);
+  assert.match(deploy, /ERROR: sqlite3 CLI unavailable and could not be installed/);
 });
 
 test('deploy migration wiring uses persistent backup path and preserves cleanup trap behavior', () => {

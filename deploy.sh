@@ -161,6 +161,22 @@ checkpoint_live_db() {
     fi
 }
 
+ensure_sqlite3_cli() {
+    if command -v sqlite3 >/dev/null 2>&1; then
+        return 0
+    fi
+    if command -v opkg >/dev/null 2>&1; then
+        echo "sqlite3 CLI absent; installing sqlite3-cli via opkg"
+        opkg update >/dev/null 2>&1 || true
+        opkg install sqlite3-cli >/dev/null 2>&1 || true
+    fi
+    if command -v sqlite3 >/dev/null 2>&1; then
+        return 0
+    fi
+    echo "ERROR: sqlite3 CLI unavailable and could not be installed; refusing schema migration" >&2
+    return 1
+}
+
 fetch_migration_runner() {
     migrations_dir="$TMP_DIR/database/migrations/ordered"
     mkdir -p "$migrations_dir" "$TMP_DIR/scripts" "$TMP_DIR/lib/osi-migrate"
@@ -204,8 +220,7 @@ run_schema_migration() {
         echo "SKIP: no live database at $DB_PATH"
         return 0
     fi
-    if ! command -v sqlite3 >/dev/null 2>&1; then
-        echo "ERROR: sqlite3 CLI is required for schema migrations" >&2
+    if ! ensure_sqlite3_cli; then
         return 1
     fi
     if ! command -v node >/dev/null 2>&1; then
@@ -228,7 +243,15 @@ run_schema_migration() {
         echo "ERROR: failed to stop Node-RED before schema migration" >&2
         return 1
     fi
-    sleep 2
+    stop_wait=0
+    while command -v pgrep >/dev/null 2>&1 && pgrep -f 'node-red' >/dev/null 2>&1 && [ "$stop_wait" -lt 30 ]; do
+        sleep 1
+        stop_wait=$((stop_wait + 1))
+    done
+    if command -v pgrep >/dev/null 2>&1 && pgrep -f 'node-red' >/dev/null 2>&1; then
+        echo "ERROR: Node-RED did not stop within 30s; refusing schema migration" >&2
+        return 1
+    fi
 
     if ! checkpoint_live_db; then
         return 1
