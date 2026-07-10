@@ -9,11 +9,13 @@ description: Use when editing conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/sh
 
 `flows.json` is the Node-RED flow definition that IS the edge backend for OSI OS:
 REST API routes, the scheduler, sync orchestration, and sensor ingest are all
-nodes in this one JSON array. As of 2026-07-06 the canonical copy at
-`conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/flows.json` is 529 nodes,
-1,245,761 bytes, formatted as `JSON.stringify(flows, null, 2) + '\n'`. It must be
-mirrored byte-for-byte into `conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/flows.json`
-(same byte count, confirmed identical on 2026-07-06).
+nodes in this one JSON array. The maintained copies are formatted as
+`JSON.stringify(flows, null, 2) + '\n'`, but node counts and byte counts drift as
+features land. Re-measure them in the current branch before citing them. The
+canonical copy at
+`conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/flows.json` must be
+mirrored byte-for-byte into
+`conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/flows.json`.
 
 This skill covers the mechanics of making a safe, wiring-correct edit to that
 file — not deploying it, diagnosing a live symptom, schema/migration changes,
@@ -72,17 +74,18 @@ script has a serialization bug (e.g. wrong indent width, missing trailing
 newline, a `Map`/`Set` in the mutation that doesn't round-trip). Do not
 proceed with a real mutation until the no-op case is proven byte-identical.
 
-This was actually run against this repo, not assumed:
+Expected roundtrip-check output shape after you rerun it in the current branch:
 
 ```
 $ node roundtrip-check.js conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/flows.json
-byte-identical: true   (1,245,761 / 1,245,761 bytes)
+byte-identical: true   (<current bytes> / <current bytes>)
 
 $ node roundtrip-check.js conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/flows.json
-byte-identical: true   (1,245,761 / 1,245,761 bytes)
+byte-identical: true   (<current bytes> / <current bytes>)
 ```
 
-Verified 2026-07-06 against `origin/main`. Both profile copies pass.
+Do not reuse old byte counts as proof. Fresh output from the branch you are
+editing is the evidence.
 
 ## Complete script skeleton
 
@@ -150,7 +153,7 @@ const exampleFunctionNode = {
     "  const fs = global.get('fs');", // functionGlobalContext local, NOT an npm module — no libs entry needed
     "  value = parseInt(fs.readFileSync('/sys/class/thermal/thermal_zone0/temp', 'utf8').trim());",
     "} catch (e) {",
-    "  // sampler must never crash the flow: swallow and report null",
+    "  node.warn('Example Sampler read failed: ' + (e && e.message ? e.message : e));",
     "}",
     "msg.payload = { value };",
     "return msg;",
@@ -286,18 +289,24 @@ automated form of the npm-module rule above.
 
 Wrap every sysfs/file/subprocess read in its own `try/catch` that resolves to
 `null` for that one reading — a sampler failing to read one sysfs path must
-never take down the rest of the function or the flow. Real precedent, node
+never take down the rest of the function or the flow. Adapted from node
 `062a0f9bf66d9789` ("Build Heartbeat", part of the frozen heartbeat cluster —
-read it for the pattern, do not edit it casually):
+read it for isolation shape, but do not copy legacy empty catches):
 
 ```js
 var cpuTemp = null, memPercent = null, load1 = null, load5 = null, load15 = null, fanValue = null;
 
-try { cpuTemp = Math.round(parseInt(fs.readFileSync('/sys/class/thermal/thermal_zone0/temp', 'utf8').trim()) / 100) / 10; } catch(e) {}
 try {
-    var tm = os.totalmem(), fm = os.freemem();
-    memPercent = Math.round(((tm - fm) / tm) * 100);
-} catch(e) {}
+  cpuTemp = Math.round(parseInt(fs.readFileSync('/sys/class/thermal/thermal_zone0/temp', 'utf8').trim()) / 100) / 10;
+} catch (e) {
+  node.warn('Build Heartbeat cpu temp read failed: ' + (e && e.message ? e.message : e));
+}
+try {
+  var tm = os.totalmem(), fm = os.freemem();
+  memPercent = Math.round(((tm - fm) / tm) * 100);
+} catch (e) {
+  node.warn('Build Heartbeat memory read failed: ' + (e && e.message ? e.message : e));
+}
 ```
 
 **The let-before-try scoping trap:** a `const` (or `let`) declared *inside* a
@@ -316,7 +325,8 @@ try {
   zoneTimezone = await lookupTimezone(zoneId);   // assignment, not declaration
   phenoMod = await lookupPhenoMod(zoneId);
 } catch (e) {
-  // zoneTimezone/phenoMod keep their safe defaults; nothing downstream breaks
+  node.warn('zone metadata lookup failed: ' + (e && e.message ? e.message : e));
+  // zoneTimezone/phenoMod keep their safe defaults; nothing downstream breaks.
 }
 // zoneTimezone and phenoMod are both safely usable here
 ```
@@ -324,15 +334,59 @@ try {
 Always declare-with-default before the `try`, assign inside it, and never
 `const`/`let` a name inside `try{}` that anything outside the block needs.
 
+### Empty catches are ratcheted
+
+The repo allows legacy empty catches only as an existing baseline. When you
+touch a function node, convert empty `catch(_){}` / `catch(e){}` /
+`catch {}` blocks in that node to a visible warning such as:
+
+```js
+catch (e) {
+  node.warn('node/context: ' + (e && e.message ? e.message : e));
+}
+```
+
+Run `node scripts/verify-no-new-silent-catch.js` before committing. It ratchets
+maintained flow nodes, so a newly-added or worsened silent catch is a real
+failure even when the flow still imports.
+
+### Authenticated HTTP endpoints
+
+For a gated HTTP endpoint, copy the auth block verbatim from the newest shipped
+endpoint with the same auth mode, then diff your block against that precedent.
+Do not retype timing-safe HMAC checks, expiry checks, or token parsing from
+memory.
+
+Every code path must send exactly one HTTP response: success, validation
+failure, auth failure, not-found, and exception paths all terminate in one
+`http response` node or one response send. A route that sometimes returns no
+response is a silent hang; a route that sends twice becomes a Node-RED runtime
+error.
+
+For auth-gated routes, a no-token `401` is healthy proof that the route exists
+and is protected. Treat `404` as broken wiring/path and `500` as a handler bug.
+
+### No ad hoc DDL in flows.json
+
+Schema DDL belongs in ordered migrations and sanctioned deploy/boot repair
+paths, not new flow-node strings. `node scripts/verify-no-stray-ddl.js` is a
+git-anchored count ratchet over the maintained `flows.json` copies and
+`deploy.sh`; adding a new `CREATE TABLE`, `ALTER TABLE`, trigger, index, or
+similar marker in `flows.json` trips that guard against `origin/main`.
+
+If a flow edit appears to need DDL, stop and route through
+`osi-schema-change-control` instead of burying schema changes in a function node.
+
 ### Stable node ids
 
 Never regenerate or reuse an existing node's `id` — every `wires` array in
 every other node references ids directly, so changing one breaks wiring
 silently (Node-RED will not error; the edge from the old id just stops
 being a target). Real ids observed in this file take one of two forms:
-16-lowercase-hex-character Node-RED-generated ids (124 of 529 nodes, e.g.
-`062a0f9bf66d9789`, `c2b43a6c6e7d2c11`) or short descriptive slugs (the
-remaining 405, e.g. `auth-db-query`, `sync-init-fn`, `write-strega-expectation`).
+16-lowercase-hex-character Node-RED-generated ids (e.g. `062a0f9bf66d9789`,
+`c2b43a6c6e7d2c11`) or short descriptive slugs (e.g. `auth-db-query`,
+`sync-init-fn`, `write-strega-expectation`). Re-measure the current distribution
+if you need exact counts for a report.
 For a new node, mint a fresh 16-hex id
 (`node -e "console.log(require('crypto').randomBytes(8).toString('hex'))"`)
 or a new, clearly-unique descriptive slug if you are extending a named
@@ -374,7 +428,7 @@ for (const n of flows) {
 
 Run with plain `node scripts/test-flows-wiring.js` (not `node --test` — the
 file is a plain script with hand-rolled assertions, not a `node:test` suite).
-It pins four kinds of wiring contract, all against the canonical
+It pins these wiring and function-node contracts against the canonical
 (bcm2712) `flows.json` only:
 
 1. **STREGA actuation wiring** (labelled WS1, tags C5/H2/L1/M8) — exact
@@ -384,18 +438,23 @@ It pins four kinds of wiring contract, all against the canonical
    (`STALE_OPEN_OBSERVED`) inside `strega-reconciliation-monitor`'s `func`,
    an absence check (must NOT contain `flow.get('command_types') || {}`), and
    node-existence checks for the today-liters HTTP trio.
-2. **`osiDb.Database` close audit** (WS2/WS3) — described above.
-3. **Function-node `libs` declaration audit** — described above.
-4. **Misc WS2/WS3 wiring invariants** — a handful of `node.id === '...'` checks
+2. **Field request intake + status apply wiring** — required HTTP routes,
+   router `osiDb` binding/close behavior, contact-email persistence, pending
+   command split output count, and status ACK queue wiring.
+3. **Settings module gates** — bulk schedule-disable endpoint existence, bearer
+   auth, scoped schedule update, response shape, and no valve/downlink mutation.
+4. **`osiDb.Database` close audit** (WS2/WS3) — described above.
+5. **Function-node `libs` declaration audit** — described above.
+6. **Misc WS2/WS3 wiring invariants** — a handful of `node.id === '...'` checks
    for specific required substrings in specific nodes (gateway migration
    preflight's parameterized `q`/`run` helpers, `sync-force-build`'s timeout
    guard, `command-ack-build-batch`'s bootstrap gate, `s2120-zones-put-auth-fn`'s
    zone-id validation).
 
 On failure it prints one `FAIL: N flow wiring regression(s):` line followed by
-a bulleted list, then `process.exit(1)`; on success, one `OK` line per check
-plus a final `PASS: STREGA wiring + osiDb close + WS2/WS3 wiring guards all
-passed`.
+a bulleted list, then `process.exit(1)`; on success, it prints `OK` lines for
+the asserted groups plus a final `PASS: STREGA wiring + osiDb close + WS2/WS3
+wiring guards all passed`.
 
 **When you intend a wiring change that this file pins, update the pin in the
 same commit, with a commit message explaining why the wiring changed.** A
@@ -411,7 +470,7 @@ mirror separately, and do not let the two diverge even by a trailing newline.
 
 Enforced by `node scripts/verify-profile-parity.js`, which is chained from
 `node scripts/verify-sync-flow.js` (it runs as the final step, via
-`spawnSync`). Real output shape, run 2026-07-06 against this worktree:
+`spawnSync`). Output shape:
 
 ```
 === conf/full_raspberrypi_bcm27xx_bcm2709 ===
@@ -442,7 +501,7 @@ discrimination happens downstream of the MQTT IN node via
 Enforced by `scripts/check-mqtt-topics.sh`, which checks all three flow
 copies (bcm2712, bcm2709, and a legacy bcm2708 path) for both a UUID-shaped
 regex in any MQTT IN topic and an exact-string match against the expected
-topic. Run 2026-07-06:
+topic. Expected output shape:
 
 ```
 OK: conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/flows.json — no UUID patterns in MQTT IN topics
@@ -461,9 +520,11 @@ from the repo root.
 | Roundtrip byte-check ran on both profiles (before AND after your mutation) | your scratchpad roundtrip script | `byte-identical: true` for both `.../bcm2712/.../flows.json` and `.../bcm2709/.../flows.json` |
 | Both profile copies updated | `git status --short` shows both `flows.json` paths changed together | both paths listed, never just one |
 | Profile parity | `node scripts/verify-profile-parity.js` | ends `All parity checks passed.`, exit 0 |
-| Sync flow verification (chains schema/history/parity checks) | `node scripts/verify-sync-flow.js` | prints `Sync flow verification passed` at the end of its own section, then chains profile parity; a healthy full run ends `All parity checks passed.`, exit 0 — verified clean on this worktree 2026-07-06 (no open `duplicate column` failure; that was issue #84, already fixed on `main`) |
+| Sync flow verification (chains schema/history/parity checks) | `node scripts/verify-sync-flow.js` | prints `Sync flow verification passed` at the end of its own section, then chains profile parity; a healthy full run ends `All parity checks passed.`, exit 0 |
 | MQTT topic compliance | `scripts/check-mqtt-topics.sh` | three `OK:` lines, one per flow copy, exit 0 |
 | Flow wiring guards | `node scripts/test-flows-wiring.js` | ends `PASS: STREGA wiring + osiDb close + WS2/WS3 wiring guards all passed`, exit 0 |
+| Silent catch ratchet | `node scripts/verify-no-new-silent-catch.js` | exit 0; no new or worsened empty catches in maintained flow nodes |
+| Stray DDL ratchet | `node scripts/verify-no-stray-ddl.js` | exit 0; no unreviewed DDL-marker count increase in flows/deploy surfaces |
 
 If you intentionally changed a pinned wiring contract, update
 `scripts/test-flows-wiring.js` in the same commit and say why in the commit
@@ -503,6 +564,16 @@ non-author) — §8 defines done, not a green checklist.
   It only enables the *mechanism*; each node still needs its own `libs` entry.
 - Adding schema DDL inside `sync-init-fn` because "it's just one more ADD
   COLUMN" — that node is frozen; see `osi-schema-change-control`.
+- Adding or leaving an empty catch in a touched function node. The
+  `verify-no-new-silent-catch.js` ratchet exists because swallowed errors made
+  flow failures look like missing data or HTTP hangs.
+- Retyping auth boilerplate for a new HTTP endpoint instead of copying and
+  diffing the newest shipped gated endpoint.
+- Treating a no-token `401` on a gated endpoint as a failure. It is the healthy
+  protected-route signal; `404`/`500` are the route/handler failures.
+- Adding DDL-like SQL to `flows.json` and assuming schema verifiers cover it.
+  `verify-no-stray-ddl.js` is the guard that catches ad hoc DDL in flow/deploy
+  surfaces.
 
 ## Provenance and maintenance
 
@@ -515,6 +586,8 @@ Re-verify these before trusting them again, especially after any large flows.jso
 - `functionGlobalContext` keys: `grep -n -A5 "functionGlobalContext" feeds/chirpstack-openwrt-feed/apps/node-red/files/settings.js`.
 - MQTT IN topic compliance: `bash scripts/check-mqtt-topics.sh`.
 - Wiring guard behavior and pass/fail text: `node scripts/test-flows-wiring.js`.
+- Silent-catch ratchet behavior: `node scripts/verify-no-new-silent-catch.js`.
+- Stray-DDL ratchet behavior: `node scripts/verify-no-stray-ddl.js`.
 - Profile parity behavior and pass/fail text: `node scripts/verify-profile-parity.js`.
 - Full chained verifier and current baseline health: `node scripts/verify-sync-flow.js`.
 - Node id format distribution (16-hex vs slug counts): re-run the id-length-distribution one-liner from this skill's authoring session, or `node -e "const f=require('./conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/flows.json'); const ids=f.filter(n=>n.id).map(n=>n.id); console.log(ids.filter(i=>/^[0-9a-f]{16}$/.test(i)).length,'/',ids.length)"`.

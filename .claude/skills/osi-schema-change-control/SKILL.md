@@ -66,6 +66,7 @@ outside the one sanctioned exception.
 | Hand-edit `schema_object_fingerprints` | It is a computed baseline (SHA-256 over live DDL + `PRAGMA table_xinfo`/`foreign_key_list`/`index_list`/`index_xinfo`). A hand edit desyncs the stamp from the real schema and the next `applyPending` either falsely passes or falsely refuses. The only sanctioned re-baselines are `scripts/restamp-fingerprints.js` (recompute fingerprints of a confirmed-good live schema) and `scripts/baseline-existing-db.js` (semantic-gated first baseline of a pre-ledger device — Option B Stage 0, spec 2026-07-07). |
 | Reseed or overwrite `/data/db/farming.db` on a provisioned Pi | `deploy.sh`'s `seed_db_if_missing` only seeds when the file is absent *and* no WAL/SHM/journal sidecars exist; it refuses otherwise. Overwriting destroys irreplaceable farm history. |
 | Add new schema behavior to `sync-init-fn` (the boot node) | It is FROZEN (AGENTS.md "Boot-DDL freeze"). New schema goes through the migration runner's ordered files and deploy-time runner path, not boot-time inline DDL. |
+| Add ad hoc DDL to `flows.json` or `deploy.sh` without routing through schema change control | `scripts/verify-no-stray-ddl.js` is a git-anchored DDL-marker ratchet over the maintained flow copies and `deploy.sh`. A green migration verifier does not prove this guard will pass. |
 | Modify an already-merged `database/migrations/ordered/NNNN__slug.sql` file | Migrations are checksummed (SHA-256 of the raw file bytes, `lib/osi-migrate/migrations-loader.js`). Changing a merged file makes the ledger's stored checksum mismatch the file on next apply, which the runner treats as `repair_required` and refuses to proceed past. |
 | Update `seed-blank.sql` or one bundled DB without the others | `verify-seed-replay.js` and `verify-db-schema-consistency.js` both fail if any of the 7 bundled copies drifts from the seed/migration-replay schema. One home for the fact: keep all copies byte/fingerprint-identical in the same commit. |
 | Rebuild a parent table (drop/rename swap) without the FK fence | Without `PRAGMA foreign_keys=OFF` held across the swap, `ON DELETE CASCADE` on child tables (`device_data`, `chameleon_readings`) silently wipes their rows when the parent is dropped. This caused a documented field history-loss incident (`docs/operations/edge-history-retention.md`). |
@@ -109,9 +110,20 @@ by the ADR but was never committed to the repo — do not go looking for it.)
 
 ### Ordered migrations: format and risk-class declaration
 
-Files live at `database/migrations/ordered/NNNN__slug.sql` — currently
-`0001__baseline.sql` through `0007__analysis_views.sql`. The filename format is
-enforced by a regex in `lib/osi-migrate/migrations-loader.js`:
+Files live at `database/migrations/ordered/NNNN__slug.sql`. Check the current
+inventory before choosing a version:
+
+```bash
+ls database/migrations/ordered/
+```
+
+Use the next contiguous four-digit version after the highest `NNNN` present; do
+not copy an example version from this skill. If `CHECKSUMS.json` is present in
+that directory, keep it in mind when interpreting `verify-migrations.js` output
+and do not edit already-recorded migration bytes casually.
+
+The filename format is enforced by a regex in
+`lib/osi-migrate/migrations-loader.js`:
 `^(\d{4})__([a-z0-9_]+)\.sql$` — four-digit version, double underscore, lowercase
 slug. Versions must be unique and are sorted numerically, not lexically.
 
@@ -280,7 +292,8 @@ fence is what prevents it from recurring.
 
 ### Merge gate for any further touch to this block
 
-Verified present and passing in this worktree on 2026-07-06:
+If you touch the guarded `devices` rebuild block, rerun this gate set in the
+current branch and paste fresh output:
 
 ```
 node scripts/verify-runtime-schema-parity.js     # OK (2 flows: devices CHECK + trigger parity)
@@ -313,14 +326,13 @@ rehearse test); `verify-profile-parity.js` is CI-gated via the
 production-copy rehearsal is additionally expected before rollout to a live
 gateway (see `osi-live-ops-runbook` for the actual on-Pi procedure).
 
-**Additional gate:** `scripts/verify-sync-flow.js` is green on `main` (verified
-in this worktree 2026-07-06, exit 0) and CI-gated by its own workflow,
-`.github/workflows/verify-sync-flow.yml` — separate from `migrations.yml`. It
-chains `verify-db-schema-consistency.js` and `verify-profile-parity.js`: a full
-run prints `Sync flow verification passed` at the end of the sync section and
-terminates with `All parity checks passed.`. (An older plan document described it as RED at baseline; that was the
-stale upgrade-test baseline fixed via the issue #84 pin — treat any RED result
-today as a real regression, not a known baseline.)
+**Additional gate:** `scripts/verify-sync-flow.js` is CI-gated by its own
+workflow, `.github/workflows/verify-sync-flow.yml` — separate from
+`migrations.yml`. It chains `verify-db-schema-consistency.js` and
+`verify-profile-parity.js`: a full run prints `Sync flow verification passed`
+at the end of the sync section and terminates with `All parity checks passed.`.
+Do not rely on historical baseline notes; rerun it in the branch you are
+changing and treat a RED result as a real regression until proven otherwise.
 
 ## Parity surfaces
 
@@ -343,12 +355,12 @@ profiles — it also includes the `base_*` profiles and the legacy `bcm2708`
 directory, plus the two dev-convenience copies under `database/` and
 `web/react-gui/`. All 7 are covered by `verify-db-schema-consistency.js`.)
 
-Four verifiers each check a different slice, all confirmed green in this
-worktree on 2026-07-06:
+Core verifiers each check a different slice. Run them in the current worktree
+and report current output; do not reuse old pass strings:
 
 | Verifier | What it checks | Run output |
 |---|---|---|
-| `scripts/verify-migrations.js` | Every ordered migration file is well-formed; versions contiguous from `0001` | `verify-migrations: OK (2 migrations)` |
+| `scripts/verify-migrations.js` | Every ordered migration file is well-formed; versions contiguous from `0001`; also validates checksum manifest rules when present | exit 0; current script may print a `verify-migrations: OK (...)` summary, but do not require a fixed migration count or exact string |
 | `scripts/verify-seed-replay.js` | Replays `bootstrapFresh` over the ordered migrations into a scratch DB and diffs its computed fingerprints (tables/indexes/triggers, excluding the ledger's own bookkeeping tables) against fingerprints from `seed-blank.sql` applied fresh — keeps the migration set and seed honestly equivalent | `verify-seed-replay: OK` |
 | `scripts/verify-runtime-schema-parity.js` | Compares `sync-init-fn`'s `devices_new` CHECK type-set and each flow file's whole trigger set (both profiles) against the canonical set derived from `seed-blank.sql` — fails if the boot node ever *downgrades* the seed | `verify-runtime-schema-parity: OK (2 flows: devices CHECK + trigger parity)` |
 | `scripts/verify-db-schema-consistency.js` | Hand-maintained column/index/trigger-fragment contract checked against all 7 bundled DB copies (defaults to the 7-path list above; accepts explicit paths as CLI args), plus an `EXPLAIN QUERY PLAN` check that a history query actually uses `idx_device_data_deveui_recorded_at`. Widest and slowest-changing — must be hand-extended whenever the contract changes (see Walkthrough) | all 7 paths `OK`, then `DB schema consistency verification passed` |
@@ -359,10 +371,16 @@ scripts/rehearse-devices-rebuild.test.js` (covered under Boot-DDL freeze above),
 and `scripts/verify-profile-parity.js` (byte-for-byte hash comparison of
 canonical payload files, including `files/usr/share/db` and
 `files/usr/share/flows.json`, between the `bcm2712` source-of-truth profile and
-the `bcm2709` mirror — confirmed green here).
+the `bcm2709` mirror). Rerun both in the branch you are changing.
 
-All of the above ran clean (exit 0) in this worktree on 2026-07-06 with no
-working-tree changes as a side effect.
+`scripts/verify-no-stray-ddl.js` is the provenance ratchet for DDL-like strings
+in `flows.json` and `deploy.sh`. Run it for schema work and for any flow/deploy
+edit that introduces, removes, or moves DDL markers. It is separate from
+`verify-migrations.js`; passing one does not prove the other.
+
+Do not treat a historical green run as current evidence. Re-run the relevant
+commands after changing schema, flow DDL, deploy repair, seed, or bundled DB
+surfaces.
 
 ## `deploy.sh` migration runner
 
@@ -428,6 +446,9 @@ appropriate to reach for at all.
 - **Blaming the boot DDL node for a "duplicate column" verifier failure without
   checking the test baseline first.** Issue #84 shows this exact misattribution
   happened and had to be corrected in writing.
+- **Assuming `verify-migrations.js` covers all DDL provenance.** It validates
+  ordered migration files; `verify-no-stray-ddl.js` is the guard for ad hoc DDL
+  in `flows.json` and `deploy.sh`.
 - **Updating `seed-blank.sql` (or one bundled DB) without the rest.** The
   verifiers above will catch it, but catching it in CI after the fact is more
   expensive than doing the "apply to all 7 copies + mirror" step in one commit.
@@ -451,9 +472,10 @@ change or table rebuild, everything below still applies but you are in
 `destructive`-class territory (writers-stopped gate, FK fence) — do not attempt
 that live without also reading `osi-live-ops-runbook`.
 
-1. **Write the migration.** Create
-   `database/migrations/ordered/0008__your_slug.sql` (next contiguous 4-digit
-   version) with a `-- risk: additive` header as the first line, then your
+1. **Write the migration.** Run `ls database/migrations/ordered/`, choose the
+   next contiguous four-digit version after the highest existing migration, and
+   create `database/migrations/ordered/NNNN__your_slug.sql` with a
+   `-- risk: additive` header as the first line, then your
    `CREATE TABLE`/`ALTER TABLE ... ADD COLUMN`/`CREATE INDEX`/`CREATE TRIGGER`
    statements. Prefer `IF NOT EXISTS` on object-creation statements (tables,
    indexes, triggers) so the file is safely re-runnable, matching the `0002`
@@ -469,6 +491,7 @@ that live without also reading `osi-live-ops-runbook`.
    the `bcm2712` full profile's DB over the `bcm2709` mirror so profile parity
    stays byte-for-byte (this is the exact pattern used for `0002`):
    ```bash
+   MIGRATION=database/migrations/ordered/NNNN__your_slug.sql
    cd "$(git rev-parse --show-toplevel)" && for db in \
      conf/base_raspberrypi_bcm27xx_bcm2709/files/usr/share/db/farming.db \
      conf/base_raspberrypi_bcm27xx_bcm2712/files/usr/share/db/farming.db \
@@ -476,7 +499,7 @@ that live without also reading `osi-live-ops-runbook`.
      conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/db/farming.db \
      database/farming.db \
      web/react-gui/farming.db
-   do sqlite3 -bail "$db" < database/migrations/ordered/0008__your_slug.sql && echo "OK $db"; done \
+   do sqlite3 -bail "$db" < "$MIGRATION" && echo "OK $db"; done \
      && cp conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/db/farming.db \
            conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/db/farming.db \
      && echo "OK mirror copy"
@@ -498,6 +521,7 @@ that live without also reading `osi-live-ops-runbook`.
    node scripts/verify-seed-replay.js
    node scripts/verify-runtime-schema-parity.js
    node scripts/verify-db-schema-consistency.js
+   node scripts/verify-no-stray-ddl.js
    node scripts/verify-profile-parity.js
    ```
    If your change also touches `sync-init-fn` or the `devices` CHECK, add:
@@ -523,16 +547,17 @@ node scripts/verify-migrations.js                      # migration file well-for
 node scripts/verify-seed-replay.js                      # migrations replay == seed-blank.sql
 node scripts/verify-runtime-schema-parity.js            # boot node devices CHECK + triggers == seed
 node scripts/verify-db-schema-consistency.js            # all 7 bundled DBs match hand-maintained contract
+node scripts/verify-no-stray-ddl.js                     # no ad hoc DDL-marker drift in flows/deploy surfaces
 node scripts/verify-profile-parity.js                   # bcm2712 == bcm2709 byte-for-byte
 node scripts/verify-devices-rebuild-fence.js            # boot-node rebuild is still fail-closed
 node --test scripts/rehearse-devices-rebuild.test.js    # boot-node rebuild behaves correctly against 4 seeded cases
 node --test lib/osi-migrate/__tests__/*.test.js         # runner unit tests (risk classes, atomicity, drift preflight, partial-batch retry)
-find . -name farming.db -not -path '*/node_modules/*'  | sort   # should list exactly 7 paths
-ls database/migrations/ordered/                         # current migration set (0001..0007 as of 2026-07-10)
+find . -name farming.db -not -path '*/node_modules/*'  | sort   # current bundled DB surface; investigate unexpected additions/removals
+ls database/migrations/ordered/                         # current migration set; choose next contiguous NNNN dynamically
 ls .github/workflows/ && cat .github/workflows/migrations.yml .github/workflows/verify-sync-flow.yml   # what CI actually gates (both workflows)
 grep -rn "osi-migrate\|applyPending\|bootstrapFresh\|verifyHead" scripts/ lib/ deploy.sh conf/ feeds/chirpstack-openwrt-feed/apps/node-red/files/ --exclude-dir=node_modules   # re-confirm no on-device caller (covers flows.json + init files, not just *.js/*.sh)
 ```
 
-All commands above were run against this worktree on 2026-07-06 and returned the
-outputs quoted in this document, with a clean `git status --short` afterward
-(read-only verification, no tracked-file side effects).
+The command list above is a maintenance recipe, not current proof. Re-run it
+against the branch you are changing and paste fresh output in the PR or
+execution report; old authoring-session outputs are not completion evidence.
