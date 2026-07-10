@@ -33,6 +33,7 @@ function parseArgs(argv) {
     root: repoRoot,
     gitRoot: null,
     baselinePath: path.join(repoRoot, 'scripts/verify-flows-size-ratchet-baseline.json'),
+    allowancesPath: path.join(repoRoot, 'scripts/verify-flows-size-ratchet-allowances.json'),
     surfaces: null,
     baseRef: null,
     writeBaseline: false,
@@ -44,6 +45,7 @@ function parseArgs(argv) {
     else if (a === '--baseline') o.baselinePath = path.resolve(argv[++i] || raise('--baseline requires a path'));
     else if (a === '--surface') (o.surfaces = o.surfaces || []).push(argv[++i] || raise('--surface requires a path'));
     else if (a === '--base-ref') o.baseRef = argv[++i] || raise('--base-ref requires a ref');
+    else if (a === '--allowances') o.allowancesPath = path.resolve(argv[++i] || raise('--allowances requires a path'));
     else if (a === '--write-baseline') o.writeBaseline = true;
     else raise('unknown argument: ' + a);
   }
@@ -83,16 +85,31 @@ function measure(flows) {
   return { sizes, total: totalChars(flows) };
 }
 
-function checkSurface(rel, headFlows, baseFlows) {
+function loadAllowances(allowancesPath) {
+  try {
+    const raw = fs.readFileSync(allowancesPath, 'utf8');
+    const a = JSON.parse(raw);
+    return {
+      node: a.node_allowances || {},
+      totalDelta: (a.total_allowance && a.total_allowance.delta) || 0,
+    };
+  } catch {
+    return { node: {}, totalDelta: 0 };
+  }
+}
+
+function checkSurface(rel, headFlows, baseFlows, allowances) {
   const failures = [];
   const head = measure(headFlows);
   const base = measure(baseFlows);
+  const allow = allowances || { node: {}, totalDelta: 0 };
 
   for (const [id, { chars }] of head.sizes) {
     const baseEntry = base.sizes.get(id);
     if (baseEntry) {
-      if (chars > baseEntry.chars) {
-        failures.push(rel + ': node ' + id + ' grew (' + chars + ' > ' + baseEntry.chars + ' at base)');
+      const nodeAllow = (allow.node[id] && allow.node[id].delta) || 0;
+      if (chars > baseEntry.chars + nodeAllow) {
+        failures.push(rel + ': node ' + id + ' grew (' + chars + ' > ' + baseEntry.chars + (nodeAllow ? ' + ' + nodeAllow + ' allowance' : '') + ' at base)');
       }
     } else {
       if (chars > NEW_NODE_CEILING) {
@@ -103,8 +120,8 @@ function checkSurface(rel, headFlows, baseFlows) {
       if (!thin.ok) failures.push(rel + ': new node ' + id + ' - ' + thin.reason);
     }
   }
-  if (head.total > base.total) {
-    failures.push(rel + ': total embedded JS increased (' + head.total + ' > ' + base.total + ' at base)');
+  if (head.total > base.total + allow.totalDelta) {
+    failures.push(rel + ': total embedded JS increased (' + head.total + ' > ' + base.total + (allow.totalDelta ? ' + ' + allow.totalDelta + ' allowance' : '') + ' at base)');
   }
   return { failures, headTotal: head.total, baseTotal: base.total };
 }
@@ -140,8 +157,9 @@ function writeBaselineFile(o) {
   return baseline;
 }
 
-function verifyDocBaseline(o) {
+function verifyDocBaseline(o, allowances) {
   const baseline = JSON.parse(fs.readFileSync(o.baselinePath, 'utf8'));
+  const allow = allowances || { node: {}, totalDelta: 0 };
   const failures = [];
   const notes = [];
   for (const rel of o.surfaces) {
@@ -149,8 +167,8 @@ function verifyDocBaseline(o) {
     const { total } = measure(surfaceHead(o.root, rel));
     if (!expected) {
       failures.push(rel + ': committed baseline missing this surface');
-    } else if (total > expected.total) {
-      failures.push(rel + ': HEAD total ' + total + ' exceeds committed baseline ' + expected.total + ' (regenerate with --write-baseline if this growth is intentional and gate 1 allowed it)');
+    } else if (total > expected.total + allow.totalDelta) {
+      failures.push(rel + ': HEAD total ' + total + ' exceeds committed baseline ' + expected.total + (allow.totalDelta ? ' + ' + allow.totalDelta + ' allowance' : '') + ' (regenerate with --write-baseline if this growth is intentional and gate 1 allowed it)');
     } else if (total < expected.total) {
       notes.push(rel + ': HEAD total ' + total + ' is below committed baseline ' + expected.total + ' - a shrink not yet reflected in the doc (ok; refresh with --write-baseline when convenient)');
     }
@@ -167,13 +185,14 @@ function run() {
     return;
   }
 
+  const allowances = loadAllowances(o.allowancesPath);
   const failures = [];
   let headTotal = 0;
   let baseTotal = 0;
   for (const rel of o.surfaces) {
     const head = surfaceHead(o.root, rel);
     const base = surfaceBase(o.gitRoot, o.baseRef, rel);
-    const res = checkSurface(rel, head, base);
+    const res = checkSurface(rel, head, base, allowances);
     failures.push(...res.failures);
     headTotal += res.headTotal;
     baseTotal += res.baseTotal;
@@ -184,7 +203,7 @@ function run() {
     process.exit(1);
   }
 
-  const doc = verifyDocBaseline(o);
+  const doc = verifyDocBaseline(o, allowances);
   for (const n of doc.notes) console.log('NOTE ' + n);
   if (doc.failures.length) {
     for (const f of doc.failures) console.error('FAIL ' + f);
@@ -198,4 +217,4 @@ if (require.main === module) {
   try { run(); } catch (e) { console.error('verify-flows-size-ratchet: FAIL - ' + e.message); process.exit(1); }
 }
 
-module.exports = { checkSurface, measure, buildBaseline };
+module.exports = { checkSurface, measure, buildBaseline, loadAllowances };

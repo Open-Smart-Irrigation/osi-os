@@ -122,6 +122,75 @@ test('gate 2: FAILS when HEAD total EXCEEDS the committed baseline (unrecorded g
   assert.match(r.stderr, /exceeds committed baseline/);
 });
 
+test('PASS when a node grows within its allowance', () => {
+  const dir = initRepo(BASE); writeBaseline(dir);
+  writeFlows(dir, [fn('keep', 'return msg;'), fn('shrinkme', 'x'.repeat(300))]);
+  // shrinkme grew from 200 to 300: +100 chars. Allow it.
+  const allowances = {
+    node_allowances: { shrinkme: { delta: 100, reason: 'test growth' } },
+    total_allowance: { delta: 100, reason: 'test growth' },
+  };
+  fs.writeFileSync(path.join(dir, 'allowances.json'), JSON.stringify(allowances));
+  const r = spawnSync(process.execPath, [
+    script, '--root', dir, '--git-root', dir, '--base-ref', 'HEAD',
+    '--baseline', path.join(dir, 'baseline.json'),
+    '--allowances', path.join(dir, 'allowances.json'),
+    ...SURFACE_ARGS,
+  ], { cwd: dir, encoding: 'utf8' });
+  assert.equal(r.status, 0, r.stderr || r.stdout);
+});
+
+test('FAIL when a node grows beyond its allowance', () => {
+  const dir = initRepo(BASE); writeBaseline(dir);
+  writeFlows(dir, [fn('keep', 'return msg;'), fn('shrinkme', 'x'.repeat(400))]);
+  // shrinkme grew from 200 to 400: +200 chars. Only allow 50.
+  const allowances = {
+    node_allowances: { shrinkme: { delta: 50, reason: 'not enough' } },
+    total_allowance: { delta: 200, reason: 'total ok' },
+  };
+  fs.writeFileSync(path.join(dir, 'allowances.json'), JSON.stringify(allowances));
+  const r = spawnSync(process.execPath, [
+    script, '--root', dir, '--git-root', dir, '--base-ref', 'HEAD',
+    '--baseline', path.join(dir, 'baseline.json'),
+    '--allowances', path.join(dir, 'allowances.json'),
+    ...SURFACE_ARGS,
+  ], { cwd: dir, encoding: 'utf8' });
+  assert.notEqual(r.status, 0, r.stdout);
+  assert.match(r.stderr, /node shrinkme grew/);
+  assert.match(r.stderr, /allowance/);
+});
+
+test('PASS with total allowance when total increases within delta', () => {
+  const dir = initRepo(BASE); writeBaseline(dir);
+  writeFlows(dir, [...BASE, fn('newsmall', 'return 1;')]);
+  const allowances = {
+    node_allowances: {},
+    total_allowance: { delta: 100, reason: 'small addition' },
+  };
+  fs.writeFileSync(path.join(dir, 'allowances.json'), JSON.stringify(allowances));
+  // Regenerate baseline to account for the added node in doc check
+  const r = spawnSync(process.execPath, [
+    script, '--root', dir, '--git-root', dir, '--base-ref', 'HEAD',
+    '--baseline', path.join(dir, 'baseline.json'),
+    '--allowances', path.join(dir, 'allowances.json'),
+    ...SURFACE_ARGS,
+  ], { cwd: dir, encoding: 'utf8' });
+  assert.equal(r.status, 0, r.stderr || r.stdout);
+});
+
+test('missing allowances file is treated as zero allowances', () => {
+  const dir = initRepo(BASE); writeBaseline(dir);
+  writeFlows(dir, [fn('keep', 'return msg;'), fn('shrinkme', 'x'.repeat(400))]);
+  const r = spawnSync(process.execPath, [
+    script, '--root', dir, '--git-root', dir, '--base-ref', 'HEAD',
+    '--baseline', path.join(dir, 'baseline.json'),
+    '--allowances', path.join(dir, 'nonexistent.json'),
+    ...SURFACE_ARGS,
+  ], { cwd: dir, encoding: 'utf8' });
+  assert.notEqual(r.status, 0, r.stdout);
+  assert.match(r.stderr, /node shrinkme grew/);
+});
+
 test('accepts the committed shipped baseline against origin/main', () => {
   assert.equal(fs.existsSync(path.join(repoRoot, 'scripts/verify-flows-size-ratchet-baseline.json')), true,
     'baseline must be committed');
