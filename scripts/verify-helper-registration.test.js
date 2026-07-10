@@ -1,7 +1,10 @@
 'use strict';
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { collectHelperNames, checkSurfaces, checkCodecs } = require('./verify-helper-registration');
+const { collectHelperNames, checkSurfaces, checkCodecs, inspectModuleDir } = require('./verify-helper-registration');
 
 const NAME_TO_PATH = {
   'history-sync': 'osi-history-sync-helper',
@@ -54,4 +57,29 @@ test('checkCodecs: codec entries need a deploy.sh fetch line + the file on disk'
   assert.equal(issues.length, 2);
   assert.match(issues[0], /agroscope_uplink_transform\.js.*deploy\.sh/);
   assert.match(issues[1], /agroscope_uplink_transform\.js.*missing under/);
+});
+
+test('inspectModuleDir warns on malformed package metadata while preserving fallback main', () => {
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), 'verify-helper-registration-'));
+  try {
+    const dir = path.join(base, 'bad-helper');
+    fs.mkdirSync(dir);
+    fs.writeFileSync(path.join(dir, 'package.json'), '{bad json');
+    fs.writeFileSync(path.join(dir, 'index.js'), 'module.exports = {};\n');
+    const warnings = [];
+
+    const result = inspectModuleDir(base, 'bad-helper', (message) => warnings.push(message));
+
+    assert.deepEqual(result, {
+      hasDir: true,
+      hasPackageJson: true,
+      hasMain: true,
+      mainName: 'index.js',
+    });
+    assert.equal(warnings.length, 1);
+    assert.match(warnings[0], /bad-helper\/package\.json/);
+    assert.match(warnings[0], /Expected property name/);
+  } finally {
+    fs.rmSync(base, { recursive: true, force: true });
+  }
 });

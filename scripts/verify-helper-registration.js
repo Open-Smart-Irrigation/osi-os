@@ -72,7 +72,7 @@ function checkCodecs({ nameToPath, deploySource, codecsDir }) {
   return issues;
 }
 
-function inspectModuleDir(nodeRedDir, name) {
+function inspectModuleDir(nodeRedDir, name, warn = console.warn) {
   const dir = path.join(nodeRedDir, name);
   if (!fs.existsSync(dir)) return { hasDir: false };
   let mainName = 'index.js';
@@ -80,7 +80,11 @@ function inspectModuleDir(nodeRedDir, name) {
   const pkgPath = path.join(dir, 'package.json');
   if (fs.existsSync(pkgPath)) {
     hasPackageJson = true;
-    try { mainName = JSON.parse(fs.readFileSync(pkgPath, 'utf8')).main || 'index.js'; } catch (_) {}
+    try {
+      mainName = JSON.parse(fs.readFileSync(pkgPath, 'utf8')).main || 'index.js';
+    } catch (e) {
+      warn('WARN ' + pkgPath + ': could not parse package.json (' + (e && e.message ? e.message : e) + '); defaulting main to index.js');
+    }
   }
   return { hasDir: true, hasPackageJson, hasMain: fs.existsSync(path.join(dir, mainName)), mainName };
 }
@@ -115,4 +119,4 @@ function run() {
 }
 
 if (require.main === module) run();
-module.exports = { collectHelperNames, checkSurfaces, checkCodecs };
+module.exports = { collectHelperNames, checkSurfaces, checkCodecs, inspectModuleDir };

@@ -12,6 +12,10 @@ const FIXTURE_BASE = fs.mkdtempSync(path.join(os.tmpdir(), 'osi-lib-test-'));
 process.env.OSI_LIB_BASE = FIXTURE_BASE;
 process.env.OSI_LIB_COOLDOWN_MS = '80';
 
+test.after(() => {
+  fs.rmSync(FIXTURE_BASE, { recursive: true, force: true });
+});
+
 const osiLib = require('./index');
 
 const sleep = (ms) => new Promise((res) => setTimeout(res, ms));
