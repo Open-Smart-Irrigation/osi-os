@@ -8,13 +8,17 @@ import urllib.request
 
 def send_alert(topic: str, title: str, body: str,
                priority: str = "high", ntfy_url: str = "https://ntfy.sh") -> bool:
+    # ntfy topic URLs accept plain text body with metadata in headers
+    # (JSON publishing only works at the root URL — Fable review fix)
     url = f"{ntfy_url}/{topic}"
-    data = json.dumps({"topic": topic, "title": title, "message": body,
-                        "priority": priority}).encode()
-    req = urllib.request.Request(url, data=data,
-                                 headers={"Content-Type": "application/json"})
+    data = body.encode("utf-8")
+    req = urllib.request.Request(url, data=data, headers={
+        "Title": title,
+        "Priority": priority,
+    })
     try:
-        urllib.request.urlopen(req, timeout=10)
+        with urllib.request.urlopen(req, timeout=10):
+            pass
         return True
     except Exception as e:
         print(f"ALERT DELIVERY FAILED: {e}")
