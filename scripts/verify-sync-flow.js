@@ -1452,7 +1452,8 @@ expectIncludes('Sync Init Schema + Triggers', 'SELECT zone_uuid FROM irrigation_
 expectIncludes('Sync Init Schema + Triggers', 'SELECT gateway_device_eui FROM irrigation_zones WHERE id = NEW.zone_id AND deleted_at IS NULL', 'ignores deleted zones when mirroring zone environment gateway bindings into the outbox');
 expectIncludes('Sync Init Schema + Triggers', 'SELECT zone_uuid FROM irrigation_zones WHERE id = NEW.irrigation_zone_id AND deleted_at IS NULL', 'ignores deleted zones when mirroring irrigation events into the outbox');
 expectIncludes('Sync Init Schema + Triggers', 'SELECT gateway_device_eui FROM irrigation_zones WHERE id = NEW.irrigation_zone_id AND deleted_at IS NULL', 'ignores deleted zones when mirroring irrigation event gateway bindings into the outbox');
-expectIncludes('Build History Batch', "require('/usr/share/node-red/osi-history-sync-helper')", 'loads history sync helper');
+expectIncludes('Build History Batch', "osiLib.require('history-sync')", 'loads history sync helper via osi-lib');
+expectIncludes('Mark History Batch ACK', "osiLib.require('history-sync')", 'marks history batches via the osi-lib-loaded helper');
 expectIncludes('Build History Batch', "phase: 'shadow'", 'runs history sync in shadow mode first');
 expectIncludes('Build History Batch', 'hashVersion: 1', 'uses history hash v1');
 expectIncludes('Build History Batch', '/api/v1/sync/edge/history/batches', 'posts history batches to the v1 history endpoint');

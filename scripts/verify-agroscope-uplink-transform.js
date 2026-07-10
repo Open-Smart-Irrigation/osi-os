@@ -118,8 +118,12 @@ assert.ok(forwardFn, 'Agroscope forward function exists');
 assert.match(forwardFn.func, /AGROSCOPE_FORWARD_ENABLED/, 'forward branch is opt-in gated');
 assert.match(forwardFn.func, /deviceProfileName/, 'forward branch has a deviceProfileName guard');
 assert.ok(
-  forwardFn.func.includes("require('/srv/node-red/codecs/agroscope_uplink_transform')"),
-  'forward branch loads the pure transform'
+  forwardFn.func.includes("osiLib.require('agroscope-uplink-transform')"),
+  'forward branch loads the pure transform via osi-lib'
+);
+assert.ok(
+  (forwardFn.libs || []).some((lib) => lib && lib.var === 'osiLib' && lib.module === 'osi-lib'),
+  'forward node declares osiLib in libs'
 );
 assert.match(forwardFn.func, /toAgroscopeUplink/, 'forward branch calls toAgroscopeUplink');
 
