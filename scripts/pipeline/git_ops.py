@@ -10,25 +10,28 @@ def run_git(args: list[str], cwd: Path | None = None,
                           cwd=cwd, timeout=timeout)
 
 
-def create_bundle_branch(bundle_name: str, cwd: Path) -> str:
+def create_bundle_branch(bundle_name: str, cwd: Path,
+                         target_branch: str = "main") -> str:
     branch = f"bundle/{bundle_name}"
-    run_git(["checkout", "main"], cwd=cwd)
+    run_git(["checkout", target_branch], cwd=cwd)
     run_git(["pull", "--ff-only"], cwd=cwd)
     run_git(["checkout", "-b", branch], cwd=cwd)
     return branch
 
 
-def merge_to_main(branch: str, cwd: Path) -> bool:
-    run_git(["checkout", "main"], cwd=cwd)
+def merge_to_target(branch: str, cwd: Path,
+                    target_branch: str = "main") -> bool:
+    run_git(["checkout", target_branch], cwd=cwd)
     r = run_git(["merge", "--no-ff", branch, "-m",
                  f"Merge {branch} — pipeline verified"], cwd=cwd)
     return r.returncode == 0
 
 
-def tag_checkpoint(n: int, cwd: Path) -> str:
+def tag_checkpoint(n: int, cwd: Path,
+                   target_branch: str = "main") -> str:
     tag = f"agrolink-checkpoint-{n}"
     run_git(["tag", tag], cwd=cwd)
-    run_git(["push", "origin", "main", tag], cwd=cwd)
+    run_git(["push", "origin", target_branch, tag], cwd=cwd)
     return tag
 
 

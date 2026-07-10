@@ -15,11 +15,12 @@ from .deploy import pre_deploy_backup, deploy_to_gateway
 from .restore import restore_gateway
 from .alert import send_alert, PipelineHeartbeat
 from .evidence import collect_evidence
-from .git_ops import (create_bundle_branch, merge_to_main, tag_checkpoint,
+from .git_ops import (create_bundle_branch, merge_to_target, tag_checkpoint,
                       delete_branch, cherry_pick_pr)
 
 REPO_ROOT = Path(__file__).parent.parent.parent
 ALERT_TOPIC = "osi-refactor-pipeline"
+TARGET_BRANCH = "feat/refactor-and-forge-handoff"
 
 PR_BRANCH_MAP = {
     118: "deploy-canary-gate",
@@ -73,7 +74,7 @@ def run_pipeline(dry_run: bool = False) -> None:
 
         # --- Phase 1: Merge PRs into bundle branch ---
         if bundle.prs:
-            branch = create_bundle_branch(bundle.name, REPO_ROOT)
+            branch = create_bundle_branch(bundle.name, REPO_ROOT, TARGET_BRANCH)
             for pr in bundle.prs:
                 pr_branch = f"origin/feat/{_pr_branch_name(pr)}"
                 if not cherry_pick_pr(pr_branch, REPO_ROOT):
@@ -153,17 +154,17 @@ def run_pipeline(dry_run: bool = False) -> None:
                         return
                     print("  Post-soak verification PASSED")
 
-        # --- Phase 4: Merge to main + tag ---
+        # --- Phase 4: Merge to target branch + tag ---
         state.status = "merging"
         save_state(state)
 
         if bundle.prs:
             if not dry_run:
-                if not merge_to_main(f"bundle/{bundle.name}", REPO_ROOT):
-                    _halt("Merge to main failed", bundle, state)
+                if not merge_to_target(f"bundle/{bundle.name}", REPO_ROOT, TARGET_BRANCH):
+                    _halt("Merge to target branch failed", bundle, state)
                     return
                 state.checkpoint_counter += 1
-                tag = tag_checkpoint(state.checkpoint_counter, REPO_ROOT)
+                tag = tag_checkpoint(state.checkpoint_counter, REPO_ROOT, TARGET_BRANCH)
                 delete_branch(f"bundle/{bundle.name}", REPO_ROOT)
                 print(f"  Merged to main, tagged {tag}")
                 send_alert(ALERT_TOPIC,

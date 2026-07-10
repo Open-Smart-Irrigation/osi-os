@@ -6,7 +6,7 @@ import pytest
 
 from pipeline.config import PipelineState, BundleConfig
 from pipeline.git_ops import (
-    run_git, create_bundle_branch, merge_to_main,
+    run_git, create_bundle_branch, merge_to_target,
     tag_checkpoint, delete_branch, cherry_pick_pr,
 )
 from pipeline.controller import _pr_branch_name, _first_failure
@@ -71,24 +71,24 @@ def test_first_failure_all_pass():
 @patch("pipeline.git_ops.subprocess.run")
 def test_create_bundle_branch(mock_run):
     mock_run.return_value = MagicMock(returncode=0)
-    branch = create_bundle_branch("canary-gate", Path("/repo"))
+    branch = create_bundle_branch("canary-gate", Path("/repo"), "feat/refactor-and-forge-handoff")
     assert branch == "bundle/canary-gate"
     cmds = [c.args[0] for c in mock_run.call_args_list]
-    assert ["git", "checkout", "main"] in cmds
+    assert ["git", "checkout", "feat/refactor-and-forge-handoff"] in cmds
     assert ["git", "pull", "--ff-only"] in cmds
     assert ["git", "checkout", "-b", "bundle/canary-gate"] in cmds
 
 
 @patch("pipeline.git_ops.subprocess.run")
-def test_merge_to_main_success(mock_run):
+def test_merge_to_target_success(mock_run):
     mock_run.return_value = MagicMock(returncode=0)
-    assert merge_to_main("bundle/canary-gate", Path("/repo")) is True
+    assert merge_to_target("bundle/canary-gate", Path("/repo"), "feat/refactor-and-forge-handoff") is True
 
 
 @patch("pipeline.git_ops.subprocess.run")
-def test_merge_to_main_conflict(mock_run):
+def test_merge_to_target_conflict(mock_run):
     mock_run.return_value = MagicMock(returncode=1, stdout="", stderr="")
-    assert merge_to_main("bundle/canary-gate", Path("/repo")) is False
+    assert merge_to_target("bundle/canary-gate", Path("/repo")) is False
 
 
 @patch("pipeline.git_ops.subprocess.run")
