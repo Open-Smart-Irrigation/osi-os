@@ -57,6 +57,12 @@ def run_pipeline(dry_run: bool = False) -> None:
     kaba100 = gateways["kaba100"]
     heartbeat = PipelineHeartbeat(ALERT_TOPIC, limits["soak_heartbeat_interval_s"])
 
+    from .git_ops import run_git
+    print("Fetching origin...")
+    r = run_git(["fetch", "origin"], cwd=REPO_ROOT)
+    if r.returncode != 0:
+        print(f"  WARNING: git fetch failed: {r.stderr[:200]}")
+
     for i, bundle in enumerate(bundles):
         if i < state.current_bundle_idx:
             continue
@@ -74,31 +80,33 @@ def run_pipeline(dry_run: bool = False) -> None:
 
         # --- Phase 1: Merge PRs into bundle branch ---
         if bundle.prs:
-            branch = create_bundle_branch(bundle.name, REPO_ROOT, TARGET_BRANCH)
-            for pr in bundle.prs:
-                pr_branch = f"origin/feat/{_pr_branch_name(pr)}"
-                if not cherry_pick_pr(pr_branch, REPO_ROOT):
-                    _halt(f"flows.json conflict merging PR #{pr} — needs manual resolution + re-review",
-                          bundle, state)
-                    return
+            if dry_run:
+                print(f"  DRY RUN: would merge {len(bundle.prs)} PRs onto bundle/{bundle.name}")
+            else:
+                branch = create_bundle_branch(bundle.name, REPO_ROOT, TARGET_BRANCH)
+                for pr in bundle.prs:
+                    pr_branch = f"origin/feat/{_pr_branch_name(pr)}"
+                    if not cherry_pick_pr(pr_branch, REPO_ROOT):
+                        _halt(f"flows.json conflict merging PR #{pr} — needs manual resolution + re-review",
+                              bundle, state)
+                        return
 
-            print(f"  Merged {len(bundle.prs)} PRs onto {branch}")
+                print(f"  Merged {len(bundle.prs)} PRs onto {branch}")
 
         # --- Phase 2: Deploy + verify ---
         if bundle.needs_deploy:
-            state.status = "deploying"
-            save_state(state)
-
-            ts = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
-
-            backup = pre_deploy_backup(kaba100, ts)
-            if not backup.ok:
-                _halt(f"Pre-deploy backup failed: {backup.detail}", bundle, state)
-                return
-
             if dry_run:
-                print("  DRY RUN: skipping deploy")
+                print(f"  DRY RUN: would deploy to {bundle.deploy_target}, soak {bundle.soak_hours}h")
             else:
+                state.status = "deploying"
+                save_state(state)
+
+                ts = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
+
+                backup = pre_deploy_backup(kaba100, ts)
+                if not backup.ok:
+                    _halt(f"Pre-deploy backup failed: {backup.detail}", bundle, state)
+                    return
                 result = deploy_to_gateway(kaba100, REPO_ROOT)
                 if not result.ok:
                     print(f"  DEPLOY FAILED: {result.detail}")
@@ -129,21 +137,20 @@ def run_pipeline(dry_run: bool = False) -> None:
 
                 print(f"  Verification PASSED ({len(results)} checks)")
 
-            # --- Phase 3: Soak ---
-            if bundle.soak_hours > 0:
-                state.status = "soaking"
-                state.soak_start_epoch = time.time()
-                save_state(state)
-                heartbeat.start(bundle.name)
-                print(f"  Soaking for {bundle.soak_hours}h...")
+                # --- Phase 3: Soak ---
+                if bundle.soak_hours > 0:
+                    state.status = "soaking"
+                    state.soak_start_epoch = time.time()
+                    save_state(state)
+                    heartbeat.start(bundle.name)
+                    print(f"  Soaking for {bundle.soak_hours}h...")
 
-                soak_end = time.time() + bundle.soak_hours * 3600
-                while time.time() < soak_end:
-                    time.sleep(min(3600, soak_end - time.time()))
+                    soak_end = time.time() + bundle.soak_hours * 3600
+                    while time.time() < soak_end:
+                        time.sleep(min(3600, soak_end - time.time()))
 
-                heartbeat.stop()
+                    heartbeat.stop()
 
-                if not dry_run:
                     results = run_all_checks(ctx)
                     evidence = collect_evidence(f"{bundle.id}-postsoak", results,
                                                 REPO_ROOT / "pipeline-evidence")

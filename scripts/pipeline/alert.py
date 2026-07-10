@@ -12,8 +12,9 @@ def send_alert(topic: str, title: str, body: str,
     # (JSON publishing only works at the root URL — Fable review fix)
     url = f"{ntfy_url}/{topic}"
     data = body.encode("utf-8")
+    safe_title = title.encode("ascii", errors="replace").decode("ascii")
     req = urllib.request.Request(url, data=data, headers={
-        "Title": title,
+        "Title": safe_title,
         "Priority": priority,
     })
     try:

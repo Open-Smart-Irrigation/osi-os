@@ -26,7 +26,7 @@ class DeployResult:
 
 def scp_to_pi(gw: GatewayConfig, local: Path, remote: str) -> None:
     subprocess.run(
-        ["scp", "-i", gw.ssh_key, "-o", "IdentitiesOnly=yes",
+        ["scp", "-O", "-i", gw.ssh_key, "-o", "IdentitiesOnly=yes",
          str(local), f"{gw.ssh_user}@{gw.host}:{remote}"],
         check=True, timeout=30
     )

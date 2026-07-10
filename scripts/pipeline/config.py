@@ -1,6 +1,7 @@
 """Pipeline configuration: bundle definitions, gateway config, limits."""
 from __future__ import annotations
 import json
+import os
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -63,7 +64,11 @@ class PipelineState:
 def load_bundles(path: Path = BUNDLES_PATH) -> tuple[list[BundleConfig], dict, dict, dict]:
     raw = json.loads(path.read_text())
     bundles = [BundleConfig(**{k: v for k, v in b.items() if k in BundleConfig.__dataclass_fields__}) for b in raw["bundles"]]
-    gateways = {k: GatewayConfig(**v) for k, v in raw["gateways"].items()}
+    gateways = {}
+    for k, v in raw["gateways"].items():
+        if "ssh_key" in v:
+            v = {**v, "ssh_key": os.path.expanduser(v["ssh_key"])}
+        gateways[k] = GatewayConfig(**v)
     servers = {k: ServerConfig(**v) for k, v in raw["servers"].items()}
     limits = raw["limits"]
     return bundles, gateways, servers, limits
