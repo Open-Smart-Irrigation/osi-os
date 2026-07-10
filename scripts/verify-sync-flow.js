@@ -563,15 +563,10 @@ function expectCalibrationCreateTableParity() {
     'updated_at TEXT',
   ];
   const runtimeColumns = calibrationSchemaColumnsFrom(String(node.func || '')).slice(0, expectedColumns.length);
-  const deployColumns = calibrationSchemaColumnsFrom(deployScript).slice(0, expectedColumns.length);
   if (JSON.stringify(runtimeColumns) !== JSON.stringify(expectedColumns)) {
     fail(`runtime zone_irrigation_calibration DDL columns differ: ${runtimeColumns.join(', ')}`);
-  } else if (JSON.stringify(deployColumns) !== JSON.stringify(expectedColumns)) {
-    fail(`deploy zone_irrigation_calibration DDL columns differ: ${deployColumns.join(', ')}`);
-  } else if (JSON.stringify(runtimeColumns) !== JSON.stringify(deployColumns)) {
-    fail('runtime and deploy zone_irrigation_calibration DDL columns differ');
   } else {
-    console.log('OK runtime and deploy zone_irrigation_calibration DDL columns match');
+    console.log('OK runtime zone_irrigation_calibration DDL columns match the nullable contract');
   }
 }
 
@@ -1767,17 +1762,17 @@ expectExcludes('Save Zone Irrigation Calibration', 'measurement_method TEXT NOT 
 expectExcludes('Save Zone Irrigation Calibration', 'measured_at TEXT NOT NULL', 'NOT NULL measured-at timestamp in runtime calibration create table');
 expectExcludes('Save Zone Irrigation Calibration', 'created_at TEXT NOT NULL', 'NOT NULL created-at timestamp in runtime calibration create table');
 expectExcludes('Save Zone Irrigation Calibration', 'updated_at TEXT NOT NULL', 'NOT NULL updated-at timestamp in runtime calibration create table');
-expectFileIncludes('deploy.sh', deployScript, 'CREATE TABLE IF NOT EXISTS zone_irrigation_calibration', 'repairs the zone irrigation calibration table during deploy');
-expectFileIncludes('deploy.sh', deployScript, 'measured_flow_rate_lpm REAL,', 'creates a nullable measured flow rate column during deploy repair');
-expectFileIncludes('deploy.sh', deployScript, 'measurement_method     TEXT,', 'creates a nullable measurement method column during deploy repair');
-expectFileIncludes('deploy.sh', deployScript, 'measured_at            TEXT,', 'creates a nullable measured-at column during deploy repair');
-expectFileIncludes('deploy.sh', deployScript, 'created_at             TEXT,', 'creates a nullable created-at column during deploy repair');
-expectFileIncludes('deploy.sh', deployScript, 'updated_at             TEXT', 'creates a nullable updated-at column during deploy repair');
-expectFileExcludes('deploy.sh', deployScript, 'measured_flow_rate_lpm REAL NOT NULL', 'NOT NULL measured flow rate in deploy repair create table');
-expectFileExcludes('deploy.sh', deployScript, 'measurement_method     TEXT NOT NULL', 'NOT NULL measurement method in deploy repair create table');
-expectFileExcludes('deploy.sh', deployScript, 'measured_at            TEXT NOT NULL', 'NOT NULL measured-at timestamp in deploy repair create table');
-expectFileExcludes('deploy.sh', deployScript, 'created_at             TEXT NOT NULL', 'NOT NULL created-at timestamp in deploy repair create table');
-expectFileExcludes('deploy.sh', deployScript, 'updated_at             TEXT NOT NULL', 'NOT NULL updated-at timestamp in deploy repair create table');
+expectFileIncludes('deploy.sh', deployScript, 'run_schema_migration || exit 1', 'runs the ordered migration runner during deploy');
+expectFileIncludes('deploy.sh', deployScript, 'database/migrations/ordered/$migration', 'fetches ordered migration files from the manifest during deploy');
+expectFileIncludes('deploy.sh', deployScript, 'scripts/migrate-cli.js', 'fetches the deploy-time migration CLI');
+expectFileIncludes('deploy.sh', deployScript, 'scripts/baseline-existing-db.js', 'fetches the semantic baseline tool for first-run devices');
+expectFileIncludes('deploy.sh', deployScript, 'scripts/repair-sync-outbox-v2.js', 'fetches the pre-baseline sync_outbox repair');
+expectFileExcludes('deploy.sh', deployScript, 'CREATE TABLE IF NOT EXISTS zone_irrigation_calibration', 'inline zone irrigation calibration DDL in deploy.sh');
+expectFileExcludes('deploy.sh', deployScript, 'measured_flow_rate_lpm REAL,', 'inline nullable measured flow rate deploy repair');
+expectFileExcludes('deploy.sh', deployScript, 'measurement_method     TEXT,', 'inline nullable measurement method deploy repair');
+expectFileExcludes('deploy.sh', deployScript, 'measured_at            TEXT,', 'inline nullable measured-at deploy repair');
+expectFileExcludes('deploy.sh', deployScript, 'created_at             TEXT,', 'inline nullable created-at deploy repair');
+expectFileExcludes('deploy.sh', deployScript, 'updated_at             TEXT', 'inline nullable updated-at deploy repair');
 expectCalibrationCreateTableParity();
 expectFileIncludes('api.ts', reactGuiApiSource, 'updateCalibration: async (zoneId: number', 'adds a shared client helper for zone irrigation calibration');
 expectFileIncludes('api.ts', reactGuiApiSource, "await api.post(`/api/irrigation-zones/${zoneId}/calibration`, payload);", 'targets the local zone irrigation calibration endpoint');
@@ -2586,10 +2581,13 @@ expectFileIncludes('deploy.sh', deployScript, '"conf/full_raspberrypi_bcm27xx_bc
 expectFileIncludes('deploy.sh', deployScript, '"conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/codecs/aquascope_lorain_decoder.js"', 'deploys the shipped LoRain ChirpStack decoder to live devices');
 expectFileIncludes('deploy.sh', deployScript, 'rm -rf "$entry"', 'removes stale hashed GUI assets AND locale files before extracting the rebuilt React bundle (loop covers assets/, locales/, index.html, dotfiles)');
 expectFileIncludes('deploy.sh', deployScript, 'chmod 755 /etc/init.d/node-red', 'keeps the deployed Node-RED init script executable');
-expectFileIncludes('deploy.sh', deployScript, 'ALTER TABLE devices ADD COLUMN dendro_ratio_at_retracted REAL', 'repairs the live DB with the canonical dendrometer retracted-ratio column during deploy');
-expectFileIncludes('deploy.sh', deployScript, 'ALTER TABLE devices ADD COLUMN dendro_ratio_at_extended REAL', 'repairs the live DB with the canonical dendrometer extended-ratio column during deploy');
-expectFileIncludes('deploy.sh', deployScript, 'UPDATE devices SET dendro_ratio_at_retracted = CASE', 'backfills the canonical dendrometer retracted-ratio column during deploy');
-expectFileIncludes('deploy.sh', deployScript, 'UPDATE devices SET dendro_ratio_at_extended = CASE', 'backfills the canonical dendrometer extended-ratio column during deploy');
+expectFileIncludes('deploy.sh', deployScript, 'run_schema_migration()', 'defines the deploy-time schema migration runner');
+expectFileIncludes('deploy.sh', deployScript, 'opkg install sqlite3-cli', 'provisions sqlite3-cli before running migrations');
+expectFileIncludes('deploy.sh', deployScript, "pgrep -f 'node-red'", 'verifies Node-RED has stopped before migrating');
+expectFileExcludes('deploy.sh', deployScript, 'ALTER TABLE devices ADD COLUMN dendro_ratio_at_retracted REAL', 'inline dendrometer retracted-ratio deploy repair');
+expectFileExcludes('deploy.sh', deployScript, 'ALTER TABLE devices ADD COLUMN dendro_ratio_at_extended REAL', 'inline dendrometer extended-ratio deploy repair');
+expectFileExcludes('deploy.sh', deployScript, 'UPDATE devices SET dendro_ratio_at_retracted = CASE', 'inline dendrometer retracted-ratio deploy backfill');
+expectFileExcludes('deploy.sh', deployScript, 'UPDATE devices SET dendro_ratio_at_extended = CASE', 'inline dendrometer extended-ratio deploy backfill');
 expectFileIncludes('deploy.sh', deployScript, '/etc/init.d/osi-gateway-gps stop || true', 'stops the retired gateway GPS sidecar during deploy');
 expectFileIncludes('deploy.sh', deployScript, '/etc/init.d/osi-gateway-gps disable || true', 'disables the retired gateway GPS sidecar during deploy');
 expectFileIncludes('deploy.sh', deployScript, 'rm -f /etc/init.d/osi-gateway-gps /usr/bin/osi-gateway-gps.js', 'removes the retired gateway GPS sidecar files during deploy');
