@@ -653,6 +653,14 @@ fetch_required "osi-history-helper analysis.js" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-history-helper/analysis.js" \
     "/srv/node-red/osi-history-helper/analysis.js"
 
+fetch_required "osi-history-sync-helper package.json" \
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-history-sync-helper/package.json" \
+    "/srv/node-red/osi-history-sync-helper/package.json"
+
+fetch_required "osi-history-sync-helper index.js" \
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-history-sync-helper/index.js" \
+    "/srv/node-red/osi-history-sync-helper/index.js"
+
 fetch_required "osi-chameleon-helper package.json" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-chameleon-helper/package.json" \
     "/srv/node-red/osi-chameleon-helper/package.json"
@@ -668,6 +676,14 @@ fetch_required "osi-cloud-http package.json" \
 fetch_required "osi-cloud-http index.js" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-cloud-http/index.js" \
     "/srv/node-red/osi-cloud-http/index.js"
+
+fetch_required "osi-lib package.json" \
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-lib/package.json" \
+    "/srv/node-red/osi-lib/package.json"
+
+fetch_required "osi-lib index.js" \
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-lib/index.js" \
+    "/srv/node-red/osi-lib/index.js"
 
 fetch_required "chirpstack-bootstrap.js" \
     "scripts/chirpstack-bootstrap.js" \

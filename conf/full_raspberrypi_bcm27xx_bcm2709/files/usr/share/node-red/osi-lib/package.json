@@ -1,5 +1,5 @@
 {
-  "name": "osi-history-sync-helper",
+  "name": "osi-lib",
   "version": "1.0.0",
   "private": true,
   "main": "index.js"
