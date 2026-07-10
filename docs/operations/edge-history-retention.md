@@ -102,6 +102,38 @@ guards the known `devices` rebuild case.
 - Keep legacy `/edge/events` and `/edge/bootstrap` compatibility until every
   supported OSI OS image advertises `history_sync_v1`.
 
+## Sync outbox retention and size cap
+
+`sync_outbox` is the edge-to-cloud event queue. Delivered rows are already in the
+cloud and can be time-pruned; undelivered rows must normally be retained so the
+edge can catch up after an offline window.
+
+Two environment knobs control the daily `Prune Sync Outbox` job:
+
+| Env var | Default | Purpose |
+|---|---:|---|
+| `OSI_OUTBOX_RETENTION_DAYS` | `30` | Deletes delivered rows older than this many days. Undelivered rows are not affected by this time-prune. |
+| `OSI_OUTBOX_MAX_ROWS` | `50000` | Caps total queue size. Values below `1000` are floored to `1000` so a bad setting cannot aggressively evict telemetry. |
+
+When the total-row cap is exceeded, the job evicts only oldest telemetry-class
+rows, delivered rows first and then undelivered rows by `occurred_at`.
+Evictable telemetry aggregates are `DEVICE_DATA`, `CHAMELEON_READING`,
+`DENDRO_READING`, `DENDRO_DAILY`, `ZONE_ENVIRONMENT`, and
+`ZONE_RECOMMENDATION`.
+
+Protected aggregates are never evicted by the cap: `IRRIGATION_EVENT`,
+`SCHEDULE`, `ZONE`, `DEVICE`, and `GATEWAY_LOCATION`. If protected rows alone
+leave the table over `OSI_OUTBOX_MAX_ROWS`, the job evicts nothing further,
+logs `outbox size cap exceeded by protected rows: ...`, bumps `error_counts`
+through the Node-RED catch path, and keeps accepting writes. Until item 0.2
+adds `errors_total` to gateway health, this condition is visible on-device in
+the Node-RED log rather than remotely in heartbeat telemetry.
+
+Operator response for the protected-over-cap signal: investigate why the
+gateway is not delivering events to the cloud. The telemetry runaway is bounded
+on disk, but a protected backlog above the cap means schedules, zones, devices,
+gateway location, or irrigation events are not draining.
+
 ## Gateway health telemetry (CPU / memory / load / fan / throttling)
 
 Since ordered migration `database/migrations/ordered/0002__gateway_health.sql`
