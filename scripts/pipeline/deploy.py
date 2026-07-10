@@ -65,35 +65,38 @@ def pre_deploy_backup(gw: GatewayConfig, timestamp: str) -> BackupResult:
 
 
 def deploy_to_gateway(gw: GatewayConfig, repo_root: Path) -> DeployResult:
-    # Build GUI
     gui_dir = repo_root / "web" / "react-gui"
     subprocess.run(["npm", "run", "build"], cwd=gui_dir, check=True, timeout=300)
 
-    # Package
     tar_path = repo_root / "react_gui.tar.gz"
     subprocess.run(
         ["tar", "czf", str(tar_path), "-C", str(gui_dir / "build"), "."],
         check=True
     )
 
-    # Serve + deploy via reverse tunnel
-    # Start a background HTTP server
-    import http.server, threading
-    handler = http.server.SimpleHTTPRequestHandler
+    import http.server, threading, functools
+    handler = functools.partial(http.server.SimpleHTTPRequestHandler,
+                                directory=str(repo_root))
     srv = http.server.HTTPServer(("127.0.0.1", 9876), handler)
     srv_thread = threading.Thread(target=srv.serve_forever, daemon=True)
     srv_thread.start()
 
     try:
-        r = ssh(gw,
-                "curl -fsS http://localhost:9876/deploy.sh | sh",
-                timeout=600)
+        # Reverse tunnel so Pi's localhost:9876 reaches workstation HTTP server.
+        # Two-step curl→sh avoids masking curl failures in a pipeline.
+        r = subprocess.run(
+            ["ssh", "-i", gw.ssh_key, "-o", "IdentitiesOnly=yes",
+             "-o", "ConnectTimeout=10",
+             "-R", "9876:localhost:9876",
+             f"{gw.ssh_user}@{gw.host}",
+             "curl -fsS http://localhost:9876/deploy.sh -o /tmp/deploy.sh && sh /tmp/deploy.sh"],
+            capture_output=True, text=True, timeout=600
+        )
         if r.returncode != 0:
             return DeployResult(False, f"deploy.sh failed: {r.stderr[:500]}")
     finally:
         srv.shutdown()
 
-    # Wait for Node-RED restart
     deadline = time.time() + 120
     while time.time() < deadline:
         try:

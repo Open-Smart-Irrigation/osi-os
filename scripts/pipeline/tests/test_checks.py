@@ -26,11 +26,18 @@ def test_boot_fail(mock_get, ctx):
     assert not r.passed
 
 @patch("pipeline.checks.http_get")
-def test_routes_404_is_fail(mock_get, ctx):
-    mock_get.side_effect = lambda url, **kw: (404, "not found") if "/api/zones" in url else (200, "ok")
+def test_routes_required_fail(mock_get, ctx):
+    mock_get.side_effect = lambda url, **kw: (500, "error") if "/api/catalog" in url else (200, "ok")
     r = check_routes(ctx)
     assert not r.passed
-    assert "/api/zones=404" in r.detail
+    assert "/api/catalog=500" in r.detail
+
+@patch("pipeline.checks.http_get")
+def test_routes_optional_degraded_still_passes(mock_get, ctx):
+    mock_get.side_effect = lambda url, **kw: (404, "not found") if "/api/zones" in url else (200, "ok")
+    r = check_routes(ctx)
+    assert r.passed
+    assert "optional degraded" in r.detail
 
 @patch("pipeline.checks.ssh_cmd")
 def test_db_integrity_fail(mock_ssh, ctx):

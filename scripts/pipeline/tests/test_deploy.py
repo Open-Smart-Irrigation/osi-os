@@ -89,8 +89,9 @@ def test_pre_deploy_backup_ok_parses_baselines(mock_scp, mock_ssh, gw):
 @patch("pipeline.deploy.ssh")
 @patch("pipeline.deploy.scp_to_pi")
 def test_pre_deploy_backup_failure_returns_not_ok(mock_scp, mock_ssh, gw):
-    # First ssh call is the chmod, second is the backup script itself failing.
+    # Three ssh calls: mkdir, chmod, then the backup script itself failing.
     mock_ssh.side_effect = [
+        MagicMock(returncode=0, stdout="", stderr=""),
         MagicMock(returncode=0, stdout="", stderr=""),
         MagicMock(returncode=1, stdout="", stderr="ERROR: sqlite3 CLI not found"),
     ]
@@ -107,15 +108,13 @@ def test_pre_deploy_backup_failure_returns_not_ok(mock_scp, mock_ssh, gw):
 
 @patch("http.server.HTTPServer")
 @patch("pipeline.checks.http_get", return_value=(301, ""))
-@patch("pipeline.deploy.ssh")
 @patch("pipeline.deploy.subprocess.run")
-def test_deploy_to_gateway_ok(mock_run, mock_ssh, mock_http_get, mock_httpserver_cls, gw, tmp_path):
-    # Arrange a fake repo root with the expected directory shape.
+def test_deploy_to_gateway_ok(mock_run, mock_http_get, mock_httpserver_cls, gw, tmp_path):
     (tmp_path / "web" / "react-gui" / "build").mkdir(parents=True)
 
     mock_srv = MagicMock()
     mock_httpserver_cls.return_value = mock_srv
-    mock_ssh.return_value = MagicMock(returncode=0, stdout="", stderr="")
+    mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
 
     result = deploy_to_gateway(gw, tmp_path)
 
@@ -124,20 +123,24 @@ def test_deploy_to_gateway_ok(mock_run, mock_ssh, mock_http_get, mock_httpserver
     assert "Node-RED alive" in result.detail
     mock_srv.shutdown.assert_called_once()
 
-    # npm build + tar package both ran
     invoked = [call.args[0] for call in mock_run.call_args_list]
     assert ["npm", "run", "build"] in invoked
     assert any(cmd[0] == "tar" for cmd in invoked)
+    ssh_call = [cmd for cmd in invoked if cmd[0] == "ssh"]
+    assert len(ssh_call) == 1
+    assert "-R" in ssh_call[0]
 
 
 @patch("http.server.HTTPServer")
-@patch("pipeline.deploy.ssh")
 @patch("pipeline.deploy.subprocess.run")
-def test_deploy_to_gateway_deploy_sh_failure(mock_run, mock_ssh, mock_httpserver_cls, gw, tmp_path):
+def test_deploy_to_gateway_deploy_sh_failure(mock_run, mock_httpserver_cls, gw, tmp_path):
     (tmp_path / "web" / "react-gui" / "build").mkdir(parents=True)
     mock_srv = MagicMock()
     mock_httpserver_cls.return_value = mock_srv
-    mock_ssh.return_value = MagicMock(returncode=1, stdout="", stderr="deploy.sh: permission denied")
+
+    ok_result = MagicMock(returncode=0, stdout="", stderr="")
+    fail_result = MagicMock(returncode=1, stdout="", stderr="deploy.sh: permission denied")
+    mock_run.side_effect = [ok_result, ok_result, fail_result]
 
     result = deploy_to_gateway(gw, tmp_path)
 
@@ -150,16 +153,14 @@ def test_deploy_to_gateway_deploy_sh_failure(mock_run, mock_ssh, mock_httpserver
 @patch("pipeline.checks.http_get", return_value=(-1, "connection refused"))
 @patch("pipeline.deploy.time.sleep", return_value=None)
 @patch("pipeline.deploy.time.time")
-@patch("pipeline.deploy.ssh")
 @patch("pipeline.deploy.subprocess.run")
 def test_deploy_to_gateway_nodered_never_comes_up(
-    mock_run, mock_ssh, mock_time, mock_sleep, mock_http_get, mock_httpserver_cls, gw, tmp_path
+    mock_run, mock_time, mock_sleep, mock_http_get, mock_httpserver_cls, gw, tmp_path
 ):
     (tmp_path / "web" / "react-gui" / "build").mkdir(parents=True)
     mock_srv = MagicMock()
     mock_httpserver_cls.return_value = mock_srv
-    mock_ssh.return_value = MagicMock(returncode=0, stdout="", stderr="")
-    # First call sets deadline (time.time() + 120), subsequent calls exceed it
+    mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
     mock_time.side_effect = [1000.0, 1200.0]
 
     result = deploy_to_gateway(gw, tmp_path)
