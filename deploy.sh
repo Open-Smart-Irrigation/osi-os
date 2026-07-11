@@ -41,13 +41,17 @@ detect_seed_db_rel() {
 }
 SEED_DB_REL="$(detect_seed_db_rel)"
 TMP_DIR="/tmp/osi-os-deploy.$$"
+PAYLOADS_ROOT="/srv/node-red/payloads"
+DEPLOY_STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
+PAYLOAD_KEEP_N="${PAYLOAD_KEEP_N:-5}"
+SWAP_JS="$TMP_DIR/deploy-payload-swap.js"
 
 cleanup() {
     rm -rf "$TMP_DIR"
 }
 trap cleanup EXIT INT TERM
 
-mkdir -p "$TMP_DIR" /srv/node-red "$DB_DIR"
+mkdir -p "$TMP_DIR" /srv/node-red "$PAYLOADS_ROOT" "$DB_DIR"
 
 fetch() {
     src="$1"
@@ -63,6 +67,27 @@ fetch_required() {
     echo "--- $label ---"
     fetch "$src" "$dest"
     echo "OK"
+}
+
+same_fs_or_die() {
+    dev_a="$(stat -c %d /srv/node-red 2>/dev/null || echo A)"
+    dev_b="$(stat -c %d "$PAYLOADS_ROOT" 2>/dev/null || echo B)"
+    if [ "$dev_a" != "$dev_b" ]; then
+        echo "ERROR: $PAYLOADS_ROOT is on a different filesystem than /srv/node-red; symlink flip would not be atomic." >&2
+        exit 1
+    fi
+}
+
+swap_call() {
+    node -e '
+      const m = require(process.argv[1]);
+      const fn = process.argv[2];
+      const args = process.argv.slice(3);
+      const out = m[fn]("/srv/node-red", ...args);
+      if (out === null || out === undefined) process.exit(0);
+      if (typeof out === "object") process.stdout.write(JSON.stringify(out));
+      else process.stdout.write(String(out));
+    ' "$SWAP_JS" "$@"
 }
 
 run_communication_preflight() {
@@ -330,9 +355,17 @@ fi
 rm -f /etc/init.d/osi-gateway-gps /usr/bin/osi-gateway-gps.js
 echo "OK"
 
-fetch_required "flows.json" \
-    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/flows.json" \
-    "/srv/node-red/flows.json"
+echo "--- Deploy payload swap helper ---"
+fetch "scripts/deploy-payload-swap.js" "$SWAP_JS"
+same_fs_or_die
+echo "OK"
+
+echo "--- flows.json (staged payload; flip deferred to post-migration) ---"
+STAGED_FLOWS="$TMP_DIR/flows.json"
+fetch "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/flows.json" "$STAGED_FLOWS"
+swap_call stagePayload "$DEPLOY_STAMP" "$STAGED_FLOWS" >/dev/null
+PREV_STAMP="$(swap_call currentStamp || true)"
+echo "OK: staged payloads/$DEPLOY_STAMP (current: ${PREV_STAMP:-none}; flip deferred)"
 
 seed_db_if_missing
 
@@ -488,6 +521,42 @@ fix_mosquitto_ownership() {
 
 fix_mosquitto_ownership
 
+echo "--- Flip payload + local health self-check + auto-rollback (5.3 / DD10) ---"
+swap_call flipTo "$DEPLOY_STAMP" >/dev/null
+echo "OK: flipped /srv/node-red/flows.json -> payloads/$DEPLOY_STAMP"
+
+/etc/init.d/node-red restart || true
+
+PROBE_OK=1
+if pgrep -f 'node-red' >/dev/null 2>&1; then
+    sleep 5
+    if wget -q -O /dev/null --spider "http://127.0.0.1:1880/gui" 2>/dev/null; then
+        echo "OK: local health self-check PASSED (Node-RED alive, /gui reachable)"
+        PROBE_OK=0
+    else
+        echo "WARN: Node-RED process alive but /gui not reachable after 5s" >&2
+    fi
+else
+    echo "ALERT: Node-RED process not found after restart" >&2
+fi
+
+if [ "$PROBE_OK" = "0" ]; then
+    echo "OK: committing payload $DEPLOY_STAMP"
+    swap_call prunePayloads "$PAYLOAD_KEEP_N" >/dev/null
+else
+    echo "ALERT: local health self-check FAILED - AUTO-ROLLING-BACK the flows payload" >&2
+    if [ -n "${PREV_STAMP:-}" ]; then
+        swap_call flipTo "$PREV_STAMP" >/dev/null
+        /etc/init.d/node-red restart || true
+        echo "ROLLED BACK: flows.json -> payloads/$PREV_STAMP; Node-RED restarted on last-known-good payload" >&2
+        echo "NOTE: any committed DB migration is NOT auto-undone (DD10); restore is an operator call via 1.B1 backup." >&2
+        echo "NOTE: run deploy-canary-gate.js from your operator machine for the full cloud verdict." >&2
+        exit 1
+    fi
+    echo "ERROR: no previous payload to roll back to. Payload $DEPLOY_STAMP left live; investigate." >&2
+    exit 1
+fi
+
 echo "--- React GUI ---"
 fetch "react_gui.tar.gz" "$TMP_DIR/react_gui.tar.gz"
 mkdir -p /usr/lib/node-red/gui
@@ -499,9 +568,10 @@ tar xzf "$TMP_DIR/react_gui.tar.gz" -C /usr/lib/node-red/gui/
 echo "OK"
 
 echo ""
-echo "=== Deploy complete. Next steps: ==="
-echo "  1. Restart Node-RED:  /etc/init.d/node-red restart"
-echo "  2. Open the UI:       http://<device-ip>:1880/gui"
+echo "=== Deploy complete. ==="
+echo "  Payload:  /srv/node-red/payloads/$DEPLOY_STAMP (flipped + local health self-checked)"
+echo "  UI:       http://<device-ip>:1880/gui"
+echo "  Rollback: automatic for payload failure; committed DB migration restore is the 1.B1 operator path, not auto."
 echo ""
 echo "  NOTE: ChirpStack provisioning runs automatically on first boot via"
 echo "        osi-bootstrap (START=99).  No manual bootstrap step needed on"
