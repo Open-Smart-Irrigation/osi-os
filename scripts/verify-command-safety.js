@@ -1,12 +1,21 @@
 #!/usr/bin/env node
 // WS1 verification: STREGA actuation expectations, calibration, dispatch rejection,
 // reconciliation monitor, and explicit cancel path.
+// DD17 (refactor-program item 3.0): generic actuator duration-bound CI gate.
+// Registry-shape assertions are the ENTRY gate only; per-device-path assertions
+// (like the existing STREGA checks) are mandatory in the device's spec (e.g. 3.1).
+// Profile-parity (verify-profile-parity.js in codecs.yml) guarantees bcm2709
+// flows.json is byte-identical to bcm2712, so we only parse bcm2712 here.
+// bcm2708 is a legacy/non-shipping profile with a divergent flows.json (no
+// command-type registry) and is outside this gate's scope.
 const fs = require('fs');
 const path = require('path');
+const vm = require('vm');
 const { execFileSync } = require('child_process');
 
 const REPO = path.resolve(__dirname, '..');
 const SEED_DB_PATHS = [
+    path.join(REPO, 'conf/base_raspberrypi_bcm27xx_bcm2709/files/usr/share/db/farming.db'),
     path.join(REPO, 'conf/base_raspberrypi_bcm27xx_bcm2712/files/usr/share/db/farming.db'),
     path.join(REPO, 'conf/full_raspberrypi_bcm27xx_bcm2708/files/usr/share/db/farming.db'),
     path.join(REPO, 'conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/db/farming.db'),
@@ -252,6 +261,110 @@ function assertFrontendValveControls() {
     console.log('  ok frontend valve controls are duration-bound and report cancel results');
 }
 
+// --- DD17 generic actuator duration-bound gate (3.0) ---
+
+const DURATION_FREE_ACTUATOR_KEYS = ['CLOSE'];
+const ACTUATOR_NAME_PATTERN = /OPEN|VALVE|CLOS|ACTUAT/i;
+
+function extractRegistryObject(nodeFunc, constName) {
+    const declaration = `const ${constName}`;
+    const idx = nodeFunc.indexOf(declaration);
+    if (idx === -1) throw new Error(`Missing ${declaration} in node`);
+    const braceStart = nodeFunc.indexOf('{', idx);
+    if (braceStart === -1) throw new Error(`Missing object literal for ${constName}`);
+    let depth = 0;
+    let end = -1;
+    for (let i = braceStart; i < nodeFunc.length; i++) {
+        if (nodeFunc[i] === '{') depth++;
+        else if (nodeFunc[i] === '}') { depth--; if (depth === 0) { end = i; break; } }
+    }
+    if (end === -1) throw new Error(`Unmatched braces for ${constName}`);
+    const literal = nodeFunc.slice(braceStart, end + 1);
+    return vm.runInNewContext(`(${literal})`, Object.create(null));
+}
+
+function assertRegistryParity() {
+    const flows = readFlows();
+    const registryNode = findFunctionNode(flows, 'Command Type Registry');
+    if (!registryNode) throw new Error('Missing function node "Command Type Registry"');
+
+    const primary = extractRegistryObject(registryNode.func, 'COMMAND_TYPES');
+    const primaryKeys = Object.keys(primary).sort();
+    const primaryActuatorKeys = primaryKeys.filter(k => primary[k].actuator === true);
+
+    const fallbackNodes = flows.filter(n =>
+        n.type === 'function' && n.func && n.func.includes('COMMAND_TYPES_FALLBACK')
+    );
+    if (fallbackNodes.length === 0) {
+        throw new Error('No function nodes contain COMMAND_TYPES_FALLBACK');
+    }
+
+    for (const node of fallbackNodes) {
+        const fallback = extractRegistryObject(node.func, 'COMMAND_TYPES_FALLBACK');
+        const fallbackKeys = Object.keys(fallback).sort();
+
+        for (const key of primaryActuatorKeys) {
+            if (!(key in fallback)) {
+                throw new Error(`Fallback in "${node.name}" is missing actuator key "${key}" from primary registry`);
+            }
+        }
+
+        for (const key of fallbackKeys) {
+            if (key in primary) {
+                const p = primary[key];
+                const f = fallback[key];
+                if (p.dispatch !== f.dispatch || p.actuator !== f.actuator || p.requires_duration !== f.requires_duration) {
+                    throw new Error(`Registry entry "${key}" differs in "${node.name}" fallback vs primary: ` +
+                        `primary=${JSON.stringify(p)} fallback=${JSON.stringify(f)}`);
+                }
+            }
+        }
+        console.log(`  ok "${node.name}" fallback consistent with primary (${fallbackKeys.length}/${primaryKeys.length} keys, all actuator keys present)`);
+    }
+
+    console.log(`  ok Command Type Registry checked against ${fallbackNodes.length} fallback(s) (${primaryKeys.length} primary entries)`);
+    return primary;
+}
+
+function assertActuatorsDurationBound(registry) {
+    for (const [key, entry] of Object.entries(registry)) {
+        if (typeof entry.dispatch !== 'string' || !entry.dispatch.trim()) {
+            throw new Error(`Registry entry "${key}" has invalid dispatch: ${JSON.stringify(entry.dispatch)}`);
+        }
+        if (typeof entry.actuator !== 'boolean') {
+            throw new Error(`Registry entry "${key}" missing boolean actuator flag`);
+        }
+        if (typeof entry.requires_duration !== 'boolean') {
+            throw new Error(`Registry entry "${key}" missing boolean requires_duration flag`);
+        }
+
+        if (entry.actuator && !entry.requires_duration) {
+            if (!DURATION_FREE_ACTUATOR_KEYS.includes(key)) {
+                throw new Error(
+                    `Actuator command "${key}" (dispatch: ${entry.dispatch}) has requires_duration=false ` +
+                    `but is not in the duration-free allowlist [${DURATION_FREE_ACTUATOR_KEYS}]. ` +
+                    `Every actuator open path must be duration-bounded (DD17).`
+                );
+            }
+        }
+
+        if (!entry.actuator && (ACTUATOR_NAME_PATTERN.test(key) || ACTUATOR_NAME_PATTERN.test(entry.dispatch))) {
+            throw new Error(
+                `Registry entry "${key}" (dispatch: ${entry.dispatch}) matches actuator naming pattern ` +
+                `but declares actuator=false. Mislabeling bypasses the duration-bound gate.`
+            );
+        }
+    }
+    console.log('  ok All actuator commands are duration-bounded or in the close allowlist');
+}
+
+function assertBareOpenNotInRegistry(registry) {
+    if ('OPEN' in registry) {
+        throw new Error('Bare "OPEN" must not appear in the command-type registry (use OPEN_FOR_DURATION)');
+    }
+    console.log('  ok Bare OPEN is not in the command-type registry');
+}
+
 function main() {
     checkSchema();
     assertIndefiniteOpenRejection();
@@ -262,6 +375,9 @@ function main() {
     assertCancelPath();
     assertQueueFlushUsesGrpc();
     assertFrontendValveControls();
+    const registry = assertRegistryParity();
+    assertActuatorsDurationBound(registry);
+    assertBareOpenNotInRegistry(registry);
     console.log('verify-command-safety: OK');
 }
 

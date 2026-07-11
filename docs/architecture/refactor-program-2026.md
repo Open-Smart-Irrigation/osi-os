@@ -85,13 +85,13 @@ This is the **program map**, not a spec. Each item below is a charter line: goal
 | 2.2 Extract Daily Dendrometer Analytics → tested module + thin adapter (DD4 "done" definition) — done: `osi-dendro-analytics` extracted (compute core), golden-vectored, scoreboard decreased, PR #125 | osi-os | M | 1.A1, 1.A2 | spec+plan |
 | 2.3 Dendro cross-repo golden-vector contract (DD5) — done: osi-os runner + byte-mirror gate over shared envelope/TWD/MDS fixtures, paired osi-server `EnvelopeTwd` runner, PR #126 / osi-server#61 | both | M | 2.2 | spec+plan |
 | 2.4 Extract Get Zone Environment Summary — done: `osi-zone-env` extracted (pure assembly helpers), golden-vectored, scoreboard decreased, HTTP-shaped 503 load-fail path, PR #127 | osi-os | L | 2.2 pattern | spec+plan |
-| 2.5 `channels.json` exported as shared field-name truth into the osi-server build (DD5) | both | S | 1.B3 | direct |
+| 2.5 `channels.json` exported as shared field-name truth into the osi-server build (DD5) — done: infrastructure already existed (osi-server `ChannelManifest.java` + `ChannelManifestTest` SHA256 pin + `registry.ts` + `verify-channel-manifest-sync.js`; osi-os `verify-channel-manifest-parity.js`). CI gate: wired `verify-channel-manifest-parity.js` + cross-repo byte-identity check into `migrations.yml`. Note: osi-server-side CI sync (wiring `verify-channel-manifest-sync.js` into `backend-ci.yml` with an osi-os RO token) is deferred — the SHA256 pin in `ChannelManifestTest` catches osi-server-initiated drift, but detection lands on the next osi-os PR, not at osi-server merge time | both | S | 1.B3 | direct |
 
 ### Phase 3 — Narrow-waist ingest via the MClimate pilot (weeks 10–15)
 
 | Item | Repo | Size | Depends on | Mode |
 |---|---|---|---|---|
-| 3.0 **Entry gate:** actuator duration-bound CI assertion (DD17, extend `verify-command-safety.js`) — merges before any MClimate downlink code | osi-os | S | — | direct |
+| 3.0 **Entry gate:** actuator duration-bound CI assertion (DD17, extend `verify-command-safety.js`) — done: wired `verify-command-safety.js` into `migrations.yml` CI; added generic guard `assertRegistryParity` (primary "Command Type Registry" ↔ fallback deep equality), `assertActuatorsDurationBound` (exact-match close-dispatch allowlist, naming tripwire for mislabeled `actuator:false`, schema validation), `assertBareOpenNotInRegistry`; added missing `base_bcm2709` seed DB. Registry-shape gate is entry-only; per-path assertions are mandatory in each device spec (3.1) | osi-os | S | — | direct |
 | 3.1 MClimate T-Valve (#18): codec + normalizer + generic manifest-driven writer with closed allow-list & ingest dead-letter (DD6) — the abstraction's second consumer | osi-os | L | 1.A1 | spec+plan |
 | 3.2 `verify-device-integration.js`: full round-trip CI gate (codec output → normalize → write → manifest-declared columns and nothing else) | osi-os | M | 3.1 | spec+plan |
 | 3.3 LSN50 shadow mode on demo gateways (DD7: old path writes, new path diffs) | osi-os | M | 3.1 | direct |

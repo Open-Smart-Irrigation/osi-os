@@ -82,3 +82,32 @@ jobs:
           OSI_SERVER_EDGE_SYNC_SERVICE: osi-server/backend/src/main/java/org/osi/server/sync/EdgeSyncService.java
       - run: node scripts/verify-sync-op-parity.js osi-server/backend/src/main/java/org/osi/server/sync/EdgeSyncService.java
       - run: node scripts/verify-dendro-contract-mirror.js osi-server
+      - run: node scripts/verify-channel-manifest-parity.js
+      - name: Cross-repo channels.json byte-identity (DD5)
+        run: |
+          set -euo pipefail
+          canonical="web/react-gui/src/channels/channels.json"
+          server_fe="osi-server/frontend/src/channels/channels.json"
+          server_be="osi-server/backend/src/main/resources/channels.json"
+          canonical_sha=$(sha256sum "$canonical" | cut -d' ' -f1)
+          fe_sha=$(sha256sum "$server_fe" | cut -d' ' -f1)
+          be_sha=$(sha256sum "$server_be" | cut -d' ' -f1)
+          echo "osi-os canonical: $canonical_sha  $canonical"
+          echo "osi-server frontend: $fe_sha  $server_fe"
+          echo "osi-server backend:  $be_sha  $server_be"
+          ok=true
+          if [ "$canonical_sha" != "$fe_sha" ]; then
+            echo "::error::osi-server frontend channels.json diverges from osi-os canonical."
+            ok=false
+          fi
+          if [ "$canonical_sha" != "$be_sha" ]; then
+            echo "::error::osi-server backend channels.json diverges from osi-os canonical."
+            ok=false
+          fi
+          if [ "$ok" = false ]; then
+            echo "Canonical is osi-os web/react-gui/src/channels/channels.json."
+            echo "Update both osi-server copies AND the EXPECTED_SHA256 pin in"
+            echo "ChannelManifestTest.java + verify-channel-manifest-sync.js on a same-named osi-server branch."
+            exit 1
+          fi
+      - run: node scripts/verify-command-safety.js
