@@ -171,6 +171,16 @@ const schemaContract = {
   chameleon_calibration_misses: [
     'array_id', 'last_tried', 'reason',
   ],
+  analysis_views: [
+    'id',
+    'user_id',
+    'owner_user_uuid',
+    'name',
+    'view_json',
+    'is_default',
+    'created_at',
+    'updated_at',
+  ],
   gateway_health_samples: [
     'id',
     'gateway_device_eui',

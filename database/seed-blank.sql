@@ -2343,3 +2343,19 @@ CREATE TABLE IF NOT EXISTS gateway_health_hourly (
 
 CREATE INDEX IF NOT EXISTS idx_gateway_health_hourly_time
   ON gateway_health_hourly(hour_start);
+
+-- ---------------------------------------------------------------------------
+-- analysis_views (folded from deploy.sh ensure_analysis_views_schema; migration 0007)
+-- ---------------------------------------------------------------------------
+
+CREATE TABLE IF NOT EXISTS analysis_views (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL,
+  owner_user_uuid TEXT,
+  name TEXT NOT NULL,
+  view_json TEXT NOT NULL,
+  is_default INTEGER NOT NULL DEFAULT 0 CHECK (is_default IN (0,1)),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
