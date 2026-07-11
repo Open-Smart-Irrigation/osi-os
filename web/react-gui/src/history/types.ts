@@ -196,6 +196,7 @@ export interface HistoryAggregationMetadata {
   coveragePct: number | null;
   coverageConfidence: CoverageConfidence;
   pointCount: number;
+  source?: string | null;
   dominantStatusMethod?: string | null;
 }
 
