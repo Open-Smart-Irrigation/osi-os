@@ -1,0 +1,22 @@
+{
+  "statusCode": 200,
+  "payload": {
+    "id": "<<AUTO_ID>>",
+    "userId": 1,
+    "ownerUserUuid": "test-user-uuid-1",
+    "zoneId": 1,
+    "name": "Golden Vector Workspace",
+    "isDefault": false,
+    "workspace": {
+      "layout": "grid",
+      "panels": [
+        {
+          "id": "p1",
+          "type": "soil"
+        }
+      ]
+    },
+    "createdAt": "2026-07-10T12:00:00.000Z",
+    "updatedAt": "2026-07-10T12:00:00.000Z"
+  }
+}

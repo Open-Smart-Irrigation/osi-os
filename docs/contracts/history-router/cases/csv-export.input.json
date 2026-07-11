@@ -1,0 +1,23 @@
+{
+  "route": {
+    "name": "csv-export",
+    "description": "GET CSV export for zone",
+    "method": "GET",
+    "path": "/api/history/zones/1/export.csv",
+    "params": {
+      "zoneId": "1"
+    },
+    "query": {
+      "granularity": "raw",
+      "from": "2026-07-10",
+      "to": "2026-07-10"
+    },
+    "body": null
+  },
+  "seed": {
+    "note": "Seeded from database/seed-blank.sql plus fixture rows (see capture-history-router-vectors.js seedFixtureDb)",
+    "pinnedClockMs": 1783684800000,
+    "pinnedClockIso": "2026-07-10T12:00:00.000Z",
+    "jwtSecret": "test-jwt-secret-for-golden-vectors-only"
+  }
+}
