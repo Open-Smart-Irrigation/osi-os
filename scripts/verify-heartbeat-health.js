@@ -11,15 +11,18 @@ const GATHER_ID = '2a4f142e3e9b6d80';
 const INJECT_ID = '310dfe7cfe34a448';
 
 const REQUIRED_HEALTH_KEYS = [
-  'schema_sig',
-  'sync_linked',
-  'sync_pending',
-  'sync_oldest_age_s',
-  'sync_rejected',
-  'sync_dirty_pending',
+  'crash_count',
+  'crash_looping',
   'disk_free_pct',
-  'errors_total',
   'errors_last_at',
+  'errors_total',
+  'health_state',
+  'schema_sig',
+  'sync_dirty_pending',
+  'sync_linked',
+  'sync_oldest_age_s',
+  'sync_pending',
+  'sync_rejected',
 ];
 
 const REQUIRED_GATHER_LIBS = [
@@ -276,6 +279,8 @@ function assertNormalHeartbeatMessage(profile, label, result) {
 function assertHealthPayload(profile, buildNode) {
   const freshHealth = {
     at: Date.now(),
+    crash_count: 2,
+    crash_looping: false,
     schema_sig: 'sig',
     sync_linked: true,
     sync_pending: 3,
@@ -285,6 +290,7 @@ function assertHealthPayload(profile, buildNode) {
     disk_free_pct: 87,
     errors_total: 3,
     errors_last_at: 1720000000000,
+    health_state: 'healthy',
     ignored_extra_key: 'must not leak',
   };
 
@@ -303,6 +309,8 @@ function assertHealthPayload(profile, buildNode) {
       disk_free_pct: 0,
     });
     assertHealthMatches(profile, 'fresh partial', partialResult.payload && partialResult.payload.health, {
+      crash_count: null,
+      crash_looping: null,
       schema_sig: null,
       sync_linked: false,
       sync_pending: 0,
@@ -312,6 +320,7 @@ function assertHealthPayload(profile, buildNode) {
       disk_free_pct: 0,
       errors_total: null,
       errors_last_at: null,
+      health_state: null,
     });
 
     const stringResult = runBuildHeartbeat(profile, buildNode, 'malformed-health');
@@ -368,8 +377,8 @@ function assertBuildNode(profile, buildNode) {
   assert(profile, buildNode.name === 'Build Heartbeat', 'Build Heartbeat name changed');
   assert(
     profile,
-    JSON.stringify(buildNode.libs) === JSON.stringify([]),
-    `Build Heartbeat.libs must be []; got ${JSON.stringify(buildNode.libs)}`
+    JSON.stringify(buildNode.libs) === JSON.stringify([{ var: 'osiHealth', module: 'osi-health-helper' }]),
+    `Build Heartbeat.libs must be [{var:"osiHealth",module:"osi-health-helper"}]; got ${JSON.stringify(buildNode.libs)}`
   );
   assert(profile, typeof buildNode.func === 'string', 'Build Heartbeat.func is missing');
   if (typeof buildNode.func !== 'string') return;
