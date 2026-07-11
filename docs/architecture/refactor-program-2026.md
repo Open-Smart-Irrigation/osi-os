@@ -53,7 +53,7 @@ This is the **program map**, not a spec. Each item below is a charter line: goal
 | Item | Repo | Size | Depends on | Mode |
 |---|---|---|---|---|
 | 0.1 Deploy merged flows (error counter, contract_version) to both demo gateways | osi-os live-ops | S | — | runbook |
-| 0.2 Heartbeat canary gate: deploy tooling refuses to advance until target gateway reports N healthy heartbeats (schema_sig = target, error_count flat, disk_free OK) | osi-os tooling | M | heartbeat #100 (done) | spec+plan |
+| 0.2 Heartbeat canary gate: deploy tooling refuses to advance until target gateway reports N healthy heartbeats (schema_sig = target, error_count flat, disk_free OK) | osi-os tooling | M | heartbeat #100 (done) | spec+plan - done: `scripts/deploy-canary-gate.js` + runbook, PR #118; companion osi-server sync-health pass-through PR #57 |
 | 0.3 **Option B Stage 0**: canonicalize fleet schema — fold `ensure_*`/repair drift into seed + ordered migrations, retire the `writable_schema` surgery (#93), establish the canonical reference such that replay == live-after-repair | osi-os | L | — | spec+plan (start from [`2026-07-05-option-b-boot-path-cutover.md`](../superpowers/plans/2026-07-05-option-b-boot-path-cutover.md)) |
 
 ### Phase 1 — Guardrails ∥ Delivery (weeks 2–6, two parallel tracks)

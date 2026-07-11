@@ -18,6 +18,8 @@ const REQUIRED_HEALTH_KEYS = [
   'sync_rejected',
   'sync_dirty_pending',
   'disk_free_pct',
+  'errors_total',
+  'errors_last_at',
 ];
 
 const REQUIRED_GATHER_LIBS = [
@@ -281,6 +283,8 @@ function assertHealthPayload(profile, buildNode) {
     sync_rejected: 1,
     sync_dirty_pending: 2,
     disk_free_pct: 87,
+    errors_total: 3,
+    errors_last_at: 1720000000000,
     ignored_extra_key: 'must not leak',
   };
 
@@ -306,6 +310,8 @@ function assertHealthPayload(profile, buildNode) {
       sync_rejected: null,
       sync_dirty_pending: null,
       disk_free_pct: 0,
+      errors_total: null,
+      errors_last_at: null,
     });
 
     const stringResult = runBuildHeartbeat(profile, buildNode, 'malformed-health');
@@ -335,6 +341,8 @@ function assertHealthPayload(profile, buildNode) {
       sync_rejected: ['invalid'],
       sync_dirty_pending: NaN,
       disk_free_pct: Infinity,
+      errors_total: { invalid: true },
+      errors_last_at: Symbol('invalid-errors-last-at'),
     });
     assertAllNullHealth(profile, 'fresh invalid values', invalidValuesResult.payload && invalidValuesResult.payload.health);
 
