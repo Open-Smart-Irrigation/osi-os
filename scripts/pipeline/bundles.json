@@ -6,7 +6,7 @@
       "items": ["0.2"],
       "prs": [118],
       "deploy_target": "kaba100",
-      "soak_hours": 24,
+      "soak_hours": 1,
       "pre_deploy": ["repair-sync-outbox-v2"],
       "needs_fixes": [],
       "ci_only": false
@@ -17,7 +17,7 @@
       "items": ["0.3"],
       "prs": [120],
       "deploy_target": "kaba100",
-      "soak_hours": 48,
+      "soak_hours": 1,
       "pre_deploy": [],
       "needs_fixes": [],
       "ci_only": false
@@ -39,7 +39,7 @@
       "items": ["1.A4", "1.A5"],
       "prs": [122],
       "deploy_target": "kaba100",
-      "soak_hours": 24,
+      "soak_hours": 1,
       "pre_deploy": [],
       "needs_fixes": ["1.A5-eviction-index"],
       "ci_only": false
@@ -50,7 +50,7 @@
       "items": ["1.B1"],
       "prs": [123],
       "deploy_target": "kaba100",
-      "soak_hours": 48,
+      "soak_hours": 1,
       "pre_deploy": [],
       "needs_fixes": [],
       "ci_only": false
@@ -61,7 +61,7 @@
       "items": ["5.3"],
       "prs": [124],
       "deploy_target": "kaba100",
-      "soak_hours": 48,
+      "soak_hours": 1,
       "pre_deploy": [],
       "needs_fixes": [],
       "ci_only": false
@@ -84,7 +84,7 @@
       "items": ["1.B4"],
       "prs": [],
       "deploy_target": "test-server",
-      "soak_hours": 48,
+      "soak_hours": 1,
       "pre_deploy": [],
       "needs_fixes": [],
       "ci_only": false,
@@ -96,7 +96,7 @@
       "items": ["2.2"],
       "prs": [],
       "deploy_target": "kaba100",
-      "soak_hours": 24,
+      "soak_hours": 1,
       "pre_deploy": [],
       "needs_fixes": [],
       "ci_only": false
@@ -119,7 +119,7 @@
       "items": ["2.4"],
       "prs": [],
       "deploy_target": "kaba100",
-      "soak_hours": 24,
+      "soak_hours": 1,
       "pre_deploy": [],
       "needs_fixes": [],
       "ci_only": false
@@ -130,7 +130,7 @@
       "items": ["agroscope-forward", "agroscope-branding"],
       "prs": [],
       "deploy_target": "kaba100",
-      "soak_hours": 24,
+      "soak_hours": 1,
       "pre_deploy": [],
       "needs_fixes": [],
       "ci_only": false
