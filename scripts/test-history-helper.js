@@ -2184,3 +2184,39 @@ test('verify-sync-flow chains SQL-backed history helper regression tests', () =>
   assert.match(verifySource, /test-history-helper\.js/);
   assert(!/execFileSync\(process\.execPath,\s*\[path\.resolve\(__dirname,\s*['"]verify-sync-flow\.js['"]\)/.test(verifySource), 'verify-sync-flow must not recursively execute itself');
 });
+
+test('rollupRowsToResult rejects rows spanning multiple logical source keys', () => {
+  const row = (key, mean) => ({
+    bucket_start: '2026-07-01T00:00:00.000Z',
+    bucket_end: '2026-07-02T00:00:00.000Z',
+    logical_source_key: key,
+    channel_id: 'swt_1',
+    min_value: mean, max_value: mean, mean_value: mean, median_value: mean, latest_value: mean,
+    dominant_status: null, sample_count: 4, event_count: 0, threshold_crossing_count: 0,
+    coverage_pct: 100, coverage_confidence: 'configured', unit: 'kPa',
+  });
+  assert.throws(
+    () => helper.rollupRowsToResult(
+      [row('root-zone', 10), row('src-aa01', 30)],
+      { aggregation: 'daily' },
+      [{ id: 'swt_1', field: 'swt_1', fields: ['swt_1'], unit: 'kPa' }],
+    ),
+    /single logical_source_key/,
+  );
+});
+
+test('rollupRowsToResult builds buckets from single-key rows', () => {
+  const rows = [{
+    bucket_start: '2026-07-01T00:00:00.000Z',
+    bucket_end: '2026-07-02T00:00:00.000Z',
+    logical_source_key: 'root-zone',
+    channel_id: 'swt_1',
+    min_value: 5, max_value: 15, mean_value: 10, median_value: 10, latest_value: 15,
+    dominant_status: null, sample_count: 4, event_count: 0, threshold_crossing_count: 0,
+    coverage_pct: 100, coverage_confidence: 'configured', unit: 'kPa',
+  }];
+  const result = helper.rollupRowsToResult(rows, { aggregation: 'daily' }, [{ id: 'swt_1', field: 'swt_1', fields: ['swt_1'], unit: 'kPa' }]);
+  assert.strictEqual(result.buckets.length, 1);
+  assert.strictEqual(result.buckets[0].series.swt_1.mean, 10);
+  assert.strictEqual(result.buckets[0].sampleCount, 4);
+});

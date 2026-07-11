@@ -1048,6 +1048,7 @@ function normalizeQueryChannels(channels) {
   return normalized;
 }
 
+/** Aggregates the UNION of scope.deveuis into one combined row per bucket/channel under scope.logicalSourceKey. */
 async function computeRollupBuckets(db, scope = {}, level, windowMs, nowMs) {
   const aggregation = String(level || '').trim();
   if (!['hourly', 'daily', 'weekly'].includes(aggregation)) throw new Error(`unsupported rollup level: ${level}`);
@@ -1132,7 +1133,28 @@ async function upsertRollups(db, rows) {
   return count;
 }
 
+/**
+ * Builds an aggregate result from history_channel_rollups rows.
+ *
+ * CONTRACT (verified live on kaba100, 2026-07-11):
+ * - Input rows MUST all belong to ONE logical_source_key. Merged cards
+ *   (soil='root-zone', environment='microclimate') store ONE combined-
+ *   aggregate row per bucket/channel — computeRollupBuckets aggregates the
+ *   UNION of the card's devices before upserting. Per-source detail exists
+ *   only in raw device_data and the CSV export path.
+ * - bucket.series is keyed by channel_id only; multi-key input would
+ *   silently drop data, hence the guard below. A future per-source rollup
+ *   scheme must extend this keying (see refactor-program open decisions).
+ * - bucket.sampleCount sums sample_count ACROSS CHANNELS (same semantics
+ *   as the live aggregateRows path).
+ */
 function rollupRowsToResult(rows, query, channels) {
+  const sourceKeys = new Set((rows || [])
+    .map((row) => row.logical_source_key)
+    .filter((value) => value !== undefined && value !== null));
+  if (sourceKeys.size > 1) {
+    throw new Error(`rollupRowsToResult requires rows from a single logical_source_key, got: ${Array.from(sourceKeys).sort().join(', ')}`);
+  }
   const channelMap = new Map(channels.map((channel) => [channel.id, channel]));
   const byBucket = new Map();
   for (const row of rows || []) {
@@ -2620,6 +2642,7 @@ module.exports = {
   runRollupJob,
   upsertRollups,
   computeRollupBuckets,
+  rollupRowsToResult,
   startOfLocalDayMs,
   buildZoneExportCsv,
   RAW_CSV_COLUMNS,
