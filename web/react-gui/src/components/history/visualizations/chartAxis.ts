@@ -6,9 +6,10 @@ import type { CSSProperties, SVGProps } from 'react';
  * (not forced to zero), muted gridline-coloured ticks, and a rotated unit title.
  */
 
-// `top: 20` keeps the top y-axis tick clear of the in-chart view-mode/device labels.
+// `top: 36` keeps the top y-axis tick clear of the absolutely-positioned
+// view-mode/device pills that HistoryCardDetailPage overlays at top-1 (~22px tall).
 // `bottom: 28` keeps x-axis ticks above mobile browser chrome and home indicators.
-export const HISTORY_CHART_MARGIN = { top: 20, right: 16, bottom: 28, left: 8 } as const;
+export const HISTORY_CHART_MARGIN = { top: 36, right: 16, bottom: 28, left: 8 } as const;
 
 const DAY_MS = 86_400_000;
 const AXIS_TICK: SVGProps<SVGTextElement> = { fontSize: 11, fill: 'var(--text-tertiary)' };

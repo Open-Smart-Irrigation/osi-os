@@ -272,11 +272,13 @@ const EnvironmentLineChartViewComponent: React.FC<EnvironmentLineChartViewProps>
         {groups.map((group, groupIndex) => {
           return (
             <div key={group.unit || 'unitless'} className="flex min-h-0 flex-1 flex-col gap-1">
-              <h4 className="text-xs font-semibold text-[var(--text-tertiary)]">
-                {group.unit
-                  ? t('history.environmentLineChart.axisLabel', { unit: formatDisplayUnit(group.unit) })
-                  : t('history.environmentLineChart.axisNoUnit')}
-              </h4>
+              {groups.length > 1 && (
+                <h4 className="text-xs font-semibold text-[var(--text-tertiary)]">
+                  {group.unit
+                    ? t('history.environmentLineChart.axisLabel', { unit: formatDisplayUnit(group.unit) })
+                    : t('history.environmentLineChart.axisNoUnit')}
+                </h4>
+              )}
               <div className="relative min-h-0 min-w-0 flex-1"><div className="absolute inset-0">
                 <ResponsiveContainer width="100%" height="100%">
                   <LineChart data={group.rows} margin={HISTORY_CHART_MARGIN}>
