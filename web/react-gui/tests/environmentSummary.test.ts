@@ -18,7 +18,7 @@ test('treats 0 as a valid value, not Unavailable', () => {
   assert.equal(formatForecastHighLow(0, -3), '0°/-3°');
 });
 
-test('edge environment summary emits the frontend daily and hourly forecast contract', () => {
+test('edge environment summary calls buildForecastSection from the extracted module', () => {
   const flowsPath = path.resolve(
     import.meta.dirname,
     '../../../conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/flows.json'
@@ -27,14 +27,16 @@ test('edge environment summary emits the frontend daily and hourly forecast cont
   const node = flows.find((entry: { name?: string }) => entry.name === 'Get Zone Environment Summary');
   assert.ok(node && typeof node.func === 'string', 'Get Zone Environment Summary function node is present');
 
-  const buildForecastStart = node.func.indexOf('function buildForecastSection');
-  const buildAgronomicStart = node.func.indexOf('function buildAgronomic');
-  assert.notEqual(buildForecastStart, -1, 'buildForecastSection is present');
-  assert.notEqual(buildAgronomicStart, -1, 'buildAgronomic follows buildForecastSection');
+  assert.ok(node.func.includes('buildForecastSection'), 'adapter calls buildForecastSection');
 
-  const buildForecastSection = node.func.slice(buildForecastStart, buildAgronomicStart);
+  const modulePath = path.resolve(
+    import.meta.dirname,
+    '../../../conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-zone-env/index.js'
+  );
+  const moduleSource = fs.readFileSync(modulePath, 'utf8');
+  assert.ok(moduleSource.includes('function buildForecastSection'), 'buildForecastSection is defined in osi-zone-env');
   for (const field of ['description:', 'weatherCode:', 'maxTempC:', 'minTempC:', 'rainProbabilityPct:', 'tempC:']) {
-    assert.match(buildForecastSection, new RegExp(`\\b${field.replace(':', '')}:`));
+    assert.match(moduleSource, new RegExp(`\\b${field.replace(':', '')}:`));
   }
 });
 
