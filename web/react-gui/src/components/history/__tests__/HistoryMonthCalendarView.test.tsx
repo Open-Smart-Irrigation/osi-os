@@ -285,4 +285,10 @@ describe('HistoryMonthCalendarView', () => {
     fireEvent.click(futureCell);
     expect(onInspectDate).not.toHaveBeenCalled();
   });
+
+  it('renders a legend for the marker dots present in the month', () => {
+    render(<HistoryMonthCalendarView cardType="soil" calendar={soilCalendarMay2026()} todayIso="2026-06-01" />);
+    const legend = screen.getByTestId('calendar-marker-legend');
+    expect(legend).toHaveTextContent('Rain');
+  });
 });

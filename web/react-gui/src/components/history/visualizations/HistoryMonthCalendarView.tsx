@@ -185,6 +185,17 @@ export const HistoryMonthCalendarView: React.FC<HistoryMonthCalendarViewProps> =
   const TOUCH_TAP_SLOP_PX = 10;
   const todayIsoDate = todayIso ?? new Date().toISOString().slice(0, 10);
 
+  const legendMarkers = useMemo(() => {
+    const seen = new Map<string, HistoryCalendarMarker>();
+    for (const day of days) {
+      for (const marker of day.markers ?? []) {
+        const key = `${marker.type}:${marker.labelKey}`;
+        if (!seen.has(key)) seen.set(key, marker);
+      }
+    }
+    return [...seen.values()];
+  }, [days]);
+
   if (!calendar || !month || days.length === 0) {
     return (
       <section
@@ -317,10 +328,10 @@ export const HistoryMonthCalendarView: React.FC<HistoryMonthCalendarViewProps> =
                 stopCalendarGesture(event);
                 touchTapRef.current = null;
               }}
-              className={`flex aspect-square min-h-12 flex-col rounded-md border p-1.5 text-left transition focus:outline-none focus:ring-2 focus:ring-[var(--primary)] ${stateTone[cell.day.state] ?? stateTone.no_data}`}
+              className={`flex aspect-square min-h-12 flex-col rounded-md border p-1 text-left transition focus:outline-none focus:ring-2 focus:ring-[var(--primary)] sm:p-1.5 ${stateTone[cell.day.state] ?? stateTone.no_data}`}
             >
               <span className="text-xs font-bold leading-none sm:text-sm">{cell.dayOfMonth}</span>
-              <span className="mt-auto line-clamp-2 text-[0.58rem] font-semibold leading-tight sm:text-[0.68rem]">
+              <span className="mt-auto line-clamp-2 break-words text-[0.58rem] font-semibold leading-tight sm:text-[0.68rem]">
                 {label}
               </span>
               {markers.length > 0 && (
@@ -339,6 +350,19 @@ export const HistoryMonthCalendarView: React.FC<HistoryMonthCalendarViewProps> =
           );
         })}
       </div>
+      {legendMarkers.length > 0 && (
+        <div className="mt-3 flex flex-wrap gap-x-3 gap-y-1" data-testid="calendar-marker-legend">
+          {legendMarkers.map((marker) => (
+            <span
+              key={`${marker.type}:${marker.labelKey}`}
+              className="flex items-center gap-1 text-[0.65rem] font-semibold text-[var(--text-tertiary)]"
+            >
+              <span className={`h-1.5 w-1.5 rounded-full ${markerClass(marker)}`} aria-hidden="true" />
+              {markerLabel(t, marker)}
+            </span>
+          ))}
+        </div>
+      )}
     </section>
   );
 };
