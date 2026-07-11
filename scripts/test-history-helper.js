@@ -2143,12 +2143,6 @@ test('data-coverage-gap interpretation ignores future time in window', () => {
     rangeFrom: '2026-07-01T00:00:00.000Z',
     rangeTo: '2026-08-01T00:00:00.000Z',
   };
-  const fullElapsedCoverage = helper.buildLocalInterpretations({ ...base, coveragePct: 34 });
-  assert(
-    !fullElapsedCoverage.some((item) => item.ruleId === 'data-coverage-gap'),
-    'coverage gap must not fire when the elapsed part of the window is fully covered',
-  );
-
   const realGap = helper.buildLocalInterpretations({ ...base, coveragePct: 15 });
   assert(
     realGap.some((item) => item.ruleId === 'data-coverage-gap'),
@@ -2183,4 +2177,127 @@ test('verify-sync-flow chains SQL-backed history helper regression tests', () =>
   const verifySource = fs.readFileSync(path.join(repoRoot, 'scripts', 'verify-sync-flow.js'), 'utf8');
   assert.match(verifySource, /test-history-helper\.js/);
   assert(!/execFileSync\(process\.execPath,\s*\[path\.resolve\(__dirname,\s*['"]verify-sync-flow\.js['"]\)/.test(verifySource), 'verify-sync-flow must not recursively execute itself');
+});
+
+test('rollupRowsToResult rejects rows spanning multiple logical source keys', () => {
+  const row = (key, mean) => ({
+    bucket_start: '2026-07-01T00:00:00.000Z',
+    bucket_end: '2026-07-02T00:00:00.000Z',
+    logical_source_key: key,
+    channel_id: 'swt_1',
+    min_value: mean, max_value: mean, mean_value: mean, median_value: mean, latest_value: mean,
+    dominant_status: null, sample_count: 4, event_count: 0, threshold_crossing_count: 0,
+    coverage_pct: 100, coverage_confidence: 'configured', unit: 'kPa',
+  });
+  assert.throws(
+    () => helper.rollupRowsToResult(
+      [row('root-zone', 10), row('src-aa01', 30)],
+      { aggregation: 'daily' },
+      [{ id: 'swt_1', field: 'swt_1', fields: ['swt_1'], unit: 'kPa' }],
+    ),
+    /single logical_source_key/,
+  );
+});
+
+test('rollupRowsToResult builds buckets from single-key rows', () => {
+  const rows = [{
+    bucket_start: '2026-07-01T00:00:00.000Z',
+    bucket_end: '2026-07-02T00:00:00.000Z',
+    logical_source_key: 'root-zone',
+    channel_id: 'swt_1',
+    min_value: 5, max_value: 15, mean_value: 10, median_value: 10, latest_value: 15,
+    dominant_status: null, sample_count: 4, event_count: 0, threshold_crossing_count: 0,
+    coverage_pct: 100, coverage_confidence: 'configured', unit: 'kPa',
+  }];
+  const result = helper.rollupRowsToResult(rows, { aggregation: 'daily' }, [{ id: 'swt_1', field: 'swt_1', fields: ['swt_1'], unit: 'kPa' }]);
+  assert.strictEqual(result.buckets.length, 1);
+  assert.strictEqual(result.buckets[0].series.swt_1.mean, 10);
+  assert.strictEqual(result.buckets[0].sampleCount, 4);
+});
+
+test('computeRollupBuckets merges a multi-device scope into ONE combined row per bucket/channel', async () => {
+  const db = createCliSqliteDb();
+  try {
+    db.runSql(`
+      INSERT INTO users(id,username,password_hash,created_at,updated_at) VALUES(1,'u','h','2026-05-31T00:00:00.000Z','2026-05-31T00:00:00.000Z');
+      INSERT INTO irrigation_zones(id,name,user_id,zone_uuid,timezone,created_at,updated_at) VALUES(7,'Z',1,'zu','UTC','2026-05-31T00:00:00.000Z','2026-05-31T00:00:00.000Z');
+      INSERT INTO devices(deveui,name,type_id,user_id,irrigation_zone_id,created_at,updated_at) VALUES
+        ('AA00000000000001','Temp A','DRAGINO_LSN50',1,7,'2026-05-31T00:00:00.000Z','2026-05-31T00:00:00.000Z'),
+        ('AA00000000000002','Temp B','DRAGINO_LSN50',1,7,'2026-05-31T00:00:00.000Z','2026-05-31T00:00:00.000Z');
+      INSERT INTO device_data(deveui,recorded_at,ext_temperature_c) VALUES
+        ('AA00000000000001','2026-06-01T08:10:00.000Z',10),
+        ('AA00000000000002','2026-06-01T08:20:00.000Z',30),
+        ('AA00000000000001','2026-06-01T08:40:00.000Z',20),
+        ('AA00000000000002','2026-06-01T08:50:00.000Z',40);
+    `);
+    const scope = {
+      zoneId: 7,
+      cardType: 'environment',
+      logicalSourceKey: 'microclimate',
+      channels: [{ id: 'ext_temperature_c', field: 'ext_temperature_c', unit: 'C' }],
+      deveuis: ['AA00000000000001', 'AA00000000000002'],
+      timezone: 'UTC',
+    };
+    const rows = await helper.computeRollupBuckets(db, scope, 'hourly', 24 * 3600 * 1000, Date.parse('2026-06-02T00:00:00.000Z'));
+    const hourRows = rows.filter((row) => row.channel_id === 'ext_temperature_c' && row.bucket_start === '2026-06-01T08:00:00.000Z');
+    assert.strictEqual(hourRows.length, 1, 'exactly ONE combined row for the merged scope');
+    assert.strictEqual(hourRows[0].logical_source_key, 'microclimate');
+    assert.strictEqual(hourRows[0].mean_value, 25);
+    assert.strictEqual(hourRows[0].min_value, 10);
+    assert.strictEqual(hourRows[0].max_value, 40);
+    assert.strictEqual(hourRows[0].sample_count, 4);
+  } finally {
+    db.close();
+  }
+});
+
+test('aggregateRows clamps coverage denominators at now for in-progress windows', () => {
+  const rows = [
+    { deveui: 'AA00000000000001', recorded_at: '2026-07-11T00:10:00.000Z', ext_temperature_c: 20 },
+    { deveui: 'AA00000000000001', recorded_at: '2026-07-11T05:50:00.000Z', ext_temperature_c: 22 },
+  ];
+  const result = helper.aggregateRows(rows, {
+    aggregation: 'daily',
+    channels: [{ id: 'ext_temperature_c', field: 'ext_temperature_c', unit: 'C' }],
+    start: '2026-07-11T00:00:00.000Z',
+    end: '2026-07-12T00:00:00.000Z',
+    timezone: 'UTC',
+    nowMs: Date.parse('2026-07-11T06:00:00.000Z'),
+    expectedCadences: { AA00000000000001: { seconds: 1200, confidence: 'configured' } },
+  });
+  assert.ok(result.coveragePct > 10 && result.coveragePct < 12,
+    `coverage must be computed over elapsed time only, got ${result.coveragePct}`);
+  assert.strictEqual(result.buckets.length, 1);
+  assert.ok(result.buckets[0].coveragePct > 10 && result.buckets[0].coveragePct < 12);
+});
+
+test('aggregateRows leaves completed-window coverage unchanged by the clamp', () => {
+  const rows = [
+    { deveui: 'AA00000000000001', recorded_at: '2026-07-10T00:10:00.000Z', ext_temperature_c: 20 },
+  ];
+  const result = helper.aggregateRows(rows, {
+    aggregation: 'daily',
+    channels: [{ id: 'ext_temperature_c', field: 'ext_temperature_c', unit: 'C' }],
+    start: '2026-07-10T00:00:00.000Z',
+    end: '2026-07-11T00:00:00.000Z',
+    timezone: 'UTC',
+    nowMs: Date.parse('2026-07-12T00:00:00.000Z'),
+    expectedCadences: { AA00000000000001: { seconds: 1200, confidence: 'configured' } },
+  });
+  assert.ok(result.coveragePct < 2, `completed windows keep the full denominator, got ${result.coveragePct}`);
+});
+
+test('aggregateRows reports null coverage for fully-future windows and buckets', () => {
+  const result = helper.aggregateRows([], {
+    aggregation: 'daily',
+    channels: [{ id: 'ext_temperature_c', field: 'ext_temperature_c', unit: 'C' }],
+    start: '2026-07-12T00:00:00.000Z',
+    end: '2026-07-13T00:00:00.000Z',
+    timezone: 'UTC',
+    nowMs: Date.parse('2026-07-11T06:00:00.000Z'),
+    expectedCadences: { AA00000000000001: { seconds: 1200, confidence: 'configured' } },
+  });
+  assert.strictEqual(result.coveragePct, null);
+  assert.strictEqual(result.buckets.length, 1);
+  assert.strictEqual(result.buckets[0].coveragePct, null);
 });

@@ -962,6 +962,7 @@ function aggregateRows(rows, options = {}) {
   if (startMs === null || endMs === null || endMs <= startMs) throw new Error('aggregateRows requires a valid start/end range for bucketed aggregation');
 
   const buckets = aggregationBuckets(startMs, endMs, aggregation, bucketSeconds, options.timezone);
+  const nowMs = toFiniteNumber(options.nowMs) ?? Date.now();
 
   for (const bucket of buckets) {
     const bucketRows = sortedRows.filter((entry) => entry.recordedAtMs >= bucket.bucketStartMs && entry.recordedAtMs < bucket.bucketEndMs);
@@ -978,7 +979,12 @@ function aggregateRows(rows, options = {}) {
       };
       bucket.sampleCount += bucket.series[channel.id].sampleCount;
     }
-    const coverage = coverageForBucket(bucketRows, channels, sourceCadences, (bucket.bucketEndMs - bucket.bucketStartMs) / 1000);
+    // Coverage denominator counts only elapsed time: a bucket (or window)
+    // that extends past `now` cannot be "missing" samples it could not
+    // yet have received. Fully-future buckets get a zero denominator,
+    // which coverageForBucket maps to coveragePct null.
+    const elapsedBucketSeconds = Math.max(0, (Math.min(bucket.bucketEndMs, nowMs) - bucket.bucketStartMs) / 1000);
+    const coverage = coverageForBucket(bucketRows, channels, sourceCadences, elapsedBucketSeconds);
     bucket.coveragePct = coverage.coveragePct;
     bucket.coverageConfidence = coverage.coverageConfidence;
     delete bucket.bucketStartMs;
@@ -986,7 +992,7 @@ function aggregateRows(rows, options = {}) {
   }
 
   const totalSamples = buckets.reduce((sum, bucket) => sum + bucket.sampleCount, 0);
-  const totalSeconds = (endMs - startMs) / 1000;
+  const totalSeconds = Math.max(0, (Math.min(endMs, nowMs) - startMs) / 1000);
   const totalCoverage = coverageForBucket(sortedRows, channels, sourceCadences, totalSeconds);
   return {
     aggregation,
@@ -1048,6 +1054,7 @@ function normalizeQueryChannels(channels) {
   return normalized;
 }
 
+/** Aggregates the UNION of scope.deveuis into one combined row per bucket/channel under scope.logicalSourceKey. */
 async function computeRollupBuckets(db, scope = {}, level, windowMs, nowMs) {
   const aggregation = String(level || '').trim();
   if (!['hourly', 'daily', 'weekly'].includes(aggregation)) throw new Error(`unsupported rollup level: ${level}`);
@@ -1132,7 +1139,28 @@ async function upsertRollups(db, rows) {
   return count;
 }
 
+/**
+ * Builds an aggregate result from history_channel_rollups rows.
+ *
+ * CONTRACT (verified live on kaba100, 2026-07-11):
+ * - Input rows MUST all belong to ONE logical_source_key. Merged cards
+ *   (soil='root-zone', environment='microclimate') store ONE combined-
+ *   aggregate row per bucket/channel — computeRollupBuckets aggregates the
+ *   UNION of the card's devices before upserting. Per-source detail exists
+ *   only in raw device_data and the CSV export path.
+ * - bucket.series is keyed by channel_id only; multi-key input would
+ *   silently drop data, hence the guard below. A future per-source rollup
+ *   scheme must extend this keying (see refactor-program open decisions).
+ * - bucket.sampleCount sums sample_count ACROSS CHANNELS (same semantics
+ *   as the live aggregateRows path).
+ */
 function rollupRowsToResult(rows, query, channels) {
+  const sourceKeys = new Set((rows || [])
+    .map((row) => row.logical_source_key)
+    .filter((value) => value !== undefined && value !== null));
+  if (sourceKeys.size > 1) {
+    throw new Error(`rollupRowsToResult requires rows from a single logical_source_key, got: ${Array.from(sourceKeys).sort().join(', ')}`);
+  }
   const channelMap = new Map(channels.map((channel) => [channel.id, channel]));
   const byBucket = new Map();
   for (const row of rows || []) {
@@ -2151,26 +2179,17 @@ function buildLocalInterpretations(input = {}) {
 
   const generatedMs = parseTime(generatedAt);
   const rangeFromMs = parseTime(input.rangeFrom);
-  const rangeToMs = parseTime(input.rangeTo);
-  const windowKnown = rangeFromMs !== null && rangeToMs !== null && generatedMs !== null && rangeToMs > rangeFromMs;
-  const fullyFutureWindow = windowKnown && rangeFromMs >= generatedMs;
-  let effectiveCoveragePct = coveragePct;
-  if (coveragePct !== null && windowKnown && rangeToMs > generatedMs) {
-    const totalMs = rangeToMs - rangeFromMs;
-    const elapsedMs = generatedMs - rangeFromMs;
-    effectiveCoveragePct = elapsedMs <= 0 ? null : Math.min(100, coveragePct * (totalMs / elapsedMs));
-  }
-  const coverageGapFires = effectiveCoveragePct !== null
-    ? effectiveCoveragePct < 80
-    : (coverageConfidence === 'unknown' && !fullyFutureWindow);
-  if (coverageGapFires) {
+  // Fully-future windows have nothing to be missing yet; coverage is null
+  // there and must not trigger the unknown-confidence info banner either.
+  const fullyFutureWindow = rangeFromMs !== null && generatedMs !== null && rangeFromMs >= generatedMs;
+  if (!fullyFutureWindow && (coverageConfidence === 'unknown' || (coveragePct !== null && coveragePct < 80))) {
     items.push({
       ruleId: 'data-coverage-gap',
       severity: coverageConfidence === 'unknown' ? 'info' : 'warning',
       titleKey: 'history.interpretation.dataCoverageGap.title',
       bodyKey: 'history.interpretation.dataCoverageGap.body',
-      params: { coveragePct: effectiveCoveragePct ?? coveragePct, coverageConfidence },
-      evidence: [{ type: 'coverage', coveragePct: effectiveCoveragePct ?? coveragePct, coverageConfidence }],
+      params: { coveragePct, coverageConfidence },
+      evidence: [{ type: 'coverage', coveragePct, coverageConfidence }],
       source: 'local-rule',
     });
   }
@@ -2620,6 +2639,7 @@ module.exports = {
   runRollupJob,
   upsertRollups,
   computeRollupBuckets,
+  rollupRowsToResult,
   startOfLocalDayMs,
   buildZoneExportCsv,
   RAW_CSV_COLUMNS,
