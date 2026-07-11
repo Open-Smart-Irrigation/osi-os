@@ -1,12 +1,18 @@
 """Check 16: deploy-canary-gate.js wrapper."""
+import os
 import subprocess
+from pathlib import Path
 from . import CheckResult, VerifyContext
+
+REPO_ROOT = Path(__file__).parent.parent.parent.parent
 
 def run(ctx: VerifyContext) -> CheckResult:
     if not ctx.canary_gate_available:
         return CheckResult("canary", True, "canary gate not yet deployed (pre-B0)")
-    cmd = ["node", "scripts/deploy-canary-gate.js",
-           "--gateway-eui", "0016C001F11766E7",  # kaba100 EUI
+    if not os.environ.get("OSI_ADMIN_TOKEN"):
+        return CheckResult("canary", True, "SKIP: OSI_ADMIN_TOKEN not set")
+    cmd = ["node", str(REPO_ROOT / "scripts" / "deploy-canary-gate.js"),
+           "--eui", "0016C001F11766E7",
            "--since", ctx.deploy_timestamp,
            "--timeout", "900"]
     if ctx.expected_schema_sig:

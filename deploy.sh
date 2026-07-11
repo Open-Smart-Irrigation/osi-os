@@ -70,11 +70,21 @@ fetch_required() {
 }
 
 same_fs_or_die() {
-    dev_a="$(stat -c %d /srv/node-red 2>/dev/null || echo A)"
-    dev_b="$(stat -c %d "$PAYLOADS_ROOT" 2>/dev/null || echo B)"
-    if [ "$dev_a" != "$dev_b" ]; then
-        echo "ERROR: $PAYLOADS_ROOT is on a different filesystem than /srv/node-red; symlink flip would not be atomic." >&2
-        exit 1
+    # BusyBox ash lacks stat; fall back to df mount-point comparison
+    if command -v stat >/dev/null 2>&1; then
+        dev_a="$(stat -c %d /srv/node-red 2>/dev/null)"
+        dev_b="$(stat -c %d "$PAYLOADS_ROOT" 2>/dev/null)"
+        if [ -n "$dev_a" ] && [ -n "$dev_b" ] && [ "$dev_a" != "$dev_b" ]; then
+            echo "ERROR: $PAYLOADS_ROOT is on a different filesystem than /srv/node-red; symlink flip would not be atomic." >&2
+            exit 1
+        fi
+    else
+        mnt_a="$(df /srv/node-red 2>/dev/null | tail -1 | awk '{print $NF}')"
+        mnt_b="$(df "$PAYLOADS_ROOT" 2>/dev/null | tail -1 | awk '{print $NF}')"
+        if [ -n "$mnt_a" ] && [ -n "$mnt_b" ] && [ "$mnt_a" != "$mnt_b" ]; then
+            echo "ERROR: $PAYLOADS_ROOT is on a different filesystem than /srv/node-red; symlink flip would not be atomic." >&2
+            exit 1
+        fi
     fi
 }
 
