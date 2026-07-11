@@ -169,7 +169,7 @@ describe('HistoryMonthCalendarView', () => {
     }));
   });
 
-  it('keeps calendar touch selection from bubbling into a parent gesture surface', () => {
+  it('keeps calendar touch events from bubbling into a parent gesture surface', () => {
     const onInspectDate = vi.fn();
     const onParentPointerDown = vi.fn();
 
@@ -179,15 +179,35 @@ describe('HistoryMonthCalendarView', () => {
       </div>,
     );
 
-    fireEvent.pointerDown(screen.getByRole('gridcell', { name: /May 12/i }), {
-      pointerId: 1,
-      pointerType: 'touch',
-      clientX: 120,
-      clientY: 120,
-    });
+    const cell = screen.getByRole('gridcell', { name: /May 12/i });
+    fireEvent.pointerDown(cell, { pointerId: 1, pointerType: 'touch', clientX: 120, clientY: 120 });
+    fireEvent.pointerUp(cell, { pointerId: 1, pointerType: 'touch', clientX: 120, clientY: 120 });
 
     expect(onInspectDate).toHaveBeenCalledWith(expect.objectContaining({ date: '2026-05-12' }));
     expect(onParentPointerDown).not.toHaveBeenCalled();
+  });
+
+  it('does not open the inspector when a touch gesture starts on a day cell and moves away', () => {
+    const onInspectDate = vi.fn();
+    render(
+      <HistoryMonthCalendarView cardType="dendro" calendar={dendroCalendarMay2026()} onInspectDate={onInspectDate} />,
+    );
+    const cell = screen.getByTestId('calendar-cell-2026-05-12');
+    fireEvent.pointerDown(cell, { pointerType: 'touch', pointerId: 1, clientX: 100, clientY: 100 });
+    fireEvent.pointerMove(cell, { pointerType: 'touch', pointerId: 1, clientX: 160, clientY: 100 });
+    fireEvent.pointerUp(cell, { pointerType: 'touch', pointerId: 1, clientX: 160, clientY: 100 });
+    expect(onInspectDate).not.toHaveBeenCalled();
+  });
+
+  it('opens the inspector on a touch tap (down and up without movement)', () => {
+    const onInspectDate = vi.fn();
+    render(
+      <HistoryMonthCalendarView cardType="dendro" calendar={dendroCalendarMay2026()} onInspectDate={onInspectDate} />,
+    );
+    const cell = screen.getByTestId('calendar-cell-2026-05-12');
+    fireEvent.pointerDown(cell, { pointerType: 'touch', pointerId: 1, clientX: 100, clientY: 100 });
+    fireEvent.pointerUp(cell, { pointerType: 'touch', pointerId: 1, clientX: 103, clientY: 101 });
+    expect(onInspectDate).toHaveBeenCalledTimes(1);
   });
 
   it('renders the latest month when a rolling range spans month boundaries', () => {

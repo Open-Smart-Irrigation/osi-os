@@ -178,6 +178,9 @@ export const HistoryMonthCalendarView: React.FC<HistoryMonthCalendarViewProps> =
   const monthLabel = formatHistoryCalendarMonthLabel(calendar) ?? t('history.calendar.title');
   const cells = useMemo(() => (calendar && month ? buildCells(calendar, month) : []), [calendar, month]);
   const [internalSelectedDate, setInternalSelectedDate] = useState<string | null>(null);
+  const touchTapRef = React.useRef<{ date: string; pointerId: number; x: number; y: number } | null>(null);
+  const suppressNextClickRef = React.useRef(false);
+  const TOUCH_TAP_SLOP_PX = 10;
 
   if (!calendar || !month || days.length === 0) {
     return (
@@ -261,22 +264,39 @@ export const HistoryMonthCalendarView: React.FC<HistoryMonthCalendarViewProps> =
               style={style}
               onClick={(event) => {
                 stopCalendarGesture(event);
+                if (suppressNextClickRef.current) {
+                  suppressNextClickRef.current = false;
+                  return;
+                }
                 selectCell();
               }}
-              onMouseDown={(event) => {
-                stopCalendarGesture(event);
-                selectCell();
-              }}
-              onMouseUp={stopCalendarGesture}
               onPointerDown={(event) => {
                 stopCalendarGesture(event);
                 if (event.pointerType === 'touch' || event.pointerType === 'pen') {
-                  selectCell();
+                  touchTapRef.current = { date: cell.date, pointerId: event.pointerId, x: event.clientX, y: event.clientY };
                 }
               }}
-              onPointerMove={stopCalendarGesture}
-              onPointerUp={stopCalendarGesture}
-              onPointerCancel={stopCalendarGesture}
+              onPointerMove={(event) => {
+                stopCalendarGesture(event);
+                const tap = touchTapRef.current;
+                if (tap && tap.pointerId === event.pointerId
+                  && Math.hypot(event.clientX - tap.x, event.clientY - tap.y) > TOUCH_TAP_SLOP_PX) {
+                  touchTapRef.current = null;
+                }
+              }}
+              onPointerUp={(event) => {
+                stopCalendarGesture(event);
+                const tap = touchTapRef.current;
+                touchTapRef.current = null;
+                if (!tap || tap.date !== cell.date || tap.pointerId !== event.pointerId) return;
+                if (Math.hypot(event.clientX - tap.x, event.clientY - tap.y) > TOUCH_TAP_SLOP_PX) return;
+                suppressNextClickRef.current = true;
+                selectCell();
+              }}
+              onPointerCancel={(event) => {
+                stopCalendarGesture(event);
+                touchTapRef.current = null;
+              }}
               className={`flex aspect-square min-h-12 flex-col rounded-md border p-1.5 text-left transition focus:outline-none focus:ring-2 focus:ring-[var(--primary)] ${stateTone[cell.day.state] ?? stateTone.no_data}`}
             >
               <span className="text-xs font-bold leading-none sm:text-sm">{cell.dayOfMonth}</span>
