@@ -32,6 +32,7 @@ test('deploy migration wiring fetches the ordered migration corpus from CHECKSUM
     '0005__field_work_requests.sql',
     '0006__improvement_request_contact_email.sql',
     '0007__analysis_views.sql',
+    '0008__sync_outbox_eviction_index.sql',
   ]);
   assert.match(deploy, /database\/migrations\/ordered\/CHECKSUMS\.json/);
   assert.match(deploy, /Object\.keys\(manifest\)\.sort\(\)/);

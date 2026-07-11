@@ -50,7 +50,7 @@ test('kaba100-shaped device (reference(3) + early analysis_views) baselines at N
   const res = await applyPending(cliRunner(db), {
     migrationsDir: MIGRATIONS_DIR, appVersion: 'test', writersStopped: true,
   });
-  assert.deepEqual(res.applied, [4, 5, 6, 7]);
+  assert.deepEqual(res.applied, [4, 5, 6, 7, 8]);
   assert.deepEqual(await verifyHead(cliRunner(db), { migrationsDir: MIGRATIONS_DIR }), { ok: true });
 });
 
