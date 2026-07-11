@@ -12,7 +12,7 @@ import {
   YAxis,
 } from 'recharts';
 import type { HistoryCardDataResponse, HistorySeriesPoint } from '../../../history/types';
-import { HISTORY_CHART_MARGIN, formatTimeTick, historyTimeXAxis, historyValueYAxis } from './chartAxis';
+import { HISTORY_CHART_MARGIN, formatDisplayUnit, formatTimeTick, historyTimeXAxis, historyValueYAxis } from './chartAxis';
 
 interface DailyMinMaxViewProps {
   data: HistoryCardDataResponse | undefined;
@@ -141,7 +141,7 @@ function formatTimestampMs(value: unknown): string {
 function formatValue(value: number | null, unit: string): string {
   if (value === null) return '-';
   const formatted = Number.isInteger(value) ? String(value) : value.toFixed(1);
-  return unit ? `${formatted} ${unit}` : formatted;
+  return unit ? `${formatted} ${formatDisplayUnit(unit)}` : formatted;
 }
 
 function formatTooltipValue(value: unknown, unit: string): string {
@@ -238,7 +238,7 @@ const DailyMinMaxViewComponent: React.FC<DailyMinMaxViewProps> = ({ data, window
                   <YAxis
                     {...historyValueYAxis(
                       series.unit
-                        ? t('history.dailyMinMax.axisLabel', { unit: series.unit })
+                        ? t('history.dailyMinMax.axisLabel', { unit: formatDisplayUnit(series.unit) })
                         : t('history.dailyMinMax.axisNoUnit'),
                       52,
                     )}

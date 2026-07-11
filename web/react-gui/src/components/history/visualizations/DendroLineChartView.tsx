@@ -11,7 +11,7 @@ import {
   YAxis,
 } from 'recharts';
 import type { HistoryCardDataResponse, HistorySeriesPoint } from '../../../history/types';
-import { HISTORY_CHART_MARGIN, consistentUnit, formatTimeTick, historyTimeXAxis, historyValueYAxis } from './chartAxis';
+import { HISTORY_CHART_MARGIN, consistentUnit, formatDisplayUnit, formatTimeTick, historyTimeXAxis, historyValueYAxis } from './chartAxis';
 
 interface DendroLineChartViewProps {
   data: HistoryCardDataResponse | undefined;
@@ -199,7 +199,7 @@ const DendroLineChartViewComponent: React.FC<DendroLineChartViewProps> = ({ data
                 formatter={(value: unknown, _name: unknown, item: { dataKey?: unknown }) => {
                   const s = seriesByKey.get(String(item.dataKey));
                   const numeric = typeof value === 'number' && Number.isFinite(value) ? value : null;
-                  const text = numeric === null ? '-' : `${Number.isInteger(numeric) ? numeric : numeric.toFixed(1)} ${s?.unit ?? ''}`.trim();
+                  const text = numeric === null ? '-' : `${Number.isInteger(numeric) ? numeric : numeric.toFixed(1)} ${formatDisplayUnit(s?.unit)}`.trim();
                   return [text, s?.label ?? ''];
                 }}
               />

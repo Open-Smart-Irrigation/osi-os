@@ -205,7 +205,7 @@ describe('HistoryCardFrame environment line chart', () => {
     expect(within(chart).queryByText('Relative humidity')).not.toBeInTheDocument();
     expect(within(chart).queryByText('Rain')).not.toBeInTheDocument();
     expect(within(chart).queryByText('Light')).not.toBeInTheDocument();
-    expect(within(chart).getByText('C axis')).toBeInTheDocument();
+    expect(within(chart).getByText('°C axis')).toBeInTheDocument();
     expect(within(chart).getByText('% axis')).toBeInTheDocument();
     expect(within(chart).getByText('mm axis')).toBeInTheDocument();
     expect(within(chart).getByText('lx axis')).toBeInTheDocument();
