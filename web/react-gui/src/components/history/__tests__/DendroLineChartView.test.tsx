@@ -79,6 +79,7 @@ describe('DendroLineChartView', () => {
         key: 'stem',
         label: 'Stem change',
         unit: 'um',
+        source: 'stem',
         points: [{ t: '2026-06-01T00:00:00Z', value: 12 }],
       },
     ]);

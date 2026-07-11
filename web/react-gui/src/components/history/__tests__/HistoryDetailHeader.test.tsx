@@ -16,9 +16,14 @@ const cardFixture: HistoryCardSummary = {
   cardType: 'environment',
   scope: 'zone',
   title: 'Environment',
-  view: 'line-chart',
-  icon: null,
-  sortOrder: 0,
+  subtitle: '',
+  defaultView: 'line-chart',
+  views: ['line-chart'],
+  supportedRanges: ['24h'],
+  defaultRange: '24h',
+  metadata: {} as HistoryCardSummary['metadata'],
+  availability: {} as HistoryCardSummary['availability'],
+  ordering: {} as HistoryCardSummary['ordering'],
 };
 
 describe('HistoryDetailHeader', () => {
