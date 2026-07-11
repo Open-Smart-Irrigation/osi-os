@@ -16,6 +16,7 @@
     "sqlite3": "^5.1.7",
     "osi-history-sync-helper": "file:osi-history-sync-helper",
     "osi-lib": "file:osi-lib",
-    "osi-dendro-analytics": "file:osi-dendro-analytics"
+    "osi-dendro-analytics": "file:osi-dendro-analytics",
+    "osi-zone-env": "file:osi-zone-env"
   }
 }

@@ -1,0 +1,244 @@
+{
+  "zoneId": 1,
+  "zoneName": "Vector Zone",
+  "generatedAt": "2026-07-11T10:00:00.000Z",
+  "location": {
+    "latitude": 46.8,
+    "longitude": 8.2,
+    "timezone": "UTC",
+    "source": "zone"
+  },
+  "water": {
+    "available": true,
+    "observedAt": "2026-07-11T09:58:00.000Z",
+    "areaM2": 50,
+    "irrigationEfficiencyPct": 75,
+    "rainTodayMm": 0.8,
+    "irrigationTodayLiters": 15,
+    "irrigationTodayNetMm": 0.23,
+    "irrigationTodayMeasuredLiters": 15,
+    "irrigationTodayEstimatedLiters": 12,
+    "measuredIrrigationNetMm": 0.23,
+    "estimatedIrrigationNetMm": 0.18,
+    "waterNeededTodayMm": null,
+    "balanceTodayMm": null,
+    "next24hRainMm": null,
+    "action": {
+      "code": "irrigate_today",
+      "source": "dendro",
+      "reasoning": "Fixture dendro recommendation",
+      "recommendationDate": "2026-07-11"
+    },
+    "daily": [
+      {
+        "date": "2026-07-05",
+        "rainMm": 0,
+        "irrigationLiters": 0,
+        "irrigationNetMm": 0,
+        "measuredIrrigationLiters": 0,
+        "estimatedIrrigationLiters": 0,
+        "measuredIrrigationNetMm": 0,
+        "estimatedIrrigationNetMm": 0,
+        "totalWaterMm": 0,
+        "estimatedTotalWaterMm": 0
+      },
+      {
+        "date": "2026-07-06",
+        "rainMm": 0,
+        "irrigationLiters": 0,
+        "irrigationNetMm": 0,
+        "measuredIrrigationLiters": 0,
+        "estimatedIrrigationLiters": 0,
+        "measuredIrrigationNetMm": 0,
+        "estimatedIrrigationNetMm": 0,
+        "totalWaterMm": 0,
+        "estimatedTotalWaterMm": 0
+      },
+      {
+        "date": "2026-07-07",
+        "rainMm": 0,
+        "irrigationLiters": 0,
+        "irrigationNetMm": 0,
+        "measuredIrrigationLiters": 0,
+        "estimatedIrrigationLiters": 0,
+        "measuredIrrigationNetMm": 0,
+        "estimatedIrrigationNetMm": 0,
+        "totalWaterMm": 0,
+        "estimatedTotalWaterMm": 0
+      },
+      {
+        "date": "2026-07-08",
+        "rainMm": 0,
+        "irrigationLiters": 0,
+        "irrigationNetMm": 0,
+        "measuredIrrigationLiters": 0,
+        "estimatedIrrigationLiters": 0,
+        "measuredIrrigationNetMm": 0,
+        "estimatedIrrigationNetMm": 0,
+        "totalWaterMm": 0,
+        "estimatedTotalWaterMm": 0
+      },
+      {
+        "date": "2026-07-09",
+        "rainMm": 0.5,
+        "irrigationLiters": 0,
+        "irrigationNetMm": 0,
+        "measuredIrrigationLiters": 0,
+        "estimatedIrrigationLiters": 0,
+        "measuredIrrigationNetMm": 0,
+        "estimatedIrrigationNetMm": 0,
+        "totalWaterMm": 0.5,
+        "estimatedTotalWaterMm": 0.5
+      },
+      {
+        "date": "2026-07-10",
+        "rainMm": 1.1,
+        "irrigationLiters": 20,
+        "irrigationNetMm": 0.3,
+        "measuredIrrigationLiters": 20,
+        "estimatedIrrigationLiters": 0,
+        "measuredIrrigationNetMm": 0.3,
+        "estimatedIrrigationNetMm": 0,
+        "totalWaterMm": 1.4,
+        "estimatedTotalWaterMm": 1.1
+      },
+      {
+        "date": "2026-07-11",
+        "rainMm": 0.8,
+        "irrigationLiters": 15,
+        "irrigationNetMm": 0.23,
+        "measuredIrrigationLiters": 15,
+        "estimatedIrrigationLiters": 12,
+        "measuredIrrigationNetMm": 0.23,
+        "estimatedIrrigationNetMm": 0.18,
+        "totalWaterMm": 1.03,
+        "estimatedTotalWaterMm": 0.98
+      }
+    ],
+    "sensorHealth": {
+      "sensorCount": 2,
+      "freshSensorCount": 2,
+      "staleSensorCount": 0,
+      "rainGaugePresent": true,
+      "flowMeterPresent": false,
+      "warnings": []
+    }
+  },
+  "local": {
+    "available": true,
+    "observedAt": "2026-07-11T09:50:00.000Z",
+    "sensorCount": 2,
+    "freshSensorCount": 2,
+    "staleSensorCount": 0,
+    "metrics": [
+      {
+        "key": "air_temperature_c",
+        "label": "Air Temperature",
+        "unit": "°C",
+        "mean": 24,
+        "median": 24,
+        "min": 23.8,
+        "max": 24.2,
+        "sampleCount": 2
+      },
+      {
+        "key": "relative_humidity_pct",
+        "label": "Relative Humidity",
+        "unit": "%",
+        "mean": 62,
+        "median": 62,
+        "min": 61,
+        "max": 63,
+        "sampleCount": 2
+      },
+      {
+        "key": "pressure_hpa",
+        "label": "Pressure",
+        "unit": "hPa",
+        "mean": 955,
+        "median": 955,
+        "min": 955,
+        "max": 955,
+        "sampleCount": 1
+      },
+      {
+        "key": "wind_speed_mps",
+        "label": "Wind Speed",
+        "unit": "m/s",
+        "mean": 2.3,
+        "median": 2.3,
+        "min": 2.3,
+        "max": 2.3,
+        "sampleCount": 1
+      }
+    ],
+    "devices": [
+      {
+        "deviceEui": "S2120VECTOR0001",
+        "name": "Weather Station",
+        "type": "SENSECAP_S2120",
+        "observedAt": "2026-07-11T09:50:00.000Z",
+        "metrics": {
+          "air_temperature_c": 24.2,
+          "relative_humidity_pct": 61,
+          "pressure_hpa": 955,
+          "wind_speed_mps": 2.3,
+          "wind_direction_deg": 180
+        }
+      },
+      {
+        "deviceEui": "KIWIVECTOR00001",
+        "name": "Kiwi Sensor",
+        "type": "KIWI_SENSOR",
+        "observedAt": "2026-07-11T09:40:00.000Z",
+        "metrics": {
+          "air_temperature_c": 23.8,
+          "relative_humidity_pct": 63
+        }
+      }
+    ]
+  },
+  "online": {
+    "available": false,
+    "source": "unavailable",
+    "cacheStatus": "miss",
+    "observedAt": null,
+    "expiresAt": null,
+    "current": null
+  },
+  "agronomic": {
+    "preferredSource": "local",
+    "current": {
+      "thermodynamicSource": "local",
+      "evapotranspirationSource": "unavailable",
+      "cropCoefficientSource": "heuristic_phenology",
+      "airTemperatureC": 24,
+      "relativeHumidityPct": 62,
+      "vpdKpa": 1.134,
+      "dewPointC": 16.26,
+      "heatIndexC": 24,
+      "thi": 22.01,
+      "referenceEt0MmDay": null,
+      "cropCoefficientKc": 0.85,
+      "etcMmDay": null
+    }
+  },
+  "forecast": {
+    "available": false,
+    "source": "unavailable",
+    "cacheStatus": "miss",
+    "observedAt": null,
+    "expiresAt": null,
+    "rainFocus": null
+  },
+  "display": {
+    "mode": "unlinked_local",
+    "schedulingMode": "local",
+    "sourceLabel": "Local environment",
+    "sharedGeneratedAt": null,
+    "sharedObservedAt": "2026-07-11T09:58:00.000Z",
+    "lastReceivedAt": null,
+    "fallbackReason": null
+  },
+  "drift": null
+}

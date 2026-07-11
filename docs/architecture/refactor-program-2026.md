@@ -84,7 +84,7 @@ This is the **program map**, not a spec. Each item below is a charter line: goal
 | 2.1 Uganda catch-up (#87): full deploy + schema baseline, rehearsed on a Uganda DB copy first | osi-os live-ops | M | 1.B4 + 1.B1 proven on demos | runbook |
 | 2.2 Extract Daily Dendrometer Analytics → tested module + thin adapter (DD4 "done" definition) — done: `osi-dendro-analytics` extracted (compute core), golden-vectored, scoreboard decreased, PR #125 | osi-os | M | 1.A1, 1.A2 | spec+plan |
 | 2.3 Dendro cross-repo golden-vector contract (DD5) — done: osi-os runner + byte-mirror gate over shared envelope/TWD/MDS fixtures, paired osi-server `EnvelopeTwd` runner, PR #126 / osi-server#61 | both | M | 2.2 | spec+plan |
-| 2.4 Extract Get Zone Environment Summary | osi-os | L | 2.2 pattern | spec+plan |
+| 2.4 Extract Get Zone Environment Summary — done: `osi-zone-env` extracted (pure assembly helpers), golden-vectored, scoreboard decreased, HTTP-shaped 503 load-fail path, PR #127 | osi-os | L | 2.2 pattern | spec+plan |
 | 2.5 `channels.json` exported as shared field-name truth into the osi-server build (DD5) | both | S | 1.B3 | direct |
 
 ### Phase 3 — Narrow-waist ingest via the MClimate pilot (weeks 10–15)

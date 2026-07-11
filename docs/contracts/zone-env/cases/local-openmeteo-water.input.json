@@ -1,0 +1,32 @@
+{
+  "schemaVersion": 1,
+  "case": "local-openmeteo-water",
+  "fixedNow": "2026-07-11T10:00:00.000Z",
+  "request": {
+    "zone_id": 1,
+    "userId": 1
+  },
+  "seed": {
+    "user": "fixture-user",
+    "zone": "Vector Zone",
+    "devices": [
+      "S2120VECTOR0001",
+      "KIWIVECTOR00001"
+    ],
+    "waterDates": [
+      "2026-07-09",
+      "2026-07-10",
+      "2026-07-11"
+    ],
+    "estimatedValveLiters": 12
+  },
+  "httpStubs": {
+    "provider": "open-meteo",
+    "currentTime": "2026-07-11T10:00",
+    "forecastHours": [
+      "2026-07-11T10:00",
+      "2026-07-11T13:00",
+      "2026-07-11T16:00"
+    ]
+  }
+}

@@ -14,6 +14,7 @@ const COOLDOWN_MS = Number(process.env.OSI_LIB_COOLDOWN_MS || 30000); // test ov
 const NAME_TO_PATH = {
   'history-sync': 'osi-history-sync-helper',
   'dendro-analytics': 'osi-dendro-analytics',
+  'zone-env': 'osi-zone-env',
   'agroscope-uplink-transform': 'codecs/agroscope_uplink_transform',
 };
 
