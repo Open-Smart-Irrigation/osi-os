@@ -41,13 +41,17 @@ detect_seed_db_rel() {
 }
 SEED_DB_REL="$(detect_seed_db_rel)"
 TMP_DIR="/tmp/osi-os-deploy.$$"
+PAYLOADS_ROOT="/srv/node-red/payloads"
+DEPLOY_STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
+PAYLOAD_KEEP_N="${PAYLOAD_KEEP_N:-5}"
+SWAP_JS="$TMP_DIR/deploy-payload-swap.js"
 
 cleanup() {
     rm -rf "$TMP_DIR"
 }
 trap cleanup EXIT INT TERM
 
-mkdir -p "$TMP_DIR" /srv/node-red "$DB_DIR"
+mkdir -p "$TMP_DIR" /srv/node-red "$PAYLOADS_ROOT" "$DB_DIR"
 
 fetch() {
     src="$1"
@@ -63,6 +67,37 @@ fetch_required() {
     echo "--- $label ---"
     fetch "$src" "$dest"
     echo "OK"
+}
+
+same_fs_or_die() {
+    # BusyBox ash lacks stat; fall back to df mount-point comparison
+    if command -v stat >/dev/null 2>&1; then
+        dev_a="$(stat -c %d /srv/node-red 2>/dev/null)"
+        dev_b="$(stat -c %d "$PAYLOADS_ROOT" 2>/dev/null)"
+        if [ -n "$dev_a" ] && [ -n "$dev_b" ] && [ "$dev_a" != "$dev_b" ]; then
+            echo "ERROR: $PAYLOADS_ROOT is on a different filesystem than /srv/node-red; symlink flip would not be atomic." >&2
+            exit 1
+        fi
+    else
+        mnt_a="$(df /srv/node-red 2>/dev/null | tail -1 | awk '{print $NF}')"
+        mnt_b="$(df "$PAYLOADS_ROOT" 2>/dev/null | tail -1 | awk '{print $NF}')"
+        if [ -n "$mnt_a" ] && [ -n "$mnt_b" ] && [ "$mnt_a" != "$mnt_b" ]; then
+            echo "ERROR: $PAYLOADS_ROOT is on a different filesystem than /srv/node-red; symlink flip would not be atomic." >&2
+            exit 1
+        fi
+    fi
+}
+
+swap_call() {
+    node -e '
+      const m = require(process.argv[1]);
+      const fn = process.argv[2];
+      const args = process.argv.slice(3);
+      const out = m[fn]("/srv/node-red", ...args);
+      if (out === null || out === undefined) process.exit(0);
+      if (typeof out === "object") process.stdout.write(JSON.stringify(out));
+      else process.stdout.write(String(out));
+    ' "$SWAP_JS" "$@"
 }
 
 run_communication_preflight() {
@@ -126,446 +161,181 @@ seed_db_if_missing() {
     echo "OK: seeded new database at $DB_PATH"
 }
 
-ensure_dendro_schema() {
-    echo "--- Live dendrometer schema repair ---"
+node_red_restart_needed=0
+
+restore_deploy_trap() {
+    trap cleanup EXIT INT TERM
+}
+
+restart_node_red() {
+    if [ "$node_red_restart_needed" != "1" ]; then
+        return 0
+    fi
+    node_red_restart_needed=0
+    echo "--- Restart Node-RED after schema migration ---"
+    if /etc/init.d/node-red start; then
+        echo "OK"
+        return 0
+    fi
+    echo "ERROR: Node-RED did not start after schema migration" >&2
+    return 1
+}
+
+checkpoint_live_db() {
+    if ! sqlite3 "$DB_PATH" "PRAGMA wal_checkpoint(TRUNCATE);" >/dev/null; then
+        echo "ERROR: failed to checkpoint $DB_PATH before migration" >&2
+        return 1
+    fi
+    if ! integrity="$(sqlite3 "$DB_PATH" "PRAGMA integrity_check;")"; then
+        echo "ERROR: failed to run integrity_check on $DB_PATH before migration" >&2
+        return 1
+    fi
+    if [ "$integrity" != "ok" ]; then
+        echo "ERROR: $DB_PATH integrity_check failed before migration: $integrity" >&2
+        return 1
+    fi
+}
+
+ensure_sqlite3_cli() {
+    if command -v sqlite3 >/dev/null 2>&1; then
+        return 0
+    fi
+    if command -v opkg >/dev/null 2>&1; then
+        echo "sqlite3 CLI absent; installing sqlite3-cli via opkg"
+        opkg update >/dev/null 2>&1 || true
+        opkg install sqlite3-cli >/dev/null 2>&1 || true
+    fi
+    if command -v sqlite3 >/dev/null 2>&1; then
+        return 0
+    fi
+    echo "ERROR: sqlite3 CLI unavailable and could not be installed; refusing schema migration" >&2
+    return 1
+}
+
+fetch_migration_runner() {
+    migrations_dir="$TMP_DIR/database/migrations/ordered"
+    mkdir -p "$migrations_dir" "$TMP_DIR/scripts" "$TMP_DIR/lib/osi-migrate"
+
+    fetch_required "Migration checksum manifest" \
+        "database/migrations/ordered/CHECKSUMS.json" \
+        "$migrations_dir/CHECKSUMS.json"
+
+    for migration in $(node -e "const fs=require('fs'); const manifest=JSON.parse(fs.readFileSync(process.argv[1], 'utf8')); for (const name of Object.keys(manifest).sort()) console.log(name);" "$migrations_dir/CHECKSUMS.json"); do
+        fetch_required "Migration $migration" \
+            "database/migrations/ordered/$migration" \
+            "$migrations_dir/$migration"
+    done
+
+    for script in \
+        baseline-existing-db.js \
+        repair-sync-outbox-v2.js \
+        migrate-cli.js \
+        semantic-schema-compare.js
+    do
+        fetch_required "Migration script $script" "scripts/$script" "$TMP_DIR/scripts/$script"
+    done
+
+    for module in \
+        backup.js \
+        fingerprints.js \
+        index.js \
+        ledger.js \
+        migrations-loader.js \
+        runner-iface.js \
+        runner.js \
+        sql-normalize.js
+    do
+        fetch_required "Migration runner module $module" "lib/osi-migrate/$module" "$TMP_DIR/lib/osi-migrate/$module"
+    done
+}
+
+run_schema_migration() {
+    echo "--- Edge schema migration runner ---"
     if [ ! -e "$DB_PATH" ]; then
         echo "SKIP: no live database at $DB_PATH"
         return 0
     fi
-    node <<'NODE'
-const fs = require('fs');
-const dbPath = '/data/db/farming.db';
-if (!fs.existsSync(dbPath)) {
-  console.log('SKIP: no live database at ' + dbPath);
-  process.exit(0);
-}
-const sqlite3 = require('/srv/node-red/node_modules/sqlite3');
-const db = new sqlite3.Database(dbPath);
-function run(sql) {
-  return new Promise((resolve, reject) => db.run(sql, (err) => err ? reject(err) : resolve()));
-}
-function all(sql) {
-  return new Promise((resolve, reject) => db.all(sql, (err, rows) => err ? reject(err) : resolve(rows || [])));
-}
-(async () => {
-  await run('PRAGMA busy_timeout=5000');
-  for (const sql of [
-    'ALTER TABLE devices ADD COLUMN dendro_ratio_at_retracted REAL',
-    'ALTER TABLE devices ADD COLUMN dendro_ratio_at_extended REAL'
-  ]) {
-    try {
-      await run(sql);
-    } catch (err) {
-      if (!/duplicate column name/i.test(String(err && err.message || err))) throw err;
-    }
-  }
-  await run(`UPDATE devices SET dendro_ratio_at_retracted = CASE
-    WHEN dendro_invert_direction = 1 THEN dendro_ratio_span
-    ELSE dendro_ratio_zero
-  END
-  WHERE dendro_ratio_at_retracted IS NULL
-    AND (dendro_ratio_zero IS NOT NULL OR dendro_ratio_span IS NOT NULL)`);
-  await run(`UPDATE devices SET dendro_ratio_at_extended = CASE
-    WHEN dendro_invert_direction = 1 THEN dendro_ratio_zero
-    ELSE dendro_ratio_span
-  END
-  WHERE dendro_ratio_at_extended IS NULL
-    AND (dendro_ratio_zero IS NOT NULL OR dendro_ratio_span IS NOT NULL)`);
-  const cols = await all('PRAGMA table_info(devices)');
-  const names = new Set(cols.map((row) => row.name));
-  if (!names.has('dendro_ratio_at_retracted') || !names.has('dendro_ratio_at_extended')) {
-    throw new Error('dendrometer calibration columns are still missing after deploy repair');
-  }
-  console.log('OK');
-  db.close();
-})().catch((err) => {
-  console.error(err && err.stack ? err.stack : err);
-  db.close();
-  process.exit(1);
-});
-NODE
-}
-
-ensure_zone_irrigation_calibration_schema() {
-    echo "--- Live zone irrigation calibration schema repair ---"
-    if [ ! -e "$DB_PATH" ]; then
-        echo "SKIP: no live database at $DB_PATH"
-        return 0
+    if ! ensure_sqlite3_cli; then
+        return 1
     fi
-    node <<'NODE'
-const fs = require('fs');
-const dbPath = '/data/db/farming.db';
-if (!fs.existsSync(dbPath)) {
-  console.log('SKIP: no live database at ' + dbPath);
-  process.exit(0);
-}
-const sqlite3 = require('/srv/node-red/node_modules/sqlite3');
-const db = new sqlite3.Database(dbPath);
-function run(sql) {
-  return new Promise((resolve, reject) => db.run(sql, (err) => err ? reject(err) : resolve()));
-}
-function all(sql) {
-  return new Promise((resolve, reject) => db.all(sql, (err, rows) => err ? reject(err) : resolve(rows || [])));
-}
-(async () => {
-  await run('PRAGMA busy_timeout=5000');
-  await run(`CREATE TABLE IF NOT EXISTS zone_irrigation_calibration (
-    zone_id                INTEGER PRIMARY KEY,
-    valve_device_eui       TEXT,
-    measured_flow_rate_lpm REAL,
-    measurement_method     TEXT,
-    measured_at            TEXT,
-    created_at             TEXT,
-    updated_at             TEXT
-  )`);
-  for (const sql of [
-    'ALTER TABLE zone_irrigation_calibration ADD COLUMN valve_device_eui TEXT',
-    'ALTER TABLE zone_irrigation_calibration ADD COLUMN measured_flow_rate_lpm REAL',
-    'ALTER TABLE zone_irrigation_calibration ADD COLUMN measurement_method TEXT',
-    'ALTER TABLE zone_irrigation_calibration ADD COLUMN measured_at TEXT',
-    'ALTER TABLE zone_irrigation_calibration ADD COLUMN created_at TEXT',
-    'ALTER TABLE zone_irrigation_calibration ADD COLUMN updated_at TEXT'
-  ]) {
-    try {
-      await run(sql);
-    } catch (err) {
-      if (!/duplicate column name/i.test(String(err && err.message || err))) throw err;
-    }
-  }
-  const cols = await all('PRAGMA table_info(zone_irrigation_calibration)');
-  const names = new Set(cols.map((row) => row.name));
-  for (const required of ['zone_id', 'measured_flow_rate_lpm', 'measurement_method', 'updated_at']) {
-    if (!names.has(required)) {
-      throw new Error('zone irrigation calibration column is still missing after deploy repair: ' + required);
-    }
-  }
-  console.log('OK');
-  db.close();
-})().catch((err) => {
-  console.error(err && err.stack ? err.stack : err);
-  db.close();
-  process.exit(1);
-});
-NODE
-}
-
-ensure_analysis_views_schema() {
-    echo "--- Live analysis views schema repair ---"
-    if [ ! -e "$DB_PATH" ]; then
-        echo "SKIP: no live database at $DB_PATH"
-        return 0
+    if ! command -v node >/dev/null 2>&1; then
+        echo "ERROR: node is required for schema migrations" >&2
+        return 1
     fi
-    node <<'NODE'
-const fs = require('fs');
-const dbPath = '/data/db/farming.db';
-if (!fs.existsSync(dbPath)) {
-  console.log('SKIP: no live database at ' + dbPath);
-  process.exit(0);
-}
-const sqlite3 = require('/srv/node-red/node_modules/sqlite3');
-const db = new sqlite3.Database(dbPath);
-function run(sql) {
-  return new Promise((resolve, reject) => db.run(sql, (err) => err ? reject(err) : resolve()));
-}
-function all(sql) {
-  return new Promise((resolve, reject) => db.all(sql, (err, rows) => err ? reject(err) : resolve(rows || [])));
-}
-(async () => {
-  await run('PRAGMA busy_timeout=5000');
-  await run(`CREATE TABLE IF NOT EXISTS analysis_views (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id INTEGER NOT NULL,
-    owner_user_uuid TEXT,
-    name TEXT NOT NULL,
-    view_json TEXT NOT NULL,
-    is_default INTEGER NOT NULL DEFAULT 0 CHECK (is_default IN (0,1)),
-    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
-  )`);
-  const cols = await all('PRAGMA table_info(analysis_views)');
-  const names = new Set(cols.map((row) => row.name));
-  for (const required of ['id', 'user_id', 'owner_user_uuid', 'name', 'view_json', 'is_default', 'created_at', 'updated_at']) {
-    if (!names.has(required)) {
-      throw new Error('analysis_views column is still missing after deploy repair: ' + required);
-    }
-  }
-  console.log('OK');
-  db.close();
-})().catch((err) => {
-  console.error(err && err.stack ? err.stack : err);
-  db.close();
-  process.exit(1);
-});
-NODE
-}
 
-ensure_chameleon_schema() {
-    echo "--- Live Chameleon SWT schema repair ---"
-    if [ ! -e "$DB_PATH" ]; then
-        echo "SKIP: no live database at $DB_PATH"
-        return 0
+    fetch_migration_runner
+
+    backup_dir="${MIGRATE_BACKUP_DIR:-/data/backups/migrate}"
+    mkdir -p "$backup_dir"
+
+    node_red_restart_needed=1
+    trap 'restart_node_red || true; cleanup' EXIT INT TERM
+
+    echo "--- Stop Node-RED for schema migration ---"
+    if /etc/init.d/node-red stop; then
+        echo "OK"
+    else
+        echo "ERROR: failed to stop Node-RED before schema migration" >&2
+        return 1
     fi
-    node <<'NODE'
-const fs = require('fs');
-const dbPath = '/data/db/farming.db';
-if (!fs.existsSync(dbPath)) {
-  console.log('SKIP: no live database at ' + dbPath);
-  process.exit(0);
-}
-const sqlite3 = require('/srv/node-red/node_modules/sqlite3');
-const db = new sqlite3.Database(dbPath);
-function run(sql) {
-  return new Promise((resolve, reject) => db.run(sql, (err) => err ? reject(err) : resolve()));
-}
-function all(sql) {
-  return new Promise((resolve, reject) => db.all(sql, (err, rows) => err ? reject(err) : resolve(rows || [])));
-}
-(async () => {
-  await run('PRAGMA busy_timeout=5000');
-  // V42 — kept columns. swt_{1,2,3} on device_data and depth/enabled on devices.
-  for (const sql of [
-    'ALTER TABLE devices ADD COLUMN chameleon_enabled INTEGER DEFAULT 0',
-    'ALTER TABLE devices ADD COLUMN chameleon_swt1_depth_cm REAL',
-    'ALTER TABLE devices ADD COLUMN chameleon_swt2_depth_cm REAL',
-    'ALTER TABLE devices ADD COLUMN chameleon_swt3_depth_cm REAL',
-    'ALTER TABLE device_data ADD COLUMN swt_1 REAL',
-    'ALTER TABLE device_data ADD COLUMN swt_2 REAL',
-    'ALTER TABLE device_data ADD COLUMN swt_3 REAL'
-  ]) {
-    try {
-      await run(sql);
-    } catch (err) {
-      if (!/duplicate column name/i.test(String(err && err.message || err))) throw err;
-    }
-  }
-  await run('UPDATE devices SET chameleon_enabled = 0 WHERE chameleon_enabled IS NULL');
-
-  // V42 — global calibration tables. Calibration values are intrinsic to the
-  // Chameleon hardware (keyed by array_id) and sourced from via.farm via the
-  // cloud sync endpoint. The miss table is a 24h negative cache.
-  await run(`CREATE TABLE IF NOT EXISTS chameleon_calibrations (
-    array_id                TEXT PRIMARY KEY,
-    sensor_id               TEXT NOT NULL,
-    sensor1_a               REAL NOT NULL,
-    sensor1_b               REAL NOT NULL,
-    sensor1_c               REAL NOT NULL,
-    sensor1_r2              REAL,
-    sensor2_a               REAL NOT NULL,
-    sensor2_b               REAL NOT NULL,
-    sensor2_c               REAL NOT NULL,
-    sensor2_r2              REAL,
-    sensor3_a               REAL NOT NULL,
-    sensor3_b               REAL NOT NULL,
-    sensor3_c               REAL NOT NULL,
-    sensor3_r2              REAL,
-    test_rig_run_start_date TEXT,
-    source                  TEXT NOT NULL,
-    fetched_at              TEXT NOT NULL
-  )`);
-  await run('CREATE INDEX IF NOT EXISTS idx_chameleon_calibrations_sensor_id ON chameleon_calibrations(sensor_id)');
-  await run(`CREATE TABLE IF NOT EXISTS chameleon_calibration_misses (
-    array_id   TEXT PRIMARY KEY,
-    last_tried TEXT NOT NULL,
-    reason     TEXT
-  )`);
-
-  // V42 — calibration_status, swt_1/2/3, and chameleon_array_id additions.
-  for (const sql of [
-    'ALTER TABLE chameleon_readings ADD COLUMN calibration_status TEXT',
-    'ALTER TABLE chameleon_readings ADD COLUMN swt_1 REAL',
-    'ALTER TABLE chameleon_readings ADD COLUMN swt_2 REAL',
-    'ALTER TABLE chameleon_readings ADD COLUMN swt_3 REAL',
-    'ALTER TABLE devices ADD COLUMN chameleon_array_id TEXT'
-  ]) {
-    try {
-      await run(sql);
-    } catch (err) {
-      if (!/duplicate column name/i.test(String(err && err.message || err))) throw err;
-    }
-  }
-
-  // V43 — data_invalid and comp_pending for Chameleon V2 firmware decoding.
-  for (const sql of [
-    'ALTER TABLE chameleon_readings ADD COLUMN data_invalid INTEGER DEFAULT 0',
-    'ALTER TABLE chameleon_readings ADD COLUMN comp_pending INTEGER DEFAULT 0'
-  ]) {
-    try {
-      await run(sql);
-    } catch (err) {
-      if (!/duplicate column name/i.test(String(err && err.message || err))) throw err;
-    }
-  }
-
-  // V42 — drop per-device coefficient columns. The bundled DB no longer has
-  // them; live DBs from pre-V42 builds must drop them so the new flows.json
-  // queries don't try to SELECT non-existent columns. SQLite >= 3.35 supports
-  // ALTER TABLE ... DROP COLUMN; older versions will error and we leave the
-  // columns in place (they're unused but not harmful).
-  for (const name of [
-    'chameleon_swt1_a','chameleon_swt1_b','chameleon_swt1_c',
-    'chameleon_swt2_a','chameleon_swt2_b','chameleon_swt2_c',
-    'chameleon_swt3_a','chameleon_swt3_b','chameleon_swt3_c'
-  ]) {
-    try {
-      await run(`ALTER TABLE devices DROP COLUMN ${name}`);
-    } catch (err) {
-      const msg = String(err && err.message || err);
-      if (/no such column/i.test(msg) || /near "DROP": syntax error/i.test(msg)) continue;
-      throw err;
-    }
-  }
-
-  // V42 — NULL device_data.swt_* rows that join a chameleon reading. Values
-  // computed from the now-dropped per-device coefficients are no longer trusted.
-  // Local backfill repopulates these once calibration arrives from osi-server.
-  // Idempotent: NULL → NULL is a no-op on repeat deploys.
-  await run(`UPDATE device_data
-    SET swt_1 = NULL, swt_2 = NULL, swt_3 = NULL
-    WHERE EXISTS (
-      SELECT 1 FROM chameleon_readings cr
-        WHERE cr.deveui = device_data.deveui
-          AND cr.recorded_at = device_data.recorded_at
-    )
-    AND (swt_1 IS NOT NULL OR swt_2 IS NOT NULL OR swt_3 IS NOT NULL)`);
-
-  const deviceNames = new Set((await all('PRAGMA table_info(devices)')).map((row) => row.name));
-  const dataNames = new Set((await all('PRAGMA table_info(device_data)')).map((row) => row.name));
-  const readingsNames = new Set((await all('PRAGMA table_info(chameleon_readings)')).map((row) => row.name));
-  const tableNames = new Set((await all("SELECT name FROM sqlite_master WHERE type = 'table'")).map((row) => row.name));
-
-  for (const name of [
-    'chameleon_enabled',
-    'chameleon_swt1_depth_cm',
-    'chameleon_swt2_depth_cm',
-    'chameleon_swt3_depth_cm',
-    'chameleon_array_id'
-  ]) {
-    if (!deviceNames.has(name)) throw new Error('Chameleon devices column is still missing after deploy repair: ' + name);
-  }
-  for (const name of ['swt_1', 'swt_2', 'swt_3']) {
-    if (!dataNames.has(name)) throw new Error('Chameleon device_data column is still missing after deploy repair: ' + name);
-  }
-  for (const name of ['calibration_status', 'swt_1', 'swt_2', 'swt_3', 'data_invalid', 'comp_pending']) {
-    if (!readingsNames.has(name)) throw new Error('chameleon_readings.' + name + ' is still missing after deploy repair');
-  }
-  for (const name of ['chameleon_calibrations', 'chameleon_calibration_misses']) {
-    if (!tableNames.has(name)) throw new Error('Chameleon global table is still missing after deploy repair: ' + name);
-  }
-  console.log('OK');
-  db.close();
-})().catch((err) => {
-  console.error(err && err.stack ? err.stack : err);
-  db.close();
-  process.exit(1);
-});
-NODE
-}
-
-ensure_gateway_health_schema() {
-    echo "--- Live gateway health schema (ordered migration 0002) ---"
-    if [ ! -e "$DB_PATH" ]; then
-        echo "SKIP: no live database at $DB_PATH"
-        return 0
+    stop_wait=0
+    while command -v pgrep >/dev/null 2>&1 && pgrep -f 'node-red' >/dev/null 2>&1 && [ "$stop_wait" -lt 30 ]; do
+        sleep 1
+        stop_wait=$((stop_wait + 1))
+    done
+    if command -v pgrep >/dev/null 2>&1 && pgrep -f 'node-red' >/dev/null 2>&1; then
+        echo "ERROR: Node-RED did not stop within 30s; refusing schema migration" >&2
+        return 1
     fi
-    fetch "database/migrations/ordered/0002__gateway_health.sql" "$TMP_DIR/0002__gateway_health.sql"
-    OSI_MIGRATION_SQL="$TMP_DIR/0002__gateway_health.sql" node <<'NODE'
-const fs = require('fs');
-const dbPath = '/data/db/farming.db';
-if (!fs.existsSync(dbPath)) {
-  console.log('SKIP: no live database at ' + dbPath);
-  process.exit(0);
-}
-// Single source of DDL truth: execute the ordered-migration file itself.
-// Guard: only additive migrations may be applied through this deploy hook.
-const sql = fs.readFileSync(process.env.OSI_MIGRATION_SQL, 'utf8');
-if (!/^--\s*risk:\s*additive\s*(\r?\n|$)/.test(sql)) {
-  console.error('ERROR: refusing to apply a non-additive migration via deploy repair');
-  process.exit(1);
-}
-const sqlite3 = require('/srv/node-red/node_modules/sqlite3');
-const db = new sqlite3.Database(dbPath);
-function run(s) { return new Promise((resolve, reject) => db.run(s, (err) => err ? reject(err) : resolve())); }
-function exec(s) { return new Promise((resolve, reject) => db.exec(s, (err) => err ? reject(err) : resolve())); }
-function all(s) { return new Promise((resolve, reject) => db.all(s, (err, rows) => err ? reject(err) : resolve(rows || []))); }
-(async () => {
-  await run('PRAGMA busy_timeout=5000');
-  await exec(sql);
-  const tables = new Set((await all("SELECT name FROM sqlite_master WHERE type = 'table'")).map((r) => r.name));
-  for (const t of ['gateway_health_samples', 'gateway_health_hourly']) {
-    if (!tables.has(t)) throw new Error('gateway health table still missing after deploy repair: ' + t);
-  }
-  console.log('OK');
-  db.close();
-})().catch((err) => {
-  console.error(err && err.stack ? err.stack : err);
-  db.close();
-  process.exit(1);
-});
-NODE
-}
 
-ensure_improvement_requests_schema() {
-    echo "--- Live improvement requests schema (ordered migrations 0005-0006) ---"
-    if [ ! -e "$DB_PATH" ]; then
-        echo "SKIP: no live database at $DB_PATH"
-        return 0
+    if ! checkpoint_live_db; then
+        return 1
     fi
-    fetch "database/migrations/ordered/0005__field_work_requests.sql" "$TMP_DIR/0005__field_work_requests.sql"
-    fetch "database/migrations/ordered/0006__improvement_request_contact_email.sql" "$TMP_DIR/0006__improvement_request_contact_email.sql"
-    OSI_MIGRATION_SQL_0005="$TMP_DIR/0005__field_work_requests.sql" \
-    OSI_MIGRATION_SQL_0006="$TMP_DIR/0006__improvement_request_contact_email.sql" node <<'NODE'
-const fs = require('fs');
-const dbPath = '/data/db/farming.db';
-if (!fs.existsSync(dbPath)) {
-  console.log('SKIP: no live database at ' + dbPath);
-  process.exit(0);
-}
-// Single source of DDL truth: execute the ordered-migration file itself.
-// Guard: only additive migrations may be applied through this deploy hook.
-const migration0005 = fs.readFileSync(process.env.OSI_MIGRATION_SQL_0005, 'utf8');
-const migration0006 = fs.readFileSync(process.env.OSI_MIGRATION_SQL_0006, 'utf8');
-for (const sql of [migration0005, migration0006]) {
-  if (!/^--\s*risk:\s*additive\s*(\r?\n|$)/.test(sql)) {
-    console.error('ERROR: refusing to apply a non-additive migration via deploy repair');
-    process.exit(1);
-  }
-}
-const sqlite3 = require('/srv/node-red/node_modules/sqlite3');
-const db = new sqlite3.Database(dbPath);
-function run(s) { return new Promise((resolve, reject) => db.run(s, (err) => err ? reject(err) : resolve())); }
-function exec(s) { return new Promise((resolve, reject) => db.exec(s, (err) => err ? reject(err) : resolve())); }
-function all(s) { return new Promise((resolve, reject) => db.all(s, (err, rows) => err ? reject(err) : resolve(rows || []))); }
-(async () => {
-  await run('PRAGMA busy_timeout=5000');
-  await exec(migration0005);
-  const tables = new Set((await all("SELECT name FROM sqlite_master WHERE type = 'table'")).map((r) => r.name));
-  if (!tables.has('improvement_requests')) {
-    throw new Error('improvement_requests table still missing after deploy repair');
-  }
-  const columns = new Set((await all("PRAGMA table_info(improvement_requests)")).map((r) => r.name));
-  if (!columns.has('contact_email')) {
-    await exec(migration0006);
-  } else {
-    const triggerSql = migration0006.slice(migration0006.indexOf('DROP TRIGGER'));
-    await exec(triggerSql);
-  }
-  const finalColumns = new Set((await all("PRAGMA table_info(improvement_requests)")).map((r) => r.name));
-  if (!finalColumns.has('contact_email')) {
-    throw new Error('improvement_requests.contact_email still missing after deploy repair');
-  }
-  const triggers = await all("SELECT lower(sql) AS sql FROM sqlite_master WHERE type = 'trigger' AND name = 'trg_improvement_requests_outbox_ai'");
-  if (!triggers.length || !String(triggers[0].sql || '').includes('contact_email')) {
-    throw new Error('improvement_requests outbox trigger missing contact_email after deploy repair');
-  }
-  console.log('OK');
-  db.close();
-})().catch((err) => {
-  console.error(err && err.stack ? err.stack : err);
-  db.close();
-  process.exit(1);
-});
-NODE
+    if ! ledger_present="$(sqlite3 "$DB_PATH" "SELECT 1 FROM sqlite_master WHERE type='table' AND name='schema_migrations' LIMIT 1;")"; then
+        echo "ERROR: failed to inspect schema_migrations ledger before migration" >&2
+        return 1
+    fi
+    ledger_rows="0"
+    if [ "$ledger_present" = "1" ]; then
+        if ! ledger_rows="$(sqlite3 "$DB_PATH" "SELECT COUNT(*) FROM schema_migrations;")"; then
+            echo "ERROR: failed to inspect schema_migrations rows before migration" >&2
+            return 1
+        fi
+    fi
+    if [ "$ledger_rows" != "0" ]; then
+        echo "SKIP: schema_migrations ledger already has rows"
+    else
+        if ! node "$TMP_DIR/scripts/repair-sync-outbox-v2.js" "$DB_PATH"; then
+            return 1
+        fi
+        if ! node "$TMP_DIR/scripts/baseline-existing-db.js" "$DB_PATH" --migrations-dir "$migrations_dir"; then
+            return 1
+        fi
+    fi
+    if ! checkpoint_live_db; then
+        return 1
+    fi
+
+    if node "$TMP_DIR/scripts/migrate-cli.js" "$DB_PATH" --backup-dir "$backup_dir" --migrations-dir "$migrations_dir"; then
+        if ! restart_node_red; then
+            restore_deploy_trap
+            return 1
+        fi
+        restore_deploy_trap
+        echo "OK"
+        return 0
+    else
+        migration_rc=$?
+    fi
+
+    if [ "$migration_rc" = "3" ]; then
+        echo "ERROR: migration failed and backup restore integrity check failed; leaving Node-RED stopped" >&2
+        node_red_restart_needed=0
+        restore_deploy_trap
+        return 1
+    fi
+    echo "ERROR: schema migration failed; Node-RED will be restarted before deploy exits" >&2
+    return 1
 }
 
 echo "=== OSI OS Deploy ==="
@@ -595,9 +365,17 @@ fi
 rm -f /etc/init.d/osi-gateway-gps /usr/bin/osi-gateway-gps.js
 echo "OK"
 
-fetch_required "flows.json" \
-    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/flows.json" \
-    "/srv/node-red/flows.json"
+echo "--- Deploy payload swap helper ---"
+fetch "scripts/deploy-payload-swap.js" "$SWAP_JS"
+same_fs_or_die
+echo "OK"
+
+echo "--- flows.json (staged payload; flip deferred to post-migration) ---"
+STAGED_FLOWS="$TMP_DIR/flows.json"
+fetch "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/flows.json" "$STAGED_FLOWS"
+swap_call stagePayload "$DEPLOY_STAMP" "$STAGED_FLOWS" >/dev/null
+PREV_STAMP="$(swap_call currentStamp || true)"
+echo "OK: staged payloads/$DEPLOY_STAMP (current: ${PREV_STAMP:-none}; flip deferred)"
 
 seed_db_if_missing
 
@@ -640,6 +418,22 @@ fetch_required "osi-dendro-helper package.json" \
 fetch_required "osi-dendro-helper index.js" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-dendro-helper/index.js" \
     "/srv/node-red/osi-dendro-helper/index.js"
+
+fetch_required "osi-dendro-analytics package.json" \
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-dendro-analytics/package.json" \
+    "/srv/node-red/osi-dendro-analytics/package.json"
+
+fetch_required "osi-dendro-analytics index.js" \
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-dendro-analytics/index.js" \
+    "/srv/node-red/osi-dendro-analytics/index.js"
+
+fetch_required "osi-zone-env package.json" \
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-zone-env/package.json" \
+    "/srv/node-red/osi-zone-env/package.json"
+
+fetch_required "osi-zone-env index.js" \
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-zone-env/index.js" \
+    "/srv/node-red/osi-zone-env/index.js"
 
 fetch_required "osi-history-helper package.json" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-history-helper/package.json" \
@@ -719,12 +513,7 @@ else
     exit 1
 fi
 
-ensure_dendro_schema
-ensure_zone_irrigation_calibration_schema
-ensure_analysis_views_schema
-ensure_chameleon_schema
-ensure_gateway_health_schema
-ensure_improvement_requests_schema
+run_schema_migration || exit 1
 
 fix_mosquitto_ownership() {
     echo "--- Mosquitto ownership ---"
@@ -758,6 +547,42 @@ fix_mosquitto_ownership() {
 
 fix_mosquitto_ownership
 
+echo "--- Flip payload + local health self-check + auto-rollback (5.3 / DD10) ---"
+swap_call flipTo "$DEPLOY_STAMP" >/dev/null
+echo "OK: flipped /srv/node-red/flows.json -> payloads/$DEPLOY_STAMP"
+
+/etc/init.d/node-red restart || true
+
+PROBE_OK=1
+if pgrep -f 'node-red' >/dev/null 2>&1; then
+    sleep 5
+    if wget -q -O /dev/null --spider "http://127.0.0.1:1880/gui" 2>/dev/null; then
+        echo "OK: local health self-check PASSED (Node-RED alive, /gui reachable)"
+        PROBE_OK=0
+    else
+        echo "WARN: Node-RED process alive but /gui not reachable after 5s" >&2
+    fi
+else
+    echo "ALERT: Node-RED process not found after restart" >&2
+fi
+
+if [ "$PROBE_OK" = "0" ]; then
+    echo "OK: committing payload $DEPLOY_STAMP"
+    swap_call prunePayloads "$PAYLOAD_KEEP_N" >/dev/null
+else
+    echo "ALERT: local health self-check FAILED - AUTO-ROLLING-BACK the flows payload" >&2
+    if [ -n "${PREV_STAMP:-}" ]; then
+        swap_call flipTo "$PREV_STAMP" >/dev/null
+        /etc/init.d/node-red restart || true
+        echo "ROLLED BACK: flows.json -> payloads/$PREV_STAMP; Node-RED restarted on last-known-good payload" >&2
+        echo "NOTE: any committed DB migration is NOT auto-undone (DD10); restore is an operator call via 1.B1 backup." >&2
+        echo "NOTE: run deploy-canary-gate.js from your operator machine for the full cloud verdict." >&2
+        exit 1
+    fi
+    echo "ERROR: no previous payload to roll back to. Payload $DEPLOY_STAMP left live; investigate." >&2
+    exit 1
+fi
+
 echo "--- React GUI ---"
 fetch "react_gui.tar.gz" "$TMP_DIR/react_gui.tar.gz"
 mkdir -p /usr/lib/node-red/gui
@@ -769,9 +594,10 @@ tar xzf "$TMP_DIR/react_gui.tar.gz" -C /usr/lib/node-red/gui/
 echo "OK"
 
 echo ""
-echo "=== Deploy complete. Next steps: ==="
-echo "  1. Restart Node-RED:  /etc/init.d/node-red restart"
-echo "  2. Open the UI:       http://<device-ip>:1880/gui"
+echo "=== Deploy complete. ==="
+echo "  Payload:  /srv/node-red/payloads/$DEPLOY_STAMP (flipped + local health self-checked)"
+echo "  UI:       http://<device-ip>:1880/gui"
+echo "  Rollback: automatic for payload failure; committed DB migration restore is the 1.B1 operator path, not auto."
 echo ""
 echo "  NOTE: ChirpStack provisioning runs automatically on first boot via"
 echo "        osi-bootstrap (START=99).  No manual bootstrap step needed on"

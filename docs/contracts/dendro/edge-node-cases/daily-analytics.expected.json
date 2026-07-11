@@ -1,0 +1,92 @@
+{
+  "fixedNow": "2026-07-11T12:00:00.000Z",
+  "resultPayload": {
+    "success": true,
+    "date": "2026-07-10",
+    "zones": [
+      {
+        "zone_id": 1,
+        "zone": "Fixture Zone",
+        "date": "2026-07-10",
+        "stress": "mild",
+        "action": "decrease_10",
+        "usable_tree_count": 2,
+        "low_confidence_tree_count": 0,
+        "outlier_filtered_tree_count": 0,
+        "rain_suppression": false,
+        "recovery_verification": false
+      }
+    ]
+  },
+  "nodeLogs": [
+    "Zone Fixture Zone [2026-07-10]: mild → decrease_10"
+  ],
+  "nodeWarnings": [],
+  "finalStatus": {
+    "fill": "green",
+    "shape": "dot",
+    "text": "2026-07-10 — 1 zone(s) v5"
+  },
+  "dendrometer_daily": [
+    {
+      "deveui": "DENDRO0000000001",
+      "date": "2026-07-10",
+      "d_max_um": 124,
+      "d_min_um": 92,
+      "mds_um": 32,
+      "twd_night_um": 0,
+      "twd_day_um": 32,
+      "envelope_ref_um": 124,
+      "twd_method": "stepwise",
+      "confidence_score": 1,
+      "low_confidence_day": 0,
+      "tree_state_v5": "none",
+      "stress_level": "none",
+      "data_quality": "insufficient",
+      "valid_readings_count": 8
+    },
+    {
+      "deveui": "DENDRO0000000002",
+      "date": "2026-07-10",
+      "d_max_um": 120,
+      "d_min_um": 58,
+      "mds_um": 62,
+      "twd_night_um": 0,
+      "twd_day_um": 62,
+      "envelope_ref_um": 120,
+      "twd_method": "stepwise",
+      "confidence_score": 1,
+      "low_confidence_day": 0,
+      "tree_state_v5": "mild",
+      "stress_level": "mild",
+      "data_quality": "insufficient",
+      "valid_readings_count": 8
+    }
+  ],
+  "zone_daily_recommendations": [
+    {
+      "zone_id": 1,
+      "date": "2026-07-10",
+      "zone_stress_summary": "mild",
+      "rainfall_mm": 0,
+      "water_delivered_liters": 120,
+      "irrigation_action": "decrease_10",
+      "action_reasoning": "No stress ≥2 of 3 days",
+      "vpd_max_kpa": 2.334,
+      "vpd_source": "local_sensor",
+      "usable_tree_count": 2,
+      "low_confidence_tree_count": 0,
+      "outlier_filtered_tree_count": 0,
+      "zone_confidence_score": 1
+    }
+  ],
+  "zone_irrigation_state": [
+    {
+      "zone_id": 1,
+      "rain_suppression_active": 0,
+      "recovery_verification_active": 0,
+      "consecutive_increases": 0,
+      "current_volume_liters": 0
+    }
+  ]
+}

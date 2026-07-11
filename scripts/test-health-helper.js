@@ -29,7 +29,10 @@ const PUBLIC_HEALTH_KEYS = [
   'sync_oldest_age_s',
   'sync_rejected',
   'sync_dirty_pending',
-  'disk_free_pct'
+  'disk_free_pct',
+  'crash_count',
+  'crash_looping',
+  'health_state'
 ];
 
 const ALL_NULL_HEALTH = Object.fromEntries(PUBLIC_HEALTH_KEYS.map((key) => [key, null]));

@@ -18,7 +18,12 @@
       "cardsFailed": "History cards failed to load.",
       "retryCards": "Retry cards"
     },
+    "export": {
+      "open": "Exportieren",
+      "title": "Daten exportieren"
+    },
     "desktop": {
+      "railLabel": "Karten",
       "toolbarTitle": "Werkzeugleiste",
       "modeLabel": "Desktop-Modus",
       "modeFocus": "Fokus",

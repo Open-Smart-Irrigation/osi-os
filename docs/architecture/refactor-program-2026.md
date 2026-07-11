@@ -13,7 +13,7 @@ This is the **program map**, not a spec. Each item below is a charter line: goal
 
 1. **The strangler extraction has already started, without guardrails.** `conf/.../node-red/osi-history-helper/` is a real extracted module (~105 KB + 18.7 KB) loaded from function nodes via a **bare absolute `require`** — which is exactly the silent-brick risk of issue #99, live in production paths, with **no co-located tests**. The program is "ratchet + test what exists, then extend," not "start extracting."
 2. **The channel manifest already exists.** `web/react-gui/src/channels/channels.json` (key/unit/edgeField/serverField/legacyAliases/exportable/deprecated) is CI-parity-checked by `verify-channel-manifest-parity.js`. The narrow-waist writer's backbone is built; what's missing is the writer and the round-trip verifier.
-3. **flows.json:** 564 nodes, 232 function nodes, **1.017 MB embedded JS** (scoreboard baseline). Largest: History API Router 74.5 KB, Sync Init 72.9 KB (frozen), Zone Env Summary 65.9 KB, Daily Dendro 56 KB, Run Force Sync 44.6 KB.
+3. **flows.json:** 572 nodes, 235 function nodes, **1,064,794 func-chars/profile embedded JS** (scoreboard baseline measured at `origin/main` `5e04b8a2`, 2026-07-10). Largest: History API Router 76,225 chars, Sync Init 73,162 chars (frozen), Zone Env Summary 67,317 chars, Daily Dendro 57,047 chars, Run Force Sync 45,590 chars.
 4. **A destructive migration is merged and undeliverable.** `0004` (fixes farmer-facing #92) cannot reach live gateways: `deploy.sh`'s migration hook is gated to `-- risk: additive` only. This satisfied the ownership ADR's stated promotion trigger for Option B (issue #88).
 5. **osi-server has zero CI** (`.github/` holds only a PR template). Tests are Mockito-only; **no test runs against Postgres or Flyway** — the code mutating farm-mirror data (sync apply) is untested against a real database.
 6. **A poison-pill batch hazard is live in sync ingest.** `EdgeSyncService.applyEventsV2` (93 KB god-file) wraps the whole batch in one `@Transactional`; one poison event marks it rollback-only and the batch fails repeatedly, losing dedup rows for events that succeeded. A weeks-stale gateway replaying backlog — i.e. **the Uganda catch-up (#87)** — is the trigger scenario.
@@ -27,8 +27,8 @@ This is the **program map**, not a spec. Each item below is a charter line: goal
 |---|---|---|
 | DD1 | **Keep Node-RED as the edge runtime; strangler-extract, never rewrite.** | Pi 5 footprint is a non-issue; the liability is untested JS-in-JSON, not the runtime. A rewrite throws away field-proven logic for no farmer value. Unanimous. |
 | DD2 | **Single-choke-point `osi-lib` loader with fail-visible quarantine** for all extracted modules (settings.js `functionGlobalContext` injection; load failure → typed error + `error_counts` + defined 503, never a dead node). Retires #99. **Precondition for every extraction.** | The bare-`require` brick is the failure that turns an improvement into a field outage. |
-| DD3 | **Three CI ratchets** (baseline-file style, like the existing silent-catch/stray-DDL ratchets): per-node size ceiling (no node may grow; new ≤4 KB), total-embedded-JS scoreboard (may only decrease from 1,017,468), new-node-must-be-thin heuristic. | Converts extraction from aspiration into a merge gate — the highest-leverage, lowest-cost item in the program. |
-| DD4 | **Extraction order: Daily Dendro Analytics → Zone Env Summary → History API Router; sync nodes only inside Option B.** "Done" per seam = pure module + co-located `node --test` green in CI + adapter <~2 KB + golden vectors captured **before** extraction + loads via DD2. | Start where the harness is cheapest and blast radius smallest; prove the pattern twice before the HTTP-shaped monster. |
+| DD3 | **Three CI ratchets** (baseline-file style, like the existing silent-catch/stray-DDL ratchets): per-node size ceiling (no node may grow; new ≤4 KB), total-embedded-JS scoreboard (may only decrease; measured baseline 1,064,794 func-chars/profile @ `5e04b8a2`, 2026-07-10; the earlier 1,017,468 and plan-write 1,039,554 figures predated current node growth), new-node-must-be-thin heuristic. | Converts extraction from aspiration into a merge gate — the highest-leverage, lowest-cost item in the program. |
+| DD4 | **Extraction order: Daily Dendro Analytics → Zone Env Summary → History API Router; sync nodes only inside Option B.** "Done" per seam = pure module + co-located `node --test` green in CI + adapter <~2 KB + golden vectors captured **before** extraction + loads via DD2. For I/O-heavy seams (daily batch / HTTP-shaped), the adapter-size bar means zero inline compute/business logic remains; residual DDL + SQL + HTTP orchestration may exceed 2 KB. | Start where the harness is cheapest and blast radius smallest; prove the pattern twice before the HTTP-shaped monster. |
 | DD5 | **Dendro duplication: contract, don't deduplicate.** Shared golden-vector fixtures in `docs/contracts/`; both repos run them in their own frameworks. `channels.json` becomes the single field-name truth consumed by both builds. | Edge (live, offline JS) and server (forecast Python) legitimately differ; one implementation couples release cadences and breaks offline-first. Divergence should be *detected*, not *prevented*. |
 | DD6 | **Narrow-waist ingest:** pure `normalize(decoded, meta) → {channels}` per device + ONE manifest-driven writer with a **closed allow-list** (unknown channels → dead-letter/quarantine, never dropped, never auto-DDL) + `verify-device-integration.js` asserting the full codec→normalize→write round trip in CI. **MClimate T-Valve (#18) is the second consumer that justifies the abstraction — build it there first.** | The manifest is a new blast-radius surface; the allow-list + CI type-check against the real schema contains it. |
 | DD7 | **Existing-device retrofit: shadow-parity evidence, not calendar time.** Generic writer runs in shadow on demos (old path writes; new path diffs). Cutover bar: ≥14 days or ≥500 live LSN50 uplinks/gateway, zero row diffs, zero dead-letters. Rest of fleet: convert-on-touch only; two writers coexisting is acceptable. | Measures actual payload variance instead of waiting a season; never risks live devices on an unproven abstraction. |
@@ -53,7 +53,7 @@ This is the **program map**, not a spec. Each item below is a charter line: goal
 | Item | Repo | Size | Depends on | Mode |
 |---|---|---|---|---|
 | 0.1 Deploy merged flows (error counter, contract_version) to both demo gateways | osi-os live-ops | S | — | runbook |
-| 0.2 Heartbeat canary gate: deploy tooling refuses to advance until target gateway reports N healthy heartbeats (schema_sig = target, error_count flat, disk_free OK) | osi-os tooling | M | heartbeat #100 (done) | spec+plan |
+| 0.2 Heartbeat canary gate: deploy tooling refuses to advance until target gateway reports N healthy heartbeats (schema_sig = target, error_count flat, disk_free OK) | osi-os tooling | M | heartbeat #100 (done) | spec+plan - done: `scripts/deploy-canary-gate.js` + runbook, PR #118; companion osi-server sync-health pass-through PR #57 |
 | 0.3 **Option B Stage 0**: canonicalize fleet schema — fold `ensure_*`/repair drift into seed + ordered migrations, retire the `writable_schema` surgery (#93), establish the canonical reference such that replay == live-after-repair | osi-os | L | — | spec+plan (start from [`2026-07-05-option-b-boot-path-cutover.md`](../superpowers/plans/2026-07-05-option-b-boot-path-cutover.md)) |
 
 ### Phase 1 — Guardrails ∥ Delivery (weeks 2–6, two parallel tracks)
@@ -63,10 +63,11 @@ This is the **program map**, not a spec. Each item below is a charter line: goal
 | Item | Size | Depends on | Mode |
 |---|---|---|---|
 | 1.A1 `osi-lib` single-choke-point loader + quarantine (DD2); migrate `osi-history-helper`'s bare require onto it — **kills #99** — done: osi-lib loader + quarantine, 3 nodes migrated, verify-helper-registration + bare-require ratchet, PR #117 | M | — | spec+plan |
-| 1.A2 Ratchet trio (DD3): node-size ceiling, total-JS scoreboard, thin-node rule | S | — | direct |
-| 1.A3 Backfill `node --test` for the existing `osi-history-helper` (pattern proof for DD4's "done") | M | 1.A1 | direct |
-| 1.A4 Crash-loop escalation: distinct heartbeat health state + persistent local flag after N respawns | S | — | direct |
-| 1.A5 `sync_outbox` retention/prune + size cap with per-aggregate drop policy (DD18) | M | — | spec+plan (drop policy is a data decision) |
+| 1.A2 Ratchet trio (DD3): node-size ceiling, total-JS scoreboard, thin-node rule — done: `verify-flows-size-ratchet` (per-node ceiling + total scoreboard + thin-node heuristic), git-anchored, both profiles, PR #121 | S | — | direct |
+| 1.A3 Backfill `node --test` for the existing `osi-history-helper` (pattern proof for DD4's "done") — done: 27 index.test.js + 3 analysis.test.js cases, Fable-reviewed edge cases, CI-wired. **Residual (P2, adjudicated 2026-07-11):** co-located suite is 446 lines; the 2,141-line `scripts/test-history-helper.js` was not retired and carries all rollup-path coverage. Finish relocation at next helper touch (Option A adopted). | M | 1.A1 | direct |
+| 1.A4 Crash-loop escalation: distinct heartbeat health state + persistent local flag after N respawns — done: persistent `/data/node-red-crash-count`, `registerStartup`/`readCrashState` with NTP guard + atomic write + decay, flows.json integration (startup inject + heartbeat whitelist + errorCount threading), Fable-reviewed (M1 first-heartbeat fallback, M2 decay), deployed+verified on kaba100 | S | — | direct |
+| 1.A5 `sync_outbox` retention/prune + size cap with per-aggregate drop policy (DD18) — done: size cap (50k, env-overridable), telemetry/protected classification, batched eviction, eviction index (0008), Fable-reviewed (M1 false-alarm fix, S3 failure visibility), retention days adjudicated at 30 | M | — | spec+plan |
+| 1.A6 `osi-history-helper` rollup hardening: `rollupRowsToResult` invariant guard + contract docs, multi-device merged-scope golden tests, coverage-denominator clamp at `now`, expose `aggregation.source` on card-data payload. Plan: `docs/superpowers/plans/2026-07-11-rollup-hardening.md`. **Hard ordering: after mobile-plan Task 5; before 4.2 golden-vector capture.** | M | 1.A3 | spec+plan |
 
 **Track B — delivery capability + cloud hardening:**
 
@@ -74,24 +75,24 @@ This is the **program map**, not a spec. Each item below is a charter line: goal
 |---|---|---|---|---|
 | 1.B1 **Option B Stage 1**: deploy-time runner invocation per DD9 (lift additive-only gate for ledger-driven migrations; restore-on-failure; rehearsed on gateway DB copies) | osi-os | L | 0.3 | spec+plan |
 | 1.B2 Deliver migration 0004 to both demo gateways via 1.B1 + canary hold (0.2) | osi-os live-ops | M | 1.B1, 0.2 | runbook |
-| 1.B3 osi-server CI (build + test + cross-repo op-parity) + ArchUnit boundary test (DD11) + Micrometer/actuator metrics endpoint + GHCR image publish + pull-only VPS deploy (DD16) | osi-server | M | — | spec+plan |
-| 1.B4 Per-event tx boundary + `sync_dead_letter` + batch cap + rate limit (DD13), with a Testcontainers test reproducing the poison-batch replay (DD15) — **hard gate for Uganda** | osi-server | M | 1.B3 | spec+plan |
+| 1.B3 osi-server CI (build + test + cross-repo op-parity) + ArchUnit boundary test (DD11) + Micrometer/actuator metrics endpoint + GHCR image publish + pull-only VPS deploy (DD16) — done: `backend-ci.yml` + `prediction-ci.yml` + `ghcr-publish.yml` (3 images), ArchUnit FreezingArchRule (3 rules + baseline store), Actuator/Micrometer admin-gated, docker-compose switched to GHCR pull, rehearsal+prod runbook docs | osi-server | M | — | spec+plan |
+| 1.B4 Per-event tx boundary + `sync_dead_letter` + batch cap + rate limit (DD13), with a Testcontainers test reproducing the poison-batch replay (DD15) — **hard gate for Uganda** — done: `SyncEventTxExecutor` (`REQUIRES_NEW`), `sync_dead_letter` table + entity + admin controller + retention job, batch cap 100, Bucket4j rate limit 10/min/gateway, `SyncExceptionClassifier`, `PoisonBatchIT` + `BacklogDrainIT` (5000 events) + `SyncDeadLetterRepositoryIT` on Testcontainers Postgres 16 | osi-server | M | 1.B3 | spec+plan |
 
 ### Phase 2 — Uganda + prove the strangler on pure seams (weeks 6–10)
 
 | Item | Repo | Size | Depends on | Mode |
 |---|---|---|---|---|
 | 2.1 Uganda catch-up (#87): full deploy + schema baseline, rehearsed on a Uganda DB copy first | osi-os live-ops | M | 1.B4 + 1.B1 proven on demos | runbook |
-| 2.2 Extract Daily Dendrometer Analytics → tested module + thin adapter (DD4 "done" definition) | osi-os | M | 1.A1, 1.A2 | spec+plan |
-| 2.3 Dendro cross-repo golden-vector contract (DD5) | both | M | 2.2 | spec+plan |
-| 2.4 Extract Get Zone Environment Summary | osi-os | L | 2.2 pattern | spec+plan |
-| 2.5 `channels.json` exported as shared field-name truth into the osi-server build (DD5) | both | S | 1.B3 | direct |
+| 2.2 Extract Daily Dendrometer Analytics → tested module + thin adapter (DD4 "done" definition) — done: `osi-dendro-analytics` extracted (compute core), golden-vectored, scoreboard decreased, PR #125 | osi-os | M | 1.A1, 1.A2 | spec+plan |
+| 2.3 Dendro cross-repo golden-vector contract (DD5) — done: osi-os runner + byte-mirror gate over shared envelope/TWD/MDS fixtures, paired osi-server `EnvelopeTwd` runner, PR #126 / osi-server#61 | both | M | 2.2 | spec+plan |
+| 2.4 Extract Get Zone Environment Summary — done: `osi-zone-env` extracted (pure assembly helpers), golden-vectored, scoreboard decreased, HTTP-shaped 503 load-fail path, PR #127 | osi-os | L | 2.2 pattern | spec+plan |
+| 2.5 `channels.json` exported as shared field-name truth into the osi-server build (DD5) — done: infrastructure already existed (osi-server `ChannelManifest.java` + `ChannelManifestTest` SHA256 pin + `registry.ts` + `verify-channel-manifest-sync.js`; osi-os `verify-channel-manifest-parity.js`). CI gate: wired `verify-channel-manifest-parity.js` + cross-repo byte-identity check into `migrations.yml`. Note: osi-server-side CI sync (wiring `verify-channel-manifest-sync.js` into `backend-ci.yml` with an osi-os RO token) is deferred — the SHA256 pin in `ChannelManifestTest` catches osi-server-initiated drift, but detection lands on the next osi-os PR, not at osi-server merge time | both | S | 1.B3 | direct |
 
 ### Phase 3 — Narrow-waist ingest via the MClimate pilot (weeks 10–15)
 
 | Item | Repo | Size | Depends on | Mode |
 |---|---|---|---|---|
-| 3.0 **Entry gate:** actuator duration-bound CI assertion (DD17, extend `verify-command-safety.js`) — merges before any MClimate downlink code | osi-os | S | — | direct |
+| 3.0 **Entry gate:** actuator duration-bound CI assertion (DD17, extend `verify-command-safety.js`) — done: wired `verify-command-safety.js` into `migrations.yml` CI; added generic guard `assertRegistryParity` (primary "Command Type Registry" ↔ fallback deep equality), `assertActuatorsDurationBound` (exact-match close-dispatch allowlist, naming tripwire for mislabeled `actuator:false`, schema validation), `assertBareOpenNotInRegistry`; added missing `base_bcm2709` seed DB. Registry-shape gate is entry-only; per-path assertions are mandatory in each device spec (3.1) | osi-os | S | — | direct |
 | 3.1 MClimate T-Valve (#18): codec + normalizer + generic manifest-driven writer with closed allow-list & ingest dead-letter (DD6) — the abstraction's second consumer | osi-os | L | 1.A1 | spec+plan |
 | 3.2 `verify-device-integration.js`: full round-trip CI gate (codec output → normalize → write → manifest-declared columns and nothing else) | osi-os | M | 3.1 | spec+plan |
 | 3.3 LSN50 shadow mode on demo gateways (DD7: old path writes, new path diffs) | osi-os | M | 3.1 | direct |
@@ -102,7 +103,7 @@ This is the **program map**, not a spec. Each item below is a charter line: goal
 | Item | Repo | Size | Depends on | Mode |
 |---|---|---|---|---|
 | 4.1 LSN50 writer cutover on the DD7 evidence bar, with temporary UCI kill-switch (DD8), demos → production | osi-os | M | 3.3 evidence | runbook + direct |
-| 4.2 Extract History API Router → tested module (the HTTP-shaped seam, after the pattern is proven twice) | osi-os | L | 2.2, 2.4 | spec+plan |
+| 4.2 Extract History API Router → tested module (the HTTP-shaped seam, after the pattern is proven twice). **Hard gate (adjudicated 2026-07-11):** golden-vector capture must wait for mobile-plan Task 5 + 1.A6 (rollup hardening Tasks 3+4 change coverage values and payload shape) | osi-os | L | 2.2, 2.4, 1.A6 | spec+plan |
 | 4.3 **Option B Stage 2**: remove boot-node inline DDL — only after two clean fleet deliveries including Uganda, schema_sig converged fleet-wide for a sustained window | osi-os | M | 1.B1 ×2 proven, 2.1 | spec+plan |
 
 ### Phase 5 — Durability & scale hygiene (ongoing, interleave as capacity allows)

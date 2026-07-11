@@ -1,5 +1,6 @@
 import React from 'react';
 import { useTranslation } from 'react-i18next';
+import { useHoverCapable } from '../../../history/useHoverCapable';
 import {
   CartesianGrid,
   Line,
@@ -13,7 +14,7 @@ import type {
   HistoryCardDataResponse,
   HistorySeriesPoint,
 } from '../../../history/types';
-import { HISTORY_CHART_MARGIN, formatTimeTick, historyTimeXAxis, historyValueYAxis } from './chartAxis';
+import { HISTORY_CHART_MARGIN, formatDisplayUnit, formatTimeTick, historyTimeXAxis, historyValueYAxis } from './chartAxis';
 
 interface EnvironmentLineChartViewProps {
   data: HistoryCardDataResponse | undefined;
@@ -154,7 +155,7 @@ function displayUnit(series: unknown, source: string): string {
 function formatValue(value: number | null, unit: string): string {
   if (value === null) return '-';
   const formatted = Number.isInteger(value) ? String(value) : value.toFixed(1);
-  return unit ? `${formatted} ${unit}` : formatted;
+  return unit ? `${formatted} ${formatDisplayUnit(unit)}` : formatted;
 }
 
 function formatTooltipValue(value: unknown, unit: string): string {
@@ -226,6 +227,7 @@ const EnvironmentLineChartViewComponent: React.FC<EnvironmentLineChartViewProps>
 }) => {
   const { t: translate } = useTranslation('history');
   const t = translate as HistoryTranslate;
+  const hoverCapable = useHoverCapable();
   const { visibleSeries, rows, groups } = React.useMemo(() => {
     const rawSeries = Array.isArray(data?.series) ? data.series : [];
     const nextVisibleSeries = normalizeSeriesList(t, rawSeries).filter(hasVisiblePoints);
@@ -270,11 +272,13 @@ const EnvironmentLineChartViewComponent: React.FC<EnvironmentLineChartViewProps>
         {groups.map((group, groupIndex) => {
           return (
             <div key={group.unit || 'unitless'} className="flex min-h-0 flex-1 flex-col gap-1">
-              <h4 className="text-xs font-semibold text-[var(--text-tertiary)]">
-                {group.unit
-                  ? t('history.environmentLineChart.axisLabel', { unit: group.unit })
-                  : t('history.environmentLineChart.axisNoUnit')}
-              </h4>
+              {groups.length > 1 && (
+                <h4 className="text-xs font-semibold text-[var(--text-tertiary)]">
+                  {group.unit
+                    ? t('history.environmentLineChart.axisLabel', { unit: formatDisplayUnit(group.unit) })
+                    : t('history.environmentLineChart.axisNoUnit')}
+                </h4>
+              )}
               <div className="relative min-h-0 min-w-0 flex-1"><div className="absolute inset-0">
                 <ResponsiveContainer width="100%" height="100%">
                   <LineChart data={group.rows} margin={HISTORY_CHART_MARGIN}>
@@ -285,17 +289,19 @@ const EnvironmentLineChartViewComponent: React.FC<EnvironmentLineChartViewProps>
                       tickFormatter={(value) => formatTimeTick(Number(value), spanMs)}
                     />
                     <YAxis {...historyValueYAxis(group.unit || undefined, 52)} />
-                    <Tooltip
-                      isAnimationActive={false}
-                      labelFormatter={formatTimestampMs}
-                      formatter={(value, _name, item) => {
-                        const series = group.seriesByKey.get(String(item.dataKey));
-                        return [
-                          formatTooltipValue(value, series?.unit ?? ''),
-                          series?.label ?? t('history.environmentLineChart.series.environment'),
-                        ];
-                      }}
-                    />
+                    {hoverCapable && (
+                      <Tooltip
+                        isAnimationActive={false}
+                        labelFormatter={formatTimestampMs}
+                        formatter={(value, _name, item) => {
+                          const series = group.seriesByKey.get(String(item.dataKey));
+                          return [
+                            formatTooltipValue(value, series?.unit ?? ''),
+                            series?.label ?? t('history.environmentLineChart.series.environment'),
+                          ];
+                        }}
+                      />
+                    )}
                     {group.series.map((series, index) => (
                       <Line
                         key={series.key}

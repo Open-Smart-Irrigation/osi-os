@@ -6,9 +6,35 @@
 
 **Goal:** Make the ordered-migration runner the on-device schema-delivery mechanism at deploy time: a new `scripts/migrate-cli.js` entrypoint that takes an off-device fsync'd backup before any destructive/data migration, invokes `applyPending` (writers stopped), and restores the byte-image on failure; and a `deploy.sh` migration step that fetches the full migrations corpus, ensures the `sqlite3` CLI, stops Node-RED, baselines a first-run device via Stage 0's `baseline-existing-db.js`, runs `migrate-cli.js`, and restarts Node-RED on every exit path — replacing the five `ensure_*` functions. No boot-node change, no Uganda, no live device.
 
-**Architecture:** `deploy.sh` gains one bracketed migration step (after `npm install`, before `fix_mosquitto_ownership`): fetch `database/migrations/ordered/*` + `CHECKSUMS.json` → `$TMP_DIR/migrations/ordered/` (§B0); `command -v sqlite3` or `opkg install sqlite3-cli`, else refuse (§B); `trap`-guarded `/etc/init.d/node-red stop` … `start` (§C); if no ledger, `repair-sync-outbox-v2.js` then `baseline-existing-db.js` (§D); `migrate-cli.js /data/db/farming.db --backup-dir $TMP_DIR/migrate-backup --migrations-dir $TMP_DIR/migrations/ordered` (§E); restart. `migrate-cli.js` wraps `applyPending` with an off-device backup (fsync file + dir) taken only when a `destructive`/`data` migration is pending, and a restore-from-byte-image on any throw. `lib/osi-migrate` is consumed, never modified.
+**Architecture:** `deploy.sh` gains one bracketed migration step (after `npm install`, before `fix_mosquitto_ownership`): fetch `database/migrations/ordered/*` + `CHECKSUMS.json` → `$TMP_DIR/migrations/ordered/` (§B0); `command -v sqlite3` or `opkg install sqlite3-cli`, else refuse (§B); `trap`-guarded `/etc/init.d/node-red stop` … `start` (§C); if no ledger, `repair-sync-outbox-v2.js` then `baseline-existing-db.js` (§D); `migrate-cli.js /data/db/farming.db --backup-dir /data/backups/migrate --migrations-dir $TMP_DIR/migrations/ordered` (§E); restart. `migrate-cli.js` wraps `applyPending` with a persistent backup (fsync file + dir) taken only when a `destructive`/`data` migration is pending, and a restore-from-byte-image on any throw. `lib/osi-migrate` is consumed, never modified.
+
+## CRITICAL corrections (Fable review 2026-07-10)
+
+**1. Backup path: `/data/backups/migrate`, NOT `$TMP_DIR/migrate-backup`.**
+On OpenWrt, `/tmp` is tmpfs (RAM). The DD9 guarantee ("byte-verified backup fsync'd … so a power loss … cannot lose the backup") is void when the backup is on tmpfs — `fsync` to tmpfs provides zero power-loss durability. The backup now goes to `/data/backups/migrate/` (persistent, same SD as the DB — honest: true off-SD protection requires the operator to pull a copy before the window, which the rehearsal DoD already mandates). The runner's own `${dbPath}.bak-<stamp>` (same dir, keep-5, `backup.js`) is the second persistent copy. `$TMP_DIR` is still used for fetched scripts and migrations corpus — those are re-fetchable, not backup artifacts.
+
+**2. Trap chaining: `restart_node_red` must NOT replace `deploy.sh`'s existing `cleanup` trap.**
+`deploy.sh:48` sets `trap cleanup EXIT INT TERM` where `cleanup` does `rm -rf "$TMP_DIR"`. The original plan's `trap restart_node_red EXIT INT TERM` **replaces** it — `cleanup` never runs, and `$TMP_DIR` (with fetched scripts, migrations corpus) is leaked. Worse: if someone "fixes" it by chaining, cleanup would delete the backup if it were in `$TMP_DIR`. The fix: (a) backup goes to `/data/backups/migrate` (not `$TMP_DIR`, so cleanup can't delete it), (b) the migration function saves and chains the existing trap:
+
+```sh
+old_trap="$(trap -p EXIT | sed "s/^trap -- '//;s/' EXIT$//")"
+trap "$old_trap; restart_node_red" EXIT INT TERM
+```
+
+**3. The rc=3 path's `trap - EXIT INT TERM` must also restore the old cleanup trap**, not cancel all traps.
 
 **Tech Stack:** Node.js (`node:test`, `node:fs`, `node:child_process`), `sqlite3` CLI via the existing `cliRunner`, `lib/osi-migrate` (runner/ledger/loader/backup — consumed), `deploy.sh` (BusyBox ash), GitHub Actions.
+
+## Rebase protocol (all plans anchoring on line numbers)
+
+**Main has progressed since this plan was written** (2026-07-08). Line numbers cited below (e.g. `deploy.sh:535`, `:643`) are verified against main as of that date but may drift as other PRs merge. **Before executing any task that references a line number:**
+
+1. `git rebase main` (or merge main into the feature branch).
+2. Re-verify every line reference: `grep -n '<anchor text>' deploy.sh` for each anchor cited in the task.
+3. If a reference has shifted, update the step's line number in your working notes — do NOT edit this plan file (it is the reviewed plan of record; line shifts are expected and handled at execution time).
+4. If the anchor text itself is GONE (not just shifted), STOP — another plan likely merged a conflicting change. Check git log for the commit that removed it and reconcile.
+
+This protocol applies to 5.3 as well — both plans edit `deploy.sh` and whichever merges second must re-anchor.
 
 ## Global Constraints
 
@@ -377,6 +403,8 @@ run_schema_migration() {
     fi
 
     # §C: stop Node-RED so writers are quiesced; restart on EVERY exit via a trap.
+    # CRITICAL (Fable review): chain with deploy.sh's existing cleanup trap — do NOT
+    # replace it, or $TMP_DIR cleanup never runs. Save the existing trap and chain.
     node_red_started=0
     restart_node_red() {
         if [ "$node_red_started" = "0" ]; then
@@ -385,7 +413,13 @@ run_schema_migration() {
             node_red_started=1
         fi
     }
-    trap restart_node_red EXIT INT TERM
+    old_exit_trap="$(trap -p EXIT | sed "s/^trap -- '//;s/' EXIT$//" || true)"
+    if [ -n "$old_exit_trap" ]; then
+        trap "$old_exit_trap; restart_node_red" EXIT
+        trap "restart_node_red" INT TERM
+    else
+        trap restart_node_red EXIT INT TERM
+    fi
 
     echo "stopping Node-RED (writers quiesced for migration)"
     /etc/init.d/node-red stop || true
@@ -427,11 +461,14 @@ run_schema_migration() {
     fi
 
     # §E: apply pending migrations under the runner's writers-stopped/backup/postflight
-    # guarantees, plus migrate-cli's off-device fsync'd backup + restore-on-failure.
+    # guarantees, plus migrate-cli's persistent backup + restore-on-failure.
+    # CRITICAL (Fable review): backup goes to /data/backups/migrate (persistent ext4),
+    # NOT $TMP_DIR (tmpfs on OpenWrt — zero power-loss durability).
     fetch "scripts/migrate-cli.js" "$TMP_DIR/migrate-cli.js"
-    mkdir -p "$TMP_DIR/migrate-backup"
+    MIGRATE_BACKUP_DIR="/data/backups/migrate"
+    mkdir -p "$MIGRATE_BACKUP_DIR"
     if node "$TMP_DIR/migrate-cli.js" "$DB_PATH" \
-            --backup-dir "$TMP_DIR/migrate-backup" \
+            --backup-dir "$MIGRATE_BACKUP_DIR" \
             --migrations-dir "$mig_dir"; then
         echo "OK: schema migration complete"
     else
@@ -439,7 +476,15 @@ run_schema_migration() {
         if [ "$rc" = "3" ]; then
             echo "ERROR: migration failed AND restore integrity failed; DB left in place for manual recovery." >&2
             echo "       Node-RED will NOT be restarted against a possibly-corrupt DB." >&2
-            trap - EXIT INT TERM   # cancel the restart trap: do not start against a bad DB
+            echo "       Pre-migration backup at: $MIGRATE_BACKUP_DIR" >&2
+            # Cancel the restart trap but keep cleanup — do NOT start against a bad DB.
+            # Restore the old cleanup trap (if any) without the restart_node_red chain.
+            if [ -n "${old_exit_trap:-}" ]; then
+                trap "$old_exit_trap" EXIT
+            else
+                trap - EXIT
+            fi
+            trap - INT TERM
             node_red_started=1
             return 1
         fi

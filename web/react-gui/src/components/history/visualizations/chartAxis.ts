@@ -6,9 +6,10 @@ import type { CSSProperties, SVGProps } from 'react';
  * (not forced to zero), muted gridline-coloured ticks, and a rotated unit title.
  */
 
-// `top: 20` keeps the top y-axis tick clear of the in-chart view-mode/device labels.
+// `top: 36` keeps the top y-axis tick clear of the absolutely-positioned
+// view-mode/device pills that HistoryCardDetailPage overlays at top-1 (~22px tall).
 // `bottom: 28` keeps x-axis ticks above mobile browser chrome and home indicators.
-export const HISTORY_CHART_MARGIN = { top: 20, right: 16, bottom: 28, left: 8 } as const;
+export const HISTORY_CHART_MARGIN = { top: 36, right: 16, bottom: 28, left: 8 } as const;
 
 const DAY_MS = 86_400_000;
 const AXIS_TICK: SVGProps<SVGTextElement> = { fontSize: 11, fill: 'var(--text-tertiary)' };
@@ -113,6 +114,13 @@ export function formatWindowCaption(fromMs: number, toMs: number): string {
   }
 }
 
+const UNIT_DISPLAY: Record<string, string> = { C: '°C', um: 'µm' };
+
+export function formatDisplayUnit(unit: string | null | undefined): string {
+  const trimmed = (unit ?? '').trim();
+  return trimmed ? (UNIT_DISPLAY[trimmed] ?? trimmed) : '';
+}
+
 /** Returns the shared unit when every series uses the same one, otherwise undefined. */
 export function consistentUnit(series: ReadonlyArray<{ unit?: string | null }>): string | undefined {
   const units = new Set(series.map((entry) => (entry.unit ?? '').trim()).filter(Boolean));
@@ -147,7 +155,7 @@ export function historyValueYAxis(unit?: string, width = 48) {
     axisLine: { stroke: AXIS_STROKE },
     label: unit
       ? {
-          value: unit,
+          value: formatDisplayUnit(unit),
           angle: -90 as const,
           position: 'insideLeft' as const,
           style: { textAnchor: 'middle', fontSize: 11, fill: 'var(--text-tertiary)' } as CSSProperties,

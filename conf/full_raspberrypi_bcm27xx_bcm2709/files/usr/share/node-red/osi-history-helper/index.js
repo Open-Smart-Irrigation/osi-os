@@ -2149,14 +2149,28 @@ function buildLocalInterpretations(input = {}) {
     });
   }
 
-  if (coverageConfidence === 'unknown' || (coveragePct !== null && coveragePct < 80)) {
+  const generatedMs = parseTime(generatedAt);
+  const rangeFromMs = parseTime(input.rangeFrom);
+  const rangeToMs = parseTime(input.rangeTo);
+  const windowKnown = rangeFromMs !== null && rangeToMs !== null && generatedMs !== null && rangeToMs > rangeFromMs;
+  const fullyFutureWindow = windowKnown && rangeFromMs >= generatedMs;
+  let effectiveCoveragePct = coveragePct;
+  if (coveragePct !== null && windowKnown && rangeToMs > generatedMs) {
+    const totalMs = rangeToMs - rangeFromMs;
+    const elapsedMs = generatedMs - rangeFromMs;
+    effectiveCoveragePct = elapsedMs <= 0 ? null : Math.min(100, coveragePct * (totalMs / elapsedMs));
+  }
+  const coverageGapFires = effectiveCoveragePct !== null
+    ? effectiveCoveragePct < 80
+    : (coverageConfidence === 'unknown' && !fullyFutureWindow);
+  if (coverageGapFires) {
     items.push({
       ruleId: 'data-coverage-gap',
       severity: coverageConfidence === 'unknown' ? 'info' : 'warning',
       titleKey: 'history.interpretation.dataCoverageGap.title',
       bodyKey: 'history.interpretation.dataCoverageGap.body',
-      params: { coveragePct, coverageConfidence },
-      evidence: [{ type: 'coverage', coveragePct, coverageConfidence }],
+      params: { coveragePct: effectiveCoveragePct ?? coveragePct, coverageConfidence },
+      evidence: [{ type: 'coverage', coveragePct: effectiveCoveragePct ?? coveragePct, coverageConfidence }],
       source: 'local-rule',
     });
   }

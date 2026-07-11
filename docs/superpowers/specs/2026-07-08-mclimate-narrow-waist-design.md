@@ -1,9 +1,39 @@
-# MClimate T-Valve Narrow-Waist Pilot — Codec + Normalizer + Manifest-Driven Writer + Round-Trip Gate + LSN50 Shadow
+# Narrow-Waist Pilot — Codec + Normalizer + Manifest-Driven Writer + Round-Trip Gate + LSN50 Shadow
 
-**Status:** Draft
-**Refactor-program items:** 3.1 (DD6: narrow-waist ingest, MClimate as the second consumer) + 3.2 (`verify-device-integration.js` round-trip gate) + 3.3 (LSN50 shadow mode). Bundled because the writer (3.1), the CI gate that proves it (3.2), and the shadow harness that de-risks retrofitting it onto LSN50 (3.3) are one indivisible design decision — the abstraction is only trustworthy if all three land together.
-**Focus: osi-os** (server-side MClimate applier is item 3.4, osi-server, separate).
-**Depends on:** 1.A1 (`osi-lib` loader — the normalizer and writer load via `osiLib.require`, per that spec's §E rule) and 3.0 (actuator duration-bound gate — merges before any MClimate downlink code; the T-Valve open MUST be `requires_duration: true`).
+**Status:** Draft — **NEEDS REWRITE for UC512** (see §UC512 rewrite note below). Architecture is ~80% reusable; device-specific sections need replacing.
+**Refactor-program items:** 3.1 (DD6: narrow-waist ingest, the second consumer) + 3.2 (`verify-device-integration.js` round-trip gate) + 3.3 (LSN50 shadow mode). Bundled because the writer (3.1), the CI gate that proves it (3.2), and the shadow harness that de-risks retrofitting it onto LSN50 (3.3) are one indivisible design decision — the abstraction is only trustworthy if all three land together.
+**Focus: osi-os** (server-side applier is item 3.4, osi-server, separate).
+**Depends on:** 1.A1 (`osi-lib` loader — the normalizer and writer load via `osiLib.require`, per that spec's §E rule) and 3.0 (actuator duration-bound gate — merges before any valve downlink code; the valve open MUST be `requires_duration: true`).
+**Pilot device:** **Milesight UC512** (confirmed 2026-07-10, replacing MClimate as the first valve integration).
+
+## UC512 rewrite note (2026-07-10 — Fable review)
+
+**The Milesight UC512 will be integrated first**, not MClimate. This spec was written around MClimate's payload and needs updating. Assessment of reusability:
+
+**~80% device-agnostic (reuse as-is):**
+- §A normalize contract (pure `normalize(decoded, meta) → {channels}`)
+- §B writer (`osi-device-writer`, manifest-driven, closed allow-list, parameterized INSERT, dead-letter to `ingest_quarantine`)
+- §D LSN50 shadow mode + the 18 manifest rows
+- §F round-trip gate (`verify-device-integration.js`)
+- §E surface enumeration structure (surfaces 1–7, 11–13 are device-name-agnostic)
+- Plan Tasks 2 (writer), 3.2 (shadow node), 4 (round-trip gate), 6 (schema surfaces), 7 (shadow diff), 10 (verification)
+
+**~20% device-specific (rewrite for UC512):**
+- Codec file: `codecs/milesight_uc512_decoder.js` (Milesight SensorDecoders is public; no UC51x codec is vendored in the repo — verified)
+- Normalizer: `osi-uc512-normalize` — field mapping from UC512's decoded payload to manifest channels
+- ChirpStack profile env names: `UC512_CODEC_PATH`, `CS_PROFILE_UC512_NAME`, `CHIRPSTACK_PROFILE_UC512`
+- `devices.type_id`: `MILESIGHT_UC512` (not `MCLIMATE_TVALVE`)
+- Golden vectors: from Milesight UC512 datasheet examples
+
+**CRITICAL design delta (Fable review HIGH):** The UC512 is a **two-channel** valve controller (it can control two independent valves per device). The entire current actuation model assumes one valve per `deveui`:
+- `valve_actuation_expectations` is keyed by `expectation_id` with `device_eui NOT NULL` but no channel discriminator column — the single-valve assumption is structural (no way to address channel 1 vs channel 2 on the same deveui)
+- Zone `valve_deveui` is a single value
+- STREGA command wiring addresses one valve per device
+- The Decide node's actuation logic assumes one valve per device
+
+**The spec rewrite must decide per-channel command addressing** — whether each UC512 channel maps to a separate zone (two zones per device), or whether one device can serve one zone with two valves. `channels.json` currently has **zero valve channels** (verified), so the UC512 integration will add the first valve-state channels.
+
+**DD17 (actuator safety) applies identically:** confirm UC512's device-side auto-close/duration-bound from the Milesight datasheet before any downlink code. The 3.0 gate mechanism is device-agnostic.
 **Governing decisions:** DD6, DD7, DD8, DD17 in [`docs/architecture/refactor-program-2026.md`](../../architecture/refactor-program-2026.md); ADRs [static device plugins](../../adr/2026-05-28-static-device-plugin-registry.md) + [schema & contract ownership](../../adr/2026-06-30-schema-and-contract-ownership.md).
 
 ## Problem

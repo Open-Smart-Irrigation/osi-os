@@ -1,5 +1,6 @@
 import React from 'react';
 import { useTranslation } from 'react-i18next';
+import { useHoverCapable } from '../../../history/useHoverCapable';
 import {
   Area,
   CartesianGrid,
@@ -11,7 +12,7 @@ import {
   YAxis,
 } from 'recharts';
 import type { HistoryCardDataResponse, HistorySeriesPoint } from '../../../history/types';
-import { HISTORY_CHART_MARGIN, formatTimeTick, historyTimeXAxis, historyValueYAxis } from './chartAxis';
+import { HISTORY_CHART_MARGIN, formatDisplayUnit, formatTimeTick, historyTimeXAxis, historyValueYAxis } from './chartAxis';
 
 interface DailyMinMaxViewProps {
   data: HistoryCardDataResponse | undefined;
@@ -140,7 +141,7 @@ function formatTimestampMs(value: unknown): string {
 function formatValue(value: number | null, unit: string): string {
   if (value === null) return '-';
   const formatted = Number.isInteger(value) ? String(value) : value.toFixed(1);
-  return unit ? `${formatted} ${unit}` : formatted;
+  return unit ? `${formatted} ${formatDisplayUnit(unit)}` : formatted;
 }
 
 function formatTooltipValue(value: unknown, unit: string): string {
@@ -170,7 +171,7 @@ export function expandSinglePointRows(rows: ChartRow[]): ChartRow[] {
   if (rows.length !== 1) return rows;
 
   const center = rows[0].tMs;
-  const preferredHalfSegmentMs = 6 * 60 * 60 * 1000;
+  const preferredHalfSegmentMs = 45 * 60 * 1000;
   const left = center - preferredHalfSegmentMs;
   const right = center + preferredHalfSegmentMs;
 
@@ -189,6 +190,7 @@ function visualWindowsEqual(left: ChartWindow | undefined, right: ChartWindow | 
 const DailyMinMaxViewComponent: React.FC<DailyMinMaxViewProps> = ({ data, window: chartWindow }) => {
   const { t: translate } = useTranslation('history');
   const t = translate as HistoryTranslate;
+  const hoverCapable = useHoverCapable();
   const visibleSeries = React.useMemo(() => {
     const rawSeries = Array.isArray(data?.series) ? data.series : [];
     return normalizeSeriesList(t, rawSeries).filter(hasDailyRange).map((series, seriesIndex) => ({
@@ -236,19 +238,21 @@ const DailyMinMaxViewComponent: React.FC<DailyMinMaxViewProps> = ({ data, window
                   <YAxis
                     {...historyValueYAxis(
                       series.unit
-                        ? t('history.dailyMinMax.axisLabel', { unit: series.unit })
+                        ? t('history.dailyMinMax.axisLabel', { unit: formatDisplayUnit(series.unit) })
                         : t('history.dailyMinMax.axisNoUnit'),
                       52,
                     )}
                   />
-                  <Tooltip
-                    isAnimationActive={false}
-                    labelFormatter={formatTimestampMs}
-                    formatter={(value, name) => [
-                      formatTooltipValue(value, series.unit),
-                      String(name),
-                    ]}
-                  />
+                  {hoverCapable && (
+                    <Tooltip
+                      isAnimationActive={false}
+                      labelFormatter={formatTimestampMs}
+                      formatter={(value, name) => [
+                        formatTooltipValue(value, series.unit),
+                        String(name),
+                      ]}
+                    />
+                  )}
                   <Area
                     type="monotone"
                     dataKey={`${series.key}-max`}

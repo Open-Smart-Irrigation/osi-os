@@ -13,7 +13,7 @@ import { HistoryVisualizationSurface } from '../components/history/mobile/Histor
 import { cardChannels, cardChannelsForSource, type ChannelSourceContext } from '../channels/registry';
 import { HistoryDesktopDetail } from '../components/history/desktop/HistoryDesktopDetail';
 import { formatWindowCaption } from '../components/history/visualizations/chartAxis';
-import { formatHistoryCalendarMonthLabel } from '../history/calendarMonth';
+import { clampCalendarMonthOffset, formatHistoryCalendarMonthLabel } from '../history/calendarMonth';
 import { historyCardDefinitionsByType } from '../history/cardDefinitions';
 import { useFeatureFlags } from '../history/useFeatureFlags';
 import { useHistoryCardAdvancedData } from '../history/useHistoryCardAdvancedData';
@@ -389,6 +389,7 @@ export const HistoryCardDetailPage: React.FC = () => {
   const [calendarMonthOffset, setCalendarMonthOffset] = useState(0);
   const [visualWindow, setVisualWindow] = useState<HistoryVisualWindow | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  useEffect(() => { setSettingsOpen(false); }, [displayCard?.cardId]);
   const [exportOpen, setExportOpen] = useState(false);
   const defaultRange = displayCard?.defaultRange ?? '24h';
   const timeViewport = useTimeViewport(
@@ -589,8 +590,9 @@ export const HistoryCardDetailPage: React.FC = () => {
   }, [displayCard, selectedView]);
 
   const handleMonthSwipe = useCallback((delta: -1 | 1) => {
-    setCalendarMonthOffset((offset) => offset + delta);
-  }, []);
+    const baseIso = timeViewport.viewport.range.to ?? timeViewport.viewport.range.from;
+    setCalendarMonthOffset((offset) => clampCalendarMonthOffset(baseIso, offset, delta));
+  }, [timeViewport.viewport.range.to, timeViewport.viewport.range.from]);
 
   const isVisualizationEvent = useCallback((target: EventTarget | null): boolean => {
     return target instanceof Element && Boolean(target.closest(HISTORY_VISUALIZATION_SURFACE_SELECTOR));

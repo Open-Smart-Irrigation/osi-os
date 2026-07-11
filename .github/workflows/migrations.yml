@@ -52,11 +52,13 @@ jobs:
       - name: Fetch migration base ref
         run: git fetch --no-tags origin main:refs/remotes/origin/main
       - run: node --test lib/osi-migrate/__tests__/*.test.js
-      - run: node --test scripts/check-sync-parity.test.js scripts/restamp-fingerprints.test.js scripts/verify-migrations.test.js scripts/verify-no-stray-ddl.test.js scripts/verify-no-new-silent-catch.test.js scripts/test-error-recording-flow.js scripts/flows-bare-require-scan.test.js scripts/verify-helper-registration.test.js
+      - run: node --test scripts/check-sync-parity.test.js scripts/restamp-fingerprints.test.js scripts/verify-migrations.test.js scripts/verify-no-stray-ddl.test.js scripts/verify-no-new-silent-catch.test.js scripts/test-error-recording-flow.js scripts/flows-bare-require-scan.test.js scripts/test-outbox-retention.js scripts/verify-helper-registration.test.js scripts/semantic-schema-compare.test.js scripts/repair-sync-outbox-v2.test.js scripts/baseline-existing-db.test.js scripts/flows-size-scan.test.js scripts/verify-flows-size-ratchet.test.js scripts/migrate-cli.test.js scripts/test-deploy-migration-wiring.js scripts/deploy-payload-swap.test.js scripts/test-deploy-atomic-payload-wiring.js
       - run: node scripts/test-history-helper.js
       - run: node --test scripts/test-health-helper.js
+      - run: node --test scripts/test-crash-loop-escalation.js
       - run: node scripts/verify-migrations.js
       - run: node scripts/verify-no-stray-ddl.js
+      - run: node scripts/verify-flows-size-ratchet.js
       - run: node scripts/verify-seed-replay.js
       - run: node scripts/verify-sync-flow.js
       - run: node scripts/verify-no-new-silent-catch.js
@@ -65,10 +67,47 @@ jobs:
       - run: node scripts/verify-heartbeat-health.js
       - run: node scripts/verify-helper-registration.js
       - run: node --test conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-lib/index.test.js
+      - run: node --test conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-dendro-analytics/index.test.js
+      - run: node scripts/capture-dendro-analytics-vectors.js --verify
+      - run: node --test scripts/test-dendro-contract.js scripts/verify-dendro-contract-mirror.test.js
+      - run: node --test conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-zone-env/index.test.js
+      - run: node --test conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-history-helper/index.test.js conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-history-helper/analysis.test.js
+      - run: node scripts/capture-zone-env-vectors.js --verify
       - run: node --test scripts/rehearse-devices-rebuild.test.js
       - run: node --test scripts/test-gateway-health-persistence.js
+      - run: node --test scripts/deploy-canary-gate.test.js
       - run: node scripts/test-contract-schemas.js
       - run: node --test scripts/verify-sync-op-parity.test.js
         env:
           OSI_SERVER_EDGE_SYNC_SERVICE: osi-server/backend/src/main/java/org/osi/server/sync/EdgeSyncService.java
       - run: node scripts/verify-sync-op-parity.js osi-server/backend/src/main/java/org/osi/server/sync/EdgeSyncService.java
+      - run: node scripts/verify-dendro-contract-mirror.js osi-server
+      - run: node scripts/verify-channel-manifest-parity.js
+      - name: Cross-repo channels.json byte-identity (DD5)
+        run: |
+          set -euo pipefail
+          canonical="web/react-gui/src/channels/channels.json"
+          server_fe="osi-server/frontend/src/channels/channels.json"
+          server_be="osi-server/backend/src/main/resources/channels.json"
+          canonical_sha=$(sha256sum "$canonical" | cut -d' ' -f1)
+          fe_sha=$(sha256sum "$server_fe" | cut -d' ' -f1)
+          be_sha=$(sha256sum "$server_be" | cut -d' ' -f1)
+          echo "osi-os canonical: $canonical_sha  $canonical"
+          echo "osi-server frontend: $fe_sha  $server_fe"
+          echo "osi-server backend:  $be_sha  $server_be"
+          ok=true
+          if [ "$canonical_sha" != "$fe_sha" ]; then
+            echo "::error::osi-server frontend channels.json diverges from osi-os canonical."
+            ok=false
+          fi
+          if [ "$canonical_sha" != "$be_sha" ]; then
+            echo "::error::osi-server backend channels.json diverges from osi-os canonical."
+            ok=false
+          fi
+          if [ "$ok" = false ]; then
+            echo "Canonical is osi-os web/react-gui/src/channels/channels.json."
+            echo "Update both osi-server copies AND the EXPECTED_SHA256 pin in"
+            echo "ChannelManifestTest.java + verify-channel-manifest-sync.js on a same-named osi-server branch."
+            exit 1
+          fi
+      - run: node scripts/verify-command-safety.js

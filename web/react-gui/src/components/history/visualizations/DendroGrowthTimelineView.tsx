@@ -1,5 +1,6 @@
 import React from 'react';
 import { useTranslation } from 'react-i18next';
+import { useHoverCapable } from '../../../history/useHoverCapable';
 import {
   CartesianGrid,
   Line,
@@ -223,6 +224,7 @@ const DendroGrowthTimelineViewComponent: React.FC<DendroGrowthTimelineViewProps>
 }) => {
   const { t: translate } = useTranslation('history');
   const t = translate as HistoryTranslate;
+  const hoverCapable = useHoverCapable();
   const { visibleSeries, rows, events } = React.useMemo(() => {
     const rawSeries = Array.isArray(data?.series) ? data.series : [];
     const withPoints = normalizeSeriesList(t, rawSeries).filter(hasVisiblePoints);
@@ -272,7 +274,7 @@ const DendroGrowthTimelineViewComponent: React.FC<DendroGrowthTimelineViewProps>
               tickFormatter={(value) => formatTimeTick(Number(value), spanMs)}
             />
             <YAxis {...historyValueYAxis(consistentUnit(visibleSeries), 48)} />
-            <Tooltip isAnimationActive={false} labelFormatter={formatTimestampMs} />
+            {hoverCapable && <Tooltip isAnimationActive={false} labelFormatter={formatTimestampMs} />}
             {events.map((event) => (
               <ReferenceLine key={event.key} x={event.tMs} stroke="#b45309" strokeDasharray="4 4" />
             ))}

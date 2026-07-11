@@ -86,6 +86,7 @@ const historyHelperCandidates = [
 ];
 const cloudHttpHelperPath = path.join(nodeRedRoot, 'osi-cloud-http', 'index.js');
 const cloudHttpPackagePath = path.join(nodeRedRoot, 'osi-cloud-http', 'package.json');
+const zoneEnvModulePath = path.join(nodeRedRoot, 'osi-zone-env', 'index.js');
 const packageJsonPath = path.join(nodeRedRoot, 'package.json');
 execFileSync(process.execPath, [path.resolve(__dirname, 'verify-communication-contract.js')], { stdio: 'inherit' });
 execFileSync(process.execPath, [path.resolve(__dirname, 'verify-db-schema-consistency.js')], { stdio: 'inherit' });
@@ -105,6 +106,7 @@ const lsn50CodecSource = fs.existsSync(lsn50CodecPath) ? fs.readFileSync(lsn50Co
 const lorainCodecSource = fs.existsSync(lorainCodecPath) ? fs.readFileSync(lorainCodecPath, 'utf8') : '';
 const cloudHttpHelperSource = fs.existsSync(cloudHttpHelperPath) ? fs.readFileSync(cloudHttpHelperPath, 'utf8') : '';
 const cloudHttpPackageSource = fs.existsSync(cloudHttpPackagePath) ? fs.readFileSync(cloudHttpPackagePath, 'utf8') : '';
+const zoneEnvModuleSource = fs.existsSync(zoneEnvModulePath) ? fs.readFileSync(zoneEnvModulePath, 'utf8') : '';
 const nodeRedPackageSource = fs.readFileSync(packageJsonPath, 'utf8');
 const reactGuiApiSource = fs.readFileSync(reactGuiApiPath, 'utf8');
 const farmingTypesSource = fs.readFileSync(farmingTypesPath, 'utf8');
@@ -563,15 +565,10 @@ function expectCalibrationCreateTableParity() {
     'updated_at TEXT',
   ];
   const runtimeColumns = calibrationSchemaColumnsFrom(String(node.func || '')).slice(0, expectedColumns.length);
-  const deployColumns = calibrationSchemaColumnsFrom(deployScript).slice(0, expectedColumns.length);
   if (JSON.stringify(runtimeColumns) !== JSON.stringify(expectedColumns)) {
     fail(`runtime zone_irrigation_calibration DDL columns differ: ${runtimeColumns.join(', ')}`);
-  } else if (JSON.stringify(deployColumns) !== JSON.stringify(expectedColumns)) {
-    fail(`deploy zone_irrigation_calibration DDL columns differ: ${deployColumns.join(', ')}`);
-  } else if (JSON.stringify(runtimeColumns) !== JSON.stringify(deployColumns)) {
-    fail('runtime and deploy zone_irrigation_calibration DDL columns differ');
   } else {
-    console.log('OK runtime and deploy zone_irrigation_calibration DDL columns match');
+    console.log('OK runtime zone_irrigation_calibration DDL columns match the nullable contract');
   }
 }
 
@@ -1728,12 +1725,12 @@ expectIncludes('Run Force Sync', 'msg._forceSyncInternal', 'supports internally 
 expectIncludes('Run Force Sync', 'queueablePendingCommands', 'filters pending commands before queueing them locally');
 expectIncludes('Run Force Sync', "commandType || '').trim().toUpperCase() !== 'FORCE_EDGE_SYNC'", 'prevents force-edge-sync commands from recursing through pending-command replay');
 expectIncludes('Run Force Sync', 'rejectedCandidates', 'surfaces rejected migration candidates in force-sync migration state');
-expectIncludes('Daily Dendrometer Analytics', 'const recoveryThreshold=(calibration.thresholds.mild||CALIBRATIONS.default.thresholds.mild)*(phenoMod>0?phenoMod:1.0);', 'uses calibration-aware recovery threshold');
+expectIncludes('Daily Dendrometer Analytics', 'const recoveryThreshold=(calibration.thresholds.mild||DA.CALIBRATIONS.default.thresholds.mild)*(phenoMod>0?phenoMod:1.0);', 'uses calibration-aware recovery threshold');
 expectIncludes('Daily Dendrometer Analytics', 't.twd_night_um<recoveryThreshold', 'uses absolute night TWD in recovery verification');
 expectIncludes('Daily Dendrometer Analytics', "date>=date('${ANALYTICS_DATE}','-3 days')", 'uses the exact previous-three-day recovery window');
 expectIncludes('Daily Dendrometer Analytics', "stressAdjustment='vpd_downgrade';", 'downgrades stress on high-VPD good-recovery days');
 expectIncludes('Daily Dendrometer Analytics', "stressAdjustment='vpd_upgrade';", 'upgrades stress on low-VPD poor-recovery days');
-expectIncludes('Daily Dendrometer Analytics', 'sdVpdR2Current=computeR2(', 'computes rolling SD-VPD correlation');
+expectIncludes('Daily Dendrometer Analytics', 'sdVpdR2Current=DA.computeR2(', 'computes rolling SD-VPD correlation');
 expectIncludes('Daily Dendrometer Analytics', 'sdVpdDecoupled=sdVpdR2Current!=null&&sdVpdR2Current<0.5*bl.sd_vpd_r2_baseline;', 'flags SD-VPD decoupling against the baseline');
 expectIncludes('Daily Dendrometer Analytics', 't.baseline_complete===1', 'requires completed baselines for recovery verification pass checks');
 expectIncludes('Daily Dendrometer Analytics', 't.mds_norm>0.7', 'requires strong MDS recovery before ending verification');
@@ -1746,18 +1743,18 @@ expectIncludes('Get Zone Environment Summary', 'CREATE TABLE IF NOT EXISTS zone_
 expectIncludes('Get Zone Environment Summary', "env.get('OPENAGRI_WEATHER_CURRENT_CACHE_MINUTES')", 'supports configurable current-weather cache TTL');
 expectIncludes('Get Zone Environment Summary', "env.get('OPENAGRI_WEATHER_FORECAST_CACHE_MINUTES')", 'supports configurable forecast cache TTL');
 expectIncludes('Get Zone Environment Summary', "const lib = urlString.startsWith('https:') ? httpsLib : httpLib;", 'uses imported HTTP clients inside the Node-RED function runtime');
-expectIncludes('Get Zone Environment Summary', "preferredSource: usingLocal ? 'local'", 'prioritizes local sensor climate over online weather for agronomic metrics');
+expectFileIncludes('osi-zone-env/index.js', zoneEnvModuleSource, "preferredSource: usingLocal ? 'local'", 'prioritizes local sensor climate over online weather for agronomic metrics');
 expectIncludes('Get Zone Environment Summary', 'LEFT JOIN gateway_locations gl ON gl.gateway_device_eui = iz.gateway_device_eui', 'falls back to mirrored gateway coordinates when a zone has no explicit location');
 expectIncludes('Get Zone Environment Summary', 'SELECT date,rainfall_mm,flow_liters,rain_source,computed_at FROM zone_daily_environment', 'uses daily zone environment totals for water summary');
-expectIncludes('Get Zone Environment Summary', 'estimatedByDate[localDate] = round((estimatedByDate[localDate] || 0) + liters, 2);', 'sums STREGA expectation liters separately from measured flow meter totals');
-expectIncludes('Get Zone Environment Summary', 'localDateIso(row.commanded_at, zone && zone.timezone)', 'buckets STREGA estimated liters by zone-local date');
+expectIncludes('Get Zone Environment Summary', 'estimatedByDate[localDate] = ZE.round((estimatedByDate[localDate] || 0) + liters, 2);', 'sums STREGA expectation liters separately from measured flow meter totals');
+expectIncludes('Get Zone Environment Summary', 'ZE.localDateIso(row.commanded_at, zone && zone.timezone, Date.now())', 'buckets STREGA estimated liters by zone-local date');
 expectIncludes('Get Zone Environment Summary', "COALESCE(reconciliation_state,'') <> 'CANCELLED'", 'excludes cancelled STREGA expectations from estimated irrigation totals');
 expectExcludes('Get Zone Environment Summary', 'substr(commanded_at,1,10)', 'UTC date slicing for STREGA estimated liters');
 expectIncludes('Get Zone Environment Summary', 'irrigationTodayMeasuredLiters', 'returns measured flow-meter liters under an honest field name');
 expectIncludes('Get Zone Environment Summary', 'irrigationTodayEstimatedLiters', 'returns estimated valve-time liters under an honest field name');
 expectIncludes('Get Zone Environment Summary', 'measuredIrrigationNetMm', 'computes effective mm for measured irrigation separately');
 expectIncludes('Get Zone Environment Summary', 'estimatedIrrigationNetMm', 'computes effective mm for estimated irrigation separately');
-expectIncludes('Get Zone Environment Summary', 'overlayLocalWaterIrrigationSplit(sharedSummary.water, water)', 'preserves local measured/estimated irrigation split when shared server water is displayed');
+expectIncludes('Get Zone Environment Summary', 'ZE.overlayLocalWaterIrrigationSplit(sharedSummary.water, water)', 'preserves local measured/estimated irrigation split when shared server water is displayed');
 expectIncludes('Get Zone Environment Summary', 'water: displayWater,', 'returns the irrigation-split overlay instead of raw shared server water');
 expectIncludes('Save Zone Irrigation Calibration', 'INSERT INTO zone_irrigation_calibration', 'upserts zone irrigation calibration through the local API');
 expectIncludes('Save Zone Irrigation Calibration', 'measured_flow_rate_lpm', 'writes the measured flow rate to the calibration table');
@@ -1767,17 +1764,17 @@ expectExcludes('Save Zone Irrigation Calibration', 'measurement_method TEXT NOT 
 expectExcludes('Save Zone Irrigation Calibration', 'measured_at TEXT NOT NULL', 'NOT NULL measured-at timestamp in runtime calibration create table');
 expectExcludes('Save Zone Irrigation Calibration', 'created_at TEXT NOT NULL', 'NOT NULL created-at timestamp in runtime calibration create table');
 expectExcludes('Save Zone Irrigation Calibration', 'updated_at TEXT NOT NULL', 'NOT NULL updated-at timestamp in runtime calibration create table');
-expectFileIncludes('deploy.sh', deployScript, 'CREATE TABLE IF NOT EXISTS zone_irrigation_calibration', 'repairs the zone irrigation calibration table during deploy');
-expectFileIncludes('deploy.sh', deployScript, 'measured_flow_rate_lpm REAL,', 'creates a nullable measured flow rate column during deploy repair');
-expectFileIncludes('deploy.sh', deployScript, 'measurement_method     TEXT,', 'creates a nullable measurement method column during deploy repair');
-expectFileIncludes('deploy.sh', deployScript, 'measured_at            TEXT,', 'creates a nullable measured-at column during deploy repair');
-expectFileIncludes('deploy.sh', deployScript, 'created_at             TEXT,', 'creates a nullable created-at column during deploy repair');
-expectFileIncludes('deploy.sh', deployScript, 'updated_at             TEXT', 'creates a nullable updated-at column during deploy repair');
-expectFileExcludes('deploy.sh', deployScript, 'measured_flow_rate_lpm REAL NOT NULL', 'NOT NULL measured flow rate in deploy repair create table');
-expectFileExcludes('deploy.sh', deployScript, 'measurement_method     TEXT NOT NULL', 'NOT NULL measurement method in deploy repair create table');
-expectFileExcludes('deploy.sh', deployScript, 'measured_at            TEXT NOT NULL', 'NOT NULL measured-at timestamp in deploy repair create table');
-expectFileExcludes('deploy.sh', deployScript, 'created_at             TEXT NOT NULL', 'NOT NULL created-at timestamp in deploy repair create table');
-expectFileExcludes('deploy.sh', deployScript, 'updated_at             TEXT NOT NULL', 'NOT NULL updated-at timestamp in deploy repair create table');
+expectFileIncludes('deploy.sh', deployScript, 'run_schema_migration || exit 1', 'runs the ordered migration runner during deploy');
+expectFileIncludes('deploy.sh', deployScript, 'database/migrations/ordered/$migration', 'fetches ordered migration files from the manifest during deploy');
+expectFileIncludes('deploy.sh', deployScript, 'scripts/migrate-cli.js', 'fetches the deploy-time migration CLI');
+expectFileIncludes('deploy.sh', deployScript, 'scripts/baseline-existing-db.js', 'fetches the semantic baseline tool for first-run devices');
+expectFileIncludes('deploy.sh', deployScript, 'scripts/repair-sync-outbox-v2.js', 'fetches the pre-baseline sync_outbox repair');
+expectFileExcludes('deploy.sh', deployScript, 'CREATE TABLE IF NOT EXISTS zone_irrigation_calibration', 'inline zone irrigation calibration DDL in deploy.sh');
+expectFileExcludes('deploy.sh', deployScript, 'measured_flow_rate_lpm REAL,', 'inline nullable measured flow rate deploy repair');
+expectFileExcludes('deploy.sh', deployScript, 'measurement_method     TEXT,', 'inline nullable measurement method deploy repair');
+expectFileExcludes('deploy.sh', deployScript, 'measured_at            TEXT,', 'inline nullable measured-at deploy repair');
+expectFileExcludes('deploy.sh', deployScript, 'created_at             TEXT,', 'inline nullable created-at deploy repair');
+expectFileExcludes('deploy.sh', deployScript, 'updated_at             TEXT', 'inline nullable updated-at deploy repair');
 expectCalibrationCreateTableParity();
 expectFileIncludes('api.ts', reactGuiApiSource, 'updateCalibration: async (zoneId: number', 'adds a shared client helper for zone irrigation calibration');
 expectFileIncludes('api.ts', reactGuiApiSource, "await api.post(`/api/irrigation-zones/${zoneId}/calibration`, payload);", 'targets the local zone irrigation calibration endpoint');
@@ -1790,12 +1787,12 @@ expectIncludes('Get Zone Environment Summary', 'const water = await buildWaterEn
 expectIncludes('Get Zone Environment Summary', 'weather_provider_unavailable', 'falls back instead of throwing when weather providers fail');
 expectIncludes('Get Zone Environment Summary', 'safeResolveOnlineCurrent', 'wraps online weather section construction');
 expectIncludes('Get Zone Environment Summary', 'safeResolveForecast', 'wraps forecast section construction');
-expectIncludes('Get Zone Environment Summary', 'maxTempC: day.maxTempC ?? day.temperatureMaxC ?? null', 'returns the frontend daily forecast high-temperature field');
-expectIncludes('Get Zone Environment Summary', 'minTempC: day.minTempC ?? day.temperatureMinC ?? null', 'returns the frontend daily forecast low-temperature field');
-expectIncludes('Get Zone Environment Summary', 'rainProbabilityPct: day.rainProbabilityPct ?? day.precipitationProbabilityPct ?? null', 'returns the frontend daily forecast rain-probability field');
-expectIncludes('Get Zone Environment Summary', 'tempC: hour.tempC ?? hour.airTemperatureC ?? null', 'returns the frontend hourly forecast temperature field');
-expectIncludes('Get Zone Environment Summary', 'areaM2: toFiniteNumber(zone && zone.area_m2)', 'exposes zone area in water summary');
-expectIncludes('Get Zone Environment Summary', 'sensorHealth: buildSensorHealth(deviceRows, local)', 'reports water sensor health and warnings');
+expectFileIncludes('osi-zone-env/index.js', zoneEnvModuleSource, 'maxTempC: day.maxTempC ?? day.temperatureMaxC ?? null', 'returns the frontend daily forecast high-temperature field');
+expectFileIncludes('osi-zone-env/index.js', zoneEnvModuleSource, 'minTempC: day.minTempC ?? day.temperatureMinC ?? null', 'returns the frontend daily forecast low-temperature field');
+expectFileIncludes('osi-zone-env/index.js', zoneEnvModuleSource, 'rainProbabilityPct: day.rainProbabilityPct ?? day.precipitationProbabilityPct ?? null', 'returns the frontend daily forecast rain-probability field');
+expectFileIncludes('osi-zone-env/index.js', zoneEnvModuleSource, 'tempC: hour.tempC ?? hour.airTemperatureC ?? null', 'returns the frontend hourly forecast temperature field');
+expectIncludes('Get Zone Environment Summary', 'areaM2: ZE.toFiniteNumber(zone && zone.area_m2)', 'exposes zone area in water summary');
+expectIncludes('Get Zone Environment Summary', 'sensorHealth: ZE.buildSensorHealth(deviceRows, local)', 'reports water sensor health and warnings');
 expectIncludes('Build Telemetry', 'lsn50_mode_code: observedModeCode', 'publishes observed LSN50 mode in edge telemetry');
 expectIncludes('Build Telemetry', 'convertHzToKPa(numberOrNull(obj.watermark1_frequency))', 'converts Kiwi watermark frequency telemetry to kPa for cloud mirroring');
 expectIncludes('Build Telemetry', "var isLsn50 = profileKind === 'DRAGINO_LSN50';", 'gates LSN50-only telemetry fields by profile');
@@ -2586,10 +2583,13 @@ expectFileIncludes('deploy.sh', deployScript, '"conf/full_raspberrypi_bcm27xx_bc
 expectFileIncludes('deploy.sh', deployScript, '"conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/codecs/aquascope_lorain_decoder.js"', 'deploys the shipped LoRain ChirpStack decoder to live devices');
 expectFileIncludes('deploy.sh', deployScript, 'rm -rf "$entry"', 'removes stale hashed GUI assets AND locale files before extracting the rebuilt React bundle (loop covers assets/, locales/, index.html, dotfiles)');
 expectFileIncludes('deploy.sh', deployScript, 'chmod 755 /etc/init.d/node-red', 'keeps the deployed Node-RED init script executable');
-expectFileIncludes('deploy.sh', deployScript, 'ALTER TABLE devices ADD COLUMN dendro_ratio_at_retracted REAL', 'repairs the live DB with the canonical dendrometer retracted-ratio column during deploy');
-expectFileIncludes('deploy.sh', deployScript, 'ALTER TABLE devices ADD COLUMN dendro_ratio_at_extended REAL', 'repairs the live DB with the canonical dendrometer extended-ratio column during deploy');
-expectFileIncludes('deploy.sh', deployScript, 'UPDATE devices SET dendro_ratio_at_retracted = CASE', 'backfills the canonical dendrometer retracted-ratio column during deploy');
-expectFileIncludes('deploy.sh', deployScript, 'UPDATE devices SET dendro_ratio_at_extended = CASE', 'backfills the canonical dendrometer extended-ratio column during deploy');
+expectFileIncludes('deploy.sh', deployScript, 'run_schema_migration()', 'defines the deploy-time schema migration runner');
+expectFileIncludes('deploy.sh', deployScript, 'opkg install sqlite3-cli', 'provisions sqlite3-cli before running migrations');
+expectFileIncludes('deploy.sh', deployScript, "pgrep -f 'node-red'", 'verifies Node-RED has stopped before migrating');
+expectFileExcludes('deploy.sh', deployScript, 'ALTER TABLE devices ADD COLUMN dendro_ratio_at_retracted REAL', 'inline dendrometer retracted-ratio deploy repair');
+expectFileExcludes('deploy.sh', deployScript, 'ALTER TABLE devices ADD COLUMN dendro_ratio_at_extended REAL', 'inline dendrometer extended-ratio deploy repair');
+expectFileExcludes('deploy.sh', deployScript, 'UPDATE devices SET dendro_ratio_at_retracted = CASE', 'inline dendrometer retracted-ratio deploy backfill');
+expectFileExcludes('deploy.sh', deployScript, 'UPDATE devices SET dendro_ratio_at_extended = CASE', 'inline dendrometer extended-ratio deploy backfill');
 expectFileIncludes('deploy.sh', deployScript, '/etc/init.d/osi-gateway-gps stop || true', 'stops the retired gateway GPS sidecar during deploy');
 expectFileIncludes('deploy.sh', deployScript, '/etc/init.d/osi-gateway-gps disable || true', 'disables the retired gateway GPS sidecar during deploy');
 expectFileIncludes('deploy.sh', deployScript, 'rm -f /etc/init.d/osi-gateway-gps /usr/bin/osi-gateway-gps.js', 'removes the retired gateway GPS sidecar files during deploy');

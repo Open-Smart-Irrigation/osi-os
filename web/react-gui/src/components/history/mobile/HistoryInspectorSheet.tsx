@@ -223,12 +223,14 @@ export const HistoryInspectorSheet: React.FC<HistoryInspectorSheetProps> = ({
                 {sourceLabel ?? t(`history.cardType.${card.cardType}`)}
               </dd>
             </div>
-            <div className="rounded-md border border-[var(--border)] bg-[var(--bg)] px-3 py-2">
-              <dt className="text-xs font-semibold uppercase text-[var(--text-tertiary)]">
-                {t('history.inspector.coverage')}
-              </dt>
-              <dd className="mt-1 font-semibold text-[var(--text)]">{formatCoverage(t, data)}</dd>
-            </div>
+            {selection.kind === 'timestamp' && (
+              <div className="rounded-md border border-[var(--border)] bg-[var(--bg)] px-3 py-2">
+                <dt className="text-xs font-semibold uppercase text-[var(--text-tertiary)]">
+                  {t('history.inspector.coverage')}
+                </dt>
+                <dd className="mt-1 font-semibold text-[var(--text)]">{formatCoverage(t, data)}</dd>
+              </div>
+            )}
             <div className="rounded-md border border-[var(--border)] bg-[var(--bg)] px-3 py-2">
               <dt className="text-xs font-semibold uppercase text-[var(--text-tertiary)]">
                 {t('history.inspector.syncState')}

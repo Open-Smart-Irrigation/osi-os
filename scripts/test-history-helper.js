@@ -441,10 +441,13 @@ test('saveAnalysisView rejects an empty or oversized name', async () => {
   }
 });
 
-test('deploy script repairs analysis_views without reseeding the live database', () => {
+test('deploy script delivers analysis_views through the migration runner', () => {
   const deploy = fs.readFileSync(path.join(repoRoot, 'deploy.sh'), 'utf8');
-  assert.match(deploy, /CREATE TABLE IF NOT EXISTS analysis_views/);
-  assert.match(deploy, /Live analysis views schema repair/);
+  assert.match(deploy, /run_schema_migration/);
+  assert.match(deploy, /database\/migrations\/ordered\/\$migration/);
+  assert.match(deploy, /migrate-cli\.js/);
+  assert.doesNotMatch(deploy, /CREATE TABLE IF NOT EXISTS analysis_views/);
+  assert.doesNotMatch(deploy, /Live analysis views schema repair/);
   assert.match(deploy, /osi-history-helper\/analysis\.js/);
 });
 
@@ -2129,6 +2132,51 @@ test('uses live device_data for long-range source-filtered requests', async () =
   } finally {
     db.close();
   }
+});
+
+// --- data-coverage-gap: future time must not count as missing data ---
+test('data-coverage-gap interpretation ignores future time in window', () => {
+  const base = {
+    cardType: 'dendro',
+    generatedAt: '2026-07-11T12:00:00.000Z',
+    coverageConfidence: 'configured',
+    rangeFrom: '2026-07-01T00:00:00.000Z',
+    rangeTo: '2026-08-01T00:00:00.000Z',
+  };
+  const fullElapsedCoverage = helper.buildLocalInterpretations({ ...base, coveragePct: 34 });
+  assert(
+    !fullElapsedCoverage.some((item) => item.ruleId === 'data-coverage-gap'),
+    'coverage gap must not fire when the elapsed part of the window is fully covered',
+  );
+
+  const realGap = helper.buildLocalInterpretations({ ...base, coveragePct: 15 });
+  assert(
+    realGap.some((item) => item.ruleId === 'data-coverage-gap'),
+    'coverage gap must still fire for genuinely low elapsed coverage',
+  );
+
+  const pastWindow = helper.buildLocalInterpretations({
+    ...base,
+    rangeFrom: '2026-06-01T00:00:00.000Z',
+    rangeTo: '2026-06-30T00:00:00.000Z',
+    coveragePct: 70,
+  });
+  assert(
+    pastWindow.some((item) => item.ruleId === 'data-coverage-gap'),
+    'past windows keep the plain <80% threshold',
+  );
+
+  const fullyFuture = helper.buildLocalInterpretations({
+    ...base,
+    rangeFrom: '2026-08-01T00:00:00.000Z',
+    rangeTo: '2026-09-01T00:00:00.000Z',
+    coveragePct: null,
+    coverageConfidence: 'unknown',
+  });
+  assert(
+    !fullyFuture.some((item) => item.ruleId === 'data-coverage-gap'),
+    'fully-future windows must not warn about missing data',
+  );
 });
 
 test('verify-sync-flow chains SQL-backed history helper regression tests', () => {

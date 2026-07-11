@@ -1,0 +1,172 @@
+{
+  "bundles": [
+    {
+      "id": "B0",
+      "name": "canary-gate",
+      "items": ["0.2"],
+      "prs": [118],
+      "deploy_target": "kaba100",
+      "soak_hours": 1,
+      "pre_deploy": ["repair-sync-outbox-v2"],
+      "needs_fixes": [],
+      "ci_only": false
+    },
+    {
+      "id": "B1",
+      "name": "schema-tooling",
+      "items": ["0.3"],
+      "prs": [120],
+      "deploy_target": "kaba100",
+      "soak_hours": 1,
+      "pre_deploy": [],
+      "needs_fixes": [],
+      "ci_only": false
+    },
+    {
+      "id": "B2",
+      "name": "ci-guardrails",
+      "items": ["1.A2", "1.A3"],
+      "prs": [121],
+      "deploy_target": null,
+      "soak_hours": 0,
+      "pre_deploy": [],
+      "needs_fixes": ["1.A2-growth-allowance"],
+      "ci_only": true
+    },
+    {
+      "id": "B3",
+      "name": "edge-durability",
+      "items": ["1.A4", "1.A5"],
+      "prs": [122],
+      "deploy_target": "kaba100",
+      "soak_hours": 1,
+      "pre_deploy": [],
+      "needs_fixes": ["1.A5-eviction-index"],
+      "ci_only": false
+    },
+    {
+      "id": "B4",
+      "name": "deploy-rewrite",
+      "items": ["1.B1"],
+      "prs": [123],
+      "deploy_target": "kaba100",
+      "soak_hours": 1,
+      "pre_deploy": [],
+      "needs_fixes": [],
+      "ci_only": false
+    },
+    {
+      "id": "B5",
+      "name": "staged-deploy",
+      "items": ["5.3"],
+      "prs": [124],
+      "deploy_target": "kaba100",
+      "soak_hours": 1,
+      "pre_deploy": [],
+      "needs_fixes": [],
+      "ci_only": false
+    },
+    {
+      "id": "B6",
+      "name": "server-ci",
+      "items": ["1.B3"],
+      "prs": [59],
+      "deploy_target": null,
+      "soak_hours": 0,
+      "pre_deploy": [],
+      "needs_fixes": [],
+      "ci_only": true,
+      "repo": "osi-server"
+    },
+    {
+      "id": "B7",
+      "name": "sync-hardening",
+      "items": ["1.B4"],
+      "prs": [60],
+      "deploy_target": "test-server",
+      "soak_hours": 1,
+      "pre_deploy": [],
+      "needs_fixes": [],
+      "ci_only": false,
+      "repo": "osi-server"
+    },
+    {
+      "id": "B8",
+      "name": "extraction-dendro",
+      "items": ["2.2"],
+      "prs": [125],
+      "deploy_target": "kaba100",
+      "soak_hours": 1,
+      "pre_deploy": [],
+      "needs_fixes": [],
+      "ci_only": false
+    },
+    {
+      "id": "B9",
+      "name": "contract-dendro",
+      "items": ["2.3"],
+      "prs": [126],
+      "deploy_target": null,
+      "soak_hours": 0,
+      "pre_deploy": [],
+      "needs_fixes": [],
+      "ci_only": true,
+      "repo": "both"
+    },
+    {
+      "id": "B10",
+      "name": "extraction-zone-env",
+      "items": ["2.4"],
+      "prs": [127],
+      "deploy_target": "kaba100",
+      "soak_hours": 1,
+      "pre_deploy": [],
+      "needs_fixes": [],
+      "ci_only": false
+    },
+    {
+      "id": "BA",
+      "name": "agroscope",
+      "items": ["agroscope-forward", "agroscope-branding"],
+      "prs": [],
+      "deploy_target": "kaba100",
+      "soak_hours": 1,
+      "pre_deploy": [],
+      "needs_fixes": [],
+      "ci_only": false
+    }
+  ],
+  "gateways": {
+    "kaba100": {
+      "host": "100.93.68.86",
+      "ssh_user": "root",
+      "ssh_key": "~/.ssh/id_ed25519",
+      "db_path": "/data/db/farming.db",
+      "backup_dir": "/data/backups",
+      "gui_url": "http://100.93.68.86:1880/gui"
+    },
+    "silvan": {
+      "host": "100.81.220.8",
+      "ssh_user": "root",
+      "ssh_key": "~/.ssh/id_ed25519",
+      "db_path": "/data/db/farming.db",
+      "gui_url": "http://100.81.220.8:1880/gui"
+    }
+  },
+  "servers": {
+    "test": {
+      "host": "server.opensmartirrigation.org",
+      "sync_health_url": "https://server.opensmartirrigation.org/api/v1/admin/sync-health"
+    }
+  },
+  "alert": {
+    "ntfy_topic": "osi-refactor-pipeline",
+    "ntfy_url": "https://ntfy.sh"
+  },
+  "limits": {
+    "max_fix_iterations": 3,
+    "budget_per_bundle_usd": 50,
+    "soak_heartbeat_interval_s": 1800,
+    "verification_timeout_s": 900
+  }
+}

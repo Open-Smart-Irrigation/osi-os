@@ -1,0 +1,21 @@
+{
+  "method": "stepwise",
+  "maxGrowthUmPerDay": null,
+  "points": [
+    {
+      "date": "2026-07-07",
+      "d_max_um": 90,
+      "d_min_um": 62
+    },
+    {
+      "date": "2026-07-08",
+      "d_max_um": 95,
+      "d_min_um": 60
+    },
+    {
+      "date": "2026-07-10",
+      "d_max_um": 91,
+      "d_min_um": 55
+    }
+  ]
+}
