@@ -539,6 +539,7 @@ CREATE TABLE sync_outbox (
 );
 
 CREATE INDEX idx_sync_outbox_pending ON sync_outbox(delivered_at, occurred_at);
+CREATE INDEX idx_sync_outbox_eviction ON sync_outbox(aggregate_type, delivered_at, occurred_at);
 
 -- ---------------------------------------------------------------------------
 -- sync_inbox
