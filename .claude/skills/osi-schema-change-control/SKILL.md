@@ -13,12 +13,13 @@ farm history (irrigation events, sensor readings, dendrometer calibration) is
 irreplaceable. Because of that, edge SQLite schema is under change control, not
 free-form DDL.
 
-As of 2026-07-06 there are two overlapping mechanisms with different scopes:
+As of 2026-07-10 there are two overlapping mechanisms with different scopes:
 
 1. **The ordered migration runner** (`lib/osi-migrate` + `database/migrations/ordered/`) —
    the *governed, executable schema authority* per
-   `docs/adr/2026-06-30-schema-and-contract-ownership.md`. It is CI/tooling-time
-   only today (see "Key fact" below); it does not run on a booting Pi.
+   `docs/adr/2026-06-30-schema-and-contract-ownership.md`. CI verifies it, and
+   `deploy.sh` now fetches and runs it at deploy time through
+   `run_schema_migration()`; it still does not run from the Node-RED boot path.
 2. **The Node-RED boot node `sync-init-fn`** ("Sync Init Schema + Triggers") — a
    legacy inline-DDL block that runs on every boot on every live Pi. It is FROZEN
    for new schema behavior (one narrow, sanctioned exception below).
@@ -64,7 +65,7 @@ outside the one sanctioned exception.
 |---|---|
 | Hand-edit `schema_object_fingerprints` | It is a computed baseline (SHA-256 over live DDL + `PRAGMA table_xinfo`/`foreign_key_list`/`index_list`/`index_xinfo`). A hand edit desyncs the stamp from the real schema and the next `applyPending` either falsely passes or falsely refuses. The only sanctioned re-baselines are `scripts/restamp-fingerprints.js` (recompute fingerprints of a confirmed-good live schema) and `scripts/baseline-existing-db.js` (semantic-gated first baseline of a pre-ledger device — Option B Stage 0, spec 2026-07-07). |
 | Reseed or overwrite `/data/db/farming.db` on a provisioned Pi | `deploy.sh`'s `seed_db_if_missing` only seeds when the file is absent *and* no WAL/SHM/journal sidecars exist; it refuses otherwise. Overwriting destroys irreplaceable farm history. |
-| Add new schema behavior to `sync-init-fn` (the boot node) | It is FROZEN (AGENTS.md "Boot-DDL freeze"). New schema goes through the migration runner's ordered files, even though the runner doesn't execute on-device yet — freezing the boot node is what makes eventual cutover (Option B) tractable. |
+| Add new schema behavior to `sync-init-fn` (the boot node) | It is FROZEN (AGENTS.md "Boot-DDL freeze"). New schema goes through the migration runner's ordered files and deploy-time runner path, not boot-time inline DDL. |
 | Modify an already-merged `database/migrations/ordered/NNNN__slug.sql` file | Migrations are checksummed (SHA-256 of the raw file bytes, `lib/osi-migrate/migrations-loader.js`). Changing a merged file makes the ledger's stored checksum mismatch the file on next apply, which the runner treats as `repair_required` and refuses to proceed past. |
 | Update `seed-blank.sql` or one bundled DB without the others | `verify-seed-replay.js` and `verify-db-schema-consistency.js` both fail if any of the 7 bundled copies drifts from the seed/migration-replay schema. One home for the fact: keep all copies byte/fingerprint-identical in the same commit. |
 | Rebuild a parent table (drop/rename swap) without the FK fence | Without `PRAGMA foreign_keys=OFF` held across the swap, `ON DELETE CASCADE` on child tables (`device_data`, `chameleon_readings`) silently wipes their rows when the parent is dropped. This caused a documented field history-loss incident (`docs/operations/edge-history-retention.md`). |
@@ -74,12 +75,12 @@ outside the one sanctioned exception.
 
 | Change | Mechanism | Notes |
 |---|---|---|
-| New table, column, index, view, or trigger (append-only) | New `additive` ordered migration + `seed-blank.sql` + all 7 bundled DBs | No backup, no writers-stopped gate required by the runner itself, but you still must keep parity surfaces in sync (see Walkthrough). |
-| Drop/rename/rebuild a table, or alter a CHECK/constraint that SQLite can't `ALTER` in place | New `destructive` ordered migration | Requires `writersStopped=true`; take a backup; FK fence. Since the runner does not run on-device today, on-device destructive changes are not currently supported outside the one sanctioned devices-CHECK rebuild (below) — anything else requires the Option B boot-path project; do not invent an ad hoc path (`ensure_*` functions are additive-only). |
-| Backfill / data correction against existing rows | New `data` ordered migration | Backup + normal transaction; no FK fence; no writers-stopped gate; must be idempotent against the pre-migration row shape. |
+| New table, column, index, view, or trigger (append-only) | New `additive` ordered migration + `seed-blank.sql` + all 7 bundled DBs | No backup, no writers-stopped gate required by the runner itself, but you still must keep parity surfaces in sync (see Walkthrough). Already-provisioned Pis receive it through `deploy.sh` `run_schema_migration()`. |
+| Drop/rename/rebuild a table, or alter a CHECK/constraint that SQLite can't `ALTER` in place | New `destructive` ordered migration | Requires `writersStopped=true`; FK fence in the migration. `deploy.sh` stops Node-RED, checkpoints WAL, and invokes `scripts/migrate-cli.js` with a persistent pre-migration backup under `/data/backups/migrate`; do not invent an ad hoc path. |
+| Backfill / data correction against existing rows | New `data` ordered migration | Persistent backup + normal transaction; no FK fence; must be idempotent against the pre-migration row shape. Deploy-time delivery uses the same `run_schema_migration()` path. |
 | `devices.type_id` CHECK needs a new device type on a **live** Pi today | The guarded fail-closed rebuild already shipped in `sync-init-fn` (sanctioned exception) + `scripts/repair-pi-schema.js` entry | Do not add a second rebuild path; extend the existing `REQUIRED_TYPES` set and its parity surfaces (`verify-runtime-schema-parity.js`, `verify-db-schema-consistency.js`) — subject to the full boot-node merge gate below (four verifiers + production-copy rehearsal). |
-| Idempotent additive repair needed on live Pis at deploy time (e.g. a new column) | `deploy.sh` `ensure_*` function | Follows the `ensure_dendro_schema` / `ensure_gateway_health_schema` precedent: `ALTER TABLE ... ADD COLUMN`, catching `duplicate column name` as a no-op. Never used for anything destructive. |
-| Any other on-device schema mutation | Not currently supported without a boot-path project | See the Option B boot-path project in the ADR (`docs/adr/2026-06-30-schema-and-contract-ownership.md`); do not invent a new ad hoc mutation path. |
+| Idempotent additive repair needed on live Pis at deploy time (e.g. a new column) | New ordered migration delivered by `deploy.sh` `run_schema_migration()` | Do not add `ensure_*` functions. The deploy runner fetches `CHECKSUMS.json`, all ordered migrations, Stage 0 baseline helpers, and `lib/osi-migrate`, then applies pending migrations once writers are stopped. |
+| Any other on-device schema mutation | Ordered migration runner path, or no change | If the runner cannot express it safely, stop and design the schema project first; do not add inline DDL to `deploy.sh`, `flows.json`, or init scripts. |
 
 ## The model: ownership, migrations, risk classes
 
@@ -109,8 +110,7 @@ by the ADR but was never committed to the repo — do not go looking for it.)
 ### Ordered migrations: format and risk-class declaration
 
 Files live at `database/migrations/ordered/NNNN__slug.sql` — currently
-`0001__baseline.sql` (the full schema equivalent of `seed-blank.sql` at the time
-the runner was introduced) and `0002__gateway_health.sql`. The filename format is
+`0001__baseline.sql` through `0007__analysis_views.sql`. The filename format is
 enforced by a regex in `lib/osi-migrate/migrations-loader.js`:
 `^(\d{4})__([a-z0-9_]+)\.sql$` — four-digit version, double underscore, lowercase
 slug. Versions must be unique and are sorted numerically, not lexically.
@@ -192,25 +192,24 @@ per-file resilient (one un-removable sibling logs and continues) and the whole
 prune step is wrapped so a directory-level failure never fails an
 already-integrity-checked backup.
 
-### Key fact: the runner does not run on a booting Pi
+### Key fact: deploy-time runner, not boot-time runner
 
-Verified by grep: `applyPending`, `bootstrapFresh`, and `verifyHead` (the only
-exports of `lib/osi-migrate/index.js`) are referenced **only** inside
-`lib/osi-migrate/` itself, its `__tests__/`, and three scripts:
-`scripts/verify-seed-replay.js` (calls `bootstrapFresh` against a scratch DB and
-compares fingerprints to `seed-blank.sql`, `appVersion: 'ci'`),
-`scripts/restamp-fingerprints.js` (calls `syncFingerprints` directly, not the
-apply path, for the stale-stamp recovery verb), and the runner's own test suite.
-`deploy.sh` and `flows.json`/`init.d` contain **zero** references to
-`osi-migrate`/`applyPending` — confirmed by grepping the whole repo. `deploy.sh`'s
-own `ensure_gateway_health_schema` function fetches
-`database/migrations/ordered/0002__gateway_health.sql` and executes its raw SQL
-directly via a small inline Node/`sqlite3` script, guarded by a regex that refuses
-to run anything except an `additive`-headed file — it does not call the ledgered
-runner at all. So today there is no dormant on-boot migration risk: the runner is
-strictly a CI/tooling-time mechanism (`.github/workflows/migrations.yml` runs
-`verify-migrations.js`, `verify-seed-replay.js`, and the runner's own
-`node --test` suite on every push/PR to `main`/`master`).
+`deploy.sh` is now the on-device delivery path for ordered migrations. Its
+`run_schema_migration()` function fetches `CHECKSUMS.json`, every ordered
+migration named by that manifest, `scripts/migrate-cli.js`,
+`scripts/baseline-existing-db.js`, `scripts/repair-sync-outbox-v2.js`,
+`scripts/semantic-schema-compare.js`, and the required `lib/osi-migrate` modules.
+It ensures the `sqlite3` CLI is present, attempting `opkg install sqlite3-cli`
+before refusing. It then stops Node-RED, waits up to 30 seconds for the process to
+exit, checkpoints WAL, inspects `schema_migrations`, performs the temporary
+pre-baseline `sync_outbox` v2-column repair and semantic baseline only when the
+DB has no ledger rows yet, and calls `migrate-cli.js` with `--backup-dir
+/data/backups/migrate`.
+
+That is still **not** a boot-time path. `flows.json`, the Node-RED init script,
+and `sync-init-fn` must not call `applyPending` or grow new schema behavior.
+Boot remains limited to the frozen legacy node plus the already-sanctioned
+devices-CHECK safety exception.
 
 ## Boot-DDL freeze (the other schema path, and why it's frozen)
 
@@ -222,9 +221,8 @@ present byte-identically in both
 against a schema that already has the column (errors from these are swallowed in
 a `try {...} catch (_) {}` sweep). This node is **FROZEN**: do not add new schema
 behavior to it. New schema changes go through the ordered-migration runner's
-files even though, per the Key Fact above, nothing executes those files on a live
-Pi yet — the migration files remain the durable, checksummed record of intended
-schema even while the boot path itself is still the inline node.
+files and the deploy-time runner path. That freeze is the reason the migration
+runner cutover stays tractable.
 
 ### Incident history (one line each, factual)
 
@@ -366,38 +364,34 @@ the `bcm2709` mirror — confirmed green here).
 All of the above ran clean (exit 0) in this worktree on 2026-07-06 with no
 working-tree changes as a side effect.
 
-## `deploy.sh` idempotent repair
+## `deploy.sh` migration runner
 
-`deploy.sh` never reseeds a provisioned Pi (see NEVER-do list). What it *does* do
-is repair schema drift on an already-provisioned live DB, at deploy time, via a
-family of `ensure_*` functions (`ensure_dendro_schema`,
-`ensure_zone_irrigation_calibration_schema`, `ensure_analysis_views_schema`,
-`ensure_chameleon_schema`, `ensure_gateway_health_schema`), all invoked
-unconditionally near the end of the script. Each:
+`deploy.sh` never reseeds a provisioned Pi (see NEVER-do list). For schema catchup
+on an existing DB, it now uses one path: `run_schema_migration()`.
 
-1. Skips entirely if `$DB_PATH` (`/data/db/farming.db`) doesn't exist yet (a
-   fresh device gets the full schema from the seed instead).
-2. `ensure_gateway_health_schema` fetches
-   `database/migrations/ordered/0002__gateway_health.sql` and executes its raw
-   SQL directly, after asserting the file's header is exactly `-- risk:
-   additive` ("Single source of DDL truth: execute the ordered-migration file
-   itself") and hard-refusing (`process.exit(1)`) otherwise — the one place an
-   `ensure_*` function reuses a migration file verbatim rather than hand-writing
-   SQL inline.
-3. Other `ensure_*` functions (e.g. `ensure_dendro_schema`) hand-write
-   idempotent `ALTER TABLE ... ADD COLUMN` statements in an inline
-   Node/`sqlite3` heredoc, explicitly catching and ignoring a `duplicate column
-   name` error so re-running deploy on an already-repaired Pi is a no-op, then
-   backfill newly-added columns from existing data, then assert (throw if not)
-   the expected columns exist afterward.
-4. Sets `busy_timeout=5000` before any statement, matching the Node-RED runtime
-   helper's 5 s busy timeout.
+1. It fetches the ordered migration corpus from
+   `database/migrations/ordered/CHECKSUMS.json` instead of carrying inline DDL.
+2. It fetches the Stage 0 pre-baseline helpers and the required
+   `lib/osi-migrate` modules into `$TMP_DIR`, so the on-device script runs the
+   same ledgered code as CI.
+3. It ensures the `sqlite3` CLI exists (`opkg install sqlite3-cli` if needed),
+   stops Node-RED before any live DB write, chains its restart with the existing
+   cleanup trap, waits up to 30 seconds for the process to exit, checkpoints WAL,
+   inspects `schema_migrations`, and only on DBs with no ledger rows runs
+   `repair-sync-outbox-v2.js` followed by `baseline-existing-db.js`. It
+   checkpoints again, then invokes `migrate-cli.js`.
+4. `migrate-cli.js` calls `applyPending(..., writersStopped: true)` and uses a
+   persistent pre-migration byte-image backup directory:
+   `/data/backups/migrate` (or `MIGRATE_BACKUP_DIR` if explicitly overridden).
+5. If migration fails after a restoreable destructive/data backup, deploy exits
+   after restarting Node-RED. If restore integrity itself fails (`migrate-cli`
+   rc=3), deploy restores the cleanup trap and intentionally leaves Node-RED
+   stopped for operator intervention.
 
-**Boundary:** `deploy.sh` repairs an existing live DB; it does not create one over
-an existing file, and none of the `ensure_*` functions are destructive-class
-(table rebuild/drop) — that class is only handled today by the sanctioned
-boot-node exception. The actual live-deploy procedure (how to run `deploy.sh`
-against a specific Pi, safely) is out of scope here — see `osi-live-ops-runbook`.
+**Boundary:** `deploy.sh` is the deploy-time migration runner path; it must stay
+free of inline `CREATE TABLE` / `ALTER TABLE` / `DROP TRIGGER` schema snippets.
+The actual live-deploy procedure (how to run `deploy.sh` against a specific Pi,
+safely) is out of scope here — see `osi-live-ops-runbook`.
 
 ## Restamp rules
 
@@ -421,9 +415,9 @@ appropriate to reach for at all.
 
 ## Common mistakes
 
-- **Assuming the migration runner is "live."** It is CI/tooling-time only today
-  (Key Fact above); nothing on-device calls `applyPending`. A `destructive`/`data`
-  migration will not run automatically on the next Pi boot.
+- **Assuming the migration runner runs on boot.** It runs during `deploy.sh`, not
+  during Node-RED startup. A `destructive`/`data` migration will not run
+  automatically on the next Pi boot.
 - **Treating `sync-init-fn`'s 93 `ADD COLUMN`s as a template to copy.** Frozen
   legacy debt (81 redundant with the seed, per AGENTS.md), not a pattern to
   extend — new additive schema goes in an ordered migration, not ADD COLUMN #94.
@@ -458,14 +452,14 @@ change or table rebuild, everything below still applies but you are in
 that live without also reading `osi-live-ops-runbook`.
 
 1. **Write the migration.** Create
-   `database/migrations/ordered/0003__your_slug.sql` (next contiguous 4-digit
+   `database/migrations/ordered/0008__your_slug.sql` (next contiguous 4-digit
    version) with a `-- risk: additive` header as the first line, then your
    `CREATE TABLE`/`ALTER TABLE ... ADD COLUMN`/`CREATE INDEX`/`CREATE TRIGGER`
    statements. Prefer `IF NOT EXISTS` on object-creation statements (tables,
    indexes, triggers) so the file is safely re-runnable, matching the `0002`
-   precedent. `ALTER TABLE ... ADD COLUMN` has no `IF NOT EXISTS` in SQLite —
-   its live-Pi delivery goes through a deploy-time `ensure_*` function that
-   treats `duplicate column name` as a no-op (see the decision table above).
+   precedent. `ALTER TABLE ... ADD COLUMN` has no `IF NOT EXISTS` in SQLite, but
+   live-Pi delivery still goes through the ordered migration runner; do not add a
+   deploy-time `ensure_*` duplicate-column wrapper.
 2. **Update `database/seed-blank.sql`.** Append the equivalent DDL so a fresh
    database created from the seed ends up schema-identical to one built by
    replaying all ordered migrations. `verify-seed-replay.js` is the automatic
@@ -482,7 +476,7 @@ that live without also reading `osi-live-ops-runbook`.
      conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/db/farming.db \
      database/farming.db \
      web/react-gui/farming.db
-   do sqlite3 -bail "$db" < database/migrations/ordered/0003__your_slug.sql && echo "OK $db"; done \
+   do sqlite3 -bail "$db" < database/migrations/ordered/0008__your_slug.sql && echo "OK $db"; done \
      && cp conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/db/farming.db \
            conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/db/farming.db \
      && echo "OK mirror copy"
@@ -494,11 +488,10 @@ that live without also reading `osi-live-ops-runbook`.
    the migration file.
 5. **Add TypeScript types** in `web/react-gui/src/types/farming.ts` if the new
    column/table is GUI-visible.
-6. **If a live Pi needs the column before its next full schema catch-up**, add or
-   extend a `deploy.sh` `ensure_*` function following the `ensure_gateway_health_schema`
-   / `ensure_dendro_schema` precedent (idempotent `ADD COLUMN`, catch `duplicate
-   column name`, assert presence afterward). This is optional and only needed for
-   changes that must reach already-provisioned Pis outside a full reseed.
+6. **Live Pi delivery is deploy-runner delivery.** Do not add or extend
+   `deploy.sh` `ensure_*` functions. `deploy.sh` fetches and runs the ordered
+   migrations, so the migration file is the live repair path for already
+   provisioned Pis.
 7. **Run the verifier set** and confirm each prints its OK line:
    ```bash
    node scripts/verify-migrations.js
@@ -535,7 +528,7 @@ node scripts/verify-devices-rebuild-fence.js            # boot-node rebuild is s
 node --test scripts/rehearse-devices-rebuild.test.js    # boot-node rebuild behaves correctly against 4 seeded cases
 node --test lib/osi-migrate/__tests__/*.test.js         # runner unit tests (risk classes, atomicity, drift preflight, partial-batch retry)
 find . -name farming.db -not -path '*/node_modules/*'  | sort   # should list exactly 7 paths
-ls database/migrations/ordered/                         # current migration set (0001, 0002 as of 2026-07-06)
+ls database/migrations/ordered/                         # current migration set (0001..0007 as of 2026-07-10)
 ls .github/workflows/ && cat .github/workflows/migrations.yml .github/workflows/verify-sync-flow.yml   # what CI actually gates (both workflows)
 grep -rn "osi-migrate\|applyPending\|bootstrapFresh\|verifyHead" scripts/ lib/ deploy.sh conf/ feeds/chirpstack-openwrt-feed/apps/node-red/files/ --exclude-dir=node_modules   # re-confirm no on-device caller (covers flows.json + init files, not just *.js/*.sh)
 ```

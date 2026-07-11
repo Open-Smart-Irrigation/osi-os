@@ -441,10 +441,13 @@ test('saveAnalysisView rejects an empty or oversized name', async () => {
   }
 });
 
-test('deploy script repairs analysis_views without reseeding the live database', () => {
+test('deploy script delivers analysis_views through the migration runner', () => {
   const deploy = fs.readFileSync(path.join(repoRoot, 'deploy.sh'), 'utf8');
-  assert.match(deploy, /CREATE TABLE IF NOT EXISTS analysis_views/);
-  assert.match(deploy, /Live analysis views schema repair/);
+  assert.match(deploy, /run_schema_migration/);
+  assert.match(deploy, /database\/migrations\/ordered\/\$migration/);
+  assert.match(deploy, /migrate-cli\.js/);
+  assert.doesNotMatch(deploy, /CREATE TABLE IF NOT EXISTS analysis_views/);
+  assert.doesNotMatch(deploy, /Live analysis views schema repair/);
   assert.match(deploy, /osi-history-helper\/analysis\.js/);
 });
 

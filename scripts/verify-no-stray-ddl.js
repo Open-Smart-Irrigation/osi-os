@@ -23,8 +23,8 @@
 // Known current owners of the frozen counts (informational, see the
 // committed baseline's "notes" field): the two request-path
 // `valve_actuation_expectations` CREATE TABLE occurrences in flows.json
-// function nodes, and deploy.sh's `ensure_*` helpers plus the
-// analysis_views / chameleon calibration / chameleon_readings DDL blocks.
+// function nodes. deploy.sh must not carry inline DDL; schema changes there go
+// through the ordered migration runner fetched by run_schema_migration().
 
 const fs = require('node:fs');
 const path = require('node:path');
@@ -254,8 +254,8 @@ const BASELINE_NOTES = [
   'The enforcement gate is scripts/verify-no-stray-ddl.js comparing HEAD counts against',
   '--base-ref (default origin/main) per surface/marker; see the script header.',
   'Known owners of the current counts: the two request-path CREATE TABLE',
-  'valve_actuation_expectations occurrences in flows.json function nodes; deploy.sh',
-  'ensure_* helpers, analysis_views, chameleon calibration, and chameleon_readings DDL.',
+  'valve_actuation_expectations occurrences in flows.json function nodes.',
+  'deploy.sh must stay free of inline DDL; it fetches the ordered migration runner instead.',
 ];
 
 function verifyAgainstBase(options) {
