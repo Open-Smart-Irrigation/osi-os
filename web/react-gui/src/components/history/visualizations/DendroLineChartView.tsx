@@ -25,6 +25,7 @@ type RenderSeries = {
   key: string;
   label: string;
   unit: string;
+  source: string;
   points: Array<{ t: string; value: number | null }>;
 };
 
@@ -108,6 +109,7 @@ function normalizeSeriesList(t: HistoryTranslate, seriesList: readonly unknown[]
       key: `series-${index}`,
       label: label && !looksLikeRawSourceToken(label) ? label : fallbackSeriesLabel(t, source),
       unit: normalizedText(isRecord(series) ? series.unit : null) ?? '',
+      source,
       points,
     };
   });
@@ -131,6 +133,11 @@ export function buildNumericRows(seriesList: RenderSeries[]): ChartRow[] {
   return [...rows.values()].sort((left, right) => left.tMs - right.tMs);
 }
 
+export function selectPlottedSeries(seriesList: RenderSeries[]): RenderSeries[] {
+  const stemSeries = seriesList.filter((series) => /stem/i.test(series.source));
+  return stemSeries.length > 0 ? stemSeries : seriesList;
+}
+
 function visualWindowsEqual(left: ChartWindow | undefined, right: ChartWindow | undefined): boolean {
   return left?.fromMs === right?.fromMs && left?.toMs === right?.toMs;
 }
@@ -139,19 +146,20 @@ const DendroLineChartViewComponent: React.FC<DendroLineChartViewProps> = ({ data
   const { t: translate } = useTranslation('history');
   const t = translate as HistoryTranslate;
   const hoverCapable = useHoverCapable();
-  const { visibleSeries, rows } = React.useMemo(() => {
+  const { plottedSeries, seriesByKey, rows } = React.useMemo(() => {
     const rawSeries = Array.isArray(data?.series) ? data.series : [];
-    const nextVisibleSeries = normalizeSeriesList(t, rawSeries).filter(hasVisiblePoints);
+    const nextPlottedSeries = selectPlottedSeries(normalizeSeriesList(t, rawSeries).filter(hasVisiblePoints));
     return {
-      visibleSeries: nextVisibleSeries,
-      rows: buildNumericRows(nextVisibleSeries),
+      plottedSeries: nextPlottedSeries,
+      seriesByKey: new Map(nextPlottedSeries.map((s) => [s.key, s])),
+      rows: buildNumericRows(nextPlottedSeries),
     };
   }, [data, t]);
   const spanMs = chartWindow
     ? chartWindow.toMs - chartWindow.fromMs
     : (rows.length ? rows[rows.length - 1].tMs - rows[0].tMs : 0);
 
-  if (visibleSeries.length === 0 || rows.length === 0) {
+  if (plottedSeries.length === 0 || rows.length === 0) {
     return (
       <section
         role="region"
@@ -183,9 +191,20 @@ const DendroLineChartViewComponent: React.FC<DendroLineChartViewProps> = ({ data
               domain={chartWindow ? [chartWindow.fromMs, chartWindow.toMs] : ['dataMin', 'dataMax']}
               tickFormatter={(value) => formatTimeTick(Number(value), spanMs)}
             />
-            <YAxis {...historyValueYAxis(consistentUnit(visibleSeries), 48)} />
-            {hoverCapable && <Tooltip isAnimationActive={false} labelFormatter={formatTimestampMs} />}
-            {visibleSeries.map((series, index) => (
+            <YAxis {...historyValueYAxis(consistentUnit(plottedSeries), 48)} />
+            {hoverCapable && (
+              <Tooltip
+                isAnimationActive={false}
+                labelFormatter={formatTimestampMs}
+                formatter={(value: unknown, _name: unknown, item: { dataKey?: unknown }) => {
+                  const s = seriesByKey.get(String(item.dataKey));
+                  const numeric = typeof value === 'number' && Number.isFinite(value) ? value : null;
+                  const text = numeric === null ? '-' : `${Number.isInteger(numeric) ? numeric : numeric.toFixed(1)} ${s?.unit ?? ''}`.trim();
+                  return [text, s?.label ?? ''];
+                }}
+              />
+            )}
+            {plottedSeries.map((series, index) => (
               <Line
                 key={series.key}
                 type="monotone"

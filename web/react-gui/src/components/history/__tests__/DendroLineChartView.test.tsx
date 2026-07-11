@@ -2,7 +2,7 @@ import '@testing-library/jest-dom/vitest';
 import { render, screen, within } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 
-import { buildNumericRows, DendroLineChartView } from '../visualizations/DendroLineChartView';
+import { buildNumericRows, DendroLineChartView, selectPlottedSeries } from '../visualizations/DendroLineChartView';
 import type { HistoryCardDataResponse } from '../../../history/types';
 
 class ResizeObserverStub {
@@ -84,6 +84,28 @@ describe('DendroLineChartView', () => {
     ]);
 
     expect(rows[0].tMs).toBe(Date.parse('2026-06-01T00:00:00Z'));
+  });
+
+  describe('selectPlottedSeries', () => {
+    const series = (source: string) => ({
+      key: source, label: source, unit: 'um', source,
+      points: [{ t: '2026-07-10T00:00:00.000Z', value: 1 }],
+    });
+
+    it('keeps only stem-change series when one exists', () => {
+      const picked = selectPlottedSeries([
+        series('stem_change_um Stem Change'),
+        series('position_mm Position'),
+        series('dendro_ratio Ratio'),
+        series('delta_mm Delta'),
+      ]);
+      expect(picked.map((entry) => entry.source)).toEqual(['stem_change_um Stem Change']);
+    });
+
+    it('falls back to all series when no stem series exists', () => {
+      const input = [series('position_mm Position'), series('dendro_ratio Ratio')];
+      expect(selectPlottedSeries(input)).toEqual(input);
+    });
   });
 
   it('renders the line chart without title, reading count, or legend cards', () => {
