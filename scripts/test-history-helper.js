@@ -2134,6 +2134,51 @@ test('uses live device_data for long-range source-filtered requests', async () =
   }
 });
 
+// --- data-coverage-gap: future time must not count as missing data ---
+test('data-coverage-gap interpretation ignores future time in window', () => {
+  const base = {
+    cardType: 'dendro',
+    generatedAt: '2026-07-11T12:00:00.000Z',
+    coverageConfidence: 'configured',
+    rangeFrom: '2026-07-01T00:00:00.000Z',
+    rangeTo: '2026-08-01T00:00:00.000Z',
+  };
+  const fullElapsedCoverage = helper.buildLocalInterpretations({ ...base, coveragePct: 34 });
+  assert(
+    !fullElapsedCoverage.some((item) => item.ruleId === 'data-coverage-gap'),
+    'coverage gap must not fire when the elapsed part of the window is fully covered',
+  );
+
+  const realGap = helper.buildLocalInterpretations({ ...base, coveragePct: 15 });
+  assert(
+    realGap.some((item) => item.ruleId === 'data-coverage-gap'),
+    'coverage gap must still fire for genuinely low elapsed coverage',
+  );
+
+  const pastWindow = helper.buildLocalInterpretations({
+    ...base,
+    rangeFrom: '2026-06-01T00:00:00.000Z',
+    rangeTo: '2026-06-30T00:00:00.000Z',
+    coveragePct: 70,
+  });
+  assert(
+    pastWindow.some((item) => item.ruleId === 'data-coverage-gap'),
+    'past windows keep the plain <80% threshold',
+  );
+
+  const fullyFuture = helper.buildLocalInterpretations({
+    ...base,
+    rangeFrom: '2026-08-01T00:00:00.000Z',
+    rangeTo: '2026-09-01T00:00:00.000Z',
+    coveragePct: null,
+    coverageConfidence: 'unknown',
+  });
+  assert(
+    !fullyFuture.some((item) => item.ruleId === 'data-coverage-gap'),
+    'fully-future windows must not warn about missing data',
+  );
+});
+
 test('verify-sync-flow chains SQL-backed history helper regression tests', () => {
   const verifySource = fs.readFileSync(path.join(repoRoot, 'scripts', 'verify-sync-flow.js'), 'utf8');
   assert.match(verifySource, /test-history-helper\.js/);
