@@ -112,6 +112,18 @@ describe('DailyMinMaxView', () => {
     expect(expanded[1]['daily-temp-mean']).toBe(17);
   });
 
+  it('expands a single bucket to a narrow ±45min segment', () => {
+    const rows = buildNumericRows({
+      key: 'daily-temp',
+      label: 'Air temperature',
+      unit: 'C',
+      points: [{ t: '2026-06-01T00:00:00Z', min: 11, max: 24, mean: 17 }],
+    });
+    const expanded = expandSinglePointRows(rows);
+    expect(expanded).toHaveLength(2);
+    expect(expanded[1].tMs - expanded[0].tMs).toBe(90 * 60 * 1000);
+  });
+
   it('renders min/max data as a real chart instead of a placeholder', () => {
     render(<DailyMinMaxView data={data()} />);
 

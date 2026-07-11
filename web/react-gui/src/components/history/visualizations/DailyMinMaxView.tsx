@@ -171,7 +171,7 @@ export function expandSinglePointRows(rows: ChartRow[]): ChartRow[] {
   if (rows.length !== 1) return rows;
 
   const center = rows[0].tMs;
-  const preferredHalfSegmentMs = 6 * 60 * 60 * 1000;
+  const preferredHalfSegmentMs = 45 * 60 * 1000;
   const left = center - preferredHalfSegmentMs;
   const right = center + preferredHalfSegmentMs;
 
