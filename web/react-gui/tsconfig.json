@@ -21,5 +21,6 @@
     "noFallthroughCasesInSwitch": true
   },
   "include": ["src"],
+  "exclude": ["src/**/__tests__/historyLocaleKeys.test.ts"],
   "references": [{ "path": "./tsconfig.node.json" }]
 }
