@@ -64,9 +64,9 @@ This is the **program map**, not a spec. Each item below is a charter line: goal
 |---|---|---|---|
 | 1.A1 `osi-lib` single-choke-point loader + quarantine (DD2); migrate `osi-history-helper`'s bare require onto it — **kills #99** — done: osi-lib loader + quarantine, 3 nodes migrated, verify-helper-registration + bare-require ratchet, PR #117 | M | — | spec+plan |
 | 1.A2 Ratchet trio (DD3): node-size ceiling, total-JS scoreboard, thin-node rule — done: `verify-flows-size-ratchet` (per-node ceiling + total scoreboard + thin-node heuristic), git-anchored, both profiles, PR #121 | S | — | direct |
-| 1.A3 Backfill `node --test` for the existing `osi-history-helper` (pattern proof for DD4's "done") | M | 1.A1 | direct |
-| 1.A4 Crash-loop escalation: distinct heartbeat health state + persistent local flag after N respawns | S | — | direct |
-| 1.A5 `sync_outbox` retention/prune + size cap with per-aggregate drop policy (DD18) | M | — | spec+plan (drop policy is a data decision) |
+| 1.A3 Backfill `node --test` for the existing `osi-history-helper` (pattern proof for DD4's "done") — done: 27 index.test.js + 3 analysis.test.js cases, Fable-reviewed edge cases, CI-wired | M | 1.A1 | direct |
+| 1.A4 Crash-loop escalation: distinct heartbeat health state + persistent local flag after N respawns — done: persistent `/data/node-red-crash-count`, `registerStartup`/`readCrashState` with NTP guard + atomic write + decay, flows.json integration (startup inject + heartbeat whitelist + errorCount threading), Fable-reviewed (M1 first-heartbeat fallback, M2 decay), deployed+verified on kaba100 | S | — | direct |
+| 1.A5 `sync_outbox` retention/prune + size cap with per-aggregate drop policy (DD18) — done: size cap (50k, env-overridable), telemetry/protected classification, batched eviction, eviction index (0008), Fable-reviewed (M1 false-alarm fix, S3 failure visibility), retention days adjudicated at 30 | M | — | spec+plan |
 
 **Track B — delivery capability + cloud hardening:**
 
@@ -74,8 +74,8 @@ This is the **program map**, not a spec. Each item below is a charter line: goal
 |---|---|---|---|---|
 | 1.B1 **Option B Stage 1**: deploy-time runner invocation per DD9 (lift additive-only gate for ledger-driven migrations; restore-on-failure; rehearsed on gateway DB copies) | osi-os | L | 0.3 | spec+plan |
 | 1.B2 Deliver migration 0004 to both demo gateways via 1.B1 + canary hold (0.2) | osi-os live-ops | M | 1.B1, 0.2 | runbook |
-| 1.B3 osi-server CI (build + test + cross-repo op-parity) + ArchUnit boundary test (DD11) + Micrometer/actuator metrics endpoint + GHCR image publish + pull-only VPS deploy (DD16) | osi-server | M | — | spec+plan |
-| 1.B4 Per-event tx boundary + `sync_dead_letter` + batch cap + rate limit (DD13), with a Testcontainers test reproducing the poison-batch replay (DD15) — **hard gate for Uganda** | osi-server | M | 1.B3 | spec+plan |
+| 1.B3 osi-server CI (build + test + cross-repo op-parity) + ArchUnit boundary test (DD11) + Micrometer/actuator metrics endpoint + GHCR image publish + pull-only VPS deploy (DD16) — done: `backend-ci.yml` + `prediction-ci.yml` + `ghcr-publish.yml` (3 images), ArchUnit FreezingArchRule (3 rules + baseline store), Actuator/Micrometer admin-gated, docker-compose switched to GHCR pull, rehearsal+prod runbook docs | osi-server | M | — | spec+plan |
+| 1.B4 Per-event tx boundary + `sync_dead_letter` + batch cap + rate limit (DD13), with a Testcontainers test reproducing the poison-batch replay (DD15) — **hard gate for Uganda** — done: `SyncEventTxExecutor` (`REQUIRES_NEW`), `sync_dead_letter` table + entity + admin controller + retention job, batch cap 100, Bucket4j rate limit 10/min/gateway, `SyncExceptionClassifier`, `PoisonBatchIT` + `BacklogDrainIT` (5000 events) + `SyncDeadLetterRepositoryIT` on Testcontainers Postgres 16 | osi-server | M | 1.B3 | spec+plan |
 
 ### Phase 2 — Uganda + prove the strangler on pure seams (weeks 6–10)
 
