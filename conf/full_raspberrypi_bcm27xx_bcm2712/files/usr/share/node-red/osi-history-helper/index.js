@@ -962,6 +962,7 @@ function aggregateRows(rows, options = {}) {
   if (startMs === null || endMs === null || endMs <= startMs) throw new Error('aggregateRows requires a valid start/end range for bucketed aggregation');
 
   const buckets = aggregationBuckets(startMs, endMs, aggregation, bucketSeconds, options.timezone);
+  const nowMs = toFiniteNumber(options.nowMs) ?? Date.now();
 
   for (const bucket of buckets) {
     const bucketRows = sortedRows.filter((entry) => entry.recordedAtMs >= bucket.bucketStartMs && entry.recordedAtMs < bucket.bucketEndMs);
@@ -978,7 +979,12 @@ function aggregateRows(rows, options = {}) {
       };
       bucket.sampleCount += bucket.series[channel.id].sampleCount;
     }
-    const coverage = coverageForBucket(bucketRows, channels, sourceCadences, (bucket.bucketEndMs - bucket.bucketStartMs) / 1000);
+    // Coverage denominator counts only elapsed time: a bucket (or window)
+    // that extends past `now` cannot be "missing" samples it could not
+    // yet have received. Fully-future buckets get a zero denominator,
+    // which coverageForBucket maps to coveragePct null.
+    const elapsedBucketSeconds = Math.max(0, (Math.min(bucket.bucketEndMs, nowMs) - bucket.bucketStartMs) / 1000);
+    const coverage = coverageForBucket(bucketRows, channels, sourceCadences, elapsedBucketSeconds);
     bucket.coveragePct = coverage.coveragePct;
     bucket.coverageConfidence = coverage.coverageConfidence;
     delete bucket.bucketStartMs;
@@ -986,7 +992,7 @@ function aggregateRows(rows, options = {}) {
   }
 
   const totalSamples = buckets.reduce((sum, bucket) => sum + bucket.sampleCount, 0);
-  const totalSeconds = (endMs - startMs) / 1000;
+  const totalSeconds = Math.max(0, (Math.min(endMs, nowMs) - startMs) / 1000);
   const totalCoverage = coverageForBucket(sortedRows, channels, sourceCadences, totalSeconds);
   return {
     aggregation,
@@ -2173,26 +2179,17 @@ function buildLocalInterpretations(input = {}) {
 
   const generatedMs = parseTime(generatedAt);
   const rangeFromMs = parseTime(input.rangeFrom);
-  const rangeToMs = parseTime(input.rangeTo);
-  const windowKnown = rangeFromMs !== null && rangeToMs !== null && generatedMs !== null && rangeToMs > rangeFromMs;
-  const fullyFutureWindow = windowKnown && rangeFromMs >= generatedMs;
-  let effectiveCoveragePct = coveragePct;
-  if (coveragePct !== null && windowKnown && rangeToMs > generatedMs) {
-    const totalMs = rangeToMs - rangeFromMs;
-    const elapsedMs = generatedMs - rangeFromMs;
-    effectiveCoveragePct = elapsedMs <= 0 ? null : Math.min(100, coveragePct * (totalMs / elapsedMs));
-  }
-  const coverageGapFires = effectiveCoveragePct !== null
-    ? effectiveCoveragePct < 80
-    : (coverageConfidence === 'unknown' && !fullyFutureWindow);
-  if (coverageGapFires) {
+  // Fully-future windows have nothing to be missing yet; coverage is null
+  // there and must not trigger the unknown-confidence info banner either.
+  const fullyFutureWindow = rangeFromMs !== null && generatedMs !== null && rangeFromMs >= generatedMs;
+  if (!fullyFutureWindow && (coverageConfidence === 'unknown' || (coveragePct !== null && coveragePct < 80))) {
     items.push({
       ruleId: 'data-coverage-gap',
       severity: coverageConfidence === 'unknown' ? 'info' : 'warning',
       titleKey: 'history.interpretation.dataCoverageGap.title',
       bodyKey: 'history.interpretation.dataCoverageGap.body',
-      params: { coveragePct: effectiveCoveragePct ?? coveragePct, coverageConfidence },
-      evidence: [{ type: 'coverage', coveragePct: effectiveCoveragePct ?? coveragePct, coverageConfidence }],
+      params: { coveragePct, coverageConfidence },
+      evidence: [{ type: 'coverage', coveragePct, coverageConfidence }],
       source: 'local-rule',
     });
   }

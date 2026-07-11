@@ -2143,12 +2143,6 @@ test('data-coverage-gap interpretation ignores future time in window', () => {
     rangeFrom: '2026-07-01T00:00:00.000Z',
     rangeTo: '2026-08-01T00:00:00.000Z',
   };
-  const fullElapsedCoverage = helper.buildLocalInterpretations({ ...base, coveragePct: 34 });
-  assert(
-    !fullElapsedCoverage.some((item) => item.ruleId === 'data-coverage-gap'),
-    'coverage gap must not fire when the elapsed part of the window is fully covered',
-  );
-
   const realGap = helper.buildLocalInterpretations({ ...base, coveragePct: 15 });
   assert(
     realGap.some((item) => item.ruleId === 'data-coverage-gap'),
@@ -2255,4 +2249,55 @@ test('computeRollupBuckets merges a multi-device scope into ONE combined row per
   } finally {
     db.close();
   }
+});
+
+test('aggregateRows clamps coverage denominators at now for in-progress windows', () => {
+  const rows = [
+    { deveui: 'AA00000000000001', recorded_at: '2026-07-11T00:10:00.000Z', ext_temperature_c: 20 },
+    { deveui: 'AA00000000000001', recorded_at: '2026-07-11T05:50:00.000Z', ext_temperature_c: 22 },
+  ];
+  const result = helper.aggregateRows(rows, {
+    aggregation: 'daily',
+    channels: [{ id: 'ext_temperature_c', field: 'ext_temperature_c', unit: 'C' }],
+    start: '2026-07-11T00:00:00.000Z',
+    end: '2026-07-12T00:00:00.000Z',
+    timezone: 'UTC',
+    nowMs: Date.parse('2026-07-11T06:00:00.000Z'),
+    expectedCadences: { AA00000000000001: { seconds: 1200, confidence: 'configured' } },
+  });
+  assert.ok(result.coveragePct > 10 && result.coveragePct < 12,
+    `coverage must be computed over elapsed time only, got ${result.coveragePct}`);
+  assert.strictEqual(result.buckets.length, 1);
+  assert.ok(result.buckets[0].coveragePct > 10 && result.buckets[0].coveragePct < 12);
+});
+
+test('aggregateRows leaves completed-window coverage unchanged by the clamp', () => {
+  const rows = [
+    { deveui: 'AA00000000000001', recorded_at: '2026-07-10T00:10:00.000Z', ext_temperature_c: 20 },
+  ];
+  const result = helper.aggregateRows(rows, {
+    aggregation: 'daily',
+    channels: [{ id: 'ext_temperature_c', field: 'ext_temperature_c', unit: 'C' }],
+    start: '2026-07-10T00:00:00.000Z',
+    end: '2026-07-11T00:00:00.000Z',
+    timezone: 'UTC',
+    nowMs: Date.parse('2026-07-12T00:00:00.000Z'),
+    expectedCadences: { AA00000000000001: { seconds: 1200, confidence: 'configured' } },
+  });
+  assert.ok(result.coveragePct < 2, `completed windows keep the full denominator, got ${result.coveragePct}`);
+});
+
+test('aggregateRows reports null coverage for fully-future windows and buckets', () => {
+  const result = helper.aggregateRows([], {
+    aggregation: 'daily',
+    channels: [{ id: 'ext_temperature_c', field: 'ext_temperature_c', unit: 'C' }],
+    start: '2026-07-12T00:00:00.000Z',
+    end: '2026-07-13T00:00:00.000Z',
+    timezone: 'UTC',
+    nowMs: Date.parse('2026-07-11T06:00:00.000Z'),
+    expectedCadences: { AA00000000000001: { seconds: 1200, confidence: 'configured' } },
+  });
+  assert.strictEqual(result.coveragePct, null);
+  assert.strictEqual(result.buckets.length, 1);
+  assert.strictEqual(result.buckets[0].coveragePct, null);
 });
