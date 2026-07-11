@@ -13,7 +13,7 @@ const REPO = path.resolve(__dirname, '..');
 const SEED = path.join(REPO, 'database/seed-blank.sql');
 const FLOWS = path.join(REPO, 'conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/flows.json');
 const CONTRACT_ROOT = path.join(REPO, 'docs/contracts/zone-env');
-const CASE_NAME = 'local-openmeteo-water';
+const CASES = ['local-openmeteo-water', 'provider-unavailable'];
 const FIXED_NOW_ISO = '2026-07-11T10:00:00.000Z';
 const FIXED_NOW_MS = Date.parse(FIXED_NOW_ISO);
 const AUTH_SECRET = 'zone-env-vector-secret';
@@ -171,7 +171,7 @@ function responseFor(url) {
   throw new Error(`unexpected HTTP URL in zone-env vector harness: ${url}`);
 }
 
-function makeHttpStub() {
+function makeHttpStub(mode) {
   return {
     request(url, _options, callback) {
       const req = new EventEmitter();
@@ -181,12 +181,21 @@ function makeHttpStub() {
       req.end = () => {
         process.nextTick(() => {
           const res = new EventEmitter();
-          res.statusCode = 200;
-          callback(res);
-          process.nextTick(() => {
-            res.emit('data', JSON.stringify(responseFor(String(url))));
-            res.emit('end');
-          });
+          if (mode === 'fail') {
+            res.statusCode = 503;
+            callback(res);
+            process.nextTick(() => {
+              res.emit('data', 'Service Unavailable');
+              res.emit('end');
+            });
+          } else {
+            res.statusCode = 200;
+            callback(res);
+            process.nextTick(() => {
+              res.emit('data', JSON.stringify(responseFor(String(url))));
+              res.emit('end');
+            });
+          }
         });
       };
       return req;
@@ -205,7 +214,7 @@ function fixedDateClass(RealDate) {
   };
 }
 
-async function runCase() {
+async function runCase(caseName) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'zone-env-vector-'));
   const dbPath = path.join(dir, 'farming.db');
   seedDb(dbPath);
@@ -235,7 +244,8 @@ async function runCase() {
     },
   };
   const osiDb = { Database: function Database() { return makeFacadeShim(dbPath); } };
-  const httpStub = makeHttpStub();
+  const httpMode = caseName === 'provider-unavailable' ? 'fail' : 'ok';
+  const httpStub = makeHttpStub(httpMode);
   const osiLib = {
     require(name) {
       if (name === 'zone-env') {
@@ -261,10 +271,10 @@ async function runCase() {
   }
 }
 
-function inputFixture() {
-  return {
+function inputFixture(caseName) {
+  const base = {
     schemaVersion: 1,
-    case: CASE_NAME,
+    case: caseName,
     fixedNow: FIXED_NOW_ISO,
     request: { zone_id: 1, userId: 1 },
     seed: {
@@ -274,12 +284,17 @@ function inputFixture() {
       waterDates: ['2026-07-09', '2026-07-10', '2026-07-11'],
       estimatedValveLiters: 12,
     },
-    httpStubs: {
+  };
+  if (caseName === 'provider-unavailable') {
+    base.httpStubs = { provider: 'open-meteo', behaviour: '503-all-requests' };
+  } else {
+    base.httpStubs = {
       provider: 'open-meteo',
       currentTime: '2026-07-11T10:00',
       forecastHours: ['2026-07-11T10:00', '2026-07-11T13:00', '2026-07-11T16:00'],
-    },
-  };
+    };
+  }
+  return base;
 }
 
 function writeJson(file, value) {
@@ -292,21 +307,25 @@ function readJson(file) {
 }
 
 async function capture() {
-  const result = await runCase();
   writeJson(path.join(CONTRACT_ROOT, 'MANIFEST.json'), {
     schemaVersion: 1,
-    cases: [CASE_NAME],
+    cases: CASES,
   });
-  writeJson(path.join(CONTRACT_ROOT, 'cases', `${CASE_NAME}.input.json`), inputFixture());
-  writeJson(path.join(CONTRACT_ROOT, 'cases', `${CASE_NAME}.expected.json`), result.payload);
-  console.log(`Captured zone-env vector ${CASE_NAME}`);
+  for (const caseName of CASES) {
+    const result = await runCase(caseName);
+    writeJson(path.join(CONTRACT_ROOT, 'cases', `${caseName}.input.json`), inputFixture(caseName));
+    writeJson(path.join(CONTRACT_ROOT, 'cases', `${caseName}.expected.json`), result.payload);
+    console.log(`Captured zone-env vector ${caseName}`);
+  }
 }
 
 async function verify() {
-  const result = await runCase();
-  const expected = readJson(path.join(CONTRACT_ROOT, 'cases', `${CASE_NAME}.expected.json`));
-  assert.deepEqual(result.payload, expected);
-  console.log(`Verified zone-env vector ${CASE_NAME}`);
+  for (const caseName of CASES) {
+    const result = await runCase(caseName);
+    const expected = readJson(path.join(CONTRACT_ROOT, 'cases', `${caseName}.expected.json`));
+    assert.deepEqual(result.payload, expected);
+    console.log(`Verified zone-env vector ${caseName}`);
+  }
 }
 
 async function main() {

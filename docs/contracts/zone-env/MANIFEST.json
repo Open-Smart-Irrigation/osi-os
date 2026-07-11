@@ -1,6 +1,7 @@
 {
   "schemaVersion": 1,
   "cases": [
-    "local-openmeteo-water"
+    "local-openmeteo-water",
+    "provider-unavailable"
   ]
 }
