@@ -1,0 +1,5 @@
+{
+  "_comment": "Explicit growth allowances. Consumed-or-deleted: remove entry when offset by extraction.",
+  "node_allowances": {},
+  "total_allowance": { "delta": 0, "reason": "none currently needed" }
+}
