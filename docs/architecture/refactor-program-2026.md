@@ -64,9 +64,10 @@ This is the **program map**, not a spec. Each item below is a charter line: goal
 |---|---|---|---|
 | 1.A1 `osi-lib` single-choke-point loader + quarantine (DD2); migrate `osi-history-helper`'s bare require onto it — **kills #99** — done: osi-lib loader + quarantine, 3 nodes migrated, verify-helper-registration + bare-require ratchet, PR #117 | M | — | spec+plan |
 | 1.A2 Ratchet trio (DD3): node-size ceiling, total-JS scoreboard, thin-node rule — done: `verify-flows-size-ratchet` (per-node ceiling + total scoreboard + thin-node heuristic), git-anchored, both profiles, PR #121 | S | — | direct |
-| 1.A3 Backfill `node --test` for the existing `osi-history-helper` (pattern proof for DD4's "done") — done: 27 index.test.js + 3 analysis.test.js cases, Fable-reviewed edge cases, CI-wired | M | 1.A1 | direct |
+| 1.A3 Backfill `node --test` for the existing `osi-history-helper` (pattern proof for DD4's "done") — done: 27 index.test.js + 3 analysis.test.js cases, Fable-reviewed edge cases, CI-wired. **Residual (P2, adjudicated 2026-07-11):** co-located suite is 446 lines; the 2,141-line `scripts/test-history-helper.js` was not retired and carries all rollup-path coverage. Finish relocation at next helper touch (Option A adopted). | M | 1.A1 | direct |
 | 1.A4 Crash-loop escalation: distinct heartbeat health state + persistent local flag after N respawns — done: persistent `/data/node-red-crash-count`, `registerStartup`/`readCrashState` with NTP guard + atomic write + decay, flows.json integration (startup inject + heartbeat whitelist + errorCount threading), Fable-reviewed (M1 first-heartbeat fallback, M2 decay), deployed+verified on kaba100 | S | — | direct |
 | 1.A5 `sync_outbox` retention/prune + size cap with per-aggregate drop policy (DD18) — done: size cap (50k, env-overridable), telemetry/protected classification, batched eviction, eviction index (0008), Fable-reviewed (M1 false-alarm fix, S3 failure visibility), retention days adjudicated at 30 | M | — | spec+plan |
+| 1.A6 `osi-history-helper` rollup hardening: `rollupRowsToResult` invariant guard + contract docs, multi-device merged-scope golden tests, coverage-denominator clamp at `now`, expose `aggregation.source` on card-data payload. Plan: `docs/superpowers/plans/2026-07-11-rollup-hardening.md`. **Hard ordering: after mobile-plan Task 5; before 4.2 golden-vector capture.** | M | 1.A3 | spec+plan |
 
 **Track B — delivery capability + cloud hardening:**
 
@@ -102,7 +103,7 @@ This is the **program map**, not a spec. Each item below is a charter line: goal
 | Item | Repo | Size | Depends on | Mode |
 |---|---|---|---|---|
 | 4.1 LSN50 writer cutover on the DD7 evidence bar, with temporary UCI kill-switch (DD8), demos → production | osi-os | M | 3.3 evidence | runbook + direct |
-| 4.2 Extract History API Router → tested module (the HTTP-shaped seam, after the pattern is proven twice) | osi-os | L | 2.2, 2.4 | spec+plan |
+| 4.2 Extract History API Router → tested module (the HTTP-shaped seam, after the pattern is proven twice). **Hard gate (adjudicated 2026-07-11):** golden-vector capture must wait for mobile-plan Task 5 + 1.A6 (rollup hardening Tasks 3+4 change coverage values and payload shape) | osi-os | L | 2.2, 2.4, 1.A6 | spec+plan |
 | 4.3 **Option B Stage 2**: remove boot-node inline DDL — only after two clean fleet deliveries including Uganda, schema_sig converged fleet-wide for a sustained window | osi-os | M | 1.B1 ×2 proven, 2.1 | spec+plan |
 
 ### Phase 5 — Durability & scale hygiene (ongoing, interleave as capacity allows)

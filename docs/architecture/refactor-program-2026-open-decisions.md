@@ -130,3 +130,26 @@ All plans that anchor edits on `deploy.sh` line numbers (1.B1, 5.3) now include 
 4. Phases 3–5 (1.A2 ratchet, 3.0/3.1, 4.2/4.3, 5.1/5.2/5.6) — 2 CRITICAL + 4 HIGH found and fixed/noted.
 
 Total across all passes: **5 CRITICAL**, **9 HIGH**, **15+ MEDIUM** — all resolved as spec/plan edits or noted for executor attention. The architecture (DD1–DD18, phase gates, YAGNI) is validated as sound. All dangerous defects were concentrated in composition seams between plans and in ground-truth claims that drifted from live code.
+
+## Adjudicated 2026-07-11 — mobile-history review / rollup analysis intake
+
+### Program slotting
+
+- **Mobile History Review Fixes** (`docs/superpowers/plans/2026-07-11-mobile-history-review-fixes.md`): product-fix stream, not a program row. 12 of 13 tasks are react-gui-only with no program intersection. Task 5 (backend `buildLocalInterpretations` coverage rescale) intersects via the hard ordering constraint below.
+- **Rollup Hardening** (`docs/superpowers/plans/2026-07-11-rollup-hardening.md`): slotted as **1.A6** in the program table (Phase 1 Track A). Guard + tests + honesty fixes on an already-extracted module.
+- **Hard ordering (adopted):** mobile plan Task 5 → 1.A6 → 4.2 golden-vector capture. No parallel execution between these or with any other work touching `osi-history-helper` / `history-api-router-fn` / history locale files.
+- **Supersession order (adjudicated):** mobile plan first, hardening second. Mobile Task 5 ships the interim rescale with user-facing fixes (false "Sensor data is incomplete" banner). Hardening Task 3 supersedes with aggregation-layer clamp and removes the rescale. Both plans document both entry orders.
+
+### P1 — Per-source rollup key scheme — RESOLVED (adopted)
+
+Per-source rollup rows **alongside** merged rows, using the router's existing `sourceKeyForDevice` tokens (e.g. `env-src-<hash>`, `soil-src-<hash>`). Additive: merged reads stay byte-identical. The `rollupRowsToResult` single-key guard (added by 1.A6 Task 1) stays; each per-source read is a separate query binding one key. Row-count multiplier = `(1 + sources-per-card)` — trivial at current fleet scale.
+
+Decide was: before the per-source series split spec is written. The deferred "environment per-source series split" (mobile plan §Deferred item 1) can now proceed to spec when capacity allows.
+
+### P2 — 1.A3 residue (dual helper test suites) — RESOLVED (Option A)
+
+Finish the relocation and retire the scripts copy at next helper touch. 1.A3's program table wording amended to note the residual. The hardening plan's new tests append to `scripts/test-history-helper.js` for now; the eventual relocation moves them.
+
+### P3 — Interim-fix supersession order — RESOLVED (mobile first)
+
+Mobile plan executes first. Task 5 ships the interpretation-layer rescale with the user-facing fix batch. Hardening Task 3 (default entry state) supersedes with the aggregation-layer clamp and removes the rescale. This minimizes time a farmer-facing bug is live and avoids holding 12 GUI fixes hostage to the hardening plan's schedule.
