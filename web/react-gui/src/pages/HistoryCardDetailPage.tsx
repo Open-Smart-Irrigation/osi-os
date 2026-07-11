@@ -389,6 +389,7 @@ export const HistoryCardDetailPage: React.FC = () => {
   const [calendarMonthOffset, setCalendarMonthOffset] = useState(0);
   const [visualWindow, setVisualWindow] = useState<HistoryVisualWindow | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  useEffect(() => { setSettingsOpen(false); }, [displayCard?.cardId]);
   const [exportOpen, setExportOpen] = useState(false);
   const defaultRange = displayCard?.defaultRange ?? '24h';
   const timeViewport = useTimeViewport(

@@ -57,6 +57,15 @@ export const HistoryDetailHeader: React.FC<HistoryDetailHeaderProps> = ({
   const eyebrow = t(`history.cardType.${card.cardType}`);
   const sourceSummary = sources.length > 1 ? formatHistorySourceLabel(t, card) : null;
 
+  React.useEffect(() => {
+    if (!settingsOpen || !onSettingsToggle) return undefined;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') onSettingsToggle();
+    };
+    document.addEventListener('keydown', onKeyDown);
+    return () => document.removeEventListener('keydown', onKeyDown);
+  }, [settingsOpen, onSettingsToggle]);
+
   return (
     <header className={`sticky top-0 z-10 border-b border-[var(--border)] bg-[var(--surface)] shadow-sm ${compact ? 'px-3 py-1' : 'px-4 py-3'}`}>
       <div className={`flex items-center ${compact ? 'gap-2' : 'gap-3'}`}>
@@ -103,6 +112,15 @@ export const HistoryDetailHeader: React.FC<HistoryDetailHeaderProps> = ({
             ...
           </button>
           {settingsOpen && (
+            <>
+            <button
+              type="button"
+              aria-hidden="true"
+              tabIndex={-1}
+              data-testid="history-settings-backdrop"
+              className="fixed inset-0 z-10 cursor-default"
+              onClick={onSettingsToggle}
+            />
             <div
               role="menu"
               aria-label={t('history.settings.menuLabel')}
@@ -135,6 +153,7 @@ export const HistoryDetailHeader: React.FC<HistoryDetailHeaderProps> = ({
                 {t('history.settings.refresh')}
               </button>
             </div>
+            </>
           )}
         </div>
       </div>
