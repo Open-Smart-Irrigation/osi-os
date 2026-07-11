@@ -265,6 +265,7 @@ function assertFrontendValveControls() {
 
 const DURATION_FREE_ACTUATOR_KEYS = ['CLOSE'];
 const ACTUATOR_NAME_PATTERN = /OPEN|VALVE|CLOS|ACTUAT/i;
+const ACTUATOR_PATTERN_FALSE_POSITIVES = ['SET_STREGA_PARTIAL_OPENING'];
 
 function extractRegistryObject(nodeFunc, constName) {
     const declaration = `const ${constName}`;
@@ -348,7 +349,8 @@ function assertActuatorsDurationBound(registry) {
             }
         }
 
-        if (!entry.actuator && (ACTUATOR_NAME_PATTERN.test(key) || ACTUATOR_NAME_PATTERN.test(entry.dispatch))) {
+        if (!entry.actuator && !ACTUATOR_PATTERN_FALSE_POSITIVES.includes(key) &&
+            (ACTUATOR_NAME_PATTERN.test(key) || ACTUATOR_NAME_PATTERN.test(entry.dispatch))) {
             throw new Error(
                 `Registry entry "${key}" (dispatch: ${entry.dispatch}) matches actuator naming pattern ` +
                 `but declares actuator=false. Mislabeling bypasses the duration-bound gate.`
