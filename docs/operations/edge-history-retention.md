@@ -125,9 +125,9 @@ Protected aggregates are never evicted by the cap: `IRRIGATION_EVENT`,
 `SCHEDULE`, `ZONE`, `DEVICE`, and `GATEWAY_LOCATION`. If protected rows alone
 leave the table over `OSI_OUTBOX_MAX_ROWS`, the job evicts nothing further,
 logs `outbox size cap exceeded by protected rows: ...`, bumps `error_counts`
-through the Node-RED catch path, and keeps accepting writes. Until item 0.2
-adds `errors_total` to gateway health, this condition is visible on-device in
-the Node-RED log rather than remotely in heartbeat telemetry.
+through the Node-RED catch path, and keeps accepting writes. This condition
+is remotely visible in the heartbeat's `errors_total` field (wired by item
+1.A4); the specific error message remains in the on-device Node-RED log.
 
 Operator response for the protected-over-cap signal: investigate why the
 gateway is not delivering events to the cloud. The telemetry runaway is bounded
