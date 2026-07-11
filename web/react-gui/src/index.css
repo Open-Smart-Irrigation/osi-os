@@ -25,6 +25,7 @@
   --warn-border: #F59E0B;
   --error-bg: #DC2626;
   --error-text: #FFFFFF;
+  --danger-fg: #DC2626;
   --soil-wet: #3B82F6;
   --soil-wet-bg: #DBEAFE;
   --soil-moist: #22C55E;
@@ -60,6 +61,7 @@ html[data-theme='dark'] {
   --warn-border: #F59E0B;
   --error-bg: #7F1D1D;
   --error-text: #FEE2E2;
+  --danger-fg: #F87171;
   --soil-wet: #60A5FA;
   --soil-wet-bg: #172B48;
   --soil-moist: #4ADE80;

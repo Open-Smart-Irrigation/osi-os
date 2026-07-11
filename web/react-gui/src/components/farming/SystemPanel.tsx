@@ -233,7 +233,7 @@ export const SystemPanel: React.FC = () => {
         ) : (
           <button
             onClick={() => setShowRebootConfirm(true)}
-            className="bg-[var(--card)] hover:bg-[var(--border)] text-[var(--error-text)] font-semibold px-4 py-2 rounded-lg text-sm transition-colors"
+            className="bg-[var(--card)] hover:bg-[var(--border)] text-[var(--danger-fg)] font-semibold px-4 py-2 rounded-lg text-sm transition-colors"
           >
             ⟳ Reboot Gateway
           </button>
