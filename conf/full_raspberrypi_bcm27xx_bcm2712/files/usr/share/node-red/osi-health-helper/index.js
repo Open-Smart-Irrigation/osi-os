@@ -76,9 +76,12 @@ function writeCrashFile(options, state) {
 // gather (does not mutate the file or count this call as a startup).
 function readCrashState(options) {
   const state = readCrashFile(options);
+  const overThreshold = state.count >= crashLoopThreshold(options);
+  const stableMs = state.startedAt !== null ? Date.now() - state.startedAt : 0;
+  const looping = overThreshold && stableMs >= 0 && stableMs < crashWindowMs(options);
   return {
     crash_count: state.count,
-    crash_looping: state.count >= crashLoopThreshold(options)
+    crash_looping: looping
   };
 }
 

@@ -166,6 +166,20 @@ test('registerStartup resets the count when clock steps backwards (NTP correctio
   assert.strictEqual(result.crash_looping, false);
 });
 
+test('crash_looping decays to false once the process survives past the crash window', () => {
+  const crashFilePath = makeTempCrashFilePath();
+  const windowSeconds = 300;
+  const pastStartedAt = Date.now() - (windowSeconds * 1000 + 5000);
+  fs.writeFileSync(
+    crashFilePath,
+    JSON.stringify({ count: 5, lastCrashAt: pastStartedAt, startedAt: pastStartedAt }),
+    'utf8'
+  );
+  const state = readCrashState({ crashFilePath, crashWindowSeconds: windowSeconds });
+  assert.strictEqual(state.crash_count, 5, 'count is preserved');
+  assert.strictEqual(state.crash_looping, false, 'looping decays after window elapses');
+});
+
 test('gatherEdgeHealth threads crash state and health_state into the health object', async () => {
   const { gatherEdgeHealth } = require(HEALTH_HELPER_MODULE);
   const crashFilePath = makeTempCrashFilePath();
