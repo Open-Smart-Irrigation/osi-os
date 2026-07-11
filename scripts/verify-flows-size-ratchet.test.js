@@ -28,7 +28,9 @@ function initRepo(nodes) {
 function run(dir, extra = []) {
   return spawnSync(process.execPath, [
     script, '--root', dir, '--git-root', dir, '--base-ref', 'HEAD',
-    '--baseline', path.join(dir, 'baseline.json'), ...SURFACE_ARGS, ...extra,
+    '--baseline', path.join(dir, 'baseline.json'),
+    '--allowances', path.join(dir, 'allowances.json'),
+    ...SURFACE_ARGS, ...extra,
   ], { cwd: dir, encoding: 'utf8' });
 }
 function writeBaseline(dir) {

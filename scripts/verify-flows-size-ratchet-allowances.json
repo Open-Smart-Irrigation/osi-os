@@ -1,5 +1,10 @@
 {
   "_comment": "Explicit growth allowances. Consumed-or-deleted: remove entry when offset by extraction.",
-  "node_allowances": {},
-  "total_allowance": { "delta": 0, "reason": "none currently needed" }
+  "node_allowances": {
+    "062a0f9bf66d9789": { "delta": 700, "reason": "Build Heartbeat: added gateway_health_samples persistence (1.A5)" },
+    "2a4f142e3e9b6d80": { "delta": 400, "reason": "sync outbox eviction index guard (1.A5)" },
+    "prune-sync-outbox": { "delta": 3000, "reason": "outbox pruning overhaul with eviction-index awareness (1.A5)" },
+    "history-api-router-fn": { "delta": 150, "reason": "history API card-data source field passthrough (1.A6)" }
+  },
+  "total_allowance": { "delta": 4250, "reason": "1.A5 sync outbox hardening + 1.A6 history card-data source" }
 }
