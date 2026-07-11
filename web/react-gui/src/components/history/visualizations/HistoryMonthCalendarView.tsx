@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { formatHistoryCalendarMonthLabel, latestCalendarMonth } from '../../../history/calendarMonth';
+import { formatHistoryCalendarMonthLabel, isFutureCalendarDate, latestCalendarMonth } from '../../../history/calendarMonth';
 import { soilStatusVisual } from '../../../history/soilStatus';
 import type {
   HistoryCalendar,
@@ -22,6 +22,7 @@ interface HistoryMonthCalendarViewProps {
   calendar: HistoryCalendar | null | undefined;
   onInspectDate?: (selection: HistoryCalendarDateSelection) => void;
   selectedDate?: string | null;
+  todayIso?: string;
 }
 
 type HistoryTranslate = (key: string, options?: Record<string, unknown>) => string;
@@ -170,6 +171,7 @@ export const HistoryMonthCalendarView: React.FC<HistoryMonthCalendarViewProps> =
   calendar,
   onInspectDate,
   selectedDate,
+  todayIso,
 }) => {
   const { t: translate } = useTranslation('history');
   const t = translate as HistoryTranslate;
@@ -181,6 +183,7 @@ export const HistoryMonthCalendarView: React.FC<HistoryMonthCalendarViewProps> =
   const touchTapRef = React.useRef<{ date: string; pointerId: number; x: number; y: number } | null>(null);
   const suppressNextClickRef = React.useRef(false);
   const TOUCH_TAP_SLOP_PX = 10;
+  const todayIsoDate = todayIso ?? new Date().toISOString().slice(0, 10);
 
   if (!calendar || !month || days.length === 0) {
     return (
@@ -223,6 +226,23 @@ export const HistoryMonthCalendarView: React.FC<HistoryMonthCalendarViewProps> =
                 aria-label="blank"
                 className="aspect-square rounded-md border border-transparent"
               />
+            );
+          }
+
+          if (isFutureCalendarDate(cell.date, todayIsoDate)) {
+            return (
+              <div
+                key={cell.key}
+                role="gridcell"
+                aria-label={`${cell.dayOfMonth}`}
+                data-testid={`calendar-cell-${cell.date}`}
+                data-state="future"
+                className="flex aspect-square min-h-12 flex-col rounded-md border border-transparent p-1 text-left opacity-40 sm:p-1.5"
+              >
+                <span className="text-xs font-bold leading-none text-[var(--text-tertiary)] sm:text-sm">
+                  {cell.dayOfMonth}
+                </span>
+              </div>
             );
           }
 

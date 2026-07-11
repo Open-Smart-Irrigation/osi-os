@@ -94,6 +94,29 @@ function dendroCalendarMay2026(): HistoryCalendar {
   };
 }
 
+function dendroCalendarJuly2026(): HistoryCalendar {
+  return {
+    timezone: 'UTC',
+    days: [
+      {
+        date: '2026-07-05',
+        state: 'normal_growth',
+        coveragePct: 100,
+        coverageConfidence: 'configured',
+        summary: { key: 'history.calendar.summary.dendro.normal_growth' },
+        markers: [],
+      },
+      {
+        date: '2026-07-20',
+        state: 'no_data',
+        coveragePct: null,
+        coverageConfidence: 'unknown',
+        markers: [],
+      },
+    ],
+  };
+}
+
 describe('HistoryMonthCalendarView', () => {
   it('formats the active month from calendar data for shared detail context', () => {
     const calendarWithJuneDays: HistoryCalendar = {
@@ -243,5 +266,23 @@ describe('HistoryMonthCalendarView', () => {
       'dry_stress',
     );
     expect(screen.queryByRole('gridcell', { name: /May 31/i })).not.toBeInTheDocument();
+  });
+
+  it('renders future days as inert placeholders without a no-data label', () => {
+    const onInspectDate = vi.fn();
+    render(
+      <HistoryMonthCalendarView
+        cardType="dendro"
+        calendar={dendroCalendarJuly2026()}
+        onInspectDate={onInspectDate}
+        todayIso="2026-07-11"
+      />,
+    );
+    const futureCell = screen.getByTestId('calendar-cell-2026-07-20');
+    expect(futureCell.tagName).toBe('DIV');
+    expect(futureCell).toHaveAttribute('data-state', 'future');
+    expect(futureCell).not.toHaveTextContent('No data');
+    fireEvent.click(futureCell);
+    expect(onInspectDate).not.toHaveBeenCalled();
   });
 });

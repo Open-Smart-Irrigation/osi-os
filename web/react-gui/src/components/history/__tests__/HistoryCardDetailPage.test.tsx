@@ -1070,7 +1070,7 @@ describe('History card detail route', () => {
     expect(screen.getByTestId('view-mode-label')).toHaveTextContent('Calendar - May 2026');
   });
 
-  it('changes the visible calendar month on inner horizontal calendar swipe', async () => {
+  it('changes the visible calendar month on inner horizontal calendar swipe (backward)', async () => {
     vi.useFakeTimers({ toFake: ['Date'] });
     vi.setSystemTime(new Date('2026-06-15T12:00:00.000Z'));
 
@@ -1135,31 +1135,31 @@ describe('History card detail route', () => {
     });
     const surface = screen.getByTestId('history-visualization-surface');
     preparePointerTarget(surface);
-    dispatchTouch(surface, 'touchstart', [{ clientX: 250, clientY: 160 }]);
-    dispatchTouch(surface, 'touchmove', [{ clientX: 120, clientY: 164 }]);
+    dispatchTouch(surface, 'touchstart', [{ clientX: 120, clientY: 160 }]);
+    dispatchTouch(surface, 'touchmove', [{ clientX: 250, clientY: 164 }]);
     dispatchTouch(surface, 'touchend', []);
 
     const initialFrom = Date.parse(initialRequest?.range.from ?? '');
     const initialMonth = new Date(initialFrom);
-    const expectedNextMonthStart = new Date(Date.UTC(
+    const expectedPrevMonthStart = new Date(Date.UTC(
       initialMonth.getUTCFullYear(),
-      initialMonth.getUTCMonth() + 1,
+      initialMonth.getUTCMonth() - 1,
       1,
       0,
       0,
       0,
       0,
     ));
-    const expectedNextMonthEnd = new Date(Date.UTC(
-      expectedNextMonthStart.getUTCFullYear(),
-      expectedNextMonthStart.getUTCMonth() + 1,
+    const expectedPrevMonthEnd = new Date(Date.UTC(
+      expectedPrevMonthStart.getUTCFullYear(),
+      expectedPrevMonthStart.getUTCMonth() + 1,
       1,
       0,
       0,
       0,
       0,
     ) - 1);
-    const nextDate = calendarFixtureDateForRange(expectedNextMonthStart.toISOString(), expectedNextMonthEnd.toISOString());
+    const nextDate = calendarFixtureDateForRange(expectedPrevMonthStart.toISOString(), expectedPrevMonthEnd.toISOString());
 
     await waitFor(() => {
       expect(historyAPI.getZoneCardData).toHaveBeenLastCalledWith(
@@ -1169,8 +1169,8 @@ describe('History card detail route', () => {
           view: 'calendar',
           range: expect.objectContaining({
             label: 'custom',
-            from: expectedNextMonthStart.toISOString(),
-            to: expectedNextMonthEnd.toISOString(),
+            from: expectedPrevMonthStart.toISOString(),
+            to: expectedPrevMonthEnd.toISOString(),
           }),
         }),
       );

@@ -14,6 +14,25 @@ export function latestCalendarMonth(calendar: HistoryCalendar | null | undefined
   return latest ? { year: latest.year, month: latest.month } : null;
 }
 
+export function isFutureCalendarDate(date: string, todayIsoDate: string): boolean {
+  return date > todayIsoDate;
+}
+
+export function clampCalendarMonthOffset(
+  baseIso: string | null | undefined,
+  currentOffset: number,
+  delta: -1 | 1,
+  nowMs: number = Date.now(),
+): number {
+  const next = currentOffset + delta;
+  const baseMs = baseIso ? Date.parse(baseIso) : NaN;
+  const base = Number.isFinite(baseMs) ? new Date(baseMs) : new Date(nowMs);
+  const targetMonthStartMs = Date.UTC(base.getUTCFullYear(), base.getUTCMonth() + next, 1);
+  const now = new Date(nowMs);
+  const currentMonthStartMs = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1);
+  return targetMonthStartMs > currentMonthStartMs ? currentOffset : next;
+}
+
 export function formatHistoryCalendarMonthLabel(calendar: HistoryCalendar | null | undefined): string | null {
   const month = latestCalendarMonth(calendar);
   if (!calendar || !month) return null;
