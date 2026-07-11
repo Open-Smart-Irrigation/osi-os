@@ -1,0 +1,7 @@
+{
+  "schemaVersion": 1,
+  "cases": [
+    "stepwise-anchor-deficit",
+    "stepwise-missing-day"
+  ]
+}

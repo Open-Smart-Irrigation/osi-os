@@ -1,0 +1,32 @@
+{
+  "results": [
+    {
+      "date": "2026-07-07",
+      "envelope_ref_um": 100,
+      "twd_night_um": 0,
+      "twd_day_um": 30,
+      "mds_um": 30
+    },
+    {
+      "date": "2026-07-08",
+      "envelope_ref_um": 112,
+      "twd_night_um": 0,
+      "twd_day_um": 30,
+      "mds_um": 30
+    },
+    {
+      "date": "2026-07-09",
+      "envelope_ref_um": 112,
+      "twd_night_um": 4,
+      "twd_day_um": 46,
+      "mds_um": 42
+    },
+    {
+      "date": "2026-07-10",
+      "envelope_ref_um": 116,
+      "twd_night_um": 0,
+      "twd_day_um": 28,
+      "mds_um": 28
+    }
+  ]
+}

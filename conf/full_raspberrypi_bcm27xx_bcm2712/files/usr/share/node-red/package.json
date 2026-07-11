@@ -15,6 +15,7 @@
     "osi-health-helper": "file:osi-health-helper",
     "sqlite3": "^5.1.7",
     "osi-history-sync-helper": "file:osi-history-sync-helper",
-    "osi-lib": "file:osi-lib"
+    "osi-lib": "file:osi-lib",
+    "osi-dendro-analytics": "file:osi-dendro-analytics"
   }
 }
