@@ -189,14 +189,16 @@ test('shipped INSERT_SQL + ROLLUP_SQL execute correctly against the seed schema'
   db.close();
 });
 
-test('deploy.sh applies migration 0002 to live DBs (after chameleon repair, before restart)', () => {
+test('deploy.sh runs the unified migration runner which covers migration 0002', () => {
   const text = fs.readFileSync(path.join(REPO, 'deploy.sh'), 'utf8');
-  assert.match(text, /ensure_gateway_health_schema\(\)/);
-  assert.match(text, /database\/migrations\/ordered\/0002__gateway_health\.sql/);
-  assert.match(text, /refusing to apply a non-additive migration/);
-  const callIdx = text.lastIndexOf('\nensure_gateway_health_schema');
-  const chameleonCallIdx = text.lastIndexOf('\nensure_chameleon_schema');
-  assert.ok(chameleonCallIdx > -1, 'ensure_chameleon_schema call not found');
-  assert.ok(callIdx > chameleonCallIdx,
-    'ensure_gateway_health_schema must be invoked after ensure_chameleon_schema');
+  assert.match(text, /run_schema_migration/,
+    'deploy.sh must invoke run_schema_migration');
+  assert.match(text, /fetch_migration_runner/,
+    'run_schema_migration must call fetch_migration_runner');
+  assert.match(text, /migrate-cli\.js/,
+    'unified runner must invoke migrate-cli.js');
+  const checksums = JSON.parse(
+    fs.readFileSync(path.join(REPO, 'database/migrations/ordered/CHECKSUMS.json'), 'utf8'));
+  assert.ok('0002__gateway_health.sql' in checksums,
+    'migration 0002 must be registered in CHECKSUMS.json');
 });
