@@ -4,6 +4,17 @@ const crypto = require('node:crypto');
 const fs = require('node:fs');
 const childProcess = require('node:child_process');
 
+// Crash-loop escalation (refactor-program item 1.A4).
+//
+// procd respawns Node-RED indefinitely (`respawn 3600 5 -1`), so a crash-looping
+// gateway still emits heartbeats between crashes and looks alive. This tracks a
+// persistent local counter of "did Node-RED just (re)start soon after its last
+// start" across process restarts, so the counter survives the very crashes it is
+// counting. State lives in a plain JSON file (BusyBox ash has no better option).
+const DEFAULT_CRASH_FILE_PATH = '/data/node-red-crash-count';
+const CRASH_WINDOW_SECONDS = 300;
+const CRASH_LOOP_THRESHOLD = 3;
+
 function allNullHealth() {
   return {
     schema_sig: null,
@@ -12,7 +23,84 @@ function allNullHealth() {
     sync_oldest_age_s: null,
     sync_rejected: null,
     sync_dirty_pending: null,
-    disk_free_pct: null
+    disk_free_pct: null,
+    crash_count: null,
+    crash_looping: null,
+    health_state: null
+  };
+}
+
+function crashFilePath(options) {
+  return (options && options.crashFilePath) || DEFAULT_CRASH_FILE_PATH;
+}
+
+function crashWindowMs(options) {
+  const seconds = Number(options && options.crashWindowSeconds);
+  return (Number.isFinite(seconds) && seconds > 0 ? seconds : CRASH_WINDOW_SECONDS) * 1000;
+}
+
+function crashLoopThreshold(options) {
+  const value = Number(options && options.crashLoopThreshold);
+  return Number.isFinite(value) && value > 0 ? value : CRASH_LOOP_THRESHOLD;
+}
+
+// Reads the crash-count file. Never throws: a missing file, unreadable file, or
+// corrupt JSON payload is treated identically to "no crash history yet" so a
+// damaged file cannot itself brick health reporting or startup registration.
+function readCrashFile(options) {
+  const filePath = crashFilePath(options);
+  try {
+    const raw = fs.readFileSync(filePath, 'utf8');
+    const parsed = JSON.parse(raw);
+    const count = Number(parsed && parsed.count);
+    const lastCrashAt = Number(parsed && parsed.lastCrashAt);
+    const startedAt = Number(parsed && parsed.startedAt);
+    return {
+      count: Number.isFinite(count) && count >= 0 ? count : 0,
+      lastCrashAt: Number.isFinite(lastCrashAt) ? lastCrashAt : null,
+      startedAt: Number.isFinite(startedAt) ? startedAt : null
+    };
+  } catch (_) {
+    return { count: 0, lastCrashAt: null, startedAt: null };
+  }
+}
+
+function writeCrashFile(options, state) {
+  const target = crashFilePath(options);
+  const tmp = target + '.tmp';
+  fs.writeFileSync(tmp, JSON.stringify(state), 'utf8');
+  fs.renameSync(tmp, target);
+}
+
+// Read-only view of the current crash state; safe to call on every health
+// gather (does not mutate the file or count this call as a startup).
+function readCrashState(options) {
+  const state = readCrashFile(options);
+  return {
+    crash_count: state.count,
+    crash_looping: state.count >= crashLoopThreshold(options)
+  };
+}
+
+// Call once per Node-RED process startup. If the previous recorded start
+// happened within CRASH_WINDOW_SECONDS, this start is treated as another
+// crash-loop respawn and the counter increments; otherwise the counter resets
+// to 0 (a fresh, healthy start). Always writes the file back with the new
+// state so the next startup has something to compare against.
+function registerStartup(options) {
+  const existing = readCrashFile(options);
+  const now = Date.now();
+  const delta = now - existing.lastCrashAt;
+  const withinWindow = existing.lastCrashAt !== null && delta >= 0 && delta < crashWindowMs(options);
+  const count = withinWindow ? existing.count + 1 : 0;
+
+  try {
+    writeCrashFile(options, { count, lastCrashAt: now, startedAt: now });
+  } catch (_) {}
+
+  return {
+    crash_count: count,
+    crash_looping: count >= crashLoopThreshold(options)
   };
 }
 
@@ -147,7 +235,7 @@ async function diskFreePct(diskPath, timeoutMs) {
   return await dfDiskFreePct(diskPath, timeoutMs);
 }
 
-async function gatherWork(db, diskPath, timeoutMs) {
+async function gatherWork(db, diskPath, timeoutMs, options) {
   const health = allNullHealth();
 
   try {
@@ -197,6 +285,22 @@ async function gatherWork(db, diskPath, timeoutMs) {
     health.disk_free_pct = await diskFreePct(diskPath, timeoutMs);
   } catch (_) {}
 
+  try {
+    const crashState = readCrashState(options);
+    health.crash_count = crashState.crash_count;
+    health.crash_looping = crashState.crash_looping;
+  } catch (_) {}
+
+  try {
+    const errorCount = Number(options && options.errorCount);
+    const hasErrors = Number.isFinite(errorCount) && errorCount > 0;
+    const syncRejected = Number(health.sync_rejected);
+    const hasRejected = Number.isFinite(syncRejected) && syncRejected > 0;
+    health.health_state = health.crash_looping
+      ? 'crash_looping'
+      : (hasErrors || hasRejected ? 'degraded' : 'healthy');
+  } catch (_) {}
+
   return health;
 }
 
@@ -216,7 +320,7 @@ function gatherEdgeHealth(db, options = {}) {
     const timer = setTimeout(() => finish(allNullHealth()), timeoutMs);
 
     Promise.resolve()
-      .then(() => gatherWork(db, diskPath, timeoutMs))
+      .then(() => gatherWork(db, diskPath, timeoutMs, options))
       .then(
         (health) => {
           clearTimeout(timer);
@@ -233,5 +337,7 @@ function gatherEdgeHealth(db, options = {}) {
 module.exports = {
   structuralSignature,
   gatherEdgeHealth,
-  compareByCodepoint
+  compareByCodepoint,
+  registerStartup,
+  readCrashState
 };
