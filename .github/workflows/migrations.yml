@@ -68,6 +68,7 @@ jobs:
       - run: node --test conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-lib/index.test.js
       - run: node --test conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-dendro-analytics/index.test.js
       - run: node scripts/capture-dendro-analytics-vectors.js --verify
+      - run: node --test scripts/test-dendro-contract.js scripts/verify-dendro-contract-mirror.test.js
       - run: node --test scripts/rehearse-devices-rebuild.test.js
       - run: node --test scripts/test-gateway-health-persistence.js
       - run: node --test scripts/deploy-canary-gate.test.js
@@ -76,3 +77,4 @@ jobs:
         env:
           OSI_SERVER_EDGE_SYNC_SERVICE: osi-server/backend/src/main/java/org/osi/server/sync/EdgeSyncService.java
       - run: node scripts/verify-sync-op-parity.js osi-server/backend/src/main/java/org/osi/server/sync/EdgeSyncService.java
+      - run: node scripts/verify-dendro-contract-mirror.js osi-server

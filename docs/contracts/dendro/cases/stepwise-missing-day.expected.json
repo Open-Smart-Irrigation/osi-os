@@ -15,13 +15,6 @@
       "mds_um": 35
     },
     {
-      "date": "2026-07-09",
-      "envelope_ref_um": 95,
-      "twd_night_um": null,
-      "twd_day_um": null,
-      "mds_um": null
-    },
-    {
       "date": "2026-07-10",
       "envelope_ref_um": 95,
       "twd_night_um": 4,
