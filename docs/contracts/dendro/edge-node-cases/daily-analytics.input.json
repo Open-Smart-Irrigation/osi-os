@@ -1,0 +1,5 @@
+{
+  "fixedNow": "2026-07-11T12:00:00.000Z",
+  "analyticsDate": "2026-07-10",
+  "description": "Temp SQLite fixture seeded by scripts/capture-dendro-analytics-vectors.js and executed against dendro-compute-fn."
+}
