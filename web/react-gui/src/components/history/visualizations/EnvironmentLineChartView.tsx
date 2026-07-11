@@ -1,5 +1,6 @@
 import React from 'react';
 import { useTranslation } from 'react-i18next';
+import { useHoverCapable } from '../../../history/useHoverCapable';
 import {
   CartesianGrid,
   Line,
@@ -226,6 +227,7 @@ const EnvironmentLineChartViewComponent: React.FC<EnvironmentLineChartViewProps>
 }) => {
   const { t: translate } = useTranslation('history');
   const t = translate as HistoryTranslate;
+  const hoverCapable = useHoverCapable();
   const { visibleSeries, rows, groups } = React.useMemo(() => {
     const rawSeries = Array.isArray(data?.series) ? data.series : [];
     const nextVisibleSeries = normalizeSeriesList(t, rawSeries).filter(hasVisiblePoints);
@@ -285,17 +287,19 @@ const EnvironmentLineChartViewComponent: React.FC<EnvironmentLineChartViewProps>
                       tickFormatter={(value) => formatTimeTick(Number(value), spanMs)}
                     />
                     <YAxis {...historyValueYAxis(group.unit || undefined, 52)} />
-                    <Tooltip
-                      isAnimationActive={false}
-                      labelFormatter={formatTimestampMs}
-                      formatter={(value, _name, item) => {
-                        const series = group.seriesByKey.get(String(item.dataKey));
-                        return [
-                          formatTooltipValue(value, series?.unit ?? ''),
-                          series?.label ?? t('history.environmentLineChart.series.environment'),
-                        ];
-                      }}
-                    />
+                    {hoverCapable && (
+                      <Tooltip
+                        isAnimationActive={false}
+                        labelFormatter={formatTimestampMs}
+                        formatter={(value, _name, item) => {
+                          const series = group.seriesByKey.get(String(item.dataKey));
+                          return [
+                            formatTooltipValue(value, series?.unit ?? ''),
+                            series?.label ?? t('history.environmentLineChart.series.environment'),
+                          ];
+                        }}
+                      />
+                    )}
                     {group.series.map((series, index) => (
                       <Line
                         key={series.key}

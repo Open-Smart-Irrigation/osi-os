@@ -1,5 +1,6 @@
 import React from 'react';
 import { useTranslation } from 'react-i18next';
+import { useHoverCapable } from '../../../history/useHoverCapable';
 import {
   Area,
   CartesianGrid,
@@ -189,6 +190,7 @@ function visualWindowsEqual(left: ChartWindow | undefined, right: ChartWindow | 
 const DailyMinMaxViewComponent: React.FC<DailyMinMaxViewProps> = ({ data, window: chartWindow }) => {
   const { t: translate } = useTranslation('history');
   const t = translate as HistoryTranslate;
+  const hoverCapable = useHoverCapable();
   const visibleSeries = React.useMemo(() => {
     const rawSeries = Array.isArray(data?.series) ? data.series : [];
     return normalizeSeriesList(t, rawSeries).filter(hasDailyRange).map((series, seriesIndex) => ({
@@ -241,14 +243,16 @@ const DailyMinMaxViewComponent: React.FC<DailyMinMaxViewProps> = ({ data, window
                       52,
                     )}
                   />
-                  <Tooltip
-                    isAnimationActive={false}
-                    labelFormatter={formatTimestampMs}
-                    formatter={(value, name) => [
-                      formatTooltipValue(value, series.unit),
-                      String(name),
-                    ]}
-                  />
+                  {hoverCapable && (
+                    <Tooltip
+                      isAnimationActive={false}
+                      labelFormatter={formatTimestampMs}
+                      formatter={(value, name) => [
+                        formatTooltipValue(value, series.unit),
+                        String(name),
+                      ]}
+                    />
+                  )}
                   <Area
                     type="monotone"
                     dataKey={`${series.key}-max`}

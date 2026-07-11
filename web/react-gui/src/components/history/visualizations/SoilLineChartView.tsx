@@ -1,5 +1,6 @@
 import React from 'react';
 import { useTranslation } from 'react-i18next';
+import { useHoverCapable } from '../../../history/useHoverCapable';
 import {
   CartesianGrid,
   Line,
@@ -211,6 +212,7 @@ function visualWindowsEqual(left: ChartWindow | undefined, right: ChartWindow | 
 const SoilLineChartViewComponent: React.FC<SoilLineChartViewProps> = ({ data, window: chartWindow }) => {
   const { t: translate } = useTranslation('history');
   const t = translate as HistoryTranslate;
+  const hoverCapable = useHoverCapable();
   const { visibleSeries, rows, seriesByKey } = React.useMemo(() => {
     const rawSeries = Array.isArray(data?.series) ? data.series : [];
     const nextVisibleSeries = normalizeSeriesList(t, rawSeries).filter(hasVisiblePoints);
@@ -257,14 +259,16 @@ const SoilLineChartViewComponent: React.FC<SoilLineChartViewProps> = ({ data, wi
               tickFormatter={(value) => formatTimeTick(Number(value), spanMs)}
             />
             <YAxis {...historyValueYAxis('kPa', 52)} />
-            <Tooltip
-              isAnimationActive={false}
-              labelFormatter={formatTimestampMs}
-              formatter={(value, _name, item) => {
-                const series = seriesByKey.get(String(item.dataKey));
-                return [formatTooltipValue(value, series?.unit ?? 'kPa'), series?.label ?? t('history.soilLineChart.series.soil')];
-              }}
-            />
+            {hoverCapable && (
+              <Tooltip
+                isAnimationActive={false}
+                labelFormatter={formatTimestampMs}
+                formatter={(value, _name, item) => {
+                  const series = seriesByKey.get(String(item.dataKey));
+                  return [formatTooltipValue(value, series?.unit ?? 'kPa'), series?.label ?? t('history.soilLineChart.series.soil')];
+                }}
+              />
+            )}
             {visibleSeries.map((series, index) => (
               <Line
                 key={series.key}

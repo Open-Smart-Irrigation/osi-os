@@ -1,5 +1,6 @@
 import React from 'react';
 import { useTranslation } from 'react-i18next';
+import { useHoverCapable } from '../../../history/useHoverCapable';
 import {
   CartesianGrid,
   Line,
@@ -137,6 +138,7 @@ function visualWindowsEqual(left: ChartWindow | undefined, right: ChartWindow | 
 const DendroLineChartViewComponent: React.FC<DendroLineChartViewProps> = ({ data, window: chartWindow }) => {
   const { t: translate } = useTranslation('history');
   const t = translate as HistoryTranslate;
+  const hoverCapable = useHoverCapable();
   const { visibleSeries, rows } = React.useMemo(() => {
     const rawSeries = Array.isArray(data?.series) ? data.series : [];
     const nextVisibleSeries = normalizeSeriesList(t, rawSeries).filter(hasVisiblePoints);
@@ -182,7 +184,7 @@ const DendroLineChartViewComponent: React.FC<DendroLineChartViewProps> = ({ data
               tickFormatter={(value) => formatTimeTick(Number(value), spanMs)}
             />
             <YAxis {...historyValueYAxis(consistentUnit(visibleSeries), 48)} />
-            <Tooltip isAnimationActive={false} labelFormatter={formatTimestampMs} />
+            {hoverCapable && <Tooltip isAnimationActive={false} labelFormatter={formatTimestampMs} />}
             {visibleSeries.map((series, index) => (
               <Line
                 key={series.key}
