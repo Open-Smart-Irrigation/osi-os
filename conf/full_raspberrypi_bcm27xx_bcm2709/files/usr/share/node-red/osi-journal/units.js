@@ -125,6 +125,9 @@ function numericAttributePreflight(catalog, attributeCode, options) {
     }
     const canonical = canonicalRowError(terms, defaultFacts, settings);
     if (canonical.code) return { ok: false, code: canonical.code };
+    if (canonical.target.code !== attribute.default_unit_code) {
+      return { ok: false, code: 'invalid_catalog' };
+    }
     if (!settings.allowInactive && !isActive(defaultUnit)) {
       return { ok: false, code: 'inactive_unit' };
     }
@@ -259,8 +262,10 @@ function validateFrozenUnitMetadata(catalog, attributeCode, row) {
     ? resolveConversion(attributeInfo, row.entered_unit_code)
     : null;
   if (entered && entered.error) return { ok: false, code: entered.error };
-  if (canonical && entered &&
-      (canonical.target.code !== row.unit_code || entered.target.code !== row.unit_code)) {
+  if (canonical && canonical.target.code !== row.unit_code) {
+    return { ok: false, code: 'invalid_value_shape' };
+  }
+  if (canonical && entered && entered.target.code !== row.unit_code) {
     return { ok: false, code: 'invalid_value_shape' };
   }
   return { ok: true };

@@ -9,6 +9,7 @@ const { DatabaseSync } = require('node:sqlite');
 
 const { loadCatalog } = require('./catalog');
 const { allowedUnits, convertToCanonical, validateEntry } = require('./index');
+const { numericAttributePreflight } = require('./units');
 
 const repoRoot = path.resolve(__dirname, '../../../../../../..');
 const seedSql = fs.readFileSync(path.join(repoRoot, 'database/seed-blank.sql'), 'utf8');
@@ -1923,4 +1924,78 @@ test('exact retired numeric correction bypass rejects corrupt unit metadata', as
 
   assert.equal(result.ok, false, JSON.stringify(result));
   assert.ok(result.errors.some((error) => error.code === 'invalid_catalog'));
+});
+
+test('a numeric attribute default must itself be the canonical unit row', async () => {
+  const { catalog, farmerQuick, openField } = await loadedFixture('noncanonical-default');
+  const code = 'attr.amount_mass_area_product';
+  const attribute = catalog.vocabByCode.get(code);
+  catalog.vocabByCode.set(code, Object.assign({}, attribute, {
+    default_unit_code: 'unit.t_per_ha_product',
+  }));
+
+  assert.deepEqual(
+    numericAttributePreflight(catalog, code),
+    { ok: false, code: 'invalid_catalog' }
+  );
+  assert.deepEqual(allowedUnits(catalog, code, openField.definition, {}), []);
+  assert.deepEqual(
+    convertToCanonical(catalog, code, 1, 'unit.t_per_ha_product'),
+    { ok: false, code: 'invalid_catalog' }
+  );
+  const missing = validateEntry(
+    catalog,
+    openField,
+    farmerQuick,
+    validIrrigation({
+      activity_code: 'general_observation',
+      values: [{ attribute_code: code, value_status: 'not_observed' }],
+    })
+  );
+  assert.equal(missing.ok, false, JSON.stringify(missing));
+  assert.ok(missing.errors.some((error) => error.code === 'invalid_catalog'));
+});
+
+test('a frozen canonical slot must remain self-canonical even without an entered unit', async () => {
+  const runCorrection = async (name, unitCode) => {
+    const { catalog, farmerQuick, openField } = await loadedFixture(name);
+    const unit = catalog.vocabByCode.get(unitCode);
+    catalog.vocabByCode.set(unitCode, Object.assign({}, unit, { active: 0 }));
+    const value = {
+      attribute_code: 'attr.amount_mass_area_product', group_index: 0,
+      value: 1000, value_num: 1000, unit_code: unitCode,
+      value_status: 'observed',
+    };
+    const originalEntry = {
+      activity_code: 'general_observation',
+      template_code: 'farmer_quick', template_version: 1,
+      layout_code: 'open_field', layout_version: 1,
+      values: [{
+        attribute_code: value.attribute_code, group_index: 0,
+        value_num: 1000, unit_code: unitCode, value_status: 'observed',
+      }],
+    };
+    return validateEntry(
+      catalog,
+      openField,
+      farmerQuick,
+      validIrrigation({ activity_code: 'general_observation', values: [value] }),
+      { mode: 'correction', originalEntry }
+    );
+  };
+
+  const noncanonical = await runCorrection(
+    'frozen-noncanonical-slot', 'unit.t_per_ha_product'
+  );
+  assert.equal(noncanonical.ok, false, JSON.stringify(noncanonical));
+  assert.ok(noncanonical.errors.some((error) => error.code === 'invalid_value_shape'));
+
+  const legitimate = await runCorrection(
+    'frozen-canonical-slot', 'unit.kg_per_ha_product'
+  );
+  assert.equal(legitimate.ok, true, JSON.stringify(legitimate));
+  assert.equal(legitimate.normalized.values[0].unit_code, 'unit.kg_per_ha_product');
+  assert.ok(!Object.prototype.hasOwnProperty.call(
+    legitimate.normalized.values[0], 'entered_unit_code'
+  ));
 });
