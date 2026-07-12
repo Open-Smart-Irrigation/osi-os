@@ -6,5 +6,10 @@
   "0005__field_work_requests.sql": "d4cc1302c1f8a977a110a8655d28a51cbd2fd68a1bab6a21eab6a1eaef4304c5",
   "0006__improvement_request_contact_email.sql": "6ea99b190d82a5110aa742cfbbeaf037c7c8bb77627cd5d49d915359a3bafc05",
   "0007__analysis_views.sql": "bc2dedd7d78b4db83cc3899b64c87f91ddf0e1e70bbce7181d97b5c2e0825e1b",
-  "0008__sync_outbox_eviction_index.sql": "21d44ae8338c9f6be2602ff40133830f229261fbef4bef869c86b55cafbca970"
+  "0008__sync_outbox_eviction_index.sql": "21d44ae8338c9f6be2602ff40133830f229261fbef4bef869c86b55cafbca970",
+  "0009__ingest_quarantine.sql": "fb2a5c162193afd9bfc3256bb61aa8bf750a7982d237b015da7629aba9c8af65",
+  "0010__add_milesight_uc512_type.sql": "ced34243a532745fc5ea3cf6b4fc8d60427fb639e14394ed73b6f378af2dbd78",
+  "0011__zone_valve_assignments.sql": "1818a173ffe193085daacf51bce900521dd6a908cad484f0095ab4f3712a4dd1",
+  "0012__uc512_device_data_columns.sql": "26e40a12278a8dbec4d22689682a771f44082f5e8d325c12e06896c67ad9587a",
+  "0013__lsn50_shadow_diff.sql": "7ad59b5b5218ea0ff978bacdbab3ddf6cf6ee50536654705f415ca0154370ce0"
 }

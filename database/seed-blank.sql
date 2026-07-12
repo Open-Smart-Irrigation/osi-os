@@ -97,7 +97,8 @@ CREATE TABLE devices (
   name                                  TEXT NOT NULL,
   type_id                               TEXT NOT NULL CHECK(type_id IN (
                                           'KIWI_SENSOR','STREGA_VALVE','DRAGINO_LSN50',
-                                          'TEKTELIC_CLOVER','SENSECAP_S2120','AQUASCOPE_LORAIN')),
+                                          'TEKTELIC_CLOVER','SENSECAP_S2120','AQUASCOPE_LORAIN',
+                                          'MILESIGHT_UC512')),
   user_id                               INTEGER NULL,
   farm_id                               TEXT NULL,
   current_state                         TEXT CHECK(current_state IN ('OPEN','CLOSED')),
@@ -217,6 +218,11 @@ CREATE TABLE device_data (
   dendro_position_raw_mm    REAL,
   dendro_saturated          INTEGER DEFAULT 0,
   dendro_saturation_side    TEXT,
+  valve_1_state             TEXT,
+  valve_2_state             TEXT,
+  valve_1_pulse             INTEGER,
+  valve_2_pulse             INTEGER,
+  pipe_pressure_kpa         REAL,
   FOREIGN KEY (deveui) REFERENCES devices(deveui) ON DELETE CASCADE
 );
 
@@ -993,7 +999,8 @@ CREATE TABLE valve_actuation_expectations (
   observed_close_at          TEXT,
   reconciliation_state       TEXT NOT NULL DEFAULT 'PENDING_OBSERVATION',
   cancel_reason              TEXT,
-  created_at                 TEXT NOT NULL
+  created_at                 TEXT NOT NULL,
+  valve_channel              INTEGER
 );
 
 CREATE INDEX idx_valve_act_exp_device_eui ON valve_actuation_expectations(device_eui);
@@ -1001,6 +1008,23 @@ CREATE INDEX idx_valve_act_exp_active
   ON valve_actuation_expectations(reconciliation_state)
   WHERE reconciliation_state IN ('PENDING_OBSERVATION','OBSERVED_RUNNING');
 CREATE INDEX idx_valve_act_exp_effect_key ON valve_actuation_expectations(effect_key);
+
+-- ---------------------------------------------------------------------------
+-- zone_valve_assignments  (3.1 channel-per-zone for multi-channel valves)
+-- ---------------------------------------------------------------------------
+CREATE TABLE zone_valve_assignments (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  zone_id INTEGER NOT NULL,
+  deveui TEXT NOT NULL,
+  valve_channel INTEGER NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  FOREIGN KEY (zone_id) REFERENCES irrigation_zones(id) ON DELETE CASCADE,
+  FOREIGN KEY (deveui) REFERENCES devices(deveui) ON DELETE CASCADE,
+  UNIQUE (zone_id, valve_channel)
+);
+
+CREATE INDEX idx_zone_valve_zone ON zone_valve_assignments(zone_id);
+CREATE INDEX idx_zone_valve_deveui ON zone_valve_assignments(deveui);
 
 -- ---------------------------------------------------------------------------
 -- zone_irrigation_calibration  (WS1)
@@ -2359,4 +2383,35 @@ CREATE TABLE IF NOT EXISTS analysis_views (
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
+-- ---------------------------------------------------------------------------
+-- ingest_quarantine  (3.1 narrow-waist dead-letter)
+-- ---------------------------------------------------------------------------
+
+CREATE TABLE IF NOT EXISTS ingest_quarantine (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  deveui TEXT NOT NULL,
+  channel TEXT NOT NULL,
+  reason TEXT NOT NULL,
+  raw_value TEXT,
+  received_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_ingest_quarantine_received
+  ON ingest_quarantine(received_at);
+
+-- ---------------------------------------------------------------------------
+-- lsn50_shadow_diff  (3.3 DD7 narrow-waist shadow validation)
+-- ---------------------------------------------------------------------------
+
+CREATE TABLE IF NOT EXISTS lsn50_shadow_diff (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  deveui TEXT NOT NULL,
+  recorded_at TEXT NOT NULL,
+  field TEXT NOT NULL,
+  old_value TEXT,
+  new_value TEXT,
+  diff_type TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );

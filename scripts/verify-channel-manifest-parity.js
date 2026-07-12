@@ -313,6 +313,28 @@ try {
     );
   }
 
+  const expectedEdge = manifest.entries
+    .filter((ch) => ch.edgeField != null)
+    .map((ch) => ({ key: ch.key, edgeField: ch.edgeField, unit: ch.unit }));
+
+  const edgePaths = [
+    path.join(repoRoot, 'conf', 'full_raspberrypi_bcm27xx_bcm2712', 'files', 'usr', 'share', 'node-red', 'edge-channels.json'),
+    path.join(repoRoot, 'conf', 'full_raspberrypi_bcm27xx_bcm2709', 'files', 'usr', 'share', 'node-red', 'edge-channels.json'),
+  ];
+
+  for (const edgePath of edgePaths) {
+    const edgeLabel = path.relative(repoRoot, edgePath);
+    const edgeData = JSON.parse(readText(edgePath));
+    if (JSON.stringify(edgeData) !== JSON.stringify(expectedEdge)) {
+      const edgeKeys = new Set(edgeData.map((e) => e.key));
+      const expectedKeys = new Set(expectedEdge.map((e) => e.key));
+      const missing = [...expectedKeys].filter((k) => !edgeKeys.has(k));
+      const extra = [...edgeKeys].filter((k) => !expectedKeys.has(k));
+      throw new Error(`${edgeLabel} does not match channels.json; missing=[${missing.join(', ')}] extra=[${extra.join(', ')}]`);
+    }
+    console.log(`OK ${edgeLabel} exactly matches channels.json edge projection (${edgeData.length} entries)`);
+  }
+
   console.log('Channel manifest parity verification passed');
 } catch (error) {
   console.error(`FAIL: ${error && error.message ? error.message : error}`);

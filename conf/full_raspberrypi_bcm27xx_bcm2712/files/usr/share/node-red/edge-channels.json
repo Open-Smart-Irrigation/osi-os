@@ -1,0 +1,247 @@
+[
+  {
+    "key": "swt_1",
+    "edgeField": "swt_1",
+    "unit": "kPa"
+  },
+  {
+    "key": "swt_2",
+    "edgeField": "swt_2",
+    "unit": "kPa"
+  },
+  {
+    "key": "swt_3",
+    "edgeField": "swt_3",
+    "unit": "kPa"
+  },
+  {
+    "key": "ambient_temperature",
+    "edgeField": "ambient_temperature",
+    "unit": "°C"
+  },
+  {
+    "key": "relative_humidity",
+    "edgeField": "relative_humidity",
+    "unit": "%"
+  },
+  {
+    "key": "light_lux",
+    "edgeField": "light_lux",
+    "unit": "lux"
+  },
+  {
+    "key": "ext_temperature_c",
+    "edgeField": "ext_temperature_c",
+    "unit": "°C"
+  },
+  {
+    "key": "rain_mm_per_hour",
+    "edgeField": "rain_mm_per_hour",
+    "unit": "mm/h"
+  },
+  {
+    "key": "rain_mm_per_10min",
+    "edgeField": "rain_mm_per_10min",
+    "unit": "mm/10min"
+  },
+  {
+    "key": "rain_mm_today",
+    "edgeField": "rain_mm_today",
+    "unit": "mm"
+  },
+  {
+    "key": "rain_mm_delta",
+    "edgeField": "rain_mm_delta",
+    "unit": "mm"
+  },
+  {
+    "key": "wind_speed_mps",
+    "edgeField": "wind_speed_mps",
+    "unit": "m/s"
+  },
+  {
+    "key": "wind_gust_mps",
+    "edgeField": "wind_gust_mps",
+    "unit": "m/s"
+  },
+  {
+    "key": "barometric_pressure_hpa",
+    "edgeField": "barometric_pressure_hpa",
+    "unit": "hPa"
+  },
+  {
+    "key": "uv_index",
+    "edgeField": "uv_index",
+    "unit": null
+  },
+  {
+    "key": "dendro_stem_change_um",
+    "edgeField": "dendro_stem_change_um",
+    "unit": "µm"
+  },
+  {
+    "key": "dendro_position_mm",
+    "edgeField": "dendro_position_mm",
+    "unit": "mm"
+  },
+  {
+    "key": "dendro_position_raw_mm",
+    "edgeField": "dendro_position_raw_mm",
+    "unit": "mm"
+  },
+  {
+    "key": "dendro_delta_mm",
+    "edgeField": "dendro_delta_mm",
+    "unit": "mm"
+  },
+  {
+    "key": "dendro_ratio",
+    "edgeField": "dendro_ratio",
+    "unit": null
+  },
+  {
+    "key": "adc_ch0v",
+    "edgeField": "adc_ch0v",
+    "unit": "V"
+  },
+  {
+    "key": "adc_ch1v",
+    "edgeField": "adc_ch1v",
+    "unit": "V"
+  },
+  {
+    "key": "bat_v",
+    "edgeField": "bat_v",
+    "unit": "V"
+  },
+  {
+    "key": "bat_pct",
+    "edgeField": "bat_pct",
+    "unit": "%"
+  },
+  {
+    "key": "dendro_valid",
+    "edgeField": "dendro_valid",
+    "unit": null
+  },
+  {
+    "key": "dendro_mode_used",
+    "edgeField": "dendro_mode_used",
+    "unit": null
+  },
+  {
+    "key": "dendro_saturated",
+    "edgeField": "dendro_saturated",
+    "unit": null
+  },
+  {
+    "key": "dendro_saturation_side",
+    "edgeField": "dendro_saturation_side",
+    "unit": null
+  },
+  {
+    "key": "lsn50_mode_code",
+    "edgeField": "lsn50_mode_code",
+    "unit": null
+  },
+  {
+    "key": "lsn50_mode_label",
+    "edgeField": "lsn50_mode_label",
+    "unit": null
+  },
+  {
+    "key": "lsn50_mode_observed_at",
+    "edgeField": "lsn50_mode_observed_at",
+    "unit": null
+  },
+  {
+    "key": "rain_count_cumulative",
+    "edgeField": "rain_count_cumulative",
+    "unit": "count"
+  },
+  {
+    "key": "rain_tips_delta",
+    "edgeField": "rain_tips_delta",
+    "unit": "count"
+  },
+  {
+    "key": "rain_gauge_cumulative_mm",
+    "edgeField": "rain_gauge_cumulative_mm",
+    "unit": "mm"
+  },
+  {
+    "key": "rain_delta_status",
+    "edgeField": "rain_delta_status",
+    "unit": null
+  },
+  {
+    "key": "flow_liters_per_min",
+    "edgeField": "flow_liters_per_min",
+    "unit": "L/min"
+  },
+  {
+    "key": "flow_liters_per_10min",
+    "edgeField": "flow_liters_per_10min",
+    "unit": "L/10min"
+  },
+  {
+    "key": "flow_liters_today",
+    "edgeField": "flow_liters_today",
+    "unit": "L"
+  },
+  {
+    "key": "flow_liters_delta",
+    "edgeField": "flow_liters_delta",
+    "unit": "L"
+  },
+  {
+    "key": "flow_count_cumulative",
+    "edgeField": "flow_count_cumulative",
+    "unit": "count"
+  },
+  {
+    "key": "flow_pulses_delta",
+    "edgeField": "flow_pulses_delta",
+    "unit": "count"
+  },
+  {
+    "key": "flow_delta_status",
+    "edgeField": "flow_delta_status",
+    "unit": null
+  },
+  {
+    "key": "counter_interval_seconds",
+    "edgeField": "counter_interval_seconds",
+    "unit": "s"
+  },
+  {
+    "key": "wind_direction_deg",
+    "edgeField": "wind_direction_deg",
+    "unit": "°"
+  },
+  {
+    "key": "valve_1_state",
+    "edgeField": "valve_1_state",
+    "unit": null
+  },
+  {
+    "key": "valve_2_state",
+    "edgeField": "valve_2_state",
+    "unit": null
+  },
+  {
+    "key": "valve_1_pulse",
+    "edgeField": "valve_1_pulse",
+    "unit": "count"
+  },
+  {
+    "key": "valve_2_pulse",
+    "edgeField": "valve_2_pulse",
+    "unit": "count"
+  },
+  {
+    "key": "pipe_pressure_kpa",
+    "edgeField": "pipe_pressure_kpa",
+    "unit": "kPa"
+  }
+]

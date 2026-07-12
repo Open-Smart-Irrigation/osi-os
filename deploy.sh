@@ -487,6 +487,34 @@ fetch_required "osi-lib index.js" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-lib/index.js" \
     "/srv/node-red/osi-lib/index.js"
 
+fetch_required "osi-device-writer package.json" \
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-device-writer/package.json" \
+    "/srv/node-red/osi-device-writer/package.json"
+
+fetch_required "osi-device-writer index.js" \
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-device-writer/index.js" \
+    "/srv/node-red/osi-device-writer/index.js"
+
+fetch_required "osi-lsn50-normalize package.json" \
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-lsn50-normalize/package.json" \
+    "/srv/node-red/osi-lsn50-normalize/package.json"
+
+fetch_required "osi-lsn50-normalize index.js" \
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-lsn50-normalize/index.js" \
+    "/srv/node-red/osi-lsn50-normalize/index.js"
+
+fetch_required "osi-uc512-normalize package.json" \
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-uc512-normalize/package.json" \
+    "/srv/node-red/osi-uc512-normalize/package.json"
+
+fetch_required "osi-uc512-normalize index.js" \
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-uc512-normalize/index.js" \
+    "/srv/node-red/osi-uc512-normalize/index.js"
+
+fetch_required "edge-channels.json" \
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/edge-channels.json" \
+    "/srv/node-red/edge-channels.json"
+
 fetch_required "chirpstack-bootstrap.js" \
     "scripts/chirpstack-bootstrap.js" \
     "/srv/node-red/chirpstack-bootstrap.js"
@@ -506,6 +534,10 @@ fetch_required "S2120 codec" \
 fetch_required "LoRain codec" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/codecs/aquascope_lorain_decoder.js" \
     "/srv/node-red/codecs/aquascope_lorain_decoder.js"
+
+fetch_required "UC512 codec" \
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/codecs/milesight_uc512_decoder.js" \
+    "/srv/node-red/codecs/milesight_uc512_decoder.js"
 
 fetch_required "Agroscope uplink transform" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/codecs/agroscope_uplink_transform.js" \
