@@ -1,6 +1,6 @@
 ---
 name: osi-agronomy-sensors-reference
-description: Use when interpreting soil water tension (SWT) kPa or pF values, Chameleon sensor calibration/wiring, dendrometer TWD/MDS output, rain gauge aggregation (LoRain/S2120), ET0/evapotranspiration questions, deciding which device_data column a sensor writes to, STREGA valve command semantics, or any device-payload/decoder question. Covers KIWI_SENSOR, TEKTELIC_CLOVER, DRAGINO_LSN50, SENSECAP_S2120, AQUASCOPE_LORAIN, STREGA_VALVE.
+description: Use when interpreting soil water tension (SWT) kPa or pF values, Chameleon sensor calibration/wiring, dendrometer TWD/MDS output, rain gauge aggregation (LoRain/S2120), ET0/evapotranspiration questions, deciding which device_data column a sensor writes to, STREGA valve command semantics, UC512 valve telemetry, or any device-payload/decoder question. Covers KIWI_SENSOR, TEKTELIC_CLOVER, DRAGINO_LSN50, SENSECAP_S2120, AQUASCOPE_LORAIN, STREGA_VALVE, MILESIGHT_UC512.
 ---
 
 # OSI Agronomy & Sensors Reference
@@ -10,9 +10,9 @@ description: Use when interpreting soil water tension (SWT) kPa or pF values, Ch
 This skill is the domain model for how OSI OS represents soil, plant-water, and
 weather measurements in the database, the scheduler, and the dashboard. It
 answers "what does this number mean and where does it live", not general
-agronomy theory. Every claim below was checked against the code or docs named
-next to it, as of 2026-07-06 (worktree `feat/agent-skill-library`,
-`osi-os` HEAD `22cffe6d`).
+agronomy theory. Claims are tied to the code or docs named next to them; when
+using this skill for implementation, re-check drift-prone facts in the current
+branch before treating them as completion evidence.
 
 ## When to use / When NOT to use
 
@@ -31,6 +31,8 @@ Do NOT use this skill for (route instead):
 - Mechanically editing `flows.json` (node shapes, wiring function nodes) — **osi-flows-json-editing**.
 - Adding/altering a table, column, or migration — **osi-schema-change-control**.
 - `CHIRPSTACK_PROFILE_*` env vars, device-profile provisioning, feature flags — **osi-config-and-flags**.
+- Pure layout, spacing, copy, or styling changes that do not alter sensor
+  semantics, units, decoder fields, thresholds, or displayed measurement meaning.
 
 ## Device catalog and units quick-reference
 
@@ -42,6 +44,7 @@ Do NOT use this skill for (route instead):
 | `SENSECAP_S2120` | Sensors | Yes — `sensecap_s2120_decoder.js` | `ambient_temperature`, `relative_humidity`, `light_lux`, `barometric_pressure_hpa`, wind speed/direction/gust, `uv_index`, `rain_gauge_cumulative_mm` → `rain_mm_delta`/`rain_mm_today`, `bat_pct` | °C, %RH, hPa, m/s, deg, mm |
 | `AQUASCOPE_LORAIN` | Sensors | Yes — `aquascope_lorain_decoder.js` | `rain_mm_delta` (from raw 0.5 mm steps), `ambient_temperature`, `bat_v` | mm, °C, V |
 | `STREGA_VALVE` | Actuators | Yes — `strega_gen1_decoder.js` | `devices.current_state` (not a `device_data` column), `bat_pct`/`bat_v` | — |
+| `MILESIGHT_UC512` | Sensors | Yes — `milesight_uc512_decoder.js` | `valve_1_state`/`valve_2_state` (text), `valve_1_pulse`/`valve_2_pulse` (integer), `pipe_pressure_kpa` (real) | —, counts, kPa |
 
 File locations for all OSI-authored decoders:
 `conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/codecs/{aquascope_lorain_decoder.js, dragino_lsn50_decoder.js, sensecap_s2120_decoder.js, strega_gen1_decoder.js}`.
@@ -97,12 +100,12 @@ between them.
   `trigger_metric = 'DENDRO'` the same column instead holds an **encoded
   1-4 stress level** (1=mild … 4=severe), not a kPa value — do not treat
   `threshold_kpa` as kPa when the metric is DENDRO.
-- **Known schema gap (informational, not this skill's fix):** the shipped
-  `irrigation_schedules` CHECK constraint (`database/seed-blank.sql`) still
-  only allows `trigger_metric IN ('SWT_WM1','SWT_WM2','SWT_AVG')`, while the
-  API/GUI have accepted `SWT_1`/`SWT_2`/`SWT_3`/`DENDRO` since 2026-06-24/25.
-  This is a live P0 tracked as osi-os issue #92 — a schema/migration concern,
-  see **osi-schema-change-control**, not an agronomy modeling question.
+- **Trigger-metric CHECK is a schema contract, not agronomy semantics.** If
+  `irrigation_schedules.trigger_metric` accepts or rejects the wrong symbolic
+  metrics, verify the current seed and ordered migrations before planning:
+  `grep -n "trigger_metric" database/seed-blank.sql` and
+  `ls database/migrations/ordered/`. Route any CHECK change through
+  **osi-schema-change-control**; this skill only explains what the metrics mean.
 
 **Depth columns:** `devices.chameleon_swt1_depth_cm`, `chameleon_swt2_depth_cm`,
 `chameleon_swt3_depth_cm` record the physical burial depth of each Chameleon
@@ -441,7 +444,7 @@ sed -n '1,50p' conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/os
 sed -n '1,60p' web/react-gui/src/utils/swt.ts
 sed -n '85,110p' docs/contracts/sync-schema/canonicalization.md
 
-# irrigation_schedules trigger_metric CHECK (confirm P0 issue #92 status)
+# irrigation_schedules trigger_metric CHECK (confirm current schema contract)
 grep -n "trigger_metric" database/seed-blank.sql
 
 # Dendrometer edge (v5) vs cloud (v6) ownership
