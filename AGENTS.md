@@ -26,6 +26,8 @@ osi-server (cloud) — see ../osi-server/AGENTS.md
 
 **REST is the only cloud→edge command path.** MQTT carries only edge→cloud telemetry, heartbeats, status, and ACKs. The edge is **not** subscribed to the cloud broker.
 
+Per-module system map (both repos, every module described with location): [docs/architecture/system-map/](docs/architecture/system-map/README.md) (plain-language) and [docs/architecture/system-map-technical/](docs/architecture/system-map-technical/README.md) (engineering edition). Snapshot-dated; AGENTS.md wins on conflict.
+
 ---
 
 ## Sync REST endpoints
