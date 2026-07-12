@@ -240,17 +240,46 @@ async function diskFreePct(diskPath, timeoutMs) {
   return await dfDiskFreePct(diskPath, timeoutMs);
 }
 
+// 2024-01-01T00:00:00Z — same plausibility floor as clampRecordedAt (5.6).
+const RTC_EPOCH_FLOOR = 1704067200;
+
 function rtcHealth({ rtcSysfsPath = '/sys/class/rtc/rtc0', hwclockRunner } = {}) {
+  const nodePath = require('node:path');
   try {
     if (rtcSysfsPath && fs.existsSync(rtcSysfsPath)) {
-      const epochPath = require('node:path').join(rtcSysfsPath, 'since_epoch');
+      const epochPath = nodePath.join(rtcSysfsPath, 'since_epoch');
+      let raw;
       try {
-        const raw = fs.readFileSync(epochPath, 'utf8').trim();
-        const epoch = Number(raw);
-        if (Number.isFinite(epoch) && epoch > 0) {
-          return { rtc_present: true, clock_source: 'rtc' };
+        raw = fs.readFileSync(epochPath, 'utf8').trim();
+      } catch (readErr) {
+        // ENOENT → since_epoch file missing; fall through to hwclock / absent.
+        // Any other error (EACCES, EIO) → RTC device exists but unreadable.
+        if (readErr && readErr.code !== 'ENOENT') {
+          return { rtc_present: null, clock_source: null };
         }
-      } catch (_) {}
+        raw = null;
+      }
+      if (raw !== null) {
+        const epoch = Number(raw);
+        if (Number.isFinite(epoch) && epoch > RTC_EPOCH_FLOOR) {
+          // Plausible epoch — check hctosys to confirm system clock came from RTC.
+          const hctosysPath = nodePath.join(rtcSysfsPath, 'hctosys');
+          let hctosys = null;
+          try {
+            hctosys = fs.readFileSync(hctosysPath, 'utf8').trim();
+          } catch (_) {}
+          if (hctosys === '1') {
+            return { rtc_present: true, clock_source: 'rtc' };
+          }
+          return { rtc_present: true, clock_source: null };
+        }
+        if (Number.isFinite(epoch) && epoch > 0) {
+          // RTC hardware present but epoch is implausible (before 2024).
+          return { rtc_present: true, clock_source: null };
+        }
+        // epoch <= 0 or NaN with readable file — RTC present but clock not useful.
+        return { rtc_present: true, clock_source: null };
+      }
     }
     if (typeof hwclockRunner === 'function') {
       try { hwclockRunner(); return { rtc_present: true, clock_source: 'rtc' }; }
