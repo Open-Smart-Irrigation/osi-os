@@ -87,6 +87,7 @@ const DEVICE_TYPE_BADGE: Record<string, string> = {
   STREGA_VALVE:    'bg-purple-100 text-purple-800',
   SENSECAP_S2120:   'bg-cyan-100 text-cyan-800',
   AQUASCOPE_LORAIN: 'bg-blue-100 text-blue-800',
+  MILESIGHT_UC512:  'bg-violet-100 text-violet-800',
 };
 
 const DeviceBreakdown: React.FC<{ local: LocalEnvironment }> = ({ local }) => {
