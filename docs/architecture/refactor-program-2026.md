@@ -110,7 +110,7 @@ This is the **program map**, not a spec. Each item below is a charter line: goal
 
 | Item | Repo | Size | Depends on | Mode |
 |---|---|---|---|---|
-| 5.1 SD durability: boot-time `PRAGMA quick_check` + quarantine/restore-from-local-backup path (couples with #56) | osi-os | M | — | spec+plan |
+| 5.1 SD durability: boot-time `PRAGMA quick_check` + quarantine/restore-from-local-backup path (couples with #56) — **Done (2026-07-12):** self-contained `osi-db-integrity` module (imaged at `/usr/share/node-red/osi-db-integrity/`), init.d service (START=90, before Node-RED), 7 tests, both profiles, PR #133 | osi-os | M | — | spec+plan |
 | 5.2 Chaos/soak rig: weeks-offline outbox replay, clock jump, power-loss-mid-migration (rehearsal gate for 4.3) | osi-os | M | — | spec+plan |
 | 5.3 Staged atomic payload deploy + auto-rollback (DD10) | osi-os | M | 0.2 | spec+plan |
 | 5.4 Postgres care: hot-path index audit, retention/partition-or-BRIN decision for `sensor_data`, autovacuum tuning, bootstrap jitter | osi-server | M | 1.B3 | spec+plan |

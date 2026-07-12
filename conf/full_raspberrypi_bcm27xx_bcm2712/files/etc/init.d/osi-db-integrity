@@ -1,0 +1,14 @@
+#!/bin/sh /etc/rc.common
+
+START=90
+STOP=
+USE_PROCD=0
+
+start() {
+  if node /usr/share/node-red/osi-db-integrity/index.js 2>&1 | logger -t osi-db-integrity; then
+    :
+  else
+    logger -t osi-db-integrity "check exited non-zero (unrecoverable or fatal); boot continues"
+  fi
+  return 0
+}
