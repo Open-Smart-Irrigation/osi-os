@@ -39,17 +39,22 @@ test('device at head: no pending migrations, no persistent backup, applied empty
   assert.deepEqual(await verifyHead(cliRunner(db), { migrationsDir: MIGRATIONS_DIR }), { ok: true });
 });
 
-async function deviceAtV3(dir) {
-  const sub = path.join(dir, 'm3');
+async function deviceAtVersion(dir, version) {
+  const sub = path.join(dir, `m${version}`);
   fs.mkdirSync(sub);
   for (const f of fs.readdirSync(MIGRATIONS_DIR)) {
-    if (/^000[123]__/.test(f) || f === 'CHECKSUMS.json') {
+    const match = f.match(/^(\d{4})__/);
+    if (match && Number(match[1]) <= version) {
       fs.copyFileSync(path.join(MIGRATIONS_DIR, f), path.join(sub, f));
     }
   }
-  const db = path.join(dir, 'device.db');
+  const db = path.join(dir, `device-v${version}.db`);
   await bootstrapFresh(cliRunner(db), { migrationsDir: sub, appVersion: 'baseline-existing-db' });
   return db;
+}
+
+async function deviceAtV3(dir) {
+  return deviceAtVersion(dir, 3);
 }
 
 test('pending destructive: persistent backup taken + fsync-verified, applies to head', async () => {
@@ -62,6 +67,25 @@ test('pending destructive: persistent backup taken + fsync-verified, applies to 
   const bakRows = await cliRunner(res.offDeviceBackup)
     .all("SELECT name FROM sqlite_master WHERE type='table' LIMIT 1");
   assert.ok(bakRows.length >= 1);
+  assert.deepEqual(await verifyHead(cliRunner(db), { migrationsDir: MIGRATIONS_DIR }), { ok: true });
+});
+
+test('devices CHECK rebuild preserves child foreign keys when applying 0010', async () => {
+  const dir = scratch();
+  const db = await deviceAtVersion(dir, 9);
+  const r = cliRunner(db);
+  await r.exec(`
+    PRAGMA foreign_keys=ON;
+    INSERT INTO devices(deveui, name, type_id, created_at, updated_at)
+    VALUES ('A84041DENDRO0001', 'Dendro fixture', 'DRAGINO_LSN50', '2026-07-12T00:00:00.000Z', '2026-07-12T00:00:00.000Z');
+    INSERT INTO dendrometer_readings(deveui, position_um, recorded_at)
+    VALUES ('A84041DENDRO0001', 1234.5, '2026-07-12T00:01:00.000Z');
+  `);
+
+  const backupDir = path.join(dir, 'bak');
+  const res = await runMigrateCli({ dbPath: db, backupDir, migrationsDir: MIGRATIONS_DIR, log: () => {} });
+  assert.deepEqual(res.applied, migrationVersionsAfter(9));
+  assert.deepEqual(await cliRunner(db).all('PRAGMA foreign_key_check'), []);
   assert.deepEqual(await verifyHead(cliRunner(db), { migrationsDir: MIGRATIONS_DIR }), { ok: true });
 });
 

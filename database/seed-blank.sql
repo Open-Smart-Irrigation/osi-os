@@ -999,9 +999,8 @@ CREATE TABLE valve_actuation_expectations (
   observed_close_at          TEXT,
   reconciliation_state       TEXT NOT NULL DEFAULT 'PENDING_OBSERVATION',
   cancel_reason              TEXT,
-  created_at                 TEXT NOT NULL,
-  valve_channel              INTEGER
-);
+  created_at                 TEXT NOT NULL
+, valve_channel INTEGER);
 
 CREATE INDEX idx_valve_act_exp_device_eui ON valve_actuation_expectations(device_eui);
 CREATE INDEX idx_valve_act_exp_active

@@ -11,6 +11,11 @@ DROP TRIGGER IF EXISTS trg_sync_devices_outbox_au;
 
 DROP TABLE IF EXISTS devices_old;
 
+-- Keep child-table foreign keys targeting devices during the rename/rebuild.
+-- Without this, modern SQLite rewrites child FKs to devices_old and leaves
+-- them broken after devices_old is dropped.
+PRAGMA legacy_alter_table=ON;
+
 ALTER TABLE devices RENAME TO devices_old;
 
 CREATE TABLE devices (
@@ -89,6 +94,8 @@ SELECT
 FROM devices_old;
 
 DROP TABLE devices_old;
+
+PRAGMA legacy_alter_table=OFF;
 
 CREATE INDEX idx_devices_user_id          ON devices(user_id);
 CREATE INDEX idx_devices_deveui           ON devices(deveui);
