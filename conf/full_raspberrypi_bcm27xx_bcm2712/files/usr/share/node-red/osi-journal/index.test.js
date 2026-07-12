@@ -683,6 +683,113 @@ test('inactive definitions and terms fail create but exact correction rows remai
   assert.ok(changedPins.errors.some((error) => error.code === 'correction_pin_mismatch'));
 });
 
+test('inactive correction comparison decodes DB rows by attribute value type', async () => {
+  const { catalog, farmerQuick, openField } = await loadedFixture('inactive-db-types');
+  catalog.vocabByCode.set('attr.test_date', {
+    code: 'attr.test_date', kind: 'attribute', value_type: 'date', active: 0,
+    constraints: {}, catalog_errors: [],
+  });
+  for (const code of ['attr.machine', 'attr.denominator', 'attr.recirculation']) {
+    catalog.vocabByCode.set(code, Object.assign({}, catalog.vocabByCode.get(code), { active: 0 }));
+  }
+  const values = [
+    { attribute_code: 'attr.machine', value: 'hoe' },
+    { attribute_code: 'attr.denominator', value: 'choice.denominator.area' },
+    { attribute_code: 'attr.test_date', value: '2026-07-12' },
+    { attribute_code: 'attr.recirculation', value: true },
+  ];
+  const originalEntry = {
+    activity_code: 'general_observation',
+    template_code: 'farmer_quick', template_version: 1,
+    layout_code: 'open_field', layout_version: 1,
+    values: [
+      { attribute_code: 'attr.machine', group_index: 0, value_text: 'hoe', value_status: 'observed' },
+      {
+        attribute_code: 'attr.denominator', group_index: 0,
+        value_text: 'choice.denominator.area', value_status: 'observed',
+      },
+      {
+        attribute_code: 'attr.test_date', group_index: 0,
+        value_text: '2026-07-12', value_status: 'observed',
+      },
+      {
+        attribute_code: 'attr.recirculation', group_index: 0,
+        value_num: 1, value_status: 'observed',
+      },
+    ],
+  };
+
+  const result = validateEntry(
+    catalog,
+    openField,
+    farmerQuick,
+    validIrrigation({ activity_code: 'general_observation', values }),
+    { mode: 'correction', originalEntry }
+  );
+
+  assert.equal(result.ok, true, JSON.stringify(result));
+});
+
+test('inactive correction preserves canonical and entered numeric audit fields bidirectionally', async () => {
+  const { catalog, farmerQuick, openField } = await loadedFixture('inactive-audit-fields');
+  for (const code of ['attr.amount_mass_area_product', 'unit.t_per_ha_product']) {
+    catalog.vocabByCode.set(code, Object.assign({}, catalog.vocabByCode.get(code), { active: 0 }));
+  }
+  const normalizedValue = {
+    attribute_code: 'attr.amount_mass_area_product', group_index: 0,
+    value: 1000, value_num: 1000, unit_code: 'unit.kg_per_ha_product',
+    entered_value_num: 1, entered_unit_code: 'unit.t_per_ha_product',
+    value_status: 'observed',
+  };
+  const originalEntry = {
+    activity_code: 'general_observation',
+    template_code: 'farmer_quick', template_version: 1,
+    layout_code: 'open_field', layout_version: 1,
+    values: [{
+      attribute_code: 'attr.amount_mass_area_product', group_index: 0,
+      value_num: 1000, value_text: null, unit_code: 'unit.kg_per_ha_product',
+      entered_value_num: 1, entered_unit_code: 'unit.t_per_ha_product',
+      value_status: 'observed',
+    }],
+  };
+  const validateValues = (values) => validateEntry(
+    catalog,
+    openField,
+    farmerQuick,
+    validIrrigation({ activity_code: 'general_observation', values }),
+    { mode: 'correction', originalEntry }
+  );
+
+  const exact = validateValues([normalizedValue]);
+  const auditMutation = validateValues([
+    Object.assign({}, normalizedValue, {
+      entered_value_num: 999,
+      entered_unit_code: 'unit.g_per_ha_product',
+    }),
+  ]);
+  const omission = validateValues([]);
+
+  assert.equal(exact.ok, true, JSON.stringify(exact));
+  assert.equal(auditMutation.ok, false);
+  assert.ok(auditMutation.errors.some((error) => error.code === 'inactive_value_changed'));
+  assert.equal(omission.ok, false);
+  assert.ok(omission.errors.some((error) => error.code === 'inactive_value_omitted'));
+
+  catalog.vocabByCode.set(
+    'attr.amount_mass_area_product',
+    Object.assign({}, catalog.vocabByCode.get('attr.amount_mass_area_product'), { active: 1 })
+  );
+  const createWithRetiredEnteredUnit = validateEntry(
+    catalog,
+    openField,
+    farmerQuick,
+    validIrrigation({ activity_code: 'general_observation', values: [normalizedValue] })
+  );
+  assert.equal(createWithRetiredEnteredUnit.ok, false);
+  assert.ok(createWithRetiredEnteredUnit.errors.some((error) =>
+    error.field === 'values[0].entered_unit_code' && error.code === 'inactive_term'));
+});
+
 test('date attributes accept only real YYYY-MM-DD calendar dates', async () => {
   const { catalog, farmerQuick, openField } = await loadedFixture('strict-dates');
   catalog.vocabByCode.set('attr.test_date', {
@@ -754,6 +861,83 @@ test('reference constraints resolve products and fail closed for external tables
   const product = catalog.products.get(productUuid);
   catalog.products.set(productUuid, Object.assign({}, product, { active: 0 }));
   assert.equal(validateValue('attr.product_uuid', productUuid).ok, false);
+});
+
+test('correction preserves retired product and external reference rows exactly', async () => {
+  const { catalog, farmerQuick, openField } = await loadedFixture('retired-references');
+  const productUuids = Array.from(catalog.products.keys());
+  const retiredProductUuid = productUuids[0];
+  const replacementProductUuid = productUuids[1];
+  catalog.products.set(
+    retiredProductUuid,
+    Object.assign({}, catalog.products.get(retiredProductUuid), {
+      active: 0,
+      deleted_at: '2026-07-12T12:00:00.000Z',
+    })
+  );
+  const baseOriginal = {
+    activity_code: 'general_observation',
+    template_code: 'farmer_quick', template_version: 1,
+    layout_code: 'open_field', layout_version: 1,
+  };
+  const validateCorrection = (originalEntry, values, referenceValues) => validateEntry(
+    catalog,
+    openField,
+    farmerQuick,
+    validIrrigation({ activity_code: 'general_observation', values }),
+    { mode: 'correction', originalEntry, referenceValues }
+  );
+  const productOriginal = Object.assign({}, baseOriginal, {
+    values: [{
+      attribute_code: 'attr.product_uuid', group_index: 0,
+      value_text: retiredProductUuid, value_status: 'observed',
+    }],
+  });
+  const productValue = {
+    attribute_code: 'attr.product_uuid', group_index: 0,
+    value: retiredProductUuid, value_status: 'observed',
+  };
+
+  const exactProduct = validateCorrection(productOriginal, [productValue]);
+  const omittedProduct = validateCorrection(productOriginal, []);
+  const changedProduct = validateCorrection(productOriginal, [
+    Object.assign({}, productValue, { value: replacementProductUuid }),
+  ]);
+
+  assert.equal(exactProduct.ok, true, JSON.stringify(exactProduct));
+  assert.equal(omittedProduct.ok, false);
+  assert.ok(omittedProduct.errors.some((error) => error.code === 'inactive_value_omitted'));
+  assert.equal(changedProduct.ok, false);
+
+  const referenceKey = 'valve_actuation_expectations.expectation_id';
+  const referenceOriginal = Object.assign({}, baseOriginal, {
+    values: [{
+      attribute_code: 'attr.actuation_expectation_id', group_index: 0,
+      value_text: 'retired-expectation', value_status: 'observed',
+    }],
+  });
+  const referenceValue = {
+    attribute_code: 'attr.actuation_expectation_id', group_index: 0,
+    value: 'retired-expectation', value_status: 'observed',
+  };
+  const emptyReferenceSet = new Map([[referenceKey, new Set()]]);
+
+  const exactReference = validateCorrection(
+    referenceOriginal,
+    [referenceValue],
+    emptyReferenceSet
+  );
+  const omittedReference = validateCorrection(referenceOriginal, [], emptyReferenceSet);
+  const changedReference = validateCorrection(
+    referenceOriginal,
+    [Object.assign({}, referenceValue, { value: 'new-dangling-expectation' })],
+    emptyReferenceSet
+  );
+
+  assert.equal(exactReference.ok, true, JSON.stringify(exactReference));
+  assert.equal(omittedReference.ok, false);
+  assert.ok(omittedReference.errors.some((error) => error.code === 'inactive_value_omitted'));
+  assert.equal(changedReference.ok, false);
 });
 
 test('required_any families pair semantically present product and dose in each repeat group', async () => {
@@ -847,5 +1031,79 @@ test('malformed nested definitions and unknown rule references fail without thro
     });
     assert.equal(result.ok, false);
     assert.ok(result.errors.some((error) => error.code === 'invalid_catalog'));
+  }
+});
+
+test('definition preflight rejects unknown predicate values in finite code domains', async () => {
+  const { catalog, farmerQuick, openField } = await loadedFixture('predicate-code-domains');
+  const predicates = [
+    { field: 'attr.denominator', op: 'eq', value: 'choice.denominator.typo' },
+    {
+      field: 'attr.denominator', op: 'in',
+      value: ['choice.denominator.area', 'choice.denominator.typo'],
+    },
+    { field: 'activity_code', op: 'eq', value: 'irrigtion_typo' },
+    { field: 'template_code', op: 'eq', value: 'farmer_quik' },
+    { field: 'layout_code', op: 'eq', value: 'open_feld' },
+  ];
+
+  for (const predicate of predicates) {
+    const template = Object.assign({}, farmerQuick, {
+      definition: {
+        sections: [{
+          fields: [{ code: 'attr.target', required_if: predicate }],
+        }],
+      },
+    });
+    const result = validateEntry(catalog, openField, template, validIrrigation());
+    assert.equal(result.ok, false, JSON.stringify(predicate));
+    assert.ok(
+      result.errors.some((error) => error.code === 'invalid_catalog'),
+      JSON.stringify(predicate)
+    );
+  }
+});
+
+test('definition preflight type-checks scalar predicate domains and leaves text open', async () => {
+  const { catalog, farmerQuick, openField } = await loadedFixture('predicate-scalar-domains');
+  catalog.vocabByCode.set('attr.test_date', {
+    code: 'attr.test_date', kind: 'attribute', value_type: 'date', active: 1,
+    constraints: {}, catalog_errors: [],
+  });
+  const resultFor = (predicate) => validateEntry(
+    catalog,
+    openField,
+    Object.assign({}, farmerQuick, {
+      definition: {
+        sections: [{ fields: [{ code: 'attr.target', required_if: predicate }] }],
+      },
+    }),
+    validIrrigation()
+  );
+  const invalidPredicates = [
+    { field: 'attr.recirculation', op: 'eq', value: 'true' },
+    { field: 'attr.ph', op: 'eq', value: '7' },
+    { field: 'attr.ph', op: 'in', value: [7, '8'] },
+    { field: 'attr.test_date', op: 'eq', value: 20260712 },
+    { field: 'attr.test_date', op: 'in', value: ['2024-02-29', '2023-02-29'] },
+    { field: 'attr.machine', op: 'eq', value: 42 },
+  ];
+
+  for (const predicate of invalidPredicates) {
+    const result = resultFor(predicate);
+    assert.equal(result.ok, false, JSON.stringify(predicate));
+    assert.ok(
+      result.errors.some((error) => error.code === 'invalid_catalog'),
+      JSON.stringify(predicate)
+    );
+  }
+
+  for (const predicate of [
+    { field: 'attr.recirculation', op: 'eq', value: true },
+    { field: 'attr.ph', op: 'eq', value: 7 },
+    { field: 'attr.test_date', op: 'eq', value: '2024-02-29' },
+    { field: 'attr.machine', op: 'eq', value: 'farmer-defined mower' },
+  ]) {
+    assert.equal(resultFor(predicate).ok, true, JSON.stringify(predicate));
   }
 });

@@ -18,6 +18,18 @@ function isPlainObject(value) {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 }
 
+function isCalendarDate(value) {
+  const match = typeof value === 'string' && /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+  if (!match) return false;
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  if (year < 1 || month < 1 || month > 12 || day < 1) return false;
+  const leap = (year % 4 === 0 && year % 100 !== 0) || year % 400 === 0;
+  const daysInMonth = [31, leap ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+  return day <= daysInMonth[month - 1];
+}
+
 function predicateResult(predicate, selections) {
   if (!isPlainObject(predicate) || typeof predicate.field !== 'string' ||
       !['eq', 'in'].includes(predicate.op)) {
@@ -69,6 +81,41 @@ function validateFieldReference(catalog, code, path, errors) {
   return true;
 }
 
+function validatePredicateDomainValue(catalog, field, value, path, errors) {
+  if (field === 'activity_code') {
+    const activity = typeof value === 'string' && catalog.vocabByCode.get(value);
+    if (!activity || activity.kind !== 'activity') {
+      catalogShapeError(errors, path, 'Predicate value is not a known activity');
+    }
+    return;
+  }
+  if (field === 'template_code' || field === 'layout_code') {
+    const definitions = field === 'template_code' ? catalog.templates : catalog.layouts;
+    if (typeof value !== 'string' || !(definitions instanceof Map) || !definitions.has(value)) {
+      catalogShapeError(errors, path, 'Predicate value is not a known definition code');
+    }
+    return;
+  }
+  const attribute = catalog.vocabByCode.get(field);
+  if (!attribute || attribute.kind !== 'attribute') return;
+  if (attribute.value_type === 'choice') {
+    const choice = typeof value === 'string' && catalog.vocabByCode.get(value);
+    if (!choice || choice.kind !== 'choice' || choice.parent_code !== attribute.code) {
+      catalogShapeError(errors, path, 'Predicate value is not a choice for this attribute');
+    }
+    return;
+  }
+  const valid = (
+    (attribute.value_type === 'boolean' && typeof value === 'boolean') ||
+    (attribute.value_type === 'number' && typeof value === 'number' && Number.isFinite(value)) ||
+    (attribute.value_type === 'date' && isCalendarDate(value)) ||
+    (attribute.value_type === 'text' && typeof value === 'string')
+  );
+  if (!valid) {
+    catalogShapeError(errors, path, 'Predicate value does not match the attribute type');
+  }
+}
+
 function validatePredicateDefinition(catalog, predicate, path, errors) {
   if (!isPlainObject(predicate) || typeof predicate.field !== 'string' ||
       !['eq', 'in'].includes(predicate.op) ||
@@ -76,10 +123,17 @@ function validatePredicateDefinition(catalog, predicate, path, errors) {
     catalogShapeError(errors, path, 'Predicate must contain field, eq/in op, and value');
     return;
   }
-  validateFieldReference(catalog, predicate.field, path + '.field', errors);
+  const knownField = validateFieldReference(catalog, predicate.field, path + '.field', errors);
   if (predicate.op === 'in' && !Array.isArray(predicate.value)) {
     catalogShapeError(errors, path + '.value', 'An in predicate value must be an array');
+    return;
   }
+  if (!knownField) return;
+  const values = predicate.op === 'in' ? predicate.value : [predicate.value];
+  values.forEach(function(value, index) {
+    const valuePath = predicate.op === 'in' ? path + '.value[' + index + ']' : path + '.value';
+    validatePredicateDomainValue(catalog, predicate.field, value, valuePath, errors);
+  });
 }
 
 function validateDefinitionFields(catalog, fields, path, errors) {
@@ -259,6 +313,7 @@ function semanticDefinitionErrors(catalog, definition, path) {
 module.exports = {
   TOP_LEVEL_ENTRY_FIELDS,
   definitionFieldRules,
+  isCalendarDate,
   predicateResult,
   semanticDefinitionErrors,
 };

@@ -3,6 +3,7 @@
 const { loadCatalog } = require('./catalog');
 const {
   definitionFieldRules,
+  isCalendarDate,
   predicateResult,
   semanticDefinitionErrors,
 } = require('./definition');
@@ -77,37 +78,157 @@ function isPlainObject(value) {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 }
 
-function logicalValueRow(row) {
-  const valueStatus = row && row.value_status != null ? row.value_status : 'observed';
-  let value = null;
-  if (valueStatus === 'observed' && row) {
-    if (Object.prototype.hasOwnProperty.call(row, 'value')) value = row.value;
-    else if (row.value_num != null) value = row.value_num;
-    else if (row.value_text != null) value = row.value_text;
+function canonicalValueForRow(row, attribute, valueStatus) {
+  if (valueStatus !== 'observed' || !row) return null;
+  if (attribute.value_type === 'number') {
+    return row.value_num != null ? row.value_num : row.value;
   }
+  if (attribute.value_type === 'boolean') {
+    if (row.value_num === 0) return false;
+    if (row.value_num === 1) return true;
+    return row.value;
+  }
+  return row.value_text != null ? row.value_text : row.value;
+}
+
+function logicalValueRow(row, attribute) {
+  const valueStatus = row && row.value_status != null ? row.value_status : 'observed';
   return {
     attribute_code: row && row.attribute_code,
     group_index: row && row.group_index != null ? row.group_index : 0,
-    value,
+    value: canonicalValueForRow(row, attribute, valueStatus),
     value_status: valueStatus,
     unit_code: row && row.unit_code != null ? row.unit_code : null,
+    entered_value_num: row && row.entered_value_num != null ? row.entered_value_num : null,
+    entered_unit_code: row && row.entered_unit_code != null ? row.entered_unit_code : null,
   };
 }
 
-function sameLogicalValue(left, right) {
-  const a = logicalValueRow(left);
-  const b = logicalValueRow(right);
+function sameLogicalValue(catalog, left, right) {
+  const attributeCode = left && left.attribute_code;
+  if (!right || right.attribute_code !== attributeCode) return false;
+  const attribute = catalog.vocabByCode.get(attributeCode);
+  if (!attribute || attribute.kind !== 'attribute') return false;
+  const a = logicalValueRow(left, attribute);
+  const b = logicalValueRow(right, attribute);
   return a.attribute_code === b.attribute_code &&
     a.group_index === b.group_index &&
     Object.is(a.value, b.value) &&
     a.value_status === b.value_status &&
-    a.unit_code === b.unit_code;
+    a.unit_code === b.unit_code &&
+    Object.is(a.entered_value_num, b.entered_value_num) &&
+    a.entered_unit_code === b.entered_unit_code;
 }
 
-function preservedOriginalValue(originalEntry, value) {
+function preservedOriginalValue(catalog, originalEntry, value) {
   return originalEntry.values.some(function(originalValue) {
-    return sameLogicalValue(originalValue, value);
+    return sameLogicalValue(catalog, originalValue, value);
   });
+}
+
+function referenceValueSet(validationContext, key) {
+  const referenceValues = validationContext.referenceValues;
+  let allowed;
+  if (referenceValues instanceof Map) allowed = referenceValues.get(key);
+  else if (isPlainObject(referenceValues) &&
+           Object.prototype.hasOwnProperty.call(referenceValues, key)) allowed = referenceValues[key];
+  else if (referenceValues != null && !isPlainObject(referenceValues)) {
+    return { ok: false, code: 'invalid_context' };
+  }
+  if (allowed == null) return { ok: true, resolved: false };
+  if (!(allowed instanceof Set) && !Array.isArray(allowed)) {
+    return { ok: false, code: 'invalid_context' };
+  }
+  return { ok: true, resolved: true, allowed };
+}
+
+function originalReferenceRetirement(catalog, attribute, logical, validationContext) {
+  if (logical.value_status !== 'observed' || attribute.constraints.reference == null) {
+    return { invalid: false, retired: false };
+  }
+  const reference = attribute.constraints.reference;
+  if (!isPlainObject(reference) || typeof reference.table !== 'string' ||
+      typeof reference.column !== 'string' || !reference.table || !reference.column) {
+    return { invalid: true, retired: false };
+  }
+  const key = reference.table + '.' + reference.column;
+  if (key === 'journal_products.product_uuid') {
+    if (!(catalog.products instanceof Map)) return { invalid: true, retired: false };
+    const product = catalog.products.get(logical.value);
+    if (!product) return { invalid: true, retired: false };
+    return {
+      invalid: false,
+      retired: product.active !== 1 || Boolean(product.deleted_at),
+    };
+  }
+  const resolved = referenceValueSet(validationContext, key);
+  if (!resolved.ok) return { invalid: true, retired: false };
+  if (!resolved.resolved) return { invalid: false, retired: true };
+  const found = resolved.allowed instanceof Set
+    ? resolved.allowed.has(logical.value)
+    : resolved.allowed.includes(logical.value);
+  return { invalid: false, retired: !found };
+}
+
+function originalValueRetirement(catalog, originalValue, validationContext) {
+  const attribute = catalog.vocabByCode.get(originalValue.attribute_code);
+  if (!attribute || attribute.kind !== 'attribute' ||
+      !['number', 'text', 'choice', 'date', 'boolean'].includes(attribute.value_type)) {
+    return { invalid: true, retired: false };
+  }
+  let retired = attribute.active !== 1 || Boolean(attribute.deleted_at);
+  const logical = logicalValueRow(originalValue, attribute);
+  if (logical.value_status === 'observed' && attribute.value_type === 'choice') {
+    const choice = catalog.vocabByCode.get(logical.value);
+    if (!choice || choice.kind !== 'choice' || choice.parent_code !== attribute.code) {
+      return { invalid: true, retired: false };
+    }
+    retired = retired || choice.active !== 1 || Boolean(choice.deleted_at);
+  }
+  for (const unitCode of [logical.unit_code, logical.entered_unit_code]) {
+    if (unitCode == null) continue;
+    const unit = catalog.vocabByCode.get(unitCode);
+    if (!unit || unit.kind !== 'unit') return { invalid: true, retired: false };
+    retired = retired || unit.active !== 1 || Boolean(unit.deleted_at);
+  }
+  if (!attribute.constraints || typeof attribute.constraints !== 'object' ||
+      Array.isArray(attribute.constraints)) {
+    return { invalid: true, retired: false };
+  }
+  const reference = originalReferenceRetirement(
+    catalog,
+    attribute,
+    logical,
+    validationContext
+  );
+  if (reference.invalid) return reference;
+  retired = retired || reference.retired;
+  return { invalid: false, retired };
+}
+
+function correctionPreservationErrors(catalog, originalEntry, normalizedValues, validationContext) {
+  const errors = [];
+  for (const originalValue of originalEntry.values) {
+    const retirement = originalValueRetirement(catalog, originalValue, validationContext);
+    if (retirement.invalid) {
+      errors.push({
+        field: 'validationContext.originalEntry.values',
+        code: 'invalid_catalog',
+        message: 'Original value references missing or corrupt vocabulary',
+      });
+      continue;
+    }
+    if (retirement.retired && !normalizedValues.some(function(value) {
+      return sameLogicalValue(catalog, originalValue, value);
+    })) {
+      errors.push({
+        field: 'values.' + originalValue.attribute_code,
+        code: 'inactive_value_omitted',
+        message: 'Correction must preserve every original inactive value row exactly',
+      });
+    }
+  }
+  return errors;
 }
 
 function correctionContextErrors(validationContext, entryInput, layoutDef, templateDef) {
@@ -145,19 +266,7 @@ function correctionContextErrors(validationContext, entryInput, layoutDef, templ
   }];
 }
 
-function isCalendarDate(value) {
-  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
-  if (!match) return false;
-  const year = Number(match[1]);
-  const month = Number(match[2]);
-  const day = Number(match[3]);
-  if (year < 1 || month < 1 || month > 12 || day < 1) return false;
-  const leap = (year % 4 === 0 && year % 100 !== 0) || year % 400 === 0;
-  const daysInMonth = [31, leap ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
-  return day <= daysInMonth[month - 1];
-}
-
-function referenceError(catalog, constraints, value, validationContext) {
+function referenceError(catalog, constraints, value, validationContext, preservedHistoricalValue) {
   const reference = constraints.reference;
   if (reference == null) return null;
   if (!isPlainObject(reference) || typeof reference.table !== 'string' ||
@@ -170,26 +279,23 @@ function referenceError(catalog, constraints, value, validationContext) {
       return { code: 'invalid_catalog', message: 'Product catalog is invalid' };
     }
     const product = catalog.products.get(value);
-    return product && product.active === 1 && !product.deleted_at
-      ? null
-      : { code: 'invalid_reference', message: 'Product reference is unknown or inactive' };
+    if (product && product.active === 1 && !product.deleted_at) return null;
+    if (product && preservedHistoricalValue) return null;
+    return { code: 'invalid_reference', message: 'Product reference is unknown or inactive' };
   }
-  const referenceValues = validationContext.referenceValues;
-  let allowed;
-  if (referenceValues instanceof Map) allowed = referenceValues.get(key);
-  else if (isPlainObject(referenceValues) &&
-           Object.prototype.hasOwnProperty.call(referenceValues, key)) allowed = referenceValues[key];
-  else if (referenceValues != null && !isPlainObject(referenceValues)) {
+  const resolved = referenceValueSet(validationContext, key);
+  if (!resolved.ok) {
     return { code: 'invalid_context', message: 'referenceValues must be a Map or object' };
   }
-  if (allowed == null) {
+  if (!resolved.resolved) {
+    if (preservedHistoricalValue) return null;
     return { code: 'reference_unresolved', message: 'No resolver was supplied for this reference' };
   }
-  if (!(allowed instanceof Set) && !Array.isArray(allowed)) {
-    return { code: 'invalid_context', message: 'Reference resolver values must be a Set or array' };
-  }
-  const found = allowed instanceof Set ? allowed.has(value) : allowed.includes(value);
-  return found ? null : { code: 'invalid_reference', message: 'Reference value does not exist' };
+  const found = resolved.allowed instanceof Set
+    ? resolved.allowed.has(value)
+    : resolved.allowed.includes(value);
+  if (found || preservedHistoricalValue) return null;
+  return { code: 'invalid_reference', message: 'Reference value does not exist' };
 }
 
 function validateEntry(catalog, _layoutDef, _templateDef, entryInput, validationContext) {
@@ -372,7 +478,7 @@ function validateEntry(catalog, _layoutDef, _templateDef, entryInput, validation
         'Unknown attribute code'
       );
     }
-    const valuePreserved = correction && preservedOriginalValue(originalEntry, Object.assign({}, value, {
+    const valuePreserved = correction && preservedOriginalValue(catalog, originalEntry, Object.assign({}, value, {
       group_index: groupIndex,
       value_status: valueStatus,
     }));
@@ -432,7 +538,13 @@ function validateEntry(catalog, _layoutDef, _templateDef, entryInput, validation
       );
     }
     if (valueStatus === 'observed') {
-      const invalidReference = referenceError(catalog, attribute.constraints, value.value, context);
+      const invalidReference = referenceError(
+        catalog,
+        attribute.constraints,
+        value.value,
+        context,
+        valuePreserved
+      );
       if (invalidReference) {
         return errorResult(
           'values[' + index + '].value',
@@ -492,6 +604,39 @@ function validateEntry(catalog, _layoutDef, _templateDef, entryInput, validation
         }
       }
     }
+    if (value.entered_unit_code != null) {
+      if (typeof value.entered_unit_code !== 'string') {
+        return errorResult(
+          'values[' + index + '].entered_unit_code',
+          'invalid_type',
+          'Entered unit code must be text'
+        );
+      }
+      const enteredUnit = catalog.vocabByCode.get(value.entered_unit_code);
+      if (!enteredUnit || enteredUnit.kind !== 'unit') {
+        return errorResult(
+          'values[' + index + '].entered_unit_code',
+          'unknown_code',
+          'Unknown entered unit code'
+        );
+      }
+      if (enteredUnit.active !== 1 || enteredUnit.deleted_at) {
+        if (!correction) {
+          return errorResult(
+            'values[' + index + '].entered_unit_code',
+            'inactive_term',
+            'Entered unit is inactive'
+          );
+        }
+        if (!valuePreserved) {
+          return errorResult(
+            'values[' + index + ']',
+            'inactive_value_changed',
+            'An inactive value row may only be preserved exactly during correction'
+          );
+        }
+      }
+    }
     if (valueStatus === 'observed' && attribute.value_type === 'number') {
       if (typeof attribute.constraints.min === 'number' && value.value < attribute.constraints.min) {
         return errorResult('values[' + index + '].value', 'below_minimum', 'Value is below the minimum');
@@ -521,6 +666,15 @@ function validateEntry(catalog, _layoutDef, _templateDef, entryInput, validation
       group_index: groupIndex,
       value_status: valueStatus,
     }));
+  }
+  if (correction) {
+    const preservationErrors = correctionPreservationErrors(
+      catalog,
+      originalEntry,
+      normalizedValues,
+      context
+    );
+    if (preservationErrors.length) return { ok: false, errors: preservationErrors };
   }
   const present = new Set(normalizedValues
     .filter(isSemanticallyPresentValue)
