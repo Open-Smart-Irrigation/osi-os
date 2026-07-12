@@ -627,6 +627,17 @@ async function verifyAll() {
         continue;
       }
 
+      if (Object.prototype.hasOwnProperty.call(expected, 'csvContentType')) {
+        const actualContentType = result.headers?.['Content-Type'] ?? null;
+        if (actualContentType !== expected.csvContentType) {
+          console.error('    FAIL: CSV Content-Type mismatch: got %j, expected %j',
+            actualContentType, expected.csvContentType);
+          failures++;
+          try { fs.unlinkSync(routeDbPath); } catch (_) {}
+          continue;
+        }
+      }
+
       // Deep compare payload
       try {
         deepStrictEqual(normalizedPayload, expected.payload);
