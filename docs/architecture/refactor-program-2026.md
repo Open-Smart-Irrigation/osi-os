@@ -110,12 +110,12 @@ This is the **program map**, not a spec. Each item below is a charter line: goal
 
 | Item | Repo | Size | Depends on | Mode |
 |---|---|---|---|---|
-| 5.1 SD durability: boot-time `PRAGMA quick_check` + quarantine/restore-from-local-backup path (couples with #56) | osi-os | M | — | spec+plan |
+| 5.1 SD durability: boot-time `PRAGMA quick_check` + quarantine/restore-from-local-backup path (couples with #56) — done (2026-07-12): self-contained `osi-db-integrity` module at `/usr/share/node-red/osi-db-integrity/`, init.d script START=90, 7 tests, PR #133 | osi-os | M | — | spec+plan |
 | 5.2 Chaos/soak rig: weeks-offline outbox replay, clock jump, power-loss-mid-migration (rehearsal gate for 4.3) | osi-os | M | — | spec+plan |
 | 5.3 Staged atomic payload deploy + auto-rollback (DD10) | osi-os | M | 0.2 | spec+plan |
 | 5.4 Postgres care: hot-path index audit, retention/partition-or-BRIN decision for `sensor_data`, autovacuum tuning, bootstrap jitter | osi-server | M | 1.B3 | spec+plan |
 | 5.5 Incremental bootstrap snapshots (watermark-delta; full snapshot only on cursor gap) — defer until ~10+ gateways | osi-server | M | 5.4 | spec+plan |
-| 5.6 Time integrity: timestamp sanity clamp + defined scheduler behavior on clock jumps (DD18) | osi-os | M | — | spec+plan |
+| 5.6 Time integrity: timestamp sanity clamp + defined scheduler behavior on clock jumps (DD18) — done (2026-07-12): `clampRecordedAt` at ingest (node `9b3afb405207302e`), `sameLogicalWindow` scheduler guard (node `5f0d2b7e9b9b1b3a`), `rtcHealth` in `osi-health-helper` + heartbeat, 28 tests, PR #134 | osi-os | M | — | spec+plan |
 
 ## Risks & one-way doors
 
