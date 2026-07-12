@@ -1,15 +1,15 @@
 {
   "description": "Ratchet baseline for empty catch blocks in maintained Node-RED function nodes. Update counts downward in the same commit that removes silent catches.",
-  "generatedFrom": "fix/mobile-history-review-2026-07-11 (1.A5/1.A6 handoff merge: +1 silent catch in outbox eviction guard)",
+  "generatedFrom": "feat/extract-history-router Task 5 / refactor-program 4.2 (History API Router extraction: -1 silent catch from moved helper)",
   "pattern": "catch\\s*(?:\\([^)]*\\))?\\s*\\{(?:\\s|;|//[^\\n]*|/\\*[\\s\\S]*?\\*/)*\\}  |  \\.catch\\s*\\(\\s*(?:(?:\\([^)]*\\)|[A-Za-z_$][\\w$]*)\\s*=>\\s*\\{(?:\\s|;|//[^\\n]*|/\\*[\\s\\S]*?\\*/)*\\}|function\\s*[A-Za-z_$][\\w$]*?\\s*\\([^)]*\\)\\s*\\{(?:\\s|;|//[^\\n]*|/\\*[\\s\\S]*?\\*/)*\\})\\s*\\)",
   "profiles": {
     "bcm2712": {
       "path": "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/flows.json",
-      "silentCatchCount": 244
+      "silentCatchCount": 243
     },
     "bcm2709": {
       "path": "conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/flows.json",
-      "silentCatchCount": 244
+      "silentCatchCount": 243
     }
   }
 }

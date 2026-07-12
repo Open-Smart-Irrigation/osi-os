@@ -87,6 +87,7 @@ const historyHelperCandidates = [
 const cloudHttpHelperPath = path.join(nodeRedRoot, 'osi-cloud-http', 'index.js');
 const cloudHttpPackagePath = path.join(nodeRedRoot, 'osi-cloud-http', 'package.json');
 const zoneEnvModulePath = path.join(nodeRedRoot, 'osi-zone-env', 'index.js');
+const historyRouterModulePath = path.join(nodeRedRoot, 'osi-history-router', 'index.js');
 const packageJsonPath = path.join(nodeRedRoot, 'package.json');
 execFileSync(process.execPath, [path.resolve(__dirname, 'verify-communication-contract.js')], { stdio: 'inherit' });
 execFileSync(process.execPath, [path.resolve(__dirname, 'verify-db-schema-consistency.js')], { stdio: 'inherit' });
@@ -107,6 +108,7 @@ const lorainCodecSource = fs.existsSync(lorainCodecPath) ? fs.readFileSync(lorai
 const cloudHttpHelperSource = fs.existsSync(cloudHttpHelperPath) ? fs.readFileSync(cloudHttpHelperPath, 'utf8') : '';
 const cloudHttpPackageSource = fs.existsSync(cloudHttpPackagePath) ? fs.readFileSync(cloudHttpPackagePath, 'utf8') : '';
 const zoneEnvModuleSource = fs.existsSync(zoneEnvModulePath) ? fs.readFileSync(zoneEnvModulePath, 'utf8') : '';
+const historyRouterModuleSource = fs.existsSync(historyRouterModulePath) ? fs.readFileSync(historyRouterModulePath, 'utf8') : '';
 const nodeRedPackageSource = fs.readFileSync(packageJsonPath, 'utf8');
 const reactGuiApiSource = fs.readFileSync(reactGuiApiPath, 'utf8');
 const farmingTypesSource = fs.readFileSync(farmingTypesPath, 'utf8');
@@ -3194,7 +3196,7 @@ if (!historyHelperPath) {
 expectIncludesById('history-api-router-fn', 'phaseMs=', 'logs per-phase timing for history endpoint performance triage');
 expectIncludesById('history-api-router-fn', 'function markPhase(', 'defines a phase timing helper for single execution phases');
 expectIncludesById('history-api-router-fn', 'function addPhase(', 'defines a phase timing helper for repeated helper calls');
-expectIncludesById('history-api-router-fn', 'phaseSummary(historyPhases)', 'formats phase timing in history API logs');
+expectIncludesById('history-api-router-fn', 'HR.phaseSummary(historyPhases)', 'formats phase timing in history API logs');
 expectIncludesById('history-api-router-fn', "addPhase('latestDeviceRows'", 'tracks latest device row lookup timing');
 expectIncludesById('history-api-router-fn', "addPhase('latestChameleonRows'", 'tracks latest Chameleon row lookup timing');
 expectIncludesById('history-api-router-fn', "markPhase('aggregate'", 'tracks aggregation helper timing');
@@ -3205,10 +3207,10 @@ expectIncludesById('history-api-router-fn', 'ORDER BY dd.recorded_at DESC, dd.id
 expectIncludesById('history-api-router-fn', 'ORDER BY cr.recorded_at DESC, cr.id DESC LIMIT 1', 'uses deterministic time-first latest Chameleon row lookup');
 expectExcludesById('history-api-router-fn', 'MAX(id) AS max_id FROM device_data', 'latest device row MAX(id) lookup');
 expectExcludesById('history-api-router-fn', 'MAX(id) AS max_id FROM chameleon_readings', 'latest Chameleon row MAX(id) lookup');
-expectIncludesById('history-api-router-fn', "title: 'Soil Moisture'", 'uses the farmer-facing Soil Moisture card title');
-expectExcludesById('history-api-router-fn', "title: 'Soil - Root Zone'", 'old Soil - Root Zone card title');
-expectIncludesById('history-api-router-fn', 'function soilChannelDepths(', 'centralizes soil channel depth lookup for history views');
-expectIncludesById('history-api-router-fn', 'seriesWithDepth({ id: channel.id', 'adds depth metadata to soil line series');
+expectFileIncludes('osi-history-router/index.js', historyRouterModuleSource, "title: 'Soil Moisture'", 'uses the farmer-facing Soil Moisture card title');
+expectFileExcludes('osi-history-router/index.js', historyRouterModuleSource, "title: 'Soil - Root Zone'", 'old Soil - Root Zone card title');
+expectFileIncludes('osi-history-router/index.js', historyRouterModuleSource, 'function soilChannelDepths(', 'centralizes soil channel depth lookup for history views');
+expectFileIncludes('osi-history-router/index.js', historyRouterModuleSource, 'seriesWithDepth({ id: channel.id', 'adds depth metadata to soil line series');
 
 const dendroHelperPath = dendroHelperCandidates.find((candidate) => fs.existsSync(candidate));
 if (!dendroHelperPath) {
