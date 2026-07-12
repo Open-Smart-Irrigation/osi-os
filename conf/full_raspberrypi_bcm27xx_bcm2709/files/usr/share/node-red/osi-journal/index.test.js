@@ -2523,7 +2523,7 @@ test('cascade choice selectors are singleton while numeric dependency targets ma
   }));
   assert.equal(sameGroupEntry.ok, false, JSON.stringify(sameGroupEntry));
   assert.ok(sameGroupEntry.errors.some((error) =>
-    error.field === 'values[1].value' && error.code === 'invalid_under_dependency'));
+    error.field === 'values[1].attribute_code' && error.code === 'duplicate_value'));
 
   const repeatedDevice = validateSelections(layout.definition, [
     selected('activity_code', 'fertilization'),
@@ -2634,4 +2634,102 @@ test('package main re-exports the public cascade APIs', () => {
   assert.equal(typeof packageApi.validateSelections, 'function');
   assert.strictEqual(packageApi.resolveOptions, directApi.resolveOptions);
   assert.strictEqual(packageApi.validateSelections, directApi.validateSelections);
+});
+
+test('note-only correction preserves exact retired numeric cascade rows', async () => {
+  const { catalog } = await loadedFixture('cascade-retired-numeric-correction');
+  const { layout, template } = agroscopeFixture(catalog);
+  const attributeCode = 'attr.amount_nutrient_rate';
+  const unitCode = 'unit.kg_n_per_ha_nutrient';
+  const operationValue = selected(
+    'attr.agroscope.operation', 'agroscope.operation.mineral_fertilization'
+  );
+  const deviceValue = selected(
+    'attr.agroscope.device', 'agroscope.device.solid_broadcast'
+  );
+  const numericValue = {
+    attribute_code: attributeCode, group_index: 0,
+    value: 80, value_num: 80, unit_code: unitCode,
+    entered_value_num: 80, entered_unit_code: unitCode,
+    value_status: 'observed',
+  };
+  const originalEntry = {
+    activity_code: 'fertilization',
+    template_code: 'research_observation', template_version: 1,
+    layout_code: 'agroscope_open_field', layout_version: 1,
+    values: [
+      {
+        attribute_code: operationValue.attribute_code, group_index: 0,
+        value_text: operationValue.value, value_status: 'observed',
+      },
+      {
+        attribute_code: deviceValue.attribute_code, group_index: 0,
+        value_text: deviceValue.value, value_status: 'observed',
+      },
+      {
+        attribute_code: attributeCode, group_index: 0,
+        value_num: 80, unit_code: unitCode,
+        entered_value_num: 80, entered_unit_code: unitCode,
+        value_status: 'observed',
+      },
+    ],
+  };
+  const input = (value, note) => validIrrigation({
+    activity_code: 'fertilization',
+    template_code: 'research_observation', template_version: 1,
+    layout_code: 'agroscope_open_field', layout_version: 1,
+    note,
+    values: [operationValue, deviceValue, value],
+  });
+  const correction = (value, note) => validateEntry(
+    catalog,
+    layout,
+    template,
+    input(value, note),
+    { mode: 'correction', originalEntry }
+  );
+
+  const unit = catalog.vocabByCode.get(unitCode);
+  catalog.vocabByCode.set(unitCode, Object.assign({}, unit, { active: 0 }));
+  const noteOnlyRetiredUnit = correction(numericValue, 'note-only correction');
+  assert.equal(noteOnlyRetiredUnit.ok, true, JSON.stringify(noteOnlyRetiredUnit));
+
+  const changedRetiredUnit = correction(Object.assign({}, numericValue, {
+    value: 81, value_num: 81, entered_value_num: 81,
+  }), 'changed value');
+  assert.equal(changedRetiredUnit.ok, false, JSON.stringify(changedRetiredUnit));
+  assert.ok(changedRetiredUnit.errors.some((error) =>
+    error.code === 'inactive_value_changed'));
+
+  const createWithRetiredUnit = validateEntry(
+    catalog, layout, template, input(numericValue, 'new entry')
+  );
+  assert.equal(createWithRetiredUnit.ok, false, JSON.stringify(createWithRetiredUnit));
+  assert.ok(createWithRetiredUnit.errors.some((error) => error.code === 'invalid_catalog'));
+
+  catalog.vocabByCode.set(unitCode, Object.assign({}, unit, {
+    active: 0,
+    constraints: Object.assign({}, unit.constraints, {
+      to_canonical: Object.assign({}, unit.constraints.to_canonical, { scale: 0 }),
+    }),
+  }));
+  const corruptRetiredUnit = correction(numericValue, 'corrupt unit metadata');
+  assert.equal(corruptRetiredUnit.ok, false, JSON.stringify(corruptRetiredUnit));
+  assert.ok(corruptRetiredUnit.errors.some((error) => error.code === 'invalid_catalog'));
+
+  catalog.vocabByCode.set(unitCode, unit);
+  const attribute = catalog.vocabByCode.get(attributeCode);
+  catalog.vocabByCode.set(attributeCode, Object.assign({}, attribute, { active: 0 }));
+  const noteOnlyRetiredAttribute = correction(numericValue, 'retired attribute note');
+  assert.equal(
+    noteOnlyRetiredAttribute.ok,
+    true,
+    JSON.stringify(noteOnlyRetiredAttribute)
+  );
+  const changedRetiredAttribute = correction(Object.assign({}, numericValue, {
+    value: 81, value_num: 81, entered_value_num: 81,
+  }), 'retired attribute changed');
+  assert.equal(changedRetiredAttribute.ok, false, JSON.stringify(changedRetiredAttribute));
+  assert.ok(changedRetiredAttribute.errors.some((error) =>
+    error.code === 'inactive_value_changed'));
 });

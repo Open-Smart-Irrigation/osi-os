@@ -488,7 +488,8 @@ function validateEntry(catalog, _layoutDef, _templateDef, entryInput, validation
     semanticErrors.push(...dependencyCatalogErrors(
       catalog,
       layoutDefinition,
-      'layout_definition.option_dependencies'
+      'layout_definition.option_dependencies',
+      { allowInactive: correction }
     ));
   }
   if (_templateDef && templateDefinition &&
@@ -583,23 +584,6 @@ function validateEntry(catalog, _layoutDef, _templateDef, entryInput, validation
     }
     const valueKey = String(groupIndex) + '\u0000' + String(value.attribute_code || '');
     if (valueKeys.has(valueKey)) {
-      const singletonField = 'values[' + index + '].value';
-      const dependencyCardinality = validateSelections(layoutDefinition, [
-        ...values,
-        { attribute_code: 'activity_code', value: entryInput.activity_code },
-      ]);
-      const singletonError = !dependencyCardinality.ok &&
-        dependencyCardinality.errors.find(function(error) {
-          return error.field === singletonField && error.code === 'invalid_under_dependency';
-        });
-      if (singletonError) {
-        return {
-          ok: false,
-          errors: [Object.assign({
-            message: 'A cascade selector may occur only once per entry',
-          }, singletonError)],
-        };
-      }
       return errorResult(
         'values[' + index + '].attribute_code',
         'duplicate_value',

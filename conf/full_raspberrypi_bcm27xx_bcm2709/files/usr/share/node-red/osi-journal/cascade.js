@@ -341,8 +341,12 @@ function validateSelections(layoutDef, values) {
   return errors.length ? { ok: false, errors } : { ok: true };
 }
 
-function dependencyCatalogErrors(catalog, layoutDef, path) {
-  const basePath = path || 'layout_definition.option_dependencies';
+function dependencyCatalogErrors(catalog, layoutDef, path, options) {
+  const optionsInPathSlot = isPlainObject(path);
+  const settings = optionsInPathSlot ? path : (options || {});
+  const basePath = optionsInPathSlot
+    ? 'layout_definition.option_dependencies'
+    : path || 'layout_definition.option_dependencies';
   const compiled = dependencyShape(layoutDef, basePath);
   if (!compiled.ok) return compiled.errors;
   const terms = catalog && catalog.vocabByCode instanceof Map
@@ -416,7 +420,9 @@ function dependencyCatalogErrors(catalog, layoutDef, path) {
         ));
         continue;
       }
-      const attributeInfo = numericAttributePreflight(catalog, targetCode);
+      const attributeInfo = numericAttributePreflight(catalog, targetCode, {
+        allowInactive: settings.allowInactive === true,
+      });
       if (!attributeInfo.ok) {
         errors.push(catalogError(
           rulePath + '.restrict.attribute_code',
