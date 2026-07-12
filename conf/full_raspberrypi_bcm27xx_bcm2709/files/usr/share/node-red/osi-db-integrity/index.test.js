@@ -5,19 +5,20 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { execFileSync } = require('node:child_process');
-const { SQLITE_EXEC_OPTIONS } = require('../lib/osi-migrate/runner-iface');
+
+const EXEC_OPTS = { encoding: 'utf8', timeout: 30_000 };
 
 function scratch() { return fs.mkdtempSync(path.join(os.tmpdir(), 'dbint-')); }
 
 function makeDb(dir, name = 'farming.db') {
   const dbPath = path.join(dir, name);
-  execFileSync('sqlite3', [dbPath, 'CREATE TABLE t (x TEXT); INSERT INTO t VALUES (1);'], SQLITE_EXEC_OPTIONS);
+  execFileSync('sqlite3', [dbPath, 'CREATE TABLE t (x TEXT); INSERT INTO t VALUES (1);'], EXEC_OPTS);
   return dbPath;
 }
 
 function makeWalDb(dir, name = 'farming.db') {
   const dbPath = path.join(dir, name);
-  execFileSync('sqlite3', [dbPath, 'PRAGMA journal_mode=WAL; CREATE TABLE t (x TEXT); INSERT INTO t VALUES (1);'], SQLITE_EXEC_OPTIONS);
+  execFileSync('sqlite3', [dbPath, 'PRAGMA journal_mode=WAL; CREATE TABLE t (x TEXT); INSERT INTO t VALUES (1);'], EXEC_OPTS);
   return dbPath;
 }
 
@@ -39,7 +40,7 @@ function makeCorruptBackup(dbPath, stamp) {
   return backupPath;
 }
 
-const { runBootIntegrityCheck } = require('./boot-db-integrity-check');
+const { runBootIntegrityCheck } = require('./index');
 
 test('healthy DB: status ok, opportunistic backup taken', async () => {
   const dir = scratch();
@@ -74,7 +75,7 @@ test('corrupt DB + passing backup: recovered', async () => {
   assert.ok(result.quarantinedTo);
   assert.ok(result.stampPath);
   assert.ok(fs.existsSync(result.quarantinedTo), 'corrupt file quarantined, not deleted');
-  const check = execFileSync('sqlite3', [dbPath, 'PRAGMA quick_check;'], SQLITE_EXEC_OPTIONS).trim();
+  const check = execFileSync('sqlite3', [dbPath, 'PRAGMA quick_check;'], EXEC_OPTS).trim();
   assert.equal(check, 'ok', 'restored DB passes quick_check');
   const stamp_data = JSON.parse(fs.readFileSync(result.stampPath, 'utf8'));
   assert.ok(stamp_data.restoredFrom);

@@ -3,8 +3,54 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const { execFileSync } = require('node:child_process');
-const { SQLITE_EXEC_OPTIONS } = require('../lib/osi-migrate/runner-iface');
-const { backupDb } = require('../lib/osi-migrate/backup');
+
+const SQLITE_TIMEOUT_MS = 120_000;
+const SQLITE_MAX_BUFFER = 64 * 1024 * 1024;
+const SQLITE_EXEC_OPTIONS = {
+  encoding: 'utf8',
+  timeout: SQLITE_TIMEOUT_MS,
+  maxBuffer: SQLITE_MAX_BUFFER,
+};
+
+function sqliteDotQuote(value) {
+  const text = String(value);
+  if (/[\r\n]/.test(text)) throw new Error('sqlite .backup path must not contain a newline');
+  return `"${text.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
+}
+
+function pruneBackups(dbPath, keep = 5) {
+  const dir = path.dirname(dbPath);
+  const prefix = `${path.basename(dbPath)}.bak-`;
+  const backups = fs.readdirSync(dir).filter((f) => f.startsWith(prefix)).sort();
+  const excess = backups.slice(0, Math.max(0, backups.length - keep));
+  let removed = 0;
+  for (const f of excess) {
+    try {
+      fs.unlinkSync(path.join(dir, f));
+      removed++;
+    } catch (err) {
+      console.error(`[backup] failed to prune ${f} (non-fatal): ${err.message || err}`);
+    }
+  }
+  return removed;
+}
+
+function backupDb(dbPath, { keep = 5 } = {}) {
+  if (!fs.existsSync(dbPath)) {
+    throw new Error(`refusing to back up: source DB does not exist: ${dbPath}`);
+  }
+  const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+  const backupPath = `${dbPath}.bak-${stamp}`;
+  execFileSync('sqlite3', [dbPath, `.backup ${sqliteDotQuote(backupPath)}`], SQLITE_EXEC_OPTIONS);
+  const check = execFileSync('sqlite3', [backupPath, 'PRAGMA integrity_check;'], SQLITE_EXEC_OPTIONS).trim();
+  if (check !== 'ok') throw new Error(`backup integrity_check failed: ${check}`);
+  try {
+    pruneBackups(dbPath, keep);
+  } catch (err) {
+    console.error(`[backup] pruneBackups failed (non-fatal): ${err.message || err}`);
+  }
+  return backupPath;
+}
 
 function quickCheck(dbPath) {
   try {
@@ -64,7 +110,7 @@ async function runBootIntegrityCheck(dbPath, opts = {}) {
   if (quickCheck(dbPath)) {
     const age = newestBackupAge(dbPath, now);
     if (age >= recentBackupMaxAgeMs) {
-      try { await backupDb(dbPath, { keep: backupKeep }); } catch (err) {
+      try { backupDb(dbPath, { keep: backupKeep }); } catch (err) {
         console.error(`[osi-db-integrity] opportunistic backup failed (non-fatal): ${err.message}`);
       }
     }
