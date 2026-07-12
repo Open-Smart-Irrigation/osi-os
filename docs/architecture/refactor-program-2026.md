@@ -111,7 +111,7 @@ This is the **program map**, not a spec. Each item below is a charter line: goal
 | Item | Repo | Size | Depends on | Mode |
 |---|---|---|---|---|
 | 5.1 SD durability: boot-time `PRAGMA quick_check` + quarantine/restore-from-local-backup path (couples with #56) — **Done (2026-07-12):** self-contained `osi-db-integrity` module (imaged at `/usr/share/node-red/osi-db-integrity/`), init.d service (START=90, before Node-RED), 7 tests, both profiles, PR #133 | osi-os | M | — | spec+plan |
-| 5.2 Chaos/soak rig: weeks-offline outbox replay, clock jump, power-loss-mid-migration (rehearsal gate for 4.3) | osi-os | M | — | spec+plan |
+| 5.2 Chaos/soak rig: weeks-offline outbox replay, clock jump, power-loss-mid-migration (rehearsal gate for 4.3) — done (2026-07-12): 4 scenarios (outbox-replay, clock-jump, kill-9-mid-migration on DB copy, SD-full/ENOSPC) against real edge code via facade shim, 16 deterministic tests in CI, operator rehearsal matrix for genuine SIGKILL + ENOSPC mount, artifact→gate citation map, PR #135 | osi-os | M | — | spec+plan |
 | 5.3 Staged atomic payload deploy + auto-rollback (DD10) — **Done:** `deploy-payload-swap.js` module (stage/flip/rollback/prune), deploy.sh integration (stage→migrate→flip→probe→auto-rollback), local health self-check, merged via `10ba61e9` | osi-os | M | 0.2 | spec+plan |
 | 5.4 Postgres care: hot-path index audit, retention/partition-or-BRIN decision for `sensor_data`, autovacuum tuning, bootstrap jitter | osi-server | M | 1.B3 | spec+plan |
 | 5.5 Incremental bootstrap snapshots (watermark-delta; full snapshot only on cursor gap) — defer until ~10+ gateways | osi-server | M | 5.4 | spec+plan |
