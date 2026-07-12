@@ -3882,43 +3882,6 @@
     ]
   },
   {
-    "id": "lsn50-sql-fn",
-    "type": "function",
-    "z": "lsn50-tab",
-    "name": "Build SQL INSERT",
-    "func": "const d = msg.formattedData;\nif (!d || !d.devEui) { node.error('formattedData missing', msg); return null; }\n\nfunction sqlStr(v) {\n    if (v === undefined || v === null) return 'NULL';\n    return \"'\" + String(v).replace(/'/g, \"''\") + \"'\";\n}\nfunction sqlNum(v) {\n    if (v === undefined || v === null) return 'NULL';\n    const n = Number(v);\n    return Number.isFinite(n) ? String(n) : 'NULL';\n}\n\nif (d.detectedMode === 9) {\n    msg.topic = [\n        'INSERT INTO device_data',\n        '  (deveui, ext_temperature_c, bat_v,',\n        '   rain_count_cumulative, rain_tips_delta, rain_mm_delta, rain_mm_per_hour, rain_mm_per_10min, rain_mm_today, rain_delta_status,',\n        '   flow_count_cumulative, flow_pulses_delta, flow_liters_delta, flow_liters_per_min, flow_liters_per_10min, flow_liters_today, flow_delta_status,',\n        '   counter_interval_seconds,',\n        '   lsn50_mode_code, lsn50_mode_label, lsn50_mode_observed_at,',\n        '   recorded_at)',\n        'VALUES (',\n        '  ' + sqlStr(d.devEui) + ',',\n        '  ' + sqlNum(d.tempC1) + ',',\n        '  ' + sqlNum(d.batV) + ',',\n        '  ' + sqlNum(d.rainCountCumulative) + ', ' + sqlNum(d.rainTipsDelta) + ', ' + sqlNum(d.rainMmDelta) + ', ' + sqlNum(d.rainMmPerHour) + ', ' + sqlNum(d.rainMmPer10Min) + ', ' + sqlNum(d.rainMmToday) + ', ' + sqlStr(d.rainDeltaStatus) + ',',\n        '  ' + sqlNum(d.flowCountCumulative) + ', ' + sqlNum(d.flowPulsesDelta) + ', ' + sqlNum(d.flowLitersDelta) + ', ' + sqlNum(d.flowLitersPerMin) + ', ' + sqlNum(d.flowLitersPer10Min) + ', ' + sqlNum(d.flowLitersToday) + ', ' + sqlStr(d.flowDeltaStatus) + ',',\n        '  ' + sqlNum(d.counterIntervalSeconds) + ',',\n        '  ' + sqlNum(d.modeCodeToStore) + ', ' + sqlStr(d.modeLabelToStore) + ', ' + sqlStr(d.observedModeObservedAt) + ',',\n        '  ' + sqlStr(d.timestamp),\n        ');'\n    ].join('\\n');\n    node.status({ fill: 'green', shape: 'dot', text: 'MOD9 deveui=' + d.devEui });\n} else {\n    const dendroValidSql = (d.dendroValid !== null && d.dendroValid !== undefined) ? String(d.dendroValid) : 'NULL';\n    msg.topic = [\n        'INSERT INTO device_data',\n        '  (deveui, ext_temperature_c, bat_v, adc_ch0v, adc_ch1v, swt_1, swt_2, swt_3,',\n        '   dendro_ratio, dendro_mode_used, dendro_position_raw_mm, dendro_position_mm, dendro_valid, dendro_delta_mm, dendro_stem_change_um,',\n        '   dendro_saturated, dendro_saturation_side,',\n        '   lsn50_mode_code, lsn50_mode_label, lsn50_mode_observed_at,',\n        '   recorded_at)',\n        'VALUES (',\n        '  ' + sqlStr(d.devEui) + ',',\n        '  ' + sqlNum(d.tempC1) + ',',\n        '  ' + sqlNum(d.batV) + ',',\n        '  ' + sqlNum(d.adcV) + ',',\n        '  ' + sqlNum(d.adcCh1V) + ',',\n        '  ' + sqlNum(d.swt1Kpa) + ',',\n        '  ' + sqlNum(d.swt2Kpa) + ',',\n        '  ' + sqlNum(d.swt3Kpa) + ',',\n        '  ' + sqlNum(d.dendroRatio) + ',',\n        '  ' + sqlStr(d.dendroModeUsed) + ',',\n        '  ' + sqlNum(d.positionRawMm) + ',',\n        '  ' + sqlNum(d.positionMm) + ',',\n        '  ' + dendroValidSql + ',',\n        '  ' + sqlNum(d.deltaMm) + ',',\n        '  ' + sqlNum(d.dendroStemChangeUm) + ',',\n        '  ' + sqlNum(d.dendroSaturated) + ',',\n        '  ' + sqlStr(d.dendroSaturationSide) + ',',\n        '  ' + sqlNum(d.modeCodeToStore) + ',',\n        '  ' + sqlStr(d.modeLabelToStore) + ',',\n        '  ' + sqlStr(d.observedModeObservedAt) + ',',\n        '  ' + sqlStr(d.timestamp),\n        ');'\n    ].join('\\n');\n    node.status({ fill: 'green', shape: 'dot', text: 'INSERT deveui=' + d.devEui });\n}\nmsg.payload = msg.topic;\nreturn msg;",
-    "outputs": 1,
-    "timeout": "",
-    "noerr": 0,
-    "initialize": "",
-    "finalize": "",
-    "libs": [],
-    "x": 1220,
-    "y": 200,
-    "wires": [
-      [
-        "lsn50-sqlite",
-        "093d7832e89c4027"
-      ]
-    ]
-  },
-  {
-    "id": "lsn50-sqlite",
-    "type": "sqlite",
-    "z": "lsn50-tab",
-    "mydb": "734737e846d06893",
-    "sqlquery": "msg.topic",
-    "sql": "",
-    "name": "Sensor DB Insert",
-    "x": 1460,
-    "y": 200,
-    "wires": [
-      [
-        "lsn50-zone-agg-fn"
-      ]
-    ]
-  },
-  {
     "id": "lsn50-debug",
     "type": "debug",
     "z": "lsn50-tab",
@@ -11018,31 +10981,12 @@
     "wires": []
   },
   {
-    "id": "093d7832e89c4027",
-    "type": "function",
-    "z": "lsn50-tab",
-    "name": "LSN50 Shadow Compare",
-    "func": "var d = msg.formattedData;\nif (!d || !d.devEui) return msg;\n\nvar normRes = osiLib.require('lsn50-normalize');\nif (!normRes.ok) return msg;\n\nvar result = normRes.value.normalize(d, {});\n\nvar MODE9_COLS = 'ext_temperature_c bat_v rain_count_cumulative rain_tips_delta rain_mm_delta rain_mm_per_hour rain_mm_per_10min rain_mm_today rain_delta_status flow_count_cumulative flow_pulses_delta flow_liters_delta flow_liters_per_min flow_liters_per_10min flow_liters_today flow_delta_status counter_interval_seconds lsn50_mode_code lsn50_mode_label lsn50_mode_observed_at'.split(' ');\nvar DEFAULT_COLS = 'ext_temperature_c bat_v adc_ch0v adc_ch1v swt_1 swt_2 swt_3 dendro_ratio dendro_mode_used dendro_position_raw_mm dendro_position_mm dendro_valid dendro_delta_mm dendro_stem_change_um dendro_saturated dendro_saturation_side lsn50_mode_code lsn50_mode_label lsn50_mode_observed_at'.split(' ');\n\nvar expectedCols = d.detectedMode === 9 ? MODE9_COLS : DEFAULT_COLS;\nvar normCols = Object.keys(result.channels);\nvar expectedSet = {};\nfor (var i = 0; i < expectedCols.length; i++) expectedSet[expectedCols[i]] = true;\n\nvar missing = expectedCols.filter(function(c) { return !(c in result.channels); });\nvar extra = normCols.filter(function(c) { return !expectedSet[c]; });\nvar unknownKeys = Object.keys(result.unknown);\n\nif (missing.length > 0 || extra.length > 0) {\n  node.warn('LSN50 shadow COVERAGE DRIFT ' + d.devEui + ' missing=[' + missing.join(',') + '] extra=[' + extra.join(',') + ']');\n}\nif (unknownKeys.length > 0) {\n  node.warn('LSN50 shadow UNKNOWN keys ' + d.devEui + ': ' + unknownKeys.join(', '));\n}\n\nnode.status({\n  fill: (missing.length > 0 || extra.length > 0) ? 'red' : (unknownKeys.length > 0 ? 'yellow' : 'green'),\n  shape: 'dot',\n  text: d.devEui + ' ch=' + normCols.length + (missing.length > 0 ? ' MISS=' + missing.length : '') + (unknownKeys.length > 0 ? ' unk=' + unknownKeys.length : '')\n});\n\nreturn msg;",
-    "outputs": 1,
-    "libs": [
-      {
-        "var": "osiLib",
-        "module": "osi-lib"
-      }
-    ],
-    "x": 1470,
-    "y": 260,
-    "wires": [
-      []
-    ]
-  },
-  {
     "id": "460e0bfd95f89e67",
     "type": "function",
     "z": "lsn50-tab",
     "name": "LSN50 Normalize + Write",
-    "func": "var d = msg.formattedData;\nif (!d || !d.devEui) { node.error(\"formattedData missing\", msg); return null; }\n\nif (env.get(\"LSN50_WRITER_DISABLE\")) {\n  node.status({ fill: \"yellow\", shape: \"ring\", text: \"kill-switch active\" });\n  return [null, msg];\n}\n\nvar normRes = osiLib.require(\"lsn50-normalize\");\nif (!normRes.ok) { node.warn(\"lsn50-normalize quarantined: \" + normRes.error); return [null, msg]; }\n\nvar writerRes = osiLib.require(\"device-writer\");\nif (!writerRes.ok) { node.warn(\"device-writer quarantined: \" + writerRes.error); return [null, msg]; }\n\nvar deveui = String(d.devEui).toUpperCase().trim();\nif (!deveui) { node.error(\"LSN50: empty devEui\"); return null; }\n\nvar fs = global.get(\"fs\");\nvar edgeManifest;\ntry { edgeManifest = JSON.parse(fs.readFileSync(\"/srv/node-red/edge-channels.json\", \"utf8\")); }\ncatch (e) { node.error(\"edge-channels.json load failed: \" + e.message); return [null, msg]; }\n\nvar decoded = {\n  devEui: d.devEui, timestamp: d.timestamp, detectedMode: d.detectedMode,\n  tempC1: d.tempC1, batV: d.batV,\n  adcV: d.adcV, adcCh1V: d.adcCh1V,\n  swt1Kpa: d.swt1Kpa, swt2Kpa: d.swt2Kpa, swt3Kpa: d.swt3Kpa,\n  dendroRatio: d.dendroRatio, dendroModeUsed: d.dendroModeUsed,\n  positionRawMm: d.positionRawMm, positionMm: d.positionMm,\n  dendroValid: d.dendroValid, deltaMm: d.deltaMm,\n  dendroStemChangeUm: d.dendroStemChangeUm,\n  dendroSaturated: d.dendroSaturated, dendroSaturationSide: d.dendroSaturationSide,\n  rainCountCumulative: d.rainCountCumulative, rainTipsDelta: d.rainTipsDelta,\n  rainMmDelta: d.rainMmDelta, rainMmPerHour: d.rainMmPerHour,\n  rainMmPer10Min: d.rainMmPer10Min, rainMmToday: d.rainMmToday,\n  rainDeltaStatus: d.rainDeltaStatus,\n  flowCountCumulative: d.flowCountCumulative, flowPulsesDelta: d.flowPulsesDelta,\n  flowLitersDelta: d.flowLitersDelta, flowLitersPerMin: d.flowLitersPerMin,\n  flowLitersPer10Min: d.flowLitersPer10Min, flowLitersToday: d.flowLitersToday,\n  flowDeltaStatus: d.flowDeltaStatus,\n  counterIntervalSeconds: d.counterIntervalSeconds,\n  modeCodeToStore: d.modeCodeToStore, modeLabelToStore: d.modeLabelToStore,\n  observedModeObservedAt: d.observedModeObservedAt\n};\n\nvar normalizeResult = normRes.value.normalize(decoded, { recordedAt: d.timestamp });\n\nvar db = new osiDb.Database(\"/data/db/farming.db\");\ntry {\n  var result = writerRes.value.writeDeviceData(db, edgeManifest, normalizeResult, { deveui: deveui }, { node: node });\n  if (result.deadLettered.length > 0) {\n    node.warn(\"LSN50 dead-lettered \" + result.deadLettered.length + \" channels for \" + deveui);\n  }\n  node.status({ fill: \"green\", shape: \"dot\", text: \"LSN50 \" + deveui + \" cols=\" + result.columns.length });\n} catch (e) {\n  node.error(\"LSN50 write failed: \" + e.message);\n  return [null, msg];\n} finally {\n  db.close();\n}\n\nreturn [msg, null];",
-    "outputs": 2,
+    "func": "var d = msg.formattedData;\nif (!d || !d.devEui) { node.error(\"formattedData missing\", msg); return null; }\n\nvar normRes = osiLib.require(\"lsn50-normalize\");\nif (!normRes.ok) { node.warn(\"lsn50-normalize quarantined: \" + normRes.error); return null; }\n\nvar writerRes = osiLib.require(\"device-writer\");\nif (!writerRes.ok) { node.warn(\"device-writer quarantined: \" + writerRes.error); return null; }\n\nvar deveui = String(d.devEui).toUpperCase().trim();\nif (!deveui) { node.error(\"LSN50: empty devEui\"); return null; }\n\nvar fs = global.get(\"fs\");\nvar edgeManifest;\ntry { edgeManifest = JSON.parse(fs.readFileSync(\"/srv/node-red/edge-channels.json\", \"utf8\")); }\ncatch (e) { node.error(\"edge-channels.json load failed: \" + e.message); return null; }\n\nvar decoded = {\n  devEui: d.devEui, timestamp: d.timestamp, detectedMode: d.detectedMode,\n  tempC1: d.tempC1, batV: d.batV,\n  adcV: d.adcV, adcCh1V: d.adcCh1V,\n  swt1Kpa: d.swt1Kpa, swt2Kpa: d.swt2Kpa, swt3Kpa: d.swt3Kpa,\n  dendroRatio: d.dendroRatio, dendroModeUsed: d.dendroModeUsed,\n  positionRawMm: d.positionRawMm, positionMm: d.positionMm,\n  dendroValid: d.dendroValid, deltaMm: d.deltaMm,\n  dendroStemChangeUm: d.dendroStemChangeUm,\n  dendroSaturated: d.dendroSaturated, dendroSaturationSide: d.dendroSaturationSide,\n  rainCountCumulative: d.rainCountCumulative, rainTipsDelta: d.rainTipsDelta,\n  rainMmDelta: d.rainMmDelta, rainMmPerHour: d.rainMmPerHour,\n  rainMmPer10Min: d.rainMmPer10Min, rainMmToday: d.rainMmToday,\n  rainDeltaStatus: d.rainDeltaStatus,\n  flowCountCumulative: d.flowCountCumulative, flowPulsesDelta: d.flowPulsesDelta,\n  flowLitersDelta: d.flowLitersDelta, flowLitersPerMin: d.flowLitersPerMin,\n  flowLitersPer10Min: d.flowLitersPer10Min, flowLitersToday: d.flowLitersToday,\n  flowDeltaStatus: d.flowDeltaStatus,\n  counterIntervalSeconds: d.counterIntervalSeconds,\n  modeCodeToStore: d.modeCodeToStore, modeLabelToStore: d.modeLabelToStore,\n  observedModeObservedAt: d.observedModeObservedAt\n};\n\nvar normalizeResult = normRes.value.normalize(decoded, { recordedAt: d.timestamp });\n\nvar db = new osiDb.Database(\"/data/db/farming.db\");\ntry {\n  var result = writerRes.value.writeDeviceData(db, edgeManifest, normalizeResult, { deveui: deveui }, { node: node });\n  if (result.deadLettered.length > 0) {\n    node.warn(\"LSN50 dead-lettered \" + result.deadLettered.length + \" channels for \" + deveui);\n  }\n  node.status({ fill: \"green\", shape: \"dot\", text: \"LSN50 \" + deveui + \" cols=\" + result.columns.length });\n} catch (e) {\n  node.error(\"LSN50 write failed: \" + e.message);\n  return null;\n} finally {\n  db.close();\n}\n\nreturn msg;",
+    "outputs": 1,
     "libs": [
       {
         "var": "osiDb",
@@ -11058,9 +11002,6 @@
     "wires": [
       [
         "lsn50-zone-agg-fn"
-      ],
-      [
-        "lsn50-sql-fn"
       ]
     ]
   }
