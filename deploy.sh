@@ -455,6 +455,18 @@ fetch_required "osi-history-router index.js" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-history-router/index.js" \
     "/srv/node-red/osi-history-router/index.js"
 
+fetch_required "osi-journal package.json" \
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-journal/package.json" \
+    "/srv/node-red/osi-journal/package.json"
+
+fetch_required "osi-journal index.js" \
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-journal/index.js" \
+    "/srv/node-red/osi-journal/index.js"
+
+fetch_required "osi-journal catalog.js" \
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-journal/catalog.js" \
+    "/srv/node-red/osi-journal/catalog.js"
+
 fetch_required "osi-history-sync-helper package.json" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-history-sync-helper/package.json" \
     "/srv/node-red/osi-history-sync-helper/package.json"
