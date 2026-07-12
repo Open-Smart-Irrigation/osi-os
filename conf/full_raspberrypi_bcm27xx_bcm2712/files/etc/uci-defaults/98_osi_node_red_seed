@@ -23,6 +23,10 @@ if [ -f "$SRC/package-lock.json" ] && [ ! -f "$DST/package-lock.json" ]; then
     cp "$SRC/package-lock.json" "$DST/package-lock.json"
 fi
 
+if [ -f "$SRC/edge-channels.json" ]; then
+    cp "$SRC/edge-channels.json" "$DST/edge-channels.json"
+fi
+
 if [ -d "$SRC/codecs" ]; then
     mkdir -p "$DST/codecs"
     cp -a "$SRC/codecs/." "$DST/codecs/"

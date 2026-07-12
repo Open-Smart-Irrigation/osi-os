@@ -487,6 +487,10 @@ fetch_required "osi-lib index.js" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-lib/index.js" \
     "/srv/node-red/osi-lib/index.js"
 
+fetch_required "edge-channels.json" \
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/edge-channels.json" \
+    "/srv/node-red/edge-channels.json"
+
 fetch_required "chirpstack-bootstrap.js" \
     "scripts/chirpstack-bootstrap.js" \
     "/srv/node-red/chirpstack-bootstrap.js"
