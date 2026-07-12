@@ -1,0 +1,24 @@
+{
+  "route": {
+    "name": "series-aggregate",
+    "description": "GET series/aggregate data for soil card (24h, hourly)",
+    "method": "GET",
+    "path": "/api/history/zones/1/cards/test-zone-uuid-1:soil:root-zone/data",
+    "params": {
+      "zoneId": "1",
+      "cardId": "test-zone-uuid-1:soil:root-zone"
+    },
+    "query": {
+      "range": "24h",
+      "view": "line-chart",
+      "aggregation": "hourly"
+    },
+    "body": null
+  },
+  "seed": {
+    "note": "Seeded from database/seed-blank.sql plus fixture rows (see capture-history-router-vectors.js seedFixtureDb)",
+    "pinnedClockMs": 1783684800000,
+    "pinnedClockIso": "2026-07-10T12:00:00.000Z",
+    "jwtSecret": "test-jwt-secret-for-golden-vectors-only"
+  }
+}

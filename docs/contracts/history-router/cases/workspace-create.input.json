@@ -1,0 +1,30 @@
+{
+  "route": {
+    "name": "workspace-create",
+    "description": "POST create a new workspace",
+    "method": "POST",
+    "path": "/api/history/workspaces",
+    "params": {},
+    "query": {},
+    "body": {
+      "name": "Golden Vector Workspace",
+      "zoneId": 1,
+      "isDefault": false,
+      "workspace": {
+        "layout": "grid",
+        "panels": [
+          {
+            "id": "p1",
+            "type": "soil"
+          }
+        ]
+      }
+    }
+  },
+  "seed": {
+    "note": "Seeded from database/seed-blank.sql plus fixture rows (see capture-history-router-vectors.js seedFixtureDb)",
+    "pinnedClockMs": 1783684800000,
+    "pinnedClockIso": "2026-07-10T12:00:00.000Z",
+    "jwtSecret": "test-jwt-secret-for-golden-vectors-only"
+  }
+}

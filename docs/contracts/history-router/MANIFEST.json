@@ -1,0 +1,9 @@
+{
+  "schemaVersion": 1,
+  "cases": [
+    "card-summary",
+    "series-aggregate",
+    "workspace-create",
+    "csv-export"
+  ]
+}
