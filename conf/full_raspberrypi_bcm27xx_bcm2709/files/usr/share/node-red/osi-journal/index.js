@@ -3,6 +3,7 @@
 const { loadCatalog } = require('./catalog');
 const {
   dependencyCatalogErrors,
+  resolveOptions,
   validateSelections,
 } = require('./cascade');
 const {
@@ -561,7 +562,6 @@ function validateEntry(catalog, _layoutDef, _templateDef, entryInput, validation
   }
   const values = entryInput.values;
   const normalizedValues = [];
-  const cascadeBypassIndexes = new Set();
   const groups = new Set();
   const valueKeys = new Set();
   for (let index = 0; index < values.length; index += 1) {
@@ -583,6 +583,23 @@ function validateEntry(catalog, _layoutDef, _templateDef, entryInput, validation
     }
     const valueKey = String(groupIndex) + '\u0000' + String(value.attribute_code || '');
     if (valueKeys.has(valueKey)) {
+      const singletonField = 'values[' + index + '].value';
+      const dependencyCardinality = validateSelections(layoutDefinition, [
+        ...values,
+        { attribute_code: 'activity_code', value: entryInput.activity_code },
+      ]);
+      const singletonError = !dependencyCardinality.ok &&
+        dependencyCardinality.errors.find(function(error) {
+          return error.field === singletonField && error.code === 'invalid_under_dependency';
+        });
+      if (singletonError) {
+        return {
+          ok: false,
+          errors: [Object.assign({
+            message: 'A cascade selector may occur only once per entry',
+          }, singletonError)],
+        };
+      }
       return errorResult(
         'values[' + index + '].attribute_code',
         'duplicate_value',
@@ -627,10 +644,6 @@ function validateEntry(catalog, _layoutDef, _templateDef, entryInput, validation
       originalEntry,
       normalizedValue
     );
-    if (valuePreserved) {
-      const retirement = originalValueRetirement(catalog, normalizedValue, context);
-      if (!retirement.invalid && retirement.retired) cascadeBypassIndexes.add(index);
-    }
     if (attribute.active !== 1 || attribute.deleted_at) {
       if (!correction) {
         return errorResult(
@@ -852,10 +865,7 @@ function validateEntry(catalog, _layoutDef, _templateDef, entryInput, validation
     { attribute_code: 'activity_code', value: entryInput.activity_code },
   ]);
   if (!cascadeValidation.ok) {
-    const cascadeErrors = cascadeValidation.errors.filter(function(error) {
-      const match = /^values\[(\d+)\]/.exec(error.field);
-      return !match || !cascadeBypassIndexes.has(Number(match[1]));
-    }).map(function(error) {
+    const cascadeErrors = cascadeValidation.errors.map(function(error) {
       return Object.assign({ message: 'Value is invalid under the selected dependency path' }, error);
     });
     if (cascadeErrors.length) return { ok: false, errors: cascadeErrors };
@@ -944,4 +954,11 @@ function validateEntry(catalog, _layoutDef, _templateDef, entryInput, validation
   };
 }
 
-module.exports = { allowedUnits, convertToCanonical, loadCatalog, validateEntry };
+module.exports = {
+  allowedUnits,
+  convertToCanonical,
+  loadCatalog,
+  resolveOptions,
+  validateEntry,
+  validateSelections,
+};

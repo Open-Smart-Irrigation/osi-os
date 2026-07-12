@@ -1,5 +1,10 @@
 'use strict';
 
+const {
+  numericAttributePreflight,
+  resolveConversion,
+} = require('./unit-family');
+
 function isPlainObject(value) {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 }
@@ -9,7 +14,7 @@ function hasOwn(value, key) {
 }
 
 function nonemptyString(value) {
-  return typeof value === 'string' && value.length > 0;
+  return typeof value === 'string' && value.trim().length > 0;
 }
 
 function catalogError(field, message) {
@@ -28,6 +33,33 @@ function sameMembers(left, right) {
   if (left.length !== right.length) return false;
   const rightSet = new Set(right);
   return left.every(function(value) { return rightSet.has(value); });
+}
+
+function choiceDependencyHasCycle(rules) {
+  const edges = new Map();
+  for (const dependency of rules) {
+    if (dependency.kind !== 'choices') continue;
+    const source = dependency.when.attribute_code;
+    const target = dependency.restrict.attribute_code;
+    if (!edges.has(source)) edges.set(source, new Set());
+    edges.get(source).add(target);
+  }
+  const state = new Map();
+  function visit(attributeCode) {
+    const current = state.get(attributeCode) || 0;
+    if (current === 1) return true;
+    if (current === 2) return false;
+    state.set(attributeCode, 1);
+    for (const target of edges.get(attributeCode) || []) {
+      if (visit(target)) return true;
+    }
+    state.set(attributeCode, 2);
+    return false;
+  }
+  for (const source of edges.keys()) {
+    if (visit(source)) return true;
+  }
+  return false;
 }
 
 function dependencyShape(layoutDef, path) {
@@ -54,6 +86,23 @@ function dependencyShape(layoutDef, path) {
     const rulePath = basePath + '[' + index + ']';
     if (!isPlainObject(rule)) {
       errors.push(catalogError(rulePath, 'Dependency rule must be an object'));
+      return;
+    }
+    const unsupportedKeys = Object.keys(rule).filter(function(key) {
+      return !['when', 'restrict', 'source_category'].includes(key);
+    });
+    if (unsupportedKeys.length) {
+      errors.push(catalogError(
+        rulePath + '.' + unsupportedKeys[0],
+        'Dependency rule contains an unsupported top-level key'
+      ));
+      return;
+    }
+    if (hasOwn(rule, 'source_category') && !nonemptyString(rule.source_category)) {
+      errors.push(catalogError(
+        rulePath + '.source_category',
+        'source_category must be a nonempty string'
+      ));
       return;
     }
     const when = rule.when;
@@ -133,9 +182,23 @@ function dependencyShape(layoutDef, path) {
     rules.push({ rule, index, when, restrict, kind, values: restrictedValues });
   });
 
-  return errors.length
-    ? { ok: false, errors }
-    : { ok: true, rules, targetKinds };
+  if (!errors.length && choiceDependencyHasCycle(rules)) {
+    errors.push(catalogError(
+      basePath,
+      'Choice dependency graph must not contain self-edges or cycles'
+    ));
+  }
+  if (errors.length) return { ok: false, errors };
+  const sourceAttributes = new Set(rules.map(function(rule) {
+    return rule.when.attribute_code;
+  }));
+  const singletonChoiceSelectors = new Set();
+  for (const [target, kind] of targetKinds) {
+    if (kind === 'choices' && sourceAttributes.has(target)) {
+      singletonChoiceSelectors.add(target);
+    }
+  }
+  return { ok: true, rules, targetKinds, singletonChoiceSelectors };
 }
 
 function addSelected(map, attributeCode, value) {
@@ -237,6 +300,7 @@ function validateSelections(layoutDef, values) {
   }
   const resolved = resolveCompiled(compiled, values);
   const errors = [];
+  const seenSingletons = new Set();
   values.forEach(function(row, index) {
     if (!isPlainObject(row)) return;
     const kind = compiled.targetKinds.get(row.attribute_code);
@@ -244,6 +308,16 @@ function validateSelections(layoutDef, values) {
     if (kind === 'choices') {
       const value = row.value != null ? row.value : row.value_text;
       if (value == null) return;
+      if (compiled.singletonChoiceSelectors.has(row.attribute_code)) {
+        if (seenSingletons.has(row.attribute_code)) {
+          errors.push({
+            field: 'values[' + index + '].value',
+            code: 'invalid_under_dependency',
+          });
+          return;
+        }
+        seenSingletons.add(row.attribute_code);
+      }
       if (!resolved[row.attribute_code].choices.includes(value)) {
         errors.push({
           field: 'values[' + index + '].value',
@@ -342,12 +416,21 @@ function dependencyCatalogErrors(catalog, layoutDef, path) {
         ));
         continue;
       }
+      const attributeInfo = numericAttributePreflight(catalog, targetCode);
+      if (!attributeInfo.ok) {
+        errors.push(catalogError(
+          rulePath + '.restrict.attribute_code',
+          'Dependency unit target has invalid or inactive numeric metadata'
+        ));
+        continue;
+      }
       dependency.values.forEach(function(code, unitIndex) {
-        const unit = terms.get(code);
-        if (!unit || unit.kind !== 'unit') {
+        const membership = resolveConversion(attributeInfo, code);
+        if (membership.error) {
           errors.push(catalogError(
             rulePath + '.restrict.units[' + unitIndex + ']',
-            'Dependency references an unknown unit'
+            'Restricted unit is not in the target active quantity family: ' +
+              membership.error
           ));
         }
       });
