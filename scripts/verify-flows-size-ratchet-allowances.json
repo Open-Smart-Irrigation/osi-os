@@ -9,7 +9,7 @@
     "reject-indefinite-open": { "delta": 3100, "reason": "1.C: expanded COMMAND_TYPES_FALLBACK to match 33-type registry" },
     "write-strega-expectation": { "delta": 3300, "reason": "1.C: expanded COMMAND_TYPES_FALLBACK to match 33-type registry" },
     "9b3afb405207302e": { "delta": 800, "reason": "5.6: timestamp sanity clamp (clampRecordedAt) at ingest" },
-    "5f0d2b7e9b9b1b3a": { "delta": 1700, "reason": "5.6: scheduler backward-jump debounce (sameLogicalWindow) on both DENDRO + threshold paths" }
+    "5f0d2b7e9b9b1b3a": { "delta": 1700, "reason": "5.6: scheduler backward-jump debounce (sameLogicalWindow) on both DENDRO + threshold paths + threshold suppression early return" }
   },
   "total_allowance": { "delta": 16400, "reason": "1.A5 sync outbox hardening + 1.A6 history card-data + 1.C command-type registry expansion + 5.6 time integrity guards + heartbeat RTC fields" }
 }

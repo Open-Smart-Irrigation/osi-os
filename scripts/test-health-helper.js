@@ -429,13 +429,23 @@ test('disk df fallback source does not use synchronous child process collection'
 
 const { rtcHealth } = requireHealthHelperFresh();
 
-test('rtcHealth reports present when the sysfs rtc node exists', () => {
+test('rtcHealth reports present when since_epoch is readable and positive', () => {
   const dir = fs.mkdtempSync(require('node:path').join(os.tmpdir(), 'rtc-'));
   const node = require('node:path').join(dir, 'rtc0');
   fs.mkdirSync(node);
   fs.writeFileSync(require('node:path').join(node, 'since_epoch'), '1700000000\n');
-  const r = rtcHealth({ rtcSysfsPath: node, hwclockRunner: () => 'ok' });
+  const r = rtcHealth({ rtcSysfsPath: node });
   assert.strictEqual(r.rtc_present, true);
+  assert.strictEqual(r.clock_source, 'rtc');
+});
+
+test('rtcHealth reports absent for an empty rtc0 directory (no since_epoch)', () => {
+  const dir = fs.mkdtempSync(require('node:path').join(os.tmpdir(), 'rtc-empty-'));
+  const node = require('node:path').join(dir, 'rtc0');
+  fs.mkdirSync(node);
+  const r = rtcHealth({ rtcSysfsPath: node });
+  assert.strictEqual(r.rtc_present, false);
+  assert.strictEqual(r.clock_source, null);
 });
 
 test('rtcHealth reports absent when the sysfs rtc node does not exist', () => {

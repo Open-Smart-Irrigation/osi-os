@@ -243,7 +243,14 @@ async function diskFreePct(diskPath, timeoutMs) {
 function rtcHealth({ rtcSysfsPath = '/sys/class/rtc/rtc0', hwclockRunner } = {}) {
   try {
     if (rtcSysfsPath && fs.existsSync(rtcSysfsPath)) {
-      return { rtc_present: true, clock_source: 'rtc' };
+      const epochPath = require('node:path').join(rtcSysfsPath, 'since_epoch');
+      try {
+        const raw = fs.readFileSync(epochPath, 'utf8').trim();
+        const epoch = Number(raw);
+        if (Number.isFinite(epoch) && epoch > 0) {
+          return { rtc_present: true, clock_source: 'rtc' };
+        }
+      } catch (_) {}
     }
     if (typeof hwclockRunner === 'function') {
       try { hwclockRunner(); return { rtc_present: true, clock_source: 'rtc' }; }
@@ -313,7 +320,10 @@ async function gatherWork(db, diskPath, timeoutMs, options) {
   } catch (_) {}
 
   try {
-    const rtc = rtcHealth({});
+    const rtc = rtcHealth({
+      rtcSysfsPath: options && options.rtcSysfsPath,
+      hwclockRunner: options && options.hwclockRunner
+    });
     health.rtc_present = rtc.rtc_present;
     health.clock_source = rtc.clock_source;
   } catch (_) {}
