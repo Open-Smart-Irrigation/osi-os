@@ -4078,7 +4078,7 @@
     "y": 200,
     "wires": [
       [
-        "lsn50-sql-fn"
+        "460e0bfd95f89e67"
       ]
     ]
   },
@@ -11034,6 +11034,34 @@
     "y": 260,
     "wires": [
       []
+    ]
+  },
+  {
+    "id": "460e0bfd95f89e67",
+    "type": "function",
+    "z": "lsn50-tab",
+    "name": "LSN50 Normalize + Write",
+    "func": "var d = msg.formattedData;\nif (!d || !d.devEui) { node.error(\"formattedData missing\", msg); return null; }\n\nif (env.get(\"LSN50_WRITER_DISABLE\")) {\n  node.status({ fill: \"yellow\", shape: \"ring\", text: \"kill-switch active\" });\n  return [null, msg];\n}\n\nvar normRes = osiLib.require(\"lsn50-normalize\");\nif (!normRes.ok) { node.warn(\"lsn50-normalize quarantined: \" + normRes.error); return [null, msg]; }\n\nvar writerRes = osiLib.require(\"device-writer\");\nif (!writerRes.ok) { node.warn(\"device-writer quarantined: \" + writerRes.error); return [null, msg]; }\n\nvar deveui = String(d.devEui).toUpperCase().trim();\nif (!deveui) { node.error(\"LSN50: empty devEui\"); return null; }\n\nvar fs = global.get(\"fs\");\nvar edgeManifest;\ntry { edgeManifest = JSON.parse(fs.readFileSync(\"/srv/node-red/edge-channels.json\", \"utf8\")); }\ncatch (e) { node.error(\"edge-channels.json load failed: \" + e.message); return [null, msg]; }\n\nvar decoded = {\n  devEui: d.devEui, timestamp: d.timestamp, detectedMode: d.detectedMode,\n  tempC1: d.tempC1, batV: d.batV,\n  adcV: d.adcV, adcCh1V: d.adcCh1V,\n  swt1Kpa: d.swt1Kpa, swt2Kpa: d.swt2Kpa, swt3Kpa: d.swt3Kpa,\n  dendroRatio: d.dendroRatio, dendroModeUsed: d.dendroModeUsed,\n  positionRawMm: d.positionRawMm, positionMm: d.positionMm,\n  dendroValid: d.dendroValid, deltaMm: d.deltaMm,\n  dendroStemChangeUm: d.dendroStemChangeUm,\n  dendroSaturated: d.dendroSaturated, dendroSaturationSide: d.dendroSaturationSide,\n  rainCountCumulative: d.rainCountCumulative, rainTipsDelta: d.rainTipsDelta,\n  rainMmDelta: d.rainMmDelta, rainMmPerHour: d.rainMmPerHour,\n  rainMmPer10Min: d.rainMmPer10Min, rainMmToday: d.rainMmToday,\n  rainDeltaStatus: d.rainDeltaStatus,\n  flowCountCumulative: d.flowCountCumulative, flowPulsesDelta: d.flowPulsesDelta,\n  flowLitersDelta: d.flowLitersDelta, flowLitersPerMin: d.flowLitersPerMin,\n  flowLitersPer10Min: d.flowLitersPer10Min, flowLitersToday: d.flowLitersToday,\n  flowDeltaStatus: d.flowDeltaStatus,\n  counterIntervalSeconds: d.counterIntervalSeconds,\n  modeCodeToStore: d.modeCodeToStore, modeLabelToStore: d.modeLabelToStore,\n  observedModeObservedAt: d.observedModeObservedAt\n};\n\nvar normalizeResult = normRes.value.normalize(decoded, { recordedAt: d.timestamp });\n\nvar db = new osiDb.Database(\"/data/db/farming.db\");\ntry {\n  var result = writerRes.value.writeDeviceData(db, edgeManifest, normalizeResult, { deveui: deveui }, { node: node });\n  if (result.deadLettered.length > 0) {\n    node.warn(\"LSN50 dead-lettered \" + result.deadLettered.length + \" channels for \" + deveui);\n  }\n  node.status({ fill: \"green\", shape: \"dot\", text: \"LSN50 \" + deveui + \" cols=\" + result.columns.length });\n} catch (e) {\n  node.error(\"LSN50 write failed: \" + e.message);\n  return [null, msg];\n} finally {\n  db.close();\n}\n\nreturn [msg, null];",
+    "outputs": 2,
+    "libs": [
+      {
+        "var": "osiDb",
+        "module": "osi-db-helper"
+      },
+      {
+        "var": "osiLib",
+        "module": "osi-lib"
+      }
+    ],
+    "x": 820,
+    "y": 200,
+    "wires": [
+      [
+        "lsn50-zone-agg-fn"
+      ],
+      [
+        "lsn50-sql-fn"
+      ]
     ]
   }
 ]
