@@ -1,0 +1,42 @@
+[
+  {
+    "name": "battery + both valves closed",
+    "bytes": [1, 117, 100, 3, 1, 0, 5, 1, 0],
+    "expected": {
+      "battery": 100,
+      "valve_1": "close",
+      "valve_2": "close"
+    }
+  },
+  {
+    "name": "battery + valve 1 open + pulse counters",
+    "bytes": [1, 117, 85, 3, 1, 1, 4, 200, 232, 3, 0, 0, 6, 200, 0, 0, 0, 0],
+    "expected": {
+      "battery": 85,
+      "valve_1": "open",
+      "valve_1_pulse": 1000,
+      "valve_2_pulse": 0
+    }
+  },
+  {
+    "name": "full telemetry with pressure + GPIOs",
+    "bytes": [1, 117, 92, 3, 1, 0, 5, 1, 1, 4, 200, 100, 0, 0, 0, 6, 200, 200, 0, 0, 0, 7, 115, 44, 1, 8, 1, 0, 9, 1, 1],
+    "expected": {
+      "battery": 92,
+      "valve_1": "close",
+      "valve_2": "open",
+      "valve_1_pulse": 100,
+      "valve_2_pulse": 200,
+      "pressure": 30.0,
+      "gpio_1": 0,
+      "gpio_2": 1
+    }
+  },
+  {
+    "name": "valve task response — success",
+    "bytes": [255, 29, 1, 0],
+    "expected": {
+      "valve_1_task_status": "success"
+    }
+  }
+]
