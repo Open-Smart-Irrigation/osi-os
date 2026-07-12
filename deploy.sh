@@ -483,6 +483,10 @@ fetch_required "osi-journal cascade.js" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-journal/cascade.js" \
     "/srv/node-red/osi-journal/cascade.js"
 
+fetch_required "osi-journal aggregate.js" \
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-journal/aggregate.js" \
+    "/srv/node-red/osi-journal/aggregate.js"
+
 fetch_required "osi-history-sync-helper package.json" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-history-sync-helper/package.json" \
     "/srv/node-red/osi-history-sync-helper/package.json"

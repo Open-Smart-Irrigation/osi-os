@@ -1,6 +1,7 @@
 'use strict';
 
 const assert = require('node:assert/strict');
+const crypto = require('node:crypto');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
@@ -2732,4 +2733,309 @@ test('note-only correction preserves exact retired numeric cascade rows', async 
   assert.equal(changedRetiredAttribute.ok, false, JSON.stringify(changedRetiredAttribute));
   assert.ok(changedRetiredAttribute.errors.some((error) =>
     error.code === 'inactive_value_changed'));
+});
+
+function aggregateApi() {
+  return require('./aggregate');
+}
+
+function aggregateEntry(overrides) {
+  return Object.assign({
+    id: 71,
+    entry_uuid: '11111111-1111-4111-8111-111111111111',
+    activity_code: 'irrigation',
+    occurred_start: '2026-07-12T07:30:00.000Z',
+    sync_version: 1,
+  }, overrides || {});
+}
+
+function aggregateValues() {
+  return [
+    {
+      id: 3,
+      entry_uuid: '11111111-1111-4111-8111-111111111111',
+      attribute_code: 'attr.note', group_index: 1,
+      value_status: 'observed', value_text: 'second',
+    },
+    {
+      id: 2,
+      entry_uuid: '11111111-1111-4111-8111-111111111111',
+      attribute_code: 'attr.irrigation_depth', group_index: 0,
+      value_status: 'observed', value_num: 12, unit_code: 'unit.mm_water',
+    },
+  ];
+}
+
+test('aggregate value order and hash are independent of SQLite insertion order', () => {
+  const { aggregateHash, buildAggregate } = aggregateApi();
+  const values = aggregateValues();
+  const forward = buildAggregate(aggregateEntry(), values);
+  const reverse = buildAggregate(aggregateEntry(), values.slice().reverse());
+
+  assert.deepEqual(forward, reverse);
+  assert.deepEqual(
+    forward.values.map((row) => [row.group_index, row.attribute_code]),
+    [[0, 'attr.irrigation_depth'], [1, 'attr.note']]
+  );
+  assert.equal(aggregateHash(forward), aggregateHash(reverse));
+});
+
+test('aggregate hash changes when one logical value changes', () => {
+  const { aggregateHash, buildAggregate } = aggregateApi();
+  const original = buildAggregate(aggregateEntry(), aggregateValues());
+  const changedValues = aggregateValues();
+  changedValues[1] = Object.assign({}, changedValues[1], { value_num: 13 });
+  const changed = buildAggregate(aggregateEntry(), changedValues);
+
+  assert.notEqual(aggregateHash(original), aggregateHash(changed));
+});
+
+test('every aggregate public path rejects payloads over 256 KiB', () => {
+  const { aggregateHash, buildAggregate } = aggregateApi();
+  const oversized = 'x'.repeat(256 * 1024);
+  const hasStableCode = (error) => error && error.code === 'aggregate_too_large';
+
+  assert.throws(() => aggregateHash({ note: oversized }), hasStableCode);
+  assert.throws(
+    () => buildAggregate(aggregateEntry({ note: oversized }), []),
+    hasStableCode
+  );
+});
+
+test('built aggregate is detached JSON-safe data that round-trips unchanged', () => {
+  const { buildAggregate } = aggregateApi();
+  const entry = aggregateEntry({ extension: { nested: ['kept', null, true] } });
+  const values = aggregateValues();
+  const aggregate = buildAggregate(entry, values);
+
+  assert.deepEqual(JSON.parse(JSON.stringify(aggregate)), aggregate);
+  entry.extension.nested[0] = 'mutated';
+  values[0].value_text = 'mutated';
+  assert.equal(aggregate.extension.nested[0], 'kept');
+  assert.equal(aggregate.values[1].value_text, 'second');
+});
+
+test('aggregateHash pins all seven normative canonicalization hashes', () => {
+  const { aggregateHash } = aggregateApi();
+  const vectors = [
+    [{}, '44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a'],
+    [{ b: 1, a: 2 }, 'd3626ac30a87e6f7a6428233b3c68299976865fa5508e4267c5415c76af7a772'],
+    [{ recorded_at: '2026-05-03T12:00:00.123456789Z' }, 'b2433460d6039d8b8bb640cb46d854e5fcdc6c511a4152ba0f9add660ceea9cc'],
+    [{ flow_rate_lpm: 8.5e0 }, '890beb02858df19a0d452b7a3bac58118a180b2e61d41e810d10768c18acb727'],
+    [{ a: null, b: null }, '052c4bd5e6ded53bd884485af8b1667a7b70ba3a8573b54bd878f6d2c705c2df'],
+    [{ device_eui: '0016c001f11715e2', event_uuid: 'D4FE4B8F-2C58-4D1C-A8C3-9DCE37E6EC90' }, '5a6af3263b6ee1803f572b1011b72f2e1e5ba72e4c45f0ca46095fc6f477d8e5'],
+    [{ device_eui: '0016c001f117' }, '7af6b7cc1190a447fddaf87749fdb4418938585b205738b20c32de051b173741'],
+  ];
+
+  for (const [input, expected] of vectors) assert.equal(aggregateHash(input), expected);
+});
+
+test('package main re-exports aggregate construction and hashing', () => {
+  const packageApi = require('./index');
+  assert.equal(typeof packageApi.buildAggregate, 'function');
+  assert.equal(typeof packageApi.aggregateHash, 'function');
+});
+
+function hashCanonicalText(text) {
+  return crypto.createHash('sha256').update(text, 'utf8').digest('hex');
+}
+
+function invalidAggregateCode(error) {
+  return error && error.code === 'invalid_aggregate';
+}
+
+test('aggregate size cap accepts exactly 256 KiB and rejects the next UTF-8 byte', () => {
+  const { aggregateHash } = aggregateApi();
+  const jsonEnvelopeBytes = Buffer.byteLength('{"payload":""}', 'utf8');
+  const exact = { payload: 'x'.repeat(256 * 1024 - jsonEnvelopeBytes) };
+  const over = { payload: exact.payload + 'x' };
+
+  assert.match(aggregateHash(exact), /^[0-9a-f]{64}$/);
+  assert.throws(
+    () => aggregateHash(over),
+    (error) => error && error.code === 'aggregate_too_large'
+  );
+});
+
+test('aggregate projection drops local IDs but retains unknown logical columns and nulls', () => {
+  const { aggregateHash, buildAggregate } = aggregateApi();
+  const values = aggregateValues();
+  const first = buildAggregate(aggregateEntry({
+    id: 1, user_id: 2, zone_id: 3,
+    context_json: '{"schema_version":1,"recorded_at":"raw"}',
+    forward_logical_field: { enabled: true },
+    nullable_extension: null,
+  }), values);
+  const second = buildAggregate(aggregateEntry({
+    id: 9001, user_id: 9002, zone_id: 9003,
+    context_json: '{"schema_version":1,"recorded_at":"raw"}',
+    forward_logical_field: { enabled: true },
+    nullable_extension: null,
+  }), values.map((row, index) => Object.assign({}, row, { id: 8000 + index })));
+
+  for (const field of ['id', 'rowid', 'user_id', 'zone_id']) {
+    assert.equal(Object.hasOwn(first, field), false, field);
+  }
+  assert.equal(Object.hasOwn(first.values[0], 'id'), false);
+  assert.equal(Object.hasOwn(first.values[0], 'entry_uuid'), false);
+  assert.equal(first.context_json, '{"schema_version":1,"recorded_at":"raw"}');
+  assert.deepEqual(first.forward_logical_field, { enabled: true });
+  assert.equal(first.nullable_extension, null);
+  assert.equal(aggregateHash(first), aggregateHash(second));
+});
+
+test('aggregate cells reject duplicates and invalid coordinates deterministically', () => {
+  const { buildAggregate } = aggregateApi();
+  const base = aggregateValues()[0];
+  const invalidSets = [
+    [base, Object.assign({}, base, { id: 99 })],
+    [Object.assign({}, base, { group_index: -1 })],
+    [Object.assign({}, base, { group_index: 1.5 })],
+    [Object.assign({}, base, { group_index: Number.MAX_SAFE_INTEGER + 1 })],
+    [Object.assign({}, base, { attribute_code: '   ' })],
+  ];
+
+  for (const rows of invalidSets) {
+    assert.throws(() => buildAggregate(aggregateEntry(), rows), invalidAggregateCode);
+  }
+});
+
+test('aggregate rejects mismatched or malformed redundant child identities', () => {
+  const { buildAggregate } = aggregateApi();
+  const base = aggregateValues()[0];
+  const wrong = Object.assign({}, base, {
+    entry_uuid: '22222222-2222-4222-8222-222222222222',
+  });
+  const malformed = Object.assign({}, base, { entry_uuid: 7 });
+
+  assert.throws(() => buildAggregate(aggregateEntry(), [wrong]), invalidAggregateCode);
+  assert.throws(() => buildAggregate(aggregateEntry(), [malformed]), invalidAggregateCode);
+});
+
+test('canonical strings normalize recursively by content like the Java sync runtime', () => {
+  const { aggregateHash } = aggregateApi();
+  const input = {
+    z: [
+      'D4FE4B8F2C584D1CA8C39DCE37E6EC90',
+      { stamp: '2026-05-03T14:00:00.123456+0200' },
+    ],
+    note: '2026-05-03T14:00:00.123456+02:00',
+    local: '2026-05-03T14:00:00',
+    idish: '0016c001f117',
+  };
+  const expected = '{"idish":"0016C0FFFE01F117","local":"2026-05-03T14:00:00",' +
+    '"note":"2026-05-03T12:00:00.123Z","z":[' +
+    '"d4fe4b8f-2c58-4d1c-a8c3-9dce37e6ec90",' +
+    '{"stamp":"2026-05-03T12:00:00.123Z"}]}';
+
+  assert.equal(aggregateHash(input), hashCanonicalText(expected));
+});
+
+test('canonical serialization matches Java UTF-16 key order and JSON escapes', () => {
+  const { aggregateHash } = aggregateApi();
+  const astralKey = '\u{10000}';
+  const bmpKey = '\uE000';
+  const input = { control: '\u000b\u001f' };
+  input[bmpKey] = 2;
+  input[astralKey] = 1;
+  const expected = '{"control":"\\u000B\\u001F","' + astralKey + '":1,"' + bmpKey + '":2}';
+
+  assert.equal(aggregateHash(input), hashCanonicalText(expected));
+});
+
+test('finite doubles serialize fixed-point without exponent, rounding cap, or negative zero', () => {
+  const { aggregateHash } = aggregateApi();
+  const smallestJavaDouble = '0.' + '0'.repeat(323) + '49';
+  const largestPower = '1' + '0'.repeat(23);
+  const expected = '{"large":' + largestPower + ',"negative_zero":0,"small":' +
+    smallestJavaDouble + '}';
+
+  assert.equal(
+    aggregateHash({ small: Number.MIN_VALUE, large: 1e23, negative_zero: -0 }),
+    hashCanonicalText(expected)
+  );
+});
+
+test('aggregate canonicalization omits object undefined and rejects non-JSON state', () => {
+  const { aggregateHash } = aggregateApi();
+  assert.equal(aggregateHash({ kept: null, absent: undefined }), aggregateHash({ kept: null }));
+
+  const cyclic = {};
+  cyclic.self = cyclic;
+  const withSymbolKey = { okay: true };
+  withSymbolKey[Symbol('hidden')] = true;
+  const sparse = [];
+  sparse.length = 1;
+  const invalidValues = [
+    cyclic,
+    { value: 1n },
+    { value: function nope() {} },
+    { value: Symbol('nope') },
+    { value: new Date() },
+    withSymbolKey,
+    { value: sparse },
+    { value: [undefined] },
+    { value: NaN },
+    { value: Infinity },
+    { value: '\uD800' },
+  ];
+  for (const value of invalidValues) {
+    assert.throws(() => aggregateHash(value), invalidAggregateCode);
+  }
+});
+
+test('semantic UUID, EUI, and timestamp fields reject malformed values', () => {
+  const { aggregateHash } = aggregateApi();
+  const invalidValues = [
+    { entry_uuid: 'not-a-uuid' },
+    { gateway_device_eui: '00:16:C0:01:F1:17:15:E2' },
+    { recorded_at: '2026-02-30T12:00:00Z' },
+    { note: '2026-02-30T12:00:00Z' },
+  ];
+  for (const value of invalidValues) {
+    assert.throws(() => aggregateHash(value), invalidAggregateCode);
+  }
+});
+
+test('value rows use code-point ordering after numeric group ordering', () => {
+  const { buildAggregate } = aggregateApi();
+  const bmpCode = 'attr.' + '\uE000';
+  const astralCode = 'attr.' + '\u{10000}';
+  const aggregate = buildAggregate(aggregateEntry(), [
+    { attribute_code: astralCode, group_index: 0, value_status: 'observed', value_num: 1 },
+    { attribute_code: bmpCode, group_index: 0, value_status: 'observed', value_num: 2 },
+    { attribute_code: 'attr.first', group_index: 1, value_status: 'observed', value_num: 3 },
+  ]);
+
+  assert.deepEqual(
+    aggregate.values.map((row) => row.attribute_code),
+    [bmpCode, astralCode, 'attr.first']
+  );
+});
+
+test('projection ignores local scaffolding before validation and safely retains proto-named data', () => {
+  const { aggregateHash, buildAggregate } = aggregateApi();
+  const entry = aggregateEntry({ id: 1n, user_id: Symbol('local'), zone_id: function local() {} });
+  Object.defineProperty(entry, '__proto__', {
+    value: { retained: true }, enumerable: true, configurable: true, writable: true,
+  });
+  const row = Object.assign({}, aggregateValues()[0], { id: 2n });
+  const aggregate = buildAggregate(entry, [row]);
+  const parsedProtoKey = JSON.parse('{"__proto__":{"retained":true},"a":1}');
+
+  assert.equal(Object.getPrototypeOf(aggregate), Object.prototype);
+  assert.equal(Object.hasOwn(aggregate, '__proto__'), true);
+  assert.deepEqual(aggregate.__proto__, { retained: true });
+  assert.equal(
+    aggregateHash(parsedProtoKey),
+    hashCanonicalText('{"__proto__":{"retained":true},"a":1}')
+  );
+});
+
+test('timestamp canonicalization rejects precision the Java runtime cannot parse', () => {
+  const { aggregateHash } = aggregateApi();
+  assert.throws(
+    () => aggregateHash({ recorded_at: '2026-05-03T12:00:00.1234567890Z' }),
+    invalidAggregateCode
+  );
 });

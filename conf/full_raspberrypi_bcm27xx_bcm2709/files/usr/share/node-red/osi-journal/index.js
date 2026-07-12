@@ -1,5 +1,6 @@
 'use strict';
 
+const { aggregateHash, buildAggregate } = require('./aggregate');
 const { loadCatalog } = require('./catalog');
 const {
   dependencyCatalogErrors,
@@ -939,7 +940,9 @@ function validateEntry(catalog, _layoutDef, _templateDef, entryInput, validation
 }
 
 module.exports = {
+  aggregateHash,
   allowedUnits,
+  buildAggregate,
   convertToCanonical,
   loadCatalog,
   resolveOptions,
