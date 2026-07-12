@@ -24,7 +24,7 @@
     "failed": "Falha ao atribuir dispositivo"
   },
   "createZoneModal": {
-    "title": "Criar zona de rega",
+    "title": "Criar zona",
     "zoneName": "Nome da zona",
     "zoneNamePlaceholder": "ex. Jardim A, Campo Norte, Pomar 1",
     "zoneNameRequired": "O nome da zona é obrigatório",
@@ -123,7 +123,7 @@
     "triggerHint": "Ativar se {{metric}} ≥ {{threshold}} kPa (uma vez/dia, 06:00)."
   },
   "environment": {
-    "sectionTitle": "Ambiente",
+    "sectionTitle": "Ambiente e previsão do tempo",
     "tabs": {
       "local": "Local",
       "online": "Online",

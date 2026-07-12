@@ -1,5 +1,5 @@
 {
-  "title": "Panel de control Open Smart Irrigation",
+  "title": "AgroLink Dashboard",
   "welcome": "Bienvenido, {{username}}",
   "add": "Añadir",
   "addMenu": {
@@ -17,13 +17,13 @@
   "autoRefresh": "Actualización automática cada 10 segundos",
   "emptyState": {
     "title": "¡Bienvenido a tu granja!",
-    "subtitle": "Comienza creando una zona de riego y añadiendo dispositivos",
+    "subtitle": "Comienza creando una zona y añadiendo dispositivos",
     "createZone": "Crear zona",
     "addDevice": "Añadir dispositivo"
   },
-  "irrigationZones": "Zonas de riego",
+  "irrigationZones": "Zonas",
   "unassignedDevices": "Dispositivos sin asignar",
-  "unassignedSubtitle": "Estos dispositivos no están asignados a ninguna zona de riego",
+  "unassignedSubtitle": "Estos dispositivos no están asignados a ninguna zona",
   "soilSensors": "Sensores de suelo",
   "smartValves": "Válvulas inteligentes"
 }

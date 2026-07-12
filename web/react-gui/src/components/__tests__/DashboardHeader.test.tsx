@@ -9,10 +9,11 @@ import { DashboardHeader } from '../DashboardHeader';
 
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({
+    i18n: { language: 'en' },
     t: (key: string, options?: Record<string, unknown>) => {
       const map: Record<string, string> = {
         add: 'Add',
-        title: 'Open Smart Irrigation Dashboard',
+        title: 'AgroLink Dashboard',
         'addMenu.zone': 'Zone',
         'addMenu.device': 'Device',
         data: 'Data',
@@ -58,9 +59,13 @@ afterEach(() => {
 });
 
 describe('DashboardHeader (osi-os)', () => {
-  it('renders the OSI OS title, welcome text, and Settings entry without a standalone language switcher', () => {
+  it('renders the AgroLink title, Agroscope Balken, welcome text, and Settings entry without a standalone language switcher', () => {
     renderHeader();
-    expect(screen.getByRole('heading', { name: 'Open Smart Irrigation Dashboard' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'AgroLink Dashboard' })).toBeInTheDocument();
+    expect(screen.getByRole('img', { name: 'Agroscope Balken' })).toHaveAttribute(
+      'src',
+      expect.stringContaining('balken-horizontal-en'),
+    );
     expect(screen.getByText('Welcome farmer')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /Lang/i })).not.toBeInTheDocument();
     expect(screen.queryByTitle('Change language')).not.toBeInTheDocument();

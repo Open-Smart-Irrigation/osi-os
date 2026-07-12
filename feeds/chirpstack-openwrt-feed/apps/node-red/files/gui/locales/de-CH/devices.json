@@ -24,7 +24,7 @@
     "failed": "Gerät konnte nicht zugewiesen werden"
   },
   "createZoneModal": {
-    "title": "Bewässerungszone erstellen",
+    "title": "Zone erstellen",
     "zoneName": "Zonenname",
     "zoneNamePlaceholder": "z.B. Garten A, Nordfeld, Obstgarten 1",
     "zoneNameRequired": "Zonenname ist erforderlich",
@@ -123,7 +123,7 @@
     "triggerHint": "Auslösen wenn {{metric}} ≥ {{threshold}} kPa (einmal/Tag, 06:00)."
   },
   "environment": {
-    "sectionTitle": "Umwelt",
+    "sectionTitle": "Umgebung & Wettervorhersage",
     "tabs": {
       "local": "Lokal",
       "online": "Online",

@@ -14,7 +14,7 @@
       "featureFlagFailed": "The feature flag request failed. The legacy dashboard is still available.",
       "zonesFailedTitle": "History zones failed to load",
       "noZonesTitle": "No zones yet",
-      "noZonesBody": "Crea una zona di irrigazione dalla dashboard legacy prima di aprire la cronologia tematica.",
+      "noZonesBody": "Crea una zona dalla dashboard legacy prima di aprire la cronologia tematica.",
       "cardsFailed": "History cards failed to load.",
       "retryCards": "Retry cards"
     },

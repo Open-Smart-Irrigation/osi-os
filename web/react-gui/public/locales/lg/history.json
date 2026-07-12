@@ -14,7 +14,7 @@
       "featureFlagFailed": "The feature flag request failed. The legacy dashboard is still available.",
       "zonesFailedTitle": "History zones failed to load",
       "noZonesTitle": "No zones yet",
-      "noZonesBody": "Tondawo ekifo ky'okufukirira okuva ku dashboard enkadde nga tonnaggula ebyafaayo by'omulamwa.",
+      "noZonesBody": "Tondawo ekifo okuva ku dashboard enkadde nga tonnaggula ebyafaayo by'omulamwa.",
       "cardsFailed": "History cards failed to load.",
       "retryCards": "Retry cards"
     },

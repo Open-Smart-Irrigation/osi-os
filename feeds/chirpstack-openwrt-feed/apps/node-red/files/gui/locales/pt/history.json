@@ -14,12 +14,27 @@
       "featureFlagFailed": "The feature flag request failed. The legacy dashboard is still available.",
       "zonesFailedTitle": "History zones failed to load",
       "noZonesTitle": "No zones yet",
-      "noZonesBody": "Crie uma zona de irrigação no painel legado antes de abrir o histórico temático.",
+      "noZonesBody": "Crie uma zona no painel legado antes de abrir o histórico temático.",
       "cardsFailed": "History cards failed to load.",
       "retryCards": "Retry cards"
     },
+    "export": {
+      "open": "Exportar",
+      "title": "Exportar dados"
+    },
     "desktop": {
+      "railLabel": "Cartões",
       "toolbarTitle": "Toolbar",
+      "modeLabel": "Desktop mode",
+      "modeFocus": "Focus",
+      "modeCompare": "Compare",
+      "viewSelectorLabel": "Card view",
+      "compareViewSelectorLabel": "Compare view",
+      "sourceSelectorLabel": "Sources",
+      "chartSurfaceLabel": "History chart, use arrow keys to pan and plus or minus to zoom",
+      "zoomIn": "Zoom in",
+      "zoomOut": "Zoom out",
+      "resetZoom": "Reset zoom",
       "maxPanels": "Up to {{count}} comparison panels",
       "singleMode": "Single",
       "comparisonMode": "Comparison",

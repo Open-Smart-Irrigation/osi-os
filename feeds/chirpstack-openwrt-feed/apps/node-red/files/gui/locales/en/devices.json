@@ -24,12 +24,12 @@
     "failed": "Failed to assign device"
   },
   "createZoneModal": {
-    "title": "Create Irrigation Zone",
+    "title": "Create Zone",
     "zoneName": "Zone Name",
     "zoneNamePlaceholder": "e.g., Garden A, North Field, Orchard 1",
     "zoneNameRequired": "Zone name is required",
     "creating": "Creating...",
-    "submit": "Create Irrigation Zone",
+    "submit": "Create Zone",
     "failed": "Failed to create zone"
   },
   "kiwiSensor": {
@@ -152,7 +152,7 @@
     "triggerHint": "Trigger if {{metric}} ≥ {{threshold}} kPa (once/day, 06:00)."
   },
   "environment": {
-    "sectionTitle": "Environment",
+    "sectionTitle": "Environment & weather forecast",
     "tabs": {
       "local": "Local",
       "online": "Online",

@@ -14,22 +14,38 @@
       "featureFlagFailed": "The feature flag request failed. The legacy dashboard is still available.",
       "zonesFailedTitle": "History zones failed to load",
       "noZonesTitle": "No zones yet",
-      "noZonesBody": "Crea una zona di irrigazione dalla dashboard legacy prima di aprire la cronologia tematica.",
+      "noZonesBody": "Crea una zona dalla dashboard legacy prima di aprire la cronologia tematica.",
       "cardsFailed": "History cards failed to load.",
       "retryCards": "Retry cards"
     },
+    "export": {
+      "open": "Esporta",
+      "title": "Esporta dati"
+    },
     "desktop": {
-      "toolbarTitle": "Toolbar",
-      "maxPanels": "Up to {{count}} comparison panels",
-      "singleMode": "Single",
-      "comparisonMode": "Comparison",
-      "addPanel": "Add panel {{title}}",
-      "removePanel": "Remove panel",
-      "panelLimitWarning": "Only {{count}} comparison panels can be shown on this edge gateway.",
-      "selectedTimestampNone": "No timestamp selected",
-      "selectedTimestamp": "Selected timestamp: {{timestamp}}",
-      "inspectorTitle": "Inspector",
-      "inspectorPlaceholder": "Select a timestamp or calendar cell to see interpretation, events, data quality, and advanced metadata."
+      "railLabel": "Schede",
+      "toolbarTitle": "Barra strumenti",
+      "modeLabel": "Modalità desktop",
+      "modeFocus": "Focus",
+      "modeCompare": "Confronta",
+      "viewSelectorLabel": "Vista scheda",
+      "compareViewSelectorLabel": "Vista confronto",
+      "sourceSelectorLabel": "Fonti",
+      "rangeOverviewLabel": "Panoramica intervallo temporale",
+      "chartSurfaceLabel": "Grafico storico, usa le frecce per spostarti e più o meno per zoomare",
+      "zoomIn": "Ingrandisci",
+      "zoomOut": "Riduci",
+      "resetZoom": "Reimposta zoom",
+      "maxPanels": "Fino a {{count}} pannelli di confronto",
+      "singleMode": "Singolo",
+      "comparisonMode": "Confronto",
+      "addPanel": "Aggiungi pannello {{title}}",
+      "removePanel": "Rimuovi pannello",
+      "panelLimitWarning": "Su questo gateway edge possono essere mostrati solo {{count}} pannelli di confronto.",
+      "selectedTimestampNone": "Nessun timestamp selezionato",
+      "selectedTimestamp": "Timestamp selezionato: {{timestamp}}",
+      "inspectorTitle": "Ispettore",
+      "inspectorPlaceholder": "Seleziona un timestamp o una cella del calendario per vedere interpretazione, eventi, qualità dei dati e metadati avanzati."
     },
     "mobile": {
       "zoneLabel": "Zone",
@@ -508,7 +524,7 @@
     },
     "sourceFilter": {
       "label": "Source",
-      "all": "All"
+      "all": "Tutte"
     },
     "settings": {
       "open": "Open card settings",

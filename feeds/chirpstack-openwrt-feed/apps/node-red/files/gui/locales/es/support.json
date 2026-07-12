@@ -1,0 +1,92 @@
+{
+  "navLabel": "Soporte y solicitudes",
+  "title": "Soporte y solicitudes",
+  "backToDashboard": "Volver al panel",
+  "empty": "Aún no hay solicitudes.",
+  "form": {
+    "stepRequest": "1. Texto de la solicitud",
+    "stepArea": "2. Área y gravedad",
+    "stepDiagnostics": "3. Diagnóstico y consentimiento",
+    "summary": "Título breve",
+    "description": "¿Qué debería mejorarse?",
+    "contactEmail": "Correo de contacto (opcional)",
+    "expected": "Esperado",
+    "actual": "Actual",
+    "steps": "Pasos",
+    "requestType": "Tipo de solicitud",
+    "area": "Área",
+    "severity": "Gravedad",
+    "diagnostics": "Vista previa del diagnóstico",
+    "includeDiagnostics": "Incluir diagnóstico seguro con esta solicitud.",
+    "consentPublic": "Acepto que esta solicitud pueda compartirse públicamente sin detalles privados de la finca.",
+    "submit": "Guardar solicitud",
+    "submitting": "Guardando..."
+  },
+  "types": {
+    "bug": "Error",
+    "improvement": "Mejora",
+    "feedback": "Comentarios"
+  },
+  "areas": {
+    "dashboard": "Panel",
+    "history": "Historial",
+    "analysis": "Análisis",
+    "copy": "Textos y etiquetas",
+    "watering": "Riego",
+    "sync": "Sincronización",
+    "devices": "Dispositivos",
+    "system": "Sistema",
+    "other": "Otro"
+  },
+  "severity": {
+    "cant_work": "No se puede trabajar",
+    "workaround": "Hay solución temporal",
+    "annoying": "Molesto",
+    "idea": "Idea"
+  },
+  "diagnostics": {
+    "loading": "Cargando diagnóstico...",
+    "unavailable": "El diagnóstico no está disponible ahora mismo."
+  },
+  "banners": {
+    "retryable": "No se pudo enviar ahora. La solicitud puede reintentarse."
+  },
+  "status": {
+    "QUEUED": "Guardado, esperando internet",
+    "SUBMITTED": "Enviado",
+    "SYNCED": "Sincronizado",
+    "FAILED_RETRYABLE": "Reintento necesario",
+    "FAILED_PERMANENT": "No se pudo enviar",
+    "AWAITING_PUBLISH": "Esperando publicación",
+    "PUBLISHING": "Publicando",
+    "PUBLISH_BLOCKED_CONFIG": "Publicación bloqueada",
+    "PUBLISH_BLOCKED_SECRET": "Publicación bloqueada",
+    "TRIAGED": "En revisión",
+    "BEING_REVIEWED": "En revisión",
+    "NEEDS_INFO": "Necesita más información",
+    "ISSUE_ONLY": "Guardado como incidencia",
+    "ISSUE_OPEN": "Incidencia abierta",
+    "NOT_PLANNED": "No planificado",
+    "RATE_LIMITED": "Límite de frecuencia alcanzado",
+    "RELEASED": "Publicado",
+    "REJECTED": "Rechazado",
+    "DUPLICATE": "Duplicado",
+    "DUPLICATE_OF": "Duplicado",
+    "AWAITING_APPROVAL": "Esperando aprobación",
+    "AGENT_RUNNING": "En progreso",
+    "VERIFYING": "Verificando",
+    "PR_OPEN": "En progreso",
+    "IN_REVIEW": "En revisión",
+    "MERGED": "Fusionado",
+    "CLOSED": "Cerrado",
+    "AGENT_FAILED": "Necesita revisión",
+    "UNKNOWN": "Actualización de estado recibida"
+  },
+  "myRequests": {
+    "title": "Mis solicitudes",
+    "loadError": "No se pudieron cargar las solicitudes.",
+    "loading": "Cargando solicitudes...",
+    "area": "Área",
+    "submitted": "Enviado"
+  }
+}

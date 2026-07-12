@@ -14,12 +14,27 @@
       "featureFlagFailed": "The feature flag request failed. The legacy dashboard is still available.",
       "zonesFailedTitle": "History zones failed to load",
       "noZonesTitle": "No zones yet",
-      "noZonesBody": "Tondawo ekifo ky'okufukirira okuva ku dashboard enkadde nga tonnaggula ebyafaayo by'omulamwa.",
+      "noZonesBody": "Tondawo ekifo okuva ku dashboard enkadde nga tonnaggula ebyafaayo by'omulamwa.",
       "cardsFailed": "History cards failed to load.",
       "retryCards": "Retry cards"
     },
+    "export": {
+      "open": "Export",
+      "title": "Export data"
+    },
     "desktop": {
+      "railLabel": "Cards",
       "toolbarTitle": "Toolbar",
+      "modeLabel": "Desktop mode",
+      "modeFocus": "Focus",
+      "modeCompare": "Compare",
+      "viewSelectorLabel": "Card view",
+      "compareViewSelectorLabel": "Compare view",
+      "sourceSelectorLabel": "Sources",
+      "chartSurfaceLabel": "History chart, use arrow keys to pan and plus or minus to zoom",
+      "zoomIn": "Zoom in",
+      "zoomOut": "Zoom out",
+      "resetZoom": "Reset zoom",
       "maxPanels": "Up to {{count}} comparison panels",
       "singleMode": "Single",
       "comparisonMode": "Comparison",

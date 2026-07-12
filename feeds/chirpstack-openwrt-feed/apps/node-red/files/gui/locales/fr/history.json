@@ -14,22 +14,38 @@
       "featureFlagFailed": "The feature flag request failed. The legacy dashboard is still available.",
       "zonesFailedTitle": "History zones failed to load",
       "noZonesTitle": "No zones yet",
-      "noZonesBody": "Créez une zone d'irrigation depuis le tableau de bord existant avant d'ouvrir l'historique thématique.",
+      "noZonesBody": "Créez une zone depuis le tableau de bord existant avant d'ouvrir l'historique thématique.",
       "cardsFailed": "History cards failed to load.",
       "retryCards": "Retry cards"
     },
+    "export": {
+      "open": "Exporter",
+      "title": "Exporter les données"
+    },
     "desktop": {
-      "toolbarTitle": "Toolbar",
-      "maxPanels": "Up to {{count}} comparison panels",
-      "singleMode": "Single",
-      "comparisonMode": "Comparison",
-      "addPanel": "Add panel {{title}}",
-      "removePanel": "Remove panel",
-      "panelLimitWarning": "Only {{count}} comparison panels can be shown on this edge gateway.",
-      "selectedTimestampNone": "No timestamp selected",
-      "selectedTimestamp": "Selected timestamp: {{timestamp}}",
-      "inspectorTitle": "Inspector",
-      "inspectorPlaceholder": "Select a timestamp or calendar cell to see interpretation, events, data quality, and advanced metadata."
+      "railLabel": "Cartes",
+      "toolbarTitle": "Barre d’outils",
+      "modeLabel": "Mode bureau",
+      "modeFocus": "Focus",
+      "modeCompare": "Comparer",
+      "viewSelectorLabel": "Vue de la carte",
+      "compareViewSelectorLabel": "Vue de comparaison",
+      "sourceSelectorLabel": "Sources",
+      "rangeOverviewLabel": "Aperçu de la période",
+      "chartSurfaceLabel": "Graphique d’historique, utilisez les flèches pour déplacer et plus ou moins pour zoomer",
+      "zoomIn": "Zoom avant",
+      "zoomOut": "Zoom arrière",
+      "resetZoom": "Réinitialiser le zoom",
+      "maxPanels": "Jusqu’à {{count}} panneaux de comparaison",
+      "singleMode": "Individuel",
+      "comparisonMode": "Comparaison",
+      "addPanel": "Ajouter le panneau {{title}}",
+      "removePanel": "Retirer le panneau",
+      "panelLimitWarning": "Seuls {{count}} panneaux de comparaison peuvent être affichés sur cette passerelle edge.",
+      "selectedTimestampNone": "Aucun horodatage sélectionné",
+      "selectedTimestamp": "Horodatage sélectionné : {{timestamp}}",
+      "inspectorTitle": "Inspecteur",
+      "inspectorPlaceholder": "Sélectionnez un horodatage ou une cellule du calendrier pour voir l’interprétation, les événements, la qualité des données et les métadonnées avancées."
     },
     "mobile": {
       "zoneLabel": "Zone",
@@ -508,7 +524,7 @@
     },
     "sourceFilter": {
       "label": "Source",
-      "all": "All"
+      "all": "Toutes"
     },
     "settings": {
       "open": "Open card settings",

@@ -14,22 +14,38 @@
       "featureFlagFailed": "The feature flag request failed. The legacy dashboard is still available.",
       "zonesFailedTitle": "History zones failed to load",
       "noZonesTitle": "No zones yet",
-      "noZonesBody": "Erstellen Sie eine Bewässerungszone im bestehenden Dashboard, bevor Sie die thematische Historie öffnen.",
+      "noZonesBody": "Erstellen Sie eine Zone im bestehenden Dashboard, bevor Sie die thematische Historie öffnen.",
       "cardsFailed": "History cards failed to load.",
       "retryCards": "Retry cards"
     },
+    "export": {
+      "open": "Exportieren",
+      "title": "Daten exportieren"
+    },
     "desktop": {
-      "toolbarTitle": "Toolbar",
-      "maxPanels": "Up to {{count}} comparison panels",
-      "singleMode": "Single",
-      "comparisonMode": "Comparison",
-      "addPanel": "Add panel {{title}}",
-      "removePanel": "Remove panel",
-      "panelLimitWarning": "Only {{count}} comparison panels can be shown on this edge gateway.",
-      "selectedTimestampNone": "No timestamp selected",
-      "selectedTimestamp": "Selected timestamp: {{timestamp}}",
-      "inspectorTitle": "Inspector",
-      "inspectorPlaceholder": "Select a timestamp or calendar cell to see interpretation, events, data quality, and advanced metadata."
+      "railLabel": "Karten",
+      "toolbarTitle": "Werkzeugleiste",
+      "modeLabel": "Desktop-Modus",
+      "modeFocus": "Fokus",
+      "modeCompare": "Vergleichen",
+      "viewSelectorLabel": "Kartenansicht",
+      "compareViewSelectorLabel": "Vergleichsansicht",
+      "sourceSelectorLabel": "Quellen",
+      "rangeOverviewLabel": "Zeitbereichsübersicht",
+      "chartSurfaceLabel": "Verlaufsdiagramm, mit Pfeiltasten verschieben und mit Plus oder Minus zoomen",
+      "zoomIn": "Hineinzoomen",
+      "zoomOut": "Herauszoomen",
+      "resetZoom": "Zoom zurücksetzen",
+      "maxPanels": "Bis zu {{count}} Vergleichsansichten",
+      "singleMode": "Einzeln",
+      "comparisonMode": "Vergleich",
+      "addPanel": "Panel {{title}} hinzufügen",
+      "removePanel": "Panel entfernen",
+      "panelLimitWarning": "Auf diesem Edge-Gateway können nur {{count}} Vergleichsansichten angezeigt werden.",
+      "selectedTimestampNone": "Kein Zeitstempel ausgewählt",
+      "selectedTimestamp": "Ausgewählter Zeitstempel: {{timestamp}}",
+      "inspectorTitle": "Inspektor",
+      "inspectorPlaceholder": "Wählen Sie einen Zeitstempel oder eine Kalenderzelle aus, um Interpretation, Ereignisse, Datenqualität und erweiterte Metadaten zu sehen."
     },
     "mobile": {
       "zoneLabel": "Zone",
@@ -508,7 +524,7 @@
     },
     "sourceFilter": {
       "label": "Source",
-      "all": "All"
+      "all": "Alle"
     },
     "settings": {
       "open": "Open card settings",
