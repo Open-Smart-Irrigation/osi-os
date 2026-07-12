@@ -226,6 +226,9 @@ const requiredFunctionNodes = [
   'Prune Sync Outbox',
   'Build Sync State',
   'Replay Pending Commands',
+  'Apply Work Request Status',
+  'Improvement Requests API Router',
+  'support-delivery-worker',
   'Build Sync Token Refresh',
   'Store Refreshed Sync Token',
   'Run Force Sync',
@@ -1588,19 +1591,77 @@ for (const actuatorNodeId of ['reject-indefinite-open', 'command-dedupe-dispatch
 for (const actuatorNodeId of ['cmd-type-registry', 'reject-indefinite-open', 'command-dedupe-dispatch', '934bf2bc19a8ce22', 'cdbaa3891d40d7a1', 'write-strega-expectation']) {
   expectExcludesById(actuatorNodeId, 'WORK_REQUEST_SUBMITTED', 'WORK_REQUEST_SUBMITTED actuator/downlink handling');
 }
+for (const node of flows.filter((entry) => entry.type === 'mqtt in')) {
+  expectCondition(
+    !String(node.topic || '').includes('WORK_REQUEST_SUBMITTED'),
+    `${node.id} does not subscribe to WORK_REQUEST_SUBMITTED over MQTT`,
+    `${node.id} must not subscribe to WORK_REQUEST_SUBMITTED over MQTT`
+  );
+}
 expectLibById('improvement-requests-api-router', 'osiDb', 'osi-db-helper', 'declares osiDb for field request intake');
 expectLibById('improvement-requests-api-router', 'crypto', 'crypto', 'declares crypto for verifyBearer');
 expectIncludesById('improvement-requests-api-router', 'function verifyBearer', 'contains the local HMAC bearer verifier');
 expectIncludesById('improvement-requests-api-router', 'consent_public !== true', 'requires explicit public consent');
+expectIncludesById('improvement-requests-api-router', 'bodySize >= 65536', 'rejects request bodies at or above 65536 bytes');
+expectIncludesById('improvement-requests-api-router', 'rawTitle.length < 3 || rawTitle.length > 80', 'validates title length 3-80');
+expectIncludesById('improvement-requests-api-router', 'rawDescription.length < 10 || rawDescription.length > 4000', 'validates description length 10-4000');
+expectIncludesById('improvement-requests-api-router', "crypto.randomBytes(32).toString('hex')", 'generates a 32-byte status secret');
+expectIncludesById('improvement-requests-api-router', "crypto.createHash('sha256').update(statusSecret).digest('hex')", 'hashes the status secret before storage');
+expectIncludesById('improvement-requests-api-router', 'status_secret_hash', 'stores the status secret hash');
+expectIncludesById('improvement-requests-api-router', 'status_secret: statusSecret', 'returns the one-time status secret');
+expectIncludesById('improvement-requests-api-router', 'contact_email', 'stores optional contact email');
+expectIncludesById('improvement-requests-api-router', 'const MAX_DIAGNOSTICS_JSON_BYTES = 32768', 'defines the diagnostics JSON byte cap');
+expectIncludesById('improvement-requests-api-router', 'cappedDiagnosticsJson(diagnostics)', 'stores capped diagnostics JSON');
+expectIncludesById('improvement-requests-api-router', "flow.get('guiVersion')", 'includes GUI version in diagnostics');
+expectIncludesById('improvement-requests-api-router', "flow.get('sync_state') || {}", 'summarizes sync_state diagnostics');
+expectIncludesById('improvement-requests-api-router', "flow.get('gateway_health')", 'prefers flow gateway_health diagnostics');
+expectIncludesById('improvement-requests-api-router', "global.get('edge_health')", 'falls back to global edge_health diagnostics');
+expectIncludesById('improvement-requests-api-router', "/[Bb]earer\\s+[A-Za-z0-9._~+/=-]{20,}/g", 'redacts bearer tokens from user text');
+expectIncludesById('improvement-requests-api-router', "/eyJ[A-Za-z0-9_-]{10,}\\.[A-Za-z0-9_-]{10,}/g", 'redacts JWT-like strings from user text');
+expectIncludesById('improvement-requests-api-router', "/\\b[0-9A-Fa-f]{32}\\b/g", 'redacts AppKey-like 32-hex strings from user text');
+expectIncludesById('improvement-requests-api-router', "/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}/g", 'redacts email patterns from user text');
+expectIncludesById('improvement-requests-api-router', "/\\b[0-9A-Fa-f]{16}\\b/g", 'redacts 16-hex EUI patterns from user text');
+expectIncludesById('improvement-requests-api-router', "replace(pattern, '[REDACTED]')", 'uses fixed [REDACTED] replacement for user text');
 expectIncludesById('improvement-requests-api-router', 'const consentDiagnostics = boolValue(body.consent_diagnostics, true)', 'honors diagnostics consent before collecting private diagnostics');
 expectIncludesById('improvement-requests-api-router', 'const diagnostics = consentDiagnostics ? await buildDiagnostics(q, body) : {}', 'builds private diagnostics only when diagnostics consent is granted');
-expectIncludesById('improvement-requests-api-router', "consentDiagnostics ? JSON.stringify(diagnostics) : '{}'", 'stores empty diagnostics when diagnostics consent is declined');
+expectIncludesById('improvement-requests-api-router', "consentDiagnostics ? cappedDiagnosticsJson(diagnostics) : '{}'", 'stores empty diagnostics when diagnostics consent is declined');
 expectIncludesById('improvement-requests-api-router', 'function diagnosticsPreviewPayload', 'builds a display-redacted diagnostics preview');
 expectIncludesById('improvement-requests-api-router', 'diagnostics: diagnosticsPreviewPayload(diagnostics)', 'returns the display-redacted diagnostics preview payload');
-expectIncludesById('improvement-requests-api-router', "gateway_device_eui: preview.gateway_identity.gateway_device_eui ? '[REDACTED_EUI]' : null", 'redacts raw gateway EUI in diagnostics preview');
+expectIncludesById('improvement-requests-api-router', "gateway_device_eui: preview.gateway_identity.gateway_device_eui ? '[REDACTED]' : null", 'redacts raw gateway EUI in diagnostics preview');
 expectIncludesById('improvement-requests-api-router', 'INSERT INTO improvement_requests', 'inserts local field requests');
 expectIncludesById('improvement-requests-api-router', 'contact_email', 'persists optional contact email separately from redacted request text');
+expectIncludesById('improvement-requests-api-router', 'Invalid contact_email', 'rejects invalid contact_email before insert');
 expectIncludesById('improvement-requests-api-router', 'WORK_REQUEST_SUBMITTED', 'documents trigger-emitted WORK_REQUEST_SUBMITTED intake contract');
+expectNodeTypeById('support-delivery-tick', 'inject', 'support delivery has a scheduled inject node');
+expectWireById('support-delivery-tick', 'support-delivery-worker', 'support delivery tick routes to worker');
+expectCondition(
+  String(findNodeById('support-delivery-tick')?.repeat || '') === '300',
+  'support-delivery-tick runs every 300 seconds / 300000 ms',
+  'support-delivery-tick must run every 300 seconds / 300000 ms'
+);
+expectNodeTypeById('support-delivery-worker', 'function', 'support delivery worker is a function node');
+expectLibById('support-delivery-worker', 'osiDb', 'osi-db-helper', 'declares osiDb for queued improvement request reads');
+expectLibById('support-delivery-worker', 'osiCloudHttp', 'osi-cloud-http', 'uses shared IPv4 HTTP client');
+expectIncludesById('support-delivery-worker', "SELECT * FROM improvement_requests WHERE local_status = 'QUEUED' ORDER BY created_at ASC LIMIT 20", 'scans queued improvement requests past backed-off rows');
+expectIncludesById('support-delivery-worker', "event_uuid = 'work-request-' || ?", 'loads the matching WORK_REQUEST_SUBMITTED outbox payload');
+expectIncludesById('support-delivery-worker', '/api/v1/support/edge/work-requests', 'posts to the support edge work-request endpoint');
+expectIncludesById('support-delivery-worker', 'osiCloudHttp.requestJsonIpv4', 'posts through shared IPv4 HTTP helper');
+expectIncludesById('support-delivery-worker', "flow.get('sync_state') || {}", 'resolves support server URL from sync_state first');
+expectIncludesById('support-delivery-worker', "env.get('OSI_CLOUD_SERVER_URL')", 'resolves support server URL from OSI_CLOUD_SERVER_URL second');
+expectIncludesById('support-delivery-worker', 'https://server.opensmartirrigation.org', 'falls back to the default support server URL');
+expectIncludesById('support-delivery-worker', "headers: { 'Content-Type': 'application/json' }", 'sends no Authorization header');
+expectExcludesById('support-delivery-worker', 'Authorization', 'support delivery Authorization header transmission');
+expectIncludesById('support-delivery-worker', 'body.result || body.status', 'accepts result or status as terminal support response state');
+expectIncludesById('support-delivery-worker', "flow.get('support_delivery_retries') || {}", 'loads retry state from flow context');
+expectIncludesById('support-delivery-worker', "flow.set('support_delivery_retries', retries)", 'persists retry state to flow context');
+expectIncludesById('support-delivery-worker', 'Math.min(300000 * Math.pow(2, retry.count), 3600000)', 'implements bounded exponential backoff');
+expectIncludesById('support-delivery-worker', 'MAX_MISSING_OUTBOX_RETRIES', 'caps missing outbox retry state');
+expectIncludesById('support-delivery-worker', 'missing_outbox_payload', 'marks stale missing outbox payloads terminal');
+expectIncludesById('support-delivery-worker', 'let attempted = 0', 'tracks attempted rows separately from skipped backoff rows');
+expectIncludesById('support-delivery-worker', 'attempted >= MAX_DELIVERIES_PER_TICK', 'prevents backed-off rows from consuming the delivery tick');
+expectIncludesById('support-delivery-worker', "local_status = 'SUBMITTED'", 'marks accepted or duplicate work requests submitted');
+expectIncludesById('support-delivery-worker', "local_status = 'REJECTED'", 'marks terminally rejected work requests rejected');
+expectIncludesById('support-delivery-worker', '.close(', 'closes the delivery worker database handle');
 expectFileIncludes('seed-blank.sql', seedSqlSource, 'trg_improvement_requests_outbox_ai', 'improvement request trigger exists');
 expectFileIncludes('seed-blank.sql', seedSqlSource, "'WORK_REQUEST_SUBMITTED'", 'improvement request trigger emits WORK_REQUEST_SUBMITTED');
 expectFileIncludes('seed-blank.sql', seedSqlSource, "'WORK_REQUEST'", 'improvement request trigger emits WORK_REQUEST aggregate type');

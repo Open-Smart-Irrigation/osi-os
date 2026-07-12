@@ -110,7 +110,7 @@ describe('DashboardHeader (osi-os)', () => {
     expect(screen.queryByRole('link', { name: 'Data' })).not.toBeInTheDocument();
   });
 
-  it('puts OSI Server and Logout in the Account menu', () => {
+  it('keeps the Account menu scoped to account linking and logout', () => {
     const { onLogout } = renderHeader();
     fireEvent.click(screen.getByRole('button', { name: 'Account' }));
     expect(screen.getByRole('menuitem', { name: 'OSI Server' })).toHaveAttribute('href', '/account-link');

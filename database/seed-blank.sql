@@ -595,6 +595,7 @@ CREATE TABLE IF NOT EXISTS improvement_requests (
   updated_at                TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   sync_version              INTEGER NOT NULL DEFAULT 1,
   contact_email             TEXT,
+  status_secret_hash         TEXT,
   FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 );
 
@@ -633,6 +634,7 @@ BEGIN
       'consent_diagnostics', CASE WHEN NEW.consent_diagnostics = 1 THEN json('true') ELSE json('false') END,
       'diagnostics', json(NEW.diagnostics_json),
       'gateway_device_eui', NEW.gateway_device_eui,
+      'status_secret_hash', NEW.status_secret_hash,
       'gui_user', json_object('local_user_id', NEW.user_id),
       'sync_version', NEW.sync_version,
       'occurred_at', NEW.submitted_at

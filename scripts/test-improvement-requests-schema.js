@@ -26,14 +26,14 @@ try {
     VALUES (7, 'field-user', 'hash', '2026-07-08T11:59:00.000Z', '2026-07-08T11:59:00.000Z');
 
     INSERT INTO improvement_requests(
-      request_uuid, user_id, type, title, contact_email, description, area, severity,
-      consent_public, consent_diagnostics, diagnostics_json, gateway_device_eui, submitted_at
+      request_uuid, user_id, type, title, description, area, severity,
+      consent_public, consent_diagnostics, diagnostics_json, gateway_device_eui,
+      status_secret_hash, contact_email, submitted_at
     ) VALUES (
       '019ff001-1111-7222-8333-aaaaaaaaaaaa',
       7,
       'bug',
       'Pump status is confusing',
-      'farmer@example.com',
       'The dashboard says the pump is open after I closed it.',
       'dashboard',
       'annoying',
@@ -41,6 +41,8 @@ try {
       1,
       '{"sync":{"pending_outbox_count":0}}',
       '0016C001F11715E2',
+      'sha256:status-secret-fixture',
+      'field-user@example.test',
       '2026-07-08T12:00:00.000Z'
     );
   `);
@@ -74,8 +76,43 @@ try {
   if (payload.request_id !== '019ff001-1111-7222-8333-aaaaaaaaaaaa') {
     throw new Error(`expected payload.request_id to match inserted request UUID, got ${payload.request_id}`);
   }
-  if (payload.contact_email !== 'farmer@example.com') {
-    throw new Error(`expected payload.contact_email farmer@example.com, got ${payload.contact_email}`);
+  if (payload.status_secret_hash !== 'sha256:status-secret-fixture') {
+    throw new Error(`expected payload.status_secret_hash to match inserted hash, got ${payload.status_secret_hash}`);
+  }
+  if (payload.contact_email !== 'field-user@example.test') {
+    throw new Error(`expected payload.contact_email to match inserted contact email, got ${payload.contact_email}`);
+  }
+  if (payload.gateway_device_eui !== '0016C001F11715E2') {
+    throw new Error(`expected payload.gateway_device_eui to match inserted gateway EUI, got ${payload.gateway_device_eui}`);
+  }
+  if (!payload.gui_user || payload.gui_user.local_user_id !== 7) {
+    throw new Error(`expected payload.gui_user.local_user_id 7, got ${JSON.stringify(payload.gui_user)}`);
+  }
+
+  let rejectedConsentPublic = false;
+  try {
+    sqlite([dbPath], `
+      INSERT INTO improvement_requests(
+        request_uuid, user_id, type, title, description, area, severity,
+        consent_public, consent_diagnostics, diagnostics_json
+      ) VALUES (
+        '019ff001-1111-7222-8333-bbbbbbbbbbbb',
+        7,
+        'feedback',
+        'Private request',
+        'This should be rejected because public consent is required.',
+        'dashboard',
+        'idea',
+        0,
+        1,
+        '{}'
+      );
+    `);
+  } catch (err) {
+    rejectedConsentPublic = true;
+  }
+  if (!rejectedConsentPublic) {
+    throw new Error('expected consent_public != 1 insert to be rejected');
   }
 
   console.log('PASS: improvement_requests schema emits WORK_REQUEST_SUBMITTED outbox payload');

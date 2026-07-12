@@ -600,15 +600,21 @@ export type SupportRequestLocalStatus =
 
 export type SupportRequestCloudStatus =
   | 'SUBMITTED'
+  | 'AWAITING_PUBLISH'
+  | 'PUBLISHING'
+  | 'PUBLISH_BLOCKED_CONFIG'
+  | 'PUBLISH_BLOCKED_SECRET'
   | 'TRIAGED'
   | 'BEING_REVIEWED'
   | 'NEEDS_INFO'
   | 'ISSUE_ONLY'
   | 'ISSUE_OPEN'
   | 'NOT_PLANNED'
+  | 'RATE_LIMITED'
   | 'RELEASED'
   | 'REJECTED'
   | 'DUPLICATE'
+  | 'DUPLICATE_OF'
   | 'AWAITING_APPROVAL'
   | 'AGENT_RUNNING'
   | 'VERIFYING'
@@ -668,6 +674,7 @@ export interface SupportRequestCreateRequest {
 export interface SupportRequestCreateResponse {
   request_id: string;
   local_status: SupportRequestLocalStatus;
+  status_secret: string;
 }
 
 /** One raw dendrometer reading from dendrometer_readings table */
