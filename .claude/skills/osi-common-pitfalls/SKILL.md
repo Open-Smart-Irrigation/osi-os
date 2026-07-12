@@ -60,6 +60,11 @@ use this card to catch the repeated mistakes before committing or reporting.
 14. **Do not assert success through a pipe.** `cmd | tail` reports `tail`'s
     status. Check the real command's exit code directly and paste real output.
 
+15. **Use `osiLib.require()`, not bare `require()`.** Function nodes that need
+    a shared helper module must use the `osiLib.require('<seam>')` loader, not
+    Node.js `require()`. Bare `require` bypasses the registry and breaks on the
+    Pi's OpenWrt layout. Enforced by `node scripts/flows-bare-require-scan.js`.
+
 ## Common Mistakes
 
 - Using this card instead of the owning skill for a schema, flow, live-ops, or

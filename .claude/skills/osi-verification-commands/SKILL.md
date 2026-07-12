@@ -49,6 +49,17 @@ repo (`scripts/`, `.github/workflows/`) plus `AGENTS.md`.
 | Codec robustness | `node scripts/verify-codec-robustness.js` | Exit 0. |
 | Communication contract | `node scripts/verify-communication-contract.js` | Exit 0. |
 | Gateway health persistence | `node --test scripts/test-gateway-health-persistence.js` | Node test exit 0. |
+| Flows size ratchet | `node scripts/verify-flows-size-ratchet.js` | Exit 0. Fails if any existing node grew, a new node exceeds 4 KB, or total embedded JS increased. |
+| Helper registration | `node scripts/verify-helper-registration.js` | Exit 0. Verifies osi-lib NAME_TO_PATH registry, loader test, and deploy.sh coverage match. |
+| Bare require scan | `node scripts/flows-bare-require-scan.js` | Exit 0. Fails if any function node uses bare `require()` instead of `osiLib.require()`. |
+| Channel manifest parity | `node scripts/verify-channel-manifest-parity.js` | Exit 0. GUI and edge manifest byte-identical. |
+| Command safety | `node scripts/verify-command-safety.js` | Exit 0. Actuator duration-bound + registry parity assertions. |
+| Heartbeat health | `node scripts/verify-heartbeat-health.js` | Exit 0. |
+| Dendro contract mirror | `node scripts/verify-dendro-contract-mirror.js` | Exit 0. |
+| Contract schemas | `node scripts/test-contract-schemas.js` | Exit 0. |
+| Device integration round-trip | `node scripts/verify-device-integration.js` | Exit 0. Full codec→normalize→write round trip for all registered devices. |
+| LSN50/Chameleon codec | `node scripts/verify-lsn50-chameleon-codec.js` | Exit 0. |
+| GUI typecheck | `cd web/react-gui && npm run typecheck` | npm exits 0. CI-gated; `vite build` does not typecheck. |
 | GUI unit tests | `cd web/react-gui && npm run test:unit` | npm exits 0. |
 | GUI build | `cd web/react-gui && npm run build` | npm exits 0. |
 | Whitespace/diff sanity | `git diff --check` | No output, exit 0. |
@@ -57,7 +68,7 @@ repo (`scripts/`, `.github/workflows/`) plus `AGENTS.md`.
 
 | Changed surface | Minimum local evidence |
 |---|---|
-| `flows.json` function, route, inject, MQTT, or wiring | Roundtrip guard, `verify-no-new-silent-catch.js`, `test-flows-wiring.js`, `check-mqtt-topics.sh` if MQTT touched, `verify-no-stray-ddl.js` if DDL-like text changed, `verify-sync-flow.js`. |
+| `flows.json` function, route, inject, MQTT, or wiring | Roundtrip guard, `verify-no-new-silent-catch.js`, `test-flows-wiring.js`, `verify-flows-size-ratchet.js`, `flows-bare-require-scan.js`, `check-mqtt-topics.sh` if MQTT touched, `verify-no-stray-ddl.js` if DDL-like text changed, `verify-sync-flow.js`. |
 | Edge schema, seed, bundled DBs, migrations, or `deploy.sh` schema repair | `verify-migrations.js`, `verify-seed-replay.js`, `verify-runtime-schema-parity.js`, `verify-db-schema-consistency.js`, `verify-no-stray-ddl.js`, `verify-profile-parity.js`. |
 | `sync-init-fn` devices-CHECK/rebuild logic | Edge schema set plus `verify-devices-rebuild-fence.js` and `node --test scripts/rehearse-devices-rebuild.test.js`. |
 | Device decoder or payload semantics | The device-specific decoder verifier plus `verify-codec-robustness.js`; add `verify-sync-flow.js` if ingest flow or DB writes changed. |

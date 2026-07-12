@@ -487,10 +487,10 @@ conf/full_raspberrypi_bcm27xx_bcm2709` and exits non-zero.
 ## MQTT IN topic rule
 
 Every `mqtt in` node in `flows.json` must subscribe to the literal topic
-`application/+/device/+/event/up`. Confirmed by inspecting all 6 `mqtt in`
-nodes in the canonical file on 2026-07-06 (`Local Device Uplinks`, `MQTT IN
-(Field Testing)`, `Local Sensor Uplinks`, `LSN50 IN`, `S2120 IN`, `LoRain IN`)
-— all 6 use exactly that topic string. ChirpStack generates a fresh
+`application/+/device/+/event/up`. Confirmed by inspecting all 7 `mqtt in`
+nodes in the canonical file (`Local Device Uplinks`, `MQTT IN (Field Testing)`,
+`Local Sensor Uplinks`, `LSN50 IN`, `S2120 IN`, `LoRain IN`, `UC512 IN`) —
+all 7 use exactly that topic string. ChirpStack generates a fresh
 per-installation application UUID at bootstrap; a topic hardcoded to one
 gateway's UUID (e.g. `application/<uuid>/device/+/event/up`) will silently
 never match on any other gateway — no error, just zero uplinks. Device-type
@@ -525,6 +525,8 @@ from the repo root.
 | Flow wiring guards | `node scripts/test-flows-wiring.js` | ends `PASS: STREGA wiring + osiDb close + WS2/WS3 wiring guards all passed`, exit 0 |
 | Silent catch ratchet | `node scripts/verify-no-new-silent-catch.js` | exit 0; no new or worsened empty catches in maintained flow nodes |
 | Stray DDL ratchet | `node scripts/verify-no-stray-ddl.js` | exit 0; no unreviewed DDL-marker count increase in flows/deploy surfaces |
+| Flows size ratchet | `node scripts/verify-flows-size-ratchet.js` | exit 0; no node grew, no new node exceeds 4 KB, total embedded JS did not increase |
+| Bare require scan | `node scripts/flows-bare-require-scan.js` | exit 0; no function node uses bare `require()` instead of `osiLib.require()` |
 
 If you intentionally changed a pinned wiring contract, update
 `scripts/test-flows-wiring.js` in the same commit and say why in the commit

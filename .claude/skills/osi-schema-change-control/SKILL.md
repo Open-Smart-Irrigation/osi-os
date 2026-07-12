@@ -258,9 +258,9 @@ identical). The rebuild:
 
 1. Reads the live `devices` table's CHECK clause and extracts the current
    `type_id` set with a regex.
-2. Compares it by **set equality** against the six canonical types —
+2. Compares it by **set equality** against the canonical types —
    `KIWI_SENSOR`, `STREGA_VALVE`, `DRAGINO_LSN50`, `TEKTELIC_CLOVER`,
-   `SENSECAP_S2120`, `AQUASCOPE_LORAIN` (named `REQUIRED_TYPES` in the code). If
+   `SENSECAP_S2120`, `AQUASCOPE_LORAIN`, `MILESIGHT_UC512` (named `REQUIRED_TYPES` in the code). If
    the live set is missing a type *or* has an extra/drifted type, `needsRebuild`
    is true — this is stricter than "missing-only," which was a P2 review finding
    fixed before merge (an extra drifted type must also trigger convergence, not
@@ -310,7 +310,7 @@ rows preserved), `would-drop` (a row the new CHECK would reject must never be
 silently dropped, and the abort must be surfaced), `legit-upgrade` (rebuild
 succeeds, CHECK gains `AQUASCOPE_LORAIN`), and `extra-type` (a drifted extra type
 with no offending rows must still trigger a rebuild that converges the CHECK back
-to exactly the six canonical types). `verify-devices-rebuild-fence.js` statically
+to exactly the canonical types). `verify-devices-rebuild-fence.js` statically
 greps both flows files for the fail-closed shape: no `INSERT OR IGNORE INTO
 devices_new`, rebuild inside `_db.transaction(`, guarded by
 `REQUIRED_TYPES`/`needsRebuild`, `finally` before `foreign_keys=ON`, a

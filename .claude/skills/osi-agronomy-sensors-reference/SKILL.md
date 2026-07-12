@@ -1,6 +1,6 @@
 ---
 name: osi-agronomy-sensors-reference
-description: Use when interpreting soil water tension (SWT) kPa or pF values, Chameleon sensor calibration/wiring, dendrometer TWD/MDS output, rain gauge aggregation (LoRain/S2120), ET0/evapotranspiration questions, deciding which device_data column a sensor writes to, STREGA valve command semantics, or any device-payload/decoder question. Covers KIWI_SENSOR, TEKTELIC_CLOVER, DRAGINO_LSN50, SENSECAP_S2120, AQUASCOPE_LORAIN, STREGA_VALVE.
+description: Use when interpreting soil water tension (SWT) kPa or pF values, Chameleon sensor calibration/wiring, dendrometer TWD/MDS output, rain gauge aggregation (LoRain/S2120), ET0/evapotranspiration questions, deciding which device_data column a sensor writes to, STREGA valve command semantics, UC512 valve telemetry, or any device-payload/decoder question. Covers KIWI_SENSOR, TEKTELIC_CLOVER, DRAGINO_LSN50, SENSECAP_S2120, AQUASCOPE_LORAIN, STREGA_VALVE, MILESIGHT_UC512.
 ---
 
 # OSI Agronomy & Sensors Reference
@@ -44,6 +44,7 @@ Do NOT use this skill for (route instead):
 | `SENSECAP_S2120` | Sensors | Yes — `sensecap_s2120_decoder.js` | `ambient_temperature`, `relative_humidity`, `light_lux`, `barometric_pressure_hpa`, wind speed/direction/gust, `uv_index`, `rain_gauge_cumulative_mm` → `rain_mm_delta`/`rain_mm_today`, `bat_pct` | °C, %RH, hPa, m/s, deg, mm |
 | `AQUASCOPE_LORAIN` | Sensors | Yes — `aquascope_lorain_decoder.js` | `rain_mm_delta` (from raw 0.5 mm steps), `ambient_temperature`, `bat_v` | mm, °C, V |
 | `STREGA_VALVE` | Actuators | Yes — `strega_gen1_decoder.js` | `devices.current_state` (not a `device_data` column), `bat_pct`/`bat_v` | — |
+| `MILESIGHT_UC512` | Sensors | Yes — `milesight_uc512_decoder.js` | `valve_1_state`/`valve_2_state` (text), `valve_1_pulse`/`valve_2_pulse` (integer), `pipe_pressure_kpa` (real) | —, counts, kPa |
 
 File locations for all OSI-authored decoders:
 `conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/codecs/{aquascope_lorain_decoder.js, dragino_lsn50_decoder.js, sensecap_s2120_decoder.js, strega_gen1_decoder.js}`.
