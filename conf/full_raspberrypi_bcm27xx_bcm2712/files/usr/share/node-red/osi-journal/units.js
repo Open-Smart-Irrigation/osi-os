@@ -1,5 +1,7 @@
 'use strict';
 
+const { dependencyCatalogErrors, resolveOptions } = require('./cascade');
+
 // Public conversion failures are stable machine codes:
 // invalid_catalog, inactive_attribute, unknown_unit, inactive_unit,
 // unit_incompatible, cross_basis_forbidden, unit_required, invalid_number,
@@ -186,7 +188,7 @@ function convertToCanonical(catalog, attributeCode, enteredValueNum, enteredUnit
   return { ok: true, value_num: valueNum, unit_code: conversion.target.code };
 }
 
-function allowedUnits(catalog, attributeCode, _layoutDef, _selections) {
+function allowedUnits(catalog, attributeCode, layoutDef, selections) {
   const attributeInfo = numericAttributePreflight(catalog, attributeCode);
   if (!attributeInfo.ok) return [];
   const allowed = [];
@@ -198,7 +200,13 @@ function allowedUnits(catalog, attributeCode, _layoutDef, _selections) {
     const conversion = resolveConversion(attributeInfo, code);
     if (!conversion.error) allowed.push(code);
   }
-  return allowed.sort();
+  allowed.sort();
+  if (dependencyCatalogErrors(catalog, layoutDef).length) return [];
+  const resolved = resolveOptions(layoutDef, selections);
+  if (resolved && resolved.ok === false) return [];
+  if (!Object.prototype.hasOwnProperty.call(resolved, attributeCode)) return allowed;
+  const dependencyUnits = new Set(resolved[attributeCode].units);
+  return allowed.filter(function(code) { return dependencyUnits.has(code); });
 }
 
 function missingRowRequiresUnit(attribute) {

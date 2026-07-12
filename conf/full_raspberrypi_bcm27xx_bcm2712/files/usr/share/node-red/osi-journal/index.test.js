@@ -1999,3 +1999,357 @@ test('a frozen canonical slot must remain self-canonical even without an entered
     legitimate.normalized.values[0], 'entered_unit_code'
   ));
 });
+
+function cascadeApi() {
+  return require('./cascade');
+}
+
+function agroscopeFixture(catalog) {
+  return {
+    layout: catalog.layouts.get('agroscope_open_field').get(1),
+    template: catalog.templates.get('research_observation').get(1),
+  };
+}
+
+function selected(attributeCode, value, extra) {
+  return Object.assign({ attribute_code: attributeCode, value }, extra || {});
+}
+
+test('resolveOptions follows the seeded activity to operation to device cascade', async () => {
+  const { resolveOptions } = cascadeApi();
+  const { catalog } = await loadedFixture('cascade-seeded-choices');
+  const { layout } = agroscopeFixture(catalog);
+  const options = resolveOptions(layout.definition, {
+    activity_code: 'fertilization',
+    'attr.agroscope.operation': 'agroscope.operation.mineral_fertilization',
+  });
+
+  assert.deepEqual(options['attr.agroscope.operation'].choices, [
+    'agroscope.operation.organic_fertilization',
+    'agroscope.operation.mineral_fertilization',
+    'agroscope.operation.other_fertilization',
+  ]);
+  assert.deepEqual(options['attr.agroscope.device'].choices, [
+    'agroscope.device.solid_broadcast',
+    'agroscope.device.solid_band',
+    'agroscope.device.solid_undersown_placement',
+    'agroscope.device.liquid_injection',
+    'agroscope.device.liquid_spraying',
+    'agroscope.device.liquid_fertigation',
+  ]);
+});
+
+test('resolveOptions exposes exactly the ten seeded solid-broadcast nutrient units', async () => {
+  const { resolveOptions } = cascadeApi();
+  const { catalog } = await loadedFixture('cascade-seeded-units');
+  const { layout } = agroscopeFixture(catalog);
+  const options = resolveOptions(layout.definition, {
+    activity_code: 'fertilization',
+    'attr.agroscope.operation': 'agroscope.operation.mineral_fertilization',
+    'attr.agroscope.device': 'agroscope.device.solid_broadcast',
+  });
+
+  assert.deepEqual(options['attr.amount_nutrient_rate'].units, [
+    'unit.kg_n_per_ha_nutrient',
+    'unit.kg_p2o5_per_ha_nutrient',
+    'unit.kg_k2o_per_ha_nutrient',
+    'unit.kg_mg_per_ha_nutrient',
+    'unit.kg_s_per_ha_nutrient',
+    'unit.kg_ca_per_ha_nutrient',
+    'unit.kg_b_per_ha_nutrient',
+    'unit.kg_na_per_ha_nutrient',
+    'unit.kg_mn_per_ha_nutrient',
+    'unit.kg_cao_per_ha_nutrient',
+  ]);
+});
+
+test('validateSelections rejects every invalid repeated dependent choice precisely', async () => {
+  const { validateSelections } = cascadeApi();
+  const { catalog } = await loadedFixture('cascade-invalid-repeated-choice');
+  const { layout } = agroscopeFixture(catalog);
+  const result = validateSelections(layout.definition, [
+    selected('activity_code', 'fertilization'),
+    selected('attr.agroscope.operation', 'agroscope.operation.mineral_fertilization'),
+    selected('attr.agroscope.device', 'agroscope.device.solid_broadcast', { group_index: 0 }),
+    selected('attr.agroscope.device', 'agroscope.device.plough', { group_index: 1 }),
+  ]);
+
+  assert.equal(result.ok, false);
+  assert.deepEqual(result.errors, [{
+    field: 'values[3].value',
+    code: 'invalid_under_dependency',
+  }]);
+});
+
+test('no device unit rule means optional omission, never unrestricted amount acceptance', async () => {
+  const { validateSelections } = cascadeApi();
+  const { catalog } = await loadedFixture('cascade-empty-leaf');
+  const { layout, template } = agroscopeFixture(catalog);
+  const baseValues = [
+    selected('attr.agroscope.operation', 'agroscope.operation.harvest_main_crop'),
+    selected('attr.agroscope.device', 'agroscope.device.combine_harvester'),
+  ];
+  const selectionValues = [selected('activity_code', 'harvest'), ...baseValues];
+
+  assert.deepEqual(validateSelections(layout.definition, selectionValues), { ok: true });
+  const invalidAmount = validateSelections(layout.definition, [
+    ...selectionValues,
+    selected('attr.amount_mass_area_product', 20, {
+      unit_code: 'unit.kg_per_ha_product',
+    }),
+  ]);
+  assert.equal(invalidAmount.ok, false);
+  assert.deepEqual(invalidAmount.errors, [{
+    field: 'values[3].unit_code',
+    code: 'invalid_under_dependency',
+  }]);
+
+  const omitted = validateEntry(catalog, layout, template, validIrrigation({
+    activity_code: 'harvest',
+    template_code: 'research_observation',
+    layout_code: 'agroscope_open_field',
+    values: baseValues,
+  }));
+  assert.equal(omitted.ok, true, JSON.stringify(omitted));
+  const submittedAmount = validateEntry(catalog, layout, template, validIrrigation({
+    activity_code: 'harvest',
+    template_code: 'research_observation',
+    layout_code: 'agroscope_open_field',
+    values: [
+      ...baseValues,
+      selected('attr.amount_mass_area_product', 20, {
+        unit_code: 'unit.kg_per_ha_product',
+      }),
+    ],
+  }));
+  assert.equal(submittedAmount.ok, false);
+  assert.ok(submittedAmount.errors.some((error) =>
+    error.field === 'values[2].entered_unit_code' &&
+    error.code === 'invalid_under_dependency'));
+});
+
+test('validateEntry enforces choice and entered-unit dependencies after normalization', async () => {
+  const { catalog } = await loadedFixture('cascade-entry-wiring');
+  const { layout, template } = agroscopeFixture(catalog);
+  const entry = (values) => validIrrigation({
+    activity_code: 'fertilization',
+    template_code: 'research_observation',
+    layout_code: 'agroscope_open_field',
+    values,
+  });
+  const validOrganic = validateEntry(catalog, layout, template, entry([
+    selected('attr.agroscope.operation', 'agroscope.operation.organic_fertilization'),
+    selected('attr.agroscope.device', 'agroscope.device.manure_broadcast'),
+    selected('attr.amount_mass_area_product', 1, {
+      unit_code: 'unit.t_per_ha_product',
+    }),
+  ]));
+  assert.equal(validOrganic.ok, true, JSON.stringify(validOrganic));
+  assert.equal(validOrganic.normalized.values[2].unit_code, 'unit.kg_per_ha_product');
+  assert.equal(validOrganic.normalized.values[2].entered_unit_code, 'unit.t_per_ha_product');
+
+  const wrongDevice = validateEntry(catalog, layout, template, entry([
+    selected('attr.agroscope.operation', 'agroscope.operation.mineral_fertilization'),
+    selected('attr.agroscope.device', 'agroscope.device.plough'),
+  ]));
+  assert.equal(wrongDevice.ok, false);
+  assert.ok(wrongDevice.errors.some((error) =>
+    error.field === 'values[1].value' && error.code === 'invalid_under_dependency'));
+});
+
+test('allowedUnits intersects dependency restrictions without re-enabling bad units', async () => {
+  const { catalog, openField } = await loadedFixture('cascade-allowed-units');
+  const { layout } = agroscopeFixture(catalog);
+  const selections = {
+    activity_code: 'fertilization',
+    'attr.agroscope.operation': 'agroscope.operation.mineral_fertilization',
+    'attr.agroscope.device': 'agroscope.device.solid_broadcast',
+  };
+  const seeded = allowedUnits(
+    catalog, 'attr.amount_nutrient_rate', layout.definition, selections
+  );
+  assert.equal(seeded.length, 10);
+  assert.deepEqual(
+    allowedUnits(catalog, 'attr.amount_nutrient_rate', layout.definition, {
+      activity_code: 'harvest',
+      'attr.agroscope.operation': 'agroscope.operation.harvest_main_crop',
+      'attr.agroscope.device': 'agroscope.device.combine_harvester',
+    }),
+    []
+  );
+  assert.equal(
+    allowedUnits(catalog, 'attr.amount_nutrient_rate', openField.definition, {}).length,
+    10
+  );
+
+  const inactiveCode = 'unit.kg_n_per_ha_nutrient';
+  catalog.vocabByCode.set(inactiveCode, Object.assign(
+    {}, catalog.vocabByCode.get(inactiveCode), { active: 0 }
+  ));
+  const widenedDefinition = Object.assign({}, layout.definition, {
+    option_dependencies: layout.definition.option_dependencies.map((rule) => {
+      if (rule.when.equals !== 'agroscope.device.solid_broadcast') return rule;
+      return Object.assign({}, rule, {
+        restrict: Object.assign({}, rule.restrict, {
+          units: [...rule.restrict.units, 'unit.kg_per_ha_product'],
+        }),
+      });
+    }),
+  });
+  const narrowed = allowedUnits(
+    catalog, 'attr.amount_nutrient_rate', widenedDefinition, selections
+  );
+  assert.equal(narrowed.length, 9);
+  assert.ok(!narrowed.includes(inactiveCode));
+  assert.ok(!narrowed.includes('unit.kg_per_ha_product'));
+});
+
+test('dependency structure fails closed while allowing top-level source metadata', async () => {
+  const { resolveOptions, validateSelections } = cascadeApi();
+  const validRule = {
+    source_category: 'irrigation',
+    when: { attribute_code: 'activity_code', equals: 'irrigation' },
+    restrict: {
+      attribute_code: 'attr.agroscope.operation',
+      choices: ['agroscope.operation.watering'],
+    },
+  };
+  const malformedDefinitions = [
+    { option_dependencies: {} },
+    { option_dependencies: [null] },
+    { option_dependencies: [{ restrict: validRule.restrict }] },
+    { option_dependencies: [{ when: validRule.when }] },
+    { option_dependencies: [{
+      when: { attribute_code: '', equals: 'irrigation' }, restrict: validRule.restrict,
+    }] },
+    { option_dependencies: [{
+      when: validRule.when,
+      restrict: { attribute_code: 'attr.agroscope.operation' },
+    }] },
+    { option_dependencies: [{
+      when: validRule.when,
+      restrict: { attribute_code: 'attr.agroscope.operation', choices: [], units: ['unit.ph'] },
+    }] },
+    { option_dependencies: [{
+      when: validRule.when,
+      restrict: { attribute_code: 'attr.agroscope.operation', choices: [] },
+    }] },
+    { option_dependencies: [{
+      when: validRule.when,
+      restrict: {
+        attribute_code: 'attr.agroscope.operation', choices: ['x', 'x'],
+      },
+    }] },
+    { option_dependencies: [validRule, Object.assign({}, validRule, {
+      restrict: Object.assign({}, validRule.restrict, {
+        choices: ['agroscope.operation.note'],
+      }),
+    })] },
+  ];
+
+  for (const definition of malformedDefinitions) {
+    const validated = validateSelections(definition, []);
+    assert.equal(validated.ok, false, JSON.stringify(definition));
+    assert.ok(validated.errors.some((error) => error.code === 'invalid_catalog'));
+    const resolved = resolveOptions(definition, {});
+    assert.equal(resolved.ok, false, JSON.stringify(definition));
+    assert.ok(resolved.errors.some((error) => error.code === 'invalid_catalog'));
+  }
+  assert.deepEqual(
+    resolveOptions({ option_dependencies: [validRule] }, { activity_code: 'irrigation' }),
+    { 'attr.agroscope.operation': { choices: ['agroscope.operation.watering'], units: [] } }
+  );
+});
+
+test('validateEntry catalog-preflights every dependency reference and target type', async () => {
+  const { catalog, farmerQuick, openField } = await loadedFixture('cascade-catalog-preflight');
+  const validWhen = { attribute_code: 'activity_code', equals: 'irrigation' };
+  const validChoiceRestrict = {
+    attribute_code: 'attr.agroscope.operation',
+    choices: ['agroscope.operation.watering'],
+  };
+  const invalidRules = [
+    { when: { attribute_code: 'attr.not_real', equals: 'x' }, restrict: validChoiceRestrict },
+    { when: { attribute_code: 'activity_code', equals: 'not_an_activity' }, restrict: validChoiceRestrict },
+    {
+      when: { attribute_code: 'attr.agroscope.operation', equals: 'choice.denominator.area' },
+      restrict: validChoiceRestrict,
+    },
+    { when: validWhen, restrict: { attribute_code: 'attr.not_real', choices: ['x'] } },
+    { when: validWhen, restrict: {
+      attribute_code: 'attr.agroscope.operation', choices: ['choice.denominator.area'],
+    } },
+    { when: validWhen, restrict: {
+      attribute_code: 'attr.amount_nutrient_rate', choices: ['agroscope.operation.watering'],
+    } },
+    { when: validWhen, restrict: {
+      attribute_code: 'attr.amount_nutrient_rate', units: ['unit.not_real'],
+    } },
+    { when: validWhen, restrict: {
+      attribute_code: 'attr.agroscope.operation', units: ['unit.ph'],
+    } },
+  ];
+
+  for (const rule of invalidRules) {
+    const layout = Object.assign({}, openField, {
+      definition: Object.assign({}, openField.definition, { option_dependencies: [rule] }),
+    });
+    const result = validateEntry(catalog, layout, farmerQuick, validIrrigation());
+    assert.equal(result.ok, false, JSON.stringify(rule));
+    assert.ok(result.errors.some((error) => error.code === 'invalid_catalog'));
+  }
+
+  const metadataLayout = Object.assign({}, openField, {
+    definition: Object.assign({}, openField.definition, {
+      option_dependencies: [{
+        source_category: 'irrigation',
+        when: validWhen,
+        restrict: validChoiceRestrict,
+      }],
+    }),
+  });
+  assert.equal(
+    validateEntry(catalog, metadataLayout, farmerQuick, validIrrigation()).ok,
+    true
+  );
+});
+
+test('exact retired dependency selections retain the correction frozen bypass', async () => {
+  const { catalog } = await loadedFixture('cascade-retired-correction');
+  const { layout, template } = agroscopeFixture(catalog);
+  const deviceCode = 'agroscope.device.solid_broadcast';
+  catalog.vocabByCode.set(deviceCode, Object.assign(
+    {}, catalog.vocabByCode.get(deviceCode), { active: 0 }
+  ));
+  const values = [
+    selected('attr.agroscope.operation', 'agroscope.operation.mineral_fertilization'),
+    selected('attr.agroscope.device', deviceCode),
+  ];
+  const originalEntry = {
+    activity_code: 'fertilization',
+    template_code: 'research_observation', template_version: 1,
+    layout_code: 'agroscope_open_field', layout_version: 1,
+    values: values.map((value) => ({
+      attribute_code: value.attribute_code,
+      group_index: 0,
+      value_text: value.value,
+      value_status: 'observed',
+    })),
+  };
+  const result = validateEntry(
+    catalog,
+    layout,
+    template,
+    validIrrigation({
+      activity_code: 'fertilization',
+      template_code: 'research_observation',
+      template_version: 1,
+      layout_code: 'agroscope_open_field',
+      layout_version: 1,
+      values,
+    }),
+    { mode: 'correction', originalEntry }
+  );
+
+  assert.equal(result.ok, true, JSON.stringify(result));
+});

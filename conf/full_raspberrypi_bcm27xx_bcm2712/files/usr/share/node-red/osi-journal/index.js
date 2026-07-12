@@ -2,6 +2,10 @@
 
 const { loadCatalog } = require('./catalog');
 const {
+  dependencyCatalogErrors,
+  validateSelections,
+} = require('./cascade');
+const {
   definitionFieldRules,
   isCalendarDate,
   predicateResult,
@@ -480,6 +484,11 @@ function validateEntry(catalog, _layoutDef, _templateDef, entryInput, validation
   if (_layoutDef && layoutDefinition &&
       !(_layoutDef.catalog_errors || []).includes('definition_json')) {
     semanticErrors.push(...semanticDefinitionErrors(catalog, layoutDefinition, 'layout_definition'));
+    semanticErrors.push(...dependencyCatalogErrors(
+      catalog,
+      layoutDefinition,
+      'layout_definition.option_dependencies'
+    ));
   }
   if (_templateDef && templateDefinition &&
       !(_templateDef.catalog_errors || []).includes('definition_json')) {
@@ -552,6 +561,7 @@ function validateEntry(catalog, _layoutDef, _templateDef, entryInput, validation
   }
   const values = entryInput.values;
   const normalizedValues = [];
+  const cascadeBypassIndexes = new Set();
   const groups = new Set();
   const valueKeys = new Set();
   for (let index = 0; index < values.length; index += 1) {
@@ -617,6 +627,10 @@ function validateEntry(catalog, _layoutDef, _templateDef, entryInput, validation
       originalEntry,
       normalizedValue
     );
+    if (valuePreserved) {
+      const retirement = originalValueRetirement(catalog, normalizedValue, context);
+      if (!retirement.invalid && retirement.retired) cascadeBypassIndexes.add(index);
+    }
     if (attribute.active !== 1 || attribute.deleted_at) {
       if (!correction) {
         return errorResult(
@@ -832,6 +846,19 @@ function validateEntry(catalog, _layoutDef, _templateDef, entryInput, validation
       );
     }
     normalizedValues.push(normalizedValue);
+  }
+  const cascadeValidation = validateSelections(layoutDefinition, [
+    ...normalizedValues,
+    { attribute_code: 'activity_code', value: entryInput.activity_code },
+  ]);
+  if (!cascadeValidation.ok) {
+    const cascadeErrors = cascadeValidation.errors.filter(function(error) {
+      const match = /^values\[(\d+)\]/.exec(error.field);
+      return !match || !cascadeBypassIndexes.has(Number(match[1]));
+    }).map(function(error) {
+      return Object.assign({ message: 'Value is invalid under the selected dependency path' }, error);
+    });
+    if (cascadeErrors.length) return { ok: false, errors: cascadeErrors };
   }
   if (correction) {
     const preservationErrors = correctionPreservationErrors(
