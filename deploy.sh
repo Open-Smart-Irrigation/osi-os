@@ -467,6 +467,10 @@ fetch_required "osi-journal catalog.js" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-journal/catalog.js" \
     "/srv/node-red/osi-journal/catalog.js"
 
+fetch_required "osi-journal definition.js" \
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-journal/definition.js" \
+    "/srv/node-red/osi-journal/definition.js"
+
 fetch_required "osi-history-sync-helper package.json" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-history-sync-helper/package.json" \
     "/srv/node-red/osi-history-sync-helper/package.json"

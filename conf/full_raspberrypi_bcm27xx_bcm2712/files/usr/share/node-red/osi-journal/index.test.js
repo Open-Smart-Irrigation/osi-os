@@ -81,7 +81,7 @@ test('loadCatalog caches data queries until catalog state changes', async () => 
   const first = await loadCatalog(db);
   const second = await loadCatalog(db);
   assert.strictEqual(second, first);
-  assert.equal(counts.get('journal_catalog_state'), 2);
+  assert.equal(counts.get('journal_catalog_state'), 3);
   for (const table of ['journal_vocab', 'journal_templates', 'journal_layouts', 'journal_products']) {
     assert.equal(counts.get(table), 1, table);
   }
@@ -121,6 +121,82 @@ test('loadCatalog supports the callback sqlite API used by Node-RED', async () =
 
   assert.equal(catalog.version, 1);
   assert.equal(catalog.vocabByCode.get('irrigation').kind, 'activity');
+});
+
+test('loadCatalog retries when catalog state changes during table reads', async () => {
+  const rawDb = createTestDb('state-race');
+  const counts = new Map();
+  let changed = false;
+  const db = {
+    prepare(sql) {
+      const table = (sql.match(/FROM\s+(\w+)/i) || [])[1] || 'other';
+      counts.set(table, (counts.get(table) || 0) + 1);
+      const statement = rawDb.prepare(sql);
+      if (table === 'journal_products' && !changed) {
+        changed = true;
+        rawDb.exec(
+          "UPDATE journal_catalog_state SET catalog_version=2, catalog_hash='" +
+          'd'.repeat(64) + "' WHERE id=1"
+        );
+      }
+      return statement;
+    },
+  };
+
+  const catalog = await loadCatalog(db);
+
+  assert.equal(catalog.version, 2);
+  for (const table of ['journal_vocab', 'journal_templates', 'journal_layouts', 'journal_products']) {
+    assert.equal(counts.get(table), 2, table);
+  }
+});
+
+test('loadCatalog de-duplicates concurrent table reads for the same state', async () => {
+  const rawDb = createTestDb('concurrent-load');
+  const counts = new Map();
+  const db = {
+    get(sql, _parameters, callback) {
+      const table = (sql.match(/FROM\s+(\w+)/i) || [])[1] || 'other';
+      counts.set(table, (counts.get(table) || 0) + 1);
+      setTimeout(() => callback(null, rawDb.prepare(sql).get()), 2);
+    },
+    all(sql, _parameters, callback) {
+      const table = (sql.match(/FROM\s+(\w+)/i) || [])[1] || 'other';
+      counts.set(table, (counts.get(table) || 0) + 1);
+      setTimeout(() => callback(null, rawDb.prepare(sql).all()), 2);
+    },
+  };
+
+  const [first, second] = await Promise.all([loadCatalog(db), loadCatalog(db)]);
+
+  assert.strictEqual(second, first);
+  for (const table of ['journal_vocab', 'journal_templates', 'journal_layouts', 'journal_products']) {
+    assert.equal(counts.get(table), 1, table);
+  }
+});
+
+test('loadCatalog fails visibly after bounded catalog churn', async () => {
+  const rawDb = createTestDb('catalog-churn');
+  let version = 1;
+  let productReads = 0;
+  const db = {
+    prepare(sql) {
+      const table = (sql.match(/FROM\s+(\w+)/i) || [])[1] || 'other';
+      const statement = rawDb.prepare(sql);
+      if (table === 'journal_products') {
+        productReads += 1;
+        version += 1;
+        rawDb.exec(
+          'UPDATE journal_catalog_state SET catalog_version=' + version +
+          ", catalog_hash='" + String(version).padStart(64, '0') + "' WHERE id=1"
+        );
+      }
+      return statement;
+    },
+  };
+
+  await assert.rejects(loadCatalog(db), /changed during load/);
+  assert.equal(productReads, 3);
 });
 
 test('validateEntry rejects an unknown activity code', async () => {
@@ -521,4 +597,255 @@ test('validateEntry rejects mismatched pinned template and layout versions', asy
     error.field === 'layout_version' && error.code === 'definition_mismatch'));
   assert.ok(result.errors.some((error) =>
     error.field === 'template_version' && error.code === 'definition_mismatch'));
+});
+
+test('inactive definitions and terms fail create but exact correction rows remain valid', async () => {
+  const { catalog, farmerQuick, openField } = await loadedFixture('inactive-correction');
+  const input = validIrrigation({
+    template_version: 1,
+    layout_version: 1,
+    values: [
+      {
+        attribute_code: 'attr.irrigation_depth', group_index: 0, value: 12,
+        unit_code: 'unit.mm_water', value_status: 'observed',
+      },
+      {
+        attribute_code: 'attr.denominator', group_index: 0,
+        value: 'choice.denominator.area', value_status: 'observed',
+      },
+    ],
+  });
+  for (const code of [
+    'irrigation', 'attr.irrigation_depth', 'unit.mm_water', 'choice.denominator.area',
+  ]) {
+    catalog.vocabByCode.set(code, Object.assign({}, catalog.vocabByCode.get(code), { active: 0 }));
+  }
+  const inactiveTemplate = Object.assign({}, farmerQuick, { active: 0 });
+  const inactiveLayout = Object.assign({}, openField, { active: 0 });
+  const originalEntry = {
+    activity_code: 'irrigation',
+    template_code: 'farmer_quick',
+    template_version: 1,
+    layout_code: 'open_field',
+    layout_version: 1,
+    values: input.values.map((value) => ({
+      attribute_code: value.attribute_code,
+      group_index: value.group_index,
+      value_num: typeof value.value === 'number' ? value.value : null,
+      value_text: typeof value.value === 'string' ? value.value : null,
+      value_status: value.value_status,
+      unit_code: value.unit_code || null,
+    })),
+  };
+
+  const create = validateEntry(catalog, inactiveLayout, inactiveTemplate, input);
+  const definitionCreate = validateEntry(
+    catalog,
+    inactiveLayout,
+    inactiveTemplate,
+    validIrrigation({ activity_code: 'general_observation', values: [] })
+  );
+  const missingOriginal = validateEntry(
+    catalog, inactiveLayout, inactiveTemplate, input, { mode: 'correction' }
+  );
+  const exactCorrection = validateEntry(
+    catalog, inactiveLayout, inactiveTemplate, input,
+    { mode: 'correction', originalEntry }
+  );
+  const changedCorrection = validateEntry(
+    catalog,
+    inactiveLayout,
+    inactiveTemplate,
+    Object.assign({}, input, {
+      values: input.values.map((value, index) =>
+        index === 0 ? Object.assign({}, value, { value: 13 }) : value),
+    }),
+    { mode: 'correction', originalEntry }
+  );
+  const changedPins = validateEntry(
+    catalog,
+    inactiveLayout,
+    inactiveTemplate,
+    Object.assign({}, input, { activity_code: 'general_observation' }),
+    { mode: 'correction', originalEntry }
+  );
+
+  assert.equal(create.ok, false);
+  assert.ok(create.errors.some((error) => error.code === 'inactive_term'));
+  assert.equal(definitionCreate.ok, false);
+  assert.ok(definitionCreate.errors.some((error) => error.code === 'inactive_definition'));
+  assert.equal(missingOriginal.ok, false);
+  assert.ok(missingOriginal.errors.some((error) => error.code === 'correction_context_required'));
+  assert.equal(exactCorrection.ok, true);
+  assert.equal(changedCorrection.ok, false);
+  assert.ok(changedCorrection.errors.some((error) => error.code === 'inactive_value_changed'));
+  assert.equal(changedPins.ok, false);
+  assert.ok(changedPins.errors.some((error) => error.code === 'correction_pin_mismatch'));
+});
+
+test('date attributes accept only real YYYY-MM-DD calendar dates', async () => {
+  const { catalog, farmerQuick, openField } = await loadedFixture('strict-dates');
+  catalog.vocabByCode.set('attr.test_date', {
+    code: 'attr.test_date', kind: 'attribute', value_type: 'date', active: 1,
+    constraints: {}, catalog_errors: [],
+  });
+  const validateDate = (value) => validateEntry(
+    catalog,
+    openField,
+    farmerQuick,
+    validIrrigation({
+      activity_code: 'general_observation',
+      values: [{ attribute_code: 'attr.test_date', value }],
+    })
+  );
+
+  assert.equal(validateDate('2024-02-29').ok, true);
+  for (const value of ['2023-02-29', '2026-02-30', '03/04/2026', '2026-1-1', '2026-01-01T00:00:00Z']) {
+    const result = validateDate(value);
+    assert.equal(result.ok, false, value);
+    assert.ok(result.errors.some((error) => error.code === 'invalid_date'), value);
+  }
+});
+
+test('reference constraints resolve products and fail closed for external tables', async () => {
+  const { catalog, farmerQuick, openField } = await loadedFixture('references');
+  const productUuid = catalog.products.keys().next().value;
+  const validateValue = (attributeCode, value, validationContext) => validateEntry(
+    catalog,
+    openField,
+    farmerQuick,
+    validIrrigation({
+      activity_code: 'general_observation',
+      values: [{ attribute_code: attributeCode, value }],
+    }),
+    validationContext
+  );
+
+  assert.equal(validateValue('attr.product_uuid', productUuid).ok, true);
+  const missingProduct = validateValue('attr.product_uuid', 'missing-product');
+  assert.equal(missingProduct.ok, false);
+  assert.ok(missingProduct.errors.some((error) => error.code === 'invalid_reference'));
+
+  const unresolvedActuation = validateValue('attr.actuation_expectation_id', 'expectation-1');
+  assert.equal(unresolvedActuation.ok, false);
+  assert.ok(unresolvedActuation.errors.some((error) => error.code === 'reference_unresolved'));
+
+  const mapResolved = validateValue(
+    'attr.actuation_expectation_id',
+    'expectation-1',
+    {
+      referenceValues: new Map([
+        ['valve_actuation_expectations.expectation_id', new Set(['expectation-1'])],
+      ]),
+    }
+  );
+  const objectResolved = validateValue(
+    'attr.actuation_expectation_id',
+    'expectation-2',
+    {
+      referenceValues: {
+        'valve_actuation_expectations.expectation_id': ['expectation-2'],
+      },
+    }
+  );
+  assert.equal(mapResolved.ok, true);
+  assert.equal(objectResolved.ok, true);
+
+  const product = catalog.products.get(productUuid);
+  catalog.products.set(productUuid, Object.assign({}, product, { active: 0 }));
+  assert.equal(validateValue('attr.product_uuid', productUuid).ok, false);
+});
+
+test('required_any families pair semantically present product and dose in each repeat group', async () => {
+  const { catalog, fullRecord, openField } = await loadedFixture('required-groups');
+  const treatedArea = {
+    attribute_code: 'attr.treated_area', group_index: 0, value: 100,
+    unit_code: 'unit.m2_area',
+  };
+  const product = { attribute_code: 'attr.product', group_index: 0, value: 'NPK 15-15-15' };
+  const dose = {
+    attribute_code: 'attr.amount_mass_area_product', group_index: 0, value: 25,
+    unit_code: 'unit.kg_per_ha_product',
+  };
+  const validateValues = (values) => validateEntry(
+    catalog,
+    openField,
+    fullRecord,
+    validIrrigation({
+      activity_code: 'fertilization', template_code: 'full_record', values,
+    })
+  );
+
+  const paired = validateValues([treatedArea, product, dose]);
+  const crossGroup = validateValues([
+    treatedArea,
+    product,
+    Object.assign({}, dose, { group_index: 1 }),
+  ]);
+  const blankProduct = validateValues([
+    treatedArea,
+    Object.assign({}, product, { value: '   ' }),
+    dose,
+  ]);
+  const nonObservedProduct = validateValues([
+    treatedArea,
+    { attribute_code: 'attr.product', group_index: 0, value_status: 'not_observed' },
+    dose,
+  ]);
+
+  assert.equal(paired.ok, true);
+  assert.equal(crossGroup.ok, false);
+  assert.ok(crossGroup.errors.some((error) => error.code === 'required_in_group'));
+  assert.equal(blankProduct.ok, false);
+  assert.equal(nonObservedProduct.ok, false);
+});
+
+test('malformed nested definitions and unknown rule references fail without throwing', async () => {
+  const { catalog, farmerQuick, openField } = await loadedFixture('malformed-definitions');
+  const templateCases = [
+    { sections: {} },
+    { sections: [{ fields: {} }] },
+    { activity_requirements: [] },
+    { activity_requirements: { irrigation: { required: {}, required_any: [] } } },
+    { activity_requirements: { irrigation: { required: [], required_any: ['attr.product'] } } },
+    { conditional_groups: {} },
+    { conditional_groups: [{ activity_codes: {}, required: [], required_any: [] }] },
+    { sections: [{ fields: [{ code: 'attr.typo', required: true }] }] },
+    { sections: [{ fields: [{
+      code: 'attr.target',
+      required_if: { field: 'attr.typo', op: 'eq', value: 'x' },
+    }] }] },
+  ];
+  const layoutCases = [
+    Object.assign({}, openField.definition, { supported_templates: {} }),
+    Object.assign({}, openField.definition, { activity_codes: {} }),
+    Object.assign({}, openField.definition, { fields: {} }),
+  ];
+
+  for (const definition of templateCases) {
+    let result;
+    assert.doesNotThrow(() => {
+      result = validateEntry(
+        catalog,
+        openField,
+        Object.assign({}, farmerQuick, { definition }),
+        validIrrigation()
+      );
+    });
+    assert.equal(result.ok, false);
+    assert.ok(result.errors.some((error) => error.code === 'invalid_catalog'));
+  }
+  for (const definition of layoutCases) {
+    let result;
+    assert.doesNotThrow(() => {
+      result = validateEntry(
+        catalog,
+        Object.assign({}, openField, { definition }),
+        farmerQuick,
+        validIrrigation()
+      );
+    });
+    assert.equal(result.ok, false);
+    assert.ok(result.errors.some((error) => error.code === 'invalid_catalog'));
+  }
 });

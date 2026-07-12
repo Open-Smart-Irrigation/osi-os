@@ -1,6 +1,8 @@
 'use strict';
 
 const catalogCache = new WeakMap();
+const catalogLoads = new WeakMap();
+const MAX_STABLE_LOAD_ATTEMPTS = 3;
 
 function queryAll(db, sql) {
   if (db && typeof db.prepare === 'function') {
@@ -83,37 +85,53 @@ function indexVersioned(rows) {
   return indexed;
 }
 
-async function loadCatalog(db) {
-  const state = await queryOne(
+function sameState(left, right) {
+  return Boolean(left) && Boolean(right) &&
+    left.catalog_version === right.catalog_version &&
+    left.catalog_hash === right.catalog_hash;
+}
+
+function stateKey(state) {
+  return String(state.catalog_version) + ':' + String(state.catalog_hash);
+}
+
+function readState(db) {
+  return queryOne(
     db,
     'SELECT catalog_version, catalog_hash FROM journal_catalog_state WHERE id = 1'
   );
-  if (!state) throw new Error('Journal catalog state is missing');
+}
 
+function cachedForState(db, state) {
   const cached = catalogCache.get(db);
-  if (cached && cached.version === state.catalog_version && cached.hash === state.catalog_hash) {
-    return cached;
-  }
+  return cached && cached.version === state.catalog_version && cached.hash === state.catalog_hash
+    ? cached
+    : null;
+}
 
+async function readCatalogTables(db) {
   const [vocabRows, templateRows, layoutRows, productRows] = await Promise.all([
     queryAll(db, 'SELECT * FROM journal_vocab ORDER BY code'),
     queryAll(db, 'SELECT * FROM journal_templates ORDER BY code, version'),
     queryAll(db, 'SELECT * FROM journal_layouts ORDER BY code, version'),
     queryAll(db, 'SELECT * FROM journal_products ORDER BY product_uuid'),
   ]);
+  return { vocabRows, templateRows, layoutRows, productRows };
+}
 
-  const vocabByCode = new Map(vocabRows.map(function(row) {
+function buildCatalog(state, rows) {
+  const vocabByCode = new Map(rows.vocabRows.map(function(row) {
     const parsed = parseVocabRow(row);
     return [parsed.code, parsed];
   }));
-  const templates = indexVersioned(templateRows.map(parseDefinitionRow));
-  const layouts = indexVersioned(layoutRows.map(parseDefinitionRow));
-  const products = new Map(productRows.map(function(row) {
+  const templates = indexVersioned(rows.templateRows.map(parseDefinitionRow));
+  const layouts = indexVersioned(rows.layoutRows.map(parseDefinitionRow));
+  const products = new Map(rows.productRows.map(function(row) {
     const parsed = parseProductRow(row);
     return [parsed.product_uuid, parsed];
   }));
 
-  const catalog = {
+  return {
     version: state.catalog_version,
     hash: state.catalog_hash,
     vocabByCode,
@@ -121,8 +139,48 @@ async function loadCatalog(db) {
     layouts,
     products,
   };
-  catalogCache.set(db, catalog);
-  return catalog;
+}
+
+async function loadStableCatalog(db, initialState) {
+  let state = initialState;
+  for (let attempt = 0; attempt < MAX_STABLE_LOAD_ATTEMPTS; attempt += 1) {
+    const cached = cachedForState(db, state);
+    if (cached) return cached;
+    const rows = await readCatalogTables(db);
+    const endState = await readState(db);
+    if (!endState) throw new Error('Journal catalog state is missing');
+    if (sameState(state, endState)) {
+      const catalog = buildCatalog(state, rows);
+      catalogCache.set(db, catalog);
+      return catalog;
+    }
+    state = endState;
+  }
+  throw new Error('Journal catalog changed during load after ' + MAX_STABLE_LOAD_ATTEMPTS + ' attempts');
+}
+
+async function loadCatalog(db) {
+  const state = await readState(db);
+  if (!state) throw new Error('Journal catalog state is missing');
+  const cached = cachedForState(db, state);
+  if (cached) return cached;
+
+  let loads = catalogLoads.get(db);
+  if (!loads) {
+    loads = new Map();
+    catalogLoads.set(db, loads);
+  }
+  const key = stateKey(state);
+  if (loads.has(key)) return loads.get(key);
+
+  const pending = loadStableCatalog(db, state);
+  loads.set(key, pending);
+  try {
+    return await pending;
+  } finally {
+    if (loads.get(key) === pending) loads.delete(key);
+    if (loads.size === 0) catalogLoads.delete(db);
+  }
 }
 
 module.exports = { loadCatalog };
