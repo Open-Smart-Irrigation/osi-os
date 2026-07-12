@@ -18,6 +18,7 @@ const NAME_TO_PATH = {
   'zone-env': 'osi-zone-env',
   'device-writer': 'osi-device-writer',
   'uc512-normalize': 'osi-uc512-normalize',
+  'lsn50-normalize': 'osi-lsn50-normalize',
   'agroscope-uplink-transform': 'codecs/agroscope_uplink_transform',
 };
 

@@ -495,6 +495,14 @@ fetch_required "osi-device-writer index.js" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-device-writer/index.js" \
     "/srv/node-red/osi-device-writer/index.js"
 
+fetch_required "osi-lsn50-normalize package.json" \
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-lsn50-normalize/package.json" \
+    "/srv/node-red/osi-lsn50-normalize/package.json"
+
+fetch_required "osi-lsn50-normalize index.js" \
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-lsn50-normalize/index.js" \
+    "/srv/node-red/osi-lsn50-normalize/index.js"
+
 fetch_required "osi-uc512-normalize package.json" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-uc512-normalize/package.json" \
     "/srv/node-red/osi-uc512-normalize/package.json"
