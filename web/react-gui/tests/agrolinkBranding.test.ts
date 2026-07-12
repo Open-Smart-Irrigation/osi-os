@@ -72,7 +72,7 @@ describe('AgroLink branding source contracts', () => {
     assert.deepEqual(offenders.map((filePath) => path.relative(reactRoot, filePath)), []);
   });
 
-  it('keeps dormant dashboard title keys aligned with the brand module', () => {
+  it('keeps the dashboard title key aligned with the AgroLink brand in all locales', () => {
     for (const locale of ['en', 'de-CH', 'fr', 'it', 'es', 'pt', 'lg']) {
       const dashboard = readReactJson(`public/locales/${locale}/dashboard.json`);
       assert.equal(dashboard.title, 'AgroLink Dashboard', `${locale} dashboard title`);

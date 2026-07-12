@@ -13,7 +13,6 @@
 ## Source Documents
 
 - Design spec: `docs/superpowers/specs/2026-06-29-agroscope-agrolink-branding-design.md`
-- Domain glossary: `CONTEXT.md`
 - TypeScript overlays: `architect.yaml`, `RULES.yaml`
 
 ## File Map
@@ -1181,9 +1180,9 @@ Expected implementation changed areas:
 - supported Pi 4/Pi 5 AP scripts
 - feed GUI bundle
 
-Previously committed design artifacts such as `CONTEXT.md` and
-`docs/superpowers/specs/2026-06-29-agroscope-agrolink-branding-design.md` may
-still appear in `origin/main...HEAD`; implementation tasks should not edit them
+The design spec
+`docs/superpowers/specs/2026-06-29-agroscope-agrolink-branding-design.md` also
+appears in `origin/main...HEAD`; implementation tasks should not edit it
 unless a new review finding requires a spec correction.
 
 - [ ] **Step 3: Run final verification bundle once**
