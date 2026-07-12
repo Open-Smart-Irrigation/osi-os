@@ -3897,7 +3897,8 @@
     "y": 200,
     "wires": [
       [
-        "lsn50-sqlite"
+        "lsn50-sqlite",
+        "093d7832e89c4027"
       ]
     ]
   },
@@ -8709,7 +8710,7 @@
     "type": "function",
     "z": "sys-admin-tab",
     "name": "Command Type Registry",
-    "func": "// Command Type Registry - single source of truth for accepted command types.\n// Routing nodes and verification scripts read from here.\n// Indefinite/manual OPEN is intentionally NOT listed - it is rejected at dispatch.\nconst COMMAND_TYPES = {\n    OPEN_FOR_DURATION:         { dispatch: 'strega_timed_open',         actuator: true,    requires_duration: true  },\n    SET_STREGA_TIMED_ACTION:   { dispatch: 'strega_timed_open',         actuator: true,    requires_duration: true  },\n    CLOSE:                     { dispatch: 'strega_explicit_close',     actuator: true,    requires_duration: false  },\n    VALVE_COMMAND:             { dispatch: 'strega_timed_open',         actuator: true,    requires_duration: true  },\n    SET_STREGA_INTERVAL:       { dispatch: 'strega_config',             actuator: false,   requires_duration: false  },\n    SET_STREGA_MODEL:          { dispatch: 'strega_config',             actuator: false,   requires_duration: false  },\n    SET_STREGA_MAGNET_MODE:    { dispatch: 'strega_config',             actuator: false,   requires_duration: false  },\n    SET_STREGA_PARTIAL_OPENING: { dispatch: 'strega_config',             actuator: false,   requires_duration: false  },\n    SET_STREGA_FLUSHING:       { dispatch: 'strega_config',             actuator: false,   requires_duration: false  },\n    SET_LSN50_MODE:            { dispatch: 'lsn50_config',              actuator: false,   requires_duration: false  },\n    SET_LSN50_INTERVAL:        { dispatch: 'lsn50_config',              actuator: false,   requires_duration: false  },\n    SET_LSN50_INTERRUPT_MODE:  { dispatch: 'lsn50_config',              actuator: false,   requires_duration: false  },\n    SET_LSN50_5V_WARMUP:       { dispatch: 'lsn50_config',              actuator: false,   requires_duration: false  },\n    SET_KIWI_INTERVAL:         { dispatch: 'kiwi_config',               actuator: false,   requires_duration: false  },\n    ENABLE_KIWI_TEMP_HUMIDITY: { dispatch: 'kiwi_config',               actuator: false,   requires_duration: false  },\n    SET_CHAMELEON_CONFIG:      { dispatch: 'chameleon_config',          actuator: false,   requires_duration: false  },\n    REGISTER_DEVICE:           { dispatch: 'device_register',           actuator: false,   requires_duration: false  },\n    REBOOT:                    { dispatch: 'device_reboot',             actuator: false,   requires_duration: false  },\n    REBOOT_DEVICE:             { dispatch: 'device_reboot',             actuator: false,   requires_duration: false  },\n    REMOVE_DEVICE_FROM_ZONE:   { dispatch: 'device_zone_detach',        actuator: false,   requires_duration: false  },\n    UNCLAIM_DEVICE:            { dispatch: 'device_unclaim',            actuator: false,   requires_duration: false  },\n    SET_FAN:                   { dispatch: 'local_fan',                 actuator: false,   requires_duration: false  },\n    FORCE_EDGE_SYNC:           { dispatch: 'local_sync',                actuator: false,   requires_duration: false  },\n    SYNC_LINKED_AUTH:          { dispatch: 'local_auth_sync',           actuator: false,   requires_duration: false  },\n    UPSERT_ZONE:               { dispatch: 'sync_apply',                actuator: false,   requires_duration: false  },\n    DELETE_ZONE:               { dispatch: 'sync_apply',                actuator: false,   requires_duration: false  },\n    UPSERT_ZONE_CONFIG:        { dispatch: 'sync_apply',                actuator: false,   requires_duration: false  },\n    UPSERT_ZONE_LOCATION:      { dispatch: 'sync_apply',                actuator: false,   requires_duration: false  },\n    ASSIGN_DEVICE_TO_ZONE:     { dispatch: 'sync_apply',                actuator: false,   requires_duration: false  },\n    UPSERT_DEVICE_FLAGS:       { dispatch: 'sync_apply',                actuator: false,   requires_duration: false  },\n    UPSERT_DEVICE_SOIL_DEPTHS: { dispatch: 'sync_apply',                actuator: false,   requires_duration: false  },\n    UPDATE_SCHEDULE:           { dispatch: 'sync_apply',                actuator: false,   requires_duration: false  },\n    UPSERT_SCHEDULE:           { dispatch: 'sync_apply',                actuator: false,   requires_duration: false  }\n};\nflow.set('command_types', COMMAND_TYPES);\nreturn msg;",
+    "func": "// Command Type Registry - single source of truth for accepted command types.\n// Routing nodes and verification scripts read from here.\n// Indefinite/manual OPEN is intentionally NOT listed - it is rejected at dispatch.\nconst COMMAND_TYPES = {\n    OPEN_FOR_DURATION:         { dispatch: 'strega_timed_open',         actuator: true,    requires_duration: true  },\n    SET_STREGA_TIMED_ACTION:   { dispatch: 'strega_timed_open',         actuator: true,    requires_duration: true  },\n    CLOSE:                     { dispatch: 'strega_explicit_close',     actuator: true,    requires_duration: false  },\n    VALVE_COMMAND:             { dispatch: 'strega_timed_open',         actuator: true,    requires_duration: true  },\n    SET_STREGA_INTERVAL:       { dispatch: 'strega_config',             actuator: false,   requires_duration: false  },\n    SET_STREGA_MODEL:          { dispatch: 'strega_config',             actuator: false,   requires_duration: false  },\n    SET_STREGA_MAGNET_MODE:    { dispatch: 'strega_config',             actuator: false,   requires_duration: false  },\n    SET_STREGA_PARTIAL_OPENING: { dispatch: 'strega_config',             actuator: false,   requires_duration: false  },\n    SET_STREGA_FLUSHING:       { dispatch: 'strega_config',             actuator: false,   requires_duration: false  },\n    SET_LSN50_MODE:            { dispatch: 'lsn50_config',              actuator: false,   requires_duration: false  },\n    SET_LSN50_INTERVAL:        { dispatch: 'lsn50_config',              actuator: false,   requires_duration: false  },\n    SET_LSN50_INTERRUPT_MODE:  { dispatch: 'lsn50_config',              actuator: false,   requires_duration: false  },\n    SET_LSN50_5V_WARMUP:       { dispatch: 'lsn50_config',              actuator: false,   requires_duration: false  },\n    SET_KIWI_INTERVAL:         { dispatch: 'kiwi_config',               actuator: false,   requires_duration: false  },\n    UC512_OPEN_FOR_DURATION:    { dispatch: 'uc512_timed_open',         actuator: true,    requires_duration: true  },\n    ENABLE_KIWI_TEMP_HUMIDITY: { dispatch: 'kiwi_config',               actuator: false,   requires_duration: false  },\n    SET_CHAMELEON_CONFIG:      { dispatch: 'chameleon_config',          actuator: false,   requires_duration: false  },\n    REGISTER_DEVICE:           { dispatch: 'device_register',           actuator: false,   requires_duration: false  },\n    REBOOT:                    { dispatch: 'device_reboot',             actuator: false,   requires_duration: false  },\n    REBOOT_DEVICE:             { dispatch: 'device_reboot',             actuator: false,   requires_duration: false  },\n    REMOVE_DEVICE_FROM_ZONE:   { dispatch: 'device_zone_detach',        actuator: false,   requires_duration: false  },\n    UNCLAIM_DEVICE:            { dispatch: 'device_unclaim',            actuator: false,   requires_duration: false  },\n    SET_FAN:                   { dispatch: 'local_fan',                 actuator: false,   requires_duration: false  },\n    FORCE_EDGE_SYNC:           { dispatch: 'local_sync',                actuator: false,   requires_duration: false  },\n    SYNC_LINKED_AUTH:          { dispatch: 'local_auth_sync',           actuator: false,   requires_duration: false  },\n    UPSERT_ZONE:               { dispatch: 'sync_apply',                actuator: false,   requires_duration: false  },\n    DELETE_ZONE:               { dispatch: 'sync_apply',                actuator: false,   requires_duration: false  },\n    UPSERT_ZONE_CONFIG:        { dispatch: 'sync_apply',                actuator: false,   requires_duration: false  },\n    UPSERT_ZONE_LOCATION:      { dispatch: 'sync_apply',                actuator: false,   requires_duration: false  },\n    ASSIGN_DEVICE_TO_ZONE:     { dispatch: 'sync_apply',                actuator: false,   requires_duration: false  },\n    UPSERT_DEVICE_FLAGS:       { dispatch: 'sync_apply',                actuator: false,   requires_duration: false  },\n    UPSERT_DEVICE_SOIL_DEPTHS: { dispatch: 'sync_apply',                actuator: false,   requires_duration: false  },\n    UPDATE_SCHEDULE:           { dispatch: 'sync_apply',                actuator: false,   requires_duration: false  },\n    UPSERT_SCHEDULE:           { dispatch: 'sync_apply',                actuator: false,   requires_duration: false  }\n};\nflow.set('command_types', COMMAND_TYPES);\nreturn msg;",
     "outputs": 1,
     "noerr": 0,
     "initialize": "",
@@ -10943,6 +10944,96 @@
       [
         "command-ack-queue-rest"
       ]
+    ]
+  },
+  {
+    "id": "uc512-tab",
+    "type": "tab",
+    "label": "Sensor_UC512",
+    "disabled": false,
+    "info": "",
+    "env": []
+  },
+  {
+    "id": "c571729fb2943059",
+    "type": "mqtt in",
+    "z": "uc512-tab",
+    "name": "UC512 IN",
+    "topic": "application/+/device/+/event/up",
+    "qos": "0",
+    "datatype": "json",
+    "broker": "b0b19352dac3fb34",
+    "nl": false,
+    "rap": true,
+    "rh": 0,
+    "inputs": 0,
+    "x": 170,
+    "y": 160,
+    "wires": [
+      [
+        "6b28e0d879808dd9"
+      ]
+    ]
+  },
+  {
+    "id": "6b28e0d879808dd9",
+    "type": "function",
+    "z": "uc512-tab",
+    "name": "UC512 Normalize + Write",
+    "func": "var data = msg.payload;\nif (!data || !data.deviceInfo) return null;\n\nvar profileId = String(data.deviceInfo.deviceProfileId || '').trim();\nvar uc512ProfileId = String(env.get('CHIRPSTACK_PROFILE_UC512') || '').trim();\nif (!uc512ProfileId || profileId !== uc512ProfileId) return null;\n\nvar normRes = osiLib.require('uc512-normalize');\nif (!normRes.ok) { node.warn('uc512-normalize quarantined: ' + normRes.error); return null; }\n\nvar writerRes = osiLib.require('device-writer');\nif (!writerRes.ok) { node.warn('device-writer quarantined: ' + writerRes.error); return null; }\n\nvar decoded = (data.object && typeof data.object === 'object') ? data.object : {};\nvar deveui = String(data.deviceInfo.devEui || '').toUpperCase().trim();\nif (!deveui) { node.error('UC512: empty devEui'); return null; }\n\nvar fs = global.get('fs');\nvar edgeManifest;\ntry { edgeManifest = JSON.parse(fs.readFileSync('/srv/node-red/edge-channels.json', 'utf8')); }\ncatch (e) { node.error('edge-channels.json load failed: ' + e.message); return null; }\n\nvar normalizeResult = normRes.value.normalize(decoded, { recordedAt: data.time });\n\nvar db = new osiDb.Database('/data/db/farming.db');\ntry {\n  var result = writerRes.value.writeDeviceData(db, edgeManifest, normalizeResult, { deveui: deveui }, { node: node });\n  if (result.deadLettered.length > 0) {\n    node.warn('UC512 dead-lettered ' + result.deadLettered.length + ' channels for ' + deveui);\n  }\n  node.status({ fill: 'green', shape: 'dot', text: 'UC512 ' + deveui + ' cols=' + result.columns.length });\n} catch (e) {\n  node.error('UC512 write failed: ' + e.message);\n} finally {\n  db.close();\n}\n\nreturn msg;",
+    "outputs": 1,
+    "libs": [
+      {
+        "var": "osiDb",
+        "module": "osi-db-helper"
+      },
+      {
+        "var": "osiLib",
+        "module": "osi-lib"
+      }
+    ],
+    "x": 430,
+    "y": 160,
+    "wires": [
+      [
+        "a2fc996126ab0cdd"
+      ]
+    ]
+  },
+  {
+    "id": "a2fc996126ab0cdd",
+    "type": "debug",
+    "z": "uc512-tab",
+    "name": "UC512 Debug",
+    "active": false,
+    "tosidebar": true,
+    "console": false,
+    "tostatus": false,
+    "complete": "true",
+    "targetType": "full",
+    "statusVal": "",
+    "statusType": "auto",
+    "x": 680,
+    "y": 160,
+    "wires": []
+  },
+  {
+    "id": "093d7832e89c4027",
+    "type": "function",
+    "z": "lsn50-tab",
+    "name": "LSN50 Shadow Compare",
+    "func": "var d = msg.formattedData;\nif (!d || !d.devEui) return msg;\n\nvar normRes = osiLib.require('lsn50-normalize');\nif (!normRes.ok) return msg;\n\nvar result = normRes.value.normalize(d, {});\n\nvar MODE9_COLS = 'ext_temperature_c bat_v rain_count_cumulative rain_tips_delta rain_mm_delta rain_mm_per_hour rain_mm_per_10min rain_mm_today rain_delta_status flow_count_cumulative flow_pulses_delta flow_liters_delta flow_liters_per_min flow_liters_per_10min flow_liters_today flow_delta_status counter_interval_seconds lsn50_mode_code lsn50_mode_label lsn50_mode_observed_at'.split(' ');\nvar DEFAULT_COLS = 'ext_temperature_c bat_v adc_ch0v adc_ch1v swt_1 swt_2 swt_3 dendro_ratio dendro_mode_used dendro_position_raw_mm dendro_position_mm dendro_valid dendro_delta_mm dendro_stem_change_um dendro_saturated dendro_saturation_side lsn50_mode_code lsn50_mode_label lsn50_mode_observed_at'.split(' ');\n\nvar expectedCols = d.detectedMode === 9 ? MODE9_COLS : DEFAULT_COLS;\nvar normCols = Object.keys(result.channels);\nvar expectedSet = {};\nfor (var i = 0; i < expectedCols.length; i++) expectedSet[expectedCols[i]] = true;\n\nvar missing = expectedCols.filter(function(c) { return !(c in result.channels); });\nvar extra = normCols.filter(function(c) { return !expectedSet[c]; });\nvar unknownKeys = Object.keys(result.unknown);\n\nif (missing.length > 0 || extra.length > 0) {\n  node.warn('LSN50 shadow COVERAGE DRIFT ' + d.devEui + ' missing=[' + missing.join(',') + '] extra=[' + extra.join(',') + ']');\n}\nif (unknownKeys.length > 0) {\n  node.warn('LSN50 shadow UNKNOWN keys ' + d.devEui + ': ' + unknownKeys.join(', '));\n}\n\nnode.status({\n  fill: (missing.length > 0 || extra.length > 0) ? 'red' : (unknownKeys.length > 0 ? 'yellow' : 'green'),\n  shape: 'dot',\n  text: d.devEui + ' ch=' + normCols.length + (missing.length > 0 ? ' MISS=' + missing.length : '') + (unknownKeys.length > 0 ? ' unk=' + unknownKeys.length : '')\n});\n\nreturn msg;",
+    "outputs": 1,
+    "libs": [
+      {
+        "var": "osiLib",
+        "module": "osi-lib"
+      }
+    ],
+    "x": 1470,
+    "y": 260,
+    "wires": [
+      []
     ]
   }
 ]
