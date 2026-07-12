@@ -7,7 +7,14 @@ const {
   predicateResult,
   semanticDefinitionErrors,
 } = require('./definition');
-const { allowedUnits, convertToCanonical } = require('./units');
+const {
+  allowedUnits,
+  convertToCanonical,
+  normalizeMissingUnits,
+  numericAttributePreflight,
+  numericStepMatches,
+  validateFrozenUnitMetadata,
+} = require('./units');
 
 function errorResult(field, code, message) {
   return { ok: false, errors: [{ field, code, message }] };
@@ -83,10 +90,18 @@ function valueShape(attribute, row, valueStatus) {
   const hasGeneric = Boolean(row) && row.value != null;
   const hasNumber = Boolean(row) && row.value_num != null;
   const hasText = Boolean(row) && row.value_text != null;
+  const hasEnteredNumber = Boolean(row) && row.entered_value_num != null;
+  const hasUnit = Boolean(row) && row.unit_code != null;
+  const hasEnteredUnit = Boolean(row) && row.entered_unit_code != null;
   if (valueStatus !== 'observed') {
-    return hasGeneric || hasNumber || hasText
+    if (attribute.value_type !== 'number' && (hasUnit || hasEnteredUnit)) return { ok: false };
+    return hasGeneric || hasNumber || hasText || hasEnteredNumber
       ? { ok: false }
       : { ok: true, value: null };
+  }
+  if (attribute.value_type !== 'number' &&
+      (hasUnit || hasEnteredUnit || hasEnteredNumber)) {
+    return { ok: false };
   }
   const numberBacked = attribute.value_type === 'number' || attribute.value_type === 'boolean';
   if ((numberBacked && hasText) || (!numberBacked && hasNumber)) return { ok: false };
@@ -153,6 +168,22 @@ function numericNormalization(catalog, attribute, row, semanticValue) {
     entered_value_num: enteredValue,
     entered_unit_code: enteredUnit,
   };
+}
+
+function numericUnitError(index, failure) {
+  const field = failure.code === 'invalid_value_shape'
+    ? 'values[' + index + ']'
+    : failure.code === 'invalid_number'
+      ? 'values[' + index + '].value'
+      : failure.code === 'invalid_catalog' || failure.code === 'inactive_attribute'
+        ? 'values[' + index + '].attribute_code'
+        : 'values[' + index + '].unit_code';
+  const message = failure.code === 'unit_required'
+    ? 'An explicit unit is required for this numeric value'
+    : failure.code === 'invalid_value_shape'
+      ? 'Canonical and entered numeric representations are contradictory'
+      : 'Numeric unit validation failed';
+  return errorResult(field, failure.code, message);
 }
 
 function hasRetiredNumericTerm(catalog, attribute, row) {
@@ -609,6 +640,14 @@ function validateEntry(catalog, _layoutDef, _templateDef, entryInput, validation
         'Attribute constraints are invalid'
       );
     }
+    if (attribute.value_type === 'number') {
+      const preflight = numericAttributePreflight(
+        catalog,
+        attribute.code,
+        { allowInactive: Boolean(valuePreserved) }
+      );
+      if (!preflight.ok) return numericUnitError(index, preflight);
+    }
     if (valueStatus === 'observed') {
       const type = attribute.value_type;
       const validType = (
@@ -734,27 +773,16 @@ function validateEntry(catalog, _layoutDef, _templateDef, entryInput, validation
         }
       }
     }
-    const preserveFrozenNumeric = valueStatus === 'observed' &&
-      attribute.value_type === 'number' && valuePreserved &&
+    const preserveFrozenNumeric = attribute.value_type === 'number' && valuePreserved &&
       hasRetiredNumericTerm(catalog, attribute, value);
+    if (preserveFrozenNumeric) {
+      const frozenMetadata = validateFrozenUnitMetadata(catalog, attribute.code, value);
+      if (!frozenMetadata.ok) return numericUnitError(index, frozenMetadata);
+    }
     if (valueStatus === 'observed' && attribute.value_type === 'number' &&
         !preserveFrozenNumeric) {
       const canonical = numericNormalization(catalog, attribute, value, semanticValue);
-      if (!canonical.ok) {
-        const field = canonical.code === 'invalid_value_shape'
-          ? 'values[' + index + ']'
-          : canonical.code === 'invalid_number'
-            ? 'values[' + index + '].value'
-            : canonical.code === 'invalid_catalog'
-              ? 'values[' + index + '].attribute_code'
-              : 'values[' + index + '].unit_code';
-        const message = canonical.code === 'unit_required'
-          ? 'An explicit unit is required for this numeric value'
-          : canonical.code === 'invalid_value_shape'
-            ? 'Canonical and entered numeric representations are contradictory'
-            : 'Numeric unit conversion failed';
-        return errorResult(field, canonical.code, message);
-      }
+      if (!canonical.ok) return numericUnitError(index, canonical);
       semanticValue = canonical.value_num;
       normalizedValue.value = canonical.value_num;
       normalizedValue.value_num = canonical.value_num;
@@ -762,6 +790,22 @@ function validateEntry(catalog, _layoutDef, _templateDef, entryInput, validation
       normalizedValue.entered_value_num = canonical.entered_value_num;
       normalizedValue.entered_unit_code = canonical.entered_unit_code;
       delete normalizedValue.value_text;
+    }
+    if (valueStatus !== 'observed' && attribute.value_type === 'number' &&
+        !preserveFrozenNumeric) {
+      const missingUnits = normalizeMissingUnits(
+        catalog,
+        attribute.code,
+        value.unit_code,
+        value.entered_unit_code
+      );
+      if (!missingUnits.ok) return numericUnitError(index, missingUnits);
+      if (missingUnits.unit_code !== undefined) {
+        normalizedValue.unit_code = missingUnits.unit_code;
+      }
+      if (missingUnits.entered_unit_code !== undefined) {
+        normalizedValue.entered_unit_code = missingUnits.entered_unit_code;
+      }
     }
     if (valueStatus === 'observed' && attribute.value_type === 'number' &&
         !preserveFrozenNumeric) {
@@ -773,9 +817,7 @@ function validateEntry(catalog, _layoutDef, _templateDef, entryInput, validation
       }
       if (typeof attribute.constraints.step === 'number' && attribute.constraints.step > 0) {
         const base = typeof attribute.constraints.min === 'number' ? attribute.constraints.min : 0;
-        const quotient = (semanticValue - base) / attribute.constraints.step;
-        const tolerance = 1e-9 * Math.max(1, Math.abs(quotient));
-        if (Math.abs(quotient - Math.round(quotient)) > tolerance) {
+        if (!numericStepMatches(semanticValue, base, attribute.constraints.step)) {
           return errorResult('values[' + index + '].value', 'step_mismatch', 'Value does not match the step');
         }
       }
