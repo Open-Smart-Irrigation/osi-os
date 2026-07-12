@@ -334,7 +334,8 @@ if (!intakeRouter) {
     intakeChecks = requireFuncIncludes(intakeRouter, 'MAX_DIAGNOSTICS_JSON_BYTES = 32768', 'Field requests: intake router does not cap diagnostics JSON at 32768 bytes') && intakeChecks;
     intakeChecks = requireFuncIncludes(intakeRouter, "flow.get('gateway_health')", 'Field requests: intake router does not prefer flow gateway_health') && intakeChecks;
     intakeChecks = requireFuncIncludes(intakeRouter, "global.get('edge_health')", 'Field requests: intake router does not retain edge_health fallback') && intakeChecks;
-    intakeChecks = requireFuncIncludes(intakeRouter, "/[Bb]earer\\s+[A-Za-z0-9._~+/=-]{20,}/g", 'Field requests: redaction does not strip bearer tokens with fixed pattern') && intakeChecks;
+    intakeChecks = requireFuncIncludes(intakeRouter, "/bearer\\s+[A-Za-z0-9._~+/=-]{8,}/gi", 'Field requests: redaction does not strip bearer tokens with fixed pattern') && intakeChecks;
+    intakeChecks = requireFuncIncludes(intakeRouter, "/(password|passwd|pwd|secret|token|key)\\s*[=:]\\s*\\S+/gi", 'Field requests: redaction does not strip password/credential patterns') && intakeChecks;
     intakeChecks = requireFuncIncludes(intakeRouter, "/eyJ[A-Za-z0-9_-]{10,}\\.[A-Za-z0-9_-]{10,}/g", 'Field requests: redaction does not strip JWT-like strings') && intakeChecks;
     intakeChecks = requireFuncIncludes(intakeRouter, "/\\b[0-9A-Fa-f]{32}\\b/g", 'Field requests: redaction does not strip AppKey-like 32-hex strings') && intakeChecks;
     intakeChecks = requireFuncIncludes(intakeRouter, "/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}/g", 'Field requests: redaction does not strip email patterns') && intakeChecks;

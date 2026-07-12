@@ -594,6 +594,7 @@ export type SupportRequestSeverity = 'cant_work' | 'workaround' | 'annoying' | '
 export type SupportRequestLocalStatus =
   | 'QUEUED'
   | 'SUBMITTED'
+  | 'REJECTED'
   | 'SYNCED'
   | 'FAILED_RETRYABLE'
   | 'FAILED_PERMANENT';

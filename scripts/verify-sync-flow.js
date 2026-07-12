@@ -1616,7 +1616,8 @@ expectIncludesById('improvement-requests-api-router', "flow.get('guiVersion')", 
 expectIncludesById('improvement-requests-api-router', "flow.get('sync_state') || {}", 'summarizes sync_state diagnostics');
 expectIncludesById('improvement-requests-api-router', "flow.get('gateway_health')", 'prefers flow gateway_health diagnostics');
 expectIncludesById('improvement-requests-api-router', "global.get('edge_health')", 'falls back to global edge_health diagnostics');
-expectIncludesById('improvement-requests-api-router', "/[Bb]earer\\s+[A-Za-z0-9._~+/=-]{20,}/g", 'redacts bearer tokens from user text');
+expectIncludesById('improvement-requests-api-router', "/bearer\\s+[A-Za-z0-9._~+/=-]{8,}/gi", 'redacts bearer tokens from user text');
+expectIncludesById('improvement-requests-api-router', "/(password|passwd|pwd|secret|token|key)\\s*[=:]\\s*\\S+/gi", 'redacts password/credential patterns from user text');
 expectIncludesById('improvement-requests-api-router', "/eyJ[A-Za-z0-9_-]{10,}\\.[A-Za-z0-9_-]{10,}/g", 'redacts JWT-like strings from user text');
 expectIncludesById('improvement-requests-api-router', "/\\b[0-9A-Fa-f]{32}\\b/g", 'redacts AppKey-like 32-hex strings from user text');
 expectIncludesById('improvement-requests-api-router', "/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}/g", 'redacts email patterns from user text');
@@ -1661,6 +1662,8 @@ expectIncludesById('support-delivery-worker', 'let attempted = 0', 'tracks attem
 expectIncludesById('support-delivery-worker', 'attempted >= MAX_DELIVERIES_PER_TICK', 'prevents backed-off rows from consuming the delivery tick');
 expectIncludesById('support-delivery-worker', "local_status = 'SUBMITTED'", 'marks accepted or duplicate work requests submitted');
 expectIncludesById('support-delivery-worker', "local_status = 'REJECTED'", 'marks terminally rejected work requests rejected');
+expectIncludesById('support-delivery-worker', 'response.statusCode === 404', 'retries on 404 instead of permanently rejecting');
+expectIncludesById('support-delivery-worker', "cloud_status IN ('SUBMITTED','DUPLICATE')", 'guards cloud_status update against clobbering fresher statuses');
 expectIncludesById('support-delivery-worker', '.close(', 'closes the delivery worker database handle');
 expectFileIncludes('seed-blank.sql', seedSqlSource, 'trg_improvement_requests_outbox_ai', 'improvement request trigger exists');
 expectFileIncludes('seed-blank.sql', seedSqlSource, "'WORK_REQUEST_SUBMITTED'", 'improvement request trigger emits WORK_REQUEST_SUBMITTED');
