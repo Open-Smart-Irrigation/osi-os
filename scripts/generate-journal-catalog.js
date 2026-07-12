@@ -21,37 +21,6 @@ const SEED_END = '-- END GENERATED JOURNAL CATALOG V1';
 const CATALOG_VERSION = 1;
 const FIXED_TIMESTAMP = '2026-07-12T00:00:00.000Z';
 
-const CATEGORY_ACTIVITY = {
-  tillage: 'tillage_soil_work',
-  sowing: 'seeding',
-  fertilizer_application: 'fertilization',
-  crop_protection: 'plant_protection_application',
-  harvest: 'harvest',
-  irrigation: 'irrigation',
-  other: 'general_observation',
-};
-
-const UNIT_BINDINGS = {
-  cm: ['attr.amount_operation_depth', 'unit.cm_operation_depth'],
-  'g/ha': ['attr.amount_mass_area_product', 'unit.g_per_ha_product'],
-  'hours/ha': ['attr.amount_duration_area', 'unit.h_per_ha_labor'],
-  'kg B/ha': ['attr.amount_nutrient_rate', 'unit.kg_b_per_ha_nutrient'],
-  'kg Ca/ha': ['attr.amount_nutrient_rate', 'unit.kg_ca_per_ha_nutrient'],
-  'kg CaO/ha': ['attr.amount_nutrient_rate', 'unit.kg_cao_per_ha_nutrient'],
-  'kg K2O/ha': ['attr.amount_nutrient_rate', 'unit.kg_k2o_per_ha_nutrient'],
-  'kg Mg/ha': ['attr.amount_nutrient_rate', 'unit.kg_mg_per_ha_nutrient'],
-  'kg Mn/ha': ['attr.amount_nutrient_rate', 'unit.kg_mn_per_ha_nutrient'],
-  'kg N/ha': ['attr.amount_nutrient_rate', 'unit.kg_n_per_ha_nutrient'],
-  'kg Na/ha': ['attr.amount_nutrient_rate', 'unit.kg_na_per_ha_nutrient'],
-  'kg P2O5/ha': ['attr.amount_nutrient_rate', 'unit.kg_p2o5_per_ha_nutrient'],
-  'kg S/ha': ['attr.amount_nutrient_rate', 'unit.kg_s_per_ha_nutrient'],
-  'kg/ha': ['attr.amount_mass_area_product', 'unit.kg_per_ha_product'],
-  'l/ha': ['attr.amount_volume_area_product', 'unit.l_per_ha_product'],
-  'plants/ha': ['attr.amount_count_area', 'unit.plants_per_ha'],
-  't/ha': ['attr.amount_mass_area_product', 'unit.t_per_ha_product'],
-  'unit/ha': ['attr.amount_biological_count_area', 'unit.biological_count_per_ha'],
-};
-
 function fail(message) {
   throw new Error(message);
 }
@@ -86,8 +55,49 @@ function sqlValue(value) {
   return "'" + String(value).replace(/'/g, "''") + "'";
 }
 
-function insertOrIgnore(table, columns, values) {
-  return `INSERT OR IGNORE INTO ${table}(${columns.join(',')}) VALUES (${values.map(sqlValue).join(',')});`;
+const CATALOG_V1_ACTIVE =
+  'COALESCE((SELECT catalog_version FROM journal_catalog_state WHERE id=1),0) <= 1';
+
+const ROW_IDENTITY_COLUMNS = {
+  journal_vocab: ['code'],
+  journal_vocab_mappings: ['term_code', 'scheme_uri', 'mapping_role', 'external_id'],
+  journal_templates: ['code', 'version'],
+  journal_layouts: ['code', 'version'],
+  journal_products: ['product_uuid'],
+};
+
+function insertIfCatalogNotNewer(row) {
+  const identity = ROW_IDENTITY_COLUMNS[row.table];
+  assert(identity, `no immutable row identity declared for ${row.table}`);
+  const identityPredicate = identity.map((column) => {
+    const index = row.columns.indexOf(column);
+    assert(index !== -1, `${row.table} row is missing identity column ${column}`);
+    return exactColumnPredicate(column, row.values[index]);
+  }).join(' AND ');
+  return [
+    `INSERT INTO ${row.table}(${row.columns.join(',')})`,
+    `SELECT ${row.values.map(sqlValue).join(',')}`,
+    `WHERE ${CATALOG_V1_ACTIVE}`,
+    `  AND NOT EXISTS (SELECT 1 FROM ${row.table} WHERE ${identityPredicate});`,
+  ].join('\n');
+}
+
+function exactColumnPredicate(column, value) {
+  return value === null || value === undefined
+    ? `${column} IS NULL`
+    : `${column}=${sqlValue(value)}`;
+}
+
+function postconditionGuard(row) {
+  const exact = row.columns.map((column, index) =>
+    exactColumnPredicate(column, row.values[index])
+  ).join(' AND ');
+  return [
+    'INSERT INTO journal_catalog_state(id,catalog_version,catalog_hash,updated_at)',
+    `SELECT 0,0,'catalog-v1-postcondition-failed',${sqlValue(FIXED_TIMESTAMP)}`,
+    `WHERE ${CATALOG_V1_ACTIVE}`,
+    `  AND NOT EXISTS (SELECT 1 FROM ${row.table} WHERE ${exact});`,
+  ].join('\n');
 }
 
 function humanize(code) {
@@ -132,35 +142,63 @@ function repairedDevices(operation) {
   return devices;
 }
 
-function bindingFor(categoryCode, sourceUnit) {
-  if (sourceUnit === 'm3/ha') {
-    return categoryCode === 'irrigation'
-      ? ['attr.irrigation_volume_area', 'unit.m3_per_ha_water']
-      : ['attr.amount_volume_area_product', 'unit.m3_per_ha_product'];
+function categoryActivityMap(coreDef) {
+  const result = new Map();
+  for (const activity of coreDef.activities) {
+    for (const categoryCode of activity.agroscope_categories || []) {
+      assert(!result.has(categoryCode), `duplicate Agroscope category binding ${categoryCode}`);
+      result.set(categoryCode, activity.code);
+    }
   }
-  const binding = UNIT_BINDINGS[sourceUnit];
-  if (!binding) fail(`no semantic binding for Agroscope unit ${sourceUnit}`);
-  return binding;
+  return result;
 }
 
-function validateCore() {
-  assert(Object.keys(core).join(',') === 'activities,attributes,units,choices,templates,layouts,products',
-    'core export must contain exactly the seven catalog collections in contract order');
-  assert(core.activities.length === 16, 'core must define exactly 16 activities');
-  assert(core.templates.length === 3, 'core must define exactly three templates');
-  assert(core.layouts.length === 3, 'core must define exactly three generic layouts');
+function bindingFor(coreDef, categoryCode, sourceUnit) {
+  const matches = [];
+  for (const unit of coreDef.units) {
+    for (const binding of unit.source_bindings || []) {
+      if (binding.label !== sourceUnit || !binding.categories.includes(categoryCode)) continue;
+      matches.push([binding.target_attribute_code, unit.code]);
+    }
+  }
+  assert(
+    matches.length === 1,
+    `expected exactly one semantic binding for Agroscope ${categoryCode}/${sourceUnit}, found ${matches.length}`
+  );
+  return matches[0];
+}
 
-  const unitByCode = new Map(core.units.map((row) => [row.code, row]));
-  const attributeByCode = new Map(core.attributes.map((row) => [row.code, row]));
+function validateCore(coreDef) {
+  assert(Object.keys(coreDef).join(',') === 'activities,attributes,units,choices,templates,layouts,products',
+    'core export must contain exactly the seven catalog collections in contract order');
+  assert(coreDef.activities.length === 16, 'core must define exactly 16 activities');
+  assert(coreDef.templates.length === 3, 'core must define exactly three templates');
+  assert(coreDef.layouts.length === 3, 'core must define exactly three generic layouts');
+
+  const unitByCode = new Map(coreDef.units.map((row) => [row.code, row]));
+  const attributeByCode = new Map(coreDef.attributes.map((row) => [row.code, row]));
   const allCodes = new Set();
-  for (const row of [...core.activities, ...core.attributes, ...core.units, ...core.choices]) {
+  for (const row of [
+    ...coreDef.activities,
+    ...coreDef.attributes,
+    ...coreDef.units,
+    ...coreDef.choices,
+  ]) {
     assert(!allCodes.has(row.code), `duplicate core vocab code ${row.code}`);
     allCodes.add(row.code);
   }
-  for (const attribute of core.attributes.filter((row) => row.value_type === 'number')) {
+  for (const attribute of coreDef.attributes.filter((row) => row.value_type === 'number')) {
     assert(attribute.quantity_kind, `${attribute.code} missing quantity_kind`);
     assert(attribute.basis, `${attribute.code} missing basis`);
-    assert(unitByCode.has(attribute.default_unit_code), `${attribute.code} has unknown default unit ${attribute.default_unit_code}`);
+    if (attribute.constraints?.allow_default_unit === false) {
+      assert(attribute.default_unit_code == null,
+        `${attribute.code} forbids a default unit but defines ${attribute.default_unit_code}`);
+      assert(attribute.constraints.requires_explicit_unit === true,
+        `${attribute.code} without a default unit must require an explicit unit`);
+      continue;
+    }
+    assert(unitByCode.has(attribute.default_unit_code),
+      `${attribute.code} has unknown default unit ${attribute.default_unit_code}`);
     const defaultUnit = unitByCode.get(attribute.default_unit_code);
     assert(defaultUnit.quantity_kind === attribute.quantity_kind,
       `${attribute.code} quantity_kind does not match ${attribute.default_unit_code}`);
@@ -171,7 +209,7 @@ function validateCore() {
     `${attribute.code} default_unit_code must name the canonical storage unit`);
   }
   const canonicalByFamily = new Map();
-  for (const unit of core.units) {
+  for (const unit of coreDef.units) {
     assert(unit.quantity_kind && unit.basis && unit.dimension, `${unit.code} has incomplete dimensional semantics`);
     assert(unit.to_canonical && Number.isFinite(unit.to_canonical.scale) && Number.isFinite(unit.to_canonical.offset),
       `${unit.code} has invalid to_canonical conversion`);
@@ -185,66 +223,69 @@ function validateCore() {
     if (!canonicalByFamily.has(family)) canonicalByFamily.set(family, canonical.code);
     assert(canonicalByFamily.get(family) === canonical.code,
       `${unit.code} disagrees on the canonical target for its unit family`);
+    for (const binding of unit.source_bindings || []) {
+      assert(typeof binding.label === 'string' && binding.label,
+        `${unit.code} has an invalid source binding label`);
+      assert(attributeByCode.has(binding.target_attribute_code),
+        `${unit.code} source binding targets unknown ${binding.target_attribute_code}`);
+      assert(Array.isArray(binding.categories) && binding.categories.length > 0,
+        `${unit.code} source binding ${binding.label} has no source categories`);
+      const target = attributeByCode.get(binding.target_attribute_code);
+      assert(target.quantity_kind === unit.quantity_kind && target.basis === unit.basis,
+        `${unit.code} source binding ${binding.label} targets an incompatible attribute`);
+    }
   }
-  for (const choice of core.choices) {
+  for (const choice of coreDef.choices) {
     assert(attributeByCode.has(choice.parent_code), `${choice.code} has unknown parent ${choice.parent_code}`);
+  }
+  for (const activity of coreDef.activities) {
+    for (const mapping of activity.mappings || []) {
+      assert(mapping.scheme_uri && mapping.scheme_version && mapping.mapping_role,
+        `${activity.code} has an incomplete standard mapping`);
+      assert(mapping.external_id && mapping.mapping_relation && mapping.source_uri,
+        `${activity.code} has an incomplete standard mapping target`);
+    }
   }
 }
 
-function validateSource(source) {
+function validateSource(coreDef, source) {
   assert(source.categories.length === 7, 'Agroscope source must contain seven categories');
   const operations = source.categories.flatMap((category) => category.operations);
   const sourceSlots = operations.reduce((count, operation) => count + operation.devices.length, 0);
   assert(operations.length === 25, 'Agroscope source must contain 25 operations');
   assert(source.counts.device_slots === 128 && sourceSlots === 128,
     'Agroscope source must retain all 128 extracted device slots');
-  assert(Object.keys(CATEGORY_ACTIVITY).length === 7, 'category mapping must contain exactly seven categories');
+  const categoryActivities = categoryActivityMap(coreDef);
+  assert(categoryActivities.size === 7, 'core category mapping must contain exactly seven categories');
   for (const category of source.categories) {
-    assert(CATEGORY_ACTIVITY[category.code], `unmapped Agroscope category ${category.code}`);
+    assert(categoryActivities.has(category.code), `unmapped Agroscope category ${category.code}`);
   }
   const sourceProducts = new Set(source.product_suggestions);
-  for (const product of core.products) {
+  for (const product of coreDef.products) {
     assert(sourceProducts.has(product.name), `core product is not source-supported: ${product.name}`);
     assert(Object.keys(product.composition).length === 0,
       `source has no defensible composition for ${product.name}; composition must stay empty`);
   }
-}
-
-function findSourceDevice(source, operationCode, deviceCode) {
+  const declaredUnits = new Set(source.all_units);
   for (const category of source.categories) {
-    const operation = category.operations.find((candidate) => candidate.code === operationCode);
-    if (!operation) continue;
-    const device = operation.devices.find((candidate) => candidate.code === deviceCode);
-    if (device) return { category, operation, device };
+    const categoryUnits = new Set(category.operations.flatMap((operation) =>
+      operation.devices.flatMap((device) => device.units)
+    ));
+    for (const sourceUnit of categoryUnits) {
+      assert(declaredUnits.has(sourceUnit),
+        `Agroscope category ${category.code} uses undeclared unit ${sourceUnit}`);
+      bindingFor(coreDef, category.code, sourceUnit);
+    }
   }
-  return null;
-}
-
-function validateRepresentativeBindings(source) {
-  const checks = [
-    ['primary_tillage', 'plough', 'cm', 'attr.amount_operation_depth', 'unit.cm_operation_depth'],
-    ['sowing_main_crop', 'direct_drill', 'kg/ha', 'attr.amount_mass_area_product', 'unit.kg_per_ha_product'],
-    ['sowing_main_crop', 'direct_drill', 'plants/ha', 'attr.amount_count_area', 'unit.plants_per_ha'],
-    ['organic_fertilization', 'liquid_organic_broadcast', 'm3/ha', 'attr.amount_volume_area_product', 'unit.m3_per_ha_product'],
-    ['organic_fertilization', 'liquid_organic_broadcast', 't/ha', 'attr.amount_mass_area_product', 'unit.t_per_ha_product'],
-    ['mineral_fertilization', 'solid_broadcast', 'kg N/ha', 'attr.amount_nutrient_rate', 'unit.kg_n_per_ha_nutrient'],
-    ['mineral_fertilization', 'solid_broadcast', 'kg P2O5/ha', 'attr.amount_nutrient_rate', 'unit.kg_p2o5_per_ha_nutrient'],
-    ['other_fertilization', 'biofertilizer', 'l/ha', 'attr.amount_volume_area_product', 'unit.l_per_ha_product'],
-    ['other_fertilization', 'biofertilizer', 'g/ha', 'attr.amount_mass_area_product', 'unit.g_per_ha_product'],
-    ['watering', 'sprinkler_irrigation', 'm3/ha', 'attr.irrigation_volume_area', 'unit.m3_per_ha_water'],
-  ];
-  for (const [operationCode, deviceCode, sourceUnit, expectedAttribute, expectedUnit] of checks) {
-    const found = findSourceDevice(source, operationCode, deviceCode);
-    assert(found, `representative source device missing: ${operationCode}/${deviceCode}`);
-    assert(found.device.units.includes(sourceUnit),
-      `representative source unit missing: ${operationCode}/${deviceCode}/${sourceUnit}`);
-    const [attributeCode, unitCode] = bindingFor(found.category.code, sourceUnit);
-    assert(attributeCode === expectedAttribute && unitCode === expectedUnit,
-      `representative binding drift: ${operationCode}/${deviceCode}/${sourceUnit}`);
+  for (const sourceUnit of declaredUnits) {
+    assert(source.categories.some((category) => category.operations.some((operation) =>
+      operation.devices.some((device) => device.units.includes(sourceUnit))
+    )), `source unit ${sourceUnit} is declared but unused`);
   }
 }
 
-function buildAgroscope(source) {
+function buildAgroscope(coreDef, source) {
+  const categoryActivities = categoryActivityMap(coreDef);
   const choices = [];
   const dependencies = [];
   const deviceMetadata = new Map();
@@ -275,8 +316,8 @@ function buildAgroscope(source) {
         deviceChoices.push(deviceCode);
         if (!deviceMetadata.has(device.code)) {
           deviceMetadata.set(device.code, {
-            sourceCategory: category.code,
             units: device.units,
+            sourceCategories: new Set(),
             descriptions: new Set(),
             sources: new Set(),
           });
@@ -284,6 +325,7 @@ function buildAgroscope(source) {
         const metadata = deviceMetadata.get(device.code);
         assert(stableStringify(metadata.units) === stableStringify(device.units),
           `device ${device.code} has inconsistent source unit sets`);
+        metadata.sourceCategories.add(category.code);
         if (device.description) metadata.descriptions.add(device.description);
         if (device.source) metadata.sources.add(device.source);
       }
@@ -294,7 +336,7 @@ function buildAgroscope(source) {
     }
     dependencies.push({
       source_category: category.code,
-      when: { attribute_code: 'activity_code', equals: CATEGORY_ACTIVITY[category.code] },
+      when: { attribute_code: 'activity_code', equals: categoryActivities.get(category.code) },
       restrict: { attribute_code: 'attr.agroscope.operation', choices: operationChoices },
     });
   }
@@ -318,7 +360,12 @@ function buildAgroscope(source) {
     });
     const byAttribute = new Map();
     for (const sourceUnit of metadata.units) {
-      const [attributeCode, unitCode] = bindingFor(metadata.sourceCategory, sourceUnit);
+      const bindings = [...metadata.sourceCategories].map((categoryCode) =>
+        bindingFor(coreDef, categoryCode, sourceUnit)
+      );
+      const [attributeCode, unitCode] = bindings[0];
+      assert(bindings.every((binding) => stableStringify(binding) === stableStringify(bindings[0])),
+        `device ${device}/${sourceUnit} has category-dependent semantics that cannot be device-scoped`);
       if (!byAttribute.has(attributeCode)) byAttribute.set(attributeCode, []);
       const allowed = byAttribute.get(attributeCode);
       if (!allowed.includes(unitCode)) allowed.push(unitCode);
@@ -356,7 +403,7 @@ function buildAgroscope(source) {
           license: 'CC BY',
           attribution: 'Wittwer, Heller, Turek — Agroscope',
         },
-        activity_codes: source.categories.map((category) => CATEGORY_ACTIVITY[category.code]),
+        activity_codes: source.categories.map((category) => categoryActivities.get(category.code)),
         supported_templates: ['research_observation'],
         fields: [
           'attr.crop',
@@ -371,6 +418,7 @@ function buildAgroscope(source) {
           'attr.amount_duration_area',
           'attr.irrigation_volume_area',
           'attr.machine',
+          'attr.product_uuid',
           'attr.product',
           'attr.agroscope.combination_group',
           'attr.agroscope.dmc_mass_fraction',
@@ -423,22 +471,21 @@ function vocabRow(row) {
   };
 }
 
-function buildRows(source) {
-  validateCore();
-  validateSource(source);
-  validateRepresentativeBindings(source);
-  const agroscope = buildAgroscope(source);
+function buildRows(coreDef, source) {
+  validateCore(coreDef);
+  validateSource(coreDef, source);
+  const agroscope = buildAgroscope(coreDef, source);
   const rows = [];
 
-  for (const activity of core.activities) {
+  for (const activity of coreDef.activities) {
     rows.push(vocabRow({ ...activity, kind: 'activity' }));
   }
   let attributeSort = 100;
-  for (const attribute of core.attributes) {
+  for (const attribute of coreDef.attributes) {
     rows.push(vocabRow({ ...attribute, kind: 'attribute', sort_order: attributeSort++ }));
   }
   let unitSort = 500;
-  for (const sourceUnit of core.units) {
+  for (const sourceUnit of coreDef.units) {
     const constraints = {
       dimension: sourceUnit.dimension,
       to_canonical: sourceUnit.to_canonical,
@@ -451,7 +498,7 @@ function buildRows(source) {
       sort_order: unitSort++,
     }));
   }
-  for (const coreChoice of core.choices) {
+  for (const coreChoice of coreDef.choices) {
     rows.push(vocabRow({
       ...coreChoice,
       kind: 'choice',
@@ -466,7 +513,33 @@ function buildRows(source) {
     }));
   }
 
-  for (const template of core.templates) {
+  for (const activity of coreDef.activities) {
+    for (const mapping of activity.mappings || []) {
+      const columns = [
+        'term_code', 'scheme_uri', 'scheme_version', 'mapping_role', 'external_id',
+        'external_parent_id', 'mapping_relation', 'source_uri', 'active',
+      ];
+      rows.push({
+        table: 'journal_vocab_mappings',
+        key: [activity.code, mapping.scheme_uri, mapping.mapping_role, mapping.external_id]
+          .join(':'),
+        columns,
+        values: [
+          activity.code,
+          mapping.scheme_uri,
+          mapping.scheme_version,
+          mapping.mapping_role,
+          mapping.external_id,
+          mapping.external_parent_id || null,
+          mapping.mapping_relation,
+          mapping.source_uri,
+          mapping.active,
+        ],
+      });
+    }
+  }
+
+  for (const template of coreDef.templates) {
     rows.push({
       table: 'journal_templates',
       key: `${template.code}:${template.version}`,
@@ -474,7 +547,7 @@ function buildRows(source) {
       values: [template.code, template.version, JSON.stringify({ en: template.label }), JSON.stringify(template.definition), 1],
     });
   }
-  for (const layout of [...core.layouts, agroscope.layout]) {
+  for (const layout of [...coreDef.layouts, agroscope.layout]) {
     rows.push({
       table: 'journal_layouts',
       key: `${layout.code}:${layout.version}`,
@@ -482,7 +555,7 @@ function buildRows(source) {
       values: [layout.code, layout.version, JSON.stringify({ en: layout.label }), JSON.stringify(layout.definition), 1],
     });
   }
-  for (const product of core.products) {
+  for (const product of coreDef.products) {
     rows.push({
       table: 'journal_products',
       key: product.code,
@@ -512,7 +585,7 @@ function buildRows(source) {
     );
     assert(categories.length > 0, `source unit ${sourceUnit} is declared but unused`);
     for (const category of categories) {
-      const [attributeCode, unitCode] = bindingFor(category.code, sourceUnit);
+      const [attributeCode, unitCode] = bindingFor(coreDef, category.code, sourceUnit);
       assert(vocabCodes.has(attributeCode), `missing generated amount attribute ${attributeCode}`);
       assert(vocabCodes.has(unitCode), `missing generated unit ${unitCode}`);
     }
@@ -520,8 +593,8 @@ function buildRows(source) {
   return rows;
 }
 
-function buildOutput(source) {
-  const rows = buildRows(source);
+function compileCatalog(coreDef, source) {
+  const rows = buildRows(coreDef, source);
   const hashInput = rows.map((row) => ({
     table: row.table,
     key: row.key,
@@ -530,16 +603,29 @@ function buildOutput(source) {
   }));
   const catalogHash = sha256(stableStringify(hashInput));
   const sections = [];
-  for (const table of ['journal_vocab', 'journal_templates', 'journal_layouts', 'journal_products']) {
+  for (const table of [
+    'journal_vocab',
+    'journal_vocab_mappings',
+    'journal_templates',
+    'journal_layouts',
+    'journal_products',
+  ]) {
     sections.push(`-- ${table}`);
     for (const row of rows.filter((candidate) => candidate.table === table)) {
-      sections.push(insertOrIgnore(row.table, row.columns, row.values));
+      sections.push(insertIfCatalogNotNewer(row));
     }
     sections.push('');
   }
+  sections.push('-- Immutable v1 postconditions. Each mismatch deliberately attempts id=0,');
+  sections.push('-- tripping journal_catalog_state CHECK(id=1) before state can be stamped.');
+  for (const row of rows) sections.push(postconditionGuard(row));
+  sections.push('');
   sections.push('-- journal_catalog_state');
   sections.push(
-    `INSERT OR REPLACE INTO journal_catalog_state(id,catalog_version,catalog_hash,updated_at) VALUES (1,${CATALOG_VERSION},${sqlValue(catalogHash)},${sqlValue(FIXED_TIMESTAMP)});`
+    `INSERT OR IGNORE INTO journal_catalog_state(id,catalog_version,catalog_hash,updated_at) VALUES (1,${CATALOG_VERSION},${sqlValue(catalogHash)},${sqlValue(FIXED_TIMESTAMP)});`
+  );
+  sections.push(
+    `UPDATE journal_catalog_state SET catalog_version=${CATALOG_VERSION},catalog_hash=${sqlValue(catalogHash)},updated_at=${sqlValue(FIXED_TIMESTAMP)} WHERE id=1 AND catalog_version <= ${CATALOG_VERSION};`
   );
   const rowSql = sections.join('\n').trimEnd() + '\n';
   const migration = [
@@ -552,16 +638,23 @@ function buildOutput(source) {
     '',
   ].join('\n');
   const seedBlock = `${SEED_BEGIN}\n${rowSql}${SEED_END}\n`;
-  return { catalogHash, migration, seedBlock };
+  return { rows, catalogHash, migration, seedBlock };
 }
 
 function replaceSeedBlock(seed, seedBlock) {
-  const start = seed.indexOf(SEED_BEGIN);
-  const end = seed.indexOf(SEED_END);
-  if (start === -1 && end === -1) {
+  const beginCount = seed.split(SEED_BEGIN).length - 1;
+  const endCount = seed.split(SEED_END).length - 1;
+  if (beginCount === 0 && endCount === 0) {
     return seed.trimEnd() + '\n\n' + seedBlock;
   }
-  if (start === -1 || end === -1 || end < start) {
+  if (beginCount !== 1 || endCount !== 1) {
+    fail(beginCount > 1 || endCount > 1
+      ? 'seed contains more than one generated journal catalog marker block'
+      : 'seed contains an incomplete generated journal catalog marker block');
+  }
+  const start = seed.indexOf(SEED_BEGIN);
+  const end = seed.indexOf(SEED_END);
+  if (end < start) {
     fail('seed contains an incomplete generated journal catalog marker block');
   }
   const after = end + SEED_END.length;
@@ -580,34 +673,88 @@ function checkEqual(actual, expected, label) {
   }
 }
 
+function artifactPaths(overrides = {}) {
+  return {
+    migrationPath: overrides.migrationPath || MIGRATION_PATH,
+    seedPath: overrides.seedPath || SEED_PATH,
+    manifestPath: overrides.manifestPath || MANIFEST_PATH,
+  };
+}
+
+function expectedArtifacts(compiled, overrides = {}) {
+  const paths = artifactPaths(overrides);
+  const currentSeed = fs.readFileSync(paths.seedPath, 'utf8');
+  const expectedSeed = replaceSeedBlock(currentSeed, compiled.seedBlock);
+  const manifest = JSON.parse(fs.readFileSync(paths.manifestPath, 'utf8'));
+  return {
+    paths,
+    expectedSeed,
+    expectedManifest: expectedManifestText(manifest, compiled.migration),
+  };
+}
+
+function checkGeneratedArtifacts(compiled, overrides = {}) {
+  const { paths, expectedSeed, expectedManifest } = expectedArtifacts(compiled, overrides);
+  checkEqual(
+    fs.existsSync(paths.migrationPath) ? fs.readFileSync(paths.migrationPath, 'utf8') : '',
+    compiled.migration,
+    path.basename(paths.migrationPath)
+  );
+  checkEqual(fs.readFileSync(paths.seedPath, 'utf8'), expectedSeed,
+    path.basename(paths.seedPath) + ' generated catalog block');
+  checkEqual(fs.readFileSync(paths.manifestPath, 'utf8'), expectedManifest,
+    path.basename(paths.manifestPath) + ' journal catalog checksum');
+}
+
+function writeGeneratedArtifacts(compiled, overrides = {}) {
+  const { paths, expectedSeed, expectedManifest } = expectedArtifacts(compiled, overrides);
+  if (fs.existsSync(paths.migrationPath)) {
+    const installed = fs.readFileSync(paths.migrationPath, 'utf8');
+    if (installed !== compiled.migration) {
+      fail(`${path.basename(paths.migrationPath)} exists and differs; refuse to rewrite an immutable migration — create a new migration`);
+    }
+  } else {
+    fs.writeFileSync(paths.migrationPath, compiled.migration);
+  }
+  if (fs.readFileSync(paths.seedPath, 'utf8') !== expectedSeed) {
+    fs.writeFileSync(paths.seedPath, expectedSeed);
+  }
+  if (fs.readFileSync(paths.manifestPath, 'utf8') !== expectedManifest) {
+    fs.writeFileSync(paths.manifestPath, expectedManifest);
+  }
+}
+
 function main(argv) {
   const check = argv.length === 1 && argv[0] === '--check';
   if (argv.length && !check) fail(`unsupported argument(s): ${argv.join(' ')}`);
 
   const source = JSON.parse(fs.readFileSync(SOURCE_PATH, 'utf8'));
-  const { catalogHash, migration, seedBlock } = buildOutput(source);
-  const currentSeed = fs.readFileSync(SEED_PATH, 'utf8');
-  const expectedSeed = replaceSeedBlock(currentSeed, seedBlock);
-  const manifest = JSON.parse(fs.readFileSync(MANIFEST_PATH, 'utf8'));
-  const manifestText = expectedManifestText(manifest, migration);
+  const compiled = compileCatalog(core, source);
 
   if (check) {
-    checkEqual(fs.existsSync(MIGRATION_PATH) ? fs.readFileSync(MIGRATION_PATH, 'utf8') : '', migration, MIGRATION_NAME);
-    checkEqual(currentSeed, expectedSeed, 'database/seed-blank.sql generated catalog block');
-    checkEqual(fs.readFileSync(MANIFEST_PATH, 'utf8'), manifestText, 'CHECKSUMS.json journal catalog checksum');
-    console.log(`generate-journal-catalog: OK (${catalogHash})`);
+    checkGeneratedArtifacts(compiled);
+    console.log(`generate-journal-catalog: OK (${compiled.catalogHash})`);
     return;
   }
 
-  fs.writeFileSync(MIGRATION_PATH, migration);
-  fs.writeFileSync(SEED_PATH, expectedSeed);
-  fs.writeFileSync(MANIFEST_PATH, manifestText);
-  console.log(`generate-journal-catalog: wrote ${MIGRATION_NAME}, seed block, and checksum (${catalogHash})`);
+  writeGeneratedArtifacts(compiled);
+  console.log(`generate-journal-catalog: artifacts current (${compiled.catalogHash})`);
 }
 
-try {
-  main(process.argv.slice(2));
-} catch (error) {
-  console.error(`generate-journal-catalog: FAIL: ${error.message}`);
-  process.exit(1);
+module.exports = {
+  compileCatalog,
+  validateCore,
+  validateSource,
+  replaceSeedBlock,
+  expectedManifestText,
+  writeGeneratedArtifacts,
+};
+
+if (require.main === module) {
+  try {
+    main(process.argv.slice(2));
+  } catch (error) {
+    console.error(`generate-journal-catalog: FAIL: ${error.message}`);
+    process.exitCode = 1;
+  }
 }
