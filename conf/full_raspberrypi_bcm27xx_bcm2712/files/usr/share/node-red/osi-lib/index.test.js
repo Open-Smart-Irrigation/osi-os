@@ -24,6 +24,7 @@ test('NAME_TO_PATH is exported and lists all launch entries', () => {
   assert.deepEqual(Object.keys(osiLib.NAME_TO_PATH).sort(), [
     'agroscope-uplink-transform',
     'dendro-analytics',
+    'history-router',
     'history-sync',
     'zone-env',
   ]);
@@ -31,6 +32,7 @@ test('NAME_TO_PATH is exported and lists all launch entries', () => {
   assert.equal(osiLib.NAME_TO_PATH['dendro-analytics'], 'osi-dendro-analytics');
   assert.equal(osiLib.NAME_TO_PATH['zone-env'], 'osi-zone-env');
   assert.equal(osiLib.NAME_TO_PATH['agroscope-uplink-transform'], 'codecs/agroscope_uplink_transform');
+  assert.equal(osiLib.NAME_TO_PATH['history-router'], 'osi-history-router');
 });
 
 test('unknown name returns a typed failure, never throws', () => {
