@@ -429,13 +429,24 @@ test('disk df fallback source does not use synchronous child process collection'
 
 const { rtcHealth } = requireHealthHelperFresh();
 
-test('rtcHealth reports present when the sysfs rtc node exists', () => {
+test('rtcHealth reports present with clock_source rtc when since_epoch is plausible and hctosys=1', () => {
   const dir = fs.mkdtempSync(require('node:path').join(os.tmpdir(), 'rtc-'));
   const node = require('node:path').join(dir, 'rtc0');
   fs.mkdirSync(node);
-  fs.writeFileSync(require('node:path').join(node, 'since_epoch'), '1700000000\n');
-  const r = rtcHealth({ rtcSysfsPath: node, hwclockRunner: () => 'ok' });
+  fs.writeFileSync(require('node:path').join(node, 'since_epoch'), '1720000000\n');
+  fs.writeFileSync(require('node:path').join(node, 'hctosys'), '1\n');
+  const r = rtcHealth({ rtcSysfsPath: node });
   assert.strictEqual(r.rtc_present, true);
+  assert.strictEqual(r.clock_source, 'rtc');
+});
+
+test('rtcHealth reports absent for an empty rtc0 directory (no since_epoch)', () => {
+  const dir = fs.mkdtempSync(require('node:path').join(os.tmpdir(), 'rtc-empty-'));
+  const node = require('node:path').join(dir, 'rtc0');
+  fs.mkdirSync(node);
+  const r = rtcHealth({ rtcSysfsPath: node });
+  assert.strictEqual(r.rtc_present, false);
+  assert.strictEqual(r.clock_source, null);
 });
 
 test('rtcHealth reports absent when the sysfs rtc node does not exist', () => {
@@ -454,6 +465,52 @@ test('rtcHealth is fail-soft: null path yields rtc_present null, never throws', 
 test('rtcHealth: injected hwclock probe succeeds => present', () => {
   const r = rtcHealth({ rtcSysfsPath: '/nonexistent/rtc0', hwclockRunner: () => 'ok' });
   assert.strictEqual(r.rtc_present, true);
+});
+
+test('rtcHealth returns rtc_present null when since_epoch exists but is unreadable', () => {
+  // Directory exists (RTC device present) but since_epoch cannot be read.
+  // Simulated by pointing to a directory where since_epoch does not exist as a file
+  // but the parent directory does — we create a subdirectory named since_epoch so
+  // readFileSync throws EISDIR (not ENOENT).
+  const dir = fs.mkdtempSync(require('node:path').join(os.tmpdir(), 'rtc-unreadable-'));
+  const node = require('node:path').join(dir, 'rtc0');
+  fs.mkdirSync(node);
+  fs.mkdirSync(require('node:path').join(node, 'since_epoch')); // EISDIR on read
+  const r = rtcHealth({ rtcSysfsPath: node });
+  assert.strictEqual(r.rtc_present, null, 'unreadable since_epoch must not report false');
+  assert.strictEqual(r.clock_source, null);
+});
+
+test('rtcHealth returns rtc_present true, clock_source null for implausible epoch (before 2024)', () => {
+  const dir = fs.mkdtempSync(require('node:path').join(os.tmpdir(), 'rtc-implausible-'));
+  const node = require('node:path').join(dir, 'rtc0');
+  fs.mkdirSync(node);
+  fs.writeFileSync(require('node:path').join(node, 'since_epoch'), '100\n');
+  const r = rtcHealth({ rtcSysfsPath: node });
+  assert.strictEqual(r.rtc_present, true, 'RTC hardware is present (epoch readable)');
+  assert.strictEqual(r.clock_source, null, 'implausible epoch must not claim clock_source rtc');
+});
+
+test('rtcHealth returns rtc_present true, clock_source null for plausible epoch with hctosys=0', () => {
+  const dir = fs.mkdtempSync(require('node:path').join(os.tmpdir(), 'rtc-nohctosys-'));
+  const node = require('node:path').join(dir, 'rtc0');
+  fs.mkdirSync(node);
+  fs.writeFileSync(require('node:path').join(node, 'since_epoch'), '1720000000\n');
+  fs.writeFileSync(require('node:path').join(node, 'hctosys'), '0\n');
+  const r = rtcHealth({ rtcSysfsPath: node });
+  assert.strictEqual(r.rtc_present, true);
+  assert.strictEqual(r.clock_source, null, 'hctosys=0 means system clock was not set from RTC');
+});
+
+test('rtcHealth returns rtc_present true, clock_source rtc for plausible epoch with hctosys=1', () => {
+  const dir = fs.mkdtempSync(require('node:path').join(os.tmpdir(), 'rtc-hctosys1-'));
+  const node = require('node:path').join(dir, 'rtc0');
+  fs.mkdirSync(node);
+  fs.writeFileSync(require('node:path').join(node, 'since_epoch'), '1720000000\n');
+  fs.writeFileSync(require('node:path').join(node, 'hctosys'), '1\n');
+  const r = rtcHealth({ rtcSysfsPath: node });
+  assert.strictEqual(r.rtc_present, true);
+  assert.strictEqual(r.clock_source, 'rtc', 'hctosys=1 confirms system clock came from RTC');
 });
 
 test('gatherEdgeHealth includes rtc_present in its output shape', async () => {
