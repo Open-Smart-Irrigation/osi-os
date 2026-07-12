@@ -24,13 +24,19 @@ test('NAME_TO_PATH is exported and lists all launch entries', () => {
   assert.deepEqual(Object.keys(osiLib.NAME_TO_PATH).sort(), [
     'agroscope-uplink-transform',
     'dendro-analytics',
+    'device-writer',
     'history-router',
     'history-sync',
+    'lsn50-normalize',
+    'uc512-normalize',
     'zone-env',
   ]);
   assert.equal(osiLib.NAME_TO_PATH['history-sync'], 'osi-history-sync-helper');
   assert.equal(osiLib.NAME_TO_PATH['dendro-analytics'], 'osi-dendro-analytics');
   assert.equal(osiLib.NAME_TO_PATH['zone-env'], 'osi-zone-env');
+  assert.equal(osiLib.NAME_TO_PATH['device-writer'], 'osi-device-writer');
+  assert.equal(osiLib.NAME_TO_PATH['uc512-normalize'], 'osi-uc512-normalize');
+  assert.equal(osiLib.NAME_TO_PATH['lsn50-normalize'], 'osi-lsn50-normalize');
   assert.equal(osiLib.NAME_TO_PATH['agroscope-uplink-transform'], 'codecs/agroscope_uplink_transform');
   assert.equal(osiLib.NAME_TO_PATH['history-router'], 'osi-history-router');
 });
