@@ -110,6 +110,13 @@ function hasHistoryHelperLib(node) {
   );
 }
 
+function hasHistoryRouterLib(node) {
+  return Array.isArray(node.libs) && node.libs.some((lib) =>
+    String(lib && lib.var || '').trim() === 'HR' &&
+    String(lib && lib.module || '').trim() === 'osi-history-router'
+  );
+}
+
 function findHistoryRouter(flows) {
   return flows.find((node) =>
     node.type === 'function' &&
@@ -136,88 +143,112 @@ function assertNotContains(failures, source, needle, description) {
   }
 }
 
-function verifyHistoryRouterImplementation(flows, failures) {
+function readHistoryRouterModule(flowPath, failures) {
+  const modulePath = path.join(
+    path.dirname(flowPath),
+    'node-red',
+    'osi-history-router',
+    'index.js'
+  );
+  try {
+    return fs.readFileSync(modulePath, 'utf8');
+  } catch (error) {
+    const state = error && error.code === 'ENOENT' ? 'missing' : 'unreadable';
+    failures.push(`History API Router module ${state}: ${modulePath} (${error.message})`);
+    return '';
+  }
+}
+
+function verifyHistoryRouterImplementation(flows, failures, extractedModuleSource) {
   const router = findHistoryRouter(flows);
   if (!router) {
     failures.push('missing History API Router function node');
     return;
   }
 
-  const source = String(router.func || '');
-  assertContains(failures, source, 'verifyBearer(msg.req && msg.req.headers && msg.req.headers.authorization)', 'bearer auth gate');
-  assertContains(failures, source, "httpError(404, 'Zone not found or access denied')", 'owned-zone 404 branch');
-  assertContains(failures, source, "httpError(404, 'History card not found')", 'missing-card 404 branch');
-  assertContains(failures, source, 'if (!deveuis.length)', 'empty known-card response branch');
-  assertContains(failures, source, "typeof device === 'string'", 'latest-row DevEUI string handling');
-  assertContains(failures, source, 'supportedRangesForCard(config, scopeContext)', 'date-range availability gating');
-  assertContains(failures, source, 'getActiveZoneSeason', 'active season lookup');
-  assertContains(failures, source, 'zone_seasons', 'zone_seasons-backed season range');
-  assertContains(failures, source, "INSERT INTO zone_seasons(zone_id, name, starts_on, ends_on, is_active, is_default", 'runtime default season backfill');
-  assertContains(failures, source, "'Current season'", 'display-safe generated season name');
-  assertContains(failures, source, 'Season range is unavailable for this zone', 'season-unavailable 400 contract');
-  assertContains(failures, source, 'Season range uses zone season boundaries; use custom for explicit from/to', 'season explicit-from/to rejection');
-  assertContains(failures, source, 'shouldUseHistoryRollups(scopeContext, range.label, aggregationRequested)', 'long-range rollup gate');
-  assertContains(failures, source, 'soilRowsHaveWarning(latestRows)', 'merged soil summary warning classifier');
-  assertContains(failures, source, 'sourceDeviceCount: summarySourceDevices.length', 'display-safe source count in card summaries');
-  assertContains(failures, source, 'sourceLabels: displaySourceLabels(summarySourceDevices)', 'display-safe source labels in card summaries');
-  assertContains(failures, source, 'sourceKey: displaySafeSourceKey(role, device)', 'display-safe source keys in card summaries');
-  assertContains(failures, source, 'function sourceDevicesForQuery', 'sourceKey query filtering helper');
-  assertContains(failures, source, "httpError(400, 'Unknown history source')", 'invalid sourceKey 400 contract');
-  assertContains(failures, source, 'const sourceDevices = sourceDevicesForQuery(scopeContext, card, query, allSourceDevices)', 'sourceKey-filtered source devices for card data');
-  assertContains(failures, source, 'environmentRowsHaveWarning(latestRows)', 'merged environment summary warning classifier');
-  assertContains(failures, source, 'osiHistory.buildCalendar', 'helper-owned calendar classification');
-  assertContains(failures, source, 'osiHistory.buildLocalInterpretations', 'helper-owned local interpretations');
-  assertContains(failures, source, 'osiHistory.buildAdvancedDiagnostics', 'helper-owned advanced diagnostic availability');
-  assertContains(failures, source, 'osiHistory.buildZoneExportCsv', 'helper-owned zone CSV export');
-  assertContains(failures, source, 'channels', 'zone CSV export forwards channels query param');
-  assertContains(failures, source, 'site:', 'zone CSV export forwards gateway site id');
-  assertContains(failures, source, 'respondCsv(200, filename, osiHistory.toCsv(result.columns, result.rows))', 'CSV download response');
-  assertContains(failures, source, 'payload.suggestion = error.suggestion', 'structured CSV export suggestions');
-  assertContains(failures, source, 'function latestSeriesPoint', 'soil profile fallback to latest visible series point');
-  assertContains(failures, source, '.find(rowHasSoilProfileValue)', 'soil profile latest row skips rows without SWT values');
-  assertContains(failures, source, 'buildSoilProfiles(latestRows, sourceDevices, series)', 'soil profile builder receives series fallback data');
+  const adapterSource = String(router.func || '');
+  const moduleSource = String(extractedModuleSource || '');
+  const contractSource = adapterSource + '\n' + moduleSource;
+  if (!hasHistoryRouterLib(router)) {
+    failures.push("History API Router must declare libs binding { var: 'HR', module: 'osi-history-router' }");
+  }
+
+  assertContains(failures, adapterSource, 'verifyBearer(msg.req && msg.req.headers && msg.req.headers.authorization)', 'bearer auth gate');
+  assertContains(failures, adapterSource, "httpError(404, 'Zone not found or access denied')", 'owned-zone 404 branch');
+  assertContains(failures, adapterSource, "httpError(404, 'History card not found')", 'missing-card 404 branch');
+  assertContains(failures, adapterSource, 'if (!deveuis.length)', 'empty known-card response branch');
+  assertContains(failures, adapterSource, "typeof device === 'string'", 'latest-row DevEUI string handling');
+  assertContains(failures, adapterSource, 'HR.supportedRangesForCard(config, scopeContext)', 'date-range availability gating');
+  assertContains(failures, adapterSource, 'getActiveZoneSeason', 'active season lookup');
+  assertContains(failures, adapterSource, 'zone_seasons', 'zone_seasons-backed season range');
+  assertContains(failures, adapterSource, "INSERT INTO zone_seasons(zone_id, name, starts_on, ends_on, is_active, is_default", 'runtime default season backfill');
+  assertContains(failures, adapterSource, "'Current season'", 'display-safe generated season name');
+  assertContains(failures, moduleSource, 'Season range is unavailable for this zone', 'season-unavailable 400 contract');
+  assertContains(failures, moduleSource, 'Season range uses zone season boundaries; use custom for explicit from/to', 'season explicit-from/to rejection');
+  assertContains(failures, adapterSource, 'HR.shouldUseHistoryRollups(scopeContext, range.label, aggregationRequested)', 'long-range rollup gate');
+  assertContains(failures, adapterSource, 'soilRowsHaveWarning(latestRows)', 'merged soil summary warning classifier');
+  assertContains(failures, adapterSource, 'sourceDeviceCount: summarySourceDevices.length', 'display-safe source count in card summaries');
+  assertContains(failures, adapterSource, 'sourceLabels: HR.displaySourceLabels(summarySourceDevices)', 'display-safe source labels in card summaries');
+  assertContains(failures, adapterSource, 'sourceKey: displaySafeSourceKey(role, device)', 'display-safe source keys in card summaries');
+  assertContains(failures, adapterSource, 'function sourceDevicesForQuery', 'sourceKey query filtering helper');
+  assertContains(failures, adapterSource, "httpError(400, 'Unknown history source')", 'invalid sourceKey 400 contract');
+  assertContains(failures, adapterSource, 'const sourceDevices = sourceDevicesForQuery(scopeContext, card, query, allSourceDevices)', 'sourceKey-filtered source devices for card data');
+  assertContains(failures, adapterSource, 'environmentRowsHaveWarning(latestRows)', 'merged environment summary warning classifier');
+  assertContains(failures, adapterSource, 'osiHistory.buildCalendar', 'helper-owned calendar classification');
+  assertContains(failures, adapterSource, 'osiHistory.buildLocalInterpretations', 'helper-owned local interpretations');
+  assertContains(failures, adapterSource, 'osiHistory.buildAdvancedDiagnostics', 'helper-owned advanced diagnostic availability');
+  assertContains(failures, adapterSource, 'osiHistory.buildZoneExportCsv', 'helper-owned zone CSV export');
+  assertContains(failures, adapterSource, 'channels', 'zone CSV export forwards channels query param');
+  assertContains(failures, adapterSource, 'site:', 'zone CSV export forwards gateway site id');
+  assertContains(failures, adapterSource, 'respondCsv(200, filename, osiHistory.toCsv(result.columns, result.rows))', 'CSV download response');
+  assertContains(failures, adapterSource, 'payload.suggestion = error.suggestion', 'structured CSV export suggestions');
+  assertContains(failures, adapterSource, '.find(HR.rowHasSoilProfileValue)', 'soil profile latest row skips rows without SWT values');
+  assertContains(failures, adapterSource, 'buildSoilProfiles(latestRows, sourceDevices, series)', 'soil profile builder receives series fallback data');
+  assertContains(failures, moduleSource, 'const CARD_CONFIG = {', 'extracted card configuration');
+  assertContains(failures, moduleSource, 'function rowHasSoilProfileValue', 'soil profile latest row predicate');
+  assertContains(failures, moduleSource, 'function latestSeriesPoint', 'soil profile fallback to latest visible series point');
   assertContains(
     failures,
-    source,
+    moduleSource,
     "{ id: 'ext_temperature_c', field: 'ext_temperature_c', label: 'External Temperature', unit: 'C' }",
     'external temperature environment channel'
   );
   assertContains(
     failures,
-    source,
+    moduleSource,
     "views: ['line-chart', 'daily-min-max', 'calendar', 'advanced']",
     'frontend-supported environment view list'
   );
   assertContains(
     failures,
-    source,
+    moduleSource,
     "views: ['event-timeline', 'calendar', 'advanced']",
     'frontend-supported irrigation view list'
   );
   assertContains(
     failures,
-    source,
+    moduleSource,
     "views: ['status-overview', 'advanced']",
     'frontend-supported gateway view list'
   );
 
-  const seasonBranchIndex = source.indexOf("if (rawLabel === 'season')");
-  const explicitRangeIndex = source.indexOf('if (fromRaw || toRaw)');
+  const seasonBranchIndex = moduleSource.indexOf("if (rawLabel === 'season')");
+  const explicitRangeIndex = moduleSource.indexOf('if (fromRaw || toRaw)');
   if (seasonBranchIndex === -1 || explicitRangeIndex === -1 || seasonBranchIndex > explicitRangeIndex) {
     failures.push('history router must resolve/reject season before accepting explicit from/to ranges');
   }
 
-  assertNotContains(failures, source, "season: 120 * 24 * 60 * 60 * 1000", 'synthetic trailing season range');
-  assertNotContains(failures, source, "useRollups: scopeContext.scope === 'zone'", 'unconditional zone rollup reads');
-  assertNotContains(failures, source, 'supportedRanges: config.supportedRanges.slice()', 'ungated supportedRanges copy');
-  assertNotContains(failures, source, 'latestRows[0]', 'single-row merged summary classification');
-  assertNotContains(failures, source, 'normalizeCardType(', 'undefined normalizeCardType runtime reference in router');
-  assertNotContains(failures, source, 'sync_outbox', 'edge sync outbox mutation from local-only history preferences/workspaces');
-  assertNotContains(failures, source, 'local-storage-sync', 'unsupported gateway local storage view');
-  assertNotContains(failures, source, 'power-state', 'unsupported gateway power state view');
-  assertNotContains(failures, source, "views: ['line-chart', 'daily-min-max', 'calendar', 'stress-events', 'advanced']", 'unsupported environment stress-events view');
-  assertNotContains(failures, source, "views: ['event-timeline', 'calendar', 'irrigation-response', 'advanced']", 'unsupported irrigation response view');
-  assertNotContains(failures, source, "views: ['status-overview', 'connectivity-timeline', 'advanced']", 'unsupported gateway connectivity timeline view');
+  assertNotContains(failures, contractSource, "season: 120 * 24 * 60 * 60 * 1000", 'synthetic trailing season range');
+  assertNotContains(failures, contractSource, "useRollups: scopeContext.scope === 'zone'", 'unconditional zone rollup reads');
+  assertNotContains(failures, contractSource, 'supportedRanges: config.supportedRanges.slice()', 'ungated supportedRanges copy');
+  assertNotContains(failures, contractSource, 'latestRows[0]', 'single-row merged summary classification');
+  assertNotContains(failures, contractSource, 'normalizeCardType(', 'undefined normalizeCardType runtime reference in router');
+  assertNotContains(failures, contractSource, 'sync_outbox', 'edge sync outbox mutation from local-only history preferences/workspaces');
+  assertNotContains(failures, contractSource, 'local-storage-sync', 'unsupported gateway local storage view');
+  assertNotContains(failures, contractSource, 'power-state', 'unsupported gateway power state view');
+  assertNotContains(failures, contractSource, "views: ['line-chart', 'daily-min-max', 'calendar', 'stress-events', 'advanced']", 'unsupported environment stress-events view');
+  assertNotContains(failures, contractSource, "views: ['event-timeline', 'calendar', 'irrigation-response', 'advanced']", 'unsupported irrigation response view');
+  assertNotContains(failures, contractSource, "views: ['status-overview', 'connectivity-timeline', 'advanced']", 'unsupported gateway connectivity timeline view');
 }
 
 function verifyAnalysisRouterImplementation(flows, failures) {
@@ -303,8 +334,12 @@ function verify(options) {
     console.log(`PENDING ${item}`);
   }
 
+  const moduleSource = findHistoryRouter(flows)
+    ? readHistoryRouterModule(options.flowPath, failures)
+    : '';
+
   if (!allowPendingMissing) {
-    verifyHistoryRouterImplementation(flows, failures);
+    verifyHistoryRouterImplementation(flows, failures, moduleSource);
     verifyAnalysisRouterImplementation(flows, failures);
   }
 

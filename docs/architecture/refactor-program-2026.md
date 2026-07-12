@@ -103,7 +103,7 @@ This is the **program map**, not a spec. Each item below is a charter line: goal
 | Item | Repo | Size | Depends on | Mode |
 |---|---|---|---|---|
 | 4.1 LSN50 writer cutover on the DD7 evidence bar, with temporary UCI kill-switch (DD8), demos → production | osi-os | M | 3.3 evidence | runbook + direct |
-| 4.2 Extract History API Router → tested module (the HTTP-shaped seam, after the pattern is proven twice). **Hard gate (adjudicated 2026-07-11):** golden-vector capture must wait for mobile-plan Task 5 + 1.A6 (rollup hardening Tasks 3+4 change coverage values and payload shape) | osi-os | L | 2.2, 2.4, 1.A6 | spec+plan |
+| 4.2 Extract History API Router → tested module (the HTTP-shaped seam, after the pattern is proven twice). **Done (2026-07-12):** `osi-history-router` module (41 exports, 67 tests, 4 golden vectors), flows.json adapter migrated (76,402 -> 60,092 chars, about 21% reduction), contract docs + CI wiring landed on `feat/extract-history-router` | osi-os | L | 2.2, 2.4, 1.A6 | spec+plan |
 | 4.3 **Option B Stage 2**: remove boot-node inline DDL — only after two clean fleet deliveries including Uganda, schema_sig converged fleet-wide for a sustained window | osi-os | M | 1.B1 ×2 proven, 2.1 | spec+plan |
 
 ### Phase 5 — Durability & scale hygiene (ongoing, interleave as capacity allows)

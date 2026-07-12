@@ -1,0 +1,487 @@
+{
+  "statusCode": 200,
+  "payload": {
+    "generatedAt": "2026-07-10T12:00:00.000Z",
+    "cardId": "test-zone-uuid-1:soil:root-zone",
+    "cardType": "soil",
+    "view": "line-chart",
+    "timezone": "Europe/Zurich",
+    "syncState": "local",
+    "range": {
+      "label": "24h",
+      "from": "2026-07-09T12:00:00.000Z",
+      "to": "2026-07-10T12:00:00.000Z",
+      "timezone": "Europe/Zurich"
+    },
+    "aggregation": {
+      "level": "hourly",
+      "bucketSizeSeconds": 3600,
+      "coveragePct": 25,
+      "coverageConfidence": "derived",
+      "pointCount": 18,
+      "source": "device_data",
+      "dominantStatusMethod": "soil-status-priority"
+    },
+    "limits": {
+      "maxPointsPerSeries": 2000,
+      "maxEvents": 200,
+      "maxInterpretations": 20,
+      "truncated": false
+    },
+    "series": [
+      {
+        "id": "swt_1",
+        "label": "SWT 1",
+        "unit": "kPa",
+        "points": [
+          {
+            "t": "2026-07-10T06:00:00.000Z",
+            "bucketStart": "2026-07-10T06:00:00.000Z",
+            "bucketEnd": "2026-07-10T07:00:00.000Z",
+            "value": 43,
+            "min": 43,
+            "max": 43,
+            "mean": 43,
+            "median": 43,
+            "latest": 43,
+            "dominantStatus": "optimal",
+            "dominantStatusMethod": "soil-status-priority",
+            "coveragePct": 100,
+            "coverageConfidence": "derived",
+            "count": 1,
+            "unit": "kPa",
+            "quality": "ok"
+          },
+          {
+            "t": "2026-07-10T07:00:00.000Z",
+            "bucketStart": "2026-07-10T07:00:00.000Z",
+            "bucketEnd": "2026-07-10T08:00:00.000Z",
+            "value": 44,
+            "min": 44,
+            "max": 44,
+            "mean": 44,
+            "median": 44,
+            "latest": 44,
+            "dominantStatus": "optimal",
+            "dominantStatusMethod": "soil-status-priority",
+            "coveragePct": 100,
+            "coverageConfidence": "derived",
+            "count": 1,
+            "unit": "kPa",
+            "quality": "ok"
+          },
+          {
+            "t": "2026-07-10T08:00:00.000Z",
+            "bucketStart": "2026-07-10T08:00:00.000Z",
+            "bucketEnd": "2026-07-10T09:00:00.000Z",
+            "value": 37,
+            "min": 37,
+            "max": 37,
+            "mean": 37,
+            "median": 37,
+            "latest": 37,
+            "dominantStatus": "optimal",
+            "dominantStatusMethod": "soil-status-priority",
+            "coveragePct": 100,
+            "coverageConfidence": "derived",
+            "count": 1,
+            "unit": "kPa",
+            "quality": "ok"
+          },
+          {
+            "t": "2026-07-10T09:00:00.000Z",
+            "bucketStart": "2026-07-10T09:00:00.000Z",
+            "bucketEnd": "2026-07-10T10:00:00.000Z",
+            "value": 38.5,
+            "min": 38.5,
+            "max": 38.5,
+            "mean": 38.5,
+            "median": 38.5,
+            "latest": 38.5,
+            "dominantStatus": "optimal",
+            "dominantStatusMethod": "soil-status-priority",
+            "coveragePct": 100,
+            "coverageConfidence": "derived",
+            "count": 1,
+            "unit": "kPa",
+            "quality": "ok"
+          },
+          {
+            "t": "2026-07-10T10:00:00.000Z",
+            "bucketStart": "2026-07-10T10:00:00.000Z",
+            "bucketEnd": "2026-07-10T11:00:00.000Z",
+            "value": 40,
+            "min": 40,
+            "max": 40,
+            "mean": 40,
+            "median": 40,
+            "latest": 40,
+            "dominantStatus": "optimal",
+            "dominantStatusMethod": "soil-status-priority",
+            "coveragePct": 100,
+            "coverageConfidence": "derived",
+            "count": 1,
+            "unit": "kPa",
+            "quality": "ok"
+          },
+          {
+            "t": "2026-07-10T11:00:00.000Z",
+            "bucketStart": "2026-07-10T11:00:00.000Z",
+            "bucketEnd": "2026-07-10T12:00:00.000Z",
+            "value": 42.5,
+            "min": 42.5,
+            "max": 42.5,
+            "mean": 42.5,
+            "median": 42.5,
+            "latest": 42.5,
+            "dominantStatus": "optimal",
+            "dominantStatusMethod": "soil-status-priority",
+            "coveragePct": 100,
+            "coverageConfidence": "derived",
+            "count": 1,
+            "unit": "kPa",
+            "quality": "ok"
+          }
+        ],
+        "depthCm": 30
+      },
+      {
+        "id": "swt_2",
+        "label": "SWT 2",
+        "unit": "kPa",
+        "points": [
+          {
+            "t": "2026-07-10T06:00:00.000Z",
+            "bucketStart": "2026-07-10T06:00:00.000Z",
+            "bucketEnd": "2026-07-10T07:00:00.000Z",
+            "value": 38.5,
+            "min": 38.5,
+            "max": 38.5,
+            "mean": 38.5,
+            "median": 38.5,
+            "latest": 38.5,
+            "dominantStatus": "optimal",
+            "dominantStatusMethod": "soil-status-priority",
+            "coveragePct": 100,
+            "coverageConfidence": "derived",
+            "count": 1,
+            "unit": "kPa",
+            "quality": "ok"
+          },
+          {
+            "t": "2026-07-10T07:00:00.000Z",
+            "bucketStart": "2026-07-10T07:00:00.000Z",
+            "bucketEnd": "2026-07-10T08:00:00.000Z",
+            "value": 39.5,
+            "min": 39.5,
+            "max": 39.5,
+            "mean": 39.5,
+            "median": 39.5,
+            "latest": 39.5,
+            "dominantStatus": "optimal",
+            "dominantStatusMethod": "soil-status-priority",
+            "coveragePct": 100,
+            "coverageConfidence": "derived",
+            "count": 1,
+            "unit": "kPa",
+            "quality": "ok"
+          },
+          {
+            "t": "2026-07-10T08:00:00.000Z",
+            "bucketStart": "2026-07-10T08:00:00.000Z",
+            "bucketEnd": "2026-07-10T09:00:00.000Z",
+            "value": 34,
+            "min": 34,
+            "max": 34,
+            "mean": 34,
+            "median": 34,
+            "latest": 34,
+            "dominantStatus": "optimal",
+            "dominantStatusMethod": "soil-status-priority",
+            "coveragePct": 100,
+            "coverageConfidence": "derived",
+            "count": 1,
+            "unit": "kPa",
+            "quality": "ok"
+          },
+          {
+            "t": "2026-07-10T09:00:00.000Z",
+            "bucketStart": "2026-07-10T09:00:00.000Z",
+            "bucketEnd": "2026-07-10T10:00:00.000Z",
+            "value": 35,
+            "min": 35,
+            "max": 35,
+            "mean": 35,
+            "median": 35,
+            "latest": 35,
+            "dominantStatus": "optimal",
+            "dominantStatusMethod": "soil-status-priority",
+            "coveragePct": 100,
+            "coverageConfidence": "derived",
+            "count": 1,
+            "unit": "kPa",
+            "quality": "ok"
+          },
+          {
+            "t": "2026-07-10T10:00:00.000Z",
+            "bucketStart": "2026-07-10T10:00:00.000Z",
+            "bucketEnd": "2026-07-10T11:00:00.000Z",
+            "value": 36.5,
+            "min": 36.5,
+            "max": 36.5,
+            "mean": 36.5,
+            "median": 36.5,
+            "latest": 36.5,
+            "dominantStatus": "optimal",
+            "dominantStatusMethod": "soil-status-priority",
+            "coveragePct": 100,
+            "coverageConfidence": "derived",
+            "count": 1,
+            "unit": "kPa",
+            "quality": "ok"
+          },
+          {
+            "t": "2026-07-10T11:00:00.000Z",
+            "bucketStart": "2026-07-10T11:00:00.000Z",
+            "bucketEnd": "2026-07-10T12:00:00.000Z",
+            "value": 38,
+            "min": 38,
+            "max": 38,
+            "mean": 38,
+            "median": 38,
+            "latest": 38,
+            "dominantStatus": "optimal",
+            "dominantStatusMethod": "soil-status-priority",
+            "coveragePct": 100,
+            "coverageConfidence": "derived",
+            "count": 1,
+            "unit": "kPa",
+            "quality": "ok"
+          }
+        ],
+        "depthCm": 60
+      },
+      {
+        "id": "swt_3",
+        "label": "SWT 3",
+        "unit": "kPa",
+        "points": [
+          {
+            "t": "2026-07-10T06:00:00.000Z",
+            "bucketStart": "2026-07-10T06:00:00.000Z",
+            "bucketEnd": "2026-07-10T07:00:00.000Z",
+            "value": 45,
+            "min": 45,
+            "max": 45,
+            "mean": 45,
+            "median": 45,
+            "latest": 45,
+            "dominantStatus": "optimal",
+            "dominantStatusMethod": "soil-status-priority",
+            "coveragePct": 100,
+            "coverageConfidence": "derived",
+            "count": 1,
+            "unit": "kPa",
+            "quality": "ok"
+          },
+          {
+            "t": "2026-07-10T07:00:00.000Z",
+            "bucketStart": "2026-07-10T07:00:00.000Z",
+            "bucketEnd": "2026-07-10T08:00:00.000Z",
+            "value": 46,
+            "min": 46,
+            "max": 46,
+            "mean": 46,
+            "median": 46,
+            "latest": 46,
+            "dominantStatus": "optimal",
+            "dominantStatusMethod": "soil-status-priority",
+            "coveragePct": 100,
+            "coverageConfidence": "derived",
+            "count": 1,
+            "unit": "kPa",
+            "quality": "ok"
+          },
+          {
+            "t": "2026-07-10T08:00:00.000Z",
+            "bucketStart": "2026-07-10T08:00:00.000Z",
+            "bucketEnd": "2026-07-10T09:00:00.000Z",
+            "value": 40,
+            "min": 40,
+            "max": 40,
+            "mean": 40,
+            "median": 40,
+            "latest": 40,
+            "dominantStatus": "optimal",
+            "dominantStatusMethod": "soil-status-priority",
+            "coveragePct": 100,
+            "coverageConfidence": "derived",
+            "count": 1,
+            "unit": "kPa",
+            "quality": "ok"
+          },
+          {
+            "t": "2026-07-10T09:00:00.000Z",
+            "bucketStart": "2026-07-10T09:00:00.000Z",
+            "bucketEnd": "2026-07-10T10:00:00.000Z",
+            "value": 41,
+            "min": 41,
+            "max": 41,
+            "mean": 41,
+            "median": 41,
+            "latest": 41,
+            "dominantStatus": "optimal",
+            "dominantStatusMethod": "soil-status-priority",
+            "coveragePct": 100,
+            "coverageConfidence": "derived",
+            "count": 1,
+            "unit": "kPa",
+            "quality": "ok"
+          },
+          {
+            "t": "2026-07-10T10:00:00.000Z",
+            "bucketStart": "2026-07-10T10:00:00.000Z",
+            "bucketEnd": "2026-07-10T11:00:00.000Z",
+            "value": 43,
+            "min": 43,
+            "max": 43,
+            "mean": 43,
+            "median": 43,
+            "latest": 43,
+            "dominantStatus": "optimal",
+            "dominantStatusMethod": "soil-status-priority",
+            "coveragePct": 100,
+            "coverageConfidence": "derived",
+            "count": 1,
+            "unit": "kPa",
+            "quality": "ok"
+          },
+          {
+            "t": "2026-07-10T11:00:00.000Z",
+            "bucketStart": "2026-07-10T11:00:00.000Z",
+            "bucketEnd": "2026-07-10T12:00:00.000Z",
+            "value": 45,
+            "min": 45,
+            "max": 45,
+            "mean": 45,
+            "median": 45,
+            "latest": 45,
+            "dominantStatus": "optimal",
+            "dominantStatusMethod": "soil-status-priority",
+            "coveragePct": 100,
+            "coverageConfidence": "derived",
+            "count": 1,
+            "unit": "kPa",
+            "quality": "ok"
+          }
+        ],
+        "depthCm": 90
+      }
+    ],
+    "profiles": [
+      {
+        "id": "swt_1",
+        "label": "Soil 1",
+        "depthCm": 30,
+        "value": 42.5,
+        "unit": "kPa",
+        "status": "optimal"
+      },
+      {
+        "id": "swt_2",
+        "label": "Soil 2",
+        "depthCm": 60,
+        "value": 38,
+        "unit": "kPa",
+        "status": "optimal"
+      },
+      {
+        "id": "swt_3",
+        "label": "Soil 3",
+        "depthCm": 90,
+        "value": 45,
+        "unit": "kPa",
+        "status": "optimal"
+      }
+    ],
+    "events": [],
+    "calendar": {
+      "timezone": "Europe/Zurich",
+      "days": [
+        {
+          "date": "2026-07-09",
+          "state": "no_data",
+          "coveragePct": null,
+          "coverageConfidence": "unknown",
+          "summary": {
+            "key": "history.calendar.summary.soil.no_data",
+            "params": {
+              "sampleCount": 0,
+              "eventCount": 0
+            }
+          },
+          "metrics": {
+            "sampleCount": 0,
+            "eventCount": 0
+          },
+          "markers": []
+        },
+        {
+          "date": "2026-07-10",
+          "state": "optimal",
+          "coveragePct": 25,
+          "coverageConfidence": "derived",
+          "summary": {
+            "key": "history.calendar.summary.soil.optimal",
+            "params": {
+              "sampleCount": 6,
+              "eventCount": 0
+            }
+          },
+          "metrics": {
+            "sampleCount": 6,
+            "eventCount": 0
+          },
+          "markers": [
+            {
+              "type": "state",
+              "severity": "info",
+              "labelKey": "history.calendar.marker.soil.optimal",
+              "params": {
+                "sampleCount": 6,
+                "eventCount": 0
+              }
+            }
+          ]
+        }
+      ]
+    },
+    "interpretations": [
+      {
+        "id": "data-coverage-gap",
+        "confidence": null,
+        "ruleId": "data-coverage-gap",
+        "severity": "warning",
+        "titleKey": "history.interpretation.dataCoverageGap.title",
+        "bodyKey": "history.interpretation.dataCoverageGap.body",
+        "params": {
+          "coveragePct": 25,
+          "coverageConfidence": "derived"
+        },
+        "evidence": [
+          {
+            "type": "coverage",
+            "coveragePct": 25,
+            "coverageConfidence": "derived"
+          }
+        ],
+        "source": "local-rule"
+      }
+    ],
+    "freshness": {
+      "dataAsOf": "2026-07-10T11:00:00.000Z",
+      "syncState": "local"
+    },
+    "advancedFields": {}
+  }
+}

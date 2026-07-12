@@ -17,6 +17,7 @@
     "osi-history-sync-helper": "file:osi-history-sync-helper",
     "osi-lib": "file:osi-lib",
     "osi-dendro-analytics": "file:osi-dendro-analytics",
-    "osi-zone-env": "file:osi-zone-env"
+    "osi-zone-env": "file:osi-zone-env",
+    "osi-history-router": "file:osi-history-router"
   }
 }
