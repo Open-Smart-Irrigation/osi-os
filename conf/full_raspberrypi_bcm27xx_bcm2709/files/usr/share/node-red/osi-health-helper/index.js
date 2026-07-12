@@ -26,7 +26,9 @@ function allNullHealth() {
     disk_free_pct: null,
     crash_count: null,
     crash_looping: null,
-    health_state: null
+    health_state: null,
+    rtc_present: null,
+    clock_source: null
   };
 }
 
@@ -238,6 +240,22 @@ async function diskFreePct(diskPath, timeoutMs) {
   return await dfDiskFreePct(diskPath, timeoutMs);
 }
 
+function rtcHealth({ rtcSysfsPath = '/sys/class/rtc/rtc0', hwclockRunner } = {}) {
+  try {
+    if (rtcSysfsPath && fs.existsSync(rtcSysfsPath)) {
+      return { rtc_present: true, clock_source: 'rtc' };
+    }
+    if (typeof hwclockRunner === 'function') {
+      try { hwclockRunner(); return { rtc_present: true, clock_source: 'rtc' }; }
+      catch (_) { return { rtc_present: false, clock_source: null }; }
+    }
+    if (rtcSysfsPath) return { rtc_present: false, clock_source: null };
+    return { rtc_present: null, clock_source: null };
+  } catch (_) {
+    return { rtc_present: null, clock_source: null };
+  }
+}
+
 async function gatherWork(db, diskPath, timeoutMs, options) {
   const health = allNullHealth();
 
@@ -295,6 +313,12 @@ async function gatherWork(db, diskPath, timeoutMs, options) {
   } catch (_) {}
 
   try {
+    const rtc = rtcHealth({});
+    health.rtc_present = rtc.rtc_present;
+    health.clock_source = rtc.clock_source;
+  } catch (_) {}
+
+  try {
     const errorCount = Number(options && options.errorCount);
     const hasErrors = Number.isFinite(errorCount) && errorCount > 0;
     const syncRejected = Number(health.sync_rejected);
@@ -342,5 +366,6 @@ module.exports = {
   gatherEdgeHealth,
   compareByCodepoint,
   registerStartup,
-  readCrashState
+  readCrashState,
+  rtcHealth
 };

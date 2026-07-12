@@ -1,13 +1,15 @@
 {
   "_comment": "Explicit growth allowances. Consumed-or-deleted: remove entry when offset by extraction.",
   "node_allowances": {
-    "062a0f9bf66d9789": { "delta": 700, "reason": "Build Heartbeat: added gateway_health_samples persistence (1.A5)" },
+    "062a0f9bf66d9789": { "delta": 850, "reason": "Build Heartbeat: gateway_health_samples (1.A5) + rtc_present/clock_source (5.6)" },
     "2a4f142e3e9b6d80": { "delta": 400, "reason": "sync outbox eviction index guard (1.A5)" },
     "prune-sync-outbox": { "delta": 3000, "reason": "outbox pruning overhaul with eviction-index awareness (1.A5)" },
     "history-api-router-fn": { "delta": 150, "reason": "history API card-data source field passthrough (1.A6)" },
     "cmd-type-registry": { "delta": 3100, "reason": "1.C: expanded command-type registry from 8 to 33 types" },
     "reject-indefinite-open": { "delta": 3100, "reason": "1.C: expanded COMMAND_TYPES_FALLBACK to match 33-type registry" },
-    "write-strega-expectation": { "delta": 3300, "reason": "1.C: expanded COMMAND_TYPES_FALLBACK to match 33-type registry" }
+    "write-strega-expectation": { "delta": 3300, "reason": "1.C: expanded COMMAND_TYPES_FALLBACK to match 33-type registry" },
+    "9b3afb405207302e": { "delta": 800, "reason": "5.6: timestamp sanity clamp (clampRecordedAt) at ingest" },
+    "5f0d2b7e9b9b1b3a": { "delta": 1700, "reason": "5.6: scheduler backward-jump debounce (sameLogicalWindow) on both DENDRO + threshold paths" }
   },
-  "total_allowance": { "delta": 13750, "reason": "1.A5 sync outbox hardening + 1.A6 history card-data + 1.C command-type registry expansion" }
+  "total_allowance": { "delta": 16400, "reason": "1.A5 sync outbox hardening + 1.A6 history card-data + 1.C command-type registry expansion + 5.6 time integrity guards + heartbeat RTC fields" }
 }

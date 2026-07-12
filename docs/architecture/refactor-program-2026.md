@@ -54,7 +54,7 @@ This is the **program map**, not a spec. Each item below is a charter line: goal
 |---|---|---|---|---|
 | 0.1 Deploy merged flows (error counter, contract_version) to both demo gateways | osi-os live-ops | S | — | runbook |
 | 0.2 Heartbeat canary gate: deploy tooling refuses to advance until target gateway reports N healthy heartbeats (schema_sig = target, error_count flat, disk_free OK) | osi-os tooling | M | heartbeat #100 (done) | spec+plan - done: `scripts/deploy-canary-gate.js` + runbook, PR #118; companion osi-server sync-health pass-through PR #57 |
-| 0.3 **Option B Stage 0**: canonicalize fleet schema — fold `ensure_*`/repair drift into seed + ordered migrations, retire the `writable_schema` surgery (#93), establish the canonical reference such that replay == live-after-repair | osi-os | L | — | spec+plan (start from [`2026-07-05-option-b-boot-path-cutover.md`](../superpowers/plans/2026-07-05-option-b-boot-path-cutover.md)) |
+| 0.3 **Option B Stage 0**: canonicalize fleet schema — fold `ensure_*`/repair drift into seed + ordered migrations, retire the `writable_schema` surgery (#93), establish the canonical reference such that replay == live-after-repair — **Done:** semantic comparator, version-aware baseline stamping, sync_outbox v2-column repair, analysis_views folded into seed+migration, PR #120 | osi-os | L | — | spec+plan |
 
 ### Phase 1 — Guardrails ∥ Delivery (weeks 2–6, two parallel tracks)
 
@@ -67,13 +67,13 @@ This is the **program map**, not a spec. Each item below is a charter line: goal
 | 1.A3 Backfill `node --test` for the existing `osi-history-helper` (pattern proof for DD4's "done") — done: 27 index.test.js + 3 analysis.test.js cases, Fable-reviewed edge cases, CI-wired. **Residual (P2, adjudicated 2026-07-11):** co-located suite is 446 lines; the 2,141-line `scripts/test-history-helper.js` was not retired and carries all rollup-path coverage. Finish relocation at next helper touch (Option A adopted). | M | 1.A1 | direct |
 | 1.A4 Crash-loop escalation: distinct heartbeat health state + persistent local flag after N respawns — done: persistent `/data/node-red-crash-count`, `registerStartup`/`readCrashState` with NTP guard + atomic write + decay, flows.json integration (startup inject + heartbeat whitelist + errorCount threading), Fable-reviewed (M1 first-heartbeat fallback, M2 decay), deployed+verified on kaba100 | S | — | direct |
 | 1.A5 `sync_outbox` retention/prune + size cap with per-aggregate drop policy (DD18) — done: size cap (50k, env-overridable), telemetry/protected classification, batched eviction, eviction index (0008), Fable-reviewed (M1 false-alarm fix, S3 failure visibility), retention days adjudicated at 30 | M | — | spec+plan |
-| 1.A6 `osi-history-helper` rollup hardening: `rollupRowsToResult` invariant guard + contract docs, multi-device merged-scope golden tests, coverage-denominator clamp at `now`, expose `aggregation.source` on card-data payload. Plan: `docs/superpowers/plans/2026-07-11-rollup-hardening.md`. **Hard ordering: after mobile-plan Task 5; before 4.2 golden-vector capture.** | M | 1.A3 | spec+plan |
+| 1.A6 `osi-history-helper` rollup hardening: `rollupRowsToResult` invariant guard + contract docs, multi-device merged-scope golden tests, coverage-denominator clamp at `now`, expose `aggregation.source` on card-data payload — **Done:** invariant guard + coverage clamp + multi-device tests (PR #131), source field exposure (PR #130). **Residual (P2, adjudicated 2026-07-11):** co-located test-history-helper.js not yet retired (Option A). | M | 1.A3 | spec+plan |
 
 **Track B — delivery capability + cloud hardening:**
 
 | Item | Repo | Size | Depends on | Mode |
 |---|---|---|---|---|
-| 1.B1 **Option B Stage 1**: deploy-time runner invocation per DD9 (lift additive-only gate for ledger-driven migrations; restore-on-failure; rehearsed on gateway DB copies) | osi-os | L | 0.3 | spec+plan |
+| 1.B1 **Option B Stage 1**: deploy-time runner invocation per DD9 (lift additive-only gate for ledger-driven migrations; restore-on-failure; rehearsed on gateway DB copies) — **Done:** deploy-time migration runner CLI with backup/restore, sqlite3-cli provisioning, deploy schema assertions updated, merged via `10ec2d05` | osi-os | L | 0.3 | spec+plan |
 | 1.B2 Deliver migration 0004 to both demo gateways via 1.B1 + canary hold (0.2) | osi-os live-ops | M | 1.B1, 0.2 | runbook |
 | 1.B3 osi-server CI (build + test + cross-repo op-parity) + ArchUnit boundary test (DD11) + Micrometer/actuator metrics endpoint + GHCR image publish + pull-only VPS deploy (DD16) — done: `backend-ci.yml` + `prediction-ci.yml` + `ghcr-publish.yml` (3 images), ArchUnit FreezingArchRule (3 rules + baseline store), Actuator/Micrometer admin-gated, docker-compose switched to GHCR pull, rehearsal+prod runbook docs | osi-server | M | — | spec+plan |
 | 1.B4 Per-event tx boundary + `sync_dead_letter` + batch cap + rate limit (DD13), with a Testcontainers test reproducing the poison-batch replay (DD15) — **hard gate for Uganda** — done: `SyncEventTxExecutor` (`REQUIRES_NEW`), `sync_dead_letter` table + entity + admin controller + retention job, batch cap 100, Bucket4j rate limit 10/min/gateway, `SyncExceptionClassifier`, `PoisonBatchIT` + `BacklogDrainIT` (5000 events) + `SyncDeadLetterRepositoryIT` on Testcontainers Postgres 16 | osi-server | M | 1.B3 | spec+plan |
@@ -112,10 +112,10 @@ This is the **program map**, not a spec. Each item below is a charter line: goal
 |---|---|---|---|---|
 | 5.1 SD durability: boot-time `PRAGMA quick_check` + quarantine/restore-from-local-backup path (couples with #56) — **Done (2026-07-12):** self-contained `osi-db-integrity` module (imaged at `/usr/share/node-red/osi-db-integrity/`), init.d service (START=90, before Node-RED), 7 tests, both profiles, PR #133 | osi-os | M | — | spec+plan |
 | 5.2 Chaos/soak rig: weeks-offline outbox replay, clock jump, power-loss-mid-migration (rehearsal gate for 4.3) | osi-os | M | — | spec+plan |
-| 5.3 Staged atomic payload deploy + auto-rollback (DD10) | osi-os | M | 0.2 | spec+plan |
+| 5.3 Staged atomic payload deploy + auto-rollback (DD10) — **Done:** `deploy-payload-swap.js` module (stage/flip/rollback/prune), deploy.sh integration (stage→migrate→flip→probe→auto-rollback), local health self-check, merged via `10ba61e9` | osi-os | M | 0.2 | spec+plan |
 | 5.4 Postgres care: hot-path index audit, retention/partition-or-BRIN decision for `sensor_data`, autovacuum tuning, bootstrap jitter | osi-server | M | 1.B3 | spec+plan |
 | 5.5 Incremental bootstrap snapshots (watermark-delta; full snapshot only on cursor gap) — defer until ~10+ gateways | osi-server | M | 5.4 | spec+plan |
-| 5.6 Time integrity: timestamp sanity clamp + defined scheduler behavior on clock jumps (DD18) | osi-os | M | — | spec+plan |
+| 5.6 Time integrity: timestamp sanity clamp + defined scheduler behavior on clock jumps (DD18) — done (2026-07-12): `clampRecordedAt` at ingest (node `9b3afb405207302e`), `sameLogicalWindow` scheduler guard (node `5f0d2b7e9b9b1b3a`), `rtcHealth` in `osi-health-helper` + heartbeat, 28 tests, PR #134 | osi-os | M | — | spec+plan |
 
 ## Risks & one-way doors
 
