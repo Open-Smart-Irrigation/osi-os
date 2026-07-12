@@ -790,6 +790,70 @@ test('inactive correction preserves canonical and entered numeric audit fields b
     error.field === 'values[0].entered_unit_code' && error.code === 'inactive_term'));
 });
 
+test('value rows reject contradictory generic and typed representations', async () => {
+  const { catalog, farmerQuick, openField } = await loadedFixture('typed-value-shapes');
+  catalog.vocabByCode.set('attr.test_date', {
+    code: 'attr.test_date', kind: 'attribute', value_type: 'date', active: 1,
+    constraints: {}, catalog_errors: [],
+  });
+  const validateValue = (value) => validateEntry(
+    catalog,
+    openField,
+    farmerQuick,
+    validIrrigation({ activity_code: 'general_observation', values: [value] })
+  );
+  const contradictoryRows = [
+    { attribute_code: 'attr.ph', value: 7, value_num: 8 },
+    { attribute_code: 'attr.recirculation', value: true, value_num: 0 },
+    { attribute_code: 'attr.machine', value: 'hoe', value_text: 'tractor' },
+    {
+      attribute_code: 'attr.denominator',
+      value: 'choice.denominator.area', value_text: 'choice.denominator.plant',
+    },
+    { attribute_code: 'attr.test_date', value: '2026-07-12', value_text: '2026-07-13' },
+    { attribute_code: 'attr.ph', value: 7, value_text: '7' },
+    { attribute_code: 'attr.machine', value: 'hoe', value_num: 1 },
+    {
+      attribute_code: 'attr.machine', value_status: 'not_observed',
+      value_text: 'hidden observation',
+    },
+    {
+      attribute_code: 'attr.machine', value_status: 'not_applicable',
+      value: 'hidden generic value',
+    },
+  ];
+
+  for (const row of contradictoryRows) {
+    const result = validateValue(row);
+    assert.equal(result.ok, false, JSON.stringify(row));
+    assert.ok(
+      result.errors.some((error) => error.code === 'invalid_value_shape'),
+      JSON.stringify(row)
+    );
+  }
+
+  for (const row of [
+    {
+      attribute_code: 'attr.ph', value: 7, value_num: 7,
+      entered_value_num: 7, entered_unit_code: 'unit.ph', unit_code: 'unit.ph',
+    },
+    { attribute_code: 'attr.recirculation', value: true, value_num: 1 },
+    { attribute_code: 'attr.machine', value: 'hoe', value_text: 'hoe' },
+    {
+      attribute_code: 'attr.denominator',
+      value: 'choice.denominator.area', value_text: 'choice.denominator.area',
+    },
+    {
+      attribute_code: 'attr.test_date',
+      value: '2026-07-12', value_text: '2026-07-12',
+    },
+  ]) {
+    const result = validateValue(row);
+    assert.equal(result.ok, true, JSON.stringify(result));
+    assert.equal(result.normalized.values[0].value, row.value);
+  }
+});
+
 test('date attributes accept only real YYYY-MM-DD calendar dates', async () => {
   const { catalog, farmerQuick, openField } = await loadedFixture('strict-dates');
   catalog.vocabByCode.set('attr.test_date', {
@@ -938,6 +1002,49 @@ test('correction preserves retired product and external reference rows exactly',
   assert.equal(omittedReference.ok, false);
   assert.ok(omittedReference.errors.some((error) => error.code === 'inactive_value_omitted'));
   assert.equal(changedReference.ok, false);
+});
+
+test('reverse correction preservation keeps context and catalog error provenance distinct', async () => {
+  const { catalog, farmerQuick, openField } = await loadedFixture('preservation-provenance');
+  const originalBase = {
+    activity_code: 'general_observation',
+    template_code: 'farmer_quick', template_version: 1,
+    layout_code: 'open_field', layout_version: 1,
+  };
+  const validateOmission = (originalEntry, referenceValues) => validateEntry(
+    catalog,
+    openField,
+    farmerQuick,
+    validIrrigation({ activity_code: 'general_observation', values: [] }),
+    { mode: 'correction', originalEntry, referenceValues }
+  );
+  const referenceKey = 'valve_actuation_expectations.expectation_id';
+  const referenceOriginal = Object.assign({}, originalBase, {
+    values: [{
+      attribute_code: 'attr.actuation_expectation_id', group_index: 0,
+      value_text: 'expectation-1', value_status: 'observed',
+    }],
+  });
+
+  const malformedContext = validateOmission(referenceOriginal, {
+    [referenceKey]: 'not-a-set-or-array',
+  });
+
+  assert.equal(malformedContext.ok, false);
+  assert.ok(malformedContext.errors.some((error) => error.code === 'invalid_context'));
+  assert.ok(!malformedContext.errors.some((error) => error.code === 'invalid_catalog'));
+
+  const missingVocabOriginal = Object.assign({}, originalBase, {
+    values: [{
+      attribute_code: 'attr.machine', group_index: 0,
+      value_text: 'hoe', value_status: 'observed',
+    }],
+  });
+  catalog.vocabByCode.delete('attr.machine');
+  const missingCatalog = validateOmission(missingVocabOriginal);
+
+  assert.equal(missingCatalog.ok, false);
+  assert.ok(missingCatalog.errors.some((error) => error.code === 'invalid_catalog'));
 });
 
 test('required_any families pair semantically present product and dose in each repeat group', async () => {

@@ -78,25 +78,45 @@ function isPlainObject(value) {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 }
 
-function canonicalValueForRow(row, attribute, valueStatus) {
-  if (valueStatus !== 'observed' || !row) return null;
-  if (attribute.value_type === 'number') {
-    return row.value_num != null ? row.value_num : row.value;
+function valueShape(attribute, row, valueStatus) {
+  const hasGeneric = Boolean(row) && row.value != null;
+  const hasNumber = Boolean(row) && row.value_num != null;
+  const hasText = Boolean(row) && row.value_text != null;
+  if (valueStatus !== 'observed') {
+    return hasGeneric || hasNumber || hasText
+      ? { ok: false }
+      : { ok: true, value: null };
   }
-  if (attribute.value_type === 'boolean') {
-    if (row.value_num === 0) return false;
-    if (row.value_num === 1) return true;
-    return row.value;
+  const numberBacked = attribute.value_type === 'number' || attribute.value_type === 'boolean';
+  if ((numberBacked && hasText) || (!numberBacked && hasNumber)) return { ok: false };
+
+  let hasTyped = false;
+  let typedValue;
+  if (attribute.value_type === 'number' && hasNumber) {
+    if (typeof row.value_num !== 'number' || !Number.isFinite(row.value_num)) return { ok: false };
+    hasTyped = true;
+    typedValue = row.value_num;
+  } else if (attribute.value_type === 'boolean' && hasNumber) {
+    if (row.value_num !== 0 && row.value_num !== 1) return { ok: false };
+    hasTyped = true;
+    typedValue = row.value_num === 1;
+  } else if (['text', 'choice', 'date'].includes(attribute.value_type) && hasText) {
+    if (typeof row.value_text !== 'string') return { ok: false };
+    hasTyped = true;
+    typedValue = row.value_text;
   }
-  return row.value_text != null ? row.value_text : row.value;
+  if (hasGeneric && hasTyped && !Object.is(row.value, typedValue)) return { ok: false };
+  return { ok: true, value: hasGeneric ? row.value : typedValue };
 }
 
 function logicalValueRow(row, attribute) {
   const valueStatus = row && row.value_status != null ? row.value_status : 'observed';
+  const shape = valueShape(attribute, row, valueStatus);
   return {
+    valid: shape.ok,
     attribute_code: row && row.attribute_code,
     group_index: row && row.group_index != null ? row.group_index : 0,
-    value: canonicalValueForRow(row, attribute, valueStatus),
+    value: shape.value,
     value_status: valueStatus,
     unit_code: row && row.unit_code != null ? row.unit_code : null,
     entered_value_num: row && row.entered_value_num != null ? row.entered_value_num : null,
@@ -111,7 +131,8 @@ function sameLogicalValue(catalog, left, right) {
   if (!attribute || attribute.kind !== 'attribute') return false;
   const a = logicalValueRow(left, attribute);
   const b = logicalValueRow(right, attribute);
-  return a.attribute_code === b.attribute_code &&
+  return a.valid && b.valid &&
+    a.attribute_code === b.attribute_code &&
     a.group_index === b.group_index &&
     Object.is(a.value, b.value) &&
     a.value_status === b.value_status &&
@@ -149,20 +170,22 @@ function originalReferenceRetirement(catalog, attribute, logical, validationCont
   const reference = attribute.constraints.reference;
   if (!isPlainObject(reference) || typeof reference.table !== 'string' ||
       typeof reference.column !== 'string' || !reference.table || !reference.column) {
-    return { invalid: true, retired: false };
+    return { invalid: true, retired: false, code: 'invalid_catalog' };
   }
   const key = reference.table + '.' + reference.column;
   if (key === 'journal_products.product_uuid') {
-    if (!(catalog.products instanceof Map)) return { invalid: true, retired: false };
+    if (!(catalog.products instanceof Map)) {
+      return { invalid: true, retired: false, code: 'invalid_catalog' };
+    }
     const product = catalog.products.get(logical.value);
-    if (!product) return { invalid: true, retired: false };
+    if (!product) return { invalid: true, retired: false, code: 'invalid_catalog' };
     return {
       invalid: false,
       retired: product.active !== 1 || Boolean(product.deleted_at),
     };
   }
   const resolved = referenceValueSet(validationContext, key);
-  if (!resolved.ok) return { invalid: true, retired: false };
+  if (!resolved.ok) return { invalid: true, retired: false, code: resolved.code };
   if (!resolved.resolved) return { invalid: false, retired: true };
   const found = resolved.allowed instanceof Set
     ? resolved.allowed.has(logical.value)
@@ -174,26 +197,29 @@ function originalValueRetirement(catalog, originalValue, validationContext) {
   const attribute = catalog.vocabByCode.get(originalValue.attribute_code);
   if (!attribute || attribute.kind !== 'attribute' ||
       !['number', 'text', 'choice', 'date', 'boolean'].includes(attribute.value_type)) {
-    return { invalid: true, retired: false };
+    return { invalid: true, retired: false, code: 'invalid_catalog' };
   }
   let retired = attribute.active !== 1 || Boolean(attribute.deleted_at);
   const logical = logicalValueRow(originalValue, attribute);
+  if (!logical.valid) return { invalid: true, retired: false, code: 'invalid_catalog' };
   if (logical.value_status === 'observed' && attribute.value_type === 'choice') {
     const choice = catalog.vocabByCode.get(logical.value);
     if (!choice || choice.kind !== 'choice' || choice.parent_code !== attribute.code) {
-      return { invalid: true, retired: false };
+      return { invalid: true, retired: false, code: 'invalid_catalog' };
     }
     retired = retired || choice.active !== 1 || Boolean(choice.deleted_at);
   }
   for (const unitCode of [logical.unit_code, logical.entered_unit_code]) {
     if (unitCode == null) continue;
     const unit = catalog.vocabByCode.get(unitCode);
-    if (!unit || unit.kind !== 'unit') return { invalid: true, retired: false };
+    if (!unit || unit.kind !== 'unit') {
+      return { invalid: true, retired: false, code: 'invalid_catalog' };
+    }
     retired = retired || unit.active !== 1 || Boolean(unit.deleted_at);
   }
   if (!attribute.constraints || typeof attribute.constraints !== 'object' ||
       Array.isArray(attribute.constraints)) {
-    return { invalid: true, retired: false };
+    return { invalid: true, retired: false, code: 'invalid_catalog' };
   }
   const reference = originalReferenceRetirement(
     catalog,
@@ -211,10 +237,15 @@ function correctionPreservationErrors(catalog, originalEntry, normalizedValues, 
   for (const originalValue of originalEntry.values) {
     const retirement = originalValueRetirement(catalog, originalValue, validationContext);
     if (retirement.invalid) {
+      const contextError = retirement.code === 'invalid_context';
       errors.push({
-        field: 'validationContext.originalEntry.values',
-        code: 'invalid_catalog',
-        message: 'Original value references missing or corrupt vocabulary',
+        field: contextError
+          ? 'validationContext.referenceValues'
+          : 'validationContext.originalEntry.values',
+        code: contextError ? 'invalid_context' : 'invalid_catalog',
+        message: contextError
+          ? 'Reference resolver context is invalid'
+          : 'Original value references missing or corrupt vocabulary',
       });
       continue;
     }
@@ -478,10 +509,27 @@ function validateEntry(catalog, _layoutDef, _templateDef, entryInput, validation
         'Unknown attribute code'
       );
     }
-    const valuePreserved = correction && preservedOriginalValue(catalog, originalEntry, Object.assign({}, value, {
+    const shape = valueShape(attribute, value, valueStatus);
+    if (!shape.ok) {
+      return errorResult(
+        'values[' + index + ']',
+        'invalid_value_shape',
+        'Generic and typed value representations are contradictory'
+      );
+    }
+    const semanticValue = shape.value;
+    const normalizedValue = Object.assign({}, value, {
       group_index: groupIndex,
       value_status: valueStatus,
-    }));
+    });
+    if (valueStatus === 'observed' && normalizedValue.value == null && semanticValue !== undefined) {
+      normalizedValue.value = semanticValue;
+    }
+    const valuePreserved = correction && preservedOriginalValue(
+      catalog,
+      originalEntry,
+      normalizedValue
+    );
     if (attribute.active !== 1 || attribute.deleted_at) {
       if (!correction) {
         return errorResult(
@@ -505,21 +553,14 @@ function validateEntry(catalog, _layoutDef, _templateDef, entryInput, validation
         'Attribute constraints are invalid'
       );
     }
-    if (valueStatus !== 'observed' && value.value != null) {
-      return errorResult(
-        'values[' + index + '].value',
-        'invalid_status_value',
-        'A non-observed value must not carry a value'
-      );
-    }
     if (valueStatus === 'observed') {
       const type = attribute.value_type;
       const validType = (
-        (type === 'number' && typeof value.value === 'number' && Number.isFinite(value.value)) ||
-        (type === 'text' && typeof value.value === 'string') ||
-        (type === 'choice' && typeof value.value === 'string') ||
-        (type === 'date' && typeof value.value === 'string') ||
-        (type === 'boolean' && typeof value.value === 'boolean')
+        (type === 'number' && typeof semanticValue === 'number' && Number.isFinite(semanticValue)) ||
+        (type === 'text' && typeof semanticValue === 'string') ||
+        (type === 'choice' && typeof semanticValue === 'string') ||
+        (type === 'date' && typeof semanticValue === 'string') ||
+        (type === 'boolean' && typeof semanticValue === 'boolean')
       );
       if (!validType) {
         return errorResult(
@@ -530,7 +571,7 @@ function validateEntry(catalog, _layoutDef, _templateDef, entryInput, validation
       }
     }
     if (valueStatus === 'observed' && attribute.value_type === 'date' &&
-        !isCalendarDate(value.value)) {
+        !isCalendarDate(semanticValue)) {
       return errorResult(
         'values[' + index + '].value',
         'invalid_date',
@@ -541,7 +582,7 @@ function validateEntry(catalog, _layoutDef, _templateDef, entryInput, validation
       const invalidReference = referenceError(
         catalog,
         attribute.constraints,
-        value.value,
+        semanticValue,
         context,
         valuePreserved
       );
@@ -554,7 +595,7 @@ function validateEntry(catalog, _layoutDef, _templateDef, entryInput, validation
       }
     }
     if (valueStatus === 'observed' && attribute.value_type === 'text' &&
-        Buffer.byteLength(value.value, 'utf8') > 4096) {
+        Buffer.byteLength(semanticValue, 'utf8') > 4096) {
       return errorResult(
         'values[' + index + '].value',
         'limit_exceeded',
@@ -562,7 +603,7 @@ function validateEntry(catalog, _layoutDef, _templateDef, entryInput, validation
       );
     }
     if (valueStatus === 'observed' && attribute.value_type === 'choice') {
-      const choice = catalog.vocabByCode.get(value.value);
+      const choice = catalog.vocabByCode.get(semanticValue);
       if (!choice || choice.kind !== 'choice' || choice.parent_code !== attribute.code) {
         return errorResult(
           'values[' + index + '].value',
@@ -638,34 +679,31 @@ function validateEntry(catalog, _layoutDef, _templateDef, entryInput, validation
       }
     }
     if (valueStatus === 'observed' && attribute.value_type === 'number') {
-      if (typeof attribute.constraints.min === 'number' && value.value < attribute.constraints.min) {
+      if (typeof attribute.constraints.min === 'number' && semanticValue < attribute.constraints.min) {
         return errorResult('values[' + index + '].value', 'below_minimum', 'Value is below the minimum');
       }
-      if (typeof attribute.constraints.max === 'number' && value.value > attribute.constraints.max) {
+      if (typeof attribute.constraints.max === 'number' && semanticValue > attribute.constraints.max) {
         return errorResult('values[' + index + '].value', 'above_maximum', 'Value is above the maximum');
       }
       if (typeof attribute.constraints.step === 'number' && attribute.constraints.step > 0) {
         const base = typeof attribute.constraints.min === 'number' ? attribute.constraints.min : 0;
-        const quotient = (value.value - base) / attribute.constraints.step;
+        const quotient = (semanticValue - base) / attribute.constraints.step;
         const tolerance = 1e-9 * Math.max(1, Math.abs(quotient));
         if (Math.abs(quotient - Math.round(quotient)) > tolerance) {
           return errorResult('values[' + index + '].value', 'step_mismatch', 'Value does not match the step');
         }
       }
     }
-    if (valueStatus === 'observed' && typeof value.value === 'string' &&
+    if (valueStatus === 'observed' && typeof semanticValue === 'string' &&
         typeof attribute.constraints.maxlength === 'number' &&
-        Array.from(value.value).length > attribute.constraints.maxlength) {
+        Array.from(semanticValue).length > attribute.constraints.maxlength) {
       return errorResult(
         'values[' + index + '].value',
         'limit_exceeded',
         'Value exceeds the catalog length limit'
       );
     }
-    normalizedValues.push(Object.assign({}, value, {
-      group_index: groupIndex,
-      value_status: valueStatus,
-    }));
+    normalizedValues.push(normalizedValue);
   }
   if (correction) {
     const preservationErrors = correctionPreservationErrors(
