@@ -1184,6 +1184,17 @@ for (const name of requiredFunctionNodes) {
   }
 }
 
+for (const id of ['9b3afb405207302e', '5f0d2b7e9b9b1b3a']) {
+  const n = flows.find((x) => x.id === id);
+  if (!n) { fail(`time-integrity node ${id} missing`); continue; }
+  try {
+    new vm.Script(`(async function(msg,node,flow,env,context,global,get,set){${n.func}\n})`);
+    console.log(`OK compile ${id} (${n.name})`);
+  } catch (error) {
+    fail(`function node ${id} (${n.name}) does not compile: ${error.message}`);
+  }
+}
+
 // Global check: any function node that calls into a Node.js core module OR a
 // project-registered Node-RED setting module must have the symbol available at
 // runtime — either declared in the node's `libs` array, locally bound via
