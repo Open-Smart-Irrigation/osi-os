@@ -254,6 +254,7 @@ Field manuals for agents live in `.claude/skills/` (Agent Skills spec: SKILL.md 
 - `osi-agronomy-sensors-reference` — domain pack (SWT/pF, Chameleon, dendrometry, rain, LoRaWAN as used here); load when touching sensor semantics or displays.
 - `osi-config-and-flags` — UCI/env/flag catalog incl. DEVICE_EUI resolution; load when configuring or provisioning.
 - `osi-hardest-problem-campaign` — deferred stub; do not author without maintainer input.
+- `anti-slop-writing` — prose floor for ALL documentation and user-facing text; load before writing or editing any docs/README/ADR/runbook/PR prose. Mechanical check: `node .claude/skills/anti-slop-writing/slop-check.js <files>`.
 
 ## Session closeout
 
