@@ -8,7 +8,7 @@ const test = require('node:test');
 const { DatabaseSync } = require('node:sqlite');
 
 const { loadCatalog } = require('./catalog');
-const { validateEntry } = require('./index');
+const { allowedUnits, convertToCanonical, validateEntry } = require('./index');
 
 const repoRoot = path.resolve(__dirname, '../../../../../../..');
 const seedSql = fs.readFileSync(path.join(repoRoot, 'database/seed-blank.sql'), 'utf8');
@@ -327,7 +327,10 @@ test('validateEntry normalizes a valid farmer_quick irrigation entry', async () 
     attribute_code: 'attr.irrigation_depth',
     group_index: 0,
     value: 12,
+    value_num: 12,
     unit_code: 'unit.mm_water',
+    entered_value_num: 12,
+    entered_unit_code: 'unit.mm_water',
     value_status: 'observed',
   }]);
 });
@@ -770,6 +773,7 @@ test('inactive correction preserves canonical and entered numeric audit fields b
   const omission = validateValues([]);
 
   assert.equal(exact.ok, true, JSON.stringify(exact));
+  assert.deepEqual(exact.normalized.values[0], normalizedValue);
   assert.equal(auditMutation.ok, false);
   assert.ok(auditMutation.errors.some((error) => error.code === 'inactive_value_changed'));
   assert.equal(omission.ok, false);
@@ -1213,4 +1217,379 @@ test('definition preflight type-checks scalar predicate domains and leaves text 
   ]) {
     assert.equal(resultFor(predicate).ok, true, JSON.stringify(predicate));
   }
+});
+
+function syntheticUnit(code, quantityKind, basis, dimension, canonicalCode, scale, offset) {
+  return {
+    code,
+    kind: 'unit',
+    value_type: null,
+    quantity_kind: quantityKind,
+    basis,
+    active: 1,
+    deleted_at: null,
+    constraints: {
+      dimension,
+      to_canonical: { unit_code: canonicalCode, scale, offset },
+    },
+    catalog_errors: [],
+  };
+}
+
+function syntheticNumberAttribute(code, quantityKind, basis, defaultUnitCode, constraints) {
+  return {
+    code,
+    kind: 'attribute',
+    value_type: 'number',
+    quantity_kind: quantityKind,
+    basis,
+    default_unit_code: defaultUnitCode,
+    active: 1,
+    deleted_at: null,
+    constraints: constraints || {},
+    catalog_errors: [],
+  };
+}
+
+test('convertToCanonical scales product t/ha to canonical kg/ha', async () => {
+  const { catalog } = await loadedFixture('unit-scale-product');
+
+  assert.deepEqual(
+    convertToCanonical(
+      catalog,
+      'attr.amount_mass_area_product',
+      1.25,
+      'unit.t_per_ha_product'
+    ),
+    { ok: true, value_num: 1250, unit_code: 'unit.kg_per_ha_product' }
+  );
+});
+
+test('convertToCanonical rejects cross-basis before generic incompatibility', async () => {
+  const { catalog } = await loadedFixture('unit-cross-basis');
+
+  assert.deepEqual(
+    convertToCanonical(
+      catalog,
+      'attr.amount_nutrient_rate',
+      20,
+      'unit.kg_per_ha_product'
+    ),
+    { ok: false, code: 'cross_basis_forbidden' }
+  );
+  const wrongDimension = convertToCanonical(
+    catalog,
+    'attr.amount_operation_depth',
+    5,
+    'unit.l_per_ha_product'
+  );
+  assert.equal(wrongDimension.ok, false);
+});
+
+test('convertToCanonical applies scale and offset and rejects nonfinite input or result', async () => {
+  const { catalog } = await loadedFixture('unit-offset');
+  catalog.vocabByCode.set(
+    'attr.air_temperature',
+    syntheticNumberAttribute(
+      'attr.air_temperature', 'temperature', 'air', 'unit.k_air', {}
+    )
+  );
+  catalog.vocabByCode.set(
+    'unit.k_air',
+    syntheticUnit('unit.k_air', 'temperature', 'air', 'temperature_air', 'unit.k_air', 1, 0)
+  );
+  catalog.vocabByCode.set(
+    'unit.c_air',
+    syntheticUnit('unit.c_air', 'temperature', 'air', 'temperature_air', 'unit.k_air', 1, 273.15)
+  );
+  catalog.vocabByCode.set(
+    'unit.overflow_air',
+    syntheticUnit(
+      'unit.overflow_air', 'temperature', 'air', 'temperature_air', 'unit.k_air', 2, 0
+    )
+  );
+
+  assert.deepEqual(
+    convertToCanonical(catalog, 'attr.air_temperature', 20, 'unit.c_air'),
+    { ok: true, value_num: 293.15, unit_code: 'unit.k_air' }
+  );
+  assert.deepEqual(
+    convertToCanonical(catalog, 'attr.air_temperature', Infinity, 'unit.c_air'),
+    { ok: false, code: 'invalid_number' }
+  );
+  assert.deepEqual(
+    convertToCanonical(catalog, 'attr.air_temperature', Number.MAX_VALUE, 'unit.overflow_air'),
+    { ok: false, code: 'invalid_number' }
+  );
+});
+
+test('convertToCanonical fails closed for unknown, inactive, and malformed unit definitions', async () => {
+  const { catalog } = await loadedFixture('unit-fail-closed');
+  const attributeCode = 'attr.amount_mass_area_product';
+
+  assert.deepEqual(
+    convertToCanonical(catalog, attributeCode, 1, 'unit.not_real'),
+    { ok: false, code: 'unknown_unit' }
+  );
+
+  const tonne = catalog.vocabByCode.get('unit.t_per_ha_product');
+  catalog.vocabByCode.set(tonne.code, Object.assign({}, tonne, { active: 0 }));
+  assert.deepEqual(
+    convertToCanonical(catalog, attributeCode, 1, tonne.code),
+    { ok: false, code: 'inactive_unit' }
+  );
+  catalog.vocabByCode.set(tonne.code, tonne);
+
+  const malformedCases = [
+    { constraints: {} },
+    { constraints: { dimension: 'mass_product_per_area', to_canonical: null } },
+    {
+      constraints: {
+        dimension: 'mass_product_per_area',
+        to_canonical: {
+          unit_code: 'unit.kg_per_ha_product', scale: '1000', offset: 0,
+        },
+      },
+    },
+  ];
+  for (const replacement of malformedCases) {
+    catalog.vocabByCode.set(tonne.code, Object.assign({}, tonne, replacement));
+    assert.deepEqual(
+      convertToCanonical(catalog, attributeCode, 1, tonne.code),
+      { ok: false, code: 'invalid_catalog' }
+    );
+  }
+  catalog.vocabByCode.set(tonne.code, tonne);
+
+  const kilogram = catalog.vocabByCode.get('unit.kg_per_ha_product');
+  catalog.vocabByCode.set(kilogram.code, Object.assign({}, kilogram, { active: 0 }));
+  assert.deepEqual(
+    convertToCanonical(catalog, attributeCode, 1, tonne.code),
+    { ok: false, code: 'inactive_unit' }
+  );
+
+  catalog.vocabByCode.set(kilogram.code, Object.assign({}, kilogram, {
+    constraints: Object.assign({}, kilogram.constraints, {
+      to_canonical: {
+        unit_code: kilogram.code,
+        scale: 2,
+        offset: 0,
+      },
+    }),
+  }));
+  assert.deepEqual(
+    convertToCanonical(catalog, attributeCode, 1, tonne.code),
+    { ok: false, code: 'invalid_catalog' }
+  );
+
+  catalog.vocabByCode.delete(kilogram.code);
+  assert.deepEqual(
+    convertToCanonical(catalog, attributeCode, 1, tonne.code),
+    { ok: false, code: 'invalid_catalog' }
+  );
+});
+
+test('allowedUnits returns only the deterministic active quantity-kind/basis family', async () => {
+  const { catalog, openField } = await loadedFixture('allowed-unit-family');
+  catalog.vocabByCode.set(
+    'unit.fake_mass_other_dimension',
+    syntheticUnit(
+      'unit.fake_mass_other_dimension',
+      'mass_area',
+      'product',
+      'mass_product_per_row',
+      'unit.fake_mass_other_dimension',
+      1,
+      0
+    )
+  );
+
+  assert.deepEqual(
+    allowedUnits(
+      catalog,
+      'attr.amount_mass_area_product',
+      openField.definition,
+      new Map()
+    ),
+    [
+      'unit.g_per_ha_product',
+      'unit.kg_per_ha_product',
+      'unit.t_per_ha_product',
+    ]
+  );
+
+  const nutrientUnits = allowedUnits(
+    catalog,
+    'attr.amount_nutrient_rate',
+    openField.definition,
+    {}
+  );
+  assert.equal(nutrientUnits.length, 10);
+  assert.ok(nutrientUnits.includes('unit.kg_n_per_ha_nutrient'));
+  assert.ok(nutrientUnits.includes('unit.kg_p2o5_per_ha_nutrient'));
+  for (const code of nutrientUnits) {
+    const unit = catalog.vocabByCode.get(code);
+    assert.equal(unit.constraints.to_canonical.unit_code, code);
+  }
+});
+
+test('validateEntry stores entered numeric values beside canonical values', async () => {
+  const { catalog, farmerQuick, openField } = await loadedFixture('unit-normalization');
+  const result = validateEntry(
+    catalog,
+    openField,
+    farmerQuick,
+    validIrrigation({
+      activity_code: 'general_observation',
+      values: [{
+        attribute_code: 'attr.amount_mass_area_product',
+        value: 1.25,
+        unit_code: 'unit.t_per_ha_product',
+      }],
+    })
+  );
+
+  assert.equal(result.ok, true, JSON.stringify(result));
+  assert.deepEqual(result.normalized.values[0], {
+    attribute_code: 'attr.amount_mass_area_product',
+    group_index: 0,
+    value: 1250,
+    value_num: 1250,
+    unit_code: 'unit.kg_per_ha_product',
+    entered_value_num: 1.25,
+    entered_unit_code: 'unit.t_per_ha_product',
+    value_status: 'observed',
+  });
+});
+
+test('validateEntry verifies an existing canonical/entered audit row and rejects contradictions', async () => {
+  const { catalog, farmerQuick, openField } = await loadedFixture('unit-audit-shape');
+  const validateValue = (value) => validateEntry(
+    catalog,
+    openField,
+    farmerQuick,
+    validIrrigation({ activity_code: 'general_observation', values: [value] })
+  );
+  const consistent = {
+    attribute_code: 'attr.amount_mass_area_product',
+    value: 1250,
+    value_num: 1250,
+    unit_code: 'unit.kg_per_ha_product',
+    entered_value_num: 1.25,
+    entered_unit_code: 'unit.t_per_ha_product',
+  };
+
+  const result = validateValue(consistent);
+  assert.equal(result.ok, true, JSON.stringify(result));
+  assert.equal(result.normalized.values[0].value_num, 1250);
+  assert.equal(result.normalized.values[0].entered_value_num, 1.25);
+
+  for (const contradictory of [
+    Object.assign({}, consistent, { value: 1200, value_num: 1200 }),
+    Object.assign({}, consistent, { unit_code: 'unit.t_per_ha_product' }),
+    {
+      attribute_code: consistent.attribute_code,
+      value: 1250,
+      value_num: 1250,
+      unit_code: 'unit.kg_per_ha_product',
+      entered_value_num: 1.25,
+    },
+  ]) {
+    const invalid = validateValue(contradictory);
+    assert.equal(invalid.ok, false, JSON.stringify(contradictory));
+    assert.ok(invalid.errors.some((error) => error.code === 'invalid_value_shape'));
+  }
+});
+
+test('validateEntry applies defaults only when allowed and never defaults a nutrient species', async () => {
+  const { catalog, farmerQuick, openField } = await loadedFixture('unit-defaults');
+  const validateValue = (value) => validateEntry(
+    catalog,
+    openField,
+    farmerQuick,
+    validIrrigation({ activity_code: 'general_observation', values: [value] })
+  );
+
+  const defaulted = validateValue({ attribute_code: 'attr.ph', value: 7 });
+  assert.equal(defaulted.ok, true, JSON.stringify(defaulted));
+  assert.equal(defaulted.normalized.values[0].unit_code, 'unit.ph');
+  assert.equal(defaulted.normalized.values[0].entered_unit_code, 'unit.ph');
+
+  const nutrient = validateValue({ attribute_code: 'attr.amount_nutrient_rate', value: 20 });
+  assert.equal(nutrient.ok, false);
+  assert.ok(nutrient.errors.some((error) => error.code === 'unit_required'));
+
+  const massAttribute = catalog.vocabByCode.get('attr.amount_mass_area_product');
+  catalog.vocabByCode.set(massAttribute.code, Object.assign({}, massAttribute, {
+    constraints: Object.assign({}, massAttribute.constraints, { allow_default_unit: false }),
+  }));
+  const noDefault = validateValue({ attribute_code: massAttribute.code, value: 20 });
+  assert.equal(noDefault.ok, false);
+  assert.ok(noDefault.errors.some((error) => error.code === 'unit_required'));
+
+  const phAttribute = catalog.vocabByCode.get('attr.ph');
+  catalog.vocabByCode.set(phAttribute.code, Object.assign({}, phAttribute, {
+    constraints: Object.assign({}, phAttribute.constraints, { requires_explicit_unit: true }),
+  }));
+  const explicitRequired = validateValue({ attribute_code: phAttribute.code, value: 7 });
+  assert.equal(explicitRequired.ok, false);
+  assert.ok(explicitRequired.errors.some((error) => error.code === 'unit_required'));
+});
+
+test('validateEntry enforces numeric min/max/step after canonical conversion', async () => {
+  const { catalog, farmerQuick, openField } = await loadedFixture('canonical-constraints');
+  const attribute = catalog.vocabByCode.get('attr.amount_mass_area_product');
+  const validateTonnes = (value) => validateEntry(
+    catalog,
+    openField,
+    farmerQuick,
+    validIrrigation({
+      activity_code: 'general_observation',
+      values: [{
+        attribute_code: attribute.code,
+        value,
+        unit_code: 'unit.t_per_ha_product',
+      }],
+    })
+  );
+
+  catalog.vocabByCode.set(attribute.code, Object.assign({}, attribute, {
+    constraints: { min: 0, max: 999 },
+  }));
+  const above = validateTonnes(1);
+  assert.equal(above.ok, false);
+  assert.ok(above.errors.some((error) => error.code === 'above_maximum'));
+
+  catalog.vocabByCode.set(attribute.code, Object.assign({}, attribute, {
+    constraints: { min: 0, step: 500 },
+  }));
+  assert.equal(validateTonnes(1.5).ok, true);
+  const offStep = validateTonnes(1.2);
+  assert.equal(offStep.ok, false);
+  assert.ok(offStep.errors.some((error) => error.code === 'step_mismatch'));
+});
+
+test('validateEntry leaves nonnumeric and non-observed value semantics unchanged', async () => {
+  const { catalog, farmerQuick, openField } = await loadedFixture('unit-nonnumeric');
+  const result = validateEntry(
+    catalog,
+    openField,
+    farmerQuick,
+    validIrrigation({
+      activity_code: 'general_observation',
+      values: [
+        { attribute_code: 'attr.machine', value: 'hoe' },
+        { attribute_code: 'attr.ph', group_index: 1, value_status: 'not_observed' },
+      ],
+    })
+  );
+
+  assert.equal(result.ok, true, JSON.stringify(result));
+  assert.deepEqual(result.normalized.values, [
+    {
+      attribute_code: 'attr.machine', value: 'hoe', group_index: 0,
+      value_status: 'observed',
+    },
+    { attribute_code: 'attr.ph', group_index: 1, value_status: 'not_observed' },
+  ]);
 });

@@ -7,6 +7,7 @@ const {
   predicateResult,
   semanticDefinitionErrors,
 } = require('./definition');
+const { allowedUnits, convertToCanonical } = require('./units');
 
 function errorResult(field, code, message) {
   return { ok: false, errors: [{ field, code, message }] };
@@ -107,6 +108,61 @@ function valueShape(attribute, row, valueStatus) {
   }
   if (hasGeneric && hasTyped && !Object.is(row.value, typedValue)) return { ok: false };
   return { ok: true, value: hasGeneric ? row.value : typedValue };
+}
+
+function numericNormalization(catalog, attribute, row, semanticValue) {
+  const hasEnteredValue = row.entered_value_num != null;
+  const hasEnteredUnit = row.entered_unit_code != null;
+  if (hasEnteredValue !== hasEnteredUnit) return { ok: false, code: 'invalid_value_shape' };
+
+  let enteredValue = semanticValue;
+  let enteredUnit = row.unit_code;
+  if (hasEnteredValue) {
+    if (typeof row.entered_value_num !== 'number' || !Number.isFinite(row.entered_value_num) ||
+        typeof row.entered_unit_code !== 'string' || !row.entered_unit_code ||
+        typeof row.value_num !== 'number' || !Number.isFinite(row.value_num) ||
+        typeof row.unit_code !== 'string' || !row.unit_code) {
+      return { ok: false, code: 'invalid_value_shape' };
+    }
+    enteredValue = row.entered_value_num;
+    enteredUnit = row.entered_unit_code;
+  } else if (enteredUnit == null) {
+    if (attribute.constraints.requires_explicit_unit === true ||
+        attribute.constraints.allow_default_unit === false ||
+        typeof attribute.default_unit_code !== 'string' || !attribute.default_unit_code) {
+      return { ok: false, code: 'unit_required' };
+    }
+    enteredUnit = attribute.default_unit_code;
+  }
+
+  const converted = convertToCanonical(
+    catalog,
+    attribute.code,
+    enteredValue,
+    enteredUnit
+  );
+  if (!converted.ok) return converted;
+  if (hasEnteredValue &&
+      (!Object.is(converted.value_num, semanticValue) || converted.unit_code !== row.unit_code)) {
+    return { ok: false, code: 'invalid_value_shape' };
+  }
+  return {
+    ok: true,
+    value_num: converted.value_num,
+    unit_code: converted.unit_code,
+    entered_value_num: enteredValue,
+    entered_unit_code: enteredUnit,
+  };
+}
+
+function hasRetiredNumericTerm(catalog, attribute, row) {
+  if (attribute.active !== 1 || attribute.deleted_at) return true;
+  for (const code of [row.unit_code, row.entered_unit_code]) {
+    if (code == null) continue;
+    const unit = catalog.vocabByCode.get(code);
+    if (unit && unit.kind === 'unit' && (unit.active !== 1 || unit.deleted_at)) return true;
+  }
+  return false;
 }
 
 function logicalValueRow(row, attribute) {
@@ -517,7 +573,7 @@ function validateEntry(catalog, _layoutDef, _templateDef, entryInput, validation
         'Generic and typed value representations are contradictory'
       );
     }
-    const semanticValue = shape.value;
+    let semanticValue = shape.value;
     const normalizedValue = Object.assign({}, value, {
       group_index: groupIndex,
       value_status: valueStatus,
@@ -678,7 +734,37 @@ function validateEntry(catalog, _layoutDef, _templateDef, entryInput, validation
         }
       }
     }
-    if (valueStatus === 'observed' && attribute.value_type === 'number') {
+    const preserveFrozenNumeric = valueStatus === 'observed' &&
+      attribute.value_type === 'number' && valuePreserved &&
+      hasRetiredNumericTerm(catalog, attribute, value);
+    if (valueStatus === 'observed' && attribute.value_type === 'number' &&
+        !preserveFrozenNumeric) {
+      const canonical = numericNormalization(catalog, attribute, value, semanticValue);
+      if (!canonical.ok) {
+        const field = canonical.code === 'invalid_value_shape'
+          ? 'values[' + index + ']'
+          : canonical.code === 'invalid_number'
+            ? 'values[' + index + '].value'
+            : canonical.code === 'invalid_catalog'
+              ? 'values[' + index + '].attribute_code'
+              : 'values[' + index + '].unit_code';
+        const message = canonical.code === 'unit_required'
+          ? 'An explicit unit is required for this numeric value'
+          : canonical.code === 'invalid_value_shape'
+            ? 'Canonical and entered numeric representations are contradictory'
+            : 'Numeric unit conversion failed';
+        return errorResult(field, canonical.code, message);
+      }
+      semanticValue = canonical.value_num;
+      normalizedValue.value = canonical.value_num;
+      normalizedValue.value_num = canonical.value_num;
+      normalizedValue.unit_code = canonical.unit_code;
+      normalizedValue.entered_value_num = canonical.entered_value_num;
+      normalizedValue.entered_unit_code = canonical.entered_unit_code;
+      delete normalizedValue.value_text;
+    }
+    if (valueStatus === 'observed' && attribute.value_type === 'number' &&
+        !preserveFrozenNumeric) {
       if (typeof attribute.constraints.min === 'number' && semanticValue < attribute.constraints.min) {
         return errorResult('values[' + index + '].value', 'below_minimum', 'Value is below the minimum');
       }
@@ -789,4 +875,4 @@ function validateEntry(catalog, _layoutDef, _templateDef, entryInput, validation
   };
 }
 
-module.exports = { loadCatalog, validateEntry };
+module.exports = { allowedUnits, convertToCanonical, loadCatalog, validateEntry };
