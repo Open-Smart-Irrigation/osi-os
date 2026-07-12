@@ -16,6 +16,7 @@ const NAME_TO_PATH = {
   'history-router': 'osi-history-router',
   'dendro-analytics': 'osi-dendro-analytics',
   'zone-env': 'osi-zone-env',
+  'device-writer': 'osi-device-writer',
   'agroscope-uplink-transform': 'codecs/agroscope_uplink_transform',
 };
 

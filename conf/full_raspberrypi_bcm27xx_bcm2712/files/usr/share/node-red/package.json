@@ -18,6 +18,7 @@
     "osi-lib": "file:osi-lib",
     "osi-dendro-analytics": "file:osi-dendro-analytics",
     "osi-zone-env": "file:osi-zone-env",
-    "osi-history-router": "file:osi-history-router"
+    "osi-history-router": "file:osi-history-router",
+    "osi-device-writer": "file:osi-device-writer"
   }
 }

@@ -487,6 +487,14 @@ fetch_required "osi-lib index.js" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-lib/index.js" \
     "/srv/node-red/osi-lib/index.js"
 
+fetch_required "osi-device-writer package.json" \
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-device-writer/package.json" \
+    "/srv/node-red/osi-device-writer/package.json"
+
+fetch_required "osi-device-writer index.js" \
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-device-writer/index.js" \
+    "/srv/node-red/osi-device-writer/index.js"
+
 fetch_required "edge-channels.json" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/edge-channels.json" \
     "/srv/node-red/edge-channels.json"
