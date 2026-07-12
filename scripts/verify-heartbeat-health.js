@@ -16,7 +16,9 @@ const REQUIRED_HEALTH_KEYS = [
   'disk_free_pct',
   'errors_last_at',
   'errors_total',
+  'clock_source',
   'health_state',
+  'rtc_present',
   'schema_sig',
   'sync_dirty_pending',
   'sync_linked',
@@ -291,6 +293,8 @@ function assertHealthPayload(profile, buildNode) {
     errors_total: 3,
     errors_last_at: 1720000000000,
     health_state: 'healthy',
+    rtc_present: true,
+    clock_source: 'rtc',
     ignored_extra_key: 'must not leak',
   };
 
@@ -321,6 +325,8 @@ function assertHealthPayload(profile, buildNode) {
       errors_total: null,
       errors_last_at: null,
       health_state: null,
+      rtc_present: null,
+      clock_source: null,
     });
 
     const stringResult = runBuildHeartbeat(profile, buildNode, 'malformed-health');

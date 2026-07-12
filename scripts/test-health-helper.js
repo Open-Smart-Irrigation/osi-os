@@ -32,7 +32,9 @@ const PUBLIC_HEALTH_KEYS = [
   'disk_free_pct',
   'crash_count',
   'crash_looping',
-  'health_state'
+  'health_state',
+  'rtc_present',
+  'clock_source'
 ];
 
 const ALL_NULL_HEALTH = Object.fromEntries(PUBLIC_HEALTH_KEYS.map((key) => [key, null]));
@@ -423,4 +425,39 @@ test('disk df fallback source does not use synchronous child process collection'
   const source = fs.readFileSync(HEALTH_HELPER_FILE, 'utf8');
 
   assert.doesNotMatch(source, /\bexecFileSync\b/);
+});
+
+const { rtcHealth } = requireHealthHelperFresh();
+
+test('rtcHealth reports present when the sysfs rtc node exists', () => {
+  const dir = fs.mkdtempSync(require('node:path').join(os.tmpdir(), 'rtc-'));
+  const node = require('node:path').join(dir, 'rtc0');
+  fs.mkdirSync(node);
+  fs.writeFileSync(require('node:path').join(node, 'since_epoch'), '1700000000\n');
+  const r = rtcHealth({ rtcSysfsPath: node, hwclockRunner: () => 'ok' });
+  assert.strictEqual(r.rtc_present, true);
+});
+
+test('rtcHealth reports absent when the sysfs rtc node does not exist', () => {
+  const r = rtcHealth({ rtcSysfsPath: '/nonexistent/rtc0', hwclockRunner: () => { throw new Error('no hwclock'); } });
+  assert.strictEqual(r.rtc_present, false);
+});
+
+test('rtcHealth is fail-soft: null path yields rtc_present null, never throws', () => {
+  let r;
+  assert.doesNotThrow(() => {
+    r = rtcHealth({ rtcSysfsPath: null });
+  });
+  assert.strictEqual(r.rtc_present, null);
+});
+
+test('rtcHealth: injected hwclock probe succeeds => present', () => {
+  const r = rtcHealth({ rtcSysfsPath: '/nonexistent/rtc0', hwclockRunner: () => 'ok' });
+  assert.strictEqual(r.rtc_present, true);
+});
+
+test('gatherEdgeHealth includes rtc_present in its output shape', async () => {
+  const db = makeFacadeShim();
+  const health = await gatherEdgeHealth(db, { timeoutMs: 2000, diskPath: os.tmpdir() });
+  assert.ok(Object.prototype.hasOwnProperty.call(health, 'rtc_present'));
 });
