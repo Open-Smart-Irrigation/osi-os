@@ -26,6 +26,17 @@ const CHANNELS = [
   { key: 'dendro_ratio', unit: null, label: 'Ratio', cardType: 'dendro', edgeField: 'dendro_ratio', exportable: true, deprecated: false },
   { key: 'adc_ch0v', unit: 'V', label: 'ADC ch0', cardType: 'dendro', edgeField: 'adc_ch0v', exportable: true, deprecated: false },
   { key: 'adc_ch1v', unit: 'V', label: 'ADC ch1', cardType: 'dendro', edgeField: 'adc_ch1v', exportable: true, deprecated: false },
+  { key: 'rain_count_cumulative', unit: 'count', label: 'Rain count', cardType: 'environment', edgeField: 'rain_count_cumulative', exportable: true, deprecated: false },
+  { key: 'rain_tips_delta', unit: 'count', label: 'Rain tips delta', cardType: 'environment', edgeField: 'rain_tips_delta', exportable: true, deprecated: false },
+  { key: 'rain_gauge_cumulative_mm', unit: 'mm', label: 'Rain cumul.', cardType: 'environment', edgeField: 'rain_gauge_cumulative_mm', exportable: true, deprecated: false },
+  { key: 'flow_liters_per_min', unit: 'L/min', label: 'Flow rate', cardType: 'environment', edgeField: 'flow_liters_per_min', exportable: true, deprecated: false },
+  { key: 'flow_liters_per_10min', unit: 'L/10min', label: 'Flow (10 min)', cardType: 'environment', edgeField: 'flow_liters_per_10min', exportable: true, deprecated: false },
+  { key: 'flow_liters_today', unit: 'L', label: 'Flow today', cardType: 'environment', edgeField: 'flow_liters_today', exportable: true, deprecated: false },
+  { key: 'flow_liters_delta', unit: 'L', label: 'Flow delta', cardType: 'environment', edgeField: 'flow_liters_delta', exportable: true, deprecated: false },
+  { key: 'flow_count_cumulative', unit: 'count', label: 'Flow count', cardType: 'environment', edgeField: 'flow_count_cumulative', exportable: true, deprecated: false },
+  { key: 'flow_pulses_delta', unit: 'count', label: 'Flow pulses', cardType: 'environment', edgeField: 'flow_pulses_delta', exportable: true, deprecated: false },
+  { key: 'wind_direction_deg', unit: '°', label: 'Wind direction', cardType: 'environment', edgeField: 'wind_direction_deg', exportable: true, deprecated: false },
+  { key: 'pipe_pressure_kpa', unit: 'kPa', label: 'Pipe pressure', cardType: 'environment', edgeField: 'pipe_pressure_kpa', exportable: true, deprecated: false },
 ];
 
 const CHANNELS_BY_KEY = new Map(CHANNELS.map((channel) => [channel.key, channel]));
