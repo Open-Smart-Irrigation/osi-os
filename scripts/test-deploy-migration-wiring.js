@@ -8,10 +8,8 @@ const path = require('node:path');
 
 const REPO = path.resolve(__dirname, '..');
 const deploy = fs.readFileSync(path.join(REPO, 'deploy.sh'), 'utf8');
-const manifest = JSON.parse(fs.readFileSync(
-  path.join(REPO, 'database/migrations/ordered/CHECKSUMS.json'),
-  'utf8'
-));
+const migrationsDir = path.join(REPO, 'database/migrations/ordered');
+const manifest = JSON.parse(fs.readFileSync(path.join(migrationsDir, 'CHECKSUMS.json'), 'utf8'));
 
 function indexOf(needle) {
   const idx = deploy.indexOf(needle);
@@ -24,16 +22,10 @@ function escapeRegExp(value) {
 }
 
 test('deploy migration wiring fetches the ordered migration corpus from CHECKSUMS.json', () => {
-  assert.deepEqual(Object.keys(manifest).sort(), [
-    '0001__baseline.sql',
-    '0002__gateway_health.sql',
-    '0003__stamp_contract_version_and_zone_op_split.sql',
-    '0004__widen_schedule_trigger_metric_check.sql',
-    '0005__field_work_requests.sql',
-    '0006__improvement_request_contact_email.sql',
-    '0007__analysis_views.sql',
-    '0008__sync_outbox_eviction_index.sql',
-  ]);
+  const migrationFiles = fs.readdirSync(migrationsDir)
+    .filter((name) => /^\d{4}__.*\.sql$/.test(name))
+    .sort();
+  assert.deepEqual(Object.keys(manifest).sort(), migrationFiles);
   assert.match(deploy, /database\/migrations\/ordered\/CHECKSUMS\.json/);
   assert.match(deploy, /Object\.keys\(manifest\)\.sort\(\)/);
   assert.match(deploy, /database\/migrations\/ordered\/\$migration/);

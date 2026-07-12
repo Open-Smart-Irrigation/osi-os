@@ -4,8 +4,8 @@
  *
  * Creates (or reuses if already present):
  *   • 3 ChirpStack applications:  OSI Sensors, OSI Actuators, OSI Field Tester
- *   • 6 device profiles:          KIWI Sensor, STREGA Valve, Dragino LSN50, RAK Field Tester,
- *                                 SenseCAP S2120, Aqua-Scope LoRain
+ *   • 7 device profiles:          KIWI Sensor, STREGA Valve, Dragino LSN50, RAK Field Tester,
+ *                                 SenseCAP S2120, Aqua-Scope LoRain, Milesight UC512
  *   • 1 API key:                  osi-nodered  (used by Node-RED function nodes)
  *
  * Writes results to:
@@ -38,10 +38,12 @@
  *   CS_PROFILE_RAK_NAME      (default: "OSI RAK Field Tester")
  *   CS_PROFILE_S2120_NAME    (default: "OSI SenseCAP S2120")
  *   CS_PROFILE_LORAIN_NAME   (default: "OSI Aqua-Scope LoRain")
+ *   CS_PROFILE_UC512_NAME    (default: "OSI Milesight UC512")
  *   STREGA_CODEC_PATH        (default: "/srv/node-red/codecs/strega_gen1_decoder.js")
  *   LSN50_CODEC_PATH         (default: "/srv/node-red/codecs/dragino_lsn50_decoder.js")
  *   S2120_CODEC_PATH         (default: "/srv/node-red/codecs/sensecap_s2120_decoder.js")
  *   LORAIN_CODEC_PATH        (default: "/srv/node-red/codecs/aquascope_lorain_decoder.js")
+ *   UC512_CODEC_PATH         (default: "/srv/node-red/codecs/milesight_uc512_decoder.js")
  */
 
 'use strict';
@@ -88,10 +90,12 @@ const CFG = {
   profileRakName: process.env.CS_PROFILE_RAK_NAME || 'OSI RAK Field Tester',
   profileS2120Name: process.env.CS_PROFILE_S2120_NAME || 'OSI SenseCAP S2120',
   profileLorainName: process.env.CS_PROFILE_LORAIN_NAME || 'OSI Aqua-Scope LoRain',
+  profileUc512Name: process.env.CS_PROFILE_UC512_NAME || 'OSI Milesight UC512',
   stregaCodecPath: process.env.STREGA_CODEC_PATH || '/srv/node-red/codecs/strega_gen1_decoder.js',
   lsn50CodecPath: process.env.LSN50_CODEC_PATH || '/srv/node-red/codecs/dragino_lsn50_decoder.js',
   s2120CodecPath: process.env.S2120_CODEC_PATH || '/srv/node-red/codecs/sensecap_s2120_decoder.js',
-  lorainCodecPath: process.env.LORAIN_CODEC_PATH || '/srv/node-red/codecs/aquascope_lorain_decoder.js'
+  lorainCodecPath: process.env.LORAIN_CODEC_PATH || '/srv/node-red/codecs/aquascope_lorain_decoder.js',
+  uc512CodecPath: process.env.UC512_CODEC_PATH || '/srv/node-red/codecs/milesight_uc512_decoder.js'
 };
 
 const ENV_LOADER_MARKER = '// [OSI] chirpstack env loader';
@@ -296,7 +300,8 @@ function toUciCloudKey(envKey) {
     CHIRPSTACK_PROFILE_CLOVER: 'chirpstack_profile_clover',
     CHIRPSTACK_PROFILE_RAK10701: 'chirpstack_profile_rak10701',
     CHIRPSTACK_PROFILE_S2120: 'chirpstack_profile_s2120',
-    CHIRPSTACK_PROFILE_LORAIN: 'chirpstack_profile_lorain'
+    CHIRPSTACK_PROFILE_LORAIN: 'chirpstack_profile_lorain',
+    CHIRPSTACK_PROFILE_UC512: 'chirpstack_profile_uc512'
   };
   return mapping[envKey] || null;
 }
@@ -446,6 +451,8 @@ async function main() {
   const s2120ProfileId = await getOrCreateProfileWithCodec(client, tenantId, CFG.profileS2120Name, 'SenseCAP S2120 8-in-1 weather station (LoRaWAN 1.0.3 OTAA)', s2120CodecScript);
   const lorainCodecScript = readCodecScript(CFG.lorainCodecPath, 'LoRain');
   const lorainProfileId = await getOrCreateProfileWithCodec(client, tenantId, CFG.profileLorainName, 'Aqua-Scope LoRain RANLWE01 rain gauge (LoRaWAN 1.0.3 OTAA)', lorainCodecScript);
+  const uc512CodecScript = readCodecScript(CFG.uc512CodecPath, 'UC512');
+  const uc512ProfileId = await getOrCreateProfileWithCodec(client, tenantId, CFG.profileUc512Name, 'Milesight UC512 dual-valve controller (LoRaWAN 1.0.3 OTAA)', uc512CodecScript);
 
   console.log('\n[ 5/5 ] Writing configuration');
   const gatewayEui = detectGatewayEui();
@@ -468,7 +475,8 @@ async function main() {
     CHIRPSTACK_PROFILE_CLOVER: rak10701ProfileId,
     CHIRPSTACK_PROFILE_RAK10701: rak10701ProfileId,
     CHIRPSTACK_PROFILE_S2120: s2120ProfileId,
-    CHIRPSTACK_PROFILE_LORAIN: lorainProfileId
+    CHIRPSTACK_PROFILE_LORAIN: lorainProfileId,
+    CHIRPSTACK_PROFILE_UC512: uc512ProfileId
   };
   writeEnvFile(envVars);
   writeUciConfig(envVars);
@@ -491,7 +499,8 @@ async function main() {
   console.log(`    ${CFG.profileLsn50Name.padEnd(24)} ${lsn50ProfileId}`);
   console.log(`    ${CFG.profileRakName.padEnd(24)} ${rak10701ProfileId}`);
   console.log(`    ${CFG.profileS2120Name.padEnd(24)} ${s2120ProfileId}`);
-  console.log(`    ${CFG.profileLorainName.padEnd(24)} ${lorainProfileId}\n`);
+  console.log(`    ${CFG.profileLorainName.padEnd(24)} ${lorainProfileId}`);
+  console.log(`    ${CFG.profileUc512Name.padEnd(24)} ${uc512ProfileId}\n`);
   if (gatewayEui) {
     console.log(`  Gateway EUI (DEVICE_EUI): ${gatewayEui}\n`);
   } else {

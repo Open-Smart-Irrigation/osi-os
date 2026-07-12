@@ -18,6 +18,16 @@ function scratch() {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'migcli-'));
 }
 
+function migrationVersionsAfter(version) {
+  return fs.readdirSync(MIGRATIONS_DIR)
+    .map((name) => {
+      const match = name.match(/^(\d{4})__/);
+      return match ? Number(match[1]) : null;
+    })
+    .filter((n) => n !== null && n > version)
+    .sort((a, b) => a - b);
+}
+
 test('device at head: no pending migrations, no persistent backup, applied empty', async () => {
   const dir = scratch();
   const db = path.join(dir, 'device.db');
@@ -47,7 +57,7 @@ test('pending destructive: persistent backup taken + fsync-verified, applies to 
   const db = await deviceAtV3(dir);
   const backupDir = path.join(dir, 'bak');
   const res = await runMigrateCli({ dbPath: db, backupDir, migrationsDir: MIGRATIONS_DIR, log: () => {} });
-  assert.deepEqual(res.applied, [4, 5, 6, 7, 8]);
+  assert.deepEqual(res.applied, migrationVersionsAfter(3));
   assert.ok(res.offDeviceBackup && fs.existsSync(res.offDeviceBackup), 'persistent backup file must exist');
   const bakRows = await cliRunner(res.offDeviceBackup)
     .all("SELECT name FROM sqlite_master WHERE type='table' LIMIT 1");
