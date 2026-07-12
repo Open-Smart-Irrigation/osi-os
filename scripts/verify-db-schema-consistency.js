@@ -109,6 +109,11 @@ const schemaContract = {
     'dendro_position_raw_mm',
     'dendro_saturated',
     'dendro_saturation_side',
+    'valve_1_state',
+    'valve_2_state',
+    'valve_1_pulse',
+    'valve_2_pulse',
+    'pipe_pressure_kpa',
   ],
   dendrometer_readings: [
     'id',
@@ -384,6 +389,31 @@ const schemaContract = {
     'updated_at',
     'sync_version',
   ],
+  ingest_quarantine: [
+    'id',
+    'deveui',
+    'channel',
+    'reason',
+    'raw_value',
+    'received_at',
+  ],
+  zone_valve_assignments: [
+    'id',
+    'zone_id',
+    'deveui',
+    'valve_channel',
+    'created_at',
+  ],
+  lsn50_shadow_diff: [
+    'id',
+    'deveui',
+    'recorded_at',
+    'field',
+    'old_value',
+    'new_value',
+    'diff_type',
+    'created_at',
+  ],
 };
 
 const requiredIndexes = {
@@ -424,6 +454,13 @@ const requiredIndexes = {
   improvement_requests: [
     'idx_improvement_requests_user_created_at',
     'idx_improvement_requests_status',
+  ],
+  ingest_quarantine: [
+    'idx_ingest_quarantine_received',
+  ],
+  zone_valve_assignments: [
+    'idx_zone_valve_zone',
+    'idx_zone_valve_deveui',
   ],
 };
 
@@ -503,6 +540,15 @@ const requiredIndexSqlFragments = {
   ],
   idx_improvement_requests_status: [
     'on improvement_requests(local_status, cloud_status, updated_at desc)',
+  ],
+  idx_ingest_quarantine_received: [
+    'on ingest_quarantine(received_at)',
+  ],
+  idx_zone_valve_zone: [
+    'on zone_valve_assignments(zone_id)',
+  ],
+  idx_zone_valve_deveui: [
+    'on zone_valve_assignments(deveui)',
   ],
 };
 

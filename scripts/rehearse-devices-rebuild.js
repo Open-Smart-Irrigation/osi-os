@@ -8,7 +8,7 @@ const { DatabaseSync } = require('node:sqlite');
 const REPO = path.resolve(__dirname, '..');
 const SEED = path.join(REPO, 'database/seed-blank.sql');
 const FLOWS = path.join(REPO, 'conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/flows.json');
-const REQUIRED = ['KIWI_SENSOR','STREGA_VALVE','DRAGINO_LSN50','TEKTELIC_CLOVER','SENSECAP_S2120','AQUASCOPE_LORAIN'];
+const REQUIRED = ['KIWI_SENSOR','STREGA_VALVE','DRAGINO_LSN50','TEKTELIC_CLOVER','SENSECAP_S2120','AQUASCOPE_LORAIN','MILESIGHT_UC512'];
 
 function sh(db, sql) { execFileSync('sqlite3', ['-bail', db], { input: sql, encoding: 'utf8' }); }
 function funcText() { return JSON.parse(fs.readFileSync(FLOWS, 'utf8')).find((n) => n.id === 'sync-init-fn').func; }
