@@ -17,6 +17,7 @@ const NAME_TO_PATH = {
   'dendro-analytics': 'osi-dendro-analytics',
   'zone-env': 'osi-zone-env',
   'device-writer': 'osi-device-writer',
+  'uc512-normalize': 'osi-uc512-normalize',
   'agroscope-uplink-transform': 'codecs/agroscope_uplink_transform',
 };
 
