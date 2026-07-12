@@ -93,9 +93,9 @@ This is the **program map**, not a spec. Each item below is a charter line: goal
 | Item | Repo | Size | Depends on | Mode |
 |---|---|---|---|---|
 | 3.0 **Entry gate:** actuator duration-bound CI assertion (DD17, extend `verify-command-safety.js`) — done: wired `verify-command-safety.js` into `migrations.yml` CI; added generic guard `assertRegistryParity` (primary "Command Type Registry" ↔ fallback deep equality), `assertActuatorsDurationBound` (exact-match close-dispatch allowlist, naming tripwire for mislabeled `actuator:false`, schema validation), `assertBareOpenNotInRegistry`; added missing `base_bcm2709` seed DB. Registry-shape gate is entry-only; per-path assertions are mandatory in each device spec (3.1) | osi-os | S | — | direct |
-| 3.1 MClimate T-Valve (#18): codec + normalizer + generic manifest-driven writer with closed allow-list & ingest dead-letter (DD6) — the abstraction's second consumer | osi-os | L | 1.A1 | spec+plan |
-| 3.2 `verify-device-integration.js`: full round-trip CI gate (codec output → normalize → write → manifest-declared columns and nothing else) | osi-os | M | 3.1 | spec+plan |
-| 3.3 LSN50 shadow mode on demo gateways (DD7: old path writes, new path diffs) | osi-os | M | 3.1 | direct |
+| 3.1 Narrow-waist ingest — Milesight UC512 pilot (replaces MClimate as first consumer): codec + normalizer + generic manifest-driven `osi-device-writer` with closed allow-list & `ingest_quarantine` dead-letter (DD6) + `zone_valve_assignments` junction table for two-channel actuation — spec+plan done (`2026-07-12-narrow-waist-uc512-design.md`, Fable-reviewed, PR #137 merged) | osi-os | L | 1.A1 | spec+plan |
+| 3.2 `verify-device-integration.js`: full round-trip CI gate (codec output → normalize → write → manifest-declared columns and nothing else) — bundled with 3.1 spec | osi-os | M | 3.1 | spec+plan |
+| 3.3 LSN50 shadow mode on demo gateways (DD7: old path writes, new path diffs, normalize-level comparison) — bundled with 3.1 spec | osi-os | M | 3.1 | direct |
 | 3.4 Server-side: first `SyncEventApplier` extraction for the MClimate resource (DD12) | osi-server | M | 1.B3, 1.B4 | spec+plan |
 
 ### Phase 4 — Cutover + the hard node + boot-DDL removal (weeks 15–20)
