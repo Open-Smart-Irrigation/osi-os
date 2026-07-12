@@ -1900,16 +1900,17 @@ expectExcludesById('strega-sql-fn', "await run('COMMIT')", 'the old multi-await 
 expectExcludesById('strega-sql-fn', "await run('ROLLBACK')", 'the old multi-await rollback call');
 expectExcludesById('strega-sql-fn', "msg.topic = insertSql + '; ' + updateSql + ';'", 'the old multi-statement sqlite topic builder');
 expectExcludesById('strega-sql-fn', 'target_state', 'passive STREGA uplinks from touching target_state');
-expectIncludesById('lsn50-sql-fn', 'lsn50_mode_code, lsn50_mode_label, lsn50_mode_observed_at', 'persists observed LSN50 mode into device_data');
-expectIncludesById('lsn50-sql-fn', 'rain_mm_per_hour, rain_mm_per_10min, rain_mm_today, rain_delta_status', 'persists interval-aware rain metadata into device_data');
-expectIncludesById('lsn50-sql-fn', 'flow_liters_per_min, flow_liters_per_10min, flow_liters_today, flow_delta_status', 'persists interval-aware flow metadata into device_data');
-expectIncludesById('lsn50-sql-fn', 'rain_mm_per_10min, rain_mm_today', 'persists normalized and daily rain telemetry into device_data');
-expectIncludesById('lsn50-sql-fn', 'flow_liters_per_10min, flow_liters_today', 'persists normalized and daily flow telemetry into device_data');
-expectIncludesById('lsn50-sql-fn', 'counter_interval_seconds', 'persists elapsed counter interval into device_data');
-expectIncludesById('lsn50-sql-fn', 'adc_ch0v, adc_ch1v, swt_1, swt_2, swt_3,', 'persists dendrometer ADC channels and derived Chameleon SWT into device_data');
-expectIncludesById('lsn50-sql-fn', 'dendro_ratio, dendro_mode_used, dendro_position_raw_mm, dendro_position_mm, dendro_valid, dendro_delta_mm,', 'persists dual-path dendrometer raw and compatibility positions into device_data');
-expectIncludesById('lsn50-sql-fn', 'dendro_stem_change_um,', 'persists baseline-relative stem change into device_data');
-expectIncludesById('lsn50-sql-fn', 'dendro_saturated, dendro_saturation_side,', 'persists dendrometer saturation metadata into device_data');
+// DD8 cleanup: lsn50-sql-fn, lsn50-sqlite, and shadow compare (093d7832e89c4027) deleted;
+// LSN50 ingest now flows through osi-lsn50-normalize + osi-device-writer via node 460e0bfd95f89e67.
+// Column-level persistence is tested by verify-device-integration.js.
+expectMissingNodeById('lsn50-sql-fn', 'old LSN50 Build SQL INSERT (replaced by osi-device-writer)');
+expectMissingNodeById('lsn50-sqlite', 'old LSN50 Sensor DB Insert (replaced by osi-device-writer)');
+expectMissingNodeById('093d7832e89c4027', 'old LSN50 Shadow Compare (DD8 cleanup)');
+expectIncludesById('460e0bfd95f89e67', 'lsn50-normalize', 'loads normalizer via osi-lib');
+expectIncludesById('460e0bfd95f89e67', 'device-writer', 'loads device-writer via osi-lib');
+expectIncludesById('460e0bfd95f89e67', 'edge-channels.json', 'reads edge manifest for column mapping');
+expectLibById('460e0bfd95f89e67', 'osiDb', 'osi-db-helper', 'opens the local database for LSN50 writes');
+expectLibById('460e0bfd95f89e67', 'osiLib', 'osi-lib', 'loads normalizer and writer via quarantine-safe loader');
 expectIncludesById('lsn50-zone-agg-fn', "localDateIso(d.timestamp || computedAt", 'bins MOD9 zone totals by uplink timestamp instead of processing time');
 expectIncludesById('lsn50-zone-agg-fn', "d.rainDeltaStatus === 'ok'", 'only aggregates valid rain deltas into zone totals');
 expectIncludesById('lsn50-zone-agg-fn', "d.flowDeltaStatus === 'ok'", 'only aggregates valid flow deltas into zone totals');
