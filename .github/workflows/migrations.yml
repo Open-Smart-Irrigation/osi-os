@@ -69,6 +69,7 @@ jobs:
       - run: node scripts/verify-heartbeat-health.js
       - run: node scripts/verify-helper-registration.js
       - run: node --test conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-lib/index.test.js
+      - run: node --test conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-db-integrity/index.test.js
       - run: node --test conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-dendro-analytics/index.test.js
       - run: node scripts/capture-dendro-analytics-vectors.js --verify
       - run: node --test scripts/test-dendro-contract.js scripts/verify-dendro-contract-mirror.test.js
