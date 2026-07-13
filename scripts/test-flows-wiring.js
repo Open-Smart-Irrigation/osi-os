@@ -140,6 +140,74 @@ for (const profile of ['bcm2712', 'bcm2709']) {
     }
 }
 
+// === Field Journal Task 11 pending-command path ===
+
+const journalCommandTypes = [
+    'UPSERT_JOURNAL_ENTRY',
+    'VOID_JOURNAL_ENTRY',
+    'UPSERT_JOURNAL_CUSTOM_VOCAB',
+    'UPSERT_JOURNAL_PLOT',
+    'UPSERT_JOURNAL_PLOT_GROUP',
+];
+const commandRegistry = byId['cmd-type-registry'];
+const pendingReplay = byId['sync-pending-split'];
+const forceSyncBuilder = byId['sync-force-build'];
+const pendingGuard = byId['reject-indefinite-open'];
+const dedupe = byId['command-dedupe-dispatch'];
+const journalApply = byId['journal-command-apply-fn'];
+const ackQueue = byId['command-ack-queue-rest'];
+for (const commandType of journalCommandTypes) {
+    if (!commandRegistry || !new RegExp('\\b' + commandType + '\\s*:').test(commandRegistry.func || '')) {
+        failures.push(`journal commands: registry is missing ${commandType}`);
+    }
+}
+if (!pendingReplay || !/_pendingCommandEnvelope/.test(pendingReplay.func || '') ||
+    !/payload:\s*rawPayload/.test(pendingReplay.func || '') ||
+    /cmd\.command_type\s*\|\|\s*rawPayload\.command_type/.test(pendingReplay.func || '')) {
+    failures.push('journal commands: pending replay must retain a protected delivery envelope and raw payload');
+}
+if (!forceSyncBuilder || !/_pendingCommandEnvelope/.test(forceSyncBuilder.func || '') ||
+    !/payload:\s*rawPayload/.test(forceSyncBuilder.func || '') ||
+    /cmd\.command_type\s*\|\|\s*rawPayload\.command_type/.test(forceSyncBuilder.func || '')) {
+    failures.push('journal commands: force-sync producer must retain a protected delivery envelope and raw payload');
+}
+if (!pendingGuard || !/\(\?:\^\|_\)JOURNAL\(\?:_\|\$\)/.test(pendingGuard.func || '')) {
+    failures.push('journal commands: guard must pass unknown JOURNAL subtypes to durable rejection');
+}
+for (const fallbackNodeId of ['reject-indefinite-open', 'write-strega-expectation']) {
+    const fallbackNode = byId[fallbackNodeId];
+    if (!fallbackNode || !/UC512_OPEN_FOR_DURATION\s*:/.test(fallbackNode.func || '')) {
+        failures.push(`journal commands: ${fallbackNodeId} fallback lost UC512_OPEN_FOR_DURATION`);
+    }
+}
+if (!dedupe || JSON.stringify(dedupe.libs) !== JSON.stringify([
+    { var: 'osiDb', module: 'osi-db-helper' },
+    { var: 'osiJournal', module: 'osi-journal' },
+]) || JSON.stringify(dedupe.wires) !== JSON.stringify([
+    ['journal-command-apply-fn'],
+    ['9d5e3035c3d069c4'],
+]) || !/deduplicatePendingCommand/.test(dedupe.func || '') ||
+    !/node\.error/.test(dedupe.func || '') || /dispatching command/.test(dedupe.func || '')) {
+    failures.push('journal commands: dedupe must delegate exact replay, fail closed, and bypass ACK reclassification');
+}
+if (!journalApply || JSON.stringify(journalApply.libs) !== JSON.stringify([
+    { var: 'osiDb', module: 'osi-db-helper' },
+    { var: 'osiJournal', module: 'osi-journal' },
+]) || JSON.stringify(journalApply.wires) !== JSON.stringify([
+    ['934bf2bc19a8ce22'],
+    ['9d5e3035c3d069c4'],
+]) || !/applyJournalCommand/.test(journalApply.func || '') || !/\.close\s*\(/.test(journalApply.func || '')) {
+    failures.push('journal commands: journal applier must delegate, close DB, and separate fallback from durable ACK');
+}
+if (!ackQueue || JSON.stringify(ackQueue.libs) !== JSON.stringify([
+    { var: 'osiDb', module: 'osi-db-helper' },
+    { var: 'osiJournal', module: 'osi-journal' },
+]) || !/queueCommandAck/.test(ackQueue.func || '') ||
+    /INSERT OR REPLACE INTO applied_commands/.test(ackQueue.func || '') ||
+    /if \(duplicateFlag\) return 'APPLIED'/.test(ackQueue.func || '')) {
+    failures.push('journal commands: legacy ACK queue must keep ledger+ACK atomic without ledger rewrite or duplicate reclassification');
+}
+
 // === Field request intake + status apply wiring ===
 
 for (const route of [

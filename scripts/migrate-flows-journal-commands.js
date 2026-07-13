@@ -1,0 +1,345 @@
+#!/usr/bin/env node
+'use strict';
+
+const crypto = require('node:crypto');
+const fs = require('node:fs');
+const path = require('node:path');
+
+const root = path.resolve(__dirname, '..');
+const flowPaths = [
+  path.join(root, 'conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/flows.json'),
+  path.join(root, 'conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/flows.json'),
+];
+
+const expectedNodeHashes = {
+  'sync-pending-split': 'b510b8f16e71eaf951a50c8035bbbaf6c990ed316b6631b59e361a83c53f6ba7',
+  'sync-force-build': 'e4cd467ca3c145b9728e307f826aa7fafb5fdaade5ee905dd9d92e554ca0def8',
+  'reject-indefinite-open': 'd52775da39d3bd02c113e1270cae3a5b2df1f0b106c84f2e874afa8bbdf8a9b5',
+  'command-dedupe-dispatch': 'e6b37170bec7c98adc17cf6423df94f31693642ca7e92897c4aac47d13ec23dd',
+  'cmd-type-registry': 'a5237108cf313821e2618a49f0beecab1299e15b4527bcd9ead93e9454aaba45',
+  'write-strega-expectation': '00df3c5c345a7b638fd9a91875a1d320b140e00890dbe0550bf0baaa01c7ebed',
+  'command-ack-queue-rest': '6b63484ab0b1b277a4357fc1ced7c5091d083a3966b6237732c7f93e235b06a2',
+};
+
+const journalRegistryRows = [
+  "    UPSERT_JOURNAL_ENTRY:      { dispatch: 'journal_apply',             actuator: false,   requires_duration: false  },",
+  "    VOID_JOURNAL_ENTRY:        { dispatch: 'journal_apply',             actuator: false,   requires_duration: false  },",
+  "    UPSERT_JOURNAL_CUSTOM_VOCAB: { dispatch: 'journal_apply',           actuator: false,   requires_duration: false  },",
+  "    UPSERT_JOURNAL_PLOT:       { dispatch: 'journal_apply',             actuator: false,   requires_duration: false  },",
+  "    UPSERT_JOURNAL_PLOT_GROUP: { dispatch: 'journal_apply',             actuator: false,   requires_duration: false  },",
+].join('\n');
+
+const replayLoopPrefix = `for (const cmd of commands) {
+  const rawPayload = cmd.payload && typeof cmd.payload === 'object' && !Array.isArray(cmd.payload)
+    ? cmd.payload
+    : {};
+  const deliveryCommandId = cmd.commandId !== undefined && cmd.commandId !== null
+    ? cmd.commandId
+    : cmd.command_id;
+  const trustedCommandType = String(cmd.commandType || cmd.command_type || '').trim().toUpperCase();
+  const trustedEffectKey = cmd.effectKey || cmd.effect_key || rawPayload.effectKey || rawPayload.effect_key || null;
+  const merged = Object.assign({}, rawPayload, {
+    commandId: deliveryCommandId,
+    commandType: trustedCommandType,
+    command_type: trustedCommandType,
+    eventUuid: cmd.eventUuid,
+    aggregateType: cmd.aggregateType,
+    aggregateKey: cmd.aggregateKey,
+    appliedSyncVersion: cmd.appliedSyncVersion,
+    leaseGrantedAt: cmd.leaseGrantedAt,
+    leaseExpiresAt: cmd.leaseExpiresAt,
+    leasedToGateway: cmd.leasedToGateway,
+    effectKey: trustedEffectKey,
+    _pendingCommandEnvelope: {
+      commandId: deliveryCommandId,
+      commandType: trustedCommandType,
+      effectKey: trustedEffectKey,
+      payload: rawPayload
+    }
+  });
+  if (merged.command_id == null) merged.command_id = deliveryCommandId;`;
+
+const forceQueueBefore = "          queuedCommands.push({ payload: Object.assign({ commandId: cmd.commandId, commandType: cmd.commandType, eventUuid: cmd.eventUuid, aggregateType: cmd.aggregateType, aggregateKey: cmd.aggregateKey, appliedSyncVersion: cmd.appliedSyncVersion, leaseGrantedAt: cmd.leaseGrantedAt, leaseExpiresAt: cmd.leaseExpiresAt, leasedToGateway: cmd.leasedToGateway, effectKey: cmd.effectKey || cmd.effect_key || (cmd.payload || {}).effectKey || (cmd.payload || {}).effect_key || null }, cmd.payload || {}) });";
+const forceQueueAfter = `          const rawPayload = cmd.payload && typeof cmd.payload === 'object' && !Array.isArray(cmd.payload)
+            ? cmd.payload
+            : {};
+          const deliveryCommandId = cmd.commandId !== undefined && cmd.commandId !== null
+            ? cmd.commandId
+            : cmd.command_id;
+          const trustedCommandType = String(cmd.commandType || cmd.command_type || '').trim().toUpperCase();
+          const trustedEffectKey = cmd.effectKey || cmd.effect_key || rawPayload.effectKey || rawPayload.effect_key || null;
+          const flattened = Object.assign({}, rawPayload, {
+            commandId: deliveryCommandId,
+            commandType: trustedCommandType,
+            command_type: trustedCommandType,
+            eventUuid: cmd.eventUuid,
+            aggregateType: cmd.aggregateType,
+            aggregateKey: cmd.aggregateKey,
+            appliedSyncVersion: cmd.appliedSyncVersion,
+            leaseGrantedAt: cmd.leaseGrantedAt,
+            leaseExpiresAt: cmd.leaseExpiresAt,
+            leasedToGateway: cmd.leasedToGateway,
+            effectKey: trustedEffectKey,
+            _pendingCommandEnvelope: {
+              commandId: deliveryCommandId,
+              commandType: trustedCommandType,
+              effectKey: trustedEffectKey,
+              payload: rawPayload
+            }
+          });
+          if (flattened.command_id == null) flattened.command_id = deliveryCommandId;
+          queuedCommands.push({ payload: flattened });`;
+
+const dedupeSource = `return (async () => {
+  const cmd = typeof msg.payload === 'string' ? JSON.parse(msg.payload) : (msg.payload || {});
+  const envelope = cmd._pendingCommandEnvelope;
+  if (!envelope || typeof envelope !== 'object') {
+    node.error('Pending command has no protected delivery envelope', msg);
+    return [null, null];
+  }
+  const gatewayEui = String(env.get('DEVICE_EUI') || '').trim().toUpperCase();
+  const db = new osiDb.Database('/data/db/farming.db');
+  const close = () => new Promise((resolve, reject) => db.close((error) => error ? reject(error) : resolve()));
+  try {
+    const result = await osiJournal.deduplicatePendingCommand(db, envelope, {
+      gateway_device_eui: gatewayEui,
+      command_type_recognized: msg._commandTypeRecognized === true
+    });
+    if (!result.handled) return [msg, null];
+    node.status({ fill: 'blue', shape: 'ring', text: 'duplicate command ' + String(result.ack.commandId) });
+    return [null, {
+      topic: 'devices/' + gatewayEui + '/command_ack',
+      payload: JSON.stringify(result.ack),
+      qos: 1
+    }];
+  } catch (error) {
+    node.error('Command dedupe failed closed: ' + String(error && error.message ? error.message : error), msg);
+    return [null, null];
+  } finally {
+    try {
+      await close();
+    } catch (closeError) {
+      node.warn('Command dedupe DB close failed: ' + String(closeError && closeError.message ? closeError.message : closeError));
+    }
+  }
+})();`;
+
+const journalApplySource = `return (async () => {
+  const cmd = typeof msg.payload === 'string' ? JSON.parse(msg.payload) : (msg.payload || {});
+  const envelope = cmd._pendingCommandEnvelope;
+  if (!envelope || typeof envelope !== 'object') {
+    node.error('Journal command has no protected delivery envelope', msg);
+    return [null, null];
+  }
+  const gatewayEui = String(env.get('DEVICE_EUI') || '').trim().toUpperCase();
+  const db = new osiDb.Database('/data/db/farming.db');
+  const close = () => new Promise((resolve, reject) => db.close((error) => error ? reject(error) : resolve()));
+  try {
+    const result = await osiJournal.applyJournalCommand(db, envelope, {
+      gateway_device_eui: gatewayEui
+    });
+    if (!result.handled) return [msg, null];
+    return [null, {
+      topic: 'devices/' + gatewayEui + '/command_ack',
+      payload: JSON.stringify(result.ack),
+      qos: 1
+    }];
+  } catch (error) {
+    node.error('Journal command apply failed closed: ' + String(error && error.message ? error.message : error), msg);
+    return [null, null];
+  } finally {
+    try {
+      await close();
+    } catch (closeError) {
+      node.warn('Journal command DB close failed: ' + String(closeError && closeError.message ? closeError.message : closeError));
+    }
+  }
+})();`;
+
+const queueAckSource = `return (async () => {
+  let ack;
+  try {
+    ack = typeof msg.payload === 'string' ? JSON.parse(msg.payload) : (msg.payload || {});
+  } catch (parseError) {
+    node.warn('Command ACK payload parse failed: ' + String(parseError && parseError.message ? parseError.message : parseError));
+    return null;
+  }
+  const db = new osiDb.Database('/data/db/farming.db');
+  const close = () => new Promise((resolve, reject) => db.close((error) => error ? reject(error) : resolve()));
+  try {
+    const queued = await osiJournal.queueCommandAck(db, ack);
+    msg.payload = JSON.stringify(queued);
+    return msg;
+  } catch (error) {
+    node.error('Failed to queue durable command ACK: ' + String(error && error.message ? error.message : error), msg);
+    return null;
+  } finally {
+    try {
+      await close();
+    } catch (closeError) {
+      node.warn('Command ACK queue DB close failed: ' + String(closeError && closeError.message ? closeError.message : closeError));
+    }
+  }
+})();`;
+
+function digest(node) {
+  return crypto.createHash('sha256').update(JSON.stringify(node)).digest('hex');
+}
+
+function replaceOnce(source, before, after, label) {
+  const first = source.indexOf(before);
+  if (first < 0 || source.indexOf(before, first + before.length) >= 0) {
+    throw new Error('Expected exactly one ' + label + ' replacement seam');
+  }
+  return source.slice(0, first) + after + source.slice(first + before.length);
+}
+
+function exposeEmptyCatches(source, label) {
+  return source.replace(/catch\s*\(([^)]+)\)\s*\{\s*\}/g, function(_match, binding) {
+    const variable = String(binding).trim();
+    return "catch (" + variable + ") { node.warn('" + label + ": ' + String(" + variable +
+      " && " + variable + ".message ? " + variable + ".message : " + variable + ")); }";
+  });
+}
+
+function assertUnique(flows) {
+  const ids = new Set();
+  for (const node of flows) {
+    if (!node.id) continue;
+    if (ids.has(node.id)) throw new Error('Duplicate flow node id: ' + node.id);
+    ids.add(node.id);
+  }
+}
+
+function isCurrent(byId) {
+  const handler = byId.get('journal-command-apply-fn');
+  return !!handler && handler.func === journalApplySource &&
+    byId.get('command-dedupe-dispatch').func === dedupeSource &&
+    byId.get('command-ack-queue-rest').func === queueAckSource &&
+    byId.get('sync-pending-split').func.includes('_pendingCommandEnvelope') &&
+    !byId.get('sync-pending-split').func.includes('cmd.command_type || rawPayload.command_type') &&
+    byId.get('sync-force-build').func.includes('_pendingCommandEnvelope') &&
+    !byId.get('sync-force-build').func.includes('cmd.command_type || rawPayload.command_type') &&
+    byId.get('cmd-type-registry').func.includes('UPSERT_JOURNAL_PLOT_GROUP:') &&
+    byId.get('reject-indefinite-open').func.includes('UC512_OPEN_FOR_DURATION:') &&
+    byId.get('write-strega-expectation').func.includes('UC512_OPEN_FOR_DURATION:');
+}
+
+function addCommandRows(source, marker, includeUc512) {
+  const rows = (includeUc512
+    ? "    UC512_OPEN_FOR_DURATION:   { dispatch: 'uc512_timed_open',         actuator: true,    requires_duration: true  },\n"
+    : '') + journalRegistryRows;
+  return replaceOnce(source, marker, marker + '\n' + rows, 'command registry rows');
+}
+
+function migrate(buffer) {
+  const flows = JSON.parse(buffer.toString('utf8'));
+  assertUnique(flows);
+  const byId = new Map(flows.filter((node) => node.id).map((node) => [node.id, node]));
+  if (isCurrent(byId)) return buffer;
+  if (byId.has('journal-command-apply-fn')) {
+    const replay = byId.get('sync-pending-split');
+    const force = byId.get('sync-force-build');
+    const oldTypeExpression = "String(cmd.commandType || cmd.command_type || rawPayload.command_type || '')";
+    const newTypeExpression = "String(cmd.commandType || cmd.command_type || '')";
+    if (byId.get('journal-command-apply-fn').func !== journalApplySource ||
+        byId.get('command-dedupe-dispatch').func !== dedupeSource ||
+        byId.get('command-ack-queue-rest').func !== queueAckSource ||
+        !replay.func.includes(oldTypeExpression) || !force.func.includes(oldTypeExpression)) {
+      throw new Error('Refusing non-exact journal command handler collision');
+    }
+    replay.func = replaceOnce(replay.func, oldTypeExpression, newTypeExpression, 'replay trusted command type');
+    force.func = replaceOnce(force.func, oldTypeExpression, newTypeExpression, 'force-sync trusted command type');
+    return Buffer.from(JSON.stringify(flows, null, 2) + '\n', 'utf8');
+  }
+  for (const [id, expected] of Object.entries(expectedNodeHashes)) {
+    const node = byId.get(id);
+    if (!node || digest(node) !== expected) {
+      throw new Error('Refusing drifted Task 11 flow node: ' + id);
+    }
+  }
+
+  const replay = byId.get('sync-pending-split');
+  const loopStart = replay.func.indexOf('for (const cmd of commands) {');
+  const commandTypeLine = "  const commandType = String(merged.command_type || merged.commandType || merged.action || '').trim().toUpperCase();";
+  const loopEnd = replay.func.indexOf(commandTypeLine, loopStart);
+  if (loopStart < 0 || loopEnd < 0) throw new Error('Replay Pending Commands merge seam is missing');
+  replay.func = replay.func.slice(0, loopStart) + replayLoopPrefix + '\n' + replay.func.slice(loopEnd);
+
+  const force = byId.get('sync-force-build');
+  force.func = replaceOnce(force.func, forceQueueBefore, forceQueueAfter, 'force-sync command queue');
+  force.func = exposeEmptyCatches(force.func, 'Force-sync optional operation failed');
+
+  const registry = byId.get('cmd-type-registry');
+  const registryMarker = "    SET_KIWI_INTERVAL:         { dispatch: 'kiwi_config',               actuator: false,   requires_duration: false  },";
+  registry.func = addCommandRows(registry.func, registryMarker, false);
+
+  for (const id of ['reject-indefinite-open', 'write-strega-expectation']) {
+    const node = byId.get(id);
+    const fallbackMarker = "    SET_KIWI_INTERVAL:         { dispatch: 'kiwi_config',               actuator: false,   requires_duration: false  },";
+    node.func = addCommandRows(node.func, fallbackMarker, true);
+    node.func = exposeEmptyCatches(node.func, id + ' ignored operation failed');
+  }
+  const guard = byId.get('reject-indefinite-open');
+  guard.func = replaceOnce(
+    guard.func,
+    "if (!entry) {\n    node.warn({ rejected: 'unknown_command_type', command_type: cmd.command_type, command_id: cmd.command_id || cmd.commandId });\n    return null;\n}",
+    "if (!entry) {\n    if (/(?:^|_)JOURNAL(?:_|$)/.test(cmd.command_type)) return msg;\n    node.warn({ rejected: 'unknown_command_type', command_type: cmd.command_type, command_id: cmd.command_id || cmd.commandId });\n    return null;\n}\nmsg._commandTypeRecognized = true;",
+    'unknown journal guard'
+  );
+
+  const dedupe = byId.get('command-dedupe-dispatch');
+  dedupe.func = dedupeSource;
+  dedupe.libs = [
+    { var: 'osiDb', module: 'osi-db-helper' },
+    { var: 'osiJournal', module: 'osi-journal' },
+  ];
+  dedupe.wires = [['journal-command-apply-fn'], ['9d5e3035c3d069c4']];
+
+  const queue = byId.get('command-ack-queue-rest');
+  queue.func = queueAckSource;
+  queue.libs = [
+    { var: 'osiDb', module: 'osi-db-helper' },
+    { var: 'osiJournal', module: 'osi-journal' },
+  ];
+
+  flows.push({
+    id: 'journal-command-apply-fn',
+    type: 'function',
+    z: dedupe.z,
+    name: 'Apply Journal Command',
+    func: journalApplySource,
+    outputs: 2,
+    timeout: 0,
+    noerr: 0,
+    initialize: '',
+    finalize: '',
+    libs: [
+      { var: 'osiDb', module: 'osi-db-helper' },
+      { var: 'osiJournal', module: 'osi-journal' },
+    ],
+    x: 1470,
+    y: 1060,
+    wires: [['934bf2bc19a8ce22'], ['9d5e3035c3d069c4']],
+  });
+  assertUnique(flows);
+  return Buffer.from(JSON.stringify(flows, null, 2) + '\n', 'utf8');
+}
+
+const before = flowPaths.map((file) => fs.readFileSync(file));
+if (!before[0].equals(before[1])) throw new Error('Maintained flows are not byte-identical before migration');
+for (let index = 0; index < before.length; index += 1) {
+  const roundTrip = Buffer.from(JSON.stringify(JSON.parse(before[index].toString('utf8')), null, 2) + '\n');
+  if (!before[index].equals(roundTrip)) throw new Error('Flow input is not a byte-stable JSON round-trip');
+}
+const after = migrate(before[0]);
+if (!after.equals(migrate(after))) throw new Error('Task 11 flow migration is not idempotent');
+if (after.equals(before[0])) {
+  process.stdout.write('migrate-flows-journal-commands: already current\n');
+  process.exit(0);
+}
+for (const file of flowPaths) fs.writeFileSync(file, after);
+if (!fs.readFileSync(flowPaths[0]).equals(fs.readFileSync(flowPaths[1]))) {
+  throw new Error('Maintained flows lost byte parity after migration');
+}
+process.stdout.write('migrate-flows-journal-commands: applied exact Task 11 command path\n');

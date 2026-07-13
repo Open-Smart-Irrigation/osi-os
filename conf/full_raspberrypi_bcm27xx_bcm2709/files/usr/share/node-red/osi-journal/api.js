@@ -583,6 +583,13 @@ async function recordResourceCommand(tx, principal, terminal) {
     gatewayDeviceEui: terminal.gateway_device_eui,
     appliedAt: now,
   };
+  const ackCommandId = principal.delivery_command_id == null
+    ? commandId
+    : principal.delivery_command_id;
+  if (principal.delivery_command_id != null &&
+      (!Number.isSafeInteger(ackCommandId) || ackCommandId <= 0)) {
+    throw apiError(400, 'invalid_command_id', 'Pending delivery command ID must be a positive integer');
+  }
   await dbRun(
     tx,
     'INSERT INTO applied_commands (' +
@@ -591,16 +598,19 @@ async function recordResourceCommand(tx, principal, terminal) {
     [commandId, terminal.gateway_device_eui, terminal.command_type, principal.effect_key,
       now, 'APPLIED', JSON.stringify(facts), 'edge']
   );
+  const hooks = principal.lifecycle_hooks;
+  if (hooks && typeof hooks.afterCommandLedger === 'function') {
+    await hooks.afterCommandLedger(facts);
+  }
   await dbRun(
     tx,
     'INSERT INTO command_ack_outbox (command_id,payload_json,created_at) VALUES (?,?,?)',
     [commandId, JSON.stringify(Object.assign({
-      commandId,
+      commandId: ackCommandId,
       status: 'ACKED',
       result: 'APPLIED',
     }, facts)), now]
   );
-  const hooks = principal.lifecycle_hooks;
   if (hooks && typeof hooks.afterCommand === 'function') await hooks.afterCommand(facts);
 }
 
@@ -1230,6 +1240,73 @@ function plotGroupAggregate(row, members) {
     deleted_at: nullable(row.deleted_at),
     members: members.slice().sort(),
   };
+}
+
+async function loadCurrentAggregate(db, type, key, principal) {
+  const scope = [key, principal.owner_user_uuid, principal.gateway_device_eui];
+  if (type === 'UPSERT_JOURNAL_ENTRY' || type === 'VOID_JOURNAL_ENTRY') {
+    const row = await dbGet(
+      db,
+      'SELECT * FROM journal_entries WHERE entry_uuid=? AND owner_user_uuid=? ' +
+        'AND gateway_device_eui=? AND deleted_at IS NULL LIMIT 1',
+      scope
+    );
+    if (!row) return null;
+    const values = await dbAll(
+      db,
+      'SELECT * FROM journal_entry_values WHERE entry_uuid=? ORDER BY group_index,attribute_code',
+      [key]
+    );
+    return buildAggregate(Object.assign({ contract_version: 1 }, row), values);
+  }
+  if (type === 'UPSERT_JOURNAL_CUSTOM_VOCAB') {
+    const row = await dbGet(
+      db,
+      'SELECT * FROM journal_vocab WHERE custom_field_uuid=? AND owner_user_uuid=? ' +
+        'AND gateway_device_eui=? AND deleted_at IS NULL LIMIT 1',
+      scope
+    );
+    if (!row) return null;
+    const mappings = await dbAll(
+      db,
+      'SELECT * FROM journal_vocab_mappings WHERE term_code=? ' +
+        'ORDER BY scheme_uri,mapping_role,external_id',
+      [row.code]
+    );
+    return vocabAggregate(row, mappings);
+  }
+  if (type === 'UPSERT_JOURNAL_PLOT') {
+    const row = await dbGet(
+      db,
+      'SELECT * FROM journal_plots WHERE plot_uuid=? AND owner_user_uuid=? ' +
+        'AND gateway_device_eui=? AND deleted_at IS NULL LIMIT 1',
+      scope
+    );
+    if (!row) return null;
+    const settings = await dbGet(
+      db,
+      'SELECT * FROM journal_plot_settings WHERE plot_uuid=? LIMIT 1',
+      [key]
+    );
+    if (!settings) return null;
+    return plotAggregate(row, settings);
+  }
+  if (type === 'UPSERT_JOURNAL_PLOT_GROUP') {
+    const row = await dbGet(
+      db,
+      'SELECT * FROM journal_plot_groups WHERE group_uuid=? AND owner_user_uuid=? ' +
+        'AND gateway_device_eui=? AND deleted_at IS NULL LIMIT 1',
+      scope
+    );
+    if (!row) return null;
+    const members = await dbAll(
+      db,
+      'SELECT plot_uuid FROM journal_plot_group_members WHERE group_uuid=? ORDER BY plot_uuid',
+      [key]
+    );
+    return plotGroupAggregate(row, members.map(function(member) { return member.plot_uuid; }));
+  }
+  return null;
 }
 
 async function validatedGroupMembers(tx, rawMembers, principal) {
@@ -2416,6 +2493,7 @@ module.exports = {
   listEntries,
   listPlotGroups,
   listPlots,
+  loadCurrentAggregate,
   loadScopedCatalog,
   resolvePrincipal,
   safeFilename,

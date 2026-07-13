@@ -943,6 +943,15 @@ function validateEntry(catalog, _layoutDef, _templateDef, entryInput, validation
 
 module.exports = {
   aggregateHash,
+  applyJournalCommand: function applyJournalCommand() {
+    return require('./commands').applyJournalCommand.apply(null, arguments);
+  },
+  deduplicatePendingCommand: function deduplicatePendingCommand() {
+    return require('./commands').deduplicatePendingCommand.apply(null, arguments);
+  },
+  queueCommandAck: function queueCommandAck() {
+    return require('./commands').queueCommandAck.apply(null, arguments);
+  },
   allowedUnits,
   assertJournalEntryEffectKey: function assertJournalEntryEffectKey() {
     return require('./lifecycle').assertJournalEntryEffectKey.apply(null, arguments);

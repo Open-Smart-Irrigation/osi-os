@@ -1,15 +1,15 @@
 {
   "description": "Ratchet baseline for empty catch blocks in maintained Node-RED function nodes. Update counts downward in the same commit that removes silent catches.",
-  "generatedFrom": "feat/extract-history-router Task 5 / refactor-program 4.2 (History API Router extraction: -1 silent catch from moved helper)",
+  "generatedFrom": "field-journal Slice 1 Task 11 (made eight catches visible in touched pending-command nodes)",
   "pattern": "catch\\s*(?:\\([^)]*\\))?\\s*\\{(?:\\s|;|//[^\\n]*|/\\*[\\s\\S]*?\\*/)*\\}  |  \\.catch\\s*\\(\\s*(?:(?:\\([^)]*\\)|[A-Za-z_$][\\w$]*)\\s*=>\\s*\\{(?:\\s|;|//[^\\n]*|/\\*[\\s\\S]*?\\*/)*\\}|function\\s*[A-Za-z_$][\\w$]*?\\s*\\([^)]*\\)\\s*\\{(?:\\s|;|//[^\\n]*|/\\*[\\s\\S]*?\\*/)*\\})\\s*\\)",
   "profiles": {
     "bcm2712": {
       "path": "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/flows.json",
-      "silentCatchCount": 243
+      "silentCatchCount": 235
     },
     "bcm2709": {
       "path": "conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/flows.json",
-      "silentCatchCount": 243
+      "silentCatchCount": 235
     }
   }
 }

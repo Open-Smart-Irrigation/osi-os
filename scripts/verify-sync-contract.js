@@ -25,6 +25,7 @@ const EXACT_STAGED_JOURNAL_COMMANDS = [
     'UPSERT_JOURNAL_PLOT',
     'UPSERT_JOURNAL_PLOT_GROUP',
 ];
+const EXACT_EDGE_DEFERRED_JOURNAL_COMMANDS = [];
 const EXACT_COMMAND_SEMANTIC_BINDINGS = {
     UPSERT_JOURNAL_ENTRY: {
         effect_key: { prefix: 'journal_entry', uuid_path: 'entry.entry_uuid', version_path: 'entry.base_sync_version' },
@@ -137,7 +138,7 @@ function loadStagedCommands() {
     if (commandKeys.join(',') !== 'cloudDeferred,edgeDeferred') {
         throw new Error(`sync-contract staging command axes must be cloudDeferred,edgeDeferred; got ${commandKeys.join(',') || '(none)'}`);
     }
-    assertExactList('staging commands.edgeDeferred', staging.commands.edgeDeferred, EXACT_STAGED_JOURNAL_COMMANDS);
+    assertExactList('staging commands.edgeDeferred', staging.commands.edgeDeferred, EXACT_EDGE_DEFERRED_JOURNAL_COMMANDS);
     assertExactList('staging commands.cloudDeferred', staging.commands.cloudDeferred, EXACT_STAGED_JOURNAL_COMMANDS);
     return staging.commands.edgeDeferred;
 }

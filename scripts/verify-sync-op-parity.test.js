@@ -95,13 +95,7 @@ function exactJournalStaging() {
   return {
     version: 1,
     commands: {
-      edgeDeferred: [
-        'UPSERT_JOURNAL_ENTRY',
-        'VOID_JOURNAL_ENTRY',
-        'UPSERT_JOURNAL_CUSTOM_VOCAB',
-        'UPSERT_JOURNAL_PLOT',
-        'UPSERT_JOURNAL_PLOT_GROUP',
-      ],
+      edgeDeferred: [],
       cloudDeferred: [
         'UPSERT_JOURNAL_ENTRY',
         'VOID_JOURNAL_ENTRY',

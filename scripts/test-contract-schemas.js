@@ -669,7 +669,7 @@ if (!fs.existsSync(STAGING_MANIFEST)) {
 } else {
     staging = JSON.parse(fs.readFileSync(STAGING_MANIFEST, 'utf8'));
     const exactStaging = staging && staging.version === 1 &&
-        JSON.stringify(staging.commands && staging.commands.edgeDeferred) === JSON.stringify(JOURNAL_COMMANDS) &&
+        JSON.stringify(staging.commands && staging.commands.edgeDeferred) === JSON.stringify([]) &&
         JSON.stringify(staging.commands && staging.commands.cloudDeferred) === JSON.stringify(JOURNAL_COMMANDS) &&
         JSON.stringify(staging.eventOps && staging.eventOps.edgeModuleOwned) === JSON.stringify([
             'JOURNAL_ENTRY_UPSERTED',
@@ -1081,14 +1081,25 @@ reportCheck(
     'device_eui exemption is missing or is not limited to the exact five journal commands'
 );
 
+const trustedCommandIdentity = {
+    owner_user_uuid: UUID,
+    author_principal_uuid: UUID,
+    author_label: 'Cloud researcher',
+};
 const commandFixtures = [
     {
+        ...trustedCommandIdentity,
         command_type: 'UPSERT_JOURNAL_ENTRY',
         command_id: UUID,
         effect_key: `journal_entry:${UUID}:0`,
-        entry: journalEntry,
+        entry: Object.assign({}, journalEntry, {
+            owner_user_uuid: UUID,
+            author_principal_uuid: UUID,
+            author_label: 'Cloud researcher',
+        }),
     },
     {
+        ...trustedCommandIdentity,
         command_type: 'VOID_JOURNAL_ENTRY',
         command_id: UUID,
         effect_key: `journal_entry:${UUID}:1`,
@@ -1097,22 +1108,25 @@ const commandFixtures = [
         reason: 'Entered against the wrong plot',
     },
     {
+        ...trustedCommandIdentity,
         command_type: 'UPSERT_JOURNAL_CUSTOM_VOCAB',
         command_id: UUID,
         effect_key: `journal_vocab:${UUID}:0`,
-        custom_vocab: customVocab,
+        custom_vocab: Object.assign({}, customVocab, { owner_user_uuid: UUID }),
     },
     {
+        ...trustedCommandIdentity,
         command_type: 'UPSERT_JOURNAL_PLOT',
         command_id: UUID,
         effect_key: `journal_plot:${UUID}:0`,
-        plot,
+        plot: Object.assign({}, plot, { owner_user_uuid: UUID }),
     },
     {
+        ...trustedCommandIdentity,
         command_type: 'UPSERT_JOURNAL_PLOT_GROUP',
         command_id: UUID,
         effect_key: `journal_plot_group:${UUID}:0`,
-        plot_group: plotGroup,
+        plot_group: Object.assign({}, plotGroup, { owner_user_uuid: UUID }),
     },
 ];
 reportCheck(
@@ -1164,6 +1178,31 @@ for (const fixture of commandFixtures) {
         /effect_key.*must equal/
     );
 }
+
+for (const identityField of ['owner_user_uuid', 'author_principal_uuid', 'author_label']) {
+    const missingIdentity = Object.assign({}, commandFixtures[0]);
+    delete missingIdentity[identityField];
+    expectInvalid(
+        `UPSERT_JOURNAL_ENTRY without trusted ${identityField}`,
+        cmdSchema,
+        missingIdentity,
+        new RegExp(`${identityField}.*required`)
+    );
+}
+expectValid(
+    'journal command accepts an explicit null author label',
+    cmdSchema,
+    Object.assign({}, commandFixtures[0], {
+        author_label: null,
+        entry: Object.assign({}, commandFixtures[0].entry, { author_label: null }),
+    })
+);
+expectInvalid(
+    'journal command rejects an oversized author label',
+    cmdSchema,
+    Object.assign({}, commandFixtures[0], { author_label: 'x'.repeat(121) }),
+    /author_label.*longer/
+);
 
 expectInvalid(
     'UPSERT_JOURNAL_ENTRY rejects draft status',

@@ -21,6 +21,7 @@ const EXACT_STAGED_COMMANDS = [
   'UPSERT_JOURNAL_PLOT',
   'UPSERT_JOURNAL_PLOT_GROUP',
 ];
+const EXACT_EDGE_DEFERRED_COMMANDS = [];
 const EXACT_EDGE_MODULE_OPS = [
   'JOURNAL_ENTRY_UPSERTED',
   'JOURNAL_ENTRY_VOIDED',
@@ -722,7 +723,7 @@ function validateStagingManifest(manifest) {
   }
 
   const checks = [
-    ['commands.edgeDeferred', commands && commands.edgeDeferred, EXACT_STAGED_COMMANDS],
+    ['commands.edgeDeferred', commands && commands.edgeDeferred, EXACT_EDGE_DEFERRED_COMMANDS],
     ['commands.cloudDeferred', commands && commands.cloudDeferred, EXACT_STAGED_COMMANDS],
     ['eventOps.edgeModuleOwned', eventOps && eventOps.edgeModuleOwned, EXACT_EDGE_MODULE_OPS],
     ['eventOps.edgeDeferred', eventOps && eventOps.edgeDeferred, EXACT_EDGE_DEFERRED_OPS],

@@ -24,6 +24,9 @@
     "additionalProperties": false,
     "properties": {
         "command_id": {"type": "string", "pattern": "^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}$"},
+        "owner_user_uuid": {"$ref": "resources.schema.json#/definitions/CanonicalUuid"},
+        "author_principal_uuid": {"$ref": "resources.schema.json#/definitions/CanonicalUuid"},
+        "author_label": {"type": ["string", "null"], "maxLength": 120},
         "command_type": {
             "type": "string",
             "enum": [
@@ -173,9 +176,9 @@
         {
             "if": {"properties": {"command_type": {"const": "UPSERT_JOURNAL_ENTRY"}}},
             "then": {
-                "required": ["effect_key", "entry"],
+                "required": ["owner_user_uuid", "author_principal_uuid", "author_label", "effect_key", "entry"],
                 "propertyNames": {
-                    "enum": ["command_id", "command_type", "device_eui", "effect_key", "issued_at", "expires_at", "entry"]
+                    "enum": ["command_id", "command_type", "owner_user_uuid", "author_principal_uuid", "author_label", "device_eui", "effect_key", "issued_at", "expires_at", "entry"]
                 },
                 "properties": {
                     "effect_key": {
@@ -194,9 +197,9 @@
         {
             "if": {"properties": {"command_type": {"const": "VOID_JOURNAL_ENTRY"}}},
             "then": {
-                "required": ["effect_key", "entry_uuid", "base_sync_version", "reason"],
+                "required": ["owner_user_uuid", "author_principal_uuid", "author_label", "effect_key", "entry_uuid", "base_sync_version", "reason"],
                 "propertyNames": {
-                    "enum": ["command_id", "command_type", "device_eui", "effect_key", "issued_at", "expires_at", "entry_uuid", "base_sync_version", "reason"]
+                    "enum": ["command_id", "command_type", "owner_user_uuid", "author_principal_uuid", "author_label", "device_eui", "effect_key", "issued_at", "expires_at", "entry_uuid", "base_sync_version", "reason"]
                 },
                 "properties": {
                     "effect_key": {
@@ -212,9 +215,9 @@
         {
             "if": {"properties": {"command_type": {"const": "UPSERT_JOURNAL_CUSTOM_VOCAB"}}},
             "then": {
-                "required": ["effect_key", "custom_vocab"],
+                "required": ["owner_user_uuid", "author_principal_uuid", "author_label", "effect_key", "custom_vocab"],
                 "propertyNames": {
-                    "enum": ["command_id", "command_type", "device_eui", "effect_key", "issued_at", "expires_at", "custom_vocab"]
+                    "enum": ["command_id", "command_type", "owner_user_uuid", "author_principal_uuid", "author_label", "device_eui", "effect_key", "issued_at", "expires_at", "custom_vocab"]
                 },
                 "properties": {
                     "effect_key": {
@@ -228,9 +231,9 @@
         {
             "if": {"properties": {"command_type": {"const": "UPSERT_JOURNAL_PLOT"}}},
             "then": {
-                "required": ["effect_key", "plot"],
+                "required": ["owner_user_uuid", "author_principal_uuid", "author_label", "effect_key", "plot"],
                 "propertyNames": {
-                    "enum": ["command_id", "command_type", "device_eui", "effect_key", "issued_at", "expires_at", "plot"]
+                    "enum": ["command_id", "command_type", "owner_user_uuid", "author_principal_uuid", "author_label", "device_eui", "effect_key", "issued_at", "expires_at", "plot"]
                 },
                 "properties": {
                     "effect_key": {
@@ -244,9 +247,9 @@
         {
             "if": {"properties": {"command_type": {"const": "UPSERT_JOURNAL_PLOT_GROUP"}}},
             "then": {
-                "required": ["effect_key", "plot_group"],
+                "required": ["owner_user_uuid", "author_principal_uuid", "author_label", "effect_key", "plot_group"],
                 "propertyNames": {
-                    "enum": ["command_id", "command_type", "device_eui", "effect_key", "issued_at", "expires_at", "plot_group"]
+                    "enum": ["command_id", "command_type", "owner_user_uuid", "author_principal_uuid", "author_label", "device_eui", "effect_key", "issued_at", "expires_at", "plot_group"]
                 },
                 "properties": {
                     "effect_key": {

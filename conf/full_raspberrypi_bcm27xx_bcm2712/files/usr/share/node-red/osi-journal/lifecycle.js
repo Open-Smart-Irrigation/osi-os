@@ -842,6 +842,14 @@ function commandIdFromPrincipal(principal) {
     : null;
 }
 
+function ackCommandIdFromPrincipal(principal, commandId) {
+  if (principal.delivery_command_id == null) return commandId;
+  if (!Number.isSafeInteger(principal.delivery_command_id) || principal.delivery_command_id <= 0) {
+    throw lifecycleError('invalid_command_id', 'Pending delivery command ID must be a positive integer');
+  }
+  return principal.delivery_command_id;
+}
+
 function assertCommandJournalEntryEffectKey(principal, terminal) {
   if (!commandIdFromPrincipal(principal)) return;
   assertJournalEntryEffectKey(principal.effect_key, terminal.entry_uuid, terminal.sync_version);
@@ -885,8 +893,19 @@ async function recordTerminalCommand(tx, principal, terminal) {
       'edge',
     ]
   );
+  const hooks = principal.lifecycle_hooks;
+  if (hooks && typeof hooks.afterCommandLedger === 'function') {
+    await hooks.afterCommandLedger({
+      command_id: commandId,
+      command_type: commandType,
+      entry_uuid: terminal.entry_uuid,
+      applied_sync_version: terminal.sync_version,
+      effect_key: effectKey,
+      payload_hash: payloadHash,
+    });
+  }
   const ack = Object.assign({
-    commandId,
+    commandId: ackCommandIdFromPrincipal(principal, commandId),
     status: 'ACKED',
     result: 'APPLIED',
   }, facts);
@@ -894,7 +913,6 @@ async function recordTerminalCommand(tx, principal, terminal) {
     'INSERT INTO command_ack_outbox (command_id,payload_json,created_at) VALUES (?,?,?)',
     [commandId, JSON.stringify(ack), appliedAt]
   );
-  const hooks = principal.lifecycle_hooks;
   if (hooks && typeof hooks.afterCommand === 'function') {
     await hooks.afterCommand({
       command_id: commandId,
