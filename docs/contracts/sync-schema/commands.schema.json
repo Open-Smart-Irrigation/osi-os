@@ -27,6 +27,7 @@
         "owner_user_uuid": {"$ref": "resources.schema.json#/definitions/CanonicalUuid"},
         "author_principal_uuid": {"$ref": "resources.schema.json#/definitions/CanonicalUuid"},
         "author_label": {"type": ["string", "null"], "maxLength": 120},
+        "duplicate_guard_ack_entry_uuid": {"$ref": "resources.schema.json#/definitions/CanonicalUuid"},
         "command_type": {
             "type": "string",
             "enum": [
@@ -137,6 +138,10 @@
             }
         },
         {
+            "if": {"properties": {"command_type": {"const": "UPSERT_JOURNAL_ENTRY"}}},
+            "else": {"not": {"required": ["duplicate_guard_ack_entry_uuid"]}}
+        },
+        {
             "if": {"properties": {"command_type": {"const": "OPEN_FOR_DURATION"}}},
             "then": {
                 "required": ["duration_seconds"],
@@ -178,7 +183,7 @@
             "then": {
                 "required": ["owner_user_uuid", "author_principal_uuid", "author_label", "effect_key", "entry"],
                 "propertyNames": {
-                    "enum": ["command_id", "command_type", "owner_user_uuid", "author_principal_uuid", "author_label", "device_eui", "effect_key", "issued_at", "expires_at", "entry"]
+                    "enum": ["command_id", "command_type", "owner_user_uuid", "author_principal_uuid", "author_label", "device_eui", "effect_key", "issued_at", "expires_at", "entry", "duplicate_guard_ack_entry_uuid"]
                 },
                 "properties": {
                     "effect_key": {

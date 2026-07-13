@@ -40,7 +40,7 @@ function isJournalCommandType(type) {
   return /(?:^|_)JOURNAL(?:_|$)/.test(type);
 }
 
-function trustedPrincipal(db, payload, runtime, type, deliveryId) {
+function trustedPrincipal(db, payload, runtime, type, deliveryId, intentHash) {
   const owner = payload.owner_user_uuid;
   const actor = payload.author_principal_uuid;
   const label = payload.author_label;
@@ -64,6 +64,7 @@ function trustedPrincipal(db, payload, runtime, type, deliveryId) {
         delivery_command_id: deliveryId,
         command_type: type,
         effect_key: payload.effect_key,
+        submitted_intent_hash: intentHash,
         lifecycle_hooks: runtime && runtime.lifecycle_hooks,
       };
     });
@@ -167,7 +168,58 @@ function entryInput(payload, principal) {
     season_variety: entry.season_variety,
     note: entry.note,
     values: entry.values,
+    duplicate_guard_ack_entry_uuid: payload.duplicate_guard_ack_entry_uuid,
   };
+}
+
+function hasOwn(value, key) {
+  return Object.prototype.hasOwnProperty.call(value, key);
+}
+
+function assertDuplicateGuardControl(type, payload) {
+  const present = hasOwn(payload, 'duplicate_guard_ack_entry_uuid');
+  if (!present) return;
+  if (type !== 'UPSERT_JOURNAL_ENTRY' ||
+      !UUID.test(payload.duplicate_guard_ack_entry_uuid || '')) {
+    throw commandError(
+      'malformed_command',
+      'duplicate_guard_ack_entry_uuid is valid only for journal entry upserts'
+    );
+  }
+}
+
+function submittedIntent(type, payload) {
+  const intent = {
+    command_type: type,
+    owner_user_uuid: payload.owner_user_uuid,
+    author_principal_uuid: payload.author_principal_uuid,
+    author_label: payload.author_label == null ? null : payload.author_label,
+  };
+  if (type === 'UPSERT_JOURNAL_ENTRY') intent.entry = payload.entry;
+  else if (type === 'VOID_JOURNAL_ENTRY') {
+    intent.void_entry = {
+      entry_uuid: payload.entry_uuid,
+      base_sync_version: payload.base_sync_version,
+      reason: payload.reason,
+    };
+  } else if (type === 'UPSERT_JOURNAL_CUSTOM_VOCAB') {
+    intent.custom_vocab = payload.custom_vocab;
+  } else if (type === 'UPSERT_JOURNAL_PLOT') intent.plot = payload.plot;
+  else if (type === 'UPSERT_JOURNAL_PLOT_GROUP') intent.plot_group = payload.plot_group;
+  else return null;
+  if (hasOwn(payload, 'duplicate_guard_ack_entry_uuid')) {
+    intent.duplicate_guard_ack_entry_uuid = payload.duplicate_guard_ack_entry_uuid;
+  }
+  return intent;
+}
+
+function submittedIntentHash(type, payload) {
+  try {
+    const intent = submittedIntent(type, payload);
+    return intent ? aggregateHash(intent) : null;
+  } catch (_) {
+    return null;
+  }
 }
 
 function assertResourceBinding(payload, principal, resource, keyField, prefix) {
@@ -235,7 +287,6 @@ function plotInput(payload, principal) {
     area_m2: source.area_m2,
     active: source.active,
     layout_code: settings.layout_code,
-    layout_version: 1,
   };
 }
 
@@ -304,22 +355,6 @@ async function currentResourceFacts(db, type, payload, owner, gateway) {
   };
 }
 
-function submittedPayloadHash(type, payload) {
-  const reference = resourceReference(type, payload);
-  let aggregate = null;
-  if (type === 'UPSERT_JOURNAL_ENTRY') aggregate = payload.entry;
-  else if (type === 'UPSERT_JOURNAL_CUSTOM_VOCAB') aggregate = payload.custom_vocab;
-  else if (type === 'UPSERT_JOURNAL_PLOT') aggregate = payload.plot;
-  else if (type === 'UPSERT_JOURNAL_PLOT_GROUP') aggregate = payload.plot_group;
-  else aggregate = { entry_uuid: reference.key, base_sync_version: payload.base_sync_version,
-    reason: payload.reason };
-  try {
-    return aggregateHash(aggregate);
-  } catch (_) {
-    return null;
-  }
-}
-
 function classification(error, type, payload) {
   const code = String(error && error.code || '').trim();
   if (code === 'parent_not_found' || code === 'missing_custom_dependency' ||
@@ -328,7 +363,17 @@ function classification(error, type, payload) {
     return { result: 'FAILED_RETRYABLE', terminal: false, reason: code || 'transient_failure' };
   }
   if (code && !/^SQLITE_/.test(code)) {
-    return { result: 'REJECTED_PERMANENT', terminal: true, reason: code };
+    const failure = { result: 'REJECTED_PERMANENT', terminal: true, reason: code };
+    const candidate = error && error.details && error.details.duplicateCandidate;
+    if (candidate && typeof candidate === 'object' && !Array.isArray(candidate)) {
+      failure.duplicateCandidate = {
+        entryUuid: candidate.entryUuid,
+        occurredStart: candidate.occurredStart,
+        activityCode: candidate.activityCode,
+        plotUuid: candidate.plotUuid,
+      };
+    }
+    return failure;
   }
   return null;
 }
@@ -339,7 +384,7 @@ function replayStatus(result) {
   return 'NACKED';
 }
 
-function replayAck(row, deliveryId) {
+function parsedResultDetail(row) {
   let facts = {};
   if (typeof row.result_detail === 'string' && row.result_detail) {
     try {
@@ -350,6 +395,14 @@ function replayAck(row, deliveryId) {
       facts = { storedResultDetail: row.result_detail };
     }
   }
+  return facts;
+}
+
+function replayAck(row, deliveryId, exactDelivery) {
+  const facts = parsedResultDetail(row);
+  const completeTerminalAck = hasOwn(facts, 'commandId') && hasOwn(facts, 'status') &&
+    hasOwn(facts, 'result') && hasOwn(facts, 'duplicate');
+  if (exactDelivery && completeTerminalAck) return Object.assign({}, facts);
   return Object.assign({}, facts, {
     commandId: deliveryId,
     commandType: facts.commandType || row.command_type,
@@ -361,15 +414,14 @@ function replayAck(row, deliveryId) {
   });
 }
 
-function journalEffectProvenanceMatches(row, ownerUserUuid, gatewayDeviceEui) {
-  let facts;
-  try {
-    facts = JSON.parse(row.result_detail);
-  } catch (_) {
-    return false;
-  }
+function journalEffectProvenanceMatches(row, payload, gatewayDeviceEui, type, intentHash) {
+  const facts = parsedResultDetail(row);
   return facts && typeof facts === 'object' && !Array.isArray(facts) &&
-    facts.ownerUserUuid === ownerUserUuid &&
+    typeof intentHash === 'string' && facts.submittedIntentHash === intentHash &&
+    facts.commandType === type &&
+    facts.ownerUserUuid === payload.owner_user_uuid &&
+    facts.authorPrincipalUuid === payload.author_principal_uuid &&
+    facts.authorLabel === (payload.author_label == null ? null : payload.author_label) &&
     facts.gatewayDeviceEui === gatewayDeviceEui &&
     String(row.device_eui || '').trim().toUpperCase() === gatewayDeviceEui;
 }
@@ -382,6 +434,11 @@ async function validJournalEffectBinding(db, envelope, runtime, type) {
       !UUID.test(payload.author_principal_uuid || '') ||
       (payload.author_label != null &&
         (typeof payload.author_label !== 'string' || Array.from(payload.author_label).length > 120))) {
+    return false;
+  }
+  try {
+    assertDuplicateGuardControl(type, payload);
+  } catch (_) {
     return false;
   }
   const gateway = String(runtime && runtime.gateway_device_eui || '').trim().toUpperCase();
@@ -460,8 +517,8 @@ function validNonJournalEffectBinding(envelope, runtime) {
   return false;
 }
 
-async function persistReplayAck(tx, row, deliveryId) {
-  const ack = replayAck(row, deliveryId);
+async function persistReplayAck(tx, row, deliveryId, exactDelivery) {
+  const ack = replayAck(row, deliveryId, exactDelivery);
   const createdAt = new Date().toISOString();
   await tx.run(
     'DELETE FROM command_ack_outbox WHERE command_id=? AND delivered_at IS NULL',
@@ -483,7 +540,7 @@ async function deduplicatePendingCommand(db, envelope, runtime) {
       [String(deliveryId)]
     );
     if (row) {
-      return { handled: true, ack: await persistReplayAck(tx, row, deliveryId) };
+      return { handled: true, ack: await persistReplayAck(tx, row, deliveryId, true) };
     }
     const type = commandType(envelope);
     const journalType = isJournalCommandType(type);
@@ -498,6 +555,7 @@ async function deduplicatePendingCommand(db, envelope, runtime) {
     ).trim();
     const gateway = String(runtime && runtime.gateway_device_eui || '').trim().toUpperCase();
     if (journalType) {
+      const intentHash = submittedIntentHash(type, envelope.payload);
       const candidates = await tx.all(
         'SELECT * FROM applied_commands WHERE effect_key=? AND command_type=? AND device_eui=? ' +
           'ORDER BY applied_at,command_id',
@@ -506,8 +564,10 @@ async function deduplicatePendingCommand(db, envelope, runtime) {
       row = candidates.find(function(candidate) {
         return journalEffectProvenanceMatches(
           candidate,
-          envelope.payload.owner_user_uuid,
-          gateway
+          envelope.payload,
+          gateway,
+          type,
+          intentHash
         );
       });
     } else {
@@ -518,7 +578,7 @@ async function deduplicatePendingCommand(db, envelope, runtime) {
       );
     }
     if (!row) return { handled: false };
-    return { handled: true, ack: await persistReplayAck(tx, row, deliveryId) };
+    return { handled: true, ack: await persistReplayAck(tx, row, deliveryId, false) };
   });
 }
 
@@ -573,7 +633,7 @@ async function queueCommandAck(db, rawAck, runtime) {
         'SELECT * FROM applied_commands WHERE command_id=? LIMIT 1',
         [commandId.stored]
       );
-      if (existing) return persistReplayAck(tx, existing, commandId.ack);
+      if (existing) return persistReplayAck(tx, existing, commandId.ack, true);
       await tx.run(
         'INSERT INTO applied_commands (' +
           'command_id,effect_key,device_eui,command_type,result,applied_at,result_detail,originator' +
@@ -600,7 +660,7 @@ async function queueCommandAck(db, rawAck, runtime) {
   });
 }
 
-async function persistFailure(db, envelope, payload, runtime, type, deliveryId, failure) {
+async function persistFailure(db, envelope, payload, runtime, type, deliveryId, failure, intentHash) {
   const gateway = String(runtime && runtime.gateway_device_eui || '').trim().toUpperCase();
   const owner = typeof payload.owner_user_uuid === 'string' ? payload.owner_user_uuid : null;
   const current = await currentResourceFacts(db, type, payload, owner, gateway);
@@ -608,14 +668,22 @@ async function persistFailure(db, envelope, payload, runtime, type, deliveryId, 
   const facts = {
     commandType: type,
     effectKey: typeof payload.effect_key === 'string' ? payload.effect_key : null,
-    payloadHash: submittedPayloadHash(type, payload),
+    payloadHash: null,
+    submittedIntentHash: intentHash || submittedIntentHash(type, payload),
     currentSyncVersion: current.currentSyncVersion,
     currentPayloadHash: current.currentPayloadHash,
     gatewayDeviceEui: EUI64.test(gateway) ? gateway : null,
     appliedAt,
     reason: failure.reason,
   };
-  if (UUID.test(owner || '')) facts.ownerUserUuid = owner;
+  if (UUID.test(owner || '')) {
+    facts.ownerUserUuid = owner;
+    facts.authorPrincipalUuid = UUID.test(payload.author_principal_uuid || '')
+      ? payload.author_principal_uuid
+      : null;
+    facts.authorLabel = payload.author_label == null ? null : payload.author_label;
+  }
+  if (failure.duplicateCandidate) facts.duplicateCandidate = failure.duplicateCandidate;
   const ack = Object.assign({
     commandId: deliveryId,
     status: failure.terminal ? 'NACKED' : 'FAILED_RETRYABLE',
@@ -630,7 +698,7 @@ async function persistFailure(db, envelope, payload, runtime, type, deliveryId, 
           'command_id,device_eui,command_type,effect_key,applied_at,result,result_detail,originator' +
         ') VALUES (?,?,?,?,?,?,?,?)',
         [String(deliveryId), EUI64.test(gateway) ? gateway : 'UNKNOWN', type,
-          facts.effectKey, appliedAt, failure.result, JSON.stringify(facts), 'edge']
+          facts.effectKey, appliedAt, failure.result, JSON.stringify(ack), 'edge']
       );
       const hooks = runtime && runtime.lifecycle_hooks;
       if (hooks && typeof hooks.afterCommandLedger === 'function') {
@@ -680,9 +748,10 @@ async function applyJournalCommandOnce(db, envelope, runtime, recheckReplay) {
       result: 'REJECTED_PERMANENT',
       terminal: true,
       reason: 'unsupported_command_type',
-    });
+    }, submittedIntentHash(type, unsupportedPayload));
   }
   let payload = envelope.payload;
+  let intentHash = null;
   try {
     payload = object(payload, 'Pending command payload');
     if (payload.command_type !== type) {
@@ -691,7 +760,9 @@ async function applyJournalCommandOnce(db, envelope, runtime, recheckReplay) {
     if (!UUID.test(payload.command_id || '')) {
       throw commandError('malformed_command', 'Logical command_id must be a canonical UUID');
     }
-    const principal = await trustedPrincipal(db, payload, runtime, type, deliveryId);
+    assertDuplicateGuardControl(type, payload);
+    intentHash = submittedIntentHash(type, payload);
+    const principal = await trustedPrincipal(db, payload, runtime, type, deliveryId, intentHash);
     if (type === 'UPSERT_JOURNAL_ENTRY') {
       const catalog = await loadCatalog(db, principal);
       await lifecycle.finalize(db, catalog, entryInput(payload, principal), principal);
@@ -731,7 +802,8 @@ async function applyJournalCommandOnce(db, envelope, runtime, recheckReplay) {
       runtime,
       type,
       deliveryId,
-      failure
+      failure,
+      intentHash
     );
   }
 }

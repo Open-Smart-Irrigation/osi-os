@@ -33,8 +33,11 @@ const MISSING_CUSTOM_CODE = 'custom.99999999-9999-4999-8999-999999999999';
 
 class TestDb {
   constructor(name) {
-    this.native = new DatabaseSync(path.join(TEMP_ROOT, name + '.db'));
+    this.filename = path.join(TEMP_ROOT, name + '.db');
+    this.native = new DatabaseSync(this.filename);
     this.native.exec(SEED);
+    this.native.exec('PRAGMA journal_mode=WAL');
+    this.snapshotParentHook = null;
   }
 
   prepare(sql) {
@@ -62,6 +65,37 @@ class TestDb {
     } catch (error) {
       this.native.exec('ROLLBACK');
       throw error;
+    }
+  }
+
+  async readSnapshot(executor) {
+    const native = new DatabaseSync(this.filename, { readOnly: true });
+    native.exec('BEGIN');
+    let parentHook = this.snapshotParentHook;
+    const scope = {
+      get: async (sql, params) => {
+        const row = native.prepare(sql).get(...(params || []));
+        if (parentHook && /FROM journal_(?:entries|vocab|plots|plot_groups)/.test(sql)) {
+          const hook = parentHook;
+          parentHook = null;
+          this.snapshotParentHook = null;
+          await hook();
+        }
+        return row;
+      },
+      all: async (sql, params) => native.prepare(sql).all(...(params || [])),
+      run: async (sql, params) => native.prepare(sql).run(...(params || [])),
+      exec: async (sql) => native.exec(sql),
+    };
+    try {
+      const result = await executor(scope);
+      native.exec('COMMIT');
+      return result;
+    } catch (error) {
+      try { native.exec('ROLLBACK'); } catch (_) {}
+      throw error;
+    } finally {
+      native.close();
     }
   }
 
@@ -658,6 +692,50 @@ test('stale entry command is not applied and durably reports current version and
   }
 });
 
+test('stale NACK version and hash come from one read snapshot during writer interleaving', async () => {
+  const db = fixtureDb('entry-stale-snapshot');
+  try {
+    const catalog = await journal.loadCatalog(db);
+    await journal.finalize(db, catalog, localEntryInput(), localPrincipal());
+    const before = await journal.loadCurrentAggregate(
+      db,
+      'UPSERT_JOURNAL_ENTRY',
+      ENTRY_UUID,
+      localPrincipal()
+    );
+    const beforeHash = journal.aggregateHash(before);
+    db.snapshotParentHook = async function() {
+      db.native.exec('BEGIN IMMEDIATE');
+      db.native.prepare(
+        'UPDATE journal_entries SET note=?,sync_version=? WHERE entry_uuid=?'
+      ).run('concurrent-new-parent', 2, ENTRY_UUID);
+      db.native.prepare(
+        'UPDATE journal_entry_values SET value_num=?,entered_value_num=? WHERE entry_uuid=?'
+      ).run(99, 99, ENTRY_UUID);
+      db.native.exec('COMMIT');
+    };
+    const result = await journal.applyJournalCommand(
+      db,
+      commandEnvelope({ commandId: 403 }),
+      { gateway_device_eui: GATEWAY_EUI }
+    );
+    assert.equal(result.ack.result, 'REJECTED_PERMANENT');
+    assert.equal(result.ack.currentSyncVersion, 1);
+    assert.equal(result.ack.currentPayloadHash, beforeHash);
+    const after = await journal.loadCurrentAggregate(
+      db,
+      'UPSERT_JOURNAL_ENTRY',
+      ENTRY_UUID,
+      localPrincipal()
+    );
+    assert.equal(after.sync_version, 2);
+    assert.equal(after.note, 'concurrent-new-parent');
+    assert.notEqual(journal.aggregateHash(after), beforeHash);
+  } finally {
+    db.close();
+  }
+});
+
 for (const fixture of [
   {
     name: 'custom vocabulary',
@@ -750,6 +828,49 @@ test('missing custom-vocabulary parent is retryable and never creates a terminal
     assert.equal((await db.get('SELECT COUNT(*) AS n FROM journal_vocab WHERE custom_field_uuid=?', [VOCAB_UUID])).n, 0);
     assert.equal((await db.get('SELECT COUNT(*) AS n FROM applied_commands WHERE command_id=?', ['403'])).n, 0);
     assert.equal((await db.get('SELECT COUNT(*) AS n FROM command_ack_outbox WHERE command_id=?', ['403'])).n, 1);
+  } finally {
+    db.close();
+  }
+});
+
+test('missing custom-unit conversion target is retryable and never creates a terminal ledger row', async () => {
+  const db = fixtureDb('unit-conversion-dependency');
+  try {
+    const missingTargetUnit = Object.assign({}, vocabAggregate(), {
+      code: 'custom.' + VOCAB_UUID,
+      kind: 'unit',
+      value_type: null,
+      quantity_kind: 'water_depth',
+      basis: 'water',
+      default_unit_code: null,
+      constraints_json: JSON.stringify({
+        dimension: 'water_depth',
+        to_canonical: {
+          unit_code: MISSING_CUSTOM_CODE,
+          scale: 10,
+          offset: 0,
+        },
+      }),
+    });
+    const result = await journal.applyJournalCommand(
+      db,
+      pendingCommand(404, 'UPSERT_JOURNAL_CUSTOM_VOCAB', 'journal_vocab:' + VOCAB_UUID + ':0', {
+        custom_vocab: missingTargetUnit,
+      }),
+      { gateway_device_eui: GATEWAY_EUI }
+    );
+    assert.equal(result.handled, true);
+    assert.equal(result.ack.result, 'FAILED_RETRYABLE');
+    assert.equal(result.ack.reason, 'missing_custom_dependency');
+    assert.equal((await db.get(
+      'SELECT COUNT(*) AS n FROM journal_vocab WHERE custom_field_uuid=?',
+      [VOCAB_UUID]
+    )).n, 0);
+    assert.equal((await db.get('SELECT COUNT(*) AS n FROM applied_commands WHERE command_id=?', ['404'])).n, 0);
+    assert.equal((await db.get(
+      'SELECT COUNT(*) AS n FROM command_ack_outbox WHERE command_id=? AND delivered_at IS NULL',
+      ['404']
+    )).n, 1);
   } finally {
     db.close();
   }
@@ -1161,14 +1282,25 @@ test('exact replay corrects a wrong pending ACK from the stored terminal ledger 
 
 test('compatible effect replay uses the stored APPLIED result for the new numeric delivery ID', async () => {
   const db = fixtureDb('dedupe-compatible-effect');
+  const submittedIntentHash = journal.aggregateHash({
+    command_type: 'UPSERT_JOURNAL_ENTRY',
+    owner_user_uuid: OWNER_UUID,
+    author_principal_uuid: ACTOR_UUID,
+    author_label: 'Cloud researcher',
+    entry: commandEnvelope().payload.entry,
+  });
   const storedFacts = {
+    commandType: 'UPSERT_JOURNAL_ENTRY',
     aggregateKey: ENTRY_UUID,
     ownerUserUuid: OWNER_UUID,
+    authorPrincipalUuid: ACTOR_UUID,
+    authorLabel: 'Cloud researcher',
     appliedSyncVersion: 1,
     effectKey: 'journal_entry:' + ENTRY_UUID + ':0',
     payloadHash: 'c'.repeat(64),
     gatewayDeviceEui: GATEWAY_EUI,
     appliedAt: '2026-07-12T10:00:00.000Z',
+    submittedIntentHash,
   };
   try {
     await db.run(
@@ -1610,6 +1742,202 @@ test('lease expiry queues a retryable ACK without consuming the terminal command
     assert.equal(queued.status, 'FAILED_RETRYABLE');
     assert.equal((await db.get('SELECT COUNT(*) AS n FROM applied_commands WHERE command_id=?', ['543'])).n, 0);
     assert.equal((await db.get('SELECT COUNT(*) AS n FROM command_ack_outbox WHERE command_id=?', ['543'])).n, 1);
+  } finally {
+    db.close();
+  }
+});
+
+test('exact delivery replay is byte-for-byte equivalent to the durable terminal ACK', async () => {
+  const db = fixtureDb('exact-terminal-ack-replay');
+  try {
+    const applied = await journal.applyJournalCommand(
+      db,
+      commandEnvelope({ commandId: 700 }),
+      { gateway_device_eui: GATEWAY_EUI }
+    );
+    assert.match(applied.ack.submittedIntentHash, /^[0-9a-f]{64}$/);
+    const ledger = await db.get(
+      'SELECT result_detail FROM applied_commands WHERE command_id=?',
+      ['700']
+    );
+    assert.deepEqual(JSON.parse(ledger.result_detail), applied.ack);
+    const replay = await journal.deduplicatePendingCommand(db, {
+      commandId: 700,
+      commandType: 'UPSERT_JOURNAL_ENTRY',
+      payload: { corrupt_redelivery_must_not_be_reparsed: true },
+    }, { gateway_device_eui: GATEWAY_EUI });
+    assert.deepEqual(replay.ack, applied.ack);
+    assert.equal(replay.ack.duplicate, false);
+  } finally {
+    db.close();
+  }
+});
+
+test('cross-delivery journal replay requires the same submitted intent and provenance', async () => {
+  const db = fixtureDb('submitted-intent-replay-gate');
+  try {
+    const original = commandEnvelope({ commandId: 701 });
+    const applied = await journal.applyJournalCommand(db, original, {
+      gateway_device_eui: GATEWAY_EUI,
+    });
+    assert.match(applied.ack.submittedIntentHash, /^[0-9a-f]{64}$/);
+
+    const transportOnly = structuredClone(original);
+    transportOnly.commandId = 702;
+    transportOnly.payload.command_id = '12111111-1111-4111-8111-111111111111';
+    transportOnly.payload.issued_at = '2026-07-12T10:00:00.000Z';
+    transportOnly.payload.expires_at = '2026-07-12T11:00:00.000Z';
+    const compatible = await journal.deduplicatePendingCommand(db, transportOnly, {
+      gateway_device_eui: GATEWAY_EUI,
+    });
+    assert.equal(compatible.handled, true);
+    assert.equal(compatible.ack.commandId, 702);
+    assert.equal(compatible.ack.duplicate, true);
+    assert.equal(compatible.ack.submittedIntentHash, applied.ack.submittedIntentHash);
+
+    const changedNote = structuredClone(original);
+    changedNote.commandId = 703;
+    changedNote.payload.entry.note = 'A different logical mutation';
+    assert.equal((await journal.deduplicatePendingCommand(db, changedNote, {
+      gateway_device_eui: GATEWAY_EUI,
+    })).handled, false);
+
+    const changedAuthor = structuredClone(original);
+    changedAuthor.commandId = 704;
+    changedAuthor.payload.author_principal_uuid = SECOND_ACTOR_UUID;
+    changedAuthor.payload.author_label = 'Different author';
+    changedAuthor.payload.entry.author_principal_uuid = SECOND_ACTOR_UUID;
+    changedAuthor.payload.entry.author_label = 'Different author';
+    assert.equal((await journal.deduplicatePendingCommand(db, changedAuthor, {
+      gateway_device_eui: GATEWAY_EUI,
+    })).handled, false);
+
+    const changedDuplicateAck = structuredClone(original);
+    changedDuplicateAck.commandId = 705;
+    changedDuplicateAck.payload.duplicate_guard_ack_entry_uuid =
+      '99999999-9999-4999-8999-999999999999';
+    assert.equal((await journal.deduplicatePendingCommand(db, changedDuplicateAck, {
+      gateway_device_eui: GATEWAY_EUI,
+    })).handled, false);
+
+    await db.run(
+      'INSERT INTO applied_commands (' +
+        'command_id,device_eui,command_type,effect_key,applied_at,result,result_detail,originator' +
+      ') VALUES (?,?,?,?,?,?,?,?)',
+      ['706', GATEWAY_EUI, 'UPSERT_JOURNAL_ENTRY', original.payload.effect_key,
+        '2026-07-12T12:00:00.000Z', 'APPLIED', JSON.stringify({
+          ownerUserUuid: OWNER_UUID,
+          authorPrincipalUuid: ACTOR_UUID,
+          authorLabel: 'Cloud researcher',
+          gatewayDeviceEui: GATEWAY_EUI,
+        }), 'edge']
+    );
+    await db.run('DELETE FROM applied_commands WHERE command_id=?', ['701']);
+    const legacy = structuredClone(original);
+    legacy.commandId = 707;
+    assert.equal((await journal.deduplicatePendingCommand(db, legacy, {
+      gateway_device_eui: GATEWAY_EUI,
+    })).handled, false, 'legacy terminal rows without submittedIntentHash never effect-match');
+  } finally {
+    db.close();
+  }
+});
+
+test('rejected commands keep payloadHash null and expose only safe camelCase duplicate facts', async () => {
+  const db = fixtureDb('rejection-fact-semantics');
+  try {
+    const catalog = await journal.loadCatalog(db);
+    await journal.finalize(db, catalog, localEntryInput(), localPrincipal());
+    const stale = await journal.applyJournalCommand(
+      db,
+      commandEnvelope({ commandId: 710 }),
+      { gateway_device_eui: GATEWAY_EUI }
+    );
+    assert.equal(stale.ack.result, 'REJECTED_PERMANENT');
+    assert.equal(stale.ack.reason, 'stale_version');
+    assert.equal(stale.ack.payloadHash, null);
+    assert.match(stale.ack.currentPayloadHash, /^[0-9a-f]{64}$/);
+    assert.match(stale.ack.submittedIntentHash, /^[0-9a-f]{64}$/);
+    assert.deepEqual(
+      JSON.parse((await db.get(
+        'SELECT result_detail FROM applied_commands WHERE command_id=?',
+        ['710']
+      )).result_detail),
+      stale.ack
+    );
+
+    const duplicateUuid = '23222222-2222-4222-8222-222222222222';
+    const duplicate = commandEnvelope({ commandId: 711 });
+    duplicate.payload.effect_key = 'journal_entry:' + duplicateUuid + ':0';
+    duplicate.payload.entry.entry_uuid = duplicateUuid;
+    duplicate.payload.entry.occurred_start = '2026-07-12T08:00:00.000Z';
+    const rejected = await journal.applyJournalCommand(db, duplicate, {
+      gateway_device_eui: GATEWAY_EUI,
+    });
+    assert.equal(rejected.ack.reason, 'duplicate_candidate');
+    assert.equal(rejected.ack.payloadHash, null);
+    assert.deepEqual(rejected.ack.duplicateCandidate, {
+      entryUuid: ENTRY_UUID,
+      occurredStart: '2026-07-12T07:30:00.000Z',
+      activityCode: 'irrigation',
+      plotUuid: PLOT_UUID,
+    });
+    assert.deepEqual(Object.keys(rejected.ack.duplicateCandidate).sort(), [
+      'activityCode', 'entryUuid', 'occurredStart', 'plotUuid',
+    ]);
+    assert.equal('details' in rejected.ack, false);
+  } finally {
+    db.close();
+  }
+});
+
+test('entry duplicate acknowledgement is canonical top-level command control and is stripped before storage', async () => {
+  const db = fixtureDb('command-duplicate-ack-control');
+  try {
+    const catalog = await journal.loadCatalog(db);
+    await journal.finalize(db, catalog, localEntryInput(), localPrincipal());
+    const separateUuid = '24222222-2222-4222-8222-222222222222';
+    const accepted = commandEnvelope({ commandId: 720 });
+    accepted.payload.effect_key = 'journal_entry:' + separateUuid + ':0';
+    accepted.payload.entry.entry_uuid = separateUuid;
+    accepted.payload.entry.occurred_start = '2026-07-12T08:00:00.000Z';
+    accepted.payload.duplicate_guard_ack_entry_uuid = ENTRY_UUID;
+    const result = await journal.applyJournalCommand(db, accepted, {
+      gateway_device_eui: GATEWAY_EUI,
+    });
+    assert.equal(result.ack.result, 'APPLIED');
+    const aggregate = JSON.parse((await db.get(
+      "SELECT payload_json FROM sync_outbox WHERE aggregate_type='JOURNAL_ENTRY' AND aggregate_key=?",
+      [separateUuid]
+    )).payload_json);
+    assert.equal('duplicate_guard_ack_entry_uuid' in aggregate, false);
+
+    const malformedUuid = '25222222-2222-4222-8222-222222222222';
+    const malformed = commandEnvelope({ commandId: 721 });
+    malformed.payload.effect_key = 'journal_entry:' + malformedUuid + ':0';
+    malformed.payload.entry.entry_uuid = malformedUuid;
+    malformed.payload.entry.occurred_start = '2026-07-12T11:00:00.000Z';
+    malformed.payload.duplicate_guard_ack_entry_uuid = 'NOT-A-UUID';
+    const malformedResult = await journal.applyJournalCommand(db, malformed, {
+      gateway_device_eui: GATEWAY_EUI,
+    });
+    assert.equal(malformedResult.ack.result, 'REJECTED_PERMANENT');
+    assert.equal(malformedResult.ack.reason, 'malformed_command');
+    assert.equal(await db.get('SELECT entry_uuid FROM journal_entries WHERE entry_uuid=?', [malformedUuid]), undefined);
+
+    const plot = pendingCommand(
+      722,
+      'UPSERT_JOURNAL_PLOT',
+      'journal_plot:' + SECOND_PLOT_UUID + ':0',
+      { plot: plotAggregate() }
+    );
+    plot.payload.duplicate_guard_ack_entry_uuid = ENTRY_UUID;
+    const wrongType = await journal.applyJournalCommand(db, plot, {
+      gateway_device_eui: GATEWAY_EUI,
+    });
+    assert.equal(wrongType.ack.result, 'REJECTED_PERMANENT');
+    assert.equal(wrongType.ack.reason, 'malformed_command');
+    assert.equal(await db.get('SELECT plot_uuid FROM journal_plots WHERE plot_uuid=?', [SECOND_PLOT_UUID]), undefined);
   } finally {
     db.close();
   }

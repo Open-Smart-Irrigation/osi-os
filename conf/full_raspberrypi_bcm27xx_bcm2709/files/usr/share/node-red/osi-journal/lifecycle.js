@@ -799,7 +799,16 @@ async function emitJournalOutbox(tx, source, op) {
   return { aggregate, entry, event_uuid: eventUuid };
 }
 
-async function assertNoDuplicateCandidate(tx, input, plot, occurrence, excludeEntryUuid) {
+function safeDuplicateCandidate(candidate) {
+  return {
+    entryUuid: candidate.entry_uuid,
+    occurredStart: candidate.occurred_start,
+    activityCode: candidate.activity_code,
+    plotUuid: candidate.plot_uuid,
+  };
+}
+
+async function findDuplicateCandidate(tx, input, plot, occurrence, excludeEntryUuid) {
   if (!plot.plot_uuid) return;
   const occurredMs = Date.parse(occurrence.start.instant);
   const lowerBound = new Date(occurredMs - 60 * 60 * 1000).toISOString();
@@ -820,18 +829,28 @@ async function assertNoDuplicateCandidate(tx, input, plot, occurrence, excludeEn
       occurrence.start.instant,
     ]
   );
+  return candidate;
+}
+
+async function assertNoDuplicateCandidate(
+  tx,
+  input,
+  plot,
+  occurrence,
+  excludeEntryUuid,
+  acknowledgedEntryUuids
+) {
+  const candidate = await findDuplicateCandidate(tx, input, plot, occurrence, excludeEntryUuid);
   if (!candidate) return;
   const acknowledged = input.duplicate_guard_ack_entry_uuid == null
     ? null
     : normalizeUuid(input.duplicate_guard_ack_entry_uuid, 'duplicate_guard_ack_entry_uuid', true);
-  if (acknowledged === candidate.entry_uuid) return;
+  if (acknowledged === candidate.entry_uuid ||
+      (acknowledgedEntryUuids && acknowledgedEntryUuids.has(candidate.entry_uuid))) return;
   const error = lifecycleError('duplicate_candidate', 'A similar final journal entry already exists');
   error.statusCode = 409;
   error.details = {
-    entry_uuid: candidate.entry_uuid,
-    occurred_start: candidate.occurred_start,
-    activity_code: candidate.activity_code,
-    plot_uuid: candidate.plot_uuid,
+    duplicateCandidate: safeDuplicateCandidate(candidate),
   };
   throw error;
 }
@@ -884,11 +903,19 @@ async function recordTerminalCommand(tx, principal, terminal) {
   const appliedAt = new Date().toISOString();
   const payloadHash = aggregateHash(terminal.aggregate);
   const facts = {
+    commandId: ackCommandIdFromPrincipal(principal, commandId),
+    commandType,
+    status: 'ACKED',
+    result: 'APPLIED',
+    duplicate: false,
     entryUuid: terminal.entry_uuid,
     ownerUserUuid: principal.owner_user_uuid,
+    authorPrincipalUuid: principal.author_principal_uuid,
+    authorLabel: principal.author_label == null ? null : principal.author_label,
     appliedSyncVersion: terminal.sync_version,
     effectKey,
     payloadHash,
+    submittedIntentHash: principal.submitted_intent_hash || null,
     gatewayDeviceEui: terminal.gateway_device_eui,
     appliedAt,
   };
@@ -918,11 +945,7 @@ async function recordTerminalCommand(tx, principal, terminal) {
       payload_hash: payloadHash,
     });
   }
-  const ack = Object.assign({
-    commandId: ackCommandIdFromPrincipal(principal, commandId),
-    status: 'ACKED',
-    result: 'APPLIED',
-  }, facts);
+  const ack = facts;
   await tx.run(
     'DELETE FROM command_ack_outbox WHERE command_id=? AND delivered_at IS NULL',
     [commandId]
@@ -1162,7 +1185,14 @@ async function createFinalInTransaction(tx, catalog, input, principal, entryInde
 
   const plot = await resolvePlotContext(tx, input.plot_uuid, principal);
   const occurrence = occurrenceFor(input, plot);
-  await assertNoDuplicateCandidate(tx, input, plot, occurrence, null);
+  await assertNoDuplicateCandidate(
+    tx,
+    input,
+    plot,
+    occurrence,
+    null,
+    options && options.duplicateAcknowledgements
+  );
   const deviceEui = await resolveDeviceEui(tx, input.device_eui, principal, plot);
   const candidate = Object.assign({}, input, {
     owner_user_uuid: plot.owner_user_uuid,
@@ -1177,6 +1207,7 @@ async function createFinalInTransaction(tx, catalog, input, principal, entryInde
     context_json: null,
   });
   delete candidate.duplicate_guard_ack_entry_uuid;
+  delete candidate.duplicate_guard_ack_entry_uuids;
   const definitions = await validationDefinitions(tx, candidate);
   const validation = validateEntry(catalog, definitions.layout, definitions.template, candidate, {});
   if (!validation.ok) {
@@ -1307,7 +1338,49 @@ async function finalizeBatch(db, catalog, input, plotUuids, principal) {
   if (new Set(plotUuids).size !== plotUuids.length) {
     throw lifecycleError('duplicate_plot', 'A journal batch cannot contain duplicate plots');
   }
+  const acknowledgementValues = input.duplicate_guard_ack_entry_uuids == null
+    ? []
+    : input.duplicate_guard_ack_entry_uuids;
+  if (!Array.isArray(acknowledgementValues) || acknowledgementValues.length > 100 ||
+      acknowledgementValues.some(function(value) { return !CANONICAL_UUID.test(value); }) ||
+      new Set(acknowledgementValues).size !== acknowledgementValues.length) {
+    throw lifecycleError('invalid_duplicate_ack', 'Batch duplicate acknowledgements are invalid');
+  }
+  const acknowledgements = new Set(acknowledgementValues);
   return db.transaction(async function(tx) {
+    const duplicateCandidates = [];
+    for (const plotUuid of plotUuids) {
+      const plot = await resolvePlotContext(tx, plotUuid, principal);
+      const candidateInput = Object.assign({}, input, { plot_uuid: plotUuid });
+      const occurrence = occurrenceFor(candidateInput, plot);
+      const candidate = await findDuplicateCandidate(tx, candidateInput, plot, occurrence, null);
+      if (candidate) duplicateCandidates.push(safeDuplicateCandidate(candidate));
+    }
+    const candidateUuids = new Set(duplicateCandidates.map(function(candidate) {
+      return candidate.entryUuid;
+    }));
+    for (const acknowledged of acknowledgements) {
+      if (!candidateUuids.has(acknowledged)) {
+        const error = lifecycleError(
+          'invalid_duplicate_ack',
+          'A batch duplicate acknowledgement does not match a current candidate'
+        );
+        error.statusCode = 422;
+        throw error;
+      }
+    }
+    const unacknowledged = duplicateCandidates.filter(function(candidate) {
+      return !acknowledgements.has(candidate.entryUuid);
+    });
+    if (unacknowledged.length) {
+      const error = lifecycleError(
+        'duplicate_candidates',
+        'Similar final journal entries already exist'
+      );
+      error.statusCode = 409;
+      error.details = { duplicateCandidates: unacknowledged };
+      throw error;
+    }
     const batchUuid = crypto.randomUUID();
     const contextCache = new Map();
     const entries = [];
@@ -1324,7 +1397,8 @@ async function finalizeBatch(db, catalog, input, plotUuids, principal) {
         entryInput,
         principal,
         index,
-        contextCache
+        contextCache,
+        { duplicateAcknowledgements: acknowledgements }
       );
       entries.push(Object.assign({ plot_uuid: plotUuids[index] }, result));
     }

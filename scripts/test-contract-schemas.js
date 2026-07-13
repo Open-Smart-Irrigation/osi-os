@@ -1190,6 +1190,29 @@ for (const identityField of ['owner_user_uuid', 'author_principal_uuid', 'author
     );
 }
 expectValid(
+    'UPSERT_JOURNAL_ENTRY accepts one canonical duplicate acknowledgement control',
+    cmdSchema,
+    Object.assign({}, commandFixtures[0], { duplicate_guard_ack_entry_uuid: UUID })
+);
+for (const invalidAcknowledgement of [UUID.toUpperCase(), COMPACT_UUID, 'not-a-uuid']) {
+    expectInvalid(
+        `UPSERT_JOURNAL_ENTRY rejects duplicate acknowledgement ${invalidAcknowledgement}`,
+        cmdSchema,
+        Object.assign({}, commandFixtures[0], {
+            duplicate_guard_ack_entry_uuid: invalidAcknowledgement,
+        }),
+        /duplicate_guard_ack_entry_uuid.*(?:match|forbidden|enum)/
+    );
+}
+for (const fixture of commandFixtures.slice(1)) {
+    expectInvalid(
+        `${fixture.command_type} rejects duplicate_guard_ack_entry_uuid`,
+        cmdSchema,
+        Object.assign({}, fixture, { duplicate_guard_ack_entry_uuid: UUID }),
+        /duplicate_guard_ack_entry_uuid.*(?:forbidden|enum)/
+    );
+}
+expectValid(
     'journal command accepts an explicit null author label',
     cmdSchema,
     Object.assign({}, commandFixtures[0], {

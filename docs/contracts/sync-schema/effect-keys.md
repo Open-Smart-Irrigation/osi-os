@@ -53,8 +53,21 @@ Plot-group upserts, including membership and resolve state. The base version is 
 ## Replay rules
 
 - Force-sync replay must preserve the original `effect_key` from the source command.
-- Two commands sharing an `effect_key` are deduplicated to a single applied effect, regardless of `command_id`.
+- Two non-journal commands sharing an `effect_key` are deduplicated to a single applied effect, regardless of `command_id`.
 - `command_id` still identifies one delivery record. Retrying that record preserves both `command_id` and `effect_key`; recreating a delivery for the same versioned journal mutation changes `command_id` but preserves `effect_key`.
+
+Journal effect-key replay also requires an exact `submittedIntentHash` match. The
+edge hashes the pre-normalization logical mutation, command type, owner, author
+principal, author label, and entry duplicate-guard acknowledgement. Delivery
+metadata (`command_id`, issue/expiry timestamps, and lease fields) is excluded.
+The terminal ledger stores this hash with the owner, author, gateway, command
+type, and result. A legacy terminal row without the hash can replay only by its
+exact delivery ID; it cannot suppress a distinct delivery that happens to reuse
+the same effect key.
+
+`payloadHash` has a different scope: it is the hash of the normalized aggregate
+that was applied. Rejected commands therefore store `payloadHash: null`; when a
+current aggregate exists, `currentPayloadHash` describes that edge state.
 
 ## Journal binding enforcement
 

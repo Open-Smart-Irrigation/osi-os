@@ -24,6 +24,18 @@ jobs:
         run: node scripts/test-journal-schema.js
       - name: Lifecycle tests
         run: node scripts/test-journal-lifecycle.js
+      - name: API tests
+        run: node scripts/test-journal-api.js
+      - name: Command-path tests
+        run: node scripts/test-journal-command-path.js
+      - name: Bootstrap tests
+        run: node scripts/test-journal-bootstrap.js
+      - name: Read-snapshot tests
+        run: node scripts/test-osi-db-helper-read-snapshot.js
+      - name: Catalog generator tests
+        run: node scripts/test-journal-catalog-generator.js
+      - name: Catalog generated-file check
+        run: node scripts/generate-journal-catalog.js --check
       - name: Performance fixture
         run: node --no-warnings scripts/test-journal-perf-fixture.js
       - name: Profile parity

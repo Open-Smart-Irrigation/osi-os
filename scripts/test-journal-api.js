@@ -37,6 +37,7 @@ class TestDb {
     this.closeCalls = 0;
     this.snapshotClosed = 0;
     this.valueBatchSizes = [];
+    this.closeError = null;
     nativeDatabases.push(this.native);
   }
 
@@ -91,7 +92,13 @@ class TestDb {
 
   async readSnapshot(executor) {
     try {
-      return await executor(this);
+      return await executor({
+        prepare: this.prepare.bind(this),
+        get: this.get.bind(this),
+        all: this.all.bind(this),
+        run: this.run.bind(this),
+        exec: this.exec.bind(this),
+      });
     } finally {
       this.snapshotClosed += 1;
     }
@@ -99,7 +106,7 @@ class TestDb {
 
   close(callback) {
     this.closeCalls += 1;
-    if (callback) queueMicrotask(callback);
+    if (callback) queueMicrotask(() => callback(this.closeError));
   }
 }
 
@@ -195,6 +202,7 @@ test('journal package exposes the complete Task 10 API surface', () => {
     'listPlots',
     'upsertPlot',
     'listPlotGroups',
+    'loadCurrentAggregate',
     'upsertPlotGroup',
     'exportWideCsv',
     'exportResearchPackage',
@@ -528,7 +536,7 @@ test('entry POST/PUT semantics and duplicate acknowledgement are transactional',
       { mode: 'create' }
     ),
     (error) => error && error.code === 'duplicate_candidate' &&
-      error.details.entry_uuid === firstUuid && error.statusCode === 409
+      error.details.duplicateCandidate.entryUuid === firstUuid && error.statusCode === 409
   );
   assert.equal(db.prepare('SELECT COUNT(*) AS n FROM journal_entries').get().n, 1);
   assert.equal(db.prepare('SELECT COUNT(*) AS n FROM sync_outbox').get().n, outboxBefore);
@@ -1293,4 +1301,459 @@ test('HTTP handler enforces ownership and limits, then round-trips a created ent
   assert.equal(listed.statusCode, 200);
   assert.deepEqual(listed.payload.entries.map((entry) => entry.entry_uuid), [entryUuid]);
   assert.equal(db.closeCalls, 5);
+});
+
+test('batch duplicate preflight returns every candidate and accepts only the exact acknowledgement set', async () => {
+  const db = new TestDb('batch-duplicate-preflight');
+  seedIdentity(db);
+  const plots = [
+    '81000000-0000-4000-8000-000000000001',
+    '81000000-0000-4000-8000-000000000002',
+  ];
+  const candidates = [
+    '82000000-0000-4000-8000-000000000001',
+    '82000000-0000-4000-8000-000000000002',
+  ];
+  for (let index = 0; index < plots.length; index += 1) {
+    await journal.upsertPlot(db, plotInput(plots[index], 'batch-duplicate-' + index), principal());
+    await journal.saveEntry(
+      db,
+      entryInput(candidates[index], plots[index], '2026-07-13T08:00:00', { season_crop: 'barley' }),
+      principal(),
+      { mode: 'create' }
+    );
+  }
+  const beforeEntries = db.prepare('SELECT COUNT(*) AS n FROM journal_entries').get().n;
+  const beforeOutbox = db.prepare('SELECT COUNT(*) AS n FROM sync_outbox').get().n;
+  const batch = entryInput(null, null, '2026-07-13T08:30:00', {
+    entry_uuid: null,
+    plot_uuid: null,
+    plot_uuids: plots,
+    season_crop: 'barley',
+  });
+
+  await assert.rejects(
+    journal.saveEntry(db, batch, principal(), { mode: 'create' }),
+    (error) => {
+      assert.equal(error.code, 'duplicate_candidates');
+      assert.equal(error.statusCode, 409);
+      assert.deepEqual(error.details.duplicateCandidates, [
+        {
+          entryUuid: candidates[0],
+          occurredStart: '2026-07-13T06:00:00.000Z',
+          activityCode: 'irrigation',
+          plotUuid: plots[0],
+        },
+        {
+          entryUuid: candidates[1],
+          occurredStart: '2026-07-13T06:00:00.000Z',
+          activityCode: 'irrigation',
+          plotUuid: plots[1],
+        },
+      ]);
+      assert.deepEqual(
+        Object.keys(error.details.duplicateCandidates[0]).sort(),
+        ['activityCode', 'entryUuid', 'occurredStart', 'plotUuid']
+      );
+      return true;
+    }
+  );
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM journal_entries').get().n, beforeEntries);
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM sync_outbox').get().n, beforeOutbox);
+
+  await assert.rejects(
+    journal.saveEntry(db, Object.assign({}, batch, {
+      duplicate_guard_ack_entry_uuids: [candidates[0]],
+    }), principal(), { mode: 'create' }),
+    (error) => error && error.code === 'duplicate_candidates' &&
+      error.details.duplicateCandidates.length === 1 &&
+      error.details.duplicateCandidates[0].entryUuid === candidates[1]
+  );
+  for (const invalid of [
+    [candidates[0], candidates[0]],
+    ['not-a-uuid'],
+    ['83000000-0000-4000-8000-000000000001'],
+    Array.from({ length: 101 }, (_, index) =>
+      '84' + String(index).padStart(6, '0') + '-0000-4000-8000-000000000001'),
+  ]) {
+    await assert.rejects(
+      journal.saveEntry(db, Object.assign({}, batch, {
+        duplicate_guard_ack_entry_uuids: invalid,
+      }), principal(), { mode: 'create' }),
+      (error) => error && ['invalid_duplicate_ack', 'duplicate_duplicate_ack', 'too_many_duplicate_acks']
+        .includes(error.code)
+    );
+  }
+  await assert.rejects(
+    journal.saveEntry(db, Object.assign(
+      entryInput('85000000-0000-4000-8000-000000000001', plots[0], '2026-07-13T12:00:00', {
+        season_crop: 'barley',
+      }),
+      { duplicate_guard_ack_entry_uuids: [] }
+    ), principal(), { mode: 'create' }),
+    (error) => error && error.code === 'invalid_batch_control'
+  );
+
+  const accepted = await journal.saveEntry(db, Object.assign({}, batch, {
+    duplicate_guard_ack_entry_uuids: candidates,
+  }), principal(), { mode: 'create' });
+  assert.equal(accepted.entries.length, 2);
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM journal_entries').get().n, beforeEntries + 2);
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM sync_outbox').get().n, beforeOutbox + 2);
+  for (const entry of accepted.entries) {
+    const aggregate = JSON.parse(db.prepare(
+      "SELECT payload_json FROM sync_outbox WHERE aggregate_type='JOURNAL_ENTRY' AND aggregate_key=?"
+    ).get(entry.entry_uuid).payload_json);
+    assert.equal('duplicate_guard_ack_entry_uuids' in aggregate, false);
+    assert.equal('duplicate_guard_ack_entry_uuid' in aggregate, false);
+  }
+});
+
+test('code-only plot layout binding rolls forward to the latest active version without rewriting history', async () => {
+  const db = new TestDb('layout-rollover');
+  seedIdentity(db);
+  const historicalPlot = '86000000-0000-4000-8000-000000000001';
+  const historicalEntry = '86000000-0000-4000-8000-000000000002';
+  await journal.upsertPlot(db, plotInput(historicalPlot, 'layout-v1-history'), principal());
+  await journal.saveEntry(
+    db,
+    entryInput(historicalEntry, historicalPlot, '2026-07-13T05:00:00', { season_crop: 'barley' }),
+    principal(),
+    { mode: 'create' }
+  );
+  db.prepare(
+    'INSERT INTO journal_layouts(code,version,labels_json,definition_json,active) ' +
+      'SELECT code,2,labels_json,definition_json,1 FROM journal_layouts WHERE code=? AND version=1'
+  ).run('open_field');
+  db.prepare('UPDATE journal_layouts SET active=0 WHERE code=? AND version=1').run('open_field');
+
+  const latestPlot = '86000000-0000-4000-8000-000000000003';
+  const codeOnly = plotInput(latestPlot, 'layout-latest');
+  delete codeOnly.layout_version;
+  const created = await journal.upsertPlot(db, codeOnly, principal());
+  assert.equal(created.plot.settings.layout_code, 'open_field');
+  assert.equal('layout_version' in created.plot.settings, false);
+  const latestEntry = '86000000-0000-4000-8000-000000000004';
+  await journal.saveEntry(
+    db,
+    entryInput(latestEntry, latestPlot, '2026-07-13T08:00:00', {
+      layout_version: 2,
+      season_crop: 'barley',
+    }),
+    principal(),
+    { mode: 'create' }
+  );
+  assert.equal(db.prepare('SELECT layout_version FROM journal_entries WHERE entry_uuid=?')
+    .get(latestEntry).layout_version, 2);
+  assert.equal(db.prepare('SELECT layout_version FROM journal_entries WHERE entry_uuid=?')
+    .get(historicalEntry).layout_version, 1);
+
+  await assert.rejects(
+    journal.upsertPlot(db, plotInput(
+      '86000000-0000-4000-8000-000000000005',
+      'layout-explicit-inactive',
+      { layout_version: 1 }
+    ), principal()),
+    (error) => error && error.code === 'invalid_layout'
+  );
+});
+
+function parseCsvRecords(text) {
+  const records = [];
+  let record = [];
+  let index = 0;
+  while (index < text.length) {
+    let quoted = false;
+    let value = '';
+    if (text[index] === '"') {
+      quoted = true;
+      index += 1;
+      while (index < text.length) {
+        if (text[index] === '"' && text[index + 1] === '"') {
+          value += '"';
+          index += 2;
+        } else if (text[index] === '"') {
+          index += 1;
+          break;
+        } else {
+          value += text[index];
+          index += 1;
+        }
+      }
+    } else {
+      while (index < text.length && text[index] !== ',' && text[index] !== '\r' && text[index] !== '\n') {
+        value += text[index];
+        index += 1;
+      }
+    }
+    record.push({ value, quoted });
+    if (text[index] === ',') {
+      index += 1;
+      continue;
+    }
+    if (text[index] === '\r' && text[index + 1] === '\n') index += 2;
+    else if (text[index] === '\n') index += 1;
+    records.push(record);
+    record = [];
+  }
+  return records;
+}
+
+test('wide CSV protects only string formulas while the research package remains byte-reversible', async () => {
+  const dangerous = ['=1', '+1', '-1', '@cmd', '\tcmd', '\rcmd', '  =1', "'literal"];
+  const { db, entryUuids } = await createPagedEntries('typed-csv', null, dangerous.length);
+  for (let index = 0; index < dangerous.length; index += 1) {
+    db.prepare('UPDATE journal_entries SET note=? WHERE entry_uuid=?').run(dangerous[index], entryUuids[index]);
+  }
+  db.prepare(
+    'UPDATE journal_entry_values SET value_num=?,entered_value_num=? WHERE entry_uuid=?'
+  ).run(-5, -5, entryUuids[0]);
+
+  const wideRows = parseCsvRecords(await journal.exportWideCsv(db, { status: 'final' }, principal()));
+  const wideHeader = wideRows[0].map((cell) => cell.value);
+  const noteIndex = wideHeader.indexOf('note');
+  const valueIndex = wideHeader.indexOf('value.0.attr.irrigation_depth.value');
+  const byEntry = new Map(wideRows.slice(1).map((row) => [
+    row[wideHeader.indexOf('entry_uuid')].value,
+    row,
+  ]));
+  const expectedSafe = ["'=1", "'+1", "'-1", "'@cmd", "'\tcmd", "'\rcmd", "'  =1", "'literal"];
+  for (let index = 0; index < entryUuids.length; index += 1) {
+    assert.equal(byEntry.get(entryUuids[index])[noteIndex].value, expectedSafe[index]);
+  }
+  assert.deepEqual(byEntry.get(entryUuids[0])[valueIndex], { value: '-5', quoted: false });
+
+  const members = parseStoredZip(await journal.exportResearchPackage(
+    db,
+    { status: 'final' },
+    principal()
+  ));
+  const entriesRows = parseCsvRecords(members.find((member) => member.name === 'entries.csv').data.toString('utf8'));
+  const entriesHeader = entriesRows[0].map((cell) => cell.value);
+  const packageByEntry = new Map(entriesRows.slice(1).map((row) => [
+    row[entriesHeader.indexOf('entry_uuid')].value,
+    row,
+  ]));
+  for (let index = 0; index < entryUuids.length; index += 1) {
+    assert.equal(packageByEntry.get(entryUuids[index])[entriesHeader.indexOf('note')].value, dangerous[index]);
+  }
+  const valuesRows = parseCsvRecords(members.find((member) => member.name === 'values.csv').data.toString('utf8'));
+  const valuesHeader = valuesRows[0].map((cell) => cell.value);
+  const negative = valuesRows.find((row) => row[valuesHeader.indexOf('entry_uuid')].value === entryUuids[0]);
+  assert.deepEqual(negative[valuesHeader.indexOf('entered_value_num')], { value: '-5', quoted: false });
+  assert.deepEqual(negative[valuesHeader.indexOf('value_num')], { value: '-5', quoted: false });
+});
+
+test('custom vocabulary applies shared unit-family rules and freezes normalized conversions after use', async () => {
+  const db = new TestDb('custom-vocab-unit-rules');
+  seedIdentity(db);
+  const unitUuid = '87000000-0000-4000-8000-000000000001';
+  const unitCode = 'custom.' + unitUuid;
+  const unitBody = {
+    custom_field_uuid: unitUuid,
+    base_sync_version: 0,
+    kind: 'unit',
+    parent_code: null,
+    value_type: null,
+    quantity_kind: 'water_depth',
+    basis: 'water',
+    default_unit_code: null,
+    labels: { en: 'Centimetre water' },
+    icon_key: null,
+    constraints: {
+      dimension: 'water_depth',
+      to_canonical: { unit_code: 'unit.mm_water', scale: 10, offset: 0 },
+    },
+    active: 1,
+    sort_order: 0,
+    mappings: [],
+  };
+  await journal.upsertCustomVocab(db, unitBody, principal());
+
+  const invalidBodies = [
+    Object.assign({}, unitBody, {
+      custom_field_uuid: '87000000-0000-4000-8000-000000000002',
+      kind: 'activity',
+      quantity_kind: 'water_depth',
+      basis: 'water',
+      constraints: {},
+    }),
+    Object.assign({}, unitBody, {
+      custom_field_uuid: '87000000-0000-4000-8000-000000000003',
+      constraints: {},
+    }),
+    Object.assign({}, unitBody, {
+      custom_field_uuid: '87000000-0000-4000-8000-000000000004',
+      kind: 'attribute',
+      value_type: 'text',
+      quantity_kind: 'water_depth',
+      basis: 'water',
+      constraints: { min: 0 },
+    }),
+    Object.assign({}, unitBody, {
+      custom_field_uuid: '87000000-0000-4000-8000-000000000008',
+      constraints: Object.assign({}, unitBody.constraints, { min: 0 }),
+    }),
+    Object.assign({}, unitBody, {
+      custom_field_uuid: '87000000-0000-4000-8000-000000000009',
+      kind: 'attribute',
+      value_type: 'number',
+      default_unit_code: 'unit.mm_water',
+      constraints: {
+        min: 0,
+        dimension: 'water_depth',
+        to_canonical: { unit_code: 'unit.mm_water', scale: 1, offset: 0 },
+      },
+    }),
+  ];
+  for (const invalid of invalidBodies) {
+    await assert.rejects(
+      journal.upsertCustomVocab(db, invalid, principal()),
+      (error) => error && ['invalid_irrelevant_field', 'invalid_unit_contract'].includes(error.code)
+    );
+  }
+  await assert.rejects(
+    journal.upsertCustomVocab(db, Object.assign({}, unitBody, {
+      custom_field_uuid: '87000000-0000-4000-8000-000000000005',
+      constraints: {
+        dimension: 'water_depth',
+        to_canonical: {
+          unit_code: 'custom.87000000-0000-4000-8000-000000000099',
+          scale: 10,
+          offset: 0,
+        },
+      },
+    }), principal()),
+    (error) => error && error.code === 'missing_custom_dependency'
+  );
+
+  const plotUuid = '87000000-0000-4000-8000-000000000006';
+  const entryUuid = '87000000-0000-4000-8000-000000000007';
+  await journal.upsertPlot(db, plotInput(plotUuid, 'unit-freeze'), principal());
+  await journal.saveEntry(db, entryInput(entryUuid, plotUuid, '2026-07-13T09:00:00', {
+    season_crop: 'barley',
+    values: [{
+      attribute_code: 'attr.irrigation_depth',
+      group_index: 0,
+      value: 2,
+      unit_code: unitCode,
+      value_status: 'observed',
+    }],
+  }), principal(), { mode: 'create' });
+  db.prepare("UPDATE journal_entries SET status='voided',deleted_at=? WHERE entry_uuid=?")
+    .run('2026-07-13T10:00:00.000Z', entryUuid);
+  await assert.rejects(
+    journal.upsertCustomVocab(db, Object.assign({}, unitBody, {
+      base_sync_version: 1,
+      constraints: {
+        dimension: 'water_depth',
+        to_canonical: { unit_code: 'unit.mm_water', scale: 20, offset: 0 },
+      },
+    }), principal(), unitUuid),
+    (error) => error && error.code === 'semantic_fields_frozen' &&
+      error.details.field === 'conversion'
+  );
+});
+
+test('multi-query read APIs assemble one old or new generation through readSnapshot', async () => {
+  async function generation(name, note, secondMember) {
+    const db = new TestDb(name);
+    seedIdentity(db);
+    const firstPlot = '88000000-0000-4000-8000-000000000001';
+    const secondPlot = '88000000-0000-4000-8000-000000000002';
+    const entryUuid = '88000000-0000-4000-8000-000000000003';
+    const groupUuid = '88000000-0000-4000-8000-000000000004';
+    await journal.upsertPlot(db, plotInput(firstPlot, 'snapshot-one'), principal());
+    await journal.upsertPlot(db, plotInput(secondPlot, 'snapshot-two'), principal());
+    await journal.saveEntry(db, entryInput(entryUuid, firstPlot, '2026-07-13T11:00:00', {
+      note,
+      season_crop: 'barley',
+    }), principal(), { mode: 'create' });
+    await journal.upsertPlotGroup(db, {
+      group_uuid: groupUuid,
+      base_sync_version: 0,
+      label: note,
+      resolved: false,
+      members: secondMember ? [firstPlot, secondPlot] : [firstPlot],
+    }, principal());
+    if (secondMember) {
+      db.prepare('UPDATE journal_entries SET sync_version=2,note=? WHERE entry_uuid=?').run(note, entryUuid);
+      db.prepare(
+        'INSERT INTO journal_entry_values(entry_uuid,attribute_code,group_index,value_status,value_text) ' +
+          'VALUES (?,?,?,?,?)'
+      ).run(entryUuid, 'attr.note', 1, 'observed', 'new-child');
+    }
+    return { db, entryUuid, groupUuid };
+  }
+  const old = await generation('snapshot-old-generation', 'old-parent', false);
+  const fresh = await generation('snapshot-new-generation', 'new-parent', true);
+  const facade = {
+    selected: old.db,
+    snapshots: 0,
+    async readSnapshot(executor) {
+      this.snapshots += 1;
+      const pinned = this.selected;
+      return executor({
+        prepare: pinned.prepare.bind(pinned),
+        get: pinned.get.bind(pinned),
+        all: pinned.all.bind(pinned),
+      });
+    },
+    get() { throw new Error('multi-query read escaped snapshot'); },
+    all() { throw new Error('multi-query read escaped snapshot'); },
+  };
+  async function readGeneration(expectedNote, expectedValues, expectedMembers) {
+    const listed = await journal.listEntries(facade, { status: 'final' }, principal());
+    assert.equal(listed.entries[0].note, expectedNote);
+    assert.equal(listed.entries[0].values.length, expectedValues);
+    const aggregate = await journal.loadCurrentAggregate(
+      facade,
+      'UPSERT_JOURNAL_ENTRY',
+      old.entryUuid,
+      principal()
+    );
+    assert.equal(aggregate.note, expectedNote);
+    assert.equal(aggregate.values.length, expectedValues);
+    const groups = await journal.listPlotGroups(facade, principal());
+    assert.equal(groups.plot_groups[0].label, expectedNote);
+    assert.equal(groups.plot_groups[0].members.length, expectedMembers);
+  }
+  await readGeneration('old-parent', 1, 1);
+  facade.selected = fresh.db;
+  await readGeneration('new-parent', 2, 2);
+  assert.equal(facade.snapshots, 6);
+});
+
+test('HTTP close callback errors are bounded and visible', async () => {
+  const db = new TestDb('router-close-error');
+  seedIdentity(db);
+  db.closeError = new Error('injected async close failure');
+  const secret = 'router-close-error-secret';
+  const authorization = 'Bearer ' + token(secret, {
+    userId: 1,
+    username: 'field-user',
+    exp: Date.now() + 60_000,
+  });
+  const warnings = [];
+  const response = await journal.handleHttpRequest({
+    msg: {
+      req: {
+        method: 'GET',
+        path: '/api/journal/export.adapt.json',
+        headers: { authorization },
+        query: {},
+        params: {},
+      },
+    },
+    Database: class { constructor() { return db; } },
+    environment: {
+      authTokenSecret: secret,
+      deviceEui: GATEWAY_EUI,
+      deviceEuiConfidence: 'authoritative',
+    },
+    warn(value) { warnings.push(String(value)); },
+  });
+  assert.equal(response.statusCode, 501);
+  assert.deepEqual(warnings, ['[journal-api] database close failed code=unknown']);
+  assert.ok(warnings[0].length < 120);
 });

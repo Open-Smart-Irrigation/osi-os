@@ -23,6 +23,74 @@ const JOURNAL_FIELDS = [
   'journal_catalog_hash',
   'journal_manifest',
 ];
+const JOURNAL_READINESS_TABLES = [
+  'journal_catalog_state',
+  'journal_entries',
+  'journal_entry_values',
+  'journal_vocab',
+  'journal_vocab_mappings',
+  'journal_plots',
+  'journal_plot_settings',
+  'journal_plot_groups',
+  'journal_plot_group_members',
+  'journal_templates',
+  'journal_layouts',
+  'journal_products',
+];
+const RESOURCE_HASH_SCOPE = 'sorted aggregate_type\\0aggregate_key\\0sync_version tuples';
+const RESOURCE_IDS = {
+  draftEntry: '10000000-0000-4000-8000-000000000001',
+  finalEntry: '10000000-0000-4000-8000-000000000002',
+  voidedEntry: '10000000-0000-4000-8000-000000000003',
+  tombstonedEntry: '10000000-0000-4000-8000-000000000004',
+  tombstonedDraft: '10000000-0000-4000-8000-000000000005',
+  customVocab: '20000000-0000-4000-8000-000000000001',
+  tombstonedVocab: '20000000-0000-4000-8000-000000000002',
+  plot: '30000000-0000-4000-8000-000000000001',
+  tombstonedPlot: '30000000-0000-4000-8000-000000000002',
+  group: '40000000-0000-4000-8000-000000000001',
+  tombstonedGroup: '40000000-0000-4000-8000-000000000002',
+};
+
+function resourceVersions(options) {
+  const settings = options || {};
+  return Object.assign({
+    finalEntry: 2,
+    voidedEntry: 3,
+    tombstonedEntry: 5,
+    customVocab: 4,
+    tombstonedVocab: 6,
+    plot: 8,
+    tombstonedPlot: 9,
+    group: 10,
+    tombstonedGroup: 11,
+  }, settings.resourceVersions || {}, settings.manifestSyncVersion === undefined
+    ? {}
+    : { finalEntry: settings.manifestSyncVersion });
+}
+
+function watermarkTuples(options) {
+  const versions = resourceVersions(options);
+  return [
+    ['JOURNAL_ENTRY', RESOURCE_IDS.finalEntry, versions.finalEntry],
+    ['JOURNAL_ENTRY', RESOURCE_IDS.voidedEntry, versions.voidedEntry],
+    ['JOURNAL_ENTRY', RESOURCE_IDS.tombstonedEntry, versions.tombstonedEntry],
+    ['JOURNAL_VOCAB', RESOURCE_IDS.customVocab, versions.customVocab],
+    ['JOURNAL_VOCAB', RESOURCE_IDS.tombstonedVocab, versions.tombstonedVocab],
+    ['JOURNAL_PLOT', RESOURCE_IDS.plot, versions.plot],
+    ['JOURNAL_PLOT', RESOURCE_IDS.tombstonedPlot, versions.tombstonedPlot],
+    ['JOURNAL_PLOT_GROUP', RESOURCE_IDS.group, versions.group],
+    ['JOURNAL_PLOT_GROUP', RESOURCE_IDS.tombstonedGroup, versions.tombstonedGroup],
+  ];
+}
+
+function expectedResourceWatermarkHash(options) {
+  const serialized = watermarkTuples(options).map((tuple) => tuple.join('\0'));
+  serialized.sort((left, right) => Buffer.compare(Buffer.from(left, 'utf8'), Buffer.from(right, 'utf8')));
+  const hash = crypto.createHash('sha256');
+  for (const tuple of serialized) hash.update(tuple, 'utf8');
+  return hash.digest('hex');
+}
 
 function loadFlows(profile) {
   return JSON.parse(fs.readFileSync(path.join(
@@ -39,12 +107,24 @@ class JournalFixtureDb {
     this.catalogQueryError = settings.catalogQueryError || null;
     this.closeError = settings.closeError || null;
     if (settings.tables !== false) {
-      this.native.exec([
-        'CREATE TABLE journal_catalog_state(id INTEGER PRIMARY KEY, catalog_version, catalog_hash TEXT)',
-        'CREATE TABLE journal_entries(status TEXT, sync_version, deleted_at TEXT)',
-        'CREATE TABLE journal_vocab(scope TEXT, sync_version, deleted_at TEXT)',
-      ].join(';'));
-      if (settings.stateRow !== false) {
+      const tableSql = {
+        journal_catalog_state: 'CREATE TABLE journal_catalog_state(id INTEGER PRIMARY KEY, catalog_version, catalog_hash TEXT)',
+        journal_entries: 'CREATE TABLE journal_entries(entry_uuid TEXT, status TEXT, sync_version, deleted_at TEXT)',
+        journal_entry_values: 'CREATE TABLE journal_entry_values(entry_uuid TEXT)',
+        journal_vocab: 'CREATE TABLE journal_vocab(code TEXT, custom_field_uuid TEXT, scope TEXT, sync_version, deleted_at TEXT)',
+        journal_vocab_mappings: 'CREATE TABLE journal_vocab_mappings(vocab_code TEXT)',
+        journal_plots: 'CREATE TABLE journal_plots(plot_uuid TEXT, sync_version, deleted_at TEXT)',
+        journal_plot_settings: 'CREATE TABLE journal_plot_settings(plot_uuid TEXT)',
+        journal_plot_groups: 'CREATE TABLE journal_plot_groups(group_uuid TEXT, sync_version, deleted_at TEXT)',
+        journal_plot_group_members: 'CREATE TABLE journal_plot_group_members(group_uuid TEXT)',
+        journal_templates: 'CREATE TABLE journal_templates(code TEXT)',
+        journal_layouts: 'CREATE TABLE journal_layouts(code TEXT)',
+        journal_products: 'CREATE TABLE journal_products(product_uuid TEXT)',
+      };
+      for (const table of JOURNAL_READINESS_TABLES) {
+        if (table !== settings.omitTable) this.native.exec(tableSql[table]);
+      }
+      if (settings.omitTable !== 'journal_catalog_state' && settings.stateRow !== false) {
         this.native.prepare(
           'INSERT INTO journal_catalog_state(id,catalog_version,catalog_hash) VALUES (1,?,?)'
         ).run(
@@ -52,24 +132,69 @@ class JournalFixtureDb {
           settings.catalogHash === undefined ? CATALOG_HASH : settings.catalogHash
         );
       }
-      const insertEntry = this.native.prepare(
-        'INSERT INTO journal_entries(status,sync_version,deleted_at) VALUES (?,?,?)'
-      );
-      insertEntry.run('draft', 100, null);
-      insertEntry.run(
-        'final',
-        settings.manifestSyncVersion === undefined ? 2 : settings.manifestSyncVersion,
-        null
-      );
-      insertEntry.run('voided', 3, null);
-      insertEntry.run('final', 5, '2026-07-12T09:00:00.000Z');
-      insertEntry.run('draft', 7, '2026-07-12T09:01:00.000Z');
-      const insertVocab = this.native.prepare(
-        'INSERT INTO journal_vocab(scope,sync_version,deleted_at) VALUES (?,?,?)'
-      );
-      insertVocab.run('core', 100, null);
-      insertVocab.run('custom', 4, null);
-      insertVocab.run('custom', 6, '2026-07-12T09:02:00.000Z');
+      const versions = resourceVersions(settings);
+      if (settings.omitTable !== 'journal_entries') {
+        const insertEntry = this.native.prepare(
+          'INSERT INTO journal_entries(entry_uuid,status,sync_version,deleted_at) VALUES (?,?,?,?)'
+        );
+        insertEntry.run(RESOURCE_IDS.draftEntry, 'draft', 100, null);
+        insertEntry.run(RESOURCE_IDS.finalEntry, 'final', versions.finalEntry, null);
+        insertEntry.run(RESOURCE_IDS.voidedEntry, 'voided', versions.voidedEntry, null);
+        insertEntry.run(
+          RESOURCE_IDS.tombstonedEntry,
+          'final',
+          versions.tombstonedEntry,
+          '2026-07-12T09:00:00.000Z'
+        );
+        insertEntry.run(
+          RESOURCE_IDS.tombstonedDraft,
+          'draft',
+          7,
+          '2026-07-12T09:01:00.000Z'
+        );
+      }
+      if (settings.omitTable !== 'journal_vocab') {
+        const insertVocab = this.native.prepare(
+          'INSERT INTO journal_vocab(code,custom_field_uuid,scope,sync_version,deleted_at) VALUES (?,?,?,?,?)'
+        );
+        insertVocab.run('activity.irrigation', null, 'core', 100, null);
+        insertVocab.run(
+          'custom.' + RESOURCE_IDS.customVocab,
+          RESOURCE_IDS.customVocab,
+          'custom',
+          versions.customVocab,
+          null
+        );
+        insertVocab.run(
+          'custom.' + RESOURCE_IDS.tombstonedVocab,
+          RESOURCE_IDS.tombstonedVocab,
+          'custom',
+          versions.tombstonedVocab,
+          '2026-07-12T09:02:00.000Z'
+        );
+      }
+      if (settings.omitTable !== 'journal_plots') {
+        const insertPlot = this.native.prepare(
+          'INSERT INTO journal_plots(plot_uuid,sync_version,deleted_at) VALUES (?,?,?)'
+        );
+        insertPlot.run(RESOURCE_IDS.plot, versions.plot, null);
+        insertPlot.run(
+          RESOURCE_IDS.tombstonedPlot,
+          versions.tombstonedPlot,
+          '2026-07-12T09:03:00.000Z'
+        );
+      }
+      if (settings.omitTable !== 'journal_plot_groups') {
+        const insertGroup = this.native.prepare(
+          'INSERT INTO journal_plot_groups(group_uuid,sync_version,deleted_at) VALUES (?,?,?)'
+        );
+        insertGroup.run(RESOURCE_IDS.group, versions.group, null);
+        insertGroup.run(
+          RESOURCE_IDS.tombstonedGroup,
+          versions.tombstonedGroup,
+          '2026-07-12T09:04:00.000Z'
+        );
+      }
     }
   }
 
@@ -91,7 +216,7 @@ class JournalFixtureDb {
         }];
       } else if (/journal_catalog_state/.test(sql) && !/sqlite_master/.test(sql) && this.catalogQueryError) {
         throw this.catalogQueryError;
-      } else if (/sqlite_master|journal_catalog_state|journal_entries|journal_vocab/.test(sql)) {
+      } else if (/sqlite_master|journal_/.test(sql)) {
         rows = this.native.prepare(sql).all(...(params || []));
       } else {
         rows = [];
@@ -157,8 +282,8 @@ async function runNormalBootstrap(node, options) {
   const db = new JournalFixtureDb(options);
   const context = runtime(db);
   try {
-    const execute = new Function('msg', 'flow', 'env', 'node', 'osiDb', node.func);
-    const result = await execute({}, context.flow, context.env, context.node, context.osiDb);
+    const execute = new Function('msg', 'flow', 'env', 'node', 'crypto', 'osiDb', node.func);
+    const result = await execute({}, context.flow, context.env, context.node, crypto, context.osiDb);
     return { payload: result && result.payload, warnings: context.warnings, errors: context.errors };
   } finally {
     db.destroy();
@@ -265,9 +390,13 @@ function assertReadyAdvertisement(payload) {
   assert.equal(payload.gatewayIdentity.journal_catalog_version, 7);
   assert.equal(payload.gatewayIdentity.journal_catalog_hash, CATALOG_HASH);
   assert.deepEqual(payload.gatewayIdentity.journal_manifest, {
+    version: 1,
     entries_count: 3,
     custom_vocab_count: 2,
-    high_water_mark: 20,
+    plots_count: 2,
+    plot_groups_count: 2,
+    resource_watermark_hash: expectedResourceWatermarkHash(),
+    hash_scope: RESOURCE_HASH_SCOPE,
   });
   assert.deepEqual(payload.gatewayIdentity.previousGatewayDeviceEuis, []);
   assert.equal(payload.gatewayIdentity.edgeBuildVersion, '2026.07-test');
@@ -310,13 +439,19 @@ for (const [kind, node, execute] of bootstrapKinds) {
     assertSuppressedAdvertisement((await execute(node, { tables: false })).payload);
   });
 
+  for (const table of JOURNAL_READINESS_TABLES) {
+    test(kind + ' bootstrap suppresses journal advertisement when ' + table + ' is absent', async () => {
+      assertSuppressedAdvertisement((await execute(node, { omitTable: table })).payload);
+    });
+  }
+
   for (const invalid of [
     { label: 'uppercase catalog hash', catalogHash: 'A'.repeat(64) },
     { label: 'zero catalog version', catalogVersion: 0 },
     { label: 'fractional catalog version', catalogVersion: 1.5 },
     { label: 'missing catalog state', stateRow: false },
-    { label: 'fractional manifest revision', manifestSyncVersion: 1.5 },
-    { label: 'negative high-water mark', manifestSyncVersion: -100 },
+    { label: 'fractional resource sync version', manifestSyncVersion: 1.5 },
+    { label: 'negative resource sync version', manifestSyncVersion: -100 },
   ]) {
     test(kind + ' bootstrap suppresses every journal field for ' + invalid.label, async () => {
       assertSuppressedAdvertisement((await execute(node, invalid)).payload);
@@ -330,6 +465,28 @@ for (const [kind, node, execute] of bootstrapKinds) {
     const warning = result.warnings.find((value) => /Journal bootstrap advertisement unavailable/.test(value));
     assert.ok(warning, 'caught journal DB error must emit a contextual warning');
     assert.ok(warning.length <= 256, 'journal warning must be bounded, got ' + warning.length);
+  });
+
+  test(kind + ' bootstrap resource hash changes when a tombstoned aggregate advances', async () => {
+    const baseline = (await execute(node)).payload.gatewayIdentity.journal_manifest;
+    const options = { resourceVersions: { tombstonedPlot: 12 } };
+    const advanced = (await execute(node, options)).payload.gatewayIdentity.journal_manifest;
+    assert.equal(advanced.resource_watermark_hash, expectedResourceWatermarkHash(options));
+    assert.notEqual(advanced.resource_watermark_hash, baseline.resource_watermark_hash);
+    assert.deepEqual(
+      Object.assign({}, advanced, { resource_watermark_hash: baseline.resource_watermark_hash }),
+      baseline
+    );
+  });
+
+  test(kind + ' bootstrap resource hash distinguishes states with the same version sum', async () => {
+    const baseline = (await execute(node)).payload.gatewayIdentity.journal_manifest;
+    const options = { resourceVersions: { finalEntry: 3, plot: 7 } };
+    const redistributed = (await execute(node, options)).payload.gatewayIdentity.journal_manifest;
+    const sum = (tuples) => tuples.reduce((total, tuple) => total + tuple[2], 0);
+    assert.equal(sum(watermarkTuples()), sum(watermarkTuples(options)));
+    assert.equal(redistributed.resource_watermark_hash, expectedResourceWatermarkHash(options));
+    assert.notEqual(redistributed.resource_watermark_hash, baseline.resource_watermark_hash);
   });
 }
 

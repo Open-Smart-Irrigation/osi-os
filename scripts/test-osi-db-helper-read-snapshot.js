@@ -94,8 +94,14 @@ function loadHelper() {
 }
 
 const native = new DatabaseSync(dbPath);
-native.exec('PRAGMA journal_mode=WAL; CREATE TABLE sample(id INTEGER PRIMARY KEY,value TEXT);');
-native.prepare('INSERT INTO sample(value) VALUES (?)').run('before');
+native.exec(
+  'PRAGMA journal_mode=WAL; ' +
+  'CREATE TABLE sample(id INTEGER PRIMARY KEY,value TEXT); ' +
+  'CREATE TABLE sample_child(id INTEGER PRIMARY KEY,parent_id INTEGER,value TEXT);'
+);
+const parent = native.prepare('INSERT INTO sample(value) VALUES (?)').run('before');
+native.prepare('INSERT INTO sample_child(parent_id,value) VALUES (?,?)')
+  .run(Number(parent.lastInsertRowid), 'before-child');
 native.close();
 const helper = loadHelper();
 
@@ -130,4 +136,36 @@ test('readSnapshot enforces query_only', async () => {
     db.readSnapshot((snapshot) => snapshot.run("INSERT INTO sample(value) VALUES ('forbidden')")),
     /read.?only|readonly|attempt to write/i
   );
+});
+
+test('readSnapshot pins parent and child queries across a concurrent WAL writer', async () => {
+  const db = new helper.Database(dbPath);
+  const writer = new DatabaseSync(dbPath);
+  try {
+    const old = await db.readSnapshot(async (snapshot) => {
+      const parentRow = await snapshot.get('SELECT * FROM sample WHERE id=1');
+      writer.exec('BEGIN IMMEDIATE');
+      writer.prepare('UPDATE sample SET value=? WHERE id=1').run('after');
+      writer.prepare('INSERT INTO sample_child(parent_id,value) VALUES (?,?)').run(1, 'after-child');
+      writer.exec('COMMIT');
+      const children = await snapshot.all('SELECT value FROM sample_child WHERE parent_id=1 ORDER BY id');
+      assert.equal(snapshot.readSnapshot, undefined, 'snapshot scopes cannot fake nested snapshots');
+      return { parent: parentRow.value, children: children.map((row) => row.value) };
+    });
+    assert.deepEqual(old, { parent: 'before', children: ['before-child'] });
+    const fresh = await db.readSnapshot(async (snapshot) => ({
+      parent: (await snapshot.get('SELECT * FROM sample WHERE id=1')).value,
+      children: (await snapshot.all('SELECT value FROM sample_child WHERE parent_id=1 ORDER BY id'))
+        .map((row) => row.value),
+    }));
+    assert.deepEqual(fresh, {
+      parent: 'after',
+      children: ['before-child', 'after-child'],
+    });
+    await db.transaction(async (transaction) => {
+      assert.equal(transaction.readSnapshot, undefined, 'writer scopes do not nest read snapshots');
+    });
+  } finally {
+    writer.close();
+  }
 });

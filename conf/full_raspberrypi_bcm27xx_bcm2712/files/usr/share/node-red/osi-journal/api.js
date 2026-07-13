@@ -4,6 +4,7 @@ const crypto = require('node:crypto');
 const fs = require('node:fs');
 const { aggregateHash, buildAggregate } = require('./aggregate');
 const { loadCatalog } = require('./catalog');
+const { numericConstraintsValid, unitFacts } = require('./unit-family');
 
 const UUID = /^[0-9a-fA-F]{8}-?[0-9a-fA-F]{4}-?[0-9a-fA-F]{4}-?[0-9a-fA-F]{4}-?[0-9a-fA-F]{12}$/;
 const CANONICAL_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
@@ -136,6 +137,25 @@ function canonicalUuid(raw, field, required) {
   const hex = raw.replace(/-/g, '').toLowerCase();
   return hex.slice(0, 8) + '-' + hex.slice(8, 12) + '-' + hex.slice(12, 16) + '-' +
     hex.slice(16, 20) + '-' + hex.slice(20);
+}
+
+function canonicalDuplicateAcknowledgements(raw) {
+  if (!Array.isArray(raw)) {
+    badRequest('invalid_duplicate_ack', 'duplicate_guard_ack_entry_uuids must be an array');
+  }
+  if (raw.length > 100) {
+    throw apiError(413, 'too_many_duplicate_acks', 'At most 100 duplicate acknowledgements are allowed');
+  }
+  const values = raw.map(function(value) {
+    if (typeof value !== 'string' || !CANONICAL_UUID.test(value)) {
+      badRequest('invalid_duplicate_ack', 'Duplicate acknowledgements must be canonical UUIDs');
+    }
+    return value;
+  });
+  if (new Set(values).size !== values.length) {
+    badRequest('duplicate_duplicate_ack', 'Duplicate acknowledgement UUIDs must be unique');
+  }
+  return values;
 }
 
 function normalizeGatewayIdentity(identity) {
@@ -415,7 +435,7 @@ async function buildEntryWhere(db, rawFilters, principal, includeCursor) {
   return { filters, hash, clauses, params };
 }
 
-async function listEntries(db, rawFilters, principal) {
+async function listEntriesInSnapshot(db, rawFilters, principal) {
   const query = await buildEntryWhere(db, rawFilters, principal, true);
   const filters = query.filters;
   const params = query.params.slice();
@@ -450,6 +470,12 @@ async function listEntries(db, rawFilters, principal) {
     entries,
     next_cursor: hasMore ? encodeCursor(rows[rows.length - 1], query.hash) : null,
   };
+}
+
+async function listEntries(db, rawFilters, principal) {
+  return inReadSnapshot(db, function(snapshot) {
+    return listEntriesInSnapshot(snapshot, rawFilters, principal);
+  });
 }
 
 async function writeTransaction(db, executor) {
@@ -510,12 +536,21 @@ async function ownedZone(tx, zoneUuid, principal) {
 
 async function activeLayout(tx, code, version) {
   const normalizedCode = boundedText(code, 'layout_code', { required: true, maxBytes: 120 });
-  if (!Number.isInteger(version) || version < 1) semanticError('invalid_layout', 'layout_version is invalid');
-  const layout = await dbGet(
-    tx,
-    'SELECT code,version FROM journal_layouts WHERE code=? AND version=? AND active=1',
-    [normalizedCode, version]
-  );
+  if (version != null && (!Number.isInteger(version) || version < 1)) {
+    semanticError('invalid_layout', 'layout_version is invalid');
+  }
+  const layout = version == null
+    ? await dbGet(
+      tx,
+      'SELECT code,version FROM journal_layouts WHERE code=? AND active=1 ' +
+        'ORDER BY version DESC LIMIT 1',
+      [normalizedCode]
+    )
+    : await dbGet(
+      tx,
+      'SELECT code,version FROM journal_layouts WHERE code=? AND version=? AND active=1',
+      [normalizedCode, version]
+    );
   if (!layout) semanticError('invalid_layout', 'Layout version is not active');
   return layout;
 }
@@ -574,16 +609,6 @@ async function recordResourceCommand(tx, principal, terminal) {
   const { aggregateHash } = require('./aggregate');
   const now = new Date().toISOString();
   const payloadHash = aggregateHash(terminal.aggregate);
-  const facts = {
-    aggregateKey: terminal.aggregate_key,
-    aggregateType: terminal.aggregate_type,
-    ownerUserUuid: principal.owner_user_uuid,
-    appliedSyncVersion: terminal.sync_version,
-    effectKey: principal.effect_key,
-    payloadHash,
-    gatewayDeviceEui: terminal.gateway_device_eui,
-    appliedAt: now,
-  };
   const ackCommandId = principal.delivery_command_id == null
     ? commandId
     : principal.delivery_command_id;
@@ -591,6 +616,24 @@ async function recordResourceCommand(tx, principal, terminal) {
       (!Number.isSafeInteger(ackCommandId) || ackCommandId <= 0)) {
     throw apiError(400, 'invalid_command_id', 'Pending delivery command ID must be a positive integer');
   }
+  const facts = {
+    commandId: ackCommandId,
+    commandType: terminal.command_type,
+    status: 'ACKED',
+    result: 'APPLIED',
+    duplicate: false,
+    aggregateKey: terminal.aggregate_key,
+    aggregateType: terminal.aggregate_type,
+    ownerUserUuid: principal.owner_user_uuid,
+    authorPrincipalUuid: principal.author_principal_uuid,
+    authorLabel: principal.author_label == null ? null : principal.author_label,
+    appliedSyncVersion: terminal.sync_version,
+    effectKey: principal.effect_key,
+    payloadHash,
+    submittedIntentHash: principal.submitted_intent_hash || null,
+    gatewayDeviceEui: terminal.gateway_device_eui,
+    appliedAt: now,
+  };
   await dbRun(
     tx,
     'INSERT INTO applied_commands (' +
@@ -611,11 +654,7 @@ async function recordResourceCommand(tx, principal, terminal) {
   await dbRun(
     tx,
     'INSERT INTO command_ack_outbox (command_id,payload_json,created_at) VALUES (?,?,?)',
-    [commandId, JSON.stringify(Object.assign({
-      commandId: ackCommandId,
-      status: 'ACKED',
-      result: 'APPLIED',
-    }, facts)), now]
+    [commandId, JSON.stringify(facts), now]
   );
   if (hooks && typeof hooks.afterCommand === 'function') await hooks.afterCommand(facts);
 }
@@ -682,7 +721,8 @@ async function upsertPlot(db, input, principal, pathUuid, options) {
         throw apiError(409, 'zone_plot_conflict', 'This zone already has an active application plot');
       }
     }
-    const layout = await activeLayout(tx, input.layout_code, Number(input.layout_version || 1));
+    const layoutVersion = input.layout_version == null ? null : Number(input.layout_version);
+    const layout = await activeLayout(tx, input.layout_code, layoutVersion);
     if (existing && Number(existing.sync_version) !== input.base_sync_version) {
       throw apiError(409, 'stale_version', 'Plot version is stale');
     }
@@ -821,7 +861,7 @@ async function ensureZonePlot(db, zoneUuid, input, principal) {
     area_m2: null,
     active: 1,
     layout_code: input.layout_code,
-    layout_version: Number(input.layout_version || 1),
+    layout_version: input.layout_version == null ? null : Number(input.layout_version),
   }, principal, null, { returnExistingZonePlot: true });
   return result.plot.plot_uuid;
 }
@@ -846,6 +886,18 @@ async function saveEntry(db, input, principal, options) {
   options = options || {};
   const mode = options.mode || 'create';
   const body = Object.assign({}, input);
+  const batchRequest = Array.isArray(body.plot_uuids);
+  if (Object.prototype.hasOwnProperty.call(body, 'duplicate_guard_ack_entry_uuids')) {
+    if (!batchRequest) {
+      badRequest('invalid_batch_control', 'duplicate_guard_ack_entry_uuids is valid only for batches');
+    }
+    body.duplicate_guard_ack_entry_uuids = canonicalDuplicateAcknowledgements(
+      body.duplicate_guard_ack_entry_uuids
+    );
+  }
+  if (batchRequest && Object.prototype.hasOwnProperty.call(body, 'duplicate_guard_ack_entry_uuid')) {
+    badRequest('invalid_batch_control', 'Batches use duplicate_guard_ack_entry_uuids');
+  }
   if (!['draft', 'final'].includes(body.status)) {
     semanticError('status_required', 'status must be explicitly draft or final');
   }
@@ -1024,7 +1076,7 @@ function vocabAggregate(row, mappings) {
 async function customTermIsUsed(tx, code) {
   return dbGet(
     tx,
-    "SELECT 1 AS used FROM journal_entries AS e WHERE e.status IN ('final','voided') AND e.deleted_at IS NULL AND (" +
+    "SELECT 1 AS used FROM journal_entries AS e WHERE e.status IN ('final','voided') AND (" +
       'e.activity_code=? OR EXISTS (' +
         'SELECT 1 FROM journal_entry_values AS v WHERE v.entry_uuid=e.entry_uuid AND (' +
           'v.attribute_code=? OR v.value_text=? OR v.unit_code=? OR v.entered_unit_code=?' +
@@ -1033,6 +1085,73 @@ async function customTermIsUsed(tx, code) {
     ') LIMIT 1',
     [code, code, code, code, code]
   );
+}
+
+function customDependencyError(code, field) {
+  throw apiError(422, 'missing_custom_dependency', 'A custom vocabulary dependency is not installed', [{
+    dependency_code: code,
+    field,
+  }]);
+}
+
+function customCode(value) {
+  return typeof value === 'string' && /^custom\.[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(value);
+}
+
+function parsedConstraintObject(raw) {
+  if (raw == null) return {};
+  const parsed = parsedJson(raw, null);
+  return isObject(parsed) ? parsed : null;
+}
+
+function unitRuleRow(row, constraints) {
+  return Object.assign({}, row, {
+    constraints: constraints == null ? parsedConstraintObject(row.constraints_json) : constraints,
+    catalog_errors: [],
+  });
+}
+
+function irrelevantField(semantic, constraints, fields) {
+  for (const field of fields) {
+    if (field === 'constraints') {
+      const numericKeys = [
+        'min', 'max', 'step', 'requires_explicit_unit', 'allow_default_unit',
+        'semantic_discriminator', 'dimension', 'to_canonical',
+      ];
+      if (constraints && numericKeys.some(function(key) {
+        return Object.prototype.hasOwnProperty.call(constraints, key);
+      })) return 'constraints';
+    } else if (semantic[field] != null) return field;
+  }
+  return null;
+}
+
+function throwIrrelevantField(field) {
+  throw apiError(422, 'invalid_irrelevant_field', 'Vocabulary field is not valid for this kind', { field });
+}
+
+function irrelevantConstraintField(constraints, fields) {
+  return fields.find(function(field) {
+    return Object.prototype.hasOwnProperty.call(constraints, field);
+  });
+}
+
+async function scopedUnit(tx, code, principal, field) {
+  const unit = await dbGet(
+    tx,
+    'SELECT * FROM journal_vocab WHERE code=? AND deleted_at IS NULL',
+    [code]
+  );
+  if (!unit) {
+    if (customCode(code)) customDependencyError(code, field);
+    semanticError('invalid_numeric_contract', 'Referenced unit was not found', { field });
+  }
+  if (unit.scope === 'custom' &&
+      (unit.owner_user_uuid !== principal.owner_user_uuid ||
+        unit.gateway_device_eui !== principal.gateway_device_eui)) {
+    throw apiError(404, 'not_found', 'Referenced unit was not found');
+  }
+  return unit;
 }
 
 async function validateCustomParent(tx, parentCode, principal) {
@@ -1049,36 +1168,109 @@ async function validateCustomParent(tx, parentCode, principal) {
   }
 }
 
-async function validateNumericContract(tx, semantic, constraintsJson, principal) {
-  if (semantic.value_type !== 'number') return;
-  if (!semantic.quantity_kind || !semantic.basis) {
-    semanticError('invalid_numeric_contract', 'Numeric attributes require quantity_kind and basis');
+async function validateVocabularyContract(
+  tx,
+  code,
+  semantic,
+  constraintsJson,
+  principal
+) {
+  const constraints = parsedConstraintObject(constraintsJson);
+  if (!constraints) semanticError('invalid_constraints', 'constraints_json must contain an object');
+  let irrelevant;
+  if (semantic.kind === 'activity') {
+    irrelevant = irrelevantField(semantic, constraints, [
+      'parent_code', 'value_type', 'quantity_kind', 'basis', 'default_unit_code', 'constraints',
+    ]);
+    if (irrelevant) throwIrrelevantField(irrelevant);
+    return;
   }
-  const constraints = parsedJson(constraintsJson, {});
-  if (semantic.default_unit_code) {
-    const unit = await dbGet(
-      tx,
-      'SELECT * FROM journal_vocab WHERE code=? AND kind=? AND active=1 AND deleted_at IS NULL',
-      [semantic.default_unit_code, 'unit']
-    );
-    if (!unit || unit.quantity_kind !== semantic.quantity_kind || unit.basis !== semantic.basis ||
-        (unit.scope === 'custom' && (unit.owner_user_uuid !== principal.owner_user_uuid ||
-          unit.gateway_device_eui !== principal.gateway_device_eui))) {
-      semanticError('invalid_numeric_contract', 'Default unit does not match the attribute quantity and basis');
+  if (semantic.kind === 'choice') {
+    irrelevant = irrelevantField(semantic, constraints, [
+      'value_type', 'quantity_kind', 'basis', 'default_unit_code', 'constraints',
+    ]);
+    if (irrelevant) throwIrrelevantField(irrelevant);
+    return;
+  }
+  if (semantic.kind === 'unit') {
+    irrelevant = irrelevantField(semantic, constraints, [
+      'parent_code', 'value_type', 'default_unit_code',
+    ]);
+    if (irrelevant) throwIrrelevantField(irrelevant);
+    const attributeConstraint = irrelevantConstraintField(constraints, [
+      'min', 'max', 'step', 'requires_explicit_unit', 'allow_default_unit',
+      'semantic_discriminator',
+    ]);
+    if (attributeConstraint) throwIrrelevantField('constraints.' + attributeConstraint);
+    const proposed = unitRuleRow(Object.assign({ code, active: 1, deleted_at: null }, semantic), constraints);
+    const facts = unitFacts(proposed);
+    if (!facts) semanticError('invalid_unit_contract', 'Unit conversion metadata is invalid');
+    let target;
+    if (facts.canonical_unit_code === code) {
+      target = proposed;
+    } else {
+      target = unitRuleRow(await scopedUnit(
+        tx,
+        facts.canonical_unit_code,
+        principal,
+        'constraints.to_canonical.unit_code'
+      ));
+    }
+    const targetFacts = unitFacts(target);
+    if (!targetFacts || Number(target.active) !== 1 || target.deleted_at ||
+        targetFacts.quantity_kind !== facts.quantity_kind ||
+        targetFacts.basis !== facts.basis || targetFacts.dimension !== facts.dimension ||
+        targetFacts.canonical_unit_code !== target.code || targetFacts.scale !== 1 ||
+        targetFacts.offset !== 0) {
+      semanticError('invalid_unit_contract', 'Canonical unit target is incompatible');
     }
     return;
   }
-  if (constraints.requires_explicit_unit !== true || constraints.allow_default_unit !== false) {
-    semanticError('invalid_numeric_contract', 'A numeric attribute without a default unit must require an explicit unit');
+  if (semantic.value_type !== 'number') {
+    irrelevant = irrelevantField(semantic, constraints, [
+      'parent_code', 'quantity_kind', 'basis', 'default_unit_code', 'constraints',
+    ]);
+    if (irrelevant) throwIrrelevantField(irrelevant);
+    return;
   }
-  const matching = await dbGet(
+  if (semantic.parent_code != null) throwIrrelevantField('parent_code');
+  const unitConstraint = irrelevantConstraintField(constraints, ['dimension', 'to_canonical']);
+  if (unitConstraint) throwIrrelevantField('constraints.' + unitConstraint);
+  const attribute = Object.assign({
+    code,
+    active: 1,
+    deleted_at: null,
+    catalog_errors: [],
+    constraints,
+  }, semantic);
+  if (!numericConstraintsValid(attribute)) {
+    semanticError('invalid_numeric_contract', 'Numeric attribute unit metadata is invalid');
+  }
+  if (semantic.default_unit_code) {
+    const unit = unitRuleRow(await scopedUnit(
+      tx,
+      semantic.default_unit_code,
+      principal,
+      'default_unit_code'
+    ));
+    const facts = unitFacts(unit);
+    if (!facts || Number(unit.active) !== 1 || unit.deleted_at ||
+        facts.quantity_kind !== semantic.quantity_kind || facts.basis !== semantic.basis ||
+        facts.canonical_unit_code !== unit.code || facts.scale !== 1 || facts.offset !== 0) {
+      semanticError('invalid_numeric_contract', 'Default unit is not canonical for this attribute');
+    }
+    return;
+  }
+  const candidates = await dbAll(
     tx,
-    'SELECT 1 AS usable FROM journal_vocab WHERE kind=? AND active=1 AND deleted_at IS NULL ' +
-      'AND quantity_kind=? AND basis=? AND (scope=? OR (scope=? AND owner_user_uuid=? AND gateway_device_eui=?)) LIMIT 1',
+    'SELECT * FROM journal_vocab WHERE kind=? AND active=1 AND deleted_at IS NULL ' +
+      'AND quantity_kind=? AND basis=? AND (scope=? OR (scope=? AND owner_user_uuid=? AND gateway_device_eui=?))',
     ['unit', semantic.quantity_kind, semantic.basis, 'core', 'custom',
       principal.owner_user_uuid, principal.gateway_device_eui]
   );
-  if (!matching) semanticError('invalid_numeric_contract', 'No usable unit matches the attribute quantity and basis');
+  if (!candidates.some(function(row) { return Boolean(unitFacts(unitRuleRow(row))); })) {
+    semanticError('invalid_numeric_contract', 'No usable unit matches the attribute quantity and basis');
+  }
 }
 
 async function upsertCustomVocab(db, input, principal, pathUuid) {
@@ -1131,11 +1323,23 @@ async function upsertCustomVocab(db, input, principal, pathUuid) {
       basis: boundedText(input.basis, 'basis', { maxBytes: 240 }),
       default_unit_code: boundedText(input.default_unit_code, 'default_unit_code', { maxBytes: 4096 }),
     };
-    await validateNumericContract(tx, semantic, constraintsJson, principal);
+    await validateVocabularyContract(tx, expectedCode, semantic, constraintsJson, principal);
     if (existing && await customTermIsUsed(tx, expectedCode)) {
       for (const field of Object.keys(semantic)) {
         if (nullable(existing[field]) !== nullable(semantic[field])) {
           throw apiError(409, 'semantic_fields_frozen', 'Used vocabulary semantics cannot be changed', { field });
+        }
+      }
+      if (semantic.kind === 'unit') {
+        const previousFacts = unitFacts(unitRuleRow(existing));
+        const nextFacts = unitFacts(unitRuleRow(semantic, parsedConstraintObject(constraintsJson)));
+        const conversionFields = ['dimension', 'canonical_unit_code', 'scale', 'offset'];
+        if (!previousFacts || !nextFacts || conversionFields.some(function(field) {
+          return previousFacts[field] !== nextFacts[field];
+        })) {
+          throw apiError(409, 'semantic_fields_frozen', 'Used vocabulary semantics cannot be changed', {
+            field: 'conversion',
+          });
         }
       }
     }
@@ -1248,7 +1452,7 @@ function plotGroupAggregate(row, members) {
   };
 }
 
-async function loadCurrentAggregate(db, type, key, principal) {
+async function loadCurrentAggregateInSnapshot(db, type, key, principal) {
   const scope = [key, principal.owner_user_uuid, principal.gateway_device_eui];
   if (type === 'UPSERT_JOURNAL_ENTRY' || type === 'VOID_JOURNAL_ENTRY') {
     const row = await dbGet(
@@ -1313,6 +1517,12 @@ async function loadCurrentAggregate(db, type, key, principal) {
     return plotGroupAggregate(row, members.map(function(member) { return member.plot_uuid; }));
   }
   return null;
+}
+
+async function loadCurrentAggregate(db, type, key, principal) {
+  return inReadSnapshot(db, function(snapshot) {
+    return loadCurrentAggregateInSnapshot(snapshot, type, key, principal);
+  });
 }
 
 async function validatedGroupMembers(tx, rawMembers, principal) {
@@ -1466,7 +1676,7 @@ async function upsertPlotGroup(db, input, principal, pathUuid) {
   });
 }
 
-async function listPlotGroups(db, principal) {
+async function listPlotGroupsInSnapshot(db, principal) {
   const rows = await dbAll(
     db,
     'SELECT * FROM journal_plot_groups WHERE owner_user_uuid=? AND gateway_device_eui=? AND deleted_at IS NULL ' +
@@ -1497,6 +1707,12 @@ async function listPlotGroups(db, principal) {
       return plotGroupAggregate(row, byGroup.get(row.group_uuid) || []);
     }),
   };
+}
+
+async function listPlotGroups(db, principal) {
+  return inReadSnapshot(db, function(snapshot) {
+    return listPlotGroupsInSnapshot(snapshot, principal);
+  });
 }
 
 async function inReadSnapshot(db, executor) {
@@ -1683,20 +1899,23 @@ function researchEntry(entry) {
 
 function formulaSafeText(value) {
   const text = String(value == null ? '' : value);
-  return /^[=+\-@]/.test(text) ? "'" + text : text;
+  return /^[ \u00a0]*(?:[=+\-@]|\t|\r)/.test(text) ? "'" + text : text;
 }
 
-function csvCell(value) {
+function csvCell(value, protectFormulaStrings) {
+  if (typeof value === 'number' && Number.isFinite(value)) return String(value);
   let text;
   if (value == null) text = '';
   else if (typeof value === 'object') text = JSON.stringify(value);
   else text = String(value);
-  text = formulaSafeText(text);
+  if (protectFormulaStrings !== false) text = formulaSafeText(text);
   return '"' + text.replace(/"/g, '""') + '"';
 }
 
-function csvLine(columns, row) {
-  return columns.map(function(column) { return csvCell(row[column]); }).join(',') + '\r\n';
+function csvLine(columns, row, protectFormulaStrings) {
+  return columns.map(function(column) {
+    return csvCell(row[column], protectFormulaStrings);
+  }).join(',') + '\r\n';
 }
 
 function writableAborted(writable) {
@@ -1784,7 +2003,9 @@ async function exportWideCsv(db, rawFilters, principal, writable) {
       'batch_uuid', 'note', 'sync_version',
     ];
     const columns = fixed.concat(dynamic);
-    await writeChunk(sink.writable, columns.map(csvCell).join(',') + '\r\n');
+    await writeChunk(sink.writable, columns.map(function(column) {
+      return csvCell(column, true);
+    }).join(',') + '\r\n');
     await forEachWidePage(snapshot, selection, principal, async function(entries) {
       let chunk = '';
       for (const entry of entries) {
@@ -2211,7 +2432,7 @@ async function exportResearchPackage(db, rawFilters, principal, writable, enviro
     async function writeRows(member, columns, rows) {
       let chunk = '';
       for (const row of rows) {
-        const line = csvLine(columns, row);
+        const line = csvLine(columns, row, false);
         if (chunk && Buffer.byteLength(chunk, 'utf8') + Buffer.byteLength(line, 'utf8') > 64 * 1024) {
           await member.write(chunk);
           chunk = '';
@@ -2225,21 +2446,27 @@ async function exportResearchPackage(db, rawFilters, principal, writable, enviro
     const dataMembers = [];
 
     const entriesMember = await writer.startMember('entries.csv');
-    await entriesMember.write(entryColumns.map(csvCell).join(',') + '\r\n');
+    await entriesMember.write(entryColumns.map(function(column) {
+      return csvCell(column, false);
+    }).join(',') + '\r\n');
     await forEachEntryPage(snapshot, selection, principal, async function(entries) {
       await writeRows(entriesMember, entryColumns, entryRows(entries));
     });
     dataMembers.push(await entriesMember.finish());
 
     const valuesMember = await writer.startMember('values.csv');
-    await valuesMember.write(valueColumns.map(csvCell).join(',') + '\r\n');
+    await valuesMember.write(valueColumns.map(function(column) {
+      return csvCell(column, false);
+    }).join(',') + '\r\n');
     await forEachEntryPage(snapshot, selection, principal, async function(entries) {
       await writeRows(valuesMember, valueColumns, valueRows(entries));
     });
     dataMembers.push(await valuesMember.finish());
 
     const mappingsMember = await writer.startMember('vocab_mappings.csv');
-    await mappingsMember.write(mappingColumns.map(csvCell).join(',') + '\r\n');
+    await mappingsMember.write(mappingColumns.map(function(column) {
+      return csvCell(column, false);
+    }).join(',') + '\r\n');
     await writeRows(mappingsMember, mappingColumns, catalog.mappings || []);
     dataMembers.push(await mappingsMember.finish());
 
@@ -2366,7 +2593,12 @@ function streamResponse(msg, contentType, extension) {
 async function closeFacade(db, warn) {
   if (!db) return;
   try {
-    await new Promise(function(resolve) { db.close(function() { resolve(); }); });
+    await new Promise(function(resolve, reject) {
+      db.close(function(error) {
+        if (error) reject(error);
+        else resolve();
+      });
+    });
   } catch (error) {
     warn('[journal-api] database close failed code=' + String(error && error.code || 'unknown'));
   }

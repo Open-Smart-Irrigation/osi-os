@@ -168,6 +168,8 @@ function resolveConversion(attributeInfo, unitCode) {
 }
 
 module.exports = {
+  numericConstraintsValid,
   numericAttributePreflight,
   resolveConversion,
+  unitFacts,
 };

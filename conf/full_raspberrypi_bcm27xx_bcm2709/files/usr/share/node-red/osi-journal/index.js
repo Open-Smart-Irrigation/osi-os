@@ -1034,6 +1034,7 @@ module.exports = {
   listEntries: journalApi.listEntries,
   listPlotGroups: journalApi.listPlotGroups,
   listPlots: journalApi.listPlots,
+  loadCurrentAggregate: journalApi.loadCurrentAggregate,
   loadScopedCatalog: journalApi.loadScopedCatalog,
   resolvePrincipal: journalApi.resolvePrincipal,
   safeFilename: journalApi.safeFilename,
