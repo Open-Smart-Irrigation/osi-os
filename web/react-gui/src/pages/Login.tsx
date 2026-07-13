@@ -97,16 +97,16 @@ export const Login: React.FC = () => {
           </button>
         </form>
 
-        <div className="mt-6 space-y-4 text-center">
+        {/* items-center is load-bearing: a stretched flex row would detach the
+            LanguageSwitcher's absolutely-positioned dropdown from its trigger */}
+        <div className="mt-6 flex items-center justify-center gap-5">
           <Link
             to="/register"
             className="text-sm font-medium text-[var(--text)] hover:underline"
           >
             {t('login.noAccount')}
           </Link>
-          <div className="flex justify-center">
-            <LanguageSwitcher />
-          </div>
+          <LanguageSwitcher />
         </div>
         </div>
       </div>
