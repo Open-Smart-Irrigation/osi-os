@@ -396,6 +396,7 @@ CREATE TABLE dendrometer_daily (
   qa_flags_json               TEXT,
   low_confidence_day          INTEGER DEFAULT 0,
   tree_state_v5               TEXT DEFAULT 'none',
+  sync_version                INTEGER NOT NULL DEFAULT 0,
   UNIQUE(deveui, date)
 );
 
@@ -454,6 +455,7 @@ CREATE TABLE zone_daily_recommendations (
   low_confidence_tree_count   INTEGER DEFAULT 0,
   outlier_filtered_tree_count INTEGER DEFAULT 0,
   zone_confidence_score       REAL,
+  sync_version                INTEGER NOT NULL DEFAULT 0,
   UNIQUE(zone_id, date)
 );
 
@@ -470,6 +472,7 @@ CREATE TABLE zone_daily_environment (
   flow_liters  REAL DEFAULT 0,
   rain_source  TEXT DEFAULT 'none',
   computed_at  TEXT,
+  sync_version INTEGER NOT NULL DEFAULT 0,
   UNIQUE(zone_id, date),
   FOREIGN KEY (zone_id) REFERENCES irrigation_zones(id) ON DELETE CASCADE
 );
@@ -1877,9 +1880,10 @@ BEGIN
       'qa_flags_json',         NEW.qa_flags_json,
       'low_confidence_day',    NEW.low_confidence_day,
       'tree_state_v5',         NEW.tree_state_v5,
-      'computed_at',           NEW.computed_at
+      'computed_at',           NEW.computed_at,
+      'sync_version',          NEW.sync_version
     ),
-    0,
+    NEW.sync_version,
     strftime('%Y-%m-%dT%H:%M:%fZ','now'),
     COALESCE((SELECT gateway_device_eui FROM devices WHERE deveui=NEW.deveui AND deleted_at IS NULL),'0016C001F11715E2')
   );
@@ -1893,6 +1897,7 @@ WHEN EXISTS (
   SELECT 1 FROM sync_link_state
    WHERE peer_node = 'cloud' AND linked = 1
 )
+ AND COALESCE(NEW.sync_version,0) <> COALESCE(OLD.sync_version,0)
 BEGIN
   INSERT INTO sync_outbox(
     event_uuid, aggregate_type, aggregate_key, op, payload_json,
@@ -1942,9 +1947,10 @@ BEGIN
       'qa_flags_json',         NEW.qa_flags_json,
       'low_confidence_day',    NEW.low_confidence_day,
       'tree_state_v5',         NEW.tree_state_v5,
-      'computed_at',           NEW.computed_at
+      'computed_at',           NEW.computed_at,
+      'sync_version',          NEW.sync_version
     ),
-    0,
+    NEW.sync_version,
     strftime('%Y-%m-%dT%H:%M:%fZ','now'),
     COALESCE((SELECT gateway_device_eui FROM devices WHERE deveui=NEW.deveui AND deleted_at IS NULL),'0016C001F11715E2')
   );
@@ -2074,9 +2080,10 @@ BEGIN
       'flow_liters',        NEW.flow_liters,
       'rain_source',        NEW.rain_source,
       'computed_at',        NEW.computed_at,
-      'gateway_device_eui', COALESCE((SELECT gateway_device_eui FROM irrigation_zones WHERE id=NEW.zone_id AND deleted_at IS NULL),'0016C001F11715E2')
+      'gateway_device_eui', COALESCE((SELECT gateway_device_eui FROM irrigation_zones WHERE id=NEW.zone_id AND deleted_at IS NULL),'0016C001F11715E2'),
+      'sync_version',       NEW.sync_version
     ),
-    0,
+    NEW.sync_version,
     strftime('%Y-%m-%dT%H:%M:%fZ','now'),
     COALESCE((SELECT gateway_device_eui FROM irrigation_zones WHERE id=NEW.zone_id AND deleted_at IS NULL),'0016C001F11715E2')
   );
@@ -2090,6 +2097,7 @@ WHEN EXISTS (
   SELECT 1 FROM sync_link_state
    WHERE peer_node = 'cloud' AND linked = 1
 )
+ AND COALESCE(NEW.sync_version,0) <> COALESCE(OLD.sync_version,0)
 BEGIN
   INSERT INTO sync_outbox(
     event_uuid, aggregate_type, aggregate_key, op, payload_json,
@@ -2108,9 +2116,10 @@ BEGIN
       'flow_liters',        NEW.flow_liters,
       'rain_source',        NEW.rain_source,
       'computed_at',        NEW.computed_at,
-      'gateway_device_eui', COALESCE((SELECT gateway_device_eui FROM irrigation_zones WHERE id=NEW.zone_id AND deleted_at IS NULL),'0016C001F11715E2')
+      'gateway_device_eui', COALESCE((SELECT gateway_device_eui FROM irrigation_zones WHERE id=NEW.zone_id AND deleted_at IS NULL),'0016C001F11715E2'),
+      'sync_version',       NEW.sync_version
     ),
-    0,
+    NEW.sync_version,
     strftime('%Y-%m-%dT%H:%M:%fZ','now'),
     COALESCE((SELECT gateway_device_eui FROM irrigation_zones WHERE id=NEW.zone_id AND deleted_at IS NULL),'0016C001F11715E2')
   );
@@ -2154,9 +2163,10 @@ BEGIN
       'low_confidence_tree_count',     NEW.low_confidence_tree_count,
       'outlier_filtered_tree_count',   NEW.outlier_filtered_tree_count,
       'zone_confidence_score',         NEW.zone_confidence_score,
-      'computed_at',                   NEW.computed_at
+      'computed_at',                   NEW.computed_at,
+      'sync_version',                  NEW.sync_version
     ),
-    0,
+    NEW.sync_version,
     strftime('%Y-%m-%dT%H:%M:%fZ','now'),
     COALESCE((SELECT gateway_device_eui FROM irrigation_zones WHERE id=NEW.zone_id AND deleted_at IS NULL),'0016C001F11715E2')
   );
@@ -2170,6 +2180,7 @@ WHEN EXISTS (
   SELECT 1 FROM sync_link_state
    WHERE peer_node = 'cloud' AND linked = 1
 )
+ AND COALESCE(NEW.sync_version,0) <> COALESCE(OLD.sync_version,0)
 BEGIN
   INSERT INTO sync_outbox(
     event_uuid, aggregate_type, aggregate_key, op, payload_json,
@@ -2200,9 +2211,10 @@ BEGIN
       'low_confidence_tree_count',     NEW.low_confidence_tree_count,
       'outlier_filtered_tree_count',   NEW.outlier_filtered_tree_count,
       'zone_confidence_score',         NEW.zone_confidence_score,
-      'computed_at',                   NEW.computed_at
+      'computed_at',                   NEW.computed_at,
+      'sync_version',                  NEW.sync_version
     ),
-    0,
+    NEW.sync_version,
     strftime('%Y-%m-%dT%H:%M:%fZ','now'),
     COALESCE((SELECT gateway_device_eui FROM irrigation_zones WHERE id=NEW.zone_id AND deleted_at IS NULL),'0016C001F11715E2')
   );
