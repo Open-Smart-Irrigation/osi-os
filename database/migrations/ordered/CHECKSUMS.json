@@ -14,5 +14,6 @@
   "0013__lsn50_shadow_diff.sql": "7ad59b5b5218ea0ff978bacdbab3ddf6cf6ee50536654705f415ca0154370ce0",
   "0014__improvement_request_status_secret.sql": "b5196442091f2e151a67284ff65111664744803ead74067bb677d98db1ee0ad1",
   "0015__upsert_sync_versioning.sql": "cbb6d9b6502eb7f3ca5b65427d629d56ae1dfc186b2ce27c347d0e8771692703",
-  "0016__device_chameleon_sync.sql": "ac12b161c576794e84c66866b823ef5638d1d575dd5330bdbf115fcecc4a41e7"
+  "0016__device_chameleon_sync.sql": "ac12b161c576794e84c66866b823ef5638d1d575dd5330bdbf115fcecc4a41e7",
+  "0017__zone_key_fallback_parity.sql": "a2eea4fe1fd97609cb5bf225e0f164dd838f68301650f271f8dc740701f18ebe"
 }
