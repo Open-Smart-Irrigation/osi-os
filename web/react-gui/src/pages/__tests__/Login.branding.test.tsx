@@ -27,7 +27,7 @@ vi.mock('react-i18next', () => ({
         'login.passwordPlaceholder': 'Enter your password',
         'login.signIn': 'Sign In',
         'login.signingIn': 'Signing In...',
-        'login.noAccount': 'No account? Register here',
+        'login.noAccount': 'Register Account',
         'login.failed': 'Login failed. Please check your credentials.',
       };
       return map[key] ?? key;
@@ -41,7 +41,7 @@ afterEach(() => {
 });
 
 describe('Login AgroLink branding', () => {
-  it('renders the Agroscope Balken crown, AgroLink title, and fixed OSI OS attribution', () => {
+  it('renders the Agroscope Balken crown, AgroLink title, and the quiet Register Account link', () => {
     render(
       <MemoryRouter>
         <Login />
@@ -53,7 +53,8 @@ describe('Login AgroLink branding', () => {
       expect.stringContaining('balken-horizontal-en'),
     );
     expect(screen.getByRole('heading', { name: 'AgroLink' })).toBeInTheDocument();
-    expect(screen.getByText('Powered by OSI OS')).toBeInTheDocument();
+    expect(screen.queryByText('Powered by OSI OS')).not.toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Register Account' })).toHaveAttribute('href', '/register');
     expect(screen.queryByText('translated login subtitle')).not.toBeInTheDocument();
     expect(screen.queryByText(/OSI OS v0\.6\.5/)).not.toBeInTheDocument();
   });

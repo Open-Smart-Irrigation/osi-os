@@ -46,10 +46,9 @@ export const Login: React.FC = () => {
         </div>
         <div className="p-6">
         <div className="text-center mb-5 font-brand">
-          <h1 className="text-3xl font-bold text-[var(--text)] mb-1">
+          <h1 className="text-5xl font-bold text-[var(--text)]">
             {AGROLINK_BRAND.productName}
           </h1>
-          <p className="text-[var(--text-secondary)] text-base">{AGROLINK_BRAND.loginSubtitle}</p>
         </div>
 
         {error && (
@@ -101,7 +100,7 @@ export const Login: React.FC = () => {
         <div className="mt-6 space-y-4 text-center">
           <Link
             to="/register"
-            className="text-[var(--primary)] hover:text-[var(--primary-hover)] text-lg font-semibold underline"
+            className="text-sm font-medium text-[var(--text)] hover:underline"
           >
             {t('login.noAccount')}
           </Link>
