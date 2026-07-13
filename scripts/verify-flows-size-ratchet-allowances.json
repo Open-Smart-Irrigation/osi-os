@@ -9,7 +9,9 @@
     "reject-indefinite-open": { "delta": 3100, "reason": "1.C: expanded COMMAND_TYPES_FALLBACK to match 33-type registry" },
     "write-strega-expectation": { "delta": 3300, "reason": "1.C: expanded COMMAND_TYPES_FALLBACK to match 33-type registry" },
     "9b3afb405207302e": { "delta": 800, "reason": "5.6: timestamp sanity clamp (clampRecordedAt) at ingest" },
-    "5f0d2b7e9b9b1b3a": { "delta": 1700, "reason": "5.6: scheduler backward-jump debounce (sameLogicalWindow) on both DENDRO + threshold paths + threshold suppression early return" }
+    "5f0d2b7e9b9b1b3a": { "delta": 1700, "reason": "5.6: scheduler backward-jump debounce (sameLogicalWindow) on both DENDRO + threshold paths + threshold suppression early return" },
+    "device-api-http500": { "delta": 45, "reason": "issue #9: adopt msg.error.statusCode instead of hardcoding 500, so auth failures (401) survive the responder" },
+    "dendro-raw-fn": { "delta": 10, "reason": "issue #6: restore escaped backslashes in the corrupted toBase64Url regex (invalid /+/  and comment-swallowing ///), which the node needs to compile at all" }
   },
-  "total_allowance": { "delta": 16400, "reason": "1.A5 sync outbox hardening + 1.A6 history card-data + 1.C command-type registry expansion + 5.6 time integrity guards + heartbeat RTC fields" }
+  "total_allowance": { "delta": 16455, "reason": "1.A5 sync outbox hardening + 1.A6 history card-data + 1.C command-type registry expansion + 5.6 time integrity guards + heartbeat RTC fields + issue #9 device-api-http500 statusCode fix (+45) + issue #6 dendro-raw-fn regex fix (+10)" }
 }
