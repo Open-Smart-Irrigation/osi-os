@@ -225,6 +225,7 @@ cd web/react-gui && npm run build             # frontend build
 - Local passwords: bcrypt-hashed.
 - `/download/database`: gated.
 - Linked login uses a gateway-specific offline verifier (`bcrypt(password::DEVICE_EUI)`), **not** cloud password hash sync.
+- `osi-server.cloud.link_gateway_device_eui` can be preset by an operator to bypass the provisional-identity block on concentrator-less gateways during account-link. This is a test/demo path only; the production path is a configured concentrator that resolves an authoritative EUI. Using the override risks stranding cloud data and breaking offline login if the linked EUI later changes (see the verifier note above). See `osi-config-and-flags` for the resolution mechanism.
 
 ---
 

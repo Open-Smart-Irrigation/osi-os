@@ -80,9 +80,9 @@ key with a default, then commits.
 | `device_eui_source` | Where the EUI came from (`concentratord-runtime`, `concentratord-uci-<chipset>`, `concentratord-toml-<chipset>`, `linked`, `persisted`, `mac:<iface>`) | resolved at boot | Same as above |
 | `device_eui_confidence` | `authoritative` \| `persisted` \| `provisional` | resolved at boot | Same as above; gates whether account-linking is allowed (provisional blocks linking — see section 2) |
 | `device_eui_last_verified_at` | ISO-8601 UTC timestamp of last resolution | resolved at boot | Same as above |
-| `link_gateway_device_eui` | Server-linked override EUI written during account-link flow | empty | Written by flows.json account-link finalize node; read by `gateway_identity_read_linked` (highest-priority persisted source, see section 2) |
+| `link_gateway_device_eui` | Server-linked override EUI; normally written by account-link finalize after a successful link, but an operator can preset it to bypass the provisional-identity block on concentrator-less gateways — see the override note in section 2 | empty | Written by flows.json account-link finalize node; read by `gateway_identity_read_linked` (highest-priority persisted source, see section 2) |
 | `device_type` | Reported device type string | `GATEWAY` | `node-red.init` exports as `DEVICE_TYPE` |
-| `firmware_version` | Reported firmware version string | `0.6.5` (2026-07-06; bump on release) | `node-red.init` exports as `FIRMWARE_VERSION` |
+| `firmware_version` | Reported firmware version string | `0.7.0` (2026-07-14; bump on release) | `node-red.init` exports as `FIRMWARE_VERSION` |
 | `server_host` | Cloud host set during account-link (used to persist/restore MQTT/server host across link/unlink), separate from the hardcoded telemetry broker URL (section 9) | empty | flows.json account-link nodes write it; `node-red.init` exports as `OSI_SERVER_HOST` |
 | `mqtt_password` | **Secret.** Cloud MQTT password used to build `/srv/node-red/flows_cred.json` | empty | Written by flows.json account-link finalize node; read by `node-red.init`. **Never print, log, or commit this value.** |
 | `allow_private_target` | Dev/test escape hatch allowing `http://` or private/loopback hosts for account-link `serverUrl` | `0` | flows.json `allowPrivateTargets()` reads via UCI directly (`uci -q get osi-server.cloud.allow_private_target`), also via `ALLOW_PRIVATE_SERVER_URLS`/`ALLOW_INSECURE_SERVER_URL` env fallback |
@@ -203,6 +203,20 @@ verifier regeneration. The repair sequence for this is also in
 link while `gatewayDeviceEuiConfidence === 'provisional'` (HTTP 503, "Gateway
 identity is not ready yet"), so a MAC-fallback-only gateway cannot complete
 cloud linking until concentratord reports a real ID.
+
+**Provisional-identity link override (test/demo path only):** an operator can
+bypass the gate above by presetting the linked-source UCI key before running
+account-link — `uci set osi-server.cloud.link_gateway_device_eui=<EUI>; uci
+commit osi-server`. `gateway_identity_read_linked()` (precedence step 4) always
+reports `persisted` confidence regardless of how the EUI was chosen, so the
+next identity resolve clears the provisional check in `al-link-validate`. This
+exists for concentrator-less gateways used in test and demo setups; the
+production path is a configured concentrator, which resolves an
+`authoritative` EUI at step 1 and needs no override. The risk: linking under a
+hand-picked EUI on a gateway that later gets a real concentrator (or a
+different MAC-derived fallback) leaves the cloud holding a stale EUI. Linked
+history strands under the old value, and offline login breaks because the
+verifier is `bcrypt(password::DEVICE_EUI)` (see the Consequence note above).
 
 **Re-verify:**
 ```
@@ -524,7 +538,7 @@ grep -n "SystemFeatureFlags\|defaultHistoryFeatureFlags" web/react-gui/src/servi
 
 | Fact | Value | Where set / verified |
 |---|---|---|
-| `firmware_version` default | `0.6.5` (as of 2026-07-06 — bump on release, re-check before quoting) | `96_osi_server_config`, also the inline fallback default in `node-red.init` (`fw_version=$(uci -q get ... || echo "0.6.5")`) |
+| `firmware_version` default | `0.7.0` (as of 2026-07-14 — bump on release, re-check before quoting) | `96_osi_server_config`, also the inline fallback default in `node-red.init` (`fw_version=$(uci -q get ... || echo "0.7.0")`) |
 | MQTT telemetry broker URL | `wss://server.opensmartirrigation.org/mqtt`, port `443` | **Hardcoded** in the flows.json `mqtt-broker` node named "OSI Cloud Broker" (`broker` field literal) — this is a compile-time constant, not read from `server_host`/UCI/env at all. Its `credentials.user`/`credentials.password` fields use Node-RED's `${DEVICE_EUI}` / `${DEVICE_MQTT_PASSWORD}` template-expansion syntax, resolved from the process env `node-red.init` sets. |
 | `osi-server.cloud.server_host` | separate concern from the broker URL above — it is the cloud host recorded/restored during account-link (`OSI_SERVER_HOST` env var), used for REST sync target bookkeeping, not for the MQTT connection itself | flows.json account-link finalize/rollback/restore nodes |
 | MQTT client ID | `device_${DEVICE_EUI}` template in the broker node config, but also force-rewritten literally into `/srv/node-red/flows.json` on every Node-RED start by an inline Node snippet in `node-red.init` (because Node-RED does not expand `${VAR}` in `clientid ` reliably across versions in this deployment's testing) | `node-red.init`, `start_service()` |
