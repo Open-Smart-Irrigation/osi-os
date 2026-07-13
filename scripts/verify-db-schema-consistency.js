@@ -416,6 +416,77 @@ const schemaContract = {
     'diff_type',
     'created_at',
   ],
+  dendrometer_daily: [
+    'id',
+    'deveui',
+    'date',
+    'd_max_um',
+    'd_min_um',
+    'mds_um',
+    'tgr_um',
+    'tgr_smoothed_um',
+    'twd_um',
+    'dr_um',
+    'recovery_delta_um',
+    'signal_intensity',
+    'stress_level',
+    'data_quality',
+    'valid_readings_count',
+    'computed_at',
+    'twd_night_um',
+    'twd_day_um',
+    'twd_norm_night',
+    'twd_norm_day',
+    'mds_norm',
+    'recovery_ratio',
+    'recovery_ratio_smoothed',
+    'r_delta_5day',
+    'delta_twd_smoothed',
+    'd_max_running_um',
+    'd_max_time',
+    'd_min_time',
+    'twd_episode_active',
+    'twd_episode_start',
+    'twd_episode_max_um',
+    'envelope_ref_um',
+    'twd_method',
+    'confidence_score',
+    'qa_flags_json',
+    'low_confidence_day',
+    'tree_state_v5',
+    'sync_version',
+  ],
+  zone_daily_recommendations: [
+    'id',
+    'zone_id',
+    'date',
+    'zone_stress_summary',
+    'rainfall_mm',
+    'water_delivered_liters',
+    'irrigation_action',
+    'action_reasoning',
+    'recommendation_json',
+    'computed_at',
+    'irrigation_window_json',
+    'rain_suppression_active',
+    'recovery_verification_active',
+    'vpd_max_kpa',
+    'vpd_source',
+    'usable_tree_count',
+    'low_confidence_tree_count',
+    'outlier_filtered_tree_count',
+    'zone_confidence_score',
+    'sync_version',
+  ],
+  zone_daily_environment: [
+    'zone_id',
+    'date',
+    'rainfall_mm',
+    'flow_liters',
+    'rain_source',
+    'computed_at',
+    'sync_version',
+  ],
 };
 
 const requiredIndexes = {
@@ -578,6 +649,41 @@ const requiredTriggerSqlFragments = {
     "'data_invalid', coalesce(new.data_invalid,0)",
     "'comp_pending', coalesce(new.comp_pending,0)",
   ],
+  // Issue #10: the three upsert-shaped aggregates must pass the row's
+  // sync_version to the outbox (not literal 0), mirror it in payload_json,
+  // and gate the AFTER UPDATE variants on a sync_version change so the cloud
+  // watermark (highest sync_version + payload hash) accepts recomputes.
+  // Fragments are matched against whitespace-collapsed lowercase SQL.
+  trg_dp_dendro_daily_outbox_ai: [
+    "'sync_version', new.sync_version ), new.sync_version,",
+  ],
+  trg_dp_dendro_daily_outbox_au: [
+    'coalesce(new.sync_version,0) <> coalesce(old.sync_version,0)',
+    "'sync_version', new.sync_version ), new.sync_version,",
+  ],
+  // Issue 16 Pattern B (migration 0017): the aggregate_key zone component
+  // must fall back to 'zone-id:' || NEW.zone_id when the zone has no
+  // zone_uuid yet (boot-rewrite form adopted by the seed) — an empty-string
+  // fallback collides aggregate keys across different uuid-less zones and
+  // corrupts the cloud's per-resource watermark semantics.
+  trg_dp_zone_recs_outbox_ai: [
+    "'sync_version', new.sync_version ), new.sync_version,",
+    "'zone-id:' || new.zone_id) || '|' ||",
+  ],
+  trg_dp_zone_recs_outbox_au: [
+    'coalesce(new.sync_version,0) <> coalesce(old.sync_version,0)',
+    "'sync_version', new.sync_version ), new.sync_version,",
+    "'zone-id:' || new.zone_id) || '|' ||",
+  ],
+  trg_dp_zone_env_outbox_ai: [
+    "'sync_version', new.sync_version ), new.sync_version,",
+    "'zone-id:' || new.zone_id) || '|' ||",
+  ],
+  trg_dp_zone_env_outbox_au: [
+    'coalesce(new.sync_version,0) <> coalesce(old.sync_version,0)',
+    "'sync_version', new.sync_version ), new.sync_version,",
+    "'zone-id:' || new.zone_id) || '|' ||",
+  ],
   trg_sync_device_data_dirty_au: [
     "select gateway_device_eui from devices where deveui = new.deveui",
     "<> '' begin",
@@ -617,6 +723,22 @@ const requiredTriggerSqlFragments = {
     "aggregate_key",
     "'gateway_device_eui', coalesce(nullif(trim(new.gateway_device_eui)",
   ],
+  // Issue #5: chameleon_enabled never left the edge because
+  // trg_sync_devices_outbox_au omitted it from both the change-detection WHEN
+  // clause and the json_object payload (and, separately, the migration-owned
+  // copy of this trigger had drifted from sync-init-fn's runtime copy, which
+  // already carried the three depth columns per e3758b9b). Pin all four
+  // chameleon fields in both places so this can't silently regress again.
+  trg_sync_devices_outbox_au: [
+    'coalesce(new.chameleon_enabled,0) <> coalesce(old.chameleon_enabled,0)',
+    'coalesce(new.chameleon_swt1_depth_cm,-1) <> coalesce(old.chameleon_swt1_depth_cm,-1)',
+    'coalesce(new.chameleon_swt2_depth_cm,-1) <> coalesce(old.chameleon_swt2_depth_cm,-1)',
+    'coalesce(new.chameleon_swt3_depth_cm,-1) <> coalesce(old.chameleon_swt3_depth_cm,-1)',
+    "'chameleon_enabled', new.chameleon_enabled,",
+    "'chameleon_swt1_depth_cm', new.chameleon_swt1_depth_cm,",
+    "'chameleon_swt2_depth_cm', new.chameleon_swt2_depth_cm,",
+    "'chameleon_swt3_depth_cm', new.chameleon_swt3_depth_cm,",
+  ],
   trg_improvement_requests_outbox_ai: [
     'work_request_submitted',
     'contract_version',
@@ -652,6 +774,14 @@ const forbiddenTriggerSqlFragments = {
   trg_dp_dendro_readings_outbox_ai: [
     "'0016c001f11715e2'",
   ],
+  // Issue #10 regression pin: literal 0 in the outbox sync_version slot
+  // (between the payload json_object close and occurred_at strftime).
+  trg_dp_dendro_daily_outbox_ai: ['), 0, strftime'],
+  trg_dp_dendro_daily_outbox_au: ['), 0, strftime'],
+  trg_dp_zone_recs_outbox_ai: ['), 0, strftime'],
+  trg_dp_zone_recs_outbox_au: ['), 0, strftime'],
+  trg_dp_zone_env_outbox_ai: ['), 0, strftime'],
+  trg_dp_zone_env_outbox_au: ['), 0, strftime'],
 };
 
 function sqlite(dbPath, sql) {

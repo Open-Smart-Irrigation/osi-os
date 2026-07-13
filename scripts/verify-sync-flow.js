@@ -2147,7 +2147,8 @@ expectIncludesById('put-chameleon-enabled-auth-fn', 'function parseChameleonEnab
 expectIncludesById('put-chameleon-enabled-auth-fn', "const enabled = parseChameleonEnabled(body.enabled);", 'rejects missing or invalid Chameleon enabled values');
 expectIncludesById('put-chameleon-enabled-auth-fn', "enabled must be a boolean, 1, 0, 'true', 'false', '1', or '0'", 'returns a 400 for invalid Chameleon enabled values');
 expectIncludesById('put-chameleon-enabled-auth-fn', "type_id = 'DRAGINO_LSN50'", 'limits Chameleon enabled updates to LSN50 devices');
-expectExcludesById('put-chameleon-enabled-auth-fn', 'sync_version = COALESCE(sync_version, 0) + 1', 'keeps Chameleon enabled as local-only edge config until a server sync contract exists');
+expectIncludesById('put-chameleon-enabled-auth-fn', 'sync_version = COALESCE(sync_version, 0) + 1', 'bumps devices.sync_version on Chameleon enable toggle so trg_sync_devices_outbox_au emits an increasing-version DEVICE event (issue #5; matches dendro_enabled/temp_enabled/rain_gauge_enabled/flow_meter_enabled precedent, avoids the equal-version-payload-conflict class fixed for issue #10)');
+expectIncludesById('dendro-ref-tree-fn', 'sync_version = COALESCE(sync_version, 0) + 1', 'bumps devices.sync_version on reference-tree toggle so trg_sync_devices_outbox_au emits an increasing-version DEVICE event (issue #15; matches dendro_enabled/temp_enabled/rain_gauge_enabled/flow_meter_enabled/chameleon_enabled precedent, avoids the equal-version-payload-conflict class fixed for issue #10)');
 expectIncludesById('8b93fa005d78e25f', 'verifyBearer', 'chameleon-depth-auth uses HMAC verifyBearer — not global.get(authCheck)');
 expectExcludesById('8b93fa005d78e25f', "global.get('authCheck')", 'chameleon-depth-auth does not call the dead authCheck global');
 expectLibById('8b93fa005d78e25f', 'crypto', 'crypto', 'imports crypto for Chameleon depth auth verification');
@@ -2207,7 +2208,7 @@ if (deviceApiCatch) {
   expectEqual(deviceApiCatch.scope, null, 'device-api catch node catches the whole tab');
 }
 expectWireById('device-api-catch', 'device-api-http500', 'routes uncaught device-api errors into the HTTP 500 formatter');
-expectIncludesById('device-api-http500', 'msg.statusCode = 500;', 'sets HTTP 500 for uncaught device-api failures');
+expectIncludesById('device-api-http500', 'msg.statusCode = (msg.error && msg.error.statusCode) || 500;', 'adopts a thrown error statusCode (e.g. verifyBearer 401) for device-api failures, defaulting to 500 (issue #9)');
 expectIncludesById('device-api-http500', "error: 'device-api failed'", 'formats uncaught device-api failures with the generic error code');
 expectWireById('device-api-http500', 'device-response', 'returns uncaught device-api failures through the shared response node');
 expectIncludes('Format Dendro Config Response', 'dendro_force_legacy: row.dendro_force_legacy ?? null', 'returns canonical dendrometer config fields');
@@ -2894,8 +2895,8 @@ for (const seedDatabasePath of v2SeedDatabasePaths) {
   }
 }
 
-// --- firmware version 0.6.5 ---
-const EXPECTED_VERSION = '0.6.5';
+// --- firmware version 0.7.0 ---
+const EXPECTED_VERSION = '0.7.0';
 const osiServerDefaultsContent = fs.existsSync(osiServerDefaultsPath) ? fs.readFileSync(osiServerDefaultsPath, 'utf8') : '';
 expectFileIncludes('96_osi_server_config', osiServerDefaultsContent, `firmware_version=${EXPECTED_VERSION}`, `96_osi_server_config seeds firmware_version ${EXPECTED_VERSION}`);
 expectFileIncludes('node-red.init', nodeRedInitScript, `echo "${EXPECTED_VERSION}"`, `node-red.init fallback version is ${EXPECTED_VERSION}`);

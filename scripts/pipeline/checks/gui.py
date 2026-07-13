@@ -5,7 +5,12 @@ def run(ctx: VerifyContext) -> CheckResult:
     try:
         from playwright.sync_api import sync_playwright
     except ImportError:
-        return CheckResult("gui", True, "SKIP: playwright not installed (install with: pip install playwright && playwright install chromium)")
+        # A check that cannot run must not report PASS: an unverified GUI is
+        # exactly what this check exists to catch.
+        return CheckResult("gui", False,
+                           "playwright not installed on runner — install it "
+                           "(pip install playwright && playwright install chromium) "
+                           "or explicitly remove the gui check from the run")
 
     try:
         with sync_playwright() as p:
