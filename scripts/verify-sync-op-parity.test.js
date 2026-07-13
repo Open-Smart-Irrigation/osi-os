@@ -153,6 +153,13 @@ return msg;
 `,
   }]));
   fs.writeFileSync(modulePath, `
+async function emitJournalOutbox(tx, entryUuid, op) {
+  return tx.run(
+    'INSERT INTO sync_outbox (event_uuid,aggregate_type,aggregate_key,op,payload_json,sync_version,occurred_at) ' +
+      'VALUES (?, ?, ?, ?, ?, ?, ?)',
+    ['event-1', 'JOURNAL_ENTRY', entryUuid, op, '{}', 1, '2026-07-13T00:00:00.000Z']
+  );
+}
 async function emit(tx, entryUuid) {
   await emitJournalOutbox(tx, entryUuid, 'JOURNAL_ENTRY_UPSERTED');
   await emitJournalOutbox(tx, entryUuid, 'JOURNAL_ENTRY_VOIDED');
@@ -420,6 +427,7 @@ test('parity ignores journal operation names found only in module comments', () 
   fs.writeFileSync(path.join(path.dirname(fixture.moduleSources[0].path), 'comment-only.js'), `
 // publishAnything(tx, { operation: 'JOURNAL_VOCAB_UPSERTED' });
 /* 'JOURNAL_PLOT_UPSERTED' was considered but is not emitted. */
+// tx.run('INSERT INTO sync_outbox (event_uuid,op) VALUES (?,?)', [eventUuid, op]);
 module.exports = {};
 `);
   delete fixture.moduleSources;
@@ -433,6 +441,7 @@ test('parity excludes journal test modules from production discovery', () => {
   const fixture = createStagedParityFixture();
   fs.writeFileSync(path.join(path.dirname(fixture.moduleSources[0].path), 'deferred.test.js'), `
 test('future vocabulary producer', () => publishAnything('JOURNAL_VOCAB_UPSERTED'));
+test('future direct producer', () => tx.run('INSERT INTO sync_outbox (event_uuid,op) VALUES (?,?)'));
 `);
   delete fixture.moduleSources;
 
@@ -454,6 +463,118 @@ async function publishDynamic(tx, entryUuid, op) {
 
   assert.equal(result.ok, false);
   assert.match(result.message, /dynamic.*outbox|outbox.*literal/i);
+});
+
+test('parity accepts the audited lifecycle SQL emitter with literal operation call sites', () => {
+  const fixture = createStagedParityFixture();
+  fs.writeFileSync(fixture.moduleSources[0].path, `
+async function emitJournalOutbox(tx, entryUuid, op) {
+  return tx.run(
+    'INSERT INTO sync_outbox (event_uuid,aggregate_type,aggregate_key,op,payload_json,sync_version,occurred_at) ' +
+      'VALUES (?, ?, ?, ?, ?, ?, ?)',
+    ['event-1', 'JOURNAL_ENTRY', entryUuid, op, '{}', 1, '2026-07-13T00:00:00.000Z']
+  );
+}
+async function emitEntryEvents(tx, entryUuid) {
+  await emitJournalOutbox(tx, entryUuid, 'JOURNAL_ENTRY_UPSERTED');
+  await emitJournalOutbox(tx, entryUuid, 'JOURNAL_ENTRY_VOIDED');
+}
+`);
+  delete fixture.moduleSources;
+
+  const result = checkSyncOpParity(fixture);
+
+  assert.equal(result.ok, true, result.message);
+});
+
+test('parity rejects lifecycle operation literals without the audited emitter insert', () => {
+  const fixture = createStagedParityFixture();
+  fs.writeFileSync(fixture.moduleSources[0].path, `
+async function publishEntryEvents(tx, entryUuid) {
+  await publishAnything(tx, entryUuid, 'JOURNAL_ENTRY_UPSERTED');
+  await publishAnything(tx, entryUuid, 'JOURNAL_ENTRY_VOIDED');
+}
+`);
+
+  const result = checkSyncOpParity(fixture);
+
+  assert.equal(result.ok, false);
+  assert.match(result.message, /emitJournalOutbox.*exactly one audited sync_outbox insert.*found 0/i);
+});
+
+test('parity rejects a dynamically constructed insert in the audited lifecycle emitter', () => {
+  const fixture = createStagedParityFixture();
+  fs.writeFileSync(fixture.moduleSources[0].path, `
+async function emitJournalOutbox(tx, entryUuid, op) {
+  const table = 'sync_' + 'outbox';
+  return tx.run(
+    'INSERT INTO ' + table + ' (event_uuid,aggregate_key,op) VALUES (?, ?, ?)',
+    ['event-1', entryUuid, op]
+  );
+}
+async function emitEntryEvents(tx, entryUuid) {
+  await emitJournalOutbox(tx, entryUuid, 'JOURNAL_ENTRY_UPSERTED');
+  await emitJournalOutbox(tx, entryUuid, 'JOURNAL_ENTRY_VOIDED');
+}
+`);
+
+  const result = checkSyncOpParity(fixture);
+
+  assert.equal(result.ok, false);
+  assert.match(result.message, /emitJournalOutbox.*exactly one audited sync_outbox insert.*found 0/i);
+});
+
+test('parity fails closed on direct sync_outbox SQL with a dynamic operation', () => {
+  const fixture = createStagedParityFixture();
+  fs.writeFileSync(path.join(path.dirname(fixture.moduleSources[0].path), 'direct-dynamic.js'), `
+async function publishDirect(tx, eventUuid, aggregateKey, op, payload) {
+  return tx.run(
+    'INSERT INTO sync_outbox (event_uuid,aggregate_type,aggregate_key,op,payload_json,sync_version,occurred_at) ' +
+      'VALUES (?, ?, ?, ?, ?, ?, ?)',
+    [eventUuid, 'JOURNAL_ENTRY', aggregateKey, op, JSON.stringify(payload), payload.sync_version, payload.updated_at]
+  );
+}
+`);
+  delete fixture.moduleSources;
+
+  const result = checkSyncOpParity(fixture);
+
+  assert.equal(result.ok, false);
+  assert.match(result.message, /direct.*sync_outbox|sync_outbox.*literal/i);
+});
+
+test('parity rejects static direct sync_outbox SQL outside the audited emitter', () => {
+  const fixture = createStagedParityFixture();
+  fs.writeFileSync(path.join(path.dirname(fixture.moduleSources[0].path), 'direct-static.js'), `
+async function publishDirect(tx, payload) {
+  return tx.run(
+    "INSERT INTO sync_outbox (event_uuid,aggregate_type,aggregate_key,op,payload_json,sync_version,occurred_at) " +
+      "VALUES ('event-1','JOURNAL_VOCAB','field-1','JOURNAL_VOCAB_UPSERTED','{}',1,'2026-07-13T00:00:00.000Z')"
+  );
+}
+`);
+  delete fixture.moduleSources;
+
+  const result = checkSyncOpParity(fixture);
+
+  assert.equal(result.ok, false);
+  assert.match(result.message, /direct.*sync_outbox.*audited|sync_outbox.*forbidden/i);
+  assert.match(result.message, /JOURNAL_VOCAB_UPSERTED/);
+});
+
+test('parity fails closed on an unparseable direct sync_outbox insert', () => {
+  const fixture = createStagedParityFixture();
+  fs.writeFileSync(path.join(path.dirname(fixture.moduleSources[0].path), 'direct-broken.js'), `
+async function publishBroken(tx, eventUuid, op) {
+  return tx.run('INSERT INTO sync_outbox (event_uuid,op VALUES (?,?)', [eventUuid, op]);
+}
+`);
+  delete fixture.moduleSources;
+
+  const result = checkSyncOpParity(fixture);
+
+  assert.equal(result.ok, false);
+  assert.match(result.message, /direct.*sync_outbox|sync_outbox.*forbidden/i);
 });
 
 test('parity fails closed on an unparseable journal outbox call', () => {

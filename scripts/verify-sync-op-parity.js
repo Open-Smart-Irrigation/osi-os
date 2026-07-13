@@ -10,6 +10,10 @@ const SERVER_RELATIVE_SOURCE = path.join('backend', 'src', 'main', 'java', 'org'
 const STAGING_MANIFEST_RELATIVE = 'scripts/fixtures/sync-contract-staging.json';
 const JOURNAL_MODULE_DIRECTORY =
   'conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-journal';
+const AUDITED_JOURNAL_OUTBOX_EMITTER = {
+  file: 'lifecycle.js',
+  functionName: 'emitJournalOutbox',
+};
 const EXACT_STAGED_COMMANDS = [
   'UPSERT_JOURNAL_ENTRY',
   'VOID_JOURNAL_ENTRY',
@@ -880,6 +884,18 @@ function findMatchingJavaScriptParen(maskedSource, openIndex) {
   return -1;
 }
 
+function findMatchingJavaScriptBrace(maskedSource, openIndex) {
+  let depth = 0;
+  for (let index = openIndex; index < maskedSource.length; index += 1) {
+    if (maskedSource[index] === '{') depth += 1;
+    if (maskedSource[index] === '}') {
+      depth -= 1;
+      if (depth === 0) return index;
+    }
+  }
+  return -1;
+}
+
 function isOutboxFunctionDefinition(maskedSource, calleeIndex, closeIndex) {
   const prefix = maskedSource.slice(Math.max(0, calleeIndex - 80), calleeIndex);
   if (/\bfunction\s*\*?\s*$/.test(prefix)) return true;
@@ -887,12 +903,12 @@ function isOutboxFunctionDefinition(maskedSource, calleeIndex, closeIndex) {
   return suffix.startsWith('=>') || suffix.startsWith('{');
 }
 
-function extractJournalOperationLiterals(source) {
-  const operations = [];
-  const journalOperation = /^JOURNAL_[A-Z0-9_]+_(?:UPSERTED|VOIDED)$/;
+function extractJavaScriptStringLiterals(source) {
+  const literals = [];
   for (let index = 0; index < source.length; index += 1) {
     const quote = source[index];
     if (quote !== "'" && quote !== '"' && quote !== '`') continue;
+    const start = index;
     let value = '';
     let closed = false;
     let dynamicTemplate = false;
@@ -909,9 +925,56 @@ function extractJournalOperationLiterals(source) {
         value += ch;
       }
     }
-    if (closed && !dynamicTemplate && journalOperation.test(value)) operations.push(value);
+    if (closed) literals.push({ start, end: index, value, dynamicTemplate });
   }
+  return literals;
+}
+
+function extractJournalOperationLiterals(source) {
+  const journalOperation = /^JOURNAL_[A-Z0-9_]+_(?:UPSERTED|VOIDED)$/;
+  return extractJavaScriptStringLiterals(source)
+    .filter((literal) => !literal.dynamicTemplate && journalOperation.test(literal.value))
+    .map((literal) => literal.value);
+}
+
+function extractJournalOperationTokens(source) {
+  const operations = [];
+  const journalOperation = /\bJOURNAL_[A-Z0-9_]+_(?:UPSERTED|VOIDED)\b/g;
+  let match;
+  while ((match = journalOperation.exec(source)) !== null) operations.push(match[0]);
   return operations;
+}
+
+function directSyncOutboxSqlSites(source) {
+  const insert = /\binsert\s+(?:or\s+(?:abort|fail|ignore|replace|rollback)\s+)?into\s+sync_outbox\b/i;
+  const literals = extractJavaScriptStringLiterals(source);
+  const sites = [];
+  for (let index = 0; index < literals.length; index += 1) {
+    const first = literals[index];
+    let last = first;
+    let sql = first.value;
+    while (index + 1 < literals.length &&
+      /^\s*\+\s*$/.test(source.slice(last.end + 1, literals[index + 1].start))) {
+      last = literals[index += 1];
+      sql += last.value;
+    }
+    if (insert.test(sql)) sites.push({ start: first.start, end: last.end, sql });
+  }
+  return sites;
+}
+
+function auditedJournalOutboxEmitterRange(modulePath, maskedSource) {
+  if (path.basename(modulePath) !== AUDITED_JOURNAL_OUTBOX_EMITTER.file) return null;
+  const definition = new RegExp(
+    '\\b(?:async\\s+)?function\\s+' + AUDITED_JOURNAL_OUTBOX_EMITTER.functionName +
+      '\\s*\\([^)]*\\)\\s*\\{',
+    'g'
+  );
+  const matches = [...maskedSource.matchAll(definition)];
+  if (matches.length !== 1) return null;
+  const openIndex = matches[0].index + matches[0][0].lastIndexOf('{');
+  const closeIndex = findMatchingJavaScriptBrace(maskedSource, openIndex);
+  return closeIndex < 0 ? null : { start: openIndex, end: closeIndex };
 }
 
 function extractJournalModuleOps(modulePath) {
@@ -923,6 +986,28 @@ function extractJournalModuleOps(modulePath) {
   const ops = extractJournalOperationLiterals(source);
   const errors = [];
   let match;
+
+  const directSqlSites = directSyncOutboxSqlSites(source);
+  const auditedEmitter = auditedJournalOutboxEmitterRange(modulePath, maskedSource);
+  let auditedSiteCount = 0;
+  for (const site of directSqlSites) {
+    ops.push(...extractJournalOperationTokens(site.sql));
+    const isAudited = auditedEmitter && site.start > auditedEmitter.start && site.end < auditedEmitter.end;
+    if (isAudited) {
+      auditedSiteCount += 1;
+      continue;
+    }
+    errors.push(
+      `${path.basename(modulePath)}@${site.start}: direct sync_outbox SQL is forbidden outside ` +
+      `${AUDITED_JOURNAL_OUTBOX_EMITTER.file} ${AUDITED_JOURNAL_OUTBOX_EMITTER.functionName}()`
+    );
+  }
+  if (path.basename(modulePath) === AUDITED_JOURNAL_OUTBOX_EMITTER.file && auditedSiteCount !== 1) {
+    errors.push(
+      `${AUDITED_JOURNAL_OUTBOX_EMITTER.file}: ${AUDITED_JOURNAL_OUTBOX_EMITTER.functionName}() ` +
+      `must contain exactly one audited sync_outbox insert; found ${auditedSiteCount}`
+    );
+  }
 
   const call = /\b([A-Za-z_$][\w$]*(?:\s*\.\s*[A-Za-z_$][\w$]*)*)\s*\(/g;
   while ((match = call.exec(maskedSource)) !== null) {
