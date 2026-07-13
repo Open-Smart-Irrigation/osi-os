@@ -23,6 +23,13 @@ test('deploy.sh fetches the tested payload-swap module and verifies same-filesys
   assert.match(deploy, /stat -c %d "\$PAYLOADS_ROOT"/);
 });
 
+test('deploy.sh ships the journal lifecycle module required by its package entry point', () => {
+  assert.match(
+    deploy,
+    /fetch_required "osi-journal lifecycle\.js" \\\n+\s+"conf\/full_raspberrypi_bcm27xx_bcm2712\/files\/usr\/share\/node-red\/osi-journal\/lifecycle\.js" \\\n+\s+"\/srv\/node-red\/osi-journal\/lifecycle\.js"/
+  );
+});
+
 test('deploy.sh stages flows before migration and flips only after migration succeeds', () => {
   const stageIdx = indexOf('swap_call stagePayload "$DEPLOY_STAMP" "$STAGED_FLOWS"');
   const migrationIdx = indexOf('run_schema_migration || exit 1');
