@@ -25,8 +25,9 @@ const SEASON_UUID = 'dddddddd-dddd-4ddd-8ddd-dddddddddddd';
 const FOREIGN_ZONE_UUID = '22222222-2222-4222-8222-222222222222';
 const NO_SEASON_ZONE_UUID = '33333333-3333-4333-8333-333333333333';
 const GATEWAY_EUI = '0016C001F11715E2';
+const OWNED_DEVICE_EUI = '70B3D57ED0061234';
 const FOREIGN_DEVICE_EUI = 'A84041ABCDEFFEDC';
-const ENTRY_UUID = '11111111-1111-4111-8111-111111111111';
+const ENTRY_UUID = 'abcdefab-cdef-4abc-8def-abcdefabcdef';
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const PLOT_NUMBERS = [2, 5, 6, 10, 12];
 
@@ -199,6 +200,20 @@ function seedDatabase() {
     '2026-07-12T00:00:00.000Z',
     '2026-07-12T00:00:00.000Z',
     2,
+    GATEWAY_EUI
+  );
+  native.prepare(
+    'INSERT INTO devices(' +
+      'deveui,name,type_id,user_id,created_at,updated_at,irrigation_zone_id,gateway_device_eui' +
+    ') VALUES (?,?,?,?,?,?,?,?)'
+  ).run(
+    OWNED_DEVICE_EUI,
+    'Owned journal sensor',
+    'DRAGINO_LSN50',
+    1,
+    '2026-07-12T00:00:00.000Z',
+    '2026-07-12T00:00:00.000Z',
+    1,
     GATEWAY_EUI
   );
   native.close();
@@ -1193,6 +1208,262 @@ test('oversize saveDraft rejects before opening a database transaction', async (
 
   await rejectCode(
     journal.saveDraft(fakeDb, catalog, oversized, principal()),
+    'limit_exceeded'
+  );
+  assert.equal(transactionCalls, 0);
+});
+
+test('correction keeps its originally frozen season after the covering season changes', async () => {
+  await journal.finalize(db, catalog, validEntry(), principal());
+  const original = await db.get(
+    'SELECT season_uuid,season_crop,season_variety FROM journal_entries WHERE entry_uuid=?',
+    [ENTRY_UUID]
+  );
+
+  let corrected;
+  try {
+    await db.run(
+      'UPDATE zone_seasons SET crop_type=?,variety=? WHERE season_uuid=?',
+      ['wheat', 'Changed after recording', SEASON_UUID]
+    );
+    await journal.finalize(db, catalog, validEntry({
+      base_sync_version: 1,
+      note: 'Correction after season metadata changed',
+      values: [{
+        attribute_code: 'attr.operator',
+        group_index: 0,
+        value: 'Correcting operator',
+        value_status: 'observed',
+      }],
+    }), principal());
+    corrected = await db.get(
+      'SELECT season_uuid,season_crop,season_variety FROM journal_entries WHERE entry_uuid=?',
+      [ENTRY_UUID]
+    );
+  } finally {
+    await db.run(
+      'UPDATE zone_seasons SET crop_type=?,variety=? WHERE season_uuid=?',
+      ['barley', 'Golden', SEASON_UUID]
+    );
+  }
+
+  assert.deepEqual(
+    [corrected.season_uuid, corrected.season_crop, corrected.season_variety],
+    [original.season_uuid, original.season_crop, original.season_variety]
+  );
+});
+
+test('finalize rejects a stale loaded catalog without writing rows', async () => {
+  assert.ok(Number.isInteger(catalog.version));
+  assert.equal(typeof catalog.hash, 'string');
+  try {
+    await db.run(
+      'UPDATE journal_catalog_state SET catalog_version=?,catalog_hash=?,updated_at=? WHERE id=?',
+      [catalog.version + 1, 'f'.repeat(64), '2026-07-13T00:00:00.000Z', 1]
+    );
+
+    await rejectCode(
+      journal.finalize(db, catalog, validEntry(), principal()),
+      'stale_catalog'
+    );
+    await assertNoJournalWrites();
+  } finally {
+    await db.run(
+      'UPDATE journal_catalog_state SET catalog_version=?,catalog_hash=?,updated_at=? WHERE id=?',
+      [catalog.version, catalog.hash, '2026-07-12T00:00:00.000Z', 1]
+    );
+  }
+});
+
+test('finalize rejects a plot whose linked zone is soft-deleted', async () => {
+  try {
+    await db.run(
+      'UPDATE irrigation_zones SET deleted_at=? WHERE id=?',
+      ['2026-07-13T00:00:00.000Z', 1]
+    );
+
+    await rejectCode(
+      journal.finalize(db, catalog, validEntry(), principal()),
+      'zone_not_found'
+    );
+    await assertNoJournalWrites();
+  } finally {
+    await db.run('UPDATE irrigation_zones SET deleted_at=NULL WHERE id=?', [1]);
+  }
+});
+
+test('finalize anchors an active owned device and rejects it after soft deletion', async () => {
+  const active = await journal.finalize(db, catalog, validEntry({
+    device_eui: OWNED_DEVICE_EUI,
+  }), principal());
+  assert.equal(active.sync_version, 1);
+  const anchored = await db.get(
+    'SELECT device_eui FROM journal_entries WHERE entry_uuid=?',
+    [ENTRY_UUID]
+  );
+  assert.equal(anchored.device_eui, OWNED_DEVICE_EUI);
+  await resetMutations();
+
+  try {
+    await db.run(
+      'UPDATE devices SET deleted_at=? WHERE deveui=?',
+      ['2026-07-13T00:00:00.000Z', OWNED_DEVICE_EUI]
+    );
+
+    await rejectCode(journal.finalize(db, catalog, validEntry({
+      device_eui: OWNED_DEVICE_EUI,
+    }), principal()), 'not_found');
+    await assertNoJournalWrites();
+  } finally {
+    await db.run('UPDATE devices SET deleted_at=NULL WHERE deveui=?', [OWNED_DEVICE_EUI]);
+  }
+});
+
+test('finalizeBatch rejects a null plot before opening a database transaction', async () => {
+  let transactionCalls = 0;
+  const fakeDb = {
+    transaction() {
+      transactionCalls += 1;
+      const error = new Error('database transaction must not be invoked');
+      error.code = 'db_transaction_invoked';
+      throw error;
+    },
+  };
+
+  await rejectCode(journal.finalizeBatch(
+    fakeDb,
+    catalog,
+    validEntry({ entry_uuid: undefined, plot_uuid: undefined }),
+    [plotUuid(2), null],
+    principal()
+  ), 'invalid_batch');
+  assert.equal(transactionCalls, 0);
+  await assertNoJournalWrites();
+});
+
+test('saveDraft rejects a malformed entry UUID without writing rows', async () => {
+  await rejectCode(journal.saveDraft(db, catalog, validEntry({
+    entry_uuid: 'not-a-uuid',
+  }), principal()), 'invalid_uuid');
+
+  await assertNoJournalWrites();
+});
+
+test('saveDraft canonicalizes a compact uppercase entry UUID before storing it', async () => {
+  const compactUppercase = ENTRY_UUID.replace(/-/g, '').toUpperCase();
+  const result = await journal.saveDraft(db, catalog, validEntry({
+    entry_uuid: compactUppercase,
+  }), principal());
+
+  assert.equal(result.entry_uuid, ENTRY_UUID);
+  assert.equal(result.sync_version, 0);
+  const rows = await db.all('SELECT entry_uuid FROM journal_entries');
+  assert.deepEqual(rows.map((row) => row.entry_uuid), [ENTRY_UUID]);
+});
+
+for (const identityField of ['campaign_uuid', 'pass_uuid', 'batch_uuid']) {
+  test('saveDraft rejects a malformed ' + identityField + ' without writing rows', async () => {
+    await rejectCode(journal.saveDraft(db, catalog, validEntry({
+      [identityField]: 'not-a-uuid',
+    }), principal()), 'invalid_uuid');
+
+    await assertNoJournalWrites();
+  });
+}
+
+test('oversize finalize rejects before opening a database transaction', async () => {
+  let transactionCalls = 0;
+  const fakeDb = {
+    transaction() {
+      transactionCalls += 1;
+      const error = new Error('database transaction must not be invoked');
+      error.code = 'db_transaction_invoked';
+      throw error;
+    },
+  };
+  const oversized = validEntry({
+    request_padding: 'x'.repeat(256 * 1024),
+  });
+  assert.ok(Buffer.byteLength(JSON.stringify(oversized), 'utf8') > 256 * 1024);
+
+  await rejectCode(
+    journal.finalize(fakeDb, catalog, oversized, principal()),
+    'limit_exceeded'
+  );
+  assert.equal(transactionCalls, 0);
+});
+
+test('oversize finalizeBatch rejects before opening a database transaction', async () => {
+  let transactionCalls = 0;
+  const fakeDb = {
+    transaction() {
+      transactionCalls += 1;
+      const error = new Error('database transaction must not be invoked');
+      error.code = 'db_transaction_invoked';
+      throw error;
+    },
+  };
+  const oversized = validEntry({
+    entry_uuid: undefined,
+    plot_uuid: undefined,
+    request_padding: 'x'.repeat(256 * 1024),
+  });
+  assert.ok(Buffer.byteLength(JSON.stringify(oversized), 'utf8') > 256 * 1024);
+
+  await rejectCode(journal.finalizeBatch(
+    fakeDb,
+    catalog,
+    oversized,
+    [plotUuid(2)],
+    principal()
+  ), 'limit_exceeded');
+  assert.equal(transactionCalls, 0);
+});
+
+test('finalize rejects an active owned device whose linked zone is soft-deleted', async () => {
+  try {
+    await db.run(
+      'UPDATE irrigation_zones SET deleted_at=? WHERE id=?',
+      ['2026-07-13T00:00:00.000Z', 1]
+    );
+
+    await rejectCode(journal.finalize(db, catalog, validEntry({
+      activity_code: 'general_observation',
+      template_code: 'farmer_quick',
+      plot_uuid: null,
+      device_eui: OWNED_DEVICE_EUI,
+      occurred_timezone: 'Europe/Zurich',
+      values: [{
+        attribute_code: 'attr.operator',
+        group_index: 0,
+        value: 'Farm observer',
+        value_status: 'observed',
+      }],
+    }), principal()), 'not_found');
+    await assertNoJournalWrites();
+  } finally {
+    await db.run('UPDATE irrigation_zones SET deleted_at=NULL WHERE id=?', [1]);
+  }
+});
+
+test('oversize correction-shaped finalize rejects before opening a database transaction', async () => {
+  let transactionCalls = 0;
+  const fakeDb = {
+    transaction() {
+      transactionCalls += 1;
+      const error = new Error('database transaction must not be invoked');
+      error.code = 'db_transaction_invoked';
+      throw error;
+    },
+  };
+  const oversized = validEntry({
+    base_sync_version: 1,
+    request_padding: 'x'.repeat(256 * 1024),
+  });
+  assert.ok(Buffer.byteLength(JSON.stringify(oversized), 'utf8') > 256 * 1024);
+
+  await rejectCode(
+    journal.finalize(fakeDb, catalog, oversized, principal()),
     'limit_exceeded'
   );
   assert.equal(transactionCalls, 0);

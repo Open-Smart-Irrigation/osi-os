@@ -61,6 +61,8 @@ const CORRECTION_IMMUTABLE_COLUMNS = new Set([
 const CORRECTION_COLUMNS = ENTRY_COLUMNS.filter(function(column) {
   return !CORRECTION_IMMUTABLE_COLUMNS.has(column);
 });
+const UUID = /^[0-9a-fA-F]{8}-?[0-9a-fA-F]{4}-?[0-9a-fA-F]{4}-?[0-9a-fA-F]{4}-?[0-9a-fA-F]{12}$/;
+const INPUT_UUID_FIELDS = ['entry_uuid', 'plot_uuid', 'campaign_uuid', 'pass_uuid', 'batch_uuid'];
 const EUI64 = /^[0-9a-fA-F]{16}$/;
 const LOCAL_TIMESTAMP = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2})(?:\.(\d{1,3}))?)?$/;
 const formatterCache = new Map();
@@ -73,6 +75,61 @@ function lifecycleError(code, message) {
 
 function nullable(value) {
   return value == null ? null : value;
+}
+
+function validateRequestLimit(input) {
+  let encoded;
+  try {
+    encoded = JSON.stringify(input);
+  } catch (_) {
+    throw lifecycleError('invalid_json', 'Journal request must be JSON-serializable');
+  }
+  if (encoded === undefined) {
+    throw lifecycleError('invalid_json', 'Journal request must be JSON-serializable');
+  }
+  if (Buffer.byteLength(encoded, 'utf8') > 256 * 1024) {
+    throw lifecycleError('limit_exceeded', 'Journal request exceeds the 256 KiB limit');
+  }
+}
+
+function canonicalUuid(raw) {
+  const hex = raw.replace(/-/g, '').toLowerCase();
+  return hex.slice(0, 8) + '-' + hex.slice(8, 12) + '-' + hex.slice(12, 16) + '-' +
+    hex.slice(16, 20) + '-' + hex.slice(20);
+}
+
+function normalizeUuid(raw, field, required) {
+  if (raw == null) {
+    if (required) throw lifecycleError('invalid_uuid', field + ' must be a UUID');
+    return raw;
+  }
+  if (typeof raw !== 'string' || !UUID.test(raw)) {
+    throw lifecycleError('invalid_uuid', field + ' must be a UUID');
+  }
+  return canonicalUuid(raw);
+}
+
+function normalizeInputIdentities(input) {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) {
+    throw lifecycleError('invalid_type', 'Journal entry must be an object');
+  }
+  const normalized = Object.assign({}, input);
+  for (const field of INPUT_UUID_FIELDS) {
+    normalized[field] = normalizeUuid(normalized[field], field, false);
+  }
+  return normalized;
+}
+
+function normalizeBatchPlotUuids(plotUuids) {
+  const normalized = [];
+  for (let index = 0; index < plotUuids.length; index += 1) {
+    const plotUuid = plotUuids[index];
+    if (typeof plotUuid !== 'string' || !UUID.test(plotUuid)) {
+      throw lifecycleError('invalid_batch', 'Every batch member must be a plot UUID');
+    }
+    normalized.push(canonicalUuid(plotUuid));
+  }
+  return normalized;
 }
 
 function parseLocalTimestamp(raw) {
@@ -217,7 +274,7 @@ async function resolvePlotContext(tx, plotUuid, principal) {
       'u.user_uuid AS zone_owner_user_uuid ' +
     'FROM journal_plots AS p ' +
     'LEFT JOIN irrigation_zones AS z ON z.zone_uuid=p.zone_uuid ' +
-      'AND z.gateway_device_eui=p.gateway_device_eui ' +
+      'AND z.gateway_device_eui=p.gateway_device_eui AND z.deleted_at IS NULL ' +
     'LEFT JOIN users AS u ON u.id=z.user_id ' +
     'WHERE p.plot_uuid=? AND p.gateway_device_eui=? AND p.active=? AND p.deleted_at IS NULL',
     [plotUuid, principal.gateway_device_eui, 1]
@@ -267,18 +324,7 @@ function validateDraftLimits(input, principal) {
   if (!input || typeof input !== 'object' || Array.isArray(input)) {
     throw lifecycleError('invalid_type', 'Draft must be an object');
   }
-  let encoded;
-  try {
-    encoded = JSON.stringify(input);
-  } catch (_) {
-    throw lifecycleError('invalid_json', 'Draft must be JSON-serializable');
-  }
-  if (encoded === undefined) {
-    throw lifecycleError('invalid_json', 'Draft must be JSON-serializable');
-  }
-  if (Buffer.byteLength(encoded, 'utf8') > 256 * 1024) {
-    throw lifecycleError('limit_exceeded', 'Draft exceeds the 256 KiB request limit');
-  }
+  validateRequestLimit(input);
   if (principal && typeof principal.author_label === 'string' &&
       Array.from(principal.author_label).length > 120) {
     throw lifecycleError('limit_exceeded', 'Author label exceeds 120 characters');
@@ -341,11 +387,13 @@ async function resolveDeviceEui(tx, deviceEui, principal, plot) {
   }
   const device = await tx.get(
     'SELECT d.deveui,d.user_id,d.irrigation_zone_id,d.gateway_device_eui,' +
-      'u.user_uuid,z.user_id AS zone_user_id,z.gateway_device_eui AS zone_gateway_device_eui ' +
+      'u.user_uuid,z.id AS linked_zone_id,z.user_id AS zone_user_id,' +
+      'z.gateway_device_eui AS zone_gateway_device_eui ' +
     'FROM devices AS d ' +
     'LEFT JOIN users AS u ON u.id=d.user_id ' +
-    'LEFT JOIN irrigation_zones AS z ON z.id=d.irrigation_zone_id ' +
-    'WHERE UPPER(d.deveui)=UPPER(?)',
+    'LEFT JOIN irrigation_zones AS z ON z.id=d.irrigation_zone_id AND z.deleted_at IS NULL ' +
+    'WHERE UPPER(d.deveui)=UPPER(?) AND d.deleted_at IS NULL ' +
+      'AND (d.irrigation_zone_id IS NULL OR z.id IS NOT NULL)',
     [deviceEui]
   );
   if (!device) throw lifecycleError('not_found', 'Journal device was not found');
@@ -415,13 +463,36 @@ async function validationDefinitions(tx, input) {
   return { layout: parsedDefinition(layout), template: parsedDefinition(template) };
 }
 
-async function currentCatalogVersion(tx) {
+async function currentCatalogVersion(tx, catalog) {
   const state = await tx.get(
-    'SELECT catalog_version FROM journal_catalog_state WHERE id=?',
+    'SELECT catalog_version,catalog_hash FROM journal_catalog_state WHERE id=?',
     [1]
   );
   if (!state) throw lifecycleError('invalid_catalog', 'Journal catalog state is missing');
-  return Number(state.catalog_version);
+  const version = Number(state.catalog_version);
+  if (!catalog || Number(catalog.version) !== version || catalog.hash !== state.catalog_hash) {
+    throw lifecycleError('stale_catalog', 'Journal catalog changed after it was loaded');
+  }
+  return version;
+}
+
+function frozenSeasonForCorrection(existing, plot, occurrence) {
+  const sameDeterminants = nullable(existing.plot_uuid) === nullable(plot.plot_uuid) &&
+    nullable(existing.zone_uuid) === nullable(plot.zone_uuid) &&
+    existing.occurred_start === occurrence.start.instant;
+  if (!sameDeterminants) return null;
+  if (existing.season_uuid == null && existing.season_crop == null &&
+      existing.season_variety == null) {
+    return { preserve: true, season: null };
+  }
+  return {
+    preserve: true,
+    season: {
+      season_uuid: nullable(existing.season_uuid),
+      crop_type: nullable(existing.season_crop),
+      variety: nullable(existing.season_variety),
+    },
+  };
 }
 
 function entryRow(input, principal, plot, season, occurrence, catalogVersion, options) {
@@ -812,8 +883,11 @@ async function correctFinalInTransaction(tx, catalog, input, principal, entryInd
     throw error;
   }
   const normalized = validation.normalized;
-  const season = await resolveSeason(tx, plot, occurrence.start.localDate, normalized, true);
-  const catalogVersion = await currentCatalogVersion(tx);
+  const frozenSeason = frozenSeasonForCorrection(existing, plot, occurrence);
+  const season = frozenSeason && frozenSeason.preserve
+    ? frozenSeason.season
+    : await resolveSeason(tx, plot, occurrence.start.localDate, normalized, true);
+  const catalogVersion = await currentCatalogVersion(tx, catalog);
   const nextVersion = Number(existing.sync_version) + 1;
   return replaceExistingWithFinal(
     tx,
@@ -865,7 +939,7 @@ async function promoteDraftInTransaction(tx, catalog, input, principal, entryInd
   }
   const normalized = validation.normalized;
   const season = await resolveSeason(tx, plot, occurrence.start.localDate, normalized, true);
-  const catalogVersion = await currentCatalogVersion(tx);
+  const catalogVersion = await currentCatalogVersion(tx, catalog);
   return replaceExistingWithFinal(
     tx,
     catalog,
@@ -921,7 +995,7 @@ async function createFinalInTransaction(tx, catalog, input, principal, entryInde
   }
   const normalized = validation.normalized;
   const season = await resolveSeason(tx, plot, occurrence.start.localDate, normalized, true);
-  const catalogVersion = await currentCatalogVersion(tx);
+  const catalogVersion = await currentCatalogVersion(tx, catalog);
   const row = entryRow(normalized, principal, plot, season, occurrence, catalogVersion, {
     entry_uuid: input.entry_uuid,
     batch_uuid: input.batch_uuid,
@@ -957,6 +1031,7 @@ async function createFinalInTransaction(tx, catalog, input, principal, entryInde
 
 async function saveDraft(db, catalog, input, principal) {
   validateDraftLimits(input, principal);
+  input = normalizeInputIdentities(input);
   return db.transaction(async function(tx) {
     await validatePrincipal(tx, principal);
     const entryUuid = input.entry_uuid || crypto.randomUUID();
@@ -969,7 +1044,7 @@ async function saveDraft(db, catalog, input, principal) {
     const deviceEui = await resolveDeviceEui(tx, input.device_eui, principal, plot);
     const draftInput = Object.assign({}, input, { device_eui: deviceEui });
     const season = await resolveSeason(tx, plot, occurrence.start.localDate, draftInput, false);
-    const catalogVersion = await currentCatalogVersion(tx);
+    const catalogVersion = await currentCatalogVersion(tx, catalog);
     const row = entryRow(draftInput, principal, plot, season, occurrence, catalogVersion, {
       entry_uuid: entryUuid,
       batch_uuid: input.batch_uuid,
@@ -1011,18 +1086,23 @@ async function saveDraft(db, catalog, input, principal) {
 }
 
 async function finalize(db, catalog, input, principal) {
+  validateRequestLimit(input);
+  input = normalizeInputIdentities(input);
   return db.transaction(function(tx) {
     return createFinalInTransaction(tx, catalog, input, principal, 0);
   });
 }
 
 async function finalizeBatch(db, catalog, input, plotUuids, principal) {
+  validateRequestLimit(input);
+  input = normalizeInputIdentities(input);
   if (!Array.isArray(plotUuids) || plotUuids.length === 0) {
     throw lifecycleError('invalid_batch', 'Batch plots must be a nonempty array');
   }
   if (plotUuids.length > 100) {
     throw lifecycleError('batch_too_large', 'A journal batch may contain at most 100 plots');
   }
+  plotUuids = normalizeBatchPlotUuids(plotUuids);
   if (new Set(plotUuids).size !== plotUuids.length) {
     throw lifecycleError('duplicate_plot', 'A journal batch cannot contain duplicate plots');
   }
@@ -1044,6 +1124,7 @@ async function finalizeBatch(db, catalog, input, plotUuids, principal) {
 }
 
 async function void_(db, _catalog, entryUuid, baseSyncVersion, reason, principal) {
+  entryUuid = normalizeUuid(entryUuid, 'entry_uuid', true);
   return db.transaction(async function(tx) {
     await validatePrincipal(tx, principal);
     const entry = await tx.get(
