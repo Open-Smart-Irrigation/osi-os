@@ -270,9 +270,10 @@ class CountingCsvSink {
     this.bytes = 0;
     this.records = 0;
     this.writes = 0;
+    this.recordsPerWrite = [];
     this.destroyed = false;
     this.writableEnded = false;
-    this.previousWasCarriageReturn = false;
+    this.pendingCarriageReturnWriteIndex = null;
   }
 
   sampleRss() {
@@ -282,12 +283,17 @@ class CountingCsvSink {
   write(chunk) {
     this.sampleRss();
     const text = Buffer.isBuffer(chunk) ? chunk.toString('utf8') : String(chunk);
+    const writeIndex = this.recordsPerWrite.length;
+    this.recordsPerWrite.push(0);
     this.bytes += Buffer.byteLength(text, 'utf8');
     this.writes += 1;
     for (let index = 0; index < text.length; index += 1) {
       const code = text.charCodeAt(index);
-      if (this.previousWasCarriageReturn && code === 10) this.records += 1;
-      this.previousWasCarriageReturn = code === 13;
+      if (this.pendingCarriageReturnWriteIndex != null && code === 10) {
+        this.records += 1;
+        this.recordsPerWrite[this.pendingCarriageReturnWriteIndex] += 1;
+      }
+      this.pendingCarriageReturnWriteIndex = code === 13 ? writeIndex : null;
     }
     this.sampleRss();
     return true;
@@ -301,6 +307,62 @@ class CountingCsvSink {
   get rssGrowthBytes() {
     return Math.max(0, this.maxRss - this.baselineRss);
   }
+}
+
+function assertCsvStreamShape(metrics) {
+  assert.ok(Array.isArray(metrics.recordsPerWrite), 'CSV sink must record CRLF counts per write');
+  assert.equal(metrics.recordsPerWrite[0], 1, 'CSV header write must contain exactly 1 record');
+  const dataWrites = metrics.recordsPerWrite.slice(1).map(function(count, index) {
+    return { count, writeNumber: index + 2 };
+  }).filter(function(write) {
+    return write.count > 0;
+  });
+  for (const write of dataWrites) {
+    assert.ok(
+      write.count >= 1 && write.count <= 50,
+      'CSV data write ' + write.writeNumber +
+        ' contains ' + write.count + ' records; expected 1..50'
+    );
+  }
+  const minimumDataWrites = Math.ceil(ENTRY_COUNT / 50);
+  assert.ok(
+    dataWrites.length >= minimumDataWrites,
+    'CSV used ' + dataWrites.length +
+      ' record-bearing data writes; expected at least ' + minimumDataWrites
+  );
+  const countedRecords = metrics.recordsPerWrite.reduce(function(total, count) {
+    return total + count;
+  }, 0);
+  assert.equal(countedRecords, metrics.records, 'per-write CRLF counts must equal total records');
+  return {
+    dataWriteCount: dataWrites.length,
+    maxRecordsPerDataWrite: Math.max(...dataWrites.map(function(write) { return write.count; })),
+  };
+}
+
+function verifyStreamShapeNegativeControl() {
+  const splitCrLf = new CountingCsvSink(process.memoryUsage().rss);
+  splitCrLf.write('header\r');
+  splitCrLf.write('\ndata\r');
+  splitCrLf.write('\n');
+  assert.equal(splitCrLf.records, 2, 'split CRLF sequences must count once each');
+  assert.deepEqual(
+    splitCrLf.recordsPerWrite,
+    [1, 1, 0],
+    'a split CRLF must be attributed to the write where its carriage return began'
+  );
+  const buffered = {
+    records: ENTRY_COUNT + 1,
+    recordsPerWrite: [1, ENTRY_COUNT],
+  };
+  assert.throws(
+    function() { assertCsvStreamShape(buffered); },
+    function(error) {
+      return error && /CSV data write 2 contains 10000 records; expected 1\.\.50/.test(error.message);
+    },
+    'stream-shape validator must reject a header followed by one buffered data write'
+  );
+  console.log('stream-shape negative control: rejected header + one 10000-row buffered write');
 }
 
 async function measureCsv(db) {
@@ -322,6 +384,7 @@ async function measureCsv(db) {
   return {
     result,
     records: sink.records,
+    recordsPerWrite: sink.recordsPerWrite.slice(),
     bytes: sink.bytes,
     writes: sink.writes,
     ended: sink.writableEnded,
@@ -331,6 +394,7 @@ async function measureCsv(db) {
 }
 
 async function main() {
+  verifyStreamShapeNegativeControl();
   const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'osi-journal-perf-'));
   const dbPath = path.join(tempRoot, 'fixture.db');
   let db;
@@ -369,11 +433,19 @@ async function main() {
     }
 
     const csv = await measureCsv(db);
+    let streamShape;
+    try {
+      streamShape = assertCsvStreamShape(csv);
+    } catch (error) {
+      failures.push(error && error.message ? error.message : String(error));
+    }
     const rssGrowthMiB = csv.rssGrowthBytes / (1024 * 1024);
     console.log(
       'exportWideCsv: records=' + csv.records +
       ' bytes=' + csv.bytes +
       ' writes=' + csv.writes +
+      ' data_writes=' + (streamShape ? streamShape.dataWriteCount : 'invalid') +
+      ' max_records_per_data_write=' + (streamShape ? streamShape.maxRecordsPerDataWrite : 'invalid') +
       ' duration_ms=' + csv.durationMs.toFixed(3) +
       ' rss_growth_mib=' + rssGrowthMiB.toFixed(3)
     );

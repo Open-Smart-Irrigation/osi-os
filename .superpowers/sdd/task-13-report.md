@@ -40,10 +40,18 @@ The duplicate guard still reports a temporary B-tree for `ORDER BY ABS(julianday
 Final measured behavior:
 
 - Fixture counts: 10,000 final entries; 150,000 observed numeric values; minimum and maximum 15 values per entry.
-- Keyset page: 50 rows; samples 20.394, 19.026, 23.353, 20.859, and 22.070 ms; maximum 23.353 ms against the 100 ms limit.
-- Streamed CSV: 10,001 CRLF records; 7,854,972 bytes; 201 writes; 782.576 ms; 30.043 MiB sampled RSS growth against the 64 MiB limit.
+- Keyset page: 50 rows; samples 61.837, 33.557, 45.531, 48.746, and 33.069 ms; maximum 61.837 ms against the 100 ms limit.
+- Streamed CSV: 10,001 CRLF records; 7,854,972 bytes; 201 writes; 1,750.645 ms; 31.602 MiB sampled RSS growth against the 64 MiB limit.
 
 The list test obtains a real cursor, warms that exact second-page query once, and checks the slowest of five measured calls. The CSV test is not pre-run. It samples RSS before, during, and after sink writes and uses a 5 ms monitor without invoking garbage collection.
+
+### Review correction: streamed page shape
+
+The first Task 13 commit counted 201 sink writes but did not constrain their row distribution. A header write followed by one buffered 10,000-row data write could therefore satisfy the total-record and RSS checks.
+
+The sink now records only a numeric CRLF count per write. It requires one header record, at least 200 record-bearing data writes, and 1–50 records in every such data write. CRLFs split across chunks are attributed to the write where the carriage return began, so a boundary split does not lose or double-count a row. A controlled three-write input asserts the distribution `[1, 1, 0]` for two split CRLF records. The actual exporter produced one header write and 200 data writes of 50 records each.
+
+A synthetic negative control passes `[1, 10000]` to the same validator. Before the validator existed, the control returned exit 1 with `stream-shape validator must reject a header followed by one buffered data write`. The corrected fixture logs `stream-shape negative control: rejected header + one 10000-row buffered write` before running the real export.
 
 ## Change-control registration
 
@@ -55,7 +63,7 @@ No flow file, boot DDL, deploy script, or pre-existing ordered migration changed
 
 | Command | Result |
 |---|---|
-| `node scripts/test-journal-perf-fixture.js` | PASS; counts, plans, timing, record count, and RSS limit above |
+| `node scripts/test-journal-perf-fixture.js` | PASS; counts, plans, timing, page-wise stream shape, record count, and RSS limit above |
 | `OSI_MIGRATIONS_BASE_REF=69f7a9f2 node scripts/verify-migrations.js` | PASS; 17 migrations, manifest and base immutability valid |
 | `node scripts/verify-seed-replay.js` | `verify-seed-replay: OK` |
 | `node scripts/verify-db-schema-consistency.js` | PASS for all seven database copies |
