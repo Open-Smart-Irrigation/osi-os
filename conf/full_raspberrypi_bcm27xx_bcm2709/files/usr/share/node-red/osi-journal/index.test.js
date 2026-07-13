@@ -2956,6 +2956,30 @@ test('finite doubles serialize fixed-point without exponent, rounding cap, or ne
   );
 });
 
+test('finite number formatting matches production Java 21/Jackson decimal reference cases', () => {
+  const { aggregateHash } = aggregateApi();
+  const cases = [
+    [5e-324, '0.' + '0'.repeat(323) + '49'],
+    [1e-323, '0.' + '0'.repeat(323) + '99'],
+    [1.5e-323, '0.' + '0'.repeat(322) + '15'],
+    [2e-323, '0.' + '0'.repeat(322) + '2'],
+    [1e-320, '0.' + '0'.repeat(319) + '1'],
+    [1e-7, '0.0000001'],
+    [1e21, '1' + '0'.repeat(21)],
+    [1e23, '1' + '0'.repeat(23)],
+    [5e20, '5' + '0'.repeat(20)],
+    [1.2345678901234567e20, '123456789012345670000'],
+  ];
+
+  for (const [value, expected] of cases) {
+    assert.equal(
+      aggregateHash({ value }),
+      hashCanonicalText('{"value":' + expected + '}'),
+      String(value)
+    );
+  }
+});
+
 test('aggregate canonicalization omits object undefined and rejects non-JSON state', () => {
   const { aggregateHash } = aggregateApi();
   assert.equal(aggregateHash({ kept: null, absent: undefined }), aggregateHash({ kept: null }));
