@@ -32,6 +32,7 @@ const RAIN_DEVICE_EUI = '3CF7F1C000000002';
 const SECOND_RAIN_DEVICE_EUI = '4CF7F1C000000003';
 const VALVE_DEVICE_EUI = '70B3D57ED0065678';
 const ENTRY_UUID = 'abcdefab-cdef-4abc-8def-abcdefabcdef';
+const CONTEXT_RAW_ROW_LIMIT = 4096;
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const PLOT_NUMBERS = [2, 5, 6, 10, 12];
 const CONTEXT_CHANNELS = [
@@ -67,6 +68,14 @@ const CONTEXT_RECORD_FIELDS = [
 function plotUuid(number) {
   return String(number).padStart(8, '0') + '-0000-4000-8000-' +
     String(number).padStart(12, '0');
+}
+
+function fixtureZoneUuid(number) {
+  return '10000000-0000-4000-8000-' + String(number).padStart(12, '0');
+}
+
+function fixtureDeviceEui(number) {
+  return 'BEEF' + String(number).padStart(12, '0');
 }
 
 const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'osi-journal-lifecycle-'));
@@ -366,6 +375,43 @@ async function storedContext(entryUuid) {
   return row && row.context_json != null ? JSON.parse(row.context_json) : null;
 }
 
+function isContextRead(sql) {
+  const text = String(sql);
+  return text.includes('FROM device_data') ||
+    text.includes('FROM devices AS d LEFT JOIN weather_station_zones') ||
+    text.includes('FROM valve_actuation_expectations AS vae');
+}
+
+function observeTransactionContextReads() {
+  const reads = [];
+  return {
+    reads,
+    database: {
+      transaction(executor) {
+        return db.transaction((tx) => executor(Object.assign({}, tx, {
+          all(sql, params) {
+            if (isContextRead(sql)) reads.push({ sql: String(sql), params });
+            return tx.all(sql, params);
+          },
+        })));
+      },
+    },
+  };
+}
+
+function observeBuildContextReads() {
+  const reads = [];
+  return {
+    reads,
+    database: {
+      all(sql, params) {
+        if (isContextRead(sql)) reads.push({ sql: String(sql), params });
+        return db.all(sql, params);
+      },
+    },
+  };
+}
+
 async function count(table) {
   const row = await db.get('SELECT COUNT(*) AS count FROM ' + table);
   return Number(row.count);
@@ -448,6 +494,39 @@ test('a 15-day-old SWT point is stale at a 24-hour freshness threshold', async (
   assert.equal(swt.source_device, OWNED_DEVICE_EUI);
   assert.equal(swt.freshness_threshold_s, 24 * 60 * 60);
   assert.equal(swt.age_s, 15 * 24 * 60 * 60);
+});
+
+test('SWT point provenance identifies the canonical or legacy source column actually read', async () => {
+  await db.run(
+    'INSERT INTO device_data(deveui,recorded_at,swt_1,swt_wm1,swt_2,swt_wm2) ' +
+    'VALUES (?,?,?,?,?,?)',
+    [OWNED_DEVICE_EUI, '2026-07-12T07:20:00.000Z', 18, 99, null, 27]
+  );
+
+  await journal.finalize(db, catalog, validEntry(), principal());
+  const channels = (await storedContext()).channels;
+
+  assert.deepEqual(
+    [channels.swt_1.value, channels.swt_1.source_key],
+    [18, 'swt_1']
+  );
+  assert.deepEqual(
+    [channels.swt_2.value, channels.swt_2.source_key],
+    [27, 'swt_wm2']
+  );
+});
+
+test('SWT point provenance falls back from a nonnumeric canonical value', async () => {
+  await db.run(
+    'INSERT INTO device_data(deveui,recorded_at,swt_1,swt_wm1) VALUES (?,?,?,?)',
+    [OWNED_DEVICE_EUI, '2026-07-12T07:20:00.000Z', '', 31]
+  );
+
+  await journal.finalize(db, catalog, validEntry(), principal());
+  const swt = (await storedContext()).channels.swt_1;
+
+  assert.equal(swt.value, 31);
+  assert.equal(swt.source_key, 'swt_wm1');
 });
 
 test('a rain window without valid samples is null rather than zero', async () => {
@@ -638,6 +717,31 @@ test('a valid zero rain delta remains an observed dry interval', async () => {
   assert.equal(rain.value, 0);
   assert.equal(rain.sample_count, 1);
   assert.equal(rain.reason, null);
+});
+
+test('rain provenance becomes unavailable when a window exceeds 4096 raw rows', async () => {
+  await db.run(
+    'WITH RECURSIVE samples(n) AS (' +
+      'VALUES(0) UNION ALL SELECT n+1 FROM samples WHERE n<?' +
+    ') ' +
+    'INSERT INTO device_data(deveui,recorded_at,rain_mm_delta,rain_delta_status) ' +
+    "SELECT ?,strftime('%Y-%m-%dT%H:%M:%fZ','2026-07-12T06:00:00Z','+' || n || ' seconds')," +
+      "1,'ok' FROM samples",
+    [CONTEXT_RAW_ROW_LIMIT, RAIN_DEVICE_EUI]
+  );
+
+  const observed = observeTransactionContextReads();
+  await journal.finalize(observed.database, catalog, validEntry(), principal());
+  const rain = (await storedContext()).channels.rain_24h;
+
+  assert.equal(rain.value, null);
+  assert.equal(rain.status, 'unavailable');
+  assert.equal(rain.reason, 'provenance_unavailable');
+  assert.equal(rain.sample_count, 0);
+  const rainRead = observed.reads.find((read) => read.sql.includes('rain_delta_status'));
+  assert.ok(rainRead);
+  assert.doesNotMatch(rainRead.sql, /ROW_NUMBER| OVER /);
+  assert.match(rainRead.sql, /ORDER BY deveui,recorded_at,id LIMIT 4097/);
 });
 
 test('valve context ignores current_state and uses the historical actuation expectation', async () => {
@@ -870,6 +974,193 @@ test('multi-bucket duration uses a full-window mean and circular wind direction'
   assert.equal(operation.swt_1.sample_count, 2);
   assert.equal(operation.wind_direction.value, 0);
   assert.equal(operation.wind_direction.statistic, 'circular_mean');
+});
+
+test('duration SWT provenance aggregates the legacy column selected by the snapshot', async () => {
+  for (const sample of [
+    ['2026-07-12T07:00:00.000Z', 10],
+    ['2026-07-12T07:20:00.000Z', 30],
+  ]) {
+    await db.run(
+      'INSERT INTO device_data(deveui,recorded_at,swt_wm1) VALUES (?,?,?)',
+      [OWNED_DEVICE_EUI].concat(sample)
+    );
+  }
+
+  await journal.finalize(db, catalog, validEntry({
+    occurred_start_local: '2026-07-12T09:00',
+    occurred_end_local: '2026-07-12T09:30',
+  }), principal());
+  const swt = (await storedContext()).duration.operation_window.swt_1;
+
+  assert.equal(swt.value, 20);
+  assert.equal(swt.source_key, 'swt_wm1');
+  assert.equal(swt.sample_count, 2);
+});
+
+test('an operation window over 4096 raw rows exposes no partial point provenance', async () => {
+  await db.run(
+    'WITH RECURSIVE samples(n) AS (' +
+      'VALUES(0) UNION ALL SELECT n+1 FROM samples WHERE n<?' +
+    ') ' +
+    'INSERT INTO device_data(deveui,recorded_at,swt_1) ' +
+    "SELECT ?,strftime('%Y-%m-%dT%H:%M:%fZ','2026-07-12T06:00:00Z','+' || n || ' seconds')," +
+      'n+1 FROM samples',
+    [CONTEXT_RAW_ROW_LIMIT, OWNED_DEVICE_EUI]
+  );
+  const observed = observeTransactionContextReads();
+
+  await journal.finalize(observed.database, catalog, validEntry({
+    occurred_start_local: '2026-07-12T08:00',
+    occurred_end_local: '2026-07-12T09:30',
+  }), principal());
+  const operation = (await storedContext()).duration.operation_window;
+
+  for (const channel of CONTEXT_CHANNELS.filter((key) => {
+    return key !== 'rain_24h' && key !== 'valve_state';
+  })) {
+    assert.equal(operation[channel].value, null, channel);
+    assert.equal(operation[channel].status, 'unavailable', channel);
+    assert.equal(operation[channel].reason, 'provenance_unavailable', channel);
+    assert.equal(operation[channel].sample_count, 0, channel);
+  }
+  const operationRead = observed.reads.find((read) => {
+    return read.sql.includes('SELECT id,deveui,recorded_at,swt_1') &&
+      read.sql.includes('recorded_at>=?');
+  });
+  assert.ok(operationRead);
+  assert.match(operationRead.sql, /ORDER BY deveui,recorded_at,id LIMIT 4097/);
+});
+
+test('a linked duration context uses at most nine bounded database reads', async () => {
+  for (const sample of [
+    ['2026-07-12T07:00:00.000Z', 10, 350],
+    ['2026-07-12T07:20:00.000Z', 30, 10],
+  ]) {
+    await db.run(
+      'INSERT INTO device_data(deveui,recorded_at,swt_1,wind_direction_deg) ' +
+      'VALUES (?,?,?,?)',
+      [OWNED_DEVICE_EUI].concat(sample)
+    );
+  }
+  const observed = observeTransactionContextReads();
+
+  await journal.finalize(observed.database, catalog, validEntry({
+    occurred_start_local: '2026-07-12T09:00',
+    occurred_end_local: '2026-07-12T09:30',
+  }), principal());
+
+  assert.ok(observed.reads.length <= 9, 'context reads: ' + observed.reads.length);
+  assert.equal(
+    observed.reads.filter((read) => read.sql.includes('FROM device_data')).length,
+    6
+  );
+});
+
+test('a 100-plot same-context batch reuses nine reads and stamps each plot UUID', async () => {
+  const plots = Array.from({ length: 100 }, (_, index) => plotUuid(1000 + index));
+  for (let index = 0; index < plots.length; index += 1) {
+    await db.run(
+      'INSERT INTO journal_plots(' +
+        'plot_uuid,plot_code,name,zone_uuid,station_code,gateway_device_eui' +
+      ') VALUES (?,?,?,?,?,?)',
+      [plots[index], 'CACHE-' + index, 'Cache plot ' + index, ZONE_UUID, 'CACHE', GATEWAY_EUI]
+    );
+  }
+  await db.run(
+    'INSERT INTO device_data(deveui,recorded_at,swt_1) VALUES (?,?,?)',
+    [OWNED_DEVICE_EUI, '2026-07-12T07:15:00.000Z', 25]
+  );
+  const observed = observeTransactionContextReads();
+
+  await journal.finalizeBatch(observed.database, catalog, validEntry({
+    entry_uuid: undefined,
+    plot_uuid: undefined,
+    device_eui: OWNED_DEVICE_EUI,
+    occurred_start_local: '2026-07-12T09:00',
+    occurred_end_local: '2026-07-12T09:30',
+  }), plots, principal());
+
+  assert.ok(observed.reads.length <= 9, 'context reads: ' + observed.reads.length);
+  const rows = await db.all(
+    'SELECT je.plot_uuid,je.context_json,so.payload_json ' +
+    'FROM journal_entries AS je ' +
+    'JOIN sync_outbox AS so ON so.aggregate_key=je.entry_uuid ' +
+    'ORDER BY je.plot_uuid'
+  );
+  assert.equal(rows.length, 100);
+  for (const row of rows) {
+    const context = JSON.parse(row.context_json);
+    const aggregate = JSON.parse(row.payload_json);
+    assert.equal(context.plot_uuid, row.plot_uuid);
+    assert.equal(context.subject_device, OWNED_DEVICE_EUI);
+    assert.equal(aggregate.context_json, row.context_json);
+  }
+});
+
+test('a 100-zone duration batch keeps context reads bounded per distinct zone', async () => {
+  const plots = [];
+  for (let index = 0; index < 100; index += 1) {
+    const zoneId = 2000 + index;
+    const zoneUuid = fixtureZoneUuid(zoneId);
+    const plot = plotUuid(3000 + index);
+    const deviceEui = fixtureDeviceEui(index);
+    plots.push(plot);
+    await db.run(
+      'INSERT INTO irrigation_zones(' +
+        'id,name,user_id,timezone,zone_uuid,gateway_device_eui' +
+      ') VALUES (?,?,?,?,?,?)',
+      [zoneId, 'Fixture zone ' + index, 1, 'Europe/Zurich', zoneUuid, GATEWAY_EUI]
+    );
+    await db.run(
+      'INSERT INTO journal_plots(' +
+        'plot_uuid,plot_code,name,zone_uuid,station_code,gateway_device_eui' +
+      ') VALUES (?,?,?,?,?,?)',
+      [plot, 'ZONE-' + index, 'Zone plot ' + index, zoneUuid, 'ZONE', GATEWAY_EUI]
+    );
+    await db.run(
+      'INSERT INTO devices(' +
+        'deveui,name,type_id,user_id,created_at,updated_at,' +
+        'irrigation_zone_id,gateway_device_eui' +
+      ') VALUES (?,?,?,?,?,?,?,?)',
+      [
+        deviceEui,
+        'Zone device ' + index,
+        'DRAGINO_LSN50',
+        1,
+        '2026-07-12T00:00:00.000Z',
+        '2026-07-12T00:00:00.000Z',
+        zoneId,
+        GATEWAY_EUI,
+      ]
+    );
+    await db.run(
+      'INSERT INTO device_data(deveui,recorded_at,swt_1) VALUES (?,?,?)',
+      [deviceEui, '2026-07-12T07:15:00.000Z', index + 1]
+    );
+  }
+  const observed = observeTransactionContextReads();
+
+  await journal.finalizeBatch(observed.database, catalog, validEntry({
+    entry_uuid: undefined,
+    plot_uuid: undefined,
+    occurred_start_local: '2026-07-12T09:00',
+    occurred_end_local: '2026-07-12T09:30',
+    season_crop: 'barley',
+    season_variety: 'Fixture',
+  }), plots, principal());
+
+  assert.equal(observed.reads.length, 600);
+  assert.ok(observed.reads.length <= 900);
+  const rows = await db.all(
+    'SELECT plot_uuid,zone_uuid,context_json FROM journal_entries ORDER BY plot_uuid'
+  );
+  assert.equal(rows.length, 100);
+  for (const row of rows) {
+    const context = JSON.parse(row.context_json);
+    assert.equal(context.plot_uuid, row.plot_uuid);
+    assert.equal(context.zone_uuid, row.zone_uuid);
+  }
 });
 
 test('same-determinant correction preserves the frozen context byte for byte', async () => {

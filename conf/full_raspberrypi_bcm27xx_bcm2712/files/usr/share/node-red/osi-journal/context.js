@@ -4,6 +4,7 @@ const { aggregateRows } = require('../osi-history-helper');
 
 const DAY_SECONDS = 24 * 60 * 60;
 const DAY_MILLISECONDS = DAY_SECONDS * 1000;
+const RAW_ROW_LIMIT = 4096;
 
 // v1 rain source policy: the selected subject wins, then a direct zone gauge,
 // then a shared weather_station_zones gauge. Native interval devices win within
@@ -20,36 +21,29 @@ const POINT_CHANNELS = Object.freeze([
     key: 'swt_1',
     unit: 'kPa',
     sourceKey: 'swt_1',
-    select: 'swt_1,swt_wm1',
+    sourceKeys: ['swt_1', 'swt_wm1'],
     predicate: '(swt_1 IS NOT NULL OR swt_wm1 IS NOT NULL)',
-    expression: 'COALESCE(swt_1,swt_wm1)',
-    value(row) { return firstFinite(row.swt_1, row.swt_wm1); },
-    rowSourceKey() { return 'swt_1'; },
+    primaryExpression: 'swt_1',
+    fallbackExpression: 'swt_wm1',
   },
   {
     key: 'swt_2',
     unit: 'kPa',
     sourceKey: 'swt_2',
-    select: 'swt_2,swt_wm2',
+    sourceKeys: ['swt_2', 'swt_wm2'],
     predicate: '(swt_2 IS NOT NULL OR swt_wm2 IS NOT NULL)',
-    expression: 'COALESCE(swt_2,swt_wm2)',
-    value(row) { return firstFinite(row.swt_2, row.swt_wm2); },
-    rowSourceKey() { return 'swt_2'; },
+    primaryExpression: 'swt_2',
+    fallbackExpression: 'swt_wm2',
   },
   numericPoint('swt_3', 'swt_3', 'kPa'),
   {
     key: 'temperature',
     unit: '°C',
     sourceKey: 'ambient_temperature',
-    select: 'ambient_temperature,ext_temperature_c',
+    sourceKeys: ['ambient_temperature', 'ext_temperature_c'],
     predicate: '(ambient_temperature IS NOT NULL OR ext_temperature_c IS NOT NULL)',
-    expression: 'COALESCE(ambient_temperature,ext_temperature_c)',
-    value(row) { return firstFinite(row.ambient_temperature, row.ext_temperature_c); },
-    rowSourceKey(row) {
-      return finiteNumber(row.ambient_temperature) !== null
-        ? 'ambient_temperature'
-        : 'ext_temperature_c';
-    },
+    primaryExpression: 'ambient_temperature',
+    fallbackExpression: 'ext_temperature_c',
   },
   numericPoint('relative_humidity', 'relative_humidity', '%'),
   numericPoint('wind_speed', 'wind_speed_mps', 'm/s'),
@@ -75,11 +69,10 @@ function numericPoint(key, field, unit) {
     key,
     unit,
     sourceKey: field,
-    select: field,
+    sourceKeys: [field],
     predicate: field + ' IS NOT NULL',
-    expression: field,
-    value(row) { return finiteNumber(row[field]); },
-    rowSourceKey() { return field; },
+    primaryExpression: field,
+    fallbackExpression: 'NULL',
   };
 }
 
@@ -214,37 +207,58 @@ async function loadSourceDevices(db, zone) {
   }).filter(function(row) { return row.deveui; });
 }
 
-async function latestPointRecord(db, devices, definition, at) {
+async function latestPointRecords(db, devices, at) {
   const sourceEuis = devices.map(function(device) { return device.sqlDeveui; });
   const windowStart = subtractDay(at);
   if (sourceEuis.length === 0) {
-    return missingRecord(definition, windowStart, at);
+    return POINT_CHANNELS.map(function(definition) {
+      return missingRecord(definition, windowStart, at);
+    });
   }
+  const queryParts = POINT_CHANNELS.map(function(definition) {
+    return 'SELECT * FROM (' +
+      'SELECT id,deveui,recorded_at,' +
+        "'" + definition.key + "' AS channel_key," +
+        definition.primaryExpression + ' AS primary_value,' +
+        definition.fallbackExpression + ' AS fallback_value ' +
+      'FROM device_data ' +
+      'WHERE deveui IN (SELECT deveui FROM requested_devices) ' +
+        'AND ' + definition.predicate + ' ' +
+        'AND recorded_at<=(SELECT at FROM snapshot) ' +
+      'ORDER BY recorded_at DESC,deveui ASC,id DESC LIMIT 1' +
+    ')';
+  });
   const rows = await db.all(
-    'SELECT id,deveui,recorded_at,' + definition.select + ' FROM device_data ' +
-    'WHERE deveui IN (' + placeholders(sourceEuis) + ') ' +
-      'AND ' + definition.predicate + ' AND recorded_at<=? ' +
-    'ORDER BY recorded_at DESC,deveui ASC,id DESC LIMIT 1',
+    'WITH requested_devices(deveui) AS (VALUES ' +
+      sourceEuis.map(function() { return '(?)'; }).join(',') +
+      '),snapshot(at) AS (VALUES (?)) ' +
+    queryParts.join(' UNION ALL '),
     sourceEuis.concat([at])
   );
-  const row = rows[0];
-  const value = row ? definition.value(row) : null;
-  if (!row || value === null) return missingRecord(definition, windowStart, at);
-  const observedAt = instant(row.recorded_at, 'device_data.recorded_at');
-  return withFreshness({
-    value,
-    unit: definition.unit,
-    sourceDevice: canonicalEui(row.deveui),
-    sourceKey: definition.rowSourceKey(row),
-    observedAt,
-    statistic: 'latest',
-    windowStart,
-    windowEnd: at,
-    sampleCount: 1,
-    coverage: null,
-    quality: 'observed',
-    freshnessThresholdSeconds: DAY_SECONDS,
-  }, at);
+  const byChannel = new Map(rows.map(function(row) { return [row.channel_key, row]; }));
+  return POINT_CHANNELS.map(function(definition) {
+    const row = byChannel.get(definition.key);
+    const primary = row ? finiteNumber(row.primary_value) : null;
+    const value = row ? firstFinite(row.primary_value, row.fallback_value) : null;
+    if (!row || value === null) return missingRecord(definition, windowStart, at);
+    const observedAt = instant(row.recorded_at, 'device_data.recorded_at');
+    return withFreshness({
+      value,
+      unit: definition.unit,
+      sourceDevice: canonicalEui(row.deveui),
+      sourceKey: primary !== null
+        ? definition.sourceKeys[0]
+        : definition.sourceKeys[1] || definition.sourceKey,
+      observedAt,
+      statistic: 'latest',
+      windowStart,
+      windowEnd: at,
+      sampleCount: 1,
+      coverage: null,
+      quality: 'observed',
+      freshnessThresholdSeconds: DAY_SECONDS,
+    }, at);
+  });
 }
 
 function rainTypePriority(device) {
@@ -295,10 +309,16 @@ async function rainRecord(db, devices, subjectDevice, windowStart, windowEnd) {
     'WHERE deveui IN (' + placeholders(sourceEuis) + ') ' +
       'AND recorded_at>=? AND recorded_at<? ' +
       "AND rain_delta_status='ok' AND rain_mm_delta IS NOT NULL AND rain_mm_delta>=0 " +
-    'ORDER BY deveui,recorded_at,id',
+    'ORDER BY deveui,recorded_at,id LIMIT ' + (RAW_ROW_LIMIT + 1),
     sourceEuis.concat([windowStart, windowEnd])
   );
   const deduped = dedupeRainRows(rows);
+  if (rows.length > RAW_ROW_LIMIT || deduped.length > RAW_ROW_LIMIT) {
+    return missingRecord(definition, windowStart, windowEnd, {
+      statistic: 'sum',
+      reason: 'provenance_unavailable',
+    });
+  }
   const sourcesWithData = new Set(deduped.map(function(row) { return row.deveui; }));
   const selected = candidates.filter(function(device) {
     return sourcesWithData.has(device.deveui);
@@ -457,9 +477,7 @@ async function valveRecord(db, zone, at) {
 
 async function snapshotAt(db, zone, devices, subjectDevice, at) {
   const channels = {};
-  const pointRecords = await Promise.all(POINT_CHANNELS.map(function(definition) {
-    return latestPointRecord(db, devices, definition, at);
-  }));
+  const pointRecords = await latestPointRecords(db, devices, at);
   for (let index = 0; index < POINT_CHANNELS.length; index += 1) {
     channels[POINT_CHANNELS[index].key] = pointRecords[index];
   }
@@ -491,47 +509,88 @@ function circularMeanDegrees(values) {
   return rounded((degrees + 360) % 360);
 }
 
-async function operationPointRecord(db, devices, definition, sourceRecord, start, end) {
+function operationSelection(devices, definition, sourceRecord) {
   const sourceDevice = canonicalEui(sourceRecord && sourceRecord.source_device);
-  const sourceKey = sourceRecord && sourceRecord.source_key || definition.sourceKey;
-  if (!sourceDevice) {
-    return missingRecord(definition, start, end, {
-      sourceKey,
-      statistic: definition.key === 'wind_direction' ? 'circular_mean' : 'mean',
-    });
-  }
+  const requestedSourceKey = sourceRecord && sourceRecord.source_key || definition.sourceKey;
+  const sourceKey = definition.sourceKeys.includes(requestedSourceKey)
+    ? requestedSourceKey
+    : definition.sourceKey;
   const source = devices.find(function(device) { return device.deveui === sourceDevice; });
-  if (!source) {
-    return missingRecord(definition, start, end, {
-      sourceDevice,
-      sourceKey,
-      statistic: definition.key === 'wind_direction' ? 'circular_mean' : 'mean',
-    });
+  return { definition, sourceDevice, sourceKey, source: source || null };
+}
+
+async function loadOperationRows(db, selections, start, end) {
+  const fieldsByDevice = new Map();
+  for (const selection of selections) {
+    if (!selection.source) continue;
+    const key = selection.source.sqlDeveui;
+    if (!fieldsByDevice.has(key)) fieldsByDevice.set(key, new Set());
+    fieldsByDevice.get(key).add(selection.sourceKey);
   }
-  let expression = definition.expression;
-  if (definition.key === 'temperature' && sourceKey === 'ext_temperature_c') {
-    expression = 'ext_temperature_c';
-  } else if (definition.key === 'temperature') {
-    expression = 'ambient_temperature';
+  if (fieldsByDevice.size === 0) return { rows: [], overflow: false };
+  const fields = Array.from(new Set(Array.from(fieldsByDevice.values()).flatMap(function(keys) {
+    return Array.from(keys);
+  })));
+  const sourcePredicates = [];
+  const parameters = [start, end];
+  for (const [sqlDeveui, sourceFields] of fieldsByDevice) {
+    sourcePredicates.push(
+      '(deveui=? AND (' + Array.from(sourceFields).map(function(field) {
+        return field + ' IS NOT NULL';
+      }).join(' OR ') + '))'
+    );
+    parameters.push(sqlDeveui);
   }
   const rows = await db.all(
-    'SELECT deveui,recorded_at,' + expression + ' AS value FROM device_data ' +
-    'WHERE deveui=? AND recorded_at>=? AND recorded_at<? ' +
-      'AND ' + expression + ' IS NOT NULL ORDER BY recorded_at,id',
-    [source.sqlDeveui, start, end]
+    'SELECT id,deveui,recorded_at,' + fields.join(',') + ' FROM device_data ' +
+    'WHERE recorded_at>=? AND recorded_at<? AND (' + sourcePredicates.join(' OR ') + ') ' +
+    'ORDER BY deveui,recorded_at,id LIMIT ' + (RAW_ROW_LIMIT + 1),
+    parameters
   );
-  const validRows = rows.map(function(row) {
+  if (rows.length > RAW_ROW_LIMIT) return { rows: [], overflow: true };
+  return {
+    overflow: false,
+    rows: rows.map(function(row) {
+      const normalized = Object.assign({}, row);
+      normalized.deveui = canonicalEui(row.deveui);
+      normalized.recorded_at = instant(row.recorded_at, 'operation recorded_at');
+      return normalized;
+    }),
+  };
+}
+
+function operationPointRecord(selection, rows, start, end, overflow) {
+  const definition = selection.definition;
+  const statistic = definition.key === 'wind_direction' ? 'circular_mean' : 'mean';
+  if (overflow) {
+    return missingRecord(definition, start, end, {
+      sourceDevice: selection.sourceDevice,
+      sourceKey: selection.sourceKey,
+      statistic,
+      reason: 'provenance_unavailable',
+    });
+  }
+  if (!selection.sourceDevice || !selection.source) {
+    return missingRecord(definition, start, end, {
+      sourceDevice: selection.sourceDevice,
+      sourceKey: selection.sourceKey,
+      statistic,
+    });
+  }
+  const validRows = rows.filter(function(row) {
+    return row.deveui === selection.sourceDevice && finiteNumber(row[selection.sourceKey]) !== null;
+  }).map(function(row) {
     return {
-      deveui: canonicalEui(row.deveui),
-      recorded_at: instant(row.recorded_at, 'operation recorded_at'),
-      value: finiteNumber(row.value),
+      deveui: row.deveui,
+      recorded_at: row.recorded_at,
+      value: finiteNumber(row[selection.sourceKey]),
     };
-  }).filter(function(row) { return row.value !== null; });
+  });
   if (validRows.length === 0) {
     return missingRecord(definition, start, end, {
-      sourceDevice,
-      sourceKey,
-      statistic: definition.key === 'wind_direction' ? 'circular_mean' : 'mean',
+      sourceDevice: selection.sourceDevice,
+      sourceKey: selection.sourceKey,
+      statistic,
     });
   }
   const aggregation = aggregateRows(validRows, {
@@ -539,7 +598,7 @@ async function operationPointRecord(db, devices, definition, sourceRecord, start
     start,
     end,
     channels: [{ id: definition.key, field: 'value', unit: definition.unit }],
-    sourceKeys: [sourceDevice],
+    sourceKeys: [selection.sourceDevice],
     nowMs: Date.parse(end),
   });
   const buckets = aggregation.buckets || [];
@@ -551,10 +610,10 @@ async function operationPointRecord(db, devices, definition, sourceRecord, start
   }, 0);
   let value = null;
   let reason = null;
-  let statistic = 'mean';
+  let resultStatistic = 'mean';
   if (definition.key === 'wind_direction') {
     value = circularMeanDegrees(validRows.map(function(row) { return row.value; }));
-    statistic = 'circular_mean';
+    resultStatistic = 'circular_mean';
     if (value === null) reason = 'indeterminate_direction';
   } else {
     const weighted = statistics.reduce(function(total, stats) {
@@ -569,10 +628,10 @@ async function operationPointRecord(db, devices, definition, sourceRecord, start
   return record({
     value,
     unit: definition.unit,
-    sourceDevice,
-    sourceKey,
+    sourceDevice: selection.sourceDevice,
+    sourceKey: selection.sourceKey,
     observedAt: latest.recorded_at,
-    statistic,
+    statistic: resultStatistic,
     windowStart: start,
     windowEnd: end,
     sampleCount,
@@ -587,17 +646,20 @@ async function operationPointRecord(db, devices, definition, sourceRecord, start
 
 async function operationWindow(db, zone, devices, subjectDevice, startChannels, endChannels, start, end) {
   const channels = {};
-  for (const definition of POINT_CHANNELS) {
+  const selections = POINT_CHANNELS.map(function(definition) {
     const sourceRecord = endChannels[definition.key].source_device
       ? endChannels[definition.key]
       : startChannels[definition.key];
-    channels[definition.key] = await operationPointRecord(
-      db,
-      devices,
-      definition,
-      sourceRecord,
+    return operationSelection(devices, definition, sourceRecord);
+  });
+  const loaded = await loadOperationRows(db, selections, start, end);
+  for (const selection of selections) {
+    channels[selection.definition.key] = operationPointRecord(
+      selection,
+      loaded.rows,
       start,
-      end
+      end,
+      loaded.overflow
     );
   }
   channels.rain_24h = await rainRecord(db, devices, subjectDevice, start, end);

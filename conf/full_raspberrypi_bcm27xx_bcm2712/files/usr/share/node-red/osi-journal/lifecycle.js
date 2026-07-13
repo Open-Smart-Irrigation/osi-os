@@ -523,15 +523,32 @@ function serializeGeneratedContext(context) {
   return serialized;
 }
 
-async function generatedContextJson(tx, plot, deviceEui, occurrence) {
-  if (plot.zone_id == null || plot.zone_uuid == null) return null;
-  const context = await buildContext(
-    tx,
-    Object.assign({}, plot, { subject_device: nullable(deviceEui) }),
+function contextCacheKey(plot, deviceEui, occurrence) {
+  return JSON.stringify([
+    plot.zone_id,
+    plot.zone_uuid,
+    nullable(deviceEui),
     occurrence.start.instant,
-    occurrence.end ? occurrence.end.instant : null
-  );
-  return serializeGeneratedContext(context);
+    occurrence.end ? occurrence.end.instant : null,
+  ]);
+}
+
+async function generatedContextJson(tx, plot, deviceEui, occurrence, contextCache) {
+  if (plot.zone_id == null || plot.zone_uuid == null) return null;
+  const key = contextCache && contextCacheKey(plot, deviceEui, occurrence);
+  let baseContext = key && contextCache.has(key) ? contextCache.get(key) : null;
+  if (!baseContext) {
+    baseContext = await buildContext(
+      tx,
+      Object.assign({}, plot, { subject_device: nullable(deviceEui) }),
+      occurrence.start.instant,
+      occurrence.end ? occurrence.end.instant : null
+    );
+    if (key) contextCache.set(key, baseContext);
+  }
+  return serializeGeneratedContext(Object.assign({}, baseContext, {
+    plot_uuid: plot.plot_uuid,
+  }));
 }
 
 function entryRow(input, principal, plot, season, occurrence, catalogVersion, options) {
@@ -1002,7 +1019,7 @@ async function promoteDraftInTransaction(tx, catalog, input, principal, entryInd
   );
 }
 
-async function createFinalInTransaction(tx, catalog, input, principal, entryIndex) {
+async function createFinalInTransaction(tx, catalog, input, principal, entryIndex, contextCache) {
   await validatePrincipal(tx, principal);
   const existing = await tx.get(
     'SELECT * FROM journal_entries WHERE entry_uuid=? AND deleted_at IS NULL',
@@ -1043,7 +1060,7 @@ async function createFinalInTransaction(tx, catalog, input, principal, entryInde
   const normalized = validation.normalized;
   const season = await resolveSeason(tx, plot, occurrence.start.localDate, normalized, true);
   const catalogVersion = await currentCatalogVersion(tx, catalog);
-  const contextJson = await generatedContextJson(tx, plot, deviceEui, occurrence);
+  const contextJson = await generatedContextJson(tx, plot, deviceEui, occurrence, contextCache);
   const row = entryRow(normalized, principal, plot, season, occurrence, catalogVersion, {
     entry_uuid: input.entry_uuid,
     batch_uuid: input.batch_uuid,
@@ -1157,6 +1174,7 @@ async function finalizeBatch(db, catalog, input, plotUuids, principal) {
   }
   return db.transaction(async function(tx) {
     const batchUuid = crypto.randomUUID();
+    const contextCache = new Map();
     const entries = [];
     for (let index = 0; index < plotUuids.length; index += 1) {
       const entryInput = Object.assign({}, input, {
@@ -1165,7 +1183,14 @@ async function finalizeBatch(db, catalog, input, plotUuids, principal) {
         batch_uuid: batchUuid,
         base_sync_version: 0,
       });
-      const result = await createFinalInTransaction(tx, catalog, entryInput, principal, index);
+      const result = await createFinalInTransaction(
+        tx,
+        catalog,
+        entryInput,
+        principal,
+        index,
+        contextCache
+      );
       entries.push(Object.assign({ plot_uuid: plotUuids[index] }, result));
     }
     return { batch_uuid: batchUuid, entries };
