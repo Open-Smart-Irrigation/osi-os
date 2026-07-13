@@ -775,7 +775,8 @@ test('valve context ignores current_state and uses the historical actuation expe
     ]
   );
 
-  await journal.finalize(db, catalog, validEntry(), principal());
+  const observed = observeTransactionContextReads();
+  await journal.finalize(observed.database, catalog, validEntry(), principal());
   const valve = (await storedContext()).channels.valve_state;
 
   assert.equal(valve.value, 'CLOSED');
@@ -784,6 +785,14 @@ test('valve context ignores current_state and uses the historical actuation expe
   assert.equal(valve.observed_at, '2026-07-12T06:08:00.000Z');
   assert.equal(valve.quality, 'observed');
   assert.equal(valve.reason, null);
+  const expectationRead = observed.reads.find((read) => {
+    return read.sql.includes('FROM valve_actuation_expectations AS vae');
+  });
+  assert.ok(expectationRead);
+  assert.match(
+    expectationRead.sql,
+    /ORDER BY vae\.commanded_at DESC,vae\.expectation_id DESC LIMIT 1$/
+  );
 });
 
 test('an unobserved valve command is labelled expected rather than observed', async () => {

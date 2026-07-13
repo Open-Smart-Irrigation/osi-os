@@ -387,7 +387,7 @@ async function loadValveExpectations(db, zone, at) {
               'OR match_assignment.valve_channel=vae.valve_channel)' +
         ')' +
       ') ' +
-    'ORDER BY vae.commanded_at DESC,vae.expectation_id DESC',
+    'ORDER BY vae.commanded_at DESC,vae.expectation_id DESC LIMIT 1',
     [zone.zone_id, zone.user_id, zone.gateway_device_eui, at, zone.zone_id, zone.zone_id]
   );
 }
