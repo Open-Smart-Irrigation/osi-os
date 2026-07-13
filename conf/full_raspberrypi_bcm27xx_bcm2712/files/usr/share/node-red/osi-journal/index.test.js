@@ -2815,8 +2815,11 @@ test('built aggregate is detached JSON-safe data that round-trips unchanged', ()
   assert.equal(aggregate.values[1].value_text, 'second');
 });
 
-test('aggregateHash pins all seven normative canonicalization hashes', () => {
+test('aggregateHash pins all eight normative canonicalization hashes', () => {
   const { aggregateHash } = aggregateApi();
+  const utf16KeyOrder = {};
+  utf16KeyOrder['\uE000'] = 2;
+  utf16KeyOrder['\u{10000}'] = 1;
   const vectors = [
     [{}, '44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a'],
     [{ b: 1, a: 2 }, 'd3626ac30a87e6f7a6428233b3c68299976865fa5508e4267c5415c76af7a772'],
@@ -2825,6 +2828,7 @@ test('aggregateHash pins all seven normative canonicalization hashes', () => {
     [{ a: null, b: null }, '052c4bd5e6ded53bd884485af8b1667a7b70ba3a8573b54bd878f6d2c705c2df'],
     [{ device_eui: '0016c001f11715e2', event_uuid: 'D4FE4B8F-2C58-4D1C-A8C3-9DCE37E6EC90' }, '5a6af3263b6ee1803f572b1011b72f2e1e5ba72e4c45f0ca46095fc6f477d8e5'],
     [{ device_eui: '0016c001f117' }, '7af6b7cc1190a447fddaf87749fdb4418938585b205738b20c32de051b173741'],
+    [utf16KeyOrder, '4045c21a23c8ae8f8d9add81f54bd506bee65885099876fb4afb378b1f2c3516'],
   ];
 
   for (const [input, expected] of vectors) assert.equal(aggregateHash(input), expected);
@@ -3006,6 +3010,48 @@ test('aggregate canonicalization omits object undefined and rejects non-JSON sta
   for (const value of invalidValues) {
     assert.throws(() => aggregateHash(value), invalidAggregateCode);
   }
+});
+
+test('timestamp-shaped arbitrary text beyond Java precision fails recursively', () => {
+  const { aggregateHash } = aggregateApi();
+  const overprecise = '2026-05-03T12:00:00.1234567890Z';
+  const invalidValues = [
+    { note: overprecise },
+    { values: [{ value_text: overprecise }] },
+  ];
+
+  for (const value of invalidValues) {
+    assert.throws(() => aggregateHash(value), invalidAggregateCode);
+  }
+});
+
+test('nine-digit timestamp-shaped arbitrary text still truncates to milliseconds', () => {
+  const { aggregateHash } = aggregateApi();
+  const precise = '2026-05-03T12:00:00.123456789Z';
+  const milliseconds = '2026-05-03T12:00:00.123Z';
+
+  assert.equal(aggregateHash({ note: precise }), aggregateHash({ note: milliseconds }));
+  assert.equal(
+    aggregateHash({ values: [{ value_text: precise }] }),
+    aggregateHash({ values: [{ value_text: milliseconds }] })
+  );
+});
+
+test('aggregate canonicalization rejects array accessors without invoking them', () => {
+  const { aggregateHash } = aggregateApi();
+  let getterCalls = 0;
+  const values = [];
+  Object.defineProperty(values, 0, {
+    enumerable: true,
+    configurable: true,
+    get() {
+      getterCalls += 1;
+      return 'must-not-run';
+    },
+  });
+
+  assert.throws(() => aggregateHash({ values }), invalidAggregateCode);
+  assert.equal(getterCalls, 0);
 });
 
 test('semantic UUID, EUI, and timestamp fields reject malformed values', () => {

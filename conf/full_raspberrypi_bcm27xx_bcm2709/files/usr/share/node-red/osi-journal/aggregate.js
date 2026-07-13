@@ -8,7 +8,7 @@ const VALUE_LOCAL_FIELDS = new Set(['id', 'rowid', 'entry_uuid']);
 const UUID = /^[0-9a-fA-F]{8}-?[0-9a-fA-F]{4}-?[0-9a-fA-F]{4}-?[0-9a-fA-F]{4}-?[0-9a-fA-F]{12}$/;
 const EUI64 = /^[0-9a-fA-F]{16}$/;
 const EUI48 = /^[0-9a-fA-F]{12}$/;
-const ISO_OFFSET = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.(\d{1,9}))?(Z|([+-])(\d{2}):?(\d{2}))$/;
+const ISO_OFFSET = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.(\d+))?(Z|([+-])(\d{2}):?(\d{2}))$/;
 
 function aggregateError(code, message) {
   const error = new Error(message);
@@ -79,10 +79,12 @@ function cloneJson(value, ancestors, arrayElement) {
       if (keys.length !== value.length) invalidAggregate('Arrays must be dense without extra fields');
       const output = [];
       for (let index = 0; index < value.length; index += 1) {
-        if (!Object.prototype.hasOwnProperty.call(value, index)) {
-          invalidAggregate('Array elements must not be undefined or sparse');
+        const descriptor = Object.getOwnPropertyDescriptor(value, index);
+        if (!descriptor || !descriptor.enumerable ||
+            !Object.prototype.hasOwnProperty.call(descriptor, 'value')) {
+          invalidAggregate('Array elements must be enumerable data fields');
         }
-        output.push(cloneJson(value[index], ancestors, true));
+        output.push(cloneJson(descriptor.value, ancestors, true));
       }
       return output;
     }
@@ -122,6 +124,9 @@ function daysInMonth(year, month) {
 function canonicalTimestamp(raw) {
   const match = ISO_OFFSET.exec(raw);
   if (!match) invalidAggregate('Timestamp must be a complete ISO-8601 offset value');
+  if (match[7] && match[7].length > 9) {
+    invalidAggregate('Timestamp fractional precision must not exceed nine digits');
+  }
   const year = Number(match[1]);
   const month = Number(match[2]);
   const day = Number(match[3]);
