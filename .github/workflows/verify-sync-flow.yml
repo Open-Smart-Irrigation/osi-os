@@ -27,6 +27,14 @@ jobs:
       # history schema/worker tests, history API contract, helper tests, and
       # profile parity). Must end with "All parity checks passed."
       - run: node scripts/verify-sync-flow.js
+      # Parse-checks every function node's func/initialize/finalize in all
+      # shipped flows.json profiles. Added after issue #6: dendro-raw-fn
+      # shipped with a corrupted regex Node-RED could not compile, so its
+      # HTTP route hung (curl exit 28) and no verifier noticed.
+      - name: Function-node parse check (all flows.json profiles)
+        run: |
+          node scripts/verify-flows-fn-parse.js
+          node --test scripts/verify-flows-fn-parse.test.js
       - name: Skill-library symlink parity (.agents/skills must alias .claude/skills)
         run: |
           test "$(readlink .agents/skills)" = "../.claude/skills"
