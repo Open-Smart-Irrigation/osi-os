@@ -23,6 +23,16 @@
 //      guard with IF NOT EXISTS; same resulting object.
 //   3. Whitespace collapsed, spacing inside parens/commas normalized: the
 //      seed is pretty-printed, the boot DDL is single-line.
+//   4. Spacing around bare `=` normalized: the seed and the boot rewrite are
+//      inconsistent with each other about padding equality comparisons
+//      (some emit `col=val`, others `col = val`, in both the seed's
+//      hand-written SQL and the boot node's JS template literals) -- found
+//      in the 2026-07-13 repo-tree discovery run (issue 16 Task 2) across
+//      trg_dp_dendro_daily_outbox_ai/au, trg_sync_devices_outbox_au,
+//      trg_sync_schedules_outbox_au, trg_sync_zones_outbox_au. Confirmed
+//      safe: neither source uses `<=`, `>=`, `!=`, `==`, or embeds a literal
+//      `=` inside a quoted string in these trigger bodies (checked by
+//      grep across both sources before adding this rule).
 //
 // Usage:
 //   node scripts/verify-trigger-body-parity.js            # both profiles
@@ -49,6 +59,7 @@ function canonicalizeTriggerSql(sql) {
   s = s.replace(/\bIF\s+NOT\s+EXISTS\b/gi, ' ');                                    // rule 2
   s = s.replace(/\s+/g, ' ');                                                       // rule 3
   s = s.replace(/\(\s+/g, '(').replace(/\s+\)/g, ')').replace(/\s*,\s*/g, ', ');
+  s = s.replace(/\s*(?<![<>=!])=(?!=)\s*/g, ' = ');                                  // rule 4
   return s.trim();
 }
 

@@ -64,6 +64,29 @@ test('canonicalize: EUI literals, IF NOT EXISTS, and whitespace collapse to one 
   assert.strictEqual(a, b);
 });
 
+// Reproduces the 2026-07-13 repo-tree discovery run finding (issue 16 Task 2):
+// the seed and boot rewrite are inconsistent with each other about padding
+// around bare `=` (unrelated to <>, <=, >=, != which this codebase's trigger
+// bodies never use). Both directions must canonicalize to the same form.
+test('canonicalize: spacing around bare = collapses to one form, both directions', () => {
+  const unpadded = canonicalizeTriggerSql(
+    'CREATE TRIGGER trg_x AFTER INSERT ON t WHEN EXISTS (SELECT 1 FROM s WHERE peer_node=\'cloud\' AND linked=1) BEGIN UPDATE t SET x=NEW.x WHERE id=NEW.id; END'
+  );
+  const padded = canonicalizeTriggerSql(
+    'CREATE TRIGGER trg_x AFTER INSERT ON t WHEN EXISTS (SELECT 1 FROM s WHERE peer_node = \'cloud\' AND linked = 1) BEGIN UPDATE t SET x = NEW.x WHERE id = NEW.id; END'
+  );
+  assert.strictEqual(unpadded, padded);
+});
+
+test('canonicalize: bare = normalization leaves <>, <=, >=, != untouched', () => {
+  const s = canonicalizeTriggerSql(
+    "CREATE TRIGGER trg_x AFTER INSERT ON t WHEN NEW.a<>1 AND NEW.b<=2 AND NEW.c>=3 BEGIN SELECT 1; END"
+  );
+  assert.match(s, /NEW\.a<>1/);
+  assert.match(s, /NEW\.b<=2/);
+  assert.match(s, /NEW\.c>=3/);
+});
+
 test('parity: equivalent seed and boot bodies pass', (t) => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tbp-'));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
