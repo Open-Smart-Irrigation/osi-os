@@ -80,7 +80,7 @@ key with a default, then commits.
 | `device_eui_source` | Where the EUI came from (`concentratord-runtime`, `concentratord-uci-<chipset>`, `concentratord-toml-<chipset>`, `linked`, `persisted`, `mac:<iface>`) | resolved at boot | Same as above |
 | `device_eui_confidence` | `authoritative` \| `persisted` \| `provisional` | resolved at boot | Same as above; gates whether account-linking is allowed (provisional blocks linking — see section 2) |
 | `device_eui_last_verified_at` | ISO-8601 UTC timestamp of last resolution | resolved at boot | Same as above |
-| `link_gateway_device_eui` | Server-linked override EUI written during account-link flow | empty | Written by flows.json account-link finalize node; read by `gateway_identity_read_linked` (highest-priority persisted source, see section 2) |
+| `link_gateway_device_eui` | Server-linked override EUI; normally written by account-link finalize after a successful link, but an operator can preset it to bypass the provisional-identity block on concentrator-less gateways — see the override note in section 2 | empty | Written by flows.json account-link finalize node; read by `gateway_identity_read_linked` (highest-priority persisted source, see section 2) |
 | `device_type` | Reported device type string | `GATEWAY` | `node-red.init` exports as `DEVICE_TYPE` |
 | `firmware_version` | Reported firmware version string | `0.6.5` (2026-07-06; bump on release) | `node-red.init` exports as `FIRMWARE_VERSION` |
 | `server_host` | Cloud host set during account-link (used to persist/restore MQTT/server host across link/unlink), separate from the hardcoded telemetry broker URL (section 9) | empty | flows.json account-link nodes write it; `node-red.init` exports as `OSI_SERVER_HOST` |
@@ -203,6 +203,20 @@ verifier regeneration. The repair sequence for this is also in
 link while `gatewayDeviceEuiConfidence === 'provisional'` (HTTP 503, "Gateway
 identity is not ready yet"), so a MAC-fallback-only gateway cannot complete
 cloud linking until concentratord reports a real ID.
+
+**Provisional-identity link override (test/demo path only):** an operator can
+bypass the gate above by presetting the linked-source UCI key before running
+account-link — `uci set osi-server.cloud.link_gateway_device_eui=<EUI>; uci
+commit osi-server`. `gateway_identity_read_linked()` (precedence step 4) always
+reports `persisted` confidence regardless of how the EUI was chosen, so the
+next identity resolve clears the provisional check in `al-link-validate`. This
+exists for concentrator-less gateways used in test and demo setups; the
+production path is a configured concentrator, which resolves an
+`authoritative` EUI at step 1 and needs no override. The risk: linking under a
+hand-picked EUI on a gateway that later gets a real concentrator (or a
+different MAC-derived fallback) leaves the cloud holding a stale EUI. Linked
+history strands under the old value, and offline login breaks because the
+verifier is `bcrypt(password::DEVICE_EUI)` (see the Consequence note above).
 
 **Re-verify:**
 ```
