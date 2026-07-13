@@ -109,6 +109,9 @@ function App() {
 
           {/* Default redirect */}
           <Route path="/" element={<Navigate to="/dashboard" replace />} />
+          {/* Unknown routes (incl. /journal until the field-journal feature
+              lands) fall back to the dashboard instead of a blank screen */}
+          <Route path="*" element={<Navigate to="/dashboard" replace />} />
         </Routes>
       </HashRouter>
     </AuthProvider>
