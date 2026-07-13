@@ -2,6 +2,7 @@
 
 const crypto = require('node:crypto');
 const { aggregateHash, buildAggregate } = require('./aggregate');
+const { buildContext } = require('./context');
 const { validateEntry } = require('./index');
 
 const ENTRY_COLUMNS = [
@@ -495,6 +496,44 @@ function frozenSeasonForCorrection(existing, plot, occurrence) {
   };
 }
 
+function sameContextDeterminants(existing, plot, deviceEui, occurrence) {
+  return nullable(existing.plot_uuid) === nullable(plot.plot_uuid) &&
+    nullable(existing.zone_uuid) === nullable(plot.zone_uuid) &&
+    nullable(existing.zone_id) === nullable(plot.zone_id) &&
+    nullable(existing.device_eui) === nullable(deviceEui) &&
+    existing.occurred_start === occurrence.start.instant &&
+    nullable(existing.occurred_end) === nullable(occurrence.end && occurrence.end.instant);
+}
+
+function serializeGeneratedContext(context) {
+  let serialized;
+  try {
+    serialized = JSON.stringify(context);
+  } catch (cause) {
+    const error = lifecycleError('invalid_context', 'Generated journal context is not JSON-serializable');
+    error.cause = cause;
+    throw error;
+  }
+  if (serialized === undefined) {
+    throw lifecycleError('invalid_context', 'Generated journal context is not JSON-serializable');
+  }
+  if (Buffer.byteLength(serialized, 'utf8') > 64 * 1024) {
+    throw lifecycleError('limit_exceeded', 'Generated journal context exceeds the 64 KiB limit');
+  }
+  return serialized;
+}
+
+async function generatedContextJson(tx, plot, deviceEui, occurrence) {
+  if (plot.zone_id == null || plot.zone_uuid == null) return null;
+  const context = await buildContext(
+    tx,
+    Object.assign({}, plot, { subject_device: nullable(deviceEui) }),
+    occurrence.start.instant,
+    occurrence.end ? occurrence.end.instant : null
+  );
+  return serializeGeneratedContext(context);
+}
+
 function entryRow(input, principal, plot, season, occurrence, catalogVersion, options) {
   const now = new Date().toISOString();
   return {
@@ -533,7 +572,7 @@ function entryRow(input, principal, plot, season, occurrence, catalogVersion, op
     voided_by_principal_uuid: null,
     void_reason: null,
     note: nullable(input.note),
-    context_json: null,
+    context_json: nullable(options.context_json),
     sync_version: options.sync_version,
     gateway_device_eui: plot.gateway_device_eui,
     created_at: now,
@@ -780,12 +819,14 @@ async function replaceExistingWithFinal(
   occurrence,
   season,
   catalogVersion,
+  contextJson,
   nextVersion
 ) {
   const replacement = entryRow(normalized, principal, plot, season, occurrence, catalogVersion, {
     entry_uuid: existing.entry_uuid,
     batch_uuid: normalized.batch_uuid,
     status: 'final',
+    context_json: contextJson,
     sync_version: nextVersion,
   });
   replacement.owner_user_uuid = existing.owner_user_uuid;
@@ -888,6 +929,9 @@ async function correctFinalInTransaction(tx, catalog, input, principal, entryInd
     ? frozenSeason.season
     : await resolveSeason(tx, plot, occurrence.start.localDate, normalized, true);
   const catalogVersion = await currentCatalogVersion(tx, catalog);
+  const contextJson = sameContextDeterminants(existing, plot, deviceEui, occurrence)
+    ? nullable(existing.context_json)
+    : await generatedContextJson(tx, plot, deviceEui, occurrence);
   const nextVersion = Number(existing.sync_version) + 1;
   return replaceExistingWithFinal(
     tx,
@@ -900,6 +944,7 @@ async function correctFinalInTransaction(tx, catalog, input, principal, entryInd
     occurrence,
     season,
     catalogVersion,
+    contextJson,
     nextVersion
   );
 }
@@ -940,6 +985,7 @@ async function promoteDraftInTransaction(tx, catalog, input, principal, entryInd
   const normalized = validation.normalized;
   const season = await resolveSeason(tx, plot, occurrence.start.localDate, normalized, true);
   const catalogVersion = await currentCatalogVersion(tx, catalog);
+  const contextJson = await generatedContextJson(tx, plot, deviceEui, occurrence);
   return replaceExistingWithFinal(
     tx,
     catalog,
@@ -951,6 +997,7 @@ async function promoteDraftInTransaction(tx, catalog, input, principal, entryInd
     occurrence,
     season,
     catalogVersion,
+    contextJson,
     1
   );
 }
@@ -996,10 +1043,12 @@ async function createFinalInTransaction(tx, catalog, input, principal, entryInde
   const normalized = validation.normalized;
   const season = await resolveSeason(tx, plot, occurrence.start.localDate, normalized, true);
   const catalogVersion = await currentCatalogVersion(tx, catalog);
+  const contextJson = await generatedContextJson(tx, plot, deviceEui, occurrence);
   const row = entryRow(normalized, principal, plot, season, occurrence, catalogVersion, {
     entry_uuid: input.entry_uuid,
     batch_uuid: input.batch_uuid,
     status: 'final',
+    context_json: contextJson,
     sync_version: 1,
   });
   await insertEntry(tx, row);

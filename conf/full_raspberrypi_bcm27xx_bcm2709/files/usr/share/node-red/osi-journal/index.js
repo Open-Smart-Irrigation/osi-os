@@ -1,6 +1,7 @@
 'use strict';
 
 const { aggregateHash, buildAggregate } = require('./aggregate');
+const { buildContext } = require('./context');
 const { loadCatalog } = require('./catalog');
 const {
   dependencyCatalogErrors,
@@ -943,6 +944,7 @@ module.exports = {
   aggregateHash,
   allowedUnits,
   buildAggregate,
+  buildContext,
   convertToCanonical,
   finalize: function finalize() {
     return require('./lifecycle').finalize.apply(null, arguments);

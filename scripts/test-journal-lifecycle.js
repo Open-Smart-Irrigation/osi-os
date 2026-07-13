@@ -27,9 +27,42 @@ const NO_SEASON_ZONE_UUID = '33333333-3333-4333-8333-333333333333';
 const GATEWAY_EUI = '0016C001F11715E2';
 const OWNED_DEVICE_EUI = '70B3D57ED0061234';
 const FOREIGN_DEVICE_EUI = 'A84041ABCDEFFEDC';
+const WEATHER_DEVICE_EUI = '2CF7F1C000000001';
+const RAIN_DEVICE_EUI = '3CF7F1C000000002';
+const SECOND_RAIN_DEVICE_EUI = '4CF7F1C000000003';
+const VALVE_DEVICE_EUI = '70B3D57ED0065678';
 const ENTRY_UUID = 'abcdefab-cdef-4abc-8def-abcdefabcdef';
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const PLOT_NUMBERS = [2, 5, 6, 10, 12];
+const CONTEXT_CHANNELS = [
+  'swt_1',
+  'swt_2',
+  'swt_3',
+  'rain_24h',
+  'temperature',
+  'relative_humidity',
+  'wind_speed',
+  'wind_direction',
+  'wind_gust',
+  'valve_state',
+];
+const CONTEXT_RECORD_FIELDS = [
+  'value',
+  'unit',
+  'source_device',
+  'source_key',
+  'observed_at',
+  'statistic',
+  'window_start',
+  'window_end',
+  'sample_count',
+  'coverage',
+  'status',
+  'quality',
+  'freshness_threshold_s',
+  'age_s',
+  'reason',
+];
 
 function plotUuid(number) {
   return String(number).padStart(8, '0') + '-0000-4000-8000-' +
@@ -166,6 +199,7 @@ function seedDatabase() {
   for (const fixture of [
     { number: 20, code: 'FOREIGN-20', zoneUuid: FOREIGN_ZONE_UUID },
     { number: 21, code: 'NO-SEASON-21', zoneUuid: NO_SEASON_ZONE_UUID },
+    { number: 22, code: 'SAME-ZONE-22', zoneUuid: ZONE_UUID },
   ]) {
     native.prepare(
       'INSERT INTO journal_plots(plot_uuid,plot_code,name,zone_uuid,station_code,gateway_device_eui) ' +
@@ -216,6 +250,47 @@ function seedDatabase() {
     1,
     GATEWAY_EUI
   );
+  for (const fixture of [
+    {
+      deveui: WEATHER_DEVICE_EUI,
+      name: 'Shared weather station',
+      typeId: 'SENSECAP_S2120',
+      zoneId: null,
+    },
+    {
+      deveui: RAIN_DEVICE_EUI,
+      name: 'Zone rain gauge',
+      typeId: 'AQUASCOPE_LORAIN',
+      zoneId: 1,
+    },
+    {
+      deveui: SECOND_RAIN_DEVICE_EUI,
+      name: 'Second zone rain gauge',
+      typeId: 'AQUASCOPE_LORAIN',
+      zoneId: 1,
+    },
+    {
+      deveui: VALVE_DEVICE_EUI,
+      name: 'Zone valve',
+      typeId: 'STREGA_VALVE',
+      zoneId: null,
+    },
+  ]) {
+    native.prepare(
+      'INSERT INTO devices(' +
+        'deveui,name,type_id,user_id,created_at,updated_at,irrigation_zone_id,gateway_device_eui' +
+      ') VALUES (?,?,?,?,?,?,?,?)'
+    ).run(
+      fixture.deveui,
+      fixture.name,
+      fixture.typeId,
+      1,
+      '2026-07-12T00:00:00.000Z',
+      '2026-07-12T00:00:00.000Z',
+      fixture.zoneId,
+      GATEWAY_EUI
+    );
+  }
   native.close();
 }
 
@@ -274,6 +349,21 @@ async function resetMutations() {
   await db.run('DELETE FROM sync_outbox');
   await db.run('DELETE FROM command_ack_outbox');
   await db.run('DELETE FROM applied_commands');
+  await db.run('DELETE FROM device_data');
+  await db.run('DELETE FROM valve_actuation_expectations');
+  await db.run('DELETE FROM zone_valve_assignments');
+  await db.run('DELETE FROM weather_station_zones');
+  await db.run(
+    'UPDATE devices SET current_state=NULL,deleted_at=NULL,rain_gauge_enabled=0'
+  );
+}
+
+async function storedContext(entryUuid) {
+  const row = await db.get(
+    'SELECT context_json FROM journal_entries WHERE entry_uuid=?',
+    [entryUuid || ENTRY_UUID]
+  );
+  return row && row.context_json != null ? JSON.parse(row.context_json) : null;
 }
 
 async function count(table) {
@@ -313,6 +403,648 @@ test('exports the complete lifecycle API from osi-journal', () => {
   }
 });
 
+test('zone finalization succeeds with explicit no-data context records', async () => {
+  assert.equal(typeof journal.buildContext, 'function');
+  const result = await journal.finalize(db, catalog, validEntry(), principal());
+  const entry = await db.get(
+    'SELECT context_json FROM journal_entries WHERE entry_uuid=?',
+    [result.entry_uuid]
+  );
+  const context = JSON.parse(entry.context_json);
+
+  assert.equal(context.schema_version, 1);
+  assert.deepEqual(Object.keys(context.channels), CONTEXT_CHANNELS);
+  for (const channel of CONTEXT_CHANNELS) {
+    assert.deepEqual(Object.keys(context.channels[channel]), CONTEXT_RECORD_FIELDS, channel);
+    assert.equal(context.channels[channel].value, null, channel);
+    assert.equal(context.channels[channel].reason, 'no_data', channel);
+  }
+  const outbox = await db.get(
+    'SELECT payload_json FROM sync_outbox WHERE aggregate_key=?',
+    [result.entry_uuid]
+  );
+  const aggregate = JSON.parse(outbox.payload_json);
+  assert.equal(aggregate.context_json, entry.context_json);
+  assert.deepEqual(JSON.parse(aggregate.context_json), context);
+  assert.equal(await count('sync_outbox'), 1);
+});
+
+test('a 15-day-old SWT point is stale at a 24-hour freshness threshold', async () => {
+  await db.run(
+    'INSERT INTO device_data(deveui,recorded_at,swt_1) VALUES (?,?,?)',
+    [OWNED_DEVICE_EUI, '2026-06-27T07:30:00.000Z', 42]
+  );
+
+  await journal.finalize(db, catalog, validEntry(), principal());
+  const entry = await db.get(
+    'SELECT context_json FROM journal_entries WHERE entry_uuid=?',
+    [ENTRY_UUID]
+  );
+  const swt = JSON.parse(entry.context_json).channels.swt_1;
+
+  assert.equal(swt.value, null);
+  assert.equal(swt.reason, 'stale');
+  assert.equal(swt.observed_at, '2026-06-27T07:30:00.000Z');
+  assert.equal(swt.source_device, OWNED_DEVICE_EUI);
+  assert.equal(swt.freshness_threshold_s, 24 * 60 * 60);
+  assert.equal(swt.age_s, 15 * 24 * 60 * 60);
+});
+
+test('a rain window without valid samples is null rather than zero', async () => {
+  await db.run(
+    'INSERT INTO device_data(deveui,recorded_at,ambient_temperature) VALUES (?,?,?)',
+    [OWNED_DEVICE_EUI, '2026-07-12T07:15:00.000Z', 18]
+  );
+
+  await journal.finalize(db, catalog, validEntry(), principal());
+  const entry = await db.get(
+    'SELECT context_json FROM journal_entries WHERE entry_uuid=?',
+    [ENTRY_UUID]
+  );
+  const rain = JSON.parse(entry.context_json).channels.rain_24h;
+
+  assert.equal(rain.value, null);
+  assert.equal(rain.reason, 'no_data');
+  assert.notEqual(rain.value, 0);
+  assert.equal(rain.sample_count, 0);
+});
+
+test('a backdated occurrence selects only historical telemetry at or before its instant', async () => {
+  await db.run(
+    'INSERT INTO device_data(deveui,recorded_at,swt_1) VALUES (?,?,?)',
+    [OWNED_DEVICE_EUI, '2026-07-12T07:00:00.000Z', 35]
+  );
+  await db.run(
+    'INSERT INTO device_data(deveui,recorded_at,swt_1) VALUES (?,?,?)',
+    [OWNED_DEVICE_EUI, '2026-07-12T08:00:00.000Z', 99]
+  );
+
+  await journal.finalize(db, catalog, validEntry(), principal());
+  const entry = await db.get(
+    'SELECT context_json FROM journal_entries WHERE entry_uuid=?',
+    [ENTRY_UUID]
+  );
+  const swt = JSON.parse(entry.context_json).channels.swt_1;
+
+  assert.equal(swt.value, 35);
+  assert.equal(swt.reason, null);
+  assert.equal(swt.observed_at, '2026-07-12T07:00:00.000Z');
+  assert.equal(swt.age_s, 30 * 60);
+});
+
+test('soft-deleted devices cannot contribute historical context', async () => {
+  await db.run(
+    'UPDATE devices SET deleted_at=? WHERE deveui=?',
+    ['2026-07-12T07:15:00.000Z', SECOND_RAIN_DEVICE_EUI]
+  );
+  await db.run(
+    'INSERT INTO device_data(deveui,recorded_at,swt_1) VALUES (?,?,?)',
+    [SECOND_RAIN_DEVICE_EUI, '2026-07-12T07:20:00.000Z', 99]
+  );
+
+  await journal.finalize(db, catalog, validEntry(), principal());
+  const swt = (await storedContext()).channels.swt_1;
+
+  assert.equal(swt.value, null);
+  assert.equal(swt.source_device, null);
+  assert.equal(swt.reason, 'no_data');
+});
+
+test('a foreign-owned shared-weather mapping cannot contribute context', async () => {
+  await db.run(
+    'INSERT INTO weather_station_zones(deveui,zone_id,created_at) VALUES (?,?,?)',
+    [FOREIGN_DEVICE_EUI, 1, '2026-07-12T00:00:00.000Z']
+  );
+  await db.run(
+    'INSERT INTO device_data(deveui,recorded_at,swt_1,ambient_temperature) VALUES (?,?,?,?)',
+    [FOREIGN_DEVICE_EUI, '2026-07-12T07:20:00.000Z', 99, 31]
+  );
+
+  await journal.finalize(db, catalog, validEntry(), principal());
+  const channels = (await storedContext()).channels;
+
+  for (const channel of ['swt_1', 'temperature']) {
+    assert.equal(channels[channel].value, null, channel);
+    assert.equal(channels[channel].source_device, null, channel);
+    assert.equal(channels[channel].reason, 'no_data', channel);
+  }
+});
+
+test('weather_station_zones supplies shared temperature, humidity, and wind context', async () => {
+  await db.run(
+    'INSERT INTO weather_station_zones(deveui,zone_id,created_at) VALUES (?,?,?)',
+    [WEATHER_DEVICE_EUI, 1, '2026-07-12T00:00:00.000Z']
+  );
+  await db.run(
+    'INSERT INTO device_data(' +
+      'deveui,recorded_at,ambient_temperature,relative_humidity,' +
+      'wind_speed_mps,wind_direction_deg,wind_gust_mps' +
+    ') VALUES (?,?,?,?,?,?,?)',
+    [WEATHER_DEVICE_EUI, '2026-07-12T07:20:00.000Z', 18.5, 67, 4.5, 225, 7.25]
+  );
+
+  await journal.finalize(db, catalog, validEntry(), principal());
+  const channels = (await storedContext()).channels;
+
+  assert.deepEqual(
+    [channels.temperature.value, channels.temperature.source_device, channels.temperature.source_key],
+    [18.5, WEATHER_DEVICE_EUI, 'ambient_temperature']
+  );
+  assert.deepEqual(
+    [channels.relative_humidity.value, channels.relative_humidity.source_device],
+    [67, WEATHER_DEVICE_EUI]
+  );
+  assert.deepEqual(
+    [channels.wind_speed.value, channels.wind_direction.value, channels.wind_gust.value],
+    [4.5, 225, 7.25]
+  );
+});
+
+test('rain context selects one deterministic source and excludes invalid and duplicate deltas', async () => {
+  await db.run(
+    'INSERT INTO weather_station_zones(deveui,zone_id,created_at) VALUES (?,?,?)',
+    [WEATHER_DEVICE_EUI, 1, '2026-07-12T00:00:00.000Z']
+  );
+  for (const sample of [
+    [WEATHER_DEVICE_EUI, '2026-07-12T06:00:00.000Z', 2, 'ok'],
+    [WEATHER_DEVICE_EUI, '2026-07-12T07:00:00.000Z', 3, 'ok'],
+    [WEATHER_DEVICE_EUI, '2026-07-12T07:00:00.000Z', 3, 'ok'],
+    [WEATHER_DEVICE_EUI, '2026-07-12T07:05:00.000Z', 100, 'duplicate_or_out_of_order'],
+    [WEATHER_DEVICE_EUI, '2026-07-12T07:10:00.000Z', 200, 'invalid_rain_delta'],
+    [RAIN_DEVICE_EUI, '2026-07-12T07:15:00.000Z', 7, 'ok'],
+    [RAIN_DEVICE_EUI, '2026-07-12T07:15:00.000Z', 7, 'ok'],
+    [RAIN_DEVICE_EUI, '2026-07-12T07:20:00.000Z', 100, 'duplicate_or_out_of_order'],
+    [RAIN_DEVICE_EUI, '2026-07-12T07:25:00.000Z', 200, 'invalid_rain_delta'],
+    [SECOND_RAIN_DEVICE_EUI, '2026-07-12T07:15:00.000Z', 9, 'ok'],
+  ]) {
+    await db.run(
+      'INSERT INTO device_data(deveui,recorded_at,rain_mm_delta,rain_delta_status) ' +
+      'VALUES (?,?,?,?)',
+      sample
+    );
+  }
+
+  await journal.finalize(db, catalog, validEntry(), principal());
+  const rain = (await storedContext()).channels.rain_24h;
+
+  assert.equal(rain.value, 7);
+  assert.equal(rain.unit, 'mm');
+  assert.equal(rain.source_device, RAIN_DEVICE_EUI);
+  assert.equal(rain.source_key, 'rain_mm_delta');
+  assert.equal(rain.observed_at, '2026-07-12T07:15:00.000Z');
+  assert.equal(rain.statistic, 'sum');
+  assert.equal(rain.window_start, '2026-07-11T07:30:00.000Z');
+  assert.equal(rain.window_end, '2026-07-12T07:30:00.000Z');
+  assert.equal(rain.sample_count, 1);
+  assert.equal(rain.reason, null);
+});
+
+test('a selected subject rain device takes precedence over other direct gauges', async () => {
+  await db.run(
+    'UPDATE devices SET rain_gauge_enabled=1 WHERE deveui=?',
+    [OWNED_DEVICE_EUI]
+  );
+  for (const sample of [
+    [OWNED_DEVICE_EUI, '2026-07-12T07:10:00.000Z', 4, 'ok'],
+    [RAIN_DEVICE_EUI, '2026-07-12T07:15:00.000Z', 7, 'ok'],
+  ]) {
+    await db.run(
+      'INSERT INTO device_data(deveui,recorded_at,rain_mm_delta,rain_delta_status) ' +
+      'VALUES (?,?,?,?)',
+      sample
+    );
+  }
+
+  await journal.finalize(db, catalog, validEntry({
+    device_eui: OWNED_DEVICE_EUI,
+  }), principal());
+  const rain = (await storedContext()).channels.rain_24h;
+
+  assert.equal(rain.value, 4);
+  assert.equal(rain.source_device, OWNED_DEVICE_EUI);
+  assert.equal(rain.sample_count, 1);
+});
+
+test('a valid zero rain delta remains an observed dry interval', async () => {
+  await db.run(
+    'INSERT INTO device_data(deveui,recorded_at,rain_mm_delta,rain_delta_status) ' +
+    'VALUES (?,?,?,?)',
+    [RAIN_DEVICE_EUI, '2026-07-12T07:15:00.000Z', 0, 'ok']
+  );
+
+  await journal.finalize(db, catalog, validEntry(), principal());
+  const rain = (await storedContext()).channels.rain_24h;
+
+  assert.equal(rain.value, 0);
+  assert.equal(rain.sample_count, 1);
+  assert.equal(rain.reason, null);
+});
+
+test('valve context ignores current_state and uses the historical actuation expectation', async () => {
+  await db.run(
+    'UPDATE devices SET current_state=? WHERE deveui=?',
+    ['OPEN', VALVE_DEVICE_EUI]
+  );
+  await db.run(
+    'INSERT INTO zone_valve_assignments(zone_id,deveui,valve_channel,created_at) VALUES (?,?,?,?)',
+    [1, VALVE_DEVICE_EUI, 2, '2026-07-12T00:00:00.000Z']
+  );
+  await db.run(
+    'INSERT INTO valve_actuation_expectations(' +
+      'expectation_id,device_eui,zone_id,commanded_at,commanded_duration_seconds,' +
+      'expected_close_at,volume_source,observed_open_at,observed_close_at,' +
+      'reconciliation_state,created_at,valve_channel' +
+    ') VALUES (?,?,?,?,?,?,?,?,?,?,?,?)',
+    [
+      'expectation-context-1',
+      VALVE_DEVICE_EUI,
+      null,
+      '2026-07-12T06:00:00.000Z',
+      600,
+      '2026-07-12T06:10:00.000Z',
+      'not_available',
+      '2026-07-12T06:01:00.000Z',
+      '2026-07-12T06:08:00.000Z',
+      'OBSERVED_COMPLETE',
+      '2026-07-12T06:00:00.000Z',
+      2,
+    ]
+  );
+
+  await journal.finalize(db, catalog, validEntry(), principal());
+  const valve = (await storedContext()).channels.valve_state;
+
+  assert.equal(valve.value, 'CLOSED');
+  assert.equal(valve.source_device, VALVE_DEVICE_EUI);
+  assert.equal(valve.source_key, 'valve_actuation_expectations:2');
+  assert.equal(valve.observed_at, '2026-07-12T06:08:00.000Z');
+  assert.equal(valve.quality, 'observed');
+  assert.equal(valve.reason, null);
+});
+
+test('an unobserved valve command is labelled expected rather than observed', async () => {
+  await db.run(
+    'INSERT INTO zone_valve_assignments(zone_id,deveui,valve_channel,created_at) VALUES (?,?,?,?)',
+    [1, VALVE_DEVICE_EUI, 2, '2026-07-12T00:00:00.000Z']
+  );
+  await db.run(
+    'INSERT INTO valve_actuation_expectations(' +
+      'expectation_id,device_eui,zone_id,commanded_at,commanded_duration_seconds,' +
+      'expected_close_at,volume_source,reconciliation_state,created_at,valve_channel' +
+    ') VALUES (?,?,?,?,?,?,?,?,?,?)',
+    [
+      'expectation-context-expected',
+      VALVE_DEVICE_EUI,
+      null,
+      '2026-07-12T07:00:00.000Z',
+      3600,
+      '2026-07-12T08:00:00.000Z',
+      'not_available',
+      'PENDING_OBSERVATION',
+      '2026-07-12T07:00:00.000Z',
+      2,
+    ]
+  );
+
+  await journal.finalize(db, catalog, validEntry(), principal());
+  const valve = (await storedContext()).channels.valve_state;
+
+  assert.equal(valve.value, 'OPEN');
+  assert.equal(valve.quality, 'expected');
+  assert.equal(valve.observed_at, '2026-07-12T07:00:00.000Z');
+});
+
+test('an observed valve is open only inside its observed open-close interval', async () => {
+  await db.run(
+    'INSERT INTO zone_valve_assignments(zone_id,deveui,valve_channel,created_at) VALUES (?,?,?,?)',
+    [1, VALVE_DEVICE_EUI, 2, '2026-07-12T00:00:00.000Z']
+  );
+  await db.run(
+    'INSERT INTO valve_actuation_expectations(' +
+      'expectation_id,device_eui,zone_id,commanded_at,commanded_duration_seconds,' +
+      'expected_close_at,volume_source,observed_open_at,observed_close_at,' +
+      'reconciliation_state,created_at,valve_channel' +
+    ') VALUES (?,?,?,?,?,?,?,?,?,?,?,?)',
+    [
+      'expectation-context-observed-open',
+      VALVE_DEVICE_EUI,
+      null,
+      '2026-07-12T07:00:00.000Z',
+      3600,
+      '2026-07-12T08:00:00.000Z',
+      'not_available',
+      '2026-07-12T07:10:00.000Z',
+      '2026-07-12T07:40:00.000Z',
+      'OBSERVED_COMPLETE',
+      '2026-07-12T07:00:00.000Z',
+      2,
+    ]
+  );
+
+  await journal.finalize(db, catalog, validEntry(), principal());
+  const valve = (await storedContext()).channels.valve_state;
+
+  assert.equal(valve.value, 'OPEN');
+  assert.equal(valve.quality, 'observed');
+  assert.equal(valve.observed_at, '2026-07-12T07:10:00.000Z');
+});
+
+test('a cancelled expectation without observations has unknown historical state', async () => {
+  await db.run(
+    'INSERT INTO zone_valve_assignments(zone_id,deveui,valve_channel,created_at) VALUES (?,?,?,?)',
+    [1, VALVE_DEVICE_EUI, 2, '2026-07-12T00:00:00.000Z']
+  );
+  await db.run(
+    'INSERT INTO valve_actuation_expectations(' +
+      'expectation_id,device_eui,zone_id,commanded_at,commanded_duration_seconds,' +
+      'expected_close_at,volume_source,reconciliation_state,created_at,valve_channel' +
+    ') VALUES (?,?,?,?,?,?,?,?,?,?)',
+    [
+      'expectation-context-cancelled',
+      VALVE_DEVICE_EUI,
+      null,
+      '2026-07-12T07:00:00.000Z',
+      3600,
+      '2026-07-12T08:00:00.000Z',
+      'not_available',
+      'CANCELLED',
+      '2026-07-12T07:00:00.000Z',
+      2,
+    ]
+  );
+
+  await journal.finalize(db, catalog, validEntry(), principal());
+  const valve = (await storedContext()).channels.valve_state;
+
+  assert.equal(valve.value, null);
+  assert.equal(valve.quality, 'unknown');
+  assert.equal(valve.reason, 'unknown');
+});
+
+test('expected_close_at alone never proves that a valve closed', async () => {
+  await db.run(
+    'INSERT INTO zone_valve_assignments(zone_id,deveui,valve_channel,created_at) VALUES (?,?,?,?)',
+    [1, VALVE_DEVICE_EUI, 2, '2026-07-12T00:00:00.000Z']
+  );
+  await db.run(
+    'INSERT INTO valve_actuation_expectations(' +
+      'expectation_id,device_eui,zone_id,commanded_at,commanded_duration_seconds,' +
+      'expected_close_at,volume_source,reconciliation_state,created_at,valve_channel' +
+    ') VALUES (?,?,?,?,?,?,?,?,?,?)',
+    [
+      'expectation-context-past-expected-close',
+      VALVE_DEVICE_EUI,
+      null,
+      '2026-07-12T07:00:00.000Z',
+      600,
+      '2026-07-12T07:10:00.000Z',
+      'not_available',
+      'PENDING_OBSERVATION',
+      '2026-07-12T07:00:00.000Z',
+      2,
+    ]
+  );
+
+  await journal.finalize(db, catalog, validEntry(), principal());
+  const valve = (await storedContext()).channels.valve_state;
+
+  assert.equal(valve.value, null);
+  assert.equal(valve.quality, 'unknown');
+  assert.equal(valve.reason, 'unknown');
+});
+
+test('a channel-less expectation with multiple zone assignments is ambiguous', async () => {
+  for (const channel of [1, 2]) {
+    await db.run(
+      'INSERT INTO zone_valve_assignments(zone_id,deveui,valve_channel,created_at) VALUES (?,?,?,?)',
+      [1, VALVE_DEVICE_EUI, channel, '2026-07-12T00:00:00.000Z']
+    );
+  }
+  await db.run(
+    'INSERT INTO valve_actuation_expectations(' +
+      'expectation_id,device_eui,zone_id,commanded_at,commanded_duration_seconds,' +
+      'expected_close_at,volume_source,reconciliation_state,created_at,valve_channel' +
+    ') VALUES (?,?,?,?,?,?,?,?,?,?)',
+    [
+      'expectation-context-ambiguous-channel',
+      VALVE_DEVICE_EUI,
+      null,
+      '2026-07-12T07:00:00.000Z',
+      3600,
+      '2026-07-12T08:00:00.000Z',
+      'not_available',
+      'PENDING_OBSERVATION',
+      '2026-07-12T07:00:00.000Z',
+      null,
+    ]
+  );
+
+  await journal.finalize(db, catalog, validEntry(), principal());
+  const valve = (await storedContext()).channels.valve_state;
+
+  assert.equal(valve.value, null);
+  assert.equal(valve.source_key, 'valve_actuation_expectations');
+  assert.equal(valve.reason, 'unknown');
+});
+
+test('multi-bucket duration uses a full-window mean and circular wind direction', async () => {
+  for (const sample of [
+    [OWNED_DEVICE_EUI, '2026-07-02T07:30:00.000Z', 10, 350],
+    [OWNED_DEVICE_EUI, '2026-07-10T07:30:00.000Z', 30, 10],
+  ]) {
+    await db.run(
+      'INSERT INTO device_data(deveui,recorded_at,swt_1,wind_direction_deg) ' +
+      'VALUES (?,?,?,?)',
+      sample
+    );
+  }
+
+  await journal.finalize(db, catalog, validEntry({
+    occurred_start_local: '2026-07-01T09:30',
+    occurred_end_local: '2026-07-12T09:30',
+  }), principal());
+  const operation = (await storedContext()).duration.operation_window;
+
+  assert.equal(operation.swt_1.value, 20);
+  assert.equal(operation.swt_1.statistic, 'mean');
+  assert.equal(operation.swt_1.sample_count, 2);
+  assert.equal(operation.wind_direction.value, 0);
+  assert.equal(operation.wind_direction.statistic, 'circular_mean');
+});
+
+test('same-determinant correction preserves the frozen context byte for byte', async () => {
+  await db.run(
+    'INSERT INTO device_data(deveui,recorded_at,swt_1) VALUES (?,?,?)',
+    [OWNED_DEVICE_EUI, '2026-07-12T07:00:00.000Z', 20]
+  );
+  await journal.finalize(db, catalog, validEntry(), principal());
+  const before = await db.get(
+    'SELECT context_json FROM journal_entries WHERE entry_uuid=?',
+    [ENTRY_UUID]
+  );
+  await db.run(
+    'INSERT INTO device_data(deveui,recorded_at,swt_1) VALUES (?,?,?)',
+    [OWNED_DEVICE_EUI, '2026-07-12T07:20:00.000Z', 40]
+  );
+
+  await journal.finalize(db, catalog, validEntry({
+    base_sync_version: 1,
+    note: 'Metadata-only correction',
+  }), principal());
+  const after = await db.get(
+    'SELECT context_json FROM journal_entries WHERE entry_uuid=?',
+    [ENTRY_UUID]
+  );
+
+  assert.equal(after.context_json, before.context_json);
+  assert.equal(JSON.parse(after.context_json).channels.swt_1.value, 20);
+});
+
+for (const scenario of [
+  {
+    name: 'start',
+    telemetryAt: '2026-07-12T08:00:00.000Z',
+    overrides: { occurred_start_local: '2026-07-12T10:30' },
+    assertChanged(context) {
+      assert.equal(context.occurred_start, '2026-07-12T08:30:00.000Z');
+      assert.equal(context.channels.swt_1.value, 40);
+    },
+  },
+  {
+    name: 'end',
+    telemetryAt: '2026-07-12T07:40:00.000Z',
+    overrides: { occurred_end_local: '2026-07-12T09:45' },
+    assertChanged(context) {
+      assert.equal(context.occurred_end, '2026-07-12T07:45:00.000Z');
+      assert.equal(context.duration.end_channels.swt_1.value, 40);
+      assert.equal(context.duration.operation_window.swt_1.value, 40);
+      assert.equal(context.duration.operation_window.swt_1.statistic, 'mean');
+    },
+  },
+  {
+    name: 'plot',
+    telemetryAt: '2026-07-12T07:20:00.000Z',
+    overrides: { plot_uuid: plotUuid(22) },
+    assertChanged(context) {
+      assert.equal(context.plot_uuid, plotUuid(22));
+      assert.equal(context.channels.swt_1.value, 40);
+    },
+  },
+  {
+    name: 'zone',
+    telemetryAt: '2026-07-12T07:20:00.000Z',
+    overrides: {
+      plot_uuid: plotUuid(21),
+      season_crop: 'maize',
+      season_variety: 'Pioneer P9241',
+    },
+    assertChanged(context) {
+      assert.equal(context.zone_uuid, NO_SEASON_ZONE_UUID);
+      assert.equal(context.channels.swt_1.value, null);
+      assert.equal(context.channels.swt_1.reason, 'no_data');
+    },
+  },
+  {
+    name: 'device',
+    telemetryAt: '2026-07-12T07:20:00.000Z',
+    overrides: { device_eui: OWNED_DEVICE_EUI },
+    assertChanged(context) {
+      assert.equal(context.subject_device, OWNED_DEVICE_EUI);
+      assert.equal(context.channels.swt_1.value, 40);
+    },
+  },
+]) {
+  test('changing the context ' + scenario.name + ' determinant recomputes the snapshot', async () => {
+    await db.run(
+      'INSERT INTO device_data(deveui,recorded_at,swt_1) VALUES (?,?,?)',
+      [OWNED_DEVICE_EUI, '2026-07-12T07:00:00.000Z', 20]
+    );
+    await journal.finalize(db, catalog, validEntry(), principal());
+    const before = await db.get(
+      'SELECT context_json FROM journal_entries WHERE entry_uuid=?',
+      [ENTRY_UUID]
+    );
+    await db.run(
+      'INSERT INTO device_data(deveui,recorded_at,swt_1) VALUES (?,?,?)',
+      [OWNED_DEVICE_EUI, scenario.telemetryAt, 40]
+    );
+
+    await journal.finalize(db, catalog, validEntry(Object.assign({
+      base_sync_version: 1,
+      note: 'Changed ' + scenario.name + ' determinant',
+    }, scenario.overrides)), principal());
+    const after = await db.get(
+      'SELECT context_json FROM journal_entries WHERE entry_uuid=?',
+      [ENTRY_UUID]
+    );
+    const context = JSON.parse(after.context_json);
+
+    assert.notEqual(after.context_json, before.context_json);
+    scenario.assertChanged(context);
+    assert.ok(Buffer.byteLength(after.context_json, 'utf8') <= 64 * 1024);
+    const outbox = await db.get(
+      'SELECT payload_json FROM sync_outbox WHERE aggregate_key=? ORDER BY sync_version DESC LIMIT 1',
+      [ENTRY_UUID]
+    );
+    assert.ok(Buffer.byteLength(outbox.payload_json, 'utf8') <= 256 * 1024);
+  });
+}
+
+test('a context query failure rolls back entry, values, and outbox', async () => {
+  const injected = new Error('injected context query failure');
+  const failingDb = {
+    transaction(executor) {
+      return db.transaction((tx) => executor(Object.assign({}, tx, {
+        all(sql, params) {
+          if (String(sql).includes('device_data')) throw injected;
+          return tx.all(sql, params);
+        },
+      })));
+    },
+  };
+
+  await assert.rejects(
+    journal.finalize(failingDb, catalog, validEntry(), principal()),
+    (error) => error === injected
+  );
+  await assertNoJournalWrites();
+});
+
+test('an oversized generated context fails inside the transaction and rolls back', async () => {
+  const contextPath = path.join(profileRoot, 'osi-journal/context.js');
+  const lifecyclePath = path.join(profileRoot, 'osi-journal/lifecycle.js');
+  const journalPath = path.join(profileRoot, 'osi-journal/index.js');
+  const contextModule = require(contextPath);
+  const originalBuildContext = contextModule.buildContext;
+  let transactionCalls = 0;
+  const observedDb = {
+    transaction(executor) {
+      transactionCalls += 1;
+      return db.transaction(executor);
+    },
+  };
+
+  contextModule.buildContext = async function oversizedContext() {
+    return { schema_version: 1, padding: 'x'.repeat(64 * 1024) };
+  };
+  delete require.cache[require.resolve(lifecyclePath)];
+  delete require.cache[require.resolve(journalPath)];
+  try {
+    const reloadedJournal = require(journalPath);
+    await rejectCode(
+      reloadedJournal.finalize(observedDb, catalog, validEntry(), principal()),
+      'limit_exceeded'
+    );
+  } finally {
+    contextModule.buildContext = originalBuildContext;
+    delete require.cache[require.resolve(lifecyclePath)];
+    delete require.cache[require.resolve(journalPath)];
+  }
+
+  assert.equal(transactionCalls, 1);
+  await assertNoJournalWrites();
+});
+
 test('saveDraft keeps an incomplete entry local at version zero without an outbox row', async () => {
   const result = await journal.saveDraft(db, catalog, validEntry({
     activity_code: 'fertilization',
@@ -321,9 +1053,13 @@ test('saveDraft keeps an incomplete entry local at version zero without an outbo
   }), principal());
 
   assert.deepEqual(result, { entry_uuid: ENTRY_UUID, sync_version: 0 });
-  const entry = await db.get('SELECT status,sync_version FROM journal_entries WHERE entry_uuid=?', [ENTRY_UUID]);
+  const entry = await db.get(
+    'SELECT status,sync_version,context_json FROM journal_entries WHERE entry_uuid=?',
+    [ENTRY_UUID]
+  );
   assert.equal(entry.status, 'draft');
   assert.equal(entry.sync_version, 0);
+  assert.equal(entry.context_json, null);
   assert.equal(await count('sync_outbox'), 0);
 });
 
@@ -347,12 +1083,17 @@ test('finalizeBatch fans five plots into independent version-one aggregates shar
     assert.equal(entry.sync_version, 1);
   }
   const entries = await db.all(
-    'SELECT entry_uuid,plot_uuid,batch_uuid,sync_version,status FROM journal_entries ORDER BY plot_uuid'
+    'SELECT entry_uuid,plot_uuid,batch_uuid,sync_version,status,context_json ' +
+    'FROM journal_entries ORDER BY plot_uuid'
   );
   assert.equal(entries.length, 5);
   assert.equal(new Set(entries.map((entry) => entry.batch_uuid)).size, 1);
   assert.equal(entries[0].batch_uuid, result.batch_uuid);
   assert.ok(entries.every((entry) => entry.sync_version === 1 && entry.status === 'final'));
+  assert.notEqual(entries.find((entry) => entry.plot_uuid === plotUuid(2)).context_json, null);
+  assert.ok(entries
+    .filter((entry) => entry.plot_uuid !== plotUuid(2))
+    .every((entry) => entry.context_json === null));
   assert.equal(await count('sync_outbox'), 5);
 });
 
@@ -446,7 +1187,10 @@ test('finalize atomically writes derived identity, ordered values, season, and e
   assert.equal(entry.season_uuid, SEASON_UUID);
   assert.equal(entry.season_crop, 'barley');
   assert.equal(entry.season_variety, 'Golden');
-  assert.equal(entry.context_json, null);
+  assert.notEqual(entry.context_json, null);
+  const generatedContext = JSON.parse(entry.context_json);
+  assert.equal(generatedContext.schema_version, 1);
+  assert.equal(generatedContext.supplied_by_request, undefined);
   assert.equal(entry.occurred_start, '2026-07-12T07:30:00.000Z');
   assert.equal(entry.occurred_utc_offset_minutes, 120);
   assert.match(entry.recorded_at, /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/);
@@ -515,6 +1259,10 @@ test('correction increments the version and completely replaces the value set', 
 
 test('void preserves values and emits a complete JOURNAL_ENTRY_VOIDED aggregate', async () => {
   await journal.finalize(db, catalog, validEntry(), principal());
+  const beforeEntry = await db.get(
+    'SELECT context_json FROM journal_entries WHERE entry_uuid=?',
+    [ENTRY_UUID]
+  );
   const beforeValues = await db.all('SELECT * FROM journal_entry_values WHERE entry_uuid=?', [ENTRY_UUID]);
   const result = await journal.void_(db, catalog, ENTRY_UUID, 1, 'Recorded twice', principal());
 
@@ -525,6 +1273,7 @@ test('void preserves values and emits a complete JOURNAL_ENTRY_VOIDED aggregate'
   assert.equal(entry.status, 'voided');
   assert.equal(entry.voided_by_principal_uuid, PRINCIPAL_UUID);
   assert.equal(entry.void_reason, 'Recorded twice');
+  assert.equal(entry.context_json, beforeEntry.context_json);
   assert.deepEqual(afterValues, beforeValues);
   const outbox = await db.get('SELECT * FROM sync_outbox WHERE event_uuid=?', [result.outbox_event_uuid]);
   assert.equal(outbox.op, 'JOURNAL_ENTRY_VOIDED');
@@ -619,7 +1368,7 @@ test('saveDraft updates an owned version-zero draft and fully replaces its value
 
   assert.deepEqual(result, { entry_uuid: ENTRY_UUID, sync_version: 0 });
   const after = await db.get(
-    'SELECT id,entry_uuid,created_at,recorded_at,author_principal_uuid,status,sync_version,note ' +
+    'SELECT id,entry_uuid,created_at,recorded_at,author_principal_uuid,status,sync_version,note,context_json ' +
     'FROM journal_entries WHERE entry_uuid=?',
     [ENTRY_UUID]
   );
@@ -668,7 +1417,7 @@ test('finalize promotes an owned draft in place to final version one', async () 
   assert.equal(result.entry_uuid, ENTRY_UUID);
   assert.equal(result.sync_version, 1);
   const finalized = await db.get(
-    'SELECT id,entry_uuid,created_at,recorded_at,author_principal_uuid,status,sync_version,note ' +
+    'SELECT id,entry_uuid,created_at,recorded_at,author_principal_uuid,status,sync_version,note,context_json ' +
     'FROM journal_entries WHERE entry_uuid=?',
     [ENTRY_UUID]
   );
@@ -676,6 +1425,8 @@ test('finalize promotes an owned draft in place to final version one', async () 
   assert.equal(finalized.status, 'final');
   assert.equal(finalized.sync_version, 1);
   assert.equal(finalized.note, 'Finalized draft');
+  assert.notEqual(finalized.context_json, null);
+  assert.equal(JSON.parse(finalized.context_json).schema_version, 1);
   const values = await db.all(
     'SELECT attribute_code,value_num FROM journal_entry_values WHERE entry_uuid=?',
     [ENTRY_UUID]
@@ -1121,6 +1872,7 @@ test('finalize creates an exact farm-level aggregate without plot, zone, or seas
   assert.equal(entry.season_uuid, null);
   assert.equal(entry.season_crop, null);
   assert.equal(entry.season_variety, null);
+  assert.equal(entry.context_json, null);
   const values = await db.all(
     'SELECT * FROM journal_entry_values WHERE entry_uuid=? ORDER BY group_index,attribute_code',
     [ENTRY_UUID]
@@ -1156,7 +1908,7 @@ test('sensorless plot requires and then freezes an explicit crop and variety', a
 
   assert.equal(result.sync_version, 1);
   const entry = await db.get(
-    'SELECT plot_uuid,zone_id,zone_uuid,season_uuid,season_crop,season_variety ' +
+    'SELECT plot_uuid,zone_id,zone_uuid,season_uuid,season_crop,season_variety,context_json ' +
     'FROM journal_entries WHERE entry_uuid=?',
     [ENTRY_UUID]
   );
@@ -1166,6 +1918,7 @@ test('sensorless plot requires and then freezes an explicit crop and variety', a
   assert.equal(entry.season_uuid, null);
   assert.equal(entry.season_crop, 'barley');
   assert.equal(entry.season_variety, 'Golden');
+  assert.equal(entry.context_json, null);
   assert.equal(await count('sync_outbox'), 1);
 });
 
