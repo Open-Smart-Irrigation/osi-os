@@ -944,8 +944,20 @@ module.exports = {
   allowedUnits,
   buildAggregate,
   convertToCanonical,
+  finalize: function finalize() {
+    return require('./lifecycle').finalize.apply(null, arguments);
+  },
+  finalizeBatch: function finalizeBatch() {
+    return require('./lifecycle').finalizeBatch.apply(null, arguments);
+  },
   loadCatalog,
   resolveOptions,
+  saveDraft: function saveDraft() {
+    return require('./lifecycle').saveDraft.apply(null, arguments);
+  },
   validateEntry,
   validateSelections,
+  void_: function void_() {
+    return require('./lifecycle').void_.apply(null, arguments);
+  },
 };
