@@ -22,7 +22,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Fixed
 - Daily-analytics writers (`dendro-compute-fn`, `sim-dendro-fn-setup`, and the LSN50/S2120/LoRain zone-aggregation nodes) now bump `sync_version` on every rewrite, so a recompute no longer collides with the cloud's per-resource watermark (`equal_version_payload_conflict`).
-- Boot-DDL string-interpolation bug in `sync-init-fn`: two trigger DDL strings shipped the literal text `+ gatewaySql + ` instead of interpolating the gateway EUI.
+- Boot-DDL string-interpolation bug in `sync-init-fn`: two trigger DDL strings shipped the literal text `+ gatewaySql +` instead of interpolating the gateway EUI.
 - `dendro-raw-fn` (`GET /api/dendrometer/:deveui/readings`) hung indefinitely because a corrupted regex made Node-RED unable to compile the node.
 - `device-api-http500` returned a hardcoded 500 on every failure, including unauthenticated requests, discarding the thrown 401 from `verifyBearer`.
 - Chameleon enable-toggle endpoint (`put-chameleon-enabled-auth-fn`) now bumps `devices.sync_version`, so a toggle after the first delivered `DEVICE` event reaches the cloud instead of being rejected.

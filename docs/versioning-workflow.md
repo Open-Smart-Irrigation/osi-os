@@ -25,10 +25,10 @@ Run through it top-to-bottom. Do not skip steps; each has a downstream dependenc
 
 ## Step 1 — Bump the version string (4 files)
 
-Edit all four places in one commit. Search for the previous version to catch anything new added since this doc was last updated.
+Edit all four places in one commit. Search for the previous version (not the one you're cutting) to catch anything new added since this doc was last updated.
 
 ```bash
-grep -r "0\.7\.0" web/react-gui/src/ conf/ README.md CHANGELOG.md
+grep -r "0\.6\.5" web/react-gui/src/ conf/ README.md CHANGELOG.md
 ```
 
 | File | What to change |
