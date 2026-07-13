@@ -656,6 +656,90 @@ function extractSchemaOps(schemaPath) {
   return { ops: [...new Set(ops)].sort(), errors };
 }
 
+function findJavaMethodBody(source, methodName) {
+  for (let i = 0; i < source.length;) {
+    const ch = source[i];
+    const next = source[i + 1];
+    if (ch === '/' && next === '/') {
+      const end = source.indexOf('\n', i + 2);
+      i = end < 0 ? source.length : end + 1;
+      continue;
+    }
+    if (ch === '/' && next === '*') {
+      const end = source.indexOf('*/', i + 2);
+      i = end < 0 ? source.length : end + 2;
+      continue;
+    }
+    if (ch === '"' || ch === "'") {
+      i = skipJavaQuotedLiteral(source, i);
+      continue;
+    }
+    if (startsWithWord(source, i, methodName)) {
+      const parenOpen = skipWhitespace(source, i + methodName.length);
+      if (source[parenOpen] === '(') {
+        const parenClose = findMatchingJavaParen(source, parenOpen);
+        if (parenClose >= 0) {
+          const braceOpen = skipWhitespace(source, parenClose + 1);
+          if (source[braceOpen] === '{') {
+            const braceClose = findMatchingBrace(source, braceOpen);
+            if (braceClose >= 0) return source.slice(braceOpen + 1, braceClose);
+          }
+        }
+      }
+    }
+    i++;
+  }
+  return null;
+}
+
+// Some sync event ops are dispatched by EdgeSyncService's applyEvent() via a
+// pluggable per-op registry (Map<String, SyncEventApplier>) rather than the
+// switch(event.op()) block: see foldSyncEventAppliers()/appliersByOp, which
+// is consulted before the switch and, when it claims an op, the switch is
+// never reached for that op (DD12, first case: GatewayLocationApplier /
+// GATEWAY_LOCATION_UPSERTED). Sibling files in the same package directory
+// that `implements SyncEventApplier` declare their ops via supportedOps();
+// those must count as server-supported ops too, or parity checks report a
+// false gap for correctly-dispatched, fully-implemented ops.
+function extractSyncEventApplierOps(source) {
+  if (!/\bimplements\b[^{;]*\bSyncEventApplier\b/.test(source)) return null;
+  const body = findJavaMethodBody(source, 'supportedOps');
+  if (body === null) return { ops: [], error: 'implements SyncEventApplier but supportedOps() method body not found' };
+  return { ops: [...new Set(extractQuotedConstants(body))], error: null };
+}
+
+function collectSyncEventApplierOps(serverSource) {
+  const dir = path.dirname(serverSource);
+  const ops = new Set();
+  const errors = [];
+  let entries = [];
+  try {
+    entries = fs.readdirSync(dir);
+  } catch (error) {
+    return { ops: [], errors: [] };
+  }
+  for (const entry of entries) {
+    if (!entry.endsWith('.java')) continue;
+    const filePath = path.join(dir, entry);
+    if (path.resolve(filePath) === path.resolve(serverSource)) continue;
+    let stat;
+    try {
+      stat = fs.statSync(filePath);
+    } catch (error) {
+      continue;
+    }
+    if (!stat.isFile()) continue;
+    const result = extractSyncEventApplierOps(readUtf8(filePath));
+    if (!result) continue;
+    if (result.error) {
+      errors.push(`${entry}: ${result.error}`);
+      continue;
+    }
+    for (const op of result.ops) ops.add(op);
+  }
+  return { ops: [...ops], errors };
+}
+
 function extractServerOps(serverSource) {
   if (!fs.existsSync(serverSource)) {
     return { ops: [], errors: [`EdgeSyncService.java not found at ${serverSource}`] };
@@ -673,7 +757,9 @@ function extractServerOps(serverSource) {
   for (const label of extractJavaSwitchCaseLabels(switchBody)) {
     ops.push(...extractQuotedConstants(label));
   }
-  return { ops: [...new Set(ops)].sort(), errors: [] };
+  const applierResult = collectSyncEventApplierOps(serverSource);
+  ops.push(...applierResult.ops);
+  return { ops: [...new Set(ops)].sort(), errors: applierResult.errors };
 }
 
 function diffSets(expected, actual) {
