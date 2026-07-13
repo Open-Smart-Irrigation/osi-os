@@ -10,7 +10,7 @@ const flowPaths = [
   path.join(root, 'conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/flows.json'),
 ];
 
-const thinRouterSource = String.raw`return osiJournal.handleHttpRequest({
+const legacyThinRouterSource = String.raw`return osiJournal.handleHttpRequest({
   msg: msg,
   Database: osiDb.Database,
   environment: {
@@ -19,6 +19,21 @@ const thinRouterSource = String.raw`return osiJournal.handleHttpRequest({
     deviceEui: env.get('DEVICE_EUI'),
     deviceEuiConfidence: env.get('DEVICE_EUI_CONFIDENCE'),
     deviceEuiSource: env.get('DEVICE_EUI_SOURCE')
+  },
+  warn: function(message) { node.warn(message); }
+});`;
+
+const thinRouterSource = String.raw`return osiJournal.handleHttpRequest({
+  msg: msg,
+  Database: osiDb.Database,
+  environment: {
+    authTokenSecret: env.get('AUTH_TOKEN_SECRET'),
+    jwtSecret: env.get('JWT_SECRET'),
+    deviceEui: env.get('DEVICE_EUI'),
+    deviceEuiConfidence: env.get('DEVICE_EUI_CONFIDENCE'),
+    deviceEuiSource: env.get('DEVICE_EUI_SOURCE'),
+    edgeBuildVersion: env.get('FIRMWARE_VERSION'),
+    edgeBuildCommit: env.get('FIRMWARE_COMMIT')
   },
   warn: function(message) { node.warn(message); }
 });`;
@@ -124,6 +139,12 @@ function stable(value) {
   return JSON.stringify(value);
 }
 
+function isExactLegacyRouter(existing, intended) {
+  if (!existing || existing.id !== 'journal-api-router-fn' ||
+      existing.func !== legacyThinRouterSource) return false;
+  return stable(Object.assign({}, existing, { func: thinRouterSource })) === stable(intended);
+}
+
 function assertUnique(flows) {
   const ids = new Set();
   const routes = new Set();
@@ -145,10 +166,12 @@ function migrate(buffer) {
   assertUnique(flows);
   const intended = intendedNodes();
   const byId = new Map(flows.filter((node) => node.id).map((node) => [node.id, node]));
+  let legacyRouter = null;
   for (const node of intended) {
     const existing = byId.get(node.id);
     if (existing && stable(existing) !== stable(node)) {
-      throw new Error('Refusing non-exact journal node collision: ' + node.id);
+      if (isExactLegacyRouter(existing, node)) legacyRouter = existing;
+      else throw new Error('Refusing non-exact journal node collision: ' + node.id);
     }
   }
   const routeKeys = new Set(routeDefinitions.map((route) => route[1] + ' ' + route[2]));
@@ -163,6 +186,10 @@ function migrate(buffer) {
     throw new Error('record-error-link-in is missing or malformed');
   }
   let changed = false;
+  if (legacyRouter) {
+    legacyRouter.func = thinRouterSource;
+    changed = true;
+  }
   if (!linkIn.links.includes('record-error-link-out-journal-api')) {
     linkIn.links.push('record-error-link-out-journal-api');
     changed = true;
@@ -199,4 +226,4 @@ for (const file of flowPaths) fs.writeFileSync(file, after);
 if (!fs.readFileSync(flowPaths[0]).equals(fs.readFileSync(flowPaths[1]))) {
   throw new Error('Maintained flows lost byte parity after migration');
 }
-process.stdout.write('migrate-flows-journal-routes: added exact Task 10 routes\n');
+process.stdout.write('migrate-flows-journal-routes: applied exact Task 10 routes\n');

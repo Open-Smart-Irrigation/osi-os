@@ -93,6 +93,12 @@ if (!journalRouter) {
     if (!/osiJournal\.handleHttpRequest/.test(journalRouter.func || '')) {
         failures.push('journal routes: router must delegate lifecycle and database close to osi-journal');
     }
+    if (!/edgeBuildVersion:\s*env\.get\('FIRMWARE_VERSION'\)/.test(journalRouter.func || '')) {
+        failures.push('journal routes: router must pass the available firmware version to research exports');
+    }
+    if (!/edgeBuildCommit:\s*env\.get\('FIRMWARE_COMMIT'\)/.test(journalRouter.func || '')) {
+        failures.push('journal routes: router must pass the available firmware commit to research exports');
+    }
 }
 
 assertWires('record-error-catch-journal-api', [['record-error-link-out-journal-api']], 'journal catch → error link out');

@@ -2,7 +2,7 @@
 
 const crypto = require('node:crypto');
 const fs = require('node:fs');
-const { buildAggregate } = require('./aggregate');
+const { aggregateHash, buildAggregate } = require('./aggregate');
 const { loadCatalog } = require('./catalog');
 
 const UUID = /^[0-9a-fA-F]{8}-?[0-9a-fA-F]{4}-?[0-9a-fA-F]{4}-?[0-9a-fA-F]{4}-?[0-9a-fA-F]{12}$/;
@@ -41,6 +41,33 @@ const MAPPING_ROLES = new Set([
   'data_type_definition', 'unit_of_measure',
 ]);
 const MAPPING_RELATIONS = new Set(['exact', 'close', 'broad', 'narrow', 'related']);
+const EXPORTER_VERSION = '1.0.0';
+const RESEARCH_SCHEMA_DESCRIPTOR = Object.freeze({
+  name: 'osi-journal-research',
+  version: 1,
+  entry_shape: 'journal_entry_aggregate_without_author_or_owner_identity',
+  value_shape: 'typed_long_form_with_entered_and_canonical_units',
+  missing_value_field: 'value_status',
+  package_members: ['entries.csv', 'values.csv', 'vocab_mappings.csv', 'manifest.json'],
+});
+const RESEARCH_SCHEMA_HASH = aggregateHash(RESEARCH_SCHEMA_DESCRIPTOR);
+const RESEARCH_METADATA_DESCRIPTOR = Object.freeze({
+  name: 'osi-journal-research-metadata',
+  version: 1,
+  sections: [
+    'coverage', 'selection', 'source', 'exporter', 'schema', 'context_generator',
+    'catalog', 'definitions', 'mapping_sources', 'unit_transformations',
+    'record_counts', 'provenance',
+  ],
+  unavailable_fact_shape: ['value', 'reason'],
+});
+const RESEARCH_METADATA_HASH = aggregateHash(RESEARCH_METADATA_DESCRIPTOR);
+
+function codePointCompare(left, right) {
+  const leftText = String(left);
+  const rightText = String(right);
+  return leftText < rightText ? -1 : (leftText > rightText ? 1 : 0);
+}
 
 function apiError(statusCode, code, message, details) {
   const error = new Error(message);
@@ -293,6 +320,16 @@ function normalizeEntryFilters(rawFilters) {
   filters.limit = Math.min(limit, 100);
   if (raw.cursor != null && raw.cursor !== '') filters.cursor = String(raw.cursor);
   return filters;
+}
+
+function canonicalExportSelection(rawFilters) {
+  const source = isObject(rawFilters) ? Object.assign({}, rawFilters) : {};
+  delete source.cursor;
+  delete source.limit;
+  const selection = normalizeEntryFilters(source);
+  delete selection.cursor;
+  delete selection.limit;
+  return selection;
 }
 
 function filterHash(filters) {
@@ -1379,9 +1416,7 @@ async function inReadSnapshot(db, executor) {
 }
 
 async function forEachEntryPage(db, rawFilters, principal, visitor) {
-  const filters = Object.assign({}, rawFilters || {}, { limit: 100 });
-  if (filters.status == null || filters.status === '') filters.status = 'final';
-  delete filters.cursor;
+  const filters = Object.assign({}, canonicalExportSelection(rawFilters), { limit: 50 });
   for (;;) {
     const page = await listEntries(db, filters, principal);
     await visitor(page.entries);
@@ -1391,25 +1426,119 @@ async function forEachEntryPage(db, rawFilters, principal, visitor) {
 }
 
 async function scanEntrySummary(db, rawFilters, principal) {
-  const summary = { entries: 0, values: 0, occurred_from: null, occurred_to: null };
+  const summary = {
+    entries: 0,
+    values: 0,
+    occurred_from: null,
+    occurred_to: null,
+    occurred_end_from: null,
+    occurred_end_to: null,
+    recorded_from: null,
+    recorded_to: null,
+  };
+  const plotUuids = new Set();
+  const zoneUuids = new Set();
+  const templateVersions = new Map();
+  const layoutVersions = new Map();
+  const unitRoles = new Map();
+  const contextGenerators = new Map();
+  let unpinnedContextEntries = 0;
+  let noContextEntries = 0;
+  const rememberVersion = function(target, code, version) {
+    const key = String(code) + '\u0000' + String(version);
+    if (!target.has(key)) target.set(key, { code: String(code), version: Number(version) });
+  };
+  const rememberUnit = function(code, role) {
+    if (!code) return;
+    if (!unitRoles.has(code)) unitRoles.set(code, new Set());
+    unitRoles.get(code).add(role);
+  };
   await forEachEntryPage(db, rawFilters, principal, async function(entries) {
     for (const entry of entries) {
       summary.entries += 1;
       summary.values += entry.values.length;
+      if (entry.plot_uuid) plotUuids.add(entry.plot_uuid);
+      if (entry.zone_uuid) zoneUuids.add(entry.zone_uuid);
+      rememberVersion(templateVersions, entry.template_code, entry.template_version);
+      rememberVersion(layoutVersions, entry.layout_code, entry.layout_version);
+      for (const value of entry.values) {
+        rememberUnit(value.entered_unit_code, 'entered');
+        rememberUnit(value.unit_code, 'canonical');
+      }
       if (summary.occurred_from == null || entry.occurred_start < summary.occurred_from) {
         summary.occurred_from = entry.occurred_start;
       }
       if (summary.occurred_to == null || entry.occurred_start > summary.occurred_to) {
         summary.occurred_to = entry.occurred_start;
       }
+      const effectiveEnd = entry.occurred_end || entry.occurred_start;
+      if (summary.occurred_end_from == null || effectiveEnd < summary.occurred_end_from) {
+        summary.occurred_end_from = effectiveEnd;
+      }
+      if (summary.occurred_end_to == null || effectiveEnd > summary.occurred_end_to) {
+        summary.occurred_end_to = effectiveEnd;
+      }
+      if (summary.recorded_from == null || entry.recorded_at < summary.recorded_from) {
+        summary.recorded_from = entry.recorded_at;
+      }
+      if (summary.recorded_to == null || entry.recorded_at > summary.recorded_to) {
+        summary.recorded_to = entry.recorded_at;
+      }
+      if (entry.context_json == null) {
+        noContextEntries += 1;
+      } else {
+        let context = null;
+        try {
+          context = typeof entry.context_json === 'string'
+            ? JSON.parse(entry.context_json)
+            : entry.context_json;
+        } catch (_) {
+          context = null;
+        }
+        const name = context && context.generator_name;
+        const version = context && Number(context.generator_version);
+        const contractHash = context && context.generator_contract_sha256;
+        if (typeof name === 'string' && name && Number.isInteger(version) && version > 0 &&
+            typeof contractHash === 'string' && /^[a-f0-9]{64}$/.test(contractHash)) {
+          const key = name + '\u0000' + String(version) + '\u0000' + contractHash;
+          const existing = contextGenerators.get(key);
+          if (existing) existing.entry_count += 1;
+          else {
+            contextGenerators.set(key, {
+              generator_name: name,
+              generator_version: version,
+              generator_contract_sha256: contractHash,
+              entry_count: 1,
+            });
+          }
+        } else {
+          unpinnedContextEntries += 1;
+        }
+      }
     }
   });
+  const versionSort = function(left, right) {
+    return codePointCompare(left.code, right.code) || left.version - right.version;
+  };
+  summary.plot_uuids = [...plotUuids].sort();
+  summary.zone_uuids = [...zoneUuids].sort();
+  summary.template_versions = [...templateVersions.values()].sort(versionSort);
+  summary.layout_versions = [...layoutVersions.values()].sort(versionSort);
+  summary.units = [...unitRoles.entries()].map(function(pair) {
+    return { unit_code: pair[0], roles: [...pair[1]].sort() };
+  }).sort(function(left, right) { return codePointCompare(left.unit_code, right.unit_code); });
+  summary.context_generators = [...contextGenerators.values()].sort(function(left, right) {
+    return codePointCompare(left.generator_name, right.generator_name) ||
+      left.generator_version - right.generator_version ||
+      codePointCompare(left.generator_contract_sha256, right.generator_contract_sha256);
+  });
+  summary.unpinned_context_entries = unpinnedContextEntries;
+  summary.no_context_entries = noContextEntries;
   return summary;
 }
 
 async function forEachWidePage(db, rawFilters, principal, visitor) {
-  const sourceFilters = Object.assign({}, rawFilters || {});
-  delete sourceFilters.cursor;
+  const sourceFilters = canonicalExportSelection(rawFilters);
   const query = await buildEntryWhere(db, sourceFilters, principal, false);
   const fixedColumns = [
     'entry_uuid', 'plot_uuid', 'zone_uuid', 'activity_code', 'template_code', 'template_version',
@@ -1547,9 +1676,8 @@ async function finishWritable(writable) {
 async function exportWideCsv(db, rawFilters, principal, writable) {
   const sink = optionalSink(writable);
   await inReadSnapshot(db, async function(snapshot) {
-    const discoveryFilters = Object.assign({}, rawFilters || {});
-    delete discoveryFilters.cursor;
-    const query = await buildEntryWhere(snapshot, discoveryFilters, principal, false);
+    const selection = canonicalExportSelection(rawFilters);
+    const query = await buildEntryWhere(snapshot, selection, principal, false);
     const cells = await dbAll(
       snapshot,
       'SELECT DISTINCT v.group_index,v.attribute_code FROM journal_entries AS e ' +
@@ -1570,7 +1698,7 @@ async function exportWideCsv(db, rawFilters, principal, writable) {
     ];
     const columns = fixed.concat(dynamic);
     await writeChunk(sink.writable, columns.map(csvCell).join(',') + '\r\n');
-    await forEachWidePage(snapshot, rawFilters, principal, async function(entries) {
+    await forEachWidePage(snapshot, selection, principal, async function(entries) {
       let chunk = '';
       for (const entry of entries) {
         const row = {};
@@ -1616,46 +1744,217 @@ function valueRows(entries) {
   });
 }
 
-function exportMetadata(summary, principal, catalog, rawFilters) {
+function availableFact(rawValue, unavailableReason) {
+  const value = rawValue == null ? '' : String(rawValue).trim();
+  return value
+    ? { value, reason: null }
+    : { value: null, reason: unavailableReason };
+}
+
+function definitionMetadata(uses, index, unavailableReason) {
+  return uses.map(function(use) {
+    const versions = index.get(use.code);
+    const row = versions && versions.get(use.version);
+    const raw = row && typeof row.definition_json === 'string' ? row.definition_json : null;
+    return {
+      code: use.code,
+      version: use.version,
+      hash_scope: 'raw_definition_json_utf8',
+      definition_sha256: raw == null
+        ? null
+        : crypto.createHash('sha256').update(raw, 'utf8').digest('hex'),
+      reason: raw == null ? unavailableReason : null,
+    };
+  });
+}
+
+function mappingSourceMetadata(mappings) {
+  const sources = new Map();
+  for (const mapping of mappings || []) {
+    const sourceUri = typeof mapping.source_uri === 'string' && mapping.source_uri.trim()
+      ? mapping.source_uri.trim()
+      : null;
+    const key = String(mapping.scheme_uri || '') + '\u0000' + String(mapping.scheme_version || '') +
+      '\u0000' + String(sourceUri || '');
+    if (!sources.has(key)) {
+      sources.set(key, {
+        scheme_uri: nullable(mapping.scheme_uri),
+        scheme_version: nullable(mapping.scheme_version),
+        source_uri: availableFact(sourceUri, 'mapping_source_uri_not_recorded'),
+        license: { value: null, reason: 'mapping_license_not_recorded' },
+        mapping_count: 0,
+      });
+    }
+    sources.get(key).mapping_count += 1;
+  }
+  return [...sources.values()].sort(function(left, right) {
+    return codePointCompare(left.scheme_uri || '', right.scheme_uri || '') ||
+      codePointCompare(left.scheme_version || '', right.scheme_version || '') ||
+      codePointCompare(left.source_uri.value || '', right.source_uri.value || '');
+  });
+}
+
+function unitTransformationMetadata(units, catalog) {
+  return units.map(function(use) {
+    const row = catalog.vocabByCode.get(use.unit_code);
+    if (!row || row.kind !== 'unit') {
+      return {
+        unit_code: use.unit_code,
+        roles: use.roles,
+        transformation: null,
+        hash_scope: 'raw_constraints_json_utf8',
+        definition_sha256: null,
+        reason: 'unit_definition_not_installed',
+      };
+    }
+    const raw = typeof row.constraints_json === 'string' ? row.constraints_json : null;
+    const constraints = row.constraints && typeof row.constraints === 'object' ? row.constraints : {};
+    const toCanonical = constraints.to_canonical && typeof constraints.to_canonical === 'object'
+      ? constraints.to_canonical
+      : null;
+    return {
+      unit_code: use.unit_code,
+      roles: use.roles,
+      transformation: {
+        quantity_kind: nullable(row.quantity_kind),
+        basis: nullable(row.basis),
+        dimension: nullable(constraints.dimension),
+        to_canonical: toCanonical,
+        formula: toCanonical ? 'canonical_value = entered_value * scale + offset' : null,
+      },
+      hash_scope: 'raw_constraints_json_utf8',
+      definition_sha256: raw == null
+        ? null
+        : crypto.createHash('sha256').update(raw, 'utf8').digest('hex'),
+      reason: toCanonical ? null : 'unit_transformation_not_recorded',
+    };
+  });
+}
+
+function frozenContextGeneratorMetadata(summary) {
+  const unpinnedCount = Number(summary.unpinned_context_entries || 0);
+  const noContextCount = Number(summary.no_context_entries || 0);
   return {
-    dataset_uuid: crypto.randomUUID(),
-    export_uuid: crypto.randomUUID(),
-    generated_at: new Date().toISOString(),
-    coverage: {
-      occurred_from: summary.occurred_from,
-      occurred_to: summary.occurred_to,
+    hash_scope: 'frozen_context_json_generator_contract',
+    pinned: summary.context_generators || [],
+    per_capture_binary_hash: {
+      value: null,
+      reason: 'context_generator_binary_hash_not_recorded_at_capture',
     },
-    source: {
-      system: 'OSI OS edge',
-      gateway_device_eui: principal.gateway_device_eui,
+    unpinned_entries: {
+      count: unpinnedCount,
+      reason: unpinnedCount ? 'context_generator_pin_not_recorded' : null,
     },
-    exporter: { name: 'osi-journal', contract_version: 1 },
-    catalog: { version: Number(catalog.version), hash: catalog.hash },
-    filters: normalizeEntryFilters(Object.assign({}, rawFilters || {}, { limit: 100 })),
+    no_context_entries: {
+      count: noContextCount,
+      reason: noContextCount ? 'context_snapshot_not_recorded' : null,
+    },
   };
 }
 
-async function exportJson(db, rawFilters, principal, writable) {
+function exportMetadata(summary, principal, catalog, selection, environment, generatedAt) {
+  environment = environment || {};
+  return {
+    metadata_contract: {
+      name: RESEARCH_METADATA_DESCRIPTOR.name,
+      version: RESEARCH_METADATA_DESCRIPTOR.version,
+      hash_scope: 'research_metadata_semantic_descriptor_v1',
+      hash_sha256: RESEARCH_METADATA_HASH,
+    },
+    dataset_uuid: crypto.randomUUID(),
+    export_uuid: crypto.randomUUID(),
+    generated_at: generatedAt || new Date().toISOString(),
+    coverage: {
+      occurred_from: summary.occurred_from,
+      occurred_to: summary.occurred_to,
+      occurred_end_from: summary.occurred_end_from,
+      occurred_end_to: summary.occurred_end_to,
+      occurred_end_semantics: 'occurred_end_or_occurred_start_for_instantaneous_entries',
+      recorded_from: summary.recorded_from,
+      recorded_to: summary.recorded_to,
+    },
+    selection: Object.assign({}, selection),
+    source: {
+      system: 'OSI OS edge',
+      authority: 'edge-canonical',
+      gateway_device_eui: principal.gateway_device_eui,
+      farm_identifier: { value: null, reason: 'farm_identifier_not_recorded' },
+      zone_uuids: summary.zone_uuids,
+      plot_uuids: summary.plot_uuids,
+    },
+    exporter: {
+      name: 'osi-journal',
+      version: { value: EXPORTER_VERSION, reason: null },
+      edge_build_version: availableFact(
+        environment.edgeBuildVersion,
+        'edge_build_version_unavailable'
+      ),
+      commit: availableFact(environment.edgeBuildCommit, 'edge_build_commit_unavailable'),
+    },
+    schema: {
+      name: RESEARCH_SCHEMA_DESCRIPTOR.name,
+      version: RESEARCH_SCHEMA_DESCRIPTOR.version,
+      hash_scope: 'logical_research_schema_descriptor_v1',
+      hash_sha256: RESEARCH_SCHEMA_HASH,
+    },
+    context_generator: frozenContextGeneratorMetadata(summary),
+    catalog: {
+      hash_scope: 'core_catalog_state',
+      core_version: Number(catalog.version),
+      core_hash: catalog.hash,
+      scoped_effective_hash: {
+        value: null,
+        reason: 'scoped_catalog_hash_not_materialized',
+      },
+    },
+    definitions: {
+      templates: definitionMetadata(
+        summary.template_versions,
+        catalog.templates,
+        'template_definition_not_installed'
+      ),
+      layouts: definitionMetadata(
+        summary.layout_versions,
+        catalog.layouts,
+        'layout_definition_not_installed'
+      ),
+    },
+    mapping_sources: mappingSourceMetadata(catalog.mappings),
+    unit_transformations: unitTransformationMetadata(summary.units, catalog),
+    record_counts: {
+      entries: summary.entries,
+      values: summary.values,
+      vocab_mappings: (catalog.mappings || []).length,
+    },
+    provenance: {
+      author_identity_included: false,
+      owner_identity_included: false,
+      context_snapshot_semantics: 'frozen-at-entry-finalization',
+      missing_values: 'value_status distinguishes not_observed, not_applicable, and below_detection',
+    },
+  };
+}
+
+async function exportJson(db, rawFilters, principal, writable, environment) {
   const sink = optionalSink(writable);
   await inReadSnapshot(db, async function(snapshot) {
-    const summary = await scanEntrySummary(snapshot, rawFilters, principal);
+    const selection = canonicalExportSelection(rawFilters);
+    const summary = await scanEntrySummary(snapshot, selection, principal);
     const catalog = await loadCatalog(snapshot, principal);
-    const metadata = exportMetadata(summary, principal, catalog, rawFilters);
-    const prefix = Object.assign({}, metadata, {
+    const metadata = exportMetadata(summary, principal, catalog, selection, environment);
+    const prefix = {
       schema: 'osi-journal-research-v1',
-      provenance: {
-        author_identity_included: false,
-        owner_identity_included: false,
-        context_snapshot_semantics: 'frozen-at-entry-finalization',
-        missing_values: 'value_status distinguishes not_observed, not_applicable, and below_detection',
-      },
-    });
+      research_metadata: metadata,
+    };
     const prefixText = JSON.stringify(prefix);
     await writeChunk(sink.writable, prefixText.slice(0, -1) + ',"entries":[');
     const entriesHash = crypto.createHash('sha256');
+    const valuesHash = crypto.createHash('sha256');
     entriesHash.update('[');
+    valuesHash.update('[');
     let first = true;
-    await forEachEntryPage(snapshot, rawFilters, principal, async function(entries) {
+    let firstValue = true;
+    await forEachEntryPage(snapshot, selection, principal, async function(entries) {
       let chunk = '';
       for (const entry of entries) {
         const serialized = JSON.stringify(researchEntry(entry));
@@ -1663,15 +1962,24 @@ async function exportJson(db, rawFilters, principal, writable) {
         first = false;
         chunk += separator + serialized;
         entriesHash.update(separator + serialized);
+        for (const value of valueRows([entry])) {
+          const valueSerialized = JSON.stringify(value);
+          const valueSeparator = firstValue ? '' : ',';
+          firstValue = false;
+          valuesHash.update(valueSeparator + valueSerialized);
+        }
       }
       if (chunk) await writeChunk(sink.writable, chunk);
     });
     entriesHash.update(']');
-    await writeChunk(sink.writable, '],"record_counts":' + JSON.stringify({
-      entries: summary.entries,
-      values: summary.values,
-    }) + ',"checksums":' + JSON.stringify({
+    valuesHash.update(']');
+    await writeChunk(sink.writable, '],"record_counts":' + JSON.stringify(metadata.record_counts) +
+      ',"checksums":' + JSON.stringify({
+      research_metadata_sha256: crypto.createHash('sha256')
+        .update(JSON.stringify(metadata), 'utf8')
+        .digest('hex'),
       entries_sha256: entriesHash.digest('hex'),
+      values_sha256: valuesHash.digest('hex'),
     }) + '}');
     await finishWritable(sink.writable);
   });
@@ -1790,10 +2098,11 @@ function zipStream(writable, generatedAt) {
   return { startMember, finish };
 }
 
-async function exportResearchPackage(db, rawFilters, principal, writable) {
+async function exportResearchPackage(db, rawFilters, principal, writable, environment) {
   const sink = optionalSink(writable);
   await inReadSnapshot(db, async function(snapshot) {
-    const summary = await scanEntrySummary(snapshot, rawFilters, principal);
+    const selection = canonicalExportSelection(rawFilters);
+    const summary = await scanEntrySummary(snapshot, selection, principal);
     const catalog = await loadCatalog(snapshot, principal);
     const entryColumns = [
       'contract_version', 'entry_uuid', 'plot_uuid', 'zone_uuid', 'device_eui',
@@ -1830,14 +2139,14 @@ async function exportResearchPackage(db, rawFilters, principal, writable) {
 
     const entriesMember = await writer.startMember('entries.csv');
     await entriesMember.write(entryColumns.map(csvCell).join(',') + '\r\n');
-    await forEachEntryPage(snapshot, rawFilters, principal, async function(entries) {
+    await forEachEntryPage(snapshot, selection, principal, async function(entries) {
       await writeRows(entriesMember, entryColumns, entryRows(entries));
     });
     dataMembers.push(await entriesMember.finish());
 
     const valuesMember = await writer.startMember('values.csv');
     await valuesMember.write(valueColumns.map(csvCell).join(',') + '\r\n');
-    await forEachEntryPage(snapshot, rawFilters, principal, async function(entries) {
+    await forEachEntryPage(snapshot, selection, principal, async function(entries) {
       await writeRows(valuesMember, valueColumns, valueRows(entries));
     });
     dataMembers.push(await valuesMember.finish());
@@ -1847,20 +2156,26 @@ async function exportResearchPackage(db, rawFilters, principal, writable) {
     await writeRows(mappingsMember, mappingColumns, catalog.mappings || []);
     dataMembers.push(await mappingsMember.finish());
 
-    const metadata = exportMetadata(summary, principal, catalog, rawFilters);
-    metadata.generated_at = generatedAt.toISOString();
-    const manifest = Object.assign({}, metadata, {
+    const metadata = exportMetadata(
+      summary,
+      principal,
+      catalog,
+      selection,
+      environment,
+      generatedAt.toISOString()
+    );
+    const manifest = {
       schema: 'osi-journal-research-package-v1',
-      author_identity_included: false,
-      owner_identity_included: false,
+      research_metadata: metadata,
       members: dataMembers,
-      record_counts: {
-        entries: summary.entries,
-        values: summary.values,
-        vocab_mappings: (catalog.mappings || []).length,
+      record_counts: metadata.record_counts,
+      checksums: {
+        research_metadata_sha256: crypto.createHash('sha256')
+          .update(JSON.stringify(metadata), 'utf8')
+          .digest('hex'),
       },
       missing_value_semantics: 'See values.csv value_status; blank values are not assumed observed.',
-    });
+    };
     const manifestMember = await writer.startMember('manifest.json');
     await manifestMember.write(JSON.stringify(manifest));
     await manifestMember.finish();
@@ -2050,12 +2365,24 @@ async function handleHttpRequest(options) {
     }
     if (method === 'GET' && requestPath === '/api/journal/export.package') {
       streaming = true;
-      await exportResearchPackage(db, query, principal, streamResponse(msg, 'application/zip', '.zip'));
+      await exportResearchPackage(
+        db,
+        query,
+        principal,
+        streamResponse(msg, 'application/zip', '.zip'),
+        environment
+      );
       return null;
     }
     if (method === 'GET' && requestPath === '/api/journal/export.json') {
       streaming = true;
-      await exportJson(db, query, principal, streamResponse(msg, 'application/json; charset=utf-8', '.json'));
+      await exportJson(
+        db,
+        query,
+        principal,
+        streamResponse(msg, 'application/json; charset=utf-8', '.json'),
+        environment
+      );
       return null;
     }
     if (method === 'GET' && requestPath === '/api/journal/export.adapt.json') {

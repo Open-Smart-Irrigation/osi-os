@@ -11339,7 +11339,7 @@
     "type": "function",
     "z": "journal-api-tab",
     "name": "Journal API Router",
-    "func": "return osiJournal.handleHttpRequest({\n  msg: msg,\n  Database: osiDb.Database,\n  environment: {\n    authTokenSecret: env.get('AUTH_TOKEN_SECRET'),\n    jwtSecret: env.get('JWT_SECRET'),\n    deviceEui: env.get('DEVICE_EUI'),\n    deviceEuiConfidence: env.get('DEVICE_EUI_CONFIDENCE'),\n    deviceEuiSource: env.get('DEVICE_EUI_SOURCE')\n  },\n  warn: function(message) { node.warn(message); }\n});",
+    "func": "return osiJournal.handleHttpRequest({\n  msg: msg,\n  Database: osiDb.Database,\n  environment: {\n    authTokenSecret: env.get('AUTH_TOKEN_SECRET'),\n    jwtSecret: env.get('JWT_SECRET'),\n    deviceEui: env.get('DEVICE_EUI'),\n    deviceEuiConfidence: env.get('DEVICE_EUI_CONFIDENCE'),\n    deviceEuiSource: env.get('DEVICE_EUI_SOURCE'),\n    edgeBuildVersion: env.get('FIRMWARE_VERSION'),\n    edgeBuildCommit: env.get('FIRMWARE_COMMIT')\n  },\n  warn: function(message) { node.warn(message); }\n});",
     "outputs": 1,
     "noerr": 0,
     "initialize": "",

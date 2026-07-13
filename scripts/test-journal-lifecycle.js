@@ -463,6 +463,9 @@ test('zone finalization succeeds with explicit no-data context records', async (
   const context = JSON.parse(entry.context_json);
 
   assert.equal(context.schema_version, 1);
+  assert.equal(context.generator_name, 'osi-journal-context');
+  assert.equal(context.generator_version, 1);
+  assert.match(context.generator_contract_sha256, /^[a-f0-9]{64}$/);
   assert.deepEqual(Object.keys(context.channels), CONTEXT_CHANNELS);
   for (const channel of CONTEXT_CHANNELS) {
     assert.deepEqual(Object.keys(context.channels[channel]), CONTEXT_RECORD_FIELDS, channel);

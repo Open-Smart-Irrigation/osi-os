@@ -1,5 +1,6 @@
 'use strict';
 
+const { aggregateHash } = require('./aggregate');
 const { aggregateRows } = require('../osi-history-helper');
 
 const DAY_SECONDS = 24 * 60 * 60;
@@ -63,6 +64,30 @@ const CHANNEL_ORDER = Object.freeze([
   'wind_gust',
   'valve_state',
 ]);
+
+const CONTEXT_GENERATOR_SEMANTIC_DESCRIPTOR = Object.freeze({
+  name: 'osi-journal-context',
+  version: 1,
+  point_snapshot_reference: 'occurred_start',
+  point_lookback_seconds: DAY_SECONDS,
+  duration_snapshot_reference: 'occurred_end',
+  duration_semantics: 'end_snapshot_plus_operation_window',
+  channels: CHANNEL_ORDER,
+});
+const CONTEXT_GENERATOR_SEMANTIC_HASH = aggregateHash(CONTEXT_GENERATOR_SEMANTIC_DESCRIPTOR);
+
+function contextGeneratorMetadata() {
+  return {
+    name: CONTEXT_GENERATOR_SEMANTIC_DESCRIPTOR.name,
+    version: CONTEXT_GENERATOR_SEMANTIC_DESCRIPTOR.version,
+    hash_scope: 'context_generator_semantic_descriptor_v1',
+    hash_sha256: CONTEXT_GENERATOR_SEMANTIC_HASH,
+    per_capture_binary_hash: {
+      value: null,
+      reason: 'context_generator_binary_hash_not_recorded_at_capture',
+    },
+  };
+}
 
 function numericPoint(key, field, unit) {
   return {
@@ -722,8 +747,12 @@ async function buildContext(db, zoneRow, occurredStartUtc, occurredEndUtc) {
       ),
     };
   }
+  const generator = contextGeneratorMetadata();
   return {
     schema_version: 1,
+    generator_name: generator.name,
+    generator_version: generator.version,
+    generator_contract_sha256: generator.hash_sha256,
     plot_uuid: zoneRow.plot_uuid || null,
     zone_uuid: zone.zone_uuid,
     subject_device: subjectDevice,
@@ -736,4 +765,5 @@ async function buildContext(db, zoneRow, occurredStartUtc, occurredEndUtc) {
 
 module.exports = {
   buildContext,
+  contextGeneratorMetadata,
 };

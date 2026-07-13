@@ -35,11 +35,26 @@ class TestDb {
     this.native.exec(SEED);
     this.closeCalls = 0;
     this.snapshotClosed = 0;
+    this.valueBatchSizes = [];
     nativeDatabases.push(this.native);
   }
 
   prepare(sql) {
-    return this.native.prepare(sql);
+    const statement = this.native.prepare(sql);
+    if (!/FROM journal_entry_values WHERE entry_uuid IN/.test(sql)) return statement;
+    const testDb = this;
+    return {
+      all(...params) {
+        testDb.valueBatchSizes.push(params.length);
+        return statement.all(...params);
+      },
+      get(...params) {
+        return statement.get(...params);
+      },
+      run(...params) {
+        return statement.run(...params);
+      },
+    };
   }
 
   get(sql, params) {
@@ -47,6 +62,9 @@ class TestDb {
   }
 
   all(sql, params) {
+    if (/FROM journal_entry_values WHERE entry_uuid IN/.test(sql)) {
+      this.valueBatchSizes.push((params || []).length);
+    }
     return Promise.resolve(this.native.prepare(sql).all(...(params || [])));
   }
 
@@ -758,11 +776,14 @@ async function createPagedEntries(name, note, count) {
   );
   for (let index = 0; index < entryUuids.length; index += 1) {
     const plotUuid = '61000000-0000-4000-8000-' + String(index + 1).padStart(12, '0');
-    await journal.upsertPlot(db, plotInput(plotUuid, 'page-' + index), principal());
+    await journal.upsertPlot(db, plotInput(plotUuid, 'page-' + index, {
+      zone_uuid: index === 0 ? ZONE_UUID : null,
+    }), principal());
     await journal.saveEntry(
       db,
       entryInput(entryUuids[index], plotUuid, '2026-07-13T09:00:00', {
         season_crop: 'barley',
+        occurred_end_local: index === 0 ? '2026-07-13T09:30:00' : null,
         note: index === 0 && note ? note : 'Page ' + index,
       }),
       principal(),
@@ -846,25 +867,187 @@ class BackpressureSink extends EventEmitter {
 
 test('research exports are loss-aware, formula-safe, incremental, and ZIP-manifest complete', async () => {
   const { db } = await createPagedEntries('exports', '=SUM(1,2)', 101);
+  db.prepare('UPDATE journal_entries SET context_json=? WHERE entry_uuid=?').run(
+    '{"schema_version":1,"channels":{}}',
+    '60000000-0000-4000-8000-000000000002'
+  );
+  db.prepare(
+    'UPDATE journal_entry_values SET entered_value_num=?,entered_unit_code=?,value_num=?,unit_code=? ' +
+      'WHERE entry_uuid=? AND attribute_code=?'
+  ).run(
+    1,
+    'unit.hour_duration',
+    60,
+    'unit.min_duration',
+    '60000000-0000-4000-8000-000000000002',
+    'attr.irrigation_depth'
+  );
+  db.valueBatchSizes = [];
   const csv = await journal.exportWideCsv(db, { status: 'final' }, principal());
   assert.match(csv, /\r\n/);
   assert.match(csv, /"'=SUM\(1,2\)"/);
   assert.ok(!/(^|[^\r])\n/.test(csv.replace(/\r\n/g, '')), 'CSV has RFC4180 CRLF only');
 
-  const jsonText = await journal.exportJson(db, { status: 'final' }, principal());
+  const exportSelection = { status: 'final', limit: 'n/a', cursor: 'ignored-export-cursor' };
+  const build = {
+    edgeBuildVersion: '2026.07-test',
+    edgeBuildCommit: '0123456789abcdef0123456789abcdef01234567',
+  };
+  const jsonText = await journal.exportJson(db, exportSelection, principal(), null, build);
   const json = JSON.parse(jsonText);
   assert.equal(json.record_counts.entries, 101);
-  assert.equal(json.provenance.author_identity_included, false);
-  assert.equal(json.provenance.owner_identity_included, false);
+  const metadata = json.research_metadata;
+  assert.match(metadata.dataset_uuid, /^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/);
+  assert.match(metadata.export_uuid, /^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/);
+  assert.ok(Number.isFinite(Date.parse(metadata.generated_at)));
+  assert.deepEqual(metadata.selection, { status: 'final' });
+  assert.equal(metadata.source.authority, 'edge-canonical');
+  assert.equal(metadata.source.gateway_device_eui, GATEWAY_EUI);
+  assert.deepEqual(metadata.source.farm_identifier, {
+    value: null,
+    reason: 'farm_identifier_not_recorded',
+  });
+  assert.deepEqual(metadata.source.zone_uuids, [ZONE_UUID]);
+  assert.equal(metadata.source.plot_uuids.length, 101);
+  const effectiveEnds = json.entries.map((entry) => entry.occurred_end || entry.occurred_start).sort();
+  assert.equal(metadata.coverage.occurred_end_from, effectiveEnds[0]);
+  assert.equal(metadata.coverage.occurred_end_to, effectiveEnds[effectiveEnds.length - 1]);
+  assert.equal(
+    metadata.coverage.occurred_end_semantics,
+    'occurred_end_or_occurred_start_for_instantaneous_entries'
+  );
+  assert.ok(metadata.coverage.recorded_from);
+  assert.ok(metadata.coverage.recorded_to);
+  assert.deepEqual(metadata.exporter.version, { value: '1.0.0', reason: null });
+  assert.deepEqual(metadata.exporter.edge_build_version, {
+    value: build.edgeBuildVersion,
+    reason: null,
+  });
+  assert.deepEqual(metadata.exporter.commit, {
+    value: build.edgeBuildCommit,
+    reason: null,
+  });
+  assert.equal(metadata.schema.version, 1);
+  assert.equal(metadata.schema.hash_scope, 'logical_research_schema_descriptor_v1');
+  assert.match(metadata.schema.hash_sha256, /^[a-f0-9]{64}$/);
+  assert.deepEqual(metadata.catalog, {
+    hash_scope: 'core_catalog_state',
+    core_version: 1,
+    core_hash: metadata.catalog.core_hash,
+    scoped_effective_hash: {
+      value: null,
+      reason: 'scoped_catalog_hash_not_materialized',
+    },
+  });
+  assert.match(metadata.catalog.core_hash, /^[a-f0-9]{64}$/);
+  assert.equal(metadata.context_generator.hash_scope, 'frozen_context_json_generator_contract');
+  assert.equal(metadata.context_generator.pinned.length, 1);
+  assert.equal(metadata.context_generator.pinned[0].generator_name, 'osi-journal-context');
+  assert.equal(metadata.context_generator.pinned[0].generator_version, 1);
+  assert.match(metadata.context_generator.pinned[0].generator_contract_sha256, /^[a-f0-9]{64}$/);
+  assert.equal(metadata.context_generator.pinned[0].entry_count, 1);
+  assert.deepEqual(metadata.context_generator.per_capture_binary_hash, {
+    value: null,
+    reason: 'context_generator_binary_hash_not_recorded_at_capture',
+  });
+  assert.deepEqual(metadata.context_generator.unpinned_entries, {
+    count: 1,
+    reason: 'context_generator_pin_not_recorded',
+  });
+  assert.deepEqual(metadata.context_generator.no_context_entries, {
+    count: 99,
+    reason: 'context_snapshot_not_recorded',
+  });
+  assert.deepEqual(metadata.record_counts, {
+    entries: 101,
+    values: 101,
+    vocab_mappings: 7,
+  });
+  const template = metadata.definitions.templates.find((item) =>
+    item.code === 'farmer_quick' && item.version === 1
+  );
+  const templateRaw = db.prepare(
+    'SELECT definition_json FROM journal_templates WHERE code=? AND version=?'
+  ).get('farmer_quick', 1).definition_json;
+  assert.equal(template.hash_scope, 'raw_definition_json_utf8');
+  assert.equal(template.definition_sha256, crypto.createHash('sha256').update(templateRaw).digest('hex'));
+  const layout = metadata.definitions.layouts.find((item) =>
+    item.code === 'open_field' && item.version === 1
+  );
+  const layoutRaw = db.prepare(
+    'SELECT definition_json FROM journal_layouts WHERE code=? AND version=?'
+  ).get('open_field', 1).definition_json;
+  assert.equal(layout.hash_scope, 'raw_definition_json_utf8');
+  assert.equal(layout.definition_sha256, crypto.createHash('sha256').update(layoutRaw).digest('hex'));
+  const adaptSource = metadata.mapping_sources.find((source) =>
+    source.scheme_uri === 'https://github.com/ADAPT/Standard'
+  );
+  assert.equal(adaptSource.source_uri.value,
+    'https://github.com/ADAPT/Standard/blob/1.0.0/adapt-data-type-definitions.json');
+  assert.deepEqual(adaptSource.license, {
+    value: null,
+    reason: 'mapping_license_not_recorded',
+  });
+  const millimeter = metadata.unit_transformations.find((unit) => unit.unit_code === 'unit.mm_water');
+  assert.equal(millimeter.transformation.to_canonical.unit_code, 'unit.mm_water');
+  assert.equal(millimeter.transformation.to_canonical.scale, 1);
+  assert.equal(millimeter.hash_scope, 'raw_constraints_json_utf8');
+  assert.match(millimeter.definition_sha256, /^[a-f0-9]{64}$/);
+  const hour = metadata.unit_transformations.find((unit) => unit.unit_code === 'unit.hour_duration');
+  const hourRaw = db.prepare('SELECT constraints_json FROM journal_vocab WHERE code=?')
+    .get('unit.hour_duration').constraints_json;
+  assert.equal(hour.transformation.to_canonical.unit_code, 'unit.min_duration');
+  assert.equal(hour.transformation.to_canonical.scale, 60);
+  assert.equal(hour.transformation.to_canonical.offset, 0);
+  assert.equal(hour.transformation.formula, 'canonical_value = entered_value * scale + offset');
+  assert.equal(hour.definition_sha256, crypto.createHash('sha256').update(hourRaw).digest('hex'));
+  assert.equal(metadata.provenance.author_identity_included, false);
+  assert.equal(metadata.provenance.owner_identity_included, false);
+  assert.equal(
+    json.checksums.research_metadata_sha256,
+    crypto.createHash('sha256').update(JSON.stringify(metadata)).digest('hex')
+  );
+  assert.match(json.checksums.entries_sha256, /^[a-f0-9]{64}$/);
+  assert.match(json.checksums.values_sha256, /^[a-f0-9]{64}$/);
   assert.ok(json.entries.every((entry) => !('author_label' in entry) &&
     !('author_principal_uuid' in entry) && !('owner_user_uuid' in entry)));
 
-  const zip = await journal.exportResearchPackage(db, { status: 'final' }, principal());
+  const zip = await journal.exportResearchPackage(db, exportSelection, principal(), null, build);
   const members = parseStoredZip(zip);
   assert.deepEqual(members.map((member) => member.name), [
     'entries.csv', 'values.csv', 'vocab_mappings.csv', 'manifest.json',
   ]);
   const manifest = JSON.parse(members[3].data.toString('utf8'));
+  assert.deepEqual(
+    Object.keys(manifest.research_metadata).sort(),
+    Object.keys(metadata).sort()
+  );
+  assert.match(
+    manifest.research_metadata.dataset_uuid,
+    /^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/
+  );
+  assert.match(
+    manifest.research_metadata.export_uuid,
+    /^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/
+  );
+  assert.ok(Number.isFinite(Date.parse(manifest.research_metadata.generated_at)));
+  assert.deepEqual(manifest.research_metadata.metadata_contract, metadata.metadata_contract);
+  assert.deepEqual(manifest.research_metadata.coverage, metadata.coverage);
+  assert.deepEqual(manifest.research_metadata.selection, metadata.selection);
+  assert.deepEqual(manifest.research_metadata.source, metadata.source);
+  assert.deepEqual(manifest.research_metadata.exporter, metadata.exporter);
+  assert.deepEqual(manifest.research_metadata.schema, metadata.schema);
+  assert.deepEqual(manifest.research_metadata.context_generator, metadata.context_generator);
+  assert.deepEqual(manifest.research_metadata.catalog, metadata.catalog);
+  assert.deepEqual(manifest.research_metadata.definitions, metadata.definitions);
+  assert.deepEqual(manifest.research_metadata.mapping_sources, metadata.mapping_sources);
+  assert.deepEqual(manifest.research_metadata.unit_transformations, metadata.unit_transformations);
+  assert.deepEqual(manifest.research_metadata.record_counts, metadata.record_counts);
+  assert.deepEqual(manifest.research_metadata.provenance, metadata.provenance);
+  assert.equal(
+    manifest.checksums.research_metadata_sha256,
+    crypto.createHash('sha256').update(JSON.stringify(manifest.research_metadata)).digest('hex')
+  );
   assert.equal(manifest.members.length, 3);
   for (let index = 0; index < 3; index += 1) {
     assert.equal(manifest.members[index].name, members[index].name);
@@ -872,6 +1055,23 @@ test('research exports are loss-aware, formula-safe, incremental, and ZIP-manife
     assert.equal(manifest.members[index].sha256, crypto.createHash('sha256').update(members[index].data).digest('hex'));
   }
   assert.doesNotMatch(members[0].data.toString('utf8').split('\r\n')[0], /author|owner_user_uuid/);
+
+  const unavailable = JSON.parse(await journal.exportJson(
+    db,
+    { entry_uuid: '60000000-0000-4000-8000-000000000001' },
+    principal()
+  )).research_metadata.exporter;
+  assert.deepEqual(unavailable.edge_build_version, {
+    value: null,
+    reason: 'edge_build_version_unavailable',
+  });
+  assert.deepEqual(unavailable.commit, {
+    value: null,
+    reason: 'edge_build_commit_unavailable',
+  });
+  assert.ok(db.valueBatchSizes.length > 0);
+  assert.ok(db.valueBatchSizes.every((size) => size <= 50), 'value lookups stay within 50-entry pages');
+  assert.ok(db.valueBatchSizes.includes(50), 'export crossed a full 50-entry value page');
 
   const sink = new BackpressureSink('drain');
   const result = await journal.exportJson(db, { status: 'final' }, principal(), sink);
