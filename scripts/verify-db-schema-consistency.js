@@ -661,19 +661,28 @@ const requiredTriggerSqlFragments = {
     'coalesce(new.sync_version,0) <> coalesce(old.sync_version,0)',
     "'sync_version', new.sync_version ), new.sync_version,",
   ],
+  // Issue 16 Pattern B (migration 0017): the aggregate_key zone component
+  // must fall back to 'zone-id:' || NEW.zone_id when the zone has no
+  // zone_uuid yet (boot-rewrite form adopted by the seed) — an empty-string
+  // fallback collides aggregate keys across different uuid-less zones and
+  // corrupts the cloud's per-resource watermark semantics.
   trg_dp_zone_recs_outbox_ai: [
     "'sync_version', new.sync_version ), new.sync_version,",
+    "'zone-id:' || new.zone_id) || '|' ||",
   ],
   trg_dp_zone_recs_outbox_au: [
     'coalesce(new.sync_version,0) <> coalesce(old.sync_version,0)',
     "'sync_version', new.sync_version ), new.sync_version,",
+    "'zone-id:' || new.zone_id) || '|' ||",
   ],
   trg_dp_zone_env_outbox_ai: [
     "'sync_version', new.sync_version ), new.sync_version,",
+    "'zone-id:' || new.zone_id) || '|' ||",
   ],
   trg_dp_zone_env_outbox_au: [
     'coalesce(new.sync_version,0) <> coalesce(old.sync_version,0)',
     "'sync_version', new.sync_version ), new.sync_version,",
+    "'zone-id:' || new.zone_id) || '|' ||",
   ],
   trg_sync_device_data_dirty_au: [
     "select gateway_device_eui from devices where deveui = new.deveui",

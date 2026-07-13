@@ -2077,7 +2077,7 @@ BEGIN
   ) VALUES (
     lower(hex(randomblob(16))),
     'ZONE_ENVIRONMENT',
-    COALESCE((SELECT zone_uuid FROM irrigation_zones WHERE id=NEW.zone_id AND deleted_at IS NULL),'') || '|' || COALESCE(NEW.date,''),
+    COALESCE((SELECT zone_uuid FROM irrigation_zones WHERE id=NEW.zone_id AND deleted_at IS NULL),'zone-id:' || NEW.zone_id) || '|' || COALESCE(NEW.date,''),
     'ZONE_ENVIRONMENT_APPENDED',
     json_object(
       'contract_version', 1,
@@ -2113,7 +2113,7 @@ BEGIN
   ) VALUES (
     lower(hex(randomblob(16))),
     'ZONE_ENVIRONMENT',
-    COALESCE((SELECT zone_uuid FROM irrigation_zones WHERE id=NEW.zone_id AND deleted_at IS NULL),'') || '|' || COALESCE(NEW.date,''),
+    COALESCE((SELECT zone_uuid FROM irrigation_zones WHERE id=NEW.zone_id AND deleted_at IS NULL),'zone-id:' || NEW.zone_id) || '|' || COALESCE(NEW.date,''),
     'ZONE_ENVIRONMENT_APPENDED',
     json_object(
       'contract_version', 1,
@@ -2148,7 +2148,7 @@ BEGIN
   ) VALUES (
     lower(hex(randomblob(16))),
     'ZONE_RECOMMENDATION',
-    COALESCE((SELECT zone_uuid FROM irrigation_zones WHERE id=NEW.zone_id AND deleted_at IS NULL),'') || '|' || COALESCE(NEW.date,''),
+    COALESCE((SELECT zone_uuid FROM irrigation_zones WHERE id=NEW.zone_id AND deleted_at IS NULL),'zone-id:' || NEW.zone_id) || '|' || COALESCE(NEW.date,''),
     'ZONE_RECOMMENDATION_UPSERTED',
     json_object(
       'contract_version', 1,
@@ -2196,7 +2196,7 @@ BEGIN
   ) VALUES (
     lower(hex(randomblob(16))),
     'ZONE_RECOMMENDATION',
-    COALESCE((SELECT zone_uuid FROM irrigation_zones WHERE id=NEW.zone_id AND deleted_at IS NULL),'') || '|' || COALESCE(NEW.date,''),
+    COALESCE((SELECT zone_uuid FROM irrigation_zones WHERE id=NEW.zone_id AND deleted_at IS NULL),'zone-id:' || NEW.zone_id) || '|' || COALESCE(NEW.date,''),
     'ZONE_RECOMMENDATION_UPSERTED',
     json_object(
       'contract_version', 1,
