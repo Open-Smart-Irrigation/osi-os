@@ -190,15 +190,17 @@ function seedDatabase() {
   ).run(1, SEASON_UUID, 'Barley 2026', '2026-01-01', '2026-12-31', 'barley', 'Golden');
   for (const number of PLOT_NUMBERS) {
     native.prepare(
-      'INSERT INTO journal_plots(plot_uuid,plot_code,name,zone_uuid,station_code,gateway_device_eui) ' +
-      'VALUES (?,?,?,?,?,?)'
+      'INSERT INTO journal_plots(' +
+        'plot_uuid,plot_code,name,zone_uuid,station_code,gateway_device_eui,owner_user_uuid' +
+      ') VALUES (?,?,?,?,?,?,?)'
     ).run(
       plotUuid(number),
       'LYS-' + number,
       'Lysimeter ' + number,
       number === 2 ? ZONE_UUID : null,
       'LYS',
-      GATEWAY_EUI
+      GATEWAY_EUI,
+      USER_UUID
     );
     native.prepare(
       'INSERT INTO journal_plot_settings(plot_uuid,layout_code,updated_at,updated_by_principal_uuid) ' +
@@ -211,15 +213,17 @@ function seedDatabase() {
     { number: 22, code: 'SAME-ZONE-22', zoneUuid: ZONE_UUID },
   ]) {
     native.prepare(
-      'INSERT INTO journal_plots(plot_uuid,plot_code,name,zone_uuid,station_code,gateway_device_eui) ' +
-      'VALUES (?,?,?,?,?,?)'
+      'INSERT INTO journal_plots(' +
+        'plot_uuid,plot_code,name,zone_uuid,station_code,gateway_device_eui,owner_user_uuid' +
+      ') VALUES (?,?,?,?,?,?,?)'
     ).run(
       plotUuid(fixture.number),
       fixture.code,
       fixture.code,
       fixture.zoneUuid,
       'TEST',
-      GATEWAY_EUI
+      GATEWAY_EUI,
+      fixture.number === 20 ? OTHER_USER_UUID : USER_UUID
     );
     native.prepare(
       'INSERT INTO journal_plot_settings(plot_uuid,layout_code,updated_at,updated_by_principal_uuid) ' +
@@ -1071,9 +1075,9 @@ test('a 100-plot same-context batch reuses nine reads and stamps each plot UUID'
   for (let index = 0; index < plots.length; index += 1) {
     await db.run(
       'INSERT INTO journal_plots(' +
-        'plot_uuid,plot_code,name,zone_uuid,station_code,gateway_device_eui' +
-      ') VALUES (?,?,?,?,?,?)',
-      [plots[index], 'CACHE-' + index, 'Cache plot ' + index, ZONE_UUID, 'CACHE', GATEWAY_EUI]
+        'plot_uuid,plot_code,name,zone_uuid,station_code,gateway_device_eui,owner_user_uuid' +
+      ') VALUES (?,?,?,?,?,?,?)',
+      [plots[index], 'CACHE-' + index, 'Cache plot ' + index, ZONE_UUID, 'CACHE', GATEWAY_EUI, USER_UUID]
     );
   }
   await db.run(
@@ -1123,9 +1127,9 @@ test('a 100-zone duration batch keeps context reads bounded per distinct zone', 
     );
     await db.run(
       'INSERT INTO journal_plots(' +
-        'plot_uuid,plot_code,name,zone_uuid,station_code,gateway_device_eui' +
-      ') VALUES (?,?,?,?,?,?)',
-      [plot, 'ZONE-' + index, 'Zone plot ' + index, zoneUuid, 'ZONE', GATEWAY_EUI]
+        'plot_uuid,plot_code,name,zone_uuid,station_code,gateway_device_eui,owner_user_uuid' +
+      ') VALUES (?,?,?,?,?,?,?)',
+      [plot, 'ZONE-' + index, 'Zone plot ' + index, zoneUuid, 'ZONE', GATEWAY_EUI, USER_UUID]
     );
     await db.run(
       'INSERT INTO devices(' +
@@ -1776,7 +1780,7 @@ test('finalize promotes an owned draft in place to final version one', async () 
 test('rejects a same-gateway plot owned by another user', async () => {
   await rejectCode(journal.finalize(db, catalog, validEntry({
     plot_uuid: plotUuid(20),
-  }), principal()), 'ownership');
+  }), principal()), 'plot_not_found');
 
   await assertNoJournalWrites();
 });

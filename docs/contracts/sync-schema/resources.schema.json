@@ -286,13 +286,14 @@
             "x-aggregate-type": "JOURNAL_PLOT",
             "x-watermark-key": "plot_uuid",
             "required": [
-                "contract_version", "plot_uuid", "plot_code", "name", "zone_uuid", "station_code", "crop_hint",
+                "contract_version", "plot_uuid", "owner_user_uuid", "plot_code", "name", "zone_uuid", "station_code", "crop_hint",
                 "area_m2", "active", "sync_version", "gateway_device_eui", "created_at", "updated_at",
                 "deleted_at", "settings"
             ],
             "properties": {
                 "contract_version": {"type": "integer", "const": 1},
                 "plot_uuid": {"$ref": "#/definitions/CanonicalUuid"},
+                "owner_user_uuid": {"$ref": "#/definitions/Uuid"},
                 "base_sync_version": {"type": "integer", "minimum": 0},
                 "plot_code": {"type": "string", "minLength": 1},
                 "name": {"type": ["string", "null"]},
@@ -327,12 +328,13 @@
             "x-aggregate-type": "JOURNAL_PLOT_GROUP",
             "x-watermark-key": "group_uuid",
             "required": [
-                "contract_version", "group_uuid", "label", "gateway_device_eui", "created_by_principal_uuid",
+                "contract_version", "group_uuid", "owner_user_uuid", "label", "gateway_device_eui", "created_by_principal_uuid",
                 "created_at", "resolved_at", "resolved_by_principal_uuid", "sync_version", "deleted_at", "members"
             ],
             "properties": {
                 "contract_version": {"type": "integer", "const": 1},
                 "group_uuid": {"$ref": "#/definitions/CanonicalUuid"},
+                "owner_user_uuid": {"$ref": "#/definitions/Uuid"},
                 "base_sync_version": {"type": "integer", "minimum": 0},
                 "label": {"type": "string", "minLength": 1},
                 "gateway_device_eui": {"$ref": "#/definitions/Eui64"},

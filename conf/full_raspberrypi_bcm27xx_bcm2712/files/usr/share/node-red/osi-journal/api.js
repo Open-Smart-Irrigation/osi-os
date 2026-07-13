@@ -489,6 +489,7 @@ function plotAggregate(row, settings) {
     area_m2: row.area_m2 == null ? null : Number(row.area_m2),
     active: Number(row.active),
     sync_version: Number(row.sync_version),
+    owner_user_uuid: row.owner_user_uuid,
     gateway_device_eui: row.gateway_device_eui,
     created_at: row.created_at,
     updated_at: row.updated_at,
@@ -560,15 +561,22 @@ async function recordResourceCommand(tx, principal, terminal) {
   if (hooks && typeof hooks.afterCommand === 'function') await hooks.afterCommand(facts);
 }
 
-async function unresolvedGroupWouldBecomeHeterogeneous(tx, plotUuid, layoutCode) {
+async function unresolvedGroupWouldBecomeHeterogeneous(tx, plotUuid, layoutCode, principal) {
   return dbGet(
     tx,
     'SELECT g.group_uuid FROM journal_plot_groups AS g ' +
       'JOIN journal_plot_group_members AS mine ON mine.group_uuid=g.group_uuid AND mine.plot_uuid=? ' +
+      'JOIN journal_plots AS mine_plot ON mine_plot.plot_uuid=mine.plot_uuid ' +
       'JOIN journal_plot_group_members AS other ON other.group_uuid=g.group_uuid AND other.plot_uuid<>? ' +
+      'JOIN journal_plots AS other_plot ON other_plot.plot_uuid=other.plot_uuid ' +
       'JOIN journal_plot_settings AS s ON s.plot_uuid=other.plot_uuid ' +
-      'WHERE g.resolved_at IS NULL AND g.deleted_at IS NULL AND s.layout_code<>? LIMIT 1',
-    [plotUuid, plotUuid, layoutCode]
+      'WHERE g.resolved_at IS NULL AND g.deleted_at IS NULL AND s.layout_code<>? ' +
+        'AND g.owner_user_uuid=? AND g.gateway_device_eui=? ' +
+        'AND mine_plot.owner_user_uuid=? AND mine_plot.gateway_device_eui=? ' +
+        'AND other_plot.owner_user_uuid=? AND other_plot.gateway_device_eui=? LIMIT 1',
+    [plotUuid, plotUuid, layoutCode, principal.owner_user_uuid, principal.gateway_device_eui,
+      principal.owner_user_uuid, principal.gateway_device_eui,
+      principal.owner_user_uuid, principal.gateway_device_eui]
   );
 }
 
@@ -582,10 +590,12 @@ async function upsertPlot(db, input, principal, pathUuid, options) {
   return writeTransaction(db, async function(tx) {
     const existing = await dbGet(
       tx,
-      'SELECT * FROM journal_plots WHERE plot_uuid=? AND deleted_at IS NULL',
-      [plotUuid]
+      'SELECT * FROM journal_plots WHERE plot_uuid=? AND owner_user_uuid=? AND gateway_device_eui=? ' +
+        'AND deleted_at IS NULL',
+      [plotUuid, principal.owner_user_uuid, principal.gateway_device_eui]
     );
-    if (existing && existing.gateway_device_eui !== principal.gateway_device_eui) {
+    if (pathUuid && !existing) throw apiError(404, 'not_found', 'Plot was not found');
+    if (!pathUuid && !existing && await dbGet(tx, 'SELECT 1 FROM journal_plots WHERE plot_uuid=?', [plotUuid])) {
       throw apiError(404, 'not_found', 'Plot was not found');
     }
     if (existing && existing.zone_uuid) await ownedZone(tx, existing.zone_uuid, principal);
@@ -596,13 +606,17 @@ async function upsertPlot(db, input, principal, pathUuid, options) {
     if (zoneUuid) {
       const byZone = await dbGet(
         tx,
-        'SELECT plot_uuid FROM journal_plots WHERE gateway_device_eui=? AND zone_uuid=? ' +
+        'SELECT plot_uuid FROM journal_plots WHERE owner_user_uuid=? AND gateway_device_eui=? AND zone_uuid=? ' +
           'AND active=1 AND deleted_at IS NULL AND plot_uuid<>? ORDER BY created_at,plot_uuid LIMIT 1',
-        [principal.gateway_device_eui, zoneUuid, plotUuid]
+        [principal.owner_user_uuid, principal.gateway_device_eui, zoneUuid, plotUuid]
       );
       if (byZone) {
         if (creating && options.returnExistingZonePlot) {
-          const row = await dbGet(tx, 'SELECT * FROM journal_plots WHERE plot_uuid=?', [byZone.plot_uuid]);
+          const row = await dbGet(
+            tx,
+            'SELECT * FROM journal_plots WHERE plot_uuid=? AND owner_user_uuid=? AND gateway_device_eui=?',
+            [byZone.plot_uuid, principal.owner_user_uuid, principal.gateway_device_eui]
+          );
           const settings = await dbGet(tx, 'SELECT * FROM journal_plot_settings WHERE plot_uuid=?', [byZone.plot_uuid]);
           return { plot: plotAggregate(row, settings), created: false };
         }
@@ -616,7 +630,7 @@ async function upsertPlot(db, input, principal, pathUuid, options) {
     if (existing) {
       const oldSettings = await dbGet(tx, 'SELECT * FROM journal_plot_settings WHERE plot_uuid=?', [plotUuid]);
       if (oldSettings && oldSettings.layout_code !== layout.code &&
-          await unresolvedGroupWouldBecomeHeterogeneous(tx, plotUuid, layout.code)) {
+          await unresolvedGroupWouldBecomeHeterogeneous(tx, plotUuid, layout.code, principal)) {
         throw apiError(409, 'heterogeneous_group', 'Layout change would make an unresolved plot group heterogeneous');
       }
     }
@@ -635,8 +649,12 @@ async function upsertPlot(db, input, principal, pathUuid, options) {
         tx,
         'SELECT g.group_uuid FROM journal_plot_groups AS g ' +
           'JOIN journal_plot_group_members AS m ON m.group_uuid=g.group_uuid ' +
-          'WHERE m.plot_uuid=? AND g.resolved_at IS NULL AND g.deleted_at IS NULL LIMIT 1',
-        [plotUuid]
+          'JOIN journal_plots AS p ON p.plot_uuid=m.plot_uuid ' +
+          'WHERE m.plot_uuid=? AND g.resolved_at IS NULL AND g.deleted_at IS NULL ' +
+            'AND g.owner_user_uuid=? AND g.gateway_device_eui=? ' +
+            'AND p.owner_user_uuid=? AND p.gateway_device_eui=? LIMIT 1',
+        [plotUuid, principal.owner_user_uuid, principal.gateway_device_eui,
+          principal.owner_user_uuid, principal.gateway_device_eui]
       );
       if (unresolved) {
         throw apiError(409, 'plot_in_unresolved_group', 'Resolve or edit the plot group before deactivating this plot');
@@ -651,10 +669,10 @@ async function upsertPlot(db, input, principal, pathUuid, options) {
           tx,
           'INSERT INTO journal_plots (' +
             'plot_uuid,plot_code,name,zone_uuid,station_code,crop_hint,area_m2,active,sync_version,' +
-            'gateway_device_eui,created_at,updated_at,deleted_at' +
-          ') VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)',
+            'gateway_device_eui,created_at,updated_at,deleted_at,owner_user_uuid' +
+          ') VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
           [plotUuid, plotCode, name, zoneUuid, stationCode, cropHint, area, active, nextVersion,
-            principal.gateway_device_eui, createdAt, now, null]
+            principal.gateway_device_eui, createdAt, now, null, principal.owner_user_uuid]
         );
         await dbRun(
           tx,
@@ -667,9 +685,10 @@ async function upsertPlot(db, input, principal, pathUuid, options) {
         await dbRun(
           tx,
           'UPDATE journal_plots SET plot_code=?,name=?,zone_uuid=?,station_code=?,crop_hint=?,area_m2=?,' +
-            'active=?,sync_version=?,updated_at=? WHERE plot_uuid=? AND sync_version=?',
+            'active=?,sync_version=?,updated_at=? WHERE plot_uuid=? AND owner_user_uuid=? ' +
+            'AND gateway_device_eui=? AND sync_version=?',
           [plotCode, name, zoneUuid, stationCode, cropHint, area, active, nextVersion, now,
-            plotUuid, existing.sync_version]
+            plotUuid, principal.owner_user_uuid, principal.gateway_device_eui, existing.sync_version]
         );
         await dbRun(
           tx,
@@ -684,7 +703,11 @@ async function upsertPlot(db, input, principal, pathUuid, options) {
       }
       throw error;
     }
-    const row = await dbGet(tx, 'SELECT * FROM journal_plots WHERE plot_uuid=?', [plotUuid]);
+    const row = await dbGet(
+      tx,
+      'SELECT * FROM journal_plots WHERE plot_uuid=? AND owner_user_uuid=? AND gateway_device_eui=?',
+      [plotUuid, principal.owner_user_uuid, principal.gateway_device_eui]
+    );
     const settings = await dbGet(tx, 'SELECT * FROM journal_plot_settings WHERE plot_uuid=?', [plotUuid]);
     const emission = await emitPlot(tx, row, settings);
     await recordResourceCommand(tx, principal, {
@@ -706,9 +729,10 @@ async function ensureZonePlot(db, zoneUuid, input, principal) {
   const zone = await ownedZone(db, canonicalZone, principal);
   const existing = await dbGet(
     db,
-    'SELECT p.plot_uuid FROM journal_plots AS p WHERE p.gateway_device_eui=? AND p.zone_uuid=? ' +
+    'SELECT p.plot_uuid FROM journal_plots AS p WHERE p.owner_user_uuid=? AND p.gateway_device_eui=? ' +
+      'AND p.zone_uuid=? ' +
       'AND p.deleted_at IS NULL ORDER BY p.created_at,p.plot_uuid LIMIT 1',
-    [principal.gateway_device_eui, canonicalZone]
+    [principal.owner_user_uuid, principal.gateway_device_eui, canonicalZone]
   );
   if (existing) return existing.plot_uuid;
   if (!input.layout_code) semanticError('layout_required', 'First use of a zone requires an explicit layout');
@@ -746,9 +770,10 @@ async function ensureZonePlot(db, zoneUuid, input, principal) {
 async function assertPlotZoneMatch(db, plotUuid, zoneUuid, principal) {
   const plot = await dbGet(
     db,
-    'SELECT plot_uuid,zone_uuid FROM journal_plots WHERE plot_uuid=? AND gateway_device_eui=? ' +
+    'SELECT plot_uuid,zone_uuid FROM journal_plots WHERE plot_uuid=? AND owner_user_uuid=? ' +
+      'AND gateway_device_eui=? ' +
       'AND active=1 AND deleted_at IS NULL',
-    [plotUuid, principal.gateway_device_eui]
+    [plotUuid, principal.owner_user_uuid, principal.gateway_device_eui]
   );
   if (!plot) throw apiError(404, 'not_found', 'Plot was not found');
   if (zoneUuid && plot.zone_uuid !== zoneUuid) {
@@ -825,10 +850,10 @@ async function listPlots(db, principal) {
       's.updated_by_principal_uuid,s.sync_version AS settings_sync_version ' +
     'FROM journal_plots AS p JOIN journal_plot_settings AS s ON s.plot_uuid=p.plot_uuid ' +
       'LEFT JOIN irrigation_zones AS z ON z.zone_uuid=p.zone_uuid AND z.deleted_at IS NULL ' +
-    'WHERE p.gateway_device_eui=? AND p.deleted_at IS NULL ' +
+    'WHERE p.owner_user_uuid=? AND p.gateway_device_eui=? AND p.deleted_at IS NULL ' +
       'AND (p.zone_uuid IS NULL OR (z.user_id=? AND (z.gateway_device_eui=? OR z.gateway_device_eui IS NULL))) ' +
     'ORDER BY p.plot_code,p.plot_uuid',
-    [principal.gateway_device_eui, principal.user_id, principal.gateway_device_eui]
+    [principal.owner_user_uuid, principal.gateway_device_eui, principal.user_id, principal.gateway_device_eui]
   );
   return {
     plots: rows.map(function(row) {
@@ -1152,6 +1177,7 @@ function plotGroupAggregate(row, members) {
     contract_version: 1,
     group_uuid: row.group_uuid,
     label: row.label,
+    owner_user_uuid: row.owner_user_uuid,
     gateway_device_eui: row.gateway_device_eui,
     created_by_principal_uuid: row.created_by_principal_uuid,
     created_at: row.created_at,
@@ -1174,8 +1200,8 @@ async function validatedGroupMembers(tx, rawMembers, principal) {
     'SELECT p.plot_uuid,s.layout_code FROM journal_plots AS p ' +
       'JOIN journal_plot_settings AS s ON s.plot_uuid=p.plot_uuid ' +
       'WHERE p.plot_uuid IN (' + members.map(function() { return '?'; }).join(',') + ') ' +
-        'AND p.gateway_device_eui=? AND p.active=1 AND p.deleted_at IS NULL',
-    members.concat([principal.gateway_device_eui])
+        'AND p.owner_user_uuid=? AND p.gateway_device_eui=? AND p.active=1 AND p.deleted_at IS NULL',
+    members.concat([principal.owner_user_uuid, principal.gateway_device_eui])
   );
   if (rows.length !== members.length) throw apiError(404, 'not_found', 'One or more plots were not found');
   if (new Set(rows.map(function(row) { return row.layout_code; })).size > 1) {
@@ -1193,10 +1219,13 @@ async function upsertPlotGroup(db, input, principal, pathUuid) {
   return writeTransaction(db, async function(tx) {
     const existing = await dbGet(
       tx,
-      'SELECT * FROM journal_plot_groups WHERE group_uuid=? AND deleted_at IS NULL',
-      [groupUuid]
+      'SELECT * FROM journal_plot_groups WHERE group_uuid=? AND owner_user_uuid=? AND gateway_device_eui=? ' +
+        'AND deleted_at IS NULL',
+      [groupUuid, principal.owner_user_uuid, principal.gateway_device_eui]
     );
-    if (existing && existing.gateway_device_eui !== principal.gateway_device_eui) {
+    if (pathUuid && !existing) throw apiError(404, 'not_found', 'Plot group was not found');
+    if (!pathUuid && !existing &&
+        await dbGet(tx, 'SELECT 1 FROM journal_plot_groups WHERE group_uuid=?', [groupUuid])) {
       throw apiError(404, 'not_found', 'Plot group was not found');
     }
     const creating = !existing;
@@ -1210,8 +1239,13 @@ async function upsertPlotGroup(db, input, principal, pathUuid) {
     const storedMembers = existing
       ? (await dbAll(
         tx,
-        'SELECT plot_uuid FROM journal_plot_group_members WHERE group_uuid=? ORDER BY plot_uuid',
-        [groupUuid]
+        'SELECT m.plot_uuid FROM journal_plot_group_members AS m ' +
+          'JOIN journal_plot_groups AS g ON g.group_uuid=m.group_uuid ' +
+          'JOIN journal_plots AS p ON p.plot_uuid=m.plot_uuid ' +
+          'WHERE m.group_uuid=? AND g.owner_user_uuid=? AND g.gateway_device_eui=? ' +
+            'AND p.owner_user_uuid=? AND p.gateway_device_eui=? ORDER BY m.plot_uuid',
+        [groupUuid, principal.owner_user_uuid, principal.gateway_device_eui,
+          principal.owner_user_uuid, principal.gateway_device_eui]
       )).map(function(row) { return row.plot_uuid; })
       : [];
     const requestedMembers = Array.isArray(input.members)
@@ -1244,28 +1278,44 @@ async function upsertPlotGroup(db, input, principal, pathUuid) {
         tx,
         'INSERT INTO journal_plot_groups (' +
           'group_uuid,label,gateway_device_eui,created_by_principal_uuid,created_at,resolved_at,' +
-          'resolved_by_principal_uuid,sync_version,deleted_at' +
-        ') VALUES (?,?,?,?,?,?,?,?,?)',
+          'resolved_by_principal_uuid,sync_version,deleted_at,owner_user_uuid' +
+        ') VALUES (?,?,?,?,?,?,?,?,?,?)',
         [groupUuid, label, principal.gateway_device_eui, creator, createdAt,
-          resolvedAt, resolver, nextVersion, null]
+          resolvedAt, resolver, nextVersion, null, principal.owner_user_uuid]
       );
     } else {
       await dbRun(
         tx,
         'UPDATE journal_plot_groups SET label=?,resolved_at=?,resolved_by_principal_uuid=?,' +
-          'sync_version=? WHERE group_uuid=? AND sync_version=?',
-        [label, resolvedAt, resolver, nextVersion, groupUuid, existing.sync_version]
+          'sync_version=? WHERE group_uuid=? AND owner_user_uuid=? AND gateway_device_eui=? AND sync_version=?',
+        [label, resolvedAt, resolver, nextVersion, groupUuid, principal.owner_user_uuid,
+          principal.gateway_device_eui, existing.sync_version]
       );
-      await dbRun(tx, 'DELETE FROM journal_plot_group_members WHERE group_uuid=?', [groupUuid]);
+      await dbRun(
+        tx,
+        'DELETE FROM journal_plot_group_members WHERE group_uuid=? ' +
+          'AND EXISTS (SELECT 1 FROM journal_plot_groups AS g WHERE g.group_uuid=? ' +
+            'AND g.owner_user_uuid=? AND g.gateway_device_eui=?)',
+        [groupUuid, groupUuid, principal.owner_user_uuid, principal.gateway_device_eui]
+      );
     }
     for (const plotUuid of members) {
       await dbRun(
         tx,
-        'INSERT INTO journal_plot_group_members (group_uuid,plot_uuid) VALUES (?,?)',
-        [groupUuid, plotUuid]
+        'INSERT INTO journal_plot_group_members (group_uuid,plot_uuid) ' +
+          'SELECT g.group_uuid,p.plot_uuid FROM journal_plot_groups AS g,journal_plots AS p ' +
+          'WHERE g.group_uuid=? AND g.owner_user_uuid=? AND g.gateway_device_eui=? ' +
+            'AND g.deleted_at IS NULL AND p.plot_uuid=? AND p.owner_user_uuid=? ' +
+            'AND p.gateway_device_eui=? AND p.deleted_at IS NULL',
+        [groupUuid, principal.owner_user_uuid, principal.gateway_device_eui, plotUuid,
+          principal.owner_user_uuid, principal.gateway_device_eui]
       );
     }
-    const row = await dbGet(tx, 'SELECT * FROM journal_plot_groups WHERE group_uuid=?', [groupUuid]);
+    const row = await dbGet(
+      tx,
+      'SELECT * FROM journal_plot_groups WHERE group_uuid=? AND owner_user_uuid=? AND gateway_device_eui=?',
+      [groupUuid, principal.owner_user_uuid, principal.gateway_device_eui]
+    );
     const aggregate = plotGroupAggregate(row, members);
     const { emitJournalOutbox } = require('./lifecycle');
     const emission = await emitJournalOutbox(tx, {
@@ -1293,18 +1343,23 @@ async function upsertPlotGroup(db, input, principal, pathUuid) {
 async function listPlotGroups(db, principal) {
   const rows = await dbAll(
     db,
-    'SELECT * FROM journal_plot_groups WHERE gateway_device_eui=? AND deleted_at IS NULL ' +
+    'SELECT * FROM journal_plot_groups WHERE owner_user_uuid=? AND gateway_device_eui=? AND deleted_at IS NULL ' +
       'ORDER BY resolved_at IS NOT NULL,label,group_uuid',
-    [principal.gateway_device_eui]
+    [principal.owner_user_uuid, principal.gateway_device_eui]
   );
   if (!rows.length) return { plot_groups: [] };
   const ids = rows.map(function(row) { return row.group_uuid; });
   const memberships = await dbAll(
     db,
       'SELECT m.group_uuid,m.plot_uuid FROM journal_plot_group_members AS m ' +
+      'JOIN journal_plot_groups AS g ON g.group_uuid=m.group_uuid ' +
+      'JOIN journal_plots AS p ON p.plot_uuid=m.plot_uuid ' +
       'WHERE m.group_uuid IN (' + ids.map(function() { return '?'; }).join(',') + ') ' +
+      'AND g.owner_user_uuid=? AND g.gateway_device_eui=? ' +
+      'AND p.owner_user_uuid=? AND p.gateway_device_eui=? ' +
       'ORDER BY m.group_uuid,m.plot_uuid',
-    ids
+    ids.concat([principal.owner_user_uuid, principal.gateway_device_eui,
+      principal.owner_user_uuid, principal.gateway_device_eui])
   );
   const byGroup = new Map();
   for (const member of memberships) {

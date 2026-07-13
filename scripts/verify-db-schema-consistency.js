@@ -534,6 +534,7 @@ const schemaContract = {
     'created_at',
     'updated_at',
     'deleted_at',
+    'owner_user_uuid',
   ],
   journal_plot_groups: [
     'group_uuid',
@@ -545,6 +546,7 @@ const schemaContract = {
     'resolved_by_principal_uuid',
     'sync_version',
     'deleted_at',
+    'owner_user_uuid',
   ],
   journal_plot_group_members: [
     'group_uuid',
@@ -652,6 +654,12 @@ const requiredIndexes = {
   ],
   journal_attachments: [
     'idx_journal_attachments_entry',
+  ],
+  journal_plots: [
+    'idx_journal_plots_owner_gateway',
+  ],
+  journal_plot_groups: [
+    'idx_journal_plot_groups_owner_gateway',
   ],
 };
 
@@ -762,6 +770,12 @@ const requiredIndexSqlFragments = {
   ],
   idx_journal_attachments_entry: [
     'on journal_attachments(entry_uuid, deleted_at)',
+  ],
+  idx_journal_plots_owner_gateway: [
+    'on journal_plots(owner_user_uuid, gateway_device_eui, deleted_at, zone_uuid, active)',
+  ],
+  idx_journal_plot_groups_owner_gateway: [
+    'on journal_plot_groups(owner_user_uuid, gateway_device_eui, deleted_at, resolved_at)',
   ],
 };
 

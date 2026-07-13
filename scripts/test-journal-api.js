@@ -266,6 +266,11 @@ test('plot upsert is atomic, zone-owner scoped, versioned, and command-ledger re
     commandPrincipal
   );
   assert.equal(result.plot.sync_version, 1);
+  assert.equal(result.plot.owner_user_uuid, OWNER_UUID);
+  assert.equal(
+    db.prepare('SELECT owner_user_uuid FROM journal_plots WHERE plot_uuid=?').get(uuid).owner_user_uuid,
+    OWNER_UUID
+  );
   assert.equal(result.plot.settings.sync_version, 1);
   assert.equal(db.prepare('SELECT COUNT(*) AS n FROM sync_outbox').get().n, 1);
   const applied = db.prepare('SELECT * FROM applied_commands WHERE command_id=?').get('command-plot-1');
@@ -311,6 +316,174 @@ test('plot constraints prevent a second active zone plot and unresolved-group de
     }), principal(), second),
     (error) => error && error.code === 'plot_in_unresolved_group'
   );
+});
+
+test('plot and group lists hide same-gateway resources owned by another user', async () => {
+  const db = new TestDb('private-resource-lists');
+  seedIdentity(db);
+  const plotUuid = '22000000-0000-4000-8000-000000000001';
+  const groupUuid = '22000000-0000-4000-8000-000000000002';
+  await journal.upsertPlot(db, plotInput(plotUuid, 'private-sensorless'), principal());
+  await journal.upsertPlotGroup(db, {
+    group_uuid: groupUuid,
+    base_sync_version: 0,
+    label: 'Private group',
+    resolved: false,
+    members: [plotUuid],
+  }, principal());
+  const other = principal({
+    user_id: 2,
+    owner_user_uuid: OTHER_OWNER_UUID,
+    author_principal_uuid: OTHER_OWNER_UUID,
+    author_label: 'other-user',
+  });
+  const foreignPlotUuid = '22000000-0000-4000-8000-000000000003';
+  await journal.upsertPlot(db, plotInput(foreignPlotUuid, 'other-private'), other);
+  db.prepare(
+    'INSERT INTO journal_plot_group_members (group_uuid,plot_uuid) VALUES (?,?)'
+  ).run(groupUuid, foreignPlotUuid);
+
+  assert.deepEqual(
+    (await journal.listPlots(db, other)).plots.map(function(plot) { return plot.plot_uuid; }),
+    [foreignPlotUuid]
+  );
+  assert.deepEqual((await journal.listPlotGroups(db, other)).plot_groups, []);
+  assert.deepEqual((await journal.listPlotGroups(db, principal())).plot_groups[0].members, [plotUuid]);
+});
+
+test('plot and group updates return 404 for another owner on the same gateway', async () => {
+  const db = new TestDb('private-resource-updates');
+  seedIdentity(db);
+  const plotUuid = '23000000-0000-4000-8000-000000000001';
+  const groupUuid = '23000000-0000-4000-8000-000000000002';
+  await journal.upsertPlot(db, plotInput(plotUuid, 'private-update'), principal());
+  await journal.upsertPlotGroup(db, {
+    group_uuid: groupUuid,
+    base_sync_version: 0,
+    label: 'Private update group',
+    resolved: false,
+    members: [plotUuid],
+  }, principal());
+  const other = principal({
+    user_id: 2,
+    owner_user_uuid: OTHER_OWNER_UUID,
+    author_principal_uuid: OTHER_OWNER_UUID,
+    author_label: 'other-user',
+  });
+
+  await assert.rejects(
+    journal.upsertPlot(db, plotInput(plotUuid, 'foreign-update', {
+      base_sync_version: 1,
+    }), other, plotUuid),
+    (error) => error && error.statusCode === 404
+  );
+  await assert.rejects(
+    journal.upsertPlotGroup(db, {
+      group_uuid: groupUuid,
+      base_sync_version: 1,
+      label: 'Foreign update',
+      resolved: false,
+      members: [plotUuid],
+    }, other, groupUuid),
+    (error) => error && error.statusCode === 404
+  );
+});
+
+test('plot and group create UUID collisions fail closed across same-gateway owners', async () => {
+  const db = new TestDb('private-resource-create-collisions');
+  seedIdentity(db);
+  const plotUuid = '23500000-0000-4000-8000-000000000001';
+  const groupUuid = '23500000-0000-4000-8000-000000000002';
+  await journal.upsertPlot(db, plotInput(plotUuid, 'private-collision'), principal());
+  await journal.upsertPlotGroup(db, {
+    group_uuid: groupUuid,
+    base_sync_version: 0,
+    label: 'Private collision group',
+    resolved: false,
+    members: [plotUuid],
+  }, principal());
+  const other = principal({
+    user_id: 2,
+    owner_user_uuid: OTHER_OWNER_UUID,
+    author_principal_uuid: OTHER_OWNER_UUID,
+    author_label: 'other-user',
+  });
+  const otherPlotUuid = '23500000-0000-4000-8000-000000000003';
+  await journal.upsertPlot(db, plotInput(otherPlotUuid, 'other-collision-member'), other);
+
+  await assert.rejects(
+    journal.upsertPlot(db, plotInput(plotUuid, 'foreign-collision'), other),
+    (error) => error && error.statusCode === 404
+  );
+  await assert.rejects(
+    journal.upsertPlotGroup(db, {
+      group_uuid: groupUuid,
+      base_sync_version: 0,
+      label: 'Foreign collision group',
+      resolved: false,
+      members: [otherPlotUuid],
+    }, other),
+    (error) => error && error.statusCode === 404
+  );
+  assert.equal(
+    db.prepare('SELECT owner_user_uuid FROM journal_plots WHERE plot_uuid=?').get(plotUuid).owner_user_uuid,
+    OWNER_UUID
+  );
+  assert.equal(
+    db.prepare('SELECT owner_user_uuid FROM journal_plot_groups WHERE group_uuid=?').get(groupUuid).owner_user_uuid,
+    OWNER_UUID
+  );
+});
+
+test('plot groups reject same-gateway plots owned by another user', async () => {
+  const db = new TestDb('private-group-membership');
+  seedIdentity(db);
+  const plotUuid = '24000000-0000-4000-8000-000000000001';
+  await journal.upsertPlot(db, plotInput(plotUuid, 'private-member'), principal());
+  const other = principal({
+    user_id: 2,
+    owner_user_uuid: OTHER_OWNER_UUID,
+    author_principal_uuid: OTHER_OWNER_UUID,
+    author_label: 'other-user',
+  });
+
+  await assert.rejects(
+    journal.upsertPlotGroup(db, {
+      group_uuid: '24000000-0000-4000-8000-000000000002',
+      base_sync_version: 0,
+      label: 'Foreign membership',
+      resolved: false,
+      members: [plotUuid],
+    }, other),
+    (error) => error && error.statusCode === 404
+  );
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM journal_plot_groups').get().n, 0);
+});
+
+test('entry creation rejects a same-gateway plot owned by another user', async () => {
+  const db = new TestDb('private-entry-plot');
+  seedIdentity(db);
+  const plotUuid = '25000000-0000-4000-8000-000000000001';
+  await journal.upsertPlot(db, plotInput(plotUuid, 'private-entry'), principal());
+  const other = principal({
+    user_id: 2,
+    owner_user_uuid: OTHER_OWNER_UUID,
+    author_principal_uuid: OTHER_OWNER_UUID,
+    author_label: 'other-user',
+  });
+
+  await assert.rejects(
+    journal.saveEntry(
+      db,
+      entryInput('25000000-0000-4000-8000-000000000002', plotUuid, '2026-07-13T09:00:00', {
+        season_crop: 'barley',
+      }),
+      other,
+      { mode: 'create' }
+    ),
+    (error) => error && error.statusCode === 404
+  );
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM journal_entries').get().n, 0);
 });
 
 test('entry POST/PUT semantics and duplicate acknowledgement are transactional', async () => {
@@ -539,13 +712,18 @@ test('plot groups enforce homogeneous active membership and preserve resolved pr
     }, principal()),
     (error) => error && error.code === 'heterogeneous_group'
   );
-  await journal.upsertPlotGroup(db, {
+  const created = await journal.upsertPlotGroup(db, {
     group_uuid: groupUuid,
     base_sync_version: 0,
     label: 'Cohort',
     resolved: false,
     members: [second, first],
   }, principal());
+  assert.equal(created.plot_group.owner_user_uuid, OWNER_UUID);
+  assert.equal(
+    db.prepare('SELECT owner_user_uuid FROM journal_plot_groups WHERE group_uuid=?').get(groupUuid).owner_user_uuid,
+    OWNER_UUID
+  );
   await journal.upsertPlotGroup(db, {
     group_uuid: groupUuid,
     base_sync_version: 1,

@@ -2565,8 +2565,11 @@ CREATE TABLE IF NOT EXISTS journal_plots (
   created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
   updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
   deleted_at TEXT,
+  owner_user_uuid TEXT,
   UNIQUE (gateway_device_eui, plot_code)
 );
+CREATE INDEX IF NOT EXISTS idx_journal_plots_owner_gateway
+  ON journal_plots(owner_user_uuid, gateway_device_eui, deleted_at, zone_uuid, active);
 
 CREATE TABLE IF NOT EXISTS journal_plot_groups (
   group_uuid TEXT PRIMARY KEY,
@@ -2578,7 +2581,9 @@ CREATE TABLE IF NOT EXISTS journal_plot_groups (
   resolved_by_principal_uuid TEXT,
   sync_version INTEGER NOT NULL DEFAULT 0,
   deleted_at TEXT
-);
+, owner_user_uuid TEXT);
+CREATE INDEX IF NOT EXISTS idx_journal_plot_groups_owner_gateway
+  ON journal_plot_groups(owner_user_uuid, gateway_device_eui, deleted_at, resolved_at);
 
 CREATE TABLE IF NOT EXISTS journal_plot_group_members (
   group_uuid TEXT NOT NULL REFERENCES journal_plot_groups(group_uuid) ON DELETE CASCADE,

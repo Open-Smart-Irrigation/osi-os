@@ -271,15 +271,17 @@ async function resolvePlotContext(tx, plotUuid, principal) {
     };
   }
   const plot = await tx.get(
-    'SELECT p.plot_uuid,p.gateway_device_eui,p.zone_uuid AS plot_zone_uuid,' +
+    'SELECT p.plot_uuid,p.owner_user_uuid AS plot_owner_user_uuid,p.gateway_device_eui,' +
+      'p.zone_uuid AS plot_zone_uuid,' +
       'z.id AS zone_id,z.zone_uuid,z.user_id AS zone_user_id,z.timezone AS zone_timezone,' +
       'u.user_uuid AS zone_owner_user_uuid ' +
     'FROM journal_plots AS p ' +
     'LEFT JOIN irrigation_zones AS z ON z.zone_uuid=p.zone_uuid ' +
       'AND z.gateway_device_eui=p.gateway_device_eui AND z.deleted_at IS NULL ' +
     'LEFT JOIN users AS u ON u.id=z.user_id ' +
-    'WHERE p.plot_uuid=? AND p.gateway_device_eui=? AND p.active=? AND p.deleted_at IS NULL',
-    [plotUuid, principal.gateway_device_eui, 1]
+    'WHERE p.plot_uuid=? AND p.owner_user_uuid=? AND p.gateway_device_eui=? ' +
+      'AND p.active=? AND p.deleted_at IS NULL',
+    [plotUuid, principal.owner_user_uuid, principal.gateway_device_eui, 1]
   );
   if (!plot) throw lifecycleError('plot_not_found', 'Plot is not owned by this gateway');
   if (plot.plot_zone_uuid != null && plot.zone_id == null) {
@@ -287,11 +289,12 @@ async function resolvePlotContext(tx, plotUuid, principal) {
   }
   const linked = plot.zone_id != null;
   const userId = linked ? plot.zone_user_id : principal.user_id;
-  const ownerUserUuid = linked ? plot.zone_owner_user_uuid : principal.owner_user_uuid;
+  const ownerUserUuid = plot.plot_owner_user_uuid;
   if (userId == null || !ownerUserUuid) {
     throw lifecycleError('ownership', 'A gateway-owned plot owner could not be resolved');
   }
-  if (Number(userId) !== Number(principal.user_id) ||
+  if ((linked && plot.zone_owner_user_uuid !== ownerUserUuid) ||
+      Number(userId) !== Number(principal.user_id) ||
       ownerUserUuid !== principal.owner_user_uuid) {
     throw lifecycleError('ownership', 'Plot belongs to another user');
   }
