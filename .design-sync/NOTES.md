@@ -22,9 +22,9 @@ Repo-specific gotchas for re-syncs. Read before touching the config or previews.
 - Collapsed-by-default cards (`IrrigationZoneCard`: `useState(true)`, no prop): use the `AutoExpand` helper pattern from `.design-sync/previews/IrrigationZoneCard.tsx` — real clicks on the chevron toggle buttons (`button span[style*="rotate(-90deg)"]`), two passes 50 ms apart (nested toggles appear after the first expand).
 - Realistic fixtures: crib from `src/components/farming/__tests__/*.test.tsx` and `src/types/farming.ts`. Device types seen live: `KIWI_SENSOR`, `DRAGINO_LSN50`, `SENSECAP_S2120`, `AQUASCOPE_LORAIN`, `STREGA_VALVE`.
 
-## Product bug found during sync (branding branch)
+## Product bug found during sync (branding branch) — FIXED 2026-07-13
 
-- **DashboardHeader clips its own dropdown menus**: the AgroLink branding commit added `overflow-hidden` to `<header>` to crop the Balken image; the Add/Account `HeaderMenu` dropdowns are absolutely positioned inside the header and get clipped at its bottom edge — in the branded app itself, not just previews (mainline header has no `overflow-hidden`). Suggested fix: move `overflow-hidden` off `<header>` onto a wrapper div around the Balken `<img>`. Until fixed, the DashboardHeader preview deliberately has no open-menu story.
+- **DashboardHeader clipped its own dropdown menus**: the AgroLink branding commit had `overflow-hidden` on `<header>` to crop the Balken image; the Add/Account `HeaderMenu` dropdowns are absolutely positioned inside the header and were clipped at its bottom edge in the branded app itself. Fixed on `design-sync/agrolink` by moving `overflow-hidden` onto a wrapper div around the Balken `<img>` (see the comment at the site in `DashboardHeader.tsx`). If the branding branch is rebased/recreated, make sure this fix rides along — the preview's `AddMenuOpen` story is the regression test (it goes blank-clipped if it comes back).
 
 ## Preview authoring patterns (wave learnings, 2026-07-13)
 

@@ -14,8 +14,24 @@ export function Canonical() {
   );
 }
 
-// No open-menu story on purpose: the branding commit's `overflow-hidden` on
-// <header> clips the header's own dropdown menus at its bottom edge (a real
-// regression in the branded app, not a preview artifact). Add an open-menu
-// story once the source moves `overflow-hidden` onto a Balken-image wrapper.
-// See NOTES.md "Product bug found during sync".
+// Open the "Add" menu with a real click on its trigger. (The branding
+// commit's overflow-hidden regression that used to clip this dropdown was
+// fixed by moving the crop onto the Balken image wrapper.)
+function AutoOpenFirstMenu({ children }: { children: React.ReactNode }) {
+  const ref = React.useRef<HTMLDivElement>(null);
+  React.useEffect(() => {
+    const btn = ref.current?.querySelector('button[aria-haspopup="menu"]') as HTMLElement | null;
+    btn?.click();
+  }, []);
+  return <div ref={ref}>{children}</div>;
+}
+
+export function AddMenuOpen() {
+  return (
+    <AutoOpenFirstMenu>
+      <div style={{ paddingBottom: 180 }}>
+        <DashboardHeader username="demo" onAddZone={noop} onAddDevice={noop} onLogout={noop} />
+      </div>
+    </AutoOpenFirstMenu>
+  );
+}

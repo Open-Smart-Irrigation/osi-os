@@ -23,12 +23,17 @@ export const DashboardHeader: React.FC<DashboardHeaderProps> = ({
   const showDesktopData = isDesktopBrowser();
 
   return (
-    <header className="bg-[var(--header-bg)] shadow-xl overflow-hidden">
-      <img
-        src={balkenHorizontal}
-        alt="Agroscope Balken"
-        className="block h-10 w-full object-cover object-left"
-      />
+    <header className="bg-[var(--header-bg)] shadow-xl">
+      {/* overflow-hidden must stay on the image wrapper, not the <header> —
+          the header's dropdown menus are absolutely positioned inside it and
+          get clipped at its edge otherwise. */}
+      <div className="overflow-hidden">
+        <img
+          src={balkenHorizontal}
+          alt="Agroscope Balken"
+          className="block h-10 w-full object-cover object-left"
+        />
+      </div>
       <div className="max-w-7xl mx-auto px-4 py-6">
         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
           <div>
