@@ -68,4 +68,4 @@ No flow file, boot DDL, deploy script, or pre-existing ordered migration changed
 | `node --test scripts/test-journal-api.js` | PASS, 22 tests |
 | `node scripts/test-journal-lifecycle.js` | PASS, 92 tests |
 | `node scripts/verify-sync-flow.js` | `Sync flow verification passed`; final profile parity passed |
-| `node --test lib/osi-migrate/__tests__/*.test.js` | PASS, 49 tests |
+| `node --test lib/osi-migrate/__tests__/*.test.js` | PASS, 60 tests |
