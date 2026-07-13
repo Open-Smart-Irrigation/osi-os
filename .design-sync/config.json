@@ -1,0 +1,35 @@
+{
+  "projectId": "98e6e89f-3f9c-4774-b9db-ca630db89bcd",
+  "shape": "package",
+  "pkg": "open-smart-irrigation",
+  "globalName": "AgroLink",
+  "entry": "web/react-gui/dist/index.js",
+  "buildCmd": "npm run build && cp build/assets/index-*.css build/ds-entry.css",
+  "tsconfig": "tsconfig.json",
+  "cssEntry": "build/ds-entry.css",
+  "readmeHeader": ".design-sync/conventions.md",
+  "extraEntries": ["./src/dsPreview.tsx"],
+  "provider": { "component": "DsPreviewProvider" },
+  "overrides": {
+    "DendrometerTreeCard": { "cardMode": "column" },
+    "WeatherIcon": { "cardMode": "column" }
+  },
+  "libOverrides": {
+    "source-kit.mjs": "app repo, not a packaged DS: exclude main.jsx bootstrap + dsPreview provider module from the synthesized entry"
+  },
+  "componentSrcMap": {
+    "App": null,
+    "DsPreviewProvider": null,
+    "PrivateRoute": null,
+    "AccountLink": null,
+    "AnalysisRoute": null,
+    "CrossZoneAnalysisPage": null,
+    "FarmingDashboard": null,
+    "HistoryCardDetailPage": null,
+    "HistoryDashboard": null,
+    "Login": null,
+    "Register": null,
+    "SettingsPage": null,
+    "SupportRequests": null
+  }
+}
