@@ -43,6 +43,9 @@ repo (`scripts/`, `.github/workflows/`) plus `AGENTS.md`.
 | Bundled DB schema consistency | `node scripts/verify-db-schema-consistency.js` | Ends `DB schema consistency verification passed`, exit 0. |
 | Devices CHECK rebuild fence | `node scripts/verify-devices-rebuild-fence.js` | `verify-devices-rebuild-fence: OK (<n> flows)`, exit 0. Required when touching `sync-init-fn` devices-CHECK logic. |
 | Devices CHECK rebuild rehearsal | `node --test scripts/rehearse-devices-rebuild.test.js` | Node test exit 0. Required with `verify-devices-rebuild-fence.js` for `sync-init-fn` devices-CHECK touches. |
+| Boot-DDL interpolation | `node scripts/verify-boot-ddl-interpolation.js` | Ends `verify-boot-ddl-interpolation: OK`, exit 0. Required when touching `sync-init-fn` DDL strings or seed triggers. |
+| Trigger-body parity | `node scripts/verify-trigger-body-parity.js` | Ends `verify-trigger-body-parity: OK`, exit 0. Required when touching any trigger in seed-blank.sql or the `sync-init-fn` rewrites. |
+| Function-node parse | `node scripts/verify-flows-fn-parse.js` | Ends `verify-flows-fn-parse: OK`, exit 0. Required for any flows.json function-node edit. |
 | STREGA Gen1 decoder | `node scripts/verify-strega-gen1.js` | Exit 0. |
 | Aqua-Scope LoRain decoder | `node scripts/verify-lorain-codec.js` | Exit 0. |
 | SENSECAP S2120 decoder | `node scripts/verify-s2120-codec.js` | Exit 0. |
@@ -68,8 +71,8 @@ repo (`scripts/`, `.github/workflows/`) plus `AGENTS.md`.
 
 | Changed surface | Minimum local evidence |
 |---|---|
-| `flows.json` function, route, inject, MQTT, or wiring | Roundtrip guard, `verify-no-new-silent-catch.js`, `test-flows-wiring.js`, `verify-flows-size-ratchet.js`, `flows-bare-require-scan.js`, `check-mqtt-topics.sh` if MQTT touched, `verify-no-stray-ddl.js` if DDL-like text changed, `verify-sync-flow.js`. |
-| Edge schema, seed, bundled DBs, migrations, or `deploy.sh` schema repair | `verify-migrations.js`, `verify-seed-replay.js`, `verify-runtime-schema-parity.js`, `verify-db-schema-consistency.js`, `verify-no-stray-ddl.js`, `verify-profile-parity.js`. |
+| `flows.json` function, route, inject, MQTT, or wiring | Roundtrip guard, `verify-no-new-silent-catch.js`, `test-flows-wiring.js`, `verify-flows-size-ratchet.js`, `flows-bare-require-scan.js`, `verify-flows-fn-parse.js`, `check-mqtt-topics.sh` if MQTT touched, `verify-no-stray-ddl.js` if DDL-like text changed, `verify-sync-flow.js`. |
+| Edge schema, seed, bundled DBs, migrations, or `deploy.sh` schema repair | `verify-migrations.js`, `verify-seed-replay.js`, `verify-runtime-schema-parity.js`, `verify-db-schema-consistency.js`, `verify-no-stray-ddl.js`, `verify-profile-parity.js`, `verify-boot-ddl-interpolation.js`, `verify-trigger-body-parity.js`. |
 | `sync-init-fn` devices-CHECK/rebuild logic | Edge schema set plus `verify-devices-rebuild-fence.js` and `node --test scripts/rehearse-devices-rebuild.test.js`. |
 | Device decoder or payload semantics | The device-specific decoder verifier plus `verify-codec-robustness.js`; add `verify-sync-flow.js` if ingest flow or DB writes changed. |
 | React GUI | `npm run test:unit` and `npm run build` from `web/react-gui`; add contract/edge verifiers if GUI semantics depend on changed edge fields. |
