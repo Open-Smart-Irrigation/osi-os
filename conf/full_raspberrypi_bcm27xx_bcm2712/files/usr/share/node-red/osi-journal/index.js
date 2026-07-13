@@ -943,6 +943,9 @@ function validateEntry(catalog, _layoutDef, _templateDef, entryInput, validation
 module.exports = {
   aggregateHash,
   allowedUnits,
+  assertJournalEntryEffectKey: function assertJournalEntryEffectKey() {
+    return require('./lifecycle').assertJournalEntryEffectKey.apply(null, arguments);
+  },
   buildAggregate,
   buildContext,
   convertToCanonical,

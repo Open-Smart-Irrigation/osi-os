@@ -2,6 +2,13 @@
     "$schema": "http://json-schema.org/draft-07/schema#",
     "$id": "https://contracts.opensmartirrigation.org/sync-schema/events.schema.json",
     "title": "Sync Event",
+    "x-semantic-bindings": {
+        "JOURNAL_ENTRY_UPSERTED": {"aggregate_key_path": "payload.entry_uuid", "sync_version_path": "payload.sync_version"},
+        "JOURNAL_ENTRY_VOIDED": {"aggregate_key_path": "payload.entry_uuid", "sync_version_path": "payload.sync_version"},
+        "JOURNAL_VOCAB_UPSERTED": {"aggregate_key_path": "payload.custom_field_uuid", "sync_version_path": "payload.sync_version"},
+        "JOURNAL_PLOT_UPSERTED": {"aggregate_key_path": "payload.plot_uuid", "sync_version_path": "payload.sync_version"},
+        "JOURNAL_PLOT_GROUP_UPSERTED": {"aggregate_key_path": "payload.group_uuid", "sync_version_path": "payload.sync_version"}
+    },
     "type": "object",
     "required": ["eventUuid", "aggregateType", "aggregateKey", "op", "syncVersion", "payload"],
     "additionalProperties": false,
@@ -60,16 +67,37 @@
     "allOf": [
         {
             "if": {
+                "properties": {
+                    "op": {
+                        "enum": [
+                            "JOURNAL_ENTRY_UPSERTED",
+                            "JOURNAL_ENTRY_VOIDED",
+                            "JOURNAL_VOCAB_UPSERTED",
+                            "JOURNAL_PLOT_UPSERTED",
+                            "JOURNAL_PLOT_GROUP_UPSERTED"
+                        ]
+                    }
+                },
+                "required": ["op"]
+            },
+            "then": {
+                "properties": {
+                    "occurredAt": {"$ref": "resources.schema.json#/definitions/CanonicalUtcTimestamp"}
+                }
+            }
+        },
+        {
+            "if": {
                 "properties": {"op": {"const": "JOURNAL_ENTRY_UPSERTED"}},
                 "required": ["op"]
             },
             "then": {
                 "properties": {
                     "aggregateType": {"const": "JOURNAL_ENTRY"},
-                    "aggregateKey": {"$ref": "resources.schema.json#/definitions/Uuid"},
+                    "aggregateKey": {"$ref": "resources.schema.json#/definitions/CanonicalUuid"},
                     "payload": {
                         "allOf": [
-                            {"$ref": "resources.schema.json#/definitions/JournalEntry"},
+                            {"$ref": "resources.schema.json#/definitions/JournalEntryAggregate"},
                             {
                                 "required": ["status"],
                                 "properties": {"status": {"const": "final"}}
@@ -87,13 +115,18 @@
             "then": {
                 "properties": {
                     "aggregateType": {"const": "JOURNAL_ENTRY"},
-                    "aggregateKey": {"$ref": "resources.schema.json#/definitions/Uuid"},
+                    "aggregateKey": {"$ref": "resources.schema.json#/definitions/CanonicalUuid"},
                     "payload": {
                         "allOf": [
-                            {"$ref": "resources.schema.json#/definitions/JournalEntry"},
+                            {"$ref": "resources.schema.json#/definitions/JournalEntryAggregate"},
                             {
-                                "required": ["status"],
-                                "properties": {"status": {"const": "voided"}}
+                                "required": ["status", "voided_at", "voided_by_principal_uuid", "void_reason"],
+                                "properties": {
+                                    "status": {"const": "voided"},
+                                    "voided_at": {"$ref": "resources.schema.json#/definitions/CanonicalUtcTimestamp"},
+                                    "voided_by_principal_uuid": {"$ref": "resources.schema.json#/definitions/Uuid"},
+                                    "void_reason": {"type": "string", "minLength": 1, "maxLength": 4000}
+                                }
                             }
                         ]
                     }
@@ -108,8 +141,8 @@
             "then": {
                 "properties": {
                     "aggregateType": {"const": "JOURNAL_VOCAB"},
-                    "aggregateKey": {"$ref": "resources.schema.json#/definitions/Uuid"},
-                    "payload": {"$ref": "resources.schema.json#/definitions/JournalVocab"}
+                    "aggregateKey": {"$ref": "resources.schema.json#/definitions/CanonicalUuid"},
+                    "payload": {"$ref": "resources.schema.json#/definitions/JournalVocabAggregate"}
                 }
             }
         },
@@ -121,8 +154,8 @@
             "then": {
                 "properties": {
                     "aggregateType": {"const": "JOURNAL_PLOT"},
-                    "aggregateKey": {"$ref": "resources.schema.json#/definitions/Uuid"},
-                    "payload": {"$ref": "resources.schema.json#/definitions/JournalPlot"}
+                    "aggregateKey": {"$ref": "resources.schema.json#/definitions/CanonicalUuid"},
+                    "payload": {"$ref": "resources.schema.json#/definitions/JournalPlotAggregate"}
                 }
             }
         },
@@ -134,8 +167,8 @@
             "then": {
                 "properties": {
                     "aggregateType": {"const": "JOURNAL_PLOT_GROUP"},
-                    "aggregateKey": {"$ref": "resources.schema.json#/definitions/Uuid"},
-                    "payload": {"$ref": "resources.schema.json#/definitions/JournalPlotGroup"}
+                    "aggregateKey": {"$ref": "resources.schema.json#/definitions/CanonicalUuid"},
+                    "payload": {"$ref": "resources.schema.json#/definitions/JournalPlotGroupAggregate"}
                 }
             }
         }

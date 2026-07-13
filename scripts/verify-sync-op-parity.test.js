@@ -125,8 +125,13 @@ function createStagedParityFixture(overrides) {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'sync-op-staging-'));
   const schemaPath = path.join(tmp, 'events.schema.json');
   const flowPath = path.join(tmp, 'flows.json');
-  const modulePath = path.join(tmp, 'journal-lifecycle.js');
+  const moduleDir = path.join(
+    tmp,
+    'conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-journal'
+  );
+  const modulePath = path.join(moduleDir, 'lifecycle.js');
   const serverSource = path.join(tmp, 'EdgeSyncService.java');
+  fs.mkdirSync(moduleDir, { recursive: true });
   fs.writeFileSync(schemaPath, JSON.stringify({
     type: 'object',
     properties: {
@@ -392,6 +397,78 @@ async function emit(tx, entryUuid) {
 
   assert.equal(result.ok, false);
   assert.match(result.message, /edgeModuleOwned.*JOURNAL_ENTRY_VOIDED/i);
+});
+
+test('parity discovers a deferred journal emitter in a second production module', () => {
+  const fixture = createStagedParityFixture();
+  fs.writeFileSync(path.join(path.dirname(fixture.moduleSources[0].path), 'vocab.js'), `
+async function publishVocab(tx, payload) {
+  return publishAnything(tx, { operation: 'JOURNAL_VOCAB_UPSERTED', payload });
+}
+`);
+  delete fixture.moduleSources;
+
+  const result = checkSyncOpParity(fixture);
+
+  assert.equal(result.ok, false);
+  assert.match(result.message, /JOURNAL_VOCAB_UPSERTED/);
+  assert.match(result.message, /edgeDeferred|undeclared journal ops/);
+});
+
+test('parity ignores journal operation names found only in module comments', () => {
+  const fixture = createStagedParityFixture();
+  fs.writeFileSync(path.join(path.dirname(fixture.moduleSources[0].path), 'comment-only.js'), `
+// publishAnything(tx, { operation: 'JOURNAL_VOCAB_UPSERTED' });
+/* 'JOURNAL_PLOT_UPSERTED' was considered but is not emitted. */
+module.exports = {};
+`);
+  delete fixture.moduleSources;
+
+  const result = checkSyncOpParity(fixture);
+
+  assert.equal(result.ok, true, result.message);
+});
+
+test('parity excludes journal test modules from production discovery', () => {
+  const fixture = createStagedParityFixture();
+  fs.writeFileSync(path.join(path.dirname(fixture.moduleSources[0].path), 'deferred.test.js'), `
+test('future vocabulary producer', () => publishAnything('JOURNAL_VOCAB_UPSERTED'));
+`);
+  delete fixture.moduleSources;
+
+  const result = checkSyncOpParity(fixture);
+
+  assert.equal(result.ok, true, result.message);
+});
+
+test('parity fails closed on a dynamic journal outbox operation site', () => {
+  const fixture = createStagedParityFixture();
+  fs.writeFileSync(path.join(path.dirname(fixture.moduleSources[0].path), 'dynamic.js'), `
+async function publishDynamic(tx, entryUuid, op) {
+  return emitJournalOutbox(tx, entryUuid, op);
+}
+`);
+  delete fixture.moduleSources;
+
+  const result = checkSyncOpParity(fixture);
+
+  assert.equal(result.ok, false);
+  assert.match(result.message, /dynamic.*outbox|outbox.*literal/i);
+});
+
+test('parity fails closed on an unparseable journal outbox call', () => {
+  const fixture = createStagedParityFixture();
+  fs.writeFileSync(path.join(path.dirname(fixture.moduleSources[0].path), 'broken.js'), `
+async function publishBroken(tx, entryUuid) {
+  return emitJournalOutbox(tx, entryUuid, 'JOURNAL_ENTRY_UPSERTED';
+}
+`);
+  delete fixture.moduleSources;
+
+  const result = checkSyncOpParity(fixture);
+
+  assert.equal(result.ok, false);
+  assert.match(result.message, /unparseable outbox call|missing closing parenthesis/i);
 });
 
 test('parity rejects cloud-deferred journal ops implemented by the server early', () => {

@@ -8,12 +8,8 @@ const { execFileSync } = require('node:child_process');
 const REPO_ROOT = path.resolve(__dirname, '..');
 const SERVER_RELATIVE_SOURCE = path.join('backend', 'src', 'main', 'java', 'org', 'osi', 'server', 'sync', 'EdgeSyncService.java');
 const STAGING_MANIFEST_RELATIVE = 'scripts/fixtures/sync-contract-staging.json';
-const MODULE_SOURCES = [
-  {
-    name: 'journal-lifecycle',
-    path: 'conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-journal/lifecycle.js',
-  },
-];
+const JOURNAL_MODULE_DIRECTORY =
+  'conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-journal';
 const EXACT_STAGED_COMMANDS = [
   'UPSERT_JOURNAL_ENTRY',
   'VOID_JOURNAL_ENTRY',
@@ -767,16 +763,187 @@ function loadStagingManifest(manifestPath) {
   }
 }
 
+function discoverJournalModuleSources(root) {
+  const directory = path.join(root, JOURNAL_MODULE_DIRECTORY);
+  let entries;
+  try {
+    entries = fs.readdirSync(directory, { withFileTypes: true });
+  } catch (error) {
+    return {
+      sources: [],
+      errors: [`unable to list production journal modules in ${directory}: ${error.message}`],
+    };
+  }
+  const sources = entries
+    .filter((entry) => entry.isFile() && entry.name.endsWith('.js') && !entry.name.endsWith('.test.js'))
+    .sort((left, right) => left.name.localeCompare(right.name))
+    .map((entry) => ({
+      name: entry.name.slice(0, -'.js'.length),
+      path: path.join(directory, entry.name),
+    }));
+  if (sources.length === 0) {
+    return { sources, errors: [`no production journal modules found in ${directory}`] };
+  }
+  return { sources, errors: [] };
+}
+
+function stripJavaScriptComments(source) {
+  const output = source.split('');
+  let state = 'code';
+  for (let index = 0; index < source.length; index += 1) {
+    const ch = source[index];
+    const next = source[index + 1];
+    if (state === 'line-comment') {
+      if (ch === '\n') {
+        state = 'code';
+      } else {
+        output[index] = ' ';
+      }
+      continue;
+    }
+    if (state === 'block-comment') {
+      if (ch === '*' && next === '/') {
+        output[index] = ' ';
+        output[index + 1] = ' ';
+        index += 1;
+        state = 'code';
+      } else if (ch !== '\n' && ch !== '\r') {
+        output[index] = ' ';
+      }
+      continue;
+    }
+    if (state !== 'code') {
+      if (ch === '\\') {
+        index += 1;
+      } else if ((state === 'single' && ch === "'") ||
+        (state === 'double' && ch === '"') ||
+        (state === 'template' && ch === '`')) {
+        state = 'code';
+      }
+      continue;
+    }
+    if (ch === '/' && next === '/') {
+      output[index] = ' ';
+      output[index + 1] = ' ';
+      index += 1;
+      state = 'line-comment';
+    } else if (ch === '/' && next === '*') {
+      output[index] = ' ';
+      output[index + 1] = ' ';
+      index += 1;
+      state = 'block-comment';
+    } else if (ch === "'") {
+      state = 'single';
+    } else if (ch === '"') {
+      state = 'double';
+    } else if (ch === '`') {
+      state = 'template';
+    }
+  }
+  return output.join('');
+}
+
+function maskJavaScriptStrings(source) {
+  const output = source.split('');
+  let state = 'code';
+  for (let index = 0; index < source.length; index += 1) {
+    const ch = source[index];
+    if (state === 'code') {
+      if (ch === "'") state = 'single';
+      else if (ch === '"') state = 'double';
+      else if (ch === '`') state = 'template';
+      if (state !== 'code') output[index] = ' ';
+      continue;
+    }
+    if (ch !== '\n' && ch !== '\r') output[index] = ' ';
+    if (ch === '\\') {
+      if (index + 1 < output.length && source[index + 1] !== '\n') output[index + 1] = ' ';
+      index += 1;
+    } else if ((state === 'single' && ch === "'") ||
+      (state === 'double' && ch === '"') ||
+      (state === 'template' && ch === '`')) {
+      state = 'code';
+    }
+  }
+  return output.join('');
+}
+
+function findMatchingJavaScriptParen(maskedSource, openIndex) {
+  let depth = 0;
+  for (let index = openIndex; index < maskedSource.length; index += 1) {
+    if (maskedSource[index] === '(') depth += 1;
+    if (maskedSource[index] === ')') {
+      depth -= 1;
+      if (depth === 0) return index;
+    }
+  }
+  return -1;
+}
+
+function isOutboxFunctionDefinition(maskedSource, calleeIndex, closeIndex) {
+  const prefix = maskedSource.slice(Math.max(0, calleeIndex - 80), calleeIndex);
+  if (/\bfunction\s*\*?\s*$/.test(prefix)) return true;
+  const suffix = maskedSource.slice(closeIndex + 1).trimStart();
+  return suffix.startsWith('=>') || suffix.startsWith('{');
+}
+
+function extractJournalOperationLiterals(source) {
+  const operations = [];
+  const journalOperation = /^JOURNAL_[A-Z0-9_]+_(?:UPSERTED|VOIDED)$/;
+  for (let index = 0; index < source.length; index += 1) {
+    const quote = source[index];
+    if (quote !== "'" && quote !== '"' && quote !== '`') continue;
+    let value = '';
+    let closed = false;
+    let dynamicTemplate = false;
+    for (index += 1; index < source.length; index += 1) {
+      const ch = source[index];
+      if (ch === '\\') {
+        value += ch;
+        if (index + 1 < source.length) value += source[index += 1];
+      } else if (ch === quote) {
+        closed = true;
+        break;
+      } else {
+        if (quote === '`' && ch === '$' && source[index + 1] === '{') dynamicTemplate = true;
+        value += ch;
+      }
+    }
+    if (closed && !dynamicTemplate && journalOperation.test(value)) operations.push(value);
+  }
+  return operations;
+}
+
 function extractJournalModuleOps(modulePath) {
   if (!fs.existsSync(modulePath)) {
     return { ops: [], errors: [`journal module source not found at ${modulePath}`] };
   }
-  const source = readUtf8(modulePath);
-  const ops = [];
-  const call = /\bemitJournalOutbox\s*\(\s*[^,]+,\s*[^,]+,\s*(['"])(JOURNAL_[A-Z0-9_]+_(?:UPSERTED|VOIDED))\1\s*\)/g;
+  const source = stripJavaScriptComments(readUtf8(modulePath));
+  const maskedSource = maskJavaScriptStrings(source);
+  const ops = extractJournalOperationLiterals(source);
+  const errors = [];
   let match;
-  while ((match = call.exec(source)) !== null) ops.push(match[2]);
-  return { ops: sortedUnique(ops), errors: [] };
+
+  const call = /\b([A-Za-z_$][\w$]*(?:\s*\.\s*[A-Za-z_$][\w$]*)*)\s*\(/g;
+  while ((match = call.exec(maskedSource)) !== null) {
+    const callee = match[1].replace(/\s+/g, '');
+    if (!callee.toLowerCase().includes('outbox')) continue;
+    const openIndex = match.index + match[0].lastIndexOf('(');
+    const closeIndex = findMatchingJavaScriptParen(maskedSource, openIndex);
+    const location = `${path.basename(modulePath)}@${match.index}`;
+    if (closeIndex < 0) {
+      errors.push(`${location}: unparseable outbox call; missing closing parenthesis`);
+      break;
+    }
+    if (!isOutboxFunctionDefinition(maskedSource, match.index, closeIndex)) {
+      const argumentsSource = source.slice(openIndex + 1, closeIndex);
+      if (extractJournalOperationLiterals(argumentsSource).length === 0) {
+        errors.push(`${location}: dynamic outbox operation; journal outbox calls must include a literal JOURNAL_* operation`);
+      }
+    }
+    call.lastIndex = closeIndex + 1;
+  }
+  return { ops: sortedUnique(ops), errors };
 }
 
 function extractSyncEventApplierOps(serverSource) {
@@ -876,8 +1043,11 @@ function checkSyncOpParity(options = {}) {
     ? options.sqlSources === undefined && options.databaseSources === undefined
     : Boolean(options.requireSqlOwnedSources);
   const stagingEnabled = options.stagingManifest !== false;
+  const discoveredModules = options.moduleSources === undefined && stagingEnabled
+    ? discoverJournalModuleSources(root)
+    : { sources: [], errors: [] };
   const moduleSources = options.moduleSources === undefined
-    ? (stagingEnabled ? MODULE_SOURCES : [])
+    ? discoveredModules.sources
     : options.moduleSources;
   const sourcePath = (entry) => path.resolve(root, entry.path);
 
@@ -890,6 +1060,7 @@ function checkSyncOpParity(options = {}) {
       stagingErrors = loadStagingManifest(manifestPath).errors;
     }
   }
+  stagingErrors.push(...discoveredModules.errors);
   // The fixture is evidence of staging state, not an extensible allow list. The
   // executable policy remains pinned to these reviewed closed sets.
   const staging = stagingEnabled ? {

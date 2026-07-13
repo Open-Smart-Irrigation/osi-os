@@ -25,6 +25,30 @@ const EXACT_STAGED_JOURNAL_COMMANDS = [
     'UPSERT_JOURNAL_PLOT',
     'UPSERT_JOURNAL_PLOT_GROUP',
 ];
+const EXACT_COMMAND_SEMANTIC_BINDINGS = {
+    UPSERT_JOURNAL_ENTRY: {
+        effect_key: { prefix: 'journal_entry', uuid_path: 'entry.entry_uuid', version_path: 'entry.base_sync_version' },
+    },
+    VOID_JOURNAL_ENTRY: {
+        effect_key: { prefix: 'journal_entry', uuid_path: 'entry_uuid', version_path: 'base_sync_version' },
+    },
+    UPSERT_JOURNAL_CUSTOM_VOCAB: {
+        effect_key: { prefix: 'journal_vocab', uuid_path: 'custom_vocab.custom_field_uuid', version_path: 'custom_vocab.base_sync_version' },
+    },
+    UPSERT_JOURNAL_PLOT: {
+        effect_key: { prefix: 'journal_plot', uuid_path: 'plot.plot_uuid', version_path: 'plot.base_sync_version' },
+    },
+    UPSERT_JOURNAL_PLOT_GROUP: {
+        effect_key: { prefix: 'journal_plot_group', uuid_path: 'plot_group.group_uuid', version_path: 'plot_group.base_sync_version' },
+    },
+};
+const EXACT_EVENT_SEMANTIC_BINDINGS = {
+    JOURNAL_ENTRY_UPSERTED: { aggregate_key_path: 'payload.entry_uuid', sync_version_path: 'payload.sync_version' },
+    JOURNAL_ENTRY_VOIDED: { aggregate_key_path: 'payload.entry_uuid', sync_version_path: 'payload.sync_version' },
+    JOURNAL_VOCAB_UPSERTED: { aggregate_key_path: 'payload.custom_field_uuid', sync_version_path: 'payload.sync_version' },
+    JOURNAL_PLOT_UPSERTED: { aggregate_key_path: 'payload.plot_uuid', sync_version_path: 'payload.sync_version' },
+    JOURNAL_PLOT_GROUP_UPSERTED: { aggregate_key_path: 'payload.group_uuid', sync_version_path: 'payload.sync_version' },
+};
 
 function loadSchema(name) {
     return JSON.parse(fs.readFileSync(path.join(SCHEMA_DIR, name), 'utf8'));
@@ -90,6 +114,20 @@ function assertExactList(name, actual, expected) {
     }
 }
 
+function canonicalJson(value) {
+    if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`;
+    if (value && typeof value === 'object') {
+        return `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${canonicalJson(value[key])}`).join(',')}}`;
+    }
+    return JSON.stringify(value);
+}
+
+function assertExactMetadata(name, actual, expected) {
+    if (canonicalJson(actual) !== canonicalJson(expected)) {
+        throw new Error(`${name} must match the reviewed executable semantic bindings`);
+    }
+}
+
 function loadStagedCommands() {
     const staging = JSON.parse(fs.readFileSync(STAGING_MANIFEST, 'utf8'));
     if (staging.version !== 1 || !staging.commands || typeof staging.commands !== 'object') {
@@ -129,6 +167,19 @@ function main() {
         throw new Error(`commands.schema.json enum drift: missing=${missing.join(',') || '(none)'} extra=${extra.join(',') || '(none)'} duplicates=${sortedUnique(schemaDuplicates).join(',') || '(none)'}`);
     }
     console.log(`  ok command enum = registry ${registryTypes.length} + routed ${separatelyRoutedCommands.length} + staged ${stagedCommands.length}`);
+
+    const eventsSchema = loadSchema('events.schema.json');
+    assertExactMetadata(
+        'commands.schema.json x-semantic-bindings',
+        schema['x-semantic-bindings'],
+        EXACT_COMMAND_SEMANTIC_BINDINGS
+    );
+    assertExactMetadata(
+        'events.schema.json x-semantic-bindings',
+        eventsSchema['x-semantic-bindings'],
+        EXACT_EVENT_SEMANTIC_BINDINGS
+    );
+    console.log('  ok journal semantic bindings are exact and machine-readable');
 
     // 2. Verify schema files exist
     for (const name of ['commands.schema.json', 'events.schema.json', 'resources.schema.json']) {

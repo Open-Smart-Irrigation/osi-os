@@ -1620,6 +1620,40 @@ test('command-originated finalize records its terminal ledger and ACK in the sam
   assert.equal(result.sync_version, 1);
 });
 
+test('command-originated create rejects a mismatched effect-key UUID and rolls back', async () => {
+  await rejectCode(journal.finalize(db, catalog, validEntry(), principal({
+    origin: 'cloud-ui',
+    command_id: 'command-wrong-entry',
+    effect_key: 'journal_entry:12345678-1234-4234-8234-123456789abc:0',
+  })), 'invalid_effect_key');
+
+  await assertNoJournalWrites();
+  assert.equal(await count('applied_commands'), 0);
+  assert.equal(await count('command_ack_outbox'), 0);
+});
+
+test('command-originated correction binds its effect-key base to applied version minus one', async () => {
+  await journal.finalize(db, catalog, validEntry(), principal());
+  const beforeEntry = await db.get('SELECT * FROM journal_entries WHERE entry_uuid=?', [ENTRY_UUID]);
+  const beforeValues = await db.all('SELECT * FROM journal_entry_values WHERE entry_uuid=?', [ENTRY_UUID]);
+  const beforeOutbox = await db.all('SELECT * FROM sync_outbox ORDER BY occurred_at,event_uuid');
+
+  await rejectCode(journal.finalize(db, catalog, validEntry({
+    base_sync_version: 1,
+    note: 'Must roll back',
+  }), principal({
+    origin: 'cloud-ui',
+    command_id: 'command-wrong-base',
+    effect_key: 'journal_entry:' + ENTRY_UUID + ':0',
+  })), 'invalid_effect_key');
+
+  assert.deepEqual(await db.get('SELECT * FROM journal_entries WHERE entry_uuid=?', [ENTRY_UUID]), beforeEntry);
+  assert.deepEqual(await db.all('SELECT * FROM journal_entry_values WHERE entry_uuid=?', [ENTRY_UUID]), beforeValues);
+  assert.deepEqual(await db.all('SELECT * FROM sync_outbox ORDER BY occurred_at,event_uuid'), beforeOutbox);
+  assert.equal(await count('applied_commands'), 0);
+  assert.equal(await count('command_ack_outbox'), 0);
+});
+
 test('command ledger and ACK roll back with the journal mutation on a late injected failure', async () => {
   const injected = new Error('injected after-command crash');
   const commandPrincipal = principal({
@@ -1884,6 +1918,32 @@ test('command-originated void writes an APPLIED VOID ledger and ACK at version t
   assert.equal(ack.result, 'APPLIED');
   assert.equal(ack.appliedSyncVersion, 2);
   assert.equal(ack.entryUuid, ENTRY_UUID);
+});
+
+test('command-originated void rejects a mismatched effect-key base and rolls back', async () => {
+  await journal.finalize(db, catalog, validEntry(), principal());
+  const beforeEntry = await db.get('SELECT * FROM journal_entries WHERE entry_uuid=?', [ENTRY_UUID]);
+  const beforeValues = await db.all('SELECT * FROM journal_entry_values WHERE entry_uuid=?', [ENTRY_UUID]);
+  const beforeOutbox = await db.all('SELECT * FROM sync_outbox ORDER BY occurred_at,event_uuid');
+
+  await rejectCode(journal.void_(
+    db,
+    catalog,
+    ENTRY_UUID,
+    1,
+    'Must roll back',
+    principal({
+      origin: 'cloud-ui',
+      command_id: 'command-void-wrong-base',
+      effect_key: 'journal_entry:' + ENTRY_UUID + ':0',
+    })
+  ), 'invalid_effect_key');
+
+  assert.deepEqual(await db.get('SELECT * FROM journal_entries WHERE entry_uuid=?', [ENTRY_UUID]), beforeEntry);
+  assert.deepEqual(await db.all('SELECT * FROM journal_entry_values WHERE entry_uuid=?', [ENTRY_UUID]), beforeValues);
+  assert.deepEqual(await db.all('SELECT * FROM sync_outbox ORDER BY occurred_at,event_uuid'), beforeOutbox);
+  assert.equal(await count('applied_commands'), 0);
+  assert.equal(await count('command_ack_outbox'), 0);
 });
 
 test('late command failure rolls back void, outbox, ledger, and ACK', async () => {

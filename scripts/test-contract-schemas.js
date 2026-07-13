@@ -22,9 +22,147 @@ const JOURNAL_EVENT_BINDINGS = {
     JOURNAL_PLOT_UPSERTED: ['JOURNAL_PLOT', 'JournalPlot', 'plot_uuid'],
     JOURNAL_PLOT_GROUP_UPSERTED: ['JOURNAL_PLOT_GROUP', 'JournalPlotGroup', 'group_uuid'],
 };
+const EXPECTED_COMMAND_SEMANTIC_BINDINGS = {
+    UPSERT_JOURNAL_ENTRY: {
+        effect_key: { prefix: 'journal_entry', uuid_path: 'entry.entry_uuid', version_path: 'entry.base_sync_version' },
+    },
+    VOID_JOURNAL_ENTRY: {
+        effect_key: { prefix: 'journal_entry', uuid_path: 'entry_uuid', version_path: 'base_sync_version' },
+    },
+    UPSERT_JOURNAL_CUSTOM_VOCAB: {
+        effect_key: { prefix: 'journal_vocab', uuid_path: 'custom_vocab.custom_field_uuid', version_path: 'custom_vocab.base_sync_version' },
+    },
+    UPSERT_JOURNAL_PLOT: {
+        effect_key: { prefix: 'journal_plot', uuid_path: 'plot.plot_uuid', version_path: 'plot.base_sync_version' },
+    },
+    UPSERT_JOURNAL_PLOT_GROUP: {
+        effect_key: { prefix: 'journal_plot_group', uuid_path: 'plot_group.group_uuid', version_path: 'plot_group.base_sync_version' },
+    },
+};
+const EXPECTED_EVENT_SEMANTIC_BINDINGS = Object.fromEntries(
+    Object.entries(JOURNAL_EVENT_BINDINGS).map(([op, binding]) => [op, {
+        aggregate_key_path: `payload.${binding[2]}`,
+        sync_version_path: 'payload.sync_version',
+    }])
+);
 
 function loadSchema(name) {
     return JSON.parse(fs.readFileSync(path.join(SCHEMA_DIR, name), 'utf8'));
+}
+
+const SUPPORTED_SCHEMA_KEYWORDS = new Set([
+    '$schema', '$id', '$ref', 'title', 'description', 'definitions',
+    'type', 'const', 'enum', 'properties', 'required', 'additionalProperties',
+    'propertyNames', 'items', 'minItems', 'maxItems', 'uniqueItems',
+    'minLength', 'maxLength', 'pattern', 'format', 'minimum', 'maximum',
+    'allOf', 'anyOf', 'oneOf', 'not', 'if', 'then', 'else',
+]);
+const SUPPORTED_FORMATS = new Set(['date-time']);
+const DATE_TIME = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.(\d+))?(Z|([+-])(\d{2}):(\d{2}))$/;
+
+function isPlainObject(value) {
+    return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+function daysInMonth(year, month) {
+    if (month === 2) {
+        const leap = year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
+        return leap ? 29 : 28;
+    }
+    return [4, 6, 9, 11].includes(month) ? 30 : 31;
+}
+
+function isValidDateTime(value) {
+    const match = DATE_TIME.exec(value);
+    if (!match) return false;
+    const year = Number(match[1]);
+    const month = Number(match[2]);
+    const day = Number(match[3]);
+    const hour = Number(match[4]);
+    const minute = Number(match[5]);
+    const second = Number(match[6]);
+    const offsetHour = match[10] == null ? 0 : Number(match[10]);
+    const offsetMinute = match[11] == null ? 0 : Number(match[11]);
+    return month >= 1 && month <= 12 && day >= 1 && day <= daysInMonth(year, month) &&
+        hour <= 23 && minute <= 59 && second <= 59 &&
+        offsetHour <= 23 && offsetMinute <= 59;
+}
+
+function unsupportedKeywordErrors(schema, location) {
+    if (!isPlainObject(schema)) return [];
+    return Object.keys(schema)
+        .filter((keyword) => !SUPPORTED_SCHEMA_KEYWORDS.has(keyword) && !keyword.startsWith('x-'))
+        .map((keyword) => `${location}: unsupported schema keyword ${keyword}`);
+}
+
+function schemaStructureErrors(schema, rootSchema, location) {
+    const at = location || '$';
+    const root = rootSchema || schema;
+    if (typeof schema === 'boolean') return [];
+    if (!isPlainObject(schema)) return [`${at}: schema must be an object or boolean`];
+    const errors = unsupportedKeywordErrors(schema, at);
+    if (schema.$ref !== undefined) {
+        if (typeof schema.$ref !== 'string') {
+            errors.push(`${at}.$ref: must be a string`);
+        } else {
+            try { resolveRef(schema.$ref, root); } catch (error) { errors.push(`${at}.$ref: ${error.message}`); }
+        }
+    }
+    if (schema.pattern !== undefined) {
+        if (typeof schema.pattern !== 'string') {
+            errors.push(`${at}.pattern: must be a string`);
+        } else {
+            try { new RegExp(schema.pattern); } catch (error) { errors.push(`${at}.pattern: invalid regex: ${error.message}`); }
+        }
+    }
+    if (schema.format !== undefined && !SUPPORTED_FORMATS.has(schema.format)) {
+        errors.push(`${at}.format: unsupported format ${String(schema.format)}`);
+    }
+    if (schema.required !== undefined) {
+        if (!Array.isArray(schema.required) || schema.required.some((item) => typeof item !== 'string')) {
+            errors.push(`${at}.required: must be an array of strings`);
+        } else if (new Set(schema.required).size !== schema.required.length) {
+            errors.push(`${at}.required: must not contain duplicates`);
+        }
+    }
+    if (schema.type !== undefined) {
+        const types = Array.isArray(schema.type) ? schema.type : [schema.type];
+        const allowedTypes = new Set(['null', 'boolean', 'object', 'array', 'number', 'integer', 'string']);
+        if (types.length === 0 || types.some((type) => !allowedTypes.has(type))) {
+            errors.push(`${at}.type: contains an unsupported JSON Schema type`);
+        }
+    }
+    for (const mapKeyword of ['properties', 'definitions']) {
+        if (schema[mapKeyword] === undefined) continue;
+        if (!isPlainObject(schema[mapKeyword])) {
+            errors.push(`${at}.${mapKeyword}: must be an object`);
+            continue;
+        }
+        for (const [name, child] of Object.entries(schema[mapKeyword])) {
+            errors.push(...schemaStructureErrors(child, root, `${at}.${mapKeyword}.${name}`));
+        }
+    }
+    for (const childKeyword of ['items', 'propertyNames', 'not', 'if', 'then', 'else']) {
+        if (schema[childKeyword] !== undefined) {
+            errors.push(...schemaStructureErrors(schema[childKeyword], root, `${at}.${childKeyword}`));
+        }
+    }
+    if (isPlainObject(schema.additionalProperties)) {
+        errors.push(...schemaStructureErrors(schema.additionalProperties, root, `${at}.additionalProperties`));
+    } else if (schema.additionalProperties !== undefined && typeof schema.additionalProperties !== 'boolean') {
+        errors.push(`${at}.additionalProperties: must be a boolean or schema`);
+    }
+    for (const arrayKeyword of ['allOf', 'anyOf', 'oneOf']) {
+        if (schema[arrayKeyword] === undefined) continue;
+        if (!Array.isArray(schema[arrayKeyword]) || schema[arrayKeyword].length === 0) {
+            errors.push(`${at}.${arrayKeyword}: must be a nonempty array of schemas`);
+            continue;
+        }
+        schema[arrayKeyword].forEach((child, index) => {
+            errors.push(...schemaStructureErrors(child, root, `${at}.${arrayKeyword}[${index}]`));
+        });
+    }
+    return errors;
 }
 
 function valueHasType(value, type) {
@@ -53,13 +191,28 @@ function validationErrors(schema, value, rootSchema, location) {
     const errors = [];
     const root = rootSchema || schema;
     const at = location || '$';
-    if (!schema || typeof schema !== 'object') return [`${at}: schema is missing`];
+    if (schema === true) return errors;
+    if (schema === false) return [`${at}: boolean schema rejects every value`];
+    if (!schema || typeof schema !== 'object' || Array.isArray(schema)) return [`${at}: schema is missing`];
+    errors.push(...unsupportedKeywordErrors(schema, at));
     if (schema.$ref) {
-        const resolved = resolveRef(schema.$ref, root);
-        return validationErrors(resolved.schema, value, resolved.rootSchema, at);
+        try {
+            const resolved = resolveRef(schema.$ref, root);
+            return errors.concat(validationErrors(resolved.schema, value, resolved.rootSchema, at));
+        } catch (error) {
+            return errors.concat(`${at}: ${error.message}`);
+        }
     }
     if (Array.isArray(schema.allOf)) {
         for (const part of schema.allOf) errors.push(...validationErrors(part, value, root, at));
+    }
+    if (Array.isArray(schema.anyOf)) {
+        const matches = schema.anyOf.filter((part) => validationErrors(part, value, root, at).length === 0);
+        if (matches.length === 0) errors.push(`${at}: must match at least one anyOf branch`);
+    }
+    if (Array.isArray(schema.oneOf)) {
+        const matches = schema.oneOf.filter((part) => validationErrors(part, value, root, at).length === 0);
+        if (matches.length !== 1) errors.push(`${at}: must match exactly one oneOf branch; matched ${matches.length}`);
     }
     if (schema.if) {
         const conditionMatches = validationErrors(schema.if, value, root, at).length === 0;
@@ -89,8 +242,19 @@ function validationErrors(schema, value, rootSchema, location) {
         if (schema.maxLength !== undefined && value.length > schema.maxLength) {
             errors.push(`${at}: string is longer than ${schema.maxLength}`);
         }
-        if (schema.pattern && !(new RegExp(schema.pattern)).test(value)) {
-            errors.push(`${at}: string does not match ${schema.pattern}`);
+        if (schema.pattern) {
+            try {
+                if (!(new RegExp(schema.pattern)).test(value)) {
+                    errors.push(`${at}: string does not match ${schema.pattern}`);
+                }
+            } catch (error) {
+                errors.push(`${at}: invalid schema pattern ${schema.pattern}: ${error.message}`);
+            }
+        }
+        if (schema.format === 'date-time' && !isValidDateTime(value)) {
+            errors.push(`${at}: string does not match format date-time`);
+        } else if (schema.format && !SUPPORTED_FORMATS.has(schema.format)) {
+            errors.push(`${at}: unsupported schema format ${schema.format}`);
         }
     }
     if (typeof value === 'number') {
@@ -117,6 +281,10 @@ function validationErrors(schema, value, rootSchema, location) {
                 errors.push(...validationErrors(properties[key], propertyValue, root, `${at}.${key}`));
             } else if (schema.additionalProperties === false) {
                 errors.push(`${at}.${key}: additional property is forbidden`);
+            } else if (isPlainObject(schema.additionalProperties) || typeof schema.additionalProperties === 'boolean') {
+                if (isPlainObject(schema.additionalProperties)) {
+                    errors.push(...validationErrors(schema.additionalProperties, propertyValue, root, `${at}.${key}`));
+                }
             }
             if (schema.propertyNames) {
                 errors.push(...validationErrors(schema.propertyNames, key, root, `${at}{${key}}`));
@@ -124,6 +292,55 @@ function validationErrors(schema, value, rootSchema, location) {
         }
     }
     return errors;
+}
+
+function valueAtPath(value, dottedPath) {
+    return String(dottedPath || '').split('.').filter(Boolean).reduce((current, part) =>
+        current == null ? undefined : current[part], value);
+}
+
+function jsonClone(value) {
+    return JSON.parse(JSON.stringify(value));
+}
+
+function setValueAtPath(value, dottedPath, replacement) {
+    const parts = dottedPath.split('.');
+    const leaf = parts.pop();
+    const parent = parts.reduce((current, part) => current[part], value);
+    parent[leaf] = replacement;
+}
+
+function semanticBindingErrors(schema, value) {
+    const errors = [];
+    const bindings = schema && schema['x-semantic-bindings'];
+    const discriminator = value && (value.command_type || value.op);
+    const binding = bindings && bindings[discriminator];
+    if (!binding) return errors;
+    if (binding.effect_key) {
+        const uuid = valueAtPath(value, binding.effect_key.uuid_path);
+        const version = valueAtPath(value, binding.effect_key.version_path);
+        const expected = `${binding.effect_key.prefix}:${uuid}:${version}`;
+        if (value.effect_key !== expected) {
+            errors.push(`$.effect_key: must equal ${expected}`);
+        }
+    }
+    if (binding.aggregate_key_path) {
+        const expected = valueAtPath(value, binding.aggregate_key_path);
+        if (value.aggregateKey !== expected) {
+            errors.push(`$.aggregateKey: must equal ${binding.aggregate_key_path}`);
+        }
+    }
+    if (binding.sync_version_path) {
+        const expected = valueAtPath(value, binding.sync_version_path);
+        if (value.syncVersion !== expected) {
+            errors.push(`$.syncVersion: must equal ${binding.sync_version_path}`);
+        }
+    }
+    return errors;
+}
+
+function contractValidationErrors(schema, value, rootSchema) {
+    return validationErrors(schema, value, rootSchema).concat(semanticBindingErrors(schema, value));
 }
 
 function reportCheck(condition, success, failure) {
@@ -135,18 +352,57 @@ function reportCheck(condition, success, failure) {
     }
 }
 
-function expectValid(label, schema, value) {
-    const errors = validationErrors(schema, value);
+function expectValid(label, schema, value, rootSchema) {
+    const errors = contractValidationErrors(schema, value, rootSchema);
     reportCheck(errors.length === 0, `${label} validates`, `${label} rejected: ${errors.join('; ')}`);
 }
 
-function expectInvalid(label, schema, value, expectedError) {
-    const errors = validationErrors(schema, value);
+function expectInvalid(label, schema, value, expectedError, rootSchema) {
+    const errors = contractValidationErrors(schema, value, rootSchema);
     const matches = errors.length > 0 && (!expectedError || errors.some((error) => expectedError.test(error)));
     reportCheck(matches, `${label} is rejected`, `${label} unexpectedly validated or missed ${expectedError}: ${errors.join('; ')}`);
 }
 
 let ok = true;
+
+expectInvalid(
+    'schema evaluator rejects an unsupported post-Draft-07 keyword',
+    { type: 'object', unevaluatedProperties: false },
+    {},
+    /unsupported.*unevaluatedProperties/
+);
+expectInvalid(
+    'schema evaluator applies anyOf',
+    { anyOf: [{ const: 'left' }, { const: 'right' }] },
+    'neither',
+    /anyOf/
+);
+expectInvalid(
+    'schema evaluator applies oneOf exactly once',
+    { oneOf: [{ const: 'same' }, { type: 'string' }] },
+    'same',
+    /oneOf/
+);
+expectInvalid(
+    'schema evaluator checks real date-time calendar values',
+    { type: 'string', format: 'date-time' },
+    '2026-02-30T10:00:00.000Z',
+    /format.*date-time/
+);
+for (const [label, malformedSchema, expectedError] of [
+    ['unresolved references', { $ref: '#/definitions/Missing', definitions: {} }, /Unresolved schema reference/],
+    ['invalid regular expressions', { type: 'string', pattern: '[' }, /invalid regex/],
+    ['malformed properties maps', { type: 'object', properties: [] }, /properties.*object/],
+    ['empty oneOf arrays', { oneOf: [] }, /oneOf.*nonempty/],
+    ['unsupported formats', { type: 'string', format: 'journal-time' }, /unsupported format/],
+]) {
+    const errors = schemaStructureErrors(malformedSchema);
+    reportCheck(
+        errors.some((error) => expectedError.test(error)),
+        `schema evaluator fails closed on ${label}`,
+        `schema evaluator missed ${label}: ${errors.join('; ')}`
+    );
+}
 
 // L5: events.schema.json syncVersion minimum must be 0
 const eventsSchema = loadSchema('events.schema.json');
@@ -359,6 +615,18 @@ reportCheck(
 
 // Contract resources must match edge runtime device and schedule enums.
 const resourcesSchema = loadSchema('resources.schema.json');
+for (const [name, schema] of [
+    ['commands.schema.json', cmdSchema],
+    ['events.schema.json', eventsSchema],
+    ['resources.schema.json', resourcesSchema],
+]) {
+    const errors = schemaStructureErrors(schema);
+    reportCheck(
+        errors.length === 0,
+        `${name} uses only supported, well-formed Draft-07 schema constructs`,
+        `${name} schema structure is invalid: ${errors.join('; ')}`
+    );
+}
 const deviceTypes = resourcesSchema.definitions.Device.properties.type_id.enum || [];
 for (const type of ['TEKTELIC_CLOVER', 'SENSECAP_S2120']) {
     if (!deviceTypes.includes(type)) {
@@ -434,7 +702,7 @@ const journalEntry = {
     protocol_version: null,
     observation_unit_code: null,
     pass_uuid: null,
-    batch_uuid: null,
+    batch_uuid: UUID,
     activity_code: 'irrigation',
     template_code: 'farmer_quick',
     template_version: 1,
@@ -494,7 +762,16 @@ const customVocab = {
     sync_version: 1,
     created_at: '2026-07-13T08:00:00.000Z',
     deleted_at: null,
-    mappings: [],
+    mappings: [{
+        scheme_uri: 'https://example.test/vocab',
+        scheme_version: '1',
+        mapping_role: 'concept',
+        external_id: 'operator-note',
+        external_parent_id: null,
+        mapping_relation: 'exact',
+        source_uri: null,
+        active: 1,
+    }],
 };
 const plot = {
     contract_version: 1,
@@ -547,6 +824,167 @@ const eventResourceSamples = Object.assign({}, resourceSamples, {
     JournalPlotGroup: Object.assign({}, plotGroup),
 });
 for (const sample of Object.values(eventResourceSamples)) delete sample.base_sync_version;
+
+expectValid('legacy Uuid accepts compact form', resourcesSchema.definitions.Uuid, COMPACT_UUID, resourcesSchema);
+expectValid('legacy Uuid accepts fully hyphenated form', resourcesSchema.definitions.Uuid, UUID, resourcesSchema);
+expectInvalid(
+    'legacy Uuid rejects partial hyphenation',
+    resourcesSchema.definitions.Uuid,
+    '12345678-12344234-8234-123456789abc',
+    /pattern|match/,
+    resourcesSchema
+);
+for (const definitionName of ['CanonicalUuid', 'NullableCanonicalUuid']) {
+    reportCheck(
+        Boolean(resourcesSchema.definitions[definitionName]),
+        `resource schema defines ${definitionName}`,
+        `resource schema is missing ${definitionName}`
+    );
+}
+expectValid('CanonicalUuid accepts lowercase hyphenated form', resourcesSchema.definitions.CanonicalUuid, UUID, resourcesSchema);
+for (const invalidUuid of [
+    UUID.toUpperCase(),
+    COMPACT_UUID,
+    '12345678-12344234-8234-123456789abc',
+]) {
+    expectInvalid(
+        `CanonicalUuid rejects ${invalidUuid}`,
+        resourcesSchema.definitions.CanonicalUuid,
+        invalidUuid,
+        /pattern|match/,
+        resourcesSchema
+    );
+}
+
+for (const [definitionName, sample] of Object.entries(eventResourceSamples)) {
+    const aggregateName = `${definitionName}Aggregate`;
+    const aggregateSchema = resourcesSchema.definitions[aggregateName];
+    reportCheck(
+        Boolean(aggregateSchema),
+        `resource schema defines ${aggregateName}`,
+        `resource schema is missing ${aggregateName}`
+    );
+    expectValid(`${aggregateName} complete persisted shape`, aggregateSchema, sample, resourcesSchema);
+    const persistedProperties = Object.keys(resourcesSchema.definitions[definitionName].properties)
+        .filter((property) => property !== 'base_sync_version');
+    for (const property of persistedProperties) {
+        const incomplete = Object.assign({}, sample);
+        delete incomplete[property];
+        expectInvalid(
+            `${aggregateName} without persisted ${property}`,
+            aggregateSchema,
+            incomplete,
+            new RegExp(`${property}.*required`),
+            resourcesSchema
+        );
+    }
+    expectInvalid(
+        `${aggregateName} rejects command-only base_sync_version`,
+        aggregateSchema,
+        Object.assign({}, sample, { base_sync_version: 0 }),
+        /base_sync_version.*forbidden|matches forbidden/,
+        resourcesSchema
+    );
+}
+
+for (const [definitionName, sample] of [
+    ['JournalEntryValue', eventResourceSamples.JournalEntry.values[0]],
+    ['JournalVocabMapping', eventResourceSamples.JournalVocab.mappings[0]],
+    ['JournalPlotSettings', eventResourceSamples.JournalPlot.settings],
+]) {
+    const definition = resourcesSchema.definitions[definitionName];
+    reportCheck(Boolean(definition), `resource schema defines ${definitionName}`, `resource schema is missing ${definitionName}`);
+    for (const property of Object.keys(sample)) {
+        const incomplete = Object.assign({}, sample);
+        delete incomplete[property];
+        expectInvalid(
+            `${definitionName} without persisted ${property}`,
+            definition,
+            incomplete,
+            new RegExp(`${property}.*required`),
+            resourcesSchema
+        );
+    }
+}
+
+const observedValue = eventResourceSamples.JournalEntry.values[0];
+expectInvalid(
+    'observed JournalEntryValue rejects both numeric and text values',
+    resourcesSchema.definitions.JournalEntryValue,
+    Object.assign({}, observedValue, { value_text: 'twelve' }),
+    /oneOf|observed/,
+    resourcesSchema
+);
+expectInvalid(
+    'observed JournalEntryValue rejects no value',
+    resourcesSchema.definitions.JournalEntryValue,
+    Object.assign({}, observedValue, { value_num: null, value_text: null }),
+    /oneOf|observed/,
+    resourcesSchema
+);
+expectInvalid(
+    'non-observed JournalEntryValue rejects a carried value',
+    resourcesSchema.definitions.JournalEntryValue,
+    Object.assign({}, observedValue, { value_status: 'not_observed' }),
+    /oneOf|non-observed|constant/,
+    resourcesSchema
+);
+
+const journalIdentityCases = [
+    ['JournalEntryAggregate', eventResourceSamples.JournalEntry, 'entry_uuid'],
+    ['JournalEntryAggregate', eventResourceSamples.JournalEntry, 'plot_uuid'],
+    ['JournalEntryAggregate', eventResourceSamples.JournalEntry, 'batch_uuid'],
+    ['JournalVocabAggregate', eventResourceSamples.JournalVocab, 'custom_field_uuid'],
+    ['JournalPlotAggregate', eventResourceSamples.JournalPlot, 'plot_uuid'],
+    ['JournalPlotGroupAggregate', eventResourceSamples.JournalPlotGroup, 'group_uuid'],
+    ['JournalPlotGroupAggregate', eventResourceSamples.JournalPlotGroup, 'members.0'],
+];
+for (const [definitionName, sample, identityPath] of journalIdentityCases) {
+    for (const invalidUuid of [
+        UUID.toUpperCase(),
+        COMPACT_UUID,
+        '12345678-12344234-8234-123456789abc',
+    ]) {
+        const invalid = jsonClone(sample);
+        setValueAtPath(invalid, identityPath, invalidUuid);
+        expectInvalid(
+            `${definitionName} rejects non-canonical ${identityPath} ${invalidUuid}`,
+            resourcesSchema.definitions[definitionName],
+            invalid,
+            /pattern|match/,
+            resourcesSchema
+        );
+    }
+}
+
+const journalTimestampPaths = {
+    JournalEntryAggregate: [
+        'occurred_start', 'occurred_end', 'recorded_at', 'voided_at', 'created_at', 'updated_at', 'deleted_at',
+    ],
+    JournalVocabAggregate: ['created_at', 'deleted_at'],
+    JournalPlotAggregate: ['created_at', 'updated_at', 'deleted_at', 'settings.updated_at'],
+    JournalPlotGroupAggregate: ['created_at', 'resolved_at', 'deleted_at'],
+};
+for (const [definitionName, timestampPaths] of Object.entries(journalTimestampPaths)) {
+    const sampleName = definitionName.replace(/Aggregate$/, '');
+    for (const timestampPath of timestampPaths) {
+        for (const invalidTimestamp of [
+            '2026-07-13T10:00:00.000+02:00',
+            '2026-07-13T08:00:00Z',
+            '2026-02-30T08:00:00.000Z',
+        ]) {
+            const invalid = jsonClone(eventResourceSamples[sampleName]);
+            setValueAtPath(invalid, timestampPath, invalidTimestamp);
+            expectInvalid(
+                `${definitionName} rejects ${timestampPath}=${invalidTimestamp}`,
+                resourcesSchema.definitions[definitionName],
+                invalid,
+                /does not match|format.*date-time/,
+                resourcesSchema
+            );
+        }
+    }
+}
 
 const storedEntryRow = Object.assign({ id: 7, user_id: 3, zone_id: 2 }, eventResourceSamples.JournalEntry);
 delete storedEntryRow.values;
@@ -606,8 +1044,8 @@ for (const [op, binding] of Object.entries(JOURNAL_EVENT_BINDINGS)) {
         (Array.isArray(rulePayload.allOf) && rulePayload.allOf[0] && rulePayload.allOf[0].$ref));
     reportCheck(
         ruleAggregate && ruleAggregate.const === aggregateType &&
-            rulePayloadRef === `resources.schema.json#/definitions/${definitionName}`,
-        `event ${op} binds ${aggregateType} to ${definitionName}`,
+            rulePayloadRef === `resources.schema.json#/definitions/${definitionName}Aggregate`,
+        `event ${op} binds ${aggregateType} to ${definitionName}Aggregate`,
         `event ${op} lacks the exact aggregate/resource binding`
     );
 }
@@ -676,6 +1114,11 @@ const commandFixtures = [
         plot_group: plotGroup,
     },
 ];
+reportCheck(
+    JSON.stringify(cmdSchema['x-semantic-bindings']) === JSON.stringify(EXPECTED_COMMAND_SEMANTIC_BINDINGS),
+    'command schema pins exact effect-key semantic bindings',
+    'command schema lacks the exact effect-key semantic bindings'
+);
 for (const fixture of commandFixtures) {
     expectValid(`${fixture.command_type} without device_eui`, cmdSchema, fixture);
     const missingEffect = Object.assign({}, fixture);
@@ -693,7 +1136,42 @@ for (const fixture of commandFixtures) {
         Object.assign({}, fixture, { effect_key: fixture.effect_key.replace(UUID, UUID.toUpperCase()) }),
         /effect_key.*match/
     );
+    expectInvalid(
+        `${fixture.command_type} with padded base version in effect_key`,
+        cmdSchema,
+        Object.assign({}, fixture, { effect_key: fixture.effect_key.replace(/:[0-9]+$/, ':00') }),
+        /effect_key.*match|must equal/
+    );
+    expectInvalid(
+        `${fixture.command_type} with mismatched UUID in effect_key`,
+        cmdSchema,
+        Object.assign({}, fixture, {
+            effect_key: fixture.effect_key.replace(UUID, '87654321-4321-4321-8321-cba987654321'),
+        }),
+        /effect_key.*must equal/
+    );
+    const mismatchedBase = jsonClone(fixture);
+    if (mismatchedBase.entry) mismatchedBase.entry.base_sync_version += 1;
+    else if (mismatchedBase.custom_vocab) mismatchedBase.custom_vocab.base_sync_version += 1;
+    else if (mismatchedBase.plot) mismatchedBase.plot.base_sync_version += 1;
+    else if (mismatchedBase.plot_group) mismatchedBase.plot_group.base_sync_version += 1;
+    else mismatchedBase.base_sync_version += 1;
+    expectInvalid(
+        `${fixture.command_type} with mismatched base version in effect_key`,
+        cmdSchema,
+        mismatchedBase,
+        /effect_key.*must equal/
+    );
 }
+
+expectInvalid(
+    'UPSERT_JOURNAL_ENTRY rejects draft status',
+    cmdSchema,
+    Object.assign({}, commandFixtures[0], {
+        entry: Object.assign({}, commandFixtures[0].entry, { status: 'draft' }),
+    }),
+    /status.*constant/
+);
 
 for (const [commandType, payloadKey] of [
     ['UPSERT_JOURNAL_ENTRY', 'entry'],
@@ -718,6 +1196,39 @@ expectInvalid(
     cmdSchema,
     Object.assign({}, commandFixtures[2], { custom_vocab: invalidCustomCode }),
     /code.*match/
+);
+for (const invalidCode of [
+    `custom.${UUID.toUpperCase()}`,
+    `custom.${COMPACT_UUID}`,
+    'custom.12345678-12344234-8234-123456789abc',
+]) {
+    expectInvalid(
+        `custom vocabulary rejects non-canonical code ${invalidCode}`,
+        cmdSchema,
+        Object.assign({}, commandFixtures[2], {
+            custom_vocab: Object.assign({}, customVocab, { code: invalidCode }),
+        }),
+        /code.*match/
+    );
+}
+for (const timestampField of ['issued_at', 'expires_at']) {
+    for (const invalidTimestamp of [
+        '2026-07-13T10:00:00.000+02:00',
+        '2026-07-13T08:00:00Z',
+        '2026-02-30T08:00:00.000Z',
+    ]) {
+        expectInvalid(
+            `journal command rejects ${timestampField}=${invalidTimestamp}`,
+            cmdSchema,
+            Object.assign({}, commandFixtures[0], { [timestampField]: invalidTimestamp }),
+            new RegExp(`${timestampField}.*(?:match|format)`)
+        );
+    }
+}
+expectValid(
+    'journal command permits an explicit null expiry',
+    cmdSchema,
+    Object.assign({}, commandFixtures[0], { expires_at: null })
 );
 
 const wrongJournalPayload = Object.assign({}, commandFixtures[0], { plot });
@@ -763,6 +1274,11 @@ expectValid(
     { command_type: 'REBOOT', command_id: UUID, device_eui: '0016C001F11715E2' }
 );
 
+reportCheck(
+    JSON.stringify(eventsSchema['x-semantic-bindings']) === JSON.stringify(EXPECTED_EVENT_SEMANTIC_BINDINGS),
+    'event schema pins exact aggregate watermark and version bindings',
+    'event schema lacks the exact aggregate watermark and version bindings'
+);
 for (const [op, binding] of Object.entries(JOURNAL_EVENT_BINDINGS)) {
     const [aggregateType, definitionName, watermarkKey] = binding;
     const payload = op === 'JOURNAL_ENTRY_VOIDED'
@@ -783,6 +1299,44 @@ for (const [op, binding] of Object.entries(JOURNAL_EVENT_BINDINGS)) {
         payload,
     };
     expectValid(`${op} flat payload`, eventsSchema, event);
+    expectInvalid(
+        `${op} rejects command-only base_sync_version`,
+        eventsSchema,
+        Object.assign({}, event, { payload: Object.assign({}, payload, { base_sync_version: 0 }) }),
+        /base_sync_version.*forbidden|matches forbidden/
+    );
+    expectInvalid(
+        `${op} rejects aggregateKey mismatched from ${watermarkKey}`,
+        eventsSchema,
+        Object.assign({}, event, { aggregateKey: '87654321-4321-4321-8321-cba987654321' }),
+        /aggregateKey.*must equal/
+    );
+    expectInvalid(
+        `${op} rejects syncVersion mismatched from payload.sync_version`,
+        eventsSchema,
+        Object.assign({}, event, { syncVersion: payload.sync_version + 1 }),
+        /syncVersion.*must equal/
+    );
+    for (const invalidKey of [UUID.toUpperCase(), COMPACT_UUID, '12345678-12344234-8234-123456789abc']) {
+        expectInvalid(
+            `${op} rejects non-canonical aggregateKey ${invalidKey}`,
+            eventsSchema,
+            Object.assign({}, event, { aggregateKey: invalidKey }),
+            /aggregateKey.*match/
+        );
+    }
+    for (const invalidTimestamp of [
+        '2026-07-13T10:01:00.000+02:00',
+        '2026-07-13T08:01:00Z',
+        '2026-02-30T08:01:00.000Z',
+    ]) {
+        expectInvalid(
+            `${op} rejects occurredAt=${invalidTimestamp}`,
+            eventsSchema,
+            Object.assign({}, event, { occurredAt: invalidTimestamp }),
+            /occurredAt.*(?:match|format)/
+        );
+    }
     expectInvalid(
         `${op} wrong aggregateType`,
         eventsSchema,
@@ -806,7 +1360,36 @@ for (const [op, binding] of Object.entries(JOURNAL_EVENT_BINDINGS)) {
             /status.*constant/
         );
     }
+    if (op === 'JOURNAL_ENTRY_VOIDED') {
+        for (const [field, replacement] of [
+            ['voided_at', null],
+            ['voided_by_principal_uuid', null],
+            ['void_reason', null],
+            ['void_reason', ''],
+        ]) {
+            expectInvalid(
+                `${op} rejects ${field}=${JSON.stringify(replacement)}`,
+                eventsSchema,
+                Object.assign({}, event, { payload: Object.assign({}, payload, { [field]: replacement }) }),
+                new RegExp(`${field}.*(?:string|shorter|non-null)`)
+            );
+        }
+    }
 }
+expectInvalid(
+    'JOURNAL_ENTRY_UPSERTED rejects void_reason over 4000 characters',
+    eventsSchema,
+    {
+        eventUuid: UUID,
+        aggregateType: 'JOURNAL_ENTRY',
+        aggregateKey: UUID,
+        op: 'JOURNAL_ENTRY_UPSERTED',
+        syncVersion: 1,
+        occurredAt: '2026-07-13T08:01:00.000Z',
+        payload: Object.assign({}, eventResourceSamples.JournalEntry, { void_reason: 'x'.repeat(4001) }),
+    },
+    /void_reason.*longer/
+);
 expectInvalid(
     'JOURNAL_ENTRY_UPSERTED double-nested payload',
     eventsSchema,

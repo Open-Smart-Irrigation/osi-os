@@ -9,7 +9,12 @@ const test = require('node:test');
 const { DatabaseSync } = require('node:sqlite');
 
 const { loadCatalog } = require('./catalog');
-const { allowedUnits, convertToCanonical, validateEntry } = require('./index');
+const {
+  allowedUnits,
+  assertJournalEntryEffectKey,
+  convertToCanonical,
+  validateEntry,
+} = require('./index');
 const { numericAttributePreflight } = require('./units');
 
 const repoRoot = path.resolve(__dirname, '../../../../../../..');
@@ -57,6 +62,27 @@ function validIrrigation(overrides) {
     note: 'Morning irrigation',
   }, overrides || {});
 }
+
+test('assertJournalEntryEffectKey binds UUID and prior version exactly', () => {
+  const entryUuid = '12345678-1234-4234-8234-123456789abc';
+  assert.doesNotThrow(() => assertJournalEntryEffectKey(
+    'journal_entry:' + entryUuid + ':1',
+    entryUuid,
+    2
+  ));
+  assert.throws(
+    () => assertJournalEntryEffectKey('journal_entry:' + entryUuid + ':0', entryUuid, 2),
+    (error) => error && error.code === 'invalid_effect_key'
+  );
+  assert.throws(
+    () => assertJournalEntryEffectKey(
+      'journal_entry:' + entryUuid.toUpperCase() + ':1',
+      entryUuid.toUpperCase(),
+      2
+    ),
+    (error) => error && error.code === 'invalid_effect_key'
+  );
+});
 
 test('loadCatalog reads the seeded catalog into code-indexed maps', async () => {
   const catalog = await loadCatalog(createTestDb('load'));

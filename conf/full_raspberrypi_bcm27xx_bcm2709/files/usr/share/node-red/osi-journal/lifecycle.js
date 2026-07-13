@@ -63,6 +63,7 @@ const CORRECTION_COLUMNS = ENTRY_COLUMNS.filter(function(column) {
   return !CORRECTION_IMMUTABLE_COLUMNS.has(column);
 });
 const UUID = /^[0-9a-fA-F]{8}-?[0-9a-fA-F]{4}-?[0-9a-fA-F]{4}-?[0-9a-fA-F]{4}-?[0-9a-fA-F]{12}$/;
+const CANONICAL_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const INPUT_UUID_FIELDS = ['entry_uuid', 'plot_uuid', 'campaign_uuid', 'pass_uuid', 'batch_uuid'];
 const EUI64 = /^[0-9a-fA-F]{16}$/;
 const LOCAL_TIMESTAMP = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2})(?:\.(\d{1,3}))?)?$/;
@@ -761,10 +762,32 @@ async function emitJournalOutbox(tx, entryUuid, op) {
   return { aggregate, entry, event_uuid: eventUuid };
 }
 
-async function recordTerminalCommand(tx, principal, terminal) {
-  const commandId = typeof principal.command_id === 'string' && principal.command_id.trim()
+function assertJournalEntryEffectKey(effectKey, entryUuid, appliedSyncVersion) {
+  if (typeof entryUuid !== 'string' || !CANONICAL_UUID.test(entryUuid)) {
+    throw lifecycleError('invalid_effect_key', 'Journal effect-key entry UUID must be canonical');
+  }
+  if (!Number.isInteger(appliedSyncVersion) || appliedSyncVersion < 1) {
+    throw lifecycleError('invalid_effect_key', 'Applied journal sync version must be a positive integer');
+  }
+  const expected = 'journal_entry:' + entryUuid + ':' + (appliedSyncVersion - 1);
+  if (effectKey !== expected) {
+    throw lifecycleError('invalid_effect_key', 'Command effect key does not match the journal mutation');
+  }
+}
+
+function commandIdFromPrincipal(principal) {
+  return typeof principal.command_id === 'string' && principal.command_id.trim()
     ? principal.command_id
     : null;
+}
+
+function assertCommandJournalEntryEffectKey(principal, terminal) {
+  if (!commandIdFromPrincipal(principal)) return;
+  assertJournalEntryEffectKey(principal.effect_key, terminal.entry_uuid, terminal.sync_version);
+}
+
+async function recordTerminalCommand(tx, principal, terminal) {
+  const commandId = commandIdFromPrincipal(principal);
   if (!commandId) return;
   const expectedCommandType = terminal.expected_command_type || 'UPSERT_JOURNAL_ENTRY';
   const suppliedCommandType = typeof principal.command_type === 'string' &&
@@ -876,12 +899,14 @@ async function replaceExistingWithFinal(
     existing.entry_uuid,
     'JOURNAL_ENTRY_UPSERTED'
   );
-  await recordTerminalCommand(tx, principal, {
+  const terminal = {
     aggregate: emission.aggregate,
     entry_uuid: existing.entry_uuid,
     sync_version: nextVersion,
     gateway_device_eui: existing.gateway_device_eui,
-  });
+  };
+  assertCommandJournalEntryEffectKey(principal, terminal);
+  await recordTerminalCommand(tx, principal, terminal);
   return {
     entry_uuid: existing.entry_uuid,
     outbox_event_uuid: emission.event_uuid,
@@ -1082,12 +1107,14 @@ async function createFinalInTransaction(tx, catalog, input, principal, entryInde
     row.entry_uuid,
     'JOURNAL_ENTRY_UPSERTED'
   );
-  await recordTerminalCommand(tx, principal, {
+  const terminal = {
     aggregate: emission.aggregate,
     entry_uuid: row.entry_uuid,
     sync_version: row.sync_version,
     gateway_device_eui: row.gateway_device_eui,
-  });
+  };
+  assertCommandJournalEntryEffectKey(principal, terminal);
+  await recordTerminalCommand(tx, principal, terminal);
   return {
     entry_uuid: row.entry_uuid,
     outbox_event_uuid: emission.event_uuid,
@@ -1236,13 +1263,15 @@ async function void_(db, _catalog, entryUuid, baseSyncVersion, reason, principal
       entryUuid,
       'JOURNAL_ENTRY_VOIDED'
     );
-    await recordTerminalCommand(tx, principal, {
+    const terminal = {
       aggregate: emission.aggregate,
       entry_uuid: entryUuid,
       sync_version: nextVersion,
       gateway_device_eui: entry.gateway_device_eui,
       expected_command_type: 'VOID_JOURNAL_ENTRY',
-    });
+    };
+    assertCommandJournalEntryEffectKey(principal, terminal);
+    await recordTerminalCommand(tx, principal, terminal);
     return {
       entry_uuid: entryUuid,
       outbox_event_uuid: emission.event_uuid,
@@ -1252,6 +1281,7 @@ async function void_(db, _catalog, entryUuid, baseSyncVersion, reason, principal
 }
 
 module.exports = {
+  assertJournalEntryEffectKey,
   finalize,
   finalizeBatch,
   saveDraft,
