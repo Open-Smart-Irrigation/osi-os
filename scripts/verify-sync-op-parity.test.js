@@ -48,6 +48,20 @@ function copyFixtureTree() {
     path.join(flow2709Dir, 'flows.json')
   );
   fs.copyFileSync(SERVER_SOURCE, path.join(serverDir, 'EdgeSyncService.java'));
+  // EdgeSyncService.applyEvent() dispatches some ops via a pluggable
+  // per-op registry (sibling classes that `implements SyncEventApplier`,
+  // e.g. GatewayLocationApplier) before it ever reaches the switch. Mirror
+  // the real package directory alongside EdgeSyncService.java so
+  // extractServerOps() sees those ops the same way it does against the
+  // real osi-server checkout.
+  const serverSourceDir = path.dirname(SERVER_SOURCE);
+  for (const entry of fs.readdirSync(serverSourceDir)) {
+    if (!entry.endsWith('.java') || entry === path.basename(SERVER_SOURCE)) continue;
+    const entryPath = path.join(serverSourceDir, entry);
+    if (fs.statSync(entryPath).isFile()) {
+      fs.copyFileSync(entryPath, path.join(serverDir, entry));
+    }
+  }
   return tmp;
 }
 
@@ -167,6 +181,16 @@ test('server extractor reads all applyEvent switch labels', () => {
   assert(result.ops.includes('DEVICE_ASSIGNED'));
   assert(result.ops.includes('ZONE_CONFIG_UPSERTED'));
   assert(result.ops.includes('ZONE_LOCATION_UPSERTED'));
+});
+
+test('server extractor also reads ops dispatched via the SyncEventApplier registry', () => {
+  // GATEWAY_LOCATION_UPSERTED is claimed by appliersByOp before applyEvent's
+  // switch is ever reached (DD12, GatewayLocationApplier). It intentionally
+  // has no case in the switch; the extractor must still see it as supported.
+  const result = extractServerOps(SERVER_SOURCE);
+
+  assert.deepEqual(result.errors, []);
+  assert(result.ops.includes('GATEWAY_LOCATION_UPSERTED'));
 });
 
 test('server extractor reads canonical applyEvent overload switch labels', () => {
