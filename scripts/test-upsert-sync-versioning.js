@@ -1,5 +1,7 @@
 'use strict';
-// Regression test for issue #10: the cloud (osi-server SyncEventTxExecutor)
+// Regression tests for issue #10 and issue #5 (both belong to the same
+// equal-version-payload-conflict class; issue #5's test is appended near the
+// end of this file). Issue #10: the cloud (osi-server SyncEventTxExecutor)
 // keeps a per-resource watermark (highest sync_version + payload hash) and
 // terminally rejects an equal-version-different-payload event. The
 // dendrometer_daily / zone_daily_recommendations / zone_daily_environment
@@ -128,4 +130,67 @@ test('the shipped writers use version-bumping upserts, not INSERT OR REPLACE', (
   assert.ok(!/INSERT OR REPLACE INTO (dendrometer_daily|zone_daily_recommendations)/.test(sim));
   assert.ok(sim.includes('sync_version=dendrometer_daily.sync_version+1'));
   assert.ok(sim.includes('sync_version=zone_daily_recommendations.sync_version+1'));
+});
+
+// Regression test for issue #5: a Chameleon-enabled LSN50 appeared as a plain
+// LSN50 in the cloud because trg_sync_devices_outbox_au omitted
+// chameleon_enabled from both its change-detection WHEN clause and its
+// json_object payload, and the chameleon-enable endpoint's UPDATE never
+// bumped devices.sync_version. The trigger fix alone would have reintroduced
+// the equal-version-payload-conflict class fixed for issue #10 (an UPDATE
+// that flips chameleon_enabled but leaves sync_version unchanged still fires
+// the WHEN clause via the flag-changed OR branch, emitting an event whose
+// sync_version equals the previously-delivered watermark with a different
+// payload, which the cloud terminally rejects) — so the endpoint fix (mirrors
+// the dendro_enabled/temp_enabled/rain_gauge_enabled/flow_meter_enabled
+// precedent) is asserted together with the payload/version behavior below.
+test('enabling Chameleon on a device emits a DEVICE event with chameleon_enabled in the payload and an increasing sync_version', () => {
+  const db = freshLinkedDb();
+  db.exec("INSERT INTO users(id, username, password_hash, created_at) VALUES(1,'u','h','now')");
+  db.exec(
+    "INSERT INTO devices(deveui, name, type_id, user_id, created_at, updated_at) " +
+    "VALUES('A84041FFFF000099','LSN50-1','DRAGINO_LSN50',1,'2026-07-13T00:00:00.000Z','2026-07-13T00:00:00.000Z')"
+  );
+
+  const before = db.prepare("SELECT sync_version, chameleon_enabled FROM devices WHERE deveui='A84041FFFF000099'").get();
+  assert.strictEqual(before.chameleon_enabled, 0, 'chameleon_enabled defaults to 0');
+
+  // Writer-shaped UPDATE mirroring the fixed put-chameleon-enabled-auth-fn SQL.
+  db.prepare(
+    "UPDATE devices SET chameleon_enabled = 1, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now'), " +
+    "sync_version = COALESCE(sync_version, 0) + 1 WHERE deveui = 'A84041FFFF000099' AND user_id = 1 " +
+    "AND type_id = 'DRAGINO_LSN50' AND deleted_at IS NULL"
+  ).run();
+
+  const after = db.prepare("SELECT sync_version, chameleon_enabled FROM devices WHERE deveui='A84041FFFF000099'").get();
+  assert.strictEqual(after.chameleon_enabled, 1, 'chameleon_enabled was persisted');
+  assert.ok(after.sync_version > before.sync_version, 'sync_version must increase on the chameleon_enabled toggle');
+
+  const events = outboxRows(db, 'DEVICE');
+  assert.ok(events.length >= 2, `expected at least an insert-defaults event plus the chameleon-enable event, got ${events.length}`);
+  const last = events[events.length - 1];
+  const payload = JSON.parse(last.payload_json);
+  assert.strictEqual(payload.chameleon_enabled, 1, 'DEVICE outbox payload must carry chameleon_enabled');
+  assert.strictEqual(last.sync_version, after.sync_version, 'outbox sync_version mirrors the row');
+  assert.ok(last.sync_version > events[0].sync_version, 'versions must increase (equal versions are terminally rejected by the cloud)');
+  db.close();
+});
+
+test('the shipped Chameleon endpoints bump devices.sync_version and the bootstrap/force-sync device SELECTs carry chameleon fields', () => {
+  const flows = JSON.parse(fs.readFileSync(FLOWS, 'utf8'));
+  const fnOf = (id) => flows.find((n) => n && n.id === id).func;
+
+  const enableFn = fnOf('put-chameleon-enabled-auth-fn');
+  assert.ok(enableFn.includes('sync_version = COALESCE(sync_version, 0) + 1'), 'chameleon enable endpoint must bump sync_version');
+
+  const depthFn = fnOf('bf93cd55db0eb57f');
+  assert.ok(depthFn.includes('sync_version = COALESCE(sync_version, 0) + 1'), 'chameleon depth endpoint must bump sync_version');
+
+  for (const id of ['sync-bootstrap-build', 'sync-force-build']) {
+    const sel = fnOf(id);
+    assert.ok(sel.includes('d.chameleon_enabled'), `${id} devices SELECT must include chameleon_enabled`);
+    assert.ok(sel.includes('d.chameleon_swt1_depth_cm'), `${id} devices SELECT must include chameleon_swt1_depth_cm`);
+    assert.ok(sel.includes('d.chameleon_swt2_depth_cm'), `${id} devices SELECT must include chameleon_swt2_depth_cm`);
+    assert.ok(sel.includes('d.chameleon_swt3_depth_cm'), `${id} devices SELECT must include chameleon_swt3_depth_cm`);
+  }
 });

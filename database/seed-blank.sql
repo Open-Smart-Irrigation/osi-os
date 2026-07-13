@@ -1295,6 +1295,10 @@ WHEN
     COALESCE(NEW.strega_model,'') <> COALESCE(OLD.strega_model,'') OR
     COALESCE(NEW.soil_moisture_probe_depths_json,'') <> COALESCE(OLD.soil_moisture_probe_depths_json,'') OR
     COALESCE(NEW.soil_moisture_probe_depths_configured,0) <> COALESCE(OLD.soil_moisture_probe_depths_configured,0) OR
+    COALESCE(NEW.chameleon_enabled,0) <> COALESCE(OLD.chameleon_enabled,0) OR
+    COALESCE(NEW.chameleon_swt1_depth_cm,-1) <> COALESCE(OLD.chameleon_swt1_depth_cm,-1) OR
+    COALESCE(NEW.chameleon_swt2_depth_cm,-1) <> COALESCE(OLD.chameleon_swt2_depth_cm,-1) OR
+    COALESCE(NEW.chameleon_swt3_depth_cm,-1) <> COALESCE(OLD.chameleon_swt3_depth_cm,-1) OR
     COALESCE(NEW.deleted_at,'') <> COALESCE(OLD.deleted_at,'') OR
     COALESCE(NEW.sync_version,0) <> COALESCE(OLD.sync_version,0)
   )
@@ -1330,6 +1334,10 @@ BEGIN
       'strega_model',                      NEW.strega_model,
       'soil_moisture_probe_depths_json',   json(COALESCE(NEW.soil_moisture_probe_depths_json,'{}')),
       'soil_moisture_probe_depths_configured', COALESCE(NEW.soil_moisture_probe_depths_configured,0),
+      'chameleon_enabled',                 NEW.chameleon_enabled,
+      'chameleon_swt1_depth_cm',           NEW.chameleon_swt1_depth_cm,
+      'chameleon_swt2_depth_cm',           NEW.chameleon_swt2_depth_cm,
+      'chameleon_swt3_depth_cm',           NEW.chameleon_swt3_depth_cm,
       'gateway_device_eui',                COALESCE(NEW.gateway_device_eui,'0016C001F11715E2'),
       'sync_version',                      NEW.sync_version,
       'deleted_at',                        NEW.deleted_at

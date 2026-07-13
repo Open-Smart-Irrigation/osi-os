@@ -28,6 +28,10 @@
                 "type_id": {"type": "string", "enum": ["STREGA_VALVE", "DRAGINO_LSN50", "KIWI_SENSOR", "TEKTELIC_CLOVER", "SENSECAP_S2120"]},
                 "name": {"type": ["string", "null"]},
                 "zone_id": {"type": ["integer", "null"]},
+                "chameleon_enabled": {"type": ["integer", "null"], "enum": [0, 1, null]},
+                "chameleon_swt1_depth_cm": {"type": ["number", "null"]},
+                "chameleon_swt2_depth_cm": {"type": ["number", "null"]},
+                "chameleon_swt3_depth_cm": {"type": ["number", "null"]},
                 "deleted_at": {"type": ["string", "null"], "format": "date-time"}
             }
         },

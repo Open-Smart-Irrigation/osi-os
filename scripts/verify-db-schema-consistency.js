@@ -714,6 +714,22 @@ const requiredTriggerSqlFragments = {
     "aggregate_key",
     "'gateway_device_eui', coalesce(nullif(trim(new.gateway_device_eui)",
   ],
+  // Issue #5: chameleon_enabled never left the edge because
+  // trg_sync_devices_outbox_au omitted it from both the change-detection WHEN
+  // clause and the json_object payload (and, separately, the migration-owned
+  // copy of this trigger had drifted from sync-init-fn's runtime copy, which
+  // already carried the three depth columns per e3758b9b). Pin all four
+  // chameleon fields in both places so this can't silently regress again.
+  trg_sync_devices_outbox_au: [
+    'coalesce(new.chameleon_enabled,0) <> coalesce(old.chameleon_enabled,0)',
+    'coalesce(new.chameleon_swt1_depth_cm,-1) <> coalesce(old.chameleon_swt1_depth_cm,-1)',
+    'coalesce(new.chameleon_swt2_depth_cm,-1) <> coalesce(old.chameleon_swt2_depth_cm,-1)',
+    'coalesce(new.chameleon_swt3_depth_cm,-1) <> coalesce(old.chameleon_swt3_depth_cm,-1)',
+    "'chameleon_enabled', new.chameleon_enabled,",
+    "'chameleon_swt1_depth_cm', new.chameleon_swt1_depth_cm,",
+    "'chameleon_swt2_depth_cm', new.chameleon_swt2_depth_cm,",
+    "'chameleon_swt3_depth_cm', new.chameleon_swt3_depth_cm,",
+  ],
   trg_improvement_requests_outbox_ai: [
     'work_request_submitted',
     'contract_version',
