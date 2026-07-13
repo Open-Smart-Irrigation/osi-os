@@ -75,6 +75,19 @@ function lifecycleError(code, message) {
   return error;
 }
 
+function entryValidationError(message, validation) {
+  const errors = validation && Array.isArray(validation.errors) ? validation.errors : [];
+  const missingCustomDependency = errors.some(function(error) {
+    return error && error.code === 'missing_custom_dependency';
+  });
+  const error = lifecycleError(
+    missingCustomDependency ? 'missing_custom_dependency' : 'validation_failed',
+    message
+  );
+  error.errors = errors;
+  return error;
+}
+
 function nullable(value) {
   return value == null ? null : value;
 }
@@ -872,6 +885,7 @@ async function recordTerminalCommand(tx, principal, terminal) {
   const payloadHash = aggregateHash(terminal.aggregate);
   const facts = {
     entryUuid: terminal.entry_uuid,
+    ownerUserUuid: principal.owner_user_uuid,
     appliedSyncVersion: terminal.sync_version,
     effectKey,
     payloadHash,
@@ -909,6 +923,10 @@ async function recordTerminalCommand(tx, principal, terminal) {
     status: 'ACKED',
     result: 'APPLIED',
   }, facts);
+  await tx.run(
+    'DELETE FROM command_ack_outbox WHERE command_id=? AND delivered_at IS NULL',
+    [commandId]
+  );
   await tx.run(
     'INSERT INTO command_ack_outbox (command_id,payload_json,created_at) VALUES (?,?,?)',
     [commandId, JSON.stringify(ack), appliedAt]
@@ -1042,9 +1060,7 @@ async function correctFinalInTransaction(tx, catalog, input, principal, entryInd
     { mode: 'correction', originalEntry }
   );
   if (!validation.ok) {
-    const error = lifecycleError('validation_failed', 'Journal correction validation failed');
-    error.errors = validation.errors;
-    throw error;
+    throw entryValidationError('Journal correction validation failed', validation);
   }
   const normalized = validation.normalized;
   const frozenSeason = frozenSeasonForCorrection(existing, plot, occurrence);
@@ -1103,9 +1119,7 @@ async function promoteDraftInTransaction(tx, catalog, input, principal, entryInd
   const definitions = await validationDefinitions(tx, candidate);
   const validation = validateEntry(catalog, definitions.layout, definitions.template, candidate, {});
   if (!validation.ok) {
-    const error = lifecycleError('validation_failed', 'Journal draft finalization validation failed');
-    error.errors = validation.errors;
-    throw error;
+    throw entryValidationError('Journal draft finalization validation failed', validation);
   }
   const normalized = validation.normalized;
   const season = await resolveSeason(tx, plot, occurrence.start.localDate, normalized, true);
@@ -1166,9 +1180,7 @@ async function createFinalInTransaction(tx, catalog, input, principal, entryInde
   const definitions = await validationDefinitions(tx, candidate);
   const validation = validateEntry(catalog, definitions.layout, definitions.template, candidate, {});
   if (!validation.ok) {
-    const error = lifecycleError('validation_failed', 'Journal entry validation failed');
-    error.errors = validation.errors;
-    throw error;
+    throw entryValidationError('Journal entry validation failed', validation);
   }
   const normalized = validation.normalized;
   const season = await resolveSeason(tx, plot, occurrence.start.localDate, normalized, true);

@@ -24,6 +24,8 @@ const {
   validateFrozenUnitMetadata,
 } = require('./units');
 
+const CUSTOM_CODE = /^custom\.[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+
 function errorResult(field, code, message) {
   return { ok: false, errors: [{ field, code, message }] };
 }
@@ -424,6 +426,25 @@ function referenceError(catalog, constraints, value, validationContext, preserve
   return { code: 'invalid_reference', message: 'Reference value does not exist' };
 }
 
+function missingCustomDependency(catalog, field, code) {
+  const vocab = catalog && catalog.vocabByCode;
+  const knownCustomCodes = catalog && catalog.knownCustomCodes;
+  if (!(vocab instanceof Map) || typeof code !== 'string' ||
+      !CUSTOM_CODE.test(code) || vocab.has(code) ||
+      (knownCustomCodes instanceof Set && knownCustomCodes.has(code))) {
+    return null;
+  }
+  return {
+    ok: false,
+    errors: [{
+      field,
+      code: 'missing_custom_dependency',
+      message: 'Custom vocabulary dependency is not installed',
+      dependency_code: code,
+    }],
+  };
+}
+
 function validateEntry(catalog, _layoutDef, _templateDef, entryInput, validationContext) {
   if (!entryInput || typeof entryInput !== 'object' || Array.isArray(entryInput)) {
     return errorResult('entry', 'invalid_type', 'Entry must be an object');
@@ -476,6 +497,12 @@ function validateEntry(catalog, _layoutDef, _templateDef, entryInput, validation
     ? catalog.vocabByCode.get(entryInput.activity_code)
     : null;
   if (!activity || activity.kind !== 'activity') {
+    const missingDependency = missingCustomDependency(
+      catalog,
+      'activity_code',
+      entryInput.activity_code
+    );
+    if (missingDependency) return missingDependency;
     return errorResult('activity_code', 'unknown_code', 'Unknown activity code');
   }
   if ((activity.active !== 1 || activity.deleted_at) && !correction) {
@@ -604,6 +631,12 @@ function validateEntry(catalog, _layoutDef, _templateDef, entryInput, validation
     }
     const attribute = value && catalog.vocabByCode.get(value.attribute_code);
     if (!attribute || attribute.kind !== 'attribute') {
+      const missingDependency = missingCustomDependency(
+        catalog,
+        'values[' + index + '].attribute_code',
+        value.attribute_code
+      );
+      if (missingDependency) return missingDependency;
       return errorResult(
         'values[' + index + '].attribute_code',
         'unknown_code',
@@ -714,6 +747,12 @@ function validateEntry(catalog, _layoutDef, _templateDef, entryInput, validation
     if (valueStatus === 'observed' && attribute.value_type === 'choice') {
       const choice = catalog.vocabByCode.get(semanticValue);
       if (!choice || choice.kind !== 'choice' || choice.parent_code !== attribute.code) {
+        const missingDependency = missingCustomDependency(
+          catalog,
+          'values[' + index + '].value',
+          semanticValue
+        );
+        if (missingDependency) return missingDependency;
         return errorResult(
           'values[' + index + '].value',
           'invalid_choice',
@@ -739,6 +778,12 @@ function validateEntry(catalog, _layoutDef, _templateDef, entryInput, validation
       }
       const unit = catalog.vocabByCode.get(value.unit_code);
       if (!unit || unit.kind !== 'unit') {
+        const missingDependency = missingCustomDependency(
+          catalog,
+          'values[' + index + '].unit_code',
+          value.unit_code
+        );
+        if (missingDependency) return missingDependency;
         return errorResult('values[' + index + '].unit_code', 'unknown_code', 'Unknown unit code');
       }
       if (unit.active !== 1 || unit.deleted_at) {
@@ -764,6 +809,12 @@ function validateEntry(catalog, _layoutDef, _templateDef, entryInput, validation
       }
       const enteredUnit = catalog.vocabByCode.get(value.entered_unit_code);
       if (!enteredUnit || enteredUnit.kind !== 'unit') {
+        const missingDependency = missingCustomDependency(
+          catalog,
+          'values[' + index + '].entered_unit_code',
+          value.entered_unit_code
+        );
+        if (missingDependency) return missingDependency;
         return errorResult(
           'values[' + index + '].entered_unit_code',
           'unknown_code',

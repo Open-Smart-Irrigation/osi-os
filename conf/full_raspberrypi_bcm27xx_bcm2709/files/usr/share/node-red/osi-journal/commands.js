@@ -322,16 +322,10 @@ function submittedPayloadHash(type, payload) {
 
 function classification(error, type, payload) {
   const code = String(error && error.code || '').trim();
-  if (code === 'parent_not_found' || code === 'stale_catalog' || code === 'invalid_catalog' ||
+  if (code === 'parent_not_found' || code === 'missing_custom_dependency' ||
+      code === 'stale_catalog' || code === 'invalid_catalog' ||
       /^SQLITE_(?:BUSY|LOCKED|IOERR|FULL|CANTOPEN|PROTOCOL)/.test(code)) {
     return { result: 'FAILED_RETRYABLE', terminal: false, reason: code || 'transient_failure' };
-  }
-  if (code === 'validation_failed' && type === 'UPSERT_JOURNAL_ENTRY' &&
-      payload.entry && Array.isArray(payload.entry.values) && payload.entry.values.some(function(value) {
-        return String(value && value.attribute_code || '').startsWith('custom.') ||
-          String(value && value.value_text || '').startsWith('custom.');
-      })) {
-    return { result: 'FAILED_RETRYABLE', terminal: false, reason: 'custom_vocab_dependency' };
   }
   if (code && !/^SQLITE_/.test(code)) {
     return { result: 'REJECTED_PERMANENT', terminal: true, reason: code };
@@ -365,6 +359,19 @@ function replayAck(row, deliveryId) {
     result: row.result,
     duplicate: true,
   });
+}
+
+function journalEffectProvenanceMatches(row, ownerUserUuid, gatewayDeviceEui) {
+  let facts;
+  try {
+    facts = JSON.parse(row.result_detail);
+  } catch (_) {
+    return false;
+  }
+  return facts && typeof facts === 'object' && !Array.isArray(facts) &&
+    facts.ownerUserUuid === ownerUserUuid &&
+    facts.gatewayDeviceEui === gatewayDeviceEui &&
+    String(row.device_eui || '').trim().toUpperCase() === gatewayDeviceEui;
 }
 
 async function validJournalEffectBinding(db, envelope, runtime, type) {
@@ -499,11 +506,30 @@ async function deduplicatePendingCommand(db, envelope, runtime) {
     if (!validEffect) {
       return { handled: false };
     }
-    row = await tx.get(
-      'SELECT * FROM applied_commands WHERE effect_key=? AND command_type=? ' +
-        'ORDER BY applied_at,command_id LIMIT 1',
-      [String(envelope.payload.effect_key || envelope.payload.effectKey || envelope.effectKey || '').trim(), type]
-    );
+    const effectKey = String(
+      envelope.payload.effect_key || envelope.payload.effectKey || envelope.effectKey || ''
+    ).trim();
+    const gateway = String(runtime && runtime.gateway_device_eui || '').trim().toUpperCase();
+    if (journalType) {
+      const candidates = await tx.all(
+        'SELECT * FROM applied_commands WHERE effect_key=? AND command_type=? AND device_eui=? ' +
+          'ORDER BY applied_at,command_id',
+        [effectKey, type, gateway]
+      );
+      row = candidates.find(function(candidate) {
+        return journalEffectProvenanceMatches(
+          candidate,
+          envelope.payload.owner_user_uuid,
+          gateway
+        );
+      });
+    } else {
+      row = await tx.get(
+        'SELECT * FROM applied_commands WHERE effect_key=? AND command_type=? ' +
+          'ORDER BY applied_at,command_id LIMIT 1',
+        [effectKey, type]
+      );
+    }
     if (!row) return { handled: false };
     return { handled: true, ack: await persistReplayAck(tx, row, deliveryId) };
   });
@@ -576,6 +602,10 @@ async function queueCommandAck(db, rawAck, runtime) {
       }
     }
     await tx.run(
+      'DELETE FROM command_ack_outbox WHERE command_id=? AND delivered_at IS NULL',
+      [commandId.stored]
+    );
+    await tx.run(
       'INSERT INTO command_ack_outbox(command_id,payload_json,created_at) VALUES (?,?,?)',
       [commandId.stored, JSON.stringify(initial), new Date().toISOString()]
     );
@@ -598,6 +628,7 @@ async function persistFailure(db, envelope, payload, runtime, type, deliveryId, 
     appliedAt,
     reason: failure.reason,
   };
+  if (UUID.test(owner || '')) facts.ownerUserUuid = owner;
   const ack = Object.assign({
     commandId: deliveryId,
     status: failure.terminal ? 'NACKED' : 'FAILED_RETRYABLE',
@@ -620,6 +651,10 @@ async function persistFailure(db, envelope, payload, runtime, type, deliveryId, 
       }
     }
     await tx.run(
+      'DELETE FROM command_ack_outbox WHERE command_id=? AND delivered_at IS NULL',
+      [String(deliveryId)]
+    );
+    await tx.run(
       'INSERT INTO command_ack_outbox (command_id,payload_json,created_at) VALUES (?,?,?)',
       [String(deliveryId), JSON.stringify(ack), appliedAt]
     );
@@ -627,7 +662,15 @@ async function persistFailure(db, envelope, payload, runtime, type, deliveryId, 
   return { handled: true, ack };
 }
 
-async function applyJournalCommand(db, envelope, runtime) {
+let journalApplyTail = Promise.resolve();
+
+function enqueueJournalApply(work) {
+  const scheduled = journalApplyTail.then(work, work);
+  journalApplyTail = scheduled.then(function() {}, function() {});
+  return scheduled;
+}
+
+async function applyJournalCommandOnce(db, envelope, runtime, recheckReplay) {
   envelope = object(envelope, 'Pending command envelope');
   const type = commandType(envelope);
   const supported = new Set([
@@ -638,6 +681,10 @@ async function applyJournalCommand(db, envelope, runtime) {
     'UPSERT_JOURNAL_PLOT_GROUP',
   ]);
   const deliveryId = deliveryCommandId(envelope);
+  if (recheckReplay) {
+    const replay = await deduplicatePendingCommand(db, envelope, runtime);
+    if (replay.handled) return replay;
+  }
   if (!supported.has(type)) {
     if (!isJournalCommandType(type)) return { handled: false };
     const unsupportedPayload = envelope.payload && typeof envelope.payload === 'object' &&
@@ -659,7 +706,7 @@ async function applyJournalCommand(db, envelope, runtime) {
     }
     const principal = await trustedPrincipal(db, payload, runtime, type, deliveryId);
     if (type === 'UPSERT_JOURNAL_ENTRY') {
-      const catalog = await loadCatalog(db);
+      const catalog = await loadCatalog(db, principal);
       await lifecycle.finalize(db, catalog, entryInput(payload, principal), principal);
     } else if (type === 'VOID_JOURNAL_ENTRY') {
       if (!UUID.test(payload.entry_uuid || '') || !Number.isInteger(payload.base_sync_version) ||
@@ -700,6 +747,17 @@ async function applyJournalCommand(db, envelope, runtime) {
       failure
     );
   }
+}
+
+async function applyJournalCommand(db, envelope, runtime) {
+  envelope = object(envelope, 'Pending command envelope');
+  const type = commandType(envelope);
+  if (!isJournalCommandType(type)) {
+    return applyJournalCommandOnce(db, envelope, runtime, false);
+  }
+  return enqueueJournalApply(function() {
+    return applyJournalCommandOnce(db, envelope, runtime, true);
+  });
 }
 
 module.exports = { applyJournalCommand, deduplicatePendingCommand, queueCommandAck };

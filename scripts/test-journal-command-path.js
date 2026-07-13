@@ -17,6 +17,8 @@ const SEED = fs.readFileSync(path.join(ROOT, 'database/seed-blank.sql'), 'utf8')
 const TEMP_ROOT = fs.mkdtempSync(path.join(os.tmpdir(), 'osi-journal-command-'));
 const OWNER_UUID = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 const ACTOR_UUID = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
+const SECOND_OWNER_UUID = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc';
+const SECOND_ACTOR_UUID = 'dddddddd-dddd-4ddd-8ddd-dddddddddddd';
 const LOGICAL_COMMAND_UUID = '11111111-1111-4111-8111-111111111111';
 const ENTRY_UUID = '22222222-2222-4222-8222-222222222222';
 const PLOT_UUID = '33333333-3333-4333-8333-333333333333';
@@ -26,6 +28,8 @@ const GROUP_UUID = '88888888-8888-4888-8888-888888888888';
 const ZONE_UUID = '44444444-4444-4444-8444-444444444444';
 const SEASON_UUID = '55555555-5555-4555-8555-555555555555';
 const GATEWAY_EUI = '0016C001F11715E2';
+const SECOND_GATEWAY_EUI = '0016C001F11715E3';
+const MISSING_CUSTOM_CODE = 'custom.99999999-9999-4999-8999-999999999999';
 
 class TestDb {
   constructor(name) {
@@ -271,6 +275,30 @@ function localPrincipal() {
   };
 }
 
+function localVocabInput(overrides) {
+  const aggregate = Object.assign({}, vocabAggregate(), overrides || {});
+  delete aggregate.owner_user_uuid;
+  delete aggregate.gateway_device_eui;
+  return aggregate;
+}
+
+function localPlotInput() {
+  const aggregate = Object.assign({}, plotAggregate());
+  aggregate.layout_code = aggregate.settings.layout_code;
+  aggregate.layout_version = 1;
+  delete aggregate.owner_user_uuid;
+  delete aggregate.gateway_device_eui;
+  delete aggregate.settings;
+  return aggregate;
+}
+
+function localGroupInput() {
+  const aggregate = Object.assign({}, groupAggregate(), { resolved: false });
+  delete aggregate.owner_user_uuid;
+  delete aggregate.gateway_device_eui;
+  return aggregate;
+}
+
 function localEntryInput(overrides) {
   return Object.assign({
     entry_uuid: ENTRY_UUID,
@@ -352,11 +380,96 @@ test('UPSERT_JOURNAL_ENTRY applies through lifecycle and atomically records nume
     assert.notEqual(entry.context_json, '{"untrusted":true}');
     const applied = await db.get('SELECT * FROM applied_commands WHERE command_id=?', ['101']);
     assert.equal(applied.command_type, 'UPSERT_JOURNAL_ENTRY');
+    const facts = JSON.parse(applied.result_detail);
+    assert.equal(facts.ownerUserUuid, OWNER_UUID);
+    assert.equal(facts.gatewayDeviceEui, GATEWAY_EUI);
     const ackRow = await db.get('SELECT * FROM command_ack_outbox WHERE command_id=?', ['101']);
     const ack = JSON.parse(ackRow.payload_json);
     assert.equal(ack.commandId, 101);
     assert.equal(typeof ack.commandId, 'number');
     assert.equal(await db.get('SELECT COUNT(*) AS n FROM sync_outbox').then((row) => row.n), 1);
+  } finally {
+    db.close();
+  }
+});
+
+test('journal entry success replaces pending retryable ACKs and preserves delivered history', async () => {
+  const db = fixtureDb('entry-ack-replacement');
+  try {
+    await db.run(
+      'INSERT INTO command_ack_outbox(command_id,payload_json,created_at) VALUES (?,?,?)',
+      ['570', JSON.stringify({ commandId: 570, result: 'FAILED_RETRYABLE' }),
+        '2026-07-12T09:00:00.000Z']
+    );
+    await db.run(
+      'INSERT INTO command_ack_outbox(command_id,payload_json,created_at,delivered_at) VALUES (?,?,?,?)',
+      ['570', JSON.stringify({ commandId: 570, result: 'FAILED_RETRYABLE', historical: true }),
+        '2026-07-12T08:00:00.000Z', '2026-07-12T08:00:01.000Z']
+    );
+    const result = await journal.applyJournalCommand(
+      db,
+      commandEnvelope({ commandId: 570 }),
+      { gateway_device_eui: GATEWAY_EUI }
+    );
+    assert.equal(result.ack.result, 'APPLIED');
+    const pending = await db.all(
+      'SELECT payload_json FROM command_ack_outbox WHERE command_id=? AND delivered_at IS NULL',
+      ['570']
+    );
+    assert.equal(pending.length, 1);
+    assert.equal(JSON.parse(pending[0].payload_json).result, 'APPLIED');
+    const delivered = await db.get(
+      'SELECT payload_json FROM command_ack_outbox WHERE command_id=? AND delivered_at IS NOT NULL',
+      ['570']
+    );
+    assert.equal(JSON.parse(delivered.payload_json).historical, true);
+  } finally {
+    db.close();
+  }
+});
+
+test('terminal ACK replacement removes the target retryable beyond a 50-row delivery boundary', async () => {
+  const db = fixtureDb('entry-ack-boundary');
+  try {
+    for (let index = 0; index < 50; index += 1) {
+      const commandId = String(6000 + index);
+      await db.run(
+        'INSERT INTO command_ack_outbox(command_id,payload_json,created_at) VALUES (?,?,?)',
+        [commandId, JSON.stringify({ commandId: Number(commandId), result: 'FAILED_RETRYABLE' }),
+          '2026-07-12T08:00:' + String(index).padStart(2, '0') + '.000Z']
+      );
+    }
+    await db.run(
+      'INSERT INTO command_ack_outbox(command_id,payload_json,created_at) VALUES (?,?,?)',
+      ['571', JSON.stringify({ commandId: 571, result: 'FAILED_RETRYABLE' }),
+        '2026-07-12T09:00:00.000Z']
+    );
+    const firstBatch = await db.all(
+      'SELECT command_id FROM command_ack_outbox WHERE delivered_at IS NULL ORDER BY id LIMIT 50'
+    );
+    assert.equal(firstBatch.length, 50);
+    assert.equal(firstBatch.some((row) => row.command_id === '571'), false);
+
+    const result = await journal.applyJournalCommand(
+      db,
+      commandEnvelope({ commandId: 571 }),
+      { gateway_device_eui: GATEWAY_EUI }
+    );
+    assert.equal(result.ack.result, 'APPLIED');
+    const targetRows = await db.all(
+      'SELECT payload_json FROM command_ack_outbox WHERE command_id=? AND delivered_at IS NULL',
+      ['571']
+    );
+    assert.equal(targetRows.length, 1);
+    assert.equal(JSON.parse(targetRows[0].payload_json).result, 'APPLIED');
+    assert.equal(
+      (await db.all('SELECT payload_json FROM command_ack_outbox WHERE delivered_at IS NULL'))
+        .filter((row) => {
+          const payload = JSON.parse(row.payload_json);
+          return payload.commandId === 571 && payload.result === 'FAILED_RETRYABLE';
+        }).length,
+      0
+    );
   } finally {
     db.close();
   }
@@ -394,6 +507,13 @@ for (const fixture of [
   test(fixture.name + ' applies through the shared resource API with numeric delivery ACK', async () => {
     const db = fixtureDb('resource-' + fixture.deliveryId);
     try {
+      await db.run(
+        'INSERT INTO command_ack_outbox(command_id,payload_json,created_at) VALUES (?,?,?)',
+        [String(fixture.deliveryId), JSON.stringify({
+          commandId: fixture.deliveryId,
+          result: 'FAILED_RETRYABLE',
+        }), '2026-07-12T09:00:00.000Z']
+      );
       const result = await journal.applyJournalCommand(
         db,
         pendingCommand(fixture.deliveryId, fixture.name, fixture.effectKey, fixture.body),
@@ -409,8 +529,16 @@ for (const fixture of [
       assert.equal(stored.sync_version, 1);
       const applied = await db.get('SELECT * FROM applied_commands WHERE command_id=?', [String(fixture.deliveryId)]);
       assert.equal(applied.command_type, fixture.name);
-      const ackRow = await db.get('SELECT payload_json FROM command_ack_outbox WHERE command_id=?', [String(fixture.deliveryId)]);
-      assert.equal(JSON.parse(ackRow.payload_json).commandId, fixture.deliveryId);
+      const facts = JSON.parse(applied.result_detail);
+      assert.equal(facts.ownerUserUuid, OWNER_UUID);
+      assert.equal(facts.gatewayDeviceEui, GATEWAY_EUI);
+      const pendingAcks = await db.all(
+        'SELECT payload_json FROM command_ack_outbox WHERE command_id=? AND delivered_at IS NULL',
+        [String(fixture.deliveryId)]
+      );
+      assert.equal(pendingAcks.length, 1);
+      assert.equal(JSON.parse(pendingAcks[0].payload_json).commandId, fixture.deliveryId);
+      assert.equal(JSON.parse(pendingAcks[0].payload_json).result, 'APPLIED');
     } finally {
       db.close();
     }
@@ -446,7 +574,7 @@ test('VOID_JOURNAL_ENTRY applies through lifecycle and records its own terminal 
   }
 });
 
-test('crash after terminal ledger insert rolls back entry, event, ledger, and ACK together', async () => {
+test('crash after terminal ledger insert rolls back atomically and does not poison the apply queue', async () => {
   const db = fixtureDb('entry-crash');
   try {
     await assert.rejects(
@@ -470,6 +598,13 @@ test('crash after terminal ledger insert rolls back entry, event, ledger, and AC
       const count = await db.get('SELECT COUNT(*) AS n FROM ' + table);
       assert.equal(count.n, 0, table);
     }
+    const recovered = await journal.applyJournalCommand(
+      db,
+      commandEnvelope({ commandId: 404 }),
+      { gateway_device_eui: GATEWAY_EUI }
+    );
+    assert.equal(recovered.ack.result, 'APPLIED');
+    assert.equal((await db.get('SELECT COUNT(*) AS n FROM journal_entries')).n, 1);
   } finally {
     db.close();
   }
@@ -489,6 +624,11 @@ test('stale entry command is not applied and durably reports current version and
       'JOURNAL_ENTRY',
       ENTRY_UUID,
     ]);
+    await db.run(
+      'INSERT INTO command_ack_outbox(command_id,payload_json,created_at) VALUES (?,?,?)',
+      ['402', JSON.stringify({ commandId: 402, result: 'FAILED_RETRYABLE' }),
+        '2026-07-12T09:00:00.000Z']
+    );
     const result = await journal.applyJournalCommand(db, commandEnvelope({ commandId: 402 }), {
       gateway_device_eui: GATEWAY_EUI,
     });
@@ -503,7 +643,16 @@ test('stale entry command is not applied and durably reports current version and
     assert.equal(entry.sync_version, 1);
     const applied = await db.get('SELECT result,result_detail FROM applied_commands WHERE command_id=?', ['402']);
     assert.equal(applied.result, 'REJECTED_PERMANENT');
-    assert.equal(JSON.parse(applied.result_detail).currentPayloadHash, result.ack.currentPayloadHash);
+    const facts = JSON.parse(applied.result_detail);
+    assert.equal(facts.currentPayloadHash, result.ack.currentPayloadHash);
+    assert.equal(facts.ownerUserUuid, OWNER_UUID);
+    assert.equal(facts.gatewayDeviceEui, GATEWAY_EUI);
+    const pendingAcks = await db.all(
+      'SELECT payload_json FROM command_ack_outbox WHERE command_id=? AND delivered_at IS NULL',
+      ['402']
+    );
+    assert.equal(pendingAcks.length, 1);
+    assert.equal(JSON.parse(pendingAcks[0].payload_json).result, 'REJECTED_PERMANENT');
   } finally {
     db.close();
   }
@@ -513,47 +662,44 @@ for (const fixture of [
   {
     name: 'custom vocabulary',
     commandType: 'UPSERT_JOURNAL_CUSTOM_VOCAB',
-    createId: 410,
     staleId: 411,
     effectKey: 'journal_vocab:' + VOCAB_UUID + ':0',
     body: { custom_vocab: vocabAggregate() },
     aggregateType: 'JOURNAL_VOCAB',
     aggregateKey: VOCAB_UUID,
+    create(db) {
+      return journal.upsertCustomVocab(db, localVocabInput(), localPrincipal());
+    },
   },
   {
     name: 'plot',
     commandType: 'UPSERT_JOURNAL_PLOT',
-    createId: 412,
     staleId: 413,
     effectKey: 'journal_plot:' + SECOND_PLOT_UUID + ':0',
     body: { plot: plotAggregate() },
     aggregateType: 'JOURNAL_PLOT',
     aggregateKey: SECOND_PLOT_UUID,
+    create(db) {
+      return journal.upsertPlot(db, localPlotInput(), localPrincipal());
+    },
   },
   {
     name: 'plot group',
     commandType: 'UPSERT_JOURNAL_PLOT_GROUP',
-    createId: 414,
     staleId: 415,
     effectKey: 'journal_plot_group:' + GROUP_UUID + ':0',
     body: { plot_group: groupAggregate() },
     aggregateType: 'JOURNAL_PLOT_GROUP',
     aggregateKey: GROUP_UUID,
+    create(db) {
+      return journal.upsertPlotGroup(db, localGroupInput(), localPrincipal());
+    },
   },
 ]) {
   test('stale ' + fixture.name + ' command reconstructs current hash after outbox pruning', async () => {
     const db = fixtureDb('stale-pruned-' + fixture.staleId);
     try {
-      await journal.applyJournalCommand(
-        db,
-        pendingCommand(
-          fixture.createId,
-          fixture.commandType,
-          fixture.effectKey,
-          fixture.body
-        ),
-        { gateway_device_eui: GATEWAY_EUI }
-      );
+      await fixture.create(db);
       const event = await db.get(
         'SELECT payload_json FROM sync_outbox WHERE aggregate_type=? AND aggregate_key=?',
         [fixture.aggregateType, fixture.aggregateKey]
@@ -609,6 +755,213 @@ test('missing custom-vocabulary parent is retryable and never creates a terminal
   }
 });
 
+for (const fixture of [
+  {
+    name: 'activity',
+    mutate(entry) {
+      entry.activity_code = MISSING_CUSTOM_CODE;
+    },
+  },
+  {
+    name: 'attribute',
+    mutate(entry) {
+      entry.values[0].attribute_code = MISSING_CUSTOM_CODE;
+    },
+  },
+  {
+    name: 'choice',
+    mutate(entry) {
+      entry.values = [{
+        attribute_code: 'attr.crop',
+        group_index: 0,
+        value_status: 'observed',
+        value_num: null,
+        value_text: MISSING_CUSTOM_CODE,
+        unit_code: null,
+        entered_value_num: null,
+        entered_unit_code: null,
+      }];
+    },
+  },
+  {
+    name: 'canonical unit',
+    mutate(entry) {
+      entry.values[0].unit_code = MISSING_CUSTOM_CODE;
+    },
+  },
+  {
+    name: 'entered unit',
+    mutate(entry) {
+      entry.values[0].entered_unit_code = MISSING_CUSTOM_CODE;
+    },
+  },
+]) {
+  test('missing custom ' + fixture.name + ' dependency is structured and retryable', async () => {
+    const db = fixtureDb('missing-custom-' + fixture.name.replace(/\s+/g, '-'));
+    try {
+      const envelope = commandEnvelope({ commandId: 600 + fixture.name.length });
+      fixture.mutate(envelope.payload.entry);
+      const result = await journal.applyJournalCommand(db, envelope, {
+        gateway_device_eui: GATEWAY_EUI,
+      });
+      assert.equal(result.ack.result, 'FAILED_RETRYABLE');
+      assert.equal(result.ack.reason, 'missing_custom_dependency');
+      assert.equal((await db.get('SELECT COUNT(*) AS n FROM journal_entries')).n, 0);
+      assert.equal((await db.get('SELECT COUNT(*) AS n FROM applied_commands')).n, 0);
+      assert.equal((await db.get(
+        'SELECT COUNT(*) AS n FROM command_ack_outbox WHERE command_id=? AND delivered_at IS NULL',
+        [String(envelope.commandId)]
+      )).n, 1);
+    } finally {
+      db.close();
+    }
+  });
+}
+
+test('malformed value shape remains permanent when it contains a missing custom unit', async () => {
+  const db = fixtureDb('malformed-value-with-custom-unit');
+  try {
+    const envelope = commandEnvelope({ commandId: 608 });
+    envelope.payload.entry.values = [{
+      attribute_code: 'attr.crop',
+      group_index: 0,
+      value_status: 'observed',
+      value_text: 'crop.barley',
+      unit_code: MISSING_CUSTOM_CODE,
+      entered_value_num: null,
+      entered_unit_code: null,
+    }];
+    const result = await journal.applyJournalCommand(db, envelope, {
+      gateway_device_eui: GATEWAY_EUI,
+    });
+    assert.equal(result.ack.result, 'REJECTED_PERMANENT');
+    assert.equal(result.ack.reason, 'validation_failed');
+    assert.equal((await db.get('SELECT COUNT(*) AS n FROM applied_commands')).n, 1);
+  } finally {
+    db.close();
+  }
+});
+
+test('a malformed custom-looking code is a permanent validation error, not a dependency retry', async () => {
+  const db = fixtureDb('malformed-custom-code');
+  try {
+    const envelope = commandEnvelope({ commandId: 609 });
+    envelope.payload.entry.activity_code = 'custom.not-a-uuid';
+    const result = await journal.applyJournalCommand(db, envelope, {
+      gateway_device_eui: GATEWAY_EUI,
+    });
+    assert.equal(result.ack.result, 'REJECTED_PERMANENT');
+    assert.equal(result.ack.reason, 'validation_failed');
+    assert.equal((await db.get('SELECT COUNT(*) AS n FROM applied_commands')).n, 1);
+  } finally {
+    db.close();
+  }
+});
+
+test('a retryable custom attribute command applies after its scoped dependency arrives', async () => {
+  const db = fixtureDb('custom-dependency-arrival');
+  try {
+    const envelope = commandEnvelope({ commandId: 610 });
+    envelope.payload.entry.values.push({
+      attribute_code: MISSING_CUSTOM_CODE,
+      group_index: 0,
+      value_status: 'observed',
+      value_num: null,
+      value_text: 'Canopy still wet',
+      unit_code: null,
+      entered_value_num: null,
+      entered_unit_code: null,
+    });
+    const missing = await journal.applyJournalCommand(db, envelope, {
+      gateway_device_eui: GATEWAY_EUI,
+    });
+    assert.equal(missing.ack.result, 'FAILED_RETRYABLE');
+    assert.equal((await db.get('SELECT COUNT(*) AS n FROM applied_commands')).n, 0);
+
+    const dependencyUuid = MISSING_CUSTOM_CODE.slice('custom.'.length);
+    await journal.upsertCustomVocab(
+      db,
+      localVocabInput({
+        custom_field_uuid: dependencyUuid,
+        code: MISSING_CUSTOM_CODE,
+        kind: 'attribute',
+        value_type: 'text',
+        labels_json: '{"en":"Canopy condition"}',
+      }),
+      localPrincipal()
+    );
+    const applied = await journal.applyJournalCommand(db, envelope, {
+      gateway_device_eui: GATEWAY_EUI,
+    });
+    assert.equal(applied.ack.result, 'APPLIED');
+    assert.equal((await db.get(
+      'SELECT value_text FROM journal_entry_values WHERE entry_uuid=? AND attribute_code=?',
+      [ENTRY_UUID, MISSING_CUSTOM_CODE]
+    )).value_text, 'Canopy still wet');
+    const pending = await db.all(
+      'SELECT payload_json FROM command_ack_outbox WHERE command_id=? AND delivered_at IS NULL',
+      ['610']
+    );
+    assert.equal(pending.length, 1);
+    assert.equal(JSON.parse(pending[0].payload_json).result, 'APPLIED');
+  } finally {
+    db.close();
+  }
+});
+
+test('an existing inactive custom activity remains a permanent validation failure', async () => {
+  const db = fixtureDb('inactive-custom-activity');
+  try {
+    await journal.upsertCustomVocab(
+      db,
+      localVocabInput({ active: 0 }),
+      localPrincipal()
+    );
+    const envelope = commandEnvelope({ commandId: 409 });
+    envelope.payload.entry.activity_code = 'custom.' + VOCAB_UUID;
+    const result = await journal.applyJournalCommand(db, envelope, {
+      gateway_device_eui: GATEWAY_EUI,
+    });
+    assert.equal(result.ack.result, 'REJECTED_PERMANENT');
+    assert.equal(result.ack.reason, 'validation_failed');
+    assert.equal(
+      (await db.get('SELECT COUNT(*) AS n FROM applied_commands WHERE command_id=?', ['409'])).n,
+      1
+    );
+  } finally {
+    db.close();
+  }
+});
+
+test('a deleted custom activity stays hidden and is a permanent validation failure', async () => {
+  const db = fixtureDb('deleted-custom-activity');
+  try {
+    await journal.upsertCustomVocab(db, localVocabInput(), localPrincipal());
+    await db.run(
+      'UPDATE journal_vocab SET deleted_at=? WHERE code=?',
+      ['2026-07-12T10:00:00.000Z', 'custom.' + VOCAB_UUID]
+    );
+    const scopedCatalog = await journal.loadScopedCatalog(db, localPrincipal());
+    assert.equal(
+      scopedCatalog.vocab.some((row) => row.code === 'custom.' + VOCAB_UUID),
+      false
+    );
+    const envelope = commandEnvelope({ commandId: 611 });
+    envelope.payload.entry.activity_code = 'custom.' + VOCAB_UUID;
+    const result = await journal.applyJournalCommand(db, envelope, {
+      gateway_device_eui: GATEWAY_EUI,
+    });
+    assert.equal(result.ack.result, 'REJECTED_PERMANENT');
+    assert.equal(result.ack.reason, 'validation_failed');
+    assert.equal(
+      (await db.get('SELECT COUNT(*) AS n FROM applied_commands WHERE command_id=?', ['611'])).n,
+      1
+    );
+  } finally {
+    db.close();
+  }
+});
+
 test('exact command-ID replay preserves the stored rejection result and does not rewrite its ledger', async () => {
   const db = fixtureDb('dedupe-exact-rejection');
   const storedFacts = {
@@ -627,6 +980,12 @@ test('exact command-ID replay preserves the stored rejection result and does not
       ['501', GATEWAY_EUI, 'UPSERT_JOURNAL_ENTRY', storedFacts.effectKey,
         '2026-07-12T10:00:00.000Z', 'REJECTED_PERMANENT', JSON.stringify(storedFacts), 'edge']
     );
+    const effectReplay = await journal.deduplicatePendingCommand(
+      db,
+      commandEnvelope({ commandId: 505 }),
+      { gateway_device_eui: GATEWAY_EUI }
+    );
+    assert.equal(effectReplay.handled, false);
     const envelope = commandEnvelope({
       commandId: 501,
       payload: { malformed_retransmission: true },
@@ -736,9 +1095,11 @@ test('compatible effect replay uses the stored APPLIED result for the new numeri
   const db = fixtureDb('dedupe-compatible-effect');
   const storedFacts = {
     aggregateKey: ENTRY_UUID,
+    ownerUserUuid: OWNER_UUID,
     appliedSyncVersion: 1,
     effectKey: 'journal_entry:' + ENTRY_UUID + ':0',
     payloadHash: 'c'.repeat(64),
+    gatewayDeviceEui: GATEWAY_EUI,
     appliedAt: '2026-07-12T10:00:00.000Z',
   };
   try {
@@ -762,6 +1123,143 @@ test('compatible effect replay uses the stored APPLIED result for the new numeri
     assert.equal(replay.ack.payloadHash, storedFacts.payloadHash);
     assert.equal((await db.get('SELECT COUNT(*) AS n FROM applied_commands')).n, 1);
     assert.equal((await db.get('SELECT COUNT(*) AS n FROM command_ack_outbox WHERE command_id=?', ['502'])).n, 1);
+  } finally {
+    db.close();
+  }
+});
+
+test('concurrent same-effect journal applies serialize and replay the winner', async () => {
+  const db = fixtureDb('apply-same-effect-concurrency');
+  const rawTransaction = db.transaction.bind(db);
+  let transactionTail = Promise.resolve();
+  db.transaction = function(executor) {
+    const scheduled = transactionTail.then(
+      function() { return rawTransaction(executor); },
+      function() { return rawTransaction(executor); }
+    );
+    transactionTail = scheduled.then(function() {}, function() {});
+    return scheduled;
+  };
+  const envelopes = [
+    commandEnvelope({ commandId: 580 }),
+    commandEnvelope({ commandId: 581 }),
+  ];
+  try {
+    const outerMisses = await Promise.all(envelopes.map(function(envelope) {
+      return journal.deduplicatePendingCommand(db, envelope, {
+        gateway_device_eui: GATEWAY_EUI,
+      });
+    }));
+    assert.deepEqual(outerMisses.map(function(result) { return result.handled; }), [false, false]);
+
+    let release;
+    const startTogether = new Promise(function(resolve) { release = resolve; });
+    const pending = envelopes.map(async function(envelope) {
+      await startTogether;
+      return journal.applyJournalCommand(db, envelope, {
+        gateway_device_eui: GATEWAY_EUI,
+      });
+    });
+    release();
+    const results = await Promise.all(pending);
+    assert.deepEqual(
+      results.map(function(result) { return result.ack.commandId; }).sort(),
+      [580, 581]
+    );
+    assert.deepEqual(
+      results.map(function(result) { return result.ack.result; }),
+      ['APPLIED', 'APPLIED']
+    );
+    assert.equal(results.filter(function(result) { return result.ack.duplicate === true; }).length, 1);
+    assert.equal((await db.get('SELECT COUNT(*) AS n FROM journal_entries')).n, 1);
+    assert.equal((await db.get('SELECT COUNT(*) AS n FROM sync_outbox')).n, 1);
+    assert.equal((await db.get('SELECT COUNT(*) AS n FROM applied_commands')).n, 1);
+    assert.equal((await db.get('SELECT COUNT(*) AS n FROM command_ack_outbox')).n, 2);
+  } finally {
+    db.close();
+  }
+});
+
+test('journal effect replay cannot cross owners on the same gateway', async () => {
+  const db = fixtureDb('dedupe-cross-owner');
+  const effectKey = 'journal_plot:' + SECOND_PLOT_UUID + ':0';
+  try {
+    await db.run(
+      'INSERT INTO users(id,username,password_hash,created_at,user_uuid) VALUES (?,?,?,?,?)',
+      [2, 'second-owner', 'unused', '2026-07-12T00:00:00.000Z', SECOND_OWNER_UUID]
+    );
+    await db.run(
+      'INSERT INTO applied_commands (' +
+        'command_id,device_eui,command_type,effect_key,applied_at,result,result_detail,originator' +
+      ') VALUES (?,?,?,?,?,?,?,?)',
+      ['560', GATEWAY_EUI, 'UPSERT_JOURNAL_PLOT', effectKey,
+        '2026-07-12T10:00:00.000Z', 'REJECTED_PERMANENT', JSON.stringify({
+          ownerUserUuid: OWNER_UUID,
+          gatewayDeviceEui: GATEWAY_EUI,
+          reason: 'owner_a_rejection',
+        }), 'edge']
+    );
+    const plot = Object.assign({}, plotAggregate(), {
+      owner_user_uuid: SECOND_OWNER_UUID,
+      settings: Object.assign({}, plotAggregate().settings, {
+        updated_by_principal_uuid: SECOND_ACTOR_UUID,
+      }),
+    });
+    const envelope = pendingCommand(561, 'UPSERT_JOURNAL_PLOT', effectKey, { plot });
+    Object.assign(envelope.payload, {
+      owner_user_uuid: SECOND_OWNER_UUID,
+      author_principal_uuid: SECOND_ACTOR_UUID,
+      author_label: 'Second cloud researcher',
+    });
+    const replay = await journal.deduplicatePendingCommand(db, envelope, {
+      gateway_device_eui: GATEWAY_EUI,
+    });
+    assert.equal(replay.handled, false);
+    const applied = await journal.applyJournalCommand(db, envelope, {
+      gateway_device_eui: GATEWAY_EUI,
+    });
+    assert.equal(applied.ack.result, 'APPLIED');
+    const stored = await db.get(
+      'SELECT owner_user_uuid FROM journal_plots WHERE plot_uuid=?',
+      [SECOND_PLOT_UUID]
+    );
+    assert.equal(stored.owner_user_uuid, SECOND_OWNER_UUID);
+    const matchingReplay = await journal.deduplicatePendingCommand(
+      db,
+      Object.assign({}, envelope, { commandId: 564 }),
+      { gateway_device_eui: GATEWAY_EUI }
+    );
+    assert.equal(matchingReplay.handled, true);
+    assert.equal(matchingReplay.ack.commandId, 564);
+    assert.equal(matchingReplay.ack.result, 'APPLIED');
+  } finally {
+    db.close();
+  }
+});
+
+test('journal effect replay cannot cross gateways for the same owner', async () => {
+  const db = fixtureDb('dedupe-cross-gateway');
+  const effectKey = 'journal_plot:' + SECOND_PLOT_UUID + ':0';
+  try {
+    await db.run(
+      'INSERT INTO applied_commands (' +
+        'command_id,device_eui,command_type,effect_key,applied_at,result,result_detail,originator' +
+      ') VALUES (?,?,?,?,?,?,?,?)',
+      ['562', GATEWAY_EUI, 'UPSERT_JOURNAL_PLOT', effectKey,
+        '2026-07-12T10:00:00.000Z', 'REJECTED_PERMANENT', JSON.stringify({
+          ownerUserUuid: OWNER_UUID,
+          gatewayDeviceEui: GATEWAY_EUI,
+          reason: 'first_gateway_rejection',
+        }), 'edge']
+    );
+    const plot = Object.assign({}, plotAggregate(), {
+      gateway_device_eui: SECOND_GATEWAY_EUI,
+    });
+    const envelope = pendingCommand(563, 'UPSERT_JOURNAL_PLOT', effectKey, { plot });
+    const replay = await journal.deduplicatePendingCommand(db, envelope, {
+      gateway_device_eui: SECOND_GATEWAY_EUI,
+    });
+    assert.equal(replay.handled, false);
   } finally {
     db.close();
   }
@@ -971,6 +1469,59 @@ test('shared ACK queue treats an undefined transaction run result as a new non-d
       'APPLIED');
     const ack = await db.get('SELECT payload_json FROM command_ack_outbox WHERE command_id=?', ['542']);
     assert.equal(JSON.parse(ack.payload_json).duplicate, false);
+  } finally {
+    db.close();
+  }
+});
+
+test('shared ACK queue keeps one pending latest result and preserves delivered history', async () => {
+  const db = fixtureDb('ack-queue-latest-only');
+  try {
+    await db.run(
+      'INSERT INTO command_ack_outbox(command_id,payload_json,created_at,delivered_at) VALUES (?,?,?,?)',
+      ['575', JSON.stringify({ commandId: 575, result: 'FAILED_RETRYABLE', historical: true }),
+        '2026-07-12T08:00:00.000Z', '2026-07-12T08:00:01.000Z']
+    );
+    await journal.queueCommandAck(db, {
+      commandId: 575,
+      commandType: 'UPSERT_ZONE',
+      effectKey: 'zone:' + ZONE_UUID + ':0',
+      deviceEui: GATEWAY_EUI,
+      result: 'FAILED_RETRYABLE',
+      reason: 'first_retry',
+    });
+    await journal.queueCommandAck(db, {
+      commandId: 575,
+      commandType: 'UPSERT_ZONE',
+      effectKey: 'zone:' + ZONE_UUID + ':0',
+      deviceEui: GATEWAY_EUI,
+      result: 'FAILED_RETRYABLE',
+      reason: 'latest_retry',
+    });
+    let pending = await db.all(
+      'SELECT payload_json FROM command_ack_outbox WHERE command_id=? AND delivered_at IS NULL',
+      ['575']
+    );
+    assert.equal(pending.length, 1);
+    assert.equal(JSON.parse(pending[0].payload_json).reason, 'latest_retry');
+    await journal.queueCommandAck(db, {
+      commandId: 575,
+      commandType: 'UPSERT_ZONE',
+      effectKey: 'zone:' + ZONE_UUID + ':0',
+      deviceEui: GATEWAY_EUI,
+      result: 'APPLIED',
+    });
+    pending = await db.all(
+      'SELECT payload_json FROM command_ack_outbox WHERE command_id=? AND delivered_at IS NULL',
+      ['575']
+    );
+    assert.equal(pending.length, 1);
+    assert.equal(JSON.parse(pending[0].payload_json).result, 'APPLIED');
+    const delivered = await db.get(
+      'SELECT payload_json FROM command_ack_outbox WHERE command_id=? AND delivered_at IS NOT NULL',
+      ['575']
+    );
+    assert.equal(JSON.parse(delivered.payload_json).historical, true);
   } finally {
     db.close();
   }

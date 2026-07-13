@@ -1268,6 +1268,19 @@ test('HTTP handler enforces ownership and limits, then round-trips a created ent
   assert.equal(oversized.payload.error, 'body_too_large');
 
   const entryUuid = '71000000-0000-4000-8000-000000000001';
+  const missingDependency = await request('POST', '/api/journal/entries', {
+    body: entryInput(
+      '71000000-0000-4000-8000-000000000002',
+      plotUuid,
+      '2026-07-13T13:00:00',
+      { activity_code: 'custom.99999999-9999-4999-8999-999999999999' }
+    ),
+  });
+  assert.equal(missingDependency.statusCode, 422);
+  assert.equal(missingDependency.payload.error, 'missing_custom_dependency');
+  assert.equal(missingDependency.payload.details[0].dependency_code,
+    'custom.99999999-9999-4999-8999-999999999999');
+
   const created = await request('POST', '/api/journal/entries', {
     body: entryInput(entryUuid, plotUuid, '2026-07-13T14:00:00'),
   });
@@ -1279,5 +1292,5 @@ test('HTTP handler enforces ownership and limits, then round-trips a created ent
   });
   assert.equal(listed.statusCode, 200);
   assert.deepEqual(listed.payload.entries.map((entry) => entry.entry_uuid), [entryUuid]);
-  assert.equal(db.closeCalls, 4);
+  assert.equal(db.closeCalls, 5);
 });

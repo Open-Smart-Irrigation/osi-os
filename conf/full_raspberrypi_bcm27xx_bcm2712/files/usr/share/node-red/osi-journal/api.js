@@ -577,6 +577,7 @@ async function recordResourceCommand(tx, principal, terminal) {
   const facts = {
     aggregateKey: terminal.aggregate_key,
     aggregateType: terminal.aggregate_type,
+    ownerUserUuid: principal.owner_user_uuid,
     appliedSyncVersion: terminal.sync_version,
     effectKey: principal.effect_key,
     payloadHash,
@@ -602,6 +603,11 @@ async function recordResourceCommand(tx, principal, terminal) {
   if (hooks && typeof hooks.afterCommandLedger === 'function') {
     await hooks.afterCommandLedger(facts);
   }
+  await dbRun(
+    tx,
+    'DELETE FROM command_ack_outbox WHERE command_id=? AND delivered_at IS NULL',
+    [commandId]
+  );
   await dbRun(
     tx,
     'INSERT INTO command_ack_outbox (command_id,payload_json,created_at) VALUES (?,?,?)',
@@ -2290,6 +2296,7 @@ function errorResponse(error) {
     limit_exceeded: 413,
     batch_too_large: 413,
     validation_failed: 422,
+    missing_custom_dependency: 422,
     season_required: 422,
   };
   const code = error && error.code ? error.code : 'internal_error';

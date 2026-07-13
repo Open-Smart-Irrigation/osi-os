@@ -197,12 +197,13 @@ async function loadScopedRows(db, principal) {
   if (typeof owner !== 'string' || !owner || typeof gateway !== 'string' || !gateway) {
     throw new TypeError('Scoped journal catalog requires owner and gateway identity');
   }
-  const vocabRows = await queryAll(
+  const allVocabRows = await queryAll(
     db,
     "SELECT * FROM journal_vocab WHERE scope='custom' AND owner_user_uuid=? " +
-      'AND gateway_device_eui=? AND deleted_at IS NULL ORDER BY code',
+      'AND gateway_device_eui=? ORDER BY code',
     [owner, gateway]
   );
+  const vocabRows = allVocabRows.filter(function(row) { return row.deleted_at == null; });
   const codes = vocabRows.map(function(row) { return row.code; });
   let mappingRows = [];
   if (codes.length) {
@@ -220,7 +221,12 @@ async function loadScopedRows(db, principal) {
       'AND gateway_device_eui=? AND deleted_at IS NULL ORDER BY product_uuid',
     [owner, gateway]
   );
-  return { vocabRows, mappingRows, productRows };
+  return {
+    vocabRows,
+    mappingRows,
+    productRows,
+    knownCustomCodes: new Set(allVocabRows.map(function(row) { return row.code; })),
+  };
 }
 
 async function loadCatalog(db, principal) {
@@ -245,6 +251,7 @@ async function loadCatalog(db, principal) {
     layouts: core.layouts,
     products,
     mappings: core.mappings.concat(scoped.mappingRows),
+    knownCustomCodes: scoped.knownCustomCodes,
   };
 }
 
