@@ -1,7 +1,8 @@
 'use strict';
-// Regression tests for issue #10 and issue #5 (both belong to the same
-// equal-version-payload-conflict class; issue #5's test is appended near the
-// end of this file). Issue #10: the cloud (osi-server SyncEventTxExecutor)
+// Regression tests for issue #10, issue #5, and issue #15 (all three belong
+// to the same equal-version-payload-conflict class; issue #5's and issue
+// #15's tests are appended near the end of this file). Issue #10: the cloud
+// (osi-server SyncEventTxExecutor)
 // keeps a per-resource watermark (highest sync_version + payload hash) and
 // terminally rejects an equal-version-different-payload event. The
 // dendrometer_daily / zone_daily_recommendations / zone_daily_environment
@@ -193,4 +194,52 @@ test('the shipped Chameleon endpoints bump devices.sync_version and the bootstra
     assert.ok(sel.includes('d.chameleon_swt2_depth_cm'), `${id} devices SELECT must include chameleon_swt2_depth_cm`);
     assert.ok(sel.includes('d.chameleon_swt3_depth_cm'), `${id} devices SELECT must include chameleon_swt3_depth_cm`);
   }
+});
+
+// Regression test for issue #15: the reference-tree endpoint
+// (dendro-ref-tree-fn, PUT /api/devices/:deveui/reference-tree) updated
+// devices.is_reference_tree without bumping devices.sync_version, unlike
+// every other device-flag endpoint (dendro_enabled/temp_enabled/
+// rain_gauge_enabled/flow_meter_enabled/chameleon_enabled all bump it).
+// is_reference_tree is already in trg_sync_devices_outbox_au's WHEN clause
+// and json_object payload (verified against sync-init-fn), so the trigger
+// itself was correct; the missing piece was solely the sync_version bump on
+// the endpoint's UPDATE. Without it, a reference-tree toggle after the first
+// delivered DEVICE event emits an equal-version-different-payload event,
+// which the cloud terminally rejects (equal_version_payload_conflict) — the
+// same class of bug fixed for issue #10 and issue #5.
+test('toggling is_reference_tree on a device emits a DEVICE event with is_reference_tree in the payload and an increasing sync_version', () => {
+  const db = freshLinkedDb();
+  db.exec("INSERT INTO users(id, username, password_hash, created_at) VALUES(1,'u','h','now')");
+  db.exec(
+    "INSERT INTO devices(deveui, name, type_id, user_id, created_at, updated_at) " +
+    "VALUES('A84041FFFF0000AA','DENDRO-1','TEKTELIC_CLOVER',1,'2026-07-13T00:00:00.000Z','2026-07-13T00:00:00.000Z')"
+  );
+
+  const before = db.prepare("SELECT sync_version, is_reference_tree FROM devices WHERE deveui='A84041FFFF0000AA'").get();
+  assert.strictEqual(before.is_reference_tree, 0, 'is_reference_tree defaults to 0');
+
+  // Writer-shaped UPDATE mirroring the fixed dendro-ref-tree-fn SQL.
+  db.prepare(
+    "UPDATE devices SET is_reference_tree=1, sync_version = COALESCE(sync_version, 0) + 1 WHERE deveui='A84041FFFF0000AA'"
+  ).run();
+
+  const after = db.prepare("SELECT sync_version, is_reference_tree FROM devices WHERE deveui='A84041FFFF0000AA'").get();
+  assert.strictEqual(after.is_reference_tree, 1, 'is_reference_tree was persisted');
+  assert.ok(after.sync_version > before.sync_version, 'sync_version must increase on the is_reference_tree toggle');
+
+  const events = outboxRows(db, 'DEVICE');
+  assert.ok(events.length >= 2, `expected at least an insert-defaults event plus the reference-tree event, got ${events.length}`);
+  const last = events[events.length - 1];
+  const payload = JSON.parse(last.payload_json);
+  assert.strictEqual(payload.is_reference_tree, 1, 'DEVICE outbox payload must carry is_reference_tree');
+  assert.strictEqual(last.sync_version, after.sync_version, 'outbox sync_version mirrors the row');
+  assert.ok(last.sync_version > events[0].sync_version, 'versions must increase (equal versions are terminally rejected by the cloud)');
+  db.close();
+});
+
+test('the shipped reference-tree endpoint bumps devices.sync_version', () => {
+  const flows = JSON.parse(fs.readFileSync(FLOWS, 'utf8'));
+  const refTreeFn = flows.find((n) => n && n.id === 'dendro-ref-tree-fn').func;
+  assert.ok(refTreeFn.includes('sync_version = COALESCE(sync_version, 0) + 1'), 'reference-tree endpoint must bump sync_version');
 });

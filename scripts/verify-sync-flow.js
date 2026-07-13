@@ -2148,6 +2148,7 @@ expectIncludesById('put-chameleon-enabled-auth-fn', "const enabled = parseChamel
 expectIncludesById('put-chameleon-enabled-auth-fn', "enabled must be a boolean, 1, 0, 'true', 'false', '1', or '0'", 'returns a 400 for invalid Chameleon enabled values');
 expectIncludesById('put-chameleon-enabled-auth-fn', "type_id = 'DRAGINO_LSN50'", 'limits Chameleon enabled updates to LSN50 devices');
 expectIncludesById('put-chameleon-enabled-auth-fn', 'sync_version = COALESCE(sync_version, 0) + 1', 'bumps devices.sync_version on Chameleon enable toggle so trg_sync_devices_outbox_au emits an increasing-version DEVICE event (issue #5; matches dendro_enabled/temp_enabled/rain_gauge_enabled/flow_meter_enabled precedent, avoids the equal-version-payload-conflict class fixed for issue #10)');
+expectIncludesById('dendro-ref-tree-fn', 'sync_version = COALESCE(sync_version, 0) + 1', 'bumps devices.sync_version on reference-tree toggle so trg_sync_devices_outbox_au emits an increasing-version DEVICE event (issue #15; matches dendro_enabled/temp_enabled/rain_gauge_enabled/flow_meter_enabled/chameleon_enabled precedent, avoids the equal-version-payload-conflict class fixed for issue #10)');
 expectIncludesById('8b93fa005d78e25f', 'verifyBearer', 'chameleon-depth-auth uses HMAC verifyBearer — not global.get(authCheck)');
 expectExcludesById('8b93fa005d78e25f', "global.get('authCheck')", 'chameleon-depth-auth does not call the dead authCheck global');
 expectLibById('8b93fa005d78e25f', 'crypto', 'crypto', 'imports crypto for Chameleon depth auth verification');

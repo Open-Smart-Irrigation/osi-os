@@ -7,7 +7,7 @@ Run through it top-to-bottom. Do not skip steps; each has a downstream dependenc
 
 ## Version scheme
 
-`MAJOR.MINOR.PATCH` — e.g. `0.6.5`
+`MAJOR.MINOR.PATCH` — e.g. `0.7.0`
 
 - **PATCH**: bug fixes, minor improvements, deploy-only rollout (no firmware rebuild required)
 - **MINOR**: new device type, new feature area, schema additions
@@ -28,7 +28,7 @@ Run through it top-to-bottom. Do not skip steps; each has a downstream dependenc
 Edit all four places in one commit. Search for the previous version to catch anything new added since this doc was last updated.
 
 ```bash
-grep -r "0\.6\.5" web/react-gui/src/ conf/ README.md CHANGELOG.md
+grep -r "0\.7\.0" web/react-gui/src/ conf/ README.md CHANGELOG.md
 ```
 
 | File | What to change |

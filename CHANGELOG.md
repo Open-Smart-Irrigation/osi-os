@@ -5,6 +5,31 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [0.7.0] — 2026-07-13
+
+### Added
+- **Daily-analytics sync versioning** (migration `0015__upsert_sync_versioning.sql`): `dendrometer_daily`, `zone_daily_recommendations`, and `zone_daily_environment` gain a `sync_version` column; their outbox triggers now pass `NEW.sync_version` instead of a literal `0`.
+- **Device chameleon sync** (migration `0016__device_chameleon_sync.sql`): `chameleon_enabled` and the three `chameleon_swt{1,2,3}_depth_cm` columns join `trg_sync_devices_outbox_au`'s change-detection and payload, so a Chameleon-enabled LSN50 no longer appears as a plain LSN50 in the cloud.
+- `verify-flows-fn-parse` CI gate: parse-checks every function node's source across all three flow profiles and fails on a syntax error a compiled Node-RED node would otherwise swallow silently.
+- `verify-boot-ddl-interpolation.js` CI gate: executes `sync-init-fn`'s boot-DDL statement array against a scratch DB and fails on a broken string interpolation or a sync-versioning regression in any trigger.
+- GUI favicon (`/gui/favicon.png`, derived from the existing OSI logo asset) — browsers no longer log a 404 on `/favicon.ico`.
+
+### Changed
+- `firmware_version` UCI default bumped `0.6.5` → `0.7.0`; the GUI login screen, `README.md`, and `docs/versioning-workflow.md` version strings updated to match.
+- Pipeline verification checks (`routes.py`, `errors.py`, `schema.py`, `gui.py`, `canary.py`) hardened against silent false passes: probed routes now match the shipped route table, error/staleness counts come from real on-disk signals instead of a nonexistent table, and a missing Playwright or admin token now fails the gate instead of skipping it quietly.
+- `sqlite3-cli` enabled in every full-image `.config` profile (`deploy.sh` previously depended on internet access to self-heal it via `opkg`).
+- `commands.schema.json`'s `command_type` enum gained `UC512_OPEN_FOR_DURATION`, matching the duration-bound actuator entry already present in the flow's command-type registry, with the same `duration_seconds` payload constraint as `OPEN_FOR_DURATION`.
+
+### Fixed
+- Daily-analytics writers (`dendro-compute-fn`, `sim-dendro-fn-setup`, and the LSN50/S2120/LoRain zone-aggregation nodes) now bump `sync_version` on every rewrite, so a recompute no longer collides with the cloud's per-resource watermark (`equal_version_payload_conflict`).
+- Boot-DDL string-interpolation bug in `sync-init-fn`: two trigger DDL strings shipped the literal text `+ gatewaySql + ` instead of interpolating the gateway EUI.
+- `dendro-raw-fn` (`GET /api/dendrometer/:deveui/readings`) hung indefinitely because a corrupted regex made Node-RED unable to compile the node.
+- `device-api-http500` returned a hardcoded 500 on every failure, including unauthenticated requests, discarding the thrown 401 from `verifyBearer`.
+- Chameleon enable-toggle endpoint (`put-chameleon-enabled-auth-fn`) now bumps `devices.sync_version`, so a toggle after the first delivered `DEVICE` event reaches the cloud instead of being rejected.
+- Reference-tree toggle endpoint (`dendro-ref-tree-fn`) now bumps `devices.sync_version`, the same defect class as the chameleon fix above.
+
+---
+
 ## [0.6.5] — 2026-05-18
 
 ### Added
