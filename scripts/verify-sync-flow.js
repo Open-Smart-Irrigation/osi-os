@@ -2207,7 +2207,7 @@ if (deviceApiCatch) {
   expectEqual(deviceApiCatch.scope, null, 'device-api catch node catches the whole tab');
 }
 expectWireById('device-api-catch', 'device-api-http500', 'routes uncaught device-api errors into the HTTP 500 formatter');
-expectIncludesById('device-api-http500', 'msg.statusCode = 500;', 'sets HTTP 500 for uncaught device-api failures');
+expectIncludesById('device-api-http500', 'msg.statusCode = (msg.error && msg.error.statusCode) || 500;', 'adopts a thrown error statusCode (e.g. verifyBearer 401) for device-api failures, defaulting to 500 (issue #9)');
 expectIncludesById('device-api-http500', "error: 'device-api failed'", 'formats uncaught device-api failures with the generic error code');
 expectWireById('device-api-http500', 'device-response', 'returns uncaught device-api failures through the shared response node');
 expectIncludes('Format Dendro Config Response', 'dendro_force_legacy: row.dendro_force_legacy ?? null', 'returns canonical dendrometer config fields');

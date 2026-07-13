@@ -15,7 +15,9 @@
     "sync-init-fn": { "delta": 500, "reason": "issue #10 trigger rewrites pass NEW.sync_version + AU gates; issue #4 gatewaySql escape fix" },
     "lsn50-zone-agg-fn": { "delta": 70, "reason": "issue #10: zone_daily_environment upsert bumps sync_version" },
     "s2120-rain-agg-fn": { "delta": 70, "reason": "issue #10: zone_daily_environment upsert bumps sync_version" },
-    "lorain-rain-agg-fn": { "delta": 70, "reason": "issue #10: zone_daily_environment upsert bumps sync_version" }
+    "lorain-rain-agg-fn": { "delta": 70, "reason": "issue #10: zone_daily_environment upsert bumps sync_version" },
+    "device-api-http500": { "delta": 45, "reason": "issue #9: adopt msg.error.statusCode instead of hardcoding 500, so auth failures (401) survive the responder" },
+    "dendro-raw-fn": { "delta": 10, "reason": "issue #6: restore escaped backslashes in the corrupted toBase64Url regex (invalid /+/  and comment-swallowing ///), which the node needs to compile at all" }
   },
-  "total_allowance": { "delta": 20260, "reason": "1.A5 sync outbox hardening + 1.A6 history card-data + 1.C command-type registry expansion + 5.6 time integrity guards + heartbeat RTC fields + issue #10 upsert sync versioning" }
+  "total_allowance": { "delta": 20315, "reason": "1.A5 sync outbox hardening + 1.A6 history card-data + 1.C command-type registry expansion + 5.6 time integrity guards + heartbeat RTC fields + issue #10 upsert sync versioning + issue #9 device-api-http500 statusCode fix (+45) + issue #6 dendro-raw-fn regex fix (+10)" }
 }
