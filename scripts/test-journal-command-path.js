@@ -1014,6 +1014,74 @@ test('exact command-ID replay preserves the stored rejection result and does not
   }
 });
 
+test('exact replay replaces a leased stale ACK with a fresh pending row', async () => {
+  const db = fixtureDb('dedupe-replay-leased-ack');
+  const storedFacts = {
+    effectKey: 'journal_entry:' + ENTRY_UUID + ':0',
+    currentSyncVersion: 4,
+    currentPayloadHash: 'e'.repeat(64),
+    reason: 'stale_version',
+  };
+  try {
+    await db.run(
+      'INSERT INTO applied_commands (' +
+        'command_id,device_eui,command_type,effect_key,applied_at,result,result_detail,originator' +
+      ') VALUES (?,?,?,?,?,?,?,?)',
+      ['506', GATEWAY_EUI, 'UPSERT_JOURNAL_ENTRY', storedFacts.effectKey,
+        '2026-07-12T10:00:00.000Z', 'REJECTED_PERMANENT', JSON.stringify(storedFacts), 'edge']
+    );
+    await db.run(
+      'INSERT INTO command_ack_outbox(command_id,payload_json,created_at) VALUES (?,?,?)',
+      ['506', JSON.stringify({ commandId: 506, result: 'FAILED_RETRYABLE' }),
+        '2026-07-12T10:00:01.000Z']
+    );
+    await db.run(
+      'INSERT INTO command_ack_outbox(command_id,payload_json,created_at,delivered_at) VALUES (?,?,?,?)',
+      ['506', JSON.stringify({ commandId: 506, result: 'FAILED_RETRYABLE', historical: true }),
+        '2026-07-12T09:00:00.000Z', '2026-07-12T09:00:01.000Z']
+    );
+    const leased = await db.get(
+      'SELECT id,payload_json FROM command_ack_outbox WHERE command_id=? AND delivered_at IS NULL',
+      ['506']
+    );
+    assert.equal(JSON.parse(leased.payload_json).result, 'FAILED_RETRYABLE');
+
+    const replay = await journal.deduplicatePendingCommand(
+      db,
+      commandEnvelope({ commandId: 506, payload: { malformed_retransmission: true } }),
+      { gateway_device_eui: GATEWAY_EUI }
+    );
+    assert.equal(replay.ack.result, 'REJECTED_PERMANENT');
+    assert.equal(await db.get('SELECT id FROM command_ack_outbox WHERE id=?', [leased.id]), undefined);
+    const fresh = await db.get(
+      'SELECT id,payload_json,delivered_at FROM command_ack_outbox ' +
+        'WHERE command_id=? AND delivered_at IS NULL',
+      ['506']
+    );
+    assert.notEqual(fresh.id, leased.id);
+    assert.deepEqual(JSON.parse(fresh.payload_json), replay.ack);
+
+    await db.run(
+      'UPDATE command_ack_outbox SET delivered_at=? WHERE id IN (?)',
+      ['2026-07-12T10:00:02.000Z', leased.id]
+    );
+    const stillPending = await db.get(
+      'SELECT id,payload_json FROM command_ack_outbox WHERE command_id=? AND delivered_at IS NULL',
+      ['506']
+    );
+    assert.equal(stillPending.id, fresh.id);
+    assert.deepEqual(JSON.parse(stillPending.payload_json), replay.ack);
+    const delivered = await db.all(
+      'SELECT payload_json FROM command_ack_outbox WHERE command_id=? AND delivered_at IS NOT NULL',
+      ['506']
+    );
+    assert.equal(delivered.length, 1);
+    assert.equal(JSON.parse(delivered[0].payload_json).historical, true);
+  } finally {
+    db.close();
+  }
+});
+
 test('exact command-ID replay preserves a non-journal terminal rejection', async () => {
   const db = fixtureDb('dedupe-exact-non-journal');
   const storedFacts = { reason: 'zone_conflict', currentSyncVersion: 4 };

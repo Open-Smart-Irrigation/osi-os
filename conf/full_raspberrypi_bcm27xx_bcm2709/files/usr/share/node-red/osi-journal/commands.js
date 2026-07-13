@@ -463,27 +463,14 @@ function validNonJournalEffectBinding(envelope, runtime) {
 async function persistReplayAck(tx, row, deliveryId) {
   const ack = replayAck(row, deliveryId);
   const createdAt = new Date().toISOString();
-  const pending = await tx.get(
-    'SELECT id FROM command_ack_outbox WHERE command_id=? AND delivered_at IS NULL ' +
-      'ORDER BY id LIMIT 1',
+  await tx.run(
+    'DELETE FROM command_ack_outbox WHERE command_id=? AND delivered_at IS NULL',
     [String(deliveryId)]
   );
-  if (pending) {
-    await tx.run(
-      'UPDATE command_ack_outbox SET payload_json=?,created_at=?,retry_count=0,last_error=NULL ' +
-        'WHERE id=?',
-      [JSON.stringify(ack), createdAt, Number(pending.id)]
-    );
-    await tx.run(
-      'DELETE FROM command_ack_outbox WHERE command_id=? AND delivered_at IS NULL AND id<>?',
-      [String(deliveryId), Number(pending.id)]
-    );
-  } else {
-    await tx.run(
-      'INSERT INTO command_ack_outbox (command_id,payload_json,created_at) VALUES (?,?,?)',
-      [String(deliveryId), JSON.stringify(ack), createdAt]
-    );
-  }
+  await tx.run(
+    'INSERT INTO command_ack_outbox (command_id,payload_json,created_at) VALUES (?,?,?)',
+    [String(deliveryId), JSON.stringify(ack), createdAt]
+  );
   return ack;
 }
 
