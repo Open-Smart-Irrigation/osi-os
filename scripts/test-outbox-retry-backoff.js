@@ -197,12 +197,16 @@ test('cooldown is hard-capped at 3600s regardless of how large retry_count grows
   const db = seedDb();
   const selectSql = extractPendingSelect(nodeById(FLOW_PATHS[0], 'sync-outbox-build').func);
   // retry_count=20 (way past the min(retry_count,7) clamp); cap must still be 3600s, not unbounded.
-  db.exec("INSERT INTO sync_outbox(event_uuid, aggregate_type, aggregate_key, op, payload_json, sync_version, occurred_at, retry_count, last_retryable_failure_at) VALUES ('evt-capped-active', 'WORK_REQUEST', 'k', 'WORK_REQUEST_SUBMITTED', '{}', 0, '2026-01-01T00:00:00Z', 20, datetime('now', '-3599 seconds'))");
-  db.exec("INSERT INTO sync_outbox(event_uuid, aggregate_type, aggregate_key, op, payload_json, sync_version, occurred_at, retry_count, last_retryable_failure_at) VALUES ('evt-capped-elapsed', 'WORK_REQUEST', 'k', 'WORK_REQUEST_SUBMITTED', '{}', 0, '2026-01-01T00:00:01Z', 20, datetime('now', '-3601 seconds'))");
+  // 30s margins on both sides of the 3600s cap: the row timestamps are written
+  // with datetime('now') at INSERT time but the SELECT evaluates unixepoch('now')
+  // at query time, so a 1s margin (3599) flakes on slow CI runners when a second
+  // boundary passes between the two statements.
+  db.exec("INSERT INTO sync_outbox(event_uuid, aggregate_type, aggregate_key, op, payload_json, sync_version, occurred_at, retry_count, last_retryable_failure_at) VALUES ('evt-capped-active', 'WORK_REQUEST', 'k', 'WORK_REQUEST_SUBMITTED', '{}', 0, '2026-01-01T00:00:00Z', 20, datetime('now', '-3570 seconds'))");
+  db.exec("INSERT INTO sync_outbox(event_uuid, aggregate_type, aggregate_key, op, payload_json, sync_version, occurred_at, retry_count, last_retryable_failure_at) VALUES ('evt-capped-elapsed', 'WORK_REQUEST', 'k', 'WORK_REQUEST_SUBMITTED', '{}', 0, '2026-01-01T00:00:01Z', 20, datetime('now', '-3630 seconds'))");
   const rows = runPendingSelect(db, selectSql);
   const ids = rows.map((r) => r.event_uuid);
-  assert.ok(!ids.includes('evt-capped-active'), '3599s < 3600s cap: must be excluded');
-  assert.ok(ids.includes('evt-capped-elapsed'), '3601s >= 3600s cap: must be included');
+  assert.ok(!ids.includes('evt-capped-active'), '3570s < 3600s cap: must be excluded');
+  assert.ok(ids.includes('evt-capped-elapsed'), '3630s >= 3600s cap: must be included');
   db.close();
 });
 
