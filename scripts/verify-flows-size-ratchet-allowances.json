@@ -4,15 +4,15 @@
     "062a0f9bf66d9789": { "delta": 850, "reason": "Build Heartbeat: gateway_health_samples (1.A5) + rtc_present/clock_source (5.6)" },
     "2a4f142e3e9b6d80": { "delta": 400, "reason": "sync outbox eviction index guard (1.A5)" },
     "prune-sync-outbox": { "delta": 3000, "reason": "outbox pruning overhaul with eviction-index awareness (1.A5)" },
-    "history-api-router-fn": { "delta": 418, "reason": "history API card-data source passthrough (1.A6) plus Field Journal Task 12 feature flag and visible touched-node catches" },
+    "history-api-router-fn": { "delta": 462, "reason": "history API card-data source passthrough (1.A6) plus Field Journal Task 12 feature flag, visible touched-node catches, and rejecting DB-close wrapper" },
     "cmd-type-registry": { "delta": 3100, "reason": "1.C: expanded command-type registry from 8 to 33 types" },
     "reject-indefinite-open": { "delta": 3100, "reason": "1.C: expanded COMMAND_TYPES_FALLBACK to match 33-type registry" },
     "write-strega-expectation": { "delta": 3300, "reason": "1.C: expanded COMMAND_TYPES_FALLBACK to match 33-type registry" },
     "sync-pending-split": { "delta": 401, "reason": "Field Journal Task 11: preserve the trusted pending-command envelope alongside legacy flat routing fields" },
-    "sync-bootstrap-build": { "delta": 2717, "reason": "Field Journal Task 12: fail-closed catalog readiness and manifest advertisement in normal bootstrap" },
-    "sync-force-build": { "delta": 3855, "reason": "Field Journal Tasks 11-12: preserve trusted envelopes and add fail-closed catalog readiness and manifest advertisement" },
+    "sync-bootstrap-build": { "delta": 2764, "reason": "Field Journal Task 12: fail-closed catalog readiness, manifest advertisement, and rejecting DB-close wrapper in normal bootstrap" },
+    "sync-force-build": { "delta": 3902, "reason": "Field Journal Tasks 11-12: preserve trusted envelopes, add fail-closed catalog readiness and manifest advertisement, and reject DB-close errors" },
     "9b3afb405207302e": { "delta": 800, "reason": "5.6: timestamp sanity clamp (clampRecordedAt) at ingest" },
     "5f0d2b7e9b9b1b3a": { "delta": 1700, "reason": "5.6: scheduler backward-jump debounce (sameLogicalWindow) on both DENDRO + threshold paths + threshold suppression early return" }
   },
-  "total_allowance": { "delta": 23641, "reason": "1.A5 sync outbox hardening + 1.A6 history card-data + 1.C command registry + 5.6 time guards + heartbeat RTC + Field Journal Tasks 11-12" }
+  "total_allowance": { "delta": 23779, "reason": "1.A5 sync outbox hardening + 1.A6 history card-data + 1.C command registry + 5.6 time guards + heartbeat RTC + Field Journal Tasks 11-12 including async DB-close errors" }
 }

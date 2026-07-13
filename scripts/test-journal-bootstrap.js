@@ -12,6 +12,7 @@ const ROOT = path.resolve(__dirname, '..');
 const PROFILES = ['bcm2712', 'bcm2709'];
 const GATEWAY_EUI = '0016C001F11715E2';
 const CATALOG_HASH = 'a'.repeat(64);
+const HISTORY_AUTH_SECRET = 'fixture-history-auth-secret';
 const EXPECTED_CAPABILITIES = [
   'linked_auth_sync_v1',
   'force_edge_sync_v1',
@@ -36,6 +37,7 @@ class JournalFixtureDb {
     this.native = new DatabaseSync(':memory:');
     this.closed = false;
     this.catalogQueryError = settings.catalogQueryError || null;
+    this.closeError = settings.closeError || null;
     if (settings.tables !== false) {
       this.native.exec([
         'CREATE TABLE journal_catalog_state(id INTEGER PRIMARY KEY, catalog_version, catalog_hash TEXT)',
@@ -106,7 +108,7 @@ class JournalFixtureDb {
 
   close(callback) {
     this.closed = true;
-    callback();
+    setImmediate(() => callback(this.closeError));
   }
 
   destroy() {
@@ -131,6 +133,7 @@ function runtime(db) {
           DEVICE_EUI_CONFIDENCE: 'authoritative',
           DEVICE_EUI_LAST_VERIFIED_AT: '2026-07-12T08:00:00.000Z',
           FIRMWARE_VERSION: '2026.07-test',
+          AUTH_TOKEN_SECRET: HISTORY_AUTH_SECRET,
         })[key];
       },
     },
@@ -193,6 +196,64 @@ async function runForcedBootstrap(node, options) {
     }, context.flow, { get() { return null; } }, context.env, context.node,
     crypto, context.osiDb, osiCloudHttp);
     return { payload: bootstrapPayload, warnings: context.warnings, errors: context.errors };
+  } finally {
+    db.destroy();
+  }
+}
+
+function toBase64Url(value) {
+  return Buffer.from(value).toString('base64')
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=+$/g, '');
+}
+
+function historyBearerToken() {
+  const payload = toBase64Url(JSON.stringify({
+    userId: 1,
+    username: 'fixture-user',
+    exp: Date.now() + 60000,
+  }));
+  const signature = toBase64Url(
+    crypto.createHmac('sha256', HISTORY_AUTH_SECRET).update(payload).digest()
+  );
+  return payload + '.' + signature;
+}
+
+async function runHistoryCloseRoute(node, options) {
+  const db = new JournalFixtureDb(options);
+  const context = runtime(db);
+  const globalState = new Map([
+    ['historySchemaGuardVersion', '2026-06-07-history-loading-v1'],
+  ]);
+  const globalContext = {
+    get(key) { return globalState.get(key); },
+    set(key, value) { globalState.set(key, value); },
+  };
+  const historyRuntime = {
+    httpError(statusCode, message, detail) {
+      const error = new Error(message);
+      error.statusCode = statusCode;
+      if (detail !== undefined) error.detail = detail;
+      throw error;
+    },
+    phaseSummary() { return ''; },
+  };
+  try {
+    const execute = new Function(
+      'msg', 'global', 'env', 'node', 'osiDb', 'osiHistory', 'crypto', 'HR',
+      node.func
+    );
+    const result = await execute({
+      req: {
+        method: 'GET',
+        path: '/api/history/fixture-not-found',
+        headers: { authorization: 'Bearer ' + historyBearerToken() },
+        params: {},
+        query: {},
+      },
+    }, globalContext, context.env, context.node, context.osiDb, {}, crypto, historyRuntime);
+    return { result, warnings: context.warnings, errors: context.errors };
   } finally {
     db.destroy();
   }
@@ -271,6 +332,32 @@ for (const [kind, node, execute] of bootstrapKinds) {
     assert.ok(warning.length <= 256, 'journal warning must be bounded, got ' + warning.length);
   });
 }
+
+test('normal bootstrap warns when SQLite close reports an asynchronous error', async () => {
+  const closeError = new Error('fixture asynchronous close failure');
+  const result = await runNormalBootstrap(bootstrapKinds[0][1], { closeError });
+  assert.ok(result.warnings.some((warning) =>
+    warning === 'Bootstrap DB close failed after error: ' + closeError.message
+  ), 'normal bootstrap must surface the close callback error');
+});
+
+test('forced bootstrap warns when SQLite close reports an asynchronous error', async () => {
+  const closeError = new Error('fixture asynchronous close failure');
+  const result = await runForcedBootstrap(bootstrapKinds[1][1], { closeError });
+  assert.ok(result.warnings.some((warning) =>
+    warning === 'Force-sync optional operation failed: ' + closeError.message
+  ), 'forced bootstrap must surface the close callback error');
+});
+
+test('history router warns when SQLite close reports an asynchronous error', async () => {
+  const closeError = new Error('fixture asynchronous close failure');
+  const history = canonical.find((node) => node.id === 'history-api-router-fn');
+  const result = await runHistoryCloseRoute(history, { closeError });
+  assert.equal(result.result.statusCode, 404);
+  assert.ok(result.warnings.some((warning) =>
+    warning === 'History API DB close failed: ' + closeError.message
+  ), 'history router must surface the close callback error');
+});
 
 for (const profile of PROFILES) {
   test(profile + ' feature response adds the UI-only journal flag and preserves history flags', async () => {

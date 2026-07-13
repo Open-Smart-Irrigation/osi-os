@@ -16,19 +16,22 @@ const nodeContracts = {
     name: 'Build Cloud Bootstrap',
     type: 'function',
     preimageHash: 'a3dbfcc3563d882d6361c71b66ed3e17c02416e5d733061a6d5932a30bf6bd17',
-    installedHash: 'e056e443c8db79322885b959b279477fb2f1f2a05c6514f71b1760d2342b2ec2',
+    interimHash: 'e056e443c8db79322885b959b279477fb2f1f2a05c6514f71b1760d2342b2ec2',
+    installedHash: '18cca753bf2afdc9ef85755b5a8dbab6b0227a130b4258dd78178e0c46d3c790',
   },
   'sync-force-build': {
     name: 'Run Force Sync',
     type: 'function',
     preimageHash: 'f3295a898438486f78c44815bc1f7b44e51884884b2eac37f9f27858cf71d50e',
-    installedHash: '6f4b9482c457f136c4b60ed9363f4b6151d3e465bc9beb5de775cd0d1d1042be',
+    interimHash: '6f4b9482c457f136c4b60ed9363f4b6151d3e465bc9beb5de775cd0d1d1042be',
+    installedHash: '6e1227eeac183740504ea7ea4effdb0f21993801a065702b5789c927982bfe61',
   },
   'history-api-router-fn': {
     name: 'History API Router',
     type: 'function',
     preimageHash: '16c728a66b472c961c9d0ef9001d3a1966c3a91c4c4e533fb7d7db5b8ba49c01',
-    installedHash: '52b51062e2b85e2081ba976f78623eef4f93deab295e3467f611654a3248b001',
+    interimHash: '52b51062e2b85e2081ba976f78623eef4f93deab295e3467f611654a3248b001',
+    installedHash: 'b12ad483f807672f6fbef6040b3e44eb612fb778fe00e6059a8ae0a4702212eb',
   },
 };
 
@@ -91,6 +94,15 @@ const capabilitySource = `const syncCapabilities = ['linked_auth_sync_v1', 'forc
     bootstrapGatewayIdentity.journal_catalog_hash = journalAdvertisement.hash;
     bootstrapGatewayIdentity.journal_manifest = journalAdvertisement.manifest;
   }`;
+
+const sqliteCloseWrapperSource =
+  `const close = () => new Promise(res => _db.close(() => res()));`;
+const rejectingSqliteCloseWrapperSource =
+  `const close = () => new Promise((resolve, reject) => _db.close((error) => error ? reject(error) : resolve()));`;
+const historyCloseWrapperSource =
+  `return db ? new Promise(function(resolve) { db.close(function() { resolve(); }); }) : Promise.resolve();`;
+const rejectingHistoryCloseWrapperSource =
+  `return db ? new Promise(function(resolve, reject) { db.close(function(error) { if (error) reject(error); else resolve(); }); }) : Promise.resolve();`;
 
 function digest(source) {
   return crypto.createHash('sha256').update(source).digest('hex');
@@ -196,60 +208,87 @@ function migrate(buffer) {
   const byId = indexNodes(flows);
   const beforeHashes = currentHashes(byId);
   if (matchesState(beforeHashes, 'installedHash')) return buffer;
-  if (!matchesState(beforeHashes, 'preimageHash')) {
+  const fromPreimage = matchesState(beforeHashes, 'preimageHash');
+  const fromInterim = matchesState(beforeHashes, 'interimHash');
+  if (!fromPreimage && !fromInterim) {
     throw new Error('Refusing unexpected Task 12 function source: ' + JSON.stringify(beforeHashes));
+  }
+
+  if (fromPreimage) {
+    for (const id of ['sync-bootstrap-build', 'sync-force-build']) {
+      const node = byId.get(id);
+      node.func = replaceOnce(
+        node.func,
+        sanitizeSyncRowSource,
+        sanitizeSyncRowSource + '\n' + journalAdvertisementSource,
+        id + ' journal helper'
+      );
+      node.func = replaceOnce(
+        node.func,
+        "const syncCapabilities = ['linked_auth_sync_v1', 'force_edge_sync_v1'];",
+        capabilitySource,
+        id + ' capability advertisement'
+      );
+    }
+
+    const normal = byId.get('sync-bootstrap-build');
+    normal.func = replaceOnce(
+      normal.func,
+      `    gatewayIdentity: {
+      previousGatewayDeviceEuis: migration.previousGatewayDeviceEuis,
+      edgeBuildVersion,
+      syncCapabilities
+    },`,
+      `    gatewayIdentity: bootstrapGatewayIdentity,`,
+      'normal bootstrap gateway identity'
+    );
+
+    normal.func = exposeNormalBootstrapCatches(normal.func);
+
+    const forced = byId.get('sync-force-build');
+    forced.func = replaceOnce(
+      forced.func,
+      `      gatewayIdentity: {
+        previousGatewayDeviceEuis: migration.previousGatewayDeviceEuis,
+        edgeBuildVersion,
+        syncCapabilities
+      },`,
+      `      gatewayIdentity: bootstrapGatewayIdentity,`,
+      'forced bootstrap gateway identity'
+    );
+
+    const history = byId.get('history-api-router-fn');
+    history.func = replaceOnce(
+      history.func,
+      `        historyCloudAiEnabled: false`,
+      `        historyCloudAiEnabled: false,
+        fieldJournalUxEnabled: false`,
+      'history feature flag'
+    );
+    history.func = exposeHistoryCatches(history.func);
+  }
+
+  const interimHashes = currentHashes(byId);
+  if (!matchesState(interimHashes, 'interimHash')) {
+    throw new Error('Task 12 interim hashes do not match pins: ' + JSON.stringify(interimHashes));
   }
 
   for (const id of ['sync-bootstrap-build', 'sync-force-build']) {
     const node = byId.get(id);
     node.func = replaceOnce(
       node.func,
-      sanitizeSyncRowSource,
-      sanitizeSyncRowSource + '\n' + journalAdvertisementSource,
-      id + ' journal helper'
-    );
-    node.func = replaceOnce(
-      node.func,
-      "const syncCapabilities = ['linked_auth_sync_v1', 'force_edge_sync_v1'];",
-      capabilitySource,
-      id + ' capability advertisement'
+      sqliteCloseWrapperSource,
+      rejectingSqliteCloseWrapperSource,
+      id + ' rejecting DB close wrapper'
     );
   }
-
-  const normal = byId.get('sync-bootstrap-build');
-  normal.func = replaceOnce(
-    normal.func,
-    `    gatewayIdentity: {
-      previousGatewayDeviceEuis: migration.previousGatewayDeviceEuis,
-      edgeBuildVersion,
-      syncCapabilities
-    },`,
-    `    gatewayIdentity: bootstrapGatewayIdentity,`,
-    'normal bootstrap gateway identity'
-  );
-  normal.func = exposeNormalBootstrapCatches(normal.func);
-
-  const forced = byId.get('sync-force-build');
-  forced.func = replaceOnce(
-    forced.func,
-    `      gatewayIdentity: {
-        previousGatewayDeviceEuis: migration.previousGatewayDeviceEuis,
-        edgeBuildVersion,
-        syncCapabilities
-      },`,
-    `      gatewayIdentity: bootstrapGatewayIdentity,`,
-    'forced bootstrap gateway identity'
-  );
-
   const history = byId.get('history-api-router-fn');
   history.func = replaceOnce(
     history.func,
-    `        historyCloudAiEnabled: false`,
-    `        historyCloudAiEnabled: false,
-        fieldJournalUxEnabled: false`,
-    'history feature flag'
+    historyCloseWrapperSource,
+    rejectingHistoryCloseWrapperSource,
+    'history rejecting DB close wrapper'
   );
-  history.func = exposeHistoryCatches(history.func);
 
   const afterHashes = currentHashes(byId);
   if (!matchesState(afterHashes, 'installedHash')) {
