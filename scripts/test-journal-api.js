@@ -18,6 +18,7 @@ const TEMP_ROOT = fs.mkdtempSync(path.join(os.tmpdir(), 'osi-journal-api-'));
 const nativeDatabases = [];
 const OWNER_UUID = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 const OTHER_OWNER_UUID = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
+const VOID_ACTOR_UUID = '99999999-9999-4999-8999-999999999999';
 const ZONE_UUID = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc';
 const FOREIGN_ZONE_UUID = 'dddddddd-dddd-4ddd-8ddd-dddddddddddd';
 const GATEWAY_EUI = '0016C001F1000001';
@@ -1010,7 +1011,8 @@ test('research exports are loss-aware, formula-safe, incremental, and ZIP-manife
   assert.match(json.checksums.entries_sha256, /^[a-f0-9]{64}$/);
   assert.match(json.checksums.values_sha256, /^[a-f0-9]{64}$/);
   assert.ok(json.entries.every((entry) => !('author_label' in entry) &&
-    !('author_principal_uuid' in entry) && !('owner_user_uuid' in entry)));
+    !('author_principal_uuid' in entry) && !('owner_user_uuid' in entry) &&
+    !('voided_by_principal_uuid' in entry)));
 
   const zip = await journal.exportResearchPackage(db, exportSelection, principal(), null, build);
   const members = parseStoredZip(zip);
@@ -1081,6 +1083,38 @@ test('research exports are loss-aware, formula-safe, incremental, and ZIP-manife
   assert.equal(sink.listenerCount('drain'), 0);
   assert.equal(sink.listenerCount('close'), 0);
   assert.equal(sink.listenerCount('error'), 0);
+});
+
+test('research JSON excludes the void actor and all author or owner identity', async () => {
+  const { db, entryUuids } = await createPagedEntries('export-void-identity', null, 1);
+  await journal.voidEntry(db, entryUuids[0], {
+    base_sync_version: 1,
+    reason: 'Duplicate field record',
+  }, principal({
+    author_principal_uuid: VOID_ACTOR_UUID,
+    author_label: 'void-reviewer',
+  }));
+
+  const json = JSON.parse(await journal.exportJson(db, { status: 'voided' }, principal()));
+  assert.equal(json.entries.length, 1);
+  const entry = json.entries[0];
+  assert.equal(entry.status, 'voided');
+  assert.equal(entry.void_reason, 'Duplicate field record');
+  assert.ok(entry.voided_at);
+  for (const field of [
+    'owner_user_uuid',
+    'author_principal_uuid',
+    'author_label',
+    'voided_by_principal_uuid',
+  ]) {
+    assert.equal(field in entry, false, field);
+  }
+  assert.equal(json.research_metadata.provenance.author_identity_included, false);
+  assert.equal(json.research_metadata.provenance.owner_identity_included, false);
+  const publicSurface = JSON.stringify(json);
+  for (const privateValue of [OWNER_UUID, VOID_ACTOR_UUID, 'field-user', 'void-reviewer']) {
+    assert.equal(publicSurface.includes(privateValue), false, privateValue);
+  }
 });
 
 test('stream abort rejects and releases the read snapshot without leaked listeners', async () => {

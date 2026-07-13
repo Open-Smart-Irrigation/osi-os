@@ -19,6 +19,12 @@ const IDENTITY_FIELDS = new Set([
   'gateway_device_eui',
   'gatewayDeviceEui',
 ]);
+const RESEARCH_IDENTITY_FIELDS = new Set([
+  'owner_user_uuid',
+  'author_principal_uuid',
+  'author_label',
+  'voided_by_principal_uuid',
+]);
 const ENTRY_FILTERS = [
   'entry_uuid',
   'plot_uuid',
@@ -1588,9 +1594,7 @@ async function forEachWidePage(db, rawFilters, principal, visitor) {
 
 function researchEntry(entry) {
   const output = Object.assign({}, entry);
-  delete output.author_principal_uuid;
-  delete output.author_label;
-  delete output.owner_user_uuid;
+  for (const field of RESEARCH_IDENTITY_FIELDS) delete output[field];
   return output;
 }
 
