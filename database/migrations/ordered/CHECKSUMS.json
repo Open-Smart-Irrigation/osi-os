@@ -14,5 +14,6 @@
   "0013__lsn50_shadow_diff.sql": "7ad59b5b5218ea0ff978bacdbab3ddf6cf6ee50536654705f415ca0154370ce0",
   "0014__field_journal.sql": "0449e4699f6e67b5c7b7e579c4cfef5e4731b9098ecc9b2fe172269359ed48a6",
   "0015__journal_catalog_v1.sql": "c7cb59d92908926c6b3ed2222dc4a81d45df113ef31a7c1ebb2b3935944b19c7",
-  "0016__journal_resource_owner_scope.sql": "92001a92728e19ba534f70d6a89c1c76f591a411886c4d62769d9d07e3eb0b1b"
+  "0016__journal_resource_owner_scope.sql": "92001a92728e19ba534f70d6a89c1c76f591a411886c4d62769d9d07e3eb0b1b",
+  "0017__journal_plot_lookup_indexes.sql": "517b78538b000c363e5729ed2716994523787ef826fb0b2819f4c3beae796cf4"
 }

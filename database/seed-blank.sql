@@ -2475,6 +2475,12 @@ CREATE INDEX IF NOT EXISTS idx_journal_entries_duplicate
 CREATE INDEX IF NOT EXISTS idx_journal_entries_sticky
   ON journal_entries(author_principal_uuid, zone_id, recorded_at DESC, entry_uuid)
   WHERE status = 'final' AND deleted_at IS NULL;
+CREATE INDEX IF NOT EXISTS idx_journal_entries_plot_duplicate
+  ON journal_entries(plot_uuid, activity_code, occurred_start, entry_uuid)
+  WHERE status = 'final' AND deleted_at IS NULL;
+CREATE INDEX IF NOT EXISTS idx_journal_entries_plot_sticky
+  ON journal_entries(author_principal_uuid, plot_uuid, recorded_at DESC, entry_uuid)
+  WHERE status = 'final' AND deleted_at IS NULL;
 
 CREATE TABLE IF NOT EXISTS journal_entry_values (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
