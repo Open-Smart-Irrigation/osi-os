@@ -136,8 +136,6 @@ function resolveApiRoute(method: string, url: string): unknown | undefined {
 
   class PreviewXHR {
     private real = new RealXHR();
-    private method = 'GET';
-    private url = '';
     private fake = false;
     private fakeBody = '';
     // own response fields for the fake path
@@ -157,8 +155,6 @@ function resolveApiRoute(method: string, url: string): unknown | undefined {
     ontimeout: (() => void) | null = null;
 
     open(method: string, url: string) {
-      this.method = method;
-      this.url = url;
       const path = url.replace(/^https?:\/\/[^/]+/, '');
       if (path.startsWith('/api')) {
         this.fake = true;
@@ -237,7 +233,7 @@ try {
 export function DsPreviewProvider({ children }: { children: React.ReactNode }) {
   return (
     <I18nextProvider i18n={previewI18n}>
-      <MemoryRouter>
+      <MemoryRouter initialEntries={['/dashboard']}>
         <AuthProvider>{children}</AuthProvider>
       </MemoryRouter>
     </I18nextProvider>

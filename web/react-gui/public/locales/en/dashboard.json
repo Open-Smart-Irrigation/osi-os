@@ -1,5 +1,5 @@
 {
-  "title": "AgroLink Dashboard",
+  "title": "Dashboard",
   "welcome": "Welcome, {{username}}",
   "add": "Add",
   "addMenu": {
@@ -25,5 +25,11 @@
   "unassignedDevices": "Unassigned Devices",
   "unassignedSubtitle": "These devices are not assigned to any zone",
   "soilSensors": "Soil Sensors",
-  "smartValves": "Smart Valves"
+  "smartValves": "Smart Valves",
+  "journal": "Journal",
+  "tabs": {
+    "zones": "Zones",
+    "history": "History",
+    "analysis": "Analysis"
+  }
 }

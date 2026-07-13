@@ -128,7 +128,7 @@ export const SensorMonitor: React.FC<Props> = ({
             <h2 className="text-2xl font-bold text-[var(--header-text)] high-contrast-text">{activeLabel}</h2>
             <p className="text-[var(--header-subtext)] text-sm mt-0.5">{deviceName} · {deveui}</p>
           </div>
-          <button onClick={onClose} className="text-[var(--header-text)] text-3xl font-light leading-none hover:text-white px-2">×</button>
+          <button onClick={onClose} className="text-[var(--header-text)] text-3xl font-light leading-none hover:opacity-60 px-2">×</button>
         </div>
 
         <div className="px-6 pt-4 flex flex-wrap gap-2 shrink-0">

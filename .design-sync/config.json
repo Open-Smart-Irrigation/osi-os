@@ -7,10 +7,12 @@
   "buildCmd": "npm run build && cp build/assets/index-*.css build/ds-entry.css",
   "tsconfig": "tsconfig.json",
   "cssEntry": "build/ds-entry.css",
+  "extraFonts": ["src/fonts/noto-sans.css"],
   "readmeHeader": ".design-sync/conventions.md",
   "extraEntries": ["./src/dsPreview.tsx"],
   "provider": { "component": "DsPreviewProvider" },
   "overrides": {
+    "DashboardHeader": { "cardMode": "column" },
     "DendrometerTreeCard": { "cardMode": "column" },
     "WeatherIcon": { "cardMode": "column" }
   },

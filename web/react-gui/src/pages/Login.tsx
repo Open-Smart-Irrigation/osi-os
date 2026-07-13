@@ -13,7 +13,7 @@ export const Login: React.FC = () => {
   const navigate = useNavigate();
   const { login } = useAuth();
   const { t, i18n } = useTranslation('auth');
-  const { logoHoch } = resolveAgroscopeAssets(i18n.language);
+  const { balkenHorizontal } = resolveAgroscopeAssets(i18n.language);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -32,14 +32,21 @@ export const Login: React.FC = () => {
 
   return (
     <div className="relative min-h-screen flex items-center justify-center bg-[var(--bg)] px-4">
-      <div className="max-w-md w-full bg-[var(--card)] rounded-2xl shadow-2xl border border-[var(--border)] p-6">
-        <div className="text-center mb-5">
+      <div className="max-w-md w-full bg-[var(--card)] rounded-2xl shadow-2xl border border-[var(--border)]">
+        {/* Balken crown on white (the asset's own ground), cropped to the
+            readable wordmark. rounded-t + overflow-hidden live HERE, not on
+            the card — the LanguageSwitcher dropdown at the bottom would be
+            clipped by an overflow-hidden card. */}
+        <div className="overflow-hidden rounded-t-2xl bg-white border-b border-[var(--border)]">
           <img
-            src={logoHoch}
+            src={balkenHorizontal}
             alt="Agroscope"
-            className="mx-auto mb-5 h-24 w-auto max-w-full object-contain"
+            className="block h-8 w-full object-cover object-left"
           />
-          <h1 className="text-3xl font-bold text-[var(--text)] mb-2 high-contrast-text">
+        </div>
+        <div className="p-6">
+        <div className="text-center mb-5 font-brand">
+          <h1 className="text-3xl font-bold text-[var(--text)] mb-1">
             {AGROLINK_BRAND.productName}
           </h1>
           <p className="text-[var(--text-secondary)] text-base">{AGROLINK_BRAND.loginSubtitle}</p>
@@ -101,6 +108,7 @@ export const Login: React.FC = () => {
           <div className="flex justify-center">
             <LanguageSwitcher />
           </div>
+        </div>
         </div>
       </div>
     </div>

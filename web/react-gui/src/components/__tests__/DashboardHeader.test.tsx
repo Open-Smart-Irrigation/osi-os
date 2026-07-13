@@ -13,10 +13,14 @@ vi.mock('react-i18next', () => ({
     t: (key: string, options?: Record<string, unknown>) => {
       const map: Record<string, string> = {
         add: 'Add',
-        title: 'AgroLink Dashboard',
+        title: 'Dashboard',
         'addMenu.zone': 'Zone',
         'addMenu.device': 'Device',
         data: 'Data',
+        journal: 'Journal',
+        'tabs.zones': 'Zones',
+        'tabs.history': 'History',
+        'tabs.analysis': 'Analysis',
         'settings:entryPoint': 'Settings',
         account: 'Account',
         'accountMenu.osiServer': 'OSI Server',
@@ -59,9 +63,9 @@ afterEach(() => {
 });
 
 describe('DashboardHeader (osi-os)', () => {
-  it('renders the AgroLink title, Agroscope Balken, welcome text, and Settings entry without a standalone language switcher', () => {
+  it('renders the plain Dashboard title, Agroscope Balken, welcome text, and Settings entry without a standalone language switcher', () => {
     renderHeader();
-    expect(screen.getByRole('heading', { name: 'AgroLink Dashboard' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Dashboard' })).toBeInTheDocument();
     expect(screen.getByRole('img', { name: 'Agroscope Balken' })).toHaveAttribute(
       'src',
       expect.stringContaining('balken-horizontal-en'),
@@ -113,6 +117,17 @@ describe('DashboardHeader (osi-os)', () => {
     vi.mocked(isDesktopBrowser).mockReturnValue(false);
     renderHeader();
     expect(screen.queryByRole('link', { name: 'Data' })).not.toBeInTheDocument();
+  });
+
+  it('links the Journal action and the primary tabs with the red active accent', () => {
+    renderHeader();
+    expect(screen.getByRole('link', { name: 'Journal' })).toHaveAttribute('href', '/journal');
+    const nav = screen.getByRole('navigation', { name: 'Primary' });
+    expect(nav).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Zones' })).toHaveAttribute('href', '/dashboard');
+    expect(screen.getByRole('link', { name: 'History' })).toHaveAttribute('href', '/history');
+    // BrowserRouter starts at "/" — no tab claims aria-current there
+    expect(nav.querySelector('[aria-current="page"]')).toBeNull();
   });
 
   it('keeps the Account menu scoped to account linking and logout', () => {

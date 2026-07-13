@@ -42,6 +42,16 @@ Repo-specific gotchas for re-syncs. Read before touching the config or previews.
 - **DeviceCardFooter derives percent from voltage** when `batteryPercent` absent — a voltage-only fixture showing a battery pill is correct behavior.
 - Soil profile `status` vocabulary: `optimal`/`dry_stress`/`wet_excess`; calendar marker `labelKey`s must be real `history.calendar.marker.*` i18n keys.
 
+## Variant A header redesign (2026-07-14)
+
+- Header tokens changed: light `--header-bg #FFFFFF / --header-text #040404 / --header-subtext #475569`, dark `#171D1B / #F4F7F5 / #C3CCC7`; new `--brand-red #E30613` (active-tab underline only — red stays out of buttons, the app reserves red for danger). All `--header-*` consumers (monitor modals, history headers, cross-zone page) flip together by design.
+- **Noto Sans** (variable latin woff2, OFL) bundled at `src/fonts/` — the Confederation's web substitute for the Frutiger in the Balken. Applied via the `.font-brand` utility (header + login card). **Gotcha: the font css must be imported from `main.jsx`, NOT `@import`ed in `index.css`** — Tailwind v4 inlines css `@import`s without rebasing `url()`s, so the woff2 never gets emitted and the app 404s the font. `cfg.extraFonts` ships the same face to the DS bundle (`fonts/`).
+- The Balken crown is always on white (both themes) — the asset's gradient ends in pure `#FFFFFF` and is designed to dissolve into a white page.
+- Header title is now the plain "Dashboard" (`dashboard:title` in all 7 locales); browser tab stays `<title>AgroLink</title>` (static, index.html). New `journal` + `tabs.*` keys exist in **en only** (fallback covers others — fold into the i18n sweep, osi-os#47).
+- Journal header button links to `/journal`; the route lands with the field-journal feature branch (`feat/field-journal-slice1`).
+- Login card: Balken crown replaces the portrait federal lockup (`logoHoch` now unused in pages; still exported from branding). rounded-t + overflow-hidden live on the crown wrapper — an overflow-hidden CARD would clip the LanguageSwitcher dropdown (same trap as the header regression).
+- Vite dev server fails with ENOSPC (inotify watcher limit, many worktrees) on this machine — use `npm run preview` (serves `build/`, no watchers) for visual checks.
+
 ## Known render warns (triaged legitimate)
 
 - `[NO_DIST]` ×2 per build — synth-entry mode, expected.

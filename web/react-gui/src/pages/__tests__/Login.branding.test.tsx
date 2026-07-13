@@ -41,7 +41,7 @@ afterEach(() => {
 });
 
 describe('Login AgroLink branding', () => {
-  it('renders the official Agroscope logo, AgroLink title, and fixed OSI OS attribution', () => {
+  it('renders the Agroscope Balken crown, AgroLink title, and fixed OSI OS attribution', () => {
     render(
       <MemoryRouter>
         <Login />
@@ -50,7 +50,7 @@ describe('Login AgroLink branding', () => {
 
     expect(screen.getByRole('img', { name: 'Agroscope' })).toHaveAttribute(
       'src',
-      expect.stringContaining('logo-en-hoch'),
+      expect.stringContaining('balken-horizontal-en'),
     );
     expect(screen.getByRole('heading', { name: 'AgroLink' })).toBeInTheDocument();
     expect(screen.getByText('Powered by OSI OS')).toBeInTheDocument();

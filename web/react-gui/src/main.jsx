@@ -3,6 +3,7 @@ import ReactDOM from 'react-dom/client'
 import App from './App.tsx'
 import './i18n/config.ts'
 import './index.css'
+import './fonts/noto-sans.css'
 import { applyThemePreference, readDisplayPreferences } from './utils/displayPreferences.ts'
 
 applyThemePreference(readDisplayPreferences().theme)
@@ -24,7 +25,7 @@ if (typeof window.matchMedia === 'function') {
 
 ReactDOM.createRoot(document.getElementById('root')).render(
   <React.StrictMode>
-    <Suspense fallback={<div className="min-h-screen bg-slate-900" />}>
+    <Suspense fallback={<div className="min-h-screen bg-[var(--bg)]" />}>
       <App />
     </Suspense>
   </React.StrictMode>
