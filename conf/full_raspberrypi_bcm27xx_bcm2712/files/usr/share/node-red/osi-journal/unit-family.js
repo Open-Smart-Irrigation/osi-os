@@ -95,6 +95,25 @@ function canonicalRowError(terms, facts, options) {
   return { target, targetFacts };
 }
 
+function usableUnitPath(terms, unitCode, options) {
+  const settings = Object.assign({ allowInactive: false }, options || {});
+  if (!(terms instanceof Map)) return { ok: false, code: 'invalid_catalog' };
+  const row = terms.get(unitCode);
+  if (!row || row.kind !== 'unit') return { ok: false, code: 'unknown_unit' };
+  const facts = unitFacts(row);
+  if (!facts) return { ok: false, code: 'invalid_catalog' };
+  if (!settings.allowInactive && !isActive(row)) return { ok: false, code: 'inactive_unit' };
+  const canonical = canonicalRowError(terms, facts, settings);
+  if (canonical.code) return { ok: false, code: canonical.code };
+  return {
+    ok: true,
+    row,
+    facts,
+    target: canonical.target,
+    targetFacts: canonical.targetFacts,
+  };
+}
+
 function numericAttributePreflight(catalog, attributeCode, options) {
   const settings = Object.assign({ allowInactive: false }, options || {});
   const terms = catalogTerms(catalog);
@@ -172,4 +191,5 @@ module.exports = {
   numericAttributePreflight,
   resolveConversion,
   unitFacts,
+  usableUnitPath,
 };

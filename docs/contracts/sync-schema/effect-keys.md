@@ -75,4 +75,7 @@ The command schema's `x-semantic-bindings` object is executable contract metadat
 
 The entry lifecycle repeats that check inside its transaction before it records the terminal command. For an applied entry version `N`, `assertJournalEntryEffectKey` requires base version `N - 1`; a mismatch rolls back the entry, values, event, terminal ledger row, and ACK together.
 
-Task 11's pending-command route must call this same exported check before the shared deduplication lookup. That ordering prevents a malformed key from matching an unrelated terminal record. The equivalent checks for vocabulary, plot, and plot-group mutations remain part of their Task 10/11 handlers; their contract publication here does not imply that those deferred handlers exist yet.
+The pending-command route validates each journal effect-key binding before the
+shared deduplication lookup. That ordering prevents a malformed key from
+matching an unrelated terminal record. The shipped vocabulary, plot, and
+plot-group handlers enforce the equivalent resource binding before mutation.

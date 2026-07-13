@@ -16,6 +16,7 @@ const {
   validateEntry,
 } = require('./index');
 const { numericAttributePreflight } = require('./units');
+const { usableUnitPath } = require('./unit-family');
 
 const repoRoot = path.resolve(__dirname, '../../../../../../..');
 const seedSql = fs.readFileSync(path.join(repoRoot, 'database/seed-blank.sql'), 'utf8');
@@ -1278,6 +1279,29 @@ function syntheticNumberAttribute(code, quantityKind, basis, defaultUnitCode, co
     catalog_errors: [],
   };
 }
+
+test('usableUnitPath requires an active self-canonical target in the same family', () => {
+  const identity = syntheticUnit(
+    'unit.test_identity', 'test_quantity', 'test_basis', 'test_dimension',
+    'unit.test_identity', 1, 0
+  );
+  const derived = syntheticUnit(
+    'unit.test_derived', 'test_quantity', 'test_basis', 'test_dimension',
+    identity.code, 10, 0
+  );
+  const terms = new Map([[identity.code, identity], [derived.code, derived]]);
+  const usable = usableUnitPath(terms, derived.code);
+  assert.equal(usable.ok, true);
+  assert.equal(usable.target.code, identity.code);
+
+  identity.active = 0;
+  assert.deepEqual(usableUnitPath(terms, derived.code), { ok: false, code: 'inactive_unit' });
+  identity.active = 1;
+  identity.constraints.dimension = 'wrong_dimension';
+  assert.deepEqual(usableUnitPath(terms, derived.code), { ok: false, code: 'invalid_catalog' });
+  terms.delete(identity.code);
+  assert.deepEqual(usableUnitPath(terms, derived.code), { ok: false, code: 'invalid_catalog' });
+});
 
 test('convertToCanonical scales product t/ha to canonical kg/ha', async () => {
   const { catalog } = await loadedFixture('unit-scale-product');

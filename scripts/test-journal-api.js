@@ -140,6 +140,25 @@ function principal(overrides) {
   }, overrides || {});
 }
 
+function customVocabInput(uuid, overrides) {
+  return Object.assign({
+    custom_field_uuid: uuid,
+    base_sync_version: 0,
+    kind: 'activity',
+    parent_code: null,
+    value_type: null,
+    quantity_kind: null,
+    basis: null,
+    default_unit_code: null,
+    labels: { en: 'Custom term ' + uuid },
+    icon_key: null,
+    constraints: {},
+    active: 1,
+    sort_order: 0,
+    mappings: [],
+  }, overrides || {});
+}
+
 function plotInput(uuid, code, overrides) {
   return Object.assign({
     plot_uuid: uuid,
@@ -705,6 +724,286 @@ test('custom vocabulary is scoped, mapping-complete, frozen after voided use, an
   assert.equal(db.prepare('SELECT COUNT(*) AS n FROM journal_vocab WHERE custom_field_uuid=?').get(rollbackUuid).n, 0);
   assert.equal(db.prepare('SELECT COUNT(*) AS n FROM applied_commands WHERE command_id=?').get('command-vocab-rollback').n, 0);
   assert.equal(db.prepare('SELECT COUNT(*) AS n FROM command_ack_outbox WHERE command_id=?').get('command-vocab-rollback').n, 0);
+});
+
+test('custom choices require a visible active choice attribute parent', async () => {
+  const db = new TestDb('custom-choice-parent-contract');
+  seedIdentity(db);
+  const choiceUuid = '40100000-0000-4000-8000-000000000001';
+  const missingParentCode = 'custom.40100000-0000-4000-8000-000000000099';
+  const choice = customVocabInput(choiceUuid, {
+    kind: 'choice',
+    parent_code: missingParentCode,
+  });
+  const beforeMissing = db.prepare('SELECT COUNT(*) AS n FROM sync_outbox').get().n;
+  await assert.rejects(
+    journal.upsertCustomVocab(db, choice, principal()),
+    (error) => error && error.code === 'missing_custom_dependency' &&
+      error.details[0].dependency_code === missingParentCode &&
+      error.details[0].field === 'parent_code'
+  );
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM journal_vocab WHERE custom_field_uuid=?')
+    .get(choiceUuid).n, 0);
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM sync_outbox').get().n, beforeMissing);
+
+  const validParentUuid = '40100000-0000-4000-8000-000000000002';
+  const validParentCode = 'custom.' + validParentUuid;
+  await journal.upsertCustomVocab(db, customVocabInput(validParentUuid, {
+    kind: 'attribute', value_type: 'choice',
+  }), principal());
+  const created = await journal.upsertCustomVocab(db, Object.assign({}, choice, {
+    parent_code: validParentCode,
+  }), principal());
+  assert.equal(created.custom_vocab.parent_code, validParentCode);
+  const catalog = await journal.loadCatalog(db, principal());
+  assert.equal(catalog.vocabByCode.get('custom.' + choiceUuid).parent_code, validParentCode);
+
+  const invalidParents = [
+    customVocabInput('40100000-0000-4000-8000-000000000003', {
+      kind: 'attribute', value_type: 'text',
+    }),
+    customVocabInput('40100000-0000-4000-8000-000000000004', {
+      kind: 'attribute', value_type: 'choice', active: 0,
+    }),
+    customVocabInput('40100000-0000-4000-8000-000000000005'),
+  ];
+  for (const parent of invalidParents) {
+    await journal.upsertCustomVocab(db, parent, principal());
+    const rejectedUuid = parent.custom_field_uuid.replace(/.$/, '6');
+    const beforeVocab = db.prepare('SELECT COUNT(*) AS n FROM journal_vocab').get().n;
+    const beforeOutbox = db.prepare('SELECT COUNT(*) AS n FROM sync_outbox').get().n;
+    await assert.rejects(
+      journal.upsertCustomVocab(db, customVocabInput(rejectedUuid, {
+        kind: 'choice', parent_code: 'custom.' + parent.custom_field_uuid,
+      }), principal()),
+      (error) => error && error.code === 'invalid_parent'
+    );
+    assert.equal(db.prepare('SELECT COUNT(*) AS n FROM journal_vocab').get().n, beforeVocab);
+    assert.equal(db.prepare('SELECT COUNT(*) AS n FROM sync_outbox').get().n, beforeOutbox);
+  }
+
+  const deletedParentUuid = '40100000-0000-4000-8000-000000000007';
+  await journal.upsertCustomVocab(db, customVocabInput(deletedParentUuid, {
+    kind: 'attribute', value_type: 'choice',
+  }), principal());
+  db.prepare('UPDATE journal_vocab SET deleted_at=? WHERE custom_field_uuid=?')
+    .run('2026-07-14T00:00:00.000Z', deletedParentUuid);
+  await assert.rejects(
+    journal.upsertCustomVocab(db, customVocabInput('40100000-0000-4000-8000-000000000008', {
+      kind: 'choice', parent_code: 'custom.' + deletedParentUuid,
+    }), principal()),
+    (error) => error && error.code === 'invalid_parent'
+  );
+
+  const foreignParentUuid = '40100000-0000-4000-8000-000000000009';
+  await journal.upsertCustomVocab(db, customVocabInput(foreignParentUuid, {
+    kind: 'attribute', value_type: 'choice',
+  }), principal({
+    user_id: 2,
+    owner_user_uuid: OTHER_OWNER_UUID,
+    author_principal_uuid: OTHER_OWNER_UUID,
+    author_label: 'other-user',
+  }));
+  const beforeForeign = db.prepare('SELECT COUNT(*) AS n FROM sync_outbox').get().n;
+  await assert.rejects(
+    journal.upsertCustomVocab(db, customVocabInput('40100000-0000-4000-8000-000000000010', {
+      kind: 'choice', parent_code: 'custom.' + foreignParentUuid,
+    }), principal()),
+    (error) => error && error.code === 'not_found' && error.statusCode === 404
+  );
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM sync_outbox').get().n, beforeForeign);
+});
+
+test('custom attribute constraints use a closed value-type grammar', async () => {
+  const db = new TestDb('custom-attribute-constraint-grammar');
+  seedIdentity(db);
+  const choiceParentUuid = '40200000-0000-4000-8000-000000000000';
+  await journal.upsertCustomVocab(db, customVocabInput(choiceParentUuid, {
+    kind: 'attribute', value_type: 'choice',
+  }), principal());
+  const validNumeric = {
+    requires_explicit_unit: true,
+    allow_default_unit: false,
+    semantic_discriminator: 'unit_code',
+  };
+  const cases = [
+    customVocabInput('40200000-0000-4000-8000-000000000001', {
+      constraints: { reference: { table: 'devices' } },
+    }),
+    customVocabInput('40200000-0000-4000-8000-000000000002', {
+      kind: 'attribute', value_type: 'number', quantity_kind: 'water_depth', basis: 'water',
+      constraints: Object.assign({}, validNumeric, { repeatable: true }),
+    }),
+    customVocabInput('40200000-0000-4000-8000-000000000003', {
+      kind: 'attribute', value_type: 'text', constraints: { maxlength: -1 },
+    }),
+    customVocabInput('40200000-0000-4000-8000-000000000004', {
+      kind: 'attribute', value_type: 'text', constraints: { maxlength: 1.5 },
+    }),
+    customVocabInput('40200000-0000-4000-8000-000000000005', {
+      kind: 'attribute', value_type: 'text', constraints: { maxlength: 4097 },
+    }),
+    customVocabInput('40200000-0000-4000-8000-000000000006', {
+      kind: 'attribute', value_type: 'choice', constraints: { maxlength: 5 },
+    }),
+    customVocabInput('40200000-0000-4000-8000-000000000007', {
+      kind: 'attribute', value_type: 'date', constraints: { unknown: true },
+    }),
+    customVocabInput('40200000-0000-4000-8000-000000000008', {
+      kind: 'attribute', value_type: 'boolean', constraints: { min: 0 },
+    }),
+    customVocabInput('40200000-0000-4000-8000-000000000010', {
+      kind: 'choice', parent_code: 'custom.' + choiceParentUuid, constraints: { unknown: true },
+    }),
+  ];
+  for (const body of cases) {
+    const beforeVocab = db.prepare('SELECT COUNT(*) AS n FROM journal_vocab').get().n;
+    const beforeOutbox = db.prepare('SELECT COUNT(*) AS n FROM sync_outbox').get().n;
+    await assert.rejects(
+      journal.upsertCustomVocab(db, body, principal()),
+      (error) => error && ['invalid_constraints', 'invalid_irrelevant_field'].includes(error.code),
+      body.custom_field_uuid
+    );
+    assert.equal(db.prepare('SELECT COUNT(*) AS n FROM journal_vocab').get().n, beforeVocab);
+    assert.equal(db.prepare('SELECT COUNT(*) AS n FROM sync_outbox').get().n, beforeOutbox);
+  }
+  await journal.upsertCustomVocab(db, customVocabInput(
+    '40200000-0000-4000-8000-000000000009',
+    { kind: 'attribute', value_type: 'text', constraints: { maxlength: 4096 } }
+  ), principal());
+});
+
+test('custom unit constraints reject unknown root and conversion keys', async () => {
+  const db = new TestDb('custom-unit-constraint-grammar');
+  seedIdentity(db);
+  const base = {
+    kind: 'unit', quantity_kind: 'water_depth', basis: 'water',
+  };
+  for (const constraints of [
+    {
+      dimension: 'water_depth',
+      to_canonical: { unit_code: 'unit.mm_water', scale: 1, offset: 0 },
+      repeatable: true,
+    },
+    {
+      dimension: 'water_depth',
+      to_canonical: { unit_code: 'unit.mm_water', scale: 1, offset: 0, precision: 2 },
+    },
+  ]) {
+    const uuid = constraints.repeatable
+      ? '40300000-0000-4000-8000-000000000001'
+      : '40300000-0000-4000-8000-000000000002';
+    await assert.rejects(
+      journal.upsertCustomVocab(db, customVocabInput(uuid, Object.assign({}, base, { constraints })), principal()),
+      (error) => error && error.code === 'invalid_constraints'
+    );
+  }
+  assert.equal(db.prepare("SELECT COUNT(*) AS n FROM journal_vocab WHERE code LIKE 'custom.403%'").get().n, 0);
+  assert.equal(db.prepare("SELECT COUNT(*) AS n FROM sync_outbox WHERE aggregate_type='JOURNAL_VOCAB'").get().n, 0);
+
+  const wrongTargetUuid = '40300000-0000-4000-8000-000000000003';
+  await journal.upsertCustomVocab(db, customVocabInput(wrongTargetUuid), principal());
+  const beforeWrongTarget = db.prepare('SELECT COUNT(*) AS n FROM sync_outbox').get().n;
+  await assert.rejects(
+    journal.upsertCustomVocab(db, customVocabInput('40300000-0000-4000-8000-000000000004', {
+      kind: 'unit', quantity_kind: 'water_depth', basis: 'water',
+      constraints: {
+        dimension: 'water_depth',
+        to_canonical: { unit_code: 'custom.' + wrongTargetUuid, scale: 10, offset: 0 },
+      },
+    }), principal()),
+    (error) => error && error.code === 'invalid_unit_contract'
+  );
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM sync_outbox').get().n, beforeWrongTarget);
+
+  const incompatibleTargetUuid = '40300000-0000-4000-8000-000000000005';
+  await journal.upsertCustomVocab(db, customVocabInput(incompatibleTargetUuid, {
+    kind: 'unit', quantity_kind: 'other_depth', basis: 'water',
+    constraints: {
+      dimension: 'other_depth',
+      to_canonical: {
+        unit_code: 'custom.' + incompatibleTargetUuid, scale: 1, offset: 0,
+      },
+    },
+  }), principal());
+  const beforeIncompatible = db.prepare('SELECT COUNT(*) AS n FROM sync_outbox').get().n;
+  await assert.rejects(
+    journal.upsertCustomVocab(db, customVocabInput('40300000-0000-4000-8000-000000000006', {
+      kind: 'unit', quantity_kind: 'water_depth', basis: 'water',
+      constraints: {
+        dimension: 'water_depth',
+        to_canonical: {
+          unit_code: 'custom.' + incompatibleTargetUuid, scale: 10, offset: 0,
+        },
+      },
+    }), principal()),
+    (error) => error && error.code === 'invalid_unit_contract'
+  );
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM sync_outbox').get().n, beforeIncompatible);
+});
+
+test('explicit-unit attributes require a reachable canonical unit path', async () => {
+  const db = new TestDb('custom-explicit-unit-reachability');
+  seedIdentity(db);
+  const identityUuid = '40400000-0000-4000-8000-000000000001';
+  const identityCode = 'custom.' + identityUuid;
+  const derivedUuid = '40400000-0000-4000-8000-000000000002';
+  const derivedCode = 'custom.' + derivedUuid;
+  const attributeUuid = '40400000-0000-4000-8000-000000000003';
+  const attributeCode = 'custom.' + attributeUuid;
+  await journal.upsertCustomVocab(db, customVocabInput(identityUuid, {
+    kind: 'unit', quantity_kind: 'review_depth', basis: 'water',
+    constraints: {
+      dimension: 'review_depth',
+      to_canonical: { unit_code: identityCode, scale: 1, offset: 0 },
+    },
+  }), principal());
+  await journal.upsertCustomVocab(db, customVocabInput(derivedUuid, {
+    kind: 'unit', quantity_kind: 'review_depth', basis: 'water',
+    constraints: {
+      dimension: 'review_depth',
+      to_canonical: { unit_code: identityCode, scale: 10, offset: 0 },
+    },
+  }), principal());
+  const explicitAttribute = customVocabInput(attributeUuid, {
+    kind: 'attribute', value_type: 'number', quantity_kind: 'review_depth', basis: 'water',
+    constraints: {
+      requires_explicit_unit: true,
+      allow_default_unit: false,
+      semantic_discriminator: 'unit_code',
+    },
+  });
+  await journal.upsertCustomVocab(db, explicitAttribute, principal());
+  let catalog = await journal.loadCatalog(db, principal());
+  assert.deepEqual(
+    journal.convertToCanonical(catalog, attributeCode, 2, derivedCode),
+    { ok: true, value_num: 20, unit_code: identityCode }
+  );
+
+  await journal.upsertCustomVocab(db, customVocabInput(identityUuid, {
+    base_sync_version: 1,
+    kind: 'unit', quantity_kind: 'review_depth', basis: 'water', active: 0,
+    constraints: {
+      dimension: 'review_depth',
+      to_canonical: { unit_code: identityCode, scale: 1, offset: 0 },
+    },
+  }), principal(), identityUuid);
+  const rejectedUuid = '40400000-0000-4000-8000-000000000004';
+  const beforeOutbox = db.prepare('SELECT COUNT(*) AS n FROM sync_outbox').get().n;
+  await assert.rejects(
+    journal.upsertCustomVocab(db, Object.assign({}, explicitAttribute, {
+      custom_field_uuid: rejectedUuid,
+    }), principal()),
+    (error) => error && error.code === 'invalid_numeric_contract'
+  );
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM journal_vocab WHERE custom_field_uuid=?')
+    .get(rejectedUuid).n, 0);
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM sync_outbox').get().n, beforeOutbox);
+  catalog = await journal.loadCatalog(db, principal());
+  assert.deepEqual(
+    journal.convertToCanonical(catalog, 'custom.' + rejectedUuid, 2, derivedCode),
+    { ok: false, code: 'invalid_catalog' }
+  );
 });
 
 test('plot groups enforce homogeneous active membership and preserve resolved provenance', async () => {
@@ -1609,7 +1908,9 @@ test('custom vocabulary applies shared unit-family rules and freezes normalized 
   for (const invalid of invalidBodies) {
     await assert.rejects(
       journal.upsertCustomVocab(db, invalid, principal()),
-      (error) => error && ['invalid_irrelevant_field', 'invalid_unit_contract'].includes(error.code)
+      (error) => error && [
+        'invalid_constraints', 'invalid_irrelevant_field', 'invalid_unit_contract',
+      ].includes(error.code)
     );
   }
   await assert.rejects(

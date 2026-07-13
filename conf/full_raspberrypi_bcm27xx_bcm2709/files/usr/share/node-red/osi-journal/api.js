@@ -4,7 +4,7 @@ const crypto = require('node:crypto');
 const fs = require('node:fs');
 const { aggregateHash, buildAggregate } = require('./aggregate');
 const { loadCatalog } = require('./catalog');
-const { numericConstraintsValid, unitFacts } = require('./unit-family');
+const { numericConstraintsValid, unitFacts, usableUnitPath } = require('./unit-family');
 
 const UUID = /^[0-9a-fA-F]{8}-?[0-9a-fA-F]{4}-?[0-9a-fA-F]{4}-?[0-9a-fA-F]{4}-?[0-9a-fA-F]{12}$/;
 const CANONICAL_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
@@ -1111,17 +1111,9 @@ function unitRuleRow(row, constraints) {
   });
 }
 
-function irrelevantField(semantic, constraints, fields) {
+function irrelevantField(semantic, fields) {
   for (const field of fields) {
-    if (field === 'constraints') {
-      const numericKeys = [
-        'min', 'max', 'step', 'requires_explicit_unit', 'allow_default_unit',
-        'semantic_discriminator', 'dimension', 'to_canonical',
-      ];
-      if (constraints && numericKeys.some(function(key) {
-        return Object.prototype.hasOwnProperty.call(constraints, key);
-      })) return 'constraints';
-    } else if (semantic[field] != null) return field;
+    if (semantic[field] != null) return field;
   }
   return null;
 }
@@ -1130,16 +1122,22 @@ function throwIrrelevantField(field) {
   throw apiError(422, 'invalid_irrelevant_field', 'Vocabulary field is not valid for this kind', { field });
 }
 
-function irrelevantConstraintField(constraints, fields) {
-  return fields.find(function(field) {
-    return Object.prototype.hasOwnProperty.call(constraints, field);
+function assertConstraintKeys(constraints, allowed, prefix) {
+  const allowedKeys = new Set(allowed);
+  const unsupported = Object.keys(constraints).find(function(key) {
+    return !allowedKeys.has(key);
   });
+  if (unsupported) {
+    semanticError('invalid_constraints', 'Vocabulary constraints contain an unsupported field', {
+      field: (prefix || 'constraints') + '.' + unsupported,
+    });
+  }
 }
 
 async function scopedUnit(tx, code, principal, field) {
   const unit = await dbGet(
     tx,
-    'SELECT * FROM journal_vocab WHERE code=? AND deleted_at IS NULL',
+    'SELECT * FROM journal_vocab WHERE code=?',
     [code]
   );
   if (!unit) {
@@ -1156,15 +1154,19 @@ async function scopedUnit(tx, code, principal, field) {
 
 async function validateCustomParent(tx, parentCode, principal) {
   if (!parentCode) return;
-  const parent = await dbGet(tx, 'SELECT * FROM journal_vocab WHERE code=? AND deleted_at IS NULL', [parentCode]);
-  if (!parent) semanticError('parent_not_found', 'Parent vocabulary term was not found');
+  const parent = await dbGet(tx, 'SELECT * FROM journal_vocab WHERE code=?', [parentCode]);
+  if (!parent) {
+    if (customCode(parentCode)) customDependencyError(parentCode, 'parent_code');
+    semanticError('invalid_parent', 'Choice parent was not found');
+  }
   if (parent.scope === 'custom' &&
       (parent.owner_user_uuid !== principal.owner_user_uuid ||
         parent.gateway_device_eui !== principal.gateway_device_eui)) {
     throw apiError(404, 'not_found', 'Parent vocabulary term was not found');
   }
-  if (parent.kind !== 'attribute') {
-    semanticError('invalid_parent', 'Choice parent must be an attribute');
+  if (Number(parent.active) !== 1 || parent.deleted_at ||
+      parent.kind !== 'attribute' || parent.value_type !== 'choice') {
+    semanticError('invalid_parent', 'Choice parent must be an active choice attribute');
   }
 }
 
@@ -1179,63 +1181,79 @@ async function validateVocabularyContract(
   if (!constraints) semanticError('invalid_constraints', 'constraints_json must contain an object');
   let irrelevant;
   if (semantic.kind === 'activity') {
-    irrelevant = irrelevantField(semantic, constraints, [
-      'parent_code', 'value_type', 'quantity_kind', 'basis', 'default_unit_code', 'constraints',
+    irrelevant = irrelevantField(semantic, [
+      'parent_code', 'value_type', 'quantity_kind', 'basis', 'default_unit_code',
     ]);
     if (irrelevant) throwIrrelevantField(irrelevant);
+    assertConstraintKeys(constraints, []);
     return;
   }
   if (semantic.kind === 'choice') {
-    irrelevant = irrelevantField(semantic, constraints, [
-      'value_type', 'quantity_kind', 'basis', 'default_unit_code', 'constraints',
+    irrelevant = irrelevantField(semantic, [
+      'value_type', 'quantity_kind', 'basis', 'default_unit_code',
     ]);
     if (irrelevant) throwIrrelevantField(irrelevant);
+    assertConstraintKeys(constraints, []);
     return;
   }
   if (semantic.kind === 'unit') {
-    irrelevant = irrelevantField(semantic, constraints, [
+    irrelevant = irrelevantField(semantic, [
       'parent_code', 'value_type', 'default_unit_code',
     ]);
     if (irrelevant) throwIrrelevantField(irrelevant);
-    const attributeConstraint = irrelevantConstraintField(constraints, [
-      'min', 'max', 'step', 'requires_explicit_unit', 'allow_default_unit',
-      'semantic_discriminator',
-    ]);
-    if (attributeConstraint) throwIrrelevantField('constraints.' + attributeConstraint);
+    assertConstraintKeys(constraints, ['dimension', 'to_canonical']);
+    if (!isObject(constraints.to_canonical)) {
+      semanticError('invalid_constraints', 'Unit conversion constraints must be an object', {
+        field: 'constraints.to_canonical',
+      });
+    }
+    assertConstraintKeys(
+      constraints.to_canonical,
+      ['unit_code', 'scale', 'offset'],
+      'constraints.to_canonical'
+    );
     const proposed = unitRuleRow(Object.assign({ code, active: 1, deleted_at: null }, semantic), constraints);
     const facts = unitFacts(proposed);
     if (!facts) semanticError('invalid_unit_contract', 'Unit conversion metadata is invalid');
-    let target;
-    if (facts.canonical_unit_code === code) {
-      target = proposed;
-    } else {
-      target = unitRuleRow(await scopedUnit(
+    const terms = new Map([[code, proposed]]);
+    if (facts.canonical_unit_code !== code) {
+      const target = unitRuleRow(await scopedUnit(
         tx,
         facts.canonical_unit_code,
         principal,
         'constraints.to_canonical.unit_code'
       ));
+      terms.set(target.code, target);
     }
-    const targetFacts = unitFacts(target);
-    if (!targetFacts || Number(target.active) !== 1 || target.deleted_at ||
-        targetFacts.quantity_kind !== facts.quantity_kind ||
-        targetFacts.basis !== facts.basis || targetFacts.dimension !== facts.dimension ||
-        targetFacts.canonical_unit_code !== target.code || targetFacts.scale !== 1 ||
-        targetFacts.offset !== 0) {
+    if (!usableUnitPath(terms, code).ok) {
       semanticError('invalid_unit_contract', 'Canonical unit target is incompatible');
     }
     return;
   }
   if (semantic.value_type !== 'number') {
-    irrelevant = irrelevantField(semantic, constraints, [
-      'parent_code', 'quantity_kind', 'basis', 'default_unit_code', 'constraints',
+    irrelevant = irrelevantField(semantic, [
+      'parent_code', 'quantity_kind', 'basis', 'default_unit_code',
     ]);
     if (irrelevant) throwIrrelevantField(irrelevant);
+    if (semantic.value_type === 'text') {
+      assertConstraintKeys(constraints, ['maxlength']);
+      if (Object.prototype.hasOwnProperty.call(constraints, 'maxlength') &&
+          (!Number.isInteger(constraints.maxlength) || constraints.maxlength < 0 ||
+            constraints.maxlength > 4096)) {
+        semanticError('invalid_constraints', 'Text maxlength must be an integer from 0 to 4096', {
+          field: 'constraints.maxlength',
+        });
+      }
+    } else {
+      assertConstraintKeys(constraints, []);
+    }
     return;
   }
   if (semantic.parent_code != null) throwIrrelevantField('parent_code');
-  const unitConstraint = irrelevantConstraintField(constraints, ['dimension', 'to_canonical']);
-  if (unitConstraint) throwIrrelevantField('constraints.' + unitConstraint);
+  assertConstraintKeys(constraints, [
+    'min', 'max', 'step', 'requires_explicit_unit', 'allow_default_unit',
+    'semantic_discriminator',
+  ]);
   const attribute = Object.assign({
     code,
     active: 1,
@@ -1254,21 +1272,42 @@ async function validateVocabularyContract(
       'default_unit_code'
     ));
     const facts = unitFacts(unit);
-    if (!facts || Number(unit.active) !== 1 || unit.deleted_at ||
-        facts.quantity_kind !== semantic.quantity_kind || facts.basis !== semantic.basis ||
-        facts.canonical_unit_code !== unit.code || facts.scale !== 1 || facts.offset !== 0) {
+    if (!facts) {
+      semanticError('invalid_numeric_contract', 'Default unit metadata is invalid');
+    }
+    const terms = new Map([[unit.code, unit]]);
+    if (facts.canonical_unit_code !== unit.code) {
+      const target = unitRuleRow(await scopedUnit(
+        tx,
+        facts.canonical_unit_code,
+        principal,
+        'default_unit_code'
+      ));
+      terms.set(target.code, target);
+    }
+    const path = usableUnitPath(terms, unit.code);
+    if (!path.ok || facts.quantity_kind !== semantic.quantity_kind ||
+        facts.basis !== semantic.basis || path.target.code !== unit.code) {
       semanticError('invalid_numeric_contract', 'Default unit is not canonical for this attribute');
     }
     return;
   }
-  const candidates = await dbAll(
+  const unitRows = await dbAll(
     tx,
-    'SELECT * FROM journal_vocab WHERE kind=? AND active=1 AND deleted_at IS NULL ' +
-      'AND quantity_kind=? AND basis=? AND (scope=? OR (scope=? AND owner_user_uuid=? AND gateway_device_eui=?))',
-    ['unit', semantic.quantity_kind, semantic.basis, 'core', 'custom',
-      principal.owner_user_uuid, principal.gateway_device_eui]
+    'SELECT * FROM journal_vocab WHERE kind=? AND ' +
+      '(scope=? OR (scope=? AND owner_user_uuid=? AND gateway_device_eui=?))',
+    ['unit', 'core', 'custom', principal.owner_user_uuid, principal.gateway_device_eui]
   );
-  if (!candidates.some(function(row) { return Boolean(unitFacts(unitRuleRow(row))); })) {
+  const terms = new Map(unitRows.map(function(row) {
+    const parsed = unitRuleRow(row);
+    return [parsed.code, parsed];
+  }));
+  const usable = unitRows.some(function(row) {
+    return Number(row.active) === 1 && !row.deleted_at &&
+      row.quantity_kind === semantic.quantity_kind && row.basis === semantic.basis &&
+      usableUnitPath(terms, row.code).ok;
+  });
+  if (!usable) {
     semanticError('invalid_numeric_contract', 'No usable unit matches the attribute quantity and basis');
   }
 }

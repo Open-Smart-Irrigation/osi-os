@@ -165,3 +165,52 @@ Only the agreed deferred items remain:
 - attachment constraints;
 - `journal_products.updated_at`;
 - migration numbering after integration with current `origin/main`.
+
+## Follow-up: custom-vocabulary admissibility gaps
+
+The follow-up review found three remaining paths that could admit unusable
+custom terms. Choice creation checked only the parent kind, explicit-unit
+attributes counted derived units without resolving their canonical targets,
+and kind-specific constraint objects accepted unknown keys.
+
+The public upsert now requires each choice parent to be visible, active,
+undeleted, and a `choice` attribute. A missing well-formed custom parent returns
+`missing_custom_dependency`; inactive, deleted, wrong-kind, and wrong-value-type
+parents are permanent failures. Same-gateway parents owned by another user
+remain hidden behind `404 not_found`.
+
+`usableUnitPath()` is the pure unit-family check for both proposed units and
+explicit-unit candidate scans. It requires an active source and target, a
+self-canonical target with scale 1 and offset 0, and matching quantity, basis,
+and dimension. The API builds the candidate map from all visible scoped units,
+including inactive targets, before deciding whether any usable path remains.
+Missing custom targets stay retryable; existing unusable targets fail
+permanently.
+
+Custom constraint JSON now has a closed grammar. Activity and choice terms,
+plus choice, date, and boolean attributes, accept only null or an empty object.
+Number attributes accept the six numeric keys already checked by
+`numericConstraintsValid()`. Text attributes accept only an integer
+`maxlength` from 0 through 4096. Unit objects accept only `dimension` and
+`to_canonical`; the nested conversion accepts only `unit_code`, `scale`, and
+`offset`. These checks apply only to custom upserts and do not change the
+generated core catalog.
+
+The RED run recorded four API failures (28/32 passed), two command failures
+(49/51 passed), and the missing pure helper in the canonical module suite
+(98/99 passed). The failures matched the review cases: wrong dependency reason,
+inactive choice acceptance, open constraint objects, and a derived unit counted
+after its identity target was retired.
+
+After the correction, both module mirrors pass 99/99, the API passes 32/32,
+and the command path passes 51/51. The command tests cover dependency arrival
+on a new delivery, permanent inactive-parent and inactive-target rejection,
+transactional no-write behavior, catalog reload, and exact derived-unit
+conversion. Full sync flow, profile parity, helper registration, contract
+schemas, communication contract, and command safety also exit 0. The stale
+effect-key text now describes the shipped vocabulary, plot, and plot-group
+handlers.
+
+This follow-up did not change migrations, bundled databases, flows, workflow
+files, the sister repository, or any live system. The existing migration-number
+collision and the three deferred items above are unchanged.

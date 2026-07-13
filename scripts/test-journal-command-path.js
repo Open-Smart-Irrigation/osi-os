@@ -253,6 +253,13 @@ function vocabAggregate() {
   };
 }
 
+function vocabAggregateFor(uuid, overrides) {
+  return Object.assign({}, vocabAggregate(), {
+    custom_field_uuid: uuid,
+    code: 'custom.' + uuid,
+  }, overrides || {});
+}
+
 function plotAggregate() {
   return {
     contract_version: 1,
@@ -807,7 +814,7 @@ for (const fixture of [
   });
 }
 
-test('missing custom-vocabulary parent is retryable and never creates a terminal ledger row', async () => {
+test('a custom choice command applies on a new delivery after its parent arrives', async () => {
   const db = fixtureDb('vocab-dependency');
   try {
     const missingParent = Object.assign({}, vocabAggregate(), {
@@ -824,27 +831,92 @@ test('missing custom-vocabulary parent is retryable and never creates a terminal
     );
     assert.equal(result.handled, true);
     assert.equal(result.ack.result, 'FAILED_RETRYABLE');
-    assert.equal(result.ack.reason, 'parent_not_found');
+    assert.equal(result.ack.reason, 'missing_custom_dependency');
     assert.equal((await db.get('SELECT COUNT(*) AS n FROM journal_vocab WHERE custom_field_uuid=?', [VOCAB_UUID])).n, 0);
     assert.equal((await db.get('SELECT COUNT(*) AS n FROM applied_commands WHERE command_id=?', ['403'])).n, 0);
     assert.equal((await db.get('SELECT COUNT(*) AS n FROM command_ack_outbox WHERE command_id=?', ['403'])).n, 1);
+
+    const parentUuid = MISSING_CUSTOM_CODE.slice('custom.'.length);
+    const parent = vocabAggregateFor(parentUuid, {
+      kind: 'attribute',
+      value_type: 'choice',
+      labels_json: '{"en":"Choice parent"}',
+    });
+    const parentResult = await journal.applyJournalCommand(
+      db,
+      pendingCommand(404, 'UPSERT_JOURNAL_CUSTOM_VOCAB', 'journal_vocab:' + parentUuid + ':0', {
+        custom_vocab: parent,
+      }),
+      { gateway_device_eui: GATEWAY_EUI }
+    );
+    assert.equal(parentResult.ack.result, 'APPLIED');
+
+    const applied = await journal.applyJournalCommand(
+      db,
+      pendingCommand(405, 'UPSERT_JOURNAL_CUSTOM_VOCAB', 'journal_vocab:' + VOCAB_UUID + ':0', {
+        custom_vocab: missingParent,
+      }),
+      { gateway_device_eui: GATEWAY_EUI }
+    );
+    assert.equal(applied.ack.result, 'APPLIED');
+    const catalog = await journal.loadCatalog(db, localPrincipal());
+    assert.equal(catalog.vocabByCode.get('custom.' + VOCAB_UUID).parent_code, MISSING_CUSTOM_CODE);
   } finally {
     db.close();
   }
 });
 
-test('missing custom-unit conversion target is retryable and never creates a terminal ledger row', async () => {
+test('an inactive choice parent is a permanent command rejection with no resource or outbox write', async () => {
+  const db = fixtureDb('inactive-choice-parent');
+  try {
+    const parentUuid = MISSING_CUSTOM_CODE.slice('custom.'.length);
+    await journal.upsertCustomVocab(db, localVocabInput({
+      custom_field_uuid: parentUuid,
+      code: MISSING_CUSTOM_CODE,
+      kind: 'attribute',
+      value_type: 'choice',
+      active: 0,
+      labels_json: '{"en":"Inactive choice parent"}',
+    }), localPrincipal());
+    const beforeOutbox = (await db.get('SELECT COUNT(*) AS n FROM sync_outbox')).n;
+    const choice = Object.assign({}, vocabAggregate(), {
+      kind: 'choice',
+      parent_code: MISSING_CUSTOM_CODE,
+      labels_json: '{"en":"Rejected choice"}',
+    });
+    const result = await journal.applyJournalCommand(
+      db,
+      pendingCommand(406, 'UPSERT_JOURNAL_CUSTOM_VOCAB', 'journal_vocab:' + VOCAB_UUID + ':0', {
+        custom_vocab: choice,
+      }),
+      { gateway_device_eui: GATEWAY_EUI }
+    );
+    assert.equal(result.ack.result, 'REJECTED_PERMANENT');
+    assert.equal(result.ack.reason, 'invalid_parent');
+    assert.equal((await db.get(
+      'SELECT COUNT(*) AS n FROM journal_vocab WHERE custom_field_uuid=?', [VOCAB_UUID]
+    )).n, 0);
+    assert.equal((await db.get('SELECT COUNT(*) AS n FROM sync_outbox')).n, beforeOutbox);
+    assert.equal((await db.get(
+      'SELECT COUNT(*) AS n FROM applied_commands WHERE command_id=?', ['406']
+    )).n, 1);
+  } finally {
+    db.close();
+  }
+});
+
+test('a custom unit command applies on a new delivery after its canonical target arrives', async () => {
   const db = fixtureDb('unit-conversion-dependency');
   try {
     const missingTargetUnit = Object.assign({}, vocabAggregate(), {
       code: 'custom.' + VOCAB_UUID,
       kind: 'unit',
       value_type: null,
-      quantity_kind: 'water_depth',
+      quantity_kind: 'review_depth',
       basis: 'water',
       default_unit_code: null,
       constraints_json: JSON.stringify({
-        dimension: 'water_depth',
+        dimension: 'review_depth',
         to_canonical: {
           unit_code: MISSING_CUSTOM_CODE,
           scale: 10,
@@ -870,6 +942,106 @@ test('missing custom-unit conversion target is retryable and never creates a ter
     assert.equal((await db.get(
       'SELECT COUNT(*) AS n FROM command_ack_outbox WHERE command_id=? AND delivered_at IS NULL',
       ['404']
+    )).n, 1);
+
+    const targetUuid = MISSING_CUSTOM_CODE.slice('custom.'.length);
+    const target = vocabAggregateFor(targetUuid, {
+      kind: 'unit',
+      quantity_kind: 'review_depth',
+      basis: 'water',
+      constraints_json: JSON.stringify({
+        dimension: 'review_depth',
+        to_canonical: { unit_code: MISSING_CUSTOM_CODE, scale: 1, offset: 0 },
+      }),
+    });
+    const targetResult = await journal.applyJournalCommand(
+      db,
+      pendingCommand(407, 'UPSERT_JOURNAL_CUSTOM_VOCAB', 'journal_vocab:' + targetUuid + ':0', {
+        custom_vocab: target,
+      }),
+      { gateway_device_eui: GATEWAY_EUI }
+    );
+    assert.equal(targetResult.ack.result, 'APPLIED');
+    const derivedResult = await journal.applyJournalCommand(
+      db,
+      pendingCommand(408, 'UPSERT_JOURNAL_CUSTOM_VOCAB', 'journal_vocab:' + VOCAB_UUID + ':0', {
+        custom_vocab: missingTargetUnit,
+      }),
+      { gateway_device_eui: GATEWAY_EUI }
+    );
+    assert.equal(derivedResult.ack.result, 'APPLIED');
+
+    const attributeUuid = '99999999-9999-4999-8999-999999999998';
+    const attribute = vocabAggregateFor(attributeUuid, {
+      kind: 'attribute',
+      value_type: 'number',
+      quantity_kind: 'review_depth',
+      basis: 'water',
+      constraints_json: JSON.stringify({
+        requires_explicit_unit: true,
+        allow_default_unit: false,
+        semantic_discriminator: 'unit_code',
+      }),
+    });
+    const attributeResult = await journal.applyJournalCommand(
+      db,
+      pendingCommand(409, 'UPSERT_JOURNAL_CUSTOM_VOCAB', 'journal_vocab:' + attributeUuid + ':0', {
+        custom_vocab: attribute,
+      }),
+      { gateway_device_eui: GATEWAY_EUI }
+    );
+    assert.equal(attributeResult.ack.result, 'APPLIED');
+    const catalog = await journal.loadCatalog(db, localPrincipal());
+    assert.deepEqual(
+      journal.convertToCanonical(catalog, 'custom.' + attributeUuid, 2, 'custom.' + VOCAB_UUID),
+      { ok: true, value_num: 20, unit_code: MISSING_CUSTOM_CODE }
+    );
+  } finally {
+    db.close();
+  }
+});
+
+test('an inactive canonical target is a permanent command rejection with no resource or outbox write', async () => {
+  const db = fixtureDb('inactive-unit-target');
+  try {
+    const targetUuid = MISSING_CUSTOM_CODE.slice('custom.'.length);
+    await journal.upsertCustomVocab(db, localVocabInput({
+      custom_field_uuid: targetUuid,
+      code: MISSING_CUSTOM_CODE,
+      kind: 'unit',
+      quantity_kind: 'review_depth',
+      basis: 'water',
+      active: 0,
+      constraints_json: JSON.stringify({
+        dimension: 'review_depth',
+        to_canonical: { unit_code: MISSING_CUSTOM_CODE, scale: 1, offset: 0 },
+      }),
+    }), localPrincipal());
+    const beforeOutbox = (await db.get('SELECT COUNT(*) AS n FROM sync_outbox')).n;
+    const derived = Object.assign({}, vocabAggregate(), {
+      kind: 'unit',
+      quantity_kind: 'review_depth',
+      basis: 'water',
+      constraints_json: JSON.stringify({
+        dimension: 'review_depth',
+        to_canonical: { unit_code: MISSING_CUSTOM_CODE, scale: 10, offset: 0 },
+      }),
+    });
+    const result = await journal.applyJournalCommand(
+      db,
+      pendingCommand(410, 'UPSERT_JOURNAL_CUSTOM_VOCAB', 'journal_vocab:' + VOCAB_UUID + ':0', {
+        custom_vocab: derived,
+      }),
+      { gateway_device_eui: GATEWAY_EUI }
+    );
+    assert.equal(result.ack.result, 'REJECTED_PERMANENT');
+    assert.equal(result.ack.reason, 'invalid_unit_contract');
+    assert.equal((await db.get(
+      'SELECT COUNT(*) AS n FROM journal_vocab WHERE custom_field_uuid=?', [VOCAB_UUID]
+    )).n, 0);
+    assert.equal((await db.get('SELECT COUNT(*) AS n FROM sync_outbox')).n, beforeOutbox);
+    assert.equal((await db.get(
+      'SELECT COUNT(*) AS n FROM applied_commands WHERE command_id=?', ['410']
     )).n, 1);
   } finally {
     db.close();
