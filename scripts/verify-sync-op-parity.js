@@ -7,6 +7,33 @@ const { execFileSync } = require('node:child_process');
 
 const REPO_ROOT = path.resolve(__dirname, '..');
 const SERVER_RELATIVE_SOURCE = path.join('backend', 'src', 'main', 'java', 'org', 'osi', 'server', 'sync', 'EdgeSyncService.java');
+const STAGING_MANIFEST_RELATIVE = 'scripts/fixtures/sync-contract-staging.json';
+const MODULE_SOURCES = [
+  {
+    name: 'journal-lifecycle',
+    path: 'conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-journal/lifecycle.js',
+  },
+];
+const EXACT_STAGED_COMMANDS = [
+  'UPSERT_JOURNAL_ENTRY',
+  'VOID_JOURNAL_ENTRY',
+  'UPSERT_JOURNAL_CUSTOM_VOCAB',
+  'UPSERT_JOURNAL_PLOT',
+  'UPSERT_JOURNAL_PLOT_GROUP',
+];
+const EXACT_EDGE_MODULE_OPS = [
+  'JOURNAL_ENTRY_UPSERTED',
+  'JOURNAL_ENTRY_VOIDED',
+];
+const EXACT_EDGE_DEFERRED_OPS = [
+  'JOURNAL_VOCAB_UPSERTED',
+  'JOURNAL_PLOT_UPSERTED',
+  'JOURNAL_PLOT_GROUP_UPSERTED',
+];
+const EXACT_JOURNAL_EVENT_OPS = [
+  ...EXACT_EDGE_MODULE_OPS,
+  ...EXACT_EDGE_DEFERRED_OPS,
+];
 const FLOW_SOURCES = [
   {
     name: 'bcm2712',
@@ -70,6 +97,8 @@ function uniquePaths(paths) {
 function fallbackServerSourceCandidates(root = REPO_ROOT) {
   const worktreeName = path.basename(root);
   return uniquePaths([
+    path.resolve(root, '..', '..', '..', '..', 'osi-server', '.worktrees', worktreeName, SERVER_RELATIVE_SOURCE),
+    path.resolve(root, '..', '..', '..', '..', 'osi-server', SERVER_RELATIVE_SOURCE),
     path.resolve(root, '..', '..', '..', 'osi-server', '.worktrees', worktreeName, SERVER_RELATIVE_SOURCE),
     path.resolve(root, '..', 'osi-server', SERVER_RELATIVE_SOURCE),
     path.resolve(root, '..', '..', '..', 'osi-server', SERVER_RELATIVE_SOURCE),
@@ -656,6 +685,141 @@ function extractSchemaOps(schemaPath) {
   return { ops: [...new Set(ops)].sort(), errors };
 }
 
+function sortedUnique(values) {
+  return [...new Set(values)].sort();
+}
+
+function sameKeys(actual, expected) {
+  return Array.isArray(actual) &&
+    actual.length === expected.length &&
+    actual.every((value, index) => value === expected[index]);
+}
+
+function validateStagingManifest(manifest) {
+  const errors = [];
+  if (!manifest || typeof manifest !== 'object' || Array.isArray(manifest)) {
+    return ['staging manifest must be an object'];
+  }
+  const rootKeys = Object.keys(manifest).sort();
+  if (!sameKeys(rootKeys, ['commands', 'eventOps', 'version'])) {
+    errors.push(`staging root keys must be commands,eventOps,version; got ${rootKeys.join(',') || '(none)'}`);
+  }
+  if (manifest.version !== 1) errors.push(`staging version must be 1; got ${String(manifest.version)}`);
+
+  const commands = manifest.commands;
+  const commandKeys = commands && typeof commands === 'object' && !Array.isArray(commands)
+    ? Object.keys(commands).sort()
+    : [];
+  if (!sameKeys(commandKeys, ['cloudDeferred', 'edgeDeferred'])) {
+    errors.push(`staging commands keys must be cloudDeferred,edgeDeferred; got ${commandKeys.join(',') || '(none)'}`);
+  }
+
+  const eventOps = manifest.eventOps;
+  const eventKeys = eventOps && typeof eventOps === 'object' && !Array.isArray(eventOps)
+    ? Object.keys(eventOps).sort()
+    : [];
+  if (!sameKeys(eventKeys, ['cloudDeferred', 'edgeDeferred', 'edgeModuleOwned'])) {
+    errors.push(`staging eventOps keys must be cloudDeferred,edgeDeferred,edgeModuleOwned; got ${eventKeys.join(',') || '(none)'}`);
+  }
+
+  const checks = [
+    ['commands.edgeDeferred', commands && commands.edgeDeferred, EXACT_STAGED_COMMANDS],
+    ['commands.cloudDeferred', commands && commands.cloudDeferred, EXACT_STAGED_COMMANDS],
+    ['eventOps.edgeModuleOwned', eventOps && eventOps.edgeModuleOwned, EXACT_EDGE_MODULE_OPS],
+    ['eventOps.edgeDeferred', eventOps && eventOps.edgeDeferred, EXACT_EDGE_DEFERRED_OPS],
+    ['eventOps.cloudDeferred', eventOps && eventOps.cloudDeferred, EXACT_JOURNAL_EVENT_OPS],
+  ];
+  for (const [name, actual, expected] of checks) {
+    if (!Array.isArray(actual)) {
+      errors.push(`staging ${name} must be an array`);
+      continue;
+    }
+    const diff = diffSets(expected, actual);
+    const duplicates = actual.filter((value, index) => actual.indexOf(value) !== index);
+    if (diff.missing.length || diff.extra.length || duplicates.length) {
+      const details = [];
+      if (diff.missing.length) details.push(`missing ${diff.missing.join(', ')}`);
+      if (diff.extra.length) details.push(`extra ${diff.extra.join(', ')}`);
+      if (duplicates.length) details.push(`duplicates ${sortedUnique(duplicates).join(', ')}`);
+      errors.push(`staging ${name} must be the exact closed set: ${details.join('; ')}`);
+    }
+  }
+
+  if (eventOps && Array.isArray(eventOps.edgeModuleOwned) && Array.isArray(eventOps.edgeDeferred)) {
+    const edgeUnion = sortedUnique(eventOps.edgeModuleOwned.concat(eventOps.edgeDeferred));
+    const edgeDiff = diffSets(sortedUnique(EXACT_JOURNAL_EVENT_OPS), edgeUnion);
+    if (edgeDiff.missing.length || edgeDiff.extra.length) {
+      errors.push('staging edgeModuleOwned union edgeDeferred must equal the exact journal event-op set');
+    }
+  }
+  return errors;
+}
+
+function loadStagingManifest(manifestPath) {
+  if (!fs.existsSync(manifestPath)) {
+    return { manifest: null, errors: [`staging manifest not found at ${manifestPath}`] };
+  }
+  try {
+    const manifest = JSON.parse(readUtf8(manifestPath));
+    return { manifest, errors: validateStagingManifest(manifest) };
+  } catch (error) {
+    return { manifest: null, errors: [`unable to parse staging manifest at ${manifestPath}: ${error.message}`] };
+  }
+}
+
+function extractJournalModuleOps(modulePath) {
+  if (!fs.existsSync(modulePath)) {
+    return { ops: [], errors: [`journal module source not found at ${modulePath}`] };
+  }
+  const source = readUtf8(modulePath);
+  const ops = [];
+  const call = /\bemitJournalOutbox\s*\(\s*[^,]+,\s*[^,]+,\s*(['"])(JOURNAL_[A-Z0-9_]+_(?:UPSERTED|VOIDED))\1\s*\)/g;
+  let match;
+  while ((match = call.exec(source)) !== null) ops.push(match[2]);
+  return { ops: sortedUnique(ops), errors: [] };
+}
+
+function extractSyncEventApplierOps(serverSource) {
+  const directory = path.dirname(serverSource);
+  const ops = [];
+  const errors = [];
+  let names;
+  try {
+    names = fs.readdirSync(directory).filter((name) => name.endsWith('.java'));
+  } catch (error) {
+    return { ops, errors: [`unable to list SyncEventApplier sources in ${directory}: ${error.message}`] };
+  }
+  for (const name of names) {
+    const file = path.join(directory, name);
+    const source = readUtf8(file);
+    if (!/\bimplements\s+SyncEventApplier\b/.test(source)) continue;
+    const method = /\bsupportedOps\s*\(\s*\)\s*\{/.exec(source);
+    if (!method) {
+      errors.push(`${name} implements SyncEventApplier without a supportedOps() body`);
+      continue;
+    }
+    const bodyOpen = method.index + method[0].lastIndexOf('{');
+    const bodyClose = findMatchingBrace(source, bodyOpen);
+    if (bodyClose < 0) {
+      errors.push(`${name} has an unbalanced supportedOps() body`);
+      continue;
+    }
+    const body = source.slice(bodyOpen + 1, bodyClose);
+    const returnedSet = /\breturn\s+Set\s*\.\s*of\s*\(([\s\S]*?)\)\s*;/.exec(body);
+    if (!returnedSet) {
+      errors.push(`${name} supportedOps() must return a literal Set.of(...) for parity extraction`);
+      continue;
+    }
+    const declared = extractQuotedConstants(returnedSet[1]);
+    if (declared.length === 0) {
+      errors.push(`${name} supportedOps() Set.of(...) contains no literal operation`);
+      continue;
+    }
+    ops.push(...declared);
+  }
+  return { ops: sortedUnique(ops), errors };
+}
+
 function extractServerOps(serverSource) {
   if (!fs.existsSync(serverSource)) {
     return { ops: [], errors: [`EdgeSyncService.java not found at ${serverSource}`] };
@@ -673,7 +837,9 @@ function extractServerOps(serverSource) {
   for (const label of extractJavaSwitchCaseLabels(switchBody)) {
     ops.push(...extractQuotedConstants(label));
   }
-  return { ops: [...new Set(ops)].sort(), errors: [] };
+  const applierResult = extractSyncEventApplierOps(serverSource);
+  ops.push(...applierResult.ops);
+  return { ops: sortedUnique(ops), errors: applierResult.errors };
 }
 
 function diffSets(expected, actual) {
@@ -703,7 +869,38 @@ function checkSyncOpParity(options = {}) {
   const flowSources = options.flowSources === undefined ? FLOW_SOURCES : options.flowSources;
   const sqlSources = options.sqlSources === undefined ? SQL_SOURCES : options.sqlSources;
   const databaseSources = options.databaseSources === undefined ? DATABASE_SOURCES : options.databaseSources;
+  const sqlOwnedEventOps = options.sqlOwnedEventOps === undefined
+    ? SQL_OWNED_EVENT_OPS
+    : new Set(options.sqlOwnedEventOps);
+  const requireSqlOwnedSources = options.requireSqlOwnedSources === undefined
+    ? options.sqlSources === undefined && options.databaseSources === undefined
+    : Boolean(options.requireSqlOwnedSources);
+  const stagingEnabled = options.stagingManifest !== false;
+  const moduleSources = options.moduleSources === undefined
+    ? (stagingEnabled ? MODULE_SOURCES : [])
+    : options.moduleSources;
   const sourcePath = (entry) => path.resolve(root, entry.path);
+
+  let stagingErrors = [];
+  if (stagingEnabled) {
+    if (options.stagingManifest !== undefined) {
+      stagingErrors = validateStagingManifest(options.stagingManifest);
+    } else {
+      const manifestPath = options.stagingManifestPath || path.join(root, STAGING_MANIFEST_RELATIVE);
+      stagingErrors = loadStagingManifest(manifestPath).errors;
+    }
+  }
+  // The fixture is evidence of staging state, not an extensible allow list. The
+  // executable policy remains pinned to these reviewed closed sets.
+  const staging = stagingEnabled ? {
+    edgeModuleOwned: EXACT_EDGE_MODULE_OPS,
+    edgeDeferred: EXACT_EDGE_DEFERRED_OPS,
+    cloudDeferred: EXACT_JOURNAL_EVENT_OPS,
+  } : {
+    edgeModuleOwned: [],
+    edgeDeferred: [],
+    cloudDeferred: [],
+  };
 
   const flowResults = flowSources.map((flow) => ({
     name: `flows:${flow.name}`,
@@ -723,6 +920,12 @@ function checkSyncOpParity(options = {}) {
     checkOps: 'subset',
     ...extractDatabaseOps(sourcePath(source)),
   }));
+  const moduleResults = moduleSources.map((source) => ({
+    name: `module:${source.name}`,
+    path: sourcePath(source),
+    checkOps: 'module',
+    ...extractJournalModuleOps(sourcePath(source)),
+  }));
   const schemaResult = {
     name: 'schema',
     path: schemaPath,
@@ -735,13 +938,14 @@ function checkSyncOpParity(options = {}) {
     checkOps: true,
     ...extractServerOps(serverSource),
   };
-  const sources = [...flowResults, ...sqlResults, ...databaseResults, schemaResult, serverResult];
-  const canonicalSources = sources.filter((source) => source.checkOps === true);
-  const subsetSources = sources.filter((source) => source.checkOps === 'subset');
-  const allOps = [...new Set(canonicalSources.flatMap((source) => source.ops))].sort();
-  const canonicalOps = new Set(allOps);
+  const sources = [...flowResults, ...sqlResults, ...databaseResults, ...moduleResults, schemaResult, serverResult];
   const lines = [];
   let ok = true;
+
+  for (const error of stagingErrors) {
+    ok = false;
+    lines.push(`  ERROR staging: ${error}`);
+  }
 
   for (const source of sources) {
     lines.push(formatSet(source.name, source.ops));
@@ -756,32 +960,78 @@ function checkSyncOpParity(options = {}) {
     }
   }
 
-  for (const source of canonicalSources) {
-    const isFlowSource = source.name.startsWith('flows:');
-    const expectedOps = isFlowSource
-      ? allOps.filter((op) => !SQL_OWNED_EVENT_OPS.has(op))
-      : allOps;
-    const baselineName = isFlowSource ? 'flow-required union' : 'union';
-    const diff = diffSets(expectedOps, source.ops);
-    const diffLines = formatDiff(source.name, baselineName, diff);
+  const flowUnion = sortedUnique(flowResults.flatMap((source) => source.ops));
+  for (const source of flowResults) {
+    const diffLines = formatDiff(source.name, 'flow union', diffSets(flowUnion, source.ops));
     if (diffLines.length) {
       ok = false;
       lines.push(...diffLines);
     }
   }
 
-  for (const source of subsetSources) {
-    const extras = source.ops.filter((op) => !canonicalOps.has(op));
-    if (extras.length) {
+  const moduleUnion = sortedUnique(moduleResults.flatMap((source) => source.ops));
+  if (stagingEnabled) {
+    const moduleDiff = diffSets(staging.edgeModuleOwned, moduleUnion);
+    if (moduleDiff.missing.length) {
       ok = false;
-      lines.push(`  ${source.name} extra vs union: ${extras.join(', ')}`);
+      lines.push(`  edgeModuleOwned missing from module sources: ${moduleDiff.missing.join(', ')}`);
     }
+    if (moduleDiff.extra.length) {
+      ok = false;
+      lines.push(`  module sources contain undeclared journal ops: ${moduleDiff.extra.join(', ')}`);
+    }
+  }
+
+  const nonModuleRuntimeOps = sortedUnique([
+    ...flowResults.flatMap((source) => source.ops),
+    ...sqlResults.flatMap((source) => source.ops),
+    ...databaseResults.flatMap((source) => source.ops),
+    ...(stagingEnabled ? sqlOwnedEventOps : []),
+  ]);
+  if (requireSqlOwnedSources) {
+    const persistenceOps = new Set([
+      ...sqlResults.flatMap((source) => source.ops),
+      ...databaseResults.flatMap((source) => source.ops),
+    ]);
+    const missingSqlOwned = [...sqlOwnedEventOps].filter((op) => !persistenceOps.has(op));
+    if (missingSqlOwned.length) {
+      ok = false;
+      lines.push(`  SQL-owned ops missing from persistence sources: ${missingSqlOwned.join(', ')}`);
+    }
+  }
+  if (stagingEnabled) {
+    const misplacedOwned = nonModuleRuntimeOps.filter((op) => staging.edgeModuleOwned.includes(op));
+    if (misplacedOwned.length) {
+      ok = false;
+      lines.push(`  edgeModuleOwned ops also appear outside module sources: ${misplacedOwned.join(', ')}`);
+    }
+  }
+
+  const deployedEdgeOps = sortedUnique(nonModuleRuntimeOps.concat(moduleUnion));
+  const deployedDeferred = deployedEdgeOps.filter((op) => staging.edgeDeferred.includes(op));
+  if (deployedDeferred.length) {
+    ok = false;
+    lines.push(`  edgeDeferred ops already appear in deployed edge sources: ${deployedDeferred.join(', ')}`);
+  }
+
+  const expectedSchemaOps = sortedUnique(deployedEdgeOps.concat(staging.edgeDeferred));
+  const schemaDiffLines = formatDiff('schema', 'deployed edge plus staged union', diffSets(expectedSchemaOps, schemaResult.ops));
+  if (schemaDiffLines.length) {
+    ok = false;
+    lines.push(...schemaDiffLines);
+  }
+
+  const expectedServerOps = expectedSchemaOps.filter((op) => !staging.cloudDeferred.includes(op));
+  const serverDiffLines = formatDiff('server', 'union', diffSets(expectedServerOps, serverResult.ops));
+  if (serverDiffLines.length) {
+    ok = false;
+    lines.push(...serverDiffLines);
   }
 
   return {
     ok,
     sources,
-    union: allOps,
+    union: expectedSchemaOps,
     message: lines.join('\n'),
   };
 }

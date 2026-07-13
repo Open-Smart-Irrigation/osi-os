@@ -3,7 +3,7 @@
     "$id": "https://contracts.opensmartirrigation.org/sync-schema/commands.schema.json",
     "title": "Command Payload",
     "type": "object",
-    "required": ["command_type", "command_id", "device_eui"],
+    "required": ["command_type", "command_id"],
     "additionalProperties": false,
     "properties": {
         "command_id": {"type": "string", "pattern": "^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}$"},
@@ -11,6 +11,7 @@
             "type": "string",
             "enum": [
                 "OPEN_FOR_DURATION",
+                "UC512_OPEN_FOR_DURATION",
                 "SET_STREGA_TIMED_ACTION",
                 "CLOSE",
                 "VALVE_COMMAND",
@@ -43,7 +44,12 @@
                 "UPSERT_DEVICE_SOIL_DEPTHS",
                 "UPDATE_SCHEDULE",
                 "UPSERT_SCHEDULE",
-                "WORK_REQUEST_STATUS"
+                "WORK_REQUEST_STATUS",
+                "UPSERT_JOURNAL_ENTRY",
+                "VOID_JOURNAL_ENTRY",
+                "UPSERT_JOURNAL_CUSTOM_VOCAB",
+                "UPSERT_JOURNAL_PLOT",
+                "UPSERT_JOURNAL_PLOT_GROUP"
             ]
         },
         "device_eui": {"type": "string", "pattern": "^[0-9A-F]{16}$"},
@@ -62,11 +68,43 @@
         "reason": {"type": ["string", "null"]},
         "human_message": {"type": ["string", "null"]},
         "released_version": {"type": ["string", "null"]},
-        "updated_at": {"type": ["string", "null"], "format": "date-time"}
+        "updated_at": {"type": ["string", "null"], "format": "date-time"},
+        "entry": {"$ref": "resources.schema.json#/definitions/JournalEntry"},
+        "entry_uuid": {"$ref": "resources.schema.json#/definitions/Uuid"},
+        "base_sync_version": {"type": "integer", "minimum": 0},
+        "custom_vocab": {"$ref": "resources.schema.json#/definitions/JournalVocab"},
+        "plot": {"$ref": "resources.schema.json#/definitions/JournalPlot"},
+        "plot_group": {"$ref": "resources.schema.json#/definitions/JournalPlotGroup"}
     },
     "allOf": [
         {
+            "if": {
+                "properties": {
+                    "command_type": {
+                        "enum": [
+                            "UPSERT_JOURNAL_ENTRY",
+                            "VOID_JOURNAL_ENTRY",
+                            "UPSERT_JOURNAL_CUSTOM_VOCAB",
+                            "UPSERT_JOURNAL_PLOT",
+                            "UPSERT_JOURNAL_PLOT_GROUP"
+                        ]
+                    }
+                },
+                "required": ["command_type"]
+            },
+            "else": {"required": ["device_eui"]}
+        },
+        {
             "if": {"properties": {"command_type": {"const": "OPEN_FOR_DURATION"}}},
+            "then": {
+                "required": ["duration_seconds"],
+                "properties": {
+                    "duration_seconds": {"type": "integer", "minimum": 1}
+                }
+            }
+        },
+        {
+            "if": {"properties": {"command_type": {"const": "UC512_OPEN_FOR_DURATION"}}},
             "then": {
                 "required": ["duration_seconds"],
                 "properties": {
@@ -90,6 +128,108 @@
                 "properties": {
                     "request_id": {"type": "string"},
                     "status": {"type": "string"}
+                }
+            }
+        },
+        {
+            "if": {"properties": {"command_type": {"const": "UPSERT_JOURNAL_ENTRY"}}},
+            "then": {
+                "required": ["effect_key", "entry"],
+                "propertyNames": {
+                    "enum": ["command_id", "command_type", "device_eui", "effect_key", "issued_at", "expires_at", "entry"]
+                },
+                "properties": {
+                    "effect_key": {
+                        "type": "string",
+                        "pattern": "^journal_entry:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}:[0-9]+$"
+                    },
+                    "entry": {
+                        "allOf": [
+                            {"$ref": "resources.schema.json#/definitions/JournalEntry"},
+                            {"required": ["base_sync_version"]}
+                        ]
+                    }
+                }
+            }
+        },
+        {
+            "if": {"properties": {"command_type": {"const": "VOID_JOURNAL_ENTRY"}}},
+            "then": {
+                "required": ["effect_key", "entry_uuid", "base_sync_version", "reason"],
+                "propertyNames": {
+                    "enum": ["command_id", "command_type", "device_eui", "effect_key", "issued_at", "expires_at", "entry_uuid", "base_sync_version", "reason"]
+                },
+                "properties": {
+                    "effect_key": {
+                        "type": "string",
+                        "pattern": "^journal_entry:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}:[0-9]+$"
+                    },
+                    "entry_uuid": {"$ref": "resources.schema.json#/definitions/Uuid"},
+                    "base_sync_version": {"type": "integer", "minimum": 0},
+                    "reason": {"type": "string", "minLength": 1, "maxLength": 4000}
+                }
+            }
+        },
+        {
+            "if": {"properties": {"command_type": {"const": "UPSERT_JOURNAL_CUSTOM_VOCAB"}}},
+            "then": {
+                "required": ["effect_key", "custom_vocab"],
+                "propertyNames": {
+                    "enum": ["command_id", "command_type", "device_eui", "effect_key", "issued_at", "expires_at", "custom_vocab"]
+                },
+                "properties": {
+                    "effect_key": {
+                        "type": "string",
+                        "pattern": "^journal_vocab:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}:[0-9]+$"
+                    },
+                    "custom_vocab": {
+                        "allOf": [
+                            {"$ref": "resources.schema.json#/definitions/JournalVocab"},
+                            {"required": ["base_sync_version"]}
+                        ]
+                    }
+                }
+            }
+        },
+        {
+            "if": {"properties": {"command_type": {"const": "UPSERT_JOURNAL_PLOT"}}},
+            "then": {
+                "required": ["effect_key", "plot"],
+                "propertyNames": {
+                    "enum": ["command_id", "command_type", "device_eui", "effect_key", "issued_at", "expires_at", "plot"]
+                },
+                "properties": {
+                    "effect_key": {
+                        "type": "string",
+                        "pattern": "^journal_plot:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}:[0-9]+$"
+                    },
+                    "plot": {
+                        "allOf": [
+                            {"$ref": "resources.schema.json#/definitions/JournalPlot"},
+                            {"required": ["base_sync_version"]}
+                        ]
+                    }
+                }
+            }
+        },
+        {
+            "if": {"properties": {"command_type": {"const": "UPSERT_JOURNAL_PLOT_GROUP"}}},
+            "then": {
+                "required": ["effect_key", "plot_group"],
+                "propertyNames": {
+                    "enum": ["command_id", "command_type", "device_eui", "effect_key", "issued_at", "expires_at", "plot_group"]
+                },
+                "properties": {
+                    "effect_key": {
+                        "type": "string",
+                        "pattern": "^journal_plot_group:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}:[0-9]+$"
+                    },
+                    "plot_group": {
+                        "allOf": [
+                            {"$ref": "resources.schema.json#/definitions/JournalPlotGroup"},
+                            {"required": ["base_sync_version"]}
+                        ]
+                    }
                 }
             }
         }

@@ -9,13 +9,13 @@
         "eventUuid": {"type": "string", "minLength": 1},
         "aggregateType": {
             "type": "string",
-            "description": "Event stream aggregate type. ZONE, DEVICE, and SCHEDULE payloads are described in resources.schema.json; other aggregates are event-only command or telemetry payloads.",
+            "description": "Event stream aggregate type. Canonical resource payloads are described in resources.schema.json; other aggregates are event-only command or telemetry payloads.",
             "minLength": 1
         },
         "aggregateKey": {"type": "string", "minLength": 1},
         "op": {
             "type": "string",
-            "description": "Sync event operation emitted by the edge and handled by the cloud EdgeSyncService applyEvent switch.",
+            "description": "Sync event operation emitted by the edge and handled by the cloud EdgeSyncService runtime dispatch.",
             "enum": [
                 "CHAMELEON_READING_APPENDED",
                 "DENDRO_DAILY_UPSERTED",
@@ -34,7 +34,12 @@
                 "ZONE_ENVIRONMENT_APPENDED",
                 "ZONE_LOCATION_UPSERTED",
                 "ZONE_RECOMMENDATION_UPSERTED",
-                "ZONE_UPSERTED"
+                "ZONE_UPSERTED",
+                "JOURNAL_ENTRY_UPSERTED",
+                "JOURNAL_ENTRY_VOIDED",
+                "JOURNAL_VOCAB_UPSERTED",
+                "JOURNAL_PLOT_UPSERTED",
+                "JOURNAL_PLOT_GROUP_UPSERTED"
             ]
         },
         "syncVersion": {"type": "integer", "minimum": 0},
@@ -51,5 +56,88 @@
                 }
             }
         }
-    }
+    },
+    "allOf": [
+        {
+            "if": {
+                "properties": {"op": {"const": "JOURNAL_ENTRY_UPSERTED"}},
+                "required": ["op"]
+            },
+            "then": {
+                "properties": {
+                    "aggregateType": {"const": "JOURNAL_ENTRY"},
+                    "aggregateKey": {"$ref": "resources.schema.json#/definitions/Uuid"},
+                    "payload": {
+                        "allOf": [
+                            {"$ref": "resources.schema.json#/definitions/JournalEntry"},
+                            {
+                                "required": ["status"],
+                                "properties": {"status": {"const": "final"}}
+                            }
+                        ]
+                    }
+                }
+            }
+        },
+        {
+            "if": {
+                "properties": {"op": {"const": "JOURNAL_ENTRY_VOIDED"}},
+                "required": ["op"]
+            },
+            "then": {
+                "properties": {
+                    "aggregateType": {"const": "JOURNAL_ENTRY"},
+                    "aggregateKey": {"$ref": "resources.schema.json#/definitions/Uuid"},
+                    "payload": {
+                        "allOf": [
+                            {"$ref": "resources.schema.json#/definitions/JournalEntry"},
+                            {
+                                "required": ["status"],
+                                "properties": {"status": {"const": "voided"}}
+                            }
+                        ]
+                    }
+                }
+            }
+        },
+        {
+            "if": {
+                "properties": {"op": {"const": "JOURNAL_VOCAB_UPSERTED"}},
+                "required": ["op"]
+            },
+            "then": {
+                "properties": {
+                    "aggregateType": {"const": "JOURNAL_VOCAB"},
+                    "aggregateKey": {"$ref": "resources.schema.json#/definitions/Uuid"},
+                    "payload": {"$ref": "resources.schema.json#/definitions/JournalVocab"}
+                }
+            }
+        },
+        {
+            "if": {
+                "properties": {"op": {"const": "JOURNAL_PLOT_UPSERTED"}},
+                "required": ["op"]
+            },
+            "then": {
+                "properties": {
+                    "aggregateType": {"const": "JOURNAL_PLOT"},
+                    "aggregateKey": {"$ref": "resources.schema.json#/definitions/Uuid"},
+                    "payload": {"$ref": "resources.schema.json#/definitions/JournalPlot"}
+                }
+            }
+        },
+        {
+            "if": {
+                "properties": {"op": {"const": "JOURNAL_PLOT_GROUP_UPSERTED"}},
+                "required": ["op"]
+            },
+            "then": {
+                "properties": {
+                    "aggregateType": {"const": "JOURNAL_PLOT_GROUP"},
+                    "aggregateKey": {"$ref": "resources.schema.json#/definitions/Uuid"},
+                    "payload": {"$ref": "resources.schema.json#/definitions/JournalPlotGroup"}
+                }
+            }
+        }
+    ]
 }

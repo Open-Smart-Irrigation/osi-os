@@ -4,6 +4,22 @@
     "title": "Sync Resource Schema Registry",
     "description": "Canonical resource types and their required fields for sync.",
     "definitions": {
+        "Uuid": {
+            "type": "string",
+            "pattern": "^[0-9A-Fa-f]{8}-?[0-9A-Fa-f]{4}-?[0-9A-Fa-f]{4}-?[0-9A-Fa-f]{4}-?[0-9A-Fa-f]{12}$"
+        },
+        "NullableUuid": {
+            "type": ["string", "null"],
+            "pattern": "^[0-9A-Fa-f]{8}-?[0-9A-Fa-f]{4}-?[0-9A-Fa-f]{4}-?[0-9A-Fa-f]{4}-?[0-9A-Fa-f]{12}$"
+        },
+        "Eui64": {
+            "type": "string",
+            "pattern": "^[0-9A-F]{16}$"
+        },
+        "NullableEui64": {
+            "type": ["string", "null"],
+            "pattern": "^[0-9A-F]{16}$"
+        },
         "Zone": {
             "type": "object",
             "required": ["zone_id", "name"],
@@ -24,8 +40,19 @@
             "type": "object",
             "required": ["deveui", "type_id"],
             "properties": {
-                "deveui": {"type": "string", "pattern": "^[0-9A-F]{16}$"},
-                "type_id": {"type": "string", "enum": ["STREGA_VALVE", "DRAGINO_LSN50", "KIWI_SENSOR", "TEKTELIC_CLOVER", "SENSECAP_S2120"]},
+                "deveui": {"$ref": "#/definitions/Eui64"},
+                "type_id": {
+                    "type": "string",
+                    "enum": [
+                        "STREGA_VALVE",
+                        "DRAGINO_LSN50",
+                        "KIWI_SENSOR",
+                        "TEKTELIC_CLOVER",
+                        "SENSECAP_S2120",
+                        "AQUASCOPE_LORAIN",
+                        "MILESIGHT_UC512"
+                    ]
+                },
                 "name": {"type": ["string", "null"]},
                 "zone_id": {"type": ["integer", "null"]},
                 "deleted_at": {"type": ["string", "null"], "format": "date-time"}
@@ -36,11 +63,273 @@
             "required": ["zone_id", "trigger_metric"],
             "properties": {
                 "zone_id": {"type": "integer", "minimum": 1},
-                "trigger_metric": {"type": "string", "enum": ["SWT_WM1","SWT_WM2","SWT_AVG","SWT_1","SWT_2","SWT_3","DENDRO"]},
+                "trigger_metric": {"type": "string", "enum": ["SWT_WM1", "SWT_WM2", "SWT_AVG", "SWT_1", "SWT_2", "SWT_3", "DENDRO"]},
                 "threshold_kpa": {"type": "number"},
                 "irrigation_duration_min": {"type": "integer", "minimum": 1},
                 "enabled": {"type": "boolean"},
                 "deleted_at": {"type": ["string", "null"], "format": "date-time"}
+            }
+        },
+        "JournalEntryValue": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+                "attribute_code",
+                "group_index",
+                "value_status",
+                "value_num",
+                "value_text",
+                "unit_code",
+                "entered_value_num",
+                "entered_unit_code"
+            ],
+            "properties": {
+                "attribute_code": {"type": "string", "minLength": 1},
+                "group_index": {"type": "integer", "minimum": 0},
+                "value_status": {
+                    "type": "string",
+                    "enum": ["observed", "not_observed", "not_applicable", "below_detection"]
+                },
+                "value_num": {"type": ["number", "null"]},
+                "value_text": {"type": ["string", "null"], "maxLength": 4096},
+                "unit_code": {"type": ["string", "null"]},
+                "entered_value_num": {"type": ["number", "null"]},
+                "entered_unit_code": {"type": ["string", "null"]}
+            }
+        },
+        "JournalEntry": {
+            "type": "object",
+            "additionalProperties": false,
+            "x-aggregate-type": "JOURNAL_ENTRY",
+            "x-watermark-key": "entry_uuid",
+            "required": [
+                "contract_version",
+                "entry_uuid",
+                "owner_user_uuid",
+                "author_principal_uuid",
+                "activity_code",
+                "template_code",
+                "template_version",
+                "layout_code",
+                "layout_version",
+                "catalog_version",
+                "occurred_start",
+                "occurred_timezone",
+                "occurred_utc_offset_minutes",
+                "recorded_at",
+                "origin",
+                "status",
+                "sync_version",
+                "gateway_device_eui",
+                "created_at",
+                "updated_at",
+                "values"
+            ],
+            "properties": {
+                "contract_version": {"type": "integer", "const": 1},
+                "entry_uuid": {"$ref": "#/definitions/Uuid"},
+                "base_sync_version": {"type": "integer", "minimum": 0},
+                "owner_user_uuid": {"$ref": "#/definitions/Uuid"},
+                "author_principal_uuid": {"$ref": "#/definitions/Uuid"},
+                "author_label": {"type": ["string", "null"], "maxLength": 120},
+                "plot_uuid": {"$ref": "#/definitions/NullableUuid"},
+                "zone_uuid": {"$ref": "#/definitions/NullableUuid"},
+                "device_eui": {"$ref": "#/definitions/NullableEui64"},
+                "season_uuid": {"$ref": "#/definitions/NullableUuid"},
+                "season_crop": {"type": ["string", "null"]},
+                "season_variety": {"type": ["string", "null"]},
+                "campaign_uuid": {"$ref": "#/definitions/NullableUuid"},
+                "protocol_code": {"type": ["string", "null"]},
+                "protocol_version": {"type": ["string", "null"]},
+                "observation_unit_code": {"type": ["string", "null"]},
+                "pass_uuid": {"$ref": "#/definitions/NullableUuid"},
+                "batch_uuid": {"$ref": "#/definitions/NullableUuid"},
+                "activity_code": {"type": "string", "minLength": 1},
+                "template_code": {"type": "string", "minLength": 1},
+                "template_version": {"type": "integer", "minimum": 1},
+                "layout_code": {"type": "string", "minLength": 1},
+                "layout_version": {"type": "integer", "minimum": 1},
+                "catalog_version": {"type": "integer", "minimum": 1},
+                "occurred_start": {"type": "string", "format": "date-time"},
+                "occurred_end": {"type": ["string", "null"], "format": "date-time"},
+                "occurred_timezone": {"type": "string", "minLength": 1},
+                "occurred_utc_offset_minutes": {"type": "integer", "minimum": -840, "maximum": 840},
+                "recorded_at": {"type": "string", "format": "date-time"},
+                "origin": {"type": "string", "enum": ["edge-ui", "cloud-ui"]},
+                "status": {"type": "string", "enum": ["draft", "final", "voided"]},
+                "voided_at": {"type": ["string", "null"], "format": "date-time"},
+                "voided_by_principal_uuid": {"$ref": "#/definitions/NullableUuid"},
+                "void_reason": {"type": ["string", "null"]},
+                "note": {"type": ["string", "null"], "maxLength": 4000},
+                "context_json": {"type": ["string", "null"]},
+                "sync_version": {"type": "integer", "minimum": 0},
+                "gateway_device_eui": {"$ref": "#/definitions/Eui64"},
+                "created_at": {"type": "string", "format": "date-time"},
+                "updated_at": {"type": "string", "format": "date-time"},
+                "deleted_at": {"type": ["string", "null"], "format": "date-time"},
+                "values": {
+                    "type": "array",
+                    "maxItems": 128,
+                    "items": {"$ref": "#/definitions/JournalEntryValue"}
+                }
+            }
+        },
+        "JournalVocabMapping": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+                "scheme_uri",
+                "scheme_version",
+                "mapping_role",
+                "external_id",
+                "mapping_relation",
+                "active"
+            ],
+            "properties": {
+                "scheme_uri": {"type": "string", "minLength": 1},
+                "scheme_version": {"type": "string", "minLength": 1},
+                "mapping_role": {
+                    "type": "string",
+                    "enum": ["concept", "variable", "coded_value", "operation_type", "data_type_definition", "unit_of_measure"]
+                },
+                "external_id": {"type": "string", "minLength": 1},
+                "external_parent_id": {"type": ["string", "null"]},
+                "mapping_relation": {"type": "string", "enum": ["exact", "close", "broad", "narrow", "related"]},
+                "source_uri": {"type": ["string", "null"]},
+                "active": {"type": "integer", "enum": [0, 1]}
+            }
+        },
+        "JournalVocab": {
+            "type": "object",
+            "additionalProperties": false,
+            "x-aggregate-type": "JOURNAL_VOCAB",
+            "x-watermark-key": "custom_field_uuid",
+            "required": [
+                "contract_version",
+                "code",
+                "kind",
+                "labels_json",
+                "scope",
+                "owner_user_uuid",
+                "gateway_device_eui",
+                "custom_field_uuid",
+                "active",
+                "sort_order",
+                "sync_version",
+                "created_at",
+                "mappings"
+            ],
+            "properties": {
+                "contract_version": {"type": "integer", "const": 1},
+                "base_sync_version": {"type": "integer", "minimum": 0},
+                "code": {
+                    "type": "string",
+                    "pattern": "^custom\\.[0-9A-Fa-f]{8}-?[0-9A-Fa-f]{4}-?[0-9A-Fa-f]{4}-?[0-9A-Fa-f]{4}-?[0-9A-Fa-f]{12}$"
+                },
+                "kind": {"type": "string", "enum": ["activity", "attribute", "unit", "choice"]},
+                "parent_code": {"type": ["string", "null"]},
+                "value_type": {"type": ["string", "null"], "enum": ["number", "text", "choice", "date", "boolean", null]},
+                "quantity_kind": {"type": ["string", "null"]},
+                "basis": {"type": ["string", "null"]},
+                "default_unit_code": {"type": ["string", "null"]},
+                "labels_json": {"type": "string", "minLength": 2},
+                "icon_key": {"type": ["string", "null"]},
+                "constraints_json": {"type": ["string", "null"]},
+                "agrovoc_uri": {"type": ["string", "null"]},
+                "icasa_code": {"type": ["string", "null"]},
+                "adapt_code": {"type": ["string", "null"]},
+                "scope": {"type": "string", "const": "custom"},
+                "owner_user_uuid": {"$ref": "#/definitions/Uuid"},
+                "gateway_device_eui": {"$ref": "#/definitions/Eui64"},
+                "custom_field_uuid": {"$ref": "#/definitions/Uuid"},
+                "active": {"type": "integer", "enum": [0, 1]},
+                "sort_order": {"type": "integer"},
+                "sync_version": {"type": "integer", "minimum": 0},
+                "created_at": {"type": "string", "format": "date-time"},
+                "deleted_at": {"type": ["string", "null"], "format": "date-time"},
+                "mappings": {
+                    "type": "array",
+                    "items": {"$ref": "#/definitions/JournalVocabMapping"}
+                }
+            }
+        },
+        "JournalPlot": {
+            "type": "object",
+            "additionalProperties": false,
+            "x-aggregate-type": "JOURNAL_PLOT",
+            "x-watermark-key": "plot_uuid",
+            "required": [
+                "contract_version",
+                "plot_uuid",
+                "plot_code",
+                "active",
+                "sync_version",
+                "gateway_device_eui",
+                "created_at",
+                "updated_at",
+                "settings"
+            ],
+            "properties": {
+                "contract_version": {"type": "integer", "const": 1},
+                "plot_uuid": {"$ref": "#/definitions/Uuid"},
+                "base_sync_version": {"type": "integer", "minimum": 0},
+                "plot_code": {"type": "string", "minLength": 1},
+                "name": {"type": ["string", "null"]},
+                "zone_uuid": {"$ref": "#/definitions/NullableUuid"},
+                "station_code": {"type": ["string", "null"]},
+                "crop_hint": {"type": ["string", "null"]},
+                "area_m2": {"type": ["number", "null"], "minimum": 0},
+                "active": {"type": "integer", "enum": [0, 1]},
+                "sync_version": {"type": "integer", "minimum": 0},
+                "gateway_device_eui": {"$ref": "#/definitions/Eui64"},
+                "created_at": {"type": "string", "format": "date-time"},
+                "updated_at": {"type": "string", "format": "date-time"},
+                "deleted_at": {"type": ["string", "null"], "format": "date-time"},
+                "settings": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": ["layout_code", "updated_at", "updated_by_principal_uuid", "sync_version"],
+                    "properties": {
+                        "layout_code": {"type": "string", "minLength": 1},
+                        "updated_at": {"type": "string", "format": "date-time"},
+                        "updated_by_principal_uuid": {"$ref": "#/definitions/Uuid"},
+                        "sync_version": {"type": "integer", "minimum": 0}
+                    }
+                }
+            }
+        },
+        "JournalPlotGroup": {
+            "type": "object",
+            "additionalProperties": false,
+            "x-aggregate-type": "JOURNAL_PLOT_GROUP",
+            "x-watermark-key": "group_uuid",
+            "required": [
+                "contract_version",
+                "group_uuid",
+                "label",
+                "gateway_device_eui",
+                "created_by_principal_uuid",
+                "created_at",
+                "sync_version",
+                "members"
+            ],
+            "properties": {
+                "contract_version": {"type": "integer", "const": 1},
+                "group_uuid": {"$ref": "#/definitions/Uuid"},
+                "base_sync_version": {"type": "integer", "minimum": 0},
+                "label": {"type": "string", "minLength": 1},
+                "gateway_device_eui": {"$ref": "#/definitions/Eui64"},
+                "created_by_principal_uuid": {"$ref": "#/definitions/Uuid"},
+                "created_at": {"type": "string", "format": "date-time"},
+                "resolved_at": {"type": ["string", "null"], "format": "date-time"},
+                "resolved_by_principal_uuid": {"$ref": "#/definitions/NullableUuid"},
+                "sync_version": {"type": "integer", "minimum": 0},
+                "deleted_at": {"type": ["string", "null"], "format": "date-time"},
+                "members": {
+                    "type": "array",
+                    "uniqueItems": true,
+                    "items": {"$ref": "#/definitions/Uuid"}
+                }
             }
         }
     }

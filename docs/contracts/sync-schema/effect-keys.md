@@ -25,14 +25,33 @@ Ad-hoc operator irrigation. `originator` is `cloud` or `edge`. `command_uuid` is
 
 Device configuration commands. `config_version` is a monotonically increasing integer per `(device_eui, config_key)` pair.
 
+### `journal_entry:{entry_uuid}:{base_sync_version}`
+
+Entry upsert and void commands. `base_sync_version` is the version the originator read before issuing the mutation; creates use `0`. Optimistic concurrency permits only one mutation to win for an entry at a given base version. A new intentional mutation after that result must read the current version and generate a new key.
+
+### `journal_vocab:{custom_field_uuid}:{base_sync_version}`
+
+Custom-vocabulary upserts. The UUID identifies the farm-owned field and `base_sync_version` identifies the state being replaced. Creates use `0`.
+
+### `journal_plot:{plot_uuid}:{base_sync_version}`
+
+Plot upserts, including the plot's layout binding. The base version is the plot aggregate version observed by the command originator. Creates use `0`.
+
+### `journal_plot_group:{group_uuid}:{base_sync_version}`
+
+Plot-group upserts, including membership and resolve state. The base version is the group aggregate version observed by the command originator. Creates use `0`.
+
 ## Normalization
 
 - `device_eui` is uppercase EUI-64 with no separators.
 - `zone_id` is the canonical integer zone id.
 - `command_uuid` is lowercase, hyphenated 8-4-4-4-12.
+- Journal resource UUIDs use lowercase, hyphenated 8-4-4-4-12 form.
+- `base_sync_version` is a non-negative decimal integer without padding.
 - `scheduled_for_iso` and any timestamps use canonical ISO-8601 UTC with millisecond precision (`YYYY-MM-DDTHH:MM:SS.sssZ`), matching `canonicalization.md`.
 
 ## Replay rules
 
 - Force-sync replay must preserve the original `effect_key` from the source command.
 - Two commands sharing an `effect_key` are deduplicated to a single applied effect, regardless of `command_id`.
+- `command_id` still identifies one delivery record. Retrying that record preserves both `command_id` and `effect_key`; recreating a delivery for the same versioned journal mutation changes `command_id` but preserves `effect_key`.

@@ -7,7 +7,12 @@ const os = require('node:os');
 const path = require('node:path');
 const { execFileSync, spawnSync } = require('node:child_process');
 
-const { checkSyncOpParity, extractFlowOps, extractServerOps } = require('./verify-sync-op-parity');
+const {
+  checkSyncOpParity,
+  extractFlowOps,
+  extractServerOps,
+  resolveDefaultServerSource,
+} = require('./verify-sync-op-parity');
 
 const ROOT = path.resolve(__dirname, '..');
 const SERVER_RELATIVE_SOURCE = path.join('backend', 'src', 'main', 'java', 'org', 'osi', 'server', 'sync', 'EdgeSyncService.java');
@@ -17,6 +22,8 @@ const SERVER_SOURCE_CANDIDATES = [
       ? process.env.OSI_SERVER_EDGE_SYNC_SERVICE
       : path.resolve(ROOT, process.env.OSI_SERVER_EDGE_SYNC_SERVICE))
     : null,
+  path.resolve(ROOT, '..', '..', '..', '..', 'osi-server', '.worktrees', path.basename(ROOT), SERVER_RELATIVE_SOURCE),
+  path.resolve(ROOT, '..', '..', '..', '..', 'osi-server', SERVER_RELATIVE_SOURCE),
   path.resolve(ROOT, '..', '..', '..', 'osi-server', '.worktrees', path.basename(ROOT), SERVER_RELATIVE_SOURCE),
   path.resolve(ROOT, '..', 'osi-server', SERVER_RELATIVE_SOURCE),
   path.resolve(ROOT, '..', '..', '..', 'osi-server', SERVER_RELATIVE_SOURCE),
@@ -29,10 +36,14 @@ function copyFixtureTree() {
   const schemaDir = path.join(tmp, 'docs/contracts/sync-schema');
   const flow2712Dir = path.join(tmp, 'conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share');
   const flow2709Dir = path.join(tmp, 'conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share');
+  const moduleDir = path.join(flow2712Dir, 'node-red/osi-journal');
+  const stagingDir = path.join(tmp, 'scripts/fixtures');
   const serverDir = path.join(tmp, 'server');
   fs.mkdirSync(schemaDir, { recursive: true });
   fs.mkdirSync(flow2712Dir, { recursive: true });
   fs.mkdirSync(flow2709Dir, { recursive: true });
+  fs.mkdirSync(moduleDir, { recursive: true });
+  fs.mkdirSync(stagingDir, { recursive: true });
   fs.mkdirSync(serverDir, { recursive: true });
 
   fs.copyFileSync(
@@ -48,6 +59,16 @@ function copyFixtureTree() {
     path.join(flow2709Dir, 'flows.json')
   );
   fs.copyFileSync(SERVER_SOURCE, path.join(serverDir, 'EdgeSyncService.java'));
+  const gatewayLocationApplier = path.join(path.dirname(SERVER_SOURCE), 'GatewayLocationApplier.java');
+  fs.copyFileSync(gatewayLocationApplier, path.join(serverDir, 'GatewayLocationApplier.java'));
+  fs.copyFileSync(
+    path.join(ROOT, 'scripts/fixtures/sync-contract-staging.json'),
+    path.join(stagingDir, 'sync-contract-staging.json')
+  );
+  fs.copyFileSync(
+    path.join(ROOT, 'conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-journal/lifecycle.js'),
+    path.join(moduleDir, 'lifecycle.js')
+  );
   return tmp;
 }
 
@@ -56,6 +77,104 @@ function writeServerFixture(source) {
   const fixture = path.join(tmp, 'EdgeSyncService.java');
   fs.writeFileSync(fixture, source);
   return fixture;
+}
+
+const JOURNAL_EVENT_OPS = [
+  'JOURNAL_ENTRY_UPSERTED',
+  'JOURNAL_ENTRY_VOIDED',
+  'JOURNAL_VOCAB_UPSERTED',
+  'JOURNAL_PLOT_UPSERTED',
+  'JOURNAL_PLOT_GROUP_UPSERTED',
+];
+
+function exactJournalStaging() {
+  return {
+    version: 1,
+    commands: {
+      edgeDeferred: [
+        'UPSERT_JOURNAL_ENTRY',
+        'VOID_JOURNAL_ENTRY',
+        'UPSERT_JOURNAL_CUSTOM_VOCAB',
+        'UPSERT_JOURNAL_PLOT',
+        'UPSERT_JOURNAL_PLOT_GROUP',
+      ],
+      cloudDeferred: [
+        'UPSERT_JOURNAL_ENTRY',
+        'VOID_JOURNAL_ENTRY',
+        'UPSERT_JOURNAL_CUSTOM_VOCAB',
+        'UPSERT_JOURNAL_PLOT',
+        'UPSERT_JOURNAL_PLOT_GROUP',
+      ],
+    },
+    eventOps: {
+      edgeModuleOwned: [
+        'JOURNAL_ENTRY_UPSERTED',
+        'JOURNAL_ENTRY_VOIDED',
+      ],
+      edgeDeferred: [
+        'JOURNAL_VOCAB_UPSERTED',
+        'JOURNAL_PLOT_UPSERTED',
+        'JOURNAL_PLOT_GROUP_UPSERTED',
+      ],
+      cloudDeferred: JOURNAL_EVENT_OPS.slice(),
+    },
+  };
+}
+
+function createStagedParityFixture(overrides) {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'sync-op-staging-'));
+  const schemaPath = path.join(tmp, 'events.schema.json');
+  const flowPath = path.join(tmp, 'flows.json');
+  const modulePath = path.join(tmp, 'journal-lifecycle.js');
+  const serverSource = path.join(tmp, 'EdgeSyncService.java');
+  fs.writeFileSync(schemaPath, JSON.stringify({
+    type: 'object',
+    properties: {
+      op: { enum: ['DEVICE_DATA_APPENDED'].concat(JOURNAL_EVENT_OPS) },
+      payload: {
+        type: 'object',
+        required: ['contract_version'],
+        properties: { contract_version: { type: 'integer', const: 1 } },
+      },
+    },
+  }));
+  fs.writeFileSync(flowPath, JSON.stringify([{
+    id: 'fixture',
+    name: 'Fixture sync insert',
+    type: 'function',
+    func: `
+msg.topic = "INSERT INTO sync_outbox(event_uuid, aggregate_type, aggregate_key, op, payload_json, sync_version, occurred_at) VALUES ('evt-1', 'DEVICE_DATA', 'dev-1', 'DEVICE_DATA_APPENDED', json_object('contract_version', 1), 1, '2026-07-05T00:00:00Z')";
+return msg;
+`,
+  }]));
+  fs.writeFileSync(modulePath, `
+async function emit(tx, entryUuid) {
+  await emitJournalOutbox(tx, entryUuid, 'JOURNAL_ENTRY_UPSERTED');
+  await emitJournalOutbox(tx, entryUuid, 'JOURNAL_ENTRY_VOIDED');
+}
+`);
+  fs.writeFileSync(serverSource, `
+class EdgeSyncService {
+  private boolean applyEvent(String gatewayDeviceEui, SyncEventRecord event) {
+    switch (event.op()) {
+      case "DEVICE_DATA_APPENDED" -> { return true; }
+      default -> { return false; }
+    }
+  }
+}
+`);
+
+  return Object.assign({
+    root: tmp,
+    schemaPath,
+    serverSource,
+    flowSources: [{ name: 'fixture', path: flowPath }],
+    sqlSources: [],
+    databaseSources: [],
+    sqlOwnedEventOps: [],
+    moduleSources: [{ name: 'journal-lifecycle', path: modulePath }],
+    stagingManifest: exactJournalStaging(),
+  }, overrides || {});
 }
 
 function createSeedBlankDb() {
@@ -198,6 +317,102 @@ class EdgeSyncService {
   assert.deepEqual(result.ops, ['DEVICE_DATA_APPENDED', 'ZONE_CONFIG_UPSERTED', 'ZONE_UPSERTED']);
 });
 
+test('server extractor unions SyncEventApplier supportedOps implementations', () => {
+  const serverSource = writeServerFixture(`
+class EdgeSyncService {
+  private boolean applyEvent(String gatewayDeviceEui, SyncEventRecord event) {
+    switch (event.op()) {
+      case "DEVICE_DATA_APPENDED" -> { return true; }
+      default -> { return false; }
+    }
+  }
+}
+`);
+  fs.writeFileSync(path.join(path.dirname(serverSource), 'GatewayLocationApplier.java'), `
+class GatewayLocationApplier implements SyncEventApplier {
+  public Set<String> supportedOps() {
+    return Set.of("GATEWAY_LOCATION_UPSERTED");
+  }
+}
+`);
+
+  const result = extractServerOps(serverSource);
+
+  assert.deepEqual(result.errors, []);
+  assert.deepEqual(result.ops, ['DEVICE_DATA_APPENDED', 'GATEWAY_LOCATION_UPSERTED']);
+});
+
+test('default server lookup reaches a sibling repo from a nested worktree', () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'sync-op-sibling-'));
+  const nestedRoot = path.join(tmp, 'osi-os', '.claude', 'worktrees', 'feature');
+  const siblingSource = path.join(tmp, 'osi-server', SERVER_RELATIVE_SOURCE);
+  fs.mkdirSync(nestedRoot, { recursive: true });
+  fs.mkdirSync(path.dirname(siblingSource), { recursive: true });
+  fs.writeFileSync(siblingSource, 'class EdgeSyncService {}\n');
+  const previous = process.env.OSI_SERVER_EDGE_SYNC_SERVICE;
+  delete process.env.OSI_SERVER_EDGE_SYNC_SERVICE;
+  try {
+    assert.equal(resolveDefaultServerSource(nestedRoot), siblingSource);
+  } finally {
+    if (previous === undefined) {
+      delete process.env.OSI_SERVER_EDGE_SYNC_SERVICE;
+    } else {
+      process.env.OSI_SERVER_EDGE_SYNC_SERVICE = previous;
+    }
+  }
+});
+
+test('parity accepts only the exact staged journal ownership split', () => {
+  const result = checkSyncOpParity(createStagedParityFixture());
+
+  assert.equal(result.ok, true, result.message);
+});
+
+test('parity rejects arbitrary additions to the staged journal exemptions', () => {
+  const stagingManifest = exactJournalStaging();
+  stagingManifest.eventOps.cloudDeferred.push('JOURNAL_BOGUS_UPSERTED');
+
+  const result = checkSyncOpParity(createStagedParityFixture({ stagingManifest }));
+
+  assert.equal(result.ok, false);
+  assert.match(result.message, /staging.*cloudDeferred/i);
+  assert.match(result.message, /JOURNAL_BOGUS_UPSERTED/);
+});
+
+test('parity rejects an edge-module-owned op missing from the module source', () => {
+  const fixture = createStagedParityFixture();
+  fs.writeFileSync(fixture.moduleSources[0].path, `
+async function emit(tx, entryUuid) {
+  await emitJournalOutbox(tx, entryUuid, 'JOURNAL_ENTRY_UPSERTED');
+  // 'JOURNAL_ENTRY_VOIDED' is named here but is not emitted.
+}
+`);
+
+  const result = checkSyncOpParity(fixture);
+
+  assert.equal(result.ok, false);
+  assert.match(result.message, /edgeModuleOwned.*JOURNAL_ENTRY_VOIDED/i);
+});
+
+test('parity rejects cloud-deferred journal ops implemented by the server early', () => {
+  const fixture = createStagedParityFixture();
+  fs.writeFileSync(fixture.serverSource, `
+class EdgeSyncService {
+  private boolean applyEvent(String gatewayDeviceEui, SyncEventRecord event) {
+    switch (event.op()) {
+      case "DEVICE_DATA_APPENDED", "JOURNAL_ENTRY_UPSERTED" -> { return true; }
+      default -> { return false; }
+    }
+  }
+}
+`);
+
+  const result = checkSyncOpParity(fixture);
+
+  assert.equal(result.ok, false);
+  assert.match(result.message, /server.*JOURNAL_ENTRY_UPSERTED/);
+});
+
 test('parity check reports runtime dispatch switch missing an op even if an allow list includes it', () => {
   const fixtureRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'sync-op-parity-'));
   const schemaPath = path.join(fixtureRoot, 'events.schema.json');
@@ -256,6 +471,7 @@ return msg;
     flowSources: [{ name: 'fixture', path: 'flows.json' }],
     sqlSources: [],
     databaseSources: [],
+    stagingManifest: false,
   });
 
   assert.equal(result.ok, false);
