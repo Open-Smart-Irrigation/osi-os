@@ -69,6 +69,10 @@ function copyFixtureTree() {
     path.join(ROOT, 'conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-journal/lifecycle.js'),
     path.join(moduleDir, 'lifecycle.js')
   );
+  fs.copyFileSync(
+    path.join(ROOT, 'conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-journal/api.js'),
+    path.join(moduleDir, 'api.js')
+  );
   return tmp;
 }
 
@@ -110,12 +114,11 @@ function exactJournalStaging() {
       edgeModuleOwned: [
         'JOURNAL_ENTRY_UPSERTED',
         'JOURNAL_ENTRY_VOIDED',
-      ],
-      edgeDeferred: [
         'JOURNAL_VOCAB_UPSERTED',
         'JOURNAL_PLOT_UPSERTED',
         'JOURNAL_PLOT_GROUP_UPSERTED',
       ],
+      edgeDeferred: [],
       cloudDeferred: JOURNAL_EVENT_OPS.slice(),
     },
   };
@@ -130,6 +133,7 @@ function createStagedParityFixture(overrides) {
     'conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-journal'
   );
   const modulePath = path.join(moduleDir, 'lifecycle.js');
+  const apiModulePath = path.join(moduleDir, 'api.js');
   const serverSource = path.join(tmp, 'EdgeSyncService.java');
   fs.mkdirSync(moduleDir, { recursive: true });
   fs.writeFileSync(schemaPath, JSON.stringify({
@@ -165,6 +169,13 @@ async function emit(tx, entryUuid) {
   await emitJournalOutbox(tx, entryUuid, 'JOURNAL_ENTRY_VOIDED');
 }
 `);
+  fs.writeFileSync(apiModulePath, `
+async function emitResourceEvents(tx, aggregate) {
+  await emitJournalOutbox(tx, aggregate, 'JOURNAL_VOCAB_UPSERTED');
+  await emitJournalOutbox(tx, aggregate, 'JOURNAL_PLOT_UPSERTED');
+  await emitJournalOutbox(tx, aggregate, 'JOURNAL_PLOT_GROUP_UPSERTED');
+}
+`);
   fs.writeFileSync(serverSource, `
 class EdgeSyncService {
   private boolean applyEvent(String gatewayDeviceEui, SyncEventRecord event) {
@@ -184,7 +195,10 @@ class EdgeSyncService {
     sqlSources: [],
     databaseSources: [],
     sqlOwnedEventOps: [],
-    moduleSources: [{ name: 'journal-lifecycle', path: modulePath }],
+    moduleSources: [
+      { name: 'journal-lifecycle', path: modulePath },
+      { name: 'journal-api', path: apiModulePath },
+    ],
     stagingManifest: exactJournalStaging(),
   }, overrides || {});
 }
@@ -406,8 +420,9 @@ async function emit(tx, entryUuid) {
   assert.match(result.message, /edgeModuleOwned.*JOURNAL_ENTRY_VOIDED/i);
 });
 
-test('parity discovers a deferred journal emitter in a second production module', () => {
+test('parity discovers a resource emitter in a second production module', () => {
   const fixture = createStagedParityFixture();
+  fs.unlinkSync(fixture.moduleSources[1].path);
   fs.writeFileSync(path.join(path.dirname(fixture.moduleSources[0].path), 'vocab.js'), `
 async function publishVocab(tx, payload) {
   return publishAnything(tx, { operation: 'JOURNAL_VOCAB_UPSERTED', payload });
@@ -419,7 +434,7 @@ async function publishVocab(tx, payload) {
 
   assert.equal(result.ok, false);
   assert.match(result.message, /JOURNAL_VOCAB_UPSERTED/);
-  assert.match(result.message, /edgeDeferred|undeclared journal ops/);
+  assert.match(result.message, /edgeModuleOwned missing/);
 });
 
 test('parity ignores journal operation names found only in module comments', () => {

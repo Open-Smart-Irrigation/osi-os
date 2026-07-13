@@ -4,30 +4,32 @@ const catalogCache = new WeakMap();
 const catalogLoads = new WeakMap();
 const MAX_STABLE_LOAD_ATTEMPTS = 3;
 
-function queryAll(db, sql) {
+function queryAll(db, sql, params) {
+  params = params || [];
   if (db && typeof db.prepare === 'function') {
-    return Promise.resolve(db.prepare(sql).all());
+    return Promise.resolve(db.prepare(sql).all(...params));
   }
   if (!db || typeof db.all !== 'function') {
     return Promise.reject(new TypeError('Database must provide prepare().all() or all()'));
   }
   return new Promise(function(resolve, reject) {
-    db.all(sql, [], function(error, rows) {
+    db.all(sql, params, function(error, rows) {
       if (error) reject(error);
       else resolve(rows || []);
     });
   });
 }
 
-function queryOne(db, sql) {
+function queryOne(db, sql, params) {
+  params = params || [];
   if (db && typeof db.prepare === 'function') {
-    return Promise.resolve(db.prepare(sql).get());
+    return Promise.resolve(db.prepare(sql).get(...params));
   }
   if (!db || typeof db.get !== 'function') {
     return Promise.reject(new TypeError('Database must provide prepare().get() or get()'));
   }
   return new Promise(function(resolve, reject) {
-    db.get(sql, [], function(error, row) {
+    db.get(sql, params, function(error, row) {
       if (error) reject(error);
       else resolve(row || null);
     });
@@ -109,14 +111,18 @@ function cachedForState(db, state) {
     : null;
 }
 
-async function readCatalogTables(db) {
-  const [vocabRows, templateRows, layoutRows, productRows] = await Promise.all([
-    queryAll(db, 'SELECT * FROM journal_vocab ORDER BY code'),
+async function readCoreCatalogTables(db) {
+  const [vocabRows, mappingRows, templateRows, layoutRows, productRows] = await Promise.all([
+    queryAll(db, "SELECT * FROM journal_vocab WHERE scope='core' ORDER BY code"),
+    queryAll(db,
+      "SELECT m.* FROM journal_vocab_mappings AS m " +
+      "JOIN journal_vocab AS v ON v.code=m.term_code WHERE v.scope='core' " +
+      'ORDER BY m.term_code,m.scheme_uri,m.mapping_role,m.external_id'),
     queryAll(db, 'SELECT * FROM journal_templates ORDER BY code, version'),
     queryAll(db, 'SELECT * FROM journal_layouts ORDER BY code, version'),
-    queryAll(db, 'SELECT * FROM journal_products ORDER BY product_uuid'),
+    queryAll(db, "SELECT * FROM journal_products WHERE scope='core' ORDER BY product_uuid"),
   ]);
-  return { vocabRows, templateRows, layoutRows, productRows };
+  return { vocabRows, mappingRows, templateRows, layoutRows, productRows };
 }
 
 function buildCatalog(state, rows) {
@@ -138,6 +144,7 @@ function buildCatalog(state, rows) {
     templates,
     layouts,
     products,
+    mappings: rows.mappingRows || [],
   };
 }
 
@@ -146,7 +153,7 @@ async function loadStableCatalog(db, initialState) {
   for (let attempt = 0; attempt < MAX_STABLE_LOAD_ATTEMPTS; attempt += 1) {
     const cached = cachedForState(db, state);
     if (cached) return cached;
-    const rows = await readCatalogTables(db);
+    const rows = await readCoreCatalogTables(db);
     const endState = await readState(db);
     if (!endState) throw new Error('Journal catalog state is missing');
     if (sameState(state, endState)) {
@@ -159,7 +166,7 @@ async function loadStableCatalog(db, initialState) {
   throw new Error('Journal catalog changed during load after ' + MAX_STABLE_LOAD_ATTEMPTS + ' attempts');
 }
 
-async function loadCatalog(db) {
+async function loadCoreCatalog(db) {
   const state = await readState(db);
   if (!state) throw new Error('Journal catalog state is missing');
   const cached = cachedForState(db, state);
@@ -181,6 +188,64 @@ async function loadCatalog(db) {
     if (loads.get(key) === pending) loads.delete(key);
     if (loads.size === 0) catalogLoads.delete(db);
   }
+}
+
+async function loadScopedRows(db, principal) {
+  if (!principal) return { vocabRows: [], mappingRows: [], productRows: [] };
+  const owner = principal.owner_user_uuid;
+  const gateway = principal.gateway_device_eui;
+  if (typeof owner !== 'string' || !owner || typeof gateway !== 'string' || !gateway) {
+    throw new TypeError('Scoped journal catalog requires owner and gateway identity');
+  }
+  const vocabRows = await queryAll(
+    db,
+    "SELECT * FROM journal_vocab WHERE scope='custom' AND owner_user_uuid=? " +
+      'AND gateway_device_eui=? AND deleted_at IS NULL ORDER BY code',
+    [owner, gateway]
+  );
+  const codes = vocabRows.map(function(row) { return row.code; });
+  let mappingRows = [];
+  if (codes.length) {
+    mappingRows = await queryAll(
+      db,
+      'SELECT * FROM journal_vocab_mappings WHERE term_code IN (' +
+        codes.map(function() { return '?'; }).join(',') +
+      ') ORDER BY term_code,scheme_uri,mapping_role,external_id',
+      codes
+    );
+  }
+  const productRows = await queryAll(
+    db,
+    "SELECT * FROM journal_products WHERE scope='farm' AND owner_user_uuid=? " +
+      'AND gateway_device_eui=? AND deleted_at IS NULL ORDER BY product_uuid',
+    [owner, gateway]
+  );
+  return { vocabRows, mappingRows, productRows };
+}
+
+async function loadCatalog(db, principal) {
+  const core = await loadCoreCatalog(db);
+  if (!principal) return core;
+  const scoped = await loadScopedRows(db, principal);
+  const vocabByCode = new Map(core.vocabByCode);
+  for (const row of scoped.vocabRows) {
+    const parsed = parseVocabRow(row);
+    vocabByCode.set(parsed.code, parsed);
+  }
+  const products = new Map(core.products);
+  for (const row of scoped.productRows) {
+    const parsed = parseProductRow(row);
+    products.set(parsed.product_uuid, parsed);
+  }
+  return {
+    version: core.version,
+    hash: core.hash,
+    vocabByCode,
+    templates: core.templates,
+    layouts: core.layouts,
+    products,
+    mappings: core.mappings.concat(scoped.mappingRows),
+  };
 }
 
 module.exports = { loadCatalog };

@@ -45,6 +45,95 @@ function assertWires(nodeId, expectedWires, label) {
     console.log(`OK  ${label}`);
 }
 
+// === Field Journal Task 10 routes ===
+
+const journalRoutes = [
+    ['journal-catalog-get-http', 'get', '/api/journal/catalog'],
+    ['journal-entries-get-http', 'get', '/api/journal/entries'],
+    ['journal-entries-post-http', 'post', '/api/journal/entries'],
+    ['journal-entry-put-http', 'put', '/api/journal/entries/:uuid'],
+    ['journal-entry-void-post-http', 'post', '/api/journal/entries/:uuid/void'],
+    ['journal-custom-vocab-post-http', 'post', '/api/journal/custom-vocab'],
+    ['journal-custom-vocab-put-http', 'put', '/api/journal/custom-vocab/:uuid'],
+    ['journal-plots-get-http', 'get', '/api/journal/plots'],
+    ['journal-plots-post-http', 'post', '/api/journal/plots'],
+    ['journal-plot-put-http', 'put', '/api/journal/plots/:uuid'],
+    ['journal-plot-groups-get-http', 'get', '/api/journal/plot-groups'],
+    ['journal-plot-groups-post-http', 'post', '/api/journal/plot-groups'],
+    ['journal-plot-group-put-http', 'put', '/api/journal/plot-groups/:uuid'],
+    ['journal-export-csv-get-http', 'get', '/api/journal/export.csv'],
+    ['journal-export-package-get-http', 'get', '/api/journal/export.package'],
+    ['journal-export-json-get-http', 'get', '/api/journal/export.json'],
+    ['journal-export-adapt-get-http', 'get', '/api/journal/export.adapt.json'],
+];
+
+for (const [id, method, url] of journalRoutes) {
+    const route = byId[id];
+    if (!route || route.type !== 'http in' || route.method !== method || route.url !== url) {
+        failures.push(`journal routes: missing exact ${method.toUpperCase()} ${url} [${id}]`);
+    } else if (JSON.stringify(route.wires) !== JSON.stringify([['journal-api-router-fn']])) {
+        failures.push(`journal routes: ${id} must wire only to journal-api-router-fn`);
+    }
+}
+
+const journalRouter = byId['journal-api-router-fn'];
+if (!journalRouter) {
+    failures.push('journal routes: missing journal-api-router-fn');
+} else {
+    const exactLibs = [
+        { var: 'osiDb', module: 'osi-db-helper' },
+        { var: 'osiJournal', module: 'osi-journal' },
+    ];
+    if (JSON.stringify(journalRouter.libs) !== JSON.stringify(exactLibs)) {
+        failures.push('journal routes: journal-api-router-fn must declare only the exact Task 10 libs');
+    }
+    if (JSON.stringify(journalRouter.wires) !== JSON.stringify([['journal-api-response']])) {
+        failures.push('journal routes: router must wire to journal-api-response');
+    }
+    if (!/osiJournal\.handleHttpRequest/.test(journalRouter.func || '')) {
+        failures.push('journal routes: router must delegate lifecycle and database close to osi-journal');
+    }
+}
+
+assertWires('record-error-catch-journal-api', [['record-error-link-out-journal-api']], 'journal catch → error link out');
+
+for (const profile of ['bcm2712', 'bcm2709']) {
+    const profilePath = path.resolve(
+        __dirname,
+        `../conf/full_raspberrypi_bcm27xx_${profile}/files/usr/share/flows.json`
+    );
+    const profileFlows = JSON.parse(fs.readFileSync(profilePath, 'utf8'));
+    const profileById = Object.fromEntries(profileFlows.filter((node) => node.id).map((node) => [node.id, node]));
+    const journalObjects = profileFlows.filter((node) => node.id === 'journal-api-tab' || node.z === 'journal-api-tab');
+    if (journalObjects.length !== 22) {
+        failures.push(`journal routes ${profile}: expected exactly 22 journal objects, got ${journalObjects.length}`);
+    }
+    for (const [id, method, url] of journalRoutes) {
+        const route = profileById[id];
+        if (!route || route.type !== 'http in' || route.method !== method || route.url !== url ||
+            JSON.stringify(route.wires) !== JSON.stringify([['journal-api-router-fn']])) {
+            failures.push(`journal routes ${profile}: invalid ${method.toUpperCase()} ${url} [${id}]`);
+        }
+    }
+    const router = profileById['journal-api-router-fn'];
+    if (!router || router.func.length > 4096 ||
+        JSON.stringify(router.libs) !== JSON.stringify([
+            { var: 'osiDb', module: 'osi-db-helper' },
+            { var: 'osiJournal', module: 'osi-journal' },
+        ]) || JSON.stringify(router.wires) !== JSON.stringify([['journal-api-response']])) {
+        failures.push(`journal routes ${profile}: router surface is not exact`);
+    }
+    const errorIn = profileById['record-error-link-in'];
+    const errorOut = profileById['record-error-link-out-journal-api'];
+    const reciprocalCount = errorIn && Array.isArray(errorIn.links)
+        ? errorIn.links.filter((id) => id === 'record-error-link-out-journal-api').length
+        : 0;
+    if (reciprocalCount !== 1 || !errorOut ||
+        JSON.stringify(errorOut.links) !== JSON.stringify(['record-error-link-in'])) {
+        failures.push(`journal routes ${profile}: error links are not reciprocal and unique`);
+    }
+}
+
 // === Field request intake + status apply wiring ===
 
 for (const route of [

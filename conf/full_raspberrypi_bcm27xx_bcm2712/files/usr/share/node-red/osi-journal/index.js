@@ -3,6 +3,7 @@
 const { aggregateHash, buildAggregate } = require('./aggregate');
 const { buildContext } = require('./context');
 const { loadCatalog } = require('./catalog');
+const journalApi = require('./api');
 const {
   dependencyCatalogErrors,
   resolveOptions,
@@ -965,4 +966,21 @@ module.exports = {
   void_: function void_() {
     return require('./lifecycle').void_.apply(null, arguments);
   },
+  errorResponse: journalApi.errorResponse,
+  exportJson: journalApi.exportJson,
+  exportResearchPackage: journalApi.exportResearchPackage,
+  exportWideCsv: journalApi.exportWideCsv,
+  handleHttpRequest: journalApi.handleHttpRequest,
+  listEntries: journalApi.listEntries,
+  listPlotGroups: journalApi.listPlotGroups,
+  listPlots: journalApi.listPlots,
+  loadScopedCatalog: journalApi.loadScopedCatalog,
+  resolvePrincipal: journalApi.resolvePrincipal,
+  safeFilename: journalApi.safeFilename,
+  saveEntry: journalApi.saveEntry,
+  upsertCustomVocab: journalApi.upsertCustomVocab,
+  upsertPlot: journalApi.upsertPlot,
+  upsertPlotGroup: journalApi.upsertPlotGroup,
+  verifyBearer: journalApi.verifyBearer,
+  voidEntry: journalApi.voidEntry,
 };

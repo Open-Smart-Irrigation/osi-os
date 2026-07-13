@@ -52,14 +52,26 @@ function runRaw(database, method, sql, params) {
   });
 }
 
-function openDatabase(filename) {
+function openDatabase(filename, mode) {
   return new Promise((resolve, reject) => {
-    const database = new sqlite3.Database(filename, (error) => {
+    const callback = (error) => {
       if (error) {
         reject(error);
         return;
       }
       resolve(database);
+    };
+    const database = mode == null
+      ? new sqlite3.Database(filename, callback)
+      : new sqlite3.Database(filename, mode, callback);
+  });
+}
+
+function closeDatabase(database) {
+  return new Promise((resolve, reject) => {
+    database.close((error) => {
+      if (error) reject(error);
+      else resolve();
     });
   });
 }
@@ -212,6 +224,44 @@ class DatabaseFacade {
         throw error;
       }
     });
+  }
+
+  async readSnapshot(executor) {
+    if (typeof executor !== 'function') {
+      throw new TypeError('Database.readSnapshot requires an executor function');
+    }
+    const database = await openDatabase(this.filename, sqlite3.OPEN_READONLY);
+    let began = false;
+    let failure = null;
+    try {
+      await runRaw(database, 'all', 'PRAGMA query_only=ON');
+      await runRaw(database, 'all', 'PRAGMA foreign_keys=ON');
+      await runRaw(database, 'all', 'PRAGMA busy_timeout=5000');
+      await runRaw(database, 'exec', 'BEGIN;');
+      began = true;
+      const result = await executor(createTransactionScope(database));
+      await runRaw(database, 'exec', 'COMMIT;');
+      began = false;
+      return result;
+    } catch (error) {
+      failure = error;
+      if (began) {
+        try {
+          await runRaw(database, 'exec', 'ROLLBACK;');
+        } catch (rollbackError) {
+          if (error && typeof error === 'object') error.rollbackError = rollbackError;
+        }
+      }
+      throw error;
+    } finally {
+      try {
+        await closeDatabase(database);
+      } catch (closeError) {
+        setLastError(closeError);
+        if (failure && typeof failure === 'object') failure.closeError = closeError;
+        else throw closeError;
+      }
+    }
   }
 
   exec(sql, callback) {

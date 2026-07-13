@@ -733,33 +733,91 @@ async function runAfterValuesHook(principal, details) {
   }
 }
 
-async function emitJournalOutbox(tx, entryUuid, op) {
-  const entry = await tx.get(
-    'SELECT * FROM journal_entries WHERE entry_uuid=?',
-    [entryUuid]
-  );
-  const values = await tx.all(
-    'SELECT * FROM journal_entry_values WHERE entry_uuid=? ORDER BY group_index,attribute_code',
-    [entryUuid]
-  );
+async function emitJournalOutbox(tx, source, op) {
+  let aggregate;
+  let aggregateType;
+  let aggregateKey;
+  let syncVersion;
+  let occurredAt;
+  let gatewayDeviceEui;
+  let entry = null;
+  if (typeof source === 'string') {
+    entry = await tx.get(
+      'SELECT * FROM journal_entries WHERE entry_uuid=?',
+      [source]
+    );
+    const values = await tx.all(
+      'SELECT * FROM journal_entry_values WHERE entry_uuid=? ORDER BY group_index,attribute_code',
+      [source]
+    );
+    aggregate = buildAggregate(Object.assign({ contract_version: 1 }, entry), values);
+    aggregateType = 'JOURNAL_ENTRY';
+    aggregateKey = source;
+    syncVersion = entry.sync_version;
+    occurredAt = entry.updated_at;
+    gatewayDeviceEui = entry.gateway_device_eui;
+  } else {
+    aggregate = source.aggregate;
+    aggregateType = source.aggregate_type;
+    aggregateKey = source.aggregate_key;
+    syncVersion = source.sync_version;
+    occurredAt = source.occurred_at;
+    gatewayDeviceEui = source.gateway_device_eui;
+  }
   const eventUuid = crypto.randomUUID();
-  const aggregate = buildAggregate(Object.assign({ contract_version: 1 }, entry), values);
   await tx.run(
     'INSERT INTO sync_outbox (' +
       'event_uuid,aggregate_type,aggregate_key,op,payload_json,sync_version,occurred_at,gateway_device_eui' +
     ') VALUES (?,?,?,?,?,?,?,?)',
     [
       eventUuid,
-      'JOURNAL_ENTRY',
-      entryUuid,
+      aggregateType,
+      aggregateKey,
       op,
       JSON.stringify(aggregate),
-      entry.sync_version,
-      entry.updated_at,
-      entry.gateway_device_eui,
+      syncVersion,
+      occurredAt,
+      gatewayDeviceEui,
     ]
   );
   return { aggregate, entry, event_uuid: eventUuid };
+}
+
+async function assertNoDuplicateCandidate(tx, input, plot, occurrence, excludeEntryUuid) {
+  if (!plot.plot_uuid) return;
+  const occurredMs = Date.parse(occurrence.start.instant);
+  const lowerBound = new Date(occurredMs - 60 * 60 * 1000).toISOString();
+  const upperBound = new Date(occurredMs + 60 * 60 * 1000).toISOString();
+  const candidate = await tx.get(
+    'SELECT entry_uuid,occurred_start,activity_code,plot_uuid FROM journal_entries ' +
+    "WHERE plot_uuid=? AND activity_code=? AND status='final' AND deleted_at IS NULL " +
+      'AND (? IS NULL OR entry_uuid<>?) ' +
+      'AND occurred_start BETWEEN ? AND ? ' +
+    'ORDER BY ABS(julianday(occurred_start)-julianday(?)),entry_uuid LIMIT 1',
+    [
+      plot.plot_uuid,
+      input.activity_code,
+      nullable(excludeEntryUuid),
+      nullable(excludeEntryUuid),
+      lowerBound,
+      upperBound,
+      occurrence.start.instant,
+    ]
+  );
+  if (!candidate) return;
+  const acknowledged = input.duplicate_guard_ack_entry_uuid == null
+    ? null
+    : normalizeUuid(input.duplicate_guard_ack_entry_uuid, 'duplicate_guard_ack_entry_uuid', true);
+  if (acknowledged === candidate.entry_uuid) return;
+  const error = lifecycleError('duplicate_candidate', 'A similar final journal entry already exists');
+  error.statusCode = 409;
+  error.details = {
+    entry_uuid: candidate.entry_uuid,
+    occurred_start: candidate.occurred_start,
+    activity_code: candidate.activity_code,
+    plot_uuid: candidate.plot_uuid,
+  };
+  throw error;
 }
 
 function assertJournalEntryEffectKey(effectKey, entryUuid, appliedSyncVersion) {
@@ -932,6 +990,7 @@ async function correctFinalInTransaction(tx, catalog, input, principal, entryInd
     throw lifecycleError('ownership', 'Correction would move the entry outside its owner and gateway');
   }
   const occurrence = occurrenceFor(input, plot);
+  await assertNoDuplicateCandidate(tx, input, plot, occurrence, existing.entry_uuid);
   const deviceEui = await resolveDeviceEui(tx, input.device_eui, principal, plot);
   const candidate = Object.assign({}, input, {
     owner_user_uuid: existing.owner_user_uuid,
@@ -946,6 +1005,7 @@ async function correctFinalInTransaction(tx, catalog, input, principal, entryInd
     context: null,
     context_json: null,
   });
+  delete candidate.duplicate_guard_ack_entry_uuid;
   const definitions = await validationDefinitions(tx, {
     layout_code: existing.layout_code,
     layout_version: existing.layout_version,
@@ -1004,6 +1064,7 @@ async function promoteDraftInTransaction(tx, catalog, input, principal, entryInd
     throw lifecycleError('ownership', 'Draft promotion would move the entry outside its owner and gateway');
   }
   const occurrence = occurrenceFor(input, plot);
+  await assertNoDuplicateCandidate(tx, input, plot, occurrence, existing.entry_uuid);
   const deviceEui = await resolveDeviceEui(tx, input.device_eui, principal, plot);
   const candidate = Object.assign({}, input, {
     owner_user_uuid: existing.owner_user_uuid,
@@ -1017,6 +1078,7 @@ async function promoteDraftInTransaction(tx, catalog, input, principal, entryInd
     context: null,
     context_json: null,
   });
+  delete candidate.duplicate_guard_ack_entry_uuid;
   const definitions = await validationDefinitions(tx, candidate);
   const validation = validateEntry(catalog, definitions.layout, definitions.template, candidate, {});
   if (!validation.ok) {
@@ -1044,12 +1106,15 @@ async function promoteDraftInTransaction(tx, catalog, input, principal, entryInd
   );
 }
 
-async function createFinalInTransaction(tx, catalog, input, principal, entryIndex, contextCache) {
+async function createFinalInTransaction(tx, catalog, input, principal, entryIndex, contextCache, options) {
   await validatePrincipal(tx, principal);
   const existing = await tx.get(
     'SELECT * FROM journal_entries WHERE entry_uuid=? AND deleted_at IS NULL',
     [input.entry_uuid]
   );
+  if (existing && options && options.createOnly) {
+    throw lifecycleError('already_exists', 'Journal entry already exists');
+  }
   if (existing && existing.status === 'draft') {
     return promoteDraftInTransaction(tx, catalog, input, principal, entryIndex, existing);
   }
@@ -1062,6 +1127,7 @@ async function createFinalInTransaction(tx, catalog, input, principal, entryInde
 
   const plot = await resolvePlotContext(tx, input.plot_uuid, principal);
   const occurrence = occurrenceFor(input, plot);
+  await assertNoDuplicateCandidate(tx, input, plot, occurrence, null);
   const deviceEui = await resolveDeviceEui(tx, input.device_eui, principal, plot);
   const candidate = Object.assign({}, input, {
     owner_user_uuid: plot.owner_user_uuid,
@@ -1075,6 +1141,7 @@ async function createFinalInTransaction(tx, catalog, input, principal, entryInde
     context: null,
     context_json: null,
   });
+  delete candidate.duplicate_guard_ack_entry_uuid;
   const definitions = await validationDefinitions(tx, candidate);
   const validation = validateEntry(catalog, definitions.layout, definitions.template, candidate, {});
   if (!validation.ok) {
@@ -1186,6 +1253,14 @@ async function finalize(db, catalog, input, principal) {
   });
 }
 
+async function finalizeCreate(db, catalog, input, principal) {
+  validateRequestLimit(input);
+  input = normalizeInputIdentities(input);
+  return db.transaction(function(tx) {
+    return createFinalInTransaction(tx, catalog, input, principal, 0, null, { createOnly: true });
+  });
+}
+
 async function finalizeBatch(db, catalog, input, plotUuids, principal) {
   validateRequestLimit(input);
   input = normalizeInputIdentities(input);
@@ -1282,7 +1357,9 @@ async function void_(db, _catalog, entryUuid, baseSyncVersion, reason, principal
 
 module.exports = {
   assertJournalEntryEffectKey,
+  emitJournalOutbox,
   finalize,
+  finalizeCreate,
   finalizeBatch,
   saveDraft,
   void_,

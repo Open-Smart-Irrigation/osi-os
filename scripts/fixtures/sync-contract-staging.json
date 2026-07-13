@@ -19,13 +19,12 @@
   "eventOps": {
     "edgeModuleOwned": [
       "JOURNAL_ENTRY_UPSERTED",
-      "JOURNAL_ENTRY_VOIDED"
-    ],
-    "edgeDeferred": [
+      "JOURNAL_ENTRY_VOIDED",
       "JOURNAL_VOCAB_UPSERTED",
       "JOURNAL_PLOT_UPSERTED",
       "JOURNAL_PLOT_GROUP_UPSERTED"
     ],
+    "edgeDeferred": [],
     "cloudDeferred": [
       "JOURNAL_ENTRY_UPSERTED",
       "JOURNAL_ENTRY_VOIDED",

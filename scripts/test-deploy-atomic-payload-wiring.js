@@ -32,6 +32,10 @@ test('deploy.sh ships the journal context and lifecycle modules required by its 
     deploy,
     /fetch_required "osi-journal lifecycle\.js" \\\n+\s+"conf\/full_raspberrypi_bcm27xx_bcm2712\/files\/usr\/share\/node-red\/osi-journal\/lifecycle\.js" \\\n+\s+"\/srv\/node-red\/osi-journal\/lifecycle\.js"/
   );
+  assert.match(
+    deploy,
+    /fetch_required "osi-journal api\.js" \\\n+\s+"conf\/full_raspberrypi_bcm27xx_bcm2712\/files\/usr\/share\/node-red\/osi-journal\/api\.js" \\\n+\s+"\/srv\/node-red\/osi-journal\/api\.js"/
+  );
 });
 
 test('deploy.sh stages flows before migration and flips only after migration succeeds', () => {

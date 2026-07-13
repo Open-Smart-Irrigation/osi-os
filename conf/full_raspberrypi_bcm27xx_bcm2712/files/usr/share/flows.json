@@ -10525,7 +10525,8 @@
       "record-error-link-out-dendro-analytics",
       "record-error-link-out-s2120",
       "record-error-link-out-history-api",
-      "record-error-link-out-lorain"
+      "record-error-link-out-lorain",
+      "record-error-link-out-journal-api"
     ],
     "x": 1590,
     "y": 1340,
@@ -11035,5 +11036,369 @@
     "wires": [
       []
     ]
+  },
+  {
+    "id": "journal-api-tab",
+    "type": "tab",
+    "label": "Field Journal API",
+    "disabled": false,
+    "info": "Authenticated edge-canonical Field Journal REST and research export routes",
+    "env": []
+  },
+  {
+    "id": "journal-catalog-get-http",
+    "type": "http in",
+    "z": "journal-api-tab",
+    "name": "GET /api/journal/catalog",
+    "url": "/api/journal/catalog",
+    "method": "get",
+    "upload": false,
+    "swaggerDoc": "",
+    "x": 210,
+    "y": 80,
+    "wires": [
+      [
+        "journal-api-router-fn"
+      ]
+    ]
+  },
+  {
+    "id": "journal-entries-get-http",
+    "type": "http in",
+    "z": "journal-api-tab",
+    "name": "GET /api/journal/entries",
+    "url": "/api/journal/entries",
+    "method": "get",
+    "upload": false,
+    "swaggerDoc": "",
+    "x": 210,
+    "y": 120,
+    "wires": [
+      [
+        "journal-api-router-fn"
+      ]
+    ]
+  },
+  {
+    "id": "journal-entries-post-http",
+    "type": "http in",
+    "z": "journal-api-tab",
+    "name": "POST /api/journal/entries",
+    "url": "/api/journal/entries",
+    "method": "post",
+    "upload": false,
+    "swaggerDoc": "",
+    "x": 210,
+    "y": 160,
+    "wires": [
+      [
+        "journal-api-router-fn"
+      ]
+    ]
+  },
+  {
+    "id": "journal-entry-put-http",
+    "type": "http in",
+    "z": "journal-api-tab",
+    "name": "PUT /api/journal/entries/:uuid",
+    "url": "/api/journal/entries/:uuid",
+    "method": "put",
+    "upload": false,
+    "swaggerDoc": "",
+    "x": 210,
+    "y": 200,
+    "wires": [
+      [
+        "journal-api-router-fn"
+      ]
+    ]
+  },
+  {
+    "id": "journal-entry-void-post-http",
+    "type": "http in",
+    "z": "journal-api-tab",
+    "name": "POST /api/journal/entries/:uuid/void",
+    "url": "/api/journal/entries/:uuid/void",
+    "method": "post",
+    "upload": false,
+    "swaggerDoc": "",
+    "x": 210,
+    "y": 240,
+    "wires": [
+      [
+        "journal-api-router-fn"
+      ]
+    ]
+  },
+  {
+    "id": "journal-custom-vocab-post-http",
+    "type": "http in",
+    "z": "journal-api-tab",
+    "name": "POST /api/journal/custom-vocab",
+    "url": "/api/journal/custom-vocab",
+    "method": "post",
+    "upload": false,
+    "swaggerDoc": "",
+    "x": 210,
+    "y": 280,
+    "wires": [
+      [
+        "journal-api-router-fn"
+      ]
+    ]
+  },
+  {
+    "id": "journal-custom-vocab-put-http",
+    "type": "http in",
+    "z": "journal-api-tab",
+    "name": "PUT /api/journal/custom-vocab/:uuid",
+    "url": "/api/journal/custom-vocab/:uuid",
+    "method": "put",
+    "upload": false,
+    "swaggerDoc": "",
+    "x": 210,
+    "y": 320,
+    "wires": [
+      [
+        "journal-api-router-fn"
+      ]
+    ]
+  },
+  {
+    "id": "journal-plots-get-http",
+    "type": "http in",
+    "z": "journal-api-tab",
+    "name": "GET /api/journal/plots",
+    "url": "/api/journal/plots",
+    "method": "get",
+    "upload": false,
+    "swaggerDoc": "",
+    "x": 210,
+    "y": 360,
+    "wires": [
+      [
+        "journal-api-router-fn"
+      ]
+    ]
+  },
+  {
+    "id": "journal-plots-post-http",
+    "type": "http in",
+    "z": "journal-api-tab",
+    "name": "POST /api/journal/plots",
+    "url": "/api/journal/plots",
+    "method": "post",
+    "upload": false,
+    "swaggerDoc": "",
+    "x": 210,
+    "y": 400,
+    "wires": [
+      [
+        "journal-api-router-fn"
+      ]
+    ]
+  },
+  {
+    "id": "journal-plot-put-http",
+    "type": "http in",
+    "z": "journal-api-tab",
+    "name": "PUT /api/journal/plots/:uuid",
+    "url": "/api/journal/plots/:uuid",
+    "method": "put",
+    "upload": false,
+    "swaggerDoc": "",
+    "x": 210,
+    "y": 440,
+    "wires": [
+      [
+        "journal-api-router-fn"
+      ]
+    ]
+  },
+  {
+    "id": "journal-plot-groups-get-http",
+    "type": "http in",
+    "z": "journal-api-tab",
+    "name": "GET /api/journal/plot-groups",
+    "url": "/api/journal/plot-groups",
+    "method": "get",
+    "upload": false,
+    "swaggerDoc": "",
+    "x": 210,
+    "y": 480,
+    "wires": [
+      [
+        "journal-api-router-fn"
+      ]
+    ]
+  },
+  {
+    "id": "journal-plot-groups-post-http",
+    "type": "http in",
+    "z": "journal-api-tab",
+    "name": "POST /api/journal/plot-groups",
+    "url": "/api/journal/plot-groups",
+    "method": "post",
+    "upload": false,
+    "swaggerDoc": "",
+    "x": 210,
+    "y": 520,
+    "wires": [
+      [
+        "journal-api-router-fn"
+      ]
+    ]
+  },
+  {
+    "id": "journal-plot-group-put-http",
+    "type": "http in",
+    "z": "journal-api-tab",
+    "name": "PUT /api/journal/plot-groups/:uuid",
+    "url": "/api/journal/plot-groups/:uuid",
+    "method": "put",
+    "upload": false,
+    "swaggerDoc": "",
+    "x": 210,
+    "y": 560,
+    "wires": [
+      [
+        "journal-api-router-fn"
+      ]
+    ]
+  },
+  {
+    "id": "journal-export-csv-get-http",
+    "type": "http in",
+    "z": "journal-api-tab",
+    "name": "GET /api/journal/export.csv",
+    "url": "/api/journal/export.csv",
+    "method": "get",
+    "upload": false,
+    "swaggerDoc": "",
+    "x": 210,
+    "y": 600,
+    "wires": [
+      [
+        "journal-api-router-fn"
+      ]
+    ]
+  },
+  {
+    "id": "journal-export-package-get-http",
+    "type": "http in",
+    "z": "journal-api-tab",
+    "name": "GET /api/journal/export.package",
+    "url": "/api/journal/export.package",
+    "method": "get",
+    "upload": false,
+    "swaggerDoc": "",
+    "x": 210,
+    "y": 640,
+    "wires": [
+      [
+        "journal-api-router-fn"
+      ]
+    ]
+  },
+  {
+    "id": "journal-export-json-get-http",
+    "type": "http in",
+    "z": "journal-api-tab",
+    "name": "GET /api/journal/export.json",
+    "url": "/api/journal/export.json",
+    "method": "get",
+    "upload": false,
+    "swaggerDoc": "",
+    "x": 210,
+    "y": 680,
+    "wires": [
+      [
+        "journal-api-router-fn"
+      ]
+    ]
+  },
+  {
+    "id": "journal-export-adapt-get-http",
+    "type": "http in",
+    "z": "journal-api-tab",
+    "name": "GET /api/journal/export.adapt.json",
+    "url": "/api/journal/export.adapt.json",
+    "method": "get",
+    "upload": false,
+    "swaggerDoc": "",
+    "x": 210,
+    "y": 720,
+    "wires": [
+      [
+        "journal-api-router-fn"
+      ]
+    ]
+  },
+  {
+    "id": "journal-api-router-fn",
+    "type": "function",
+    "z": "journal-api-tab",
+    "name": "Journal API Router",
+    "func": "return osiJournal.handleHttpRequest({\n  msg: msg,\n  Database: osiDb.Database,\n  environment: {\n    authTokenSecret: env.get('AUTH_TOKEN_SECRET'),\n    jwtSecret: env.get('JWT_SECRET'),\n    deviceEui: env.get('DEVICE_EUI'),\n    deviceEuiConfidence: env.get('DEVICE_EUI_CONFIDENCE'),\n    deviceEuiSource: env.get('DEVICE_EUI_SOURCE')\n  },\n  warn: function(message) { node.warn(message); }\n});",
+    "outputs": 1,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [
+      {
+        "var": "osiDb",
+        "module": "osi-db-helper"
+      },
+      {
+        "var": "osiJournal",
+        "module": "osi-journal"
+      }
+    ],
+    "x": 590,
+    "y": 400,
+    "wires": [
+      [
+        "journal-api-response"
+      ]
+    ]
+  },
+  {
+    "id": "journal-api-response",
+    "type": "http response",
+    "z": "journal-api-tab",
+    "name": "Journal API Response",
+    "statusCode": "",
+    "headers": {},
+    "x": 860,
+    "y": 400,
+    "wires": []
+  },
+  {
+    "id": "record-error-catch-journal-api",
+    "type": "catch",
+    "z": "journal-api-tab",
+    "name": "Catch unhandled errors",
+    "scope": null,
+    "uncaught": false,
+    "x": 590,
+    "y": 800,
+    "wires": [
+      [
+        "record-error-link-out-journal-api"
+      ]
+    ]
+  },
+  {
+    "id": "record-error-link-out-journal-api",
+    "type": "link out",
+    "z": "journal-api-tab",
+    "name": "Record Error (link)",
+    "mode": "link",
+    "links": [
+      "record-error-link-in"
+    ],
+    "x": 800,
+    "y": 800,
+    "wires": []
   }
 ]
