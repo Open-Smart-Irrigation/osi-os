@@ -11,6 +11,7 @@
             "type": "string",
             "enum": [
                 "OPEN_FOR_DURATION",
+                "UC512_OPEN_FOR_DURATION",
                 "SET_STREGA_TIMED_ACTION",
                 "CLOSE",
                 "VALVE_COMMAND",
@@ -67,6 +68,15 @@
     "allOf": [
         {
             "if": {"properties": {"command_type": {"const": "OPEN_FOR_DURATION"}}},
+            "then": {
+                "required": ["duration_seconds"],
+                "properties": {
+                    "duration_seconds": {"type": "integer", "minimum": 1}
+                }
+            }
+        },
+        {
+            "if": {"properties": {"command_type": {"const": "UC512_OPEN_FOR_DURATION"}}},
             "then": {
                 "required": ["duration_seconds"],
                 "properties": {

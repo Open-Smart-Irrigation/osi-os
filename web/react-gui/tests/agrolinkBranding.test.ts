@@ -72,10 +72,12 @@ describe('AgroLink branding source contracts', () => {
     assert.deepEqual(offenders.map((filePath) => path.relative(reactRoot, filePath)), []);
   });
 
-  it('keeps the dashboard title key aligned with the AgroLink brand in all locales', () => {
+  it('keeps the dashboard title key as the plain Dashboard wordmark-free title in all locales', () => {
+    // Variant A header design (2026-07-14): the AgroLink brand lives in the
+    // Balken crown + login wordmark; the header H1 is the plain 'Dashboard'.
     for (const locale of ['en', 'de-CH', 'fr', 'it', 'es', 'pt', 'lg']) {
       const dashboard = readReactJson(`public/locales/${locale}/dashboard.json`);
-      assert.equal(dashboard.title, 'AgroLink Dashboard', `${locale} dashboard title`);
+      assert.equal(dashboard.title, 'Dashboard', `${locale} dashboard title`);
     }
   });
 
