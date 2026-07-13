@@ -8,6 +8,7 @@
 //     S2120 zone_ids validation)
 const fs = require('fs');
 const path = require('path');
+const { spawnSync } = require('child_process');
 
 const flowsPath = path.resolve(
     __dirname, '../conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/flows.json'
@@ -16,6 +17,19 @@ const flows = JSON.parse(fs.readFileSync(flowsPath, 'utf8'));
 const byId = Object.fromEntries(flows.filter((n) => n.id).map((n) => [n.id, n]));
 
 let failures = [];
+
+const journalBootstrapResult = spawnSync(
+    process.execPath,
+    [path.resolve(__dirname, 'test-journal-bootstrap.js')],
+    { encoding: 'utf8', timeout: 30000 }
+);
+if (journalBootstrapResult.status !== 0) {
+    if (journalBootstrapResult.stdout) process.stderr.write(journalBootstrapResult.stdout);
+    if (journalBootstrapResult.stderr) process.stderr.write(journalBootstrapResult.stderr);
+    failures.push('journal bootstrap behavior harness failed');
+} else {
+    console.log('OK  journal bootstrap behavior harness');
+}
 
 function hasLib(node, varName, moduleName) {
     const libs = Array.isArray(node && node.libs) ? node.libs : [];
