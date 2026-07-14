@@ -2,6 +2,7 @@
 // Validates contract schema correctness for known edge cases.
 const fs = require('fs');
 const path = require('path');
+const { isDeepStrictEqual } = require('node:util');
 
 const SCHEMA_DIR = path.resolve(__dirname, '../docs/contracts/sync-schema');
 const STAGING_MANIFEST = path.resolve(__dirname, 'fixtures/sync-contract-staging.json');
@@ -64,6 +65,26 @@ function isPlainObject(value) {
     return value !== null && typeof value === 'object' && !Array.isArray(value);
 }
 
+function jsonValuesEqual(left, right) {
+    if (typeof left === 'number' && typeof right === 'number' &&
+        Number.isFinite(left) && Number.isFinite(right)) {
+        return left === right;
+    }
+    if (isDeepStrictEqual(left, right)) return true;
+    if (Array.isArray(left) && Array.isArray(right)) {
+        return left.length === right.length &&
+            left.every((item, index) => jsonValuesEqual(item, right[index]));
+    }
+    if (isPlainObject(left) && isPlainObject(right)) {
+        const leftKeys = Object.keys(left);
+        const rightKeys = Object.keys(right);
+        return leftKeys.length === rightKeys.length &&
+            leftKeys.every((key) => Object.prototype.hasOwnProperty.call(right, key) &&
+                jsonValuesEqual(left[key], right[key]));
+    }
+    return false;
+}
+
 function daysInMonth(year, month) {
     if (month === 2) {
         const leap = year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
@@ -101,6 +122,11 @@ function schemaStructureErrors(schema, rootSchema, location) {
     if (typeof schema === 'boolean') return [];
     if (!isPlainObject(schema)) return [`${at}: schema must be an object or boolean`];
     const errors = unsupportedKeywordErrors(schema, at);
+    for (const stringKeyword of ['$schema', '$id', 'title', 'description']) {
+        if (schema[stringKeyword] !== undefined && typeof schema[stringKeyword] !== 'string') {
+            errors.push(`${at}.${stringKeyword}: must be a string`);
+        }
+    }
     if (schema.$ref !== undefined) {
         if (typeof schema.$ref !== 'string') {
             errors.push(`${at}.$ref: must be a string`);
@@ -115,12 +141,17 @@ function schemaStructureErrors(schema, rootSchema, location) {
             try { new RegExp(schema.pattern); } catch (error) { errors.push(`${at}.pattern: invalid regex: ${error.message}`); }
         }
     }
-    if (schema.format !== undefined && !SUPPORTED_FORMATS.has(schema.format)) {
-        errors.push(`${at}.format: unsupported format ${String(schema.format)}`);
+    if (schema.format !== undefined) {
+        if (typeof schema.format !== 'string') {
+            errors.push(`${at}.format: must be a string`);
+        } else if (!SUPPORTED_FORMATS.has(schema.format)) {
+            errors.push(`${at}.format: unsupported format ${schema.format}`);
+        }
     }
     if (schema.required !== undefined) {
-        if (!Array.isArray(schema.required) || schema.required.some((item) => typeof item !== 'string')) {
-            errors.push(`${at}.required: must be an array of strings`);
+        if (!Array.isArray(schema.required) || schema.required.length === 0 ||
+            schema.required.some((item) => typeof item !== 'string')) {
+            errors.push(`${at}.required: must be a nonempty array of strings`);
         } else if (new Set(schema.required).size !== schema.required.length) {
             errors.push(`${at}.required: must not contain duplicates`);
         }
@@ -130,6 +161,31 @@ function schemaStructureErrors(schema, rootSchema, location) {
         const allowedTypes = new Set(['null', 'boolean', 'object', 'array', 'number', 'integer', 'string']);
         if (types.length === 0 || types.some((type) => !allowedTypes.has(type))) {
             errors.push(`${at}.type: contains an unsupported JSON Schema type`);
+        } else if (new Set(types).size !== types.length) {
+            errors.push(`${at}.type: must not contain duplicates`);
+        }
+    }
+    if (schema.enum !== undefined) {
+        if (!Array.isArray(schema.enum) || schema.enum.length === 0) {
+            errors.push(`${at}.enum: must be a nonempty array`);
+        } else if (schema.enum.some((candidate, index) =>
+            schema.enum.slice(0, index).some((earlier) => jsonValuesEqual(earlier, candidate)))) {
+            errors.push(`${at}.enum: must not contain duplicates`);
+        }
+    }
+    if (schema.uniqueItems !== undefined && typeof schema.uniqueItems !== 'boolean') {
+        errors.push(`${at}.uniqueItems: must be a boolean`);
+    }
+    for (const lengthKeyword of ['minLength', 'maxLength', 'minItems', 'maxItems']) {
+        if (schema[lengthKeyword] !== undefined &&
+            (!Number.isInteger(schema[lengthKeyword]) || schema[lengthKeyword] < 0)) {
+            errors.push(`${at}.${lengthKeyword}: must be a non-negative integer`);
+        }
+    }
+    for (const numericKeyword of ['minimum', 'maximum']) {
+        if (schema[numericKeyword] !== undefined &&
+            (typeof schema[numericKeyword] !== 'number' || !Number.isFinite(schema[numericKeyword]))) {
+            errors.push(`${at}.${numericKeyword}: must be a finite number`);
         }
     }
     for (const mapKeyword of ['properties', 'definitions']) {
@@ -179,11 +235,20 @@ function resolveRef(ref, rootSchema) {
     const external = parts[0];
     const targetRoot = external ? loadSchema(external) : rootSchema;
     const pointer = parts[1] || '';
-    const target = pointer.split('/').filter(Boolean).reduce((value, rawPart) => {
+    if (pointer === '') return { schema: targetRoot, rootSchema: targetRoot };
+    if (!pointer.startsWith('/')) throw new Error(`Unresolved schema reference ${ref}`);
+    const rawParts = pointer.slice(1).split('/');
+    let target = targetRoot;
+    for (const rawPart of rawParts) {
+        if (target === null || typeof target !== 'object') {
+            throw new Error(`Unresolved schema reference ${ref}`);
+        }
         const part = rawPart.replace(/~1/g, '/').replace(/~0/g, '~');
-        return value && value[part];
-    }, targetRoot);
-    if (!target) throw new Error(`Unresolved schema reference ${ref}`);
+        if (!Object.prototype.hasOwnProperty.call(target, part)) {
+            throw new Error(`Unresolved schema reference ${ref}`);
+        }
+        target = target[part];
+    }
     return { schema: target, rootSchema: targetRoot };
 }
 
@@ -195,7 +260,7 @@ function validationErrors(schema, value, rootSchema, location) {
     if (schema === false) return [`${at}: boolean schema rejects every value`];
     if (!schema || typeof schema !== 'object' || Array.isArray(schema)) return [`${at}: schema is missing`];
     errors.push(...unsupportedKeywordErrors(schema, at));
-    if (schema.$ref) {
+    if (schema.$ref !== undefined) {
         try {
             const resolved = resolveRef(schema.$ref, root);
             return errors.concat(validationErrors(resolved.schema, value, resolved.rootSchema, at));
@@ -214,18 +279,18 @@ function validationErrors(schema, value, rootSchema, location) {
         const matches = schema.oneOf.filter((part) => validationErrors(part, value, root, at).length === 0);
         if (matches.length !== 1) errors.push(`${at}: must match exactly one oneOf branch; matched ${matches.length}`);
     }
-    if (schema.if) {
+    if (schema.if !== undefined) {
         const conditionMatches = validationErrors(schema.if, value, root, at).length === 0;
         const branch = conditionMatches ? schema.then : schema.else;
-        if (branch) errors.push(...validationErrors(branch, value, root, at));
+        if (branch !== undefined) errors.push(...validationErrors(branch, value, root, at));
     }
-    if (schema.not && validationErrors(schema.not, value, root, at).length === 0) {
+    if (schema.not !== undefined && validationErrors(schema.not, value, root, at).length === 0) {
         errors.push(`${at}: matches forbidden schema`);
     }
-    if (Object.prototype.hasOwnProperty.call(schema, 'const') && value !== schema.const) {
+    if (Object.prototype.hasOwnProperty.call(schema, 'const') && !jsonValuesEqual(value, schema.const)) {
         errors.push(`${at}: expected constant ${JSON.stringify(schema.const)}`);
     }
-    if (Array.isArray(schema.enum) && !schema.enum.some((candidate) => candidate === value)) {
+    if (Array.isArray(schema.enum) && !schema.enum.some((candidate) => jsonValuesEqual(candidate, value))) {
         errors.push(`${at}: value is not in enum`);
     }
     if (schema.type) {
@@ -236,10 +301,11 @@ function validationErrors(schema, value, rootSchema, location) {
         }
     }
     if (typeof value === 'string') {
-        if (schema.minLength !== undefined && value.length < schema.minLength) {
+        const codePointLength = Array.from(value).length;
+        if (schema.minLength !== undefined && codePointLength < schema.minLength) {
             errors.push(`${at}: string is shorter than ${schema.minLength}`);
         }
-        if (schema.maxLength !== undefined && value.length > schema.maxLength) {
+        if (schema.maxLength !== undefined && codePointLength > schema.maxLength) {
             errors.push(`${at}: string is longer than ${schema.maxLength}`);
         }
         if (schema.pattern) {
@@ -264,10 +330,11 @@ function validationErrors(schema, value, rootSchema, location) {
     if (Array.isArray(value)) {
         if (schema.minItems !== undefined && value.length < schema.minItems) errors.push(`${at}: too few items`);
         if (schema.maxItems !== undefined && value.length > schema.maxItems) errors.push(`${at}: too many items`);
-        if (schema.uniqueItems && new Set(value.map((item) => JSON.stringify(item))).size !== value.length) {
+        if (schema.uniqueItems && value.some((item, index) =>
+            value.slice(0, index).some((earlier) => jsonValuesEqual(earlier, item)))) {
             errors.push(`${at}: duplicate items`);
         }
-        if (schema.items) {
+        if (schema.items !== undefined) {
             value.forEach((item, index) => errors.push(...validationErrors(schema.items, item, root, `${at}[${index}]`)));
         }
     }
@@ -277,7 +344,7 @@ function validationErrors(schema, value, rootSchema, location) {
             if (!Object.prototype.hasOwnProperty.call(value, required)) errors.push(`${at}.${required}: is required`);
         }
         for (const [key, propertyValue] of Object.entries(value)) {
-            if (properties[key]) {
+            if (Object.prototype.hasOwnProperty.call(properties, key)) {
                 errors.push(...validationErrors(properties[key], propertyValue, root, `${at}.${key}`));
             } else if (schema.additionalProperties === false) {
                 errors.push(`${at}.${key}: additional property is forbidden`);
@@ -286,7 +353,7 @@ function validationErrors(schema, value, rootSchema, location) {
                     errors.push(...validationErrors(schema.additionalProperties, propertyValue, root, `${at}.${key}`));
                 }
             }
-            if (schema.propertyNames) {
+            if (schema.propertyNames !== undefined) {
                 errors.push(...validationErrors(schema.propertyNames, key, root, `${at}{${key}}`));
             }
         }
@@ -389,18 +456,161 @@ expectInvalid(
     '2026-02-30T10:00:00.000Z',
     /format.*date-time/
 );
+expectValid(
+    'schema evaluator counts one supplementary Unicode code point as length one',
+    { type: 'string', maxLength: 1 },
+    '😀'
+);
+expectInvalid(
+    'schema evaluator counts one supplementary Unicode code point below minLength two',
+    { type: 'string', minLength: 2 },
+    '😀',
+    /shorter/
+);
+expectValid(
+    'schema evaluator applies object-valued const by JSON deep equality',
+    { const: { nested: { value: 1 } } },
+    { nested: { value: 1 } }
+);
+expectValid(
+    'schema evaluator applies object-valued enum by JSON deep equality',
+    { enum: [{ nested: ['value'] }] },
+    { nested: ['value'] }
+);
+expectInvalid(
+    'schema evaluator applies uniqueItems by JSON deep equality',
+    { type: 'array', uniqueItems: true },
+    [{ first: 1, second: 2 }, { second: 2, first: 1 }],
+    /duplicate/
+);
+expectValid(
+    'schema evaluator treats negative zero and zero as equal for const',
+    { const: { nested: -0 } },
+    { nested: 0 }
+);
+expectValid(
+    'schema evaluator treats negative zero and zero as equal for enum',
+    { enum: [{ nested: -0 }] },
+    { nested: 0 }
+);
+expectInvalid(
+    'schema evaluator treats negative zero and zero as duplicates for uniqueItems',
+    { type: 'array', uniqueItems: true },
+    [{ nested: -0 }, { nested: 0 }],
+    /duplicate/
+);
+expectInvalid(
+    'schema evaluator follows a reference to a false schema',
+    { $ref: '#/definitions/Never', definitions: { Never: false } },
+    'value',
+    /boolean schema rejects/
+);
+expectInvalid(
+    'schema evaluator rejects a child reference beneath a false schema',
+    { $ref: '#/definitions/Never/child', definitions: { Never: false } },
+    'value',
+    /Unresolved schema reference/
+);
+expectInvalid(
+    'schema evaluator preserves an empty JSON Pointer token',
+    { $ref: '#/definitions/', definitions: { '': { const: 'allowed' } } },
+    'denied',
+    /constant/
+);
+expectInvalid(
+    'schema evaluator decodes escaped JSON Pointer tokens',
+    { $ref: '#/definitions/slash~1tilde~0key', definitions: { 'slash/tilde~key': { const: 'allowed' } } },
+    'denied',
+    /constant/
+);
+expectInvalid(
+    'schema evaluator applies else when if is false',
+    { if: false, then: true, else: { const: 'allowed' } },
+    'denied',
+    /constant/
+);
+expectInvalid(
+    'schema evaluator applies a false then schema',
+    { if: true, then: false },
+    'value',
+    /boolean schema rejects/
+);
+expectInvalid(
+    'schema evaluator applies a false else schema',
+    { if: { const: 'match' }, else: false },
+    'other',
+    /boolean schema rejects/
+);
+expectInvalid(
+    'schema evaluator applies a false items schema',
+    { type: 'array', items: false },
+    ['value'],
+    /boolean schema rejects/
+);
+expectInvalid(
+    'schema evaluator applies a false propertyNames schema',
+    { type: 'object', propertyNames: false },
+    { property: 'value' },
+    /boolean schema rejects/
+);
+expectInvalid(
+    'schema evaluator applies a false property schema',
+    { type: 'object', properties: { property: false } },
+    { property: 'value' },
+    /boolean schema rejects/
+);
 for (const [label, malformedSchema, expectedError] of [
     ['unresolved references', { $ref: '#/definitions/Missing', definitions: {} }, /Unresolved schema reference/],
     ['invalid regular expressions', { type: 'string', pattern: '[' }, /invalid regex/],
     ['malformed properties maps', { type: 'object', properties: [] }, /properties.*object/],
     ['empty oneOf arrays', { oneOf: [] }, /oneOf.*nonempty/],
     ['unsupported formats', { type: 'string', format: 'journal-time' }, /unsupported format/],
+    ['negative minLength', { type: 'string', minLength: -1 }, /minLength.*non-negative integer/],
+    ['fractional maxLength', { type: 'string', maxLength: 1.5 }, /maxLength.*non-negative integer/],
+    ['negative minItems', { type: 'array', minItems: -1 }, /minItems.*non-negative integer/],
+    ['fractional maxItems', { type: 'array', maxItems: 1.5 }, /maxItems.*non-negative integer/],
+    ['non-array enum', { enum: 'one' }, /enum.*nonempty array/],
+    ['empty enum', { enum: [] }, /enum.*nonempty array/],
+    ['duplicate enum numbers', { enum: [{ nested: -0 }, { nested: 0 }] }, /enum.*duplicates/],
+    ['non-boolean uniqueItems', { type: 'array', uniqueItems: 'true' }, /uniqueItems.*boolean/],
+    ['duplicate type arrays', { type: ['string', 'string'] }, /type.*duplicates/],
+    ['empty required arrays', { type: 'object', required: [] }, /required.*nonempty array/],
+    ['non-numeric minimum', { type: 'number', minimum: '0' }, /minimum.*finite number/],
+    ['non-numeric maximum', { type: 'number', maximum: null }, /maximum.*finite number/],
 ]) {
     const errors = schemaStructureErrors(malformedSchema);
     reportCheck(
         errors.some((error) => expectedError.test(error)),
         `schema evaluator fails closed on ${label}`,
         `schema evaluator missed ${label}: ${errors.join('; ')}`
+    );
+}
+for (const [label, supportedSchema] of [
+    ['string keyword shapes', { type: ['string', 'null'], minLength: 0, maxLength: 3, pattern: '^.*$' }],
+    ['numeric keyword shapes', { type: 'number', minimum: 0, maximum: 1 }],
+    ['array keyword shapes', { type: 'array', items: { type: 'string' }, minItems: 0, maxItems: 2, uniqueItems: true }],
+    ['object keyword shapes', {
+        type: 'object',
+        properties: { name: { type: 'string' } },
+        propertyNames: { type: 'string' },
+        required: ['name'],
+        additionalProperties: false,
+    }],
+    ['conditional and composition keyword shapes', {
+        allOf: [true],
+        anyOf: [{ const: 'left' }],
+        oneOf: [{ enum: ['left'] }],
+        not: false,
+        if: { type: 'string' },
+        then: true,
+        else: false,
+    }],
+]) {
+    const errors = schemaStructureErrors(supportedSchema);
+    reportCheck(
+        errors.length === 0,
+        `schema evaluator accepts ${label}`,
+        `schema evaluator rejected ${label}: ${errors.join('; ')}`
     );
 }
 
@@ -454,6 +664,14 @@ if (sampleMissing.length || (eventsSchema.additionalProperties === false && samp
 } else {
     console.log('OK  schema: real V2 event sample matches event envelope');
 }
+const nonJournalWithoutOccurredAt = Object.assign({}, sampleEvent);
+delete nonJournalWithoutOccurredAt.occurredAt;
+expectValid('non-journal event remains compatible without occurredAt', eventsSchema, nonJournalWithoutOccurredAt);
+expectValid(
+    'non-journal event remains compatible with null occurredAt',
+    eventsSchema,
+    Object.assign({}, sampleEvent, { occurredAt: null })
+);
 
 const sampleWorkRequestEvent = {
     eventUuid: 'req-0016C001F11715E2-20260708T120000Z',
@@ -903,6 +1121,27 @@ for (const [definitionName, sample] of Object.entries(eventResourceSamples)) {
     );
 }
 
+for (const [definitionName, identityPaths] of [
+    ['JournalEntryAggregate', ['owner_user_uuid', 'author_principal_uuid']],
+    ['JournalVocabAggregate', ['owner_user_uuid']],
+    ['JournalPlotAggregate', ['owner_user_uuid']],
+    ['JournalPlotGroupAggregate', ['owner_user_uuid']],
+]) {
+    const sampleName = definitionName.replace(/Aggregate$/, '');
+    for (const identityPath of identityPaths) {
+        for (const compatibleUuid of [COMPACT_UUID, UUID.toUpperCase()]) {
+            const compatible = jsonClone(eventResourceSamples[sampleName]);
+            setValueAtPath(compatible, identityPath, compatibleUuid);
+            expectValid(
+                `${definitionName} keeps legacy ${identityPath} compatibility for ${compatibleUuid}`,
+                resourcesSchema.definitions[definitionName],
+                compatible,
+                resourcesSchema
+            );
+        }
+    }
+}
+
 for (const [definitionName, sample] of [
     ['JournalEntryValue', eventResourceSamples.JournalEntry.values[0]],
     ['JournalVocabMapping', eventResourceSamples.JournalVocab.mappings[0]],
@@ -1144,6 +1383,26 @@ const commandFixtures = [
         plot_group: Object.assign({}, plotGroup, { owner_user_uuid: UUID }),
     },
 ];
+for (const [fixtureIndex, payloadKey, identityPaths] of [
+    [0, 'entry', ['owner_user_uuid', 'author_principal_uuid']],
+    [2, 'custom_vocab', ['owner_user_uuid']],
+    [3, 'plot', ['owner_user_uuid']],
+    [4, 'plot_group', ['owner_user_uuid']],
+]) {
+    const fixture = commandFixtures[fixtureIndex];
+    for (const identityPath of identityPaths) {
+        for (const invalidUuid of [COMPACT_UUID, UUID.toUpperCase()]) {
+            const invalid = jsonClone(fixture);
+            setValueAtPath(invalid[payloadKey], identityPath, invalidUuid);
+            expectInvalid(
+                `${fixture.command_type} rejects nested ${identityPath} ${invalidUuid}`,
+                cmdSchema,
+                invalid,
+                new RegExp(`${identityPath}.*(?:match|pattern)`)
+            );
+        }
+    }
+}
 reportCheck(
     JSON.stringify(cmdSchema['x-semantic-bindings']) === JSON.stringify(EXPECTED_COMMAND_SEMANTIC_BINDINGS),
     'command schema pins exact effect-key semantic bindings',
@@ -1438,6 +1697,20 @@ for (const [op, binding] of Object.entries(JOURNAL_EVENT_BINDINGS)) {
             /status.*constant/
         );
     }
+    const missingOccurredAt = Object.assign({}, event);
+    delete missingOccurredAt.occurredAt;
+    expectInvalid(
+        `${op} rejects missing occurredAt`,
+        eventsSchema,
+        missingOccurredAt,
+        /occurredAt.*required/
+    );
+    expectInvalid(
+        `${op} rejects null occurredAt`,
+        eventsSchema,
+        Object.assign({}, event, { occurredAt: null }),
+        /occurredAt.*(?:string|type)/
+    );
     if (op === 'JOURNAL_ENTRY_VOIDED') {
         for (const [field, replacement] of [
             ['voided_at', null],
@@ -1506,6 +1779,24 @@ for (const format of [
         effectKeyDoc.includes(format),
         `effect-key contract pins ${format}`,
         `effect-key contract missing ${format}`
+    );
+}
+
+const fieldJournalWorkflow = fs.readFileSync(
+    path.resolve(__dirname, '../.github/workflows/field-journal.yml'),
+    'utf8'
+);
+for (const command of [
+    'node scripts/verify-sync-contract.js',
+    'node scripts/test-contract-schemas.js',
+    'node --test conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-command-ledger/index.test.js',
+]) {
+    const matchingRuns = fieldJournalWorkflow.split(/\r?\n/)
+        .filter((line) => line.trim() === `run: ${command}`);
+    reportCheck(
+        matchingRuns.length === 1,
+        `Field Journal CI runs ${command} exactly once`,
+        `Field Journal CI must run ${command} exactly once; found ${matchingRuns.length}`
     );
 }
 

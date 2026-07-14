@@ -81,6 +81,7 @@
                 "required": ["op"]
             },
             "then": {
+                "required": ["occurredAt"],
                 "properties": {
                     "occurredAt": {"$ref": "resources.schema.json#/definitions/CanonicalUtcTimestamp"}
                 }

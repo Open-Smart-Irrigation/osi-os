@@ -28,6 +28,12 @@ jobs:
         run: node scripts/test-journal-api.js
       - name: Command-path tests
         run: node scripts/test-journal-command-path.js
+      - name: Sync contract registry and semantic bindings
+        run: node scripts/verify-sync-contract.js
+      - name: Contract schema edge cases
+        run: node scripts/test-contract-schemas.js
+      - name: Command ledger tests
+        run: node --test conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-command-ledger/index.test.js
       - name: Bootstrap tests
         run: node scripts/test-journal-bootstrap.js
       - name: Read-snapshot tests
