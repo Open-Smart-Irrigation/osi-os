@@ -42,18 +42,19 @@ the active tab.
 | Monitor modals (`SensorMonitor`, `RainMonitor`, `WindMonitor`, legacy `DendrometerMonitor`) | Use `--header-*` tokens, so they already flipped to neutral | Optional polish: `glass-chrome` modal title bars | — (optional) |
 | Journal page | Does not exist | Full alignment on arrival: shared header, Journal tab active | `feat/field-journal-slice1` |
 
-## Open decisions
+## Decisions (resolved 2026-07-14)
 
-- **A — crown on subpages.** Detail routes and the `h-screen` analysis layout
-  cannot use the scroll-away crown as designed. Options: pin a slimmer crown,
-  or reserve the Balken for top-level pages and give subpages the glass bar
-  only. Recommendation: Balken on top-level pages, glass bar + back link on
-  subpages; the brand stays anchored where sessions start.
-- **B — action row composition** (item 4): confirm Add · Settings · Account
-  once tabs carry Data and Journal.
-- **C — touch equivalent for the hover sweep.** `btn-liquid`'s light sweep is
-  hover-only; phones never see it. A tap-triggered sweep is a small addition
-  if the polish should carry to mobile.
+- **A — crown placement.** Terminology: "top-level pages" are the tab
+  destinations (Zones `/dashboard`; Data `/history` mobile / `/analysis`
+  desktop; Journal `/journal`); "subpages" are the drill-in detail routes
+  below them (history card detail, gateway card detail, cross-zone
+  deep-dive). Every top-level page carries the full Balken crown — on the
+  analysis page's fixed-height layout it sits pinned above the internal
+  scroll area. Subpages get the slim glass bar with a back affordance and no
+  crown.
+- **B — action row**: confirmed as Add · Settings · Account; the Data and
+  Journal buttons leave the header when the tabs take over.
+- **C — touch sweep**: rejected; the hover sweep stays desktop-only.
 
 ## After each alignment lands
 
