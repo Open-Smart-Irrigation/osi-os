@@ -686,8 +686,11 @@ function expectedArtifacts(compiled, overrides = {}) {
   const currentSeed = fs.readFileSync(paths.seedPath, 'utf8');
   const expectedSeed = replaceSeedBlock(currentSeed, compiled.seedBlock);
   const manifest = JSON.parse(fs.readFileSync(paths.manifestPath, 'utf8'));
+  const generatedChecksum = sha256(compiled.migration);
   return {
     paths,
+    manifest,
+    generatedChecksum,
     expectedSeed,
     expectedManifest: expectedManifestText(manifest, compiled.migration),
   };
@@ -707,13 +710,26 @@ function checkGeneratedArtifacts(compiled, overrides = {}) {
 }
 
 function writeGeneratedArtifacts(compiled, overrides = {}) {
-  const { paths, expectedSeed, expectedManifest } = expectedArtifacts(compiled, overrides);
-  if (fs.existsSync(paths.migrationPath)) {
+  const {
+    paths,
+    manifest,
+    generatedChecksum,
+    expectedSeed,
+    expectedManifest,
+  } = expectedArtifacts(compiled, overrides);
+  const migrationExists = fs.existsSync(paths.migrationPath);
+  if (migrationExists) {
     const installed = fs.readFileSync(paths.migrationPath, 'utf8');
     if (installed !== compiled.migration) {
       fail(`${path.basename(paths.migrationPath)} exists and differs; refuse to rewrite an immutable migration — create a new migration`);
     }
   } else {
+    const recordedChecksum = manifest[MIGRATION_NAME];
+    if (recordedChecksum && recordedChecksum !== generatedChecksum) {
+      fail(`${MIGRATION_NAME} has a different recorded checksum; restore it or create a new migration`);
+    }
+  }
+  if (!migrationExists) {
     fs.writeFileSync(paths.migrationPath, compiled.migration);
   }
   if (fs.readFileSync(paths.seedPath, 'utf8') !== expectedSeed) {
