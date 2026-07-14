@@ -11,6 +11,9 @@ const test = require('node:test');
 const { DatabaseSync } = require('node:sqlite');
 
 const journal = require('../conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-journal');
+const { aggregateHash } = require(
+  '../conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-journal/aggregate'
+);
 
 const ROOT = path.resolve(__dirname, '..');
 const SEED = fs.readFileSync(path.join(ROOT, 'database/seed-blank.sql'), 'utf8');
@@ -22,6 +25,23 @@ const VOID_ACTOR_UUID = '99999999-9999-4999-8999-999999999999';
 const ZONE_UUID = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc';
 const FOREIGN_ZONE_UUID = 'dddddddd-dddd-4ddd-8ddd-dddddddddddd';
 const GATEWAY_EUI = '0016C001F1000001';
+const RESEARCH_PACKAGE_MEMBERS = [
+  'entries.csv',
+  'values.csv',
+  'vocab_mappings.csv',
+  'records.ndjson',
+  'manifest.json',
+];
+const RESEARCH_SCHEMA_DESCRIPTOR = {
+  name: 'osi-journal-research',
+  version: 1,
+  entry_shape: 'journal_entry_aggregate_without_author_or_owner_identity',
+  value_shape: 'typed_long_form_with_entered_and_canonical_units',
+  missing_value_field: 'value_status',
+  package_members: RESEARCH_PACKAGE_MEMBERS,
+  csv_string_safety: 'formula-prefix apostrophe; exact source strings are in records.ndjson',
+  lossless_member: 'records.ndjson',
+};
 
 test.after(() => {
   for (const db of nativeDatabases) {
@@ -1362,7 +1382,10 @@ test('research exports are loss-aware, formula-safe, incremental, and ZIP-manife
   });
   assert.equal(metadata.schema.version, 1);
   assert.equal(metadata.schema.hash_scope, 'logical_research_schema_descriptor_v1');
-  assert.match(metadata.schema.hash_sha256, /^[a-f0-9]{64}$/);
+  assert.equal(metadata.schema.hash_sha256, aggregateHash(RESEARCH_SCHEMA_DESCRIPTOR));
+  assert.deepEqual(metadata.schema.package_members, RESEARCH_PACKAGE_MEMBERS);
+  assert.equal(metadata.schema.csv_string_safety, RESEARCH_SCHEMA_DESCRIPTOR.csv_string_safety);
+  assert.equal(metadata.schema.lossless_member, 'records.ndjson');
   assert.deepEqual(metadata.catalog, {
     hash_scope: 'core_catalog_state',
     core_version: 1,
@@ -1448,10 +1471,8 @@ test('research exports are loss-aware, formula-safe, incremental, and ZIP-manife
 
   const zip = await journal.exportResearchPackage(db, exportSelection, principal(), null, build);
   const members = parseStoredZip(zip);
-  assert.deepEqual(members.map((member) => member.name), [
-    'entries.csv', 'values.csv', 'vocab_mappings.csv', 'manifest.json',
-  ]);
-  const manifest = JSON.parse(members[3].data.toString('utf8'));
+  assert.deepEqual(members.map((member) => member.name), RESEARCH_PACKAGE_MEMBERS);
+  const manifest = JSON.parse(members[4].data.toString('utf8'));
   assert.deepEqual(
     Object.keys(manifest.research_metadata).sort(),
     Object.keys(metadata).sort()
@@ -1482,12 +1503,19 @@ test('research exports are loss-aware, formula-safe, incremental, and ZIP-manife
     manifest.checksums.research_metadata_sha256,
     crypto.createHash('sha256').update(JSON.stringify(manifest.research_metadata)).digest('hex')
   );
-  assert.equal(manifest.members.length, 3);
-  for (let index = 0; index < 3; index += 1) {
+  assert.equal(manifest.members.length, 4);
+  for (let index = 0; index < 4; index += 1) {
     assert.equal(manifest.members[index].name, members[index].name);
     assert.equal(manifest.members[index].size_bytes, members[index].data.length);
     assert.equal(manifest.members[index].sha256, crypto.createHash('sha256').update(members[index].data).digest('hex'));
   }
+  const recordsDescriptor = manifest.members.find((member) => member.name === 'records.ndjson');
+  const recordsMember = members.find((member) => member.name === 'records.ndjson');
+  assert.equal(recordsDescriptor.size_bytes, recordsMember.data.length);
+  assert.equal(
+    recordsDescriptor.sha256,
+    crypto.createHash('sha256').update(recordsMember.data).digest('hex')
+  );
   assert.doesNotMatch(members[0].data.toString('utf8').split('\r\n')[0], /author|owner_user_uuid/);
 
   const unavailable = JSON.parse(await journal.exportJson(
@@ -1923,8 +1951,20 @@ function parseCsvRecords(text) {
   return records;
 }
 
-test('wide CSV protects only string formulas while the research package remains byte-reversible', async () => {
-  const dangerous = ['=1', '+1', '-1', '@cmd', '\tcmd', '\rcmd', '  =1', "'literal"];
+test('research package CSV is formula-safe and records.ndjson preserves typed source rows', async () => {
+  const dangerous = [
+    '=1',
+    '+1',
+    '-1',
+    '@cmd',
+    '\tcmd',
+    '\rcmd',
+    '  =1',
+    '\u00a0=1',
+    ' \u00a0\tcmd',
+    '\u00a0 \rcmd',
+    "'literal",
+  ];
   const { db, entryUuids } = await createPagedEntries('typed-csv', null, dangerous.length);
   for (let index = 0; index < dangerous.length; index += 1) {
     db.prepare('UPDATE journal_entries SET note=? WHERE entry_uuid=?').run(dangerous[index], entryUuids[index]);
@@ -1941,7 +1981,19 @@ test('wide CSV protects only string formulas while the research package remains 
     row[wideHeader.indexOf('entry_uuid')].value,
     row,
   ]));
-  const expectedSafe = ["'=1", "'+1", "'-1", "'@cmd", "'\tcmd", "'\rcmd", "'  =1", "'literal"];
+  const expectedSafe = [
+    "'=1",
+    "'+1",
+    "'-1",
+    "'@cmd",
+    "'\tcmd",
+    "'\rcmd",
+    "'  =1",
+    "'\u00a0=1",
+    "' \u00a0\tcmd",
+    "'\u00a0 \rcmd",
+    "'literal",
+  ];
   for (let index = 0; index < entryUuids.length; index += 1) {
     assert.equal(byEntry.get(entryUuids[index])[noteIndex].value, expectedSafe[index]);
   }
@@ -1959,13 +2011,112 @@ test('wide CSV protects only string formulas while the research package remains 
     row,
   ]));
   for (let index = 0; index < entryUuids.length; index += 1) {
-    assert.equal(packageByEntry.get(entryUuids[index])[entriesHeader.indexOf('note')].value, dangerous[index]);
+    assert.equal(
+      packageByEntry.get(entryUuids[index])[entriesHeader.indexOf('note')].value,
+      expectedSafe[index]
+    );
   }
   const valuesRows = parseCsvRecords(members.find((member) => member.name === 'values.csv').data.toString('utf8'));
   const valuesHeader = valuesRows[0].map((cell) => cell.value);
   const negative = valuesRows.find((row) => row[valuesHeader.indexOf('entry_uuid')].value === entryUuids[0]);
   assert.deepEqual(negative[valuesHeader.indexOf('entered_value_num')], { value: '-5', quoted: false });
   assert.deepEqual(negative[valuesHeader.indexOf('value_num')], { value: '-5', quoted: false });
+
+  const listed = await journal.listEntries(
+    db,
+    { status: 'final', limit: dangerous.length },
+    principal()
+  );
+  const expectedEntries = listed.entries.map((entry) => {
+    const row = Object.assign({}, entry);
+    delete row.values;
+    delete row.owner_user_uuid;
+    delete row.author_principal_uuid;
+    delete row.author_label;
+    delete row.voided_by_principal_uuid;
+    return { record_type: 'entry', data: row };
+  });
+  const expectedValues = listed.entries.flatMap((entry) => entry.values.map((value) => ({
+    record_type: 'value',
+    data: {
+      entry_uuid: entry.entry_uuid,
+      attribute_code: value.attribute_code,
+      group_index: value.group_index,
+      value_status: value.value_status,
+      entered_value_num: value.entered_value_num,
+      entered_unit_code: value.entered_unit_code,
+      value_num: value.value_num,
+      value_text: value.value_text,
+      unit_code: value.unit_code,
+    },
+  })));
+  const expectedMappings = db.prepare(
+    'SELECT term_code,scheme_uri,scheme_version,mapping_role,external_id,' +
+      'external_parent_id,mapping_relation,source_uri,active FROM journal_vocab_mappings ' +
+      'ORDER BY term_code,scheme_uri,mapping_role,external_id'
+  ).all().map((mapping) => ({
+    record_type: 'vocab_mapping',
+    data: Object.assign({}, mapping),
+  }));
+  const ndjsonMember = members.find((member) => member.name === 'records.ndjson');
+  assert.ok(ndjsonMember.data.toString('utf8').endsWith('\n'));
+  const records = ndjsonMember.data.toString('utf8').trimEnd().split('\n').map(JSON.parse);
+  assert.deepEqual(records, expectedEntries.concat(expectedValues, expectedMappings));
+  assert.deepEqual(
+    records.filter((record) => record.record_type === 'entry').map((record) => record.data.note),
+    dangerous
+  );
+  assert.equal(
+    records.find((record) =>
+      record.record_type === 'value' && record.data.entry_uuid === entryUuids[0]
+    ).data.value_num,
+    -5
+  );
+});
+
+test('research package bounds every ZIP payload write without changing an oversized UTF-8 row', async () => {
+  const { db, entryUuids } = await createPagedEntries('bounded-package-writes', null, 1);
+  const sourceContext = JSON.stringify({
+    schema_version: 1,
+    source: '\u00e9'.repeat(32_600),
+  });
+  assert.ok(Buffer.byteLength(sourceContext, 'utf8') > 64 * 1024 - 512);
+  assert.ok(Buffer.byteLength(sourceContext, 'utf8') < 64 * 1024);
+  db.prepare('UPDATE journal_entries SET note=?,context_json=? WHERE entry_uuid=?').run(
+    '=1',
+    sourceContext,
+    entryUuids[0]
+  );
+
+  const sink = new BackpressureSink('drain');
+  const result = await journal.exportResearchPackage(
+    db,
+    { status: 'final' },
+    principal(),
+    sink
+  );
+  assert.equal(result, null);
+  assert.ok(sink.writableEnded);
+  assert.ok(sink.chunks.length > 0);
+  assert.ok(
+    sink.chunks.every((chunk) => chunk.length <= 64 * 1024),
+    'every ZIP header, descriptor, and member payload write must be at most 64 KiB'
+  );
+
+  const members = parseStoredZip(Buffer.concat(sink.chunks));
+  assert.deepEqual(members.map((member) => member.name), RESEARCH_PACKAGE_MEMBERS);
+  const entryRecords = parseCsvRecords(
+    members.find((member) => member.name === 'entries.csv').data.toString('utf8')
+  );
+  const entryHeader = entryRecords[0].map((cell) => cell.value);
+  assert.equal(entryRecords[1][entryHeader.indexOf('note')].value, "'=1");
+  assert.equal(entryRecords[1][entryHeader.indexOf('context_json')].value, sourceContext);
+
+  const ndjson = members.find((member) => member.name === 'records.ndjson').data.toString('utf8');
+  const entryRecord = ndjson.trimEnd().split('\n').map(JSON.parse)
+    .find((record) => record.record_type === 'entry');
+  assert.equal(entryRecord.data.note, '=1');
+  assert.equal(entryRecord.data.context_json, sourceContext);
 });
 
 test('custom vocabulary applies shared unit-family rules and freezes normalized conversions after use', async () => {

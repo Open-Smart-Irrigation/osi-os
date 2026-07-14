@@ -55,7 +55,11 @@ const RESEARCH_SCHEMA_DESCRIPTOR = Object.freeze({
   entry_shape: 'journal_entry_aggregate_without_author_or_owner_identity',
   value_shape: 'typed_long_form_with_entered_and_canonical_units',
   missing_value_field: 'value_status',
-  package_members: ['entries.csv', 'values.csv', 'vocab_mappings.csv', 'manifest.json'],
+  package_members: [
+    'entries.csv', 'values.csv', 'vocab_mappings.csv', 'records.ndjson', 'manifest.json',
+  ],
+  csv_string_safety: 'formula-prefix apostrophe; exact source strings are in records.ndjson',
+  lossless_member: 'records.ndjson',
 });
 const RESEARCH_SCHEMA_HASH = aggregateHash(RESEARCH_SCHEMA_DESCRIPTOR);
 const RESEARCH_METADATA_DESCRIPTOR = Object.freeze({
@@ -2242,6 +2246,9 @@ function exportMetadata(summary, principal, catalog, selection, environment, gen
       version: RESEARCH_SCHEMA_DESCRIPTOR.version,
       hash_scope: 'logical_research_schema_descriptor_v1',
       hash_sha256: RESEARCH_SCHEMA_HASH,
+      package_members: RESEARCH_SCHEMA_DESCRIPTOR.package_members.slice(),
+      csv_string_safety: RESEARCH_SCHEMA_DESCRIPTOR.csv_string_safety,
+      lossless_member: RESEARCH_SCHEMA_DESCRIPTOR.lossless_member,
     },
     context_generator: frozenContextGeneratorMetadata(summary),
     catalog: {
@@ -2467,17 +2474,48 @@ async function exportResearchPackage(db, rawFilters, principal, writable, enviro
       'term_code', 'scheme_uri', 'scheme_version', 'mapping_role', 'external_id',
       'external_parent_id', 'mapping_relation', 'source_uri', 'active',
     ];
-    async function writeRows(member, columns, rows) {
+    const mappings = (catalog.mappings || []).map(function(mapping) {
+      const row = {};
+      for (const column of mappingColumns) row[column] = mapping[column];
+      return row;
+    });
+    const maxWriteBytes = 64 * 1024;
+    async function writeBoundedRows(member, rows, serialize) {
       let chunk = '';
+      let chunkBytes = 0;
       for (const row of rows) {
-        const line = csvLine(columns, row, false);
-        if (chunk && Buffer.byteLength(chunk, 'utf8') + Buffer.byteLength(line, 'utf8') > 64 * 1024) {
+        const line = serialize(row);
+        const lineBuffer = Buffer.from(line, 'utf8');
+        if (lineBuffer.length > maxWriteBytes) {
+          if (chunkBytes) {
+            await member.write(chunk);
+            chunk = '';
+            chunkBytes = 0;
+          }
+          for (let offset = 0; offset < lineBuffer.length; offset += maxWriteBytes) {
+            await member.write(lineBuffer.subarray(offset, offset + maxWriteBytes));
+          }
+          continue;
+        }
+        if (chunkBytes && chunkBytes + lineBuffer.length > maxWriteBytes) {
           await member.write(chunk);
           chunk = '';
+          chunkBytes = 0;
         }
         chunk += line;
+        chunkBytes += lineBuffer.length;
       }
-      if (chunk) await member.write(chunk);
+      if (chunkBytes) await member.write(chunk);
+    }
+    async function writeRows(member, columns, rows) {
+      await writeBoundedRows(member, rows, function(row) {
+        return csvLine(columns, row, true);
+      });
+    }
+    async function writeNdjsonRows(member, recordType, rows) {
+      await writeBoundedRows(member, rows, function(row) {
+        return JSON.stringify({ record_type: recordType, data: row }) + '\n';
+      });
     }
     const generatedAt = new Date();
     const writer = zipStream(sink.writable, generatedAt);
@@ -2485,7 +2523,7 @@ async function exportResearchPackage(db, rawFilters, principal, writable, enviro
 
     const entriesMember = await writer.startMember('entries.csv');
     await entriesMember.write(entryColumns.map(function(column) {
-      return csvCell(column, false);
+      return csvCell(column, true);
     }).join(',') + '\r\n');
     await forEachEntryPage(snapshot, selection, principal, async function(entries) {
       await writeRows(entriesMember, entryColumns, entryRows(entries));
@@ -2494,7 +2532,7 @@ async function exportResearchPackage(db, rawFilters, principal, writable, enviro
 
     const valuesMember = await writer.startMember('values.csv');
     await valuesMember.write(valueColumns.map(function(column) {
-      return csvCell(column, false);
+      return csvCell(column, true);
     }).join(',') + '\r\n');
     await forEachEntryPage(snapshot, selection, principal, async function(entries) {
       await writeRows(valuesMember, valueColumns, valueRows(entries));
@@ -2503,10 +2541,20 @@ async function exportResearchPackage(db, rawFilters, principal, writable, enviro
 
     const mappingsMember = await writer.startMember('vocab_mappings.csv');
     await mappingsMember.write(mappingColumns.map(function(column) {
-      return csvCell(column, false);
+      return csvCell(column, true);
     }).join(',') + '\r\n');
-    await writeRows(mappingsMember, mappingColumns, catalog.mappings || []);
+    await writeRows(mappingsMember, mappingColumns, mappings);
     dataMembers.push(await mappingsMember.finish());
+
+    const recordsMember = await writer.startMember('records.ndjson');
+    await forEachEntryPage(snapshot, selection, principal, async function(entries) {
+      await writeNdjsonRows(recordsMember, 'entry', entryRows(entries));
+    });
+    await forEachEntryPage(snapshot, selection, principal, async function(entries) {
+      await writeNdjsonRows(recordsMember, 'value', valueRows(entries));
+    });
+    await writeNdjsonRows(recordsMember, 'vocab_mapping', mappings);
+    dataMembers.push(await recordsMember.finish());
 
     const metadata = exportMetadata(
       summary,
