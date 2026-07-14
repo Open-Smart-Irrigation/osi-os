@@ -14,7 +14,7 @@ const migrationPath = path.join(
   'database',
   'migrations',
   'ordered',
-  '0015__journal_catalog_v1.sql'
+  '0019__journal_catalog_v1.sql'
 );
 const sourceCatalog = require(path.join(
   repoRoot,
@@ -706,7 +706,7 @@ try {
   assert.deepEqual(
     catalogSnapshot(replayDbPath),
     afterFirstReplay,
-    '0015 must be exactly idempotent on a matching installed catalog'
+    '0019 must be exactly idempotent on a matching installed catalog'
   );
 
   const conflictDbPath = path.join(tmpDir, 'conflict.db');
@@ -725,7 +725,7 @@ try {
   } catch (error) {
     conflictError = error;
   }
-  assert.ok(conflictError, '0015 must reject an immutable installed-row conflict');
+  assert.ok(conflictError, '0019 must reject an immutable installed-row conflict');
   assert.match(
     String(conflictError.stderr || conflictError.message),
     /CHECK constraint failed/,
@@ -769,7 +769,7 @@ try {
       catalog_hash: versionTwoHash,
       updated_at: versionTwoTimestamp,
     },
-    'replaying 0015 must not downgrade catalog state version 2'
+    'replaying 0019 must not downgrade catalog state version 2'
   );
   assert.equal(
     sqliteJson(
@@ -777,7 +777,7 @@ try {
       "SELECT count(*) AS count FROM journal_vocab_mappings WHERE term_code='irrigation';"
     )[0].count,
     0,
-    'replaying 0015 must not mutate catalog data when a newer catalog is installed'
+    'replaying 0019 must not mutate catalog data when a newer catalog is installed'
   );
 
   console.log('test-journal-schema: OK (catalog v1 semantics, guarded replay, seven-DB data parity)');

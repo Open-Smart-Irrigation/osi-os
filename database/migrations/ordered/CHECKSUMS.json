@@ -12,8 +12,12 @@
   "0011__zone_valve_assignments.sql": "1818a173ffe193085daacf51bce900521dd6a908cad484f0095ab4f3712a4dd1",
   "0012__uc512_device_data_columns.sql": "26e40a12278a8dbec4d22689682a771f44082f5e8d325c12e06896c67ad9587a",
   "0013__lsn50_shadow_diff.sql": "7ad59b5b5218ea0ff978bacdbab3ddf6cf6ee50536654705f415ca0154370ce0",
-  "0014__field_journal.sql": "0449e4699f6e67b5c7b7e579c4cfef5e4731b9098ecc9b2fe172269359ed48a6",
-  "0015__journal_catalog_v1.sql": "c7cb59d92908926c6b3ed2222dc4a81d45df113ef31a7c1ebb2b3935944b19c7",
-  "0016__journal_resource_owner_scope.sql": "92001a92728e19ba534f70d6a89c1c76f591a411886c4d62769d9d07e3eb0b1b",
-  "0017__journal_plot_lookup_indexes.sql": "517b78538b000c363e5729ed2716994523787ef826fb0b2819f4c3beae796cf4"
+  "0014__improvement_request_status_secret.sql": "b5196442091f2e151a67284ff65111664744803ead74067bb677d98db1ee0ad1",
+  "0015__upsert_sync_versioning.sql": "cbb6d9b6502eb7f3ca5b65427d629d56ae1dfc186b2ce27c347d0e8771692703",
+  "0016__device_chameleon_sync.sql": "ac12b161c576794e84c66866b823ef5638d1d575dd5330bdbf115fcecc4a41e7",
+  "0017__zone_key_fallback_parity.sql": "a2eea4fe1fd97609cb5bf225e0f164dd838f68301650f271f8dc740701f18ebe",
+  "0018__field_journal.sql": "6f62f6db2a5e9b0e6b760fcfbc63ad3d73c865c79a0a2ba69ae1bcbee0e793e8",
+  "0019__journal_catalog_v1.sql": "c7cb59d92908926c6b3ed2222dc4a81d45df113ef31a7c1ebb2b3935944b19c7",
+  "0020__journal_resource_owner_scope.sql": "85249a25aa9ed6d0cfdca029a35efc249e1f0f3152817357b37d884b5dff1ad2",
+  "0021__journal_plot_lookup_indexes.sql": "88fc490dedf1b05b7c44945a984b16fbf0a1f075407bfccfde332729b3434590"
 }

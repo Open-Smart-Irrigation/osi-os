@@ -11,13 +11,20 @@ const flowPaths = [
   path.join(root, 'conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/flows.json'),
 ];
 
+// One-shot input-safety pins. Re-pinned 2026-07-14 against main @0f1361a3 after
+// merging main into feat/field-journal-slice1: main's upsert-sync-versioning
+// work changed sync-force-build, and main independently added
+// UC512_OPEN_FOR_DURATION to the two fallback registries
+// (reject-indefinite-open, write-strega-expectation). Every literal
+// replaceOnce anchor was verified to still occur exactly once; only these
+// safety hashes moved.
 const expectedNodeHashes = {
   'sync-pending-split': 'b510b8f16e71eaf951a50c8035bbbaf6c990ed316b6631b59e361a83c53f6ba7',
-  'sync-force-build': 'e4cd467ca3c145b9728e307f826aa7fafb5fdaade5ee905dd9d92e554ca0def8',
-  'reject-indefinite-open': 'd52775da39d3bd02c113e1270cae3a5b2df1f0b106c84f2e874afa8bbdf8a9b5',
+  'sync-force-build': 'aa51c022a383b31add0926983980d4130ef39c26ab8f63aaf9abb7f0a7e9dbb2',
+  'reject-indefinite-open': 'deb15cbe21e59f7b17c3ae11ff05bc9d1ae485a68fe044927fd8ab374cc841c9',
   'command-dedupe-dispatch': 'e6b37170bec7c98adc17cf6423df94f31693642ca7e92897c4aac47d13ec23dd',
   'cmd-type-registry': 'a5237108cf313821e2618a49f0beecab1299e15b4527bcd9ead93e9454aaba45',
-  'write-strega-expectation': '00df3c5c345a7b638fd9a91875a1d320b140e00890dbe0550bf0baaa01c7ebed',
+  'write-strega-expectation': '73415c5511ca01dd53e1217290e8aeb368a4c55c7087886127c2a5b2213db9b2',
   'command-ack-queue-rest': '6b63484ab0b1b277a4357fc1ced7c5091d083a3966b6237732c7f93e235b06a2',
 };
 
@@ -277,7 +284,10 @@ function migrate(buffer) {
   for (const id of ['reject-indefinite-open', 'write-strega-expectation']) {
     const node = byId.get(id);
     const fallbackMarker = "    SET_KIWI_INTERVAL:         { dispatch: 'kiwi_config',               actuator: false,   requires_duration: false  },";
-    node.func = addCommandRows(node.func, fallbackMarker, true);
+    // Main added UC512_OPEN_FOR_DURATION to these fallback registries after
+    // this script was written; only insert it where it is still missing so a
+    // re-application onto main never duplicates the row.
+    node.func = addCommandRows(node.func, fallbackMarker, !node.func.includes('UC512_OPEN_FOR_DURATION'));
     node.func = exposeEmptyCatches(node.func, id + ' ignored operation failed');
   }
   const guard = byId.get('reject-indefinite-open');

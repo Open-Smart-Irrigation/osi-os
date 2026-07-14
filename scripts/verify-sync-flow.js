@@ -228,6 +228,9 @@ const requiredFunctionNodes = [
   'Prune Sync Outbox',
   'Build Sync State',
   'Replay Pending Commands',
+  'Apply Work Request Status',
+  'Improvement Requests API Router',
+  'support-delivery-worker',
   'Build Sync Token Refresh',
   'Store Refreshed Sync Token',
   'Run Force Sync',
@@ -1593,19 +1596,80 @@ for (const actuatorNodeId of ['reject-indefinite-open', 'command-dedupe-dispatch
 for (const actuatorNodeId of ['cmd-type-registry', 'reject-indefinite-open', 'command-dedupe-dispatch', '934bf2bc19a8ce22', 'cdbaa3891d40d7a1', 'write-strega-expectation']) {
   expectExcludesById(actuatorNodeId, 'WORK_REQUEST_SUBMITTED', 'WORK_REQUEST_SUBMITTED actuator/downlink handling');
 }
+for (const node of flows.filter((entry) => entry.type === 'mqtt in')) {
+  expectCondition(
+    !String(node.topic || '').includes('WORK_REQUEST_SUBMITTED'),
+    `${node.id} does not subscribe to WORK_REQUEST_SUBMITTED over MQTT`,
+    `${node.id} must not subscribe to WORK_REQUEST_SUBMITTED over MQTT`
+  );
+}
 expectLibById('improvement-requests-api-router', 'osiDb', 'osi-db-helper', 'declares osiDb for field request intake');
 expectLibById('improvement-requests-api-router', 'crypto', 'crypto', 'declares crypto for verifyBearer');
 expectIncludesById('improvement-requests-api-router', 'function verifyBearer', 'contains the local HMAC bearer verifier');
 expectIncludesById('improvement-requests-api-router', 'consent_public !== true', 'requires explicit public consent');
+expectIncludesById('improvement-requests-api-router', 'bodySize >= 65536', 'rejects request bodies at or above 65536 bytes');
+expectIncludesById('improvement-requests-api-router', 'rawTitle.length < 3 || rawTitle.length > 80', 'validates title length 3-80');
+expectIncludesById('improvement-requests-api-router', 'rawDescription.length < 10 || rawDescription.length > 4000', 'validates description length 10-4000');
+expectIncludesById('improvement-requests-api-router', "crypto.randomBytes(32).toString('hex')", 'generates a 32-byte status secret');
+expectIncludesById('improvement-requests-api-router', "crypto.createHash('sha256').update(statusSecret).digest('hex')", 'hashes the status secret before storage');
+expectIncludesById('improvement-requests-api-router', 'status_secret_hash', 'stores the status secret hash');
+expectIncludesById('improvement-requests-api-router', 'status_secret: statusSecret', 'returns the one-time status secret');
+expectIncludesById('improvement-requests-api-router', 'contact_email', 'stores optional contact email');
+expectIncludesById('improvement-requests-api-router', 'const MAX_DIAGNOSTICS_JSON_BYTES = 32768', 'defines the diagnostics JSON byte cap');
+expectIncludesById('improvement-requests-api-router', 'cappedDiagnosticsJson(diagnostics)', 'stores capped diagnostics JSON');
+expectIncludesById('improvement-requests-api-router', "flow.get('guiVersion')", 'includes GUI version in diagnostics');
+expectIncludesById('improvement-requests-api-router', "flow.get('sync_state') || {}", 'summarizes sync_state diagnostics');
+expectIncludesById('improvement-requests-api-router', "flow.get('gateway_health')", 'prefers flow gateway_health diagnostics');
+expectIncludesById('improvement-requests-api-router', "global.get('edge_health')", 'falls back to global edge_health diagnostics');
+expectIncludesById('improvement-requests-api-router', "/bearer\\s+[A-Za-z0-9._~+/=-]{8,}/gi", 'redacts bearer tokens from user text');
+expectIncludesById('improvement-requests-api-router', "/(password|passwd|pwd|secret|token|key)\\s*[=:]\\s*\\S+/gi", 'redacts password/credential patterns from user text');
+expectIncludesById('improvement-requests-api-router', "/eyJ[A-Za-z0-9_-]{10,}\\.[A-Za-z0-9_-]{10,}/g", 'redacts JWT-like strings from user text');
+expectIncludesById('improvement-requests-api-router', "/\\b[0-9A-Fa-f]{32}\\b/g", 'redacts AppKey-like 32-hex strings from user text');
+expectIncludesById('improvement-requests-api-router', "/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}/g", 'redacts email patterns from user text');
+expectIncludesById('improvement-requests-api-router', "/\\b[0-9A-Fa-f]{16}\\b/g", 'redacts 16-hex EUI patterns from user text');
+expectIncludesById('improvement-requests-api-router', "replace(pattern, '[REDACTED]')", 'uses fixed [REDACTED] replacement for user text');
 expectIncludesById('improvement-requests-api-router', 'const consentDiagnostics = boolValue(body.consent_diagnostics, true)', 'honors diagnostics consent before collecting private diagnostics');
 expectIncludesById('improvement-requests-api-router', 'const diagnostics = consentDiagnostics ? await buildDiagnostics(q, body) : {}', 'builds private diagnostics only when diagnostics consent is granted');
-expectIncludesById('improvement-requests-api-router', "consentDiagnostics ? JSON.stringify(diagnostics) : '{}'", 'stores empty diagnostics when diagnostics consent is declined');
+expectIncludesById('improvement-requests-api-router', "consentDiagnostics ? cappedDiagnosticsJson(diagnostics) : '{}'", 'stores empty diagnostics when diagnostics consent is declined');
 expectIncludesById('improvement-requests-api-router', 'function diagnosticsPreviewPayload', 'builds a display-redacted diagnostics preview');
 expectIncludesById('improvement-requests-api-router', 'diagnostics: diagnosticsPreviewPayload(diagnostics)', 'returns the display-redacted diagnostics preview payload');
-expectIncludesById('improvement-requests-api-router', "gateway_device_eui: preview.gateway_identity.gateway_device_eui ? '[REDACTED_EUI]' : null", 'redacts raw gateway EUI in diagnostics preview');
+expectIncludesById('improvement-requests-api-router', "gateway_device_eui: preview.gateway_identity.gateway_device_eui ? '[REDACTED]' : null", 'redacts raw gateway EUI in diagnostics preview');
 expectIncludesById('improvement-requests-api-router', 'INSERT INTO improvement_requests', 'inserts local field requests');
 expectIncludesById('improvement-requests-api-router', 'contact_email', 'persists optional contact email separately from redacted request text');
+expectIncludesById('improvement-requests-api-router', 'Invalid contact_email', 'rejects invalid contact_email before insert');
 expectIncludesById('improvement-requests-api-router', 'WORK_REQUEST_SUBMITTED', 'documents trigger-emitted WORK_REQUEST_SUBMITTED intake contract');
+expectNodeTypeById('support-delivery-tick', 'inject', 'support delivery has a scheduled inject node');
+expectWireById('support-delivery-tick', 'support-delivery-worker', 'support delivery tick routes to worker');
+expectCondition(
+  String(findNodeById('support-delivery-tick')?.repeat || '') === '300',
+  'support-delivery-tick runs every 300 seconds / 300000 ms',
+  'support-delivery-tick must run every 300 seconds / 300000 ms'
+);
+expectNodeTypeById('support-delivery-worker', 'function', 'support delivery worker is a function node');
+expectLibById('support-delivery-worker', 'osiDb', 'osi-db-helper', 'declares osiDb for queued improvement request reads');
+expectLibById('support-delivery-worker', 'osiCloudHttp', 'osi-cloud-http', 'uses shared IPv4 HTTP client');
+expectIncludesById('support-delivery-worker', "SELECT * FROM improvement_requests WHERE local_status = 'QUEUED' ORDER BY created_at ASC LIMIT 20", 'scans queued improvement requests past backed-off rows');
+expectIncludesById('support-delivery-worker', "event_uuid = 'work-request-' || ?", 'loads the matching WORK_REQUEST_SUBMITTED outbox payload');
+expectIncludesById('support-delivery-worker', '/api/v1/support/edge/work-requests', 'posts to the support edge work-request endpoint');
+expectIncludesById('support-delivery-worker', 'osiCloudHttp.requestJsonIpv4', 'posts through shared IPv4 HTTP helper');
+expectIncludesById('support-delivery-worker', "flow.get('sync_state') || {}", 'resolves support server URL from sync_state first');
+expectIncludesById('support-delivery-worker', "env.get('OSI_CLOUD_SERVER_URL')", 'resolves support server URL from OSI_CLOUD_SERVER_URL second');
+expectIncludesById('support-delivery-worker', 'https://server.opensmartirrigation.org', 'falls back to the default support server URL');
+expectIncludesById('support-delivery-worker', "headers: { 'Content-Type': 'application/json' }", 'sends no Authorization header');
+expectExcludesById('support-delivery-worker', 'Authorization', 'support delivery Authorization header transmission');
+expectIncludesById('support-delivery-worker', 'body.result || body.status', 'accepts result or status as terminal support response state');
+expectIncludesById('support-delivery-worker', "flow.get('support_delivery_retries') || {}", 'loads retry state from flow context');
+expectIncludesById('support-delivery-worker', "flow.set('support_delivery_retries', retries)", 'persists retry state to flow context');
+expectIncludesById('support-delivery-worker', 'Math.min(300000 * Math.pow(2, retry.count), 3600000)', 'implements bounded exponential backoff');
+expectIncludesById('support-delivery-worker', 'MAX_MISSING_OUTBOX_RETRIES', 'caps missing outbox retry state');
+expectIncludesById('support-delivery-worker', 'missing_outbox_payload', 'marks stale missing outbox payloads terminal');
+expectIncludesById('support-delivery-worker', 'let attempted = 0', 'tracks attempted rows separately from skipped backoff rows');
+expectIncludesById('support-delivery-worker', 'attempted >= MAX_DELIVERIES_PER_TICK', 'prevents backed-off rows from consuming the delivery tick');
+expectIncludesById('support-delivery-worker', "local_status = 'SUBMITTED'", 'marks accepted or duplicate work requests submitted');
+expectIncludesById('support-delivery-worker', "local_status = 'REJECTED'", 'marks terminally rejected work requests rejected');
+expectIncludesById('support-delivery-worker', 'response.statusCode === 404', 'retries on 404 instead of permanently rejecting');
+expectIncludesById('support-delivery-worker', "cloud_status IN ('SUBMITTED','DUPLICATE')", 'guards cloud_status update against clobbering fresher statuses');
+expectIncludesById('support-delivery-worker', '.close(', 'closes the delivery worker database handle');
 expectFileIncludes('seed-blank.sql', seedSqlSource, 'trg_improvement_requests_outbox_ai', 'improvement request trigger exists');
 expectFileIncludes('seed-blank.sql', seedSqlSource, "'WORK_REQUEST_SUBMITTED'", 'improvement request trigger emits WORK_REQUEST_SUBMITTED');
 expectFileIncludes('seed-blank.sql', seedSqlSource, "'WORK_REQUEST'", 'improvement request trigger emits WORK_REQUEST aggregate type');
@@ -1907,16 +1971,17 @@ expectExcludesById('strega-sql-fn', "await run('COMMIT')", 'the old multi-await 
 expectExcludesById('strega-sql-fn', "await run('ROLLBACK')", 'the old multi-await rollback call');
 expectExcludesById('strega-sql-fn', "msg.topic = insertSql + '; ' + updateSql + ';'", 'the old multi-statement sqlite topic builder');
 expectExcludesById('strega-sql-fn', 'target_state', 'passive STREGA uplinks from touching target_state');
-expectIncludesById('lsn50-sql-fn', 'lsn50_mode_code, lsn50_mode_label, lsn50_mode_observed_at', 'persists observed LSN50 mode into device_data');
-expectIncludesById('lsn50-sql-fn', 'rain_mm_per_hour, rain_mm_per_10min, rain_mm_today, rain_delta_status', 'persists interval-aware rain metadata into device_data');
-expectIncludesById('lsn50-sql-fn', 'flow_liters_per_min, flow_liters_per_10min, flow_liters_today, flow_delta_status', 'persists interval-aware flow metadata into device_data');
-expectIncludesById('lsn50-sql-fn', 'rain_mm_per_10min, rain_mm_today', 'persists normalized and daily rain telemetry into device_data');
-expectIncludesById('lsn50-sql-fn', 'flow_liters_per_10min, flow_liters_today', 'persists normalized and daily flow telemetry into device_data');
-expectIncludesById('lsn50-sql-fn', 'counter_interval_seconds', 'persists elapsed counter interval into device_data');
-expectIncludesById('lsn50-sql-fn', 'adc_ch0v, adc_ch1v, swt_1, swt_2, swt_3,', 'persists dendrometer ADC channels and derived Chameleon SWT into device_data');
-expectIncludesById('lsn50-sql-fn', 'dendro_ratio, dendro_mode_used, dendro_position_raw_mm, dendro_position_mm, dendro_valid, dendro_delta_mm,', 'persists dual-path dendrometer raw and compatibility positions into device_data');
-expectIncludesById('lsn50-sql-fn', 'dendro_stem_change_um,', 'persists baseline-relative stem change into device_data');
-expectIncludesById('lsn50-sql-fn', 'dendro_saturated, dendro_saturation_side,', 'persists dendrometer saturation metadata into device_data');
+// DD8 cleanup: lsn50-sql-fn, lsn50-sqlite, and shadow compare (093d7832e89c4027) deleted;
+// LSN50 ingest now flows through osi-lsn50-normalize + osi-device-writer via node 460e0bfd95f89e67.
+// Column-level persistence is tested by verify-device-integration.js.
+expectMissingNodeById('lsn50-sql-fn', 'old LSN50 Build SQL INSERT (replaced by osi-device-writer)');
+expectMissingNodeById('lsn50-sqlite', 'old LSN50 Sensor DB Insert (replaced by osi-device-writer)');
+expectMissingNodeById('093d7832e89c4027', 'old LSN50 Shadow Compare (DD8 cleanup)');
+expectIncludesById('460e0bfd95f89e67', 'lsn50-normalize', 'loads normalizer via osi-lib');
+expectIncludesById('460e0bfd95f89e67', 'device-writer', 'loads device-writer via osi-lib');
+expectIncludesById('460e0bfd95f89e67', 'edge-channels.json', 'reads edge manifest for column mapping');
+expectLibById('460e0bfd95f89e67', 'osiDb', 'osi-db-helper', 'opens the local database for LSN50 writes');
+expectLibById('460e0bfd95f89e67', 'osiLib', 'osi-lib', 'loads normalizer and writer via quarantine-safe loader');
 expectIncludesById('lsn50-zone-agg-fn', "localDateIso(d.timestamp || computedAt", 'bins MOD9 zone totals by uplink timestamp instead of processing time');
 expectIncludesById('lsn50-zone-agg-fn', "d.rainDeltaStatus === 'ok'", 'only aggregates valid rain deltas into zone totals');
 expectIncludesById('lsn50-zone-agg-fn', "d.flowDeltaStatus === 'ok'", 'only aggregates valid flow deltas into zone totals');
@@ -2089,7 +2154,8 @@ expectIncludesById('put-chameleon-enabled-auth-fn', 'function parseChameleonEnab
 expectIncludesById('put-chameleon-enabled-auth-fn', "const enabled = parseChameleonEnabled(body.enabled);", 'rejects missing or invalid Chameleon enabled values');
 expectIncludesById('put-chameleon-enabled-auth-fn', "enabled must be a boolean, 1, 0, 'true', 'false', '1', or '0'", 'returns a 400 for invalid Chameleon enabled values');
 expectIncludesById('put-chameleon-enabled-auth-fn', "type_id = 'DRAGINO_LSN50'", 'limits Chameleon enabled updates to LSN50 devices');
-expectExcludesById('put-chameleon-enabled-auth-fn', 'sync_version = COALESCE(sync_version, 0) + 1', 'keeps Chameleon enabled as local-only edge config until a server sync contract exists');
+expectIncludesById('put-chameleon-enabled-auth-fn', 'sync_version = COALESCE(sync_version, 0) + 1', 'bumps devices.sync_version on Chameleon enable toggle so trg_sync_devices_outbox_au emits an increasing-version DEVICE event (issue #5; matches dendro_enabled/temp_enabled/rain_gauge_enabled/flow_meter_enabled precedent, avoids the equal-version-payload-conflict class fixed for issue #10)');
+expectIncludesById('dendro-ref-tree-fn', 'sync_version = COALESCE(sync_version, 0) + 1', 'bumps devices.sync_version on reference-tree toggle so trg_sync_devices_outbox_au emits an increasing-version DEVICE event (issue #15; matches dendro_enabled/temp_enabled/rain_gauge_enabled/flow_meter_enabled/chameleon_enabled precedent, avoids the equal-version-payload-conflict class fixed for issue #10)');
 expectIncludesById('8b93fa005d78e25f', 'verifyBearer', 'chameleon-depth-auth uses HMAC verifyBearer — not global.get(authCheck)');
 expectExcludesById('8b93fa005d78e25f', "global.get('authCheck')", 'chameleon-depth-auth does not call the dead authCheck global');
 expectLibById('8b93fa005d78e25f', 'crypto', 'crypto', 'imports crypto for Chameleon depth auth verification');
@@ -2149,7 +2215,7 @@ if (deviceApiCatch) {
   expectEqual(deviceApiCatch.scope, null, 'device-api catch node catches the whole tab');
 }
 expectWireById('device-api-catch', 'device-api-http500', 'routes uncaught device-api errors into the HTTP 500 formatter');
-expectIncludesById('device-api-http500', 'msg.statusCode = 500;', 'sets HTTP 500 for uncaught device-api failures');
+expectIncludesById('device-api-http500', 'msg.statusCode = (msg.error && msg.error.statusCode) || 500;', 'adopts a thrown error statusCode (e.g. verifyBearer 401) for device-api failures, defaulting to 500 (issue #9)');
 expectIncludesById('device-api-http500', "error: 'device-api failed'", 'formats uncaught device-api failures with the generic error code');
 expectWireById('device-api-http500', 'device-response', 'returns uncaught device-api failures through the shared response node');
 expectIncludes('Format Dendro Config Response', 'dendro_force_legacy: row.dendro_force_legacy ?? null', 'returns canonical dendrometer config fields');
@@ -2836,8 +2902,8 @@ for (const seedDatabasePath of v2SeedDatabasePaths) {
   }
 }
 
-// --- firmware version 0.6.5 ---
-const EXPECTED_VERSION = '0.6.5';
+// --- firmware version 0.7.0 ---
+const EXPECTED_VERSION = '0.7.0';
 const osiServerDefaultsContent = fs.existsSync(osiServerDefaultsPath) ? fs.readFileSync(osiServerDefaultsPath, 'utf8') : '';
 expectFileIncludes('96_osi_server_config', osiServerDefaultsContent, `firmware_version=${EXPECTED_VERSION}`, `96_osi_server_config seeds firmware_version ${EXPECTED_VERSION}`);
 expectFileIncludes('node-red.init', nodeRedInitScript, `echo "${EXPECTED_VERSION}"`, `node-red.init fallback version is ${EXPECTED_VERSION}`);

@@ -52,7 +52,7 @@ UX decisions U1–U5 (picker model, type-ahead, ranking transparency, Agroscope 
 
 ## 4. Data model (edge SQLite, mirrored to cloud Postgres)
 
-One ordered migration `database/migrations/ordered/0014__field_journal.sql` (numbering updated 2026-07-12: main advanced to 0013) (first line `-- risk: additive`) + catalog seeds, through the full change-control surface (§9, SYS-12). After 0014, vocabulary/template/layout/product evolution is catalog data delivered by idempotent ordered data migrations or a governed importer — **never** by editing 0014.
+One ordered migration `database/migrations/ordered/0018__field_journal.sql` (numbering updated 2026-07-14: renumbered from 0014 after merging main's 0014–0017) (first line `-- risk: additive`) + catalog seeds, through the full change-control surface (§9, SYS-12). After 0014, vocabulary/template/layout/product evolution is catalog data delivered by idempotent ordered data migrations or a governed importer — **never** by editing 0014.
 
 ### 4.1 `journal_entries`
 

@@ -396,6 +396,7 @@ CREATE TABLE dendrometer_daily (
   qa_flags_json               TEXT,
   low_confidence_day          INTEGER DEFAULT 0,
   tree_state_v5               TEXT DEFAULT 'none',
+  sync_version                INTEGER NOT NULL DEFAULT 0,
   UNIQUE(deveui, date)
 );
 
@@ -454,6 +455,7 @@ CREATE TABLE zone_daily_recommendations (
   low_confidence_tree_count   INTEGER DEFAULT 0,
   outlier_filtered_tree_count INTEGER DEFAULT 0,
   zone_confidence_score       REAL,
+  sync_version                INTEGER NOT NULL DEFAULT 0,
   UNIQUE(zone_id, date)
 );
 
@@ -470,6 +472,7 @@ CREATE TABLE zone_daily_environment (
   flow_liters  REAL DEFAULT 0,
   rain_source  TEXT DEFAULT 'none',
   computed_at  TEXT,
+  sync_version INTEGER NOT NULL DEFAULT 0,
   UNIQUE(zone_id, date),
   FOREIGN KEY (zone_id) REFERENCES irrigation_zones(id) ON DELETE CASCADE
 );
@@ -595,6 +598,7 @@ CREATE TABLE IF NOT EXISTS improvement_requests (
   updated_at                TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   sync_version              INTEGER NOT NULL DEFAULT 1,
   contact_email             TEXT,
+  status_secret_hash         TEXT,
   FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 );
 
@@ -633,6 +637,7 @@ BEGIN
       'consent_diagnostics', CASE WHEN NEW.consent_diagnostics = 1 THEN json('true') ELSE json('false') END,
       'diagnostics', json(NEW.diagnostics_json),
       'gateway_device_eui', NEW.gateway_device_eui,
+      'status_secret_hash', NEW.status_secret_hash,
       'gui_user', json_object('local_user_id', NEW.user_id),
       'sync_version', NEW.sync_version,
       'occurred_at', NEW.submitted_at
@@ -1290,6 +1295,10 @@ WHEN
     COALESCE(NEW.strega_model,'') <> COALESCE(OLD.strega_model,'') OR
     COALESCE(NEW.soil_moisture_probe_depths_json,'') <> COALESCE(OLD.soil_moisture_probe_depths_json,'') OR
     COALESCE(NEW.soil_moisture_probe_depths_configured,0) <> COALESCE(OLD.soil_moisture_probe_depths_configured,0) OR
+    COALESCE(NEW.chameleon_enabled,0) <> COALESCE(OLD.chameleon_enabled,0) OR
+    COALESCE(NEW.chameleon_swt1_depth_cm,-1) <> COALESCE(OLD.chameleon_swt1_depth_cm,-1) OR
+    COALESCE(NEW.chameleon_swt2_depth_cm,-1) <> COALESCE(OLD.chameleon_swt2_depth_cm,-1) OR
+    COALESCE(NEW.chameleon_swt3_depth_cm,-1) <> COALESCE(OLD.chameleon_swt3_depth_cm,-1) OR
     COALESCE(NEW.deleted_at,'') <> COALESCE(OLD.deleted_at,'') OR
     COALESCE(NEW.sync_version,0) <> COALESCE(OLD.sync_version,0)
   )
@@ -1325,6 +1334,10 @@ BEGIN
       'strega_model',                      NEW.strega_model,
       'soil_moisture_probe_depths_json',   json(COALESCE(NEW.soil_moisture_probe_depths_json,'{}')),
       'soil_moisture_probe_depths_configured', COALESCE(NEW.soil_moisture_probe_depths_configured,0),
+      'chameleon_enabled',                 NEW.chameleon_enabled,
+      'chameleon_swt1_depth_cm',           NEW.chameleon_swt1_depth_cm,
+      'chameleon_swt2_depth_cm',           NEW.chameleon_swt2_depth_cm,
+      'chameleon_swt3_depth_cm',           NEW.chameleon_swt3_depth_cm,
       'gateway_device_eui',                COALESCE(NEW.gateway_device_eui,'0016C001F11715E2'),
       'sync_version',                      NEW.sync_version,
       'deleted_at',                        NEW.deleted_at
@@ -1875,9 +1888,10 @@ BEGIN
       'qa_flags_json',         NEW.qa_flags_json,
       'low_confidence_day',    NEW.low_confidence_day,
       'tree_state_v5',         NEW.tree_state_v5,
-      'computed_at',           NEW.computed_at
+      'computed_at',           NEW.computed_at,
+      'sync_version',          NEW.sync_version
     ),
-    0,
+    NEW.sync_version,
     strftime('%Y-%m-%dT%H:%M:%fZ','now'),
     COALESCE((SELECT gateway_device_eui FROM devices WHERE deveui=NEW.deveui AND deleted_at IS NULL),'0016C001F11715E2')
   );
@@ -1891,6 +1905,7 @@ WHEN EXISTS (
   SELECT 1 FROM sync_link_state
    WHERE peer_node = 'cloud' AND linked = 1
 )
+ AND COALESCE(NEW.sync_version,0) <> COALESCE(OLD.sync_version,0)
 BEGIN
   INSERT INTO sync_outbox(
     event_uuid, aggregate_type, aggregate_key, op, payload_json,
@@ -1940,9 +1955,10 @@ BEGIN
       'qa_flags_json',         NEW.qa_flags_json,
       'low_confidence_day',    NEW.low_confidence_day,
       'tree_state_v5',         NEW.tree_state_v5,
-      'computed_at',           NEW.computed_at
+      'computed_at',           NEW.computed_at,
+      'sync_version',          NEW.sync_version
     ),
-    0,
+    NEW.sync_version,
     strftime('%Y-%m-%dT%H:%M:%fZ','now'),
     COALESCE((SELECT gateway_device_eui FROM devices WHERE deveui=NEW.deveui AND deleted_at IS NULL),'0016C001F11715E2')
   );
@@ -2061,7 +2077,7 @@ BEGIN
   ) VALUES (
     lower(hex(randomblob(16))),
     'ZONE_ENVIRONMENT',
-    COALESCE((SELECT zone_uuid FROM irrigation_zones WHERE id=NEW.zone_id AND deleted_at IS NULL),'') || '|' || COALESCE(NEW.date,''),
+    COALESCE((SELECT zone_uuid FROM irrigation_zones WHERE id=NEW.zone_id AND deleted_at IS NULL),'zone-id:' || NEW.zone_id) || '|' || COALESCE(NEW.date,''),
     'ZONE_ENVIRONMENT_APPENDED',
     json_object(
       'contract_version', 1,
@@ -2072,9 +2088,10 @@ BEGIN
       'flow_liters',        NEW.flow_liters,
       'rain_source',        NEW.rain_source,
       'computed_at',        NEW.computed_at,
-      'gateway_device_eui', COALESCE((SELECT gateway_device_eui FROM irrigation_zones WHERE id=NEW.zone_id AND deleted_at IS NULL),'0016C001F11715E2')
+      'gateway_device_eui', COALESCE((SELECT gateway_device_eui FROM irrigation_zones WHERE id=NEW.zone_id AND deleted_at IS NULL),'0016C001F11715E2'),
+      'sync_version',       NEW.sync_version
     ),
-    0,
+    NEW.sync_version,
     strftime('%Y-%m-%dT%H:%M:%fZ','now'),
     COALESCE((SELECT gateway_device_eui FROM irrigation_zones WHERE id=NEW.zone_id AND deleted_at IS NULL),'0016C001F11715E2')
   );
@@ -2088,6 +2105,7 @@ WHEN EXISTS (
   SELECT 1 FROM sync_link_state
    WHERE peer_node = 'cloud' AND linked = 1
 )
+ AND COALESCE(NEW.sync_version,0) <> COALESCE(OLD.sync_version,0)
 BEGIN
   INSERT INTO sync_outbox(
     event_uuid, aggregate_type, aggregate_key, op, payload_json,
@@ -2095,7 +2113,7 @@ BEGIN
   ) VALUES (
     lower(hex(randomblob(16))),
     'ZONE_ENVIRONMENT',
-    COALESCE((SELECT zone_uuid FROM irrigation_zones WHERE id=NEW.zone_id AND deleted_at IS NULL),'') || '|' || COALESCE(NEW.date,''),
+    COALESCE((SELECT zone_uuid FROM irrigation_zones WHERE id=NEW.zone_id AND deleted_at IS NULL),'zone-id:' || NEW.zone_id) || '|' || COALESCE(NEW.date,''),
     'ZONE_ENVIRONMENT_APPENDED',
     json_object(
       'contract_version', 1,
@@ -2106,9 +2124,10 @@ BEGIN
       'flow_liters',        NEW.flow_liters,
       'rain_source',        NEW.rain_source,
       'computed_at',        NEW.computed_at,
-      'gateway_device_eui', COALESCE((SELECT gateway_device_eui FROM irrigation_zones WHERE id=NEW.zone_id AND deleted_at IS NULL),'0016C001F11715E2')
+      'gateway_device_eui', COALESCE((SELECT gateway_device_eui FROM irrigation_zones WHERE id=NEW.zone_id AND deleted_at IS NULL),'0016C001F11715E2'),
+      'sync_version',       NEW.sync_version
     ),
-    0,
+    NEW.sync_version,
     strftime('%Y-%m-%dT%H:%M:%fZ','now'),
     COALESCE((SELECT gateway_device_eui FROM irrigation_zones WHERE id=NEW.zone_id AND deleted_at IS NULL),'0016C001F11715E2')
   );
@@ -2129,7 +2148,7 @@ BEGIN
   ) VALUES (
     lower(hex(randomblob(16))),
     'ZONE_RECOMMENDATION',
-    COALESCE((SELECT zone_uuid FROM irrigation_zones WHERE id=NEW.zone_id AND deleted_at IS NULL),'') || '|' || COALESCE(NEW.date,''),
+    COALESCE((SELECT zone_uuid FROM irrigation_zones WHERE id=NEW.zone_id AND deleted_at IS NULL),'zone-id:' || NEW.zone_id) || '|' || COALESCE(NEW.date,''),
     'ZONE_RECOMMENDATION_UPSERTED',
     json_object(
       'contract_version', 1,
@@ -2152,9 +2171,10 @@ BEGIN
       'low_confidence_tree_count',     NEW.low_confidence_tree_count,
       'outlier_filtered_tree_count',   NEW.outlier_filtered_tree_count,
       'zone_confidence_score',         NEW.zone_confidence_score,
-      'computed_at',                   NEW.computed_at
+      'computed_at',                   NEW.computed_at,
+      'sync_version',                  NEW.sync_version
     ),
-    0,
+    NEW.sync_version,
     strftime('%Y-%m-%dT%H:%M:%fZ','now'),
     COALESCE((SELECT gateway_device_eui FROM irrigation_zones WHERE id=NEW.zone_id AND deleted_at IS NULL),'0016C001F11715E2')
   );
@@ -2168,6 +2188,7 @@ WHEN EXISTS (
   SELECT 1 FROM sync_link_state
    WHERE peer_node = 'cloud' AND linked = 1
 )
+ AND COALESCE(NEW.sync_version,0) <> COALESCE(OLD.sync_version,0)
 BEGIN
   INSERT INTO sync_outbox(
     event_uuid, aggregate_type, aggregate_key, op, payload_json,
@@ -2175,7 +2196,7 @@ BEGIN
   ) VALUES (
     lower(hex(randomblob(16))),
     'ZONE_RECOMMENDATION',
-    COALESCE((SELECT zone_uuid FROM irrigation_zones WHERE id=NEW.zone_id AND deleted_at IS NULL),'') || '|' || COALESCE(NEW.date,''),
+    COALESCE((SELECT zone_uuid FROM irrigation_zones WHERE id=NEW.zone_id AND deleted_at IS NULL),'zone-id:' || NEW.zone_id) || '|' || COALESCE(NEW.date,''),
     'ZONE_RECOMMENDATION_UPSERTED',
     json_object(
       'contract_version', 1,
@@ -2198,9 +2219,10 @@ BEGIN
       'low_confidence_tree_count',     NEW.low_confidence_tree_count,
       'outlier_filtered_tree_count',   NEW.outlier_filtered_tree_count,
       'zone_confidence_score',         NEW.zone_confidence_score,
-      'computed_at',                   NEW.computed_at
+      'computed_at',                   NEW.computed_at,
+      'sync_version',                  NEW.sync_version
     ),
-    0,
+    NEW.sync_version,
     strftime('%Y-%m-%dT%H:%M:%fZ','now'),
     COALESCE((SELECT gateway_device_eui FROM irrigation_zones WHERE id=NEW.zone_id AND deleted_at IS NULL),'0016C001F11715E2')
   );

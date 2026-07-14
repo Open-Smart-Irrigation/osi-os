@@ -26,6 +26,8 @@ osi-server (cloud) — see ../osi-server/AGENTS.md
 
 **REST is the only cloud→edge command path.** MQTT carries only edge→cloud telemetry, heartbeats, status, and ACKs. The edge is **not** subscribed to the cloud broker.
 
+Per-module system map (both repos, every module described with location): [docs/architecture/system-map/](docs/architecture/system-map/README.md) (plain-language) and [docs/architecture/system-map-technical/](docs/architecture/system-map-technical/README.md) (engineering edition). Snapshot-dated; AGENTS.md wins on conflict.
+
 ---
 
 ## Sync REST endpoints
@@ -223,6 +225,7 @@ cd web/react-gui && npm run build             # frontend build
 - Local passwords: bcrypt-hashed.
 - `/download/database`: gated.
 - Linked login uses a gateway-specific offline verifier (`bcrypt(password::DEVICE_EUI)`), **not** cloud password hash sync.
+- `osi-server.cloud.link_gateway_device_eui` can be preset by an operator to bypass the provisional-identity block on concentrator-less gateways during account-link. This is a test/demo path only; the production path is a configured concentrator that resolves an authoritative EUI. Using the override risks stranding cloud data and breaking offline login if the linked EUI later changes (see the verifier note above). See `osi-config-and-flags` for the resolution mechanism.
 
 ---
 
@@ -254,6 +257,7 @@ Field manuals for agents live in `.claude/skills/` (Agent Skills spec: SKILL.md 
 - `osi-agronomy-sensors-reference` — domain pack (SWT/pF, Chameleon, dendrometry, rain, LoRaWAN as used here); load when touching sensor semantics or displays.
 - `osi-config-and-flags` — UCI/env/flag catalog incl. DEVICE_EUI resolution; load when configuring or provisioning.
 - `osi-hardest-problem-campaign` — deferred stub; do not author without maintainer input.
+- `anti-slop-writing` — prose floor for ALL documentation and user-facing text; load before writing or editing any docs/README/ADR/runbook/PR prose. Mechanical check: `node .claude/skills/anti-slop-writing/slop-check.js <files>`.
 
 ## Session closeout
 

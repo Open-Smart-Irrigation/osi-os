@@ -1,5 +1,5 @@
 -- risk: additive
--- 0016: Persist private owner scope on journal plots and plot groups.
+-- 0020: Persist private owner scope on journal plots and plot groups.
 
 ALTER TABLE journal_plots ADD COLUMN owner_user_uuid TEXT;
 ALTER TABLE journal_plot_groups ADD COLUMN owner_user_uuid TEXT;

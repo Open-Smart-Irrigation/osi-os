@@ -7,6 +7,7 @@ import type {
   SupportRequest,
   SupportRequestArea,
   SupportRequestCloudStatus,
+  SupportRequestCreateResponse,
   SupportRequestCreateRequest,
   SupportRequestLocalStatus,
   SupportRequestSeverity,
@@ -31,6 +32,10 @@ const STATUS_TONE: Record<string, string> = {
   QUEUED: 'border-amber-300 bg-amber-50 text-amber-900',
   SUBMITTED: 'border-sky-300 bg-sky-50 text-sky-900',
   SYNCED: 'border-sky-300 bg-sky-50 text-sky-900',
+  AWAITING_PUBLISH: 'border-amber-300 bg-amber-50 text-amber-900',
+  PUBLISHING: 'border-sky-300 bg-sky-50 text-sky-900',
+  PUBLISH_BLOCKED_CONFIG: 'border-red-300 bg-red-50 text-red-900',
+  PUBLISH_BLOCKED_SECRET: 'border-red-300 bg-red-50 text-red-900',
   TRIAGED: 'border-sky-300 bg-sky-50 text-sky-900',
   BEING_REVIEWED: 'border-sky-300 bg-sky-50 text-sky-900',
   NEEDS_INFO: 'border-orange-300 bg-orange-50 text-orange-900',
@@ -38,7 +43,9 @@ const STATUS_TONE: Record<string, string> = {
   ISSUE_OPEN: 'border-sky-300 bg-sky-50 text-sky-900',
   NOT_PLANNED: 'border-slate-300 bg-slate-50 text-slate-900',
   REJECTED: 'border-slate-300 bg-slate-50 text-slate-900',
+  RATE_LIMITED: 'border-red-300 bg-red-50 text-red-900',
   DUPLICATE: 'border-slate-300 bg-slate-50 text-slate-900',
+  DUPLICATE_OF: 'border-slate-300 bg-slate-50 text-slate-900',
   AWAITING_APPROVAL: 'border-amber-300 bg-amber-50 text-amber-900',
   AGENT_RUNNING: 'border-sky-300 bg-sky-50 text-sky-900',
   VERIFYING: 'border-sky-300 bg-sky-50 text-sky-900',
@@ -86,6 +93,17 @@ function hasKnownStatus(code: string): code is SupportRequestCloudStatus | Suppo
 
 function sortDiagnosticsEntries(value: Record<string, SupportDiagnosticsValue>) {
   return Object.entries(value).sort(([left], [right]) => left.localeCompare(right));
+}
+
+function storeStatusSecret(response: SupportRequestCreateResponse) {
+  const statusSecret = typeof response.status_secret === 'string' ? response.status_secret.trim() : '';
+  if (!statusSecret) return;
+
+  try {
+    localStorage.setItem(`osi.support.statusSecret.${response.request_id}`, statusSecret);
+  } catch {
+    // localStorage may be disabled or quota-limited; the request itself is still saved locally.
+  }
 }
 
 const DiagnosticsValue: React.FC<{ value: SupportDiagnosticsValue; depth?: number }> = ({ value, depth = 0 }) => {
@@ -142,6 +160,7 @@ export const SupportRequests: React.FC = () => {
 
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
+  const [contactEmail, setContactEmail] = useState('');
   const [expected, setExpected] = useState('');
   const [actual, setActual] = useState('');
   const [steps, setSteps] = useState('');
@@ -195,6 +214,7 @@ export const SupportRequests: React.FC = () => {
   const resetForm = () => {
     setTitle('');
     setDescription('');
+    setContactEmail('');
     setExpected('');
     setActual('');
     setSteps('');
@@ -213,6 +233,7 @@ export const SupportRequests: React.FC = () => {
       type: requestType,
       title: title.trim(),
       description: description.trim(),
+      contact_email: contactEmail.trim() || null,
       expected: expected.trim() || null,
       actual: actual.trim() || null,
       steps: steps.trim() || null,
@@ -228,7 +249,8 @@ export const SupportRequests: React.FC = () => {
     setSubmitError('');
     setSubmitNotice('');
     try {
-      await supportRequestsAPI.create(payload);
+      const response = await supportRequestsAPI.create(payload);
+      storeStatusSecret(response);
       setSubmitNotice(t('status.QUEUED'));
       resetForm();
       setRequestsLoading(true);
@@ -301,6 +323,20 @@ export const SupportRequests: React.FC = () => {
                   onChange={(event) => setDescription(event.target.value)}
                   rows={5}
                   maxLength={4000}
+                  className="mt-1 w-full rounded-lg border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-[var(--text)]"
+                />
+              </div>
+
+              <div>
+                <label htmlFor="support-contact-email" className="block text-sm font-semibold text-[var(--text)]">
+                  {t('form.contactEmail')}
+                </label>
+                <input
+                  id="support-contact-email"
+                  type="email"
+                  value={contactEmail}
+                  onChange={(event) => setContactEmail(event.target.value)}
+                  maxLength={254}
                   className="mt-1 w-full rounded-lg border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-[var(--text)]"
                 />
               </div>

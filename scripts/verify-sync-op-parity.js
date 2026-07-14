@@ -1031,45 +1031,88 @@ function extractJournalModuleOps(modulePath) {
   return { ops: sortedUnique(ops), errors };
 }
 
-function extractSyncEventApplierOps(serverSource) {
-  const directory = path.dirname(serverSource);
-  const ops = [];
+function findJavaMethodBody(source, methodName) {
+  for (let i = 0; i < source.length;) {
+    const ch = source[i];
+    const next = source[i + 1];
+    if (ch === '/' && next === '/') {
+      const end = source.indexOf('\n', i + 2);
+      i = end < 0 ? source.length : end + 1;
+      continue;
+    }
+    if (ch === '/' && next === '*') {
+      const end = source.indexOf('*/', i + 2);
+      i = end < 0 ? source.length : end + 2;
+      continue;
+    }
+    if (ch === '"' || ch === "'") {
+      i = skipJavaQuotedLiteral(source, i);
+      continue;
+    }
+    if (startsWithWord(source, i, methodName)) {
+      const parenOpen = skipWhitespace(source, i + methodName.length);
+      if (source[parenOpen] === '(') {
+        const parenClose = findMatchingJavaParen(source, parenOpen);
+        if (parenClose >= 0) {
+          const braceOpen = skipWhitespace(source, parenClose + 1);
+          if (source[braceOpen] === '{') {
+            const braceClose = findMatchingBrace(source, braceOpen);
+            if (braceClose >= 0) return source.slice(braceOpen + 1, braceClose);
+          }
+        }
+      }
+    }
+    i++;
+  }
+  return null;
+}
+
+// Some sync event ops are dispatched by EdgeSyncService's applyEvent() via a
+// pluggable per-op registry (Map<String, SyncEventApplier>) rather than the
+// switch(event.op()) block: see foldSyncEventAppliers()/appliersByOp, which
+// is consulted before the switch and, when it claims an op, the switch is
+// never reached for that op (DD12, first case: GatewayLocationApplier /
+// GATEWAY_LOCATION_UPSERTED). Sibling files in the same package directory
+// that `implements SyncEventApplier` declare their ops via supportedOps();
+// those must count as server-supported ops too, or parity checks report a
+// false gap for correctly-dispatched, fully-implemented ops.
+function extractSyncEventApplierOps(source) {
+  if (!/\bimplements\b[^{;]*\bSyncEventApplier\b/.test(source)) return null;
+  const body = findJavaMethodBody(source, 'supportedOps');
+  if (body === null) return { ops: [], error: 'implements SyncEventApplier but supportedOps() method body not found' };
+  return { ops: [...new Set(extractQuotedConstants(body))], error: null };
+}
+
+function collectSyncEventApplierOps(serverSource) {
+  const dir = path.dirname(serverSource);
+  const ops = new Set();
   const errors = [];
-  let names;
+  let entries = [];
   try {
-    names = fs.readdirSync(directory).filter((name) => name.endsWith('.java'));
+    entries = fs.readdirSync(dir);
   } catch (error) {
-    return { ops, errors: [`unable to list SyncEventApplier sources in ${directory}: ${error.message}`] };
+    return { ops: [], errors: [] };
   }
-  for (const name of names) {
-    const file = path.join(directory, name);
-    const source = readUtf8(file);
-    if (!/\bimplements\s+SyncEventApplier\b/.test(source)) continue;
-    const method = /\bsupportedOps\s*\(\s*\)\s*\{/.exec(source);
-    if (!method) {
-      errors.push(`${name} implements SyncEventApplier without a supportedOps() body`);
+  for (const entry of entries) {
+    if (!entry.endsWith('.java')) continue;
+    const filePath = path.join(dir, entry);
+    if (path.resolve(filePath) === path.resolve(serverSource)) continue;
+    let stat;
+    try {
+      stat = fs.statSync(filePath);
+    } catch (error) {
       continue;
     }
-    const bodyOpen = method.index + method[0].lastIndexOf('{');
-    const bodyClose = findMatchingBrace(source, bodyOpen);
-    if (bodyClose < 0) {
-      errors.push(`${name} has an unbalanced supportedOps() body`);
+    if (!stat.isFile()) continue;
+    const result = extractSyncEventApplierOps(readUtf8(filePath));
+    if (!result) continue;
+    if (result.error) {
+      errors.push(`${entry}: ${result.error}`);
       continue;
     }
-    const body = source.slice(bodyOpen + 1, bodyClose);
-    const returnedSet = /\breturn\s+Set\s*\.\s*of\s*\(([\s\S]*?)\)\s*;/.exec(body);
-    if (!returnedSet) {
-      errors.push(`${name} supportedOps() must return a literal Set.of(...) for parity extraction`);
-      continue;
-    }
-    const declared = extractQuotedConstants(returnedSet[1]);
-    if (declared.length === 0) {
-      errors.push(`${name} supportedOps() Set.of(...) contains no literal operation`);
-      continue;
-    }
-    ops.push(...declared);
+    for (const op of result.ops) ops.add(op);
   }
-  return { ops: sortedUnique(ops), errors };
+  return { ops: [...ops], errors };
 }
 
 function extractServerOps(serverSource) {
@@ -1089,9 +1132,9 @@ function extractServerOps(serverSource) {
   for (const label of extractJavaSwitchCaseLabels(switchBody)) {
     ops.push(...extractQuotedConstants(label));
   }
-  const applierResult = extractSyncEventApplierOps(serverSource);
+  const applierResult = collectSyncEventApplierOps(serverSource);
   ops.push(...applierResult.ops);
-  return { ops: sortedUnique(ops), errors: applierResult.errors };
+  return { ops: [...new Set(ops)].sort(), errors: applierResult.errors };
 }
 
 function diffSets(expected, actual) {

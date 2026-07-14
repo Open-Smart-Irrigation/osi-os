@@ -1,5 +1,5 @@
 -- risk: additive
--- 0014: Field journal core schema (spec docs/superpowers/specs/2026-07-12-field-journal-design.md §4)
+-- 0018: Field journal core schema (spec docs/superpowers/specs/2026-07-12-field-journal-design.md §4)
 
 CREATE TABLE IF NOT EXISTS journal_entries (
   id INTEGER PRIMARY KEY AUTOINCREMENT,

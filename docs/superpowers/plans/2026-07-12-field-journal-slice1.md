@@ -38,8 +38,8 @@
 
 ## File structure (created/modified by this slice)
 
-- `database/migrations/ordered/0014__field_journal.sql` — DDL (9 tables + indexes)
-- `database/migrations/ordered/0015__journal_catalog_v1.sql` — generated catalog data v1
+- `database/migrations/ordered/0018__field_journal.sql` — DDL (9 tables + indexes; renumbered from 0014 on 2026-07-14 after merging main's 0014–0017)
+- `database/migrations/ordered/0019__journal_catalog_v1.sql` — generated catalog data v1 (renumbered from 0015 on 2026-07-14)
 - `scripts/generate-journal-catalog.js` — deterministic 0010 generator (reads core catalog def + Agroscope `catalog.json`)
 - `scripts/journal-catalog-core.js` — hand-written core catalog definition (activities, attributes, units, templates, layouts, products)
 - `database/migrations/ordered/CHECKSUMS.json`, `database/seed-blank.sql`, bundled `farming.db` copies — change-control registration
@@ -54,12 +54,12 @@
 
 ### Task 1: Migration 0014 — schema
 
-**Files:** Create `database/migrations/ordered/0014__field_journal.sql`; Modify `database/migrations/ordered/CHECKSUMS.json`, `database/seed-blank.sql` (append same DDL), bundled DBs per `osi-schema-change-control`; Test: existing verifiers.
+**Files:** Create `database/migrations/ordered/0018__field_journal.sql` (authored as 0014; renumbered 2026-07-14); Modify `database/migrations/ordered/CHECKSUMS.json`, `database/seed-blank.sql` (append same DDL), bundled DBs per `osi-schema-change-control`; Test: existing verifiers.
 
 **Interfaces — Produces:** the nine tables exactly as spec §4.1–§4.7 defines them; later tasks depend on these column names verbatim.
 
 - [ ] **Step 1: read the `osi-schema-change-control` skill**, then write the failing check: `node scripts/verify-migrations.js` currently knows nothing of 0014 — run it to record the clean baseline. Expected: PASS (baseline).
-- [ ] **Step 2: write `0014__field_journal.sql`** — complete DDL:
+- [ ] **Step 2: write `0018__field_journal.sql`** (authored as 0014; renumbered 2026-07-14) — complete DDL:
 
 ```sql
 -- risk: additive
@@ -281,13 +281,13 @@ CREATE TABLE IF NOT EXISTS journal_catalog_state (
 );
 ```
 
-- [ ] **Step 3: register in change control.** Append the identical DDL block to `database/seed-blank.sql`; add the 0014 sha256 to `CHECKSUMS.json` (`shasum -a 256 database/migrations/ordered/0014__field_journal.sql`); regenerate every bundled `farming.db` the `osi-schema-change-control` skill lists (repo root, `web/react-gui/`, profile DBs) with the repo's documented regeneration procedure.
+- [ ] **Step 3: register in change control.** Append the identical DDL block to `database/seed-blank.sql`; add the 0014 sha256 to `CHECKSUMS.json` (`shasum -a 256 database/migrations/ordered/0018__field_journal.sql`); regenerate every bundled `farming.db` the `osi-schema-change-control` skill lists (repo root, `web/react-gui/`, profile DBs) with the repo's documented regeneration procedure.
 - [ ] **Step 4: run the gates.** `node scripts/verify-migrations.js && node scripts/verify-seed-replay.js && node scripts/verify-db-schema-consistency.js && node scripts/verify-runtime-schema-parity.js && node scripts/verify-no-stray-ddl.js && node scripts/test-deploy-migration-wiring.js`. Expected: all PASS. Fix schemaContract/fingerprint updates the verifiers demand until green.
 - [ ] **Step 5: commit** `feat(journal): 0014 field journal schema + change-control registration`.
 
 ### Task 2: Catalog v1 — core definition + generated 0010
 
-**Files:** Create `scripts/journal-catalog-core.js`, `scripts/generate-journal-catalog.js`, `database/migrations/ordered/0015__journal_catalog_v1.sql` (generated, committed); Modify CHECKSUMS.json + seed-blank.sql + bundled DBs (same procedure as Task 1); Test: Create `scripts/test-journal-schema.js`.
+**Files:** Create `scripts/journal-catalog-core.js`, `scripts/generate-journal-catalog.js`, `database/migrations/ordered/0019__journal_catalog_v1.sql` (generated, committed; authored as 0015, renumbered 2026-07-14); Modify CHECKSUMS.json + seed-blank.sql + bundled DBs (same procedure as Task 1); Test: Create `scripts/test-journal-schema.js`.
 
 **Interfaces — Produces:** catalog rows with `catalog_version = 1`; `journal-catalog-core.js` exports `{ activities, attributes, units, choices, templates, layouts, products }` plain objects (the single authoring surface for core catalog content).
 

@@ -11,22 +11,29 @@ const flowPaths = [
   path.join(root, 'conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/flows.json'),
 ];
 
+// One-shot input-safety pins. Re-pinned 2026-07-14 against main @0f1361a3
+// merged into feat/field-journal-slice1 with the Task 10/11 journal wiring
+// re-applied: main's upsert-sync-versioning and DD8 follow-ups changed
+// sync-bootstrap-build and sync-force-build (history-api-router-fn was
+// untouched). Every replaceOnce anchor was verified to still occur exactly
+// once before re-pinning; interim/installed/corrected hashes were recomputed
+// by running this script's own staged verification.
 const nodeContracts = {
   'sync-bootstrap-build': {
     name: 'Build Cloud Bootstrap',
     type: 'function',
-    preimageHash: 'a3dbfcc3563d882d6361c71b66ed3e17c02416e5d733061a6d5932a30bf6bd17',
-    interimHash: 'e056e443c8db79322885b959b279477fb2f1f2a05c6514f71b1760d2342b2ec2',
-    installedHash: '18cca753bf2afdc9ef85755b5a8dbab6b0227a130b4258dd78178e0c46d3c790',
-    correctedHash: '566e90631cde1ab06b4bb7f802b2e757c71ece8aed1f803795877a59405a760f',
+    preimageHash: 'd7fd2a019cb3925e34f52fc0851816781bfc50da4c6c31d018c2723d7304cd81',
+    interimHash: '15167b53b7103c4f99c5ab0a2de7912a4917ec799e07b1e5fb9ad67268da7649',
+    installedHash: '55d7ea47694d8f6f0863e793c6a40bbfcf7a442e79b6a25d6d7be4fcd842b6c0',
+    correctedHash: '30fd59f6f57519113752b7fb9728d086e10d51eabd9dbcc740cd1222d27bad49',
   },
   'sync-force-build': {
     name: 'Run Force Sync',
     type: 'function',
-    preimageHash: 'f3295a898438486f78c44815bc1f7b44e51884884b2eac37f9f27858cf71d50e',
-    interimHash: '6f4b9482c457f136c4b60ed9363f4b6151d3e465bc9beb5de775cd0d1d1042be',
-    installedHash: '6e1227eeac183740504ea7ea4effdb0f21993801a065702b5789c927982bfe61',
-    correctedHash: '77ef1abba60a978923396dc299f6013c40c564c9ef2eb9415738e31a223ec889',
+    preimageHash: 'b037f8984b16e9a5d73dd85d5fdde89be1b426e6b102673630751d8d6d7a8254',
+    interimHash: '54424af7aac4515582c7c9312c419580ea151a2fd48bdbf0be51eff78a241bcd',
+    installedHash: 'e240ff936f17899b1414f8b1dd473462d53bceb842e4ca942ff7946f53b3482a',
+    correctedHash: 'b17b2801f706adebd6832f053133c12e4535e6e4a51240c7e641e98c60811a45',
   },
   'history-api-router-fn': {
     name: 'History API Router',

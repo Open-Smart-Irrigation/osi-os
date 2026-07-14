@@ -8,9 +8,15 @@ REPO_ROOT = Path(__file__).parent.parent.parent.parent
 
 def run(ctx: VerifyContext) -> CheckResult:
     if not ctx.canary_gate_available:
+        # Context-driven skip: the controller says the gate is not deployed
+        # yet, so there is nothing to run (unlike missing tooling below).
         return CheckResult("canary", True, "canary gate not yet deployed (pre-B0)")
     if not os.environ.get("OSI_ADMIN_TOKEN"):
-        return CheckResult("canary", True, "SKIP: OSI_ADMIN_TOKEN not set")
+        # The gate is supposed to run but cannot — that must not PASS.
+        return CheckResult("canary", False,
+                           "OSI_ADMIN_TOKEN not set on runner — the canary "
+                           "gate cannot run; set the token or disable the "
+                           "gate explicitly via canary_gate_available")
     cmd = ["node", str(REPO_ROOT / "scripts" / "deploy-canary-gate.js"),
            "--eui", "0016C001F11766E7",
            "--since", ctx.deploy_timestamp,

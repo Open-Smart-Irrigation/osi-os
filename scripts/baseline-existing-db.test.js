@@ -16,6 +16,12 @@ const MIGRATIONS_DIR = path.join(REPO, 'database/migrations/ordered');
 
 function scratch() { return fs.mkdtempSync(path.join(os.tmpdir(), 'baseline-test-')); }
 
+function migrationVersionsAfter(version) {
+  return loadMigrations(MIGRATIONS_DIR)
+    .map((m) => m.version)
+    .filter((v) => v > version);
+}
+
 // deploy.sh ensure_analysis_views_schema shape - live early-arrived content
 // deliberately indented differently from migration 0007 to prove semantic,
 // not textual, matching.
@@ -50,7 +56,7 @@ test('kaba100-shaped device (reference(3) + early analysis_views) baselines at N
   const res = await applyPending(cliRunner(db), {
     migrationsDir: MIGRATIONS_DIR, appVersion: 'test', writersStopped: true,
   });
-  assert.deepEqual(res.applied, [4, 5, 6, 7, 8]);
+  assert.deepEqual(res.applied, migrationVersionsAfter(3));
   assert.deepEqual(await verifyHead(cliRunner(db), { migrationsDir: MIGRATIONS_DIR }), { ok: true });
 });
 

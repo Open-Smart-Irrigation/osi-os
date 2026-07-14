@@ -12,7 +12,7 @@ const SOURCE_PATH = path.join(
   REPO_ROOT,
   'docs/superpowers/specs/agroscope-open-field/catalog.json'
 );
-const MIGRATION_NAME = '0015__journal_catalog_v1.sql';
+const MIGRATION_NAME = '0019__journal_catalog_v1.sql';
 const MIGRATION_PATH = path.join(REPO_ROOT, 'database/migrations/ordered', MIGRATION_NAME);
 const MANIFEST_PATH = path.join(REPO_ROOT, 'database/migrations/ordered/CHECKSUMS.json');
 const SEED_PATH = path.join(REPO_ROOT, 'database/seed-blank.sql');

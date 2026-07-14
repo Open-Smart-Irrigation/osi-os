@@ -16,6 +16,7 @@ vi.mock('react-i18next', () => ({
         'form.stepArea': '2. Area and severity',
         'form.stepDiagnostics': '3. Diagnostics and consent',
         'form.summary': 'Short title',
+        'form.contactEmail': 'Contact email (optional)',
         'form.description': 'What should be improved?',
         'form.requestType': 'Request type',
         'form.area': 'Area',
@@ -26,10 +27,20 @@ vi.mock('react-i18next', () => ({
         'form.submit': 'Save request',
         'form.submitting': 'Saving...',
         'status.QUEUED': 'Saved, waiting for internet',
+        'status.SUBMITTED': 'Submitted',
         'status.TRIAGED': 'Being reviewed',
+        'status.AWAITING_PUBLISH': 'Waiting to publish',
+        'status.ISSUE_OPEN': 'Issue open',
         'status.NEEDS_INFO': 'Needs more information',
+        'status.ISSUE_ONLY': 'Saved as issue',
+        'status.REJECTED': 'Rejected',
+        'status.RATE_LIMITED': 'Rate limited',
+        'status.DUPLICATE_OF': 'Duplicate',
+        'status.PUBLISHING': 'Publishing',
+        'status.PUBLISH_BLOCKED_CONFIG': 'Publishing blocked',
+        'status.PUBLISH_BLOCKED_SECRET': 'Publishing blocked',
         'status.PR_OPEN': 'In progress',
-        'status.UNKNOWN': 'Status unavailable',
+        'status.UNKNOWN': 'Status update received',
         'myRequests.title': 'My Requests',
         'empty': 'No requests yet.',
         'diagnostics.gateway': 'Gateway',
@@ -120,6 +131,7 @@ function fillValidRequest() {
 }
 
 beforeEach(() => {
+  window.localStorage.clear();
   vi.mocked(supportRequestsAPI.list).mockResolvedValue([]);
   vi.mocked(supportRequestsAPI.diagnosticsPreview).mockResolvedValue(diagnosticsPreview as any);
   vi.mocked(supportRequestsAPI.create).mockResolvedValue({
@@ -188,6 +200,43 @@ describe('SupportRequests', () => {
     });
   });
 
+  it('sends trimmed optional contact email when provided', async () => {
+    renderPage();
+    await screen.findByRole('heading', { name: 'Support & Requests' });
+
+    fillValidRequest();
+    fireEvent.change(screen.getByLabelText('Contact email (optional)'), {
+      target: { value: '  grower@example.com  ' },
+    });
+    fireEvent.click(screen.getByLabelText('I agree this request may be shared publicly without private farm details.'));
+    fireEvent.click(screen.getByRole('button', { name: 'Save request' }));
+
+    await waitFor(() => {
+      expect(supportRequestsAPI.create).toHaveBeenCalledWith(expect.objectContaining({
+        contact_email: 'grower@example.com',
+      }));
+    });
+  });
+
+  it('stores the returned status secret by request id after submit', async () => {
+    vi.mocked(supportRequestsAPI.create).mockResolvedValue({
+      request_id: 'local-secret-1',
+      local_status: 'QUEUED',
+      status_secret: 'edge-status-secret',
+    } as any);
+
+    renderPage();
+    await screen.findByRole('heading', { name: 'Support & Requests' });
+
+    fillValidRequest();
+    fireEvent.click(screen.getByLabelText('I agree this request may be shared publicly without private farm details.'));
+    fireEvent.click(screen.getByRole('button', { name: 'Save request' }));
+
+    await waitFor(() => {
+      expect(window.localStorage.getItem('osi.support.statusSecret.local-secret-1')).toBe('edge-status-secret');
+    });
+  });
+
   it('shows queued and triaged statuses in My Requests after submit', async () => {
     vi.mocked(supportRequestsAPI.list)
       .mockResolvedValueOnce([])
@@ -243,8 +292,46 @@ describe('SupportRequests', () => {
 
     renderPage();
 
-    expect(await screen.findByText('Status unavailable')).toBeInTheDocument();
+    expect(await screen.findByText('Status update received')).toBeInTheDocument();
+    expect(document.body).not.toHaveTextContent('Status unavailable');
     expect(document.body).not.toHaveTextContent('status.SURPRISE_STATUS');
+  });
+
+  it('renders normal server cloud states with intentional labels', async () => {
+    const serverStatusCases = [
+      ['submitted', 'SUBMITTED', 'Submitted'],
+      ['awaiting-publish', 'AWAITING_PUBLISH', 'Waiting to publish'],
+      ['issue-only', 'ISSUE_ONLY', 'Saved as issue'],
+      ['issue-open', 'ISSUE_OPEN', 'Issue open'],
+      ['needs-info', 'NEEDS_INFO', 'Needs more information'],
+      ['rejected', 'REJECTED', 'Rejected'],
+      ['rate-limited', 'RATE_LIMITED', 'Rate limited'],
+      ['duplicate-of', 'DUPLICATE_OF', 'Duplicate'],
+      ['publishing', 'PUBLISHING', 'Publishing'],
+      ['publish-blocked-config', 'PUBLISH_BLOCKED_CONFIG', 'Publishing blocked'],
+      ['publish-blocked-secret', 'PUBLISH_BLOCKED_SECRET', 'Publishing blocked'],
+    ] as const;
+
+    vi.mocked(supportRequestsAPI.list).mockResolvedValue(
+      serverStatusCases.map(([requestId, cloudStatus]) =>
+        request({
+          request_id: requestId,
+          local_status: 'SYNCED',
+          cloud_status: cloudStatus,
+        }),
+      ) as any,
+    );
+
+    renderPage();
+
+    const expectedLabelCounts = new Map<string, number>();
+    for (const [, , label] of serverStatusCases) {
+      expectedLabelCounts.set(label, (expectedLabelCounts.get(label) ?? 0) + 1);
+    }
+    for (const [label, count] of expectedLabelCounts) {
+      expect(await screen.findAllByText(label)).toHaveLength(count);
+    }
+    expect(document.body).not.toHaveTextContent('Status update received');
   });
 
   it('renders valid workflow cloud statuses with their labels', async () => {

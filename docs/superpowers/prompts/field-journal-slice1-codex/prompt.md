@@ -13,7 +13,7 @@ You are the orchestrator. You plan, dispatch, verify, and loop. Spawn a **cheap 
 ## State at handover (verify before starting)
 
 - Commit `a28a6237`: all design docs (spec v2, plan, review artifacts, Agroscope catalog).
-- Commit `f72c6e2b`: **Task 1 complete and reviewed clean** — migration `database/migrations/ordered/0014__field_journal.sql` (13 journal tables + indexes), registered in CHECKSUMS.json, seed-blank.sql, all 7 bundled farming.db copies, and `scripts/verify-db-schema-consistency.js` schemaContract.
+- Commit `f72c6e2b`: **Task 1 complete and reviewed clean** — migration `database/migrations/ordered/0018__field_journal.sql` (13 journal tables + indexes; authored as 0014, renumbered 2026-07-14), registered in CHECKSUMS.json, seed-blank.sql, all 7 bundled farming.db copies, and `scripts/verify-db-schema-consistency.js` schemaContract.
 - Progress ledger: `.superpowers/sdd/progress.md` — append one line per completed task: `Task N: complete (commits <base7>..<head7>, review clean[, notes])`. Worker reports go to `.superpowers/sdd/task-N-report.md`.
 - Baseline gates all green at `f72c6e2b`: `verify-migrations` (14), `verify-seed-replay`, `verify-profile-parity`, `verify-db-schema-consistency`, `verify-runtime-schema-parity`, `verify-no-stray-ddl`, `test-deploy-migration-wiring`, `test-flows-wiring`, `test-contract-schemas`.
 - Known Minor deferred to final review: `journal_products` lacks `updated_at` (spec-inherited; do not fix unless the final review says so).
@@ -21,7 +21,7 @@ You are the orchestrator. You plan, dispatch, verify, and loop. Spawn a **cheap 
 
 ## Remaining tasks (execution order 2 → 14)
 
-2. Catalog v1 — `scripts/journal-catalog-core.js` + `scripts/generate-journal-catalog.js` → generated `0015__journal_catalog_v1.sql`; `scripts/test-journal-schema.js`
+2. Catalog v1 — `scripts/journal-catalog-core.js` + `scripts/generate-journal-catalog.js` → generated `0019__journal_catalog_v1.sql` (authored as 0015, renumbered 2026-07-14); `scripts/test-journal-schema.js`
 3. `osi-journal` module — catalog loader + entry validation (+ registration in osi-lib NAME_TO_PATH, srv package.json, deploy.sh — both profiles)
 4. Units engine (quantity_kind/basis, entered→canonical)
 5. Cascade engine (`option_dependencies`)

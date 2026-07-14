@@ -475,6 +475,8 @@ const sampleWorkRequestEvent = {
         consent_public: true,
         consent_diagnostics: true,
         gateway_device_eui: '0016C001F11715E2',
+        status_secret_hash: 'sha256:status-secret-fixture',
+        contact_email: 'field-user@example.test',
         diagnostics: { sync: { pending_outbox_count: 0 } },
         gui_user: { local_user_id: 7, username: 'field-user' }
     }
@@ -550,19 +552,32 @@ const workRequestStatusRequestIdType = workRequestStatusRule &&
     workRequestStatusRule.then.properties &&
     workRequestStatusRule.then.properties.request_id &&
     workRequestStatusRule.then.properties.request_id.type;
+const workRequestStatusRequestIdMinLength = workRequestStatusRule &&
+    workRequestStatusRule.then &&
+    workRequestStatusRule.then.properties &&
+    workRequestStatusRule.then.properties.request_id &&
+    workRequestStatusRule.then.properties.request_id.minLength;
 const workRequestStatusStatusType = workRequestStatusRule &&
     workRequestStatusRule.then &&
     workRequestStatusRule.then.properties &&
     workRequestStatusRule.then.properties.status &&
     workRequestStatusRule.then.properties.status.type;
+const workRequestStatusStatusMinLength = workRequestStatusRule &&
+    workRequestStatusRule.then &&
+    workRequestStatusRule.then.properties &&
+    workRequestStatusRule.then.properties.status &&
+    workRequestStatusRule.then.properties.status.minLength;
 if (!workRequestStatusRequired.includes('request_id') || !workRequestStatusRequired.includes('status')) {
     console.error('FAIL schema: WORK_REQUEST_STATUS does not require request_id and status');
     ok = false;
 } else if (workRequestStatusRequestIdType !== 'string' || workRequestStatusStatusType !== 'string') {
     console.error('FAIL schema: WORK_REQUEST_STATUS request_id/status can still be null');
     ok = false;
+} else if (workRequestStatusRequestIdMinLength !== 1 || workRequestStatusStatusMinLength !== 1) {
+    console.error('FAIL schema: WORK_REQUEST_STATUS request_id/status do not require minLength 1');
+    ok = false;
 } else {
-    console.log('OK  schema: WORK_REQUEST_STATUS requires non-null request_id and status');
+    console.log('OK  schema: WORK_REQUEST_STATUS requires non-empty request_id and status');
 }
 
 const openForDurationRule = allOf.find(rule =>

@@ -42,7 +42,7 @@ for (const exportName of [
 }
 
 const artifactPaths = [
-  'database/migrations/ordered/0015__journal_catalog_v1.sql',
+  'database/migrations/ordered/0019__journal_catalog_v1.sql',
   'database/seed-blank.sql',
   'database/migrations/ordered/CHECKSUMS.json',
 ].map((relativePath) => path.join(repoRoot, relativePath));
@@ -164,7 +164,7 @@ assert.throws(
 const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'journal-generator-'));
 try {
   const paths = {
-    migrationPath: path.join(tmpDir, '0015__journal_catalog_v1.sql'),
+    migrationPath: path.join(tmpDir, '0019__journal_catalog_v1.sql'),
     seedPath: path.join(tmpDir, 'seed-blank.sql'),
     manifestPath: path.join(tmpDir, 'CHECKSUMS.json'),
   };
@@ -180,15 +180,15 @@ try {
   const installedMigration = fs.readFileSync(paths.migrationPath, 'utf8');
   const installedSeed = fs.readFileSync(paths.seedPath, 'utf8');
   const installedManifest = fs.readFileSync(paths.manifestPath, 'utf8');
-  fs.writeFileSync(paths.migrationPath, '-- differing installed 0015\n');
+  fs.writeFileSync(paths.migrationPath, '-- differing installed 0019\n');
   assert.throws(
     () => generator.writeGeneratedArtifacts(compiled, paths),
     /new migration|refus|exists and differs/i,
-    'normal generator writes must refuse to replace a differing installed 0015'
+    'normal generator writes must refuse to replace a differing installed 0019'
   );
   assert.equal(
     fs.readFileSync(paths.migrationPath, 'utf8'),
-    '-- differing installed 0015\n',
+    '-- differing installed 0019\n',
     'refusal must leave the installed migration untouched'
   );
   assert.equal(

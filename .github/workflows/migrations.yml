@@ -52,7 +52,7 @@ jobs:
       - name: Fetch migration base ref
         run: git fetch --no-tags origin main:refs/remotes/origin/main
       - run: node --test lib/osi-migrate/__tests__/*.test.js
-      - run: node --test scripts/check-sync-parity.test.js scripts/restamp-fingerprints.test.js scripts/verify-migrations.test.js scripts/verify-no-stray-ddl.test.js scripts/verify-no-new-silent-catch.test.js scripts/test-error-recording-flow.js scripts/flows-bare-require-scan.test.js scripts/test-outbox-retention.js scripts/verify-helper-registration.test.js scripts/semantic-schema-compare.test.js scripts/repair-sync-outbox-v2.test.js scripts/baseline-existing-db.test.js scripts/flows-size-scan.test.js scripts/verify-flows-size-ratchet.test.js scripts/migrate-cli.test.js scripts/test-deploy-migration-wiring.js scripts/deploy-payload-swap.test.js scripts/test-deploy-atomic-payload-wiring.js
+      - run: node --test scripts/check-sync-parity.test.js scripts/restamp-fingerprints.test.js scripts/verify-migrations.test.js scripts/verify-no-stray-ddl.test.js scripts/verify-no-new-silent-catch.test.js scripts/test-error-recording-flow.js scripts/flows-bare-require-scan.test.js scripts/test-outbox-retention.js scripts/test-outbox-retry-backoff.js scripts/verify-helper-registration.test.js scripts/semantic-schema-compare.test.js scripts/repair-sync-outbox-v2.test.js scripts/baseline-existing-db.test.js scripts/flows-size-scan.test.js scripts/verify-flows-size-ratchet.test.js scripts/migrate-cli.test.js scripts/test-deploy-migration-wiring.js scripts/deploy-payload-swap.test.js scripts/test-deploy-atomic-payload-wiring.js
       - run: node scripts/test-history-helper.js
       - run: node --test scripts/test-health-helper.js
       - run: node --test scripts/test-timestamp-clamp.js
@@ -65,6 +65,12 @@ jobs:
       - run: node scripts/verify-sync-flow.js
       - run: node scripts/verify-no-new-silent-catch.js
       - run: node scripts/verify-runtime-schema-parity.js
+      - run: node scripts/verify-boot-ddl-interpolation.js
+      - run: node --test scripts/verify-boot-ddl-interpolation.test.js scripts/test-upsert-sync-versioning.js
+      - name: Verify trigger-body parity (seed vs boot DDL)
+        run: node scripts/verify-trigger-body-parity.js
+      - name: Trigger-body parity unit tests
+        run: node --test scripts/verify-trigger-body-parity.test.js
       - run: node scripts/verify-devices-rebuild-fence.js
       - run: node scripts/verify-heartbeat-health.js
       - run: node scripts/verify-helper-registration.js
