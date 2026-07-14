@@ -336,6 +336,79 @@ test('plot upsert is atomic, zone-owner scoped, versioned, and command-ledger re
   assert.equal(db.prepare("SELECT COUNT(*) AS n FROM journal_plots WHERE plot_code='foreign'").get().n, 0);
 });
 
+test('plot detach succeeds after the linked zone is soft-deleted', async () => {
+  const db = new TestDb('plot-zone-soft-delete-detach');
+  seedIdentity(db);
+  const plotUuid = '10000000-0000-4000-8000-000000000021';
+  await journal.upsertPlot(db, plotInput(plotUuid, 'zone-detach', { zone_uuid: ZONE_UUID }), principal());
+  db.prepare('UPDATE irrigation_zones SET deleted_at=? WHERE zone_uuid=?')
+    .run('2026-07-13T00:00:00.000Z', ZONE_UUID);
+
+  // Detaching a plot from its now-soft-deleted zone must succeed, not 404.
+  const result = await journal.upsertPlot(
+    db,
+    plotInput(plotUuid, 'zone-detach', { base_sync_version: 1, zone_uuid: null }),
+    principal(),
+    plotUuid
+  );
+  assert.equal(result.plot.zone_uuid, null);
+  assert.equal(result.plot.sync_version, 2);
+});
+
+test('plot field edit succeeds after the linked zone is soft-deleted', async () => {
+  const db = new TestDb('plot-zone-soft-delete-edit');
+  seedIdentity(db);
+  const plotUuid = '10000000-0000-4000-8000-000000000022';
+  await journal.upsertPlot(db, plotInput(plotUuid, 'zone-edit', { zone_uuid: ZONE_UUID }), principal());
+  db.prepare('UPDATE irrigation_zones SET deleted_at=? WHERE zone_uuid=?')
+    .run('2026-07-13T00:00:00.000Z', ZONE_UUID);
+
+  // An unrelated field edit (that does not name the dead zone) must also succeed.
+  const result = await journal.upsertPlot(
+    db,
+    plotInput(plotUuid, 'zone-edit', { base_sync_version: 1, active: 0 }),
+    principal(),
+    plotUuid
+  );
+  assert.equal(result.plot.active, 0);
+  assert.equal(result.plot.sync_version, 2);
+});
+
+test('plot edits after zone soft-delete still enforce zone ownership masking', async () => {
+  const db = new TestDb('plot-zone-soft-delete-masking');
+  seedIdentity(db);
+  const plotUuid = '10000000-0000-4000-8000-000000000023';
+  await journal.upsertPlot(db, plotInput(plotUuid, 'zone-masking', { zone_uuid: ZONE_UUID }), principal());
+  db.prepare('UPDATE irrigation_zones SET deleted_at=? WHERE zone_uuid=?')
+    .run('2026-07-13T00:00:00.000Z', ZONE_UUID);
+
+  // Regression guard: still cannot link the plot to another user's zone.
+  await assert.rejects(
+    journal.upsertPlot(
+      db,
+      plotInput(plotUuid, 'zone-masking', { base_sync_version: 1, zone_uuid: FOREIGN_ZONE_UUID }),
+      principal(),
+      plotUuid
+    ),
+    (error) => error && error.statusCode === 404
+  );
+
+  // Regression guard: still cannot re-link the plot to the soft-deleted zone itself.
+  await assert.rejects(
+    journal.upsertPlot(
+      db,
+      plotInput(plotUuid, 'zone-masking', { base_sync_version: 1, zone_uuid: ZONE_UUID }),
+      principal(),
+      plotUuid
+    ),
+    (error) => error && error.statusCode === 404
+  );
+  assert.equal(
+    db.prepare('SELECT zone_uuid FROM journal_plots WHERE plot_uuid=?').get(plotUuid).zone_uuid,
+    ZONE_UUID
+  );
+});
+
 test('plot constraints prevent a second active zone plot and unresolved-group deactivation', async () => {
   const db = new TestDb('plot-invariants');
   seedIdentity(db);

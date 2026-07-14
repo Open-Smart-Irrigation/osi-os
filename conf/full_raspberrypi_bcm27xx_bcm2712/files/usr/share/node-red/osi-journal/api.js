@@ -696,7 +696,6 @@ async function upsertPlot(db, input, principal, pathUuid, options) {
     if (!pathUuid && !existing && await dbGet(tx, 'SELECT 1 FROM journal_plots WHERE plot_uuid=?', [plotUuid])) {
       throw apiError(404, 'not_found', 'Plot was not found');
     }
-    if (existing && existing.zone_uuid) await ownedZone(tx, existing.zone_uuid, principal);
     const creating = !existing;
     exactBaseVersion(input.base_sync_version, creating);
     const zoneUuid = canonicalUuid(input.zone_uuid, 'zone_uuid', false);
