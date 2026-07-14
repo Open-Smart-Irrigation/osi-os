@@ -689,6 +689,53 @@ test('zone-only entry provisioning is idempotent, explicit-layout, and commits b
   );
 });
 
+test('zone-based entry creation skips an inactive plot and provisions a new active one', async () => {
+  const db = new TestDb('zone-provision-skip-inactive');
+  seedIdentity(db);
+  const firstEntryUuid = '33000000-0000-4000-8000-000000000001';
+  await journal.saveEntry(
+    db,
+    entryInput(firstEntryUuid, null, '2026-07-13T08:00:00', { zone_uuid: ZONE_UUID, plot_uuid: null }),
+    principal(),
+    { mode: 'create' }
+  );
+  const original = db.prepare('SELECT plot_uuid,plot_code FROM journal_plots WHERE zone_uuid=?').get(ZONE_UUID);
+  assert.ok(original, 'zone-provisioned plot must exist after the first entry');
+
+  // Deactivate the auto-created plot, mirroring PUT /api/journal/plots/:plot_uuid { active: 0 }.
+  await journal.upsertPlot(
+    db,
+    plotInput(original.plot_uuid, original.plot_code, {
+      base_sync_version: 1,
+      zone_uuid: ZONE_UUID,
+      active: 0,
+    }),
+    principal(),
+    original.plot_uuid
+  );
+  assert.equal(
+    db.prepare('SELECT active FROM journal_plots WHERE plot_uuid=?').get(original.plot_uuid).active,
+    0
+  );
+
+  const secondEntryUuid = '33000000-0000-4000-8000-000000000002';
+  await journal.saveEntry(
+    db,
+    entryInput(secondEntryUuid, null, '2026-07-13T09:00:00', { zone_uuid: ZONE_UUID, plot_uuid: null }),
+    principal(),
+    { mode: 'create' }
+  );
+
+  const createdPlotUuid = db.prepare('SELECT plot_uuid FROM journal_entries WHERE entry_uuid=?')
+    .get(secondEntryUuid).plot_uuid;
+  assert.ok(createdPlotUuid, 'second entry must be linked to a plot');
+  assert.notEqual(createdPlotUuid, original.plot_uuid);
+  assert.equal(
+    db.prepare('SELECT active FROM journal_plots WHERE plot_uuid=?').get(createdPlotUuid).active,
+    1
+  );
+});
+
 test('custom vocabulary is scoped, mapping-complete, frozen after voided use, and rollback-safe', async () => {
   const db = new TestDb('custom-vocab');
   seedIdentity(db);

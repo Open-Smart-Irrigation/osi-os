@@ -829,7 +829,7 @@ async function ensureZonePlot(db, zoneUuid, input, principal) {
     db,
     'SELECT p.plot_uuid FROM journal_plots AS p WHERE p.owner_user_uuid=? AND p.gateway_device_eui=? ' +
       'AND p.zone_uuid=? ' +
-      'AND p.deleted_at IS NULL ORDER BY p.created_at,p.plot_uuid LIMIT 1',
+      'AND p.active=1 AND p.deleted_at IS NULL ORDER BY p.created_at,p.plot_uuid LIMIT 1',
     [principal.owner_user_uuid, principal.gateway_device_eui, canonicalZone]
   );
   if (existing) return existing.plot_uuid;
