@@ -1003,6 +1003,12 @@ module.exports = {
   queueCommandAck: function queueCommandAck() {
     return require('./commands').queueCommandAck.apply(null, arguments);
   },
+  validJournalEffectBinding: function validJournalEffectBinding() {
+    return require('./commands').validJournalEffectBinding.apply(null, arguments);
+  },
+  submittedIntentHash: function submittedIntentHash() {
+    return require('./commands').submittedIntentHash.apply(null, arguments);
+  },
   allowedUnits,
   assertJournalEntryEffectKey: function assertJournalEntryEffectKey() {
     return require('./lifecycle').assertJournalEntryEffectKey.apply(null, arguments);

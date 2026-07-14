@@ -213,12 +213,13 @@ for (const fallbackNodeId of ['reject-indefinite-open', 'write-strega-expectatio
 if (!dedupe || JSON.stringify(dedupe.libs) !== JSON.stringify([
     { var: 'osiDb', module: 'osi-db-helper' },
     { var: 'osiJournal', module: 'osi-journal' },
+    { var: 'osiCommandLedger', module: 'osi-command-ledger' },
 ]) || JSON.stringify(dedupe.wires) !== JSON.stringify([
     ['journal-command-apply-fn'],
     ['9d5e3035c3d069c4'],
 ]) || !/deduplicatePendingCommand/.test(dedupe.func || '') ||
     !/node\.error/.test(dedupe.func || '') || /dispatching command/.test(dedupe.func || '')) {
-    failures.push('journal commands: dedupe must delegate exact replay, fail closed, and bypass ACK reclassification');
+    failures.push('journal commands: dedupe must delegate exact replay via the shared command ledger, fail closed, and bypass ACK reclassification');
 }
 if (!journalApply || JSON.stringify(journalApply.libs) !== JSON.stringify([
     { var: 'osiDb', module: 'osi-db-helper' },
@@ -231,7 +232,7 @@ if (!journalApply || JSON.stringify(journalApply.libs) !== JSON.stringify([
 }
 if (!ackQueue || JSON.stringify(ackQueue.libs) !== JSON.stringify([
     { var: 'osiDb', module: 'osi-db-helper' },
-    { var: 'osiJournal', module: 'osi-journal' },
+    { var: 'osiCommandLedger', module: 'osi-command-ledger' },
 ]) || !/queueCommandAck/.test(ackQueue.func || '') ||
     /INSERT OR REPLACE INTO applied_commands/.test(ackQueue.func || '') ||
     /if \(duplicateFlag\) return 'APPLIED'/.test(ackQueue.func || '')) {

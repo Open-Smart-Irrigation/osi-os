@@ -10,6 +10,8 @@ const flowPath = path.resolve(__dirname, '..', 'conf', 'full_raspberrypi_bcm27xx
 const nodeRedRoot = path.resolve(__dirname, '..', 'conf', 'full_raspberrypi_bcm27xx_bcm2712', 'files', 'usr', 'share', 'node-red');
 const journalCommandsPath = path.join(nodeRedRoot, 'osi-journal', 'commands.js');
 const journalCommandsSource = fs.readFileSync(journalCommandsPath, 'utf8');
+const commandLedgerPath = path.join(nodeRedRoot, 'osi-command-ledger', 'index.js');
+const commandLedgerSource = fs.readFileSync(commandLedgerPath, 'utf8');
 const deployScriptPath = path.resolve(__dirname, '..', 'deploy.sh');
 const nodeRedInitPath = path.resolve(__dirname, '..', 'feeds', 'chirpstack-openwrt-feed', 'apps', 'node-red', 'files', 'node-red.init');
 const chirpstackInitPath = path.resolve(__dirname, '..', 'feeds', 'chirpstack-openwrt-feed', 'chirpstack', 'chirpstack', 'files', 'chirpstack.init');
@@ -1563,12 +1565,12 @@ expectIncludes('Sync Init Schema + Triggers', 'result_detail TEXT', 'creates the
 expectIncludes('Sync Init Schema + Triggers', 'attempt_count INTEGER NOT NULL DEFAULT 0', 'creates/applies applied_commands retry accounting columns');
 expectIncludes('Sync Init Schema + Triggers', 'last_ack_attempt_at TEXT', 'creates/applies applied_commands ACK retry timestamp column');
 expectIncludes('Sync Init Schema + Triggers', 'CREATE TABLE IF NOT EXISTS command_ack_outbox', 'creates the durable edge command ACK outbox during sync init');
-expectIncludes('Deduplicate Pending Command', 'osiJournal.deduplicatePendingCommand', 'delegates exact stored-result replay before dispatch');
+expectIncludes('Deduplicate Pending Command', 'osiCommandLedger.deduplicatePendingCommand', 'delegates exact stored-result replay before dispatch via the shared command ledger');
 expectIncludes('Deduplicate Pending Command', 'failed closed', 'fails closed when replay-ledger lookup is unavailable');
-expectFileIncludes('osi-journal/commands.js', journalCommandsSource, 'SELECT * FROM applied_commands WHERE command_id=? LIMIT 1', 'looks up exact command IDs before payload validation');
+expectFileIncludes('osi-command-ledger/index.js', commandLedgerSource, 'SELECT * FROM applied_commands WHERE command_id=? LIMIT 1', 'looks up exact command IDs before payload validation');
 expectFileIncludes('osi-journal/commands.js', journalCommandsSource, 'result_detail', 'reconstructs ACK facts from canonical replay-ledger detail');
-expectIncludes('Queue REST Command ACK', 'osiJournal.queueCommandAck', 'delegates atomic terminal ledger and ACK queueing');
-expectFileIncludes('osi-journal/commands.js', journalCommandsSource, 'ON CONFLICT(command_id) DO NOTHING', 'never rewrites an existing terminal command result');
+expectIncludes('Queue REST Command ACK', 'osiCommandLedger.queueCommandAck', 'delegates atomic terminal ledger and ACK queueing via the shared command ledger');
+expectFileIncludes('osi-command-ledger/index.js', commandLedgerSource, 'ON CONFLICT(command_id) DO NOTHING', 'never rewrites an existing terminal command result');
 expectFileIncludes('osi-journal/commands.js', journalCommandsSource, 'INSERT INTO command_ack_outbox', 'queues durable REST command ACKs in the shared transaction helper');
 expectExcludes('Queue REST Command ACK', 'applied_at,detail', 'legacy applied_commands.detail insert column');
 expectExcludes('Queue REST Command ACK', 'INSERT OR REPLACE INTO applied_commands', 'terminal ledger rewrite SQL');

@@ -4,6 +4,7 @@ const { loadCatalog } = require('./catalog');
 const lifecycle = require('./lifecycle');
 const journalApi = require('./api');
 const { aggregateHash } = require('./aggregate');
+const ledger = require('../osi-command-ledger');
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const EUI64 = /^[0-9A-F]{16}$/;
@@ -378,54 +379,11 @@ function classification(error, type, payload) {
   return null;
 }
 
-function replayStatus(result) {
-  if (result === 'APPLIED') return 'ACKED';
-  if (result === 'FAILED_RETRYABLE') return 'FAILED_RETRYABLE';
-  return 'NACKED';
-}
-
-function parsedResultDetail(row) {
-  let facts = {};
-  if (typeof row.result_detail === 'string' && row.result_detail) {
-    try {
-      const parsed = JSON.parse(row.result_detail);
-      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) facts = parsed;
-      else facts = { storedResultDetail: parsed };
-    } catch (_) {
-      facts = { storedResultDetail: row.result_detail };
-    }
-  }
-  return facts;
-}
-
-function replayAck(row, deliveryId, exactDelivery) {
-  const facts = parsedResultDetail(row);
-  const completeTerminalAck = hasOwn(facts, 'commandId') && hasOwn(facts, 'status') &&
-    hasOwn(facts, 'result') && hasOwn(facts, 'duplicate');
-  if (exactDelivery && completeTerminalAck) return Object.assign({}, facts);
-  return Object.assign({}, facts, {
-    commandId: deliveryId,
-    commandType: facts.commandType || row.command_type,
-    effectKey: facts.effectKey == null ? row.effect_key : facts.effectKey,
-    appliedAt: facts.appliedAt || row.applied_at,
-    status: replayStatus(row.result),
-    result: row.result,
-    duplicate: true,
-  });
-}
-
-function journalEffectProvenanceMatches(row, payload, gatewayDeviceEui, type, intentHash) {
-  const facts = parsedResultDetail(row);
-  return facts && typeof facts === 'object' && !Array.isArray(facts) &&
-    typeof intentHash === 'string' && facts.submittedIntentHash === intentHash &&
-    facts.commandType === type &&
-    facts.ownerUserUuid === payload.owner_user_uuid &&
-    facts.authorPrincipalUuid === payload.author_principal_uuid &&
-    facts.authorLabel === (payload.author_label == null ? null : payload.author_label) &&
-    facts.gatewayDeviceEui === gatewayDeviceEui &&
-    String(row.device_eui || '').trim().toUpperCase() === gatewayDeviceEui;
-}
-
+// replayStatus/parsedResultDetail/replayAck/journalEffectProvenanceMatches and
+// the generic dedupe/ACK pipeline now live in osi-command-ledger (they fail
+// closed for every command family, not just journal commands). This module
+// keeps only the journal-specific effect-key binding rule below, injected
+// into the ledger through deduplicatePendingCommand's opts hook.
 async function validJournalEffectBinding(db, envelope, runtime, type) {
   const payload = envelope.payload;
   if (!payload || typeof payload !== 'object' || Array.isArray(payload) ||
@@ -490,174 +448,22 @@ async function validJournalEffectBinding(db, envelope, runtime, type) {
     payload.effect_key === prefix + ':' + key + ':' + baseVersion;
 }
 
-function validNonJournalEffectBinding(envelope, runtime) {
-  if (!runtime || runtime.command_type_recognized !== true) return false;
-  const payload = envelope.payload;
-  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return false;
-  const effectKey = String(payload.effect_key || payload.effectKey || envelope.effectKey || '').trim();
-  let match = /^irrigation:scheduler:(0|[1-9]\d*):(0|[1-9]\d*):(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z)$/.exec(effectKey);
-  if (match) {
-    const zoneId = payload.zone_id == null ? payload.zoneId : payload.zone_id;
-    const scheduledFor = new Date(match[3]);
-    return Number.isSafeInteger(Number(zoneId)) && String(Number(zoneId)) === match[1] &&
-      Number.isFinite(scheduledFor.getTime()) && scheduledFor.toISOString() === match[3];
-  }
-  match = /^irrigation:manual:([0-9A-F]{16}):(cloud|edge):([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/.exec(effectKey);
-  if (match) {
-    const deviceEui = String(payload.device_eui || payload.deviceEui || payload.devEui || '')
-      .trim().toUpperCase();
-    return deviceEui === match[1];
-  }
-  match = /^config:([0-9A-F]{16}):([a-z0-9_.-]+):(0|[1-9]\d*)$/.exec(effectKey);
-  if (match) {
-    const deviceEui = String(payload.device_eui || payload.deviceEui || payload.devEui || '')
-      .trim().toUpperCase();
-    return deviceEui === match[1];
-  }
-  return false;
+// Thin, signature-identical wrappers over osi-command-ledger's generic
+// pipeline. They inject the two pieces of journal-specific knowledge the
+// ledger cannot have on its own: the identity/effect-key binding rule above,
+// and the intent-hash used to recognize a "compatible effect" duplicate
+// arriving under a different delivery command_id. Existing callers of
+// osiJournal.deduplicatePendingCommand/queueCommandAck (flows.json's journal
+// applier node, scripts/test-journal-command-path.js) keep working unchanged.
+function deduplicatePendingCommand(db, envelope, runtime) {
+  return ledger.deduplicatePendingCommand(db, envelope, Object.assign({}, runtime, {
+    extraEffectBindingValidator: validJournalEffectBinding,
+    extraSubmittedIntentHash: submittedIntentHash,
+  }));
 }
 
-async function persistReplayAck(tx, row, deliveryId, exactDelivery) {
-  const ack = replayAck(row, deliveryId, exactDelivery);
-  const createdAt = new Date().toISOString();
-  await tx.run(
-    'DELETE FROM command_ack_outbox WHERE command_id=? AND delivered_at IS NULL',
-    [String(deliveryId)]
-  );
-  await tx.run(
-    'INSERT INTO command_ack_outbox (command_id,payload_json,created_at) VALUES (?,?,?)',
-    [String(deliveryId), JSON.stringify(ack), createdAt]
-  );
-  return ack;
-}
-
-async function deduplicatePendingCommand(db, envelope, runtime) {
-  envelope = object(envelope, 'Pending command envelope');
-  const deliveryId = deliveryCommandId(envelope);
-  return db.transaction(async function(tx) {
-    let row = await tx.get(
-      'SELECT * FROM applied_commands WHERE command_id=? LIMIT 1',
-      [String(deliveryId)]
-    );
-    if (row) {
-      return { handled: true, ack: await persistReplayAck(tx, row, deliveryId, true) };
-    }
-    const type = commandType(envelope);
-    const journalType = isJournalCommandType(type);
-    const validEffect = journalType
-      ? await validJournalEffectBinding(tx, envelope, runtime, type)
-      : validNonJournalEffectBinding(envelope, runtime);
-    if (!validEffect) {
-      return { handled: false };
-    }
-    const effectKey = String(
-      envelope.payload.effect_key || envelope.payload.effectKey || envelope.effectKey || ''
-    ).trim();
-    const gateway = String(runtime && runtime.gateway_device_eui || '').trim().toUpperCase();
-    if (journalType) {
-      const intentHash = submittedIntentHash(type, envelope.payload);
-      const candidates = await tx.all(
-        'SELECT * FROM applied_commands WHERE effect_key=? AND command_type=? AND device_eui=? ' +
-          'ORDER BY applied_at,command_id',
-        [effectKey, type, gateway]
-      );
-      row = candidates.find(function(candidate) {
-        return journalEffectProvenanceMatches(
-          candidate,
-          envelope.payload,
-          gateway,
-          type,
-          intentHash
-        );
-      });
-    } else {
-      row = await tx.get(
-        'SELECT * FROM applied_commands WHERE effect_key=? AND command_type=? ' +
-          'ORDER BY applied_at,command_id LIMIT 1',
-        [effectKey, type]
-      );
-    }
-    if (!row) return { handled: false };
-    return { handled: true, ack: await persistReplayAck(tx, row, deliveryId, false) };
-  });
-}
-
-function classifyAckResult(result, errorText) {
-  if (['SUCCESS', 'APPLIED', 'ACKED'].includes(result)) return 'APPLIED';
-  if (['FAILED_RETRYABLE', 'RETRYABLE_ERROR', 'EXPIRED'].includes(result)) return 'FAILED_RETRYABLE';
-  if (['REJECTED_PERMANENT', 'NACKED'].includes(result)) return result;
-  if (result === 'FAILED') {
-    const detail = String(errorText || '').toLowerCase();
-    if (detail.includes('invalid') || detail.includes('unsupported') ||
-        detail.includes('missing valve deveui') || detail.includes('missing sensor deveui')) {
-      return 'REJECTED_PERMANENT';
-    }
-  }
-  return 'FAILED_RETRYABLE';
-}
-
-function queueCommandId(raw) {
-  const value = raw && raw.commandId;
-  if (Number.isSafeInteger(value) && value > 0) return { stored: String(value), ack: value };
-  const text = String(value == null ? '' : value).trim();
-  if (!text) throw commandError('invalid_command_id', 'Command ACK requires commandId');
-  if (/^\d+$/.test(text)) {
-    const numeric = Number(text);
-    if (Number.isSafeInteger(numeric) && numeric > 0) return { stored: text, ack: numeric };
-  }
-  return { stored: text, ack: text };
-}
-
-async function queueCommandAck(db, rawAck, runtime) {
-  const ack = object(rawAck, 'Command ACK');
-  const commandId = queueCommandId(ack);
-  const incomingResult = String(ack.result || ack.status || '').trim().toUpperCase();
-  const errorText = ack.error == null ? '' : String(ack.error);
-  const result = classifyAckResult(incomingResult, errorText);
-  const terminal = ['APPLIED', 'REJECTED_PERMANENT', 'NACKED', 'EXPIRED'].includes(result);
-  const appliedAt = String(ack.timestamp || ack.appliedAt || new Date().toISOString());
-  const duplicate = ack.duplicate === true || String(ack.duplicate || '').toLowerCase() === 'true';
-  const initial = {
-    commandId: commandId.ack,
-    status: replayStatus(result),
-    result,
-    appliedAt,
-    appliedSyncVersion: ack.appliedSyncVersion == null ? null : Number(ack.appliedSyncVersion),
-    duplicate,
-    reason: errorText || ack.reason || null,
-    detail: errorText || ack.reason || null,
-  };
-  return db.transaction(async function(tx) {
-    if (terminal) {
-      const existing = await tx.get(
-        'SELECT * FROM applied_commands WHERE command_id=? LIMIT 1',
-        [commandId.stored]
-      );
-      if (existing) return persistReplayAck(tx, existing, commandId.ack, true);
-      await tx.run(
-        'INSERT INTO applied_commands (' +
-          'command_id,effect_key,device_eui,command_type,result,applied_at,result_detail,originator' +
-        ') VALUES (?,?,?,?,?,?,?,?) ON CONFLICT(command_id) DO NOTHING',
-        [commandId.stored, String(ack.effectKey || ack.effect_key || '').trim() || null,
-          String(ack.deviceEui || ack.devEui || '').trim().toUpperCase() || 'UNKNOWN',
-          String(ack.commandType || '').trim().toUpperCase() || 'UNKNOWN', result, appliedAt,
-          JSON.stringify(ack), 'edge']
-      );
-      const hooks = runtime && runtime.lifecycle_hooks;
-      if (hooks && typeof hooks.afterCommandLedger === 'function') {
-        await hooks.afterCommandLedger(ack);
-      }
-    }
-    await tx.run(
-      'DELETE FROM command_ack_outbox WHERE command_id=? AND delivered_at IS NULL',
-      [commandId.stored]
-    );
-    await tx.run(
-      'INSERT INTO command_ack_outbox(command_id,payload_json,created_at) VALUES (?,?,?)',
-      [commandId.stored, JSON.stringify(initial), new Date().toISOString()]
-    );
-    return initial;
-  });
+function queueCommandAck(db, rawAck, runtime) {
+  return ledger.queueCommandAck(db, rawAck, runtime);
 }
 
 async function persistFailure(db, envelope, payload, runtime, type, deliveryId, failure, intentHash) {
@@ -819,4 +625,10 @@ async function applyJournalCommand(db, envelope, runtime) {
   });
 }
 
-module.exports = { applyJournalCommand, deduplicatePendingCommand, queueCommandAck };
+module.exports = {
+  applyJournalCommand,
+  deduplicatePendingCommand,
+  queueCommandAck,
+  validJournalEffectBinding,
+  submittedIntentHash,
+};
