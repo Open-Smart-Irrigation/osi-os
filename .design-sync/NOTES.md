@@ -42,6 +42,12 @@ Repo-specific gotchas for re-syncs. Read before touching the config or previews.
 - **DeviceCardFooter derives percent from voltage** when `batteryPercent` absent — a voltage-only fixture showing a battery pill is correct behavior.
 - Soil profile `status` vocabulary: `optimal`/`dry_stress`/`wet_excess`; calendar marker `labelKey`s must be real `history.calendar.marker.*` i18n keys.
 
+## Liquid-glass chrome (2026-07-14, on top of Variant A)
+
+- Material classes live in `index.css` (plain CSS, purge-proof): `.btn-liquid`, `.btn-liquid-red`, `.glass-chrome`, `.login-scene` — light + dark token sets (`--glass-*`, `--chrome-*`), `prefers-reduced-transparency` solid fallbacks, `prefers-reduced-motion` respected. Adjudicated in the Glass Lab artifact (07ed95a2…): glass is **chrome-only** — header bar + its buttons + login moment; never data cards, danger actions, or the Balken.
+- All five header actions are uniform `btn-liquid` (Add included — explicit design call); login Sign In is `btn-liquid-red` over the `.login-scene` field gradient; disabled state falls back solid.
+- `overflow: hidden` on liquid buttons is safe (dropdowns live in the sibling container, not the trigger) — don't put the class on anything that CONTAINS an absolutely-positioned flyout.
+
 ## Variant A header redesign (2026-07-14)
 
 - Header tokens changed: light `--header-bg #FFFFFF / --header-text #040404 / --header-subtext #475569`, dark `#171D1B / #F4F7F5 / #C3CCC7`; new `--brand-red #E30613` (active-tab underline only — red stays out of buttons, the app reserves red for danger). All `--header-*` consumers (monitor modals, history headers, cross-zone page) flip together by design.
