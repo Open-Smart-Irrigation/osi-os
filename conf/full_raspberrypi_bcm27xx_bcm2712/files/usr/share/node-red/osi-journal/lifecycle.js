@@ -431,7 +431,8 @@ async function resolveDeviceEui(tx, deviceEui, principal, plot) {
   const zoneMatches = plot.zone_id == null ||
     (Number(device.irrigation_zone_id) === Number(plot.zone_id) &&
       Number(device.zone_user_id) === Number(principal.user_id) &&
-      device.zone_gateway_device_eui === principal.gateway_device_eui);
+      (device.zone_gateway_device_eui === principal.gateway_device_eui ||
+        device.zone_gateway_device_eui == null));
   if (!owned || !zoneMatches) {
     throw lifecycleError('ownership', 'Journal device belongs to another owner or zone');
   }

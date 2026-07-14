@@ -33,6 +33,7 @@ const WEATHER_DEVICE_EUI = '2CF7F1C000000001';
 const RAIN_DEVICE_EUI = '3CF7F1C000000002';
 const SECOND_RAIN_DEVICE_EUI = '4CF7F1C000000003';
 const VALVE_DEVICE_EUI = '70B3D57ED0065678';
+const NULL_EUI_ZONE_DEVICE_EUI = '70B3D57ED0069999';
 const ENTRY_UUID = 'abcdefab-cdef-4abc-8def-abcdefabcdef';
 const CONTEXT_RAW_ROW_LIMIT = 4096;
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
@@ -278,6 +279,20 @@ function seedDatabase() {
     '2026-07-12T00:00:00.000Z',
     '2026-07-12T00:00:00.000Z',
     1,
+    GATEWAY_EUI
+  );
+  native.prepare(
+    'INSERT INTO devices(' +
+      'deveui,name,type_id,user_id,created_at,updated_at,irrigation_zone_id,gateway_device_eui' +
+    ') VALUES (?,?,?,?,?,?,?,?)'
+  ).run(
+    NULL_EUI_ZONE_DEVICE_EUI,
+    'Legacy null-EUI zone sensor',
+    'DRAGINO_LSN50',
+    1,
+    '2026-07-12T00:00:00.000Z',
+    '2026-07-12T00:00:00.000Z',
+    4,
     GATEWAY_EUI
   );
   for (const fixture of [
@@ -1897,6 +1912,22 @@ test('resolves a plot linked to a legacy zone with a NULL gateway_device_eui', a
   assert.equal(entry.season_uuid, NULL_EUI_SEASON_UUID);
   assert.equal(entry.season_crop, 'wheat');
   assert.equal(entry.season_variety, 'Test');
+});
+
+test('resolves a device linked to a legacy zone with a NULL gateway_device_eui', async () => {
+  const result = await journal.finalize(db, catalog, validEntry({
+    plot_uuid: plotUuid(23),
+    device_eui: NULL_EUI_ZONE_DEVICE_EUI,
+  }), principal());
+
+  assert.equal(result.sync_version, 1);
+  const entry = await db.get(
+    'SELECT zone_id,zone_uuid,device_eui FROM journal_entries WHERE entry_uuid=?',
+    [ENTRY_UUID]
+  );
+  assert.equal(entry.zone_id, 4);
+  assert.equal(entry.zone_uuid, NULL_EUI_ZONE_UUID);
+  assert.equal(entry.device_eui, NULL_EUI_ZONE_DEVICE_EUI);
 });
 
 test('correction preserves the batch UUID of a batch-created entry when omitted', async () => {
