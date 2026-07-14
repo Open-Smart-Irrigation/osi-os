@@ -791,85 +791,123 @@ function discoverJournalModuleSources(root) {
   return { sources, errors: [] };
 }
 
-function stripJavaScriptComments(source) {
+function transformJavaScriptLexical(source, maskStrings) {
   const output = source.split('');
-  let state = 'code';
-  for (let index = 0; index < source.length; index += 1) {
-    const ch = source[index];
-    const next = source[index + 1];
-    if (state === 'line-comment') {
-      if (ch === '\n') {
-        state = 'code';
-      } else {
-        output[index] = ' ';
-      }
-      continue;
-    }
-    if (state === 'block-comment') {
-      if (ch === '*' && next === '/') {
-        output[index] = ' ';
-        output[index + 1] = ' ';
-        index += 1;
-        state = 'code';
-      } else if (ch !== '\n' && ch !== '\r') {
-        output[index] = ' ';
-      }
-      continue;
-    }
-    if (state !== 'code') {
+  const maskAt = (index) => {
+    if (source[index] !== '\n' && source[index] !== '\r') output[index] = ' ';
+  };
+
+  const scanQuoted = (start, quote) => {
+    let index = start;
+    if (maskStrings) maskAt(index);
+    index += 1;
+    while (index < source.length) {
+      const ch = source[index];
+      if (maskStrings) maskAt(index);
       if (ch === '\\') {
+        if (index + 1 < source.length) {
+          if (maskStrings) maskAt(index + 1);
+          index += 2;
+        } else {
+          index += 1;
+        }
+      } else {
         index += 1;
-      } else if ((state === 'single' && ch === "'") ||
-        (state === 'double' && ch === '"') ||
-        (state === 'template' && ch === '`')) {
-        state = 'code';
+        if (ch === quote) return index;
       }
-      continue;
     }
-    if (ch === '/' && next === '/') {
-      output[index] = ' ';
-      output[index + 1] = ' ';
+    return index;
+  };
+
+  const scanLineComment = (start) => {
+    let index = start;
+    while (index < source.length && source[index] !== '\n' && source[index] !== '\r') {
+      maskAt(index);
       index += 1;
-      state = 'line-comment';
-    } else if (ch === '/' && next === '*') {
-      output[index] = ' ';
-      output[index + 1] = ' ';
-      index += 1;
-      state = 'block-comment';
-    } else if (ch === "'") {
-      state = 'single';
-    } else if (ch === '"') {
-      state = 'double';
-    } else if (ch === '`') {
-      state = 'template';
     }
-  }
+    return index;
+  };
+
+  const scanBlockComment = (start) => {
+    let index = start;
+    while (index < source.length) {
+      const ch = source[index];
+      const next = source[index + 1];
+      maskAt(index);
+      if (ch === '*' && next === '/') {
+        if (index + 1 < source.length) maskAt(index + 1);
+        return index + 2;
+      }
+      index += 1;
+    }
+    return index;
+  };
+
+  let scanCode;
+  const scanTemplate = (start) => {
+    let index = start;
+    if (maskStrings) maskAt(index);
+    index += 1;
+    while (index < source.length) {
+      const ch = source[index];
+      const next = source[index + 1];
+      if (ch === '\\') {
+        if (maskStrings) {
+          maskAt(index);
+          if (index + 1 < source.length) maskAt(index + 1);
+        }
+        index += index + 1 < source.length ? 2 : 1;
+      } else if (ch === '`') {
+        if (maskStrings) maskAt(index);
+        return index + 1;
+      } else if (ch === '$' && next === '{') {
+        index = scanCode(index + 2, true);
+      } else {
+        if (maskStrings) maskAt(index);
+        index += 1;
+      }
+    }
+    return index;
+  };
+
+  scanCode = (start, stopAtInterpolationEnd) => {
+    let index = start;
+    let braceDepth = 0;
+    while (index < source.length) {
+      const ch = source[index];
+      const next = source[index + 1];
+      if (ch === "'" || ch === '"') {
+        index = scanQuoted(index, ch);
+      } else if (ch === '`') {
+        index = scanTemplate(index);
+      } else if (ch === '/' && next === '/') {
+        index = scanLineComment(index);
+      } else if (ch === '/' && next === '*') {
+        index = scanBlockComment(index);
+      } else if (stopAtInterpolationEnd && ch === '{') {
+        braceDepth += 1;
+        index += 1;
+      } else if (stopAtInterpolationEnd && ch === '}') {
+        index += 1;
+        if (braceDepth === 0) return index;
+        braceDepth -= 1;
+      } else {
+        index += 1;
+      }
+    }
+    return index;
+  };
+
+  scanCode(0, false);
   return output.join('');
 }
 
+function stripJavaScriptComments(source) {
+  return transformJavaScriptLexical(source, false);
+}
+
 function maskJavaScriptStrings(source) {
-  const output = source.split('');
-  let state = 'code';
-  for (let index = 0; index < source.length; index += 1) {
-    const ch = source[index];
-    if (state === 'code') {
-      if (ch === "'") state = 'single';
-      else if (ch === '"') state = 'double';
-      else if (ch === '`') state = 'template';
-      if (state !== 'code') output[index] = ' ';
-      continue;
-    }
-    if (ch !== '\n' && ch !== '\r') output[index] = ' ';
-    if (ch === '\\') {
-      if (index + 1 < output.length && source[index + 1] !== '\n') output[index + 1] = ' ';
-      index += 1;
-    } else if ((state === 'single' && ch === "'") ||
-      (state === 'double' && ch === '"') ||
-      (state === 'template' && ch === '`')) {
-      state = 'code';
-    }
-  }
-  return output.join('');
+  return transformJavaScriptLexical(source, true);
 }
 
 function findMatchingJavaScriptParen(maskedSource, openIndex) {
@@ -882,6 +920,32 @@ function findMatchingJavaScriptParen(maskedSource, openIndex) {
     }
   }
   return -1;
+}
+
+function splitTopLevelJavaScriptArguments(source, maskedSource) {
+  if (source.length !== maskedSource.length) return null;
+  const parts = [];
+  let start = 0;
+  let parenDepth = 0;
+  let bracketDepth = 0;
+  let braceDepth = 0;
+  for (let index = 0; index < maskedSource.length; index += 1) {
+    const ch = maskedSource[index];
+    if (ch === '(') parenDepth += 1;
+    else if (ch === ')') parenDepth -= 1;
+    else if (ch === '[') bracketDepth += 1;
+    else if (ch === ']') bracketDepth -= 1;
+    else if (ch === '{') braceDepth += 1;
+    else if (ch === '}') braceDepth -= 1;
+    else if (ch === ',' && parenDepth === 0 && bracketDepth === 0 && braceDepth === 0) {
+      parts.push(source.slice(start, index).trim());
+      start = index + 1;
+    }
+    if (parenDepth < 0 || bracketDepth < 0 || braceDepth < 0) return null;
+  }
+  if (parenDepth !== 0 || bracketDepth !== 0 || braceDepth !== 0) return null;
+  parts.push(source.slice(start).trim());
+  return parts;
 }
 
 function findMatchingJavaScriptBrace(maskedSource, openIndex) {
@@ -937,6 +1001,17 @@ function extractJournalOperationLiterals(source) {
     .map((literal) => literal.value);
 }
 
+function staticJournalOperationArgument(source) {
+  const literals = extractJavaScriptStringLiterals(source);
+  if (literals.length !== 1) return null;
+  const literal = literals[0];
+  if (literal.dynamicTemplate) return null;
+  if (source.slice(0, literal.start).trim() || source.slice(literal.end + 1).trim()) return null;
+  return /^JOURNAL_[A-Z0-9_]+_(?:UPSERTED|VOIDED)$/.test(literal.value)
+    ? literal.value
+    : null;
+}
+
 function extractJournalOperationTokens(source) {
   const operations = [];
   const journalOperation = /\bJOURNAL_[A-Z0-9_]+_(?:UPSERTED|VOIDED)\b/g;
@@ -983,7 +1058,7 @@ function extractJournalModuleOps(modulePath) {
   }
   const source = stripJavaScriptComments(readUtf8(modulePath));
   const maskedSource = maskJavaScriptStrings(source);
-  const ops = extractJournalOperationLiterals(source);
+  const ops = [];
   const errors = [];
   let match;
 
@@ -1020,13 +1095,35 @@ function extractJournalModuleOps(modulePath) {
       errors.push(`${location}: unparseable outbox call; missing closing parenthesis`);
       break;
     }
-    if (!isOutboxFunctionDefinition(maskedSource, match.index, closeIndex)) {
-      const argumentsSource = source.slice(openIndex + 1, closeIndex);
-      if (extractJournalOperationLiterals(argumentsSource).length === 0) {
-        errors.push(`${location}: dynamic outbox operation; journal outbox calls must include a literal JOURNAL_* operation`);
+    if (callee === AUDITED_JOURNAL_OUTBOX_EMITTER.functionName &&
+      isOutboxFunctionDefinition(maskedSource, match.index, closeIndex)) {
+      continue;
+    }
+    if (callee !== AUDITED_JOURNAL_OUTBOX_EMITTER.functionName) {
+      errors.push(
+        `${location}: unaudited outbox-like call ${callee}(...); only exact ` +
+        `${AUDITED_JOURNAL_OUTBOX_EMITTER.functionName}(...) calls are audited`
+      );
+      continue;
+    }
+    const argumentsSource = source.slice(openIndex + 1, closeIndex);
+    const maskedArgumentsSource = maskedSource.slice(openIndex + 1, closeIndex);
+    const args = splitTopLevelJavaScriptArguments(argumentsSource, maskedArgumentsSource);
+    if (!args) {
+      errors.push(`${location}: unparseable emitJournalOutbox arguments`);
+    } else if (args.length !== 3) {
+      errors.push(`${location}: emitJournalOutbox must receive exactly three arguments; found ${args.length}`);
+    } else {
+      const operation = staticJournalOperationArgument(args[2]);
+      if (!operation) {
+        errors.push(
+          `${location}: emitJournalOutbox third argument must be one static ` +
+          'JOURNAL_*_(UPSERTED|VOIDED) string literal'
+        );
+      } else {
+        ops.push(operation);
       }
     }
-    call.lastIndex = closeIndex + 1;
   }
   return { ops: sortedUnique(ops), errors };
 }

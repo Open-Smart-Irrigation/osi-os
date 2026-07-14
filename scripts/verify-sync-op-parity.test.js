@@ -436,6 +436,138 @@ async function emit(tx, entryUuid) {
   assert.match(result.message, /edgeModuleOwned.*JOURNAL_ENTRY_VOIDED/i);
 });
 
+test('parity does not count an unused journal operation constant as an emitter', () => {
+  const fixture = createStagedParityFixture();
+  fs.writeFileSync(fixture.moduleSources[1].path, `
+const NEVER_EMITTED = 'JOURNAL_VOCAB_UPSERTED';
+async function emitResourceEvents(tx, aggregate) {
+  await emitJournalOutbox(tx, aggregate, 'JOURNAL_PLOT_UPSERTED');
+  await emitJournalOutbox(tx, aggregate, 'JOURNAL_PLOT_GROUP_UPSERTED');
+}
+`);
+
+  const result = checkSyncOpParity(fixture);
+
+  assert.equal(result.ok, false);
+  assert.match(result.message, /edgeModuleOwned missing.*JOURNAL_VOCAB_UPSERTED/i);
+});
+
+test('parity rejects a misleading outbox-named call as unaudited', () => {
+  const fixture = createStagedParityFixture();
+  fs.writeFileSync(fixture.moduleSources[1].path, `
+async function emitResourceEvents(tx, aggregate) {
+  fakeOutboxMetric('JOURNAL_VOCAB_UPSERTED');
+  await emitJournalOutbox(tx, aggregate, 'JOURNAL_PLOT_UPSERTED');
+  await emitJournalOutbox(tx, aggregate, 'JOURNAL_PLOT_GROUP_UPSERTED');
+}
+`);
+
+  const result = checkSyncOpParity(fixture);
+
+  assert.equal(result.ok, false);
+  assert.match(result.message, /fakeOutboxMetric.*unaudited|unaudited.*fakeOutboxMetric/i);
+  assert.match(result.message, /edgeModuleOwned missing.*JOURNAL_VOCAB_UPSERTED/i);
+});
+
+test('parity rejects a misleading outbox-named call nested inside the audited call', () => {
+  const fixture = createStagedParityFixture();
+  fs.appendFileSync(fixture.moduleSources[1].path, `
+async function publishNestedMetric(tx, aggregate) {
+  return emitJournalOutbox(
+    tx,
+    fakeOutboxMetric(aggregate),
+    'JOURNAL_ENTRY_UPSERTED'
+  );
+}
+`);
+
+  const result = checkSyncOpParity(fixture);
+
+  assert.equal(result.ok, false);
+  assert.match(result.message, /fakeOutboxMetric.*unaudited|unaudited.*fakeOutboxMetric/i);
+});
+
+test('parity rejects an outbox-named call inside a template interpolation', () => {
+  const fixture = createStagedParityFixture();
+  fs.appendFileSync(fixture.moduleSources[1].path, `
+async function publishTemplateMetric(tx, aggregate) {
+  return emitJournalOutbox(
+    tx,
+    \`\${fakeOutboxMetric(aggregate)}\`,
+    'JOURNAL_VOCAB_UPSERTED'
+  );
+}
+`);
+
+  const result = checkSyncOpParity(fixture);
+
+  assert.equal(result.ok, false);
+  assert.match(result.message, /fakeOutboxMetric.*unaudited|unaudited.*fakeOutboxMetric/i);
+});
+
+test('parity scans outbox-named calls through nested template interpolations', () => {
+  const fixture = createStagedParityFixture();
+  fs.appendFileSync(fixture.moduleSources[1].path, `
+async function publishNestedTemplateMetric(tx, aggregate) {
+  const label = \`\${formatMetric({
+    nested: \`\${fakeOutboxMetric(aggregate)}\`,
+  })}\`;
+  return emitJournalOutbox(tx, label, 'JOURNAL_VOCAB_UPSERTED');
+}
+`);
+
+  const result = checkSyncOpParity(fixture);
+
+  assert.equal(result.ok, false);
+  assert.match(result.message, /fakeOutboxMetric.*unaudited|unaudited.*fakeOutboxMetric/i);
+});
+
+test('parity masks template text while scanning benign nested interpolations', () => {
+  const fixture = createStagedParityFixture();
+  fs.appendFileSync(fixture.moduleSources[1].path, `
+async function publishBenignTemplate(tx, aggregate) {
+  const label = \`fakeOutboxMetric(aggregate): \${formatMetric({
+    value: aggregate.value,
+    note: 'fakeOutboxMetric(aggregate)',
+    nested: \`\${aggregate.name}\`,
+  })}\`;
+  return emitJournalOutbox(tx, label, 'JOURNAL_ENTRY_UPSERTED');
+}
+`);
+
+  const result = checkSyncOpParity(fixture);
+
+  assert.equal(result.ok, true, result.message);
+});
+
+test('parity rejects a journal operation literal in the wrong argument position', () => {
+  const fixture = createStagedParityFixture();
+  fs.appendFileSync(fixture.moduleSources[1].path, `
+async function publishWrongPosition(tx, aggregate) {
+  return emitJournalOutbox('JOURNAL_ENTRY_UPSERTED', aggregate, tx);
+}
+`);
+
+  const result = checkSyncOpParity(fixture);
+
+  assert.equal(result.ok, false);
+  assert.match(result.message, /emitJournalOutbox.*third argument.*static JOURNAL/i);
+});
+
+test('parity rejects an audited emitter call with more than three arguments', () => {
+  const fixture = createStagedParityFixture();
+  fs.appendFileSync(fixture.moduleSources[1].path, `
+async function publishExtraArgument(tx, aggregate) {
+  return emitJournalOutbox(tx, aggregate, 'JOURNAL_ENTRY_UPSERTED', 'extra');
+}
+`);
+
+  const result = checkSyncOpParity(fixture);
+
+  assert.equal(result.ok, false);
+  assert.match(result.message, /emitJournalOutbox.*exactly three arguments/i);
+});
+
 test('parity discovers a resource emitter in a second production module', () => {
   const fixture = createStagedParityFixture();
   fs.unlinkSync(fixture.moduleSources[1].path);
@@ -485,7 +617,7 @@ test('parity fails closed on a dynamic journal outbox operation site', () => {
   const fixture = createStagedParityFixture();
   fs.writeFileSync(path.join(path.dirname(fixture.moduleSources[0].path), 'dynamic.js'), `
 async function publishDynamic(tx, entryUuid, op) {
-  return emitJournalOutbox(tx, entryUuid, op);
+  return emitJournalOutbox(tx, 'JOURNAL_ENTRY_UPSERTED', op);
 }
 `);
   delete fixture.moduleSources;
@@ -493,7 +625,25 @@ async function publishDynamic(tx, entryUuid, op) {
   const result = checkSyncOpParity(fixture);
 
   assert.equal(result.ok, false);
-  assert.match(result.message, /dynamic.*outbox|outbox.*literal/i);
+  assert.match(result.message, /emitJournalOutbox.*third argument.*static JOURNAL/i);
+});
+
+test('parity accepts a static journal operation after a nested object source', () => {
+  const fixture = createStagedParityFixture();
+  fs.writeFileSync(fixture.moduleSources[1].path, `
+async function emitResourceEvents(tx, aggregate) {
+  await emitJournalOutbox(tx, {
+    aggregate,
+    metadata: { source: 'fixture,with,commas', values: [1, 2, 3] },
+  }, 'JOURNAL_VOCAB_UPSERTED');
+  await emitJournalOutbox(tx, aggregate, 'JOURNAL_PLOT_UPSERTED');
+  await emitJournalOutbox(tx, aggregate, 'JOURNAL_PLOT_GROUP_UPSERTED');
+}
+`);
+
+  const result = checkSyncOpParity(fixture);
+
+  assert.equal(result.ok, true, result.message);
 });
 
 test('parity accepts the audited lifecycle SQL emitter with literal operation call sites', () => {

@@ -1571,7 +1571,7 @@ expectFileIncludes('osi-command-ledger/index.js', commandLedgerSource, 'SELECT *
 expectFileIncludes('osi-journal/commands.js', journalCommandsSource, 'result_detail', 'reconstructs ACK facts from canonical replay-ledger detail');
 expectIncludes('Queue REST Command ACK', 'osiCommandLedger.queueCommandAck', 'delegates atomic terminal ledger and ACK queueing via the shared command ledger');
 expectFileIncludes('osi-command-ledger/index.js', commandLedgerSource, 'ON CONFLICT(command_id) DO NOTHING', 'never rewrites an existing terminal command result');
-expectFileIncludes('osi-journal/commands.js', journalCommandsSource, 'INSERT INTO command_ack_outbox', 'queues durable REST command ACKs in the shared transaction helper');
+expectFileIncludes('osi-command-ledger/index.js', commandLedgerSource, 'INSERT INTO command_ack_outbox', 'queues durable REST command ACKs in the shared transaction helper');
 expectExcludes('Queue REST Command ACK', 'applied_at,detail', 'legacy applied_commands.detail insert column');
 expectExcludes('Queue REST Command ACK', 'INSERT OR REPLACE INTO applied_commands', 'terminal ledger rewrite SQL');
 expectIncludes('Build Command ACK Batch', '/command-acks', 'posts queued command ACKs to the sync REST endpoint');
