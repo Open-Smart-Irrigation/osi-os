@@ -8,11 +8,52 @@ const path = require('node:path');
 
 const deploy = fs.readFileSync(path.resolve(__dirname, '..', 'deploy.sh'), 'utf8');
 
+const JOURNAL_MODULE_REL_DIR = 'conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-journal';
+const JOURNAL_MODULE_DIR = path.resolve(__dirname, '..', JOURNAL_MODULE_REL_DIR);
+
 function indexOf(needle) {
   const idx = deploy.indexOf(needle);
   assert.notEqual(idx, -1, `missing deploy.sh snippet: ${needle}`);
   return idx;
 }
+
+// Directory-derived expected file set: package.json + every *.js except *.test.js.
+// This is what makes the fence a fence — it is not a hand-maintained list, so a
+// new/renamed module file automatically becomes a required deploy.sh target.
+function listExpectedModuleFiles(moduleDir) {
+  return fs
+    .readdirSync(moduleDir)
+    .filter((name) => name === 'package.json' || (name.endsWith('.js') && !name.endsWith('.test.js')))
+    .sort();
+}
+
+function escapeForRegex(filename) {
+  // Journal module filenames only ever contain word chars, '-' and '.'; only '.' is
+  // regex-special among those, so that's the only character that needs escaping.
+  return filename.replace(/\./g, '\\.');
+}
+
+// Builds the same block pattern the original hardcoded assertions used
+// (label line + source path line + dest path line, joined by a line
+// continuation backslash and one-or-more newlines), parameterized on filename
+// so it can be applied to the full discovered file set instead of 4 hand-picked
+// names.
+function fetchBlockPattern(filename) {
+  const escaped = escapeForRegex(filename);
+  return new RegExp(
+    String.raw`fetch_required "osi-journal ${escaped}" \\\n+\s+"conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-journal/${escaped}" \\\n+\s+"/srv/node-red/osi-journal/${escaped}"`
+  );
+}
+
+// Pure function: given deploy.sh source text and the expected file list,
+// returns the filenames that do NOT have a matching fetch_required block.
+// Kept pure (no fs/module-scope reads) so it can be exercised against doctored
+// input in the negative self-test below.
+function missingFetches(deploySource, fileList) {
+  return fileList.filter((filename) => !fetchBlockPattern(filename).test(deploySource));
+}
+
+const EXPECTED_JOURNAL_FILES = listExpectedModuleFiles(JOURNAL_MODULE_DIR);
 
 test('deploy.sh fetches the tested payload-swap module and verifies same-filesystem atomicity', () => {
   assert.match(deploy, /PAYLOADS_ROOT="\/srv\/node-red\/payloads"/);
@@ -24,21 +65,40 @@ test('deploy.sh fetches the tested payload-swap module and verifies same-filesys
 });
 
 test('deploy.sh ships every journal module required by its package entry point', () => {
-  assert.match(
-    deploy,
-    /fetch_required "osi-journal context\.js" \\\n+\s+"conf\/full_raspberrypi_bcm27xx_bcm2712\/files\/usr\/share\/node-red\/osi-journal\/context\.js" \\\n+\s+"\/srv\/node-red\/osi-journal\/context\.js"/
+  assert.ok(
+    EXPECTED_JOURNAL_FILES.length > 0,
+    `expected to discover at least one file under ${JOURNAL_MODULE_REL_DIR}`
   );
-  assert.match(
-    deploy,
-    /fetch_required "osi-journal lifecycle\.js" \\\n+\s+"conf\/full_raspberrypi_bcm27xx_bcm2712\/files\/usr\/share\/node-red\/osi-journal\/lifecycle\.js" \\\n+\s+"\/srv\/node-red\/osi-journal\/lifecycle\.js"/
+
+  const missing = missingFetches(deploy, EXPECTED_JOURNAL_FILES);
+  assert.deepEqual(
+    missing,
+    [],
+    `deploy.sh is missing fetch_required wiring for osi-journal file(s): ${missing.join(', ')}`
   );
-  assert.match(
-    deploy,
-    /fetch_required "osi-journal api\.js" \\\n+\s+"conf\/full_raspberrypi_bcm27xx_bcm2712\/files\/usr\/share\/node-red\/osi-journal\/api\.js" \\\n+\s+"\/srv\/node-red\/osi-journal\/api\.js"/
+});
+
+test('missingFetches fence self-test: a doctored deploy.sh missing one fetch block is caught', () => {
+  // Prove the fence actually closes: remove exactly one real fetch_required
+  // block from a copy of deploy.sh's content and confirm missingFetches
+  // reports that exact filename (not zero, not the wrong one, not everything).
+  const targetFile = 'catalog.js';
+  assert.ok(
+    EXPECTED_JOURNAL_FILES.includes(targetFile),
+    `test setup assumption broken: ${targetFile} is no longer among discovered osi-journal files`
   );
-  assert.match(
-    deploy,
-    /fetch_required "osi-journal commands\.js" \\\n+\s+"conf\/full_raspberrypi_bcm27xx_bcm2712\/files\/usr\/share\/node-red\/osi-journal\/commands\.js" \\\n+\s+"\/srv\/node-red\/osi-journal\/commands\.js"/
+
+  const pattern = fetchBlockPattern(targetFile);
+  assert.match(deploy, pattern, `expected real deploy.sh to already contain a fetch block for ${targetFile}`);
+
+  const doctoredDeploy = deploy.replace(pattern, '');
+  assert.notEqual(doctoredDeploy, deploy, 'doctoring must actually remove the fetch block from the copy');
+
+  const missing = missingFetches(doctoredDeploy, EXPECTED_JOURNAL_FILES);
+  assert.deepEqual(
+    missing,
+    [targetFile],
+    'doctored deploy.sh (one fetch block removed) must report exactly the removed filename'
   );
 });
 
