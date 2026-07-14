@@ -2612,7 +2612,13 @@ function requestBody(msg) {
 }
 
 function streamResponse(msg, contentType, extension) {
-  const response = msg.res;
+  // Node-RED's http-in node (3.1.15) replaces msg.res with a wrapper that only
+  // exposes `_res` plus wrapped Express methods (status/set/send/...) — no
+  // `write`. Unwrap to the raw response so we can stream to it directly.
+  const wrapper = msg.res;
+  const response = wrapper && wrapper._res && typeof wrapper._res.write === 'function'
+    ? wrapper._res
+    : wrapper;
   if (!response || typeof response.write !== 'function') {
     throw apiError(500, 'stream_unavailable', 'HTTP streaming response is unavailable');
   }
@@ -2665,6 +2671,7 @@ async function handleHttpRequest(options) {
   const authorization = msg.req && msg.req.headers && msg.req.headers.authorization;
   let db = null;
   let streaming = false;
+  let streamedResponse = null;
   try {
     assertBearerShape(authorization);
     const token = verifyBearer(authorization, resolveAuthSecret(environment, warn));
@@ -2719,29 +2726,20 @@ async function handleHttpRequest(options) {
     }
     if (method === 'GET' && requestPath === '/api/journal/export.csv') {
       streaming = true;
-      await exportWideCsv(db, query, principal, streamResponse(msg, 'text/csv; charset=utf-8', '.csv'));
+      streamedResponse = streamResponse(msg, 'text/csv; charset=utf-8', '.csv');
+      await exportWideCsv(db, query, principal, streamedResponse);
       return null;
     }
     if (method === 'GET' && requestPath === '/api/journal/export.package') {
       streaming = true;
-      await exportResearchPackage(
-        db,
-        query,
-        principal,
-        streamResponse(msg, 'application/zip', '.zip'),
-        environment
-      );
+      streamedResponse = streamResponse(msg, 'application/zip', '.zip');
+      await exportResearchPackage(db, query, principal, streamedResponse, environment);
       return null;
     }
     if (method === 'GET' && requestPath === '/api/journal/export.json') {
       streaming = true;
-      await exportJson(
-        db,
-        query,
-        principal,
-        streamResponse(msg, 'application/json; charset=utf-8', '.json'),
-        environment
-      );
+      streamedResponse = streamResponse(msg, 'application/json; charset=utf-8', '.json');
+      await exportJson(db, query, principal, streamedResponse, environment);
       return null;
     }
     if (method === 'GET' && requestPath === '/api/journal/export.adapt.json') {
@@ -2749,10 +2747,10 @@ async function handleHttpRequest(options) {
     }
     return respond(404, { error: 'not_found', message: 'Journal endpoint was not found' });
   } catch (error) {
-    if (streaming && msg.res && msg.res.headersSent) {
+    if (streaming && streamedResponse && streamedResponse.headersSent) {
       warn('[journal-api] streamed request failed code=' + String(error && error.code || 'internal_error') +
         ' status=' + String(error && error.statusCode || 500));
-      if (typeof msg.res.destroy === 'function') msg.res.destroy();
+      if (typeof streamedResponse.destroy === 'function') streamedResponse.destroy();
       return null;
     }
     const response = errorResponse(error);

@@ -1155,6 +1155,7 @@ class BackpressureSink extends EventEmitter {
     this.writes = 0;
     this.chunks = [];
     this.maxDrainListeners = 0;
+    this.headers = {};
   }
 
   write(chunk) {
@@ -1170,6 +1171,10 @@ class BackpressureSink extends EventEmitter {
 
   end() {
     this.writableEnded = true;
+  }
+
+  setHeader(name, value) {
+    this.headers[name] = value;
   }
 }
 
@@ -2057,4 +2062,54 @@ test('HTTP close callback errors are bounded and visible', async () => {
   assert.equal(response.statusCode, 501);
   assert.deepEqual(warnings, ['[journal-api] database close failed code=unknown']);
   assert.ok(warnings[0].length < 120);
+});
+
+test('export.csv streams through a Node-RED msg.res wrapper (msg.res._res)', async () => {
+  const { db } = await createPagedEntries('export-stream-wrapper', null, 1);
+  const secret = 'export-stream-wrapper-secret';
+  const authorization = 'Bearer ' + token(secret, {
+    userId: 1,
+    username: 'field-user',
+    exp: Date.now() + 60_000,
+  });
+  class ExistingDb {
+    constructor() {
+      return db;
+    }
+  }
+  const sink = new BackpressureSink('drain');
+  // Shaped like Node-RED 3.1.15's http-in createResponseWrapper(): only `_res`
+  // plus wrapped Express methods are present. There is no `write`.
+  const wrapper = {
+    _res: sink,
+    status() { return wrapper; },
+    set() { return wrapper; },
+    send() { return wrapper; },
+    type() { return wrapper; },
+  };
+  const response = await journal.handleHttpRequest({
+    msg: {
+      req: {
+        method: 'GET',
+        path: '/api/journal/export.csv',
+        headers: { authorization },
+        query: { status: 'final' },
+        params: {},
+      },
+      res: wrapper,
+    },
+    Database: ExistingDb,
+    environment: {
+      authTokenSecret: secret,
+      deviceEui: GATEWAY_EUI,
+      deviceEuiConfidence: 'authoritative',
+    },
+  });
+  assert.equal(response, null, 'streaming responses do not fall back to msg.payload');
+  assert.equal(sink.statusCode, 200);
+  assert.equal(sink.headers['Content-Type'], 'text/csv; charset=utf-8');
+  assert.ok(sink.writes > 0, 'CSV bytes were streamed to the unwrapped sink, not lost in the wrapper');
+  assert.ok(sink.writableEnded);
+  const csvText = Buffer.concat(sink.chunks).toString('utf8');
+  assert.match(csvText, /"entry_uuid"/);
 });
