@@ -18,6 +18,9 @@ const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'osi-db-snapshot-'));
 const dbPath = path.join(tempRoot, 'snapshot.db');
 let opened = 0;
 let closed = 0;
+let nextCloseError = null;
+let nextRollbackError = null;
+const snapshotEvents = [];
 
 function adapter() {
   class Database {
@@ -59,8 +62,12 @@ function adapter() {
 
     exec(sql, callback) {
       try {
+        const event = String(sql).trim().replace(/;$/, '').toUpperCase();
+        snapshotEvents.push(event);
         this.native.exec(sql);
-        callback.call(this, null);
+        const injected = event === 'ROLLBACK' ? nextRollbackError : null;
+        if (event === 'ROLLBACK') nextRollbackError = null;
+        callback.call(this, injected);
       } catch (error) {
         callback.call(this, error);
       }
@@ -68,9 +75,12 @@ function adapter() {
 
     close(callback) {
       try {
+        snapshotEvents.push('CLOSE');
         this.native.close();
         closed += 1;
-        callback.call(this, null);
+        const injected = nextCloseError;
+        nextCloseError = null;
+        callback.call(this, injected);
       } catch (error) {
         callback.call(this, error);
       }
@@ -105,6 +115,20 @@ native.prepare('INSERT INTO sample_child(parent_id,value) VALUES (?,?)')
 native.close();
 const helper = loadHelper();
 
+async function rejectedReason(promise) {
+  let rejected = false;
+  let reason;
+  await promise.then(
+    () => undefined,
+    (error) => {
+      rejected = true;
+      reason = error;
+    }
+  );
+  assert.equal(rejected, true, 'expected promise to reject');
+  return reason;
+}
+
 test.after(() => fs.rmSync(tempRoot, { recursive: true, force: true }));
 
 test('readSnapshot commits a read-only snapshot and physically closes its connection', async () => {
@@ -120,6 +144,7 @@ test('readSnapshot commits a read-only snapshot and physically closes its connec
 test('readSnapshot rolls back and physically closes after executor failure', async () => {
   const db = new helper.Database(dbPath);
   const beforeClosed = closed;
+  const beforeEvents = snapshotEvents.length;
   await assert.rejects(
     db.readSnapshot(async (snapshot) => {
       await snapshot.get('SELECT * FROM sample LIMIT 1');
@@ -128,7 +153,62 @@ test('readSnapshot rolls back and physically closes after executor failure', asy
     /injected snapshot failure/
   );
   assert.equal(closed, beforeClosed + 1);
+  const events = snapshotEvents.slice(beforeEvents);
+  assert.equal(events.filter((event) => event === 'ROLLBACK').length, 1);
+  assert.ok(events.indexOf('ROLLBACK') < events.indexOf('CLOSE'));
 });
+
+test('readSnapshot preserves the executor Error when rollback reports a failure', async () => {
+  const db = new helper.Database(dbPath);
+  const failure = new Error('injected executor failure before rollback error');
+  const rollbackError = new Error('injected rollback failure');
+  const beforeEvents = snapshotEvents.length;
+  nextRollbackError = rollbackError;
+
+  const rejected = await rejectedReason(db.readSnapshot(() => { throw failure; }));
+  assert.strictEqual(rejected, failure);
+  assert.strictEqual(failure.rollbackError, rollbackError);
+  const events = snapshotEvents.slice(beforeEvents);
+  assert.equal(events.filter((event) => event === 'ROLLBACK').length, 1);
+  assert.ok(events.indexOf('ROLLBACK') < events.indexOf('CLOSE'));
+});
+
+test('readSnapshot rejects with the close error after a successful executor', async () => {
+  const db = new helper.Database(dbPath);
+  const closeError = new Error('injected close failure after success');
+  nextCloseError = closeError;
+
+  assert.strictEqual(
+    await rejectedReason(db.readSnapshot(() => 'snapshot-result')),
+    closeError
+  );
+});
+
+test('readSnapshot preserves an Error executor failure when close also fails', async () => {
+  const db = new helper.Database(dbPath);
+  const failure = new Error('injected executor Error');
+  const closeError = new Error('injected close failure after Error');
+  nextCloseError = closeError;
+
+  const rejected = await rejectedReason(db.readSnapshot(() => { throw failure; }));
+  assert.strictEqual(rejected, failure);
+  assert.strictEqual(failure.closeError, closeError);
+});
+
+for (const fixture of [
+  { name: 'string', value: 'injected primitive failure' },
+  { name: 'null', value: null },
+  { name: 'undefined', value: undefined },
+]) {
+  test('readSnapshot preserves a thrown ' + fixture.name + ' when close also fails', async () => {
+    const db = new helper.Database(dbPath);
+    const closeError = new Error('injected close failure after ' + fixture.name);
+    nextCloseError = closeError;
+
+    const rejected = await rejectedReason(db.readSnapshot(() => { throw fixture.value; }));
+    assert.strictEqual(rejected, fixture.value);
+  });
+}
 
 test('readSnapshot enforces query_only', async () => {
   const db = new helper.Database(dbPath);

@@ -183,6 +183,10 @@ async function deduplicatePendingCommand(db, envelope, runtime) {
     if (!validEffect) {
       return { handled: false };
     }
+    if (!envelope.payload || typeof envelope.payload !== 'object' ||
+        Array.isArray(envelope.payload)) {
+      return { handled: false };
+    }
     const effectKey = String(
       envelope.payload.effect_key || envelope.payload.effectKey || envelope.effectKey || ''
     ).trim();
@@ -213,7 +217,8 @@ async function deduplicatePendingCommand(db, envelope, runtime) {
 
 function classifyAckResult(result, errorText) {
   if (['SUCCESS', 'APPLIED', 'ACKED'].includes(result)) return 'APPLIED';
-  if (['FAILED_RETRYABLE', 'RETRYABLE_ERROR', 'EXPIRED'].includes(result)) return 'FAILED_RETRYABLE';
+  if (result === 'EXPIRED') return 'EXPIRED';
+  if (['FAILED_RETRYABLE', 'RETRYABLE_ERROR'].includes(result)) return 'FAILED_RETRYABLE';
   if (['REJECTED_PERMANENT', 'NACKED'].includes(result)) return result;
   if (result === 'FAILED') {
     const detail = String(errorText || '').toLowerCase();
@@ -246,12 +251,18 @@ async function queueCommandAck(db, rawAck, runtime) {
   const terminal = ['APPLIED', 'REJECTED_PERMANENT', 'NACKED', 'EXPIRED'].includes(result);
   const appliedAt = String(ack.timestamp || ack.appliedAt || new Date().toISOString());
   const duplicate = ack.duplicate === true || String(ack.duplicate || '').toLowerCase() === 'true';
+  const syncVersionCandidate = ack.appliedSyncVersion == null
+    ? null
+    : Number(ack.appliedSyncVersion);
+  const appliedSyncVersion = Number.isSafeInteger(syncVersionCandidate) && syncVersionCandidate >= 0
+    ? syncVersionCandidate
+    : null;
   const initial = {
     commandId: commandId.ack,
     status: replayStatus(result),
     result,
     appliedAt,
-    appliedSyncVersion: ack.appliedSyncVersion == null ? null : Number(ack.appliedSyncVersion),
+    appliedSyncVersion,
     duplicate,
     reason: errorText || ack.reason || null,
     detail: errorText || ack.reason || null,
@@ -270,11 +281,11 @@ async function queueCommandAck(db, rawAck, runtime) {
         [commandId.stored, String(ack.effectKey || ack.effect_key || '').trim() || null,
           String(ack.deviceEui || ack.devEui || '').trim().toUpperCase() || 'UNKNOWN',
           String(ack.commandType || '').trim().toUpperCase() || 'UNKNOWN', result, appliedAt,
-          JSON.stringify(ack), 'edge']
+          JSON.stringify(initial), 'edge']
       );
       const hooks = runtime && runtime.lifecycle_hooks;
       if (hooks && typeof hooks.afterCommandLedger === 'function') {
-        await hooks.afterCommandLedger(ack);
+        await hooks.afterCommandLedger(initial);
       }
     }
     await tx.run(

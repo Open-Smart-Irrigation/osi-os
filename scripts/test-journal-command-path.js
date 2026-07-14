@@ -2059,7 +2059,7 @@ test('shared ACK queue keeps one pending latest result and preserves delivered h
   }
 });
 
-test('lease expiry queues a retryable ACK without consuming the terminal command ledger', async () => {
+test('lease expiry consumes the terminal command ledger and replays the durable ACK exactly', async () => {
   const db = fixtureDb('ack-queue-expired');
   try {
     const queued = await journal.queueCommandAck(db, {
@@ -2070,10 +2070,17 @@ test('lease expiry queues a retryable ACK without consuming the terminal command
       result: 'EXPIRED',
       reason: 'lease_expired',
     });
-    assert.equal(queued.result, 'FAILED_RETRYABLE');
-    assert.equal(queued.status, 'FAILED_RETRYABLE');
-    assert.equal((await db.get('SELECT COUNT(*) AS n FROM applied_commands WHERE command_id=?', ['543'])).n, 0);
+    assert.equal(queued.result, 'EXPIRED');
+    assert.equal(queued.status, 'NACKED');
+    assert.equal((await db.get('SELECT result FROM applied_commands WHERE command_id=?', ['543'])).result,
+      'EXPIRED');
     assert.equal((await db.get('SELECT COUNT(*) AS n FROM command_ack_outbox WHERE command_id=?', ['543'])).n, 1);
+    const replay = await journal.deduplicatePendingCommand(db, {
+      commandId: 543,
+      commandType: 'UPSERT_ZONE',
+      payload: null,
+    }, { gateway_device_eui: GATEWAY_EUI });
+    assert.deepEqual(replay, { handled: true, ack: queued });
   } finally {
     db.close();
   }

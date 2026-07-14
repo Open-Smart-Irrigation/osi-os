@@ -232,36 +232,48 @@ class DatabaseFacade {
     }
     const database = await openDatabase(this.filename, sqlite3.OPEN_READONLY);
     let began = false;
-    let failure = null;
+    let operationFailed = false;
+    let failure;
+    let result;
     try {
       await runRaw(database, 'all', 'PRAGMA query_only=ON');
       await runRaw(database, 'all', 'PRAGMA foreign_keys=ON');
       await runRaw(database, 'all', 'PRAGMA busy_timeout=5000');
       await runRaw(database, 'exec', 'BEGIN;');
       began = true;
-      const result = await executor(createTransactionScope(database));
+      result = await executor(createTransactionScope(database));
       await runRaw(database, 'exec', 'COMMIT;');
       began = false;
-      return result;
     } catch (error) {
+      operationFailed = true;
       failure = error;
       if (began) {
         try {
           await runRaw(database, 'exec', 'ROLLBACK;');
         } catch (rollbackError) {
-          if (error && typeof error === 'object') error.rollbackError = rollbackError;
+          if (failure &&
+              (typeof failure === 'object' || typeof failure === 'function')) {
+            failure.rollbackError = rollbackError;
+          }
         }
       }
-      throw error;
-    } finally {
-      try {
-        await closeDatabase(database);
-      } catch (closeError) {
-        setLastError(closeError);
-        if (failure && typeof failure === 'object') failure.closeError = closeError;
-        else throw closeError;
-      }
     }
+    let closeError = null;
+    try {
+      await closeDatabase(database);
+    } catch (error) {
+      closeError = error;
+      setLastError(error);
+    }
+    if (operationFailed) {
+      if (closeError && failure &&
+          (typeof failure === 'object' || typeof failure === 'function')) {
+        failure.closeError = closeError;
+      }
+      throw failure;
+    }
+    if (closeError) throw closeError;
+    return result;
   }
 
   exec(sql, callback) {

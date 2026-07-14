@@ -82,7 +82,7 @@ test('classifyAckResult maps known result/status vocabularies', () => {
   assert.equal(ledger.classifyAckResult('SUCCESS'), 'APPLIED');
   assert.equal(ledger.classifyAckResult('APPLIED'), 'APPLIED');
   assert.equal(ledger.classifyAckResult('RETRYABLE_ERROR'), 'FAILED_RETRYABLE');
-  assert.equal(ledger.classifyAckResult('EXPIRED'), 'FAILED_RETRYABLE');
+  assert.equal(ledger.classifyAckResult('EXPIRED'), 'EXPIRED');
   assert.equal(ledger.classifyAckResult('REJECTED_PERMANENT'), 'REJECTED_PERMANENT');
   assert.equal(ledger.classifyAckResult('FAILED', 'missing valve devEui'), 'REJECTED_PERMANENT');
   assert.equal(ledger.classifyAckResult('FAILED', 'timeout talking to gateway'), 'FAILED_RETRYABLE');
@@ -228,6 +228,24 @@ test('deduplicatePendingCommand fails closed when the effect binding is not reco
   assert.equal(replay.handled, false);
 });
 
+test('deduplicatePendingCommand fails closed after a permissive validator accepts a null payload', async () => {
+  const db = new TestDb();
+  const replay = await ledger.deduplicatePendingCommand(
+    db,
+    { commandId: 708, commandType: 'UPSERT_JOURNAL_ENTRY', payload: null },
+    {
+      gateway_device_eui: GATEWAY_EUI,
+      extraEffectBindingValidator: async () => true,
+    }
+  );
+
+  assert.deepEqual(replay, { handled: false });
+  assert.equal(
+    (await db.get('SELECT COUNT(*) AS n FROM command_ack_outbox WHERE command_id=?', ['708'])).n,
+    0
+  );
+});
+
 test('deduplicatePendingCommand uses the injected journal hooks for identity-based duplicate lookup', async () => {
   const db = new TestDb();
   const entryUuid = '22222222-2222-4222-8222-222222222222';
@@ -301,6 +319,97 @@ test('queueCommandAck writes the ledger + outbox atomically and fires the lifecy
   );
 });
 
+test('queueCommandAck durably stores and exactly replays the first normalized terminal ACK', async () => {
+  const db = new TestDb();
+  let hookAck = null;
+  const rawAck = {
+    commandId: 803,
+    commandType: 'CONFIG_UPDATE',
+    effectKey: 'config:' + GATEWAY_EUI + ':irrigation_interval:1',
+    deviceEui: GATEWAY_EUI,
+    status: 'ACKED',
+    result: 'SUCCESS',
+    duplicate: false,
+  };
+  const queued = await ledger.queueCommandAck(db, rawAck, {
+    lifecycle_hooks: { afterCommandLedger: async (ack) => { hookAck = ack; } },
+  });
+
+  assert.deepEqual(queued, {
+    commandId: 803,
+    status: 'ACKED',
+    result: 'APPLIED',
+    appliedAt: queued.appliedAt,
+    appliedSyncVersion: null,
+    duplicate: false,
+    reason: null,
+    detail: null,
+  });
+  assert.match(queued.appliedAt, /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/);
+  const durable = await db.get(
+    'SELECT result_detail FROM applied_commands WHERE command_id=?',
+    ['803']
+  );
+  const outbox = await db.get(
+    'SELECT payload_json FROM command_ack_outbox WHERE command_id=? AND delivered_at IS NULL',
+    ['803']
+  );
+  assert.deepEqual(JSON.parse(durable.result_detail), queued);
+  assert.deepEqual(JSON.parse(outbox.payload_json), queued);
+  assert.deepEqual(hookAck, queued);
+
+  const replay = await ledger.deduplicatePendingCommand(
+    db,
+    { commandId: 803, commandType: 'CONFIG_UPDATE', payload: null },
+    { gateway_device_eui: GATEWAY_EUI }
+  );
+  assert.deepEqual(replay, { handled: true, ack: queued });
+});
+
+test('queueCommandAck normalizes invalid sync versions before every durable observation', async () => {
+  const invalidVersions = [
+    NaN,
+    Infinity,
+    -Infinity,
+    -1,
+    1.5,
+    Number.MAX_SAFE_INTEGER + 1,
+    'not-a-version',
+  ];
+  for (const [index, appliedSyncVersion] of invalidVersions.entries()) {
+    const db = new TestDb();
+    const commandId = 810 + index;
+    let hookAck = null;
+    const queued = await ledger.queueCommandAck(db, {
+      commandId,
+      commandType: 'CONFIG_UPDATE',
+      result: 'APPLIED',
+      appliedSyncVersion,
+    }, {
+      lifecycle_hooks: { afterCommandLedger: async (ack) => { hookAck = ack; } },
+    });
+    const durable = JSON.parse((await db.get(
+      'SELECT result_detail FROM applied_commands WHERE command_id=?',
+      [String(commandId)]
+    )).result_detail);
+    const outbox = JSON.parse((await db.get(
+      'SELECT payload_json FROM command_ack_outbox WHERE command_id=? AND delivered_at IS NULL',
+      [String(commandId)]
+    )).payload_json);
+    const replay = await ledger.deduplicatePendingCommand(
+      db,
+      { commandId, commandType: 'CONFIG_UPDATE', payload: null },
+      { gateway_device_eui: GATEWAY_EUI }
+    );
+
+    assert.equal(queued.appliedSyncVersion, null);
+    assert.deepEqual(durable, queued);
+    assert.deepEqual(outbox, queued);
+    assert.deepEqual(hookAck, queued);
+    assert.deepEqual(replay, { handled: true, ack: queued });
+  }
+});
+
 test('queueCommandAck never rewrites an existing terminal result and never re-fires the hook', async () => {
   const db = new TestDb();
   await ledger.queueCommandAck(db, {
@@ -317,19 +426,25 @@ test('queueCommandAck never rewrites an existing terminal result and never re-fi
   assert.equal(hookFired, false, 'a contradictory replay must not re-fire the ledger hook');
 });
 
-test('queueCommandAck leaves a retryable result out of the terminal ledger', async () => {
+test('queueCommandAck stores EXPIRED as a terminal result and replays it exactly', async () => {
   const db = new TestDb();
   const queued = await ledger.queueCommandAck(db, {
     commandId: 802, commandType: 'CONFIG_UPDATE', result: 'EXPIRED', reason: 'lease_expired',
   });
 
-  assert.equal(queued.result, 'FAILED_RETRYABLE');
+  assert.equal(queued.result, 'EXPIRED');
   assert.equal(
-    (await db.get('SELECT COUNT(*) AS n FROM applied_commands WHERE command_id=?', ['802'])).n,
-    0
+    (await db.get('SELECT result FROM applied_commands WHERE command_id=?', ['802'])).result,
+    'EXPIRED'
   );
   assert.equal(
     (await db.get('SELECT COUNT(*) AS n FROM command_ack_outbox WHERE command_id=?', ['802'])).n,
     1
   );
+  const replay = await ledger.deduplicatePendingCommand(
+    db,
+    { commandId: 802, commandType: 'CONFIG_UPDATE', payload: null },
+    { gateway_device_eui: GATEWAY_EUI }
+  );
+  assert.deepEqual(replay, { handled: true, ack: queued });
 });
