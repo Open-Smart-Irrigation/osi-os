@@ -492,6 +492,23 @@ async function validationDefinitions(tx, input) {
   return { layout: parsedDefinition(layout), template: parsedDefinition(template) };
 }
 
+const ACTUATION_REFERENCE_KEY = 'valve_actuation_expectations.expectation_id';
+
+async function referenceValuesForFinalization(tx, plot, principal) {
+  const allowed = new Set();
+  if (plot.zone_id != null) {
+    const rows = await tx.all(
+      'SELECT vae.expectation_id FROM valve_actuation_expectations AS vae ' +
+      'JOIN devices AS d ON UPPER(d.deveui)=UPPER(vae.device_eui) ' +
+      'WHERE vae.zone_id=? AND d.user_id=? AND d.gateway_device_eui=? ' +
+        'AND d.deleted_at IS NULL ORDER BY vae.expectation_id',
+      [plot.zone_id, principal.user_id, principal.gateway_device_eui]
+    );
+    for (const row of rows) allowed.add(row.expectation_id);
+  }
+  return new Map([[ACTUATION_REFERENCE_KEY, allowed]]);
+}
+
 async function currentCatalogVersion(tx, catalog) {
   const state = await tx.get(
     'SELECT catalog_version,catalog_hash FROM journal_catalog_state WHERE id=?',
@@ -508,7 +525,8 @@ async function currentCatalogVersion(tx, catalog) {
 function frozenSeasonForCorrection(existing, plot, occurrence) {
   const sameDeterminants = nullable(existing.plot_uuid) === nullable(plot.plot_uuid) &&
     nullable(existing.zone_uuid) === nullable(plot.zone_uuid) &&
-    existing.occurred_start === occurrence.start.instant;
+    existing.occurred_start === occurrence.start.instant &&
+    existing.occurred_timezone === occurrence.timezone;
   if (!sameDeterminants) return null;
   if (existing.season_uuid == null && existing.season_crop == null &&
       existing.season_variety == null) {
@@ -1086,12 +1104,13 @@ async function correctFinalInTransaction(tx, catalog, input, principal, entryInd
     template_version: existing.template_version,
   });
   const originalEntry = Object.assign({}, existing, { values: originalValues });
+  const referenceValues = await referenceValuesForFinalization(tx, plot, principal);
   const validation = validateEntry(
     catalog,
     definitions.layout,
     definitions.template,
     candidate,
-    { mode: 'correction', originalEntry }
+    { mode: 'correction', originalEntry, referenceValues }
   );
   if (!validation.ok) {
     throw entryValidationError('Journal correction validation failed', validation);
@@ -1151,7 +1170,14 @@ async function promoteDraftInTransaction(tx, catalog, input, principal, entryInd
   });
   delete candidate.duplicate_guard_ack_entry_uuid;
   const definitions = await validationDefinitions(tx, candidate);
-  const validation = validateEntry(catalog, definitions.layout, definitions.template, candidate, {});
+  const referenceValues = await referenceValuesForFinalization(tx, plot, principal);
+  const validation = validateEntry(
+    catalog,
+    definitions.layout,
+    definitions.template,
+    candidate,
+    { referenceValues }
+  );
   if (!validation.ok) {
     throw entryValidationError('Journal draft finalization validation failed', validation);
   }
@@ -1220,7 +1246,14 @@ async function createFinalInTransaction(tx, catalog, input, principal, entryInde
   delete candidate.duplicate_guard_ack_entry_uuid;
   delete candidate.duplicate_guard_ack_entry_uuids;
   const definitions = await validationDefinitions(tx, candidate);
-  const validation = validateEntry(catalog, definitions.layout, definitions.template, candidate, {});
+  const referenceValues = await referenceValuesForFinalization(tx, plot, principal);
+  const validation = validateEntry(
+    catalog,
+    definitions.layout,
+    definitions.template,
+    candidate,
+    { referenceValues }
+  );
   if (!validation.ok) {
     throw entryValidationError('Journal entry validation failed', validation);
   }

@@ -29,6 +29,10 @@ const ZONE_UUID = '44444444-4444-4444-8444-444444444444';
 const SEASON_UUID = '55555555-5555-4555-8555-555555555555';
 const GATEWAY_EUI = '0016C001F11715E2';
 const SECOND_GATEWAY_EUI = '0016C001F11715E3';
+const OWNED_VALVE_EUI = '70B3D57ED0065678';
+const FOREIGN_VALVE_EUI = '70B3D57ED0065679';
+const OWNED_EXPECTATION_ID = 'expectation-owned';
+const FOREIGN_EXPECTATION_ID = 'expectation-foreign-owner';
 const MISSING_CUSTOM_CODE = 'custom.99999999-9999-4999-8999-999999999999';
 
 class TestDb {
@@ -129,6 +133,52 @@ function fixtureDb(name) {
       ') VALUES (?,?,?,?)'
   ).run(PLOT_UUID, 'open_field', now, ACTOR_UUID);
   return db;
+}
+
+function seedActuationReferences(db) {
+  const now = '2026-07-12T07:00:00.000Z';
+  const later = '2026-07-12T07:01:00.000Z';
+  db.native.prepare(
+    'INSERT INTO users(id,username,password_hash,created_at,user_uuid) VALUES (?,?,?,?,?)'
+  ).run(2, 'journal-foreign', 'unused', now, SECOND_OWNER_UUID);
+  const insertDevice = db.native.prepare(
+    'INSERT INTO devices(' +
+      'deveui,name,type_id,user_id,created_at,updated_at,irrigation_zone_id,gateway_device_eui' +
+    ') VALUES (?,?,?,?,?,?,?,?)'
+  );
+  insertDevice.run(
+    OWNED_VALVE_EUI, 'Owned valve', 'STREGA_VALVE', 1, now, now, 1, GATEWAY_EUI
+  );
+  insertDevice.run(
+    FOREIGN_VALVE_EUI, 'Foreign valve', 'STREGA_VALVE', 2, now, now, null, GATEWAY_EUI
+  );
+  const insertExpectation = db.native.prepare(
+    'INSERT INTO valve_actuation_expectations(' +
+      'expectation_id,device_eui,zone_id,commanded_at,commanded_duration_seconds,' +
+      'expected_close_at,volume_source,reconciliation_state,created_at' +
+    ') VALUES (?,?,?,?,?,?,?,?,?)'
+  );
+  insertExpectation.run(
+    OWNED_EXPECTATION_ID, OWNED_VALVE_EUI, 1, now, 60, later,
+    'unknown', 'OBSERVED_RUNNING', now
+  );
+  insertExpectation.run(
+    FOREIGN_EXPECTATION_ID, FOREIGN_VALVE_EUI, 1, now, 60, later,
+    'unknown', 'OBSERVED_RUNNING', now
+  );
+}
+
+function aggregateActuationValue(expectationId) {
+  return {
+    attribute_code: 'attr.actuation_expectation_id',
+    group_index: 0,
+    value_status: 'observed',
+    value_num: null,
+    value_text: expectationId,
+    unit_code: null,
+    entered_value_num: null,
+    entered_unit_code: null,
+  };
 }
 
 function entryAggregate(overrides) {
@@ -431,6 +481,46 @@ test('UPSERT_JOURNAL_ENTRY applies through lifecycle and atomically records nume
     assert.equal(await db.get('SELECT COUNT(*) AS n FROM sync_outbox').then((row) => row.n), 1);
   } finally {
     db.close();
+  }
+});
+
+test('UPSERT_JOURNAL_ENTRY applies owned actuation references and rejects foreign ones', async () => {
+  const ownedDb = fixtureDb('entry-owned-actuation-reference');
+  const foreignDb = fixtureDb('entry-foreign-actuation-reference');
+  try {
+    seedActuationReferences(ownedDb);
+    seedActuationReferences(foreignDb);
+    const ownedEnvelope = commandEnvelope({ commandId: 640 });
+    ownedEnvelope.payload.entry.values = [aggregateActuationValue(OWNED_EXPECTATION_ID)];
+    const owned = await journal.applyJournalCommand(ownedDb, ownedEnvelope, {
+      gateway_device_eui: GATEWAY_EUI,
+    });
+
+    assert.equal(owned.ack.result, 'APPLIED');
+    assert.equal((await ownedDb.get(
+      'SELECT result FROM applied_commands WHERE command_id=?', ['640']
+    )).result, 'APPLIED');
+    assert.equal((await ownedDb.get(
+      'SELECT value_text FROM journal_entry_values WHERE entry_uuid=?', [ENTRY_UUID]
+    )).value_text, OWNED_EXPECTATION_ID);
+
+    const foreignEnvelope = commandEnvelope({ commandId: 641 });
+    foreignEnvelope.payload.entry.values = [aggregateActuationValue(FOREIGN_EXPECTATION_ID)];
+    const foreign = await journal.applyJournalCommand(foreignDb, foreignEnvelope, {
+      gateway_device_eui: GATEWAY_EUI,
+    });
+
+    assert.equal(foreign.ack.result, 'REJECTED_PERMANENT');
+    assert.equal(foreign.ack.reason, 'validation_failed');
+    assert.equal((await foreignDb.get(
+      'SELECT result FROM applied_commands WHERE command_id=?', ['641']
+    )).result, 'REJECTED_PERMANENT');
+    assert.equal((await foreignDb.get('SELECT COUNT(*) AS n FROM journal_entries')).n, 0);
+    assert.equal((await foreignDb.get('SELECT COUNT(*) AS n FROM journal_entry_values')).n, 0);
+    assert.equal((await foreignDb.get('SELECT COUNT(*) AS n FROM sync_outbox')).n, 0);
+  } finally {
+    ownedDb.close();
+    foreignDb.close();
   }
 });
 

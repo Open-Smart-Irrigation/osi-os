@@ -22,6 +22,7 @@ const OTHER_UUID = 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee';
 const OTHER_USER_UUID = 'f0f0f0f0-f0f0-40f0-80f0-f0f0f0f0f0f0';
 const ZONE_UUID = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc';
 const SEASON_UUID = 'dddddddd-dddd-4ddd-8ddd-dddddddddddd';
+const PRIOR_SEASON_UUID = '11111111-1111-4111-8111-111111111111';
 const FOREIGN_ZONE_UUID = '22222222-2222-4222-8222-222222222222';
 const NO_SEASON_ZONE_UUID = '33333333-3333-4333-8333-333333333333';
 const NULL_EUI_ZONE_UUID = '44444444-4444-4444-8444-444444444444';
@@ -35,6 +36,9 @@ const SECOND_RAIN_DEVICE_EUI = '4CF7F1C000000003';
 const VALVE_DEVICE_EUI = '70B3D57ED0065678';
 const NULL_EUI_ZONE_DEVICE_EUI = '70B3D57ED0069999';
 const ENTRY_UUID = 'abcdefab-cdef-4abc-8def-abcdefabcdef';
+const OWNED_EXPECTATION_ID = 'expectation-owned';
+const FOREIGN_ZONE_EXPECTATION_ID = 'expectation-foreign-zone';
+const FOREIGN_OWNER_EXPECTATION_ID = 'expectation-foreign-owner';
 const CONTEXT_RAW_ROW_LIMIT = 4096;
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const PLOT_NUMBERS = [2, 5, 6, 10, 12];
@@ -415,7 +419,7 @@ function isContextRead(sql) {
   const text = String(sql);
   return text.includes('FROM device_data') ||
     text.includes('FROM devices AS d LEFT JOIN weather_station_zones') ||
-    text.includes('FROM valve_actuation_expectations AS vae');
+    text.includes('ORDER BY vae.commanded_at DESC,vae.expectation_id DESC LIMIT 1');
 }
 
 function observeTransactionContextReads() {
@@ -457,6 +461,66 @@ async function assertNoJournalWrites() {
   assert.equal(await count('journal_entries'), 0);
   assert.equal(await count('journal_entry_values'), 0);
   assert.equal(await count('sync_outbox'), 0);
+}
+
+async function journalMutationState() {
+  return {
+    entries: await db.all('SELECT * FROM journal_entries ORDER BY entry_uuid'),
+    values: await db.all(
+      'SELECT * FROM journal_entry_values ORDER BY entry_uuid,group_index,attribute_code'
+    ),
+    outbox: await db.all('SELECT * FROM sync_outbox ORDER BY event_uuid'),
+    appliedCommands: await db.all('SELECT * FROM applied_commands ORDER BY command_id'),
+    commandAcks: await db.all('SELECT * FROM command_ack_outbox ORDER BY id'),
+  };
+}
+
+async function seedActuationExpectations() {
+  const now = '2026-07-12T07:00:00.000Z';
+  const later = '2026-07-12T07:01:00.000Z';
+  const insert =
+    'INSERT INTO valve_actuation_expectations(' +
+      'expectation_id,device_eui,zone_id,commanded_at,commanded_duration_seconds,' +
+      'expected_close_at,volume_source,reconciliation_state,created_at' +
+    ') VALUES (?,?,?,?,?,?,?,?,?)';
+  await db.run(insert, [
+    OWNED_EXPECTATION_ID, VALVE_DEVICE_EUI, 1, now, 60, later,
+    'unknown', 'OBSERVED_RUNNING', now,
+  ]);
+  await db.run(insert, [
+    FOREIGN_ZONE_EXPECTATION_ID, VALVE_DEVICE_EUI, 2, now, 60, later,
+    'unknown', 'OBSERVED_RUNNING', now,
+  ]);
+  await db.run(insert, [
+    FOREIGN_OWNER_EXPECTATION_ID, FOREIGN_DEVICE_EUI, 1, now, 60, later,
+    'unknown', 'OBSERVED_RUNNING', now,
+  ]);
+}
+
+function actuationValue(expectationId) {
+  return {
+    attribute_code: 'attr.actuation_expectation_id',
+    group_index: 0,
+    value: expectationId,
+    value_status: 'observed',
+  };
+}
+
+function actuationEntry(expectationId, overrides) {
+  return validEntry(Object.assign({
+    values: [actuationValue(expectationId)],
+  }, overrides || {}));
+}
+
+async function rejectInvalidReference(promise) {
+  await assert.rejects(promise, (error) => {
+    assert.equal(error && error.code, 'validation_failed');
+    assert.ok(
+      error.errors.some((detail) => detail && detail.code === 'invalid_reference'),
+      JSON.stringify(error.errors)
+    );
+    return true;
+  });
 }
 
 async function rejectCode(promise, code) {
@@ -825,7 +889,7 @@ test('valve context ignores current_state and uses the historical actuation expe
   assert.equal(valve.quality, 'observed');
   assert.equal(valve.reason, null);
   const expectationRead = observed.reads.find((read) => {
-    return read.sql.includes('FROM valve_actuation_expectations AS vae');
+    return read.sql.includes('ORDER BY vae.commanded_at DESC,vae.expectation_id DESC LIMIT 1');
   });
   assert.ok(expectationRead);
   assert.match(
@@ -1595,6 +1659,80 @@ test('correction increments the version and completely replaces the value set', 
     buildAggregate(Object.assign({ contract_version: 1 }, entry), values)
   );
 });
+
+const actuationFinalizationScenarios = [
+  {
+    name: 'final create',
+    expectedVersion: 1,
+    async arrange() {},
+    apply(expectationId) {
+      return journal.finalize(db, catalog, actuationEntry(expectationId), principal());
+    },
+  },
+  {
+    name: 'draft promotion',
+    expectedVersion: 1,
+    async arrange() {
+      await journal.saveDraft(db, catalog, validEntry({
+        values: [{
+          attribute_code: 'attr.operator',
+          group_index: 0,
+          value: 'Draft operator',
+          value_status: 'observed',
+        }],
+      }), principal());
+    },
+    apply(expectationId) {
+      return journal.finalize(db, catalog, actuationEntry(expectationId), principal());
+    },
+  },
+  {
+    name: 'correction',
+    expectedVersion: 2,
+    async arrange() {
+      await journal.finalize(db, catalog, validEntry(), principal());
+    },
+    apply(expectationId) {
+      return journal.finalize(db, catalog, actuationEntry(expectationId, {
+        base_sync_version: 1,
+      }), principal());
+    },
+  },
+];
+
+for (const scenario of actuationFinalizationScenarios) {
+  test(scenario.name + ' accepts an owned same-zone actuation reference', async () => {
+    await seedActuationExpectations();
+    await scenario.arrange();
+
+    const result = await scenario.apply(OWNED_EXPECTATION_ID);
+
+    assert.equal(result.sync_version, scenario.expectedVersion);
+    const stored = await db.get(
+      'SELECT value_text FROM journal_entry_values ' +
+        'WHERE entry_uuid=? AND attribute_code=?',
+      [ENTRY_UUID, 'attr.actuation_expectation_id']
+    );
+    assert.equal(stored.value_text, OWNED_EXPECTATION_ID);
+  });
+
+  for (const invalidReference of [
+    'expectation-missing',
+    FOREIGN_ZONE_EXPECTATION_ID,
+    FOREIGN_OWNER_EXPECTATION_ID,
+  ]) {
+    test(scenario.name + ' rejects and rolls back disallowed actuation reference ' +
+        invalidReference, async () => {
+      await seedActuationExpectations();
+      await scenario.arrange();
+      const before = await journalMutationState();
+
+      await rejectInvalidReference(scenario.apply(invalidReference));
+
+      assert.deepEqual(await journalMutationState(), before);
+    });
+  }
+}
 
 test('void preserves values and emits a complete JOURNAL_ENTRY_VOIDED aggregate', async () => {
   await journal.finalize(db, catalog, validEntry(), principal());
@@ -2460,6 +2598,52 @@ test('correction keeps its originally frozen season after the covering season ch
     [corrected.season_uuid, corrected.season_crop, corrected.season_variety],
     [original.season_uuid, original.season_crop, original.season_variety]
   );
+});
+
+test('timezone-only correction selects the season covering the new local date', async () => {
+  try {
+    await db.run(
+      'UPDATE zone_seasons SET starts_on=?,ends_on=? WHERE season_uuid=?',
+      ['2026-07-12', '2026-12-31', SEASON_UUID]
+    );
+    await db.run(
+      'INSERT INTO zone_seasons(' +
+        'zone_id,season_uuid,name,starts_on,ends_on,crop_type,variety' +
+      ') VALUES (?,?,?,?,?,?,?)',
+      [1, PRIOR_SEASON_UUID, 'Prior crop', '2026-01-01', '2026-07-11', 'wheat', 'Prior']
+    );
+    await journal.finalize(db, catalog, validEntry({
+      occurred_start_local: '2026-07-12T00:30',
+      occurred_timezone: 'Europe/Zurich',
+    }), principal());
+    assert.equal(
+      (await db.get('SELECT season_uuid FROM journal_entries WHERE entry_uuid=?', [ENTRY_UUID]))
+        .season_uuid,
+      SEASON_UUID
+    );
+
+    await journal.finalize(db, catalog, validEntry({
+      base_sync_version: 1,
+      occurred_start_local: '2026-07-11T18:30',
+      occurred_timezone: 'America/New_York',
+      occurred_utc_offset_minutes: -240,
+      note: 'Same instant, previous local date',
+    }), principal());
+
+    const corrected = await db.get(
+      'SELECT occurred_start,occurred_timezone,season_uuid FROM journal_entries WHERE entry_uuid=?',
+      [ENTRY_UUID]
+    );
+    assert.equal(corrected.occurred_start, '2026-07-11T22:30:00.000Z');
+    assert.equal(corrected.occurred_timezone, 'America/New_York');
+    assert.equal(corrected.season_uuid, PRIOR_SEASON_UUID);
+  } finally {
+    await db.run('DELETE FROM zone_seasons WHERE season_uuid=?', [PRIOR_SEASON_UUID]);
+    await db.run(
+      'UPDATE zone_seasons SET starts_on=?,ends_on=? WHERE season_uuid=?',
+      ['2026-01-01', '2026-12-31', SEASON_UUID]
+    );
+  }
 });
 
 test('finalize rejects a stale loaded catalog without writing rows', async () => {
