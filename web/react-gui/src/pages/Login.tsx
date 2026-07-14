@@ -31,7 +31,7 @@ export const Login: React.FC = () => {
   };
 
   return (
-    <div className="relative min-h-screen flex items-center justify-center bg-[var(--bg)] px-4">
+    <div className="login-scene relative min-h-screen flex items-center justify-center px-4">
       <div className="max-w-md w-full bg-[var(--card)] rounded-2xl shadow-2xl border border-[var(--border)]">
         {/* Balken crown on white (the asset's own ground), cropped to the
             readable wordmark. rounded-t + overflow-hidden live HERE, not on
@@ -91,7 +91,7 @@ export const Login: React.FC = () => {
           <button
             type="submit"
             disabled={loading}
-            className="w-full bg-[var(--primary)] hover:bg-[var(--primary-hover)] disabled:bg-[var(--border)] text-white font-bold text-xl py-4 touch-target rounded-lg transition-colors shadow-lg disabled:cursor-not-allowed disabled:text-[var(--text-disabled)]"
+            className="btn-liquid-red w-full font-bold text-xl py-4 touch-target rounded-lg disabled:cursor-not-allowed"
           >
             {loading ? t('login.signingIn') : t('login.signIn')}
           </button>

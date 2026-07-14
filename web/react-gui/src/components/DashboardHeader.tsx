@@ -12,8 +12,8 @@ interface DashboardHeaderProps {
   onLogout: () => void;
 }
 
-const GHOST_BUTTON =
-  'rounded-lg border border-[var(--border)] bg-[var(--card)] px-6 py-3 text-center text-lg font-bold text-[var(--text)] transition-colors hover:bg-[var(--secondary-bg)]';
+const LIQUID_BUTTON =
+  'btn-liquid rounded-lg px-6 py-3 text-center text-lg font-bold text-[var(--text)]';
 
 export const DashboardHeader: React.FC<DashboardHeaderProps> = ({
   username,
@@ -46,7 +46,7 @@ export const DashboardHeader: React.FC<DashboardHeaderProps> = ({
           className="block h-8 w-full object-cover object-left"
         />
       </div>
-      <header className="sticky top-0 z-30 border-b border-[var(--border)] bg-[var(--header-bg)]">
+      <header className="glass-chrome sticky top-0 z-30 border-b border-[var(--border)]">
         <div className="max-w-7xl mx-auto px-4 pt-5">
           <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
             <div>
@@ -60,7 +60,7 @@ export const DashboardHeader: React.FC<DashboardHeaderProps> = ({
               <HeaderMenu
                 label={t('add')}
                 className="w-[calc(50%-4px)] sm:w-auto"
-                triggerClassName="bg-[var(--text)] text-[var(--card)] hover:opacity-85 text-lg px-6 py-3"
+                triggerClassName="btn-liquid text-[var(--text)] text-lg px-6 py-3"
                 align="left"
                 items={[
                   { key: 'zone', label: t('addMenu.zone'), onSelect: onAddZone },
@@ -69,23 +69,23 @@ export const DashboardHeader: React.FC<DashboardHeaderProps> = ({
               />
 
               {showDesktopData && (
-                <Link to="/analysis" className={`w-[calc(50%-4px)] sm:w-auto ${GHOST_BUTTON}`}>
+                <Link to="/analysis" className={`w-[calc(50%-4px)] sm:w-auto ${LIQUID_BUTTON}`}>
                   {t('data')}
                 </Link>
               )}
 
-              <Link to="/journal" className={`w-[calc(50%-4px)] sm:w-auto ${GHOST_BUTTON}`}>
+              <Link to="/journal" className={`w-[calc(50%-4px)] sm:w-auto ${LIQUID_BUTTON}`}>
                 {t('journal')}
               </Link>
 
-              <Link to="/settings" className={`w-[calc(50%-4px)] sm:w-auto ${GHOST_BUTTON}`}>
+              <Link to="/settings" className={`w-[calc(50%-4px)] sm:w-auto ${LIQUID_BUTTON}`}>
                 {t('settings:entryPoint')}
               </Link>
 
               <HeaderMenu
                 label={t('account')}
                 className="w-[calc(50%-4px)] sm:w-auto"
-                triggerClassName="border border-[var(--border)] bg-[var(--card)] text-[var(--text)] hover:bg-[var(--secondary-bg)] text-lg px-6 py-3"
+                triggerClassName="btn-liquid text-[var(--text)] text-lg px-6 py-3"
                 items={[
                   { key: 'osi-server', label: t('accountMenu.osiServer'), to: '/account-link' },
                   { key: 'logout', label: t('logout'), onSelect: onLogout },
