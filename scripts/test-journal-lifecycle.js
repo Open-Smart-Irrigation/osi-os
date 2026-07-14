@@ -24,6 +24,8 @@ const ZONE_UUID = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc';
 const SEASON_UUID = 'dddddddd-dddd-4ddd-8ddd-dddddddddddd';
 const FOREIGN_ZONE_UUID = '22222222-2222-4222-8222-222222222222';
 const NO_SEASON_ZONE_UUID = '33333333-3333-4333-8333-333333333333';
+const NULL_EUI_ZONE_UUID = '44444444-4444-4444-8444-444444444444';
+const NULL_EUI_SEASON_UUID = '55555555-5555-4555-8555-555555555555';
 const GATEWAY_EUI = '0016C001F11715E2';
 const OWNED_DEVICE_EUI = '70B3D57ED0061234';
 const FOREIGN_DEVICE_EUI = 'A84041ABCDEFFEDC';
@@ -185,9 +187,23 @@ function seedDatabase() {
     'VALUES (?,?,?,?,?,?)'
   ).run(3, 'No season zone', 1, 'Europe/Zurich', NO_SEASON_ZONE_UUID, GATEWAY_EUI);
   native.prepare(
+    'INSERT INTO irrigation_zones(id,name,user_id,timezone,zone_uuid,gateway_device_eui) ' +
+    'VALUES (?,?,?,?,?,?)'
+  ).run(4, 'Legacy null-EUI zone', 1, 'Europe/Zurich', NULL_EUI_ZONE_UUID, null);
+  // trg_sync_zones_defaults_ai backfills gateway_device_eui on INSERT (COALESCE to the
+  // fleet default), so force it back to NULL via an UPDATE (no such backfill on UPDATE)
+  // to reproduce a legacy zone whose gateway_device_eui was never populated.
+  native.prepare(
+    'UPDATE irrigation_zones SET gateway_device_eui=NULL WHERE id=?'
+  ).run(4);
+  native.prepare(
     'INSERT INTO zone_seasons(zone_id,season_uuid,name,starts_on,ends_on,crop_type,variety) ' +
     'VALUES (?,?,?,?,?,?,?)'
   ).run(1, SEASON_UUID, 'Barley 2026', '2026-01-01', '2026-12-31', 'barley', 'Golden');
+  native.prepare(
+    'INSERT INTO zone_seasons(zone_id,season_uuid,name,starts_on,ends_on,crop_type,variety) ' +
+    'VALUES (?,?,?,?,?,?,?)'
+  ).run(4, NULL_EUI_SEASON_UUID, 'Wheat 2026', '2026-01-01', '2026-12-31', 'wheat', 'Test');
   for (const number of PLOT_NUMBERS) {
     native.prepare(
       'INSERT INTO journal_plots(' +
@@ -211,6 +227,7 @@ function seedDatabase() {
     { number: 20, code: 'FOREIGN-20', zoneUuid: FOREIGN_ZONE_UUID },
     { number: 21, code: 'NO-SEASON-21', zoneUuid: NO_SEASON_ZONE_UUID },
     { number: 22, code: 'SAME-ZONE-22', zoneUuid: ZONE_UUID },
+    { number: 23, code: 'NULL-EUI-23', zoneUuid: NULL_EUI_ZONE_UUID },
   ]) {
     native.prepare(
       'INSERT INTO journal_plots(' +
@@ -1862,6 +1879,24 @@ test('freezes an explicit crop and variety when no covering season exists', asyn
   assert.equal(entry.season_uuid, null);
   assert.equal(entry.season_crop, 'maize');
   assert.equal(entry.season_variety, 'Pioneer P9241');
+});
+
+test('resolves a plot linked to a legacy zone with a NULL gateway_device_eui', async () => {
+  const result = await journal.finalize(db, catalog, validEntry({
+    plot_uuid: plotUuid(23),
+  }), principal());
+
+  assert.equal(result.sync_version, 1);
+  const entry = await db.get(
+    'SELECT zone_id,zone_uuid,season_uuid,season_crop,season_variety ' +
+    'FROM journal_entries WHERE entry_uuid=?',
+    [ENTRY_UUID]
+  );
+  assert.equal(entry.zone_id, 4);
+  assert.equal(entry.zone_uuid, NULL_EUI_ZONE_UUID);
+  assert.equal(entry.season_uuid, NULL_EUI_SEASON_UUID);
+  assert.equal(entry.season_crop, 'wheat');
+  assert.equal(entry.season_variety, 'Test');
 });
 
 test('correction preserves the batch UUID of a batch-created entry when omitted', async () => {

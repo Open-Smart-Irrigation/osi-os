@@ -290,7 +290,8 @@ async function resolvePlotContext(tx, plotUuid, principal) {
       'u.user_uuid AS zone_owner_user_uuid ' +
     'FROM journal_plots AS p ' +
     'LEFT JOIN irrigation_zones AS z ON z.zone_uuid=p.zone_uuid ' +
-      'AND z.gateway_device_eui=p.gateway_device_eui AND z.deleted_at IS NULL ' +
+      'AND (z.gateway_device_eui=p.gateway_device_eui OR z.gateway_device_eui IS NULL) ' +
+      'AND z.deleted_at IS NULL ' +
     'LEFT JOIN users AS u ON u.id=z.user_id ' +
     'WHERE p.plot_uuid=? AND p.owner_user_uuid=? AND p.gateway_device_eui=? ' +
       'AND p.active=? AND p.deleted_at IS NULL',
