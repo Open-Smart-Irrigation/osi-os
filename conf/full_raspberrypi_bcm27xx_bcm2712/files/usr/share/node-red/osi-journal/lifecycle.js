@@ -361,6 +361,7 @@ function validateDraftLimits(input, principal) {
     throw lifecycleError('limit_exceeded', 'Draft exceeds the 128 value limit');
   }
   const groups = new Set();
+  const valueKeys = new Set();
   for (let index = 0; index < input.values.length; index += 1) {
     const value = input.values[index];
     if (!value || typeof value !== 'object' || Array.isArray(value)) {
@@ -374,6 +375,14 @@ function validateDraftLimits(input, principal) {
     if (groups.size > 32) {
       throw lifecycleError('limit_exceeded', 'Draft exceeds the 32 group limit');
     }
+    const valueKey = String(groupIndex) + ':' + String(value.attribute_code || '');
+    if (valueKeys.has(valueKey)) {
+      const duplicateError = lifecycleError('duplicate_value', 'Attribute is duplicated in this group');
+      duplicateError.statusCode = 422;
+      duplicateError.details = { field: 'values[' + index + '].attribute_code' };
+      throw duplicateError;
+    }
+    valueKeys.add(valueKey);
     const valueStatus = value.value_status == null ? 'observed' : value.value_status;
     if (!['observed', 'not_observed', 'not_applicable', 'below_detection'].includes(valueStatus)) {
       throw lifecycleError('invalid_status', 'Draft value status is not supported');

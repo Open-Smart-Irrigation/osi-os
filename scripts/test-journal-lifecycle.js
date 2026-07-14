@@ -2096,6 +2096,29 @@ test('saveDraft rejects observed text over 4096 UTF-8 bytes without writing rows
   await assertNoJournalWrites();
 });
 
+test('saveDraft rejects duplicate group_index/attribute_code values without writing rows', async () => {
+  await rejectCode(journal.saveDraft(db, catalog, validEntry({
+    values: [
+      {
+        attribute_code: 'attr.irrigation_depth',
+        group_index: 0,
+        value: 12,
+        unit_code: 'unit.mm_water',
+        value_status: 'observed',
+      },
+      {
+        attribute_code: 'attr.irrigation_depth',
+        group_index: 0,
+        value: 18,
+        unit_code: 'unit.mm_water',
+        value_status: 'observed',
+      },
+    ],
+  }), principal()), 'duplicate_value');
+
+  await assertNoJournalWrites();
+});
+
 test('failed correction after value replacement restores entry, values, and outbox exactly', async () => {
   await journal.finalize(db, catalog, validEntry(), principal());
   const beforeEntry = await db.get(
