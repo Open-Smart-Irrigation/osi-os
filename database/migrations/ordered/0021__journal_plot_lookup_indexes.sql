@@ -8,3 +8,7 @@ CREATE INDEX IF NOT EXISTS idx_journal_entries_plot_duplicate
 CREATE INDEX IF NOT EXISTS idx_journal_entries_plot_sticky
   ON journal_entries(author_principal_uuid, plot_uuid, recorded_at DESC, entry_uuid)
   WHERE status = 'final' AND deleted_at IS NULL;
+
+CREATE INDEX IF NOT EXISTS idx_journal_entries_plot_time
+  ON journal_entries (plot_uuid, occurred_start DESC, entry_uuid)
+  WHERE deleted_at IS NULL;

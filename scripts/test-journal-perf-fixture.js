@@ -224,6 +224,19 @@ function collectPlans(db) {
         common.concat([OCCURRED_FIRST, OCCURRED_LAST])
       ),
     },
+    plot_time: {
+      // Mirrors buildEntryWhere()'s clause order for GET /entries?plot_uuid=X
+      // with the default status='final' and no activity/author/zone filter.
+      index: 'idx_journal_entries_plot_time',
+      detail: explain(
+        db,
+        "SELECT e.* FROM journal_entries AS e WHERE e.owner_user_uuid=? AND e.user_id=? " +
+          "AND e.gateway_device_eui=? AND e.deleted_at IS NULL AND e.status='final' " +
+          'AND e.plot_uuid=? ' +
+          'ORDER BY e.occurred_start DESC,e.entry_uuid ASC LIMIT 50',
+        common.concat([PLOT_UUID])
+      ),
+    },
   };
 }
 

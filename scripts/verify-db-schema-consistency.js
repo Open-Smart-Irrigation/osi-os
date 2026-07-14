@@ -723,6 +723,7 @@ const requiredIndexes = {
     'idx_journal_entries_sticky',
     'idx_journal_entries_plot_duplicate',
     'idx_journal_entries_plot_sticky',
+    'idx_journal_entries_plot_time',
   ],
   journal_entry_values: [
     'idx_journal_entry_values_entry',
@@ -847,6 +848,10 @@ const requiredIndexSqlFragments = {
   idx_journal_entries_plot_sticky: [
     'on journal_entries(author_principal_uuid, plot_uuid, recorded_at desc, entry_uuid)',
     "where status = 'final' and deleted_at is null",
+  ],
+  idx_journal_entries_plot_time: [
+    'on journal_entries (plot_uuid, occurred_start desc, entry_uuid)',
+    'where deleted_at is null',
   ],
   idx_journal_entry_values_entry: [
     'on journal_entry_values(entry_uuid)',
