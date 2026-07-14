@@ -434,6 +434,76 @@ test('UPSERT_JOURNAL_ENTRY applies through lifecycle and atomically records nume
   }
 });
 
+test('UPSERT_JOURNAL_ENTRY prefers the entry timezone over a zone left at the schema UTC default', async () => {
+  const db = fixtureDb('entry-timezone-precedence');
+  try {
+    const kampalaZoneUuid = '44444444-4444-4444-8444-444444440002';
+    const kampalaPlotUuid = '33333333-3333-4333-8333-333333330002';
+    db.native.prepare(
+      'INSERT INTO irrigation_zones(id,name,user_id,zone_uuid,gateway_device_eui) ' +
+        'VALUES (?,?,?,?,?)'
+    ).run(2, 'Kampala field', 1, kampalaZoneUuid, GATEWAY_EUI);
+    assert.equal(
+      await db.get('SELECT timezone FROM irrigation_zones WHERE id=2').then((row) => row.timezone),
+      'UTC'
+    );
+    db.native.prepare(
+      'INSERT INTO journal_plots(' +
+        'plot_uuid,plot_code,name,zone_uuid,gateway_device_eui,owner_user_uuid' +
+        ') VALUES (?,?,?,?,?,?)'
+    ).run(kampalaPlotUuid, 'kampala-field', 'Kampala field', kampalaZoneUuid, GATEWAY_EUI, OWNER_UUID);
+    db.native.prepare(
+      'INSERT INTO journal_plot_settings(' +
+        'plot_uuid,layout_code,updated_at,updated_by_principal_uuid' +
+        ') VALUES (?,?,?,?)'
+    ).run(kampalaPlotUuid, 'open_field', '2026-07-12T00:00:00.000Z', ACTOR_UUID);
+
+    const envelope = {
+      commandId: 630,
+      commandType: 'UPSERT_JOURNAL_ENTRY',
+      payload: {
+        command_id: LOGICAL_COMMAND_UUID,
+        command_type: 'UPSERT_JOURNAL_ENTRY',
+        owner_user_uuid: OWNER_UUID,
+        author_principal_uuid: ACTOR_UUID,
+        author_label: 'Cloud researcher',
+        effect_key: 'journal_entry:' + ENTRY_UUID + ':0',
+        entry: entryAggregate({
+          plot_uuid: kampalaPlotUuid,
+          zone_uuid: kampalaZoneUuid,
+          occurred_start: '2026-07-12T07:30:00.000Z',
+          occurred_timezone: 'Africa/Kampala',
+          occurred_utc_offset_minutes: 180,
+        }),
+      },
+    };
+
+    const result = await journal.applyJournalCommand(db, envelope, {
+      gateway_device_eui: GATEWAY_EUI,
+    });
+
+    assert.equal(result.ack.result, 'APPLIED');
+    const entry = await db.get(
+      'SELECT occurred_start,occurred_timezone,occurred_utc_offset_minutes ' +
+        'FROM journal_entries WHERE entry_uuid=?',
+      [ENTRY_UUID]
+    );
+    assert.equal(entry.occurred_timezone, 'Africa/Kampala');
+    assert.equal(entry.occurred_utc_offset_minutes, 180);
+    // 2026-07-12T07:30:00.000Z + 180 minutes = Kampala wall time 10:30 on the same day.
+    const localWallClock = new Date(
+      new Date(entry.occurred_start).getTime() + entry.occurred_utc_offset_minutes * 60000
+    );
+    assert.equal(localWallClock.getUTCFullYear(), 2026);
+    assert.equal(localWallClock.getUTCMonth(), 6);
+    assert.equal(localWallClock.getUTCDate(), 12);
+    assert.equal(localWallClock.getUTCHours(), 10);
+    assert.equal(localWallClock.getUTCMinutes(), 30);
+  } finally {
+    db.close();
+  }
+});
+
 test('journal entry success replaces pending retryable ACKs and preserves delivered history', async () => {
   const db = fixtureDb('entry-ack-replacement');
   try {

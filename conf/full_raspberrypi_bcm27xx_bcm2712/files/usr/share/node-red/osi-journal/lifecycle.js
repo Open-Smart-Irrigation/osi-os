@@ -690,7 +690,7 @@ async function persistValues(tx, catalog, entryUuid, values, allowIncomplete) {
 }
 
 function occurrenceFor(input, plot) {
-  const timezone = plot.zone_timezone || input.occurred_timezone;
+  const timezone = input.occurred_timezone || plot.zone_timezone;
   if (!timezone) throw lifecycleError('invalid_timezone', 'An occurrence timezone is required');
   const start = resolveLocalTime(
     input.occurred_start_local,
