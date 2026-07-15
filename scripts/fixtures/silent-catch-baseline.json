@@ -1,15 +1,15 @@
 {
   "description": "Ratchet baseline for empty catch blocks in maintained Node-RED function nodes. Update counts downward in the same commit that removes silent catches.",
-  "generatedFrom": "Live gateway identity Task 4: removed seven silent catches outside frozen runGatewayMigrationPreflight bodies; two reviewed catches remain protected byte-identically",
+  "generatedFrom": "Live gateway identity Task 5: removed three silent fan-detection catches from sys-stats-fn; frozen runGatewayMigrationPreflight bodies remain byte-identical",
   "pattern": "catch\\s*(?:\\([^)]*\\))?\\s*\\{(?:\\s|;|//[^\\n]*|/\\*[\\s\\S]*?\\*/)*\\}  |  \\.catch\\s*\\(\\s*(?:(?:\\([^)]*\\)|[A-Za-z_$][\\w$]*)\\s*=>\\s*\\{(?:\\s|;|//[^\\n]*|/\\*[\\s\\S]*?\\*/)*\\}|function\\s*[A-Za-z_$][\\w$]*?\\s*\\([^)]*\\)\\s*\\{(?:\\s|;|//[^\\n]*|/\\*[\\s\\S]*?\\*/)*\\})\\s*\\)",
   "profiles": {
     "bcm2712": {
       "path": "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/flows.json",
-      "silentCatchCount": 218
+      "silentCatchCount": 215
     },
     "bcm2709": {
       "path": "conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/flows.json",
-      "silentCatchCount": 218
+      "silentCatchCount": 215
     }
   }
 }

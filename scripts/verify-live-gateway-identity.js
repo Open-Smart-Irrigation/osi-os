@@ -294,6 +294,7 @@ const identityGateIds = [
   'sync-state-build',
   'al-link-build-req',
 ];
+const sentinelReaderIds = ['sys-stats-fn', ...identityGateIds];
 const syncBuilderIds = [
   'sync-bootstrap-build',
   'sync-outbox-build',
@@ -494,6 +495,341 @@ function verifyRestartOwnerExecution(label, func, reason, delaySeconds) {
     `${label}: msg._msgid must enforce the 64-byte filename-key contract`);
 }
 
+function createSystemStatsNodeContext() {
+  const values = new Map();
+  return {
+    get(key) { return values.get(key); },
+    set(key, value) { values.set(key, value); },
+    value(key) { return values.get(key); },
+  };
+}
+
+function executeSystemStats(func, options, sharedContext) {
+  const fixtureOptions = options || {};
+  const warnings = [];
+  const sentinelExists = fixtureOptions.sentinelExists === true;
+  const sentinelRaw = fixtureOptions.sentinelRaw;
+  const fsGlobal = {
+    existsSync(filePath) {
+      return filePath === sentinelPath && sentinelExists;
+    },
+    readFileSync(filePath) {
+      if (filePath === '/sys/class/thermal/thermal_zone0/temp') return '42500\n';
+      if (filePath === sentinelPath) {
+        if (fixtureOptions.sentinelReadError) throw fixtureOptions.sentinelReadError;
+        return sentinelRaw;
+      }
+      if (/^\/sys\/class\/hwmon\/[^/]+\/name$/.test(filePath)) {
+        if (fixtureOptions.hwmonNameError) throw fixtureOptions.hwmonNameError;
+        return fixtureOptions.hwmonName || 'not-a-pwm-fan\n';
+      }
+      throw new Error(`unexpected read: ${filePath}`);
+    },
+    readdirSync(filePath) {
+      if (filePath !== '/sys/class/hwmon') throw new Error(`unexpected readdir: ${filePath}`);
+      if (fixtureOptions.hwmonDirectoryError) throw fixtureOptions.hwmonDirectoryError;
+      return fixtureOptions.hwmonDirectories || [];
+    },
+    accessSync(filePath) {
+      if (filePath !== '/sys/class/pwm/pwmchip2') throw new Error(`unexpected access: ${filePath}`);
+      if (fixtureOptions.pwmAccessError) throw fixtureOptions.pwmAccessError;
+      if (fixtureOptions.pwmAccessError !== false) {
+        throw Object.assign(new Error('pwm control absent'), { code: 'ENOENT' });
+      }
+    },
+  };
+  const osGlobal = {
+    loadavg() { return [0.25, 0.5, 0.75]; },
+    totalmem() { return 1024 * 1048576; },
+    freemem() { return 256 * 1048576; },
+    cpus() { return [{}, {}, {}, {}]; },
+  };
+  const globalContext = {
+    get(key) {
+      if (key === 'fs') return fsGlobal;
+      if (key === 'os') return osGlobal;
+      return null;
+    },
+  };
+  const nodeApi = { warn(value) { warnings.push(String(value)); } };
+  const functionContext = sharedContext || createSystemStatsNodeContext();
+  const msg = {};
+  const execute = new Function('msg', 'global', 'node', 'context', func);
+  const result = execute(msg, globalContext, nodeApi, functionContext);
+  return { result, msg, warnings, context: functionContext };
+}
+
+function auditRestartStateAccesses(source) {
+  const properties = [];
+  let propertyBaseUses = 0;
+  let literalBracketUses = 0;
+  for (const match of source.matchAll(/\brestartState\s*\.\s*([A-Za-z_$][\w$]*)/g)) {
+    properties.push(match[1]);
+    propertyBaseUses += 1;
+  }
+  for (const match of source.matchAll(/\brestartState\s*\[\s*(['"])([^'"]+)\1\s*\]/g)) {
+    properties.push(match[2]);
+    propertyBaseUses += 1;
+    literalBracketUses += 1;
+  }
+  const allUses = countMatches(source, /\brestartState\b/g);
+  const bracketUses = countMatches(source, /\brestartState\s*\[/g);
+  const reviewedBareUses = countMatches(source, /\bvar\s+restartState\s*=/g)
+    + countMatches(source, /!\s*restartState\b(?!\s*[.\[])/g)
+    + countMatches(source, /\btypeof\s+restartState\b(?!\s*[.\[])/g)
+    + countMatches(source, /\bArray\.isArray\(\s*restartState\s*\)/g);
+  return {
+    properties,
+    hasDynamicBracketAccess: bracketUses !== literalBracketUses,
+    hasUnreviewedBareUse: allUses !== propertyBaseUses + reviewedBareUses,
+  };
+}
+
+function verifySystemStatsExecution(label, func) {
+  const missing = executeSystemStats(func, {});
+  expectCondition(missing.result === missing.msg && missing.msg.statusCode === 200
+      && Object.prototype.hasOwnProperty.call(missing.msg.payload || {}, 'restartPending')
+      && missing.msg.payload.restartPending === null,
+    `${label}: missing restart sentinel returns restartPending null`,
+    `${label}: missing restart sentinel must return HTTP 200 with an explicit restartPending null`);
+
+  const privateEui = '0016C001F116EBF2';
+  const validState = {
+    version: 1,
+    phase: 'restart_pending',
+    reason: 'gateway_identity_change',
+    restartAt: '2026-07-15T12:01:00Z',
+    restartAtEpoch: 1784116860,
+    restartNotBeforeUptime: 100,
+    targetDeviceEui: privateEui,
+    confidence: 'authoritative',
+  };
+  const valid = executeSystemStats(func, { sentinelExists: true, sentinelRaw: JSON.stringify(validState) });
+  const publicState = valid.msg.payload && valid.msg.payload.restartPending;
+  const publicPayload = JSON.stringify(valid.msg.payload || {});
+  expectCondition(valid.msg.statusCode === 200
+      && publicState
+      && JSON.stringify(Object.keys(publicState)) === JSON.stringify(['restartAt', 'reason'])
+      && publicState.restartAt === validState.restartAt
+      && publicState.reason === validState.reason,
+    `${label}: valid restart sentinel exposes only restartAt and reason`,
+    `${label}: valid restart sentinel must expose exactly restartAt and reason`);
+  expectCondition(!publicPayload.includes('targetDeviceEui')
+      && !publicPayload.includes(privateEui)
+      && !publicPayload.includes('restartAtEpoch')
+      && !publicPayload.includes('restartNotBeforeUptime')
+      && !publicPayload.includes('confidence'),
+    `${label}: unauthenticated stats omit private and internal sentinel fields`,
+    `${label}: unauthenticated stats leaked a private or internal sentinel field`);
+
+  const defaultReason = executeSystemStats(func, {
+    sentinelExists: true,
+    sentinelRaw: JSON.stringify({ phase: 'restart_pending', restartAt: '2026-07-15T12:01:00Z' }),
+  });
+  expectCondition(defaultReason.msg.payload?.restartPending?.reason === 'gateway_identity_change'
+      && JSON.stringify(Object.keys(defaultReason.msg.payload.restartPending)) === JSON.stringify(['restartAt', 'reason']),
+    `${label}: missing sentinel reason uses the reviewed public fallback`,
+    `${label}: missing sentinel reason must fall back to gateway_identity_change without adding fields`);
+
+  const healing = executeSystemStats(func, {
+    sentinelExists: true,
+    sentinelRaw: JSON.stringify({ phase: 'healing', restartAt: null, reason: 'gateway_identity_change', targetDeviceEui: privateEui }),
+  });
+  expectCondition(healing.msg.statusCode === 200 && healing.msg.payload?.restartPending === null
+      && !JSON.stringify(healing.msg.payload || {}).includes(privateEui),
+    `${label}: no-deadline healing state has no public countdown`,
+    `${label}: no-deadline healing state must return restartPending null without leaking the target EUI`);
+
+  const expiredState = { phase: 'restart_pending', restartAt: '2000-01-01T00:00:00Z', reason: 'account_link' };
+  const expired = executeSystemStats(func, { sentinelExists: true, sentinelRaw: JSON.stringify(expiredState) });
+  expectCondition(expired.msg.payload?.restartPending?.restartAt === expiredState.restartAt
+      && expired.msg.payload?.restartPending?.reason === expiredState.reason,
+    `${label}: an expired pending deadline remains visible until daemon cleanup`,
+    `${label}: stats must retain an expired pending deadline for the GUI in-progress state`);
+
+  for (const [caseName, sentinelRaw] of [
+    ['invalid JSON', '{'],
+    ['array shape', '[]'],
+    ['non-string deadline', JSON.stringify({ phase: 'restart_pending', restartAt: 1784116860, reason: 'gateway_identity_change' })],
+  ]) {
+    const malformed = executeSystemStats(func, { sentinelExists: true, sentinelRaw });
+    expectCondition(malformed.msg.statusCode === 200 && malformed.msg.payload?.restartPending === null
+        && malformed.warnings.some((warning) => warning.includes('restart state')),
+      `${label}: ${caseName} is filtered with a visible warning`,
+      `${label}: ${caseName} must return restartPending null and warn without failing system stats`);
+  }
+
+  const readFailure = executeSystemStats(func, {
+    sentinelExists: true,
+    sentinelReadError: Object.assign(new Error('fixture read failure'), { code: 'EIO' }),
+  });
+  expectCondition(readFailure.msg.statusCode === 200 && readFailure.msg.payload?.restartPending === null
+      && readFailure.warnings.some((warning) => warning.includes('restart state') && warning.includes('fixture read failure')),
+    `${label}: unreadable restart sentinel is filtered with a visible warning`,
+    `${label}: unreadable restart sentinel must return restartPending null and warn without failing system stats`);
+
+  const hwmonDirectoryFailure = executeSystemStats(func, {
+    hwmonDirectoryError: new Error('fixture hwmon directory failure'),
+  });
+  expectCondition(hwmonDirectoryFailure.msg.statusCode === 200
+      && hwmonDirectoryFailure.msg.payload?.fan_available === false
+      && hwmonDirectoryFailure.warnings.some((warning) => warning.includes('/sys/class/hwmon')),
+    `${label}: hwmon directory failure keeps the fan fallback and warns with context`,
+    `${label}: hwmon directory failure must retain fan_available false and warn with the probed path`);
+
+  const fanProbeFailures = executeSystemStats(func, {
+    hwmonDirectories: ['hwmon0'],
+    hwmonNameError: new Error('fixture fan name failure'),
+    pwmAccessError: Object.assign(new Error('fixture pwm access failure'), { code: 'EACCES' }),
+  });
+  expectCondition(fanProbeFailures.msg.statusCode === 200
+      && fanProbeFailures.msg.payload?.fan_available === false
+      && fanProbeFailures.warnings.some((warning) => warning.includes('/sys/class/hwmon/hwmon0/name'))
+      && fanProbeFailures.warnings.some((warning) => warning.includes('/sys/class/pwm/pwmchip2')),
+    `${label}: fan probe failures retain the fallback and warn for each probed path`,
+    `${label}: fan probe failures must retain fan_available false and warn for hwmon name and pwm paths`);
+
+  const expectedAbsenceContext = createSystemStatsNodeContext();
+  const missingPwmFirst = executeSystemStats(func, {
+    pwmAccessError: Object.assign(new Error('pwm path missing'), { code: 'ENOENT' }),
+  }, expectedAbsenceContext);
+  const missingPwmAgain = executeSystemStats(func, {
+    pwmAccessError: Object.assign(new Error('pwm parent is not a directory'), { code: 'ENOTDIR' }),
+  }, expectedAbsenceContext);
+  expectCondition(missingPwmFirst.msg.statusCode === 200 && missingPwmAgain.msg.statusCode === 200
+      && missingPwmFirst.msg.payload?.fan_available === false && missingPwmAgain.msg.payload?.fan_available === false
+      && !missingPwmFirst.warnings.some((warning) => warning.includes('/sys/class/pwm/pwmchip2'))
+      && !missingPwmAgain.warnings.some((warning) => warning.includes('/sys/class/pwm/pwmchip2')),
+    `${label}: expected ENOENT and ENOTDIR fan absence stays quiet with the existing fallback`,
+    `${label}: expected fan-path absence must retain HTTP 200 and fan_available false without repeated warnings`);
+
+  const persistentContext = createSystemStatsNodeContext();
+  const longDeniedMessage = `permission denied ${'x'.repeat(500)}`;
+  const deniedFirst = executeSystemStats(func, {
+    hwmonDirectoryError: Object.assign(new Error(longDeniedMessage), { code: 'EACCES' }),
+  }, persistentContext);
+  const deniedAgain = executeSystemStats(func, {
+    hwmonDirectoryError: Object.assign(new Error(longDeniedMessage), { code: 'EACCES' }),
+  }, persistentContext);
+  const changedFailure = executeSystemStats(func, {
+    hwmonDirectoryError: Object.assign(new Error('input output failure'), { code: 'EIO' }),
+  }, persistentContext);
+  const recovered = executeSystemStats(func, {}, persistentContext);
+  const recurred = executeSystemStats(func, {
+    hwmonDirectoryError: Object.assign(new Error('input output failure'), { code: 'EIO' }),
+  }, persistentContext);
+  const fanFailureState = persistentContext.value('sys_stats_fan_probe_failures');
+  const hwmonWarnings = (result) => result.warnings.filter((warning) => warning.includes('/sys/class/hwmon'));
+  expectCondition(hwmonWarnings(deniedFirst).length === 1 && hwmonWarnings(deniedAgain).length === 0,
+    `${label}: a persistent unexpected fan failure warns once per path and signature`,
+    `${label}: repeated EACCES must be deduplicated through shared Node-RED context`);
+  expectCondition(hwmonWarnings(changedFailure).length === 1,
+    `${label}: a changed unexpected fan failure warns again`,
+    `${label}: changing the fan failure signature from EACCES to EIO must emit a new warning`);
+  expectCondition(hwmonWarnings(recovered).length === 0 && hwmonWarnings(recurred).length === 1,
+    `${label}: successful fan-probe recovery resets warning deduplication`,
+    `${label}: a successful probe must clear its signature so the same later regression warns again`);
+  expectCondition(fanFailureState && typeof fanFailureState['/sys/class/hwmon'] === 'string'
+      && fanFailureState['/sys/class/hwmon'].length <= 170,
+    `${label}: remembered fan failure signatures are bounded`,
+    `${label}: fan failure context must retain a bounded per-path signature`);
+
+  const pruneContext = createSystemStatsNodeContext();
+  const currentProbePath = '/sys/class/hwmon/hwmon-current/name';
+  const disappearedProbePath = '/sys/class/hwmon/hwmon-disappeared/name';
+  const identicalProbeSignature = 'EIO:churn fixture failure';
+  pruneContext.set('sys_stats_fan_probe_failures', {
+    [currentProbePath]: identicalProbeSignature,
+    [disappearedProbePath]: identicalProbeSignature,
+  });
+  const prunePass = executeSystemStats(func, {
+    hwmonDirectories: ['hwmon-current'],
+    hwmonNameError: Object.assign(new Error('churn fixture failure'), { code: 'EIO' }),
+  }, pruneContext);
+  const prunedState = pruneContext.value('sys_stats_fan_probe_failures') || {};
+  const prunedChildPaths = Object.keys(prunedState).filter((probePath) => /^\/sys\/class\/hwmon\/[^/]+\/name$/.test(probePath));
+  expectCondition(!prunePass.warnings.some((warning) => warning.includes(currentProbePath))
+      && JSON.stringify(prunedChildPaths) === JSON.stringify([currentProbePath]),
+    `${label}: successful hwmon listing prunes disappeared children and keeps current deduplication`,
+    `${label}: successful readdir must remove disappeared child signatures without re-warning the current identical failure`);
+  const prunedPathRecurrence = executeSystemStats(func, {
+    hwmonDirectories: ['hwmon-current', 'hwmon-disappeared'],
+    hwmonNameError: Object.assign(new Error('churn fixture failure'), { code: 'EIO' }),
+  }, pruneContext);
+  expectCondition(prunedPathRecurrence.warnings.some((warning) => warning.includes(disappearedProbePath))
+      && !prunedPathRecurrence.warnings.some((warning) => warning.includes(currentProbePath)),
+    `${label}: disappeared hwmon path warns when it recurs while the current path remains deduplicated`,
+    `${label}: a pruned child recurrence must warn again without re-warning the retained identical failure`);
+
+  const churnDirectories = Array.from({ length: 40 }, (_, index) => `hwmon${index}`);
+  const churnPaths = churnDirectories.map((directory) => `/sys/class/hwmon/${directory}/name`);
+  const churnContext = createSystemStatsNodeContext();
+  executeSystemStats(func, {
+    hwmonDirectories: churnDirectories,
+    hwmonNameError: Object.assign(new Error('churn fixture failure'), { code: 'EIO' }),
+  }, churnContext);
+  const churnState = churnContext.value('sys_stats_fan_probe_failures') || {};
+  const churnKeys = Object.keys(churnState);
+  const initiallyRetainedPaths = churnPaths.filter((probePath) => Object.prototype.hasOwnProperty.call(churnState, probePath));
+  const retainedPath = initiallyRetainedPaths[0];
+  const evictedPath = churnPaths.find((probePath) => !Object.prototype.hasOwnProperty.call(churnState, probePath));
+  expectCondition(churnKeys.length <= 32 && retainedPath && evictedPath,
+    `${label}: hwmon hotplug churn keeps the complete failure map at or below 32 entries`,
+    `${label}: more than 32 unique hwmon failures must evict at least one entry and retain at most 32`);
+
+  if (retainedPath && evictedPath) {
+    const retainedDirectory = retainedPath.split('/')[4];
+    const retainedRepeat = executeSystemStats(func, {
+      hwmonDirectories: [retainedDirectory],
+      hwmonNameError: Object.assign(new Error('churn fixture failure'), { code: 'EIO' }),
+    }, churnContext);
+    const afterPrune = churnContext.value('sys_stats_fan_probe_failures') || {};
+    const remainingChildPaths = Object.keys(afterPrune).filter((probePath) => /^\/sys\/class\/hwmon\/[^/]+\/name$/.test(probePath));
+    expectCondition(!retainedRepeat.warnings.some((warning) => warning.includes(retainedPath))
+        && JSON.stringify(remainingChildPaths) === JSON.stringify([retainedPath]),
+      `${label}: successful hwmon listing prunes disappeared children and retains identical current deduplication`,
+      `${label}: stale hwmon child paths must be pruned while the current identical failure stays deduplicated`);
+
+    const prunedPath = initiallyRetainedPaths.find((probePath) => probePath !== retainedPath);
+    if (prunedPath) {
+      const prunedDirectory = prunedPath.split('/')[4];
+      const prunedRecurrence = executeSystemStats(func, {
+        hwmonDirectories: [retainedDirectory, prunedDirectory],
+        hwmonNameError: Object.assign(new Error('churn fixture failure'), { code: 'EIO' }),
+      }, churnContext);
+      expectCondition(prunedRecurrence.warnings.some((warning) => warning.includes(prunedPath))
+          && !prunedRecurrence.warnings.some((warning) => warning.includes(retainedPath)),
+        `${label}: a pruned hwmon path warns when it recurs while the retained path stays deduplicated`,
+        `${label}: pruned path recurrence must warn again without regressing current-path deduplication`);
+    } else {
+      fail(`${label}: churn fixture did not retain a second path that could be pruned`);
+    }
+
+    const evictedDirectory = evictedPath.split('/')[4];
+    const evictedRecurrence = executeSystemStats(func, {
+      hwmonDirectories: [retainedDirectory, evictedDirectory],
+      hwmonNameError: Object.assign(new Error('churn fixture failure'), { code: 'EIO' }),
+    }, churnContext);
+    expectCondition(evictedRecurrence.warnings.some((warning) => warning.includes(evictedPath)),
+      `${label}: an evicted hwmon path warns when it recurs`,
+      `${label}: cap-evicted path recurrence must become visible again`);
+  }
+
+  const failedListingContext = createSystemStatsNodeContext();
+  const oversizedFailureMap = {};
+  for (let index = 0; index < 40; index += 1) {
+    oversizedFailureMap[`/sys/class/hwmon/stale${index}/name`] = `EIO:stale-${index}`;
+  }
+  failedListingContext.set('sys_stats_fan_probe_failures', oversizedFailureMap);
+  executeSystemStats(func, {
+    hwmonDirectoryError: Object.assign(new Error('listing unavailable'), { code: 'EIO' }),
+  }, failedListingContext);
+  const failedListingState = failedListingContext.value('sys_stats_fan_probe_failures') || {};
+  expectCondition(Object.keys(failedListingState).length <= 32,
+    `${label}: failure-map cap still applies when hwmon listing cannot prune stale children`,
+    `${label}: defense-in-depth cap must hold even while /sys/class/hwmon readdir fails`);
+}
+
 let canonicalFlowsText = '';
 for (const flowRelativePath of flowRelativePaths) {
   const flowsText = read(flowRelativePath);
@@ -507,11 +843,32 @@ for (const flowRelativePath of flowRelativePaths) {
   expectCondition(Array.isArray(flows), `${flowRelativePath}: flow document is an array`, `${flowRelativePath}: flow document must be an array`);
   if (!Array.isArray(flows)) continue;
   const byId = new Map(flows.map((node) => [node && node.id, node]));
+  const systemStats = byId.get('sys-stats-fn');
+  if (!systemStats || typeof systemStats.func !== 'string') {
+    fail(`${flowRelativePath}: missing system stats function sys-stats-fn`);
+  } else {
+    expectCondition(!Object.prototype.hasOwnProperty.call(systemStats, 'libs'),
+      `${flowRelativePath}:sys-stats-fn: preserves its absent libs property`,
+      `${flowRelativePath}:sys-stats-fn: must not add a libs property for the fs global`);
+    for (const banned of ["global.get('cp')", 'spawn(', 'require(']) {
+      expectExcludes(`${flowRelativePath}:sys-stats-fn`, systemStats.func, banned, `does not use ${banned}`);
+    }
+    const restartStateAudit = auditRestartStateAccesses(systemStats.func);
+    const publicStateProperties = [...new Set(restartStateAudit.properties)].sort();
+    expectCondition(JSON.stringify(publicStateProperties) === JSON.stringify(['reason', 'restartAt'])
+        && !restartStateAudit.hasDynamicBracketAccess && !restartStateAudit.hasUnreviewedBareUse,
+      `${flowRelativePath}:sys-stats-fn: restartState reads are allowlisted to reason and restartAt`,
+      `${flowRelativePath}:sys-stats-fn: restartState access must use only direct reason/restartAt reads without aliases or dynamic brackets; got ${publicStateProperties.join(', ')}`);
+    for (const privateField of ['phase', 'restartAtEpoch', 'restartNotBeforeUptime', 'targetDeviceEui', 'target_device_eui', 'requestedAt', 'confidence', 'version']) {
+      expectExcludes(`${flowRelativePath}:sys-stats-fn`, systemStats.func, privateField, `does not reference private sentinel field ${privateField}`);
+    }
+    verifySystemStatsExecution(`${flowRelativePath}:sys-stats-fn`, systemStats.func);
+  }
   const sentinelReaders = flows.filter((node) => node && typeof node.func === 'string' && node.func.includes(sentinelPath));
   expectCondition(
-    sentinelReaders.length === identityGateIds.length && sentinelReaders.every((node) => identityGateIds.includes(node.id)),
-    `${flowRelativePath}: exactly seven identity gates read the restart sentinel`,
-    `${flowRelativePath}: restart sentinel readers must be exactly ${identityGateIds.join(', ')}; got ${sentinelReaders.map((node) => node.id).join(', ')}`
+    sentinelReaders.length === sentinelReaderIds.length && sentinelReaders.every((node) => sentinelReaderIds.includes(node.id)),
+    `${flowRelativePath}: only system stats and the seven identity gates read the restart sentinel`,
+    `${flowRelativePath}: restart sentinel readers must be exactly ${sentinelReaderIds.join(', ')}; got ${sentinelReaders.map((node) => node.id).join(', ')}`
   );
   for (const nodeId of identityGateIds) {
     const node = byId.get(nodeId);
@@ -614,10 +971,10 @@ try {
   fail(`Task 4 ratchet JSON is invalid: ${error.message}`);
 }
 if (silentCatchBaseline) {
-  expectCondition(silentCatchBaseline.profiles?.bcm2712?.silentCatchCount === 218 && silentCatchBaseline.profiles?.bcm2709?.silentCatchCount === 218,
-    'silent-catch baseline records 218 for both maintained profiles',
-    'silent-catch baseline must be 218 for both maintained profiles after seven non-frozen catches are removed');
-  expectIncludes('silent-catch baseline', String(silentCatchBaseline.generatedFrom || ''), 'seven silent catches outside frozen runGatewayMigrationPreflight bodies', 'records the frozen-preflight reality correction');
+  expectCondition(silentCatchBaseline.profiles?.bcm2712?.silentCatchCount === 215 && silentCatchBaseline.profiles?.bcm2709?.silentCatchCount === 215,
+    'silent-catch baseline records 215 for both maintained profiles',
+    'silent-catch baseline must be 215 for both maintained profiles after three sys-stats fan catches are removed');
+  expectIncludes('silent-catch baseline', String(silentCatchBaseline.generatedFrom || ''), 'removed three silent fan-detection catches from sys-stats-fn', 'records the Task 5 catch cleanup');
 }
 if (sizeAllowances) {
   const expectedGrowth = {
@@ -637,9 +994,14 @@ if (sizeAllowances) {
       `size allowance ${nodeId}: expected exact cumulative delta ${delta}`);
     expectIncludes(`size allowance ${nodeId}`, String(sizeAllowances.node_allowances?.[nodeId]?.reason || ''), 'live identity restart sentinel (Option C Slice 1)', 'declares Task 4 growth');
   }
-  expectCondition(sizeAllowances.total_allowance?.delta === 36172,
-    'size total allowance: exact cumulative delta 36172',
-    'size total allowance: expected exact cumulative delta 36172');
+  expectCondition(sizeAllowances.node_allowances?.['sys-stats-fn']?.delta === 3884,
+    'size allowance sys-stats-fn: exact Task 5 delta 3884',
+    'size allowance sys-stats-fn: expected exact Task 5 delta 3884');
+  expectIncludes('size allowance sys-stats-fn', String(sizeAllowances.node_allowances?.['sys-stats-fn']?.reason || ''), 'filtered restartPending status (Option C Slice 1b)', 'declares Task 5 growth');
+  expectCondition(sizeAllowances.total_allowance?.delta === 40056,
+    'size total allowance: exact cumulative delta 40056',
+    'size total allowance: expected exact cumulative delta 40056');
+  expectIncludes('size total allowance', String(sizeAllowances.total_allowance?.reason || ''), 'filtered restartPending status with deduplicated fan-probe warnings and a capped, hotplug-pruned context map (Option C Slice 1b) (+3884)', 'declares exact Task 5 total growth');
   const allowanceKeys = [...sizeAllowancesSource.matchAll(/^    "([^"]+)":/gm)].map((match) => match[1]);
   expectCondition(new Set(allowanceKeys).size === allowanceKeys.length,
     'size allowances contain no duplicate node keys',
