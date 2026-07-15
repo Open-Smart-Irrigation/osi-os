@@ -251,6 +251,17 @@ const EXPECTED_JOURNAL_ENTRY_VALUE_FOREIGN_KEYS = [
   },
 ];
 
+const EXPECTED_JOURNAL_ATTACHMENT_FOREIGN_KEYS = [{
+  id: 0,
+  seq: 0,
+  table: 'journal_entries',
+  from: 'entry_uuid',
+  to: 'entry_uuid',
+  on_update: 'NO ACTION',
+  on_delete: 'CASCADE',
+  match: 'NONE',
+}];
+
 function foreignKeys(dbPath, table) {
   return sqliteJson(dbPath, `PRAGMA foreign_key_list(${table});`).map((row) => ({
     id: row.id,
@@ -388,6 +399,80 @@ function assertJournalSemanticForeignKeyBehavior(dbPath, context) {
       cascadeRemaining: 0,
     },
     `${context} must enforce journal plot/activity/attribute references and entry-value cascade`
+  );
+}
+
+function journalAttachmentForeignKeyFacts(dbPath) {
+  const entryUuid = 'schema-attachment-fk-valid-entry';
+  const attachmentUuid = 'schema-attachment-fk-valid-attachment';
+
+  sqliteExec(dbPath, `
+    PRAGMA foreign_keys=ON;
+    INSERT INTO users(id,username,password_hash,created_at)
+      VALUES (2147483000,'schema-attachment-fk-user','schema-hash','2026-07-15T00:00:00.000Z');
+    INSERT INTO journal_plots(plot_uuid,plot_code)
+      VALUES ('schema-attachment-fk-plot','schema-attachment-fk-plot');
+    INSERT INTO journal_vocab(code,kind,value_type)
+      VALUES ('schema.attachment.activity','activity',NULL);
+    ${journalEntryInsert(
+      entryUuid,
+      'schema-attachment-fk-plot',
+      'schema.attachment.activity'
+    )}
+  `);
+
+  let validInsertSucceeded = false;
+  try {
+    sqliteExec(dbPath, `
+      PRAGMA foreign_keys=ON;
+      INSERT INTO journal_attachments(attachment_uuid,entry_uuid,kind)
+        VALUES ('${attachmentUuid}','${entryUuid}','photo');
+    `);
+    validInsertSucceeded = true;
+  } catch (_) {
+    validInsertSucceeded = false;
+  }
+
+  const validAttachmentCount = sqliteJson(
+    dbPath,
+    `SELECT count(*) AS count FROM journal_attachments
+      WHERE attachment_uuid='${attachmentUuid}';`
+  )[0].count;
+  sqliteExec(dbPath, `
+    PRAGMA foreign_keys=ON;
+    DELETE FROM journal_entries WHERE entry_uuid='${entryUuid}';
+  `);
+  const cascadeRemaining = sqliteJson(
+    dbPath,
+    `SELECT count(*) AS count FROM journal_attachments
+      WHERE attachment_uuid='${attachmentUuid}';`
+  )[0].count;
+
+  sqliteExec(dbPath, `
+    PRAGMA foreign_keys=ON;
+    DELETE FROM users WHERE id=2147483000;
+    DELETE FROM journal_vocab WHERE code='schema.attachment.activity';
+    DELETE FROM journal_plots WHERE plot_uuid='schema-attachment-fk-plot';
+  `);
+
+  return {
+    foreignKeys: foreignKeys(dbPath, 'journal_attachments'),
+    validInsertSucceeded,
+    validAttachmentCount,
+    cascadeRemaining,
+  };
+}
+
+function assertJournalAttachmentForeignKeyBehavior(dbPath, context) {
+  assert.deepEqual(
+    journalAttachmentForeignKeyFacts(dbPath),
+    {
+      foreignKeys: EXPECTED_JOURNAL_ATTACHMENT_FOREIGN_KEYS,
+      validInsertSucceeded: true,
+      validAttachmentCount: 1,
+      cascadeRemaining: 0,
+    },
+    `${context} must attach to journal_entries and cascade entry deletion`
   );
 }
 
@@ -633,6 +718,7 @@ try {
 
   assertPlotSettingsForeignKeyBehavior(dbPath, 'seed-built database');
   assertJournalSemanticForeignKeyBehavior(dbPath, 'seed-built database');
+  assertJournalAttachmentForeignKeyBehavior(dbPath, 'seed-built database');
 
   const migrationDbPath = path.join(tmpDir, 'field-journal-migration.db');
   sqliteExec(migrationDbPath, `
@@ -646,6 +732,10 @@ try {
   sqliteExec(migrationDbPath, fs.readFileSync(fieldJournalMigrationPath, 'utf8'));
   assertPlotSettingsForeignKeyBehavior(migrationDbPath, '0018 migration-built database');
   assertJournalSemanticForeignKeyBehavior(migrationDbPath, '0018 migration-built database');
+  assertJournalAttachmentForeignKeyBehavior(
+    migrationDbPath,
+    '0018 migration-built database'
+  );
 
   for (const [index, bundledDbPath] of BUNDLED_DB_PATHS.entries()) {
     assert.deepEqual(
@@ -656,6 +746,10 @@ try {
     const bundledCopyPath = path.join(tmpDir, `bundled-${index}.db`);
     fs.copyFileSync(bundledDbPath, bundledCopyPath);
     assertJournalSemanticForeignKeyBehavior(
+      bundledCopyPath,
+      path.relative(repoRoot, bundledDbPath)
+    );
+    assertJournalAttachmentForeignKeyBehavior(
       bundledCopyPath,
       path.relative(repoRoot, bundledDbPath)
     );
