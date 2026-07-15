@@ -7,10 +7,13 @@ factors, so they stop being separate destinations: the Data tab routes to
 draws this line for the header's Data button). Journal waits for
 `feat/field-journal-slice1` before its page is aligned.
 
-This document is the work list only. Nothing here is implemented yet except the
-reference design on the dashboard (Balken crown, glass chrome header,
-`btn-liquid` actions, red active-tab underline; commits `18c301dc`,
-`7b044b55`).
+Progress (2026-07-14): the shared `AppHeader` is extracted and mounts on the
+Zones dashboard and the new Journal page; tabs are **Zones · Data · Journal**
+with the device-aware Data target and a floating liquid-glass pill; the action
+row is Add · Settings · Account (Add carries "Log activity"); `/journal` has a
+real route and an aligned landing page. Still open: applying `AppHeader` to the
+History and Analysis (Data) pages, subpage glass bars, Register, and the
+journal capture UI (design in `agrolink-journal-ux.md`).
 
 ## IA work items
 
@@ -31,7 +34,8 @@ the active tab.
 
 | Surface | Current state | Needed | Blocked on |
 |---|---|---|---|
-| `FarmingDashboard` (Zones) | Aligned (the reference) | Adopt shared `AppHeader` when extracted (item 1) | — |
+| `FarmingDashboard` (Zones) | Uses shared `AppHeader` (glass tabs, done) | — | done |
+| `JournalPage` (Journal) | Uses shared `AppHeader`; placeholder body | Build capture UI per `agrolink-journal-ux.md` | Slice 2 |
 | `HistoryDashboard` desktop header | Own solid header (`--header-bg` + `shadow-xl`), separate title key, `high-contrast-text` on a light surface, no crown, no tabs | Shared header with Data tab active; move its view controls into the actions slot as `btn-liquid` | Item 1 |
 | `HistoryMobileHeader` | Compact solid bar, no crown | Crown (scroll-away) + `glass-chrome`; keep the compact height; this is the primary mobile surface | Item 1 |
 | History detail routes (`HistoryCardDetailPage`, zone/card, gateway/card) | Mobile `HistoryDetailHeader` / desktop detail shells, plain surfaces | Subpage treatment: slim glass bar + back affordance. Whether subpages carry the crown is an open decision (see below) | Decision A |
