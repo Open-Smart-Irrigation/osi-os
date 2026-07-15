@@ -239,6 +239,31 @@ if (!ackQueue || JSON.stringify(ackQueue.libs) !== JSON.stringify([
     failures.push('journal commands: legacy ACK queue must keep ledger+ACK atomic without ledger rewrite or duplicate reclassification');
 }
 
+// === Fail-closed sync_outbox payload parsing ===
+
+for (const nodeId of ['sync-bootstrap-build', 'sync-outbox-build', 'sync-force-build']) {
+    const syncNode = byId[nodeId];
+    if (!syncNode || !/function parseJsonValue\(raw, eventUuid\)/.test(syncNode.func || '') ||
+        !/parseJsonValue\(row\.payload_json, row\.event_uuid\)/.test(syncNode.func || '') ||
+        /parseJsonValue\(row\.payload_json,\s*\{\}\)/.test(syncNode.func || '')) {
+        failures.push(`sync outbox: ${nodeId} must reject malformed gateway-rewrite payloads with event_uuid`);
+    }
+}
+for (const nodeId of ['sync-outbox-build', 'sync-force-build']) {
+    const syncNode = byId[nodeId];
+    if (!syncNode || !/payload:\s*parseJsonValue\(r\.payload_json, r\.event_uuid\)/.test(syncNode.func || '') ||
+        /JSON\.parse\(r\.payload_json\s*\|\|\s*'\{\}'\)/.test(syncNode.func || '')) {
+        failures.push(`sync outbox: ${nodeId} must fail closed before event delivery`);
+    }
+}
+const stregaExpectation = byId['write-strega-expectation'];
+if (!stregaExpectation ||
+    !/no such table:\\s\*zone_irrigation_calibration\\b\/i/.test(stregaExpectation.func || '') ||
+    !/node\.warn\('STREGA calibration unavailable/.test(stregaExpectation.func || '') ||
+    !/throw error;/.test(stregaExpectation.func || '')) {
+    failures.push('STREGA expectation: only a missing zone_irrigation_calibration table may be downgraded');
+}
+
 function makeSupportHttpClient(responseBody, capturedRequests) {
     return {
         request(options, callback) {

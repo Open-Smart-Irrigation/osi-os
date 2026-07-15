@@ -1,15 +1,15 @@
 {
   "description": "Ratchet baseline for empty catch blocks in maintained Node-RED function nodes. Update counts downward in the same commit that removes silent catches.",
-  "generatedFrom": "chore(journal): merge main (task-k-docs-cleanup Build Heartbeat fix) into field-journal Slice 1 (Tasks 11-12 visibility work); recomputed after re-applying journal flows wiring onto main's flows.json",
+  "generatedFrom": "PR #141 Task 8 malformed-outbox hardening: removed one rollback-swallowing catch and exposed two cleanup catches in Build Edge Event Batch",
   "pattern": "catch\\s*(?:\\([^)]*\\))?\\s*\\{(?:\\s|;|//[^\\n]*|/\\*[\\s\\S]*?\\*/)*\\}  |  \\.catch\\s*\\(\\s*(?:(?:\\([^)]*\\)|[A-Za-z_$][\\w$]*)\\s*=>\\s*\\{(?:\\s|;|//[^\\n]*|/\\*[\\s\\S]*?\\*/)*\\}|function\\s*[A-Za-z_$][\\w$]*?\\s*\\([^)]*\\)\\s*\\{(?:\\s|;|//[^\\n]*|/\\*[\\s\\S]*?\\*/)*\\})\\s*\\)",
   "profiles": {
     "bcm2712": {
       "path": "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/flows.json",
-      "silentCatchCount": 228
+      "silentCatchCount": 225
     },
     "bcm2709": {
       "path": "conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/flows.json",
-      "silentCatchCount": 228
+      "silentCatchCount": 225
     }
   }
 }

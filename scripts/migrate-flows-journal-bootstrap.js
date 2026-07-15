@@ -26,6 +26,7 @@ const nodeContracts = {
     interimHash: '15167b53b7103c4f99c5ab0a2de7912a4917ec799e07b1e5fb9ad67268da7649',
     installedHash: '55d7ea47694d8f6f0863e793c6a40bbfcf7a442e79b6a25d6d7be4fcd842b6c0',
     correctedHash: '30fd59f6f57519113752b7fb9728d086e10d51eabd9dbcc740cd1222d27bad49',
+    hardenedHash: 'c1bfd92a13a8021757c390d15b764277522eae604a21e2985f2f1c9378985663',
   },
   'sync-force-build': {
     name: 'Run Force Sync',
@@ -34,6 +35,7 @@ const nodeContracts = {
     interimHash: '54424af7aac4515582c7c9312c419580ea151a2fd48bdbf0be51eff78a241bcd',
     installedHash: 'e240ff936f17899b1414f8b1dd473462d53bceb842e4ca942ff7946f53b3482a',
     correctedHash: 'b17b2801f706adebd6832f053133c12e4535e6e4a51240c7e641e98c60811a45',
+    hardenedHash: 'fb682aaef9ebf3f851f0f8c7ef6ee1602e2e7fe5281eaa2f7bf51576c919ec0c',
   },
   'history-api-router-fn': {
     name: 'History API Router',
@@ -42,6 +44,7 @@ const nodeContracts = {
     interimHash: '52b51062e2b85e2081ba976f78623eef4f93deab295e3467f611654a3248b001',
     installedHash: 'b12ad483f807672f6fbef6040b3e44eb612fb778fe00e6059a8ae0a4702212eb',
     correctedHash: 'b12ad483f807672f6fbef6040b3e44eb612fb778fe00e6059a8ae0a4702212eb',
+    hardenedHash: 'b12ad483f807672f6fbef6040b3e44eb612fb778fe00e6059a8ae0a4702212eb',
   },
 };
 
@@ -194,6 +197,41 @@ const historyCloseWrapperSource =
 const rejectingHistoryCloseWrapperSource =
   `return db ? new Promise(function(resolve, reject) { db.close(function(error) { if (error) reject(error); else resolve(); }); }) : Promise.resolve();`;
 
+const permissiveParserSource = `function parseJsonValue(raw, fallback) {
+  try {
+    return JSON.parse(raw || '{}');
+  } catch (_) {
+    return fallback;
+  }
+}`;
+const strictParserSource = `function parseJsonValue(raw, eventUuid) {
+  let value;
+  try { value = JSON.parse(raw); } catch (cause) {
+    const error = new Error('Malformed sync_outbox payload_json for ' + String(eventUuid));
+    error.cause = cause;
+    throw error;
+  }
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error('sync_outbox payload_json must be an object for ' + String(eventUuid));
+  }
+  return value;
+}`;
+const bootstrapGatewayRewriteSource = `    for (const row of outboxRows) {
+      let payloadJson = row.payload_json;
+      try {
+        payloadJson = JSON.stringify(rewriteGatewayReferences(parseJsonValue(row.payload_json, {}), replacements));
+      } catch (_) { node.warn('Bootstrap gateway-reference rewrite failed: ' + String(_ && _.message ? _.message : _)); }`;
+const forceGatewayRewriteSource = `    for (const row of outboxRows) {
+      let payloadJson = row.payload_json;
+      try {
+        payloadJson = JSON.stringify(rewriteGatewayReferences(parseJsonValue(row.payload_json, {}), replacements));
+      } catch (_) { node.warn('Force-sync optional operation failed: ' + String(_ && _.message ? _.message : _)); }`;
+const strictGatewayRewriteSource = `    for (const row of outboxRows) {
+      const payloadJson = JSON.stringify(rewriteGatewayReferences(parseJsonValue(row.payload_json, row.event_uuid), replacements));`;
+const permissiveDeliverySource =
+  `payload: (() => { try { return JSON.parse(r.payload_json || '{}'); } catch (_) { return {}; } })()`;
+const strictDeliverySource = `payload: parseJsonValue(r.payload_json, r.event_uuid)`;
+
 function digest(source) {
   return crypto.createHash('sha256').update(source).digest('hex');
 }
@@ -313,24 +351,61 @@ function exposeHistoryCatches(source) {
   );
 }
 
+function hardenCorrectedOutboxJson(byId) {
+  const normal = byId.get('sync-bootstrap-build');
+  normal.func = replaceOnce(
+    normal.func,
+    permissiveParserSource,
+    strictParserSource,
+    'sync-bootstrap-build strict payload parser'
+  );
+  normal.func = replaceOnce(
+    normal.func,
+    bootstrapGatewayRewriteSource,
+    strictGatewayRewriteSource,
+    'sync-bootstrap-build rollback-propagating gateway rewrite'
+  );
+
+  const forced = byId.get('sync-force-build');
+  forced.func = replaceOnce(
+    forced.func,
+    permissiveParserSource,
+    strictParserSource,
+    'sync-force-build strict payload parser'
+  );
+  forced.func = replaceOnce(
+    forced.func,
+    forceGatewayRewriteSource,
+    strictGatewayRewriteSource,
+    'sync-force-build rollback-propagating gateway rewrite'
+  );
+  forced.func = replaceOnce(
+    forced.func,
+    permissiveDeliverySource,
+    strictDeliverySource,
+    'sync-force-build strict event delivery parser'
+  );
+}
+
 function migrate(buffer) {
   const flows = JSON.parse(buffer.toString('utf8'));
   const byId = indexNodes(flows);
   const beforeHashes = currentHashes(byId);
-  if (matchesState(beforeHashes, 'correctedHash')) {
+  if (matchesState(beforeHashes, 'hardenedHash')) {
     if (!correctedLibrariesInstalled(byId)) {
-      throw new Error('Refusing corrected Task 12 source without exact crypto libraries');
+      throw new Error('Refusing hardened Task 12 source without exact crypto libraries');
     }
     return buffer;
   }
   const fromPreimage = matchesState(beforeHashes, 'preimageHash');
   const fromInterim = matchesState(beforeHashes, 'interimHash');
   const fromInstalled = matchesState(beforeHashes, 'installedHash');
-  if (!fromPreimage && !fromInterim && !fromInstalled) {
+  const fromCorrected = matchesState(beforeHashes, 'correctedHash');
+  if (!fromPreimage && !fromInterim && !fromInstalled && !fromCorrected) {
     throw new Error('Refusing unexpected Task 12 function source: ' + JSON.stringify(beforeHashes));
   }
 
-  if (fromPreimage) {
+  if (!fromCorrected && fromPreimage) {
     for (const id of ['sync-bootstrap-build', 'sync-force-build']) {
       const node = byId.get(id);
       node.func = replaceOnce(
@@ -384,7 +459,7 @@ function migrate(buffer) {
     history.func = exposeHistoryCatches(history.func);
   }
 
-  if (!fromInstalled) {
+  if (!fromCorrected && !fromInstalled) {
     const interimHashes = currentHashes(byId);
     if (!matchesState(interimHashes, 'interimHash')) {
       throw new Error('Task 12 interim hashes do not match pins: ' + JSON.stringify(interimHashes));
@@ -408,25 +483,36 @@ function migrate(buffer) {
     );
   }
 
-  const installedHashes = currentHashes(byId);
-  if (!matchesState(installedHashes, 'installedHash')) {
-    throw new Error('Task 12 installed hashes do not match pins: ' + JSON.stringify(installedHashes));
+  if (!fromCorrected) {
+    const installedHashes = currentHashes(byId);
+    if (!matchesState(installedHashes, 'installedHash')) {
+      throw new Error('Task 12 installed hashes do not match pins: ' + JSON.stringify(installedHashes));
+    }
+
+    for (const id of ['sync-bootstrap-build', 'sync-force-build']) {
+      const node = byId.get(id);
+      node.func = replaceOnce(
+        node.func,
+        journalAdvertisementSource,
+        correctedJournalAdvertisementSource,
+        id + ' corrected journal helper'
+      );
+      ensureCryptoLibrary(node);
+    }
+
+    const correctedHashes = currentHashes(byId);
+    if (!matchesState(correctedHashes, 'correctedHash')) {
+      throw new Error('Task 12 corrected hashes do not match pins: ' + JSON.stringify(correctedHashes));
+    }
   }
 
-  for (const id of ['sync-bootstrap-build', 'sync-force-build']) {
-    const node = byId.get(id);
-    node.func = replaceOnce(
-      node.func,
-      journalAdvertisementSource,
-      correctedJournalAdvertisementSource,
-      id + ' corrected journal helper'
-    );
-    ensureCryptoLibrary(node);
+  if (!correctedLibrariesInstalled(byId)) {
+    throw new Error('Refusing corrected Task 12 source without exact crypto libraries');
   }
-
-  const afterHashes = currentHashes(byId);
-  if (!matchesState(afterHashes, 'correctedHash')) {
-    throw new Error('Task 12 corrected hashes do not match pins: ' + JSON.stringify(afterHashes));
+  hardenCorrectedOutboxJson(byId);
+  const hardenedHashes = currentHashes(byId);
+  if (!matchesState(hardenedHashes, 'hardenedHash')) {
+    throw new Error('Task 12 hardened hashes do not match pins: ' + JSON.stringify(hardenedHashes));
   }
   return serialize(flows);
 }
