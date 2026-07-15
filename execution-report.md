@@ -332,3 +332,275 @@ Each mutation was reverted before the green run. The verifier now checks the gat
 | `git diff --check` | 0 | No output |
 
 The six new files have intent-to-add entries, so `git diff --check` covers their content. `git diff --cached --name-only` produced no output; no content is staged. The final `execution-report.md` prose check exited 0 with `slop-check: PASS (no tier-1 findings)`.
+
+## Task 4 — Pause identity-sensitive flows during a coordinated restart
+
+The static verifier changed before either flow file. Its first run exited 1 with 66 Task 4 contract failures across the two maintained profiles. Existing service, deploy, package, and protected-function assertions remained green. The failure group began with:
+
+```text
+FAIL conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/flows.json: restart sentinel readers must be exactly sync-bootstrap-build, sync-outbox-build, sync-pending-build, sync-force-build, command-ack-build-batch, sync-state-build, al-link-build-req; got
+FAIL conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/flows.json:sync-bootstrap-build: restart check must precede currentGatewayIdentity()
+FAIL conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/flows.json:al-link-restart-node-red: does not use global.get('cp'); found "global.get('cp')"
+FAIL conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/flows.json:al-unlink-restart-node-red: does not use /etc/init.d/node-red; found "/etc/init.d/node-red"
+66 live gateway identity verification failure(s)
+EXIT=1
+```
+
+The throwaway `/tmp/osi-live-identity-flow-edit.js` proved the required no-op serialization before mutation:
+
+```text
+conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/flows.json: byte-identical: true (1291107 / 1291107 bytes)
+conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/flows.json: byte-identical: true (1291107 / 1291107 bytes)
+```
+
+The first guarded mutation attempt exposed an internal plan contradiction and stopped before writing either file. Two of the three reviewed silent catches in `sync-pending-build` are inside `runGatewayMigrationPreflight`, while the hard guardrail requires every such function body to remain byte-identical. The hard guardrail won: the two frozen catches remain unchanged, seven catches outside protected preflight bodies became visible warnings, and the maintained baseline moved from 225 to 218 rather than 216. The static verifier records the protected preflight hashes and the corrected baseline.
+
+The successful guarded mutation reparsed both outputs, proved that only the nine named `func` values changed, preserved every other node field, and produced byte-identical profiles. Its measurements were:
+
+```text
+Node count: 602 -> 602
+sync-bootstrap-build: 32815 -> 33904 bytes (+1089)
+sync-outbox-build: 16856 -> 17945 bytes (+1089)
+sync-pending-build: 15718 -> 16951 bytes (+1233)
+sync-force-build: 51729 -> 52818 bytes (+1089)
+command-ack-build-batch: 2684 -> 3659 bytes (+975)
+sync-state-build: 9047 -> 10119 bytes (+1072)
+al-link-build-req: 3173 -> 4142 bytes (+969)
+al-link-restart-node-red: 527 -> 1264 bytes (+737)
+al-unlink-restart-node-red: 532 -> 1275 bytes (+743)
+Positive function growth: 8996 bytes
+Flow bytes: 1291107 -> 1300322 (+9215)
+```
+
+The protected hashes after mutation matched their pre-edit snapshots:
+
+```text
+al-link-validate c6dc24e4f754e3d6d5dde77d5352d96e6105b958349e549e8896d50bf64bf2d7
+sync-init-fn 2ecba63b87c0389c9f1273267346101d861d5a076abe1410ec496111fe502263
+sync-bootstrap-build preflight 9ae98d1f0fba0086ebc1dbe556a58656f7bd52d74b6ca81d085735df3950fe46
+sync-outbox-build preflight abbebaac2e03f06562d6e6c49ff10fbca800c229d8cf5879a9af3ba0a0558c56
+sync-pending-build preflight 6f4fbe26fd5954042736f07e05d99c40ffe55ad1bff2a35097c8fec32f49570b
+sync-force-build preflight df5cb5ca7dae8dc1bfeba7b8546e1d215ead1f71730f426400bbafb02f07864d
+```
+
+The first complete gate stopped at `node scripts/test-flows-wiring.js`, exit 1. Its journal-bootstrap harness did not provide the newly required `global.get('fs')`, so the production reader correctly failed closed and 48 bootstrap assertions received no payload:
+
+```text
+not ok 1 - bcm2712 normal bootstrap advertises the ready journal catalog and exact manifest
+error: 'core bootstrap payload must be produced'
+...
+# pass 5
+# fail 48
+FAIL: 1 flow wiring regression(s):
+  - journal bootstrap behavior harness failed
+wiring EXIT=1
+```
+
+The approved scope correction updated only that existing harness. Its normal and forced bootstrap runners now provide an `fs` global whose default state is a missing sentinel, and explicit tests cover both present and malformed sentinels failing closed. The failed wiring gate then passed, and the focused harness reported:
+
+```text
+1..61
+# tests 61
+# pass 61
+# fail 0
+EXIT=0
+```
+
+### Fresh complete flows gate
+
+Every command below was rerun after the harness correction. Execution stopped on any non-zero result.
+
+| Command | Exit | Observed output/pass signal |
+|---|---:|---|
+| `node scripts/verify-sync-flow.js` | 0 | Line 2012: `Sync flow verification passed`; line 2340: `Live gateway identity verification passed.`; final line: `All parity checks passed.` |
+| `node scripts/verify-communication-contract.js` | 0 | `Communication contract verification passed` |
+| `node scripts/verify-profile-parity.js` | 0 | Final line `All parity checks passed.` |
+| `node scripts/verify-flows-fn-parse.js` | 0 | Maintained profiles: 240 nodes and 240 sources each; `verify-flows-fn-parse: OK` |
+| `node scripts/verify-no-new-silent-catch.js` | 0 | bcm2712 and bcm2709 each: 218 empty catches, baseline 218 |
+| `node scripts/verify-flows-size-ratchet.js` | 0 | Both maintained profiles: total 1,061,774; `verify-flows-size-ratchet: OK` |
+| `node scripts/flows-bare-require-scan.js` | 0 | No output |
+| `node scripts/test-flows-wiring.js` | 0 | `OK  journal bootstrap behavior harness`; final line `PASS: STREGA wiring + osiDb close + WS2/WS3 wiring guards all passed` |
+| `node scripts/verify-no-stray-ddl.js` | 0 | `verify-no-stray-ddl: OK (HEAD total 702 <= origin/main total 702; committed baseline matches HEAD total 702)` |
+| `scripts/check-mqtt-topics.sh` | 0 | All three flow copies reported no UUID patterns in MQTT IN topics |
+| `node scripts/verify-live-gateway-identity.js` | 0 | Exact seven readers, request publishers, reviewed libs, protected hashes, ratchets, mirror parity, and lifecycle assertions reported `OK`; final line `Live gateway identity verification passed.` |
+| `git diff --check` | 0 | No output |
+
+The function-node edits introduce no child process calls, bare `require()`, or new `libs`. The two restart owners retain `libs: []`, publish unique three-field JSON requests through same-directory temporary files and atomic renames, and keep their original wiring. `al-link-validate`, `sync-init-fn`, all four `runGatewayMigrationPreflight` bodies, and the reboot route remain untouched.
+
+### Task 4 review follow-up — deterministic and confined restart requests
+
+The Task 4 review found that the first restart-owner implementation used a random suffix as the final filename and created the request directory with mode 0755. It also accepted a missing `msg._msgid`. The executable assertions were added before the fix. `node scripts/verify-live-gateway-identity.js` exited 1 with 36 findings across both owner nodes and both profiles. Representative failures were:
+
+```text
+FAIL ...:al-link-restart-node-red: requires the Node-RED message identity
+FAIL ...:al-link-restart-node-red: must mkdir the request directory recursively with mode 0700
+FAIL ...:al-link-restart-node-red: final request path escaped or is not keyed by the safe msg._msgid encoding
+FAIL ...:al-link-restart-node-red: missing msg._msgid must warn, set red status, and publish nothing
+36 live gateway identity verification failure(s)
+EXIT=1
+```
+
+A new guarded `/tmp/osi-live-identity-owner-fix.js` no-op roundtripped both 1,300,322-byte profiles before changing only the two restart-owner functions. The final filename now uses the hexadecimal UTF-8 encoding of the required `msg._msgid`, so path separators and other hostile input cannot leave `/var/run/osi-node-red-restart-requests`. A repeated message keeps that deterministic final filename, while every publication uses a fresh timestamp-and-random temporary suffix. Missing or whitespace-only message IDs warn, set a red node status, and make no filesystem call. Directory creation requests mode 0700; temporary files remain exclusive mode 0600 writes followed by a rename.
+
+The owner-only mutation measured:
+
+```text
+al-link-restart-node-red: 1264 -> 1614 bytes (+350)
+al-unlink-restart-node-red: 1275 -> 1629 bytes (+354)
+Flow bytes: 1300322 -> 1301040 (+718)
+```
+
+These values supersede the final Task 4 sizing above. Relative to the pre-Task-4 flow, the two owner allowances are 1,087 and 1,097 bytes. Total Task 4 function growth is 9,700 bytes, and the cumulative total allowance is 34,267. The other seven Task 4 function hashes, all protected hashes, node wiring, `libs`, and non-function fields remained unchanged.
+
+The executable verifier uses fixed clock and random inputs with a mocked `fs`, `global`, `node`, and `msg`. It checks confined deterministic final paths, distinct final paths for distinct message IDs, fresh temporary paths for retrying the same ID, exact JSON keys and values, mkdir mode 0700, exclusive mode-0600 writes, rename ordering, and visible missing-ID failures. A guarded mutation replaced the temporary suffix with a constant in both profiles. The verifier exited 1 with exactly four failures:
+
+```text
+FAIL ...bcm2712...:al-link-restart-node-red: retries must keep the final path stable while changing the temporary path
+FAIL ...bcm2712...:al-unlink-restart-node-red: retries must keep the final path stable while changing the temporary path
+FAIL ...bcm2709...:al-link-restart-node-red: retries must keep the final path stable while changing the temporary path
+FAIL ...bcm2709...:al-unlink-restart-node-red: retries must keep the final path stable while changing the temporary path
+4 live gateway identity verification failure(s)
+MUTATE_EXIT=0 VERIFIER_EXIT=1 RESTORE_EXIT=0
+```
+
+After guarded restoration, the live verifier exited 0. The complete flow gate was then rerun from the start:
+
+| Command | Exit | Observed output/pass signal |
+|---|---:|---|
+| `node scripts/verify-sync-flow.js` | 0 | Line 2012: `Sync flow verification passed`; line 2396: `Live gateway identity verification passed.`; final line: `All parity checks passed.` |
+| `node scripts/verify-communication-contract.js` | 0 | `Communication contract verification passed` |
+| `node scripts/verify-profile-parity.js` | 0 | `All parity checks passed.` |
+| `node scripts/verify-flows-fn-parse.js` | 0 | Maintained profiles: 240 nodes and 240 parsed sources each; `verify-flows-fn-parse: OK` |
+| `node scripts/verify-no-new-silent-catch.js` | 0 | Both maintained profiles: 218 empty catches, baseline 218 |
+| `node scripts/verify-flows-size-ratchet.js` | 0 | Both maintained profiles: total 1,062,478; `verify-flows-size-ratchet: OK` |
+| `node scripts/flows-bare-require-scan.js` | 0 | No output |
+| `node scripts/test-flows-wiring.js` | 0 | `PASS: STREGA wiring + osiDb close + WS2/WS3 wiring guards all passed` |
+| `node scripts/verify-no-stray-ddl.js` | 0 | `verify-no-stray-ddl: OK` with HEAD and origin/main totals 702 |
+| `scripts/check-mqtt-topics.sh` | 0 | All three profiles reported no UUID patterns in MQTT IN topics |
+| `node scripts/verify-live-gateway-identity.js` | 0 | Executable owner contracts and all earlier static contracts passed; final line `Live gateway identity verification passed.` |
+| `git diff --check` | 0 | No output |
+
+An independent comparison with `HEAD` still reports 602 nodes, exactly the nine Task 4 function IDs changed, no non-function changes, and byte-identical maintained profiles at 1,301,040 bytes.
+
+### Task 4 review follow-up — fail-closed publication and error provenance
+
+The second review found two behavior gaps. A filesystem failure in either restart owner still sent the original success message through the success fanout, which could clear link state or start bootstrap without publishing a restart request. The bootstrap catch also derived its error source from the previous `sync_state.lastError`, so a stale gateway-identity failure could mislabel an unrelated bootstrap failure.
+
+Assertions for the publication contract changed first. The live verifier exited 1 with 48 findings across both restart owners and profiles. It required a non-empty `msg._msgid` of at most 64 UTF-8 bytes, two outputs, success-only fanout after a completed rename, and error-only HTTP responses for a missing `fs`, `ENOSPC`, or rename failure. The behavioral bootstrap harness also exposed the stale source behavior in the existing sentinel cases:
+
+```text
+FAIL ...:al-link-restart-node-red: must declare two outputs
+FAIL ...:al-link-restart-node-red: success/error wiring must be [["al-link-resp","al-link-clear-state","al-link-bootstrap-link-out"],["al-link-resp"]]
+FAIL ...:al-link-restart-node-red: ENOSPC must never retain a success response or reach success wiring
+FAIL ...:al-unlink-restart-node-red: msg._msgid must enforce the 64-byte filename-key contract
+48 live gateway identity verification failure(s)
+
+# tests 61
+# pass 57
+# fail 4
+```
+
+The guarded flow mutation changed the two owner functions and their wiring. Each owner now returns `[msg, null]` only after the atomic rename. Publication errors return `[null, msg]` with status 503, a bounded error detail, a warning, and red node status; the error output connects only to the matching HTTP response. The message identity is trimmed, measured as UTF-8 before any filesystem access, limited to 64 bytes, and hex-encoded for the deterministic final filename. The mutation roundtripped and reparsed both profiles, preserved the two protected functions and four preflight bodies, and measured:
+
+```text
+Flow bytes: 1301040 -> 1302694 (+1654)
+sync-bootstrap-build: +198
+al-link-restart-node-red: +674
+al-unlink-restart-node-red: +676
+```
+
+The first source-preservation fix still consulted `sync_state.lastError`. A dedicated stale-state test and static assertions were RED before the correction:
+
+```text
+FAIL ...:sync-bootstrap-build: throws a marked status 503 while the identity restart is pending
+FAIL ...:sync-bootstrap-build: selects the outer error source from the caught error marker, not stale flow state
+10 live gateway identity verification failure(s)
+
+not ok 13 - normal bootstrap does not inherit a stale gateway-identity source for an unrelated failure
+# tests 62
+# pass 61
+# fail 1
+```
+
+Each identity error from `requireStableGatewayIdentity` now carries `source = 'gateway-identity'`. The outer bootstrap catch reads that marker from the caught error and uses `bootstrap` for every unrelated failure, regardless of stale flow state. The second guarded mutation changed only the four identity-gated builders, reparsed both profiles, and measured:
+
+```text
+Flow bytes: 1302694 -> 1303062 (+368)
+sync-bootstrap-build: +24
+sync-outbox-build: +111
+sync-pending-build: +111
+sync-force-build: +111
+```
+
+The first focused post-fix verifier run caught three allowance descriptions whose wording did not contain its exact Slice 1 contract phrase. It exited 1 while the 62-test harness passed. Only those three reason strings changed, after which both focused gates passed:
+
+```text
+FAIL size allowance sync-outbox-build: declares Task 4 growth; missing "live identity restart sentinel (Option C Slice 1)"
+FAIL size allowance sync-pending-build: declares Task 4 growth; missing "live identity restart sentinel (Option C Slice 1)"
+FAIL size allowance sync-force-build: declares Task 4 growth; missing "live identity restart sentinel (Option C Slice 1)"
+3 live gateway identity verification failure(s)
+EXIT=1
+
+Live gateway identity verification passed.
+EXIT=0
+# tests 62
+# pass 62
+# fail 0
+EXIT=0
+```
+
+Final Task 4 function growth is 11,605 bytes. The owner allowances are 1,761 and 1,773 bytes, and the cumulative total allowance is 36,172. These values supersede the earlier Task 4 follow-up measurements.
+
+### Final Task 4 gate after review fixes
+
+Every command below was rerun after the publication and error-source corrections.
+
+| Command | Exit | Observed output/pass signal |
+|---|---:|---|
+| `node scripts/verify-sync-flow.js` | 0 | `Sync flow verification passed`; chained live verification passed; final line `All parity checks passed.` |
+| `node scripts/verify-communication-contract.js` | 0 | `Communication contract verification passed` |
+| `node scripts/verify-profile-parity.js` | 0 | Final line `All parity checks passed.` |
+| `node scripts/verify-flows-fn-parse.js` | 0 | Maintained profiles: 240 function nodes and 240 parsed sources each; `verify-flows-fn-parse: OK` |
+| `node scripts/verify-no-new-silent-catch.js` | 0 | Both maintained profiles: 218 empty catches, baseline 218 |
+| `node scripts/verify-flows-size-ratchet.js` | 0 | Both maintained profiles: total 1,064,383; `verify-flows-size-ratchet: OK` |
+| `node scripts/flows-bare-require-scan.js` | 0 | No output |
+| `node scripts/test-flows-wiring.js` | 0 | Final line `PASS: STREGA wiring + osiDb close + WS2/WS3 wiring guards all passed` |
+| `node scripts/verify-no-stray-ddl.js` | 0 | `verify-no-stray-ddl: OK` with HEAD and origin/main totals 702 |
+| `scripts/check-mqtt-topics.sh` | 0 | All three profiles reported no UUID patterns in MQTT IN topics |
+| `node scripts/verify-live-gateway-identity.js` | 0 | Publication failure probes, source-marker assertions, protected hashes, lifecycle checks, and ratchets passed; final line `Live gateway identity verification passed.` |
+| `node --test scripts/test-journal-bootstrap.js` | 0 | 62 tests passed; zero failed |
+| `git diff --check` | 0 | No output |
+
+The independent final comparison reports 602 nodes and byte-identical maintained flow files of 1,303,062 bytes. Exactly nine function bodies differ from `HEAD`: `sync-bootstrap-build`, `sync-outbox-build`, `sync-pending-build`, `sync-force-build`, `command-ack-build-batch`, `sync-state-build`, `al-link-build-req`, `al-link-restart-node-red`, and `al-unlink-restart-node-red`. Only the two restart-owner nodes have non-function changes, limited to their two-output wiring. Both retain `libs: []`. `al-link-validate`, `sync-init-fn`, and all four `runGatewayMigrationPreflight` bodies match their pre-edit hashes.
+
+### Final verifier review — mkdir failure execution
+
+The final review found an unused `mkdirError` fixture in `verifyRestartOwnerExecution`. Existing probes covered missing `fs`, write failure, and rename failure, but none executed a thrown `mkdirSync`. A guarded owner-only mutant returned `[msg, null]` when the mkdir failed and preserved the existing failure path after a temporary filename existed. Both profile files roundtripped before mutation, the mutant changed only the two restart-owner function bodies, and the verifier incorrectly passed:
+
+```text
+mutation apply exit=0
+mutate: guarded owner-only mutation complete (1303138 bytes per profile)
+mutated verifier exit=0
+Live gateway identity verification passed.
+mutation restore exit=0
+restore: guarded owner-only mutation complete (1303062 bytes per profile)
+restore hashes bcm2712=MATCH bcm2709=MATCH
+```
+
+The verifier now invokes each owner with `mkdirSync` throwing a 500-character fixture error. The assertion requires one mkdir call; zero write, rename, and unlink calls; a warning; red node status; error-only `[null, msg]`; status 503; and a failure payload whose detail is truncated to 200 characters and whose serialized size is at most 512 bytes.
+
+The same guarded mutant then failed once for each owner and profile. Restoration again reproduced both pre-mutation hashes:
+
+```text
+mutation apply exit=0
+mutated verifier exit=1
+FAIL ...bcm2712...:al-link-restart-node-red: mkdir failure must warn, set red status, avoid publication and cleanup, and return one bounded 503 error
+FAIL ...bcm2712...:al-unlink-restart-node-red: mkdir failure must warn, set red status, avoid publication and cleanup, and return one bounded 503 error
+FAIL ...bcm2709...:al-link-restart-node-red: mkdir failure must warn, set red status, avoid publication and cleanup, and return one bounded 503 error
+FAIL ...bcm2709...:al-unlink-restart-node-red: mkdir failure must warn, set red status, avoid publication and cleanup, and return one bounded 503 error
+4 live gateway identity verification failure(s)
+mutation restore exit=0
+restore hashes bcm2712=MATCH bcm2709=MATCH
+```
+
+No production flow changed for this correction. The focused live verifier passed, and the journal bootstrap harness passed all 62 tests. The complete Task 4 gate was rerun after restoration; all 13 commands in the preceding table exited 0 with the same pass signals. The independent proof again reported 602 nodes, byte-identical 1,303,062-byte maintained profiles, the same nine function changes and two structural changes, exact owner wiring with `libs: []`, and unchanged protected-function hashes.

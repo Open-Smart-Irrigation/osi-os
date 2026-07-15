@@ -105,6 +105,7 @@ class JournalFixtureDb {
     this.native = new DatabaseSync(':memory:');
     this.closed = false;
     this.catalogQueryError = settings.catalogQueryError || null;
+    this.userQueryError = settings.userQueryError || null;
     this.closeError = settings.closeError || null;
     if (settings.tables !== false) {
       const tableSql = {
@@ -201,7 +202,9 @@ class JournalFixtureDb {
   all(sql, params, callback) {
     try {
       let rows;
-      if (/FROM users WHERE id = \? AND auth_mode = 'server'/.test(sql)) {
+      if (/FROM users WHERE server_url IS NOT NULL/.test(sql) && this.userQueryError) {
+        throw this.userQueryError;
+      } else if (/FROM users WHERE id = \? AND auth_mode = 'server'/.test(sql)) {
         rows = [{
           id: 1,
           server_url: 'https://cloud.invalid',
@@ -241,8 +244,9 @@ class JournalFixtureDb {
   }
 }
 
-function runtime(db) {
+function runtime(db, options) {
   const state = new Map();
+  if (options && options.initialSyncState) state.set('sync_state', options.initialSyncState);
   const warnings = [];
   const errors = [];
   return {
@@ -278,13 +282,34 @@ function runtime(db) {
   };
 }
 
+function identityGlobal(options) {
+  const restartState = String((options && options.identityRestartState) || 'missing');
+  const restartPath = '/var/run/osi-identity-restart.json';
+  const fsGlobal = {
+    existsSync(filePath) {
+      return filePath === restartPath && restartState !== 'missing';
+    },
+    readFileSync(filePath, encoding) {
+      assert.equal(filePath, restartPath);
+      assert.equal(encoding, 'utf8');
+      if (restartState === 'malformed') return '{';
+      return '{"phase":"restart_pending"}';
+    },
+  };
+  return {
+    get(key) {
+      return key === 'fs' ? fsGlobal : null;
+    },
+  };
+}
+
 async function runNormalBootstrap(node, options) {
   const db = new JournalFixtureDb(options);
-  const context = runtime(db);
+  const context = runtime(db, options);
   try {
-    const execute = new Function('msg', 'flow', 'env', 'node', 'crypto', 'osiDb', node.func);
-    const result = await execute({}, context.flow, context.env, context.node, crypto, context.osiDb);
-    return { payload: result && result.payload, warnings: context.warnings, errors: context.errors };
+    const execute = new Function('msg', 'flow', 'global', 'env', 'node', 'crypto', 'osiDb', node.func);
+    const result = await execute({}, context.flow, identityGlobal(options), context.env, context.node, crypto, context.osiDb);
+    return { payload: result && result.payload, syncState: context.flow.get('sync_state') || {}, warnings: context.warnings, errors: context.errors };
   } finally {
     db.destroy();
   }
@@ -292,7 +317,7 @@ async function runNormalBootstrap(node, options) {
 
 async function runForcedBootstrap(node, options) {
   const db = new JournalFixtureDb(options);
-  const context = runtime(db);
+  const context = runtime(db, options);
   let bootstrapPayload = null;
   const osiCloudHttp = {
     async requestJsonIpv4(request) {
@@ -318,9 +343,9 @@ async function runForcedBootstrap(node, options) {
       _forceSyncInternal: true,
       _forceSyncUserId: 1,
       _forceSyncUsername: 'fixture-user',
-    }, context.flow, { get() { return null; } }, context.env, context.node,
+    }, context.flow, identityGlobal(options), context.env, context.node,
     crypto, context.osiDb, osiCloudHttp);
-    return { payload: bootstrapPayload, warnings: context.warnings, errors: context.errors };
+    return { payload: bootstrapPayload, syncState: context.flow.get('sync_state') || {}, warnings: context.warnings, errors: context.errors };
   } finally {
     db.destroy();
   }
@@ -426,7 +451,39 @@ for (const profile of PROFILES) {
     assert.equal(forced && forced.name, 'Run Force Sync');
     assertReadyAdvertisement((await runForcedBootstrap(forced)).payload);
   });
+
+  for (const [label, options] of [
+    ['present', { identityRestartState: 'present' }],
+    ['malformed', { identityRestartState: 'malformed' }],
+  ]) {
+    test(profile + ' normal bootstrap fails closed for ' + label + ' identity restart state', async () => {
+      const result = await runNormalBootstrap(normal, options);
+      assert.equal(result.payload, null);
+      assert.equal(result.syncState.lastError && result.syncState.lastError.source, 'gateway-identity');
+      if (label === 'malformed') {
+        assert.ok(result.warnings.some((warning) => /Gateway identity restart state is unreadable/.test(warning)));
+      }
+    });
+    test(profile + ' forced bootstrap fails closed for ' + label + ' identity restart state', async () => {
+      const result = await runForcedBootstrap(forced, options);
+      assert.equal(result.payload, null);
+      assert.equal(result.syncState.lastError && result.syncState.lastError.source, 'gateway-identity');
+      if (label === 'malformed') {
+        assert.ok(result.warnings.some((warning) => /Gateway identity restart state is unreadable/.test(warning)));
+      }
+    });
+  }
 }
+
+test('normal bootstrap does not inherit a stale gateway-identity source for an unrelated failure', async () => {
+  const normal = canonical.find((node) => node.id === 'sync-bootstrap-build');
+  const result = await runNormalBootstrap(normal, {
+    initialSyncState: { lastError: { source: 'gateway-identity', message: 'stale' } },
+    userQueryError: new Error('unrelated users query failure'),
+  });
+  assert.equal(result.payload, null);
+  assert.equal(result.syncState.lastError && result.syncState.lastError.source, 'bootstrap');
+});
 
 const canonical = loadFlows('bcm2712');
 const bootstrapKinds = [
