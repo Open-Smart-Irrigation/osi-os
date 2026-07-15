@@ -67,3 +67,11 @@ Append-only execution log for the accepted Phase 0 and Phase 1-6 plans on `desig
 - sol blocked the first Phase 2 draft because entry-list errors could appear as empty data, Tasks 4 and 6 both owned `package.json`, only English had journal keys, Task 7 lacked complete executable page code, and rows exposed raw plot UUIDs with browser-timezone dates.
 - The amended plan adds retryable entry and plot hooks, distinct page error states, a seven-locale key-parity test, complete page and page-test code, plot/activity filters, human plot labels, and occurrence-timezone formatting.
 - `620b161a53a0e7bb0efe4467a3d4c077a7839243` is the package-only prep commit that registers both Phase 2 test directories before parallel work. Its full unit gate passed 93/93 tsx tests and 564/564 Vitest tests across 99 files.
+
+## 2026-07-16T01:48:32+02:00 - Phase 2 Tasks 4-6 implemented
+
+- `833b4b7de982d77846a0e7739a9b1055e0932afb` adds the catalog capability hook. The original SWR test seam surfaced caught mock rejections after assertions; a directly awaited `loadJournalCatalog` now verifies 404/501 classification, while a resolved-null loader verifies hook state. Targeted tests pass 4/4; sol approved both specification and quality.
+- `2d7e0cf1bff302265f5487689a5265ea4d89e373` contains the authorized union of Tasks 5 and 6: retryable entry/plot hooks, localized entry row, seven source locale files, and locale parity coverage.
+- Concurrency deviation: the Task 6 worker staged its ten paths while the Task 5 worker committed four paths, so the shared Git index produced one fourteen-file commit with the Task 5 subject. Both workers stopped immediately. The commit was not rewritten because the mission forbids destructive Git; a read-only audit confirmed that it contains only the two authorized scopes.
+- RED evidence: Task 5 had two unresolved hook modules; Task 6 had an unresolved row component and missing non-English locale resources. Targeted GREEN is 6/6 for Task 5 and 14/14 for Task 6. The stabilized full gate passed 93/93 tsx tests and 588/588 Vitest tests across 104 files; TypeScript and `git diff --check` exited 0.
+- Orchestrator targeted recheck: all five Phase 2 hook/row/locale suites pass 24/24; TypeScript and `git diff --check` exit 0.

@@ -673,7 +673,7 @@ vi.mock('../../services/journalApi', () => ({
   isJournalUnavailable,
 }));
 
-import { useJournalCatalog } from '../useJournalCatalog';
+import { loadJournalCatalog, useJournalCatalog } from '../useJournalCatalog';
 
 const wrapper = ({ children }: React.PropsWithChildren) => (
   <SWRConfig value={{ provider: () => new Map(), dedupingInterval: 0 }}>
@@ -695,7 +695,11 @@ describe('useJournalCatalog', () => {
 
   it.each([404, 501])('reports unavailable on a %s capability response', async (status) => {
     getCatalog.mockRejectedValue({ response: { status } });
-    const { result } = renderHook(() => useJournalCatalog(), { wrapper });
+    await expect(loadJournalCatalog()).resolves.toBeNull();
+    const { result } = renderHook(
+      () => useJournalCatalog(() => Promise.resolve(null)),
+      { wrapper },
+    );
     await waitFor(() => expect(result.current.loading).toBe(false));
     expect(result.current.available).toBe(false);
     expect(result.current.unavailable).toBe(true);
@@ -727,20 +731,30 @@ import useSWR from 'swr';
 import { journalApi, isJournalUnavailable } from '../services/journalApi';
 import type { JournalCatalog } from '../types/journal';
 
-export function useJournalCatalog() {
-  const { data, error, isLoading, mutate } = useSWR<JournalCatalog>(
+type JournalCatalogLoader = () => Promise<JournalCatalog | null>;
+
+export async function loadJournalCatalog(): Promise<JournalCatalog | null> {
+  try {
+    return await journalApi.getCatalog();
+  } catch (failure) {
+    if (isJournalUnavailable(failure)) return null;
+    throw failure;
+  }
+}
+
+export function useJournalCatalog(loader: JournalCatalogLoader = loadJournalCatalog) {
+  const { data, error, isLoading, mutate } = useSWR<JournalCatalog | null>(
     'journal:catalog',
-    () => journalApi.getCatalog(),
+    loader,
     { revalidateOnFocus: false, shouldRetryOnError: false },
   );
-  const unavailable = !!error && isJournalUnavailable(error);
   return {
-    catalog: data,
-    available: !!data,
-    unavailable,
+    catalog: data ?? undefined,
+    available: data != null,
+    unavailable: data === null,
     loading: isLoading,
-    error: error && !unavailable ? error : undefined,
-    retry: mutate,
+    error,
+    retry: async () => (await mutate()) ?? undefined,
   };
 }
 ```
