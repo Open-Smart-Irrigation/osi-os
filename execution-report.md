@@ -861,3 +861,70 @@ Two read-only reviewers approved the task. The only changes from review were typ
 | `node -e "<build locale restart-key check>"` | 0 | `build/locales/en/common.json restart keys OK: gateway_identity_change, chirpstack_bootstrap, account_link, account_unlink, generic, in_progress` |
 
 The build emitted the existing stale browser-data notices and the existing large-chunk warning. No Task 6 gate failed after review.
+
+## Task 7 — PR A documentation and complete local verification
+
+Task 7 documented the shipped PR A contracts in `AGENTS.md`, `.claude/skills/osi-config-and-flags/SKILL.md`, and `CHANGELOG.md`. The corrected design and plan were also added under `docs/superpowers/` so the branch carries the reviewed source artifacts.
+
+The documentation records the new `osi-identityd` daemon and service paths, `/var/run/osi-gateway-identity.json`, `/var/run/osi-identity-restart.json`, `/var/run/osi-node-red-restart-requests/`, the cache phases `provisional`, `active`, `healing`, and `restart_pending`, the 60 s operator warning window, the bootstrap restart request path, and the invariant that Node-RED consumers keep their boot identity until the coordinated restart.
+
+### Prose gate
+
+```text
+COMMAND: node .claude/skills/anti-slop-writing/slop-check.js AGENTS.md .claude/skills/osi-config-and-flags/SKILL.md CHANGELOG.md execution-report.md docs/superpowers/specs/2026-07-14-live-gateway-identity-design.md docs/superpowers/plans/2026-07-14-live-gateway-identity-plan.md
+tier2 AGENTS.md: em-dash density 9.0/1000 words (25 in 2786; budget 8)
+tier2 .claude/skills/osi-config-and-flags/SKILL.md:571: "literally"
+tier2 .claude/skills/osi-config-and-flags/SKILL.md:598: "genuinely"
+tier2 .claude/skills/osi-config-and-flags/SKILL.md: em-dash density 15.1/1000 words (64 in 4225; budget 8)
+slop-check: PASS (no tier-1 findings)
+EXIT_CODE=0
+```
+
+The two word warnings are pre-existing skill text. The em-dash warnings are tier-2 density warnings on long-standing files; no tier-1 finding remains.
+
+### Fresh shell and service gates
+
+| Command | Exit | Observed output/pass signal |
+|---|---:|---|
+| `sh -n` on both profile copies of `osi-gateway-identity.sh`, `osi-identityd.sh`, `etc/init.d/osi-identityd`, `etc/init.d/osi-bootstrap`, plus `deploy.sh` | 0 | No shell syntax output |
+| `sh scripts/test-gateway-identity-helper.sh` | 0 | `PASS: gateway identity heal ordering and state propagation` |
+| `sh scripts/test-osi-identityd.sh` | 0 | `PASS: osi-identityd state machine (17 scenarios)` |
+| `sh scripts/test-identityd-service-lifecycle.sh` | 0 | Expected OK and ERROR harness branches ran; final line `PASS: identityd deploy lifecycle and readiness` |
+| `node scripts/verify-live-gateway-identity.js` | 0 | Mode, service ordering, restart request, sentinel privacy, lifecycle, size allowances, protected-node, and parity assertions ran; final line `Live gateway identity verification passed.` |
+| `node scripts/verify-profile-parity.js` | 0 | `OK: files/usr/share/flows.json`, `OK: files/usr/libexec/osi-identityd.sh`, `OK: files/etc/init.d/osi-identityd`; final line `All parity checks passed.` |
+
+### Fresh flows gates
+
+| Command | Exit | Observed output/pass signal |
+|---|---:|---|
+| `node scripts/verify-communication-contract.js` | 0 | `Communication contract verification passed` |
+| `node scripts/verify-sync-flow.js` | 0 | `Sync flow verification passed`; chained live identity verification passed; chained profile parity ended `All parity checks passed.` |
+| `node scripts/verify-flows-fn-parse.js` | 0 | Maintained profiles: 240 function nodes and 240 parsed sources each; `verify-flows-fn-parse: OK` |
+| `node scripts/verify-no-new-silent-catch.js` | 0 | `verify-no-new-silent-catch: OK`; both maintained profiles remain at 215 empty catches, baseline 215 |
+| `node scripts/verify-flows-size-ratchet.js` | 0 | Maintained profiles: total 1,068,267 each; `verify-flows-size-ratchet: OK` |
+| `node scripts/flows-bare-require-scan.js` | 0 | No output |
+| `node scripts/test-flows-wiring.js` | 0 | Final line `PASS: STREGA wiring + osiDb close + WS2/WS3 wiring guards all passed` |
+| `node scripts/verify-no-stray-ddl.js` | 0 | `verify-no-stray-ddl: OK (HEAD total 702 <= origin/main total 702; committed baseline matches HEAD total 702)` |
+| `scripts/check-mqtt-topics.sh` | 0 | All three profiles reported no UUID patterns in MQTT IN topics |
+
+### Fresh GUI gates
+
+| Command | Exit | Observed output/pass signal |
+|---|---:|---|
+| `cd web/react-gui && npm run typecheck` | 0 | `tsc --noEmit` |
+| `cd web/react-gui && npm run test:unit` | 0 | TSX runner: 84 tests passed; Vitest: 97 files and 565 tests passed |
+| `cd web/react-gui && npm run build` | 0 | Vite transformed 1,641 modules and completed production build |
+| `cd web/react-gui && node -e "<build locale restart-key check>"` | 0 | `build/locales/en/common.json restart keys OK: gateway_identity_change, chirpstack_bootstrap, account_link, account_unlink, generic, in_progress` |
+
+The GUI build repeated the existing stale browser-data notices and large-chunk warning. No GUI gate failed.
+
+### PR A scope audit
+
+| Check | Exit | Observed output/pass signal |
+|---|---:|---|
+| Added maintained-flow hunks contain no `child_process`, `global.get('cp')`, or bare `require(` | 0 | No output |
+| JSON-aware comparison for protected flow surface | 0 | Both maintained profiles printed `forbidden-scope bodies/routes unchanged`; `sync-init-fn`, the `/api/system/reboot` route, and `runGatewayMigrationPreflight` bodies match base |
+| `sys-stats-fn` private restart-field scan | 0 | `sys-stats-fn private restart fields absent in both maintained profiles` |
+| `git diff --check` before editing this report | 0 | No output |
+
+No live gateway was contacted for Task 7. Task 8 remains blocked until the operator explicitly confirms `192.168.8.180` is still a disposable bench Pi and authorizes live checks for this turn.
