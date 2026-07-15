@@ -28,5 +28,25 @@
     "seeding": "Seeding",
     "harvest": "Harvest",
     "general_observation": "Observation"
-  }
+  },
+  "timeline": {
+    "empty": "No activities logged yet.",
+    "loading": "Loading activities…"
+  },
+  "unavailable": {
+    "title": "Journal not available",
+    "body": "This gateway does not yet have the field journal. Update the gateway firmware to enable it."
+  },
+  "error": {
+    "title": "Could not load the journal",
+    "body": "The gateway did not answer successfully. Try again.",
+    "retry": "Try again"
+  },
+  "filters": {
+    "plot": "Plot",
+    "allPlots": "All plots",
+    "activity": "Activity",
+    "allActivities": "All activities"
+  },
+  "logActivity": "Log activity"
 }
