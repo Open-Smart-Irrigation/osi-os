@@ -1,23 +1,46 @@
-import React from 'react';
+import React, { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { useAuth } from '../contexts/AuthContext';
-import { AppHeader } from '../components/AppHeader';
 
-/**
- * Journal top-level page. The full Slice 2 capture flow and desktop three-pane
- * workspace are in design (docs/design/agrolink-journal-ux.md); this is the
- * aligned landing surface — same crown, glass chrome, and Journal tab active —
- * so the navigation is real while the entry UI is built.
- */
+import { AppHeader } from '../components/AppHeader';
+import { JournalTimeline } from '../components/journal/JournalTimeline';
+import { useAuth } from '../contexts/AuthContext';
+import { useJournalCatalog } from '../journal/useJournalCatalog';
+import { useJournalEntries } from '../journal/useJournalEntries';
+import { useJournalPlots } from '../journal/useJournalPlots';
+import type { EntryListFilters } from '../types/journal';
+
 export const JournalPage: React.FC = () => {
   const { t } = useTranslation('journal');
   const { username, logout } = useAuth();
+  const [plotUuid, setPlotUuid] = useState('');
+  const [activityCode, setActivityCode] = useState('');
+  const catalogState = useJournalCatalog();
+  const filters = useMemo<EntryListFilters>(() => ({
+    status: 'final',
+    limit: 50,
+    ...(plotUuid ? { plot_uuid: plotUuid } : {}),
+    ...(activityCode ? { activity_code: activityCode } : {}),
+  }), [activityCode, plotUuid]);
+  const entryState = useJournalEntries(filters, catalogState.available);
+  const plotState = useJournalPlots(catalogState.available);
+  const readError = entryState.error || plotState.error;
+  const activities = (catalogState.catalog?.vocab ?? [])
+    .filter((row) => row.kind === 'activity' && row.active === 1);
 
-  const cards = [
-    { k: 'capture', title: t('comingSoon.captureTitle'), body: t('comingSoon.captureBody') },
-    { k: 'record', title: t('comingSoon.recordTitle'), body: t('comingSoon.recordBody') },
-    { k: 'sync', title: t('comingSoon.syncTitle'), body: t('comingSoon.syncBody') },
-  ];
+  const retryReads = () => Promise.all([entryState.retry(), plotState.retry()]);
+  const errorCard = (retry: () => Promise<unknown>) => (
+    <div className="rounded-2xl border border-[var(--border)] bg-[var(--card)] p-8">
+      <h2 className="text-xl font-bold text-[var(--text)]">{t('error.title')}</h2>
+      <p className="mt-2 text-[var(--text-secondary)]">{t('error.body')}</p>
+      <button
+        type="button"
+        className="btn-liquid mt-4 rounded-lg px-4 py-2"
+        onClick={() => void retry()}
+      >
+        {t('error.retry')}
+      </button>
+    </div>
+  );
 
   return (
     <div className="min-h-screen bg-[var(--bg)]">
@@ -28,23 +51,72 @@ export const JournalPage: React.FC = () => {
         onLogout={logout}
       />
 
-      <main className="mx-auto max-w-3xl px-4 py-10">
-        <div className="rounded-2xl border border-[var(--border)] bg-[var(--card)] p-8 shadow-sm">
-          <span className="inline-flex items-center gap-2 rounded-full bg-[var(--warn-bg)] px-3 py-1 text-xs font-bold uppercase tracking-widest text-[var(--warn-text)]">
-            {t('comingSoon.badge')}
-          </span>
-          <h2 className="mt-4 text-2xl font-bold text-[var(--text)]">{t('comingSoon.heading')}</h2>
-          <p className="mt-3 max-w-prose text-[var(--text-secondary)]">{t('comingSoon.body')}</p>
-
-          <div className="mt-8 grid gap-4 sm:grid-cols-3">
-            {cards.map((c) => (
-              <div key={c.k} className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-4">
-                <h3 className="text-sm font-bold text-[var(--text)]">{c.title}</h3>
-                <p className="mt-1.5 text-sm text-[var(--text-secondary)]">{c.body}</p>
-              </div>
-            ))}
+      <main className="mx-auto max-w-3xl px-4 py-8">
+        {catalogState.loading ? (
+          <p className="text-[var(--text-secondary)]">{t('timeline.loading')}</p>
+        ) : catalogState.unavailable ? (
+          <div className="rounded-2xl border border-[var(--border)] bg-[var(--card)] p-8">
+            <h2 className="text-xl font-bold text-[var(--text)]">
+              {t('unavailable.title')}
+            </h2>
+            <p className="mt-2 text-[var(--text-secondary)]">{t('unavailable.body')}</p>
           </div>
-        </div>
+        ) : catalogState.error ? (
+          errorCard(catalogState.retry)
+        ) : (
+          <>
+            <div className="mb-4 flex flex-wrap items-end gap-3">
+              <label className="min-w-40 flex-1 text-sm text-[var(--text-secondary)]">
+                {t('filters.plot')}
+                <select
+                  aria-label={t('filters.plot')}
+                  className="mt-1 w-full rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-[var(--text)]"
+                  value={plotUuid}
+                  onChange={(event) => setPlotUuid(event.target.value)}
+                >
+                  <option value="">{t('filters.allPlots')}</option>
+                  {plotState.plots.map((plot) => (
+                    <option key={plot.plot_uuid} value={plot.plot_uuid}>
+                      {plot.name?.trim() || plot.plot_code}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <label className="min-w-40 flex-1 text-sm text-[var(--text-secondary)]">
+                {t('filters.activity')}
+                <select
+                  aria-label={t('filters.activity')}
+                  className="mt-1 w-full rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-[var(--text)]"
+                  value={activityCode}
+                  onChange={(event) => setActivityCode(event.target.value)}
+                >
+                  <option value="">{t('filters.allActivities')}</option>
+                  {activities.map((activity) => (
+                    <option key={activity.code} value={activity.code}>
+                      {t(`activity.${activity.code}`, activity.code)}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <button
+                type="button"
+                className="btn-liquid rounded-lg px-5 py-2.5 font-bold"
+              >
+                {t('logActivity')}
+              </button>
+            </div>
+
+            {readError ? errorCard(retryReads) : (
+              <JournalTimeline
+                entries={entryState.entries}
+                plots={plotState.plots}
+                loading={entryState.loading || plotState.loading}
+              />
+            )}
+          </>
+        )}
       </main>
     </div>
   );
