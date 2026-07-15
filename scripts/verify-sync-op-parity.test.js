@@ -7,7 +7,12 @@ const os = require('node:os');
 const path = require('node:path');
 const { execFileSync, spawnSync } = require('node:child_process');
 
-const { checkSyncOpParity, extractFlowOps, extractServerOps } = require('./verify-sync-op-parity');
+const {
+  checkSyncOpParity,
+  extractFlowOps,
+  extractServerOps,
+  resolveDefaultServerSource,
+} = require('./verify-sync-op-parity');
 
 const ROOT = path.resolve(__dirname, '..');
 const SERVER_RELATIVE_SOURCE = path.join('backend', 'src', 'main', 'java', 'org', 'osi', 'server', 'sync', 'EdgeSyncService.java');
@@ -17,6 +22,8 @@ const SERVER_SOURCE_CANDIDATES = [
       ? process.env.OSI_SERVER_EDGE_SYNC_SERVICE
       : path.resolve(ROOT, process.env.OSI_SERVER_EDGE_SYNC_SERVICE))
     : null,
+  path.resolve(ROOT, '..', '..', '..', '..', 'osi-server', '.worktrees', path.basename(ROOT), SERVER_RELATIVE_SOURCE),
+  path.resolve(ROOT, '..', '..', '..', '..', 'osi-server', SERVER_RELATIVE_SOURCE),
   path.resolve(ROOT, '..', '..', '..', 'osi-server', '.worktrees', path.basename(ROOT), SERVER_RELATIVE_SOURCE),
   path.resolve(ROOT, '..', 'osi-server', SERVER_RELATIVE_SOURCE),
   path.resolve(ROOT, '..', '..', '..', 'osi-server', SERVER_RELATIVE_SOURCE),
@@ -29,10 +36,14 @@ function copyFixtureTree() {
   const schemaDir = path.join(tmp, 'docs/contracts/sync-schema');
   const flow2712Dir = path.join(tmp, 'conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share');
   const flow2709Dir = path.join(tmp, 'conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share');
+  const moduleDir = path.join(flow2712Dir, 'node-red/osi-journal');
+  const stagingDir = path.join(tmp, 'scripts/fixtures');
   const serverDir = path.join(tmp, 'server');
   fs.mkdirSync(schemaDir, { recursive: true });
   fs.mkdirSync(flow2712Dir, { recursive: true });
   fs.mkdirSync(flow2709Dir, { recursive: true });
+  fs.mkdirSync(moduleDir, { recursive: true });
+  fs.mkdirSync(stagingDir, { recursive: true });
   fs.mkdirSync(serverDir, { recursive: true });
 
   fs.copyFileSync(
@@ -62,6 +73,18 @@ function copyFixtureTree() {
       fs.copyFileSync(entryPath, path.join(serverDir, entry));
     }
   }
+  fs.copyFileSync(
+    path.join(ROOT, 'scripts/fixtures/sync-contract-staging.json'),
+    path.join(stagingDir, 'sync-contract-staging.json')
+  );
+  fs.copyFileSync(
+    path.join(ROOT, 'conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-journal/lifecycle.js'),
+    path.join(moduleDir, 'lifecycle.js')
+  );
+  fs.copyFileSync(
+    path.join(ROOT, 'conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-journal/api.js'),
+    path.join(moduleDir, 'api.js')
+  );
   return tmp;
 }
 
@@ -70,6 +93,120 @@ function writeServerFixture(source) {
   const fixture = path.join(tmp, 'EdgeSyncService.java');
   fs.writeFileSync(fixture, source);
   return fixture;
+}
+
+const JOURNAL_EVENT_OPS = [
+  'JOURNAL_ENTRY_UPSERTED',
+  'JOURNAL_ENTRY_VOIDED',
+  'JOURNAL_VOCAB_UPSERTED',
+  'JOURNAL_PLOT_UPSERTED',
+  'JOURNAL_PLOT_GROUP_UPSERTED',
+];
+
+function exactJournalStaging() {
+  return {
+    version: 1,
+    commands: {
+      edgeDeferred: [],
+      cloudDeferred: [
+        'UPSERT_JOURNAL_ENTRY',
+        'VOID_JOURNAL_ENTRY',
+        'UPSERT_JOURNAL_CUSTOM_VOCAB',
+        'UPSERT_JOURNAL_PLOT',
+        'UPSERT_JOURNAL_PLOT_GROUP',
+      ],
+    },
+    eventOps: {
+      edgeModuleOwned: [
+        'JOURNAL_ENTRY_UPSERTED',
+        'JOURNAL_ENTRY_VOIDED',
+        'JOURNAL_VOCAB_UPSERTED',
+        'JOURNAL_PLOT_UPSERTED',
+        'JOURNAL_PLOT_GROUP_UPSERTED',
+      ],
+      edgeDeferred: [],
+      cloudDeferred: JOURNAL_EVENT_OPS.slice(),
+    },
+  };
+}
+
+function createStagedParityFixture(overrides) {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'sync-op-staging-'));
+  const schemaPath = path.join(tmp, 'events.schema.json');
+  const flowPath = path.join(tmp, 'flows.json');
+  const moduleDir = path.join(
+    tmp,
+    'conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-journal'
+  );
+  const modulePath = path.join(moduleDir, 'lifecycle.js');
+  const apiModulePath = path.join(moduleDir, 'api.js');
+  const serverSource = path.join(tmp, 'EdgeSyncService.java');
+  fs.mkdirSync(moduleDir, { recursive: true });
+  fs.writeFileSync(schemaPath, JSON.stringify({
+    type: 'object',
+    properties: {
+      op: { enum: ['DEVICE_DATA_APPENDED'].concat(JOURNAL_EVENT_OPS) },
+      payload: {
+        type: 'object',
+        required: ['contract_version'],
+        properties: { contract_version: { type: 'integer', const: 1 } },
+      },
+    },
+  }));
+  fs.writeFileSync(flowPath, JSON.stringify([{
+    id: 'fixture',
+    name: 'Fixture sync insert',
+    type: 'function',
+    func: `
+msg.topic = "INSERT INTO sync_outbox(event_uuid, aggregate_type, aggregate_key, op, payload_json, sync_version, occurred_at) VALUES ('evt-1', 'DEVICE_DATA', 'dev-1', 'DEVICE_DATA_APPENDED', json_object('contract_version', 1), 1, '2026-07-05T00:00:00Z')";
+return msg;
+`,
+  }]));
+  fs.writeFileSync(modulePath, `
+async function emitJournalOutbox(tx, entryUuid, op) {
+  return tx.run(
+    'INSERT INTO sync_outbox (event_uuid,aggregate_type,aggregate_key,op,payload_json,sync_version,occurred_at) ' +
+      'VALUES (?, ?, ?, ?, ?, ?, ?)',
+    ['event-1', 'JOURNAL_ENTRY', entryUuid, op, '{}', 1, '2026-07-13T00:00:00.000Z']
+  );
+}
+async function emit(tx, entryUuid) {
+  await emitJournalOutbox(tx, entryUuid, 'JOURNAL_ENTRY_UPSERTED');
+  await emitJournalOutbox(tx, entryUuid, 'JOURNAL_ENTRY_VOIDED');
+}
+`);
+  fs.writeFileSync(apiModulePath, `
+async function emitResourceEvents(tx, aggregate) {
+  await emitJournalOutbox(tx, aggregate, 'JOURNAL_VOCAB_UPSERTED');
+  await emitJournalOutbox(tx, aggregate, 'JOURNAL_PLOT_UPSERTED');
+  await emitJournalOutbox(tx, aggregate, 'JOURNAL_PLOT_GROUP_UPSERTED');
+}
+`);
+  fs.writeFileSync(serverSource, `
+class EdgeSyncService {
+  private boolean applyEvent(String gatewayDeviceEui, SyncEventRecord event) {
+    switch (event.op()) {
+      case "DEVICE_DATA_APPENDED" -> { return true; }
+      default -> { return false; }
+    }
+  }
+}
+`);
+
+  return Object.assign({
+    root: tmp,
+    schemaPath,
+    serverSource,
+    flowSources: [{ name: 'fixture', path: flowPath }],
+    sqlSources: [],
+    databaseSources: [],
+    sqlOwnedEventOps: [],
+    moduleSources: [
+      { name: 'journal-lifecycle', path: modulePath },
+      { name: 'journal-api', path: apiModulePath },
+    ],
+    stagingManifest: exactJournalStaging(),
+  }, overrides || {});
 }
 
 function createSeedBlankDb() {
@@ -222,6 +359,439 @@ class EdgeSyncService {
   assert.deepEqual(result.ops, ['DEVICE_DATA_APPENDED', 'ZONE_CONFIG_UPSERTED', 'ZONE_UPSERTED']);
 });
 
+test('server extractor unions SyncEventApplier supportedOps implementations', () => {
+  const serverSource = writeServerFixture(`
+class EdgeSyncService {
+  private boolean applyEvent(String gatewayDeviceEui, SyncEventRecord event) {
+    switch (event.op()) {
+      case "DEVICE_DATA_APPENDED" -> { return true; }
+      default -> { return false; }
+    }
+  }
+}
+`);
+  fs.writeFileSync(path.join(path.dirname(serverSource), 'GatewayLocationApplier.java'), `
+class GatewayLocationApplier implements SyncEventApplier {
+  public Set<String> supportedOps() {
+    return Set.of("GATEWAY_LOCATION_UPSERTED");
+  }
+}
+`);
+
+  const result = extractServerOps(serverSource);
+
+  assert.deepEqual(result.errors, []);
+  assert.deepEqual(result.ops, ['DEVICE_DATA_APPENDED', 'GATEWAY_LOCATION_UPSERTED']);
+});
+
+test('default server lookup reaches a sibling repo from a nested worktree', () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'sync-op-sibling-'));
+  const nestedRoot = path.join(tmp, 'osi-os', '.claude', 'worktrees', 'feature');
+  const siblingSource = path.join(tmp, 'osi-server', SERVER_RELATIVE_SOURCE);
+  fs.mkdirSync(nestedRoot, { recursive: true });
+  fs.mkdirSync(path.dirname(siblingSource), { recursive: true });
+  fs.writeFileSync(siblingSource, 'class EdgeSyncService {}\n');
+  const previous = process.env.OSI_SERVER_EDGE_SYNC_SERVICE;
+  delete process.env.OSI_SERVER_EDGE_SYNC_SERVICE;
+  try {
+    assert.equal(resolveDefaultServerSource(nestedRoot), siblingSource);
+  } finally {
+    if (previous === undefined) {
+      delete process.env.OSI_SERVER_EDGE_SYNC_SERVICE;
+    } else {
+      process.env.OSI_SERVER_EDGE_SYNC_SERVICE = previous;
+    }
+  }
+});
+
+test('parity accepts only the exact staged journal ownership split', () => {
+  const result = checkSyncOpParity(createStagedParityFixture());
+
+  assert.equal(result.ok, true, result.message);
+});
+
+test('parity rejects arbitrary additions to the staged journal exemptions', () => {
+  const stagingManifest = exactJournalStaging();
+  stagingManifest.eventOps.cloudDeferred.push('JOURNAL_BOGUS_UPSERTED');
+
+  const result = checkSyncOpParity(createStagedParityFixture({ stagingManifest }));
+
+  assert.equal(result.ok, false);
+  assert.match(result.message, /staging.*cloudDeferred/i);
+  assert.match(result.message, /JOURNAL_BOGUS_UPSERTED/);
+});
+
+test('parity rejects an edge-module-owned op missing from the module source', () => {
+  const fixture = createStagedParityFixture();
+  fs.writeFileSync(fixture.moduleSources[0].path, `
+async function emit(tx, entryUuid) {
+  await emitJournalOutbox(tx, entryUuid, 'JOURNAL_ENTRY_UPSERTED');
+  // 'JOURNAL_ENTRY_VOIDED' is named here but is not emitted.
+}
+`);
+
+  const result = checkSyncOpParity(fixture);
+
+  assert.equal(result.ok, false);
+  assert.match(result.message, /edgeModuleOwned.*JOURNAL_ENTRY_VOIDED/i);
+});
+
+test('parity does not count an unused journal operation constant as an emitter', () => {
+  const fixture = createStagedParityFixture();
+  fs.writeFileSync(fixture.moduleSources[1].path, `
+const NEVER_EMITTED = 'JOURNAL_VOCAB_UPSERTED';
+async function emitResourceEvents(tx, aggregate) {
+  await emitJournalOutbox(tx, aggregate, 'JOURNAL_PLOT_UPSERTED');
+  await emitJournalOutbox(tx, aggregate, 'JOURNAL_PLOT_GROUP_UPSERTED');
+}
+`);
+
+  const result = checkSyncOpParity(fixture);
+
+  assert.equal(result.ok, false);
+  assert.match(result.message, /edgeModuleOwned missing.*JOURNAL_VOCAB_UPSERTED/i);
+});
+
+test('parity rejects a misleading outbox-named call as unaudited', () => {
+  const fixture = createStagedParityFixture();
+  fs.writeFileSync(fixture.moduleSources[1].path, `
+async function emitResourceEvents(tx, aggregate) {
+  fakeOutboxMetric('JOURNAL_VOCAB_UPSERTED');
+  await emitJournalOutbox(tx, aggregate, 'JOURNAL_PLOT_UPSERTED');
+  await emitJournalOutbox(tx, aggregate, 'JOURNAL_PLOT_GROUP_UPSERTED');
+}
+`);
+
+  const result = checkSyncOpParity(fixture);
+
+  assert.equal(result.ok, false);
+  assert.match(result.message, /fakeOutboxMetric.*unaudited|unaudited.*fakeOutboxMetric/i);
+  assert.match(result.message, /edgeModuleOwned missing.*JOURNAL_VOCAB_UPSERTED/i);
+});
+
+test('parity rejects a misleading outbox-named call nested inside the audited call', () => {
+  const fixture = createStagedParityFixture();
+  fs.appendFileSync(fixture.moduleSources[1].path, `
+async function publishNestedMetric(tx, aggregate) {
+  return emitJournalOutbox(
+    tx,
+    fakeOutboxMetric(aggregate),
+    'JOURNAL_ENTRY_UPSERTED'
+  );
+}
+`);
+
+  const result = checkSyncOpParity(fixture);
+
+  assert.equal(result.ok, false);
+  assert.match(result.message, /fakeOutboxMetric.*unaudited|unaudited.*fakeOutboxMetric/i);
+});
+
+test('parity rejects an outbox-named call inside a template interpolation', () => {
+  const fixture = createStagedParityFixture();
+  fs.appendFileSync(fixture.moduleSources[1].path, `
+async function publishTemplateMetric(tx, aggregate) {
+  return emitJournalOutbox(
+    tx,
+    \`\${fakeOutboxMetric(aggregate)}\`,
+    'JOURNAL_VOCAB_UPSERTED'
+  );
+}
+`);
+
+  const result = checkSyncOpParity(fixture);
+
+  assert.equal(result.ok, false);
+  assert.match(result.message, /fakeOutboxMetric.*unaudited|unaudited.*fakeOutboxMetric/i);
+});
+
+test('parity scans outbox-named calls through nested template interpolations', () => {
+  const fixture = createStagedParityFixture();
+  fs.appendFileSync(fixture.moduleSources[1].path, `
+async function publishNestedTemplateMetric(tx, aggregate) {
+  const label = \`\${formatMetric({
+    nested: \`\${fakeOutboxMetric(aggregate)}\`,
+  })}\`;
+  return emitJournalOutbox(tx, label, 'JOURNAL_VOCAB_UPSERTED');
+}
+`);
+
+  const result = checkSyncOpParity(fixture);
+
+  assert.equal(result.ok, false);
+  assert.match(result.message, /fakeOutboxMetric.*unaudited|unaudited.*fakeOutboxMetric/i);
+});
+
+test('parity masks template text while scanning benign nested interpolations', () => {
+  const fixture = createStagedParityFixture();
+  fs.appendFileSync(fixture.moduleSources[1].path, `
+async function publishBenignTemplate(tx, aggregate) {
+  const label = \`fakeOutboxMetric(aggregate): \${formatMetric({
+    value: aggregate.value,
+    note: 'fakeOutboxMetric(aggregate)',
+    nested: \`\${aggregate.name}\`,
+  })}\`;
+  return emitJournalOutbox(tx, label, 'JOURNAL_ENTRY_UPSERTED');
+}
+`);
+
+  const result = checkSyncOpParity(fixture);
+
+  assert.equal(result.ok, true, result.message);
+});
+
+test('parity rejects a journal operation literal in the wrong argument position', () => {
+  const fixture = createStagedParityFixture();
+  fs.appendFileSync(fixture.moduleSources[1].path, `
+async function publishWrongPosition(tx, aggregate) {
+  return emitJournalOutbox('JOURNAL_ENTRY_UPSERTED', aggregate, tx);
+}
+`);
+
+  const result = checkSyncOpParity(fixture);
+
+  assert.equal(result.ok, false);
+  assert.match(result.message, /emitJournalOutbox.*third argument.*static JOURNAL/i);
+});
+
+test('parity rejects an audited emitter call with more than three arguments', () => {
+  const fixture = createStagedParityFixture();
+  fs.appendFileSync(fixture.moduleSources[1].path, `
+async function publishExtraArgument(tx, aggregate) {
+  return emitJournalOutbox(tx, aggregate, 'JOURNAL_ENTRY_UPSERTED', 'extra');
+}
+`);
+
+  const result = checkSyncOpParity(fixture);
+
+  assert.equal(result.ok, false);
+  assert.match(result.message, /emitJournalOutbox.*exactly three arguments/i);
+});
+
+test('parity discovers a resource emitter in a second production module', () => {
+  const fixture = createStagedParityFixture();
+  fs.unlinkSync(fixture.moduleSources[1].path);
+  fs.writeFileSync(path.join(path.dirname(fixture.moduleSources[0].path), 'vocab.js'), `
+async function publishVocab(tx, payload) {
+  return publishAnything(tx, { operation: 'JOURNAL_VOCAB_UPSERTED', payload });
+}
+`);
+  delete fixture.moduleSources;
+
+  const result = checkSyncOpParity(fixture);
+
+  assert.equal(result.ok, false);
+  assert.match(result.message, /JOURNAL_VOCAB_UPSERTED/);
+  assert.match(result.message, /edgeModuleOwned missing/);
+});
+
+test('parity ignores journal operation names found only in module comments', () => {
+  const fixture = createStagedParityFixture();
+  fs.writeFileSync(path.join(path.dirname(fixture.moduleSources[0].path), 'comment-only.js'), `
+// publishAnything(tx, { operation: 'JOURNAL_VOCAB_UPSERTED' });
+/* 'JOURNAL_PLOT_UPSERTED' was considered but is not emitted. */
+// tx.run('INSERT INTO sync_outbox (event_uuid,op) VALUES (?,?)', [eventUuid, op]);
+module.exports = {};
+`);
+  delete fixture.moduleSources;
+
+  const result = checkSyncOpParity(fixture);
+
+  assert.equal(result.ok, true, result.message);
+});
+
+test('parity excludes journal test modules from production discovery', () => {
+  const fixture = createStagedParityFixture();
+  fs.writeFileSync(path.join(path.dirname(fixture.moduleSources[0].path), 'deferred.test.js'), `
+test('future vocabulary producer', () => publishAnything('JOURNAL_VOCAB_UPSERTED'));
+test('future direct producer', () => tx.run('INSERT INTO sync_outbox (event_uuid,op) VALUES (?,?)'));
+`);
+  delete fixture.moduleSources;
+
+  const result = checkSyncOpParity(fixture);
+
+  assert.equal(result.ok, true, result.message);
+});
+
+test('parity fails closed on a dynamic journal outbox operation site', () => {
+  const fixture = createStagedParityFixture();
+  fs.writeFileSync(path.join(path.dirname(fixture.moduleSources[0].path), 'dynamic.js'), `
+async function publishDynamic(tx, entryUuid, op) {
+  return emitJournalOutbox(tx, 'JOURNAL_ENTRY_UPSERTED', op);
+}
+`);
+  delete fixture.moduleSources;
+
+  const result = checkSyncOpParity(fixture);
+
+  assert.equal(result.ok, false);
+  assert.match(result.message, /emitJournalOutbox.*third argument.*static JOURNAL/i);
+});
+
+test('parity accepts a static journal operation after a nested object source', () => {
+  const fixture = createStagedParityFixture();
+  fs.writeFileSync(fixture.moduleSources[1].path, `
+async function emitResourceEvents(tx, aggregate) {
+  await emitJournalOutbox(tx, {
+    aggregate,
+    metadata: { source: 'fixture,with,commas', values: [1, 2, 3] },
+  }, 'JOURNAL_VOCAB_UPSERTED');
+  await emitJournalOutbox(tx, aggregate, 'JOURNAL_PLOT_UPSERTED');
+  await emitJournalOutbox(tx, aggregate, 'JOURNAL_PLOT_GROUP_UPSERTED');
+}
+`);
+
+  const result = checkSyncOpParity(fixture);
+
+  assert.equal(result.ok, true, result.message);
+});
+
+test('parity accepts the audited lifecycle SQL emitter with literal operation call sites', () => {
+  const fixture = createStagedParityFixture();
+  fs.writeFileSync(fixture.moduleSources[0].path, `
+async function emitJournalOutbox(tx, entryUuid, op) {
+  return tx.run(
+    'INSERT INTO sync_outbox (event_uuid,aggregate_type,aggregate_key,op,payload_json,sync_version,occurred_at) ' +
+      'VALUES (?, ?, ?, ?, ?, ?, ?)',
+    ['event-1', 'JOURNAL_ENTRY', entryUuid, op, '{}', 1, '2026-07-13T00:00:00.000Z']
+  );
+}
+async function emitEntryEvents(tx, entryUuid) {
+  await emitJournalOutbox(tx, entryUuid, 'JOURNAL_ENTRY_UPSERTED');
+  await emitJournalOutbox(tx, entryUuid, 'JOURNAL_ENTRY_VOIDED');
+}
+`);
+  delete fixture.moduleSources;
+
+  const result = checkSyncOpParity(fixture);
+
+  assert.equal(result.ok, true, result.message);
+});
+
+test('parity rejects lifecycle operation literals without the audited emitter insert', () => {
+  const fixture = createStagedParityFixture();
+  fs.writeFileSync(fixture.moduleSources[0].path, `
+async function publishEntryEvents(tx, entryUuid) {
+  await publishAnything(tx, entryUuid, 'JOURNAL_ENTRY_UPSERTED');
+  await publishAnything(tx, entryUuid, 'JOURNAL_ENTRY_VOIDED');
+}
+`);
+
+  const result = checkSyncOpParity(fixture);
+
+  assert.equal(result.ok, false);
+  assert.match(result.message, /emitJournalOutbox.*exactly one audited sync_outbox insert.*found 0/i);
+});
+
+test('parity rejects a dynamically constructed insert in the audited lifecycle emitter', () => {
+  const fixture = createStagedParityFixture();
+  fs.writeFileSync(fixture.moduleSources[0].path, `
+async function emitJournalOutbox(tx, entryUuid, op) {
+  const table = 'sync_' + 'outbox';
+  return tx.run(
+    'INSERT INTO ' + table + ' (event_uuid,aggregate_key,op) VALUES (?, ?, ?)',
+    ['event-1', entryUuid, op]
+  );
+}
+async function emitEntryEvents(tx, entryUuid) {
+  await emitJournalOutbox(tx, entryUuid, 'JOURNAL_ENTRY_UPSERTED');
+  await emitJournalOutbox(tx, entryUuid, 'JOURNAL_ENTRY_VOIDED');
+}
+`);
+
+  const result = checkSyncOpParity(fixture);
+
+  assert.equal(result.ok, false);
+  assert.match(result.message, /emitJournalOutbox.*exactly one audited sync_outbox insert.*found 0/i);
+});
+
+test('parity fails closed on direct sync_outbox SQL with a dynamic operation', () => {
+  const fixture = createStagedParityFixture();
+  fs.writeFileSync(path.join(path.dirname(fixture.moduleSources[0].path), 'direct-dynamic.js'), `
+async function publishDirect(tx, eventUuid, aggregateKey, op, payload) {
+  return tx.run(
+    'INSERT INTO sync_outbox (event_uuid,aggregate_type,aggregate_key,op,payload_json,sync_version,occurred_at) ' +
+      'VALUES (?, ?, ?, ?, ?, ?, ?)',
+    [eventUuid, 'JOURNAL_ENTRY', aggregateKey, op, JSON.stringify(payload), payload.sync_version, payload.updated_at]
+  );
+}
+`);
+  delete fixture.moduleSources;
+
+  const result = checkSyncOpParity(fixture);
+
+  assert.equal(result.ok, false);
+  assert.match(result.message, /direct.*sync_outbox|sync_outbox.*literal/i);
+});
+
+test('parity rejects static direct sync_outbox SQL outside the audited emitter', () => {
+  const fixture = createStagedParityFixture();
+  fs.writeFileSync(path.join(path.dirname(fixture.moduleSources[0].path), 'direct-static.js'), `
+async function publishDirect(tx, payload) {
+  return tx.run(
+    "INSERT INTO sync_outbox (event_uuid,aggregate_type,aggregate_key,op,payload_json,sync_version,occurred_at) " +
+      "VALUES ('event-1','JOURNAL_VOCAB','field-1','JOURNAL_VOCAB_UPSERTED','{}',1,'2026-07-13T00:00:00.000Z')"
+  );
+}
+`);
+  delete fixture.moduleSources;
+
+  const result = checkSyncOpParity(fixture);
+
+  assert.equal(result.ok, false);
+  assert.match(result.message, /direct.*sync_outbox.*audited|sync_outbox.*forbidden/i);
+  assert.match(result.message, /JOURNAL_VOCAB_UPSERTED/);
+});
+
+test('parity fails closed on an unparseable direct sync_outbox insert', () => {
+  const fixture = createStagedParityFixture();
+  fs.writeFileSync(path.join(path.dirname(fixture.moduleSources[0].path), 'direct-broken.js'), `
+async function publishBroken(tx, eventUuid, op) {
+  return tx.run('INSERT INTO sync_outbox (event_uuid,op VALUES (?,?)', [eventUuid, op]);
+}
+`);
+  delete fixture.moduleSources;
+
+  const result = checkSyncOpParity(fixture);
+
+  assert.equal(result.ok, false);
+  assert.match(result.message, /direct.*sync_outbox|sync_outbox.*forbidden/i);
+});
+
+test('parity fails closed on an unparseable journal outbox call', () => {
+  const fixture = createStagedParityFixture();
+  fs.writeFileSync(path.join(path.dirname(fixture.moduleSources[0].path), 'broken.js'), `
+async function publishBroken(tx, entryUuid) {
+  return emitJournalOutbox(tx, entryUuid, 'JOURNAL_ENTRY_UPSERTED';
+}
+`);
+  delete fixture.moduleSources;
+
+  const result = checkSyncOpParity(fixture);
+
+  assert.equal(result.ok, false);
+  assert.match(result.message, /unparseable outbox call|missing closing parenthesis/i);
+});
+
+test('parity rejects cloud-deferred journal ops implemented by the server early', () => {
+  const fixture = createStagedParityFixture();
+  fs.writeFileSync(fixture.serverSource, `
+class EdgeSyncService {
+  private boolean applyEvent(String gatewayDeviceEui, SyncEventRecord event) {
+    switch (event.op()) {
+      case "DEVICE_DATA_APPENDED", "JOURNAL_ENTRY_UPSERTED" -> { return true; }
+      default -> { return false; }
+    }
+  }
+}
+`);
+
+  const result = checkSyncOpParity(fixture);
+
+  assert.equal(result.ok, false);
+  assert.match(result.message, /server.*JOURNAL_ENTRY_UPSERTED/);
+});
+
 test('parity check reports runtime dispatch switch missing an op even if an allow list includes it', () => {
   const fixtureRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'sync-op-parity-'));
   const schemaPath = path.join(fixtureRoot, 'events.schema.json');
@@ -280,6 +850,7 @@ return msg;
     flowSources: [{ name: 'fixture', path: 'flows.json' }],
     sqlSources: [],
     databaseSources: [],
+    stagingManifest: false,
   });
 
   assert.equal(result.ok, false);

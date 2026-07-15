@@ -7,6 +7,33 @@ const { execFileSync } = require('node:child_process');
 
 const REPO_ROOT = path.resolve(__dirname, '..');
 const SERVER_RELATIVE_SOURCE = path.join('backend', 'src', 'main', 'java', 'org', 'osi', 'server', 'sync', 'EdgeSyncService.java');
+const STAGING_MANIFEST_RELATIVE = 'scripts/fixtures/sync-contract-staging.json';
+const JOURNAL_MODULE_DIRECTORY =
+  'conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-journal';
+const AUDITED_JOURNAL_OUTBOX_EMITTER = {
+  file: 'lifecycle.js',
+  functionName: 'emitJournalOutbox',
+};
+const EXACT_STAGED_COMMANDS = [
+  'UPSERT_JOURNAL_ENTRY',
+  'VOID_JOURNAL_ENTRY',
+  'UPSERT_JOURNAL_CUSTOM_VOCAB',
+  'UPSERT_JOURNAL_PLOT',
+  'UPSERT_JOURNAL_PLOT_GROUP',
+];
+const EXACT_EDGE_DEFERRED_COMMANDS = [];
+const EXACT_EDGE_MODULE_OPS = [
+  'JOURNAL_ENTRY_UPSERTED',
+  'JOURNAL_ENTRY_VOIDED',
+  'JOURNAL_VOCAB_UPSERTED',
+  'JOURNAL_PLOT_UPSERTED',
+  'JOURNAL_PLOT_GROUP_UPSERTED',
+];
+const EXACT_EDGE_DEFERRED_OPS = [];
+const EXACT_JOURNAL_EVENT_OPS = [
+  ...EXACT_EDGE_MODULE_OPS,
+  ...EXACT_EDGE_DEFERRED_OPS,
+];
 const FLOW_SOURCES = [
   {
     name: 'bcm2712',
@@ -70,6 +97,8 @@ function uniquePaths(paths) {
 function fallbackServerSourceCandidates(root = REPO_ROOT) {
   const worktreeName = path.basename(root);
   return uniquePaths([
+    path.resolve(root, '..', '..', '..', '..', 'osi-server', '.worktrees', worktreeName, SERVER_RELATIVE_SOURCE),
+    path.resolve(root, '..', '..', '..', '..', 'osi-server', SERVER_RELATIVE_SOURCE),
     path.resolve(root, '..', '..', '..', 'osi-server', '.worktrees', worktreeName, SERVER_RELATIVE_SOURCE),
     path.resolve(root, '..', 'osi-server', SERVER_RELATIVE_SOURCE),
     path.resolve(root, '..', '..', '..', 'osi-server', SERVER_RELATIVE_SOURCE),
@@ -656,6 +685,449 @@ function extractSchemaOps(schemaPath) {
   return { ops: [...new Set(ops)].sort(), errors };
 }
 
+function sortedUnique(values) {
+  return [...new Set(values)].sort();
+}
+
+function sameKeys(actual, expected) {
+  return Array.isArray(actual) &&
+    actual.length === expected.length &&
+    actual.every((value, index) => value === expected[index]);
+}
+
+function validateStagingManifest(manifest) {
+  const errors = [];
+  if (!manifest || typeof manifest !== 'object' || Array.isArray(manifest)) {
+    return ['staging manifest must be an object'];
+  }
+  const rootKeys = Object.keys(manifest).sort();
+  if (!sameKeys(rootKeys, ['commands', 'eventOps', 'version'])) {
+    errors.push(`staging root keys must be commands,eventOps,version; got ${rootKeys.join(',') || '(none)'}`);
+  }
+  if (manifest.version !== 1) errors.push(`staging version must be 1; got ${String(manifest.version)}`);
+
+  const commands = manifest.commands;
+  const commandKeys = commands && typeof commands === 'object' && !Array.isArray(commands)
+    ? Object.keys(commands).sort()
+    : [];
+  if (!sameKeys(commandKeys, ['cloudDeferred', 'edgeDeferred'])) {
+    errors.push(`staging commands keys must be cloudDeferred,edgeDeferred; got ${commandKeys.join(',') || '(none)'}`);
+  }
+
+  const eventOps = manifest.eventOps;
+  const eventKeys = eventOps && typeof eventOps === 'object' && !Array.isArray(eventOps)
+    ? Object.keys(eventOps).sort()
+    : [];
+  if (!sameKeys(eventKeys, ['cloudDeferred', 'edgeDeferred', 'edgeModuleOwned'])) {
+    errors.push(`staging eventOps keys must be cloudDeferred,edgeDeferred,edgeModuleOwned; got ${eventKeys.join(',') || '(none)'}`);
+  }
+
+  const checks = [
+    ['commands.edgeDeferred', commands && commands.edgeDeferred, EXACT_EDGE_DEFERRED_COMMANDS],
+    ['commands.cloudDeferred', commands && commands.cloudDeferred, EXACT_STAGED_COMMANDS],
+    ['eventOps.edgeModuleOwned', eventOps && eventOps.edgeModuleOwned, EXACT_EDGE_MODULE_OPS],
+    ['eventOps.edgeDeferred', eventOps && eventOps.edgeDeferred, EXACT_EDGE_DEFERRED_OPS],
+    ['eventOps.cloudDeferred', eventOps && eventOps.cloudDeferred, EXACT_JOURNAL_EVENT_OPS],
+  ];
+  for (const [name, actual, expected] of checks) {
+    if (!Array.isArray(actual)) {
+      errors.push(`staging ${name} must be an array`);
+      continue;
+    }
+    const diff = diffSets(expected, actual);
+    const duplicates = actual.filter((value, index) => actual.indexOf(value) !== index);
+    if (diff.missing.length || diff.extra.length || duplicates.length) {
+      const details = [];
+      if (diff.missing.length) details.push(`missing ${diff.missing.join(', ')}`);
+      if (diff.extra.length) details.push(`extra ${diff.extra.join(', ')}`);
+      if (duplicates.length) details.push(`duplicates ${sortedUnique(duplicates).join(', ')}`);
+      errors.push(`staging ${name} must be the exact closed set: ${details.join('; ')}`);
+    }
+  }
+
+  if (eventOps && Array.isArray(eventOps.edgeModuleOwned) && Array.isArray(eventOps.edgeDeferred)) {
+    const edgeUnion = sortedUnique(eventOps.edgeModuleOwned.concat(eventOps.edgeDeferred));
+    const edgeDiff = diffSets(sortedUnique(EXACT_JOURNAL_EVENT_OPS), edgeUnion);
+    if (edgeDiff.missing.length || edgeDiff.extra.length) {
+      errors.push('staging edgeModuleOwned union edgeDeferred must equal the exact journal event-op set');
+    }
+  }
+  return errors;
+}
+
+function loadStagingManifest(manifestPath) {
+  if (!fs.existsSync(manifestPath)) {
+    return { manifest: null, errors: [`staging manifest not found at ${manifestPath}`] };
+  }
+  try {
+    const manifest = JSON.parse(readUtf8(manifestPath));
+    return { manifest, errors: validateStagingManifest(manifest) };
+  } catch (error) {
+    return { manifest: null, errors: [`unable to parse staging manifest at ${manifestPath}: ${error.message}`] };
+  }
+}
+
+function discoverJournalModuleSources(root) {
+  const directory = path.join(root, JOURNAL_MODULE_DIRECTORY);
+  let entries;
+  try {
+    entries = fs.readdirSync(directory, { withFileTypes: true });
+  } catch (error) {
+    return {
+      sources: [],
+      errors: [`unable to list production journal modules in ${directory}: ${error.message}`],
+    };
+  }
+  const sources = entries
+    .filter((entry) => entry.isFile() && entry.name.endsWith('.js') && !entry.name.endsWith('.test.js'))
+    .sort((left, right) => left.name.localeCompare(right.name))
+    .map((entry) => ({
+      name: entry.name.slice(0, -'.js'.length),
+      path: path.join(directory, entry.name),
+    }));
+  if (sources.length === 0) {
+    return { sources, errors: [`no production journal modules found in ${directory}`] };
+  }
+  return { sources, errors: [] };
+}
+
+function transformJavaScriptLexical(source, maskStrings) {
+  const output = source.split('');
+  const maskAt = (index) => {
+    if (source[index] !== '\n' && source[index] !== '\r') output[index] = ' ';
+  };
+
+  const scanQuoted = (start, quote) => {
+    let index = start;
+    if (maskStrings) maskAt(index);
+    index += 1;
+    while (index < source.length) {
+      const ch = source[index];
+      if (maskStrings) maskAt(index);
+      if (ch === '\\') {
+        if (index + 1 < source.length) {
+          if (maskStrings) maskAt(index + 1);
+          index += 2;
+        } else {
+          index += 1;
+        }
+      } else {
+        index += 1;
+        if (ch === quote) return index;
+      }
+    }
+    return index;
+  };
+
+  const scanLineComment = (start) => {
+    let index = start;
+    while (index < source.length && source[index] !== '\n' && source[index] !== '\r') {
+      maskAt(index);
+      index += 1;
+    }
+    return index;
+  };
+
+  const scanBlockComment = (start) => {
+    let index = start;
+    while (index < source.length) {
+      const ch = source[index];
+      const next = source[index + 1];
+      maskAt(index);
+      if (ch === '*' && next === '/') {
+        if (index + 1 < source.length) maskAt(index + 1);
+        return index + 2;
+      }
+      index += 1;
+    }
+    return index;
+  };
+
+  let scanCode;
+  const scanTemplate = (start) => {
+    let index = start;
+    if (maskStrings) maskAt(index);
+    index += 1;
+    while (index < source.length) {
+      const ch = source[index];
+      const next = source[index + 1];
+      if (ch === '\\') {
+        if (maskStrings) {
+          maskAt(index);
+          if (index + 1 < source.length) maskAt(index + 1);
+        }
+        index += index + 1 < source.length ? 2 : 1;
+      } else if (ch === '`') {
+        if (maskStrings) maskAt(index);
+        return index + 1;
+      } else if (ch === '$' && next === '{') {
+        index = scanCode(index + 2, true);
+      } else {
+        if (maskStrings) maskAt(index);
+        index += 1;
+      }
+    }
+    return index;
+  };
+
+  scanCode = (start, stopAtInterpolationEnd) => {
+    let index = start;
+    let braceDepth = 0;
+    while (index < source.length) {
+      const ch = source[index];
+      const next = source[index + 1];
+      if (ch === "'" || ch === '"') {
+        index = scanQuoted(index, ch);
+      } else if (ch === '`') {
+        index = scanTemplate(index);
+      } else if (ch === '/' && next === '/') {
+        index = scanLineComment(index);
+      } else if (ch === '/' && next === '*') {
+        index = scanBlockComment(index);
+      } else if (stopAtInterpolationEnd && ch === '{') {
+        braceDepth += 1;
+        index += 1;
+      } else if (stopAtInterpolationEnd && ch === '}') {
+        index += 1;
+        if (braceDepth === 0) return index;
+        braceDepth -= 1;
+      } else {
+        index += 1;
+      }
+    }
+    return index;
+  };
+
+  scanCode(0, false);
+  return output.join('');
+}
+
+function stripJavaScriptComments(source) {
+  return transformJavaScriptLexical(source, false);
+}
+
+function maskJavaScriptStrings(source) {
+  return transformJavaScriptLexical(source, true);
+}
+
+function findMatchingJavaScriptParen(maskedSource, openIndex) {
+  let depth = 0;
+  for (let index = openIndex; index < maskedSource.length; index += 1) {
+    if (maskedSource[index] === '(') depth += 1;
+    if (maskedSource[index] === ')') {
+      depth -= 1;
+      if (depth === 0) return index;
+    }
+  }
+  return -1;
+}
+
+function splitTopLevelJavaScriptArguments(source, maskedSource) {
+  if (source.length !== maskedSource.length) return null;
+  const parts = [];
+  let start = 0;
+  let parenDepth = 0;
+  let bracketDepth = 0;
+  let braceDepth = 0;
+  for (let index = 0; index < maskedSource.length; index += 1) {
+    const ch = maskedSource[index];
+    if (ch === '(') parenDepth += 1;
+    else if (ch === ')') parenDepth -= 1;
+    else if (ch === '[') bracketDepth += 1;
+    else if (ch === ']') bracketDepth -= 1;
+    else if (ch === '{') braceDepth += 1;
+    else if (ch === '}') braceDepth -= 1;
+    else if (ch === ',' && parenDepth === 0 && bracketDepth === 0 && braceDepth === 0) {
+      parts.push(source.slice(start, index).trim());
+      start = index + 1;
+    }
+    if (parenDepth < 0 || bracketDepth < 0 || braceDepth < 0) return null;
+  }
+  if (parenDepth !== 0 || bracketDepth !== 0 || braceDepth !== 0) return null;
+  parts.push(source.slice(start).trim());
+  return parts;
+}
+
+function findMatchingJavaScriptBrace(maskedSource, openIndex) {
+  let depth = 0;
+  for (let index = openIndex; index < maskedSource.length; index += 1) {
+    if (maskedSource[index] === '{') depth += 1;
+    if (maskedSource[index] === '}') {
+      depth -= 1;
+      if (depth === 0) return index;
+    }
+  }
+  return -1;
+}
+
+function isOutboxFunctionDefinition(maskedSource, calleeIndex, closeIndex) {
+  const prefix = maskedSource.slice(Math.max(0, calleeIndex - 80), calleeIndex);
+  if (/\bfunction\s*\*?\s*$/.test(prefix)) return true;
+  const suffix = maskedSource.slice(closeIndex + 1).trimStart();
+  return suffix.startsWith('=>') || suffix.startsWith('{');
+}
+
+function extractJavaScriptStringLiterals(source) {
+  const literals = [];
+  for (let index = 0; index < source.length; index += 1) {
+    const quote = source[index];
+    if (quote !== "'" && quote !== '"' && quote !== '`') continue;
+    const start = index;
+    let value = '';
+    let closed = false;
+    let dynamicTemplate = false;
+    for (index += 1; index < source.length; index += 1) {
+      const ch = source[index];
+      if (ch === '\\') {
+        value += ch;
+        if (index + 1 < source.length) value += source[index += 1];
+      } else if (ch === quote) {
+        closed = true;
+        break;
+      } else {
+        if (quote === '`' && ch === '$' && source[index + 1] === '{') dynamicTemplate = true;
+        value += ch;
+      }
+    }
+    if (closed) literals.push({ start, end: index, value, dynamicTemplate });
+  }
+  return literals;
+}
+
+function extractJournalOperationLiterals(source) {
+  const journalOperation = /^JOURNAL_[A-Z0-9_]+_(?:UPSERTED|VOIDED)$/;
+  return extractJavaScriptStringLiterals(source)
+    .filter((literal) => !literal.dynamicTemplate && journalOperation.test(literal.value))
+    .map((literal) => literal.value);
+}
+
+function staticJournalOperationArgument(source) {
+  const literals = extractJavaScriptStringLiterals(source);
+  if (literals.length !== 1) return null;
+  const literal = literals[0];
+  if (literal.dynamicTemplate) return null;
+  if (source.slice(0, literal.start).trim() || source.slice(literal.end + 1).trim()) return null;
+  return /^JOURNAL_[A-Z0-9_]+_(?:UPSERTED|VOIDED)$/.test(literal.value)
+    ? literal.value
+    : null;
+}
+
+function extractJournalOperationTokens(source) {
+  const operations = [];
+  const journalOperation = /\bJOURNAL_[A-Z0-9_]+_(?:UPSERTED|VOIDED)\b/g;
+  let match;
+  while ((match = journalOperation.exec(source)) !== null) operations.push(match[0]);
+  return operations;
+}
+
+function directSyncOutboxSqlSites(source) {
+  const insert = /\binsert\s+(?:or\s+(?:abort|fail|ignore|replace|rollback)\s+)?into\s+sync_outbox\b/i;
+  const literals = extractJavaScriptStringLiterals(source);
+  const sites = [];
+  for (let index = 0; index < literals.length; index += 1) {
+    const first = literals[index];
+    let last = first;
+    let sql = first.value;
+    while (index + 1 < literals.length &&
+      /^\s*\+\s*$/.test(source.slice(last.end + 1, literals[index + 1].start))) {
+      last = literals[index += 1];
+      sql += last.value;
+    }
+    if (insert.test(sql)) sites.push({ start: first.start, end: last.end, sql });
+  }
+  return sites;
+}
+
+function auditedJournalOutboxEmitterRange(modulePath, maskedSource) {
+  if (path.basename(modulePath) !== AUDITED_JOURNAL_OUTBOX_EMITTER.file) return null;
+  const definition = new RegExp(
+    '\\b(?:async\\s+)?function\\s+' + AUDITED_JOURNAL_OUTBOX_EMITTER.functionName +
+      '\\s*\\([^)]*\\)\\s*\\{',
+    'g'
+  );
+  const matches = [...maskedSource.matchAll(definition)];
+  if (matches.length !== 1) return null;
+  const openIndex = matches[0].index + matches[0][0].lastIndexOf('{');
+  const closeIndex = findMatchingJavaScriptBrace(maskedSource, openIndex);
+  return closeIndex < 0 ? null : { start: openIndex, end: closeIndex };
+}
+
+function extractJournalModuleOps(modulePath) {
+  if (!fs.existsSync(modulePath)) {
+    return { ops: [], errors: [`journal module source not found at ${modulePath}`] };
+  }
+  const source = stripJavaScriptComments(readUtf8(modulePath));
+  const maskedSource = maskJavaScriptStrings(source);
+  const ops = [];
+  const errors = [];
+  let match;
+
+  const directSqlSites = directSyncOutboxSqlSites(source);
+  const auditedEmitter = auditedJournalOutboxEmitterRange(modulePath, maskedSource);
+  let auditedSiteCount = 0;
+  for (const site of directSqlSites) {
+    ops.push(...extractJournalOperationTokens(site.sql));
+    const isAudited = auditedEmitter && site.start > auditedEmitter.start && site.end < auditedEmitter.end;
+    if (isAudited) {
+      auditedSiteCount += 1;
+      continue;
+    }
+    errors.push(
+      `${path.basename(modulePath)}@${site.start}: direct sync_outbox SQL is forbidden outside ` +
+      `${AUDITED_JOURNAL_OUTBOX_EMITTER.file} ${AUDITED_JOURNAL_OUTBOX_EMITTER.functionName}()`
+    );
+  }
+  if (path.basename(modulePath) === AUDITED_JOURNAL_OUTBOX_EMITTER.file && auditedSiteCount !== 1) {
+    errors.push(
+      `${AUDITED_JOURNAL_OUTBOX_EMITTER.file}: ${AUDITED_JOURNAL_OUTBOX_EMITTER.functionName}() ` +
+      `must contain exactly one audited sync_outbox insert; found ${auditedSiteCount}`
+    );
+  }
+
+  const call = /\b([A-Za-z_$][\w$]*(?:\s*\.\s*[A-Za-z_$][\w$]*)*)\s*\(/g;
+  while ((match = call.exec(maskedSource)) !== null) {
+    const callee = match[1].replace(/\s+/g, '');
+    if (!callee.toLowerCase().includes('outbox')) continue;
+    const openIndex = match.index + match[0].lastIndexOf('(');
+    const closeIndex = findMatchingJavaScriptParen(maskedSource, openIndex);
+    const location = `${path.basename(modulePath)}@${match.index}`;
+    if (closeIndex < 0) {
+      errors.push(`${location}: unparseable outbox call; missing closing parenthesis`);
+      break;
+    }
+    if (callee === AUDITED_JOURNAL_OUTBOX_EMITTER.functionName &&
+      isOutboxFunctionDefinition(maskedSource, match.index, closeIndex)) {
+      continue;
+    }
+    if (callee !== AUDITED_JOURNAL_OUTBOX_EMITTER.functionName) {
+      errors.push(
+        `${location}: unaudited outbox-like call ${callee}(...); only exact ` +
+        `${AUDITED_JOURNAL_OUTBOX_EMITTER.functionName}(...) calls are audited`
+      );
+      continue;
+    }
+    const argumentsSource = source.slice(openIndex + 1, closeIndex);
+    const maskedArgumentsSource = maskedSource.slice(openIndex + 1, closeIndex);
+    const args = splitTopLevelJavaScriptArguments(argumentsSource, maskedArgumentsSource);
+    if (!args) {
+      errors.push(`${location}: unparseable emitJournalOutbox arguments`);
+    } else if (args.length !== 3) {
+      errors.push(`${location}: emitJournalOutbox must receive exactly three arguments; found ${args.length}`);
+    } else {
+      const operation = staticJournalOperationArgument(args[2]);
+      if (!operation) {
+        errors.push(
+          `${location}: emitJournalOutbox third argument must be one static ` +
+          'JOURNAL_*_(UPSERTED|VOIDED) string literal'
+        );
+      } else {
+        ops.push(operation);
+      }
+    }
+  }
+  return { ops: sortedUnique(ops), errors };
+}
+
 function findJavaMethodBody(source, methodName) {
   for (let i = 0; i < source.length;) {
     const ch = source[i];
@@ -789,7 +1261,42 @@ function checkSyncOpParity(options = {}) {
   const flowSources = options.flowSources === undefined ? FLOW_SOURCES : options.flowSources;
   const sqlSources = options.sqlSources === undefined ? SQL_SOURCES : options.sqlSources;
   const databaseSources = options.databaseSources === undefined ? DATABASE_SOURCES : options.databaseSources;
+  const sqlOwnedEventOps = options.sqlOwnedEventOps === undefined
+    ? SQL_OWNED_EVENT_OPS
+    : new Set(options.sqlOwnedEventOps);
+  const requireSqlOwnedSources = options.requireSqlOwnedSources === undefined
+    ? options.sqlSources === undefined && options.databaseSources === undefined
+    : Boolean(options.requireSqlOwnedSources);
+  const stagingEnabled = options.stagingManifest !== false;
+  const discoveredModules = options.moduleSources === undefined && stagingEnabled
+    ? discoverJournalModuleSources(root)
+    : { sources: [], errors: [] };
+  const moduleSources = options.moduleSources === undefined
+    ? discoveredModules.sources
+    : options.moduleSources;
   const sourcePath = (entry) => path.resolve(root, entry.path);
+
+  let stagingErrors = [];
+  if (stagingEnabled) {
+    if (options.stagingManifest !== undefined) {
+      stagingErrors = validateStagingManifest(options.stagingManifest);
+    } else {
+      const manifestPath = options.stagingManifestPath || path.join(root, STAGING_MANIFEST_RELATIVE);
+      stagingErrors = loadStagingManifest(manifestPath).errors;
+    }
+  }
+  stagingErrors.push(...discoveredModules.errors);
+  // The fixture is evidence of staging state, not an extensible allow list. The
+  // executable policy remains pinned to these reviewed closed sets.
+  const staging = stagingEnabled ? {
+    edgeModuleOwned: EXACT_EDGE_MODULE_OPS,
+    edgeDeferred: EXACT_EDGE_DEFERRED_OPS,
+    cloudDeferred: EXACT_JOURNAL_EVENT_OPS,
+  } : {
+    edgeModuleOwned: [],
+    edgeDeferred: [],
+    cloudDeferred: [],
+  };
 
   const flowResults = flowSources.map((flow) => ({
     name: `flows:${flow.name}`,
@@ -809,6 +1316,12 @@ function checkSyncOpParity(options = {}) {
     checkOps: 'subset',
     ...extractDatabaseOps(sourcePath(source)),
   }));
+  const moduleResults = moduleSources.map((source) => ({
+    name: `module:${source.name}`,
+    path: sourcePath(source),
+    checkOps: 'module',
+    ...extractJournalModuleOps(sourcePath(source)),
+  }));
   const schemaResult = {
     name: 'schema',
     path: schemaPath,
@@ -821,13 +1334,14 @@ function checkSyncOpParity(options = {}) {
     checkOps: true,
     ...extractServerOps(serverSource),
   };
-  const sources = [...flowResults, ...sqlResults, ...databaseResults, schemaResult, serverResult];
-  const canonicalSources = sources.filter((source) => source.checkOps === true);
-  const subsetSources = sources.filter((source) => source.checkOps === 'subset');
-  const allOps = [...new Set(canonicalSources.flatMap((source) => source.ops))].sort();
-  const canonicalOps = new Set(allOps);
+  const sources = [...flowResults, ...sqlResults, ...databaseResults, ...moduleResults, schemaResult, serverResult];
   const lines = [];
   let ok = true;
+
+  for (const error of stagingErrors) {
+    ok = false;
+    lines.push(`  ERROR staging: ${error}`);
+  }
 
   for (const source of sources) {
     lines.push(formatSet(source.name, source.ops));
@@ -842,32 +1356,78 @@ function checkSyncOpParity(options = {}) {
     }
   }
 
-  for (const source of canonicalSources) {
-    const isFlowSource = source.name.startsWith('flows:');
-    const expectedOps = isFlowSource
-      ? allOps.filter((op) => !SQL_OWNED_EVENT_OPS.has(op))
-      : allOps;
-    const baselineName = isFlowSource ? 'flow-required union' : 'union';
-    const diff = diffSets(expectedOps, source.ops);
-    const diffLines = formatDiff(source.name, baselineName, diff);
+  const flowUnion = sortedUnique(flowResults.flatMap((source) => source.ops));
+  for (const source of flowResults) {
+    const diffLines = formatDiff(source.name, 'flow union', diffSets(flowUnion, source.ops));
     if (diffLines.length) {
       ok = false;
       lines.push(...diffLines);
     }
   }
 
-  for (const source of subsetSources) {
-    const extras = source.ops.filter((op) => !canonicalOps.has(op));
-    if (extras.length) {
+  const moduleUnion = sortedUnique(moduleResults.flatMap((source) => source.ops));
+  if (stagingEnabled) {
+    const moduleDiff = diffSets(staging.edgeModuleOwned, moduleUnion);
+    if (moduleDiff.missing.length) {
       ok = false;
-      lines.push(`  ${source.name} extra vs union: ${extras.join(', ')}`);
+      lines.push(`  edgeModuleOwned missing from module sources: ${moduleDiff.missing.join(', ')}`);
     }
+    if (moduleDiff.extra.length) {
+      ok = false;
+      lines.push(`  module sources contain undeclared journal ops: ${moduleDiff.extra.join(', ')}`);
+    }
+  }
+
+  const nonModuleRuntimeOps = sortedUnique([
+    ...flowResults.flatMap((source) => source.ops),
+    ...sqlResults.flatMap((source) => source.ops),
+    ...databaseResults.flatMap((source) => source.ops),
+    ...(stagingEnabled ? sqlOwnedEventOps : []),
+  ]);
+  if (requireSqlOwnedSources) {
+    const persistenceOps = new Set([
+      ...sqlResults.flatMap((source) => source.ops),
+      ...databaseResults.flatMap((source) => source.ops),
+    ]);
+    const missingSqlOwned = [...sqlOwnedEventOps].filter((op) => !persistenceOps.has(op));
+    if (missingSqlOwned.length) {
+      ok = false;
+      lines.push(`  SQL-owned ops missing from persistence sources: ${missingSqlOwned.join(', ')}`);
+    }
+  }
+  if (stagingEnabled) {
+    const misplacedOwned = nonModuleRuntimeOps.filter((op) => staging.edgeModuleOwned.includes(op));
+    if (misplacedOwned.length) {
+      ok = false;
+      lines.push(`  edgeModuleOwned ops also appear outside module sources: ${misplacedOwned.join(', ')}`);
+    }
+  }
+
+  const deployedEdgeOps = sortedUnique(nonModuleRuntimeOps.concat(moduleUnion));
+  const deployedDeferred = deployedEdgeOps.filter((op) => staging.edgeDeferred.includes(op));
+  if (deployedDeferred.length) {
+    ok = false;
+    lines.push(`  edgeDeferred ops already appear in deployed edge sources: ${deployedDeferred.join(', ')}`);
+  }
+
+  const expectedSchemaOps = sortedUnique(deployedEdgeOps.concat(staging.edgeDeferred));
+  const schemaDiffLines = formatDiff('schema', 'deployed edge plus staged union', diffSets(expectedSchemaOps, schemaResult.ops));
+  if (schemaDiffLines.length) {
+    ok = false;
+    lines.push(...schemaDiffLines);
+  }
+
+  const expectedServerOps = expectedSchemaOps.filter((op) => !staging.cloudDeferred.includes(op));
+  const serverDiffLines = formatDiff('server', 'union', diffSets(expectedServerOps, serverResult.ops));
+  if (serverDiffLines.length) {
+    ok = false;
+    lines.push(...serverDiffLines);
   }
 
   return {
     ok,
     sources,
-    union: allOps,
+    union: expectedSchemaOps,
     message: lines.join('\n'),
   };
 }

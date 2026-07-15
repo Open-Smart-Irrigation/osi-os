@@ -4,6 +4,40 @@
     "title": "Sync Resource Schema Registry",
     "description": "Canonical resource types and their required fields for sync.",
     "definitions": {
+        "Uuid": {
+            "type": "string",
+            "pattern": "^(?:[0-9A-Fa-f]{32}|[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12})$"
+        },
+        "NullableUuid": {
+            "type": ["string", "null"],
+            "pattern": "^(?:[0-9A-Fa-f]{32}|[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12})$"
+        },
+        "CanonicalUuid": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+        },
+        "NullableCanonicalUuid": {
+            "type": ["string", "null"],
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+        },
+        "CanonicalUtcTimestamp": {
+            "type": "string",
+            "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\\.[0-9]{3}Z$",
+            "format": "date-time"
+        },
+        "NullableCanonicalUtcTimestamp": {
+            "type": ["string", "null"],
+            "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\\.[0-9]{3}Z$",
+            "format": "date-time"
+        },
+        "Eui64": {
+            "type": "string",
+            "pattern": "^[0-9A-F]{16}$"
+        },
+        "NullableEui64": {
+            "type": ["string", "null"],
+            "pattern": "^[0-9A-F]{16}$"
+        },
         "Zone": {
             "type": "object",
             "required": ["zone_id", "name"],
@@ -24,8 +58,19 @@
             "type": "object",
             "required": ["deveui", "type_id"],
             "properties": {
-                "deveui": {"type": "string", "pattern": "^[0-9A-F]{16}$"},
-                "type_id": {"type": "string", "enum": ["STREGA_VALVE", "DRAGINO_LSN50", "KIWI_SENSOR", "TEKTELIC_CLOVER", "SENSECAP_S2120"]},
+                "deveui": {"$ref": "#/definitions/Eui64"},
+                "type_id": {
+                    "type": "string",
+                    "enum": [
+                        "STREGA_VALVE",
+                        "DRAGINO_LSN50",
+                        "KIWI_SENSOR",
+                        "TEKTELIC_CLOVER",
+                        "SENSECAP_S2120",
+                        "AQUASCOPE_LORAIN",
+                        "MILESIGHT_UC512"
+                    ]
+                },
                 "name": {"type": ["string", "null"]},
                 "zone_id": {"type": ["integer", "null"]},
                 "chameleon_enabled": {"type": ["integer", "null"], "enum": [0, 1, null]},
@@ -40,12 +85,304 @@
             "required": ["zone_id", "trigger_metric"],
             "properties": {
                 "zone_id": {"type": "integer", "minimum": 1},
-                "trigger_metric": {"type": "string", "enum": ["SWT_WM1","SWT_WM2","SWT_AVG","SWT_1","SWT_2","SWT_3","DENDRO"]},
+                "trigger_metric": {"type": "string", "enum": ["SWT_WM1", "SWT_WM2", "SWT_AVG", "SWT_1", "SWT_2", "SWT_3", "DENDRO"]},
                 "threshold_kpa": {"type": "number"},
                 "irrigation_duration_min": {"type": "integer", "minimum": 1},
                 "enabled": {"type": "boolean"},
                 "deleted_at": {"type": ["string", "null"], "format": "date-time"}
             }
+        },
+        "JournalEntryValue": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+                "attribute_code", "group_index", "value_status", "value_num", "value_text",
+                "unit_code", "entered_value_num", "entered_unit_code"
+            ],
+            "properties": {
+                "attribute_code": {"type": "string", "minLength": 1},
+                "group_index": {"type": "integer", "minimum": 0},
+                "value_status": {
+                    "type": "string",
+                    "enum": ["observed", "not_observed", "not_applicable", "below_detection"]
+                },
+                "value_num": {"type": ["number", "null"]},
+                "value_text": {"type": ["string", "null"], "maxLength": 4096},
+                "unit_code": {"type": ["string", "null"]},
+                "entered_value_num": {"type": ["number", "null"]},
+                "entered_unit_code": {"type": ["string", "null"]}
+            },
+            "oneOf": [
+                {
+                    "properties": {"value_status": {"const": "observed"}},
+                    "oneOf": [
+                        {"properties": {"value_num": {"type": "number"}, "value_text": {"type": "null"}}},
+                        {"properties": {"value_num": {"type": "null"}, "value_text": {"type": "string"}}}
+                    ]
+                },
+                {
+                    "properties": {
+                        "value_status": {"enum": ["not_observed", "not_applicable", "below_detection"]},
+                        "value_num": {"const": null},
+                        "value_text": {"const": null}
+                    }
+                }
+            ]
+        },
+        "JournalEntry": {
+            "type": "object",
+            "additionalProperties": false,
+            "x-aggregate-type": "JOURNAL_ENTRY",
+            "x-watermark-key": "entry_uuid",
+            "required": [
+                "contract_version", "entry_uuid", "owner_user_uuid", "author_principal_uuid", "author_label",
+                "plot_uuid", "zone_uuid", "device_eui", "season_uuid", "season_crop", "season_variety",
+                "campaign_uuid", "protocol_code", "protocol_version", "observation_unit_code", "pass_uuid",
+                "batch_uuid", "activity_code", "template_code", "template_version", "layout_code",
+                "layout_version", "catalog_version", "occurred_start", "occurred_end", "occurred_timezone",
+                "occurred_utc_offset_minutes", "recorded_at", "origin", "status", "voided_at",
+                "voided_by_principal_uuid", "void_reason", "note", "context_json", "sync_version",
+                "gateway_device_eui", "created_at", "updated_at", "deleted_at", "values"
+            ],
+            "properties": {
+                "contract_version": {"type": "integer", "const": 1},
+                "entry_uuid": {"$ref": "#/definitions/CanonicalUuid"},
+                "base_sync_version": {"type": "integer", "minimum": 0},
+                "owner_user_uuid": {"$ref": "#/definitions/Uuid"},
+                "author_principal_uuid": {"$ref": "#/definitions/Uuid"},
+                "author_label": {"type": ["string", "null"], "maxLength": 120},
+                "plot_uuid": {"$ref": "#/definitions/NullableCanonicalUuid"},
+                "zone_uuid": {"$ref": "#/definitions/NullableUuid"},
+                "device_eui": {"$ref": "#/definitions/NullableEui64"},
+                "season_uuid": {"$ref": "#/definitions/NullableUuid"},
+                "season_crop": {"type": ["string", "null"]},
+                "season_variety": {"type": ["string", "null"]},
+                "campaign_uuid": {"$ref": "#/definitions/NullableUuid"},
+                "protocol_code": {"type": ["string", "null"]},
+                "protocol_version": {"type": ["string", "null"]},
+                "observation_unit_code": {"type": ["string", "null"]},
+                "pass_uuid": {"$ref": "#/definitions/NullableCanonicalUuid"},
+                "batch_uuid": {"$ref": "#/definitions/NullableCanonicalUuid"},
+                "activity_code": {"type": "string", "minLength": 1},
+                "template_code": {"type": "string", "minLength": 1},
+                "template_version": {"type": "integer", "minimum": 1},
+                "layout_code": {"type": "string", "minLength": 1},
+                "layout_version": {"type": "integer", "minimum": 1},
+                "catalog_version": {"type": "integer", "minimum": 1},
+                "occurred_start": {"$ref": "#/definitions/CanonicalUtcTimestamp"},
+                "occurred_end": {"$ref": "#/definitions/NullableCanonicalUtcTimestamp"},
+                "occurred_timezone": {"type": "string", "minLength": 1},
+                "occurred_utc_offset_minutes": {"type": "integer", "minimum": -840, "maximum": 840},
+                "recorded_at": {"$ref": "#/definitions/CanonicalUtcTimestamp"},
+                "origin": {"type": "string", "enum": ["edge-ui", "cloud-ui"]},
+                "status": {"type": "string", "enum": ["draft", "final", "voided"]},
+                "voided_at": {"$ref": "#/definitions/NullableCanonicalUtcTimestamp"},
+                "voided_by_principal_uuid": {"$ref": "#/definitions/NullableUuid"},
+                "void_reason": {"type": ["string", "null"], "maxLength": 4000},
+                "note": {"type": ["string", "null"], "maxLength": 4000},
+                "context_json": {"type": ["string", "null"]},
+                "sync_version": {"type": "integer", "minimum": 0},
+                "gateway_device_eui": {"$ref": "#/definitions/Eui64"},
+                "created_at": {"$ref": "#/definitions/CanonicalUtcTimestamp"},
+                "updated_at": {"$ref": "#/definitions/CanonicalUtcTimestamp"},
+                "deleted_at": {"$ref": "#/definitions/NullableCanonicalUtcTimestamp"},
+                "values": {"type": "array", "maxItems": 128, "items": {"$ref": "#/definitions/JournalEntryValue"}}
+            }
+        },
+        "JournalEntryAggregate": {
+            "allOf": [
+                {"$ref": "#/definitions/JournalEntry"},
+                {"not": {"required": ["base_sync_version"]}}
+            ]
+        },
+        "JournalEntryCommand": {
+            "allOf": [
+                {"$ref": "#/definitions/JournalEntry"},
+                {"required": ["base_sync_version"]},
+                {
+                    "properties": {
+                        "owner_user_uuid": {"$ref": "#/definitions/CanonicalUuid"},
+                        "author_principal_uuid": {"$ref": "#/definitions/CanonicalUuid"}
+                    }
+                }
+            ]
+        },
+        "JournalVocabMapping": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+                "scheme_uri", "scheme_version", "mapping_role", "external_id", "external_parent_id",
+                "mapping_relation", "source_uri", "active"
+            ],
+            "properties": {
+                "scheme_uri": {"type": "string", "minLength": 1},
+                "scheme_version": {"type": "string", "minLength": 1},
+                "mapping_role": {
+                    "type": "string",
+                    "enum": ["concept", "variable", "coded_value", "operation_type", "data_type_definition", "unit_of_measure"]
+                },
+                "external_id": {"type": "string", "minLength": 1},
+                "external_parent_id": {"type": ["string", "null"]},
+                "mapping_relation": {"type": "string", "enum": ["exact", "close", "broad", "narrow", "related"]},
+                "source_uri": {"type": ["string", "null"]},
+                "active": {"type": "integer", "enum": [0, 1]}
+            }
+        },
+        "JournalVocab": {
+            "type": "object",
+            "additionalProperties": false,
+            "x-aggregate-type": "JOURNAL_VOCAB",
+            "x-watermark-key": "custom_field_uuid",
+            "required": [
+                "contract_version", "code", "kind", "parent_code", "value_type", "quantity_kind", "basis",
+                "default_unit_code", "labels_json", "icon_key", "constraints_json", "agrovoc_uri", "icasa_code",
+                "adapt_code", "scope", "owner_user_uuid", "gateway_device_eui", "custom_field_uuid", "active",
+                "sort_order", "sync_version", "created_at", "deleted_at", "mappings"
+            ],
+            "properties": {
+                "contract_version": {"type": "integer", "const": 1},
+                "base_sync_version": {"type": "integer", "minimum": 0},
+                "code": {"type": "string", "pattern": "^custom\\.[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"},
+                "kind": {"type": "string", "enum": ["activity", "attribute", "unit", "choice"]},
+                "parent_code": {"type": ["string", "null"]},
+                "value_type": {"type": ["string", "null"], "enum": ["number", "text", "choice", "date", "boolean", null]},
+                "quantity_kind": {"type": ["string", "null"]},
+                "basis": {"type": ["string", "null"]},
+                "default_unit_code": {"type": ["string", "null"]},
+                "labels_json": {"type": "string", "minLength": 2},
+                "icon_key": {"type": ["string", "null"]},
+                "constraints_json": {"type": ["string", "null"]},
+                "agrovoc_uri": {"type": ["string", "null"]},
+                "icasa_code": {"type": ["string", "null"]},
+                "adapt_code": {"type": ["string", "null"]},
+                "scope": {"type": "string", "const": "custom"},
+                "owner_user_uuid": {"$ref": "#/definitions/Uuid"},
+                "gateway_device_eui": {"$ref": "#/definitions/Eui64"},
+                "custom_field_uuid": {"$ref": "#/definitions/CanonicalUuid"},
+                "active": {"type": "integer", "enum": [0, 1]},
+                "sort_order": {"type": "integer"},
+                "sync_version": {"type": "integer", "minimum": 0},
+                "created_at": {"$ref": "#/definitions/CanonicalUtcTimestamp"},
+                "deleted_at": {"$ref": "#/definitions/NullableCanonicalUtcTimestamp"},
+                "mappings": {"type": "array", "items": {"$ref": "#/definitions/JournalVocabMapping"}}
+            }
+        },
+        "JournalVocabAggregate": {
+            "allOf": [
+                {"$ref": "#/definitions/JournalVocab"},
+                {"not": {"required": ["base_sync_version"]}}
+            ]
+        },
+        "JournalVocabCommand": {
+            "allOf": [
+                {"$ref": "#/definitions/JournalVocab"},
+                {"required": ["base_sync_version"]},
+                {
+                    "properties": {
+                        "owner_user_uuid": {"$ref": "#/definitions/CanonicalUuid"}
+                    }
+                }
+            ]
+        },
+        "JournalPlotSettings": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["layout_code", "updated_at", "updated_by_principal_uuid", "sync_version"],
+            "properties": {
+                "layout_code": {"type": "string", "minLength": 1},
+                "updated_at": {"$ref": "#/definitions/CanonicalUtcTimestamp"},
+                "updated_by_principal_uuid": {"$ref": "#/definitions/Uuid"},
+                "sync_version": {"type": "integer", "minimum": 0}
+            }
+        },
+        "JournalPlot": {
+            "type": "object",
+            "additionalProperties": false,
+            "x-aggregate-type": "JOURNAL_PLOT",
+            "x-watermark-key": "plot_uuid",
+            "required": [
+                "contract_version", "plot_uuid", "owner_user_uuid", "plot_code", "name", "zone_uuid", "station_code", "crop_hint",
+                "area_m2", "active", "sync_version", "gateway_device_eui", "created_at", "updated_at",
+                "deleted_at", "settings"
+            ],
+            "properties": {
+                "contract_version": {"type": "integer", "const": 1},
+                "plot_uuid": {"$ref": "#/definitions/CanonicalUuid"},
+                "owner_user_uuid": {"$ref": "#/definitions/Uuid"},
+                "base_sync_version": {"type": "integer", "minimum": 0},
+                "plot_code": {"type": "string", "minLength": 1},
+                "name": {"type": ["string", "null"]},
+                "zone_uuid": {"$ref": "#/definitions/NullableUuid"},
+                "station_code": {"type": ["string", "null"]},
+                "crop_hint": {"type": ["string", "null"]},
+                "area_m2": {"type": ["number", "null"], "minimum": 0},
+                "active": {"type": "integer", "enum": [0, 1]},
+                "sync_version": {"type": "integer", "minimum": 0},
+                "gateway_device_eui": {"$ref": "#/definitions/Eui64"},
+                "created_at": {"$ref": "#/definitions/CanonicalUtcTimestamp"},
+                "updated_at": {"$ref": "#/definitions/CanonicalUtcTimestamp"},
+                "deleted_at": {"$ref": "#/definitions/NullableCanonicalUtcTimestamp"},
+                "settings": {"$ref": "#/definitions/JournalPlotSettings"}
+            }
+        },
+        "JournalPlotAggregate": {
+            "allOf": [
+                {"$ref": "#/definitions/JournalPlot"},
+                {"not": {"required": ["base_sync_version"]}}
+            ]
+        },
+        "JournalPlotCommand": {
+            "allOf": [
+                {"$ref": "#/definitions/JournalPlot"},
+                {"required": ["base_sync_version"]},
+                {
+                    "properties": {
+                        "owner_user_uuid": {"$ref": "#/definitions/CanonicalUuid"}
+                    }
+                }
+            ]
+        },
+        "JournalPlotGroup": {
+            "type": "object",
+            "additionalProperties": false,
+            "x-aggregate-type": "JOURNAL_PLOT_GROUP",
+            "x-watermark-key": "group_uuid",
+            "required": [
+                "contract_version", "group_uuid", "owner_user_uuid", "label", "gateway_device_eui", "created_by_principal_uuid",
+                "created_at", "resolved_at", "resolved_by_principal_uuid", "sync_version", "deleted_at", "members"
+            ],
+            "properties": {
+                "contract_version": {"type": "integer", "const": 1},
+                "group_uuid": {"$ref": "#/definitions/CanonicalUuid"},
+                "owner_user_uuid": {"$ref": "#/definitions/Uuid"},
+                "base_sync_version": {"type": "integer", "minimum": 0},
+                "label": {"type": "string", "minLength": 1},
+                "gateway_device_eui": {"$ref": "#/definitions/Eui64"},
+                "created_by_principal_uuid": {"$ref": "#/definitions/Uuid"},
+                "created_at": {"$ref": "#/definitions/CanonicalUtcTimestamp"},
+                "resolved_at": {"$ref": "#/definitions/NullableCanonicalUtcTimestamp"},
+                "resolved_by_principal_uuid": {"$ref": "#/definitions/NullableUuid"},
+                "sync_version": {"type": "integer", "minimum": 0},
+                "deleted_at": {"$ref": "#/definitions/NullableCanonicalUtcTimestamp"},
+                "members": {"type": "array", "uniqueItems": true, "items": {"$ref": "#/definitions/CanonicalUuid"}}
+            }
+        },
+        "JournalPlotGroupAggregate": {
+            "allOf": [
+                {"$ref": "#/definitions/JournalPlotGroup"},
+                {"not": {"required": ["base_sync_version"]}}
+            ]
+        },
+        "JournalPlotGroupCommand": {
+            "allOf": [
+                {"$ref": "#/definitions/JournalPlotGroup"},
+                {"required": ["base_sync_version"]},
+                {
+                    "properties": {
+                        "owner_user_uuid": {"$ref": "#/definitions/CanonicalUuid"}
+                    }
+                }
+            ]
         }
     }
 }

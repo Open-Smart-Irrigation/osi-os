@@ -1,0 +1,30 @@
+{
+  "version": 1,
+  "commands": {
+    "edgeDeferred": [],
+    "cloudDeferred": [
+      "UPSERT_JOURNAL_ENTRY",
+      "VOID_JOURNAL_ENTRY",
+      "UPSERT_JOURNAL_CUSTOM_VOCAB",
+      "UPSERT_JOURNAL_PLOT",
+      "UPSERT_JOURNAL_PLOT_GROUP"
+    ]
+  },
+  "eventOps": {
+    "edgeModuleOwned": [
+      "JOURNAL_ENTRY_UPSERTED",
+      "JOURNAL_ENTRY_VOIDED",
+      "JOURNAL_VOCAB_UPSERTED",
+      "JOURNAL_PLOT_UPSERTED",
+      "JOURNAL_PLOT_GROUP_UPSERTED"
+    ],
+    "edgeDeferred": [],
+    "cloudDeferred": [
+      "JOURNAL_ENTRY_UPSERTED",
+      "JOURNAL_ENTRY_VOIDED",
+      "JOURNAL_VOCAB_UPSERTED",
+      "JOURNAL_PLOT_UPSERTED",
+      "JOURNAL_PLOT_GROUP_UPSERTED"
+    ]
+  }
+}

@@ -221,8 +221,11 @@ function runBuildHeartbeat(profile, buildNode, edgeHealth) {
     },
   };
   const msg = {};
-  const fn = new Function('env', 'global', 'msg', buildNode.func);
-  const result = fn(fakeEnv(), global, msg);
+  // Function nodes may call node.warn/log/error (the no-silent-catch rule
+  // mandates node.warn in catch blocks), so the harness must provide the stub.
+  const fakeNode = { warn() {}, log() {}, error() {}, debug() {} };
+  const fn = new Function('env', 'global', 'msg', 'node', buildNode.func);
+  const result = fn(fakeEnv(), global, msg, fakeNode);
   const outbound = result || msg;
   return {
     msg: outbound,
