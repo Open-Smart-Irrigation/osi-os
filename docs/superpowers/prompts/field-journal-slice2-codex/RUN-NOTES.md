@@ -52,3 +52,18 @@ Append-only execution log for the accepted Phase 0 and Phase 1-6 plans on `desig
 - sol quality review found that catalog row types omitted `catalog_errors`, the edge signal for malformed JSON replaced with an empty object.
 - `a088b162ab5f248fa18edc1fc558c521e52ea1b8` adds required `catalog_errors` fields to vocab, definition, and product rows.
 - sol re-review: APPROVE. Orchestrator `npx tsc --noEmit` and `git diff --check` exited 0.
+
+## 2026-07-16T01:20:28+02:00 - Phase 1 Tasks 2 and 3 complete
+
+- `210ca963ce55f337bda251334880af4555776013` exports the existing configured Axios instance. No second auth or interceptor boundary was introduced.
+- `e1e1640df9fd83d933ac1407ae82b94f10bd526f` adds the typed journal client and its initial six contract tests. The full unit command now discovers service tests.
+- sol's specification review approved the routes, payloads, receipts, collection envelopes, and unavailable helper. Its separate quality review found a lifecycle blocker: the client lacked PUT, so POST-created drafts could not be promoted because POST is create-only.
+- The plan was amended under the user's blocker authority. RED then failed with 6/7 passing because `journalApi.updateEntry` did not exist.
+- `15331ea41c48b028e74c453f4372515d6d8ad4c7` adds the typed, UUID-encoded PUT client and the version-zero draft-promotion contract test. Targeted GREEN is 7/7; the worker's full gate is 93/93 tsx tests and 564/564 Vitest tests across 99 files. TypeScript and `git diff --check` exit 0.
+- The Phase 2 plan now keeps 404/501 capability absence separate from transient or server errors, gives operational failures a retry path, isolates SWR caches in hook tests, and adds every new test directory to the normal unit runner.
+
+## 2026-07-16T01:32:54+02:00 - Phase 2 preflight amendments
+
+- sol blocked the first Phase 2 draft because entry-list errors could appear as empty data, Tasks 4 and 6 both owned `package.json`, only English had journal keys, Task 7 lacked complete executable page code, and rows exposed raw plot UUIDs with browser-timezone dates.
+- The amended plan adds retryable entry and plot hooks, distinct page error states, a seven-locale key-parity test, complete page and page-test code, plot/activity filters, human plot labels, and occurrence-timezone formatting.
+- `620b161a53a0e7bb0efe4467a3d4c077a7839243` is the package-only prep commit that registers both Phase 2 test directories before parallel work. Its full unit gate passed 93/93 tsx tests and 564/564 Vitest tests across 99 files.

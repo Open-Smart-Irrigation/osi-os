@@ -383,7 +383,12 @@ git commit -m "refactor(api): export the shared axios instance for feature modul
 
 **Interfaces:**
 - Consumes: `api` (Task 2); types from Task 1.
-- Produces: `journalApi.getCatalog(options?): Promise<JournalCatalog>`, `journalApi.listEntries(filters?): Promise<EntryListResponse>`, `journalApi.createEntry(payload): Promise<EntryMutationReceipt>`, `journalApi.voidEntry(uuid, reason, baseVersion): Promise<EntryFinalMutationReceipt>`, `journalApi.listPlots(): Promise<JournalPlot[]>`, `journalApi.listPlotGroups(): Promise<PlotGroup[]>`, and `isJournalUnavailable(err): boolean`.
+- Produces: `journalApi.getCatalog(options?): Promise<JournalCatalog>`, `journalApi.listEntries(filters?): Promise<EntryListResponse>`, `journalApi.createEntry(payload): Promise<EntryMutationReceipt>`, `journalApi.updateEntry(uuid, payload): Promise<EntryMutationReceipt>`, `journalApi.voidEntry(uuid, reason, baseVersion): Promise<EntryFinalMutationReceipt>`, `journalApi.listPlots(): Promise<JournalPlot[]>`, `journalApi.listPlotGroups(): Promise<PlotGroup[]>`, and `isJournalUnavailable(err): boolean`.
+
+`updateEntry` is required even before the drafts queue UI lands: POST is
+create-only, while draft promotion and final-entry correction use PUT with the
+path UUID and current `base_sync_version`. Omitting PUT would make a locally
+saved draft impossible to finalize.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -391,15 +396,16 @@ git commit -m "refactor(api): export the shared axios instance for feature modul
 // web/react-gui/src/services/__tests__/journalApi.test.ts
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-const { get, post } = vi.hoisted(() => ({ get: vi.fn(), post: vi.fn() }));
-vi.mock('../api', () => ({ api: { get, post } }));
+const { get, post, put } = vi.hoisted(() => ({ get: vi.fn(), post: vi.fn(), put: vi.fn() }));
+vi.mock('../api', () => ({ api: { get, post, put } }));
 
 import { journalApi, isJournalUnavailable } from '../journalApi';
-import type { CreateEntryPayload } from '../journalApi';
+import type { CreateEntryPayload, UpdateEntryPayload } from '../journalApi';
 
 beforeEach(() => {
   get.mockReset();
   post.mockReset();
+  put.mockReset();
 });
 
 describe('journalApi', () => {
@@ -453,6 +459,26 @@ describe('journalApi', () => {
     await expect(journalApi.listPlotGroups()).resolves.toEqual([{ group_uuid: 'g1', members: ['p1'] }]);
   });
 
+  it('promotes an existing draft through the UUID-encoded PUT route', async () => {
+    const payload: UpdateEntryPayload = {
+      base_sync_version: 0,
+      status: 'final',
+      plot_uuid: '11111111-1111-4111-8111-111111111111',
+      activity_code: 'irrigation',
+      template_code: 'farmer_quick',
+      template_version: 1,
+      layout_code: 'open_field',
+      layout_version: 1,
+      occurred_start_local: '2026-07-16T08:30:00',
+      occurred_timezone: 'Europe/Zurich',
+      values: [{ attribute_code: 'attr.irrigation_depth', value: 12, unit_code: 'unit.mm_water' }],
+    };
+    const receipt = { entry_uuid: 'e1/segment', outbox_event_uuid: 'o2', sync_version: 1 };
+    put.mockResolvedValue({ data: receipt });
+    await expect(journalApi.updateEntry('e1/segment', payload)).resolves.toEqual(receipt);
+    expect(put).toHaveBeenCalledWith('/api/journal/entries/e1%2Fsegment', payload);
+  });
+
   it('posts the void reason and current sync version', async () => {
     post.mockResolvedValue({ data: { entry_uuid: 'e1', outbox_event_uuid: 'o2', sync_version: 2 } });
     await journalApi.voidEntry('e1', 'Duplicate', 1);
@@ -489,9 +515,7 @@ export interface JournalCatalogOptions {
   includeDefinitions?: boolean;
 }
 
-export interface CreateEntryPayload {
-  entry_uuid?: string;
-  base_sync_version: 0;
+interface EntryWritePayload {
   status: EntryWriteStatus;
   plot_uuid: string | null;
   activity_code: string;
@@ -505,6 +529,16 @@ export interface CreateEntryPayload {
   values: EntryValueInput[];
   note?: string | null;
   batch_uuid?: string | null;
+}
+
+export interface CreateEntryPayload extends EntryWritePayload {
+  entry_uuid?: string;
+  base_sync_version: 0;
+}
+
+export interface UpdateEntryPayload extends EntryWritePayload {
+  entry_uuid?: string;
+  base_sync_version: number;
 }
 
 export const journalApi = {
@@ -522,6 +556,12 @@ export const journalApi = {
 
   createEntry: async (payload: CreateEntryPayload): Promise<EntryMutationReceipt> =>
     (await api.post<EntryMutationReceipt>('/api/journal/entries', payload)).data,
+
+  updateEntry: async (uuid: string, payload: UpdateEntryPayload): Promise<EntryMutationReceipt> =>
+    (await api.put<EntryMutationReceipt>(
+      `/api/journal/entries/${encodeURIComponent(uuid)}`,
+      payload,
+    )).data,
 
   voidEntry: async (uuid: string, void_reason: string, base_sync_version: number): Promise<EntryFinalMutationReceipt> =>
     (await api.post<EntryFinalMutationReceipt>(
@@ -556,7 +596,7 @@ In `web/react-gui/package.json`, append `src/services/__tests__` to the `test:un
 - [ ] **Step 5: Run the targeted test, full unit gate, and typecheck**
 
 Run: `cd web/react-gui && npx vitest run src/services/__tests__/journalApi.test.ts`
-Expected: PASS (6 tests).
+Expected: PASS (7 tests).
 
 Run: `cd web/react-gui && npm run test:unit && npx tsc --noEmit`
 Expected: both unit runners pass, including `journalApi.test.ts`; TypeScript exits 0.
@@ -568,13 +608,33 @@ git add web/react-gui/src/services/journalApi.ts web/react-gui/src/services/__te
 git commit -m "feat(journal): typed journalApi client over the Slice-1 routes"
 ```
 
-**Phase 1 acceptance:** the shared axios instance remains the only auth/interceptor boundary; the typed client requests full catalog definitions only when asked, sends the actual Slice-1 entry-write shape, returns mutation receipts, unwraps plot/group list envelopes, and its six contract tests run under `npm run test:unit`.
+**Phase 1 acceptance:** the shared axios instance remains the only auth/interceptor boundary; the typed client requests full catalog definitions only when asked, sends the actual Slice-1 entry-write shape over create and update routes, can promote a version-zero draft through PUT, returns mutation receipts, unwraps plot/group list envelopes, and its seven contract tests run under `npm run test:unit`.
 
 ---
 
 ## Phase 2 — Reading surface: entry timeline
 
 Replace the `JournalPage` placeholder body with the real reading surface: a reverse-chron, final-only, filterable timeline (spec §6.3), an empty state, and a graceful "journal not available on this gateway" state when the catalog probe fails.
+
+### 2026-07-16 Phase 2 preflight amendment
+
+The unavailable state is reserved for the capability responses recognized by
+`isJournalUnavailable` (`404` and `501`). A timeout, `401`, or `5xx` response is
+an operational error, not evidence that the gateway lacks the journal. The
+catalog hook therefore exposes `unavailable` separately from `error`, and the
+page renders a retryable error card for non-capability failures.
+
+Hook tests use an isolated `SWRConfig` cache and hoisted mocks. The Phase 2
+prep commit adds both new test directories to the normal Vitest command. Task 7
+adds page-level tests for loading,
+unavailable, transient-error, and available states. These are normal unit-gate
+inputs, not targeted-test-only coverage.
+
+Before Tasks 4–6 run in parallel, make one Phase 2 prep commit that registers
+both `src/journal/__tests__` and `src/components/journal/__tests__` in
+`test:unit:vitest`. This gives `package.json` one owner and keeps Tasks 4–6
+independent. Run `npm run test:unit` and commit the package-only change as
+`test(journal): discover Phase 2 unit suites`.
 
 **File Structure**
 - Create `web/react-gui/src/journal/useJournalCatalog.ts` — SWR catalog probe + availability.
@@ -589,48 +649,74 @@ Replace the `JournalPage` placeholder body with the real reading surface: a reve
 
 **Files:**
 - Create: `web/react-gui/src/journal/useJournalCatalog.ts`
-- Test: `web/react-gui/src/journal/__tests__/useJournalCatalog.test.ts`
+- Test: `web/react-gui/src/journal/__tests__/useJournalCatalog.test.tsx`
 
 **Interfaces:**
 - Consumes: `journalApi.getCatalog`, `isJournalUnavailable` (Phase 1).
-- Produces: `useJournalCatalog(): { catalog: JournalCatalog | undefined; available: boolean; loading: boolean; error: unknown }`.
+- Produces: `useJournalCatalog(): { catalog: JournalCatalog | undefined; available: boolean; unavailable: boolean; loading: boolean; error: unknown; retry: () => Promise<JournalCatalog | undefined> }`.
 
 - [ ] **Step 1: Write the failing test**
 
 ```typescript
-// web/react-gui/src/journal/__tests__/useJournalCatalog.test.ts
-import { describe, it, expect, vi } from 'vitest';
-import { renderHook, waitFor } from '@testing-library/react';
+// web/react-gui/src/journal/__tests__/useJournalCatalog.test.tsx
+import React from 'react';
+import { beforeEach, describe, it, expect, vi } from 'vitest';
+import { act, renderHook, waitFor } from '@testing-library/react';
+import { SWRConfig } from 'swr';
 
-const getCatalog = vi.fn();
+const { getCatalog, isJournalUnavailable } = vi.hoisted(() => ({
+  getCatalog: vi.fn(),
+  isJournalUnavailable: vi.fn((e: any) => [404, 501].includes(e?.response?.status)),
+}));
 vi.mock('../../services/journalApi', () => ({
   journalApi: { getCatalog: () => getCatalog() },
-  isJournalUnavailable: (e: any) => e?.response?.status === 404,
+  isJournalUnavailable,
 }));
 
 import { useJournalCatalog } from '../useJournalCatalog';
 
+const wrapper = ({ children }: React.PropsWithChildren) => (
+  <SWRConfig value={{ provider: () => new Map(), dedupingInterval: 0 }}>
+    {children}
+  </SWRConfig>
+);
+
 describe('useJournalCatalog', () => {
+  beforeEach(() => getCatalog.mockReset());
+
   it('reports available with the catalog when the probe succeeds', async () => {
     getCatalog.mockResolvedValue({ catalog_version: 1, vocab: [] });
-    const { result } = renderHook(() => useJournalCatalog());
+    const { result } = renderHook(() => useJournalCatalog(), { wrapper });
     await waitFor(() => expect(result.current.loading).toBe(false));
     expect(result.current.available).toBe(true);
+    expect(result.current.unavailable).toBe(false);
     expect(result.current.catalog?.catalog_version).toBe(1);
   });
 
-  it('reports unavailable on a 404 probe', async () => {
-    getCatalog.mockRejectedValue({ response: { status: 404 } });
-    const { result } = renderHook(() => useJournalCatalog());
+  it.each([404, 501])('reports unavailable on a %s capability response', async (status) => {
+    getCatalog.mockRejectedValue({ response: { status } });
+    const { result } = renderHook(() => useJournalCatalog(), { wrapper });
     await waitFor(() => expect(result.current.loading).toBe(false));
     expect(result.current.available).toBe(false);
+    expect(result.current.unavailable).toBe(true);
+    expect(result.current.error).toBeUndefined();
+  });
+
+  it('keeps operational failures distinct and exposes retry', async () => {
+    const failure = { response: { status: 500 } };
+    getCatalog.mockRejectedValueOnce(failure).mockResolvedValueOnce({ catalog_version: 1 });
+    const { result } = renderHook(() => useJournalCatalog(), { wrapper });
+    await waitFor(() => expect(result.current.error).toBe(failure));
+    expect(result.current.unavailable).toBe(false);
+    await act(async () => { await result.current.retry(); });
+    await waitFor(() => expect(result.current.available).toBe(true));
   });
 });
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `cd web/react-gui && npx vitest run src/journal/__tests__/useJournalCatalog.test.ts`
+Run: `cd web/react-gui && npx vitest run src/journal/__tests__/useJournalCatalog.test.tsx`
 Expected: FAIL — cannot resolve `../useJournalCatalog`.
 
 - [ ] **Step 3: Write the hook**
@@ -642,29 +728,32 @@ import { journalApi, isJournalUnavailable } from '../services/journalApi';
 import type { JournalCatalog } from '../types/journal';
 
 export function useJournalCatalog() {
-  const { data, error, isLoading } = useSWR<JournalCatalog>(
+  const { data, error, isLoading, mutate } = useSWR<JournalCatalog>(
     'journal:catalog',
     () => journalApi.getCatalog(),
     { revalidateOnFocus: false, shouldRetryOnError: false },
   );
+  const unavailable = !!error && isJournalUnavailable(error);
   return {
     catalog: data,
-    available: !!data && !error,
+    available: !!data,
+    unavailable,
     loading: isLoading,
-    error: error && !isJournalUnavailable(error) ? error : undefined,
+    error: error && !unavailable ? error : undefined,
+    retry: mutate,
   };
 }
 ```
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `cd web/react-gui && npx vitest run src/journal/__tests__/useJournalCatalog.test.ts`
-Expected: PASS (2 tests).
+Run: `cd web/react-gui && npx vitest run src/journal/__tests__/useJournalCatalog.test.tsx`
+Expected: PASS (4 tests).
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add web/react-gui/src/journal/useJournalCatalog.ts web/react-gui/src/journal/__tests__/useJournalCatalog.test.ts
+git add web/react-gui/src/journal/useJournalCatalog.ts web/react-gui/src/journal/__tests__/useJournalCatalog.test.tsx
 git commit -m "feat(journal): catalog availability probe hook"
 ```
 
@@ -672,43 +761,118 @@ git commit -m "feat(journal): catalog availability probe hook"
 
 **Files:**
 - Create: `web/react-gui/src/journal/useJournalEntries.ts`
-- Test: `web/react-gui/src/journal/__tests__/useJournalEntries.test.ts`
+- Create: `web/react-gui/src/journal/useJournalPlots.ts`
+- Test: `web/react-gui/src/journal/__tests__/useJournalEntries.test.tsx`
+- Test: `web/react-gui/src/journal/__tests__/useJournalPlots.test.tsx`
 
 **Interfaces:**
-- Consumes: `journalApi.listEntries` (Phase 1), `EntryListFilters`.
-- Produces: `useJournalEntries(filters: EntryListFilters, enabled: boolean): { entries: EntryAggregate[]; loading: boolean; error: unknown }`.
+- Consumes: `journalApi.listEntries`, `journalApi.listPlots` (Phase 1), `EntryListFilters`.
+- Produces: filter-keyed entry state and plot lookup state. Both expose `retry`; errors remain distinct from successful empty arrays.
 
 - [ ] **Step 1: Write the failing test**
 
 ```typescript
-// web/react-gui/src/journal/__tests__/useJournalEntries.test.ts
-import { describe, it, expect, vi } from 'vitest';
-import { renderHook, waitFor } from '@testing-library/react';
+// web/react-gui/src/journal/__tests__/useJournalEntries.test.tsx
+import React from 'react';
+import { beforeEach, describe, it, expect, vi } from 'vitest';
+import { act, renderHook, waitFor } from '@testing-library/react';
+import { SWRConfig } from 'swr';
 
-const listEntries = vi.fn();
+const { listEntries } = vi.hoisted(() => ({ listEntries: vi.fn() }));
 vi.mock('../../services/journalApi', () => ({ journalApi: { listEntries: (f: any) => listEntries(f) } }));
 
 import { useJournalEntries } from '../useJournalEntries';
 
+const wrapper = ({ children }: React.PropsWithChildren) => (
+  <SWRConfig value={{ provider: () => new Map(), dedupingInterval: 0 }}>
+    {children}
+  </SWRConfig>
+);
+
 describe('useJournalEntries', () => {
+  beforeEach(() => listEntries.mockReset());
+
   it('does not fetch when disabled', () => {
-    renderHook(() => useJournalEntries({ status: 'final' }, false));
+    renderHook(() => useJournalEntries({ status: 'final' }, false), { wrapper });
     expect(listEntries).not.toHaveBeenCalled();
   });
 
   it('returns entries when enabled', async () => {
     listEntries.mockResolvedValue({ entries: [{ entry_uuid: 'e1' }], next_cursor: null });
-    const { result } = renderHook(() => useJournalEntries({ status: 'final' }, true));
+    const filters = { status: 'final' as const, limit: 50 };
+    const { result } = renderHook(() => useJournalEntries(filters, true), { wrapper });
     await waitFor(() => expect(result.current.loading).toBe(false));
     expect(result.current.entries).toHaveLength(1);
+    expect(listEntries).toHaveBeenCalledWith(filters);
+  });
+
+  it('keeps a failed request distinct from an empty result and retries', async () => {
+    const failure = new Error('offline');
+    listEntries
+      .mockRejectedValueOnce(failure)
+      .mockResolvedValueOnce({ entries: [], next_cursor: null });
+    const { result } = renderHook(
+      () => useJournalEntries({ status: 'final' }, true),
+      { wrapper },
+    );
+    await waitFor(() => expect(result.current.error).toBe(failure));
+    expect(result.current.entries).toEqual([]);
+    await act(async () => { await result.current.retry(); });
+    await waitFor(() => expect(result.current.error).toBeUndefined());
+    expect(listEntries).toHaveBeenCalledTimes(2);
+  });
+});
+```
+
+```typescript
+// web/react-gui/src/journal/__tests__/useJournalPlots.test.tsx
+import React from 'react';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { act, renderHook, waitFor } from '@testing-library/react';
+import { SWRConfig } from 'swr';
+
+const { listPlots } = vi.hoisted(() => ({ listPlots: vi.fn() }));
+vi.mock('../../services/journalApi', () => ({ journalApi: { listPlots } }));
+import { useJournalPlots } from '../useJournalPlots';
+
+const wrapper = ({ children }: React.PropsWithChildren) => (
+  <SWRConfig value={{ provider: () => new Map(), dedupingInterval: 0 }}>
+    {children}
+  </SWRConfig>
+);
+
+describe('useJournalPlots', () => {
+  beforeEach(() => listPlots.mockReset());
+
+  it('does not fetch when disabled', () => {
+    renderHook(() => useJournalPlots(false), { wrapper });
+    expect(listPlots).not.toHaveBeenCalled();
+  });
+
+  it('returns plots when enabled', async () => {
+    const plots = [{ plot_uuid: 'p1', plot_code: 'N-1' }];
+    listPlots.mockResolvedValue(plots);
+    const { result } = renderHook(() => useJournalPlots(true), { wrapper });
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    expect(result.current.plots).toEqual(plots);
+  });
+
+  it('exposes and retries a failed request', async () => {
+    const failure = new Error('offline');
+    listPlots.mockRejectedValueOnce(failure).mockResolvedValueOnce([]);
+    const { result } = renderHook(() => useJournalPlots(true), { wrapper });
+    await waitFor(() => expect(result.current.error).toBe(failure));
+    await act(async () => { await result.current.retry(); });
+    await waitFor(() => expect(result.current.error).toBeUndefined());
+    expect(listPlots).toHaveBeenCalledTimes(2);
   });
 });
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `cd web/react-gui && npx vitest run src/journal/__tests__/useJournalEntries.test.ts`
-Expected: FAIL — cannot resolve `../useJournalEntries`.
+Run: `cd web/react-gui && npx vitest run src/journal/__tests__/useJournalEntries.test.tsx src/journal/__tests__/useJournalPlots.test.tsx`
+Expected: FAIL — cannot resolve the two hook modules.
 
 - [ ] **Step 3: Write the hook**
 
@@ -719,25 +883,47 @@ import { journalApi } from '../services/journalApi';
 import type { EntryAggregate, EntryListFilters } from '../types/journal';
 
 export function useJournalEntries(filters: EntryListFilters, enabled: boolean) {
-  const key = enabled ? ['journal:entries', JSON.stringify(filters)] : null;
-  const { data, error, isLoading } = useSWR(key, () => journalApi.listEntries(filters), {
+  const key = enabled ? ['journal:entries', filters] : null;
+  const { data, error, isLoading, mutate } = useSWR(key, () => journalApi.listEntries(filters), {
     revalidateOnFocus: false,
+    shouldRetryOnError: false,
   });
   const entries: EntryAggregate[] = data?.entries ?? [];
-  return { entries, loading: enabled && isLoading, error };
+  return { entries, loading: enabled && isLoading, error, retry: mutate };
+}
+```
+
+```typescript
+// web/react-gui/src/journal/useJournalPlots.ts
+import useSWR from 'swr';
+import { journalApi } from '../services/journalApi';
+import type { JournalPlot } from '../types/journal';
+
+export function useJournalPlots(enabled: boolean) {
+  const { data, error, isLoading, mutate } = useSWR<JournalPlot[]>(
+    enabled ? 'journal:plots' : null,
+    () => journalApi.listPlots(),
+    { revalidateOnFocus: false, shouldRetryOnError: false },
+  );
+  return {
+    plots: data ?? [],
+    loading: enabled && isLoading,
+    error,
+    retry: mutate,
+  };
 }
 ```
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `cd web/react-gui && npx vitest run src/journal/__tests__/useJournalEntries.test.ts`
-Expected: PASS (2 tests).
+Run: `cd web/react-gui && npx vitest run src/journal/__tests__/useJournalEntries.test.tsx src/journal/__tests__/useJournalPlots.test.tsx`
+Expected: both hook suites pass, including failure-to-retry cases.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add web/react-gui/src/journal/useJournalEntries.ts web/react-gui/src/journal/__tests__/useJournalEntries.test.ts
-git commit -m "feat(journal): entry list hook (SWR, filter-keyed)"
+git add web/react-gui/src/journal/useJournalEntries.ts web/react-gui/src/journal/useJournalPlots.ts web/react-gui/src/journal/__tests__/useJournalEntries.test.tsx web/react-gui/src/journal/__tests__/useJournalPlots.test.tsx
+git commit -m "feat(journal): retryable entry and plot read hooks"
 ```
 
 ### Task 6: Entry row component
@@ -745,11 +931,12 @@ git commit -m "feat(journal): entry list hook (SWR, filter-keyed)"
 **Files:**
 - Create: `web/react-gui/src/components/journal/JournalEntryRow.tsx`
 - Test: `web/react-gui/src/components/journal/__tests__/JournalEntryRow.test.tsx`
-- Modify: `web/react-gui/public/locales/en/journal.json` (add `activity.<code>` fallbacks + `row.*` keys)
+- Modify: `web/react-gui/public/locales/{de-CH,en,es,fr,it,lg,pt}/journal.json` (matching key shape; English fallback copy is allowed for this slice)
+- Test: `web/react-gui/src/journal/__tests__/journalLocales.test.ts`
 
 **Interfaces:**
 - Consumes: `EntryAggregate`.
-- Produces: `<JournalEntryRow entry={EntryAggregate} />` — a solid card row showing localized activity, plot, occurred date, and a status chip.
+- Produces: `<JournalEntryRow entry={EntryAggregate} plotLabel={string | null} />` — a solid card row showing localized activity, a human plot label, the occurrence date formatted in `occurred_timezone`, and a status chip. Raw plot UUIDs are never user-facing.
 
 - [ ] **Step 1: Add locale keys**
 
@@ -758,6 +945,7 @@ Add to `web/react-gui/public/locales/en/journal.json`:
 ```json
 "row": {
   "farmLevel": "Farm-level",
+  "unknownPlot": "Unknown plot",
   "status": { "final": "Final", "draft": "Draft", "voided": "Voided" }
 },
 "activity": {
@@ -770,6 +958,11 @@ Add to `web/react-gui/public/locales/en/journal.json`:
 }
 ```
 
+Create the same `journal.json` key shape for all seven configured locales.
+`journalLocales.test.ts` imports each file, recursively compares its keys to
+English, and fails if any locale is missing or gains a divergent key. Phase 6
+will mirror these source files into the Node-RED feed bundle.
+
 - [ ] **Step 2: Write the failing test**
 
 ```typescript
@@ -778,29 +971,68 @@ import { describe, it, expect, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
 
 vi.mock('react-i18next', () => ({
-  useTranslation: () => ({ t: (k: string) => k }),
+  useTranslation: () => ({
+    t: (k: string) => k,
+    i18n: { resolvedLanguage: 'en-GB', language: 'en-GB' },
+  }),
 }));
 
-import { JournalEntryRow } from '../JournalEntryRow';
+import { formatOccurredDate, JournalEntryRow } from '../JournalEntryRow';
 
 const entry = {
   entry_uuid: 'e1', activity_code: 'irrigation', plot_uuid: 'p1', status: 'final',
-  occurred_start: '2026-07-10T08:00:00.000Z', values: [],
+  occurred_start: '2026-07-10T08:00:00.000Z', occurred_timezone: 'Europe/Zurich', values: [],
 } as any;
 
 describe('JournalEntryRow', () => {
   it('shows the activity key and a status chip', () => {
-    render(<JournalEntryRow entry={entry} />);
+    render(<JournalEntryRow entry={entry} plotLabel="North field" />);
     expect(screen.getByText('activity.irrigation')).toBeInTheDocument();
     expect(screen.getByText('row.status.final')).toBeInTheDocument();
+    expect(screen.getByText(/North field/)).toBeInTheDocument();
+    expect(screen.queryByText(/p1/)).not.toBeInTheDocument();
+  });
+
+  it('formats the occurrence in its recorded timezone', () => {
+    expect(formatOccurredDate(
+      '2026-07-10T23:30:00.000Z',
+      'Pacific/Auckland',
+      'en-GB',
+    )).toContain('11 Jul 2026');
+  });
+});
+```
+
+```typescript
+// web/react-gui/src/journal/__tests__/journalLocales.test.ts
+import { describe, expect, it } from 'vitest';
+import deCH from '../../../public/locales/de-CH/journal.json';
+import en from '../../../public/locales/en/journal.json';
+import es from '../../../public/locales/es/journal.json';
+import fr from '../../../public/locales/fr/journal.json';
+import itLocale from '../../../public/locales/it/journal.json';
+import lg from '../../../public/locales/lg/journal.json';
+import pt from '../../../public/locales/pt/journal.json';
+
+function keyShape(value: unknown, prefix = ''): string[] {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return [prefix];
+  return Object.entries(value).flatMap(([key, child]) =>
+    keyShape(child, prefix ? `${prefix}.${key}` : key));
+}
+
+describe('journal locale parity', () => {
+  it.each([
+    ['de-CH', deCH], ['es', es], ['fr', fr], ['it', itLocale], ['lg', lg], ['pt', pt],
+  ])('%s matches the English key shape', (_locale, resource) => {
+    expect(keyShape(resource).sort()).toEqual(keyShape(en).sort());
   });
 });
 ```
 
 - [ ] **Step 3: Run test to verify it fails**
 
-Run: `cd web/react-gui && npx vitest run src/components/journal/__tests__/JournalEntryRow.test.tsx`
-Expected: FAIL — cannot resolve `../JournalEntryRow`.
+Run: `cd web/react-gui && npx vitest run src/components/journal/__tests__/JournalEntryRow.test.tsx src/journal/__tests__/journalLocales.test.ts`
+Expected: FAIL — the row component and six non-English journal resources do not exist.
 
 - [ ] **Step 4: Write the component**
 
@@ -810,12 +1042,26 @@ import React from 'react';
 import { useTranslation } from 'react-i18next';
 import type { EntryAggregate } from '../../types/journal';
 
-export const JournalEntryRow: React.FC<{ entry: EntryAggregate }> = ({ entry }) => {
-  const { t } = useTranslation('journal');
-  const date = new Date(entry.occurred_start).toLocaleDateString();
-  const statusClass =
-    entry.status === 'final'
-      ? 'bg-[var(--success-bg)] text-[var(--success-text)]'
+export function formatOccurredDate(value: string, timeZone: string, locale?: string): string {
+  const date = new Date(value);
+  if (!Number.isFinite(date.getTime())) return value;
+  try {
+    return new Intl.DateTimeFormat(locale, { dateStyle: 'medium', timeZone }).format(date);
+  } catch {
+    return new Intl.DateTimeFormat(locale, { dateStyle: 'medium' }).format(date);
+  }
+}
+
+interface Props { entry: EntryAggregate; plotLabel: string | null; }
+
+export const JournalEntryRow: React.FC<Props> = ({ entry, plotLabel }) => {
+  const { t, i18n } = useTranslation('journal');
+  const locale = i18n.resolvedLanguage || i18n.language;
+  const date = formatOccurredDate(entry.occurred_start, entry.occurred_timezone, locale);
+  const statusClass = entry.status === 'final'
+    ? 'bg-[var(--success-bg)] text-[var(--success-text)]'
+    : entry.status === 'voided'
+      ? 'bg-red-100 text-red-800'
       : 'bg-[var(--warn-bg)] text-[var(--warn-text)]';
   return (
     <div className="flex items-center justify-between gap-3 rounded-xl border border-[var(--border)] bg-[var(--card)] px-4 py-3">
@@ -824,7 +1070,7 @@ export const JournalEntryRow: React.FC<{ entry: EntryAggregate }> = ({ entry }) 
           {t(`activity.${entry.activity_code}`, entry.activity_code)}
         </p>
         <p className="text-sm text-[var(--text-secondary)]">
-          {entry.plot_uuid ?? t('row.farmLevel')} · {date}
+          {entry.plot_uuid ? (plotLabel ?? t('row.unknownPlot')) : t('row.farmLevel')} · {date}
         </p>
       </div>
       <span className={`shrink-0 rounded-full px-2.5 py-1 text-xs font-bold ${statusClass}`}>
@@ -837,31 +1083,34 @@ export const JournalEntryRow: React.FC<{ entry: EntryAggregate }> = ({ entry }) 
 
 - [ ] **Step 5: Run test to verify it passes**
 
-Run: `cd web/react-gui && npx vitest run src/components/journal/__tests__/JournalEntryRow.test.tsx`
-Expected: PASS (1 test).
+Run: `cd web/react-gui && npx vitest run src/components/journal/__tests__/JournalEntryRow.test.tsx src/journal/__tests__/journalLocales.test.ts`
+Expected: row behavior, timezone formatting, and locale-key parity all pass.
 
 - [ ] **Step 6: Commit**
 
 ```bash
-git add web/react-gui/src/components/journal/JournalEntryRow.tsx web/react-gui/src/components/journal/__tests__/JournalEntryRow.test.tsx web/react-gui/public/locales/en/journal.json
+git add web/react-gui/src/components/journal/JournalEntryRow.tsx web/react-gui/src/components/journal/__tests__/JournalEntryRow.test.tsx web/react-gui/public/locales/*/journal.json web/react-gui/src/journal/__tests__/journalLocales.test.ts
 git commit -m "feat(journal): timeline entry row"
 ```
 
 ### Task 7: Timeline + JournalPage wiring
 
+**Depends on:** Tasks 4, 5, and 6.
+
 **Files:**
 - Create: `web/react-gui/src/components/journal/JournalTimeline.tsx`
 - Modify: `web/react-gui/src/pages/JournalPage.tsx`
-- Modify: `web/react-gui/public/locales/en/journal.json` (add `timeline.*`, `unavailable.*`, `logActivity`)
+- Modify: `web/react-gui/public/locales/{de-CH,en,es,fr,it,lg,pt}/journal.json` (matching `timeline.*`, `unavailable.*`, `error.*`, `filters.*`, `logActivity` keys)
 - Test: `web/react-gui/src/components/journal/__tests__/JournalTimeline.test.tsx`
+- Test: `web/react-gui/src/pages/__tests__/JournalPage.test.tsx`
 
 **Interfaces:**
-- Consumes: `JournalEntryRow` (Task 6), `EntryAggregate`.
-- Produces: `<JournalTimeline entries={EntryAggregate[]} loading={boolean} />` (empty state when `!loading && entries.length === 0`).
+- Consumes: Tasks 4–6, including plot lookup and retryable reads.
+- Produces: `<JournalTimeline entries={EntryAggregate[]} plots={JournalPlot[]} loading={boolean} />`, plus a page with final-entry plot/activity filters. Empty state renders only after successful entry and plot reads.
 
 - [ ] **Step 1: Add locale keys**
 
-Add to `journal.json`: `"timeline": { "empty": "No activities logged yet.", "loading": "Loading activities…" }`, `"unavailable": { "title": "Journal not available", "body": "This gateway does not yet have the field journal. Update the gateway firmware to enable it." }`, `"logActivity": "Log activity"`.
+Add the same keys to all seven locale files: `"timeline": { "empty": "No activities logged yet.", "loading": "Loading activities…" }`, `"unavailable": { "title": "Journal not available", "body": "This gateway does not yet have the field journal. Update the gateway firmware to enable it." }`, `"error": { "title": "Could not load the journal", "body": "The gateway did not answer successfully. Try again.", "retry": "Try again" }`, `"filters": { "plot": "Plot", "allPlots": "All plots", "activity": "Activity", "allActivities": "All activities" }`, `"logActivity": "Log activity"`. English fallback copy is allowed, but `journalLocales.test.ts` must remain green.
 
 - [ ] **Step 2: Write the failing test**
 
@@ -870,13 +1119,23 @@ Add to `journal.json`: `"timeline": { "empty": "No activities logged yet.", "loa
 import { describe, it, expect, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
 
-vi.mock('react-i18next', () => ({ useTranslation: () => ({ t: (k: string) => k }) }));
+vi.mock('react-i18next', () => ({
+  useTranslation: () => ({
+    t: (k: string) => k,
+    i18n: { resolvedLanguage: 'en-GB', language: 'en-GB' },
+  }),
+}));
 
 import { JournalTimeline } from '../JournalTimeline';
 
 describe('JournalTimeline', () => {
+  it('shows the loading state while entries are pending', () => {
+    render(<JournalTimeline entries={[]} plots={[]} loading />);
+    expect(screen.getByText('timeline.loading')).toBeInTheDocument();
+  });
+
   it('shows the empty state when there are no entries', () => {
-    render(<JournalTimeline entries={[]} loading={false} />);
+    render(<JournalTimeline entries={[]} plots={[]} loading={false} />);
     expect(screen.getByText('timeline.empty')).toBeInTheDocument();
   });
 
@@ -885,17 +1144,145 @@ describe('JournalTimeline', () => {
       { entry_uuid: 'e1', activity_code: 'irrigation', plot_uuid: 'p1', status: 'final', occurred_start: '2026-07-10T08:00:00.000Z', values: [] },
       { entry_uuid: 'e2', activity_code: 'harvest', plot_uuid: null, status: 'final', occurred_start: '2026-07-09T08:00:00.000Z', values: [] },
     ] as any;
-    render(<JournalTimeline entries={entries} loading={false} />);
-    expect(screen.getByText('activity.irrigation')).toBeInTheDocument();
-    expect(screen.getByText('activity.harvest')).toBeInTheDocument();
+    const plots = [{ plot_uuid: 'p1', plot_code: 'N-1', name: 'North field' }] as any;
+    render(<JournalTimeline entries={entries} plots={plots} loading={false} />);
+    const rows = screen.getAllByText(/^activity\./);
+    expect(rows.map((row) => row.textContent)).toEqual([
+      'activity.irrigation',
+      'activity.harvest',
+    ]);
+    expect(screen.getByText(/North field/)).toBeInTheDocument();
+    expect(screen.queryByText(/p1/)).not.toBeInTheDocument();
+  });
+});
+```
+
+```typescript
+// web/react-gui/src/pages/__tests__/JournalPage.test.tsx
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+
+const mocks = vi.hoisted(() => ({
+  useJournalCatalog: vi.fn(),
+  useJournalEntries: vi.fn(),
+  useJournalPlots: vi.fn(),
+  timeline: vi.fn(),
+  retryCatalog: vi.fn(),
+  retryEntries: vi.fn(),
+  retryPlots: vi.fn(),
+}));
+
+vi.mock('react-i18next', () => ({
+  useTranslation: () => ({ t: (key: string) => key }),
+}));
+vi.mock('../../contexts/AuthContext', () => ({
+  useAuth: () => ({ username: 'farmer', logout: vi.fn() }),
+}));
+vi.mock('../../components/AppHeader', () => ({ AppHeader: () => <header /> }));
+vi.mock('../../journal/useJournalCatalog', () => ({
+  useJournalCatalog: mocks.useJournalCatalog,
+}));
+vi.mock('../../journal/useJournalEntries', () => ({
+  useJournalEntries: mocks.useJournalEntries,
+}));
+vi.mock('../../journal/useJournalPlots', () => ({
+  useJournalPlots: mocks.useJournalPlots,
+}));
+vi.mock('../../components/journal/JournalTimeline', () => ({
+  JournalTimeline: (props: unknown) => {
+    mocks.timeline(props);
+    return <div data-testid="timeline" />;
+  },
+}));
+
+import { JournalPage } from '../JournalPage';
+
+const catalog = {
+  vocab: [{ code: 'irrigation', kind: 'activity', active: 1 }],
+};
+const entries = [{ entry_uuid: 'e1' }];
+const plots = [{ plot_uuid: 'p1', plot_code: 'N-1', name: 'North field' }];
+
+describe('JournalPage', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.useJournalCatalog.mockReturnValue({
+      catalog, available: true, unavailable: false, loading: false,
+      error: undefined, retry: mocks.retryCatalog,
+    });
+    mocks.useJournalEntries.mockReturnValue({
+      entries, loading: false, error: undefined, retry: mocks.retryEntries,
+    });
+    mocks.useJournalPlots.mockReturnValue({
+      plots, loading: false, error: undefined, retry: mocks.retryPlots,
+    });
+  });
+
+  it('does not enable reads while the catalog probe is loading', () => {
+    mocks.useJournalCatalog.mockReturnValue({
+      catalog: undefined, available: false, unavailable: false, loading: true,
+      error: undefined, retry: mocks.retryCatalog,
+    });
+    render(<JournalPage />);
+    expect(screen.getByText('timeline.loading')).toBeInTheDocument();
+    expect(mocks.useJournalEntries).toHaveBeenCalledWith(expect.anything(), false);
+    expect(mocks.useJournalPlots).toHaveBeenCalledWith(false);
+  });
+
+  it('renders capability absence only for unavailable gateways', () => {
+    mocks.useJournalCatalog.mockReturnValue({
+      catalog: undefined, available: false, unavailable: true, loading: false,
+      error: undefined, retry: mocks.retryCatalog,
+    });
+    render(<JournalPage />);
+    expect(screen.getByText('unavailable.title')).toBeInTheDocument();
+    expect(screen.queryByText('error.title')).not.toBeInTheDocument();
+  });
+
+  it('renders and retries a catalog operational error', () => {
+    mocks.useJournalCatalog.mockReturnValue({
+      catalog: undefined, available: false, unavailable: false, loading: false,
+      error: new Error('offline'), retry: mocks.retryCatalog,
+    });
+    render(<JournalPage />);
+    expect(screen.getByText('error.title')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'error.retry' }));
+    expect(mocks.retryCatalog).toHaveBeenCalledOnce();
+  });
+
+  it('does not turn an entry-list failure into the empty state', () => {
+    mocks.useJournalEntries.mockReturnValue({
+      entries: [], loading: false, error: new Error('offline'), retry: mocks.retryEntries,
+    });
+    render(<JournalPage />);
+    expect(screen.getByText('error.title')).toBeInTheDocument();
+    expect(screen.queryByTestId('timeline')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'error.retry' }));
+    expect(mocks.retryEntries).toHaveBeenCalledOnce();
+    expect(mocks.retryPlots).toHaveBeenCalledOnce();
+  });
+
+  it('renders reads and applies plot and activity filters', async () => {
+    render(<JournalPage />);
+    expect(screen.getByRole('button', { name: 'logActivity' })).toBeInTheDocument();
+    expect(mocks.timeline).toHaveBeenCalledWith(expect.objectContaining({ entries, plots }));
+
+    fireEvent.change(screen.getByLabelText('filters.plot'), { target: { value: 'p1' } });
+    fireEvent.change(screen.getByLabelText('filters.activity'), {
+      target: { value: 'irrigation' },
+    });
+    await waitFor(() => expect(mocks.useJournalEntries).toHaveBeenLastCalledWith(
+      { status: 'final', limit: 50, plot_uuid: 'p1', activity_code: 'irrigation' },
+      true,
+    ));
   });
 });
 ```
 
 - [ ] **Step 3: Run test to verify it fails**
 
-Run: `cd web/react-gui && npx vitest run src/components/journal/__tests__/JournalTimeline.test.tsx`
-Expected: FAIL — cannot resolve `../JournalTimeline`.
+Run: `cd web/react-gui && npx vitest run src/components/journal/__tests__/JournalTimeline.test.tsx src/pages/__tests__/JournalPage.test.tsx`
+Expected: both suites fail because `JournalTimeline` and the new page behavior do not exist yet.
 
 - [ ] **Step 4: Write the timeline**
 
@@ -903,12 +1290,12 @@ Expected: FAIL — cannot resolve `../JournalTimeline`.
 // web/react-gui/src/components/journal/JournalTimeline.tsx
 import React from 'react';
 import { useTranslation } from 'react-i18next';
-import type { EntryAggregate } from '../../types/journal';
+import type { EntryAggregate, JournalPlot } from '../../types/journal';
 import { JournalEntryRow } from './JournalEntryRow';
 
-interface Props { entries: EntryAggregate[]; loading: boolean; }
+interface Props { entries: EntryAggregate[]; plots: JournalPlot[]; loading: boolean; }
 
-export const JournalTimeline: React.FC<Props> = ({ entries, loading }) => {
+export const JournalTimeline: React.FC<Props> = ({ entries, plots, loading }) => {
   const { t } = useTranslation('journal');
   if (loading) {
     return <p className="text-[var(--text-secondary)]">{t('timeline.loading')}</p>;
@@ -920,63 +1307,156 @@ export const JournalTimeline: React.FC<Props> = ({ entries, loading }) => {
       </div>
     );
   }
+  const labels = new Map(plots.map((plot) => [
+    plot.plot_uuid,
+    plot.name?.trim() || plot.plot_code,
+  ]));
   return (
     <div className="flex flex-col gap-2">
-      {entries.map((e) => <JournalEntryRow key={e.entry_uuid} entry={e} />)}
+      {entries.map((entry) => (
+        <JournalEntryRow
+          key={entry.entry_uuid}
+          entry={entry}
+          plotLabel={entry.plot_uuid ? (labels.get(entry.plot_uuid) ?? null) : null}
+        />
+      ))}
     </div>
   );
 };
 ```
 
-- [ ] **Step 5: Rewrite `JournalPage` body to mount the timeline**
-
-Replace the placeholder `<main>` content in `web/react-gui/src/pages/JournalPage.tsx` with:
+- [ ] **Step 5: Replace `JournalPage` with the complete reading surface**
 
 ```typescript
-// imports at top:
+// web/react-gui/src/pages/JournalPage.tsx
+import React, { useMemo, useState } from 'react';
+import { useTranslation } from 'react-i18next';
+import { AppHeader } from '../components/AppHeader';
+import { JournalTimeline } from '../components/journal/JournalTimeline';
+import { useAuth } from '../contexts/AuthContext';
 import { useJournalCatalog } from '../journal/useJournalCatalog';
 import { useJournalEntries } from '../journal/useJournalEntries';
-import { JournalTimeline } from '../components/journal/JournalTimeline';
+import { useJournalPlots } from '../journal/useJournalPlots';
+import type { EntryListFilters } from '../types/journal';
 
-// inside the component, after useAuth:
-const { available, loading: catalogLoading } = useJournalCatalog();
-const { entries, loading: entriesLoading } = useJournalEntries({ status: 'final', limit: 50 }, available);
+export const JournalPage: React.FC = () => {
+  const { t } = useTranslation('journal');
+  const { username, logout } = useAuth();
+  const [plotUuid, setPlotUuid] = useState('');
+  const [activityCode, setActivityCode] = useState('');
+  const catalogState = useJournalCatalog();
+  const filters = useMemo<EntryListFilters>(() => ({
+    status: 'final',
+    limit: 50,
+    ...(plotUuid ? { plot_uuid: plotUuid } : {}),
+    ...(activityCode ? { activity_code: activityCode } : {}),
+  }), [activityCode, plotUuid]);
+  const entryState = useJournalEntries(filters, catalogState.available);
+  const plotState = useJournalPlots(catalogState.available);
+  const readError = entryState.error || plotState.error;
+  const activities = (catalogState.catalog?.vocab ?? [])
+    .filter((row) => row.kind === 'activity' && row.active === 1);
 
-// <main> body:
-<main className="mx-auto max-w-3xl px-4 py-8">
-  {catalogLoading ? (
-    <p className="text-[var(--text-secondary)]">{t('timeline.loading')}</p>
-  ) : !available ? (
+  const retryReads = () => Promise.all([entryState.retry(), plotState.retry()]);
+  const errorCard = (retry: () => Promise<unknown>) => (
     <div className="rounded-2xl border border-[var(--border)] bg-[var(--card)] p-8">
-      <h2 className="text-xl font-bold text-[var(--text)]">{t('unavailable.title')}</h2>
-      <p className="mt-2 text-[var(--text-secondary)]">{t('unavailable.body')}</p>
+      <h2 className="text-xl font-bold text-[var(--text)]">{t('error.title')}</h2>
+      <p className="mt-2 text-[var(--text-secondary)]">{t('error.body')}</p>
+      <button
+        type="button"
+        className="btn-liquid mt-4 rounded-lg px-4 py-2"
+        onClick={() => void retry()}
+      >
+        {t('error.retry')}
+      </button>
     </div>
-  ) : (
-    <>
-      <div className="mb-4 flex justify-end">
-        <button type="button" className="btn-liquid-red rounded-lg px-5 py-2.5 font-bold">
-          {t('logActivity')}
-        </button>
-      </div>
-      <JournalTimeline entries={entries} loading={entriesLoading} />
-    </>
-  )}
-</main>
+  );
+
+  return (
+    <div className="min-h-screen bg-[var(--bg)]">
+      <AppHeader
+        title={t('title')}
+        activeTab="journal"
+        username={username}
+        onLogout={logout}
+      />
+      <main className="mx-auto max-w-3xl px-4 py-8">
+        {catalogState.loading ? (
+          <p className="text-[var(--text-secondary)]">{t('timeline.loading')}</p>
+        ) : catalogState.unavailable ? (
+          <div className="rounded-2xl border border-[var(--border)] bg-[var(--card)] p-8">
+            <h2 className="text-xl font-bold text-[var(--text)]">{t('unavailable.title')}</h2>
+            <p className="mt-2 text-[var(--text-secondary)]">{t('unavailable.body')}</p>
+          </div>
+        ) : catalogState.error ? (
+          errorCard(catalogState.retry)
+        ) : (
+          <>
+            <div className="mb-4 flex flex-wrap items-end gap-3">
+              <label className="min-w-40 flex-1 text-sm text-[var(--text-secondary)]">
+                {t('filters.plot')}
+                <select
+                  aria-label={t('filters.plot')}
+                  className="mt-1 w-full rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-[var(--text)]"
+                  value={plotUuid}
+                  onChange={(event) => setPlotUuid(event.target.value)}
+                >
+                  <option value="">{t('filters.allPlots')}</option>
+                  {plotState.plots.map((plot) => (
+                    <option key={plot.plot_uuid} value={plot.plot_uuid}>
+                      {plot.name?.trim() || plot.plot_code}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="min-w-40 flex-1 text-sm text-[var(--text-secondary)]">
+                {t('filters.activity')}
+                <select
+                  aria-label={t('filters.activity')}
+                  className="mt-1 w-full rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-[var(--text)]"
+                  value={activityCode}
+                  onChange={(event) => setActivityCode(event.target.value)}
+                >
+                  <option value="">{t('filters.allActivities')}</option>
+                  {activities.map((activity) => (
+                    <option key={activity.code} value={activity.code}>
+                      {t(`activity.${activity.code}`, activity.code)}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <button type="button" className="btn-liquid rounded-lg px-5 py-2.5 font-bold">
+                {t('logActivity')}
+              </button>
+            </div>
+            {readError ? errorCard(retryReads) : (
+              <JournalTimeline
+                entries={entryState.entries}
+                plots={plotState.plots}
+                loading={entryState.loading || plotState.loading}
+              />
+            )}
+          </>
+        )}
+      </main>
+    </div>
+  );
+};
 ```
 
 - [ ] **Step 6: Run tests + typecheck + build**
 
-Run: `cd web/react-gui && npx vitest run src/components/journal src/journal && npx tsc --noEmit && npm run build`
+Run: `cd web/react-gui && npx vitest run src/components/journal src/journal src/pages/__tests__/JournalPage.test.tsx && npm run test:unit && npx tsc --noEmit && npm run build`
 Expected: all journal tests PASS; tsc clean; build succeeds.
 
 - [ ] **Step 7: Commit**
 
 ```bash
-git add web/react-gui/src/components/journal/JournalTimeline.tsx web/react-gui/src/pages/JournalPage.tsx web/react-gui/public/locales/en/journal.json web/react-gui/src/components/journal/__tests__/JournalTimeline.test.tsx
+git add web/react-gui/src/components/journal/JournalTimeline.tsx web/react-gui/src/pages/JournalPage.tsx web/react-gui/public/locales/*/journal.json web/react-gui/src/components/journal/__tests__/JournalTimeline.test.tsx web/react-gui/src/pages/__tests__/JournalPage.test.tsx
 git commit -m "feat(journal): reading-surface timeline on the Journal page with empty + unavailable states"
 ```
 
-**Phase 2 acceptance:** on a Slice-1 gateway the Journal tab lists final entries newest-first with an empty state; on a pre-journal gateway it shows the unavailable card instead of an error; `Log activity` is present (wired in Phase 3).
+**Phase 2 acceptance:** on a Slice-1 gateway the Journal tab lists final entries newest-first, supports plot/activity filtering, renders human plot labels and occurrence dates in their recorded timezone, and shows an empty state only after successful reads. A pre-journal gateway shows the unavailable card; operational catalog/list/plot failures show a retryable error. `Log activity` is present (wired in Phase 3), and all seven source locales have matching journal keys.
 
 ---
 
