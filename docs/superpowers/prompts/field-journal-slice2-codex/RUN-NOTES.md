@@ -16,3 +16,13 @@ Append-only execution log for the accepted Phase 0 and Phase 1-6 plans on `desig
 - Edge: journal API 44/44; both profile module suites 99/99; schema, lifecycle, command-path, sync-contract, bootstrap, and profile-parity gates exited 0.
 - GUI: `npx tsc --noEmit` exited 0; `npm run test:unit` passed 557 tests across 98 Vitest files plus 93 tests in the tsx runner; `npm run build` exited 0.
 - Existing build warnings: stale Browserslist/baseline-browser data and chunks over 500 kB. These are baseline warnings, not Slice 2 regressions.
+
+## 2026-07-16T00:07:29+02:00 - sol preflight for Phase 0 and Phase 1
+
+- Phase 0: ACCEPT. The test harness executes `database/seed-blank.sql`; the seeded catalog contains 266 vocab rows, 3 templates, 4 layouts, and 10 products. The existing catalog route and owner-scoped loader provide the required additive seam. No schema, migration, or `flows.json` edit is needed.
+- Phase 1: MAJOR BLOCKER. The accepted plan's client contract does not match the Slice 1 implementation:
+  - `createEntry` and `voidEntry` return `{ entry_uuid, outbox_event_uuid, sync_version }`, not `EntryAggregate`.
+  - create requires an explicit `status` of `draft` or `final`; the planned payload omits it.
+  - plot reads return `{ plots: [...] }`; plot-group reads return `{ plot_groups: [...] }`.
+  - plot-group aggregates expose `members`, not `member_plot_uuids`.
+- Decision: hold Track B at the Phase 1 hard stop. Continue the independent Phase 0 track. Do not rewrite the accepted plan or invent an unreviewed API contract.
