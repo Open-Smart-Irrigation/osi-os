@@ -185,12 +185,11 @@ export const FarmingDashboard: React.FC = () => {
               </div>
             )}
 
-            {/* Zones Section */}
+            {/* Zones section — heading omitted; the active nav tab labels the
+                page. The Unassigned Devices section below keeps its heading
+                because it is a distinct section. */}
             {zones.length > 0 && (
               <div className="mb-8">
-                <h2 className="text-2xl font-bold text-[var(--text)] mb-4 high-contrast-text">
-                  {t('irrigationZones')}
-                </h2>
                 {zones.map((zone) => (
                   <IrrigationZoneCard
                     key={zone.id}

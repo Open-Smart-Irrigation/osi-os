@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Link } from 'react-router-dom';
+import { AppHeader } from '../components/AppHeader';
 import { useAnalysisCatalog } from '../analysis/useAnalysisCatalog';
 import { useAnalysisSeries } from '../analysis/useAnalysisSeries';
 import { useAnalysisViews } from '../analysis/useAnalysisViews';
@@ -42,7 +42,7 @@ function toRequest(ws: AnalysisWorkspaceState): AnalysisSeriesRequest | null {
 
 export function CrossZoneAnalysisPage() {
   const { t } = useTranslation();
-  const { username } = useAuth();
+  const { username, logout } = useAuth();
   const [workspace, setWorkspace] = useState<AnalysisWorkspaceState>(() => loadWorkspace() ?? createDefaultWorkspace());
   const [viewSaveError, setViewSaveError] = useState<unknown>(null);
   const chartRef = useRef<EChartHandle>(null);
@@ -144,14 +144,10 @@ export function CrossZoneAnalysisPage() {
 
   return (
     <div className="analysis-page flex h-screen flex-col bg-[var(--bg)] text-[var(--text)]">
-      <header className="shrink-0 border-b border-[var(--border)] bg-[var(--header-bg)] text-[var(--header-text)]">
-        <div className="mx-auto max-w-[1600px] px-4 py-4">
-          <div>
-            <Link to="/dashboard" className="text-sm font-medium text-[var(--header-subtext)] hover:text-[var(--header-text)]">{t('analysis.backToDashboard')}</Link>
-            <h1 className="mt-2 text-3xl font-semibold">{t('analysis.title')}</h1>
-          </div>
-        </div>
-      </header>
+      {/* Crown pinned above the internal scroll area (decision A). */}
+      <div className="shrink-0">
+        <AppHeader title={t('analysis.title')} activeTab="data" username={username} onLogout={logout} />
+      </div>
 
       {(catalogError || seriesError || viewsError || viewSaveError) && (
         <div className="border-b border-[var(--warn-border)] bg-[var(--warn-bg)] px-4 py-3 text-sm text-[var(--warn-text)]">

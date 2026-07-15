@@ -1,11 +1,9 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Link } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import useSWR from 'swr';
-import { LanguageSwitcher } from '../components/LanguageSwitcher';
+import { AppHeader } from '../components/AppHeader';
 import { HistoryDesktopShell } from '../components/history/HistoryDesktopShell';
 import { HistoryMobileShell } from '../components/history/HistoryMobileShell';
-import { HistoryMobileHeader } from '../components/history/mobile/HistoryMobileHeader';
 import { useAuth } from '../contexts/AuthContext';
 import { useFeatureFlags } from '../history/useFeatureFlags';
 import { useHistoryCards } from '../history/useHistoryCards';
@@ -394,42 +392,12 @@ export const HistoryDashboard: React.FC = () => {
 
   return (
     <div className="min-h-screen bg-[var(--bg)]">
-      {isMobileViewport ? (
-        <HistoryMobileHeader onLogout={logout} />
-      ) : (
-        <header className="bg-[var(--header-bg)] shadow-xl">
-          <div className="mx-auto max-w-7xl px-4 py-6">
-            <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-              <div>
-                <h1 className="text-4xl font-bold text-[var(--header-text)] high-contrast-text">
-                  {t('history.shell.title')}
-                </h1>
-                <p className="mt-1 text-lg text-[var(--header-subtext)]">
-                  {t('history.shell.subtitle', { username })}
-                </p>
-              </div>
-              <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
-                <div className="flex justify-center sm:justify-start">
-                  <LanguageSwitcher />
-                </div>
-                <Link
-                  to="/dashboard"
-                  className="rounded-lg bg-[var(--secondary-bg)] px-6 py-3 text-center text-lg font-bold text-[var(--text)] transition-colors hover:bg-[var(--border)]"
-                >
-                  {t('history.nav.legacyDashboard')}
-                </Link>
-                <button
-                  type="button"
-                  onClick={logout}
-                  className="rounded-lg bg-[var(--secondary-bg)] px-6 py-3 text-lg font-bold text-[var(--text)] transition-colors hover:bg-[var(--border)]"
-                >
-                  {t('history.nav.logout')}
-                </button>
-              </div>
-            </div>
-          </div>
-        </header>
-      )}
+      <AppHeader
+        title={t('history.shell.title')}
+        activeTab="data"
+        username={username}
+        onLogout={logout}
+      />
 
       <main className="mx-auto max-w-7xl px-4 py-4 lg:py-8">
         {!featureFlags.historyEnabled && (

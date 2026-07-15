@@ -359,17 +359,17 @@ describe('History mobile overview', () => {
     expect(screen.queryByRole('button', { name: 'Update workspace' })).not.toBeInTheDocument();
   });
 
-  it('keeps mobile utility actions behind one compact overflow button', async () => {
+  it('exposes logout through the shared header account menu without an inline legacy link', async () => {
     renderHistoryAtMobileWidth('/history');
 
     await screen.findByRole('heading', { name: 'History' });
-    expect(screen.getByRole('button', { name: 'Open history actions' })).toBeInTheDocument();
-    expect(screen.queryByRole('link', { name: 'Legacy dashboard' })).not.toBeInTheDocument();
+    // The mobile history header is now the shared AppHeader: utility actions
+    // live in the Account menu, and the Zones tab replaces the legacy link.
+    expect(screen.queryByRole('link', { name: /legacy dashboard/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Open history actions' })).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('button', { name: 'Open history actions' }));
-
-    expect(screen.getByRole('link', { name: 'Legacy dashboard' })).toHaveAttribute('href', '/dashboard');
-    expect(screen.getByRole('button', { name: 'Logout' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'account' }));
+    expect(screen.getByRole('menuitem', { name: 'logout' })).toBeInTheDocument();
   });
 
   it('toggles pinned card preference through the existing history API path', async () => {

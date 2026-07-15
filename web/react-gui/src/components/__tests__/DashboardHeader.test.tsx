@@ -86,15 +86,16 @@ describe('DashboardHeader (osi-os)', () => {
     expect(onAddDevice).toHaveBeenCalledOnce();
   });
 
-  it('uses the wrapping server-style action layout so header menus are not clipped', () => {
+  it('renders the Add menu in a non-clipping action row', () => {
     renderHeader();
 
-    const addMenuWrapper = screen.getByRole('button', { name: 'Add' }).closest('div');
-    expect(addMenuWrapper).toHaveClass('w-[calc(50%-4px)]');
-    expect(addMenuWrapper).toHaveClass('sm:w-auto');
+    const addTrigger = screen.getByRole('button', { name: 'Add' });
+    expect(addTrigger).toHaveClass('btn-liquid');
 
-    const actionGroup = addMenuWrapper?.parentElement;
-    expect(actionGroup).toHaveClass('flex-wrap');
+    // The action row is a centered flex group, never a horizontal scroller
+    // that would clip the dropdown.
+    const actionGroup = addTrigger.closest('div')?.parentElement;
+    expect(actionGroup).toHaveClass('items-center');
     expect(actionGroup).not.toHaveClass('overflow-x-auto');
   });
 

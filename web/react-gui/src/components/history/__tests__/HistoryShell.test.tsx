@@ -326,7 +326,9 @@ describe('History shell', () => {
     renderWithProviders(React.createElement(HistoryDashboard));
 
     expect(screen.getByRole('heading', { level: 1, name: 'History' })).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: /legacy dashboard/i })).toHaveAttribute('href', '/dashboard');
+    // Navigation is the shared AppHeader now: the Zones tab replaces the old
+    // inline "legacy dashboard" link.
+    expect(screen.queryByRole('link', { name: /legacy dashboard/i })).not.toBeInTheDocument();
 
     await screen.findByText(/history is unavailable/i);
     expect(screen.getByRole('button', { name: /retry/i })).toBeInTheDocument();

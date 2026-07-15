@@ -41,9 +41,8 @@ export const AppHeader: React.FC<AppHeaderProps> = ({
   onLogout,
   actions,
 }) => {
-  const { t } = useTranslation(['dashboard', 'settings']);
-  const { i18n } = useTranslation();
-  const { balkenHorizontal } = resolveAgroscopeAssets(i18n.language);
+  const { t, i18n } = useTranslation(['dashboard', 'settings']);
+  const { balkenHorizontal } = resolveAgroscopeAssets(i18n?.language ?? 'en');
   const { pathname } = useLocation();
 
   const dataTarget = isDesktopBrowser() ? '/analysis' : '/history';
@@ -72,25 +71,45 @@ export const AppHeader: React.FC<AppHeaderProps> = ({
         </div>
       </div>
       <header className="glass-chrome sticky top-0 z-30 border-b border-[var(--border)]">
-        <div className="max-w-7xl mx-auto px-4 pt-5">
-          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-            <div>
-              <h1 className="text-3xl sm:text-4xl font-bold text-[var(--header-text)]">{title}</h1>
-              <p className="text-[var(--header-subtext)] text-lg mt-1">
+        <div className="max-w-7xl mx-auto px-4 py-3">
+          <h1 className="sr-only">{title}</h1>
+          <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-3">
+            {/* Primary navigation on its own floating glass pill. The Agroscope
+                red returns once here: the active-tab lozenge's specular ring.
+                Red stays out of buttons — the app reserves red for danger. */}
+            <div className="flex items-center gap-4">
+              <nav aria-label="Primary">
+                <div className="glass-tabs inline-flex gap-1 p-1">
+                  {tabs.map((tab) => (
+                    <Link
+                      key={tab.key}
+                      to={tab.to}
+                      aria-current={tab.active ? 'page' : undefined}
+                      className={`glass-tab px-5 py-2 text-[15px] font-semibold ${
+                        tab.active
+                          ? 'text-[var(--header-text)]'
+                          : 'text-[var(--text-tertiary)] hover:text-[var(--header-text)]'
+                      }`}
+                    >
+                      {tab.label}
+                    </Link>
+                  ))}
+                </div>
+              </nav>
+              <p className="hidden md:block text-[var(--header-subtext)] text-base">
                 {t('welcome', { username })}
               </p>
             </div>
 
-            <div className="flex flex-wrap items-center justify-end gap-2 sm:gap-3">
+            <div className="flex items-center justify-end gap-2 sm:gap-3">
               {actions}
 
-              <Link to="/settings" className={`w-[calc(50%-4px)] sm:w-auto ${LIQUID_BUTTON}`}>
+              <Link to="/settings" className={LIQUID_BUTTON}>
                 {t('settings:entryPoint')}
               </Link>
 
               <HeaderMenu
                 label={t('account')}
-                className="w-[calc(50%-4px)] sm:w-auto"
                 triggerClassName="btn-liquid text-[var(--text)] text-lg px-6 py-3"
                 items={[
                   { key: 'osi-server', label: t('accountMenu.osiServer'), to: '/account-link' },
@@ -99,28 +118,6 @@ export const AppHeader: React.FC<AppHeaderProps> = ({
               />
             </div>
           </div>
-
-          {/* Primary navigation on its own floating glass pill. The Agroscope
-              red returns once here: the active-tab lozenge's specular ring.
-              Red stays out of buttons — the app reserves red for danger. */}
-          <nav className="mt-4 pb-3" aria-label="Primary">
-            <div className="glass-tabs inline-flex gap-1 p-1">
-              {tabs.map((tab) => (
-                <Link
-                  key={tab.key}
-                  to={tab.to}
-                  aria-current={tab.active ? 'page' : undefined}
-                  className={`glass-tab px-5 py-2 text-[15px] font-semibold ${
-                    tab.active
-                      ? 'text-[var(--header-text)]'
-                      : 'text-[var(--text-tertiary)] hover:text-[var(--header-text)]'
-                  }`}
-                >
-                  {tab.label}
-                </Link>
-              ))}
-            </div>
-          </nav>
         </div>
       </header>
     </div>

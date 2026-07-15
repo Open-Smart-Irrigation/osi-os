@@ -35,7 +35,6 @@ export const DashboardHeader: React.FC<DashboardHeaderProps> = ({
       actions={
         <HeaderMenu
           label={t('add')}
-          className="w-[calc(50%-4px)] sm:w-auto"
           triggerClassName="btn-liquid text-[var(--text)] text-lg px-6 py-3"
           align="left"
           items={[
