@@ -91,5 +91,13 @@
       "insufficient": "insufficiente (n={{n}})",
       "exploratory": "Solo esplorativo — r di Pearson su bucket allineati; non è un test di significatività."
     }
+  },
+  "restart": {
+    "gateway_identity_change": "Identità del gateway aggiornata. I servizi verranno riavviati tra {{count}} s.",
+    "chirpstack_bootstrap": "Configurazione LoRaWAN completata. I servizi verranno riavviati tra {{count}} s.",
+    "account_link": "Account collegato. I servizi verranno riavviati tra {{count}} s.",
+    "account_unlink": "Account scollegato. I servizi verranno riavviati tra {{count}} s.",
+    "generic": "I servizi del gateway verranno riavviati tra {{count}} s.",
+    "in_progress": "I servizi del gateway si stanno riavviando…"
   }
 }
