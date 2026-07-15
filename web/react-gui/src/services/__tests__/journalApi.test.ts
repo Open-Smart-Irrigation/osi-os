@@ -1,15 +1,20 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { get, post } = vi.hoisted(() => ({ get: vi.fn(), post: vi.fn() }));
+const { get, post, put } = vi.hoisted(() => ({
+  get: vi.fn(),
+  post: vi.fn(),
+  put: vi.fn(),
+}));
 
-vi.mock('../api', () => ({ api: { get, post } }));
+vi.mock('../api', () => ({ api: { get, post, put } }));
 
 import { isJournalUnavailable, journalApi } from '../journalApi';
-import type { CreateEntryPayload } from '../journalApi';
+import type { CreateEntryPayload, UpdateEntryPayload } from '../journalApi';
 
 beforeEach(() => {
   get.mockReset();
   post.mockReset();
+  put.mockReset();
 });
 
 describe('journalApi', () => {
@@ -98,6 +103,37 @@ describe('journalApi', () => {
     await expect(journalApi.listPlotGroups()).resolves.toEqual([
       { group_uuid: 'g1', members: ['p1'] },
     ]);
+  });
+
+  it('promotes a version-zero draft through the UUID-encoded PUT route', async () => {
+    const payload: UpdateEntryPayload = {
+      base_sync_version: 0,
+      status: 'final',
+      plot_uuid: '11111111-1111-4111-8111-111111111111',
+      activity_code: 'irrigation',
+      template_code: 'farmer_quick',
+      template_version: 1,
+      layout_code: 'open_field',
+      layout_version: 1,
+      occurred_start_local: '2026-07-16T08:30:00',
+      occurred_timezone: 'Europe/Zurich',
+      values: [
+        {
+          attribute_code: 'attr.irrigation_depth',
+          value: 12,
+          unit_code: 'unit.mm_water',
+        },
+      ],
+    };
+    const receipt = {
+      entry_uuid: 'e1/segment',
+      outbox_event_uuid: 'o2',
+      sync_version: 1,
+    };
+    put.mockResolvedValue({ data: receipt });
+
+    await expect(journalApi.updateEntry('e1/segment', payload)).resolves.toEqual(receipt);
+    expect(put).toHaveBeenCalledWith('/api/journal/entries/e1%2Fsegment', payload);
   });
 
   it('URL-encodes the entry UUID and posts the void reason and base version', async () => {
