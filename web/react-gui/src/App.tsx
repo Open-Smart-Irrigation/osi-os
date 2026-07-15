@@ -5,6 +5,7 @@ import { PrivateRoute } from './components/PrivateRoute';
 import { Login } from './pages/Login';
 import { Register } from './pages/Register';
 import { FarmingDashboard } from './pages/FarmingDashboard';
+import { JournalPage } from './pages/JournalPage';
 import { HistoryDashboard } from './pages/HistoryDashboard';
 import { HistoryCardDetailPage } from './pages/HistoryCardDetailPage';
 import { AccountLink } from './pages/AccountLink';
@@ -109,6 +110,15 @@ function App() {
 
           {/* Default redirect */}
           <Route path="/" element={<Navigate to="/dashboard" replace />} />
+          <Route
+            path="/journal"
+            element={
+              <PrivateRoute>
+                <JournalPage />
+              </PrivateRoute>
+            }
+          />
+
           {/* Unknown routes (incl. /journal until the field-journal feature
               lands) fall back to the dashboard instead of a blank screen */}
           <Route path="*" element={<Navigate to="/dashboard" replace />} />

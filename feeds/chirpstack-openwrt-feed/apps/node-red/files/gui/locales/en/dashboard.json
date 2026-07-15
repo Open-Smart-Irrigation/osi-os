@@ -4,7 +4,8 @@
   "add": "Add",
   "addMenu": {
     "zone": "Add Zone",
-    "device": "Add Device"
+    "device": "Add Device",
+    "activity": "Log activity"
   },
   "data": "Data",
   "account": "Account",
@@ -29,7 +30,7 @@
   "journal": "Journal",
   "tabs": {
     "zones": "Zones",
-    "history": "History",
-    "analysis": "Analysis"
+    "data": "Data",
+    "journal": "Journal"
   }
 }

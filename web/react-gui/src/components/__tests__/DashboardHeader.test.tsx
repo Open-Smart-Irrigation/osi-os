@@ -16,11 +16,10 @@ vi.mock('react-i18next', () => ({
         title: 'Dashboard',
         'addMenu.zone': 'Zone',
         'addMenu.device': 'Device',
-        data: 'Data',
-        journal: 'Journal',
+        'addMenu.activity': 'Log activity',
         'tabs.zones': 'Zones',
-        'tabs.history': 'History',
-        'tabs.analysis': 'Analysis',
+        'tabs.data': 'Data',
+        'tabs.journal': 'Journal',
         'settings:entryPoint': 'Settings',
         account: 'Account',
         'accountMenu.osiServer': 'OSI Server',
@@ -108,26 +107,31 @@ describe('DashboardHeader (osi-os)', () => {
     expect(screen.getByRole('menu')).not.toHaveClass('right-0');
   });
 
-  it('points the desktop Data link to the analysis view', () => {
+  it('points the Data tab to the analysis workspace on desktop', () => {
     renderHeader();
     expect(screen.getByRole('link', { name: 'Data' })).toHaveAttribute('href', '/analysis');
   });
 
-  it('hides the Data link on mobile/tablet browsers', () => {
+  it('points the Data tab to the mobile history view on phones/tablets', () => {
     vi.mocked(isDesktopBrowser).mockReturnValue(false);
     renderHeader();
-    expect(screen.queryByRole('link', { name: 'Data' })).not.toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Data' })).toHaveAttribute('href', '/history');
   });
 
-  it('links the Journal action and the primary tabs with the red active accent', () => {
+  it('renders the Zones/Data/Journal primary tabs, with Zones active on the dashboard', () => {
     renderHeader();
-    expect(screen.getByRole('link', { name: 'Journal' })).toHaveAttribute('href', '/journal');
     const nav = screen.getByRole('navigation', { name: 'Primary' });
     expect(nav).toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Zones' })).toHaveAttribute('href', '/dashboard');
-    expect(screen.getByRole('link', { name: 'History' })).toHaveAttribute('href', '/history');
-    // BrowserRouter starts at "/" — no tab claims aria-current there
-    expect(nav.querySelector('[aria-current="page"]')).toBeNull();
+    expect(screen.getByRole('link', { name: 'Journal' })).toHaveAttribute('href', '/journal');
+    // Dashboard sets activeTab="zones"
+    expect(screen.getByRole('link', { name: 'Zones' })).toHaveAttribute('aria-current', 'page');
+  });
+
+  it('offers Log activity in the Add menu', () => {
+    renderHeader();
+    fireEvent.click(screen.getByRole('button', { name: 'Add' }));
+    expect(screen.getByRole('menuitem', { name: 'Log activity' })).toBeInTheDocument();
   });
 
   it('keeps the Account menu scoped to account linking and logout', () => {

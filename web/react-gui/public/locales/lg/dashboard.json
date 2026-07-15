@@ -4,7 +4,8 @@
   "add": "Yongera",
   "addMenu": {
     "zone": "Yongera Ekifo",
-    "device": "Yongera Ekyuma"
+    "device": "Yongera Ekyuma",
+    "activity": "Wandiika ky'okoze"
   },
   "data": "Data",
   "account": "Akaawunti",
@@ -25,5 +26,10 @@
   "unassignedDevices": "Ebyuma ebitawerekwa",
   "unassignedSubtitle": "Ebyuma ebino tebiwerekeddwa ku kifo kyonna",
   "soilSensors": "Ebyuma eby'obutaka",
-  "smartValves": "Zzimu ez'amagezi"
+  "smartValves": "Zzimu ez'amagezi",
+  "tabs": {
+    "zones": "Ebitundu",
+    "data": "Data",
+    "journal": "Journal"
+  }
 }

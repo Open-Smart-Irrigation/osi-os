@@ -4,7 +4,8 @@
   "add": "Ajouter",
   "addMenu": {
     "zone": "Ajouter une zone",
-    "device": "Ajouter un appareil"
+    "device": "Ajouter un appareil",
+    "activity": "Consigner une activité"
   },
   "data": "Données",
   "account": "Compte",
@@ -25,5 +26,10 @@
   "unassignedDevices": "Appareils non assignés",
   "unassignedSubtitle": "Ces appareils ne sont assignés à aucune zone",
   "soilSensors": "Capteurs de sol",
-  "smartValves": "Vannes intelligentes"
+  "smartValves": "Vannes intelligentes",
+  "tabs": {
+    "zones": "Zones",
+    "data": "Données",
+    "journal": "Journal"
+  }
 }

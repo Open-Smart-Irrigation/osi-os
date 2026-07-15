@@ -7,6 +7,7 @@ import type en_accountLink from '../../public/locales/en/accountLink.json';
 import type en_history from '../../public/locales/en/history.json';
 import type en_support from '../../public/locales/en/support.json';
 import type en_settings from '../../public/locales/en/settings.json';
+import type en_journal from '../../public/locales/en/journal.json';
 
 declare module 'i18next' {
   interface CustomTypeOptions {
@@ -20,6 +21,7 @@ declare module 'i18next' {
       history: typeof en_history;
       support: typeof en_support;
       settings: typeof en_settings;
+      journal: typeof en_journal;
     };
   }
 }

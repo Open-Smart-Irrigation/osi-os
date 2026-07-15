@@ -18,6 +18,7 @@ import accountLink from '../public/locales/en/accountLink.json';
 import history from '../public/locales/en/history.json';
 import support from '../public/locales/en/support.json';
 import settings from '../public/locales/en/settings.json';
+import journal from '../public/locales/en/journal.json';
 
 // Explicit re-export for a name the synthesized `export *` entry can't carry:
 // ValveCancelButton is a default-only export, invisible to `export *`.
@@ -30,9 +31,9 @@ const previewI18n = createInstance({
   lng: 'en',
   fallbackLng: 'en',
   defaultNS: 'common',
-  ns: ['common', 'auth', 'dashboard', 'devices', 'accountLink', 'history', 'support', 'settings'],
+  ns: ['common', 'auth', 'dashboard', 'devices', 'accountLink', 'history', 'support', 'settings', 'journal'],
   resources: {
-    en: { common, auth, dashboard, devices, accountLink, history, support, settings },
+    en: { common, auth, dashboard, devices, accountLink, history, support, settings, journal },
   },
   interpolation: { escapeValue: false },
   react: { useSuspense: false },
