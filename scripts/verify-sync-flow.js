@@ -1811,8 +1811,12 @@ expectIncludes('Clear MQTT Broker Config', 'msg._mqttConfigBackup = {', 'backs u
 expectExcludes('Clear MQTT Broker Config', '/etc/init.d/node-red restart', 'Node-RED restart while unlink cleanup is still in flight');
 expectIncludes('Rollback MQTT Broker Config', 'rolled back MQTT credentials', 'restores prior MQTT config when link finalization fails');
 expectIncludes('Restore MQTT Broker Config', 'restored MQTT credentials', 'restores prior MQTT config when unlink finalization fails');
-expectIncludes('Schedule Link Restart', '/etc/init.d/node-red restart', 'schedules a Node-RED restart only after successful link completion');
-expectIncludes('Schedule Unlink Restart', '/etc/init.d/node-red restart', 'schedules a Node-RED restart only after successful unlink completion');
+expectIncludes('Schedule Link Restart', '/var/run/osi-node-red-restart-requests', 'requests a daemon-owned restart only after successful link completion');
+expectIncludes('Schedule Link Restart', "reason: 'account_link', delaySeconds: 10", 'uses the account-link restart contract');
+expectExcludes('Schedule Link Restart', '/etc/init.d/node-red restart', 'does not restart Node-RED directly');
+expectIncludes('Schedule Unlink Restart', '/var/run/osi-node-red-restart-requests', 'requests a daemon-owned restart only after successful unlink completion');
+expectIncludes('Schedule Unlink Restart', "reason: 'account_unlink', delaySeconds: 2", 'uses the account-unlink restart contract');
+expectExcludes('Schedule Unlink Restart', '/etc/init.d/node-red restart', 'does not restart Node-RED directly');
 const cloudRestNodeIds = [
   'al-link-server-auth',
   'sync-bootstrap-http',

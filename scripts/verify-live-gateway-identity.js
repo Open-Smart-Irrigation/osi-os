@@ -3,6 +3,7 @@
 
 const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
 const { spawnSync } = require('child_process');
 
 const repoRoot = path.resolve(__dirname, '..');
@@ -59,6 +60,10 @@ function countMatches(source, pattern) {
   return (source.match(pattern) || []).length;
 }
 
+function sha256(source) {
+  return crypto.createHash('sha256').update(source).digest('hex');
+}
+
 function shellIntegerAssignment(source, name) {
   const match = source.match(new RegExp(`^${name}=([0-9]+)$`, 'm'));
   return match ? Number(match[1]) : null;
@@ -74,6 +79,8 @@ const bootInitSource = read('openwrt/package/base-files/files/etc/init.d/boot');
 const nodeRedInitSource = read('feeds/chirpstack-openwrt-feed/apps/node-red/files/node-red.init');
 const lifecycleTestPath = 'scripts/test-identityd-service-lifecycle.sh';
 const lifecycleTestSource = read(lifecycleTestPath);
+const silentCatchBaselineSource = read('scripts/fixtures/silent-catch-baseline.json');
+const sizeAllowancesSource = read('scripts/verify-flows-size-ratchet-allowances.json');
 
 expectIncludes('openwrt/osi-os.config', openWrtConfig, 'CONFIG_PACKAGE_jsonfilter=y', 'build includes jsonfilter');
 expectIncludes('jsonfilter Makefile', jsonfilterMakefile, 'PKG_NAME:=jsonfilter', 'pinned OpenWrt source declares jsonfilter');
@@ -276,6 +283,368 @@ expectIncludes('deploy.sh', deploySource, 'swap_call flipTo "$PREV_STAMP" >/dev/
 expectCondition(countMatches(deploySource, /\/etc\/init\.d\/node-red restart/g) === 2,
   'deploy.sh: only payload flip and rollback directly restart Node-RED',
   'deploy.sh: expected exactly two direct Node-RED restarts for payload flip and rollback');
+
+const flowRelativePaths = profiles.map((profile) => `${profile}/files/usr/share/flows.json`);
+const identityGateIds = [
+  'sync-bootstrap-build',
+  'sync-outbox-build',
+  'sync-pending-build',
+  'sync-force-build',
+  'command-ack-build-batch',
+  'sync-state-build',
+  'al-link-build-req',
+];
+const syncBuilderIds = [
+  'sync-bootstrap-build',
+  'sync-outbox-build',
+  'sync-pending-build',
+  'sync-force-build',
+];
+const restartOwnerContracts = [
+  ['al-link-restart-node-red', 'account_link', 10],
+  ['al-unlink-restart-node-red', 'account_unlink', 2],
+];
+const expectedNodeLibs = {
+  'sync-bootstrap-build': [{ var: 'crypto', module: 'crypto' }, { var: 'osiDb', module: 'osi-db-helper' }],
+  'sync-outbox-build': [{ var: 'osiDb', module: 'osi-db-helper' }],
+  'sync-pending-build': [{ var: 'osiDb', module: 'osi-db-helper' }],
+  'sync-force-build': [{ var: 'crypto', module: 'crypto' }, { var: 'osiDb', module: 'osi-db-helper' }, { var: 'osiCloudHttp', module: 'osi-cloud-http' }],
+  'command-ack-build-batch': [{ var: 'osiDb', module: 'osi-db-helper' }],
+  'sync-state-build': [{ var: 'crypto', module: 'crypto' }, { var: 'osiDb', module: 'osi-db-helper' }],
+  'al-link-build-req': [{ var: 'osiDb', module: 'osi-db-helper' }],
+  'al-link-restart-node-red': [],
+  'al-unlink-restart-node-red': [],
+};
+const sentinelPath = '/var/run/osi-identity-restart.json';
+const requestDirectory = '/var/run/osi-node-red-restart-requests';
+const localRestartReader = [
+  'function gatewayIdentityRestartPending() {',
+  "  const fs = global.get('fs');",
+  '  if (!fs) {',
+  "    node.warn('Gateway identity restart check: fs global is unavailable; blocking identity-sensitive work');",
+  '    return true;',
+  '  }',
+  "  const statePath = '/var/run/osi-identity-restart.json';",
+  '  if (!fs.existsSync(statePath)) return false;',
+  '  try {',
+  "    JSON.parse(fs.readFileSync(statePath, 'utf8'));",
+  '    return true;',
+  '  } catch (error) {',
+  "    node.warn('Gateway identity restart state is unreadable; blocking identity-sensitive work: ' + String(error && error.message ? error.message : error));",
+  '    return true;',
+  '  }',
+  '}',
+].join('\n');
+const protectedNodeHashes = {
+  'al-link-validate': 'c6dc24e4f754e3d6d5dde77d5352d96e6105b958349e549e8896d50bf64bf2d7',
+  'sync-init-fn': '2ecba63b87c0389c9f1273267346101d861d5a076abe1410ec496111fe502263',
+};
+const migrationPreflightHashes = {
+  'sync-bootstrap-build': ['\nfunction normalizeCloudServerUrl', '9ae98d1f0fba0086ebc1dbe556a58656f7bd52d74b6ca81d085735df3950fe46'],
+  'sync-outbox-build': ['\nfunction normalizeCloudServerUrl', 'abbebaac2e03f06562d6e6c49ff10fbca800c229d8cf5879a9af3ba0a0558c56'],
+  'sync-pending-build': ['\nfunction normalizeCloudServerUrl', '6f4fbe26fd5954042736f07e05d99c40ffe55ad1bff2a35097c8fec32f49570b'],
+  'sync-force-build': ['\nfunction recordFailure', 'df5cb5ca7dae8dc1bfeba7b8546e1d215ead1f71730f426400bbafb02f07864d'],
+};
+
+function executeRestartOwner(func, msgId, options) {
+  const fixtureOptions = options || {};
+  const calls = { mkdir: [], write: [], rename: [], unlink: [] };
+  const warnings = [];
+  const statuses = [];
+  const fsGlobal = {
+    mkdirSync(...args) {
+      calls.mkdir.push(args);
+      if (fixtureOptions.mkdirError) throw fixtureOptions.mkdirError;
+    },
+    writeFileSync(...args) {
+      calls.write.push(args);
+      if (fixtureOptions.writeError) throw fixtureOptions.writeError;
+    },
+    renameSync(...args) {
+      calls.rename.push(args);
+      if (fixtureOptions.renameError) throw fixtureOptions.renameError;
+    },
+    unlinkSync(...args) { calls.unlink.push(args); },
+  };
+  const globalContext = { get(key) { return key === 'fs' && fixtureOptions.fsAvailable !== false ? fsGlobal : null; } };
+  const nodeContext = {
+    warn(value) { warnings.push(String(value)); },
+    status(value) { statuses.push(value); },
+  };
+  const fixedDate = { now() { return 1700000000123; } };
+  const fixedMath = { floor: Math.floor, random() { return fixtureOptions.randomValue == null ? 0.125 : fixtureOptions.randomValue; } };
+  const execute = new Function('msg', 'global', 'node', 'Buffer', 'Date', 'Math', func);
+  const msg = msgId === undefined ? {} : { _msgid: msgId };
+  const result = execute(msg, globalContext, nodeContext, Buffer, fixedDate, fixedMath);
+  return { calls, warnings, statuses, result, msg };
+}
+
+function verifyRestartOwnerExecution(label, func, reason, delaySeconds) {
+  const hostileId = '../../etc/passwd ?#\u2603';
+  const safeHostileId = Buffer.from(hostileId, 'utf8').toString('hex');
+  const hostile = executeRestartOwner(func, hostileId, { randomValue: 0.125 });
+  expectCondition(hostile.calls.mkdir.length === 1
+      && hostile.calls.mkdir[0][0] === requestDirectory
+      && JSON.stringify(hostile.calls.mkdir[0][1]) === JSON.stringify({ recursive: true, mode: 0o700 }),
+    `${label}: creates the private request directory with mode 0700`,
+    `${label}: must mkdir the request directory recursively with mode 0700`);
+  expectCondition(hostile.calls.write.length === 1 && hostile.calls.rename.length === 1,
+    `${label}: writes one temporary file and renames it once`,
+    `${label}: expected one write and one atomic rename`);
+  if (hostile.calls.write.length === 1 && hostile.calls.rename.length === 1) {
+    const [tempPath, rawJson, writeOptions] = hostile.calls.write[0];
+    const [renamedFrom, finalPath] = hostile.calls.rename[0];
+    let request = null;
+    try { request = JSON.parse(rawJson); } catch (error) { fail(`${label}: request JSON is invalid: ${error.message}`); }
+    expectCondition(path.dirname(finalPath) === requestDirectory
+        && finalPath === `${requestDirectory}/${reason}-${safeHostileId}.json`,
+      `${label}: hostile msg._msgid is deterministically encoded inside the request directory`,
+      `${label}: final request path escaped or is not keyed by the safe msg._msgid encoding: ${finalPath}`);
+    expectCondition(tempPath !== finalPath && renamedFrom === tempPath && tempPath.startsWith(finalPath + '.') && tempPath.endsWith('.tmp'),
+      `${label}: unique temporary path is renamed to the deterministic final path`,
+      `${label}: temporary publication path is not a unique child of the deterministic final path`);
+    expectCondition(JSON.stringify(writeOptions) === JSON.stringify({ encoding: 'utf8', mode: 0o600, flag: 'wx' }),
+      `${label}: temporary request uses mode 0600 and exclusive creation`,
+      `${label}: temporary request must use utf8, mode 0600, and flag wx`);
+    expectCondition(request && JSON.stringify(Object.keys(request)) === JSON.stringify(['reason', 'delaySeconds', 'requestedAtEpoch'])
+        && request.reason === reason && request.delaySeconds === delaySeconds && request.requestedAtEpoch === 1700000000,
+      `${label}: final JSON has exactly reason, delaySeconds, and requestedAtEpoch`,
+      `${label}: request JSON does not match the exact three-field contract`);
+  }
+  expectCondition(Array.isArray(hostile.result) && hostile.result[0] === hostile.msg && hostile.result[1] === null,
+    `${label}: successful publication uses only the success output`,
+    `${label}: successful publication must return [msg, null]`);
+
+  const first = executeRestartOwner(func, 'request-one', { randomValue: 0.25 });
+  const second = executeRestartOwner(func, 'request-two', { randomValue: 0.375 });
+  const retry = executeRestartOwner(func, 'request-one', { randomValue: 0.5 });
+  const firstFinal = first.calls.rename[0] && first.calls.rename[0][1];
+  const secondFinal = second.calls.rename[0] && second.calls.rename[0][1];
+  const retryFinal = retry.calls.rename[0] && retry.calls.rename[0][1];
+  const firstTemp = first.calls.write[0] && first.calls.write[0][0];
+  const retryTemp = retry.calls.write[0] && retry.calls.write[0][0];
+  expectCondition(firstFinal && secondFinal && firstFinal !== secondFinal,
+    `${label}: distinct msg._msgid values produce distinct final paths`,
+    `${label}: final request path is not keyed by msg._msgid`);
+  expectCondition(firstFinal && firstFinal === retryFinal && firstTemp && retryTemp && firstTemp !== retryTemp,
+    `${label}: retries keep a deterministic final path and use a fresh temporary suffix`,
+    `${label}: retries must keep the final path stable while changing the temporary path`);
+
+  for (const [missingLabel, msgId] of [['missing', undefined], ['empty', '   ']]) {
+    const invalid = executeRestartOwner(func, msgId, { randomValue: 0.625 });
+    expectCondition(invalid.calls.mkdir.length === 0 && invalid.calls.write.length === 0 && invalid.calls.rename.length === 0
+        && invalid.warnings.some((warning) => warning.includes('msg._msgid'))
+        && invalid.statuses.some((status) => status && status.fill === 'red')
+        && Array.isArray(invalid.result) && invalid.result[0] === null && invalid.result[1] === invalid.msg
+        && invalid.msg.statusCode === 503 && invalid.msg.payload && invalid.msg.payload.success === false,
+      `${label}: ${missingLabel} msg._msgid fails visibly before filesystem access`,
+      `${label}: ${missingLabel} msg._msgid must warn, set red status, publish nothing, and use only the error output`);
+  }
+
+  const missingFs = executeRestartOwner(func, 'missing-fs', { fsAvailable: false });
+  expectCondition(missingFs.calls.mkdir.length === 0 && missingFs.calls.write.length === 0
+      && missingFs.warnings.some((warning) => warning.includes('fs global is unavailable'))
+      && missingFs.statuses.some((status) => status && status.fill === 'red')
+      && Array.isArray(missingFs.result) && missingFs.result[0] === null && missingFs.result[1] === missingFs.msg
+      && missingFs.msg.statusCode === 503 && missingFs.msg.payload?.success === false,
+    `${label}: missing fs fails through only the error output`,
+    `${label}: missing fs must not preserve the success response or reach success wiring`);
+
+  const mkdirError = Object.assign(new Error('m'.repeat(500)), { code: 'EACCES' });
+  const mkdirFailure = executeRestartOwner(func, 'mkdir-failure', { mkdirError });
+  expectCondition(mkdirFailure.calls.mkdir.length === 1 && mkdirFailure.calls.write.length === 0
+      && mkdirFailure.calls.rename.length === 0 && mkdirFailure.calls.unlink.length === 0
+      && mkdirFailure.warnings.length === 1
+      && mkdirFailure.warnings[0].includes('central hub restart could not be queued')
+      && mkdirFailure.statuses.some((status) => status && status.fill === 'red')
+      && Array.isArray(mkdirFailure.result) && mkdirFailure.result[0] === null && mkdirFailure.result[1] === mkdirFailure.msg
+      && mkdirFailure.msg.statusCode === 503 && mkdirFailure.msg.payload?.success === false
+      && typeof mkdirFailure.msg.payload?.message === 'string'
+      && mkdirFailure.msg.payload?.detail?.length === 200
+      && JSON.stringify(mkdirFailure.msg.payload).length <= 512,
+    `${label}: mkdir failure stops before publication and uses only the bounded error output`,
+    `${label}: mkdir failure must warn, set red status, avoid publication and cleanup, and return one bounded 503 error`);
+
+  const enospc = Object.assign(new Error('x'.repeat(500)), { code: 'ENOSPC' });
+  const writeFailure = executeRestartOwner(func, 'write-failure', { writeError: enospc });
+  expectCondition(writeFailure.calls.write.length === 1 && writeFailure.calls.rename.length === 0 && writeFailure.calls.unlink.length === 1
+      && writeFailure.statuses.some((status) => status && status.fill === 'red')
+      && Array.isArray(writeFailure.result) && writeFailure.result[0] === null && writeFailure.result[1] === writeFailure.msg
+      && writeFailure.msg.statusCode === 503 && writeFailure.msg.payload?.success === false
+      && writeFailure.msg.payload?.detail?.length === 200,
+    `${label}: ENOSPC fails closed, cleans up, and uses only the error output`,
+    `${label}: ENOSPC must never retain a success response or reach success wiring`);
+
+  const renameError = Object.assign(new Error('fixture rename failure'), { code: 'EIO' });
+  const renameFailure = executeRestartOwner(func, 'rename-failure', { renameError });
+  expectCondition(renameFailure.calls.write.length === 1 && renameFailure.calls.rename.length === 1 && renameFailure.calls.unlink.length === 1
+      && renameFailure.statuses.some((status) => status && status.fill === 'red')
+      && Array.isArray(renameFailure.result) && renameFailure.result[0] === null && renameFailure.result[1] === renameFailure.msg
+      && renameFailure.msg.statusCode === 503 && renameFailure.msg.payload?.success === false,
+    `${label}: rename failure cleans up and uses only the error output`,
+    `${label}: rename failure must never retain a success response or reach success wiring`);
+
+  const longId = executeRestartOwner(func, 'x'.repeat(65), {});
+  expectCondition(longId.calls.mkdir.length === 0 && longId.calls.write.length === 0 && longId.calls.rename.length === 0
+      && longId.warnings.some((warning) => warning.includes('too long'))
+      && longId.statuses.some((status) => status && status.fill === 'red')
+      && Array.isArray(longId.result) && longId.result[0] === null && longId.result[1] === longId.msg
+      && longId.msg.statusCode === 503 && longId.msg.payload?.success === false,
+    `${label}: very long msg._msgid fails before filename construction`,
+    `${label}: msg._msgid must enforce the 64-byte filename-key contract`);
+}
+
+let canonicalFlowsText = '';
+for (const flowRelativePath of flowRelativePaths) {
+  const flowsText = read(flowRelativePath);
+  let flows = [];
+  try {
+    flows = JSON.parse(flowsText);
+  } catch (error) {
+    fail(`${flowRelativePath}: invalid JSON: ${error.message}`);
+    continue;
+  }
+  expectCondition(Array.isArray(flows), `${flowRelativePath}: flow document is an array`, `${flowRelativePath}: flow document must be an array`);
+  if (!Array.isArray(flows)) continue;
+  const byId = new Map(flows.map((node) => [node && node.id, node]));
+  const sentinelReaders = flows.filter((node) => node && typeof node.func === 'string' && node.func.includes(sentinelPath));
+  expectCondition(
+    sentinelReaders.length === identityGateIds.length && sentinelReaders.every((node) => identityGateIds.includes(node.id)),
+    `${flowRelativePath}: exactly seven identity gates read the restart sentinel`,
+    `${flowRelativePath}: restart sentinel readers must be exactly ${identityGateIds.join(', ')}; got ${sentinelReaders.map((node) => node.id).join(', ')}`
+  );
+  for (const nodeId of identityGateIds) {
+    const node = byId.get(nodeId);
+    if (!node || typeof node.func !== 'string') {
+      fail(`${flowRelativePath}: missing identity-gate function ${nodeId}`);
+      continue;
+    }
+    expectIncludes(`${flowRelativePath}:${nodeId}`, node.func, localRestartReader, 'contains the exact fail-closed local restart reader');
+    expectCondition(JSON.stringify(node.libs) === JSON.stringify(expectedNodeLibs[nodeId]),
+      `${flowRelativePath}:${nodeId}: preserves its reviewed libs`,
+      `${flowRelativePath}:${nodeId}: libs changed from ${JSON.stringify(expectedNodeLibs[nodeId])}`);
+    for (const banned of ["global.get('cp')", 'spawn(', 'require(']) {
+      expectExcludes(`${flowRelativePath}:${nodeId}`, node.func, banned, `does not use ${banned}`);
+    }
+  }
+  for (const nodeId of syncBuilderIds) {
+    const func = byId.get(nodeId) && byId.get(nodeId).func;
+    if (!func) continue;
+    const pendingCheckAt = func.indexOf('if (gatewayIdentityRestartPending()) {');
+    const identityReadAt = func.indexOf('const identity = currentGatewayIdentity();');
+    expectCondition(pendingCheckAt >= 0 && identityReadAt > pendingCheckAt,
+      `${flowRelativePath}:${nodeId}: blocks before reading the boot identity`,
+      `${flowRelativePath}:${nodeId}: restart check must precede currentGatewayIdentity()`);
+    expectIncludes(`${flowRelativePath}:${nodeId}`, func, "source: 'gateway-identity'", 'records the existing gateway-identity error source');
+    expectIncludes(`${flowRelativePath}:${nodeId}`, func, "const err = new Error('Gateway identity is being applied. The central hub will restart before syncing.');\n    err.statusCode = 503;\n    err.source = 'gateway-identity';\n    throw err;", 'throws a marked status 503 while the identity restart is pending');
+  }
+  const bootstrapBuilder = byId.get('sync-bootstrap-build');
+  if (bootstrapBuilder) expectIncludes(`${flowRelativePath}:sync-bootstrap-build`, bootstrapBuilder.func, "const lastErrorSource = e && e.source === 'gateway-identity'\n    ? 'gateway-identity'\n    : 'bootstrap';", 'selects the outer error source from the caught error marker, not stale flow state');
+  const commandAck = byId.get('command-ack-build-batch');
+  if (commandAck) {
+    expectIncludes(`${flowRelativePath}:command-ack-build-batch`, commandAck.func,
+      'if (gatewayIdentityRestartPending()) {\n    await close();\n    return null;\n  }',
+      'drops command ACK work while restart is pending');
+  }
+  const syncState = byId.get('sync-state-build');
+  if (syncState) expectIncludes(`${flowRelativePath}:sync-state-build`, syncState.func, 'restartPending: gatewayIdentityRestartPending()', 'exposes the boolean restart state');
+  const linkRequest = byId.get('al-link-build-req');
+  if (linkRequest) {
+    expectIncludes(`${flowRelativePath}:al-link-build-req`, linkRequest.func,
+      "flow.set('al_server_password', null);\n  msg.statusCode = 503;\n  msg.payload = { message: 'Gateway identity is being applied. The central hub will restart before linking.' };\n  return [null, msg];",
+      'clears the password and returns the second/error output with status 503');
+  }
+  for (const [nodeId, reason, delaySeconds] of restartOwnerContracts) {
+    const node = byId.get(nodeId);
+    if (!node || typeof node.func !== 'string') {
+      fail(`${flowRelativePath}: missing restart-owner function ${nodeId}`);
+      continue;
+    }
+    expectIncludes(`${flowRelativePath}:${nodeId}`, node.func, "const fs = global.get('fs');", 'uses the approved fs global');
+    expectIncludes(`${flowRelativePath}:${nodeId}`, node.func, requestDirectory, 'publishes into the daemon request directory');
+    expectIncludes(`${flowRelativePath}:${nodeId}`, node.func, `reason: '${reason}', delaySeconds: ${delaySeconds}, requestedAtEpoch: Math.floor(Date.now() / 1000)`, 'publishes the exact three-field request contract');
+    expectIncludes(`${flowRelativePath}:${nodeId}`, node.func, "const requestId = String((msg && msg._msgid) || '').trim();", 'requires the Node-RED message identity');
+    expectIncludes(`${flowRelativePath}:${nodeId}`, node.func, ".slice(0, 200)", 'bounds filesystem error detail returned to the operator');
+    expectIncludes(`${flowRelativePath}:${nodeId}`, node.func, "const requestIdBytes = Buffer.from(requestId, 'utf8');", 'measures the UTF-8 message identity');
+    expectIncludes(`${flowRelativePath}:${nodeId}`, node.func, 'if (requestIdBytes.length > 64) {', 'bounds the filename key before filesystem access');
+    expectIncludes(`${flowRelativePath}:${nodeId}`, node.func, "const safeRequestId = requestIdBytes.toString('hex');", 'encodes msg._msgid into a path-safe deterministic key');
+    expectIncludes(`${flowRelativePath}:${nodeId}`, node.func, `const finalPath = requestDir + '/${reason}-' + safeRequestId + '.json';`, 'keys the deterministic final path by the safe message identity');
+    expectIncludes(`${flowRelativePath}:${nodeId}`, node.func, "tempPath = finalPath + '.' + uniqueSuffix + '.tmp';", 'uses a unique temporary suffix for retry-safe publication');
+    expectIncludes(`${flowRelativePath}:${nodeId}`, node.func, "fs.writeFileSync(tempPath, JSON.stringify(request), { encoding: 'utf8', mode: 0o600, flag: 'wx' });\n  fs.renameSync(tempPath, finalPath);", 'publishes atomically through a unique temporary file');
+    expectIncludes(`${flowRelativePath}:${nodeId}`, node.func, 'node.status({', 'reports the scheduled restart');
+    expectCondition(node.outputs === 2, `${flowRelativePath}:${nodeId}: has separate success and error outputs`, `${flowRelativePath}:${nodeId}: must declare two outputs`);
+    const expectedWires = reason === 'account_link'
+      ? [['al-link-resp', 'al-link-clear-state', 'al-link-bootstrap-link-out'], ['al-link-resp']]
+      : [['al-unlink-resp', 'al-link-clear-state'], ['al-unlink-resp']];
+    expectCondition(JSON.stringify(node.wires) === JSON.stringify(expectedWires),
+      `${flowRelativePath}:${nodeId}: failure reaches only the HTTP response`,
+      `${flowRelativePath}:${nodeId}: success/error wiring must be ${JSON.stringify(expectedWires)}`);
+    expectCondition(JSON.stringify(node.libs) === JSON.stringify(expectedNodeLibs[nodeId]), `${flowRelativePath}:${nodeId}: keeps libs empty`, `${flowRelativePath}:${nodeId}: libs must remain []`);
+    for (const banned of ["global.get('cp')", 'spawn(', '/etc/init.d/node-red']) {
+      expectExcludes(`${flowRelativePath}:${nodeId}`, node.func, banned, `does not use ${banned}`);
+    }
+    verifyRestartOwnerExecution(`${flowRelativePath}:${nodeId}`, node.func, reason, delaySeconds);
+  }
+  for (const [nodeId, expectedHash] of Object.entries(protectedNodeHashes)) {
+    const node = byId.get(nodeId);
+    expectCondition(node && sha256(node.func || '') === expectedHash,
+      `${flowRelativePath}:${nodeId}: protected function is byte-identical to its pre-edit snapshot`,
+      `${flowRelativePath}:${nodeId}: protected function changed from its pre-edit snapshot`);
+  }
+  for (const [nodeId, [endMarker, expectedHash]] of Object.entries(migrationPreflightHashes)) {
+    const node = byId.get(nodeId);
+    if (!node || typeof node.func !== 'string') continue;
+    const startAt = node.func.indexOf('async function runGatewayMigrationPreflight');
+    const endAt = node.func.indexOf(endMarker, startAt);
+    const body = startAt >= 0 && endAt > startAt ? node.func.slice(startAt, endAt) : '';
+    expectCondition(sha256(body) === expectedHash,
+      `${flowRelativePath}:${nodeId}: runGatewayMigrationPreflight is byte-identical to its pre-edit snapshot`,
+      `${flowRelativePath}:${nodeId}: runGatewayMigrationPreflight changed from its pre-edit snapshot`);
+  }
+  if (!canonicalFlowsText) canonicalFlowsText = flowsText;
+  else expectCondition(flowsText === canonicalFlowsText, `${flowRelativePath}: byte-identical flow mirror`, `${flowRelativePath}: differs from bcm2712 flows`);
+}
+
+let silentCatchBaseline = null;
+let sizeAllowances = null;
+try {
+  silentCatchBaseline = JSON.parse(silentCatchBaselineSource);
+  sizeAllowances = JSON.parse(sizeAllowancesSource);
+} catch (error) {
+  fail(`Task 4 ratchet JSON is invalid: ${error.message}`);
+}
+if (silentCatchBaseline) {
+  expectCondition(silentCatchBaseline.profiles?.bcm2712?.silentCatchCount === 218 && silentCatchBaseline.profiles?.bcm2709?.silentCatchCount === 218,
+    'silent-catch baseline records 218 for both maintained profiles',
+    'silent-catch baseline must be 218 for both maintained profiles after seven non-frozen catches are removed');
+  expectIncludes('silent-catch baseline', String(silentCatchBaseline.generatedFrom || ''), 'seven silent catches outside frozen runGatewayMigrationPreflight bodies', 'records the frozen-preflight reality correction');
+}
+if (sizeAllowances) {
+  const expectedGrowth = {
+    'sync-bootstrap-build': 5709,
+    'sync-outbox-build': 1597,
+    'sync-pending-build': 1344,
+    'sync-force-build': 6697,
+    'command-ack-build-batch': 975,
+    'sync-state-build': 1072,
+    'al-link-build-req': 969,
+    'al-link-restart-node-red': 1761,
+    'al-unlink-restart-node-red': 1773,
+  };
+  for (const [nodeId, delta] of Object.entries(expectedGrowth)) {
+    expectCondition(sizeAllowances.node_allowances?.[nodeId]?.delta === delta,
+      `size allowance ${nodeId}: exact cumulative delta ${delta}`,
+      `size allowance ${nodeId}: expected exact cumulative delta ${delta}`);
+    expectIncludes(`size allowance ${nodeId}`, String(sizeAllowances.node_allowances?.[nodeId]?.reason || ''), 'live identity restart sentinel (Option C Slice 1)', 'declares Task 4 growth');
+  }
+  expectCondition(sizeAllowances.total_allowance?.delta === 36172,
+    'size total allowance: exact cumulative delta 36172',
+    'size total allowance: expected exact cumulative delta 36172');
+  const allowanceKeys = [...sizeAllowancesSource.matchAll(/^    "([^"]+)":/gm)].map((match) => match[1]);
+  expectCondition(new Set(allowanceKeys).size === allowanceKeys.length,
+    'size allowances contain no duplicate node keys',
+    'size allowances contain duplicate node keys');
+}
 
 if (lifecycleTestSource) {
   const lifecycleResult = spawnSync('sh', [path.join(repoRoot, lifecycleTestPath)], {
