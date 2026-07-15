@@ -25,5 +25,11 @@
   "unassignedDevices": "Unassigned Devices",
   "unassignedSubtitle": "These devices are not assigned to any irrigation zone",
   "soilSensors": "Soil Sensors",
-  "smartValves": "Smart Valves"
+  "smartValves": "Smart Valves",
+  "journal": "Journal",
+  "tabs": {
+    "zones": "Zones",
+    "data": "Data",
+    "journal": "Journal"
+  }
 }

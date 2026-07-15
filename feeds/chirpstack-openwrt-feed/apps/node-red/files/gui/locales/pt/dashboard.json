@@ -25,5 +25,10 @@
   "unassignedDevices": "Dispositivos não atribuídos",
   "unassignedSubtitle": "Estes dispositivos não estão atribuídos a nenhuma zona de rega",
   "soilSensors": "Sensores de solo",
-  "smartValves": "Válvulas inteligentes"
+  "smartValves": "Válvulas inteligentes",
+  "tabs": {
+    "zones": "Zonas",
+    "data": "Dados",
+    "journal": "Diário"
+  }
 }

@@ -25,5 +25,10 @@
   "unassignedDevices": "Dispositivos sin asignar",
   "unassignedSubtitle": "Estos dispositivos no están asignados a ninguna zona de riego",
   "soilSensors": "Sensores de suelo",
-  "smartValves": "Válvulas inteligentes"
+  "smartValves": "Válvulas inteligentes",
+  "tabs": {
+    "zones": "Zonas",
+    "data": "Datos",
+    "journal": "Diario"
+  }
 }

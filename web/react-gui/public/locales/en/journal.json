@@ -1,0 +1,15 @@
+{
+  "title": "Field journal",
+  "welcome": "Activity record for {{username}}",
+  "comingSoon": {
+    "badge": "In development",
+    "heading": "The field journal is being built",
+    "body": "Log what happened in the field — irrigation, spraying, seeding, harvest, observations — so your sensor curves and analytics can be read in context. Entries anchor to a plot, capture the sensor snapshot at the moment of the activity, and appear as markers on your history charts.",
+    "captureTitle": "Fast capture",
+    "captureBody": "Six recent activities on a tap grid, product-first entry, and a plain-language confirmation line before every save.",
+    "recordTitle": "A real farm record",
+    "recordBody": "Structured, machine-readable entries per plot with frozen provenance — a detailed record designed for compliance profiles later.",
+    "syncTitle": "Honest sync",
+    "syncBody": "Every entry tells you whether it is saved on the farm gateway or waiting for it. Nothing is silently lost."
+  }
+}

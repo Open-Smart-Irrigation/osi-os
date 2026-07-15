@@ -25,5 +25,10 @@
   "unassignedDevices": "Ebyuma ebitawerekwa",
   "unassignedSubtitle": "Ebyuma ebino tebiwerekeddwa ku kifo kyonna ky'okusukkulirira",
   "soilSensors": "Ebyuma eby'obutaka",
-  "smartValves": "Zzimu ez'amagezi"
+  "smartValves": "Zzimu ez'amagezi",
+  "tabs": {
+    "zones": "Ebitundu",
+    "data": "Data",
+    "journal": "Journal"
+  }
 }

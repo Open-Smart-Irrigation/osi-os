@@ -25,5 +25,10 @@
   "unassignedDevices": "Nicht zugewiesene Geräte",
   "unassignedSubtitle": "Diese Geräte sind keiner Bewässerungszone zugewiesen",
   "soilSensors": "Bodensensoren",
-  "smartValves": "Intelligente Ventile"
+  "smartValves": "Intelligente Ventile",
+  "tabs": {
+    "zones": "Zonen",
+    "data": "Daten",
+    "journal": "Journal"
+  }
 }
