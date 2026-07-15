@@ -2874,3 +2874,43 @@ test('export.csv streams through a Node-RED msg.res wrapper (msg.res._res)', asy
   const csvText = Buffer.concat(sink.chunks).toString('utf8');
   assert.match(csvText, /"entry_uuid"/);
 });
+
+test('catalog delivers parsed definitions under include=definitions and stays light by default', async () => {
+  const db = new TestDb('catalog-definitions');
+  const light = await journal.loadScopedCatalog(db, principal());
+  assert.ok(light.vocab.length > 0);
+  assert.ok(light.templates.length > 0);
+  for (const row of light.vocab) {
+    assert.ok(!Object.hasOwn(row, 'labels'));
+    assert.ok(!Object.hasOwn(row, 'labels_json'));
+  }
+  for (const row of light.templates) {
+    assert.ok(!Object.hasOwn(row, 'labels'));
+    assert.ok(!Object.hasOwn(row, 'labels_json'));
+    assert.ok(!Object.hasOwn(row, 'definition'));
+    assert.ok(!Object.hasOwn(row, 'definition_json'));
+  }
+
+  const full = await journal.loadScopedCatalog(db, principal(), { includeDefinitions: true });
+  const template = full.templates[0];
+  const layout = full.layouts[0];
+  const vocab = full.vocab[0];
+  assert.ok(template.definition && typeof template.definition === 'object');
+  assert.ok(template.labels && typeof template.labels === 'object');
+  assert.ok(layout.definition && typeof layout.definition === 'object');
+  assert.ok(vocab.labels && typeof vocab.labels === 'object');
+  assert.ok(Object.hasOwn(vocab, 'constraints'));
+  if (full.products.length > 0) {
+    assert.ok(full.products[0].composition && typeof full.products[0].composition === 'object');
+  }
+
+  function assertNoRawJsonKeys(value) {
+    if (!value || typeof value !== 'object') return;
+    for (const [key, nested] of Object.entries(value)) {
+      assert.ok(!key.endsWith('_json'), 'raw JSON key leaked: ' + key);
+      assertNoRawJsonKeys(nested);
+    }
+  }
+  assertNoRawJsonKeys(light);
+  assertNoRawJsonKeys(full);
+});
