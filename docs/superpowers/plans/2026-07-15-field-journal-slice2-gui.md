@@ -134,6 +134,7 @@ export interface JournalVocabRow {
   deleted_at: string | null;
   labels?: Record<string, string>;
   constraints?: JsonObject | null;
+  catalog_errors: string[];
 }
 
 export interface JournalDefinitionRow {
@@ -142,6 +143,7 @@ export interface JournalDefinitionRow {
   active: number;
   labels?: Record<string, string>;
   definition?: JsonObject;
+  catalog_errors: string[];
 }
 
 export interface JournalProductRow {
@@ -156,6 +158,7 @@ export interface JournalProductRow {
   created_at: string;
   deleted_at: string | null;
   composition?: JsonObject;
+  catalog_errors: string[];
 }
 
 export interface JournalMappingRow {
@@ -262,8 +265,10 @@ export interface EntryFinalMutationReceipt {
 export type EntryMutationReceipt = EntryDraftMutationReceipt | EntryFinalMutationReceipt;
 
 export interface EntryListFilters {
+  entry_uuid?: string;
   status?: EntryStatus | 'all';
   plot_uuid?: string;
+  zone_uuid?: string;
   activity_code?: string;
   occurred_from?: string;
   occurred_to?: string;

@@ -44,3 +44,11 @@ Append-only execution log for the accepted Phase 0 and Phase 1-6 plans on `desig
 - The amendment adds `src/services/__tests__` to `test:unit:vitest`; targeted tests alone are not accepted as the phase gate.
 - sol found and the amendment corrected two additional blockers: Vitest module mocks now use `vi.hoisted`, and draft receipts no longer require an outbox event UUID.
 - sol re-check: ACCEPT. Phase 1 may resume from Task 1.
+
+## 2026-07-16T01:02:37+02:00 - Phase 1 Task 1 complete
+
+- `f71cb1585c525355a1fc7ecd413fb09675ebe0a5` adds the Slice 1 GUI wire types. The worker completed the live filter set with `entry_uuid` and `zone_uuid`, which the earlier plan snippet omitted.
+- sol spec review: APPROVE.
+- sol quality review found that catalog row types omitted `catalog_errors`, the edge signal for malformed JSON replaced with an empty object.
+- `a088b162ab5f248fa18edc1fc558c521e52ea1b8` adds required `catalog_errors` fields to vocab, definition, and product rows.
+- sol re-review: APPROVE. Orchestrator `npx tsc --noEmit` and `git diff --check` exited 0.
