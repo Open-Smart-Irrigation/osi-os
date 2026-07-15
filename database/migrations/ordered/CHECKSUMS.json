@@ -16,7 +16,7 @@
   "0015__upsert_sync_versioning.sql": "cbb6d9b6502eb7f3ca5b65427d629d56ae1dfc186b2ce27c347d0e8771692703",
   "0016__device_chameleon_sync.sql": "ac12b161c576794e84c66866b823ef5638d1d575dd5330bdbf115fcecc4a41e7",
   "0017__zone_key_fallback_parity.sql": "a2eea4fe1fd97609cb5bf225e0f164dd838f68301650f271f8dc740701f18ebe",
-  "0018__field_journal.sql": "6f62f6db2a5e9b0e6b760fcfbc63ad3d73c865c79a0a2ba69ae1bcbee0e793e8",
+  "0018__field_journal.sql": "d83c6cdd5e530b47b19666760afcc44699cea03af276fa454bf23e3c5fc51752",
   "0019__journal_catalog_v1.sql": "c7cb59d92908926c6b3ed2222dc4a81d45df113ef31a7c1ebb2b3935944b19c7",
   "0020__journal_resource_owner_scope.sql": "85249a25aa9ed6d0cfdca029a35efc249e1f0f3152817357b37d884b5dff1ad2",
   "0021__journal_plot_lookup_indexes.sql": "21591c7a050c46331f1d2ed9494d6883a0c421866f5f65168b7c5fccd9862c8c"

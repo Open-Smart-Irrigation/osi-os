@@ -9,6 +9,13 @@ const path = require('node:path');
 
 const repoRoot = path.resolve(__dirname, '..');
 const seedPath = path.join(repoRoot, 'database', 'seed-blank.sql');
+const fieldJournalMigrationPath = path.join(
+  repoRoot,
+  'database',
+  'migrations',
+  'ordered',
+  '0018__field_journal.sql'
+);
 const migrationPath = path.join(
   repoRoot,
   'database',
@@ -162,6 +169,91 @@ function sqliteExec(dbPath, sql) {
     encoding: 'utf8',
     stdio: ['pipe', 'pipe', 'pipe'],
   });
+}
+
+function plotSettingsForeignKeys(dbPath) {
+  return sqliteJson(dbPath, 'PRAGMA foreign_key_list(journal_plot_settings);').map((row) => ({
+    id: row.id,
+    seq: row.seq,
+    table: row.table,
+    from: row.from,
+    to: row.to,
+    on_update: row.on_update,
+    on_delete: row.on_delete,
+    match: row.match,
+  }));
+}
+
+const EXPECTED_PLOT_SETTINGS_FOREIGN_KEYS = [{
+  id: 0,
+  seq: 0,
+  table: 'journal_plots',
+  from: 'plot_uuid',
+  to: 'plot_uuid',
+  on_update: 'NO ACTION',
+  on_delete: 'CASCADE',
+  match: 'NONE',
+}];
+
+function plotSettingsForeignKeyFacts(dbPath) {
+  const orphanPlotUuid = 'schema-fk-orphan';
+  const parentPlotUuid = 'schema-fk-parent';
+  let orphanRejected = false;
+
+  try {
+    sqliteExec(dbPath, `
+      PRAGMA foreign_keys=ON;
+      INSERT INTO journal_plot_settings(
+        plot_uuid,layout_code,updated_at,updated_by_principal_uuid
+      ) VALUES (
+        '${orphanPlotUuid}','open_field','2026-07-15T00:00:00.000Z','schema-test'
+      );
+    `);
+  } catch (error) {
+    orphanRejected = /FOREIGN KEY constraint failed/.test(
+      String(error.stderr || error.message)
+    );
+  }
+
+  sqliteExec(dbPath, `
+    DELETE FROM journal_plot_settings WHERE plot_uuid='${orphanPlotUuid}';
+    INSERT INTO journal_plots(plot_uuid,plot_code)
+      VALUES ('${parentPlotUuid}','schema-fk-parent');
+    INSERT INTO journal_plot_settings(
+      plot_uuid,layout_code,updated_at,updated_by_principal_uuid
+    ) VALUES (
+      '${parentPlotUuid}','open_field','2026-07-15T00:00:00.000Z','schema-test'
+    );
+    PRAGMA foreign_keys=ON;
+    DELETE FROM journal_plots WHERE plot_uuid='${parentPlotUuid}';
+  `);
+  const cascadeRemaining = sqliteJson(
+    dbPath,
+    `SELECT count(*) AS count FROM journal_plot_settings
+      WHERE plot_uuid='${parentPlotUuid}';`
+  )[0].count;
+  sqliteExec(dbPath, `
+    DELETE FROM journal_plot_settings WHERE plot_uuid='${parentPlotUuid}';
+    DELETE FROM journal_plots WHERE plot_uuid='${parentPlotUuid}';
+  `);
+
+  return {
+    foreignKeys: plotSettingsForeignKeys(dbPath),
+    orphanRejected,
+    cascadeRemaining,
+  };
+}
+
+function assertPlotSettingsForeignKeyBehavior(dbPath, context) {
+  assert.deepEqual(
+    plotSettingsForeignKeyFacts(dbPath),
+    {
+      foreignKeys: EXPECTED_PLOT_SETTINGS_FOREIGN_KEYS,
+      orphanRejected: true,
+      cascadeRemaining: 0,
+    },
+    `${context} must reject orphan settings and cascade plot deletion`
+  );
 }
 
 function parseJsonColumn(row, column, context) {
@@ -342,6 +434,20 @@ try {
     encoding: 'utf8',
     stdio: ['pipe', 'pipe', 'pipe'],
   });
+
+  assertPlotSettingsForeignKeyBehavior(dbPath, 'seed-built database');
+
+  const migrationDbPath = path.join(tmpDir, 'field-journal-migration.db');
+  sqliteExec(migrationDbPath, fs.readFileSync(fieldJournalMigrationPath, 'utf8'));
+  assertPlotSettingsForeignKeyBehavior(migrationDbPath, '0018 migration-built database');
+
+  for (const bundledDbPath of BUNDLED_DB_PATHS) {
+    assert.deepEqual(
+      plotSettingsForeignKeys(bundledDbPath),
+      EXPECTED_PLOT_SETTINGS_FOREIGN_KEYS,
+      `${path.relative(repoRoot, bundledDbPath)} journal_plot_settings foreign key`
+    );
+  }
 
   const activities = sqliteJson(
     dbPath,

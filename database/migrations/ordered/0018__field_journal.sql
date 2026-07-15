@@ -168,7 +168,7 @@ CREATE TABLE IF NOT EXISTS journal_plot_group_members (
 );
 
 CREATE TABLE IF NOT EXISTS journal_plot_settings (
-  plot_uuid TEXT PRIMARY KEY,
+  plot_uuid TEXT PRIMARY KEY REFERENCES journal_plots(plot_uuid) ON DELETE CASCADE,
   layout_code TEXT NOT NULL,
   updated_at TEXT NOT NULL,
   updated_by_principal_uuid TEXT NOT NULL,
