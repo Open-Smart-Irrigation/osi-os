@@ -135,6 +135,8 @@ api.interceptors.response.use(
   }
 );
 
+export { api };
+
 // Auth API
 export const authAPI = {
   login: async (credentials: LoginRequest): Promise<LoginResponse> => {
