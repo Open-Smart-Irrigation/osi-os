@@ -604,3 +604,240 @@ restore hashes bcm2712=MATCH bcm2709=MATCH
 ```
 
 No production flow changed for this correction. The focused live verifier passed, and the journal bootstrap harness passed all 62 tests. The complete Task 4 gate was rerun after restoration; all 13 commands in the preceding table exited 0 with the same pass signals. The independent proof again reported 602 nodes, byte-identical 1,303,062-byte maintained profiles, the same nine function changes and two structural changes, exact owner wiring with `libs: []`, and unchanged protected-function hashes.
+
+## Task 5 — filtered restart status
+
+The executable system-stats cases were added before changing either flow. `node scripts/verify-live-gateway-identity.js` exited 1 with 22 failures, 11 for each maintained profile. The failures covered the missing field, valid projection, default reason, healing state, expired deadline, malformed input, read errors, and the three silent fan-probe paths. Representative output was:
+
+```text
+FAIL ...bcm2712...:sys-stats-fn: missing restart sentinel must return HTTP 200 with an explicit restartPending null
+FAIL ...bcm2712...:sys-stats-fn: valid restart sentinel must expose exactly restartAt and reason
+FAIL ...bcm2712...:sys-stats-fn: unreadable restart sentinel must return restartPending null and warn without failing system stats
+FAIL ...bcm2712...:sys-stats-fn: fan probe failures must retain fan_available false and warn for hwmon name and pwm paths
+22 live gateway identity verification failure(s)
+EXIT_CODE=1
+```
+
+The throwaway `/tmp/osi-live-identity-task5-flow-edit.js` guarded both profile inputs before changing `sys-stats-fn`. It reparsed both outputs, compared all node IDs and non-function fields, and wrote the same bytes to each profile:
+
+```text
+conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/flows.json: byte-identical: true (1303062 / 1303062 bytes)
+conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/flows.json: byte-identical: true (1303062 / 1303062 bytes)
+conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/flows.json: post-write byte-identical: true (1304657 / 1304657 bytes)
+conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/flows.json: post-write byte-identical: true (1304657 / 1304657 bytes)
+Node count: 602 -> 602
+Changed nodes: sys-stats-fn
+sys-stats-fn: 2208 -> 3770 bytes (+1562)
+Flow bytes: 1303062 -> 1304657 (+1595)
+```
+
+The function reads `/var/run/osi-identity-restart.json` through `global.get('fs')`. A missing file or a healing state without a deadline produces `restartPending: null`. A pending state produces only `restartAt` and `reason`; the target EUI, confidence, monotonic deadline, and epoch fields are discarded. Invalid JSON, a non-object value, a non-string deadline, and a read error each return null and warn without failing the remaining system stats. An expired pending deadline remains visible so the GUI can retain its in-progress message until daemon cleanup.
+
+The three empty fan-detection catches now warn with the path being probed. Their fallback values are unchanged. The silent-catch baseline moved from 218 to 215 per profile. Measured function growth is 1,562 bytes, so the cumulative allowance moved from 36,172 to 37,734 with a dedicated `sys-stats-fn` entry. The node still has no `libs` property.
+
+The first focused run after mutation exposed the old verifier assumption that only the seven gates read the sentinel. It exited 1 with two findings, one per profile:
+
+```text
+FAIL ...bcm2712...: restart sentinel readers must be exactly sync-bootstrap-build, sync-outbox-build, sync-pending-build, sync-force-build, command-ack-build-batch, sync-state-build, al-link-build-req; got sys-stats-fn, al-link-build-req, sync-bootstrap-build, sync-outbox-build, sync-pending-build, sync-state-build, sync-force-build, command-ack-build-batch
+FAIL ...bcm2709...: restart sentinel readers must be exactly sync-bootstrap-build, sync-outbox-build, sync-pending-build, sync-force-build, command-ack-build-batch, sync-state-build, al-link-build-req; got sys-stats-fn, al-link-build-req, sync-bootstrap-build, sync-outbox-build, sync-pending-build, sync-state-build, sync-force-build, command-ack-build-batch
+2 live gateway identity verification failure(s)
+EXIT_CODE=1
+```
+
+The assertion now permits only `sys-stats-fn` plus the same seven gates. The final focused verifier exited 0 with `Live gateway identity verification passed.`
+
+Two guarded mutants tested the executable assertions. Both changed only `sys-stats-fn` in the two maintained profiles and restored the pre-mutation bytes afterward:
+
+```text
+leak mutant applied to sys-stats-fn only (1304711 bytes/profile)
+FAIL ...bcm2712...:sys-stats-fn: unauthenticated stats leaked a private or internal sentinel field
+FAIL ...bcm2709...:sys-stats-fn: unauthenticated stats leaked a private or internal sentinel field
+6 live gateway identity verification failure(s)
+APPLY_EXIT=0 VERIFIER_EXIT=1 RESTORE_EXIT=0
+
+silent mutant applied to sys-stats-fn only (1304553 bytes/profile)
+FAIL ...bcm2712...:sys-stats-fn: invalid JSON must return restartPending null and warn without failing system stats
+FAIL ...bcm2709...:sys-stats-fn: unreadable restart sentinel must return restartPending null and warn without failing system stats
+8 live gateway identity verification failure(s)
+APPLY_EXIT=0 VERIFIER_EXIT=1 RESTORE_EXIT=0
+```
+
+The throwaway editor, mutant script, and flow backups were deleted before the complete gate.
+
+### Task 5 complete flows gate
+
+| Command | Exit | Observed output/pass signal |
+|---|---:|---|
+| `node scripts/verify-sync-flow.js` | 0 | `Sync flow verification passed`; chained live verification passed; final line `All parity checks passed.` |
+| `node scripts/verify-communication-contract.js` | 0 | `Communication contract verification passed` |
+| `node scripts/verify-profile-parity.js` | 0 | `OK: files/usr/share/flows.json`; final line `All parity checks passed.` |
+| `node scripts/verify-flows-fn-parse.js` | 0 | Maintained profiles: 240 function nodes and 240 parsed sources each; `verify-flows-fn-parse: OK` |
+| `node scripts/verify-no-new-silent-catch.js` | 0 | Both maintained profiles: 215 empty catches, baseline 215 |
+| `node scripts/verify-flows-size-ratchet.js` | 0 | Both maintained profiles: total 1,065,945; `verify-flows-size-ratchet: OK` |
+| `node scripts/flows-bare-require-scan.js` | 0 | No output |
+| `node scripts/test-flows-wiring.js` | 0 | `OK journal bootstrap behavior harness`; final line `PASS: STREGA wiring + osiDb close + WS2/WS3 wiring guards all passed` |
+| `node scripts/verify-no-stray-ddl.js` | 0 | `verify-no-stray-ddl: OK` with HEAD and origin/main totals 702 |
+| `scripts/check-mqtt-topics.sh` | 0 | All three profiles reported no UUID patterns in MQTT IN topics |
+| `node scripts/verify-live-gateway-identity.js` | 0 | System-stats execution cases, filtering, catch baseline, allowances, protected hashes, and lifecycle checks passed; final line `Live gateway identity verification passed.` |
+| `node --test scripts/test-journal-bootstrap.js` | 0 | 62 tests passed; zero failed |
+| `node .claude/skills/anti-slop-writing/slop-check.js execution-report.md` | 0 | `slop-check: PASS (no tier-1 findings)` |
+| `git diff --check` | 0 | No output |
+
+The final structural comparison against `HEAD` reports 602 nodes and byte-identical maintained flow files of 1,304,657 bytes. Only `sys-stats-fn` differs, only its `func` changed, and its absent `libs` property remains absent. The function body grew from 2,208 to 3,770 bytes. No flow wiring or other node field changed.
+
+### Task 5 quality review — fan-probe warning deduplication
+
+The quality review exercised repeated calls on a gateway without the legacy raw PWM path. The first Task 5 implementation treated the normal `ENOENT` as an error and warned on every 30-second system-stats poll. Its test harness created a fresh node API for each invocation and had no shared Function-node context, so it could not detect the repeated warning.
+
+The harness now passes one `context.get`/`context.set` store through repeated invocations. Before the flow fix, `node scripts/verify-live-gateway-identity.js` exited 1 with six findings, three per profile:
+
+```text
+FAIL ...bcm2712...:sys-stats-fn: expected fan-path absence must retain HTTP 200 and fan_available false without repeated warnings
+FAIL ...bcm2712...:sys-stats-fn: repeated EACCES must be deduplicated through shared Node-RED context
+FAIL ...bcm2712...:sys-stats-fn: fan failure context must retain a bounded per-path signature
+FAIL ...bcm2709...:sys-stats-fn: expected fan-path absence must retain HTTP 200 and fan_available false without repeated warnings
+FAIL ...bcm2709...:sys-stats-fn: repeated EACCES must be deduplicated through shared Node-RED context
+FAIL ...bcm2709...:sys-stats-fn: fan failure context must retain a bounded per-path signature
+6 live gateway identity verification failure(s)
+EXIT_CODE=1
+```
+
+The guarded `/tmp/osi-live-identity-task5-review-fix.js` changed only `sys-stats-fn.func`. It treated `ENOENT` and `ENOTDIR` as normal absence. Unexpected errors store an error-code-and-message signature, bounded to 169 characters, under their probe path in node context. The same path and signature warns once; a changed signature warns again. A successful probe or normal absence clears that path so a later recurrence is visible.
+
+```text
+conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/flows.json: byte-identical: true (1304657 / 1304657 bytes)
+conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/flows.json: byte-identical: true (1304657 / 1304657 bytes)
+conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/flows.json: post-write byte-identical: true (1305808 / 1305808 bytes)
+conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/flows.json: post-write byte-identical: true (1305808 / 1305808 bytes)
+Node count: 602 -> 602
+Changed nodes: sys-stats-fn
+sys-stats-fn: 3770 -> 4887 bytes (+1117)
+Flow bytes: 1304657 -> 1305808 (+1151)
+```
+
+The live verifier also rejects `targetDeviceEui`, `target_device_eui`, `restartAtEpoch`, and `phase` anywhere in the system-stats function body. This static check supplements the executable projection cases, including for branches the fixtures do not enter.
+
+Two guarded mutants checked the new assertions, then restored both profiles byte-for-byte:
+
+```text
+private mutant applied to sys-stats-fn only (1305859 bytes/profile)
+FAIL ...bcm2712...:sys-stats-fn: does not reference private sentinel field targetDeviceEui; found "targetDeviceEui"
+FAIL ...bcm2709...:sys-stats-fn: does not reference private sentinel field targetDeviceEui; found "targetDeviceEui"
+2 live gateway identity verification failure(s)
+APPLY_EXIT=0 VERIFIER_EXIT=1 RESTORE_EXIT=0
+
+dedupe mutant applied to sys-stats-fn only (1305780 bytes/profile)
+FAIL ...bcm2712...:sys-stats-fn: repeated EACCES must be deduplicated through shared Node-RED context
+FAIL ...bcm2709...:sys-stats-fn: repeated EACCES must be deduplicated through shared Node-RED context
+2 live gateway identity verification failure(s)
+APPLY_EXIT=0 VERIFIER_EXIT=1 RESTORE_EXIT=0
+```
+
+The focused verifier passed after each restoration. The scratch editor, mutant, and backups were deleted before rerunning the complete gate. This review adds 1,117 function bytes, making the Task 5 `sys-stats-fn` allowance 2,679 and the cumulative allowance 38,851.
+
+| Command | Exit | Observed output/pass signal |
+|---|---:|---|
+| `node scripts/verify-sync-flow.js` | 0 | `Sync flow verification passed`; `Live gateway identity verification passed.`; final line `All parity checks passed.` |
+| `node scripts/verify-communication-contract.js` | 0 | `Communication contract verification passed` |
+| `node scripts/verify-profile-parity.js` | 0 | Final line `All parity checks passed.` |
+| `node scripts/verify-flows-fn-parse.js` | 0 | Both maintained profiles parsed 240 function nodes; `verify-flows-fn-parse: OK` |
+| `node scripts/verify-no-new-silent-catch.js` | 0 | Both maintained profiles: 215 empty catches, baseline 215 |
+| `node scripts/verify-flows-size-ratchet.js` | 0 | Both maintained profiles: total 1,067,062; `verify-flows-size-ratchet: OK` |
+| `node scripts/flows-bare-require-scan.js` | 0 | No output |
+| `node scripts/test-flows-wiring.js` | 0 | Final line `PASS: STREGA wiring + osiDb close + WS2/WS3 wiring guards all passed` |
+| `node scripts/verify-no-stray-ddl.js` | 0 | `verify-no-stray-ddl: OK` with HEAD and origin/main totals 702 |
+| `scripts/check-mqtt-topics.sh` | 0 | All three profiles reported no UUID patterns in MQTT IN topics |
+| `node scripts/verify-live-gateway-identity.js` | 0 | Repeated-poll, recovery, signature-bound, private-field, lifecycle, and earlier Task 5 cases passed; final line `Live gateway identity verification passed.` |
+| `node --test scripts/test-journal-bootstrap.js` | 0 | 62 tests passed; zero failed |
+| `node .claude/skills/anti-slop-writing/slop-check.js execution-report.md` | 0 | `slop-check: PASS (no tier-1 findings)` |
+| `git diff --check` | 0 | No output |
+
+The superseding structural comparison reports 602 nodes and byte-identical 1,305,808-byte maintained flow files. Only `sys-stats-fn` differs from `HEAD`, only its function changed, and its absent `libs` property remains absent. Its function grew from 2,208 to 4,887 bytes. No wiring or other node field changed.
+
+### Task 5 final review — bounded hotplug state and sentinel allowlist
+
+The final review found that per-path deduplication still allowed the node-context map to grow with hwmon hotplug churn. It also found a verifier gap: the explicit private-field list did not include every canonical sentinel field. A dead conditional read of `restartState.restartNotBeforeUptime` passed the old verifier:
+
+```text
+conditional restartNotBeforeUptime mutant applied to sys-stats-fn only
+Live gateway identity verification passed.
+APPLY_EXIT=0 VERIFIER_EXIT=0 RESTORE_EXIT=0
+```
+
+The verifier now scans all direct property access on the parsed `restartState` variable, allows only `restartAt` and `reason`, rejects dynamic bracket access and unreviewed aliases, and explicitly bans `phase`, `restartAtEpoch`, `restartNotBeforeUptime`, `targetDeviceEui`, `target_device_eui`, `requestedAt`, `confidence`, and `version`.
+
+Shared-context churn fixtures were added before the flow change. One fixture starts with a current and a disappeared hwmon-name signature, then confirms a successful directory listing prunes the disappeared path without re-warning the current identical failure. Another drives 40 distinct child paths through the same context and checks cap eviction, retained-path deduplication, pruned and evicted recurrence warnings, and the cap while `readdirSync` fails. The focused verifier exited 1 with eight flow findings:
+
+```text
+FAIL ...bcm2712...:sys-stats-fn: successful readdir must remove disappeared child signatures without re-warning the current identical failure
+FAIL ...bcm2712...:sys-stats-fn: a pruned child recurrence must warn again without re-warning the retained identical failure
+FAIL ...bcm2712...:sys-stats-fn: more than 32 unique hwmon failures must evict at least one entry and retain at most 32
+FAIL ...bcm2712...:sys-stats-fn: defense-in-depth cap must hold even while /sys/class/hwmon readdir fails
+FAIL ...bcm2709...:sys-stats-fn: successful readdir must remove disappeared child signatures without re-warning the current identical failure
+FAIL ...bcm2709...:sys-stats-fn: a pruned child recurrence must warn again without re-warning the retained identical failure
+FAIL ...bcm2709...:sys-stats-fn: more than 32 unique hwmon failures must evict at least one entry and retain at most 32
+FAIL ...bcm2709...:sys-stats-fn: defense-in-depth cap must hold even while /sys/class/hwmon readdir fails
+8 live gateway identity verification failure(s)
+EXIT_CODE=1
+```
+
+The guarded `/tmp/osi-live-identity-task5-cap-prune-fix.js` added a 32-entry cap to the complete fan-failure map. Every map read enforces the cap, including when the hwmon directory cannot be listed. After a successful listing, stored `/sys/class/hwmon/<dir>/name` entries not present in that listing are removed. The fixed `/sys/class/hwmon` and `/sys/class/pwm/pwmchip2` entries keep the prior success, expected-absence, and unexpected-failure behavior.
+
+```text
+conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/flows.json: byte-identical: true (1305808 / 1305808 bytes)
+conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/flows.json: byte-identical: true (1305808 / 1305808 bytes)
+conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/flows.json: post-write byte-identical: true (1307053 / 1307053 bytes)
+conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/flows.json: post-write byte-identical: true (1307053 / 1307053 bytes)
+Node count: 602 -> 602
+Changed nodes: sys-stats-fn
+sys-stats-fn: 4887 -> 6092 bytes (+1205)
+Flow bytes: 1305808 -> 1307053 (+1245)
+```
+
+The earlier conditional private-field mutant now fails both the allowlist and explicit ban in each profile. Cap and prune mutants test the state-bound contracts:
+
+```text
+FAIL ...bcm2712...:sys-stats-fn: restartState access must use only direct reason/restartAt reads without aliases or dynamic brackets; got reason, restartAt, restartNotBeforeUptime
+FAIL ...bcm2712...:sys-stats-fn: does not reference private sentinel field restartNotBeforeUptime; found "restartNotBeforeUptime"
+FAIL ...bcm2709...:sys-stats-fn: restartState access must use only direct reason/restartAt reads without aliases or dynamic brackets; got reason, restartAt, restartNotBeforeUptime
+FAIL ...bcm2709...:sys-stats-fn: does not reference private sentinel field restartNotBeforeUptime; found "restartNotBeforeUptime"
+4 live gateway identity verification failure(s)
+APPLY_EXIT=0 VERIFIER_EXIT=1 RESTORE_EXIT=0
+
+cap mutant applied to sys-stats-fn only
+FAIL ...bcm2712...:sys-stats-fn: more than 32 unique hwmon failures must evict at least one entry and retain at most 32
+FAIL ...bcm2712...:sys-stats-fn: defense-in-depth cap must hold even while /sys/class/hwmon readdir fails
+FAIL ...bcm2709...:sys-stats-fn: more than 32 unique hwmon failures must evict at least one entry and retain at most 32
+FAIL ...bcm2709...:sys-stats-fn: defense-in-depth cap must hold even while /sys/class/hwmon readdir fails
+4 live gateway identity verification failure(s)
+APPLY_EXIT=0 VERIFIER_EXIT=1 RESTORE_EXIT=0
+
+prune mutant applied to sys-stats-fn only
+FAIL ...bcm2712...:sys-stats-fn: successful readdir must remove disappeared child signatures without re-warning the current identical failure
+FAIL ...bcm2712...:sys-stats-fn: a pruned child recurrence must warn again without re-warning the retained identical failure
+FAIL ...bcm2709...:sys-stats-fn: successful readdir must remove disappeared child signatures without re-warning the current identical failure
+FAIL ...bcm2709...:sys-stats-fn: a pruned child recurrence must warn again without re-warning the retained identical failure
+8 live gateway identity verification failure(s)
+APPLY_EXIT=0 VERIFIER_EXIT=1 RESTORE_EXIT=0
+```
+
+The focused verifier passed after restoration. The scratch scripts and backups were removed before the complete gate. This review adds 1,205 function bytes, making the Task 5 node allowance 3,884 and the cumulative allowance 40,056.
+
+| Command | Exit | Observed output/pass signal |
+|---|---:|---|
+| `node scripts/verify-sync-flow.js` | 0 | `Sync flow verification passed`; `Live gateway identity verification passed.`; final line `All parity checks passed.` |
+| `node scripts/verify-communication-contract.js` | 0 | `Communication contract verification passed` |
+| `node scripts/verify-profile-parity.js` | 0 | Final line `All parity checks passed.` |
+| `node scripts/verify-flows-fn-parse.js` | 0 | Both maintained profiles parsed 240 function nodes; `verify-flows-fn-parse: OK` |
+| `node scripts/verify-no-new-silent-catch.js` | 0 | Both maintained profiles: 215 empty catches, baseline 215 |
+| `node scripts/verify-flows-size-ratchet.js` | 0 | Both maintained profiles: total 1,068,267; `verify-flows-size-ratchet: OK` |
+| `node scripts/flows-bare-require-scan.js` | 0 | No output |
+| `node scripts/test-flows-wiring.js` | 0 | Final line `PASS: STREGA wiring + osiDb close + WS2/WS3 wiring guards all passed` |
+| `node scripts/verify-no-stray-ddl.js` | 0 | `verify-no-stray-ddl: OK` with HEAD and origin/main totals 702 |
+| `scripts/check-mqtt-topics.sh` | 0 | All three profiles reported no UUID patterns in MQTT IN topics |
+| `node scripts/verify-live-gateway-identity.js` | 0 | Access allowlist, hotplug churn, cap, pruning, recurrence, lifecycle, and earlier Task 5 assertions passed; final line `Live gateway identity verification passed.` |
+| `node --test scripts/test-journal-bootstrap.js` | 0 | 62 tests passed; zero failed |
+| `node .claude/skills/anti-slop-writing/slop-check.js execution-report.md` | 0 | `slop-check: PASS (no tier-1 findings)` |
+| `git diff --check` | 0 | No output |
+
+The final structural comparison reports 602 nodes and byte-identical 1,307,053-byte maintained flow files. Only `sys-stats-fn` differs from `HEAD`, only its function changed, and its absent `libs` property remains absent. Its function grew from 2,208 to 6,092 bytes. No wiring or other node field changed.
