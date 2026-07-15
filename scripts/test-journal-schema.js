@@ -195,6 +195,202 @@ const EXPECTED_PLOT_SETTINGS_FOREIGN_KEYS = [{
   match: 'NONE',
 }];
 
+const EXPECTED_JOURNAL_ENTRY_FOREIGN_KEYS = [
+  {
+    id: 0,
+    seq: 0,
+    table: 'journal_vocab',
+    from: 'activity_code',
+    to: 'code',
+    on_update: 'NO ACTION',
+    on_delete: 'NO ACTION',
+    match: 'NONE',
+  },
+  {
+    id: 1,
+    seq: 0,
+    table: 'journal_plots',
+    from: 'plot_uuid',
+    to: 'plot_uuid',
+    on_update: 'NO ACTION',
+    on_delete: 'NO ACTION',
+    match: 'NONE',
+  },
+  {
+    id: 2,
+    seq: 0,
+    table: 'users',
+    from: 'user_id',
+    to: 'id',
+    on_update: 'NO ACTION',
+    on_delete: 'CASCADE',
+    match: 'NONE',
+  },
+];
+
+const EXPECTED_JOURNAL_ENTRY_VALUE_FOREIGN_KEYS = [
+  {
+    id: 0,
+    seq: 0,
+    table: 'journal_vocab',
+    from: 'attribute_code',
+    to: 'code',
+    on_update: 'NO ACTION',
+    on_delete: 'NO ACTION',
+    match: 'NONE',
+  },
+  {
+    id: 1,
+    seq: 0,
+    table: 'journal_entries',
+    from: 'entry_uuid',
+    to: 'entry_uuid',
+    on_update: 'NO ACTION',
+    on_delete: 'CASCADE',
+    match: 'NONE',
+  },
+];
+
+function foreignKeys(dbPath, table) {
+  return sqliteJson(dbPath, `PRAGMA foreign_key_list(${table});`).map((row) => ({
+    id: row.id,
+    seq: row.seq,
+    table: row.table,
+    from: row.from,
+    to: row.to,
+    on_update: row.on_update,
+    on_delete: row.on_delete,
+    match: row.match,
+  }));
+}
+
+function journalEntryInsert(entryUuid, plotUuid, activityCode) {
+  return `
+    INSERT INTO journal_entries(
+      entry_uuid,owner_user_uuid,user_id,author_principal_uuid,plot_uuid,
+      activity_code,template_code,template_version,layout_code,layout_version,
+      catalog_version,occurred_start,occurred_timezone,occurred_utc_offset_minutes,
+      recorded_at,origin,status,sync_version,created_at,updated_at
+    ) VALUES (
+      '${entryUuid}','schema-owner',2147483000,'schema-author','${plotUuid}',
+      '${activityCode}','schema-template',1,'open_field',1,
+      1,'2026-07-15T00:00:00.000Z','UTC',0,
+      '2026-07-15T00:00:01.000Z','edge-ui','draft',0,
+      '2026-07-15T00:00:01.000Z','2026-07-15T00:00:01.000Z'
+    );
+  `;
+}
+
+function foreignKeyRejected(dbPath, sql) {
+  try {
+    sqliteExec(dbPath, `PRAGMA foreign_keys=ON;\n${sql}`);
+    return false;
+  } catch (error) {
+    return /FOREIGN KEY constraint failed/.test(String(error.stderr || error.message));
+  }
+}
+
+function journalSemanticForeignKeyFacts(dbPath) {
+  sqliteExec(dbPath, `
+    PRAGMA foreign_keys=ON;
+    INSERT INTO users(id,username,password_hash,created_at)
+      VALUES (2147483000,'schema-semantic-fk-user','schema-hash','2026-07-15T00:00:00.000Z');
+    INSERT INTO journal_plots(plot_uuid,plot_code)
+      VALUES ('schema-semantic-fk-plot','schema-semantic-fk-plot');
+    INSERT INTO journal_vocab(code,kind,value_type)
+      VALUES ('schema.semantic.activity','activity',NULL);
+    INSERT INTO journal_vocab(code,kind,value_type)
+      VALUES ('schema.semantic.attribute','attribute','text');
+  `);
+
+  const orphanPlotRejected = foreignKeyRejected(
+    dbPath,
+    journalEntryInsert(
+      'schema-semantic-fk-orphan-plot',
+      'schema-semantic-fk-missing-plot',
+      'schema.semantic.activity'
+    )
+  );
+  const orphanActivityRejected = foreignKeyRejected(
+    dbPath,
+    journalEntryInsert(
+      'schema-semantic-fk-orphan-activity',
+      'schema-semantic-fk-plot',
+      'schema.semantic.missing-activity'
+    )
+  );
+
+  sqliteExec(
+    dbPath,
+    `PRAGMA foreign_keys=ON;\n${journalEntryInsert(
+      'schema-semantic-fk-valid-entry',
+      'schema-semantic-fk-plot',
+      'schema.semantic.activity'
+    )}
+    INSERT INTO journal_entry_values(entry_uuid,attribute_code,value_text)
+      VALUES ('schema-semantic-fk-valid-entry','schema.semantic.attribute','valid');
+    `
+  );
+
+  const orphanAttributeRejected = foreignKeyRejected(
+    dbPath,
+    `INSERT INTO journal_entry_values(entry_uuid,attribute_code,value_text)
+       VALUES ('schema-semantic-fk-valid-entry','schema.semantic.missing-attribute','orphan');`
+  );
+  const validEntryCount = sqliteJson(
+    dbPath,
+    "SELECT count(*) AS count FROM journal_entries WHERE entry_uuid='schema-semantic-fk-valid-entry';"
+  )[0].count;
+  const validValueCount = sqliteJson(
+    dbPath,
+    "SELECT count(*) AS count FROM journal_entry_values WHERE entry_uuid='schema-semantic-fk-valid-entry';"
+  )[0].count;
+  sqliteExec(dbPath, `
+    PRAGMA foreign_keys=ON;
+    DELETE FROM journal_entries WHERE entry_uuid='schema-semantic-fk-valid-entry';
+  `);
+  const cascadeRemaining = sqliteJson(
+    dbPath,
+    "SELECT count(*) AS count FROM journal_entry_values WHERE entry_uuid='schema-semantic-fk-valid-entry';"
+  )[0].count;
+
+  sqliteExec(dbPath, `
+    PRAGMA foreign_keys=ON;
+    DELETE FROM users WHERE id=2147483000;
+    DELETE FROM journal_vocab
+      WHERE code IN ('schema.semantic.activity','schema.semantic.attribute');
+    DELETE FROM journal_plots WHERE plot_uuid='schema-semantic-fk-plot';
+  `);
+
+  return {
+    entryForeignKeys: foreignKeys(dbPath, 'journal_entries'),
+    valueForeignKeys: foreignKeys(dbPath, 'journal_entry_values'),
+    orphanPlotRejected,
+    orphanActivityRejected,
+    orphanAttributeRejected,
+    validEntryCount,
+    validValueCount,
+    cascadeRemaining,
+  };
+}
+
+function assertJournalSemanticForeignKeyBehavior(dbPath, context) {
+  assert.deepEqual(
+    journalSemanticForeignKeyFacts(dbPath),
+    {
+      entryForeignKeys: EXPECTED_JOURNAL_ENTRY_FOREIGN_KEYS,
+      valueForeignKeys: EXPECTED_JOURNAL_ENTRY_VALUE_FOREIGN_KEYS,
+      orphanPlotRejected: true,
+      orphanActivityRejected: true,
+      orphanAttributeRejected: true,
+      validEntryCount: 1,
+      validValueCount: 1,
+      cascadeRemaining: 0,
+    },
+    `${context} must enforce journal plot/activity/attribute references and entry-value cascade`
+  );
+}
+
 function plotSettingsForeignKeyFacts(dbPath) {
   const orphanPlotUuid = 'schema-fk-orphan';
   const parentPlotUuid = 'schema-fk-parent';
@@ -436,16 +632,32 @@ try {
   });
 
   assertPlotSettingsForeignKeyBehavior(dbPath, 'seed-built database');
+  assertJournalSemanticForeignKeyBehavior(dbPath, 'seed-built database');
 
   const migrationDbPath = path.join(tmpDir, 'field-journal-migration.db');
+  sqliteExec(migrationDbPath, `
+    CREATE TABLE users(
+      id INTEGER PRIMARY KEY,
+      username TEXT NOT NULL,
+      password_hash TEXT NOT NULL,
+      created_at TEXT NOT NULL
+    );
+  `);
   sqliteExec(migrationDbPath, fs.readFileSync(fieldJournalMigrationPath, 'utf8'));
   assertPlotSettingsForeignKeyBehavior(migrationDbPath, '0018 migration-built database');
+  assertJournalSemanticForeignKeyBehavior(migrationDbPath, '0018 migration-built database');
 
-  for (const bundledDbPath of BUNDLED_DB_PATHS) {
+  for (const [index, bundledDbPath] of BUNDLED_DB_PATHS.entries()) {
     assert.deepEqual(
       plotSettingsForeignKeys(bundledDbPath),
       EXPECTED_PLOT_SETTINGS_FOREIGN_KEYS,
       `${path.relative(repoRoot, bundledDbPath)} journal_plot_settings foreign key`
+    );
+    const bundledCopyPath = path.join(tmpDir, `bundled-${index}.db`);
+    fs.copyFileSync(bundledDbPath, bundledCopyPath);
+    assertJournalSemanticForeignKeyBehavior(
+      bundledCopyPath,
+      path.relative(repoRoot, bundledDbPath)
     );
   }
 
@@ -886,7 +1098,9 @@ try {
     'replaying 0019 must not mutate catalog data when a newer catalog is installed'
   );
 
-  console.log('test-journal-schema: OK (catalog v1 semantics, guarded replay, seven-DB data parity)');
+  console.log(
+    'test-journal-schema: OK (catalog v1 semantics, semantic FKs, guarded replay, seven-DB data parity)'
+  );
 } finally {
   fs.rmSync(tmpDir, { recursive: true, force: true });
 }

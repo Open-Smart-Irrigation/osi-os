@@ -2485,7 +2485,9 @@ CREATE TABLE IF NOT EXISTS journal_entries (
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL,
   deleted_at TEXT,
-  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+  FOREIGN KEY (plot_uuid) REFERENCES journal_plots(plot_uuid),
+  FOREIGN KEY (activity_code) REFERENCES journal_vocab(code)
 );
 CREATE INDEX IF NOT EXISTS idx_journal_entries_zone_time
   ON journal_entries(zone_id, occurred_start DESC, entry_uuid) WHERE deleted_at IS NULL;
@@ -2510,7 +2512,7 @@ CREATE INDEX IF NOT EXISTS idx_journal_entries_plot_time
 CREATE TABLE IF NOT EXISTS journal_entry_values (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   entry_uuid TEXT NOT NULL REFERENCES journal_entries(entry_uuid) ON DELETE CASCADE,
-  attribute_code TEXT NOT NULL,
+  attribute_code TEXT NOT NULL REFERENCES journal_vocab(code),
   group_index INTEGER NOT NULL DEFAULT 0 CHECK (group_index >= 0),
   value_status TEXT NOT NULL DEFAULT 'observed'
     CHECK (value_status IN ('observed','not_observed','not_applicable','below_detection')),
