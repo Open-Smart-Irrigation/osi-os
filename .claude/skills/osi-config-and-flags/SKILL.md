@@ -18,7 +18,8 @@ init script), Node-RED's own `settings.js`, and hardcoded constants inside
 defined, who reads/writes it, and how to inspect or safely extend it.
 
 All facts below were verified against the repository on 2026-07-06 unless
-marked otherwise. Re-verification commands are in the last section.
+marked otherwise. The live identity daemon notes in section 2 were verified on
+2026-07-15. Re-verification commands are in the last section.
 
 ## When to use
 
@@ -161,6 +162,31 @@ inactive chipset's sibling section) if confidence is not provisional, the
 second resolve re-reads post-repair state, and `persist` commits the final
 answer to `osi-server.cloud.device_eui*`.
 
+`osi-identityd` adds the live convergence path. The daemon is supervised by
+`/etc/init.d/osi-identityd`, sources the same helper, and owns two tmpfs files:
+
+- `/var/run/osi-gateway-identity.json` is the observed cache. Its phases are
+  `provisional`, `active`, `healing`, and `restart_pending`.
+- `/var/run/osi-identity-restart.json` is the transition sentinel. During
+  `healing`, it has no deadline. During `restart_pending`, it carries the
+  absolute restart time and private target fields.
+
+Node-RED does not switch to the cache EUI while it is running. Identity-coupled
+link and sync builders keep the boot `DEVICE_EUI*` environment and fail closed
+when the restart sentinel exists, including malformed or unreadable sentinel
+files. After a non-provisional transition, `osi-identityd` runs the shared
+`resolve -> repair -> resolve -> persist` heal path, validates durable UCI
+readback, waits 60 seconds, restarts Node-RED, and removes the sentinel only
+after the restart command exits zero. `/api/system/stats` exposes only
+`restartPending.restartAt` and `restartPending.reason`; target EUIs remain
+private.
+
+`osi-bootstrap`, account link, and account unlink publish restart requests in
+`/var/run/osi-node-red-restart-requests/`. The daemon is the only consumer and
+the only writer of the live cache and restart sentinel. A gateway identity
+transition keeps priority over generic restart requests and always receives a
+fresh 60-second warning from the detection time.
+
 **THE TRAP.** `/srv/node-red/.chirpstack.env` is a legacy compatibility file.
 `settings.js` explicitly protects identity keys from it:
 
@@ -221,6 +247,7 @@ verifier is `bcrypt(password::DEVICE_EUI)` (see the Consequence note above).
 **Re-verify:**
 ```
 grep -n "gateway_identity_resolve\|gateway_identity_read_linked\|gateway_identity_read_persisted" conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/libexec/osi-gateway-identity.sh
+grep -n "request-restart\|restart_pending\|osi-node-red-restart-requests" conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/libexec/osi-identityd.sh
 grep -n "protectedKeys" feeds/chirpstack-openwrt-feed/apps/node-red/files/settings.js
 grep -n "envVars.DEVICE_EUI" scripts/verify-sync-flow.js
 ```

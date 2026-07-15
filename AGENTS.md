@@ -117,6 +117,31 @@ rehearsal.
 - **Release script:** `OSI_ADMIN_TOKEN=… node scripts/refresh-chameleon-calibrations.js` before cutting a release.
 - Apply the generated release seed with `node scripts/apply-chameleon-calibration-seed.js`; it updates every bundled DB copy and fails on an empty calibration snapshot.
 
+### Live gateway identity convergence
+
+`osi-identityd` is the procd-supervised owner of live gateway identity after
+boot. It sources `/usr/libexec/osi-gateway-identity.sh`, writes the observed
+identity cache at `/var/run/osi-gateway-identity.json`, and writes transition
+state at `/var/run/osi-identity-restart.json`. The cache phases are
+`provisional`, `active`, `healing`, and `restart_pending`.
+
+Node-RED still uses one boot-time `DEVICE_EUI*` environment snapshot. During a
+live identity transition, link and sync builders read only the restart
+sentinel and fail closed; they do not substitute the cache's candidate EUI. The
+daemon heals UCI through the shared `resolve -> repair -> resolve -> persist`
+helper path, validates durable readback, warns for 60 seconds, then restarts
+Node-RED with `/etc/init.d/node-red restart`. That restart switches `DEVICE_EUI`,
+MQTT credentials/client ID, sync triggers, link requests, and sync requests
+together.
+
+`osi-bootstrap`, account link, and account unlink publish restart requests under
+`/var/run/osi-node-red-restart-requests/` instead of restarting Node-RED
+directly. `/api/system/stats` exposes only
+`restartPending: { restartAt, reason } | null`; target EUIs and monotonic
+deadline fields remain private. Do not route identity transitions through the
+GUI `/api/system/reboot` route, and do not edit `sync-init-fn` or any
+`runGatewayMigrationPreflight` body as part of this path.
+
 ---
 
 ## File locations
@@ -209,7 +234,11 @@ cd web/react-gui && npm run build             # frontend build
 - Before risky repair: timestamped backup at `/data/db/backups/osi-os-<timestamp>` covering `/data/db/`, `/srv/node-red/`, `/usr/lib/node-red/gui/`, `flows.json`, `settings.js`.
 - Schema changes go via migrations or idempotent SQL — never replace `farming.db`.
 - **Stale-stamp recovery:** if `applyPending`/`verifyHead` report fingerprint drift after a crash between a migration commit and its stamp, and the live schema is confirmed correct, re-baseline with `node scripts/restamp-fingerprints.js /data/db/farming.db`. This is the ONLY sanctioned way to overwrite the fingerprint baseline; do not hand-edit `schema_object_fingerprints`.
-- Stale `/srv/node-red/.chirpstack.env` `DEVICE_EUI*` values can override runtime identity; remove during repair. Canonical EUI is uppercase and comes from the helper / UCI path.
+- Stale `/srv/node-red/.chirpstack.env` `DEVICE_EUI*` values are legacy
+  artifacts. Current `node-red.init` does not read identity from that file, and
+  `settings.js` protects identity keys, but operators should still remove stale
+  identity lines during repair so no future or manual env-file path can revive
+  them. Canonical EUI is uppercase and comes from the helper / UCI path.
 
 ## Production cloud access
 
