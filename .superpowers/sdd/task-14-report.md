@@ -1,5 +1,7 @@
 # Task 14 execution report
 
+> **Supersession note (2026-07-15):** This report remains below as the original Task 14 execution snapshot. Current acceptance evidence is recorded by the PR #141 hardening design, plan, and `.superpowers/sdd/progress.md`. The final slice uses migrations `0018`–`0021`, plot-first layout/index contracts, formula-neutralized CSV plus lossless `records.ndjson`, and the expanded post-review gate; the 37-gate counts below are not the current merge claim.
+
 ## Result
 
 Task 14 adds `.github/workflows/field-journal.yml`. The workflow runs both maintained journal module suites, the schema and lifecycle tests, the performance fixture, and profile parity on pushes and pull requests to `main` or `master`.

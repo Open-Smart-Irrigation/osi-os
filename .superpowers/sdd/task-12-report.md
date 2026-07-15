@@ -1,5 +1,7 @@
 # Task 12 implementation report
 
+> **Supersession note (2026-07-15):** This report remains below as the original Task 12 execution snapshot. Current behavior is governed by `docs/superpowers/specs/2026-07-14-field-journal-pr141-hardening-design.md` and the later PR #141 correction evidence in `.superpowers/sdd/progress.md`. The shipped slice uses migrations `0018`–`0021`, 13 tables in `0018`, plot-scoped layout settings, and the post-hardening bootstrap/flow gates; the test counts and manifest details below are historical evidence.
+
 ## Outcome
 
 Task 12 adds a fail-closed Field Journal compatibility advertisement to both

@@ -1,7 +1,7 @@
 # Field Journal / Activity Tracker — Design
 
-**Date:** 2026-07-12 (v2 — revised after external consultant review; see §12 and `docs/superpowers/prompts/field-journal-spec-review/consolidation.md`)
-**Status:** Reviewed draft — Phase-1 review findings incorporated
+**Date:** 2026-07-12 (v2; Slice 1 contract corrected 2026-07-15 after PR #141 review)
+**Status:** Slice 1 edge contract implemented; later slices remain staged in §11
 **Scope:** OSI OS (edge) + OSI Server (cloud)
 **Companion docs:** [UX addendum](2026-07-12-field-journal-ux-addendum.md) (U1–U5 adjudicated, P1–P9 adopted per its §5) · [Agroscope open-field layout](2026-07-12-agroscope-open-field-layout-design.md)
 
@@ -10,7 +10,7 @@
 A standardized, machine-readable activity tracker / field journal for the OSI ecosystem, serving three jobs from day one on a single shared data model:
 
 1. **Ground truth for sensor data** — entries (irrigation, pruning, fertilization, harvest, observations) explain what happened in the field so sensor curves and analytics (dendro v6, RDI) can be interpreted.
-2. **Detailed farm record** — structured farm records per zone, designed to support named compliance profiles later. v1 `full_record` is a **detailed record, not a certified ÖLN record or export**; any compliance-oriented requiredness and retention are explicit profile rules, never implied by the template name.
+2. **Detailed farm record** — structured farm records per plot, with optional derived zone attribution, designed to support named compliance profiles later. v1 `full_record` is a **detailed record, not a certified ÖLN record or export**; any compliance-oriented requiredness and retention are explicit profile rules, never implied by the template name.
 3. **Research data collection** — structured observations with standardized variables, campaign/protocol identity, and researcher-defined custom fields.
 
 Goals: **standardized terms**, **input robustness**, **machine readability**, **reproducibility** — every final entry pins its occurrence instant, crop season where known, catalog/template/layout semantics, entered and canonical units, and the provenance needed to interpret it later — and a UX suitable for both farmers and agronomic researchers, with **switchable templates** (audience depth) and **layouts** (agronomic setting) that together determine which choices and options the form surfaces.
@@ -52,7 +52,7 @@ UX decisions U1–U5 (picker model, type-ahead, ranking transparency, Agroscope 
 
 ## 4. Data model (edge SQLite, mirrored to cloud Postgres)
 
-One ordered migration `database/migrations/ordered/0018__field_journal.sql` (numbering updated 2026-07-14: renumbered from 0014 after merging main's 0014–0017) (first line `-- risk: additive`) + catalog seeds, through the full change-control surface (§9, SYS-12). After 0014, vocabulary/template/layout/product evolution is catalog data delivered by idempotent ordered data migrations or a governed importer — **never** by editing 0014.
+Slice 1 spans ordered migrations `0018`–`0021`, all registered through the full change-control surface (§9, SYS-12). Migration `0018__field_journal.sql` creates the 13 journal tables and initial indexes; `0019__journal_catalog_v1.sql` contains the generated catalog rows; `0020__journal_resource_owner_scope.sql` adds private owner scope to plots and groups; `0021__journal_plot_lookup_indexes.sql` adds the canonical plot-first lookup indexes. Later vocabulary/template/layout/product revisions use new idempotent data migrations or a governed importer. Shipped migrations are never edited.
 
 ### 4.1 `journal_entries`
 
@@ -105,7 +105,7 @@ One ordered migration `database/migrations/ordered/0018__field_journal.sql` (num
 | `entered_value_num` | REAL NULL | original numeric input (audit) |
 | `entered_unit_code` | TEXT NULL | unit the user selected |
 
-Constraints/indexes: `UNIQUE(entry_uuid, group_index, attribute_code)`; entry indexes `idx_journal_entries_zone_time (zone_id, occurred_start DESC, entry_uuid) WHERE deleted_at IS NULL`, `idx_journal_entries_gateway_time`, `idx_journal_entries_duplicate (zone_id, activity_code, occurred_start, entry_uuid) WHERE status='final' AND deleted_at IS NULL`, `idx_journal_entries_sticky (author_principal_uuid, zone_id, recorded_at DESC, entry_uuid) WHERE status='final' AND deleted_at IS NULL`; `idx_journal_entry_values (entry_uuid)`. Keyset pagination and streamed CSV; EXPLAIN QUERY PLAN + performance pinned with a 10k-entry/150k-value fixture. Value-side indexes only for proven research predicates.
+Constraints/indexes: `UNIQUE(entry_uuid, group_index, attribute_code)`. Canonical entry lookups use `idx_journal_entries_plot_time (plot_uuid, occurred_start DESC, entry_uuid)`, `idx_journal_entries_plot_duplicate (plot_uuid, activity_code, occurred_start, entry_uuid)`, and `idx_journal_entries_plot_sticky (author_principal_uuid, plot_uuid, recorded_at DESC, entry_uuid)`. The zone-first time/duplicate/sticky indexes from `0018` remain for legacy-compatible queries; `idx_journal_entries_gateway_time` and `idx_journal_entry_values_entry (entry_uuid)` cover gateway and value lookups. Keyset pagination and streamed exports are pinned with `EXPLAIN QUERY PLAN` on a 10k-entry/150k-value fixture. Value-side indexes exist only for proven research predicates.
 
 ### 4.3 Vocabulary: `journal_vocab` + `journal_vocab_mappings`
 
@@ -134,13 +134,13 @@ Constraints/indexes: `UNIQUE(entry_uuid, group_index, attribute_code)`; entry in
 
 **v1 activity seed list (final before Slice 1 implementation):** `irrigation`, `fertilization`, `fertigation` (carries both water and nutrient groups), `plant_protection_application` (herbicide/fungicide/insecticide/biological — product+rate always in scope), `weed_control_nonchemical` (method-coded), `seeding`, `planting_transplanting`, `pruning`, `crop_care` (thin/train/tie/de-leaf), `tillage_soil_work`, `mowing`, `harvest`, `sampling` (soil/plant), `general_observation`, `pest_disease_observation`, `equipment_maintenance`. Short farmer-verb labels; localized.
 
-**Catalog delivery:** `journal_catalog_version` is monotonic. Every post-0014 catalog revision is an idempotent ordered data migration or governed importer with cross-repo seed-row hashes; editing an old migration is forbidden. The edge advertises installed catalog version + definition hashes (§5.5).
+**Catalog delivery:** `journal_catalog_version` is monotonic. Every revision after catalog migration `0019` is a new idempotent ordered data migration or governed importer with cross-repo seed-row hashes; editing an old migration is forbidden. The edge advertises installed catalog version + definition hashes (§5.5).
 
 ### 4.4 `journal_templates`
 
 PK **(code, version)** — append-only; old versions retained inactive; entry pins immutable. `definition_json`: sections → fields, required/`required_if`/`visible_if` predicates (deterministic, side-effect-free, enforced by the same edge validator), defaults, carry-forward classes (§6.1). Families: `farmer_quick`, `full_record`, `research_observation`. `full_record` ships an activity/profile matrix of conditionally required facts (product, application date/quantity, treated area, harvest crop/area/yield/unit; operator/equipment/wind/PHI classified operational unless a named profile requires them). No authoring UI in v1.
 
-### 4.5 `journal_layouts` + zone binding
+### 4.5 `journal_layouts` + plot binding
 
 PK **(code, version)** — append-only. `definition_json` contract:
 
@@ -261,9 +261,9 @@ Picker model, search, ranking, and product-first entry are governed by the UX ad
 
 ### 6.2 Templates × layouts
 
-Separate controls: **"Detail level: Quick | Full | Research"** (template) and **"Growing setting"** (layout — a zone property per §4.5, passive badge, changed in zone settings or explicit per-entry override). Template depth rule (P3): quick picks shortlist leaves with defaults auto-resolved and visible; full shows all in-scope attributes; research requires the full explicit path, no silent defaults, identity/treatment fields shown.
+Separate controls: **"Detail level: Quick | Full | Research"** (template) and **"Growing setting"** (layout — a plot property per §4.5, passive badge, changed in plot settings or explicit per-entry override). Template depth rule (P3): quick picks shortlist leaves with defaults auto-resolved and visible; full shows all in-scope attributes; research requires the full explicit path, no silent defaults, identity/treatment fields shown.
 
-**Transition semantics (UX-3):** template switches retain valid hidden values and expose an "N extra details saved" drawer. Layout changes show a review sheet of now-disallowed activities/choices/values and **block finalization** until the user keeps the old setting, replaces the invalid item, or explicitly removes it. Zone + layout are repeated in the final confirmation strip.
+**Transition semantics (UX-3):** template switches retain valid hidden values and expose an "N extra details saved" drawer. Layout changes show a review sheet of now-disallowed activities/choices/values and **block finalization** until the user keeps the old setting, replaces the invalid item, or explicitly removes it. Plot + layout are repeated in the final confirmation strip.
 
 ### 6.3 Reading surfaces
 
@@ -289,14 +289,14 @@ Every enabled journal term/template/layout/unit, validation message, and save/re
 - **One rulebook, two layers:** template/layout-driven client validation + authoritative edge validation from the pinned catalog versions; cloud-origin entries traverse the same edge code path.
 - **Quantity/unit contract (STD-1):** every numeric attribute has quantity_kind, basis, canonical unit, allowed unit family; entered value/unit stored alongside canonical; cross-basis conversion only with complete denominator/formulation facts; separate semantics preserved for totals, depths, flows, rates, counts, per-plant amounts, concentrations, nutrient rates, yields.
 - **Hard server-side limits (SEC-3), independent of template constraints (which may only be stricter):** request 256 KiB; note 4,000 chars; author label 120; text value 4,096 UTF-8 bytes; ≤128 values, ≤32 groups per entry; context ≤64 KiB; aggregate ≤256 KiB; filename 255 bytes. Oversize → 413 before the transaction. Event batches capped by count and total bytes.
-- **Output hardening:** RFC-4180 CSV encoding, formula-neutralization of leading `= + - @`, safe generated filenames, labels/notes rendered as plain text. Logs carry IDs/codes/lengths only — no journal text or author names. Author labels omitted from default research export.
+- **Output hardening:** RFC-4180 CSV encoding and formula-neutralization apply to every string cell. A leading apostrophe protects cells whose first non-space/NBSP character is `= + - @` or whose prefix is a tab/carriage return. Safe generated filenames and plain-text rendering apply throughout. Logs carry IDs/codes/lengths only, with no journal text or author names. Author labels are omitted from the default research export, and exact typed source strings remain available in `records.ndjson`.
 - **Duplicate guard:** ±60 min per-activity default, scoped per plot (batch siblings on different plots never trip it); runs after activity/time selection and again at finalization; shows the matching entry (time + key values) with "Open existing" / "Save separately"; warns once per draft; Finish disabled while in flight.
 - **Batch limits:** ≤ 100 plots per batch; the fan-out transaction respects all aggregate/outbox size caps per entry.
 - **Timestamps:** UTC + timezone-snapshot contract per §4.1; Zurich DST gap/fold tested.
 
 ## 8. Exports & machine readability
 
-- **Canonical research package** (`export.package`): `entries.csv` (one row per entry), `values.csv` (one row per typed value: entry_uuid, attribute_code, group_index, value_status, entered + canonical value/unit), `vocab_mappings.csv`, `manifest.json`. The optional wide pivot (`export.csv`) is a convenience view with deterministic escaped columns and is **not** full fidelity.
+- **Canonical research package** (`export.package`): formula-neutralized `entries.csv`, `values.csv`, and `vocab_mappings.csv`; lossless typed `records.ndjson` containing entry, value, and mapping records; and `manifest.json` with the schema descriptor, record counts, and SHA-256/byte length for every data member. The wide pivot (`export.csv`) uses the same CSV hardening and remains a convenience view, not the lossless source.
 - **JSON export:** includes dataset/export UUID, generation + coverage times, source/gateway/farm/zone identifiers, exporter version/commit, schema/catalog/template/layout/context-generator versions and hashes, mapping sources/licenses, unit transformations, record counts, payload checksums. Author identity only per explicit access/pseudonymization policy.
 - **SoilManageR export** (Agroscope layout doc): flattens repeat groups and pass links back to the template's one-value-per-row + `combination` format; derived nutrient rates computed from frozen product compositions.
 - **ADAPT export:** zone-linked final operational entries against **pinned ADAPT Standard 1.0.0** (root/DTD/unit artifact hashes recorded in the review report §STD-3). Deterministic Catalog Field references, WorkRecords, Operations, Variables, SummaryValues, ACTUAL UTC TimeScopes. No centroid-as-Field (ADAPT Field has no point property); no productIds unless valid Catalog Products are emitted (product text goes to notes/descriptions). CI: schema validation through a root-definition wrapper + semantic linter (allowed codes, DTD units/conversions, resolvable references, UTC, start≤end, profile version) + negative mutation fixtures. No named external consumer exists yet (Q5) — the OSI semantic profile v1 is the acceptance contract; fallback to fast-follow only if that profile cannot be satisfied.
@@ -317,7 +317,7 @@ Every enabled journal term/template/layout/unit, validation message, and save/re
 
 ## 11. Delivery staging
 
-1. **Slice 1 — edge core:** complete 0014 + change-control surface; unit/quantity + version contracts; catalog seeds (vocab incl. final activity list, templates, 3+1 layouts, core products) + hashes; `osi-journal` module (validation, cascade, transaction lifecycle); REST routes + auth; outbox aggregates; sync-contract schemas + capabilities; bounded snapshot manifest.
+1. **Slice 1 — edge core:** migrations `0018`–`0021` through the change-control surface (`0018` creates 13 tables; `0019` carries generated catalog v1; `0020` adds private resource scope; `0021` adds plot-first indexes); unit/quantity + version contracts; catalog seeds (vocab incl. final activity list, templates, 3+1 layouts, core products) + hashes; `osi-journal` module (validation, cascade, transaction lifecycle); REST routes + auth; outbox aggregates; sync-contract schemas + capabilities; bounded snapshot manifest.
 2. **Slice 2 — edge UI:** Journal nav surface (mobile flow + desktop three-pane per §6.4), entry flow (U1 picker, save states, safe carry-forward, repeater, confirmation strip), plot CRUD + no-zone entry, Drafts queue, timeline, chart markers, layout-transition review, locale contract, recent-activity personalization.
 3. **Slice 3 — cloud read:** mirror tables + idempotent ingestion + resource watermarks; snapshot worker + reconciliation; cloud read UI; canonical research package export.
 4. **Slice 4 — cloud write:** capability-aware command leasing, durable local command handling, exact replay results, recoverable rejected drafts ("Waiting for farm" tray), custom-field + farm-product creation.

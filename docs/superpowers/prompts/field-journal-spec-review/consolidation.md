@@ -1,5 +1,7 @@
 # Field Journal — Review Consolidation Record
 
+> **Supersession note (2026-07-15):** The original 2026-07-12 consolidation snapshot remains below unchanged, including the consultant's Slice 1/Slice 3 recommendation. Current Slice 1 contracts are in `docs/superpowers/specs/2026-07-12-field-journal-design.md` and the PR #141 hardening design. They use migrations `0018`–`0021` (`0018` creates 13 tables; `0019` contains generated catalog v1), bind layouts through `journal_plot_settings.plot_uuid`, and pair formula-neutralized CSV with lossless `records.ndjson`.
+
 **Date:** 2026-07-12
 **Inputs:** Phase-1 consultant review (`report.md`, 623 lines, SHA-verified against parent spec v1) + UX addendum (U1–U5/P1–P9) + Agroscope layout doc. **The Phase-2 review (`followup-01-layouts-and-cascade.md`) was never run** — its questions (cascade mechanism, product registry, layout binding, picker stress-test) were decided autonomously per product-owner instruction ("decide on your own, don't prompt").
 **Outputs:** parent spec rewritten as v2; layout doc §5 resolved; addendum §4 verdicts added.
@@ -58,7 +60,7 @@ Recorded normatively in parent spec §12: Q1 detailed-record-only; Q2 no orchard
 - **Product registry (U5):** dedicated `journal_products` table (not vocab kind) — structured composition, tenant-owned farm rows, immutable-after-use; derived nutrient rates computed at display/export from frozen compositions, never stored (no drift).
 - **Layout binding:** P1 adopted via `journal_zone_settings` (avoids touching the `irrigation_zones` sync contract).
 - **Combined operations:** entry-level `pass_uuid`; SoilManageR `combination` derived at export.
-- **Picker stress-test items** (shortlist size, cold start, synonym curation workflow, near-duplicate devices): deferred to Slice-2 implementation planning; U1–U3 stand as adjudicated.
+- **Picker stress-test items** (shortlist size, cold start, synonym curation workflow, near-duplicate devices): deferred to Slice-2 implementation planning; U1–U3 stand as adjudicated. <!-- slop-allow: preserved historical wording -->
 
 ## What was deliberately not adopted
 

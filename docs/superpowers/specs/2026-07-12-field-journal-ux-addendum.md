@@ -15,17 +15,17 @@
 
 | # | Decision | Detail |
 |---|---|---|
-| U1 | **Picker model: smart shortlist + search; guided tree as fallback** | Entry opens on a card grid of *leaf* choices (operation·device pairs) ranked by zone recents → season likelihood → layout defaults. Type-ahead search over flattened labelled paths below. "Browse all…" opens a guided one-level-per-screen tree (ODK-style) — the fallback and cold-start mode, never the default. A sentence-builder ("mad-libs") input was rejected for i18n grammar cost; its *output* is kept as the confirmation strip (P2). |
+| U1 | **Picker model: smart shortlist + search; guided tree as fallback** | Entry opens on a card grid of *leaf* choices (operation·device pairs) ranked by plot recents → season likelihood when the plot links a zone → layout defaults. Type-ahead search over flattened labelled paths below. "Browse all…" opens a guided one-level-per-screen tree (ODK-style) — the fallback and cold-start mode, never the default. A sentence-builder ("mad-libs") input was rejected for i18n grammar cost; its *output* is kept as the confirmation strip (P2). |
 | U2 | **Type-ahead is the search mechanism** | Search matches localized labels **and a curated synonym index** per language ("Gülle" → `liquid_organic_broadcast`; AGROVOC labels as the base layer, colloquialisms curated on top). Synonym curation is a v1 deliverable for shipped vocab, per-language. |
-| U3 | **Ranking must be transparent** | Shortlist sections are visibly labelled ("Recent in this zone", "Common this season", "All options") — never an unexplained ranking, or trust in the picker dies. |
+| U3 | **Ranking must be transparent** | Shortlist sections are visibly labelled ("Recent on this plot", "Common this season", "All options") — never an unexplained ranking, or trust in the picker dies. |
 | U4 | **Agroscope open-field layout is researcher-only** | No `farmer_quick × agroscope_open_field` combination exists; no cascade-collapse logic is designed for it. Layouts therefore declare which template families they support (`supported_templates` in layout definition). The depth-pruning rule (P3) still applies to layouts that *do* serve both audiences (generic open_field, greenhouse). |
 | U6 | **Plot-first anchoring + general Journal entry (added post-consolidation, 2026-07-12)** | Journal is a top-level nav item next to "Data"; its entry flow attributes a plot optionally. Plots (`journal_plots`, unique `plot_code` per gateway) are the canonical land unit; sensor-less fields are first-class plots; zone attribution is derived, optional. No-zone entries: crop + activity suggestions from recent use only, no context snapshot. Desktop = three-pane review/enrichment workspace (spec §6.4); mobile stays the capture surface. |
 | U7 | **Multi-plot batch entry + resolvable groups (added 2026-07-12)** | One authoring pass, N database rows: the "Where?" step multi-selects plots (numbered grid + range input `2, 5, 6, 10-12` for stations like a 72-lysimeter facility); finalize fans out to one independent entry per plot sharing a `batch_uuid` (spec D11). **Custom-labeled plot groups** ("Barley 2026") select a recurring cohort in one tap, are layout-homogeneous by rule, editable while active, and **resolved** (archived, reversible) when done — offered automatically after a harvest batch covering the whole group. Pickers never render a station as a long list — one collapsible row expanding to a grid. |
-| U5 | **Product-first fertilization entry is designed in from v1** | Farmers think in product terms ("300 kg/ha of 27.5 % N"); SoilManageR and research exports need nutrient rates. v1 therefore includes a **product registry with nutrient composition** (N/P₂O₅/K₂O/… per unit of product; DMC/C/N for organic amendments, matching SoilManageR's optional fields). Entry supports both modes: product + application rate (system derives nutrient rates) **or** direct nutrient rates (researcher mode). Derived values are stored as derived (provenance flagged), feeding SoilManageR/ADAPT/CSV exports. Exact storage shape (vocab kind `product` vs. dedicated table) is decided in the Slice-1 plan with Phase-2 review input. |
+| U5 | **Product-first fertilization entry is designed in from v1** | Farmers think in product terms ("300 kg/ha of 27.5 % N"); SoilManageR and research exports need nutrient rates. v1 stores the product registry in `journal_products`, including nutrient composition (N/P₂O₅/K₂O/… per unit of product and DMC/C/N for organic amendments). Entry supports product + application rate or direct nutrient rates. Composition-derived values are computed for display and export from the frozen product facts; they are not duplicated as stored derived values. |
 
-## 3. Proposals (pending Phase-2 reconciliation)
+## 3. Proposal record (resolved in §4)
 
-**P1 — Layout is a zone property, not a daily switch.** A zone *is* a trial field or a greenhouse; bind layout at zone setup, change in zone settings, show as a passive badge on the entry screen. Eliminates the wrong-layout data-integrity risk structurally and kills the two-dimensional daily switcher (revises parent §4.5 stickiness and §6.2b switching). Template remains the only user-facing daily-ish control.
+**P1 — Layout is a plot property, not a daily switch.** Bind layout at plot setup, change it in plot settings, and show it as a passive badge on the entry screen. This removes the two-dimensional daily switcher while keeping sensor-zone attribution optional. Template remains the only routine depth control.
 
 **P2 — Confirm-by-reading strip.** Before save, one generated journal sentence — "Slurry (drag hose) · 25 m³/ha · Zone North · today" — every token tappable to edit. This is what makes carry-forward safe: prefills are *read* in one glance, not buried in collapsed sections.
 
@@ -47,8 +47,8 @@
 
 | P | Verdict | Notes |
 |---|---|---|
-| P1 layout = zone property | **Adopted** | Via new `journal_zone_settings` table (not an `irrigation_zones` column — avoids touching the zone sync contract). Explicit first-use choice; no silent `open_field` default; per-entry override allowed; layout changes trigger the UX-3 review sheet (parent §6.2). |
-| P2 confirm-by-reading strip | **Adopted** | Also carries the STD-1 requirement: interpreted value + unit repeated before finalization; zone + layout shown. |
+| P1 layout = plot property | **Adopted** | `journal_plot_settings` binds `layout_code` to `plot_uuid`; no `journal_zone_settings` table exists. First use requires an explicit choice, `open_field` is never a silent default, per-entry override remains allowed, and layout changes trigger the UX-3 review sheet (parent §6.2). |
+| P2 confirm-by-reading strip | **Adopted** | Also carries the STD-1 requirement: interpreted value + unit repeated before finalization; plot + layout shown. |
 | P3 template depth rule | **Adopted** | With UX-3 transition semantics and the separate "Detail level" / "Growing setting" controls. |
 | P4 two-class prefill | **Adopted, strengthened by AGR-7** | Plant-protection product/authorization/target/dose/area/waiting-period are never silently carried — explicit "Repeat last treatment" confirmation card; carry-forward source must match season/layout and precede the occurrence time. |
 | P5 unit ergonomics | **Adopted** | Backed by the STD-1 quantity_kind/basis model; entered value/unit stored for audit. |
@@ -59,8 +59,8 @@
 
 ## 5. Parent-spec impact (applied in parent spec v2, 2026-07-12)
 
-- §4.4/§4.5: layouts gain `supported_templates` (U4); layout binding moves to zone property (P1, if confirmed).
-- §4.3: product registry decision (U5) — new vocab kind or table; derived-value provenance.
+- §4.4/§4.5: layouts gain `supported_templates` (U4); `journal_plot_settings.plot_uuid` carries layout binding (P1).
+- §4.3/§4.6: `journal_products` is the stored registry; composition-derived nutrient values are computed for display/export (U5).
 - §6.1–6.2b: replace the segmented template×layout switching text with U1/P1–P3; add prefill classes (P4), unit rules (P5), confirmation strip (P2).
 - §6.3: timeline pass-cards (P8); "needs completion" queue (P7).
 - §11: synonym-index curation (U2) lands in Slice 1 seeds; system-initiated drafts (P9) scheduled in planning.

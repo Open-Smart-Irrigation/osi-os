@@ -8,11 +8,13 @@
 
 **Tech Stack:** SQLite (edge), Node.js ≥18 pure modules (no deps), Node-RED function nodes bound via `libs`, JSON-Schema sync contracts, repo verifier suite.
 
+**Shipped correction (2026-07-15):** Slice 1 uses migrations `0018`–`0021`. Migration `0018` creates 13 tables, `0019` contains generated catalog v1, `0020` adds plot/group owner scope, and `0021` adds the canonical plot-first time/duplicate/sticky indexes. The task steps below use those final identifiers.
+
 ## Global Constraints
 
 - Spec of record: `docs/superpowers/specs/2026-07-12-field-journal-design.md` (v2). UX addendum U1–U5/P1–P9 and the Agroscope layout doc are companions.
 - **REQUIRED SKILLS while executing:** `osi-schema-change-control` (before touching any SQL/schema file), `osi-flows-json-editing` (before touching flows.json — flows.json is edited ONLY via one-shot Node scripts, never by hand or text tools).
-- Migration `0014` DDL only; catalog rows in `0015` (generated, idempotent). First line of every migration: `-- risk: additive`. Never edit a shipped migration.
+- Migration `0018` is DDL; catalog rows live in generated, idempotent migration `0019`; additive migrations `0020` and `0021` complete resource scope and plot lookup indexes. First line of every migration declares its risk class. Never edit a shipped migration.
 - Both profiles (`bcm2712` canonical, `bcm2709` mirror) byte-identical for every shipped file; `node scripts/verify-profile-parity.js` must pass after every task that touches `conf/`.
 - No journal DDL in the frozen `sync-init-fn` boot node.
 - All timestamps stored as UTC `YYYY-MM-DDTHH:MM:SS.sssZ`.
@@ -38,9 +40,11 @@
 
 ## File structure (created/modified by this slice)
 
-- `database/migrations/ordered/0018__field_journal.sql` — DDL (9 tables + indexes; renumbered from 0014 on 2026-07-14 after merging main's 0014–0017)
-- `database/migrations/ordered/0019__journal_catalog_v1.sql` — generated catalog data v1 (renumbered from 0015 on 2026-07-14)
-- `scripts/generate-journal-catalog.js` — deterministic 0010 generator (reads core catalog def + Agroscope `catalog.json`)
+- `database/migrations/ordered/0018__field_journal.sql` — 13 journal tables plus initial indexes
+- `database/migrations/ordered/0019__journal_catalog_v1.sql` — generated catalog data v1
+- `database/migrations/ordered/0020__journal_resource_owner_scope.sql` — private owner scope for plots and plot groups
+- `database/migrations/ordered/0021__journal_plot_lookup_indexes.sql` — canonical plot-first time, duplicate, and sticky indexes
+- `scripts/generate-journal-catalog.js` — deterministic `0019` generator (reads core catalog def + Agroscope `catalog.json`)
 - `scripts/journal-catalog-core.js` — hand-written core catalog definition (activities, attributes, units, templates, layouts, products)
 - `database/migrations/ordered/CHECKSUMS.json`, `database/seed-blank.sql`, bundled `farming.db` copies — change-control registration
 - `conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-journal/{index.js,catalog.js,units.js,cascade.js,aggregate.js,lifecycle.js,context.js,index.test.js,package.json}` (+ bcm2709 mirror) — the pure module
@@ -52,18 +56,18 @@
 - `scripts/test-journal-schema.js`, `scripts/test-journal-lifecycle.js`, `scripts/test-journal-perf-fixture.js` — new test entry points
 - `.github/workflows/field-journal.yml` — CI
 
-### Task 1: Migration 0014 — schema
+### Task 1: Migration 0018 — schema
 
-**Files:** Create `database/migrations/ordered/0018__field_journal.sql` (authored as 0014; renumbered 2026-07-14); Modify `database/migrations/ordered/CHECKSUMS.json`, `database/seed-blank.sql` (append same DDL), bundled DBs per `osi-schema-change-control`; Test: existing verifiers.
+**Files:** Create `database/migrations/ordered/0018__field_journal.sql`; Modify `database/migrations/ordered/CHECKSUMS.json`, `database/seed-blank.sql` (append same DDL), bundled DBs per `osi-schema-change-control`; Test: existing verifiers.
 
-**Interfaces — Produces:** the nine tables exactly as spec §4.1–§4.7 defines them; later tasks depend on these column names verbatim.
+**Interfaces — Produces:** the 13 tables exactly as spec §4.1–§4.7 defines them; later tasks depend on these column names verbatim.
 
-- [ ] **Step 1: read the `osi-schema-change-control` skill**, then write the failing check: `node scripts/verify-migrations.js` currently knows nothing of 0014 — run it to record the clean baseline. Expected: PASS (baseline).
-- [ ] **Step 2: write `0018__field_journal.sql`** (authored as 0014; renumbered 2026-07-14) — complete DDL:
+- [ ] **Step 1: read the `osi-schema-change-control` skill**, then write the failing check: `node scripts/verify-migrations.js` currently knows nothing of `0018` — run it to record the clean baseline. Expected: PASS (baseline).
+- [ ] **Step 2: write `0018__field_journal.sql`** — complete DDL:
 
 ```sql
 -- risk: additive
--- 0014: Field journal core schema (spec docs/superpowers/specs/2026-07-12-field-journal-design.md §4)
+-- 0018: Field journal core schema (spec docs/superpowers/specs/2026-07-12-field-journal-design.md §4)
 
 CREATE TABLE IF NOT EXISTS journal_entries (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -232,7 +236,7 @@ CREATE TABLE IF NOT EXISTS journal_plot_group_members (
 );
 
 CREATE TABLE IF NOT EXISTS journal_plot_settings (
-  plot_uuid TEXT PRIMARY KEY,
+  plot_uuid TEXT PRIMARY KEY REFERENCES journal_plots(plot_uuid) ON DELETE CASCADE,
   layout_code TEXT NOT NULL,
   updated_at TEXT NOT NULL,
   updated_by_principal_uuid TEXT NOT NULL,
@@ -281,21 +285,21 @@ CREATE TABLE IF NOT EXISTS journal_catalog_state (
 );
 ```
 
-- [ ] **Step 3: register in change control.** Append the identical DDL block to `database/seed-blank.sql`; add the 0014 sha256 to `CHECKSUMS.json` (`shasum -a 256 database/migrations/ordered/0018__field_journal.sql`); regenerate every bundled `farming.db` the `osi-schema-change-control` skill lists (repo root, `web/react-gui/`, profile DBs) with the repo's documented regeneration procedure.
+- [ ] **Step 3: register in change control.** Append the identical DDL block to `database/seed-blank.sql`; add the `0018` SHA-256 to `CHECKSUMS.json` (`shasum -a 256 database/migrations/ordered/0018__field_journal.sql`); regenerate every bundled `farming.db` the `osi-schema-change-control` skill lists (repo root, `web/react-gui/`, profile DBs) with the repo's documented regeneration procedure.
 - [ ] **Step 4: run the gates.** `node scripts/verify-migrations.js && node scripts/verify-seed-replay.js && node scripts/verify-db-schema-consistency.js && node scripts/verify-runtime-schema-parity.js && node scripts/verify-no-stray-ddl.js && node scripts/test-deploy-migration-wiring.js`. Expected: all PASS. Fix schemaContract/fingerprint updates the verifiers demand until green.
-- [ ] **Step 5: commit** `feat(journal): 0014 field journal schema + change-control registration`.
+- [ ] **Step 5: commit** `feat(journal): 0018 field journal schema + change-control registration`.
 
-### Task 2: Catalog v1 — core definition + generated 0010
+### Task 2: Catalog v1 — core definition + generated 0019
 
-**Files:** Create `scripts/journal-catalog-core.js`, `scripts/generate-journal-catalog.js`, `database/migrations/ordered/0019__journal_catalog_v1.sql` (generated, committed; authored as 0015, renumbered 2026-07-14); Modify CHECKSUMS.json + seed-blank.sql + bundled DBs (same procedure as Task 1); Test: Create `scripts/test-journal-schema.js`.
+**Files:** Create `scripts/journal-catalog-core.js`, `scripts/generate-journal-catalog.js`, `database/migrations/ordered/0019__journal_catalog_v1.sql` (generated, committed); Modify CHECKSUMS.json + seed-blank.sql + bundled DBs (same procedure as Task 1); Test: Create `scripts/test-journal-schema.js`.
 
 **Interfaces — Produces:** catalog rows with `catalog_version = 1`; `journal-catalog-core.js` exports `{ activities, attributes, units, choices, templates, layouts, products }` plain objects (the single authoring surface for core catalog content).
 
 - [ ] **Step 1: write the failing test** `scripts/test-journal-schema.js` (node:assert, opens a temp DB, applies seed-blank.sql): asserts (a) 16 activity rows exist matching spec §4.3's list verbatim (`irrigation, fertilization, fertigation, plant_protection_application, weed_control_nonchemical, seeding, planting_transplanting, pruning, crop_care, tillage_soil_work, mowing, harvest, sampling, general_observation, pest_disease_observation, equipment_maintenance`); (b) every numeric attribute has non-null `quantity_kind`, `basis`, `default_unit_code`; (c) 4 layouts (`open_field`, `greenhouse`, `lysimeter`, `agroscope_open_field`) at version 1, each `definition_json` parses and `agroscope_open_field.definition_json.option_dependencies` reproduces the counts from `docs/superpowers/specs/agroscope-open-field/catalog.json` (25 operations, 128 device slots, unit sets per device); (d) `journal_catalog_state.catalog_version = 1`. Run: `node scripts/test-journal-schema.js` → FAIL (no rows).
 - [ ] **Step 2: write `journal-catalog-core.js`** — the hand-written core catalog: the 16 activities (icon_key, labels_json en at minimum, sort_order), shared attributes (e.g. `attr.amount` variants per quantity_kind: `area_rate_volume` L/ha·m³/ha, `area_rate_mass` kg/ha·t/ha, `nutrient_rate` kg-N/P₂O₅/K₂O…/ha with `basis:'nutrient'`, `depth_cm`, `count_area`, `duration_min`, `per_plant_volume`), units with `{dimension, basis, to_canonical:{scale,offset}}`, the 3 template definitions, the 3 generic layout definitions with their spec §4.5 minimum fields, and ~10 core products with `composition_json`. Mappings rows (AGROVOC/ICASA/ADAPT role-qualified) for every activity + unit where a mapping exists in the Agroscope catalog's `source`/provenance data.
-- [ ] **Step 3: write `generate-journal-catalog.js`**: reads core def + `docs/superpowers/specs/agroscope-open-field/catalog.json`; emits deterministic idempotent SQL (`INSERT OR IGNORE`, fixed ordering, `-- risk: additive` header, trailing `INSERT OR REPLACE INTO journal_catalog_state(id,catalog_version,catalog_hash,updated_at) …` where catalog_hash = sha256 of the emitted row content). Agroscope mapping: 7 categories → `choice` rows of `attr.agroscope.operation` parented per activity; devices → `choice` rows of `attr.agroscope.device`; cascade + device-unit sets → `option_dependencies` in the layout `definition_json`; quirk handling per layout doc §3 (seed `cleaning_cut→mower`, dedupe `mower`, no-unit devices get no unit family). Run it; commit the generated 0010 file; register in CHECKSUMS + seed-blank + bundled DBs.
-- [ ] **Step 4: run** `node scripts/test-journal-schema.js` → PASS; rerun the Task-1 gate suite → PASS. Regenerating 0010 twice must be byte-identical (determinism check: `node scripts/generate-journal-catalog.js --check`).
-- [ ] **Step 5: commit** `feat(journal): catalog v1 (core + agroscope) as generated 0010 data migration`.
+- [ ] **Step 3: write `generate-journal-catalog.js`**: reads core def + `docs/superpowers/specs/agroscope-open-field/catalog.json`; emits deterministic idempotent SQL (`INSERT OR IGNORE`, fixed ordering, `-- risk: data` header, trailing `INSERT OR REPLACE INTO journal_catalog_state(id,catalog_version,catalog_hash,updated_at) …` where catalog_hash = sha256 of the emitted row content). Agroscope mapping: 7 categories → `choice` rows of `attr.agroscope.operation` parented per activity; devices → `choice` rows of `attr.agroscope.device`; cascade + device-unit sets → `option_dependencies` in the layout `definition_json`; quirk handling per layout doc §3 (seed `cleaning_cut→mower`, dedupe `mower`, no-unit devices get no unit family). Run it; commit generated migration `0019`; register it in CHECKSUMS + seed-blank + bundled DBs.
+- [ ] **Step 4: run** `node scripts/test-journal-schema.js` → PASS; rerun the Task-1 gate suite → PASS. Regenerating `0019` twice must be byte-identical (determinism check: `node scripts/generate-journal-catalog.js --check`).
+- [ ] **Step 5: commit** `feat(journal): catalog v1 (core + agroscope) as generated 0019 data migration`.
 
 ### Task 3: `osi-journal` module — catalog access + entry validation
 

@@ -1,7 +1,7 @@
 # Layout: "Agroscope open field" — Design & Faithful Template Duplication
 
 **Date:** 2026-07-12
-**Status:** Draft for review
+**Status:** Slice 1 catalog contract implemented; GUI and localization remain staged
 **Parent spec:** [2026-07-12-field-journal-design.md](2026-07-12-field-journal-design.md) (decision D8 — layouts)
 **Source:** SoilManageR management-data template **v2.6** (23.12.2024), Agroscope SoilX project
 **Source files in repo:** [`agroscope-open-field/SoilManageR_mgmt_data_template_V2.6.xlsx`](agroscope-open-field/SoilManageR_mgmt_data_template_V2.6.xlsx) · full machine-readable extraction [`agroscope-open-field/catalog.json`](agroscope-open-field/catalog.json)
@@ -17,7 +17,7 @@ The template's vocabulary follows, in decreasing priority: **AGROVOC → KTBL (2
 
 The template is **not** a flat activity list. Each management operation is a **4-level dependent cascade**, plus a numeric value, plus optional context fields:
 
-```
+```text
 category  ──▶  operation  ──▶  device  ──▶  unit(s)     +  value (numeric)
 (7)            (25 total)      (82 uniq)     (19 distinct)
 ```
@@ -115,11 +115,11 @@ In SoilManageR, recording N+P+K for one `solid_broadcast` fertilization needs th
 
 ### 4.4 Treatment/plot fields (layout-level, optional)
 
-`layout.plot` (Parzelle), `layout.tillage_system`, `layout.fertilization_regime` as optional entry fields surfaced only in this layout, defaulting from zone/trial config. These satisfy the researcher plot/replicate-identifier need without polluting the generic model.
+`layout.plot` (Parzelle), `layout.tillage_system`, `layout.fertilization_regime` as optional entry fields surfaced only in this layout, defaulting from plot/trial config. These satisfy the researcher plot/replicate-identifier need without polluting the generic model.
 
 ## 5. Design implication for the parent spec — RESOLVED 2026-07-12
 
-**Resolution (post Phase-1 review consolidation):** the cascade lives in the layout's `definition_json` as `option_dependencies` (choices and allowed-unit sets constrained by earlier field values), enforced by the same edge validator — exactly the recommendation below, independently corroborated by review finding AGR-3. Device-scoped units use the same mechanism. Additional resolutions: combined operations use an entry-level `pass_uuid` (exports derive SoilManageR `combination` integers); multi-nutrient events use the repeatable value groups; product/DMC/C/N map to the `journal_products` registry (parent spec §4.6) with derived nutrient rates computed at export from frozen compositions. Parent spec §4.5 now carries the normative contract. Original analysis retained below for provenance.
+**Resolution (post Phase-1 review consolidation):** the cascade lives in the layout's `definition_json` as `option_dependencies` (choices and allowed-unit sets constrained by earlier field values), enforced by the same edge validator — exactly the recommendation below, independently corroborated by review finding AGR-3. Device-scoped units use the same mechanism. Additional resolutions: combined operations use an entry-level `pass_uuid` (exports derive SoilManageR `combination` integers); multi-nutrient events use the repeatable value groups; product/DMC/C/N map to the `journal_products` registry (parent spec §4.6), with derived nutrient rates computed for display and export from frozen compositions. Parent spec §4.5 carries the normative contract. Original analysis is retained below for provenance.
 
 ### Original analysis (superseded by the resolution above)
 
@@ -136,8 +136,8 @@ Duplicating this template surfaces a capability the parent journal spec (§4.3�
 1. **`catalog.json`** — complete, faithful, machine-readable duplication of every category, operation, device, unit, crop, product suggestion, treatment factor, row-field, and quirk. This is the authoritative input for the eventual `agroscope_open_field` layout seed + associated vocab rows.
 2. **This design doc** — structure, mapping to the journal model, quirks, and the dependent-options design implication.
 
-## 7. Not done now (correctly deferred)
+## 7. Delivery boundary after Slice 1
 
-- No schema, seed, `flows.json`, or GUI changes — the parent journal design is still under review; this layout depends on decisions (dependent-options mechanism) that the review may influence.
+- Migrations `0018` and `0019`, the catalog generator, the `osi-journal` validator, and the authenticated edge routes now implement this layout's data contract. The GUI remains a Slice-2 deliverable.
 - German/French labels: `catalog.json` carries the canonical English/technical codes; `labels_json` localization is a Slice-2 concern tied to i18n (#47). AGROVOC provides reference translations for mapped terms.
-- Reconciliation of the dependent-options mechanism into the parent spec (§5) — pending review outcome.
+- `option_dependencies` reconciliation is complete in the parent spec (§4.5) and generated catalog tests.

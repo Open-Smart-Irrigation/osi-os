@@ -1,5 +1,7 @@
 # Codex Task: Field Journal Slice 1 — Tasks 2–14 (edge core)
 
+> **Supersession note (2026-07-15):** This handover remains below as the 2026-07-12 execution snapshot. The current contract is the field-journal design plus `docs/superpowers/specs/2026-07-14-field-journal-pr141-hardening-design.md`. Slice 1 now spans migrations `0018`–`0021`: `0018` creates 13 tables, `0019` contains generated catalog v1, and `0021` supplies the canonical plot-first lookup indexes while the zone indexes remain legacy-compatible. Post-review acceptance uses the hardening plan's full gate, not the historical counts or migration names below.
+
 ## Orchestrator instructions
 
 You are the orchestrator. You plan, dispatch, verify, and loop. Spawn a **cheap execution worker** for each task, and a **gpt-5.6-sol reviewer** after each task. You never accept a worker's claim unverified: after each worker completes, run the task's verification gates yourself, then dispatch the reviewer. If verification or review fails, diagnose, write a corrective worker prompt, re-dispatch, re-review. Loop until green.
