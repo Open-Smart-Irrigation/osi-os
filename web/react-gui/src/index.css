@@ -103,6 +103,23 @@ body {
   -moz-osx-font-smoothing: grayscale;
 }
 
+/* Agroscope Balken crown: the "Agroscope" wordmark sits 16.2% into the image
+   (solid red block + seam precede it). Shift the image left by that fraction
+   so the wordmark aligns with the content column's left edge (the page title
+   / form labels below it), and widen it to 1/(1-0.162) so its gradient tail
+   still reaches the column's right edge. The red block bleeds left and is
+   clipped by the crown wrapper's overflow-hidden. Put this on the <img>
+   inside a box whose left edge is the content-left. */
+.balken-crown {
+  display: block;
+  height: 2rem;
+  width: 119.33%;
+  max-width: none;
+  margin-left: -19.33%;
+  object-fit: cover;
+  object-position: left center;
+}
+
 /* Brand typography: Noto Sans on brand surfaces (header, login card) — the
    Confederation's web substitute for the Frutiger used in the Balken. */
 .font-brand {

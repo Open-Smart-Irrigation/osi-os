@@ -38,11 +38,10 @@ export const Login: React.FC = () => {
             the card — the LanguageSwitcher dropdown at the bottom would be
             clipped by an overflow-hidden card. */}
         <div className="overflow-hidden rounded-t-2xl bg-white border-b border-[var(--border)]">
-          <img
-            src={balkenHorizontal}
-            alt="Agroscope"
-            className="block h-8 w-full object-cover object-left"
-          />
+          {/* Wordmark aligns with the form labels' left edge (p-6 below). */}
+          <div className="px-6">
+            <img src={balkenHorizontal} alt="Agroscope" className="balken-crown" />
+          </div>
         </div>
         <div className="p-6">
         <div className="text-center mb-5 font-brand">

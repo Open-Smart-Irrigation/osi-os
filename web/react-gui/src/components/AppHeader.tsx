@@ -65,11 +65,11 @@ export const AppHeader: React.FC<AppHeaderProps> = ({
           page. It sits in document flow and scrolls away; only the header
           below sticks. */}
       <div className="overflow-hidden bg-white">
-        <img
-          src={balkenHorizontal}
-          alt="Agroscope Balken"
-          className="block h-8 w-full object-cover object-left"
-        />
+        {/* Wordmark aligns with the content column's left edge (the H1 below).
+            See .balken-crown in index.css. */}
+        <div className="max-w-7xl mx-auto px-4">
+          <img src={balkenHorizontal} alt="Agroscope Balken" className="balken-crown" />
+        </div>
       </div>
       <header className="glass-chrome sticky top-0 z-30 border-b border-[var(--border)]">
         <div className="max-w-7xl mx-auto px-4 pt-5">
