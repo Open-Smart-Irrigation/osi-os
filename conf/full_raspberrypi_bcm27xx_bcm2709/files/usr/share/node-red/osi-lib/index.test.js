@@ -28,6 +28,9 @@ test('NAME_TO_PATH is exported and lists all launch entries', () => {
     'history-router',
     'history-sync',
     'lsn50-normalize',
+    'osi-command-ledger',
+    'osi-db-helper',
+    'osi-journal',
     'uc512-normalize',
     'zone-env',
   ]);
@@ -39,6 +42,9 @@ test('NAME_TO_PATH is exported and lists all launch entries', () => {
   assert.equal(osiLib.NAME_TO_PATH['lsn50-normalize'], 'osi-lsn50-normalize');
   assert.equal(osiLib.NAME_TO_PATH['agroscope-uplink-transform'], 'codecs/agroscope_uplink_transform');
   assert.equal(osiLib.NAME_TO_PATH['history-router'], 'osi-history-router');
+  assert.equal(osiLib.NAME_TO_PATH['osi-db-helper'], 'osi-db-helper');
+  assert.equal(osiLib.NAME_TO_PATH['osi-command-ledger'], 'osi-command-ledger');
+  assert.equal(osiLib.NAME_TO_PATH['osi-journal'], 'osi-journal');
 });
 
 test('unknown name returns a typed failure, never throws', () => {
@@ -59,6 +65,28 @@ test('load success returns the module and caches it', () => {
   const second = osiLib.require('history-sync');
   assert.equal(second.ok, true);
   assert.equal(second.value.marker, 'v1');
+});
+
+test('journal flow helpers load from OSI_LIB_BASE and cache successful modules', () => {
+  for (const [name, directory] of [
+    ['osi-db-helper', 'osi-db-helper'],
+    ['osi-command-ledger', 'osi-command-ledger'],
+  ]) {
+    const helperDirectory = path.join(FIXTURE_BASE, directory);
+    const helperPath = path.join(helperDirectory, 'index.js');
+    fs.mkdirSync(helperDirectory, { recursive: true });
+    fs.writeFileSync(helperPath, `module.exports = { marker: '${name}-v1' };\n`);
+
+    const first = osiLib.require(name);
+    assert.equal(first.ok, true);
+    assert.equal(first.value.marker, `${name}-v1`);
+
+    fs.writeFileSync(helperPath, `module.exports = { marker: '${name}-v2' };\n`);
+    const second = osiLib.require(name);
+    assert.equal(second.ok, true);
+    assert.equal(second.value, first.value);
+    assert.equal(second.value.marker, `${name}-v1`);
+  }
 });
 
 test('load failure -> cooldown quarantine -> retry succeeds after expiry', async () => {

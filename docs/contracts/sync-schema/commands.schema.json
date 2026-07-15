@@ -2,11 +2,32 @@
     "$schema": "http://json-schema.org/draft-07/schema#",
     "$id": "https://contracts.opensmartirrigation.org/sync-schema/commands.schema.json",
     "title": "Command Payload",
+    "x-semantic-bindings": {
+        "UPSERT_JOURNAL_ENTRY": {
+            "effect_key": {"prefix": "journal_entry", "uuid_path": "entry.entry_uuid", "version_path": "entry.base_sync_version"}
+        },
+        "VOID_JOURNAL_ENTRY": {
+            "effect_key": {"prefix": "journal_entry", "uuid_path": "entry_uuid", "version_path": "base_sync_version"}
+        },
+        "UPSERT_JOURNAL_CUSTOM_VOCAB": {
+            "effect_key": {"prefix": "journal_vocab", "uuid_path": "custom_vocab.custom_field_uuid", "version_path": "custom_vocab.base_sync_version"}
+        },
+        "UPSERT_JOURNAL_PLOT": {
+            "effect_key": {"prefix": "journal_plot", "uuid_path": "plot.plot_uuid", "version_path": "plot.base_sync_version"}
+        },
+        "UPSERT_JOURNAL_PLOT_GROUP": {
+            "effect_key": {"prefix": "journal_plot_group", "uuid_path": "plot_group.group_uuid", "version_path": "plot_group.base_sync_version"}
+        }
+    },
     "type": "object",
-    "required": ["command_type", "command_id", "device_eui"],
+    "required": ["command_type", "command_id"],
     "additionalProperties": false,
     "properties": {
         "command_id": {"type": "string", "pattern": "^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}$"},
+        "owner_user_uuid": {"$ref": "resources.schema.json#/definitions/CanonicalUuid"},
+        "author_principal_uuid": {"$ref": "resources.schema.json#/definitions/CanonicalUuid"},
+        "author_label": {"type": ["string", "null"], "maxLength": 120},
+        "duplicate_guard_ack_entry_uuid": {"$ref": "resources.schema.json#/definitions/CanonicalUuid"},
         "command_type": {
             "type": "string",
             "enum": [
@@ -44,7 +65,12 @@
                 "UPSERT_DEVICE_SOIL_DEPTHS",
                 "UPDATE_SCHEDULE",
                 "UPSERT_SCHEDULE",
-                "WORK_REQUEST_STATUS"
+                "WORK_REQUEST_STATUS",
+                "UPSERT_JOURNAL_ENTRY",
+                "VOID_JOURNAL_ENTRY",
+                "UPSERT_JOURNAL_CUSTOM_VOCAB",
+                "UPSERT_JOURNAL_PLOT",
+                "UPSERT_JOURNAL_PLOT_GROUP"
             ]
         },
         "device_eui": {"type": "string", "pattern": "^[0-9A-F]{16}$"},
@@ -63,9 +89,58 @@
         "reason": {"type": ["string", "null"]},
         "human_message": {"type": ["string", "null"]},
         "released_version": {"type": ["string", "null"]},
-        "updated_at": {"type": ["string", "null"], "format": "date-time"}
+        "updated_at": {"type": ["string", "null"], "format": "date-time"},
+        "entry": {"$ref": "resources.schema.json#/definitions/JournalEntry"},
+        "entry_uuid": {"$ref": "resources.schema.json#/definitions/Uuid"},
+        "base_sync_version": {"type": "integer", "minimum": 0},
+        "custom_vocab": {"$ref": "resources.schema.json#/definitions/JournalVocab"},
+        "plot": {"$ref": "resources.schema.json#/definitions/JournalPlot"},
+        "plot_group": {"$ref": "resources.schema.json#/definitions/JournalPlotGroup"}
     },
     "allOf": [
+        {
+            "if": {
+                "properties": {
+                    "command_type": {
+                        "enum": [
+                            "UPSERT_JOURNAL_ENTRY",
+                            "VOID_JOURNAL_ENTRY",
+                            "UPSERT_JOURNAL_CUSTOM_VOCAB",
+                            "UPSERT_JOURNAL_PLOT",
+                            "UPSERT_JOURNAL_PLOT_GROUP"
+                        ]
+                    }
+                },
+                "required": ["command_type"]
+            },
+            "else": {"required": ["device_eui"]}
+        },
+        {
+            "if": {
+                "properties": {
+                    "command_type": {
+                        "enum": [
+                            "UPSERT_JOURNAL_ENTRY",
+                            "VOID_JOURNAL_ENTRY",
+                            "UPSERT_JOURNAL_CUSTOM_VOCAB",
+                            "UPSERT_JOURNAL_PLOT",
+                            "UPSERT_JOURNAL_PLOT_GROUP"
+                        ]
+                    }
+                },
+                "required": ["command_type"]
+            },
+            "then": {
+                "properties": {
+                    "issued_at": {"$ref": "resources.schema.json#/definitions/CanonicalUtcTimestamp"},
+                    "expires_at": {"$ref": "resources.schema.json#/definitions/NullableCanonicalUtcTimestamp"}
+                }
+            }
+        },
+        {
+            "if": {"properties": {"command_type": {"const": "UPSERT_JOURNAL_ENTRY"}}},
+            "else": {"not": {"required": ["duplicate_guard_ack_entry_uuid"]}}
+        },
         {
             "if": {"properties": {"command_type": {"const": "OPEN_FOR_DURATION"}}},
             "then": {
@@ -100,6 +175,93 @@
                 "properties": {
                     "request_id": {"type": "string", "minLength": 1},
                     "status": {"type": "string", "minLength": 1}
+                }
+            }
+        },
+        {
+            "if": {"properties": {"command_type": {"const": "UPSERT_JOURNAL_ENTRY"}}},
+            "then": {
+                "required": ["owner_user_uuid", "author_principal_uuid", "author_label", "effect_key", "entry"],
+                "propertyNames": {
+                    "enum": ["command_id", "command_type", "owner_user_uuid", "author_principal_uuid", "author_label", "device_eui", "effect_key", "issued_at", "expires_at", "entry", "duplicate_guard_ack_entry_uuid"]
+                },
+                "properties": {
+                    "effect_key": {
+                        "type": "string",
+                        "pattern": "^journal_entry:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}:(?:0|[1-9][0-9]*)$"
+                    },
+                    "entry": {
+                        "allOf": [
+                            {"$ref": "resources.schema.json#/definitions/JournalEntryCommand"},
+                            {"properties": {"status": {"const": "final"}}}
+                        ]
+                    }
+                }
+            }
+        },
+        {
+            "if": {"properties": {"command_type": {"const": "VOID_JOURNAL_ENTRY"}}},
+            "then": {
+                "required": ["owner_user_uuid", "author_principal_uuid", "author_label", "effect_key", "entry_uuid", "base_sync_version", "reason"],
+                "propertyNames": {
+                    "enum": ["command_id", "command_type", "owner_user_uuid", "author_principal_uuid", "author_label", "device_eui", "effect_key", "issued_at", "expires_at", "entry_uuid", "base_sync_version", "reason"]
+                },
+                "properties": {
+                    "effect_key": {
+                        "type": "string",
+                        "pattern": "^journal_entry:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}:(?:0|[1-9][0-9]*)$"
+                    },
+                    "entry_uuid": {"$ref": "resources.schema.json#/definitions/CanonicalUuid"},
+                    "base_sync_version": {"type": "integer", "minimum": 0},
+                    "reason": {"type": "string", "minLength": 1, "maxLength": 4000}
+                }
+            }
+        },
+        {
+            "if": {"properties": {"command_type": {"const": "UPSERT_JOURNAL_CUSTOM_VOCAB"}}},
+            "then": {
+                "required": ["owner_user_uuid", "author_principal_uuid", "author_label", "effect_key", "custom_vocab"],
+                "propertyNames": {
+                    "enum": ["command_id", "command_type", "owner_user_uuid", "author_principal_uuid", "author_label", "device_eui", "effect_key", "issued_at", "expires_at", "custom_vocab"]
+                },
+                "properties": {
+                    "effect_key": {
+                        "type": "string",
+                        "pattern": "^journal_vocab:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}:(?:0|[1-9][0-9]*)$"
+                    },
+                    "custom_vocab": {"$ref": "resources.schema.json#/definitions/JournalVocabCommand"}
+                }
+            }
+        },
+        {
+            "if": {"properties": {"command_type": {"const": "UPSERT_JOURNAL_PLOT"}}},
+            "then": {
+                "required": ["owner_user_uuid", "author_principal_uuid", "author_label", "effect_key", "plot"],
+                "propertyNames": {
+                    "enum": ["command_id", "command_type", "owner_user_uuid", "author_principal_uuid", "author_label", "device_eui", "effect_key", "issued_at", "expires_at", "plot"]
+                },
+                "properties": {
+                    "effect_key": {
+                        "type": "string",
+                        "pattern": "^journal_plot:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}:(?:0|[1-9][0-9]*)$"
+                    },
+                    "plot": {"$ref": "resources.schema.json#/definitions/JournalPlotCommand"}
+                }
+            }
+        },
+        {
+            "if": {"properties": {"command_type": {"const": "UPSERT_JOURNAL_PLOT_GROUP"}}},
+            "then": {
+                "required": ["owner_user_uuid", "author_principal_uuid", "author_label", "effect_key", "plot_group"],
+                "propertyNames": {
+                    "enum": ["command_id", "command_type", "owner_user_uuid", "author_principal_uuid", "author_label", "device_eui", "effect_key", "issued_at", "expires_at", "plot_group"]
+                },
+                "properties": {
+                    "effect_key": {
+                        "type": "string",
+                        "pattern": "^journal_plot_group:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}:(?:0|[1-9][0-9]*)$"
+                    },
+                    "plot_group": {"$ref": "resources.schema.json#/definitions/JournalPlotGroupCommand"}
                 }
             }
         }

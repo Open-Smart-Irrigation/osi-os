@@ -8,6 +8,11 @@
 //     S2120 zone_ids validation)
 const fs = require('fs');
 const path = require('path');
+const { spawnSync } = require('child_process');
+const {
+    TASK9_OSI_LIB_NODE_POLICIES,
+    auditOsiLibBindings,
+} = require('./osi-lib-binding-audit');
 
 const flowsPath = path.resolve(
     __dirname, '../conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/flows.json'
@@ -17,9 +22,38 @@ const byId = Object.fromEntries(flows.filter((n) => n.id).map((n) => [n.id, n]))
 
 let failures = [];
 
+const journalBootstrapResult = spawnSync(
+    process.execPath,
+    [path.resolve(__dirname, 'test-journal-bootstrap.js')],
+    { encoding: 'utf8', timeout: 30000 }
+);
+if (journalBootstrapResult.status !== 0) {
+    if (journalBootstrapResult.stdout) process.stderr.write(journalBootstrapResult.stdout);
+    if (journalBootstrapResult.stderr) process.stderr.write(journalBootstrapResult.stderr);
+    failures.push('journal bootstrap behavior harness failed');
+} else {
+    console.log('OK  journal bootstrap behavior harness');
+}
+
 function hasLib(node, varName, moduleName) {
     const libs = Array.isArray(node && node.libs) ? node.libs : [];
     return libs.some((lib) => lib.var === varName && lib.module === moduleName);
+}
+
+const OSI_DB_BINDING = { variable: 'osiDb', module: 'osi-db-helper' };
+const OSI_JOURNAL_BINDING = { variable: 'osiJournal', module: 'osi-journal' };
+const OSI_COMMAND_LEDGER_BINDING = { variable: 'osiCommandLedger', module: 'osi-command-ledger' };
+
+function requireOsiLibContract(node, expectedBindings, label, unavailableErrorPrefix = 'Journal helpers unavailable:') {
+    if (!node || typeof node.func !== 'string') return false;
+    const audit = auditOsiLibBindings(node, expectedBindings);
+    for (const error of audit.errors) failures.push(`${label}: ${error}`);
+    let ok = audit.ok;
+    if (!node.func.includes(`node.error('${unavailableErrorPrefix}`)) {
+        failures.push(`${label}: must report unavailable helpers through node.error`);
+        ok = false;
+    }
+    return ok;
 }
 
 function findHttpIn(method, url) {
@@ -59,6 +93,298 @@ function assertWires(nodeId, expectedWires, label) {
         return;
     }
     console.log(`OK  ${label}`);
+}
+
+// === Field Journal Task 10 routes ===
+
+const journalRoutes = [
+    ['journal-catalog-get-http', 'get', '/api/journal/catalog'],
+    ['journal-entries-get-http', 'get', '/api/journal/entries'],
+    ['journal-entries-post-http', 'post', '/api/journal/entries'],
+    ['journal-entry-put-http', 'put', '/api/journal/entries/:uuid'],
+    ['journal-entry-void-post-http', 'post', '/api/journal/entries/:uuid/void'],
+    ['journal-custom-vocab-post-http', 'post', '/api/journal/custom-vocab'],
+    ['journal-custom-vocab-put-http', 'put', '/api/journal/custom-vocab/:uuid'],
+    ['journal-plots-get-http', 'get', '/api/journal/plots'],
+    ['journal-plots-post-http', 'post', '/api/journal/plots'],
+    ['journal-plot-put-http', 'put', '/api/journal/plots/:uuid'],
+    ['journal-plot-groups-get-http', 'get', '/api/journal/plot-groups'],
+    ['journal-plot-groups-post-http', 'post', '/api/journal/plot-groups'],
+    ['journal-plot-group-put-http', 'put', '/api/journal/plot-groups/:uuid'],
+    ['journal-export-csv-get-http', 'get', '/api/journal/export.csv'],
+    ['journal-export-package-get-http', 'get', '/api/journal/export.package'],
+    ['journal-export-json-get-http', 'get', '/api/journal/export.json'],
+    ['journal-export-adapt-get-http', 'get', '/api/journal/export.adapt.json'],
+];
+
+for (const [id, method, url] of journalRoutes) {
+    const route = byId[id];
+    if (!route || route.type !== 'http in' || route.method !== method || route.url !== url) {
+        failures.push(`journal routes: missing exact ${method.toUpperCase()} ${url} [${id}]`);
+    } else if (JSON.stringify(route.wires) !== JSON.stringify([['journal-api-router-fn']])) {
+        failures.push(`journal routes: ${id} must wire only to journal-api-router-fn`);
+    }
+}
+
+const journalRouter = byId['journal-api-router-fn'];
+if (!journalRouter) {
+    failures.push('journal routes: missing journal-api-router-fn');
+} else {
+    requireOsiLibContract(
+        journalRouter,
+        [OSI_DB_BINDING, OSI_JOURNAL_BINDING],
+        'journal routes: journal-api-router-fn'
+    );
+    if (JSON.stringify(journalRouter.wires) !== JSON.stringify([['journal-api-response']])) {
+        failures.push('journal routes: router must wire to journal-api-response');
+    }
+    if (!/osiJournal\.handleHttpRequest/.test(journalRouter.func || '')) {
+        failures.push('journal routes: router must delegate lifecycle and database close to osi-journal');
+    }
+    if (!/edgeBuildVersion:\s*env\.get\('FIRMWARE_VERSION'\)/.test(journalRouter.func || '')) {
+        failures.push('journal routes: router must pass the available firmware version to research exports');
+    }
+    if (!/edgeBuildCommit:\s*env\.get\('FIRMWARE_COMMIT'\)/.test(journalRouter.func || '')) {
+        failures.push('journal routes: router must pass the available firmware commit to research exports');
+    }
+}
+
+assertWires('record-error-catch-journal-api', [['record-error-link-out-journal-api']], 'journal catch → error link out');
+
+for (const profile of ['bcm2712', 'bcm2709']) {
+    const profilePath = path.resolve(
+        __dirname,
+        `../conf/full_raspberrypi_bcm27xx_${profile}/files/usr/share/flows.json`
+    );
+    const profileFlows = JSON.parse(fs.readFileSync(profilePath, 'utf8'));
+    const profileById = Object.fromEntries(profileFlows.filter((node) => node.id).map((node) => [node.id, node]));
+    const journalObjects = profileFlows.filter((node) => node.id === 'journal-api-tab' || node.z === 'journal-api-tab');
+    if (journalObjects.length !== 22) {
+        failures.push(`journal routes ${profile}: expected exactly 22 journal objects, got ${journalObjects.length}`);
+    }
+    for (const [id, method, url] of journalRoutes) {
+        const route = profileById[id];
+        if (!route || route.type !== 'http in' || route.method !== method || route.url !== url ||
+            JSON.stringify(route.wires) !== JSON.stringify([['journal-api-router-fn']])) {
+            failures.push(`journal routes ${profile}: invalid ${method.toUpperCase()} ${url} [${id}]`);
+        }
+    }
+    const router = profileById['journal-api-router-fn'];
+    if (!router || router.func.length > 4096 ||
+        !auditOsiLibBindings(router, [OSI_DB_BINDING, OSI_JOURNAL_BINDING]).ok ||
+        JSON.stringify(router.wires) !== JSON.stringify([['journal-api-response']])) {
+        failures.push(`journal routes ${profile}: router surface is not exact`);
+    }
+    const errorIn = profileById['record-error-link-in'];
+    const errorOut = profileById['record-error-link-out-journal-api'];
+    const reciprocalCount = errorIn && Array.isArray(errorIn.links)
+        ? errorIn.links.filter((id) => id === 'record-error-link-out-journal-api').length
+        : 0;
+    if (reciprocalCount !== 1 || !errorOut ||
+        JSON.stringify(errorOut.links) !== JSON.stringify(['record-error-link-in'])) {
+        failures.push(`journal routes ${profile}: error links are not reciprocal and unique`);
+    }
+}
+
+// === Field Journal Task 11 pending-command path ===
+
+const journalCommandTypes = [
+    'UPSERT_JOURNAL_ENTRY',
+    'VOID_JOURNAL_ENTRY',
+    'UPSERT_JOURNAL_CUSTOM_VOCAB',
+    'UPSERT_JOURNAL_PLOT',
+    'UPSERT_JOURNAL_PLOT_GROUP',
+];
+const commandRegistry = byId['cmd-type-registry'];
+const pendingReplay = byId['sync-pending-split'];
+const forceSyncBuilder = byId['sync-force-build'];
+const pendingGuard = byId['reject-indefinite-open'];
+const dedupe = byId['command-dedupe-dispatch'];
+const journalApply = byId['journal-command-apply-fn'];
+const ackQueue = byId['command-ack-queue-rest'];
+for (const commandType of journalCommandTypes) {
+    if (!commandRegistry || !new RegExp('\\b' + commandType + '\\s*:').test(commandRegistry.func || '')) {
+        failures.push(`journal commands: registry is missing ${commandType}`);
+    }
+}
+if (!pendingReplay || !/_pendingCommandEnvelope/.test(pendingReplay.func || '') ||
+    !/payload:\s*rawPayload/.test(pendingReplay.func || '') ||
+    /cmd\.command_type\s*\|\|\s*rawPayload\.command_type/.test(pendingReplay.func || '')) {
+    failures.push('journal commands: pending replay must retain a protected delivery envelope and raw payload');
+}
+if (!forceSyncBuilder || !/_pendingCommandEnvelope/.test(forceSyncBuilder.func || '') ||
+    !/payload:\s*rawPayload/.test(forceSyncBuilder.func || '') ||
+    /cmd\.command_type\s*\|\|\s*rawPayload\.command_type/.test(forceSyncBuilder.func || '')) {
+    failures.push('journal commands: force-sync producer must retain a protected delivery envelope and raw payload');
+}
+if (!pendingGuard || !/\(\?:\^\|_\)JOURNAL\(\?:_\|\$\)/.test(pendingGuard.func || '')) {
+    failures.push('journal commands: guard must pass unknown JOURNAL subtypes to durable rejection');
+}
+for (const fallbackNodeId of ['reject-indefinite-open', 'write-strega-expectation']) {
+    const fallbackNode = byId[fallbackNodeId];
+    if (!fallbackNode || !/UC512_OPEN_FOR_DURATION\s*:/.test(fallbackNode.func || '')) {
+        failures.push(`journal commands: ${fallbackNodeId} fallback lost UC512_OPEN_FOR_DURATION`);
+    }
+}
+if (!dedupe || !requireOsiLibContract(
+    dedupe,
+    [OSI_DB_BINDING, OSI_JOURNAL_BINDING, OSI_COMMAND_LEDGER_BINDING],
+    'journal commands: dedupe',
+    'Command helpers unavailable:'
+) || JSON.stringify(dedupe.wires) !== JSON.stringify([
+    ['journal-command-apply-fn'],
+    ['9d5e3035c3d069c4'],
+]) || !/deduplicatePendingCommand/.test(dedupe.func || '') ||
+    !/const journalType = \/\(\?:\^\|_\)JOURNAL\(\?:_\|\$\)\//.test(dedupe.func || '') ||
+    !/if \(journalType\) \{[\s\S]*osiLib\.require\('osi-journal'\)/.test(dedupe.func || '') ||
+    !/node\.error/.test(dedupe.func || '') || /dispatching command/.test(dedupe.func || '')) {
+    failures.push('journal commands: dedupe must delegate exact replay via the shared command ledger, fail closed, and bypass ACK reclassification');
+}
+if (!journalApply || !requireOsiLibContract(
+    journalApply,
+    [OSI_DB_BINDING, OSI_JOURNAL_BINDING],
+    'journal commands: applier'
+) || JSON.stringify(journalApply.wires) !== JSON.stringify([
+    ['934bf2bc19a8ce22'],
+    ['9d5e3035c3d069c4'],
+]) || !/applyJournalCommand/.test(journalApply.func || '') || !/\.close\s*\(/.test(journalApply.func || '')) {
+    failures.push('journal commands: journal applier must delegate, close DB, and separate fallback from durable ACK');
+}
+if (!ackQueue || !requireOsiLibContract(
+    ackQueue,
+    [OSI_DB_BINDING, OSI_COMMAND_LEDGER_BINDING],
+    'journal commands: ACK queue'
+) || !/queueCommandAck/.test(ackQueue.func || '') ||
+    /INSERT OR REPLACE INTO applied_commands/.test(ackQueue.func || '') ||
+    /if \(duplicateFlag\) return 'APPLIED'/.test(ackQueue.func || '')) {
+    failures.push('journal commands: legacy ACK queue must keep ledger+ACK atomic without ledger rewrite or duplicate reclassification');
+}
+
+async function runJournalHelperFailureMatrix() {
+    const cases = [
+        {
+            node: dedupe,
+            label: 'journal helper failure: dedupe',
+            helpers: ['osi-db-helper', 'osi-command-ledger'],
+            errorPrefix: 'Command helpers unavailable: ',
+            expected: [null, null],
+        },
+        {
+            node: journalApply,
+            label: 'journal helper failure: apply',
+            helpers: ['osi-db-helper', 'osi-journal'],
+            expected: [null, null],
+        },
+        {
+            node: ackQueue,
+            label: 'journal helper failure: ACK queue',
+            helpers: ['osi-db-helper', 'osi-command-ledger'],
+            expected: null,
+        },
+        {
+            node: journalRouter,
+            label: 'journal helper failure: API router',
+            helpers: ['osi-db-helper', 'osi-journal'],
+            expected: 'api-503',
+        },
+    ];
+
+    for (const testCase of cases) {
+        if (!testCase.node || typeof testCase.node.func !== 'string') {
+            failures.push(`${testCase.label}: node source is unavailable`);
+            continue;
+        }
+        const msg = {
+            payload: {
+                _pendingCommandEnvelope: {
+                    commandId: 'helper-failure-test',
+                    commandType: 'UPSERT_JOURNAL_ENTRY',
+                    payload: {},
+                },
+            },
+        };
+        const requested = [];
+        const events = [];
+        const errorCalls = [];
+        const osiLib = {
+            require(name) {
+                requested.push(name);
+                return { ok: false, error: `missing ${name}` };
+            },
+        };
+        const node = {
+            error(message, errorMsg) {
+                events.push('error');
+                errorCalls.push({ message, errorMsg });
+            },
+            warn() {},
+            status() {},
+        };
+        const env = { get() { return ''; } };
+        let result;
+        try {
+            const runner = new Function('msg', 'node', 'env', 'osiLib', testCase.node.func);
+            result = await runner(msg, node, env, osiLib);
+            events.push('return');
+        } catch (error) {
+            failures.push(`${testCase.label}: threw instead of failing closed: ${String(error && error.message ? error.message : error)}`);
+            continue;
+        }
+
+        if (JSON.stringify(requested) !== JSON.stringify(testCase.helpers)) {
+            failures.push(`${testCase.label}: expected helper loads ${JSON.stringify(testCase.helpers)}, got ${JSON.stringify(requested)}`);
+        }
+        const expectedDetail = testCase.helpers.map((name) => `missing ${name}`).join('; ');
+        const errorPrefix = testCase.errorPrefix || 'Journal helpers unavailable: ';
+        if (errorCalls.length !== 1 ||
+            errorCalls[0].message !== `${errorPrefix}${expectedDetail}` ||
+            errorCalls[0].errorMsg !== msg) {
+            failures.push(`${testCase.label}: must emit one contextual node.error with the loader detail`);
+        }
+        if (events[0] !== 'error' || events[events.length - 1] !== 'return') {
+            failures.push(`${testCase.label}: must report helper failure before returning`);
+        }
+        if (testCase.expected === 'api-503') {
+            if (result !== msg || msg.statusCode !== 503 ||
+                JSON.stringify(msg.payload) !== JSON.stringify({
+                    error: 'journal_helpers_unavailable',
+                    message: expectedDetail,
+                })) {
+                failures.push(`${testCase.label}: must return msg with the exact 503 response payload`);
+            }
+        } else if (JSON.stringify(result) !== JSON.stringify(testCase.expected)) {
+            failures.push(`${testCase.label}: expected ${JSON.stringify(testCase.expected)}, got ${JSON.stringify(result)}`);
+        }
+    }
+
+    if (!failures.some((failure) => failure.startsWith('journal helper failure:'))) {
+        console.log('OK  journal helper failure paths return exact fail-closed outputs');
+    }
+}
+
+// === Fail-closed sync_outbox payload parsing ===
+
+for (const nodeId of ['sync-bootstrap-build', 'sync-outbox-build', 'sync-force-build']) {
+    const syncNode = byId[nodeId];
+    if (!syncNode || !/function parseJsonValue\(raw, eventUuid\)/.test(syncNode.func || '') ||
+        !/parseJsonValue\(row\.payload_json, row\.event_uuid\)/.test(syncNode.func || '') ||
+        /parseJsonValue\(row\.payload_json,\s*\{\}\)/.test(syncNode.func || '')) {
+        failures.push(`sync outbox: ${nodeId} must reject malformed gateway-rewrite payloads with event_uuid`);
+    }
+}
+for (const nodeId of ['sync-outbox-build', 'sync-force-build']) {
+    const syncNode = byId[nodeId];
+    if (!syncNode || !/payload:\s*parseJsonValue\(r\.payload_json, r\.event_uuid\)/.test(syncNode.func || '') ||
+        /JSON\.parse\(r\.payload_json\s*\|\|\s*'\{\}'\)/.test(syncNode.func || '')) {
+        failures.push(`sync outbox: ${nodeId} must fail closed before event delivery`);
+    }
+}
+const stregaExpectation = byId['write-strega-expectation'];
+if (!stregaExpectation ||
+    !/no such table:\\s\*zone_irrigation_calibration\\b\/i/.test(stregaExpectation.func || '') ||
+    !/node\.warn\('STREGA calibration unavailable/.test(stregaExpectation.func || '') ||
+    !/throw error;/.test(stregaExpectation.func || '')) {
+    failures.push('STREGA expectation: only a missing zone_irrigation_calibration table may be downgraded');
 }
 
 function makeSupportHttpClient(responseBody, capturedRequests) {
@@ -517,14 +843,25 @@ const helperGlobals = [
     { varName: 'osiCloudHttp', moduleName: 'osi-cloud-http', rx: /\bosiCloudHttp\./ },
     { varName: 'chameleon', moduleName: 'osi-chameleon-helper', rx: /\bchameleon\./ },
     { varName: 'dendro', moduleName: 'osi-dendro-helper', rx: /\bdendro\./ },
+    { varName: 'osiJournal', moduleName: 'osi-journal', rx: /\bosiJournal\./ },
+    { varName: 'osiCommandLedger', moduleName: 'osi-command-ledger', rx: /\bosiCommandLedger\./ },
 ];
 
 for (const node of flows) {
     if (node.type !== 'function' || typeof node.func !== 'string') continue;
     const libs = Array.isArray(node.libs) ? node.libs : [];
+    const osiLibPolicy = TASK9_OSI_LIB_NODE_POLICIES[node.id];
+    if (osiLibPolicy) {
+        const audit = auditOsiLibBindings(node, osiLibPolicy.bindings);
+        if (!audit.ok) {
+            failures.push(`${node.name || '(unnamed)'} [${node.id}] failed its reviewed osiLib source policy: ${audit.errors.join('; ')}`);
+        }
+        continue;
+    }
     for (const { varName, moduleName, rx } of helperGlobals) {
         if (!rx.test(node.func)) continue;
-        if (!libs.some((lib) => lib.var === varName && lib.module === moduleName)) {
+        const directBinding = libs.some((lib) => lib.var === varName && lib.module === moduleName);
+        if (!directBinding) {
             failures.push(`${node.name || '(unnamed)'} [${node.id}] references ${varName} without libs entry ${moduleName}`);
         }
     }
@@ -603,7 +940,8 @@ if (!disableAllSchedulesFn || typeof disableAllSchedulesFn.func !== 'string') {
     }
 }
 
-runSupportDeliveryBehaviorMatrix()
+runJournalHelperFailureMatrix()
+    .then(() => runSupportDeliveryBehaviorMatrix())
     .then(() => {
         if (failures.length > 0) {
             console.error('FAIL: ' + failures.length + ' flow wiring regression(s):');

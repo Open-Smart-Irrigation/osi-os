@@ -1,0 +1,48 @@
+name: Field Journal Tests
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+jobs:
+  field-journal:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: bcm2712 module unit tests
+        run: node conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-journal/index.test.js
+      - name: bcm2709 module unit tests
+        run: node conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/node-red/osi-journal/index.test.js
+      - name: Schema tests
+        run: node scripts/test-journal-schema.js
+      - name: Lifecycle tests
+        run: node scripts/test-journal-lifecycle.js
+      - name: API tests
+        run: node scripts/test-journal-api.js
+      - name: Command-path tests
+        run: node scripts/test-journal-command-path.js
+      - name: Sync contract registry and semantic bindings
+        run: node scripts/verify-sync-contract.js
+      - name: Contract schema edge cases
+        run: node scripts/test-contract-schemas.js
+      - name: Command ledger tests
+        run: node --test conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-command-ledger/index.test.js
+      - name: Bootstrap tests
+        run: node scripts/test-journal-bootstrap.js
+      - name: Read-snapshot tests
+        run: node scripts/test-osi-db-helper-read-snapshot.js
+      - name: Catalog generator tests
+        run: node scripts/test-journal-catalog-generator.js
+      - name: Catalog generated-file check
+        run: node scripts/generate-journal-catalog.js --check
+      - name: Performance fixture
+        run: node --no-warnings scripts/test-journal-perf-fixture.js
+      - name: Profile parity
+        run: node scripts/verify-profile-parity.js

@@ -1,0 +1,1522 @@
+{
+ "categories": [
+  {
+   "code": "tillage",
+   "description": "Tillage operation, including primary tillage, seedbed preparation and stubble cultivation",
+   "source": "",
+   "operations": [
+    {
+     "code": "primary_tillage",
+     "description": "Primary tillage is a loosening, mixing or inverting form of cultivation with a cultivation depth between 15 cm and 35 cm. Primary tillage takes place prior to seedbed preparation and sowing.",
+     "source": "KTBL (2020)",
+     "devices": [
+      {
+       "code": "plough",
+       "units": [
+        "cm"
+       ],
+       "description": "Loosening and mixing, inversion primary tillage. Intensive soil cultivation, very little covering with plant residues on the surface. Also called moldboard plough.",
+       "source": "KTBL (2020)"
+      },
+      {
+       "code": "plough_with_packer",
+       "units": [
+        "cm"
+       ],
+       "description": "Loosening and mixing, inversion primary tillage with consolidation and breaking of clods. Intensive soil cultivation, leaving very little covering with plant residues on the surface. Crumbling and consolidation through trailing packer.",
+       "source": "KTBL (2020)"
+      },
+      {
+       "code": "spading_machine",
+       "units": [
+        "cm"
+       ],
+       "description": "Loosening and mixing, non-inversion primary tillage. The implement reduces covering of the surface with organic residues by 85 %.",
+       "source": "KTBL (2020)"
+      },
+      {
+       "code": "deep_tiller",
+       "units": [
+        "cm"
+       ],
+       "description": "Loosening and mixing, non-inversion primary tillage with driven tools. The implement reduces covering of the surface with organic residues by 85 %.",
+       "source": "KTBL (2020)"
+      },
+      {
+       "code": "heavy_duty_cultivator",
+       "units": [
+        "cm"
+       ],
+       "description": "Loosening and mixing, non-inversion primary tillage. The implement reduces covering of the surface with organic residues by 50-75 %. Also called chisel plough.",
+       "source": "KTBL (2020)"
+      },
+      {
+       "code": "heavy_duty_cultivator_sweeps",
+       "units": [
+        "cm"
+       ],
+       "description": "Same as above, but with sweeps mounted at the chisel.",
+       "source": "Custom"
+      },
+      {
+       "code": "disk_harrow",
+       "units": [
+        "cm"
+       ],
+       "description": "Loosening and mixing, non-inversion primary tillage. The implement reduces covering of the surface with organic residues by 40-60 %.",
+       "source": "KTBL (2020)"
+      },
+      {
+       "code": "strip_tiller",
+       "units": [
+        "cm"
+       ],
+       "description": "Partial strip-wise loosening, non-inversion primary tillage - strip-wise cultivation of the seed rows before sowing. Less than 50 % of the total area is cultivated. The implement reduces covering of the surface with organic residues by 60-70 %.",
+       "source": "KTBL (2020)"
+      },
+      {
+       "code": "subsoiler",
+       "units": [
+        "cm"
+       ],
+       "description": "The subsoiler is a primary tillage tool, that is similar to a chisel plow. It is typically designed to penetrate 30 to 55 cm deep to alleviate soil compaction.",
+       "source": "NRCS (2017)"
+      },
+      {
+       "code": "paraplough",
+       "units": [
+        "cm"
+       ],
+       "description": "The purpose of the Paraplough is to loosen compacted soil layers 30 to 40 cm deep and still maintain high surface residue levels. The Paraplow lifts and fractures the soil.",
+       "source": "NRCS (2017)"
+      },
+      {
+       "code": "separator",
+       "units": [
+        "cm"
+       ],
+       "description": "Operation to separate stones, typcially used for potatos",
+       "source": "Custom"
+      },
+      {
+       "code": "skim_plough",
+       "units": [
+        "cm"
+       ],
+       "description": "",
+       "source": ""
+      }
+     ]
+    },
+    {
+     "code": "seedbed_preparation",
+     "description": "Seedbed preparation or secondary tillage is limited to an operation depth of 5-10 cm. The seed horizon\nis crumbled finely, loosened and reconsolidated to ensure optimal seed germination.",
+     "source": "KTBL (2020)",
+     "devices": [
+      {
+       "code": "seedbed_combination",
+       "units": [
+        "cm"
+       ],
+       "description": "",
+       "source": ""
+      },
+      {
+       "code": "strip_tiller",
+       "units": [
+        "cm"
+       ],
+       "description": "The seed horizon is partially strip-wise loosened and crumbled with towed, not driven implements and reconsolidated with a roller. The implement speed is equivalent to the driving speed. The implement reduces covering of the cultivated surface with organic residues by 50-60 %.",
+       "source": "KTBL (2020)"
+      },
+      {
+       "code": "rotary_harrow",
+       "units": [
+        "cm"
+       ],
+       "description": "The seed horizon is loosened and crumbled with driven implements operating around a vertical axis, and reconsolidated with a roller. The implement reduces covering of the surface with organic residues by 30 %. The implement speed is equivalent to the driving speed in interaction with the circumferential speed of 3-6 m/s. Tines are straight, trailed or \"on grip\". Also called rotary cultivator when tines are \"on grip\".",
+       "source": "KTBL (2020)"
+      },
+      {
+       "code": "tine_rotor",
+       "units": [
+        "cm"
+       ],
+       "description": "The seed horizon is loosened and crumbled with driven implements operating around the transverse axis and reconsolidated with a roller. The implement reduces covering of the surface with organic residues by 50-75 %. The implement speed is equivalent to the driving speed in interaction with the circumferential speed of 4-8 m/s.",
+       "source": "KTBL (2020)"
+      },
+      {
+       "code": "tiller",
+       "units": [
+        "cm"
+       ],
+       "description": "The seed horizon is loosened and crumbled with driven implements operating around the transverse axis, and reconsolidated with a roller. The implement reduces covering of the surface with organic residues by 50-75 %. The implement speed is equivalent to the driving speed in interaction with the circumferential speed of 4-8 m/s",
+       "source": "KTBL (2020)"
+      },
+      {
+       "code": "bedder",
+       "units": [
+        "cm"
+       ],
+       "description": "Operation to form dams or beds, e.g. for potatos or carotts",
+       "source": "Custom"
+      },
+      {
+       "code": "mulching",
+       "units": [
+        "cm"
+       ],
+       "description": "",
+       "source": ""
+      },
+      {
+       "code": "tine_weeder",
+       "units": [
+        "cm"
+       ],
+       "description": "",
+       "source": ""
+      },
+      {
+       "code": "rotary_weeder",
+       "units": [
+        "cm"
+       ],
+       "description": "",
+       "source": ""
+      },
+      {
+       "code": "ring_cutter",
+       "units": [
+        "cm"
+       ],
+       "description": "",
+       "source": ""
+      },
+      {
+       "code": "roller",
+       "units": [
+        "cm"
+       ],
+       "description": "",
+       "source": ""
+      },
+      {
+       "code": "knife_roller",
+       "units": [
+        "cm"
+       ],
+       "description": "",
+       "source": ""
+      },
+      {
+       "code": "short_disk_harrow",
+       "units": [
+        "cm"
+       ],
+       "description": "",
+       "source": ""
+      },
+      {
+       "code": "disk_harrow",
+       "units": [
+        "cm"
+       ],
+       "description": "",
+       "source": ""
+      },
+      {
+       "code": "spade_roller_harrow",
+       "units": [
+        "cm"
+       ],
+       "description": "",
+       "source": ""
+      },
+      {
+       "code": "fine_cultivator",
+       "units": [
+        "cm"
+       ],
+       "description": "",
+       "source": ""
+      },
+      {
+       "code": "fine_cultivator_sweeps",
+       "units": [
+        "cm"
+       ],
+       "description": "",
+       "source": ""
+      },
+      {
+       "code": "heavy_duty_cultivator_sweeps",
+       "units": [
+        "cm"
+       ],
+       "description": "",
+       "source": ""
+      },
+      {
+       "code": "heavy_duty_cultivator",
+       "units": [
+        "cm"
+       ],
+       "description": "",
+       "source": ""
+      },
+      {
+       "code": "skim_plough",
+       "units": [
+        "cm"
+       ],
+       "description": "",
+       "source": ""
+      },
+      {
+       "code": "straw_harrow",
+       "units": [
+        "cm"
+       ],
+       "description": "",
+       "source": ""
+      }
+     ]
+    },
+    {
+     "code": "stubble_cultivation",
+     "description": "Stubble cultivation is only a shallow cultivation method to loosen, mix or invert the soil after harvesting to promote the emergence of volunteer grain and weed seeds, with a cultivation depth of up to 15 cm. It is assumed that the implements are used as intended. Within the non-inversion method, all further operations with an operation depth of more than 10 cm represent primary tillage.",
+     "source": "KTBL (2020)",
+     "devices": [
+      {
+       "code": "seedbed_combination",
+       "units": [
+        "cm"
+       ],
+       "description": "",
+       "source": ""
+      },
+      {
+       "code": "strip_tiller",
+       "units": [
+        "cm"
+       ],
+       "description": "",
+       "source": ""
+      },
+      {
+       "code": "rotary_harrow",
+       "units": [
+        "cm"
+       ],
+       "description": "",
+       "source": ""
+      },
+      {
+       "code": "tine_rotor",
+       "units": [
+        "cm"
+       ],
+       "description": "",
+       "source": ""
+      },
+      {
+       "code": "tiller",
+       "units": [
+        "cm"
+       ],
+       "description": "",
+       "source": ""
+      },
+      {
+       "code": "bedder",
+       "units": [
+        "cm"
+       ],
+       "description": "",
+       "source": ""
+      },
+      {
+       "code": "mulching",
+       "units": [
+        "cm"
+       ],
+       "description": "Mulching involves shredding of above-ground organic material like stubbles, grasses or cover crops and covering the soil with the shredded material without any intervention in the soil.",
+       "source": "Custom"
+      },
+      {
+       "code": "tine_weeder",
+       "units": [
+        "cm"
+       ],
+       "description": "Mixing, very shallow stubble cultivation. Even spreading of the straw covering and unroots weeds. The implement reduces covering of the surface with organic residues by 5 %.",
+       "source": "KTBL (2020)"
+      },
+      {
+       "code": "rotary_weeder",
+       "units": [
+        "cm"
+       ],
+       "description": "Mixing, very shallow stubble cultivation with a rotating device. Even spreading of the straw covering and unrooting weeds.",
+       "source": "Custom"
+      },
+      {
+       "code": "ring_cutter",
+       "units": [
+        "cm"
+       ],
+       "description": "Loosening and mixing, non-inversion stubble cultivation. The implement reduces covering of the surface with organic residues by 10 %",
+       "source": "KTBL (2020)"
+      },
+      {
+       "code": "roller",
+       "units": [
+        "cm"
+       ],
+       "description": "Rollers firm the seed bed or consolidate loose soil. This contributes to better seed soil contact and is important for establishment of small seeded crops like forages.",
+       "source": "Custom"
+      },
+      {
+       "code": "knife_roller",
+       "units": [
+        "cm"
+       ],
+       "description": "Crushing, cutting and mixing effect on organic residues and cover crops. The implement reduces covering of the surface with organic residues by 10 %.",
+       "source": "KTBL (2020)"
+      },
+      {
+       "code": "short_disk_harrow",
+       "units": [
+        "cm"
+       ],
+       "description": "Mixing, non-inversion stubble cultivation. The implement reduces covering of the surface with organic residues by 40-60 %.",
+       "source": "KTBL (2020)"
+      },
+      {
+       "code": "disk_harrow",
+       "units": [
+        "cm"
+       ],
+       "description": "Mixing, non-inversion stubble cultivation. The implement reduces covering of the surface with organic residues by 40-60 %.",
+       "source": "KTBL (2020)"
+      },
+      {
+       "code": "spade_roller_harrow",
+       "units": [
+        "cm"
+       ],
+       "description": "Mixing, non-inversion stubble cultivation. The implement reduces covering of the surface with organic residues by 40-60 %.",
+       "source": "KTBL (2020)"
+      },
+      {
+       "code": "fine_cultivator",
+       "units": [
+        "cm"
+       ],
+       "description": "Loosening and mixing, non-inversion stubble cultivation (shallow). The implement reduces covering of the surface with organic residues by 20-40 %. Also called chisel.",
+       "source": "KTBL (2020)"
+      },
+      {
+       "code": "fine_cultivator_sweeps",
+       "units": [
+        "cm"
+       ],
+       "description": "Same as above, but with sweeps mounted at the chisel.",
+       "source": "KTBL (2020)"
+      },
+      {
+       "code": "heavy_duty_cultivator_sweeps",
+       "units": [
+        "cm"
+       ],
+       "description": "Same as above, but with sweeps mounted at the chisel.",
+       "source": "KTBL (2020)"
+      },
+      {
+       "code": "heavy_duty_cultivator",
+       "units": [
+        "cm"
+       ],
+       "description": "Loosening and mixing, non-inversion stubble cultivation (deep). The implement reduces covering of the surface with organic residues by 50-75 %. Also called chisel plough.",
+       "source": "KTBL (2020)"
+      },
+      {
+       "code": "skim_plough",
+       "units": [
+        "cm"
+       ],
+       "description": "Inversion stubble cultivation. Little covering with plant residues on the surface (on < 10 % of ground covering).",
+       "source": "KTBL (2020)"
+      },
+      {
+       "code": "straw_harrow",
+       "units": [
+        "cm"
+       ],
+       "description": "Harrow, used to distribute residues evenly and level field surface (e.g., in no-till systems)",
+       "source": "Custom"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "code": "sowing",
+   "description": "Sowing operation, including the sowing of the main crop and preceeding cover crops",
+   "source": "",
+   "operations": [
+    {
+     "code": "sowing_cover_crop",
+     "description": "Sowing is the defined placement of seed at an optimal depth for the type of cover crop.",
+     "source": "KTBL (2020)",
+     "devices": [
+      {
+       "code": "direct_drill",
+       "units": [
+        "kg/ha",
+        "plants/ha"
+       ],
+       "description": "Seed placement in rows or bands with no prior tillage. Seed feed through dosing units and mechanical or pneumatic conveyance and distribution. Soil disturbance is not more than needed for seed and fertiliser placement. Sowing is carried out on less than 1/3 of the row width Cultivation depth is the seed placement depth.",
+       "source": "KTBL (2020)"
+      },
+      {
+       "code": "direct_single_grain",
+       "units": [
+        "kg/ha",
+        "plants/ha"
+       ],
+       "description": "Seed placement is carried out without previous tillage. Seed placement in rows with defined longitudinal grain spacing at the defined placement depth. Seed feed through dosing units and mechanical or pneumatic conveyance and distribution. Sowing is carried out on less than 1/3 of the row width Cultivation depth is the seed placement depth.",
+       "source": "KTBL (2020)"
+      },
+      {
+       "code": "classic_drill",
+       "units": [
+        "kg/ha",
+        "plants/ha"
+       ],
+       "description": "Seed placement in rows or bands at the defined placement depth. Seed feed through dosing units and mechanical or pneumatic conveyance and distribution.",
+       "source": "KTBL (2020)"
+      },
+      {
+       "code": "classic_single_grain",
+       "units": [
+        "kg/ha",
+        "plants/ha"
+       ],
+       "description": "Seed placement in rows with defined longitudinal grain spacing at the defined placement depth. Seed feed through dosing units and mechanical or pneumatic conveyance and distribution.",
+       "source": "KTBL (2020)"
+      },
+      {
+       "code": "broadcast_seeder",
+       "units": [
+        "kg/ha",
+        "plants/ha"
+       ],
+       "description": "Broadcast seeding is a method of seeding that involves scattering seed, by hand or mechanically, over a relatively large area.",
+       "source": "Custom"
+      },
+      {
+       "code": "grassland_reseeder",
+       "units": [
+        "kg/ha",
+        "plants/ha"
+       ],
+       "description": "Seed placement is carried out without previous tillage. Seed placement in rows at the defined placement depth. Seed feed through dosing units and mechanical or pneumatic conveyance and distribution.",
+       "source": "KTBL (2020)"
+      },
+      {
+       "code": "roller",
+       "units": [
+        "cm"
+       ],
+       "description": "Roller firm the seed bed or recompact loose soil. This contributes to better seed soil contact and is important for establishment of small seeded crops like forages.",
+       "source": "Custom"
+      }
+     ]
+    },
+    {
+     "code": "sowing_main_crop",
+     "description": "Sowing is the defined placement of seed at an optimal depth for the type of main crop.",
+     "source": "KTBL (2020)",
+     "devices": [
+      {
+       "code": "direct_drill",
+       "units": [
+        "kg/ha",
+        "plants/ha"
+       ],
+       "description": "Seed placement in rows or bands with no prior tillage. Seed feed through dosing units and mechanical or pneumatic conveyance and distribution. Soil disturbance is not more than needed for seed and fertiliser placement. Sowing is carried out on less than 1/3 of the row width Cultivation depth is the seed placement depth.",
+       "source": "KTBL (2020)"
+      },
+      {
+       "code": "direct_single_grain",
+       "units": [
+        "kg/ha",
+        "plants/ha"
+       ],
+       "description": "Seed placement is carried out without previous tillage. Seed placement in rows with defined longitudinal grain spacing at the defined placement depth. Seed feed through dosing units and mechanical or pneumatic conveyance and distribution. Sowing is carried out on less than 1/3 of the row width Cultivation depth is the seed placement depth.",
+       "source": "KTBL (2020)"
+      },
+      {
+       "code": "classic_drill",
+       "units": [
+        "kg/ha",
+        "plants/ha"
+       ],
+       "description": "Seed placement in rows or bands at the defined placement depth. Seed feed through dosing units and mechanical or pneumatic conveyance and distribution.",
+       "source": "KTBL (2020)"
+      },
+      {
+       "code": "classic_single_grain",
+       "units": [
+        "kg/ha",
+        "plants/ha"
+       ],
+       "description": "Seed placement in rows with defined longitudinal grain spacing at the defined placement depth. Seed feed through dosing units and mechanical or pneumatic conveyance and distribution.",
+       "source": "KTBL (2020)"
+      },
+      {
+       "code": "broadcast_seeder",
+       "units": [
+        "kg/ha",
+        "plants/ha"
+       ],
+       "description": "Broadcast seeding is a method of seeding that involves scattering seed, by hand or mechanically, over a relatively large area.",
+       "source": "Custom"
+      },
+      {
+       "code": "grassland_reseeder",
+       "units": [
+        "kg/ha",
+        "plants/ha"
+       ],
+       "description": "",
+       "source": ""
+      },
+      {
+       "code": "potato_planter",
+       "units": [],
+       "description": "Planting potatoes into ridges",
+       "source": "Custom"
+      },
+      {
+       "code": "roller",
+       "units": [
+        "cm"
+       ],
+       "description": "Rollers firm the seed bed or consolidate loose soil. This contributes to better seed soil contact and is important for establishment of small seeded crops like forages.",
+       "source": "NRCS (2017)"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "code": "fertilizer_application",
+   "description": "Fertilizer application operation, including the application of mineral fertilizers and organic soil amendments",
+   "source": "",
+   "operations": [
+    {
+     "code": "organic_fertilization",
+     "description": "Organic fertilizer: a carbon-rich fertilizer derived from organic materials, including treated or untreated livestock manures, compost, vermicompost, sewage sludge and other organic materials or mixed materials used to supply nutrients to soils.",
+     "source": "AGROVOC",
+     "devices": [
+      {
+       "code": "liquid_organic_broadcast",
+       "units": [
+        "m3/ha",
+        "t/ha"
+       ],
+       "description": "Broadcast application of liquid organic compounds like slurry with baffle plates or other distribution devices.",
+       "source": "Custom"
+      },
+      {
+       "code": "liquid_organic_draghose",
+       "units": [
+        "m3/ha",
+        "t/ha"
+       ],
+       "description": "Application of liquid organic compounds like slurry with drag hose distributors.",
+       "source": "Custom"
+      },
+      {
+       "code": "liquid_organic_trailingshoe",
+       "units": [
+        "m3/ha",
+        "t/ha"
+       ],
+       "description": "Application of liquid organic compounds like slurry with trailingshoe distributors.",
+       "source": "Custom"
+      },
+      {
+       "code": "liquid_organic_injection",
+       "units": [
+        "m3/ha",
+        "t/ha"
+       ],
+       "description": "Application of liquid organic compounds like slurry with injection distributors.",
+       "source": "Custom"
+      },
+      {
+       "code": "manure_broadcast",
+       "units": [
+        "m3/ha",
+        "t/ha"
+       ],
+       "description": "An implement used to distribute manure over a field. It usually consists of a trailer towed behind a tractor with a rotating mechanism driven by the tractor's power take off.",
+       "source": "AGROVOC"
+      },
+      {
+       "code": "compost_broadcast",
+       "units": [
+        "m3/ha",
+        "t/ha"
+       ],
+       "description": "An implement used to distribute compost over a field. It usually consists of a trailer towed behind a tractor with a rotating mechanism driven by the tractor's power take off.",
+       "source": "Custom"
+      },
+      {
+       "code": "other_organic_solid_broadcast",
+       "units": [
+        "m3/ha",
+        "t/ha"
+       ],
+       "description": "An implement used to distribute other solid organic amendments than manure or compost over a field. It usually consists of a trailer towed behind a tractor with a rotating mechanism driven by the tractor's power take off.",
+       "source": "Custom"
+      }
+     ]
+    },
+    {
+     "code": "mineral_fertilization",
+     "description": "Inorganic fertilizer: a nutrient-rich fertilizer produced industrially by chemical processes, mineral extraction or by mechanical grinding.",
+     "source": "AGROVOC",
+     "devices": [
+      {
+       "code": "solid_broadcast",
+       "units": [
+        "kg N/ha",
+        "kg P2O5/ha",
+        "kg K2O/ha",
+        "kg Mg/ha",
+        "kg S/ha",
+        "kg Ca/ha",
+        "kg B/ha",
+        "kg Na/ha",
+        "kg Mn/ha",
+        "kg CaO/ha"
+       ],
+       "description": "Broadcasting of solid mineral fertilizers",
+       "source": "AGROVOC"
+      },
+      {
+       "code": "solid_band",
+       "units": [
+        "kg N/ha",
+        "kg P2O5/ha",
+        "kg K2O/ha",
+        "kg Mg/ha",
+        "kg S/ha",
+        "kg Ca/ha",
+        "kg B/ha",
+        "kg Na/ha",
+        "kg Mn/ha",
+        "kg CaO/ha"
+       ],
+       "description": "Band placement of solid mineral fertilizers",
+       "source": "AGROVOC"
+      },
+      {
+       "code": "solid_undersown_placement",
+       "units": [
+        "kg N/ha",
+        "kg P2O5/ha",
+        "kg K2O/ha",
+        "kg Mg/ha",
+        "kg S/ha",
+        "kg Ca/ha",
+        "kg B/ha",
+        "kg Na/ha",
+        "kg Mn/ha",
+        "kg CaO/ha"
+       ],
+       "description": "An application method for solid mineral fertilizer in which the fertilizer is placed in the soil below the seeds.",
+       "source": "Custom"
+      },
+      {
+       "code": "liquid_injection",
+       "units": [
+        "kg N/ha",
+        "kg P2O5/ha",
+        "kg K2O/ha",
+        "kg Mg/ha",
+        "kg S/ha",
+        "kg Ca/ha",
+        "kg B/ha",
+        "kg Na/ha",
+        "kg Mn/ha",
+        "kg CaO/ha"
+       ],
+       "description": "An application method for liquid mineral fertilizer in which the fertilizer is injected into the soil.",
+       "source": "Custom"
+      },
+      {
+       "code": "liquid_spraying",
+       "units": [
+        "kg N/ha",
+        "kg P2O5/ha",
+        "kg K2O/ha",
+        "kg Mg/ha",
+        "kg S/ha",
+        "kg Ca/ha",
+        "kg B/ha",
+        "kg Na/ha",
+        "kg Mn/ha",
+        "kg CaO/ha"
+       ],
+       "description": "An application method for liquid mineral fertilizer in which the fertilizer is sprayed on the crops and the soil surface.",
+       "source": "Custom"
+      },
+      {
+       "code": "liquid_fertigation",
+       "units": [
+        "kg N/ha",
+        "kg P2O5/ha",
+        "kg K2O/ha",
+        "kg Mg/ha",
+        "kg S/ha",
+        "kg Ca/ha",
+        "kg B/ha",
+        "kg Na/ha",
+        "kg Mn/ha",
+        "kg CaO/ha"
+       ],
+       "description": "Fertigation is the injection of fertilizers and other water-soluble products into an irrigation system.",
+       "source": "AGROVOC"
+      }
+     ]
+    },
+    {
+     "code": "other_fertilization",
+     "description": "Other soil amendments that are applied in the intention to provide nutrient to crops or to increase soil fertility",
+     "source": "AGROVOC",
+     "devices": [
+      {
+       "code": "biofertilizer",
+       "units": [
+        "l/ha",
+        "g/ha"
+       ],
+       "description": "Application of effective microorganisms, rhizobia, compost tee or biodynamic preparation like e.g. horn manure (P 500), etc.",
+       "source": "Custom"
+      },
+      {
+       "code": "liming",
+       "units": [
+        "m3/ha",
+        "t/ha",
+        "kg CaO/ha"
+       ],
+       "description": "The application of lime, dolomite or gypsum. Specify the product in product colum",
+       "source": "Custom"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "code": "crop_protection",
+   "description": "Crop protection operation, including the application of pesticides, growth regulators, biocontrol agents and mechanical weeding",
+   "source": "",
+   "operations": [
+    {
+     "code": "biocontrol",
+     "description": "Biological control: The use of biological agents (e.g. insects, micro-organisms and/or microbial metabolites) for the control of mites, pests, plant pathogens and spoilage organisms.",
+     "source": "AGROVOC",
+     "devices": [
+      {
+       "code": "disease_biocontrol",
+       "units": [
+        "l/ha",
+        "g/ha",
+        "unit/ha"
+       ],
+       "description": "Apllication of biocontrol agent against diseases",
+       "source": "Custom"
+      },
+      {
+       "code": "pest_biocontrol",
+       "units": [
+        "l/ha",
+        "g/ha",
+        "unit/ha"
+       ],
+       "description": "Apllication of biocontrol agent against pests",
+       "source": "Custom"
+      },
+      {
+       "code": "weed_biocontrol",
+       "units": [
+        "l/ha",
+        "g/ha",
+        "unit/ha"
+       ],
+       "description": "Apllication of biocontrol agent against weeds",
+       "source": "Custom"
+      }
+     ]
+    },
+    {
+     "code": "fungicide",
+     "description": "The application of chemicals aimed at killing fungi",
+     "source": "Blanchy et al. (2023)",
+     "devices": [
+      {
+       "code": "sprayer",
+       "units": [
+        "l/ha",
+        "g/ha"
+       ],
+       "description": "Broadcast application of synthetic fungicides by spraying",
+       "source": "Custom"
+      },
+      {
+       "code": "seed_coating",
+       "units": [
+        "l/ha",
+        "g/ha"
+       ],
+       "description": "Seed coating with synthetic fungicides",
+       "source": "Custom"
+      }
+     ]
+    },
+    {
+     "code": "insecticide",
+     "description": "The application of chemicals aimed at killing insects",
+     "source": "Blanchy et al. (2023)",
+     "devices": [
+      {
+       "code": "sprayer",
+       "units": [
+        "l/ha",
+        "g/ha"
+       ],
+       "description": "Broadcast application of synthetic insecticides by spraying",
+       "source": "Custom"
+      },
+      {
+       "code": "seed_coating",
+       "units": [
+        "l/ha",
+        "g/ha"
+       ],
+       "description": "seed coating with synthetic insecticides",
+       "source": "Custom"
+      }
+     ]
+    },
+    {
+     "code": "growth_regulator",
+     "description": "The application of chemicals aimed at reducing vegative growth of crops",
+     "source": "Custom",
+     "devices": [
+      {
+       "code": "sprayer",
+       "units": [
+        "l/ha",
+        "g/ha"
+       ],
+       "description": "broadcast application of synthetic growth regulators by spraying",
+       "source": "Custom"
+      }
+     ]
+    },
+    {
+     "code": "weed_herbicide",
+     "description": "The application of chemicals aimed at killing weeds",
+     "source": "Blanchy et al. (2023)",
+     "devices": [
+      {
+       "code": "sprayer_broadcast",
+       "units": [
+        "l/ha",
+        "g/ha"
+       ],
+       "description": "broadcast application of synthetic herbizides by spraying",
+       "source": "Custom"
+      },
+      {
+       "code": "sprayer_band",
+       "units": [
+        "l/ha",
+        "g/ha"
+       ],
+       "description": "Strip or band application of synthetic herbizides by spraying",
+       "source": "Custom"
+      },
+      {
+       "code": "sprayer_spot",
+       "units": [],
+       "description": "Spot application of synthetic herbizides by spraying, incl. manual spraying with shoulder mounted tank.",
+       "source": "Custom"
+      }
+     ]
+    },
+    {
+     "code": "total_herbicide",
+     "description": "",
+     "source": "",
+     "devices": [
+      {
+       "code": "sprayer_broadcast",
+       "units": [
+        "l/ha",
+        "g/ha"
+       ],
+       "description": "broadcast application of synthetic herbizides by spraying",
+       "source": "Custom"
+      }
+     ]
+    },
+    {
+     "code": "weed_mechanical",
+     "description": "Application of mechanical weeding operations to reduce weed preasure.",
+     "source": "Custom",
+     "devices": [
+      {
+       "code": "tine_weeder",
+       "units": [
+        "cm"
+       ],
+       "description": "Mixing, very shallow stubble cultivation. Even spreading of the straw covering and unroots weeds. The implement reduces covering of the surface with organic residues by 5 %.",
+       "source": "KTBL (2020)"
+      },
+      {
+       "code": "rotary_weeder",
+       "units": [
+        "cm"
+       ],
+       "description": "Mixing, very shallow stubble cultivation with a rotating device. Even spreading of the straw covering and unrooting weeds.",
+       "source": "Custom"
+      },
+      {
+       "code": "tine_hoe",
+       "units": [
+        "cm"
+       ],
+       "description": "Inter-rows soil cultivation with shovels, sweeps or pike implements",
+       "source": "Mohler et al. (2021)."
+      },
+      {
+       "code": "rotary_hoe",
+       "units": [
+        "cm"
+       ],
+       "description": "ground-driven implement that uses a series of wheels with metal spoons radiating out",
+       "source": "Mohler et al. (2021)."
+      },
+      {
+       "code": "finger_hoe",
+       "units": [
+        "cm"
+       ],
+       "description": "designed to mount on a row-crop cultivator to provide in-row and near-row weeding that cannot be achieved by sweeps and shovels alone.",
+       "source": "Mohler et al. (2021)."
+      },
+      {
+       "code": "star_hoe",
+       "units": [
+        "cm"
+       ],
+       "description": "sually consists of gangs of “spider” ground driven wheels with two gangs working in each inter-row. Depending on the setting of the gangs, soil flow is strictly toward or away from the row.",
+       "source": "Mohler et al. (2021)."
+      },
+      {
+       "code": "other_mechanical_weeder",
+       "units": [
+        "cm"
+       ],
+       "description": "",
+       "source": ""
+      },
+      {
+       "code": "roller",
+       "units": [
+        "cm"
+       ],
+       "description": "Use of a roller to encourage tillering of cereals.",
+       "source": "Custom"
+      }
+     ]
+    },
+    {
+     "code": "weed_other",
+     "description": "Application of weeding operations other then chemical and mechanical to reduce weed preasure.",
+     "source": "Custom",
+     "devices": [
+      {
+       "code": "burning",
+       "units": [],
+       "description": "use of propane or butane flame to burn weeds",
+       "source": "Mohler et al. (2021)."
+      },
+      {
+       "code": "electric",
+       "units": [],
+       "description": "electric discharge weeder bringing a high voltage electrode into contact with weeds",
+       "source": "Mohler et al. (2021)."
+      },
+      {
+       "code": "manual",
+       "units": [
+        "hours/ha"
+       ],
+       "description": "Manual removing of weeds",
+       "source": "Custom"
+      }
+     ]
+    },
+    {
+     "code": "pest_control",
+     "description": "",
+     "source": "",
+     "devices": [
+      {
+       "code": "slug_control",
+       "units": [],
+       "description": "Slug control, e.g. with pellets. Specify in product",
+       "source": "Custom"
+      },
+      {
+       "code": "rodent_control",
+       "units": [],
+       "description": "Rodent control, e.g. with traps. Specify in product.",
+       "source": "Custom"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "code": "harvest",
+   "description": "Harvest operations, including harvest of main crop and residue removement",
+   "source": "",
+   "operations": [
+    {
+     "code": "harvest_main_crop",
+     "description": "Harvest operation of the main crop",
+     "source": "Custom",
+     "devices": [
+      {
+       "code": "combine_harvester",
+       "units": [],
+       "description": "The combine harvester is a versatile machine designed to efficiently harvest a variety of grain crops. The name derives from its combining three separate harvesting operations—reaping, threshing, and winnowing—into a single process.",
+       "source": "AGROVOC"
+      },
+      {
+       "code": "beet_lifter",
+       "units": [],
+       "description": "After defoliation with a topper, a mechanical beet lifter pulls beets from the soil, removing much of the soil from the root. Beet lifter-loader harvesters can also load roots onto trucks, but simple two-wheeled, bladed beet lifters may also be followed by hand labourers.",
+       "source": "AGROVOC"
+      },
+      {
+       "code": "potato_harvester",
+       "units": [],
+       "description": "Potato harvesters are machines that harvest potatoes.",
+       "source": "AGROVOC"
+      },
+      {
+       "code": "maize_chopper",
+       "units": [],
+       "description": "Maize choppers are machines to harvest maize plants.",
+       "source": "Custom"
+      },
+      {
+       "code": "mower",
+       "units": [],
+       "description": "An agricultural implement that is used to cut grass or any plant that grows on the ground.",
+       "source": "AGROVOC"
+      }
+     ]
+    },
+    {
+     "code": "harvest_cover_crop",
+     "description": "Harvest operation of the cover crop, leads to killing of the cover crop and removal of the aboveground biomass",
+     "source": "Custom",
+     "devices": [
+      {
+       "code": "mower",
+       "units": [],
+       "description": "",
+       "source": ""
+      }
+     ]
+    },
+    {
+     "code": "hay_removal",
+     "description": "Removing dried grasses (but may include legumes and herbs) that have been cut, to preserve as fodder",
+     "source": "AGROVOC",
+     "devices": [
+      {
+       "code": "self_loading_wagon",
+       "units": [],
+       "description": "A machine used to collect grass or hay from a field.",
+       "source": "Custom"
+      },
+      {
+       "code": "square_baler",
+       "units": [],
+       "description": "A machine used to compress hay or straw into round square bales for easy transport and storage. A bale is the simplest minimum package for marketing.",
+       "source": "AGROVOC"
+      },
+      {
+       "code": "round_baler",
+       "units": [],
+       "description": "A machine used to compress hay or straw into round bales for easy transport and storage. A bale is the simplest minimum package for marketing.",
+       "source": "AGROVOC"
+      }
+     ]
+    },
+    {
+     "code": "straw_removal",
+     "description": "Removing straw and other crop residues from the field",
+     "source": "Custom",
+     "devices": [
+      {
+       "code": "self_loading_wagon",
+       "units": [],
+       "description": "A machine used to collect grass or hay from a field.",
+       "source": "Custom"
+      },
+      {
+       "code": "square_baler",
+       "units": [],
+       "description": "A machine used to compress hay or straw into round square bales for easy transport and storage. A bale is the simplest minimum package for marketing.",
+       "source": "AGROVOC"
+      },
+      {
+       "code": "round_baler",
+       "units": [],
+       "description": "A machine used to compress hay or straw into round bales for easy transport and storage. A bale is the simplest minimum package for marketing.",
+       "source": "AGROVOC"
+      },
+      {
+       "code": "mower",
+       "units": [],
+       "description": "",
+       "source": ""
+      }
+     ]
+    },
+    {
+     "code": "cleaning_cut",
+     "description": "Cutting of grasses and other crops for aesthetic reasons",
+     "source": "Custom",
+     "devices": []
+    }
+   ]
+  },
+  {
+   "code": "irrigation",
+   "description": "Irrigation operations",
+   "source": "",
+   "operations": [
+    {
+     "code": "watering",
+     "description": "Irrigation is the process of applying controlled amounts of water to plants at needed intervals",
+     "source": "AGROVOC",
+     "devices": [
+      {
+       "code": "sprinkler_irrigation",
+       "units": [
+        "m3/ha"
+       ],
+       "description": "Spraying water into the air and allowing it to fall on to plants and soil as simulated rainfall.",
+       "source": "AGROVOC"
+      },
+      {
+       "code": "trickle_irrigation",
+       "units": [
+        "m3/ha"
+       ],
+       "description": "Dripping water on to a fraction of the ground surface so as to infiltrate it into the root zone.",
+       "source": "AGROVOC"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "code": "other",
+   "description": "other operations (such as soil or plant sampling), please do use with caution",
+   "source": "",
+   "operations": [
+    {
+     "code": "sampling",
+     "description": "",
+     "source": "",
+     "devices": [
+      {
+       "code": "sampling_soil",
+       "units": [],
+       "description": "Date of soil sampling, specify in comments",
+       "source": "Custom"
+      },
+      {
+       "code": "sampling_plants",
+       "units": [],
+       "description": "Date of plant sampling, specific in comments",
+       "source": "Custom"
+      }
+     ]
+    },
+    {
+     "code": "note",
+     "description": "",
+     "source": "",
+     "devices": [
+      {
+       "code": "note",
+       "units": [],
+       "description": "No real opeartion, but an important note (e.g. BBCH stage), use with causion",
+       "source": "Custom"
+      },
+      {
+       "code": "frost_kill_cover_crop",
+       "units": [],
+       "description": "No real opeartion, but a note that the cover crop was killed by a frost event",
+       "source": "Custom"
+      }
+     ]
+    }
+   ]
+  }
+ ],
+ "crop_list": [
+  "barley, spring",
+  "barley, winter",
+  "beet, fodder",
+  "beet, sugar",
+  "faba bean, spring",
+  "faba bean, winter",
+  "ley, temporary",
+  "maize, grain",
+  "maize, silage",
+  "oat, spring",
+  "oat, winter",
+  "pea, spring",
+  "pea, winter",
+  "potato",
+  "rapeseed, spring",
+  "rapeseed, winter",
+  "rye, spring",
+  "rye, winter",
+  "sorghum",
+  "soybean",
+  "sunflower",
+  "triticale, spring",
+  "triticale, winter",
+  "wheat, durum",
+  "wheat, spring",
+  "wheat, winter"
+ ],
+ "product_suggestions": [
+  "Slurry",
+  "Manure",
+  "Slurry_dairy_cow",
+  "Slurry_dairy_cow_low_concentration",
+  "Manure_dairy_cow_from_pile",
+  "Manure_dairy_cow",
+  "Slurry_cattle",
+  "Manure_cattle",
+  "Manure_calves",
+  "Manure_horses_fresh",
+  "Manure_horses",
+  "Manure_goat_sheep",
+  "Slurry_pig",
+  "Slurry_pig_breeding",
+  "Manure_pig",
+  "Manure_laying_hens_manure_belt",
+  "Manure_laying_hens",
+  "Manure_broiler_chickens",
+  "Manure_turkey",
+  "Digestate_solid",
+  "Digestate_liquid",
+  "Compost",
+  "Biorga_Quick_12N",
+  "Glyphosate"
+ ],
+ "treatment_factors": {
+  "plot_Parzelle": [
+   "I",
+   "II",
+   "III",
+   "IV",
+   "V",
+   "VI",
+   "all"
+  ],
+  "tillage_system": [
+   "Plough",
+   "No-till",
+   "all"
+  ],
+  "fertilization_regime": [
+   "GRUD",
+   "Kinsey",
+   "all"
+  ]
+ },
+ "row_fields": {
+  "crop": [
+   "Name of the main crop. Cover crop related operations are linked to the next main crop in the rotation",
+   "String from list",
+   ""
+  ],
+  "date": [
+   "Date of the management operation",
+   "Date",
+   ""
+  ],
+  "year": [
+   "Year of the management operation. Optional, is not used by the package",
+   "Integer",
+   ""
+  ],
+  "category": [
+   "Categorization of the managment operation [1 level]",
+   "String from list",
+   ""
+  ],
+  "operation": [
+   "Categorization of the managment operation [2 level]",
+   "String from list",
+   ""
+  ],
+  "device": [
+   "Categorization of the managment operation [3 level]",
+   "String from list",
+   ""
+  ],
+  "value": [
+   "Numerical value linked to managment operation (e.g., depth of tillage operation, mass of organic amendment)",
+   "Integer",
+   ""
+  ],
+  "unit": [
+   "Unit of the numerical value (e.g. cm, t/ha)",
+   "String from list",
+   ""
+  ],
+  "machine": [
+   "Further information on the machine used (e.g., type, manufacturer, tool)",
+   "String [UTF-8]",
+   ""
+  ],
+  "product": [
+   "Further information on the applied product (e.g., name, manufacturer, C content). Some suggested optional values for organic amendments and plant protection products are supplied.",
+   "String [UTF-8]",
+   ""
+  ],
+  "combination": [
+   "Indicate if a operation was done in combination with others. Use consequtive integer numbers if combinded operations occur. Leave empty if not combined",
+   "Integer",
+   ""
+  ],
+  "comments": [
+   "Comments related to the management operation",
+   "String [UTF-8]",
+   ""
+  ],
+  "DMC": [
+   "Optional input for organic fertilization events. Dry weight of the organic amendments. Mass of the dry solid substance per ton of fresh weight (solids) or per m3 (liquids) in kg/t or kg/m3. Default values are available.",
+   "Nummeric",
+   ""
+  ],
+  "C_content": [
+   "Optional input for organic fertilization events. C content of the organic amendment, relative to it's dry weight in gC/kgDM. Default values are available.",
+   "Nummeric",
+   ""
+  ],
+  "N_content": [
+   "Optional input for organic fertilization events. N content of the organic amendment, relative to it's dry weight in gN/kgDM. Default values are available.",
+   "Nummeric",
+   ""
+  ],
+  "crop_product": [
+   "Optional input for harvest events. Dry weight of the exported product in t/ha (100% DM). Default values are available.",
+   "Nummeric",
+   ""
+  ],
+  "crop_residue": [
+   "Optional input for harvest events. Dry weight of the residues of the main crop in t/ha (100% DM). Default values are available.",
+   "Nummeric",
+   ""
+  ],
+  "Cc_product": [
+   "Optional input for harvest events. C concentration of the exported product in gC/kgDM. Default values are available.",
+   "Nummeric",
+   ""
+  ],
+  "Cc_residue": [
+   "Optional input for harvest events. C concentration of the residues of the main crop in gC/kgDM. Default values are available.",
+   "Nummeric",
+   ""
+  ]
+ },
+ "quirks": [
+  "device 'potato_planter' (under 'sowing_main_crop') has no unit list -> value/unit not expected.",
+  "device 'sprayer_spot' (under 'weed_herbicide') has no unit list -> value/unit not expected.",
+  "device 'burning' (under 'weed_other') has no unit list -> value/unit not expected.",
+  "device 'electric' (under 'weed_other') has no unit list -> value/unit not expected.",
+  "device 'slug_control' (under 'pest_control') has no unit list -> value/unit not expected.",
+  "device 'rodent_control' (under 'pest_control') has no unit list -> value/unit not expected.",
+  "operation 'harvest_main_crop' had duplicate device(s) in source: ['combine_harvester', 'beet_lifter', 'potato_harvester', 'maize_chopper', 'mower', 'mower'] -> ['combine_harvester', 'beet_lifter', 'potato_harvester', 'maize_chopper', 'mower']",
+  "device 'combine_harvester' (under 'harvest_main_crop') has no unit list -> value/unit not expected.",
+  "device 'beet_lifter' (under 'harvest_main_crop') has no unit list -> value/unit not expected.",
+  "device 'potato_harvester' (under 'harvest_main_crop') has no unit list -> value/unit not expected.",
+  "device 'maize_chopper' (under 'harvest_main_crop') has no unit list -> value/unit not expected.",
+  "device 'mower' (under 'harvest_main_crop') has no unit list -> value/unit not expected.",
+  "device 'mower' (under 'harvest_cover_crop') has no unit list -> value/unit not expected.",
+  "device 'self_loading_wagon' (under 'hay_removal') has no unit list -> value/unit not expected.",
+  "device 'square_baler' (under 'hay_removal') has no unit list -> value/unit not expected.",
+  "device 'round_baler' (under 'hay_removal') has no unit list -> value/unit not expected.",
+  "device 'self_loading_wagon' (under 'straw_removal') has no unit list -> value/unit not expected.",
+  "device 'square_baler' (under 'straw_removal') has no unit list -> value/unit not expected.",
+  "device 'round_baler' (under 'straw_removal') has no unit list -> value/unit not expected.",
+  "device 'mower' (under 'straw_removal') has no unit list -> value/unit not expected.",
+  "operation 'cleaning_cut' (category 'harvest') has NO device list in source (empty dropdown).",
+  "device 'sampling_soil' (under 'sampling') has no unit list -> value/unit not expected.",
+  "device 'sampling_plants' (under 'sampling') has no unit list -> value/unit not expected.",
+  "device 'note' unit range is self-referential (note/frost_kill_cover_crop); treat as no unit.",
+  "device 'note' (under 'note') has no unit list -> value/unit not expected.",
+  "device 'frost_kill_cover_crop' (under 'note') has no unit list -> value/unit not expected."
+ ],
+ "all_units": [
+  "cm",
+  "g/ha",
+  "hours/ha",
+  "kg B/ha",
+  "kg Ca/ha",
+  "kg CaO/ha",
+  "kg K2O/ha",
+  "kg Mg/ha",
+  "kg Mn/ha",
+  "kg N/ha",
+  "kg Na/ha",
+  "kg P2O5/ha",
+  "kg S/ha",
+  "kg/ha",
+  "l/ha",
+  "m3/ha",
+  "plants/ha",
+  "t/ha",
+  "unit/ha"
+ ],
+ "counts": {
+  "categories": 7,
+  "operations": 25,
+  "device_slots": 128,
+  "unique_devices": 82
+ }
+}

@@ -455,6 +455,62 @@ fetch_required "osi-history-router index.js" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-history-router/index.js" \
     "/srv/node-red/osi-history-router/index.js"
 
+fetch_required "osi-journal package.json" \
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-journal/package.json" \
+    "/srv/node-red/osi-journal/package.json"
+
+fetch_required "osi-journal index.js" \
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-journal/index.js" \
+    "/srv/node-red/osi-journal/index.js"
+
+fetch_required "osi-journal catalog.js" \
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-journal/catalog.js" \
+    "/srv/node-red/osi-journal/catalog.js"
+
+fetch_required "osi-journal definition.js" \
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-journal/definition.js" \
+    "/srv/node-red/osi-journal/definition.js"
+
+fetch_required "osi-journal units.js" \
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-journal/units.js" \
+    "/srv/node-red/osi-journal/units.js"
+
+fetch_required "osi-journal unit-family.js" \
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-journal/unit-family.js" \
+    "/srv/node-red/osi-journal/unit-family.js"
+
+fetch_required "osi-journal cascade.js" \
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-journal/cascade.js" \
+    "/srv/node-red/osi-journal/cascade.js"
+
+fetch_required "osi-journal aggregate.js" \
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-journal/aggregate.js" \
+    "/srv/node-red/osi-journal/aggregate.js"
+
+fetch_required "osi-journal context.js" \
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-journal/context.js" \
+    "/srv/node-red/osi-journal/context.js"
+
+fetch_required "osi-journal lifecycle.js" \
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-journal/lifecycle.js" \
+    "/srv/node-red/osi-journal/lifecycle.js"
+
+fetch_required "osi-journal api.js" \
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-journal/api.js" \
+    "/srv/node-red/osi-journal/api.js"
+
+fetch_required "osi-journal commands.js" \
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-journal/commands.js" \
+    "/srv/node-red/osi-journal/commands.js"
+
+fetch_required "osi-command-ledger package.json" \
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-command-ledger/package.json" \
+    "/srv/node-red/osi-command-ledger/package.json"
+
+fetch_required "osi-command-ledger index.js" \
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-command-ledger/index.js" \
+    "/srv/node-red/osi-command-ledger/index.js"
+
 fetch_required "osi-history-sync-helper package.json" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-history-sync-helper/package.json" \
     "/srv/node-red/osi-history-sync-helper/package.json"

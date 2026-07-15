@@ -5,9 +5,17 @@ const vm = require('vm');
 const path = require('path');
 const { execFileSync } = require('child_process');
 const { createRequire } = require('module');
+const {
+  TASK9_OSI_LIB_NODE_POLICIES,
+  auditOsiLibBindings,
+} = require('./osi-lib-binding-audit');
 
 const flowPath = path.resolve(__dirname, '..', 'conf', 'full_raspberrypi_bcm27xx_bcm2712', 'files', 'usr', 'share', 'flows.json');
 const nodeRedRoot = path.resolve(__dirname, '..', 'conf', 'full_raspberrypi_bcm27xx_bcm2712', 'files', 'usr', 'share', 'node-red');
+const journalCommandsPath = path.join(nodeRedRoot, 'osi-journal', 'commands.js');
+const journalCommandsSource = fs.readFileSync(journalCommandsPath, 'utf8');
+const commandLedgerPath = path.join(nodeRedRoot, 'osi-command-ledger', 'index.js');
+const commandLedgerSource = fs.readFileSync(commandLedgerPath, 'utf8');
 const deployScriptPath = path.resolve(__dirname, '..', 'deploy.sh');
 const nodeRedInitPath = path.resolve(__dirname, '..', 'feeds', 'chirpstack-openwrt-feed', 'apps', 'node-red', 'files', 'node-red.init');
 const chirpstackInitPath = path.resolve(__dirname, '..', 'feeds', 'chirpstack-openwrt-feed', 'chirpstack', 'chirpstack', 'files', 'chirpstack.init');
@@ -325,6 +333,9 @@ function runQuietNodeScript(scriptName, description) {
   }
 }
 
+runQuietNodeScript('osi-lib-binding-audit.test.js', 'osi-lib binding audit adversarial fixtures pass');
+runQuietNodeScript('migrate-flows-journal-generators.test.js', 'journal replay generators reject shape drift');
+
 function findNodeByName(name) {
   return flows.find((node) => node.name === name);
 }
@@ -416,6 +427,25 @@ function expectExcludesById(nodeId, needle, description) {
   } else {
     console.log(`OK ${nodeId} removed ${description}`);
   }
+}
+
+function expectOrderedIncludesById(nodeId, needles, description) {
+  const node = findNodeById(nodeId);
+  if (!node) {
+    fail(`missing node ${nodeId}`);
+    return;
+  }
+  const source = String(node.func || '');
+  let cursor = -1;
+  for (const needle of needles) {
+    const index = source.indexOf(needle, cursor + 1);
+    if (index < 0) {
+      fail(`${nodeId} does not ${description}: missing or out-of-order ${JSON.stringify(needle)}`);
+      return;
+    }
+    cursor = index;
+  }
+  console.log(`OK ${nodeId} ${description}`);
 }
 
 function expectMissingNodeById(nodeId, description) {
@@ -1201,7 +1231,8 @@ for (const id of ['9b3afb405207302e', '5f0d2b7e9b9b1b3a']) {
 // Global check: any function node that calls into a Node.js core module OR a
 // project-registered Node-RED setting module must have the symbol available at
 // runtime — either declared in the node's `libs` array, locally bound via
-// `const X = global.get('X')`, or locally bound via `const X = require('X')`.
+// `const X = global.get('X')`, locally bound via `const X = require('X')`, or
+// bound from a checked osiLib loader result (`const X = xLoad.value`).
 // Without one of those, the symbol is undefined and the function throws
 // `ReferenceError: <module> is not defined`.
 //
@@ -1221,11 +1252,20 @@ const GUARDED_MODULE_VARS = [
   'crypto', 'fs', 'path', 'os', 'net', 'http', 'https', 'url',
   // Project-registered helpers (settings.js functionGlobalContext)
   'osiDb', 'osiCloudHttp', 'chameleon', 'dendro', 'chirpstack', 'bcrypt', 'sqlite3', 'osiLib',
+  'osiJournal', 'osiCommandLedger',
 ];
 for (const node of flows) {
   if (node.type !== 'function') continue;
   const body = String(node.func || '');
   if (!body) continue;
+  const osiLibPolicy = TASK9_OSI_LIB_NODE_POLICIES[node.id];
+  if (osiLibPolicy) {
+    const audit = auditOsiLibBindings(node, osiLibPolicy.bindings);
+    if (!audit.ok) {
+      fail(`function node ${node.name || node.id} failed its reviewed osiLib source policy: ${audit.errors.join('; ')}`);
+    }
+    continue;
+  }
   const declaredLibs = new Set((node.libs || []).map((entry) => String(entry?.var || '').trim()).filter(Boolean));
   for (const mod of GUARDED_MODULE_VARS) {
     const usagePattern = new RegExp(`(?:^|[^A-Za-z0-9_$])${mod}\\.[A-Za-z_$][A-Za-z0-9_$]*\\s*\\(`);
@@ -1561,12 +1601,34 @@ expectIncludes('Sync Init Schema + Triggers', 'result_detail TEXT', 'creates the
 expectIncludes('Sync Init Schema + Triggers', 'attempt_count INTEGER NOT NULL DEFAULT 0', 'creates/applies applied_commands retry accounting columns');
 expectIncludes('Sync Init Schema + Triggers', 'last_ack_attempt_at TEXT', 'creates/applies applied_commands ACK retry timestamp column');
 expectIncludes('Sync Init Schema + Triggers', 'CREATE TABLE IF NOT EXISTS command_ack_outbox', 'creates the durable edge command ACK outbox during sync init');
-expectIncludes('Deduplicate Pending Command', 'SELECT command_id, effect_key, result FROM applied_commands', 'checks command and effect-key replay ledger before dispatch');
-expectIncludes('Deduplicate Pending Command', 'duplicate_command', 'emits a terminal duplicate ACK instead of replaying a command');
-expectIncludes('Queue REST Command ACK', 'INSERT OR REPLACE INTO applied_commands', 'records terminal command outcomes in the local replay ledger');
-expectIncludes('Queue REST Command ACK', 'result_detail', 'writes terminal command detail into the canonical replay-ledger detail column');
+expectIncludes('Deduplicate Pending Command', 'osiCommandLedger.deduplicatePendingCommand', 'delegates exact stored-result replay before dispatch via the shared command ledger');
+expectIncludes('Deduplicate Pending Command', 'failed closed', 'fails closed when replay-ledger lookup is unavailable');
+expectOrderedIncludesById('command-dedupe-dispatch', [
+  'const envelope = cmd._pendingCommandEnvelope;',
+  "const commandType = String(envelope.commandType || '').trim().toUpperCase();",
+  'const journalType = /(?:^|_)JOURNAL(?:_|$)/.test(commandType);',
+  "const dbLoad = osiLib.require('osi-db-helper');",
+  "const commandLedgerLoad = osiLib.require('osi-command-ledger');",
+  'if (journalType) {',
+  "const journalLoad = osiLib.require('osi-journal');",
+], 'classifies the protected command type before mandatory and optional helper loading');
+expectIncludesById('command-dedupe-dispatch', 'Command helpers unavailable:', 'keeps DB and ledger mandatory for every protected command');
+expectIncludesById('command-dedupe-dispatch', 'Journal dedupe hooks unavailable:', 'surfaces unavailable optional journal replay hooks');
+expectOrderedIncludesById('journal-command-apply-fn', [
+  'const envelope = cmd._pendingCommandEnvelope;',
+  "const commandType = String(envelope.commandType || '').trim().toUpperCase();",
+  'const journalType = /(?:^|_)JOURNAL(?:_|$)/.test(commandType);',
+  'if (!journalType) return [msg, null];',
+  "const dbLoad = osiLib.require('osi-db-helper');",
+  "const journalLoad = osiLib.require('osi-journal');",
+], 'passes non-journal commands toward legacy dispatch before loading journal helpers');
+expectFileIncludes('osi-command-ledger/index.js', commandLedgerSource, 'SELECT * FROM applied_commands WHERE command_id=? LIMIT 1', 'looks up exact command IDs before payload validation');
+expectFileIncludes('osi-journal/commands.js', journalCommandsSource, 'result_detail', 'reconstructs ACK facts from canonical replay-ledger detail');
+expectIncludes('Queue REST Command ACK', 'osiCommandLedger.queueCommandAck', 'delegates atomic terminal ledger and ACK queueing via the shared command ledger');
+expectFileIncludes('osi-command-ledger/index.js', commandLedgerSource, 'ON CONFLICT(command_id) DO NOTHING', 'never rewrites an existing terminal command result');
+expectFileIncludes('osi-command-ledger/index.js', commandLedgerSource, 'INSERT INTO command_ack_outbox', 'queues durable REST command ACKs in the shared transaction helper');
 expectExcludes('Queue REST Command ACK', 'applied_at,detail', 'legacy applied_commands.detail insert column');
-expectIncludes('Queue REST Command ACK', 'INSERT INTO command_ack_outbox', 'queues durable REST command ACKs before MQTT telemetry forwarding');
+expectExcludes('Queue REST Command ACK', 'INSERT OR REPLACE INTO applied_commands', 'terminal ledger rewrite SQL');
 expectIncludes('Build Command ACK Batch', '/command-acks', 'posts queued command ACKs to the sync REST endpoint');
 expectIncludes('Build Command ACK Batch', "'X-OSI-Sync-Protocol': '2'", 'opts REST command ACKs into sync protocol v2');
 expectIncludes('Mark Command ACKs Delivered', 'UPDATE command_ack_outbox SET delivered_at', 'marks REST command ACK rows delivered only after a successful response');
@@ -1676,8 +1738,10 @@ expectIncludes('Build UPDATE SQL', 'cmd.device_eui', 'accepts schema-shaped devi
 expectWireById('sync-pending-split', 'reject-indefinite-open', 'routes pending cloud commands through the indefinite-open guard before the replay ledger');
 expectWireById('sync-force-build', 'reject-indefinite-open', 'routes force-sync replayed commands through the indefinite-open guard before the replay ledger');
 expectWireById('reject-indefinite-open', 'command-dedupe-dispatch', 'routes guarded cloud commands through the replay ledger');
-expectWireById('command-dedupe-dispatch', '934bf2bc19a8ce22', 'allows non-duplicate commands to reach the existing command router');
-expectWireById('command-dedupe-dispatch', 'command-ack-queue-rest', 'routes duplicate command ACKs to the durable ACK queue');
+expectWireById('command-dedupe-dispatch', 'journal-command-apply-fn', 'routes non-duplicates through the journal-aware command applier');
+expectWireById('command-dedupe-dispatch', '9d5e3035c3d069c4', 'publishes already-persisted exact replay ACKs without reclassification');
+expectWireById('journal-command-apply-fn', '934bf2bc19a8ce22', 'falls through recognized non-journal commands to the existing router');
+expectWireById('journal-command-apply-fn', '9d5e3035c3d069c4', 'publishes atomically persisted journal ACKs');
 expectWireById('c8628cffe45f64f7', 'command-ack-queue-rest', 'routes STREGA command ACKs through the durable ACK queue');
 expectWireById('cs-reg-cloud-ack-fn', 'command-ack-queue-rest', 'routes special command ACKs through the durable ACK queue');
 expectWireById('lsn50-mode-ack-link-in', 'command-ack-queue-rest', 'routes LSN50 command ACKs through the durable ACK queue');

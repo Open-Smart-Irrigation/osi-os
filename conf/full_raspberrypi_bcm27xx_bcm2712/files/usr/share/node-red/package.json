@@ -9,6 +9,7 @@
     "osi-chameleon-helper": "file:osi-chameleon-helper",
     "osi-chirpstack-helper": "file:osi-chirpstack-helper",
     "osi-cloud-http": "file:osi-cloud-http",
+    "osi-command-ledger": "file:osi-command-ledger",
     "osi-dendro-helper": "file:osi-dendro-helper",
     "osi-db-helper": "file:osi-db-helper",
     "osi-history-helper": "file:osi-history-helper",
@@ -19,6 +20,7 @@
     "osi-dendro-analytics": "file:osi-dendro-analytics",
     "osi-zone-env": "file:osi-zone-env",
     "osi-history-router": "file:osi-history-router",
+    "osi-journal": "file:osi-journal",
     "osi-device-writer": "file:osi-device-writer",
     "osi-uc512-normalize": "file:osi-uc512-normalize",
     "osi-lsn50-normalize": "file:osi-lsn50-normalize"
