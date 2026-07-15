@@ -281,9 +281,17 @@ function parsedJson(raw, fallback) {
   }
 }
 
-function catalogDto(catalog) {
+function catalogDto(catalog, options) {
+  const includeDefs = Boolean(options && options.includeDefinitions);
   const vocab = [...catalog.vocabByCode.values()].map(function(row) {
     const output = Object.assign({}, row);
+    if (includeDefs) {
+      output.labels = parsedJson(output.labels_json, {});
+      output.constraints = parsedJson(output.constraints_json, null);
+    } else {
+      delete output.labels;
+      delete output.constraints;
+    }
     delete output.labels_json;
     delete output.constraints_json;
     return output;
@@ -292,6 +300,13 @@ function catalogDto(catalog) {
     return [...index.values()].flatMap(function(versions) {
       return [...versions.values()].map(function(row) {
         const output = Object.assign({}, row);
+        if (includeDefs) {
+          output.labels = parsedJson(output.labels_json, {});
+          output.definition = parsedJson(output.definition_json, {});
+        } else {
+          delete output.labels;
+          delete output.definition;
+        }
         delete output.labels_json;
         delete output.definition_json;
         return output;
@@ -300,6 +315,11 @@ function catalogDto(catalog) {
   };
   const products = [...catalog.products.values()].map(function(row) {
     const output = Object.assign({}, row);
+    if (includeDefs) {
+      output.composition = parsedJson(output.composition_json, {});
+    } else {
+      delete output.composition;
+    }
     delete output.composition_json;
     return output;
   }).sort(function(left, right) { return left.product_uuid.localeCompare(right.product_uuid); });
@@ -319,8 +339,8 @@ function catalogDto(catalog) {
   };
 }
 
-async function loadScopedCatalog(db, principal) {
-  return catalogDto(await loadCatalog(db, principal));
+async function loadScopedCatalog(db, principal, options) {
+  return catalogDto(await loadCatalog(db, principal), options);
 }
 
 function normalizedStringFilter(raw, field) {
@@ -2779,7 +2799,9 @@ async function handleHttpRequest(options) {
     const query = msg.req && msg.req.query || {};
     const uuid = msg.req && msg.req.params && msg.req.params.uuid;
     if (method === 'GET' && requestPath === '/api/journal/catalog') {
-      return respond(200, await loadScopedCatalog(db, principal));
+      return respond(200, await loadScopedCatalog(db, principal, {
+        includeDefinitions: query.include === 'definitions',
+      }));
     }
     if (method === 'GET' && requestPath === '/api/journal/entries') {
       return respond(200, await listEntries(db, query, principal));
