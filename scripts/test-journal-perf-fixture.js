@@ -16,6 +16,9 @@ const VALUE_COUNT = 150_000;
 const VALUES_PER_ENTRY = VALUE_COUNT / ENTRY_COUNT;
 const LIST_LIMIT_MS = 100;
 const RSS_LIMIT_BYTES = 64 * 1024 * 1024;
+const WIDE_EXPORT_MAX_WRITE_BYTES = 64 * 1024;
+const ADVERSARIAL_ENTRY_COUNT = 50;
+const ADVERSARIAL_VALUES_PER_ENTRY = 128;
 const OWNER_UUID = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 const PLOT_UUID = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
 const ZONE_UUID = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc';
@@ -88,6 +91,24 @@ function seedFixture(db) {
         'entered_value_num,entered_unit_code' +
       ') VALUES (?,?,?,?,?,?,?,?)'
     );
+    const insertPerfAttribute = db.prepare(
+      'INSERT INTO journal_vocab(' +
+        'code,kind,value_type,labels_json,scope,active,sort_order,sync_version,created_at' +
+      ') VALUES (?,?,?,?,?,?,?,?,?)'
+    );
+    for (let valueIndex = 0; valueIndex < VALUES_PER_ENTRY; valueIndex += 1) {
+      insertPerfAttribute.run(
+        'attr.perf_' + String(valueIndex).padStart(2, '0'),
+        'attribute',
+        'number',
+        JSON.stringify({ en: 'Performance value ' + valueIndex }),
+        'core',
+        1,
+        valueIndex,
+        1,
+        OCCURRED_FIRST
+      );
+    }
 
     const firstMs = Date.parse(OCCURRED_FIRST);
     for (let entryIndex = 0; entryIndex < ENTRY_COUNT; entryIndex += 1) {
@@ -283,6 +304,8 @@ class CountingCsvSink {
     this.bytes = 0;
     this.records = 0;
     this.writes = 0;
+    this.maxWriteBytes = 0;
+    this.writeBytes = [];
     this.recordsPerWrite = [];
     this.destroyed = false;
     this.writableEnded = false;
@@ -296,10 +319,13 @@ class CountingCsvSink {
   write(chunk) {
     this.sampleRss();
     const text = Buffer.isBuffer(chunk) ? chunk.toString('utf8') : String(chunk);
+    const bytes = Buffer.isBuffer(chunk) ? chunk.length : Buffer.byteLength(text, 'utf8');
     const writeIndex = this.recordsPerWrite.length;
     this.recordsPerWrite.push(0);
-    this.bytes += Buffer.byteLength(text, 'utf8');
+    this.bytes += bytes;
     this.writes += 1;
+    this.maxWriteBytes = Math.max(this.maxWriteBytes, bytes);
+    this.writeBytes.push(bytes);
     for (let index = 0; index < text.length; index += 1) {
       const code = text.charCodeAt(index);
       if (this.pendingCarriageReturnWriteIndex != null && code === 10) {
@@ -353,6 +379,14 @@ function assertCsvStreamShape(metrics) {
   };
 }
 
+function assertBoundedCsvWrites(metrics, label) {
+  assert.ok(Array.isArray(metrics.writeBytes), label + ' must record bytes per sink write');
+  assert.ok(
+    metrics.writeBytes.every(function(bytes) { return bytes <= WIDE_EXPORT_MAX_WRITE_BYTES; }),
+    label + ' wrote a ' + metrics.maxWriteBytes + '-byte chunk; maximum is 65536 bytes'
+  );
+}
+
 function verifyStreamShapeNegativeControl() {
   const splitCrLf = new CountingCsvSink(process.memoryUsage().rss);
   splitCrLf.write('header\r');
@@ -400,9 +434,128 @@ async function measureCsv(db) {
     recordsPerWrite: sink.recordsPerWrite.slice(),
     bytes: sink.bytes,
     writes: sink.writes,
+    maxWriteBytes: sink.maxWriteBytes,
+    writeBytes: sink.writeBytes.slice(),
     ended: sink.writableEnded,
     durationMs: elapsedMs(start),
     rssGrowthBytes: sink.rssGrowthBytes,
+  };
+}
+
+function adversarialCustomUuid(index) {
+  return '73000000-0000-4000-8000-' + index.toString(16).padStart(12, '0');
+}
+
+function seedAdversarialWideFixture(db) {
+  const insertVocab = db.prepare(
+    'INSERT INTO journal_vocab(' +
+      'code,kind,value_type,labels_json,scope,owner_user_uuid,gateway_device_eui,' +
+      'custom_field_uuid,active,sort_order,sync_version,created_at' +
+    ') VALUES (?,?,?,?,?,?,?,?,?,?,?,?)'
+  );
+  const insertEntry = db.prepare(
+    'INSERT INTO journal_entries(' +
+      'entry_uuid,owner_user_uuid,user_id,author_principal_uuid,author_label,' +
+      'plot_uuid,zone_id,zone_uuid,activity_code,template_code,template_version,' +
+      'layout_code,layout_version,catalog_version,occurred_start,occurred_timezone,' +
+      'occurred_utc_offset_minutes,recorded_at,origin,status,sync_version,' +
+      'gateway_device_eui,created_at,updated_at' +
+    ') VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)'
+  );
+  const insertValue = db.prepare(
+    'INSERT INTO journal_entry_values(' +
+      'entry_uuid,attribute_code,group_index,value_status,value_text' +
+    ') VALUES (?,?,?,?,?)'
+  );
+  db.exec('PRAGMA synchronous=OFF; BEGIN IMMEDIATE;');
+  try {
+    let cellIndex = 0;
+    for (let entryIndex = 0; entryIndex < ADVERSARIAL_ENTRY_COUNT; entryIndex += 1) {
+      const entryUuidValue = '74000000-0000-4000-8000-' +
+        entryIndex.toString(16).padStart(12, '0');
+      const occurredAt = new Date(Date.parse(OCCURRED_LAST) + (entryIndex + 1) * 60_000).toISOString();
+      insertEntry.run(
+        entryUuidValue,
+        OWNER_UUID,
+        1,
+        OWNER_UUID,
+        'fixture-user',
+        PLOT_UUID,
+        1,
+        ZONE_UUID,
+        'general_observation',
+        'farmer_quick',
+        1,
+        'open_field',
+        1,
+        1,
+        occurredAt,
+        'UTC',
+        0,
+        occurredAt,
+        'edge-ui',
+        'final',
+        1,
+        GATEWAY_EUI,
+        occurredAt,
+        occurredAt
+      );
+      for (let valueIndex = 0; valueIndex < ADVERSARIAL_VALUES_PER_ENTRY; valueIndex += 1) {
+        const customUuid = adversarialCustomUuid(cellIndex + 1);
+        const code = 'custom.' + customUuid;
+        insertVocab.run(
+          code,
+          'attribute',
+          'text',
+          JSON.stringify({ en: 'Adversarial field ' + cellIndex }),
+          'custom',
+          OWNER_UUID,
+          GATEWAY_EUI,
+          customUuid,
+          1,
+          cellIndex,
+          1,
+          occurredAt
+        );
+        insertValue.run(entryUuidValue, code, valueIndex % 32, 'observed', 'x');
+        cellIndex += 1;
+      }
+    }
+    db.exec('COMMIT;');
+  } catch (error) {
+    try { db.exec('ROLLBACK;'); } catch (_) {}
+    throw error;
+  } finally {
+    db.exec('PRAGMA synchronous=NORMAL;');
+  }
+}
+
+async function measureAdversarialWideCsv(db) {
+  const sink = new CountingCsvSink(process.memoryUsage().rss);
+  let result;
+  let error = null;
+  const start = process.hrtime.bigint();
+  try {
+    result = await journal.exportWideCsv(
+      db,
+      { status: 'final', activity_code: 'general_observation' },
+      principal(),
+      sink
+    );
+  } catch (caught) {
+    error = caught;
+  }
+  return {
+    result,
+    errorCode: error && error.code,
+    errorStatus: error && error.statusCode,
+    fallbackExport: error && error.details && error.details.fallback_export,
+    writes: sink.writes,
+    bytes: sink.bytes,
+    maxWriteBytes: sink.maxWriteBytes,
+    writeBytes: sink.writeBytes.slice(),
+    ended: sink.writableEnded,
+    durationMs: elapsedMs(start),
   };
 }
 
@@ -449,6 +602,7 @@ async function main() {
     let streamShape;
     try {
       streamShape = assertCsvStreamShape(csv);
+      assertBoundedCsvWrites(csv, 'normal wide CSV');
     } catch (error) {
       failures.push(error && error.message ? error.message : String(error));
     }
@@ -457,6 +611,7 @@ async function main() {
       'exportWideCsv: records=' + csv.records +
       ' bytes=' + csv.bytes +
       ' writes=' + csv.writes +
+      ' max_write_bytes=' + csv.maxWriteBytes +
       ' data_writes=' + (streamShape ? streamShape.dataWriteCount : 'invalid') +
       ' max_records_per_data_write=' + (streamShape ? streamShape.maxRecordsPerDataWrite : 'invalid') +
       ' duration_ms=' + csv.durationMs.toFixed(3) +
@@ -469,6 +624,38 @@ async function main() {
     }
     if (csv.rssGrowthBytes > RSS_LIMIT_BYTES) {
       failures.push('streamed CSV RSS growth ' + rssGrowthMiB.toFixed(3) + ' MiB exceeded 64 MiB');
+    }
+
+    seedAdversarialWideFixture(db);
+    const adversarial = await measureAdversarialWideCsv(db);
+    console.log(
+      'exportWideCsv adversarial: entries=' + ADVERSARIAL_ENTRY_COUNT +
+      ' values_per_entry=' + ADVERSARIAL_VALUES_PER_ENTRY +
+      ' error=' + (adversarial.errorCode || 'none') +
+      ' writes=' + adversarial.writes +
+      ' bytes=' + adversarial.bytes +
+      ' max_write_bytes=' + adversarial.maxWriteBytes +
+      ' duration_ms=' + adversarial.durationMs.toFixed(3)
+    );
+    if (adversarial.errorCode !== 'wide_export_too_wide' || adversarial.errorStatus !== 413) {
+      failures.push(
+        '50x128 disjoint-cell export returned ' + (adversarial.errorCode || 'success') +
+          '; expected 413 wide_export_too_wide'
+      );
+    }
+    if (adversarial.fallbackExport !== '/api/journal/export.package') {
+      failures.push('wide-export rejection did not direct clients to /api/journal/export.package');
+    }
+    if (adversarial.writes !== 0 || adversarial.bytes !== 0) {
+      failures.push(
+        '50x128 disjoint-cell export wrote ' + adversarial.bytes + ' bytes in ' +
+          adversarial.writes + ' writes before rejection'
+      );
+    }
+    try {
+      assertBoundedCsvWrites(adversarial, 'adversarial wide CSV');
+    } catch (error) {
+      failures.push(error && error.message ? error.message : String(error));
     }
 
     if (failures.length) {

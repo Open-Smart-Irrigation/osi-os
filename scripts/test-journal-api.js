@@ -57,17 +57,21 @@ class TestDb {
     this.closeCalls = 0;
     this.snapshotClosed = 0;
     this.valueBatchSizes = [];
+    this.wideCellQueries = [];
     this.closeError = null;
     nativeDatabases.push(this.native);
   }
 
   prepare(sql) {
     const statement = this.native.prepare(sql);
-    if (!/FROM journal_entry_values WHERE entry_uuid IN/.test(sql)) return statement;
+    const tracksValueBatch = /FROM journal_entry_values WHERE entry_uuid IN/.test(sql);
+    const tracksWideCells = /SELECT DISTINCT v\.group_index,v\.attribute_code/.test(sql);
+    if (!tracksValueBatch && !tracksWideCells) return statement;
     const testDb = this;
     return {
       all(...params) {
-        testDb.valueBatchSizes.push(params.length);
+        if (tracksValueBatch) testDb.valueBatchSizes.push(params.length);
+        if (tracksWideCells) testDb.wideCellQueries.push({ sql, params: params.slice() });
         return statement.all(...params);
       },
       get(...params) {
@@ -86,6 +90,9 @@ class TestDb {
   all(sql, params) {
     if (/FROM journal_entry_values WHERE entry_uuid IN/.test(sql)) {
       this.valueBatchSizes.push((params || []).length);
+    }
+    if (/SELECT DISTINCT v\.group_index,v\.attribute_code/.test(sql)) {
+      this.wideCellQueries.push({ sql, params: (params || []).slice() });
     }
     return Promise.resolve(this.native.prepare(sql).all(...(params || [])));
   }
@@ -1509,6 +1516,246 @@ class BackpressureSink extends EventEmitter {
     this.headers[name] = value;
   }
 }
+
+function wideCustomUuid(index) {
+  return '71000000-0000-4000-8000-' + index.toString(16).padStart(12, '0');
+}
+
+function insertWideVocab(db, codes) {
+  const insert = db.prepare(
+    'INSERT INTO journal_vocab(' +
+      'code,kind,value_type,labels_json,scope,owner_user_uuid,gateway_device_eui,' +
+      'custom_field_uuid,active,sort_order,sync_version,created_at' +
+    ') VALUES (?,?,?,?,?,?,?,?,?,?,?,?)'
+  );
+  for (let index = 0; index < codes.length; index += 1) {
+    const code = codes[index];
+    const customUuid = /^custom\.[0-9a-f-]{36}$/.test(code) ? code.slice(7) : null;
+    insert.run(
+      code,
+      'attribute',
+      'text',
+      JSON.stringify({ en: 'Wide field ' + index }),
+      customUuid ? 'custom' : 'core',
+      customUuid ? OWNER_UUID : null,
+      customUuid ? GATEWAY_EUI : null,
+      customUuid,
+      1,
+      index,
+      1,
+      '2026-07-14T00:00:00.000Z'
+    );
+  }
+}
+
+function insertWideEntries(db, cells, options) {
+  const settings = Object.assign({ valuesPerEntry: 128, text: 'x' }, options || {});
+  const insertEntry = db.prepare(
+    'INSERT INTO journal_entries(' +
+      'entry_uuid,owner_user_uuid,user_id,author_principal_uuid,activity_code,' +
+      'template_code,template_version,layout_code,layout_version,catalog_version,' +
+      'occurred_start,occurred_timezone,occurred_utc_offset_minutes,recorded_at,' +
+      'origin,status,sync_version,gateway_device_eui,created_at,updated_at' +
+    ') VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)'
+  );
+  const insertValue = db.prepare(
+    'INSERT INTO journal_entry_values(' +
+      'entry_uuid,attribute_code,group_index,value_status,value_text' +
+    ') VALUES (?,?,?,?,?)'
+  );
+  for (let offset = 0, entryIndex = 0; offset < cells.length;
+    offset += settings.valuesPerEntry, entryIndex += 1) {
+    const entryUuid = '72000000-0000-4000-8000-' + entryIndex.toString(16).padStart(12, '0');
+    const recordedAt = new Date(Date.parse('2026-07-14T00:00:00.000Z') + entryIndex * 60_000)
+      .toISOString();
+    insertEntry.run(
+      entryUuid,
+      OWNER_UUID,
+      1,
+      OWNER_UUID,
+      'irrigation',
+      'farmer_quick',
+      1,
+      'open_field',
+      1,
+      1,
+      recordedAt,
+      'UTC',
+      0,
+      recordedAt,
+      'edge-ui',
+      'final',
+      1,
+      GATEWAY_EUI,
+      recordedAt,
+      recordedAt
+    );
+    for (const cell of cells.slice(offset, offset + settings.valuesPerEntry)) {
+      insertValue.run(
+        entryUuid,
+        cell.attribute_code,
+        cell.group_index,
+        'observed',
+        settings.text
+      );
+    }
+  }
+}
+
+function customWideCells(count) {
+  return Array.from({ length: count }, function(_, index) {
+    return {
+      attribute_code: 'custom.' + wideCustomUuid(index + 1),
+      group_index: index % 32,
+    };
+  });
+}
+
+test('wide CSV accepts 256 pivot cells, sorts in JavaScript, and bounds exact reconstructed writes', async () => {
+  const db = new TestDb('wide-csv-limit-accepted');
+  seedIdentity(db);
+  const cells = customWideCells(256);
+  insertWideVocab(db, cells.map(function(cell) { return cell.attribute_code; }).reverse());
+  insertWideEntries(db, cells.slice().reverse(), { text: '\u00e9'.repeat(400) });
+
+  const expected = await journal.exportWideCsv(db, { status: 'final' }, principal());
+  const sink = new BackpressureSink('drain');
+  const result = await journal.exportWideCsv(db, { status: 'final' }, principal(), sink);
+  assert.equal(result, null);
+  assert.ok(sink.writableEnded);
+  assert.equal(Buffer.concat(sink.chunks).toString('utf8'), expected);
+  const logicalLines = expected.split('\r\n').filter(Boolean);
+  assert.ok(
+    logicalLines.some(function(line) { return Buffer.byteLength(line + '\r\n', 'utf8') > 64 * 1024; }),
+    'fixture must contain a logical row larger than one sink write'
+  );
+  assert.ok(sink.chunks.length > 4, 'rows larger than one chunk must be split');
+  assert.ok(
+    sink.chunks.every(function(chunk) { return chunk.length <= 64 * 1024; }),
+    'every wide CSV sink write must be at most 64 KiB'
+  );
+
+  const header = parseCsvRecords(expected)[0].map(function(cell) { return cell.value; });
+  const headerEnd = expected.indexOf('\r\n') + 2;
+  assert.ok(Buffer.byteLength(expected.slice(0, headerEnd), 'utf8') <= 64 * 1024);
+  const actualDynamicStatus = header.filter(function(column) {
+    return column.startsWith('value.') && column.endsWith('.status');
+  });
+  const expectedDynamicStatus = cells.slice().sort(function(left, right) {
+    return left.group_index - right.group_index ||
+      (left.attribute_code < right.attribute_code ? -1 : (left.attribute_code > right.attribute_code ? 1 : 0));
+  }).map(function(cell) {
+    return 'value.' + cell.group_index + '.' + cell.attribute_code + '.status';
+  });
+  assert.deepEqual(actualDynamicStatus, expectedDynamicStatus);
+  assert.equal(db.wideCellQueries.length, 2);
+  for (const query of db.wideCellQueries) {
+    assert.match(query.sql, /LIMIT \?/);
+    assert.doesNotMatch(query.sql, /ORDER BY/);
+    assert.equal(query.params.at(-1), 257);
+  }
+});
+
+test('wide CSV rejects a 257th pivot cell before any sink write', async () => {
+  const db = new TestDb('wide-csv-limit-rejected');
+  seedIdentity(db);
+  const cells = customWideCells(257);
+  insertWideVocab(db, cells.map(function(cell) { return cell.attribute_code; }));
+  insertWideEntries(db, cells);
+  const sink = new BackpressureSink('drain');
+
+  await assert.rejects(
+    journal.exportWideCsv(db, { status: 'final' }, principal(), sink),
+    function(error) {
+      assert.equal(error && error.statusCode, 413);
+      assert.equal(error && error.code, 'wide_export_too_wide');
+      assert.deepEqual(error && error.details, {
+        reason: 'pivot_cells',
+        max_pivot_cells: 256,
+        observed_pivot_cells: 257,
+        max_header_bytes: 64 * 1024,
+        fallback_export: '/api/journal/export.package',
+      });
+      return true;
+    }
+  );
+  assert.equal(sink.writes, 0);
+  assert.equal(sink.writableEnded, false);
+});
+
+test('wide CSV rejects a computed header over 64 KiB before any sink write', async () => {
+  const db = new TestDb('wide-csv-header-rejected');
+  seedIdentity(db);
+  const codes = Array.from({ length: 256 }, function(_, index) {
+    return 'attr.wide_' + String(index).padStart(3, '0') + '_' + 'x'.repeat(300);
+  });
+  const cells = codes.map(function(attributeCode, index) {
+    return { attribute_code: attributeCode, group_index: index % 32 };
+  });
+  insertWideVocab(db, codes);
+  insertWideEntries(db, cells);
+  const sink = new BackpressureSink('drain');
+
+  await assert.rejects(
+    journal.exportWideCsv(db, { status: 'final' }, principal(), sink),
+    function(error) {
+      assert.equal(error && error.statusCode, 413);
+      assert.equal(error && error.code, 'wide_export_too_wide');
+      assert.equal(error && error.details && error.details.reason, 'header_bytes');
+      assert.ok(error && error.details && error.details.header_bytes > 64 * 1024);
+      assert.equal(error && error.details && error.details.max_header_bytes, 64 * 1024);
+      assert.equal(
+        error && error.details && error.details.fallback_export,
+        '/api/journal/export.package'
+      );
+      return true;
+    }
+  );
+  assert.equal(sink.writes, 0);
+  assert.equal(sink.writableEnded, false);
+});
+
+test('HTTP export.csv returns 413 before preparing or writing the CSV stream', async () => {
+  const db = new TestDb('wide-csv-route-rejected');
+  seedIdentity(db);
+  const cells = customWideCells(257);
+  insertWideVocab(db, cells.map(function(cell) { return cell.attribute_code; }));
+  insertWideEntries(db, cells);
+  const secret = 'wide-csv-route-secret';
+  const authorization = 'Bearer ' + token(secret, {
+    userId: 1,
+    username: 'field-user',
+    exp: Date.now() + 60_000,
+  });
+  const sink = new BackpressureSink('drain');
+
+  const response = await journal.handleHttpRequest({
+    msg: {
+      req: {
+        method: 'GET',
+        path: '/api/journal/export.csv',
+        headers: { authorization },
+        query: { status: 'final' },
+        params: {},
+      },
+      res: sink,
+    },
+    Database: class { constructor() { return db; } },
+    environment: {
+      authTokenSecret: secret,
+      deviceEui: GATEWAY_EUI,
+      deviceEuiConfidence: 'authoritative',
+    },
+  });
+
+  assert.equal(response.statusCode, 413);
+  assert.equal(response.payload.error, 'wide_export_too_wide');
+  assert.equal(response.payload.details.fallback_export, '/api/journal/export.package');
+  assert.equal(sink.writes, 0);
+  assert.equal(sink.writableEnded, false);
+  assert.deepEqual(sink.headers, {});
+  assert.equal(db.closeCalls, 1);
+});
 
 test('research exports are loss-aware, formula-safe, incremental, and ZIP-manifest complete', async () => {
   const { db } = await createPagedEntries('exports', '=SUM(1,2)', 101);

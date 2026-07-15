@@ -10,6 +10,10 @@ const UUID = /^[0-9a-fA-F]{8}-?[0-9a-fA-F]{4}-?[0-9a-fA-F]{4}-?[0-9a-fA-F]{4}-?[
 const CANONICAL_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const EUI64 = /^[0-9A-F]{16}$/;
 const MAX_BODY_BYTES = 256 * 1024;
+const WIDE_EXPORT_MAX_PIVOT_CELLS = 256;
+const WIDE_EXPORT_MAX_HEADER_BYTES = 64 * 1024;
+const WIDE_EXPORT_MAX_WRITE_BYTES = 64 * 1024;
+const WIDE_EXPORT_FALLBACK_PATH = '/api/journal/export.package';
 const IDENTITY_FIELDS = new Set([
   'user_id',
   'owner_user_uuid',
@@ -2001,6 +2005,13 @@ async function writeChunk(writable, chunk) {
   }
 }
 
+async function writeBoundedWideChunk(writable, chunk) {
+  const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(String(chunk), 'utf8');
+  for (let offset = 0; offset < buffer.length; offset += WIDE_EXPORT_MAX_WRITE_BYTES) {
+    await writeChunk(writable, buffer.subarray(offset, offset + WIDE_EXPORT_MAX_WRITE_BYTES));
+  }
+}
+
 function optionalSink(writable) {
   if (writable) return { writable, collected: null };
   const chunks = [];
@@ -2030,8 +2041,22 @@ async function finishWritable(writable) {
   if (!writableAborted(writable)) writable.end();
 }
 
-async function exportWideCsv(db, rawFilters, principal, writable) {
-  const sink = optionalSink(writable);
+function wideExportTooWide(reason, extraDetails) {
+  return apiError(
+    413,
+    'wide_export_too_wide',
+    'Wide CSV export is too wide; use ' + WIDE_EXPORT_FALLBACK_PATH + ' instead',
+    Object.assign({
+      reason,
+      max_pivot_cells: WIDE_EXPORT_MAX_PIVOT_CELLS,
+      max_header_bytes: WIDE_EXPORT_MAX_HEADER_BYTES,
+      fallback_export: WIDE_EXPORT_FALLBACK_PATH,
+    }, extraDetails || {})
+  );
+}
+
+async function exportWideCsv(db, rawFilters, principal, writable, writableFactory) {
+  let sink = null;
   await inReadSnapshot(db, async function(snapshot) {
     const selection = canonicalExportSelection(rawFilters);
     const query = await buildEntryWhere(snapshot, selection, principal, false);
@@ -2039,9 +2064,18 @@ async function exportWideCsv(db, rawFilters, principal, writable) {
       snapshot,
       'SELECT DISTINCT v.group_index,v.attribute_code FROM journal_entries AS e ' +
         'JOIN journal_entry_values AS v ON v.entry_uuid=e.entry_uuid WHERE ' +
-        query.clauses.join(' AND ') + ' ORDER BY v.group_index,v.attribute_code',
-      query.params
+        query.clauses.join(' AND ') + ' LIMIT ?',
+      query.params.concat([WIDE_EXPORT_MAX_PIVOT_CELLS + 1])
     );
+    if (cells.length > WIDE_EXPORT_MAX_PIVOT_CELLS) {
+      throw wideExportTooWide('pivot_cells', {
+        observed_pivot_cells: cells.length,
+      });
+    }
+    cells.sort(function(left, right) {
+      return Number(left.group_index) - Number(right.group_index) ||
+        codePointCompare(left.attribute_code, right.attribute_code);
+    });
     const dynamic = [];
     for (const cell of cells) {
       const prefix = 'value.' + String(cell.group_index) + '.' + cell.attribute_code;
@@ -2054,11 +2088,17 @@ async function exportWideCsv(db, rawFilters, principal, writable) {
       'batch_uuid', 'note', 'sync_version',
     ];
     const columns = fixed.concat(dynamic);
-    await writeChunk(sink.writable, columns.map(function(column) {
+    const header = columns.map(function(column) {
       return csvCell(column, true);
-    }).join(',') + '\r\n');
+    }).join(',') + '\r\n';
+    const headerBytes = Buffer.byteLength(header, 'utf8');
+    if (headerBytes > WIDE_EXPORT_MAX_HEADER_BYTES) {
+      throw wideExportTooWide('header_bytes', { header_bytes: headerBytes });
+    }
+    const target = typeof writableFactory === 'function' ? writableFactory() : writable;
+    sink = optionalSink(target);
+    await writeBoundedWideChunk(sink.writable, header);
     await forEachWidePage(snapshot, selection, principal, async function(entries) {
-      let chunk = '';
       for (const entry of entries) {
         const row = {};
         for (const column of fixed) row[column] = entry[column];
@@ -2068,9 +2108,8 @@ async function exportWideCsv(db, rawFilters, principal, writable) {
           row[prefix + '.value'] = value.value_num == null ? value.value_text : value.value_num;
           row[prefix + '.unit'] = value.unit_code;
         }
-        chunk += csvLine(columns, row);
+        await writeBoundedWideChunk(sink.writable, csvLine(columns, row));
       }
-      if (chunk) await writeChunk(sink.writable, chunk);
     });
     await finishWritable(sink.writable);
   });
@@ -2781,9 +2820,11 @@ async function handleHttpRequest(options) {
       return respond(200, await upsertPlotGroup(db, requestBody(msg), principal, uuid));
     }
     if (method === 'GET' && requestPath === '/api/journal/export.csv') {
-      streaming = true;
-      streamedResponse = streamResponse(msg, 'text/csv; charset=utf-8', '.csv');
-      await exportWideCsv(db, query, principal, streamedResponse);
+      await exportWideCsv(db, query, principal, null, function() {
+        streamedResponse = streamResponse(msg, 'text/csv; charset=utf-8', '.csv');
+        streaming = true;
+        return streamedResponse;
+      });
       return null;
     }
     if (method === 'GET' && requestPath === '/api/journal/export.package') {
