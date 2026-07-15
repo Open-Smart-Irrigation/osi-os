@@ -36,3 +36,11 @@ Append-only execution log for the accepted Phase 0 and Phase 1-6 plans on `desig
   - `5d3c0e76269a06358e1e5d093b020b4547c17090` - byte-identical bcm2709 mirror.
 - Orchestrator gates: API 45/45; both profile suites 99/99; lifecycle 108/108; command path 63/63; bootstrap 53/53; schema, sync contract, profile parity, and `git diff --check` exited 0.
 - sol post-check: APPROVE after a fresh rerun of the same gates. sol confirmed the deviation is required because `catalog.js` pre-populates the parsed fields.
+
+## 2026-07-16T00:53:58+02:00 - Phase 1 blocker amendment accepted
+
+- Authority change: the user authorized plan fixes and enhancements when code reality blocks execution, with no further approval pause.
+- The plan now matches the Slice 1 wire contract: explicit draft/final write status, pinned template/layout versions, local occurrence fields, semantic value inputs, draft/final receipt variants, wrapped plot/group collections, and `members` for plot groups.
+- The amendment adds `src/services/__tests__` to `test:unit:vitest`; targeted tests alone are not accepted as the phase gate.
+- sol found and the amendment corrected two additional blockers: Vitest module mocks now use `vi.hoisted`, and draft receipts no longer require an outbox event UUID.
+- sol re-check: ACCEPT. Phase 1 may resume from Task 1.
