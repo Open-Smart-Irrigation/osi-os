@@ -3150,8 +3150,9 @@ expectFileIncludes('osi-bootstrap', osiBootstrapInitScript, 'curl -sf --max-time
 expectFileIncludes('osi-bootstrap', osiBootstrapInitScript, 'seq 1 24', 'init script retries gRPC health check up to 24 times');
 expectFileIncludes('osi-bootstrap', osiBootstrapInitScript, 'if touch /etc/osi-bootstrap.done; then', 'init script treats stamp write as part of successful provisioning');
 expectFileIncludes('osi-bootstrap', osiBootstrapInitScript, 'provisioned_this_boot=1', 'init script tracks successful first-boot provisioning');
-expectFileIncludes('osi-bootstrap', osiBootstrapInitScript, 'if [ "$provisioned_this_boot" = 1 ]; then', 'init script gates Node-RED restart on successful provisioning');
-expectFileIncludes('osi-bootstrap', osiBootstrapInitScript, '/etc/init.d/node-red restart', 'init script restarts Node-RED after successful provisioning');
+expectFileIncludes('osi-bootstrap', osiBootstrapInitScript, 'if [ "$provisioned_this_boot" = 1 ]; then', 'init script gates the restart request on successful provisioning');
+expectFileIncludes('osi-bootstrap', osiBootstrapInitScript, '/usr/libexec/osi-identityd.sh request-restart chirpstack_bootstrap 60', 'init script requests a coordinated restart after successful provisioning');
+expectFileExcludes('osi-bootstrap', osiBootstrapInitScript, '/etc/init.d/node-red restart', 'direct Node-RED restart after provisioning');
 expectFileIncludes('osi-bootstrap', osiBootstrapInitScript, 'logger -t osi-bootstrap', 'init script logs all events with the correct tag');
 expectCondition(!osiBootstrapInitScript.includes('STOP='), 'osi-bootstrap does not set a shutdown priority (one-shot)', 'osi-bootstrap must not set STOP for this one-shot init script');
 
@@ -4154,6 +4155,16 @@ Promise.all(pendingChecks).finally(() => {
 
   // Profile parity (bcm2709 ↔ bcm2712)
   const { spawnSync } = require('child_process');
+  const liveIdentityResult = spawnSync(
+    process.execPath,
+    [path.resolve(__dirname, 'verify-live-gateway-identity.js')],
+    { stdio: 'inherit' }
+  );
+  if (liveIdentityResult.status !== 0) {
+    console.error('verify-live-gateway-identity.js failed');
+    process.exitCode = liveIdentityResult.status || 1;
+  }
+
   const parityResult = spawnSync(
     process.execPath,
     [path.resolve(__dirname, 'verify-profile-parity.js')],

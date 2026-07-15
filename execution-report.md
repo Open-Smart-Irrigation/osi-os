@@ -228,3 +228,107 @@ Final verification after R1–R3:
 | `git diff --check` after `git add -N` for all three new files | 0 | No output |
 | `test -z "$(git diff --cached --name-only)"` | 0 | No content staged |
 | `node .claude/skills/anti-slop-writing/slop-check.js execution-report.md` | 0 | `slop-check: PASS (no tier-1 findings)` |
+
+## Task 3 — OpenWrt supervision and bootstrap coordination
+
+The static verifier was added before the service, enable script, bootstrap change, deploy wiring, or parity entries. Its first run exited 1 with 41 failures. The failures named the absent profile files, missing procd settings, old direct bootstrap restart, missing deploy fetches and service activation, and missing parity entries. The first and last failure groups were:
+
+```text
+FAIL missing required file: conf/full_raspberrypi_bcm27xx_bcm2712/files/etc/init.d/osi-identityd
+FAIL missing required file: conf/full_raspberrypi_bcm27xx_bcm2712/files/etc/uci-defaults/94_osi_identityd_enable
+FAIL conf/full_raspberrypi_bcm27xx_bcm2712/files/etc/init.d/osi-bootstrap: bootstrap does not restart Node-RED directly; found "/etc/init.d/node-red restart"
+FAIL scripts/verify-profile-parity.js: CANONICAL_PAYLOAD includes files/etc/init.d/osi-identityd; missing "'files/etc/init.d/osi-identityd'"
+FAIL deploy.sh: starts identityd during live deploy; missing "/etc/init.d/osi-identityd start"
+FAIL deploy.sh: identityd enable/start must follow flows, helpers, and GUI installation
+41 live gateway identity verification failure(s)
+EXIT_CODE=1
+```
+
+A second RED cycle covered the CI-chain contract. After temporarily removing the premature chain implementation, `node scripts/verify-live-gateway-identity.js` exited 1:
+
+```text
+FAIL scripts/verify-sync-flow.js: sync verification chains the live identity verifier; missing "[path.resolve(__dirname, 'verify-live-gateway-identity.js')]"
+1 live gateway identity verification failure(s)
+EXIT_CODE=1
+```
+
+The new rc.common service uses `START=98`, `STOP=98`, procd, and infinite respawn. Its `ready` command requires both a running procd instance and a daemon CLI check of the symlink lock's live PID owner. The verifier parses Node-RED's real `STOP=99` and requires identityd to stop first. The image enable script and all live-deploy copies use mode 755. Bootstrap checks identityd readiness immediately before publishing its 60-second `chirpstack_bootstrap` request; a readiness or request failure removes `/etc/osi-bootstrap.done` and leaves the one-shot eligible to retry.
+
+Live deploy now stops identityd before its sole schema-migration call and waits until procd reports it absent and `/var/run/osi-identityd.lock` is absent, including a broken symlink. It leaves the request directory and restart sentinel in place. A single EXIT handler restores Node-RED first and then restores identityd to its prior running or stopped state on ordinary failures. Migration return code 3 disarms both restorations and leaves both services stopped. Final activation starts a fresh daemon after GUI extraction and disarms EXIT restoration only after the shared `ready` contract passes. The two direct deploy-time Node-RED restarts remain limited to the flow-payload flip and rollback paths.
+
+The static verifier pins `jsonfilter` source revision `594cfa86469c005972ba750614f5b3f1af84d0f6` and procd source revision `42d3937654508b04da64969f9d764ac2ec411904`. The procd revision is the reviewed source for rcS's startup-list snapshot behavior. The verifier also requires `CONFIG_PACKAGE_jsonfilter=y`, the installed `/usr/bin/jsonfilter`, exact canonical JSON comparisons, `/proc/uptime`, `restartNotBeforeUptime`, and consumption-time monotonic scheduling.
+
+Review found a factory-boot ordering gap in the original enable-only uci-default. S10boot applies `94_osi_identityd_enable` after rcS has captured its `S*` startup list, so a newly created `S98osi-identityd` link cannot join that boot's list. The corrected script records whether the link existed before enabling. If absent, it enables and starts identityd during the same S10boot run; if present, it leaves the already-queued S98 start alone. `/var/run` exists before uci-defaults execute, and an early provisional observation is safe because the daemon continues resolving after later defaults.
+
+The pinned rc.common `start()` does not propagate `rc_procd start_service` failure unless the service defines a `service_started` hook. A reproduction used the checked-in control flow with `start_service` returning 7; the wrapper still returned 0:
+
+```text
+MASKED_START_EXIT=0
+```
+
+The uci-default therefore treats only `enable` status directly. After the same-boot `start`, it checks `/etc/init.d/osi-identityd ready` up to five times at one-second intervals and exits 1 if no live lock owner appears. The checked-in `uci_apply_defaults` implementation retains the failed file for the next boot. Live deploy uses the same bounded readiness contract after a proven lock-absence gap.
+
+The new factory-boot assertions failed before the enable script changed: the verifier reported four missing pre-enable snapshot and conditional-start contracts and exited 1. A following assertion-first run for the intended enable/start failure paths reported six missing contract or ordering checks and exited 1. The first running postcondition assertions failed with eight findings. Lifecycle TDD then produced `identityd ready function is missing` from the daemon test and 42 static-verifier findings before the lifecycle implementation. The pre-existing migration wiring test exposed stale trap expectations at 5 passing tests out of 6; its lifecycle-aware contract now passes 6 out of 6.
+
+The complete mutation sweep produced these RED results:
+
+| Mutation | Verifier failure |
+|---|---|
+| Replace the checked-in jsonfilter source revision with zeroes | `pins the reviewed jsonfilter source revision` |
+| Replace the checked-in procd source revision with zeroes | `pins the reviewed procd rcS snapshot semantics` |
+| Insert an operation between the live payload-flip log and Node-RED restart | `retains the direct Node-RED restart immediately after the live payload flip and its existing log` |
+| Activate identityd before flows staging, payload activation, and GUI extraction | Three ordered-activation failures for those prerequisites |
+| Replace both first-boot `running` checks with `true` | Six missing first-boot postcondition or ordering failures |
+| Replace the deploy `running` check with `true` | Two missing deploy postcondition or ordering failures |
+| Remove quiescence immediately before migration | One missing lifecycle-fence failure |
+| Set Node-RED `STOP=97` below identityd's `STOP=98` | Two real-profile shutdown-order failures |
+| Remove the ready predicate's `kill -0` | The initial verifier escaped the mutation; after tightening the exact function contract, both profiles failed |
+| Replace final fresh readiness with procd `running` | Two final-activation failures |
+| Replace bootstrap `ready` with `running` | Two live-consumer failures |
+| Restore identityd before Node-RED in the EXIT handler | One static ordering failure and a lifecycle-harness failure |
+
+Each mutation was reverted before the green run. The verifier now checks the gateway identity helper and daemon installation, flows staging and activation, and GUI extraction independently before identityd activation.
+
+### Shell and service gate
+
+| Command | Exit | Observed output/pass signal |
+|---|---:|---|
+| `sh -n conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/libexec/osi-gateway-identity.sh` | 0 | No output |
+| `sh -n conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/libexec/osi-gateway-identity.sh` | 0 | No output |
+| `sh -n conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/libexec/osi-identityd.sh` | 0 | No output |
+| `sh -n conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/libexec/osi-identityd.sh` | 0 | No output |
+| `sh -n conf/full_raspberrypi_bcm27xx_bcm2712/files/etc/init.d/osi-identityd` | 0 | No output |
+| `sh -n conf/full_raspberrypi_bcm27xx_bcm2709/files/etc/init.d/osi-identityd` | 0 | No output |
+| `sh -n conf/full_raspberrypi_bcm27xx_bcm2712/files/etc/uci-defaults/94_osi_identityd_enable` | 0 | No output |
+| `sh -n conf/full_raspberrypi_bcm27xx_bcm2709/files/etc/uci-defaults/94_osi_identityd_enable` | 0 | No output |
+| `sh -n conf/full_raspberrypi_bcm27xx_bcm2712/files/etc/init.d/osi-bootstrap` | 0 | No output |
+| `sh -n conf/full_raspberrypi_bcm27xx_bcm2709/files/etc/init.d/osi-bootstrap` | 0 | No output |
+| `sh -n deploy.sh` | 0 | No output |
+| `sh -n scripts/test-osi-identityd.sh` | 0 | No output |
+| `sh -n scripts/test-identityd-service-lifecycle.sh` | 0 | No output |
+| `sh scripts/test-gateway-identity-helper.sh` | 0 | `PASS: gateway identity heal ordering and state propagation` |
+| `sh scripts/test-osi-identityd.sh` | 0 | `PASS: osi-identityd state machine (17 scenarios)` |
+| `sh scripts/test-identityd-service-lifecycle.sh` | 0 | `PASS: identityd deploy lifecycle and readiness` |
+| `node scripts/test-deploy-migration-wiring.js` | 0 | Six tests passed; zero failed |
+| `node scripts/verify-live-gateway-identity.js` | 0 | All listed service, deploy, parity, package-source, strict-JSON, and monotonic-clock assertions reported `OK`; final line `Live gateway identity verification passed.` |
+| `node scripts/verify-profile-parity.js` | 0 | New paths `osi-bootstrap`, `osi-identityd`, `94_osi_identityd_enable`, and `osi-identityd.sh` reported `OK`; final line `All parity checks passed.` |
+| `git diff --check` | 0 | No output |
+
+### Full flows gate
+
+| Command | Exit | Observed output/pass signal |
+|---|---:|---|
+| `node scripts/verify-sync-flow.js` | 0 | Existing detailed assertions reported `OK`; `Sync flow verification passed`; chained live identity verification passed; chained parity ended `All parity checks passed.` |
+| `node scripts/verify-communication-contract.js` | 0 | `Communication contract verification passed` |
+| `node scripts/verify-profile-parity.js` | 0 | All canonical paths reported `OK`; final line `All parity checks passed.` |
+| `node scripts/verify-flows-fn-parse.js` | 0 | Maintained profiles: 240 nodes and 240 parsed sources each; bcm2708: 64 and 64; `verify-flows-fn-parse: OK` |
+| `node scripts/verify-no-new-silent-catch.js` | 0 | bcm2712 and bcm2709 each: 225 empty catches, baseline 225 |
+| `node scripts/verify-flows-size-ratchet.js` | 0 | Both maintained profiles: 1,052,778 bytes; `verify-flows-size-ratchet: OK` |
+| `node scripts/flows-bare-require-scan.js` | 0 | No output |
+| `node scripts/test-flows-wiring.js` | 0 | All listed wiring assertions reported `OK`; final line `PASS: STREGA wiring + osiDb close + WS2/WS3 wiring guards all passed` |
+| `node scripts/verify-no-stray-ddl.js` | 0 | `verify-no-stray-ddl: OK (HEAD total 702 <= origin/main total 702; committed baseline matches HEAD total 702)` |
+| `scripts/check-mqtt-topics.sh` | 0 | All three profile flow copies reported no UUID patterns in MQTT IN topics |
+| `node scripts/verify-live-gateway-identity.js` | 0 | All listed service, deploy, parity, package-source, strict-JSON, and monotonic-clock assertions reported `OK`; final line `Live gateway identity verification passed.` |
+| `git diff --check` | 0 | No output |
+
+The six new files have intent-to-add entries, so `git diff --check` covers their content. `git diff --cached --name-only` produced no output; no content is staged. The final `execution-report.md` prose check exited 0 with `slop-check: PASS (no tier-1 findings)`.
