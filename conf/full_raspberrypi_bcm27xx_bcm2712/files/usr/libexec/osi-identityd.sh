@@ -150,6 +150,16 @@ identityd_lock_owner_alive() {
     kill -0 "$owner" 2>/dev/null
 }
 
+identityd_ready() {
+    local owner
+    identityd_refresh_paths
+    [ -L "$IDENTITYD_LOCK_DIR" ] || return 1
+    owner="$(readlink "$IDENTITYD_LOCK_DIR" 2>/dev/null)" || return 1
+    identityd_uint_valid "$owner" "$IDENTITYD_MAX_EPOCH" || return 1
+    [ "$owner" -gt 1 ] || return 1
+    kill -0 "$owner" 2>/dev/null
+}
+
 identityd_lock_create() {
     ln -s "$$" "$IDENTITYD_LOCK_DIR" 2>/dev/null || return 1
     if [ ! -L "$IDENTITYD_LOCK_DIR" ] || [ "$(readlink "$IDENTITYD_LOCK_DIR" 2>/dev/null || true)" != "$$" ]; then
@@ -809,12 +819,16 @@ identityd_main() {
             [ "$#" -eq 1 ] || return 2
             identityd_run_once
             ;;
+        ready)
+            [ "$#" -eq 1 ] || return 2
+            identityd_ready
+            ;;
         request-restart)
             [ "$#" -eq 3 ] || return 2
             identityd_request_restart "$2" "$3"
             ;;
         *)
-            printf '%s\n' "usage: osi-identityd.sh {start|run-once|request-restart REASON DELAY}" >&2
+            printf '%s\n' "usage: osi-identityd.sh {start|run-once|ready|request-restart REASON DELAY}" >&2
             return 2
             ;;
     esac

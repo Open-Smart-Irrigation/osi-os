@@ -1030,6 +1030,35 @@ assert_eq "$$" \
     "atomic consumer lock owner"
 identityd_lock_release
 
+# Readiness accepts only the daemon's atomic symlink lock with a canonical,
+# live positive PID owner. Stale, malformed, and legacy locks fail closed.
+if ! command -v identityd_ready >/dev/null 2>&1; then
+    fail "identityd ready function is missing"
+fi
+identityd_lock_acquire || fail "ready fixture lock was not acquired"
+identityd_ready || fail "live daemon lock did not satisfy readiness"
+"$DAEMON" ready || fail "ready CLI rejected a live daemon lock"
+identityd_lock_release
+
+ln -s "999999" "$OSI_IDENTITY_RUN_DIR/osi-identityd.lock"
+if identityd_ready; then
+    fail "ready accepted a dead PID owner"
+fi
+rm -f "$OSI_IDENTITY_RUN_DIR/osi-identityd.lock"
+
+ln -s "0$$" "$OSI_IDENTITY_RUN_DIR/osi-identityd.lock"
+if identityd_ready; then
+    fail "ready accepted a noncanonical PID owner"
+fi
+rm -f "$OSI_IDENTITY_RUN_DIR/osi-identityd.lock"
+
+mkdir "$OSI_IDENTITY_RUN_DIR/osi-identityd.lock"
+printf '%s\n' "$$" > "$OSI_IDENTITY_RUN_DIR/osi-identityd.lock/pid"
+if identityd_ready; then
+    fail "ready accepted a legacy directory lock"
+fi
+rm -rf "$OSI_IDENTITY_RUN_DIR/osi-identityd.lock"
+
 # Pause one contender before its atomic link publication. The other contender
 # wins the token, and the paused contender must then observe the live owner.
 IDENTITYD_TEST_PAUSE_LOCK_PUBLICATION=1 sh -c '

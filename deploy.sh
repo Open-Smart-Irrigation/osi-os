@@ -163,17 +163,122 @@ seed_db_if_missing() {
 
 node_red_restart_needed=0
 
-restore_deploy_trap() {
-    trap cleanup EXIT INT TERM
+# identityd deploy lifecycle begin
+IDENTITYD_LOCK_PATH="/var/run/osi-identityd.lock"
+identityd_deploy_state="untouched"
+
+identityd_service() {
+    /etc/init.d/osi-identityd "$@"
 }
+
+identityd_sleep() {
+    sleep "$1"
+}
+
+identityd_lock_present() {
+    [ -e "$IDENTITYD_LOCK_PATH" ] || [ -L "$IDENTITYD_LOCK_PATH" ]
+}
+
+wait_for_identityd_quiescence() {
+    identityd_quiesce_attempts=0
+    while identityd_service running || identityd_lock_present; do
+        identityd_quiesce_attempts=$((identityd_quiesce_attempts + 1))
+        [ "$identityd_quiesce_attempts" -lt 10 ] || return 1
+        identityd_sleep 1
+    done
+}
+
+wait_for_identityd_ready() {
+    identityd_ready_attempts=0
+    while ! identityd_service ready; do
+        identityd_ready_attempts=$((identityd_ready_attempts + 1))
+        [ "$identityd_ready_attempts" -lt 5 ] || return 1
+        identityd_sleep 1
+    done
+}
+
+quiesce_identityd_instance() {
+    if identityd_service running || identityd_lock_present; then
+        identityd_service stop || true
+    fi
+    wait_for_identityd_quiescence
+}
+
+quiesce_identityd_for_deploy() {
+    echo "--- Quiesce gateway identity supervisor before schema migration ---"
+    if identityd_service running; then
+        identityd_deploy_state="restore_running"
+    else
+        identityd_deploy_state="restore_stopped"
+    fi
+    if ! quiesce_identityd_instance; then
+        echo "ERROR: identityd did not release procd state and $IDENTITYD_LOCK_PATH; refusing schema migration" >&2
+        return 1
+    fi
+    echo "OK"
+}
+
+restore_identityd_prior_state() {
+    case "$identityd_deploy_state" in
+        untouched|disarmed|fatal_hold)
+            return 0
+            ;;
+        restore_running|restore_stopped)
+            ;;
+        *)
+            echo "ERROR: unknown identityd deploy state: $identityd_deploy_state" >&2
+            return 1
+            ;;
+    esac
+
+    echo "--- Restore gateway identity supervisor after interrupted deploy ---"
+    if ! quiesce_identityd_instance; then
+        echo "ERROR: could not quiesce a partial identityd activation" >&2
+        return 1
+    fi
+    if [ "$identityd_deploy_state" = "restore_stopped" ]; then
+        identityd_deploy_state="disarmed"
+        echo "OK: identityd restored to stopped state"
+        return 0
+    fi
+
+    identityd_service start
+    if ! wait_for_identityd_ready; then
+        echo "ERROR: identityd did not become ready while restoring prior state" >&2
+        return 1
+    fi
+    identityd_deploy_state="disarmed"
+    echo "OK"
+}
+
+deploy_exit_handler() {
+    exit_status="$1"
+    trap - EXIT INT TERM
+    set +e
+    if ! restart_node_red; then
+        [ "$exit_status" -ne 0 ] || exit_status=1
+    fi
+    if ! restore_identityd_prior_state; then
+        [ "$exit_status" -ne 0 ] || exit_status=1
+    fi
+    cleanup
+    exit "$exit_status"
+}
+
+install_deploy_exit_trap() {
+    trap 'deploy_exit_handler $?' EXIT
+    trap 'exit 130' INT
+    trap 'exit 143' TERM
+}
+# identityd deploy lifecycle end
 
 restart_node_red() {
     if [ "$node_red_restart_needed" != "1" ]; then
         return 0
     fi
-    node_red_restart_needed=0
     echo "--- Restart Node-RED after schema migration ---"
     if /etc/init.d/node-red start; then
+        node_red_restart_needed=0
         echo "OK"
         return 0
     fi
@@ -269,7 +374,6 @@ run_schema_migration() {
     mkdir -p "$backup_dir"
 
     node_red_restart_needed=1
-    trap 'restart_node_red || true; cleanup' EXIT INT TERM
 
     echo "--- Stop Node-RED for schema migration ---"
     if /etc/init.d/node-red stop; then
@@ -318,10 +422,8 @@ run_schema_migration() {
 
     if node "$TMP_DIR/scripts/migrate-cli.js" "$DB_PATH" --backup-dir "$backup_dir" --migrations-dir "$migrations_dir"; then
         if ! restart_node_red; then
-            restore_deploy_trap
             return 1
         fi
-        restore_deploy_trap
         echo "OK"
         return 0
     else
@@ -329,9 +431,9 @@ run_schema_migration() {
     fi
 
     if [ "$migration_rc" = "3" ]; then
-        echo "ERROR: migration failed and backup restore integrity check failed; leaving Node-RED stopped" >&2
         node_red_restart_needed=0
-        restore_deploy_trap
+        identityd_deploy_state="fatal_hold"
+        echo "ERROR: migration failed and backup restore integrity check failed; leaving Node-RED and identityd stopped" >&2
         return 1
     fi
     echo "ERROR: schema migration failed; Node-RED will be restarted before deploy exits" >&2
@@ -356,6 +458,26 @@ fetch_required "Gateway identity helper" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/libexec/osi-gateway-identity.sh" \
     "/usr/libexec/osi-gateway-identity.sh"
 chmod 755 /usr/libexec/osi-gateway-identity.sh
+
+fetch_required "Gateway identity daemon" \
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/libexec/osi-identityd.sh" \
+    "/usr/libexec/osi-identityd.sh"
+chmod 755 /usr/libexec/osi-identityd.sh
+
+fetch_required "Gateway identity service" \
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/etc/init.d/osi-identityd" \
+    "/etc/init.d/osi-identityd"
+chmod 755 /etc/init.d/osi-identityd
+
+fetch_required "Gateway identity service enable script" \
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/etc/uci-defaults/94_osi_identityd_enable" \
+    "/etc/uci-defaults/94_osi_identityd_enable"
+chmod 755 /etc/uci-defaults/94_osi_identityd_enable
+
+fetch_required "ChirpStack bootstrap service" \
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/etc/init.d/osi-bootstrap" \
+    "/etc/init.d/osi-bootstrap"
+chmod 755 /etc/init.d/osi-bootstrap
 
 echo "--- Remove legacy gateway GPS sidecar ---"
 if [ -x /etc/init.d/osi-gateway-gps ]; then
@@ -609,6 +731,8 @@ else
     exit 1
 fi
 
+install_deploy_exit_trap
+quiesce_identityd_for_deploy || exit 1
 run_schema_migration || exit 1
 
 fix_mosquitto_ownership() {
@@ -687,6 +811,19 @@ for entry in /usr/lib/node-red/gui/* /usr/lib/node-red/gui/.[!.]* /usr/lib/node-
     rm -rf "$entry"
 done
 tar xzf "$TMP_DIR/react_gui.tar.gz" -C /usr/lib/node-red/gui/
+echo "OK"
+
+echo "--- Gateway identity supervisor ---"
+if ! identityd_service enable; then
+    echo "ERROR: failed to enable identityd" >&2
+    exit 1
+fi
+identityd_service start
+if ! wait_for_identityd_ready; then
+    echo "ERROR: identityd did not become ready after activation" >&2
+    exit 1
+fi
+identityd_deploy_state="disarmed"
 echo "OK"
 
 echo ""
