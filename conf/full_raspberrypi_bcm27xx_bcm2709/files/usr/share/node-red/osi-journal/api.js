@@ -1076,17 +1076,26 @@ function vocabAggregate(row, mappings) {
   };
 }
 
-async function customTermIsUsed(tx, code) {
+async function customTermIsUsed(tx, code, principal) {
   return dbGet(
     tx,
-    "SELECT 1 AS used FROM journal_entries AS e WHERE e.status IN ('final','voided') AND (" +
+    'SELECT 1 AS used FROM journal_entries AS e WHERE ' +
+      'e.owner_user_uuid=? AND e.user_id=? AND e.gateway_device_eui=? ' +
+      "AND e.status IN ('final','voided') AND (" +
       'e.activity_code=? OR EXISTS (' +
         'SELECT 1 FROM journal_entry_values AS v WHERE v.entry_uuid=e.entry_uuid AND (' +
-          'v.attribute_code=? OR v.value_text=? OR v.unit_code=? OR v.entered_unit_code=?' +
+          'v.attribute_code=? OR v.unit_code=? OR v.entered_unit_code=? OR (' +
+            'v.value_text=? AND EXISTS (' +
+              'SELECT 1 FROM journal_vocab AS attribute ' +
+              "WHERE attribute.code=v.attribute_code AND attribute.kind='attribute' " +
+                "AND attribute.value_type='choice'" +
+            ')' +
+          ')' +
         ')' +
       ')' +
     ') LIMIT 1',
-    [code, code, code, code, code]
+    [principal.owner_user_uuid, principal.user_id, principal.gateway_device_eui,
+      code, code, code, code, code]
   );
 }
 
@@ -1366,7 +1375,7 @@ async function upsertCustomVocab(db, input, principal, pathUuid) {
       default_unit_code: boundedText(input.default_unit_code, 'default_unit_code', { maxBytes: 4096 }),
     };
     await validateVocabularyContract(tx, expectedCode, semantic, constraintsJson, principal);
-    if (existing && await customTermIsUsed(tx, expectedCode)) {
+    if (existing && await customTermIsUsed(tx, expectedCode, principal)) {
       for (const field of Object.keys(semantic)) {
         if (nullable(existing[field]) !== nullable(semantic[field])) {
           throw apiError(409, 'semantic_fields_frozen', 'Used vocabulary semantics cannot be changed', { field });

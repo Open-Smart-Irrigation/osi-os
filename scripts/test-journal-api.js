@@ -866,6 +866,198 @@ test('custom vocabulary is scoped, mapping-complete, frozen after voided use, an
   assert.equal(db.prepare('SELECT COUNT(*) AS n FROM command_ack_outbox WHERE command_id=?').get('command-vocab-rollback').n, 0);
 });
 
+test('custom vocabulary freeze detection respects tenant scope and value semantics', async () => {
+  const db = new TestDb('custom-vocab-freeze-scope');
+  seedIdentity(db);
+  const actor = principal();
+  const otherActor = principal({
+    user_id: 2,
+    owner_user_uuid: OTHER_OWNER_UUID,
+    author_principal_uuid: OTHER_OWNER_UUID,
+    author_label: 'other-user',
+  });
+  const otherGatewayActor = principal({ gateway_device_eui: '0016C001F1000002' });
+  const codeFor = (uuid) => 'custom.' + uuid;
+  const updated = (body, overrides) => Object.assign({}, body, {
+    base_sync_version: 1,
+  }, overrides || {});
+  const expectFrozen = async (body, overrides) => {
+    await assert.rejects(
+      journal.upsertCustomVocab(db, updated(body, overrides), actor, body.custom_field_uuid),
+      (error) => error && error.code === 'semantic_fields_frozen'
+    );
+  };
+
+  const activity = customVocabInput('40400000-0000-4000-8000-000000000001');
+  const attribute = customVocabInput('40400000-0000-4000-8000-000000000002', {
+    kind: 'attribute', value_type: 'text',
+  });
+  const choiceParent = customVocabInput('40400000-0000-4000-8000-000000000003', {
+    kind: 'attribute', value_type: 'choice',
+  });
+  const choice = customVocabInput('40400000-0000-4000-8000-000000000004', {
+    kind: 'choice', parent_code: codeFor(choiceParent.custom_field_uuid),
+  });
+  const unit = customVocabInput('40400000-0000-4000-8000-000000000005', {
+    kind: 'unit',
+    quantity_kind: 'water_depth',
+    basis: 'water',
+    constraints: {
+      dimension: 'water_depth',
+      to_canonical: { unit_code: 'unit.mm_water', scale: 10, offset: 0 },
+    },
+  });
+  const enteredUnit = customVocabInput('40400000-0000-4000-8000-000000000006', {
+    kind: 'unit',
+    quantity_kind: 'water_depth',
+    basis: 'water',
+    constraints: {
+      dimension: 'water_depth',
+      to_canonical: { unit_code: 'unit.mm_water', scale: 100, offset: 0 },
+    },
+  });
+  const arbitraryText = customVocabInput('40400000-0000-4000-8000-000000000007', {
+    kind: 'attribute', value_type: 'text',
+  });
+  const unused = customVocabInput('40400000-0000-4000-8000-000000000008', {
+    kind: 'attribute', value_type: 'text',
+  });
+  const crossOwner = customVocabInput('40400000-0000-4000-8000-000000000009');
+  const crossGateway = customVocabInput('40400000-0000-4000-8000-000000000010');
+  for (const body of [
+    activity,
+    attribute,
+    choiceParent,
+    choice,
+    unit,
+    enteredUnit,
+    arbitraryText,
+    unused,
+    crossOwner,
+    crossGateway,
+  ]) {
+    await journal.upsertCustomVocab(db, body, actor);
+  }
+
+  const plotUuid = '40500000-0000-4000-8000-000000000001';
+  const entryUuid = '40600000-0000-4000-8000-000000000001';
+  await journal.upsertPlot(db, plotInput(plotUuid, 'freeze-scope-local'), actor);
+  await journal.saveEntry(
+    db,
+    entryInput(entryUuid, plotUuid, '2026-07-13T06:00:00', { season_crop: 'barley' }),
+    actor,
+    { mode: 'create' }
+  );
+  db.prepare('DELETE FROM journal_entry_values WHERE entry_uuid=?').run(entryUuid);
+  db.prepare('UPDATE journal_entries SET activity_code=? WHERE entry_uuid=?')
+    .run(codeFor(activity.custom_field_uuid), entryUuid);
+  const insertValue = db.prepare(
+    'INSERT INTO journal_entry_values (' +
+      'entry_uuid,attribute_code,group_index,value_status,value_num,value_text,' +
+      'unit_code,entered_value_num,entered_unit_code' +
+    ') VALUES (?,?,?,?,?,?,?,?,?)'
+  );
+  insertValue.run(
+    entryUuid, codeFor(attribute.custom_field_uuid), 0, 'observed', null, 'direct attribute',
+    null, null, null
+  );
+  insertValue.run(
+    entryUuid, codeFor(choiceParent.custom_field_uuid), 0, 'observed', null,
+    codeFor(choice.custom_field_uuid), null, null, null
+  );
+  insertValue.run(
+    entryUuid, 'attr.observation_text', 0, 'observed', null,
+    codeFor(arbitraryText.custom_field_uuid), null, null, null
+  );
+  insertValue.run(
+    entryUuid, 'attr.irrigation_depth', 0, 'observed', 1, null,
+    codeFor(unit.custom_field_uuid), 1, 'unit.mm_water'
+  );
+  insertValue.run(
+    entryUuid, 'attr.irrigation_depth', 1, 'observed', 1, null,
+    'unit.mm_water', 0.01, codeFor(enteredUnit.custom_field_uuid)
+  );
+
+  const unusedResult = await journal.upsertCustomVocab(
+    db,
+    updated(unused, { value_type: 'date' }),
+    actor,
+    unused.custom_field_uuid
+  );
+  assert.equal(unusedResult.custom_vocab.sync_version, 2);
+  const arbitraryResult = await journal.upsertCustomVocab(
+    db,
+    updated(arbitraryText, { value_type: 'date' }),
+    actor,
+    arbitraryText.custom_field_uuid
+  );
+  assert.equal(arbitraryResult.custom_vocab.sync_version, 2);
+
+  await expectFrozen(activity, { kind: 'attribute', value_type: 'text' });
+  await expectFrozen(attribute, { value_type: 'date' });
+  await expectFrozen(choice, { kind: 'activity', parent_code: null });
+  await expectFrozen(unit, {
+    constraints: {
+      dimension: 'water_depth',
+      to_canonical: { unit_code: 'unit.mm_water', scale: 11, offset: 0 },
+    },
+  });
+  await expectFrozen(enteredUnit, {
+    constraints: {
+      dimension: 'water_depth',
+      to_canonical: { unit_code: 'unit.mm_water', scale: 101, offset: 0 },
+    },
+  });
+
+  const crossOwnerPlot = '40500000-0000-4000-8000-000000000002';
+  const crossOwnerEntry = '40600000-0000-4000-8000-000000000002';
+  await journal.upsertPlot(db, plotInput(crossOwnerPlot, 'freeze-scope-owner'), otherActor);
+  await journal.saveEntry(
+    db,
+    entryInput(crossOwnerEntry, crossOwnerPlot, '2026-07-13T07:00:00', { season_crop: 'barley' }),
+    otherActor,
+    { mode: 'create' }
+  );
+  db.prepare('UPDATE journal_entries SET activity_code=? WHERE entry_uuid=?')
+    .run(codeFor(crossOwner.custom_field_uuid), crossOwnerEntry);
+  const crossOwnerResult = await journal.upsertCustomVocab(
+    db,
+    updated(crossOwner, { kind: 'attribute', value_type: 'text' }),
+    actor,
+    crossOwner.custom_field_uuid
+  );
+  assert.equal(crossOwnerResult.custom_vocab.sync_version, 2);
+
+  const crossGatewayPlot = '40500000-0000-4000-8000-000000000003';
+  const crossGatewayEntry = '40600000-0000-4000-8000-000000000003';
+  await journal.upsertPlot(db, plotInput(crossGatewayPlot, 'freeze-scope-gateway'), otherGatewayActor);
+  await journal.saveEntry(
+    db,
+    entryInput(crossGatewayEntry, crossGatewayPlot, '2026-07-13T08:00:00', { season_crop: 'barley' }),
+    otherGatewayActor,
+    { mode: 'create' }
+  );
+  db.prepare('UPDATE journal_entries SET activity_code=? WHERE entry_uuid=?')
+    .run(codeFor(crossGateway.custom_field_uuid), crossGatewayEntry);
+  const crossGatewayResult = await journal.upsertCustomVocab(
+    db,
+    updated(crossGateway, { kind: 'attribute', value_type: 'text' }),
+    actor,
+    crossGateway.custom_field_uuid
+  );
+  assert.equal(crossGatewayResult.custom_vocab.sync_version, 2);
+
+  await assert.rejects(
+    journal.upsertCustomVocab(
+      db,
+      updated(arbitraryText, { base_sync_version: 2, value_type: 'text' }),
+      otherActor,
+      arbitraryText.custom_field_uuid
+    ),
+    (error) => error && error.code === 'not_found' && error.statusCode === 404
+  );
+});
+
 test('custom choices require a visible active choice attribute parent', async () => {
   const db = new TestDb('custom-choice-parent-contract');
   seedIdentity(db);
@@ -2258,7 +2450,7 @@ test('multi-query read APIs assemble one old or new generation through readSnaps
       db.prepare(
         'INSERT INTO journal_entry_values(entry_uuid,attribute_code,group_index,value_status,value_text) ' +
           'VALUES (?,?,?,?,?)'
-      ).run(entryUuid, 'attr.note', 1, 'observed', 'new-child');
+      ).run(entryUuid, 'attr.observation_text', 1, 'observed', 'new-child');
     }
     return { db, entryUuid, groupUuid };
   }
