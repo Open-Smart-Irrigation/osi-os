@@ -49,7 +49,7 @@ The capture flow (Phase 3+) cannot render forms from this DTO: template/layout `
 
 **Phase 0 resolves this before Phase 3 starts.** Decide and implement one of:
 
-- **0a (recommended):** add a `?include=definitions` (or a sibling `/api/journal/catalog/full`) edge response that returns `definition_json`, `constraints_json`, and `composition_json` for the owner-scoped catalog, plus a labels delivery (either `labels_json` in that response or per-locale `journal-vocab.<locale>.json` files served like the other locale namespaces). This is an edge change in `osi-journal/api.js` + a sync/verifier pass — schedule it as its own small plan under `osi-schema-change-control`/`osi-flows-json-editing`, **not** in this GUI plan.
+- **0a (recommended):** add a `?include=definitions` edge response that returns parsed `definition`, `constraints`, `composition`, and `labels` for the owner-scoped catalog. Planned in full as `docs/superpowers/plans/2026-07-15-field-journal-slice2-phase0-catalog-definitions.md` (edge-only, additive, both profiles; no schema or flows.json change).
 - **0b (interim):** ship Phase 1–2 (foundation + reading surface) now — they only need the index DTO plus vocab labels — and gate Phases 3+ on 0a landing.
 
 Phase 0 is a **hard dependency for Phases 3–6**. Phases 1–2 do not depend on it beyond vocab labels; §6.4 labels delivery covers those. Until labels delivery exists, Phase 2 renders `activity_code` verbatim behind an i18n `journal.activity.<code>` key with an English fallback.
