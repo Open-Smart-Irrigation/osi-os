@@ -1715,6 +1715,57 @@ test('wide CSV rejects a computed header over 64 KiB before any sink write', asy
   assert.equal(sink.writableEnded, false);
 });
 
+test('HTTP export.csv rejects an oversized header before preparing the stream', async () => {
+  const db = new TestDb('wide-csv-header-route-rejected');
+  seedIdentity(db);
+  const codes = Array.from({ length: 256 }, function(_, index) {
+    return 'attr.wide_http_' + String(index).padStart(3, '0') + '_' + 'x'.repeat(300);
+  });
+  const cells = codes.map(function(attributeCode, index) {
+    return { attribute_code: attributeCode, group_index: index % 32 };
+  });
+  insertWideVocab(db, codes);
+  insertWideEntries(db, cells);
+  const secret = 'wide-csv-header-route-secret';
+  const authorization = 'Bearer ' + token(secret, {
+    userId: 1,
+    username: 'field-user',
+    exp: Date.now() + 60_000,
+  });
+  const sink = new BackpressureSink('drain');
+
+  const response = await journal.handleHttpRequest({
+    msg: {
+      req: {
+        method: 'GET',
+        path: '/api/journal/export.csv',
+        headers: { authorization },
+        query: { status: 'final' },
+        params: {},
+      },
+      res: sink,
+    },
+    Database: class { constructor() { return db; } },
+    environment: {
+      authTokenSecret: secret,
+      deviceEui: GATEWAY_EUI,
+      deviceEuiConfidence: 'authoritative',
+    },
+  });
+
+  assert.equal(response.statusCode, 413);
+  assert.equal(response.payload.error, 'wide_export_too_wide');
+  assert.equal(response.payload.details.reason, 'header_bytes');
+  assert.ok(response.payload.details.header_bytes > 64 * 1024);
+  assert.equal(response.payload.details.max_header_bytes, 64 * 1024);
+  assert.equal(response.payload.details.fallback_export, '/api/journal/export.package');
+  assert.deepEqual(sink.headers, {});
+  assert.equal(sink.writes, 0);
+  assert.equal(sink.writableEnded, false);
+  assert.equal(db.closeCalls, 1);
+  assert.equal(db.snapshotClosed, 1);
+});
+
 test('HTTP export.csv returns 413 before preparing or writing the CSV stream', async () => {
   const db = new TestDb('wide-csv-route-rejected');
   seedIdentity(db);
