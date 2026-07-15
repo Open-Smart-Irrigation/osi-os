@@ -4,9 +4,10 @@ import { DashboardHeader } from 'open-smart-irrigation';
 const noop = () => {};
 
 /**
- * The AgroLink branding showcase: Agroscope red Balken strip across the top,
- * blue header bar, title + welcome line, and the Add / Data / Settings /
- * Account actions.
+ * The Zones page chrome: a thin wrapper over the shared AppHeader supplying
+ * the dashboard's Add menu. Shows the Agroscope Balken crown, the liquid-glass
+ * header with the Zones/Data/Journal pill (Zones active), the welcome line,
+ * and the Add / Settings / Account action row.
  */
 export function Canonical() {
   return (

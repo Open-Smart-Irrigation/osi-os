@@ -12,6 +12,7 @@
   "extraEntries": ["./src/dsPreview.tsx"],
   "provider": { "component": "DsPreviewProvider" },
   "overrides": {
+    "AppHeader": { "cardMode": "column" },
     "DashboardHeader": { "cardMode": "column" },
     "DendrometerTreeCard": { "cardMode": "column" },
     "WeatherIcon": { "cardMode": "column" }
@@ -29,6 +30,7 @@
     "FarmingDashboard": null,
     "HistoryCardDetailPage": null,
     "HistoryDashboard": null,
+    "JournalPage": null,
     "Login": null,
     "Register": null,
     "SettingsPage": null,
