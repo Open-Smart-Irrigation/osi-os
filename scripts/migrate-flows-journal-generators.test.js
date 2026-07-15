@@ -13,6 +13,7 @@ function loadGenerator(fileName) {
 }
 
 const commands = loadGenerator('migrate-flows-journal-commands.js');
+const helperLoading = loadGenerator('migrate-flows-journal-helper-loading.js');
 const routes = loadGenerator('migrate-flows-journal-routes.js');
 
 const flowsPath = path.resolve(
@@ -28,6 +29,7 @@ function mutateNode(buffer, id, field) {
   if (field === 'wires') node.wires = [['review-drift']];
   else if (field === 'outputs') node.outputs = Number(node.outputs || 0) + 1;
   else if (field === 'name') node.name += ' drift';
+  else if (field === 'func') node.func += '\n// reviewed-source drift';
   else throw new Error('unsupported mutation field: ' + field);
   return Buffer.from(JSON.stringify(flows, null, 2) + '\n', 'utf8');
 }
@@ -38,6 +40,18 @@ function legacyCommandBuffer() {
   const flows = JSON.parse(current.toString('utf8'));
   for (const [id, surface] of Object.entries(commands.LEGACY_COMMAND_SURFACES)) {
     const node = flows.find((candidate) => candidate.id === id);
+    node.func = surface.func;
+    node.libs = surface.libs;
+  }
+  return Buffer.from(JSON.stringify(flows, null, 2) + '\n', 'utf8');
+}
+
+function priorCurrentBuffer(surfaces) {
+  assert.ok(surfaces);
+  const flows = JSON.parse(current.toString('utf8'));
+  for (const [id, surface] of Object.entries(surfaces)) {
+    const node = flows.find((candidate) => candidate.id === id);
+    assert.ok(node, `missing prior-current fixture node ${id}`);
     node.func = surface.func;
     node.libs = surface.libs;
   }
@@ -57,6 +71,22 @@ function legacyRouteBuffer(source = routes.directThinRouterSource) {
   return Buffer.from(JSON.stringify(flows, null, 2) + '\n', 'utf8');
 }
 
+function legacyHelperLoadingBuffer() {
+  const flows = JSON.parse(current.toString('utf8'));
+  for (const [id, surface] of Object.entries(commands.LEGACY_COMMAND_SURFACES)) {
+    const node = flows.find((candidate) => candidate.id === id);
+    node.func = surface.func;
+    node.libs = surface.libs;
+  }
+  const router = flows.find((candidate) => candidate.id === 'journal-api-router-fn');
+  router.func = routes.LEGACY_ROUTE_SOURCES['direct-helper'];
+  router.libs = [
+    { var: 'osiDb', module: 'osi-db-helper' },
+    { var: 'osiJournal', module: 'osi-journal' },
+  ];
+  return Buffer.from(JSON.stringify(flows, null, 2) + '\n', 'utf8');
+}
+
 test('command generator is a no-op on the exact current surface', () => {
   assert.equal(typeof commands.migrate, 'function');
   assert.equal(commands.migrate(current).equals(current), true);
@@ -66,12 +96,21 @@ test('command generator upgrades the exact legacy direct-helper surface', () => 
   assert.equal(commands.migrate(legacyCommandBuffer()).equals(current), true);
 });
 
+test('command generator upgrades the exact prior-current journal-coupled surface', () => {
+  assert.ok(commands.PRIOR_CURRENT_COMMAND_SURFACES);
+  assert.equal(
+    commands.migrate(priorCurrentBuffer(commands.PRIOR_CURRENT_COMMAND_SURFACES)).equals(current),
+    true,
+  );
+});
+
 for (const state of [
   ['current', () => current],
   ['legacy', legacyCommandBuffer],
+  ['prior-current', () => priorCurrentBuffer(commands.PRIOR_CURRENT_COMMAND_SURFACES)],
 ]) {
   for (const id of ['command-dedupe-dispatch', 'journal-command-apply-fn', 'command-ack-queue-rest']) {
-    for (const field of ['wires', 'outputs', 'name']) {
+    for (const field of ['wires', 'outputs', 'name', 'func']) {
       test(`command generator rejects ${state[0]} ${id} ${field} drift`, () => {
         assert.throws(
           () => commands.migrate(mutateNode(state[1](), id, field)),
@@ -81,6 +120,69 @@ for (const state of [
     }
   }
 }
+
+test('command generator rejects a mixed current and prior-current source set', () => {
+  const flows = JSON.parse(current.toString('utf8'));
+  const prior = commands.PRIOR_CURRENT_COMMAND_SURFACES['command-dedupe-dispatch'];
+  const dedupe = flows.find((candidate) => candidate.id === 'command-dedupe-dispatch');
+  dedupe.func = prior.func;
+  dedupe.libs = prior.libs;
+  assert.throws(
+    () => commands.migrate(Buffer.from(JSON.stringify(flows, null, 2) + '\n')),
+    /Refusing non-exact journal command handler collision/,
+  );
+});
+
+test('helper-loading generator is a no-op on the exact current surface', () => {
+  assert.equal(typeof helperLoading.migrate, 'function');
+  assert.equal(helperLoading.migrate(current).equals(current), true);
+});
+
+test('helper-loading generator upgrades the exact prior-current journal-coupled surface', () => {
+  assert.ok(helperLoading.PRIOR_CURRENT_HELPER_SURFACES);
+  assert.equal(
+    helperLoading.migrate(priorCurrentBuffer(helperLoading.PRIOR_CURRENT_HELPER_SURFACES)).equals(current),
+    true,
+  );
+});
+
+test('helper-loading generator preserves its exact direct-helper upgrade path', () => {
+  assert.equal(helperLoading.migrate(legacyHelperLoadingBuffer()).equals(current), true);
+});
+
+for (const state of [
+  ['current', () => current],
+  ['prior-current', () => priorCurrentBuffer(helperLoading.PRIOR_CURRENT_HELPER_SURFACES)],
+  ['direct-helper', legacyHelperLoadingBuffer],
+]) {
+  for (const id of [
+    'command-dedupe-dispatch',
+    'journal-command-apply-fn',
+    'command-ack-queue-rest',
+    'journal-api-router-fn',
+  ]) {
+    for (const field of ['wires', 'outputs', 'name', 'func']) {
+      test(`helper-loading generator rejects ${state[0]} ${id} ${field} drift`, () => {
+        assert.throws(
+          () => helperLoading.migrate(mutateNode(state[1](), id, field)),
+          /Refusing drifted Task 9 helper-loading node/,
+        );
+      });
+    }
+  }
+}
+
+test('helper-loading generator rejects a mixed current and prior-current source set', () => {
+  const flows = JSON.parse(current.toString('utf8'));
+  const prior = helperLoading.PRIOR_CURRENT_HELPER_SURFACES['command-dedupe-dispatch'];
+  const dedupe = flows.find((candidate) => candidate.id === 'command-dedupe-dispatch');
+  dedupe.func = prior.func;
+  dedupe.libs = prior.libs;
+  assert.throws(
+    () => helperLoading.migrate(Buffer.from(JSON.stringify(flows, null, 2) + '\n')),
+    /Refusing drifted Task 9 helper-loading node/,
+  );
+});
 
 test('route generator is a no-op on the exact current router surface', () => {
   assert.equal(typeof routes.migrate, 'function');
@@ -112,7 +214,7 @@ test('route generator exports both exact supported legacy router surfaces', () =
   assert.deepEqual(Object.keys(routes.LEGACY_ROUTE_SOURCES || {}).sort(), ['direct-helper', 'pre-build-metadata']);
 });
 for (const state of routeStates) {
-  for (const field of ['wires', 'outputs', 'name']) {
+  for (const field of ['wires', 'outputs', 'name', 'func']) {
     test(`route generator rejects ${state[0]} router ${field} drift`, () => {
       const startingBuffer = state[1]();
       if (state[2]) {

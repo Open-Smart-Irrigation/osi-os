@@ -44,12 +44,12 @@ const OSI_DB_BINDING = { variable: 'osiDb', module: 'osi-db-helper' };
 const OSI_JOURNAL_BINDING = { variable: 'osiJournal', module: 'osi-journal' };
 const OSI_COMMAND_LEDGER_BINDING = { variable: 'osiCommandLedger', module: 'osi-command-ledger' };
 
-function requireOsiLibContract(node, expectedBindings, label) {
+function requireOsiLibContract(node, expectedBindings, label, unavailableErrorPrefix = 'Journal helpers unavailable:') {
     if (!node || typeof node.func !== 'string') return false;
     const audit = auditOsiLibBindings(node, expectedBindings);
     for (const error of audit.errors) failures.push(`${label}: ${error}`);
     let ok = audit.ok;
-    if (!/node\.error\(['"]Journal helpers unavailable:/.test(node.func)) {
+    if (!node.func.includes(`node.error('${unavailableErrorPrefix}`)) {
         failures.push(`${label}: must report unavailable helpers through node.error`);
         ok = false;
     }
@@ -229,11 +229,14 @@ for (const fallbackNodeId of ['reject-indefinite-open', 'write-strega-expectatio
 if (!dedupe || !requireOsiLibContract(
     dedupe,
     [OSI_DB_BINDING, OSI_JOURNAL_BINDING, OSI_COMMAND_LEDGER_BINDING],
-    'journal commands: dedupe'
+    'journal commands: dedupe',
+    'Command helpers unavailable:'
 ) || JSON.stringify(dedupe.wires) !== JSON.stringify([
     ['journal-command-apply-fn'],
     ['9d5e3035c3d069c4'],
 ]) || !/deduplicatePendingCommand/.test(dedupe.func || '') ||
+    !/const journalType = \/\(\?:\^\|_\)JOURNAL\(\?:_\|\$\)\//.test(dedupe.func || '') ||
+    !/if \(journalType\) \{[\s\S]*osiLib\.require\('osi-journal'\)/.test(dedupe.func || '') ||
     !/node\.error/.test(dedupe.func || '') || /dispatching command/.test(dedupe.func || '')) {
     failures.push('journal commands: dedupe must delegate exact replay via the shared command ledger, fail closed, and bypass ACK reclassification');
 }
@@ -262,7 +265,8 @@ async function runJournalHelperFailureMatrix() {
         {
             node: dedupe,
             label: 'journal helper failure: dedupe',
-            helpers: ['osi-db-helper', 'osi-journal', 'osi-command-ledger'],
+            helpers: ['osi-db-helper', 'osi-command-ledger'],
+            errorPrefix: 'Command helpers unavailable: ',
             expected: [null, null],
         },
         {
@@ -331,8 +335,9 @@ async function runJournalHelperFailureMatrix() {
             failures.push(`${testCase.label}: expected helper loads ${JSON.stringify(testCase.helpers)}, got ${JSON.stringify(requested)}`);
         }
         const expectedDetail = testCase.helpers.map((name) => `missing ${name}`).join('; ');
+        const errorPrefix = testCase.errorPrefix || 'Journal helpers unavailable: ';
         if (errorCalls.length !== 1 ||
-            errorCalls[0].message !== `Journal helpers unavailable: ${expectedDetail}` ||
+            errorCalls[0].message !== `${errorPrefix}${expectedDetail}` ||
             errorCalls[0].errorMsg !== msg) {
             failures.push(`${testCase.label}: must emit one contextual node.error with the loader detail`);
         }

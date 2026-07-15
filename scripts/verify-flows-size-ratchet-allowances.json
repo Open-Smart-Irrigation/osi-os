@@ -6,7 +6,7 @@
     "prune-sync-outbox": { "delta": 3000, "reason": "outbox pruning overhaul with eviction-index awareness (1.A5)" },
     "history-api-router-fn": { "delta": 462, "reason": "history API card-data source field passthrough (1.A6, +150); Field Journal Task 12: fieldJournalUxEnabled feature flag, visible touched-node catches, rejecting DB-close wrapper (+312)" },
     "sync-pending-split": { "delta": 401, "reason": "Field Journal Task 11: preserve the trusted pending-command envelope alongside legacy flat routing fields" },
-    "command-dedupe-dispatch": { "delta": 136, "reason": "Field Journal Task 10: delegate exact replay to osi-command-ledger with journal hooks; PR #141 hardening: guarded osiLib loading for DB, journal, and command-ledger helpers (+136 exact final delta vs origin/main)" },
+    "command-dedupe-dispatch": { "delta": 823, "reason": "Field Journal Task 10: shared command-ledger replay; PR #141 hardening: guarded osiLib loading and protected-type routing keep generic commands independent from optional journal hooks (+823 exact final delta vs origin/main)" },
     "command-ack-queue-rest": { "delta": -1700, "reason": "Field Journal Task 10: extract durable ACK persistence into osi-command-ledger; PR #141 hardening: guarded osiLib loading retains an exact -1700 final delta vs origin/main" },
     "cmd-type-registry": { "delta": 3100, "reason": "1.C: expanded command-type registry from 8 to 33 types" },
     "reject-indefinite-open": { "delta": 3100, "reason": "1.C: expanded COMMAND_TYPES_FALLBACK to match 33-type registry" },

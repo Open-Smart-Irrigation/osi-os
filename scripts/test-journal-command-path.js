@@ -34,6 +34,77 @@ const FOREIGN_VALVE_EUI = '70B3D57ED0065679';
 const OWNED_EXPECTATION_ID = 'expectation-owned';
 const FOREIGN_EXPECTATION_ID = 'expectation-foreign-owner';
 const MISSING_CUSTOM_CODE = 'custom.99999999-9999-4999-8999-999999999999';
+const SHIPPED_FLOWS = JSON.parse(fs.readFileSync(path.join(
+  ROOT,
+  'conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/flows.json'
+), 'utf8'));
+
+function shippedCommandMessage(commandType, commandId) {
+  return {
+    _commandTypeRecognized: true,
+    payload: {
+      commandId,
+      commandType,
+      command_type: commandType,
+      _pendingCommandEnvelope: {
+        commandId,
+        commandType,
+        effectKey: null,
+        payload: {
+          command_id: commandId,
+          command_type: commandType,
+        },
+      },
+    },
+  };
+}
+
+function flowDbHelper(events) {
+  return {
+    ok: true,
+    value: {
+      Database: class FakeFlowDatabase {
+        constructor(filename) {
+          events.push(['db-open', filename]);
+        }
+
+        close(callback) {
+          events.push(['db-close']);
+          callback(null);
+        }
+      },
+    },
+  };
+}
+
+async function runShippedCommandNode(nodeId, msg, helperResults) {
+  const shippedNode = SHIPPED_FLOWS.find((candidate) => candidate.id === nodeId);
+  assert.ok(shippedNode, `missing shipped function node ${nodeId}`);
+  const requested = [];
+  const errors = [];
+  const warnings = [];
+  const statuses = [];
+  const osiLib = {
+    require(name) {
+      requested.push(name);
+      assert.ok(Object.prototype.hasOwnProperty.call(helperResults, name), `unexpected helper load ${name}`);
+      return helperResults[name];
+    },
+  };
+  const node = {
+    error(message, errorMsg) { errors.push({ message, errorMsg }); },
+    warn(message) { warnings.push(message); },
+    status(status) { statuses.push(status); },
+  };
+  const env = {
+    get(name) {
+      return name === 'DEVICE_EUI' ? GATEWAY_EUI : '';
+    },
+  };
+  const runner = new Function('msg', 'node', 'env', 'osiLib', shippedNode.func);
+  const result = await runner(msg, node, env, osiLib);
+  return { result, requested, errors, warnings, statuses };
+}
 
 class TestDb {
   constructor(name) {
@@ -452,6 +523,276 @@ test('both pending-command producers keep payload command type outside the trust
   assert.equal(queued.command_type, 'UPSERT_ZONE');
   assert.equal(queued._pendingCommandEnvelope.commandType, 'UPSERT_ZONE');
   assert.equal(queued._pendingCommandEnvelope.payload.command_type, 'UPSERT_JOURNAL_ENTRY');
+});
+
+test('shipped command nodes let recognized REBOOT traverse toward legacy dispatch without journal', async () => {
+  const events = [];
+  const msg = shippedCommandMessage('REBOOT', 901);
+  let ledgerRuntime = null;
+  const helpers = {
+    'osi-db-helper': flowDbHelper(events),
+    'osi-command-ledger': {
+      ok: true,
+      value: {
+        async deduplicatePendingCommand(_db, _envelope, runtime) {
+          ledgerRuntime = runtime;
+          return { handled: false };
+        },
+      },
+    },
+    'osi-journal': { ok: false, error: 'journal package absent' },
+  };
+
+  const dedupe = await runShippedCommandNode('command-dedupe-dispatch', msg, helpers);
+  assert.deepEqual(dedupe.requested, ['osi-db-helper', 'osi-command-ledger']);
+  assert.deepEqual(dedupe.errors, []);
+  assert.equal(dedupe.result[0], msg);
+  assert.equal(dedupe.result[1], null);
+  assert.equal(Object.prototype.hasOwnProperty.call(ledgerRuntime, 'extraEffectBindingValidator'), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(ledgerRuntime, 'extraSubmittedIntentHash'), false);
+
+  const apply = await runShippedCommandNode('journal-command-apply-fn', dedupe.result[0], helpers);
+  assert.deepEqual(apply.requested, []);
+  assert.deepEqual(apply.errors, []);
+  assert.equal(apply.result[0], msg);
+  assert.equal(apply.result[1], null);
+  assert.deepEqual(events, [
+    ['db-open', '/data/db/farming.db'],
+    ['db-close'],
+  ]);
+});
+
+for (const unavailableHelper of ['osi-db-helper', 'osi-command-ledger']) {
+  test(`shipped dedupe blocks REBOOT when mandatory ${unavailableHelper} is unavailable`, async () => {
+    const events = [];
+    const msg = shippedCommandMessage('REBOOT', unavailableHelper === 'osi-db-helper' ? 902 : 903);
+    const helpers = {
+      'osi-db-helper': unavailableHelper === 'osi-db-helper'
+        ? { ok: false, error: 'database helper absent' }
+        : flowDbHelper(events),
+      'osi-command-ledger': unavailableHelper === 'osi-command-ledger'
+        ? { ok: false, error: 'command ledger absent' }
+        : { ok: true, value: { async deduplicatePendingCommand() { return { handled: false }; } } },
+      'osi-journal': { ok: false, error: 'journal package absent' },
+    };
+
+    const dedupe = await runShippedCommandNode('command-dedupe-dispatch', msg, helpers);
+    assert.deepEqual(dedupe.requested, ['osi-db-helper', 'osi-command-ledger']);
+    assert.deepEqual(dedupe.result, [null, null]);
+    assert.equal(dedupe.errors.length, 1);
+    assert.equal(dedupe.errors[0].errorMsg, msg);
+    assert.match(dedupe.errors[0].message, /helper.*unavailable/i);
+    assert.deepEqual(events, []);
+  });
+}
+
+test('shipped journal command path fails closed after optional dedupe hooks are unavailable', async () => {
+  const events = [];
+  const msg = shippedCommandMessage('UPSERT_JOURNAL_ENTRY', 904);
+  let ledgerRuntime = null;
+  const helpers = {
+    'osi-db-helper': flowDbHelper(events),
+    'osi-command-ledger': {
+      ok: true,
+      value: {
+        async deduplicatePendingCommand(_db, _envelope, runtime) {
+          ledgerRuntime = runtime;
+          return { handled: false };
+        },
+      },
+    },
+    'osi-journal': { ok: false, error: 'journal package absent' },
+  };
+
+  const dedupe = await runShippedCommandNode('command-dedupe-dispatch', msg, helpers);
+  assert.deepEqual(dedupe.requested, ['osi-db-helper', 'osi-command-ledger', 'osi-journal']);
+  assert.equal(dedupe.result[0], msg);
+  assert.equal(dedupe.result[1], null);
+  assert.equal(Object.prototype.hasOwnProperty.call(ledgerRuntime, 'extraEffectBindingValidator'), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(ledgerRuntime, 'extraSubmittedIntentHash'), false);
+
+  const apply = await runShippedCommandNode('journal-command-apply-fn', dedupe.result[0], helpers);
+  assert.deepEqual(apply.requested, ['osi-db-helper', 'osi-journal']);
+  assert.deepEqual(apply.result, [null, null]);
+  assert.equal(apply.errors.length, 1);
+  assert.equal(apply.errors[0].errorMsg, msg);
+  assert.deepEqual(events, [
+    ['db-open', '/data/db/farming.db'],
+    ['db-close'],
+  ]);
+});
+
+test('shipped dedupe preserves exact journal command-ID replay without journal hooks', async () => {
+  const events = [];
+  const msg = shippedCommandMessage('UPSERT_JOURNAL_ENTRY', 905);
+  const replayAck = {
+    commandId: 905,
+    commandType: 'UPSERT_JOURNAL_ENTRY',
+    result: 'APPLIED',
+    status: 'ACKED',
+    duplicate: false,
+  };
+  let ledgerRuntime = null;
+  const helpers = {
+    'osi-db-helper': flowDbHelper(events),
+    'osi-command-ledger': {
+      ok: true,
+      value: {
+        async deduplicatePendingCommand(_db, _envelope, runtime) {
+          ledgerRuntime = runtime;
+          return { handled: true, ack: replayAck };
+        },
+      },
+    },
+    'osi-journal': { ok: false, error: 'journal package absent' },
+  };
+
+  const dedupe = await runShippedCommandNode('command-dedupe-dispatch', msg, helpers);
+  assert.deepEqual(dedupe.requested, ['osi-db-helper', 'osi-command-ledger', 'osi-journal']);
+  assert.equal(Object.prototype.hasOwnProperty.call(ledgerRuntime, 'extraEffectBindingValidator'), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(ledgerRuntime, 'extraSubmittedIntentHash'), false);
+  assert.equal(dedupe.result[0], null);
+  assert.equal(dedupe.result[1].topic, `devices/${GATEWAY_EUI}/command_ack`);
+  assert.equal(dedupe.result[1].payload, JSON.stringify(replayAck));
+  assert.deepEqual(events, [
+    ['db-open', '/data/db/farming.db'],
+    ['db-close'],
+  ]);
+});
+
+test('shipped dedupe preserves exact non-journal replay without requesting journal', async () => {
+  const events = [];
+  const msg = shippedCommandMessage('REBOOT', 906);
+  const replayAck = {
+    commandId: 906,
+    commandType: 'REBOOT',
+    result: 'APPLIED',
+    status: 'ACKED',
+    duplicate: false,
+  };
+  const helpers = {
+    'osi-db-helper': flowDbHelper(events),
+    'osi-command-ledger': {
+      ok: true,
+      value: {
+        async deduplicatePendingCommand(_db, _envelope, runtime) {
+          assert.equal(Object.prototype.hasOwnProperty.call(runtime, 'extraEffectBindingValidator'), false);
+          assert.equal(Object.prototype.hasOwnProperty.call(runtime, 'extraSubmittedIntentHash'), false);
+          return { handled: true, ack: replayAck };
+        },
+      },
+    },
+  };
+
+  const dedupe = await runShippedCommandNode('command-dedupe-dispatch', msg, helpers);
+  assert.deepEqual(dedupe.requested, ['osi-db-helper', 'osi-command-ledger']);
+  assert.equal(dedupe.result[0], null);
+  assert.equal(dedupe.result[1].payload, JSON.stringify(replayAck));
+});
+
+test('shipped dedupe injects both journal hooks only when protected type is journal-shaped', async () => {
+  const events = [];
+  const msg = shippedCommandMessage('UPSERT_JOURNAL_ENTRY', 907);
+  const validJournalEffectBinding = async () => true;
+  const submittedIntentHash = () => 'journal-intent';
+  let ledgerRuntime = null;
+  const helpers = {
+    'osi-db-helper': flowDbHelper(events),
+    'osi-command-ledger': {
+      ok: true,
+      value: {
+        async deduplicatePendingCommand(_db, _envelope, runtime) {
+          ledgerRuntime = runtime;
+          return { handled: false };
+        },
+      },
+    },
+    'osi-journal': {
+      ok: true,
+      value: { validJournalEffectBinding, submittedIntentHash },
+    },
+  };
+
+  const dedupe = await runShippedCommandNode('command-dedupe-dispatch', msg, helpers);
+  assert.equal(dedupe.result[0], msg);
+  assert.equal(ledgerRuntime.extraEffectBindingValidator, validJournalEffectBinding);
+  assert.equal(ledgerRuntime.extraSubmittedIntentHash, submittedIntentHash);
+});
+
+test('shipped command nodes trust protected type over spoofed flattened type in both directions', async () => {
+  const nonJournalEvents = [];
+  const protectedReboot = shippedCommandMessage('REBOOT', 908);
+  protectedReboot.payload.commandType = 'UPSERT_JOURNAL_ENTRY';
+  protectedReboot.payload.command_type = 'UPSERT_JOURNAL_ENTRY';
+  const nonJournalHelpers = {
+    'osi-db-helper': flowDbHelper(nonJournalEvents),
+    'osi-command-ledger': {
+      ok: true,
+      value: { async deduplicatePendingCommand() { return { handled: false }; } },
+    },
+  };
+  const rebootDedupe = await runShippedCommandNode(
+    'command-dedupe-dispatch', protectedReboot, nonJournalHelpers
+  );
+  assert.deepEqual(rebootDedupe.requested, ['osi-db-helper', 'osi-command-ledger']);
+  const rebootApply = await runShippedCommandNode(
+    'journal-command-apply-fn', rebootDedupe.result[0], nonJournalHelpers
+  );
+  assert.deepEqual(rebootApply.requested, []);
+  assert.equal(rebootApply.result[0], protectedReboot);
+
+  const protectedJournal = shippedCommandMessage('UPSERT_JOURNAL_ENTRY', 909);
+  protectedJournal.payload.commandType = 'REBOOT';
+  protectedJournal.payload.command_type = 'REBOOT';
+  const journalEvents = [];
+  const journalHelpers = {
+    'osi-db-helper': flowDbHelper(journalEvents),
+    'osi-command-ledger': {
+      ok: true,
+      value: { async deduplicatePendingCommand() { return { handled: false }; } },
+    },
+    'osi-journal': { ok: false, error: 'journal package absent' },
+  };
+  const journalDedupe = await runShippedCommandNode(
+    'command-dedupe-dispatch', protectedJournal, journalHelpers
+  );
+  assert.deepEqual(journalDedupe.requested, ['osi-db-helper', 'osi-command-ledger', 'osi-journal']);
+  const journalApply = await runShippedCommandNode(
+    'journal-command-apply-fn', journalDedupe.result[0], journalHelpers
+  );
+  assert.deepEqual(journalApply.result, [null, null]);
+  assert.equal(journalApply.errors.length, 1);
+});
+
+test('shipped command nodes reject an empty protected type before loading helpers', async () => {
+  const msg = shippedCommandMessage('', 910);
+  for (const nodeId of ['command-dedupe-dispatch', 'journal-command-apply-fn']) {
+    const result = await runShippedCommandNode(nodeId, msg, {});
+    assert.deepEqual(result.requested, []);
+    assert.deepEqual(result.result, [null, null]);
+    assert.equal(result.errors.length, 1);
+    assert.match(result.errors[0].message, /protected delivery command type/);
+  }
+});
+
+test('shipped unknown JOURNAL-shaped command cannot reach legacy dispatch without journal', async () => {
+  const events = [];
+  const msg = shippedCommandMessage('UPSERT_FIELD_JOURNAL_NOTE', 911);
+  msg._commandTypeRecognized = false;
+  const helpers = {
+    'osi-db-helper': flowDbHelper(events),
+    'osi-command-ledger': {
+      ok: true,
+      value: { async deduplicatePendingCommand() { return { handled: false }; } },
+    },
+    'osi-journal': { ok: false, error: 'journal package absent' },
+  };
+
+  const dedupe = await runShippedCommandNode('command-dedupe-dispatch', msg, helpers);
+  assert.equal(dedupe.result[0], msg);
+  const apply = await runShippedCommandNode('journal-command-apply-fn', dedupe.result[0], helpers);
+  assert.deepEqual(apply.result, [null, null]);
+  assert.equal(apply.errors.length, 1);
 });
 
 test('UPSERT_JOURNAL_ENTRY applies through lifecycle and atomically records numeric ACK facts', async () => {

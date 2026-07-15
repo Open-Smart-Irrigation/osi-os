@@ -429,6 +429,25 @@ function expectExcludesById(nodeId, needle, description) {
   }
 }
 
+function expectOrderedIncludesById(nodeId, needles, description) {
+  const node = findNodeById(nodeId);
+  if (!node) {
+    fail(`missing node ${nodeId}`);
+    return;
+  }
+  const source = String(node.func || '');
+  let cursor = -1;
+  for (const needle of needles) {
+    const index = source.indexOf(needle, cursor + 1);
+    if (index < 0) {
+      fail(`${nodeId} does not ${description}: missing or out-of-order ${JSON.stringify(needle)}`);
+      return;
+    }
+    cursor = index;
+  }
+  console.log(`OK ${nodeId} ${description}`);
+}
+
 function expectMissingNodeById(nodeId, description) {
   if (findNodeById(nodeId)) {
     fail(`${nodeId} still exists: ${description}`);
@@ -1584,6 +1603,25 @@ expectIncludes('Sync Init Schema + Triggers', 'last_ack_attempt_at TEXT', 'creat
 expectIncludes('Sync Init Schema + Triggers', 'CREATE TABLE IF NOT EXISTS command_ack_outbox', 'creates the durable edge command ACK outbox during sync init');
 expectIncludes('Deduplicate Pending Command', 'osiCommandLedger.deduplicatePendingCommand', 'delegates exact stored-result replay before dispatch via the shared command ledger');
 expectIncludes('Deduplicate Pending Command', 'failed closed', 'fails closed when replay-ledger lookup is unavailable');
+expectOrderedIncludesById('command-dedupe-dispatch', [
+  'const envelope = cmd._pendingCommandEnvelope;',
+  "const commandType = String(envelope.commandType || '').trim().toUpperCase();",
+  'const journalType = /(?:^|_)JOURNAL(?:_|$)/.test(commandType);',
+  "const dbLoad = osiLib.require('osi-db-helper');",
+  "const commandLedgerLoad = osiLib.require('osi-command-ledger');",
+  'if (journalType) {',
+  "const journalLoad = osiLib.require('osi-journal');",
+], 'classifies the protected command type before mandatory and optional helper loading');
+expectIncludesById('command-dedupe-dispatch', 'Command helpers unavailable:', 'keeps DB and ledger mandatory for every protected command');
+expectIncludesById('command-dedupe-dispatch', 'Journal dedupe hooks unavailable:', 'surfaces unavailable optional journal replay hooks');
+expectOrderedIncludesById('journal-command-apply-fn', [
+  'const envelope = cmd._pendingCommandEnvelope;',
+  "const commandType = String(envelope.commandType || '').trim().toUpperCase();",
+  'const journalType = /(?:^|_)JOURNAL(?:_|$)/.test(commandType);',
+  'if (!journalType) return [msg, null];',
+  "const dbLoad = osiLib.require('osi-db-helper');",
+  "const journalLoad = osiLib.require('osi-journal');",
+], 'passes non-journal commands toward legacy dispatch before loading journal helpers');
 expectFileIncludes('osi-command-ledger/index.js', commandLedgerSource, 'SELECT * FROM applied_commands WHERE command_id=? LIMIT 1', 'looks up exact command IDs before payload validation');
 expectFileIncludes('osi-journal/commands.js', journalCommandsSource, 'result_detail', 'reconstructs ACK facts from canonical replay-ledger detail');
 expectIncludes('Queue REST Command ACK', 'osiCommandLedger.queueCommandAck', 'delegates atomic terminal ledger and ACK queueing via the shared command ledger');

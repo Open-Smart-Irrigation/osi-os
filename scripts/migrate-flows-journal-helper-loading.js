@@ -13,6 +13,131 @@ const flowPaths = [
 const osiLibOnly = [{ var: 'osiLib', module: 'osi-lib' }];
 
 const dedupeSource = `return (async () => {
+  let cmd;
+  try {
+    cmd = typeof msg.payload === 'string' ? JSON.parse(msg.payload) : (msg.payload || {});
+  } catch (parseError) {
+    node.error('Pending command parse failed closed: ' + String(parseError && parseError.message ? parseError.message : parseError), msg);
+    return [null, null];
+  }
+  const envelope = cmd._pendingCommandEnvelope;
+  if (!envelope || typeof envelope !== 'object' || Array.isArray(envelope)) {
+    node.error('Pending command has no protected delivery envelope', msg);
+    return [null, null];
+  }
+  const commandType = String(envelope.commandType || '').trim().toUpperCase();
+  if (!commandType) {
+    node.error('Pending command has no protected delivery command type', msg);
+    return [null, null];
+  }
+  const journalType = /(?:^|_)JOURNAL(?:_|$)/.test(commandType);
+  const dbLoad = osiLib.require('osi-db-helper');
+  const commandLedgerLoad = osiLib.require('osi-command-ledger');
+  if (!dbLoad.ok || !commandLedgerLoad.ok) {
+    const detail = [dbLoad, commandLedgerLoad]
+      .filter(function(load) { return !load.ok; })
+      .map(function(load) { return load.error; })
+      .join('; ');
+    node.error('Command helpers unavailable: ' + detail, msg);
+    return [null, null];
+  }
+  const osiDb = dbLoad.value;
+  const osiCommandLedger = commandLedgerLoad.value;
+  const runtime = {
+    gateway_device_eui: String(env.get('DEVICE_EUI') || '').trim().toUpperCase(),
+    command_type_recognized: msg._commandTypeRecognized === true
+  };
+  if (journalType) {
+    const journalLoad = osiLib.require('osi-journal');
+    if (journalLoad.ok) {
+      runtime.extraEffectBindingValidator = journalLoad.value.validJournalEffectBinding;
+      runtime.extraSubmittedIntentHash = journalLoad.value.submittedIntentHash;
+    } else {
+      node.warn('Journal dedupe hooks unavailable: ' + String(journalLoad.error || 'unknown loader error'));
+    }
+  }
+  const gatewayEui = runtime.gateway_device_eui;
+  const db = new osiDb.Database('/data/db/farming.db');
+  const close = () => new Promise((resolve, reject) => db.close((error) => error ? reject(error) : resolve()));
+  try {
+    const result = await osiCommandLedger.deduplicatePendingCommand(db, envelope, runtime);
+    if (!result.handled) return [msg, null];
+    node.status({ fill: 'blue', shape: 'ring', text: 'duplicate command ' + String(result.ack.commandId) });
+    return [null, {
+      topic: 'devices/' + gatewayEui + '/command_ack',
+      payload: JSON.stringify(result.ack),
+      qos: 1
+    }];
+  } catch (error) {
+    node.error('Command dedupe failed closed: ' + String(error && error.message ? error.message : error), msg);
+    return [null, null];
+  } finally {
+    try {
+      await close();
+    } catch (closeError) {
+      node.warn('Command dedupe DB close failed: ' + String(closeError && closeError.message ? closeError.message : closeError));
+    }
+  }
+})();`;
+
+const journalApplySource = `return (async () => {
+  let cmd;
+  try {
+    cmd = typeof msg.payload === 'string' ? JSON.parse(msg.payload) : (msg.payload || {});
+  } catch (parseError) {
+    node.error('Journal command parse failed closed: ' + String(parseError && parseError.message ? parseError.message : parseError), msg);
+    return [null, null];
+  }
+  const envelope = cmd._pendingCommandEnvelope;
+  if (!envelope || typeof envelope !== 'object' || Array.isArray(envelope)) {
+    node.error('Journal command has no protected delivery envelope', msg);
+    return [null, null];
+  }
+  const commandType = String(envelope.commandType || '').trim().toUpperCase();
+  if (!commandType) {
+    node.error('Journal command has no protected delivery command type', msg);
+    return [null, null];
+  }
+  const journalType = /(?:^|_)JOURNAL(?:_|$)/.test(commandType);
+  if (!journalType) return [msg, null];
+  const dbLoad = osiLib.require('osi-db-helper');
+  const journalLoad = osiLib.require('osi-journal');
+  if (!dbLoad.ok || !journalLoad.ok) {
+    const detail = [dbLoad, journalLoad]
+      .filter(function(load) { return !load.ok; })
+      .map(function(load) { return load.error; })
+      .join('; ');
+    node.error('Journal helpers unavailable: ' + detail, msg);
+    return [null, null];
+  }
+  const osiDb = dbLoad.value;
+  const osiJournal = journalLoad.value;
+  const gatewayEui = String(env.get('DEVICE_EUI') || '').trim().toUpperCase();
+  const db = new osiDb.Database('/data/db/farming.db');
+  const close = () => new Promise((resolve, reject) => db.close((error) => error ? reject(error) : resolve()));
+  try {
+    const result = await osiJournal.applyJournalCommand(db, envelope, {
+      gateway_device_eui: gatewayEui
+    });
+    if (!result.handled) return [msg, null];
+    return [null, {
+      topic: 'devices/' + gatewayEui + '/command_ack',
+      payload: JSON.stringify(result.ack),
+      qos: 1
+    }];
+  } catch (error) {
+    node.error('Journal command apply failed closed: ' + String(error && error.message ? error.message : error), msg);
+    return [null, null];
+  } finally {
+    try {
+      await close();
+    } catch (closeError) {
+      node.warn('Journal command DB close failed: ' + String(closeError && closeError.message ? closeError.message : closeError));
+    }
+  }
+})();`;
+
+const priorCurrentDedupeSource = `return (async () => {
   const dbLoad = osiLib.require('osi-db-helper');
   const journalLoad = osiLib.require('osi-journal');
   const commandLedgerLoad = osiLib.require('osi-command-ledger');
@@ -62,7 +187,7 @@ const dedupeSource = `return (async () => {
   }
 })();`;
 
-const journalApplySource = `return (async () => {
+const priorCurrentJournalApplySource = `return (async () => {
   const dbLoad = osiLib.require('osi-db-helper');
   const journalLoad = osiLib.require('osi-journal');
   if (!dbLoad.ok || !journalLoad.ok) {
@@ -173,6 +298,13 @@ return osiJournal.handleHttpRequest({
   warn: function(message) { node.warn(message); }
 });`;
 
+const PRIOR_CURRENT_HELPER_SURFACES = Object.freeze({
+  'command-dedupe-dispatch': Object.freeze({ func: priorCurrentDedupeSource, libs: osiLibOnly }),
+  'journal-command-apply-fn': Object.freeze({ func: priorCurrentJournalApplySource, libs: osiLibOnly }),
+  'command-ack-queue-rest': Object.freeze({ func: queueAckSource, libs: osiLibOnly }),
+  'journal-api-router-fn': Object.freeze({ func: apiRouterSource, libs: osiLibOnly }),
+});
+
 const targetSpecs = {
   'command-dedupe-dispatch': {
     beforeNodeHash: '014ce95de868e0cdfc61db295367117d09845ab1e5afd434fb590f3e4735ab06',
@@ -229,6 +361,12 @@ function isCurrentNode(node, spec) {
     node.func === spec.func && same(node.libs, osiLibOnly);
 }
 
+function matchesPriorCurrentNode(node, id, spec) {
+  const prior = PRIOR_CURRENT_HELPER_SURFACES[id];
+  return !!node && !!prior && shapeDigest(node) === spec.shapeHash &&
+    node.func === prior.func && same(node.libs, prior.libs);
+}
+
 function assertOnlyTargetChanges(before, after) {
   if (before.length !== after.length) throw new Error('Helper loading migration changed the flow node count');
   for (let index = 0; index < before.length; index += 1) {
@@ -251,11 +389,14 @@ function migrate(buffer) {
   const entries = Object.entries(targetSpecs);
   if (entries.every(([id, spec]) => isCurrentNode(byId.get(id), spec))) return buffer;
 
-  for (const [id, spec] of entries) {
+  const exactPriorCurrent = entries.every(([id, spec]) =>
+    matchesPriorCurrentNode(byId.get(id), id, spec));
+  const exactDirectHelper = entries.every(([id, spec]) => {
     const node = byId.get(id);
-    if (!node || digest(node) !== spec.beforeNodeHash) {
-      throw new Error('Refusing drifted Task 9 helper-loading node: ' + id);
-    }
+    return !!node && digest(node) === spec.beforeNodeHash;
+  });
+  if (!exactPriorCurrent && !exactDirectHelper) {
+    throw new Error('Refusing drifted Task 9 helper-loading node set');
   }
 
   const before = JSON.parse(buffer.toString('utf8'));
@@ -273,32 +414,41 @@ function migrate(buffer) {
   return serialize(flows);
 }
 
-const before = flowPaths.map((file) => fs.readFileSync(file));
-if (!before[0].equals(before[1])) throw new Error('Maintained flows are not byte-identical before migration');
-for (let index = 0; index < before.length; index += 1) {
-  const roundTrip = serialize(JSON.parse(before[index].toString('utf8')));
-  if (!before[index].equals(roundTrip)) {
-    throw new Error('Maintained flow input is not a byte-stable JSON round-trip: ' + flowPaths[index]);
+function run() {
+  const before = flowPaths.map((file) => fs.readFileSync(file));
+  if (!before[0].equals(before[1])) throw new Error('Maintained flows are not byte-identical before migration');
+  for (let index = 0; index < before.length; index += 1) {
+    const roundTrip = serialize(JSON.parse(before[index].toString('utf8')));
+    if (!before[index].equals(roundTrip)) {
+      throw new Error('Maintained flow input is not a byte-stable JSON round-trip: ' + flowPaths[index]);
+    }
   }
+
+  const after = migrate(before[0]);
+  if (!after.equals(migrate(after))) throw new Error('Journal helper-loading migration is not idempotent');
+  if (!after.equals(serialize(JSON.parse(after.toString('utf8'))))) {
+    throw new Error('Journal helper-loading output is not a byte-stable JSON round-trip');
+  }
+  if (after.equals(before[0])) {
+    process.stdout.write('migrate-flows-journal-helper-loading: already current\n');
+    return;
+  }
+  for (const file of flowPaths) fs.writeFileSync(file, after);
+  if (!fs.readFileSync(flowPaths[0]).equals(fs.readFileSync(flowPaths[1]))) {
+    throw new Error('Maintained flows lost byte parity after helper-loading migration');
+  }
+  for (const file of flowPaths) {
+    const written = fs.readFileSync(file);
+    if (!written.equals(serialize(JSON.parse(written.toString('utf8'))))) {
+      throw new Error('Written flow lost byte-stable JSON formatting: ' + file);
+    }
+  }
+  process.stdout.write('migrate-flows-journal-helper-loading: applied exact four-node helper loading\n');
 }
 
-const after = migrate(before[0]);
-if (!after.equals(migrate(after))) throw new Error('Journal helper-loading migration is not idempotent');
-if (!after.equals(serialize(JSON.parse(after.toString('utf8'))))) {
-  throw new Error('Journal helper-loading output is not a byte-stable JSON round-trip');
-}
-if (after.equals(before[0])) {
-  process.stdout.write('migrate-flows-journal-helper-loading: already current\n');
-  process.exit(0);
-}
-for (const file of flowPaths) fs.writeFileSync(file, after);
-if (!fs.readFileSync(flowPaths[0]).equals(fs.readFileSync(flowPaths[1]))) {
-  throw new Error('Maintained flows lost byte parity after helper-loading migration');
-}
-for (const file of flowPaths) {
-  const written = fs.readFileSync(file);
-  if (!written.equals(serialize(JSON.parse(written.toString('utf8'))))) {
-    throw new Error('Written flow lost byte-stable JSON formatting: ' + file);
-  }
-}
-process.stdout.write('migrate-flows-journal-helper-loading: applied exact four-node helper loading\n');
+if (require.main === module) run();
+
+module.exports = {
+  PRIOR_CURRENT_HELPER_SURFACES,
+  migrate,
+};
