@@ -841,3 +841,23 @@ The focused verifier passed after restoration. The scratch scripts and backups w
 | `git diff --check` | 0 | No output |
 
 The final structural comparison reports 602 nodes and byte-identical 1,307,053-byte maintained flow files. Only `sys-stats-fn` differs from `HEAD`, only its function changed, and its absent `libs` property remains absent. Its function grew from 2,208 to 6,092 bytes. No wiring or other node field changed.
+
+## Task 6 — GUI restart countdown banner
+
+Task 6 added the global restart banner, the 30-second system-status polling hook, the typed `restartPending` stats field, and six restart strings in every `web/react-gui/public/locales/<lng>/common.json` file. The retained controller transcript does not contain the earlier worker's initial missing-component RED output, so this section records the fresh post-review evidence only.
+
+The banner is mounted inside `AuthProvider` and before `HashRouter`. It renders `role="status"` with `aria-live="polite"`, parses each `restartAt` value once per response, updates the visible countdown locally once per second, retains the last successful status through transient API errors, and clears after a later successful `restartPending:null` response. Invalid timestamps render nothing; expired pending restarts render the in-progress message until the next successful poll clears them.
+
+Two read-only reviewers approved the task. The only changes from review were type-shape cleanups: the API `reason` field is a plain string, and the reason-to-translation map is a partial record so the generic fallback is explicit.
+
+| Command | Exit | Observed output/pass signal |
+|---|---:|---|
+| `cd web/react-gui && npx vitest run src/components/__tests__/GatewayRestartBanner.test.tsx` | 0 | One file passed; 15 tests passed; zero failed |
+| `cd web/react-gui && npm run typecheck` | 0 | `tsc --noEmit` |
+| `git diff --check` | 0 | No output |
+| `cd web/react-gui && npm run test:unit` | 0 | TSX runner: 84 tests passed; Vitest: 97 files and 565 tests passed |
+| `cd web/react-gui && npm run build` | 0 | Vite transformed 1,641 modules and completed production build |
+| `git diff --check` after build | 0 | No output |
+| `node -e "<build locale restart-key check>"` | 0 | `build/locales/en/common.json restart keys OK: gateway_identity_change, chirpstack_bootstrap, account_link, account_unlink, generic, in_progress` |
+
+The build emitted the existing stale browser-data notices and the existing large-chunk warning. No Task 6 gate failed after review.

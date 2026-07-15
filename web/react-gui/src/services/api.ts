@@ -963,6 +963,10 @@ export interface SystemStats {
   fan_mode: 'pwm' | 'cooling' | 'none';
   fan_value: number | null;
   fan_max: number | null;
+  restartPending?: {
+    restartAt: string;
+    reason: string;
+  } | null;
 }
 
 export const systemAPI = {
