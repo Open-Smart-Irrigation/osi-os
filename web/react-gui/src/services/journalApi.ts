@@ -17,9 +17,7 @@ export interface JournalCatalogOptions {
   includeDefinitions?: boolean;
 }
 
-export interface CreateEntryPayload {
-  entry_uuid?: string;
-  base_sync_version: 0;
+interface EntryWritePayload {
   status: EntryWriteStatus;
   plot_uuid: string | null;
   activity_code: string;
@@ -33,6 +31,16 @@ export interface CreateEntryPayload {
   values: EntryValueInput[];
   note?: string | null;
   batch_uuid?: string | null;
+}
+
+export interface CreateEntryPayload extends EntryWritePayload {
+  entry_uuid?: string;
+  base_sync_version: 0;
+}
+
+export interface UpdateEntryPayload extends EntryWritePayload {
+  entry_uuid?: string;
+  base_sync_version: number;
 }
 
 export const journalApi = {
@@ -53,6 +61,17 @@ export const journalApi = {
 
   createEntry: async (payload: CreateEntryPayload): Promise<EntryMutationReceipt> =>
     (await api.post<EntryMutationReceipt>('/api/journal/entries', payload)).data,
+
+  updateEntry: async (
+    uuid: string,
+    payload: UpdateEntryPayload,
+  ): Promise<EntryMutationReceipt> =>
+    (
+      await api.put<EntryMutationReceipt>(
+        `/api/journal/entries/${encodeURIComponent(uuid)}`,
+        payload,
+      )
+    ).data,
 
   voidEntry: async (
     uuid: string,
