@@ -12,7 +12,9 @@ interface AppHeaderProps {
   title: string;
   /** Which primary tab is active on this page, if any. */
   activeTab?: TabKey;
-  username: string | null;
+  /** Accepted for call-site compatibility; the header no longer shows a
+      greeting (product decision 2026-07-14). */
+  username?: string | null;
   onLogout: () => void;
   /**
    * Page-specific primary actions, rendered left of the always-present
@@ -37,7 +39,6 @@ const LIQUID_BUTTON =
 export const AppHeader: React.FC<AppHeaderProps> = ({
   title,
   activeTab,
-  username,
   onLogout,
   actions,
 }) => {
@@ -64,11 +65,10 @@ export const AppHeader: React.FC<AppHeaderProps> = ({
           page. It sits in document flow and scrolls away; only the header
           below sticks. */}
       <div className="overflow-hidden bg-white">
-        {/* Wordmark aligns with the content column's left edge (the H1 below).
-            See .balken-crown in index.css. */}
-        <div className="max-w-7xl mx-auto px-4">
-          <img src={balkenHorizontal} alt="Agroscope Balken" className="balken-crown" />
-        </div>
+        {/* Full-bleed red block on the left, wordmark pinned to the content
+            column's left edge at every viewport width. See .balken-crown in
+            index.css for the width-independent alignment. */}
+        <img src={balkenHorizontal} alt="Agroscope Balken" className="balken-crown" />
       </div>
       <header className="glass-chrome sticky top-0 z-30 border-b border-[var(--border)]">
         <div className="max-w-7xl mx-auto px-4 py-3">
@@ -77,29 +77,24 @@ export const AppHeader: React.FC<AppHeaderProps> = ({
             {/* Primary navigation on its own floating glass pill. The Agroscope
                 red returns once here: the active-tab lozenge's specular ring.
                 Red stays out of buttons — the app reserves red for danger. */}
-            <div className="flex items-center gap-4">
-              <nav aria-label="Primary">
-                <div className="glass-tabs inline-flex gap-1 p-1">
-                  {tabs.map((tab) => (
-                    <Link
-                      key={tab.key}
-                      to={tab.to}
-                      aria-current={tab.active ? 'page' : undefined}
-                      className={`glass-tab px-5 py-2 text-[15px] font-semibold ${
-                        tab.active
-                          ? 'text-[var(--header-text)]'
-                          : 'text-[var(--text-tertiary)] hover:text-[var(--header-text)]'
-                      }`}
-                    >
-                      {tab.label}
-                    </Link>
-                  ))}
-                </div>
-              </nav>
-              <p className="hidden md:block text-[var(--header-subtext)] text-base">
-                {t('welcome', { username })}
-              </p>
-            </div>
+            <nav aria-label="Primary">
+              <div className="glass-tabs inline-flex gap-1 p-1">
+                {tabs.map((tab) => (
+                  <Link
+                    key={tab.key}
+                    to={tab.to}
+                    aria-current={tab.active ? 'page' : undefined}
+                    className={`glass-tab px-5 py-2 text-[15px] font-semibold ${
+                      tab.active
+                        ? 'text-[var(--header-text)]'
+                        : 'text-[var(--text-tertiary)] hover:text-[var(--header-text)]'
+                    }`}
+                  >
+                    {tab.label}
+                  </Link>
+                ))}
+              </div>
+            </nav>
 
             <div className="flex items-center justify-end gap-2 sm:gap-3">
               {actions}

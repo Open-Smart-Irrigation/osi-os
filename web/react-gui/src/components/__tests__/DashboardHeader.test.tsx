@@ -62,14 +62,15 @@ afterEach(() => {
 });
 
 describe('DashboardHeader (osi-os)', () => {
-  it('renders the plain Dashboard title, Agroscope Balken, welcome text, and Settings entry without a standalone language switcher', () => {
+  it('renders the Dashboard title, Agroscope Balken, and Settings entry without a standalone language switcher', () => {
     renderHeader();
     expect(screen.getByRole('heading', { name: 'Dashboard' })).toBeInTheDocument();
     expect(screen.getByRole('img', { name: 'Agroscope Balken' })).toHaveAttribute(
       'src',
       expect.stringContaining('balken-horizontal-en'),
     );
-    expect(screen.getByText('Welcome farmer')).toBeInTheDocument();
+    // The header no longer shows a greeting.
+    expect(screen.queryByText(/Welcome/i)).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /Lang/i })).not.toBeInTheDocument();
     expect(screen.queryByTitle('Change language')).not.toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Settings' })).toHaveAttribute('href', '/settings');
