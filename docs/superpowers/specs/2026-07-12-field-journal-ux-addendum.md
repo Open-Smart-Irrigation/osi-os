@@ -27,7 +27,7 @@
 
 **P1 — Layout is a plot property, not a daily switch.** Bind layout at plot setup, change it in plot settings, and show it as a passive badge on the entry screen. This removes the two-dimensional daily switcher while keeping sensor-zone attribution optional. Template remains the only routine depth control.
 
-**P2 — Confirm-by-reading strip.** Before save, one generated journal sentence — "Slurry (drag hose) · 25 m³/ha · Zone North · today" — every token tappable to edit. This is what makes carry-forward safe: prefills are *read* in one glance, not buried in collapsed sections.
+**P2 — Confirm-by-reading strip.** Before save, one generated journal sentence — "Slurry (drag hose) · 25 m³/ha · Plot P-07 · Open field · today" — every token tappable to edit. This is what makes carry-forward safe: prefills are *read* in one glance, not buried in collapsed sections.
 
 **P3 — Template depth rule (one rule for all layouts).** Template depth = *termination level + defaulting*: `farmer_quick` picks shortlist leaves with device auto-resolved (zone equipment profile / last-used; visible in the sentence, editable under "details"); `full_record` adds all context fields; `research_observation` requires the full explicit path, no silent device defaults, treatment/plot fields shown.
 
@@ -39,7 +39,7 @@
 
 **P7 — Two-phase entry: capture in field, enrich at desk.** Skeleton entry (<10 s, phone, `draft`) → "needs completion" queue for evening/desktop enrichment (DMC, C-content, comments, treatment factors). Splits across people too: farmer captures, researcher enriches the same entry. Uses existing draft/final status; adds a queue view.
 
-**P8 — Passes, not rows, for combined operations.** "Add another operation to this pass" creates linked entries sharing date/zone, rendered as one stacked timeline card; SoilManageR's `combination` integer falls out at export.
+**P8 — Passes, not rows, for combined operations.** "Add another operation to this pass" creates linked entries sharing date/plot, rendered as one stacked timeline card; SoilManageR's `combination` integer falls out at export.
 
 **P9 — System-initiated drafts.** Auto-draft journal entries from `actuator_log`/`irrigation_events` (and later rain events), surfaced as "log this?" proposals. OSI's unique advantage; candidate for v1-slice-2 or fast-follow — cost/benefit to be weighed in planning.
 

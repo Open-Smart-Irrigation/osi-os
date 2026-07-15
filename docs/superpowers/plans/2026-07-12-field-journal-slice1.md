@@ -399,7 +399,7 @@ void_(db, catalog, entry_uuid, base_sync_version, reason, principal) -> { sync_v
 
 **Files:** Modify `docs/contracts/sync-schema/commands.schema.json`, `events.schema.json`, `resources.schema.json`; extend fixtures used by `scripts/test-contract-schemas.js` and `scripts/verify-sync-op-parity.js`.
 
-**Interfaces — Produces:** closed-enum entries `UPSERT_JOURNAL_ENTRY`/`VOID_JOURNAL_ENTRY`/`UPSERT_JOURNAL_CUSTOM_VOCAB`/`UPSERT_JOURNAL_PLOT` with conditional payload schemas (journal commands are gateway-scoped: `device_eui` **not** required — adjust the universal requirement to conditional); event ops `JOURNAL_ENTRY_UPSERTED`/`JOURNAL_ENTRY_VOIDED`/`JOURNAL_VOCAB_UPSERTED` with resource watermark key = `entry_uuid` / `custom_field_uuid`; effect-key formats documented in `effect-keys.md` (`journal_entry:<entry_uuid>:<base_sync_version>`).
+**Interfaces — Produces:** five closed-enum, gateway-scoped commands with conditional payload schemas: `UPSERT_JOURNAL_ENTRY`, `VOID_JOURNAL_ENTRY`, `UPSERT_JOURNAL_CUSTOM_VOCAB`, `UPSERT_JOURNAL_PLOT`, and `UPSERT_JOURNAL_PLOT_GROUP`. `device_eui` remains mandatory for device commands and is not required for these five. The event set is `JOURNAL_ENTRY_UPSERTED`, `JOURNAL_ENTRY_VOIDED`, `JOURNAL_VOCAB_UPSERTED`, `JOURNAL_PLOT_UPSERTED`, and `JOURNAL_PLOT_GROUP_UPSERTED`. Resources and watermark keys are `JOURNAL_ENTRY → entry_uuid`, `JOURNAL_VOCAB → custom_field_uuid`, `JOURNAL_PLOT → plot_uuid`, and `JOURNAL_PLOT_GROUP → group_uuid`; every event binds its version to `payload.sync_version`. `effect-keys.md` defines the four effect-key families `journal_entry`, `journal_vocab`, `journal_plot`, and `journal_plot_group`, each ending in the originator's `base_sync_version`. `verify-sync-contract.js` pins these exact command and event semantic bindings.
 
 - [ ] **Step 1: failing tests**: add fixtures — a valid `UPSERT_JOURNAL_ENTRY` command payload must validate; the same payload with `result:'APPLIED'` replay rules covered by verify-sync-op-parity fixture. Run `node scripts/test-contract-schemas.js && node scripts/verify-sync-op-parity.js` → FAIL.
 - [ ] **Step 2: edit the three schema files** (conditional `device_eui`: keep required for device commands via `allOf/if/then`, exempt `*_JOURNAL_*`), add fixtures, rerun → PASS. Also run `node scripts/verify-sync-contract.js` → PASS.
@@ -409,46 +409,46 @@ void_(db, catalog, entry_uuid, base_sync_version, reason, principal) -> { sync_v
 
 **Files:** Create `scripts/migrate-flows-journal-routes.js` (one-shot, follows the roundtrip-guard pattern in `osi-flows-json-editing`); Modify both `flows.json` profiles via the script only; extend `scripts/test-flows-wiring.js` expectations.
 
-**Interfaces — Produces:** `journal-api-router-fn` function node with `libs: [{var:'osiDb',module:'osi-db-helper'},{var:'osiJournal',module:'osi-journal'}]`, HTTP-in/out wiring for the spec §5.1 route matrix (catalog GET; entries GET/POST; entry PUT; void POST; custom-vocab POST/PUT; plots GET/POST/PUT incl. zone auto-provisioning; export.csv/export.package/export.json GET — export.adapt.json stubs 501 until Slice 5). Auth: reuse the bearer verification pattern from `history-api-router-fn` (`getAuthSecret`/`verifyBearer`); owner derived from token; 401 missing auth, 404 cross-owner.
+**Interfaces — Produces:** `journal-api-router-fn` has the sole Node-RED binding `libs: [{var:'osiLib',module:'osi-lib'}]`; it loads `osi-db-helper` and `osi-journal` through checked `osiLib.require(...)` results, returns 503 if either helper is unavailable, and delegates to `osiJournal.handleHttpRequest`. HTTP wiring covers catalog GET; entries GET/POST and item PUT/void POST; custom-vocab POST/item PUT; plots GET/POST/item PUT (including zone auto-provisioning); plot-groups GET/POST/item PUT; and GET exports for CSV, research package, JSON, and the ADAPT 501 stub. Bearer auth resolves the owner from the token; missing auth returns 401 and cross-owner resources return 404.
 
 - [ ] **Step 1: read the `osi-flows-json-editing` skill.** Extend `scripts/test-flows-wiring.js` with expectations for the new node/routes (node exists, libs bound, routes wired in both profiles). Run → FAIL.
-- [ ] **Step 2: write + run the one-shot script** (JSON parse → mutate → roundtrip-guard → write both profiles). The `func` body is thin glue: parse/route → call `osiJournal` module functions → respond. Run wiring tests + `node scripts/verify-profile-parity.js` → PASS.
-- [ ] **Step 3: route-level tests**: extend `scripts/test-journal-lifecycle.js` with an HTTP-shaped harness (invoke the router func body with mocked msg/auth, same technique as `scripts/test-history-helper.js`): 401 without token; 404 for foreign zone; 413 oversize body; happy-path POST→GET roundtrip. Run → PASS.
+- [ ] **Step 2: write + run the one-shot script** (JSON parse → mutate → roundtrip-guard → write both profiles). The `func` body checks both helper loads, returns 503 if either is unavailable, and delegates to `osiJournal.handleHttpRequest`; routing and auth remain in the module. Run wiring tests + `node scripts/verify-profile-parity.js` → PASS.
+- [ ] **Step 3: route-level tests**: add `scripts/test-journal-api.js` coverage for missing-token 401, foreign-resource 404, oversize-body 413, CRUD round trips, all plot/group ownership paths, and streamed exports. Run it with the wiring gate → PASS.
 - [ ] **Step 4: commit** `feat(journal): edge REST routes with auth + limits`.
 
 ### Task 11: command apply path + exact-replay dedupe fix
 
-**Files:** Extend the one-shot flows script (new `scripts/migrate-flows-journal-commands.js`); Modify both profiles; extend `scripts/test-journal-lifecycle.js`.
+**Files:** Extend the one-shot flows script (new `scripts/migrate-flows-journal-commands.js`); Modify both profiles; add `scripts/test-journal-command-path.js` coverage and wiring assertions.
 
-**Interfaces — Produces:** pending-command handling for the three journal command types routed through `osiJournal.lifecycle` (same validation path as REST); durable `REJECTED_PERMANENT/unsupported_command_type` ACK for unknown journal subtypes; **fix the shared `Deduplicate Pending Command` node so replays emit the exact stored terminal result** (result, result_detail, applied version, effect key, payload hash) instead of unconditional APPLIED — this is finding SYS-3 and benefits all command types.
+**Interfaces — Produces:** pending-command handling for all five journal command types (`UPSERT_JOURNAL_ENTRY`, `VOID_JOURNAL_ENTRY`, `UPSERT_JOURNAL_CUSTOM_VOCAB`, `UPSERT_JOURNAL_PLOT`, `UPSERT_JOURNAL_PLOT_GROUP`) through the same `osi-journal` validation/mutation paths as REST; durable `REJECTED_PERMANENT/unsupported_command_type` ACKs for unknown journal subtypes; and shared-ledger deduplication that replays the exact stored terminal result (result, detail, applied version, effect key, and payload hash) instead of reclassifying it as APPLIED. The dedupe correction benefits every command type.
 
-- [ ] **Step 1: failing tests**: apply `UPSERT_JOURNAL_ENTRY` → entry present + `applied_commands` terminal row + `command_ack_outbox` row all present (atomic — crash-injection between them must roll back all); **replay of a pre-seeded `REJECTED_PERMANENT` ledger row with no ACK row regenerates the same NACK, never APPLIED**; stale base version → NACK with current version/hash. Run → FAIL.
+- [ ] **Step 1: failing tests**: cover accepted mutations for all five journal commands; apply `UPSERT_JOURNAL_ENTRY` → entry present + `applied_commands` terminal row + `command_ack_outbox` row all present (atomic — crash-injection between them must roll back all); **replay of a pre-seeded `REJECTED_PERMANENT` ledger row with no ACK row regenerates the same NACK, never APPLIED**; stale base version → NACK with current version/hash. Run → FAIL.
 - [ ] **Step 2: implement** via the flows one-shot script (command router branch + dedupe-node fix). The dedupe fix changes shared behavior: run the full existing suite `node scripts/verify-sync-flow.js && node scripts/verify-command-safety.js` to prove no regression for existing command types. → PASS.
 - [ ] **Step 3: commit** `feat(journal): command apply path; fix dedupe to replay exact stored results`.
 
 ### Task 12: bootstrap capability + catalog advertisement + feature flag
 
-**Files:** One-shot flows script extension (`scripts/migrate-flows-journal-bootstrap.js`); Modify both profiles; extend wiring tests.
+**Files:** One-shot flows script extension (`scripts/migrate-flows-journal-bootstrap.js`); Modify both profiles; extend bootstrap behavior and wiring tests.
 
-**Interfaces — Produces:** `Build Cloud Bootstrap` advertises `field_journal_v1`, `journal_catalog_version`, `journal_catalog_hash`, and a journal manifest `{entries_count, custom_vocab_count, high_water_mark}`; `/api/system/features` gains `fieldJournalUxEnabled` (default **false**; UI-visibility-only semantics per spec §10 — reads/exports/sync stay active regardless).
+**Interfaces — Produces:** normal and forced bootstrap advertise `field_journal_v1` only after all 12 journal readiness tables exist and catalog row `id=1` has a positive safe-integer version plus a lowercase 64-hex hash. Ready payloads carry `journal_catalog_version`, `journal_catalog_hash`, and `journal_manifest` with `version: 1`, `entries_count`, `custom_vocab_count`, `plots_count`, `plot_groups_count`, `resource_watermark_hash`, and `hash_scope: 'sorted aggregate_type\0aggregate_key\0sync_version tuples'`. The hash covers sorted journal aggregate-type/key/version tuples and distinguishes states with equal version sums. Any missing or malformed readiness fact suppresses the full journal advertisement while core bootstrap continues. `/api/system/features` returns `fieldJournalUxEnabled: false`; this flag controls UI visibility only, so reads, exports, sync, and ACKs remain active.
 
-- [ ] **Step 1: failing wiring tests** for both additions. Run → FAIL.
-- [ ] **Step 2: implement via one-shot script**, rerun wiring + profile parity + `node scripts/verify-sync-flow.js` → PASS.
+- [ ] **Step 1: add failing normal/forced bootstrap behavior tests and wiring assertions** for readiness, exact catalog facts, manifest counts/hash, fail-closed omission, feature response, and both profiles. Run → FAIL.
+- [ ] **Step 2: implement via the one-shot script**, then run `node scripts/test-journal-bootstrap.js`, `node scripts/test-flows-wiring.js`, profile parity, and `node scripts/verify-sync-flow.js` → PASS.
 - [ ] **Step 3: commit** `feat(journal): capability/catalog advertisement + fieldJournalUxEnabled flag`.
 
 ### Task 13: performance fixture + query-plan pinning
 
 **Files:** Create `scripts/test-journal-perf-fixture.js`.
 
-- [ ] **Step 1: write the test**: generate 10k entries / 150k values in a temp DB; assert EXPLAIN QUERY PLAN for the four §4.2 query shapes (zone+time range, duplicate guard, sticky layout, gateway range) each uses its intended index (`SEARCH … USING INDEX idx_journal_entries_…`); assert keyset-paged list of 50 under 100 ms and streamed CSV of 10k entries completes without >64 MiB RSS growth. Run → PASS expected on first run **if** Task 1 indexes are right — a FAIL here is a real finding, fix indexes (never the assertion).
+- [ ] **Step 1: write the test**: generate 10k entries / 150k values in a temp DB; assert `EXPLAIN QUERY PLAN` for five query shapes (legacy zone+time range, plot-scoped duplicate guard, plot-scoped sticky layout, gateway range, canonical plot+time list) each uses its intended index (`SEARCH … USING INDEX idx_journal_entries_…`). Migration `0018` supplies the legacy zone/gateway indexes; migration `0021` supplies the canonical plot duplicate/sticky/time indexes. Also assert a keyset-paged list of 50 completes under 100 ms and streamed CSV of 10k entries stays below 64 MiB RSS growth. Run → PASS expected when both migrations' indexes are correct; a failure is a real finding, so fix the owning index and never weaken the assertion.
 - [ ] **Step 2: commit** `test(journal): 10k/150k perf fixture with pinned query plans`.
 
 ### Task 14: CI + full-suite gate
 
-**Files:** Create `.github/workflows/field-journal.yml` (checkout + setup-node 22, `persist-credentials: false`; runs: module tests, `test-journal-schema.js`, `test-journal-lifecycle.js`, `test-journal-perf-fixture.js`, `verify-profile-parity.js`); final full run of every gate named in Tasks 1–13.
+**Files:** Create `.github/workflows/field-journal.yml` with read-only permissions, checkout credentials disabled, and Node 22. Its authoritative run-step inventory is the complete command list in the workflow itself, not a duplicated subset in this plan; the current workflow covers both module mirrors, schema, lifecycle, API, command path, sync-contract registry, contract edge cases, command ledger, bootstrap, read-snapshot, catalog generator test/check, performance, and profile parity. Finish with every additional local gate named in Tasks 1–13.
 
 - [ ] **Step 1: write the workflow** (mirror the structure of `.github/workflows/history-router.yml`).
-- [ ] **Step 2: full suite locally** — the complete Task-1 gate list plus `node scripts/verify-sync-flow.js`, all module tests, wiring tests, perf fixture. Expected: all exit 0. Record outputs.
+- [ ] **Step 2: full suite locally** — run every command from `.github/workflows/field-journal.yml`, the complete Task-1 gate list, `node scripts/verify-sync-flow.js`, and the wiring/communication/op-parity gates. Expected: all exit 0. Record outputs.
 - [ ] **Step 3: commit** `ci(journal): field-journal workflow`, then request review per `superpowers:requesting-code-review`.
 
 ## Self-review record
