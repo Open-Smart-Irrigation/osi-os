@@ -26,3 +26,13 @@ Append-only execution log for the accepted Phase 0 and Phase 1-6 plans on `desig
   - plot reads return `{ plots: [...] }`; plot-group reads return `{ plot_groups: [...] }`.
   - plot-group aggregates expose `members`, not `member_plot_uuids`.
 - Decision: hold Track B at the Phase 1 hard stop. Continue the independent Phase 0 track. Do not rewrite the accepted plan or invent an unreviewed API contract.
+
+## 2026-07-16T00:18:08+02:00 - Phase 0 green
+
+- RED: the new catalog test failed with 44/45 passing because the default DTO leaked parsed `labels`. The plan expected the full variant to lack `definition`, but `catalog.js` already parsed labels, constraints, definitions, and composition before `catalogDto` ran.
+- Deviation: `catalogDto` now explicitly removes parsed fields for the default lightweight response and exposes them only when `includeDefinitions` is true. It reuses the existing `parsedJson` helper. This satisfies the opt-in contract without adding a duplicate parser.
+- Commits:
+  - `64da767cfd7336eebf93325f7cde4016db2d7aac` - canonical bcm2712 module and regression test.
+  - `5d3c0e76269a06358e1e5d093b020b4547c17090` - byte-identical bcm2709 mirror.
+- Orchestrator gates: API 45/45; both profile suites 99/99; lifecycle 108/108; command path 63/63; bootstrap 53/53; schema, sync contract, profile parity, and `git diff --check` exited 0.
+- sol post-check: APPROVE after a fresh rerun of the same gates. sol confirmed the deviation is required because `catalog.js` pre-populates the parsed fields.
