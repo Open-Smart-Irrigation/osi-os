@@ -66,10 +66,10 @@ start_service() {
 
     # OSI Server cloud integration env vars. UCI is canonical; .chirpstack.env is
     # a per-key compatibility fallback for older field installations.
-    gateway_identity_resolve || true
-    gateway_identity_repair_concentratord_config || true
-    gateway_identity_resolve || true
-    gateway_identity_persist || true
+    if ! gateway_identity_heal; then
+        logger -t node-red.init "gateway identity heal failed; resolving best available identity"
+        gateway_identity_resolve || true
+    fi
     local device_eui="${GATEWAY_IDENTITY_DEVICE_EUI:-$(uci -q get osi-server.cloud.device_eui 2>/dev/null || echo "")}"
     local device_eui_source="${GATEWAY_IDENTITY_DEVICE_EUI_SOURCE:-$(uci -q get osi-server.cloud.device_eui_source 2>/dev/null || echo "persisted")}"
     local device_eui_confidence="${GATEWAY_IDENTITY_DEVICE_EUI_CONFIDENCE:-$(uci -q get osi-server.cloud.device_eui_confidence 2>/dev/null || echo "provisional")}"

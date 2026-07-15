@@ -225,6 +225,13 @@ gateway_identity_persist() {
     uci commit osi-server
 }
 
+gateway_identity_heal() {
+    gateway_identity_resolve || return 1
+    gateway_identity_repair_concentratord_config || return 1
+    gateway_identity_resolve || return 1
+    gateway_identity_persist || return 1
+}
+
 gateway_identity_emit_shell() {
     printf 'DEVICE_EUI=%s\n' "$GATEWAY_IDENTITY_DEVICE_EUI"
     printf 'DEVICE_EUI_SOURCE=%s\n' "$GATEWAY_IDENTITY_DEVICE_EUI_SOURCE"
@@ -241,6 +248,10 @@ if [ "${0##*/}" = "osi-gateway-identity.sh" ] || [ "${0##*/}" = "osi-gateway-ide
         persist)
             gateway_identity_resolve || exit 1
             gateway_identity_persist || exit 1
+            gateway_identity_emit_shell
+            ;;
+        heal)
+            gateway_identity_heal || exit 1
             gateway_identity_emit_shell
             ;;
     esac

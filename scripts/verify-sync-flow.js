@@ -37,6 +37,7 @@ const sysupgradeConfPath = path.resolve(__dirname, '..', 'conf', 'full_raspberry
 const osiDbSeedPath = path.resolve(__dirname, '..', 'conf', 'full_raspberrypi_bcm27xx_bcm2712', 'files', 'etc', 'uci-defaults', '97_osi_db_seed');
 const osiNodeRedSeedPath = path.resolve(__dirname, '..', 'conf', 'full_raspberrypi_bcm27xx_bcm2712', 'files', 'etc', 'uci-defaults', '98_osi_node_red_seed');
 const installOsiOsPath = path.resolve(__dirname, '..', 'scripts', 'install-osi-os.sh');
+const gatewayIdentityHelperTestPath = path.resolve(__dirname, 'test-gateway-identity-helper.sh');
 const seedSqlPath = path.resolve(__dirname, '..', 'database', 'seed-blank.sql');
 const seedSqlSource = fs.readFileSync(seedSqlPath, 'utf8');
 const stregaCodecPath = path.resolve(__dirname, '..', 'conf', 'full_raspberrypi_bcm27xx_bcm2712', 'files', 'usr', 'share', 'node-red', 'codecs', 'strega_gen1_decoder.js');
@@ -2669,9 +2670,11 @@ pendingChecks.push((async () => {
   fail(`failed to execute VALVE_COMMAND ACK context fixture: ${error.message}`);
 }));
 expectFileIncludes('node-red.init', nodeRedInitScript, '. /usr/libexec/osi-gateway-identity.sh', 'uses the shared gateway identity helper');
-expectFileIncludes('node-red.init', nodeRedInitScript, 'gateway_identity_resolve', 'resolves the canonical gateway identity through the shared helper');
-expectFileIncludes('node-red.init', nodeRedInitScript, 'gateway_identity_repair_concentratord_config || true', 'self-heals active concentratord gateway-id state during startup');
-expectFileIncludes('node-red.init', nodeRedInitScript, 'gateway_identity_persist', 'persists canonical gateway identity metadata during startup');
+expectFileIncludes('node-red.init', nodeRedInitScript, 'gateway_identity_heal', 'heals and persists canonical gateway identity through the shared helper');
+expectFileIncludes('node-red.init', nodeRedInitScript, 'gateway identity heal failed; resolving best available identity', 'logs the exact gateway identity heal failure');
+expectFileIncludes('node-red.init', nodeRedInitScript, 'gateway_identity_resolve || true', 'resolves the best available identity after a heal failure');
+expectFileExcludes('node-red.init', nodeRedInitScript, 'gateway_identity_repair_concentratord_config || true', 'direct best-effort concentratord repair during startup');
+expectFileExcludes('node-red.init', nodeRedInitScript, 'gateway_identity_persist || true', 'direct best-effort identity persistence during startup');
 expectFileIncludes('node-red.init', nodeRedInitScript, 'normalize_runtime_eui()', 'defines a startup helper to canonicalize gateway identities before exporting them');
 expectFileIncludes('node-red.init', nodeRedInitScript, 'device_eui="$(normalize_runtime_eui "$device_eui")"', 'normalizes the runtime gateway identity to uppercase before using it for MQTT credentials');
 expectFileIncludes('node-red.init', nodeRedInitScript, 'link_gateway_device_eui="$(normalize_runtime_eui "$link_gateway_device_eui")"', 'normalizes the linked gateway identity to uppercase before exporting it');
@@ -3025,6 +3028,19 @@ expectFileIncludes('osi-gateway-identity.sh', gatewayIdentityHelperScript, 'uci 
 expectFileIncludes('osi-gateway-identity.sh', gatewayIdentityHelperScript, 'gateway_identity_try_active_concentratord_uci', 'limits static UCI gateway-id probing to the active chipset');
 expectFileIncludes('osi-gateway-identity.sh', gatewayIdentityHelperScript, 'gateway_identity_try_active_concentratord_toml', 'limits TOML gateway-id probing to the active chipset');
 expectFileIncludes('osi-gateway-identity.sh', gatewayIdentityHelperScript, 'gateway_identity_repair_concentratord_config()', 'defines startup self-healing for active concentratord gateway-id state');
+expectFileIncludes(
+  'osi-gateway-identity.sh',
+  gatewayIdentityHelperScript,
+  'gateway_identity_heal() {\n    gateway_identity_resolve || return 1\n    gateway_identity_repair_concentratord_config || return 1\n    gateway_identity_resolve || return 1\n    gateway_identity_persist || return 1\n}',
+  'defines the exact resolve-repair-resolve-persist heal order'
+);
+expectFileIncludes(
+  'osi-gateway-identity.sh',
+  gatewayIdentityHelperScript,
+  '        heal)\n            gateway_identity_heal || exit 1\n            gateway_identity_emit_shell\n            ;;',
+  'dispatches the heal command and emits the resolved shell fields'
+);
+expectFileExists(gatewayIdentityHelperTestPath, 'gateway identity helper focused test');
 expectFileIncludes('osi-gateway-identity.sh', gatewayIdentityHelperScript, 'GATEWAY_IDENTITY_DEVICE_EUI_CONFIDENCE="authoritative"', 'marks live ChirpStack-derived gateway identities as authoritative');
 expectFileIncludes('osi-gateway-identity.sh', gatewayIdentityHelperScript, 'GATEWAY_IDENTITY_DEVICE_EUI_CONFIDENCE="persisted"', 'marks previously verified gateway identities as persisted');
 expectFileIncludes('osi-gateway-identity.sh', gatewayIdentityHelperScript, 'GATEWAY_IDENTITY_DEVICE_EUI_CONFIDENCE="provisional"', 'marks MAC-derived gateway identities as provisional');
