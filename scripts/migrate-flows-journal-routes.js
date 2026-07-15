@@ -23,7 +23,40 @@ const legacyThinRouterSource = String.raw`return osiJournal.handleHttpRequest({
   warn: function(message) { node.warn(message); }
 });`;
 
-const thinRouterSource = String.raw`return osiJournal.handleHttpRequest({
+const directThinRouterSource = String.raw`return osiJournal.handleHttpRequest({
+  msg: msg,
+  Database: osiDb.Database,
+  environment: {
+    authTokenSecret: env.get('AUTH_TOKEN_SECRET'),
+    jwtSecret: env.get('JWT_SECRET'),
+    deviceEui: env.get('DEVICE_EUI'),
+    deviceEuiConfidence: env.get('DEVICE_EUI_CONFIDENCE'),
+    deviceEuiSource: env.get('DEVICE_EUI_SOURCE'),
+    edgeBuildVersion: env.get('FIRMWARE_VERSION'),
+    edgeBuildCommit: env.get('FIRMWARE_COMMIT')
+  },
+  warn: function(message) { node.warn(message); }
+});`;
+const LEGACY_ROUTE_SOURCES = {
+  'pre-build-metadata': legacyThinRouterSource,
+  'direct-helper': directThinRouterSource,
+};
+
+const thinRouterSource = String.raw`const dbLoad = osiLib.require('osi-db-helper');
+const journalLoad = osiLib.require('osi-journal');
+if (!dbLoad.ok || !journalLoad.ok) {
+  const detail = [dbLoad, journalLoad]
+    .filter(function(load) { return !load.ok; })
+    .map(function(load) { return load.error; })
+    .join('; ');
+  node.error('Journal helpers unavailable: ' + detail, msg);
+  msg.statusCode = 503;
+  msg.payload = { error: 'journal_helpers_unavailable', message: detail };
+  return msg;
+}
+const osiDb = dbLoad.value;
+const osiJournal = journalLoad.value;
+return osiJournal.handleHttpRequest({
   msg: msg,
   Database: osiDb.Database,
   environment: {
@@ -94,10 +127,7 @@ function intendedNodes() {
     noerr: 0,
     initialize: '',
     finalize: '',
-    libs: [
-      { var: 'osiDb', module: 'osi-db-helper' },
-      { var: 'osiJournal', module: 'osi-journal' },
-    ],
+    libs: [{ var: 'osiLib', module: 'osi-lib' }],
     x: 590,
     y: 400,
     wires: [['journal-api-response']],
@@ -141,8 +171,11 @@ function stable(value) {
 
 function isExactLegacyRouter(existing, intended) {
   if (!existing || existing.id !== 'journal-api-router-fn' ||
-      existing.func !== legacyThinRouterSource) return false;
-  return stable(Object.assign({}, existing, { func: thinRouterSource })) === stable(intended);
+      !Object.values(LEGACY_ROUTE_SOURCES).includes(existing.func)) return false;
+  return stable(Object.assign({}, existing, {
+    func: thinRouterSource,
+    libs: [{ var: 'osiLib', module: 'osi-lib' }],
+  })) === stable(intended);
 }
 
 function assertUnique(flows) {
@@ -188,6 +221,7 @@ function migrate(buffer) {
   let changed = false;
   if (legacyRouter) {
     legacyRouter.func = thinRouterSource;
+    legacyRouter.libs = [{ var: 'osiLib', module: 'osi-lib' }];
     changed = true;
   }
   if (!linkIn.links.includes('record-error-link-out-journal-api')) {
@@ -202,28 +236,38 @@ function migrate(buffer) {
   return changed ? Buffer.from(JSON.stringify(flows, null, 2) + '\n', 'utf8') : buffer;
 }
 
-const before = flowPaths.map((file) => fs.readFileSync(file));
-if (!before[0].equals(before[1])) throw new Error('Maintained flows are not byte-identical before migration');
-for (let index = 0; index < before.length; index += 1) {
-  const roundTripBefore = Buffer.from(
-    JSON.stringify(JSON.parse(before[index].toString('utf8')), null, 2) + '\n',
-    'utf8'
-  );
-  if (!before[index].equals(roundTripBefore)) {
-    throw new Error('Maintained flow input is not a byte-stable JSON round-trip: ' + flowPaths[index]);
+function run() {
+  const before = flowPaths.map((file) => fs.readFileSync(file));
+  if (!before[0].equals(before[1])) throw new Error('Maintained flows are not byte-identical before migration');
+  for (let index = 0; index < before.length; index += 1) {
+    const roundTripBefore = Buffer.from(
+      JSON.stringify(JSON.parse(before[index].toString('utf8')), null, 2) + '\n',
+      'utf8'
+    );
+    if (!before[index].equals(roundTripBefore)) {
+      throw new Error('Maintained flow input is not a byte-stable JSON round-trip: ' + flowPaths[index]);
+    }
   }
+  const after = migrate(before[0]);
+  const secondPass = migrate(after);
+  if (!after.equals(secondPass)) throw new Error('Journal route migration is not idempotent');
+  const roundTrip = Buffer.from(JSON.stringify(JSON.parse(after.toString('utf8')), null, 2) + '\n');
+  if (!after.equals(roundTrip)) throw new Error('Journal route migration is not stable after JSON round-trip');
+  if (after.equals(before[0])) {
+    process.stdout.write('migrate-flows-journal-routes: already current\n');
+    return;
+  }
+  for (const file of flowPaths) fs.writeFileSync(file, after);
+  if (!fs.readFileSync(flowPaths[0]).equals(fs.readFileSync(flowPaths[1]))) {
+    throw new Error('Maintained flows lost byte parity after migration');
+  }
+  process.stdout.write('migrate-flows-journal-routes: applied exact Task 10 routes\n');
 }
-const after = migrate(before[0]);
-const secondPass = migrate(after);
-if (!after.equals(secondPass)) throw new Error('Journal route migration is not idempotent');
-const roundTrip = Buffer.from(JSON.stringify(JSON.parse(after.toString('utf8')), null, 2) + '\n');
-if (!after.equals(roundTrip)) throw new Error('Journal route migration is not stable after JSON round-trip');
-if (after.equals(before[0])) {
-  process.stdout.write('migrate-flows-journal-routes: already current\n');
-  process.exit(0);
-}
-for (const file of flowPaths) fs.writeFileSync(file, after);
-if (!fs.readFileSync(flowPaths[0]).equals(fs.readFileSync(flowPaths[1]))) {
-  throw new Error('Maintained flows lost byte parity after migration');
-}
-process.stdout.write('migrate-flows-journal-routes: applied exact Task 10 routes\n');
+
+if (require.main === module) run();
+
+module.exports = {
+  LEGACY_ROUTE_SOURCES,
+  directThinRouterSource,
+  migrate,
+};

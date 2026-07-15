@@ -8694,7 +8694,7 @@
     "type": "function",
     "z": "93b1537a596e0e6d",
     "name": "Deduplicate Pending Command",
-    "func": "return (async () => {\n  const cmd = typeof msg.payload === 'string' ? JSON.parse(msg.payload) : (msg.payload || {});\n  const envelope = cmd._pendingCommandEnvelope;\n  if (!envelope || typeof envelope !== 'object') {\n    node.error('Pending command has no protected delivery envelope', msg);\n    return [null, null];\n  }\n  const gatewayEui = String(env.get('DEVICE_EUI') || '').trim().toUpperCase();\n  const db = new osiDb.Database('/data/db/farming.db');\n  const close = () => new Promise((resolve, reject) => db.close((error) => error ? reject(error) : resolve()));\n  try {\n    const result = await osiCommandLedger.deduplicatePendingCommand(db, envelope, {\n      gateway_device_eui: gatewayEui,\n      command_type_recognized: msg._commandTypeRecognized === true,\n      extraEffectBindingValidator: osiJournal.validJournalEffectBinding,\n      extraSubmittedIntentHash: osiJournal.submittedIntentHash\n    });\n    if (!result.handled) return [msg, null];\n    node.status({ fill: 'blue', shape: 'ring', text: 'duplicate command ' + String(result.ack.commandId) });\n    return [null, {\n      topic: 'devices/' + gatewayEui + '/command_ack',\n      payload: JSON.stringify(result.ack),\n      qos: 1\n    }];\n  } catch (error) {\n    node.error('Command dedupe failed closed: ' + String(error && error.message ? error.message : error), msg);\n    return [null, null];\n  } finally {\n    try {\n      await close();\n    } catch (closeError) {\n      node.warn('Command dedupe DB close failed: ' + String(closeError && closeError.message ? closeError.message : closeError));\n    }\n  }\n})();",
+    "func": "return (async () => {\n  const dbLoad = osiLib.require('osi-db-helper');\n  const journalLoad = osiLib.require('osi-journal');\n  const commandLedgerLoad = osiLib.require('osi-command-ledger');\n  if (!dbLoad.ok || !journalLoad.ok || !commandLedgerLoad.ok) {\n    const detail = [dbLoad, journalLoad, commandLedgerLoad]\n      .filter(function(load) { return !load.ok; })\n      .map(function(load) { return load.error; })\n      .join('; ');\n    node.error('Journal helpers unavailable: ' + detail, msg);\n    return [null, null];\n  }\n  const osiDb = dbLoad.value;\n  const osiJournal = journalLoad.value;\n  const osiCommandLedger = commandLedgerLoad.value;\n  const cmd = typeof msg.payload === 'string' ? JSON.parse(msg.payload) : (msg.payload || {});\n  const envelope = cmd._pendingCommandEnvelope;\n  if (!envelope || typeof envelope !== 'object') {\n    node.error('Pending command has no protected delivery envelope', msg);\n    return [null, null];\n  }\n  const gatewayEui = String(env.get('DEVICE_EUI') || '').trim().toUpperCase();\n  const db = new osiDb.Database('/data/db/farming.db');\n  const close = () => new Promise((resolve, reject) => db.close((error) => error ? reject(error) : resolve()));\n  try {\n    const result = await osiCommandLedger.deduplicatePendingCommand(db, envelope, {\n      gateway_device_eui: gatewayEui,\n      command_type_recognized: msg._commandTypeRecognized === true,\n      extraEffectBindingValidator: osiJournal.validJournalEffectBinding,\n      extraSubmittedIntentHash: osiJournal.submittedIntentHash\n    });\n    if (!result.handled) return [msg, null];\n    node.status({ fill: 'blue', shape: 'ring', text: 'duplicate command ' + String(result.ack.commandId) });\n    return [null, {\n      topic: 'devices/' + gatewayEui + '/command_ack',\n      payload: JSON.stringify(result.ack),\n      qos: 1\n    }];\n  } catch (error) {\n    node.error('Command dedupe failed closed: ' + String(error && error.message ? error.message : error), msg);\n    return [null, null];\n  } finally {\n    try {\n      await close();\n    } catch (closeError) {\n      node.warn('Command dedupe DB close failed: ' + String(closeError && closeError.message ? closeError.message : closeError));\n    }\n  }\n})();",
     "outputs": 2,
     "timeout": 0,
     "noerr": 0,
@@ -8702,16 +8702,8 @@
     "finalize": "",
     "libs": [
       {
-        "var": "osiDb",
-        "module": "osi-db-helper"
-      },
-      {
-        "var": "osiJournal",
-        "module": "osi-journal"
-      },
-      {
-        "var": "osiCommandLedger",
-        "module": "osi-command-ledger"
+        "var": "osiLib",
+        "module": "osi-lib"
       }
     ],
     "x": 1210,
@@ -8730,7 +8722,7 @@
     "type": "function",
     "z": "93b1537a596e0e6d",
     "name": "Queue REST Command ACK",
-    "func": "return (async () => {\n  let ack;\n  try {\n    ack = typeof msg.payload === 'string' ? JSON.parse(msg.payload) : (msg.payload || {});\n  } catch (parseError) {\n    node.warn('Command ACK payload parse failed: ' + String(parseError && parseError.message ? parseError.message : parseError));\n    return null;\n  }\n  const db = new osiDb.Database('/data/db/farming.db');\n  const close = () => new Promise((resolve, reject) => db.close((error) => error ? reject(error) : resolve()));\n  try {\n    const queued = await osiCommandLedger.queueCommandAck(db, ack);\n    msg.payload = JSON.stringify(queued);\n    return msg;\n  } catch (error) {\n    node.error('Failed to queue durable command ACK: ' + String(error && error.message ? error.message : error), msg);\n    return null;\n  } finally {\n    try {\n      await close();\n    } catch (closeError) {\n      node.warn('Command ACK queue DB close failed: ' + String(closeError && closeError.message ? closeError.message : closeError));\n    }\n  }\n})();",
+    "func": "return (async () => {\n  const dbLoad = osiLib.require('osi-db-helper');\n  const commandLedgerLoad = osiLib.require('osi-command-ledger');\n  if (!dbLoad.ok || !commandLedgerLoad.ok) {\n    const detail = [dbLoad, commandLedgerLoad]\n      .filter(function(load) { return !load.ok; })\n      .map(function(load) { return load.error; })\n      .join('; ');\n    node.error('Journal helpers unavailable: ' + detail, msg);\n    return null;\n  }\n  const osiDb = dbLoad.value;\n  const osiCommandLedger = commandLedgerLoad.value;\n  let ack;\n  try {\n    ack = typeof msg.payload === 'string' ? JSON.parse(msg.payload) : (msg.payload || {});\n  } catch (parseError) {\n    node.warn('Command ACK payload parse failed: ' + String(parseError && parseError.message ? parseError.message : parseError));\n    return null;\n  }\n  const db = new osiDb.Database('/data/db/farming.db');\n  const close = () => new Promise((resolve, reject) => db.close((error) => error ? reject(error) : resolve()));\n  try {\n    const queued = await osiCommandLedger.queueCommandAck(db, ack);\n    msg.payload = JSON.stringify(queued);\n    return msg;\n  } catch (error) {\n    node.error('Failed to queue durable command ACK: ' + String(error && error.message ? error.message : error), msg);\n    return null;\n  } finally {\n    try {\n      await close();\n    } catch (closeError) {\n      node.warn('Command ACK queue DB close failed: ' + String(closeError && closeError.message ? closeError.message : closeError));\n    }\n  }\n})();",
     "outputs": 1,
     "timeout": 0,
     "noerr": 0,
@@ -8738,12 +8730,8 @@
     "finalize": "",
     "libs": [
       {
-        "var": "osiDb",
-        "module": "osi-db-helper"
-      },
-      {
-        "var": "osiCommandLedger",
-        "module": "osi-command-ledger"
+        "var": "osiLib",
+        "module": "osi-lib"
       }
     ],
     "x": 620,
@@ -11375,19 +11363,15 @@
     "type": "function",
     "z": "journal-api-tab",
     "name": "Journal API Router",
-    "func": "return osiJournal.handleHttpRequest({\n  msg: msg,\n  Database: osiDb.Database,\n  environment: {\n    authTokenSecret: env.get('AUTH_TOKEN_SECRET'),\n    jwtSecret: env.get('JWT_SECRET'),\n    deviceEui: env.get('DEVICE_EUI'),\n    deviceEuiConfidence: env.get('DEVICE_EUI_CONFIDENCE'),\n    deviceEuiSource: env.get('DEVICE_EUI_SOURCE'),\n    edgeBuildVersion: env.get('FIRMWARE_VERSION'),\n    edgeBuildCommit: env.get('FIRMWARE_COMMIT')\n  },\n  warn: function(message) { node.warn(message); }\n});",
+    "func": "const dbLoad = osiLib.require('osi-db-helper');\nconst journalLoad = osiLib.require('osi-journal');\nif (!dbLoad.ok || !journalLoad.ok) {\n  const detail = [dbLoad, journalLoad]\n    .filter(function(load) { return !load.ok; })\n    .map(function(load) { return load.error; })\n    .join('; ');\n  node.error('Journal helpers unavailable: ' + detail, msg);\n  msg.statusCode = 503;\n  msg.payload = { error: 'journal_helpers_unavailable', message: detail };\n  return msg;\n}\nconst osiDb = dbLoad.value;\nconst osiJournal = journalLoad.value;\nreturn osiJournal.handleHttpRequest({\n  msg: msg,\n  Database: osiDb.Database,\n  environment: {\n    authTokenSecret: env.get('AUTH_TOKEN_SECRET'),\n    jwtSecret: env.get('JWT_SECRET'),\n    deviceEui: env.get('DEVICE_EUI'),\n    deviceEuiConfidence: env.get('DEVICE_EUI_CONFIDENCE'),\n    deviceEuiSource: env.get('DEVICE_EUI_SOURCE'),\n    edgeBuildVersion: env.get('FIRMWARE_VERSION'),\n    edgeBuildCommit: env.get('FIRMWARE_COMMIT')\n  },\n  warn: function(message) { node.warn(message); }\n});",
     "outputs": 1,
     "noerr": 0,
     "initialize": "",
     "finalize": "",
     "libs": [
       {
-        "var": "osiDb",
-        "module": "osi-db-helper"
-      },
-      {
-        "var": "osiJournal",
-        "module": "osi-journal"
+        "var": "osiLib",
+        "module": "osi-lib"
       }
     ],
     "x": 590,
@@ -11442,7 +11426,7 @@
     "type": "function",
     "z": "93b1537a596e0e6d",
     "name": "Apply Journal Command",
-    "func": "return (async () => {\n  const cmd = typeof msg.payload === 'string' ? JSON.parse(msg.payload) : (msg.payload || {});\n  const envelope = cmd._pendingCommandEnvelope;\n  if (!envelope || typeof envelope !== 'object') {\n    node.error('Journal command has no protected delivery envelope', msg);\n    return [null, null];\n  }\n  const gatewayEui = String(env.get('DEVICE_EUI') || '').trim().toUpperCase();\n  const db = new osiDb.Database('/data/db/farming.db');\n  const close = () => new Promise((resolve, reject) => db.close((error) => error ? reject(error) : resolve()));\n  try {\n    const result = await osiJournal.applyJournalCommand(db, envelope, {\n      gateway_device_eui: gatewayEui\n    });\n    if (!result.handled) return [msg, null];\n    return [null, {\n      topic: 'devices/' + gatewayEui + '/command_ack',\n      payload: JSON.stringify(result.ack),\n      qos: 1\n    }];\n  } catch (error) {\n    node.error('Journal command apply failed closed: ' + String(error && error.message ? error.message : error), msg);\n    return [null, null];\n  } finally {\n    try {\n      await close();\n    } catch (closeError) {\n      node.warn('Journal command DB close failed: ' + String(closeError && closeError.message ? closeError.message : closeError));\n    }\n  }\n})();",
+    "func": "return (async () => {\n  const dbLoad = osiLib.require('osi-db-helper');\n  const journalLoad = osiLib.require('osi-journal');\n  if (!dbLoad.ok || !journalLoad.ok) {\n    const detail = [dbLoad, journalLoad]\n      .filter(function(load) { return !load.ok; })\n      .map(function(load) { return load.error; })\n      .join('; ');\n    node.error('Journal helpers unavailable: ' + detail, msg);\n    return [null, null];\n  }\n  const osiDb = dbLoad.value;\n  const osiJournal = journalLoad.value;\n  const cmd = typeof msg.payload === 'string' ? JSON.parse(msg.payload) : (msg.payload || {});\n  const envelope = cmd._pendingCommandEnvelope;\n  if (!envelope || typeof envelope !== 'object') {\n    node.error('Journal command has no protected delivery envelope', msg);\n    return [null, null];\n  }\n  const gatewayEui = String(env.get('DEVICE_EUI') || '').trim().toUpperCase();\n  const db = new osiDb.Database('/data/db/farming.db');\n  const close = () => new Promise((resolve, reject) => db.close((error) => error ? reject(error) : resolve()));\n  try {\n    const result = await osiJournal.applyJournalCommand(db, envelope, {\n      gateway_device_eui: gatewayEui\n    });\n    if (!result.handled) return [msg, null];\n    return [null, {\n      topic: 'devices/' + gatewayEui + '/command_ack',\n      payload: JSON.stringify(result.ack),\n      qos: 1\n    }];\n  } catch (error) {\n    node.error('Journal command apply failed closed: ' + String(error && error.message ? error.message : error), msg);\n    return [null, null];\n  } finally {\n    try {\n      await close();\n    } catch (closeError) {\n      node.warn('Journal command DB close failed: ' + String(closeError && closeError.message ? closeError.message : closeError));\n    }\n  }\n})();",
     "outputs": 2,
     "timeout": 0,
     "noerr": 0,
@@ -11450,12 +11434,8 @@
     "finalize": "",
     "libs": [
       {
-        "var": "osiDb",
-        "module": "osi-db-helper"
-      },
-      {
-        "var": "osiJournal",
-        "module": "osi-journal"
+        "var": "osiLib",
+        "module": "osi-lib"
       }
     ],
     "x": 1470,

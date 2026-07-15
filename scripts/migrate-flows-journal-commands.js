@@ -97,7 +97,7 @@ const forceQueueAfter = `          const rawPayload = cmd.payload && typeof cmd.
           if (flattened.command_id == null) flattened.command_id = deliveryCommandId;
           queuedCommands.push({ payload: flattened });`;
 
-const dedupeSource = `return (async () => {
+const legacyDedupeSource = `return (async () => {
   const cmd = typeof msg.payload === 'string' ? JSON.parse(msg.payload) : (msg.payload || {});
   const envelope = cmd._pendingCommandEnvelope;
   if (!envelope || typeof envelope !== 'object') {
@@ -108,9 +108,11 @@ const dedupeSource = `return (async () => {
   const db = new osiDb.Database('/data/db/farming.db');
   const close = () => new Promise((resolve, reject) => db.close((error) => error ? reject(error) : resolve()));
   try {
-    const result = await osiJournal.deduplicatePendingCommand(db, envelope, {
+    const result = await osiCommandLedger.deduplicatePendingCommand(db, envelope, {
       gateway_device_eui: gatewayEui,
-      command_type_recognized: msg._commandTypeRecognized === true
+      command_type_recognized: msg._commandTypeRecognized === true,
+      extraEffectBindingValidator: osiJournal.validJournalEffectBinding,
+      extraSubmittedIntentHash: osiJournal.submittedIntentHash
     });
     if (!result.handled) return [msg, null];
     node.status({ fill: 'blue', shape: 'ring', text: 'duplicate command ' + String(result.ack.commandId) });
@@ -131,7 +133,57 @@ const dedupeSource = `return (async () => {
   }
 })();`;
 
-const journalApplySource = `return (async () => {
+const dedupeSource = `return (async () => {
+  const dbLoad = osiLib.require('osi-db-helper');
+  const journalLoad = osiLib.require('osi-journal');
+  const commandLedgerLoad = osiLib.require('osi-command-ledger');
+  if (!dbLoad.ok || !journalLoad.ok || !commandLedgerLoad.ok) {
+    const detail = [dbLoad, journalLoad, commandLedgerLoad]
+      .filter(function(load) { return !load.ok; })
+      .map(function(load) { return load.error; })
+      .join('; ');
+    node.error('Journal helpers unavailable: ' + detail, msg);
+    return [null, null];
+  }
+  const osiDb = dbLoad.value;
+  const osiJournal = journalLoad.value;
+  const osiCommandLedger = commandLedgerLoad.value;
+  const cmd = typeof msg.payload === 'string' ? JSON.parse(msg.payload) : (msg.payload || {});
+  const envelope = cmd._pendingCommandEnvelope;
+  if (!envelope || typeof envelope !== 'object') {
+    node.error('Pending command has no protected delivery envelope', msg);
+    return [null, null];
+  }
+  const gatewayEui = String(env.get('DEVICE_EUI') || '').trim().toUpperCase();
+  const db = new osiDb.Database('/data/db/farming.db');
+  const close = () => new Promise((resolve, reject) => db.close((error) => error ? reject(error) : resolve()));
+  try {
+    const result = await osiCommandLedger.deduplicatePendingCommand(db, envelope, {
+      gateway_device_eui: gatewayEui,
+      command_type_recognized: msg._commandTypeRecognized === true,
+      extraEffectBindingValidator: osiJournal.validJournalEffectBinding,
+      extraSubmittedIntentHash: osiJournal.submittedIntentHash
+    });
+    if (!result.handled) return [msg, null];
+    node.status({ fill: 'blue', shape: 'ring', text: 'duplicate command ' + String(result.ack.commandId) });
+    return [null, {
+      topic: 'devices/' + gatewayEui + '/command_ack',
+      payload: JSON.stringify(result.ack),
+      qos: 1
+    }];
+  } catch (error) {
+    node.error('Command dedupe failed closed: ' + String(error && error.message ? error.message : error), msg);
+    return [null, null];
+  } finally {
+    try {
+      await close();
+    } catch (closeError) {
+      node.warn('Command dedupe DB close failed: ' + String(closeError && closeError.message ? closeError.message : closeError));
+    }
+  }
+})();`;
+
+const legacyJournalApplySource = `return (async () => {
   const cmd = typeof msg.payload === 'string' ? JSON.parse(msg.payload) : (msg.payload || {});
   const envelope = cmd._pendingCommandEnvelope;
   if (!envelope || typeof envelope !== 'object') {
@@ -163,7 +215,51 @@ const journalApplySource = `return (async () => {
   }
 })();`;
 
-const queueAckSource = `return (async () => {
+const journalApplySource = `return (async () => {
+  const dbLoad = osiLib.require('osi-db-helper');
+  const journalLoad = osiLib.require('osi-journal');
+  if (!dbLoad.ok || !journalLoad.ok) {
+    const detail = [dbLoad, journalLoad]
+      .filter(function(load) { return !load.ok; })
+      .map(function(load) { return load.error; })
+      .join('; ');
+    node.error('Journal helpers unavailable: ' + detail, msg);
+    return [null, null];
+  }
+  const osiDb = dbLoad.value;
+  const osiJournal = journalLoad.value;
+  const cmd = typeof msg.payload === 'string' ? JSON.parse(msg.payload) : (msg.payload || {});
+  const envelope = cmd._pendingCommandEnvelope;
+  if (!envelope || typeof envelope !== 'object') {
+    node.error('Journal command has no protected delivery envelope', msg);
+    return [null, null];
+  }
+  const gatewayEui = String(env.get('DEVICE_EUI') || '').trim().toUpperCase();
+  const db = new osiDb.Database('/data/db/farming.db');
+  const close = () => new Promise((resolve, reject) => db.close((error) => error ? reject(error) : resolve()));
+  try {
+    const result = await osiJournal.applyJournalCommand(db, envelope, {
+      gateway_device_eui: gatewayEui
+    });
+    if (!result.handled) return [msg, null];
+    return [null, {
+      topic: 'devices/' + gatewayEui + '/command_ack',
+      payload: JSON.stringify(result.ack),
+      qos: 1
+    }];
+  } catch (error) {
+    node.error('Journal command apply failed closed: ' + String(error && error.message ? error.message : error), msg);
+    return [null, null];
+  } finally {
+    try {
+      await close();
+    } catch (closeError) {
+      node.warn('Journal command DB close failed: ' + String(closeError && closeError.message ? closeError.message : closeError));
+    }
+  }
+})();`;
+
+const legacyQueueAckSource = `return (async () => {
   let ack;
   try {
     ack = typeof msg.payload === 'string' ? JSON.parse(msg.payload) : (msg.payload || {});
@@ -174,7 +270,7 @@ const queueAckSource = `return (async () => {
   const db = new osiDb.Database('/data/db/farming.db');
   const close = () => new Promise((resolve, reject) => db.close((error) => error ? reject(error) : resolve()));
   try {
-    const queued = await osiJournal.queueCommandAck(db, ack);
+    const queued = await osiCommandLedger.queueCommandAck(db, ack);
     msg.payload = JSON.stringify(queued);
     return msg;
   } catch (error) {
@@ -189,8 +285,79 @@ const queueAckSource = `return (async () => {
   }
 })();`;
 
+const queueAckSource = `return (async () => {
+  const dbLoad = osiLib.require('osi-db-helper');
+  const commandLedgerLoad = osiLib.require('osi-command-ledger');
+  if (!dbLoad.ok || !commandLedgerLoad.ok) {
+    const detail = [dbLoad, commandLedgerLoad]
+      .filter(function(load) { return !load.ok; })
+      .map(function(load) { return load.error; })
+      .join('; ');
+    node.error('Journal helpers unavailable: ' + detail, msg);
+    return null;
+  }
+  const osiDb = dbLoad.value;
+  const osiCommandLedger = commandLedgerLoad.value;
+  let ack;
+  try {
+    ack = typeof msg.payload === 'string' ? JSON.parse(msg.payload) : (msg.payload || {});
+  } catch (parseError) {
+    node.warn('Command ACK payload parse failed: ' + String(parseError && parseError.message ? parseError.message : parseError));
+    return null;
+  }
+  const db = new osiDb.Database('/data/db/farming.db');
+  const close = () => new Promise((resolve, reject) => db.close((error) => error ? reject(error) : resolve()));
+  try {
+    const queued = await osiCommandLedger.queueCommandAck(db, ack);
+    msg.payload = JSON.stringify(queued);
+    return msg;
+  } catch (error) {
+    node.error('Failed to queue durable command ACK: ' + String(error && error.message ? error.message : error), msg);
+    return null;
+  } finally {
+    try {
+      await close();
+    } catch (closeError) {
+      node.warn('Command ACK queue DB close failed: ' + String(closeError && closeError.message ? closeError.message : closeError));
+    }
+  }
+})();`;
+
+const osiLibOnly = [{ var: 'osiLib', module: 'osi-lib' }];
+const legacyDedupeLibs = [
+  { var: 'osiDb', module: 'osi-db-helper' },
+  { var: 'osiJournal', module: 'osi-journal' },
+  { var: 'osiCommandLedger', module: 'osi-command-ledger' },
+];
+const legacyApplyLibs = [
+  { var: 'osiDb', module: 'osi-db-helper' },
+  { var: 'osiJournal', module: 'osi-journal' },
+];
+const legacyQueueLibs = [
+  { var: 'osiDb', module: 'osi-db-helper' },
+  { var: 'osiCommandLedger', module: 'osi-command-ledger' },
+];
+const LEGACY_COMMAND_SURFACES = {
+  'command-dedupe-dispatch': { func: legacyDedupeSource, libs: legacyDedupeLibs },
+  'journal-command-apply-fn': { func: legacyJournalApplySource, libs: legacyApplyLibs },
+  'command-ack-queue-rest': { func: legacyQueueAckSource, libs: legacyQueueLibs },
+};
+const expectedCommandShapeHashes = {
+  'command-dedupe-dispatch': 'cac813cf50ef6a3527e5e205ceb4330d4cf18cca15c79c89a86c4f63d867c609',
+  'journal-command-apply-fn': 'ede833ad182c0a3056d2ed1420b407c513e1f14d6ca24c72f55ee0c0c9b41de3',
+  'command-ack-queue-rest': '28368a33749674b0bc1036143c42f98dea5ea10535c437735175e83cc670650e',
+};
+
 function digest(node) {
   return crypto.createHash('sha256').update(JSON.stringify(node)).digest('hex');
+}
+
+function commandShapeDigest(node) {
+  if (!node) return null;
+  const shape = Object.assign({}, node);
+  delete shape.func;
+  delete shape.libs;
+  return digest(shape);
 }
 
 function replaceOnce(source, before, after, label) {
@@ -218,11 +385,14 @@ function assertUnique(flows) {
   }
 }
 
-function isCurrent(byId) {
+function same(value, expected) {
+  return JSON.stringify(value) === JSON.stringify(expected);
+}
+
+function commandScaffoldingIsCurrent(byId) {
   const handler = byId.get('journal-command-apply-fn');
-  return !!handler && handler.func === journalApplySource &&
-    byId.get('command-dedupe-dispatch').func === dedupeSource &&
-    byId.get('command-ack-queue-rest').func === queueAckSource &&
+  return !!handler && Object.entries(expectedCommandShapeHashes).every(([id, expected]) =>
+    commandShapeDigest(byId.get(id)) === expected) &&
     byId.get('sync-pending-split').func.includes('_pendingCommandEnvelope') &&
     !byId.get('sync-pending-split').func.includes('cmd.command_type || rawPayload.command_type') &&
     byId.get('sync-force-build').func.includes('_pendingCommandEnvelope') &&
@@ -230,6 +400,26 @@ function isCurrent(byId) {
     byId.get('cmd-type-registry').func.includes('UPSERT_JOURNAL_PLOT_GROUP:') &&
     byId.get('reject-indefinite-open').func.includes('UC512_OPEN_FOR_DURATION:') &&
     byId.get('write-strega-expectation').func.includes('UC512_OPEN_FOR_DURATION:');
+}
+
+function isCurrent(byId) {
+  if (!commandScaffoldingIsCurrent(byId)) return false;
+  const handler = byId.get('journal-command-apply-fn');
+  const dedupe = byId.get('command-dedupe-dispatch');
+  const queue = byId.get('command-ack-queue-rest');
+  return handler.func === journalApplySource && same(handler.libs, osiLibOnly) &&
+    dedupe.func === dedupeSource && same(dedupe.libs, osiLibOnly) &&
+    queue.func === queueAckSource && same(queue.libs, osiLibOnly);
+}
+
+function isLegacyDirectHelperState(byId) {
+  if (!commandScaffoldingIsCurrent(byId)) return false;
+  const handler = byId.get('journal-command-apply-fn');
+  const dedupe = byId.get('command-dedupe-dispatch');
+  const queue = byId.get('command-ack-queue-rest');
+  return handler.func === legacyJournalApplySource && same(handler.libs, legacyApplyLibs) &&
+    dedupe.func === legacyDedupeSource && same(dedupe.libs, legacyDedupeLibs) &&
+    queue.func === legacyQueueAckSource && same(queue.libs, legacyQueueLibs);
 }
 
 function addCommandRows(source, marker, includeUc512) {
@@ -245,18 +435,18 @@ function migrate(buffer) {
   const byId = new Map(flows.filter((node) => node.id).map((node) => [node.id, node]));
   if (isCurrent(byId)) return buffer;
   if (byId.has('journal-command-apply-fn')) {
-    const replay = byId.get('sync-pending-split');
-    const force = byId.get('sync-force-build');
-    const oldTypeExpression = "String(cmd.commandType || cmd.command_type || rawPayload.command_type || '')";
-    const newTypeExpression = "String(cmd.commandType || cmd.command_type || '')";
-    if (byId.get('journal-command-apply-fn').func !== journalApplySource ||
-        byId.get('command-dedupe-dispatch').func !== dedupeSource ||
-        byId.get('command-ack-queue-rest').func !== queueAckSource ||
-        !replay.func.includes(oldTypeExpression) || !force.func.includes(oldTypeExpression)) {
+    if (!isLegacyDirectHelperState(byId)) {
       throw new Error('Refusing non-exact journal command handler collision');
     }
-    replay.func = replaceOnce(replay.func, oldTypeExpression, newTypeExpression, 'replay trusted command type');
-    force.func = replaceOnce(force.func, oldTypeExpression, newTypeExpression, 'force-sync trusted command type');
+    const handler = byId.get('journal-command-apply-fn');
+    const dedupe = byId.get('command-dedupe-dispatch');
+    const queue = byId.get('command-ack-queue-rest');
+    handler.func = journalApplySource;
+    handler.libs = osiLibOnly;
+    dedupe.func = dedupeSource;
+    dedupe.libs = osiLibOnly;
+    queue.func = queueAckSource;
+    queue.libs = osiLibOnly;
     return Buffer.from(JSON.stringify(flows, null, 2) + '\n', 'utf8');
   }
   for (const [id, expected] of Object.entries(expectedNodeHashes)) {
@@ -300,18 +490,12 @@ function migrate(buffer) {
 
   const dedupe = byId.get('command-dedupe-dispatch');
   dedupe.func = dedupeSource;
-  dedupe.libs = [
-    { var: 'osiDb', module: 'osi-db-helper' },
-    { var: 'osiJournal', module: 'osi-journal' },
-  ];
+  dedupe.libs = osiLibOnly;
   dedupe.wires = [['journal-command-apply-fn'], ['9d5e3035c3d069c4']];
 
   const queue = byId.get('command-ack-queue-rest');
   queue.func = queueAckSource;
-  queue.libs = [
-    { var: 'osiDb', module: 'osi-db-helper' },
-    { var: 'osiJournal', module: 'osi-journal' },
-  ];
+  queue.libs = osiLibOnly;
 
   flows.push({
     id: 'journal-command-apply-fn',
@@ -324,10 +508,7 @@ function migrate(buffer) {
     noerr: 0,
     initialize: '',
     finalize: '',
-    libs: [
-      { var: 'osiDb', module: 'osi-db-helper' },
-      { var: 'osiJournal', module: 'osi-journal' },
-    ],
+    libs: osiLibOnly,
     x: 1470,
     y: 1060,
     wires: [['934bf2bc19a8ce22'], ['9d5e3035c3d069c4']],
@@ -336,20 +517,29 @@ function migrate(buffer) {
   return Buffer.from(JSON.stringify(flows, null, 2) + '\n', 'utf8');
 }
 
-const before = flowPaths.map((file) => fs.readFileSync(file));
-if (!before[0].equals(before[1])) throw new Error('Maintained flows are not byte-identical before migration');
-for (let index = 0; index < before.length; index += 1) {
-  const roundTrip = Buffer.from(JSON.stringify(JSON.parse(before[index].toString('utf8')), null, 2) + '\n');
-  if (!before[index].equals(roundTrip)) throw new Error('Flow input is not a byte-stable JSON round-trip');
+function run() {
+  const before = flowPaths.map((file) => fs.readFileSync(file));
+  if (!before[0].equals(before[1])) throw new Error('Maintained flows are not byte-identical before migration');
+  for (let index = 0; index < before.length; index += 1) {
+    const roundTrip = Buffer.from(JSON.stringify(JSON.parse(before[index].toString('utf8')), null, 2) + '\n');
+    if (!before[index].equals(roundTrip)) throw new Error('Flow input is not a byte-stable JSON round-trip');
+  }
+  const after = migrate(before[0]);
+  if (!after.equals(migrate(after))) throw new Error('Task 11 flow migration is not idempotent');
+  if (after.equals(before[0])) {
+    process.stdout.write('migrate-flows-journal-commands: already current\n');
+    return;
+  }
+  for (const file of flowPaths) fs.writeFileSync(file, after);
+  if (!fs.readFileSync(flowPaths[0]).equals(fs.readFileSync(flowPaths[1]))) {
+    throw new Error('Maintained flows lost byte parity after migration');
+  }
+  process.stdout.write('migrate-flows-journal-commands: applied exact Task 11 command path\n');
 }
-const after = migrate(before[0]);
-if (!after.equals(migrate(after))) throw new Error('Task 11 flow migration is not idempotent');
-if (after.equals(before[0])) {
-  process.stdout.write('migrate-flows-journal-commands: already current\n');
-  process.exit(0);
-}
-for (const file of flowPaths) fs.writeFileSync(file, after);
-if (!fs.readFileSync(flowPaths[0]).equals(fs.readFileSync(flowPaths[1]))) {
-  throw new Error('Maintained flows lost byte parity after migration');
-}
-process.stdout.write('migrate-flows-journal-commands: applied exact Task 11 command path\n');
+
+if (require.main === module) run();
+
+module.exports = {
+  LEGACY_COMMAND_SURFACES,
+  migrate,
+};

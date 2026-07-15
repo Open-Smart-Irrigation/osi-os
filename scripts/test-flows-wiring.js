@@ -9,6 +9,10 @@
 const fs = require('fs');
 const path = require('path');
 const { spawnSync } = require('child_process');
+const {
+    TASK9_OSI_LIB_NODE_POLICIES,
+    auditOsiLibBindings,
+} = require('./osi-lib-binding-audit');
 
 const flowsPath = path.resolve(
     __dirname, '../conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/flows.json'
@@ -34,6 +38,22 @@ if (journalBootstrapResult.status !== 0) {
 function hasLib(node, varName, moduleName) {
     const libs = Array.isArray(node && node.libs) ? node.libs : [];
     return libs.some((lib) => lib.var === varName && lib.module === moduleName);
+}
+
+const OSI_DB_BINDING = { variable: 'osiDb', module: 'osi-db-helper' };
+const OSI_JOURNAL_BINDING = { variable: 'osiJournal', module: 'osi-journal' };
+const OSI_COMMAND_LEDGER_BINDING = { variable: 'osiCommandLedger', module: 'osi-command-ledger' };
+
+function requireOsiLibContract(node, expectedBindings, label) {
+    if (!node || typeof node.func !== 'string') return false;
+    const audit = auditOsiLibBindings(node, expectedBindings);
+    for (const error of audit.errors) failures.push(`${label}: ${error}`);
+    let ok = audit.ok;
+    if (!/node\.error\(['"]Journal helpers unavailable:/.test(node.func)) {
+        failures.push(`${label}: must report unavailable helpers through node.error`);
+        ok = false;
+    }
+    return ok;
 }
 
 function findHttpIn(method, url) {
@@ -110,13 +130,11 @@ const journalRouter = byId['journal-api-router-fn'];
 if (!journalRouter) {
     failures.push('journal routes: missing journal-api-router-fn');
 } else {
-    const exactLibs = [
-        { var: 'osiDb', module: 'osi-db-helper' },
-        { var: 'osiJournal', module: 'osi-journal' },
-    ];
-    if (JSON.stringify(journalRouter.libs) !== JSON.stringify(exactLibs)) {
-        failures.push('journal routes: journal-api-router-fn must declare only the exact Task 10 libs');
-    }
+    requireOsiLibContract(
+        journalRouter,
+        [OSI_DB_BINDING, OSI_JOURNAL_BINDING],
+        'journal routes: journal-api-router-fn'
+    );
     if (JSON.stringify(journalRouter.wires) !== JSON.stringify([['journal-api-response']])) {
         failures.push('journal routes: router must wire to journal-api-response');
     }
@@ -153,10 +171,8 @@ for (const profile of ['bcm2712', 'bcm2709']) {
     }
     const router = profileById['journal-api-router-fn'];
     if (!router || router.func.length > 4096 ||
-        JSON.stringify(router.libs) !== JSON.stringify([
-            { var: 'osiDb', module: 'osi-db-helper' },
-            { var: 'osiJournal', module: 'osi-journal' },
-        ]) || JSON.stringify(router.wires) !== JSON.stringify([['journal-api-response']])) {
+        !auditOsiLibBindings(router, [OSI_DB_BINDING, OSI_JOURNAL_BINDING]).ok ||
+        JSON.stringify(router.wires) !== JSON.stringify([['journal-api-response']])) {
         failures.push(`journal routes ${profile}: router surface is not exact`);
     }
     const errorIn = profileById['record-error-link-in'];
@@ -210,33 +226,135 @@ for (const fallbackNodeId of ['reject-indefinite-open', 'write-strega-expectatio
         failures.push(`journal commands: ${fallbackNodeId} fallback lost UC512_OPEN_FOR_DURATION`);
     }
 }
-if (!dedupe || JSON.stringify(dedupe.libs) !== JSON.stringify([
-    { var: 'osiDb', module: 'osi-db-helper' },
-    { var: 'osiJournal', module: 'osi-journal' },
-    { var: 'osiCommandLedger', module: 'osi-command-ledger' },
-]) || JSON.stringify(dedupe.wires) !== JSON.stringify([
+if (!dedupe || !requireOsiLibContract(
+    dedupe,
+    [OSI_DB_BINDING, OSI_JOURNAL_BINDING, OSI_COMMAND_LEDGER_BINDING],
+    'journal commands: dedupe'
+) || JSON.stringify(dedupe.wires) !== JSON.stringify([
     ['journal-command-apply-fn'],
     ['9d5e3035c3d069c4'],
 ]) || !/deduplicatePendingCommand/.test(dedupe.func || '') ||
     !/node\.error/.test(dedupe.func || '') || /dispatching command/.test(dedupe.func || '')) {
     failures.push('journal commands: dedupe must delegate exact replay via the shared command ledger, fail closed, and bypass ACK reclassification');
 }
-if (!journalApply || JSON.stringify(journalApply.libs) !== JSON.stringify([
-    { var: 'osiDb', module: 'osi-db-helper' },
-    { var: 'osiJournal', module: 'osi-journal' },
-]) || JSON.stringify(journalApply.wires) !== JSON.stringify([
+if (!journalApply || !requireOsiLibContract(
+    journalApply,
+    [OSI_DB_BINDING, OSI_JOURNAL_BINDING],
+    'journal commands: applier'
+) || JSON.stringify(journalApply.wires) !== JSON.stringify([
     ['934bf2bc19a8ce22'],
     ['9d5e3035c3d069c4'],
 ]) || !/applyJournalCommand/.test(journalApply.func || '') || !/\.close\s*\(/.test(journalApply.func || '')) {
     failures.push('journal commands: journal applier must delegate, close DB, and separate fallback from durable ACK');
 }
-if (!ackQueue || JSON.stringify(ackQueue.libs) !== JSON.stringify([
-    { var: 'osiDb', module: 'osi-db-helper' },
-    { var: 'osiCommandLedger', module: 'osi-command-ledger' },
-]) || !/queueCommandAck/.test(ackQueue.func || '') ||
+if (!ackQueue || !requireOsiLibContract(
+    ackQueue,
+    [OSI_DB_BINDING, OSI_COMMAND_LEDGER_BINDING],
+    'journal commands: ACK queue'
+) || !/queueCommandAck/.test(ackQueue.func || '') ||
     /INSERT OR REPLACE INTO applied_commands/.test(ackQueue.func || '') ||
     /if \(duplicateFlag\) return 'APPLIED'/.test(ackQueue.func || '')) {
     failures.push('journal commands: legacy ACK queue must keep ledger+ACK atomic without ledger rewrite or duplicate reclassification');
+}
+
+async function runJournalHelperFailureMatrix() {
+    const cases = [
+        {
+            node: dedupe,
+            label: 'journal helper failure: dedupe',
+            helpers: ['osi-db-helper', 'osi-journal', 'osi-command-ledger'],
+            expected: [null, null],
+        },
+        {
+            node: journalApply,
+            label: 'journal helper failure: apply',
+            helpers: ['osi-db-helper', 'osi-journal'],
+            expected: [null, null],
+        },
+        {
+            node: ackQueue,
+            label: 'journal helper failure: ACK queue',
+            helpers: ['osi-db-helper', 'osi-command-ledger'],
+            expected: null,
+        },
+        {
+            node: journalRouter,
+            label: 'journal helper failure: API router',
+            helpers: ['osi-db-helper', 'osi-journal'],
+            expected: 'api-503',
+        },
+    ];
+
+    for (const testCase of cases) {
+        if (!testCase.node || typeof testCase.node.func !== 'string') {
+            failures.push(`${testCase.label}: node source is unavailable`);
+            continue;
+        }
+        const msg = {
+            payload: {
+                _pendingCommandEnvelope: {
+                    commandId: 'helper-failure-test',
+                    commandType: 'UPSERT_JOURNAL_ENTRY',
+                    payload: {},
+                },
+            },
+        };
+        const requested = [];
+        const events = [];
+        const errorCalls = [];
+        const osiLib = {
+            require(name) {
+                requested.push(name);
+                return { ok: false, error: `missing ${name}` };
+            },
+        };
+        const node = {
+            error(message, errorMsg) {
+                events.push('error');
+                errorCalls.push({ message, errorMsg });
+            },
+            warn() {},
+            status() {},
+        };
+        const env = { get() { return ''; } };
+        let result;
+        try {
+            const runner = new Function('msg', 'node', 'env', 'osiLib', testCase.node.func);
+            result = await runner(msg, node, env, osiLib);
+            events.push('return');
+        } catch (error) {
+            failures.push(`${testCase.label}: threw instead of failing closed: ${String(error && error.message ? error.message : error)}`);
+            continue;
+        }
+
+        if (JSON.stringify(requested) !== JSON.stringify(testCase.helpers)) {
+            failures.push(`${testCase.label}: expected helper loads ${JSON.stringify(testCase.helpers)}, got ${JSON.stringify(requested)}`);
+        }
+        const expectedDetail = testCase.helpers.map((name) => `missing ${name}`).join('; ');
+        if (errorCalls.length !== 1 ||
+            errorCalls[0].message !== `Journal helpers unavailable: ${expectedDetail}` ||
+            errorCalls[0].errorMsg !== msg) {
+            failures.push(`${testCase.label}: must emit one contextual node.error with the loader detail`);
+        }
+        if (events[0] !== 'error' || events[events.length - 1] !== 'return') {
+            failures.push(`${testCase.label}: must report helper failure before returning`);
+        }
+        if (testCase.expected === 'api-503') {
+            if (result !== msg || msg.statusCode !== 503 ||
+                JSON.stringify(msg.payload) !== JSON.stringify({
+                    error: 'journal_helpers_unavailable',
+                    message: expectedDetail,
+                })) {
+                failures.push(`${testCase.label}: must return msg with the exact 503 response payload`);
+            }
+        } else if (JSON.stringify(result) !== JSON.stringify(testCase.expected)) {
+            failures.push(`${testCase.label}: expected ${JSON.stringify(testCase.expected)}, got ${JSON.stringify(result)}`);
+        }
+    }
+
+    if (!failures.some((failure) => failure.startsWith('journal helper failure:'))) {
+        console.log('OK  journal helper failure paths return exact fail-closed outputs');
+    }
 }
 
 // === Fail-closed sync_outbox payload parsing ===
@@ -720,14 +838,25 @@ const helperGlobals = [
     { varName: 'osiCloudHttp', moduleName: 'osi-cloud-http', rx: /\bosiCloudHttp\./ },
     { varName: 'chameleon', moduleName: 'osi-chameleon-helper', rx: /\bchameleon\./ },
     { varName: 'dendro', moduleName: 'osi-dendro-helper', rx: /\bdendro\./ },
+    { varName: 'osiJournal', moduleName: 'osi-journal', rx: /\bosiJournal\./ },
+    { varName: 'osiCommandLedger', moduleName: 'osi-command-ledger', rx: /\bosiCommandLedger\./ },
 ];
 
 for (const node of flows) {
     if (node.type !== 'function' || typeof node.func !== 'string') continue;
     const libs = Array.isArray(node.libs) ? node.libs : [];
+    const osiLibPolicy = TASK9_OSI_LIB_NODE_POLICIES[node.id];
+    if (osiLibPolicy) {
+        const audit = auditOsiLibBindings(node, osiLibPolicy.bindings);
+        if (!audit.ok) {
+            failures.push(`${node.name || '(unnamed)'} [${node.id}] failed its reviewed osiLib source policy: ${audit.errors.join('; ')}`);
+        }
+        continue;
+    }
     for (const { varName, moduleName, rx } of helperGlobals) {
         if (!rx.test(node.func)) continue;
-        if (!libs.some((lib) => lib.var === varName && lib.module === moduleName)) {
+        const directBinding = libs.some((lib) => lib.var === varName && lib.module === moduleName);
+        if (!directBinding) {
             failures.push(`${node.name || '(unnamed)'} [${node.id}] references ${varName} without libs entry ${moduleName}`);
         }
     }
@@ -806,7 +935,8 @@ if (!disableAllSchedulesFn || typeof disableAllSchedulesFn.func !== 'string') {
     }
 }
 
-runSupportDeliveryBehaviorMatrix()
+runJournalHelperFailureMatrix()
+    .then(() => runSupportDeliveryBehaviorMatrix())
     .then(() => {
         if (failures.length > 0) {
             console.error('FAIL: ' + failures.length + ' flow wiring regression(s):');

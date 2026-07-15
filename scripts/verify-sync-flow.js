@@ -5,6 +5,10 @@ const vm = require('vm');
 const path = require('path');
 const { execFileSync } = require('child_process');
 const { createRequire } = require('module');
+const {
+  TASK9_OSI_LIB_NODE_POLICIES,
+  auditOsiLibBindings,
+} = require('./osi-lib-binding-audit');
 
 const flowPath = path.resolve(__dirname, '..', 'conf', 'full_raspberrypi_bcm27xx_bcm2712', 'files', 'usr', 'share', 'flows.json');
 const nodeRedRoot = path.resolve(__dirname, '..', 'conf', 'full_raspberrypi_bcm27xx_bcm2712', 'files', 'usr', 'share', 'node-red');
@@ -328,6 +332,9 @@ function runQuietNodeScript(scriptName, description) {
     fail(`${scriptName} failed`);
   }
 }
+
+runQuietNodeScript('osi-lib-binding-audit.test.js', 'osi-lib binding audit adversarial fixtures pass');
+runQuietNodeScript('migrate-flows-journal-generators.test.js', 'journal replay generators reject shape drift');
 
 function findNodeByName(name) {
   return flows.find((node) => node.name === name);
@@ -1205,7 +1212,8 @@ for (const id of ['9b3afb405207302e', '5f0d2b7e9b9b1b3a']) {
 // Global check: any function node that calls into a Node.js core module OR a
 // project-registered Node-RED setting module must have the symbol available at
 // runtime — either declared in the node's `libs` array, locally bound via
-// `const X = global.get('X')`, or locally bound via `const X = require('X')`.
+// `const X = global.get('X')`, locally bound via `const X = require('X')`, or
+// bound from a checked osiLib loader result (`const X = xLoad.value`).
 // Without one of those, the symbol is undefined and the function throws
 // `ReferenceError: <module> is not defined`.
 //
@@ -1225,11 +1233,20 @@ const GUARDED_MODULE_VARS = [
   'crypto', 'fs', 'path', 'os', 'net', 'http', 'https', 'url',
   // Project-registered helpers (settings.js functionGlobalContext)
   'osiDb', 'osiCloudHttp', 'chameleon', 'dendro', 'chirpstack', 'bcrypt', 'sqlite3', 'osiLib',
+  'osiJournal', 'osiCommandLedger',
 ];
 for (const node of flows) {
   if (node.type !== 'function') continue;
   const body = String(node.func || '');
   if (!body) continue;
+  const osiLibPolicy = TASK9_OSI_LIB_NODE_POLICIES[node.id];
+  if (osiLibPolicy) {
+    const audit = auditOsiLibBindings(node, osiLibPolicy.bindings);
+    if (!audit.ok) {
+      fail(`function node ${node.name || node.id} failed its reviewed osiLib source policy: ${audit.errors.join('; ')}`);
+    }
+    continue;
+  }
   const declaredLibs = new Set((node.libs || []).map((entry) => String(entry?.var || '').trim()).filter(Boolean));
   for (const mod of GUARDED_MODULE_VARS) {
     const usagePattern = new RegExp(`(?:^|[^A-Za-z0-9_$])${mod}\\.[A-Za-z_$][A-Za-z0-9_$]*\\s*\\(`);
