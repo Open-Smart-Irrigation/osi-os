@@ -27,6 +27,7 @@ export interface JournalVocabRow {
   sync_version: number;
   created_at: string;
   deleted_at: string | null;
+  catalog_errors: string[];
   labels?: Record<string, string>;
   constraints?: JsonObject | null;
 }
@@ -35,6 +36,7 @@ export interface JournalDefinitionRow {
   code: string;
   version: number;
   active: number;
+  catalog_errors: string[];
   labels?: Record<string, string>;
   definition?: JsonObject;
 }
@@ -50,6 +52,7 @@ export interface JournalProductRow {
   sync_version: number;
   created_at: string;
   deleted_at: string | null;
+  catalog_errors: string[];
   composition?: JsonObject;
 }
 
