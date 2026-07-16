@@ -55,18 +55,35 @@ describe('journalApi', () => {
       base_sync_version: 0,
       status: 'final',
       plot_uuid: '11111111-1111-4111-8111-111111111111',
+      zone_uuid: '22222222-2222-4222-8222-222222222222',
+      device_eui: 'A84041FFFF123456',
+      season_crop: 'barley',
+      season_variety: 'Golden',
+      campaign_uuid: '33333333-3333-4333-8333-333333333333',
+      protocol_code: 'soil-manage-r',
+      protocol_version: '2026.1',
+      observation_unit_code: 'plot',
+      pass_uuid: '44444444-4444-4444-8444-444444444444',
       activity_code: 'irrigation',
       template_code: 'farmer_quick',
       template_version: 1,
       layout_code: 'open_field',
       layout_version: 1,
       occurred_start_local: '2026-07-16T08:30:00',
+      occurred_end_local: '2026-07-16T08:45:00',
       occurred_timezone: 'Europe/Zurich',
+      occurred_utc_offset_minutes: 120,
+      occurred_end_utc_offset_minutes: 120,
+      duplicate_guard_ack_entry_uuid: '55555555-5555-4555-8555-555555555555',
       values: [
         {
           attribute_code: 'attr.irrigation_depth',
-          value: 12,
+          group_index: 0,
+          value_status: 'observed',
+          value_num: 12,
           unit_code: 'unit.mm_water',
+          entered_value_num: 1.2,
+          entered_unit_code: 'unit.cm_water',
         },
       ],
     };
@@ -87,6 +104,16 @@ describe('journalApi', () => {
 
     await expect(journalApi.createEntry(finalPayload)).resolves.toEqual(finalReceipt);
     expect(post).toHaveBeenCalledWith('/api/journal/entries', finalPayload);
+    expect(finalPayload.values[0]).toEqual({
+      attribute_code: 'attr.irrigation_depth',
+      group_index: 0,
+      value_status: 'observed',
+      value_num: 12,
+      unit_code: 'unit.mm_water',
+      entered_value_num: 1.2,
+      entered_unit_code: 'unit.cm_water',
+    });
+    expect(finalPayload.values[0]).not.toHaveProperty('value');
 
     await expect(journalApi.createEntry(draftPayload)).resolves.toEqual(draftReceipt);
     expect(post).toHaveBeenLastCalledWith('/api/journal/entries', draftPayload);
