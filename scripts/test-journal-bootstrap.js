@@ -292,6 +292,11 @@ function identityGlobal(options) {
     readFileSync(filePath, encoding) {
       assert.equal(filePath, restartPath);
       assert.equal(encoding, 'utf8');
+      if (restartState === 'missing') {
+        const error = new Error(`ENOENT: no such file or directory, open '${filePath}'`);
+        error.code = 'ENOENT';
+        throw error;
+      }
       if (restartState === 'malformed') return '{';
       return '{"phase":"restart_pending"}';
     },

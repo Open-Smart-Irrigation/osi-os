@@ -964,8 +964,10 @@ export interface SystemStats {
   fan_value: number | null;
   fan_max: number | null;
   restartPending?: {
-    restartAt: string;
+    restartAt: string | null;
     reason: string;
+    status?: 'blocked' | 'malformed' | 'unreadable';
+    error?: string;
   } | null;
 }
 
