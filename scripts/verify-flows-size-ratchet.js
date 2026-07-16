@@ -1,57 +1,49 @@
 #!/usr/bin/env node
 'use strict';
-// verify-flows-size-ratchet - refactor-program 1.A2, DD3.
-// Git-anchored ratchets over maintained flows.json profiles:
-// 1. Existing function nodes (by id) may not grow vs --base-ref.
-// 2. A newly-added function node must be <= NEW_NODE_CEILING.
-// 3. Per-profile total embedded function JS may only decrease.
-// 4. Large new nodes may not re-embed oversized SQL unless loading via osi-lib.
+// verify-flows-size-ratchet - refactor-program A0 (repair commit 3).
+//
+// Absolute-ceiling ratchet over maintained flows.json profiles. Earlier versions of this
+// script compared HEAD against a moving --base-ref (default origin/main) using deltas
+// recorded in the allowances file. That was a false green: once origin/main itself
+// advanced to include an allowed change, the delta-vs-base comparison stopped meaning
+// anything (base already contained the growth), so the ratchet silently stopped
+// enforcing what its own committed allowances claimed to bound. See
+// docs/superpowers/plans/2026-07-15-refactor-repair-program.md, Task A0.
+//
+// The fix: every ceiling is a committed, reviewed ABSOLUTE maximum, not a delta.
+//   1. Each "owned" function node (one with an entry in the allowances file) may not
+//      exceed its committed max_chars, ever - regardless of git history.
+//   2. Each maintained profile's total embedded function JS may not exceed the
+//      committed max_total.
+// A node with no allowances entry has no per-node ceiling of its own; it is still
+// bounded indirectly by max_total. Raising a ceiling is a reviewed, explicit edit to
+// the allowances file - there is no --write-baseline/--baseline autoregeneration path.
 const fs = require('node:fs');
 const path = require('node:path');
-const { execFileSync } = require('node:child_process');
-const {
-  nodeSizes,
-  totalChars,
-  isThinNewNode,
-  NEW_NODE_CEILING,
-  THIN_NODE_FLOOR,
-  SQL_LITERAL_MAX,
-} = require('./flows-size-scan');
+const { nodeSizes, totalChars } = require('./flows-size-scan');
 
 const repoRoot = path.resolve(__dirname, '..');
-const DEFAULT_BASE_REF = 'origin/main';
 const DEFAULT_SURFACES = [
   'conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/flows.json',
   'conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/flows.json',
 ];
-const GIT_MAX_BUFFER = 64 * 1024 * 1024;
 
 function raise(msg) { throw new Error(msg); }
 
 function parseArgs(argv) {
   const o = {
     root: repoRoot,
-    gitRoot: null,
-    baselinePath: path.join(repoRoot, 'scripts/verify-flows-size-ratchet-baseline.json'),
     allowancesPath: path.join(repoRoot, 'scripts/verify-flows-size-ratchet-allowances.json'),
     surfaces: null,
-    baseRef: null,
-    writeBaseline: false,
   };
   for (let i = 0; i < argv.length; i += 1) {
     const a = argv[i];
     if (a === '--root') o.root = path.resolve(argv[++i] || raise('--root requires a path'));
-    else if (a === '--git-root') o.gitRoot = path.resolve(argv[++i] || raise('--git-root requires a path'));
-    else if (a === '--baseline') o.baselinePath = path.resolve(argv[++i] || raise('--baseline requires a path'));
     else if (a === '--surface') (o.surfaces = o.surfaces || []).push(argv[++i] || raise('--surface requires a path'));
-    else if (a === '--base-ref') o.baseRef = argv[++i] || raise('--base-ref requires a ref');
     else if (a === '--allowances') o.allowancesPath = path.resolve(argv[++i] || raise('--allowances requires a path'));
-    else if (a === '--write-baseline') o.writeBaseline = true;
     else raise('unknown argument: ' + a);
   }
   if (!o.surfaces) o.surfaces = DEFAULT_SURFACES;
-  if (!o.gitRoot) o.gitRoot = o.root;
-  if (!o.baseRef) o.baseRef = process.env.OSI_FLOWS_SIZE_BASE_REF || DEFAULT_BASE_REF;
   return o;
 }
 
@@ -65,156 +57,180 @@ function surfaceHead(root, rel) {
   return parseFlows(fs.readFileSync(path.join(root, rel), 'utf8'));
 }
 
-function surfaceBase(gitRoot, baseRef, rel) {
+function measure(flows) {
+  return { sizes: nodeSizes(flows), total: totalChars(flows) };
+}
+
+function isPlainObject(v) {
+  return v !== null && typeof v === 'object' && !Array.isArray(v);
+}
+
+// Ceilings must be exact non-negative integers: no strings, no wildcards ("*", "~4096"),
+// no rounded/fractional approximations. A ceiling is a reviewed exact number or nothing.
+function isStrictNonNegativeInt(v) {
+  return typeof v === 'number' && Number.isFinite(v) && Number.isInteger(v) && v >= 0;
+}
+
+function isNonEmptyString(v) {
+  return typeof v === 'string' && v.trim().length > 0;
+}
+
+// JSON.parse silently collapses duplicate object keys (last write wins), which would let
+// a duplicate node id in the allowances file quietly widen or shadow a committed ceiling.
+// Brace-match the node_allowances span in the raw text and scan it for repeated keys.
+function extractObjectSpan(raw, key) {
+  const marker = new RegExp('"' + key + '"\\s*:\\s*\\{');
+  const m = marker.exec(raw);
+  if (!m) return null;
+  let depth = 0;
+  let start = -1;
+  for (let i = m.index; i < raw.length; i += 1) {
+    const c = raw[i];
+    if (c === '{') {
+      if (depth === 0) start = i + 1;
+      depth += 1;
+    } else if (c === '}') {
+      depth -= 1;
+      if (depth === 0) return raw.slice(start, i);
+    }
+  }
+  return null;
+}
+
+function findDuplicateNodeAllowanceKeys(raw) {
+  const span = extractObjectSpan(raw, 'node_allowances');
+  if (span === null) return [];
+  const keys = [...span.matchAll(/"([^"]+)"\s*:\s*\{/g)].map((m) => m[1]);
+  const seen = new Set();
+  const duplicates = new Set();
+  for (const k of keys) {
+    if (seen.has(k)) duplicates.add(k);
+    seen.add(k);
+  }
+  return [...duplicates];
+}
+
+// Loads and strictly validates the allowances file against the absolute-ceiling schema.
+// Any structural problem fails closed here, before any size is ever compared, so a single
+// malformed entry cannot silently widen or bypass the ratchet.
+function loadAllowances(allowancesPath) {
   let raw;
   try {
-    raw = execFileSync('git', ['-C', gitRoot, 'show', baseRef + ':' + rel], {
-      encoding: 'utf8',
-      stdio: ['ignore', 'pipe', 'pipe'],
-      maxBuffer: GIT_MAX_BUFFER,
-    });
+    raw = fs.readFileSync(allowancesPath, 'utf8');
   } catch (e) {
-    const stderr = e.stderr ? e.stderr.toString().trim() : e.message;
-    throw new Error('base ref unusable, failing closed: cannot read ' + rel + ' (' + baseRef + '): ' + stderr);
+    throw new Error('cannot read allowances file ' + allowancesPath + ': ' + e.message);
   }
-  return parseFlows(raw);
-}
-
-function measure(flows) {
-  const sizes = nodeSizes(flows);
-  return { sizes, total: totalChars(flows) };
-}
-
-function loadAllowances(allowancesPath) {
+  let parsed;
   try {
-    const raw = fs.readFileSync(allowancesPath, 'utf8');
-    const a = JSON.parse(raw);
-    return {
-      node: a.node_allowances || {},
-      totalDelta: (a.total_allowance && a.total_allowance.delta) || 0,
-    };
-  } catch {
-    return { node: {}, totalDelta: 0 };
+    parsed = JSON.parse(raw);
+  } catch (e) {
+    throw new Error('allowances file ' + allowancesPath + ' is not valid JSON: ' + e.message);
   }
-}
 
-function checkSurface(rel, headFlows, baseFlows, allowances) {
-  const failures = [];
-  const head = measure(headFlows);
-  const base = measure(baseFlows);
-  const allow = allowances || { node: {}, totalDelta: 0 };
+  const errors = [];
+  if (!isPlainObject(parsed)) {
+    throw new Error('allowances file ' + allowancesPath + ' must be a JSON object');
+  }
 
-  for (const [id, { chars }] of head.sizes) {
-    const baseEntry = base.sizes.get(id);
-    if (baseEntry) {
-      const nodeAllow = (allow.node[id] && allow.node[id].delta) || 0;
-      if (chars > baseEntry.chars + nodeAllow) {
-        failures.push(rel + ': node ' + id + ' grew (' + chars + ' > ' + baseEntry.chars + (nodeAllow ? ' + ' + nodeAllow + ' allowance' : '') + ' at base)');
-      }
+  for (const dup of findDuplicateNodeAllowanceKeys(raw)) {
+    errors.push('node_allowances contains a duplicate key: ' + dup);
+  }
+
+  const rawNodeAllowances = parsed.node_allowances;
+  if (!isPlainObject(rawNodeAllowances)) {
+    errors.push('node_allowances must be an object');
+  }
+  const node = {};
+  for (const [id, entry] of Object.entries(rawNodeAllowances || {})) {
+    if (!isPlainObject(entry)) {
+      errors.push('node_allowances.' + id + ': entry must be an object with max_chars and reason');
+      continue;
+    }
+    if (Object.prototype.hasOwnProperty.call(entry, 'delta')) {
+      errors.push('node_allowances.' + id + ': stale delta field found; migrate this entry to max_chars (absolute ceiling, not a base-ref delta)');
+    }
+    if (!isStrictNonNegativeInt(entry.max_chars)) {
+      errors.push('node_allowances.' + id + ': max_chars must be an exact non-negative integer (no rounding/wildcards); got ' + JSON.stringify(entry.max_chars));
+    }
+    if (!isNonEmptyString(entry.reason)) {
+      errors.push('node_allowances.' + id + ': missing reason');
+    }
+    const extraKeys = Object.keys(entry).filter((k) => k !== 'max_chars' && k !== 'reason');
+    if (extraKeys.length) {
+      errors.push('node_allowances.' + id + ': unexpected field(s) ' + extraKeys.join(', '));
+    }
+    if (isStrictNonNegativeInt(entry.max_chars) && isNonEmptyString(entry.reason)) {
+      node[id] = { max_chars: entry.max_chars, reason: entry.reason };
+    }
+  }
+
+  const total = parsed.total_allowance;
+  let maxTotal = null;
+  if (!isPlainObject(total)) {
+    errors.push('total_allowance must be an object with max_total and reason');
+  } else {
+    if (Object.prototype.hasOwnProperty.call(total, 'delta')) {
+      errors.push('total_allowance: stale delta field found; migrate to max_total (absolute ceiling, not a base-ref delta)');
+    }
+    if (!isStrictNonNegativeInt(total.max_total)) {
+      errors.push('total_allowance: max_total must be an exact non-negative integer (no rounding/wildcards); got ' + JSON.stringify(total.max_total));
     } else {
-      if (chars > NEW_NODE_CEILING) {
-        failures.push(rel + ': new node ' + id + ' exceeds the ' + NEW_NODE_CEILING + '-char ceiling (' + chars + ')');
-      }
-      const node = headFlows.find((n) => n && n.id === id);
-      const thin = isThinNewNode(node, { floor: THIN_NODE_FLOOR, sqlLiteralMax: SQL_LITERAL_MAX });
-      if (!thin.ok) failures.push(rel + ': new node ' + id + ' - ' + thin.reason);
+      maxTotal = total.max_total;
+    }
+    if (!isNonEmptyString(total.reason)) {
+      errors.push('total_allowance: missing reason');
+    }
+    const extraKeys = Object.keys(total).filter((k) => k !== 'max_total' && k !== 'reason');
+    if (extraKeys.length) {
+      errors.push('total_allowance: unexpected field(s) ' + extraKeys.join(', '));
     }
   }
-  if (head.total > base.total + allow.totalDelta) {
-    failures.push(rel + ': total embedded JS increased (' + head.total + ' > ' + base.total + (allow.totalDelta ? ' + ' + allow.totalDelta + ' allowance' : '') + ' at base)');
+
+  if (errors.length) {
+    throw new Error('invalid allowances file ' + allowancesPath + ':\n  ' + errors.join('\n  '));
   }
-  return { failures, headTotal: head.total, baseTotal: base.total };
+
+  return { node, maxTotal };
 }
 
-function buildBaseline(root, surfaces) {
-  const files = {};
-  for (const rel of surfaces) {
-    const { sizes, total } = measure(surfaceHead(root, rel));
-    files[rel] = { functionNodes: sizes.size, total };
-  }
-  return {
-    version: 1,
-    baseRef: DEFAULT_BASE_REF,
-    ceilingChars: NEW_NODE_CEILING,
-    thinNodeFloorChars: THIN_NODE_FLOOR,
-    sqlLiteralMaxChars: SQL_LITERAL_MAX,
-    notes: [
-      'DOCUMENTATION of the current per-profile function-JS totals, not the enforcement gate.',
-      'Enforcement is scripts/verify-flows-size-ratchet.js comparing HEAD against --base-ref',
-      '(default origin/main): per-node-id ceilings, per-profile total may only decrease, and',
-      'the thin-node heuristic on newly-added node ids. See the script header.',
-      'The DD3 charter cites 1,017,468 as the scoreboard start; plan-write measured 1,039,554.',
-      'The real measured baseline at introduction (origin/main @ 5e04b8a2, 2026-07-10) is',
-      '1,064,794 per profile after #117. Git-anchoring means the enforced number self-updates.',
-    ],
-    files,
-  };
-}
-
-function writeBaselineFile(o) {
-  const baseline = buildBaseline(o.root, o.surfaces);
-  fs.writeFileSync(o.baselinePath, JSON.stringify(baseline, null, 2) + '\n');
-  return baseline;
-}
-
-function verifyDocBaseline(o, allowances) {
-  const baseline = JSON.parse(fs.readFileSync(o.baselinePath, 'utf8'));
-  const allow = allowances || { node: {}, totalDelta: 0 };
+function checkSurface(rel, flows, allowances) {
   const failures = [];
-  const notes = [];
-  for (const rel of o.surfaces) {
-    const expected = (baseline.files || {})[rel];
-    const { total } = measure(surfaceHead(o.root, rel));
-    if (!expected) {
-      failures.push(rel + ': committed baseline missing this surface');
-    } else if (total > expected.total + allow.totalDelta) {
-      failures.push(rel + ': HEAD total ' + total + ' exceeds committed baseline ' + expected.total + (allow.totalDelta ? ' + ' + allow.totalDelta + ' allowance' : '') + ' (regenerate with --write-baseline if this growth is intentional and gate 1 allowed it)');
-    } else if (total < expected.total) {
-      notes.push(rel + ': HEAD total ' + total + ' is below committed baseline ' + expected.total + ' - a shrink not yet reflected in the doc (ok; refresh with --write-baseline when convenient)');
+  const { sizes, total } = measure(flows);
+  for (const [id, entry] of Object.entries(allowances.node)) {
+    const found = sizes.get(id);
+    if (!found) {
+      failures.push(rel + ': allowances entry for node ' + id + ' is unused (no such function node exists in this surface); remove the stale entry');
+      continue;
+    }
+    if (found.chars > entry.max_chars) {
+      failures.push(rel + ': node ' + id + ' is ' + found.chars + ' chars, exceeding its committed ceiling of ' + entry.max_chars + ' (+' + (found.chars - entry.max_chars) + '); update the committed max_chars if this growth was reviewed');
     }
   }
-  return { failures, notes };
+  if (total > allowances.maxTotal) {
+    failures.push(rel + ': total embedded JS is ' + total + ' chars, exceeding the committed max_total of ' + allowances.maxTotal + ' (+' + (total - allowances.maxTotal) + '); update the committed max_total if this growth was reviewed');
+  }
+  return { failures, total };
 }
 
 function run() {
   const o = parseArgs(process.argv.slice(2));
-  if (o.writeBaseline) {
-    const b = writeBaselineFile(o);
-    const t = Object.values(b.files).map((f) => f.total).join(', ');
-    console.log('verify-flows-size-ratchet: wrote baseline (per-profile totals ' + t + ') to ' + o.baselinePath);
-    return;
-  }
-
   const allowances = loadAllowances(o.allowancesPath);
   const failures = [];
-  let headTotal = 0;
-  let baseTotal = 0;
   for (const rel of o.surfaces) {
-    const head = surfaceHead(o.root, rel);
-    const base = surfaceBase(o.gitRoot, o.baseRef, rel);
-    const res = checkSurface(rel, head, base, allowances);
+    const flows = surfaceHead(o.root, rel);
+    const res = checkSurface(rel, flows, allowances);
     failures.push(...res.failures);
-    headTotal += res.headTotal;
-    baseTotal += res.baseTotal;
-    if (!res.failures.length) console.log('OK ' + rel + ' (total ' + res.headTotal + ')');
+    if (!res.failures.length) console.log('OK ' + rel + ' (total ' + res.total + ' <= max_total ' + allowances.maxTotal + ')');
   }
   if (failures.length) {
     for (const f of failures) console.error('FAIL ' + f);
     process.exit(1);
   }
-
-  const doc = verifyDocBaseline(o, allowances);
-  for (const n of doc.notes) console.log('NOTE ' + n);
-  if (doc.failures.length) {
-    for (const f of doc.failures) console.error('FAIL ' + f);
-    process.exit(1);
-  }
-
-  console.log('verify-flows-size-ratchet: OK (HEAD total ' + headTotal + ' <= ' + o.baseRef + ' total ' + baseTotal + '; committed baseline not exceeded)');
+  console.log('verify-flows-size-ratchet: OK (all owned-node and max_total ceilings held)');
 }
 
 if (require.main === module) {
   try { run(); } catch (e) { console.error('verify-flows-size-ratchet: FAIL - ' + e.message); process.exit(1); }
 }
 
-module.exports = { checkSurface, measure, buildBaseline, loadAllowances };
+module.exports = { checkSurface, measure, loadAllowances, parseFlows };

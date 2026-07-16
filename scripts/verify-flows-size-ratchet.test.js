@@ -1,202 +1,247 @@
 'use strict';
+// Tests for the absolute-ceiling flow-size ratchet (refactor-program A0 commit 3).
+// The ratchet no longer diffs against a moving git base-ref: every owned function
+// node carries a committed, reviewed absolute `max_chars` ceiling, and each profile
+// carries a committed absolute `max_total`. Both are hard maximums measured directly
+// against the current tree - no git, no baseline doc, no deltas.
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const { spawnSync, execFileSync } = require('node:child_process');
+const { spawnSync } = require('node:child_process');
 
 const repoRoot = path.resolve(__dirname, '..');
 const script = path.join(__dirname, 'verify-flows-size-ratchet.js');
 const SURFACE = 'flows.json';
-const SURFACE_ARGS = ['--surface', SURFACE];
 
-function git(dir, args) { return execFileSync('git', ['-C', dir, ...args], { encoding: 'utf8' }); }
+function tmpDir() {
+  return fs.mkdtempSync(path.join(os.tmpdir(), 'flows-size-ratchet-'));
+}
 function writeFlows(dir, nodes) {
   fs.writeFileSync(path.join(dir, SURFACE), JSON.stringify(nodes, null, 2) + '\n');
 }
-function initRepo(nodes) {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'flows-size-ratchet-'));
-  git(dir, ['init', '-q']);
-  git(dir, ['config', 'user.email', 't@e.com']);
-  git(dir, ['config', 'user.name', 'T']);
-  writeFlows(dir, nodes);
-  git(dir, ['add', '-A']);
-  git(dir, ['commit', '-q', '-m', 'base']);
-  return dir;
+function writeAllowancesRaw(dir, raw) {
+  fs.writeFileSync(path.join(dir, 'allowances.json'), raw);
 }
-function run(dir, extra = []) {
+function writeAllowances(dir, allowances) {
+  writeAllowancesRaw(dir, JSON.stringify(allowances, null, 2) + '\n');
+}
+function run(dir, extraArgs = []) {
   return spawnSync(process.execPath, [
-    script, '--root', dir, '--git-root', dir, '--base-ref', 'HEAD',
-    '--baseline', path.join(dir, 'baseline.json'),
-    '--allowances', path.join(dir, 'allowances.json'),
-    ...SURFACE_ARGS, ...extra,
+    script, '--root', dir, '--allowances', path.join(dir, 'allowances.json'),
+    '--surface', SURFACE, ...extraArgs,
   ], { cwd: dir, encoding: 'utf8' });
 }
-function writeBaseline(dir) {
-  execFileSync(process.execPath, [
-    script, '--root', dir, '--git-root', dir, '--base-ref', 'HEAD',
-    '--baseline', path.join(dir, 'baseline.json'), ...SURFACE_ARGS, '--write-baseline',
-  ], { cwd: dir });
-}
-const fn = (id, func, extra = {}) => ({ id, type: 'function', name: id, func, ...extra });
-const BASE = [fn('keep', 'return msg;'), fn('shrinkme', 'x'.repeat(200))];
 
-test('PASS when HEAD == base', () => {
-  const dir = initRepo(BASE); writeBaseline(dir);
+const fn = (id, func, extra = {}) => ({ id, type: 'function', name: id, func, ...extra });
+
+// A tiny fixture flow: one unowned node the ratchet never looks at individually,
+// and one owned node whose ceiling is exercised by the tests below.
+function fixtureNodes(ownedFunc) {
+  return [fn('unowned', 'return msg;'), fn('owned', ownedFunc)];
+}
+
+function exactAllowances(ownedChars, total, overrides = {}) {
+  return {
+    node_allowances: {
+      owned: { max_chars: ownedChars, reason: 'test: exact measured ceiling', ...overrides.owned },
+    },
+    total_allowance: { max_total: total, reason: 'test: exact measured total ceiling', ...overrides.total },
+  };
+}
+
+test('PASS at the exact measured baseline (zero headroom on both node and total ceilings)', () => {
+  const dir = tmpDir();
+  const nodes = fixtureNodes('x'.repeat(200));
+  writeFlows(dir, nodes);
+  const total = nodes.reduce((sum, n) => sum + n.func.length, 0);
+  writeAllowances(dir, exactAllowances(200, total));
   const r = run(dir);
   assert.equal(r.status, 0, r.stderr || r.stdout);
   assert.match(r.stdout, /verify-flows-size-ratchet: OK/);
 });
 
-test('PASS when an existing node shrinks and the total drops (no baseline regen needed)', () => {
-  const dir = initRepo(BASE); writeBaseline(dir);
-  writeFlows(dir, [fn('keep', 'return msg;'), fn('shrinkme', 'x'.repeat(50))]);
-  const r = run(dir);
-  assert.equal(r.status, 0, r.stderr || r.stdout);
-  assert.match(r.stdout, /below committed baseline/);
+test('FAIL when an owned node exceeds its committed max_chars by a single byte, PASS again once the ceiling is updated', () => {
+  const dir = tmpDir();
+  const nodes = fixtureNodes('x'.repeat(201)); // one byte over the 200 ceiling below
+  writeFlows(dir, nodes);
+  // Generous total headroom so only the per-node ceiling is exercised.
+  writeAllowances(dir, exactAllowances(200, 100000));
+  const over = run(dir);
+  assert.notEqual(over.status, 0, over.stdout);
+  assert.match(over.stderr, /node owned/);
+  assert.match(over.stderr, /201/);
+  assert.match(over.stderr, /200/);
+
+  // Bump the committed ceiling by exactly the amount needed - now it must pass.
+  writeAllowances(dir, exactAllowances(201, 100000));
+  const fixed = run(dir);
+  assert.equal(fixed.status, 0, fixed.stderr || fixed.stdout);
 });
 
-test('FAIL when an existing node grows', () => {
-  const dir = initRepo(BASE); writeBaseline(dir);
-  writeFlows(dir, [fn('keep', 'return msg;'), fn('shrinkme', 'x'.repeat(400))]);
-  const r = run(dir);
-  assert.notEqual(r.status, 0, r.stdout);
-  assert.match(r.stderr, /node shrinkme grew/);
-});
-
-test('FAIL when the per-profile total increases', () => {
-  const dir = initRepo(BASE); writeBaseline(dir);
-  writeFlows(dir, [...BASE, fn('newsmall', 'return 1;')]);
-  const r = run(dir);
-  assert.notEqual(r.status, 0, r.stdout);
-  assert.match(r.stderr, /total embedded JS increased/);
-});
-
-test('FAIL when a NEW node exceeds the 4096 ceiling', () => {
-  const dir = initRepo(BASE); writeBaseline(dir);
-  writeFlows(dir, [fn('keep', 'return msg;'), fn('shrinkme', 'y'.repeat(1)), fn('toobig', 'z'.repeat(5000))]);
+test('max_total is enforced independently of any per-node ceiling', () => {
+  const dir = tmpDir();
+  // "owned" stays within its own generous per-node ceiling, but the profile total
+  // (owned + unowned, which carries no ceiling of its own) exceeds max_total.
+  const nodes = [fn('unowned', 'y'.repeat(500)), fn('owned', 'x'.repeat(50))];
+  writeFlows(dir, nodes);
+  writeAllowances(dir, exactAllowances(1000, 500)); // node ceiling generous; total too tight
   const r = run(dir);
   assert.notEqual(r.status, 0, r.stdout);
-  assert.match(r.stderr, /new node toobig exceeds/);
+  assert.match(r.stderr, /total embedded JS/);
+  assert.doesNotMatch(r.stderr, /node owned/);
+
+  writeAllowances(dir, exactAllowances(1000, 550));
+  const fixed = run(dir);
+  assert.equal(fixed.status, 0, fixed.stderr || fixed.stdout);
 });
 
-test('FAIL when a large NEW node has a fat SQL literal and no osiLib (thin-node rule)', () => {
-  const dir = initRepo(BASE); writeBaseline(dir);
-  const fatSql = "const q=`SELECT " + 'a,'.repeat(400) + "b FROM device_data`;";
-  writeFlows(dir, [fn('keep', 'return msg;'), fn('shrinkme', 'y'.repeat(1)),
-    fn('fatnew', 'x'.repeat(4097) + '\n' + fatSql)]);
+test('FAIL closed on a stale delta-schema allowances file (node_allowances[*].delta)', () => {
+  const dir = tmpDir();
+  writeFlows(dir, fixtureNodes('x'.repeat(200)));
+  writeAllowances(dir, {
+    node_allowances: { owned: { delta: 100, reason: 'stale delta schema' } },
+    total_allowance: { delta: 100, reason: 'stale delta schema' },
+  });
   const r = run(dir);
   assert.notEqual(r.status, 0, r.stdout);
-  assert.match(r.stderr, /oversized SQL literal/);
+  assert.match(r.stderr, /delta/);
 });
 
-test('PASS when a large NEW node loads via osiLib.require', () => {
-  const dir = initRepo(BASE); writeBaseline(dir);
-  writeFlows(dir, [fn('keep', 'return msg;'), fn('shrinkme', 'y'.repeat(1)),
-    fn('adapter', "const h=osiLib.require('x');\n" + 'k'.repeat(4097),
-      { libs: [{ var: 'osiLib', module: 'osi-lib' }] })]);
+test('FAIL closed on a stale delta field on total_allowance even when node_allowances is migrated', () => {
+  const dir = tmpDir();
+  writeFlows(dir, fixtureNodes('x'.repeat(200)));
+  writeAllowances(dir, {
+    node_allowances: { owned: { max_chars: 200, reason: 'migrated' } },
+    total_allowance: { delta: 100, reason: 'not migrated' },
+  });
   const r = run(dir);
   assert.notEqual(r.status, 0, r.stdout);
-  assert.match(r.stderr, /new node adapter exceeds/);
-  assert.doesNotMatch(r.stderr, /oversized SQL literal/);
+  assert.match(r.stderr, /delta/);
 });
 
-test('fails closed when --base-ref is unreachable', () => {
-  const dir = initRepo(BASE); writeBaseline(dir);
+test('FAIL closed on an allowance entry for a node id that does not exist (unused entry)', () => {
+  const dir = tmpDir();
+  writeFlows(dir, fixtureNodes('x'.repeat(200)));
+  const total = 200 + 'return msg;'.length;
+  const allowances = exactAllowances(200, total);
+  allowances.node_allowances['ghost-node-id'] = { max_chars: 4096, reason: 'no longer exists' };
+  writeAllowances(dir, allowances);
+  const r = run(dir);
+  assert.notEqual(r.status, 0, r.stdout);
+  assert.match(r.stderr, /ghost-node-id/);
+  assert.match(r.stderr, /unused|does not exist/);
+});
+
+test('FAIL closed on a node_allowances entry missing a reason', () => {
+  const dir = tmpDir();
+  writeFlows(dir, fixtureNodes('x'.repeat(200)));
+  writeAllowances(dir, {
+    node_allowances: { owned: { max_chars: 200 } },
+    total_allowance: { max_total: 100000, reason: 'ok' },
+  });
+  const r = run(dir);
+  assert.notEqual(r.status, 0, r.stdout);
+  assert.match(r.stderr, /reason/);
+});
+
+test('FAIL closed on a total_allowance missing a reason', () => {
+  const dir = tmpDir();
+  writeFlows(dir, fixtureNodes('x'.repeat(200)));
+  writeAllowances(dir, {
+    node_allowances: { owned: { max_chars: 200, reason: 'ok' } },
+    total_allowance: { max_total: 100000 },
+  });
+  const r = run(dir);
+  assert.notEqual(r.status, 0, r.stdout);
+  assert.match(r.stderr, /reason/);
+});
+
+for (const [label, badValue] of [
+  ['a string ceiling', '4096'],
+  ['an approximate/wildcard-marked ceiling', '~4096'],
+  ['a wildcard ceiling', '*'],
+  ['a non-integer (rounded/fractional) ceiling', 200.5],
+  ['a negative ceiling', -1],
+]) {
+  test('FAIL closed on ' + label + ' for a node_allowances entry', () => {
+    const dir = tmpDir();
+    writeFlows(dir, fixtureNodes('x'.repeat(200)));
+    writeAllowances(dir, {
+      node_allowances: { owned: { max_chars: badValue, reason: 'ok' } },
+      total_allowance: { max_total: 100000, reason: 'ok' },
+    });
+    const r = run(dir);
+    assert.notEqual(r.status, 0, r.stdout);
+    assert.match(r.stderr, /max_chars/);
+  });
+
+  test('FAIL closed on ' + label + ' for total_allowance.max_total', () => {
+    const dir = tmpDir();
+    writeFlows(dir, fixtureNodes('x'.repeat(200)));
+    writeAllowances(dir, {
+      node_allowances: { owned: { max_chars: 200, reason: 'ok' } },
+      total_allowance: { max_total: badValue, reason: 'ok' },
+    });
+    const r = run(dir);
+    assert.notEqual(r.status, 0, r.stdout);
+    assert.match(r.stderr, /max_total/);
+  });
+}
+
+test('FAIL closed when the allowances file is missing entirely (no implicit zero-allowance fallback)', () => {
+  const dir = tmpDir();
+  writeFlows(dir, fixtureNodes('x'.repeat(200)));
   const r = spawnSync(process.execPath, [
-    script, '--root', dir, '--git-root', dir,
-    '--base-ref', 'refs/remotes/origin/does-not-exist',
-    '--baseline', path.join(dir, 'baseline.json'), ...SURFACE_ARGS,
+    script, '--root', dir, '--allowances', path.join(dir, 'nonexistent.json'), '--surface', SURFACE,
   ], { cwd: dir, encoding: 'utf8' });
   assert.notEqual(r.status, 0, r.stdout);
-  assert.match(r.stderr, /failing closed/);
 });
 
-test('gate 2: FAILS when HEAD total EXCEEDS the committed baseline (unrecorded growth)', () => {
-  const dir = initRepo(BASE); writeBaseline(dir);
-  const bp = path.join(dir, 'baseline.json');
-  const doctored = JSON.parse(fs.readFileSync(bp, 'utf8'));
-  doctored.files[SURFACE].total = 1;
-  fs.writeFileSync(bp, JSON.stringify(doctored, null, 2) + '\n');
+test('FAIL closed on an unparsable (non-JSON) allowances file', () => {
+  const dir = tmpDir();
+  writeFlows(dir, fixtureNodes('x'.repeat(200)));
+  writeAllowancesRaw(dir, '{ not valid json');
   const r = run(dir);
   assert.notEqual(r.status, 0, r.stdout);
-  assert.match(r.stderr, /exceeds committed baseline/);
 });
 
-test('PASS when a node grows within its allowance', () => {
-  const dir = initRepo(BASE); writeBaseline(dir);
-  writeFlows(dir, [fn('keep', 'return msg;'), fn('shrinkme', 'x'.repeat(300))]);
-  // shrinkme grew from 200 to 300: +100 chars. Allow it.
-  const allowances = {
-    node_allowances: { shrinkme: { delta: 100, reason: 'test growth' } },
-    total_allowance: { delta: 100, reason: 'test growth' },
-  };
-  fs.writeFileSync(path.join(dir, 'allowances.json'), JSON.stringify(allowances));
-  const r = spawnSync(process.execPath, [
-    script, '--root', dir, '--git-root', dir, '--base-ref', 'HEAD',
-    '--baseline', path.join(dir, 'baseline.json'),
-    '--allowances', path.join(dir, 'allowances.json'),
-    ...SURFACE_ARGS,
-  ], { cwd: dir, encoding: 'utf8' });
-  assert.equal(r.status, 0, r.stderr || r.stdout);
-});
-
-test('FAIL when a node grows beyond its allowance', () => {
-  const dir = initRepo(BASE); writeBaseline(dir);
-  writeFlows(dir, [fn('keep', 'return msg;'), fn('shrinkme', 'x'.repeat(400))]);
-  // shrinkme grew from 200 to 400: +200 chars. Only allow 50.
-  const allowances = {
-    node_allowances: { shrinkme: { delta: 50, reason: 'not enough' } },
-    total_allowance: { delta: 200, reason: 'total ok' },
-  };
-  fs.writeFileSync(path.join(dir, 'allowances.json'), JSON.stringify(allowances));
-  const r = spawnSync(process.execPath, [
-    script, '--root', dir, '--git-root', dir, '--base-ref', 'HEAD',
-    '--baseline', path.join(dir, 'baseline.json'),
-    '--allowances', path.join(dir, 'allowances.json'),
-    ...SURFACE_ARGS,
-  ], { cwd: dir, encoding: 'utf8' });
-  assert.notEqual(r.status, 0, r.stdout);
-  assert.match(r.stderr, /node shrinkme grew/);
-  assert.match(r.stderr, /allowance/);
-});
-
-test('PASS with total allowance when total increases within delta', () => {
-  const dir = initRepo(BASE); writeBaseline(dir);
-  writeFlows(dir, [...BASE, fn('newsmall', 'return 1;')]);
-  const allowances = {
-    node_allowances: {},
-    total_allowance: { delta: 100, reason: 'small addition' },
-  };
-  fs.writeFileSync(path.join(dir, 'allowances.json'), JSON.stringify(allowances));
-  // Regenerate baseline to account for the added node in doc check
-  const r = spawnSync(process.execPath, [
-    script, '--root', dir, '--git-root', dir, '--base-ref', 'HEAD',
-    '--baseline', path.join(dir, 'baseline.json'),
-    '--allowances', path.join(dir, 'allowances.json'),
-    ...SURFACE_ARGS,
-  ], { cwd: dir, encoding: 'utf8' });
-  assert.equal(r.status, 0, r.stderr || r.stdout);
-});
-
-test('missing allowances file is treated as zero allowances', () => {
-  const dir = initRepo(BASE); writeBaseline(dir);
-  writeFlows(dir, [fn('keep', 'return msg;'), fn('shrinkme', 'x'.repeat(400))]);
-  const r = spawnSync(process.execPath, [
-    script, '--root', dir, '--git-root', dir, '--base-ref', 'HEAD',
-    '--baseline', path.join(dir, 'baseline.json'),
-    '--allowances', path.join(dir, 'nonexistent.json'),
-    ...SURFACE_ARGS,
-  ], { cwd: dir, encoding: 'utf8' });
-  assert.notEqual(r.status, 0, r.stdout);
-  assert.match(r.stderr, /node shrinkme grew/);
-});
-
-test('accepts the committed shipped baseline against origin/main', () => {
-  assert.equal(fs.existsSync(path.join(repoRoot, 'scripts/verify-flows-size-ratchet-baseline.json')), true,
-    'baseline must be committed');
+test('the shipped committed allowances file has no node with an entry for a node id absent from the real flows.json surfaces, and the real script passes against the real repo', () => {
   const r = spawnSync(process.execPath, [script], { cwd: repoRoot, encoding: 'utf8' });
   assert.equal(r.status, 0, r.stderr || r.stdout);
   assert.match(r.stdout, /verify-flows-size-ratchet: OK/);
+});
+
+test('the committed allowances file contains no legacy delta fields anywhere', () => {
+  const raw = fs.readFileSync(path.join(repoRoot, 'scripts/verify-flows-size-ratchet-allowances.json'), 'utf8');
+  assert.doesNotMatch(raw, /"delta"\s*:/);
+});
+
+test('the stale baseline doc file no longer exists', () => {
+  assert.equal(fs.existsSync(path.join(repoRoot, 'scripts/verify-flows-size-ratchet-baseline.json')), false,
+    'scripts/verify-flows-size-ratchet-baseline.json must be deleted (git rm) as part of the absolute-ceiling migration');
+});
+
+test('the rewritten script rejects every removed baseline/delta CLI flag as an unknown argument', () => {
+  const dir = tmpDir();
+  writeFlows(dir, fixtureNodes('x'.repeat(200)));
+  const total = 200 + 'return msg;'.length;
+  writeAllowances(dir, exactAllowances(200, total));
+  for (const removedFlag of ['--baseline', '--write-baseline', '--base-ref', '--git-root']) {
+    const r = run(dir, [removedFlag, 'x']);
+    assert.notEqual(r.status, 0, `${removedFlag} must no longer be accepted: ${r.stdout}`);
+    assert.match(r.stderr, /unknown argument/);
+  }
+  // --write-baseline takes no value argument; exercise it standalone too.
+  const standalone = run(dir, ['--write-baseline']);
+  assert.notEqual(standalone.status, 0, standalone.stdout);
+  assert.match(standalone.stderr, /unknown argument/);
+});
+
+test('the module no longer exports the removed baseline-authoring functions', () => {
+  delete require.cache[require.resolve('./verify-flows-size-ratchet.js')];
+  const mod = require('./verify-flows-size-ratchet.js');
+  assert.equal(mod.buildBaseline, undefined);
+  assert.equal(mod.verifyDocBaseline, undefined);
 });
