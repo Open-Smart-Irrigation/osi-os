@@ -101,3 +101,132 @@ sol reviews against the plan, so when the plan itself drifts from the source spe
 doc and UX addendum), sol will not catch it — F5 is an instance. Where an amended task
 reworders an adopted U- or P- decision, keep the addendum's wording in the task text so the
 drift is visible at review time.
+
+---
+
+# Task 14 external review — CHANGES REQUIRED (2026-07-16)
+
+Reviewed `6ede2ff2` (feature) and `31082aae` (notes). Every claimed gate was re-run
+independently and matched exactly: tsx-runner 93/93, Vitest 921/921 across 121 files,
+TypeScript clean, production build green, preview suite 7/7, edge 45/45, worktree clean.
+The reported numbers are accurate.
+
+**The browser-evidence blocker is resolved.** The controller could not drive its in-app
+browser (`browser-client is not trusted`). The reviewer ran the required verification
+externally with Playwright/Chromium against the committed preview at both required
+viewports. Task 14's own scope passes:
+
+- 320x568 and 360x640, journal timeline and zone-preselected capture: **no horizontal page
+  scroll** (scrollWidth == clientWidth at both).
+- Capture flow: 8 controls at >=56px; confirmation content visible.
+- Keyboard focus order is sane and fully visible: Close, Search activities, activity grid,
+  Browse all, Back. No focus traps, no off-screen stops.
+- No page errors on the journal path.
+
+The preview harness itself is sound: it compiles the **real** Agroscope catalog and runs
+final payloads through the shipped edge validator, and it refuses to start without an
+explicit `TASK14_PREVIEW=1` opt-in. Screenshots are reviewer-side artifacts, not committed.
+
+**Verdict: Task 14 is NOT ready to merge. F6 must be fixed. The phase-gate hold was correct.**
+
+## F6 — IMPORTANT, Task 14's own code: a user's crop edit is silently discarded
+
+`JournalCaptureFlow.tsx` `payloadValues` (the `if (cropValue)` block, added by `6ede2ff2`)
+unconditionally overwrites `attr.crop:0` with the zone-derived crop **after** form
+validation. The full-record layout renders `attr.crop` as an editable choice control seeded
+with that same value, and no path syncs a form edit back to `crop` state.
+
+Reproduced with a temporary probe against the committed code (probe removed; worktree left
+clean):
+
+| step | observed |
+|---|---|
+| seeded from zone | `agroscope.crop.barley_winter` |
+| user edits the control to | `agroscope.crop.barley_spring` (control displays the edit) |
+| **sent in the final payload** | **`agroscope.crop.barley_winter`** |
+
+Failure scenario: a zone-linked plot whose zone crop label says winter barley, a farmer
+using Full record who corrects the crop to spring barley. The control accepts and shows the
+correction, then the payload reverts it. The farm record stores the wrong crop. This record
+is intended to support compliance profiles later, so a wrong crop is a real-world data
+defect, not a cosmetic one. The confirmation step does render the payload value, so an
+attentive user can catch it — that is a mitigation, not a fix: the control is a dead end
+that accepts input and throws it away.
+
+Required: the zone crop must **seed** the field, not **override** it. Apply the zone value
+as an initial form value and let the form own it thereafter, or apply the override only when
+the form supplies no explicit `attr.crop`. Keep the existing label-to-code mapping and the
+unmatched-label fallback to `season_crop` exactly as they are — that part is correct.
+
+Missing regression to add: edit the seeded full-record crop control, finalize, and assert
+the **edited** code reaches the payload. The current test
+(`seeds a mapped zone crop into the editable full-record crop choice`) asserts the seed and
+never edits it, which is why the defect passed 921 green tests.
+
+## F7 — IMPORTANT, evidence gap: the 5-tap SLA is not evidenced for the shipped default layout
+
+The five-activation test counts genuine user activations on role-visible controls, ends on a
+rendered `Saved on farm gateway` receipt, and asserts a single final write. The counting
+method is honest. Its **fixture** is not representative:
+
+- The test fixture declares `minimum_fields: []` and empty template `requirements`.
+- `templateEngine` marks layout `minimum_fields` as **required** (`addField(field, true)`).
+- Shipped layouts: `open_field` **4** required minimum_fields
+  (`attr.block_bed_row`, `attr.treated_area`, `attr.cover_type`, `attr.denominator`),
+  `greenhouse` **6**, `lysimeter` **12**, `agroscope_open_field` **0**.
+- `farmer_quick.carry_forward` is only `operator`/`equipment`/`method` — it prefills **none**
+  of those minimum_fields.
+- Task 14's **own preview fixture uses `layout_code: 'open_field'`**, i.e. the run's own
+  realistic default is a layout the SLA test does not model.
+
+So `<=5` is demonstrated only for a zero-minimum-field layout. On `open_field` the user must
+additionally satisfy four required fields that nothing prefills, and the gate cannot detect
+the gap. This is not necessarily a code defect — it may be a catalog/product question about
+whether `open_field` is the right default or whether those fields should carry forward — but
+the headline SLA claim is currently unevidenced for the default path.
+
+Required: re-run the activation counter against an `open_field`-shaped fixture (4 required
+minimum_fields, `farmer_quick` carry-forward) and report the true count. Do **not** edit
+catalog data or migrations to make the number smaller (N1/N2 remain out of scope). If the
+count exceeds five on the shipped default, stop and report it as a product question with the
+measured number; that is a legitimate hard stop.
+
+## Minor — no action required this task, recorded for later
+
+- `canonicalCropValue` returns raw free text when `attr.crop` is absent or non-choice, while
+  `withCanonicalContextCrop` gates on `value_type === 'choice'`. The payload injection does
+  not gate. Unreachable with the shipped catalog (0019 ships a choice-typed `attr.crop`), and
+  the edge rejects `invalid_choice` regardless. Fixing F6 likely removes this seam anyway.
+- The confirm-layout assertions use `not.toHaveClass('flex-nowrap', 'overflow-x-auto')`, a
+  negated conjunction that passes when only one forbidden class is present. The positive
+  `flex flex-wrap` and inline `minHeight` checks carry the real weight. jsdom cannot prove
+  computed layout — the reviewer's browser pass now covers that.
+
+## Not Task 14's — reviewer-owned, do NOT act on these
+
+The browser pass surfaced two defects in the **shared AppHeader** (design work that predates
+this run; `6ede2ff2` did not touch `AppHeader.tsx` and changed only the Add menu's navigate
+target). Recorded here for traceability; the human owns them:
+
+- The AppHeader actions row (`flex items-center justify-end gap-2 sm:gap-3`) does not wrap,
+  while its parent container does. On the Zones page the extra Add button pushes the row to
+  373px, so the page scrolls horizontally below ~389px: 320px `+65px`, 360px `+29px`,
+  375px `+14px`; 390px and up are clean. The Journal page, same header without an extra
+  action, never overflows at any width — which isolates the cause. Adding `flex-wrap` to that
+  container clears it at 320/360/375/390 (verified in-browser).
+- Header controls (tabs, Settings, Account) measure 38.5px tall, below the 44px touch
+  minimum the capture flow itself honours.
+
+## Note for the remaining phases
+
+Two review blind spots compound, and both showed up here:
+
+1. sol reviews against the plan, so plan-to-spec drift is invisible to it (F5).
+2. sol reviews against the **fixtures the task itself defines**, so a fixture that is easier
+   than the shipped catalog makes a green gate meaningless (F7). Where a task asserts a
+   product SLA, the fixture must match shipped catalog data, or the assertion proves nothing.
+
+F6 is a third pattern worth naming: a test that asserts a value is *seeded* into an editable
+control, without ever editing it, will not notice that the control is a dead end. When a
+field is both prefilled and user-editable, the regression must edit it and assert the edited
+value survives to the payload.
