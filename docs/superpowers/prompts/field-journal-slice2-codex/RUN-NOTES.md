@@ -90,3 +90,11 @@ Append-only execution log for the accepted Phase 0 and Phase 1-6 plans on `desig
 - The amended tasks now cover every shipped definition and dependency shape, typed activity/dependent-choice leaves with paged season derivation, exact canonical-plus-entered numeric rows, cursor-paged stored-draft carry-forward, explicit template/farm-layout choices, warn-once duplicate UX, typed zone UUID/timezone normalization, exact test paths, and a zone-CTA-inclusive five-tap gate.
 - A second review caught and closed the last two details: numeric rows omit generic `value` and submit canonical `value_num` beside entered audit facts; Task 13 owns deterministic paged season/common and no-history fallback inputs.
 - sol final preflight: ACCEPT. Anti-slop reports no tier-1 findings and `git diff --check` is clean. Phase 3 may begin at Task 8.
+
+## 2026-07-16T02:55:00+02:00 - Phase 3 Task 8 complete
+
+- `e3644ccd` adds the browser-safe catalog model, template engine, unit conversion, activity-leaf derivation, DST occurrence resolver, complete write DTO, and the single shared Phase 3 locale tree.
+- Execution deviation: the first broad worker attempt stalled without changing files. Task 8 was split into disjoint 8A catalog/template and 8B occurrence/API/locale scopes; neither worker staged, and the orchestrator integrated one exact 17-file commit. This avoided another shared-index race.
+- Initial RED was five missing/contract suites. Review-driven RED added 14 fail-closed predicate/constraint/fixture cases, two empty unit-metadata cases, and two inactive/deleted activity cases.
+- sol specification review required edge-parity predicate domains, numeric metadata validation, canonical generated fixtures, typed `carry_forward`, and non-empty unit facts. The final specification verdict is APPROVE. The separate quality review required inactive/deleted activity filtering and a string-only dependent-choice type; final quality verdict is APPROVE.
+- Canonical tests compile `journal-catalog-core.js` with the real Agroscope catalog and exercise the generated REST DTO and cascade. Final gates: Task 8 focused 59/59, full unit 93/93 tsx plus 643/643 Vitest across 109 files, TypeScript clean, anti-slop no tier-1 findings, and `git diff --check` clean.
