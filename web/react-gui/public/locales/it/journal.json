@@ -63,7 +63,7 @@
       "noPlot": "Nessuna particella",
       "linkedZone": "Collegata a una zona sensore",
       "sensorless": "Nessuna zona sensore collegata",
-      "growingSetting": "Impostazione colturale",
+      "layout": "Layout",
       "timezone": "Fuso orario"
     },
     "picker": {
@@ -77,7 +77,7 @@
       "searchPlaceholder": "Cerca per nome o codice",
       "browseAll": "Sfoglia tutte",
       "noResults": "Nessuna attività corrispondente",
-      "unsupported": "Questa attività non è disponibile per l'impostazione colturale selezionata"
+      "unsupported": "Questa attività non è disponibile per il layout selezionato"
     },
     "form": {
       "title": "Dettagli attività",
@@ -85,7 +85,7 @@
       "quick": "Rapido",
       "full": "Completo",
       "research": "Ricerca",
-      "growingSetting": "Impostazione colturale",
+      "layout": "Layout",
       "required": "Obbligatorio",
       "optional": "Facoltativo",
       "select": "Seleziona un'opzione",
@@ -111,7 +111,7 @@
       "crossBasis": "Questa unità utilizza una base di misura diversa",
       "invalidDependency": "Le opzioni selezionate non formano una combinazione valida",
       "invalidDefinition": "Questo modulo del diario non è disponibile",
-      "layoutTemplateMismatch": "Questo livello di dettaglio non è disponibile per l'impostazione colturale selezionata",
+      "layoutTemplateMismatch": "Questo livello di dettaglio non è disponibile per il layout selezionato",
       "cropRequired": "Inserisci una coltura perché nessuna stagione attiva copre questa particella",
       "invalidLocalTime": "Inserisci una data e un'ora locali valide",
       "invalidTimezone": "Seleziona un fuso orario supportato",
@@ -130,14 +130,14 @@
       "rate": "Dose",
       "useValues": "Usa questi valori",
       "dismiss": "Non copiare",
-      "invalidated": "Il trattamento precedente non corrisponde più a questa particella, coltura, orario, stagione o impostazione colturale"
+      "invalidated": "Il trattamento precedente non corrisponde più a questa particella, coltura, orario, stagione o layout"
     },
     "confirm": {
       "title": "Controlla prima di salvare",
       "activity": "Attività",
       "plot": "Particella",
       "farmLevel": "Intera azienda",
-      "layout": "Impostazione colturale",
+      "layout": "Layout",
       "occurrence": "Quando",
       "values": "Dettagli",
       "edit": "Modifica",

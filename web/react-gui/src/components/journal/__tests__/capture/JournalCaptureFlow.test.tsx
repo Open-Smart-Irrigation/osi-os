@@ -843,7 +843,7 @@ describe('JournalCaptureFlow', () => {
 
   it('requires an explicit growing setting for farm-level capture', () => {
     render(<JournalCaptureFlow {...baseProps} plots={[]} />);
-    const layout = screen.getByRole('combobox', { name: 'capture.where.growingSetting' });
+    const layout = screen.getByRole('combobox', { name: 'capture.where.layout' });
     expect(layout).toHaveValue('');
     fireEvent.click(screen.getByRole('button', { name: 'capture.next' }));
     expect(screen.getByRole('alert')).toHaveTextContent('capture.validation.invalidDefinition');
@@ -2093,7 +2093,7 @@ describe('JournalCaptureFlow', () => {
 
   it('sanitizes values hidden by the next growing setting before returning to details', async () => {
     render(<JournalCaptureFlow {...baseProps} catalog={layoutSanitizationCatalog} />);
-    fireEvent.change(screen.getByRole('combobox', { name: 'capture.where.growingSetting' }), {
+    fireEvent.change(screen.getByRole('combobox', { name: 'capture.where.layout' }), {
       target: { value: 'greenhouse' },
     });
     fireEvent.click(screen.getByRole('button', { name: 'capture.next' }));
@@ -2106,7 +2106,7 @@ describe('JournalCaptureFlow', () => {
     await waitFor(() => expect(screen.getByRole('heading', { name: 'capture.confirm.title' })).toBeInTheDocument());
 
     fireEvent.click(screen.getByRole('button', { name: /greenhouse/ }));
-    fireEvent.change(screen.getByRole('combobox', { name: 'capture.where.growingSetting' }), {
+    fireEvent.change(screen.getByRole('combobox', { name: 'capture.where.layout' }), {
       target: { value: 'open_field' },
     });
     fireEvent.click(screen.getByRole('button', { name: 'capture.next' }));

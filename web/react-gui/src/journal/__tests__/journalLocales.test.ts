@@ -30,23 +30,34 @@ function flatten(value: unknown, prefix = ''): Array<[string, string]> {
  * the test here asserted `resource.capture` *equalled* English — pinning the
  * placeholder in place. Assert on values, and make every shared string explicit.
  */
+/**
+ * "Layout" is deliberately the same word in every locale (product decision
+ * 2026-07-16). A layout is a neutral, extensible container — v1 happens to ship
+ * cultivation settings (open field, greenhouse, lysimeter), but a future layout
+ * may mean something else entirely, so the label must not bake "growing" into
+ * it. It was previously "Growing setting", which no locale could translate
+ * consistently: "setting" reads as either configuration or environment, and the
+ * six translators split evenly between those two meanings.
+ */
+const LAYOUT_KEYS = ['capture.confirm.layout', 'capture.form.layout', 'capture.where.layout'];
+
 const SHARED_WITH_ENGLISH: Record<string, readonly string[]> = {
   // Fertigation: international agronomic loanword, unchanged even in de-CH, which
   // otherwise translates freely (Fertilization -> Düngung). Optional/Details:
   // genuine German words. Final: the record-state loanword, beside Entwurf/Storniert.
-  'de-CH': ['activity.fertigation', 'capture.confirm.values', 'capture.form.optional', 'row.status.final'],
+  'de-CH': [...LAYOUT_KEYS, 'activity.fertigation', 'capture.confirm.values', 'capture.form.optional', 'row.status.final'],
   // Irrigation/Fertigation/Observation are spelled identically in French; Final
   // agrees with the implicit masculine "statut", beside Brouillon/Annulé.
-  fr: ['activity.fertigation', 'activity.general_observation', 'activity.irrigation', 'row.status.final'],
+  fr: [...LAYOUT_KEYS, 'activity.fertigation', 'activity.general_observation', 'activity.irrigation', 'row.status.final'],
   // "Note" (pl. of nota) and "No" are the correct Italian words.
-  it: ['capture.form.booleanNo', 'capture.form.note'],
+  it: [...LAYOUT_KEYS, 'capture.form.booleanNo', 'capture.form.note'],
   // "No" is identical in Spanish.
-  es: ['capture.form.booleanNo'],
+  es: [...LAYOUT_KEYS, 'capture.form.booleanNo'],
   // "Final" is the correct Portuguese word for this record state.
-  pt: ['row.status.final'],
+  pt: [...LAYOUT_KEYS, 'row.status.final'],
   // Fertigation has no vernacular Luganda equivalent; Timezone is a computing
   // term the shipped lg files also leave in English.
-  lg: ['activity.fertigation', 'capture.where.timezone'],
+  lg: [...LAYOUT_KEYS, 'activity.fertigation', 'capture.where.timezone'],
 };
 
 const REQUIRED_CAPTURE_KEYS = [
@@ -83,8 +94,8 @@ const REQUIRED_CAPTURE_KEYS = [
   'capture.form.derivedNutrients',
   'capture.form.detailLevel',
   'capture.form.full',
-  'capture.form.growingSetting',
   'capture.form.increase',
+  'capture.form.layout',
   'capture.form.noProducts',
   'capture.form.note',
   'capture.form.optional',
@@ -135,7 +146,7 @@ const REQUIRED_CAPTURE_KEYS = [
   'capture.validation.nonexistentLocalTime',
   'capture.validation.required',
   'capture.where.farmLevel',
-  'capture.where.growingSetting',
+  'capture.where.layout',
   'capture.where.linkedZone',
   'capture.where.noPlot',
   'capture.where.plot',

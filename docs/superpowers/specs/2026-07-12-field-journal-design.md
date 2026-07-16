@@ -261,7 +261,9 @@ Picker model, search, ranking, and product-first entry are governed by the UX ad
 
 ### 6.2 Templates × layouts
 
-Separate controls: **"Detail level: Quick | Full | Research"** (template) and **"Growing setting"** (layout — a plot property per §4.5, passive badge, changed in plot settings or explicit per-entry override). Template depth rule (P3): quick picks shortlist leaves with defaults auto-resolved and visible; full shows all in-scope attributes; research requires the full explicit path, no silent defaults, identity/treatment fields shown.
+Separate controls: **"Detail level: Quick | Full | Research"** (template) and **"Layout"** (a plot property per §4.5, passive badge, changed in plot settings or explicit per-entry override).
+
+> **Label decision (product owner, 2026-07-16):** this control is labelled **"Layout"**, not "Growing setting", in the UI and the code alike. A layout is a neutral, extensible container: v1 ships cultivation settings (`open_field`, `greenhouse`, `lysimeter`), but a future layout may carry a different meaning entirely, so the label must not bake "growing" into the axis. "Growing setting" was also untranslatable — "setting" reads as either *configuration* or *environment*, and six independent translators split evenly between those readings. "Layout" stays the same word in all seven locales by design. Template depth rule (P3): quick picks shortlist leaves with defaults auto-resolved and visible; full shows all in-scope attributes; research requires the full explicit path, no silent defaults, identity/treatment fields shown.
 
 **Transition semantics (UX-3):** template switches retain valid hidden values and expose an "N extra details saved" drawer. Layout changes show a review sheet of now-disallowed activities/choices/values and **block finalization** until the user keeps the old setting, replaces the invalid item, or explicitly removes it. Plot + layout are repeated in the final confirmation strip.
 

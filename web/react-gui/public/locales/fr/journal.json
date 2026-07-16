@@ -63,7 +63,7 @@
       "noPlot": "Aucune parcelle",
       "linkedZone": "Liée à une zone de capteurs",
       "sensorless": "Aucune zone de capteurs liée",
-      "growingSetting": "Mode de culture",
+      "layout": "Layout",
       "timezone": "Fuseau horaire"
     },
     "picker": {
@@ -77,7 +77,7 @@
       "searchPlaceholder": "Rechercher par nom ou code",
       "browseAll": "Parcourir tout",
       "noResults": "Aucune activité correspondante",
-      "unsupported": "Cette activité n'est pas disponible pour le mode de culture sélectionné"
+      "unsupported": "Cette activité n'est pas disponible pour le layout sélectionné"
     },
     "form": {
       "title": "Détails de l'activité",
@@ -85,7 +85,7 @@
       "quick": "Rapide",
       "full": "Complet",
       "research": "Recherche",
-      "growingSetting": "Mode de culture",
+      "layout": "Layout",
       "required": "Obligatoire",
       "optional": "Facultatif",
       "select": "Sélectionner une option",
@@ -111,7 +111,7 @@
       "crossBasis": "Cette unité utilise une base de mesure différente",
       "invalidDependency": "Les options sélectionnées ne forment pas une combinaison valide",
       "invalidDefinition": "Ce formulaire de journal n'est pas disponible",
-      "layoutTemplateMismatch": "Ce niveau de détail n'est pas disponible pour le mode de culture sélectionné",
+      "layoutTemplateMismatch": "Ce niveau de détail n'est pas disponible pour le layout sélectionné",
       "cropRequired": "Saisissez une culture, car aucune saison active ne couvre cette parcelle",
       "invalidLocalTime": "Saisissez une date et une heure locales valides",
       "invalidTimezone": "Sélectionnez un fuseau horaire pris en charge",
@@ -130,14 +130,14 @@
       "rate": "Dose",
       "useValues": "Utiliser ces valeurs",
       "dismiss": "Ne pas copier",
-      "invalidated": "Le traitement précédent ne correspond plus à cette parcelle, cette culture, cette heure, cette saison ou ce mode de culture"
+      "invalidated": "Le traitement précédent ne correspond plus à cette parcelle, cette culture, cette heure, cette saison ou ce layout"
     },
     "confirm": {
       "title": "Vérifier avant d'enregistrer",
       "activity": "Activité",
       "plot": "Parcelle",
       "farmLevel": "Toute la ferme",
-      "layout": "Mode de culture",
+      "layout": "Layout",
       "occurrence": "Quand",
       "values": "Détails",
       "edit": "Modifier",

@@ -63,7 +63,7 @@
       "noPlot": "Tewali musiri",
       "linkedZone": "Kikwatagana n'ekitundu kya sensor",
       "sensorless": "Tewali kitundu kya sensor ekikwataganye",
-      "growingSetting": "Enkola y'okulima",
+      "layout": "Layout",
       "timezone": "Timezone"
     },
     "picker": {
@@ -77,7 +77,7 @@
       "searchPlaceholder": "Noonya n'erinnya oba koodi",
       "browseAll": "Laba byonna",
       "noResults": "Tewali kikolwa kifaanana",
-      "unsupported": "Ekikolwa kino tekiriwo ku nkola y'okulima gy'olonze"
+      "unsupported": "Ekikolwa kino tekiriwo ku layout gy'olonze"
     },
     "form": {
       "title": "Ebikwata ku kikolwa",
@@ -85,7 +85,7 @@
       "quick": "Amangu",
       "full": "Ekijjuvu",
       "research": "Okunoonyereza",
-      "growingSetting": "Enkola y'okulima",
+      "layout": "Layout",
       "required": "Kyetaagisa",
       "optional": "Si kyetaagisa",
       "select": "Londa ekintu",
@@ -111,7 +111,7 @@
       "crossBasis": "Ekipimo kino kikozesa enkola endala ey'okupima",
       "invalidDependency": "Ebyolonze tebikwatagana bulungi",
       "invalidDefinition": "Fomu eno eya journal tekiriwo",
-      "layoutTemplateMismatch": "Obungi buno obw'ebikwata tebukolera ku nkola y'okulima gy'olonze",
+      "layoutTemplateMismatch": "Obungi buno obw'ebikwata tebukolera ku layout gy'olonze",
       "cropRequired": "Yingiza ekirime kubanga tewali kiseera kikola ku musiri guno",
       "invalidLocalTime": "Yingiza ennaku n'ekiseera ebituufu eby'omu kitundu",
       "invalidTimezone": "Londa timezone ekkirizibwa",
@@ -130,14 +130,14 @@
       "rate": "Omuwendo gw'okukozesa",
       "useValues": "Kozesa emiwendo gino",
       "dismiss": "Tokoppa",
-      "invalidated": "Ekyakozesebwa ekyasooka tekikyakwatagana na musiri guno, ekirime kino, akaseera kano, ebbanga lino ery'okulima, oba enkola y'okulima eno"
+      "invalidated": "Ekyakozesebwa ekyasooka tekikyakwatagana na musiri guno, ekirime kino, akaseera kano, ebbanga lino ery'okulima, oba layout eno"
     },
     "confirm": {
       "title": "Kebera nga tonnaterekawo",
       "activity": "Ekikolwa",
       "plot": "Omusiri",
       "farmLevel": "Ennimiro yonna",
-      "layout": "Enkola y'okulima",
+      "layout": "Layout",
       "occurrence": "Ddi",
       "values": "Ebikwata",
       "edit": "Kyusa",

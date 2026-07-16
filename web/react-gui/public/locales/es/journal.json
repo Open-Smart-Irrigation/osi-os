@@ -63,7 +63,7 @@
       "noPlot": "Sin parcela",
       "linkedZone": "Vinculado a una zona de sensores",
       "sensorless": "Sin zona de sensores vinculada",
-      "growingSetting": "Sistema de cultivo",
+      "layout": "Layout",
       "timezone": "Zona horaria"
     },
     "picker": {
@@ -77,7 +77,7 @@
       "searchPlaceholder": "Buscar por nombre o código",
       "browseAll": "Ver todas",
       "noResults": "No hay actividades coincidentes",
-      "unsupported": "Esta actividad no está disponible para el sistema de cultivo seleccionado"
+      "unsupported": "Esta actividad no está disponible para el layout seleccionado"
     },
     "form": {
       "title": "Detalles de la actividad",
@@ -85,7 +85,7 @@
       "quick": "Rápido",
       "full": "Completo",
       "research": "Investigación",
-      "growingSetting": "Sistema de cultivo",
+      "layout": "Layout",
       "required": "Obligatorio",
       "optional": "Opcional",
       "select": "Selecciona una opción",
@@ -111,7 +111,7 @@
       "crossBasis": "Esta unidad corresponde a una magnitud de medida diferente",
       "invalidDependency": "Las opciones seleccionadas no forman una combinación válida",
       "invalidDefinition": "Este formulario del diario no está disponible",
-      "layoutTemplateMismatch": "Este nivel de detalle no está disponible para el sistema de cultivo seleccionado",
+      "layoutTemplateMismatch": "Este nivel de detalle no está disponible para el layout seleccionado",
       "cropRequired": "Introduce un cultivo porque ninguna temporada activa cubre esta parcela",
       "invalidLocalTime": "Introduce una fecha y hora local válidas",
       "invalidTimezone": "Selecciona una zona horaria compatible",
@@ -130,14 +130,14 @@
       "rate": "Dosis",
       "useValues": "Usar estos valores",
       "dismiss": "No copiar",
-      "invalidated": "El tratamiento anterior ya no coincide con esta parcela, cultivo, hora, temporada o sistema de cultivo"
+      "invalidated": "El tratamiento anterior ya no coincide con esta parcela, cultivo, hora, temporada o layout"
     },
     "confirm": {
       "title": "Revisa antes de guardar",
       "activity": "Actividad",
       "plot": "Parcela",
       "farmLevel": "Toda la finca",
-      "layout": "Sistema de cultivo",
+      "layout": "Layout",
       "occurrence": "Cuándo",
       "values": "Detalles",
       "edit": "Editar",
