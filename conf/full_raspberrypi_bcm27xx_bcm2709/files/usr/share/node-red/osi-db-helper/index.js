@@ -1,6 +1,7 @@
 'use strict';
 
 const sqlite3 = require('sqlite3');
+const { AsyncLocalStorage } = require('node:async_hooks');
 
 const DB_PATH = '/data/db/farming.db';
 const PRAGMAS = [
@@ -21,6 +22,172 @@ const health = {
   lastPragmaAt: null,
   lastError: null
 };
+
+// --- durableTransaction / enterFailStop shared state -----------------------
+//
+// durableWorkContext: an AsyncLocalStorage whose store is set only while a
+// durableTransaction() work callback is executing, so a nested
+// durableTransaction()/transaction() call made from inside that callback can
+// be rejected immediately instead of deadlocking the serialized operation
+// queue (the nested call would otherwise wait forever on a queue slot that
+// can't free up until the outer work itself resolves). Async-context based,
+// so an unrelated caller invoking transaction() concurrently from outside
+// the work callback is NOT affected.
+//
+// synchronousPoison: set when durableTransaction fails to restore the saved
+// PRAGMA synchronous mode after COMMIT/ROLLBACK. While set, every new queued
+// operation attempts the restore again (using the saved mode) before doing
+// its own work; a successful attempt clears it, a repeat failure keeps the
+// facade rejecting new work with a bounded error naming the cause.
+//
+// failStopState / failStopRetainedDatabases: set once by enterFailStop() and
+// never cleared for the remaining lifetime of the process. Every dedicated
+// database ever handed to enterFailStop is added to
+// failStopRetainedDatabases, a strong reference that keeps it reachable (and
+// therefore un-garbage-collected, keeping its native handle and any
+// uncommitted transaction open) even after the caller drops its own
+// reference.
+const durableWorkContext = new AsyncLocalStorage();
+let synchronousPoison = null;
+let failStopState = null;
+const failStopRetainedDatabases = new Set();
+
+const SYNCHRONOUS_MODE_NAMES = ['OFF', 'NORMAL', 'FULL', 'EXTRA'];
+
+function boundedString(value, maxLength) {
+  const limit = typeof maxLength === 'number' ? maxLength : 500;
+  const text = value === undefined || value === null ? '' : String(value);
+  return text.length > limit ? `${text.slice(0, limit)}…(truncated)` : text;
+}
+
+function facadeFailStopGuardOrNull() {
+  if (!failStopState) return null;
+  const error = new Error(
+    `osi-db-helper: fail-stop active (${failStopState.name}): ${failStopState.reason}`
+  );
+  error.code = 'OSI_DB_FAIL_STOP';
+  error.failStopName = failStopState.name;
+  error.failStopReason = failStopState.reason;
+  return error;
+}
+
+function buildSynchronousPoisonError() {
+  const error = new Error(
+    'osi-db-helper: durableTransaction failed to restore synchronous mode ' +
+    `(${synchronousPoison.cause}); facade rejects new work until restoration succeeds`
+  );
+  error.code = 'OSI_DB_SYNCHRONOUS_POISONED';
+  return error;
+}
+
+// Attempts to restore the previously-saved PRAGMA synchronous mode when the
+// facade is poisoned. Returns null (and clears the poison) on success, or a
+// bounded error to reject the caller's operation with on failure. A no-op
+// (returns null) when the facade isn't poisoned.
+async function attemptSynchronousPoisonRecovery(database) {
+  if (!synchronousPoison) return null;
+  const mode = synchronousPoison.mode;
+  try {
+    await runRaw(database, 'exec', `PRAGMA synchronous=${SYNCHRONOUS_MODE_NAMES[mode]};`);
+    synchronousPoison = null;
+    return null;
+  } catch (restoreError) {
+    synchronousPoison = {
+      mode,
+      cause: boundedString((restoreError && restoreError.message) || restoreError),
+      at: new Date().toISOString()
+    };
+    return buildSynchronousPoisonError();
+  }
+}
+
+async function readSynchronousMode(database) {
+  const { rows } = await runRaw(database, 'all', 'PRAGMA synchronous');
+  const raw = rows && rows[0] ? rows[0].synchronous : undefined;
+  const value = Number(raw);
+  if (!Number.isInteger(value) || !SYNCHRONOUS_MODE_NAMES[value]) {
+    throw new Error(
+      `osi-db-helper: unable to validate current synchronous mode (got ${JSON.stringify(raw)})`
+    );
+  }
+  return value;
+}
+
+// The durableTransaction executor: runs entirely inside one enqueueOperation
+// slot (serialized with every other facade operation). Reads/validates the
+// current synchronous mode, elevates to FULL, BEGIN IMMEDIATE, awaits work(),
+// COMMIT on success / ROLLBACK on throw, then always attempts to restore the
+// saved mode (success or failure of that restore never changes work's
+// resolution/rejection — it only ever affects future operations via
+// synchronousPoison).
+async function runDurableTransactionExecutor(database, work) {
+  const originalMode = await readSynchronousMode(database);
+  await runRaw(database, 'exec', 'PRAGMA synchronous=FULL;');
+
+  try {
+    await runRaw(database, 'exec', 'BEGIN IMMEDIATE;');
+  } catch (beginError) {
+    try {
+      await runRaw(database, 'exec', `PRAGMA synchronous=${SYNCHRONOUS_MODE_NAMES[originalMode]};`);
+      synchronousPoison = null;
+    } catch (restoreError) {
+      synchronousPoison = {
+        mode: originalMode,
+        cause: boundedString((restoreError && restoreError.message) || restoreError),
+        at: new Date().toISOString()
+      };
+    }
+    throw beginError;
+  }
+
+  let workError = null;
+  let workResult;
+  try {
+    workResult = await durableWorkContext.run(
+      { active: true },
+      () => work(createTransactionScope(database))
+    );
+  } catch (error) {
+    workError = error;
+  }
+
+  if (workError) {
+    try {
+      await runRaw(database, 'exec', 'ROLLBACK;');
+    } catch (rollbackError) {
+      if (workError && typeof workError === 'object') {
+        workError.rollbackError = rollbackError;
+      }
+    }
+  } else {
+    try {
+      await runRaw(database, 'exec', 'COMMIT;');
+    } catch (commitError) {
+      workError = commitError;
+      try {
+        await runRaw(database, 'exec', 'ROLLBACK;');
+      } catch (rollbackError) {
+        if (commitError && typeof commitError === 'object') {
+          commitError.rollbackError = rollbackError;
+        }
+      }
+    }
+  }
+
+  try {
+    await runRaw(database, 'exec', `PRAGMA synchronous=${SYNCHRONOUS_MODE_NAMES[originalMode]};`);
+    synchronousPoison = null;
+  } catch (restoreError) {
+    synchronousPoison = {
+      mode: originalMode,
+      cause: boundedString((restoreError && restoreError.message) || restoreError),
+      at: new Date().toISOString()
+    };
+  }
+
+  if (workError) throw workError;
+  return workResult;
+}
 
 function setLastError(error) {
   health.lastError = error
@@ -131,7 +298,14 @@ function enqueueOperation(executor) {
     .catch(() => undefined)
     .then(async () => {
       try {
+        // Fail-stop is also re-checked here (not only at method entry) so an
+        // operation that was already enqueued when enterFailStop() ran still
+        // cannot produce a success side effect.
+        const failStopGuard = facadeFailStopGuardOrNull();
+        if (failStopGuard) throw failStopGuard;
         const database = await ensureSharedDatabase();
+        const recoveryError = await attemptSynchronousPoisonRecovery(database);
+        if (recoveryError) throw recoveryError;
         const result = await executor(database);
         markHealthy();
         return result;
@@ -163,6 +337,14 @@ function invokeCallback(callback, context, error, result) {
 
 function runQueued(method, args, mapper) {
   const { sql, params, callback } = normalizeArgs(args);
+  // Fail-stop rejects before enqueue: no SQL may reach the connection and no
+  // queue slot is consumed once the process-lifetime write gate is active.
+  const failStopGuard = facadeFailStopGuardOrNull();
+  if (failStopGuard) {
+    invokeCallback(callback, null, failStopGuard);
+    if (typeof callback === 'function') return Promise.resolve(undefined);
+    return Promise.reject(failStopGuard);
+  }
   // await callers expect the mapped value (row for .get(), rows[] for .all(),
   // undefined for .run()) — the mapper has to run on the returned promise, not
   // only on the callback path.
@@ -184,6 +366,13 @@ class DatabaseFacade {
     this.mode = typeof mode === 'number' ? mode : undefined;
     const finalCallback =
       typeof mode === 'function' ? mode : typeof callback === 'function' ? callback : null;
+    // Fail-stop poisons new facade construction too: report the gate error
+    // and do not touch the shared connection at all.
+    const failStopGuard = facadeFailStopGuardOrNull();
+    if (failStopGuard) {
+      invokeCallback(finalCallback, this, failStopGuard);
+      return;
+    }
     ensureSharedDatabase(this.filename).then(
       () => invokeCallback(finalCallback, this, null),
       (error) => invokeCallback(finalCallback, this, error)
@@ -206,6 +395,13 @@ class DatabaseFacade {
     if (typeof executor !== 'function') {
       throw new TypeError('Database.transaction requires an executor function');
     }
+    const failStopGuard = facadeFailStopGuardOrNull();
+    if (failStopGuard) return Promise.reject(failStopGuard);
+    if (durableWorkContext.getStore()) {
+      return Promise.reject(new Error(
+        'osi-db-helper: nested transaction inside durableTransaction work is not allowed'
+      ));
+    }
     return enqueueOperation(async (database) => {
       await runRaw(database, 'exec', 'BEGIN IMMEDIATE;');
       const transaction = createTransactionScope(database);
@@ -226,10 +422,34 @@ class DatabaseFacade {
     });
   }
 
+  // Serialized pre-external-effect intent barrier (stop-loss plan Task 3).
+  // Takes one queue slot like every other facade operation; inside that slot
+  // it validates/saves the current PRAGMA synchronous mode, elevates to FULL,
+  // runs work(tx) inside BEGIN IMMEDIATE, commits or rolls back, then
+  // restores the exact saved mode. A failed restore poisons the facade (see
+  // synchronousPoison above). Resolves with work's return value; a rollback
+  // rethrows work's original error.
+  durableTransaction(work) {
+    if (typeof work !== 'function') {
+      throw new TypeError('Database.durableTransaction requires a work function');
+    }
+    const failStopGuard = facadeFailStopGuardOrNull();
+    if (failStopGuard) return Promise.reject(failStopGuard);
+    if (durableWorkContext.getStore()) {
+      return Promise.reject(new Error(
+        'osi-db-helper: nested durableTransaction inside durableTransaction work is not allowed'
+      ));
+    }
+    return enqueueOperation((database) => runDurableTransactionExecutor(database, work));
+  }
+
   async readSnapshot(executor) {
     if (typeof executor !== 'function') {
       throw new TypeError('Database.readSnapshot requires an executor function');
     }
+    const failStopGuard = facadeFailStopGuardOrNull();
+    if (failStopGuard) throw failStopGuard;
+    if (synchronousPoison) throw buildSynchronousPoisonError();
     const database = await openDatabase(this.filename, sqlite3.OPEN_READONLY);
     let began = false;
     let operationFailed = false;
@@ -277,6 +497,17 @@ class DatabaseFacade {
   }
 
   exec(sql, callback) {
+    const failStopGuard = facadeFailStopGuardOrNull();
+    if (failStopGuard) {
+      invokeCallback(callback, null, failStopGuard);
+      const rejected = Promise.reject(failStopGuard);
+      if (typeof callback === 'function') {
+        // Mark handled for fire-and-forget callback callers while still
+        // returning the rejection to await callers.
+        rejected.catch(() => undefined);
+      }
+      return rejected;
+    }
     const scheduled = enqueueOperation(
       (database) =>
         new Promise((resolve, reject) => {
@@ -320,6 +551,111 @@ class DatabaseFacade {
   }
 }
 
+// A fully separate sqlite3 connection with its own serialized operation
+// queue — never the module-global shared connection, and deliberately NOT
+// poisoned by enterFailStop (the fail-stop caller must keep using its
+// dedicated connection, e.g. to hold an uncommitted EXCLUSIVE transaction
+// open). No auto-transaction helpers: the caller drives BEGIN
+// EXCLUSIVE/COMMIT/ROLLBACK manually through run(), and nothing here ever
+// issues a COMMIT/ROLLBACK on its own.
+class DedicatedDatabase {
+  constructor(filename) {
+    this._filename = filename;
+    this._queue = Promise.resolve();
+    this._dbPromise = null;
+    this._closed = false;
+  }
+
+  _ensure() {
+    if (this._closed) {
+      return Promise.reject(new Error('osi-db-helper: dedicated database is closed'));
+    }
+    if (!this._dbPromise) {
+      this._dbPromise = openDatabase(this._filename).then(async (database) => {
+        // Connection-local lock patience only; journal/synchronous modes are
+        // deliberately left untouched — callers own transaction semantics.
+        await runRaw(database, 'all', 'PRAGMA busy_timeout=5000');
+        return database;
+      });
+    }
+    return this._dbPromise;
+  }
+
+  _enqueue(executor) {
+    const scheduled = this._queue
+      .catch(() => undefined)
+      .then(async () => {
+        if (this._closed) {
+          throw new Error('osi-db-helper: dedicated database is closed');
+        }
+        const database = await this._ensure();
+        return executor(database);
+      });
+    this._queue = scheduled.then(
+      () => undefined,
+      () => undefined
+    );
+    return scheduled;
+  }
+
+  run(sql, params) {
+    return this._enqueue((database) => runRaw(database, 'run', sql, params).then(() => undefined));
+  }
+
+  all(sql, params) {
+    return this._enqueue((database) => runRaw(database, 'all', sql, params).then(({ rows }) => rows || []));
+  }
+
+  get(sql, params) {
+    return this._enqueue((database) =>
+      runRaw(database, 'all', sql, params).then(({ rows }) => (rows && rows[0]) || undefined));
+  }
+
+  exec(sql) {
+    return this._enqueue((database) => runRaw(database, 'exec', sql).then(() => undefined));
+  }
+
+  close() {
+    return this._enqueue(async (database) => {
+      this._closed = true;
+      await closeDatabase(database);
+    });
+  }
+}
+
+function createDedicatedDatabase(filename) {
+  if (typeof filename !== 'string' || !filename.trim()) {
+    throw new TypeError('createDedicatedDatabase requires a database path');
+  }
+  return new DedicatedDatabase(filename);
+}
+
+// Process-lifetime write gate. Atomically poisons every new shared-facade
+// operation and every new shared-facade construction (see the guards in
+// runQueued/exec/transaction/durableTransaction/readSnapshot/enqueueOperation
+// and the DatabaseFacade constructor), retains the caller's dedicated
+// database in a module-level strong-reference set so it is never garbage
+// collected — keeping its uncommitted EXCLUSIVE transaction open so other
+// SQLite connections get SQLITE_BUSY until process exit — and returns a
+// promise that never settles. It never commits, rolls back, or closes the
+// dedicated connection. Idempotent-safe: a second call keeps the first
+// poison identity and additionally retains the second handle.
+function enterFailStop(name, dedicatedDb, reason) {
+  if (dedicatedDb !== undefined && dedicatedDb !== null) {
+    failStopRetainedDatabases.add(dedicatedDb);
+  }
+  if (!failStopState) {
+    failStopState = {
+      name: boundedString(name, 120),
+      reason: boundedString(reason, 500),
+      at: new Date().toISOString()
+    };
+    health.failStop = Object.assign({}, failStopState);
+    setLastError(facadeFailStopGuardOrNull());
+  }
+  return new Promise(() => {});
+}
+
 function getHealth() {
   return Object.assign({}, health);
 }
@@ -336,5 +672,7 @@ module.exports = {
   OPEN_CREATE: sqlite3.OPEN_CREATE,
   verbose: () => module.exports,
   getHealth,
-  quickCheck
+  quickCheck,
+  createDedicatedDatabase,
+  enterFailStop
 };
