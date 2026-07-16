@@ -148,6 +148,16 @@ const catalog: JournalCatalog = {
   mappings: [],
 };
 
+const canonicalCropCatalog: JournalCatalog = {
+  ...catalog,
+  vocab: [
+    row('irrigation', 'activity'),
+    row('attr.crop', 'attribute', 'choice'),
+    choiceRow('agroscope.crop.barley_spring', 'attr.crop', 'barley, spring'),
+    choiceRow('agroscope.crop.barley_winter', 'attr.crop', 'barley, winter'),
+  ],
+};
+
 const plot: JournalPlot = {
   contract_version: 1,
   plot_uuid: 'plot-1',
@@ -602,6 +612,102 @@ afterEach(() => {
 });
 
 describe('JournalCaptureFlow', () => {
+  it('maps a linked zone crop label to its canonical choice for attr.crop', async () => {
+    const propsWithZoneCrop = {
+      ...baseProps,
+      catalog: canonicalCropCatalog,
+      zoneCrops: { 'zone-1': 'Barley, Winter' },
+    };
+    render(<JournalCaptureFlow {...propsWithZoneCrop} initialPlot={plot} />);
+    fireEvent.click(screen.getByRole('button', { name: 'irrigation' }));
+    fireEvent.click(screen.getByRole('button', { name: 'capture.next' }));
+    fireEvent.click(screen.getByRole('button', { name: 'capture.next' }));
+
+    await waitFor(() => expect(screen.getByRole('button', { name: 'capture.finish' })).not.toBeDisabled());
+    fireEvent.click(screen.getByRole('button', { name: 'capture.finish' }));
+
+    await waitFor(() => expect(apiMocks.updateEntry).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({
+        season_crop: 'Barley, Winter',
+        values: expect.arrayContaining([
+          expect.objectContaining({
+            attribute_code: 'attr.crop',
+            value: 'agroscope.crop.barley_winter',
+          }),
+        ]),
+      }),
+    ));
+  });
+
+  it('keeps an unmatched zone crop as season context without emitting an invalid choice', async () => {
+    const propsWithBroadZoneCrop = {
+      ...baseProps,
+      catalog: canonicalCropCatalog,
+      zoneCrops: { 'zone-1': 'Barley' },
+    };
+    render(<JournalCaptureFlow {...propsWithBroadZoneCrop} initialPlot={plot} />);
+    fireEvent.click(screen.getByRole('button', { name: 'irrigation' }));
+    fireEvent.click(screen.getByRole('button', { name: 'capture.next' }));
+    fireEvent.click(screen.getByRole('button', { name: 'capture.next' }));
+
+    await waitFor(() => expect(screen.getByRole('button', { name: 'capture.finish' })).not.toBeDisabled());
+    fireEvent.click(screen.getByRole('button', { name: 'capture.finish' }));
+
+    await waitFor(() => expect(apiMocks.updateEntry).toHaveBeenCalled());
+    const payload = apiMocks.updateEntry.mock.calls[0][1];
+    expect(payload.season_crop).toBe('Barley');
+    expect(payload.values).not.toEqual(expect.arrayContaining([
+      expect.objectContaining({ attribute_code: 'attr.crop' }),
+    ]));
+  });
+
+  it('seeds a mapped zone crop into the editable full-record crop choice', async () => {
+    const releaseJournalEffects = deferJournalEffects();
+    const seedingCatalog: JournalCatalog = {
+      ...canonicalCropCatalog,
+      vocab: [...canonicalCropCatalog.vocab, row('seeding', 'activity')],
+      layouts: canonicalCropCatalog.layouts.map((candidate) => ({
+        ...candidate,
+        definition: {
+          ...candidate.definition,
+          activity_codes: ['irrigation', 'seeding'],
+        },
+      })),
+    };
+    render(<JournalCaptureFlow
+      {...baseProps}
+      catalog={seedingCatalog}
+      initialPlot={plot}
+      zoneCrops={{ 'zone-1': 'barley, winter' }}
+    />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'seeding' }));
+    fireEvent.click(screen.getByRole('button', { name: 'capture.next' }));
+    fireEvent.change(screen.getByRole('combobox', { name: 'capture.form.detailLevel' }), {
+      target: { value: 'full_record' },
+    });
+
+    expect(screen.getByRole('combobox', { name: 'attr.crop' })).toHaveValue(
+      'agroscope.crop.barley_winter',
+    );
+    await releaseJournalEffects();
+  });
+
+  it('moves keyboard focus to the capture heading on entry', async () => {
+    render(<JournalCaptureFlow {...baseProps} />);
+
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'capture.title' })).toHaveFocus());
+  });
+
+  it('renders the primary Next control with a computed 56px minimum height', () => {
+    render(<JournalCaptureFlow {...baseProps} />);
+
+    const next = screen.getByRole('button', { name: 'capture.next' });
+    expect(next.style.minHeight).toBe('56px');
+    expect(getComputedStyle(next).minHeight).toBe('56px');
+  });
+
   it('completes a full capture transition inside React StrictMode', async () => {
     render(
       <StrictMode>
@@ -677,6 +783,30 @@ describe('JournalCaptureFlow', () => {
       '11111111-1111-4111-8111-111111111111',
       expect.objectContaining({ template_code: 'full_record', template_version: 2, layout_code: 'greenhouse', layout_version: 6 }),
     ));
+  });
+
+  it('adopts the linked plot timezone when generic capture selects a plot', async () => {
+    const browserTimezone = vi.spyOn(Intl.DateTimeFormat.prototype, 'resolvedOptions')
+      .mockReturnValue({ timeZone: 'America/Los_Angeles' } as Intl.ResolvedDateTimeFormatOptions);
+    try {
+      render(<JournalCaptureFlow
+        {...baseProps}
+        zoneTimezones={{ 'zone-1': 'Europe/Zurich' }}
+      />);
+
+      fireEvent.change(screen.getByRole('combobox', { name: 'capture.where.plot' }), {
+        target: { value: 'plot-1' },
+      });
+
+      fireEvent.click(screen.getByRole('button', { name: 'capture.next' }));
+      expect(screen.getByRole('heading', { name: 'capture.picker.title' })).toBeInTheDocument();
+      fireEvent.click(screen.getByRole('button', { name: 'irrigation' }));
+      fireEvent.click(screen.getByRole('button', { name: 'capture.next' }));
+
+      await waitFor(() => expect(screen.getByRole('textbox', { name: 'capture.where.timezone' })).toHaveValue('Europe/Zurich'));
+    } finally {
+      browserTimezone.mockRestore();
+    }
   });
 
   it('starts preselected plots at Activity and keeps the bound layout passive', async () => {

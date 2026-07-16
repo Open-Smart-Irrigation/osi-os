@@ -219,6 +219,10 @@ export interface IrrigationZone {
   updated_at: string;
   updatedAt?: string;
 
+  // Zone UUID compatibility aliases from edge snake_case and cloud camelCase APIs
+  zone_uuid?: string | null;
+  zoneUuid?: string | null;
+
   // Returned by GET /api/irrigation-zones (your Node-RED flow adds this)
   schedule: IrrigationSchedule | null;
 

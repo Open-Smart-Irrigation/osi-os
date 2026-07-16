@@ -150,7 +150,11 @@ export const authAPI = {
   },
 };
 
-function normaliseSchedule(sched: any): IrrigationSchedule {
+type RawIrrigationSchedule = Partial<IrrigationSchedule> & {
+  irrigationZoneId?: number | null;
+};
+
+function normaliseSchedule(sched: RawIrrigationSchedule): IrrigationSchedule {
   return {
     ...sched,
     irrigation_zone_id: Number(sched?.irrigation_zone_id ?? sched?.irrigationZoneId ?? 0),
@@ -158,6 +162,7 @@ function normaliseSchedule(sched: any): IrrigationSchedule {
     triggerMetric: sched?.triggerMetric ?? sched?.trigger_metric ?? 'SWT_WM1',
     threshold_kpa: Number(sched?.threshold_kpa ?? sched?.thresholdKpa ?? 0),
     thresholdKpa: Number(sched?.thresholdKpa ?? sched?.threshold_kpa ?? 0),
+    enabled: sched.enabled ?? false,
     duration_minutes: sched?.duration_minutes ?? sched?.durationMinutes ?? undefined,
     durationMinutes: sched?.durationMinutes ?? sched?.duration_minutes ?? undefined,
     last_triggered_at: sched?.last_triggered_at ?? sched?.lastTriggeredAt ?? null,
@@ -248,13 +253,26 @@ export const devicesAPI = {
   },
 };
 
-function normaliseZone(z: any): IrrigationZone {
+type RawIrrigationZone = Omit<Partial<IrrigationZone>, 'schedule'> & {
+  id: number;
+  name: string;
+  device_count: number;
+  created_at: string;
+  updated_at: string;
+  schedule: RawIrrigationSchedule | null;
+  variety_compat?: string | null;
+};
+
+function normaliseZone(z: RawIrrigationZone): IrrigationZone {
   const sched = z.schedule;
+  const canonicalZoneUuid = z.zone_uuid ?? z.zoneUuid ?? null;
   return {
     ...z,
     deviceCount:       z.deviceCount       ?? z.device_count ?? 0,
     createdAt:         z.createdAt         ?? z.created_at,
     updatedAt:         z.updatedAt         ?? z.updated_at,
+    zone_uuid:         canonicalZoneUuid,
+    zoneUuid:          canonicalZoneUuid,
     // Camelise new metadata fields from Pi snake_case API
     cropType:          z.cropType          ?? z.crop_type          ?? null,
     variety:           z.variety                                   ?? null,
@@ -310,7 +328,7 @@ function parseRecommendationDiagnostics(raw: string | null): ZoneRecommendationD
 // Irrigation Zones API
 export const irrigationZonesAPI = {
   getAll: async (): Promise<IrrigationZone[]> => {
-    const response = await api.get<any[]>('/api/irrigation-zones');
+    const response = await api.get<RawIrrigationZone[]>('/api/irrigation-zones');
     const rows = Array.isArray(response.data) ? response.data : [];
     return rows.map(normaliseZone);
   },

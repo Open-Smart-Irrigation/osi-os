@@ -87,6 +87,21 @@ describe('DashboardHeader (osi-os)', () => {
     expect(onAddDevice).toHaveBeenCalledOnce();
   });
 
+  it('navigates Add → Log activity to journal capture mode without changing add callbacks', () => {
+    const { onAddZone, onAddDevice } = renderHeader();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Add' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Zone' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Add' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Device' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Add' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Log activity' }));
+
+    expect(`${window.location.pathname}${window.location.search}`).toBe('/journal?capture=1');
+    expect(onAddZone).toHaveBeenCalledOnce();
+    expect(onAddDevice).toHaveBeenCalledOnce();
+  });
+
   it('renders the Add menu in a non-clipping action row', () => {
     renderHeader();
 

@@ -6,7 +6,7 @@ type JournalCatalogLoader = () => Promise<JournalCatalog | null>;
 
 export async function loadJournalCatalog(): Promise<JournalCatalog | null> {
   try {
-    return await journalApi.getCatalog();
+    return await journalApi.getCatalog({ includeDefinitions: true });
   } catch (error) {
     if (isJournalUnavailable(error)) return null;
     throw error;

@@ -14,7 +14,7 @@ interface DashboardHeaderProps {
 /**
  * Zones page chrome. Delegates all shared structure (crown, glass header,
  * tabs) to AppHeader and supplies the dashboard's own Add menu as the page
- * action. Add carries the journal entry point (Log activity → /journal) per
+ * action. Add carries the journal entry point (Log activity → /journal?capture=1) per
  * the field-journal spec §6.1(c).
  */
 export const DashboardHeader: React.FC<DashboardHeaderProps> = ({
@@ -40,7 +40,7 @@ export const DashboardHeader: React.FC<DashboardHeaderProps> = ({
           items={[
             { key: 'zone', label: t('addMenu.zone'), onSelect: onAddZone },
             { key: 'device', label: t('addMenu.device'), onSelect: onAddDevice },
-            { key: 'activity', label: t('addMenu.activity'), onSelect: () => navigate('/journal') },
+            { key: 'activity', label: t('addMenu.activity'), onSelect: () => navigate('/journal?capture=1') },
           ]}
         />
       }

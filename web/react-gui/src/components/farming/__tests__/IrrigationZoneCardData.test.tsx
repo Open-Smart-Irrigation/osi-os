@@ -54,6 +54,7 @@ vi.mock('react-i18next', () => ({
       if (key === 'zone.deviceCount') return '2 devices';
       if (key === 'zone.assignDevice') return 'Assign Device';
       if (key === 'zone.deleteZone') return 'Delete Zone';
+      if (key === 'addMenu.activity') return 'Log activity';
       return key;
     },
   }),
@@ -123,11 +124,14 @@ const environmentSummary = {
   drift: null,
 } as ZoneEnvironmentSummary;
 
-function renderCard(devices: Device[] = []) {
+function renderCard(
+  devices: Device[] = [],
+  zoneOverrides: Partial<IrrigationZone & { zoneUuid?: string | null; zone_uuid?: string | null }> = {},
+) {
   render(
     <MemoryRouter>
       <IrrigationZoneCard
-        zone={zone}
+        zone={{ ...zone, ...zoneOverrides } as IrrigationZone}
         devices={devices}
         unassignedDevices={[]}
         onUpdate={vi.fn()}
@@ -178,6 +182,57 @@ describe('IrrigationZoneCard Data entry', () => {
     renderCard();
 
     expect(screen.queryByRole('link', { name: /data/i })).not.toBeInTheDocument();
+  });
+
+  it('builds the Journal CTA from the typed zoneUuid with URL encoding', () => {
+    const zoneUuid = 'zone uuid/typed';
+    renderCard([], { zoneUuid });
+
+    const journalLink = screen.getByRole('link', { name: 'Log activity' });
+    expect(journalLink).toHaveAttribute(
+      'href',
+      `/journal?capture=1&zone_uuid=${encodeURIComponent(zoneUuid)}`,
+    );
+    expect(journalLink).not.toHaveTextContent(zoneUuid);
+  });
+
+  it('falls back to the snake_case zone_uuid for the Journal CTA', () => {
+    const zoneUuid = 'zone uuid/snake';
+    renderCard([], { zone_uuid: zoneUuid });
+
+    expect(screen.getByRole('link', { name: 'Log activity' })).toHaveAttribute(
+      'href',
+      `/journal?capture=1&zone_uuid=${encodeURIComponent(zoneUuid)}`,
+    );
+  });
+
+  it('prefers the edge snake_case UUID if compatibility aliases conflict', () => {
+    renderCard([], { zone_uuid: 'edge-zone', zoneUuid: 'cloud-zone' });
+
+    expect(screen.getByRole('link', { name: 'Log activity' })).toHaveAttribute(
+      'href',
+      '/journal?capture=1&zone_uuid=edge-zone',
+    );
+  });
+
+  it('keeps a generic Journal CTA when the zone UUID is missing', () => {
+    renderCard();
+
+    expect(screen.getByRole('link', { name: 'Log activity' })).toHaveAttribute(
+      'href',
+      '/journal?capture=1',
+    );
+  });
+
+  it('uses a translated, touch-sized Journal CTA in a wrapping action group', () => {
+    renderCard();
+
+    const journalLink = screen.getByRole('link', { name: 'Log activity' });
+    expect(journalLink.style.minHeight).toBe('56px');
+    expect(getComputedStyle(journalLink).minHeight).toBe('56px');
+    expect(journalLink).toHaveClass('touch-target', 'min-h-14');
+    expect(journalLink.parentElement).toHaveClass('flex', 'flex-wrap');
+    expect(journalLink.parentElement).not.toHaveClass('overflow-x-auto');
   });
 
   it('labels a canonical SWT_1 schedule as soil tension (S1)', () => {

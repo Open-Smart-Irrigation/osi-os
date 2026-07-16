@@ -8,7 +8,7 @@ const { getCatalog, isJournalUnavailable } = vi.hoisted(() => ({
   isJournalUnavailable: vi.fn((e: any) => [404, 501].includes(e?.response?.status)),
 }));
 vi.mock('../../services/journalApi', () => ({
-  journalApi: { getCatalog: () => getCatalog() },
+  journalApi: { getCatalog: (options: unknown) => getCatalog(options) },
   isJournalUnavailable,
 }));
 
@@ -27,6 +27,7 @@ describe('useJournalCatalog', () => {
     getCatalog.mockResolvedValue({ catalog_version: 1, vocab: [] });
     const { result } = renderHook(() => useJournalCatalog(), { wrapper });
     await waitFor(() => expect(result.current.loading).toBe(false));
+    expect(getCatalog).toHaveBeenCalledWith({ includeDefinitions: true });
     expect(result.current.available).toBe(true);
     expect(result.current.unavailable).toBe(false);
     expect(result.current.catalog?.catalog_version).toBe(1);
