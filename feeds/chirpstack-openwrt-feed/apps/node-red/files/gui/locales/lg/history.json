@@ -1,571 +1,572 @@
 {
   "history": {
     "nav": {
-      "history": "History",
-      "legacyDashboard": "Legacy dashboard",
-      "logout": "Logout"
+      "history": "Ebyafaayo",
+      "legacyDashboard": "Dashboard enkadde",
+      "logout": "Fuluma"
     },
     "shell": {
-      "title": "History",
-      "subtitle": "Local gateway history for {{username}}",
-      "loadingLocalCards": "Loading local history cards...",
-      "unavailableTitle": "History is unavailable",
-      "unavailableBody": "Runtime feature flags keep the new history shell off until the local gateway enables it.",
-      "featureFlagFailed": "The feature flag request failed. The legacy dashboard is still available.",
-      "zonesFailedTitle": "History zones failed to load",
-      "noZonesTitle": "No zones yet",
+      "title": "Ebyafaayo",
+      "subtitle": "Ebyafaayo bya Gateway eby'omu kitundu ebya {{username}}",
+      "loadingLocalCards": "Amakaadi g'ebyafaayo eby'omu kitundu gatikkibwa...",
+      "unavailableTitle": "Ebyafaayo tebiriwo",
+      "unavailableBody": "Enteekateeka za sisitimu (feature flags) zikomekkerezza ebyafaayo ebipya okutuusa Gateway y'omu kitundu lw'ebisobozesa.",
+      "featureFlagFailed": "Okusaba kwa feature flag kugaanye. Dashboard enkadde ekyaliwo.",
+      "zonesFailedTitle": "Ebitundu by'ebyafaayo tebisobodde kutikkibwa",
+      "noZonesTitle": "Tewannaba kubaawo bitundu",
       "noZonesBody": "Tondawo ekifo okuva ku dashboard enkadde nga tonnaggula ebyafaayo by'omulamwa.",
-      "cardsFailed": "History cards failed to load.",
-      "retryCards": "Retry cards"
+      "cardsFailed": "Amakaadi g'ebyafaayo tegasobodde kutikkibwa.",
+      "retryCards": "Gezaako amakaadi nate"
     },
     "export": {
-      "open": "Export",
-      "title": "Export data"
+      "open": "Fulumya",
+      "title": "Fulumya data"
     },
     "desktop": {
-      "railLabel": "Cards",
-      "toolbarTitle": "Toolbar",
-      "modeLabel": "Desktop mode",
-      "modeFocus": "Focus",
-      "modeCompare": "Compare",
-      "viewSelectorLabel": "Card view",
-      "compareViewSelectorLabel": "Compare view",
-      "sourceSelectorLabel": "Sources",
-      "chartSurfaceLabel": "History chart, use arrow keys to pan and plus or minus to zoom",
-      "zoomIn": "Zoom in",
-      "zoomOut": "Zoom out",
-      "resetZoom": "Reset zoom",
-      "maxPanels": "Up to {{count}} comparison panels",
-      "singleMode": "Single",
-      "comparisonMode": "Comparison",
-      "addPanel": "Add panel {{title}}",
-      "removePanel": "Remove panel",
-      "panelLimitWarning": "Only {{count}} comparison panels can be shown on this edge gateway.",
-      "selectedTimestampNone": "No timestamp selected",
-      "selectedTimestamp": "Selected timestamp: {{timestamp}}",
-      "inspectorTitle": "Inspector",
-      "inspectorPlaceholder": "Select a timestamp or calendar cell to see interpretation, events, data quality, and advanced metadata."
+      "railLabel": "Amakaadi",
+      "toolbarTitle": "Ebikozesebwa",
+      "modeLabel": "Enkola ya Desktop",
+      "modeFocus": "Kwolekera",
+      "modeCompare": "Kugeraageranya",
+      "viewSelectorLabel": "Endaba y'akaadi",
+      "compareViewSelectorLabel": "Endaba y'okugeraageranya",
+      "sourceSelectorLabel": "Ensibuko",
+      "rangeOverviewLabel": "Endaba y'ekiseera kyonna",
+      "chartSurfaceLabel": "Chart y'ebyafaayo. Kozesa obufunzo obulaga obuko okutambuza, ate + oba - okugaziya oba okufunza",
+      "zoomIn": "Gaziya",
+      "zoomOut": "Funza",
+      "resetZoom": "Zzaawo obunene obw'olubereberye",
+      "maxPanels": "Ebitundu by'okugeraageranya okutuuka ku {{count}}",
+      "singleMode": "Ekimu",
+      "comparisonMode": "Okugeraageranya",
+      "addPanel": "Yongera ekitundu {{title}}",
+      "removePanel": "Ggyawo ekitundu",
+      "panelLimitWarning": "Bitundu {{count}} byokka eby'okugeraageranya bye bisobola okulagibwa ku Gateway eno.",
+      "selectedTimestampNone": "Tewali kiseera kirondeddwa",
+      "selectedTimestamp": "Ekiseera ekirondeddwa: {{timestamp}}",
+      "inspectorTitle": "Ebikwata",
+      "inspectorPlaceholder": "Londa ekiseera oba akasanduuko ka kalendaa okulaba okutegeera, ebikolwa, omutindo gwa data, n'ebikwata ebisingawo."
     },
     "mobile": {
-      "zoneLabel": "Zone",
-      "actions": "History actions",
-      "openActions": "Open history actions"
+      "zoneLabel": "Ekitundu",
+      "actions": "Ebikolwa by'ebyafaayo",
+      "openActions": "Ggulawo ebikolwa by'ebyafaayo"
     },
     "overview": {
-      "empty": "No history cards are available for this zone yet.",
-      "openCard": "Open {{title}} history",
-      "cardTypeLabel": "{{cardType}} card",
-      "pinCard": "Pin card",
-      "unpinCard": "Unpin card",
-      "pinCardForTitle": "Pin {{title}} card",
-      "unpinCardForTitle": "Unpin {{title}} card",
-      "pinned": "Pinned",
-      "alert": "Attention"
+      "empty": "Tewannaba kubaawo makaadi ga byafaayo mu kitundu kino.",
+      "openCard": "Ggulawo ebyafaayo bya {{title}}",
+      "cardTypeLabel": "Kaadi ya {{cardType}}",
+      "pinCard": "Kwasa kaadi",
+      "unpinCard": "Sumulula kaadi",
+      "pinCardForTitle": "Kwasa kaadi ya {{title}}",
+      "unpinCardForTitle": "Sumulula kaadi ya {{title}}",
+      "pinned": "Ekwasiddwa",
+      "alert": "Weetegereze"
     },
     "detail": {
-      "backToHistory": "Back to history",
-      "invalidRouteTitle": "History card not available",
-      "invalidRouteBody": "Return to History and choose an available card.",
-      "loading": "Loading history card...",
-      "notFoundTitle": "History card not available",
-      "notFoundBody": "Return to History and choose an available card.",
-      "controlsPlaceholder": "Date range",
-      "inspectorPlaceholder": "Inspector",
-      "rangeControlLabel": "Date range",
-      "viewControlLabel": "View",
-      "visualizationLabel": "History visualization",
-      "visualizationHelp": "Drag to pan, pinch to zoom, double tap to reset, or long press to inspect."
+      "backToHistory": "Ddayo ku byafaayo",
+      "invalidRouteTitle": "Kaadi y'ebyafaayo tekiriwo",
+      "invalidRouteBody": "Ddayo ku Byafaayo olonde kaadi eriwo.",
+      "loading": "Kaadi y'ebyafaayo etikkibwa...",
+      "notFoundTitle": "Kaadi y'ebyafaayo tekiriwo",
+      "notFoundBody": "Ddayo ku Byafaayo olonde kaadi eriwo.",
+      "controlsPlaceholder": "Ekiseera ky'ennaku",
+      "inspectorPlaceholder": "Ebikwata",
+      "rangeControlLabel": "Ekiseera ky'ennaku",
+      "viewControlLabel": "Endaba",
+      "visualizationLabel": "Ebifaananyi by'ebyafaayo",
+      "visualizationHelp": "Kwalula okutambuza, nyiga n'engalo bbiri okugaziya oba okufunza, kooma emirundi ebiri okuzzaawo, oba nyiga n'obudde obuwanvu okwekenneenya."
     },
     "rangeShort": {
       "12h": "12h",
       "24h": "24h",
       "7d": "7D",
       "30d": "30D",
-      "season": "Season",
-      "custom": "Custom"
+      "season": "Ebiseera",
+      "custom": "Ekikolebwa ggwe"
     },
     "sidebar": {
-      "zones": "Zones",
-      "pinnedCards": "Pinned cards",
-      "availableCards": "Available cards",
-      "savedWorkspaces": "Saved workspaces",
-      "workspaceDisabled": "Workspace saving is not enabled on this slice.",
-      "workspaceName": "Workspace name",
-      "saveWorkspace": "Save workspace",
-      "updateWorkspace": "Update workspace",
-      "loadWorkspace": "Load {{name}}",
-      "deleteWorkspace": "Delete {{name}}",
-      "defaultWorkspaceName": "Local workspace",
-      "pinCard": "Pin",
-      "unpinCard": "Unpin",
-      "none": "None"
+      "zones": "Ebitundu",
+      "pinnedCards": "Amakaadi agakwasiddwa",
+      "availableCards": "Amakaadi agaliwo",
+      "savedWorkspaces": "Entegeka ezitereke",
+      "workspaceDisabled": "Okutereka entegeka tekukkirizibwa ku Gateway eno.",
+      "workspaceName": "Erinnya ly'entegeka",
+      "saveWorkspace": "Tereka entegeka",
+      "updateWorkspace": "Kyusa entegeka",
+      "loadWorkspace": "Ggulawo {{name}}",
+      "deleteWorkspace": "Sazaamu {{name}}",
+      "defaultWorkspaceName": "Entegeka ey'omu kitundu",
+      "pinCard": "Kwasa",
+      "unpinCard": "Sumulula",
+      "none": "Tewali"
     },
     "carousel": {
-      "empty": "No history cards are available for this zone yet.",
-      "ariaLabel": "History card carousel",
-      "cardAriaLabel": "{{title}} card",
-      "cardTypeLabel": "{{cardType}} card",
-      "pinned": "Pinned"
+      "empty": "Tewannaba kubaawo makaadi ga byafaayo mu kitundu kino.",
+      "ariaLabel": "Amakaadi g'ebyafaayo mu Carousel",
+      "cardAriaLabel": "Kaadi ya {{title}}",
+      "cardTypeLabel": "Kaadi ya {{cardType}}",
+      "pinned": "Ekwasiddwa"
     },
     "cardFrame": {
-      "emptyTitle": "Select a history card",
-      "emptyBody": "Choose a zone and thematic card to inspect local history.",
-      "typeHistory": "{{cardType}} history",
-      "viewModes": "{{title}} view modes",
-      "unavailable": "This card is not available for the selected zone.",
-      "timelineBrush": "Timeline viewport",
-      "timelineBrushKeyboardHelp": "Use arrow keys to pan, plus or minus to zoom, and Home or Enter to reset.",
-      "aggregationBadge": "Aggregation: {{aggregation}}",
-      "placeholderBody": "Chart and calendar data will load here when card data APIs are enabled.",
-      "cardDataLoading": "Loading card data...",
-      "cardDataError": "Card data failed to load: {{message}}",
-      "cardDataUnknownError": "Unknown error"
+      "emptyTitle": "Londa kaadi y'ebyafaayo",
+      "emptyBody": "Londa ekitundu ne kaadi ey'omulamwa okwekenneenya ebyafaayo eby'omu kitundu.",
+      "typeHistory": "Ebyafaayo bya {{cardType}}",
+      "viewModes": "Enkola z'okulaba {{title}}",
+      "unavailable": "Kaadi eno teriwo mu kitundu ekirondeddwa.",
+      "timelineBrush": "Eddirisa ly'olunyiriri lw'ebiseera",
+      "timelineBrushKeyboardHelp": "Kozesa obufunzo obulaga obuko okutambuza, + oba - okugaziya oba okufunza, ne Home oba Enter okuzzaawo.",
+      "aggregationBadge": "Okugatta data: {{aggregation}}",
+      "placeholderBody": "Data za chart ne kalendaa zijja kulabikira wano nga API za data za kaadi zisobozesezza.",
+      "cardDataLoading": "Data za kaadi zitikkibwa...",
+      "cardDataError": "Data za kaadi tezisobodde kutikkibwa: {{message}}",
+      "cardDataUnknownError": "Ensobi etamanyiddwa"
     },
     "workspace": {
-      "unavailablePanel": "Unavailable panel",
-      "repairPanel": "Remove unavailable panel"
+      "unavailablePanel": "Ekitundu ekitaliwo",
+      "repairPanel": "Ggyawo ekitundu ekitaliwo"
     },
     "dendroTimeline": {
-      "title": "Growth timeline",
-      "emptyTitle": "No dendrometer timeline data",
-      "emptyBody": "Dendrometer readings will appear here when history data is available.",
-      "eventsTitle": "Timeline events",
-      "eventFallback": "Dendrometer event",
-      "noEvents": "No events in this range",
-      "pointsCount": "{{count}} readings",
+      "title": "Olunyiriri lw'okukula",
+      "emptyTitle": "Tewali data za lunyiriri lwa Dendrometer",
+      "emptyBody": "Ebiwandiiko bya Dendrometer bijja kulabikira wano nga data w'ebyafaayo eriwo.",
+      "eventsTitle": "Ebikolwa ku lunyiriri",
+      "eventFallback": "Ekikolwa kya Dendrometer",
+      "noEvents": "Tewali bikolwa mu kiseera kino",
+      "pointsCount": "Ebiwandiiko {{count}}",
       "series": {
-        "stemChange": "Stem change",
-        "growth": "Growth",
-        "shrinkage": "Shrinkage",
+        "stemChange": "Enkyukakyuka mu kikolo",
+        "growth": "Okukula",
+        "shrinkage": "Okukendeera",
         "dendrometer": "Dendrometer"
       }
     },
     "environmentLineChart": {
-      "title": "Environment trend",
-      "emptyTitle": "No environment trend data",
-      "emptyBody": "Environment readings will appear here when history data is available.",
-      "pointsCount": "{{count}} readings",
-      "axisLabel": "{{unit}} axis",
-      "axisNoUnit": "Unitless axis",
+      "title": "Enkyukakyuka z'obudde",
+      "emptyTitle": "Tewali data za nkyukakyuka z'obudde",
+      "emptyBody": "Ebiwandiiko by'obudde bijja kulabikira wano nga data w'ebyafaayo eriwo.",
+      "pointsCount": "Ebiwandiiko {{count}}",
+      "axisLabel": "Olwebongero lwa {{unit}}",
+      "axisNoUnit": "Olwebongero olutalina kipimo",
       "series": {
-        "airTemperature": "Air temperature",
-        "humidity": "Relative humidity",
-        "rain": "Rain",
-        "light": "Light",
-        "pressure": "Pressure",
-        "wind": "Wind",
-        "uv": "UV index",
-        "environment": "Environment"
+        "airTemperature": "Ebbugumu ery'empewo",
+        "humidity": "Amaanzi mu mpewo",
+        "rain": "Enkuba",
+        "light": "Omusana",
+        "pressure": "Okunyigiriza",
+        "wind": "Empewo",
+        "uv": "Enkomerero ya UV",
+        "environment": "Obudde"
+      }
+    },
+    "dailyMinMax": {
+      "title": "Buli Lunaku: Min/Max",
+      "emptyTitle": "Tewali data za Min/Max eza buli lunaku",
+      "emptyBody": "Ebiwandiiko by'ekitono n'ekisingawo eby'buli lunaku tebiriwo mu kiseera kino.",
+      "pointsCount": "Ennaku {{count}}",
+      "axisLabel": "{{unit}}",
+      "axisNoUnit": "Omuwendo",
+      "tooltipMin": "Ekitono",
+      "tooltipMax": "Ekisingawo",
+      "tooltipMean": "Wakati",
+      "series": {
+        "airTemperature": "Ebbugumu ery'empewo",
+        "environment": "Obudde"
       }
     },
     "gatewayStatus": {
-      "title": "Gateway status overview",
-      "emptyTitle": "Limited gateway status data",
-      "emptyBody": "Gateway status details will appear here as the hub reports them.",
-      "lastSeen": "Last seen",
-      "dataAsOf": "Data as of",
-      "syncState": "Sync state",
-      "eventsTitle": "Recent gateway events",
-      "noEvents": "No gateway events in this range.",
-      "eventFallback": "Gateway event",
+      "title": "Endaba y'embeera ya Gateway",
+      "emptyTitle": "Data z'embeera ya Gateway nkeenkeene",
+      "emptyBody": "Ebikwata ku mbeera ya Gateway bijja kulabikira wano nga Gateway ebiwaayo.",
+      "lastSeen": "Yalabibwa wa nnyuma",
+      "dataAsOf": "Data okutuuka ku",
+      "syncState": "Embeera y'okusinkroniza",
+      "eventsTitle": "Ebikolwa bya Gateway ebisembayo",
+      "noEvents": "Tewali bikolwa bya Gateway mu kiseera kino.",
+      "eventFallback": "Ekikolwa kya Gateway",
       "status": {
-        "ok": "OK",
-        "online": "Online",
-        "offline": "Offline",
-        "connected": "Connected",
-        "disconnected": "Disconnected",
-        "degraded": "Degraded",
-        "stale": "Stale",
-        "charging": "Charging"
+        "ok": "Bulungi",
+        "online": "Kiri ku Network",
+        "offline": "Tekiri ku Network",
+        "connected": "Kiyunze",
+        "disconnected": "Tekiyunze",
+        "degraded": "Kikendedde",
+        "stale": "Ekaddiye",
+        "charging": "Kikutte amasannyalaze"
       },
       "category": {
-        "connectivity": "Connectivity",
-        "storage": "Storage",
-        "system": "System"
+        "connectivity": "Okuyunga",
+        "storage": "Okutereka",
+        "system": "Sisitimu"
       },
       "metric": {
-        "signal": "Signal",
-        "storage": "Storage use",
-        "memory": "Memory use",
+        "signal": "Obubonero",
+        "storage": "Okukozesa mu kutereka",
+        "memory": "Okukozesa mu Memory",
         "cpu": "CPU",
-        "temperature": "Temperature"
+        "temperature": "Ebbugumu"
       },
       "value": {
-        "unavailable": "Not reported"
+        "unavailable": "Tekiwandiikiddwa"
       }
     },
     "irrigationTimeline": {
-      "title": "Irrigation event timeline",
-      "emptyTitle": "No irrigation events",
-      "emptyBody": "Irrigation actions and response windows will appear here when history data is available.",
-      "eventsCount": "{{count}} events",
+      "title": "Olunyiriri lw'ebikolwa by'okusukkulirira",
+      "emptyTitle": "Tewali bikolwa by'okusukkulirira",
+      "emptyBody": "Ebikolwa by'okusukkulirira n'ebiseera by'okuddamu bijja kulabikira wano nga data w'ebyafaayo eriwo.",
+      "eventsCount": "Ebikolwa {{count}}",
       "eventLabel": {
-        "irrigation": "Irrigation event",
-        "scheduled": "Scheduled irrigation",
-        "manualOverride": "Manual override",
-        "possibleIneffective": "Possible ineffective irrigation",
-        "responseWindow": "Response window"
+        "irrigation": "Ekikolwa ky'okusukkulirira",
+        "scheduled": "Okusukkulirira okutegekeddwa",
+        "manualOverride": "Okukozesa n'omukono",
+        "possibleIneffective": "Okusukkulirira okuyinza obutagasa",
+        "responseWindow": "Ekiseera ky'okuddamu"
       },
       "detail": {
-        "duration": "Duration: {{value}}",
-        "responseWindow": "Response window: {{value}}",
-        "observedResponse": "Observed response: {{value}}"
+        "duration": "Ebanga: {{value}}",
+        "responseWindow": "Ekiseera ky'okuddamu: {{value}}",
+        "observedResponse": "Okuddamu okulabiddwa: {{value}}"
       },
       "severity": {
-        "info": "Info",
-        "warning": "Warning",
-        "critical": "Critical",
-        "success": "Success",
-        "unknown": "Info"
+        "info": "Amawulire",
+        "warning": "Okulabula",
+        "critical": "Kya bulabe",
+        "success": "Kituukiridde",
+        "unknown": "Amawulire"
       }
     },
     "cardType": {
-      "soil": "Soil",
+      "soil": "Obutaka",
       "dendro": "Dendro",
-      "environment": "Environment",
-      "irrigation": "Irrigation",
+      "environment": "Obudde",
+      "irrigation": "Okusukkulirira",
       "gateway": "Gateway"
     },
     "viewMode": {
-      "soil-profile": "Soil Profile",
-      "line-chart": "Line Chart",
-      "calendar": "Calendar",
-      "irrigation-response": "Irrigation Response",
-      "advanced": "Advanced View",
-      "growth-timeline": "Growth Timeline",
-      "stress-events": "Stress Events",
-      "daily-min-max": "Daily Min/Max",
-      "event-timeline": "Event Timeline",
-      "status-overview": "Status Overview",
-      "connectivity-timeline": "Connectivity Timeline"
+      "soil-profile": "Obutaka mu Buziba",
+      "line-chart": "Chart y'Omulongo",
+      "calendar": "Kalendaa",
+      "irrigation-response": "Okuddamu kw'Okusukkulirira",
+      "advanced": "Endaba y'Ebisingawo",
+      "growth-timeline": "Olunyiriri lw'Okukula",
+      "stress-events": "Ebikolwa by'Okunyigirizibwa",
+      "daily-min-max": "Buli Lunaku: Min/Max",
+      "event-timeline": "Olunyiriri lw'Ebikolwa",
+      "status-overview": "Endaba y'Embeera",
+      "connectivity-timeline": "Olunyiriri lw'Okuyunga"
     },
     "metadata": {
-      "coverageUnknown": "Coverage unknown",
-      "coverageKnown": "{{coverage}}% coverage",
+      "coverageUnknown": "Obujjuvu tebumanyiddwa",
+      "coverageKnown": "Obujjuvu bwa {{coverage}}%",
       "coverageConfidence": {
-        "configured": "Configured cadence",
-        "derived": "Derived cadence",
-        "unknown": "Cadence unknown"
+        "configured": "Ekiseera ekitegekeddwa",
+        "derived": "Ekiseera ekifunibbwa",
+        "unknown": "Ekiseera tekimanyiddwa"
       },
       "syncState": {
-        "local": "Local",
-        "synced": "Synced",
-        "stale": "Stale",
-        "degraded": "Degraded",
-        "unknown": "Unknown"
+        "local": "Ku Gateway",
+        "synced": "Kisinkroniziddwa",
+        "stale": "Ekaddiye",
+        "degraded": "Kikendedde",
+        "unknown": "Tekimanyiddwa"
       },
       "aggregation": {
-        "auto": "Automatic",
-        "raw": "Raw",
-        "15m": "15 min",
-        "hourly": "Hourly",
-        "daily": "Daily",
-        "weekly": "Weekly"
+        "auto": "Byokka",
+        "raw": "Nga bwe kiri",
+        "15m": "Ddakiika 15",
+        "hourly": "Buli saawa",
+        "daily": "Buli lunaku",
+        "weekly": "Buli wiiki"
       },
       "range": {
-        "12h": "12 hours",
-        "24h": "24 hours",
-        "7d": "7 days",
-        "30d": "30 days",
-        "season": "Season",
-        "custom": "Custom range"
+        "12h": "Essaawa 12",
+        "24h": "Essaawa 24",
+        "7d": "Ennaku 7",
+        "30d": "Ennaku 30",
+        "season": "Ebiseera",
+        "custom": "Ekiseera ekikolebwa ggwe"
       }
     },
     "soilProfile": {
-      "emptyTitle": "No soil profile data",
-      "emptyBody": "Depth-aware profile readings are not available for this range.",
+      "emptyTitle": "Tewali data za Butaka mu Buziba",
+      "emptyBody": "Ebiwandiiko by'Obutaka ebimanyi obuziba tebiriwo mu kiseera kino.",
       "depthLabel": "{{depth}} cm",
-      "depthUnknown": "Depth pending",
-      "valueMissing": "No reading",
+      "depthUnknown": "Obuziba bulindiridde",
+      "valueMissing": "Tewali kiwandiiko",
       "status": {
-        "dry_stress": "Dry stress",
-        "optimal": "Optimal",
-        "wet_excess": "Wet excess",
-        "mixed": "Mixed",
-        "no_data": "No data"
+        "dry_stress": "Okunyigirizibwa olw'obukalu",
+        "optimal": "Ekisaanidde",
+        "wet_excess": "Amazzi amasukiridde",
+        "mixed": "Ekitabuddwa",
+        "no_data": "Tewali data"
       },
-      "labelUnknown": "Soil layer {{index}}"
+      "labelUnknown": "Olutindo lw'obutaka {{index}}"
     },
     "soil": {
       "state": {
-        "wet": "Wet",
-        "moist": "Moist",
-        "dry": "Dry"
+        "wet": "Kitose",
+        "moist": "Kitosetose",
+        "dry": "Kikalu"
       }
     },
     "calendar": {
-      "label": "Calendar",
-      "title": "Calendar",
-      "emptyTitle": "No calendar data",
+      "label": "Kalendaa",
+      "title": "Kalendaa",
+      "emptyTitle": "Tewali data za kalendaa",
       "weekday": {
-        "mon": "Mon",
-        "tue": "Tue",
-        "wed": "Wed",
-        "thu": "Thu",
-        "fri": "Fri",
-        "sat": "Sat",
-        "sun": "Sun"
+        "mon": "Bal",
+        "tue": "Lw2",
+        "wed": "Lw3",
+        "thu": "Lw4",
+        "fri": "Lw5",
+        "sat": "Lw6",
+        "sun": "Sab"
       },
       "state": {
-        "dry_stress": "Dry stress",
-        "optimal": "Optimal",
-        "wet_excess": "Wet excess",
-        "mixed": "Mixed",
-        "normal_growth": "Normal growth",
-        "reduced_growth": "Reduced growth",
-        "high_shrinkage_stress": "High shrinkage stress",
-        "incomplete_night_recovery": "Incomplete night recovery",
-        "normal": "Normal",
-        "heat_stress": "Heat stress",
-        "cold_stress": "Cold stress",
-        "high_humidity": "High humidity",
-        "rain_day": "Rain day",
-        "no_irrigation": "No irrigation",
-        "irrigation_event": "Irrigation event",
-        "high_irrigation_frequency": "High irrigation frequency",
-        "possible_ineffective_irrigation": "Possible ineffective irrigation",
-        "manual_override": "Manual override",
-        "offline": "Offline",
-        "no_data": "No data"
+        "dry_stress": "Okunyigirizibwa olw'obukalu",
+        "optimal": "Ekisaanidde",
+        "wet_excess": "Amazzi amasukiridde",
+        "mixed": "Ekitabuddwa",
+        "normal_growth": "Okukula okw'obulijjo",
+        "reduced_growth": "Okukula okukendedde",
+        "high_shrinkage_stress": "Okukendeera okw'amaanyi",
+        "incomplete_night_recovery": "Okuzzaawo kw'ekiro okutajjuvu",
+        "normal": "Bulijjo",
+        "heat_stress": "Okunyigirizibwa olw'ebbugumu",
+        "cold_stress": "Okunyigirizibwa olw'obunnyogovu",
+        "high_humidity": "Amaanzi mangi mu mpewo",
+        "rain_day": "Olunaku olw'enkuba",
+        "no_irrigation": "Tewali kusukkulirira",
+        "irrigation_event": "Ekikolwa ky'okusukkulirira",
+        "high_irrigation_frequency": "Okusukkulirira emirundi mingi",
+        "possible_ineffective_irrigation": "Okusukkulirira okuyinza obutagasa",
+        "manual_override": "Okukozesa n'omukono",
+        "offline": "Tekiri ku Network",
+        "no_data": "Tewali data"
       },
       "marker": {
         "irrigation": {
-          "no_irrigation": "No irrigation marker",
-          "irrigation_event": "Irrigation marker",
-          "high_irrigation_frequency": "High frequency marker",
-          "possible_ineffective_irrigation": "Possible ineffective irrigation marker",
-          "manual_override": "Manual override marker"
+          "no_irrigation": "Akabonero: Tewali kusukkulirira",
+          "irrigation_event": "Akabonero: Okusukkulirira",
+          "high_irrigation_frequency": "Akabonero: Emirundi mingi",
+          "possible_ineffective_irrigation": "Akabonero: Okuyinza obutagasa",
+          "manual_override": "Akabonero: Okukozesa n'omukono"
         },
-        "rain": "Rain",
-        "sensor_gap": "Sensor gap",
-        "heat_event": "Heat event",
+        "rain": "Enkuba",
+        "sensor_gap": "Ekituli kya sensor",
+        "heat_event": "Ekikolwa ky'ebbugumu",
         "soil": {
-          "dry_stress": "Dry stress marker",
-          "optimal": "Optimal marker",
-          "wet_excess": "Wet marker",
-          "mixed": "Mixed marker"
+          "dry_stress": "Akabonero: Okukalu",
+          "optimal": "Akabonero: Ekisaanidde",
+          "wet_excess": "Akabonero: Amazzi amasukiridde",
+          "mixed": "Akabonero: Ekitabuddwa"
         },
         "dendro": {
-          "normal_growth": "Normal growth marker",
-          "reduced_growth": "Reduced growth marker",
-          "high_shrinkage_stress": "High shrinkage marker",
-          "incomplete_night_recovery": "Incomplete recovery marker"
+          "normal_growth": "Akabonero: Okukula okw'obulijjo",
+          "reduced_growth": "Akabonero: Okukula okukendedde",
+          "high_shrinkage_stress": "Akabonero: Okukendeera okw'amaanyi",
+          "incomplete_night_recovery": "Akabonero: Okuzzaawo okutajjuvu"
         },
         "environment": {
-          "normal": "Normal marker",
-          "heat_stress": "Heat marker",
-          "cold_stress": "Cold marker",
-          "high_humidity": "High humidity marker",
-          "rain_day": "Rain marker"
+          "normal": "Akabonero: Bulijjo",
+          "heat_stress": "Akabonero: Ebbugumu",
+          "cold_stress": "Akabonero: Obunnyogovu",
+          "high_humidity": "Akabonero: Amaanzi mangi mu mpewo",
+          "rain_day": "Akabonero: Enkuba"
         }
       },
       "summary": {
         "soil": {
-          "dry_stress": "Root zone was dry with {{sampleCount}} samples.",
-          "optimal": "Root zone was optimal with {{sampleCount}} samples.",
-          "wet_excess": "Root zone was wet with {{sampleCount}} samples.",
-          "mixed": "Soil status was mixed across depths.",
-          "no_data": "No soil data was available."
+          "dry_stress": "Ekitundu ky'emirandira kyali kikalu, n'ebiwandiiko {{sampleCount}}.",
+          "optimal": "Ekitundu ky'emirandira kyali kisaanidde, n'ebiwandiiko {{sampleCount}}.",
+          "wet_excess": "Ekitundu ky'emirandira kyalimu amazzi amasukiridde, n'ebiwandiiko {{sampleCount}}.",
+          "mixed": "Embeera y'obutaka yali etabuddwa mu buziba obwenjawulo.",
+          "no_data": "Tewali data za butaka eyaliwo."
         },
         "dendro": {
-          "normal_growth": "Stem growth looked normal.",
-          "reduced_growth": "Stem growth was reduced.",
-          "high_shrinkage_stress": "Stem shrinkage indicated stress.",
-          "incomplete_night_recovery": "Night recovery was incomplete.",
-          "no_data": "No dendrometer data was available."
+          "normal_growth": "Okukula kw'omuti kwalabika kwa bulijjo.",
+          "reduced_growth": "Okukula kw'omuti kwakendeera.",
+          "high_shrinkage_stress": "Okukendeera kw'omuti kwalaga okunyigirizibwa.",
+          "incomplete_night_recovery": "Okuzzaawo kw'ekiro tekwatuuka.",
+          "no_data": "Tewali data za Dendrometer eyaliwo."
         },
         "environment": {
-          "normal": "Environment was normal.",
-          "heat_stress": "Heat stress was detected.",
-          "cold_stress": "Cold stress was detected.",
-          "high_humidity": "High humidity was detected.",
-          "rain_day": "Rain was detected.",
-          "no_data": "No environment data was available."
+          "normal": "Obudde bwali bwa bulijjo.",
+          "heat_stress": "Okunyigirizibwa olw'ebbugumu kwazuulibwa.",
+          "cold_stress": "Okunyigirizibwa olw'obunnyogovu kwazuulibwa.",
+          "high_humidity": "Amaanzi mangi mu mpewo gazuulibwa.",
+          "rain_day": "Enkuba yazuulibwa.",
+          "no_data": "Tewali data z'obudde eyaliwo."
         },
         "irrigation": {
-          "no_irrigation": "No irrigation occurred.",
-          "irrigation_event": "Irrigation occurred.",
-          "high_irrigation_frequency": "Irrigation frequency was high.",
-          "possible_ineffective_irrigation": "Irrigation may have been ineffective.",
-          "manual_override": "Manual override occurred."
+          "no_irrigation": "Tewali kusukkulirira kwabaddewo.",
+          "irrigation_event": "Okusukkulirira kwabaddewo.",
+          "high_irrigation_frequency": "Okusukkulirira kwabaddewo emirundi mingi.",
+          "possible_ineffective_irrigation": "Okusukkulirira kiyinza okuba nga tekwagasa.",
+          "manual_override": "Waliwo okukozesa n'omukono."
         },
         "gateway": {
-          "offline": "Gateway connectivity was offline.",
-          "normal": "Gateway status was normal.",
-          "no_data": "No gateway data was available."
+          "offline": "Okuyunga kwa Gateway kwali tekuli ku Network.",
+          "normal": "Embeera ya Gateway yali ya bulijjo.",
+          "no_data": "Tewali data za Gateway eyaliwo."
         }
       }
     },
     "interpretation": {
-      "title": "Interpretation",
+      "title": "Okutegeera",
       "noData": {
-        "title": "No data in selected range",
-        "body": "This card is configured, but no measured history was available for the selected range."
+        "title": "Tewali data mu kiseera ekirondeddwa",
+        "body": "Kaadi eno etegekeddwa, naye tewali byafaayo ebipimiddwa ebyaliwo mu kiseera ekirondeddwa."
       },
       "rootZoneDry": {
-        "title": "Root zone entered dry status",
-        "body": "Lower soil tension stayed dry through the selected period."
+        "title": "Ekitundu ky'emirandira kyayingira embeera ey'obukalu",
+        "body": "Okuzika kw'amazzi mu butaka obuwanvu kwasigala kukalu mu kiseera ekirondeddwa."
       },
       "dataCoverageGap": {
-        "title": "Sensor data is incomplete",
-        "body": "Sensor data was missing during the selected period."
+        "title": "Data za Sensor tezijjuvu",
+        "body": "Data za Sensor zaabulako mu kiseera ekirondeddwa."
       },
       "incompleteNightRecovery": {
-        "title": "Night recovery was incomplete",
-        "body": "The dendrometer did not fully recover overnight during the selected period."
+        "title": "Okuzzaawo kw'ekiro tekwatuuka",
+        "body": "Dendrometer teyazzaawo bulungi ekiro mu kiseera ekirondeddwa."
       },
       "environmentStress": {
-        "title": "Environment stress detected",
-        "body": "Environment readings crossed a stress threshold in the selected range."
+        "title": "Okunyigirizibwa kw'obudde kwazuulibwa",
+        "body": "Ebiwandiiko by'obudde byasukka ekigero ky'okunyigirizibwa mu kiseera ekirondeddwa."
       },
       "extensionUnavailable": {
-        "title": "Cloud context unavailable"
+        "title": "Ebikwata ku Cloud tebiriwo"
       },
       "prediction": {
-        "title": "Prediction context",
-        "body": "Prediction context is available for this zone."
+        "title": "Ebikwata ku Prediction",
+        "body": "Ebikwata ku Prediction biriwo mu kitundu kino."
       },
       "recommendation": {
-        "irrigate": "Irrigate",
-        "monitor": "Monitor"
+        "irrigate": "Sukkulira",
+        "monitor": "Lambula"
       }
     },
     "advanced": {
-      "title": "Advanced diagnostics",
-      "loading": "Loading advanced diagnostics...",
-      "emptyTitle": "No advanced diagnostics",
+      "title": "Okwekenneenya okw'ebisingawo",
+      "loading": "Okwekenneenya okw'ebisingawo kutikkibwa...",
+      "emptyTitle": "Tewali kwekenneenya kw'ebisingawo",
       "value": {
-        "unavailable": "Unavailable"
+        "unavailable": "Tekiriwo"
       },
       "availability": {
-        "collected": "Collected",
-        "not_collected_at_time": "Not collected then",
-        "unknown_now": "Unknown now",
-        "unsupported": "Unsupported"
+        "collected": "Kikuŋŋaanyiziddwa",
+        "not_collected_at_time": "Tekyakuŋŋaanyizibwa mu kiseera ekyo",
+        "unknown_now": "Tekimanyiddwa kati",
+        "unsupported": "Tewagirwa"
       },
       "field": {
         "device_eui": "Device EUI",
         "primaryDeveui": "Device EUI",
         "rssi": "RSSI",
         "snr": "SNR",
-        "raw_payload": "Raw payload",
-        "rawPayload": "Raw payload",
+        "raw_payload": "Data nga bwe eri",
+        "rawPayload": "Data nga bwe eri",
         "firmware": "Firmware",
-        "calibration": "Calibration",
-        "prediction": "Prediction",
-        "forecast": "Forecast",
-        "pending_commands": "Pending commands",
-        "batteryPct": "Battery percent",
-        "batteryVoltage": "Battery voltage",
-        "calibrationStatus": "Calibration status",
-        "firmwareVersion": "Firmware version",
+        "calibration": "Okutereeza ekipimo",
+        "prediction": "Okuteebereza",
+        "forecast": "Ebikuubiriza",
+        "pending_commands": "Ebiragiro ebirindiridde",
+        "batteryPct": "Pasenti ya Bbaatule",
+        "batteryVoltage": "Voliti za Bbaatule",
+        "calibrationStatus": "Embeera ya Calibration",
+        "firmwareVersion": "Vaasoni ya Firmware",
         "gatewayEui": "Gateway EUI",
-        "gatewayLatitude": "Gateway latitude",
-        "gatewayLocationStatus": "Gateway location status",
-        "gatewayLongitude": "Gateway longitude",
-        "logicalSourceKey": "Logical source key",
-        "pendingCommands": "Pending commands",
-        "rawRowCount": "Raw row count",
-        "sourceDeviceCount": "Source device count"
+        "gatewayLatitude": "Latitudo ya Gateway",
+        "gatewayLocationStatus": "Embeera y'ekifo kya Gateway",
+        "gatewayLongitude": "Longitudo ya Gateway",
+        "logicalSourceKey": "Kisumuluzo ky'ensibuko",
+        "pendingCommands": "Ebiragiro ebirindiridde",
+        "rawRowCount": "Omuwendo gw'emirundi gya data",
+        "sourceDeviceCount": "Omuwendo gw'ebyuma ebisibuko"
       }
     },
     "source": {
-      "multipleNamed": "{{count}} sources: {{names}}",
-      "multiple": "{{count}} sources"
+      "multipleNamed": "Ensibuko {{count}}: {{names}}",
+      "multiple": "Ensibuko {{count}}"
     },
     "soilLineChart": {
-      "title": "Soil line chart",
-      "emptyTitle": "No soil trend data",
-      "emptyBody": "Soil tension readings will appear here when history data is available.",
-      "pointsCount": "{{count}} readings",
-      "axisLabel": "{{unit}} axis",
+      "title": "Chart y'omulongo gw'obutaka",
+      "emptyTitle": "Tewali data za nkyukakyuka z'obutaka",
+      "emptyBody": "Ebiwandiiko by'okuzika kw'amazzi mu butaka bijja kulabikira wano nga data w'ebyafaayo eriwo.",
+      "pointsCount": "Ebiwandiiko {{count}}",
+      "axisLabel": "Olwebongero lwa {{unit}}",
       "series": {
-        "soil1": "Soil 1",
-        "soil2": "Soil 2",
-        "soil3": "Soil 3",
-        "soil": "Soil {{index}}",
-        "sensor": "Sensor {{index}}"
+        "soil1": "Obutaka 1",
+        "soil2": "Obutaka 2",
+        "soil3": "Obutaka 3",
+        "soil": "Obutaka {{index}}",
+        "sensor": "Ekyuma ekipima {{index}}"
       }
     },
     "soilIrrigationResponse": {
-      "title": "Soil irrigation response",
-      "emptyTitle": "No irrigation response events",
-      "emptyBody": "No irrigation response events in this range.",
-      "eventsCount": "{{count}} events",
-      "eventFallback": "Irrigation response",
-      "duration": "Duration: {{value}} min",
-      "interpretationsTitle": "Response notes"
+      "title": "Okuddamu kw'obutaka eri okusukkulirira",
+      "emptyTitle": "Tewali bikolwa by'okuddamu kw'okusukkulirira",
+      "emptyBody": "Tewali bikolwa by'okuddamu kw'okusukkulirira mu kiseera kino.",
+      "eventsCount": "Ebikolwa {{count}}",
+      "eventFallback": "Okuddamu kw'okusukkulirira",
+      "duration": "Ebanga: Ddakiika {{value}}",
+      "interpretationsTitle": "Ebiwandiiko ku kuddamu"
     },
     "dendroLineChart": {
-      "title": "Dendro line chart",
-      "emptyTitle": "No dendrometer line data",
-      "emptyBody": "Dendrometer readings will appear here when history data is available.",
-      "pointsCount": "{{count}} readings",
+      "title": "Chart y'omulongo gwa Dendro",
+      "emptyTitle": "Tewali data za chart ya Dendrometer",
+      "emptyBody": "Ebiwandiiko bya Dendrometer bijja kulabikira wano nga data w'ebyafaayo eriwo.",
+      "pointsCount": "Ebiwandiiko {{count}}",
       "series": {
-        "stemChange": "Stem change",
-        "growth": "Growth",
-        "shrinkage": "Shrinkage",
-        "position": "Position",
+        "stemChange": "Enkyukakyuka mu kikolo",
+        "growth": "Okukula",
+        "shrinkage": "Okukendeera",
+        "position": "Ekifo",
         "dendrometer": "Dendrometer"
       }
     },
     "dendroStressEvents": {
-      "title": "Dendro stress events",
-      "emptyTitle": "No stress events",
-      "emptyBody": "No stress events in this range.",
-      "eventsCount": "{{count}} events",
-      "interpretationsTitle": "Stress notes",
+      "title": "Ebikolwa by'okunyigirizibwa bya Dendro",
+      "emptyTitle": "Tewali bikolwa by'okunyigirizibwa",
+      "emptyBody": "Tewali bikolwa by'okunyigirizibwa mu kiseera kino.",
+      "eventsCount": "Ebikolwa {{count}}",
+      "interpretationsTitle": "Ebiwandiiko ku kunyigirizibwa",
       "event": {
-        "stress": "Stress event",
-        "shrinkage": "Shrinkage stress",
-        "incompleteRecovery": "Incomplete recovery"
+        "stress": "Ekikolwa ky'okunyigirizibwa",
+        "shrinkage": "Okunyigirizibwa olw'okukendeera",
+        "incompleteRecovery": "Okuzzaawo okutajjuvu"
       }
     },
     "sourceFilter": {
-      "label": "Source",
-      "all": "All"
+      "label": "Ensibuko",
+      "all": "Byonna"
     },
     "settings": {
-      "open": "Open card settings",
-      "menuLabel": "Card settings",
-      "advancedView": "Advanced View",
-      "cardSettings": "Card settings",
-      "resetRange": "Reset range",
-      "cardSettingsUnavailable": "Card settings are not available yet.",
-      "refresh": "Refresh"
+      "open": "Ggulawo enteekateeka za kaadi",
+      "menuLabel": "Enteekateeka za kaadi",
+      "advancedView": "Endaba y'ebisingawo",
+      "cardSettings": "Enteekateeka za kaadi",
+      "resetRange": "Zzaawo ekiseera",
+      "cardSettingsUnavailable": "Enteekateeka za kaadi tezinnaba kubaawo.",
+      "refresh": "Zza obuggya"
     },
     "inspector": {
-      "title": "Inspector",
-      "context": "Selected point",
-      "close": "Close",
-      "timestamp": "Timestamp",
-      "date": "Date",
-      "source": "Source",
-      "coverage": "Coverage",
-      "syncState": "Sync state",
-      "dataAsOf": "Data as of",
-      "events": "Events",
-      "noInterpretation": "No local interpretation for this selection.",
-      "eventFallback": "History event"
-    },
-    "dailyMinMax": {
-      "title": "Daily Min/Max",
-      "emptyTitle": "No daily min/max data",
-      "emptyBody": "Daily minimum and maximum readings are not available for this range.",
-      "pointsCount": "{{count}} days",
-      "axisLabel": "{{unit}}",
-      "axisNoUnit": "Value",
-      "tooltipMin": "Min",
-      "tooltipMax": "Max",
-      "tooltipMean": "Mean",
-      "series": {
-        "airTemperature": "Air temperature",
-        "environment": "Environment"
-      }
+      "title": "Ebikwata",
+      "context": "Akatundu akalondeddwa",
+      "close": "Ggalawo",
+      "timestamp": "Ekiseera",
+      "date": "Olunaku",
+      "source": "Ensibuko",
+      "coverage": "Obujjuvu",
+      "syncState": "Embeera y'okusinkroniza",
+      "dataAsOf": "Data okutuuka ku",
+      "events": "Ebikolwa",
+      "noInterpretation": "Tewali kutegeera kw'omu kitundu ku kirondeddwa kino.",
+      "eventFallback": "Ekikolwa ky'ebyafaayo"
     },
     "sources": {
-      "button": "Sources",
-      "menuLabel": "Card sources"
+      "button": "Ensibuko",
+      "menuLabel": "Ensibuko za kaadi"
     }
   }
 }

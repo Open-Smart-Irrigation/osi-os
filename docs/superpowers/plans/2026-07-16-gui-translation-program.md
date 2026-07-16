@@ -4,7 +4,7 @@
 **Goal (product owner, 2026-07-16):** every GUI string is translated into all seven shipped
 locales. **Catalog labels stay English for now** — that decision is unchanged and out of
 scope here (see `2026-07-16-journal-catalog-completeness.md` F2/N2).
-**Status:** wave 1 (journal) DONE; waves 2–3 specified, not started.
+**Status:** wave 1 (journal) DONE; wave 2 (history) DONE; wave 3 specified, not started.
 
 ## Why this needs a plan rather than a sweep
 
@@ -72,7 +72,7 @@ tone. Ends with the value-level parity test replacing the English-pinning assert
 `npm run test:unit`, `npx tsc --noEmit`, `npm run build`, browser spot-check of the de-CH
 capture flow at 320px (the header already proved translated labels change layout).
 
-## Wave 2 — `history` (2360 strings) — the elephant
+## Wave 2 — `history` (2360 strings) — DONE
 
 414 strings, 95% untranslated, and **mirrored + enforced**. This is 69% of the program.
 
@@ -83,6 +83,10 @@ Several strings are template-heavy and will need placeholder care.
 
 **Gate:** wave 1's gate, plus `agrolinkBranding.test.ts` green (proves both trees written),
 plus the existing `localizes thematic history empty-zone copy in all bundled locales` test.
+
+**Outcome (2026-07-16):** All six non-English History resources have 414 leaf keys,
+matching placeholders, reviewed identical-value allowlists, and byte-identical feed mirrors.
+The de-CH resource contains no `ß`.
 
 ## Wave 3 — long tail (287 strings)
 

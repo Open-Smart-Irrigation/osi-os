@@ -45,6 +45,18 @@ describe('AgroLink branding source contracts', () => {
     }
   });
 
+  it('keeps the six non-English history source/feed mirrors byte-identical', () => {
+    const sourceLocaleRoot = path.join(reactRoot, 'public', 'locales');
+    const feedLocaleRoot = path.join(repoRoot, 'feeds/chirpstack-openwrt-feed/apps/node-red/files/gui/locales');
+
+    for (const locale of ['de-CH', 'es', 'fr', 'it', 'lg', 'pt']) {
+      const relativePath = path.join(locale, 'history.json');
+      const source = fs.readFileSync(path.join(sourceLocaleRoot, relativePath));
+      const feed = fs.readFileSync(path.join(feedLocaleRoot, relativePath));
+      assert.equal(Buffer.compare(source, feed), 0, `${relativePath} must be byte-identical in the feed GUI bundle`);
+    }
+  });
+
   it('uses AgroLink auth copy in supported brand languages', () => {
     const expectedRegisterSubtitles: Record<string, string> = {
       en: 'Register for AgroLink',

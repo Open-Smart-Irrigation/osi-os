@@ -1,22 +1,22 @@
 {
   "history": {
     "nav": {
-      "history": "History",
-      "legacyDashboard": "Legacy dashboard",
-      "logout": "Logout"
+      "history": "Historial",
+      "legacyDashboard": "Panel heredado",
+      "logout": "Cerrar sesión"
     },
     "shell": {
-      "title": "History",
-      "subtitle": "Local gateway history for {{username}}",
-      "loadingLocalCards": "Loading local history cards...",
-      "unavailableTitle": "History is unavailable",
-      "unavailableBody": "Runtime feature flags keep the new history shell off until the local gateway enables it.",
-      "featureFlagFailed": "The feature flag request failed. The legacy dashboard is still available.",
-      "zonesFailedTitle": "History zones failed to load",
-      "noZonesTitle": "No zones yet",
+      "title": "Historial",
+      "subtitle": "Historial local del gateway para {{username}}",
+      "loadingLocalCards": "Cargando tarjetas de historial locales...",
+      "unavailableTitle": "El historial no está disponible",
+      "unavailableBody": "Los indicadores de funciones en tiempo de ejecución mantienen desactivado el nuevo panel de historial hasta que el gateway local lo habilite.",
+      "featureFlagFailed": "La solicitud del indicador de función falló. El panel heredado sigue disponible.",
+      "zonesFailedTitle": "Error al cargar las zonas de historial",
+      "noZonesTitle": "Aún no hay zonas",
       "noZonesBody": "Crea una zona desde el panel heredado antes de abrir el historial temático.",
-      "cardsFailed": "History cards failed to load.",
-      "retryCards": "Retry cards"
+      "cardsFailed": "Error al cargar las tarjetas de historial.",
+      "retryCards": "Reintentar tarjetas"
     },
     "export": {
       "open": "Exportar",
@@ -48,426 +48,426 @@
       "inspectorPlaceholder": "Seleccione una marca de tiempo o celda del calendario para ver interpretación, eventos, calidad de datos y metadatos avanzados."
     },
     "mobile": {
-      "zoneLabel": "Zone",
-      "actions": "History actions",
-      "openActions": "Open history actions"
+      "zoneLabel": "Zona",
+      "actions": "Acciones de historial",
+      "openActions": "Abrir acciones de historial"
     },
     "overview": {
-      "empty": "No history cards are available for this zone yet.",
-      "openCard": "Open {{title}} history",
-      "cardTypeLabel": "{{cardType}} card",
-      "pinCard": "Pin card",
-      "unpinCard": "Unpin card",
-      "pinCardForTitle": "Pin {{title}} card",
-      "unpinCardForTitle": "Unpin {{title}} card",
-      "pinned": "Pinned",
-      "alert": "Attention"
+      "empty": "Aún no hay tarjetas de historial disponibles para esta zona.",
+      "openCard": "Abrir historial de {{title}}",
+      "cardTypeLabel": "Tarjeta de {{cardType}}",
+      "pinCard": "Fijar tarjeta",
+      "unpinCard": "Desfijar tarjeta",
+      "pinCardForTitle": "Fijar tarjeta {{title}}",
+      "unpinCardForTitle": "Desfijar tarjeta {{title}}",
+      "pinned": "Fijada",
+      "alert": "Atención"
     },
     "detail": {
-      "backToHistory": "Back to history",
-      "invalidRouteTitle": "History card not available",
-      "invalidRouteBody": "Return to History and choose an available card.",
-      "loading": "Loading history card...",
-      "notFoundTitle": "History card not available",
-      "notFoundBody": "Return to History and choose an available card.",
-      "controlsPlaceholder": "Date range",
+      "backToHistory": "Volver al historial",
+      "invalidRouteTitle": "Tarjeta de historial no disponible",
+      "invalidRouteBody": "Vuelve a Historial y elige una tarjeta disponible.",
+      "loading": "Cargando tarjeta de historial...",
+      "notFoundTitle": "Tarjeta de historial no disponible",
+      "notFoundBody": "Vuelve a Historial y elige una tarjeta disponible.",
+      "controlsPlaceholder": "Rango de fechas",
       "inspectorPlaceholder": "Inspector",
-      "rangeControlLabel": "Date range",
-      "viewControlLabel": "View",
-      "visualizationLabel": "History visualization",
-      "visualizationHelp": "Drag to pan, pinch to zoom, double tap to reset, or long press to inspect."
+      "rangeControlLabel": "Rango de fechas",
+      "viewControlLabel": "Vista",
+      "visualizationLabel": "Visualización de historial",
+      "visualizationHelp": "Arrastra para desplazar, pellizca para acercar, toca dos veces para restablecer o mantén pulsado para inspeccionar."
     },
     "rangeShort": {
       "12h": "12h",
       "24h": "24h",
       "7d": "7D",
       "30d": "30D",
-      "season": "Season",
-      "custom": "Custom"
+      "season": "Temporada",
+      "custom": "Personalizado"
     },
     "sidebar": {
-      "zones": "Zones",
-      "pinnedCards": "Pinned cards",
-      "availableCards": "Available cards",
-      "savedWorkspaces": "Saved workspaces",
-      "workspaceDisabled": "Workspace saving is not enabled on this slice.",
-      "workspaceName": "Workspace name",
-      "saveWorkspace": "Save workspace",
-      "updateWorkspace": "Update workspace",
-      "loadWorkspace": "Load {{name}}",
-      "deleteWorkspace": "Delete {{name}}",
-      "defaultWorkspaceName": "Local workspace",
-      "pinCard": "Pin",
-      "unpinCard": "Unpin",
-      "none": "None"
+      "zones": "Zonas",
+      "pinnedCards": "Tarjetas fijadas",
+      "availableCards": "Tarjetas disponibles",
+      "savedWorkspaces": "Espacios de trabajo guardados",
+      "workspaceDisabled": "El guardado de espacios de trabajo no está habilitado en esta versión.",
+      "workspaceName": "Nombre del espacio de trabajo",
+      "saveWorkspace": "Guardar espacio de trabajo",
+      "updateWorkspace": "Actualizar espacio de trabajo",
+      "loadWorkspace": "Cargar {{name}}",
+      "deleteWorkspace": "Eliminar {{name}}",
+      "defaultWorkspaceName": "Espacio de trabajo local",
+      "pinCard": "Fijar",
+      "unpinCard": "Desfijar",
+      "none": "Ninguno"
     },
     "carousel": {
-      "empty": "No history cards are available for this zone yet.",
-      "ariaLabel": "History card carousel",
-      "cardAriaLabel": "{{title}} card",
-      "cardTypeLabel": "{{cardType}} card",
-      "pinned": "Pinned"
+      "empty": "Aún no hay tarjetas de historial disponibles para esta zona.",
+      "ariaLabel": "Carrusel de tarjetas de historial",
+      "cardAriaLabel": "Tarjeta {{title}}",
+      "cardTypeLabel": "Tarjeta de {{cardType}}",
+      "pinned": "Fijada"
     },
     "cardFrame": {
-      "emptyTitle": "Select a history card",
-      "emptyBody": "Choose a zone and thematic card to inspect local history.",
-      "typeHistory": "{{cardType}} history",
-      "viewModes": "{{title}} view modes",
-      "unavailable": "This card is not available for the selected zone.",
-      "timelineBrush": "Timeline viewport",
-      "timelineBrushKeyboardHelp": "Use arrow keys to pan, plus or minus to zoom, and Home or Enter to reset.",
-      "aggregationBadge": "Aggregation: {{aggregation}}",
-      "placeholderBody": "Chart and calendar data will load here when card data APIs are enabled.",
-      "cardDataLoading": "Loading card data...",
-      "cardDataError": "Card data failed to load: {{message}}",
-      "cardDataUnknownError": "Unknown error"
+      "emptyTitle": "Selecciona una tarjeta de historial",
+      "emptyBody": "Elige una zona y una tarjeta temática para inspeccionar el historial local.",
+      "typeHistory": "Historial de {{cardType}}",
+      "viewModes": "Modos de vista de {{title}}",
+      "unavailable": "Esta tarjeta no está disponible para la zona seleccionada.",
+      "timelineBrush": "Ventana de la línea de tiempo",
+      "timelineBrushKeyboardHelp": "Usa las flechas para desplazar, más o menos para acercar, e Inicio o Intro para restablecer.",
+      "aggregationBadge": "Agregación: {{aggregation}}",
+      "placeholderBody": "Los datos del gráfico y del calendario se cargarán aquí cuando las API de datos de la tarjeta estén habilitadas.",
+      "cardDataLoading": "Cargando datos de la tarjeta...",
+      "cardDataError": "Error al cargar los datos de la tarjeta: {{message}}",
+      "cardDataUnknownError": "Error desconocido"
     },
     "workspace": {
-      "unavailablePanel": "Unavailable panel",
-      "repairPanel": "Remove unavailable panel"
+      "unavailablePanel": "Panel no disponible",
+      "repairPanel": "Quitar panel no disponible"
     },
     "dendroTimeline": {
-      "title": "Growth timeline",
-      "emptyTitle": "No dendrometer timeline data",
-      "emptyBody": "Dendrometer readings will appear here when history data is available.",
-      "eventsTitle": "Timeline events",
-      "eventFallback": "Dendrometer event",
-      "noEvents": "No events in this range",
-      "pointsCount": "{{count}} readings",
+      "title": "Línea de tiempo de crecimiento",
+      "emptyTitle": "No hay datos de línea de tiempo del dendrómetro",
+      "emptyBody": "Las lecturas del dendrómetro aparecerán aquí cuando haya datos de historial disponibles.",
+      "eventsTitle": "Eventos de la línea de tiempo",
+      "eventFallback": "Evento del dendrómetro",
+      "noEvents": "No hay eventos en este rango",
+      "pointsCount": "{{count}} lecturas",
       "series": {
-        "stemChange": "Stem change",
-        "growth": "Growth",
-        "shrinkage": "Shrinkage",
-        "dendrometer": "Dendrometer"
+        "stemChange": "Cambio del tronco",
+        "growth": "Crecimiento",
+        "shrinkage": "Contracción",
+        "dendrometer": "Dendrómetro"
       }
     },
     "environmentLineChart": {
-      "title": "Environment trend",
-      "emptyTitle": "No environment trend data",
-      "emptyBody": "Environment readings will appear here when history data is available.",
-      "pointsCount": "{{count}} readings",
-      "axisLabel": "{{unit}} axis",
-      "axisNoUnit": "Unitless axis",
+      "title": "Tendencia ambiental",
+      "emptyTitle": "No hay datos de tendencia ambiental",
+      "emptyBody": "Las lecturas ambientales aparecerán aquí cuando haya datos de historial disponibles.",
+      "pointsCount": "{{count}} lecturas",
+      "axisLabel": "Eje de {{unit}}",
+      "axisNoUnit": "Eje sin unidad",
       "series": {
-        "airTemperature": "Air temperature",
-        "humidity": "Relative humidity",
-        "rain": "Rain",
-        "light": "Light",
-        "pressure": "Pressure",
-        "wind": "Wind",
-        "uv": "UV index",
-        "environment": "Environment"
+        "airTemperature": "Temperatura del aire",
+        "humidity": "Humedad relativa",
+        "rain": "Lluvia",
+        "light": "Luz",
+        "pressure": "Presión",
+        "wind": "Viento",
+        "uv": "Índice UV",
+        "environment": "Entorno"
       }
     },
     "gatewayStatus": {
-      "title": "Gateway status overview",
-      "emptyTitle": "Limited gateway status data",
-      "emptyBody": "Gateway status details will appear here as the hub reports them.",
-      "lastSeen": "Last seen",
-      "dataAsOf": "Data as of",
-      "syncState": "Sync state",
-      "eventsTitle": "Recent gateway events",
-      "noEvents": "No gateway events in this range.",
-      "eventFallback": "Gateway event",
+      "title": "Resumen del estado del gateway",
+      "emptyTitle": "Datos limitados del estado del gateway",
+      "emptyBody": "Los detalles del estado del gateway aparecerán aquí a medida que el hub los reporte.",
+      "lastSeen": "Visto por última vez",
+      "dataAsOf": "Datos a fecha de",
+      "syncState": "Estado de sincronización",
+      "eventsTitle": "Eventos recientes del gateway",
+      "noEvents": "No hay eventos del gateway en este rango.",
+      "eventFallback": "Evento del gateway",
       "status": {
         "ok": "OK",
-        "online": "Online",
-        "offline": "Offline",
-        "connected": "Connected",
-        "disconnected": "Disconnected",
-        "degraded": "Degraded",
-        "stale": "Stale",
-        "charging": "Charging"
+        "online": "En línea",
+        "offline": "Fuera de línea",
+        "connected": "Conectado",
+        "disconnected": "Desconectado",
+        "degraded": "Degradado",
+        "stale": "Desactualizado",
+        "charging": "Cargando"
       },
       "category": {
-        "connectivity": "Connectivity",
-        "storage": "Storage",
-        "system": "System"
+        "connectivity": "Conectividad",
+        "storage": "Almacenamiento",
+        "system": "Sistema"
       },
       "metric": {
-        "signal": "Signal",
-        "storage": "Storage use",
-        "memory": "Memory use",
+        "signal": "Señal",
+        "storage": "Uso de almacenamiento",
+        "memory": "Uso de memoria",
         "cpu": "CPU",
-        "temperature": "Temperature"
+        "temperature": "Temperatura"
       },
       "value": {
-        "unavailable": "Not reported"
+        "unavailable": "No reportado"
       }
     },
     "irrigationTimeline": {
-      "title": "Irrigation event timeline",
-      "emptyTitle": "No irrigation events",
-      "emptyBody": "Irrigation actions and response windows will appear here when history data is available.",
-      "eventsCount": "{{count}} events",
+      "title": "Línea de tiempo de eventos de riego",
+      "emptyTitle": "No hay eventos de riego",
+      "emptyBody": "Las acciones de riego y las ventanas de respuesta aparecerán aquí cuando haya datos de historial disponibles.",
+      "eventsCount": "{{count}} eventos",
       "eventLabel": {
-        "irrigation": "Irrigation event",
-        "scheduled": "Scheduled irrigation",
-        "manualOverride": "Manual override",
-        "possibleIneffective": "Possible ineffective irrigation",
-        "responseWindow": "Response window"
+        "irrigation": "Evento de riego",
+        "scheduled": "Riego programado",
+        "manualOverride": "Anulación manual",
+        "possibleIneffective": "Posible riego ineficaz",
+        "responseWindow": "Ventana de respuesta"
       },
       "detail": {
-        "duration": "Duration: {{value}}",
-        "responseWindow": "Response window: {{value}}",
-        "observedResponse": "Observed response: {{value}}"
+        "duration": "Duración: {{value}}",
+        "responseWindow": "Ventana de respuesta: {{value}}",
+        "observedResponse": "Respuesta observada: {{value}}"
       },
       "severity": {
         "info": "Info",
-        "warning": "Warning",
-        "critical": "Critical",
-        "success": "Success",
+        "warning": "Advertencia",
+        "critical": "Crítico",
+        "success": "Éxito",
         "unknown": "Info"
       }
     },
     "cardType": {
-      "soil": "Soil",
+      "soil": "Suelo",
       "dendro": "Dendro",
-      "environment": "Environment",
-      "irrigation": "Irrigation",
+      "environment": "Entorno",
+      "irrigation": "Riego",
       "gateway": "Gateway"
     },
     "viewMode": {
-      "soil-profile": "Soil Profile",
-      "line-chart": "Line Chart",
-      "calendar": "Calendar",
-      "irrigation-response": "Irrigation Response",
-      "advanced": "Advanced View",
-      "growth-timeline": "Growth Timeline",
-      "stress-events": "Stress Events",
-      "daily-min-max": "Daily Min/Max",
-      "event-timeline": "Event Timeline",
-      "status-overview": "Status Overview",
-      "connectivity-timeline": "Connectivity Timeline"
+      "soil-profile": "Perfil de suelo",
+      "line-chart": "Gráfico de líneas",
+      "calendar": "Calendario",
+      "irrigation-response": "Respuesta de riego",
+      "advanced": "Vista avanzada",
+      "growth-timeline": "Línea de tiempo de crecimiento",
+      "stress-events": "Eventos de estrés",
+      "daily-min-max": "Mín/Máx diario",
+      "event-timeline": "Línea de tiempo de eventos",
+      "status-overview": "Resumen de estado",
+      "connectivity-timeline": "Línea de tiempo de conectividad"
     },
     "metadata": {
-      "coverageUnknown": "Coverage unknown",
-      "coverageKnown": "{{coverage}}% coverage",
+      "coverageUnknown": "Cobertura desconocida",
+      "coverageKnown": "{{coverage}}% de cobertura",
       "coverageConfidence": {
-        "configured": "Configured cadence",
-        "derived": "Derived cadence",
-        "unknown": "Cadence unknown"
+        "configured": "Cadencia configurada",
+        "derived": "Cadencia derivada",
+        "unknown": "Cadencia desconocida"
       },
       "syncState": {
         "local": "Local",
-        "synced": "Synced",
-        "stale": "Stale",
-        "degraded": "Degraded",
-        "unknown": "Unknown"
+        "synced": "Sincronizado",
+        "stale": "Desactualizado",
+        "degraded": "Degradado",
+        "unknown": "Desconocido"
       },
       "aggregation": {
-        "auto": "Automatic",
-        "raw": "Raw",
+        "auto": "Automático",
+        "raw": "Sin agregación",
         "15m": "15 min",
-        "hourly": "Hourly",
-        "daily": "Daily",
-        "weekly": "Weekly"
+        "hourly": "Por hora",
+        "daily": "Diaria",
+        "weekly": "Semanal"
       },
       "range": {
-        "12h": "12 hours",
-        "24h": "24 hours",
-        "7d": "7 days",
-        "30d": "30 days",
-        "season": "Season",
-        "custom": "Custom range"
+        "12h": "12 horas",
+        "24h": "24 horas",
+        "7d": "7 días",
+        "30d": "30 días",
+        "season": "Temporada",
+        "custom": "Rango personalizado"
       }
     },
     "soilProfile": {
-      "emptyTitle": "No soil profile data",
-      "emptyBody": "Depth-aware profile readings are not available for this range.",
+      "emptyTitle": "No hay datos de perfil de suelo",
+      "emptyBody": "Las lecturas de perfil por profundidad no están disponibles para este rango.",
       "depthLabel": "{{depth}} cm",
-      "depthUnknown": "Depth pending",
-      "valueMissing": "No reading",
+      "depthUnknown": "Profundidad pendiente",
+      "valueMissing": "Sin lectura",
       "status": {
-        "dry_stress": "Dry stress",
-        "optimal": "Optimal",
-        "wet_excess": "Wet excess",
-        "mixed": "Mixed",
-        "no_data": "No data"
+        "dry_stress": "Estrés por sequía",
+        "optimal": "Óptimo",
+        "wet_excess": "Exceso de humedad",
+        "mixed": "Mixto",
+        "no_data": "Sin datos"
       },
-      "labelUnknown": "Soil layer {{index}}"
+      "labelUnknown": "Capa de suelo {{index}}"
     },
     "soil": {
       "state": {
-        "wet": "Wet",
-        "moist": "Moist",
-        "dry": "Dry"
+        "wet": "Mojado",
+        "moist": "Húmedo",
+        "dry": "Seco"
       }
     },
     "calendar": {
-      "label": "Calendar",
-      "title": "Calendar",
-      "emptyTitle": "No calendar data",
+      "label": "Calendario",
+      "title": "Calendario",
+      "emptyTitle": "No hay datos de calendario",
       "weekday": {
-        "mon": "Mon",
-        "tue": "Tue",
-        "wed": "Wed",
-        "thu": "Thu",
-        "fri": "Fri",
-        "sat": "Sat",
-        "sun": "Sun"
+        "mon": "Lun",
+        "tue": "Mar",
+        "wed": "Mié",
+        "thu": "Jue",
+        "fri": "Vie",
+        "sat": "Sáb",
+        "sun": "Dom"
       },
       "state": {
-        "dry_stress": "Dry stress",
-        "optimal": "Optimal",
-        "wet_excess": "Wet excess",
-        "mixed": "Mixed",
-        "normal_growth": "Normal growth",
-        "reduced_growth": "Reduced growth",
-        "high_shrinkage_stress": "High shrinkage stress",
-        "incomplete_night_recovery": "Incomplete night recovery",
+        "dry_stress": "Estrés por sequía",
+        "optimal": "Óptimo",
+        "wet_excess": "Exceso de humedad",
+        "mixed": "Mixto",
+        "normal_growth": "Crecimiento normal",
+        "reduced_growth": "Crecimiento reducido",
+        "high_shrinkage_stress": "Estrés alto por contracción",
+        "incomplete_night_recovery": "Recuperación nocturna incompleta",
         "normal": "Normal",
-        "heat_stress": "Heat stress",
-        "cold_stress": "Cold stress",
-        "high_humidity": "High humidity",
-        "rain_day": "Rain day",
-        "no_irrigation": "No irrigation",
-        "irrigation_event": "Irrigation event",
-        "high_irrigation_frequency": "High irrigation frequency",
-        "possible_ineffective_irrigation": "Possible ineffective irrigation",
-        "manual_override": "Manual override",
-        "offline": "Offline",
-        "no_data": "No data"
+        "heat_stress": "Estrés por calor",
+        "cold_stress": "Estrés por frío",
+        "high_humidity": "Humedad alta",
+        "rain_day": "Día de lluvia",
+        "no_irrigation": "Sin riego",
+        "irrigation_event": "Evento de riego",
+        "high_irrigation_frequency": "Frecuencia de riego alta",
+        "possible_ineffective_irrigation": "Posible riego ineficaz",
+        "manual_override": "Anulación manual",
+        "offline": "Fuera de línea",
+        "no_data": "Sin datos"
       },
       "marker": {
         "irrigation": {
-          "no_irrigation": "No irrigation marker",
-          "irrigation_event": "Irrigation marker",
-          "high_irrigation_frequency": "High frequency marker",
-          "possible_ineffective_irrigation": "Possible ineffective irrigation marker",
-          "manual_override": "Manual override marker"
+          "no_irrigation": "Marcador de sin riego",
+          "irrigation_event": "Marcador de riego",
+          "high_irrigation_frequency": "Marcador de frecuencia alta",
+          "possible_ineffective_irrigation": "Marcador de posible riego ineficaz",
+          "manual_override": "Marcador de anulación manual"
         },
-        "rain": "Rain",
-        "sensor_gap": "Sensor gap",
-        "heat_event": "Heat event",
+        "rain": "Lluvia",
+        "sensor_gap": "Vacío de sensor",
+        "heat_event": "Evento de calor",
         "soil": {
-          "dry_stress": "Dry stress marker",
-          "optimal": "Optimal marker",
-          "wet_excess": "Wet marker",
-          "mixed": "Mixed marker"
+          "dry_stress": "Marcador de estrés por sequía",
+          "optimal": "Marcador óptimo",
+          "wet_excess": "Marcador de humedad",
+          "mixed": "Marcador mixto"
         },
         "dendro": {
-          "normal_growth": "Normal growth marker",
-          "reduced_growth": "Reduced growth marker",
-          "high_shrinkage_stress": "High shrinkage marker",
-          "incomplete_night_recovery": "Incomplete recovery marker"
+          "normal_growth": "Marcador de crecimiento normal",
+          "reduced_growth": "Marcador de crecimiento reducido",
+          "high_shrinkage_stress": "Marcador de contracción alta",
+          "incomplete_night_recovery": "Marcador de recuperación incompleta"
         },
         "environment": {
-          "normal": "Normal marker",
-          "heat_stress": "Heat marker",
-          "cold_stress": "Cold marker",
-          "high_humidity": "High humidity marker",
-          "rain_day": "Rain marker"
+          "normal": "Marcador normal",
+          "heat_stress": "Marcador de calor",
+          "cold_stress": "Marcador de frío",
+          "high_humidity": "Marcador de humedad alta",
+          "rain_day": "Marcador de lluvia"
         }
       },
       "summary": {
         "soil": {
-          "dry_stress": "Root zone was dry with {{sampleCount}} samples.",
-          "optimal": "Root zone was optimal with {{sampleCount}} samples.",
-          "wet_excess": "Root zone was wet with {{sampleCount}} samples.",
-          "mixed": "Soil status was mixed across depths.",
-          "no_data": "No soil data was available."
+          "dry_stress": "La zona radicular estuvo seca con {{sampleCount}} muestras.",
+          "optimal": "La zona radicular estuvo óptima con {{sampleCount}} muestras.",
+          "wet_excess": "La zona radicular estuvo húmeda con {{sampleCount}} muestras.",
+          "mixed": "El estado del suelo fue mixto entre profundidades.",
+          "no_data": "No hubo datos de suelo disponibles."
         },
         "dendro": {
-          "normal_growth": "Stem growth looked normal.",
-          "reduced_growth": "Stem growth was reduced.",
-          "high_shrinkage_stress": "Stem shrinkage indicated stress.",
-          "incomplete_night_recovery": "Night recovery was incomplete.",
-          "no_data": "No dendrometer data was available."
+          "normal_growth": "El crecimiento del tronco se vio normal.",
+          "reduced_growth": "El crecimiento del tronco fue reducido.",
+          "high_shrinkage_stress": "La contracción del tronco indicó estrés.",
+          "incomplete_night_recovery": "La recuperación nocturna fue incompleta.",
+          "no_data": "No hubo datos del dendrómetro disponibles."
         },
         "environment": {
-          "normal": "Environment was normal.",
-          "heat_stress": "Heat stress was detected.",
-          "cold_stress": "Cold stress was detected.",
-          "high_humidity": "High humidity was detected.",
-          "rain_day": "Rain was detected.",
-          "no_data": "No environment data was available."
+          "normal": "El entorno fue normal.",
+          "heat_stress": "Se detectó estrés por calor.",
+          "cold_stress": "Se detectó estrés por frío.",
+          "high_humidity": "Se detectó humedad alta.",
+          "rain_day": "Se detectó lluvia.",
+          "no_data": "No hubo datos ambientales disponibles."
         },
         "irrigation": {
-          "no_irrigation": "No irrigation occurred.",
-          "irrigation_event": "Irrigation occurred.",
-          "high_irrigation_frequency": "Irrigation frequency was high.",
-          "possible_ineffective_irrigation": "Irrigation may have been ineffective.",
-          "manual_override": "Manual override occurred."
+          "no_irrigation": "No hubo riego.",
+          "irrigation_event": "Hubo riego.",
+          "high_irrigation_frequency": "La frecuencia de riego fue alta.",
+          "possible_ineffective_irrigation": "El riego pudo haber sido ineficaz.",
+          "manual_override": "Hubo una anulación manual."
         },
         "gateway": {
-          "offline": "Gateway connectivity was offline.",
-          "normal": "Gateway status was normal.",
-          "no_data": "No gateway data was available."
+          "offline": "La conectividad del gateway estuvo fuera de línea.",
+          "normal": "El estado del gateway fue normal.",
+          "no_data": "No hubo datos del gateway disponibles."
         }
       }
     },
     "interpretation": {
-      "title": "Interpretation",
+      "title": "Interpretación",
       "noData": {
-        "title": "No data in selected range",
-        "body": "This card is configured, but no measured history was available for the selected range."
+        "title": "Sin datos en el rango seleccionado",
+        "body": "Esta tarjeta está configurada, pero no había historial medido disponible para el rango seleccionado."
       },
       "rootZoneDry": {
-        "title": "Root zone entered dry status",
-        "body": "Lower soil tension stayed dry through the selected period."
+        "title": "La zona radicular entró en estado seco",
+        "body": "La tensión del suelo en profundidad se mantuvo seca durante el período seleccionado."
       },
       "dataCoverageGap": {
-        "title": "Sensor data is incomplete",
-        "body": "Sensor data was missing during the selected period."
+        "title": "Los datos del sensor están incompletos",
+        "body": "Faltaron datos del sensor durante el período seleccionado."
       },
       "incompleteNightRecovery": {
-        "title": "Night recovery was incomplete",
-        "body": "The dendrometer did not fully recover overnight during the selected period."
+        "title": "La recuperación nocturna fue incompleta",
+        "body": "El dendrómetro no se recuperó completamente durante la noche en el período seleccionado."
       },
       "environmentStress": {
-        "title": "Environment stress detected",
-        "body": "Environment readings crossed a stress threshold in the selected range."
+        "title": "Se detectó estrés ambiental",
+        "body": "Las lecturas ambientales superaron un umbral de estrés en el rango seleccionado."
       },
       "extensionUnavailable": {
-        "title": "Cloud context unavailable"
+        "title": "Contexto en la nube no disponible"
       },
       "prediction": {
-        "title": "Prediction context",
-        "body": "Prediction context is available for this zone."
+        "title": "Contexto de predicción",
+        "body": "Hay contexto de predicción disponible para esta zona."
       },
       "recommendation": {
-        "irrigate": "Irrigate",
-        "monitor": "Monitor"
+        "irrigate": "Regar",
+        "monitor": "Monitorear"
       }
     },
     "advanced": {
-      "title": "Advanced diagnostics",
-      "loading": "Loading advanced diagnostics...",
-      "emptyTitle": "No advanced diagnostics",
+      "title": "Diagnósticos avanzados",
+      "loading": "Cargando diagnósticos avanzados...",
+      "emptyTitle": "No hay diagnósticos avanzados",
       "value": {
-        "unavailable": "Unavailable"
+        "unavailable": "No disponible"
       },
       "availability": {
-        "collected": "Collected",
-        "not_collected_at_time": "Not collected then",
-        "unknown_now": "Unknown now",
-        "unsupported": "Unsupported"
+        "collected": "Recopilado",
+        "not_collected_at_time": "No recopilado en ese momento",
+        "unknown_now": "Desconocido ahora",
+        "unsupported": "No compatible"
       },
       "field": {
-        "device_eui": "Device EUI",
-        "primaryDeveui": "Device EUI",
+        "device_eui": "EUI del dispositivo",
+        "primaryDeveui": "EUI del dispositivo",
         "rssi": "RSSI",
         "snr": "SNR",
-        "raw_payload": "Raw payload",
-        "rawPayload": "Raw payload",
+        "raw_payload": "Payload crudo",
+        "rawPayload": "Payload crudo",
         "firmware": "Firmware",
-        "calibration": "Calibration",
-        "prediction": "Prediction",
-        "forecast": "Forecast",
-        "pending_commands": "Pending commands",
-        "batteryPct": "Battery percent",
-        "batteryVoltage": "Battery voltage",
-        "calibrationStatus": "Calibration status",
-        "firmwareVersion": "Firmware version",
-        "gatewayEui": "Gateway EUI",
-        "gatewayLatitude": "Gateway latitude",
-        "gatewayLocationStatus": "Gateway location status",
-        "gatewayLongitude": "Gateway longitude",
-        "logicalSourceKey": "Logical source key",
-        "pendingCommands": "Pending commands",
-        "rawRowCount": "Raw row count",
-        "sourceDeviceCount": "Source device count"
+        "calibration": "Calibración",
+        "prediction": "Predicción",
+        "forecast": "Pronóstico",
+        "pending_commands": "Comandos pendientes",
+        "batteryPct": "Porcentaje de batería",
+        "batteryVoltage": "Voltaje de batería",
+        "calibrationStatus": "Estado de calibración",
+        "firmwareVersion": "Versión de firmware",
+        "gatewayEui": "EUI del gateway",
+        "gatewayLatitude": "Latitud del gateway",
+        "gatewayLocationStatus": "Estado de ubicación del gateway",
+        "gatewayLongitude": "Longitud del gateway",
+        "logicalSourceKey": "Clave de fuente lógica",
+        "pendingCommands": "Comandos pendientes",
+        "rawRowCount": "Recuento de filas crudas",
+        "sourceDeviceCount": "Recuento de dispositivos fuente"
       }
     },
     "source": {
@@ -475,98 +475,98 @@
       "multiple": "{{count}} fuentes"
     },
     "soilLineChart": {
-      "title": "Soil line chart",
-      "emptyTitle": "No soil trend data",
-      "emptyBody": "Soil tension readings will appear here when history data is available.",
-      "pointsCount": "{{count}} readings",
-      "axisLabel": "{{unit}} axis",
+      "title": "Gráfico de líneas de suelo",
+      "emptyTitle": "No hay datos de tendencia de suelo",
+      "emptyBody": "Las lecturas de tensión del suelo aparecerán aquí cuando haya datos de historial disponibles.",
+      "pointsCount": "{{count}} lecturas",
+      "axisLabel": "Eje de {{unit}}",
       "series": {
-        "soil1": "Soil 1",
-        "soil2": "Soil 2",
-        "soil3": "Soil 3",
+        "soil1": "Suelo 1",
+        "soil2": "Suelo 2",
+        "soil3": "Suelo 3",
         "soil": "Suelo {{index}}",
         "sensor": "Sensor {{index}}"
       }
     },
     "soilIrrigationResponse": {
-      "title": "Soil irrigation response",
-      "emptyTitle": "No irrigation response events",
-      "emptyBody": "No irrigation response events in this range.",
-      "eventsCount": "{{count}} events",
-      "eventFallback": "Irrigation response",
-      "duration": "Duration: {{value}} min",
-      "interpretationsTitle": "Response notes"
+      "title": "Respuesta de riego del suelo",
+      "emptyTitle": "No hay eventos de respuesta de riego",
+      "emptyBody": "No hay eventos de respuesta de riego en este rango.",
+      "eventsCount": "{{count}} eventos",
+      "eventFallback": "Respuesta de riego",
+      "duration": "Duración: {{value}} min",
+      "interpretationsTitle": "Notas de respuesta"
     },
     "dendroLineChart": {
-      "title": "Dendro line chart",
-      "emptyTitle": "No dendrometer line data",
-      "emptyBody": "Dendrometer readings will appear here when history data is available.",
-      "pointsCount": "{{count}} readings",
+      "title": "Gráfico de líneas del dendrómetro",
+      "emptyTitle": "No hay datos de línea del dendrómetro",
+      "emptyBody": "Las lecturas del dendrómetro aparecerán aquí cuando haya datos de historial disponibles.",
+      "pointsCount": "{{count}} lecturas",
       "series": {
-        "stemChange": "Stem change",
-        "growth": "Growth",
-        "shrinkage": "Shrinkage",
-        "position": "Position",
-        "dendrometer": "Dendrometer"
+        "stemChange": "Cambio del tronco",
+        "growth": "Crecimiento",
+        "shrinkage": "Contracción",
+        "position": "Posición",
+        "dendrometer": "Dendrómetro"
       }
     },
     "dendroStressEvents": {
-      "title": "Dendro stress events",
-      "emptyTitle": "No stress events",
-      "emptyBody": "No stress events in this range.",
-      "eventsCount": "{{count}} events",
-      "interpretationsTitle": "Stress notes",
+      "title": "Eventos de estrés del dendrómetro",
+      "emptyTitle": "No hay eventos de estrés",
+      "emptyBody": "No hay eventos de estrés en este rango.",
+      "eventsCount": "{{count}} eventos",
+      "interpretationsTitle": "Notas de estrés",
       "event": {
-        "stress": "Stress event",
-        "shrinkage": "Shrinkage stress",
-        "incompleteRecovery": "Incomplete recovery"
+        "stress": "Evento de estrés",
+        "shrinkage": "Estrés por contracción",
+        "incompleteRecovery": "Recuperación incompleta"
       }
     },
     "sourceFilter": {
-      "label": "Source",
+      "label": "Fuente",
       "all": "Todo"
     },
     "settings": {
-      "open": "Open card settings",
-      "menuLabel": "Card settings",
-      "advancedView": "Advanced View",
-      "cardSettings": "Card settings",
-      "resetRange": "Reset range",
-      "cardSettingsUnavailable": "Card settings are not available yet.",
-      "refresh": "Refresh"
+      "open": "Abrir configuración de la tarjeta",
+      "menuLabel": "Configuración de la tarjeta",
+      "advancedView": "Vista avanzada",
+      "cardSettings": "Configuración de la tarjeta",
+      "resetRange": "Restablecer rango",
+      "cardSettingsUnavailable": "La configuración de la tarjeta aún no está disponible.",
+      "refresh": "Actualizar"
     },
     "inspector": {
       "title": "Inspector",
-      "context": "Selected point",
-      "close": "Close",
-      "timestamp": "Timestamp",
-      "date": "Date",
-      "source": "Source",
-      "coverage": "Coverage",
-      "syncState": "Sync state",
-      "dataAsOf": "Data as of",
-      "events": "Events",
-      "noInterpretation": "No local interpretation for this selection.",
-      "eventFallback": "History event"
+      "context": "Punto seleccionado",
+      "close": "Cerrar",
+      "timestamp": "Marca de tiempo",
+      "date": "Fecha",
+      "source": "Fuente",
+      "coverage": "Cobertura",
+      "syncState": "Estado de sincronización",
+      "dataAsOf": "Datos a fecha de",
+      "events": "Eventos",
+      "noInterpretation": "No hay interpretación local para esta selección.",
+      "eventFallback": "Evento de historial"
     },
     "dailyMinMax": {
-      "title": "Daily Min/Max",
-      "emptyTitle": "No daily min/max data",
-      "emptyBody": "Daily minimum and maximum readings are not available for this range.",
-      "pointsCount": "{{count}} days",
+      "title": "Mín/Máx diario",
+      "emptyTitle": "No hay datos de mín/máx diario",
+      "emptyBody": "Las lecturas mínimas y máximas diarias no están disponibles para este rango.",
+      "pointsCount": "{{count}} días",
       "axisLabel": "{{unit}}",
-      "axisNoUnit": "Value",
-      "tooltipMin": "Min",
-      "tooltipMax": "Max",
-      "tooltipMean": "Mean",
+      "axisNoUnit": "Valor",
+      "tooltipMin": "Mín",
+      "tooltipMax": "Máx",
+      "tooltipMean": "Media",
       "series": {
-        "airTemperature": "Air temperature",
-        "environment": "Environment"
+        "airTemperature": "Temperatura del aire",
+        "environment": "Entorno"
       }
     },
     "sources": {
-      "button": "Sources",
-      "menuLabel": "Card sources"
+      "button": "Fuentes",
+      "menuLabel": "Fuentes de la tarjeta"
     }
   }
 }
