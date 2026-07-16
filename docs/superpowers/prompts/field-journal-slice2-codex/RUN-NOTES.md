@@ -127,3 +127,11 @@ Append-only execution log for the accepted Phase 0 and Phase 1-6 plans on `desig
 - Read `REVIEW-FINDINGS.md` before the Task 13 commit boundary and applied only R1. The `include=definitions` edge test now requires a non-empty template definition and a non-empty English template label; `node scripts/test-journal-api.js` passes 45/45.
 - R2 required no code change. Carry-forward remains definition-driven through `declaredCarryForward`; no `full_record` fallback list was added in the GUI.
 - N1 and N2 remain out of scope as directed. No migration, product-composition seed, or catalog-label translation was created or changed, and neither item was treated as a hard stop.
+
+## 2026-07-16T16:53:19+02:00 - Phase 3 Task 13 ready for external review
+
+- `7343540d` commits the independent-review R1 assertion and its adjudication note. R2 remained definition-driven; out-of-scope N1 and N2 were not changed.
+- `52cc8637` commits the confirm-by-reading flow: paged plot/season/farm shortlists, generic and preselected capture paths, explicit layout/template choices, shared full-form validation, stable draft carry-forward, strict occurrence handling, confirmation tokens, duplicate decisions, and honest final-save states.
+- Heavy-blocker corrections extended the Task 13 seam into `EntryForm` and `occurrence` so transitions and automatic/repeat merges use one validator, and shortlist plus duplicate handling share one strict API-instant parser. No template-specific carry-forward fallback was added.
+- Final independent reviews found no Critical, Important, or Minor findings. Controller gates pass 84/84 focused occurrence/shortlist/flow tests, 124/124 capture tests, 93/93 tsx-runner tests, 887/887 Vitest tests across 120 files, TypeScript, production build, anti-slop, and whitespace checks. React `act(...)` warnings are zero. Build output retains only the existing stale browser-data and large-chunk advisories.
+- Task 13 is ready for the external reviewer. Task 14 has not started.
