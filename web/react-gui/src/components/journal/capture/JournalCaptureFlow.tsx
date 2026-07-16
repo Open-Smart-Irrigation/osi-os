@@ -488,34 +488,37 @@ export const JournalCaptureFlow: React.FC<JournalCaptureFlowProps> = ({
     () => captureSelections(model, leaf, crop),
     [crop, leaf, model],
   );
-  const payloadValues = useMemo(() => {
-    const combined = [...formPayload];
-    if (model && leaf) {
-      try {
-        combined.push(...buildEntryValues(model, activityDependencyInputs(leaf)));
-      } catch {
-        // The catalog model already failed closed; the form remains the visible validation seam.
-      }
-    }
-    const valuesByKey = new Map<string, CaptureEntryValueOutput>();
-    for (const value of combined) {
-      valuesByKey.set(`${value.attribute_code}:${value.group_index ?? 0}`, value);
-    }
-    if (cropValue) {
-      valuesByKey.set('attr.crop:0', {
-        attribute_code: 'attr.crop',
-        value_status: 'observed',
-        value: cropValue,
-      });
-    }
-    return [...valuesByKey.values()];
-  }, [cropValue, formPayload, leaf, model]);
   const fieldStates = useMemo(
     () => model && layout && template && leaf
       ? deriveFieldStates(template, layout, selections)
       : [],
     [layout, leaf, model, selections, template],
   );
+  const formOwnsCrop = fieldStates.some((state) => state.code === 'attr.crop' && state.visible);
+  const payloadValues = useMemo(() => {
+    const combined: CaptureEntryValueOutput[] = [];
+    if (cropValue && !formOwnsCrop) {
+      combined.push({
+        attribute_code: 'attr.crop',
+        value_status: 'observed',
+        value: cropValue,
+      });
+    }
+    if (model && leaf) {
+      try {
+        combined.push(...buildEntryValues(model, activityDependencyInputs(leaf))
+          .filter((value) => !formOwnsCrop || value.attribute_code !== 'attr.crop'));
+      } catch {
+        // The catalog model already failed closed; the form remains the visible validation seam.
+      }
+    }
+    combined.push(...formPayload);
+    const valuesByKey = new Map<string, CaptureEntryValueOutput>();
+    for (const value of combined) {
+      valuesByKey.set(`${value.attribute_code}:${value.group_index ?? 0}`, value);
+    }
+    return [...valuesByKey.values()];
+  }, [cropValue, formOwnsCrop, formPayload, leaf, model]);
   const validateTransition = useCallback((
     nextLayout: JournalLayoutDefinition | undefined,
     nextTemplate: JournalTemplateDefinition | undefined,

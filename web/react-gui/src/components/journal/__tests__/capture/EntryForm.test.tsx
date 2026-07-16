@@ -358,6 +358,31 @@ describe('EntryForm', () => {
     expect(screen.queryByText('note')).not.toBeInTheDocument();
   });
 
+  it('accepts an empty optional generic choice and emits no payload value', () => {
+    const onResult = vi.fn();
+    render(
+      <ControlledForm
+        fieldStates={[state('attr.agroscope.operation')]}
+        initialValues={[{
+          attribute_code: 'attr.agroscope.operation',
+          value: 'agroscope.operation.primary_tillage',
+        }]}
+        selections={{ activity_code: 'tillage_soil_work' }}
+        onResult={onResult}
+      />,
+    );
+
+    fireEvent.change(screen.getByRole('combobox', { name: 'Operation' }), {
+      target: { value: '' },
+    });
+
+    expect(onResult).toHaveBeenLastCalledWith(
+      [{ attribute_code: 'attr.agroscope.operation', value: '' }],
+      [],
+      true,
+    );
+  });
+
   it('uses fixed, segmented, and select unit controls for one, two, and many allowed units', () => {
     render(
       <ControlledForm

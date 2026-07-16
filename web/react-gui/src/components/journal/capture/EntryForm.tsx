@@ -258,7 +258,7 @@ export function validateEntryForm({
       );
       for (const row of rows) {
         const selected = semanticValue(row);
-        if (typeof selected === 'string' &&
+        if (typeof selected === 'string' && selected !== '' &&
             (dependencyTarget || choices.length > 0) && !choices.includes(selected)) {
           errors.set(state.code, t('capture.validation.invalidDependency'));
         }
