@@ -90,17 +90,32 @@ test('deploy migration wiring provisions sqlite3-cli before refusing', () => {
   assert.match(deploy, /ERROR: sqlite3 CLI unavailable and could not be installed/);
 });
 
-test('deploy migration wiring uses persistent backup path and preserves cleanup trap behavior', () => {
+test('deploy migration wiring uses persistent backup path and lifecycle-aware cleanup', () => {
   assert.match(deploy, /MIGRATE_BACKUP_DIR:-\/data\/backups\/migrate/);
-  assert.match(deploy, /trap 'restart_node_red \|\| true; cleanup' EXIT INT TERM/);
-  assert.match(deploy, /restore_deploy_trap\(\) \{\n    trap cleanup EXIT INT TERM\n\}/);
+  assert.match(deploy, /trap 'deploy_exit_handler \$\?' EXIT/);
+  assert.match(deploy, /trap 'exit 130' INT/);
+  assert.match(deploy, /trap 'exit 143' TERM/);
+
+  const exitHandlerStart = indexOf('deploy_exit_handler() {');
+  const trapInstallStart = indexOf('install_deploy_exit_trap() {');
+  const exitHandlerBlock = deploy.slice(exitHandlerStart, trapInstallStart);
+  const nodeRedRestoreIdx = exitHandlerBlock.indexOf('restart_node_red');
+  const identitydRestoreIdx = exitHandlerBlock.indexOf('restore_identityd_prior_state');
+  assert.ok(nodeRedRestoreIdx >= 0, 'EXIT handler must restore Node-RED when required');
+  assert.ok(identitydRestoreIdx > nodeRedRestoreIdx, 'EXIT handler must restore Node-RED before identityd');
+
+  const quiesceIdx = indexOf('quiesce_identityd_for_deploy || exit 1');
+  const migrationCallIdx = indexOf('run_schema_migration || exit 1');
+  assert.ok(quiesceIdx < migrationCallIdx, 'identityd quiescence must precede schema migration');
 
   const rc3Start = indexOf('if [ "$migration_rc" = "3" ]; then');
   const rc3End = indexOf('echo "ERROR: schema migration failed; Node-RED will be restarted before deploy exits"');
   const rc3Block = deploy.slice(rc3Start, rc3End);
   assert.match(rc3Block, /node_red_restart_needed=0/);
-  assert.match(rc3Block, /restore_deploy_trap/);
+  assert.match(rc3Block, /identityd_deploy_state="fatal_hold"/);
   assert.doesNotMatch(rc3Block, /restart_node_red/);
+  assert.doesNotMatch(rc3Block, /restore_identityd_prior_state/);
+  assert.doesNotMatch(rc3Block, /identityd_service start/);
 });
 
 test('deploy.sh has a single migration call site and no inline schema DDL helpers', () => {

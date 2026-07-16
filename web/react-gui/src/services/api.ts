@@ -963,6 +963,12 @@ export interface SystemStats {
   fan_mode: 'pwm' | 'cooling' | 'none';
   fan_value: number | null;
   fan_max: number | null;
+  restartPending?: {
+    restartAt: string | null;
+    reason: string;
+    status?: 'blocked' | 'malformed' | 'unreadable';
+    error?: string;
+  } | null;
 }
 
 export const systemAPI = {

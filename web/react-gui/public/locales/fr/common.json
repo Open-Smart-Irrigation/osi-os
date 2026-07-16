@@ -91,5 +91,13 @@
       "insufficient": "insuffisant (n={{n}})",
       "exploratory": "Exploratoire uniquement — r de Pearson sur des buckets alignés ; pas un test de signification."
     }
+  },
+  "restart": {
+    "gateway_identity_change": "Identité de la passerelle mise à jour. Les services redémarreront dans {{count}} s.",
+    "chirpstack_bootstrap": "Configuration LoRaWAN terminée. Les services redémarreront dans {{count}} s.",
+    "account_link": "Compte associé. Les services redémarreront dans {{count}} s.",
+    "account_unlink": "Compte dissocié. Les services redémarreront dans {{count}} s.",
+    "generic": "Les services de la passerelle redémarreront dans {{count}} s.",
+    "in_progress": "Les services de la passerelle redémarrent maintenant…"
   }
 }

@@ -37,6 +37,7 @@ const sysupgradeConfPath = path.resolve(__dirname, '..', 'conf', 'full_raspberry
 const osiDbSeedPath = path.resolve(__dirname, '..', 'conf', 'full_raspberrypi_bcm27xx_bcm2712', 'files', 'etc', 'uci-defaults', '97_osi_db_seed');
 const osiNodeRedSeedPath = path.resolve(__dirname, '..', 'conf', 'full_raspberrypi_bcm27xx_bcm2712', 'files', 'etc', 'uci-defaults', '98_osi_node_red_seed');
 const installOsiOsPath = path.resolve(__dirname, '..', 'scripts', 'install-osi-os.sh');
+const gatewayIdentityHelperTestPath = path.resolve(__dirname, 'test-gateway-identity-helper.sh');
 const seedSqlPath = path.resolve(__dirname, '..', 'database', 'seed-blank.sql');
 const seedSqlSource = fs.readFileSync(seedSqlPath, 'utf8');
 const stregaCodecPath = path.resolve(__dirname, '..', 'conf', 'full_raspberrypi_bcm27xx_bcm2712', 'files', 'usr', 'share', 'node-red', 'codecs', 'strega_gen1_decoder.js');
@@ -1810,8 +1811,12 @@ expectIncludes('Clear MQTT Broker Config', 'msg._mqttConfigBackup = {', 'backs u
 expectExcludes('Clear MQTT Broker Config', '/etc/init.d/node-red restart', 'Node-RED restart while unlink cleanup is still in flight');
 expectIncludes('Rollback MQTT Broker Config', 'rolled back MQTT credentials', 'restores prior MQTT config when link finalization fails');
 expectIncludes('Restore MQTT Broker Config', 'restored MQTT credentials', 'restores prior MQTT config when unlink finalization fails');
-expectIncludes('Schedule Link Restart', '/etc/init.d/node-red restart', 'schedules a Node-RED restart only after successful link completion');
-expectIncludes('Schedule Unlink Restart', '/etc/init.d/node-red restart', 'schedules a Node-RED restart only after successful unlink completion');
+expectIncludes('Schedule Link Restart', '/var/run/osi-node-red-restart-requests', 'requests a daemon-owned restart only after successful link completion');
+expectIncludes('Schedule Link Restart', "reason: 'account_link', delaySeconds: 10", 'uses the account-link restart contract');
+expectExcludes('Schedule Link Restart', '/etc/init.d/node-red restart', 'does not restart Node-RED directly');
+expectIncludes('Schedule Unlink Restart', '/var/run/osi-node-red-restart-requests', 'requests a daemon-owned restart only after successful unlink completion');
+expectIncludes('Schedule Unlink Restart', "reason: 'account_unlink', delaySeconds: 2", 'uses the account-unlink restart contract');
+expectExcludes('Schedule Unlink Restart', '/etc/init.d/node-red restart', 'does not restart Node-RED directly');
 const cloudRestNodeIds = [
   'al-link-server-auth',
   'sync-bootstrap-http',
@@ -2669,9 +2674,11 @@ pendingChecks.push((async () => {
   fail(`failed to execute VALVE_COMMAND ACK context fixture: ${error.message}`);
 }));
 expectFileIncludes('node-red.init', nodeRedInitScript, '. /usr/libexec/osi-gateway-identity.sh', 'uses the shared gateway identity helper');
-expectFileIncludes('node-red.init', nodeRedInitScript, 'gateway_identity_resolve', 'resolves the canonical gateway identity through the shared helper');
-expectFileIncludes('node-red.init', nodeRedInitScript, 'gateway_identity_repair_concentratord_config || true', 'self-heals active concentratord gateway-id state during startup');
-expectFileIncludes('node-red.init', nodeRedInitScript, 'gateway_identity_persist', 'persists canonical gateway identity metadata during startup');
+expectFileIncludes('node-red.init', nodeRedInitScript, 'gateway_identity_heal', 'heals and persists canonical gateway identity through the shared helper');
+expectFileIncludes('node-red.init', nodeRedInitScript, 'gateway identity heal failed; resolving best available identity', 'logs the exact gateway identity heal failure');
+expectFileIncludes('node-red.init', nodeRedInitScript, 'gateway_identity_resolve || true', 'resolves the best available identity after a heal failure');
+expectFileExcludes('node-red.init', nodeRedInitScript, 'gateway_identity_repair_concentratord_config || true', 'direct best-effort concentratord repair during startup');
+expectFileExcludes('node-red.init', nodeRedInitScript, 'gateway_identity_persist || true', 'direct best-effort identity persistence during startup');
 expectFileIncludes('node-red.init', nodeRedInitScript, 'normalize_runtime_eui()', 'defines a startup helper to canonicalize gateway identities before exporting them');
 expectFileIncludes('node-red.init', nodeRedInitScript, 'device_eui="$(normalize_runtime_eui "$device_eui")"', 'normalizes the runtime gateway identity to uppercase before using it for MQTT credentials');
 expectFileIncludes('node-red.init', nodeRedInitScript, 'link_gateway_device_eui="$(normalize_runtime_eui "$link_gateway_device_eui")"', 'normalizes the linked gateway identity to uppercase before exporting it');
@@ -3025,6 +3032,19 @@ expectFileIncludes('osi-gateway-identity.sh', gatewayIdentityHelperScript, 'uci 
 expectFileIncludes('osi-gateway-identity.sh', gatewayIdentityHelperScript, 'gateway_identity_try_active_concentratord_uci', 'limits static UCI gateway-id probing to the active chipset');
 expectFileIncludes('osi-gateway-identity.sh', gatewayIdentityHelperScript, 'gateway_identity_try_active_concentratord_toml', 'limits TOML gateway-id probing to the active chipset');
 expectFileIncludes('osi-gateway-identity.sh', gatewayIdentityHelperScript, 'gateway_identity_repair_concentratord_config()', 'defines startup self-healing for active concentratord gateway-id state');
+expectFileIncludes(
+  'osi-gateway-identity.sh',
+  gatewayIdentityHelperScript,
+  'gateway_identity_heal() {\n    gateway_identity_resolve || return 1\n    gateway_identity_repair_concentratord_config || return 1\n    gateway_identity_resolve || return 1\n    gateway_identity_persist || return 1\n}',
+  'defines the exact resolve-repair-resolve-persist heal order'
+);
+expectFileIncludes(
+  'osi-gateway-identity.sh',
+  gatewayIdentityHelperScript,
+  '        heal)\n            gateway_identity_heal || exit 1\n            gateway_identity_emit_shell\n            ;;',
+  'dispatches the heal command and emits the resolved shell fields'
+);
+expectFileExists(gatewayIdentityHelperTestPath, 'gateway identity helper focused test');
 expectFileIncludes('osi-gateway-identity.sh', gatewayIdentityHelperScript, 'GATEWAY_IDENTITY_DEVICE_EUI_CONFIDENCE="authoritative"', 'marks live ChirpStack-derived gateway identities as authoritative');
 expectFileIncludes('osi-gateway-identity.sh', gatewayIdentityHelperScript, 'GATEWAY_IDENTITY_DEVICE_EUI_CONFIDENCE="persisted"', 'marks previously verified gateway identities as persisted');
 expectFileIncludes('osi-gateway-identity.sh', gatewayIdentityHelperScript, 'GATEWAY_IDENTITY_DEVICE_EUI_CONFIDENCE="provisional"', 'marks MAC-derived gateway identities as provisional');
@@ -3134,8 +3154,9 @@ expectFileIncludes('osi-bootstrap', osiBootstrapInitScript, 'curl -sf --max-time
 expectFileIncludes('osi-bootstrap', osiBootstrapInitScript, 'seq 1 24', 'init script retries gRPC health check up to 24 times');
 expectFileIncludes('osi-bootstrap', osiBootstrapInitScript, 'if touch /etc/osi-bootstrap.done; then', 'init script treats stamp write as part of successful provisioning');
 expectFileIncludes('osi-bootstrap', osiBootstrapInitScript, 'provisioned_this_boot=1', 'init script tracks successful first-boot provisioning');
-expectFileIncludes('osi-bootstrap', osiBootstrapInitScript, 'if [ "$provisioned_this_boot" = 1 ]; then', 'init script gates Node-RED restart on successful provisioning');
-expectFileIncludes('osi-bootstrap', osiBootstrapInitScript, '/etc/init.d/node-red restart', 'init script restarts Node-RED after successful provisioning');
+expectFileIncludes('osi-bootstrap', osiBootstrapInitScript, 'if [ "$provisioned_this_boot" = 1 ]; then', 'init script gates the restart request on successful provisioning');
+expectFileIncludes('osi-bootstrap', osiBootstrapInitScript, '/usr/libexec/osi-identityd.sh request-restart chirpstack_bootstrap 60', 'init script requests a coordinated restart after successful provisioning');
+expectFileExcludes('osi-bootstrap', osiBootstrapInitScript, '/etc/init.d/node-red restart', 'direct Node-RED restart after provisioning');
 expectFileIncludes('osi-bootstrap', osiBootstrapInitScript, 'logger -t osi-bootstrap', 'init script logs all events with the correct tag');
 expectCondition(!osiBootstrapInitScript.includes('STOP='), 'osi-bootstrap does not set a shutdown priority (one-shot)', 'osi-bootstrap must not set STOP for this one-shot init script');
 
@@ -4138,6 +4159,16 @@ Promise.all(pendingChecks).finally(() => {
 
   // Profile parity (bcm2709 ↔ bcm2712)
   const { spawnSync } = require('child_process');
+  const liveIdentityResult = spawnSync(
+    process.execPath,
+    [path.resolve(__dirname, 'verify-live-gateway-identity.js')],
+    { stdio: 'inherit' }
+  );
+  if (liveIdentityResult.status !== 0) {
+    console.error('verify-live-gateway-identity.js failed');
+    process.exitCode = liveIdentityResult.status || 1;
+  }
+
   const parityResult = spawnSync(
     process.execPath,
     [path.resolve(__dirname, 'verify-profile-parity.js')],
