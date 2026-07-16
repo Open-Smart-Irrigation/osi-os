@@ -2896,7 +2896,10 @@ test('catalog delivers parsed definitions under include=definitions and stays li
   const layout = full.layouts[0];
   const vocab = full.vocab[0];
   assert.ok(template.definition && typeof template.definition === 'object');
+  assert.ok(Object.keys(template.definition).length > 0, 'template definition must not be empty');
   assert.ok(template.labels && typeof template.labels === 'object');
+  assert.ok(typeof template.labels.en === 'string' && template.labels.en.trim().length > 0,
+    'template must expose a non-empty English label');
   assert.ok(layout.definition && typeof layout.definition === 'object');
   assert.ok(vocab.labels && typeof vocab.labels === 'object');
   assert.ok(Object.hasOwn(vocab, 'constraints'));

@@ -121,3 +121,9 @@ Append-only execution log for the accepted Phase 0 and Phase 1-6 plans on `desig
 - RED: the focused regression failed because `attr.amount_operation_depth` and `attr.amount_duration_area` were missing from `automaticValues`. The fix removed the broad prefix heuristic while retaining the explicit protected-code set for product, authorization, target, dose/basis, amount/rate, treated area, and waiting period.
 - `abdb8004` commits the approved season-safe carry-forward implementation. Sol re-ran 93/93 focused tests and found no regression in runtime validation, label resolution, deterministic and bounded pagination, idempotent confirmation, candidate replacement invalidation, incomplete-preview safety, or dismissibility.
 - Post-fix combined gate: 93/93 tsx-runner tests, 804/804 Vitest tests across 117 files, Task 11 focused 93/93, and TypeScript clean. The recorded Task 11 hard stop is closed; Phase 3 may continue at Task 13.
+
+## 2026-07-16T15:35:24+02:00 - Independent pre-Task 13 findings adjudicated
+
+- Read `REVIEW-FINDINGS.md` before the Task 13 commit boundary and applied only R1. The `include=definitions` edge test now requires a non-empty template definition and a non-empty English template label; `node scripts/test-journal-api.js` passes 45/45.
+- R2 required no code change. Carry-forward remains definition-driven through `declaredCarryForward`; no `full_record` fallback list was added in the GUI.
+- N1 and N2 remain out of scope as directed. No migration, product-composition seed, or catalog-label translation was created or changed, and neither item was treated as a hard stop.
