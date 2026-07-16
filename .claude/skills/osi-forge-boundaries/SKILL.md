@@ -88,6 +88,20 @@ or invoke a provider outside the assigned stage. Subscription exhaustion marks
 the job `BLOCKED_USAGE`; it never enables API-key, metered, or other paid
 fallback.
 
+After implementation or repair, the controller runs the deterministic
+post-execution gate and repository verification before any reviewer. A failed
+gate or verification command vetoes publication; no model may override it.
+For a passing candidate, Codex Sol reviews first, OpenCode Go reviews the same
+SHA independently, and Claude Opus independently reviews the diff before its
+final adjudication. Draft publication requires all three reviewers to approve
+evidence bound to that candidate SHA and repair count.
+
+The controller permits at most one Luna repair. Starting that repair discards
+all earlier gate, verification, and review approvals. The repaired candidate
+must pass fresh gates, repository verification, and the complete three-reviewer
+sequence. Any remaining rejection blocks the job; the controller must not
+start a second repair.
+
 The human `forge-admin` Tailscale path is an operator capability. It is not
 available to workers and does not grant them SSH, controller admin commands,
 deployment rights, or secret access.
