@@ -63,7 +63,7 @@
       "noPlot": "Sem parcela",
       "linkedZone": "Associada a uma zona de sensor",
       "sensorless": "Sem zona de sensor associada",
-      "growingSetting": "Sistema de cultivo",
+      "layout": "Layout",
       "timezone": "Fuso horário"
     },
     "picker": {
@@ -77,7 +77,7 @@
       "searchPlaceholder": "Pesquisar por nome ou código",
       "browseAll": "Ver todas",
       "noResults": "Nenhuma atividade correspondente",
-      "unsupported": "Esta atividade não está disponível para o sistema de cultivo selecionado"
+      "unsupported": "Esta atividade não está disponível para o layout selecionado"
     },
     "form": {
       "title": "Detalhes da atividade",
@@ -85,7 +85,7 @@
       "quick": "Rápido",
       "full": "Completo",
       "research": "Investigação",
-      "growingSetting": "Sistema de cultivo",
+      "layout": "Layout",
       "required": "Obrigatório",
       "optional": "Opcional",
       "select": "Selecionar uma opção",
@@ -111,7 +111,7 @@
       "crossBasis": "Esta unidade utiliza uma base de medição diferente",
       "invalidDependency": "As opções selecionadas não formam uma combinação válida",
       "invalidDefinition": "Este formulário do diário não está disponível",
-      "layoutTemplateMismatch": "Este nível de detalhe não está disponível para o sistema de cultivo selecionado",
+      "layoutTemplateMismatch": "Este nível de detalhe não está disponível para o layout selecionado",
       "cropRequired": "Indique uma cultura porque nenhuma época ativa cobre esta parcela",
       "invalidLocalTime": "Introduza uma data e hora locais válidas",
       "invalidTimezone": "Selecione um fuso horário suportado",
@@ -130,14 +130,14 @@
       "rate": "Dose",
       "useValues": "Utilizar estes valores",
       "dismiss": "Não copiar",
-      "invalidated": "O tratamento anterior deixou de corresponder a esta parcela, cultura, hora, época ou sistema de cultivo"
+      "invalidated": "O tratamento anterior deixou de corresponder a esta parcela, cultura, hora, época ou layout"
     },
     "confirm": {
       "title": "Reveja antes de guardar",
       "activity": "Atividade",
       "plot": "Parcela",
       "farmLevel": "Quinta inteira",
-      "layout": "Sistema de cultivo",
+      "layout": "Layout",
       "occurrence": "Quando",
       "values": "Detalhes",
       "edit": "Editar",

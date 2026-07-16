@@ -63,7 +63,7 @@
       "noPlot": "No plot",
       "linkedZone": "Linked to a sensor zone",
       "sensorless": "No linked sensor zone",
-      "growingSetting": "Growing setting",
+      "layout": "Layout",
       "timezone": "Timezone"
     },
     "picker": {
@@ -77,7 +77,7 @@
       "searchPlaceholder": "Search by name or code",
       "browseAll": "Browse all",
       "noResults": "No matching activities",
-      "unsupported": "This activity is not available for the selected growing setting"
+      "unsupported": "This activity is not available for the selected layout"
     },
     "form": {
       "title": "Activity details",
@@ -85,7 +85,7 @@
       "quick": "Quick",
       "full": "Full",
       "research": "Research",
-      "growingSetting": "Growing setting",
+      "layout": "Layout",
       "required": "Required",
       "optional": "Optional",
       "select": "Select an option",
@@ -111,7 +111,7 @@
       "crossBasis": "This unit uses a different measurement basis",
       "invalidDependency": "The selected options do not form a valid combination",
       "invalidDefinition": "This journal form is not available",
-      "layoutTemplateMismatch": "This detail level is not available for the selected growing setting",
+      "layoutTemplateMismatch": "This detail level is not available for the selected layout",
       "cropRequired": "Enter a crop because no active season covers this plot",
       "invalidLocalTime": "Enter a valid local date and time",
       "invalidTimezone": "Select a supported timezone",
@@ -130,14 +130,14 @@
       "rate": "Rate",
       "useValues": "Use these values",
       "dismiss": "Do not copy",
-      "invalidated": "The previous treatment no longer matches this plot, crop, time, season, or growing setting"
+      "invalidated": "The previous treatment no longer matches this plot, crop, time, season, or layout"
     },
     "confirm": {
       "title": "Review before saving",
       "activity": "Activity",
       "plot": "Plot",
       "farmLevel": "Whole farm",
-      "layout": "Growing setting",
+      "layout": "Layout",
       "occurrence": "When",
       "values": "Details",
       "edit": "Edit",

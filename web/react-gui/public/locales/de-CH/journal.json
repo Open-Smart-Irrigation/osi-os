@@ -63,7 +63,7 @@
       "noPlot": "Keine Parzelle",
       "linkedZone": "Mit einer Sensorzone verknüpft",
       "sensorless": "Keine verknüpfte Sensorzone",
-      "growingSetting": "Anbaukonfiguration",
+      "layout": "Layout",
       "timezone": "Zeitzone"
     },
     "picker": {
@@ -77,7 +77,7 @@
       "searchPlaceholder": "Nach Name oder Code suchen",
       "browseAll": "Alle anzeigen",
       "noResults": "Keine passenden Aktivitäten",
-      "unsupported": "Diese Aktivität ist für die ausgewählte Anbaukonfiguration nicht verfügbar"
+      "unsupported": "Diese Aktivität ist für das ausgewählte Layout nicht verfügbar"
     },
     "form": {
       "title": "Aktivitätsdetails",
@@ -85,7 +85,7 @@
       "quick": "Schnell",
       "full": "Vollständig",
       "research": "Forschung",
-      "growingSetting": "Anbaukonfiguration",
+      "layout": "Layout",
       "required": "Erforderlich",
       "optional": "Optional",
       "select": "Option auswählen",
@@ -111,7 +111,7 @@
       "crossBasis": "Diese Einheit verwendet eine andere Messgrundlage.",
       "invalidDependency": "Die ausgewählten Optionen ergeben keine gültige Kombination.",
       "invalidDefinition": "Dieses Journalformular ist nicht verfügbar.",
-      "layoutTemplateMismatch": "Dieser Detailgrad ist für die ausgewählte Anbaukonfiguration nicht verfügbar.",
+      "layoutTemplateMismatch": "Dieser Detailgrad ist für das ausgewählte Layout nicht verfügbar.",
       "cropRequired": "Geben Sie eine Kultur ein, da keine aktive Saison diese Parzelle abdeckt.",
       "invalidLocalTime": "Geben Sie ein gültiges lokales Datum und eine gültige Uhrzeit ein.",
       "invalidTimezone": "Wählen Sie eine unterstützte Zeitzone.",
@@ -130,14 +130,14 @@
       "rate": "Aufwandmenge",
       "useValues": "Diese Werte verwenden",
       "dismiss": "Nicht übernehmen",
-      "invalidated": "Die vorherige Behandlung passt nicht mehr zu dieser Parzelle, Kultur, Zeit, Saison oder Anbaukonfiguration"
+      "invalidated": "Die vorherige Behandlung passt nicht mehr zu dieser Parzelle, Kultur, Zeit, Saison oder zu diesem Layout"
     },
     "confirm": {
       "title": "Vor dem Speichern prüfen",
       "activity": "Aktivität",
       "plot": "Parzelle",
       "farmLevel": "Ganzer Hof",
-      "layout": "Anbaukonfiguration",
+      "layout": "Layout",
       "occurrence": "Wann",
       "values": "Details",
       "edit": "Bearbeiten",

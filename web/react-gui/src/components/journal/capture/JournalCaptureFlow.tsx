@@ -1181,8 +1181,8 @@ export const JournalCaptureFlow: React.FC<JournalCaptureFlowProps> = ({
           </label>
           {!selectedPlot && (
             <label className="block text-sm font-bold text-[var(--text)]">
-              {t('capture.where.growingSetting')}
-              <select aria-label={t('capture.where.growingSetting')} value={layoutCode} onChange={(event) => chooseLayout(event.target.value)} className="mt-1 min-h-11 w-full rounded-xl border border-[var(--border)] bg-[var(--card)] px-3 text-[var(--text)]">
+              {t('capture.where.layout')}
+              <select aria-label={t('capture.where.layout')} value={layoutCode} onChange={(event) => chooseLayout(event.target.value)} className="mt-1 min-h-11 w-full rounded-xl border border-[var(--border)] bg-[var(--card)] px-3 text-[var(--text)]">
                 <option value="">{t('capture.where.selectPlot')}</option>
                 {layoutChoices.map((candidate) => <option key={`${candidate.code}:${candidate.version}`} value={candidate.code}>{catalogLabel(catalog.layouts.find((row) => row.code === candidate.code) ?? { code: candidate.code }, locale)} · v{candidate.version}</option>)}
               </select>

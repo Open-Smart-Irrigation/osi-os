@@ -237,3 +237,31 @@ F6 is a third pattern worth naming: a test that asserts a value is *seeded* into
 control, without ever editing it, will not notice that the control is a dead end. When a
 field is both prefilled and user-editable, the regression must edit it and assert the edited
 value survives to the payload.
+
+---
+
+# Label decision: "Growing setting" is now "Layout" (2026-07-16)
+
+Product-owner decision, applied by the reviewer in `journal.json` (all seven locales),
+`JournalCaptureFlow.tsx` and the locale tests. **Do not revert it toward the spec's old
+wording**, and do not re-report it as spec drift — the spec §6.2 has been updated to match.
+
+The i18n keys `capture.where.growingSetting` and `capture.form.growingSetting` are renamed to
+`capture.where.layout` / `capture.form.layout`. `capture.confirm.layout` keeps its key and
+gains the new value. The embedded phrase in `capture.picker.unsupported`,
+`capture.validation.layoutTemplateMismatch` and `capture.carry.invalidated` now reads
+"layout" in every locale.
+
+**Nothing below the GUI changes.** `layout_code`, the `layouts[]` REST payload, the catalog
+codes and `templateEngine`'s signature were already correct and are untouched — the code name
+was right all along and the UI label was the outlier.
+
+Rationale, so it is not re-litigated: a layout is a neutral container. v1 happens to ship
+cultivation settings, but a future layout may mean something else, so the label must not bake
+"growing" into the axis. "Growing setting" was also untranslatable — "setting" reads as
+either *configuration* or *environment*, and six independent translators split evenly between
+those two readings. "Layout" is deliberately the same word in all seven locales and is
+recorded in the `SHARED_WITH_ENGLISH` allowlist.
+
+If Task 14's follow-up work touches `JournalCaptureFlow.tsx`, rebase onto this rather than
+resolving the two `t()` call sites back to the old keys.
