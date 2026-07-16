@@ -20,6 +20,15 @@ export interface JournalCatalogOptions {
 interface EntryWritePayload {
   status: EntryWriteStatus;
   plot_uuid: string | null;
+  zone_uuid?: string | null;
+  device_eui?: string | null;
+  season_crop?: string | null;
+  season_variety?: string | null;
+  campaign_uuid?: string | null;
+  protocol_code?: string | null;
+  protocol_version?: string | null;
+  observation_unit_code?: string | null;
+  pass_uuid?: string | null;
   activity_code: string;
   template_code: string;
   template_version: number;
@@ -28,6 +37,9 @@ interface EntryWritePayload {
   occurred_start_local: string;
   occurred_end_local?: string | null;
   occurred_timezone: string;
+  occurred_utc_offset_minutes?: number | null;
+  occurred_end_utc_offset_minutes?: number | null;
+  duplicate_guard_ack_entry_uuid?: string | null;
   values: EntryValueInput[];
   note?: string | null;
   batch_uuid?: string | null;
