@@ -114,3 +114,10 @@ Append-only execution log for the accepted Phase 0 and Phase 1-6 plans on `desig
 - HARD STOP: the final Task 11 quality re-review still found one Important defect. `carryForward.ts` classifies every `attr.amount_*` code as protected, which suppresses shipped non-protection fields such as `attr.amount_operation_depth` and `attr.amount_duration_area` when a template declares them. The missing regression must prove a declared non-protected `attr.amount_*` value remains in `automaticValues`, then replace the prefix rule with an explicit activity-appropriate protected-code set.
 - The hard stop follows the mission's three-attempt limit. The four Task 11 files remain untracked and uncommitted; no Task 13 integration began.
 - Independent combined gate at the stop point: 93/93 tsx-runner tests, 804/804 Vitest tests across 117 files, Task 11 focused 93/93, Task 12 focused 32/32, and TypeScript clean. Passing tests do not override the unresolved Task 11 review defect.
+
+## 2026-07-16T12:15:56+02:00 - Task 11 hard stop cleared under blocker-correction authority
+
+- The user authorized corrections of heavy blockers beyond the original three-attempt cap. The additional Task 11 cycle stayed limited to the unresolved `attr.amount_*` classification defect.
+- RED: the focused regression failed because `attr.amount_operation_depth` and `attr.amount_duration_area` were missing from `automaticValues`. The fix removed the broad prefix heuristic while retaining the explicit protected-code set for product, authorization, target, dose/basis, amount/rate, treated area, and waiting period.
+- `abdb8004` commits the approved season-safe carry-forward implementation. Sol re-ran 93/93 focused tests and found no regression in runtime validation, label resolution, deterministic and bounded pagination, idempotent confirmation, candidate replacement invalidation, incomplete-preview safety, or dismissibility.
+- Post-fix combined gate: 93/93 tsx-runner tests, 804/804 Vitest tests across 117 files, Task 11 focused 93/93, and TypeScript clean. The recorded Task 11 hard stop is closed; Phase 3 may continue at Task 13.
