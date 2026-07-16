@@ -75,3 +75,18 @@ Append-only execution log for the accepted Phase 0 and Phase 1-6 plans on `desig
 - Concurrency deviation: the Task 6 worker staged its ten paths while the Task 5 worker committed four paths, so the shared Git index produced one fourteen-file commit with the Task 5 subject. Both workers stopped immediately. The commit was not rewritten because the mission forbids destructive Git; a read-only audit confirmed that it contains only the two authorized scopes.
 - RED evidence: Task 5 had two unresolved hook modules; Task 6 had an unresolved row component and missing non-English locale resources. Targeted GREEN is 6/6 for Task 5 and 14/14 for Task 6. The stabilized full gate passed 93/93 tsx tests and 588/588 Vitest tests across 104 files; TypeScript and `git diff --check` exited 0.
 - Orchestrator targeted recheck: all five Phase 2 hook/row/locale suites pass 24/24; TypeScript and `git diff --check` exit 0.
+
+## 2026-07-16T02:02:42+02:00 - Phase 2 green
+
+- `d373951d127c64627374a8a3e13a8f6bb7690a26` replaces the placeholder with the final-only reading surface, plot/activity filters, timeline loading/empty states, separate unavailable and operational-error cards, retry-both behavior for entry/plot failures, and the neutral Log activity control.
+- RED: the timeline module was missing and six page tests failed against the placeholder. GREEN: page/timeline 9/9, source-locale parity 6/6, and all Phase 2 suites 33/33.
+- Full gates: 93/93 tsx tests, 597/597 Vitest tests across 106 files, TypeScript exit 0, production build exit 0, anti-slop no tier-1 findings, and `git diff --check` clean.
+- sol specification and quality reviews: APPROVE. sol confirmed final-only limit-50 queries, filters, human plot labels, capability/error separation, retry behavior, neutral CTA styling, and seven-locale parity.
+- Orchestrator repeated the full unit, TypeScript, build, whitespace, and clean-worktree gates. Phase 2 is accepted.
+
+## 2026-07-16T02:17:05+02:00 - Phase 3 executable decomposition accepted
+
+- The first sol preflight blocked partial template/layout handling, flat and incorrectly ranked activity choices, fixed-only units, caller-authoritative carry-forward fences, incomplete draft/duplicate behavior, browser-timezone precedence for zone shortcuts, and unnamed test ownership.
+- The amended tasks now cover every shipped definition and dependency shape, typed activity/dependent-choice leaves with paged season derivation, exact canonical-plus-entered numeric rows, cursor-paged stored-draft carry-forward, explicit template/farm-layout choices, warn-once duplicate UX, typed zone UUID/timezone normalization, exact test paths, and a zone-CTA-inclusive five-tap gate.
+- A second review caught and closed the last two details: numeric rows omit generic `value` and submit canonical `value_num` beside entered audit facts; Task 13 owns deterministic paged season/common and no-history fallback inputs.
+- sol final preflight: ACCEPT. Anti-slop reports no tier-1 findings and `git diff --check` is clean. Phase 3 may begin at Task 8.

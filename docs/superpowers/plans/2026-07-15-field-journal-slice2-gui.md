@@ -1474,15 +1474,397 @@ git commit -m "feat(journal): reading-surface timeline on the Journal page with 
 
 ---
 
-## Phase 3 — Capture flow (code-decompose when Phase 0 lands)
+## Phase 3 — Mobile capture flow
 
-**Blocked on Phase 0** (needs template/layout `definition_json` + vocab labels/constraints + product composition).
+Phase 0 is green. Its full catalog response exposes the parsed definitions,
+labels, constraints, and product composition that this phase consumes.
 
-**Files (planned):** `src/components/journal/capture/` — `ActivityPicker.tsx` (U1 shortlist grid + type-ahead + browse-all tree), `EntryForm.tsx` (template-engine renderer driven by `definition_json`: sections → fields, `required_if`/`visible_if`), `NumberStepper.tsx` (P6), `NutrientRepeater.tsx` (P5), `ConfirmStrip.tsx` (P2 read-back sentence), `SaveState.tsx` (four honest states, spec §6.1), `useCaptureDraft.ts` (stable draft UUID, debounced serialized saves, leave-guard). `src/journal/templateEngine.ts` — pure predicate evaluator (`required_if`/`visible_if`), carry-forward classification (P4), unit resolution (P5/STD-1). Entry point: the zone-card "Log activity" CTA + the Add-menu item already routing to `/journal`.
+### Verified catalog and lifecycle facts
 
-**Interfaces (planned):** `evaluateVisibility(definition, values): FieldState[]`; `buildCreatePayload(form): CreateEntryPayload`; `<ActivityPicker onPick={(activity_code) => …} recents={…} />`.
+- Shipped template fields are strings today, but the edge validator also
+  accepts field-rule objects whose identifier is `code`, `attribute_code`, or
+  `field`, plus `required`, `required_if`, and `visible_if`. The renderer
+  supports every accepted alias and only the edge predicate operators `eq`
+  and `in`.
+- `farmer_quick@1` contains `activity_code`, `plot_uuid`,
+  `occurred_start`, the quick value fields, and `note`. Layouts add
+  `activity_codes`, `supported_templates`, `fields`, `minimum_fields`,
+  `conditional_fields`, `denominator_contract`, and `option_dependencies`.
+  `research_observation@1` also uses section `include_scope`; Agroscope's
+  dependency cascade restricts operation choices, devices, and units.
+- A draft save resolves and stores the covering `season_uuid`. Safe
+  carry-forward therefore first saves the stable draft, reloads that exact
+  draft, and compares its non-null season plus pinned layout against older
+  final entries. It never guesses a season from `crop_hint`.
+- POST final is create-only. POST draft may replace the same owned version-zero
+  draft. The client still uses first draft attempt POST with a client UUID;
+  later draft saves and final promotion use the PUT client added in Phase 1.
+- The edge UI can produce `Saved on farm gateway` or `Not saved`. The save
+  state component also renders the cloud-pending state for contract parity,
+  but this edge route never claims that state.
 
-**Acceptance:** ≤5 primary-control activations from zone CTA to acknowledged save for a common carried-forward entry (spec §6.1) at 320×568 with no horizontal scroll; product/dose/target/waiting-period never silently carried (P4/AGR-7 — explicit "Repeat last treatment" card); confirm-by-reading strip repeats interpreted value + unit before finalize; the four save states render distinctly and a mid-edit failure keeps a sticky loss warning.
+### Dependency and delegation graph
+
+```text
+Task 8 catalog model + template engine
+  ├── Task 9 activity picker
+  ├── Task 10 dynamic field controls/form
+  ├── Task 11 season-safe carry-forward
+  └── Task 12 stable draft/save lifecycle
+Tasks 9 + 10 + 11 + 12
+  └── Task 13 capture-flow composition
+Task 13
+  └── Task 14 Journal/zone/Add-menu integration + mobile SLA
+```
+
+Tasks 9–12 may run in parallel after Task 8. Task 13 is the convergence
+point. Task 14 is the Phase 3 gate. Every task uses TDD, receives separate sol
+specification and quality reviews, and commits only its declared files.
+
+### Task 8: Typed catalog model and template engine
+
+**Files:**
+- Create `web/react-gui/src/types/journalCapture.ts`.
+- Create `web/react-gui/src/journal/catalogModel.ts`.
+- Create `web/react-gui/src/journal/templateEngine.ts`.
+- Create `web/react-gui/src/journal/occurrence.ts`.
+- Create `web/react-gui/src/journal/__tests__/catalogModel.test.ts`.
+- Create `web/react-gui/src/journal/__tests__/templateEngine.test.ts`.
+- Create `web/react-gui/src/journal/__tests__/occurrence.test.ts`.
+- Modify `web/react-gui/src/services/journalApi.ts` and
+  `web/react-gui/src/services/__tests__/journalApi.test.ts` only
+  to add optional top-level write fields used by the shipped edge contract:
+  `zone_uuid`, `device_eui`, `season_crop`, `season_variety`, campaign,
+  protocol, observation unit, pass UUID, start/end UTC offsets, and duplicate
+  acknowledgement as the exact `duplicate_guard_ack_entry_uuid` field.
+- Modify all seven source `public/locales/*/journal.json` files once with the
+  complete Phase 3 `capture.*` key tree, and extend
+  `web/react-gui/src/journal/__tests__/journalLocales.test.ts`. This is the sole
+  locale owner before Tasks 9–12 run in parallel.
+
+**Required interfaces and behavior:**
+- Runtime guards parse `JournalDefinitionRow.definition` fail-closed when
+  `catalog_errors` contains `definition_json` or when required arrays are
+  malformed.
+- `catalogLabel(row, locale)` uses the requested locale, then English, then
+  the code. `activeDefinition(rows, code)` selects the highest active version.
+- `normalizeFieldRule`, `evaluatePredicate`, and
+  `deriveFieldStates(template, layout, selections)` mirror the edge's string
+  and three object-field aliases, `eq`/`in` predicates, visibility,
+  requiredness, activity requirements, conditional groups, section
+  `include_scope`, layout `fields`/`minimum_fields`/`conditional_fields`, and
+  deterministic ordered deduplication.
+- The model parses `activity_codes`, `supported_templates`,
+  `denominator_contract`, and every shipped `option_dependencies` shape. It
+  derives the effective ordered field set plus currently allowed choices and
+  units for the selected activity and earlier values. Invalid dependency
+  references fail closed just as invalid definition JSON does.
+- Unit helpers resolve every active compatible unit from the attribute and
+  unit `quantity_kind`/`basis`/conversion facts, then intersect that family
+  with layout dependency restrictions. Conversion produces both the canonical
+  `value_num`/`unit_code` and the audit
+  `entered_value_num`/`entered_unit_code`; incompatible or cross-basis units
+  are rejected. A numeric request row has the exact edge shape
+  `{ value_num: canonicalValue, unit_code: canonicalUnit,
+  entered_value_num: enteredValue, entered_unit_code: enteredUnit }`. Generic
+  `value` is omitted; if a caller supplies it, the builder accepts it only when
+  it equals `canonicalValue`.
+- `buildEntryValues` preserves nonnumeric semantic `value`, `value_status`,
+  numeric canonical/entered facts, and repeat `group_index`; it omits truly
+  empty values without coercing zero or false away.
+- `ActivityLeafSelection` is declared in `journalCapture.ts` as
+  `{ activity_code, dependent_selections: Array<{ attribute_code, value }> }`.
+  Task 8 derives these leaves from activity plus the layout's dependent choice
+  chain, with a deterministic identity/order; units remain constrained by the
+  resulting selections but are chosen in the form.
+- `resolveOccurrence(local, timezone, preferredOffset?)` mirrors the edge's
+  calendar and IANA-timezone behavior, detects DST gaps, returns both offsets
+  for a fold, and requires an explicit choice when ambiguous. Tests cover the
+  Zurich spring gap and autumn fold. The capture flow defaults to the browser
+  IANA timezone only when the caller has no typed linked-zone timezone; plot
+  aggregates themselves do not expose that timezone.
+- Tests use fixtures matching all shipped definitions:
+  `farmer_quick@1`, `full_record@1`, `research_observation@1`,
+  `open_field@1`, `greenhouse@1`, `lysimeter@1`, and
+  `agroscope_open_field@1`. They cover invalid definitions, every field-rule
+  alias, include-scope fields, zero/false values, conditional requiredness,
+  layout/template compatibility, the exact numeric request shape, and the
+  Agroscope operation→device→allowed-unit cascade. The journal API contract
+  test also asserts the canonical-plus-entered numeric row without generic
+  `value`.
+- The shared locale tree contains `capture.title/close/back/next/finish`,
+  `capture.where.*`, `capture.picker.*`, `capture.form.*`,
+  `capture.validation.*`, `capture.carry.*`, `capture.confirm.*`, and
+  `capture.save.*`. All seven files receive identical English fallback copy;
+  later tasks consume these keys without editing locale files in parallel.
+
+**Gate:** targeted suites, `npm run test:unit`, `npx tsc --noEmit`, and
+`git diff --check`. Commit: `feat(journal): catalog-driven capture engine`.
+
+### Task 9: Transparent activity picker
+
+**Files:**
+- Create `web/react-gui/src/components/journal/capture/ActivityPicker.tsx`.
+- Create
+  `web/react-gui/src/components/journal/__tests__/capture/ActivityPicker.test.tsx`.
+- Consume the Phase 3 locale keys from Task 8; do not edit locale files.
+
+**Required behavior:**
+- Props are catalog rows and distinct `ActivityLeafSelection[]` inputs for
+  plot recents, season common, farm recents, and layout fallback, plus whether
+  the selected plot is zone-linked, locale, and `onPick`. Each leaf is
+  produced by Task 8 from `activity_code` plus the layout's dependent choice
+  chain; `onPick` returns the complete typed leaf so Agroscope operation/device
+  selections reach form state, never only an opaque label or activity code.
+- The default surface is at most six 56px icon+label controls in labelled
+  sections: `Recent on this plot`, then `Common this season` for a zone-linked
+  plot, then `All options` from layout fallback. No-zone/farm-level selection
+  uses farm recents instead of season inference. Ordering is stable and
+  transparent; no opaque score is shown.
+- Search matches every localized label in the flattened path, English fallback
+  labels, and normalized code tokens. The current catalog has no synonym
+  field, so the UI does not invent unreviewed agronomic synonyms. Browse all
+  starts at activity and walks each dependency-constrained choice level (for
+  example operation then device) one labelled screen at a time, with back
+  navigation. A layout with no dependent choices ends at the activity leaf;
+  the UI never dumps a flat long-tail leaf list.
+- Icons come from a closed local allowlist and always have a visible label.
+- Tests cover zone-linked season ranking, no-zone farm fallback,
+  ranking/deduplication, the six-item cap, cold start, search, one-level guided
+  browsing/backtracking, unsupported activities, keyboard activation, and
+  English fallback.
+
+**Gate/commit:** targeted + full unit + TypeScript + locale parity +
+whitespace; `feat(journal): transparent activity picker`.
+
+### Task 10: Catalog-driven fields and product/numeric controls
+
+**Files:**
+- Create `web/react-gui/src/components/journal/capture/NumberStepper.tsx`,
+  `web/react-gui/src/components/journal/capture/NutrientRepeater.tsx`, and
+  `web/react-gui/src/components/journal/capture/EntryForm.tsx`.
+- Create
+  `web/react-gui/src/components/journal/__tests__/capture/NumberStepper.test.tsx`,
+  `web/react-gui/src/components/journal/__tests__/capture/NutrientRepeater.test.tsx`,
+  and
+  `web/react-gui/src/components/journal/__tests__/capture/EntryForm.test.tsx`.
+- Consume the Phase 3 locale keys from Task 8; do not edit locale files.
+
+**Required behavior:**
+- `EntryForm` renders the field states from Task 8 for number, text, choice,
+  date, and boolean attributes. Top-level identity/time/plot fields remain the
+  capture shell's responsibility.
+- Numeric input accepts the locale decimal separator, retains a keyboard
+  fallback, exposes large decrement/increment controls, and honours catalog
+  `min`/`max`/`step`. One allowed unit renders a fixed suffix; two allowed
+  units render the P5 segmented toggle; larger active compatible families use
+  an accessible selector. Every choice is further restricted by the current
+  layout dependency cascade.
+- Numeric submission retains entered value/unit and converts to canonical
+  value/unit through Task 8's quantity-kind+basis conversion. It submits
+  canonical `value_num`/`unit_code` beside
+  `entered_value_num`/`entered_unit_code` and omits generic `value`.
+  Incompatible units and cross-basis conversions fail visibly. Nutrient-rate
+  rows require explicit fixed nutrient-unit chips and never silently default a
+  species.
+- Product-first activities show active products before product-rate fields.
+  `NutrientRepeater` uses group indices and fixed nutrient-unit chips. It can
+  display composition-derived facts from a non-empty fixture but does not
+  store derived nutrient values or fabricate composition for the currently
+  empty shipped product rows.
+- Required visible fields block confirmation with field-level i18n errors.
+  Hidden values remain in form state for later template transitions but are
+  omitted from the create payload when the edge would reject them.
+- Tests cover zero, decimal comma, step/min/max, one-unit suffix, two-unit
+  toggle, larger unit family, entered/canonical conversion, incompatible unit,
+  dependency-restricted unit, choice restrictions, the Agroscope
+  operation→device→unit cascade, product-first order, repeat groups,
+  derived-display-only composition, explicit nutrient units, and conditional
+  visibility/requiredness.
+
+**Gate/commit:** targeted + full unit + TypeScript + locale parity +
+whitespace; `feat(journal): catalog-driven entry controls`.
+
+### Task 11: Season-safe carry-forward
+
+**Files:**
+- Create `web/react-gui/src/journal/carryForward.ts`.
+- Create `web/react-gui/src/journal/__tests__/carryForward.test.ts`.
+- Create
+  `web/react-gui/src/components/journal/capture/RepeatTreatmentCard.tsx`.
+- Create
+  `web/react-gui/src/components/journal/__tests__/capture/RepeatTreatmentCard.test.tsx`.
+- Consume the Phase 3 locale keys from Task 8; do not edit locale files.
+
+**Required interfaces and behavior:**
+- `loadCarryForwardCandidate(entryUuid)` treats only the stored draft as
+  authoritative. It reloads that exact row with `status=all`, requires
+  `status === 'draft'`, and derives plot, crop, activity, occurrence, layout,
+  and season fences from it rather than accepting them from the caller.
+- It pages final-only entries by cursor (up to the endpoint's 100-row page)
+  until it finds the newest compatible source or exhausts the result set. It
+  returns no candidate unless source and draft share the same non-null
+  `season_uuid`, plot, activity, and layout code/version, and
+  `source.occurred_start <= draft.occurred_start`.
+- `partitionCarryForward` silently pre-fills only template-declared low-risk
+  fields. Plant-protection product/authorization, target, dose/basis, treated
+  area, and waiting period are always excluded from automatic values.
+- An eligible plant-protection source may populate a hollow
+  `RepeatTreatmentCard` with source date/crop/product/rate. Values enter form
+  state only after explicit confirmation and are invalidated if plot,
+  crop, occurrence, season, or layout changes.
+- Tests prove cursor pagination, exact-draft authority/status, every
+  compatibility fence, every unsafe-field exclusion, and all card
+  invalidation inputs.
+
+**Gate/commit:** targeted + full unit + TypeScript + locale parity +
+whitespace; `feat(journal): season-safe carry-forward`.
+
+### Task 12: Stable draft and honest save lifecycle
+
+**Files:**
+- Create `web/react-gui/src/journal/useCaptureDraft.ts`.
+- Create `web/react-gui/src/journal/__tests__/useCaptureDraft.test.tsx`.
+- Create `web/react-gui/src/components/journal/capture/SaveState.tsx`.
+- Create
+  `web/react-gui/src/components/journal/__tests__/capture/SaveState.test.tsx`.
+- Consume the Phase 3 locale keys from Task 8; do not edit locale files.
+
+**Required behavior:**
+- The hook allocates one `crypto.randomUUID()` per capture session. It never
+  writes localStorage or IndexedDB.
+- Draft changes are debounced and serialized. First persistence is POST
+  `status=draft`; subsequent persistence is UUID-encoded PUT at
+  `base_sync_version=0`. A newer change queued during a request is saved after
+  that request, never concurrently.
+- `finish(finalPayload)` flushes the latest draft and promotes the same UUID
+  via PUT. Retry reuses the UUID. Successful final receipts expose
+  `outbox_event_uuid` and invalidate the final-entry list.
+- Mid-edit failure preserves volatile React state, renders a sticky loss
+  warning, and installs/removes a `beforeunload` guard. Pre-edit capability or
+  connectivity failure never mounts an editable form.
+- `SaveState` distinguishes saving, draft saved on gateway, final saved on
+  gateway, cloud saved/waiting for gateway, and not saved. Tests prove exact
+  transitions with fake timers, serialization, retry, unmount cleanup, and no
+  browser persistence calls.
+
+**Gate/commit:** targeted + full unit + TypeScript + locale parity +
+whitespace; `feat(journal): stable drafts and honest save states`.
+
+### Task 13: Confirm-by-reading capture flow
+
+**Files:**
+- Create `web/react-gui/src/components/journal/capture/ConfirmStrip.tsx` and
+  `web/react-gui/src/components/journal/capture/JournalCaptureFlow.tsx`.
+- Create `web/react-gui/src/journal/activityShortlist.ts`.
+- Create `web/react-gui/src/journal/__tests__/activityShortlist.test.ts`.
+- Create
+  `web/react-gui/src/components/journal/__tests__/capture/ConfirmStrip.test.tsx`
+  and
+  `web/react-gui/src/components/journal/__tests__/capture/JournalCaptureFlow.test.tsx`.
+- Consume the Phase 3 locale keys from Task 8; do not edit locale files.
+
+**Required behavior:**
+- Props include full catalog, plots, optional initial plot, recent entries,
+  optional initial timezone, close, open-existing, and saved callbacks. The
+  generic flow is Where → Activity → Details → Confirm; a zone-preselected
+  flow begins at Activity.
+- A selected plot uses its bound layout and shows it as a passive badge. The
+  user explicitly selects Quick/Full/Research from layouts that support it;
+  Quick is an initial visible choice, never a hidden pin. Farm-level
+  `plot_uuid=null` requires an explicit growing-setting choice before Activity;
+  `open_field` is never a silent default.
+- The details step pins the chosen active template and bound/explicit layout
+  versions, uses the catalog form, saves the stable draft, then applies only
+  Task 11's safe prefills. Sensorless plots visibly require crop text when no
+  covering season can be inferred; farm-level entries may keep
+  `plot_uuid=null` but still require explicit layout selection.
+- Task 13 owns the paged history query that supplies Task 9. For a zone-linked
+  plot it pages final entries at/before the chosen occurrence, derives the
+  current season as the newest row with non-null `season_uuid`, and ranks typed
+  leaves only from rows sharing that season. If no such row exists, it omits
+  `Common this season` and proceeds to layout fallback. Plot recents remain a
+  separate list. A no-zone/farm-level selection never relabels farm recents as
+  seasonal; it uses explicitly labelled farm recents plus layout fallback.
+  Leaf extraction reads activity plus dependency-source/target choice values
+  from each aggregate. Cursor pagination continues until exhaustion for the
+  selected plot; farm fallback stops after six unique valid leaves or
+  exhaustion.
+- Occurrence input always shows the chosen timezone. It sends
+  `occurred_utc_offset_minutes` (and the end offset when present), so DST folds
+  are never resolved silently.
+- `ConfirmStrip` renders a plain-language activity, plot, layout, occurrence,
+  and every interpreted value+unit. Each token is a button returning to the
+  relevant edit step. Finalize stays disabled while validation or duplicate
+  submission is in flight.
+- Finish promotes the draft and renders `SaveState`; failures remain editable
+  with the sticky warning. Close after success calls the saved callback so the
+  timeline revalidates.
+- After plot/activity/time are known, a preliminary final-only lookup runs the
+  ±60-minute duplicate guard. A candidate shows time and key values with
+  `Open existing` and `Save separately`. Finalization handles an authoritative
+  `duplicate_candidate` response the same way. `Save separately` warns only
+  once per draft and retries the same UUID with the exact
+  `duplicate_guard_ack_entry_uuid`; this is separate from suppressing repeated
+  Finish clicks.
+- Tests cover generic and preselected paths, definition/version pinning,
+  explicit template and farm-level layout choice, no-zone crop requirement,
+  confirm token editing, safe/unsafe prefill, preliminary and authoritative
+  duplicate warnings, open-existing/save-separately/warn-once behavior,
+  duplicate-click suppression, failure retry, final receipt handling, paged
+  season derivation, typed operation/device leaf extraction, and
+  first-season/no-history fallback without a seasonal label.
+
+**Gate/commit:** targeted + all capture suites + full unit + TypeScript +
+locale parity + build + whitespace; `feat(journal): confirm-by-reading capture flow`.
+
+### Task 14: Entry-point integration and mobile SLA
+
+**Files:**
+- Modify `web/react-gui/src/pages/JournalPage.tsx` and
+  `web/react-gui/src/pages/__tests__/JournalPage.test.tsx` to open/close the
+  capture flow and refresh final entries.
+- Modify `web/react-gui/src/components/DashboardHeader.tsx` and
+  `web/react-gui/src/components/__tests__/DashboardHeader.test.tsx` so Add →
+  Log activity routes to `/journal?capture=1`.
+- Modify `web/react-gui/src/types/farming.ts`,
+  `web/react-gui/src/services/api.ts`, and create
+  `web/react-gui/src/services/__tests__/irrigationZonesApi.test.ts` for explicit
+  zone UUID/timezone normalization coverage. The already-shipped `zone_uuid`
+  response field receives explicit snake/camel aliases instead of relying on
+  `...z` to preserve an untyped property.
+- Modify `web/react-gui/src/components/farming/IrrigationZoneCard.tsx` and
+  `web/react-gui/src/components/farming/__tests__/IrrigationZoneCardData.test.tsx`
+  to add a 56px Journal CTA to `/journal?capture=1&zone_uuid=<uuid>`.
+- Consume the Phase 3 entry-point keys from Task 8; do not edit locale files.
+
+**Required behavior:**
+- Journal's Log activity button opens the generic flow. Query state opens it
+  on arrival and resolves `zone_uuid` to the matching plot without displaying
+  an ID. Unknown zone query falls back to the generic Where step.
+- The card builds the shortcut from typed `zoneUuid`/`zone_uuid`; a missing
+  UUID keeps the CTA available as the generic `/journal?capture=1` flow.
+- Journal loads typed irrigation-zone data, matches it by `zone_uuid`, and
+  passes its timezone with the preselected plot and crop hint. Browser timezone
+  is the editable fallback only for a genuinely missing zone timezone,
+  sensorless plot, or farm-level entry. It never overrides a known linked-zone
+  timezone and never bypasses catalog/layout or DST validation.
+- Tests cover snake/camel UUID aliases, missing-UUID generic fallback, known
+  zone timezone, missing timezone fallback, and unknown zone query.
+- A test counts primary-control activations for a common zone-preselected,
+  safely prefilled entry and requires at most five including the initiating
+  zone-card CTA and ending only when the final PUT receipt is rendered as
+  `Saved on farm gateway`. It also proves one final request and no
+  horizontal-only control layout.
+- Browser verification runs the built preview at 320×568 and 360×640: no
+  horizontal page scroll, 56px primary controls, visible confirmation text,
+  and keyboard focus order. Mocked Slice-1 responses are used because the
+  available live gateway is pre-journal.
+
+**Phase 3 gate:** all capture and Phase 1–2 suites, `npm run test:unit`,
+`npx tsc --noEmit`, `npm run build`, locale parity, anti-slop on changed copy,
+browser screenshots at both viewports, `git diff --check`, clean worktree, and
+sol post-check. Commit: `feat(journal): integrate mobile capture entry points`.
 
 ## Phase 4 — Multi-plot batch + plot/group CRUD (code-decompose when reached)
 
