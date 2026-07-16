@@ -11,24 +11,24 @@ Forge Stage 1 agents work in disposable test-VPS worktrees and prove changes
 with local commands. They do not deploy, SSH, read live secrets, inspect
 production, or merge their own work. If correct execution appears to require a
 forbidden action, stop and write the finding into `execution-report.md`.
-Stage 1 is limited to `osi-os` jobs with risk class 0-2; requests that need
+Stage 1 accepts only `Open-Smart-Irrigation/osi-os` and
+`Open-Smart-Irrigation/osi-server` jobs at risk class 0-2. Requests that need
 production access, live gateway mutation, or deployment-only proof are
 stop-and-report outcomes.
 
-Verified context: branch naming and draft-PR shape are specified in
-`docs/superpowers/specs/2026-07-08-field-to-pr-design.md` (`agent/req-*`,
-draft PR, evidence body). Production restrictions are in `AGENTS.md`
-("Production cloud access").
+The controller creates `forge/<repo-short-name>/<issue-number>-<slug>/attempt-<n>`
+branches. The legacy `agent/req-*` shape remains readable for historical jobs
+only. Production restrictions are in `AGENTS.md` ("Production cloud access").
 
 ## Environment
 
 | Allowed in Stage 1 | Not allowed in Stage 1 |
 |---|---|
-| Disposable worktree on a test VPS | SSH to any gateway or server |
+| Disposable worktree on a test VPS for either approved repository | SSH to any gateway or server |
 | Local repo reads and writes within the assigned scope | Docker or host-level service mutation |
 | Local tests, build commands, static verifiers | Reading server `.env` or credential files |
 | Git commits on the assigned branch | Touching a live gateway or `osicloud.ch` |
-| Draft PR creation from `agent/*` branches | Pushing non-`agent/*` branches or merging |
+| Controller-created draft PR from a `forge/*` branch | Pushing non-`forge/*` branches or merging |
 
 ## Absolute Prohibitions
 
@@ -43,7 +43,7 @@ gap instead of assuming human review will catch it later.
 | Secret-looking values in diffs | Prevents token, key, AppKey, password, and credential leakage into git history. |
 | Credential paths in diffs | Prevents accidental reads or writes of `.env`, SSH keys, Node-RED credentials, gateway tokens, and similar files. |
 | Oversized diffs beyond the request limit | Keeps worker output reviewable and prevents broad, uncontrolled edits. |
-| Branch names outside the allowed `agent/*` / `agent/req-*` shape | Keeps automation isolated from maintainer and production branches. |
+| Branch names outside the allowed `forge/<repo>/<issue>-<slug>/attempt-<n>` shape (or legacy `agent/req-*`) | Keeps automation isolated from maintainer and production branches. |
 | Controller content-scan findings when enabled for the current job | Honors task-specific deny lists without pretending every policy item is universally scanned. |
 
 ### Policy, caught by review unless a gate also exists
@@ -71,14 +71,15 @@ They are still forbidden by policy and should be reported when seen.
 ## Branch and PR Contract
 
 - Start from an issue or request artifact; do not invent scope outside it.
-- Use `agent/req-<shortid>-<slug>` for Forge worker branches unless the task
-  gives a stricter branch name.
+- Use `forge/<repo-short-name>/<issue-number>-<slug>/attempt-<n>` for new
+  Forge job branches. Keep legacy `agent/req-*` branches readable only when
+  recovering historical jobs.
 - Open a draft PR only. The PR body must include issue link, root cause, files
   changed, commands run, and pasted evidence.
 - Never self-approve, mark ready, merge, squash, retarget, or delete branches
   unless the maintainer explicitly instructs it in the current turn.
-- Push only `agent/*` worker branches. If the assigned task names a
-  non-`agent/*` branch, commit locally and stop for controller handling.
+- Push only controller-created `forge/*` worker branches. If the assigned task
+  names another branch, commit locally and stop for controller handling.
 
 ## Blocked Execution
 
