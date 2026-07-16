@@ -54,3 +54,50 @@ machine-translate, or seed catalog label translations. Do **not** hard stop for 
 ## Summary
 
 Continue Phase 3 at Task 13 on the current path. The only change requested is R1.
+
+---
+
+# Task 13 external review — ACCEPTED (2026-07-16)
+
+Reviewed `52cc8637` (feature), `7343540d` (R1), `a3f59dc8` (notes). Every claimed gate was
+re-run independently and matched: tsx-runner 93/93, Vitest 887/887 across 120 files,
+TypeScript clean, production build green, edge 45/45, worktree clean.
+
+R1 is correctly closed: the assertion now proves a non-empty definition and a non-empty
+English label. R2 was correctly honoured — carry-forward stayed definition-driven through
+`declaredCarryForward` with no `full_record` fallback. N1 and N2 were correctly left alone
+with no spurious hard stop.
+
+The 5-tap SLA is absent from Task 13 by correct scoping: Task 14 owns it.
+
+**Verdict: Task 13 is accepted and ready to merge. Task 14 may proceed.**
+
+## F5 — ACCEPTED DEVIATION, do not re-litigate
+
+The UX addendum P2 (verdict: Adopted) specifies the confirmation as "one generated journal
+sentence … every token tappable to edit", whose stated purpose is that prefills are "read in
+one glance". The shipped `ConfirmStrip` renders a two-column grid of labelled tokens
+instead. It satisfies STD-1 (interpreted value + unit repeated), §6.2 (plot and layout
+shown), tappable tokens, and the in-flight Finish lock; it does not deliver the glanceable
+sentence.
+
+Origin: the amended Task 13 plan reworded P2 to "plain-language … tokens" and never used the
+word "sentence". The implementation followed the plan faithfully. This is plan-to-spec
+drift, not an implementation defect.
+
+**Adjudication (product owner, 2026-07-16): accepted as-is. Revisit later.** A generated
+sentence needs localised labels to be worth anything, and catalog labels are English-only
+today (N2), so the sentence is naturally sequenced after the label work. The token model
+already carries `label`/`value`/`unit`/`step`, so rendering a sentence later is contained to
+`ConfirmStrip`.
+
+**Required behaviour:** do not rewrite `ConfirmStrip` into a sentence during Slice 2. Do not
+raise this as a finding again. It is scheduled for the live-verification and enhancement
+round after the firmware image is built.
+
+## Note for the remaining phases
+
+sol reviews against the plan, so when the plan itself drifts from the source spec (the design
+doc and UX addendum), sol will not catch it — F5 is an instance. Where an amended task
+reworders an adopted U- or P- decision, keep the addendum's wording in the task text so the
+drift is visible at review time.
