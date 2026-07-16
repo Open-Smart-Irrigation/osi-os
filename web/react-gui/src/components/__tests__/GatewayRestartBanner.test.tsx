@@ -28,7 +28,7 @@ vi.mock('react-i18next', () => ({
 }));
 
 type RestartPending = {
-  restartAt: string;
+  restartAt: string | null;
   reason: string;
 } | null;
 
@@ -133,7 +133,7 @@ describe('GatewayRestartBanner', () => {
     expect(screen.queryByRole('status')).not.toBeInTheDocument();
   });
 
-  it('renders nothing for an invalid pending timestamp', async () => {
+  it('keeps a malformed pending restart visible as in progress', async () => {
     vi.mocked(systemAPI.getStats).mockResolvedValue(makeStats({
       restartAt: 'not-a-date',
       reason: 'gateway_identity_change',
@@ -142,7 +142,19 @@ describe('GatewayRestartBanner', () => {
     render(<GatewayRestartBanner />);
     await flushRequests();
 
-    expect(screen.queryByRole('status')).not.toBeInTheDocument();
+    expect(screen.getByRole('status')).toHaveTextContent('Restart in progress');
+  });
+
+  it('keeps a pending restart with no published deadline visible as in progress', async () => {
+    vi.mocked(systemAPI.getStats).mockResolvedValue(makeStats({
+      restartAt: null,
+      reason: 'gateway_identity_change',
+    }));
+
+    render(<GatewayRestartBanner />);
+    await flushRequests();
+
+    expect(screen.getByRole('status')).toHaveTextContent('Restart in progress');
   });
 
   it('keeps an already-expired pending restart visible as in progress', async () => {

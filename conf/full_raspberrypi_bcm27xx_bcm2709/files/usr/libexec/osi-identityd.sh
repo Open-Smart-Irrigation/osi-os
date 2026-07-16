@@ -7,6 +7,8 @@ OSI_IDENTITY_HELPER="${OSI_IDENTITY_HELPER:-/usr/libexec/osi-gateway-identity.sh
 OSI_NODE_RED_SERVICE="${OSI_NODE_RED_SERVICE:-/etc/init.d/node-red}"
 OSI_REGISTRATION_SCRIPT="${OSI_REGISTRATION_SCRIPT:-/usr/libexec/osi-register-gateway.sh}"
 IDENTITYD_MAX_EPOCH=2147483647
+IDENTITYD_COMPLETED_SENTINEL_SET=0
+IDENTITYD_COMPLETED_SENTINEL_RAW=""
 
 if [ ! -r "$OSI_IDENTITY_HELPER" ]; then
     printf 'osi-identityd: identity helper is not readable: %s\n' "$OSI_IDENTITY_HELPER" >&2
@@ -123,6 +125,31 @@ identityd_remove_sentinel() {
 
 identityd_remove_completion() {
     rm -f "$IDENTITYD_COMPLETION_FILE"
+}
+
+identityd_clear_completed_sentinel() {
+    IDENTITYD_COMPLETED_SENTINEL_SET=0
+    IDENTITYD_COMPLETED_SENTINEL_RAW=""
+}
+
+identityd_remember_completed_sentinel() {
+    IDENTITYD_COMPLETED_SENTINEL_SET=1
+    IDENTITYD_COMPLETED_SENTINEL_RAW="$1"
+}
+
+identityd_write_completion_marker() {
+    identityd_atomic_write "$IDENTITYD_COMPLETION_FILE" "$1"
+}
+
+identityd_finish_completed_sentinel() {
+    local reason
+    reason="$1"
+    if identityd_remove_sentinel; then
+        identityd_remove_completion 2>/dev/null || true
+        identityd_clear_completed_sentinel
+        identityd_cache_after_restart "$reason" || true
+    fi
+    return 0
 }
 
 identityd_lock_owner_at() {
@@ -636,22 +663,29 @@ identityd_cache_after_restart() {
 }
 
 identityd_process_restart_deadline() {
-    local now reason target requested remaining rebased_epoch rebased_at malformed completed_sentinel
+    local now reason target requested remaining rebased_epoch rebased_at malformed completed_sentinel current_sentinel
     now="$1"
     if [ ! -f "$IDENTITYD_SENTINEL_FILE" ]; then
         identityd_remove_completion 2>/dev/null || true
+        identityd_clear_completed_sentinel
         IDENTITYD_LAST_MALFORMED_SENTINEL=""
         IDENTITYD_LAST_MALFORMED_SENTINEL_SET=0
         return 0
     fi
+    if [ "$IDENTITYD_COMPLETED_SENTINEL_SET" -eq 1 ]; then
+        current_sentinel="$(identityd_json_raw "$IDENTITYD_SENTINEL_FILE" 2>/dev/null || true)"
+        if [ "$current_sentinel" = "$IDENTITYD_COMPLETED_SENTINEL_RAW" ]; then
+            if identityd_load_sentinel; then
+                identityd_finish_completed_sentinel "$IDENTITYD_SENTINEL_REASON"
+            fi
+            return 0
+        fi
+        identityd_clear_completed_sentinel
+    fi
     if [ -f "$IDENTITYD_COMPLETION_FILE" ]; then
         if cmp -s "$IDENTITYD_SENTINEL_FILE" "$IDENTITYD_COMPLETION_FILE"; then
             if identityd_load_sentinel; then
-                reason="$IDENTITYD_SENTINEL_REASON"
-                if identityd_remove_sentinel; then
-                    identityd_remove_completion 2>/dev/null || true
-                    identityd_cache_after_restart "$reason" || true
-                fi
+                identityd_finish_completed_sentinel "$IDENTITYD_SENTINEL_REASON"
             fi
             return 0
         fi
@@ -689,11 +723,13 @@ identityd_process_restart_deadline() {
     requested="$IDENTITYD_SENTINEL_REQUESTED"
     if "$OSI_NODE_RED_SERVICE" restart; then
         completed_sentinel="$(identityd_json_raw "$IDENTITYD_SENTINEL_FILE")" || return 1
-        identityd_atomic_write "$IDENTITYD_COMPLETION_FILE" "$completed_sentinel" || return 1
-        if identityd_remove_sentinel; then
-            identityd_remove_completion 2>/dev/null || true
-            identityd_cache_after_restart "$reason" || true
+        identityd_remember_completed_sentinel "$completed_sentinel"
+        if ! identityd_write_completion_marker "$completed_sentinel"; then
+            printf '%s\n' "osi-identityd: Node-RED restart succeeded but completion marker write failed; suppressing repeated restart" >&2
+            identityd_finish_completed_sentinel "$reason"
+            return 0
         fi
+        identityd_finish_completed_sentinel "$reason"
         return 0
     fi
     identityd_write_pending_sentinel "$reason" "$target" "$requested" "$((now + 30))" "$((IDENTITYD_NOW_UPTIME + 30))"

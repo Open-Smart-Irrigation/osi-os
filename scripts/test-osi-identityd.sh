@@ -615,6 +615,33 @@ assert_file_absent "$OSI_IDENTITY_RUN_DIR/$COMPLETION_NAME" "scenario 13 complet
 new_fixture
 set_uci_identity "8899AABBCCDDEEFF" "authoritative" "concentratord-runtime" "2026-07-15T00:12:10Z"
 write_cache "8899AABBCCDDEEFF" "concentratord-runtime" "authoritative" "2026-07-15T00:12:10Z" "null" "restart_pending" "2026-07-15T00:12:10Z"
+write_sentinel "restart_pending" '"1970-01-01T00:16:40Z"' "1000" "gateway_identity_change" '"8899AABBCCDDEEFF"' "2026-07-15T00:12:10Z"
+identityd_initialize
+identityd_atomic_write() {
+    if [ "$1" = "$IDENTITYD_COMPLETION_FILE" ]; then
+        return 1
+    fi
+    printf '%s\n' "$2" > "$1"
+}
+identityd_control_tick
+assert_eq "1" \
+    "$(grep -c '^restart$' "$IDENTITYD_TEST_STATE_DIR/service.log")" \
+    "restart succeeds once before completion write failure"
+assert_file_absent "$OSI_IDENTITY_RUN_DIR/$SENTINEL_NAME" "completion write failure falls back to sentinel removal"
+assert_file_absent "$OSI_IDENTITY_RUN_DIR/$COMPLETION_NAME" "completion write failure leaves no marker"
+. "$DAEMON"
+identityd_now_uptime() {
+    cat "$IDENTITYD_TEST_STATE_DIR/uptime"
+}
+set_now 1001
+identityd_control_tick
+assert_eq "1" \
+    "$(grep -c '^restart$' "$IDENTITYD_TEST_STATE_DIR/service.log")" \
+    "completion write failure does not repeat restart"
+
+new_fixture
+set_uci_identity "8899AABBCCDDEEFF" "authoritative" "concentratord-runtime" "2026-07-15T00:12:20Z"
+write_cache "8899AABBCCDDEEFF" "concentratord-runtime" "authoritative" "2026-07-15T00:12:20Z" "null" "restart_pending" "2026-07-15T00:12:20Z"
 write_sentinel "restart_pending" '"1970-01-01T00:16:39Z"' "999" "gateway_identity_change" '"8899AABBCCDDEEFF"' "2026-07-15T00:12:10Z"
 identityd_initialize
 identityd_remove_sentinel() {

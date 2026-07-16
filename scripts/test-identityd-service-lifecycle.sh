@@ -69,20 +69,25 @@ identityd_service() {
         stop)
             printf '%s\n' identityd-stop >> "$STATE_LOG"
             SERVICE_RUNNING=0
+            SERVICE_READY=0
             if [ "$STOP_RELEASES_LOCK" = 1 ]; then
                 rm -rf "$IDENTITYD_LOCK_PATH"
             fi
             ;;
         start)
             printf '%s\n' identityd-start >> "$STATE_LOG"
-            if [ "$START_BECOMES_READY" = 1 ]; then
+            if [ "$STARTS_RUNNING" = 1 ]; then
                 SERVICE_RUNNING=1
+            fi
+            if [ "$START_BECOMES_READY" = 1 ]; then
+                SERVICE_READY=1
                 rm -rf "$IDENTITYD_LOCK_PATH"
                 ln -s "$$" "$IDENTITYD_LOCK_PATH"
             fi
             ;;
         ready)
             [ "$SERVICE_RUNNING" = 1 ] || return 1
+            [ "$SERVICE_READY" = 1 ] || return 1
             OSI_IDENTITY_RUN_DIR="$RUN_DIR" \
                 OSI_IDENTITY_HELPER="$HELPER" \
                 "$DAEMON" ready >/dev/null 2>&1
@@ -104,7 +109,9 @@ reset_fixture() {
     printf '%s\n' sentinel > "$RUN_DIR/osi-identity-restart.json"
     : > "$STATE_LOG"
     SERVICE_RUNNING="$prior_running"
+    SERVICE_READY="$prior_running"
     STOP_RELEASES_LOCK=1
+    STARTS_RUNNING=1
     START_BECOMES_READY=1
     NODE_RED_START_OK=1
     node_red_restart_needed=0
@@ -178,11 +185,15 @@ identityd_line="$(grep -n '^identityd-start$' "$STATE_LOG" | tail -1 | cut -d: -
 reset_fixture 1
 quiesce_identityd_for_deploy || fail "restore-failure quiescence failed"
 START_BECOMES_READY=0
+stops_before="$(grep -c '^identityd-stop$' "$STATE_LOG" || true)"
 if (deploy_exit_handler 0); then
     fail "exit handler hid an identityd restoration failure"
 else
     handler_status=$?
 fi
 assert_eq 1 "$handler_status" "restoration failure status"
+stops_after="$(grep -c '^identityd-stop$' "$STATE_LOG" || true)"
+assert_eq "$((stops_before + 1))" "$stops_after" "failed restoration stopped running-but-unready identityd"
+[ ! -e "$IDENTITYD_LOCK_PATH" ] && [ ! -L "$IDENTITYD_LOCK_PATH" ] || fail "failed restoration left an identityd lock"
 
 printf '%s\n' "PASS: identityd deploy lifecycle and readiness"

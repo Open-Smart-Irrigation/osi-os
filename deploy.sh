@@ -245,6 +245,7 @@ restore_identityd_prior_state() {
     identityd_service start
     if ! wait_for_identityd_ready; then
         echo "ERROR: identityd did not become ready while restoring prior state" >&2
+        quiesce_identityd_instance || true
         return 1
     fi
     identityd_deploy_state="disarmed"

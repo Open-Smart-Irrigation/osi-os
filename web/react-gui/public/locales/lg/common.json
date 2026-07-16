@@ -93,11 +93,11 @@
     }
   },
   "restart": {
-    "gateway_identity_change": "Gateway identity updated. Services will restart in {{count}} s.",
-    "chirpstack_bootstrap": "LoRaWAN setup completed. Services will restart in {{count}} s.",
-    "account_link": "Account linked. Services will restart in {{count}} s.",
-    "account_unlink": "Account unlinked. Services will restart in {{count}} s.",
-    "generic": "Gateway services will restart in {{count}} s.",
-    "in_progress": "Gateway services are restarting now…"
+    "gateway_identity_change": "Endagamuntu ya getwaya etereezeddwa. Empeereza zijja kuddamu okutandika mu sikonda {{count}}.",
+    "chirpstack_bootstrap": "Okuteekateeka LoRaWAN kuwedde. Empeereza zijja kuddamu okutandika mu sikonda {{count}}.",
+    "account_link": "Akawunti eyungiddwa. Empeereza zijja kuddamu okutandika mu sikonda {{count}}.",
+    "account_unlink": "Akawunti eggyiddwa ku kuyungibwa. Empeereza zijja kuddamu okutandika mu sikonda {{count}}.",
+    "generic": "Empeereza za getwaya zijja kuddamu okutandika mu sikonda {{count}}.",
+    "in_progress": "Empeereza za getwaya ziddamu okutandika kati…"
   }
 }

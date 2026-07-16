@@ -41,11 +41,27 @@ export function GatewayRestartBanner() {
     return () => window.clearInterval(interval);
   }, [restartAtMs]);
 
-  if (!restartPending || restartAtMs === null || remainingSeconds === null) return null;
+  if (!restartPending) return null;
 
-  const message = remainingSeconds === 0
+  const displayedRemainingSeconds = restartAtMs === null
+    ? null
+    : remainingSeconds ?? Math.max(0, Math.ceil((restartAtMs - Date.now()) / 1000));
+
+  if (restartAtMs === null || displayedRemainingSeconds === null) {
+    return (
+      <div
+        role="status"
+        aria-live="polite"
+        className="border-b border-[var(--warn-border)] bg-[var(--warn-bg)] px-4 py-3 text-center text-sm font-semibold text-[var(--warn-text)]"
+      >
+        {t('restart.in_progress')}
+      </div>
+    );
+  }
+
+  const message = displayedRemainingSeconds === 0
     ? t('restart.in_progress')
-    : t(REASON_KEYS[restartPending.reason] ?? 'restart.generic', { count: remainingSeconds });
+    : t(REASON_KEYS[restartPending.reason] ?? 'restart.generic', { count: displayedRemainingSeconds });
 
   return (
     <div

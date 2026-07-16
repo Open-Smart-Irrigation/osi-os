@@ -635,10 +635,14 @@ function verifySystemStatsExecution(label, func) {
     sentinelExists: true,
     sentinelRaw: JSON.stringify({ phase: 'healing', restartAt: null, reason: 'gateway_identity_change', targetDeviceEui: privateEui }),
   });
-  expectCondition(healing.msg.statusCode === 200 && healing.msg.payload?.restartPending === null
+  expectCondition(healing.msg.statusCode === 200
+      && JSON.stringify(Object.keys(healing.msg.payload?.restartPending || {})) === JSON.stringify(['restartAt', 'reason', 'status'])
+      && healing.msg.payload?.restartPending?.restartAt === null
+      && healing.msg.payload?.restartPending?.reason === 'gateway_identity_change'
+      && healing.msg.payload?.restartPending?.status === 'blocked'
       && !JSON.stringify(healing.msg.payload || {}).includes(privateEui),
-    `${label}: no-deadline healing state has no public countdown`,
-    `${label}: no-deadline healing state must return restartPending null without leaking the target EUI`);
+    `${label}: no-deadline healing state exposes a blocked public restart state`,
+    `${label}: no-deadline healing state must return a blocked restartPending object without leaking the target EUI`);
 
   const expiredState = { phase: 'restart_pending', restartAt: '2000-01-01T00:00:00Z', reason: 'account_link' };
   const expired = executeSystemStats(func, { sentinelExists: true, sentinelRaw: JSON.stringify(expiredState) });
@@ -653,20 +657,30 @@ function verifySystemStatsExecution(label, func) {
     ['non-string deadline', JSON.stringify({ phase: 'restart_pending', restartAt: 1784116860, reason: 'gateway_identity_change' })],
   ]) {
     const malformed = executeSystemStats(func, { sentinelExists: true, sentinelRaw });
-    expectCondition(malformed.msg.statusCode === 200 && malformed.msg.payload?.restartPending === null
+    expectCondition(malformed.msg.statusCode === 200
+        && JSON.stringify(Object.keys(malformed.msg.payload?.restartPending || {})) === JSON.stringify(['restartAt', 'reason', 'status', 'error'])
+        && malformed.msg.payload?.restartPending?.restartAt === null
+        && malformed.msg.payload?.restartPending?.reason === 'gateway_identity_change'
+        && malformed.msg.payload?.restartPending?.status === 'malformed'
+        && typeof malformed.msg.payload?.restartPending?.error === 'string'
         && malformed.warnings.some((warning) => warning.includes('restart state')),
-      `${label}: ${caseName} is filtered with a visible warning`,
-      `${label}: ${caseName} must return restartPending null and warn without failing system stats`);
+      `${label}: ${caseName} exposes a malformed public restart state`,
+      `${label}: ${caseName} must return a malformed restartPending object and warn without failing system stats`);
   }
 
   const readFailure = executeSystemStats(func, {
     sentinelExists: true,
     sentinelReadError: Object.assign(new Error('fixture read failure'), { code: 'EIO' }),
   });
-  expectCondition(readFailure.msg.statusCode === 200 && readFailure.msg.payload?.restartPending === null
+  expectCondition(readFailure.msg.statusCode === 200
+      && JSON.stringify(Object.keys(readFailure.msg.payload?.restartPending || {})) === JSON.stringify(['restartAt', 'reason', 'status', 'error'])
+      && readFailure.msg.payload?.restartPending?.restartAt === null
+      && readFailure.msg.payload?.restartPending?.reason === 'gateway_identity_change'
+      && readFailure.msg.payload?.restartPending?.status === 'unreadable'
+      && readFailure.msg.payload?.restartPending?.error.includes('fixture read failure')
       && readFailure.warnings.some((warning) => warning.includes('restart state') && warning.includes('fixture read failure')),
-    `${label}: unreadable restart sentinel is filtered with a visible warning`,
-    `${label}: unreadable restart sentinel must return restartPending null and warn without failing system stats`);
+    `${label}: unreadable restart sentinel exposes an unreadable public restart state`,
+    `${label}: unreadable restart sentinel must return an unreadable restartPending object and warn without failing system stats`);
 
   const hwmonDirectoryFailure = executeSystemStats(func, {
     hwmonDirectoryError: new Error('fixture hwmon directory failure'),
@@ -994,14 +1008,14 @@ if (sizeAllowances) {
       `size allowance ${nodeId}: expected exact cumulative delta ${delta}`);
     expectIncludes(`size allowance ${nodeId}`, String(sizeAllowances.node_allowances?.[nodeId]?.reason || ''), 'live identity restart sentinel (Option C Slice 1)', 'declares Task 4 growth');
   }
-  expectCondition(sizeAllowances.node_allowances?.['sys-stats-fn']?.delta === 3884,
-    'size allowance sys-stats-fn: exact Task 5 delta 3884',
-    'size allowance sys-stats-fn: expected exact Task 5 delta 3884');
+  expectCondition(sizeAllowances.node_allowances?.['sys-stats-fn']?.delta === 4862,
+    'size allowance sys-stats-fn: exact Task 5 delta 4862',
+    'size allowance sys-stats-fn: expected exact Task 5 delta 4862');
   expectIncludes('size allowance sys-stats-fn', String(sizeAllowances.node_allowances?.['sys-stats-fn']?.reason || ''), 'filtered restartPending status (Option C Slice 1b)', 'declares Task 5 growth');
-  expectCondition(sizeAllowances.total_allowance?.delta === 40056,
-    'size total allowance: exact cumulative delta 40056',
-    'size total allowance: expected exact cumulative delta 40056');
-  expectIncludes('size total allowance', String(sizeAllowances.total_allowance?.reason || ''), 'filtered restartPending status with deduplicated fan-probe warnings and a capped, hotplug-pruned context map (Option C Slice 1b) (+3884)', 'declares exact Task 5 total growth');
+  expectCondition(sizeAllowances.total_allowance?.delta === 41034,
+    'size total allowance: exact cumulative delta 41034',
+    'size total allowance: expected exact cumulative delta 41034');
+  expectIncludes('size total allowance', String(sizeAllowances.total_allowance?.reason || ''), 'filtered restartPending status with explicit blocked/malformed/unreadable restartPending states, deduplicated fan-probe warnings, and a capped, hotplug-pruned context map (Option C Slice 1b) (+4862)', 'declares exact Task 5 total growth');
   const allowanceKeys = [...sizeAllowancesSource.matchAll(/^    "([^"]+)":/gm)].map((match) => match[1]);
   expectCondition(new Set(allowanceKeys).size === allowanceKeys.length,
     'size allowances contain no duplicate node keys',
