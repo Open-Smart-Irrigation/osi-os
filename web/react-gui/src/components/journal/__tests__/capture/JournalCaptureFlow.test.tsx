@@ -158,6 +158,33 @@ const canonicalCropCatalog: JournalCatalog = {
   ],
 };
 
+const quickWithoutCropCatalog: JournalCatalog = {
+  ...canonicalCropCatalog,
+  templates: canonicalCropCatalog.templates.map((candidate) => candidate.code === 'farmer_quick'
+    ? {
+        ...candidate,
+        definition: { ...candidate.definition, fields: [], carry_forward: [] },
+      }
+    : candidate),
+};
+
+const activityCropDependencyCatalog: JournalCatalog = {
+  ...canonicalCropCatalog,
+  layouts: [{
+    ...canonicalCropCatalog.layouts[0],
+    definition: {
+      ...canonicalCropCatalog.layouts[0].definition,
+      option_dependencies: [{
+        when: { attribute_code: 'activity_code', equals: 'irrigation' },
+        restrict: {
+          attribute_code: 'attr.crop',
+          choices: ['agroscope.crop.barley_spring', 'agroscope.crop.barley_winter'],
+        },
+      }],
+    },
+  }],
+};
+
 const plot: JournalPlot = {
   contract_version: 1,
   plot_uuid: 'plot-1',
@@ -694,6 +721,136 @@ describe('JournalCaptureFlow', () => {
     await releaseJournalEffects();
   });
 
+  it('preserves an edited full-record crop through confirmation and finalization', async () => {
+    render(<JournalCaptureFlow
+      {...baseProps}
+      catalog={canonicalCropCatalog}
+      initialPlot={plot}
+      zoneCrops={{ 'zone-1': 'Barley, Winter' }}
+    />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'irrigation' }));
+    fireEvent.click(screen.getByRole('button', { name: 'capture.next' }));
+    fireEvent.change(screen.getByRole('combobox', { name: 'capture.form.detailLevel' }), {
+      target: { value: 'full_record' },
+    });
+
+    const cropControl = screen.getByRole('combobox', { name: 'attr.crop' });
+    expect(cropControl).toHaveValue('agroscope.crop.barley_winter');
+    fireEvent.change(cropControl, { target: { value: 'agroscope.crop.barley_spring' } });
+    expect(cropControl).toHaveValue('agroscope.crop.barley_spring');
+
+    fireEvent.click(screen.getByRole('button', { name: 'capture.next' }));
+    await waitFor(() => expect(screen.getByRole('heading', {
+      name: 'capture.confirm.title',
+    })).toBeInTheDocument());
+    fireEvent.click(screen.getByRole('button', { name: 'capture.finish' }));
+
+    await waitFor(() => expect(apiMocks.updateEntry.mock.calls.some(([, payload]) => payload.status === 'final')).toBe(true));
+    const finalPayload = apiMocks.updateEntry.mock.calls
+      .map(([, payload]) => payload)
+      .find((payload) => payload.status === 'final');
+    expect(finalPayload.values.filter((value: { attribute_code: string }) => value.attribute_code === 'attr.crop'))
+      .toEqual([{
+        attribute_code: 'attr.crop',
+        value_status: 'observed',
+        value: 'agroscope.crop.barley_spring',
+      }]);
+  });
+
+  it('does not restore the seeded crop after clearing the full-record crop', async () => {
+    render(<JournalCaptureFlow
+      {...baseProps}
+      catalog={canonicalCropCatalog}
+      initialPlot={plot}
+      zoneCrops={{ 'zone-1': 'Barley, Winter' }}
+    />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'irrigation' }));
+    fireEvent.click(screen.getByRole('button', { name: 'capture.next' }));
+    fireEvent.change(screen.getByRole('combobox', { name: 'capture.form.detailLevel' }), {
+      target: { value: 'full_record' },
+    });
+    const cropControl = screen.getByRole('combobox', { name: 'attr.crop' });
+    expect(cropControl).toHaveValue('agroscope.crop.barley_winter');
+    fireEvent.change(cropControl, { target: { value: '' } });
+    expect(cropControl).toHaveValue('');
+
+    fireEvent.click(screen.getByRole('button', { name: 'capture.next' }));
+    await waitFor(() => expect(screen.getByRole('heading', {
+      name: 'capture.confirm.title',
+    })).toBeInTheDocument());
+    expect(screen.queryByText(/attr\.crop: barley, winter/i)).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'capture.finish' }));
+
+    await waitFor(() => expect(apiMocks.updateEntry.mock.calls.some(([, payload]) => payload.status === 'final')).toBe(true));
+    const finalPayload = apiMocks.updateEntry.mock.calls
+      .map(([, payload]) => payload)
+      .find((payload) => payload.status === 'final');
+    expect(finalPayload.values.filter((value: { attribute_code: string }) => value.attribute_code === 'attr.crop'))
+      .toEqual([]);
+  });
+
+  it('injects the mapped crop for a quick form without an attr.crop control', async () => {
+    render(<JournalCaptureFlow
+      {...baseProps}
+      catalog={quickWithoutCropCatalog}
+      initialPlot={plot}
+      zoneCrops={{ 'zone-1': 'Barley, Winter' }}
+    />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'irrigation' }));
+    fireEvent.click(screen.getByRole('button', { name: 'capture.next' }));
+    expect(screen.queryByRole('combobox', { name: 'attr.crop' })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'capture.next' }));
+    await waitFor(() => expect(screen.getByRole('heading', {
+      name: 'capture.confirm.title',
+    })).toBeInTheDocument());
+    fireEvent.click(screen.getByRole('button', { name: 'capture.finish' }));
+
+    await waitFor(() => expect(apiMocks.updateEntry.mock.calls.some(([, payload]) => payload.status === 'final')).toBe(true));
+    const finalPayload = apiMocks.updateEntry.mock.calls
+      .map(([, payload]) => payload)
+      .find((payload) => payload.status === 'final');
+    expect(finalPayload.values.filter((value: { attribute_code: string }) => value.attribute_code === 'attr.crop'))
+      .toEqual([{
+        attribute_code: 'attr.crop',
+        value_status: 'observed',
+        value: 'agroscope.crop.barley_winter',
+      }]);
+  });
+
+  it('keeps an editable form crop ahead of an activity-derived same-key default', async () => {
+    render(<JournalCaptureFlow
+      {...baseProps}
+      catalog={activityCropDependencyCatalog}
+      initialPlot={plot}
+      zoneCrops={{ 'zone-1': 'Barley, Winter' }}
+    />);
+
+    fireEvent.click(screen.getByRole('button', { name: /irrigation \/ barley, spring/i }));
+    fireEvent.click(screen.getByRole('button', { name: 'capture.next' }));
+    const cropControl = screen.getByRole('combobox', { name: 'attr.crop' });
+    fireEvent.change(cropControl, { target: { value: 'agroscope.crop.barley_winter' } });
+    expect(cropControl).toHaveValue('agroscope.crop.barley_winter');
+    fireEvent.click(screen.getByRole('button', { name: 'capture.next' }));
+    await waitFor(() => expect(screen.getByRole('heading', {
+      name: 'capture.confirm.title',
+    })).toBeInTheDocument());
+    fireEvent.click(screen.getByRole('button', { name: 'capture.finish' }));
+
+    await waitFor(() => expect(apiMocks.updateEntry.mock.calls.some(([, payload]) => payload.status === 'final')).toBe(true));
+    const finalPayload = apiMocks.updateEntry.mock.calls
+      .map(([, payload]) => payload)
+      .find((payload) => payload.status === 'final');
+    expect(finalPayload.values.filter((value: { attribute_code: string }) => value.attribute_code === 'attr.crop'))
+      .toEqual([{
+        attribute_code: 'attr.crop',
+        value_status: 'observed',
+        value: 'agroscope.crop.barley_winter',
+      }]);
+  });
+
   it('moves keyboard focus to the capture heading on entry', async () => {
     render(<JournalCaptureFlow {...baseProps} />);
 
@@ -1108,7 +1265,7 @@ describe('JournalCaptureFlow', () => {
     await waitFor(() => expect(screen.getByRole('textbox', { name: 'attr.crop' })).toHaveValue('Barley'));
 
     fireEvent.change(screen.getByLabelText(START_OCCURRENCE_LABEL), { target: { value: '2026-07-17T00:00' } });
-    expect(screen.getByRole('textbox', { name: 'attr.crop' })).toHaveValue('');
+    await waitFor(() => expect(screen.getByRole('textbox', { name: 'attr.crop' })).toHaveValue(''));
     cleanup();
   });
 
