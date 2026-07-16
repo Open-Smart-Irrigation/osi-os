@@ -1,0 +1,281 @@
+{
+  "$schema": "device-api-auth-routes.v1",
+  "description": "Reviewed inventory of every protected Device API HTTP route on device-api-tab (43 entries), the verifyBearer-bearing function node each route must reach first, and the three deliberately public routes. Reviewed against origin/main at f50950b1767a1aa6302ef2553d68a4e379b5b142. A new http-in node on device-api-tab must be added to exactly one of routes/unprotectedRoutes here or scripts/test-device-api-auth-status.js fails closed.",
+  "routes": [
+    {
+      "method": "PUT",
+      "url": "/api/devices/:deveui/chameleon/depth",
+      "httpNodeId": "b0b3d5c0ff56cd29",
+      "authNodeId": "8b93fa005d78e25f"
+    },
+    {
+      "method": "POST",
+      "url": "/api/devices/:deveui/chameleon/refresh-calibration",
+      "httpNodeId": "7aa47f3149614bb1",
+      "authNodeId": "44e7d74ff3668e01"
+    },
+    {
+      "method": "PUT",
+      "url": "/api/devices/:deveui/chameleon",
+      "httpNodeId": "put-chameleon-enabled-http",
+      "authNodeId": "put-chameleon-enabled-auth-fn"
+    },
+    {
+      "method": "POST",
+      "url": "/api/devices/:deveui/dendro-baseline/reset",
+      "httpNodeId": "post-dendro-baseline-reset-http",
+      "authNodeId": "post-dendro-baseline-reset-auth-fn"
+    },
+    {
+      "method": "PUT",
+      "url": "/api/devices/:deveui/dendro-config",
+      "httpNodeId": "put-dendro-config-http",
+      "authNodeId": "put-dendro-config-auth-fn"
+    },
+    {
+      "method": "GET",
+      "url": "/api/devices/:deveui/dendro-history",
+      "httpNodeId": "dendro-history-http",
+      "authNodeId": "dendro-history-fn"
+    },
+    {
+      "method": "PUT",
+      "url": "/api/devices/:deveui/dendro",
+      "httpNodeId": "put-dendro-http",
+      "authNodeId": "put-dendro-auth-fn"
+    },
+    {
+      "method": "PUT",
+      "url": "/api/devices/:deveui/flow-meter",
+      "httpNodeId": "put-flow-meter-http",
+      "authNodeId": "put-flow-meter-auth-fn"
+    },
+    {
+      "method": "PUT",
+      "url": "/api/devices/:deveui/kiwi/interval",
+      "httpNodeId": "put-kiwi-interval-http",
+      "authNodeId": "put-kiwi-interval-auth-fn"
+    },
+    {
+      "method": "POST",
+      "url": "/api/devices/:deveui/kiwi/temperature-humidity/enable",
+      "httpNodeId": "post-kiwi-enable-http",
+      "authNodeId": "post-kiwi-enable-auth-fn"
+    },
+    {
+      "method": "PUT",
+      "url": "/api/devices/:deveui/lsn50/5v-warmup",
+      "httpNodeId": "put-lsn50-5v-http",
+      "authNodeId": "put-lsn50-5v-auth-fn"
+    },
+    {
+      "method": "PUT",
+      "url": "/api/devices/:deveui/lsn50/interrupt-mode",
+      "httpNodeId": "put-lsn50-interrupt-http",
+      "authNodeId": "put-lsn50-interrupt-auth-fn"
+    },
+    {
+      "method": "PUT",
+      "url": "/api/devices/:deveui/lsn50/interval",
+      "httpNodeId": "put-lsn50-interval-http",
+      "authNodeId": "put-lsn50-interval-auth-fn"
+    },
+    {
+      "method": "PUT",
+      "url": "/api/devices/:deveui/lsn50/mode",
+      "httpNodeId": "put-lsn50-mode-http",
+      "authNodeId": "put-lsn50-mode-auth-fn"
+    },
+    {
+      "method": "PUT",
+      "url": "/api/devices/:deveui/rain-gauge",
+      "httpNodeId": "put-rain-gauge-http",
+      "authNodeId": "put-rain-gauge-auth-fn"
+    },
+    {
+      "method": "GET",
+      "url": "/api/devices/:deveui/rain-history",
+      "httpNodeId": "rain-history-http",
+      "authNodeId": "rain-history-fn"
+    },
+    {
+      "method": "GET",
+      "url": "/api/devices/:deveui/sensor-history",
+      "httpNodeId": "sensor-history-http",
+      "authNodeId": "sensor-history-fn"
+    },
+    {
+      "method": "PUT",
+      "url": "/api/devices/:deveui/soil-moisture-depths",
+      "httpNodeId": "put-soil-depth-http",
+      "authNodeId": "put-soil-depth-fn"
+    },
+    {
+      "method": "PUT",
+      "url": "/api/devices/:deveui/strega/flushing",
+      "httpNodeId": "put-strega-flush-http",
+      "authNodeId": "put-strega-flush-auth-fn"
+    },
+    {
+      "method": "PUT",
+      "url": "/api/devices/:deveui/strega/interval",
+      "httpNodeId": "put-strega-interval-http",
+      "authNodeId": "put-strega-interval-auth-fn"
+    },
+    {
+      "method": "PUT",
+      "url": "/api/devices/:deveui/strega/magnet",
+      "httpNodeId": "put-strega-magnet-http",
+      "authNodeId": "put-strega-magnet-auth-fn"
+    },
+    {
+      "method": "PUT",
+      "url": "/api/devices/:deveui/strega/model",
+      "httpNodeId": "put-strega-model-http",
+      "authNodeId": "put-strega-model-auth-fn"
+    },
+    {
+      "method": "PUT",
+      "url": "/api/devices/:deveui/strega/partial-opening",
+      "httpNodeId": "put-strega-partial-http",
+      "authNodeId": "put-strega-partial-auth-fn"
+    },
+    {
+      "method": "PUT",
+      "url": "/api/devices/:deveui/strega/timed-action",
+      "httpNodeId": "put-strega-timed-http",
+      "authNodeId": "put-strega-timed-auth-fn"
+    },
+    {
+      "method": "PUT",
+      "url": "/api/devices/:deveui/temp",
+      "httpNodeId": "put-temp-http",
+      "authNodeId": "put-temp-auth-fn"
+    },
+    {
+      "method": "GET",
+      "url": "/api/devices/:deveui/zone-assignments",
+      "httpNodeId": "s2120-zones-get-http",
+      "authNodeId": "s2120-zones-get-fn"
+    },
+    {
+      "method": "PUT",
+      "url": "/api/devices/:deveui/zone-assignments",
+      "httpNodeId": "s2120-zones-put-http",
+      "authNodeId": "s2120-zones-put-auth-fn"
+    },
+    {
+      "method": "DELETE",
+      "url": "/api/devices/:deveui",
+      "httpNodeId": "delete-device-http",
+      "authNodeId": "delete-device-auth"
+    },
+    {
+      "method": "GET",
+      "url": "/api/devices",
+      "httpNodeId": "get-devices-http",
+      "authNodeId": "get-devices-auth"
+    },
+    {
+      "method": "POST",
+      "url": "/api/devices",
+      "httpNodeId": "post-devices-http",
+      "authNodeId": "post-devices-auth"
+    },
+    {
+      "method": "GET",
+      "url": "/api/gateway/location",
+      "httpNodeId": "get-gateway-location-http",
+      "authNodeId": "get-gateway-location-auth-fn"
+    },
+    {
+      "method": "GET",
+      "url": "/api/gateways/:gatewayEui/location",
+      "httpNodeId": "get-gateway-location-by-id-http",
+      "authNodeId": "get-gateway-location-auth-fn"
+    },
+    {
+      "method": "DELETE",
+      "url": "/api/irrigation-zones/:id/devices/:deveui",
+      "httpNodeId": "unassign-device-http",
+      "authNodeId": "unassign-device-auth"
+    },
+    {
+      "method": "PUT",
+      "url": "/api/irrigation-zones/:id/devices/:deveui",
+      "httpNodeId": "assign-device-http",
+      "authNodeId": "assign-device-auth"
+    },
+    {
+      "method": "PUT",
+      "url": "/api/irrigation-zones/:id/schedule",
+      "httpNodeId": "e970d93ded4679af",
+      "authNodeId": "70fcbea336401bd1"
+    },
+    {
+      "method": "DELETE",
+      "url": "/api/irrigation-zones/:id",
+      "httpNodeId": "delete-zone-http",
+      "authNodeId": "delete-zone-auth"
+    },
+    {
+      "method": "POST",
+      "url": "/api/irrigation-zones/schedules/disable-all",
+      "httpNodeId": "settings-disable-schedules-http",
+      "authNodeId": "settings-disable-schedules-fn"
+    },
+    {
+      "method": "GET",
+      "url": "/api/irrigation-zones",
+      "httpNodeId": "get-zones-http",
+      "authNodeId": "get-zones-auth"
+    },
+    {
+      "method": "POST",
+      "url": "/api/irrigation-zones",
+      "httpNodeId": "post-zone-http",
+      "authNodeId": "post-zone-auth"
+    },
+    {
+      "method": "GET",
+      "url": "/api/irrigation/recent-actuations",
+      "httpNodeId": "get-actuations-http",
+      "authNodeId": "get-actuations-auth"
+    },
+    {
+      "method": "POST",
+      "url": "/api/v1/valves/:deveui/cancel",
+      "httpNodeId": "cancel-valve-http-in",
+      "authNodeId": "cancel-strega-actuation-fn"
+    },
+    {
+      "method": "POST",
+      "url": "/api/valve/:deveui/cancel",
+      "httpNodeId": "cancel-valve-local-http-in",
+      "authNodeId": "cancel-strega-actuation-fn"
+    },
+    {
+      "method": "POST",
+      "url": "/api/valve/:deveui",
+      "httpNodeId": "6ba1d1d0ac7fd7db",
+      "authNodeId": "83bb4a452dd9ae37"
+    }
+  ],
+  "unprotectedRoutes": [
+    {
+      "method": "OPTIONS",
+      "url": "/api/*",
+      "httpNodeId": "device-options-http"
+    },
+    {
+      "method": "GET",
+      "url": "/api/catalog",
+      "httpNodeId": "get-catalog-http"
+    },
+    {
+      "method": "GET",
+      "url": "/api/v1/devices/:deveui/today-liters",
+      "httpNodeId": "strega-today-liters-http-in"
+    }
+  ]
+}
