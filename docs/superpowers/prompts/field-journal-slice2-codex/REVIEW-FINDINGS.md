@@ -202,20 +202,27 @@ measured number; that is a legitimate hard stop.
   `flex flex-wrap` and inline `minHeight` checks carry the real weight. jsdom cannot prove
   computed layout — the reviewer's browser pass now covers that.
 
-## Not Task 14's — reviewer-owned, do NOT act on these
+## Not Task 14's — reviewer-owned, FIXED, do NOT act on these
 
 The browser pass surfaced two defects in the **shared AppHeader** (design work that predates
 this run; `6ede2ff2` did not touch `AppHeader.tsx` and changed only the Add menu's navigate
-target). Recorded here for traceability; the human owns them:
+target). The reviewer fixed them; they are recorded here so the run does not re-report them:
 
-- The AppHeader actions row (`flex items-center justify-end gap-2 sm:gap-3`) does not wrap,
-  while its parent container does. On the Zones page the extra Add button pushes the row to
-  373px, so the page scrolls horizontally below ~389px: 320px `+65px`, 360px `+29px`,
-  375px `+14px`; 390px and up are clean. The Journal page, same header without an extra
-  action, never overflows at any width — which isolates the cause. Adding `flex-wrap` to that
-  container clears it at 320/360/375/390 (verified in-browser).
-- Header controls (tabs, Settings, Account) measure 38.5px tall, below the 44px touch
-  minimum the capture flow itself honours.
+- The AppHeader actions row did not wrap while its parent container did. On the Zones page
+  the extra Add button pushed the row to 373px, so the page scrolled horizontally below
+  ~389px: 320px `+65px`, 360px `+29px`, 375px `+14px`. The Journal page, same header without
+  an extra action, never overflowed — which isolated the cause.
+- Header tabs measured 38.5px tall, below the 44px touch minimum the capture flow honours.
+
+Fixed together, because wrapping alone traded the overflow for a 207px sticky header on a
+568px screen: header buttons now run compact below `sm`, Settings is icon-only on phones with
+its full label as the accessible name, tabs take a 44px minimum under `pointer: coarse` only,
+and the action row wraps as a safety net. Verified in-browser: Zones and Journal both 137px
+with no overflow at 320/360/375/390/414 across **all seven locales** (English alone fitted
+before; German `Einstellungen` was what forced the third row), desktop unchanged at 79px with
+the compact 38.5px pill. `DashboardHeader.test.tsx` gains two red-verified regressions.
+
+Do not "fix" the AppHeader further, and do not revert the icon-only Settings.
 
 ## Note for the remaining phases
 

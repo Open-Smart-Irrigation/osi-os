@@ -151,6 +151,30 @@ describe('DashboardHeader (osi-os)', () => {
     expect(screen.getByRole('menuitem', { name: 'Log activity' })).toBeInTheDocument();
   });
 
+  it('names the Settings link by its full label even though phones show only the gear', () => {
+    renderHeader();
+    const settings = screen.getByRole('link', { name: 'Settings' });
+
+    expect(settings).toHaveAttribute('href', '/settings');
+    // Assert the aria-label itself, not the computed name: jsdom applies no CSS,
+    // so the `sm:` label span it resolves the name from is display:none on a real
+    // phone. There the gear is aria-hidden and the label span is not rendered, so
+    // dropping this attribute would leave the link with no accessible name at all
+    // — and a computed-name assertion here would still pass.
+    expect(settings).toHaveAttribute('aria-label', 'Settings');
+    expect(settings.querySelector('[aria-hidden="true"]')).toHaveTextContent('⚙');
+  });
+
+  it('lets the header action row wrap so a phone never scrolls sideways', () => {
+    renderHeader();
+    // The Zones header carries Add alongside Settings and Account: held on one
+    // line these overflow a viewport under ~389px. Layout itself is proven in
+    // the browser pass; this guards the class that permits the wrap.
+    const actionRow = screen.getByRole('link', { name: 'Settings' }).parentElement;
+
+    expect(actionRow).toHaveClass('flex-wrap');
+  });
+
   it('keeps the Account menu scoped to account linking and logout', () => {
     const { onLogout } = renderHeader();
     fireEvent.click(screen.getByRole('button', { name: 'Account' }));

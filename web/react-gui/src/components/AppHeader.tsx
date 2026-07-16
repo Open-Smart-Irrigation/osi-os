@@ -25,8 +25,16 @@ interface AppHeaderProps {
   actions?: React.ReactNode;
 }
 
+/* Phones carry up to three of these next to the tab pill, so they run compact
+   below `sm` and reach their full size once there is room. py-2.5 + text-base
+   still measures 44px, the touch minimum. */
+const LIQUID_SIZING = 'px-3 py-2.5 text-base sm:px-6 sm:py-3 sm:text-lg';
+
 const LIQUID_BUTTON =
-  'btn-liquid rounded-lg px-6 py-3 text-center text-lg font-bold text-[var(--text)]';
+  `btn-liquid rounded-lg text-center font-bold text-[var(--text)] ${LIQUID_SIZING}`;
+
+/** Trigger for the header's dropdown menus (Account here, Add on Zones). */
+const LIQUID_MENU_TRIGGER = `btn-liquid text-[var(--text)] font-bold ${LIQUID_SIZING}`;
 
 /**
  * Shared top-level chrome for AgroLink: Agroscope Balken crown (scroll-away),
@@ -96,16 +104,28 @@ export const AppHeader: React.FC<AppHeaderProps> = ({
               </div>
             </nav>
 
-            <div className="flex items-center justify-end gap-2 sm:gap-3">
+            {/* Wraps for the same reason the parent row does: on the Zones page
+                this row also carries the Add menu, which overflows a phone
+                narrower than ~389px if it is held on one line. */}
+            <div className="flex flex-wrap items-center justify-end gap-2 sm:gap-3">
               {actions}
 
-              <Link to="/settings" className={LIQUID_BUTTON}>
-                {t('settings:entryPoint')}
+              {/* Icon-only on phones: the translated label is the widest thing
+                  in this row ("Einstellungen"), and spelling it out pushes the
+                  Account menu onto a third line in every non-English locale.
+                  The accessible name stays the full label at every width. */}
+              <Link
+                to="/settings"
+                aria-label={t('settings:entryPoint')}
+                className={`${LIQUID_BUTTON} inline-flex items-center justify-center`}
+              >
+                <span aria-hidden="true" className="sm:hidden">⚙</span>
+                <span className="hidden sm:inline">{t('settings:entryPoint')}</span>
               </Link>
 
               <HeaderMenu
                 label={t('account')}
-                triggerClassName="btn-liquid text-[var(--text)] text-lg px-6 py-3"
+                triggerClassName={LIQUID_MENU_TRIGGER}
                 items={[
                   { key: 'osi-server', label: t('accountMenu.osiServer'), to: '/account-link' },
                   { key: 'logout', label: t('logout'), onSelect: onLogout },
@@ -119,4 +139,4 @@ export const AppHeader: React.FC<AppHeaderProps> = ({
   );
 };
 
-export { LIQUID_BUTTON };
+export { LIQUID_BUTTON, LIQUID_MENU_TRIGGER };

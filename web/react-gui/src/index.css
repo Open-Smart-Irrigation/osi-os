@@ -249,6 +249,17 @@ body {
   border-radius: 999px;
   transition: color 0.18s ease;
 }
+/* Touch pointers get the 44px minimum target; mouse pointers keep the compact
+   pill the header was designed around. `pointer: coarse` is the primary-input
+   query, so a touchscreen laptop driven by a mouse stays compact. */
+@media (pointer: coarse) {
+  .glass-tab {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 44px;
+  }
+}
 /* Active pill: a moving glass lozenge behind the label, red specular ring. */
 .glass-tab[aria-current='page'] {
   background: linear-gradient(160deg, rgba(255, 255, 255, 0.7), rgba(255, 255, 255, 0.25));

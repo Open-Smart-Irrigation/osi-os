@@ -2,7 +2,7 @@ import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { HeaderMenu } from './HeaderMenu';
-import { AppHeader } from './AppHeader';
+import { AppHeader, LIQUID_MENU_TRIGGER } from './AppHeader';
 
 interface DashboardHeaderProps {
   username: string | null;
@@ -35,7 +35,7 @@ export const DashboardHeader: React.FC<DashboardHeaderProps> = ({
       actions={
         <HeaderMenu
           label={t('add')}
-          triggerClassName="btn-liquid text-[var(--text)] text-lg px-6 py-3"
+          triggerClassName={LIQUID_MENU_TRIGGER}
           align="left"
           items={[
             { key: 'zone', label: t('addMenu.zone'), onSelect: onAddZone },
