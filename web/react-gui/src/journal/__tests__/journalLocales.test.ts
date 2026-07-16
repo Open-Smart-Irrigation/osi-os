@@ -14,6 +14,41 @@ function keyShape(value: unknown, prefix = ''): string[] {
     keyShape(child, prefix ? `${prefix}.${key}` : key));
 }
 
+function flatten(value: unknown, prefix = ''): Array<[string, string]> {
+  if (typeof value === 'string') return [[prefix, value]];
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return [];
+  return Object.entries(value).flatMap(([key, child]) =>
+    flatten(child, prefix ? `${prefix}.${key}` : key));
+}
+
+/**
+ * Keys whose translated value is legitimately identical to English, reviewed one
+ * by one. Anything else identical is an untranslated string, not a translation.
+ *
+ * This shape exists because key-presence parity cannot see the bug it replaced:
+ * `journal.json` shipped a complete key tree whose values were all English, and
+ * the test here asserted `resource.capture` *equalled* English — pinning the
+ * placeholder in place. Assert on values, and make every shared string explicit.
+ */
+const SHARED_WITH_ENGLISH: Record<string, readonly string[]> = {
+  // Fertigation: international agronomic loanword, unchanged even in de-CH, which
+  // otherwise translates freely (Fertilization -> Düngung). Optional/Details:
+  // genuine German words. Final: the record-state loanword, beside Entwurf/Storniert.
+  'de-CH': ['activity.fertigation', 'capture.confirm.values', 'capture.form.optional', 'row.status.final'],
+  // Irrigation/Fertigation/Observation are spelled identically in French; Final
+  // agrees with the implicit masculine "statut", beside Brouillon/Annulé.
+  fr: ['activity.fertigation', 'activity.general_observation', 'activity.irrigation', 'row.status.final'],
+  // "Note" (pl. of nota) and "No" are the correct Italian words.
+  it: ['capture.form.booleanNo', 'capture.form.note'],
+  // "No" is identical in Spanish.
+  es: ['capture.form.booleanNo'],
+  // "Final" is the correct Portuguese word for this record state.
+  pt: ['row.status.final'],
+  // Fertigation has no vernacular Luganda equivalent; Timezone is a computing
+  // term the shipped lg files also leave in English.
+  lg: ['activity.fertigation', 'capture.where.timezone'],
+};
+
 const REQUIRED_CAPTURE_KEYS = [
   'capture.back',
   'capture.carry.dismiss',
@@ -137,7 +172,37 @@ describe('journal locale parity', () => {
     ['it', itLocale],
     ['lg', lg],
     ['pt', pt],
-  ])('%s carries the accepted English capture fallback', (_locale, resource) => {
-    expect(resource.capture).toEqual(en.capture);
+  ])('%s translates every string it does not legitimately share with English', (locale, resource) => {
+    const english = new Map(flatten(en));
+    const identical = flatten(resource)
+      .filter(([key, value]) => english.get(key) === value)
+      .map(([key]) => key)
+      .sort();
+
+    expect(identical).toEqual([...SHARED_WITH_ENGLISH[locale]].sort());
+  });
+
+  it('keeps de-CH in Swiss orthography', () => {
+    const violations = flatten(deCH).filter(([, value]) => value.includes('ß'));
+
+    expect(violations).toEqual([]);
+  });
+
+  it.each([
+    ['de-CH', deCH],
+    ['es', es],
+    ['fr', fr],
+    ['it', itLocale],
+    ['lg', lg],
+    ['pt', pt],
+  ])('%s preserves every interpolation placeholder', (_locale, resource) => {
+    const placeholders = (value: string) => (value.match(/{{\s*\w+\s*}}/g) ?? []).sort();
+    const translated = new Map(flatten(resource));
+    const mismatched = flatten(en)
+      .filter(([key, value]) =>
+        placeholders(value).join() !== placeholders(translated.get(key) ?? '').join())
+      .map(([key]) => key);
+
+    expect(mismatched).toEqual([]);
   });
 });
