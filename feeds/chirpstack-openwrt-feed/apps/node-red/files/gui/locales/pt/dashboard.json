@@ -4,7 +4,8 @@
   "add": "Adicionar",
   "addMenu": {
     "zone": "Adicionar zona",
-    "device": "Adicionar dispositivo"
+    "device": "Adicionar dispositivo",
+    "activity": "Registar atividade"
   },
   "data": "Dados",
   "account": "Conta",

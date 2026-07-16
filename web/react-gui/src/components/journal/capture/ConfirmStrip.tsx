@@ -125,6 +125,7 @@ export function ConfirmStrip({
         type="button"
         disabled={disabled}
         onClick={() => void onFinalize()}
+        style={{ minHeight: '56px' }}
         className={`min-h-12 w-full rounded-xl bg-[var(--primary)] px-5 py-3 font-bold text-white transition-opacity disabled:cursor-not-allowed disabled:opacity-50 ${FOCUS_RING}`}
       >
         {t('capture.finish')}

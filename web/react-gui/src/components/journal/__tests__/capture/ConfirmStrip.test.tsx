@@ -60,7 +60,10 @@ describe('ConfirmStrip', () => {
 
   it('calls finalize only from the explicit finish control', () => {
     render(<ConfirmStrip {...props} />);
-    fireEvent.click(screen.getByRole('button', { name: 'capture.finish' }));
+    const finish = screen.getByRole('button', { name: 'capture.finish' });
+    expect(finish.style.minHeight).toBe('56px');
+    expect(getComputedStyle(finish).minHeight).toBe('56px');
+    fireEvent.click(finish);
     expect(props.onFinalize).toHaveBeenCalledTimes(1);
   });
 

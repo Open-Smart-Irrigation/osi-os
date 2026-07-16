@@ -58,6 +58,8 @@ export interface JournalCaptureFlowProps {
   initialPlot?: JournalPlot;
   recentEntries: EntryAggregate[];
   initialTimezone?: string;
+  zoneCrops?: Readonly<Record<string, string>>;
+  zoneTimezones?: Readonly<Record<string, string>>;
   onClose: () => void;
   onOpenExisting: (entryUuid: string) => void;
   onSaved: (receipt: EntryFinalMutationReceipt) => void | Promise<void>;
@@ -94,6 +96,54 @@ function localDefault(timezone: string, fallbackTimezone: string): string {
   const parts = formatter.formatToParts(new Date());
   const values = new Map(parts.map(({ type, value }) => [type, value]));
   return `${values.get('year')}-${values.get('month')}-${values.get('day')}T${values.get('hour')}:${values.get('minute')}`;
+}
+
+function cropForPlot(
+  plot: JournalPlot | undefined,
+  zoneCrops: Readonly<Record<string, string>>,
+): string {
+  const zoneCrop = plot?.zone_uuid ? zoneCrops[plot.zone_uuid]?.trim() : '';
+  return zoneCrop || plot?.crop_hint?.trim() || '';
+}
+
+function normalizedCropLabel(value: string): string {
+  return value.normalize('NFKC').trim().toLocaleLowerCase('en');
+}
+
+function canonicalCropValue(
+  model: JournalCaptureCatalogModel | null,
+  crop: string,
+): string {
+  const value = crop.trim();
+  if (!value || !model) return '';
+  const attribute = model.vocabByCode.get('attr.crop');
+  if (attribute?.value_type !== 'choice') return value;
+
+  const choices = [...model.vocabByCode.values()].filter((row) =>
+    row.kind === 'choice' && row.parent_code === 'attr.crop' && row.active === 1 && !row.deleted_at);
+  const exact = choices.find((row) => row.code === value);
+  if (exact) return exact.code;
+  const normalized = normalizedCropLabel(value);
+  const matching = choices.filter((row) => Object.values(row.labels ?? {})
+    .some((label) => normalizedCropLabel(label) === normalized));
+  return matching.length === 1 ? matching[0].code : '';
+}
+
+function withCanonicalContextCrop(
+  model: JournalCaptureCatalogModel | null,
+  crop: string,
+  values: CaptureEntryValueInput[],
+): CaptureEntryValueInput[] {
+  if (model?.vocabByCode.get('attr.crop')?.value_type !== 'choice') return values;
+  const withoutCrop = values.filter((value) => value.attribute_code !== 'attr.crop');
+  const cropValue = canonicalCropValue(model, crop);
+  return cropValue
+    ? [...withoutCrop, {
+      attribute_code: 'attr.crop',
+      value_status: 'observed',
+      value: cropValue,
+    }]
+    : withoutCrop;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -256,15 +306,17 @@ function activityDependencyInputs(leaf: ActivityLeafSelection | null): CaptureEn
 }
 
 function captureSelections(
+  model: JournalCaptureCatalogModel | null,
   leaf: ActivityLeafSelection | null,
   crop: string,
 ): JournalSelections {
+  const cropValue = canonicalCropValue(model, crop);
   return {
     activity_code: leaf?.activity_code,
     ...(leaf?.dependent_selections.reduce<Record<string, JournalScalar>>((result, selection) => ({
       ...result, [selection.attribute_code]: selection.value,
     }), {}) ?? {}),
-    ...(crop ? { 'attr.crop': crop } : {}),
+    ...(cropValue ? { 'attr.crop': cropValue } : {}),
   };
 }
 
@@ -297,12 +349,13 @@ function sanitizeValues(
   excludedCodes: ReadonlySet<string> = new Set(),
 ): CaptureEntryValueInput[] {
   if (!layout || !template) return [];
+  const cropValue = canonicalCropValue(model, crop);
   const selections: JournalSelections = {
     activity_code: leaf?.activity_code,
     ...(leaf?.dependent_selections.reduce<Record<string, JournalScalar>>((result, selection) => ({
       ...result, [selection.attribute_code]: selection.value,
     }), {}) ?? {}),
-    ...(crop ? { 'attr.crop': crop } : {}),
+    ...(cropValue ? { 'attr.crop': cropValue } : {}),
   };
   const fieldStates = deriveFieldStates(template, layout, selections);
   const visibleCodes = new Set(fieldStates.filter((state) => state.visible).map((state) => state.code));
@@ -340,6 +393,8 @@ export const JournalCaptureFlow: React.FC<JournalCaptureFlowProps> = ({
   initialPlot,
   recentEntries,
   initialTimezone,
+  zoneCrops = {},
+  zoneTimezones = {},
   onClose,
   onOpenExisting,
   onSaved,
@@ -353,7 +408,8 @@ export const JournalCaptureFlow: React.FC<JournalCaptureFlowProps> = ({
   const [layoutCode, setLayoutCode] = useState(initialPlot?.settings.layout_code ?? '');
   const [templateCode, setTemplateCode] = useState('farmer_quick');
   const [leaf, setLeaf] = useState<ActivityLeafSelection | null>(null);
-  const [crop, setCrop] = useState(initialPlot?.crop_hint ?? '');
+  const initialCrop = cropForPlot(initialPlot, zoneCrops);
+  const [crop, setCrop] = useState(initialCrop);
   const browserTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
   const effectiveInitialTimezone = initialTimezone ?? browserTimezone;
   const [timezone, setTimezone] = useState(effectiveInitialTimezone);
@@ -368,7 +424,8 @@ export const JournalCaptureFlow: React.FC<JournalCaptureFlowProps> = ({
   const endResolvedRef = useRef<ResolvedOccurrence | null>(null);
   const [occurrenceError, setOccurrenceError] = useState<OccurrenceResolutionError | null>(null);
   const [endOccurrenceError, setEndOccurrenceError] = useState<OccurrenceResolutionError | null>(null);
-  const [values, setValues] = useState<CaptureEntryValueInput[]>([]);
+  const [values, setValues] = useState<CaptureEntryValueInput[]>(() =>
+    withCanonicalContextCrop(model, initialCrop, []));
   const [formPayload, setFormPayload] = useState<CaptureEntryValueOutput[]>([]);
   const [formValid, setFormValid] = useState(true);
   const [numberInputErrors, setNumberInputErrors] = useState<ReadonlyMap<string, string>>(
@@ -389,6 +446,7 @@ export const JournalCaptureFlow: React.FC<JournalCaptureFlowProps> = ({
   const [stickyLossWarning, setStickyLossWarning] = useState(false);
   const [finalReceipt, setFinalReceipt] = useState<EntryFinalMutationReceipt | null>(null);
   const [preparingConfirm, setPreparingConfirm] = useState(false);
+  const headingRef = useRef<HTMLHeadingElement>(null);
   const savePromiseRef = useRef<Promise<void> | null>(null);
   const savedCallbackFiredRef = useRef(false);
   const closeStartedRef = useRef(false);
@@ -425,7 +483,11 @@ export const JournalCaptureFlow: React.FC<JournalCaptureFlowProps> = ({
     () => model && layout ? deriveActivityLeaves(model, layout) : [],
     [layout, model],
   );
-  const selections = useMemo<JournalSelections>(() => captureSelections(leaf, crop), [crop, leaf]);
+  const cropValue = useMemo(() => canonicalCropValue(model, crop), [crop, model]);
+  const selections = useMemo<JournalSelections>(
+    () => captureSelections(model, leaf, crop),
+    [crop, leaf, model],
+  );
   const payloadValues = useMemo(() => {
     const combined = [...formPayload];
     if (model && leaf) {
@@ -439,8 +501,15 @@ export const JournalCaptureFlow: React.FC<JournalCaptureFlowProps> = ({
     for (const value of combined) {
       valuesByKey.set(`${value.attribute_code}:${value.group_index ?? 0}`, value);
     }
+    if (cropValue) {
+      valuesByKey.set('attr.crop:0', {
+        attribute_code: 'attr.crop',
+        value_status: 'observed',
+        value: cropValue,
+      });
+    }
     return [...valuesByKey.values()];
-  }, [formPayload, leaf, model]);
+  }, [cropValue, formPayload, leaf, model]);
   const fieldStates = useMemo(
     () => model && layout && template && leaf
       ? deriveFieldStates(template, layout, selections)
@@ -463,7 +532,7 @@ export const JournalCaptureFlow: React.FC<JournalCaptureFlowProps> = ({
         numberInputErrors: EMPTY_NUMBER_INPUT_ERRORS,
       };
     }
-    const nextSelections = captureSelections(nextLeaf, nextCrop);
+    const nextSelections = captureSelections(model, nextLeaf, nextCrop);
     return validateEntryForm({
       model,
       layout: nextLayout,
@@ -494,6 +563,7 @@ export const JournalCaptureFlow: React.FC<JournalCaptureFlowProps> = ({
 
   useEffect(() => {
     mountedRef.current = true;
+    headingRef.current?.focus();
     return () => {
       mountedRef.current = false;
       preparationTokenRef.current += 1;
@@ -536,6 +606,34 @@ export const JournalCaptureFlow: React.FC<JournalCaptureFlowProps> = ({
     values: payloadValues,
   }), [draft.entryUuid, endResolved?.offsetMinutes, endUtcOffset, occurredEndLocal, inferredCrop, layout, leaf, occurredLocal, payloadValues, resolved?.offsetMinutes, selectedPlot, template, timezone, utcOffset]);
 
+  const commitValues = useCallback((next: CaptureEntryValueInput[]) => {
+    const validation = validateTransition(
+      layout,
+      template,
+      leaf,
+      crop,
+      next,
+      numberInputErrors,
+    );
+    setValues(next);
+    setFormPayload(validation.payload);
+    setFormValid(validation.valid);
+    setNumberInputErrors(validation.numberInputErrors);
+  }, [crop, layout, leaf, numberInputErrors, template, validateTransition]);
+
+  const applyAutomaticPrefill = useCallback((incoming: CaptureEntryValueInput[]) => {
+    const existing = new Set(values.map((value) =>
+      `${value.attribute_code}:${value.group_index ?? 0}`));
+    const additions = incoming.filter((value) =>
+      !existing.has(`${value.attribute_code}:${value.group_index ?? 0}`));
+    additions.forEach((value) => automaticPrefillRef.current.set(
+      `${value.attribute_code}:${value.group_index ?? 0}`,
+      value,
+    ));
+    if (additions.length > 0) commitValues([...values, ...additions]);
+    setSafePrefill(incoming);
+  }, [commitValues, values]);
+
   const updateStableDraft = useCallback(async (token: number, contextKey: string): Promise<boolean> => {
     const current = () => mountedRef.current && token === preparationTokenRef.current &&
       contextKey === contextKeyRef.current;
@@ -553,9 +651,9 @@ export const JournalCaptureFlow: React.FC<JournalCaptureFlowProps> = ({
     const partition = partitionCarryForward(candidate.source, template, carryForwardLabels);
     if (!current()) return false;
     setCarryForwardCandidate({ ...candidate, repeatTreatment: partition.repeatTreatment });
-    setSafePrefill(partition.automaticValues);
+    applyAutomaticPrefill(partition.automaticValues);
     return true;
-  }, [buildPayload, carryForwardLabels, draft, formValid, layout, leaf, model, template]);
+  }, [applyAutomaticPrefill, buildPayload, carryForwardLabels, draft, formValid, layout, leaf, model, template]);
 
   useEffect(() => {
     if (!model || !layout || !selectedPlotUuid && layoutCode === '') return;
@@ -638,18 +736,43 @@ export const JournalCaptureFlow: React.FC<JournalCaptureFlowProps> = ({
     });
 
     automaticPrefillRef.current.clear();
+    const nextTimezone = nextPlot?.zone_uuid
+      ? zoneTimezones[nextPlot.zone_uuid] ?? browserTimezone
+      : browserTimezone;
     setSelectedPlotUuid(uuid);
     setLayoutCode(nextLayoutCode);
     setTemplateCode(nextTemplate);
-    setCrop(nextPlot?.crop_hint ?? '');
+    const nextCrop = cropForPlot(nextPlot, zoneCrops);
+    setCrop(nextCrop);
+    setTimezone(nextTimezone);
+    setOccurredLocal(localDefault(nextTimezone, browserTimezone));
+    setOccurredEndLocal('');
+    setResolved(null);
+    resolvedRef.current = null;
+    setEndResolved(null);
+    endResolvedRef.current = null;
+    setUtcOffset(null);
+    setEndUtcOffset(null);
+    setOccurrenceError(null);
+    setEndOccurrenceError(null);
     setLeaf(null);
-    const nextValues = sanitizeValues(model!, nextLayout, model?.templates.get(nextTemplate), null,
-      nextPlot?.crop_hint ?? '', retainedValues);
+    const nextValues = withCanonicalContextCrop(
+      model,
+      nextCrop,
+      sanitizeValues(
+        model!,
+        nextLayout,
+        model?.templates.get(nextTemplate),
+        null,
+        nextCrop,
+        retainedValues,
+      ),
+    );
     const validation = validateTransition(
       nextLayout,
       model?.templates.get(nextTemplate),
       null,
-      nextPlot?.crop_hint ?? '',
+      nextCrop,
       nextValues,
     );
     setValues(nextValues);
@@ -790,8 +913,9 @@ export const JournalCaptureFlow: React.FC<JournalCaptureFlowProps> = ({
       setPreparingConfirm(true);
       try {
         const prepared = await updateStableDraft(token, contextKey);
-        if (prepared && mountedRef.current && token === preparationTokenRef.current &&
-            contextKey === contextKeyRef.current) setStep('confirm');
+        if (prepared && mountedRef.current && token === preparationTokenRef.current) {
+          setStep('confirm');
+        }
       } catch {
         if (mountedRef.current && token === preparationTokenRef.current) setStickyLossWarning(true);
       } finally {
@@ -920,21 +1044,6 @@ export const JournalCaptureFlow: React.FC<JournalCaptureFlowProps> = ({
     };
   }, [inferredCrop, layout, leaf, resolved, selectedPlot, shortlist.currentSeasonUuid]);
 
-  const commitValues = useCallback((next: CaptureEntryValueInput[]) => {
-    const validation = validateTransition(
-      layout,
-      template,
-      leaf,
-      crop,
-      next,
-      numberInputErrors,
-    );
-    setValues(next);
-    setFormPayload(validation.payload);
-    setFormValid(validation.valid);
-    setNumberInputErrors(validation.numberInputErrors);
-  }, [crop, layout, leaf, numberInputErrors, template, validateTransition]);
-
   const useRepeatTreatment = useCallback((incoming: CaptureEntryValueInput[]) => {
     if (interactionLocked) return;
     const incomingKeys = new Set(incoming.map((value) => `${value.attribute_code}:${value.group_index ?? 0}`));
@@ -1009,18 +1118,6 @@ export const JournalCaptureFlow: React.FC<JournalCaptureFlowProps> = ({
     setCarryForwardCandidate(null);
     if (nextValues.length !== values.length) commitValues(nextValues);
   }, [commitValues, preparingConfirm, prefillContext, values]);
-
-  useEffect(() => {
-    if (safePrefill.length === 0) return;
-    const existing = new Set(values.map((value) =>
-      `${value.attribute_code}:${value.group_index ?? 0}`));
-    const additions = safePrefill.filter((value) =>
-      !existing.has(`${value.attribute_code}:${value.group_index ?? 0}`));
-    if (additions.length === 0) return;
-    additions.forEach((value) => automaticPrefillRef.current.set(
-      `${value.attribute_code}:${value.group_index ?? 0}`, value));
-    commitValues([...values, ...additions]);
-  }, [commitValues, safePrefill, values]);
 
   if (!model) {
     return <p role="alert" className="text-sm font-semibold text-[var(--error-text)]">{t('capture.validation.invalidDefinition')}</p>;
@@ -1157,12 +1254,12 @@ export const JournalCaptureFlow: React.FC<JournalCaptureFlowProps> = ({
 
   return (
     <div className="min-h-full bg-[var(--bg)] px-4 py-5">
-      <header className="mx-auto flex max-w-3xl items-center justify-between gap-3"><h1 className="text-2xl font-bold text-[var(--text)]">{t('capture.title')}</h1><button type="button" disabled={preparingConfirm || saving} onClick={() => { void close().catch(() => undefined); }} className={`min-h-11 rounded-xl px-3 font-bold text-[var(--primary)] ${FOCUS_RING}`}>{t('capture.close')}</button></header>
-      <main className="mx-auto mt-5 max-w-3xl space-y-5">
+      <header className="mx-auto flex max-w-3xl items-center justify-between gap-3"><h1 ref={headingRef} tabIndex={-1} className="text-2xl font-bold text-[var(--text)]">{t('capture.title')}</h1><button type="button" disabled={preparingConfirm || saving} onClick={() => { void close().catch(() => undefined); }} className={`min-h-11 rounded-xl px-3 font-bold text-[var(--primary)] ${FOCUS_RING}`}>{t('capture.close')}</button></header>
+      <div className="mx-auto mt-5 max-w-3xl space-y-5">
         {body()}
-        <div className="flex flex-wrap justify-between gap-3">{step !== 'where' && <button type="button" disabled={preparingConfirm || saving || Boolean(finalReceipt)} onClick={() => { if (preparingConfirm || saving || finalReceipt) return; preparationTokenRef.current += 1; setStep(step === 'confirm' ? 'details' : step === 'details' ? 'activity' : 'where'); }} className={`min-h-11 rounded-xl px-4 font-bold text-[var(--primary)] ${FOCUS_RING}`}>{t('capture.back')}</button>}<span />{step !== 'confirm' && <button type="button" onClick={next} disabled={(step === 'activity' && !leaf) || (step === 'details' && preparingConfirm) || saving || Boolean(finalReceipt)} className={`min-h-11 rounded-xl bg-[var(--primary)] px-5 font-bold text-white disabled:cursor-not-allowed disabled:opacity-50 ${FOCUS_RING}`}>{t('capture.next')}</button>}</div>
+        <div className="flex flex-wrap justify-between gap-3">{step !== 'where' && <button type="button" disabled={preparingConfirm || saving || Boolean(finalReceipt)} onClick={() => { if (preparingConfirm || saving || finalReceipt) return; preparationTokenRef.current += 1; setStep(step === 'confirm' ? 'details' : step === 'details' ? 'activity' : 'where'); }} className={`min-h-11 rounded-xl px-4 font-bold text-[var(--primary)] ${FOCUS_RING}`}>{t('capture.back')}</button>}<span />{step !== 'confirm' && <button type="button" onClick={next} disabled={(step === 'activity' && !leaf) || (step === 'details' && preparingConfirm) || saving || Boolean(finalReceipt)} style={{ minHeight: '56px' }} className={`min-h-11 rounded-xl bg-[var(--primary)] px-5 font-bold text-white disabled:cursor-not-allowed disabled:opacity-50 ${FOCUS_RING}`}>{t('capture.next')}</button>}</div>
         {!duplicateCandidate && (step === 'confirm' || draft.lossWarning || stickyLossWarning) && <SaveState status={draft.status} lossWarning={draft.lossWarning || stickyLossWarning} onRetry={retry} />}
-      </main>
+      </div>
     </div>
   );
 };
