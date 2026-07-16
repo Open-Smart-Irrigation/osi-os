@@ -1,7 +1,8 @@
 import '@testing-library/jest-dom/vitest';
 import { useState } from 'react';
-import { fireEvent, render, screen, within } from '@testing-library/react';
-import { describe, expect, it, vi } from 'vitest';
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import type { TFunction } from 'i18next';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { JournalProductRow, JournalVocabRow } from '../../../../types/journal';
 import type {
@@ -20,9 +21,27 @@ vi.mock('react-i18next', () => ({
   }),
 }));
 
-import { EntryForm } from '../../capture/EntryForm';
+import { EntryForm, validateEntryForm } from '../../capture/EntryForm';
+
+const reportConsoleError = console.error.bind(console);
+const ACT_WARNING = /not wrapped in act|testing environment is not configured to support act/i;
+let consoleErrorSpy: ReturnType<typeof vi.spyOn>;
 
 const timestamp = '2026-07-16T00:00:00.000Z';
+
+beforeEach(() => {
+  consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation((...args) => {
+    reportConsoleError(...args);
+  });
+});
+
+afterEach(() => {
+  cleanup();
+  const actWarnings = consoleErrorSpy.mock.calls.filter((args: unknown[]) =>
+    args.some((value: unknown) => ACT_WARNING.test(String(value))));
+  consoleErrorSpy.mockRestore();
+  expect(actWarnings).toEqual([]);
+});
 
 function vocab(code: string, overrides: Partial<JournalVocabRow> = {}): JournalVocabRow {
   return {
@@ -271,6 +290,44 @@ function ControlledForm({
 }
 
 describe('EntryForm', () => {
+  it('exports the full validator and prunes parse errors for hidden numeric inputs', () => {
+    const t = ((key: string) => key) as TFunction<'journal'>;
+    const invalid = validateEntryForm({
+      model,
+      layout,
+      fieldStates: [state('attr.amount')],
+      inputs: [{
+        attribute_code: 'attr.amount',
+        entered_value_num: 2001,
+        entered_unit_code: 'unit.kg',
+      }],
+      selections: {},
+      numberInputErrors: new Map(),
+      products: [],
+      t,
+    });
+    expect(invalid.valid).toBe(false);
+    expect(invalid.errors.get('attr.amount:0')).toBe('capture.validation.maximum');
+
+    const hidden = validateEntryForm({
+      model,
+      layout,
+      fieldStates: [state('attr.amount', { visible: false })],
+      inputs: [{
+        attribute_code: 'attr.amount',
+        entered_value_num: 5,
+        entered_unit_code: 'unit.kg',
+      }],
+      selections: {},
+      numberInputErrors: new Map([['attr.amount', 'capture.validation.invalidNumber']]),
+      products: [],
+      t,
+    });
+    expect(hidden.valid).toBe(true);
+    expect(hidden.payload).toEqual([]);
+    expect(hidden.numberInputErrors.size).toBe(0);
+  });
+
   it('renders Task 8 number, text, choice, date, and boolean field states but excludes shell fields', () => {
     render(
       <ControlledForm

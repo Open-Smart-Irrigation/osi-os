@@ -25,7 +25,7 @@ import { NumberStepper } from './NumberStepper';
 const FOCUS_RING =
   'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--card)]';
 
-type Translate = TFunction<'journal'>;
+export type EntryFormTranslate = TFunction<'journal'>;
 
 export interface EntryFormProps {
   model: JournalCaptureCatalogModel;
@@ -36,6 +36,7 @@ export interface EntryFormProps {
     inputs: CaptureEntryValueInput[],
     payload: CaptureEntryValueOutput[],
     valid: boolean,
+    numberInputErrors: ReadonlyMap<string, string>,
   ) => void;
   selections?: JournalSelections;
   products?: JournalProductRow[];
@@ -43,10 +44,22 @@ export interface EntryFormProps {
   showValidation?: boolean;
 }
 
-interface ValidationResult {
+export interface EntryFormValidationResult {
   valid: boolean;
   payload: CaptureEntryValueOutput[];
   errors: Map<string, string>;
+  numberInputErrors: ReadonlyMap<string, string>;
+}
+
+export interface EntryFormValidationRequest {
+  model: JournalCaptureCatalogModel;
+  layout: JournalLayoutDefinition;
+  fieldStates: JournalFieldState[];
+  inputs: CaptureEntryValueInput[];
+  selections: JournalSelections;
+  numberInputErrors: ReadonlyMap<string, string>;
+  products: JournalProductRow[];
+  t: EntryFormTranslate;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -148,7 +161,7 @@ function mergedSelections(
   return merged;
 }
 
-function conversionMessage(code: string, t: Translate): string {
+function conversionMessage(code: string, t: EntryFormTranslate): string {
   if (code === 'invalid_number') return t('capture.validation.invalidNumber');
   if (code === 'cross_basis_forbidden' || code === 'unit_incompatible' ||
       code === 'unknown_unit' || code === 'inactive_unit') {
@@ -202,17 +215,23 @@ function sameErrors(
   return left.size === right.size && [...left].every(([key, value]) => right.get(key) === value);
 }
 
-function validateForm(
-  model: JournalCaptureCatalogModel,
-  layout: JournalLayoutDefinition,
-  states: JournalFieldState[],
-  inputs: CaptureEntryValueInput[],
-  selections: JournalSelections,
-  numberInputErrors: ReadonlyMap<string, string>,
-  products: JournalProductRow[],
-  t: Translate,
-): ValidationResult {
-  const visibleStates = visibleAttributeStates(model, states);
+export function validateEntryForm({
+  model,
+  layout,
+  fieldStates,
+  inputs,
+  selections,
+  numberInputErrors,
+  products,
+  t,
+}: EntryFormValidationRequest): EntryFormValidationResult {
+  const activeNumberInputErrors = pruneNumberErrors(
+    numberInputErrors,
+    model,
+    fieldStates,
+    inputs,
+  );
+  const visibleStates = visibleAttributeStates(model, fieldStates);
   const visibleCodes = new Set(visibleStates.map(({ code }) => code));
   const visibleInputs = inputs.filter(({ attribute_code }) => visibleCodes.has(attribute_code));
   const currentSelections = mergedSelections(selections, inputs);
@@ -255,7 +274,7 @@ function validateForm(
     for (const [index, row] of numericRows.entries()) {
       const groupIndex = row.group_index ?? index;
       const key = `${state.code}:${groupIndex}`;
-      const inputError = numberInputErrors.get(key) ?? numberInputErrors.get(state.code);
+      const inputError = activeNumberInputErrors.get(key) ?? activeNumberInputErrors.get(state.code);
       if (inputError) {
         errors.set(key, inputError);
         continue;
@@ -309,7 +328,12 @@ function validateForm(
     // Specific conversion/dependency errors above remain the user-visible source.
     if (errors.size === 0) errors.set('form', t('capture.validation.invalidDefinition'));
   }
-  return { valid: errors.size === 0, payload, errors };
+  return {
+    valid: errors.size === 0,
+    payload,
+    errors,
+    numberInputErrors: activeNumberInputErrors,
+  };
 }
 
 function productFirst(states: JournalFieldState[]): JournalFieldState[] {
@@ -347,16 +371,16 @@ export const EntryForm: React.FC<EntryFormProps> = ({
     () => productFirst(visibleAttributeStates(model, fieldStates)),
     [fieldStates, model],
   );
-  const validation = validateForm(
+  const validation = validateEntryForm({
     model,
     layout,
     fieldStates,
-    values,
+    inputs: values,
     selections,
     numberInputErrors,
     products,
     t,
-  );
+  });
   const activeProducts = useMemo(
     () => products
       .filter(({ active, deleted_at: deletedAt }) => active === 1 && deletedAt == null)
@@ -379,19 +403,20 @@ export const EntryForm: React.FC<EntryFormProps> = ({
     next: CaptureEntryValueInput[],
     inputErrors: ReadonlyMap<string, string> = numberInputErrors,
   ) => {
-    const prunedErrors = pruneNumberErrors(inputErrors, model, fieldStates, next);
-    if (!sameErrors(numberInputErrors, prunedErrors)) setNumberInputErrors(prunedErrors);
-    const result = validateForm(
+    const result = validateEntryForm({
       model,
       layout,
       fieldStates,
-      next,
+      inputs: next,
       selections,
-      prunedErrors,
+      numberInputErrors: inputErrors,
       products,
       t,
-    );
-    onChange(next, result.payload, result.valid);
+    });
+    if (!sameErrors(numberInputErrors, result.numberInputErrors)) {
+      setNumberInputErrors(new Map(result.numberInputErrors));
+    }
+    onChange(next, result.payload, result.valid, result.numberInputErrors);
   };
 
   const updateSingle = (code: string, next: CaptureEntryValueInput) => {

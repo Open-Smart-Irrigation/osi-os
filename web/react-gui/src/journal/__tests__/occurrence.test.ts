@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  isValidApiInstant,
   OccurrenceResolutionError,
   resolveOccurrence,
 } from '../occurrence';
@@ -20,6 +21,21 @@ function expectOccurrenceError(
 }
 
 describe('resolveOccurrence', () => {
+  it.each([
+    '1',
+    '2026-07-16T08:30:00',
+    '2026-02-30T08:30:00Z',
+  ])('rejects malformed API instant %s', (instant) => {
+    expect(isValidApiInstant(instant)).toBe(false);
+  });
+
+  it.each([
+    '2026-07-16T08:30:00.000Z',
+    '2026-07-16T10:30:00+02:00',
+  ])('accepts strict API instant %s', (instant) => {
+    expect(isValidApiInstant(instant)).toBe(true);
+  });
+
   it('resolves a valid Zurich wall time to its UTC instant and offset', () => {
     expect(resolveOccurrence('2026-07-16T08:30', 'Europe/Zurich')).toEqual({
       instant: '2026-07-16T06:30:00.000Z',
