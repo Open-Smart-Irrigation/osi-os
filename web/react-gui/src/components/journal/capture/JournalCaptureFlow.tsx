@@ -1,0 +1,1174 @@
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
+
+import {
+  allowedChoices,
+  allowedUnits,
+  buildCatalogModel,
+  catalogLabel,
+  deriveActivityLeaves,
+} from '../../../journal/catalogModel';
+import {
+  loadActivityShortlist,
+  type ActivityShortlist,
+} from '../../../journal/activityShortlist';
+import { loadCarryForwardCandidate, partitionCarryForward } from '../../../journal/carryForward';
+import {
+  buildEntryValues,
+  deriveFieldStates,
+} from '../../../journal/templateEngine';
+import {
+  isValidApiInstant,
+  OccurrenceResolutionError,
+  resolveOccurrence,
+  type ResolvedOccurrence,
+} from '../../../journal/occurrence';
+import { useCaptureDraft } from '../../../journal/useCaptureDraft';
+import type {
+  CarryForwardCandidate,
+  CarryForwardContext,
+} from '../../../journal/carryForward';
+import { journalApi } from '../../../services/journalApi';
+import type { CreateEntryPayload } from '../../../services/journalApi';
+import type {
+  EntryAggregate,
+  EntryFinalMutationReceipt,
+  JournalCatalog,
+  JournalPlot,
+} from '../../../types/journal';
+import type {
+  ActivityLeafSelection,
+  CaptureEntryValueInput,
+  CaptureEntryValueOutput,
+  JournalLayoutDefinition,
+  JournalCaptureCatalogModel,
+  JournalScalar,
+  JournalSelections,
+  JournalTemplateDefinition,
+} from '../../../types/journalCapture';
+import { ActivityPicker } from './ActivityPicker';
+import { ConfirmStrip, type CaptureEditStep, type ConfirmValueToken } from './ConfirmStrip';
+import { EntryForm, validateEntryForm } from './EntryForm';
+import { RepeatTreatmentCard } from './RepeatTreatmentCard';
+import { SaveState } from './SaveState';
+
+export interface JournalCaptureFlowProps {
+  catalog: JournalCatalog;
+  plots: JournalPlot[];
+  initialPlot?: JournalPlot;
+  recentEntries: EntryAggregate[];
+  initialTimezone?: string;
+  onClose: () => void;
+  onOpenExisting: (entryUuid: string) => void;
+  onSaved: (receipt: EntryFinalMutationReceipt) => void | Promise<void>;
+}
+
+type CaptureStep = CaptureEditStep | 'confirm';
+
+interface DuplicateCandidate {
+  entry_uuid: string;
+  occurred_start: string;
+  activity_code: string;
+  values: EntryAggregate['values'];
+}
+
+const FOCUS_RING =
+  'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--card)]';
+const EMPTY_NUMBER_INPUT_ERRORS: ReadonlyMap<string, string> = new Map();
+
+function localDefault(timezone: string, fallbackTimezone: string): string {
+  let formatter: Intl.DateTimeFormat;
+  try {
+    formatter = new Intl.DateTimeFormat('en-CA', {
+      timeZone: timezone,
+      year: 'numeric', month: '2-digit', day: '2-digit',
+      hour: '2-digit', minute: '2-digit', hourCycle: 'h23',
+    });
+  } catch {
+    formatter = new Intl.DateTimeFormat('en-CA', {
+      timeZone: fallbackTimezone,
+      year: 'numeric', month: '2-digit', day: '2-digit',
+      hour: '2-digit', minute: '2-digit', hourCycle: 'h23',
+    });
+  }
+  const parts = formatter.formatToParts(new Date());
+  const values = new Map(parts.map(({ type, value }) => [type, value]));
+  return `${values.get('year')}-${values.get('month')}-${values.get('day')}T${values.get('hour')}:${values.get('minute')}`;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
+const CANONICAL_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+function isTrimmedNonEmpty(value: unknown): value is string {
+  return typeof value === 'string' && value.length > 0 && value.trim() === value;
+}
+
+function isCanonicalUuid(value: unknown): value is string {
+  return isTrimmedNonEmpty(value) && CANONICAL_UUID.test(value);
+}
+
+function errorCode(error: unknown): string | null {
+  if (!isRecord(error)) return null;
+  const response = isRecord(error.response) ? error.response : null;
+  const data = response && isRecord(response.data) ? response.data : null;
+  return data && typeof data.error === 'string' ? data.error
+    : data && typeof data.code === 'string' ? data.code
+      : typeof error.code === 'string' ? error.code : null;
+}
+
+function isDuplicateValue(value: unknown): value is EntryAggregate['values'][number] {
+  if (!isRecord(value)) return false;
+  return Number.isInteger(value.group_index) && Number(value.group_index) >= 0 &&
+    isTrimmedNonEmpty(value.attribute_code) &&
+    ['observed', 'not_observed', 'not_applicable', 'below_detection'].includes(String(value.value_status)) &&
+    (value.value_num === null || typeof value.value_num === 'number' && Number.isFinite(value.value_num)) &&
+    (value.value_text === null || typeof value.value_text === 'string') &&
+    (value.unit_code === null || typeof value.unit_code === 'string') &&
+    (value.entered_value_num === null || typeof value.entered_value_num === 'number' && Number.isFinite(value.entered_value_num)) &&
+    (value.entered_unit_code === null || typeof value.entered_unit_code === 'string');
+}
+
+function duplicateValues(value: unknown): EntryAggregate['values'] {
+  return Array.isArray(value) ? value.filter(isDuplicateValue) : [];
+}
+
+function duplicateFromEntry(value: unknown): DuplicateCandidate | null {
+  if (!isRecord(value) || !isCanonicalUuid(value.entry_uuid) ||
+      !isValidApiInstant(value.occurred_start) || !isTrimmedNonEmpty(value.activity_code)) return null;
+  return {
+    entry_uuid: value.entry_uuid,
+    occurred_start: value.occurred_start,
+    activity_code: value.activity_code,
+    values: duplicateValues(value.values),
+  };
+}
+
+function duplicateFromError(error: unknown): DuplicateCandidate | null {
+  if (errorCode(error) !== 'duplicate_candidate' || !isRecord(error)) return null;
+  const response = isRecord(error.response) ? error.response : null;
+  const data = response && isRecord(response.data) ? response.data : null;
+  const directDetails = isRecord(error.details) ? error.details : null;
+  const directCandidate = isRecord(error.duplicateCandidate)
+    ? { duplicateCandidate: error.duplicateCandidate }
+    : null;
+  const responseDetails = data && isRecord(data.details) ? data.details : null;
+  const details: Record<string, unknown> | null = directDetails ?? directCandidate ?? responseDetails;
+  const candidate = details && isRecord(details.duplicateCandidate)
+    ? details.duplicateCandidate
+    : details && isRecord(details.duplicate_candidate) ? details.duplicate_candidate : null;
+  if (!candidate || !isCanonicalUuid(candidate.entryUuid) ||
+      !isValidApiInstant(candidate.occurredStart) || !isTrimmedNonEmpty(candidate.activityCode)) return null;
+  return {
+    entry_uuid: candidate.entryUuid,
+    occurred_start: candidate.occurredStart,
+    activity_code: candidate.activityCode,
+    values: duplicateValues(candidate.values),
+  };
+}
+
+function localizedNumber(value: number, locale: string): string {
+  return Number.isFinite(value) ? new Intl.NumberFormat(locale).format(value) : String(value);
+}
+
+function localizedDate(value: string, locale: string): string | null {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return null;
+  const date = new Date(`${value}T00:00:00.000Z`);
+  return Number.isNaN(date.getTime())
+    ? null
+    : new Intl.DateTimeFormat(locale, { dateStyle: 'medium', timeZone: 'UTC' }).format(date);
+}
+
+function displayValue(
+  value: CaptureEntryValueOutput,
+  model: JournalCaptureCatalogModel,
+  locale: string,
+  booleanLabels: { yes: string; no: string },
+): string {
+  const attribute = model.vocabByCode.get(value.attribute_code);
+  if (value.entered_value_num != null) return attribute?.value_type === 'number'
+    ? localizedNumber(value.entered_value_num, locale) : String(value.entered_value_num);
+  if (value.value !== undefined && value.value !== null) {
+    if (typeof value.value === 'string') {
+      const choice = model.vocabByCode.get(value.value);
+      if (choice) return catalogLabel(choice, locale);
+    }
+    if (attribute?.value_type === 'date' && typeof value.value === 'string') {
+      return localizedDate(value.value, locale) ?? value.value;
+    }
+    if (attribute?.value_type === 'number' && typeof value.value === 'number') {
+      return localizedNumber(value.value, locale);
+    }
+    if (attribute?.value_type === 'boolean' && typeof value.value === 'boolean') {
+      return value.value ? booleanLabels.yes : booleanLabels.no;
+    }
+    return String(value.value);
+  }
+  if (value.value_num != null) return attribute?.value_type === 'number'
+    ? localizedNumber(value.value_num, locale) : String(value.value_num);
+  if (value.value_text != null) return attribute?.value_type === 'date'
+    ? localizedDate(value.value_text, locale) ?? value.value_text : value.value_text;
+  return '';
+}
+
+function occurrenceLabel(value: string, timezone: string, locale: string): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return new Intl.DateTimeFormat(locale, {
+    dateStyle: 'medium', timeStyle: 'short', timeZone: timezone,
+  }).format(date);
+}
+
+function duplicateValueLabel(
+  value: EntryAggregate['values'][number],
+  model: JournalCaptureCatalogModel,
+  locale: string,
+): string {
+  const attribute = model.vocabByCode.get(value.attribute_code);
+  const label = attribute ? catalogLabel(attribute, locale) : value.attribute_code;
+  const raw = value.value_text ?? value.entered_value_num ?? value.value_num;
+  if (raw == null) return '';
+  const displayRaw = attribute?.value_type === 'number' && typeof raw === 'number'
+    ? localizedNumber(raw, locale)
+    : attribute?.value_type === 'date' && typeof raw === 'string'
+      ? localizedDate(raw, locale) ?? raw
+      : String(raw);
+  const unitCode = value.entered_unit_code ?? value.unit_code;
+  const unit = unitCode ? model.vocabByCode.get(unitCode) : undefined;
+  return `${label}: ${displayRaw}${unit ? ` ${catalogLabel(unit, locale)}` : ''}`;
+}
+
+function templateLabel(code: string, fallback: string): string {
+  if (code === 'farmer_quick') return fallback;
+  if (code === 'full_record') return fallback;
+  if (code === 'research_observation') return fallback;
+  return code;
+}
+
+function activityDependencyInputs(leaf: ActivityLeafSelection | null): CaptureEntryValueInput[] {
+  return leaf?.dependent_selections.map(({ attribute_code, value }) => ({
+    attribute_code,
+    value_status: 'observed' as const,
+    value,
+  })) ?? [];
+}
+
+function captureSelections(
+  leaf: ActivityLeafSelection | null,
+  crop: string,
+): JournalSelections {
+  return {
+    activity_code: leaf?.activity_code,
+    ...(leaf?.dependent_selections.reduce<Record<string, JournalScalar>>((result, selection) => ({
+      ...result, [selection.attribute_code]: selection.value,
+    }), {}) ?? {}),
+    ...(crop ? { 'attr.crop': crop } : {}),
+  };
+}
+
+function inputHasValue(input: CaptureEntryValueInput): boolean {
+  if (input.value_status != null && input.value_status !== 'observed') return true;
+  return input.value !== undefined && input.value !== null && input.value !== ''
+    || input.value_text !== undefined && input.value_text !== null && input.value_text !== ''
+    || input.entered_value_num !== undefined && input.entered_value_num !== null
+    || input.value_num !== undefined && input.value_num !== null;
+}
+
+function requiredFieldsSatisfied(
+  states: Array<{ code: string; visible: boolean; required: boolean; required_any_groups: number[] }>,
+  inputs: CaptureEntryValueInput[],
+): boolean {
+  const hasValue = (code: string) => inputs.some((input) => input.attribute_code === code && inputHasValue(input));
+  if (states.some((state) => state.visible && state.required && !hasValue(state.code))) return false;
+  const groups = new Set(states.flatMap((state) => state.required_any_groups));
+  return [...groups].every((group) => states.some((state) =>
+    state.visible && state.required_any_groups.includes(group) && hasValue(state.code)));
+}
+
+function sanitizeValues(
+  model: JournalCaptureCatalogModel,
+  layout: JournalLayoutDefinition | undefined,
+  template: JournalTemplateDefinition | undefined,
+  leaf: ActivityLeafSelection | null,
+  crop: string,
+  values: CaptureEntryValueInput[],
+  excludedCodes: ReadonlySet<string> = new Set(),
+): CaptureEntryValueInput[] {
+  if (!layout || !template) return [];
+  const selections: JournalSelections = {
+    activity_code: leaf?.activity_code,
+    ...(leaf?.dependent_selections.reduce<Record<string, JournalScalar>>((result, selection) => ({
+      ...result, [selection.attribute_code]: selection.value,
+    }), {}) ?? {}),
+    ...(crop ? { 'attr.crop': crop } : {}),
+  };
+  const fieldStates = deriveFieldStates(template, layout, selections);
+  const visibleCodes = new Set(fieldStates.filter((state) => state.visible).map((state) => state.code));
+  const dependencyCodes = new Set(leaf?.dependent_selections.map(({ attribute_code }) => attribute_code) ?? []);
+  const choiceTargets = new Set(layout.option_dependencies
+    .filter(({ restrict }) => 'choices' in restrict)
+    .map(({ restrict }) => restrict.attribute_code));
+  const unitTargets = new Set(layout.option_dependencies
+    .filter(({ restrict }) => 'units' in restrict)
+    .map(({ restrict }) => restrict.attribute_code));
+  return values.filter((input) => {
+    if (excludedCodes.has(input.attribute_code) ||
+        (!visibleCodes.has(input.attribute_code) && !dependencyCodes.has(input.attribute_code))) return false;
+    const attribute = model.vocabByCode.get(input.attribute_code);
+    if (!attribute || input.value_status != null && input.value_status !== 'observed') return true;
+    const selection = input.value ?? input.value_text;
+    if (attribute.value_type === 'choice' && typeof selection === 'string') {
+      const choices = allowedChoices(model, layout, input.attribute_code, selections);
+      if ((choiceTargets.has(input.attribute_code) || choices.length > 0) &&
+          !choices.includes(selection)) return false;
+    }
+    if (attribute.value_type === 'number') {
+      const unit = input.entered_unit_code ?? input.unit_code;
+      const units = allowedUnits(model, layout, input.attribute_code, selections);
+      if (unit != null && (unitTargets.has(input.attribute_code) || units.length > 0) &&
+          !units.includes(unit)) return false;
+    }
+    return true;
+  });
+}
+
+export const JournalCaptureFlow: React.FC<JournalCaptureFlowProps> = ({
+  catalog,
+  plots,
+  initialPlot,
+  recentEntries,
+  initialTimezone,
+  onClose,
+  onOpenExisting,
+  onSaved,
+}) => {
+  const { t, i18n } = useTranslation('journal');
+  const locale = i18n.resolvedLanguage || i18n.language || 'en';
+  const modelResult = useMemo(() => buildCatalogModel(catalog), [catalog]);
+  const model = modelResult.ok ? modelResult.model : null;
+  const [step, setStep] = useState<CaptureStep>(initialPlot ? 'activity' : 'where');
+  const [selectedPlotUuid, setSelectedPlotUuid] = useState(initialPlot?.plot_uuid ?? '');
+  const [layoutCode, setLayoutCode] = useState(initialPlot?.settings.layout_code ?? '');
+  const [templateCode, setTemplateCode] = useState('farmer_quick');
+  const [leaf, setLeaf] = useState<ActivityLeafSelection | null>(null);
+  const [crop, setCrop] = useState(initialPlot?.crop_hint ?? '');
+  const browserTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+  const effectiveInitialTimezone = initialTimezone ?? browserTimezone;
+  const [timezone, setTimezone] = useState(effectiveInitialTimezone);
+  const [occurredLocal, setOccurredLocal] = useState(() =>
+    localDefault(effectiveInitialTimezone, browserTimezone));
+  const [occurredEndLocal, setOccurredEndLocal] = useState('');
+  const [utcOffset, setUtcOffset] = useState<number | null>(null);
+  const [endUtcOffset, setEndUtcOffset] = useState<number | null>(null);
+  const [resolved, setResolved] = useState<ResolvedOccurrence | null>(null);
+  const [endResolved, setEndResolved] = useState<ResolvedOccurrence | null>(null);
+  const resolvedRef = useRef<ResolvedOccurrence | null>(null);
+  const endResolvedRef = useRef<ResolvedOccurrence | null>(null);
+  const [occurrenceError, setOccurrenceError] = useState<OccurrenceResolutionError | null>(null);
+  const [endOccurrenceError, setEndOccurrenceError] = useState<OccurrenceResolutionError | null>(null);
+  const [values, setValues] = useState<CaptureEntryValueInput[]>([]);
+  const [formPayload, setFormPayload] = useState<CaptureEntryValueOutput[]>([]);
+  const [formValid, setFormValid] = useState(true);
+  const [numberInputErrors, setNumberInputErrors] = useState<ReadonlyMap<string, string>>(
+    EMPTY_NUMBER_INPUT_ERRORS,
+  );
+  const [showValidation, setShowValidation] = useState(false);
+  const [whereError, setWhereError] = useState<string | null>(null);
+  const [shortlist, setShortlist] = useState<ActivityShortlist>(() => ({
+    plotRecent: [], seasonCommon: [], farmRecent: [], currentSeasonUuid: null,
+  }));
+  const [duplicateCandidate, setDuplicateCandidate] = useState<DuplicateCandidate | null>(null);
+  const [duplicateAck, setDuplicateAck] = useState<string | null>(null);
+  const [duplicateInFlight, setDuplicateInFlight] = useState(false);
+  const [duplicateWarningShown, setDuplicateWarningShown] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [carryForwardCandidate, setCarryForwardCandidate] = useState<CarryForwardCandidate | null>(null);
+  const [safePrefill, setSafePrefill] = useState<CaptureEntryValueInput[]>([]);
+  const [stickyLossWarning, setStickyLossWarning] = useState(false);
+  const [finalReceipt, setFinalReceipt] = useState<EntryFinalMutationReceipt | null>(null);
+  const [preparingConfirm, setPreparingConfirm] = useState(false);
+  const savePromiseRef = useRef<Promise<void> | null>(null);
+  const savedCallbackFiredRef = useRef(false);
+  const closeStartedRef = useRef(false);
+  const closePromiseRef = useRef<Promise<void> | null>(null);
+  const mountedRef = useRef(true);
+  const preparationTokenRef = useRef(0);
+  const contextKeyRef = useRef('');
+  const automaticPrefillRef = useRef(new Map<string, CaptureEntryValueInput>());
+  const prefillContextRef = useRef<string | null>(null);
+
+  const selectedPlot = plots.find(({ plot_uuid: uuid }) => uuid === selectedPlotUuid) ?? null;
+  const zoneLinked = Boolean(selectedPlot?.zone_uuid);
+  const layout: JournalLayoutDefinition | undefined = model?.layouts.get(layoutCode);
+  const templates = useMemo(() => {
+    if (!model || !layout) return [];
+    return layout.supported_templates
+      .map((code) => model.templates.get(code))
+      .filter((template): template is NonNullable<typeof template> => template != null)
+      .sort((left, right) => {
+        const order = ['farmer_quick', 'full_record', 'research_observation'];
+        return order.indexOf(left.code) - order.indexOf(right.code) || left.code.localeCompare(right.code);
+      });
+  }, [layout, model]);
+  const template = templates.find((candidate) => candidate.code === templateCode) ?? templates[0];
+  const carryForwardLabels = useMemo(() => ({
+    productLabels: new Map(catalog.products.map((product) => [product.product_uuid, product.name])),
+    unitLabels: new Map(
+      catalog.vocab
+        .filter((row) => row.kind === 'unit')
+        .map((row) => [row.code, catalogLabel(row, locale)]),
+    ),
+  }), [catalog.products, catalog.vocab, locale]);
+  const fallbackLeaves = useMemo(
+    () => model && layout ? deriveActivityLeaves(model, layout) : [],
+    [layout, model],
+  );
+  const selections = useMemo<JournalSelections>(() => captureSelections(leaf, crop), [crop, leaf]);
+  const payloadValues = useMemo(() => {
+    const combined = [...formPayload];
+    if (model && leaf) {
+      try {
+        combined.push(...buildEntryValues(model, activityDependencyInputs(leaf)));
+      } catch {
+        // The catalog model already failed closed; the form remains the visible validation seam.
+      }
+    }
+    const valuesByKey = new Map<string, CaptureEntryValueOutput>();
+    for (const value of combined) {
+      valuesByKey.set(`${value.attribute_code}:${value.group_index ?? 0}`, value);
+    }
+    return [...valuesByKey.values()];
+  }, [formPayload, leaf, model]);
+  const fieldStates = useMemo(
+    () => model && layout && template && leaf
+      ? deriveFieldStates(template, layout, selections)
+      : [],
+    [layout, leaf, model, selections, template],
+  );
+  const validateTransition = useCallback((
+    nextLayout: JournalLayoutDefinition | undefined,
+    nextTemplate: JournalTemplateDefinition | undefined,
+    nextLeaf: ActivityLeafSelection | null,
+    nextCrop: string,
+    nextValues: CaptureEntryValueInput[],
+    inputErrors: ReadonlyMap<string, string> = EMPTY_NUMBER_INPUT_ERRORS,
+  ) => {
+    if (!model || !nextLayout || !nextTemplate) {
+      return {
+        valid: false,
+        payload: [] as CaptureEntryValueOutput[],
+        errors: new Map<string, string>(),
+        numberInputErrors: EMPTY_NUMBER_INPUT_ERRORS,
+      };
+    }
+    const nextSelections = captureSelections(nextLeaf, nextCrop);
+    return validateEntryForm({
+      model,
+      layout: nextLayout,
+      fieldStates: deriveFieldStates(nextTemplate, nextLayout, nextSelections),
+      inputs: nextValues,
+      selections: nextSelections,
+      numberInputErrors: inputErrors,
+      products: catalog.products,
+      t,
+    });
+  }, [catalog.products, model, t]);
+
+  const draft = useCaptureDraft();
+  const interactionLocked = preparingConfirm || saving || Boolean(finalReceipt);
+
+  const prefillContext = JSON.stringify({
+    plot: selectedPlotUuid,
+    crop,
+    activity: leaf,
+    layout: layout ? [layout.code, layout.version] : null,
+    template: template ? [template.code, template.version] : null,
+    occurredLocal,
+    occurredEndLocal,
+    timezone,
+  });
+  const attemptContext = JSON.stringify({ prefillContext, values });
+  contextKeyRef.current = attemptContext;
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      preparationTokenRef.current += 1;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (draft.lossWarning) setStickyLossWarning(true);
+  }, [draft.lossWarning]);
+
+  const inferredCrop = useMemo(() => {
+    if (crop.trim()) return crop.trim();
+    // A sensorless plot has no authoritative season snapshot. Do not infer a
+    // crop from historical rows there; the user must provide the context.
+    if (selectedPlot && !zoneLinked) return '';
+    const source = recentEntries
+      .filter((entry) => entry.plot_uuid === selectedPlotUuid && entry.season_uuid && entry.season_crop)
+      .sort((left, right) => Date.parse(right.occurred_start) - Date.parse(left.occurred_start))[0];
+    return source?.season_crop?.trim() ?? '';
+  }, [crop, recentEntries, selectedPlot, selectedPlotUuid, zoneLinked]);
+
+  const buildPayload = useCallback((status: 'draft' | 'final', ack?: string | null): CreateEntryPayload => ({
+    entry_uuid: draft.entryUuid ?? undefined,
+    base_sync_version: 0,
+    status,
+    plot_uuid: selectedPlot?.plot_uuid ?? null,
+    zone_uuid: selectedPlot?.zone_uuid ?? null,
+    season_crop: inferredCrop || null,
+    activity_code: leaf?.activity_code ?? '',
+    template_code: template?.code ?? '',
+    template_version: template?.version ?? 0,
+    layout_code: layout?.code ?? '',
+    layout_version: layout?.version ?? 0,
+    occurred_start_local: occurredLocal,
+    occurred_end_local: occurredEndLocal || null,
+    occurred_timezone: timezone,
+    occurred_utc_offset_minutes: resolvedRef.current?.offsetMinutes ?? resolved?.offsetMinutes ?? utcOffset,
+    occurred_end_utc_offset_minutes: endResolvedRef.current?.offsetMinutes ?? endResolved?.offsetMinutes ?? endUtcOffset,
+    duplicate_guard_ack_entry_uuid: ack ?? null,
+    values: payloadValues,
+  }), [draft.entryUuid, endResolved?.offsetMinutes, endUtcOffset, occurredEndLocal, inferredCrop, layout, leaf, occurredLocal, payloadValues, resolved?.offsetMinutes, selectedPlot, template, timezone, utcOffset]);
+
+  const updateStableDraft = useCallback(async (token: number, contextKey: string): Promise<boolean> => {
+    const current = () => mountedRef.current && token === preparationTokenRef.current &&
+      contextKey === contextKeyRef.current;
+    if (!current() || !model || !layout || !template || !leaf || !resolvedRef.current || !formValid) return false;
+    draft.updateDraft(buildPayload('draft'));
+    const receipt = await draft.saveDraft();
+    if (!current() || !receipt?.entry_uuid || !template) return false;
+    const candidate = await loadCarryForwardCandidate(receipt.entry_uuid, carryForwardLabels);
+    if (!current()) return false;
+    if (!candidate) {
+      setCarryForwardCandidate(null);
+      setSafePrefill([]);
+      return true;
+    }
+    const partition = partitionCarryForward(candidate.source, template, carryForwardLabels);
+    if (!current()) return false;
+    setCarryForwardCandidate({ ...candidate, repeatTreatment: partition.repeatTreatment });
+    setSafePrefill(partition.automaticValues);
+    return true;
+  }, [buildPayload, carryForwardLabels, draft, formValid, layout, leaf, model, template]);
+
+  useEffect(() => {
+    if (!model || !layout || !selectedPlotUuid && layoutCode === '') return;
+    let cancelled = false;
+    const options = {
+      model,
+      layout: layout ?? fallbackLayout(model),
+      plotUuid: selectedPlotUuid || null,
+      zoneLinked,
+      occurrence: resolved?.instant ?? null,
+    };
+    const load = async () => {
+      try {
+        const result = await loadActivityShortlist({ ...options, listEntries: journalApi.listEntries });
+        if (!cancelled) setShortlist(result);
+      } catch {
+        if (!cancelled) setShortlist({
+          plotRecent: [],
+          seasonCommon: [],
+          farmRecent: [],
+          currentSeasonUuid: null,
+        });
+      }
+    };
+    void load();
+    return () => { cancelled = true; };
+  }, [fallbackLeaves, layout, layoutCode, model, recentEntries, resolved?.instant, selectedPlotUuid, zoneLinked]);
+
+  useEffect(() => {
+    if (!model || !layout || !leaf || !resolved || !selectedPlot?.plot_uuid) {
+      setDuplicateCandidate(null);
+      return;
+    }
+    let cancelled = false;
+    const instant = Date.parse(resolved.instant);
+    const list = async () => {
+      setDuplicateInFlight(true);
+      try {
+        const response = await journalApi.listEntries({
+          status: 'final',
+          plot_uuid: selectedPlot.plot_uuid,
+          activity_code: leaf.activity_code,
+          occurred_from: new Date(instant - 60 * 60 * 1000).toISOString(),
+          occurred_to: new Date(instant + 60 * 60 * 1000).toISOString(),
+          limit: 100,
+        });
+        if (cancelled) return;
+        const entries = Array.isArray(response?.entries) ? response.entries : [];
+        const candidate = entries
+          .filter((entry) => isRecord(entry) && entry.entry_uuid !== draft.entryUuid && entry.status === 'final')
+          .map(duplicateFromEntry)
+          .find((entry): entry is DuplicateCandidate => entry != null);
+        setDuplicateCandidate(candidate ?? null);
+      } catch {
+        if (!cancelled) setDuplicateCandidate(null);
+      } finally {
+        if (!cancelled) setDuplicateInFlight(false);
+      }
+    };
+    void list();
+    return () => { cancelled = true; };
+  }, [draft.entryUuid, leaf, layout, model, resolved, selectedPlot]);
+
+  const selectPlot = (uuid: string) => {
+    if (interactionLocked) return;
+    const nextPlot = plots.find(({ plot_uuid: plotUuid }) => plotUuid === uuid);
+    const nextLayoutCode = nextPlot?.settings.layout_code ?? '';
+    const nextLayout = model?.layouts.get(nextLayoutCode);
+    const nextTemplate = nextLayout?.supported_templates.includes('farmer_quick')
+      ? 'farmer_quick'
+      : nextLayout?.supported_templates[0] ?? '';
+    const dependencyCodes = new Set(
+      leaf?.dependent_selections.map(({ attribute_code }) => attribute_code) ?? [],
+    );
+    const retainedValues = values.filter((value) => {
+      if (dependencyCodes.has(value.attribute_code)) return false;
+      const key = `${value.attribute_code}:${value.group_index ?? 0}`;
+      const automatic = automaticPrefillRef.current.get(key);
+      return !automatic || JSON.stringify(value) !== JSON.stringify(automatic);
+    });
+
+    automaticPrefillRef.current.clear();
+    setSelectedPlotUuid(uuid);
+    setLayoutCode(nextLayoutCode);
+    setTemplateCode(nextTemplate);
+    setCrop(nextPlot?.crop_hint ?? '');
+    setLeaf(null);
+    const nextValues = sanitizeValues(model!, nextLayout, model?.templates.get(nextTemplate), null,
+      nextPlot?.crop_hint ?? '', retainedValues);
+    const validation = validateTransition(
+      nextLayout,
+      model?.templates.get(nextTemplate),
+      null,
+      nextPlot?.crop_hint ?? '',
+      nextValues,
+    );
+    setValues(nextValues);
+    setFormPayload(validation.payload);
+    setFormValid(validation.valid);
+    setNumberInputErrors(validation.numberInputErrors);
+    setShowValidation(false);
+    setShortlist({
+      plotRecent: [], seasonCommon: [], farmRecent: [], currentSeasonUuid: null,
+    });
+    setDuplicateCandidate(null);
+    setDuplicateAck(null);
+    setDuplicateInFlight(false);
+    setCarryForwardCandidate(null);
+    setSafePrefill([]);
+    setWhereError(null);
+  };
+
+  const chooseLayout = (code: string) => {
+    if (interactionLocked) return;
+    setLayoutCode(code);
+    const nextLayout = model?.layouts.get(code);
+    const nextTemplate = nextLayout?.supported_templates.includes('farmer_quick')
+      ? 'farmer_quick'
+      : nextLayout?.supported_templates[0] ?? '';
+    setTemplateCode(nextTemplate);
+    const previousDependencyCodes = new Set(leaf?.dependent_selections.map(({ attribute_code }) => attribute_code));
+    const nextValues = sanitizeValues(model!, nextLayout, model?.templates.get(nextTemplate), null, crop, values, previousDependencyCodes);
+    const validation = validateTransition(
+      nextLayout,
+      model?.templates.get(nextTemplate),
+      null,
+      crop,
+      nextValues,
+    );
+    setLeaf(null);
+    setValues(nextValues);
+    setFormPayload(validation.payload);
+    setFormValid(validation.valid);
+    setNumberInputErrors(validation.numberInputErrors);
+  };
+
+  const pickActivity = (chosen: ActivityLeafSelection) => {
+    if (interactionLocked) return;
+    setLeaf(chosen);
+    const previousDependencyCodes = new Set(leaf?.dependent_selections.map(({ attribute_code }) => attribute_code));
+    const retainedValues = sanitizeValues(model!, layout, template, chosen, crop, values, previousDependencyCodes);
+    const nextValues = [
+      ...retainedValues,
+      ...activityDependencyInputs(chosen),
+    ];
+    setValues(nextValues);
+    const validation = validateTransition(layout, template, chosen, crop, nextValues);
+    setFormPayload(validation.payload);
+    setFormValid(validation.valid);
+    setNumberInputErrors(validation.numberInputErrors);
+    if (!resolved) resolveCurrentOccurrence();
+  };
+
+  const resolveCurrentOccurrence = (): boolean => {
+    try {
+      const result = resolveOccurrence(occurredLocal, timezone, utcOffset);
+      resolvedRef.current = result;
+      setResolved(result);
+      setOccurrenceError(null);
+      setUtcOffset(result.offsetMinutes);
+      return true;
+    } catch (error) {
+      const typed = error instanceof OccurrenceResolutionError ? error : null;
+      setResolved(null);
+      resolvedRef.current = null;
+      setOccurrenceError(typed);
+      return false;
+    }
+  };
+
+  const resolveEndOccurrence = (): boolean => {
+    if (!occurredEndLocal) {
+      setEndResolved(null);
+      endResolvedRef.current = null;
+      setEndUtcOffset(null);
+      setEndOccurrenceError(null);
+      return true;
+    }
+    try {
+      const result = resolveOccurrence(occurredEndLocal, timezone, endUtcOffset);
+      endResolvedRef.current = result;
+      setEndResolved(result);
+      setEndUtcOffset(result.offsetMinutes);
+      setEndOccurrenceError(null);
+      return true;
+    } catch (error) {
+      const typed = error instanceof OccurrenceResolutionError ? error : null;
+      setEndResolved(null);
+      endResolvedRef.current = null;
+      setEndOccurrenceError(typed);
+      return false;
+    }
+  };
+
+  const next = async () => {
+    if (interactionLocked) return;
+    if (step === 'where') {
+      if (!selectedPlot && !layoutCode) {
+        setWhereError('capture.validation.invalidDefinition');
+        return;
+      }
+      if (selectedPlot && !zoneLinked && !inferredCrop) {
+        setWhereError('capture.validation.cropRequired');
+        return;
+      }
+      if (!layout) {
+        setWhereError('capture.validation.invalidDefinition');
+        return;
+      }
+      setWhereError(null);
+      setStep('activity');
+      return;
+    }
+    if (step === 'activity') {
+      if (!leaf) return;
+      if (selectedPlot && !zoneLinked && !inferredCrop) {
+        setWhereError('capture.validation.cropRequired');
+        return;
+      }
+      setStep('details');
+      return;
+    }
+    if (step === 'details') {
+      const occurrenceValid = resolveCurrentOccurrence();
+      const endOccurrenceValid = resolveEndOccurrence();
+      setShowValidation(true);
+      const requiredValid = requiredFieldsSatisfied(fieldStates, values);
+      if (!occurrenceValid || !endOccurrenceValid || !formValid || !requiredValid || !template || !layout) return;
+      const token = preparationTokenRef.current + 1;
+      preparationTokenRef.current = token;
+      const contextKey = contextKeyRef.current;
+      setPreparingConfirm(true);
+      try {
+        const prepared = await updateStableDraft(token, contextKey);
+        if (prepared && mountedRef.current && token === preparationTokenRef.current &&
+            contextKey === contextKeyRef.current) setStep('confirm');
+      } catch {
+        if (mountedRef.current && token === preparationTokenRef.current) setStickyLossWarning(true);
+      } finally {
+        if (mountedRef.current && token === preparationTokenRef.current) setPreparingConfirm(false);
+      }
+    }
+  };
+
+  const edit = (target: CaptureEditStep) => {
+    if (interactionLocked) return;
+    preparationTokenRef.current += 1;
+    setStep(target);
+  };
+
+  const finalize = useCallback(async (ackOverride?: string | null) => {
+    if (finalReceipt) return;
+    if (savePromiseRef.current) return savePromiseRef.current;
+    const acknowledgedDuplicateUuid = duplicateCandidate &&
+      (duplicateAck === duplicateCandidate.entry_uuid || ackOverride === duplicateCandidate.entry_uuid)
+      ? duplicateCandidate.entry_uuid
+      : null;
+    if (duplicateCandidate && !acknowledgedDuplicateUuid) return;
+    const promise = (async () => {
+      setSaving(true);
+      try {
+        const receipt = await draft.finish(buildPayload('final', acknowledgedDuplicateUuid));
+        setDuplicateCandidate(null);
+        setStickyLossWarning(false);
+        setFinalReceipt(receipt);
+        return receipt;
+      } catch (error) {
+        const candidate = duplicateFromError(error);
+        if (candidate) {
+          let values = candidate.values;
+          if (values.length === 0) {
+            try {
+              const response = await journalApi.listEntries({
+                entry_uuid: candidate.entry_uuid,
+                status: 'all',
+                limit: 1,
+              });
+              const aggregate = Array.isArray(response?.entries)
+                ? response.entries.find((entry) => isRecord(entry) && entry.entry_uuid === candidate.entry_uuid)
+                : undefined;
+              if (aggregate) values = duplicateValues(aggregate.values);
+            } catch {
+              values = [];
+            }
+          }
+          setDuplicateCandidate({ ...candidate, values: duplicateValues(values) });
+          setStickyLossWarning(false);
+        } else {
+          setStickyLossWarning(true);
+        }
+        throw error;
+      } finally {
+        setSaving(false);
+        savePromiseRef.current = null;
+      }
+    })();
+    savePromiseRef.current = promise.then(() => undefined, () => undefined);
+    return promise;
+  }, [buildPayload, duplicateAck, duplicateCandidate, draft, payloadValues]);
+
+  const retry = useCallback(async () => {
+    if (savePromiseRef.current) return savePromiseRef.current;
+    const promise = (async () => {
+      setSaving(true);
+      try {
+        const receipt = await draft.retry();
+        if (receipt && 'outbox_event_uuid' in receipt && receipt.outbox_event_uuid) {
+          setStickyLossWarning(false);
+          setFinalReceipt(receipt);
+          setStep('confirm');
+        }
+      } finally {
+        setSaving(false);
+        savePromiseRef.current = null;
+      }
+    })();
+    savePromiseRef.current = promise.then(() => undefined, () => undefined);
+    return promise;
+  }, [draft]);
+
+  const close = useCallback(() => {
+    if (closePromiseRef.current) return closePromiseRef.current;
+    if (closeStartedRef.current || preparingConfirm || saving) return Promise.resolve();
+    closeStartedRef.current = true;
+    const promise = (async () => {
+      if (!finalReceipt || savedCallbackFiredRef.current) {
+        onClose();
+        return;
+      }
+      savedCallbackFiredRef.current = true;
+      try {
+        await onSaved(finalReceipt);
+      } finally {
+        onClose();
+      }
+    })();
+    closePromiseRef.current = promise;
+    void promise.then(
+      () => { closePromiseRef.current = null; },
+      () => { closePromiseRef.current = null; },
+    );
+    return promise;
+  }, [finalReceipt, onClose, onSaved, preparingConfirm, saving]);
+
+  const saveSeparately = () => {
+    if (!duplicateCandidate || interactionLocked) return;
+    if (!duplicateWarningShown) setDuplicateWarningShown(true);
+    setDuplicateAck(duplicateCandidate.entry_uuid);
+    void finalize(duplicateCandidate.entry_uuid).catch(() => undefined);
+  };
+
+  const carryForwardContext = useMemo<CarryForwardContext | null>(() => {
+    if (!leaf || !layout || !resolved || !selectedPlot?.plot_uuid || !shortlist.currentSeasonUuid) return null;
+    return {
+      plot_uuid: selectedPlot.plot_uuid,
+      crop: inferredCrop || null,
+      activity_code: leaf.activity_code,
+      occurred_start: resolved.instant,
+      season_uuid: shortlist.currentSeasonUuid,
+      layout_code: layout.code,
+      layout_version: layout.version,
+    };
+  }, [inferredCrop, layout, leaf, resolved, selectedPlot, shortlist.currentSeasonUuid]);
+
+  const commitValues = useCallback((next: CaptureEntryValueInput[]) => {
+    const validation = validateTransition(
+      layout,
+      template,
+      leaf,
+      crop,
+      next,
+      numberInputErrors,
+    );
+    setValues(next);
+    setFormPayload(validation.payload);
+    setFormValid(validation.valid);
+    setNumberInputErrors(validation.numberInputErrors);
+  }, [crop, layout, leaf, numberInputErrors, template, validateTransition]);
+
+  const useRepeatTreatment = useCallback((incoming: CaptureEntryValueInput[]) => {
+    if (interactionLocked) return;
+    const incomingKeys = new Set(incoming.map((value) => `${value.attribute_code}:${value.group_index ?? 0}`));
+    commitValues([
+      ...values.filter((value) => !incomingKeys.has(`${value.attribute_code}:${value.group_index ?? 0}`)),
+      ...incoming,
+    ]);
+  }, [commitValues, interactionLocked, values]);
+
+  const invalidateRepeatTreatment = useCallback((removed: CaptureEntryValueInput[]) => {
+    const removedKeys = new Set(removed.map((value) => `${value.attribute_code}:${value.group_index ?? 0}`));
+    commitValues(values.filter((value) => !removedKeys.has(`${value.attribute_code}:${value.group_index ?? 0}`)));
+  }, [commitValues, values]);
+
+  const chooseTemplate = useCallback((code: string) => {
+    if (interactionLocked) return;
+    const nextTemplate = templates.find((candidate) => candidate.code === code);
+    if (!nextTemplate || !layout || !model) return;
+    const nextValues = sanitizeValues(model, layout, nextTemplate, leaf, crop, values);
+    const validation = validateTransition(
+      layout,
+      nextTemplate,
+      leaf,
+      crop,
+      nextValues,
+      numberInputErrors,
+    );
+    setTemplateCode(code);
+    setValues(nextValues);
+    setFormPayload(validation.payload);
+    setFormValid(validation.valid);
+    setNumberInputErrors(validation.numberInputErrors);
+    setShowValidation(false);
+  }, [crop, interactionLocked, layout, leaf, model, numberInputErrors, templates, validateTransition, values]);
+
+  const formChanged = useCallback((
+    next: CaptureEntryValueInput[],
+    payload: CaptureEntryValueOutput[],
+    valid: boolean,
+    inputErrors: ReadonlyMap<string, string>,
+  ) => {
+    if (interactionLocked) return;
+    for (const [key, automatic] of automaticPrefillRef.current) {
+      const current = next.find((value) => `${value.attribute_code}:${value.group_index ?? 0}` === key);
+      if (!current || JSON.stringify(current) !== JSON.stringify(automatic)) {
+        automaticPrefillRef.current.delete(key);
+      }
+    }
+    setValues(next);
+    setFormPayload(payload);
+    setFormValid(valid);
+    setNumberInputErrors(inputErrors);
+  }, [interactionLocked]);
+
+  useEffect(() => {
+    const previousContext = prefillContextRef.current;
+    prefillContextRef.current = prefillContext;
+    const changed = Boolean(previousContext && previousContext !== prefillContext);
+    if (changed) {
+      preparationTokenRef.current += 1;
+      if (preparingConfirm) setPreparingConfirm(false);
+    }
+    if (!previousContext || previousContext === prefillContext || automaticPrefillRef.current.size === 0) return;
+    const automaticKeys = new Set(automaticPrefillRef.current.keys());
+    const nextValues = values.filter((value) => {
+      const key = `${value.attribute_code}:${value.group_index ?? 0}`;
+      const automatic = automaticPrefillRef.current.get(key);
+      return !automaticKeys.has(key) || JSON.stringify(value) !== JSON.stringify(automatic);
+    });
+    automaticPrefillRef.current.clear();
+    setSafePrefill([]);
+    setCarryForwardCandidate(null);
+    if (nextValues.length !== values.length) commitValues(nextValues);
+  }, [commitValues, preparingConfirm, prefillContext, values]);
+
+  useEffect(() => {
+    if (safePrefill.length === 0) return;
+    const existing = new Set(values.map((value) =>
+      `${value.attribute_code}:${value.group_index ?? 0}`));
+    const additions = safePrefill.filter((value) =>
+      !existing.has(`${value.attribute_code}:${value.group_index ?? 0}`));
+    if (additions.length === 0) return;
+    additions.forEach((value) => automaticPrefillRef.current.set(
+      `${value.attribute_code}:${value.group_index ?? 0}`, value));
+    commitValues([...values, ...additions]);
+  }, [commitValues, safePrefill, values]);
+
+  if (!model) {
+    return <p role="alert" className="text-sm font-semibold text-[var(--error-text)]">{t('capture.validation.invalidDefinition')}</p>;
+  }
+
+  const layoutChoices = [...model.layouts.values()].sort((left, right) => left.code.localeCompare(right.code));
+  const activityRows = catalog.vocab.filter((row) => row.active === 1 && row.deleted_at == null);
+  const templateOptions = templates.map((candidate) => ({
+    value: candidate.code,
+    label: templateLabel(candidate.code, candidate.code === 'farmer_quick'
+      ? t('capture.form.quick')
+      : candidate.code === 'full_record' ? t('capture.form.full') : t('capture.form.research')),
+  }));
+  const valueTokens: ConfirmValueToken[] = payloadValues.map((value) => {
+    const attribute = model.vocabByCode.get(value.attribute_code);
+    const unitCode = value.entered_unit_code ?? value.unit_code;
+    const unit = unitCode ? model.vocabByCode.get(unitCode) : undefined;
+    return {
+      attribute_code: value.attribute_code,
+      group_index: value.group_index,
+      label: attribute ? catalogLabel(attribute, locale) : value.attribute_code,
+      value: displayValue(value, model, locale, {
+        yes: t('capture.form.booleanYes'),
+        no: t('capture.form.booleanNo'),
+      }),
+      unit: unit ? catalogLabel(unit, locale) : unitCode,
+      step: 'details',
+    };
+  });
+  const confirmValues: ConfirmValueToken[] = occurredEndLocal
+    ? [...valueTokens, {
+        attribute_code: 'occurred_end_local',
+        label: `${t('capture.confirm.occurrence')} · ${t('capture.form.optional')}`,
+        value: endResolved ? occurrenceLabel(endResolved.instant, timezone, locale) : occurredEndLocal,
+        step: 'details',
+      }]
+    : valueTokens;
+  const duplicateActivityLabel = duplicateCandidate
+    ? catalogLabel(
+        catalog.vocab.find((row) => row.code === duplicateCandidate.activity_code) ?? {
+          code: duplicateCandidate.activity_code,
+        },
+        locale,
+      )
+    : '';
+  const startOccurrenceLabel = `${t('capture.confirm.occurrence')} · ${t('capture.form.required')}`;
+  const endOccurrenceLabel = `${t('capture.confirm.occurrence')} · ${t('capture.form.optional')}`;
+  const endOffsetLabel = `${t('capture.validation.chooseUtcOffset')} · ${t('capture.form.optional')}`;
+
+  const body = () => {
+    if (step === 'where') {
+      return (
+        <section aria-labelledby="capture-where-title" className="space-y-4">
+          <h2 id="capture-where-title" className="text-xl font-bold text-[var(--text)]">{t('capture.where.title')}</h2>
+          <label className="block text-sm font-bold text-[var(--text)]">
+            {t('capture.where.plot')}
+            <select aria-label={t('capture.where.plot')} value={selectedPlotUuid} onChange={(event) => selectPlot(event.target.value)} className="mt-1 min-h-11 w-full rounded-xl border border-[var(--border)] bg-[var(--card)] px-3 text-[var(--text)]">
+              <option value="">{t('capture.where.farmLevel')}</option>
+              {plots.map((candidate) => <option key={candidate.plot_uuid} value={candidate.plot_uuid}>{candidate.name?.trim() || candidate.plot_code}</option>)}
+            </select>
+          </label>
+          {!selectedPlot && (
+            <label className="block text-sm font-bold text-[var(--text)]">
+              {t('capture.where.growingSetting')}
+              <select aria-label={t('capture.where.growingSetting')} value={layoutCode} onChange={(event) => chooseLayout(event.target.value)} className="mt-1 min-h-11 w-full rounded-xl border border-[var(--border)] bg-[var(--card)] px-3 text-[var(--text)]">
+                <option value="">{t('capture.where.selectPlot')}</option>
+                {layoutChoices.map((candidate) => <option key={`${candidate.code}:${candidate.version}`} value={candidate.code}>{catalogLabel(catalog.layouts.find((row) => row.code === candidate.code) ?? { code: candidate.code }, locale)} · v{candidate.version}</option>)}
+              </select>
+            </label>
+          )}
+          {selectedPlot && <p className="rounded-xl bg-[var(--secondary-bg)] px-3 py-2 text-sm text-[var(--text-secondary)]">{catalogLabel(catalog.layouts.find((row) => row.code === layout?.code) ?? { code: layout?.code ?? '' }, locale)} · v{layout?.version}</p>}
+          {selectedPlot && !zoneLinked && <label className="block text-sm font-bold text-[var(--text)]">{t('capture.carry.crop')}<input aria-label={t('capture.carry.crop')} value={crop} disabled={preparingConfirm || saving || Boolean(finalReceipt)} onChange={(event) => setCrop(event.target.value)} className="mt-1 min-h-11 w-full rounded-xl border border-[var(--border)] bg-[var(--card)] px-3 text-[var(--text)]" /></label>}
+          {whereError && <p role="alert" className="text-sm font-semibold text-[var(--error-text)]">{t(whereError as never)}</p>}
+        </section>
+      );
+    }
+    if (step === 'activity') {
+      return <section className="space-y-3"><p className="rounded-xl bg-[var(--secondary-bg)] px-3 py-2 text-sm font-semibold text-[var(--text-secondary)]">{catalogLabel(catalog.layouts.find((row) => row.code === layout?.code) ?? { code: layout?.code ?? '' }, locale)} · v{layout?.version}</p>{selectedPlot && !zoneLinked && <label className="block text-sm font-bold text-[var(--text)]">{t('capture.carry.crop')}<input aria-label={t('capture.carry.crop')} value={crop} disabled={preparingConfirm || saving || Boolean(finalReceipt)} onChange={(event) => { setCrop(event.target.value); setWhereError(null); }} className="mt-1 min-h-11 w-full rounded-xl border border-[var(--border)] bg-[var(--card)] px-3 text-[var(--text)]" /></label>}{whereError && <p role="alert" className="text-sm font-semibold text-[var(--error-text)]">{t(whereError as never)}</p>}<ActivityPicker catalogRows={activityRows} plotRecent={shortlist.plotRecent} seasonCommon={shortlist.seasonCommon} farmRecent={shortlist.farmRecent} layoutFallback={fallbackLeaves} zoneLinked={zoneLinked} locale={locale} onPick={pickActivity} /></section>;
+    }
+    if (step === 'details') {
+      return (
+        <section aria-labelledby="capture-form-title" className="space-y-4">
+          <h2 id="capture-form-title" className="text-xl font-bold text-[var(--text)]">{t('capture.form.title')}</h2>
+          <fieldset disabled={interactionLocked} className="m-0 min-w-0 space-y-4 border-0 p-0">
+          <p className="rounded-xl bg-[var(--secondary-bg)] px-3 py-2 text-sm font-semibold text-[var(--text-secondary)]">{catalogLabel(catalog.layouts.find((row) => row.code === layout?.code) ?? { code: layout?.code ?? '' }, locale)} · v{layout?.version}</p>
+          <label className="block text-sm font-bold text-[var(--text)]">
+            {t('capture.form.detailLevel')}
+            <select aria-label={t('capture.form.detailLevel')} value={template?.code ?? templateCode} onChange={(event) => chooseTemplate(event.target.value)} className="mt-1 min-h-11 w-full rounded-xl border border-[var(--border)] bg-[var(--card)] px-3 text-[var(--text)]">
+              {templateOptions.map((option) => <option key={option.value} value={option.value}>{option.label} · v{model.templates.get(option.value)?.version}</option>)}
+            </select>
+          </label>
+          <label className="block text-sm font-bold text-[var(--text)]">
+            {t('capture.where.timezone')}
+            <input aria-label={t('capture.where.timezone')} value={timezone} onChange={(event) => { setTimezone(event.target.value); setResolved(null); resolvedRef.current = null; setEndResolved(null); endResolvedRef.current = null; setUtcOffset(null); setEndUtcOffset(null); }} className="mt-1 min-h-11 w-full rounded-xl border border-[var(--border)] bg-[var(--card)] px-3 text-[var(--text)]" />
+          </label>
+          <label className="block text-sm font-bold text-[var(--text)]">
+            {startOccurrenceLabel}
+            <input type="datetime-local" aria-label={startOccurrenceLabel} value={occurredLocal} onChange={(event) => { setOccurredLocal(event.target.value); setResolved(null); resolvedRef.current = null; setUtcOffset(null); setOccurrenceError(null); }} className="mt-1 min-h-11 w-full rounded-xl border border-[var(--border)] bg-[var(--card)] px-3 text-[var(--text)]" />
+          </label>
+          <label className="block text-sm font-bold text-[var(--text)]">
+            {endOccurrenceLabel}
+            <input type="datetime-local" aria-label={endOccurrenceLabel} value={occurredEndLocal} onChange={(event) => { setOccurredEndLocal(event.target.value); setEndResolved(null); endResolvedRef.current = null; setEndUtcOffset(null); setEndOccurrenceError(null); }} className="mt-1 min-h-11 w-full rounded-xl border border-[var(--border)] bg-[var(--card)] px-3 text-[var(--text)]" />
+          </label>
+          {occurrenceError?.code === 'ambiguous_local_time' && <label className="block text-sm font-bold text-[var(--text)]">{t('capture.validation.chooseUtcOffset')}<select aria-label={t('capture.validation.chooseUtcOffset')} value={utcOffset ?? ''} onChange={(event) => setUtcOffset(Number(event.target.value))} className="mt-1 min-h-11 w-full rounded-xl border border-[var(--border)] bg-[var(--card)] px-3"><option value="">{t('capture.form.select')}</option>{occurrenceError.availableOffsets.map((offset) => <option key={offset} value={offset}>{offset}</option>)}</select></label>}
+          {occurrenceError && <p role="alert" className="text-sm font-semibold text-[var(--error-text)]">{t(`capture.validation.${occurrenceError.code === 'ambiguous_local_time' ? 'ambiguousLocalTime' : occurrenceError.code === 'nonexistent_local_time' ? 'nonexistentLocalTime' : occurrenceError.code === 'invalid_timezone' ? 'invalidTimezone' : 'invalidLocalTime'}`)}</p>}
+          {endOccurrenceError?.code === 'ambiguous_local_time' && <label className="block text-sm font-bold text-[var(--text)]">{endOffsetLabel}<select aria-label={endOffsetLabel} value={endUtcOffset ?? ''} onChange={(event) => setEndUtcOffset(Number(event.target.value))} className="mt-1 min-h-11 w-full rounded-xl border border-[var(--border)] bg-[var(--card)] px-3"><option value="">{t('capture.form.select')}</option>{endOccurrenceError.availableOffsets.map((offset) => <option key={offset} value={offset}>{offset}</option>)}</select></label>}
+          {endOccurrenceError && <p role="alert" className="text-sm font-semibold text-[var(--error-text)]">{t(`capture.validation.${endOccurrenceError.code === 'ambiguous_local_time' ? 'ambiguousLocalTime' : endOccurrenceError.code === 'nonexistent_local_time' ? 'nonexistentLocalTime' : endOccurrenceError.code === 'invalid_timezone' ? 'invalidTimezone' : 'invalidLocalTime'}`)}</p>}
+          {template && layout && leaf && <EntryForm model={model} layout={layout} fieldStates={fieldStates} values={values} onChange={formChanged} selections={selections} products={catalog.products} locale={locale} showValidation={showValidation} />}
+          {safePrefill.length > 0 && <p role="status" className="text-sm font-semibold text-[var(--text-secondary)]">{t('capture.carry.prefilled')}</p>}
+          {carryForwardCandidate?.repeatTreatment && carryForwardContext && (
+            <RepeatTreatmentCard
+              candidate={carryForwardCandidate}
+              currentContext={carryForwardContext}
+              onConfirm={useRepeatTreatment}
+              onInvalidate={invalidateRepeatTreatment}
+              onDismiss={() => {
+                if (!interactionLocked) {
+                  invalidateRepeatTreatment(carryForwardCandidate.repeatTreatment?.values ?? []);
+                }
+              }}
+            />
+          )}
+          </fieldset>
+        </section>
+      );
+    }
+    return (
+      <>
+        {duplicateCandidate && <section role="alert" className="mb-4 space-y-3 rounded-xl border border-[var(--primary)] bg-[var(--secondary-bg)] p-4"><h2 className="font-bold text-[var(--text)]">{t('capture.confirm.duplicateTitle')}</h2><p className="text-sm text-[var(--text-secondary)]">{occurrenceLabel(duplicateCandidate.occurred_start, timezone, locale)} · {duplicateActivityLabel}</p>{duplicateCandidate.values.length > 0 && <ul className="space-y-1 text-sm text-[var(--text)]">{duplicateCandidate.values.map((value, index) => { const label = duplicateValueLabel(value, model, locale); return label ? <li key={`${value.attribute_code}:${value.group_index ?? index}`}>{label}</li> : null; })}</ul>}<div className="flex flex-wrap gap-2"><button type="button" disabled={saving || Boolean(finalReceipt)} className={`min-h-11 rounded-xl border border-[var(--primary)] px-4 font-bold text-[var(--primary)] ${FOCUS_RING}`} onClick={() => { if (!saving && !finalReceipt) onOpenExisting(duplicateCandidate.entry_uuid); }}>{t('capture.confirm.openExisting')}</button><button type="button" className={`min-h-11 rounded-xl bg-[var(--primary)] px-4 font-bold text-white ${FOCUS_RING}`} onClick={saveSeparately} disabled={saving || Boolean(finalReceipt)}>{t('capture.confirm.saveSeparately')}</button></div>{duplicateWarningShown && <p role="status" className="text-sm font-semibold text-[var(--text-secondary)]">{t('capture.confirm.duplicateBody')}</p>}</section>}
+        <ConfirmStrip activity={{ label: t('capture.confirm.activity'), value: leaf ? catalogLabel(catalog.vocab.find((row) => row.code === leaf.activity_code) ?? { code: leaf?.activity_code ?? '' }, locale) : '', step: 'activity' }} plot={{ label: t('capture.confirm.plot'), value: selectedPlot?.name?.trim() || selectedPlot?.plot_code || t('capture.confirm.farmLevel'), step: 'where' }} layout={{ label: t('capture.confirm.layout'), value: `${catalogLabel(catalog.layouts.find((row) => row.code === layout?.code) ?? { code: layout?.code ?? '' }, locale)} · v${layout?.version}`, step: 'where' }} occurrence={{ label: t('capture.confirm.occurrence'), value: resolved ? occurrenceLabel(resolved.instant, timezone, locale) : occurredLocal, timezone, endTimezone: occurredEndLocal ? timezone : null, step: 'details' }} values={confirmValues} onEdit={edit} onFinalize={() => { void finalize().catch(() => undefined); }} validationInFlight={showValidation && !formValid} duplicateInFlight={duplicateInFlight} saveInFlight={saving} editDisabled={preparingConfirm || saving} readOnly={Boolean(finalReceipt)} finalizeDisabled={Boolean(duplicateCandidate && duplicateAck !== duplicateCandidate.entry_uuid)} />
+      </>
+    );
+  };
+
+  return (
+    <div className="min-h-full bg-[var(--bg)] px-4 py-5">
+      <header className="mx-auto flex max-w-3xl items-center justify-between gap-3"><h1 className="text-2xl font-bold text-[var(--text)]">{t('capture.title')}</h1><button type="button" disabled={preparingConfirm || saving} onClick={() => { void close().catch(() => undefined); }} className={`min-h-11 rounded-xl px-3 font-bold text-[var(--primary)] ${FOCUS_RING}`}>{t('capture.close')}</button></header>
+      <main className="mx-auto mt-5 max-w-3xl space-y-5">
+        {body()}
+        <div className="flex flex-wrap justify-between gap-3">{step !== 'where' && <button type="button" disabled={preparingConfirm || saving || Boolean(finalReceipt)} onClick={() => { if (preparingConfirm || saving || finalReceipt) return; preparationTokenRef.current += 1; setStep(step === 'confirm' ? 'details' : step === 'details' ? 'activity' : 'where'); }} className={`min-h-11 rounded-xl px-4 font-bold text-[var(--primary)] ${FOCUS_RING}`}>{t('capture.back')}</button>}<span />{step !== 'confirm' && <button type="button" onClick={next} disabled={(step === 'activity' && !leaf) || (step === 'details' && preparingConfirm) || saving || Boolean(finalReceipt)} className={`min-h-11 rounded-xl bg-[var(--primary)] px-5 font-bold text-white disabled:cursor-not-allowed disabled:opacity-50 ${FOCUS_RING}`}>{t('capture.next')}</button>}</div>
+        {!duplicateCandidate && (step === 'confirm' || draft.lossWarning || stickyLossWarning) && <SaveState status={draft.status} lossWarning={draft.lossWarning || stickyLossWarning} onRetry={retry} />}
+      </main>
+    </div>
+  );
+};
+
+function fallbackLayout(model: JournalCaptureCatalogModel): JournalLayoutDefinition {
+  return [...model.layouts.values()][0] ?? {
+    code: '', version: 0, activity_codes: [], supported_templates: [], fields: [], minimum_fields: [], conditional_fields: {}, denominator_contract: [], option_dependencies: [],
+  };
+}
