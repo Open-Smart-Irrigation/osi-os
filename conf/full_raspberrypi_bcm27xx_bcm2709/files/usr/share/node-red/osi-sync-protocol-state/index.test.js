@@ -1025,8 +1025,12 @@ test('load: a non-GENESIS resumable-shaped gap validates-and-blocks rather than 
   appendHandCraftedGeneration(roots, genesisSha256, gen1, witness1);
   const gen2 = buildGen1(codecs.canonicalSha256(gen1), { generation: 2, previousGeneration: 1, operationId: crypto.randomUUID() });
   // generation 2 written, witness NOT written, head still at generation 1.
+  // Since the IMPORTANT-1 fix, this blocks at the bidirectional
+  // set-equality check (an orphan generation above the witness chain is
+  // indistinguishable from a witness-root rollback) rather than falling
+  // through to the head comparison — same block, stricter classification.
   pathsMod.writeExclusiveFile(path.join(roots.generationsDir, pathsMod.generationFilename(2)), Buffer.from(codecs.canonicalJson(gen2), 'utf8'), pathsMod.defaultOwnershipAdapter);
-  assert.throws(() => loadMod.verifyCapabilityChain(roots, {}), { code: 'capability_head_rollback' });
+  assert.throws(() => loadMod.verifyCapabilityChain(roots, {}), { code: 'capability_witness_missing' });
 });
 
 test('load: activity database rollback against a newer external head is detected', () => {
@@ -1079,9 +1083,33 @@ function writeDeploymentState(tmp, obj) {
   return p;
 }
 
-test('requireDeploymentPhase accepts an exact match and rejects a phase/id/generation mismatch', () => {
+// The real envelope (repair-program plan line 160, implemented by the
+// sibling deployment-state slice): {format:2, parentDeployment,
+// activeSubOperation}, with the deployment identity/phase/generation
+// nested under parentDeployment. parentDeployment additionally carries
+// lease/hash/stamp/receipt fields owned by the sibling library; the gate
+// must tolerate those while gating strictly on the fields it checks.
+function format2State(overrides) {
+  const o = overrides || {};
+  return {
+    format: o.format !== undefined ? o.format : 2,
+    parentDeployment: Object.assign(
+      {
+        deploymentId: 'dep-1',
+        phase: 'protocol-initializing',
+        generation: 3,
+        leaseActive: true,
+        artifactSha256: 'a'.repeat(64),
+      },
+      o.parentDeployment
+    ),
+    activeSubOperation: o.activeSubOperation !== undefined ? o.activeSubOperation : null,
+  };
+}
+
+test('requireDeploymentPhase accepts an exact format-2 match and rejects a phase/id/generation mismatch', () => {
   const { tmp } = makeRoots();
-  const p = writeDeploymentState(tmp, { format: 1, deploymentId: 'dep-1', phase: 'protocol-initializing', parentGeneration: 3 });
+  const p = writeDeploymentState(tmp, format2State());
   assert.doesNotThrow(() =>
     deploymentGate.requireDeploymentPhase(p, { expectedDeploymentId: 'dep-1', expectedPhase: 'protocol-initializing', expectedParentGeneration: 3 })
   );
@@ -1099,16 +1127,52 @@ test('requireDeploymentPhase accepts an exact match and rejects a phase/id/gener
   );
 });
 
-test('readDeploymentStateFile rejects unknown fields and a missing file', () => {
+test('requireDeploymentPhase rejects a non-null activeSubOperation', () => {
   const { tmp } = makeRoots();
-  const p = writeDeploymentState(tmp, { format: 1, deploymentId: 'dep-1', phase: 'protocol-initializing', parentGeneration: 0, extra: 'nope' });
+  const p = writeDeploymentState(
+    tmp,
+    format2State({ activeSubOperation: { kind: 'recovery', operationId: OP_B, phase: 'recovering' } })
+  );
+  assert.throws(
+    () => deploymentGate.requireDeploymentPhase(p, { expectedDeploymentId: 'dep-1', expectedPhase: 'protocol-initializing', expectedParentGeneration: 3 }),
+    { code: 'deployment_state_active_sub_operation' }
+  );
+});
+
+test('readDeploymentStateFile rejects format 1 and any other non-2 format', () => {
+  const { tmp } = makeRoots();
+  const p = writeDeploymentState(tmp, format2State({ format: 1 }));
+  assert.throws(() => deploymentGate.readDeploymentStateFile(p), { code: 'schema_invalid_field' });
+});
+
+test('readDeploymentStateFile rejects the legacy flat (invented) shape outright', () => {
+  const { tmp } = makeRoots();
+  const p = writeDeploymentState(tmp, { format: 2, deploymentId: 'dep-1', phase: 'protocol-initializing', parentGeneration: 0 });
+  assert.throws(() => deploymentGate.readDeploymentStateFile(p), Error);
+});
+
+test('readDeploymentStateFile rejects unknown top-level fields and a missing file', () => {
+  const { tmp } = makeRoots();
+  const p = writeDeploymentState(tmp, Object.assign(format2State(), { extra: 'nope' }));
   assert.throws(() => deploymentGate.readDeploymentStateFile(p), { code: 'schema_unknown_field' });
   assert.throws(() => deploymentGate.readDeploymentStateFile(path.join(tmp, 'absent.json')), { code: 'deployment_state_missing' });
 });
 
+test('readDeploymentStateFile tolerates extra parentDeployment fields but requires its gated fields', () => {
+  const { tmp } = makeRoots();
+  // extra sibling-library-owned fields are fine...
+  const ok = writeDeploymentState(tmp, format2State({ parentDeployment: { controlManifestSha256: 'b'.repeat(64) } }));
+  assert.doesNotThrow(() => deploymentGate.readDeploymentStateFile(ok));
+  // ...but a missing gated field is not.
+  const missing = format2State();
+  delete missing.parentDeployment.phase;
+  const bad = writeDeploymentState(path.join(tmp, 'sub'), missing);
+  assert.throws(() => deploymentGate.readDeploymentStateFile(bad), { code: 'deployment_state_parent_invalid' });
+});
+
 test('readDeploymentStateFile rejects a symlinked path', () => {
   const { tmp } = makeRoots();
-  const real = writeDeploymentState(tmp, { format: 1, deploymentId: 'dep-1', phase: 'protocol-initializing', parentGeneration: 0 });
+  const real = writeDeploymentState(tmp, format2State());
   const link = path.join(tmp, 'link.json');
   fs.symlinkSync(real, link);
   assert.throws(() => deploymentGate.readDeploymentStateFile(link), { code: 'symlink_component' });
@@ -1139,4 +1203,244 @@ test('index.status never writes to disk (read-only)', () => {
   mod.status(opts);
   const after = fs.readFileSync(roots.capabilityHeadPath, 'utf8');
   assert.equal(before, after);
+});
+
+// ===========================================================================
+// Fix wave (review IMPORTANT 1): single-root tail-deletion rollback
+// detection — bidirectional generation/witness set equality.
+// ===========================================================================
+
+// Builds a healthy, fully committed 2-generation chain (genesis + a
+// hand-crafted NEGOTIATED generation 1 with its witness and head at 1) and
+// returns everything needed to surgically damage single roots afterwards.
+function buildHealthyTwoGenerationChain() {
+  const { opts } = makeRoots();
+  const created = initHealthy(opts);
+  const roots = created.roots;
+  const genesisSha256 = codecs.canonicalSha256(created.capabilityGeneration);
+  const genesisWitnessSha256 = codecs.canonicalSha256(created.capabilityWitness);
+  const gen1 = buildGen1(genesisSha256);
+  const witness1 = {
+    format: 1,
+    generation: 1,
+    generationSha256: codecs.canonicalSha256(gen1),
+    previousWitnessSha256: genesisWitnessSha256,
+    operationId: OP_B,
+  };
+  appendHandCraftedGeneration(roots, genesisSha256, gen1, witness1);
+  // sanity: healthy before the attack
+  const healthy = loadMod.verifyCapabilityChain(roots, {});
+  assert.equal(healthy.maxGeneration, 1);
+  assert.equal(healthy.resumable, null);
+  return { roots, created, genesisSha256, genesisWitnessSha256, gen1, witness1 };
+}
+
+function rewindHeadToGenesis(roots, genesisSha256, genesisWitnessSha256) {
+  const rolledBackHead = codecs.buildCapabilityHead({
+    generation: 0,
+    generationSha256: genesisSha256,
+    witnessSha256: genesisWitnessSha256,
+  });
+  pathsMod.atomicReplaceFile(
+    roots.capabilityHeadPath,
+    Buffer.from(codecs.canonicalJson(rolledBackHead), 'utf8'),
+    pathsMod.defaultOwnershipAdapter
+  );
+}
+
+test('load: tail generation deleted + head rewound, witness root intact -> BLOCKED (single-root rollback)', () => {
+  const { roots, genesisSha256, genesisWitnessSha256 } = buildHealthyTwoGenerationChain();
+  fs.rmSync(path.join(roots.generationsDir, pathsMod.generationFilename(1)));
+  rewindHeadToGenesis(roots, genesisSha256, genesisWitnessSha256);
+  // witness 1 survives in the independent witness root: an orphan witness
+  // above the head proves the generation root was rolled back alone.
+  assert.throws(() => loadMod.verifyCapabilityChain(roots, {}), { code: 'capability_witness_orphan' });
+});
+
+test('load: tail witness deleted + head rewound, generation root intact -> BLOCKED (single-root rollback)', () => {
+  const { roots, genesisSha256, genesisWitnessSha256 } = buildHealthyTwoGenerationChain();
+  fs.rmSync(path.join(roots.witnessRoot, pathsMod.generationFilename(1)));
+  rewindHeadToGenesis(roots, genesisSha256, genesisWitnessSha256);
+  // generation 1 survives in the generation root: an orphan generation
+  // above the witness chain proves the witness root was rolled back alone.
+  assert.throws(() => loadMod.verifyCapabilityChain(roots, {}), { code: 'capability_witness_missing' });
+});
+
+test('load: CONSISTENT both-roots tail deletion + head rewind is NOT detected (documented threat-model boundary)', () => {
+  // Adjudicated against plan line 352: "A privileged actor that
+  // consistently rolls back all independent roots is outside the
+  // software-only threat model and requires a hardware monotonic counter
+  // or external witness; the plan states this limit rather than claiming
+  // tamper resistance." Deleting the tail generation AND its same-number
+  // witness AND rewinding the head is byte-for-byte indistinguishable from
+  // a chain that legitimately never advanced past genesis, so the verifier
+  // accepts it BY DESIGN. This test pins that stance so any future change
+  // to it is deliberate, not accidental.
+  const { roots, genesisSha256, genesisWitnessSha256 } = buildHealthyTwoGenerationChain();
+  fs.rmSync(path.join(roots.generationsDir, pathsMod.generationFilename(1)));
+  fs.rmSync(path.join(roots.witnessRoot, pathsMod.generationFilename(1)));
+  rewindHeadToGenesis(roots, genesisSha256, genesisWitnessSha256);
+  const result = loadMod.verifyCapabilityChain(roots, {});
+  assert.equal(result.maxGeneration, 0);
+  assert.equal(result.resumable, null);
+  assert.equal(result.head.generation, 0);
+});
+
+// ===========================================================================
+// Fix wave (review IMPORTANT 3): mode/ownership enforcement gaps.
+// ===========================================================================
+
+test('initialize rejects a pre-existing wrong-mode (0755) module root before any chain write', () => {
+  const { tmp, opts } = makeRoots();
+  // Pre-create the capability outer root at 0755 — plan line 351 requires
+  // /data/osi-sync at mode 0700; a pre-existing wrong-mode directory must
+  // fail closed, not be silently accepted.
+  fs.mkdirSync(opts.root, { recursive: true, mode: 0o755 });
+  fs.chmodSync(opts.root, 0o755);
+  assert.throws(
+    () => mod.initialize(Object.assign({}, opts, { operationId: OP_A, createdAt: CREATED_AT })),
+    { code: 'dir_wrong_mode' }
+  );
+  // No capability chain content may have been written under the bad root.
+  const roots = pathsMod.resolveRoots(opts);
+  assert.equal(fs.existsSync(roots.generationsDir), false);
+  assert.equal(fs.existsSync(roots.capabilityHeadPath), false);
+});
+
+test('initialize rejects a pre-existing module root with wrong ownership (adapter-reported)', () => {
+  const { opts } = makeRoots();
+  fs.mkdirSync(opts.root, { recursive: true, mode: 0o700 });
+  const foreignAdapter = {
+    claimOwner() {},
+    verifyOwner() { return false; }, // every pre-existing path reads as foreign-owned
+  };
+  assert.throws(
+    () => mod.initialize(Object.assign({}, opts, { operationId: OP_A, createdAt: CREATED_AT, ownershipAdapter: foreignAdapter })),
+    { code: 'dir_wrong_owner' }
+  );
+});
+
+test('load blocks when activity.sqlite has the wrong mode (0644)', () => {
+  const { opts } = makeRoots();
+  const created = initHealthy(opts);
+  const roots = created.roots;
+  fs.chmodSync(roots.activityDbPath, 0o644);
+  assert.throws(() => loadMod.verifyActivityRoots(roots, {}), { code: 'activity_db_wrong_mode' });
+  // status() goes through the same verification and must block too.
+  assert.throws(() => mod.status(opts), { code: 'activity_db_wrong_mode' });
+});
+
+test('load blocks when activity.sqlite is not owned by the service identity (adapter-reported)', () => {
+  const { opts } = makeRoots();
+  const created = initHealthy(opts);
+  const roots = created.roots;
+  const foreignDbAdapter = {
+    claimOwner() {},
+    verifyOwner(stat) { return !stat.isFile(); }, // regular files read as foreign-owned
+  };
+  assert.throws(
+    () => loadMod.verifyActivityRoots(roots, { ownershipAdapter: foreignDbAdapter }),
+    { code: 'activity_db_wrong_owner' }
+  );
+});
+
+// ===========================================================================
+// Fix wave (review MINORS 1-3).
+// ===========================================================================
+
+// MINOR 1: PRAGMA synchronous is per-connection state, not file state, so
+// it is enforced-at-open on every connection this module creates (and
+// asserted by verifyFixedSchema against the CURRENT connection). Note:
+// this build's SQLite defaults to synchronous=FULL already, so the
+// openReadOnly assertion below was green even before the explicit set —
+// the explicit set + connection-level assert guard against builds
+// compiled with a different SQLITE_DEFAULT_SYNCHRONOUS.
+test('every module-opened connection carries synchronous=FULL', () => {
+  const { tmp } = makeRoots();
+  fs.mkdirSync(tmp, { recursive: true });
+  const finalPath = path.join(tmp, 'activity.sqlite');
+  activityDb.createActivityDatabase({ finalPath, operationId: OP_A, createdAt: CREATED_AT, sourceKind: 'deployment' });
+  const db = activityDb.openReadOnly(finalPath);
+  try {
+    assert.equal(db.prepare('PRAGMA synchronous').get().synchronous, 2); // 2 === FULL
+  } finally {
+    db.close();
+  }
+});
+
+test('verifyFixedSchema rejects a connection whose synchronous mode is not FULL', () => {
+  const { tmp } = makeRoots();
+  fs.mkdirSync(tmp, { recursive: true });
+  const finalPath = path.join(tmp, 'activity.sqlite');
+  activityDb.createActivityDatabase({ finalPath, operationId: OP_A, createdAt: CREATED_AT, sourceKind: 'deployment' });
+  const { DatabaseSync } = require('node:sqlite');
+  const db = new DatabaseSync(finalPath);
+  db.exec('PRAGMA synchronous=OFF');
+  try {
+    assert.throws(() => activityDb.verifyFixedSchema(db), { code: 'activity_schema_pragma_mismatch' });
+  } finally {
+    db.close();
+  }
+});
+
+// MINOR 2: plan line 351 binds a purpose-specific restore-invalidation
+// proposal to "the unchanged linked recovery operation/`disposition-
+// restoring` phase" — the codec must carry the recovery phase, not just
+// the recovery operation ID.
+function validRestoreInvalidationDisposition() {
+  return {
+    format: 1,
+    generation: 1,
+    previousGeneration: 0,
+    previousSha256: 'a'.repeat(64),
+    operationId: OP_B,
+    kind: 'HISTORICAL_V2_DISPOSITION',
+    createdAt: CREATED_AT,
+    state: {
+      activeIdentitySha256: null,
+      mode: 'UNNEGOTIATED',
+      historicalV2Disposition: 'RECONCILIATION_REQUIRED',
+      historicalV2DispositionReceiptSha256: 'c'.repeat(64),
+      databaseRestore: { status: 'CLEAR', restoreEpoch: 0 },
+      sourceKind: 'restore-invalidation',
+      recoveryOperationId: OP_A,
+      recoveryPhase: 'disposition-restoring',
+      restorePreparationResultSha256: 'd'.repeat(64),
+      restoreReceiptSha256: 'e'.repeat(64),
+      restoredDatabaseAuditSha256: 'f'.repeat(64),
+      priorClearGenerationSha256: 'a1'.repeat(32),
+      identitySha256: 'b2'.repeat(32),
+    },
+  };
+}
+
+test('restore-invalidation disposition carries the linked recovery phase and requires its exact value', () => {
+  const gen = validRestoreInvalidationDisposition();
+  assert.doesNotThrow(() => codecs.validateGeneration(gen));
+  const missingPhase = validRestoreInvalidationDisposition();
+  delete missingPhase.state.recoveryPhase;
+  assert.throws(() => codecs.validateGeneration(missingPhase), { code: 'schema_missing_field' });
+  const wrongPhase = validRestoreInvalidationDisposition();
+  wrongPhase.state.recoveryPhase = 'database-restore-preparing';
+  assert.throws(() => codecs.validateGeneration(wrongPhase), { code: 'schema_invalid_field' });
+});
+
+// MINOR 3: plan line 333 — "The immutable factory anchor is exactly
+// {generation:0,entrySha256:<canonical genesis entry hash>};
+// factoryCommandActivityAnchorSha256 hashes those canonical bytes and
+// never hashes mutable activity_head or external head.json bytes."
+// Consumed by the future initialize-factory-zero verb (out of scope this
+// slice); the codec is pinned now so that slice inherits it rather than
+// re-inventing it.
+test('computeFactoryCommandActivityAnchorSha256 hashes the exact canonical anchor bytes', () => {
+  const entrySha256 = 'ab'.repeat(32);
+  const expected = codecs.sha256Hex(codecs.canonicalJson({ generation: 0, entrySha256 }));
+  assert.equal(activityDb.computeFactoryCommandActivityAnchorSha256(entrySha256), expected);
+  assert.equal(mod.computeFactoryCommandActivityAnchorSha256(entrySha256), expected);
+  // deterministic
+  assert.equal(
+    activityDb.computeFactoryCommandActivityAnchorSha256(entrySha256),
+    activityDb.computeFactoryCommandActivityAnchorSha256(entrySha256)
+  );
+  assert.throws(() => activityDb.computeFactoryCommandActivityAnchorSha256('not-a-sha'), { code: 'factory_anchor_invalid_entry_sha256' });
 });
