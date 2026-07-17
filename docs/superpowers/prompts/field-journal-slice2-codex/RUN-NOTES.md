@@ -212,3 +212,12 @@ Append-only execution log for the accepted Phase 0 and Phase 1-6 plans on `desig
 - The separate Sol quality reviewer initially required five quality corrections and one Task 22 test-authority correction. Luna corrected all six; the final Sol quality verdict is `APPROVED`.
 - The Phase 4 plan is ready to commit, and Task 15 may begin.
 - Broader Phase 3 remains separately in review; no finding was waived.
+
+## 2026-07-17T11:39:55+02:00 - Task 15 outcome
+
+- Task 15 committed `a0321b5a` with the exact three-file scope: `web/react-gui/src/services/__tests__/journalApi.test.ts`, `web/react-gui/src/services/journalApi.ts`, and `web/react-gui/src/types/journal.ts`. The change adds the atomic batch and plot resource API contracts.
+- Initial RED found five absent service methods; first GREEN was 12/12.
+- Sol specification review required rejection of path/body UUID mismatches and canonical UUID fixtures. Luna added RED with 2 failures and 12 passes, then GREEN reached 14/14. Final Sol specification verdict: `APPROVED`.
+- Sol quality review required canonical sync-version fixture semantics: plot create/update use 1/3, and group create/update use 1/4. Luna corrected this with RED at 3 failures and 11 passes, then GREEN reached 14/14. Final Sol quality verdict: `APPROVED`.
+- Controller verification passed focused 14/14, full 94/94 TSX and 946/946 Vitest across 122 files, typecheck, and diff check.
+- Task 16 is next. Broader Phase 3 remains separately in review; no finding was waived.
