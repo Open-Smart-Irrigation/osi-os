@@ -183,14 +183,53 @@ function verifyCapabilityChain(roots, { ownershipAdapter } = {}) {
   }
 
   const maxGeneration = generations.length - 1;
-  const fullyWitnessedUpTo = witnessByGeneration.size - 1; // -1 if none
+  const maxWitness = witnessByGeneration.size - 1; // -1 if none; contiguous from 0 enforced above
 
-  // At most the single highest generation may lack a witness (the
-  // generation-created/witness-missing resume point); anything below that
-  // must be witnessed, or this is a deleted/removed witness.
-  if (fullyWitnessedUpTo < maxGeneration - 1) {
-    throw loadError('capability_witness_missing', 'a capability generation below the highest is missing its required witness');
+  // Bidirectional generation/witness set equality (review IMPORTANT 1):
+  // every generation must have exactly one same-number witness AND every
+  // witness exactly one same-number generation, and the head must identify
+  // the max of the UNION of both sets. Uniqueness and contiguity are
+  // enforced by the numbering checks above; a witness with no same-number
+  // generation (orphan witness — the surviving evidence of a
+  // generation-root-only rollback, plan line 351 "deleting a tail and
+  // restoring its older head") was already rejected inside the witness
+  // loop via capability_witness_orphan. Here we enforce the other
+  // direction: a generation with no same-number witness (orphan generation
+  // above the witness chain — the surviving evidence of a
+  // witness-root-only rollback) blocks, with exactly one exception: the
+  // GENESIS-adjacent WITNESS_CREATION resume state (generation 0 written,
+  // witness and head not yet created — a crash between the genesis write
+  // and its witness write during initialization).
+  //
+  // Deliberately NOT detected: a CONSISTENT rollback of the generation
+  // root, the witness root, AND the head together is byte-for-byte
+  // indistinguishable from a chain that legitimately never advanced, and
+  // plan line 352 places it outside the software-only threat model ("A
+  // privileged actor that consistently rolls back all independent roots is
+  // outside the software-only threat model and requires a hardware
+  // monotonic counter or external witness"). See the pinning test in
+  // index.test.js.
+  if (maxWitness < maxGeneration) {
+    if (maxGeneration === 0 && maxWitness === -1 && !fs.existsSync(roots.capabilityHeadPath)) {
+      return {
+        present: true,
+        generations,
+        witnessByGeneration,
+        head: null,
+        maxGeneration,
+        resumable: { kind: 'WITNESS_CREATION', targetGeneration: 0 },
+      };
+    }
+    throw loadError('capability_witness_missing', 'a capability generation has no same-number witness (orphan generation above the witness chain)', {
+      maxGeneration,
+      maxWitness,
+    });
   }
+  // maxWitness > maxGeneration is impossible here: every witness was
+  // required to match a same-number generation inside the loop above
+  // (capability_witness_orphan otherwise), so from this point the two sets
+  // are equal and chainMax is the max of their union.
+  const chainMax = maxGeneration;
 
   const head = readJsonFile(roots.capabilityHeadPath);
   let headRecord = null;
@@ -204,17 +243,19 @@ function verifyCapabilityChain(roots, { ownershipAdapter } = {}) {
     if (!witnessRecord || witnessRecord.witnessSha256 !== headRecord.witnessSha256) {
       throw loadError('capability_head_witness_mismatch', 'capability head.json witnessSha256 does not match the on-disk witness');
     }
-    if (headRecord.generation < maxGeneration) {
-      // Only the GENESIS-adjacent single-unheaded-proposal resume is
-      // implemented in this slice (brief: "Single-valid-unheaded-proposal
-      // resume rules implemented for GENESIS-adjacent states"); every
-      // other N-to-N+1 unheaded gap — even a fully witnessed one — is
-      // indistinguishable from an attacker replacing head.json with an
-      // older-but-still-valid pointer and blocks rather than resumes.
-      if (headRecord.generation !== 0 || maxGeneration !== 1 || !witnessByGeneration.has(maxGeneration)) {
-        throw loadError('capability_head_rollback', 'capability head.json points at a stale generation while a further, unrelated chain state exists', {
+    if (headRecord.generation < chainMax) {
+      // The head must identify the highest committed pair (the max of the
+      // generation/witness union). Only the GENESIS-adjacent
+      // single-unheaded-proposal resume is implemented in this slice
+      // (brief: "Single-valid-unheaded-proposal resume rules implemented
+      // for GENESIS-adjacent states"); every other stale-head state — even
+      // a fully witnessed one — is indistinguishable from an attacker
+      // replacing head.json with an older-but-still-valid pointer and
+      // blocks rather than resumes.
+      if (headRecord.generation !== 0 || chainMax !== 1 || !witnessByGeneration.has(chainMax)) {
+        throw loadError('capability_head_rollback', 'capability head.json does not identify the highest committed generation/witness pair', {
           headGeneration: headRecord.generation,
-          maxGeneration,
+          chainMax,
         });
       }
       // resumable: witnessed proposal one step ahead of head.
@@ -224,23 +265,14 @@ function verifyCapabilityChain(roots, { ownershipAdapter } = {}) {
         witnessByGeneration,
         head: headRecord,
         maxGeneration,
-        resumable: { kind: 'HEAD_PUBLICATION', targetGeneration: maxGeneration },
+        resumable: { kind: 'HEAD_PUBLICATION', targetGeneration: chainMax },
       };
     }
-  } else if (maxGeneration === 0 && !witnessByGeneration.has(0)) {
-    // Generation 0 exists but neither witness nor head: resumable
-    // "missing witness" point.
-    return {
-      present: true,
-      generations,
-      witnessByGeneration,
-      head: null,
-      maxGeneration,
-      resumable: { kind: 'WITNESS_CREATION', targetGeneration: 0 },
-    };
-  } else if (maxGeneration === 0 && witnessByGeneration.has(0)) {
+  } else if (chainMax === 0) {
     // Generation 0 + witness 0 exist, head absent: resumable head
     // publication (GENESIS-adjacent case explicitly named in the brief).
+    // (The generation-without-witness variant returned WITNESS_CREATION
+    // above, before the head was even considered.)
     return {
       present: true,
       generations,

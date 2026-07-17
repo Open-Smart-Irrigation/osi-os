@@ -1025,8 +1025,12 @@ test('load: a non-GENESIS resumable-shaped gap validates-and-blocks rather than 
   appendHandCraftedGeneration(roots, genesisSha256, gen1, witness1);
   const gen2 = buildGen1(codecs.canonicalSha256(gen1), { generation: 2, previousGeneration: 1, operationId: crypto.randomUUID() });
   // generation 2 written, witness NOT written, head still at generation 1.
+  // Since the IMPORTANT-1 fix, this blocks at the bidirectional
+  // set-equality check (an orphan generation above the witness chain is
+  // indistinguishable from a witness-root rollback) rather than falling
+  // through to the head comparison — same block, stricter classification.
   pathsMod.writeExclusiveFile(path.join(roots.generationsDir, pathsMod.generationFilename(2)), Buffer.from(codecs.canonicalJson(gen2), 'utf8'), pathsMod.defaultOwnershipAdapter);
-  assert.throws(() => loadMod.verifyCapabilityChain(roots, {}), { code: 'capability_head_rollback' });
+  assert.throws(() => loadMod.verifyCapabilityChain(roots, {}), { code: 'capability_witness_missing' });
 });
 
 test('load: activity database rollback against a newer external head is detected', () => {
@@ -1139,4 +1143,85 @@ test('index.status never writes to disk (read-only)', () => {
   mod.status(opts);
   const after = fs.readFileSync(roots.capabilityHeadPath, 'utf8');
   assert.equal(before, after);
+});
+
+// ===========================================================================
+// Fix wave (review IMPORTANT 1): single-root tail-deletion rollback
+// detection — bidirectional generation/witness set equality.
+// ===========================================================================
+
+// Builds a healthy, fully committed 2-generation chain (genesis + a
+// hand-crafted NEGOTIATED generation 1 with its witness and head at 1) and
+// returns everything needed to surgically damage single roots afterwards.
+function buildHealthyTwoGenerationChain() {
+  const { opts } = makeRoots();
+  const created = initHealthy(opts);
+  const roots = created.roots;
+  const genesisSha256 = codecs.canonicalSha256(created.capabilityGeneration);
+  const genesisWitnessSha256 = codecs.canonicalSha256(created.capabilityWitness);
+  const gen1 = buildGen1(genesisSha256);
+  const witness1 = {
+    format: 1,
+    generation: 1,
+    generationSha256: codecs.canonicalSha256(gen1),
+    previousWitnessSha256: genesisWitnessSha256,
+    operationId: OP_B,
+  };
+  appendHandCraftedGeneration(roots, genesisSha256, gen1, witness1);
+  // sanity: healthy before the attack
+  const healthy = loadMod.verifyCapabilityChain(roots, {});
+  assert.equal(healthy.maxGeneration, 1);
+  assert.equal(healthy.resumable, null);
+  return { roots, created, genesisSha256, genesisWitnessSha256, gen1, witness1 };
+}
+
+function rewindHeadToGenesis(roots, genesisSha256, genesisWitnessSha256) {
+  const rolledBackHead = codecs.buildCapabilityHead({
+    generation: 0,
+    generationSha256: genesisSha256,
+    witnessSha256: genesisWitnessSha256,
+  });
+  pathsMod.atomicReplaceFile(
+    roots.capabilityHeadPath,
+    Buffer.from(codecs.canonicalJson(rolledBackHead), 'utf8'),
+    pathsMod.defaultOwnershipAdapter
+  );
+}
+
+test('load: tail generation deleted + head rewound, witness root intact -> BLOCKED (single-root rollback)', () => {
+  const { roots, genesisSha256, genesisWitnessSha256 } = buildHealthyTwoGenerationChain();
+  fs.rmSync(path.join(roots.generationsDir, pathsMod.generationFilename(1)));
+  rewindHeadToGenesis(roots, genesisSha256, genesisWitnessSha256);
+  // witness 1 survives in the independent witness root: an orphan witness
+  // above the head proves the generation root was rolled back alone.
+  assert.throws(() => loadMod.verifyCapabilityChain(roots, {}), { code: 'capability_witness_orphan' });
+});
+
+test('load: tail witness deleted + head rewound, generation root intact -> BLOCKED (single-root rollback)', () => {
+  const { roots, genesisSha256, genesisWitnessSha256 } = buildHealthyTwoGenerationChain();
+  fs.rmSync(path.join(roots.witnessRoot, pathsMod.generationFilename(1)));
+  rewindHeadToGenesis(roots, genesisSha256, genesisWitnessSha256);
+  // generation 1 survives in the generation root: an orphan generation
+  // above the witness chain proves the witness root was rolled back alone.
+  assert.throws(() => loadMod.verifyCapabilityChain(roots, {}), { code: 'capability_witness_missing' });
+});
+
+test('load: CONSISTENT both-roots tail deletion + head rewind is NOT detected (documented threat-model boundary)', () => {
+  // Adjudicated against plan line 352: "A privileged actor that
+  // consistently rolls back all independent roots is outside the
+  // software-only threat model and requires a hardware monotonic counter
+  // or external witness; the plan states this limit rather than claiming
+  // tamper resistance." Deleting the tail generation AND its same-number
+  // witness AND rewinding the head is byte-for-byte indistinguishable from
+  // a chain that legitimately never advanced past genesis, so the verifier
+  // accepts it BY DESIGN. This test pins that stance so any future change
+  // to it is deliberate, not accidental.
+  const { roots, genesisSha256, genesisWitnessSha256 } = buildHealthyTwoGenerationChain();
+  fs.rmSync(path.join(roots.generationsDir, pathsMod.generationFilename(1)));
+  fs.rmSync(path.join(roots.witnessRoot, pathsMod.generationFilename(1)));
+  rewindHeadToGenesis(roots, genesisSha256, genesisWitnessSha256);
+  const result = loadMod.verifyCapabilityChain(roots, {});
+  assert.equal(result.maxGeneration, 0);
+  assert.equal(result.resumable, null);
+  assert.equal(result.head.generation, 0);
 });
