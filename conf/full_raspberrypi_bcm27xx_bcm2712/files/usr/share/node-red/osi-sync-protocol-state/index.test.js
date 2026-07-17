@@ -1343,3 +1343,104 @@ test('load blocks when activity.sqlite is not owned by the service identity (ada
     { code: 'activity_db_wrong_owner' }
   );
 });
+
+// ===========================================================================
+// Fix wave (review MINORS 1-3).
+// ===========================================================================
+
+// MINOR 1: PRAGMA synchronous is per-connection state, not file state, so
+// it is enforced-at-open on every connection this module creates (and
+// asserted by verifyFixedSchema against the CURRENT connection). Note:
+// this build's SQLite defaults to synchronous=FULL already, so the
+// openReadOnly assertion below was green even before the explicit set —
+// the explicit set + connection-level assert guard against builds
+// compiled with a different SQLITE_DEFAULT_SYNCHRONOUS.
+test('every module-opened connection carries synchronous=FULL', () => {
+  const { tmp } = makeRoots();
+  fs.mkdirSync(tmp, { recursive: true });
+  const finalPath = path.join(tmp, 'activity.sqlite');
+  activityDb.createActivityDatabase({ finalPath, operationId: OP_A, createdAt: CREATED_AT, sourceKind: 'deployment' });
+  const db = activityDb.openReadOnly(finalPath);
+  try {
+    assert.equal(db.prepare('PRAGMA synchronous').get().synchronous, 2); // 2 === FULL
+  } finally {
+    db.close();
+  }
+});
+
+test('verifyFixedSchema rejects a connection whose synchronous mode is not FULL', () => {
+  const { tmp } = makeRoots();
+  fs.mkdirSync(tmp, { recursive: true });
+  const finalPath = path.join(tmp, 'activity.sqlite');
+  activityDb.createActivityDatabase({ finalPath, operationId: OP_A, createdAt: CREATED_AT, sourceKind: 'deployment' });
+  const { DatabaseSync } = require('node:sqlite');
+  const db = new DatabaseSync(finalPath);
+  db.exec('PRAGMA synchronous=OFF');
+  try {
+    assert.throws(() => activityDb.verifyFixedSchema(db), { code: 'activity_schema_pragma_mismatch' });
+  } finally {
+    db.close();
+  }
+});
+
+// MINOR 2: plan line 351 binds a purpose-specific restore-invalidation
+// proposal to "the unchanged linked recovery operation/`disposition-
+// restoring` phase" — the codec must carry the recovery phase, not just
+// the recovery operation ID.
+function validRestoreInvalidationDisposition() {
+  return {
+    format: 1,
+    generation: 1,
+    previousGeneration: 0,
+    previousSha256: 'a'.repeat(64),
+    operationId: OP_B,
+    kind: 'HISTORICAL_V2_DISPOSITION',
+    createdAt: CREATED_AT,
+    state: {
+      activeIdentitySha256: null,
+      mode: 'UNNEGOTIATED',
+      historicalV2Disposition: 'RECONCILIATION_REQUIRED',
+      historicalV2DispositionReceiptSha256: 'c'.repeat(64),
+      databaseRestore: { status: 'CLEAR', restoreEpoch: 0 },
+      sourceKind: 'restore-invalidation',
+      recoveryOperationId: OP_A,
+      recoveryPhase: 'disposition-restoring',
+      restorePreparationResultSha256: 'd'.repeat(64),
+      restoreReceiptSha256: 'e'.repeat(64),
+      restoredDatabaseAuditSha256: 'f'.repeat(64),
+      priorClearGenerationSha256: 'a1'.repeat(32),
+      identitySha256: 'b2'.repeat(32),
+    },
+  };
+}
+
+test('restore-invalidation disposition carries the linked recovery phase and requires its exact value', () => {
+  const gen = validRestoreInvalidationDisposition();
+  assert.doesNotThrow(() => codecs.validateGeneration(gen));
+  const missingPhase = validRestoreInvalidationDisposition();
+  delete missingPhase.state.recoveryPhase;
+  assert.throws(() => codecs.validateGeneration(missingPhase), { code: 'schema_missing_field' });
+  const wrongPhase = validRestoreInvalidationDisposition();
+  wrongPhase.state.recoveryPhase = 'database-restore-preparing';
+  assert.throws(() => codecs.validateGeneration(wrongPhase), { code: 'schema_invalid_field' });
+});
+
+// MINOR 3: plan line 333 — "The immutable factory anchor is exactly
+// {generation:0,entrySha256:<canonical genesis entry hash>};
+// factoryCommandActivityAnchorSha256 hashes those canonical bytes and
+// never hashes mutable activity_head or external head.json bytes."
+// Consumed by the future initialize-factory-zero verb (out of scope this
+// slice); the codec is pinned now so that slice inherits it rather than
+// re-inventing it.
+test('computeFactoryCommandActivityAnchorSha256 hashes the exact canonical anchor bytes', () => {
+  const entrySha256 = 'ab'.repeat(32);
+  const expected = codecs.sha256Hex(codecs.canonicalJson({ generation: 0, entrySha256 }));
+  assert.equal(activityDb.computeFactoryCommandActivityAnchorSha256(entrySha256), expected);
+  assert.equal(mod.computeFactoryCommandActivityAnchorSha256(entrySha256), expected);
+  // deterministic
+  assert.equal(
+    activityDb.computeFactoryCommandActivityAnchorSha256(entrySha256),
+    activityDb.computeFactoryCommandActivityAnchorSha256(entrySha256)
+  );
+  assert.throws(() => activityDb.computeFactoryCommandActivityAnchorSha256('not-a-sha'), { code: 'factory_anchor_invalid_entry_sha256' });
+});

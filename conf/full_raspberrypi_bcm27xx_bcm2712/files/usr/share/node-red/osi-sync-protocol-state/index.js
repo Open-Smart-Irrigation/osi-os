@@ -201,6 +201,10 @@ module.exports = {
   // activity db
   recoverHotJournalIfPresent: activityDb.recoverHotJournalIfPresent,
   defaultRecoveryOnlyAdapter: activityDb.defaultRecoveryOnlyAdapter,
+  // Factory anchor codec (plan line 333) — consumed by the future
+  // initialize-factory-zero verb; pinned in this slice so the formula is
+  // inherited, not re-derived.
+  computeFactoryCommandActivityAnchorSha256: activityDb.computeFactoryCommandActivityAnchorSha256,
 
   // locks
   acquireFourRootLocks: locks.acquireFourRootLocks,
