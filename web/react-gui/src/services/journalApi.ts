@@ -1,14 +1,17 @@
 import { api } from './api';
 import type {
+  BatchMutationReceipt,
+  CreateFinalBatchPayload,
   EntryFinalMutationReceipt,
   EntryListFilters,
   EntryListResponse,
   EntryMutationReceipt,
-  EntryValueInput,
-  EntryWriteStatus,
   JournalCatalog,
+  JournalEntryWriteFields,
   JournalPlot,
+  JournalPlotGroupWritePayload,
   JournalPlotListResponse,
+  JournalPlotWritePayload,
   PlotGroup,
   PlotGroupListResponse,
 } from '../types/journal';
@@ -17,31 +20,9 @@ export interface JournalCatalogOptions {
   includeDefinitions?: boolean;
 }
 
-interface EntryWritePayload {
-  status: EntryWriteStatus;
+interface EntryWritePayload extends JournalEntryWriteFields {
   plot_uuid: string | null;
-  zone_uuid?: string | null;
-  device_eui?: string | null;
-  season_crop?: string | null;
-  season_variety?: string | null;
-  campaign_uuid?: string | null;
-  protocol_code?: string | null;
-  protocol_version?: string | null;
-  observation_unit_code?: string | null;
-  pass_uuid?: string | null;
-  activity_code: string;
-  template_code: string;
-  template_version: number;
-  layout_code: string;
-  layout_version: number;
-  occurred_start_local: string;
-  occurred_end_local?: string | null;
-  occurred_timezone: string;
-  occurred_utc_offset_minutes?: number | null;
-  occurred_end_utc_offset_minutes?: number | null;
   duplicate_guard_ack_entry_uuid?: string | null;
-  values: EntryValueInput[];
-  note?: string | null;
   batch_uuid?: string | null;
 }
 
@@ -74,6 +55,9 @@ export const journalApi = {
   createEntry: async (payload: CreateEntryPayload): Promise<EntryMutationReceipt> =>
     (await api.post<EntryMutationReceipt>('/api/journal/entries', payload)).data,
 
+  createFinalBatch: async (payload: CreateFinalBatchPayload): Promise<BatchMutationReceipt> =>
+    (await api.post<BatchMutationReceipt>('/api/journal/entries', payload)).data,
+
   updateEntry: async (
     uuid: string,
     payload: UpdateEntryPayload,
@@ -100,8 +84,46 @@ export const journalApi = {
   listPlots: async (): Promise<JournalPlot[]> =>
     (await api.get<JournalPlotListResponse>('/api/journal/plots')).data.plots,
 
+  createPlot: async (payload: JournalPlotWritePayload): Promise<JournalPlot> =>
+    (await api.post<{ plot: JournalPlot }>('/api/journal/plots', payload)).data.plot,
+
+  updatePlot: async (
+    uuid: string,
+    payload: JournalPlotWritePayload,
+  ): Promise<JournalPlot> => {
+    if (uuid !== payload.plot_uuid) {
+      throw new Error('Plot UUID path/body mismatch');
+    }
+
+    return (
+      await api.put<{ plot: JournalPlot }>(
+        `/api/journal/plots/${encodeURIComponent(uuid)}`,
+        payload,
+      )
+    ).data.plot;
+  },
+
   listPlotGroups: async (): Promise<PlotGroup[]> =>
     (await api.get<PlotGroupListResponse>('/api/journal/plot-groups')).data.plot_groups,
+
+  createPlotGroup: async (payload: JournalPlotGroupWritePayload): Promise<PlotGroup> =>
+    (await api.post<{ plot_group: PlotGroup }>('/api/journal/plot-groups', payload)).data.plot_group,
+
+  updatePlotGroup: async (
+    uuid: string,
+    payload: JournalPlotGroupWritePayload,
+  ): Promise<PlotGroup> => {
+    if (uuid !== payload.group_uuid) {
+      throw new Error('Plot-group UUID path/body mismatch');
+    }
+
+    return (
+      await api.put<{ plot_group: PlotGroup }>(
+        `/api/journal/plot-groups/${encodeURIComponent(uuid)}`,
+        payload,
+      )
+    ).data.plot_group;
+  },
 };
 
 export function isJournalUnavailable(err: unknown): boolean {
