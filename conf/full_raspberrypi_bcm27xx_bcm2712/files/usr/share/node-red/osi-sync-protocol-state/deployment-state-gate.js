@@ -1,31 +1,36 @@
 'use strict';
 // osi-sync-protocol-state/deployment-state-gate.js — the minimal
 // deployment-state read/validation this slice's `initialize` CLI verb
-// needs to enforce "exact parent phase protocol-initializing" (plan line
-// 329: "The deployment coordinator runs initialize with writers stopped,
-// exact parent phase protocol-initializing, and a fsynced operation before
-// the first Node-RED start.").
+// needs to enforce "exact parent phase protocol-initializing" (stop-loss
+// plan line 329: "The deployment coordinator runs initialize with writers
+// stopped, exact parent phase protocol-initializing, and a fsynced
+// operation before the first Node-RED start.").
 //
-// SCOPE NOTE (execution report flags this as a resolved plan-text
-// ambiguity, not a design choice made freely): `scripts/lib/deployment-
-// state.js` is the plan's real, shared deployment-lease/phase/receipt
-// library (2026-07-15-sync-delivery-stop-loss.md line 280 and
-// 2026-07-15-refactor-boundary-hardening.md line 86-87), but it does not
-// exist yet in this worktree/branch — it belongs to a different task's
-// slice. The authoritative plan region for THIS brief (lines 322-353) also
-// never gives a literal field-by-field JSON envelope for
-// `/data/osi-deploy/deployment-state.json` the way it does for the
-// capability generation/witness/head schemas; it only shows the CLI's
-// `--expected-deployment-id/--expected-phase/--expected-parent-generation`
-// flags (line 379-390) that a caller compares the file against. Per this
-// slice's brief: "implement the read/validation against an injectable
-// deployment-state.json... do NOT import the deployment-state library,
-// parse the documented envelope shape." The envelope below
-// (`{format, deploymentId, phase, parentGeneration}`) is this file's own
-// minimal, closed reading of that CLI contract — sufficient to gate
-// `initialize`, and nothing more. A later slice that lands the real
-// `scripts/lib/deployment-state.js` owns reconciling/replacing this
-// reader; it must not be assumed frozen.
+// Envelope shape: the REAL deployment-state envelope, specified at
+// 2026-07-15-refactor-repair-program.md line 160 and implemented by the
+// sibling deployment-state slice, is exactly
+//   `{format:2, parentDeployment, activeSubOperation}`
+// with the deployment identity, phase, and generation nested under
+// `parentDeployment`, and `activeSubOperation` either null or exactly one
+// recovery|selection-rehearsal|staging-gc record. This gate validates that
+// real shape strictly at the TOP level (exactly those three keys, format
+// exactly 2, unknown top-level fields rejected) and validates the specific
+// `parentDeployment` fields it gates on (deploymentId, phase, generation)
+// while TOLERATING the sibling library's other parentDeployment fields
+// (lease, hashes, stamps, receipt hashes, probe permit, databaseLineage,
+// previous-terminal identity, ...) — that full closed field set is owned
+// by `scripts/lib/deployment-state.js`, and re-declaring it here would
+// make this gate reject every legitimate envelope the moment the sibling
+// library evolves a field. For `initialize`, `activeSubOperation` must be
+// exactly null: protocol initialization may never run while a recovery,
+// rehearsal, or staging-GC sub-operation is in flight.
+//
+// This remains a standalone strict reader by design: it does NOT import
+// the deployment-state library (that wiring is integration work for the
+// slice that registers this helper on the shipping surfaces). An earlier
+// revision of this file parsed an invented flat `{format:1, deploymentId,
+// phase, parentGeneration}` shape; that was wrong and was replaced with
+// the real format-2 envelope during the review fix wave.
 
 const fs = require('node:fs');
 const { codecError, validateClosedObject } = require('./codecs');
@@ -37,13 +42,30 @@ function gateError(code, message, extra) {
 
 const isNonEmptyString = (v) => typeof v === 'string' && v.length > 0;
 const isNonNegInt = (v) => Number.isSafeInteger(v) && v >= 0;
+const isPlainObject = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
 
-const DEPLOYMENT_STATE_FIELDS = {
-  format: { check: (v) => v === 1 },
-  deploymentId: { check: isNonEmptyString },
-  phase: { check: isNonEmptyString },
-  parentGeneration: { check: isNonNegInt },
+// Top level is closed: exactly these three keys, no more, no fewer.
+const DEPLOYMENT_STATE_TOP_FIELDS = {
+  format: { check: (v) => v === 2 },
+  parentDeployment: { check: isPlainObject },
+  activeSubOperation: { check: (v) => v === null || isPlainObject(v) },
 };
+
+// The parentDeployment fields this gate actually checks. Other fields are
+// deliberately tolerated (see header note); these three must be present
+// and well-formed or the envelope is unusable for gating.
+function validateParentDeploymentGatedFields(parentDeployment) {
+  if (!isNonEmptyString(parentDeployment.deploymentId)) {
+    throw gateError('deployment_state_parent_invalid', 'parentDeployment.deploymentId must be a non-empty string', { field: 'deploymentId' });
+  }
+  if (!isNonEmptyString(parentDeployment.phase)) {
+    throw gateError('deployment_state_parent_invalid', 'parentDeployment.phase must be a non-empty string', { field: 'phase' });
+  }
+  if (!isNonNegInt(parentDeployment.generation)) {
+    throw gateError('deployment_state_parent_invalid', 'parentDeployment.generation must be a non-negative safe integer', { field: 'generation' });
+  }
+  return parentDeployment;
+}
 
 function readDeploymentStateFile(deploymentStatePath) {
   assertNoSymlinkComponents(deploymentStatePath);
@@ -62,29 +84,38 @@ function readDeploymentStateFile(deploymentStatePath) {
   } catch (_err) {
     throw gateError('deployment_state_malformed', `deployment-state file is not valid JSON: ${deploymentStatePath}`, { path: deploymentStatePath });
   }
-  return validateClosedObject(parsed, DEPLOYMENT_STATE_FIELDS, 'deployment-state envelope');
+  validateClosedObject(parsed, DEPLOYMENT_STATE_TOP_FIELDS, 'deployment-state envelope');
+  validateParentDeploymentGatedFields(parsed.parentDeployment);
+  return parsed;
 }
 
-// requireDeploymentPhase: reads+validates the envelope and requires it to
-// exactly match the expected deployment ID / phase / parent generation.
+// requireDeploymentPhase: reads+validates the envelope and requires the
+// parent deployment to exactly match the expected deployment ID / phase /
+// generation, with no sub-operation in flight.
 function requireDeploymentPhase(deploymentStatePath, { expectedDeploymentId, expectedPhase, expectedParentGeneration }) {
   const state = readDeploymentStateFile(deploymentStatePath);
-  if (state.deploymentId !== expectedDeploymentId) {
-    throw gateError('deployment_state_wrong_deployment_id', 'deployment-state deploymentId does not match --expected-deployment-id', {
-      actual: state.deploymentId,
+  const parent = state.parentDeployment;
+  if (parent.deploymentId !== expectedDeploymentId) {
+    throw gateError('deployment_state_wrong_deployment_id', 'parentDeployment.deploymentId does not match --expected-deployment-id', {
+      actual: parent.deploymentId,
       expected: expectedDeploymentId,
     });
   }
-  if (state.phase !== expectedPhase) {
-    throw gateError('deployment_state_wrong_phase', `deployment-state phase "${state.phase}" !== required "${expectedPhase}"`, {
-      actual: state.phase,
+  if (parent.phase !== expectedPhase) {
+    throw gateError('deployment_state_wrong_phase', `parentDeployment.phase "${parent.phase}" !== required "${expectedPhase}"`, {
+      actual: parent.phase,
       expected: expectedPhase,
     });
   }
-  if (state.parentGeneration !== expectedParentGeneration) {
-    throw gateError('deployment_state_wrong_parent_generation', 'deployment-state parentGeneration does not match --expected-parent-generation', {
-      actual: state.parentGeneration,
+  if (parent.generation !== expectedParentGeneration) {
+    throw gateError('deployment_state_wrong_parent_generation', 'parentDeployment.generation does not match --expected-parent-generation', {
+      actual: parent.generation,
       expected: expectedParentGeneration,
+    });
+  }
+  if (state.activeSubOperation !== null) {
+    throw gateError('deployment_state_active_sub_operation', 'protocol initialization requires activeSubOperation to be null; a sub-operation is in flight', {
+      activeSubOperationKind: state.activeSubOperation && state.activeSubOperation.kind,
     });
   }
   return state;
@@ -92,7 +123,7 @@ function requireDeploymentPhase(deploymentStatePath, { expectedDeploymentId, exp
 
 module.exports = {
   gateError,
-  DEPLOYMENT_STATE_FIELDS,
+  DEPLOYMENT_STATE_TOP_FIELDS,
   readDeploymentStateFile,
   requireDeploymentPhase,
 };
