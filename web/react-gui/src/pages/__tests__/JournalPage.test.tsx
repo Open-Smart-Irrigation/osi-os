@@ -91,169 +91,241 @@ vi.mock('../../components/journal/capture/JournalCaptureFlow', async () => {
 
 import { JournalPage } from '../JournalPage';
 import { IrrigationZoneCard } from '../../components/farming/IrrigationZoneCard';
-import type { EntryAggregate, JournalCatalog, JournalPlot } from '../../types/journal';
+import { partitionCarryForward } from '../../journal/carryForward';
+import type {
+  EntryAggregate,
+  JournalCatalog,
+  JournalPlot,
+  JournalVocabRow,
+} from '../../types/journal';
+import type { UpdateEntryPayload } from '../../services/journalApi';
 import type { IrrigationZone } from '../../types/farming';
 
-const captureCatalog: JournalCatalog = {
-  catalog_version: 7,
-  catalog_hash: 'catalog-hash',
-  vocab: [{
-    code: 'irrigation',
-    kind: 'activity',
+const openFieldActivityCodes = [
+  'irrigation',
+  'fertilization',
+  'fertigation',
+  'plant_protection_application',
+  'weed_control_nonchemical',
+  'seeding',
+  'planting_transplanting',
+  'pruning',
+  'crop_care',
+  'tillage_soil_work',
+  'mowing',
+  'harvest',
+  'sampling',
+  'general_observation',
+  'pest_disease_observation',
+  'equipment_maintenance',
+] as const;
+
+function catalogVocabRow(
+  code: string,
+  kind: JournalVocabRow['kind'],
+  overrides: Partial<JournalVocabRow> = {},
+): JournalVocabRow {
+  return {
     parent_code: null,
     value_type: null,
     quantity_kind: null,
     basis: null,
     default_unit_code: null,
-    icon_key: 'water',
-    scope: 'core',
-    owner_user_uuid: null,
-    gateway_device_eui: null,
-    custom_field_uuid: null,
-    active: 1,
-    sort_order: 1,
-    sync_version: 0,
-    created_at: '2026-07-16T00:00:00.000Z',
-    deleted_at: null,
-    catalog_errors: [],
-    labels: { en: 'Irrigation' },
-    constraints: null,
-  }, {
-    code: 'attr.crop',
-    kind: 'attribute',
-    parent_code: null,
-    value_type: 'choice',
-    quantity_kind: null,
-    basis: null,
-    default_unit_code: null,
     icon_key: null,
     scope: 'core',
     owner_user_uuid: null,
     gateway_device_eui: null,
     custom_field_uuid: null,
     active: 1,
-    sort_order: 2,
+    sort_order: 0,
     sync_version: 0,
-    created_at: '2026-07-16T00:00:00.000Z',
+    created_at: '2026-07-12T00:00:00.000Z',
     deleted_at: null,
-    catalog_errors: [],
-    labels: { en: 'Crop' },
-    constraints: {},
-  }, {
-    code: 'agroscope.crop.barley_winter',
-    kind: 'choice',
-    parent_code: 'attr.crop',
-    value_type: null,
-    quantity_kind: null,
-    basis: null,
-    default_unit_code: null,
-    icon_key: null,
-    scope: 'core',
-    owner_user_uuid: null,
-    gateway_device_eui: null,
-    custom_field_uuid: null,
-    active: 1,
-    sort_order: 3,
-    sync_version: 0,
-    created_at: '2026-07-16T00:00:00.000Z',
-    deleted_at: null,
-    catalog_errors: [],
-    labels: { en: 'barley, winter' },
-    constraints: {},
-  }, {
-    code: 'attr.method',
-    kind: 'attribute',
-    parent_code: null,
-    value_type: 'text',
-    quantity_kind: null,
-    basis: null,
-    default_unit_code: null,
-    icon_key: null,
-    scope: 'core',
-    owner_user_uuid: null,
-    gateway_device_eui: null,
-    custom_field_uuid: null,
-    active: 1,
-    sort_order: 4,
-    sync_version: 0,
-    created_at: '2026-07-16T00:00:00.000Z',
-    deleted_at: null,
-    catalog_errors: [],
-    labels: { en: 'Method' },
-    constraints: { maxlength: 300 },
-  }, {
-    code: 'attr.operator',
-    kind: 'attribute',
-    parent_code: null,
-    value_type: 'text',
-    quantity_kind: null,
-    basis: null,
-    default_unit_code: null,
-    icon_key: null,
-    scope: 'core',
-    owner_user_uuid: null,
-    gateway_device_eui: null,
-    custom_field_uuid: null,
-    active: 1,
-    sort_order: 5,
-    sync_version: 0,
-    created_at: '2026-07-16T00:00:00.000Z',
-    deleted_at: null,
-    catalog_errors: [],
-    labels: { en: 'Operator' },
-    constraints: { maxlength: 160 },
-  }, {
-    code: 'attr.equipment',
-    kind: 'attribute',
-    parent_code: null,
-    value_type: 'text',
-    quantity_kind: null,
-    basis: null,
-    default_unit_code: null,
-    icon_key: null,
-    scope: 'core',
-    owner_user_uuid: null,
-    gateway_device_eui: null,
-    custom_field_uuid: null,
-    active: 1,
-    sort_order: 6,
-    sync_version: 0,
-    created_at: '2026-07-16T00:00:00.000Z',
-    deleted_at: null,
-    catalog_errors: [],
-    labels: { en: 'Equipment' },
-    constraints: { maxlength: 300 },
-  }],
-  templates: ['farmer_quick', 'full_record', 'research_observation'].map((code, index) => ({
-    code,
-    version: index + 1,
-    active: 1,
     catalog_errors: [],
     labels: { en: code },
-    definition: {
-      fields: ['attr.crop', 'attr.method'],
-      sections: [],
-      carry_forward: ['attr.operator', 'attr.equipment', 'attr.method'],
-      require_explicit_choices: false,
-      show_standard_mappings: false,
-      activity_requirements: {},
-      conditional_groups: [],
-      requirements: { required: [], optional: [], required_any: [] },
-    },
-  })),
-  layouts: [{
-    code: 'greenhouse',
-    version: 6,
+    constraints: null,
+    ...overrides,
+    code,
+    kind,
+  };
+}
+
+const captureCatalog: JournalCatalog = {
+  catalog_version: 1,
+  catalog_hash: 'catalog-hash',
+  vocab: [
+    ...openFieldActivityCodes.map((code, index) => catalogVocabRow(code, 'activity', {
+      icon_key: code === 'irrigation' ? 'water' : null,
+      labels: { en: code === 'irrigation' ? 'Irrigation' : code },
+      sort_order: index + 1,
+    })),
+    catalogVocabRow('attr.crop', 'attribute', {
+      value_type: 'choice', labels: { en: 'Crop' }, constraints: {}, sort_order: 60,
+    }),
+    catalogVocabRow('agroscope.crop.barley_winter', 'choice', {
+      parent_code: 'attr.crop', labels: { en: 'barley, winter' }, sort_order: 61,
+    }),
+    catalogVocabRow('attr.operator', 'attribute', {
+      value_type: 'text', labels: { en: 'Operator' }, constraints: { maxlength: 160 }, sort_order: 65,
+    }),
+    catalogVocabRow('attr.equipment', 'attribute', {
+      value_type: 'text', labels: { en: 'Equipment' }, constraints: { maxlength: 300 }, sort_order: 66,
+    }),
+    catalogVocabRow('attr.method', 'attribute', {
+      value_type: 'text', labels: { en: 'Method' }, constraints: { maxlength: 300 }, sort_order: 67,
+    }),
+    catalogVocabRow('attr.amount_mass_area_product', 'attribute', {
+      value_type: 'number',
+      quantity_kind: 'mass_area',
+      basis: 'product',
+      default_unit_code: 'unit.kg_per_ha_product',
+      labels: { en: 'Product mass per area' },
+      constraints: { min: 0 },
+      sort_order: 101,
+    }),
+    catalogVocabRow('attr.amount_volume_area_product', 'attribute', {
+      value_type: 'number',
+      quantity_kind: 'volume_area',
+      basis: 'product',
+      default_unit_code: 'unit.l_per_ha_product',
+      labels: { en: 'Product volume per area' },
+      constraints: { min: 0 },
+      sort_order: 102,
+    }),
+    catalogVocabRow('attr.irrigation_depth', 'attribute', {
+      value_type: 'number',
+      quantity_kind: 'water_depth',
+      basis: 'water',
+      default_unit_code: 'unit.mm_water',
+      labels: { en: 'Irrigation depth' },
+      constraints: { min: 0 },
+      sort_order: 108,
+    }),
+    catalogVocabRow('attr.treated_area', 'attribute', {
+      value_type: 'number',
+      quantity_kind: 'area',
+      basis: 'land_area',
+      default_unit_code: 'unit.m2_area',
+      labels: { en: 'Treated area' },
+      constraints: { min: 0 },
+      sort_order: 111,
+    }),
+    catalogVocabRow('attr.block_bed_row', 'attribute', {
+      value_type: 'text', labels: { en: 'Block / bed / row' }, constraints: { maxlength: 160 }, sort_order: 143,
+    }),
+    catalogVocabRow('attr.cover_type', 'attribute', {
+      value_type: 'choice', labels: { en: 'Cover type' }, constraints: {}, sort_order: 144,
+    }),
+    catalogVocabRow('attr.denominator', 'attribute', {
+      value_type: 'choice', labels: { en: 'Application denominator' }, constraints: {}, sort_order: 145,
+    }),
+    catalogVocabRow('unit.kg_per_ha_product', 'unit', {
+      quantity_kind: 'mass_area',
+      basis: 'product',
+      labels: { en: 'kg/ha' },
+      constraints: {
+        dimension: 'mass_product_per_area',
+        to_canonical: { unit_code: 'unit.kg_per_ha_product', scale: 1, offset: 0 },
+      },
+      sort_order: 502,
+    }),
+    catalogVocabRow('unit.l_per_ha_product', 'unit', {
+      quantity_kind: 'volume_area',
+      basis: 'product',
+      labels: { en: 'L/ha' },
+      constraints: {
+        dimension: 'volume_product_per_area',
+        to_canonical: { unit_code: 'unit.l_per_ha_product', scale: 1, offset: 0 },
+      },
+      sort_order: 504,
+    }),
+    catalogVocabRow('unit.m2_area', 'unit', {
+      quantity_kind: 'area',
+      basis: 'land_area',
+      labels: { en: 'm²' },
+      constraints: {
+        dimension: 'area',
+        to_canonical: { unit_code: 'unit.m2_area', scale: 1, offset: 0 },
+      },
+      sort_order: 512,
+    }),
+    catalogVocabRow('unit.mm_water', 'unit', {
+      quantity_kind: 'water_depth',
+      basis: 'water',
+      labels: { en: 'mm' },
+      constraints: {
+        dimension: 'water_depth',
+        to_canonical: { unit_code: 'unit.mm_water', scale: 1, offset: 0 },
+      },
+      sort_order: 522,
+    }),
+    catalogVocabRow('choice.cover.bare', 'choice', {
+      parent_code: 'attr.cover_type', labels: { en: 'Bare soil' }, sort_order: 10,
+    }),
+    catalogVocabRow('choice.cover.crop', 'choice', {
+      parent_code: 'attr.cover_type', labels: { en: 'Crop cover' }, sort_order: 20,
+    }),
+    catalogVocabRow('choice.cover.mulch', 'choice', {
+      parent_code: 'attr.cover_type', labels: { en: 'Mulch' }, sort_order: 30,
+    }),
+    catalogVocabRow('choice.denominator.area', 'choice', {
+      parent_code: 'attr.denominator', labels: { en: 'Per area' }, sort_order: 10,
+    }),
+    catalogVocabRow('choice.denominator.plant', 'choice', {
+      parent_code: 'attr.denominator', labels: { en: 'Per plant' }, sort_order: 20,
+    }),
+    catalogVocabRow('choice.denominator.row', 'choice', {
+      parent_code: 'attr.denominator', labels: { en: 'Per row length' }, sort_order: 30,
+    }),
+  ],
+  templates: [{
+    code: 'farmer_quick',
+    version: 1,
     active: 1,
     catalog_errors: [],
-    labels: { en: 'Greenhouse' },
+    labels: { en: 'Quick' },
     definition: {
-      activity_codes: ['irrigation'],
+      sections: [
+        { code: 'what_where_when', fields: ['activity_code', 'plot_uuid', 'occurred_start'] },
+        {
+          code: 'key_values',
+          fields: [
+            'attr.irrigation_depth',
+            'attr.amount_mass_area_product',
+            'attr.amount_volume_area_product',
+            'note',
+          ],
+        },
+      ],
+      max_primary_fields: 5,
+      carry_forward: ['attr.operator', 'attr.equipment', 'attr.method'],
+    },
+  }, {
+    code: 'full_record',
+    version: 1,
+    active: 1,
+    catalog_errors: [],
+    labels: { en: 'Full record' },
+    definition: { sections: [] },
+  }, {
+    code: 'research_observation',
+    version: 1,
+    active: 1,
+    catalog_errors: [],
+    labels: { en: 'Research' },
+    definition: { sections: [] },
+  }],
+  layouts: [{
+    code: 'open_field',
+    version: 1,
+    active: 1,
+    catalog_errors: [],
+    labels: { en: 'Open field' },
+    definition: {
+      activity_codes: [...openFieldActivityCodes],
       supported_templates: ['farmer_quick', 'full_record', 'research_observation'],
-      fields: [],
-      minimum_fields: [],
-      conditional_fields: {},
-      denominator_contract: [],
+      minimum_fields: ['attr.block_bed_row', 'attr.treated_area', 'attr.cover_type', 'attr.denominator'],
+      denominator_contract: ['area', 'plant', 'row'],
       option_dependencies: [],
     },
   }],
@@ -305,9 +377,9 @@ const carryForwardSource: EntryAggregate = {
   activity_code: 'irrigation',
   template_code: 'farmer_quick',
   template_version: 1,
-  layout_code: 'greenhouse',
-  layout_version: 6,
-  catalog_version: 7,
+  layout_code: 'open_field',
+  layout_version: 1,
+  catalog_version: 1,
   occurred_start: '2026-07-15T00:00:00.000Z',
   occurred_end: null,
   occurred_timezone: 'Europe/Zurich',
@@ -806,7 +878,56 @@ describe('JournalPage', () => {
     await expect(saved).resolves.toBeUndefined();
   });
 
-  it('completes a safely prefilled zone capture in at most five primary activations', async () => {
+  it('completes a realistic open-field zone capture in at most nine primary activations', async () => {
+    expect(captureCatalog.templates.find(({ code }) => code === 'farmer_quick')?.definition).toEqual({
+      sections: [
+        { code: 'what_where_when', fields: ['activity_code', 'plot_uuid', 'occurred_start'] },
+        {
+          code: 'key_values',
+          fields: [
+            'attr.irrigation_depth',
+            'attr.amount_mass_area_product',
+            'attr.amount_volume_area_product',
+            'note',
+          ],
+        },
+      ],
+      max_primary_fields: 5,
+      carry_forward: ['attr.operator', 'attr.equipment', 'attr.method'],
+    });
+    expect(captureCatalog.layouts.find(({ code }) => code === 'open_field')?.definition).toEqual({
+      activity_codes: [
+        'irrigation',
+        'fertilization',
+        'fertigation',
+        'plant_protection_application',
+        'weed_control_nonchemical',
+        'seeding',
+        'planting_transplanting',
+        'pruning',
+        'crop_care',
+        'tillage_soil_work',
+        'mowing',
+        'harvest',
+        'sampling',
+        'general_observation',
+        'pest_disease_observation',
+        'equipment_maintenance',
+      ],
+      supported_templates: ['farmer_quick', 'full_record', 'research_observation'],
+      minimum_fields: ['attr.block_bed_row', 'attr.treated_area', 'attr.cover_type', 'attr.denominator'],
+      denominator_contract: ['area', 'plant', 'row'],
+      option_dependencies: [],
+    });
+    expect(partitionCarryForward(carryForwardSource, {
+      definition: captureCatalog.templates.find(({ code }) => code === 'farmer_quick')?.definition,
+    }).automaticValues).toEqual(expect.arrayContaining([{
+      attribute_code: 'attr.method',
+      group_index: 0,
+      value_status: 'observed',
+      value_text: 'Drip irrigation',
+    }]));
+    expect(plots[0].settings.layout_code).toBe('greenhouse');
     mocks.useRealCaptureFlow = true;
     mocks.useJournalCatalog.mockReturnValue({
       catalog: captureCatalog,
@@ -816,8 +937,22 @@ describe('JournalPage', () => {
       error: undefined,
       retry: mocks.retryCatalog,
     });
+    const openFieldPlots = [{
+      ...plots[0],
+      settings: { ...plots[0].settings, layout_code: 'open_field' },
+    }];
+    mocks.useJournalPlots.mockReturnValue({
+      plots: openFieldPlots,
+      loading: false,
+      error: undefined,
+      retry: mocks.retryPlots,
+    });
     vi.spyOn(crypto, 'randomUUID').mockReturnValue('11111111-1111-4111-8111-111111111111');
     let primaryActivations = 0;
+    const primaryActivate = (dispatch: () => unknown) => {
+      dispatch();
+      primaryActivations += 1;
+    };
     mocks.useJournalEntries.mockReturnValue({
       entries: [carryForwardSource],
       loading: false,
@@ -878,40 +1013,83 @@ describe('JournalPage', () => {
     expect(getComputedStyle(zoneCta).minHeight).toBe('56px');
     expect(zoneCta.parentElement).toHaveClass('flex', 'flex-wrap');
     expect(zoneCta.parentElement).not.toHaveClass('flex-nowrap', 'overflow-x-auto');
-    fireEvent.click(zoneCta);
-    primaryActivations += 1;
+    primaryActivate(() => fireEvent.click(zoneCta));
     await screen.findByRole('heading', { name: 'capture.title' });
-    fireEvent.click(screen.getByRole('button', { name: 'Irrigation' }));
-    primaryActivations += 1;
+    primaryActivate(() => fireEvent.click(screen.getByRole('button', { name: 'Irrigation' })));
     const captureNavigation = screen.getByRole('button', { name: 'capture.next' }).parentElement;
     expect(captureNavigation).toHaveClass('flex', 'flex-wrap');
     expect(captureNavigation).not.toHaveClass('flex-nowrap', 'overflow-x-auto');
-    fireEvent.click(screen.getByRole('button', { name: 'capture.next' }));
-    primaryActivations += 1;
-    fireEvent.click(screen.getByRole('button', { name: 'capture.next' }));
-    primaryActivations += 1;
+    primaryActivate(() => fireEvent.click(screen.getByRole('button', { name: 'capture.next' })));
+    expect(screen.getByLabelText(/Block \/ bed \/ row/)).toHaveValue('');
+    expect(screen.getByLabelText(/Treated area/)).toHaveValue('');
+    expect(screen.getByLabelText(/Cover type/)).toHaveValue('');
+    expect(screen.getByLabelText(/Application denominator/)).toHaveValue('');
+    primaryActivate(() => fireEvent.change(
+      screen.getByLabelText(/Block \/ bed \/ row/),
+      { target: { value: 'B-12' } },
+    ));
+    primaryActivate(() => fireEvent.change(
+      screen.getByLabelText(/Treated area/),
+      { target: { value: '1200' } },
+    ));
+    primaryActivate(() => fireEvent.change(
+      screen.getByLabelText(/Cover type/),
+      { target: { value: 'choice.cover.crop' } },
+    ));
+    primaryActivate(() => fireEvent.change(
+      screen.getByLabelText(/Application denominator/),
+      { target: { value: 'choice.denominator.area' } },
+    ));
+    primaryActivate(() => fireEvent.click(screen.getByRole('button', { name: 'capture.next' })));
     await screen.findByRole('heading', { name: 'capture.confirm.title' });
-    expect(screen.getByText('Drip irrigation')).toBeInTheDocument();
     expect(screen.getAllByRole('main')).toHaveLength(1);
-    fireEvent.click(screen.getByRole('button', { name: 'capture.finish' }));
-    primaryActivations += 1;
+    primaryActivate(() => fireEvent.click(screen.getByRole('button', { name: 'capture.finish' })));
 
     await waitFor(() => expect(screen.getByText('Saved on farm gateway')).toBeInTheDocument());
-    expect(primaryActivations).toBeLessThanOrEqual(5);
+    expect(primaryActivations).toBe(9);
+    expect(primaryActivations).toBeLessThanOrEqual(9);
     expect(mocks.journalApi.updateEntry).toHaveBeenCalledTimes(1);
-    expect(mocks.journalApi.updateEntry.mock.calls[0][1]).toEqual(expect.objectContaining({
+    const finalPayload = mocks.journalApi.updateEntry.mock.calls[0][1] as UpdateEntryPayload;
+    expect(finalPayload).toEqual(expect.objectContaining({
+      status: 'final',
       season_crop: 'barley, winter',
       values: expect.arrayContaining([
         expect.objectContaining({
           attribute_code: 'attr.crop',
           value: 'agroscope.crop.barley_winter',
         }),
-        expect.objectContaining({
-          attribute_code: 'attr.method',
-          value: 'Drip irrigation',
-        }),
       ]),
     }));
+    const requiredCodes = new Set([
+      'attr.block_bed_row',
+      'attr.treated_area',
+      'attr.cover_type',
+      'attr.denominator',
+    ]);
+    const requiredValues = finalPayload.values
+      .filter(({ attribute_code }) => requiredCodes.has(attribute_code))
+      .sort((left, right) => left.attribute_code.localeCompare(right.attribute_code));
+    expect(requiredValues).toEqual([
+      {
+        attribute_code: 'attr.block_bed_row',
+        value: 'B-12',
+      },
+      {
+        attribute_code: 'attr.cover_type',
+        value: 'choice.cover.crop',
+      },
+      {
+        attribute_code: 'attr.denominator',
+        value: 'choice.denominator.area',
+      },
+      {
+        attribute_code: 'attr.treated_area',
+        entered_unit_code: 'unit.m2_area',
+        entered_value_num: 1200,
+        unit_code: 'unit.m2_area',
+        value_num: 1200,
+      },
+    ]);
     const confirmation = screen.getByRole('heading', { name: 'capture.confirm.title' }).closest('section');
     expect(confirmation?.querySelector(':scope > .grid')).toHaveClass('grid', 'grid-cols-1', 'sm:grid-cols-2');
     expect(confirmation?.querySelector(':scope > .flex.flex-nowrap, :scope > .overflow-x-auto')).toBeNull();

@@ -15,7 +15,7 @@
 - Branch: `design-sync/agrolink` (carries the shared `AppHeader`, glass tokens, and the aligned `JournalPage` landing surface this plan replaces).
 - Every user-facing string is an i18n key in the `journal` namespace with an English value; other locales fall back to English until the §6.4 locale contract lands. Locale files that Node-RED serves are mirrored into `feeds/chirpstack-openwrt-feed/apps/node-red/files/gui/locales/` **only** for namespaces the mirror already carries (`auth`, `dashboard`, `devices`, `history`) — `journal.json` is not mirrored yet; adding it to the mirror is a Phase 6 task, not a silent per-edit step.
 - Glass is chrome-only: `btn-liquid` / `glass-chrome` on nav and controls; entry surfaces, tables, and data stay solid (`--card`, `--surface`) and legible. Danger stays red; the brand red is never a general CTA.
-- The capture flow's ≤5-tap SLA (spec §6.1) is a Phase 3 acceptance test at 320×568, not an aspiration.
+- The capture flow's shipped uncached `open_field` path allows at most nine primary-control activations from the zone CTA to the rendered save receipt. That shipped tier is tested at 320×568 and 360×640. A conditional five-activation target applies only when an approved safe-default policy supplies every required field from current plot state or a compatible confirmed record; the current release has no such policy for `open_field`'s four minimum fields, so the five-activation tier becomes testable only after one is approved.
 - Live verification requires a gateway running Slice-1 firmware. kaba100 runs pre-journal firmware and returns 401 on `/api/journal/*`; use the mocked-response unit tests plus the design-sync preview shim for development, and hand live checks to a Slice-1 firmware build.
 
 ---
@@ -1851,11 +1851,14 @@ locale parity + build + whitespace; `feat(journal): confirm-by-reading capture f
   timezone and never bypasses catalog/layout or DST validation.
 - Tests cover snake/camel UUID aliases, missing-UUID generic fallback, known
   zone timezone, missing timezone fallback, and unknown zone query.
-- A test counts primary-control activations for a common zone-preselected,
-  safely prefilled entry and requires at most five including the initiating
-  zone-card CTA and ending only when the final PUT receipt is rendered as
-  `Saved on farm gateway`. It also proves one final request and no
-  horizontal-only control layout.
+- A test counts primary-control activations for a zone-preselected `open_field`
+  entry, including its four required minimum fields, and requires at most nine
+  including the initiating zone-card CTA and ending only when the final PUT
+  receipt is rendered as `Saved on farm gateway`. It proves the four required
+  controls start empty, preserves the shipped `farmer_quick` carry-forward
+  fields, proves one final request, and checks for no horizontal-only control
+  layout. Five remains a conditional target only after an approved safe-default
+  policy covers every required field.
 - Browser verification runs the built preview at 320×568 and 360×640: no
   horizontal page scroll, 56px primary controls, visible confirmation text,
   and keyboard focus order. Mocked Slice-1 responses are used because the

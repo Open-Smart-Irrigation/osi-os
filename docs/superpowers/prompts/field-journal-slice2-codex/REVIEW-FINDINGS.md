@@ -265,3 +265,21 @@ recorded in the `SHARED_WITH_ENGLISH` allowlist.
 
 If Task 14's follow-up work touches `JournalCaptureFlow.tsx`, rebase onto this rather than
 resolving the two `t()` call sites back to the old keys.
+
+## F7 — Product-owner adjudication (2026-07-17)
+
+The product owner accepted a two-tier activation target. The shipped uncached
+`open_field` capture path may require at most nine primary-control activations
+from the zone CTA through the rendered `Saved on farm gateway` receipt. Five
+activations remains a conditional target only when every required field has a
+safe, explicit default from current plot state or a compatible confirmed record
+under an approved policy.
+
+The current release has no approved safe-default policy for
+`attr.block_bed_row`, `attr.treated_area`, `attr.cover_type`, or
+`attr.denominator`. Catalog rows, migrations, and carry-forward behavior remain
+unchanged. The durable Task 14 test therefore uses the shipped `open_field`
+definition from migration `0019__journal_catalog_v1.sql`, starts all four
+minimum-field controls empty, enters their shipped value types and codes, and
+asserts the nine-activation bound. F7 is resolved by this two-tier target; the
+conditional five-activation tier is not claimed as current support.
