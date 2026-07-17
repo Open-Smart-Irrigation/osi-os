@@ -175,10 +175,13 @@ function createFourRootsUnlocked(options) {
 
   {
     // --- capability root -----------------------------------------------
-    ensureModeDirRecursive(roots.generationsDir, ownershipAdapter);
-    ensureModeDirRecursive(roots.resetReceiptsDir, ownershipAdapter);
-    ensureModeDirRecursive(roots.v2DispositionReceiptsDir, ownershipAdapter);
-    ensureModeDirRecursive(roots.databaseRestoreReceiptsDir, ownershipAdapter);
+    // enforceFrom pins the module-owned subtree: any PRE-EXISTING
+    // component at/below it must already be mode 0700 + service-owned
+    // (review IMPORTANT 3a — a pre-created wrong-mode root fails closed).
+    ensureModeDirRecursive(roots.generationsDir, ownershipAdapter, { enforceFrom: roots.root });
+    ensureModeDirRecursive(roots.resetReceiptsDir, ownershipAdapter, { enforceFrom: roots.root });
+    ensureModeDirRecursive(roots.v2DispositionReceiptsDir, ownershipAdapter, { enforceFrom: roots.root });
+    ensureModeDirRecursive(roots.databaseRestoreReceiptsDir, ownershipAdapter, { enforceFrom: roots.root });
     maybeCrash('capability_dirs_created', crashAfter);
 
     const genesisGeneration = buildGenesisGeneration({ operationId, createdAt });
@@ -190,7 +193,7 @@ function createFourRootsUnlocked(options) {
     );
     maybeCrash('capability_genesis_written', crashAfter);
 
-    ensureModeDirRecursive(roots.witnessRoot, ownershipAdapter);
+    ensureModeDirRecursive(roots.witnessRoot, ownershipAdapter, { enforceFrom: roots.witnessRoot });
     maybeCrash('witness_root_created', crashAfter);
 
     const genesisWitness = buildGenesisWitness({ generationSha256, operationId });
@@ -207,7 +210,7 @@ function createFourRootsUnlocked(options) {
     maybeCrash('capability_head_published', crashAfter);
 
     // --- activity database ----------------------------------------------
-    ensureModeDirRecursive(roots.activityWitnessRoot, ownershipAdapter);
+    ensureModeDirRecursive(roots.activityWitnessRoot, ownershipAdapter, { enforceFrom: roots.activityWitnessRoot });
     maybeCrash('activity_root_created', crashAfter);
 
     const activityCreate = resume ? createOrResumeActivityDatabase : createActivityDatabase;
@@ -221,7 +224,7 @@ function createFourRootsUnlocked(options) {
     maybeCrash('activity_database_created', crashAfter);
 
     // --- activity head witness -------------------------------------------
-    ensureModeDirRecursive(roots.checkpointsDir, ownershipAdapter);
+    ensureModeDirRecursive(roots.checkpointsDir, ownershipAdapter, { enforceFrom: roots.activityHeadWitnessRoot });
     maybeCrash('activity_head_witness_root_created', crashAfter);
 
     writeStep(
