@@ -283,3 +283,97 @@ definition from migration `0019__journal_catalog_v1.sql`, starts all four
 minimum-field controls empty, enters their shipped value types and codes, and
 asserts the nine-activation bound. F7 is resolved by this two-tier target; the
 conditional five-activation tier is not claimed as current support.
+
+---
+
+# Phase 3 review — Tasks 8–12 (2026-07-17)
+
+Tasks 8–12 previously received gate verification only; my findings then (R1/R2/N1/N2) were all
+about catalog data, not their code. This is the code review they did not get. F5 and F6 were
+both found only by looking properly, and Tasks 8–12 have exactly what F6 had: a green gate.
+
+## Verified clean — no action
+
+**Occurrence / DST (Task 8) is correct and honestly tested.** `occurrence.test.ts` uses the
+real Europe/Zurich transitions, and I checked those dates against the IANA database rather
+than against the test's own assumptions: on 2026-03-29 the offset moves +01:00 to +02:00 and
+local 01:30 jumps to 03:30, so 02:30 does not exist; on 2026-10-25 the offset drops
++02:00 to +01:00 and both 00:30Z and 01:30Z render as local 02:30, so the fold is real. The
+fold offsets are arithmetically right (120 to 00:30Z, 60 to 01:30Z). Nothing to do.
+
+**The protected-code set is complete for the shipped catalog.** The shipped
+`plant_protection_application` requirement is `attr.treated_area` plus `required_any` over
+`attr.product_uuid`/`attr.product` and
+`attr.amount_mass_area_product`/`attr.amount_volume_area_product`/`attr.amount_biological_count_area`.
+Every one is in `PLANT_PROTECTION_PROTECTED_CODES`. `attr.agroscope.crop_product` and
+`attr.agroscope.cc_product` look like products by name but are numbers ("Exported crop
+product", "Product carbon concentration"), and `attr.amount_nutrient_rate` is fertilisation,
+which AGR-7 does not cover. The Task 11 prefix fix did not leave a shipped hole.
+
+## P1 — IMPORTANT: the protected set was written from imagination, not from the catalog
+
+`carryForward.ts` protects twelve codes that **do not exist in the catalog** (`attr.dose`,
+`attr.rate`, `attr.application_rate`, `attr.authorization`, `attr.authorization_number`,
+`attr.dose_basis`, `attr.basis`, `attr.application_basis`, `attr.area_treated`,
+`attr.waiting_period`, `attr.phi`, `attr.phi_days`) while **missing `attr.denominator`**, the
+only dose-*basis* code the catalog actually ships (per-area / per-plant / per-row) and a
+required `open_field` minimum field.
+
+Latent today: no shipped template lists `attr.denominator` in `carry_forward`. It bites when a
+tenant or custom template does — `parseTemplate` validates `carry_forward` only against
+`knownField`, so `attr.denominator` would flow into `automaticValues` and silently prefill the
+basis. Source "per plant", farmer applying "per area", no confirmation: the dose is wrong by
+the plant-count factor.
+
+Required: add `attr.denominator` to the protected set. Drop or comment the phantom codes —
+they cost nothing at runtime but they are why nobody noticed the real one was missing. Then
+add a test that derives the expected protected set **from the compiled catalog** rather than
+from a hand-written list, so this cannot drift again.
+
+## P2 — IMPORTANT (mechanism confirmed by inspection; NOT reproduced end-to-end)
+
+**Be honest about this one: I could not reproduce it in a probe, and I am not claiming it is
+proven. Verify it before you fix it, and if it turns out unreachable, say so and close it.**
+
+The claim: confirmed "Repeat last treatment" values survive a plot switch without
+re-confirmation, violating AGR-7's "invalidated on crop/season/layout change".
+
+What I did confirm by reading:
+- `RepeatTreatmentCard.tsx` has exactly one `useEffect` and **no cleanup function**, so
+  unmounting the card never calls `onInvalidate`.
+- `selectPlot` retains any value **not** in `automaticPrefillRef`, and confirmed repeat values
+  never enter that ref — only `applyAutomaticPrefill` writes it.
+- `selectPlot` then sets `carryForwardCandidate` to null, which unmounts the card.
+- No test covers it: exactly one test clicks `capture.carry.useValues`, and none switches plot
+  afterwards.
+
+Why I could not prove it: `protectedCatalog` never renders a `useValues` button (its preview
+is deliberately incomplete), and the fixture that does render one (`invalidRepeatCatalog`) is
+built around a max-exceeded value. A probe needs a third fixture: a complete, valid
+plant-protection source whose preview renders.
+
+Reproduce with: confirm the repeat card on plot-1, go Back to Where, switch to plot-2,
+continue, and assert the protected values are **gone** from the payload. `chooseLayout` is
+likely a second path to the same hole (it nulls `leaf`, which nulls `carryForwardContext`).
+
+## P3 — MINOR, unverified: tank-mix confirmation may under-disclose
+
+Card facts appear to use only the first row per code, while the confirmed set carries every
+protected row across all `group_index`. A source with product A (group 0) and product B
+(group 1) would show A, and confirming would land B unseen. Unverified by me; no shipped
+multi-group source exists to trigger it today.
+
+## Minor — record, do not chase
+
+- Float drift in canonical conversion: 0.07 ha yields 700.0000000000001 m². Entered facts stay
+  exact; the drift reaches sync and exports. Cosmetic until someone diffs an export.
+- `min`/`max` are checked against the **entered** value while constraints are defined in
+  canonical units. Harmless today (multi-unit attributes only carry `min: 0`), but the first
+  `max` on a multi-unit attribute will mis-validate across units.
+- One malformed final entry anywhere nulls the whole carry-forward page, disabling AGR-7
+  farm-wide. Fail-closed, so safe, but silent.
+
+## Scope note
+
+Tasks 9, 10 and 12 (ActivityPicker, entry controls, drafts queue) remain **unreviewed**. Do
+not read this section as a clean bill for Phase 3.
