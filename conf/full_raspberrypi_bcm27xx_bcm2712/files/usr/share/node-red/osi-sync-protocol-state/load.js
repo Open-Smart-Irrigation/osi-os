@@ -350,6 +350,20 @@ function verifyActivityRoots(roots, { ownershipAdapter, recoveryOnlyAdapter } = 
   if (!dbStat.isFile()) {
     throw loadError('activity_db_wrong_type', 'activity.sqlite is not a regular file');
   }
+  // Review IMPORTANT 3b: the activity database file itself gets the same
+  // mode-0600 + service-ownership check the capability chain files get
+  // (plan line 329/351: "capability/activity files are mode 0600").
+  if ((dbStat.mode & 0o777) !== FILE_MODE) {
+    throw loadError('activity_db_wrong_mode', 'activity.sqlite is not mode 0600', {
+      path: roots.activityDbPath,
+      mode: (dbStat.mode & 0o777).toString(8),
+    });
+  }
+  if (!adapter.verifyOwner(dbStat)) {
+    throw loadError('activity_db_wrong_owner', 'activity.sqlite is not owned by the service identity', {
+      path: roots.activityDbPath,
+    });
+  }
 
   const recovery = recoverHotJournalIfPresent({ dbPath: roots.activityDbPath, ownershipAdapter: adapter, recoveryOnlyAdapter });
 
@@ -470,7 +484,7 @@ function repairActivityRoots(roots, activityResult, { ownershipAdapter } = {}) {
   const targetGeneration = activityResult.resumable.targetGeneration;
   if (targetGeneration === 0 && activityResult.checkpoints.length === 0) {
     const { ensureModeDirRecursive } = require('./paths');
-    ensureModeDirRecursive(roots.checkpointsDir, adapter);
+    ensureModeDirRecursive(roots.checkpointsDir, adapter, { enforceFrom: roots.activityHeadWitnessRoot });
     const checkpoint = buildGenesisCheckpoint({ entrySha256: activityResult.genesisRow.entry_sha256, createdAt: activityResult.genesisRow.created_at });
     writeExclusiveFile(
       path.join(roots.checkpointsDir, '0000000000000000.json'),

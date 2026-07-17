@@ -150,9 +150,21 @@ function assertNoSymlinkComponents(targetPath) {
 
 // Creates (or verifies) a mode-0700 directory at every level from the first
 // missing component down to dirPath, with no symlink components.
-function ensureModeDirRecursive(dirPath, ownershipAdapter) {
+//
+// options.enforceFrom (review IMPORTANT 3a): absolute path marking where
+// the MODULE-OWNED subtree begins. Every PRE-EXISTING directory component
+// at or below that path must already be mode 0700 and owned by the
+// service identity (via the injectable ownership adapter) or this fails
+// closed (dir_wrong_mode / dir_wrong_owner) — a pre-created 0755 root is
+// an attack surface, not something to silently adopt. Components ABOVE
+// enforceFrom (e.g. /tmp, /data) are only checked for symlink/directory
+// type, since the module has no authority over their modes. Without
+// enforceFrom, pre-existing components are accepted as before (used only
+// by tests that build scaffolding).
+function ensureModeDirRecursive(dirPath, ownershipAdapter, options) {
   assertNoSymlinkComponents(dirPath);
   const adapter = ownershipAdapter || defaultOwnershipAdapter;
+  const enforceFrom = options && options.enforceFrom ? path.resolve(options.enforceFrom) : null;
   const parsed = path.parse(path.resolve(dirPath));
   const segments = parsed.dir.slice(parsed.root.length).split(path.sep).filter(Boolean);
   segments.push(parsed.base);
@@ -170,6 +182,20 @@ function ensureModeDirRecursive(dirPath, ownershipAdapter) {
       }
       if (!stat.isDirectory()) {
         throw pathsError('not_a_directory', `expected a directory at ${current}`, { path: current });
+      }
+      const enforced = enforceFrom !== null && (current === enforceFrom || current.startsWith(enforceFrom + path.sep));
+      if (enforced) {
+        if ((stat.mode & 0o777) !== DIR_MODE) {
+          throw pathsError('dir_wrong_mode', `pre-existing module directory is not mode 0700: ${current}`, {
+            path: current,
+            mode: (stat.mode & 0o777).toString(8),
+          });
+        }
+        if (!adapter.verifyOwner(stat)) {
+          throw pathsError('dir_wrong_owner', `pre-existing module directory is not owned by the service identity: ${current}`, {
+            path: current,
+          });
+        }
       }
     }
   }
@@ -269,13 +295,15 @@ function listRegularEntries(dirPath, pattern) {
 // Creates (if absent) the four top-level directories that directly hold
 // each root's lock.json, so acquireFourRootLocks always has somewhere to
 // write — including on a completely fresh (all-absent) initialization.
-// Never touches chain content; an already-existing directory is only
-// verified, not recreated.
+// Never touches chain content; an already-existing directory is verified
+// (mode 0700 + ownership, fail-closed) from each module-owned root down.
 function ensureFourRootDirsForLocking(roots, ownershipAdapter) {
-  ensureModeDirRecursive(roots.activityHeadWitnessRoot, ownershipAdapter);
-  ensureModeDirRecursive(roots.activityWitnessRoot, ownershipAdapter);
-  ensureModeDirRecursive(roots.witnessRoot, ownershipAdapter);
-  ensureModeDirRecursive(roots.capabilityRoot, ownershipAdapter);
+  ensureModeDirRecursive(roots.activityHeadWitnessRoot, ownershipAdapter, { enforceFrom: roots.activityHeadWitnessRoot });
+  ensureModeDirRecursive(roots.activityWitnessRoot, ownershipAdapter, { enforceFrom: roots.activityWitnessRoot });
+  ensureModeDirRecursive(roots.witnessRoot, ownershipAdapter, { enforceFrom: roots.witnessRoot });
+  // The capability tree's module-owned subtree begins at the outer root
+  // (/data/osi-sync itself is plan-mandated mode 0700, line 351).
+  ensureModeDirRecursive(roots.capabilityRoot, ownershipAdapter, { enforceFrom: roots.root });
 }
 
 module.exports = {

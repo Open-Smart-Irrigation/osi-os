@@ -1285,3 +1285,61 @@ test('load: CONSISTENT both-roots tail deletion + head rewind is NOT detected (d
   assert.equal(result.resumable, null);
   assert.equal(result.head.generation, 0);
 });
+
+// ===========================================================================
+// Fix wave (review IMPORTANT 3): mode/ownership enforcement gaps.
+// ===========================================================================
+
+test('initialize rejects a pre-existing wrong-mode (0755) module root before any chain write', () => {
+  const { tmp, opts } = makeRoots();
+  // Pre-create the capability outer root at 0755 — plan line 351 requires
+  // /data/osi-sync at mode 0700; a pre-existing wrong-mode directory must
+  // fail closed, not be silently accepted.
+  fs.mkdirSync(opts.root, { recursive: true, mode: 0o755 });
+  fs.chmodSync(opts.root, 0o755);
+  assert.throws(
+    () => mod.initialize(Object.assign({}, opts, { operationId: OP_A, createdAt: CREATED_AT })),
+    { code: 'dir_wrong_mode' }
+  );
+  // No capability chain content may have been written under the bad root.
+  const roots = pathsMod.resolveRoots(opts);
+  assert.equal(fs.existsSync(roots.generationsDir), false);
+  assert.equal(fs.existsSync(roots.capabilityHeadPath), false);
+});
+
+test('initialize rejects a pre-existing module root with wrong ownership (adapter-reported)', () => {
+  const { opts } = makeRoots();
+  fs.mkdirSync(opts.root, { recursive: true, mode: 0o700 });
+  const foreignAdapter = {
+    claimOwner() {},
+    verifyOwner() { return false; }, // every pre-existing path reads as foreign-owned
+  };
+  assert.throws(
+    () => mod.initialize(Object.assign({}, opts, { operationId: OP_A, createdAt: CREATED_AT, ownershipAdapter: foreignAdapter })),
+    { code: 'dir_wrong_owner' }
+  );
+});
+
+test('load blocks when activity.sqlite has the wrong mode (0644)', () => {
+  const { opts } = makeRoots();
+  const created = initHealthy(opts);
+  const roots = created.roots;
+  fs.chmodSync(roots.activityDbPath, 0o644);
+  assert.throws(() => loadMod.verifyActivityRoots(roots, {}), { code: 'activity_db_wrong_mode' });
+  // status() goes through the same verification and must block too.
+  assert.throws(() => mod.status(opts), { code: 'activity_db_wrong_mode' });
+});
+
+test('load blocks when activity.sqlite is not owned by the service identity (adapter-reported)', () => {
+  const { opts } = makeRoots();
+  const created = initHealthy(opts);
+  const roots = created.roots;
+  const foreignDbAdapter = {
+    claimOwner() {},
+    verifyOwner(stat) { return !stat.isFile(); }, // regular files read as foreign-owned
+  };
+  assert.throws(
+    () => loadMod.verifyActivityRoots(roots, { ownershipAdapter: foreignDbAdapter }),
+    { code: 'activity_db_wrong_owner' }
+  );
+});
