@@ -241,3 +241,15 @@ Append-only execution log for the accepted Phase 0 and Phase 1-6 plans on `desig
 - Final Sol specification and quality verdicts: `APPROVED`.
 - Controller gate: focused 19/19; TSX 94/94; Vitest 1001/1001 across 125 files; typecheck and production build pass; scoped diff check passes. Only existing stale browser-data and large-chunk warnings remain.
 - Task 18 is next. Broader Phase 3 remains separately in review; no finding was waived.
+
+## 2026-07-18T01:22:23+02:00 - Task 18 outcome
+
+- Task 18 committed `d8121df7` with the exact two-file StationGrid scope: `web/react-gui/src/components/journal/where/StationGrid.tsx` and `web/react-gui/src/components/journal/__tests__/where/StationGrid.test.tsx`.
+- Initial RED was module-not-found; first GREEN was 9/9.
+- Sol's specification review found a missing 56px range-textbox assertion. The stronger assertion passed immediately with no production change, and the final specification verdict was `APPROVED`.
+- Sol's quality review found that the numeric mobile keyboard was incompatible with comma/hyphen ranges, that unplanned `where.gridPlot` and `where.numericGrid` keys were outside Task 24, and that long tokens could overflow and duplicate.
+- Correction RED was 1/10 on the first run and 4/11 after the complete corrections; GREEN reached 11/11.
+- Fixes used a text-capable input mode, accessible names from the visible number/human label and `stationLabel`, and one structured error token with safe wrapping.
+- Final Sol specification and quality verdicts were `APPROVED`.
+- Controller verification passed focused 11/11, TSX 94/94, and Vitest 1012/1012 across 126 files, plus typecheck, production build, anti-slop, and diff checks. Existing stale browser-data and large-chunk warnings were the only findings.
+- Task 19 is next. Broader Phase 3 remains separately in review; no finding was waived.
