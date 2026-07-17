@@ -42,10 +42,18 @@ function writeDeploymentState(tmp, obj) {
 }
 
 function initializeFlags(tmp, overrides) {
-  const stateObj = Object.assign(
-    { format: 1, deploymentId: 'dep-1', phase: 'protocol-initializing', parentGeneration: 0 },
-    overrides && overrides.state
-  );
+  // Real deployment-state envelope (repair-program plan line 160):
+  // {format:2, parentDeployment, activeSubOperation} with identity/phase/
+  // generation nested under parentDeployment.
+  const o = overrides || {};
+  const stateObj = {
+    format: 2,
+    parentDeployment: Object.assign(
+      { deploymentId: 'dep-1', phase: 'protocol-initializing', generation: 0, leaseActive: true },
+      o.parentDeployment
+    ),
+    activeSubOperation: o.activeSubOperation !== undefined ? o.activeSubOperation : null,
+  };
   const statePath = writeDeploymentState(tmp, stateObj);
   return [
     'initialize',
@@ -91,9 +99,29 @@ test('CLI initialize: re-running against an already-initialized root set is idem
 
 test('CLI initialize: wrong deployment-state phase is rejected and creates nothing', () => {
   const tmp = tmpDir();
-  const result = runCli(initializeFlags(tmp, { state: { phase: 'protocol-dispositioning' } }));
+  const result = runCli(initializeFlags(tmp, { parentDeployment: { phase: 'protocol-dispositioning' } }));
   assert.notEqual(result.status, 0);
   assert.match(result.stderr, /deployment_state_wrong_phase/);
+  assert.equal(fs.existsSync(path.join(tmp, 'osi-sync')), false);
+});
+
+test('CLI initialize: a non-null activeSubOperation is rejected and creates nothing', () => {
+  const tmp = tmpDir();
+  const result = runCli(
+    initializeFlags(tmp, { activeSubOperation: { kind: 'recovery', operationId: '33333333-3333-4333-8333-333333333333', phase: 'recovering' } })
+  );
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /deployment_state_active_sub_operation/);
+  assert.equal(fs.existsSync(path.join(tmp, 'osi-sync')), false);
+});
+
+test('CLI initialize: a legacy format-1 deployment-state is rejected', () => {
+  const tmp = tmpDir();
+  const flags = initializeFlags(tmp);
+  // Overwrite the fixture with a format-1 envelope at the same path.
+  writeDeploymentState(tmp, { format: 1, deploymentId: 'dep-1', phase: 'protocol-initializing', parentGeneration: 0 });
+  const result = runCli(flags);
+  assert.notEqual(result.status, 0);
   assert.equal(fs.existsSync(path.join(tmp, 'osi-sync')), false);
 });
 

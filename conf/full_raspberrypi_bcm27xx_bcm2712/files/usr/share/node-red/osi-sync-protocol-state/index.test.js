@@ -1083,9 +1083,33 @@ function writeDeploymentState(tmp, obj) {
   return p;
 }
 
-test('requireDeploymentPhase accepts an exact match and rejects a phase/id/generation mismatch', () => {
+// The real envelope (repair-program plan line 160, implemented by the
+// sibling deployment-state slice): {format:2, parentDeployment,
+// activeSubOperation}, with the deployment identity/phase/generation
+// nested under parentDeployment. parentDeployment additionally carries
+// lease/hash/stamp/receipt fields owned by the sibling library; the gate
+// must tolerate those while gating strictly on the fields it checks.
+function format2State(overrides) {
+  const o = overrides || {};
+  return {
+    format: o.format !== undefined ? o.format : 2,
+    parentDeployment: Object.assign(
+      {
+        deploymentId: 'dep-1',
+        phase: 'protocol-initializing',
+        generation: 3,
+        leaseActive: true,
+        artifactSha256: 'a'.repeat(64),
+      },
+      o.parentDeployment
+    ),
+    activeSubOperation: o.activeSubOperation !== undefined ? o.activeSubOperation : null,
+  };
+}
+
+test('requireDeploymentPhase accepts an exact format-2 match and rejects a phase/id/generation mismatch', () => {
   const { tmp } = makeRoots();
-  const p = writeDeploymentState(tmp, { format: 1, deploymentId: 'dep-1', phase: 'protocol-initializing', parentGeneration: 3 });
+  const p = writeDeploymentState(tmp, format2State());
   assert.doesNotThrow(() =>
     deploymentGate.requireDeploymentPhase(p, { expectedDeploymentId: 'dep-1', expectedPhase: 'protocol-initializing', expectedParentGeneration: 3 })
   );
@@ -1103,16 +1127,52 @@ test('requireDeploymentPhase accepts an exact match and rejects a phase/id/gener
   );
 });
 
-test('readDeploymentStateFile rejects unknown fields and a missing file', () => {
+test('requireDeploymentPhase rejects a non-null activeSubOperation', () => {
   const { tmp } = makeRoots();
-  const p = writeDeploymentState(tmp, { format: 1, deploymentId: 'dep-1', phase: 'protocol-initializing', parentGeneration: 0, extra: 'nope' });
+  const p = writeDeploymentState(
+    tmp,
+    format2State({ activeSubOperation: { kind: 'recovery', operationId: OP_B, phase: 'recovering' } })
+  );
+  assert.throws(
+    () => deploymentGate.requireDeploymentPhase(p, { expectedDeploymentId: 'dep-1', expectedPhase: 'protocol-initializing', expectedParentGeneration: 3 }),
+    { code: 'deployment_state_active_sub_operation' }
+  );
+});
+
+test('readDeploymentStateFile rejects format 1 and any other non-2 format', () => {
+  const { tmp } = makeRoots();
+  const p = writeDeploymentState(tmp, format2State({ format: 1 }));
+  assert.throws(() => deploymentGate.readDeploymentStateFile(p), { code: 'schema_invalid_field' });
+});
+
+test('readDeploymentStateFile rejects the legacy flat (invented) shape outright', () => {
+  const { tmp } = makeRoots();
+  const p = writeDeploymentState(tmp, { format: 2, deploymentId: 'dep-1', phase: 'protocol-initializing', parentGeneration: 0 });
+  assert.throws(() => deploymentGate.readDeploymentStateFile(p), Error);
+});
+
+test('readDeploymentStateFile rejects unknown top-level fields and a missing file', () => {
+  const { tmp } = makeRoots();
+  const p = writeDeploymentState(tmp, Object.assign(format2State(), { extra: 'nope' }));
   assert.throws(() => deploymentGate.readDeploymentStateFile(p), { code: 'schema_unknown_field' });
   assert.throws(() => deploymentGate.readDeploymentStateFile(path.join(tmp, 'absent.json')), { code: 'deployment_state_missing' });
 });
 
+test('readDeploymentStateFile tolerates extra parentDeployment fields but requires its gated fields', () => {
+  const { tmp } = makeRoots();
+  // extra sibling-library-owned fields are fine...
+  const ok = writeDeploymentState(tmp, format2State({ parentDeployment: { controlManifestSha256: 'b'.repeat(64) } }));
+  assert.doesNotThrow(() => deploymentGate.readDeploymentStateFile(ok));
+  // ...but a missing gated field is not.
+  const missing = format2State();
+  delete missing.parentDeployment.phase;
+  const bad = writeDeploymentState(path.join(tmp, 'sub'), missing);
+  assert.throws(() => deploymentGate.readDeploymentStateFile(bad), { code: 'deployment_state_parent_invalid' });
+});
+
 test('readDeploymentStateFile rejects a symlinked path', () => {
   const { tmp } = makeRoots();
-  const real = writeDeploymentState(tmp, { format: 1, deploymentId: 'dep-1', phase: 'protocol-initializing', parentGeneration: 0 });
+  const real = writeDeploymentState(tmp, format2State());
   const link = path.join(tmp, 'link.json');
   fs.symlinkSync(real, link);
   assert.throws(() => deploymentGate.readDeploymentStateFile(link), { code: 'symlink_component' });
