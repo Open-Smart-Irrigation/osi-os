@@ -1869,13 +1869,550 @@ locale parity + build + whitespace; `feat(journal): confirm-by-reading capture f
 browser screenshots at both viewports, `git diff --check`, clean worktree, and
 sol post-check. Commit: `feat(journal): integrate mobile capture entry points`.
 
-## Phase 4 — Multi-plot batch + plot/group CRUD (code-decompose when reached)
+## Phase 4 — Multi-plot batch + plot/group CRUD
 
-**Blocked on Phases 0, 1, 3.**
+Task 14 has written external acceptance in `docs/superpowers/prompts/field-journal-slice2-codex/REVIEW-FINDINGS.md` at commit `923b76b6`, under `# Task 14 external re-review — ACCEPTED (2026-07-17)`. Broader Phase 3 remains in review, and the user explicitly authorizes early Phase 4 sequencing. This narrow sequencing authorization does not mark Phase 3 complete and does not waive later Phase 3 findings. Phase 4 also requires the Phase 0 definitions response and the existing Phase 1 contracts.
 
-**Files (planned):** `src/components/journal/where/` — `PlotPicker.tsx`, `StationGrid.tsx` (numbered multi-select + range input `2, 5, 6, 10-12`, U7), `PlotGroupChips.tsx` (one-tap cohort select), `PlotForm.tsx` (lightweight CRUD). `src/journal/rangeSelection.ts` — pure `parseRange('2,5,6,10-12'): number[]` / `formatRange(number[]): string`, station-bounded.
+The old sketch described N create calls and a client-generated `batch_uuid`. The shipped Slice 1 contract is different: one final `POST /api/journal/entries` switches to batch mode when `plot_uuids` is an array; the edge performs duplicate preflight, atomically creates N entries, generates `batch_uuid`, and returns that batch UUID with N independent receipts. The request is capped at 100 plots. Batch drafts and `PUT` batches are rejected. Every task below uses this contract.
 
-**Acceptance:** a station renders as one collapsible row expanding to a grid, never a list; batch finalize fans out to N create calls sharing a client-generated `batch_uuid`; a harvest batch covering a whole active group offers "Resolve group?"; range field and grid stay in sync.
+### Phase 4 working rules
+
+- The controller is the only Git writer. Workers may edit only their assigned paths; the controller stages exact paths and creates each commit with the subject recorded below. No worker stages, commits, pushes, resets, checkouts, rebases, or cleans.
+- Each task follows TDD: write the named RED tests, run the exact focused command and record the missing behavior, add the smallest GREEN implementation, rerun the focused command, then request Sol's specification review followed by the quality review. A task does not advance until both reviews approve or the finding is recorded as a concrete task correction.
+- The API boundary keeps snake_case wire names and unwraps only the response envelopes shipped by `osi-journal/api.js`: plot reads use `.plots`, group reads use `.plot_groups`, plot mutations use `.plot`, group mutations use `.plot_group`, and final batch creation returns `{ batch_uuid, entries }` at the response root.
+- The batch authoring path has no draft endpoint and no batch `PUT`. Single-plot capture keeps the existing version-zero draft, `PUT /api/journal/entries/:uuid` promotion, scalar duplicate acknowledgement, and the existing uncached `open_field` `<=9` activation SLA.
+- All new user-facing strings use the `journal` namespace. The seven source locale files are `web/react-gui/public/locales/{en,de-CH,es,fr,it,lg,pt}/journal.json`; Phase 4 never mirrors `journal.json` into `feeds/`.
+- After Sol approves the Phase 4 preflight, the controller commits exactly `docs/superpowers/plans/2026-07-15-field-journal-slice2-gui.md` and `docs/superpowers/prompts/field-journal-slice2-codex/RUN-NOTES.md` as `docs(journal): define Slice 2 Phase 4 GUI execution`. That documentation commit occurs before Task 15; no Task 15–24 source commit includes either planning document.
+
+### Task 15: Atomic entry, plot, and plot-group service contracts
+
+**Files:**
+- Modify: `web/react-gui/src/types/journal.ts`
+- Modify: `web/react-gui/src/services/journalApi.ts`
+- Modify: `web/react-gui/src/services/__tests__/journalApi.test.ts`
+
+**Interfaces:**
+
+```typescript
+export interface JournalEntryWriteFields {
+  status: 'final' | 'draft';
+  plot_uuid?: string | null;
+  zone_uuid?: string | null;
+  device_eui?: string | null;
+  season_crop?: string | null;
+  season_variety?: string | null;
+  campaign_uuid?: string | null;
+  protocol_code?: string | null;
+  protocol_version?: string | null;
+  observation_unit_code?: string | null;
+  pass_uuid?: string | null;
+  activity_code: string;
+  template_code: string;
+  template_version: number;
+  layout_code: string;
+  layout_version: number;
+  occurred_start_local: string;
+  occurred_end_local?: string | null;
+  occurred_timezone: string;
+  occurred_utc_offset_minutes?: number | null;
+  occurred_end_utc_offset_minutes?: number | null;
+  values: EntryValueInput[];
+  note?: string | null;
+}
+
+export interface CreateFinalBatchPayload extends Omit<JournalEntryWriteFields, 'status' | 'plot_uuid' | 'zone_uuid'> {
+  status: 'final';
+  plot_uuids: string[];
+  base_sync_version: 0;
+  duplicate_guard_ack_entry_uuids?: string[];
+}
+
+export interface BatchEntryMutationReceipt {
+  plot_uuid: string;
+  entry_uuid: string;
+  outbox_event_uuid: string;
+  sync_version: number;
+}
+
+export interface BatchMutationReceipt {
+  batch_uuid: string;
+  entries: BatchEntryMutationReceipt[];
+}
+
+export interface JournalPlotWritePayload {
+  plot_uuid: string;
+  base_sync_version: number;
+  plot_code: string;
+  name: string | null;
+  zone_uuid: string | null;
+  station_code: string | null;
+  crop_hint: string | null;
+  area_m2: number | null;
+  active: 0 | 1;
+  layout_code: string;
+  layout_version: number;
+}
+
+export interface JournalPlotGroupWritePayload {
+  group_uuid: string;
+  base_sync_version: number;
+  label: string;
+  members: string[];
+  resolved: boolean;
+}
+
+```
+
+- [ ] **Step 1: Add the exact batch and resource wire types.** Move the shared entry fields into the exported shape without changing the existing single-entry draft/final receipt union. Keep `CreateEntryPayload` capable of the current single-plot draft flow; make `CreateFinalBatchPayload` final-only with `status: 'final'`, `base_sync_version: 0`, a `string[]` `plot_uuids` field, and optional plural `duplicate_guard_ack_entry_uuids`. This task owns only the compile-time wire-field shape and the exact service pass-through. It does not enforce the runtime 1–100 cardinality rule. Its type and wire payload forbid `entry_uuid`, scalar `plot_uuid`, `zone_uuid`, client `batch_uuid`, singular duplicate acknowledgement, and draft status.
+- [ ] **Step 2: Write RED contract tests and compile assertions.** Add Vitest tests named `creates one final batch request with plot_uuids and returns the edge batch receipt`, `creates a plot through POST and returns JournalPlot from data.plot`, `updates a plot through UUID-encoded PUT and returns JournalPlot from data.plot`, `creates a plot group through POST and returns PlotGroup from data.plot_group`, and `updates a plot group through UUID-encoded PUT and returns PlotGroup from data.plot_group`. Add these `@ts-expect-error` assertions beside the valid batch fixture; `tsc --noEmit`, not Vitest, is the evidence for excess-property rejection:
+
+  ```typescript
+  // @ts-expect-error batch status is final-only
+  const draftBatch: CreateFinalBatchPayload = { ...validBatch, status: 'draft' };
+  // @ts-expect-error batch payload has no scalar plot_uuid
+  const scalarPlotBatch: CreateFinalBatchPayload = { ...validBatch, plot_uuid: 'p1' };
+  // @ts-expect-error batch payload has no zone_uuid
+  const zoneBatch: CreateFinalBatchPayload = { ...validBatch, zone_uuid: 'z1' };
+  // @ts-expect-error batch payload has no entry_uuid
+  const entryBatch: CreateFinalBatchPayload = { ...validBatch, entry_uuid: 'e1' };
+  // @ts-expect-error batch_uuid is edge-generated
+  const clientBatch: CreateFinalBatchPayload = { ...validBatch, batch_uuid: 'b1' };
+  const singularAckBatch: CreateFinalBatchPayload = {
+    ...validBatch,
+    // @ts-expect-error singular acknowledgement is not a batch wire field
+    duplicate_guard_ack_entry_uuid: 'e1',
+  };
+
+  void draftBatch;
+  void scalarPlotBatch;
+  void zoneBatch;
+  void entryBatch;
+  void clientBatch;
+  void singularAckBatch;
+  ```
+
+  The `void` statements explicitly consume every invalid fixture so `noUnusedLocals` cannot determine the compile result. The compile evidence therefore isolates the forbidden-property checks. The batch assertion must check one POST to `/api/journal/entries`, `status: 'final'`, `base_sync_version: 0`, a `string[]` `plot_uuids` value, optional plural acknowledgements, and the root `{ batch_uuid, entries }` receipt. Assert that both `zone_uuid` and `plot_uuid` are absent from the wire payload. The batch builder is a later Task 21 seam; this service test covers the exact payload passed to the API without adding cardinality validation here.
+- [ ] **Step 3: Run the focused RED commands.** Run the Vitest command and the typecheck as separate commands so a failing Vitest process cannot suppress typecheck evidence:
+
+  ```bash
+  cd web/react-gui
+  npx vitest run src/services/__tests__/journalApi.test.ts
+  npm run typecheck
+  ```
+
+  Expected: Vitest fails because the five new service methods and exact unwrapping are absent. After the exact types are added, typecheck consumes the forbidden-property assertions and fails only for still-missing service methods or test implementation, as applicable. Vitest alone is insufficient for this task.
+- [ ] **Step 4: Implement the smallest service seam.** Add `journalApi.createFinalBatch(payload)` as exactly one `api.post('/api/journal/entries', payload)` returning `BatchMutationReceipt`; add `POST /api/journal/plots` plus `PUT /api/journal/plots/${encodeURIComponent(uuid)}` and return only `data.plot` as `JournalPlot`; add `POST /api/journal/plot-groups` plus `PUT /api/journal/plot-groups/${encodeURIComponent(uuid)}` and return only `data.plot_group` as `PlotGroup`. The update body UUID must match the path. Keep server `created` and `outbox_event_uuid` outside the UI return. Do not add a batch draft method, a batch update method, N per-plot calls, or a client-generated batch UUID method.
+- [ ] **Step 5: Run GREEN and type checks.** Run `cd web/react-gui && npx vitest run src/services/__tests__/journalApi.test.ts && npx tsc --noEmit`. Expected: the focused tests and typecheck pass.
+- [ ] **Step 6: Controller-only commit and reviews.** The controller stages only `web/react-gui/src/types/journal.ts`, `web/react-gui/src/services/journalApi.ts`, and `web/react-gui/src/services/__tests__/journalApi.test.ts`, then commits `feat(journal): add atomic batch and plot resource API contracts`. Sol performs the specification review first and the quality review second.
+
+### Task 16: Station-bounded range parsing and natural station ordering
+
+**Files:**
+- Create: `web/react-gui/src/journal/rangeSelection.ts`
+- Create: `web/react-gui/src/journal/stationModel.ts`
+- Create: `web/react-gui/src/journal/__tests__/rangeSelection.test.ts`
+- Create: `web/react-gui/src/journal/__tests__/stationModel.test.ts`
+
+**Interfaces:**
+
+```typescript
+export type RangeParseResult =
+  | { ok: true; values: number[] }
+  | {
+      ok: false;
+      code: 'empty' | 'malformed' | 'duplicate' | 'out_of_station'
+        | 'reversed' | 'non_integer' | 'non_positive';
+      token: string;
+    };
+
+export type RangeParseFailure = Extract<RangeParseResult, { ok: false }>;
+
+export function parseStationRange(
+  input: string,
+  availableNumbers: ReadonlySet<number>,
+): RangeParseResult;
+
+export function formatStationRange(values: readonly number[]): string;
+
+export interface StationPlotPosition {
+  plot: JournalPlot;
+  gridNumber: number;
+  sourceNumber: number;
+}
+
+export interface StationModel {
+  gridPlots: StationPlotPosition[];
+  namedFallbackPlots: JournalPlot[];
+  unstationedPlots: JournalPlot[];
+}
+
+export function deriveStationModel(
+  stationCode: string,
+  plots: readonly JournalPlot[],
+): StationModel;
+```
+
+- [ ] **Step 1: Write pure RED cases.** Cover `2, 5, 6, 10-12` → `[2, 5, 6, 10, 11, 12]`; whitespace normalization; sorted-unique compressed formatting; empty and repeated commas; malformed `2--4`, `2-`, and `a`; decimal and exponent input; zero/negative input; reversed `12-10`; duplicate `5,5` and overlapping `2-4,4-6`; and out-of-station values. Assert each failure is exactly `{ ok: false, code, token }`, with no silently dropped token. For station numbering, extract from `plot_code` first. An accepted source is a string containing exactly one contiguous ASCII digit run whose parsed value is a positive safe integer; `P-07` yields `7`, `Lysimeter 10` yields `10`, and `plot 2` yields `2`. A decimal, exponent, or text with two digit runs such as `plot 2 row 3` has no accepted token; only then fall back to `name` under the same rule. Add RED cases for code precedence, ambiguous code falling back to an unambiguous name, ambiguous strings in both fields, and two same-station plots deriving the same source number. A collision moves every colliding plot to `namedFallbackPlots`, retains each plot exactly once, and emits no duplicate `gridNumber`. Assert that numeric non-colliding members enter `gridPlots`, named nonnumeric members enter `namedFallbackPlots`, plots without a station enter `unstationedPlots`, and no plot disappears.
+- [ ] **Step 2: Run focused RED.** Run `cd web/react-gui && npx vitest run src/journal/__tests__/rangeSelection.test.ts src/journal/__tests__/stationModel.test.ts`. Expected: module-not-found or missing-export failures.
+- [ ] **Step 3: Implement pure parsing and ordering.** Trim comma-separated tokens; accept one positive integer or one `start-end` pair with integer endpoints; return the exact seven-code failure union for every invalid fact. Expand ranges against `availableNumbers`, reject duplicates and missing numbers, sort successful values numerically, and have `formatStationRange` sort unique values and compress only consecutive runs. Derive a source number with the exact `plot_code`-then-`name` rule from Step 1. Within each station, detect source-number collisions before assigning grid positions; put only unique numeric members in stable numeric order with one-based `gridNumber`, move every colliding plot to `namedFallbackPlots`, and retain unstationed facts separately.
+- [ ] **Step 4: Run GREEN.** Rerun the focused command. Expected: all parser and station-ordering cases pass with no DOM or React dependency.
+- [ ] **Step 5: Controller-only commit and reviews.** Commit the four exact files as `feat(journal): add bounded station range selection model`. Sol reviews specification, then quality.
+
+### Task 17: SWR plot and group loading, mutation, and revalidation seams
+
+**Files:**
+- Modify: `web/react-gui/src/journal/useJournalPlots.ts`
+- Create: `web/react-gui/src/journal/useJournalPlotGroups.ts`
+- Modify: `web/react-gui/src/journal/__tests__/useJournalPlots.test.tsx`
+- Create: `web/react-gui/src/journal/__tests__/useJournalPlotGroups.test.tsx`
+
+**Interfaces:**
+
+```typescript
+export interface JournalPlotResourceActions {
+  createPlot: (payload: JournalPlotWritePayload) => Promise<JournalPlot>;
+  updatePlot: (uuid: string, payload: JournalPlotWritePayload) => Promise<JournalPlot>;
+  revalidate: () => Promise<unknown>;
+}
+
+export interface JournalPlotsState extends JournalPlotResourceActions {
+  plots: JournalPlot[];
+  loading: boolean;
+  error: unknown | null;
+  mutationError: unknown | null;
+  retry: () => Promise<unknown>;
+}
+
+export interface JournalPlotGroupResourceActions {
+  createPlotGroup: (payload: JournalPlotGroupWritePayload) => Promise<PlotGroup>;
+  updatePlotGroup: (uuid: string, payload: JournalPlotGroupWritePayload) => Promise<PlotGroup>;
+  revalidate: () => Promise<unknown>;
+}
+
+export interface JournalPlotGroupsState extends JournalPlotGroupResourceActions {
+  groups: PlotGroup[];
+  activeGroups: PlotGroup[];
+  resolvedGroups: PlotGroup[];
+  loading: boolean;
+  error: unknown | null;
+  mutationError: unknown | null;
+  retry: () => Promise<unknown>;
+}
+```
+
+- [ ] **Step 1: Write RED hook tests.** Extend the plot hook tests with `does not fetch while disabled`, `returns read errors instead of an empty success`, `awaits create then revalidates plots`, `awaits update then revalidates plots`, `does not claim a canonical plot before the server response`, and `surfaces mutation errors`. Add group tests for the same seams plus `retains resolved groups in groups while exposing only active groups to the picker`; assert loading, read error, retry, and mutation-error states separately.
+- [ ] **Step 2: Run focused RED.** Run `cd web/react-gui && npx vitest run src/journal/__tests__/useJournalPlots.test.tsx src/journal/__tests__/useJournalPlotGroups.test.tsx`. Expected: the group hook is missing and the mutation actions are missing from the plot hook.
+- [ ] **Step 3: Implement the SWR seams.** Keep the existing keys, public `loading` name, and no-focus-revalidation behavior. Each mutation action awaits the unwrapped `JournalPlot` or `PlotGroup` returned by `journalApi`, then awaits SWR `mutate()` with no optimistic data, no `optimisticData`, and no local array replacement. Surface rejected reads and mutations distinctly, expose retry, return `groups` unchanged for management/timeline consumers, derive `activeGroups` by unresolved state, and retain resolved groups in `resolvedGroups` and the raw collection. The hooks own this revalidation; no form-level second revalidation callback exists.
+- [ ] **Step 4: Run GREEN and typecheck.** Rerun the focused command and `cd web/react-gui && npx tsc --noEmit`. Expected: all hook tests and TypeScript pass.
+- [ ] **Step 5: Controller-only commit and reviews.** Commit the four exact files as `feat(journal): add SWR plot and group mutation seams`. Sol reviews specification, then quality.
+
+### Task 18: Accessible station grid
+
+**Files:**
+- Create: `web/react-gui/src/components/journal/where/StationGrid.tsx`
+- Create: `web/react-gui/src/components/journal/__tests__/where/StationGrid.test.tsx`
+
+**Interface:**
+
+```typescript
+export interface StationGridProps {
+  stationCode: string;
+  stationLabel: string;
+  plots: readonly StationPlotPosition[];
+  namedFallbackPlots: readonly JournalPlot[];
+  selectedPlotUuids: ReadonlySet<string>;
+  rangeText: string;
+  rangeError: RangeParseFailure | null;
+  onTogglePlot: (plotUuid: string) => void;
+  onSelectAll: () => void;
+  onInvert: () => void;
+  onRangeTextChange: (value: string) => void;
+  onApplyRange: () => void;
+}
+```
+
+- [ ] **Step 1: Write RED component tests.** Name tests `renders one collapsed station row instead of a long plot list`, `expands a numbered grid with toggle buttons`, `keeps select all and invert scoped to the station`, `shows the range input and exact structured parse error`, `calls the accessible apply callback from the button and Enter`, `renders named nonnumeric fallback plots outside the numeric grid`, `renders a selection count and human labels`, `keeps primary controls at least 56px`, and `renders focusable grid controls with visible focus classes`. Keep semantic, class, and focusable-element assertions in this JSDOM suite; real viewport overflow and browser Tab traversal belong to Task 25.
+- [ ] **Step 2: Run RED.** Run `cd web/react-gui && npx vitest run src/components/journal/__tests__/where/StationGrid.test.tsx`. Expected: module-not-found failure.
+- [ ] **Step 3: Implement the smallest accessible row.** Render one `<details>`/`<summary>` station row with the member count; render numbered `gridPlots` only when expanded; render `namedFallbackPlots` outside that grid; use `aria-pressed`, visible labels, a labelled range input, an Apply button and Enter handler that invoke the same `onApplyRange`, the structured `rangeError` token/code, `min-h-[56px]` on touch controls, visible focus rings, and flex/grid wrapping that does not impose a fixed desktop width. Route all changes through the typed callbacks; do not keep a second canonical selection inside the component.
+- [ ] **Step 4: Run GREEN.** Rerun the focused command and inspect the rendered DOM for the accessible name, focus order, and no long-list fallback.
+- [ ] **Step 5: Controller-only commit and reviews.** Commit the two exact files as `feat(journal): add accessible station grid selection`. Sol reviews specification, then quality.
+
+### Task 19: PlotPicker composition and active plot-group chips
+
+**Files:**
+- Create: `web/react-gui/src/components/journal/where/PlotGroupChips.tsx`
+- Create: `web/react-gui/src/components/journal/where/PlotPicker.tsx`
+- Create: `web/react-gui/src/components/journal/__tests__/where/PlotGroupChips.test.tsx`
+- Create: `web/react-gui/src/components/journal/__tests__/where/PlotPicker.test.tsx`
+
+**Interfaces:**
+
+```typescript
+export interface PlotSelection {
+  plotUuids: string[];
+  layoutCode: string | null;
+  isMultiPlot: boolean;
+}
+
+export interface PlotPickerProps {
+  plots: readonly JournalPlot[];
+  activeGroups: readonly PlotGroup[];
+  resolvedGroups: readonly PlotGroup[];
+  allowNoPlot: boolean;
+  maxPlots?: 100;
+  value: PlotSelection;
+  onChange: (selection: PlotSelection) => void;
+  onCreateGroup: (payload: JournalPlotGroupWritePayload) => Promise<PlotGroup>;
+  onUpdateGroup: (groupUuid: string, payload: JournalPlotGroupWritePayload) => Promise<PlotGroup>;
+}
+```
+
+- [ ] **Step 1: Write RED tests.** Cover one-tap active-group selection with member-level deselection; resolved groups absent from the picker but present in the supplied retained collection; station rows plus unstationed plots; explicit `No plot` only when `allowNoPlot` is true; a homogeneous multi-selection producing one layout; mixed-layout selection blocked with an alert before the form callback; a 101st selection rejected with a count/error; and manual multi-selection offering `Create group` whose callback receives `{ group_uuid: crypto.randomUUID(), base_sync_version: 0, label, members: sortedMembers, resolved: false }`. Cover active-group `Edit group` with the existing `group_uuid`, `sync_version`, `label`, `resolved_at: null`, and sorted members, and assert that the payload's `resolved` field is `false`. Model the Axios rejection exactly as `{ response: { data: { error: 'heterogeneous_group', message, details: null } } }` and assert that `response.data` is rendered visibly, not reduced to silent chip removal.
+- [ ] **Step 2: Run RED.** Run `cd web/react-gui && npx vitest run src/components/journal/__tests__/where/PlotGroupChips.test.tsx src/components/journal/__tests__/where/PlotPicker.test.tsx`. Expected: missing component/export failures.
+- [ ] **Step 3: Implement composition and selection wiring.** Partition active plots by `station_code`, call `deriveStationModel`, and render each station through `StationGrid`; render named fallback and unstationed plots in visible wrapped sections; render active group chips before stations; filter groups whose `resolved_at` is non-null from the picker only and retain them in parent data. A group chip selects all its members, while each member remains individually editable. Keep range text and parser errors per station. On `onApplyRange`, parse against the `sourceNumber` set from that station's unique `gridPlots` only, map valid source numbers to those plot UUIDs, replace only that station's selected UUIDs, and preserve selections from every other station plus named/unstationed plots. Show every parser failure, heterogeneous-layout error, and 100-plot-cap rejection visibly; never truncate selection silently. Recompute the selected layout from all selected plots before invoking `onChange`; if layouts differ, preserve the existing selection, show the response/domain error, and do not render or notify the entry form. Manual multi-select opens a label field whose create action builds the exact new-group payload with `crypto.randomUUID()`, `base_sync_version: 0`, sorted members, and `resolved: false`. Active-group edit uses the existing `group_uuid`, `sync_version` as `base_sync_version`, current label, sorted members, and `resolved: group.resolved_at !== null`; because the edited group is active, assert that this field is `false`. Surface the exact Axios `response.data` error shape through the localized error state and render that data visibly.
+- [ ] **Step 4: Run GREEN and typecheck.** From one GUI-directory shell, run:
+
+  ```bash
+  cd web/react-gui
+  npx vitest run src/components/journal/__tests__/where/PlotGroupChips.test.tsx src/components/journal/__tests__/where/PlotPicker.test.tsx
+  npx tsc --noEmit
+  ```
+
+  Expected: tests and typecheck pass.
+- [ ] **Step 5: Controller-only commit and reviews.** Commit the four exact files as `feat(journal): compose plot picker and active group chips`. Sol reviews specification, then quality.
+
+### Task 20: Lightweight plot CRUD form
+
+**Files:**
+- Create: `web/react-gui/src/components/journal/where/PlotForm.tsx`
+- Create: `web/react-gui/src/components/journal/__tests__/where/PlotForm.test.tsx`
+
+**Interface:**
+
+```typescript
+export interface PlotFormProps {
+  mode: 'create' | 'update';
+  initialPlot?: JournalPlot;
+  layoutOptions: readonly { code: string; version: number; label: string }[];
+  onSubmit: (payload: JournalPlotWritePayload) => Promise<JournalPlot>;
+  onAfterSave?: (plot: JournalPlot) => void | Promise<void>;
+  onCancel: () => void;
+}
+```
+
+- [ ] **Step 1: Write RED tests.** Name tests `creates with crypto.randomUUID and base version zero`, `sends exactly the shipped plot fields`, `updates with the existing UUID and current sync version`, `requires an explicit catalog layout and never selects open_field silently`, `renders plot code conflict and stale version responses`, `renders heterogeneous-group and unresolved-group deactivation conflicts`, `uses 56px labels and controls`, and `awaits the supplied mutation before optional close notification`. There is no plot/group revalidation callback in this interface.
+- [ ] **Step 2: Run RED.** Run `cd web/react-gui && npx vitest run src/components/journal/__tests__/where/PlotForm.test.tsx`. Expected: module-not-found failure.
+- [ ] **Step 3: Implement the exact form.** Generate one create-mode UUID with `crypto.randomUUID()`, keep it stable across rerenders, and send exactly `plot_uuid`, `base_sync_version: 0`, `plot_code`, `name`, `zone_uuid`, `station_code`, `crop_hint`, `area_m2`, `active` as `0 | 1`, `layout_code`, and `layout_version`. In update mode send the existing UUID and current `sync_version` as the base. Require a selected active catalog layout; do not substitute `open_field`. Map code-conflict, stale-version, heterogeneous-group, and unresolved-group deactivation errors to visible `role=alert` text and leave entered values intact on failure. Await `onSubmit`, receive the unwrapped `JournalPlot`, and invoke only the optional `onAfterSave` close/notification callback; the hook remains responsible for revalidation.
+- [ ] **Step 4: Run GREEN and typecheck.** Rerun the focused command and `cd web/react-gui && npx tsc --noEmit`. Expected: tests and typecheck pass.
+- [ ] **Step 5: Controller-only commit and reviews.** Commit the two exact files as `feat(journal): add explicit-layout plot CRUD form`. Sol reviews specification, then quality.
+
+### Task 21: JournalCaptureFlow multi-plot integration
+
+**Files:**
+- Modify: `web/react-gui/src/components/journal/capture/JournalCaptureFlow.tsx`
+- Modify: `web/react-gui/src/components/journal/__tests__/capture/JournalCaptureFlow.test.tsx`
+- Modify: `web/react-gui/src/pages/JournalPage.tsx`
+- Modify: `web/react-gui/src/pages/__tests__/JournalPage.test.tsx`
+- Create: `web/react-gui/src/journal/buildFinalBatchPayload.ts`
+- Create: `web/react-gui/src/journal/__tests__/buildFinalBatchPayload.test.ts`
+- Modify: `scripts/task14-journal-preview.js`
+- Modify: `scripts/test-task14-journal-preview.js`
+
+**Interfaces:**
+
+```typescript
+export type JournalSavedReceipt = EntryFinalMutationReceipt | BatchMutationReceipt;
+
+export interface JournalCaptureFlowProps {
+  catalog: JournalCatalog;
+  plots: JournalPlot[];
+  plotGroups: PlotGroup[];
+  initialPlot?: JournalPlot;
+  recentEntries: EntryAggregate[];
+  initialTimezone?: string;
+  zoneCrops?: Readonly<Record<string, string>>;
+  zoneTimezones?: Readonly<Record<string, string>>;
+  plotState: Pick<JournalPlotResourceActions, 'createPlot' | 'updatePlot'>;
+  groupState: Pick<JournalPlotGroupResourceActions, 'createPlotGroup' | 'updatePlotGroup'>;
+  onClose: () => void;
+  onOpenExisting: (entryUuid: string) => void;
+  onSaved: (receipt: JournalSavedReceipt) => void | Promise<void>;
+}
+```
+
+- [ ] **Step 0: Re-read current Phase 3 findings before RED.** Read the current Phase 3 section of `REVIEW-FINDINGS`, including concurrent commit `bbb85004`. Keep P1, P2, and P3 with their Phase 3 owners; adapt to any landed fix without overwriting it. Phase 4 tests must not encode the known unsafe denominator carry-forward behavior as desired behavior.
+- [ ] **Step 1: Write RED integration, builder, route, and preview-harness tests.** Add tests named `renders one shared details form only after homogeneous multi-plot selection`, `blocks mixed-layout selections before EntryForm renders`, `confirms every target name and count`, `posts one atomic final batch with sorted plot_uuids and no batch_uuid`, `uses the returned batch receipt`, `shows plural duplicate candidates and retries with duplicate_guard_ack_entry_uuids`, `rejects a 101-plot selection before rendering the form`, `keeps single-plot draft POST then PUT promotion unchanged`, `does not call createEntry once per selected plot`, `preserves the existing nine-activation open_field SLA regression`, `reaches New plot and Edit selected plot controls through the route`, and `reaches group create and active-group edit controls through the route`. Add `buildFinalBatchPayload` RED cases for an empty selection, 101 plots, duplicate UUIDs, and an unsorted valid selection. Assert the exact domain errors `{ error: 'invalid_batch', message: 'Batch plots must be a nonempty array', details: null }`, `{ error: 'batch_too_large', message: 'A journal batch may contain at most 100 plots', details: null }`, and `{ error: 'duplicate_plot', message: 'A journal batch cannot contain duplicate plots', details: null }`; assert valid UUIDs are sorted before the builder returns, and assert a rejected builder result makes no `journalApi.createFinalBatch` POST. The builder tests also assert both `plot_uuid` and `zone_uuid` are absent while the single-entry draft POST and PUT path remains unchanged. Extend the existing `scripts/test-task14-journal-preview.js` suite with cases for numeric and nonnumeric station plots, range Apply/Enter, active/resolved groups, plot/group envelope unwrapping and version rules including generic `resolved: true` PUT wire support, one atomic batch response with edge-generated `batch_uuid` and N receipts, plural duplicate candidates plus acknowledgement retry, plot create/update, and group create/edit.
+- [ ] **Step 2: Run RED.** Run:
+
+  ```bash
+  cd web/react-gui && npx vitest run src/components/journal/__tests__/capture/JournalCaptureFlow.test.tsx src/pages/__tests__/JournalPage.test.tsx src/journal/__tests__/buildFinalBatchPayload.test.ts
+  cd ../.. && node scripts/test-task14-journal-preview.js
+  ```
+
+  Expected: the GUI suites fail on missing batch selection/save behavior, and the preview suite fails because the harness still exposes one plot, no plot-group resources, single-entry POST behavior, and no plural duplicate response.
+- [ ] **Step 3: Extend the guarded preview harness.** Add multiple station plots with numeric and nonnumeric codes, active and resolved groups, and guarded `GET`, `POST`, and UUID-encoded `PUT` handling for plots and plot-groups, including generic `resolved: true` and `resolved: false` wire values. Return the shipped `{ plots }`, `{ plot_groups }`, `{ plot }`, and `{ plot_group }` envelopes; enforce the UI-required `base_sync_version` and current-version rules. Keep the harness mock-only, not production API authority, and continue routing applicable entry payload validation through the shipped edge validator. Task 21's preview scope covers the generic plot-group wire envelope only.
+- [ ] **Step 4: Wire the plot/group hooks and CRUD controls through JournalPage.** Load plots and groups from SWR, pass the raw groups plus `plotState.createPlot/updatePlot` and `groupState.createPlotGroup/updatePlotGroup` to capture, and revalidate entries after a successful receipt. Keep unavailable/error states distinct from empty collections. Pass group mutation actions to the picker; plot and group mutation revalidation remains owned by the hooks. Make `New plot` and `Edit selected plot` visible controls, mount `PlotForm`, and pass the active catalog layout options. Make group create and active-group edit visible through the picker/chip controls and the group hook callbacks. Add route-level tests for all four reachability paths.
+- [ ] **Step 5: Integrate the picker without changing the single path.** Track selected UUIDs as a sorted set. For one UUID, retain `useCaptureDraft`, the existing `entry_uuid`, scalar duplicate acknowledgement, and final PUT promotion. For multiple homogeneous plots, render the same catalog-driven `EntryForm` once, display the selected plot names/count in `ConfirmStrip`, and bypass draft serialization entirely.
+- [ ] **Step 6: Implement the dedicated atomic batch builder and final request.** Add `buildFinalBatchPayload` as the only batch payload construction seam and the defensive runtime authority before the service call. It rejects an empty selection, more than 100 plots, or duplicate UUIDs with the exact structured/domain errors pinned in Step 1; it sorts valid UUIDs before returning one `CreateFinalBatchPayload` with `status: 'final'`, `plot_uuids`, `base_sync_version: 0`, one shared values payload, pinned template/layout versions, occurrence fields, and no `entry_uuid`, `batch_uuid`, `plot_uuid`, `zone_uuid`, or scalar duplicate acknowledgement. The picker’s 100-plot cap remains UX prevention, not the validation authority. Call `journalApi.createFinalBatch` exactly once only after the builder succeeds. Store the returned `BatchMutationReceipt` and pass it to `onSaved`; never loop over plots and never call a batch `PUT`. Keep the existing single-entry draft POST and `PUT` promotion path byte-for-byte in behavior, including its scalar duplicate acknowledgement.
+- [ ] **Step 7: Implement plural duplicate acknowledgement/retry in the harness and flow.** In the guarded preview, return the shipped 409 `{ error: 'duplicate_candidates', details: { duplicateCandidates: [{ entryUuid, occurredStart, activityCode, plotUuid }] } }` shape for an unacknowledged duplicate batch, then accept the unchanged batch payload with selected UUIDs in `duplicate_guard_ack_entry_uuids` and return the edge-generated batch receipt. In the flow, show every candidate grouped by plot and retry without dropping candidates, converting the list to a scalar, issuing one request per plot, or creating a batch draft. Keep Finish disabled while the request is in flight.
+- [ ] **Step 8: Run GREEN and all Phase 3 regressions.** Run:
+
+  ```bash
+  cd web/react-gui && npx vitest run src/components/journal/__tests__/capture/JournalCaptureFlow.test.tsx src/pages/__tests__/JournalPage.test.tsx src/journal/__tests__/buildFinalBatchPayload.test.ts && npm run test:unit:tsx-runner
+  cd ../.. && node scripts/test-task14-journal-preview.js
+  ```
+
+  Expected: the new batch, CRUD, generic resolved-plot-group wire, range, and browser-harness cases pass, the existing preview cases retain their 7/7 pass signal, the single-plot SLA remains green, and no draft request is made for a batch. The harness records each request and response for the generic GUI envelopes; it does not prove real edge atomicity.
+- [ ] **Step 9: Controller-only commit and reviews.** The controller stages the eight exact files `web/react-gui/src/components/journal/capture/JournalCaptureFlow.tsx`, `web/react-gui/src/components/journal/__tests__/capture/JournalCaptureFlow.test.tsx`, `web/react-gui/src/pages/JournalPage.tsx`, `web/react-gui/src/pages/__tests__/JournalPage.test.tsx`, `web/react-gui/src/journal/buildFinalBatchPayload.ts`, `web/react-gui/src/journal/__tests__/buildFinalBatchPayload.test.ts`, `scripts/task14-journal-preview.js`, and `scripts/test-task14-journal-preview.js`, then commits `feat(journal): integrate atomic multi-plot capture`. Sol reviews specification first and quality second. Any Phase 3 finding discovered here is recorded and sent to its owning Phase 3 task; this task does not mark Phase 3 complete.
+
+### Task 22: Post-save harvest group-resolution nudge
+
+**Files:**
+- Create: `web/react-gui/src/journal/groupResolutionNudge.ts`
+- Create: `web/react-gui/src/journal/__tests__/groupResolutionNudge.test.ts`
+- Create: `web/react-gui/src/components/journal/where/HarvestGroupNudge.tsx`
+- Create: `web/react-gui/src/components/journal/__tests__/where/HarvestGroupNudge.test.tsx`
+- Modify: `web/react-gui/src/components/journal/capture/JournalCaptureFlow.tsx`
+- Modify: `web/react-gui/src/components/journal/__tests__/capture/JournalCaptureFlow.test.tsx`
+- Modify: `scripts/test-task14-journal-preview.js`
+
+**Interfaces:**
+
+```typescript
+export function matchingActiveHarvestGroups(
+  activityCode: string,
+  selectedPlotUuids: readonly string[],
+  groups: readonly PlotGroup[],
+): PlotGroup[];
+
+export interface HarvestGroupNudgeProps {
+  groups: readonly PlotGroup[];
+  onResolve: (group: PlotGroup) => Promise<void>;
+  errors: ReadonlyMap<string, string>;
+}
+```
+
+- [ ] **Step 1: Write RED tests.** Cover exact set equality only; extra selected plots and partial group coverage produce no nudge; non-harvest activity produces no nudge; resolved groups are ignored; multiple matches sort by `label` using a stable case-folded comparison then `group_uuid`; each visible resolve action sends `group_uuid`, the same `label`, the same sorted `members`, `base_sync_version: sync_version`, and `resolved: true`; a successful resolve revalidates groups; a failed resolve remains visible and shows its error; no group resolves automatically. The React capture-flow test owns driving and clicking the visible post-save `HarvestGroupNudge`, then asserting the group-hook update callback, the exact resolved-true payload, and success/error behavior. Extend `scripts/test-task14-journal-preview.js` only with HTTP-level evidence for the exact generic UUID-encoded plot-group `PUT` request and response envelope with `resolved: true`; it does not drive or claim visible React UI behavior.
+- [ ] **Step 2: Run RED.** Run these as separate commands:
+
+  ```bash
+  cd web/react-gui && npx vitest run src/journal/__tests__/groupResolutionNudge.test.ts src/components/journal/__tests__/where/HarvestGroupNudge.test.tsx src/components/journal/__tests__/capture/JournalCaptureFlow.test.tsx
+  cd ../.. && node scripts/test-task14-journal-preview.js
+  ```
+
+  Expected: the focused GUI suites fail on the missing nudge behavior, including the capture-flow integration assertions, and the preview suite fails its new HTTP-level `resolved: true` request/response evidence even though the generic plot-group endpoint from Task 21 is available.
+- [ ] **Step 3: Implement deterministic nudge behavior and record HTTP envelope evidence.** Derive matches only for a successful harvest batch and exact set equality with active groups. Render one opt-in action per matching group after the batch receipt; sort multiple matches by case-folded label and then `group_uuid`. Call the existing UUID-encoded `journalApi.updatePlotGroup` through the group hook with the same `group_uuid`, label, sorted members, current `sync_version` as `base_sync_version`, and `resolved: true`; then await group revalidation. Keep the group label and membership unchanged, show failures beside the action, and never resolve automatically or add an apply-to-all correction action. The React capture-flow test drives the visible post-save action and owns its callback, payload, and success/error assertions. Extend the preview test only to issue the generic HTTP `PUT` and preserve its exact request/response envelope; the endpoint implementation remains owned by Task 21.
+- [ ] **Step 4: Run GREEN and typecheck.** Run:
+
+  ```bash
+  cd web/react-gui
+  npx vitest run src/journal/__tests__/groupResolutionNudge.test.ts src/components/journal/__tests__/where/HarvestGroupNudge.test.tsx src/components/journal/__tests__/capture/JournalCaptureFlow.test.tsx
+  npx tsc --noEmit
+  cd ../..
+  node scripts/test-task14-journal-preview.js
+  ```
+
+  Expected: all matching, payload, error, ordering, and recorded preview-evidence tests pass.
+- [ ] **Step 5: Controller-only commit and reviews.** Commit the seven exact files as `feat(journal): offer harvest plot-group resolution`. Sol reviews specification, then quality. Task 25 retains the real browser wiring acceptance for clicking harvest group resolution at both required phone sizes.
+
+### Task 23: Batch grouping in the timeline
+
+**Files:**
+- Modify: `web/react-gui/src/components/journal/JournalTimeline.tsx`
+- Modify: `web/react-gui/src/components/journal/__tests__/JournalTimeline.test.tsx`
+- Modify: `web/react-gui/src/components/journal/JournalEntryRow.tsx`
+- Modify: `web/react-gui/src/components/journal/__tests__/JournalEntryRow.test.tsx`
+- Modify: `web/react-gui/src/pages/JournalPage.tsx`
+- Modify: `web/react-gui/src/pages/__tests__/JournalPage.test.tsx`
+- Create: `web/react-gui/src/journal/hydrateBatchMembership.ts`
+- Create: `web/react-gui/src/journal/__tests__/hydrateBatchMembership.test.ts`
+
+**Interface:**
+
+```typescript
+export type JournalTimelineItem =
+  | { kind: 'entry'; entry: EntryAggregate }
+  | {
+      kind: 'batch';
+      batchUuid: string;
+      entries: EntryAggregate[];
+      count: number;
+      activityCode: string;
+      cropSummary: string | null;
+    };
+
+export function groupJournalTimelineEntries(
+  entries: readonly EntryAggregate[],
+): JournalTimelineItem[];
+
+export interface BatchMembershipPage {
+  entries: EntryAggregate[];
+  next_cursor: string | null;
+}
+
+export function hydrateBatchMembership(
+  batchUuid: string,
+  listPage: (filters: { batch_uuid: string; status: 'all'; limit: 100; cursor?: string }) => Promise<BatchMembershipPage>,
+): Promise<EntryAggregate[]>;
+
+export interface JournalTimelineProps {
+  entries: EntryAggregate[];
+  plots: JournalPlot[];
+  loading: boolean;
+  listBatchEntries: (filters: { batch_uuid: string; status: 'all'; limit: 100; cursor?: string }) => Promise<BatchMembershipPage>;
+}
+```
+
+- [ ] **Step 1: Write RED timeline, hydration, and page-wiring tests.** Add `groups final entries sharing a non-null batch_uuid into one collapsed card`, `shows the hydrated batch count and all plot names after expansion`, `keeps entries with null batch_uuid independent`, `orders grouped items by first input occurrence`, `includes activity and crop summary`, and `preserves each child entry_uuid status and base identity for future per-entry actions`. Add hydration tests for `fetches complete membership with status all and limit 100`, `follows next_cursor defensively until null`, `does not fetch a cursor after null`, `shows loading while membership hydrates`, `shows a retryable error when hydration fails`, and `does not issue mutation or apply-to-all calls`. Assert that the callback preserves actual child statuses, including voided children, and that batch creation remains final-only. Add `JournalPage.test.tsx` coverage proving the page passes a typed `listBatchEntries` callback backed by `journalApi.listEntries` (or an equivalent typed adapter) into the required `JournalTimeline` prop. Assert that the grouped card does not invent correction or void controls.
+- [ ] **Step 2: Run RED.** From one GUI-directory shell, run:
+
+  ```bash
+  cd web/react-gui
+  npx vitest run src/components/journal/__tests__/JournalTimeline.test.tsx src/components/journal/__tests__/JournalEntryRow.test.tsx src/journal/__tests__/hydrateBatchMembership.test.ts src/pages/__tests__/JournalPage.test.tsx
+  ```
+
+  Expected: the page-wiring, grouped-card, and hydration assertions fail.
+- [ ] **Step 3: Implement parent §6.1 grouping and complete-membership hydration.** Wire `JournalPage.tsx` to the required `JournalTimeline` `listBatchEntries` prop using `journalApi.listEntries` directly or an equivalent typed adapter that maps its response to `BatchMembershipPage`. Partition the initially loaded final entries by non-null `batch_uuid`; emit grouped cards in first-occurrence order, preserve input order within each group, and leave null-batch entries independent at their input positions. Batch creation remains final-only. On expansion, call `hydrateBatchMembership(batch_uuid, listBatchEntries)` with `status: 'all'` and `limit: 100` so later voided children remain in complete membership; append pages only while a defensive `next_cursor` is a non-empty string, stop at `null`, and guard against repeated cursors. Display the count, plot labels, and child rows only from the hydrated complete membership, preserving each child's actual `status`, `entry_uuid`, and `sync_version` base identity. Render loading, error, and Retry states and leave the collapsed card usable while hydration is pending. Pass each child identity unchanged to the original `JournalEntryRow` seam for future per-entry actions. Do not add correction or void controls in Phase 4; defer those controls to the Phase 5 detail workspace. Do not issue N mutation calls or expose apply-to-all.
+- [ ] **Step 4: Run GREEN.** From one GUI-directory shell, run:
+
+  ```bash
+  cd web/react-gui
+  npx vitest run src/components/journal/__tests__/JournalTimeline.test.tsx src/components/journal/__tests__/JournalEntryRow.test.tsx src/journal/__tests__/hydrateBatchMembership.test.ts src/pages/__tests__/JournalPage.test.tsx
+  npx tsc --noEmit
+  ```
+
+  Expected: grouping, complete-membership, loading/error/retry, page-wiring, and entry-identity tests pass.
+- [ ] **Step 5: Controller-only commit and reviews.** Commit the eight exact files as `feat(journal): group atomic batches in the journal timeline`. Sol reviews specification, then quality.
+
+### Task 24: Phase 4 locale keys and parity coverage
+
+**Files:**
+- Modify: `web/react-gui/public/locales/en/journal.json`
+- Modify: `web/react-gui/public/locales/de-CH/journal.json`
+- Modify: `web/react-gui/public/locales/es/journal.json`
+- Modify: `web/react-gui/public/locales/fr/journal.json`
+- Modify: `web/react-gui/public/locales/it/journal.json`
+- Modify: `web/react-gui/public/locales/lg/journal.json`
+- Modify: `web/react-gui/public/locales/pt/journal.json`
+- Modify: `web/react-gui/src/journal/__tests__/journalLocales.test.ts`
+
+- [ ] **Step 1: Write RED parity and component-key assertions.** Extend the English required-key assertion with every user-facing key consumed by Tasks 15–23. The required set includes `where.station`, `where.unstationed`, `where.namedPlots`, `where.noStation`, `where.selectAll`, `where.invert`, `where.range`, `where.applyRange`, `where.rangeSummary`, `where.rangeEmpty`, `where.rangeMalformed`, `where.rangeOutOfStation`, `where.rangeDuplicate`, `where.rangeReversed`, `where.rangeNonInteger`, `where.rangeNonPositive`, `where.mixedLayout`, `where.maxPlots`, `where.maxPlotsError`, `where.noPlot`, `where.selectionCount`, `where.createGroup`, `where.editGroup`, `where.groupLabel`, `where.saveGroup`, `where.cancel`, `where.loading`, `where.retry`, `group.members`, `group.resolved`, `group.resolve`, `group.resolveError`, `group.heterogeneous`, `group.create`, `group.edit`, `group.loading`, `group.error`, `group.retry`, `plot.create`, `plot.update`, `plot.new`, `plot.edit`, `plot.code`, `plot.name`, `plot.zone`, `plot.station`, `plot.cropHint`, `plot.area`, `plot.active`, `plot.layout`, `plot.save`, `plot.cancel`, `plot.layoutRequired`, `plot.stale`, `plot.codeConflict`, `plot.heterogeneousGroup`, `plot.unresolvedGroup`, `plot.loading`, `plot.error`, `plot.retry`, `batch.saving`, `batch.saved`, `batch.confirm`, `batch.confirmCount`, `batch.duplicateTitle`, `batch.duplicateBody`, `batch.duplicateAcknowledge`, `batch.count`, `batch.retry`, `timeline.batch`, `timeline.batchExpand`, `timeline.batchCollapse`, `timeline.batchLoading`, `timeline.batchError`, and `timeline.batchRetry`. Add interpolation checks for `{{count}}`, `{{label}}`, and `{{plot}}` where used. Add a component-key test that imports the English `journal.json` object and asserts every required component key exists at its exact nested path; locale parity alone is insufficient.
+- [ ] **Step 2: Run RED.** Run `cd web/react-gui && npx vitest run src/journal/__tests__/journalLocales.test.ts`. Expected: English required-key and six-locale shape/value assertions fail because the Phase 4 tree is absent.
+- [ ] **Step 3: Add translations to all seven source files.** Add the same nested key shape to all seven files, translate values where the existing locale policy requires translation, list only reviewed identical terms in `SHARED_WITH_ENGLISH`, preserve interpolation-token sets, and keep Swiss German free of `ß`. Do not add or edit any feed mirror.
+- [ ] **Step 4: Run GREEN.** Rerun the focused parity command. Expected: all seven source resources match keys, values, and interpolation tokens.
+- [ ] **Step 5: Controller-only commit and reviews.** Commit the eight exact files as `feat(journal): add Phase 4 plot and batch locale keys`. Sol reviews specification, then quality.
+
+### Task 25: Phase 4 final verification and audit
+
+**Files:**
+- No source edits; audit the Phase 4 files committed by Tasks 15–24, including the mock preview extensions owned by Tasks 21 and 22. The documentation commit was created before Task 15, so this task expects a clean worktree after the Task 24 commit.
+
+- [ ] **Step 1: Run the complete focused journal set.** Run `cd web/react-gui && npx vitest run src/services/__tests__/journalApi.test.ts src/journal/__tests__/rangeSelection.test.ts src/journal/__tests__/stationModel.test.ts src/journal/__tests__/useJournalPlots.test.tsx src/journal/__tests__/useJournalPlotGroups.test.tsx src/journal/__tests__/groupResolutionNudge.test.ts src/journal/__tests__/buildFinalBatchPayload.test.ts src/journal/__tests__/hydrateBatchMembership.test.ts src/components/journal/__tests__/where/StationGrid.test.tsx src/components/journal/__tests__/where/PlotGroupChips.test.tsx src/components/journal/__tests__/where/PlotPicker.test.tsx src/components/journal/__tests__/where/PlotForm.test.tsx src/components/journal/__tests__/where/HarvestGroupNudge.test.tsx src/components/journal/__tests__/capture/JournalCaptureFlow.test.tsx src/components/journal/__tests__/JournalTimeline.test.tsx src/components/journal/__tests__/JournalEntryRow.test.tsx src/journal/__tests__/journalLocales.test.ts src/pages/__tests__/JournalPage.test.tsx`, then run `cd ../.. && node scripts/test-task14-journal-preview.js`. Expected: all Task 15–24 suites pass and the preview suite retains its existing 7/7 cases plus the new plot/group/batch cases.
+- [ ] **Step 2: Run the repository GUI gates.** Run `cd web/react-gui && npm run test:unit && npm run typecheck && npm run build`. Expected: the fresh baseline is 94/94 TSX and 939/939 Vitest before Phase 4 additions, all added tests are green, `npm run typecheck` exits 0, and the production build exits 0. Existing Browserslist and large-chunk advisories may remain, but no new error is accepted. The existing uncached `open_field` single-capture path must retain its `<=9` primary-control activation SLA.
+- [ ] **Step 3: Run the mocked edge contract gates.** Run `node scripts/test-journal-api.js`, `node conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-journal/index.test.js`, `node conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/node-red/osi-journal/index.test.js`, and `node scripts/verify-profile-parity.js`. Expected: the shipped batch, plot, group, lifecycle, and mirrored-profile contracts stay green. No code or edge flow change is part of this Phase 4 plan.
+- [ ] **Step 4: Run browser acceptance at both required phone sizes after Task 22.** Build with `cd web/react-gui && npm run build`; start the existing guarded preview with `TASK14_PREVIEW=1 node scripts/task14-journal-preview.js`; use the in-app browser/Chromium at 320×568 and 360×640 against `http://127.0.0.1:41714/gui/#/journal?capture=1&zone_uuid=22222222-2222-4222-8222-222222222222`. At both sizes, exercise range Apply and Enter, keyboard traversal, real no-horizontal-overflow behavior, plot create/update, group create/edit, harvest group resolution, one atomic batch receipt, and plural duplicate acknowledgement. Capture the recorded mock request/response evidence for each CRUD, resolution, batch, and retry envelope plus screenshots at both viewports. The mock harness proves GUI wiring and wire envelopes; it does not prove real edge atomicity. Do not use a pre-journal live gateway.
+- [ ] **Step 5: Run prose and audit gates.** From the repository root run `node .claude/skills/anti-slop-writing/slop-check.js docs/superpowers/plans/2026-07-15-field-journal-slice2-gui.md docs/superpowers/prompts/field-journal-slice2-codex/RUN-NOTES.md` and `git diff --check -- docs/superpowers/plans/2026-07-15-field-journal-slice2-gui.md docs/superpowers/prompts/field-journal-slice2-codex/RUN-NOTES.md`. Expected: `slop-check: PASS (no tier-1 findings)` and no whitespace output. Review the plan against the fixed decomposition, type shapes, preview authority boundary, Phase 3 ownership, and exact file scopes.
+- [ ] **Step 6: Final Sol range audit and gate report.** Sol performs the final specification review, then the quality range audit. The controller verifies no uncommitted changes with `git status --short` and `git diff --exit-code`; an empty result is required after the Task 24 commit. Report the Phase 4 gate only when focused suites, full GUI gates, edge lifecycle/profile checks, browser evidence at 320×568 and 360×640, the single-capture SLA, anti-slop, diff checks, and clean-worktree checks pass. Do not commit in Task 25; the documentation commit happened before Task 15. Phase 4 completion does not imply broader Phase 3 review completion; that status remains separately recorded.
 
 ## Phase 5 — Desktop three-pane workspace (code-decompose when reached)
 
@@ -1898,5 +2435,5 @@ sol post-check. Commit: `feat(journal): integrate mobile capture entry points`.
 ## Self-review
 
 - **Spec coverage:** §6.1 entry/save/carry-forward → Phase 3; §6.2 templates×layouts → Phase 3 (`templateEngine`); §6.3 timeline → Phase 2, markers → Phase 6; §6.4 i18n → Phase 6 + the per-task English keys; D10 plot-first/no-zone → Phases 2–4; D11 batch/stations/groups → Phase 4; P7 capture→enrich → Phases 3/5/6. The one gap the spec does not name — the catalog DTO stripping definitions/labels — is captured as the Phase 0 prerequisite.
-- **Placeholder scan:** Phases 1–2 carry complete code in every step. Phases 3–6 are deliberately specified at file/interface/acceptance level, not stubbed code, because their forms depend on the Phase 0 payload; each is a "code-decompose when reached" section, not a hidden TODO.
+- **Placeholder scan:** Phases 1–2 carry complete code in every step. Phase 4 is decomposed as Tasks 15–25 with exact files, interfaces, RED/GREEN commands, review gates, and commit boundaries. Only Phases 5–6 remain "code-decompose when reached" sections because their forms depend on later product decisions.
 - **Type consistency:** `journalApi`, `CreateEntryPayload`, `EntryAggregate`, `EntryListFilters`, `useJournalCatalog`, `useJournalEntries`, `JournalEntryRow`, `JournalTimeline` names are used identically across the tasks that define and consume them.

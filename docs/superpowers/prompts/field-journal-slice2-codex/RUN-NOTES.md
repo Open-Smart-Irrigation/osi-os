@@ -164,3 +164,51 @@ Append-only execution log for the accepted Phase 0 and Phase 1-6 plans on `desig
 - Luna implementation and Sol specification reviews are PASS. Quality is APPROVED with no findings.
 - The F7 product-question hard stop is cleared. Task 14 is READY FOR EXTERNAL RE-REVIEW, but it is not externally accepted. Phase 4 must not start until external reviewer acceptance closes Phase 3.
 - Pre-existing `attr.method` issue: shipped definition-driven carry-forward maps it, but current form pruning prevents retention in the final payload. This is a separate production TDD follow-up and did not block this decision patch.
+
+## 2026-07-17T09:46:08+02:00 - Phase 4 sequencing authorization and contract correction
+
+- The user reports that Task 14 is externally approved. Broader Phase 3 remains in review, and the user explicitly authorizes Phase 4 to begin now. This narrow sequencing authorization does not mark Phase 3 complete, waive later findings, or permit Phase 3-owned work to be treated as accepted.
+- Fresh GUI baseline: 94/94 TSX-runner tests and 939/939 Vitest tests pass.
+- Phase 4 preflight corrected the stale sketch. Shipped Slice 1 uses one atomic `POST /api/journal/entries` with `plot_uuids`; the edge generates `batch_uuid`, returns N independent receipts, caps the batch at 100 plots, and performs plural duplicate preflight. `duplicate_guard_ack_entry_uuids` is batch-only. Batch drafts and `PUT` batches are rejected. The path does not use N client calls or a client-generated UUID.
+- The Phase 4 plan preserves single-plot draft promotion and keeps Phase 3 status separate from Phase 4 sequencing.
+- Concurrent commit `bbb85004` recorded ongoing Phase 3 review findings. Those findings remain Phase 3-owned and are not waived. Task 21 must re-read the current Phase 3 section of `REVIEW-FINDINGS` before capture integration, keep P1/P2/P3 with their Phase 3 owners, and adapt to any landed fix without overwriting it.
+
+## 2026-07-17T10:36:46+02:00 - Phase 4 plan corrected after two Sol specification reviews
+
+- Two independent Sol specification reviews returned `CHANGES REQUIRED`. The plan now forbids `status`, `plot_uuid`, and `zone_uuid` in the shared batch fields while requiring final status; places the multiline singular-ack `@ts-expect-error` directly above the offending property; separates Vitest RED from typecheck evidence; and asserts both forbidden UUID fields are absent from the batch wire payload.
+- Range Apply and Enter now parse against each station's source-number set and replace only that station's selected UUIDs. The plan adds visible parser, heterogeneous-layout, and 100-plot-cap failures, removes impossible JSDOM claims about real viewport overflow and browser Tab traversal, and moves those checks to Task 25 browser acceptance at 320x568 and 360x640.
+- Group creation and editing now use exact `JournalPlotGroupWritePayload` callbacks. New groups use a random UUID, base version zero, sorted members, and `resolved: false`; active edits preserve the existing identity, version, label, resolution state, and sorted members. The exact `{ error: 'heterogeneous_group', message, details: null }` response shape is visible.
+- Task 21 now reaches plot create/update through mounted `PlotForm` controls and group create/edit through hook callbacks, uses a dedicated batch builder that omits both `plot_uuid` and `zone_uuid`, and records mock request evidence for CRUD, harvest resolution, batch receipt, and plural duplicate retry. The mock harness proves GUI wiring and envelopes, not edge atomicity. All preview test references use `scripts/test-task14-journal-preview.js`.
+- Timeline adjudication accepted hydrating complete batch membership by `batch_uuid` with the 100-entry hard cap, defensive cursor pagination, loading, error, and retry states. Invented correction/void callbacks were rejected and deferred to the Phase 5 detail workspace; child `entry_uuid`, `status`, and `sync_version` identity remain preserved for future per-entry actions, with no apply-to-all or mutation fan-out.
+- Task 24 now requires all Task 15–23 user-facing keys, including PlotForm fields/actions, plot and group create/edit controls, parser/API errors, loading/retry copy, batch states, and active-group edit copy, with direct component-key existence tests. Phase 3 remains in review; no Phase 3 finding was waived.
+- Re-review correction: Task 15 now consumes every invalid compile fixture with `void` statements, keeps each `@ts-expect-error` beside its forbidden property, and uses one shell `cd` for separate RED commands so evidence isolates forbidden-property checks.
+- Re-review correction: Task 19 now uses `resolved_at`, derives payload `resolved` from `group.resolved_at !== null`, asserts active edits send `false`, and renders the exact Axios `response.data` error envelope visibly.
+- Re-review correction: Task 23 now owns `JournalPage.tsx` and `JournalPage.test.tsx`, wires `journalApi.listEntries` (or a typed adapter) into `JournalTimeline`, includes the page test in RED/GREEN, and commits eight exact files.
+
+## 2026-07-17T10:57:22+02:00 - Authoritative Task 14 status and remaining quality corrections
+
+- The earlier 09:46 entry recorded relayed Task 14 approval from the user's report. Commit `923b76b6` now supplies the authoritative written acceptance in `docs/superpowers/prompts/field-journal-slice2-codex/REVIEW-FINDINGS.md` under `# Task 14 external re-review — ACCEPTED (2026-07-17)`. Broader Phase 3 remains separately in review; the early Phase 4 sequencing authorization does not close that review.
+- Cardinality ownership is explicit: Task 15 keeps `CreateFinalBatchPayload.plot_uuids` as `string[]` and covers only compile-time wire shape plus exact service pass-through. Task 21's `buildFinalBatchPayload` validates 1–100 unique plot UUIDs, sorts valid UUIDs, returns the exact `invalid_batch`, `batch_too_large`, and `duplicate_plot` error envelopes, and makes no POST after a rejected build.
+- Numeric station extraction is deterministic: use `plot_code` when it contains exactly one positive integer token, otherwise try `name`; reject ambiguous multi-number text. Same-station source-number collisions move every colliding plot to `namedFallbackPlots`, retain all plots, and leave `gridPlots` unique. Task 19 maps ranges only through unique `gridPlots`.
+- Harvest sequencing is separated: Task 21 may test generic plot-group PUT wire support for `resolved: true`, but it does not claim to prove the HarvestGroupNudge UI. Task 22 owns the nudge tests, preview evidence, and `scripts/test-task14-journal-preview.js` scope; Task 25 remains the final browser acceptance gate.
+- Complete batch membership uses `status: 'all'` in Task 23 hydration callbacks, filters, interfaces, tests, and implementation. Batch creation remains final-only, while hydration retains voided children and preserves each child's actual status and identity.
+
+## 2026-07-17T11:02:00+02:00 - Final scope clarification for the Phase 4 correction
+
+- The earlier 10:36 plan note used “harvest resolution” in the Task 21 preview summary. That wording is superseded by this append-only correction: Task 21 covers generic plot-group `PUT` wire support, including `resolved: true`; Task 22 owns the HarvestGroupNudge tests and `scripts/test-task14-journal-preview.js` evidence, with a six-file commit scope. Task 25 remains the final browser gate.
+
+## 2026-07-17T12:00:00+02:00 - Superseding Task 22 documentation correction
+
+- Task 22 now owns seven files, adding `web/react-gui/src/components/journal/__tests__/capture/JournalCaptureFlow.test.tsx`. That React test drives the visible post-save `HarvestGroupNudge` and asserts the group-hook callback, exact `resolved: true` payload, and success/error behavior.
+- `scripts/test-task14-journal-preview.js` is HTTP-only for Task 22: it records the exact generic UUID-encoded plot-group `PUT` request/response envelope with `resolved: true`. It does not claim visible React UI coverage; Task 25 retains real browser wiring acceptance.
+
+## 2026-07-17T11:09:42+02:00 - Timestamp correction
+
+- The 12:00 header was a timestamp-entry error; its content remains valid, and this correction was recorded at the actual time.
+
+## 2026-07-17T11:11:19+02:00 - Final Phase 4 documentation review outcome
+
+- Two independent Sol specification reviewers approved corrected Tasks 15–20 and 21–25.
+- The separate Sol quality reviewer initially required five quality corrections and one Task 22 test-authority correction. Luna corrected all six; the final Sol quality verdict is `APPROVED`.
+- The Phase 4 plan is ready to commit, and Task 15 may begin.
+- Broader Phase 3 remains separately in review; no finding was waived.
