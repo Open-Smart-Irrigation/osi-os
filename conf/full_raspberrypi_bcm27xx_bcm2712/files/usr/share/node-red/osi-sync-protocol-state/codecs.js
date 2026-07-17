@@ -364,6 +364,10 @@ function dispositionStateFields(state) {
   } else if (sourceKind === 'restore-invalidation') {
     Object.assign(fields, {
       recoveryOperationId: { check: isOperationId },
+      // Plan line 351 binds the proposal to "the unchanged linked recovery
+      // operation/`disposition-restoring` phase" — the phase is part of
+      // the bound source facts, not just the operation ID (review MINOR 2).
+      recoveryPhase: { check: oneOf('disposition-restoring') },
       restorePreparationResultSha256: { check: isSha256Hex },
       restoreReceiptSha256: { check: isSha256Hex },
       restoredDatabaseAuditSha256: { check: isSha256Hex },

@@ -153,6 +153,17 @@ function applyFixedPragmasAndSchema(db) {
   db.exec(CREATE_ACTIVITY_HEAD);
 }
 
+// Pragma verification note (review MINOR 1): journal_mode, auto_vacuum,
+// foreign_keys, and user_version below are (or behave as) database-file
+// state and can be checked at rest. PRAGMA synchronous is NOT file state —
+// it is per-connection and resets on every open — so it cannot be
+// "checked at rest" at all: instead this module ENFORCES it at open
+// (createActivityDatabase via applyFixedPragmasAndSchema, openReadOnly,
+// and defaultRecoveryOnlyAdapter all set synchronous=FULL explicitly on
+// their own connections, rather than trusting the build's compiled
+// SQLITE_DEFAULT_SYNCHRONOUS), and verifyFixedSchema asserts the CURRENT
+// connection honors that convention as a guard against a future caller
+// opening a connection some other way.
 function verifyFixedSchema(db) {
   const objects = db
     .prepare(`SELECT type, name, tbl_name, sql FROM sqlite_master ORDER BY name`)
@@ -189,7 +200,13 @@ function verifyFixedSchema(db) {
     // 2 == INCREMENTAL in SQLite's PRAGMA auto_vacuum encoding.
     throw dbError('activity_schema_pragma_mismatch', 'activity database auto_vacuum pragma is not INCREMENTAL');
   }
-  return { tableNames, userVersion, journalMode, foreignKeys, autoVacuum };
+  const synchronous = db.prepare('PRAGMA synchronous').get().synchronous;
+  if (synchronous !== 2) {
+    // 2 == FULL. Per-connection, enforced-at-open (see note above); this
+    // assert catches a connection opened outside the module's own paths.
+    throw dbError('activity_schema_pragma_mismatch', 'connection synchronous mode is not FULL; open connections through this module');
+  }
+  return { tableNames, userVersion, journalMode, foreignKeys, autoVacuum, synchronous };
 }
 
 function quickCheck(db) {
@@ -432,6 +449,12 @@ function recoveryOnlyHandle(db) {
 function defaultRecoveryOnlyAdapter(dbPath) {
   const db = new DatabaseSync(dbPath);
   try {
+    // Connection-open harness setup, before the write-rejecting handle
+    // exists: synchronous is per-connection and enforced at open on every
+    // module connection (see the pragma note above verifyFixedSchema).
+    // This is not adapter-driven SQL — the recovery-only handle continues
+    // to reject any pragma assignment an adapter attempts.
+    db.exec('PRAGMA synchronous=FULL;');
     const handle = recoveryOnlyHandle(db);
     handle.prepare('PRAGMA schema_version').get();
   } finally {
@@ -499,7 +522,28 @@ function recoverHotJournalIfPresent({ dbPath, ownershipAdapter, recoveryOnlyAdap
 }
 
 function openReadOnly(dbPath) {
-  return new DatabaseSync(dbPath, { readOnly: true });
+  const db = new DatabaseSync(dbPath, { readOnly: true });
+  // synchronous is per-connection: enforce FULL at open on every
+  // connection this module creates rather than trusting the build's
+  // compiled default (see the pragma note above verifyFixedSchema).
+  // Setting it does not write to the (read-only) database file.
+  db.exec('PRAGMA synchronous=FULL;');
+  return db;
+}
+
+// computeFactoryCommandActivityAnchorSha256 (review MINOR 3; plan line
+// 333): "The immutable factory anchor is exactly
+// {generation:0,entrySha256:<canonical genesis entry hash>};
+// factoryCommandActivityAnchorSha256 hashes those canonical bytes and
+// never hashes mutable activity_head or external head.json bytes."
+// Consumed by the future initialize-factory-zero verb (its verb behavior
+// is NOT_IMPLEMENTED_IN_THIS_SLICE); the codec is pinned here so that
+// slice inherits the exact formula instead of re-deriving it.
+function computeFactoryCommandActivityAnchorSha256(entrySha256) {
+  if (!isSha256Hex(entrySha256)) {
+    throw dbError('factory_anchor_invalid_entry_sha256', 'factory anchor requires a lowercase 64-hex-digit entrySha256');
+  }
+  return sha256Hex(canonicalJson({ generation: 0, entrySha256 }));
 }
 
 module.exports = {
@@ -518,6 +562,7 @@ module.exports = {
   readHeadRow,
   checkpointCumulativeSha256,
   buildGenesisCheckpoint,
+  computeFactoryCommandActivityAnchorSha256,
   createActivityDatabase,
   createOrResumeActivityDatabase,
   recoveryOnlyHandle,
