@@ -101,6 +101,74 @@ export interface EntryValueInput {
   entered_unit_code?: string | null;
 }
 
+export interface JournalEntryWriteFields {
+  status: 'final' | 'draft';
+  plot_uuid?: string | null;
+  zone_uuid?: string | null;
+  device_eui?: string | null;
+  season_crop?: string | null;
+  season_variety?: string | null;
+  campaign_uuid?: string | null;
+  protocol_code?: string | null;
+  protocol_version?: string | null;
+  observation_unit_code?: string | null;
+  pass_uuid?: string | null;
+  activity_code: string;
+  template_code: string;
+  template_version: number;
+  layout_code: string;
+  layout_version: number;
+  occurred_start_local: string;
+  occurred_end_local?: string | null;
+  occurred_timezone: string;
+  occurred_utc_offset_minutes?: number | null;
+  occurred_end_utc_offset_minutes?: number | null;
+  values: EntryValueInput[];
+  note?: string | null;
+}
+
+export interface CreateFinalBatchPayload
+  extends Omit<JournalEntryWriteFields, 'status' | 'plot_uuid' | 'zone_uuid'> {
+  status: 'final';
+  plot_uuids: string[];
+  base_sync_version: 0;
+  duplicate_guard_ack_entry_uuids?: string[];
+}
+
+export interface BatchEntryMutationReceipt {
+  plot_uuid: string;
+  entry_uuid: string;
+  outbox_event_uuid: string;
+  sync_version: number;
+}
+
+export interface BatchMutationReceipt {
+  batch_uuid: string;
+  entries: BatchEntryMutationReceipt[];
+}
+
+export interface JournalPlotWritePayload {
+  plot_uuid: string;
+  base_sync_version: number;
+  plot_code: string;
+  name: string | null;
+  zone_uuid: string | null;
+  station_code: string | null;
+  crop_hint: string | null;
+  area_m2: number | null;
+  active: 0 | 1;
+  layout_code: string;
+  layout_version: number;
+}
+
+export interface JournalPlotGroupWritePayload {
+  group_uuid: string;
+  base_sync_version: number;
+  label: string;
+  members: string[];
+  resolved: boolean;
+}
+
 export interface EntryAggregate {
   contract_version: number;
   entry_uuid: string;
