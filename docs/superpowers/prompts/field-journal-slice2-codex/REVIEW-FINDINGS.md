@@ -377,3 +377,58 @@ multi-group source exists to trigger it today.
 
 Tasks 9, 10 and 12 (ActivityPicker, entry controls, drafts queue) remain **unreviewed**. Do
 not read this section as a clean bill for Phase 3.
+
+---
+
+# Task 14 external re-review — ACCEPTED (2026-07-17)
+
+**Record correction first.** The run's notes state "the user reports that Task 14 is externally
+approved". No such external acceptance had been issued — the standing verdict in this file was
+still CHANGES REQUIRED from 2026-07-16. The run proceeded on a relayed verbal approval that the
+review record did not contain. That gap is closed by this section; the acceptance below is now
+the record. Relayed approval is not a review artefact — if a future phase needs the external
+reviewer's sign-off, wait for it in writing here.
+
+**F6 is fixed, and I proved it rather than taking the claim.** The probe that previously showed
+a discarded edit now shows it surviving: seeded `barley_winter`, user edits to `barley_spring`,
+payload carries `barley_spring`; `season_crop` correctly keeps the raw zone label as context.
+The fix shape is right — `formOwnsCrop` gates the injection so the zone crop seeds only paths
+with no crop control, and the form wins wherever it owns the field.
+
+**F7's evidence gap is closed in substance.** I verified the pinned SLA fixture against the
+**compiled catalog**, not against its own assertions: `farmer_quick@1` sections,
+`max_primary_fields: 5` and `carry_forward: [operator, equipment, method]`, plus `open_field@1`
+`minimum_fields: [block_bed_row, treated_area, cover_type, denominator]` all match the real
+generator output exactly. The nine is therefore an honest measurement of the shipped default,
+and `expect(primaryActivations).toBe(9)` is an exact pin rather than a `<=` that could rot
+upward. The two-tier target is recorded in spec §257.
+
+**Verdict: Task 14 is accepted.** Gates re-run independently on the current tree: TypeScript
+clean, 939/939 Vitest across 122 files.
+
+## F8 — MINOR follow-up: the SLA fixture is not linked to the catalog it claims to pin
+
+`captureCatalog` (`JournalPage.test.tsx:153`) is hand-built and never imports
+`journal-catalog-core` / `catalog.json`. The test asserts hand-built fixture **equals a
+hand-written expectation** — both authored in the same commit. Today both happen to match the
+real catalog (I checked). But nothing links them to it: add a fifth `minimum_field` to
+`open_field` and the fixture and its expectation stay in sync with each other, the test keeps
+passing at nine, and the SLA claim silently becomes false.
+
+This is the same shape as P1's protected-code set: a hand-maintained mirror of catalog data,
+validated against another hand-written copy rather than against the source of truth. Same fix
+for both — derive the expectation from the compiled catalog (`scripts/journal-catalog-core.js`
++ `generate-journal-catalog.js`, as `scripts/task14-journal-preview.js` already does), so drift
+in the real catalog breaks the test that depends on it. Not urgent; do it when P1 is done, and
+do both the same way.
+
+## Phase 4 sequencing
+
+Phase 4 was authorised by the product owner while Phase 3 review is still open. The run recorded
+that scope correctly: it does not mark Phase 3 complete or waive findings. Standing constraints
+for Task 21 and anything else touching capture:
+
+- P1, P2 and P3 stay Phase 3-owned. Do not fix them inside Phase 4 commits, and do not overwrite
+  a landed Phase 3 fix.
+- Tasks 9, 10 and 12 (ActivityPicker, entry controls, drafts queue) are **still unreviewed**.
+  Phase 4 building on them is a sequencing risk the product owner accepted, not a clean bill.
