@@ -221,3 +221,12 @@ Append-only execution log for the accepted Phase 0 and Phase 1-6 plans on `desig
 - Sol quality review required canonical sync-version fixture semantics: plot create/update use 1/3, and group create/update use 1/4. Luna corrected this with RED at 3 failures and 11 passes, then GREEN reached 14/14. Final Sol quality verdict: `APPROVED`.
 - Controller verification passed focused 14/14, full 94/94 TSX and 946/946 Vitest across 122 files, typecheck, and diff check.
 - Task 16 is next. Broader Phase 3 remains separately in review; no finding was waived.
+
+## 2026-07-17T23:27:46+02:00 - Task 16 outcome
+
+- Task 16 committed `7d0f1942` with the exact four-file scope: `web/react-gui/src/journal/rangeSelection.ts`, `web/react-gui/src/journal/stationModel.ts`, `web/react-gui/src/journal/__tests__/rangeSelection.test.ts`, and `web/react-gui/src/journal/__tests__/stationModel.test.ts`. The change adds station-bounded range parsing and natural station ordering.
+- Initial RED found missing modules; first GREEN was 23/23.
+- Sol's specification review required decimal/exponent boundary handling and multi-station corrections. Correction RED was 7 failed and 29 passed; GREEN reached 36/36. Final Sol specification verdict: `APPROVED`.
+- Sol's quality review required a pre-split hostile-input bound. Luna added a 1024-character guard; RED was 2 failed and 37 passed, then GREEN reached 39/39. Final Sol quality verdict: `APPROVED`.
+- Controller verification passed focused 39/39, full 94/94 TSX and 985/985 Vitest across 124 files, typecheck, production build, and diff check. Existing baseline-browser, Browserslist, and large-chunk advisories were the only findings.
+- Task 17 is next. Broader Phase 3 remains separately in review; no finding was waived.
