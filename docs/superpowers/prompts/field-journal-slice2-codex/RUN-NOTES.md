@@ -230,3 +230,14 @@ Append-only execution log for the accepted Phase 0 and Phase 1-6 plans on `desig
 - Sol's quality review required a pre-split hostile-input bound. Luna added a 1024-character guard; RED was 2 failed and 37 passed, then GREEN reached 39/39. Final Sol quality verdict: `APPROVED`.
 - Controller verification passed focused 39/39, full 94/94 TSX and 985/985 Vitest across 124 files, typecheck, production build, and diff check. Existing baseline-browser, Browserslist, and large-chunk advisories were the only findings.
 - Task 17 is next. Broader Phase 3 remains separately in review; no finding was waived.
+
+## 2026-07-18T00:39:54+02:00 - Task 17 outcome
+
+- Task 17 committed `22c2e19c` with the exact four-file scope: `web/react-gui/src/journal/__tests__/useJournalPlotGroups.test.tsx`, `web/react-gui/src/journal/__tests__/useJournalPlots.test.tsx`, `web/react-gui/src/journal/useJournalPlotGroups.ts`, and `web/react-gui/src/journal/useJournalPlots.ts`. The SWR seams load plots and groups with disabled-fetch, loading, read-error, retry, raw-group, active-group, and resolved-group states; mutations await the API result and then bound `mutate()` revalidation.
+- Initial RED was plot suite 1 passed/7 failed with the group module missing; first GREEN was 15/15.
+- Sol's first specification review found three test-evidence gaps. Stronger tests passed immediately and reached 18/18 without production changes. Final Sol specification verdict: `APPROVED`.
+- Sol's quality review found the shared `mutationInFlight`/`mutationRevalidationError` race under overlapping retry/mutation. Systematic analysis identified installed SWR 2.3.7 as awaiting revalidation while recording fetch failure as the read error and resolving bound `mutate()`.
+- Race-fix RED was 4 failed/15 passed; GREEN reached 19/19. API failures remain `mutationError`/rejected; refresh failures remain the read error while the action awaits refresh completion.
+- Final Sol specification and quality verdicts: `APPROVED`.
+- Controller gate: focused 19/19; TSX 94/94; Vitest 1001/1001 across 125 files; typecheck and production build pass; scoped diff check passes. Only existing stale browser-data and large-chunk warnings remain.
+- Task 18 is next. Broader Phase 3 remains separately in review; no finding was waived.
