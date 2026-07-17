@@ -541,3 +541,174 @@ test('enterFailStop retains the dedicated connection through forced GC (child pr
     fs.rmSync(scratchDir, { recursive: true, force: true });
   }
 });
+
+// ---------------------------------------------------------------------------
+// Review fixes: outer-facade calls inside durableTransaction work, rollback-
+// path poison coverage, and the readSnapshot post-open fail-stop window.
+// ---------------------------------------------------------------------------
+
+test('outer-facade calls inside durableTransaction work reject immediately instead of deadlocking', { timeout: 8000 }, async () => {
+  const osiDb = freshModule();
+  const db = new osiDb.Database(tempDbPath('outer-call'));
+  await db.run('CREATE TABLE t (id INTEGER PRIMARY KEY)');
+
+  const result = await db.durableTransaction(async (tx) => {
+    await tx.run('INSERT INTO t (id) VALUES (1)');
+
+    const outerCalls = [
+      ['run', () => db.run('INSERT INTO t (id) VALUES (2)')],
+      ['all', () => db.all('SELECT * FROM t')],
+      ['get', () => db.get('SELECT * FROM t')],
+      ['exec', () => db.exec('UPDATE t SET id = 9')],
+      ['readSnapshot', () => db.readSnapshot(async () => {})],
+      ['quickCheck', () => osiDb.quickCheck()]
+    ];
+    for (const [label, factory] of outerCalls) {
+      let error = null;
+      try {
+        await factory();
+      } catch (e) {
+        error = e;
+      }
+      assert.ok(error, `outer ${label} inside work should reject instead of deadlocking`);
+      assert.match(
+        String(error.message),
+        /durableTransaction work/i,
+        `outer ${label} should carry the bounded guard message`
+      );
+    }
+
+    // The tx scope handed to work must keep working after the rejected
+    // outer calls.
+    await tx.run('INSERT INTO t (id) VALUES (3)');
+    return 'outer-guarded';
+  });
+
+  assert.equal(result, 'outer-guarded');
+  const rows = await db.all('SELECT id FROM t ORDER BY id');
+  assert.deepEqual(rows.map((r) => r.id), [1, 3]);
+});
+
+test('an unguarded outer-facade call inside work rolls the durableTransaction back cleanly', { timeout: 8000 }, async () => {
+  const osiDb = freshModule();
+  const db = new osiDb.Database(tempDbPath('outer-uncaught'));
+  await db.run('CREATE TABLE t (id INTEGER PRIMARY KEY)');
+
+  await assert.rejects(
+    () => db.durableTransaction(async (tx) => {
+      await tx.run('INSERT INTO t (id) VALUES (1)');
+      // Reaching for the closed-over facade instead of tx: must reject and
+      // roll the whole durable transaction back.
+      await db.run('INSERT INTO t (id) VALUES (2)');
+    }),
+    (err) => /durableTransaction work/i.test(String(err.message))
+  );
+
+  const rows = await db.all('SELECT * FROM t');
+  assert.deepEqual(rows, []);
+
+  // Facade fully usable afterwards.
+  await db.run('INSERT INTO t (id) VALUES (7)');
+  const after = await db.all('SELECT id FROM t');
+  assert.deepEqual(after.map((r) => r.id), [7]);
+});
+
+test('durableTransaction poisons on the rollback path too, preserving the original work error, then recovers', async () => {
+  const osiDb = freshModule();
+  const db = new osiDb.Database(tempDbPath('poison-rollback'));
+  await db.run('CREATE TABLE t (id INTEGER PRIMARY KEY)');
+
+  const sqlite3 = require('sqlite3');
+  const originalExec = sqlite3.Database.prototype.exec;
+  // Same shape as the commit-path poison test: fail the trailing restore
+  // (after a successful ROLLBACK) and the first recovery attempt; the third
+  // restore succeeds.
+  let failuresRemaining = 2;
+  sqlite3.Database.prototype.exec = function patchedExec(sql, callback) {
+    if (failuresRemaining > 0 && /PRAGMA\s+synchronous\s*=\s*NORMAL/i.test(sql)) {
+      failuresRemaining -= 1;
+      const err = new Error('synthetic-rollback-restore-failure');
+      process.nextTick(() => callback && callback(err));
+      return this;
+    }
+    return originalExec.call(this, sql, callback);
+  };
+
+  try {
+    const boom = new Error('boom-rollback-work-failure');
+    await assert.rejects(
+      () => db.durableTransaction(async (tx) => {
+        await tx.run('INSERT INTO t (id) VALUES (1)');
+        throw boom;
+      }),
+      (err) => err === boom // original work error preserved, not the restore failure
+    );
+
+    // Poison engaged: new work rejects with the bounded restore cause.
+    await assert.rejects(
+      () => db.run('INSERT INTO t (id) VALUES (2)'),
+      (err) => /synchronous/i.test(err.message) && /synthetic-rollback-restore-failure/.test(err.message)
+    );
+
+    // Patch now exhausted: the next operation's internal restore succeeds,
+    // clears the poison, and shows the rollback left no rows behind.
+    const rows = await db.all('SELECT * FROM t');
+    assert.deepEqual(rows, []);
+
+    const mode = await db.all('PRAGMA synchronous');
+    assert.equal(Number(mode[0].synchronous), 1);
+  } finally {
+    sqlite3.Database.prototype.exec = originalExec;
+  }
+});
+
+test('readSnapshot started before enterFailStop cannot proceed once the gate closes', async () => {
+  const osiDb = freshModule();
+  const db = new osiDb.Database(tempDbPath('snap-race'));
+  await db.run('CREATE TABLE t (id INTEGER PRIMARY KEY)');
+
+  const sqlite3 = require('sqlite3');
+  const originalAll = sqlite3.Database.prototype.all;
+  let releaseGate;
+  const gate = new Promise((resolve) => { releaseGate = resolve; });
+  let signalOpened;
+  const opened = new Promise((resolve) => { signalOpened = resolve; });
+  let intercepted = false;
+  // Ordering control: stall the snapshot's first post-open PRAGMA so
+  // enterFailStop lands while the snapshot is between its entry check and
+  // its executor.
+  sqlite3.Database.prototype.all = function patchedAll(sql, ...rest) {
+    if (!intercepted && typeof sql === 'string' && /query_only/i.test(sql)) {
+      intercepted = true;
+      signalOpened();
+      const self = this;
+      gate.then(() => originalAll.call(self, sql, ...rest));
+      return this;
+    }
+    return originalAll.call(this, sql, ...rest);
+  };
+
+  try {
+    let executorRan = false;
+    const snapshot = db.readSnapshot(async () => {
+      executorRan = true;
+      return 'ran';
+    });
+
+    await opened; // snapshot passed its entry checks and opened its connection
+
+    const dedicated = osiDb.createDedicatedDatabase(tempDbPath('snap-race-dedicated'));
+    osiDb.enterFailStop('snapshot-race-stop', dedicated, 'synthetic-snapshot-reason').then(() => {}, () => {});
+    releaseGate();
+
+    await assert.rejects(
+      snapshot,
+      (err) =>
+        String(err.message).includes('snapshot-race-stop') &&
+        String(err.message).includes('synthetic-snapshot-reason')
+    );
+    assert.equal(executorRan, false, 'snapshot executor must not run once the gate is closed');
+  } finally {
+    sqlite3.Database.prototype.all = originalAll;
+  }
+});

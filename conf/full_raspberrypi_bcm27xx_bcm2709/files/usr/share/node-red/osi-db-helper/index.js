@@ -71,6 +71,19 @@ function facadeFailStopGuardOrNull() {
   return error;
 }
 
+// Any shared-facade call made from inside a durableTransaction work callback
+// would wait on the queue slot the durable transaction itself holds — a
+// silent permanent deadlock of the whole facade. Reject it up front; work
+// must use the tx scope it was handed.
+function durableWorkGuardOrNull() {
+  if (!durableWorkContext.getStore()) return null;
+  const error = new Error(
+    'osi-db-helper: shared-facade call inside durableTransaction work is not allowed; use the tx scope passed to work'
+  );
+  error.code = 'OSI_DB_CALL_INSIDE_DURABLE_WORK';
+  return error;
+}
+
 function buildSynchronousPoisonError() {
   const error = new Error(
     'osi-db-helper: durableTransaction failed to restore synchronous mode ' +
@@ -294,6 +307,14 @@ function ensureSharedDatabase(filename) {
 }
 
 function enqueueOperation(executor) {
+  // Single choke point for queue admission: a call arriving from inside a
+  // durableTransaction work callback can never be given a queue slot (the
+  // slot is held by the durable transaction it came from — waiting would
+  // deadlock the facade forever). Covers run/all/get/exec/quickCheck/
+  // serialize; transaction() and durableTransaction() additionally reject at
+  // entry with their more specific nested-call errors.
+  const nestedGuard = durableWorkGuardOrNull();
+  if (nestedGuard) return Promise.reject(nestedGuard);
   const scheduled = operationQueue
     .catch(() => undefined)
     .then(async () => {
@@ -450,6 +471,8 @@ class DatabaseFacade {
     const failStopGuard = facadeFailStopGuardOrNull();
     if (failStopGuard) throw failStopGuard;
     if (synchronousPoison) throw buildSynchronousPoisonError();
+    const nestedGuard = durableWorkGuardOrNull();
+    if (nestedGuard) throw nestedGuard;
     const database = await openDatabase(this.filename, sqlite3.OPEN_READONLY);
     let began = false;
     let operationFailed = false;
@@ -461,6 +484,12 @@ class DatabaseFacade {
       await runRaw(database, 'all', 'PRAGMA busy_timeout=5000');
       await runRaw(database, 'exec', 'BEGIN;');
       began = true;
+      // Re-check after the open/PRAGMA/BEGIN awaits: a fail-stop entered
+      // while this snapshot was setting up must still block the executor
+      // (the entry check alone leaves a window). The throw lands in the
+      // existing rollback/close cleanup below.
+      const postOpenFailStopGuard = facadeFailStopGuardOrNull();
+      if (postOpenFailStopGuard) throw postOpenFailStopGuard;
       result = await executor(createTransactionScope(database));
       await runRaw(database, 'exec', 'COMMIT;');
       began = false;
