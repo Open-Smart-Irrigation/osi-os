@@ -167,10 +167,11 @@ function reconcileStaleLock(lockPath, existing, requestingOperationId, { verifyC
   releaseOneLock(lockPath);
 }
 
-// acquireFourRootLocks: acquires all four root locks in the fixed order,
-// automatically reconciling one generation of staleness per root when
-// `reconcile` options are supplied. Returns a handle with .release().
-function acquireFourRootLocks(roots, ownerInfo, options) {
+// acquireLocksInOrder: shared machinery — acquires a lock in each listed
+// directory, in exactly the given order, automatically reconciling one
+// generation of staleness per root when `reconcile` options are supplied.
+// Returns a handle with .release().
+function acquireLocksInOrder(lockDirs, ownerInfo, options) {
   const opts = options || {};
   const ctx = {
     bootId: opts.bootId || defaultBootId(),
@@ -178,10 +179,9 @@ function acquireFourRootLocks(roots, ownerInfo, options) {
     isProcessAlive: opts.isProcessAlive || defaultIsProcessAlive,
     ownershipAdapter: opts.ownershipAdapter,
   };
-  const order = fourRootsInLockOrder(roots);
   const acquiredPaths = [];
   try {
-    for (const { dir } of order) {
+    for (const dir of lockDirs) {
       const lockPath = path.join(dir, LOCK_FILENAME);
       try {
         acquireOneLock(lockPath, ownerInfo, ctx);
@@ -210,6 +210,21 @@ function acquireFourRootLocks(roots, ownerInfo, options) {
   };
 }
 
+// acquireFourRootLocks: all four root locks in the fixed plan order.
+function acquireFourRootLocks(roots, ownerInfo, options) {
+  return acquireLocksInOrder(fourRootsInLockOrder(roots).map((r) => r.dir), ownerInfo, options);
+}
+
+// acquireActivityRootLocks: the stable activity lock (plan line 353: "A
+// witnessed operation locks both activity roots"). Locks exactly the two
+// activity roots, in the same relative order they hold within the fixed
+// four-root order (activity-head-witness, then activity-database), so a
+// witnessed operation and a four-root capability operation can never
+// deadlock by acquiring the shared subset in opposite orders.
+function acquireActivityRootLocks(roots, ownerInfo, options) {
+  return acquireLocksInOrder([roots.activityHeadWitnessRoot, roots.activityWitnessRoot], ownerInfo, options);
+}
+
 module.exports = {
   lockError,
   LOCK_FILENAME,
@@ -221,5 +236,7 @@ module.exports = {
   acquireOneLock,
   releaseOneLock,
   reconcileStaleLock,
+  acquireLocksInOrder,
   acquireFourRootLocks,
+  acquireActivityRootLocks,
 };
