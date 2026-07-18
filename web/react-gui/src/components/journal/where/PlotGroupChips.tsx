@@ -93,7 +93,7 @@ export function PlotGroupChips({
               </div>
               {hasStaleMembers && (
                 <p role="alert" className="mt-2 text-sm font-semibold text-[var(--error-text)]">
-                  {t('group.error', { defaultValue: 'Some group members are unavailable.' })}
+                  {t('group.unavailableMembers', { defaultValue: 'Some group members are unavailable.' })}
                 </p>
               )}
             </div>

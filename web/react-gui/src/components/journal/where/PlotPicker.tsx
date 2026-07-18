@@ -170,7 +170,7 @@ export function PlotPicker({
     if (plotUuids.some((plotUuid) => !activePlotByUuid.has(plotUuid))) {
       setPickerError(domainError({
         error: 'stale_plot_membership',
-        message: t('group.error', {
+        message: t('where.staleSelection', {
           defaultValue: 'Some selected plots are no longer available. Choose an active plot to update the selection.',
         }),
         details: null,
@@ -339,7 +339,7 @@ export function PlotPicker({
 
       {staleSelectedPlotUuids.length > 0 && (
         <div role="alert" className="rounded-xl bg-[var(--error-bg)] px-3 py-2 text-sm font-semibold text-[var(--error-text)]">
-          {t('group.error', {
+          {t('where.staleSelection', {
             defaultValue: 'Some selected plots are no longer available. Choose an active plot to update the selection.',
           })}
         </div>

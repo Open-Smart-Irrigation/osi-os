@@ -1,15 +1,17 @@
 // @vitest-environment jsdom
 import '@testing-library/jest-dom/vitest';
 import { fireEvent, render, screen } from '@testing-library/react';
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { JournalPlot, PlotGroup } from '../../../../types/journal';
 import { PlotGroupChips } from '../../where/PlotGroupChips';
 
+const translationMocks = vi.hoisted(() => ({
+  t: vi.fn((key: string, options?: { defaultValue?: string }) => options?.defaultValue ?? key),
+}));
+
 vi.mock('react-i18next', () => ({
-  useTranslation: () => ({
-    t: (_key: string, options?: { defaultValue?: string }) => options?.defaultValue ?? _key,
-  }),
+  useTranslation: () => ({ t: translationMocks.t }),
 }));
 
 const timestamp = '2026-07-18T00:00:00.000Z';
@@ -80,6 +82,10 @@ function renderChips(overrides: Partial<React.ComponentProps<typeof PlotGroupChi
 }
 
 describe('PlotGroupChips', () => {
+  beforeEach(() => {
+    translationMocks.t.mockClear();
+  });
+
   it('renders active groups as selectable chips with individual member controls', () => {
     const onSelectGroup = vi.fn();
     const onTogglePlot = vi.fn();
@@ -128,6 +134,9 @@ describe('PlotGroupChips', () => {
     expect(screen.queryByRole('button', { name: 'unknown-id' })).not.toBeInTheDocument();
     expect(screen.queryByText('unknown-id')).not.toBeInTheDocument();
     expect(screen.getByRole('alert')).toHaveTextContent('Some group members are unavailable.');
+    expect(translationMocks.t).toHaveBeenCalledWith('group.unavailableMembers', {
+      defaultValue: 'Some group members are unavailable.',
+    });
   });
 
   it('disables group selection, member toggles, and editing while a save is pending', () => {
