@@ -276,3 +276,17 @@ Append-only execution log for the accepted Phase 0 and Phase 1-6 plans on `desig
 - Final controller gate passed focused 26/26, TSX 94/94, and Vitest 1059/1059 across 129 files; typecheck and build were green, with 1669 modules transformed. Anti-slop and diff checks were green. Only inherited baseline-browser, Browserslist, and large-chunk advisories remained.
 - Task 21 required a preflight re-read of `REVIEW-FINDINGS.md`; P1/P2/P3 remain Phase 3-owned, and no findings were waived.
 - Task 21 is next.
+
+## 2026-07-18T10:40:01+02:00 - Task 21 outcome
+
+- Commit `9c6c70af` (`feat(journal): integrate atomic multi-plot capture`) landed with the exact eight-file scope: `scripts/task14-journal-preview.js`, `scripts/test-task14-journal-preview.js`, `web/react-gui/src/components/journal/__tests__/capture/JournalCaptureFlow.test.tsx`, `web/react-gui/src/components/journal/capture/JournalCaptureFlow.tsx`, `web/react-gui/src/journal/__tests__/buildFinalBatchPayload.test.ts`, `web/react-gui/src/journal/buildFinalBatchPayload.ts`, `web/react-gui/src/pages/JournalPage.tsx`, and `web/react-gui/src/pages/__tests__/JournalPage.test.tsx`.
+- Initial focused RED found 10 failures and 85 passed (95 total). The new preview scenario failed while the original seven remained. First GREEN reached 99/99, followed by the review-correction progression below.
+- Sol's first specification review returned `CHANGES REQUIRED`: immutable retry, an explicit allowlist, rejection before POST, real route controls, grouped duplicates, real Apply/Enter evidence, and named regressions.
+- Luna's correction RED was 3 failed and 102 passed; GREEN reached 105/105, and the preview reached 9/9.
+- Sol's quality review returned `CHANGES REQUESTED` with seven Important findings covering batch generic retry and lifecycle locking, duplicate labels, sole PlotPicker authority, scoped page errors, removal of the nested Vitest runner, and explicit preview response envelopes. Canonical typed fixtures were an additional Suggestion.
+- Quality-correction RED found 8 failures out of 110; GREEN reached 110/110, and the preview reached 8/8. The Node preview is HTTP-only; the direct route Vitest owns Apply/Enter behavior.
+- Final micro-cleanup restored the exact required duplicate test name, removed the dead ref, fixed memo dependencies, and canonicalized the primary route fixture.
+- Final Sol specification and quality verdicts were `APPROVED`.
+- Final controller evidence: focused 110/110, preview 8/8, TSX 94/94, and Vitest 1084/1084 across 130 files; `tsc` and build were green with 1677 modules; diff check was green. Only inherited browser-data and large-chunk advisories remained.
+- Broader Phase 3 remains separately in review. P1/P2/P3 were not waived or changed.
+- Task 22 is next.
