@@ -253,3 +253,14 @@ Append-only execution log for the accepted Phase 0 and Phase 1-6 plans on `desig
 - Final Sol specification and quality verdicts were `APPROVED`.
 - Controller verification passed focused 11/11, TSX 94/94, and Vitest 1012/1012 across 126 files, plus typecheck, production build, anti-slop, and diff checks. Existing stale browser-data and large-chunk warnings were the only findings.
 - Task 19 is next. Broader Phase 3 remains separately in review; no finding was waived.
+
+## 2026-07-18T02:17:07+02:00 - Task 19 outcome
+
+- Task 19 committed `ac59f5fd` with the exact four-file scope: `web/react-gui/src/components/journal/where/PlotGroupChips.tsx`, `web/react-gui/src/components/journal/where/PlotPicker.tsx`, `web/react-gui/src/components/journal/__tests__/where/PlotGroupChips.test.tsx`, and `web/react-gui/src/components/journal/__tests__/where/PlotPicker.test.tsx`.
+- Initial RED found two unresolved-import suites with 0 tests; first GREEN was 14/14.
+- Sol's specification review required planned `maxPlotsError` i18n, direct controlled rerender/rejection evidence, exact `randomUUID` plus label trim, two-station range isolation, exact visible `response.data`, and fresh `tsc` evidence. Correction RED was 1 failed/14 passed; GREEN reached 15/15. Final Sol specification verdict: `APPROVED`.
+- Sol's quality review found duplicate and unstable group mutations, stale inactive/deleted/unknown IDs, a pressed group that did not toggle off, and missing form/blank-label semantics.
+- Quality RED was 7 failed/14 passed (21 total); GREEN reached 21/21. Fixes provide stable create UUID/retry behavior, pending guards and disabled controls, one active nondeleted map with visible stale handling, a true group toggle that preserves outside selection, and form/Enter plus blank-label disable behavior.
+- Final Sol specification and quality verdicts: `APPROVED`.
+- Controller verification passed focused 21/21, TSX 94/94, and Vitest 1033/1033 across 128 files, plus typecheck, production build, anti-slop, and diff checks. Existing browser-data and large-chunk warnings were the only findings.
+- Task 20 is next. Broader Phase 3 remains separately in review; no finding was waived.
