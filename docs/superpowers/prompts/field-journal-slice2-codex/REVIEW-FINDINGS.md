@@ -432,3 +432,96 @@ for Task 21 and anything else touching capture:
   a landed Phase 3 fix.
 - Tasks 9, 10 and 12 (ActivityPicker, entry controls, drafts queue) are **still unreviewed**.
   Phase 4 building on them is a sequencing risk the product owner accepted, not a clean bill.
+
+---
+
+# Phase 3 review — Tasks 9, 10, 12 (2026-07-19)
+
+The three Phase 3 tasks that had gate verification only. Reviewed against the spec and the
+compiled catalog, not against the plan. One Important finding, one refuted suspicion, one
+honest scope gap.
+
+## Task 9 — ActivityPicker: CLEAN (verified)
+
+I hunted one plausible correctness bug: prefix-leaf shadowing. `openActivity` (line 197) and
+`chooseDependency` (line 210) auto-pick a leaf that is "complete at the current depth", so if
+the catalog produced both `[activity, a]` and `[activity, a, b]`, choosing `a` would fire the
+short leaf and the user could never reach the long one.
+
+It is not reachable. `deriveActivityLeaves` (`catalogModel.ts:681`) emits only maximal-depth
+leaves — `expand` pushes a leaf only when there is no further target, so no leaf is ever a
+prefix of another. I verified this empirically against the real research layout
+(`agroscope_open_field`, the only one with dependencies — 122 option_dependencies, 32
+choice-restricting): 129 derived leaves, all at depth 2, **0 prefix violations**. So the
+cascade is live (not dead code) and the auto-pick is safe. Icon collisions (`mowing` and
+`weed_control` both `⌁`) are cosmetic.
+
+## Task 12 — useCaptureDraft / SaveState: sound; one refuted suspicion, one minor
+
+The honest-save logic is correct: `draft-saved-gateway` is set only after the gateway
+confirms the write (line 142); `final-saved-gateway` requires both HTTP success and a
+non-empty `outbox_event_uuid` (lines 252-260); writes are serialized through
+`requestTailRef` so an update cannot race its create; `finish` is idempotent; partial
+failure over-warns (`not-saved` + lossWarning) rather than under-warns. Good.
+
+**Refuted:** I suspected the hardcoded `base_sync_version: 0` on every write (lines 110, 231)
+would collide with edge optimistic concurrency on repeated debounced draft saves. It does
+not. The edge `saveDraft` (`lifecycle.js:1322`) requires **both** `existing.sync_version === 0`
+and `input.base_sync_version === 0`, and draft updates deliberately never bump the version
+(written back with `sync_version: 0`, line 1320) — the version only moves to 1 on
+finalization. Sending 0 every time is exactly the contract. Verified against the edge, not
+filed as a finding.
+
+**P5 — MINOR:** `cloud-waiting` is a declared `CaptureSaveState` (line 17) that `SaveState.tsx`
+renders (`capture.save.cloudWaiting`) but this hook never sets. It is the D6 "saved on OSI
+Server — waiting for farm gateway" state, i.e. the cloud write path (D2, pending-commands),
+which is a later slice. So it is likely correct-for-now, but the type and renderer imply a
+completeness the hook does not deliver: a future dev could assume the cloud-waiting path works
+when nothing exercises it. Either wire it when the cloud write path lands, or comment why it
+is intentionally unreachable in the edge hook.
+
+## P4 — IMPORTANT: low-risk carry-forward is inert on the shipped catalog, both templates
+
+The run flagged "attr.method carry-forward is mapped but form pruning prevents retention in
+the final payload" and deferred it. It is broader than method, and broader than a retention
+bug: AGR-7 / P4's "operator, equipment, method carry by default with visible prefill marking"
+works for **neither** shipped template.
+
+`EntryForm` builds the payload from **visible** attributes only:
+`visibleInputs = inputs.filter((i) => visibleCodes.has(i.attribute_code))` then
+`buildEntryValues(model, visibleInputs)` (EntryForm.tsx:234-236, 326). A carried value for a
+field the template does not display is silently pruned.
+
+Against the compiled catalog:
+- **farmer_quick** declares `carry_forward: [attr.operator, attr.equipment, attr.method]` but
+  displays **none** of the three (its fields are activity/plot/occurrence + irrigation depth +
+  two product-amount fields + note). All three are carried into state and then pruned. The
+  low-risk carry is a no-op for the most common template.
+- **full_record** displays all three as fields but declares **empty** `carry_forward`. So it
+  shows them but never carries them.
+
+The two templates are mismatched in opposite directions, so the feature fires in neither.
+
+Root cause is a catalog/engine mismatch, not (only) the GUI: `parseTemplate` validates
+`carry_forward` against `knownField`, never against the template's own visible field set, so a
+template can declare carry-forward for a field it does not show and nothing catches it. This
+is the same class as P1 — the catalog declares something the engine silently cannot honour.
+
+Fix options (product + catalog owned): make `farmer_quick` display operator/equipment/method
+as prefill-marked fields (satisfies P4's "visible prefill marking"), or move the carry_forward
+onto `full_record` where they are already fields, or reject at parse time any carry_forward
+code not in the visible field set so the mismatch cannot ship silently. The GUI's
+prune-to-visible behaviour is itself defensible — do not "fix" it by emitting invisible
+values.
+
+## Honest scope gap — NOT reviewed
+
+**NutrientRepeater derived-nutrient math (Task 10) was not deep-reviewed.** The Fable subagent
+assigned to Task 10's unit/nutrient math terminated on a credit limit before reaching it. I
+confirmed the two concrete leads myself (P4 pruning above; the min/max-against-entered-value
+issue stays latent — 0 shipped attributes are both multi-unit and carry a `max`), but I did
+not independently verify the composition→rate arithmetic, unit-basis alignment, or reactivity
+on product/rate change. Because compositions ship empty (N1), that path produces nothing
+against the real catalog and is fixture-only today, so the risk is deferred rather than live —
+but it should be reviewed together with the composition-population work (migration 0022), not
+assumed correct.
