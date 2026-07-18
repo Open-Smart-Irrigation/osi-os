@@ -290,3 +290,16 @@ Append-only execution log for the accepted Phase 0 and Phase 1-6 plans on `desig
 - Final controller evidence: focused 110/110, preview 8/8, TSX 94/94, and Vitest 1084/1084 across 130 files; `tsc` and build were green with 1677 modules; diff check was green. Only inherited browser-data and large-chunk advisories remained.
 - Broader Phase 3 remains separately in review. P1/P2/P3 were not waived or changed.
 - Task 22 is next.
+
+## 2026-07-18T11:55:44+02:00 - Task 22 outcome
+
+- Commit `e988e335` (`feat(journal): offer harvest plot-group resolution`) used the exact seven-file scope: `web/react-gui/src/journal/groupResolutionNudge.ts`, `web/react-gui/src/journal/__tests__/groupResolutionNudge.test.ts`, `web/react-gui/src/components/journal/where/HarvestGroupNudge.tsx`, `web/react-gui/src/components/journal/__tests__/where/HarvestGroupNudge.test.tsx`, `web/react-gui/src/components/journal/capture/JournalCaptureFlow.tsx`, `web/react-gui/src/components/journal/__tests__/capture/JournalCaptureFlow.test.tsx`, and `scripts/test-task14-journal-preview.js`.
+- Initial GUI RED failed on the missing matcher, component, and capture-nudge coverage. First GREEN reached 84/84. The strengthened preview asserted the exact generic `resolved:true` PUT evidence, passed immediately against the Task 21 endpoint, and reached 9/9. No preview RED was manufactured where the endpoint already passed.
+- Sol's first specification review returned `CHANGES REQUIRED`: live SWR revalidation removed durable success visibility. Correction RED was 2 failed and 82 passed; GREEN reached 84/84 with a receipt-scoped snapshot and stateful `resolved`-prop integration.
+- Sol's first quality review returned `CHANGES REQUIRED` for same-tick duplicate calls, latest-version/member reconciliation, safe retry errors, distinct i18n keys, and empty-set/Unicode boundaries. Its request for single-entry nudges was rejected because Task 22 is batch-only. Explicit single-entry finish and retry no-nudge tests pin that boundary, and final Sol specification approved this adjudication.
+- Quality RED cycles were matcher 1 failed/6 passed, component 6 failed/2 passed, and capture 4 failed/77 passed; both single-entry exclusion tests already passed. GREEN reached 97/97.
+- Fixes added synchronous in-flight/resolved guards; latest valid label, members, and sync version; already-resolved no-PUT success; changed, missing, and deleted no-PUT safe errors; prior-error clearing; no backend detail; distinct future Task 24 keys; and empty-set, Unicode, tie, nonmutation, and two-match pins.
+- Final Sol specification and quality verdicts were `APPROVED`.
+- Final controller evidence: focused 97/97, preview 9/9, TSX 94/94, and Vitest 1107/1107 across 132 files; `tsc` and build were green with 1679 modules; anti-slop and diff checks were green. Inherited browser-data and chunk warnings were the only findings.
+- Task 24 locale files were untouched. Task 25 owns browser acceptance. Phase 3, P1, P2, and P3 remain separate and unwaived.
+- Task 23 is next.
