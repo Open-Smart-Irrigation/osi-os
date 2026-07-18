@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import '@testing-library/jest-dom/vitest';
-import { StrictMode } from 'react';
+import { StrictMode, useState, type ComponentProps } from 'react';
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -167,6 +167,15 @@ const canonicalCropCatalog: JournalCatalog = {
     choiceRow('agroscope.crop.barley_spring', 'attr.crop', 'barley, spring'),
     choiceRow('agroscope.crop.barley_winter', 'attr.crop', 'barley, winter'),
   ],
+};
+
+const harvestCatalog: JournalCatalog = {
+  ...catalog,
+  vocab: [...catalog.vocab, row('harvest', 'activity')],
+  layouts: catalog.layouts.map((layout) => ({
+    ...layout,
+    definition: { ...layout.definition, activity_codes: ['harvest'] },
+  })),
 };
 
 const quickWithoutCropCatalog: JournalCatalog = {
@@ -634,6 +643,72 @@ const activeGroup: PlotGroup = {
   deleted_at: null,
   members: [plot.plot_uuid, homogeneousSecondPlot.plot_uuid],
 };
+
+const secondActiveGroup: PlotGroup = {
+  ...activeGroup,
+  group_uuid: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+  label: 'South pair',
+};
+
+const singlePlotHarvestGroup: PlotGroup = {
+  ...activeGroup,
+  group_uuid: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc',
+  label: 'North single',
+  members: [plot.plot_uuid],
+};
+
+const resolvedActiveGroup: PlotGroup = {
+  ...activeGroup,
+  resolved_at: '2026-07-18T08:30:00.000Z',
+  resolved_by_principal_uuid: 'author',
+  sync_version: activeGroup.sync_version + 1,
+};
+
+interface RevalidatingHarvestCaptureProps {
+  updatePlotGroup: ComponentProps<typeof JournalCaptureFlow>['groupState']['updatePlotGroup'];
+  onRevalidated: (group: PlotGroup) => void;
+  onSaved?: ComponentProps<typeof JournalCaptureFlow>['onSaved'];
+}
+
+function RevalidatingHarvestCapture({
+  updatePlotGroup,
+  onRevalidated,
+  onSaved = baseProps.onSaved,
+}: RevalidatingHarvestCaptureProps) {
+  const [groups, setGroups] = useState<PlotGroup[]>([activeGroup, secondActiveGroup]);
+  const updateAndRevalidate: ComponentProps<typeof JournalCaptureFlow>['groupState']['updatePlotGroup'] =
+    async (uuid, payload) => {
+      const updated = await updatePlotGroup(uuid, payload);
+      setGroups((current) => current.map((group) => group.group_uuid === updated.group_uuid ? updated : group));
+      onRevalidated(updated);
+      return updated;
+    };
+
+  return (
+    <JournalCaptureFlow
+      {...baseProps}
+      catalog={harvestCatalog}
+      plots={[plot, homogeneousSecondPlot]}
+      plotGroups={groups}
+      groupState={{ ...baseProps.groupState, updatePlotGroup: updateAndRevalidate }}
+      onSaved={onSaved}
+    />
+  );
+}
+
+async function finishHarvestBatch(): Promise<void> {
+  const northButtons = screen.getAllByRole('button', { name: 'North field' });
+  const eastButtons = screen.getAllByRole('button', { name: 'East field' });
+  fireEvent.click(northButtons[northButtons.length - 1]);
+  fireEvent.click(eastButtons[eastButtons.length - 1]);
+  fireEvent.click(screen.getByRole('button', { name: 'capture.next' }));
+  fireEvent.click(screen.getByRole('button', { name: 'harvest' }));
+  fireEvent.click(screen.getByRole('button', { name: 'capture.next' }));
+  fireEvent.click(screen.getByRole('button', { name: 'capture.next' }));
+  await waitFor(() => expect(screen.getByRole('button', { name: 'capture.finish' })).toBeEnabled());
+  fireEvent.click(screen.getByRole('button', { name: 'capture.finish' }));
+  await waitFor(() => expect(apiMocks.createFinalBatch).toHaveBeenCalled());
+}
 
 const START_OCCURRENCE_LABEL = 'capture.confirm.occurrence · capture.form.required';
 const END_OCCURRENCE_LABEL = 'capture.confirm.occurrence · capture.form.optional';
@@ -2729,5 +2804,235 @@ describe('JournalCaptureFlow', () => {
     fireEvent.click(screen.getByRole('button', { name: 'capture.finish' }));
     await waitFor(() => expect(apiMocks.createFinalBatch).toHaveBeenCalledOnce());
     expect(apiMocks.createEntry).not.toHaveBeenCalled();
+  });
+
+  it('does not offer harvest group resolution after a successful single-entry final save', async () => {
+    const updatePlotGroup = vi.fn();
+    render(<JournalCaptureFlow
+      {...baseProps}
+      catalog={harvestCatalog}
+      initialPlot={plot}
+      plotGroups={[singlePlotHarvestGroup]}
+      groupState={{ ...baseProps.groupState, updatePlotGroup }}
+    />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'harvest' }));
+    fireEvent.click(screen.getByRole('button', { name: 'capture.next' }));
+    fireEvent.click(screen.getByRole('button', { name: 'capture.next' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'capture.finish' })).toBeEnabled());
+    fireEvent.click(screen.getByRole('button', { name: 'capture.finish' }));
+
+    await waitFor(() => expect(screen.getByText('capture.save.finalSavedGateway')).toBeVisible());
+    expect(apiMocks.createFinalBatch).not.toHaveBeenCalled();
+    expect(updatePlotGroup).not.toHaveBeenCalled();
+    expect(screen.queryByRole('region', { name: /harvest group resolution/i })).not.toBeInTheDocument();
+  });
+
+  it('does not offer harvest group resolution after a successful single-entry retry', async () => {
+    apiMocks.updateEntry.mockRejectedValueOnce(new Error('gateway unavailable'));
+    const updatePlotGroup = vi.fn();
+    render(<JournalCaptureFlow
+      {...baseProps}
+      catalog={harvestCatalog}
+      initialPlot={plot}
+      plotGroups={[singlePlotHarvestGroup]}
+      groupState={{ ...baseProps.groupState, updatePlotGroup }}
+    />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'harvest' }));
+    fireEvent.click(screen.getByRole('button', { name: 'capture.next' }));
+    fireEvent.click(screen.getByRole('button', { name: 'capture.next' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'capture.finish' })).toBeEnabled());
+    fireEvent.click(screen.getByRole('button', { name: 'capture.finish' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'capture.save.retry' })).toBeVisible());
+
+    fireEvent.click(screen.getByRole('button', { name: 'capture.save.retry' }));
+    await waitFor(() => expect(apiMocks.updateEntry).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(screen.getByText('capture.save.finalSavedGateway')).toBeVisible());
+    expect(apiMocks.createFinalBatch).not.toHaveBeenCalled();
+    expect(updatePlotGroup).not.toHaveBeenCalled();
+    expect(screen.queryByRole('region', { name: /harvest group resolution/i })).not.toBeInTheDocument();
+  });
+
+  it('offers harvest group resolution after a failed batch succeeds through generic retry', async () => {
+    apiMocks.createFinalBatch
+      .mockRejectedValueOnce(new Error('gateway unavailable'))
+      .mockResolvedValueOnce({
+        batch_uuid: duplicateUuid(120),
+        entries: [],
+      });
+    render(<JournalCaptureFlow
+      {...baseProps}
+      catalog={harvestCatalog}
+      plots={[plot, homogeneousSecondPlot]}
+      plotGroups={[activeGroup]}
+    />);
+
+    await finishHarvestBatch();
+    await waitFor(() => expect(screen.getByRole('button', { name: 'capture.save.retry' })).toBeVisible());
+    expect(screen.queryByRole('region', { name: /harvest group resolution/i })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'capture.save.retry' }));
+    await waitFor(() => expect(apiMocks.createFinalBatch).toHaveBeenCalledTimes(2));
+    expect(await screen.findByRole('button', { name: /resolve.*north pair/i })).toBeVisible();
+  });
+
+  it('offers harvest group resolution only after a successful batch and sends the exact resolved payload', async () => {
+    const updatePlotGroup = vi.fn().mockResolvedValue(resolvedActiveGroup);
+    const onRevalidated = vi.fn();
+    const onSaved = vi.fn();
+    render(<RevalidatingHarvestCapture
+      updatePlotGroup={updatePlotGroup}
+      onRevalidated={onRevalidated}
+      onSaved={onSaved}
+    />);
+
+    await finishHarvestBatch();
+
+    await waitFor(() => expect(screen.getByRole('button', { name: /resolve.*north pair/i })).toBeVisible());
+    expect(screen.getAllByRole('button', { name: /resolve.*pair/i })).toHaveLength(2);
+    expect(updatePlotGroup).not.toHaveBeenCalled();
+    expect(onSaved).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole('button', { name: /resolve.*north pair/i }));
+    await waitFor(() => expect(updatePlotGroup).toHaveBeenCalledWith(
+      activeGroup.group_uuid,
+      {
+        group_uuid: activeGroup.group_uuid,
+        base_sync_version: activeGroup.sync_version,
+        label: activeGroup.label,
+        members: [...activeGroup.members].sort(),
+        resolved: true,
+      },
+    ));
+    await waitFor(() => expect(onRevalidated).toHaveBeenCalledWith(resolvedActiveGroup));
+    expect(screen.getByRole('region', { name: /harvest group resolution/i })).toBeVisible();
+    expect(screen.getByText(/group\.resolved:Resolved/)).toBeVisible();
+    expect(onSaved).not.toHaveBeenCalled();
+  });
+
+  it('keeps harvest group resolution failures visible and retryable after a successful batch', async () => {
+    let resolveRetry: ((group: PlotGroup) => void) | undefined;
+    const updatePlotGroup = vi.fn()
+      .mockRejectedValueOnce(new Error('gateway unavailable for owner@example.test'))
+      .mockReturnValueOnce(new Promise<PlotGroup>((resolve) => { resolveRetry = resolve; }));
+    const onRevalidated = vi.fn();
+    render(<RevalidatingHarvestCapture
+      updatePlotGroup={updatePlotGroup}
+      onRevalidated={onRevalidated}
+    />);
+
+    await finishHarvestBatch();
+
+    const resolveButton = await screen.findByRole('button', { name: /resolve.*north pair/i });
+    fireEvent.click(resolveButton);
+    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent(
+      'group.resolveError:Could not resolve this group.',
+    ));
+    expect(screen.getByRole('alert')).not.toHaveTextContent('gateway unavailable');
+    expect(screen.getByRole('alert')).not.toHaveTextContent('owner@example.test');
+    expect(screen.getByRole('button', { name: /resolve.*north pair/i })).toBeVisible();
+    expect(onRevalidated).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole('button', { name: /resolve.*north pair/i }));
+    await waitFor(() => expect(updatePlotGroup).toHaveBeenCalledTimes(2));
+    expect(screen.getAllByRole('status').some((status) =>
+      status.textContent === 'group.resolving:Resolving…')).toBe(true);
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    await act(async () => {
+      resolveRetry?.(resolvedActiveGroup);
+      await Promise.resolve();
+    });
+    await waitFor(() => expect(onRevalidated).toHaveBeenCalledWith(resolvedActiveGroup));
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    expect(screen.getByRole('region', { name: /harvest group resolution/i })).toBeVisible();
+    expect(screen.getByText(/group\.resolved:Resolved/)).toBeVisible();
+  });
+
+  it('reconciles a receipt group to the latest label, members, and sync version before PUT', async () => {
+    const latestGroup: PlotGroup = {
+      ...activeGroup,
+      label: 'North pair revised',
+      members: [...activeGroup.members].reverse(),
+      sync_version: 9,
+    };
+    const updatePlotGroup = vi.fn().mockResolvedValue({
+      ...latestGroup,
+      resolved_at: '2026-07-18T09:00:00.000Z',
+    });
+    const props = {
+      ...baseProps,
+      catalog: harvestCatalog,
+      plots: [plot, homogeneousSecondPlot],
+      groupState: { ...baseProps.groupState, updatePlotGroup },
+    };
+    const { rerender } = render(<JournalCaptureFlow {...props} plotGroups={[activeGroup]} />);
+    await finishHarvestBatch();
+    const resolveButton = await screen.findByRole('button', { name: /resolve.*north pair/i });
+
+    rerender(<JournalCaptureFlow {...props} plotGroups={[latestGroup]} />);
+    fireEvent.click(resolveButton);
+
+    await waitFor(() => expect(updatePlotGroup).toHaveBeenCalledWith(activeGroup.group_uuid, {
+      group_uuid: activeGroup.group_uuid,
+      base_sync_version: 9,
+      label: 'North pair revised',
+      members: [...latestGroup.members].sort(),
+      resolved: true,
+    }));
+  });
+
+  it('treats a receipt group already resolved in latest props as success without another PUT', async () => {
+    const updatePlotGroup = vi.fn();
+    const props = {
+      ...baseProps,
+      catalog: harvestCatalog,
+      plots: [plot, homogeneousSecondPlot],
+      groupState: { ...baseProps.groupState, updatePlotGroup },
+    };
+    const { rerender } = render(<JournalCaptureFlow {...props} plotGroups={[activeGroup]} />);
+    await finishHarvestBatch();
+    const resolveButton = await screen.findByRole('button', { name: /resolve.*north pair/i });
+
+    rerender(<JournalCaptureFlow {...props} plotGroups={[resolvedActiveGroup]} />);
+    fireEvent.click(resolveButton);
+
+    await waitFor(() => expect(screen.getByText(/group\.resolved:Resolved/)).toBeVisible());
+    expect(updatePlotGroup).not.toHaveBeenCalled();
+  });
+
+  it('refuses changed receipt membership without PUT and remains retryable after valid props arrive', async () => {
+    const changedGroup: PlotGroup = {
+      ...activeGroup,
+      members: [plot.plot_uuid],
+      sync_version: 8,
+    };
+    const latestValidGroup: PlotGroup = {
+      ...activeGroup,
+      label: 'North pair current',
+      sync_version: 9,
+    };
+    const updatePlotGroup = vi.fn().mockResolvedValue(latestValidGroup);
+    const props = {
+      ...baseProps,
+      catalog: harvestCatalog,
+      plots: [plot, homogeneousSecondPlot],
+      groupState: { ...baseProps.groupState, updatePlotGroup },
+    };
+    const { rerender } = render(<JournalCaptureFlow {...props} plotGroups={[activeGroup]} />);
+    await finishHarvestBatch();
+    const resolveButton = await screen.findByRole('button', { name: /resolve.*north pair/i });
+
+    rerender(<JournalCaptureFlow {...props} plotGroups={[changedGroup]} />);
+    fireEvent.click(resolveButton);
+    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent(
+      'group.changedError:This group changed. Refresh and try again.',
+    ));
+    expect(updatePlotGroup).not.toHaveBeenCalled();
+
+    rerender(<JournalCaptureFlow {...props} plotGroups={[latestValidGroup]} />);
+    fireEvent.click(screen.getByRole('button', { name: /resolve.*north pair/i }));
+    await waitFor(() => expect(updatePlotGroup).toHaveBeenCalledOnce());
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
   });
 });
