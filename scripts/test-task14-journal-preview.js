@@ -408,3 +408,146 @@ test('preview finalization applies the real edge choice validator', async (t) =>
   );
   assert.equal(valid.statusCode, 200);
 });
+
+test('Task 21 preview exposes plot, group, range, and atomic batch envelopes', async (t) => {
+  const preview = createTask14JournalPreviewServer();
+  await preview.listen();
+  t.after(() => preview.close());
+  const baseUrl = preview.url();
+
+  const plots = await request(baseUrl, 'GET', '/api/journal/plots');
+  assert.equal(plots.statusCode, 200);
+  assert.ok(plots.json.plots.length >= 3);
+  assert.ok(plots.json.plots.some((plot) => plot.station_code === 'SOUTH-01'));
+  assert.ok(plots.json.plots.some((plot) => plot.station_code === 'SOUTH-01' && !/^\d+$/.test(plot.plot_code)));
+
+  const groups = await request(baseUrl, 'GET', '/api/journal/plot-groups');
+  assert.equal(groups.statusCode, 200);
+  assert.ok(groups.json.plot_groups.some((group) => group.resolved_at === null));
+  assert.ok(groups.json.plot_groups.some((group) => group.resolved_at !== null));
+
+  const newPlotUuid = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+  const plotPayload = {
+    plot_uuid: newPlotUuid,
+    base_sync_version: 0,
+    plot_code: 'SOUTH-02',
+    name: 'South 2',
+    zone_uuid: CANONICAL_IDS.zoneUuid,
+    station_code: 'SOUTH-01',
+    crop_hint: 'barley, winter',
+    area_m2: 100,
+    active: 1,
+    layout_code: 'open_field',
+    layout_version: 1,
+  };
+  const createdPlot = await request(baseUrl, 'POST', '/api/journal/plots', plotPayload);
+  assert.equal(createdPlot.statusCode, 201);
+  assert.equal(createdPlot.json.plot.plot_uuid, newPlotUuid);
+  assert.equal(createdPlot.json.plot.sync_version, 1);
+  assert.deepEqual(Object.keys(createdPlot.json.plot).sort(), [
+    'active', 'area_m2', 'contract_version', 'created_at', 'crop_hint',
+    'deleted_at', 'gateway_device_eui', 'name', 'owner_user_uuid', 'plot_code',
+    'plot_uuid', 'settings', 'station_code', 'sync_version', 'updated_at', 'zone_uuid',
+  ].sort());
+  assert.deepEqual(Object.keys(createdPlot.json.plot.settings).sort(), [
+    'layout_code', 'sync_version', 'updated_at', 'updated_by_principal_uuid',
+  ].sort());
+  assert.equal(createdPlot.json.plot.base_sync_version, undefined);
+  assert.equal(createdPlot.json.plot.layout_code, undefined);
+
+  const updatedPlot = await request(
+    baseUrl,
+    'PUT',
+    `/api/journal/plots/${encodeURIComponent(newPlotUuid)}`,
+    { ...plotPayload, base_sync_version: 1, name: 'South 2 updated' },
+  );
+  assert.equal(updatedPlot.statusCode, 200);
+  assert.equal(updatedPlot.json.plot.name, 'South 2 updated');
+  assert.equal(updatedPlot.json.plot.sync_version, 2);
+  assert.deepEqual(Object.keys(updatedPlot.json.plot).sort(), Object.keys(createdPlot.json.plot).sort());
+  assert.equal(updatedPlot.json.plot.base_sync_version, undefined);
+
+  const stalePlot = await request(
+    baseUrl,
+    'PUT',
+    `/api/journal/plots/${encodeURIComponent(newPlotUuid)}`,
+    { ...plotPayload, base_sync_version: 1 },
+  );
+  assert.equal(stalePlot.statusCode, 409);
+  assert.equal(stalePlot.json.error, 'stale_version');
+
+  const groupUuid = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc';
+  const groupPayload = {
+    group_uuid: groupUuid,
+    base_sync_version: 0,
+    label: 'Task 21 group',
+    members: [CANONICAL_IDS.plotUuid, newPlotUuid].sort(),
+    resolved: false,
+  };
+  const createdGroup = await request(baseUrl, 'POST', '/api/journal/plot-groups', groupPayload);
+  assert.equal(createdGroup.statusCode, 201);
+  assert.equal(createdGroup.json.plot_group.group_uuid, groupUuid);
+  assert.equal(createdGroup.json.plot_group.sync_version, 1);
+  assert.deepEqual(Object.keys(createdGroup.json.plot_group).sort(), [
+    'contract_version', 'created_at', 'created_by_principal_uuid', 'deleted_at',
+    'gateway_device_eui', 'group_uuid', 'label', 'members', 'owner_user_uuid',
+    'resolved_at', 'resolved_by_principal_uuid', 'sync_version',
+  ].sort());
+  assert.equal(createdGroup.json.plot_group.base_sync_version, undefined);
+  assert.equal(createdGroup.json.plot_group.resolved, undefined);
+
+  const updatedGroup = await request(
+    baseUrl,
+    'PUT',
+    `/api/journal/plot-groups/${encodeURIComponent(groupUuid)}`,
+    { ...groupPayload, base_sync_version: 1, label: 'Task 21 group renamed', resolved: false },
+  );
+  assert.equal(updatedGroup.statusCode, 200);
+  assert.equal(updatedGroup.json.plot_group.sync_version, 2);
+  assert.equal(updatedGroup.json.plot_group.resolved_at, null);
+  assert.deepEqual(Object.keys(updatedGroup.json.plot_group).sort(), Object.keys(createdGroup.json.plot_group).sort());
+  assert.equal(updatedGroup.json.plot_group.resolved, undefined);
+
+  const resolvedGroup = await request(
+    baseUrl,
+    'PUT',
+    `/api/journal/plot-groups/${encodeURIComponent(groupUuid)}`,
+    { ...groupPayload, base_sync_version: 2, label: 'Task 21 group renamed', resolved: true },
+  );
+  assert.equal(resolvedGroup.statusCode, 200);
+  assert.equal(resolvedGroup.json.plot_group.resolved_at, '2026-07-17T08:30:00.000Z');
+
+  const batchPayload = {
+    status: 'final',
+    plot_uuids: [newPlotUuid, CANONICAL_IDS.plotUuid].sort(),
+    base_sync_version: 0,
+    activity_code: 'irrigation',
+    template_code: 'farmer_quick',
+    template_version: 1,
+    layout_code: 'open_field',
+    layout_version: 1,
+    occurred_start_local: '2026-07-17T08:30',
+    occurred_timezone: 'Europe/Zurich',
+    occurred_utc_offset_minutes: 120,
+    values: [{ attribute_code: 'attr.irrigation_depth', value: 12 }],
+  };
+  const duplicate = await request(baseUrl, 'POST', '/api/journal/entries', batchPayload);
+  assert.equal(duplicate.statusCode, 409);
+  assert.equal(duplicate.json.error, 'duplicate_candidates');
+  assert.equal(duplicate.json.details.duplicateCandidates.length, 2);
+
+  const retried = await request(baseUrl, 'POST', '/api/journal/entries', {
+    ...batchPayload,
+    duplicate_guard_ack_entry_uuids: duplicate.json.details.duplicateCandidates.map((candidate) => candidate.entryUuid),
+  });
+  assert.equal(retried.statusCode, 201);
+  assert.match(retried.json.batch_uuid, /^[0-9a-f-]{36}$/);
+  assert.equal(retried.json.entries.length, 2);
+  assert.ok(retried.json.entries.every((entry) => entry.plot_uuid));
+
+  const status = await request(baseUrl, 'GET', '/__task14/status');
+  assert.equal(status.statusCode, 200);
+  assert.equal(status.json.batch_post_count, 2);
+  assert.equal(status.json.last_batch_payload.plot_uuid, undefined);
+  assert.equal(status.json.last_batch_payload.zone_uuid, undefined);
+});

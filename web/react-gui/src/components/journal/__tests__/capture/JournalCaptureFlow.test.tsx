@@ -7,8 +7,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 const apiMocks = vi.hoisted(() => ({
   listEntries: vi.fn(),
   createEntry: vi.fn(),
+  createFinalBatch: vi.fn(),
   updateEntry: vi.fn(),
 }));
+
+const buildFinalBatchPayloadMock = vi.hoisted(() => vi.fn());
 
 const translationMocks = vi.hoisted(() => ({ locale: 'en' }));
 const reportConsoleError = console.error.bind(console);
@@ -19,6 +22,14 @@ vi.mock('../../../../services/journalApi', () => ({
   journalApi: apiMocks,
 }));
 
+vi.mock('../../../../journal/buildFinalBatchPayload', async () => {
+  const actual = await vi.importActual<typeof import('../../../../journal/buildFinalBatchPayload')>(
+    '../../../../journal/buildFinalBatchPayload',
+  );
+  buildFinalBatchPayloadMock.mockImplementation(actual.buildFinalBatchPayload);
+  return { ...actual, buildFinalBatchPayload: buildFinalBatchPayloadMock };
+});
+
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({
     t: (key: string, values?: Record<string, unknown>) => values
@@ -28,7 +39,7 @@ vi.mock('react-i18next', () => ({
   }),
 }));
 
-import type { EntryAggregate, JournalCatalog, JournalPlot } from '../../../../types/journal';
+import type { EntryAggregate, JournalCatalog, JournalPlot, PlotGroup } from '../../../../types/journal';
 import { JournalCaptureFlow } from '../../capture/JournalCaptureFlow';
 
 const timestamp = '2026-07-16T00:00:00.000Z';
@@ -214,6 +225,15 @@ const sensorlessPlot = { ...plot, plot_uuid: 'plot-2', plot_code: 'SOUTH', name:
 const baseProps = {
   catalog,
   plots: [plot, sensorlessPlot],
+  plotGroups: [] as PlotGroup[],
+  plotState: {
+    createPlot: vi.fn(),
+    updatePlot: vi.fn(),
+  },
+  groupState: {
+    createPlotGroup: vi.fn(),
+    updatePlotGroup: vi.fn(),
+  },
   recentEntries: [],
   initialTimezone: 'Europe/Zurich',
   onClose: vi.fn(),
@@ -593,6 +613,28 @@ const secondPlot: JournalPlot = {
   },
 };
 
+const mixedLayoutPlot: JournalPlot = secondPlot;
+
+const homogeneousSecondPlot: JournalPlot = {
+  ...secondPlot,
+  settings: { ...plot.settings },
+};
+
+const activeGroup: PlotGroup = {
+  contract_version: 1,
+  group_uuid: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+  label: 'North pair',
+  owner_user_uuid: 'owner',
+  gateway_device_eui: 'gateway',
+  created_by_principal_uuid: 'author',
+  created_at: timestamp,
+  resolved_at: null,
+  resolved_by_principal_uuid: null,
+  sync_version: 2,
+  deleted_at: null,
+  members: [plot.plot_uuid, homogeneousSecondPlot.plot_uuid],
+};
+
 const START_OCCURRENCE_LABEL = 'capture.confirm.occurrence · capture.form.required';
 const END_OCCURRENCE_LABEL = 'capture.confirm.occurrence · capture.form.optional';
 
@@ -622,11 +664,29 @@ beforeEach(() => {
   apiMocks.createEntry.mockReset().mockResolvedValue({
     entry_uuid: '11111111-1111-4111-8111-111111111111', sync_version: 0,
   });
+  apiMocks.createFinalBatch.mockReset().mockResolvedValue({
+    batch_uuid: '99999999-9999-4999-8999-999999999999',
+    entries: [
+      {
+        plot_uuid: plot.plot_uuid,
+        entry_uuid: '88888888-8888-4888-8888-888888888888',
+        outbox_event_uuid: '77777777-7777-4777-8777-777777777777',
+        sync_version: 1,
+      },
+      {
+        plot_uuid: homogeneousSecondPlot.plot_uuid,
+        entry_uuid: '66666666-6666-4666-8666-666666666666',
+        outbox_event_uuid: '55555555-5555-4555-8555-555555555555',
+        sync_version: 1,
+      },
+    ],
+  });
   apiMocks.updateEntry.mockReset().mockResolvedValue({
     entry_uuid: '11111111-1111-4111-8111-111111111111',
     sync_version: 1,
     outbox_event_uuid: 'outbox-1',
   });
+  buildFinalBatchPayloadMock.mockClear();
   vi.spyOn(crypto, 'randomUUID').mockReturnValue('11111111-1111-4111-8111-111111111111');
 });
 
@@ -887,9 +947,7 @@ describe('JournalCaptureFlow', () => {
     vi.setSystemTime(new Date('2026-01-15T22:30:00.000Z'));
     try {
       render(<JournalCaptureFlow {...baseProps} initialTimezone="Europe/Zurich" />);
-      fireEvent.change(screen.getByRole('combobox', { name: 'capture.where.plot' }), {
-        target: { value: 'plot-1' },
-      });
+      fireEvent.click(screen.getByRole('button', { name: 'North field' }));
       fireEvent.click(screen.getByRole('button', { name: 'capture.next' }));
       fireEvent.click(screen.getByRole('button', { name: 'irrigation' }));
       fireEvent.click(screen.getByRole('button', { name: 'capture.next' }));
@@ -913,13 +971,11 @@ describe('JournalCaptureFlow', () => {
     cleanup();
   });
 
-  it('walks the generic Where → Activity → Details → Confirm path and pins catalog versions', async () => {
+  it('keeps single-plot draft POST then PUT promotion unchanged', async () => {
     render(<JournalCaptureFlow {...baseProps} />);
     expect(screen.getByRole('heading', { name: 'capture.where.title' })).toBeInTheDocument();
 
-    fireEvent.change(screen.getByRole('combobox', { name: 'capture.where.plot' }), {
-      target: { value: 'plot-1' },
-    });
+    fireEvent.click(screen.getByRole('button', { name: 'North field' }));
     fireEvent.click(screen.getByRole('button', { name: 'capture.next' }));
     expect(screen.getByRole('heading', { name: 'capture.picker.title' })).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'irrigation' }));
@@ -936,10 +992,16 @@ describe('JournalCaptureFlow', () => {
     expect(screen.getByRole('button', { name: /greenhouse/ })).toBeInTheDocument();
     await waitFor(() => expect(screen.getByRole('button', { name: 'capture.finish' })).not.toBeDisabled());
     fireEvent.click(screen.getByRole('button', { name: /capture.finish/ }));
+    await waitFor(() => expect(apiMocks.createEntry).toHaveBeenCalledWith(
+      expect.objectContaining({ status: 'draft' }),
+    ));
     await waitFor(() => expect(apiMocks.updateEntry).toHaveBeenCalledWith(
       '11111111-1111-4111-8111-111111111111',
       expect.objectContaining({ template_code: 'full_record', template_version: 2, layout_code: 'greenhouse', layout_version: 6 }),
     ));
+    expect(apiMocks.updateEntry.mock.calls[apiMocks.updateEntry.mock.calls.length - 1]?.[1]).toEqual(
+      expect.objectContaining({ status: 'final' }),
+    );
   });
 
   it('adopts the linked plot timezone when generic capture selects a plot', async () => {
@@ -951,9 +1013,7 @@ describe('JournalCaptureFlow', () => {
         zoneTimezones={{ 'zone-1': 'Europe/Zurich' }}
       />);
 
-      fireEvent.change(screen.getByRole('combobox', { name: 'capture.where.plot' }), {
-        target: { value: 'plot-1' },
-      });
+      fireEvent.click(screen.getByRole('button', { name: 'North field' }));
 
       fireEvent.click(screen.getByRole('button', { name: 'capture.next' }));
       expect(screen.getByRole('heading', { name: 'capture.picker.title' })).toBeInTheDocument();
@@ -974,11 +1034,27 @@ describe('JournalCaptureFlow', () => {
     await waitFor(() => expect(apiMocks.listEntries).toHaveBeenCalled());
   });
 
+  it('uses PlotPicker as the only plot authority and rejects an inactive initial plot', () => {
+    const inactivePlot = {
+      ...plot,
+      plot_uuid: '33333333-3333-4333-8333-333333333333',
+      name: 'Inactive field',
+      active: 0,
+      deleted_at: timestamp,
+    };
+    render(<JournalCaptureFlow {...baseProps} plots={[inactivePlot]} initialPlot={inactivePlot} />);
+
+    expect(screen.getByRole('heading', { name: 'capture.where.title' })).toBeInTheDocument();
+    expect(screen.queryByRole('combobox', { name: 'capture.where.plot' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /where\.noPlot/ })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.queryByRole('button', { name: 'Inactive field' })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'capture.next' }));
+    expect(screen.getByRole('alert')).toHaveTextContent('capture.validation.invalidDefinition');
+  });
+
   it('requires crop text for a sensorless plot while keeping its bound layout passive', () => {
     render(<JournalCaptureFlow {...baseProps} plots={[sensorlessPlot]} />);
-    fireEvent.change(screen.getByRole('combobox', { name: 'capture.where.plot' }), {
-      target: { value: 'plot-2' },
-    });
+    fireEvent.click(screen.getByRole('button', { name: 'South field' }));
     fireEvent.click(screen.getByRole('button', { name: 'capture.next' }));
     expect(screen.getByText('capture.validation.cropRequired')).toBeInTheDocument();
     expect(screen.getByRole('textbox', { name: 'capture.carry.crop' })).toBeInTheDocument();
@@ -1663,6 +1739,50 @@ describe('JournalCaptureFlow', () => {
     expect(duplicateAlert).not.toHaveTextContent('irrigation');
   });
 
+  it('keeps every plural duplicate candidate review localized and attributable', async () => {
+    translationMocks.locale = 'de';
+    const localizedCatalog: JournalCatalog = {
+      ...catalog,
+      vocab: catalog.vocab.map((candidate) => candidate.code === 'irrigation'
+        ? { ...candidate, labels: { en: 'Irrigation', de: 'Bewässerung' } }
+        : candidate),
+    };
+    const candidates = [
+      { entryUuid: duplicateUuid(14), occurredStart: '2026-07-16T08:30:00.000Z', activityCode: 'irrigation', plotUuid: plot.plot_uuid },
+      { entryUuid: duplicateUuid(15), occurredStart: '2026-07-16T09:30:00.000Z', activityCode: 'irrigation', plotUuid: homogeneousSecondPlot.plot_uuid },
+    ];
+    apiMocks.createFinalBatch.mockRejectedValueOnce({
+      response: { data: { error: 'duplicate_candidates', details: { duplicateCandidates: candidates } } },
+    });
+    render(<JournalCaptureFlow
+      {...baseProps}
+      catalog={localizedCatalog}
+      plots={[plot, homogeneousSecondPlot]}
+    />);
+    fireEvent.click(screen.getByRole('button', { name: 'North field' }));
+    fireEvent.click(screen.getByRole('button', { name: 'East field' }));
+    fireEvent.click(screen.getByRole('button', { name: 'capture.next' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Bewässerung' }));
+    fireEvent.click(screen.getByRole('button', { name: 'capture.next' }));
+    fireEvent.click(screen.getByRole('button', { name: 'capture.next' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'capture.finish' })).toBeEnabled());
+    fireEvent.click(screen.getByRole('button', { name: 'capture.finish' }));
+    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent(duplicateUuid(14)));
+
+    const firstDate = new Intl.DateTimeFormat('de', {
+      dateStyle: 'medium', timeStyle: 'short', timeZone: 'Europe/Zurich',
+    }).format(new Date(candidates[0].occurredStart));
+    const secondDate = new Intl.DateTimeFormat('de', {
+      dateStyle: 'medium', timeStyle: 'short', timeZone: 'Europe/Zurich',
+    }).format(new Date(candidates[1].occurredStart));
+    const alert = screen.getByRole('alert');
+    expect(alert).toHaveTextContent(firstDate);
+    expect(alert).toHaveTextContent(secondDate);
+    expect(alert).toHaveTextContent('Bewässerung');
+    expect(alert).toHaveTextContent(duplicateUuid(14));
+    expect(alert).toHaveTextContent(duplicateUuid(15));
+  });
+
   it('ignores malformed duplicate candidates and value rows without crashing', async () => {
     apiMocks.updateEntry.mockRejectedValueOnce({
       response: {
@@ -2010,13 +2130,13 @@ describe('JournalCaptureFlow', () => {
     })).toBeInTheDocument());
 
     fireEvent.click(screen.getByRole('button', { name: /capture\.confirm\.plot: North field/ }));
-    fireEvent.change(screen.getByRole('combobox', { name: 'capture.where.plot' }), {
-      target: { value: secondPlot.plot_uuid },
-    });
+    fireEvent.click(screen.getByRole('button', { name: 'North field' }));
+    fireEvent.click(screen.getByRole('button', { name: 'East field' }));
+    expect(screen.getByRole('button', { name: 'East field' })).toHaveAttribute('aria-pressed', 'true');
     fireEvent.click(screen.getByRole('button', { name: 'capture.next' }));
 
     expect(screen.getByRole('heading', { name: 'capture.picker.title' })).toBeInTheDocument();
-    expect(screen.queryByRole('region', { name: 'capture.picker.recentOnPlot' })).not.toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByRole('region', { name: 'capture.picker.recentOnPlot' })).not.toBeInTheDocument());
     expect(screen.queryByRole('button', {
       name: 'fertilization / Spreading / Broadcast spreader',
     })).not.toBeInTheDocument();
@@ -2170,6 +2290,34 @@ describe('JournalCaptureFlow', () => {
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
   });
 
+  it('retries a failed multi-plot batch once with the immutable payload and accepts the receipt', async () => {
+    apiMocks.createFinalBatch
+      .mockRejectedValueOnce(new Error('gateway unavailable'))
+      .mockResolvedValueOnce({ batch_uuid: duplicateUuid(110), entries: [] });
+    render(<JournalCaptureFlow {...baseProps} plots={[plot, homogeneousSecondPlot]} />);
+    fireEvent.click(screen.getByRole('button', { name: 'North field' }));
+    fireEvent.click(screen.getByRole('button', { name: 'East field' }));
+    fireEvent.click(screen.getByRole('button', { name: 'capture.next' }));
+    fireEvent.click(screen.getByRole('button', { name: 'irrigation' }));
+    fireEvent.click(screen.getByRole('button', { name: 'capture.next' }));
+    fireEvent.click(screen.getByRole('button', { name: 'capture.next' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'capture.finish' })).toBeEnabled());
+    fireEvent.click(screen.getByRole('button', { name: 'capture.finish' }));
+
+    await waitFor(() => expect(screen.getByRole('button', { name: 'capture.save.retry' })).toBeInTheDocument());
+    const firstPayload = JSON.parse(JSON.stringify(apiMocks.createFinalBatch.mock.calls[0][0]));
+    expect(screen.getByRole('button', { name: 'capture.close' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'capture.back' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: /capture\.confirm\.occurrence/ })).toBeDisabled();
+
+    fireEvent.click(screen.getByRole('button', { name: 'capture.save.retry' }));
+    await waitFor(() => expect(apiMocks.createFinalBatch).toHaveBeenCalledTimes(2));
+    expect(apiMocks.createFinalBatch.mock.calls[1][0]).toEqual(firstPayload);
+    expect(apiMocks.createEntry).not.toHaveBeenCalled();
+    expect(apiMocks.updateEntry).not.toHaveBeenCalled();
+    await waitFor(() => expect(screen.getByText('capture.save.finalSavedGateway')).toBeInTheDocument());
+  });
+
   it('locks and deduplicates navigation and edits while a retry is pending', async () => {
     let resolveRetry: ((value: unknown) => void) | undefined;
     apiMocks.updateEntry
@@ -2312,9 +2460,7 @@ describe('JournalCaptureFlow', () => {
     rerender(<JournalCaptureFlow {...props} catalog={tightenedCatalog} />);
     await settleJournalEffects();
     fireEvent.click(screen.getByRole('button', { name: 'capture.back' }));
-    fireEvent.change(screen.getByRole('combobox', { name: 'capture.where.plot' }), {
-      target: { value: secondPlot.plot_uuid },
-    });
+    fireEvent.click(screen.getByRole('button', { name: 'East field' }));
     fireEvent.click(screen.getByRole('button', { name: 'capture.next' }));
     fireEvent.click(screen.getByRole('button', { name: 'irrigation' }));
     await settleJournalEffects();
@@ -2383,5 +2529,205 @@ describe('JournalCaptureFlow', () => {
     fireEvent.click(screen.getByRole('button', { name: 'capture.next' }));
     expect(screen.getByRole('heading', { name: 'capture.form.title' })).toBeInTheDocument();
     expect(screen.queryByRole('heading', { name: 'capture.confirm.title' })).not.toBeInTheDocument();
+  });
+
+  it('renders one shared details form only after homogeneous multi-plot selection', async () => {
+    render(<JournalCaptureFlow
+      {...baseProps}
+      plots={[plot, homogeneousSecondPlot]}
+      plotGroups={[activeGroup]}
+    />);
+
+    const northButtons = screen.getAllByRole('button', { name: 'North field' });
+    const eastButtons = screen.getAllByRole('button', { name: 'East field' });
+    fireEvent.click(northButtons[northButtons.length - 1]);
+    fireEvent.click(eastButtons[eastButtons.length - 1]);
+    expect(screen.getByText(/where\.selectionCount:2/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'capture.next' }));
+    fireEvent.click(screen.getByRole('button', { name: 'irrigation' }));
+    fireEvent.click(screen.getByRole('button', { name: 'capture.next' }));
+    fireEvent.click(screen.getByRole('button', { name: 'capture.next' }));
+
+    await waitFor(() => expect(screen.getByRole('heading', {
+      name: 'capture.confirm.title',
+    })).toBeInTheDocument());
+    expect(screen.getByText(/North field, East field/)).toBeInTheDocument();
+    expect(apiMocks.createEntry).not.toHaveBeenCalled();
+    expect(apiMocks.createFinalBatch).not.toHaveBeenCalled();
+  });
+
+  it('blocks mixed-layout selections before EntryForm renders', async () => {
+    render(<JournalCaptureFlow {...baseProps} plots={[plot, mixedLayoutPlot]} />);
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'North field' }));
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'East field' }));
+    });
+
+    expect(screen.getByRole('alert')).toHaveTextContent('where.mixedLayout');
+    expect(screen.queryByRole('heading', { name: 'capture.form.title' })).not.toBeInTheDocument();
+  });
+
+  it('confirms every target name and count', async () => {
+    render(<JournalCaptureFlow {...baseProps} plots={[plot, homogeneousSecondPlot]} />);
+    fireEvent.click(screen.getByRole('button', { name: 'North field' }));
+    fireEvent.click(screen.getByRole('button', { name: 'East field' }));
+    fireEvent.click(screen.getByRole('button', { name: 'capture.next' }));
+    fireEvent.click(screen.getByRole('button', { name: 'irrigation' }));
+    fireEvent.click(screen.getByRole('button', { name: 'capture.next' }));
+    fireEvent.click(screen.getByRole('button', { name: 'capture.next' }));
+
+    await waitFor(() => expect(screen.getByRole('heading', {
+      name: 'capture.confirm.title',
+    })).toBeInTheDocument());
+    expect(screen.getByText(/batch\.confirmCount:2/)).toBeInTheDocument();
+    expect(screen.getByText(/North field, East field/)).toBeInTheDocument();
+  });
+
+  it('posts one atomic final batch with sorted plot_uuids and no batch_uuid', async () => {
+    const onSaved = vi.fn();
+    render(<JournalCaptureFlow
+      {...baseProps}
+      plots={[plot, homogeneousSecondPlot]}
+      onSaved={onSaved}
+    />);
+    fireEvent.click(screen.getByRole('button', { name: 'North field' }));
+    fireEvent.click(screen.getByRole('button', { name: 'East field' }));
+    fireEvent.click(screen.getByRole('button', { name: 'capture.next' }));
+    fireEvent.click(screen.getByRole('button', { name: 'irrigation' }));
+    fireEvent.click(screen.getByRole('button', { name: 'capture.next' }));
+    fireEvent.click(screen.getByRole('button', { name: 'capture.next' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'capture.finish' })).toBeEnabled());
+    fireEvent.click(screen.getByRole('button', { name: 'capture.finish' }));
+
+    await waitFor(() => expect(apiMocks.createFinalBatch).toHaveBeenCalledOnce());
+    const payload = apiMocks.createFinalBatch.mock.calls[0][0];
+    expect(payload.plot_uuids).toEqual([...payload.plot_uuids].sort());
+    expect(payload).not.toHaveProperty('batch_uuid');
+    expect(payload).not.toHaveProperty('entry_uuid');
+    expect(payload).not.toHaveProperty('plot_uuid');
+    expect(payload).not.toHaveProperty('zone_uuid');
+    expect(payload).not.toHaveProperty('duplicate_guard_ack_entry_uuid');
+    expect(apiMocks.createEntry).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: 'capture.close' }));
+    await waitFor(() => expect(onSaved).toHaveBeenCalledWith(expect.objectContaining({
+      batch_uuid: '99999999-9999-4999-8999-999999999999',
+    })));
+  });
+
+  it('uses the returned batch receipt', async () => {
+    const onSaved = vi.fn();
+    render(<JournalCaptureFlow {...baseProps} plots={[plot, homogeneousSecondPlot]} onSaved={onSaved} />);
+    fireEvent.click(screen.getByRole('button', { name: 'North field' }));
+    fireEvent.click(screen.getByRole('button', { name: 'East field' }));
+    fireEvent.click(screen.getByRole('button', { name: 'capture.next' }));
+    fireEvent.click(screen.getByRole('button', { name: 'irrigation' }));
+    fireEvent.click(screen.getByRole('button', { name: 'capture.next' }));
+    fireEvent.click(screen.getByRole('button', { name: 'capture.next' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'capture.finish' })).toBeEnabled());
+    fireEvent.click(screen.getByRole('button', { name: 'capture.finish' }));
+    await waitFor(() => expect(screen.getByText('capture.save.finalSavedGateway')).toBeInTheDocument());
+    fireEvent.click(screen.getByRole('button', { name: 'capture.close' }));
+    await waitFor(() => expect(onSaved.mock.calls[0][0].entries).toHaveLength(2));
+  });
+
+  it('does not POST when final batch building returns the exact domain rejection', async () => {
+    buildFinalBatchPayloadMock.mockImplementationOnce(() => ({
+      ok: false,
+      error: {
+        error: 'invalid_batch',
+        message: 'Batch plots were rejected by the finalization builder',
+        details: null,
+      },
+    }));
+    render(<JournalCaptureFlow {...baseProps} plots={[plot, homogeneousSecondPlot]} />);
+    fireEvent.click(screen.getByRole('button', { name: 'North field' }));
+    fireEvent.click(screen.getByRole('button', { name: 'East field' }));
+    fireEvent.click(screen.getByRole('button', { name: 'capture.next' }));
+    fireEvent.click(screen.getByRole('button', { name: 'irrigation' }));
+    fireEvent.click(screen.getByRole('button', { name: 'capture.next' }));
+    fireEvent.click(screen.getByRole('button', { name: 'capture.next' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'capture.finish' })).toBeEnabled());
+
+    fireEvent.click(screen.getByRole('button', { name: 'capture.finish' }));
+
+    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent(
+      'Batch plots were rejected by the finalization builder',
+    ));
+    expect(apiMocks.createFinalBatch).not.toHaveBeenCalled();
+  });
+
+  it('shows plural duplicate candidates and retries with duplicate_guard_ack_entry_uuids', async () => {
+    const candidates = [
+      { entryUuid: duplicateUuid(11), occurredStart: timestamp, activityCode: 'irrigation', plotUuid: plot.plot_uuid },
+      { entryUuid: duplicateUuid(12), occurredStart: timestamp, activityCode: 'irrigation', plotUuid: plot.plot_uuid },
+      { entryUuid: duplicateUuid(13), occurredStart: timestamp, activityCode: 'irrigation', plotUuid: homogeneousSecondPlot.plot_uuid },
+    ];
+    apiMocks.createFinalBatch
+      .mockRejectedValueOnce({ response: { data: { error: 'duplicate_candidates', details: { duplicateCandidates: candidates } } } })
+      .mockResolvedValueOnce({ batch_uuid: '99999999-9999-4999-8999-999999999999', entries: [] });
+    render(<JournalCaptureFlow {...baseProps} plots={[plot, homogeneousSecondPlot]} />);
+    fireEvent.click(screen.getByRole('button', { name: 'North field' }));
+    fireEvent.click(screen.getByRole('button', { name: 'East field' }));
+    fireEvent.click(screen.getByRole('button', { name: 'capture.next' }));
+    fireEvent.click(screen.getByRole('button', { name: 'irrigation' }));
+    fireEvent.click(screen.getByRole('button', { name: 'capture.next' }));
+    fireEvent.click(screen.getByRole('button', { name: 'capture.next' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'capture.finish' })).toBeEnabled());
+    fireEvent.click(screen.getByRole('button', { name: 'capture.finish' }));
+    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent(duplicateUuid(11)));
+    expect(screen.getByRole('alert')).toHaveTextContent(duplicateUuid(12));
+    expect(screen.getByRole('alert')).toHaveTextContent(duplicateUuid(13));
+    expect(screen.getByRole('heading', { name: 'North field' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'East field' })).toBeInTheDocument();
+    const firstPayload = JSON.parse(JSON.stringify(apiMocks.createFinalBatch.mock.calls[0][0]));
+    expect(screen.getByRole('button', { name: 'capture.close' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'capture.back' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: /capture\.confirm\.occurrence/ })).toBeDisabled();
+    expect(screen.getByRole('button', { name: /duplicateAcknowledge/ })).toBeEnabled();
+    fireEvent.click(screen.getByRole('button', { name: /duplicateAcknowledge/ }));
+    await waitFor(() => expect(apiMocks.createFinalBatch).toHaveBeenCalledTimes(2));
+    expect(apiMocks.createFinalBatch.mock.calls[1][0]).toEqual({
+      ...firstPayload,
+      duplicate_guard_ack_entry_uuids: [duplicateUuid(11), duplicateUuid(12), duplicateUuid(13)],
+    });
+  });
+
+  it('rejects a 101-plot selection before rendering the form', async () => {
+    const plots = Array.from({ length: 101 }, (_, index) => ({
+      ...plot,
+      plot_uuid: duplicateUuid(index + 20),
+      plot_code: `P-${index + 1}`,
+      name: `Plot ${index + 1}`,
+    }));
+    render(<JournalCaptureFlow
+      {...baseProps}
+      plots={plots}
+      plotGroups={[{
+        ...activeGroup,
+        group_uuid: duplicateUuid(2),
+        label: 'Large group',
+        members: plots.map((candidate) => candidate.plot_uuid),
+      }]}
+    />);
+    fireEvent.click(screen.getByRole('button', { name: 'Large group' }));
+    expect(screen.getByRole('alert')).toHaveTextContent('batch_too_large');
+    expect(screen.queryByRole('heading', { name: 'capture.form.title' })).not.toBeInTheDocument();
+  }, 15000);
+
+  it('does not call createEntry once per selected plot', async () => {
+    render(<JournalCaptureFlow {...baseProps} plots={[plot, homogeneousSecondPlot]} />);
+    fireEvent.click(screen.getByRole('button', { name: 'North field' }));
+    fireEvent.click(screen.getByRole('button', { name: 'East field' }));
+    fireEvent.click(screen.getByRole('button', { name: 'capture.next' }));
+    fireEvent.click(screen.getByRole('button', { name: 'irrigation' }));
+    fireEvent.click(screen.getByRole('button', { name: 'capture.next' }));
+    fireEvent.click(screen.getByRole('button', { name: 'capture.next' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'capture.finish' })).toBeEnabled());
+    fireEvent.click(screen.getByRole('button', { name: 'capture.finish' }));
+    await waitFor(() => expect(apiMocks.createFinalBatch).toHaveBeenCalledOnce());
+    expect(apiMocks.createEntry).not.toHaveBeenCalled();
   });
 });
