@@ -12,6 +12,7 @@ const mod = require('./index');
 const codecs = require('./codecs');
 const pathsMod = require('./paths');
 const activityDb = require('./activity-db');
+const activityAppend = require('./activity-append');
 const locksMod = require('./locks');
 const initMod = require('./init');
 const loadMod = require('./load');
@@ -1443,4 +1444,257 @@ test('computeFactoryCommandActivityAnchorSha256 hashes the exact canonical ancho
     activityDb.computeFactoryCommandActivityAnchorSha256(entrySha256)
   );
   assert.throws(() => activityDb.computeFactoryCommandActivityAnchorSha256('not-a-sha'), { code: 'factory_anchor_invalid_entry_sha256' });
+});
+
+// ===========================================================================
+// activity-append: entry codec, principal hashing, durable append discipline
+// (plan lines 335-341; slice 2 of the protocol-state module)
+// ===========================================================================
+
+const OP_C = '33333333-3333-4333-8333-333333333333';
+const OP_D = '44444444-4444-4444-8444-444444444444';
+const APPEND_AT = '2026-07-16T00:00:01.000Z';
+
+function validAppendEntryFields(overrides) {
+  return Object.assign(
+    {
+      generation: 1,
+      previousGeneration: 0,
+      previousSha256: 'a'.repeat(64),
+      operationId: OP_C,
+      kind: 'COMMAND_LIFECYCLE_MUTATION',
+      createdAt: APPEND_AT,
+      principalKind: 'local',
+      principalSha256: 'b'.repeat(64),
+      commandKeySha256: 'c'.repeat(64),
+      adapterId: 'db.command-lifecycle',
+      activitySha256: 'd'.repeat(64),
+    },
+    overrides || {}
+  );
+}
+
+function initializedRoots() {
+  const { opts } = makeRoots();
+  initMod.initializeFourRoots(Object.assign({}, opts, { operationId: OP_A, createdAt: CREATED_AT }));
+  const roots = pathsMod.resolveRoots(opts);
+  return { opts, roots };
+}
+
+function appendArgs(roots, overrides) {
+  return Object.assign(
+    {
+      dbPath: roots.activityDbPath,
+      operationId: OP_C,
+      kind: 'COMMAND_LIFECYCLE_MUTATION',
+      createdAt: APPEND_AT,
+      principalKind: 'local',
+      principalSha256: 'b'.repeat(64),
+      commandKeySha256: 'c'.repeat(64),
+      adapterId: 'db.command-lifecycle',
+      activitySha256: 'd'.repeat(64),
+    },
+    overrides || {}
+  );
+}
+
+test('activity entry codec: buildActivityEntry produces the exact closed 12-field logical entry', () => {
+  const entry = activityAppend.buildActivityEntry(validAppendEntryFields());
+  assert.deepEqual(Object.keys(entry).sort(), [
+    'activitySha256',
+    'adapterId',
+    'commandKeySha256',
+    'createdAt',
+    'entrySha256',
+    'generation',
+    'kind',
+    'operationId',
+    'previousGeneration',
+    'previousSha256',
+    'principalKind',
+    'principalSha256',
+  ]);
+  // entrySha256 is the canonical hash of the other 11 fields (same codec as genesis)
+  assert.equal(entry.entrySha256, activityDb.entrySha256For(entry));
+  assert.doesNotThrow(() => activityAppend.validateActivityEntry(entry));
+});
+
+test('activity entry codec rejects token/payload/credential/actor/detail fields', () => {
+  for (const field of ['token', 'payload', 'credential', 'actorId', 'detail', 'leaseToken', 'result', 'deviceSecret']) {
+    const entry = activityAppend.buildActivityEntry(validAppendEntryFields());
+    entry[field] = 'x';
+    assert.throws(() => activityAppend.validateActivityEntry(entry), { code: 'schema_unknown_field' }, `field "${field}" must be rejected`);
+  }
+});
+
+test('activity entry codec: closed kind union (no GENESIS on the append path)', () => {
+  for (const kind of ['COMMAND_LIFECYCLE_MUTATION', 'EXTERNAL_EFFECT_ATTEMPT', 'ACK_TRANSPORT_MUTATION']) {
+    assert.doesNotThrow(() => activityAppend.buildActivityEntry(validAppendEntryFields({ kind })));
+  }
+  assert.throws(() => activityAppend.buildActivityEntry(validAppendEntryFields({ kind: 'GENESIS' })), { code: 'schema_invalid_field' });
+  assert.throws(() => activityAppend.buildActivityEntry(validAppendEntryFields({ kind: 'SOMETHING_ELSE' })), { code: 'schema_invalid_field' });
+});
+
+test('activity entry codec: closed principalKind union cloud|local (no system on the append path)', () => {
+  for (const principalKind of ['cloud', 'local']) {
+    assert.doesNotThrow(() => activityAppend.buildActivityEntry(validAppendEntryFields({ principalKind })));
+  }
+  assert.throws(() => activityAppend.buildActivityEntry(validAppendEntryFields({ principalKind: 'system' })), { code: 'schema_invalid_field' });
+  assert.throws(() => activityAppend.buildActivityEntry(validAppendEntryFields({ principalKind: 'operator' })), { code: 'schema_invalid_field' });
+});
+
+test('activity entry codec: null command/adapter/activity fields are rejected on the append path', () => {
+  assert.throws(() => activityAppend.buildActivityEntry(validAppendEntryFields({ commandKeySha256: null })), { code: 'schema_invalid_field' });
+  assert.throws(() => activityAppend.buildActivityEntry(validAppendEntryFields({ adapterId: null })), { code: 'schema_invalid_field' });
+  assert.throws(() => activityAppend.buildActivityEntry(validAppendEntryFields({ activitySha256: null })), { code: 'schema_invalid_field' });
+  assert.throws(() => activityAppend.buildActivityEntry(validAppendEntryFields({ principalSha256: 'not-hex' })), { code: 'schema_invalid_field' });
+});
+
+test('principal hashing: local grammar is exactly local:<actor-uuid|system>:<producer-id>, actor never returned', () => {
+  assert.equal(activityAppend.localPrincipalSha256('system', 'scheduler'), codecs.sha256Hex('local:system:scheduler'));
+  const uuid = '55555555-5555-4555-8555-555555555555';
+  assert.equal(activityAppend.localPrincipalSha256(uuid, 'valve-api'), codecs.sha256Hex(`local:${uuid}:valve-api`));
+  assert.throws(() => activityAppend.localPrincipalSha256('not a uuid', 'x'), { code: 'principal_invalid_actor' });
+  assert.throws(() => activityAppend.localPrincipalSha256('', 'x'), { code: 'principal_invalid_actor' });
+  assert.throws(() => activityAppend.localPrincipalSha256(uuid, ''), { code: 'principal_invalid_producer' });
+  assert.throws(() => activityAppend.localPrincipalSha256(uuid, 'bad producer'), { code: 'principal_invalid_producer' });
+});
+
+test('principal hashing: cloud form hashes the protected capability identity', () => {
+  const idHash = 'e'.repeat(64);
+  assert.equal(activityAppend.cloudPrincipalSha256(idHash), codecs.sha256Hex(`cloud:${idHash}`));
+  assert.throws(() => activityAppend.cloudPrincipalSha256('nope'), { code: 'principal_invalid_identity' });
+  assert.throws(() => activityAppend.cloudPrincipalSha256(null), { code: 'principal_invalid_identity' });
+});
+
+test('appendCommandActivity commits generation 1 with the full BEGIN IMMEDIATE discipline and rereads it', () => {
+  const { roots } = initializedRoots();
+  const res = activityAppend.appendCommandActivity(appendArgs(roots));
+  assert.equal(res.row.generation, 1);
+  assert.equal(res.row.kind, 'COMMAND_LIFECYCLE_MUTATION');
+  assert.equal(res.row.operation_id, OP_C);
+
+  const dbRo = activityDb.openReadOnly(roots.activityDbPath);
+  const genesis = dbRo.prepare('SELECT * FROM activity_chain WHERE generation=0').get();
+  const head = dbRo.prepare('SELECT * FROM activity_head WHERE id=1').get();
+  dbRo.close();
+
+  // chain links to the committed genesis row
+  assert.equal(res.row.previous_generation, 0);
+  assert.equal(res.row.previous_sha256, genesis.entry_sha256);
+  // entry hash is the canonical hash of the row's own logical fields
+  assert.equal(
+    res.row.entry_sha256,
+    activityDb.entrySha256For({
+      generation: 1,
+      previousGeneration: 0,
+      previousSha256: genesis.entry_sha256,
+      operationId: OP_C,
+      kind: 'COMMAND_LIFECYCLE_MUTATION',
+      createdAt: APPEND_AT,
+      principalKind: 'local',
+      principalSha256: 'b'.repeat(64),
+      commandKeySha256: 'c'.repeat(64),
+      adapterId: 'db.command-lifecycle',
+      activitySha256: 'd'.repeat(64),
+    })
+  );
+  // singleton head updated in the same transaction
+  assert.equal(head.generation, 1);
+  assert.equal(head.entry_sha256, res.row.entry_sha256);
+  assert.equal(head.segment_count, 2);
+  const acc0 = activityDb.checkpointCumulativeSha256(null, genesis.entry_sha256);
+  assert.equal(head.segment_accumulator_sha256, activityDb.checkpointCumulativeSha256(acc0, res.row.entry_sha256));
+  // checkpoint binding unchanged off-boundary
+  assert.equal(head.checkpoint_generation, 0);
+  // the reread head is returned too
+  assert.equal(res.headRow.generation, 1);
+  assert.equal(res.headRow.entry_sha256, res.row.entry_sha256);
+});
+
+test('appendCommandActivity chains a second append onto the first', () => {
+  const { roots } = initializedRoots();
+  const first = activityAppend.appendCommandActivity(appendArgs(roots));
+  const second = activityAppend.appendCommandActivity(
+    appendArgs(roots, { operationId: OP_D, kind: 'ACK_TRANSPORT_MUTATION', createdAt: '2026-07-16T00:00:02.000Z' })
+  );
+  assert.equal(second.row.generation, 2);
+  assert.equal(second.row.previous_sha256, first.row.entry_sha256);
+  assert.equal(second.headRow.generation, 2);
+  assert.equal(second.headRow.segment_count, 3);
+});
+
+test('appendCommandActivity refuses a replayed operationId and leaves the first entry intact (no second attempt)', () => {
+  const { roots } = initializedRoots();
+  const first = activityAppend.appendCommandActivity(appendArgs(roots));
+  assert.throws(
+    () => activityAppend.appendCommandActivity(appendArgs(roots, { createdAt: '2026-07-16T00:00:02.000Z' })),
+    { code: 'activity_append_operation_replayed' }
+  );
+  const dbRo = activityDb.openReadOnly(roots.activityDbPath);
+  const rows = dbRo.prepare('SELECT COUNT(*) AS n FROM activity_chain').get();
+  const row1 = dbRo.prepare('SELECT * FROM activity_chain WHERE generation=1').get();
+  const head = dbRo.prepare('SELECT * FROM activity_head WHERE id=1').get();
+  dbRo.close();
+  assert.equal(rows.n, 2); // genesis + the one successful append
+  assert.equal(row1.entry_sha256, first.row.entry_sha256);
+  assert.equal(head.generation, 1);
+});
+
+test('appendCommandActivity revalidates the singleton head inside the transaction: a tampered head blocks', () => {
+  const { roots } = initializedRoots();
+  const { DatabaseSync } = require('node:sqlite');
+  const rw = new DatabaseSync(roots.activityDbPath);
+  rw.prepare("UPDATE activity_head SET entry_sha256 = ? WHERE id=1").run('f'.repeat(64));
+  rw.close();
+  assert.throws(() => activityAppend.appendCommandActivity(appendArgs(roots)), { code: 'activity_append_head_invalid' });
+  // nothing appended
+  const dbRo = activityDb.openReadOnly(roots.activityDbPath);
+  const rows = dbRo.prepare('SELECT COUNT(*) AS n FROM activity_chain').get();
+  dbRo.close();
+  assert.equal(rows.n, 1);
+});
+
+test('appendCommandActivity revalidates the singleton head: a head behind the chain max blocks', () => {
+  const { roots } = initializedRoots();
+  activityAppend.appendCommandActivity(appendArgs(roots));
+  const { DatabaseSync } = require('node:sqlite');
+  const rw = new DatabaseSync(roots.activityDbPath);
+  const genesis = rw.prepare('SELECT * FROM activity_chain WHERE generation=0').get();
+  rw.prepare('UPDATE activity_head SET generation = 0, entry_sha256 = ? WHERE id=1').run(genesis.entry_sha256);
+  rw.close();
+  assert.throws(
+    () => activityAppend.appendCommandActivity(appendArgs(roots, { operationId: OP_D })),
+    { code: 'activity_append_head_invalid' }
+  );
+});
+
+test('appendCommandActivity revalidates the fixed schema inside the transaction: an extra view blocks', () => {
+  const { roots } = initializedRoots();
+  const { DatabaseSync } = require('node:sqlite');
+  const rw = new DatabaseSync(roots.activityDbPath);
+  rw.exec('CREATE VIEW sneaky AS SELECT 1');
+  rw.close();
+  assert.throws(() => activityAppend.appendCommandActivity(appendArgs(roots)), { code: 'activity_schema_extra_objects' });
+});
+
+test('appendCommandActivity rejects invalid descriptor fields without writing anything', () => {
+  const { roots } = initializedRoots();
+  const cases = [
+    { operationId: 'no' },
+    { kind: 'GENESIS' },
+    { principalKind: 'system' },
+    { principalSha256: 'not-hex' },
+    { commandKeySha256: null },
+    { adapterId: '' },
+    { activitySha256: 'not-hex' },
+    { createdAt: 'not-a-date' },
+  ];
+  for (const bad of cases) {
+    assert.throws(() => activityAppend.appendCommandActivity(appendArgs(roots, bad)), Error, `should reject ${JSON.stringify(bad)}`);
+  }
+  const dbRo = activityDb.openReadOnly(roots.activityDbPath);
+  const rows = dbRo.prepare('SELECT COUNT(*) AS n FROM activity_chain').get();
+  dbRo.close();
+  assert.equal(rows.n, 1); // only genesis
 });
