@@ -27,9 +27,11 @@ const crypto = require('node:crypto');
 const codecs = require('./codecs');
 const paths = require('./paths');
 const activityDb = require('./activity-db');
+const activityAppend = require('./activity-append');
 const locks = require('./locks');
 const initModule = require('./init');
 const loadModule = require('./load');
+const witnessed = require('./witnessed');
 const deploymentStateGate = require('./deployment-state-gate');
 
 // initialize(options): the deployment-only four-root initialization entry
@@ -148,6 +150,22 @@ function initialize(options) {
   }
 }
 
+// Default (fail-closed) witnessed-operation runner for the bare
+// runWitnessedOperation module surface: production roots, EMPTY closed
+// registry. Lazily constructed so merely loading the module never touches
+// /data; the registry check inside runWitnessedOperation fires before any
+// root access, so with no registered adapters no filesystem path is ever
+// reached through this surface.
+let _defaultWitnessedRunner = null;
+function defaultWitnessedRunner() {
+  if (!_defaultWitnessedRunner) {
+    _defaultWitnessedRunner = witnessed.createWitnessedOperationRunner({
+      registry: witnessed.createAdapterRegistry([]),
+    });
+  }
+  return _defaultWitnessedRunner;
+}
+
 // status(options): read-only. Never writes to any root.
 function status(options) {
   const opts = options || {};
@@ -221,6 +239,21 @@ module.exports = {
   // deployment-state gate
   readDeploymentStateFile: deploymentStateGate.readDeploymentStateFile,
   requireDeploymentPhase: deploymentStateGate.requireDeploymentPhase,
+
+  // witnessed operations (plan line 335) — machinery for the future
+  // osi-command-ledger slice. The bare runWitnessedOperation surface below
+  // carries an EMPTY closed registry, so every call fails closed
+  // (witnessed_adapter_not_registered) until that slice constructs a
+  // runner with the real production adapters via
+  // createWitnessedOperationRunner.
+  ACTIVITY_KINDS: activityAppend.ACTIVITY_KINDS,
+  localPrincipalSha256: activityAppend.localPrincipalSha256,
+  cloudPrincipalSha256: activityAppend.cloudPrincipalSha256,
+  createAdapterRegistry: witnessed.createAdapterRegistry,
+  createWitnessedOperationRunner: witnessed.createWitnessedOperationRunner,
+  runWitnessedOperation(db, descriptor, args) {
+    return defaultWitnessedRunner().runWitnessedOperation(db, descriptor, args);
+  },
 
   // high-level verbs implemented in this slice
   initialize,
