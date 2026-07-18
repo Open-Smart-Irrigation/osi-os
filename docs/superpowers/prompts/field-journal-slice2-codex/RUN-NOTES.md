@@ -264,3 +264,15 @@ Append-only execution log for the accepted Phase 0 and Phase 1-6 plans on `desig
 - Final Sol specification and quality verdicts: `APPROVED`.
 - Controller verification passed focused 21/21, TSX 94/94, and Vitest 1033/1033 across 128 files, plus typecheck, production build, anti-slop, and diff checks. Existing browser-data and large-chunk warnings were the only findings.
 - Task 20 is next. Broader Phase 3 remains separately in review; no finding was waived.
+
+## 2026-07-18T03:28:28+02:00 - Task 20 outcome
+
+- Task 20 committed `290d4c21` (`feat(journal): add explicit-layout plot CRUD form`) with the exact two-file scope: `web/react-gui/src/components/journal/where/PlotForm.tsx` and `web/react-gui/src/components/journal/__tests__/where/PlotForm.test.tsx`.
+- The initial RED was module-not-found; first GREEN was 8/8. Spec-correction RED was 3 failures/9 passes, then GREEN reached 12/12. Final Sol specification verdict: `APPROVED`.
+- Quality review found identity/unmount races, post-save misclassification, edge-aligned code/area validation gaps, and duplicate IDs/associations. Correction RED was 11/24, then GREEN reached 24/24.
+- Follow-up quality review found a misleading permanent Saving lock and false text-spinbutton/native constraints. Correction RED was 11/25, then GREEN reached 25/25.
+- Final quality review found untranslated feedback fragments and focus-order defects. Correction RED was 5/26, then GREEN reached 26/26.
+- Final Sol specification and quality verdicts: `APPROVED`.
+- Final controller gate passed focused 26/26, TSX 94/94, and Vitest 1059/1059 across 129 files; typecheck and build were green, with 1669 modules transformed. Anti-slop and diff checks were green. Only inherited baseline-browser, Browserslist, and large-chunk advisories remained.
+- Task 21 required a preflight re-read of `REVIEW-FINDINGS.md`; P1/P2/P3 remain Phase 3-owned, and no findings were waived.
+- Task 21 is next.
