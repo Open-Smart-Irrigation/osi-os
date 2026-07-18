@@ -58,7 +58,12 @@ const {
   ensureModeDirRecursive,
   atomicReplaceFile,
   writeExclusiveFile,
+  writeExclusiveOrVerify,
   generationFilename,
+  listRegularEntries,
+  fsyncFile,
+  fsyncDir,
+  FILE_MODE,
   defaultOwnershipAdapter,
 } = require('./paths');
 const { acquireActivityRootLocks } = require('./locks');
@@ -73,7 +78,17 @@ function appendError(code, message, extra) {
 const CHECKPOINT_INTERVAL = 4096;
 const MAX_RETAINED_ROWS = 8193;
 const MAX_ACTIVITY_DB_BYTES = 32 * 1024 * 1024;
+// "the hard ceiling is 100000 receipts, representing 409600000 activities"
+// — 100000 * 4096 = 409,600,000 exactly, i.e. the highest permitted
+// checkpoint INDEX is 100000 (the genesis receipt 0 represents
+// initialization, not a 4096-activity segment, and is not counted).
+// Creating receipt 100001 fails closed; a separately reviewed archive
+// format, not silent rollover, is required beyond it.
 const MAX_CHECKPOINT_RECEIPTS = 100000;
+// "bounded incremental_vacuum": explicit page budget per checkpoint so
+// vacuum work can never grow with lifetime history.
+const INCREMENTAL_VACUUM_PAGE_BUDGET = 4096;
+const FULL_AUDIT_WATCHDOG_MS = 120000;
 
 const ACTIVITY_KINDS = ['COMMAND_LIFECYCLE_MUTATION', 'EXTERNAL_EFFECT_ATTEMPT', 'ACK_TRANSPORT_MUTATION'];
 const ACTIVITY_PRINCIPAL_KINDS = ['cloud', 'local'];
@@ -237,6 +252,7 @@ function appendCommandActivity(args) {
 
   const db = new DatabaseSync(dbPath);
   let entry;
+  let pendingCheckpoint = null;
   try {
     // synchronous is per-connection; enforce FULL at open on every module
     // connection (see the pragma note in activity-db.js).
@@ -293,11 +309,47 @@ function appendCommandActivity(args) {
         throw err;
       }
       const newAccumulator = checkpointCumulativeSha256(head.segment_accumulator_sha256, entry.entrySha256);
-      db.prepare(
-        `UPDATE activity_head
-            SET generation = ?, entry_sha256 = ?, segment_count = segment_count + 1, segment_accumulator_sha256 = ?
-          WHERE id = 1`
-      ).run(entry.generation, entry.entrySha256, newAccumulator);
+      if (entry.generation % CHECKPOINT_INTERVAL === 0) {
+        // Checkpoint boundary (plan line 341): the next receipt's content is
+        // fully deterministic from committed state, so its binding hash is
+        // committed in the SAME transaction as the boundary row — the
+        // post-commit file/head/prune sequence can then always be resumed
+        // deterministically after any crash.
+        const newIndex = head.checkpoint_generation + 1;
+        if (entry.generation / CHECKPOINT_INTERVAL !== newIndex) {
+          throw appendError('activity_append_head_invalid', 'head checkpoint index is inconsistent with the boundary generation', {
+            boundaryGeneration: entry.generation,
+            headCheckpointGeneration: head.checkpoint_generation,
+          });
+        }
+        if (newIndex > MAX_CHECKPOINT_RECEIPTS) {
+          throw appendError(
+            'activity_checkpoint_ceiling_reached',
+            `the ${MAX_CHECKPOINT_RECEIPTS}-checkpoint-receipt hard ceiling was reached; a separately reviewed archive format is required, not silent rollover`,
+            { checkpointGeneration: newIndex }
+          );
+        }
+        pendingCheckpoint = {
+          format: 1,
+          checkpointGeneration: newIndex,
+          entrySha256: entry.entrySha256,
+          previousCheckpointSha256: head.checkpoint_sha256,
+          cumulativeSha256: newAccumulator,
+          createdAt: entry.createdAt,
+        };
+        db.prepare(
+          `UPDATE activity_head
+              SET generation = ?, entry_sha256 = ?, checkpoint_generation = ?, checkpoint_sha256 = ?,
+                  segment_count = 1, segment_accumulator_sha256 = ?
+            WHERE id = 1`
+        ).run(entry.generation, entry.entrySha256, newIndex, sha256Hex(canonicalJson(pendingCheckpoint)), newAccumulator);
+      } else {
+        db.prepare(
+          `UPDATE activity_head
+              SET generation = ?, entry_sha256 = ?, segment_count = segment_count + 1, segment_accumulator_sha256 = ?
+            WHERE id = 1`
+        ).run(entry.generation, entry.entrySha256, newAccumulator);
+      }
       if (a.crashAfter === 'append_mid_transaction') {
         // Hard-crash with the write transaction open: leaves a hot journal.
         process.exit(137);
@@ -332,7 +384,7 @@ function appendCommandActivity(args) {
     if (!row || row.entry_sha256 !== entry.entrySha256 || !headRow || headRow.generation !== entry.generation) {
       throw appendError('activity_append_reread_mismatch', 'committed activity row/head reread does not match the appended entry');
     }
-    return { row, headRow };
+    return { row, headRow, pendingCheckpoint };
   } finally {
     ro.close();
   }
@@ -389,12 +441,18 @@ function readExternalHeadFile(activityHeadPath) {
 }
 
 // ensureCheckpointReceiptForHead: before publishing an external head that
-// binds checkpoint K, make sure the receipt file for K exists. At K=0 the
-// receipt is deterministically rebuildable from the genesis row (a crash
-// between activity-database creation and receipt write); K>0 receipts are
-// rebuilt by the checkpoint machinery's own crash recovery (they are
-// deterministic too — see maybeRollCheckpoint), so a missing K>0 receipt
-// here means recovery was bypassed and blocks.
+// binds checkpoint K, make sure the receipt file for K exists. Missing
+// receipts are rebuilt DETERMINISTICALLY:
+//   - K=0 from the genesis row (a crash between activity-database creation
+//     and receipt write);
+//   - K>0 from the retained boundary row + the on-disk receipt K-1 (a
+//     crash between the boundary commit and the receipt write). The
+//     rebuilt receipt's canonical hash must equal the head row's committed
+//     checkpoint_sha256 — the boundary transaction committed that binding
+//     hash precisely so this rebuild can be verified, never guessed.
+// A K>0 rebuild is only possible while the head still sits exactly on the
+// boundary generation (the accumulator has not rolled past); any other
+// missing-receipt state blocks.
 function ensureCheckpointReceiptForHead(roots, db, headRow, adapter) {
   const receiptPath = path.join(roots.checkpointsDir, generationFilename(headRow.checkpoint_generation));
   if (fs.existsSync(receiptPath)) return;
@@ -408,9 +466,110 @@ function ensureCheckpointReceiptForHead(roots, db, headRow, adapter) {
     writeExclusiveFile(receiptPath, Buffer.from(canonicalJson(checkpoint), 'utf8'), adapter);
     return;
   }
-  throw appendError('activity_repair_checkpoint_missing', 'cannot publish external head: no on-disk checkpoint matches the database head row', {
-    checkpointGeneration: headRow.checkpoint_generation,
-  });
+  const kIdx = headRow.checkpoint_generation;
+  const boundaryGeneration = kIdx * CHECKPOINT_INTERVAL;
+  if (headRow.generation !== boundaryGeneration) {
+    throw appendError('activity_repair_checkpoint_missing', 'cannot rebuild the missing checkpoint receipt: the head has moved past the boundary', {
+      checkpointGeneration: kIdx,
+      headGeneration: headRow.generation,
+    });
+  }
+  const boundaryRow = db.prepare('SELECT * FROM activity_chain WHERE generation = ?').get(boundaryGeneration);
+  if (!boundaryRow) {
+    throw appendError('activity_repair_checkpoint_missing', 'cannot rebuild the missing checkpoint receipt: the boundary row is not retained', {
+      checkpointGeneration: kIdx,
+    });
+  }
+  const prevReceiptPath = path.join(roots.checkpointsDir, generationFilename(kIdx - 1));
+  let prevRaw;
+  try {
+    prevRaw = fs.readFileSync(prevReceiptPath, 'utf8');
+  } catch (err) {
+    if (err.code === 'ENOENT') {
+      throw appendError('activity_checkpoint_chain_broken', 'cannot rebuild the missing checkpoint receipt: its predecessor receipt is also missing', {
+        checkpointGeneration: kIdx,
+      });
+    }
+    throw err;
+  }
+  const rebuilt = {
+    format: 1,
+    checkpointGeneration: kIdx,
+    entrySha256: boundaryRow.entry_sha256,
+    previousCheckpointSha256: sha256Hex(canonicalJson(JSON.parse(prevRaw))),
+    cumulativeSha256: headRow.segment_accumulator_sha256,
+    createdAt: boundaryRow.created_at,
+  };
+  if (sha256Hex(canonicalJson(rebuilt)) !== headRow.checkpoint_sha256) {
+    throw appendError('activity_checkpoint_rebuild_mismatch', 'the deterministically rebuilt checkpoint receipt does not match the committed head binding hash', {
+      checkpointGeneration: kIdx,
+    });
+  }
+  ensureModeDirRecursive(roots.checkpointsDir, adapter, { enforceFrom: roots.activityHeadWitnessRoot });
+  writeExclusiveOrVerify(receiptPath, Buffer.from(canonicalJson(rebuilt), 'utf8'), adapter, 'activity_checkpoint_resume_mismatch');
+  fsyncFile(receiptPath);
+  fsyncDir(roots.checkpointsDir);
+}
+
+// pruneAndVacuum: "then deletes rows older than the previous checkpoint and
+// runs bounded incremental_vacuum" — for latest checkpoint index K, rows
+// with generation < (K-1)*4096 are deleted (the previous checkpoint's own
+// boundary row is retained). Idempotent, so crash recovery simply re-runs
+// it. Never touches checkpoint receipts.
+function pruneAndVacuum(dbPath, checkpointIndex, crashAfter) {
+  const cutoff = (checkpointIndex - 1) * CHECKPOINT_INTERVAL;
+  const db = new DatabaseSync(dbPath);
+  try {
+    db.exec('PRAGMA synchronous=FULL;');
+    db.exec('BEGIN IMMEDIATE');
+    try {
+      if (cutoff > 0) {
+        db.prepare('DELETE FROM activity_chain WHERE generation < ?').run(cutoff);
+      }
+      db.exec('COMMIT');
+    } catch (err) {
+      db.exec('ROLLBACK');
+      throw err;
+    }
+    if (crashAfter === 'prune_done') {
+      process.exit(137);
+    }
+    db.exec(`PRAGMA incremental_vacuum(${INCREMENTAL_VACUUM_PAGE_BUDGET});`);
+    if (crashAfter === 'incremental_vacuum_done') {
+      process.exit(137);
+    }
+  } finally {
+    try {
+      db.close();
+    } catch (_ignored) {
+      /* already closed */
+    }
+  }
+  const size = fs.statSync(dbPath).size;
+  if (size > MAX_ACTIVITY_DB_BYTES) {
+    throw appendError('activity_db_size_exceeded', `activity database exceeds the ${MAX_ACTIVITY_DB_BYTES}-byte bound after prune/vacuum`, { size });
+  }
+}
+
+// completeCheckpointSequence: the exact post-commit order of plan line 341 —
+// O_EXCL-write/fsync the receipt, update/fsync the external head to bind
+// it, then prune + bounded incremental_vacuum. Every step is deterministic
+// and idempotent, so any crash inside it is completed by
+// reconcileExternalActivityHead on the next operation.
+function completeCheckpointSequence(roots, { receipt, headRow, ownershipAdapter, crashAfter }) {
+  const adapter = ownershipAdapter || defaultOwnershipAdapter;
+  const receiptPath = path.join(roots.checkpointsDir, generationFilename(receipt.checkpointGeneration));
+  writeExclusiveOrVerify(receiptPath, Buffer.from(canonicalJson(receipt), 'utf8'), adapter, 'activity_checkpoint_resume_mismatch');
+  fsyncFile(receiptPath);
+  fsyncDir(roots.checkpointsDir);
+  if (crashAfter === 'checkpoint_receipt_written') {
+    process.exit(137);
+  }
+  publishExternalActivityHead(roots, headRow, adapter);
+  if (crashAfter === 'checkpoint_head_published') {
+    process.exit(137);
+  }
+  pruneAndVacuum(roots.activityDbPath, receipt.checkpointGeneration, crashAfter);
 }
 
 // reconcileExternalActivityHead(roots): the line-339 rule, run under the
@@ -426,7 +585,35 @@ function reconcileExternalActivityHead(roots, options) {
   const adapter = opts.ownershipAdapter || defaultOwnershipAdapter;
   recoverHotJournalIfPresent({ dbPath: roots.activityDbPath, ownershipAdapter: adapter, recoveryOnlyAdapter: opts.recoveryOnlyAdapter });
   const db = openReadOnly(roots.activityDbPath);
+  let maintenance = null;
+  let result;
   try {
+    result = reconcileWithOpenDb(roots, db, adapter);
+    // Crash-recovery completion for the prune step (plan line 341 order:
+    // receipt, head, THEN prune/vacuum): if rows older than the previous
+    // checkpoint boundary are still retained, the prune was interrupted —
+    // finish it now, before any command work. O(1) detection (MIN over the
+    // integer primary key), only ever runs real work after a crash.
+    const head = db.prepare('SELECT checkpoint_generation FROM activity_head WHERE id = 1').get();
+    if (head && head.checkpoint_generation > 0) {
+      const cutoff = (head.checkpoint_generation - 1) * CHECKPOINT_INTERVAL;
+      const min = db.prepare('SELECT MIN(generation) AS lo FROM activity_chain').get();
+      if (min && min.lo !== null && min.lo < cutoff) {
+        maintenance = { checkpointIndex: head.checkpoint_generation };
+      }
+    }
+  } finally {
+    db.close();
+  }
+  if (maintenance) {
+    pruneAndVacuum(roots.activityDbPath, maintenance.checkpointIndex, null);
+    result = Object.assign({}, result, { prunedPendingWindow: true });
+  }
+  return result;
+}
+
+function reconcileWithOpenDb(roots, db, adapter) {
+  {
     const { head } = revalidateHead(db);
     const externalHead = readExternalHeadFile(roots.activityHeadPath);
 
@@ -472,8 +659,6 @@ function reconcileExternalActivityHead(roots, options) {
     // ...and publish only that deterministic next head.
     ensureCheckpointReceiptForHead(roots, db, head, adapter);
     return { reconciled: true, published: publishExternalActivityHead(roots, head, adapter) };
-  } finally {
-    db.close();
   }
 }
 
@@ -490,11 +675,112 @@ function appendActivityWithExternalHead(args) {
   const adapter = a.ownershipAdapter || defaultOwnershipAdapter;
   reconcileExternalActivityHead(roots, { ownershipAdapter: adapter, recoveryOnlyAdapter: a.recoveryOnlyAdapter });
   const res = appendCommandActivity(Object.assign({}, a, { dbPath: roots.activityDbPath }));
-  publishExternalActivityHead(roots, res.headRow, adapter);
+  if (res.pendingCheckpoint) {
+    // Boundary append: receipt first, then the external head binds it,
+    // then prune + bounded vacuum (plan line 341's exact order).
+    completeCheckpointSequence(roots, {
+      receipt: res.pendingCheckpoint,
+      headRow: res.headRow,
+      ownershipAdapter: adapter,
+      crashAfter: a.crashAfter,
+    });
+  } else {
+    publishExternalActivityHead(roots, res.headRow, adapter);
+  }
   if (a.crashAfter === 'external_head_published') {
     process.exit(137);
   }
   return res;
+}
+
+// --- maintenance full audit (plan line 341) --------------------------------
+
+// fullAuditActivityChain: "A maintenance/full-audit verb streams the
+// checkpoint chain with a 120-second wall watchdog before deployment
+// evidence, while normal polling stays bounded." This is the ONLY code
+// path allowed to enumerate the checkpoint directory; every runtime path
+// reads receipts by computed filename. Verifies contiguous numbering from
+// 0, every previous-checkpoint link hash, receipt file modes/ownership,
+// and that the latest receipt is the one bound by both the external head
+// and the database head row. Per-receipt cumulative hashes bind pruned
+// segment rows and are therefore verifiable only for receipts whose
+// segment is still retained — that binding is checked at write/rebuild
+// time and by the bounded runtime verifier for the current segment.
+function fullAuditActivityChain(roots, options) {
+  const opts = options || {};
+  const adapter = opts.ownershipAdapter || defaultOwnershipAdapter;
+  const watchdogMs = Number.isFinite(opts.watchdogMs) ? opts.watchdogMs : FULL_AUDIT_WATCHDOG_MS;
+  const startedAt = Date.now();
+  const checkWatchdog = () => {
+    if (Date.now() - startedAt > watchdogMs) {
+      throw appendError('activity_audit_watchdog_exceeded', `full activity audit exceeded its ${watchdogMs} ms wall watchdog`);
+    }
+  };
+  const entries = listRegularEntries(roots.checkpointsDir, /^\d{16}\.json$/);
+  if (entries.length === 0) {
+    throw appendError('activity_audit_no_receipts', 'full activity audit found no checkpoint receipts');
+  }
+  let previousSha = null;
+  let latest = null;
+  let latestSha = null;
+  for (let i = 0; i < entries.length; i += 1) {
+    checkWatchdog();
+    const entry = entries[i];
+    const index = Number.parseInt(entry.name.slice(0, 16), 10);
+    if (index !== i) {
+      throw appendError('activity_checkpoint_gap', 'checkpoint receipt numbering has a gap or does not start at 0', { index, position: i });
+    }
+    if ((entry.stat.mode & 0o777) !== FILE_MODE) {
+      throw appendError('chain_entry_wrong_mode', `checkpoint receipt ${entry.name} is not mode 0600`, { path: entry.path });
+    }
+    if (!adapter.verifyOwner(entry.stat)) {
+      throw appendError('chain_entry_wrong_owner', `checkpoint receipt ${entry.name} is not owned by the service identity`, { path: entry.path });
+    }
+    let parsed;
+    try {
+      parsed = JSON.parse(fs.readFileSync(entry.path, 'utf8'));
+    } catch (_err) {
+      throw appendError('activity_checkpoint_malformed', `checkpoint receipt ${entry.name} is not valid JSON`, { path: entry.path });
+    }
+    if (
+      !parsed || parsed.format !== 1 || parsed.checkpointGeneration !== index ||
+      !isSha256Hex(parsed.entrySha256) || !isSha256Hex(parsed.cumulativeSha256) || !isIsoTimestamp(parsed.createdAt)
+    ) {
+      throw appendError('activity_checkpoint_malformed', `checkpoint receipt ${entry.name} does not match the exact receipt schema`, { path: entry.path });
+    }
+    if (index === 0) {
+      if (parsed.previousCheckpointSha256 !== null) {
+        throw appendError('activity_checkpoint_fork', 'checkpoint 0 must have null previousCheckpointSha256');
+      }
+    } else if (parsed.previousCheckpointSha256 !== previousSha) {
+      throw appendError('activity_checkpoint_fork', `checkpoint ${entry.name} previousCheckpointSha256 does not match its actual predecessor`, {
+        index,
+      });
+    }
+    latest = parsed;
+    latestSha = sha256Hex(canonicalJson(parsed));
+    previousSha = latestSha;
+  }
+  checkWatchdog();
+  // The latest receipt must be the one both heads bind.
+  const externalHead = readExternalHeadFile(roots.activityHeadPath);
+  if (!externalHead || externalHead.checkpointGeneration !== latest.checkpointGeneration || externalHead.checkpointSha256 !== latestSha) {
+    throw appendError('activity_audit_head_mismatch', 'the external head does not bind the latest checkpoint receipt', {
+      latestCheckpointGeneration: latest.checkpointGeneration,
+    });
+  }
+  const db = openReadOnly(roots.activityDbPath);
+  try {
+    const head = db.prepare('SELECT * FROM activity_head WHERE id = 1').get();
+    if (!head || head.checkpoint_generation !== latest.checkpointGeneration || head.checkpoint_sha256 !== latestSha) {
+      throw appendError('activity_audit_head_mismatch', 'the database head row does not bind the latest checkpoint receipt', {
+        latestCheckpointGeneration: latest.checkpointGeneration,
+      });
+    }
+  } finally {
+    db.close();
+  }
+  return { ok: true, receiptCount: entries.length, latestCheckpointGeneration: latest.checkpointGeneration, elapsedMs: Date.now() - startedAt };
 }
 
 // runExclusiveActivityAppend(args): self-locking wrapper — acquires the
@@ -541,6 +827,8 @@ module.exports = {
   MAX_RETAINED_ROWS,
   MAX_ACTIVITY_DB_BYTES,
   MAX_CHECKPOINT_RECEIPTS,
+  INCREMENTAL_VACUUM_PAGE_BUDGET,
+  FULL_AUDIT_WATCHDOG_MS,
   ACTIVITY_KINDS,
   ACTIVITY_PRINCIPAL_KINDS,
   isAdapterId,
@@ -553,7 +841,11 @@ module.exports = {
   buildExternalActivityHead,
   publishExternalActivityHead,
   readExternalHeadFile,
+  ensureCheckpointReceiptForHead,
+  pruneAndVacuum,
+  completeCheckpointSequence,
   reconcileExternalActivityHead,
   appendActivityWithExternalHead,
   runExclusiveActivityAppend,
+  fullAuditActivityChain,
 };
