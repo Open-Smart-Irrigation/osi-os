@@ -37,6 +37,7 @@ const GENERATIONS_DIRNAME = 'generations';
 const RESET_RECEIPTS_DIRNAME = 'reset-receipts';
 const V2_DISPOSITION_RECEIPTS_DIRNAME = 'v2-disposition-receipts';
 const DATABASE_RESTORE_RECEIPTS_DIRNAME = 'database-restore-receipts';
+const DATABASE_INTEGRITY_RECEIPTS_DIRNAME = 'database-integrity-receipts';
 const CHECKPOINTS_DIRNAME = 'checkpoints';
 const LOCK_FILENAME = 'lock.json';
 
@@ -80,6 +81,7 @@ function resolveRoots(options) {
     resetReceiptsDir: path.join(capabilityRoot, RESET_RECEIPTS_DIRNAME),
     v2DispositionReceiptsDir: path.join(capabilityRoot, V2_DISPOSITION_RECEIPTS_DIRNAME),
     databaseRestoreReceiptsDir: path.join(capabilityRoot, DATABASE_RESTORE_RECEIPTS_DIRNAME),
+    databaseIntegrityReceiptsDir: path.join(capabilityRoot, DATABASE_INTEGRITY_RECEIPTS_DIRNAME),
     capabilityHeadPath: path.join(capabilityRoot, 'head.json'),
     witnessRoot,
     activityWitnessRoot,
@@ -247,6 +249,17 @@ function writeExclusiveOrVerify(filePath, buffer, ownershipAdapter, mismatchCode
     return { created: true };
   }
   assertNoSymlinkComponents(filePath);
+  const adapter = ownershipAdapter || defaultOwnershipAdapter;
+  const stat = fs.lstatSync(filePath);
+  if (!stat.isFile() || stat.isSymbolicLink()) {
+    throw pathsError('exclusive_write_wrong_type', `existing resume path is not a regular nonsymlink file: ${filePath}`, { path: filePath });
+  }
+  if ((stat.mode & 0o777) !== FILE_MODE) {
+    throw pathsError('exclusive_write_wrong_mode', `existing resume file is not mode 0600: ${filePath}`, { path: filePath });
+  }
+  if (!adapter.verifyOwner(stat)) {
+    throw pathsError('exclusive_write_wrong_owner', `existing resume file is not owned by the service identity: ${filePath}`, { path: filePath });
+  }
   const existing = fs.readFileSync(filePath);
   if (!existing.equals(buffer)) {
     throw pathsError(mismatchCode || 'exclusive_write_mismatch', `existing file does not match the expected resumed content: ${filePath}`, { path: filePath });
@@ -318,6 +331,7 @@ module.exports = {
   RESET_RECEIPTS_DIRNAME,
   V2_DISPOSITION_RECEIPTS_DIRNAME,
   DATABASE_RESTORE_RECEIPTS_DIRNAME,
+  DATABASE_INTEGRITY_RECEIPTS_DIRNAME,
   CHECKPOINTS_DIRNAME,
   LOCK_FILENAME,
   pathsError,

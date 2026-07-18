@@ -69,13 +69,29 @@ function validateParentDeploymentGatedFields(parentDeployment) {
 
 function readDeploymentStateFile(deploymentStatePath) {
   assertNoSymlinkComponents(deploymentStatePath);
-  let raw;
+  let stat;
   try {
-    raw = fs.readFileSync(deploymentStatePath, 'utf8');
+    stat = fs.lstatSync(deploymentStatePath);
   } catch (err) {
     if (err.code === 'ENOENT') {
       throw gateError('deployment_state_missing', `deployment-state file does not exist: ${deploymentStatePath}`, { path: deploymentStatePath });
     }
+    throw err;
+  }
+  if (!stat.isFile() || stat.isSymbolicLink() || (stat.mode & 0o777) !== 0o600) {
+    throw gateError('deployment_state_unsafe_file', 'deployment-state must be a regular nonsymlink mode-0600 file', {
+      path: deploymentStatePath,
+    });
+  }
+  if (typeof process.getuid === 'function' && stat.uid !== process.getuid()) {
+    throw gateError('deployment_state_wrong_owner', 'deployment-state is not owned by the invoking service identity', {
+      path: deploymentStatePath,
+    });
+  }
+  let raw;
+  try {
+    raw = fs.readFileSync(deploymentStatePath, 'utf8');
+  } catch (err) {
     throw err;
   }
   let parsed;
@@ -121,9 +137,93 @@ function requireDeploymentPhase(deploymentStatePath, { expectedDeploymentId, exp
   return state;
 }
 
+// Recovery protocol verbs run while the parent deployment is pinned. Their
+// authority is the exact recovery sub-operation, not a caller-provided
+// Boolean. The sibling deployment-state codec owns the full closed recovery
+// union; this gate checks only the fields consumed here and rejects any
+// mismatch before protocol roots are opened.
+function requireRecoveryPhase(deploymentStatePath, {
+  expectedDeploymentId,
+  expectedParentGeneration,
+  recoveryOperationId,
+  expectedRecoveryPhase,
+  requestId,
+}) {
+  const state = readDeploymentStateFile(deploymentStatePath);
+  const parent = state.parentDeployment;
+  const recovery = state.activeSubOperation;
+  if (parent.deploymentId !== expectedDeploymentId) {
+    throw gateError('deployment_state_wrong_deployment_id', 'parentDeployment.deploymentId does not match the expected deployment', {
+      actual: parent.deploymentId,
+      expected: expectedDeploymentId,
+    });
+  }
+  if (parent.generation !== expectedParentGeneration) {
+    throw gateError('deployment_state_wrong_parent_generation', 'parentDeployment.generation does not match the expected parent generation', {
+      actual: parent.generation,
+      expected: expectedParentGeneration,
+    });
+  }
+  if (!recovery || recovery.kind !== 'recovery') {
+    throw gateError('deployment_state_recovery_missing', 'the required recovery sub-operation is not active');
+  }
+  if (recovery.operationId !== recoveryOperationId) {
+    throw gateError('deployment_state_wrong_recovery_operation', 'active recovery operation does not match', {
+      actual: recovery.operationId,
+      expected: recoveryOperationId,
+    });
+  }
+  if (recovery.phase !== expectedRecoveryPhase) {
+    throw gateError('deployment_state_wrong_recovery_phase', `active recovery phase "${recovery.phase}" !== required "${expectedRecoveryPhase}"`, {
+      actual: recovery.phase,
+      expected: expectedRecoveryPhase,
+    });
+  }
+  if (requestId != null && recovery.requestId !== requestId) {
+    throw gateError('deployment_state_wrong_recovery_request', 'active recovery request does not match', {
+      actual: recovery.requestId,
+      expected: requestId,
+    });
+  }
+  return state;
+}
+
+function requireFactoryBaselinePhase(deploymentStatePath, {
+  expectedBaselineId,
+  expectedPhase,
+  expectedBaselinePrefix,
+  expectedParentGeneration,
+  operationId,
+}) {
+  const state = readDeploymentStateFile(deploymentStatePath);
+  const parent = state.parentDeployment;
+  if (parent.phase !== expectedPhase) {
+    throw gateError('deployment_state_wrong_phase', `parentDeployment.phase "${parent.phase}" !== required "${expectedPhase}"`);
+  }
+  if (parent.generation !== expectedParentGeneration) {
+    throw gateError('deployment_state_wrong_parent_generation', 'parentDeployment.generation does not match --expected-parent-generation');
+  }
+  if (parent.deploymentId !== expectedBaselineId && parent.baselineId !== expectedBaselineId) {
+    throw gateError('deployment_state_wrong_baseline_id', 'factory baseline identity does not match --expected-baseline-id');
+  }
+  const prefix = parent.baselinePrefix || parent.operationPrefix || parent.prefix;
+  if (prefix !== expectedBaselinePrefix) {
+    throw gateError('deployment_state_wrong_baseline_prefix', 'factory baseline prefix does not match --expected-baseline-prefix');
+  }
+  if (parent.operationId != null && parent.operationId !== operationId) {
+    throw gateError('deployment_state_wrong_factory_operation', 'factory baseline operation does not match --operation-id');
+  }
+  if (state.activeSubOperation !== null) {
+    throw gateError('deployment_state_active_sub_operation', 'factory baseline initialization forbids an active sub-operation');
+  }
+  return state;
+}
+
 module.exports = {
   gateError,
   DEPLOYMENT_STATE_TOP_FIELDS,
   readDeploymentStateFile,
   requireDeploymentPhase,
+  requireRecoveryPhase,
+  requireFactoryBaselinePhase,
 };
