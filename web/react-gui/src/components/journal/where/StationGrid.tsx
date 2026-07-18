@@ -18,6 +18,7 @@ const RANGE_ERROR_KEYS: Record<RangeParseFailure['code'], string> = {
   non_integer: 'where.rangeNonInteger',
   non_positive: 'where.rangeNonPositive',
 };
+const RANGE_SUMMARY_DEFAULT = '{{label}} · {{plotCount}} · {{selectedCount}}';
 
 export interface StationGridProps {
   stationCode: string;
@@ -66,11 +67,21 @@ export function StationGrid({
   const selectedCount = [...plots.map(({ plot }) => plot), ...namedFallbackPlots]
     .filter((plot) => selectedPlotUuids.has(plot.plot_uuid)).length;
 
+  const plotCountLabel = t('where.rangePlotCount', {
+    count: totalCount,
+    defaultValue: totalCount === 1 ? '{{count}} plot' : '{{count}} plots',
+  });
+  const selectedCountLabel = t('where.rangeSelectedCount', {
+    count: selectedCount,
+    defaultValue: '{{count}} selected',
+  });
   const summary = t('where.rangeSummary', {
-    defaultValue: '{{label}} · {{count}} plots · {{selected}} selected',
+    defaultValue: RANGE_SUMMARY_DEFAULT,
     label: stationLabel,
     count: totalCount,
     selected: selectedCount,
+    plotCount: plotCountLabel,
+    selectedCount: selectedCountLabel,
   });
 
   const toggleButton = (plotUuid: string, label: string, number?: number) => {

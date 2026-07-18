@@ -26,7 +26,7 @@ vi.mock('react-i18next', () => ({
         'where.invert': 'Invert selection',
         'where.range': 'Station range',
         'where.applyRange': 'Apply range',
-        'where.rangeSummary': '{{label}} · {{count}} plots · {{selected}} selected',
+        'where.rangeSummary': '{{label}} · {{count}} · {{selected}}',
         'where.rangeOutOfStation': 'The range contains a plot outside this station.',
         'where.rangeMalformed': 'The station range is invalid.',
         'where.rangeEmpty': 'The station range is empty.',
@@ -309,6 +309,9 @@ describe('PlotPicker', () => {
 
     expect(screen.getByText('2 plots selected')).toBeVisible();
     expect(screen.getByText('Some selected plots are no longer available. Choose an active plot to update the selection.')).toBeVisible();
+    expect(translationMocks.t).toHaveBeenCalledWith('where.staleSelection', {
+      defaultValue: 'Some selected plots are no longer available. Choose an active plot to update the selection.',
+    });
     fireEvent.click(screen.getByRole('button', { name: 'Create group' }));
     fireEvent.change(screen.getByRole('textbox', { name: 'Group label' }), { target: { value: 'Active pair' } });
     fireEvent.click(screen.getByRole('button', { name: 'Save group' }));
@@ -584,5 +587,8 @@ describe('PlotPicker', () => {
 
     const serializedResponseData = JSON.stringify(failure.response.data);
     await vi.waitFor(() => expect(screen.getByText(serializedResponseData, { exact: true })).toBeVisible());
+    expect(translationMocks.t).toHaveBeenCalledWith('group.error', {
+      defaultValue: 'Could not save the plot group.',
+    });
   });
 });

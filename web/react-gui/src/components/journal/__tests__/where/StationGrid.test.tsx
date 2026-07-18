@@ -1,7 +1,9 @@
 import '@testing-library/jest-dom/vitest';
 import { fireEvent, render, screen, within } from '@testing-library/react';
+import i18next from 'i18next';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+import en from '../../../../../public/locales/en/journal.json';
 import type { StationPlotPosition } from '../../../../journal/stationModel';
 import type { JournalPlot } from '../../../../types/journal';
 import type { StationGridProps } from '../../where/StationGrid';
@@ -93,6 +95,94 @@ describe('StationGrid', () => {
     expect(screen.queryByRole('button', { name: /1.*North field/ })).not.toBeInTheDocument();
   });
 
+  it.each([
+    {
+      plots: gridPlots.slice(0, 1),
+      selectedPlotUuids: new Set(['plot-1']),
+      plotCountDefault: '{{count}} plot',
+      plotCountLabel: '1 plot',
+      selectedCountLabel: '1 selected',
+      summary: 'Station Alpha · 1 plot · 1 selected',
+    },
+    {
+      plots: gridPlots.slice(0, 2),
+      selectedPlotUuids: new Set(['plot-1']),
+      plotCountDefault: '{{count}} plots',
+      plotCountLabel: '2 plots',
+      selectedCountLabel: '1 selected',
+      summary: 'Station Alpha · 2 plots · 1 selected',
+    },
+    {
+      plots: gridPlots.slice(0, 2),
+      selectedPlotUuids: new Set(['plot-1', 'plot-2']),
+      plotCountDefault: '{{count}} plots',
+      plotCountLabel: '2 plots',
+      selectedCountLabel: '2 selected',
+      summary: 'Station Alpha · 2 plots · 2 selected',
+    },
+  ])('localizes $plotCountLabel and $selectedCountLabel before composing the summary', ({
+    plots,
+    selectedPlotUuids,
+    plotCountDefault,
+    plotCountLabel,
+    selectedCountLabel,
+    summary,
+  }) => {
+    render(<StationGrid {...props({
+      plots,
+      namedFallbackPlots: [],
+      selectedPlotUuids,
+    })} />);
+
+    expect(translate).toHaveBeenCalledWith('where.rangePlotCount', {
+      count: plots.length,
+      defaultValue: plotCountDefault,
+    });
+    expect(translate).toHaveBeenCalledWith('where.rangeSelectedCount', {
+      count: selectedPlotUuids.size,
+      defaultValue: '{{count}} selected',
+    });
+    expect(translate).toHaveBeenCalledWith('where.rangeSummary', {
+      defaultValue: '{{label}} · {{plotCount}} · {{selectedCount}}',
+      label: 'Station Alpha',
+      count: plots.length,
+      selected: selectedPlotUuids.size,
+      plotCount: plotCountLabel,
+      selectedCount: selectedCountLabel,
+    });
+    expect(screen.getByText(summary)).toBeInTheDocument();
+  });
+
+  it('bridges StationGrid range summary options to the current English resource', async () => {
+    render(<StationGrid {...props({
+      plots: gridPlots.slice(0, 2),
+      namedFallbackPlots: [],
+      selectedPlotUuids: new Set(['plot-1']),
+    })} />);
+
+    const rangeSummaryCall = translate.mock.calls.find(([key]) => key === 'where.rangeSummary');
+    expect(rangeSummaryCall).toBeDefined();
+    const rangeSummaryOptions = rangeSummaryCall?.[1];
+    expect(rangeSummaryOptions).toBeDefined();
+
+    const i18n = i18next.createInstance();
+    try {
+      await i18n.init({
+        lng: 'en',
+        ns: ['journal'],
+        defaultNS: 'journal',
+        resources: { en: { journal: en } },
+      });
+
+      const summary = i18n.t('journal:where.rangeSummary', rangeSummaryOptions);
+
+      expect(summary).toBe('Station Alpha · 2 plots · 1 selected');
+      expect(summary).not.toMatch(/\{\{[^}]+\}\}/);
+    } finally {
+      i18n.removeResourceBundle('en', 'journal');
+    }
+  });
+
   it('expands a numbered grid with toggle buttons', () => {
     render(<StationGrid {...props()} />);
 
@@ -132,6 +222,30 @@ describe('StationGrid', () => {
 
     expect(screen.getByRole('textbox', { name: 'Station range' })).toHaveValue('1-2');
     expect(screen.getByRole('alert')).toHaveTextContent('out_of_station: 2-4');
+  });
+
+  it.each([
+    ['empty', 'where.rangeEmpty', ''],
+    ['malformed', 'where.rangeMalformed', '2--4'],
+    ['duplicate', 'where.rangeDuplicate', '5'],
+    ['out_of_station', 'where.rangeOutOfStation', '9'],
+    ['reversed', 'where.rangeReversed', '12-10'],
+    ['non_integer', 'where.rangeNonInteger', '2.5'],
+    ['non_positive', 'where.rangeNonPositive', '0'],
+  ] as const)('maps the %s parser error to its dedicated translation key', (
+    code,
+    translationKey,
+    token,
+  ) => {
+    render(<StationGrid {...props({
+      rangeError: { ok: false, code, token },
+    })} />);
+
+    expandStation();
+
+    expect(translate).toHaveBeenCalledWith(translationKey, {
+      defaultValue: 'The station range is invalid.',
+    });
   });
 
   it('wraps one exact long structured range error token without duplication', () => {
