@@ -66,6 +66,21 @@ test('PASS at the exact measured baseline (zero headroom on both node and total 
   assert.match(r.stdout, /verify-flows-size-ratchet: OK/);
 });
 
+test('PASS with exact coverage for an empty function at max_chars zero', () => {
+  const dir = tmpDir();
+  writeFlows(dir, [fn('empty', '')]);
+  writeAllowances(dir, {
+    node_allowances: {
+      empty: { max_chars: 0, reason: 'test: exact empty-function ceiling' },
+    },
+    total_allowance: { max_total: 0, reason: 'test: exact empty-flow total ceiling' },
+  });
+
+  const r = run(dir);
+  assert.equal(r.status, 0, r.stderr || r.stdout);
+  assert.match(r.stdout, /verify-flows-size-ratchet: OK/);
+});
+
 test('FAIL when an owned node exceeds its committed max_chars by a single byte, PASS again once the ceiling is updated', () => {
   const dir = tmpDir();
   const nodes = fixtureNodes('x'.repeat(201)); // one byte over the 200 ceiling below
@@ -84,21 +99,23 @@ test('FAIL when an owned node exceeds its committed max_chars by a single byte, 
   assert.equal(fixed.status, 0, fixed.stderr || fixed.stdout);
 });
 
-test('FAIL when a previously unlisted node grows by one while another node shrinks by one and max_total is unchanged', () => {
+test('FAIL on the growing node ceiling when another covered node shrinks and max_total is unchanged', () => {
   const dir = tmpDir();
-  const nodes = [fn('previously-unlisted', 'x'.repeat(101)), fn('offset', 'y'.repeat(99))];
+  const nodes = [fn('growing', 'x'.repeat(101)), fn('shrinking', 'y'.repeat(99))];
   writeFlows(dir, nodes);
   writeAllowances(dir, {
     node_allowances: {
-      offset: { max_chars: 100, reason: 'test: offset node baseline' },
+      growing: { max_chars: 100, reason: 'test: growing node baseline' },
+      shrinking: { max_chars: 100, reason: 'test: shrinking node baseline' },
     },
     total_allowance: { max_total: 200, reason: 'test: aggregate remains at baseline' },
   });
 
   const r = run(dir);
   assert.notEqual(r.status, 0, r.stdout);
-  assert.match(r.stderr, /previously-unlisted/);
-  assert.match(r.stderr, /missing.*ceiling|ceiling.*missing/);
+  assert.match(r.stderr, /node growing is 101 chars, exceeding its committed ceiling of 100 \(\+1\)/);
+  assert.doesNotMatch(r.stderr, /missing a committed ceiling/);
+  assert.doesNotMatch(r.stderr, /node shrinking/);
   assert.doesNotMatch(r.stderr, /total embedded JS/);
 });
 

@@ -202,11 +202,11 @@ function checkSurface(rel, flows, allowances) {
     }
   }
   for (const [id, entry] of Object.entries(allowances.node)) {
-    const found = sizes.get(id);
-    if (!found) {
+    if (!sizes.has(id)) {
       failures.push(rel + ': allowances entry for node ' + id + ' is unused (no such function node exists in this surface); remove the stale entry');
       continue;
     }
+    const found = sizes.get(id);
     if (found.chars > entry.max_chars) {
       failures.push(rel + ': node ' + id + ' is ' + found.chars + ' chars, exceeding its committed ceiling of ' + entry.max_chars + ' (+' + (found.chars - entry.max_chars) + '); update the committed max_chars if this growth was reviewed');
     }
