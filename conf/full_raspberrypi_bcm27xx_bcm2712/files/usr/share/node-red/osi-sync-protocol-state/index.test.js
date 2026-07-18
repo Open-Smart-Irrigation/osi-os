@@ -1698,3 +1698,210 @@ test('appendCommandActivity rejects invalid descriptor fields without writing an
   dbRo.close();
   assert.equal(rows.n, 1); // only genesis
 });
+
+// ===========================================================================
+// external activity-head witness update after commit (plan line 339)
+// ===========================================================================
+
+const ACTIVITY_APPEND_PATH = path.join(__dirname, 'activity-append.js');
+
+function readExternalHead(roots) {
+  return JSON.parse(fs.readFileSync(roots.activityHeadPath, 'utf8'));
+}
+
+test('runExclusiveActivityAppend publishes the external head witness after every commit', () => {
+  const { opts, roots } = initializedRoots();
+  const first = activityAppend.runExclusiveActivityAppend(Object.assign({ opts, bootId: 'boot-x' }, appendArgs(roots)));
+  const head1 = readExternalHead(roots);
+  assert.deepEqual(head1, {
+    format: 1,
+    generation: 1,
+    entrySha256: first.row.entry_sha256,
+    checkpointGeneration: 0,
+    checkpointSha256: first.headRow.checkpoint_sha256,
+  });
+  const second = activityAppend.runExclusiveActivityAppend(
+    Object.assign({ opts, bootId: 'boot-x' }, appendArgs(roots, { operationId: OP_D, createdAt: '2026-07-16T00:00:02.000Z' }))
+  );
+  const head2 = readExternalHead(roots);
+  assert.equal(head2.generation, 2);
+  assert.equal(head2.entrySha256, second.row.entry_sha256);
+  // the whole root set still verifies cleanly
+  const loaded = loadMod.loadProtocolState(Object.assign({}, opts, { repair: false }));
+  assert.equal(loaded.initialized, true);
+  assert.equal(loaded.resumePending, false);
+});
+
+test('a crash between DB commit and external head publish is a resumable one-ahead state', () => {
+  const { opts, roots } = initializedRoots();
+  const childScript = `
+    const activityAppend = require(${JSON.stringify(ACTIVITY_APPEND_PATH)});
+    activityAppend.runExclusiveActivityAppend(${JSON.stringify(
+      Object.assign({ opts, bootId: 'boot-x', crashAfter: 'append_db_commit' }, appendArgs(pathsMod.resolveRoots(opts)))
+    )});
+  `;
+  const child = cp.spawnSync(process.execPath, ['-e', childScript]);
+  assert.equal(child.status, 137, `expected simulated crash, got ${child.status}: ${child.stderr}`);
+  // On disk: DB at generation 1, external head still at generation 0.
+  assert.equal(readExternalHead(roots).generation, 0);
+  const verified = loadMod.verifyActivityRoots(roots, {});
+  assert.deepEqual(verified.resumable, { kind: 'EXTERNAL_HEAD_PUBLICATION', targetGeneration: 1 });
+  // status() must not throw on this documented crash state
+  assert.ok(mod.status(opts));
+  // reconcile under the activity lock heals it deterministically
+  activityAppend.reconcileExternalActivityHead(roots, {});
+  assert.equal(readExternalHead(roots).generation, 1);
+  const healed = loadMod.verifyActivityRoots(roots, {});
+  assert.equal(healed.resumable, null);
+});
+
+test('a crashed hot journal on the append path is recovered before the next locked append', () => {
+  const { opts, roots } = initializedRoots();
+  const childScript = `
+    const activityAppend = require(${JSON.stringify(ACTIVITY_APPEND_PATH)});
+    activityAppend.runExclusiveActivityAppend(${JSON.stringify(
+      Object.assign({ opts, bootId: 'boot-x', crashAfter: 'append_mid_transaction' }, appendArgs(pathsMod.resolveRoots(opts)))
+    )});
+  `;
+  const child = cp.spawnSync(process.execPath, ['-e', childScript]);
+  assert.equal(child.status, 137);
+  assert.equal(fs.existsSync(`${roots.activityDbPath}-journal`), true);
+  // The uncommitted transaction is rolled back; the next locked append
+  // recovers the journal and proceeds from generation 0.
+  const res = activityAppend.runExclusiveActivityAppend(
+    Object.assign({ opts, bootId: 'boot-y' }, appendArgs(roots, { operationId: OP_D }))
+  );
+  assert.equal(res.row.generation, 1);
+  assert.equal(fs.existsSync(`${roots.activityDbPath}-journal`), false);
+  assert.equal(readExternalHead(roots).generation, 1);
+});
+
+test('one-ahead recovery verifies the predecessor equals the external head (tampered head blocks)', () => {
+  const { opts, roots } = initializedRoots();
+  activityAppend.runExclusiveActivityAppend(Object.assign({ opts, bootId: 'boot-x' }, appendArgs(roots)));
+  // Crash the next append after commit: DB at 2, external head at 1.
+  const childScript = `
+    const activityAppend = require(${JSON.stringify(ACTIVITY_APPEND_PATH)});
+    activityAppend.runExclusiveActivityAppend(${JSON.stringify(
+      Object.assign(
+        { opts, bootId: 'boot-x', crashAfter: 'append_db_commit' },
+        appendArgs(pathsMod.resolveRoots(opts), { operationId: OP_D, createdAt: '2026-07-16T00:00:02.000Z' })
+      )
+    )});
+  `;
+  const child = cp.spawnSync(process.execPath, ['-e', childScript]);
+  assert.equal(child.status, 137);
+  // Tamper the external head's entrySha256 (shape stays valid).
+  const tampered = readExternalHead(roots);
+  tampered.entrySha256 = 'f'.repeat(64);
+  fs.writeFileSync(roots.activityHeadPath, JSON.stringify(tampered));
+  assert.throws(() => activityAppend.reconcileExternalActivityHead(roots, {}), (err) =>
+    ['activity_external_head_predecessor_mismatch', 'activity_external_head_hash_mismatch'].includes(err.code)
+  );
+});
+
+test('one-ahead recovery recomputes that one row: a corrupted pending row blocks', () => {
+  const { opts, roots } = initializedRoots();
+  const childScript = `
+    const activityAppend = require(${JSON.stringify(ACTIVITY_APPEND_PATH)});
+    activityAppend.runExclusiveActivityAppend(${JSON.stringify(
+      Object.assign({ opts, bootId: 'boot-x', crashAfter: 'append_db_commit' }, appendArgs(pathsMod.resolveRoots(opts)))
+    )});
+  `;
+  const child = cp.spawnSync(process.execPath, ['-e', childScript]);
+  assert.equal(child.status, 137);
+  // Corrupt the committed-but-unpublished row's stored kind so its stored
+  // entry hash no longer matches its canonical bytes. The pending row IS
+  // the database head row, so the line-339 "recomputes that one row" step
+  // is revalidateHead's canonical-bytes recompute, which blocks with
+  // activity_append_head_invalid before any head is published.
+  const { DatabaseSync } = require('node:sqlite');
+  const rw = new DatabaseSync(roots.activityDbPath);
+  rw.prepare("UPDATE activity_chain SET kind='ACK_TRANSPORT_MUTATION' WHERE generation=1").run();
+  rw.close();
+  assert.throws(() => activityAppend.reconcileExternalActivityHead(roots, {}), { code: 'activity_append_head_invalid' });
+});
+
+test('a gap larger than one between DB and external head blocks (no multi-step catch-up)', () => {
+  const { opts, roots } = initializedRoots();
+  activityAppend.runExclusiveActivityAppend(Object.assign({ opts, bootId: 'boot-x' }, appendArgs(roots)));
+  activityAppend.runExclusiveActivityAppend(
+    Object.assign({ opts, bootId: 'boot-x' }, appendArgs(roots, { operationId: OP_D, createdAt: '2026-07-16T00:00:02.000Z' }))
+  );
+  // Rewind the external head to generation 0 (the genesis head content).
+  const genesisCheckpoint = JSON.parse(fs.readFileSync(path.join(roots.checkpointsDir, '0000000000000000.json'), 'utf8'));
+  const dbRo = activityDb.openReadOnly(roots.activityDbPath);
+  const genesis = dbRo.prepare('SELECT * FROM activity_chain WHERE generation=0').get();
+  dbRo.close();
+  fs.writeFileSync(
+    roots.activityHeadPath,
+    JSON.stringify({
+      format: 1,
+      generation: 0,
+      entrySha256: genesis.entry_sha256,
+      checkpointGeneration: 0,
+      checkpointSha256: codecs.sha256Hex(codecs.canonicalJson(genesisCheckpoint)),
+    })
+  );
+  assert.throws(() => activityAppend.reconcileExternalActivityHead(roots, {}), { code: 'activity_head_gap_too_large' });
+  assert.throws(() => loadMod.verifyActivityRoots(roots, {}), { code: 'activity_head_gap_too_large' });
+});
+
+test('an external head ahead of the database blocks the append path', () => {
+  const { opts, roots } = initializedRoots();
+  activityAppend.runExclusiveActivityAppend(Object.assign({ opts, bootId: 'boot-x' }, appendArgs(roots)));
+  const head = readExternalHead(roots);
+  head.generation = 5;
+  fs.writeFileSync(roots.activityHeadPath, JSON.stringify(head));
+  assert.throws(() => activityAppend.reconcileExternalActivityHead(roots, {}), { code: 'activity_database_rollback' });
+  assert.throws(
+    () => activityAppend.runExclusiveActivityAppend(Object.assign({ opts, bootId: 'boot-x' }, appendArgs(roots, { operationId: OP_D }))),
+    { code: 'activity_database_rollback' }
+  );
+});
+
+test('loadProtocolState repair completes a one-ahead external head with predecessor verification', () => {
+  const { opts, roots } = initializedRoots();
+  const childScript = `
+    const activityAppend = require(${JSON.stringify(ACTIVITY_APPEND_PATH)});
+    activityAppend.runExclusiveActivityAppend(${JSON.stringify(
+      Object.assign({ opts, bootId: 'boot-x', crashAfter: 'append_db_commit' }, appendArgs(pathsMod.resolveRoots(opts)))
+    )});
+  `;
+  const child = cp.spawnSync(process.execPath, ['-e', childScript]);
+  assert.equal(child.status, 137);
+  const loaded = loadMod.loadProtocolState(Object.assign({}, opts, { repair: true }));
+  assert.equal(loaded.initialized, true);
+  assert.equal(loaded.repaired, true);
+  assert.equal(readExternalHead(roots).generation, 1);
+});
+
+test('the witnessed append path locks both activity roots (live same-boot owner blocks)', () => {
+  const { opts, roots } = initializedRoots();
+  const held = locksMod.acquireActivityRootLocks(roots, { operationId: OP_C, sourceKind: 'test' }, { bootId: 'boot-x' });
+  // both activity lock files exist, in the fixed order subset
+  assert.deepEqual(held.lockPaths, [
+    path.join(roots.activityHeadWitnessRoot, 'lock.json'),
+    path.join(roots.activityWitnessRoot, 'lock.json'),
+  ]);
+  assert.throws(
+    () => activityAppend.runExclusiveActivityAppend(Object.assign({ opts, bootId: 'boot-x' }, appendArgs(roots, { operationId: OP_D }))),
+    { code: 'lock_live_same_boot_owner' }
+  );
+  held.release();
+});
+
+test('a held capability-root lock does not block the activity-only append path', () => {
+  const { opts, roots } = initializedRoots();
+  // Simulate another live operation holding ONLY the capability root lock.
+  fs.writeFileSync(
+    path.join(roots.capabilityRoot, 'lock.json'),
+    JSON.stringify({ format: 1, pid: process.pid, bootId: 'boot-x', operationId: OP_C, sourceKind: 'test', sourceAuthority: null, headIdentities: {}, typedReceiptSha256: null, createdAt: CREATED_AT }),
+    { mode: 0o600 }
+  );
+  const res = activityAppend.runExclusiveActivityAppend(
+    Object.assign({ opts, bootId: 'boot-x' }, appendArgs(roots, { operationId: OP_D }))
+  );
+  assert.equal(res.row.generation, 1);
+  fs.unlinkSync(path.join(roots.capabilityRoot, 'lock.json'));
+});
