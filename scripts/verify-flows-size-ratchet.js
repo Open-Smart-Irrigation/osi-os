@@ -11,12 +11,12 @@
 // docs/superpowers/plans/2026-07-15-refactor-repair-program.md, Task A0.
 //
 // The fix: every ceiling is a committed, reviewed ABSOLUTE maximum, not a delta.
-//   1. Each "owned" function node (one with an entry in the allowances file) may not
-//      exceed its committed max_chars, ever - regardless of git history.
+//   1. Every function node must have an allowances entry and may not exceed its
+//      committed max_chars, ever - regardless of git history.
 //   2. Each maintained profile's total embedded function JS may not exceed the
 //      committed max_total.
-// A node with no allowances entry has no per-node ceiling of its own; it is still
-// bounded indirectly by max_total. Raising a ceiling is a reviewed, explicit edit to
+// Missing or unused allowances fail closed, so the measured node-id set and committed
+// allowance-id set are exact equals. Raising a ceiling is a reviewed, explicit edit to
 // the allowances file - there is no --write-baseline/--baseline autoregeneration path.
 const fs = require('node:fs');
 const path = require('node:path');
@@ -196,6 +196,11 @@ function loadAllowances(allowancesPath) {
 function checkSurface(rel, flows, allowances) {
   const failures = [];
   const { sizes, total } = measure(flows);
+  for (const id of sizes.keys()) {
+    if (!Object.prototype.hasOwnProperty.call(allowances.node, id)) {
+      failures.push(rel + ': function node ' + id + ' is missing a committed ceiling; add an explicit node_allowances entry with its exact reviewed max_chars and reason');
+    }
+  }
   for (const [id, entry] of Object.entries(allowances.node)) {
     const found = sizes.get(id);
     if (!found) {
@@ -226,7 +231,7 @@ function run() {
     for (const f of failures) console.error('FAIL ' + f);
     process.exit(1);
   }
-  console.log('verify-flows-size-ratchet: OK (all owned-node and max_total ceilings held)');
+  console.log('verify-flows-size-ratchet: OK (exact node coverage and all max_chars/max_total ceilings held)');
 }
 
 if (require.main === module) {

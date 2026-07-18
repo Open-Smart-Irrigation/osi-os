@@ -1,7 +1,7 @@
 'use strict';
 // Tests for the absolute-ceiling flow-size ratchet (refactor-program A0 commit 3).
-// The ratchet no longer diffs against a moving git base-ref: every owned function
-// node carries a committed, reviewed absolute `max_chars` ceiling, and each profile
+// The ratchet no longer diffs against a moving git base-ref: every function node
+// carries a committed, reviewed absolute `max_chars` ceiling, and each profile
 // carries a committed absolute `max_total`. Both are hard maximums measured directly
 // against the current tree - no git, no baseline doc, no deltas.
 const test = require('node:test');
@@ -36,8 +36,7 @@ function run(dir, extraArgs = []) {
 
 const fn = (id, func, extra = {}) => ({ id, type: 'function', name: id, func, ...extra });
 
-// A tiny fixture flow: one unowned node the ratchet never looks at individually,
-// and one owned node whose ceiling is exercised by the tests below.
+// A tiny fixture flow with exact per-node coverage.
 function fixtureNodes(ownedFunc) {
   return [fn('unowned', 'return msg;'), fn('owned', ownedFunc)];
 }
@@ -45,6 +44,11 @@ function fixtureNodes(ownedFunc) {
 function exactAllowances(ownedChars, total, overrides = {}) {
   return {
     node_allowances: {
+      unowned: {
+        max_chars: 'return msg;'.length,
+        reason: 'test: exact measured ceiling',
+        ...overrides.unowned,
+      },
       owned: { max_chars: ownedChars, reason: 'test: exact measured ceiling', ...overrides.owned },
     },
     total_allowance: { max_total: total, reason: 'test: exact measured total ceiling', ...overrides.total },
@@ -80,19 +84,70 @@ test('FAIL when an owned node exceeds its committed max_chars by a single byte, 
   assert.equal(fixed.status, 0, fixed.stderr || fixed.stdout);
 });
 
+test('FAIL when a previously unlisted node grows by one while another node shrinks by one and max_total is unchanged', () => {
+  const dir = tmpDir();
+  const nodes = [fn('previously-unlisted', 'x'.repeat(101)), fn('offset', 'y'.repeat(99))];
+  writeFlows(dir, nodes);
+  writeAllowances(dir, {
+    node_allowances: {
+      offset: { max_chars: 100, reason: 'test: offset node baseline' },
+    },
+    total_allowance: { max_total: 200, reason: 'test: aggregate remains at baseline' },
+  });
+
+  const r = run(dir);
+  assert.notEqual(r.status, 0, r.stdout);
+  assert.match(r.stderr, /previously-unlisted/);
+  assert.match(r.stderr, /missing.*ceiling|ceiling.*missing/);
+  assert.doesNotMatch(r.stderr, /total embedded JS/);
+});
+
+test('FAIL when a new small function node has no explicit ceiling despite max_total headroom', () => {
+  const dir = tmpDir();
+  const nodes = [...fixtureNodes('x'.repeat(200)), fn('new-small', 'return 1;')];
+  writeFlows(dir, nodes);
+  writeAllowances(dir, exactAllowances(200, 100000));
+
+  const r = run(dir);
+  assert.notEqual(r.status, 0, r.stdout);
+  assert.match(r.stderr, /new-small/);
+  assert.match(r.stderr, /missing.*ceiling|ceiling.*missing/);
+});
+
+test('FAIL when an existing measured function node is omitted from node_allowances', () => {
+  const dir = tmpDir();
+  const nodes = fixtureNodes('x'.repeat(200));
+  writeFlows(dir, nodes);
+  writeAllowances(dir, {
+    node_allowances: {
+      owned: { max_chars: 200, reason: 'test: owned node baseline' },
+    },
+    total_allowance: {
+      max_total: nodes.reduce((sum, node) => sum + node.func.length, 0),
+      reason: 'test: exact measured total ceiling',
+    },
+  });
+
+  const r = run(dir);
+  assert.notEqual(r.status, 0, r.stdout);
+  assert.match(r.stderr, /unowned/);
+  assert.match(r.stderr, /missing.*ceiling|ceiling.*missing/);
+});
+
 test('max_total is enforced independently of any per-node ceiling', () => {
   const dir = tmpDir();
-  // "owned" stays within its own generous per-node ceiling, but the profile total
-  // (owned + unowned, which carries no ceiling of its own) exceeds max_total.
+  // Both nodes stay within their ceilings, but the profile total exceeds max_total.
   const nodes = [fn('unowned', 'y'.repeat(500)), fn('owned', 'x'.repeat(50))];
   writeFlows(dir, nodes);
-  writeAllowances(dir, exactAllowances(1000, 500)); // node ceiling generous; total too tight
+  const allowances = exactAllowances(1000, 500, { unowned: { max_chars: 500 } });
+  writeAllowances(dir, allowances); // node ceilings generous; total too tight
   const r = run(dir);
   assert.notEqual(r.status, 0, r.stdout);
   assert.match(r.stderr, /total embedded JS/);
   assert.doesNotMatch(r.stderr, /node owned/);
 
-  writeAllowances(dir, exactAllowances(1000, 550));
+  allowances.total_allowance.max_total = 550;
+  writeAllowances(dir, allowances);
   const fixed = run(dir);
   assert.equal(fixed.status, 0, fixed.stderr || fixed.stdout);
 });
@@ -207,7 +262,7 @@ test('FAIL closed on an unparsable (non-JSON) allowances file', () => {
   assert.notEqual(r.status, 0, r.stdout);
 });
 
-test('the shipped committed allowances file has no node with an entry for a node id absent from the real flows.json surfaces, and the real script passes against the real repo', () => {
+test('the shipped allowances exactly cover both real flows.json surfaces, and the real script passes against the real repo', () => {
   const r = spawnSync(process.execPath, [script], { cwd: repoRoot, encoding: 'utf8' });
   assert.equal(r.status, 0, r.stderr || r.stdout);
   assert.match(r.stdout, /verify-flows-size-ratchet: OK/);
