@@ -41,6 +41,7 @@ const {
   assertNoSymlinkComponents,
   atomicReplaceFile,
   writeExclusiveFile,
+  generationFilename,
   defaultOwnershipAdapter,
   FILE_MODE,
 } = require('./paths');
@@ -50,10 +51,16 @@ const {
   verifyFixedSchema,
   quickCheck,
   readGenesisRow,
-  readHeadRow,
   checkpointCumulativeSha256,
-  buildGenesisCheckpoint,
 } = require('./activity-db');
+const {
+  CHECKPOINT_INTERVAL,
+  MAX_RETAINED_ROWS,
+  MAX_ACTIVITY_DB_BYTES,
+  MAX_CHECKPOINT_RECEIPTS,
+  revalidateHead,
+  readExternalHeadFile,
+} = require('./activity-append');
 
 function loadError(code, message, extra) {
   return codecError(code, message, extra);
@@ -328,15 +335,48 @@ function repairCapabilityChain(roots, chainResult, { ownershipAdapter } = {}) {
   throw loadError('capability_resume_unknown_kind', 'unknown resumable kind', { resumable: chainResult.resumable });
 }
 
-// verifyActivityRoots: hot-journal recovery, schema/pragma/quick_check,
-// genesis+head row verification, and external head/checkpoint
-// verification bounded to the retained (genesis-only, in this slice)
-// segment.
-function verifyActivityRoots(roots, { ownershipAdapter, recoveryOnlyAdapter } = {}) {
+// readCheckpointReceiptByIndex: reads ONE receipt by computed filename —
+// never by directory enumeration (plan line 341: runtime verification
+// "never scans lifetime history"; capacity rule: "no checkpoint-directory
+// enumeration on runtime paths").
+function readCheckpointReceiptByIndex(roots, index, adapter, { optional } = {}) {
+  const receiptPath = path.join(roots.checkpointsDir, generationFilename(index));
+  let stat;
+  try {
+    stat = fs.lstatSync(receiptPath);
+  } catch (err) {
+    if (err.code === 'ENOENT') {
+      if (optional) return null;
+      throw loadError('activity_checkpoint_chain_broken', `checkpoint receipt ${index} is missing`, { index });
+    }
+    throw err;
+  }
+  if (stat.isSymbolicLink() || !stat.isFile()) {
+    throw loadError('chain_entry_not_regular_file', `checkpoint receipt is not a regular file: ${receiptPath}`, { path: receiptPath });
+  }
+  assertModeAndOwner({ name: path.basename(receiptPath), path: receiptPath, stat }, adapter, 'activity checkpoint');
+  const parsed = readJsonFile(receiptPath);
+  if (!parsed || parsed.format !== 1 || parsed.checkpointGeneration !== index) {
+    throw loadError('activity_checkpoint_malformed', `checkpoint receipt ${index} is malformed`, { path: receiptPath });
+  }
+  return { checkpoint: parsed, checkpointSha256: sha256Hex(canonicalJson(parsed)), path: receiptPath };
+}
+
+// verifyActivityRoots: hot-journal recovery, fixed schema/pragmas, SQLite
+// integrity, external head, LATEST checkpoint receipt + its previous
+// checkpoint link, and at most the current 4096-row segment (plan line
+// 341). It never scans lifetime history and never enumerates the
+// checkpoint directory: receipts are read by computed filename only, and
+// only the current segment's rows are hashed. Options: ownershipAdapter,
+// recoveryOnlyAdapter, maxDbBytes (injectable size bound for tests;
+// production default MAX_ACTIVITY_DB_BYTES).
+function verifyActivityRoots(roots, { ownershipAdapter, recoveryOnlyAdapter, maxDbBytes } = {}) {
   const adapter = ownershipAdapter || defaultOwnershipAdapter;
   const dbExists = fs.existsSync(roots.activityDbPath);
   const externalHeadExists = fs.existsSync(roots.activityHeadPath);
-  const checkpointsExist = fs.existsSync(roots.checkpointsDir) && listRegularEntries(roots.checkpointsDir, /^\d{16}\.json$/).length > 0;
+  // Presence probe without enumeration: receipts are never pruned, so an
+  // initialized root always has receipt 0 at its fixed filename.
+  const checkpointsExist = fs.existsSync(path.join(roots.checkpointsDir, generationFilename(0)));
 
   if (!dbExists && !externalHeadExists && !checkpointsExist) {
     return { present: false };
@@ -364,118 +404,221 @@ function verifyActivityRoots(roots, { ownershipAdapter, recoveryOnlyAdapter } = 
       path: roots.activityDbPath,
     });
   }
+  const sizeBound = Number.isFinite(maxDbBytes) ? maxDbBytes : MAX_ACTIVITY_DB_BYTES;
+  if (dbStat.size > sizeBound) {
+    throw loadError('activity_db_size_exceeded', `activity.sqlite exceeds the ${sizeBound}-byte retention bound`, { size: dbStat.size });
+  }
 
   const recovery = recoverHotJournalIfPresent({ dbPath: roots.activityDbPath, ownershipAdapter: adapter, recoveryOnlyAdapter });
 
   const db = openReadOnly(roots.activityDbPath);
-  let genesisRow;
+  let genesisRow = null;
   let headRow;
+  let stats;
+  let segmentRows;
   try {
     verifyFixedSchema(db);
     if (!quickCheck(db)) {
       throw loadError('activity_db_quick_check_failed', 'activity database failed PRAGMA quick_check');
     }
-    genesisRow = readGenesisRow(db);
-    headRow = readHeadRow(db);
-  } finally {
-    db.close();
-  }
+    // Singleton head revalidation (head matches chain max, head row's
+    // canonical hash matches) — shared with the append discipline.
+    headRow = revalidateHead(db).head;
+    stats = db.prepare('SELECT COUNT(*) AS n, MIN(generation) AS lo, MAX(generation) AS hi FROM activity_chain').get();
+    // Genesis-row deep verification only while generation 0 is retained;
+    // at scale the genesis row is pruned and the checkpoint chain carries
+    // its evidence (the immutable factory anchor binds it separately).
+    if (stats.lo === 0) {
+      genesisRow = readGenesisRow(db);
+    }
 
-  // Bounded retained-segment checkpoint verification. This slice only ever
-  // has checkpoint 0; the walk below is written to generalize (a later
-  // slice's every-4096th checkpoint still chains the same way).
-  const checkpointEntries = listRegularEntries(roots.checkpointsDir, /^\d{16}\.json$/);
-  const checkpointNumbers = checkpointEntries.map((e) => generationNumberFromFilename(e.name));
-  for (let i = 0; i < checkpointNumbers.length; i += 1) {
-    if (checkpointNumbers[i] !== i) {
-      throw loadError('activity_checkpoint_gap', 'activity checkpoint numbering has a gap or does not start at 0');
+    // Retained-window bounds (plan line 341: "at most 8193 rows and 32 MiB").
+    if (stats.n > MAX_RETAINED_ROWS) {
+      throw loadError('activity_retained_rows_exceeded', `activity database retains ${stats.n} rows > ${MAX_RETAINED_ROWS}`, { rows: stats.n });
     }
-  }
-  let previousCumulative = null;
-  let previousCheckpointHash = null;
-  const checkpoints = [];
-  for (const entry of checkpointEntries) {
-    assertModeAndOwner(entry, adapter, 'activity checkpoint');
-    const parsed = readJsonFile(entry.path);
-    if (!parsed || parsed.format !== 1 || parsed.checkpointGeneration !== generationNumberFromFilename(entry.name)) {
-      throw loadError('activity_checkpoint_malformed', `checkpoint ${entry.name} is malformed`);
+    const kDb = headRow.checkpoint_generation;
+    if (!Number.isSafeInteger(kDb) || kDb < 0) {
+      throw loadError('activity_head_row_invalid', 'activity_head checkpoint_generation is not a non-negative safe integer');
     }
-    if (parsed.checkpointGeneration === 0) {
-      if (parsed.previousCheckpointSha256 !== null) {
+    if (kDb > MAX_CHECKPOINT_RECEIPTS) {
+      throw loadError('activity_checkpoint_ceiling_exceeded', `activity head references checkpoint ${kDb} beyond the ${MAX_CHECKPOINT_RECEIPTS}-receipt hard ceiling`);
+    }
+    if (headRow.generation >= (kDb + 1) * CHECKPOINT_INTERVAL) {
+      throw loadError('activity_checkpoint_gap', 'the activity head has run past a 4096 boundary without a checkpoint');
+    }
+    const pruneFloor = Math.max(0, (kDb - 2) * CHECKPOINT_INTERVAL);
+    if (stats.lo !== null && stats.lo < pruneFloor) {
+      throw loadError('activity_retained_window_violation', 'activity database retains rows older than the prune window permits', {
+        lo: stats.lo,
+        pruneFloor,
+      });
+    }
+
+    // External head (line 339): the database may be exactly one generation
+    // ahead after a crash; anything else blocks.
+    const externalHead = readExternalHeadFile(roots.activityHeadPath);
+    if (externalHead === null) {
+      if (headRow.generation === 0 && genesisRow) {
+        return {
+          present: true,
+          recovery,
+          genesisRow,
+          headRow,
+          externalHead: null,
+          latestCheckpoint: null,
+          previousCheckpoint: null,
+          rowStats: stats,
+          resumable: { kind: 'EXTERNAL_HEAD_PUBLICATION', targetGeneration: 0 },
+        };
+      }
+      throw loadError('activity_external_head_missing', 'activity database has committed generations but the external head witness is missing');
+    }
+
+    if (externalHead.generation > headRow.generation) {
+      throw loadError('activity_database_rollback', 'activity database generation is behind the external head witness', {
+        dbGeneration: headRow.generation,
+        externalHeadGeneration: externalHead.generation,
+      });
+    }
+    if (headRow.generation - externalHead.generation > 1) {
+      throw loadError('activity_head_gap_too_large', 'activity database is more than one generation ahead of the external head witness', {
+        dbGeneration: headRow.generation,
+        externalHeadGeneration: externalHead.generation,
+      });
+    }
+    if (externalHead.entrySha256 !== headRow.entry_sha256 && headRow.generation === externalHead.generation) {
+      throw loadError('activity_external_head_hash_mismatch', 'external head entrySha256 does not match the committed database row');
+    }
+
+    const kExt = externalHead.checkpointGeneration;
+    if (kDb < kExt) {
+      throw loadError('activity_database_rollback', 'activity database checkpoint binding is behind the external head witness', {
+        dbCheckpointGeneration: kDb,
+        externalCheckpointGeneration: kExt,
+      });
+    }
+    if (kDb > kExt + 1) {
+      throw loadError('activity_head_gap_too_large', 'activity database checkpoint binding is more than one checkpoint ahead of the external head witness', {
+        dbCheckpointGeneration: kDb,
+        externalCheckpointGeneration: kExt,
+      });
+    }
+
+    // Latest PUBLISHED checkpoint receipt + previous checkpoint link. Read
+    // by computed filename; a boundary crash may additionally leave the
+    // database bound to receipt kExt+1 (rebuilt during reconcile), which
+    // is part of the resumable state, not a verification target here.
+    const latestCheckpoint = readCheckpointReceiptByIndex(roots, kExt, adapter, {});
+    if (latestCheckpoint.checkpointSha256 !== externalHead.checkpointSha256) {
+      throw loadError('activity_external_head_checkpoint_mismatch', 'external head checkpointSha256 does not match the on-disk checkpoint receipt');
+    }
+    if (kDb === kExt && latestCheckpoint.checkpointSha256 !== headRow.checkpoint_sha256) {
+      throw loadError('activity_external_head_checkpoint_mismatch', 'database head checkpoint binding does not match the on-disk checkpoint receipt');
+    }
+    let previousCheckpoint = null;
+    if (kExt === 0) {
+      if (latestCheckpoint.checkpoint.previousCheckpointSha256 !== null) {
         throw loadError('activity_checkpoint_fork', 'checkpoint 0 must have null previousCheckpointSha256');
       }
-    } else if (parsed.previousCheckpointSha256 !== previousCheckpointHash) {
-      throw loadError('activity_checkpoint_fork', `checkpoint ${entry.name} previousCheckpointSha256 does not match its actual predecessor`);
+      // Genesis receipt: its cumulative hash is recomputable while the
+      // genesis row is retained (it always is at kExt === 0).
+      if (genesisRow) {
+        const expectedCumulative = checkpointCumulativeSha256(null, genesisRow.entry_sha256);
+        if (latestCheckpoint.checkpoint.cumulativeSha256 !== expectedCumulative || latestCheckpoint.checkpoint.entrySha256 !== genesisRow.entry_sha256) {
+          throw loadError('activity_checkpoint_hash_mismatch', 'checkpoint 0 does not match the committed genesis row');
+        }
+      }
+    } else {
+      previousCheckpoint = readCheckpointReceiptByIndex(roots, kExt - 1, adapter, {});
+      if (latestCheckpoint.checkpoint.previousCheckpointSha256 !== previousCheckpoint.checkpointSha256) {
+        throw loadError('activity_checkpoint_fork', `checkpoint ${kExt} previousCheckpointSha256 does not match its actual predecessor`);
+      }
     }
-    const expectedCumulative = checkpointCumulativeSha256(previousCumulative, parsed.entrySha256);
-    if (expectedCumulative !== parsed.cumulativeSha256) {
-      throw loadError('activity_checkpoint_hash_mismatch', `checkpoint ${entry.name} cumulativeSha256 does not match its chain`);
+    // Orphan newer receipt probe (single computed-filename existence check,
+    // not enumeration): a receipt newer than everything the database head
+    // binds means the published head was replaced with an older valid
+    // pointer ("external-head-only rollback").
+    if (fs.existsSync(path.join(roots.checkpointsDir, generationFilename(kDb + 1)))) {
+      throw loadError('activity_external_head_rollback', 'a newer checkpoint exists on disk than the one referenced by the external head');
     }
-    const checkpointSha256 = sha256Hex(canonicalJson(parsed));
-    checkpoints.push({ checkpoint: parsed, checkpointSha256, path: entry.path });
-    previousCumulative = expectedCumulative;
-    previousCheckpointHash = checkpointSha256;
-  }
 
-  // Activity-database-vs-external-head reconciliation (line 339): the
-  // database may be exactly one generation ahead of the external head
-  // after a crash; anything else blocks.
-  const externalHead = readJsonFile(roots.activityHeadPath);
-  if (externalHead === null) {
-    if (headRow.generation === 0 && genesisRow) {
-      return {
-        present: true,
-        recovery,
-        genesisRow,
-        headRow,
-        checkpoints,
-        externalHead: null,
-        resumable: { kind: 'EXTERNAL_HEAD_PUBLICATION', targetGeneration: 0 },
-      };
+    // Current-segment verification (at most 4096+1 rows): anchored at the
+    // latest PUBLISHED receipt's boundary row, chained forward to the head,
+    // with every canonical row hash recomputed and the rolling segment
+    // accumulator + segment count cross-checked against the head row.
+    const segmentStart = kExt * CHECKPOINT_INTERVAL;
+    segmentRows = db.prepare('SELECT * FROM activity_chain WHERE generation >= ? ORDER BY generation').all(segmentStart);
+    if (segmentRows.length === 0 || segmentRows[0].generation !== segmentStart) {
+      throw loadError('activity_checkpoint_boundary_row_mismatch', 'the latest checkpoint boundary row is not retained', { segmentStart });
     }
-    throw loadError('activity_external_head_missing', 'activity database has committed generations but the external head witness is missing');
-  }
+    if (segmentRows[0].entry_sha256 !== latestCheckpoint.checkpoint.entrySha256) {
+      throw loadError('activity_checkpoint_boundary_row_mismatch', 'the checkpoint boundary row does not match the receipt entrySha256', {
+        segmentStart,
+      });
+    }
+    let accumulator = latestCheckpoint.checkpoint.cumulativeSha256;
+    for (let i = 0; i < segmentRows.length; i += 1) {
+      const row = segmentRows[i];
+      if (i > 0) {
+        const prev = segmentRows[i - 1];
+        if (row.generation !== prev.generation + 1 || row.previous_generation !== prev.generation || row.previous_sha256 !== prev.entry_sha256) {
+          throw loadError('activity_segment_chain_broken', `activity segment chain link broken at generation ${row.generation}`);
+        }
+      }
+      // Recompute every segment row's canonical hash (the boundary row's
+      // stored hash is additionally pinned by the receipt's entrySha256).
+      const recomputed = sha256Hex(
+        canonicalJson({
+          generation: row.generation,
+          previousGeneration: row.previous_generation,
+          previousSha256: row.previous_sha256,
+          operationId: row.operation_id,
+          kind: row.kind,
+          createdAt: row.created_at,
+          principalKind: row.principal_kind,
+          principalSha256: row.principal_sha256,
+          commandKeySha256: row.command_key_sha256,
+          adapterId: row.adapter_id,
+          activitySha256: row.activity_sha256,
+        })
+      );
+      if (recomputed !== row.entry_sha256) {
+        throw loadError('activity_segment_chain_broken', `activity segment row ${row.generation} does not match its canonical bytes`);
+      }
+      if (i > 0) {
+        accumulator = checkpointCumulativeSha256(accumulator, row.entry_sha256);
+      }
+    }
+    if (segmentRows[segmentRows.length - 1].generation !== headRow.generation) {
+      throw loadError('activity_segment_chain_broken', 'the activity segment does not end at the head generation');
+    }
+    if (accumulator !== headRow.segment_accumulator_sha256) {
+      throw loadError('activity_segment_accumulator_mismatch', 'the rolling segment accumulator does not match the verified segment rows');
+    }
+    const expectedSegmentCount = headRow.generation - kDb * CHECKPOINT_INTERVAL + 1;
+    if (headRow.segment_count !== expectedSegmentCount) {
+      throw loadError('activity_segment_count_mismatch', `activity head segment_count ${headRow.segment_count} !== expected ${expectedSegmentCount}`);
+    }
 
-  if (externalHead.generation > headRow.generation) {
-    throw loadError('activity_database_rollback', 'activity database generation is behind the external head witness', {
-      dbGeneration: headRow.generation,
-      externalHeadGeneration: externalHead.generation,
-    });
-  }
-  if (headRow.generation - externalHead.generation > 1) {
-    throw loadError('activity_head_gap_too_large', 'activity database is more than one generation ahead of the external head witness', {
-      dbGeneration: headRow.generation,
-      externalHeadGeneration: externalHead.generation,
-    });
-  }
-  if (externalHead.entrySha256 !== headRow.entry_sha256 && headRow.generation === externalHead.generation) {
-    throw loadError('activity_external_head_hash_mismatch', 'external head entrySha256 does not match the committed database row');
-  }
-  const matchingCheckpoint = checkpoints.find((c) => c.checkpoint.checkpointGeneration === externalHead.checkpointGeneration);
-  if (!matchingCheckpoint || matchingCheckpoint.checkpointSha256 !== externalHead.checkpointSha256) {
-    throw loadError('activity_external_head_checkpoint_mismatch', 'external head checkpointSha256 does not match any on-disk checkpoint');
-  }
-  // Reject an orphan checkpoint newer than what the external head claims —
-  // an "external-head-only rollback" (a newer checkpoint exists but the
-  // published head was replaced with an older valid pointer).
-  const maxCheckpointGeneration = checkpoints.length > 0 ? checkpoints[checkpoints.length - 1].checkpoint.checkpointGeneration : -1;
-  if (maxCheckpointGeneration > externalHead.checkpointGeneration) {
-    throw loadError('activity_external_head_rollback', 'a newer checkpoint exists on disk than the one referenced by the external head');
-  }
+    const resumable =
+      headRow.generation === externalHead.generation + 1
+        ? { kind: 'EXTERNAL_HEAD_PUBLICATION', targetGeneration: headRow.generation }
+        : null;
 
-  if (headRow.generation === externalHead.generation + 1) {
     return {
       present: true,
       recovery,
       genesisRow,
       headRow,
-      checkpoints,
       externalHead,
-      resumable: { kind: 'EXTERNAL_HEAD_PUBLICATION', targetGeneration: headRow.generation },
+      latestCheckpoint,
+      previousCheckpoint,
+      rowStats: stats,
+      resumable,
     };
+  } finally {
+    db.close();
   }
-
-  return { present: true, recovery, genesisRow, headRow, checkpoints, externalHead, resumable: null };
 }
 
 function repairActivityRoots(roots, activityResult, { ownershipAdapter } = {}) {

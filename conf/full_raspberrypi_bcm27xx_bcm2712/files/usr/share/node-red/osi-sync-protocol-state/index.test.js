@@ -2254,3 +2254,418 @@ test('the module-level runWitnessedOperation surface exists and fails closed wit
   assert.equal(typeof mod.runWitnessedOperation, 'function');
   assert.throws(() => mod.runWitnessedOperation({}, witnessedDescriptor(), {}), { code: 'witnessed_adapter_not_registered' });
 });
+
+// ===========================================================================
+// checkpoints, prune, ceilings, bounded runtime verification, full audit
+// (plan line 341)
+// ===========================================================================
+
+const INTERVAL = activityAppend.CHECKPOINT_INTERVAL; // 4096
+
+// synthesizeActivityState: builds an initialized root set whose activity
+// ledger represents a chain currently at checkpoint index `k` (boundary
+// generation B = k*INTERVAL) plus `offset` post-boundary appends, retaining
+// exactly the rows the prune discipline would have left (from (k-1)*INTERVAL
+// through B+offset). Rows in the retained window are REAL, internally
+// consistent entries (canonical hashes, chain links, rolling accumulator);
+// the pruned prehistory is represented only by a fabricated seed hash for
+// the first retained row's previousSha256 / accumulator — exactly the
+// information a genuinely pruned database would carry. Receipts are written
+// for the indices in `receiptIndices` (default: all of 0..k, with real
+// previous-link hashes; intermediate receipts carry fabricated entry/
+// cumulative hashes since their segment rows are pruned). This is the
+// documented synthesis method for the capacity tests: state is constructed
+// directly rather than via a million live appends.
+function synthesizeActivityState(baseOpts, { checkpointIndex, offset, receiptIndices }) {
+  const k = checkpointIndex;
+  const r = offset;
+  assert.ok(k >= 1);
+  const { opts } = makeRoots();
+  Object.assign(opts, baseOpts || {});
+  initMod.initializeFourRoots(Object.assign({}, opts, { operationId: OP_A, createdAt: CREATED_AT }));
+  const roots = pathsMod.resolveRoots(opts);
+  const B = k * INTERVAL;
+  const startGen = (k - 1) * INTERVAL;
+  const { DatabaseSync } = require('node:sqlite');
+  const db = new DatabaseSync(roots.activityDbPath);
+  db.exec('PRAGMA synchronous=FULL;');
+
+  const genesis = db.prepare('SELECT * FROM activity_chain WHERE generation=0').get();
+  const receipt0 = JSON.parse(fs.readFileSync(path.join(roots.checkpointsDir, pathsMod.generationFilename(0)), 'utf8'));
+
+  // Row synthesis: chain forward from either the real genesis (k===1) or a
+  // fabricated pruned-prehistory seed (k>=2).
+  let prevSha;
+  let acc;
+  let firstSynthGen;
+  if (k === 1) {
+    prevSha = genesis.entry_sha256;
+    acc = activityDb.checkpointCumulativeSha256(null, genesis.entry_sha256); // real acc_0
+    firstSynthGen = 1;
+  } else {
+    prevSha = '5'.repeat(64); // pruned predecessor's entry hash (fabricated seed)
+    acc = '6'.repeat(64); // accumulator value before the first retained row (fabricated seed)
+    firstSynthGen = startGen;
+    db.exec('DELETE FROM activity_chain'); // genesis row is long pruned at this scale
+  }
+
+  const insert = db.prepare(
+    `INSERT INTO activity_chain
+       (generation, previous_generation, previous_sha256, operation_id, kind, created_at,
+        principal_kind, principal_sha256, command_key_sha256, adapter_id, activity_sha256, entry_sha256)
+     VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`
+  );
+  const rowFacts = new Map(); // generation -> { entrySha256, acc }
+  let boundaryAcc = null;
+  let prevBoundaryEntry = null;
+  let prevBoundaryAcc = null;
+  db.exec('BEGIN IMMEDIATE');
+  for (let g = firstSynthGen; g <= B + r; g += 1) {
+    const entry = activityAppend.buildActivityEntry({
+      generation: g,
+      previousGeneration: g - 1,
+      previousSha256: prevSha,
+      operationId: `synth-op-${g}`,
+      kind: activityAppend.ACTIVITY_KINDS[g % 3],
+      createdAt: APPEND_AT,
+      principalKind: 'local',
+      principalSha256: 'b'.repeat(64),
+      commandKeySha256: 'c'.repeat(64),
+      adapterId: 'db.command-lifecycle',
+      activitySha256: 'd'.repeat(64),
+    });
+    insert.run(
+      entry.generation, entry.previousGeneration, entry.previousSha256, entry.operationId, entry.kind,
+      entry.createdAt, entry.principalKind, entry.principalSha256, entry.commandKeySha256, entry.adapterId,
+      entry.activitySha256, entry.entrySha256
+    );
+    acc = activityDb.checkpointCumulativeSha256(acc, entry.entrySha256);
+    prevSha = entry.entrySha256;
+    if (g === startGen) { prevBoundaryEntry = entry.entrySha256; prevBoundaryAcc = acc; }
+    if (g === B) { boundaryAcc = acc; }
+    rowFacts.set(g, { entrySha256: entry.entrySha256, acc });
+  }
+  const headEntrySha = rowFacts.get(B + r).entrySha256;
+  const headAcc = rowFacts.get(B + r).acc;
+
+  // Receipts. Real previous-link hashes throughout; entry/cumulative hashes
+  // are real for indices whose boundary rows are retained (k-1 when k>=2
+  // only if startGen row exists — it does; k always), fabricated otherwise.
+  const wanted = receiptIndices || Array.from({ length: k }, (_v, i) => i + 1);
+  const receiptByIndex = new Map([[0, receipt0]]);
+  let prevReceipt = receipt0;
+  let prevReceiptSha = codecs.canonicalSha256(receipt0);
+  for (let i = 1; i <= k; i += 1) {
+    let entrySha256;
+    let cumulativeSha256;
+    if (i === k) {
+      entrySha256 = rowFacts.get(B).entrySha256;
+      cumulativeSha256 = boundaryAcc;
+    } else if (i === k - 1 && k >= 2) {
+      entrySha256 = prevBoundaryEntry;
+      cumulativeSha256 = prevBoundaryAcc;
+    } else {
+      entrySha256 = codecs.sha256Hex(`fabricated-entry-${i}`);
+      cumulativeSha256 = codecs.sha256Hex(`fabricated-cumulative-${i}`);
+    }
+    const receipt = {
+      format: 1,
+      checkpointGeneration: i,
+      entrySha256,
+      previousCheckpointSha256: prevReceiptSha,
+      cumulativeSha256,
+      createdAt: APPEND_AT,
+    };
+    receiptByIndex.set(i, receipt);
+    if (wanted.includes(i)) {
+      pathsMod.writeExclusiveFile(
+        path.join(roots.checkpointsDir, pathsMod.generationFilename(i)),
+        Buffer.from(codecs.canonicalJson(receipt), 'utf8'),
+        pathsMod.defaultOwnershipAdapter
+      );
+    }
+    prevReceipt = receipt;
+    prevReceiptSha = codecs.canonicalSha256(receipt);
+  }
+  const latestReceiptSha = codecs.canonicalSha256(receiptByIndex.get(k));
+
+  db.prepare(
+    `UPDATE activity_head SET generation=?, entry_sha256=?, checkpoint_generation=?, checkpoint_sha256=?, segment_count=?, segment_accumulator_sha256=? WHERE id=1`
+  ).run(B + r, headEntrySha, k, latestReceiptSha, r + 1, headAcc);
+  db.exec('COMMIT');
+  db.close();
+
+  const externalHead = { format: 1, generation: B + r, entrySha256: headEntrySha, checkpointGeneration: k, checkpointSha256: latestReceiptSha };
+  fs.writeFileSync(roots.activityHeadPath, codecs.canonicalJson(externalHead), { mode: 0o600 });
+
+  return { opts, roots, k, B, r, headGeneration: B + r, rowFacts, receiptByIndex, latestReceiptSha, externalHead };
+}
+
+function countRows(roots) {
+  const ro = activityDb.openReadOnly(roots.activityDbPath);
+  const res = ro.prepare('SELECT COUNT(*) AS n, MIN(generation) AS lo, MAX(generation) AS hi FROM activity_chain').get();
+  ro.close();
+  return res;
+}
+
+test('crossing a 4096 boundary writes the exact deterministic receipt, rebinds the head, and prunes', () => {
+  const synth = synthesizeActivityState(null, { checkpointIndex: 1, offset: INTERVAL - 1 }); // head at 8191
+  const { opts, roots } = synth;
+  // sanity: the synthesized state verifies cleanly under the bounded verifier
+  const pre = loadMod.verifyActivityRoots(roots, {});
+  assert.equal(pre.resumable, null);
+
+  const receipt1Sha = codecs.canonicalSha256(synth.receiptByIndex.get(1));
+  const preAcc = synth.rowFacts.get(synth.headGeneration).acc;
+
+  const res = activityAppend.runExclusiveActivityAppend(
+    Object.assign({ opts, bootId: 'boot-x' }, appendArgs(roots, { operationId: 'boundary-op-8192', createdAt: '2026-07-16T00:00:05.000Z' }))
+  );
+  assert.equal(res.row.generation, 2 * INTERVAL); // 8192
+
+  // Receipt 2 exists with the exact deterministic content.
+  const receipt2Path = path.join(roots.checkpointsDir, pathsMod.generationFilename(2));
+  assert.equal(fs.existsSync(receipt2Path), true);
+  const receipt2 = JSON.parse(fs.readFileSync(receipt2Path, 'utf8'));
+  assert.deepEqual(receipt2, {
+    format: 1,
+    checkpointGeneration: 2,
+    entrySha256: res.row.entry_sha256,
+    previousCheckpointSha256: receipt1Sha,
+    cumulativeSha256: activityDb.checkpointCumulativeSha256(preAcc, res.row.entry_sha256),
+    createdAt: '2026-07-16T00:00:05.000Z',
+  });
+
+  // The DB head binds the new receipt and restarts the segment.
+  assert.equal(res.headRow.checkpoint_generation, 2);
+  assert.equal(res.headRow.checkpoint_sha256, codecs.canonicalSha256(receipt2));
+  assert.equal(res.headRow.segment_count, 1);
+
+  // External head rebinds checkpoint 2.
+  const external = JSON.parse(fs.readFileSync(roots.activityHeadPath, 'utf8'));
+  assert.deepEqual(external, {
+    format: 1,
+    generation: 2 * INTERVAL,
+    entrySha256: res.row.entry_sha256,
+    checkpointGeneration: 2,
+    checkpointSha256: codecs.canonicalSha256(receipt2),
+  });
+
+  // Prune deleted rows older than the PREVIOUS checkpoint (receipt 1,
+  // boundary 4096): retained window is exactly [4096, 8192].
+  const rows = countRows(roots);
+  assert.equal(rows.lo, INTERVAL);
+  assert.equal(rows.hi, 2 * INTERVAL);
+  assert.equal(rows.n, INTERVAL + 1);
+  assert.ok(rows.n <= activityAppend.MAX_RETAINED_ROWS);
+  assert.ok(fs.statSync(roots.activityDbPath).size <= activityAppend.MAX_ACTIVITY_DB_BYTES);
+
+  // Checkpoint receipts are never pruned online.
+  for (const i of [0, 1, 2]) {
+    assert.equal(fs.existsSync(path.join(roots.checkpointsDir, pathsMod.generationFilename(i))), true, `receipt ${i} must survive`);
+  }
+
+  // The genesis ROW is pruned, but load verification stays healthy (it
+  // verifies at most the current segment, never lifetime history).
+  const loaded = loadMod.loadProtocolState(Object.assign({}, opts, { repair: false }));
+  assert.equal(loaded.initialized, true);
+  assert.equal(loaded.resumePending, false);
+
+  // Ordinary appends continue after the boundary.
+  const next = activityAppend.runExclusiveActivityAppend(
+    Object.assign({ opts, bootId: 'boot-x' }, appendArgs(roots, { operationId: 'post-boundary-op-1', createdAt: '2026-07-16T00:00:06.000Z' }))
+  );
+  assert.equal(next.row.generation, 2 * INTERVAL + 1);
+  assert.equal(next.headRow.segment_count, 2);
+});
+
+test('the 100000-receipt hard ceiling fails closed at the next boundary', () => {
+  const K = activityAppend.MAX_CHECKPOINT_RECEIPTS; // 100000
+  const synth = synthesizeActivityState(null, { checkpointIndex: K, offset: INTERVAL - 1, receiptIndices: [K - 1, K] });
+  const { opts, roots } = synth;
+  const before = countRows(roots);
+  assert.throws(
+    () =>
+      activityAppend.runExclusiveActivityAppend(
+        Object.assign({ opts, bootId: 'boot-x' }, appendArgs(roots, { operationId: 'ceiling-op-000001' }))
+      ),
+    { code: 'activity_checkpoint_ceiling_reached' }
+  );
+  // Fail closed: nothing committed, head unchanged.
+  const after = countRows(roots);
+  assert.deepEqual(after, before);
+  const ro = activityDb.openReadOnly(roots.activityDbPath);
+  const head = ro.prepare('SELECT * FROM activity_head WHERE id=1').get();
+  ro.close();
+  assert.equal(head.generation, synth.headGeneration);
+  assert.equal(head.checkpoint_generation, K);
+});
+
+test('runtime paths never enumerate the checkpoint directory', () => {
+  const synth = synthesizeActivityState(null, { checkpointIndex: 1, offset: 5 });
+  const { opts, roots } = synth;
+  const realReaddir = fs.readdirSync;
+  const enumerated = [];
+  fs.readdirSync = function spied(dir, ...rest) {
+    enumerated.push(String(dir));
+    return realReaddir.call(fs, dir, ...rest);
+  };
+  try {
+    loadMod.verifyActivityRoots(roots, {});
+    mod.status(opts);
+    activityAppend.runExclusiveActivityAppend(
+      Object.assign({ opts, bootId: 'boot-x' }, appendArgs(roots, { operationId: 'no-enum-op-01' }))
+    );
+  } finally {
+    fs.readdirSync = realReaddir;
+  }
+  const checkpointDirHits = enumerated.filter((d) => path.resolve(d) === path.resolve(roots.checkpointsDir));
+  assert.deepEqual(checkpointDirHits, [], 'no runtime path may enumerate the checkpoints directory');
+});
+
+test('bounded verification checks the previous checkpoint link: a rewritten previous receipt blocks', () => {
+  const synth = synthesizeActivityState(null, { checkpointIndex: 1, offset: 3 });
+  const { roots } = synth;
+  // Rewrite receipt 0 with different (still schema-valid) bytes.
+  const receipt0Path = path.join(roots.checkpointsDir, pathsMod.generationFilename(0));
+  const receipt0 = JSON.parse(fs.readFileSync(receipt0Path, 'utf8'));
+  receipt0.createdAt = '2020-01-01T00:00:00.000Z';
+  fs.writeFileSync(receipt0Path, codecs.canonicalJson(receipt0), { mode: 0o600 });
+  assert.throws(() => loadMod.verifyActivityRoots(roots, {}), { code: 'activity_checkpoint_fork' });
+});
+
+test('bounded verification checks the latest receipt binding: a rewritten latest receipt blocks', () => {
+  const synth = synthesizeActivityState(null, { checkpointIndex: 1, offset: 3 });
+  const { roots } = synth;
+  const receipt1Path = path.join(roots.checkpointsDir, pathsMod.generationFilename(1));
+  const receipt1 = JSON.parse(fs.readFileSync(receipt1Path, 'utf8'));
+  receipt1.cumulativeSha256 = 'e'.repeat(64);
+  fs.writeFileSync(receipt1Path, codecs.canonicalJson(receipt1), { mode: 0o600 });
+  assert.throws(() => loadMod.verifyActivityRoots(roots, {}), (err) =>
+    ['activity_external_head_checkpoint_mismatch', 'activity_checkpoint_hash_mismatch'].includes(err.code)
+  );
+});
+
+test('bounded verification verifies the current segment: a tampered mid-segment row blocks', () => {
+  const synth = synthesizeActivityState(null, { checkpointIndex: 1, offset: 5 });
+  const { roots } = synth;
+  const { DatabaseSync } = require('node:sqlite');
+  const rw = new DatabaseSync(roots.activityDbPath);
+  rw.prepare('UPDATE activity_chain SET created_at = ? WHERE generation = ?').run('2020-01-01T00:00:00.000Z', synth.B + 2);
+  rw.close();
+  assert.throws(() => loadMod.verifyActivityRoots(roots, {}), { code: 'activity_segment_chain_broken' });
+});
+
+test('bounded verification verifies the boundary row against the latest receipt', () => {
+  const synth = synthesizeActivityState(null, { checkpointIndex: 1, offset: 5 });
+  const { roots } = synth;
+  const { DatabaseSync } = require('node:sqlite');
+  const rw = new DatabaseSync(roots.activityDbPath);
+  // Replace the boundary row wholesale with an internally-consistent but
+  // different entry (different operationId), re-chaining nothing else: the
+  // receipt no longer matches the boundary row.
+  const forged = activityAppend.buildActivityEntry({
+    generation: synth.B,
+    previousGeneration: synth.B - 1,
+    previousSha256: synth.rowFacts.get(synth.B - 1).entrySha256,
+    operationId: 'forged-boundary-op',
+    kind: 'COMMAND_LIFECYCLE_MUTATION',
+    createdAt: APPEND_AT,
+    principalKind: 'local',
+    principalSha256: 'b'.repeat(64),
+    commandKeySha256: 'c'.repeat(64),
+    adapterId: 'db.command-lifecycle',
+    activitySha256: 'd'.repeat(64),
+  });
+  rw.prepare('UPDATE activity_chain SET operation_id=?, entry_sha256=? WHERE generation=?').run(forged.operationId, forged.entrySha256, synth.B);
+  rw.close();
+  assert.throws(() => loadMod.verifyActivityRoots(roots, {}), (err) =>
+    ['activity_checkpoint_boundary_row_mismatch', 'activity_segment_chain_broken'].includes(err.code)
+  );
+});
+
+test('bounded verification verifies the rolling segment accumulator and segment count', () => {
+  const synthA = synthesizeActivityState(null, { checkpointIndex: 1, offset: 4 });
+  {
+    const { DatabaseSync } = require('node:sqlite');
+    const rw = new DatabaseSync(synthA.roots.activityDbPath);
+    rw.prepare('UPDATE activity_head SET segment_accumulator_sha256 = ? WHERE id=1').run('e'.repeat(64));
+    rw.close();
+    assert.throws(() => loadMod.verifyActivityRoots(synthA.roots, {}), { code: 'activity_segment_accumulator_mismatch' });
+  }
+  const synthB = synthesizeActivityState(null, { checkpointIndex: 1, offset: 4 });
+  {
+    const { DatabaseSync } = require('node:sqlite');
+    const rw = new DatabaseSync(synthB.roots.activityDbPath);
+    rw.prepare('UPDATE activity_head SET segment_count = 99 WHERE id=1').run();
+    rw.close();
+    assert.throws(() => loadMod.verifyActivityRoots(synthB.roots, {}), { code: 'activity_segment_count_mismatch' });
+  }
+});
+
+test('the retained-window bounds are enforced at verification time (injectable size bound)', () => {
+  const { roots } = initializedRoots();
+  assert.throws(() => loadMod.verifyActivityRoots(roots, { maxDbBytes: 512 }), { code: 'activity_db_size_exceeded' });
+});
+
+test('the full-audit verb streams the complete receipt chain and enforces its watchdog', () => {
+  const synth = synthesizeActivityState(null, { checkpointIndex: 1, offset: INTERVAL - 1 });
+  const { opts, roots } = synth;
+  // Cross a real boundary so receipts 0..2 exist with real links.
+  activityAppend.runExclusiveActivityAppend(
+    Object.assign({ opts, bootId: 'boot-x' }, appendArgs(roots, { operationId: 'audit-boundary-op', createdAt: '2026-07-16T00:00:05.000Z' }))
+  );
+  const audit = activityAppend.fullAuditActivityChain(roots, {});
+  assert.equal(audit.ok, true);
+  assert.equal(audit.receiptCount, 3);
+  assert.equal(audit.latestCheckpointGeneration, 2);
+
+  // A broken link anywhere in the chain fails the audit.
+  const receipt1Path = path.join(roots.checkpointsDir, pathsMod.generationFilename(1));
+  const receipt1 = JSON.parse(fs.readFileSync(receipt1Path, 'utf8'));
+  receipt1.createdAt = '2020-01-01T00:00:00.000Z';
+  fs.writeFileSync(receipt1Path, codecs.canonicalJson(receipt1), { mode: 0o600 });
+  assert.throws(() => activityAppend.fullAuditActivityChain(roots, {}), { code: 'activity_checkpoint_fork' });
+  fs.writeFileSync(receipt1Path, codecs.canonicalJson(synth.receiptByIndex.get(1)), { mode: 0o600 });
+
+  // Watchdog: an impossible budget trips the 120-second wall-clock guard.
+  assert.throws(() => activityAppend.fullAuditActivityChain(roots, { watchdogMs: -1 }), { code: 'activity_audit_watchdog_exceeded' });
+});
+
+test('a crash between boundary commit and receipt write is recovered deterministically', () => {
+  const synth = synthesizeActivityState(null, { checkpointIndex: 1, offset: INTERVAL - 1 });
+  const { opts, roots } = synth;
+  const childScript = `
+    const activityAppend = require(${JSON.stringify(ACTIVITY_APPEND_PATH)});
+    activityAppend.runExclusiveActivityAppend(${JSON.stringify(
+      Object.assign(
+        { opts, bootId: 'boot-x', crashAfter: 'append_db_commit' },
+        appendArgs(pathsMod.resolveRoots(opts), { operationId: 'crash-boundary-op', createdAt: '2026-07-16T00:00:05.000Z' })
+      )
+    )});
+  `;
+  const child = cp.spawnSync(process.execPath, ['-e', childScript]);
+  assert.equal(child.status, 137);
+  // On disk: DB head at 8192 binding checkpoint 2, receipt 2 missing,
+  // external head still at 8191 / checkpoint 1, prune not yet run.
+  assert.equal(fs.existsSync(path.join(roots.checkpointsDir, pathsMod.generationFilename(2))), false);
+  assert.equal(JSON.parse(fs.readFileSync(roots.activityHeadPath, 'utf8')).generation, synth.headGeneration);
+  // Verification reports a resumable state, not a hard block.
+  const before = loadMod.verifyActivityRoots(roots, {});
+  assert.equal(before.resumable && before.resumable.kind, 'EXTERNAL_HEAD_PUBLICATION');
+  // Reconcile rebuilds the receipt deterministically, publishes the head,
+  // and completes the pending prune.
+  activityAppend.reconcileExternalActivityHead(roots, {});
+  const receipt2 = JSON.parse(fs.readFileSync(path.join(roots.checkpointsDir, pathsMod.generationFilename(2)), 'utf8'));
+  const ro = activityDb.openReadOnly(roots.activityDbPath);
+  const head = ro.prepare('SELECT * FROM activity_head WHERE id=1').get();
+  ro.close();
+  assert.equal(codecs.canonicalSha256(receipt2), head.checkpoint_sha256);
+  const external = JSON.parse(fs.readFileSync(roots.activityHeadPath, 'utf8'));
+  assert.equal(external.generation, 2 * INTERVAL);
+  assert.equal(external.checkpointGeneration, 2);
+  const rows = countRows(roots);
+  assert.equal(rows.lo, INTERVAL); // prune completed
+  const after = loadMod.verifyActivityRoots(roots, {});
+  assert.equal(after.resumable, null);
+});
