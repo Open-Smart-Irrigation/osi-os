@@ -49,8 +49,19 @@ const {
   verifyFixedSchema,
   entrySha256For,
   checkpointCumulativeSha256,
+  buildGenesisCheckpoint,
+  recoverHotJournalIfPresent,
   openReadOnly,
 } = require('./activity-db');
+const {
+  resolveRoots,
+  ensureModeDirRecursive,
+  atomicReplaceFile,
+  writeExclusiveFile,
+  generationFilename,
+  defaultOwnershipAdapter,
+} = require('./paths');
+const { acquireActivityRootLocks } = require('./locks');
 
 function appendError(code, message, extra) {
   return codecError(code, message, extra);
@@ -327,6 +338,203 @@ function appendCommandActivity(args) {
   }
 }
 
+// --- external activity-head witness (plan line 339) -------------------------
+
+// buildExternalActivityHead(headRow): the deterministic external head.json
+// content for a committed DB head row. Exactly
+// {format:1,generation,entrySha256,checkpointGeneration,checkpointSha256}
+// (same literal shape init.js publishes at genesis).
+function buildExternalActivityHead(headRow) {
+  return {
+    format: 1,
+    generation: headRow.generation,
+    entrySha256: headRow.entry_sha256,
+    checkpointGeneration: headRow.checkpoint_generation,
+    checkpointSha256: headRow.checkpoint_sha256,
+  };
+}
+
+function publishExternalActivityHead(roots, headRow, ownershipAdapter) {
+  const adapter = ownershipAdapter || defaultOwnershipAdapter;
+  const headObj = buildExternalActivityHead(headRow);
+  atomicReplaceFile(roots.activityHeadPath, Buffer.from(canonicalJson(headObj), 'utf8'), adapter);
+  return headObj;
+}
+
+function readExternalHeadFile(activityHeadPath) {
+  let raw;
+  try {
+    raw = fs.readFileSync(activityHeadPath, 'utf8');
+  } catch (err) {
+    if (err.code === 'ENOENT') return null;
+    throw err;
+  }
+  let parsed;
+  try {
+    parsed = JSON.parse(raw);
+  } catch (_err) {
+    throw appendError('activity_external_head_malformed', 'external activity head.json is not valid JSON');
+  }
+  if (
+    !parsed ||
+    parsed.format !== 1 ||
+    !isNonNegInt(parsed.generation) ||
+    !isSha256Hex(parsed.entrySha256) ||
+    !isNonNegInt(parsed.checkpointGeneration) ||
+    !isSha256Hex(parsed.checkpointSha256)
+  ) {
+    throw appendError('activity_external_head_malformed', 'external activity head.json does not match the exact head schema');
+  }
+  return parsed;
+}
+
+// ensureCheckpointReceiptForHead: before publishing an external head that
+// binds checkpoint K, make sure the receipt file for K exists. At K=0 the
+// receipt is deterministically rebuildable from the genesis row (a crash
+// between activity-database creation and receipt write); K>0 receipts are
+// rebuilt by the checkpoint machinery's own crash recovery (they are
+// deterministic too — see maybeRollCheckpoint), so a missing K>0 receipt
+// here means recovery was bypassed and blocks.
+function ensureCheckpointReceiptForHead(roots, db, headRow, adapter) {
+  const receiptPath = path.join(roots.checkpointsDir, generationFilename(headRow.checkpoint_generation));
+  if (fs.existsSync(receiptPath)) return;
+  if (headRow.checkpoint_generation === 0) {
+    const genesisRow = db.prepare('SELECT * FROM activity_chain WHERE generation = 0').get();
+    if (!genesisRow) {
+      throw appendError('activity_repair_checkpoint_missing', 'cannot rebuild checkpoint 0: genesis row is not retained');
+    }
+    ensureModeDirRecursive(roots.checkpointsDir, adapter, { enforceFrom: roots.activityHeadWitnessRoot });
+    const checkpoint = buildGenesisCheckpoint({ entrySha256: genesisRow.entry_sha256, createdAt: genesisRow.created_at });
+    writeExclusiveFile(receiptPath, Buffer.from(canonicalJson(checkpoint), 'utf8'), adapter);
+    return;
+  }
+  throw appendError('activity_repair_checkpoint_missing', 'cannot publish external head: no on-disk checkpoint matches the database head row', {
+    checkpointGeneration: headRow.checkpoint_generation,
+  });
+}
+
+// reconcileExternalActivityHead(roots): the line-339 rule, run under the
+// stable activity lock before any command work (runExclusiveActivityAppend
+// holds it; loadProtocolState's repair path and direct maintenance callers
+// are single-actor by construction). The database may be exactly one
+// generation ahead of external head.json after a crash: recompute that one
+// row, verify its predecessor equals the external head, and publish only
+// that deterministic next head. Any larger gap, external head ahead, hash
+// mismatch, or database rollback below the external generation blocks.
+function reconcileExternalActivityHead(roots, options) {
+  const opts = options || {};
+  const adapter = opts.ownershipAdapter || defaultOwnershipAdapter;
+  recoverHotJournalIfPresent({ dbPath: roots.activityDbPath, ownershipAdapter: adapter, recoveryOnlyAdapter: opts.recoveryOnlyAdapter });
+  const db = openReadOnly(roots.activityDbPath);
+  try {
+    const { head } = revalidateHead(db);
+    const externalHead = readExternalHeadFile(roots.activityHeadPath);
+
+    if (externalHead === null) {
+      if (head.generation !== 0) {
+        throw appendError('activity_external_head_missing', 'activity database has committed generations but the external head witness is missing');
+      }
+      ensureCheckpointReceiptForHead(roots, db, head, adapter);
+      return { reconciled: true, published: publishExternalActivityHead(roots, head, adapter) };
+    }
+
+    if (externalHead.generation > head.generation) {
+      throw appendError('activity_database_rollback', 'activity database generation is behind the external head witness', {
+        dbGeneration: head.generation,
+        externalHeadGeneration: externalHead.generation,
+      });
+    }
+    if (head.generation - externalHead.generation > 1) {
+      throw appendError('activity_head_gap_too_large', 'activity database is more than one generation ahead of the external head witness', {
+        dbGeneration: head.generation,
+        externalHeadGeneration: externalHead.generation,
+      });
+    }
+    if (head.generation === externalHead.generation) {
+      if (externalHead.entrySha256 !== head.entry_sha256) {
+        throw appendError('activity_external_head_hash_mismatch', 'external head entrySha256 does not match the committed database row');
+      }
+      return { reconciled: false };
+    }
+
+    // Exactly one ahead. "Recomputes that one row": the pending row IS the
+    // database head row, and revalidateHead above already reread it and
+    // recomputed its canonical entry hash (a corrupted pending row throws
+    // activity_append_head_invalid there before reaching this point).
+    const pending = db.prepare('SELECT * FROM activity_chain WHERE generation = ?').get(head.generation);
+    // "...verify its predecessor equals the external head..."
+    if (pending.previous_sha256 !== externalHead.entrySha256 || pending.previous_generation !== externalHead.generation) {
+      throw appendError('activity_external_head_predecessor_mismatch', 'the one-ahead pending row does not chain from the published external head', {
+        pendingGeneration: pending.generation,
+        externalHeadGeneration: externalHead.generation,
+      });
+    }
+    // ...and publish only that deterministic next head.
+    ensureCheckpointReceiptForHead(roots, db, head, adapter);
+    return { reconciled: true, published: publishExternalActivityHead(roots, head, adapter) };
+  } finally {
+    db.close();
+  }
+}
+
+// --- the locked witnessed append --------------------------------------------
+
+// appendActivityWithExternalHead(args): reconcile (one-ahead recovery) +
+// append + external head publication. The caller MUST already hold the
+// stable activity lock (runExclusiveActivityAppend below, or the witnessed
+// operation runner). crashAfter boundaries: append_mid_transaction,
+// append_db_commit (inside appendCommandActivity), external_head_published.
+function appendActivityWithExternalHead(args) {
+  const a = args || {};
+  const roots = a.roots || resolveRoots(a.opts || {});
+  const adapter = a.ownershipAdapter || defaultOwnershipAdapter;
+  reconcileExternalActivityHead(roots, { ownershipAdapter: adapter, recoveryOnlyAdapter: a.recoveryOnlyAdapter });
+  const res = appendCommandActivity(Object.assign({}, a, { dbPath: roots.activityDbPath }));
+  publishExternalActivityHead(roots, res.headRow, adapter);
+  if (a.crashAfter === 'external_head_published') {
+    process.exit(137);
+  }
+  return res;
+}
+
+// runExclusiveActivityAppend(args): self-locking wrapper — acquires the
+// stable activity lock (both activity roots, fixed order), reconciles,
+// appends, publishes the external head, releases. Stale locks are
+// reconciled per line 353: the chain is verified (which itself completes
+// the only deterministic proposal an activity append can leave behind, the
+// one-ahead external-head publication) before the stale lock is removed;
+// an activity append has no other resumable proposal shape because the
+// SQLite transaction is atomic.
+function runExclusiveActivityAppend(args) {
+  const a = args || {};
+  const roots = a.roots || resolveRoots(a.opts || {});
+  const adapter = a.ownershipAdapter || defaultOwnershipAdapter;
+  const lock = acquireActivityRootLocks(
+    roots,
+    {
+      operationId: a.operationId,
+      sourceKind: 'witnessed-append',
+      sourceAuthority: null,
+      headIdentities: {},
+      typedReceiptSha256: null,
+    },
+    {
+      bootId: a.bootId,
+      isProcessAlive: a.isProcessAlive,
+      ownershipAdapter: adapter,
+      reconcile: {
+        verifyChain: () => reconcileExternalActivityHead(roots, { ownershipAdapter: adapter, recoveryOnlyAdapter: a.recoveryOnlyAdapter }),
+        findProposalForOperation: () => null,
+      },
+    }
+  );
+  try {
+    return appendActivityWithExternalHead(Object.assign({}, a, { roots, ownershipAdapter: adapter }));
+  } finally {
+    lock.release();
+  }
+}
+
 module.exports = {
   appendError,
   CHECKPOINT_INTERVAL,
@@ -341,4 +549,10 @@ module.exports = {
   validateActivityEntry,
   revalidateHead,
   appendCommandActivity,
+  buildExternalActivityHead,
+  publishExternalActivityHead,
+  readExternalHeadFile,
+  reconcileExternalActivityHead,
+  appendActivityWithExternalHead,
+  runExclusiveActivityAppend,
 };

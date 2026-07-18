@@ -481,32 +481,17 @@ function verifyActivityRoots(roots, { ownershipAdapter, recoveryOnlyAdapter } = 
 function repairActivityRoots(roots, activityResult, { ownershipAdapter } = {}) {
   const adapter = ownershipAdapter || defaultOwnershipAdapter;
   if (!activityResult.resumable || activityResult.resumable.kind !== 'EXTERNAL_HEAD_PUBLICATION') return activityResult;
-  const targetGeneration = activityResult.resumable.targetGeneration;
-  if (targetGeneration === 0 && activityResult.checkpoints.length === 0) {
-    const { ensureModeDirRecursive } = require('./paths');
-    ensureModeDirRecursive(roots.checkpointsDir, adapter, { enforceFrom: roots.activityHeadWitnessRoot });
-    const checkpoint = buildGenesisCheckpoint({ entrySha256: activityResult.genesisRow.entry_sha256, createdAt: activityResult.genesisRow.created_at });
-    writeExclusiveFile(
-      path.join(roots.checkpointsDir, '0000000000000000.json'),
-      Buffer.from(canonicalJson(checkpoint), 'utf8'),
-      adapter
-    );
-  }
-  const checkpointEntries = listRegularEntries(roots.checkpointsDir, /^\d{16}\.json$/);
-  const matching = checkpointEntries.find((e) => generationNumberFromFilename(e.name) === activityResult.headRow.checkpoint_generation);
-  if (!matching) {
-    throw loadError('activity_repair_checkpoint_missing', 'cannot republish external head: no on-disk checkpoint matches the database head row');
-  }
-  const checkpointObj = readJsonFile(matching.path);
-  const checkpointSha256 = sha256Hex(canonicalJson(checkpointObj));
-  const activityHead = {
-    format: 1,
-    generation: activityResult.headRow.generation,
-    entrySha256: activityResult.headRow.entry_sha256,
-    checkpointGeneration: activityResult.headRow.checkpoint_generation,
-    checkpointSha256,
-  };
-  atomicReplaceFile(roots.activityHeadPath, Buffer.from(canonicalJson(activityHead), 'utf8'), adapter);
+  // The full line-339 rule (recompute the one pending row, verify its
+  // predecessor equals the published external head, publish only the
+  // deterministic next head, rebuilding a deterministically-rebuildable
+  // missing checkpoint receipt first) lives in the shared reconcile helper
+  // also used by the witnessed append path; delegate rather than duplicate.
+  // Lazy require: activity-append itself requires this module's siblings
+  // (activity-db/paths/locks) but not load.js, so there is no cycle; the
+  // lazy form just keeps the top-of-file import list an honest statement
+  // of load-time dependencies.
+  const { reconcileExternalActivityHead } = require('./activity-append');
+  reconcileExternalActivityHead(roots, { ownershipAdapter: adapter });
   return verifyActivityRoots(roots, { ownershipAdapter: adapter });
 }
 
