@@ -18,6 +18,7 @@ const entry = {
   activity_code: 'irrigation',
   plot_uuid: 'p1',
   status: 'final',
+  sync_version: 11,
   occurred_start: '2026-07-10T08:00:00.000Z',
   occurred_timezone: 'Europe/Zurich',
   values: [],

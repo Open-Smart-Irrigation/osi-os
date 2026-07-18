@@ -652,6 +652,46 @@ describe('JournalPage', () => {
     ));
   });
 
+  it('passes a typed batch-membership adapter backed by journalApi.listEntries', async () => {
+    mocks.journalApi.listEntries.mockResolvedValue({ entries: [], next_cursor: null });
+
+    renderPage();
+
+    const props = mocks.timeline.mock.lastCall?.[0] as {
+      listBatchEntries: (filters: {
+        batch_uuid: string;
+        status: 'all';
+        limit: 100;
+        cursor?: string;
+      }) => Promise<{ entries: EntryAggregate[]; next_cursor: string | null }>;
+    };
+    expect(props.listBatchEntries).toEqual(expect.any(Function));
+    await props.listBatchEntries({ batch_uuid: 'batch-1', status: 'all', limit: 100 });
+    expect(mocks.journalApi.listEntries).toHaveBeenLastCalledWith({
+      batch_uuid: 'batch-1', status: 'all', limit: 100,
+    });
+  });
+
+  it('keeps the batch-membership adapter referentially stable across page state changes', async () => {
+    renderPage();
+    const firstAdapter = (mocks.timeline.mock.lastCall?.[0] as {
+      listBatchEntries: unknown;
+    }).listBatchEntries;
+
+    fireEvent.change(screen.getByLabelText('filters.activity'), {
+      target: { value: 'irrigation' },
+    });
+    await waitFor(() => expect(mocks.timeline.mock.lastCall?.[0]).toEqual(
+      expect.objectContaining({ listBatchEntries: firstAdapter }),
+    ));
+  });
+
+  it('does not add correction, void, or apply-to-all controls to the timeline wiring', () => {
+    renderPage();
+
+    expect(screen.queryByRole('button', { name: /void|correct|apply all/i })).not.toBeInTheDocument();
+  });
+
   it('opens a generic capture flow from Log activity', () => {
     renderPage();
 
