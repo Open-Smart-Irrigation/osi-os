@@ -5,13 +5,9 @@
 // Scope (2026-07-15-sync-delivery-stop-loss.md, Task 3 Step 0, the region
 // from "Persist negotiation through osi-sync-protocol-state" through
 // "...the plan states this limit rather than claiming tamper resistance"):
-//   - Capability generation kind is a closed union of 8 kinds. This slice's
-//     CLI only ever CREATES the GENESIS kind (factory-zero and every
-//     disposition/reset/restore verb is NOT_IMPLEMENTED_IN_THIS_SLICE), but
-//     the codec still validates every kind's exact field rules, rejects
-//     cross-kind fields, and rejects unknown fields, because the load
-//     verifier must be able to recognize/reject a hand-crafted or
-//     corrupted generation of any kind.
+//   - Capability generation kind is a closed union of 8 kinds. Writers and
+//     the load verifier share these exact field rules; cross-kind and unknown
+//     fields are rejected before a generation can become authority.
 //   - Byte-exact literal schemas (GENESIS generation, capability head,
 //     genesis witness) are copied verbatim from the plan text; do not
 //     paraphrase.
@@ -21,10 +17,8 @@
 // RESET_AUTHORIZATION, and the four DATABASE_* kinds' extra state fields,
 // but does not give literal camelCase field names for every one of those
 // facts the way it does for GENESIS/NEGOTIATED. Field names below are the
-// most literal reading of the plan's descriptive language; a later slice
-// that implements the verb which actually CREATES one of these kinds must
-// reconcile its writer against this file (and may edit this file) rather
-// than assume the names below are frozen.
+// most literal reading of the plan's descriptive language and are shared by
+// the transition writers below.
 
 const crypto = require('node:crypto');
 
@@ -371,6 +365,7 @@ function dispositionStateFields(state) {
       restorePreparationResultSha256: { check: isSha256Hex },
       restoreReceiptSha256: { check: isSha256Hex },
       restoredDatabaseAuditSha256: { check: isSha256Hex },
+      priorClearGeneration: { check: isPositiveInt },
       priorClearGenerationSha256: { check: isSha256Hex },
       identitySha256: { check: isSha256Hex },
     });
@@ -436,6 +431,7 @@ function resetStateFields() {
     resetEpoch: { check: isNonNegInt },
     resetAuthorizedAt: { check: isIsoTimestamp },
     resetReasonSha256: { check: isSha256Hex },
+    resetReceiptSha256: { check: isSha256Hex },
   });
 }
 
@@ -501,11 +497,15 @@ function databaseIntegrityInvalidationFields() {
         return v.status === 'RECONCILIATION_REQUIRED';
       },
     },
-    latchObservationSha256: { check: isSha256Hex },
-    trustedBackupSha256: { check: isSha256Hex },
-    forensicDestinationSha256: { check: isSha256Hex },
-    activityRootsSha256: { check: isSha256Hex },
-    manualLossAcknowledgementSha256: { check: isSha256Hex },
+    invalidationReceiptSha256: { check: isSha256Hex },
+    authoritySha256: { check: isSha256Hex },
+    observedEvidenceSha256: { check: isSha256Hex },
+    backupManifestSha256: { check: isSha256Hex },
+    forensicDestination: { check: (v) => typeof v === 'string' && v.startsWith('/') },
+    activityGeneration: { check: isNonNegInt },
+    activityEntrySha256: { check: isSha256Hex },
+    activityExternalHeadSha256: { check: isSha256Hex },
+    possibleDataLossAcknowledgementSha256: { check: isSha256Hex },
     recoveryOperationId: { check: isOperationId },
   });
 }
@@ -522,10 +522,12 @@ function databaseIntegrityReconciledFields() {
         return v.status === 'CLEAR';
       },
     },
-    importOrCutoffAuthoritySha256: { check: isSha256Hex },
-    restoredOrFinalAuditSha256: { check: isSha256Hex },
+    reconciledReceiptSha256: { check: isSha256Hex },
+    reconciliationAuthoritySha256: { check: isSha256Hex },
+    historicalRevalidationReceiptSha256: { check: isSha256Hex },
+    postReconcileCommandAuditSha256: { check: isSha256Hex },
+    postReconcileFarmingAuditSha256: { check: isSha256Hex },
     forensicInventorySha256: { check: isSha256Hex },
-    zeroEffectReceiptSha256: { check: isSha256Hex },
     recoveryOperationId: { check: isOperationId },
   });
 }

@@ -16,13 +16,9 @@
 // corrupting or replacing the activity database, or replaying an operation
 // blocks polling."
 //
-// Scope for this slice (per brief): the resume machinery is fully
-// implemented for GENESIS-adjacent states (the only kind this slice's CLI
-// ever creates) and for the activity root's documented one-ahead crash
-// tolerance. Every other kind's resume branch (disposition/reset/restore)
-// validates its shape and then blocks — it does not attempt to complete
-// the resume, because the verbs that would legitimately finish it are
-// NOT_IMPLEMENTED_IN_THIS_SLICE.
+// GENESIS initialization and activity one-ahead states have generic repair
+// here. Purpose-specific transition writers retain authority for validating
+// any non-GENESIS proposal before completing it.
 
 const fs = require('node:fs');
 const path = require('node:path');
@@ -93,6 +89,79 @@ function readJsonFile(filePath) {
     return JSON.parse(raw);
   } catch (_err) {
     throw loadError('chain_entry_malformed_json', `not valid JSON: ${filePath}`, { path: filePath });
+  }
+}
+
+function readTypedReceipt(filePath, adapter, label) {
+  assertNoSymlinkComponents(filePath);
+  let stat;
+  try {
+    stat = fs.lstatSync(filePath);
+  } catch (err) {
+    if (err.code === 'ENOENT') {
+      throw loadError('typed_receipt_missing', `${label} is missing`, { path: filePath });
+    }
+    throw err;
+  }
+  if (!stat.isFile() || stat.isSymbolicLink()) {
+    throw loadError('typed_receipt_wrong_type', `${label} is not a regular nonsymlink file`, { path: filePath });
+  }
+  assertModeAndOwner({ name: path.basename(filePath), path: filePath, stat }, adapter, label);
+  return readJsonFile(filePath);
+}
+
+function verifyTypedReceipts(roots, generations, adapter) {
+  for (const entry of generations) {
+    const generation = entry.generation;
+    if (generation.kind === 'GENESIS' || generation.kind === 'NEGOTIATED') continue;
+    let receiptPath;
+    let expectedSha256 = null;
+    if (generation.kind === 'HISTORICAL_V2_DISPOSITION') {
+      receiptPath = path.join(roots.v2DispositionReceiptsDir, `${generation.operationId}.json`);
+      expectedSha256 = generation.state.historicalV2DispositionReceiptSha256;
+    } else if (generation.kind === 'RESET_AUTHORIZATION') {
+      receiptPath = path.join(roots.resetReceiptsDir, `${generation.state.authorizationId}.json`);
+      expectedSha256 = generation.state.resetReceiptSha256;
+    } else if (generation.kind === 'DATABASE_RESTORE_INVALIDATION') {
+      receiptPath = path.join(roots.databaseRestoreReceiptsDir, `${generation.state.databaseRestore.restoreEpoch}.invalidation.json`);
+      expectedSha256 = generation.state.invalidationReceiptSha256;
+    } else if (generation.kind === 'DATABASE_RESTORE_RECONCILED') {
+      receiptPath = path.join(roots.databaseRestoreReceiptsDir, `${generation.state.databaseRestore.restoreEpoch}.reconciled.json`);
+      expectedSha256 = generation.state.reconciledReceiptSha256;
+    } else if (generation.kind === 'DATABASE_INTEGRITY_INVALIDATION') {
+      receiptPath = path.join(roots.databaseIntegrityReceiptsDir, `${generation.state.databaseRestore.restoreEpoch}.invalidation.json`);
+      expectedSha256 = generation.state.invalidationReceiptSha256;
+    } else if (generation.kind === 'DATABASE_INTEGRITY_RECONCILED') {
+      receiptPath = path.join(roots.databaseIntegrityReceiptsDir, `${generation.state.databaseRestore.restoreEpoch}.reconciled.json`);
+      expectedSha256 = generation.state.reconciledReceiptSha256;
+    }
+    const receipt = readTypedReceipt(receiptPath, adapter, `${generation.kind} typed receipt`);
+    if (receipt.operationId !== generation.operationId) {
+      throw loadError('typed_receipt_operation_mismatch', `${generation.kind} typed receipt operationId does not match its generation`, {
+        path: receiptPath,
+      });
+    }
+    if (expectedSha256 !== null && canonicalSha256(receipt) !== expectedSha256) {
+      throw loadError('typed_receipt_hash_mismatch', `${generation.kind} typed receipt hash does not match its generation`, {
+        path: receiptPath,
+      });
+    }
+    if (generation.kind === 'RESET_AUTHORIZATION') {
+      const state = generation.state;
+      if (
+        receipt.authorizationId !== state.authorizationId ||
+        receipt.confirmationSha256 !== state.confirmationSha256 ||
+        receipt.fromIdentitySha256 !== state.fromIdentitySha256 ||
+        receipt.toIdentitySha256 !== state.toIdentitySha256 ||
+        receipt.resetEpoch !== state.resetEpoch ||
+        receipt.resetAuthorizedAt !== state.resetAuthorizedAt ||
+        receipt.resetReasonSha256 !== state.resetReasonSha256
+      ) {
+        throw loadError('typed_receipt_state_mismatch', 'RESET_AUTHORIZATION receipt does not bind the generation state', {
+          path: receiptPath,
+        });
+      }
+    }
   }
 }
 
@@ -191,6 +260,8 @@ function verifyCapabilityChain(roots, { ownershipAdapter } = {}) {
 
   const maxGeneration = generations.length - 1;
   const maxWitness = witnessByGeneration.size - 1; // -1 if none; contiguous from 0 enforced above
+  const proposalKind = generations[maxGeneration].generation.kind;
+  const purposeResumableKind = proposalKind !== 'GENESIS' && proposalKind !== 'NEGOTIATED';
 
   // Bidirectional generation/witness set equality (review IMPORTANT 1):
   // every generation must have exactly one same-number witness AND every
@@ -216,6 +287,7 @@ function verifyCapabilityChain(roots, { ownershipAdapter } = {}) {
   // outside the software-only threat model and requires a hardware
   // monotonic counter or external witness"). See the pinning test in
   // index.test.js.
+  const singleMissingTopWitness = maxWitness === maxGeneration - 1;
   if (maxWitness < maxGeneration) {
     if (maxGeneration === 0 && maxWitness === -1 && !fs.existsSync(roots.capabilityHeadPath)) {
       return {
@@ -227,10 +299,12 @@ function verifyCapabilityChain(roots, { ownershipAdapter } = {}) {
         resumable: { kind: 'WITNESS_CREATION', targetGeneration: 0 },
       };
     }
-    throw loadError('capability_witness_missing', 'a capability generation has no same-number witness (orphan generation above the witness chain)', {
-      maxGeneration,
-      maxWitness,
-    });
+    if (!singleMissingTopWitness || !purposeResumableKind) {
+      throw loadError('capability_witness_missing', 'more than one capability generation lacks a same-number witness', {
+        maxGeneration,
+        maxWitness,
+      });
+    }
   }
   // maxWitness > maxGeneration is impossible here: every witness was
   // required to match a same-number generation inside the loop above
@@ -259,20 +333,25 @@ function verifyCapabilityChain(roots, { ownershipAdapter } = {}) {
       // a fully witnessed one — is indistinguishable from an attacker
       // replacing head.json with an older-but-still-valid pointer and
       // blocks rather than resumes.
-      if (headRecord.generation !== 0 || chainMax !== 1 || !witnessByGeneration.has(chainMax)) {
+      if (headRecord.generation !== chainMax - 1 || !purposeResumableKind) {
         throw loadError('capability_head_rollback', 'capability head.json does not identify the highest committed generation/witness pair', {
           headGeneration: headRecord.generation,
           chainMax,
         });
       }
-      // resumable: witnessed proposal one step ahead of head.
+      // Resumable: exactly one validated proposal is ahead of the current
+      // head. Its purpose-specific verb must revalidate source authority
+      // before creating a missing receipt/witness or publishing the head.
       return {
         present: true,
         generations,
         witnessByGeneration,
         head: headRecord,
         maxGeneration,
-        resumable: { kind: 'HEAD_PUBLICATION', targetGeneration: chainMax },
+        resumable: {
+          kind: witnessByGeneration.has(chainMax) ? 'HEAD_PUBLICATION' : 'WITNESS_CREATION',
+          targetGeneration: chainMax,
+        },
       };
     }
   } else if (chainMax === 0) {
@@ -292,6 +371,7 @@ function verifyCapabilityChain(roots, { ownershipAdapter } = {}) {
     throw loadError('capability_head_missing', 'capability head.json is missing but more than one generation/witness pair exists');
   }
 
+  verifyTypedReceipts(roots, generations, adapter);
   return { present: true, generations, witnessByGeneration, head: headRecord, maxGeneration, resumable: null };
 }
 
