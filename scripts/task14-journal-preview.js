@@ -21,6 +21,10 @@ const CANONICAL_IDS = Object.freeze({
   finalEntryUuid: '55555555-5555-4555-8555-555555555555',
   seasonUuid: '66666666-6666-4666-8666-666666666666',
   gatewayEui: '0011223344556677',
+  numericPlotUuid: '88888888-8888-4888-8888-888888888888',
+  namedPlotUuid: '99999999-9999-4999-8999-999999999999',
+  activeGroupUuid: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+  resolvedGroupUuid: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
 });
 
 const DEMO_AUTH_TOKEN = 'task14-demo-token';
@@ -197,6 +201,46 @@ function plot() {
   };
 }
 
+function numberedPlot() {
+  return {
+    ...plot(),
+    plot_uuid: CANONICAL_IDS.numericPlotUuid,
+    plot_code: '2',
+    name: 'South 2',
+    sync_version: 1,
+    settings: { ...plot().settings, sync_version: 1 },
+  };
+}
+
+function namedPlot() {
+  return {
+    ...plot(),
+    plot_uuid: CANONICAL_IDS.namedPlotUuid,
+    plot_code: 'SOUTH-A',
+    name: 'South named',
+    station_code: 'SOUTH-01',
+    sync_version: 1,
+    settings: { ...plot().settings, sync_version: 1 },
+  };
+}
+
+function plotGroup(groupUuid, members, resolved) {
+  return {
+    contract_version: 1,
+    group_uuid: groupUuid,
+    label: resolved ? 'Resolved south' : 'Active south',
+    owner_user_uuid: CANONICAL_IDS.userUuid,
+    gateway_device_eui: CANONICAL_IDS.gatewayEui,
+    created_by_principal_uuid: CANONICAL_IDS.userUuid,
+    created_at: '2026-01-10T08:00:00.000Z',
+    resolved_at: resolved ? '2026-07-17T08:30:00.000Z' : null,
+    resolved_by_principal_uuid: resolved ? CANONICAL_IDS.userUuid : null,
+    sync_version: 1,
+    deleted_at: null,
+    members: [...members].sort(),
+  };
+}
+
 function aggregateValue(input) {
   const value = input || {};
   const raw = value.value;
@@ -331,11 +375,66 @@ function createState(catalog) {
       layouts: new Map(catalog.layouts.map((row) => [row.code, row])),
     },
     zones: [irrigationZone()],
-    plots: [plot()],
+    plots: [plot(), numberedPlot(), namedPlot()],
+    plotGroups: [
+      plotGroup(CANONICAL_IDS.activeGroupUuid, [CANONICAL_IDS.plotUuid, CANONICAL_IDS.numericPlotUuid], false),
+      plotGroup(CANONICAL_IDS.resolvedGroupUuid, [CANONICAL_IDS.plotUuid], true),
+    ],
     entries: new Map([[CANONICAL_IDS.finalEntryUuid, seededFinalEntry(catalog.catalog_version)]]),
     draftPostCount: 0,
     finalPutCount: 0,
+    plotPostCount: 0,
+    plotPutCount: 0,
+    groupPostCount: 0,
+    groupPutCount: 0,
+    batchPostCount: 0,
     lastFinalPayload: null,
+    lastBatchPayload: null,
+  };
+}
+
+function plotFromPayload(payload, syncVersion) {
+  const base = plot();
+  return {
+    contract_version: 1,
+    plot_uuid: payload.plot_uuid,
+    plot_code: payload.plot_code,
+    name: payload.name ?? null,
+    zone_uuid: payload.zone_uuid ?? null,
+    station_code: payload.station_code ?? null,
+    crop_hint: payload.crop_hint ?? null,
+    area_m2: payload.area_m2 ?? null,
+    active: payload.active,
+    sync_version: syncVersion,
+    owner_user_uuid: base.owner_user_uuid,
+    gateway_device_eui: base.gateway_device_eui,
+    created_at: base.created_at,
+    updated_at: FIXTURE_TIME,
+    deleted_at: null,
+    settings: {
+      layout_code: payload.layout_code,
+      updated_at: FIXTURE_TIME,
+      updated_by_principal_uuid: CANONICAL_IDS.userUuid,
+      sync_version: syncVersion,
+    },
+  };
+}
+
+function groupFromPayload(payload, syncVersion) {
+  const base = plotGroup(payload.group_uuid, payload.members, payload.resolved);
+  return {
+    contract_version: 1,
+    group_uuid: payload.group_uuid,
+    label: payload.label,
+    owner_user_uuid: base.owner_user_uuid,
+    gateway_device_eui: base.gateway_device_eui,
+    created_by_principal_uuid: base.created_by_principal_uuid,
+    created_at: base.created_at,
+    resolved_at: payload.resolved ? '2026-07-17T08:30:00.000Z' : null,
+    resolved_by_principal_uuid: payload.resolved ? CANONICAL_IDS.userUuid : null,
+    sync_version: syncVersion,
+    deleted_at: null,
+    members: [...payload.members].sort(),
   };
 }
 
@@ -479,12 +578,16 @@ async function handleApi(req, res, requestUrl, state) {
   const query = requestUrl.searchParams;
 
   const updateMatch = /^\/api\/journal\/entries\/([^/]+)$/.exec(requestPath);
+  const plotUpdateMatch = /^\/api\/journal\/plots\/([^/]+)$/.exec(requestPath);
+  const groupUpdateMatch = /^\/api\/journal\/plot-groups\/([^/]+)$/.exec(requestPath);
   const allowedMethods = requestPath === '/api/irrigation-zones' ||
-      requestPath === '/api/journal/catalog' || requestPath === '/api/journal/plots'
+      requestPath === '/api/journal/catalog'
     ? ['GET']
+    : requestPath === '/api/journal/plots' || requestPath === '/api/journal/plot-groups'
+      ? ['GET', 'POST']
     : requestPath === '/api/journal/entries'
       ? ['GET', 'POST']
-      : updateMatch ? ['PUT'] : null;
+      : plotUpdateMatch || groupUpdateMatch || updateMatch ? ['PUT'] : null;
   if (allowedMethods && !allowedMethods.includes(req.method)) {
     return errorJson(res, 405, 'method_not_allowed');
   }
@@ -492,6 +595,58 @@ async function handleApi(req, res, requestUrl, state) {
   if (req.method === 'GET' && requestPath === '/api/irrigation-zones') return json(res, 200, state.zones);
   if (req.method === 'GET' && requestPath === '/api/journal/catalog') return json(res, 200, state.catalog);
   if (req.method === 'GET' && requestPath === '/api/journal/plots') return json(res, 200, { plots: state.plots });
+  if (req.method === 'GET' && requestPath === '/api/journal/plot-groups') return json(res, 200, { plot_groups: state.plotGroups });
+
+  if (req.method === 'POST' && requestPath === '/api/journal/plots') {
+    const payload = await readBody(req);
+    if (payload.base_sync_version !== 0 || !PREVIEW_UUID.test(payload.plot_uuid) ||
+        state.plots.some((candidate) => candidate.plot_uuid === payload.plot_uuid)) {
+      return errorJson(res, 409, 'stale_version');
+    }
+    const created = plotFromPayload(payload, 1);
+    state.plots.push(created);
+    state.plotPostCount += 1;
+    return json(res, 201, { plot: created });
+  }
+
+  if (req.method === 'PUT' && plotUpdateMatch) {
+    const plotUuid = decodeURIComponent(plotUpdateMatch[1]);
+    const current = state.plots.find((candidate) => candidate.plot_uuid === plotUuid);
+    const payload = await readBody(req);
+    if (!current || payload.plot_uuid !== plotUuid || payload.base_sync_version !== current.sync_version) {
+      return json(res, 409, { error: 'stale_version', message: 'Plot version is stale', details: null });
+    }
+    const updated = plotFromPayload(payload, current.sync_version + 1);
+    state.plots = state.plots.map((candidate) => candidate.plot_uuid === plotUuid ? updated : candidate);
+    state.plotPutCount += 1;
+    return json(res, 200, { plot: updated });
+  }
+
+  if (req.method === 'POST' && requestPath === '/api/journal/plot-groups') {
+    const payload = await readBody(req);
+    if (payload.base_sync_version !== 0 || !PREVIEW_UUID.test(payload.group_uuid) ||
+        payload.resolved !== false || state.plotGroups.some((candidate) => candidate.group_uuid === payload.group_uuid)) {
+      return errorJson(res, 409, 'stale_version');
+    }
+    const created = groupFromPayload(payload, 1);
+    state.plotGroups.push(created);
+    state.groupPostCount += 1;
+    return json(res, 201, { plot_group: created });
+  }
+
+  if (req.method === 'PUT' && groupUpdateMatch) {
+    const groupUuid = decodeURIComponent(groupUpdateMatch[1]);
+    const current = state.plotGroups.find((candidate) => candidate.group_uuid === groupUuid);
+    const payload = await readBody(req);
+    if (!current || payload.group_uuid !== groupUuid || typeof payload.resolved !== 'boolean' ||
+        payload.base_sync_version !== current.sync_version) {
+      return json(res, 409, { error: 'stale_version', message: 'Plot-group version is stale', details: null });
+    }
+    const updated = groupFromPayload(payload, current.sync_version + 1);
+    state.plotGroups = state.plotGroups.map((candidate) => candidate.group_uuid === groupUuid ? updated : candidate);
+    state.groupPutCount += 1;
+    return json(res, 200, { plot_group: updated });
+  }
   if (req.method === 'GET' && requestPath === '/api/journal/entries') {
     const validated = validatedEntryQuery(query);
     if (validated.error) return errorJson(res, 400, validated.error);
@@ -509,6 +664,55 @@ async function handleApi(req, res, requestUrl, state) {
 
   if (req.method === 'POST' && requestPath === '/api/journal/entries') {
     const payload = await readBody(req);
+    if (Array.isArray(payload.plot_uuids)) {
+      state.batchPostCount += 1;
+      if (payload.status !== 'final' || payload.plot_uuids.length === 0 || payload.plot_uuids.length > 100 ||
+          new Set(payload.plot_uuids).size !== payload.plot_uuids.length ||
+          Object.prototype.hasOwnProperty.call(payload, 'plot_uuid') ||
+          Object.prototype.hasOwnProperty.call(payload, 'zone_uuid')) {
+        return errorJson(res, 400, 'invalid_batch_payload');
+      }
+      const validation = validateEntryPayload(state, {
+        ...payload,
+        plot_uuid: payload.plot_uuids[0],
+        zone_uuid: null,
+      });
+      if (!validation.ok) return json(res, 422, { error: 'invalid_entry_payload', errors: validation.errors });
+
+      const duplicateCandidates = payload.plot_uuids.map((plotUuid, index) => ({
+        entryUuid: `eeeeeeee-eeee-4eee-8eee-${String(index + 1).padStart(12, '0')}`,
+        occurredStart: FIXTURE_TIME,
+        activityCode: payload.activity_code,
+        plotUuid,
+      }));
+      const acknowledgements = Array.isArray(payload.duplicate_guard_ack_entry_uuids)
+        ? payload.duplicate_guard_ack_entry_uuids
+        : [];
+      if (!duplicateCandidates.every((candidate) => acknowledgements.includes(candidate.entryUuid))) {
+        return json(res, 409, { error: 'duplicate_candidates', details: { duplicateCandidates } });
+      }
+
+      const batchUuid = `ffffffff-ffff-4fff-8fff-${String(state.batchPostCount).padStart(12, '0')}`;
+      const receipts = payload.plot_uuids.map((plotUuid, index) => {
+        const entryUuid = duplicateCandidates[index].entryUuid;
+        const plotRecord = state.plots.find((candidate) => candidate.plot_uuid === plotUuid);
+        const entry = aggregateFromPayload({
+          ...payload,
+          plot_uuid: plotUuid,
+          zone_uuid: plotRecord?.zone_uuid ?? null,
+          batch_uuid: batchUuid,
+        }, 'final', entryUuid, state.catalog.catalog_version);
+        state.entries.set(entryUuid, entry);
+        return {
+          plot_uuid: plotUuid,
+          entry_uuid: entryUuid,
+          outbox_event_uuid: `dddddddd-dddd-4ddd-8ddd-${String(index + 1).padStart(12, '0')}`,
+          sync_version: 1,
+        };
+      });
+      state.lastBatchPayload = payload;
+      return json(res, 201, { batch_uuid: batchUuid, entries: receipts });
+    }
     if (payload.status !== 'draft' || typeof payload.entry_uuid !== 'string') return errorJson(res, 400, 'invalid_draft_payload');
     const validation = validateEntryPayload(state, payload);
     if (!validation.ok) return json(res, 422, { error: 'invalid_entry_payload', errors: validation.errors });
@@ -598,7 +802,13 @@ function createTask14JournalPreviewServer(options = {}) {
         return json(res, 200, {
           draft_post_count: state.draftPostCount,
           final_put_count: state.finalPutCount,
+          plot_post_count: state.plotPostCount,
+          plot_put_count: state.plotPutCount,
+          group_post_count: state.groupPostCount,
+          group_put_count: state.groupPutCount,
+          batch_post_count: state.batchPostCount,
           last_final_payload: state.lastFinalPayload,
+          last_batch_payload: state.lastBatchPayload,
         });
       }
       if (requestUrl.pathname.startsWith('/api/')) return await handleApi(req, res, requestUrl, state);

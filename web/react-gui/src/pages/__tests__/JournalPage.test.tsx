@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => ({
   useJournalCatalog: vi.fn(),
   useJournalEntries: vi.fn(),
   useJournalPlots: vi.fn(),
+  useJournalPlotGroups: vi.fn(),
   useSWR: vi.fn(),
   getZones: vi.fn(),
   journalApi: {
@@ -21,6 +22,7 @@ const mocks = vi.hoisted(() => ({
   retryCatalog: vi.fn(),
   retryEntries: vi.fn(),
   retryPlots: vi.fn(),
+  retryGroups: vi.fn(),
   retryZones: vi.fn(),
 }));
 
@@ -42,6 +44,9 @@ vi.mock('../../journal/useJournalEntries', () => ({
 }));
 vi.mock('../../journal/useJournalPlots', () => ({
   useJournalPlots: mocks.useJournalPlots,
+}));
+vi.mock('../../journal/useJournalPlotGroups', () => ({
+  useJournalPlotGroups: mocks.useJournalPlotGroups,
 }));
 vi.mock('swr', () => ({
   default: mocks.useSWR,
@@ -97,6 +102,7 @@ import type {
   JournalCatalog,
   JournalPlot,
   JournalVocabRow,
+  PlotGroup,
 } from '../../types/journal';
 import type { UpdateEntryPayload } from '../../services/journalApi';
 import type { IrrigationZone } from '../../types/farming';
@@ -337,14 +343,60 @@ const catalog = {
   vocab: [{ code: 'irrigation', kind: 'activity', active: 1 }],
 };
 const entries = [{ entry_uuid: 'e1' }];
-const plots: JournalPlot[] = [{
-  plot_uuid: 'p1',
-  plot_code: 'N-1',
-  name: 'North field',
-  zone_uuid: 'zone-1',
-  crop_hint: 'Wheat',
-  settings: { layout_code: 'greenhouse' },
-} as JournalPlot];
+const ROUTE_FIXTURE_IDS = {
+  primaryPlot: '11111111-1111-4111-8111-111111111111',
+  secondaryPlot: '22222222-2222-4222-8222-222222222222',
+  numericPlot: '44444444-4444-4444-8444-444444444444',
+  namedPlot: '55555555-5555-4555-8555-555555555555',
+  primaryGroup: '33333333-3333-4333-8333-333333333333',
+} as const;
+
+function journalPlot(overrides: Partial<JournalPlot> = {}): JournalPlot {
+  return {
+    contract_version: 1,
+    plot_uuid: ROUTE_FIXTURE_IDS.primaryPlot,
+    plot_code: 'N-1',
+    name: 'North field',
+    zone_uuid: 'zone-1',
+    station_code: null,
+    crop_hint: 'Wheat',
+    area_m2: 100,
+    active: 1,
+    sync_version: 0,
+    owner_user_uuid: 'owner',
+    gateway_device_eui: 'gateway',
+    created_at: '2026-07-16T00:00:00.000Z',
+    updated_at: '2026-07-16T00:00:00.000Z',
+    deleted_at: null,
+    settings: {
+      layout_code: 'greenhouse',
+      updated_at: '2026-07-16T00:00:00.000Z',
+      updated_by_principal_uuid: 'author',
+      sync_version: 0,
+    },
+    ...overrides,
+  };
+}
+
+function journalPlotGroup(overrides: Partial<PlotGroup> = {}): PlotGroup {
+  return {
+    contract_version: 1,
+    group_uuid: ROUTE_FIXTURE_IDS.primaryGroup,
+    label: 'North pair',
+    owner_user_uuid: 'owner',
+    gateway_device_eui: 'gateway',
+    created_by_principal_uuid: 'author',
+    created_at: '2026-07-16T00:00:00.000Z',
+    resolved_at: null,
+    resolved_by_principal_uuid: null,
+    sync_version: 0,
+    deleted_at: null,
+    members: [ROUTE_FIXTURE_IDS.primaryPlot],
+    ...overrides,
+  };
+}
+
+const plots: JournalPlot[] = [journalPlot()];
 const zones = [{
   id: 1,
   name: 'North zone',
@@ -364,7 +416,7 @@ const carryForwardSource: EntryAggregate = {
   author_principal_uuid: 'author',
   author_label: null,
   gateway_device_eui: 'gateway',
-  plot_uuid: 'p1',
+  plot_uuid: ROUTE_FIXTURE_IDS.primaryPlot,
   zone_uuid: 'zone-1',
   device_eui: null,
   season_uuid: 'season-1',
@@ -479,6 +531,19 @@ describe('JournalPage', () => {
       loading: false,
       error: undefined,
       retry: mocks.retryPlots,
+      createPlot: vi.fn(),
+      updatePlot: vi.fn(),
+    });
+    mocks.useJournalPlotGroups.mockReturnValue({
+      groups: [],
+      activeGroups: [],
+      resolvedGroups: [],
+      loading: false,
+      error: undefined,
+      retry: mocks.retryGroups,
+      createPlotGroup: vi.fn(),
+      updatePlotGroup: vi.fn(),
+      revalidate: mocks.retryGroups,
     });
   });
 
@@ -497,7 +562,7 @@ describe('JournalPage', () => {
     expect(screen.getByRole('banner')).toBeInTheDocument();
     expect(screen.getByText('timeline.loading')).toBeInTheDocument();
     expect(mocks.useJournalEntries).toHaveBeenCalledWith(expect.anything(), false);
-    expect(mocks.useJournalPlots).toHaveBeenCalledWith(false);
+      expect(mocks.useJournalPlots).toHaveBeenCalledWith(false);
   });
 
   it('renders capability absence only for unavailable gateways', () => {
@@ -570,7 +635,7 @@ describe('JournalPage', () => {
     expect(mocks.timeline).toHaveBeenCalledWith(expect.objectContaining({ entries, plots }));
 
     fireEvent.change(screen.getByLabelText('filters.plot'), {
-      target: { value: 'p1' },
+      target: { value: ROUTE_FIXTURE_IDS.primaryPlot },
     });
     fireEvent.change(screen.getByLabelText('filters.activity'), {
       target: { value: 'irrigation' },
@@ -580,7 +645,7 @@ describe('JournalPage', () => {
       {
         status: 'final',
         limit: 50,
-        plot_uuid: 'p1',
+        plot_uuid: ROUTE_FIXTURE_IDS.primaryPlot,
         activity_code: 'irrigation',
       },
       true,
@@ -599,13 +664,238 @@ describe('JournalPage', () => {
     }));
   });
 
+  it('reaches New plot and Edit selected plot controls through the route', () => {
+    renderPage();
+    fireEvent.click(screen.getByRole('button', { name: 'logActivity' }));
+
+    const props = mocks.captureFlow.mock.lastCall?.[0];
+    expect(props.plotState).toEqual(expect.objectContaining({
+      createPlot: expect.any(Function),
+      updatePlot: expect.any(Function),
+    }));
+    expect(props.plots).toEqual(expect.arrayContaining([
+      expect.objectContaining({ plot_uuid: ROUTE_FIXTURE_IDS.primaryPlot, name: 'North field' }),
+    ]));
+  });
+
+  it('operates New plot and Edit selected plot through the real route controls', async () => {
+    mocks.useRealCaptureFlow = true;
+    mocks.useJournalCatalog.mockReturnValue({
+      catalog: captureCatalog,
+      available: true,
+      unavailable: false,
+      loading: false,
+      error: undefined,
+      retry: mocks.retryCatalog,
+    });
+    const editablePlot = {
+      ...plots[0],
+      active: 1,
+      deleted_at: null,
+      station_code: 'ST-1',
+      settings: { ...plots[0].settings, layout_code: 'open_field' },
+    };
+    const createPlot = vi.fn().mockResolvedValue(editablePlot);
+    const updatePlot = vi.fn().mockResolvedValue(editablePlot);
+    mocks.useJournalPlots.mockReturnValue({
+      plots: [editablePlot],
+      loading: false,
+      error: undefined,
+      retry: mocks.retryPlots,
+      createPlot,
+      updatePlot,
+    });
+
+    renderPage();
+    fireEvent.click(screen.getByRole('button', { name: 'logActivity' }));
+    expect(screen.queryByTestId('capture-flow')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'plot.new' }));
+    fireEvent.change(screen.getByLabelText('plot.code'), { target: { value: 'NEW-1' } });
+    fireEvent.change(screen.getByLabelText('plot.layout'), { target: { value: 'open_field' } });
+    fireEvent.click(screen.getByRole('button', { name: 'plot.save' }));
+    await waitFor(() => expect(createPlot).toHaveBeenCalledWith(expect.objectContaining({
+      plot_code: 'NEW-1',
+      layout_code: 'open_field',
+      base_sync_version: 0,
+    })));
+
+    await waitFor(() => expect(screen.queryByRole('heading', { name: 'plot.new' })).not.toBeInTheDocument());
+    fireEvent.click(screen.getByRole('button', { name: 'plot.edit' }));
+    fireEvent.change(screen.getByLabelText('plot.name'), { target: { value: 'Renamed field' } });
+    fireEvent.click(screen.getByRole('button', { name: 'plot.save' }));
+    await waitFor(() => expect(updatePlot).toHaveBeenCalledWith(
+      ROUTE_FIXTURE_IDS.primaryPlot,
+      expect.objectContaining({ name: 'Renamed field', base_sync_version: 0 }),
+    ));
+  });
+
+  it('reaches group create and active-group edit controls through the route', () => {
+    const group = journalPlotGroup();
+    mocks.useJournalPlotGroups.mockReturnValue({
+      groups: [group],
+      activeGroups: [group],
+      resolvedGroups: [],
+      loading: false,
+      error: undefined,
+      retry: mocks.retryPlots,
+      createPlotGroup: vi.fn(),
+      updatePlotGroup: vi.fn(),
+      revalidate: mocks.retryPlots,
+    });
+    renderPage();
+    fireEvent.click(screen.getByRole('button', { name: 'logActivity' }));
+
+    const props = mocks.captureFlow.mock.lastCall?.[0];
+    expect(props.plotGroups).toEqual([group]);
+    expect(props.groupState).toEqual(expect.objectContaining({
+      createPlotGroup: expect.any(Function),
+      updatePlotGroup: expect.any(Function),
+    }));
+  });
+
+  it('operates group create and active-group edit through the real route controls', async () => {
+    mocks.useRealCaptureFlow = true;
+    mocks.useJournalCatalog.mockReturnValue({
+      catalog: captureCatalog,
+      available: true,
+      unavailable: false,
+      loading: false,
+      error: undefined,
+      retry: mocks.retryCatalog,
+    });
+    const firstPlot = {
+      ...plots[0],
+      active: 1,
+      deleted_at: null,
+      station_code: 'ST-1',
+      settings: { ...plots[0].settings, layout_code: 'open_field' },
+    };
+    const secondPlot = {
+      ...firstPlot,
+      plot_uuid: ROUTE_FIXTURE_IDS.secondaryPlot,
+      plot_code: 'N-2',
+      name: 'North second',
+    };
+    const activeGroup = journalPlotGroup({
+      members: [ROUTE_FIXTURE_IDS.primaryPlot, ROUTE_FIXTURE_IDS.secondaryPlot],
+      sync_version: 3,
+    });
+    const createPlotGroup = vi.fn().mockResolvedValue(activeGroup);
+    const updatePlotGroup = vi.fn().mockResolvedValue(activeGroup);
+    mocks.useJournalPlots.mockReturnValue({
+      plots: [firstPlot, secondPlot],
+      loading: false,
+      error: undefined,
+      retry: mocks.retryPlots,
+      createPlot: vi.fn(),
+      updatePlot: vi.fn(),
+    });
+    mocks.useJournalPlotGroups.mockReturnValue({
+      groups: [activeGroup],
+      activeGroups: [activeGroup],
+      resolvedGroups: [],
+      loading: false,
+      error: undefined,
+      retry: mocks.retryGroups,
+      createPlotGroup,
+      updatePlotGroup,
+      revalidate: mocks.retryGroups,
+    });
+
+    renderPage();
+    fireEvent.click(screen.getByRole('button', { name: 'logActivity' }));
+    fireEvent.click(screen.getByRole('button', { name: 'North pair' }));
+    fireEvent.click(screen.getByRole('button', { name: 'where.createGroup' }));
+    fireEvent.change(screen.getByRole('textbox', { name: 'where.groupLabel' }), {
+      target: { value: 'Created pair' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'where.saveGroup' }));
+    await waitFor(() => expect(createPlotGroup).toHaveBeenCalledWith(expect.objectContaining({
+      group_uuid: expect.any(String),
+      base_sync_version: 0,
+      label: 'Created pair',
+      members: [ROUTE_FIXTURE_IDS.primaryPlot, ROUTE_FIXTURE_IDS.secondaryPlot],
+      resolved: false,
+    })));
+
+    fireEvent.click(screen.getByRole('button', { name: /where.editGroup North pair/ }));
+    fireEvent.change(screen.getByRole('textbox', { name: 'where.groupLabel' }), {
+      target: { value: 'Renamed pair' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'where.saveGroup' }));
+    await waitFor(() => expect(updatePlotGroup).toHaveBeenCalledWith(
+      ROUTE_FIXTURE_IDS.primaryGroup,
+      expect.objectContaining({
+        group_uuid: ROUTE_FIXTURE_IDS.primaryGroup,
+        base_sync_version: 3,
+        label: 'Renamed pair',
+        members: [ROUTE_FIXTURE_IDS.primaryPlot, ROUTE_FIXTURE_IDS.secondaryPlot],
+        resolved: false,
+      }),
+    ));
+  });
+
+  it('proves shipped numeric and nonnumeric station range selection for Apply and Enter', async () => {
+    mocks.useRealCaptureFlow = true;
+    const stationPlot = (uuid: string, plotCode: string, name: string): JournalPlot => ({
+      ...plots[0],
+      plot_uuid: uuid,
+      plot_code: plotCode,
+      name,
+      station_code: 'ST-1',
+      active: 1,
+      deleted_at: null,
+      settings: { ...plots[0].settings, layout_code: 'open_field' },
+    });
+    const numericOne = stationPlot(ROUTE_FIXTURE_IDS.numericPlot, '1', 'Numeric one');
+    const numericTwo = stationPlot(ROUTE_FIXTURE_IDS.secondaryPlot, '2', 'Numeric two');
+    const named = stationPlot(ROUTE_FIXTURE_IDS.namedPlot, 'NORTH-A', 'Named bed');
+    mocks.useJournalCatalog.mockReturnValue({
+      catalog: captureCatalog,
+      available: true,
+      unavailable: false,
+      loading: false,
+      error: undefined,
+      retry: mocks.retryCatalog,
+    });
+    mocks.useJournalPlots.mockReturnValue({
+      plots: [numericOne, numericTwo, named],
+      loading: false,
+      error: undefined,
+      retry: mocks.retryPlots,
+      createPlot: vi.fn(),
+      updatePlot: vi.fn(),
+    });
+
+    renderPage();
+    fireEvent.click(screen.getByRole('button', { name: 'logActivity' }));
+    fireEvent.click(screen.getByText('ST-1', { exact: true }));
+    const range = screen.getByRole('textbox', { name: 'where.range' });
+    expect(screen.getByRole('button', { name: 'Named bed' })).toBeVisible();
+    fireEvent.click(screen.getByRole('button', { name: 'Named bed' }));
+
+    fireEvent.change(range, { target: { value: '1-2' } });
+    fireEvent.click(screen.getByRole('button', { name: 'where.applyRange' }));
+    expect(screen.getByRole('button', { name: /Numeric one$/ })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByRole('button', { name: /Numeric two$/ })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByRole('button', { name: 'Named bed' })).toHaveAttribute('aria-pressed', 'true');
+
+    fireEvent.change(range, { target: { value: '2' } });
+    fireEvent.keyDown(range, { key: 'Enter', code: 'Enter' });
+    expect(screen.getByRole('button', { name: /Numeric one$/ })).toHaveAttribute('aria-pressed', 'false');
+    expect(screen.getByRole('button', { name: /Numeric two$/ })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByRole('button', { name: 'Named bed' })).toHaveAttribute('aria-pressed', 'true');
+    await act(async () => {});
+  });
+
   it('opens a known query zone without exposing its identifier and preserves plot crop context', async () => {
     renderPage('/journal?capture=1&zone_uuid=zone-1');
 
     await waitFor(() => expect(mocks.captureFlow).toHaveBeenCalled());
     const props = mocks.captureFlow.mock.lastCall?.[0];
     expect(props.initialPlot).toEqual(expect.objectContaining({
-      plot_uuid: 'p1',
+      plot_uuid: ROUTE_FIXTURE_IDS.primaryPlot,
       crop_hint: 'Barley',
     }));
     expect(props.initialPlot).not.toBe(plots[0]);
@@ -617,7 +907,7 @@ describe('JournalPage', () => {
   it('enriches every plot copy with its linked zone crop without mutating hook data', async () => {
     const secondPlot = {
       ...plots[0],
-      plot_uuid: 'p2',
+      plot_uuid: ROUTE_FIXTURE_IDS.secondaryPlot,
       plot_code: 'S-1',
       name: 'South field',
       zone_uuid: 'zone-2',
@@ -643,8 +933,8 @@ describe('JournalPage', () => {
     await waitFor(() => expect(mocks.captureFlow).toHaveBeenCalled());
     const captureProps = mocks.captureFlow.mock.lastCall?.[0];
     expect(captureProps.plots).toEqual(expect.arrayContaining([
-      expect.objectContaining({ plot_uuid: 'p1', crop_hint: 'Barley' }),
-      expect.objectContaining({ plot_uuid: 'p2', crop_hint: 'Corn' }),
+      expect.objectContaining({ plot_uuid: ROUTE_FIXTURE_IDS.primaryPlot, crop_hint: 'Barley' }),
+      expect.objectContaining({ plot_uuid: ROUTE_FIXTURE_IDS.secondaryPlot, crop_hint: 'Corn' }),
     ]));
     expect(captureProps.plots[1]).not.toBe(secondPlot);
     expect(secondPlot.crop_hint).toBeNull();
@@ -713,6 +1003,49 @@ describe('JournalPage', () => {
 
     expect(screen.getByTestId('timeline')).toBeInTheDocument();
     expect(screen.queryByText('error.title')).not.toBeInTheDocument();
+  });
+
+  it('keeps the ordinary timeline usable when plot-group enrichment fails', () => {
+    mocks.useJournalPlotGroups.mockReturnValue({
+      groups: [],
+      activeGroups: [],
+      resolvedGroups: [],
+      loading: false,
+      error: new Error('groups offline'),
+      retry: mocks.retryGroups,
+      createPlotGroup: vi.fn(),
+      updatePlotGroup: vi.fn(),
+      revalidate: mocks.retryGroups,
+    });
+
+    renderPage();
+
+    expect(screen.getByTestId('timeline')).toBeInTheDocument();
+    expect(screen.queryByText('error.title')).not.toBeInTheDocument();
+  });
+
+  it('scopes a capture plot-group error and retry to the group resource', () => {
+    mocks.useJournalPlotGroups.mockReturnValue({
+      groups: [],
+      activeGroups: [],
+      resolvedGroups: [],
+      loading: false,
+      error: new Error('groups offline'),
+      retry: mocks.retryGroups,
+      createPlotGroup: vi.fn(),
+      updatePlotGroup: vi.fn(),
+      revalidate: mocks.retryGroups,
+    });
+
+    renderPage('/journal?capture=1');
+
+    expect(screen.getByText('error.title')).toBeInTheDocument();
+    expect(screen.queryByTestId('capture-flow')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'error.retry' }));
+    expect(mocks.retryGroups).toHaveBeenCalledOnce();
+    expect(mocks.retryEntries).not.toHaveBeenCalled();
+    expect(mocks.retryPlots).not.toHaveBeenCalled();
+    expect(mocks.retryZones).not.toHaveBeenCalled();
   });
 
   it('blocks query and local capture on zone enrichment failure with a separate retry', () => {
@@ -840,13 +1173,13 @@ describe('JournalPage', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'mock-close' }));
     await waitFor(() => expect(screen.queryByTestId('capture-flow')).not.toBeInTheDocument());
-    fireEvent.change(screen.getByLabelText('filters.plot'), { target: { value: 'p1' } });
+    fireEvent.change(screen.getByLabelText('filters.plot'), { target: { value: ROUTE_FIXTURE_IDS.primaryPlot } });
     fireEvent.change(screen.getByLabelText('filters.activity'), { target: { value: 'irrigation' } });
     await waitFor(() => expect(mocks.useJournalEntries).toHaveBeenLastCalledWith(
       {
         status: 'final',
         limit: 50,
-        plot_uuid: 'p1',
+        plot_uuid: ROUTE_FIXTURE_IDS.primaryPlot,
         activity_code: 'irrigation',
       },
       true,
@@ -878,7 +1211,26 @@ describe('JournalPage', () => {
     await expect(saved).resolves.toBeUndefined();
   });
 
-  it('completes a realistic open-field zone capture in at most nine primary activations', async () => {
+  it('revalidates entries after onSaved receives a BatchMutationReceipt', async () => {
+    renderPage();
+    fireEvent.click(screen.getByRole('button', { name: 'logActivity' }));
+    await waitFor(() => expect(mocks.captureFlow).toHaveBeenCalled());
+
+    const onSaved = mocks.captureFlow.mock.lastCall?.[0].onSaved as (receipt: unknown) => Promise<void>;
+    await onSaved({
+      batch_uuid: 'batch-1',
+      entries: [{
+        plot_uuid: ROUTE_FIXTURE_IDS.primaryPlot,
+        entry_uuid: 'entry-1',
+        outbox_event_uuid: 'outbox-1',
+        sync_version: 1,
+      }],
+    });
+
+    expect(mocks.retryEntries).toHaveBeenCalledOnce();
+  });
+
+  it('preserves the existing nine-activation open_field SLA regression', async () => {
     expect(captureCatalog.templates.find(({ code }) => code === 'farmer_quick')?.definition).toEqual({
       sections: [
         { code: 'what_where_when', fields: ['activity_code', 'plot_uuid', 'occurred_start'] },

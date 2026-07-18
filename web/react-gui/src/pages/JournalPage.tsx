@@ -10,9 +10,11 @@ import { useAuth } from '../contexts/AuthContext';
 import { useJournalCatalog } from '../journal/useJournalCatalog';
 import { useJournalEntries } from '../journal/useJournalEntries';
 import { useJournalPlots } from '../journal/useJournalPlots';
+import { useJournalPlotGroups } from '../journal/useJournalPlotGroups';
 import { irrigationZonesAPI } from '../services/api';
 import type { IrrigationZone } from '../types/farming';
-import type { EntryFinalMutationReceipt, EntryListFilters } from '../types/journal';
+import type { EntryListFilters } from '../types/journal';
+import type { JournalSavedReceipt } from '../components/journal/capture/JournalCaptureFlow';
 
 type JournalIrrigationZone = IrrigationZone & {
   zone_uuid?: string | null;
@@ -57,12 +59,14 @@ export const JournalPage: React.FC = () => {
   }), [activityCode, exactEntryUuid, plotUuid]);
   const entryState = useJournalEntries(filters, catalogState.available);
   const plotState = useJournalPlots(catalogState.available);
+  const groupState = useJournalPlotGroups(catalogState.available);
   const zonesState = useSWR<JournalIrrigationZone[]>(
     catalogState.available ? 'journal:irrigation-zones' : null,
     () => irrigationZonesAPI.getAll(),
     { revalidateOnFocus: false, shouldRetryOnError: false },
   );
-  const readError = entryState.error || plotState.error;
+  const timelineReadError = entryState.error || plotState.error;
+  const captureEnrichmentError = groupState.error || zonesState.error;
   const activities = (catalogState.catalog?.vocab ?? [])
     .filter((row) => row.kind === 'activity' && row.active === 1);
 
@@ -100,8 +104,8 @@ export const JournalPage: React.FC = () => {
     if (!initialPlot?.zone_uuid) return undefined;
     return (zonesState.data ?? []).find((zone) => zoneUuid(zone) === initialPlot.zone_uuid);
   }, [initialPlot, zonesState.data]);
-  const captureReady = catalogState.available && !catalogState.error && !readError &&
-    !plotState.loading && Array.isArray(zonesState.data) && !zonesState.isLoading && !zonesState.error;
+  const captureReady = catalogState.available && !catalogState.error && !timelineReadError && !captureEnrichmentError &&
+    !plotState.loading && !groupState.loading && Array.isArray(zonesState.data) && !zonesState.isLoading && !zonesState.error;
 
   React.useEffect(() => {
     if (!captureRequested) {
@@ -143,7 +147,7 @@ export const JournalPage: React.FC = () => {
     setSearchParams(next, { replace: true });
   };
 
-  const onSaved = async (_receipt: EntryFinalMutationReceipt) => {
+  const onSaved = async (_receipt: JournalSavedReceipt) => {
     await entryState.retry();
   };
 
@@ -154,7 +158,10 @@ export const JournalPage: React.FC = () => {
 
   const showCapture = captureOpen && captureReady && catalogState.catalog;
 
-  const retryReads = () => Promise.all([entryState.retry(), plotState.retry()]);
+  const retryTimelineReads = () => Promise.all([entryState.retry(), plotState.retry()]);
+  const retryCaptureEnrichment = () => groupState.error
+    ? groupState.retry()
+    : zonesState.mutate();
   const errorCard = (retry: () => Promise<unknown>) => (
     <div className="rounded-2xl border border-[var(--border)] bg-[var(--card)] p-8">
       <h2 className="text-xl font-bold text-[var(--text)]">{t('error.title')}</h2>
@@ -190,17 +197,22 @@ export const JournalPage: React.FC = () => {
           </div>
         ) : catalogState.error ? (
           errorCard(catalogState.retry)
-        ) : (captureRequested || captureOpen) && zonesState.error ? (
-          errorCard(() => zonesState.mutate())
+        ) : timelineReadError ? (
+          errorCard(retryTimelineReads)
+        ) : (captureRequested || captureOpen) && captureEnrichmentError ? (
+          errorCard(retryCaptureEnrichment)
         ) : showCapture ? (
           <JournalCaptureFlow
             catalog={catalogState.catalog!}
             plots={capturePlots}
+            plotGroups={groupState.groups}
             initialPlot={initialPlot}
             recentEntries={entryState.entries}
             initialTimezone={zoneTimezone(initialZone)}
             zoneCrops={zoneCrops}
             zoneTimezones={zoneTimezones}
+            plotState={plotState}
+            groupState={groupState}
             onClose={closeCapture}
             onOpenExisting={onOpenExisting}
             onSaved={onSaved}
@@ -258,7 +270,7 @@ export const JournalPage: React.FC = () => {
               </button>
             </div>
 
-            {readError ? errorCard(retryReads) : (
+            {timelineReadError ? errorCard(retryTimelineReads) : (
               <JournalTimeline
                 entries={entryState.entries}
                 plots={plotState.plots}

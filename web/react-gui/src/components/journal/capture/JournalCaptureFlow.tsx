@@ -24,6 +24,11 @@ import {
   type ResolvedOccurrence,
 } from '../../../journal/occurrence';
 import { useCaptureDraft } from '../../../journal/useCaptureDraft';
+import { buildFinalBatchPayload } from '../../../journal/buildFinalBatchPayload';
+import type {
+  JournalPlotGroupResourceActions,
+} from '../../../journal/useJournalPlotGroups';
+import type { JournalPlotResourceActions } from '../../../journal/useJournalPlots';
 import type {
   CarryForwardCandidate,
   CarryForwardContext,
@@ -31,10 +36,12 @@ import type {
 import { journalApi } from '../../../services/journalApi';
 import type { CreateEntryPayload } from '../../../services/journalApi';
 import type {
+  BatchMutationReceipt,
   EntryAggregate,
   EntryFinalMutationReceipt,
   JournalCatalog,
   JournalPlot,
+  PlotGroup,
 } from '../../../types/journal';
 import type {
   ActivityLeafSelection,
@@ -49,21 +56,28 @@ import type {
 import { ActivityPicker } from './ActivityPicker';
 import { ConfirmStrip, type CaptureEditStep, type ConfirmValueToken } from './ConfirmStrip';
 import { EntryForm, validateEntryForm } from './EntryForm';
+import { PlotForm } from '../where/PlotForm';
+import { PlotPicker } from '../where/PlotPicker';
 import { RepeatTreatmentCard } from './RepeatTreatmentCard';
 import { SaveState } from './SaveState';
 
 export interface JournalCaptureFlowProps {
   catalog: JournalCatalog;
   plots: JournalPlot[];
+  plotGroups: PlotGroup[];
   initialPlot?: JournalPlot;
   recentEntries: EntryAggregate[];
   initialTimezone?: string;
   zoneCrops?: Readonly<Record<string, string>>;
   zoneTimezones?: Readonly<Record<string, string>>;
+  plotState: Pick<JournalPlotResourceActions, 'createPlot' | 'updatePlot'>;
+  groupState: Pick<JournalPlotGroupResourceActions, 'createPlotGroup' | 'updatePlotGroup'>;
   onClose: () => void;
   onOpenExisting: (entryUuid: string) => void;
-  onSaved: (receipt: EntryFinalMutationReceipt) => void | Promise<void>;
+  onSaved: (receipt: JournalSavedReceipt) => void | Promise<void>;
 }
+
+export type JournalSavedReceipt = EntryFinalMutationReceipt | BatchMutationReceipt;
 
 type CaptureStep = CaptureEditStep | 'confirm';
 
@@ -71,7 +85,14 @@ interface DuplicateCandidate {
   entry_uuid: string;
   occurred_start: string;
   activity_code: string;
+  plot_uuid?: string | null;
   values: EntryAggregate['values'];
+}
+
+interface DuplicateCandidateGroup {
+  key: string;
+  label: string;
+  candidates: DuplicateCandidate[];
 }
 
 const FOCUS_RING =
@@ -160,6 +181,18 @@ function isCanonicalUuid(value: unknown): value is string {
   return isTrimmedNonEmpty(value) && CANONICAL_UUID.test(value);
 }
 
+function cloneFinalBatchPayload(payload: Parameters<typeof journalApi.createFinalBatch>[0]):
+  Parameters<typeof journalApi.createFinalBatch>[0] {
+  return {
+    ...payload,
+    plot_uuids: [...payload.plot_uuids],
+    values: payload.values.map((value) => ({ ...value })),
+    ...(payload.duplicate_guard_ack_entry_uuids
+      ? { duplicate_guard_ack_entry_uuids: [...payload.duplicate_guard_ack_entry_uuids] }
+      : {}),
+  };
+}
+
 function errorCode(error: unknown): string | null {
   if (!isRecord(error)) return null;
   const response = isRecord(error.response) ? error.response : null;
@@ -192,6 +225,7 @@ function duplicateFromEntry(value: unknown): DuplicateCandidate | null {
     entry_uuid: value.entry_uuid,
     occurred_start: value.occurred_start,
     activity_code: value.activity_code,
+    plot_uuid: typeof value.plot_uuid === 'string' ? value.plot_uuid : null,
     values: duplicateValues(value.values),
   };
 }
@@ -215,8 +249,30 @@ function duplicateFromError(error: unknown): DuplicateCandidate | null {
     entry_uuid: candidate.entryUuid,
     occurred_start: candidate.occurredStart,
     activity_code: candidate.activityCode,
+    plot_uuid: typeof candidate.plotUuid === 'string' ? candidate.plotUuid : null,
     values: duplicateValues(candidate.values),
   };
+}
+
+function duplicateCandidatesFromError(error: unknown): DuplicateCandidate[] {
+  if (errorCode(error) !== 'duplicate_candidates' || !isRecord(error)) return [];
+  const response = isRecord(error.response) ? error.response : null;
+  const data = response && isRecord(response.data) ? response.data : null;
+  const details = data && isRecord(data.details) ? data.details : null;
+  if (!details || !Array.isArray(details.duplicateCandidates)) return [];
+  const parsed: Array<DuplicateCandidate | null> = details.duplicateCandidates
+    .map((candidate) => {
+      if (!isRecord(candidate) || !isCanonicalUuid(candidate.entryUuid) ||
+          !isValidApiInstant(candidate.occurredStart) || !isTrimmedNonEmpty(candidate.activityCode)) return null;
+      return {
+        entry_uuid: candidate.entryUuid,
+        occurred_start: candidate.occurredStart,
+        activity_code: candidate.activityCode,
+        plot_uuid: typeof candidate.plotUuid === 'string' ? candidate.plotUuid : null,
+        values: duplicateValues(candidate.values),
+      } satisfies DuplicateCandidate;
+    });
+  return parsed.filter((candidate): candidate is DuplicateCandidate => candidate != null);
 }
 
 function localizedNumber(value: number, locale: string): string {
@@ -390,11 +446,14 @@ function sanitizeValues(
 export const JournalCaptureFlow: React.FC<JournalCaptureFlowProps> = ({
   catalog,
   plots,
+  plotGroups,
   initialPlot,
   recentEntries,
   initialTimezone,
   zoneCrops = {},
   zoneTimezones = {},
+  plotState,
+  groupState,
   onClose,
   onOpenExisting,
   onSaved,
@@ -403,12 +462,17 @@ export const JournalCaptureFlow: React.FC<JournalCaptureFlowProps> = ({
   const locale = i18n.resolvedLanguage || i18n.language || 'en';
   const modelResult = useMemo(() => buildCatalogModel(catalog), [catalog]);
   const model = modelResult.ok ? modelResult.model : null;
-  const [step, setStep] = useState<CaptureStep>(initialPlot ? 'activity' : 'where');
-  const [selectedPlotUuid, setSelectedPlotUuid] = useState(initialPlot?.plot_uuid ?? '');
-  const [layoutCode, setLayoutCode] = useState(initialPlot?.settings.layout_code ?? '');
+  const usableInitialPlot = initialPlot && initialPlot.active === 1 && initialPlot.deleted_at === null
+    ? initialPlot
+    : undefined;
+  const [step, setStep] = useState<CaptureStep>(usableInitialPlot ? 'activity' : 'where');
+  const [selectedPlotUuids, setSelectedPlotUuids] = useState<string[]>(
+    usableInitialPlot ? [usableInitialPlot.plot_uuid] : [],
+  );
+  const [layoutCode, setLayoutCode] = useState(usableInitialPlot?.settings.layout_code ?? '');
   const [templateCode, setTemplateCode] = useState('farmer_quick');
   const [leaf, setLeaf] = useState<ActivityLeafSelection | null>(null);
-  const initialCrop = cropForPlot(initialPlot, zoneCrops);
+  const initialCrop = cropForPlot(usableInitialPlot, zoneCrops);
   const [crop, setCrop] = useState(initialCrop);
   const browserTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
   const effectiveInitialTimezone = initialTimezone ?? browserTimezone;
@@ -433,10 +497,13 @@ export const JournalCaptureFlow: React.FC<JournalCaptureFlowProps> = ({
   );
   const [showValidation, setShowValidation] = useState(false);
   const [whereError, setWhereError] = useState<string | null>(null);
+  const [batchError, setBatchError] = useState<string | null>(null);
   const [shortlist, setShortlist] = useState<ActivityShortlist>(() => ({
     plotRecent: [], seasonCommon: [], farmRecent: [], currentSeasonUuid: null,
   }));
   const [duplicateCandidate, setDuplicateCandidate] = useState<DuplicateCandidate | null>(null);
+  const [duplicateCandidates, setDuplicateCandidates] = useState<DuplicateCandidate[]>([]);
+  const [duplicateAckEntryUuids, setDuplicateAckEntryUuids] = useState<string[]>([]);
   const [duplicateAck, setDuplicateAck] = useState<string | null>(null);
   const [duplicateInFlight, setDuplicateInFlight] = useState(false);
   const [duplicateWarningShown, setDuplicateWarningShown] = useState(false);
@@ -444,8 +511,10 @@ export const JournalCaptureFlow: React.FC<JournalCaptureFlowProps> = ({
   const [carryForwardCandidate, setCarryForwardCandidate] = useState<CarryForwardCandidate | null>(null);
   const [safePrefill, setSafePrefill] = useState<CaptureEntryValueInput[]>([]);
   const [stickyLossWarning, setStickyLossWarning] = useState(false);
-  const [finalReceipt, setFinalReceipt] = useState<EntryFinalMutationReceipt | null>(null);
+  const [finalReceipt, setFinalReceipt] = useState<JournalSavedReceipt | null>(null);
+  const [plotEditor, setPlotEditor] = useState<{ mode: 'create' | 'update'; plot?: JournalPlot } | null>(null);
   const [preparingConfirm, setPreparingConfirm] = useState(false);
+  const [batchAttemptPending, setBatchAttemptPending] = useState(false);
   const headingRef = useRef<HTMLHeadingElement>(null);
   const savePromiseRef = useRef<Promise<void> | null>(null);
   const savedCallbackFiredRef = useRef(false);
@@ -453,11 +522,34 @@ export const JournalCaptureFlow: React.FC<JournalCaptureFlowProps> = ({
   const closePromiseRef = useRef<Promise<void> | null>(null);
   const mountedRef = useRef(true);
   const preparationTokenRef = useRef(0);
+  const batchPayloadSnapshotRef = useRef<Parameters<typeof journalApi.createFinalBatch>[0] | null>(null);
   const contextKeyRef = useRef('');
   const automaticPrefillRef = useRef(new Map<string, CaptureEntryValueInput>());
   const prefillContextRef = useRef<string | null>(null);
 
-  const selectedPlot = plots.find(({ plot_uuid: uuid }) => uuid === selectedPlotUuid) ?? null;
+  const selectedPlotUuid = selectedPlotUuids.length === 1 ? selectedPlotUuids[0] : '';
+  const selectedPlot = plots.find(({ plot_uuid: uuid, active, deleted_at }) =>
+    uuid === selectedPlotUuid && active === 1 && deleted_at === null) ?? null;
+  const selectedPlots = selectedPlotUuids
+    .map((uuid) => plots.find((plot) => plot.plot_uuid === uuid))
+    .filter((plot): plot is JournalPlot => plot != null && plot.active === 1 && plot.deleted_at === null);
+  const duplicateCandidateGroups = useMemo<DuplicateCandidateGroup[]>(() => {
+    const groups = new Map<string, DuplicateCandidateGroup>();
+    duplicateCandidates.forEach((candidate) => {
+      const key = candidate.plot_uuid ?? '__farm__';
+      const plot = plots.find(({ plot_uuid: plotUuid, active, deleted_at }) =>
+        plotUuid === candidate.plot_uuid && active === 1 && deleted_at === null);
+      const label = plot?.name?.trim() || plot?.plot_code || t('capture.confirm.farmLevel');
+      const group = groups.get(key);
+      if (group) {
+        group.candidates.push(candidate);
+      } else {
+        groups.set(key, { key, label, candidates: [candidate] });
+      }
+    });
+    return [...groups.values()];
+  }, [duplicateCandidates, plots, t]);
+  const isMultiPlot = selectedPlotUuids.length > 1;
   const zoneLinked = Boolean(selectedPlot?.zone_uuid);
   const layout: JournalLayoutDefinition | undefined = model?.layouts.get(layoutCode);
   const templates = useMemo(() => {
@@ -549,7 +641,8 @@ export const JournalCaptureFlow: React.FC<JournalCaptureFlowProps> = ({
   }, [catalog.products, model, t]);
 
   const draft = useCaptureDraft();
-  const interactionLocked = preparingConfirm || saving || Boolean(finalReceipt);
+  const interactionLocked = preparingConfirm || saving || Boolean(finalReceipt) || batchAttemptPending;
+  const closeLocked = preparingConfirm || saving || batchAttemptPending;
 
   const prefillContext = JSON.stringify({
     plot: selectedPlotUuid,
@@ -608,6 +701,25 @@ export const JournalCaptureFlow: React.FC<JournalCaptureFlowProps> = ({
     duplicate_guard_ack_entry_uuid: ack ?? null,
     values: payloadValues,
   }), [draft.entryUuid, endResolved?.offsetMinutes, endUtcOffset, occurredEndLocal, inferredCrop, layout, leaf, occurredLocal, payloadValues, resolved?.offsetMinutes, selectedPlot, template, timezone, utcOffset]);
+
+  const buildBatchInput = useCallback((acknowledgements: readonly string[] = []) => ({
+    plotUuids: selectedPlotUuids,
+    season_crop: inferredCrop || null,
+    activity_code: leaf?.activity_code ?? '',
+    template_code: template?.code ?? '',
+    template_version: template?.version ?? 0,
+    layout_code: layout?.code ?? '',
+    layout_version: layout?.version ?? 0,
+    occurred_start_local: occurredLocal,
+    occurred_end_local: occurredEndLocal || null,
+    occurred_timezone: timezone,
+    occurred_utc_offset_minutes: resolvedRef.current?.offsetMinutes ?? resolved?.offsetMinutes ?? utcOffset,
+    occurred_end_utc_offset_minutes: endResolvedRef.current?.offsetMinutes ?? endResolved?.offsetMinutes ?? endUtcOffset,
+    values: payloadValues,
+    ...(acknowledgements.length > 0
+      ? { duplicate_guard_ack_entry_uuids: acknowledgements }
+      : {}),
+  }), [endResolved?.offsetMinutes, endUtcOffset, occurredEndLocal, inferredCrop, layout, leaf, occurredLocal, payloadValues, resolved?.offsetMinutes, selectedPlotUuids, template, timezone, utcOffset]);
 
   const commitValues = useCallback((next: CaptureEntryValueInput[]) => {
     const validation = validateTransition(
@@ -720,8 +832,19 @@ export const JournalCaptureFlow: React.FC<JournalCaptureFlowProps> = ({
     return () => { cancelled = true; };
   }, [draft.entryUuid, leaf, layout, model, resolved, selectedPlot]);
 
-  const selectPlot = (uuid: string) => {
+  const selectPlot = (uuid: string, selectionOverride?: readonly string[]) => {
     if (interactionLocked) return;
+    const requestedSelection = [...new Set(selectionOverride ?? (uuid ? [uuid] : []))];
+    const invalidSelection = requestedSelection.some((plotUuid) => {
+      const candidate = plots.find((plot) => plot.plot_uuid === plotUuid);
+      return candidate == null || candidate.active !== 1 || candidate.deleted_at !== null;
+    });
+    if (invalidSelection) {
+      setWhereError('capture.validation.invalidDefinition');
+      return;
+    }
+    batchPayloadSnapshotRef.current = null;
+    setBatchAttemptPending(false);
     const nextPlot = plots.find(({ plot_uuid: plotUuid }) => plotUuid === uuid);
     const nextLayoutCode = nextPlot?.settings.layout_code ?? '';
     const nextLayout = model?.layouts.get(nextLayoutCode);
@@ -742,7 +865,7 @@ export const JournalCaptureFlow: React.FC<JournalCaptureFlowProps> = ({
     const nextTimezone = nextPlot?.zone_uuid
       ? zoneTimezones[nextPlot.zone_uuid] ?? browserTimezone
       : browserTimezone;
-    setSelectedPlotUuid(uuid);
+    setSelectedPlotUuids(requestedSelection);
     setLayoutCode(nextLayoutCode);
     setTemplateCode(nextTemplate);
     const nextCrop = cropForPlot(nextPlot, zoneCrops);
@@ -787,11 +910,31 @@ export const JournalCaptureFlow: React.FC<JournalCaptureFlowProps> = ({
       plotRecent: [], seasonCommon: [], farmRecent: [], currentSeasonUuid: null,
     });
     setDuplicateCandidate(null);
+    setDuplicateCandidates([]);
     setDuplicateAck(null);
+    setDuplicateAckEntryUuids([]);
+    setBatchError(null);
     setDuplicateInFlight(false);
     setCarryForwardCandidate(null);
     setSafePrefill([]);
     setWhereError(null);
+  };
+
+  const handlePlotSelection = (selection: {
+    plotUuids: string[];
+    layoutCode: string | null;
+    isMultiPlot: boolean;
+  }) => {
+    if (interactionLocked) return;
+    const sorted = [...new Set(selection.plotUuids)].sort();
+    const first = sorted[0];
+    selectPlot(first ?? '', sorted);
+    setLayoutCode(selection.layoutCode ?? '');
+    if (sorted.length > 1) {
+      setDuplicateCandidate(null);
+      setDuplicateCandidates([]);
+      setDuplicateAckEntryUuids([]);
+    }
   };
 
   const chooseLayout = (code: string) => {
@@ -910,6 +1053,10 @@ export const JournalCaptureFlow: React.FC<JournalCaptureFlowProps> = ({
       setShowValidation(true);
       const requiredValid = requiredFieldsSatisfied(fieldStates, values);
       if (!occurrenceValid || !endOccurrenceValid || !formValid || !requiredValid || !template || !layout) return;
+      if (isMultiPlot) {
+        setStep('confirm');
+        return;
+      }
       const token = preparationTokenRef.current + 1;
       preparationTokenRef.current = token;
       const contextKey = contextKeyRef.current;
@@ -933,8 +1080,67 @@ export const JournalCaptureFlow: React.FC<JournalCaptureFlowProps> = ({
     setStep(target);
   };
 
+  const finalizeBatch = useCallback(async (ackOverride: readonly string[] = duplicateAckEntryUuids) => {
+    if (finalReceipt || !isMultiPlot) return finalReceipt ?? undefined;
+    if (savePromiseRef.current) return savePromiseRef.current;
+    if (duplicateCandidates.length > 0 && ackOverride.length === 0) return undefined;
+
+    const payload = batchPayloadSnapshotRef.current
+      ? {
+          ...cloneFinalBatchPayload(batchPayloadSnapshotRef.current),
+          ...(ackOverride.length > 0
+            ? { duplicate_guard_ack_entry_uuids: [...ackOverride] }
+            : {}),
+        }
+      : (() => {
+          const built = buildFinalBatchPayload(buildBatchInput(ackOverride));
+          if (!built.ok) {
+            setBatchError(built.error.message);
+            return null;
+          }
+          const snapshot = cloneFinalBatchPayload(built.payload);
+          batchPayloadSnapshotRef.current = snapshot;
+          return cloneFinalBatchPayload(snapshot);
+        })();
+    if (!payload) return undefined;
+
+    const promise = (async (): Promise<BatchMutationReceipt> => {
+      setBatchAttemptPending(true);
+      setSaving(true);
+      setBatchError(null);
+      try {
+        const receipt = await journalApi.createFinalBatch(payload);
+        setDuplicateCandidates([]);
+        setDuplicateAckEntryUuids([]);
+        setStickyLossWarning(false);
+        batchPayloadSnapshotRef.current = null;
+        setBatchAttemptPending(false);
+        setFinalReceipt(receipt);
+        return receipt;
+      } catch (error) {
+        const candidates = duplicateCandidatesFromError(error);
+        if (candidates.length > 0) {
+          setDuplicateCandidates(candidates);
+          setDuplicateAckEntryUuids([]);
+          setStickyLossWarning(false);
+        } else {
+          setStickyLossWarning(true);
+        }
+        throw error;
+      } finally {
+        setSaving(false);
+        savePromiseRef.current = null;
+      }
+    })();
+    savePromiseRef.current = promise.then(() => undefined, () => undefined);
+    return promise;
+  }, [buildBatchInput, duplicateAckEntryUuids, duplicateCandidates.length, finalReceipt, isMultiPlot]);
+
   const finalize = useCallback(async (ackOverride?: string | null) => {
     if (finalReceipt) return;
+    if (isMultiPlot) {
+      return finalizeBatch(ackOverride ? [ackOverride] : duplicateAckEntryUuids);
+    }
     if (savePromiseRef.current) return savePromiseRef.current;
     const acknowledgedDuplicateUuid = duplicateCandidate &&
       (duplicateAck === duplicateCandidate.entry_uuid || ackOverride === duplicateCandidate.entry_uuid)
@@ -981,10 +1187,11 @@ export const JournalCaptureFlow: React.FC<JournalCaptureFlowProps> = ({
     })();
     savePromiseRef.current = promise.then(() => undefined, () => undefined);
     return promise;
-  }, [buildPayload, duplicateAck, duplicateCandidate, draft, payloadValues]);
+  }, [buildPayload, duplicateAck, duplicateAckEntryUuids, duplicateCandidate, draft, finalizeBatch, isMultiPlot, payloadValues]);
 
   const retry = useCallback(async () => {
     if (savePromiseRef.current) return savePromiseRef.current;
+    if (isMultiPlot) return finalizeBatch(duplicateAckEntryUuids);
     const promise = (async () => {
       setSaving(true);
       try {
@@ -1001,11 +1208,11 @@ export const JournalCaptureFlow: React.FC<JournalCaptureFlowProps> = ({
     })();
     savePromiseRef.current = promise.then(() => undefined, () => undefined);
     return promise;
-  }, [draft]);
+  }, [draft, duplicateAckEntryUuids, finalizeBatch, isMultiPlot]);
 
   const close = useCallback(() => {
     if (closePromiseRef.current) return closePromiseRef.current;
-    if (closeStartedRef.current || preparingConfirm || saving) return Promise.resolve();
+    if (closeStartedRef.current || closeLocked) return Promise.resolve();
     closeStartedRef.current = true;
     const promise = (async () => {
       if (!finalReceipt || savedCallbackFiredRef.current) {
@@ -1025,13 +1232,20 @@ export const JournalCaptureFlow: React.FC<JournalCaptureFlowProps> = ({
       () => { closePromiseRef.current = null; },
     );
     return promise;
-  }, [finalReceipt, onClose, onSaved, preparingConfirm, saving]);
+  }, [closeLocked, finalReceipt, onClose, onSaved]);
 
   const saveSeparately = () => {
     if (!duplicateCandidate || interactionLocked) return;
     if (!duplicateWarningShown) setDuplicateWarningShown(true);
     setDuplicateAck(duplicateCandidate.entry_uuid);
     void finalize(duplicateCandidate.entry_uuid).catch(() => undefined);
+  };
+
+  const acknowledgeBatchDuplicates = () => {
+    if (duplicateCandidates.length === 0 || saving || finalReceipt) return;
+    const acknowledgements = duplicateCandidates.map((candidate) => candidate.entry_uuid);
+    setDuplicateAckEntryUuids(acknowledgements);
+    void finalizeBatch(acknowledgements).catch(() => undefined);
   };
 
   const carryForwardContext = useMemo<CarryForwardContext | null>(() => {
@@ -1127,6 +1341,13 @@ export const JournalCaptureFlow: React.FC<JournalCaptureFlowProps> = ({
   }
 
   const layoutChoices = [...model.layouts.values()].sort((left, right) => left.code.localeCompare(right.code));
+  const plotLayoutOptions = layoutChoices.map((candidate) => ({
+    code: candidate.code,
+    version: candidate.version,
+    label: catalogLabel(catalog.layouts.find((row) => row.code === candidate.code) ?? { code: candidate.code }, locale),
+  }));
+  const activePlotGroups = plotGroups.filter((group) => group.resolved_at === null);
+  const resolvedPlotGroups = plotGroups.filter((group) => group.resolved_at !== null);
   const activityRows = catalog.vocab.filter((row) => row.active === 1 && row.deleted_at == null);
   const templateOptions = templates.map((candidate) => ({
     value: candidate.code,
@@ -1166,6 +1387,15 @@ export const JournalCaptureFlow: React.FC<JournalCaptureFlowProps> = ({
         locale,
       )
     : '';
+  const duplicateActivity = (candidate: DuplicateCandidate): string => catalogLabel(
+    catalog.vocab.find((row) => row.code === candidate.activity_code) ?? {
+      code: candidate.activity_code,
+    },
+    locale,
+  );
+  const selectedPlotLabel = isMultiPlot
+    ? selectedPlots.map((plot) => plot.name?.trim() || plot.plot_code).join(', ')
+    : selectedPlot?.name?.trim() || selectedPlot?.plot_code || t('capture.confirm.farmLevel');
   const startOccurrenceLabel = `${t('capture.confirm.occurrence')} · ${t('capture.form.required')}`;
   const endOccurrenceLabel = `${t('capture.confirm.occurrence')} · ${t('capture.form.optional')}`;
   const endOffsetLabel = `${t('capture.validation.chooseUtcOffset')} · ${t('capture.form.optional')}`;
@@ -1175,14 +1405,41 @@ export const JournalCaptureFlow: React.FC<JournalCaptureFlowProps> = ({
       return (
         <section aria-labelledby="capture-where-title" className="space-y-4">
           <h2 id="capture-where-title" className="text-xl font-bold text-[var(--text)]">{t('capture.where.title')}</h2>
-          <label className="block text-sm font-bold text-[var(--text)]">
-            {t('capture.where.plot')}
-            <select aria-label={t('capture.where.plot')} value={selectedPlotUuid} onChange={(event) => selectPlot(event.target.value)} className="mt-1 min-h-11 w-full rounded-xl border border-[var(--border)] bg-[var(--card)] px-3 text-[var(--text)]">
-              <option value="">{t('capture.where.farmLevel')}</option>
-              {plots.map((candidate) => <option key={candidate.plot_uuid} value={candidate.plot_uuid}>{candidate.name?.trim() || candidate.plot_code}</option>)}
-            </select>
-          </label>
-          {!selectedPlot && (
+          <PlotPicker
+            plots={plots}
+            activeGroups={activePlotGroups}
+            resolvedGroups={resolvedPlotGroups}
+            allowNoPlot
+            value={{ plotUuids: selectedPlotUuids, layoutCode: layoutCode || null, isMultiPlot }}
+            onChange={handlePlotSelection}
+            onCreateGroup={groupState.createPlotGroup}
+            onUpdateGroup={groupState.updatePlotGroup}
+          />
+          {plotEditor ? (
+            <PlotForm
+              mode={plotEditor.mode}
+              initialPlot={plotEditor.plot}
+              layoutOptions={plotLayoutOptions}
+              onSubmit={(payload) => plotEditor.mode === 'create'
+                ? plotState.createPlot(payload)
+                : plotState.updatePlot(payload.plot_uuid, payload)}
+              onAfterSave={(savedPlot) => {
+                selectPlot(savedPlot.plot_uuid);
+                setPlotEditor(null);
+              }}
+              onCancel={() => setPlotEditor(null)}
+            />
+          ) : (
+            <div className="flex flex-wrap gap-3">
+              <button type="button" className="min-h-[56px] rounded-xl border border-[var(--border)] px-4 font-bold text-[var(--text)]" disabled={interactionLocked} onClick={() => setPlotEditor({ mode: 'create' })}>
+                {t('plot.new', { defaultValue: 'New plot' })}
+              </button>
+              <button type="button" className="min-h-[56px] rounded-xl border border-[var(--border)] px-4 font-bold text-[var(--text)]" disabled={interactionLocked || !selectedPlot} onClick={() => selectedPlot && setPlotEditor({ mode: 'update', plot: selectedPlot })}>
+                {t('plot.edit', { defaultValue: 'Edit selected plot' })}
+              </button>
+            </div>
+          )}
+          {!selectedPlot && !plotEditor && (
             <label className="block text-sm font-bold text-[var(--text)]">
               {t('capture.where.layout')}
               <select aria-label={t('capture.where.layout')} value={layoutCode} onChange={(event) => chooseLayout(event.target.value)} className="mt-1 min-h-11 w-full rounded-xl border border-[var(--border)] bg-[var(--card)] px-3 text-[var(--text)]">
@@ -1193,6 +1450,7 @@ export const JournalCaptureFlow: React.FC<JournalCaptureFlowProps> = ({
           )}
           {selectedPlot && <p className="rounded-xl bg-[var(--secondary-bg)] px-3 py-2 text-sm text-[var(--text-secondary)]">{catalogLabel(catalog.layouts.find((row) => row.code === layout?.code) ?? { code: layout?.code ?? '' }, locale)} · v{layout?.version}</p>}
           {selectedPlot && !zoneLinked && <label className="block text-sm font-bold text-[var(--text)]">{t('capture.carry.crop')}<input aria-label={t('capture.carry.crop')} value={crop} disabled={preparingConfirm || saving || Boolean(finalReceipt)} onChange={(event) => setCrop(event.target.value)} className="mt-1 min-h-11 w-full rounded-xl border border-[var(--border)] bg-[var(--card)] px-3 text-[var(--text)]" /></label>}
+          {batchError && <p role="alert" className="text-sm font-semibold text-[var(--error-text)]">{batchError}</p>}
           {whereError && <p role="alert" className="text-sm font-semibold text-[var(--error-text)]">{t(whereError as never)}</p>}
         </section>
       );
@@ -1249,19 +1507,22 @@ export const JournalCaptureFlow: React.FC<JournalCaptureFlowProps> = ({
     }
     return (
       <>
+        {batchError && <p role="alert" className="mb-4 text-sm font-semibold text-[var(--error-text)]">{batchError}</p>}
+        {duplicateCandidates.length > 0 && <section role="alert" className="mb-4 space-y-3 rounded-xl border border-[var(--primary)] bg-[var(--secondary-bg)] p-4"><h2 className="font-bold text-[var(--text)]">{t('batch.duplicateTitle', { defaultValue: 'Duplicate entries found' })}</h2><p className="text-sm text-[var(--text-secondary)]">{t('batch.duplicateBody', { defaultValue: 'Review every duplicate candidate before saving this batch.' })}</p><ul className="space-y-3 text-sm text-[var(--text)]">{duplicateCandidateGroups.map((group) => <li key={group.key}><h3 className="font-bold">{group.label}</h3><ul className="ml-4 list-disc space-y-1">{group.candidates.map((candidate) => <li key={candidate.entry_uuid}><span>{occurrenceLabel(candidate.occurred_start, timezone, locale)} · {duplicateActivity(candidate)}</span>{' '}<span className="text-xs text-[var(--text-secondary)]">{candidate.entry_uuid}</span></li>)}</ul></li>)}</ul><button type="button" disabled={saving || Boolean(finalReceipt)} className={`min-h-11 rounded-xl bg-[var(--primary)] px-4 font-bold text-white ${FOCUS_RING}`} onClick={acknowledgeBatchDuplicates}>{t('batch.duplicateAcknowledge', { defaultValue: 'Acknowledge all and retry' })}</button></section>}
         {duplicateCandidate && <section role="alert" className="mb-4 space-y-3 rounded-xl border border-[var(--primary)] bg-[var(--secondary-bg)] p-4"><h2 className="font-bold text-[var(--text)]">{t('capture.confirm.duplicateTitle')}</h2><p className="text-sm text-[var(--text-secondary)]">{occurrenceLabel(duplicateCandidate.occurred_start, timezone, locale)} · {duplicateActivityLabel}</p>{duplicateCandidate.values.length > 0 && <ul className="space-y-1 text-sm text-[var(--text)]">{duplicateCandidate.values.map((value, index) => { const label = duplicateValueLabel(value, model, locale); return label ? <li key={`${value.attribute_code}:${value.group_index ?? index}`}>{label}</li> : null; })}</ul>}<div className="flex flex-wrap gap-2"><button type="button" disabled={saving || Boolean(finalReceipt)} className={`min-h-11 rounded-xl border border-[var(--primary)] px-4 font-bold text-[var(--primary)] ${FOCUS_RING}`} onClick={() => { if (!saving && !finalReceipt) onOpenExisting(duplicateCandidate.entry_uuid); }}>{t('capture.confirm.openExisting')}</button><button type="button" className={`min-h-11 rounded-xl bg-[var(--primary)] px-4 font-bold text-white ${FOCUS_RING}`} onClick={saveSeparately} disabled={saving || Boolean(finalReceipt)}>{t('capture.confirm.saveSeparately')}</button></div>{duplicateWarningShown && <p role="status" className="text-sm font-semibold text-[var(--text-secondary)]">{t('capture.confirm.duplicateBody')}</p>}</section>}
-        <ConfirmStrip activity={{ label: t('capture.confirm.activity'), value: leaf ? catalogLabel(catalog.vocab.find((row) => row.code === leaf.activity_code) ?? { code: leaf?.activity_code ?? '' }, locale) : '', step: 'activity' }} plot={{ label: t('capture.confirm.plot'), value: selectedPlot?.name?.trim() || selectedPlot?.plot_code || t('capture.confirm.farmLevel'), step: 'where' }} layout={{ label: t('capture.confirm.layout'), value: `${catalogLabel(catalog.layouts.find((row) => row.code === layout?.code) ?? { code: layout?.code ?? '' }, locale)} · v${layout?.version}`, step: 'where' }} occurrence={{ label: t('capture.confirm.occurrence'), value: resolved ? occurrenceLabel(resolved.instant, timezone, locale) : occurredLocal, timezone, endTimezone: occurredEndLocal ? timezone : null, step: 'details' }} values={confirmValues} onEdit={edit} onFinalize={() => { void finalize().catch(() => undefined); }} validationInFlight={showValidation && !formValid} duplicateInFlight={duplicateInFlight} saveInFlight={saving} editDisabled={preparingConfirm || saving} readOnly={Boolean(finalReceipt)} finalizeDisabled={Boolean(duplicateCandidate && duplicateAck !== duplicateCandidate.entry_uuid)} />
+        {isMultiPlot && <p className="rounded-xl bg-[var(--secondary-bg)] px-3 py-2 text-sm font-semibold text-[var(--text-secondary)]">{t('batch.confirmCount', { count: selectedPlotUuids.length, defaultValue: `${selectedPlotUuids.length} plots` })}</p>}
+        <ConfirmStrip activity={{ label: t('capture.confirm.activity'), value: leaf ? catalogLabel(catalog.vocab.find((row) => row.code === leaf.activity_code) ?? { code: leaf?.activity_code ?? '' }, locale) : '', step: 'activity' }} plot={{ label: t('capture.confirm.plot'), value: selectedPlotLabel, step: 'where' }} layout={{ label: t('capture.confirm.layout'), value: `${catalogLabel(catalog.layouts.find((row) => row.code === layout?.code) ?? { code: layout?.code ?? '' }, locale)} · v${layout?.version}`, step: 'where' }} occurrence={{ label: t('capture.confirm.occurrence'), value: resolved ? occurrenceLabel(resolved.instant, timezone, locale) : occurredLocal, timezone, endTimezone: occurredEndLocal ? timezone : null, step: 'details' }} values={confirmValues} onEdit={edit} onFinalize={() => { void finalize().catch(() => undefined); }} validationInFlight={showValidation && !formValid} duplicateInFlight={duplicateInFlight} saveInFlight={saving} editDisabled={interactionLocked} readOnly={Boolean(finalReceipt)} finalizeDisabled={Boolean(duplicateCandidate && duplicateAck !== duplicateCandidate.entry_uuid) || duplicateCandidates.length > 0} />
       </>
     );
   };
 
   return (
     <div className="min-h-full bg-[var(--bg)] px-4 py-5">
-      <header className="mx-auto flex max-w-3xl items-center justify-between gap-3"><h1 ref={headingRef} tabIndex={-1} className="text-2xl font-bold text-[var(--text)]">{t('capture.title')}</h1><button type="button" disabled={preparingConfirm || saving} onClick={() => { void close().catch(() => undefined); }} className={`min-h-11 rounded-xl px-3 font-bold text-[var(--primary)] ${FOCUS_RING}`}>{t('capture.close')}</button></header>
+      <header className="mx-auto flex max-w-3xl items-center justify-between gap-3"><h1 ref={headingRef} tabIndex={-1} className="text-2xl font-bold text-[var(--text)]">{t('capture.title')}</h1><button type="button" disabled={closeLocked} onClick={() => { void close().catch(() => undefined); }} className={`min-h-11 rounded-xl px-3 font-bold text-[var(--primary)] ${FOCUS_RING}`}>{t('capture.close')}</button></header>
       <div className="mx-auto mt-5 max-w-3xl space-y-5">
         {body()}
-        <div className="flex flex-wrap justify-between gap-3">{step !== 'where' && <button type="button" disabled={preparingConfirm || saving || Boolean(finalReceipt)} onClick={() => { if (preparingConfirm || saving || finalReceipt) return; preparationTokenRef.current += 1; setStep(step === 'confirm' ? 'details' : step === 'details' ? 'activity' : 'where'); }} className={`min-h-11 rounded-xl px-4 font-bold text-[var(--primary)] ${FOCUS_RING}`}>{t('capture.back')}</button>}<span />{step !== 'confirm' && <button type="button" onClick={next} disabled={(step === 'activity' && !leaf) || (step === 'details' && preparingConfirm) || saving || Boolean(finalReceipt)} style={{ minHeight: '56px' }} className={`min-h-11 rounded-xl bg-[var(--primary)] px-5 font-bold text-white disabled:cursor-not-allowed disabled:opacity-50 ${FOCUS_RING}`}>{t('capture.next')}</button>}</div>
-        {!duplicateCandidate && (step === 'confirm' || draft.lossWarning || stickyLossWarning) && <SaveState status={draft.status} lossWarning={draft.lossWarning || stickyLossWarning} onRetry={retry} />}
+        <div className="flex flex-wrap justify-between gap-3">{step !== 'where' && <button type="button" disabled={interactionLocked} onClick={() => { if (interactionLocked) return; preparationTokenRef.current += 1; setStep(step === 'confirm' ? 'details' : step === 'details' ? 'activity' : 'where'); }} className={`min-h-11 rounded-xl px-4 font-bold text-[var(--primary)] ${FOCUS_RING}`}>{t('capture.back')}</button>}<span />{step !== 'confirm' && <button type="button" onClick={next} disabled={(step === 'activity' && !leaf) || (step === 'details' && preparingConfirm) || interactionLocked} style={{ minHeight: '56px' }} className={`min-h-11 rounded-xl bg-[var(--primary)] px-5 font-bold text-white disabled:cursor-not-allowed disabled:opacity-50 ${FOCUS_RING}`}>{t('capture.next')}</button>}</div>
+        {!duplicateCandidate && duplicateCandidates.length === 0 && (step === 'confirm' || draft.lossWarning || stickyLossWarning) && <SaveState status={finalReceipt ? 'final-saved-gateway' : draft.status} lossWarning={draft.lossWarning || stickyLossWarning} onRetry={async () => { await retry(); }} />}
       </div>
     </div>
   );
