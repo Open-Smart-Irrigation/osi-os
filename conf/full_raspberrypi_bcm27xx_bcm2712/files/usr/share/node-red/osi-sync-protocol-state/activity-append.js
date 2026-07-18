@@ -543,6 +543,7 @@ module.exports = {
   MAX_CHECKPOINT_RECEIPTS,
   ACTIVITY_KINDS,
   ACTIVITY_PRINCIPAL_KINDS,
+  isAdapterId,
   localPrincipalSha256,
   cloudPrincipalSha256,
   buildActivityEntry,

@@ -1905,3 +1905,352 @@ test('a held capability-root lock does not block the activity-only append path',
   assert.equal(res.row.generation, 1);
   fs.unlinkSync(path.join(roots.capabilityRoot, 'lock.json'));
 });
+
+// ===========================================================================
+// witnessed operations: closed adapter registry + one-use capability +
+// runWitnessedOperation (plan line 335)
+// ===========================================================================
+
+const witnessedMod = require('./witnessed');
+
+const CMD_ADAPTER = 'db.command-lifecycle';
+
+function witnessedDescriptor(overrides) {
+  return Object.assign(
+    {
+      adapterId: CMD_ADAPTER,
+      kind: 'COMMAND_LIFECYCLE_MUTATION',
+      principal: { principalKind: 'local', actor: 'system', producerId: 'scheduler' },
+      commandKeySha256: 'c'.repeat(64),
+      activitySha256: 'd'.repeat(64),
+    },
+    overrides || {}
+  );
+}
+
+function makeRunner(runImpl, extraOpts, registryDefs) {
+  const { opts, roots } = initializedRoots();
+  const registry = witnessedMod.createAdapterRegistry(
+    registryDefs || [{ adapterId: CMD_ADAPTER, kind: 'COMMAND_LIFECYCLE_MUTATION', run: runImpl }]
+  );
+  const runner = witnessedMod.createWitnessedOperationRunner(
+    Object.assign({ registry, opts, bootId: 'boot-x' }, extraOpts || {})
+  );
+  return { opts, roots, registry, runner };
+}
+
+test('createAdapterRegistry is closed: duplicate adapterId, bad kind, and non-function run are rejected', () => {
+  const run = () => {};
+  assert.throws(
+    () =>
+      witnessedMod.createAdapterRegistry([
+        { adapterId: 'a', kind: 'COMMAND_LIFECYCLE_MUTATION', run },
+        { adapterId: 'a', kind: 'ACK_TRANSPORT_MUTATION', run },
+      ]),
+    { code: 'witnessed_registry_duplicate_adapter' }
+  );
+  assert.throws(
+    () => witnessedMod.createAdapterRegistry([{ adapterId: 'a', kind: 'GENESIS', run }]),
+    { code: 'witnessed_registry_invalid_kind' }
+  );
+  assert.throws(
+    () => witnessedMod.createAdapterRegistry([{ adapterId: 'a', kind: 'COMMAND_LIFECYCLE_MUTATION', run: 'nope' }]),
+    { code: 'witnessed_registry_invalid_run' }
+  );
+  const registry = witnessedMod.createAdapterRegistry([{ adapterId: 'a', kind: 'COMMAND_LIFECYCLE_MUTATION', run }]);
+  assert.equal(Object.isFrozen(registry), true);
+});
+
+test('runWitnessedOperation appends the activity intent durably BEFORE the adapter runs', () => {
+  let observedInsideAdapter = null;
+  const { roots, runner } = makeRunner((gatedDb, args, capability) => {
+    capability.consume();
+    // The intent row must already be committed and the external head already
+    // published when the adapter first runs.
+    const ro = activityDb.openReadOnly(roots.activityDbPath);
+    const row = ro.prepare('SELECT * FROM activity_chain WHERE operation_id = ?').get(capability.operationId);
+    ro.close();
+    observedInsideAdapter = {
+      row,
+      externalHeadGeneration: JSON.parse(fs.readFileSync(roots.activityHeadPath, 'utf8')).generation,
+    };
+    return 'adapter-result';
+  });
+  const outcome = runner.runWitnessedOperation({}, witnessedDescriptor(), {});
+  assert.equal(outcome.ok, true);
+  assert.equal(outcome.result, 'adapter-result');
+  assert.equal(outcome.generation, 1);
+  assert.ok(observedInsideAdapter.row, 'intent row must be committed before the adapter runs');
+  assert.equal(observedInsideAdapter.row.generation, 1);
+  assert.equal(observedInsideAdapter.row.kind, 'COMMAND_LIFECYCLE_MUTATION');
+  assert.equal(observedInsideAdapter.row.adapter_id, CMD_ADAPTER);
+  assert.equal(observedInsideAdapter.externalHeadGeneration, 1);
+  // no actor identifier anywhere in the committed row
+  assert.equal(observedInsideAdapter.row.principal_sha256, activityAppend.localPrincipalSha256('system', 'scheduler'));
+});
+
+test('the one-use capability carries exactly operation ID, adapter ID, activity hash, and generation', () => {
+  let seen = null;
+  const { runner } = makeRunner((gatedDb, args, capability) => {
+    seen = capability;
+    capability.consume();
+    return null;
+  });
+  const outcome = runner.runWitnessedOperation({}, witnessedDescriptor(), {});
+  assert.equal(outcome.ok, true);
+  assert.equal(typeof seen.operationId, 'string');
+  assert.equal(seen.adapterId, CMD_ADAPTER);
+  assert.equal(seen.activitySha256, 'd'.repeat(64));
+  assert.equal(seen.generation, 1);
+  assert.equal(Object.isFrozen(seen), true);
+});
+
+test('the capability gates the db handle: any mutation before consumption fails', () => {
+  const calls = [];
+  const fakeDb = { mutate: (x) => { calls.push(x); return 'ok'; } };
+  const { runner } = makeRunner((gatedDb, args, capability) => {
+    assert.throws(() => gatedDb.mutate('too-early'), { code: 'witnessed_mutation_before_consumption' });
+    capability.consume();
+    assert.equal(gatedDb.mutate('after-consume'), 'ok');
+    return null;
+  });
+  const outcome = runner.runWitnessedOperation(fakeDb, witnessedDescriptor(), {});
+  assert.equal(outcome.ok, true);
+  assert.deepEqual(calls, ['after-consume']);
+});
+
+test('double consumption fails', () => {
+  const { runner } = makeRunner((gatedDb, args, capability) => {
+    capability.consume();
+    assert.throws(() => capability.consume(), { code: 'witnessed_capability_double_use' });
+    return null;
+  });
+  const outcome = runner.runWitnessedOperation({}, witnessedDescriptor(), {});
+  assert.equal(outcome.ok, true); // consumed exactly once; the second call threw inside the adapter and was caught by the adapter itself
+});
+
+test('a cached capability from an earlier operation cannot be consumed by a later one', () => {
+  let cached = null;
+  let secondOutcomeInsideAdapter = null;
+  const { runner } = makeRunner((gatedDb, args, capability) => {
+    if (!cached) {
+      cached = capability;
+      capability.consume();
+      return 'first';
+    }
+    secondOutcomeInsideAdapter = assert.throws(() => cached.consume(), (err) =>
+      ['witnessed_capability_unrecognized', 'witnessed_capability_context_mismatch', 'witnessed_capability_double_use'].includes(err.code)
+    );
+    capability.consume();
+    return 'second';
+  });
+  assert.equal(runner.runWitnessedOperation({}, witnessedDescriptor(), {}).ok, true);
+  const second = runner.runWitnessedOperation({}, witnessedDescriptor(), {});
+  assert.equal(second.ok, true);
+});
+
+test('a serialized/copied capability is unrecognized (process-private, nonserializable)', () => {
+  const { runner } = makeRunner((gatedDb, args, capability) => {
+    const copy = Object.assign(Object.create(Object.getPrototypeOf(capability)), JSON.parse(JSON.stringify(capability)));
+    copy.consume = capability.consume;
+    assert.throws(() => witnessedMod.__consumeForTest(copy), (err) =>
+      ['witnessed_capability_unrecognized', 'witnessed_no_operation_in_flight'].includes(err.code)
+    );
+    capability.consume();
+    return null;
+  });
+  assert.equal(runner.runWitnessedOperation({}, witnessedDescriptor(), {}).ok, true);
+});
+
+test('consume outside any in-flight operation fails', () => {
+  let cached = null;
+  const { runner } = makeRunner((gatedDb, args, capability) => {
+    cached = capability;
+    capability.consume();
+    return null;
+  });
+  assert.equal(runner.runWitnessedOperation({}, witnessedDescriptor(), {}).ok, true);
+  assert.throws(() => cached.consume(), (err) =>
+    ['witnessed_no_operation_in_flight', 'witnessed_capability_unrecognized', 'witnessed_capability_double_use'].includes(err.code)
+  );
+});
+
+test('an unregistered adapterId fails before any append (no evidence row)', () => {
+  const { roots, runner } = makeRunner(() => null);
+  assert.throws(
+    () => runner.runWitnessedOperation({}, witnessedDescriptor({ adapterId: 'not-registered' }), {}),
+    { code: 'witnessed_adapter_not_registered' }
+  );
+  const ro = activityDb.openReadOnly(roots.activityDbPath);
+  assert.equal(ro.prepare('SELECT COUNT(*) AS n FROM activity_chain').get().n, 1);
+  ro.close();
+});
+
+test('a kind mismatch between descriptor and registered adapter fails before any append', () => {
+  const { roots, runner } = makeRunner(() => null);
+  assert.throws(
+    () => runner.runWitnessedOperation({}, witnessedDescriptor({ kind: 'ACK_TRANSPORT_MUTATION' }), {}),
+    { code: 'witnessed_adapter_kind_mismatch' }
+  );
+  const ro = activityDb.openReadOnly(roots.activityDbPath);
+  assert.equal(ro.prepare('SELECT COUNT(*) AS n FROM activity_chain').get().n, 1);
+  ro.close();
+});
+
+test('the protected descriptor is canonicalized: unknown fields, functions, and undefined are rejected', () => {
+  const { runner } = makeRunner(() => null);
+  assert.throws(
+    () => runner.runWitnessedOperation({}, witnessedDescriptor({ run: () => {} }), {}),
+    { code: 'schema_unknown_field' }
+  );
+  assert.throws(
+    () => runner.runWitnessedOperation({}, witnessedDescriptor({ principal: { principalKind: 'local', actor: 'system', producerId: 'scheduler', cb: () => {} } }), {}),
+    Error
+  );
+  assert.throws(
+    () => runner.runWitnessedOperation({}, witnessedDescriptor({ commandKeySha256: undefined }), {}),
+    Error
+  );
+});
+
+test('caller callback substitution fails: functions anywhere in args are rejected before any append', () => {
+  const { roots, runner } = makeRunner(() => null);
+  assert.throws(
+    () => runner.runWitnessedOperation({}, witnessedDescriptor(), { run: () => {} }),
+    { code: 'witnessed_args_function_rejected' }
+  );
+  assert.throws(
+    () => runner.runWitnessedOperation({}, witnessedDescriptor(), { nested: { deep: [{ cb: () => {} }] } }),
+    { code: 'witnessed_args_function_rejected' }
+  );
+  const ro = activityDb.openReadOnly(roots.activityDbPath);
+  assert.equal(ro.prepare('SELECT COUNT(*) AS n FROM activity_chain').get().n, 1);
+  ro.close();
+});
+
+test('a nested witnessed operation fails', () => {
+  let nestedError = null;
+  const { runner } = makeRunner((gatedDb, args, capability) => {
+    capability.consume();
+    try {
+      runner.runWitnessedOperation({}, witnessedDescriptor(), {});
+    } catch (err) {
+      nestedError = err;
+    }
+    return null;
+  });
+  const outcome = runner.runWitnessedOperation({}, witnessedDescriptor(), {});
+  assert.equal(outcome.ok, true);
+  assert.ok(nestedError);
+  assert.equal(nestedError.code, 'witnessed_nested_operation');
+});
+
+test('adapter completion without consumption fails but leaves the appended evidence', () => {
+  const { roots, runner } = makeRunner(() => 'finished-without-consuming');
+  const outcome = runner.runWitnessedOperation({}, witnessedDescriptor(), {});
+  assert.equal(outcome.ok, false);
+  assert.equal(outcome.failure, 'witnessed_completed_without_consumption');
+  assert.equal(outcome.generation, 1);
+  const ro = activityDb.openReadOnly(roots.activityDbPath);
+  assert.equal(ro.prepare('SELECT COUNT(*) AS n FROM activity_chain').get().n, 2); // evidence retained
+  ro.close();
+});
+
+test('append-only-without-adapter-completion returns failure with conservative evidence and no second attempt', () => {
+  const fixedOp = '66666666-6666-4666-8666-666666666666';
+  let attempts = 0;
+  const { roots, runner } = makeRunner(
+    () => {
+      attempts += 1;
+      throw new Error('adapter exploded before doing any work');
+    },
+    { newOperationId: () => fixedOp }
+  );
+  const outcome = runner.runWitnessedOperation({}, witnessedDescriptor(), {});
+  assert.equal(outcome.ok, false);
+  assert.equal(outcome.failure, 'witnessed_adapter_failed');
+  assert.equal(outcome.generation, 1);
+  assert.equal(attempts, 1);
+  // conservative evidence: the intent row for the failed operation stays
+  const ro = activityDb.openReadOnly(roots.activityDbPath);
+  const row = ro.prepare('SELECT * FROM activity_chain WHERE operation_id = ?').get(fixedOp);
+  ro.close();
+  assert.ok(row);
+  // no second attempt from the same operation ID
+  assert.throws(() => runner.runWitnessedOperation({}, witnessedDescriptor(), {}), { code: 'activity_append_operation_replayed' });
+  assert.equal(attempts, 1, 'the adapter must not run again for the replayed operation ID');
+});
+
+test('a witnessed operation refuses to run while capability state is missing', () => {
+  const { opts } = makeRoots(); // NOT initialized
+  const registry = witnessedMod.createAdapterRegistry([{ adapterId: CMD_ADAPTER, kind: 'COMMAND_LIFECYCLE_MUTATION', run: () => null }]);
+  const runner = witnessedMod.createWitnessedOperationRunner({ registry, opts, bootId: 'boot-x' });
+  assert.throws(() => runner.runWitnessedOperation({}, witnessedDescriptor(), {}), { code: 'witnessed_capability_state_missing' });
+});
+
+test('a witnessed operation refuses to run while capability state is database-restore-blocked', () => {
+  const { opts, roots, runner } = makeRunner(() => null);
+  // Hand-craft a valid generation 1 DATABASE_RESTORE_INVALIDATION on disk.
+  const gen0 = JSON.parse(fs.readFileSync(path.join(roots.generationsDir, pathsMod.generationFilename(0)), 'utf8'));
+  const gen0Sha = codecs.canonicalSha256(gen0);
+  const witness0 = JSON.parse(fs.readFileSync(path.join(roots.witnessRoot, pathsMod.generationFilename(0)), 'utf8'));
+  const witness0Sha = codecs.canonicalSha256(witness0);
+  const gen1 = {
+    format: 1,
+    generation: 1,
+    previousGeneration: 0,
+    previousSha256: gen0Sha,
+    operationId: OP_D,
+    kind: 'DATABASE_RESTORE_INVALIDATION',
+    createdAt: '2026-07-16T00:00:03.000Z',
+    state: {
+      activeIdentitySha256: null,
+      mode: 'UNNEGOTIATED',
+      historicalV2Disposition: 'UNASSESSED',
+      historicalV2DispositionReceiptSha256: null,
+      databaseRestore: { status: 'RECONCILIATION_REQUIRED', restoreEpoch: 1 },
+      invalidationReceiptSha256: 'a'.repeat(64),
+      recoveryOperationId: OP_C,
+    },
+  };
+  const gen1Sha = codecs.canonicalSha256(gen1);
+  pathsMod.writeExclusiveFile(path.join(roots.generationsDir, pathsMod.generationFilename(1)), Buffer.from(codecs.canonicalJson(gen1), 'utf8'), pathsMod.defaultOwnershipAdapter);
+  const witness1 = { format: 1, generation: 1, generationSha256: gen1Sha, previousWitnessSha256: witness0Sha, operationId: OP_D };
+  pathsMod.writeExclusiveFile(path.join(roots.witnessRoot, pathsMod.generationFilename(1)), Buffer.from(codecs.canonicalJson(witness1), 'utf8'), pathsMod.defaultOwnershipAdapter);
+  const head = { format: 1, generation: 1, generationSha256: gen1Sha, witnessSha256: codecs.canonicalSha256(witness1) };
+  fs.writeFileSync(roots.capabilityHeadPath, codecs.canonicalJson(head), { mode: 0o600 });
+  // sanity: the chain itself verifies
+  assert.doesNotThrow(() => loadMod.verifyCapabilityChain(roots, {}));
+  assert.throws(() => runner.runWitnessedOperation({}, witnessedDescriptor(), {}), { code: 'witnessed_database_restore_blocked' });
+});
+
+test('a witnessed operation refuses to run while capability state is malformed', () => {
+  const { roots, runner } = makeRunner(() => null);
+  fs.writeFileSync(path.join(roots.generationsDir, pathsMod.generationFilename(0)), 'not-json', { mode: 0o600 });
+  assert.throws(() => runner.runWitnessedOperation({}, witnessedDescriptor(), {}), { code: 'chain_entry_malformed_json' });
+});
+
+test('cloud principal descriptors hash the protected capability identity', () => {
+  let row = null;
+  const { roots, runner } = makeRunner((gatedDb, args, capability) => {
+    capability.consume();
+    const ro = activityDb.openReadOnly(roots.activityDbPath);
+    row = ro.prepare('SELECT * FROM activity_chain WHERE operation_id = ?').get(capability.operationId);
+    ro.close();
+    return null;
+  });
+  const idHash = 'ab'.repeat(32);
+  const outcome = runner.runWitnessedOperation(
+    {},
+    witnessedDescriptor({ principal: { principalKind: 'cloud', identitySha256: idHash } }),
+    {}
+  );
+  assert.equal(outcome.ok, true);
+  assert.equal(row.principal_kind, 'cloud');
+  assert.equal(row.principal_sha256, activityAppend.cloudPrincipalSha256(idHash));
+});
+
+test('the module-level runWitnessedOperation surface exists and fails closed with an empty registry', () => {
+  assert.equal(typeof mod.runWitnessedOperation, 'function');
+  assert.throws(() => mod.runWitnessedOperation({}, witnessedDescriptor(), {}), { code: 'witnessed_adapter_not_registered' });
+});
