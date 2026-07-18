@@ -312,3 +312,12 @@ Append-only execution log for the accepted Phase 0 and Phase 1-6 plans on `desig
 - Initial RED had 7 failures among 50 tests; first GREEN reached 56/56. Sol's first specification corrections reached 60/60. Quality correction cycles reached 78/78, 87/87, and 88/88 after fixes for partial counts and collapsed callback caching. Final Sol quality and separate final Sol specification verdicts were `APPROVED`.
 - Final controller evidence: focused 88/88; TSX 94/94; Vitest 1153/1153 across 133 files; `tsc` passed; the production build passed with 1680 modules; and the diff check was clean. Only inherited baseline-browser, Browserslist, and large-chunk advisories remained.
 - Task 24 locale files, browser work, migrations, and Phase 5 controls were untouched. Task 25 owns browser acceptance. Broader Phase 3, P1, P2, and P3 remain separate and unwaived. Task 24 is next.
+
+## 2026-07-19T01:26:22+02:00 - Task 24 outcome
+
+- Heavy-blocker corrections were separated from locale work in commit `25f61405` (`fix(journal): distinguish group errors and range counts`), covering exactly six files: `web/react-gui/src/components/journal/where/PlotGroupChips.tsx`, `web/react-gui/src/components/journal/where/PlotPicker.tsx`, `web/react-gui/src/components/journal/where/StationGrid.tsx`, and their three tests. The split isolated blocker fixes before Task 24's locale-only scope.
+- Task 24 committed `b5619b43` (`feat(journal): add Phase 4 plot and batch locale keys`) with exactly seven source locale JSON files, `web/react-gui/public/locales/{de-CH,en,es,fr,it,lg,pt}/journal.json`, plus `web/react-gui/src/journal/__tests__/journalLocales.test.ts`; no feed mirror changed.
+- Outcomes include distinct stale/unavailable keys; count plural/runtime support; range-summary tokens; all-seven-locale runtime tests; a source-derived literal consumer audit plus dynamic families; dissolve/disband terminology; corrected Luganda plot-number grammar; Spanish/French toggles; and no `ß` in de-CH.
+- Verification passed focused locale 38/38, focused blocker 43/43, GUI full 94/94 TSX and 1182/1182 Vitest, typecheck, the 1680-module build, JSON 7/7, anti-slop, and exact-scope/diff checks. Only inherited browser-data and chunk warnings remained.
+- Sol approved both the separate correction commit and Task 24 after the correction loops, for specification and quality.
+- Task 24 is complete; Task 25 is next. Phase 3 remains separately in review; P1/P2/P3 remain unwaived. Task 24 claims no migration, feed-mirror, or browser acceptance.
