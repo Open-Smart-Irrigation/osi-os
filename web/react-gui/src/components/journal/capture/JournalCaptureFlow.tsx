@@ -25,6 +25,7 @@ import {
 } from '../../../journal/occurrence';
 import { useCaptureDraft } from '../../../journal/useCaptureDraft';
 import { buildFinalBatchPayload } from '../../../journal/buildFinalBatchPayload';
+import { matchingActiveHarvestGroups } from '../../../journal/groupResolutionNudge';
 import type {
   JournalPlotGroupResourceActions,
 } from '../../../journal/useJournalPlotGroups';
@@ -57,6 +58,7 @@ import { ActivityPicker } from './ActivityPicker';
 import { ConfirmStrip, type CaptureEditStep, type ConfirmValueToken } from './ConfirmStrip';
 import { EntryForm, validateEntryForm } from './EntryForm';
 import { PlotForm } from '../where/PlotForm';
+import { HarvestGroupNudge } from '../where/HarvestGroupNudge';
 import { PlotPicker } from '../where/PlotPicker';
 import { RepeatTreatmentCard } from './RepeatTreatmentCard';
 import { SaveState } from './SaveState';
@@ -512,6 +514,8 @@ export const JournalCaptureFlow: React.FC<JournalCaptureFlowProps> = ({
   const [safePrefill, setSafePrefill] = useState<CaptureEntryValueInput[]>([]);
   const [stickyLossWarning, setStickyLossWarning] = useState(false);
   const [finalReceipt, setFinalReceipt] = useState<JournalSavedReceipt | null>(null);
+  const [receiptHarvestGroups, setReceiptHarvestGroups] = useState<PlotGroup[]>([]);
+  const [groupResolutionErrors, setGroupResolutionErrors] = useState<ReadonlyMap<string, string>>(new Map());
   const [plotEditor, setPlotEditor] = useState<{ mode: 'create' | 'update'; plot?: JournalPlot } | null>(null);
   const [preparingConfirm, setPreparingConfirm] = useState(false);
   const [batchAttemptPending, setBatchAttemptPending] = useState(false);
@@ -1115,6 +1119,14 @@ export const JournalCaptureFlow: React.FC<JournalCaptureFlowProps> = ({
         setStickyLossWarning(false);
         batchPayloadSnapshotRef.current = null;
         setBatchAttemptPending(false);
+        setReceiptHarvestGroups(matchingActiveHarvestGroups(
+          leaf?.activity_code ?? '',
+          selectedPlotUuids,
+          plotGroups,
+        ).map((group) => ({
+          ...group,
+          members: [...group.members],
+        })));
         setFinalReceipt(receipt);
         return receipt;
       } catch (error) {
@@ -1134,7 +1146,16 @@ export const JournalCaptureFlow: React.FC<JournalCaptureFlowProps> = ({
     })();
     savePromiseRef.current = promise.then(() => undefined, () => undefined);
     return promise;
-  }, [buildBatchInput, duplicateAckEntryUuids, duplicateCandidates.length, finalReceipt, isMultiPlot]);
+  }, [
+    buildBatchInput,
+    duplicateAckEntryUuids,
+    duplicateCandidates.length,
+    finalReceipt,
+    isMultiPlot,
+    leaf?.activity_code,
+    plotGroups,
+    selectedPlotUuids,
+  ]);
 
   const finalize = useCallback(async (ackOverride?: string | null) => {
     if (finalReceipt) return;
@@ -1209,6 +1230,42 @@ export const JournalCaptureFlow: React.FC<JournalCaptureFlowProps> = ({
     savePromiseRef.current = promise.then(() => undefined, () => undefined);
     return promise;
   }, [draft, duplicateAckEntryUuids, finalizeBatch, isMultiPlot]);
+
+  const resolveHarvestGroup = useCallback(async (group: PlotGroup) => {
+    setGroupResolutionErrors((current) => {
+      const next = new Map(current);
+      next.delete(group.group_uuid);
+      return next;
+    });
+
+    const latestGroup = plotGroups.find((candidate) => candidate.group_uuid === group.group_uuid);
+    if (!latestGroup || latestGroup.deleted_at !== null) {
+      setGroupResolutionErrors((current) =>
+        new Map(current).set(group.group_uuid, 'group.changedError'));
+      throw new Error('plot group changed');
+    }
+    if (latestGroup.resolved_at !== null) return;
+    if (matchingActiveHarvestGroups('harvest', group.members, [latestGroup]).length === 0) {
+      setGroupResolutionErrors((current) =>
+        new Map(current).set(group.group_uuid, 'group.changedError'));
+      throw new Error('plot group changed');
+    }
+
+    const payload = {
+      group_uuid: latestGroup.group_uuid,
+      base_sync_version: latestGroup.sync_version,
+      label: latestGroup.label,
+      members: [...latestGroup.members].sort(),
+      resolved: true,
+    };
+    try {
+      await groupState.updatePlotGroup(latestGroup.group_uuid, payload);
+    } catch (cause) {
+      setGroupResolutionErrors((current) =>
+        new Map(current).set(group.group_uuid, 'group.resolveError'));
+      throw cause;
+    }
+  }, [groupState.updatePlotGroup, plotGroups]);
 
   const close = useCallback(() => {
     if (closePromiseRef.current) return closePromiseRef.current;
@@ -1399,7 +1456,6 @@ export const JournalCaptureFlow: React.FC<JournalCaptureFlowProps> = ({
   const startOccurrenceLabel = `${t('capture.confirm.occurrence')} · ${t('capture.form.required')}`;
   const endOccurrenceLabel = `${t('capture.confirm.occurrence')} · ${t('capture.form.optional')}`;
   const endOffsetLabel = `${t('capture.validation.chooseUtcOffset')} · ${t('capture.form.optional')}`;
-
   const body = () => {
     if (step === 'where') {
       return (
@@ -1521,6 +1577,13 @@ export const JournalCaptureFlow: React.FC<JournalCaptureFlowProps> = ({
       <header className="mx-auto flex max-w-3xl items-center justify-between gap-3"><h1 ref={headingRef} tabIndex={-1} className="text-2xl font-bold text-[var(--text)]">{t('capture.title')}</h1><button type="button" disabled={closeLocked} onClick={() => { void close().catch(() => undefined); }} className={`min-h-11 rounded-xl px-3 font-bold text-[var(--primary)] ${FOCUS_RING}`}>{t('capture.close')}</button></header>
       <div className="mx-auto mt-5 max-w-3xl space-y-5">
         {body()}
+        {receiptHarvestGroups.length > 0 && (
+          <HarvestGroupNudge
+            groups={receiptHarvestGroups}
+            onResolve={resolveHarvestGroup}
+            errors={groupResolutionErrors}
+          />
+        )}
         <div className="flex flex-wrap justify-between gap-3">{step !== 'where' && <button type="button" disabled={interactionLocked} onClick={() => { if (interactionLocked) return; preparationTokenRef.current += 1; setStep(step === 'confirm' ? 'details' : step === 'details' ? 'activity' : 'where'); }} className={`min-h-11 rounded-xl px-4 font-bold text-[var(--primary)] ${FOCUS_RING}`}>{t('capture.back')}</button>}<span />{step !== 'confirm' && <button type="button" onClick={next} disabled={(step === 'activity' && !leaf) || (step === 'details' && preparingConfirm) || interactionLocked} style={{ minHeight: '56px' }} className={`min-h-11 rounded-xl bg-[var(--primary)] px-5 font-bold text-white disabled:cursor-not-allowed disabled:opacity-50 ${FOCUS_RING}`}>{t('capture.next')}</button>}</div>
         {!duplicateCandidate && duplicateCandidates.length === 0 && (step === 'confirm' || draft.lossWarning || stickyLossWarning) && <SaveState status={finalReceipt ? 'final-saved-gateway' : draft.status} lossWarning={draft.lossWarning || stickyLossWarning} onRetry={async () => { await retry(); }} />}
       </div>

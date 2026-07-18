@@ -551,3 +551,46 @@ test('Task 21 preview exposes plot, group, range, and atomic batch envelopes', a
   assert.equal(status.json.last_batch_payload.plot_uuid, undefined);
   assert.equal(status.json.last_batch_payload.zone_uuid, undefined);
 });
+
+test('preview records the exact UUID-encoded generic resolved plot-group PUT envelope', async (t) => {
+  const preview = createTask14JournalPreviewServer();
+  await preview.listen();
+  t.after(() => preview.close());
+  const baseUrl = preview.url();
+  const groupUuid = 'dddddddd-dddd-4ddd-8ddd-dddddddddddd';
+  const members = [CANONICAL_IDS.plotUuid, CANONICAL_IDS.numericPlotUuid].sort();
+  const createPayload = {
+    group_uuid: groupUuid,
+    base_sync_version: 0,
+    label: 'Resolution evidence group',
+    members,
+    resolved: false,
+  };
+
+  const created = await request(baseUrl, 'POST', '/api/journal/plot-groups', createPayload);
+  assert.equal(created.statusCode, 201);
+  assert.equal(created.json.plot_group.group_uuid, groupUuid);
+
+  const payload = {
+    group_uuid: groupUuid,
+    base_sync_version: created.json.plot_group.sync_version,
+    label: createPayload.label,
+    members,
+    resolved: true,
+  };
+  const resolved = await request(
+    baseUrl,
+    'PUT',
+    `/api/journal/plot-groups/${encodeURIComponent(groupUuid)}`,
+    payload,
+  );
+
+  assert.equal(resolved.statusCode, 200);
+  assert.deepEqual(Object.keys(resolved.json), ['plot_group']);
+  assert.equal(resolved.json.plot_group.group_uuid, groupUuid);
+  assert.equal(resolved.json.plot_group.label, payload.label);
+  assert.deepEqual(resolved.json.plot_group.members, members);
+  assert.equal(resolved.json.plot_group.sync_version, 2);
+  assert.equal(resolved.json.plot_group.resolved_at, '2026-07-17T08:30:00.000Z');
+  assert.equal(resolved.json.plot_group.resolved, undefined);
+});
