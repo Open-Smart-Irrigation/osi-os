@@ -12,8 +12,10 @@ import { useJournalEntries } from '../journal/useJournalEntries';
 import { useJournalPlots } from '../journal/useJournalPlots';
 import { useJournalPlotGroups } from '../journal/useJournalPlotGroups';
 import { irrigationZonesAPI } from '../services/api';
+import { journalApi } from '../services/journalApi';
 import type { IrrigationZone } from '../types/farming';
 import type { EntryListFilters } from '../types/journal';
+import type { JournalTimelineProps } from '../components/journal/JournalTimeline';
 import type { JournalSavedReceipt } from '../components/journal/capture/JournalCaptureFlow';
 
 type JournalIrrigationZone = IrrigationZone & {
@@ -159,6 +161,10 @@ export const JournalPage: React.FC = () => {
   const showCapture = captureOpen && captureReady && catalogState.catalog;
 
   const retryTimelineReads = () => Promise.all([entryState.retry(), plotState.retry()]);
+  const listBatchEntries = React.useCallback<JournalTimelineProps['listBatchEntries']>(
+    (batchFilters) => journalApi.listEntries(batchFilters),
+    [],
+  );
   const retryCaptureEnrichment = () => groupState.error
     ? groupState.retry()
     : zonesState.mutate();
@@ -275,6 +281,7 @@ export const JournalPage: React.FC = () => {
                 entries={entryState.entries}
                 plots={plotState.plots}
                 loading={entryState.loading || plotState.loading}
+                listBatchEntries={listBatchEntries}
               />
             )}
           </>
