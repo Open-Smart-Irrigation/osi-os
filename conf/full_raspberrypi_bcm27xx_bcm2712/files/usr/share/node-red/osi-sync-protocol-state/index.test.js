@@ -2669,3 +2669,153 @@ test('a crash between boundary commit and receipt write is recovered determinist
   const after = loadMod.verifyActivityRoots(roots, {});
   assert.equal(after.resumable, null);
 });
+
+// ===========================================================================
+// capacity (synthetic million-activity) + crash boundary matrix
+// (plan line 341: "Synthetic million-activity capacity tests require the
+// database bound, O(1) ordinary append work, O(4096) startup validation,
+// no checkpoint-directory enumeration on runtime paths, and injected
+// Pi-class budgets of 250 ms startup validation and 50 ms p99 append
+// excluding storage-fault injection. Crash tests cover DB commit, hot
+// journal, external head, checkpoint receipt/head, prune, and
+// incremental-vacuum boundaries.")
+// ===========================================================================
+
+// Injected Pi-class budgets (test-injected per the plan's wording; the
+// production code has no timing knobs).
+const STARTUP_VALIDATION_BUDGET_MS = 250;
+const APPEND_P99_BUDGET_MS = 50;
+
+test('synthetic million-activity capacity: bounds, budgets, and no enumeration', () => {
+  // Synthesis method (documented in the report): the chain state at
+  // checkpoint 244 (boundary generation 999,424) is constructed directly —
+  // real, hash-consistent rows for the entire retained window, sparse
+  // receipts (243, 244 + genesis 0) since runtime paths read only the
+  // latest receipt and its predecessor by computed filename. A real
+  // boundary crossing to checkpoint 245 (generation 1,003,520) then runs
+  // through the production append/checkpoint/prune machinery.
+  const K = 244;
+  const synth = synthesizeActivityState(null, { checkpointIndex: K, offset: INTERVAL - 6, receiptIndices: [K - 1, K] });
+  const { opts, roots } = synth;
+  assert.ok(synth.headGeneration > 1000000 - 4200, 'the synthesized head sits in million-generation territory');
+
+  // --- O(4096) startup validation under the 250 ms injected budget -------
+  const t0 = process.hrtime.bigint();
+  const verified = loadMod.verifyActivityRoots(roots, {});
+  const startupMs = Number(process.hrtime.bigint() - t0) / 1e6;
+  assert.equal(verified.resumable, null);
+  assert.equal(verified.genesisRow, null); // lifetime history is gone and never scanned
+  assert.ok(
+    startupMs <= STARTUP_VALIDATION_BUDGET_MS,
+    `startup validation took ${startupMs.toFixed(1)} ms > ${STARTUP_VALIDATION_BUDGET_MS} ms budget`
+  );
+
+  // --- p99 append budget across a real checkpoint boundary ----------------
+  const realReaddir = fs.readdirSync;
+  const enumerated = [];
+  fs.readdirSync = function spied(dir, ...rest) {
+    enumerated.push(String(dir));
+    return realReaddir.call(fs, dir, ...rest);
+  };
+  const durations = [];
+  let crossedBoundary = false;
+  try {
+    for (let i = 0; i < 120; i += 1) {
+      const a0 = process.hrtime.bigint();
+      const res = activityAppend.runExclusiveActivityAppend(
+        Object.assign(
+          { opts, bootId: 'boot-cap' },
+          appendArgs(roots, { operationId: `capacity-op-${String(i).padStart(4, '0')}`, createdAt: '2026-07-16T00:00:07.000Z' })
+        )
+      );
+      durations.push(Number(process.hrtime.bigint() - a0) / 1e6);
+      if (res.pendingCheckpoint) crossedBoundary = true;
+    }
+  } finally {
+    fs.readdirSync = realReaddir;
+  }
+  assert.equal(crossedBoundary, true, 'the run must cross a real 4096 boundary (checkpoint 245)');
+  const sorted = durations.slice().sort((a, b) => a - b);
+  const p99 = sorted[Math.floor(0.99 * (sorted.length - 1))];
+  assert.ok(p99 <= APPEND_P99_BUDGET_MS, `append p99 ${p99.toFixed(1)} ms > ${APPEND_P99_BUDGET_MS} ms budget`);
+
+  // --- no checkpoint-directory enumeration on any runtime path ------------
+  const checkpointDirHits = enumerated.filter((d) => path.resolve(d) === path.resolve(roots.checkpointsDir));
+  assert.deepEqual(checkpointDirHits, [], 'append paths must never enumerate the checkpoints directory');
+
+  // --- the database bound held across the boundary ------------------------
+  const rows = countRows(roots);
+  assert.ok(rows.n <= activityAppend.MAX_RETAINED_ROWS, `retained rows ${rows.n} > ${activityAppend.MAX_RETAINED_ROWS}`);
+  assert.equal(rows.lo, (245 - 1) * INTERVAL); // pruned to the previous checkpoint boundary
+  assert.ok(fs.statSync(roots.activityDbPath).size <= activityAppend.MAX_ACTIVITY_DB_BYTES);
+
+  // Receipt 245 exists and chains to 244; verification stays green and fast.
+  const receipt245 = JSON.parse(fs.readFileSync(path.join(roots.checkpointsDir, pathsMod.generationFilename(245)), 'utf8'));
+  assert.equal(receipt245.previousCheckpointSha256, synth.latestReceiptSha);
+  const t1 = process.hrtime.bigint();
+  const after = loadMod.verifyActivityRoots(roots, {});
+  const revalidateMs = Number(process.hrtime.bigint() - t1) / 1e6;
+  assert.equal(after.resumable, null);
+  assert.ok(revalidateMs <= STARTUP_VALIDATION_BUDGET_MS);
+});
+
+test('crash matrix: every append/checkpoint/prune/vacuum boundary converges after recovery', () => {
+  const NON_BOUNDARY_STEPS = ['append_mid_transaction', 'append_db_commit', 'external_head_published'];
+  const BOUNDARY_STEPS = ['append_db_commit', 'checkpoint_receipt_written', 'checkpoint_head_published', 'prune_done', 'incremental_vacuum_done'];
+
+  const runCase = (step, { boundary }) => {
+    const label = `${boundary ? 'boundary' : 'ordinary'}/${step}`;
+    // boundary: the crashing append IS the 4096-boundary append (8192).
+    // ordinary: the crashing append is a mid-segment append.
+    const synth = synthesizeActivityState(null, { checkpointIndex: 1, offset: boundary ? INTERVAL - 1 : 7 });
+    const { opts, roots } = synth;
+    const childScript = `
+      const activityAppend = require(${JSON.stringify(ACTIVITY_APPEND_PATH)});
+      activityAppend.runExclusiveActivityAppend(${JSON.stringify(
+        Object.assign(
+          { opts, bootId: 'boot-crash', crashAfter: step },
+          appendArgs(pathsMod.resolveRoots(opts), { operationId: `crash-${step}-op1`, createdAt: '2026-07-16T00:00:08.000Z' })
+        )
+      )});
+    `;
+    const child = cp.spawnSync(process.execPath, ['-e', childScript]);
+    assert.equal(child.status, 137, `${label}: expected simulated crash, got ${child.status}: ${child.stderr}`);
+
+    // status() must never throw an unhandled corruption error on any of
+    // these documented crash states.
+    assert.ok(mod.status(opts), `${label}: status() should return`);
+
+    // A follow-up locked append (different boot: the crashed child's locks
+    // are stale) must recover deterministically and commit.
+    const res = activityAppend.runExclusiveActivityAppend(
+      Object.assign({ opts, bootId: 'boot-after' }, appendArgs(roots, { operationId: `after-${step}-op1`, createdAt: '2026-07-16T00:00:09.000Z' }))
+    );
+    assert.ok(res.row.generation > 0, `${label}: recovery append must commit`);
+
+    // Converged: fully healthy, external head equals the DB head, retained
+    // window within bounds, no journal left behind.
+    const verified = loadMod.verifyActivityRoots(roots, {});
+    assert.equal(verified.resumable, null, `${label}: no pending resume after recovery`);
+    const external = JSON.parse(fs.readFileSync(roots.activityHeadPath, 'utf8'));
+    assert.equal(external.generation, verified.headRow.generation, `${label}: external head converged`);
+    assert.equal(fs.existsSync(`${roots.activityDbPath}-journal`), false, `${label}: no hot journal left`);
+    const rows = countRows(roots);
+    assert.ok(rows.n <= activityAppend.MAX_RETAINED_ROWS, `${label}: retained-row bound`);
+    if (boundary && ['checkpoint_head_published', 'prune_done', 'incremental_vacuum_done'].includes(step)) {
+      // For steps at/after external-head publication the boundary append
+      // itself survived; prune must have completed by now.
+      assert.equal(rows.lo, INTERVAL, `${label}: prune completed`);
+    }
+    // The crashed operation's evidence: for steps after the DB commit the
+    // intent row is durably present exactly once.
+    if (step !== 'append_mid_transaction') {
+      const ro = activityDb.openReadOnly(roots.activityDbPath);
+      const evidence = ro.prepare('SELECT COUNT(*) AS n FROM activity_chain WHERE operation_id = ?').get(`crash-${step}-op1`);
+      ro.close();
+      assert.equal(evidence.n, 1, `${label}: committed intent row survives`);
+    }
+  };
+
+  for (const step of NON_BOUNDARY_STEPS) runCase(step, { boundary: false });
+  for (const step of BOUNDARY_STEPS) runCase(step, { boundary: true });
+});
