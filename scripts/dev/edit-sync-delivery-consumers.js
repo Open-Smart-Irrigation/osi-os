@@ -91,7 +91,7 @@ const rejectedEvents = [];
 const rejectedIds = [];
 const retryableIds = [];
 const issues = [];
-if (!Array.isArray(eventResults)) {
+if (!Array.isArray(eventResults) || eventResults.length === 0) {
   for (const id of requestedIds) retryableIds.push(id);
   issues.push('protocol_response_missing_results');
 } else {
