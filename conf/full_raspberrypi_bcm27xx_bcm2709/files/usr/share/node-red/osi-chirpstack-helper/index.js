@@ -538,6 +538,43 @@ class ChirpStackClient {
 
     const rollbackErrors = [];
 
+    // A successful forward write is only ours to undo while the whole
+    // aggregate still has the exact device and key snapshots that this
+    // invocation verified. Check every fence before making any compensating
+    // mutation so a concurrent registrar cannot have one half overwritten.
+    if (ctx.deviceCreated || ctx.deviceMutated || ctx.keysCreatedNew || ctx.keysMutated) {
+      try {
+        const [fenceDevice, fenceKeys] = await Promise.all([
+          this.getDevice(ctx.devEui),
+          this.getKeys(ctx.devEui),
+        ]);
+        const deviceFenceHolds = !(ctx.deviceCreated || ctx.deviceMutated) || Boolean(
+          fenceDevice && ctx.desiredSnapshot && deviceMatches(fenceDevice, ctx.desiredSnapshot)
+        );
+        const keysFenceHolds = !(ctx.keysCreatedNew || ctx.keysMutated) || Boolean(
+          fenceKeys
+          && ctx.desiredKeysSnapshot
+          && constantTimeEqual(normalizeHexKey(fenceKeys.getNwkKey()), ctx.desiredKeysSnapshot.nwkKey)
+          && constantTimeEqual(normalizeHexKey(fenceKeys.getAppKey()), ctx.desiredKeysSnapshot.appKey)
+          && constantTimeEqual(normalizeHexKey(fenceKeys.getGenAppKey()), ctx.desiredKeysSnapshot.genAppKey)
+        );
+        if (!deviceFenceHolds || !keysFenceHolds) {
+          return reconciliationRequiredError(error.step, !deviceFenceHolds ? 'device' : 'keys');
+        }
+        ctx.compensationFenceDevice = fenceDevice;
+      } catch (fenceError) {
+        rollbackErrors.push(fenceError);
+      }
+      if (rollbackErrors.length) {
+        const combined = boundedError(error.step, error.code);
+        combined.rollback = rollbackErrors.map((entry) => ({
+          step: normalizeStep(entry && entry.step),
+          code: normalizeResultCode(entry && entry.code),
+        }));
+        return combined;
+      }
+    }
+
     if (ctx.deviceCreated) {
       try {
         await this.deleteDevice(ctx.devEui);
@@ -546,7 +583,7 @@ class ChirpStackClient {
       }
     } else if (ctx.deviceMutated && ctx.originalDeviceSnapshot) {
       try {
-        const device = await this.getDevice(ctx.devEui);
+        const device = ctx.compensationFenceDevice;
         if (device) {
           await this.restoreDevice(device, ctx.originalDeviceSnapshot);
         }
@@ -607,6 +644,7 @@ class ChirpStackClient {
       keysCreatedNew: false,
       keysMutated: false,
       originalKeysSnapshot: null,
+      desiredKeysSnapshot: null,
     };
 
     try {
@@ -698,6 +736,11 @@ class ChirpStackClient {
       }
 
       const finalKeys = await this.getKeys(devEui);
+      ctx.desiredKeysSnapshot = {
+        nwkKey,
+        appKey: expectedAppKey,
+        genAppKey: expectedGenAppKey,
+      };
       const keysOk = Boolean(finalKeys)
         && constantTimeEqual(normalizeHexKey(finalKeys.getNwkKey()), nwkKey)
         && constantTimeEqual(normalizeHexKey(finalKeys.getAppKey()), expectedAppKey)
@@ -706,7 +749,7 @@ class ChirpStackClient {
         throw boundedError('verifyKeys', 'FAILED_PRECONDITION');
       }
 
-      return {
+      const result = {
         devEui,
         deviceAction,
         keysAction,
@@ -714,6 +757,15 @@ class ChirpStackClient {
         verifiedApplicationId: desired.applicationId,
         verifiedDeviceProfileId: desired.deviceProfileId,
       };
+      Object.defineProperty(result, 'compensate', {
+        enumerable: false,
+        value: async () => {
+          const dbError = boundedError('db', 'UNKNOWN');
+          const compensation = await this._compensateProvisioning(ctx, dbError);
+          if (compensation !== dbError) throw compensation;
+        },
+      });
+      return result;
     } catch (error) {
       throw await this._compensateProvisioning(ctx, error);
     }
