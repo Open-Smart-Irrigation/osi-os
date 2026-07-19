@@ -1633,6 +1633,11 @@ expectExcludes('Queue REST Command ACK', 'INSERT OR REPLACE INTO applied_command
 expectIncludes('Build Command ACK Batch', '/command-acks', 'posts queued command ACKs to the sync REST endpoint');
 expectIncludes('Build Command ACK Batch', "'X-OSI-Sync-Protocol': '2'", 'opts REST command ACKs into sync protocol v2');
 expectIncludes('Mark Command ACKs Delivered', 'UPDATE command_ack_outbox SET delivered_at', 'marks REST command ACK rows delivered only after a successful response');
+expectIncludesById('command-ack-mark-delivered', "Number.isInteger(statusCode) && statusCode === 200", 'requires an eligible integer HTTP 200 before evaluating any per-entry ACK result');
+expectIncludesById('command-ack-mark-delivered', "status === 'ACKED' && matches[0].accepted !== false", 'delivers a command ACK outbox row only for a single unambiguous accepted-terminal result');
+expectIncludesById('command-ack-build-batch', 'if (row.payload_json !== group.canonicalPayloadJson) group.conflict = true;', 'detects conflicting local ACK rows for the same commandId by canonical payload equality');
+expectIncludesById('command-ack-build-batch', 'msg._localAckCorrelation = localAckCorrelation;', 'carries local outbox row correlation for collapsed duplicate ACKs');
+expectIncludesById('command-ack-build-batch', "node.warn('Command ACK conflict for commandId ' + group.commandId", 'withholds delivery and warns on conflicting local ACK rows without leaking lease tokens');
 expectIncludesById('sync-pending-split', "commandType === 'WORK_REQUEST_STATUS'", 'routes WORK_REQUEST_STATUS before the actuator replay guard');
 expectCondition(
   findNodeById('sync-pending-split')?.outputs === 2,
@@ -1648,6 +1653,9 @@ expectLibById('work-request-status-apply', 'osiDb', 'osi-db-helper', 'declares o
 expectIncludesById('work-request-status-apply', 'UPDATE improvement_requests SET cloud_status', 'updates improvement request cloud status fields');
 expectIncludesById('work-request-status-apply', 'last_status_at', 'records the cloud status timestamp');
 expectWireById('work-request-status-apply', 'command-ack-queue-rest', 'queues WORK_REQUEST_STATUS ACKs through the durable ACK queue');
+expectIncludesById('sync-pending-split', 'function isHttpSuccess(statusCode) {\n  return Number.isInteger(statusCode) && statusCode >= 200 && statusCode < 300;\n}', 'gates lastPendingCommandPollSuccessAt on an explicit integer 2xx predicate, never a truthy/0/string statusCode');
+expectIncludesById('reject-indefinite-open', "status: 'REJECTED_PERMANENT'", 'produces a durable REJECTED_PERMANENT ack instead of silently dropping a permanently-invalid command');
+expectIncludesById('reject-indefinite-open', 'return rejectionAck(cmd,', 'routes every permanent-rejection path (indefinite OPEN, unknown type, missing duration) through the durable ack builder');
 for (const actuatorNodeId of ['reject-indefinite-open', 'command-dedupe-dispatch', '934bf2bc19a8ce22', 'cdbaa3891d40d7a1', 'write-strega-expectation']) {
   expectExcludesById(actuatorNodeId, 'WORK_REQUEST_STATUS', 'WORK_REQUEST_STATUS actuator/downlink handling');
 }
