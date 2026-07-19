@@ -1660,7 +1660,7 @@ expectIncludesById('work-request-status-apply', "return ack('APPLIED', 'work_req
 expectIncludesById('work-request-status-apply', "'INSERT INTO applied_commands (command_id, device_eui, command_type, effect_key, applied_at, result, originator, result_detail) VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(command_id) DO NOTHING'", 'writes the applied_commands dedup marker in the same shape osi-command-ledger.queueCommandAck writes, so a replayed ack downstream is byte-for-byte unchanged');
 expectIncludesById('sync-pending-split', 'function isHttpSuccess(statusCode) {\n  return Number.isInteger(statusCode) && statusCode >= 200 && statusCode < 300;\n}', 'gates lastPendingCommandPollSuccessAt on an explicit integer 2xx predicate, never a truthy/0/string statusCode');
 expectIncludesById('reject-indefinite-open', "status: 'REJECTED_PERMANENT'", 'produces a durable REJECTED_PERMANENT ack instead of silently dropping a permanently-invalid command');
-expectIncludesById('reject-indefinite-open', 'return rejectionAck(cmd,', 'routes every permanent-rejection path (indefinite OPEN, unknown type, missing duration) through the durable ack builder');
+expectIncludesById('reject-indefinite-open', 'return [null, rejectionAck(cmd,', 'routes every permanent-rejection path (indefinite OPEN, unknown type, missing duration) through the durable ACK output');
 for (const actuatorNodeId of ['reject-indefinite-open', 'command-dedupe-dispatch', '934bf2bc19a8ce22', 'cdbaa3891d40d7a1', 'write-strega-expectation']) {
   expectExcludesById(actuatorNodeId, 'WORK_REQUEST_STATUS', 'WORK_REQUEST_STATUS actuator/downlink handling');
 }
@@ -1752,6 +1752,7 @@ expectIncludes('Build UPDATE SQL', 'cmd.device_eui', 'accepts schema-shaped devi
 expectWireById('sync-pending-split', 'reject-indefinite-open', 'routes pending cloud commands through the indefinite-open guard before the replay ledger');
 expectWireById('sync-force-build', 'reject-indefinite-open', 'routes force-sync replayed commands through the indefinite-open guard before the replay ledger');
 expectWireById('reject-indefinite-open', 'command-dedupe-dispatch', 'routes guarded cloud commands through the replay ledger');
+expectWireById('reject-indefinite-open', 'command-ack-queue-rest', 'routes permanent rejection ACKs around the command deduper and into the durable ACK queue');
 expectWireById('command-dedupe-dispatch', 'journal-command-apply-fn', 'routes non-duplicates through the journal-aware command applier');
 expectWireById('command-dedupe-dispatch', '9d5e3035c3d069c4', 'publishes already-persisted exact replay ACKs without reclassification');
 expectWireById('journal-command-apply-fn', '934bf2bc19a8ce22', 'falls through recognized non-journal commands to the existing router');
@@ -3966,6 +3967,8 @@ if (!helperPath) {
   expectFileExcludes('osi-chirpstack-helper/index.js', helperSource, '`/api/devices/${encodeURIComponent(normalizedDevEui)}/queue`', 'REST device queue path');
   expectFileExcludes('osi-chirpstack-helper/index.js', helperSource, "requestJson('DELETE'", 'REST device queue DELETE');
   expectFileExcludes('osi-chirpstack-helper/index.js', helperSource, 'ChirpStack queue flush failed with HTTP', 'REST queue-flush error handling');
+  expectFileIncludes('osi-chirpstack-helper/index.js', helperSource, 'const [fenceDevice, fenceKeys] = await Promise.all([', 'checks the aggregate ownership fence before compensation');
+  expectFileIncludes('osi-chirpstack-helper/index.js', helperSource, "Object.defineProperty(result, 'compensate'", 'returns a non-enumerable guarded compensation boundary to registration callers');
   try {
     const helper = require(helperPath);
     for (const exportName of ['createClient', 'createProvisioningClientFromEnv', 'normalizeApiUrl']) {
@@ -4018,7 +4021,7 @@ expectExcludesById('cs-register-device-fn', 'cleanupClient', 'the retired second
 expectExcludesById('cs-register-device-fn', 'deviceCreated', 'the retired deviceCreated field');
 expectExcludesById('cs-register-device-fn', 'grpcStatus', 'the retired numeric grpcStatus field');
 expectExcludesById('cs-register-device-fn', 'error.details', 'the retired error.details field');
-expectIncludesById('cs-register-device-fn', "provisioned.deviceAction === 'created'", 'reads the new deviceAction field to decide post-commit-failure rollback');
+expectIncludesById('cs-register-device-fn', "typeof provisioned.compensate === 'function'", 'uses guarded helper compensation after any post-provisioning local save failure');
 expectIncludesById('cs-register-device-fn', 'const code = error.code || null;', 'reads the new normalized error.code instead of numeric grpcStatus');
 expectIncludesById('cs-register-device-fn', "flow.set('device_chirpstack_result', provisioned);", 'surfaces the full reconciliation result (deviceAction/keysAction/keysVerified/verifiedApplicationId/verifiedDeviceProfileId) as local registration evidence');
 expectIncludesById('cs-register-device-fn', '} finally {\n  if (client) {\n    try {\n      client.close();\n    } catch (_) {\n      node.warn(\'CS Register Device: ChirpStack client close threw unexpectedly\');\n    }\n  }\n  try { await close(); } catch (_) {}\n}\n})();', 'closes the ChirpStack client and the local DB in a single finally on every path, surfacing an unexpected close() throw via node.warn');
@@ -4031,7 +4034,7 @@ expectSingleClientById('cs-reg-cloud-fn', 'no second cleanup client');
 expectExcludesById('cs-reg-cloud-fn', 'deviceCreated', 'the retired deviceCreated field');
 expectExcludesById('cs-reg-cloud-fn', 'grpcStatus', 'the retired numeric grpcStatus field');
 expectExcludesById('cs-reg-cloud-fn', 'error.details', 'the retired error.details field');
-expectIncludesById('cs-reg-cloud-fn', "result.deviceAction === 'created'", 'reads the new deviceAction field to decide post-commit-failure rollback');
+expectIncludesById('cs-reg-cloud-fn', "typeof provisioned.compensate === 'function'", 'uses guarded helper compensation after any post-provisioning local save failure');
 expectIncludesById('cs-reg-cloud-fn', 'const code = error.code || null;', 'reads the new normalized error.code instead of numeric grpcStatus');
 expectIncludesById('cs-reg-cloud-fn', "return [buildAck('SUCCESS', { state: 'APPLIED', deviceEui: devEui, provisionedInChirpStack: true }), null];", 'preserves the exact success ACK shape (commit/ACK path unchanged)');
 expectIncludesById('cs-reg-cloud-fn', '} finally {\n  if (client) {\n    try {\n      client.close();\n    } catch (_) {\n      node.warn(\'CS Register (cloud cmd): ChirpStack client close threw unexpectedly\');\n    }\n  }\n  try { await close(); } catch (_) {}\n}\n})();', 'closes the ChirpStack client and the local DB in a single finally on every REGISTER_DEVICE path, surfacing an unexpected close() throw via node.warn');
