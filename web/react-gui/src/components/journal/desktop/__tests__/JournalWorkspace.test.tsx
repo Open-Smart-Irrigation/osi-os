@@ -1,17 +1,24 @@
 import '@testing-library/jest-dom/vitest';
-import { act, render, screen } from '@testing-library/react';
-import { describe, expect, it, vi } from 'vitest';
+import { act, fireEvent, render, screen } from '@testing-library/react';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
   scopeRail: vi.fn(),
   entryTable: vi.fn(),
   detailPanel: vi.fn(),
+  captureFlow: vi.fn(),
+  useJournalEntries: vi.fn(),
+  retryEntries: vi.fn(),
 }));
 
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({
     t: (key: string) => key,
   }),
+}));
+
+vi.mock('../../../../journal/useJournalEntries', () => ({
+  useJournalEntries: mocks.useJournalEntries,
 }));
 
 vi.mock('../ScopeRail', async () => {
@@ -26,11 +33,13 @@ vi.mock('../ScopeRail', async () => {
 });
 
 vi.mock('../EntryTable', () => ({
+  PAGE_SIZE: 50,
   EntryTable: (props: unknown) => {
     mocks.entryTable(props);
-    const { selectedEntryUuid } = props as EntryTableProps;
+    const { selectedEntryUuid, headerStart } = props as EntryTableProps;
     return (
       <div data-testid="entry-table">
+        {headerStart}
         {selectedEntryUuid && (
           // Stands in for Task 29's real per-row element (which carries this
           // same testid) so the focus-return seam can be exercised without
@@ -49,11 +58,40 @@ vi.mock('../DetailPanel', () => ({
   },
 }));
 
+vi.mock('../../capture/JournalCaptureFlow', () => ({
+  JournalCaptureFlow: (props: unknown) => {
+    mocks.captureFlow(props);
+    const typed = props as {
+      onClose: () => void;
+      onSaved: (receipt: unknown) => void | Promise<void>;
+      onOpenExisting: (entryUuid: string) => void;
+    };
+    return (
+      <div data-testid="capture-flow">
+        <h1 tabIndex={-1}>capture.title</h1>
+        <button type="button" onClick={typed.onClose}>mock-close</button>
+        <button type="button" onClick={() => void typed.onSaved({ entry_uuid: 'new-entry' })}>
+          mock-save
+        </button>
+        <button type="button" onClick={() => typed.onOpenExisting('existing-entry')}>
+          mock-open-existing
+        </button>
+      </div>
+    );
+  },
+}));
+
 import { JournalWorkspace } from '../JournalWorkspace';
 import { DEFAULT_SCOPE_RAIL_FILTERS, type ScopeRailProps } from '../ScopeRail';
 import type { EntryTableProps } from '../EntryTable';
 import type { DetailPanelProps } from '../DetailPanel';
-import type { JournalCatalog, JournalPlot, JournalVocabRow, PlotGroup } from '../../../../types/journal';
+import type {
+  EntryAggregate,
+  JournalCatalog,
+  JournalPlot,
+  JournalVocabRow,
+  PlotGroup,
+} from '../../../../types/journal';
 import type { IrrigationZone } from '../../../../types/farming';
 
 function journalPlot(overrides: Partial<JournalPlot> = {}): JournalPlot {
@@ -107,6 +145,8 @@ function vocabRow(code: string): JournalVocabRow {
 }
 
 const activeGroups: PlotGroup[] = [];
+const plotGroups: PlotGroup[] = [];
+const recentEntries: EntryAggregate[] = [];
 
 const catalog: JournalCatalog = {
   catalog_version: 1,
@@ -118,12 +158,22 @@ const catalog: JournalCatalog = {
   mappings: [],
 };
 
+function defaultPlotState() {
+  return { createPlot: vi.fn(), updatePlot: vi.fn() };
+}
+
+function defaultGroupState() {
+  return { createPlotGroup: vi.fn(), updatePlotGroup: vi.fn() };
+}
+
 function renderWorkspace(overrides: {
   plots?: JournalPlot[];
   activeGroups?: PlotGroup[];
   zones?: IrrigationZone[];
   activities?: JournalVocabRow[];
   catalog?: JournalCatalog;
+  plotGroups?: PlotGroup[];
+  recentEntries?: EntryAggregate[];
 } = {}) {
   return render(
     <JournalWorkspace
@@ -132,6 +182,10 @@ function renderWorkspace(overrides: {
       zones={overrides.zones ?? []}
       activities={overrides.activities ?? [vocabRow('irrigation')]}
       catalog={overrides.catalog ?? catalog}
+      plotGroups={overrides.plotGroups ?? plotGroups}
+      recentEntries={overrides.recentEntries ?? recentEntries}
+      plotState={defaultPlotState()}
+      groupState={defaultGroupState()}
     />,
   );
 }
@@ -148,7 +202,21 @@ function lastDetailPanelProps(): DetailPanelProps {
   return mocks.detailPanel.mock.lastCall?.[0] as DetailPanelProps;
 }
 
+function openCaptureModal() {
+  fireEvent.click(screen.getByRole('button', { name: 'logActivity' }));
+}
+
 describe('JournalWorkspace', () => {
+  beforeEach(() => {
+    mocks.useJournalEntries.mockReturnValue({
+      entries: [],
+      loading: false,
+      error: undefined,
+      nextCursor: null,
+      retry: mocks.retryEntries,
+    });
+  });
+
   it('renders a three-pane grid with the scope rail, an entry table, and a detail panel', () => {
     const { container } = renderWorkspace();
 
@@ -329,4 +397,159 @@ describe('JournalWorkspace', () => {
 
     expect(lastScopeRailProps().search).toBe('north');
   });
+
+  describe('Log activity capture', () => {
+    it('renders a Log activity button in the entry table header that opens an accessible dialog wrapping the capture flow', () => {
+      renderWorkspace();
+
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+
+      const trigger = screen.getByRole('button', { name: 'logActivity' });
+      expect(lastEntryTableProps().headerStart).toBeTruthy();
+
+      fireEvent.click(trigger);
+
+      const dialog = screen.getByRole('dialog');
+      expect(dialog).toBeInTheDocument();
+      expect(screen.getByTestId('capture-flow')).toBeInTheDocument();
+    });
+
+    it('gives the dialog an accessible name, marks it aria-modal, and starts focus inside it', () => {
+      renderWorkspace();
+      openCaptureModal();
+
+      const dialog = screen.getByRole('dialog');
+      expect(dialog).toHaveAttribute('aria-modal', 'true');
+      expect(dialog).toHaveAccessibleName();
+      expect(dialog.contains(document.activeElement)).toBe(true);
+    });
+
+    it('wires the capture flow with the plot/group/entry/timezone dependencies JournalPage assembles', () => {
+      const plots = [journalPlot({ plot_uuid: 'plot-a' })];
+      const groups = [{ ...plotGroupFixture(), group_uuid: 'group-a' }];
+      const entries = [{ entry_uuid: 'recent-1' } as EntryAggregate];
+
+      renderWorkspace({ plots, plotGroups: groups, recentEntries: entries });
+      openCaptureModal();
+
+      const props = mocks.captureFlow.mock.lastCall?.[0] as {
+        catalog: unknown;
+        plots: unknown;
+        plotGroups: unknown;
+        recentEntries: unknown;
+        plotState: { createPlot: unknown; updatePlot: unknown };
+        groupState: { createPlotGroup: unknown; updatePlotGroup: unknown };
+      };
+      expect(props.catalog).toBe(catalog);
+      expect(props.plots).toBe(plots);
+      expect(props.plotGroups).toBe(groups);
+      expect(props.recentEntries).toBe(entries);
+      expect(props.plotState).toEqual(expect.objectContaining({
+        createPlot: expect.any(Function),
+        updatePlot: expect.any(Function),
+      }));
+      expect(props.groupState).toEqual(expect.objectContaining({
+        createPlotGroup: expect.any(Function),
+        updatePlotGroup: expect.any(Function),
+      }));
+    });
+
+    it('closes the dialog and returns focus to the Log activity button on Escape', () => {
+      renderWorkspace();
+      const trigger = screen.getByRole('button', { name: 'logActivity' });
+      trigger.focus();
+      openCaptureModal();
+      expect(screen.getByRole('dialog')).toBeInTheDocument();
+
+      fireEvent.keyDown(window, { key: 'Escape' });
+
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+      expect(trigger).toHaveFocus();
+    });
+
+    it('closes the dialog and returns focus to the Log activity button when the capture flow calls onClose', () => {
+      renderWorkspace();
+      const trigger = screen.getByRole('button', { name: 'logActivity' });
+      openCaptureModal();
+
+      fireEvent.click(screen.getByRole('button', { name: 'mock-close' }));
+
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+      expect(trigger).toHaveFocus();
+    });
+
+    it('traps Tab focus within the dialog', () => {
+      renderWorkspace();
+      openCaptureModal();
+
+      const closeBtn = screen.getByRole('button', { name: 'mock-close' });
+      const saveBtn = screen.getByRole('button', { name: 'mock-save' });
+      const openExistingBtn = screen.getByRole('button', { name: 'mock-open-existing' });
+
+      openExistingBtn.focus();
+      expect(document.activeElement).toBe(openExistingBtn);
+      fireEvent.keyDown(window, { key: 'Tab' });
+      expect(document.activeElement).toBe(closeBtn);
+
+      fireEvent.keyDown(window, { key: 'Tab', shiftKey: true });
+      expect(document.activeElement).toBe(openExistingBtn);
+
+      closeBtn.focus();
+      fireEvent.keyDown(window, { key: 'Tab', shiftKey: true });
+      expect(document.activeElement).toBe(openExistingBtn);
+      void saveBtn;
+    });
+
+    it('on save: refreshes entries via the entries hook retry, closes the dialog, and selects the new entry', async () => {
+      renderWorkspace();
+      openCaptureModal();
+
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: 'mock-save' }));
+      });
+
+      expect(mocks.retryEntries).toHaveBeenCalled();
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+      expect(lastDetailPanelProps().selectedEntryUuid).toBe('new-entry');
+    });
+
+    it('on save: returns focus to the Log activity button', async () => {
+      renderWorkspace();
+      const trigger = screen.getByRole('button', { name: 'logActivity' });
+      openCaptureModal();
+
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: 'mock-save' }));
+      });
+
+      expect(trigger).toHaveFocus();
+    });
+
+    it('on duplicate routing: closes the dialog and selects the existing entry', () => {
+      renderWorkspace();
+      openCaptureModal();
+
+      fireEvent.click(screen.getByRole('button', { name: 'mock-open-existing' }));
+
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+      expect(lastDetailPanelProps().selectedEntryUuid).toBe('existing-entry');
+    });
+  });
 });
+
+function plotGroupFixture(): PlotGroup {
+  return {
+    contract_version: 1,
+    group_uuid: 'group-1',
+    label: 'North pair',
+    owner_user_uuid: 'owner',
+    gateway_device_eui: 'gateway',
+    created_by_principal_uuid: 'author',
+    created_at: '2026-07-16T00:00:00.000Z',
+    resolved_at: null,
+    resolved_by_principal_uuid: null,
+    sync_version: 0,
+    deleted_at: null,
+    members: ['plot-1'],
+  };
+}

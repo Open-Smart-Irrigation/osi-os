@@ -236,6 +236,13 @@ export const JournalPage: React.FC = () => {
             zones={zonesState.data ?? []}
             activities={activities}
             catalog={catalogState.catalog!}
+            plotGroups={groupState.groups}
+            recentEntries={entryState.entries}
+            initialTimezone={zoneTimezone(initialZone)}
+            zoneCrops={zoneCrops}
+            zoneTimezones={zoneTimezones}
+            plotState={plotState}
+            groupState={groupState}
           />
         ) : (
           <>

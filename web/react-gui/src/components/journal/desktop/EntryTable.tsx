@@ -1,4 +1,5 @@
 import type { TFunction } from 'i18next';
+import type { ReactNode } from 'react';
 import { useEffect, useMemo, useReducer, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
@@ -12,7 +13,7 @@ import {
   paginationReducer,
 } from './entryTablePagination';
 
-const PAGE_SIZE = 50;
+export const PAGE_SIZE = 50;
 
 type ExportKind = 'csv' | 'json' | 'package';
 
@@ -35,6 +36,11 @@ export interface EntryTableProps {
   plots: readonly JournalPlot[];
   selectedEntryUuid: string | null;
   onSelectEntry: (entryUuid: string) => void;
+  // Rendered at the start of the table's own header row, to the left of the
+  // export buttons — the seam JournalWorkspace uses to place its "Log
+  // activity" trigger in the same row without EntryTable knowing anything
+  // about capture.
+  headerStart?: ReactNode;
 }
 
 function plotLabelOf(
@@ -46,7 +52,7 @@ function plotLabelOf(
   return plotLabels.get(entry.plot_uuid) ?? t('row.unknownPlot');
 }
 
-export function EntryTable({ filters, plots, selectedEntryUuid, onSelectEntry }: EntryTableProps) {
+export function EntryTable({ filters, plots, selectedEntryUuid, onSelectEntry, headerStart }: EntryTableProps) {
   const { t, i18n } = useTranslation('journal');
   const locale = i18n.resolvedLanguage || i18n.language;
 
@@ -252,31 +258,34 @@ export function EntryTable({ filters, plots, selectedEntryUuid, onSelectEntry }:
       aria-label={t('workspace.table.heading')}
       className="flex h-full min-h-0 flex-col overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--card)]"
     >
-      <div className="flex flex-wrap items-center justify-end gap-2 border-b border-[var(--border)] px-4 py-3">
-        <button
-          type="button"
-          onClick={() => void handleExport('csv')}
-          disabled={pendingExport !== null}
-          className="rounded-lg border border-[var(--border)] px-3 py-2 text-sm font-bold disabled:cursor-not-allowed disabled:opacity-50"
-        >
-          {t('workspace.table.exportCsv')}
-        </button>
-        <button
-          type="button"
-          onClick={() => void handleExport('json')}
-          disabled={pendingExport !== null}
-          className="rounded-lg border border-[var(--border)] px-3 py-2 text-sm font-bold disabled:cursor-not-allowed disabled:opacity-50"
-        >
-          {t('workspace.table.exportJson')}
-        </button>
-        <button
-          type="button"
-          onClick={() => void handleExport('package')}
-          disabled={pendingExport !== null}
-          className="rounded-lg border border-[var(--border)] px-3 py-2 text-sm font-bold disabled:cursor-not-allowed disabled:opacity-50"
-        >
-          {t('workspace.table.exportPackage')}
-        </button>
+      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[var(--border)] px-4 py-3">
+        <div className="flex flex-wrap items-center gap-2">{headerStart}</div>
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={() => void handleExport('csv')}
+            disabled={pendingExport !== null}
+            className="rounded-lg border border-[var(--border)] px-3 py-2 text-sm font-bold disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {t('workspace.table.exportCsv')}
+          </button>
+          <button
+            type="button"
+            onClick={() => void handleExport('json')}
+            disabled={pendingExport !== null}
+            className="rounded-lg border border-[var(--border)] px-3 py-2 text-sm font-bold disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {t('workspace.table.exportJson')}
+          </button>
+          <button
+            type="button"
+            onClick={() => void handleExport('package')}
+            disabled={pendingExport !== null}
+            className="rounded-lg border border-[var(--border)] px-3 py-2 text-sm font-bold disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {t('workspace.table.exportPackage')}
+          </button>
+        </div>
       </div>
       {exportError && (
         <div role="alert" className="px-4 py-2 text-sm font-semibold text-[var(--error-text)]">

@@ -1,17 +1,23 @@
-import { useCallback, useMemo, useState } from 'react';
+import type { ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
+import { useJournalEntries } from '../../../journal/useJournalEntries';
+import type { JournalPlotGroupResourceActions } from '../../../journal/useJournalPlotGroups';
+import type { JournalPlotResourceActions } from '../../../journal/useJournalPlots';
 import type { IrrigationZone } from '../../../types/farming';
 import type {
+  EntryAggregate,
   EntryListFilters,
   JournalCatalog,
   JournalPlot,
   JournalVocabRow,
   PlotGroup,
 } from '../../../types/journal';
+import { JournalCaptureFlow, type JournalSavedReceipt } from '../capture/JournalCaptureFlow';
 import { DraftsQueue } from '../DraftsQueue';
 import { DetailPanel } from './DetailPanel';
-import { EntryTable } from './EntryTable';
+import { EntryTable, PAGE_SIZE } from './EntryTable';
 import {
   DEFAULT_SCOPE_RAIL_FILTERS,
   ScopeRail,
@@ -25,6 +31,17 @@ export interface JournalWorkspaceProps {
   zones: readonly IrrigationZone[];
   activities: readonly JournalVocabRow[];
   catalog: JournalCatalog;
+  // Capture-flow dependencies. JournalPage already assembles every one of
+  // these for the mobile <JournalCaptureFlow> branch — the desktop "Log
+  // activity" modal below reuses the exact same values rather than
+  // duplicating any of the plot/group/zone enrichment logic.
+  plotGroups: PlotGroup[];
+  recentEntries: EntryAggregate[];
+  initialTimezone?: string;
+  zoneCrops?: Readonly<Record<string, string>>;
+  zoneTimezones?: Readonly<Record<string, string>>;
+  plotState: Pick<JournalPlotResourceActions, 'createPlot' | 'updatePlot'>;
+  groupState: Pick<JournalPlotGroupResourceActions, 'createPlotGroup' | 'updatePlotGroup'>;
 }
 
 type ZoneLike = Pick<IrrigationZone, 'zone_uuid' | 'zoneUuid' | 'device_count' | 'deviceCount'>;
@@ -58,12 +75,138 @@ function toEntryListFilters(scope: ScopeSelection, filters: ScopeRailFilters): E
   return result;
 }
 
-export function JournalWorkspace({ plots, activeGroups, zones, activities, catalog }: JournalWorkspaceProps) {
+function savedEntryUuid(receipt: JournalSavedReceipt): string | null {
+  if ('entry_uuid' in receipt) return receipt.entry_uuid;
+  // A batch receipt covers several plots at once; there's no single "the"
+  // entry to open, so land on the first member as a reasonable default
+  // rather than guessing further or leaving nothing selected.
+  return receipt.entries[0]?.entry_uuid ?? null;
+}
+
+function getFocusableElements(container: HTMLElement | null): HTMLElement[] {
+  if (!container) return [];
+  return Array.from(
+    container.querySelectorAll<HTMLElement>(
+      [
+        'button:not([disabled])',
+        '[href]',
+        'input:not([disabled])',
+        'select:not([disabled])',
+        'textarea:not([disabled])',
+        '[tabindex]:not([tabindex="-1"])',
+      ].join(', '),
+    ),
+  ).filter(
+    (element) => !element.hasAttribute('disabled') && element.getAttribute('aria-hidden') !== 'true',
+  );
+}
+
+interface CaptureModalProps {
+  accessibleName: string;
+  onRequestClose: () => void;
+  children: ReactNode;
+}
+
+// A generic, self-contained role="dialog" overlay: backdrop, Escape-to-close,
+// initial focus into the dialog, and a Tab focus trap. Deliberately renders
+// no header/title chrome of its own — JournalCaptureFlow already renders its
+// own heading (which self-focuses on mount) and its own "Close" button, so
+// this wrapper only needs to supply the modal semantics around it.
+function CaptureModal({ accessibleName, onRequestClose, children }: CaptureModalProps) {
+  const dialogRef = useRef<HTMLDivElement | null>(null);
+  const onRequestCloseRef = useRef(onRequestClose);
+
+  useEffect(() => {
+    onRequestCloseRef.current = onRequestClose;
+  }, [onRequestClose]);
+
+  useEffect(() => {
+    // Runs after children have mounted (and, for the real JournalCaptureFlow,
+    // after its own heading-focus effect), so this only steps in when focus
+    // hasn't already landed inside the dialog.
+    const node = dialogRef.current;
+    if (node && !node.contains(document.activeElement)) {
+      const focusable = getFocusableElements(node);
+      (focusable[0] ?? node).focus();
+    }
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        onRequestCloseRef.current();
+        return;
+      }
+      if (event.key !== 'Tab') return;
+
+      const focusable = getFocusableElements(dialogRef.current);
+      if (focusable.length === 0) {
+        event.preventDefault();
+        return;
+      }
+
+      const activeElement = document.activeElement as HTMLElement | null;
+      const currentIndex = activeElement ? focusable.indexOf(activeElement) : -1;
+      const lastIndex = focusable.length - 1;
+      let nextIndex = currentIndex;
+
+      if (event.shiftKey) {
+        nextIndex = currentIndex <= 0 ? lastIndex : currentIndex - 1;
+      } else {
+        nextIndex = currentIndex === -1 || currentIndex >= lastIndex ? 0 : currentIndex + 1;
+      }
+
+      if (nextIndex !== currentIndex) {
+        event.preventDefault();
+        focusable[nextIndex]?.focus();
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/50 p-4"
+      onClick={() => onRequestClose()}
+    >
+      <div
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-label={accessibleName}
+        tabIndex={-1}
+        className="my-8 max-h-[calc(100vh-4rem)] w-full max-w-lg overflow-y-auto rounded-xl border border-[var(--border)] bg-[var(--surface)] shadow-2xl"
+        onClick={(event) => event.stopPropagation()}
+      >
+        {children}
+      </div>
+    </div>
+  );
+}
+
+export function JournalWorkspace({
+  plots,
+  activeGroups,
+  zones,
+  activities,
+  catalog,
+  plotGroups,
+  recentEntries,
+  initialTimezone,
+  zoneCrops,
+  zoneTimezones,
+  plotState,
+  groupState,
+}: JournalWorkspaceProps) {
   const { t } = useTranslation('journal');
   const [scope, setScope] = useState<ScopeSelection>({ kind: 'all' });
   const [filters, setFilters] = useState<ScopeRailFilters>(DEFAULT_SCOPE_RAIL_FILTERS);
   const [search, setSearch] = useState('');
   const [selectedEntryUuid, setSelectedEntryUuid] = useState<string | null>(null);
+  const [captureOpen, setCaptureOpen] = useState(false);
+  const logActivityButtonRef = useRef<HTMLButtonElement | null>(null);
+  const wasCaptureOpenRef = useRef(false);
 
   // The focus-return seam: EntryTable (Task 29) renders each row with a
   // stable `entry-row-<uuid>` testid/DOM node it also uses for its own
@@ -98,6 +241,49 @@ export function JournalWorkspace({ plots, activeGroups, zones, activities, catal
   // of leaving it as an undisclosed gap.
   const scopeNotNarrowed = scope.kind === 'station' || scope.kind === 'group';
 
+  // Own the post-save refresh. EntryTable manages its own paginated
+  // useJournalEntries call internally; this instance mirrors its unpaginated
+  // (first-page, no cursor) query exactly — same filters, same PAGE_SIZE —
+  // so calling retry() after a save revalidates the same SWR cache entry
+  // EntryTable reads from when the user is on page 1, which is the common
+  // desktop case (save while looking at the table, see the new entry appear).
+  // A page 2+ view isn't invalidated by this; a known, accepted gap, the same
+  // shape as the scopeNotNarrowed gap documented above.
+  const { retry: retryEntries } = useJournalEntries({ ...entryListFilters, limit: PAGE_SIZE }, true);
+
+  useEffect(() => {
+    if (wasCaptureOpenRef.current && !captureOpen) {
+      logActivityButtonRef.current?.focus();
+    }
+    wasCaptureOpenRef.current = captureOpen;
+  }, [captureOpen]);
+
+  const openCapture = useCallback(() => setCaptureOpen(true), []);
+  const closeCapture = useCallback(() => setCaptureOpen(false), []);
+
+  const handleCaptureSaved = useCallback(async (receipt: JournalSavedReceipt) => {
+    await retryEntries();
+    setCaptureOpen(false);
+    const entryUuid = savedEntryUuid(receipt);
+    if (entryUuid) setSelectedEntryUuid(entryUuid);
+  }, [retryEntries]);
+
+  const handleCaptureOpenExisting = useCallback((entryUuid: string) => {
+    setCaptureOpen(false);
+    setSelectedEntryUuid(entryUuid);
+  }, []);
+
+  const logActivityButton = (
+    <button
+      ref={logActivityButtonRef}
+      type="button"
+      className="btn-liquid rounded-lg px-4 py-2 text-sm font-bold"
+      onClick={openCapture}
+    >
+      {t('logActivity')}
+    </button>
+  );
+
   return (
     <div className="mx-auto grid w-full max-w-[1600px] grid-cols-1 gap-4 px-4 py-6 lg:grid-cols-[320px_1fr_360px]">
       <div className="flex flex-col gap-4">
@@ -128,6 +314,7 @@ export function JournalWorkspace({ plots, activeGroups, zones, activities, catal
             plots={plots}
             selectedEntryUuid={selectedEntryUuid}
             onSelectEntry={setSelectedEntryUuid}
+            headerStart={logActivityButton}
           />
         </div>
       </div>
@@ -138,6 +325,29 @@ export function JournalWorkspace({ plots, activeGroups, zones, activities, catal
         selectedEntryUuid={selectedEntryUuid}
         onFocusReturn={focusSelectedRow}
       />
+
+      {captureOpen && (
+        <CaptureModal accessibleName={t('capture.title')} onRequestClose={closeCapture}>
+          <JournalCaptureFlow
+            catalog={catalog}
+            // JournalCaptureFlow reads (find/map/filter) but never mutates
+            // plots; JournalWorkspace's own `plots` prop is readonly (shared
+            // with ScopeRail/EntryTable/DetailPanel), so this is a type-only
+            // widening, not a behavior change.
+            plots={plots as JournalPlot[]}
+            plotGroups={plotGroups}
+            recentEntries={recentEntries}
+            initialTimezone={initialTimezone}
+            zoneCrops={zoneCrops}
+            zoneTimezones={zoneTimezones}
+            plotState={plotState}
+            groupState={groupState}
+            onClose={closeCapture}
+            onOpenExisting={handleCaptureOpenExisting}
+            onSaved={handleCaptureSaved}
+          />
+        </CaptureModal>
+      )}
     </div>
   );
 }
