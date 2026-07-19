@@ -65,6 +65,24 @@ const ORDINARY_PARENT_PHASES = Object.freeze([
 // Verbatim: "factory-only `image-baseline-initializing` is the additional
 // closed phase ... and is rejected by generic transitions."
 const FACTORY_ONLY_PARENT_PHASE = 'image-baseline-initializing';
+// Factory baseline state is a separate, closed envelope.  Generic lifecycle
+// validation intentionally rejects these phases; ROM consumers use this
+// validator when checking the state created by the image-baseline verbs.
+const FACTORY_BASELINE_PARENT_PHASES = Object.freeze([
+  'image-baseline-initializing',
+]);
+const FACTORY_BASELINE_PREFIXES = Object.freeze([
+  'image-preactivation',
+  'baseline-completing',
+]);
+const FACTORY_BASELINE_PARENT_FIELDS = Object.freeze([
+  'deploymentId', 'phase', 'generation', 'imageBaselinePrefix', 'databaseLineage',
+  'factoryZeroAuthority',
+  // The factory verbs may carry the ordinary identity/timestamp fields while
+  // they share the format-2 envelope; keep the accepted set closed.
+  'leaseActive', 'attemptSha256', 'targetCommitSha', 'controllerGeneration',
+  'claimSha256', 'claimPath', 'createdAt', 'updatedAt',
+]);
 
 const TERMINAL_PARENT_PHASES = Object.freeze(['completed', 'recovered']);
 
@@ -933,6 +951,101 @@ function validateActiveSubOperation(obj, parentDeployment) {
     }
   }
   return obj;
+}
+
+function validateFactoryZeroAuthority(obj, ctx = 'parentDeployment.factoryZeroAuthority') {
+  assertPlainObject(obj, ctx);
+  assertExactFields(obj, [
+    'factoryProvenanceSha256', 'factorySeedReceiptSha256', 'databaseLineageSha256',
+    'databaseIdentitySha256', 'protocolRoots', 'bootId',
+    'stoppedRoleEvidence', 'linkGenerationEvidence',
+  ], ctx);
+  for (const field of [
+    'factoryProvenanceSha256', 'factorySeedReceiptSha256', 'databaseLineageSha256',
+    'databaseIdentitySha256',
+  ]) assertSha256Hex(obj[field], `${ctx}.${field}`);
+  assertPlainObject(obj.protocolRoots, `${ctx}.protocolRoots`);
+  assertExactFields(obj.protocolRoots, ['root', 'witnessRoot', 'activityWitnessRoot', 'activityHeadWitnessRoot'], `${ctx}.protocolRoots`);
+  for (const [name, root] of Object.entries(obj.protocolRoots)) {
+    assertAbsolutePathString(root, `${ctx}.protocolRoots.${name}`);
+    if (root.includes('\0')) throw new DeploymentStateError(`${ctx}.protocolRoots.${name} must not contain NUL`, 'shape');
+  }
+  assertString(obj.bootId, `${ctx}.bootId`);
+  for (const field of ['stoppedRoleEvidence', 'linkGenerationEvidence']) {
+    const evidenceCtx = `${ctx}.${field}`;
+    assertPlainObject(obj[field], evidenceCtx);
+    assertExactFields(obj[field], ['path', 'sha256'], evidenceCtx);
+    assertAbsolutePathString(obj[field].path, `${evidenceCtx}.path`);
+    if (obj[field].path.includes('\0')) throw new DeploymentStateError(`${evidenceCtx}.path must not contain NUL`, 'shape');
+    assertSha256Hex(obj[field].sha256, `${evidenceCtx}.sha256`);
+  }
+  return obj;
+}
+
+/**
+ * Validate the ROM-owned factory baseline envelope without widening the
+ * ordinary deployment state codec.  The parent identity and lineage hashes
+ * are checked here and can be cross-bound to the immutable seed evidence by
+ * callers through the optional expected* values.
+ */
+function validateFactoryBaselineEnvelope(envelope, options = {}) {
+  assertPlainObject(envelope, 'factory baseline envelope');
+  assertExactFields(envelope, ['format', 'parentDeployment', 'activeSubOperation'], 'factory baseline envelope');
+  if (envelope.format !== FORMAT) throw new DeploymentStateError(`factory baseline envelope.format must be ${FORMAT}`, 'shape');
+  if (envelope.activeSubOperation !== null) {
+    throw new DeploymentStateError('factory baseline envelope.activeSubOperation must be null', 'shape');
+  }
+
+  const parent = envelope.parentDeployment;
+  assertPlainObject(parent, 'factory baseline parentDeployment');
+  assertNoUnknownFields(parent, FACTORY_BASELINE_PARENT_FIELDS, 'factory baseline parentDeployment');
+  for (const required of ['deploymentId', 'phase', 'generation', 'imageBaselinePrefix', 'databaseLineage']) {
+    if (!(required in parent)) throw new DeploymentStateError(`factory baseline parentDeployment: missing required field '${required}'`, 'missing-field');
+  }
+  validateOperationId(parent.deploymentId, 'factory baseline parentDeployment.deploymentId');
+  assertOneOf(parent.phase, FACTORY_BASELINE_PARENT_PHASES, 'factory baseline parentDeployment.phase');
+  assertPositiveInt(parent.generation, 'factory baseline parentDeployment.generation');
+  assertOneOf(parent.imageBaselinePrefix, FACTORY_BASELINE_PREFIXES, 'factory baseline parentDeployment.imageBaselinePrefix');
+  validateDatabaseLineage(parent.databaseLineage);
+  if (parent.databaseLineage.status !== 'valid') {
+    throw new DeploymentStateError('factory baseline parentDeployment.databaseLineage must be valid', 'shape');
+  }
+
+  if ('leaseActive' in parent) assertBoolean(parent.leaseActive, 'factory baseline parentDeployment.leaseActive');
+  if ('attemptSha256' in parent) assertSha256Hex(parent.attemptSha256, 'factory baseline parentDeployment.attemptSha256');
+  if ('targetCommitSha' in parent) assertString(parent.targetCommitSha, 'factory baseline parentDeployment.targetCommitSha');
+  if ('controllerGeneration' in parent) assertPositiveInt(parent.controllerGeneration, 'factory baseline parentDeployment.controllerGeneration');
+  if ('claimSha256' in parent) assertSha256Hex(parent.claimSha256, 'factory baseline parentDeployment.claimSha256');
+  if ('claimPath' in parent) assertAbsolutePathString(parent.claimPath, 'factory baseline parentDeployment.claimPath');
+  if ('createdAt' in parent) assertIsoTimestamp(parent.createdAt, 'factory baseline parentDeployment.createdAt');
+  if ('updatedAt' in parent) assertIsoTimestamp(parent.updatedAt, 'factory baseline parentDeployment.updatedAt');
+
+  if ('factoryZeroAuthority' in parent) {
+    validateFactoryZeroAuthority(parent.factoryZeroAuthority);
+    const authority = parent.factoryZeroAuthority;
+    const expectedHashes = {
+      expectedFactoryProvenanceSha256: 'factoryProvenanceSha256',
+      expectedSeedReceiptSha256: 'factorySeedReceiptSha256',
+      expectedDatabaseLineageSha256: 'databaseLineageSha256',
+    };
+    for (const [option, field] of Object.entries(expectedHashes)) {
+      if (options[option] !== undefined && authority[field] !== options[option]) {
+        throw new DeploymentStateError(`factory baseline authority ${field} does not match immutable evidence`, 'hash-mismatch');
+      }
+    }
+  }
+  if (options.expectedDeploymentId !== undefined && parent.deploymentId !== options.expectedDeploymentId) {
+    throw new DeploymentStateError('factory baseline deployment id does not match immutable seed receipt', 'cross-link-mismatch');
+  }
+  if (options.expectedDatabaseLineageSha256 !== undefined
+      && parent.databaseLineage.databaseLineageSha256 !== options.expectedDatabaseLineageSha256) {
+    throw new DeploymentStateError('factory baseline lineage does not match immutable lineage bytes', 'hash-mismatch');
+  }
+  if (options.expectedSeedReceiptSha256 !== undefined
+      && parent.databaseLineage.seedReceiptSha256 !== options.expectedSeedReceiptSha256) {
+    throw new DeploymentStateError('factory baseline seed receipt does not match immutable receipt bytes', 'hash-mismatch');
+  }
+  return envelope;
 }
 
 function validateEnvelope(envelope) {
@@ -3551,6 +3664,9 @@ module.exports = {
   FORMAT,
   ORDINARY_PARENT_PHASES,
   FACTORY_ONLY_PARENT_PHASE,
+  FACTORY_BASELINE_PARENT_PHASES,
+  FACTORY_BASELINE_PREFIXES,
+  FACTORY_BASELINE_PARENT_FIELDS,
   TERMINAL_PARENT_PHASES,
   RECEIPT_KINDS,
   SUB_OPERATION_KINDS,
@@ -3588,6 +3704,8 @@ module.exports = {
   validatePreviousTerminal,
   validateParentDeployment,
   validateActiveSubOperation,
+  validateFactoryZeroAuthority,
+  validateFactoryBaselineEnvelope,
   validateEnvelope,
   RECOVERY_LINKABLE_PARENT_PHASES,
   RECOVERY_SUB_OPERATION_PHASES,

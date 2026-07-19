@@ -17,6 +17,7 @@ function valid() {
     factorySeedHelperSha256: HASH,
     factorySeedLibrarySha256: HASH,
     deploymentStateCliSha256: HASH,
+    deploymentStateLibrarySha256: HASH,
     dbSeedInitializerSha256: HASH,
     commandStateAuditSha256: HASH,
     protocolCapabilityHelperSha256: HASH,

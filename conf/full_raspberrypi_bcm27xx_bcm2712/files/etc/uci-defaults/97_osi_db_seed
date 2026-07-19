@@ -25,6 +25,10 @@ PUBLICATION="$LINEAGE.seed-publication.json"
 fail() { logger -t osi-db-seed "$1" 2>/dev/null || :; return 1; }
 safe_path() {
     candidate=$1
+    case "$candidate" in
+        /*) ;;
+        *) fail "path must be absolute: $candidate" ;;
+    esac
     while [ "$candidate" != / ]; do
         [ ! -L "$candidate" ] || fail "symlink path component: $candidate"
         candidate=$(dirname "$candidate")
@@ -44,39 +48,49 @@ done
 
 # A foreign/mismatched state chain is not idempotence.  Validate all durable
 # evidence before accepting an existing database (or attempting any seed).
-"$NODE" - "$STATE" "$RECEIPT" "$LINEAGE" "$DB" "$PROVENANCE" "$SEED" "$PUBLICATION" "$ROM_ROOT/usr/libexec/osi-factory-database-seed.js" <<'NODE'
+"$NODE" - "$STATE" "$RECEIPT" "$LINEAGE" "$DB" "$PROVENANCE" "$SEED" "$PUBLICATION" "$ROM_ROOT/usr/libexec/osi-factory-database-seed.js" "$ROM_ROOT/usr/libexec/osi-deployment-state.js" <<'NODE'
 const fs = require('node:fs');
 const crypto = require('node:crypto');
-const [statePath, receiptPath, lineagePath, databasePath, provenancePath, seedPath, publicationPath, seedLibraryPath] = process.argv.slice(2);
+const [statePath, receiptPath, lineagePath, databasePath, provenancePath, seedPath, publicationPath, seedLibraryPath, stateLibraryPath] = process.argv.slice(2);
 const sha = value => crypto.createHash('sha256').update(value).digest('hex');
 const canonical = value => Array.isArray(value) ? `[${value.map(canonical).join(',')}]`
   : (value && typeof value === 'object' ? `{${Object.keys(value).sort().map(key => `${JSON.stringify(key)}:${canonical(value[key])}`).join(',')}}` : JSON.stringify(value));
-function regular(file, label) {
+function regular(file, label, expectedMode = 0o600) {
   const stat = fs.lstatSync(file);
   if (!stat.isFile() || stat.isSymbolicLink()) throw new Error(`${label} must be a regular nonsymlink file`);
-  if ((stat.mode & 0o777) !== 0o600) throw new Error(`${label} must be mode 0600`);
+  if (expectedMode !== null && stat.uid !== process.getuid()) throw new Error(`${label} must be owned by the runtime user`);
+  if (expectedMode !== null && (stat.mode & 0o777) !== expectedMode) throw new Error(`${label} must be mode ${expectedMode.toString(8).padStart(4, '0')}`);
+  if (expectedMode === null && (stat.mode & 0o444) === 0) throw new Error(`${label} must be readable`);
+  return stat;
 }
-function json(file, label) { regular(file, label); return JSON.parse(fs.readFileSync(file, 'utf8')); }
+function json(file, label, expectedMode = 0o600) { regular(file, label, expectedMode); return JSON.parse(fs.readFileSync(file, 'utf8')); }
 const state = json(statePath, 'deployment state');
 const receipt = json(receiptPath, 'factory seed receipt');
 const lineage = json(lineagePath, 'factory database lineage');
-const provenance = json(provenancePath, 'factory provenance');
+// ROM artifacts are read-only image inputs and are shipped mode 0644.  Only
+// mutable factory evidence in /data is root-only mode 0600.
+const provenance = json(provenancePath, 'factory provenance', null);
+regular(seedPath, 'factory seed', null);
 regular(publicationPath, 'factory database publication authority');
-const phase = state && state.parentDeployment ? state.parentDeployment.phase : state && state.phase;
-if (!state || !state.parentDeployment || !['image-baseline-initializing', 'baseline-completing'].includes(phase)) throw new Error('deployment state is not the exact factory baseline chain');
-const stateLineage = state.parentDeployment.databaseLineage;
-if (!stateLineage || stateLineage.status !== 'valid'
-    || Object.keys(stateLineage).sort().join() !== ['status', 'databaseLineageSha256', 'seedReceiptSha256'].sort().join()) throw new Error('deployment state lineage is not valid');
 const receiptKeys = ['format', 'receiptKind', 'operationId', 'databasePath', 'seedSha256', 'dataMountIdentitySha256', 'databasePublicationSha256', 'createdDevice', 'createdInode', 'createdAt'];
 if (!receipt || Object.keys(receipt).sort().join() !== receiptKeys.sort().join()
     || receipt.format !== 1 || receipt.receiptKind !== 'factory-seed' || receipt.databasePath !== databasePath
-    || receipt.operationId !== `factory-baseline-${provenance.profile}`) throw new Error('factory seed receipt is foreign or mismatched');
+    || typeof receipt.operationId !== 'string' || receipt.operationId.length === 0) throw new Error('factory seed receipt is foreign or mismatched');
 const lineageKeys = ['format', 'databasePath', 'seedReceiptSha256', 'seedSha256', 'dataMountIdentitySha256', 'databasePublicationSha256', 'createdDevice', 'createdInode', 'createdAt'];
 if (!lineage || Object.keys(lineage).sort().join() !== lineageKeys.sort().join()
     || lineage.format !== 1 || lineage.databasePath !== databasePath) throw new Error('factory database lineage is foreign or mismatched');
 const receiptSha = sha(fs.readFileSync(receiptPath));
-if (lineage.seedReceiptSha256 !== receiptSha || receipt.seedSha256 !== provenance.factorySeedSha256 || lineage.seedSha256 !== provenance.factorySeedSha256) throw new Error('factory seed receipt/lineage/provenance mismatch');
+const stateLibrary = require(stateLibraryPath);
 const lineageSha = sha(Buffer.from(canonical(lineage)));
+const provenanceSha = sha(fs.readFileSync(provenancePath));
+stateLibrary.validateFactoryBaselineEnvelope(state, {
+  expectedDeploymentId: receipt.operationId,
+  expectedFactoryProvenanceSha256: provenanceSha,
+  expectedSeedReceiptSha256: receiptSha,
+  expectedDatabaseLineageSha256: lineageSha,
+});
+const stateLineage = state.parentDeployment.databaseLineage;
+if (lineage.seedReceiptSha256 !== receiptSha || receipt.seedSha256 !== provenance.factorySeedSha256 || lineage.seedSha256 !== provenance.factorySeedSha256) throw new Error('factory seed receipt/lineage/provenance mismatch');
 if (stateLineage.databaseLineageSha256 !== lineageSha || stateLineage.seedReceiptSha256 !== receiptSha) throw new Error('deployment state lineage does not bind receipt/lineage bytes');
 if (sha(fs.readFileSync(seedPath)) !== provenance.factorySeedSha256) throw new Error('factory seed bytes do not match provenance');
 const seed = require(seedLibraryPath);

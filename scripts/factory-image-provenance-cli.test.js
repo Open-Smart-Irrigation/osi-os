@@ -14,7 +14,7 @@ function writeJson(file, value) { fs.writeFileSync(file, `${codec.canonical(valu
 function makeCase() {
   const root = temp();
   const files = {};
-  for (const name of ['initializer', '97_osi_db_seed', 'seed', 'helper', 'seed-cli', 'seed-library', 'state-cli', 'audit', 'protocol-helper', 'protocol-cli', 'provenance-library', 'provenance-cli']) {
+  for (const name of ['initializer', '97_osi_db_seed', 'seed', 'helper', 'seed-cli', 'seed-library', 'state-cli', 'osi-deployment-state.js', 'audit', 'protocol-helper', 'protocol-cli', 'provenance-library', 'provenance-cli']) {
     files[name] = path.join(root, name);
     fs.writeFileSync(files[name], `${name}\n`, { mode: 0o600 });
   }
@@ -34,6 +34,7 @@ function makeCase() {
       factorySeedHelperSha256: codec.hashFile(files['seed-cli']),
       factorySeedLibrarySha256: codec.hashFile(files['seed-library']),
       deploymentStateCliSha256: codec.hashFile(files['state-cli']),
+      deploymentStateLibrarySha256: codec.hashFile(files['osi-deployment-state.js']),
       dbSeedInitializerSha256: codec.hashFile(files['97_osi_db_seed']),
       commandStateAuditSha256: codec.hashFile(files.audit),
       protocolCapabilityHelperSha256: codec.hashFile(files['protocol-cli']),
@@ -54,6 +55,7 @@ function makeCase() {
     factorySeedHelperSha256: manifest.files.factorySeedHelperSha256,
     factorySeedLibrarySha256: manifest.files.factorySeedLibrarySha256,
     deploymentStateCliSha256: manifest.files.deploymentStateCliSha256,
+    deploymentStateLibrarySha256: manifest.files.deploymentStateLibrarySha256,
     dbSeedInitializerSha256: manifest.files.dbSeedInitializerSha256,
     commandStateAuditSha256: manifest.files.commandStateAuditSha256,
     protocolCapabilityHelperSha256: manifest.files.protocolCapabilityHelperSha256,
