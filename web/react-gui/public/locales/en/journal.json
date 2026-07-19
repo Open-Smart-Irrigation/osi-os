@@ -250,6 +250,10 @@
     "discardError": "Could not discard this draft. Try again.",
     "resumeUnavailable": "This draft's form is no longer available.",
     "close": "Close",
+    "complete": "Complete",
+    "completing": "Completing…",
+    "completeError": "Could not complete this draft. Try again.",
+    "completeStale": "This draft changed elsewhere. Reload it before completing again.",
     "error": {
       "title": "Could not load drafts",
       "retry": "Try again"
@@ -371,13 +375,13 @@
     },
     "transition": {
       "title": "Review changed values",
-      "body": "This growing setting change affects values you already entered. Choose what to do with each one before continuing.",
+      "body": "This layout change affects values you already entered. Choose what to do with each one before continuing.",
       "close": "Close",
       "keep": "Keep",
       "replace": "Replace",
       "remove": "Remove",
-      "reasonFieldHidden": "This growing setting no longer shows this field.",
-      "reasonChoiceInvalid": "This value is not allowed under the new growing setting.",
+      "reasonFieldHidden": "This layout no longer shows this field.",
+      "reasonChoiceInvalid": "This value is not allowed under the new layout.",
       "pendingBanner": "Some values need your decision before you can continue.",
       "reviewAction": "Review changed values"
     },

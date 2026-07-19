@@ -250,6 +250,10 @@
     "discardError": "No se ha podido descartar este borrador. Inténtalo de nuevo.",
     "resumeUnavailable": "El formulario de este borrador ya no está disponible.",
     "close": "Cerrar",
+    "complete": "Completar",
+    "completing": "Completando…",
+    "completeError": "No se ha podido completar este borrador. Inténtalo de nuevo.",
+    "completeStale": "Este borrador ha cambiado en otro lugar. Vuelve a cargarlo antes de completarlo de nuevo.",
     "error": {
       "title": "No se pudieron cargar los borradores",
       "retry": "Reintentar"
@@ -371,13 +375,13 @@
     },
     "transition": {
       "title": "Revisar valores modificados",
-      "body": "Este cambio en la configuración de cultivo afecta a valores que ya habías introducido. Elige qué hacer con cada uno antes de continuar.",
+      "body": "Este cambio en el layout afecta a valores que ya habías introducido. Elige qué hacer con cada uno antes de continuar.",
       "close": "Cerrar",
       "keep": "Mantener",
       "replace": "Reemplazar",
       "remove": "Quitar",
-      "reasonFieldHidden": "Esta configuración de cultivo ya no muestra este campo.",
-      "reasonChoiceInvalid": "Este valor no está permitido con la nueva configuración de cultivo.",
+      "reasonFieldHidden": "Este layout ya no muestra este campo.",
+      "reasonChoiceInvalid": "Este valor no está permitido con el nuevo layout.",
       "pendingBanner": "Algunos valores necesitan tu decisión antes de poder continuar.",
       "reviewAction": "Revisar valores modificados"
     },

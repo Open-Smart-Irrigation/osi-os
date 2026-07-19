@@ -250,6 +250,10 @@
     "discardError": "Impossible d'abandonner ce brouillon. Réessayez.",
     "resumeUnavailable": "Le formulaire de ce brouillon n'est plus disponible.",
     "close": "Fermer",
+    "complete": "Compléter",
+    "completing": "Complétion en cours…",
+    "completeError": "Impossible de compléter ce brouillon. Réessayez.",
+    "completeStale": "Ce brouillon a changé ailleurs. Rechargez-le avant de le compléter à nouveau.",
     "error": {
       "title": "Impossible de charger les brouillons",
       "retry": "Réessayer"
@@ -371,13 +375,13 @@
     },
     "transition": {
       "title": "Vérifier les valeurs modifiées",
-      "body": "Ce changement de réglage de culture affecte des valeurs déjà saisies. Choisissez ce qu'il faut faire pour chacune avant de continuer.",
+      "body": "Ce changement de layout affecte des valeurs déjà saisies. Choisissez ce qu'il faut faire pour chacune avant de continuer.",
       "close": "Fermer",
       "keep": "Conserver",
       "replace": "Remplacer",
       "remove": "Retirer",
-      "reasonFieldHidden": "Ce réglage de culture n'affiche plus ce champ.",
-      "reasonChoiceInvalid": "Cette valeur n'est pas autorisée avec le nouveau réglage de culture.",
+      "reasonFieldHidden": "Ce layout n'affiche plus ce champ.",
+      "reasonChoiceInvalid": "Cette valeur n'est pas autorisée avec le nouveau layout.",
       "pendingBanner": "Certaines valeurs nécessitent votre décision avant de pouvoir continuer.",
       "reviewAction": "Vérifier les valeurs modifiées"
     },
