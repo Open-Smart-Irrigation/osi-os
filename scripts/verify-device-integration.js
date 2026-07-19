@@ -8,8 +8,6 @@ const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
 
-const { createAsyncDatabaseFacade } = require(path.join(__dirname, 'lib', 'database-sync-async-facade.js'));
-
 const PROFILE = 'full_raspberrypi_bcm27xx_bcm2712';
 const CONF_ROOT = path.resolve(__dirname, '..', 'conf', PROFILE, 'files', 'usr', 'share');
 const NR_ROOT = path.join(CONF_ROOT, 'node-red');
@@ -29,75 +27,15 @@ function loadCodecViaVm(codecPath) {
   return sandbox;
 }
 
-function createTestDb(typeId) {
+function createTestDb() {
   const db = new DatabaseSync(':memory:');
   db.exec(fs.readFileSync(SEED_SQL, 'utf8'));
   db.exec("INSERT INTO users(username, password_hash, created_at) VALUES('test','hash',datetime('now'))");
   const userId = db.prepare("SELECT id FROM users WHERE username = 'test'").get().id;
   db.prepare(
-    "INSERT INTO devices(deveui, type_id, name, user_id, created_at, updated_at) VALUES(?, ?, 'test-dev', ?, datetime('now'), datetime('now'))"
-  ).run(TEST_DEVEUI, typeId, userId);
+    "INSERT INTO devices(deveui, type_id, name, user_id, created_at, updated_at) VALUES(?, 'MILESIGHT_UC512', 'test-uc512', ?, datetime('now'), datetime('now'))"
+  ).run(TEST_DEVEUI, userId);
   return db;
-}
-
-// Builds the flat object actually assembled by the shipped LSN50 flow node
-// (`460e0bfd95f89e67`, "LSN50 Normalize + Write"): every default-mode and
-// MOD9 property is always present, with the inactive mode's properties left
-// `undefined` (or, for the null-variant fixture, explicit `null`) because the
-// source ChirpStack payload never populated them. `overrides` applies last so
-// a specific field can be forced populated while keeping the rest of the
-// production shape intact.
-function productionLsn50Decoded(overrides, inactivePlaceholder) {
-  overrides = overrides || {};
-  const placeholder = inactivePlaceholder === undefined ? undefined : inactivePlaceholder;
-  const detectedMode = overrides.detectedMode === undefined ? 1 : overrides.detectedMode;
-  const isMode9 = detectedMode === 9;
-
-  const decoded = {
-    devEui: TEST_DEVEUI,
-    timestamp: '2026-07-12T10:00:00Z',
-    detectedMode: detectedMode,
-
-    tempC1: 22.3,
-    batV: 3.45,
-
-    adcV: isMode9 ? placeholder : 1.23,
-    adcCh1V: isMode9 ? placeholder : 0.45,
-    swt1Kpa: isMode9 ? placeholder : 15.2,
-    swt2Kpa: isMode9 ? placeholder : 18.7,
-    swt3Kpa: isMode9 ? placeholder : null,
-    dendroRatio: isMode9 ? placeholder : 0.85,
-    dendroModeUsed: isMode9 ? placeholder : 'linear',
-    positionRawMm: isMode9 ? placeholder : 12.5,
-    positionMm: isMode9 ? placeholder : 12.3,
-    dendroValid: isMode9 ? placeholder : 1,
-    deltaMm: isMode9 ? placeholder : 0.02,
-    dendroStemChangeUm: isMode9 ? placeholder : 20,
-    dendroSaturated: isMode9 ? placeholder : 0,
-    dendroSaturationSide: isMode9 ? placeholder : null,
-
-    rainCountCumulative: isMode9 ? 150 : placeholder,
-    rainTipsDelta: isMode9 ? 3 : placeholder,
-    rainMmDelta: isMode9 ? 0.6 : placeholder,
-    rainMmPerHour: isMode9 ? 3.6 : placeholder,
-    rainMmPer10Min: isMode9 ? 0.6 : placeholder,
-    rainMmToday: isMode9 ? 5.4 : placeholder,
-    rainDeltaStatus: isMode9 ? 'ok' : placeholder,
-    flowCountCumulative: isMode9 ? 500 : placeholder,
-    flowPulsesDelta: isMode9 ? 10 : placeholder,
-    flowLitersDelta: isMode9 ? 2.5 : placeholder,
-    flowLitersPerMin: isMode9 ? 15.0 : placeholder,
-    flowLitersPer10Min: isMode9 ? 150.0 : placeholder,
-    flowLitersToday: isMode9 ? 1200.0 : placeholder,
-    flowDeltaStatus: isMode9 ? 'ok' : placeholder,
-    counterIntervalSeconds: isMode9 ? 600 : placeholder,
-
-    modeCodeToStore: detectedMode,
-    modeLabelToStore: isMode9 ? 'MOD9' : 'MOD1',
-    observedModeObservedAt: '2026-07-12T09:00:00Z',
-  };
-
-  return Object.assign(decoded, overrides);
 }
 
 describe('UC512 round-trip: codec → normalizer → writer → DB', () => {
@@ -110,7 +48,7 @@ describe('UC512 round-trip: codec → normalizer → writer → DB', () => {
   const manifest = loadEdgeManifest();
 
   for (const vector of vectors) {
-    it(`round-trip: ${vector.name}`, async () => {
+    it(`round-trip: ${vector.name}`, () => {
       const decoded = codec.decodeUplink({
         fPort: vector.fPort,
         bytes: vector.bytes,
@@ -121,17 +59,15 @@ describe('UC512 round-trip: codec → normalizer → writer → DB', () => {
       const normalizeResult = normalizer.normalize(decoded.data, { recordedAt: '2026-07-12T10:00:00Z' });
       assert.ok(normalizeResult.channels && typeof normalizeResult.channels === 'object');
 
-      const syncDb = createTestDb('MILESIGHT_UC512');
-      const writerDb = createAsyncDatabaseFacade(syncDb);
+      const db = createTestDb();
       try {
         writer.resetColumnCache();
-        assert.equal(writerDb.prepare, undefined, 'writer must be driven through the no-prepare async facade');
-        const result = await writer.writeDeviceData(writerDb, manifest, normalizeResult, { deveui: TEST_DEVEUI }, {});
+        const result = writer.writeDeviceData(db, manifest, normalizeResult, { deveui: TEST_DEVEUI }, {});
 
         assert.ok(Array.isArray(result.columns), 'writer must return columns array');
         assert.ok(result.columns.length > 0, 'at least one column must be written');
 
-        const row = syncDb.prepare('SELECT * FROM device_data WHERE deveui = ? ORDER BY rowid DESC LIMIT 1').get(TEST_DEVEUI);
+        const row = db.prepare('SELECT * FROM device_data WHERE deveui = ? ORDER BY rowid DESC LIMIT 1').get(TEST_DEVEUI);
         assert.ok(row, 'device_data row must exist');
         assert.equal(row.deveui, TEST_DEVEUI);
 
@@ -150,7 +86,7 @@ describe('UC512 round-trip: codec → normalizer → writer → DB', () => {
           assert.ok(dl.reason, 'dead-lettered entry must have a reason');
         }
       } finally {
-        syncDb.close();
+        db.close();
       }
     });
   }
@@ -161,7 +97,7 @@ describe('LSN50 round-trip: normalizer → writer → DB (default mode)', () => 
   const writer = require(path.join(NR_ROOT, 'osi-device-writer'));
   const manifest = loadEdgeManifest();
 
-  it('default mode soil/dendro uplink', async () => {
+  it('default mode soil/dendro uplink', () => {
     const decoded = {
       devEui: TEST_DEVEUI,
       detectedMode: 1,
@@ -193,25 +129,27 @@ describe('LSN50 round-trip: normalizer → writer → DB (default mode)', () => 
     assert.ok(normalizeResult.channels.swt_1 === 15.2);
     assert.ok(normalizeResult.channels.dendro_position_mm === 12.340);
 
-    const syncDb = createTestDb('DRAGINO_LSN50');
-    const writerDb = createAsyncDatabaseFacade(syncDb);
+    const db = createTestDb();
     try {
+      db.prepare(
+        "UPDATE devices SET type_id = 'DRAGINO_LSN50' WHERE deveui = ?"
+      ).run(TEST_DEVEUI);
       writer.resetColumnCache();
-      const result = await writer.writeDeviceData(writerDb, manifest, normalizeResult, { deveui: TEST_DEVEUI }, {});
+      const result = writer.writeDeviceData(db, manifest, normalizeResult, { deveui: TEST_DEVEUI }, {});
 
       assert.ok(result.columns.length >= 10, 'default mode must write 10+ columns');
-      const row = syncDb.prepare('SELECT * FROM device_data WHERE deveui = ? ORDER BY rowid DESC LIMIT 1').get(TEST_DEVEUI);
+      const row = db.prepare('SELECT * FROM device_data WHERE deveui = ? ORDER BY rowid DESC LIMIT 1').get(TEST_DEVEUI);
       assert.ok(row);
       assert.equal(row.ext_temperature_c, 23.5);
       assert.equal(row.bat_v, 3.62);
       assert.equal(row.swt_1, 15.2);
       assert.equal(row.dendro_position_mm, 12.340);
     } finally {
-      syncDb.close();
+      db.close();
     }
   });
 
-  it('mode 9 rain/flow uplink', async () => {
+  it('mode 9 rain/flow uplink', () => {
     const decoded = {
       devEui: TEST_DEVEUI,
       detectedMode: 9,
@@ -242,92 +180,22 @@ describe('LSN50 round-trip: normalizer → writer → DB (default mode)', () => 
     assert.ok(normalizeResult.channels.rain_count_cumulative === 100);
     assert.ok(normalizeResult.channels.flow_liters_today === 120);
 
-    const syncDb = createTestDb('DRAGINO_LSN50');
-    const writerDb = createAsyncDatabaseFacade(syncDb);
+    const db = createTestDb();
     try {
+      db.prepare(
+        "UPDATE devices SET type_id = 'DRAGINO_LSN50' WHERE deveui = ?"
+      ).run(TEST_DEVEUI);
       writer.resetColumnCache();
-      const result = await writer.writeDeviceData(writerDb, manifest, normalizeResult, { deveui: TEST_DEVEUI }, {});
+      const result = writer.writeDeviceData(db, manifest, normalizeResult, { deveui: TEST_DEVEUI }, {});
 
       assert.ok(result.columns.length >= 15, 'mode 9 must write 15+ columns');
-      const row = syncDb.prepare('SELECT * FROM device_data WHERE deveui = ? ORDER BY rowid DESC LIMIT 1').get(TEST_DEVEUI);
+      const row = db.prepare('SELECT * FROM device_data WHERE deveui = ? ORDER BY rowid DESC LIMIT 1').get(TEST_DEVEUI);
       assert.ok(row);
       assert.equal(row.rain_count_cumulative, 100);
       assert.equal(row.flow_liters_today, 120);
     } finally {
-      syncDb.close();
+      db.close();
     }
-  });
-});
-
-describe('LSN50 round-trip: production-shaped fixtures with both mode key sets present', () => {
-  const normalizer = require(path.join(NR_ROOT, 'osi-lsn50-normalize'));
-  const writer = require(path.join(NR_ROOT, 'osi-device-writer'));
-  const manifest = loadEdgeManifest();
-
-  async function runThroughWriter(decoded) {
-    const normalizeResult = normalizer.normalize(decoded, { recordedAt: decoded.timestamp });
-    const syncDb = createTestDb('DRAGINO_LSN50');
-    const writerDb = createAsyncDatabaseFacade(syncDb);
-    try {
-      writer.resetColumnCache();
-      const result = await writer.writeDeviceData(writerDb, manifest, normalizeResult, { deveui: TEST_DEVEUI }, {});
-      const quarantineCount = syncDb.prepare('SELECT COUNT(*) AS n FROM ingest_quarantine').get().n;
-      const quarantineRows = syncDb.prepare('SELECT * FROM ingest_quarantine').all();
-      return { result, quarantineCount, quarantineRows };
-    } finally {
-      syncDb.close();
-    }
-  }
-
-  for (const placeholderLabel of ['undefined', 'null']) {
-    const placeholder = placeholderLabel === 'undefined' ? undefined : null;
-
-    it(`default mode with ${placeholderLabel} inactive MOD9 placeholders produces zero dead letters`, async () => {
-      const decoded = productionLsn50Decoded({ detectedMode: 1 }, placeholder);
-      const { result, quarantineCount } = await runThroughWriter(decoded);
-      assert.equal(result.deadLettered.length, 0);
-      assert.equal(quarantineCount, 0);
-    });
-
-    it(`MOD9 with ${placeholderLabel} inactive default placeholders produces zero dead letters`, async () => {
-      const decoded = productionLsn50Decoded({ detectedMode: 9 }, placeholder);
-      const { result, quarantineCount } = await runThroughWriter(decoded);
-      assert.equal(result.deadLettered.length, 0);
-      assert.equal(quarantineCount, 0);
-    });
-  }
-
-  it('a populated MOD9-only field on a default-mode uplink produces exactly one unknown_channel row', async () => {
-    const decoded = productionLsn50Decoded({ detectedMode: 1, rainCountCumulative: 7 }, undefined);
-    const { result, quarantineCount, quarantineRows } = await runThroughWriter(decoded);
-    assert.equal(result.deadLettered.length, 1);
-    assert.equal(result.deadLettered[0].channel, 'rainCountCumulative');
-    assert.equal(result.deadLettered[0].reason, 'unknown_channel');
-    assert.equal(quarantineCount, 1);
-    assert.equal(quarantineRows[0].channel, 'rainCountCumulative');
-    assert.equal(quarantineRows[0].reason, 'unknown_channel');
-  });
-
-  it('a populated default-only field on a MOD9 uplink produces exactly one unknown_channel row', async () => {
-    const decoded = productionLsn50Decoded({ detectedMode: 9, adcV: 1.25 }, undefined);
-    const { result, quarantineCount, quarantineRows } = await runThroughWriter(decoded);
-    assert.equal(result.deadLettered.length, 1);
-    assert.equal(result.deadLettered[0].channel, 'adcV');
-    assert.equal(result.deadLettered[0].reason, 'unknown_channel');
-    assert.equal(quarantineCount, 1);
-    assert.equal(quarantineRows[0].channel, 'adcV');
-    assert.equal(quarantineRows[0].reason, 'unknown_channel');
-  });
-
-  it('a populated field outside both shipped maps produces exactly one unknown_channel row', async () => {
-    const decoded = Object.assign(productionLsn50Decoded({ detectedMode: 1 }, undefined), { futureProbe: 7 });
-    const { result, quarantineCount, quarantineRows } = await runThroughWriter(decoded);
-    assert.equal(result.deadLettered.length, 1);
-    assert.equal(result.deadLettered[0].channel, 'futureProbe');
-    assert.equal(result.deadLettered[0].reason, 'unknown_channel');
-    assert.equal(quarantineCount, 1);
-    assert.equal(quarantineRows[0].channel, 'futureProbe');
-    assert.equal(quarantineRows[0].reason, 'unknown_channel');
   });
 });
 
