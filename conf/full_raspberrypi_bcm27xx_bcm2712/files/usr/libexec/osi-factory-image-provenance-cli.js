@@ -100,6 +100,7 @@ function verifyRuntime(values) {
     factorySeedLibrarySha256: values['factory-seed-library'],
     factorySeedHelperSha256: values['factory-seed-helper'],
     deploymentStateCliSha256: values['deployment-state-cli'],
+    deploymentStateLibrarySha256: path.join(path.dirname(values['deployment-state-cli']), 'osi-deployment-state.js'),
     // The UCI seed runner is a fixed sibling of the trusted 93 initializer;
     // keeping this derivation in the codec preserves the exact ROM argv while
     // still comparing the live 97 bytes.

@@ -25,7 +25,9 @@ test('verifier rejects an extra provenance field', () => {
 
 test('verifier rejects coordinated resident-copy drift', () => {
   const residents = ['conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/libexec/osi-factory-image-provenance.js',
-    'conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/libexec/osi-factory-image-provenance.js'];
+    'conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/libexec/osi-factory-image-provenance.js',
+    'conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/libexec/osi-deployment-state.js',
+    'conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/libexec/osi-deployment-state.js'];
   const originals = residents.map((file) => fs.readFileSync(path.join(root, file)));
   try {
     for (const file of residents) fs.appendFileSync(path.join(root, file), '\n// drift\n');

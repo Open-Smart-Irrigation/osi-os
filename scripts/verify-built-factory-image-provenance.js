@@ -30,7 +30,11 @@ function verify({ rootfs, profile }) {
   }
   // The lower root is the trust boundary: both runtime copies must be exact
   // source bytes, never an overlay-only replacement.
-  for (const [source, relative] of [['scripts/lib/factory-image-provenance.js', 'usr/libexec/osi-factory-image-provenance.js'], ['scripts/factory-image-provenance-cli.js', 'usr/libexec/osi-factory-image-provenance-cli.js']]) {
+  for (const [source, relative] of [
+    ['scripts/lib/factory-image-provenance.js', 'usr/libexec/osi-factory-image-provenance.js'],
+    ['scripts/lib/deployment-state.js', 'usr/libexec/osi-deployment-state.js'],
+    ['scripts/factory-image-provenance-cli.js', 'usr/libexec/osi-factory-image-provenance-cli.js'],
+  ]) {
     const sourcePath = path.resolve(__dirname, '..', source);
     if (codec.hashFile(codec.safeJoin(rootfs, relative, `built resident ${relative}`)) !== codec.hashFile(sourcePath)) throw new Error(`built resident ${relative} drift`);
   }

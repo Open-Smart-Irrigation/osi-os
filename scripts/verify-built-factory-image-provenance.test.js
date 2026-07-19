@@ -15,7 +15,7 @@ function fixture() {
   for (const rel of ['usr/share/osi-deploy/image-guard-manifest.json', 'usr/share/osi-deploy/factory-image-provenance.json',
     'usr/share/db/farming.db', 'etc/uci-defaults/93_osi_deploy_guard_init', 'etc/uci-defaults/97_osi_db_seed',
     'usr/libexec/osi-factory-database-seed.js', 'usr/libexec/osi-factory-database-seed-cli.js',
-    'usr/libexec/osi-deployment-state-cli.js', 'usr/libexec/osi-audit-command-ack-state.js',
+    'usr/libexec/osi-deployment-state-cli.js', 'usr/libexec/osi-deployment-state.js', 'usr/libexec/osi-audit-command-ack-state.js',
     'usr/libexec/osi-sync-protocol-capability-cli.js', 'usr/libexec/osi-factory-image-provenance.js',
     'usr/libexec/osi-factory-image-provenance-cli.js']) {
     const target = path.join(root, rel);

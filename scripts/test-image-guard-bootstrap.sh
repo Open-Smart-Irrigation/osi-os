@@ -39,6 +39,19 @@ copy_profile() {
     cp "$source/usr/libexec/osi-factory-image-provenance.js" "$rom/usr/libexec/osi-factory-image-provenance.js"
     chmod 700 "$data" "$run"
 
+    # Test-only root overrides must fail closed before safe_path walks a
+    # relative dirname loop.  timeout makes the regression a bounded failure
+    # instead of hanging the bootstrap harness.
+    status=0
+    timeout 3 env OSI_REPAIR_PROGRAM_MODE=1 OSI_DEPLOY_ARTIFACT_MODE=test \
+        OSI_ROM_ROOT=relative-rom OSI_DATA_ROOT="$data" OSI_RUN_ROOT="$run" \
+        OSI_IMAGE_PROFILE="$profile" OSI_REBOOT_COMMAND=false \
+        sh "$rom/etc/uci-defaults/93_osi_deploy_guard_init" >/dev/null 2>"$CASE/$profile/relative-err" || status=$?
+    [ "$status" -ne 0 ] && [ "$status" -ne 124 ] || {
+        echo "93 did not reject a relative test ROM root without hanging" >&2
+        exit 1
+    }
+
     # Commit 1 intentionally rejects image-baseline verbs.  The real ROM
     # script must fail before creating state/database; commit 4 supplies the
     # state verb.

@@ -41,6 +41,7 @@ const BOUND = Object.freeze({
   factorySeedHelperSha256: 'usr/libexec/osi-factory-database-seed-cli.js',
   deploymentStateCliSha256: 'usr/libexec/osi-deployment-state-cli.js',
   commandStateAuditSha256: 'usr/libexec/osi-audit-command-ack-state.js',
+  deploymentStateLibrarySha256: 'usr/libexec/osi-deployment-state.js',
   protocolCapabilityHelperSha256: 'usr/libexec/osi-sync-protocol-capability-cli.js',
   protocolCapabilityCliSha256: 'usr/libexec/osi-sync-protocol-capability-cli.js',
   provenanceLibrarySha256: 'usr/libexec/osi-factory-image-provenance.js',
@@ -55,7 +56,7 @@ const FIELDS = Object.freeze([
   'initializerSha256', 'factorySeedSha256', 'factorySeedHelperSha256',
   'dbSeedInitializerSha256',
   'factorySeedLibrarySha256', 'deploymentStateCliSha256',
-  'commandStateAuditSha256', 'protocolCapabilityHelperSha256',
+  'commandStateAuditSha256', 'deploymentStateLibrarySha256', 'protocolCapabilityHelperSha256',
   'protocolCapabilityCliSha256', 'provenanceLibrarySha256', 'provenanceCliSha256',
 ]);
 

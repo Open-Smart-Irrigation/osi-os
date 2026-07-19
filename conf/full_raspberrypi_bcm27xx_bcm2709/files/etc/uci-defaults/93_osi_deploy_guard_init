@@ -26,6 +26,10 @@ DB="$DATA_ROOT/db/farming.db"
 fail() { logger -t osi-deploy-guard-init "$1" 2>/dev/null || :; return 1; }
 safe_path() {
     candidate=$1
+    case "$candidate" in
+        /*) ;;
+        *) fail "path must be absolute: $candidate" ;;
+    esac
     while [ "$candidate" != / ]; do
         [ ! -L "$candidate" ] || fail "symlink path component: $candidate"
         candidate=$(dirname "$candidate")

@@ -19,7 +19,7 @@ function fixture() {
   };
   for (const rel of ['etc/uci-defaults/93_osi_deploy_guard_init', 'etc/uci-defaults/97_osi_db_seed', 'usr/share/db/farming.db',
     'usr/libexec/osi-factory-database-seed.js', 'usr/libexec/osi-factory-database-seed-cli.js',
-    'usr/libexec/osi-deployment-state-cli.js', 'usr/libexec/osi-audit-command-ack-state.js',
+    'usr/libexec/osi-deployment-state-cli.js', 'usr/libexec/osi-deployment-state.js', 'usr/libexec/osi-audit-command-ack-state.js',
     'usr/libexec/osi-sync-protocol-capability-cli.js', 'usr/libexec/osi-factory-image-provenance.js',
     'usr/libexec/osi-factory-image-provenance-cli.js']) {
     const file = path.join(profileRoot, rel);
