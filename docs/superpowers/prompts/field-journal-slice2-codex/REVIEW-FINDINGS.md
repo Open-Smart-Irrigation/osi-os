@@ -525,3 +525,69 @@ on product/rate change. Because compositions ship empty (N1), that path produces
 against the real catalog and is fixture-only today, so the risk is deferred rather than live —
 but it should be reviewed together with the composition-population work (migration 0022), not
 assumed correct.
+
+---
+
+# Phase 4 review — partial (2026-07-19)
+
+Reviewed the committed Phase 4 logic (Tasks 15–23) while Task 25 owns browser acceptance.
+Gates cited for Task 24/25 re-verified on the current tree: 1182/1182 Vitest across 133
+files, edge 45/45. **Task 25's own code (its preview harness, browser test) is not in this
+checkout**, so this is not a Task 25 review — it covers the batch/plot logic Task 25 verifies.
+
+## rangeSelection — CLEAN (verified)
+
+`parseStationRange` (`rangeSelection.ts`) implements D11's `2, 5, 6, 10-12` input correctly. I
+traced the one subtle part — the DoS-bounded range expansion. `lastValueToCheck =
+min(end, start + availableNumbers.size)` caps the loop so `10-999999999` cannot spin, and it
+can never truncate a *valid* range: for the loop to reach `start + size` without hitting
+`out_of_station`, the station would need `size + 1` distinct consecutive members in a size-N
+set, which is impossible. So an oversized range always resolves to `out_of_station`, and the
+`formatStationRange` round-trip holds. Duplicate/reversed/non-integer/non-positive all fail
+closed. One UX note, not a defect: overlaps like `1-5, 5` error as `duplicate` rather than
+merging — strict, but defensible for catching typos.
+
+## P6 — IMPORTANT: batch finalize is not retry-idempotent, unlike single-plot
+
+D11 requires atomic all-N-or-none finalize. That holds *within* one request. It does not hold
+*across* a retry, and batch differs from single-plot in a way that can silently duplicate a
+farm record on every plot.
+
+- **Single-plot** capture sends a stable client `entry_uuid` (`useCaptureDraft` generates it
+  once, line 101, and sends it on every write). A retry after a lost response re-sends the
+  same UUID, so the edge upserts — no duplicate. Retry is truly idempotent.
+- **Batch** finalize sends `plot_uuids` only (`JournalCaptureFlow.tsx:190`,
+  `buildFinalBatchPayload.ts:55`) — **no client `entry_uuid`, no client `batch_uuid`, no
+  idempotency key**. The edge generates all of them. The only retry protection is the
+  duplicate-guard (`findDuplicateCandidate`: plot + activity + occurrence + `status='final'`).
+
+Failure scenario: a farmer finalizes a seeding batch over 5 lysimeters. The edge writes all 5
+final entries, but the HTTP response is lost (a plausible farm-gateway network drop). The GUI
+shows an error and a retry. The farmer retries; the edge's duplicate preflight now finds 5
+matching finals and returns them as candidates; the GUI surfaces "a similar activity already
+exists". Reasonably believing the first attempt failed, the farmer acknowledges and chooses
+"save separately" — whose semantics (from Task 13) are *create a distinct record anyway* — and
+the edge writes 5 more entries. Result: 10 entries, 5 spurious, one per plot.
+
+The snapshot/`savePromiseRef` guards in `finalizeBatch` are correct — they prevent
+double-submit from rapid clicks and keep the retry payload byte-stable. They do not close the
+lost-response window, because the duplicate-guard defers to user judgment and the user's mental
+model ("it failed") is wrong.
+
+This may be the intended tradeoff — the Phase 4 preflight deliberately chose edge-generated
+UUIDs ("the path does not use a client-generated UUID"), and the duplicate-guard is the
+designed mitigation. But it leaves batches materially less retry-safe than single-plot, and the
+weaker mitigation (guard + user judgment vs. stable UUID + no judgment) is exactly inverted
+from where the blast radius is larger. Decision for the human: either accept the duplicate-guard
+as sufficient for batches, or give each batch member a stable client `entry_uuid` (or the batch
+a client `batch_uuid` used as an idempotency key) so a lost-response retry is a no-op the way
+single-plot already is. Edge is 45/45 + 99/99, so this is a design question, not a failing test.
+
+## Honest scope — NOT reviewed
+
+Partial review. Still unreviewed by me: the rendering/interaction of `StationGrid`,
+`PlotPicker`, `PlotGroupChips`, `PlotForm`, `HarvestGroupNudge`; the plot/group CRUD SWR seams;
+and Task 25's browser acceptance (screenshots + keyboard at mobile widths), whose harness is
+not in this checkout. The station grid at 72 plots is the highest untested mobile-layout risk
+(horizontal scroll, 44px touch targets) and is exactly what Task 25's browser pass should cover
+— worth confirming Task 25 actually exercised 72-plot widths, not a small fixture.
