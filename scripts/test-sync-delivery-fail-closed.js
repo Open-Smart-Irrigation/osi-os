@@ -144,7 +144,7 @@ class FakeDatabase {
   }
 
   // -- SELECT dispatch (only the specific templates these nodes issue) ------
-  _select(sql) {
+  _select(sql, params) {
     const s = sql.replace(/\s+/g, ' ').trim();
     if (s.includes('FROM users WHERE server_url')) {
       const rows = Array.from(this._table('users').values())
@@ -162,6 +162,15 @@ class FakeDatabase {
         .filter((r) => !r.delivered_at)
         .sort((a, b) => String(a.created_at || '').localeCompare(String(b.created_at || '')));
       return rows.slice(0, 50).map((r) => ({ id: r.id, payload_json: r.payload_json }));
+    }
+    // work-request-status-apply idempotent-replay guard: dedup key lookup
+    // against the shipped applied_commands ledger table (keyed by
+    // command_id, the same table/key osi-command-ledger.queueCommandAck
+    // and .deduplicatePendingCommand use).
+    if (s.includes('FROM applied_commands WHERE command_id')) {
+      const key = String((params || [])[0]);
+      const row = this._table('applied_commands').get(key);
+      return row ? [Object.assign({}, row)] : [];
     }
     throw new Error('FakeDatabase: unrecognized SELECT: ' + sql);
   }
@@ -182,6 +191,33 @@ class FakeDatabase {
       const row = table.get('cloud') || { peer_node: 'cloud' };
       row.last_full_backfill_at = value;
       table.set('cloud', row);
+      return { changes: 1 };
+    }
+
+    // Generic INSERT INTO applied_commands (col, col, ...) VALUES (?, ?, ...)
+    // [ON CONFLICT(command_id) DO NOTHING] - minimal, generic to the shape
+    // the shipped work-request-status-apply node issues (named columns,
+    // '?' placeholders only, optional ON CONFLICT(command_id) DO NOTHING).
+    const insertAC = /^INSERT INTO\s+applied_commands\s*\(([^)]+)\)\s*VALUES\s*\(([^)]+)\)\s*(ON CONFLICT\s*\(\s*command_id\s*\)\s*DO NOTHING)?\s*$/i.exec(s);
+    if (insertAC) {
+      const cols = insertAC[1].split(',').map((c) => c.trim());
+      const placeholders = insertAC[2].split(',').map((v) => v.trim());
+      if (placeholders.some((v) => v !== '?')) {
+        throw new Error('FakeDatabase: applied_commands INSERT only supports ? placeholders: ' + sql);
+      }
+      const onConflictDoNothing = Boolean(insertAC[3]);
+      const idIndex = cols.indexOf('command_id');
+      if (idIndex === -1) throw new Error('FakeDatabase: applied_commands INSERT missing command_id column: ' + sql);
+      const values = cols.map(() => nextParam());
+      const key = String(values[idIndex]);
+      const table = this._table('applied_commands');
+      if (table.has(key)) {
+        if (onConflictDoNothing) return { changes: 0 };
+        throw new Error('FakeDatabase: applied_commands PRIMARY KEY collision for command_id=' + key);
+      }
+      const row = {};
+      cols.forEach((col, i) => { row[col] = values[i]; });
+      table.set(key, row);
       return { changes: 1 };
     }
 
