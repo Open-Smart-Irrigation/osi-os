@@ -1,0 +1,55 @@
+#!/bin/sh
+set -eu
+
+# This is a ROM-owned, fresh-image initializer.  It is intentionally inert on
+# an existing gateway: deleting /data/osi-deploy must never recreate authority.
+ROM_ROOT=${OSI_ROM_ROOT:-/rom}
+DATA_ROOT=${OSI_DATA_ROOT:-/data}
+RUN_ROOT=${OSI_RUN_ROOT:-/var/run}
+PROVENANCE="$ROM_ROOT/usr/share/osi-deploy/factory-image-provenance.json"
+MANIFEST="$ROM_ROOT/usr/share/osi-deploy/image-guard-manifest.json"
+RESULT="$RUN_ROOT/osi-factory-image-verification.json"
+STATE_ROOT="$DATA_ROOT/osi-deploy"
+DB="$DATA_ROOT/db/farming.db"
+
+fail() { logger -t osi-deploy-guard-init "$1" 2>/dev/null || :; return 1; }
+[ -d "$DATA_ROOT" ] || fail "persistent data root missing"
+[ -f "$PROVENANCE" ] || fail "factory provenance missing"
+[ -f "$MANIFEST" ] || fail "image guard manifest missing"
+[ ! -e "$STATE_ROOT" ] || fail "deployment state already exists; fresh-image initializer refused"
+for sidecar in "$DB-wal" "$DB-shm" "$DB-journal"; do
+    [ ! -e "$sidecar" ] || fail "database sidecar already exists"
+done
+[ ! -e "$DB" ] || fail "database already exists; fresh-image initializer refused"
+
+NODE=${OSI_NODE:-node}
+PROFILE=${OSI_IMAGE_PROFILE:-$("$NODE" -e 'const fs=require("fs"); const p=JSON.parse(fs.readFileSync(process.argv[1])); process.stdout.write(p.profile);' "$PROVENANCE")}
+"$NODE" "$ROM_ROOT/usr/libexec/osi-factory-image-provenance-cli.js" verify-runtime \
+    --factory-provenance "$PROVENANCE" \
+    --image-guard-manifest "$MANIFEST" \
+    --initializer "$ROM_ROOT/etc/uci-defaults/93_osi_deploy_guard_init" \
+    --factory-seed "$ROM_ROOT/usr/share/db/farming.db" \
+    --factory-seed-helper "$ROM_ROOT/usr/libexec/osi-factory-database-seed-cli.js" \
+    --ack-audit-cli "$ROM_ROOT/usr/libexec/osi-audit-command-ack-state.js" \
+    --protocol-cli "$ROM_ROOT/usr/libexec/osi-sync-protocol-capability-cli.js" \
+    --expected-profile "$PROFILE" \
+    --result "$RESULT"
+
+# Commit-1's state CLI deliberately rejects this future verb.  This checkpoint
+# therefore fails closed before any database/state mutation; the full runtime
+# adds the image-baseline verb and owns seed receipts and lineage CAS.
+"$NODE" "$ROM_ROOT/usr/libexec/osi-deployment-state-cli.js" initialize-image-baseline \
+    --state "$STATE_ROOT/deployment-state.json" \
+    --receipts "$STATE_ROOT/receipts" \
+    --guard-bootstrap-root "$STATE_ROOT/guard-bootstrap" \
+    --factory-verification-result "$RESULT" \
+    --factory-seed-receipt "$STATE_ROOT/receipts/factory-seed.json" \
+    --database-lineage "$STATE_ROOT/database-lineage.json" \
+    --profile "$PROFILE"
+
+if [ "${OSI_REPAIR_PROGRAM_MODE:-0}" = 1 ] && [ "${OSI_DEPLOY_ARTIFACT_MODE:-}" = test ]; then
+    reboot_command=${OSI_REBOOT_COMMAND:-/sbin/reboot}
+else
+    reboot_command=/sbin/reboot
+fi
+"$reboot_command"

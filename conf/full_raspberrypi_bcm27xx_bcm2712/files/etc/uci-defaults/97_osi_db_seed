@@ -1,34 +1,27 @@
 #!/bin/sh
-# Seed the OSI database on first boot.
-# Copies /usr/share/db/farming.db to /data/db/farming.db only when the
-# target is absent.  Does NOT overwrite an existing database.
-# Self-deletes after execution (uci-defaults convention).
+set -eu
 
-SEED_SRC="/usr/share/db/farming.db"
-DATA_DIR="/data/db"
-DATA_DB="$DATA_DIR/farming.db"
+# The ROM seed helper owns hashing, SQLite checks, atomic publication, and the
+# one-use receipt.  This UCI wrapper never overwrites a live database.
+ROM_ROOT=${OSI_ROM_ROOT:-/rom}
+DATA_ROOT=${OSI_DATA_ROOT:-/data}
+DB="$DATA_ROOT/db/farming.db"
+STATE_ROOT="$DATA_ROOT/osi-deploy"
+SEED="$ROM_ROOT/usr/share/db/farming.db"
+PROVENANCE="$ROM_ROOT/usr/share/osi-deploy/factory-image-provenance.json"
+NODE=${OSI_NODE:-node}
+PROFILE=${OSI_IMAGE_PROFILE:-$("$NODE" -e 'const fs=require("fs"); const p=JSON.parse(fs.readFileSync(process.argv[1])); process.stdout.write(p.profile);' "$PROVENANCE")}
 
-if [ ! -f "$SEED_SRC" ]; then
-    logger -t osi-db-seed "seed source $SEED_SRC not found, skipping"
-    exit 0
-fi
-
-if [ -f "$DATA_DB" ]; then
-    logger -t osi-db-seed "$DATA_DB already exists, skipping seed"
-    exit 0
-fi
-
-# Refuse to seed if SQLite sidecar files exist (indicates a partially-written
-# or journal-active database that we must not clobber).
-for sidecar in "$DATA_DB-wal" "$DATA_DB-shm" "$DATA_DB-journal"; do
-    if [ -f "$sidecar" ]; then
-        logger -t osi-db-seed "sidecar $sidecar exists, refusing to seed"
-        exit 1
-    fi
+[ -f "$SEED" ] || { logger -t osi-db-seed "ROM seed missing" 2>/dev/null || :; exit 1; }
+[ -f "$PROVENANCE" ] || { logger -t osi-db-seed "ROM provenance missing" 2>/dev/null || :; exit 1; }
+[ ! -e "$DB" ] || exit 0
+for sidecar in "$DB-wal" "$DB-shm" "$DB-journal"; do
+    [ ! -e "$sidecar" ] || { logger -t osi-db-seed "sidecar exists; refusing seed" 2>/dev/null || :; exit 1; }
 done
-
-mkdir -p "$DATA_DIR" || { logger -t osi-db-seed "cannot create $DATA_DIR"; exit 1; }
-cp "$SEED_SRC" "$DATA_DB" || { logger -t osi-db-seed "copy failed"; exit 1; }
-
-logger -t osi-db-seed "seeded $DATA_DB from $SEED_SRC"
-exit 0
+mkdir -p "$DATA_ROOT/db" "$STATE_ROOT/receipts"
+SEED_SHA256=$("$NODE" -e 'const fs=require("fs"); const p=JSON.parse(fs.readFileSync(process.argv[1])); process.stdout.write(p.factorySeedSha256);' "$PROVENANCE")
+"$NODE" "$ROM_ROOT/usr/libexec/osi-factory-database-seed-cli.js" realize \
+    --factory-seed "$SEED" --expected-seed-sha256 "$SEED_SHA256" --database "$DB" \
+    --operation-id "factory-baseline-$PROFILE" \
+    --receipt-out "$STATE_ROOT/receipts/factory-seed.json" \
+    --database-lineage-out "$STATE_ROOT/database-lineage.json"
