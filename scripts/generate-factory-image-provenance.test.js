@@ -48,7 +48,17 @@ test('generator check fails after a bound source changes', () => {
   assert.throws(() => gen.check({ root: f.root, profile: 'bcm2712' }), /hash mismatch/);
 });
 
-test('generator rejects reserved refresh flags instead of accepting a no-op', () => {
-  assert.throws(() => gen.parse(['--write', '--profile', 'bcm2712', '--refresh-bound-hashes']), /reserved/);
-  assert.throws(() => gen.parse(['--check', '--preserve-image-build-id']), /reserved/);
+test('refresh check is non-writing and catches stale anchors', () => {
+  const f = fixture();
+  gen.generate({ root: f.root, profile: 'bcm2712', imageBuildId: '20260719-factory-bcm2712' });
+  fs.appendFileSync(path.join(f.profileRoot, 'usr/libexec/osi-factory-database-seed-cli.js'), 'tamper');
+  assert.throws(() => gen.generate({ root: f.root, profile: 'bcm2712', check: true, refreshBoundHashes: true, preserveImageBuildId: true }), /hash mismatch/);
+});
+
+test('generator accepts the atomic bound-hash refresh mode and rejects incomplete forms', () => {
+  assert.doesNotThrow(() => gen.parse(['--write', '--refresh-bound-hashes', '--preserve-image-build-id']));
+  assert.doesNotThrow(() => gen.parse(['--check', '--refresh-bound-hashes', '--preserve-image-build-id']));
+  assert.throws(() => gen.parse(['--check', '--preserve-image-build-id']), /requires/);
+  assert.throws(() => gen.parse(['--check', '--refresh-bound-hashes']), /requires/);
+  assert.throws(() => gen.parse(['--check', '--refresh-bound-hashes', '--preserve-image-build-id', '--profile', 'bcm2712']), /both profiles/);
 });

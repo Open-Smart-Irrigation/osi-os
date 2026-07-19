@@ -25,6 +25,22 @@ const RC_LINKS = Object.freeze({
   K99nodeRed: '/etc/init.d/node-red',
   S99osiBootstrap: '/etc/init.d/osi-bootstrap',
 });
+const RC_LINK_PATHS = Object.freeze({
+  S90osiDbIntegrity: 'S90osi-db-integrity',
+  S98osiIdentityd: 'S98osi-identityd',
+  K98osiIdentityd: 'K98osi-identityd',
+  S99nodeRed: 'S99node-red',
+  K99nodeRed: 'K99node-red',
+  S99osiBootstrap: 'S99osi-bootstrap',
+});
+const RC_LINK_TARGETS = Object.freeze({
+  S90osiDbIntegrity: '../init.d/osi-db-integrity',
+  S98osiIdentityd: '../init.d/osi-identityd',
+  K98osiIdentityd: '../init.d/osi-identityd',
+  S99nodeRed: '../init.d/node-red',
+  K99nodeRed: '../init.d/node-red',
+  S99osiBootstrap: '../init.d/osi-bootstrap',
+});
 const UCI_DEFAULTS_ORDER = Object.freeze([
   '93_osi_deploy_guard_init', '94_osi_identityd_enable', '97_osi_db_seed',
 ]);
@@ -74,6 +90,12 @@ function canonicalBytes(value) {
 
 function sha256(value) {
   return crypto.createHash('sha256').update(value).digest('hex');
+}
+
+function factoryBaselineId(profile, manifestBytes) {
+  profileInfo(profile);
+  if (!Buffer.isBuffer(manifestBytes)) throw new Error('factory baseline manifest bytes must be a Buffer');
+  return `factory-baseline-${profile}-${sha256(manifestBytes)}`;
 }
 
 function provenanceHash(value) {
@@ -204,6 +226,8 @@ function assertProfileInfo(profile) { return profileInfo(profile); }
 module.exports = {
   BOUND,
   RC_LINKS,
+  RC_LINK_PATHS,
+  RC_LINK_TARGETS,
   UCI_DEFAULTS_ORDER,
   MANIFEST_FILE_KEYS,
   MANIFEST_FIELDS,
@@ -212,6 +236,7 @@ module.exports = {
   canonical,
   canonicalBytes,
   sha256,
+  factoryBaselineId,
   provenanceHash,
   profileInfo,
   assertSafeBuildId,

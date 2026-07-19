@@ -4,6 +4,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
+const cp = require('node:child_process');
 const verifier = require('./verify-factory-image-provenance');
 
 const root = path.resolve(__dirname, '..');
@@ -35,4 +36,10 @@ test('verifier rejects coordinated resident-copy drift', () => {
   } finally {
     residents.forEach((file, index) => fs.writeFileSync(path.join(root, file), originals[index]));
   }
+});
+
+test('verifier rejects duplicate command-line flags', () => {
+  const result = cp.spawnSync(process.execPath, [path.join(root, 'scripts/verify-factory-image-provenance.js'), '--root', root, '--root', root], { encoding: 'utf8' });
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /duplicate flag/);
 });

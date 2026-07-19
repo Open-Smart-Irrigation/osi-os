@@ -128,13 +128,12 @@ BUILD_DATE="$(date -u +%Y%m%d)"
 IMAGE_BUILD_ID="${BUILD_DATE}-factory-bcm2712"
 node scripts/generate-factory-image-provenance.js --write \
   --profile bcm2712 --image-build-id "$IMAGE_BUILD_ID"
+node scripts/generate-factory-image-provenance.js --write \
+  --profile bcm2709 --image-build-id "${BUILD_DATE}-factory-bcm2709"
 node scripts/generate-factory-image-provenance.js --check
 node scripts/verify-factory-image-provenance.js
 sh scripts/test-image-guard-bootstrap.sh
 ```
-
-Before the bcm2709 build, write its profile-bound record with
-`--image-build-id "${BUILD_DATE}-factory-bcm2709"`, then rerun the same checks.
 
 Do not build from a commit that has not passed these checks. The initializer
 creates no authority on a previously provisioned `/data` tree; the first boot

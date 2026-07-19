@@ -100,7 +100,21 @@ test('no shipped init, uci-default, deploy, workflow, or pipeline caller names a
       // Commit 2 makes the pre-94 ROM initializer invoke the trusted state
       // CLI for the image-baseline handoff; this is the sole intended caller
       // before the full runtime tranche lands.
-      if (file.endsWith('/etc/uci-defaults/93_osi_deploy_guard_init')) continue;
+      if (file.endsWith('/etc/uci-defaults/93_osi_deploy_guard_init')) {
+        assert.match(source, /initialize-image-baseline/);
+        assert.match(source, /--root "\$STATE_ROOT"/);
+        assert.match(source, /--guard-marker "\$STATE_ROOT\/guard-installed\.json"/);
+        assert.match(source, /--image-manifest "\$MANIFEST"/);
+        assert.match(source, /--factory-seed-receipt-out "\$RECEIPT"/);
+        assert.match(source, /--database-lineage-out "\$LINEAGE"/);
+        continue;
+      }
+      if (file.endsWith('/etc/uci-defaults/97_osi_db_seed')) {
+        assert.match(source, /factory-database-lineage\.json/);
+        assert.match(source, /factoryBaselineId/);
+        assert.match(source, /verifyFactoryDatabaseLineage/);
+        continue;
+      }
       for (const pattern of patterns) assert.doesNotMatch(source, new RegExp(pattern), `${file} unexpectedly calls ${pattern}`);
     }
   }

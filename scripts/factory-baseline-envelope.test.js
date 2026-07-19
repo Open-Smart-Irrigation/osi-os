@@ -14,6 +14,7 @@ function envelope(overrides = {}) {
       phase: 'image-baseline-initializing',
       generation: 2,
       imageBaselinePrefix: 'baseline-completing',
+      factoryProvenanceSha256: HASH,
       databaseLineage: { status: 'valid', databaseLineageSha256: HASH, seedReceiptSha256: HASH },
       ...overrides.parentDeployment,
     },
