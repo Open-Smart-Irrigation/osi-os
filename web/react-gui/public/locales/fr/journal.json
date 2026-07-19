@@ -186,7 +186,8 @@
       "exportCsv": "Exporter le CSV",
       "exportJson": "Exporter le JSON",
       "exportPackage": "Exporter le pack de recherche",
-      "exportError": "Échec de l'export. Réessayez."
+      "exportError": "Échec de l'export. Réessayez.",
+      "scopeNotNarrowed": "Les entrées de toutes les parcelles sont affichées. Le filtrage de la liste et des exports par station ou groupe n'est pas encore disponible."
     },
     "detail": {
       "placeholder": "Sélectionnez une entrée pour afficher ses détails."

@@ -70,6 +70,12 @@ export function JournalWorkspace({ plots, activeGroups, zones, activities }: Jou
     [scope, filters],
   );
 
+  // Station and group scope cannot be sent to the shipped single-plot_uuid
+  // API (see toEntryListFilters above), so the list and every export are
+  // silently unfiltered for those two scopes. Surface that honestly instead
+  // of leaving it as an undisclosed gap.
+  const scopeNotNarrowed = scope.kind === 'station' || scope.kind === 'group';
+
   return (
     <div className="mx-auto grid w-full max-w-[1600px] grid-cols-1 gap-4 px-4 py-6 lg:grid-cols-[320px_1fr_360px]">
       <ScopeRail
@@ -85,12 +91,21 @@ export function JournalWorkspace({ plots, activeGroups, zones, activities }: Jou
         onSearchChange={setSearch}
       />
 
-      <EntryTable
-        filters={entryListFilters}
-        plots={plots}
-        selectedEntryUuid={selectedEntryUuid}
-        onSelectEntry={setSelectedEntryUuid}
-      />
+      <div className="flex h-full min-h-0 flex-col gap-2">
+        {scopeNotNarrowed && (
+          <p className="rounded-xl border border-[var(--border)] bg-[var(--surface)] px-4 py-2 text-sm text-[var(--text-secondary)]">
+            {t('workspace.table.scopeNotNarrowed')}
+          </p>
+        )}
+        <div className="min-h-0 flex-1">
+          <EntryTable
+            filters={entryListFilters}
+            plots={plots}
+            selectedEntryUuid={selectedEntryUuid}
+            onSelectEntry={setSelectedEntryUuid}
+          />
+        </div>
+      </div>
 
       <aside className="min-h-[240px] rounded-2xl border border-[var(--border)] bg-[var(--card)] p-4 text-sm text-[var(--text-secondary)]">
         {t('workspace.detail.placeholder')}

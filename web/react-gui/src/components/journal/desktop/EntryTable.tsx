@@ -1,11 +1,12 @@
 import type { TFunction } from 'i18next';
-import { useMemo, useReducer, useRef, useState } from 'react';
+import { useEffect, useMemo, useReducer, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { useJournalEntries } from '../../../journal/useJournalEntries';
 import { journalApi } from '../../../services/journalApi';
 import type { EntryAggregate, EntryListFilters, JournalPlot } from '../../../types/journal';
 import { formatOccurredDate } from '../JournalEntryRow';
+import { statusBadgeClass } from '../statusBadgeClass';
 import {
   initialPaginationState,
   paginationReducer,
@@ -28,12 +29,6 @@ interface SortState {
 }
 
 const DEFAULT_SORT: SortState = { key: 'occurred', direction: 'desc' };
-
-const STATUS_CLASS: Record<EntryAggregate['status'], string> = {
-  final: 'bg-[var(--success-bg)] text-[var(--success-text)]',
-  draft: 'bg-[var(--warn-bg)] text-[var(--warn-text)]',
-  voided: 'bg-red-100 text-red-800',
-};
 
 export interface EntryTableProps {
   filters: EntryListFilters;
@@ -78,6 +73,13 @@ export function EntryTable({ filters, plots, selectedEntryUuid, onSelectEntry }:
   const [sort, setSort] = useState<SortState>(DEFAULT_SORT);
   const [pendingExport, setPendingExport] = useState<ExportKind | null>(null);
   const [exportError, setExportError] = useState<ExportKind | null>(null);
+
+  // A failed-export banner names a specific export attempt; once the caller
+  // moves to a different scope/filter set, that attempt no longer describes
+  // what "export" would do now, so don't let it linger.
+  useEffect(() => {
+    setExportError(null);
+  }, [filtersKey]);
 
   const plotLabels = useMemo(
     () => new Map(plots.map((plot) => [plot.plot_uuid, plot.name?.trim() || plot.plot_code])),
@@ -233,7 +235,7 @@ export function EntryTable({ filters, plots, selectedEntryUuid, onSelectEntry }:
               <td className="px-3 py-2">{plotLabelOf(entry, plotLabels, t)}</td>
               <td className="px-3 py-2">
                 <span
-                  className={`rounded-full px-2.5 py-1 text-xs font-bold ${STATUS_CLASS[entry.status]}`}
+                  className={`rounded-full px-2.5 py-1 text-xs font-bold ${statusBadgeClass(entry.status)}`}
                 >
                   {t(`row.status.${entry.status}`)}
                 </span>

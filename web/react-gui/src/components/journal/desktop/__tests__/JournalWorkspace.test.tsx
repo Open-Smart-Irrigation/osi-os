@@ -182,6 +182,26 @@ describe('JournalWorkspace', () => {
     expect(lastEntryTableProps().filters).not.toHaveProperty('plot_uuid');
   });
 
+  it('discloses that the list and exports cover all plots when the scope cannot narrow them (station or group), and stays quiet otherwise', () => {
+    renderWorkspace();
+
+    // Global view: no notice.
+    expect(screen.queryByText('workspace.table.scopeNotNarrowed')).not.toBeInTheDocument();
+
+    act(() => lastScopeRailProps().onScopeChange({ kind: 'station', stationCode: 'ST-1' }));
+    expect(screen.getByText('workspace.table.scopeNotNarrowed')).toBeInTheDocument();
+
+    act(() => lastScopeRailProps().onScopeChange({ kind: 'group', groupUuid: 'group-1' }));
+    expect(screen.getByText('workspace.table.scopeNotNarrowed')).toBeInTheDocument();
+
+    // Single-plot scope: the filter really does narrow the list, no notice.
+    act(() => lastScopeRailProps().onScopeChange({ kind: 'plot', plotUuid: 'plot-a' }));
+    expect(screen.queryByText('workspace.table.scopeNotNarrowed')).not.toBeInTheDocument();
+
+    act(() => lastScopeRailProps().onScopeChange({ kind: 'all' }));
+    expect(screen.queryByText('workspace.table.scopeNotNarrowed')).not.toBeInTheDocument();
+  });
+
   it('passes the real plots, active groups, and activities straight through to the scope rail', () => {
     const plots = [journalPlot({ plot_uuid: 'plot-a' })];
     const groups = [{

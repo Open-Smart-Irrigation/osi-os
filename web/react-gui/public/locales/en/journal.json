@@ -186,7 +186,8 @@
       "exportCsv": "Export CSV",
       "exportJson": "Export JSON",
       "exportPackage": "Export research package",
-      "exportError": "Export failed. Try again."
+      "exportError": "Export failed. Try again.",
+      "scopeNotNarrowed": "Showing entries for all plots. Filtering the list and exports by station or group isn't available yet."
     },
     "detail": {
       "placeholder": "Select an entry to see its details."

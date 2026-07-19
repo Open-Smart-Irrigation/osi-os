@@ -186,7 +186,8 @@
       "exportCsv": "Fulumya CSV",
       "exportJson": "Fulumya JSON",
       "exportPackage": "Fulumya ekipakiti ky'okunoonyereza",
-      "exportError": "Fulumya kigaanye. Gezaako nate."
+      "exportError": "Fulumya kigaanye. Gezaako nate.",
+      "scopeNotNarrowed": "Ebiwandiiko by'emisiri gyonna bye birabika. Okusengejja olukalala n'ebifulumizibwa okusinziira ku siteegi oba ekibinja tekinnayinzika kaakano."
     },
     "detail": {
       "placeholder": "Londa ekiwandiiko okulaba ebikwata ku kyo."

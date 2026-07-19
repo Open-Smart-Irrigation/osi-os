@@ -186,7 +186,8 @@
       "exportCsv": "Esporta CSV",
       "exportJson": "Esporta JSON",
       "exportPackage": "Esporta pacchetto di ricerca",
-      "exportError": "Esportazione non riuscita. Riprova."
+      "exportError": "Esportazione non riuscita. Riprova.",
+      "scopeNotNarrowed": "Vengono mostrate le registrazioni di tutte le particelle. Il filtraggio dell'elenco e delle esportazioni per stazione o gruppo non è ancora disponibile."
     },
     "detail": {
       "placeholder": "Seleziona una registrazione per vedere i dettagli."

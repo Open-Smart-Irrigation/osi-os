@@ -186,7 +186,8 @@
       "exportCsv": "Exportar CSV",
       "exportJson": "Exportar JSON",
       "exportPackage": "Exportar pacote de investigação",
-      "exportError": "Falha ao exportar. Tente novamente."
+      "exportError": "Falha ao exportar. Tente novamente.",
+      "scopeNotNarrowed": "São apresentados registos de todas as parcelas. A filtragem da lista e das exportações por estação ou grupo ainda não está disponível."
     },
     "detail": {
       "placeholder": "Selecione um registo para ver os detalhes."
