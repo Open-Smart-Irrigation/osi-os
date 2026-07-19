@@ -22,7 +22,7 @@ import type {
   JournalSelections,
   JournalTemplateDefinition,
 } from '../../../types/journalCapture';
-import { EntryForm } from '../capture/EntryForm';
+import { EntryForm, validateEntryForm } from '../capture/EntryForm';
 import { formatOccurredDate } from '../JournalEntryRow';
 import { statusBadgeClass } from '../statusBadgeClass';
 
@@ -89,6 +89,40 @@ function scalarSelectionsFromValues(values: readonly CaptureEntryValueInput[]): 
     }
   }
   return result;
+}
+
+// EntryForm only calls onChange on user interaction, never on mount, so a
+// correction form's payload/valid state cannot start empty: an unedited
+// Save would then submit an empty value set, which the edge correction path
+// (DELETE + re-INSERT of every journal_entry_values row) turns into a full
+// wipe of the record (C1). Seed the form's initial payload/valid by running
+// the same validateEntryForm the live form uses, over the aggregate's own
+// stored values, so an unedited save re-emits the identical original value
+// set instead of nothing.
+function initialCorrectionSeed(
+  model: JournalCaptureCatalogModel,
+  template: JournalTemplateDefinition,
+  layout: JournalLayoutDefinition,
+  aggregate: EntryAggregate,
+  products: JournalCatalog['products'],
+  t: TFunction<'journal'>,
+): { payload: CaptureEntryValueOutput[]; valid: boolean } {
+  const selections: JournalSelections = {
+    activity_code: aggregate.activity_code,
+    ...scalarSelectionsFromValues(aggregate.values),
+  };
+  const fieldStates = deriveFieldStates(template, layout, selections);
+  const result = validateEntryForm({
+    model,
+    layout,
+    fieldStates,
+    inputs: aggregate.values,
+    selections,
+    numberInputErrors: new Map(),
+    products,
+    t,
+  });
+  return { payload: result.payload, valid: result.valid };
 }
 
 // The desktop three-pane workspace's right slot: reads a selected entry back
@@ -453,8 +487,12 @@ function EntryCorrectionForm({
 }: EntryCorrectionFormProps) {
   const { t } = useTranslation('journal');
   const [values, setValues] = useState<CaptureEntryValueInput[]>(() => aggregate.values);
-  const [payload, setPayload] = useState<CaptureEntryValueOutput[]>([]);
-  const [valid, setValid] = useState(true);
+  const [payload, setPayload] = useState<CaptureEntryValueOutput[]>(
+    () => initialCorrectionSeed(model, template, layout, aggregate, products, t).payload,
+  );
+  const [valid, setValid] = useState<boolean>(
+    () => initialCorrectionSeed(model, template, layout, aggregate, products, t).valid,
+  );
   const [showValidation, setShowValidation] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [staleError, setStaleError] = useState(false);
@@ -469,9 +507,14 @@ function EntryCorrectionForm({
     () => deriveFieldStates(template, layout, selections),
     [template, layout, selections],
   );
+  // Ownership must mirror EntryForm's own visibleAttributeStates filter: the
+  // form only ever emits values for visible attribute fields, so a field
+  // that is in fieldStates but currently invisible must NOT be "owned" here
+  // (I2) — otherwise its stored value is filtered out of `preserved` and
+  // never re-emitted, silently dropping it.
   const formOwnedAttributeCodes = useMemo(() => new Set(
     fieldStates
-      .filter((state) => model.vocabByCode.get(state.code)?.kind === 'attribute')
+      .filter((state) => state.visible && model.vocabByCode.get(state.code)?.kind === 'attribute')
       .map((state) => state.code),
   ), [fieldStates, model]);
 
