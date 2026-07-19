@@ -79,8 +79,10 @@ const SHARED_WITH_ENGLISH: Record<string, readonly string[]> = {
   // Fertigation has no vernacular Luganda equivalent; Timezone is a computing
   // term the shipped lg files also leave in English. Campaign, Protocol, and
   // Sensor(s) (Task 28 workspace filters/scope) follow the same precedent —
-  // no established Luganda term, kept as the source English word.
-  lg: [...LAYOUT_KEYS, ...SHARED_STRUCTURE_KEYS, 'activity.fertigation', 'capture.where.timezone', 'filters.campaign', 'filters.protocol', 'workspace.scope.sensors'],
+  // no established Luganda term, kept as the source English word. Task 30's
+  // detail-panel field labels for the same two concepts (campaign, protocol)
+  // follow the identical precedent already set by the filters above.
+  lg: [...LAYOUT_KEYS, ...SHARED_STRUCTURE_KEYS, 'activity.fertigation', 'capture.where.timezone', 'filters.campaign', 'filters.protocol', 'workspace.detail.field.campaign_uuid', 'workspace.detail.field.protocol_code', 'workspace.scope.sensors'],
 };
 
 const REQUIRED_CAPTURE_KEYS = [

@@ -190,7 +190,54 @@
       "scopeNotNarrowed": "Es werden Einträge aller Parzellen angezeigt. Das Filtern der Liste und der Exporte nach Station oder Gruppe ist noch nicht möglich."
     },
     "detail": {
-      "placeholder": "Wählen Sie einen Eintrag aus, um die Details zu sehen."
+      "heading": "Eintragsdetails",
+      "placeholder": "Wählen Sie einen Eintrag aus, um die Details zu sehen.",
+      "loading": "Eintrag wird geladen…",
+      "error": "Der Eintrag konnte nicht geladen werden.",
+      "retry": "Erneut versuchen",
+      "notFound": "Dieser Eintrag konnte nicht gefunden werden. Er wurde möglicherweise geändert oder anderswo entfernt.",
+      "locked": {
+        "draft": "Dieser Eintrag ist ein Entwurf. Setzen Sie ihn über die Liste der Entwürfe fort, um Änderungen vorzunehmen.",
+        "voided": "Dieser Eintrag ist storniert und kann nicht geändert werden."
+      },
+      "field": {
+        "campaign_uuid": "Kampagne",
+        "protocol_code": "Protokoll",
+        "observation_unit_code": "Beobachtungseinheit",
+        "season_crop": "Kultur",
+        "note": "Notiz"
+      },
+      "values": {
+        "heading": "Erfasste Werte",
+        "empty": "Es wurden keine Werte erfasst."
+      },
+      "context": {
+        "heading": "Sensorkontext zum Zeitpunkt",
+        "empty": "Für diesen Eintrag wurde kein Sensorkontext erfasst.",
+        "channelEmpty": "Kein Messwert"
+      },
+      "actions": {
+        "correct": "Korrigieren",
+        "void": "Stornieren"
+      },
+      "correction": {
+        "heading": "Diesen Eintrag korrigieren",
+        "unavailable": "Die Vorlage dieses Eintrags ist nicht mehr verfügbar, daher kann er hier nicht korrigiert werden.",
+        "cancel": "Abbrechen",
+        "save": "Korrektur speichern",
+        "saving": "Wird gespeichert…",
+        "stale": "Dieser Eintrag hat sich anderswo geändert. Laden Sie ihn neu, bevor Sie erneut korrigieren.",
+        "error": "Die Korrektur konnte nicht gespeichert werden. Versuchen Sie es erneut."
+      },
+      "void": {
+        "reasonLabel": "Grund für die Stornierung",
+        "reasonRequired": "Geben Sie einen Grund an, bevor Sie diesen Eintrag stornieren.",
+        "cancel": "Abbrechen",
+        "submit": "Eintrag stornieren",
+        "saving": "Wird storniert…",
+        "stale": "Dieser Eintrag hat sich anderswo geändert. Laden Sie ihn neu, bevor Sie ihn erneut stornieren.",
+        "error": "Der Eintrag konnte nicht storniert werden. Versuchen Sie es erneut."
+      }
     }
   },
   "logActivity": "Aktivität erfassen",

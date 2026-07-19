@@ -5,6 +5,7 @@ import { describe, expect, it, vi } from 'vitest';
 const mocks = vi.hoisted(() => ({
   scopeRail: vi.fn(),
   entryTable: vi.fn(),
+  detailPanel: vi.fn(),
 }));
 
 vi.mock('react-i18next', () => ({
@@ -27,14 +28,32 @@ vi.mock('../ScopeRail', async () => {
 vi.mock('../EntryTable', () => ({
   EntryTable: (props: unknown) => {
     mocks.entryTable(props);
-    return <div data-testid="entry-table" />;
+    const { selectedEntryUuid } = props as EntryTableProps;
+    return (
+      <div data-testid="entry-table">
+        {selectedEntryUuid && (
+          // Stands in for Task 29's real per-row element (which carries this
+          // same testid) so the focus-return seam can be exercised without
+          // depending on EntryTable's real implementation.
+          <button type="button" data-testid={`entry-row-${selectedEntryUuid}`} />
+        )}
+      </div>
+    );
+  },
+}));
+
+vi.mock('../DetailPanel', () => ({
+  DetailPanel: (props: unknown) => {
+    mocks.detailPanel(props);
+    return <div data-testid="detail-panel" />;
   },
 }));
 
 import { JournalWorkspace } from '../JournalWorkspace';
 import { DEFAULT_SCOPE_RAIL_FILTERS, type ScopeRailProps } from '../ScopeRail';
 import type { EntryTableProps } from '../EntryTable';
-import type { JournalPlot, JournalVocabRow, PlotGroup } from '../../../../types/journal';
+import type { DetailPanelProps } from '../DetailPanel';
+import type { JournalCatalog, JournalPlot, JournalVocabRow, PlotGroup } from '../../../../types/journal';
 import type { IrrigationZone } from '../../../../types/farming';
 
 function journalPlot(overrides: Partial<JournalPlot> = {}): JournalPlot {
@@ -89,11 +108,22 @@ function vocabRow(code: string): JournalVocabRow {
 
 const activeGroups: PlotGroup[] = [];
 
+const catalog: JournalCatalog = {
+  catalog_version: 1,
+  catalog_hash: 'hash-1',
+  vocab: [],
+  templates: [],
+  layouts: [],
+  products: [],
+  mappings: [],
+};
+
 function renderWorkspace(overrides: {
   plots?: JournalPlot[];
   activeGroups?: PlotGroup[];
   zones?: IrrigationZone[];
   activities?: JournalVocabRow[];
+  catalog?: JournalCatalog;
 } = {}) {
   return render(
     <JournalWorkspace
@@ -101,6 +131,7 @@ function renderWorkspace(overrides: {
       activeGroups={overrides.activeGroups ?? activeGroups}
       zones={overrides.zones ?? []}
       activities={overrides.activities ?? [vocabRow('irrigation')]}
+      catalog={overrides.catalog ?? catalog}
     />,
   );
 }
@@ -113,8 +144,12 @@ function lastEntryTableProps(): EntryTableProps {
   return mocks.entryTable.mock.lastCall?.[0] as EntryTableProps;
 }
 
+function lastDetailPanelProps(): DetailPanelProps {
+  return mocks.detailPanel.mock.lastCall?.[0] as DetailPanelProps;
+}
+
 describe('JournalWorkspace', () => {
-  it('renders a three-pane grid with the scope rail, an entry table, and a detail pane', () => {
+  it('renders a three-pane grid with the scope rail, an entry table, and a detail panel', () => {
     const { container } = renderWorkspace();
 
     const grid = container.firstElementChild as HTMLElement;
@@ -122,7 +157,37 @@ describe('JournalWorkspace', () => {
     expect(grid.className).toContain('lg:grid-cols-[320px_1fr_360px]');
     expect(screen.getByTestId('scope-rail')).toBeInTheDocument();
     expect(screen.getByTestId('entry-table')).toBeInTheDocument();
-    expect(screen.getByText('workspace.detail.placeholder')).toBeInTheDocument();
+    expect(screen.getByTestId('detail-panel')).toBeInTheDocument();
+  });
+
+  it('passes the catalog and plots straight through to the detail panel', () => {
+    const plots = [journalPlot({ plot_uuid: 'plot-a' })];
+
+    renderWorkspace({ plots, catalog });
+
+    expect(lastDetailPanelProps().catalog).toBe(catalog);
+    expect(lastDetailPanelProps().plots).toBe(plots);
+  });
+
+  it('keeps the detail panel synced with selectedEntryUuid', () => {
+    renderWorkspace();
+
+    expect(lastDetailPanelProps().selectedEntryUuid).toBeNull();
+    act(() => lastEntryTableProps().onSelectEntry('entry-1'));
+
+    expect(lastDetailPanelProps().selectedEntryUuid).toBe('entry-1');
+  });
+
+  it('exposes a focus-return seam that gives keyboard focus back to the selected entry row', () => {
+    renderWorkspace();
+    act(() => lastEntryTableProps().onSelectEntry('entry-1'));
+
+    const row = screen.getByTestId('entry-row-entry-1');
+    const focusSpy = vi.spyOn(row, 'focus');
+
+    act(() => lastDetailPanelProps().onFocusReturn?.());
+
+    expect(focusSpy).toHaveBeenCalled();
   });
 
   it('passes plots straight through to the entry table', () => {

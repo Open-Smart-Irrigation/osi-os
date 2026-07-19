@@ -190,7 +190,54 @@
       "scopeNotNarrowed": "Showing entries for all plots. Filtering the list and exports by station or group isn't available yet."
     },
     "detail": {
-      "placeholder": "Select an entry to see its details."
+      "heading": "Entry detail",
+      "placeholder": "Select an entry to see its details.",
+      "loading": "Loading entry…",
+      "error": "Could not load this entry.",
+      "retry": "Try again",
+      "notFound": "This entry could not be found. It may have changed or been removed elsewhere.",
+      "locked": {
+        "draft": "This entry is a draft. Resume it from the drafts queue to make changes.",
+        "voided": "This entry is voided and cannot be changed."
+      },
+      "field": {
+        "campaign_uuid": "Campaign",
+        "protocol_code": "Protocol",
+        "observation_unit_code": "Observation unit",
+        "season_crop": "Crop",
+        "note": "Note"
+      },
+      "values": {
+        "heading": "Recorded values",
+        "empty": "No values were recorded."
+      },
+      "context": {
+        "heading": "Sensor context at the time",
+        "empty": "No sensor context was captured for this entry.",
+        "channelEmpty": "No reading"
+      },
+      "actions": {
+        "correct": "Correct",
+        "void": "Void"
+      },
+      "correction": {
+        "heading": "Correct this entry",
+        "unavailable": "This entry's template is no longer available, so it cannot be corrected here.",
+        "cancel": "Cancel",
+        "save": "Save correction",
+        "saving": "Saving…",
+        "stale": "This entry changed elsewhere. Reload it before correcting again.",
+        "error": "Could not save the correction. Try again."
+      },
+      "void": {
+        "reasonLabel": "Reason for voiding",
+        "reasonRequired": "Enter a reason before voiding this entry.",
+        "cancel": "Cancel",
+        "submit": "Void entry",
+        "saving": "Voiding…",
+        "stale": "This entry changed elsewhere. Reload it before voiding again.",
+        "error": "Could not void this entry. Try again."
+      }
     }
   },
   "logActivity": "Log activity",

@@ -190,7 +190,54 @@
       "scopeNotNarrowed": "Se muestran las entradas de todas las parcelas. El filtrado de la lista y las exportaciones por estación o grupo aún no está disponible."
     },
     "detail": {
-      "placeholder": "Selecciona una entrada para ver sus detalles."
+      "heading": "Detalle de la entrada",
+      "placeholder": "Selecciona una entrada para ver sus detalles.",
+      "loading": "Cargando entrada…",
+      "error": "No se pudo cargar esta entrada.",
+      "retry": "Reintentar",
+      "notFound": "No se ha podido encontrar esta entrada. Puede que haya cambiado o se haya eliminado en otro lugar.",
+      "locked": {
+        "draft": "Esta entrada es un borrador. Retómala desde la cola de borradores para hacer cambios.",
+        "voided": "Esta entrada está anulada y no se puede modificar."
+      },
+      "field": {
+        "campaign_uuid": "Campaña",
+        "protocol_code": "Protocolo",
+        "observation_unit_code": "Unidad de observación",
+        "season_crop": "Cultivo",
+        "note": "Nota"
+      },
+      "values": {
+        "heading": "Valores registrados",
+        "empty": "No se registró ningún valor."
+      },
+      "context": {
+        "heading": "Contexto de los sensores en ese momento",
+        "empty": "No se capturó contexto de sensores para esta entrada.",
+        "channelEmpty": "Sin lectura"
+      },
+      "actions": {
+        "correct": "Corregir",
+        "void": "Anular"
+      },
+      "correction": {
+        "heading": "Corregir esta entrada",
+        "unavailable": "La plantilla de esta entrada ya no está disponible, por lo que no se puede corregir aquí.",
+        "cancel": "Cancelar",
+        "save": "Guardar corrección",
+        "saving": "Guardando…",
+        "stale": "Esta entrada ha cambiado en otro lugar. Vuelve a cargarla antes de corregirla de nuevo.",
+        "error": "No se pudo guardar la corrección. Inténtalo de nuevo."
+      },
+      "void": {
+        "reasonLabel": "Motivo de la anulación",
+        "reasonRequired": "Indica un motivo antes de anular esta entrada.",
+        "cancel": "Cancelar",
+        "submit": "Anular entrada",
+        "saving": "Anulando…",
+        "stale": "Esta entrada ha cambiado en otro lugar. Vuelve a cargarla antes de anularla de nuevo.",
+        "error": "No se pudo anular esta entrada. Inténtalo de nuevo."
+      }
     }
   },
   "logActivity": "Registrar actividad",

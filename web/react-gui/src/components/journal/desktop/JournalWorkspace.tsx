@@ -1,8 +1,15 @@
-import { useMemo, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import type { IrrigationZone } from '../../../types/farming';
-import type { EntryListFilters, JournalPlot, JournalVocabRow, PlotGroup } from '../../../types/journal';
+import type {
+  EntryListFilters,
+  JournalCatalog,
+  JournalPlot,
+  JournalVocabRow,
+  PlotGroup,
+} from '../../../types/journal';
+import { DetailPanel } from './DetailPanel';
 import { EntryTable } from './EntryTable';
 import {
   DEFAULT_SCOPE_RAIL_FILTERS,
@@ -16,6 +23,7 @@ export interface JournalWorkspaceProps {
   activeGroups: readonly PlotGroup[];
   zones: readonly IrrigationZone[];
   activities: readonly JournalVocabRow[];
+  catalog: JournalCatalog;
 }
 
 type ZoneLike = Pick<IrrigationZone, 'zone_uuid' | 'zoneUuid' | 'device_count' | 'deviceCount'>;
@@ -49,12 +57,25 @@ function toEntryListFilters(scope: ScopeSelection, filters: ScopeRailFilters): E
   return result;
 }
 
-export function JournalWorkspace({ plots, activeGroups, zones, activities }: JournalWorkspaceProps) {
+export function JournalWorkspace({ plots, activeGroups, zones, activities, catalog }: JournalWorkspaceProps) {
   const { t } = useTranslation('journal');
   const [scope, setScope] = useState<ScopeSelection>({ kind: 'all' });
   const [filters, setFilters] = useState<ScopeRailFilters>(DEFAULT_SCOPE_RAIL_FILTERS);
   const [search, setSearch] = useState('');
   const [selectedEntryUuid, setSelectedEntryUuid] = useState<string | null>(null);
+
+  // The focus-return seam: EntryTable (Task 29) renders each row with a
+  // stable `entry-row-<uuid>` testid/DOM node it also uses for its own
+  // roving tabIndex. DetailPanel has no ref into EntryTable's internals, so
+  // it asks the workspace to hand focus back to the row it came from after a
+  // correction/void is saved or cancelled, rather than losing focus into the
+  // document body.
+  const focusSelectedRow = useCallback(() => {
+    if (!selectedEntryUuid) return;
+    document
+      .querySelector<HTMLElement>(`[data-testid="entry-row-${selectedEntryUuid}"]`)
+      ?.focus();
+  }, [selectedEntryUuid]);
 
   const sensorCountByZoneUuid = useMemo(() => {
     const counts: Record<string, number> = {};
@@ -107,9 +128,12 @@ export function JournalWorkspace({ plots, activeGroups, zones, activities }: Jou
         </div>
       </div>
 
-      <aside className="min-h-[240px] rounded-2xl border border-[var(--border)] bg-[var(--card)] p-4 text-sm text-[var(--text-secondary)]">
-        {t('workspace.detail.placeholder')}
-      </aside>
+      <DetailPanel
+        catalog={catalog}
+        plots={plots}
+        selectedEntryUuid={selectedEntryUuid}
+        onFocusReturn={focusSelectedRow}
+      />
     </div>
   );
 }

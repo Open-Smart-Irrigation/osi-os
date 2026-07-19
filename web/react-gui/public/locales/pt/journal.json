@@ -190,7 +190,54 @@
       "scopeNotNarrowed": "São apresentados registos de todas as parcelas. A filtragem da lista e das exportações por estação ou grupo ainda não está disponível."
     },
     "detail": {
-      "placeholder": "Selecione um registo para ver os detalhes."
+      "heading": "Detalhe do registo",
+      "placeholder": "Selecione um registo para ver os detalhes.",
+      "loading": "A carregar o registo…",
+      "error": "Não foi possível carregar este registo.",
+      "retry": "Tentar novamente",
+      "notFound": "Este registo não foi encontrado. Pode ter sido alterado ou removido noutro local.",
+      "locked": {
+        "draft": "Este registo é um rascunho. Retome-o a partir da lista de rascunhos para fazer alterações.",
+        "voided": "Este registo está anulado e não pode ser alterado."
+      },
+      "field": {
+        "campaign_uuid": "Campanha",
+        "protocol_code": "Protocolo",
+        "observation_unit_code": "Unidade de observação",
+        "season_crop": "Cultura",
+        "note": "Nota"
+      },
+      "values": {
+        "heading": "Valores registados",
+        "empty": "Não foi registado nenhum valor."
+      },
+      "context": {
+        "heading": "Contexto dos sensores nesse momento",
+        "empty": "Não foi captado contexto de sensores para este registo.",
+        "channelEmpty": "Sem leitura"
+      },
+      "actions": {
+        "correct": "Corrigir",
+        "void": "Anular"
+      },
+      "correction": {
+        "heading": "Corrigir este registo",
+        "unavailable": "O modelo deste registo já não está disponível, pelo que não pode ser corrigido aqui.",
+        "cancel": "Cancelar",
+        "save": "Guardar correção",
+        "saving": "A guardar…",
+        "stale": "Este registo foi alterado noutro local. Volte a carregá-lo antes de o corrigir novamente.",
+        "error": "Não foi possível guardar a correção. Tente novamente."
+      },
+      "void": {
+        "reasonLabel": "Motivo da anulação",
+        "reasonRequired": "Indique um motivo antes de anular este registo.",
+        "cancel": "Cancelar",
+        "submit": "Anular registo",
+        "saving": "A anular…",
+        "stale": "Este registo foi alterado noutro local. Volte a carregá-lo antes de o anular novamente.",
+        "error": "Não foi possível anular este registo. Tente novamente."
+      }
     }
   },
   "logActivity": "Registar atividade",

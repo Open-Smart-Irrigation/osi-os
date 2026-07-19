@@ -235,6 +235,7 @@ export const JournalPage: React.FC = () => {
             activeGroups={groupState.activeGroups}
             zones={zonesState.data ?? []}
             activities={activities}
+            catalog={catalogState.catalog!}
           />
         ) : (
           <>
