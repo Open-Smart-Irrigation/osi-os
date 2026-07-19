@@ -161,7 +161,7 @@ Final serial gates: provenance CLI 7/7; generator 4/4; built-rootfs verifier 6/6
 
 ## Safe local handoff after constrained finalization
 
-Integration branch: `integration/refactor-repair-train-a-a3-20260719`, final safe handoff `c8c8f0b4`. Main checkout remained untouched; no live host, SSH, push, PR, or deployment was used.
+Integration branch: `integration/refactor-repair-train-a-a3-20260719`, final head `ef8937a6` (safe functional handoff state `c8c8f0b4` plus this documentation checkpoint). Main checkout remained untouched; no live host, SSH, push, PR, or deployment was used.
 
 Retained and rechecked: A0 commits 1–3; sync delivery stop-loss Tasks 1–2 (`16/16` delivery cases, including the present-but-empty `results[]` batch error); Device API auth Tasks 1–2 (`75/75`); absolute flow ceilings (`verify-flows-size-ratchet`); profile parity; `verify-sync-flow`; and `git diff --check`.
 
