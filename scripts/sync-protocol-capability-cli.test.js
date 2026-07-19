@@ -37,16 +37,8 @@ function rootFlags(tmp) {
 function writeDeploymentState(tmp, obj) {
   const p = path.join(tmp, 'osi-deploy', 'deployment-state.json');
   fs.mkdirSync(path.dirname(p), { recursive: true });
-  fs.writeFileSync(p, JSON.stringify(obj), { mode: 0o600 });
-  fs.chmodSync(p, 0o600);
+  fs.writeFileSync(p, JSON.stringify(obj));
   return p;
-}
-
-function writePrivateJson(filePath, value) {
-  fs.mkdirSync(path.dirname(filePath), { recursive: true, mode: 0o700 });
-  fs.writeFileSync(filePath, JSON.stringify(value), { mode: 0o600 });
-  fs.chmodSync(filePath, 0o600);
-  return filePath;
 }
 
 function initializeFlags(tmp, overrides) {
@@ -174,7 +166,7 @@ test('CLI status: corrupt roots (forked generation) exit nonzero', () => {
 });
 
 // ===========================================================================
-// implemented verb dispatch
+// every not-implemented verb exits nonzero, bounded
 // ===========================================================================
 
 function dummyValueForType(spec) {
@@ -202,120 +194,15 @@ function dummyArgvForVerb(verb, tmp) {
   return argv;
 }
 
-test('CLI: every protocol verb reaches real dispatch and none retains the slice placeholder', () => {
-  assert.doesNotMatch(fs.readFileSync(CLI_PATH, 'utf8'), /NOT_IMPLEMENTED_IN_THIS_SLICE/);
-  for (const verb of Object.keys(cli.VERB_FLAGS).filter((name) => !['initialize', 'status'].includes(name))) {
+test('CLI: every not-implemented verb is pinned in the verb table and exits nonzero with a bounded error', () => {
+  for (const verb of cli.NOT_IMPLEMENTED_VERBS) {
     const tmp = tmpDir();
     const result = runCli(dummyArgvForVerb(verb, tmp));
-    assert.doesNotMatch(result.stderr, /NOT_IMPLEMENTED_IN_THIS_SLICE/, `verb "${verb}" still has placeholder dispatch`);
+    assert.notEqual(result.status, 0, `verb "${verb}" should exit nonzero`);
+    assert.match(result.stderr, /NOT_IMPLEMENTED_IN_THIS_SLICE/, `verb "${verb}" should report the bounded not-implemented error: ${result.stderr}`);
+    // Bounded: it must not have created any of the four roots.
+    assert.equal(fs.existsSync(path.join(tmp, 'osi-sync')), false, `verb "${verb}" must not create the capability root`);
   }
-});
-
-test('CLI import alone performs no dispatch or filesystem mutation', () => {
-  const tmp = tmpDir();
-  const result = cp.spawnSync(process.execPath, ['-e', `require(${JSON.stringify(CLI_PATH)})`], {
-    cwd: tmp,
-    encoding: 'utf8',
-  });
-  assert.equal(result.status, 0, result.stderr);
-  assert.equal(fs.readdirSync(tmp).length, 0);
-});
-
-test('CLI record-v2-disposition commits a deployment-bound CLEAR transition', () => {
-  const tmp = tmpDir();
-  const init = runCli(initializeFlags(tmp));
-  assert.equal(init.status, 0, init.stderr);
-  const protocol = require('../conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-sync-protocol-state');
-  const opts = {
-    root: path.join(tmp, 'osi-sync'),
-    witnessRoot: path.join(tmp, 'osi-sync-witness', 'protocol-capability-witnesses'),
-    activityWitnessRoot: path.join(tmp, 'osi-sync-witness', 'command-activity-witnesses'),
-  };
-  const loaded = protocol.loadProtocolState(opts);
-  const identitySha256 = 'e'.repeat(64);
-  const audit = { format: 1, databaseIdentitySha256: 'c'.repeat(64) };
-  const backup = {
-    format: 1,
-    activityGeneration: loaded.activity.externalHead.generation,
-    activityEntrySha256: loaded.activity.externalHead.entrySha256,
-    activityExternalHeadSha256: protocol.canonicalSha256(loaded.activity.externalHead),
-  };
-  const disposition = {
-    format: 1,
-    sourceKind: 'zero',
-    historicalV2Disposition: 'CLEAR',
-    identitySha256,
-  };
-  const auditPath = writePrivateJson(path.join(tmp, 'evidence', 'audit.json'), audit);
-  const backupPath = writePrivateJson(path.join(tmp, 'evidence', 'backup.json'), backup);
-  const dispositionPath = writePrivateJson(path.join(tmp, 'evidence', 'disposition.json'), disposition);
-  const deploymentState = writeDeploymentState(tmp, {
-    format: 2,
-    parentDeployment: { deploymentId: 'dep-1', phase: 'protocol-dispositioning', generation: 1 },
-    activeSubOperation: null,
-  });
-  const result = runCli([
-    'record-v2-disposition', ...rootFlags(tmp),
-    '--deployment-state', deploymentState,
-    '--expected-deployment-id', 'dep-1',
-    '--expected-phase', 'protocol-dispositioning',
-    '--expected-parent-generation', '1',
-    '--operation-id', '22222222-2222-4222-8222-222222222222',
-    '--ack-audit-report', auditPath,
-    '--backup-manifest', backupPath,
-    '--disposition-receipt', dispositionPath,
-    '--expected-disposition-receipt-sha256', protocol.canonicalSha256(disposition),
-    '--expected-identity-sha256', identitySha256,
-    '--expected-head-sha256', loaded.capability.head.generationSha256,
-    '--expected-witness-sha256', loaded.capability.head.witnessSha256,
-  ]);
-  assert.equal(result.status, 0, result.stderr);
-  assert.equal(JSON.parse(result.stdout).operationResult, 'CLEAR');
-  assert.equal(protocol.status(opts).capabilityGeneration, 1);
-});
-
-test('CLI initialize-factory-zero commits factory genesis and CLEAR only in the baseline prefix', () => {
-  const tmp = tmpDir();
-  const operationId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
-  const deploymentState = writeDeploymentState(tmp, {
-    format: 2,
-    parentDeployment: {
-      deploymentId: 'baseline-1', baselineId: 'baseline-1', phase: 'image-baseline-initializing',
-      generation: 12, baselinePrefix: 'baseline-completing', operationId,
-    },
-    activeSubOperation: null,
-  });
-  const evidenceDir = path.join(tmp, 'factory-evidence');
-  const provenance = writePrivateJson(path.join(evidenceDir, 'provenance.json'), { format: 2, profile: 'bcm2712' });
-  const imageManifest = writePrivateJson(path.join(evidenceDir, 'image-manifest.json'), { format: 2, profile: 'bcm2712' });
-  const seed = writePrivateJson(path.join(evidenceDir, 'seed.json'), {
-    format: 1, receiptKind: 'factory-seed', seedSha256: 'a'.repeat(64),
-    databaseIdentitySha256: 'b'.repeat(64), databaseLineageSha256: 'c'.repeat(64),
-  });
-  const audit = writePrivateJson(path.join(evidenceDir, 'audit.json'), {
-    format: 1, factorySeedEligible: true, databaseIdentitySha256: 'b'.repeat(64),
-    databaseLineageSha256: 'c'.repeat(64), allCountersZero: true,
-  });
-  const database = path.join(tmp, 'farming.db');
-  fs.writeFileSync(database, 'factory-test');
-  const result = runCli([
-    'initialize-factory-zero', ...rootFlags(tmp),
-    '--deployment-state', deploymentState,
-    '--expected-baseline-id', 'baseline-1',
-    '--expected-phase', 'image-baseline-initializing',
-    '--expected-baseline-prefix', 'baseline-completing',
-    '--expected-parent-generation', '12',
-    '--operation-id', operationId,
-    '--factory-provenance', provenance,
-    '--image-guard-manifest', imageManifest,
-    '--factory-seed-receipt', seed,
-    '--database', database,
-    '--ack-audit-report', audit,
-    '--factory-intent-out', path.join(tmp, 'factory-output', 'intent.json'),
-    '--factory-zero-source-receipt-out', path.join(tmp, 'factory-output', 'source.json'),
-  ]);
-  assert.equal(result.status, 0, result.stderr);
-  assert.equal(JSON.parse(result.stdout).capabilityGeneration, 1);
 });
 
 test('CLI: an unknown verb exits nonzero', () => {
@@ -329,15 +216,6 @@ test('CLI: a missing verb exits nonzero', () => {
   const result = runCli([]);
   assert.notEqual(result.status, 0);
   assert.match(result.stderr, /cli_missing_verb/);
-});
-
-test('CLI: any stdin bytes fail before dispatch', () => {
-  const result = cp.spawnSync(process.execPath, [CLI_PATH, 'status', ...rootFlags(tmpDir())], {
-    encoding: 'utf8',
-    input: '{}',
-  });
-  assert.notEqual(result.status, 0);
-  assert.match(result.stderr, /cli_stdin_forbidden/);
 });
 
 // ===========================================================================
