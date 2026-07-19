@@ -10499,7 +10499,8 @@
       "record-error-link-out-s2120",
       "record-error-link-out-history-api",
       "record-error-link-out-lorain",
-      "record-error-link-out-journal-api"
+      "record-error-link-out-journal-api",
+      "record-error-link-out-uc512"
     ],
     "x": 1590,
     "y": 1340,
@@ -11005,7 +11006,7 @@
     "type": "function",
     "z": "uc512-tab",
     "name": "UC512 Normalize + Write",
-    "func": "var data = msg.payload;\nif (!data || !data.deviceInfo) return null;\n\nvar profileId = String(data.deviceInfo.deviceProfileId || '').trim();\nvar uc512ProfileId = String(env.get('CHIRPSTACK_PROFILE_UC512') || '').trim();\nif (!uc512ProfileId || profileId !== uc512ProfileId) return null;\n\nvar normRes = osiLib.require('uc512-normalize');\nif (!normRes.ok) { node.warn('uc512-normalize quarantined: ' + normRes.error); return null; }\n\nvar writerRes = osiLib.require('device-writer');\nif (!writerRes.ok) { node.warn('device-writer quarantined: ' + writerRes.error); return null; }\n\nvar decoded = (data.object && typeof data.object === 'object') ? data.object : {};\nvar deveui = String(data.deviceInfo.devEui || '').toUpperCase().trim();\nif (!deveui) { node.error('UC512: empty devEui'); return null; }\n\nvar fs = global.get('fs');\nvar edgeManifest;\ntry { edgeManifest = JSON.parse(fs.readFileSync('/srv/node-red/edge-channels.json', 'utf8')); }\ncatch (e) { node.error('edge-channels.json load failed: ' + e.message); return null; }\n\nvar normalizeResult = normRes.value.normalize(decoded, { recordedAt: data.time });\n\nvar db = new osiDb.Database('/data/db/farming.db');\ntry {\n  var result = writerRes.value.writeDeviceData(db, edgeManifest, normalizeResult, { deveui: deveui }, { node: node });\n  if (result.deadLettered.length > 0) {\n    node.warn('UC512 dead-lettered ' + result.deadLettered.length + ' channels for ' + deveui);\n  }\n  node.status({ fill: 'green', shape: 'dot', text: 'UC512 ' + deveui + ' cols=' + result.columns.length });\n} catch (e) {\n  node.error('UC512 write failed: ' + e.message);\n} finally {\n  db.close();\n}\n\nreturn msg;",
+    "func": "var data = msg.payload;\nif (!data || !data.deviceInfo) return null;\n\nvar profileId = String(data.deviceInfo.deviceProfileId || '').trim();\nvar uc512ProfileId = String(env.get('CHIRPSTACK_PROFILE_UC512') || '').trim();\nif (!uc512ProfileId || profileId !== uc512ProfileId) return null;\n\nfunction reportFailure(stage) {\n  var codes = {\n    normalizer_load: 'NORMALIZER_LOAD_FAILED',\n    writer_load: 'WRITER_LOAD_FAILED',\n    manifest_load: 'MANIFEST_LOAD_FAILED',\n    identity_missing: 'IDENTITY_MISSING',\n    normalize_run: 'NORMALIZE_RUN_FAILED',\n    db_open: 'DB_OPEN_FAILED',\n    writer_run: 'WRITER_RUN_FAILED',\n    db_close: 'DB_CLOSE_FAILED'\n  };\n  if (!Object.prototype.hasOwnProperty.call(codes, stage)) {\n    throw new Error('uc512 write: unknown failure stage ' + stage);\n  }\n  node.error('UC512 write failed [' + stage + '] code=' + codes[stage], msg);\n  node.status({ fill: 'red', shape: 'dot', text: 'UC512 ' + codes[stage] });\n  return null;\n}\n\nreturn (async () => {\n  var normRes = osiLib.require('uc512-normalize');\n  if (!normRes.ok) return reportFailure('normalizer_load');\n\n  var writerRes = osiLib.require('device-writer');\n  if (!writerRes.ok) return reportFailure('writer_load');\n\n  var decoded = (data.object && typeof data.object === 'object') ? data.object : {};\n  var deveui = String(data.deviceInfo.devEui || '').toUpperCase().trim();\n  if (!deveui) return reportFailure('identity_missing');\n\n  var fs = global.get('fs');\n  var edgeManifest;\n  try {\n    edgeManifest = JSON.parse(fs.readFileSync('/srv/node-red/edge-channels.json', 'utf8'));\n  } catch (e) {\n    return reportFailure('manifest_load');\n  }\n\n  var normalizeResult;\n  try {\n    normalizeResult = normRes.value.normalize(decoded, { recordedAt: data.time });\n  } catch (e) {\n    return reportFailure('normalize_run');\n  }\n\n  var db;\n  try {\n    db = new osiDb.Database('/data/db/farming.db');\n  } catch (e) {\n    return reportFailure('db_open');\n  }\n\n  var writerFailed = false;\n  try {\n    var result = await writerRes.value.writeDeviceData(db, edgeManifest, normalizeResult, { deveui: deveui }, { node: node, msg: msg });\n    if (result.deadLettered.length > 0) {\n      node.warn('UC512 dead-lettered ' + result.deadLettered.length + ' channels for ' + deveui);\n    }\n    node.status({ fill: 'green', shape: 'dot', text: 'UC512 ' + deveui + ' cols=' + result.columns.length });\n  } catch (e) {\n    writerFailed = true;\n    reportFailure('writer_run');\n  }\n\n  try {\n    await db.close();\n  } catch (closeErr) {\n    reportFailure('db_close');\n  }\n\n  return writerFailed ? null : msg;\n})();",
     "outputs": 1,
     "libs": [
       {
@@ -11047,8 +11048,8 @@
     "type": "function",
     "z": "lsn50-tab",
     "name": "LSN50 Normalize + Write",
-    "func": "var d = msg.formattedData;\nif (!d || !d.devEui) { node.error(\"formattedData missing\", msg); return null; }\n\nvar normRes = osiLib.require(\"lsn50-normalize\");\nif (!normRes.ok) { node.warn(\"lsn50-normalize quarantined: \" + normRes.error); return null; }\n\nvar writerRes = osiLib.require(\"device-writer\");\nif (!writerRes.ok) { node.warn(\"device-writer quarantined: \" + writerRes.error); return null; }\n\nvar deveui = String(d.devEui).toUpperCase().trim();\nif (!deveui) { node.error(\"LSN50: empty devEui\"); return null; }\n\nvar fs = global.get(\"fs\");\nvar edgeManifest;\ntry { edgeManifest = JSON.parse(fs.readFileSync(\"/srv/node-red/edge-channels.json\", \"utf8\")); }\ncatch (e) { node.error(\"edge-channels.json load failed: \" + e.message); return null; }\n\nvar decoded = {\n  devEui: d.devEui, timestamp: d.timestamp, detectedMode: d.detectedMode,\n  tempC1: d.tempC1, batV: d.batV,\n  adcV: d.adcV, adcCh1V: d.adcCh1V,\n  swt1Kpa: d.swt1Kpa, swt2Kpa: d.swt2Kpa, swt3Kpa: d.swt3Kpa,\n  dendroRatio: d.dendroRatio, dendroModeUsed: d.dendroModeUsed,\n  positionRawMm: d.positionRawMm, positionMm: d.positionMm,\n  dendroValid: d.dendroValid, deltaMm: d.deltaMm,\n  dendroStemChangeUm: d.dendroStemChangeUm,\n  dendroSaturated: d.dendroSaturated, dendroSaturationSide: d.dendroSaturationSide,\n  rainCountCumulative: d.rainCountCumulative, rainTipsDelta: d.rainTipsDelta,\n  rainMmDelta: d.rainMmDelta, rainMmPerHour: d.rainMmPerHour,\n  rainMmPer10Min: d.rainMmPer10Min, rainMmToday: d.rainMmToday,\n  rainDeltaStatus: d.rainDeltaStatus,\n  flowCountCumulative: d.flowCountCumulative, flowPulsesDelta: d.flowPulsesDelta,\n  flowLitersDelta: d.flowLitersDelta, flowLitersPerMin: d.flowLitersPerMin,\n  flowLitersPer10Min: d.flowLitersPer10Min, flowLitersToday: d.flowLitersToday,\n  flowDeltaStatus: d.flowDeltaStatus,\n  counterIntervalSeconds: d.counterIntervalSeconds,\n  modeCodeToStore: d.modeCodeToStore, modeLabelToStore: d.modeLabelToStore,\n  observedModeObservedAt: d.observedModeObservedAt\n};\n\nvar normalizeResult = normRes.value.normalize(decoded, { recordedAt: d.timestamp });\n\nvar db = new osiDb.Database(\"/data/db/farming.db\");\ntry {\n  var result = writerRes.value.writeDeviceData(db, edgeManifest, normalizeResult, { deveui: deveui }, { node: node });\n  if (result.deadLettered.length > 0) {\n    node.warn(\"LSN50 dead-lettered \" + result.deadLettered.length + \" channels for \" + deveui);\n  }\n  node.status({ fill: \"green\", shape: \"dot\", text: \"LSN50 \" + deveui + \" cols=\" + result.columns.length });\n} catch (e) {\n  node.error(\"LSN50 write failed: \" + e.message);\n  return null;\n} finally {\n  db.close();\n}\n\nreturn msg;",
-    "outputs": 1,
+    "func": "var d = msg.formattedData;\nif (!d || !d.devEui) { node.error(\"formattedData missing\", msg); return [null, null]; }\n\nfunction useFallback(stage, error) {\n  var codes = {\n    normalizer_load: 'NORMALIZER_LOAD_FAILED',\n    writer_load: 'WRITER_LOAD_FAILED',\n    manifest_load: 'MANIFEST_LOAD_FAILED',\n    normalize_run: 'NORMALIZE_RUN_FAILED',\n    db_open: 'DB_OPEN_FAILED',\n    writer_run: 'WRITER_RUN_FAILED'\n  };\n  if (!Object.prototype.hasOwnProperty.call(codes, stage)) {\n    throw new Error('lsn50 fallback: unknown stage ' + stage);\n  }\n  msg.osiWriterFallbackStage = stage;\n  msg.osiWriterFallbackCode = codes[stage];\n  node.warn('LSN50 writer fallback [' + stage + '] code=' + codes[stage]);\n  if (error) node.error('LSN50 writer failed [' + stage + '] code=' + codes[stage], msg);\n  return [null, msg];\n}\n\nvar writerDisabled = ['1', 'true', 'yes', 'on'].indexOf(\n  String(env.get('LSN50_WRITER_DISABLE') || '').trim().toLowerCase()\n) !== -1;\nif (writerDisabled) {\n  node.status({ fill: 'yellow', shape: 'ring', text: 'legacy fallback forced' });\n  msg.osiWriterFallbackStage = 'forced_flag';\n  return [null, msg];\n}\n\nreturn (async () => {\n  var normRes = osiLib.require(\"lsn50-normalize\");\n  if (!normRes.ok) return useFallback('normalizer_load', new Error('normalizer unavailable'));\n\n  var writerRes = osiLib.require(\"device-writer\");\n  if (!writerRes.ok) return useFallback('writer_load', new Error('writer unavailable'));\n\n  var deveui = String(d.devEui).toUpperCase().trim();\n  if (!deveui) { node.error(\"LSN50: empty devEui\", msg); return [null, null]; }\n\n  var fs = global.get(\"fs\");\n  var edgeManifest;\n  try {\n    edgeManifest = JSON.parse(fs.readFileSync(\"/srv/node-red/edge-channels.json\", \"utf8\"));\n  } catch (e) {\n    return useFallback('manifest_load', e);\n  }\n\n  var decoded = {\n    devEui: d.devEui, timestamp: d.timestamp, detectedMode: d.detectedMode,\n    tempC1: d.tempC1, batV: d.batV,\n    adcV: d.adcV, adcCh1V: d.adcCh1V,\n    swt1Kpa: d.swt1Kpa, swt2Kpa: d.swt2Kpa, swt3Kpa: d.swt3Kpa,\n    dendroRatio: d.dendroRatio, dendroModeUsed: d.dendroModeUsed,\n    positionRawMm: d.positionRawMm, positionMm: d.positionMm,\n    dendroValid: d.dendroValid, deltaMm: d.deltaMm,\n    dendroStemChangeUm: d.dendroStemChangeUm,\n    dendroSaturated: d.dendroSaturated, dendroSaturationSide: d.dendroSaturationSide,\n    rainCountCumulative: d.rainCountCumulative, rainTipsDelta: d.rainTipsDelta,\n    rainMmDelta: d.rainMmDelta, rainMmPerHour: d.rainMmPerHour,\n    rainMmPer10Min: d.rainMmPer10Min, rainMmToday: d.rainMmToday,\n    rainDeltaStatus: d.rainDeltaStatus,\n    flowCountCumulative: d.flowCountCumulative, flowPulsesDelta: d.flowPulsesDelta,\n    flowLitersDelta: d.flowLitersDelta, flowLitersPerMin: d.flowLitersPerMin,\n    flowLitersPer10Min: d.flowLitersPer10Min, flowLitersToday: d.flowLitersToday,\n    flowDeltaStatus: d.flowDeltaStatus,\n    counterIntervalSeconds: d.counterIntervalSeconds,\n    modeCodeToStore: d.modeCodeToStore, modeLabelToStore: d.modeLabelToStore,\n    observedModeObservedAt: d.observedModeObservedAt\n  };\n\n  var normalizeResult;\n  try {\n    normalizeResult = normRes.value.normalize(decoded, { recordedAt: d.timestamp });\n  } catch (e) {\n    return useFallback('normalize_run', e);\n  }\n\n  var db;\n  try {\n    db = new osiDb.Database(\"/data/db/farming.db\");\n  } catch (e) {\n    return useFallback('db_open', e);\n  }\n\n  var writerFailed = false;\n  var fallbackOutput = null;\n  try {\n    var result = await writerRes.value.writeDeviceData(db, edgeManifest, normalizeResult, { deveui: deveui }, { node: node, msg: msg });\n    if (result.deadLettered.length > 0) {\n      node.warn(\"LSN50 dead-lettered \" + result.deadLettered.length + \" channels for \" + deveui);\n    }\n    node.status({ fill: \"green\", shape: \"dot\", text: \"LSN50 \" + deveui + \" cols=\" + result.columns.length });\n  } catch (e) {\n    writerFailed = true;\n    fallbackOutput = useFallback('writer_run', e);\n  }\n\n  try {\n    await db.close();\n  } catch (closeErr) {\n    node.error('LSN50 writer cleanup failed code=DB_CLOSE_FAILED', msg);\n    node.status({ fill: 'red', shape: 'dot', text: 'LSN50 cleanup failed' });\n  }\n\n  if (writerFailed) return fallbackOutput;\n  return [msg, null];\n})();",
+    "outputs": 2,
     "libs": [
       {
         "var": "osiDb",
@@ -11064,6 +11065,9 @@
     "wires": [
       [
         "lsn50-zone-agg-fn"
+      ],
+      [
+        "lsn50-fallback-marker-fn"
       ]
     ]
   },
@@ -11454,5 +11458,139 @@
         "9d5e3035c3d069c4"
       ]
     ]
+  },
+  {
+    "id": "lsn50-fallback-marker-fn",
+    "type": "function",
+    "z": "lsn50-tab",
+    "name": "LSN50 Fallback Marker",
+    "func": "var STAGES = ['forced_flag', 'normalizer_load', 'writer_load', 'manifest_load', 'normalize_run', 'db_open', 'writer_run'];\nvar stage = msg.osiWriterFallbackStage;\nif (!stage || STAGES.indexOf(stage) === -1) {\n  node.error('lsn50-fallback-marker-fn: missing or unknown fallback stage', msg);\n  return null;\n}\n\nfunction sqlStr(v) {\n  return \"'\" + String(v == null ? '' : v).replace(/'/g, \"''\") + \"'\";\n}\n\nvar d = msg.formattedData || {};\nvar deveui = String(d.devEui || '').toUpperCase().trim();\n\nmsg.topic = [\n  'INSERT INTO ingest_quarantine (deveui, channel, reason, raw_value)',\n  'VALUES (' + sqlStr(deveui) + ', ' + sqlStr('__writer__') + ', ' + sqlStr('writer_fallback') + ', ' + sqlStr(stage) + ');'\n].join('\\n');\n\nreturn msg;",
+    "outputs": 1,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 940,
+    "y": 340,
+    "wires": [
+      [
+        "lsn50-fallback-marker-sqlite"
+      ]
+    ]
+  },
+  {
+    "id": "lsn50-fallback-marker-sqlite",
+    "type": "sqlite",
+    "z": "lsn50-tab",
+    "mydb": "734737e846d06893",
+    "sqlquery": "msg.topic",
+    "sql": "",
+    "name": "Fallback Marker DB Insert",
+    "x": 1180,
+    "y": 340,
+    "wires": [
+      [
+        "lsn50-fallback-evict-fn"
+      ]
+    ]
+  },
+  {
+    "id": "lsn50-fallback-evict-fn",
+    "type": "function",
+    "z": "lsn50-tab",
+    "name": "LSN50 Fallback Evict",
+    "func": "msg.topic = [\n  'DELETE FROM ingest_quarantine',\n  'WHERE id NOT IN (',\n  '  SELECT id FROM ingest_quarantine ORDER BY id DESC LIMIT 1000',\n  ');'\n].join('\\n');\n\nreturn msg;",
+    "outputs": 1,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 1420,
+    "y": 340,
+    "wires": [
+      [
+        "lsn50-fallback-evict-sqlite"
+      ]
+    ]
+  },
+  {
+    "id": "lsn50-fallback-evict-sqlite",
+    "type": "sqlite",
+    "z": "lsn50-tab",
+    "mydb": "734737e846d06893",
+    "sqlquery": "msg.topic",
+    "sql": "",
+    "name": "Fallback Evict DB Delete",
+    "x": 1440,
+    "y": 380,
+    "wires": [
+      [
+        "lsn50-sql-fn"
+      ]
+    ]
+  },
+  {
+    "id": "lsn50-sql-fn",
+    "type": "function",
+    "z": "lsn50-tab",
+    "name": "Build SQL INSERT",
+    "func": "const d = msg.formattedData;\nif (!d || !d.devEui) { node.error('formattedData missing', msg); return null; }\n\nfunction sqlStr(v) {\n    if (v === undefined || v === null) return 'NULL';\n    return \"'\" + String(v).replace(/'/g, \"''\") + \"'\";\n}\nfunction sqlNum(v) {\n    if (v === undefined || v === null) return 'NULL';\n    const n = Number(v);\n    return Number.isFinite(n) ? String(n) : 'NULL';\n}\n\nif (d.detectedMode === 9) {\n    msg.topic = [\n        'INSERT INTO device_data',\n        '  (deveui, ext_temperature_c, bat_v,',\n        '   rain_count_cumulative, rain_tips_delta, rain_mm_delta, rain_mm_per_hour, rain_mm_per_10min, rain_mm_today, rain_delta_status,',\n        '   flow_count_cumulative, flow_pulses_delta, flow_liters_delta, flow_liters_per_min, flow_liters_per_10min, flow_liters_today, flow_delta_status,',\n        '   counter_interval_seconds,',\n        '   lsn50_mode_code, lsn50_mode_label, lsn50_mode_observed_at,',\n        '   recorded_at)',\n        'VALUES (',\n        '  ' + sqlStr(d.devEui) + ',',\n        '  ' + sqlNum(d.tempC1) + ',',\n        '  ' + sqlNum(d.batV) + ',',\n        '  ' + sqlNum(d.rainCountCumulative) + ', ' + sqlNum(d.rainTipsDelta) + ', ' + sqlNum(d.rainMmDelta) + ', ' + sqlNum(d.rainMmPerHour) + ', ' + sqlNum(d.rainMmPer10Min) + ', ' + sqlNum(d.rainMmToday) + ', ' + sqlStr(d.rainDeltaStatus) + ',',\n        '  ' + sqlNum(d.flowCountCumulative) + ', ' + sqlNum(d.flowPulsesDelta) + ', ' + sqlNum(d.flowLitersDelta) + ', ' + sqlNum(d.flowLitersPerMin) + ', ' + sqlNum(d.flowLitersPer10Min) + ', ' + sqlNum(d.flowLitersToday) + ', ' + sqlStr(d.flowDeltaStatus) + ',',\n        '  ' + sqlNum(d.counterIntervalSeconds) + ',',\n        '  ' + sqlNum(d.modeCodeToStore) + ', ' + sqlStr(d.modeLabelToStore) + ', ' + sqlStr(d.observedModeObservedAt) + ',',\n        '  ' + sqlStr(d.timestamp),\n        ');'\n    ].join('\\n');\n    node.status({ fill: 'green', shape: 'dot', text: 'MOD9 deveui=' + d.devEui });\n} else {\n    const dendroValidSql = (d.dendroValid !== null && d.dendroValid !== undefined) ? String(d.dendroValid) : 'NULL';\n    msg.topic = [\n        'INSERT INTO device_data',\n        '  (deveui, ext_temperature_c, bat_v, adc_ch0v, adc_ch1v, swt_1, swt_2, swt_3,',\n        '   dendro_ratio, dendro_mode_used, dendro_position_raw_mm, dendro_position_mm, dendro_valid, dendro_delta_mm, dendro_stem_change_um,',\n        '   dendro_saturated, dendro_saturation_side,',\n        '   lsn50_mode_code, lsn50_mode_label, lsn50_mode_observed_at,',\n        '   recorded_at)',\n        'VALUES (',\n        '  ' + sqlStr(d.devEui) + ',',\n        '  ' + sqlNum(d.tempC1) + ',',\n        '  ' + sqlNum(d.batV) + ',',\n        '  ' + sqlNum(d.adcV) + ',',\n        '  ' + sqlNum(d.adcCh1V) + ',',\n        '  ' + sqlNum(d.swt1Kpa) + ',',\n        '  ' + sqlNum(d.swt2Kpa) + ',',\n        '  ' + sqlNum(d.swt3Kpa) + ',',\n        '  ' + sqlNum(d.dendroRatio) + ',',\n        '  ' + sqlStr(d.dendroModeUsed) + ',',\n        '  ' + sqlNum(d.positionRawMm) + ',',\n        '  ' + sqlNum(d.positionMm) + ',',\n        '  ' + dendroValidSql + ',',\n        '  ' + sqlNum(d.deltaMm) + ',',\n        '  ' + sqlNum(d.dendroStemChangeUm) + ',',\n        '  ' + sqlNum(d.dendroSaturated) + ',',\n        '  ' + sqlStr(d.dendroSaturationSide) + ',',\n        '  ' + sqlNum(d.modeCodeToStore) + ',',\n        '  ' + sqlStr(d.modeLabelToStore) + ',',\n        '  ' + sqlStr(d.observedModeObservedAt) + ',',\n        '  ' + sqlStr(d.timestamp),\n        ');'\n    ].join('\\n');\n    node.status({ fill: 'green', shape: 'dot', text: 'INSERT deveui=' + d.devEui });\n}\nmsg.payload = msg.topic;\nreturn msg;",
+    "outputs": 1,
+    "timeout": "",
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 1660,
+    "y": 340,
+    "wires": [
+      [
+        "lsn50-sqlite"
+      ]
+    ]
+  },
+  {
+    "id": "lsn50-sqlite",
+    "type": "sqlite",
+    "z": "lsn50-tab",
+    "mydb": "734737e846d06893",
+    "sqlquery": "msg.topic",
+    "sql": "",
+    "name": "Sensor DB Insert",
+    "x": 1900,
+    "y": 340,
+    "wires": [
+      [
+        "lsn50-zone-agg-fn"
+      ]
+    ]
+  },
+  {
+    "id": "record-error-catch-uc512",
+    "type": "catch",
+    "z": "uc512-tab",
+    "name": "Catch unhandled errors",
+    "scope": null,
+    "uncaught": false,
+    "x": 620,
+    "y": 340,
+    "wires": [
+      [
+        "record-error-link-out-uc512"
+      ]
+    ]
+  },
+  {
+    "id": "record-error-link-out-uc512",
+    "type": "link out",
+    "z": "uc512-tab",
+    "name": "Record Error (link)",
+    "mode": "link",
+    "links": [
+      "record-error-link-in"
+    ],
+    "x": 860,
+    "y": 340,
+    "wires": []
   }
 ]
