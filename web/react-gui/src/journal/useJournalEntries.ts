@@ -10,6 +10,7 @@ export function useJournalEntries(filters: EntryListFilters, enabled: boolean) {
     { revalidateOnFocus: false, shouldRetryOnError: false },
   );
   const entries: EntryAggregate[] = data?.entries ?? [];
+  const nextCursor: string | null = data?.next_cursor ?? null;
 
-  return { entries, loading: enabled && isLoading, error, retry: mutate };
+  return { entries, loading: enabled && isLoading, error, nextCursor, retry: mutate };
 }

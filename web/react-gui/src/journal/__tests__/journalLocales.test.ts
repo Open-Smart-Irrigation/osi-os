@@ -60,8 +60,9 @@ const SHARED_WITH_ENGLISH: Record<string, readonly string[]> = {
   // otherwise translates freely (Fertilization -> Düngung). Optional/Details:
   // genuine German words. Final: the record-state loanword, beside Entwurf/Storniert.
   // Name, Zone, and Station are the legitimate English-identical field labels in de-CH.
-  // Status (Task 28 workspace filter) is the same loanword in German too.
-  'de-CH': [...LAYOUT_KEYS, ...SHARED_STRUCTURE_KEYS, 'activity.fertigation', 'capture.confirm.values', 'capture.form.optional', 'row.status.final', 'plot.name', 'plot.station', 'plot.zone', 'where.station', 'filters.status'],
+  // Status (Task 28 workspace filter, and the Task 29 entry-table column of
+  // the same name) is the same loanword in German too.
+  'de-CH': [...LAYOUT_KEYS, ...SHARED_STRUCTURE_KEYS, 'activity.fertigation', 'capture.confirm.values', 'capture.form.optional', 'row.status.final', 'plot.name', 'plot.station', 'plot.zone', 'where.station', 'filters.status', 'workspace.table.column.status'],
   // Irrigation/Fertigation/Observation are spelled identically in French; Final
   // agrees with the implicit masculine "statut", beside Brouillon/Annulé.
   // Zone, Station, and Active are the legitimate English-identical French labels;

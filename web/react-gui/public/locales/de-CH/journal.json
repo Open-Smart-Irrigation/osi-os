@@ -170,7 +170,23 @@
       "noSensors": "Keine Sensoren"
     },
     "table": {
-      "placeholder": "Wählen Sie eine Station, Gruppe oder Parzelle aus, um die Einträge zu sehen."
+      "heading": "Journaleinträge",
+      "loading": "Einträge werden geladen…",
+      "error": "Die Einträge konnten nicht geladen werden.",
+      "retry": "Erneut versuchen",
+      "empty": "Keine Einträge entsprechen den aktuellen Filtern.",
+      "column": {
+        "occurred": "Wann",
+        "activity": "Aktivität",
+        "plot": "Parzelle",
+        "status": "Status"
+      },
+      "previousPage": "Vorherige Seite",
+      "nextPage": "Nächste Seite",
+      "exportCsv": "CSV exportieren",
+      "exportJson": "JSON exportieren",
+      "exportPackage": "Forschungspaket exportieren",
+      "exportError": "Export fehlgeschlagen. Erneut versuchen."
     },
     "detail": {
       "placeholder": "Wählen Sie einen Eintrag aus, um die Details zu sehen."

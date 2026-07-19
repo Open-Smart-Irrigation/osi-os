@@ -170,7 +170,23 @@
       "noSensors": "Sin sensores"
     },
     "table": {
-      "placeholder": "Selecciona una estación, un grupo o una parcela para ver sus entradas."
+      "heading": "Entradas del diario",
+      "loading": "Cargando entradas…",
+      "error": "No se han podido cargar las entradas.",
+      "retry": "Reintentar",
+      "empty": "Ninguna entrada coincide con los filtros actuales.",
+      "column": {
+        "occurred": "Cuándo",
+        "activity": "Actividad",
+        "plot": "Parcela",
+        "status": "Estado"
+      },
+      "previousPage": "Página anterior",
+      "nextPage": "Página siguiente",
+      "exportCsv": "Exportar CSV",
+      "exportJson": "Exportar JSON",
+      "exportPackage": "Exportar paquete de investigación",
+      "exportError": "Error al exportar. Inténtalo de nuevo."
     },
     "detail": {
       "placeholder": "Selecciona una entrada para ver sus detalles."

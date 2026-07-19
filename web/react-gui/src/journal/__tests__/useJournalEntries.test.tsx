@@ -37,6 +37,17 @@ describe('useJournalEntries', () => {
     expect(listEntries).toHaveBeenCalledWith(filters);
   });
 
+  it('exposes the opaque next_cursor for keyset pagination, defaulting to null before a response arrives', async () => {
+    listEntries.mockResolvedValue({ entries: [{ entry_uuid: 'e1' }], next_cursor: 'cursor-2' });
+    const filters = { status: 'final' as const, limit: 50 };
+
+    const { result } = renderHook(() => useJournalEntries(filters, true), { wrapper });
+
+    expect(result.current.nextCursor).toBeNull();
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    expect(result.current.nextCursor).toBe('cursor-2');
+  });
+
   it('keeps a failed request distinct from an empty result and retries', async () => {
     const failure = new Error('offline');
     listEntries

@@ -170,7 +170,23 @@
       "noSensors": "Aucun capteur"
     },
     "table": {
-      "placeholder": "Sélectionnez une station, un groupe ou une parcelle pour afficher les entrées."
+      "heading": "Entrées du journal",
+      "loading": "Chargement des entrées…",
+      "error": "Impossible de charger les entrées.",
+      "retry": "Réessayer",
+      "empty": "Aucune entrée ne correspond aux filtres actuels.",
+      "column": {
+        "occurred": "Quand",
+        "activity": "Activité",
+        "plot": "Parcelle",
+        "status": "Statut"
+      },
+      "previousPage": "Page précédente",
+      "nextPage": "Page suivante",
+      "exportCsv": "Exporter le CSV",
+      "exportJson": "Exporter le JSON",
+      "exportPackage": "Exporter le pack de recherche",
+      "exportError": "Échec de l'export. Réessayez."
     },
     "detail": {
       "placeholder": "Sélectionnez une entrée pour afficher ses détails."

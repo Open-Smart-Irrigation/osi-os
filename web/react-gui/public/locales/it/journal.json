@@ -170,7 +170,23 @@
       "noSensors": "Nessun sensore"
     },
     "table": {
-      "placeholder": "Seleziona una stazione, un gruppo o una particella per vedere le registrazioni."
+      "heading": "Registrazioni del diario",
+      "loading": "Caricamento delle registrazioni…",
+      "error": "Impossibile caricare le registrazioni.",
+      "retry": "Riprova",
+      "empty": "Nessuna registrazione corrisponde ai filtri attuali.",
+      "column": {
+        "occurred": "Quando",
+        "activity": "Attività",
+        "plot": "Particella",
+        "status": "Stato"
+      },
+      "previousPage": "Pagina precedente",
+      "nextPage": "Pagina successiva",
+      "exportCsv": "Esporta CSV",
+      "exportJson": "Esporta JSON",
+      "exportPackage": "Esporta pacchetto di ricerca",
+      "exportError": "Esportazione non riuscita. Riprova."
     },
     "detail": {
       "placeholder": "Seleziona una registrazione per vedere i dettagli."

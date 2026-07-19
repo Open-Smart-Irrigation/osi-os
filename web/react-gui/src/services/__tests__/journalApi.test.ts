@@ -448,4 +448,96 @@ describe('journalApi', () => {
     expect(isJournalUnavailable({ response: { status: 501 } })).toBe(true);
     expect(isJournalUnavailable({ response: { status: 500 } })).toBe(false);
   });
+
+  describe('entry exports', () => {
+    const activeFilters = { status: 'final' as const, plot_uuid: plotUuid, activity_code: 'irrigation' };
+
+    beforeEach(() => {
+      Object.defineProperty(URL, 'createObjectURL', {
+        configurable: true,
+        value: vi.fn(() => 'blob:journal-export'),
+      });
+      Object.defineProperty(URL, 'revokeObjectURL', {
+        configurable: true,
+        value: vi.fn(),
+      });
+    });
+
+    it('downloads the CSV export from the shipped route with the exact active filters as query params', async () => {
+      get.mockResolvedValue({ data: 'occurred_start,activity_code\n' });
+      const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => undefined);
+
+      await journalApi.exportEntriesCsv(activeFilters);
+
+      expect(get).toHaveBeenCalledWith('/api/journal/export.csv', {
+        params: activeFilters,
+        responseType: 'blob',
+      });
+      expect(URL.createObjectURL).toHaveBeenCalledWith(expect.any(Blob));
+      expect(click).toHaveBeenCalledTimes(1);
+      expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:journal-export');
+      click.mockRestore();
+    });
+
+    it('downloads the JSON export from the shipped route with the exact active filters as query params', async () => {
+      get.mockResolvedValue({ data: '{"entries":[]}' });
+      const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => undefined);
+
+      await journalApi.exportEntriesJson(activeFilters);
+
+      expect(get).toHaveBeenCalledWith('/api/journal/export.json', {
+        params: activeFilters,
+        responseType: 'blob',
+      });
+      expect(click).toHaveBeenCalledTimes(1);
+      click.mockRestore();
+    });
+
+    it('downloads the research-package export from the shipped route with the exact active filters as query params', async () => {
+      get.mockResolvedValue({ data: new ArrayBuffer(4) });
+      const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => undefined);
+
+      await journalApi.exportEntriesResearchPackage(activeFilters);
+
+      expect(get).toHaveBeenCalledWith('/api/journal/export.package', {
+        params: activeFilters,
+        responseType: 'blob',
+      });
+      expect(click).toHaveBeenCalledTimes(1);
+      click.mockRestore();
+    });
+
+    it('never targets the Slice-1 501 ADAPT route from any export method', () => {
+      const journalApiExportMethods = Object.keys(journalApi).filter((key) => key.startsWith('exportEntries'));
+      expect(journalApiExportMethods).toEqual([
+        'exportEntriesCsv',
+        'exportEntriesJson',
+        'exportEntriesResearchPackage',
+      ]);
+      expect(journalApi).not.toHaveProperty('exportEntriesAdapt');
+    });
+
+    it('names each downloaded file distinctly by export kind', async () => {
+      get.mockResolvedValue({ data: 'x' });
+      const anchors: HTMLAnchorElement[] = [];
+      const createElement = document.createElement.bind(document);
+      const spy = vi.spyOn(document, 'createElement').mockImplementation((tag: string) => {
+        const el = createElement(tag);
+        if (tag === 'a') anchors.push(el as HTMLAnchorElement);
+        return el;
+      });
+      vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => undefined);
+
+      await journalApi.exportEntriesCsv(activeFilters);
+      await journalApi.exportEntriesJson(activeFilters);
+      await journalApi.exportEntriesResearchPackage(activeFilters);
+
+      expect(anchors.map((a) => a.download)).toEqual([
+        'journal-entries.csv',
+        'journal-entries.json',
+        'journal-entries-package.zip',
+      ]);
+      spy.mockRestore();
+    });
+  });
 });
