@@ -592,6 +592,22 @@ function registerDeliveryTests() {
     assert.strictEqual(flowState.sync_state.lastOutboxDeliverySuccessAt, undefined);
     assert.ok(/protocol_response_missing_results/.test(flowState.sync_state.lastError.message));
   });
+
+  test('delivery', 'outbox: present-but-empty results array reports one batch-level missing-results error', async () => {
+    const seed = {
+      sync_outbox: {
+        'ev-empty-a': { event_uuid: 'ev-empty-a', delivered_at: null, retry_count: 0 },
+        'ev-empty-b': { event_uuid: 'ev-empty-b', delivered_at: null, retry_count: 0 },
+      },
+    };
+    const msg = { statusCode: 200, _syncEventIds: ['ev-empty-a', 'ev-empty-b'], payload: { results: [] } };
+    const { flowState, db } = await executeFlowFunction('sync-outbox-mark', msg, { seed, flowState: {} });
+    assert.strictEqual(db.tables.sync_outbox.get('ev-empty-a').delivered_at, null);
+    assert.strictEqual(db.tables.sync_outbox.get('ev-empty-b').delivered_at, null);
+    assert.strictEqual(db.tables.sync_outbox.get('ev-empty-a').retry_count, 1);
+    assert.strictEqual(db.tables.sync_outbox.get('ev-empty-b').retry_count, 1);
+    assert.strictEqual(flowState.sync_state.lastError.message, 'protocol_response_missing_results');
+  });
 }
 
 // ---------------------------------------------------------------------------
