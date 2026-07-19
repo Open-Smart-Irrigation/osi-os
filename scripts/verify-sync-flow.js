@@ -2046,17 +2046,689 @@ expectExcludesById('strega-sql-fn', "await run('COMMIT')", 'the old multi-await 
 expectExcludesById('strega-sql-fn', "await run('ROLLBACK')", 'the old multi-await rollback call');
 expectExcludesById('strega-sql-fn', "msg.topic = insertSql + '; ' + updateSql + ';'", 'the old multi-statement sqlite topic builder');
 expectExcludesById('strega-sql-fn', 'target_state', 'passive STREGA uplinks from touching target_state');
-// DD8 cleanup: lsn50-sql-fn, lsn50-sqlite, and shadow compare (093d7832e89c4027) deleted;
+// LSN50 writer runtime recovery (Train A, 2026-07-15 plan, Task 3): commit
+// e5852033 deleted lsn50-sql-fn/lsn50-sqlite 13m35s after cutover, dropping
+// the only fallback the moment the async writer could fail. Both legacy
+// insert nodes are restored as an OBSERVABLE fallback tail (marker + evict
+// ahead of them, never a silent shadow branch); the shadow compare node
+// (093d7832e89c4027) is deliberately NOT restored -- it only measured
+// normalizer coverage and cannot prove writer execution.
 // LSN50 ingest now flows through osi-lsn50-normalize + osi-device-writer via node 460e0bfd95f89e67.
 // Column-level persistence is tested by verify-device-integration.js.
-expectMissingNodeById('lsn50-sql-fn', 'old LSN50 Build SQL INSERT (replaced by osi-device-writer)');
-expectMissingNodeById('lsn50-sqlite', 'old LSN50 Sensor DB Insert (replaced by osi-device-writer)');
-expectMissingNodeById('093d7832e89c4027', 'old LSN50 Shadow Compare (DD8 cleanup)');
+expectMissingNodeById('093d7832e89c4027', 'old LSN50 Shadow Compare (DD8 cleanup; not restored -- proves normalizer coverage, not writer execution)');
 expectIncludesById('460e0bfd95f89e67', 'lsn50-normalize', 'loads normalizer via osi-lib');
 expectIncludesById('460e0bfd95f89e67', 'device-writer', 'loads device-writer via osi-lib');
 expectIncludesById('460e0bfd95f89e67', 'edge-channels.json', 'reads edge manifest for column mapping');
 expectLibById('460e0bfd95f89e67', 'osiDb', 'osi-db-helper', 'opens the local database for LSN50 writes');
 expectLibById('460e0bfd95f89e67', 'osiLib', 'osi-lib', 'loads normalizer and writer via quarantine-safe loader');
+
+expectEqual(findNodeById('460e0bfd95f89e67').outputs, 2, 'LSN50 writer retains primary and legacy fallback outputs');
+expectIncludesById('460e0bfd95f89e67', 'await writerRes.value.writeDeviceData(', 'awaits the asynchronous writer contract');
+expectIncludesById('6b28e0d879808dd9', 'await writerRes.value.writeDeviceData(', 'UC512 awaits the asynchronous writer contract');
+expectIncludesById('lsn50-fallback-marker-fn', "'writer_fallback'", 'records every LSN50 fallback before the legacy insert');
+
+expectNodeTypeById('lsn50-fallback-marker-fn', 'function', 'LSN50 fallback marker function node exists');
+expectNodeTypeById('lsn50-fallback-marker-sqlite', 'sqlite', 'LSN50 fallback marker SQLite node exists');
+expectNodeTypeById('lsn50-fallback-evict-fn', 'function', 'LSN50 fallback evict function node exists');
+expectNodeTypeById('lsn50-fallback-evict-sqlite', 'sqlite', 'LSN50 fallback evict SQLite node exists');
+expectNodeTypeById('lsn50-sql-fn', 'function', 'restored legacy LSN50 Build SQL INSERT node exists');
+expectNodeTypeById('lsn50-sqlite', 'sqlite', 'restored legacy LSN50 Sensor DB Insert node exists');
+
+expectWireById('460e0bfd95f89e67', 'lsn50-fallback-marker-fn', 'routes writer failures through observable fallback');
+expectWireById('lsn50-fallback-marker-fn', 'lsn50-fallback-marker-sqlite', 'writes the fallback quarantine marker row before eviction');
+expectWireById('lsn50-fallback-marker-sqlite', 'lsn50-fallback-evict-fn', 'evicts quarantine rows to the writer cap after marking');
+expectWireById('lsn50-fallback-evict-fn', 'lsn50-fallback-evict-sqlite', 'applies the quarantine eviction cap');
+expectWireById('lsn50-fallback-evict-sqlite', 'lsn50-sql-fn', 'reaches the restored legacy SQL builder only after marker + eviction');
+expectWireById('lsn50-sql-fn', 'lsn50-sqlite', 'restored legacy SQL builder feeds the restored legacy insert');
+expectWireById('lsn50-sqlite', 'lsn50-zone-agg-fn', 'restored legacy insert rejoins zone aggregation like primary output 1');
+expectExcludesById('lsn50-sql-fn', '093d7832e89c4027', 'removes the historical shadow-compare wire from the restored legacy SQL builder');
+
+(function expectQuarantineCapParity() {
+  const writerIndexPath = path.join(nodeRedRoot, 'osi-device-writer', 'index.js');
+  const writerIndexSource = fs.readFileSync(writerIndexPath, 'utf8');
+  const capMatch = writerIndexSource.match(/QUARANTINE_CAP\s*=\s*(\d+)/);
+  if (!capMatch) {
+    fail('could not parse QUARANTINE_CAP from osi-device-writer/index.js');
+    return;
+  }
+  const evictNode = findNodeById('lsn50-fallback-evict-fn');
+  if (!evictNode) {
+    fail('missing lsn50-fallback-evict-fn to compare against QUARANTINE_CAP');
+    return;
+  }
+  const limitMatch = String(evictNode.func || '').match(/LIMIT\s+(\d+)/);
+  if (!limitMatch) {
+    fail('could not parse numeric LIMIT from lsn50-fallback-evict-fn');
+    return;
+  }
+  expectEqual(
+    Number(limitMatch[1]),
+    Number(capMatch[1]),
+    'lsn50-fallback-evict-fn LIMIT matches osi-device-writer QUARANTINE_CAP (temporary legacy path cannot load the writer constant when module loading itself caused the fallback)'
+  );
+})();
+
+(function expectEveryWriteDeviceDataCallSiteIsAwaited() {
+  const offenders = [];
+  let sitesChecked = 0;
+  for (const node of flows) {
+    if (node.type !== 'function' || typeof node.func !== 'string') continue;
+    const func = node.func;
+    const re = /writeDeviceData\s*\(/g;
+    let m;
+    while ((m = re.exec(func))) {
+      sitesChecked += 1;
+      const before = func.slice(Math.max(0, m.index - 60), m.index);
+      if (!/await\s+[\w$.]*$/.test(before)) {
+        offenders.push(`${node.id} at offset ${m.index}`);
+      }
+    }
+  }
+  if (sitesChecked === 0) {
+    fail('expected at least one writeDeviceData( call site across maintained function nodes');
+  } else if (offenders.length) {
+    fail(`writeDeviceData( call site(s) missing await: ${offenders.join(', ')}`);
+  } else {
+    console.log(`OK every writeDeviceData( call site (${sitesChecked}) across maintained function nodes is awaited`);
+  }
+})();
+
+expectFileIncludes(
+  '96_osi_server_config',
+  osiServerDefaultsScript,
+  'uci -q get osi-server.cloud.lsn50_writer_disable >/dev/null 2>&1 ||',
+  'LSN50 writer kill switch UCI default is absent-only (never resets an operator override)'
+);
+expectFileIncludes(
+  '96_osi_server_config',
+  osiServerDefaultsScript,
+  "uci set osi-server.cloud.lsn50_writer_disable='0'",
+  'LSN50 writer kill switch defaults new images to disabled (0)'
+);
+expectFileIncludes(
+  'node-red.init',
+  nodeRedInitScript,
+  'osi-server.cloud.lsn50_writer_disable',
+  'node-red.init resolves the LSN50 writer kill switch from UCI'
+);
+expectFileIncludes(
+  'node-red.init',
+  nodeRedInitScript,
+  'LSN50_WRITER_DISABLE="$lsn50_writer_disable"',
+  'node-red.init exports LSN50_WRITER_DISABLE into the Node-RED process env'
+);
+
+// --- LSN50/UC512 writer runtime recovery (2026-07-15 plan Task 3): executable
+// flow-path and error-counter tests. Structural string/wiring pins above prove
+// shape; these prove behavior by actually running the shipped node bodies
+// through executeFunctionNodeById with narrow fakes, per the plan's Step 6.
+(function verifyLsn50Uc512WriterRuntimeExecutable() {
+  const LSN50_NODE_ID = '460e0bfd95f89e67';
+  const UC512_NODE_ID = '6b28e0d879808dd9';
+  const SECRET_SENTINEL = '__OSI_TEST_SECRET_SENTINEL_4f19c2b7__';
+  const LSN50_STAGES = ['normalizer_load', 'writer_load', 'manifest_load', 'normalize_run', 'db_open', 'writer_run'];
+  const UC512_STAGES = ['normalizer_load', 'writer_load', 'manifest_load', 'identity_missing', 'normalize_run', 'db_open', 'writer_run', 'db_close'];
+
+  function createRecordingNode() {
+    const calls = { warn: [], error: [], status: [] };
+    return {
+      calls,
+      warn(m) { calls.warn.push(m); },
+      error(m, msg) { calls.error.push([m, msg]); },
+      status(s) { calls.status.push(s); },
+    };
+  }
+
+  const edgeManifestSourceForTests = fs.readFileSync(path.join(nodeRedRoot, 'edge-channels.json'), 'utf8');
+
+  function fsGlobalOk() {
+    // The shipped node reads /srv/node-red/edge-channels.json, which does not
+    // exist on a dev/CI machine. Return the real manifest content for any
+    // path so these fixtures exercise the actual channel-mapping shape
+    // without depending on a deployed-Pi filesystem layout.
+    return {
+      get(key) {
+        if (key !== 'fs') return undefined;
+        return { readFileSync() { return edgeManifestSourceForTests; } };
+      },
+      set() {},
+    };
+  }
+
+  function fsGlobalThrowingReadFile(error) {
+    return {
+      get(key) {
+        if (key !== 'fs') return undefined;
+        return { readFileSync() { throw error; } };
+      },
+      set() {},
+    };
+  }
+
+  function baseLsn50FormattedData(overrides) {
+    return Object.assign({
+      devEui: 'A8404101FD5ECF42',
+      timestamp: '2026-07-19T10:00:00.000Z',
+      detectedMode: 1,
+      tempC1: 22.4,
+      batV: 3.55,
+      adcV: 1.2,
+      adcCh1V: 0.4,
+    }, overrides || {});
+  }
+
+  function baseUc512Payload(overrides) {
+    return Object.assign({
+      deviceInfo: { devEui: 'A8404101FD5ECF43', deviceProfileId: 'profile-uc512' },
+      time: '2026-07-19T10:00:00.000Z',
+      object: { valveState: 1 },
+    }, overrides || {});
+  }
+
+  function fakeOsiLib(overrides) {
+    return {
+      require(name) {
+        if (Object.prototype.hasOwnProperty.call(overrides, name)) return overrides[name];
+        return { ok: false, error: 'osi-lib fake: unregistered module ' + name };
+      },
+    };
+  }
+
+  function okNormalizer(result) {
+    return { ok: true, value: { normalize() { return result || { channels: {}, unknown: {} }; } } };
+  }
+  function throwingNormalizer(error) {
+    return { ok: true, value: { normalize() { throw error; } } };
+  }
+  function resolvingWriter(result) {
+    return { ok: true, value: { writeDeviceData() { return Promise.resolve(result || { inserted: true, deadLettered: [], columns: ['deveui'] }); } } };
+  }
+  function rejectingWriter(error) {
+    return { ok: true, value: { writeDeviceData() { return Promise.reject(error); } } };
+  }
+  function fakeOsiDb(closeImpl) {
+    return { Database: function FakeDatabase() { this.close = closeImpl || (() => Promise.resolve()); } };
+  }
+  function throwingOsiDb(error) {
+    return { Database: function FakeDatabase() { throw error; } };
+  }
+
+  function recordErrorCounterDelta(errorArg, sourceId, globalStore) {
+    const recordErrorNode = findNodeById('record-error-fn');
+    const flowStore = new Map();
+    const node = { warn() {} };
+    const flowApi = { get: (k) => flowStore.get(k), set: (k, v) => flowStore.set(k, v) };
+    const globalApi = { get: (k) => globalStore.get(k), set: (k, v) => globalStore.set(k, v) };
+    const before = (globalStore.get('error_counts') || {}).total || 0;
+    const errMsg = { error: { message: String(errorArg), source: { name: sourceId } } };
+    const fnScript = new vm.Script(`(function(msg, node, flow, global) {\n${recordErrorNode.func}\n})`);
+    const context = vm.createContext({});
+    const compiled = fnScript.runInContext(context);
+    compiled(errMsg, node, flowApi, globalApi);
+    const after = (globalStore.get('error_counts') || {}).total || 0;
+    return after - before;
+  }
+
+  function jsonHasSentinel(value) {
+    try {
+      return JSON.stringify(value).includes(SECRET_SENTINEL);
+    } catch (_e) {
+      return String(value).includes(SECRET_SENTINEL);
+    }
+  }
+
+  // 1. Operator kill switch: forced_flag, writer never called; '0' is not truthy.
+  pendingChecks.push((async () => {
+    let writerCalled = false;
+    const forcedOut = await executeFunctionNodeById(LSN50_NODE_ID, { formattedData: baseLsn50FormattedData() }, {
+      env: { LSN50_WRITER_DISABLE: '1' },
+      global: fsGlobalOk(),
+      scope: {
+        osiLib: fakeOsiLib({
+          'lsn50-normalize': okNormalizer(),
+          'device-writer': { ok: true, value: { writeDeviceData() { writerCalled = true; return Promise.resolve({ inserted: true, deadLettered: [], columns: [] }); } } },
+        }),
+        osiDb: fakeOsiDb(),
+      },
+    });
+    expectCondition(
+      Array.isArray(forcedOut) && forcedOut[0] === null && !!forcedOut[1] && forcedOut[1].osiWriterFallbackStage === 'forced_flag',
+      'LSN50_WRITER_DISABLE=1 returns only output 2 with stage forced_flag',
+      'LSN50_WRITER_DISABLE=1 did not return the expected forced_flag fallback shape'
+    );
+    expectCondition(!writerCalled, 'LSN50_WRITER_DISABLE=1 never calls the writer', 'LSN50_WRITER_DISABLE=1 unexpectedly called the writer');
+
+    let writerCalledForZero = false;
+    const zeroOut = await executeFunctionNodeById(LSN50_NODE_ID, { formattedData: baseLsn50FormattedData() }, {
+      env: { LSN50_WRITER_DISABLE: '0' },
+      global: fsGlobalOk(),
+      scope: {
+        osiLib: fakeOsiLib({
+          'lsn50-normalize': okNormalizer(),
+          'device-writer': { ok: true, value: { writeDeviceData() { writerCalledForZero = true; return Promise.resolve({ inserted: true, deadLettered: [], columns: ['deveui'] }); } } },
+        }),
+        osiDb: fakeOsiDb(),
+      },
+    });
+    expectCondition(writerCalledForZero, "LSN50_WRITER_DISABLE='0' is not truthy and still reaches the writer", "LSN50_WRITER_DISABLE='0' incorrectly forced the legacy fallback");
+    expectCondition(Array.isArray(zeroOut) && zeroOut[1] === null && !!zeroOut[0], "LSN50_WRITER_DISABLE='0' returns only output 1", "LSN50_WRITER_DISABLE='0' unexpectedly produced fallback output");
+  })().catch((error) => {
+    fail(`failed to execute LSN50 kill-switch fixtures: ${error.message}\n${error.stack}`);
+  }));
+
+  // 2. Success path: writer resolves on a later microtask; node must await it.
+  pendingChecks.push((async () => {
+    let resolvedFlag = false;
+    const writer = {
+      ok: true,
+      value: {
+        writeDeviceData() {
+          return new Promise((resolve) => {
+            setTimeout(() => {
+              resolvedFlag = true;
+              resolve({ inserted: true, deadLettered: [], columns: ['deveui'] });
+            }, 0);
+          });
+        },
+      },
+    };
+    const out = await executeFunctionNodeById(LSN50_NODE_ID, { formattedData: baseLsn50FormattedData() }, {
+      env: {},
+      global: fsGlobalOk(),
+      scope: { osiLib: fakeOsiLib({ 'lsn50-normalize': okNormalizer(), 'device-writer': writer }), osiDb: fakeOsiDb() },
+    });
+    expectCondition(resolvedFlag, 'LSN50 success path awaits the writer promise (flag observed set before the node returned)', 'LSN50 success path returned before the writer promise resolved');
+    expectCondition(Array.isArray(out) && !!out[0] && out[1] === null, 'LSN50 success path returns only output 1', 'LSN50 success path did not return only output 1');
+  })().catch((error) => {
+    fail(`failed to execute LSN50 async-await success fixture: ${error.message}`);
+  }));
+
+  // 3. Every LSN50 fallback stage: exact stage, output-2-only, and (for real
+  //    errors) a Catch-routable node.error(fixedMessage, msg) call.
+  pendingChecks.push((async () => {
+    const globalStore = new Map();
+
+    async function runStage(stage, scopeOverrides, globalOverride) {
+      const recordingNode = createRecordingNode();
+      const msg = { formattedData: baseLsn50FormattedData() };
+      const out = await executeFunctionNodeById(LSN50_NODE_ID, msg, {
+        env: {},
+        global: globalOverride || fsGlobalOk(),
+        node: recordingNode,
+        scope: Object.assign({ osiDb: fakeOsiDb() }, scopeOverrides),
+      });
+      return { out, recordingNode };
+    }
+
+    // normalizer_load
+    {
+      const { out, recordingNode } = await runStage('normalizer_load', {
+        osiLib: fakeOsiLib({ 'lsn50-normalize': { ok: false, error: 'boom-normalizer-load' } }),
+      });
+      expectCondition(Array.isArray(out) && out[0] === null && out[1].osiWriterFallbackStage === 'normalizer_load' && out[1].osiWriterFallbackCode === 'NORMALIZER_LOAD_FAILED',
+        'LSN50 normalizer_load failure returns only output 2 with the exact stage/code', 'LSN50 normalizer_load failure did not produce the expected fallback shape');
+      expectCondition(recordingNode.calls.error.length === 1 && String(recordingNode.calls.error[0][0]).includes('NORMALIZER_LOAD_FAILED'),
+        'LSN50 normalizer_load failure calls node.error once with the fixed code', 'LSN50 normalizer_load failure did not call node.error with the fixed code');
+      const delta = recordErrorCounterDelta(recordingNode.calls.error[0][0], LSN50_NODE_ID, globalStore);
+      expectEqual(delta, 1, 'LSN50 normalizer_load failure reaches the shared Record Error counter exactly once');
+    }
+
+    // writer_load
+    {
+      const { out, recordingNode } = await runStage('writer_load', {
+        osiLib: fakeOsiLib({ 'lsn50-normalize': okNormalizer(), 'device-writer': { ok: false, error: 'boom-writer-load' } }),
+      });
+      expectCondition(Array.isArray(out) && out[0] === null && out[1].osiWriterFallbackStage === 'writer_load' && out[1].osiWriterFallbackCode === 'WRITER_LOAD_FAILED',
+        'LSN50 writer_load failure returns only output 2 with the exact stage/code', 'LSN50 writer_load failure did not produce the expected fallback shape');
+      const delta = recordErrorCounterDelta(recordingNode.calls.error[0][0], LSN50_NODE_ID, globalStore);
+      expectEqual(delta, 1, 'LSN50 writer_load failure reaches the shared Record Error counter exactly once');
+    }
+
+    // manifest_load
+    {
+      const { out, recordingNode } = await runStage('manifest_load', {
+        osiLib: fakeOsiLib({ 'lsn50-normalize': okNormalizer(), 'device-writer': resolvingWriter() }),
+      }, fsGlobalThrowingReadFile(new Error(SECRET_SENTINEL)));
+      expectCondition(Array.isArray(out) && out[0] === null && out[1].osiWriterFallbackStage === 'manifest_load' && out[1].osiWriterFallbackCode === 'MANIFEST_LOAD_FAILED',
+        'LSN50 manifest_load failure returns only output 2 with the exact stage/code', 'LSN50 manifest_load failure did not produce the expected fallback shape');
+      expectCondition(!jsonHasSentinel(out[1]) && !recordingNode.calls.warn.some(jsonHasSentinel) && !recordingNode.calls.error.some(jsonHasSentinel),
+        'LSN50 manifest_load secret-sentinel error text never reaches the returned message or Node-RED logs',
+        'LSN50 manifest_load leaked raw exception text into the returned message or logs');
+      const delta = recordErrorCounterDelta(recordingNode.calls.error[0][0], LSN50_NODE_ID, globalStore);
+      expectEqual(delta, 1, 'LSN50 manifest_load failure reaches the shared Record Error counter exactly once');
+    }
+
+    // normalize_run
+    {
+      const { out, recordingNode } = await runStage('normalize_run', {
+        osiLib: fakeOsiLib({ 'lsn50-normalize': throwingNormalizer(new Error(SECRET_SENTINEL)), 'device-writer': resolvingWriter() }),
+      });
+      expectCondition(Array.isArray(out) && out[0] === null && out[1].osiWriterFallbackStage === 'normalize_run' && out[1].osiWriterFallbackCode === 'NORMALIZE_RUN_FAILED',
+        'LSN50 normalize_run failure returns only output 2 with the exact stage/code', 'LSN50 normalize_run failure did not produce the expected fallback shape');
+      expectCondition(!jsonHasSentinel(out[1]) && !recordingNode.calls.warn.some(jsonHasSentinel) && !recordingNode.calls.error.some(jsonHasSentinel),
+        'LSN50 normalize_run secret-sentinel error text never reaches the returned message or Node-RED logs',
+        'LSN50 normalize_run leaked raw exception text into the returned message or logs');
+      const delta = recordErrorCounterDelta(recordingNode.calls.error[0][0], LSN50_NODE_ID, globalStore);
+      expectEqual(delta, 1, 'LSN50 normalize_run failure reaches the shared Record Error counter exactly once');
+    }
+
+    // db_open
+    {
+      const { out, recordingNode } = await runStage('db_open', {
+        osiLib: fakeOsiLib({ 'lsn50-normalize': okNormalizer(), 'device-writer': resolvingWriter() }),
+        osiDb: throwingOsiDb(new Error(SECRET_SENTINEL)),
+      });
+      expectCondition(Array.isArray(out) && out[0] === null && out[1].osiWriterFallbackStage === 'db_open' && out[1].osiWriterFallbackCode === 'DB_OPEN_FAILED',
+        'LSN50 db_open failure returns only output 2 with the exact stage/code', 'LSN50 db_open failure did not produce the expected fallback shape');
+      expectCondition(!jsonHasSentinel(out[1]) && !recordingNode.calls.warn.some(jsonHasSentinel) && !recordingNode.calls.error.some(jsonHasSentinel),
+        'LSN50 db_open secret-sentinel error text never reaches the returned message or Node-RED logs',
+        'LSN50 db_open leaked raw exception text into the returned message or logs');
+      const delta = recordErrorCounterDelta(recordingNode.calls.error[0][0], LSN50_NODE_ID, globalStore);
+      expectEqual(delta, 1, 'LSN50 db_open failure reaches the shared Record Error counter exactly once');
+    }
+
+    // writer_run (rejected writer Promise) -- must pass the ORIGINAL msg to node.error.
+    {
+      const recordingNode = createRecordingNode();
+      const msg = { formattedData: baseLsn50FormattedData() };
+      const writerError = new Error(SECRET_SENTINEL);
+      const out = await executeFunctionNodeById(LSN50_NODE_ID, msg, {
+        env: {},
+        global: fsGlobalOk(),
+        node: recordingNode,
+        scope: { osiLib: fakeOsiLib({ 'lsn50-normalize': okNormalizer(), 'device-writer': rejectingWriter(writerError) }), osiDb: fakeOsiDb() },
+      });
+      expectCondition(Array.isArray(out) && out[0] === null && out[1] === msg && out[1].osiWriterFallbackStage === 'writer_run' && out[1].osiWriterFallbackCode === 'WRITER_RUN_FAILED',
+        'LSN50 writer_run rejection returns only output 2 (the original msg) with the exact stage/code', 'LSN50 writer_run rejection did not produce the expected fallback shape');
+      expectCondition(recordingNode.calls.error.some((entry) => entry[1] === msg),
+        'LSN50 writer_run rejection passes the original msg object to node.error', 'LSN50 writer_run rejection did not pass the original msg to node.error');
+      expectCondition(!jsonHasSentinel(out[1]) && !recordingNode.calls.warn.some(jsonHasSentinel) && !recordingNode.calls.error.some((e) => jsonHasSentinel(e[0])),
+        'LSN50 writer_run secret-sentinel error text never reaches the returned message or Node-RED logs',
+        'LSN50 writer_run leaked raw exception text into the returned message or logs');
+      const delta = recordErrorCounterDelta(recordingNode.calls.error[0][0], LSN50_NODE_ID, globalStore);
+      expectEqual(delta, 1, 'LSN50 writer_run rejection reaches the shared Record Error counter exactly once');
+
+      // Feed the resulting fallback msg through the real marker function and
+      // confirm the sentinel never reaches the quarantine marker SQL either.
+      const markerOut = await executeFunctionNodeById('lsn50-fallback-marker-fn', out[1], {});
+      expectCondition(!!markerOut && !jsonHasSentinel(markerOut.topic),
+        'LSN50 writer_run secret-sentinel error text never reaches the fallback marker SQL',
+        'LSN50 writer_run leaked raw exception text into the fallback marker SQL');
+    }
+  })().catch((error) => {
+    fail(`failed to execute LSN50 fallback-stage fixtures: ${error.message}\n${error.stack}`);
+  }));
+
+  // 4. Deferred-close semantics: success+close-fail preserves output 1 and
+  //    counts once; writer-fail+close-fail retains the writer fallback once.
+  pendingChecks.push((async () => {
+    const globalStore = new Map();
+
+    // success, then db.close() rejects: output 1 preserved, single row, one DB_CLOSE_FAILED error.
+    {
+      const recordingNode = createRecordingNode();
+      const msg = { formattedData: baseLsn50FormattedData() };
+      let writeCalls = 0;
+      const out = await executeFunctionNodeById(LSN50_NODE_ID, msg, {
+        env: {},
+        global: fsGlobalOk(),
+        node: recordingNode,
+        scope: {
+          osiLib: fakeOsiLib({
+            'lsn50-normalize': okNormalizer(),
+            'device-writer': { ok: true, value: { writeDeviceData() { writeCalls += 1; return Promise.resolve({ inserted: true, deadLettered: [], columns: ['deveui'] }); } } },
+          }),
+          osiDb: fakeOsiDb(() => Promise.reject(new Error('close boom'))),
+        },
+      });
+      expectEqual(writeCalls, 1, 'LSN50 success+close-failure calls the writer exactly once (no duplicate insert)');
+      expectCondition(Array.isArray(out) && !!out[0] && out[1] === null,
+        'LSN50 success+close-failure preserves output 1 (the single inserted row) and never enters legacy fallback',
+        'LSN50 success+close-failure did not preserve the primary success output');
+      expectCondition(out[0].osiWriterFallbackStage === undefined, 'LSN50 success+close-failure does not tag the message with a fallback stage', 'LSN50 success+close-failure unexpectedly tagged a fallback stage');
+      expectCondition(recordingNode.calls.error.length === 1 && String(recordingNode.calls.error[0][0]).includes('DB_CLOSE_FAILED'),
+        'LSN50 success+close-failure calls node.error exactly once with the fixed DB_CLOSE_FAILED code', 'LSN50 success+close-failure did not call node.error with the fixed cleanup code');
+      const delta = recordErrorCounterDelta(recordingNode.calls.error[0][0], LSN50_NODE_ID, globalStore);
+      expectEqual(delta, 1, 'LSN50 success+close-failure reaches the shared Record Error counter exactly once');
+    }
+
+    // writer failure AND close failure: writer fallback retained exactly once, plus one additional cleanup error.
+    {
+      const recordingNode = createRecordingNode();
+      const msg = { formattedData: baseLsn50FormattedData() };
+      const out = await executeFunctionNodeById(LSN50_NODE_ID, msg, {
+        env: {},
+        global: fsGlobalOk(),
+        node: recordingNode,
+        scope: {
+          osiLib: fakeOsiLib({ 'lsn50-normalize': okNormalizer(), 'device-writer': rejectingWriter(new Error('writer boom')) }),
+          osiDb: fakeOsiDb(() => Promise.reject(new Error('close boom'))),
+        },
+      });
+      expectCondition(Array.isArray(out) && out[0] === null && out[1].osiWriterFallbackStage === 'writer_run',
+        'LSN50 writer-failure+close-failure retains the writer_run fallback stage exactly once', 'LSN50 writer-failure+close-failure lost or replaced the writer_run fallback stage');
+      expectEqual(recordingNode.calls.error.length, 2, 'LSN50 writer-failure+close-failure calls node.error exactly twice (writer_run once, DB_CLOSE_FAILED once)');
+      expectCondition(String(recordingNode.calls.error[0][0]).includes('WRITER_RUN_FAILED') && String(recordingNode.calls.error[1][0]).includes('DB_CLOSE_FAILED'),
+        'LSN50 writer-failure+close-failure records the writer error before the cleanup error, each with its own fixed code',
+        'LSN50 writer-failure+close-failure did not record both fixed-code errors in order');
+    }
+  })().catch((error) => {
+    fail(`failed to execute LSN50 deferred-close fixtures: ${error.message}\n${error.stack}`);
+  }));
+
+  // 5. Fallback marker + evict function nodes: reject unknown stage, build the
+  //    literal writer_fallback insert, and emit the writer's exact cap statement.
+  pendingChecks.push((async () => {
+    const unknownStageNode = createRecordingNode();
+    const rejectedOut = await executeFunctionNodeById('lsn50-fallback-marker-fn', { osiWriterFallbackStage: 'not_a_real_stage', formattedData: baseLsn50FormattedData() }, { node: unknownStageNode });
+    expectCondition(rejectedOut === null && unknownStageNode.calls.error.length === 1,
+      'lsn50-fallback-marker-fn rejects an unknown/missing fallback stage without writing SQL',
+      'lsn50-fallback-marker-fn did not reject an unknown fallback stage');
+
+    const missingStageOut = await executeFunctionNodeById('lsn50-fallback-marker-fn', { formattedData: baseLsn50FormattedData() }, {});
+    expectCondition(missingStageOut === null, 'lsn50-fallback-marker-fn rejects a missing fallback stage without writing SQL', 'lsn50-fallback-marker-fn did not reject a missing fallback stage');
+
+    const markerMsg = await executeFunctionNodeById('lsn50-fallback-marker-fn', {
+      osiWriterFallbackStage: 'writer_run',
+      formattedData: baseLsn50FormattedData({ devEui: 'a8404101fd5ecf42' }),
+    }, {});
+    expectCondition(!!markerMsg && typeof markerMsg.topic === 'string' && markerMsg.topic.includes("'writer_fallback'") && markerMsg.topic.includes('A8404101FD5ECF42') && markerMsg.topic.includes("'writer_run'"),
+      'lsn50-fallback-marker-fn builds the literal writer_fallback insert with the uppercased deveui and stage',
+      'lsn50-fallback-marker-fn did not build the expected writer_fallback insert');
+    expectCondition(markerMsg.topic.includes('__writer__'), 'lsn50-fallback-marker-fn marks the fallback channel as __writer__', 'lsn50-fallback-marker-fn did not mark the fallback channel as __writer__');
+
+    const evictMsg = await executeFunctionNodeById('lsn50-fallback-evict-fn', {}, {});
+    expectCondition(!!evictMsg && typeof evictMsg.topic === 'string' && /LIMIT\s+1000/.test(evictMsg.topic) && evictMsg.topic.includes('ingest_quarantine'),
+      'lsn50-fallback-evict-fn emits the writer-matching ingest_quarantine eviction cap (LIMIT 1000)',
+      'lsn50-fallback-evict-fn did not emit the expected eviction cap SQL');
+  })().catch((error) => {
+    fail(`failed to execute LSN50 fallback marker/evict fixtures: ${error.message}`);
+  }));
+
+  // 6. UC512: every loader/manifest/identity/normalize/db-open/writer/db-close
+  //    failure uses a fixed stage/code, reports the error, sets red status,
+  //    never claims success, and reaches the shared Record Error counter.
+  pendingChecks.push((async () => {
+    const globalStore = new Map();
+
+    async function runUc512(scopeOverrides, globalOverride, payloadOverrides) {
+      const recordingNode = createRecordingNode();
+      const msg = { payload: baseUc512Payload(payloadOverrides) };
+      const out = await executeFunctionNodeById(UC512_NODE_ID, msg, {
+        env: { CHIRPSTACK_PROFILE_UC512: 'profile-uc512' },
+        global: globalOverride || fsGlobalOk(),
+        node: recordingNode,
+        scope: Object.assign({ osiDb: fakeOsiDb() }, scopeOverrides),
+      });
+      return { out, recordingNode, msg };
+    }
+
+    function expectUc512Failure(label, code, result) {
+      const { out, recordingNode } = result;
+      expectCondition(out === null, `UC512 ${label} failure emits no success output`, `UC512 ${label} failure unexpectedly emitted a success output`);
+      expectCondition(recordingNode.calls.error.length === 1 && String(recordingNode.calls.error[0][0]).includes(code),
+        `UC512 ${label} failure calls node.error once with the fixed code ${code}`, `UC512 ${label} failure did not call node.error with the fixed code ${code}`);
+      expectCondition(recordingNode.calls.status.some((s) => s && s.fill === 'red'), `UC512 ${label} failure sets red node status`, `UC512 ${label} failure did not set red node status`);
+      const delta = recordErrorCounterDelta(recordingNode.calls.error[0][0], UC512_NODE_ID, globalStore);
+      expectEqual(delta, 1, `UC512 ${label} failure reaches the shared Record Error counter exactly once`);
+    }
+
+    expectUc512Failure('normalizer_load', 'NORMALIZER_LOAD_FAILED', await runUc512({
+      osiLib: fakeOsiLib({ 'uc512-normalize': { ok: false, error: 'boom' } }),
+    }));
+    expectUc512Failure('writer_load', 'WRITER_LOAD_FAILED', await runUc512({
+      osiLib: fakeOsiLib({ 'uc512-normalize': okNormalizer(), 'device-writer': { ok: false, error: 'boom' } }),
+    }));
+    expectUc512Failure('identity_missing', 'IDENTITY_MISSING', await runUc512({
+      osiLib: fakeOsiLib({ 'uc512-normalize': okNormalizer(), 'device-writer': resolvingWriter() }),
+    }, null, { deviceInfo: { devEui: '', deviceProfileId: 'profile-uc512' } }));
+    expectUc512Failure('manifest_load', 'MANIFEST_LOAD_FAILED', await runUc512({
+      osiLib: fakeOsiLib({ 'uc512-normalize': okNormalizer(), 'device-writer': resolvingWriter() }),
+    }, fsGlobalThrowingReadFile(new Error(SECRET_SENTINEL))));
+    expectUc512Failure('normalize_run', 'NORMALIZE_RUN_FAILED', await runUc512({
+      osiLib: fakeOsiLib({ 'uc512-normalize': throwingNormalizer(new Error(SECRET_SENTINEL)), 'device-writer': resolvingWriter() }),
+    }));
+    expectUc512Failure('db_open', 'DB_OPEN_FAILED', await runUc512({
+      osiLib: fakeOsiLib({ 'uc512-normalize': okNormalizer(), 'device-writer': resolvingWriter() }),
+      osiDb: throwingOsiDb(new Error(SECRET_SENTINEL)),
+    }));
+
+    // writer_run: rejected writer Promise must pass the original msg to node.error and never claim success.
+    {
+      const recordingNode = createRecordingNode();
+      const msg = { payload: baseUc512Payload() };
+      const writerError = new Error(SECRET_SENTINEL);
+      const out = await executeFunctionNodeById(UC512_NODE_ID, msg, {
+        env: { CHIRPSTACK_PROFILE_UC512: 'profile-uc512' },
+        global: fsGlobalOk(),
+        node: recordingNode,
+        scope: { osiLib: fakeOsiLib({ 'uc512-normalize': okNormalizer(), 'device-writer': rejectingWriter(writerError) }), osiDb: fakeOsiDb() },
+      });
+      expectCondition(out === null, 'UC512 writer_run rejection reports the error instead of claiming success', 'UC512 writer_run rejection incorrectly returned a success output');
+      expectCondition(recordingNode.calls.error.some((entry) => entry[1] === msg), 'UC512 writer_run rejection passes the original msg to node.error', 'UC512 writer_run rejection did not pass the original msg to node.error');
+      expectCondition(!jsonHasSentinel(recordingNode.calls.error.map((e) => e[0])), 'UC512 writer_run secret-sentinel error text never reaches Node-RED logs', 'UC512 writer_run leaked raw exception text into the logs');
+      const delta = recordErrorCounterDelta(recordingNode.calls.error[0][0], UC512_NODE_ID, globalStore);
+      expectEqual(delta, 1, 'UC512 writer_run rejection reaches the shared Record Error counter exactly once');
+    }
+
+    // db_close: success, then db.close() rejects -- one DB_CLOSE_FAILED error, never claims writer failure was success... and never claims failure either (write itself succeeded).
+    {
+      const recordingNode = createRecordingNode();
+      const msg = { payload: baseUc512Payload() };
+      const out = await executeFunctionNodeById(UC512_NODE_ID, msg, {
+        env: { CHIRPSTACK_PROFILE_UC512: 'profile-uc512' },
+        global: fsGlobalOk(),
+        node: recordingNode,
+        scope: { osiLib: fakeOsiLib({ 'uc512-normalize': okNormalizer(), 'device-writer': resolvingWriter() }), osiDb: fakeOsiDb(() => Promise.reject(new Error('close boom'))) },
+      });
+      expectCondition(out === msg, 'UC512 success+close-failure still returns the message (write itself succeeded)', 'UC512 success+close-failure unexpectedly dropped the message');
+      expectCondition(recordingNode.calls.error.length === 1 && String(recordingNode.calls.error[0][0]).includes('DB_CLOSE_FAILED'),
+        'UC512 db_close failure calls node.error once with the fixed DB_CLOSE_FAILED code', 'UC512 db_close failure did not call node.error with the fixed code');
+      const delta = recordErrorCounterDelta(recordingNode.calls.error[0][0], UC512_NODE_ID, globalStore);
+      expectEqual(delta, 1, 'UC512 db_close failure reaches the shared Record Error counter exactly once');
+    }
+  })().catch((error) => {
+    fail(`failed to execute UC512 fixed stage/code fixtures: ${error.message}\n${error.stack}`);
+  }));
+
+  // 7. The actual shipped LSN50 node assembly, run through the real
+  //    normalizer + writer + async database facade (no fakes for the
+  //    seam modules themselves), for both null and undefined inactive
+  //    placeholders in both device modes -- zero quarantine either way.
+  pendingChecks.push((async () => {
+    const { DatabaseSync } = require('node:sqlite');
+    const { createAsyncDatabaseFacade } = require(path.join(__dirname, 'lib', 'database-sync-async-facade.js'));
+    const realNormalizer = require(path.join(nodeRedRoot, 'osi-lsn50-normalize'));
+    const realWriter = require(path.join(nodeRedRoot, 'osi-device-writer'));
+    const TEST_DEVEUI = 'A8404101REALASM1';
+
+    function createRealTestDb() {
+      const db = new DatabaseSync(':memory:');
+      db.exec(seedSqlSource);
+      db.exec("INSERT INTO users(username, password_hash, created_at) VALUES('test','hash',datetime('now'))");
+      const userId = db.prepare("SELECT id FROM users WHERE username = 'test'").get().id;
+      db.prepare(
+        "INSERT INTO devices(deveui, type_id, name, user_id, created_at, updated_at) VALUES(?, 'DRAGINO_LSN50', 'test-dev', ?, datetime('now'), datetime('now'))"
+      ).run(TEST_DEVEUI, userId);
+      return db;
+    }
+
+    function productionDecoded(detectedMode, placeholder) {
+      const isMode9 = detectedMode === 9;
+      return {
+        devEui: TEST_DEVEUI,
+        timestamp: '2026-07-19T10:00:00Z',
+        detectedMode,
+        tempC1: 22.3,
+        batV: 3.45,
+        adcV: isMode9 ? placeholder : 1.23,
+        adcCh1V: isMode9 ? placeholder : 0.45,
+        swt1Kpa: isMode9 ? placeholder : 15.2,
+        swt2Kpa: isMode9 ? placeholder : 18.7,
+        swt3Kpa: isMode9 ? placeholder : null,
+        dendroRatio: isMode9 ? placeholder : 0.85,
+        dendroModeUsed: isMode9 ? placeholder : 'linear',
+        positionRawMm: isMode9 ? placeholder : 12.5,
+        positionMm: isMode9 ? placeholder : 12.3,
+        dendroValid: isMode9 ? placeholder : 1,
+        deltaMm: isMode9 ? placeholder : 0.02,
+        dendroStemChangeUm: isMode9 ? placeholder : 20,
+        dendroSaturated: isMode9 ? placeholder : 0,
+        dendroSaturationSide: isMode9 ? placeholder : null,
+        rainCountCumulative: isMode9 ? 150 : placeholder,
+        rainTipsDelta: isMode9 ? 3 : placeholder,
+        rainMmDelta: isMode9 ? 0.6 : placeholder,
+        rainMmPerHour: isMode9 ? 3.6 : placeholder,
+        rainMmPer10Min: isMode9 ? 0.6 : placeholder,
+        rainMmToday: isMode9 ? 5.4 : placeholder,
+        rainDeltaStatus: isMode9 ? 'ok' : placeholder,
+        flowCountCumulative: isMode9 ? 500 : placeholder,
+        flowPulsesDelta: isMode9 ? 10 : placeholder,
+        flowLitersDelta: isMode9 ? 2.5 : placeholder,
+        flowLitersPerMin: isMode9 ? 15.0 : placeholder,
+        flowLitersPer10Min: isMode9 ? 150.0 : placeholder,
+        flowLitersToday: isMode9 ? 1200.0 : placeholder,
+        flowDeltaStatus: isMode9 ? 'ok' : placeholder,
+        counterIntervalSeconds: isMode9 ? 600 : placeholder,
+        modeCodeToStore: detectedMode,
+        modeLabelToStore: isMode9 ? 'MOD9' : 'MOD1',
+        observedModeObservedAt: '2026-07-19T09:00:00Z',
+      };
+    }
+
+    for (const detectedMode of [1, 9]) {
+      for (const placeholder of [undefined, null]) {
+        const placeholderLabel = placeholder === undefined ? 'undefined' : 'null';
+        const syncDb = createRealTestDb();
+        try {
+          realWriter.resetColumnCache();
+          const facade = createAsyncDatabaseFacade(syncDb);
+          const out = await executeFunctionNodeById(LSN50_NODE_ID, { formattedData: productionDecoded(detectedMode, placeholder) }, {
+            env: {},
+            global: fsGlobalOk(),
+            scope: {
+              osiLib: fakeOsiLib({ 'lsn50-normalize': { ok: true, value: realNormalizer }, 'device-writer': { ok: true, value: realWriter } }),
+              osiDb: { Database: function RealFacadeDatabase() { return facade; } },
+            },
+          });
+          const quarantineCount = syncDb.prepare('SELECT COUNT(*) AS n FROM ingest_quarantine').get().n;
+          expectEqual(quarantineCount, 0, `real LSN50 node assembly (mode ${detectedMode}, ${placeholderLabel} inactive placeholders) produces zero ingest_quarantine rows`);
+          expectCondition(Array.isArray(out) && !!out[0] && out[1] === null,
+            `real LSN50 node assembly (mode ${detectedMode}, ${placeholderLabel} inactive placeholders) returns only output 1`,
+            `real LSN50 node assembly (mode ${detectedMode}, ${placeholderLabel} inactive placeholders) did not return only output 1`);
+          const row = syncDb.prepare('SELECT * FROM device_data WHERE deveui = ? ORDER BY rowid DESC LIMIT 1').get(TEST_DEVEUI);
+          expectCondition(!!row, `real LSN50 node assembly (mode ${detectedMode}, ${placeholderLabel} inactive placeholders) inserts a device_data row`,
+            `real LSN50 node assembly (mode ${detectedMode}, ${placeholderLabel} inactive placeholders) did not insert a device_data row`);
+        } finally {
+          syncDb.close();
+        }
+      }
+    }
+  })().catch((error) => {
+    fail(`failed to execute the real LSN50 node assembly fixtures: ${error.message}\n${error.stack}`);
+  }));
+})();
+
 expectIncludesById('lsn50-zone-agg-fn', "localDateIso(d.timestamp || computedAt", 'bins MOD9 zone totals by uplink timestamp instead of processing time');
 expectIncludesById('lsn50-zone-agg-fn', "d.rainDeltaStatus === 'ok'", 'only aggregates valid rain deltas into zone totals');
 expectIncludesById('lsn50-zone-agg-fn', "d.flowDeltaStatus === 'ok'", 'only aggregates valid flow deltas into zone totals');

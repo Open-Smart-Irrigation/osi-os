@@ -31,6 +31,7 @@ const crossTabCatchNodes = {
   'record-error-catch-field-testing': 'a3f03829ad106e10',
   'record-error-catch-download': '7d4f3e45f4b0d111',
   'record-error-catch-lsn50': 'lsn50-tab',
+  'record-error-catch-uc512': 'uc512-tab',
   'record-error-catch-system-admin': 'sys-admin-tab',
   'record-error-catch-account-link': 'account-link-tab',
   'record-error-catch-dendro-analytics': 'dendro-analytics-tab',
