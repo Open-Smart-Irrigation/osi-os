@@ -1023,6 +1023,15 @@ async function voidEntry(db, entryUuid, input, principal) {
   return require('./lifecycle').void_(db, null, pathUuid, input.base_sync_version, reason, principal);
 }
 
+async function discardEntry(db, entryUuid, input, principal) {
+  assertBodyLimit(input);
+  assertNoRequestIdentity(input);
+  const bodyUuid = canonicalUuid(input.entry_uuid, 'entry_uuid', false);
+  const pathUuid = canonicalUuid(entryUuid, 'entry_uuid', true);
+  if (bodyUuid && bodyUuid !== pathUuid) badRequest('path_body_mismatch', 'Path and body entry UUID differ');
+  return require('./lifecycle').discardDraft(db, pathUuid, principal);
+}
+
 async function listPlots(db, principal) {
   const rows = await dbAll(
     db,
@@ -2852,7 +2861,14 @@ async function handleHttpRequest(options) {
       return respond(201, await saveEntry(db, requestBody(msg), principal, { mode: 'create' }));
     }
     if (method === 'PUT' && /^\/api\/journal\/entries\/[^/]+$/.test(requestPath)) {
-      return respond(200, await saveEntry(db, requestBody(msg), principal, { mode: 'update', entryUuid: uuid }));
+      const body = requestBody(msg);
+      // Draft discard reuses this same PUT transport (no new flows.json route):
+      // a body of { discard: true } is a distinct verb from the draft/final
+      // save shapes handled by saveEntry below.
+      if (isObject(body) && body.discard === true) {
+        return respond(200, await discardEntry(db, uuid, body, principal));
+      }
+      return respond(200, await saveEntry(db, body, principal, { mode: 'update', entryUuid: uuid }));
     }
     if (method === 'POST' && /^\/api\/journal\/entries\/[^/]+\/void$/.test(requestPath)) {
       return respond(200, await voidEntry(db, uuid, requestBody(msg), principal));
@@ -2922,6 +2938,7 @@ async function handleHttpRequest(options) {
 }
 
 module.exports = {
+  discardEntry,
   errorResponse,
   exportJson,
   exportResearchPackage,

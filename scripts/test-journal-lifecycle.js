@@ -545,7 +545,7 @@ test.after(() => {
 });
 
 test('exports the complete lifecycle API from osi-journal', () => {
-  for (const name of ['saveDraft', 'finalize', 'finalizeBatch', 'void_']) {
+  for (const name of ['saveDraft', 'finalize', 'finalizeBatch', 'void_', 'discardDraft']) {
     assert.equal(typeof journal[name], 'function', name);
   }
 });
@@ -2002,6 +2002,117 @@ test('saveDraft updates an owned version-zero draft and fully replaces its value
     [['attr.operator', 'Alice']]
   );
   assert.equal(await count('sync_outbox'), 0);
+});
+
+test('discardDraft rejects a discard for an entry owned by another user without writes', async () => {
+  await journal.saveDraft(db, catalog, validEntry(), principal());
+  const before = await journalMutationState();
+
+  await rejectCode(
+    journal.discardDraft(db, ENTRY_UUID, principal({
+      user_id: 2,
+      owner_user_uuid: OTHER_USER_UUID,
+    })),
+    'ownership'
+  );
+
+  assert.deepEqual(await journalMutationState(), before);
+});
+
+test('discardDraft rejects a final entry with a clear invalid_state error', async () => {
+  await journal.finalize(db, catalog, validEntry(), principal());
+  const before = await journalMutationState();
+
+  await rejectCode(journal.discardDraft(db, ENTRY_UUID, principal()), 'invalid_state');
+
+  assert.deepEqual(await journalMutationState(), before);
+});
+
+test('discardDraft rejects a voided entry with a clear invalid_state error', async () => {
+  await journal.finalize(db, catalog, validEntry(), principal());
+  await journal.void_(db, catalog, ENTRY_UUID, 1, 'Recorded twice', principal());
+  const before = await journalMutationState();
+
+  await rejectCode(journal.discardDraft(db, ENTRY_UUID, principal()), 'invalid_state');
+
+  assert.deepEqual(await journalMutationState(), before);
+});
+
+test('discardDraft rejects a draft whose sync_version has drifted from zero', async () => {
+  await journal.saveDraft(db, catalog, validEntry(), principal());
+  await db.run('UPDATE journal_entries SET sync_version=1 WHERE entry_uuid=?', [ENTRY_UUID]);
+  const before = await journalMutationState();
+
+  await rejectCode(journal.discardDraft(db, ENTRY_UUID, principal()), 'invalid_state');
+
+  assert.deepEqual(await journalMutationState(), before);
+});
+
+test('discardDraft transactionally hard-deletes the draft entry and its values with no outbox row', async () => {
+  await journal.saveDraft(db, catalog, validEntry({
+    values: [{
+      attribute_code: 'attr.operator',
+      group_index: 0,
+      value: 'Alice',
+      value_status: 'observed',
+    }],
+  }), principal());
+  assert.equal(await count('journal_entries'), 1);
+  assert.equal(await count('journal_entry_values'), 1);
+
+  const result = await journal.discardDraft(db, ENTRY_UUID, principal());
+
+  assert.deepEqual(result, { entry_uuid: ENTRY_UUID, discarded: true });
+  assert.equal(await count('journal_entries'), 0);
+  assert.equal(await count('journal_entry_values'), 0);
+  assert.equal(await count('sync_outbox'), 0);
+  assert.equal(await count('applied_commands'), 0);
+  assert.equal(await count('command_ack_outbox'), 0);
+});
+
+test('discardDraft rolls back the entry alongside its values on a late injected failure', async () => {
+  await journal.saveDraft(db, catalog, validEntry({
+    values: [{
+      attribute_code: 'attr.operator',
+      group_index: 0,
+      value: 'Alice',
+      value_status: 'observed',
+    }],
+  }), principal());
+  const injected = new Error('injected discard failure');
+  let deleteEntryCalls = 0;
+  const crashingDb = {
+    transaction(executor) {
+      return db.transaction((tx) => executor(Object.assign({}, tx, {
+        run(sql, params) {
+          if (String(sql).startsWith('DELETE FROM journal_entries')) {
+            deleteEntryCalls += 1;
+            throw injected;
+          }
+          return tx.run(sql, params);
+        },
+      })));
+    },
+  };
+
+  await assert.rejects(journal.discardDraft(crashingDb, ENTRY_UUID, principal()), injected);
+
+  assert.equal(deleteEntryCalls, 1);
+  assert.equal(await count('journal_entries'), 1);
+  assert.equal(await count('journal_entry_values'), 1);
+});
+
+test('discardDraft is idempotent: an exact repeated discard of an already-gone draft succeeds', async () => {
+  await journal.saveDraft(db, catalog, validEntry(), principal());
+
+  const first = await journal.discardDraft(db, ENTRY_UUID, principal());
+  assert.deepEqual(first, { entry_uuid: ENTRY_UUID, discarded: true });
+
+  const second = await journal.discardDraft(db, ENTRY_UUID, principal());
+  assert.deepEqual(second, { entry_uuid: ENTRY_UUID, discarded: true });
+
+  assert.equal(await count('journal_entries'), 0);
+  assert.equal(await count('journal_entry_values'), 0);
 });
 
 test('finalize promotes an owned draft in place to final version one', async () => {

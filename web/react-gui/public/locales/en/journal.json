@@ -240,6 +240,25 @@
       }
     }
   },
+  "drafts": {
+    "title": "Needs completion",
+    "loading": "Loading drafts…",
+    "empty": "No drafts need completion right now.",
+    "resume": "Resume",
+    "discard": "Discard",
+    "discarding": "Discarding…",
+    "discardError": "Could not discard this draft. Try again.",
+    "resumeUnavailable": "This draft's form is no longer available.",
+    "close": "Close",
+    "error": {
+      "title": "Could not load drafts",
+      "retry": "Try again"
+    },
+    "stale": {
+      "body": "Showing the last known drafts — refreshing failed.",
+      "retry": "Refresh"
+    }
+  },
   "logActivity": "Log activity",
   "capture": {
     "title": "Log activity",

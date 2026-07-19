@@ -244,6 +244,7 @@ test('journal package exposes the complete Task 10 API surface', () => {
     'listEntries',
     'saveEntry',
     'voidEntry',
+    'discardEntry',
     'upsertCustomVocab',
     'listPlots',
     'upsertPlot',
@@ -688,6 +689,117 @@ test('entry POST/PUT semantics and duplicate acknowledgement are transactional',
     ),
     (error) => error && error.code === 'identity_field_forbidden'
   );
+});
+
+test('discardEntry rejects a path/body entry UUID mismatch and forbidden identity fields', async () => {
+  const db = new TestDb('discard-validation');
+  seedIdentity(db);
+  const draftUuid = '92000000-0000-4000-8000-000000000001';
+
+  await assert.rejects(
+    journal.discardEntry(
+      db,
+      draftUuid,
+      { entry_uuid: '92000000-0000-4000-8000-000000000099' },
+      principal()
+    ),
+    (error) => error && error.code === 'path_body_mismatch'
+  );
+  await assert.rejects(
+    journal.discardEntry(db, draftUuid, { owner_user_uuid: OTHER_OWNER_UUID }, principal()),
+    (error) => error && error.code === 'identity_field_forbidden'
+  );
+});
+
+test('discardEntry via PUT reuses the existing journal-entry transport without a new route', async () => {
+  const db = new TestDb('discard-put-transport');
+  seedIdentity(db);
+  const plotUuid = '90000000-0000-4000-8000-000000000001';
+  await journal.upsertPlot(db, plotInput(plotUuid, 'discard-plot', { zone_uuid: ZONE_UUID }), principal());
+  const secret = 'discard-secret';
+  const authorization = 'Bearer ' + token(secret, {
+    userId: 1,
+    username: 'field-user',
+    exp: Date.now() + 60_000,
+  });
+  class ExistingDb {
+    constructor() {
+      return db;
+    }
+  }
+  const environment = {
+    authTokenSecret: secret,
+    deviceEui: GATEWAY_EUI,
+    deviceEuiConfidence: 'authoritative',
+  };
+  async function request(method, requestPath, options) {
+    const requestOptions = options || {};
+    return journal.handleHttpRequest({
+      msg: {
+        req: {
+          method,
+          path: requestPath,
+          headers: Object.assign({ authorization }, requestOptions.headers || {}),
+          body: requestOptions.body,
+          query: requestOptions.query || {},
+          params: requestOptions.params || {},
+        },
+      },
+      Database: ExistingDb,
+      environment,
+    });
+  }
+
+  const draftUuid = '91000000-0000-4000-8000-000000000001';
+  const draft = await request('PUT', '/api/journal/entries/' + draftUuid, {
+    params: { uuid: draftUuid },
+    body: Object.assign(entryInput(draftUuid, plotUuid, '2026-07-13T09:00:00'), {
+      status: 'draft',
+      base_sync_version: 0,
+    }),
+  });
+  assert.equal(draft.statusCode, 200);
+  assert.equal(draft.payload.sync_version, 0);
+  assert.equal(
+    db.prepare('SELECT status FROM journal_entries WHERE entry_uuid=?').get(draftUuid).status,
+    'draft'
+  );
+
+  const foreignAttempt = await request('PUT', '/api/journal/entries/' + draftUuid, {
+    params: { uuid: draftUuid },
+    body: { discard: true },
+    headers: {
+      authorization: 'Bearer ' + token(secret, {
+        userId: 2,
+        username: 'other-user',
+        exp: Date.now() + 60_000,
+      }),
+    },
+  });
+  assert.equal(foreignAttempt.statusCode, 404);
+  assert.equal(foreignAttempt.payload.error, 'ownership');
+  assert.equal(
+    db.prepare('SELECT COUNT(*) AS n FROM journal_entries WHERE entry_uuid=?').get(draftUuid).n,
+    1
+  );
+
+  const discarded = await request('PUT', '/api/journal/entries/' + draftUuid, {
+    params: { uuid: draftUuid },
+    body: { discard: true },
+  });
+  assert.equal(discarded.statusCode, 200);
+  assert.deepEqual(discarded.payload, { entry_uuid: draftUuid, discarded: true });
+  assert.equal(
+    db.prepare('SELECT COUNT(*) AS n FROM journal_entries WHERE entry_uuid=?').get(draftUuid).n,
+    0
+  );
+
+  const repeat = await request('PUT', '/api/journal/entries/' + draftUuid, {
+    params: { uuid: draftUuid },
+    body: { discard: true },
+  });
+  assert.equal(repeat.statusCode, 200);
+  assert.deepEqual(repeat.payload, { entry_uuid: draftUuid, discarded: true });
 });
 
 test('zone-only entry provisioning is idempotent, explicit-layout, and commits before entry validation', async () => {

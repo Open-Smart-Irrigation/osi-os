@@ -9,6 +9,7 @@ import type {
   JournalVocabRow,
   PlotGroup,
 } from '../../../types/journal';
+import { DraftsQueue } from '../DraftsQueue';
 import { DetailPanel } from './DetailPanel';
 import { EntryTable } from './EntryTable';
 import {
@@ -99,18 +100,21 @@ export function JournalWorkspace({ plots, activeGroups, zones, activities, catal
 
   return (
     <div className="mx-auto grid w-full max-w-[1600px] grid-cols-1 gap-4 px-4 py-6 lg:grid-cols-[320px_1fr_360px]">
-      <ScopeRail
-        plots={plots}
-        activeGroups={activeGroups}
-        activities={activities}
-        sensorCountByZoneUuid={sensorCountByZoneUuid}
-        scope={scope}
-        onScopeChange={setScope}
-        filters={filters}
-        onFiltersChange={setFilters}
-        search={search}
-        onSearchChange={setSearch}
-      />
+      <div className="flex flex-col gap-4">
+        <ScopeRail
+          plots={plots}
+          activeGroups={activeGroups}
+          activities={activities}
+          sensorCountByZoneUuid={sensorCountByZoneUuid}
+          scope={scope}
+          onScopeChange={setScope}
+          filters={filters}
+          onFiltersChange={setFilters}
+          search={search}
+          onSearchChange={setSearch}
+        />
+        <DraftsQueue />
+      </div>
 
       <div className="flex h-full min-h-0 flex-col gap-2">
         {scopeNotNarrowed && (

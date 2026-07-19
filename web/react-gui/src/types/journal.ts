@@ -232,6 +232,11 @@ export interface EntryFinalMutationReceipt {
 
 export type EntryMutationReceipt = EntryDraftMutationReceipt | EntryFinalMutationReceipt;
 
+export interface EntryDiscardReceipt {
+  entry_uuid: string;
+  discarded: true;
+}
+
 export interface EntryListFilters {
   entry_uuid?: string;
   plot_uuid?: string;
