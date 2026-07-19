@@ -34,7 +34,7 @@ describe('AgroLink branding source contracts', () => {
     const feedLocaleRoot = path.join(repoRoot, 'feeds/chirpstack-openwrt-feed/apps/node-red/files/gui/locales');
 
     for (const locale of ['en', 'de-CH', 'fr', 'it', 'es', 'pt', 'lg']) {
-      for (const namespace of ['auth.json', 'dashboard.json', 'devices.json', 'history.json']) {
+      for (const namespace of ['auth.json', 'dashboard.json', 'devices.json', 'history.json', 'journal.json']) {
         const relativePath = path.join(locale, namespace);
         assert.deepEqual(
           readJsonAt(feedLocaleRoot, relativePath),
