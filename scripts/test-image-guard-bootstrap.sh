@@ -34,6 +34,27 @@ copy_profile() {
         mkdir -p "$rom/$(dirname "$rel")"
         cp "$source/$rel" "$rom/$rel"
     done
+    # Keep the pre-94 invocation pinned to the plan-owned factory baseline
+    # contract.  This is intentionally a source-level assertion in the
+    # hermetic boot test because commit 1 rejects the future verb before argv
+    # parsing; the activation commit must not silently change these paths.
+    guard_init="$rom/etc/uci-defaults/93_osi_deploy_guard_init"
+    for required in \
+        '--root "$STATE_ROOT"' \
+        '--guard-marker "$STATE_ROOT/guard-installed.json"' \
+        '--image-manifest "$MANIFEST"' \
+        '--factory-seed "$ROM_ROOT/usr/share/db/farming.db"' \
+        '--factory-seed-helper "$ROM_ROOT/usr/libexec/osi-factory-database-seed-cli.js"' \
+        '--factory-seed-receipt-out "$RECEIPT"' \
+        '--database-lineage-out "$LINEAGE"' \
+        '--expected-verification-sha256 "$VERIFICATION_SHA256"' \
+        '--expected-verification-nonce "$VERIFICATION_NONCE"' \
+        '--expected-profile "$PROFILE"'; do
+        grep -F -- "$required" "$guard_init" >/dev/null || {
+            echo "93 missing pinned initialize-image-baseline argument: $required" >&2
+            exit 1
+        }
+    done
     # The provenance CLI checks this resident copy as a trusted candidate.
     mkdir -p "$rom/usr/libexec"
     cp "$source/usr/libexec/osi-factory-image-provenance.js" "$rom/usr/libexec/osi-factory-image-provenance.js"
@@ -52,6 +73,42 @@ copy_profile() {
         exit 1
     }
 
+    # The initializer itself is ROM authority; invoking it through an overlay
+    # symlink must fail before any provenance/state work is attempted.
+    ln -s "$rom/etc/uci-defaults/93_osi_deploy_guard_init" "$CASE/$profile/93-link"
+    status=0
+    OSI_REPAIR_PROGRAM_MODE=1 OSI_DEPLOY_ARTIFACT_MODE=test \
+    OSI_ROM_ROOT="$rom" OSI_DATA_ROOT="$data" OSI_RUN_ROOT="$run" \
+    OSI_IMAGE_PROFILE="$profile" OSI_REBOOT_COMMAND=false \
+        sh "$CASE/$profile/93-link" >/dev/null 2>"$CASE/$profile/symlink-err" || status=$?
+    [ "$status" -ne 0 ] || { echo "93 accepted a symlinked overlay invocation" >&2; exit 1; }
+
+    # Resident codec paths are also no-follow authorities; a symlinked codec
+    # must be rejected before the heredoc can require it.
+    codec="$rom/usr/libexec/osi-factory-image-provenance.js"
+    mv "$codec" "$codec.real"
+    ln -s "$codec.real" "$codec"
+    status=0
+    OSI_REPAIR_PROGRAM_MODE=1 OSI_DEPLOY_ARTIFACT_MODE=test \
+    OSI_ROM_ROOT="$rom" OSI_DATA_ROOT="$data" OSI_RUN_ROOT="$run" \
+    OSI_IMAGE_PROFILE="$profile" OSI_REBOOT_COMMAND=false \
+        sh "$rom/etc/uci-defaults/93_osi_deploy_guard_init" >/dev/null 2>"$CASE/$profile/codec-symlink-err" || status=$?
+    rm -f "$codec"
+    mv "$codec.real" "$codec"
+    [ "$status" -ne 0 ] || { echo "93 accepted a symlinked provenance codec" >&2; exit 1; }
+
+    provenance_cli="$rom/usr/libexec/osi-factory-image-provenance-cli.js"
+    mv "$provenance_cli" "$provenance_cli.real"
+    ln -s "$provenance_cli.real" "$provenance_cli"
+    status=0
+    OSI_REPAIR_PROGRAM_MODE=1 OSI_DEPLOY_ARTIFACT_MODE=test \
+    OSI_ROM_ROOT="$rom" OSI_DATA_ROOT="$data" OSI_RUN_ROOT="$run" \
+    OSI_IMAGE_PROFILE="$profile" OSI_REBOOT_COMMAND=false \
+        sh "$rom/etc/uci-defaults/93_osi_deploy_guard_init" >/dev/null 2>"$CASE/$profile/cli-symlink-err" || status=$?
+    rm -f "$provenance_cli"
+    mv "$provenance_cli.real" "$provenance_cli"
+    [ "$status" -ne 0 ] || { echo "93 accepted a symlinked provenance CLI" >&2; exit 1; }
+
     # Commit 1 intentionally rejects image-baseline verbs.  The real ROM
     # script must fail before creating state/database; commit 4 supplies the
     # state verb.
@@ -61,8 +118,17 @@ copy_profile() {
     OSI_IMAGE_PROFILE="$profile" OSI_REBOOT_COMMAND=false \
         sh "$rom/etc/uci-defaults/93_osi_deploy_guard_init" >/dev/null 2>"$CASE/$profile/err" || status=$?
     [ "$status" -ne 0 ] || { echo "93 unexpectedly succeeded before image-baseline verb" >&2; exit 1; }
+    grep -E 'unknown verb|unsupported verb|initialize-image-baseline' "$CASE/$profile/err" >/dev/null || {
+        echo "93 failed before reaching the commit-1 image-baseline boundary" >&2
+        cat "$CASE/$profile/err" >&2
+        exit 1
+    }
     [ ! -e "$data/osi-deploy" ] || { echo "93 created state after fail-closed rejection" >&2; exit 1; }
     [ ! -e "$data/db/farming.db" ] || { echo "93 created database after fail-closed rejection" >&2; exit 1; }
+
+    # Model the one-use result consumption that the future image-baseline state
+    # verb performs before a second-boot 97 validation attempt.
+    [ ! -e "$run/osi-factory-image-verification.json" ] || rm -f "$run/osi-factory-image-verification.json"
 
     # 97 refuses to accept a database without the 93-owned state/receipt/
     # lineage chain; even an existing sentinel remains unchanged.
@@ -71,7 +137,7 @@ copy_profile() {
     before=$(sha256sum "$data/db/farming.db" | awk '{print $1}')
     status=0
     OSI_REPAIR_PROGRAM_MODE=1 OSI_DEPLOY_ARTIFACT_MODE=test \
-    OSI_ROM_ROOT="$rom" OSI_DATA_ROOT="$data" OSI_IMAGE_PROFILE="$profile" \
+    OSI_ROM_ROOT="$rom" OSI_DATA_ROOT="$data" OSI_RUN_ROOT="$run" OSI_IMAGE_PROFILE="$profile" \
         sh "$rom/etc/uci-defaults/97_osi_db_seed" 2>/dev/null || status=$?
     [ "$status" -ne 0 ] || { echo "97 accepted a database without factory authority" >&2; exit 1; }
     after=$(sha256sum "$data/db/farming.db" | awk '{print $1}')
@@ -81,12 +147,13 @@ copy_profile() {
     # lineage and helper-owned publication chain.
     mkdir -p "$data/osi-deploy/receipts"
     printf '%s\n' '{"phase":"image-baseline-initializing"}' > "$data/osi-deploy/deployment-state.json"
-    printf '%s\n' '{}' > "$data/osi-deploy/receipts/factory-seed.json"
-    printf '%s\n' '{}' > "$data/osi-deploy/database-lineage.json"
-    chmod 600 "$data/osi-deploy/deployment-state.json" "$data/osi-deploy/receipts/factory-seed.json" "$data/osi-deploy/database-lineage.json"
+    baseline_id=$(node -e 'const fs=require("fs"), c=require("crypto"); const p=require(process.argv[1]); const h=c.createHash("sha256").update(fs.readFileSync(process.argv[2])).digest("hex"); process.stdout.write(`factory-baseline-${p.profile}-${h}`)' "$rom/usr/share/osi-deploy/factory-image-provenance.json" "$rom/usr/share/osi-deploy/image-guard-manifest.json")
+    printf '%s\n' '{}' > "$data/osi-deploy/receipts/$baseline_id.factory-seed.json"
+    printf '%s\n' '{}' > "$data/osi-deploy/factory-database-lineage.json"
+    chmod 600 "$data/osi-deploy/deployment-state.json" "$data/osi-deploy/receipts/$baseline_id.factory-seed.json" "$data/osi-deploy/factory-database-lineage.json"
     status=0
     OSI_REPAIR_PROGRAM_MODE=1 OSI_DEPLOY_ARTIFACT_MODE=test \
-    OSI_ROM_ROOT="$rom" OSI_DATA_ROOT="$data" OSI_IMAGE_PROFILE="$profile" \
+    OSI_ROM_ROOT="$rom" OSI_DATA_ROOT="$data" OSI_RUN_ROOT="$run" OSI_IMAGE_PROFILE="$profile" \
         sh "$rom/etc/uci-defaults/97_osi_db_seed" 2>/dev/null || status=$?
     [ "$status" -ne 0 ] || { echo "97 accepted a forged minimal baseline state" >&2; exit 1; }
 }

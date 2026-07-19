@@ -77,6 +77,7 @@ const FACTORY_BASELINE_PREFIXES = Object.freeze([
 ]);
 const FACTORY_BASELINE_PARENT_FIELDS = Object.freeze([
   'deploymentId', 'phase', 'generation', 'imageBaselinePrefix', 'databaseLineage',
+  'factoryProvenanceSha256',
   'factoryZeroAuthority',
   // The factory verbs may carry the ordinary identity/timestamp fields while
   // they share the format-2 envelope; keep the accepted set closed.
@@ -1012,6 +1013,7 @@ function validateFactoryBaselineEnvelope(envelope, options = {}) {
   }
 
   if ('leaseActive' in parent) assertBoolean(parent.leaseActive, 'factory baseline parentDeployment.leaseActive');
+  if ('factoryProvenanceSha256' in parent) assertSha256Hex(parent.factoryProvenanceSha256, 'factory baseline parentDeployment.factoryProvenanceSha256');
   if ('attemptSha256' in parent) assertSha256Hex(parent.attemptSha256, 'factory baseline parentDeployment.attemptSha256');
   if ('targetCommitSha' in parent) assertString(parent.targetCommitSha, 'factory baseline parentDeployment.targetCommitSha');
   if ('controllerGeneration' in parent) assertPositiveInt(parent.controllerGeneration, 'factory baseline parentDeployment.controllerGeneration');
@@ -1040,6 +1042,10 @@ function validateFactoryBaselineEnvelope(envelope, options = {}) {
   if (options.expectedDatabaseLineageSha256 !== undefined
       && parent.databaseLineage.databaseLineageSha256 !== options.expectedDatabaseLineageSha256) {
     throw new DeploymentStateError('factory baseline lineage does not match immutable lineage bytes', 'hash-mismatch');
+  }
+  if (options.expectedFactoryProvenanceSha256 !== undefined
+      && parent.factoryProvenanceSha256 !== options.expectedFactoryProvenanceSha256) {
+    throw new DeploymentStateError('factory baseline provenance does not match immutable ROM bytes', 'hash-mismatch');
   }
   if (options.expectedSeedReceiptSha256 !== undefined
       && parent.databaseLineage.seedReceiptSha256 !== options.expectedSeedReceiptSha256) {

@@ -77,11 +77,35 @@ function writeJson(file, bytes) {
 }
 
 function generate(options) {
+  if (options.refreshBoundHashes) {
+    const artifacts = refreshArtifacts(options);
+    if (options.check) return check({ ...options, refreshBoundHashes: false, preserveImageBuildId: false });
+    // All candidates are built and validated before the first replacement.
+    // Manifests land before their dependent provenance records.
+    for (const artifact of artifacts) writeJson(artifact.manifestPath, artifact.manifestBytes);
+    for (const artifact of artifacts) writeJson(artifact.provenancePath, artifact.provenanceBytes);
+    return { ok: true, profiles: artifacts.map((item) => item.provenance.profile) };
+  }
   const artifacts = makeArtifacts({ ...options, root: options.root || REPO_ROOT });
   if (options.check) return check(options);
   writeJson(artifacts.manifestPath, artifacts.manifestBytes);
   writeJson(artifacts.provenancePath, artifacts.provenanceBytes);
   return artifacts.provenance;
+}
+
+function refreshArtifacts(options) {
+  const root = options.root || REPO_ROOT;
+  const profiles = options.profile ? [options.profile] : Object.keys(codec.PROFILES);
+  const artifacts = profiles.map((profile) => {
+    const p = paths(root, profile);
+    const existing = codec.readCanonicalJson(p.provenance, `${profile} factory provenance`);
+    codec.assertProfileRelation(existing, profile);
+    if (options.preserveImageBuildId && !existing.imageBuildId) throw new Error(`${profile} provenance has no imageBuildId to preserve`);
+    return makeArtifacts({ root, profile, imageBuildId: existing.imageBuildId });
+  });
+  const ids = new Set(artifacts.map((item) => item.provenance.imageBuildId));
+  if (ids.size !== artifacts.length) throw new Error('refresh profiles must have distinct imageBuildId values');
+  return artifacts;
 }
 
 function check(options) {
@@ -101,14 +125,16 @@ function check(options) {
 }
 
 function parse(argv) {
-  const options = { root: REPO_ROOT, write: false, check: false };
+  const options = { root: REPO_ROOT, write: false, check: false, refreshBoundHashes: false, preserveImageBuildId: false };
+  const seen = new Set();
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
+    if (seen.has(arg)) throw new Error(`duplicate flag: ${arg}`);
+    seen.add(arg);
     if (arg === '--write') options.write = true;
     else if (arg === '--check') options.check = true;
-    else if (arg === '--refresh-bound-hashes' || arg === '--preserve-image-build-id') {
-      throw new Error(`${arg} is reserved for a later reviewed migration; it is not accepted in this checkpoint`);
-    }
+    else if (arg === '--refresh-bound-hashes') options.refreshBoundHashes = true;
+    else if (arg === '--preserve-image-build-id') options.preserveImageBuildId = true;
     else if (arg.startsWith('--') && ['--root', '--profile', '--image-build-id'].includes(arg)) {
       const value = argv[++i];
       if (!value || value.startsWith('--')) throw new Error(`missing value for ${arg}`);
@@ -117,8 +143,12 @@ function parse(argv) {
     } else throw new Error(`unknown flag: ${arg}`);
   }
   if (options.write === options.check) throw new Error('choose exactly one of --write or --check');
+  if (options.preserveImageBuildId && !options.refreshBoundHashes) throw new Error('--preserve-image-build-id requires --refresh-bound-hashes');
+  if (options.refreshBoundHashes && !options.preserveImageBuildId) throw new Error('--refresh-bound-hashes requires --preserve-image-build-id');
+  if (options.refreshBoundHashes && options.imageBuildId) throw new Error('--image-build-id cannot be combined with --refresh-bound-hashes');
+  if (options.refreshBoundHashes && options.profile) throw new Error('--refresh-bound-hashes always covers both profiles');
   if (options.profile) codec.profileInfo(options.profile);
-  if (!options.profile && options.write) throw new Error('--profile is required with --write');
+  if (!options.profile && options.write && !options.refreshBoundHashes) throw new Error('--profile is required with --write');
   if (options.root.includes('\0') || !path.isAbsolute(options.root)) throw new Error('--root must be absolute');
   return options;
 }

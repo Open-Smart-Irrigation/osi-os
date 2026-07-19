@@ -18,6 +18,10 @@ function makeCase() {
     files[name] = path.join(root, name);
     fs.writeFileSync(files[name], `${name}\n`, { mode: 0o600 });
   }
+  for (const [alias, source] of [['osi-factory-database-seed.js', 'seed-library'], ['osi-deployment-state-cli.js', 'state-cli'],
+    ['osi-factory-image-provenance.js', 'provenance-library'], ['osi-factory-image-provenance-cli.js', 'provenance-cli']]) {
+    fs.writeFileSync(path.join(root, alias), `${source}\n`, { mode: 0o600 });
+  }
   const manifest = {
     format: 1,
     profile: 'bcm2712',
@@ -83,10 +87,31 @@ test('verify-runtime creates one root-only, nonce-bearing verification result', 
     '--provenance-library', c.files['provenance-library'], '--provenance-cli', c.files['provenance-cli'], '--expected-profile', 'bcm2712', '--result', result];
   const output = cli.dispatch(args);
   assert.equal(output.profile, 'bcm2712');
+  assert.equal(Object.hasOwn(output, 'factoryVerification'), false, 'provenance-only verification cannot claim factory-zero eligibility');
   assert.match(output.nonce, /^[0-9a-f]{64}$/);
   assert.equal(JSON.parse(fs.readFileSync(result)).nonce, output.nonce);
   assert.equal((fs.statSync(result).mode & 0o777), 0o600);
-  assert.throws(() => cli.dispatch(args), /already exists|replay/);
+  const retry = cli.dispatch(args);
+  assert.equal(retry.nonce, output.nonce, 'same-boot retry must reuse the exact unconsumed result');
+});
+
+test('verify-runtime accepts the exact first-boot argv without derived-path flags', () => {
+  const c = makeCase();
+  const result = path.join(c.root, 'exact-result.json');
+  const args = ['verify-runtime', '--factory-provenance', c.provenancePath, '--image-guard-manifest', c.manifestPath,
+    '--initializer', c.files.initializer, '--factory-seed', c.files.seed, '--factory-seed-helper', c.files['seed-cli'],
+    '--ack-audit-cli', c.files.audit, '--protocol-cli', c.files['protocol-cli'], '--expected-profile', 'bcm2712', '--result', result];
+  assert.equal(cli.dispatch(args).profile, 'bcm2712');
+});
+
+test('check-runtime revalidates the exact ROM candidates without creating a result', () => {
+  const c = makeCase();
+  const args = ['check-runtime', '--factory-provenance', c.provenancePath, '--image-guard-manifest', c.manifestPath,
+    '--initializer', c.files.initializer, '--factory-seed', c.files.seed, '--factory-seed-helper', c.files['seed-cli'],
+    '--ack-audit-cli', c.files.audit, '--protocol-cli', c.files['protocol-cli'], '--expected-profile', 'bcm2712'];
+  const output = cli.dispatch(args);
+  assert.equal(output.profile, 'bcm2712');
+  assert.equal(fs.readdirSync(c.root).some((name) => name.includes('verification-result')), false);
 });
 
 test('verify-runtime rejects a swapped live candidate', () => {
@@ -113,4 +138,16 @@ test('verify-runtime rejects provenance and candidates under a symlink ancestor'
     '--expected-profile', 'bcm2712', '--result', result];
   try { assert.throws(() => cli.dispatch(args), /symlink ancestor/); }
   finally { fs.unlinkSync(c.root); fs.renameSync(real, c.root); }
+});
+
+test('verify-runtime rejects a result path whose existing parent is below a symlink ancestor', () => {
+  const c = makeCase();
+  const real = path.join(c.root, 'real');
+  fs.mkdirSync(path.join(real, 'sub'), { recursive: true });
+  fs.symlinkSync(real, path.join(c.root, 'linked'));
+  const result = path.join(c.root, 'linked', 'sub', 'result.json');
+  const args = ['verify-runtime', '--factory-provenance', c.provenancePath, '--image-guard-manifest', c.manifestPath,
+    '--initializer', c.files.initializer, '--factory-seed', c.files.seed, '--factory-seed-library', c.files['seed-library'], '--factory-seed-helper', c.files['seed-cli'], '--deployment-state-cli', c.files['state-cli'],
+    '--ack-audit-cli', c.files.audit, '--protocol-cli', c.files['protocol-cli'], '--provenance-library', c.files['provenance-library'], '--provenance-cli', c.files['provenance-cli'], '--expected-profile', 'bcm2712', '--result', result];
+  assert.throws(() => cli.dispatch(args), /symlink ancestor|verification result parent/);
 });

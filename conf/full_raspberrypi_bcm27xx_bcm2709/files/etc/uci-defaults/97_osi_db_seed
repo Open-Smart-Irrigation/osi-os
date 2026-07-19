@@ -7,20 +7,30 @@ set -eu
 if [ "${OSI_REPAIR_PROGRAM_MODE:-0}" = 1 ] && [ "${OSI_DEPLOY_ARTIFACT_MODE:-}" = test ]; then
     ROM_ROOT=${OSI_ROM_ROOT:-/rom}
     DATA_ROOT=${OSI_DATA_ROOT:-/data}
+    RUN_ROOT=${OSI_RUN_ROOT:-/var/run}
     NODE=${OSI_NODE:-node}
 else
     ROM_ROOT=/rom
     DATA_ROOT=/data
+    RUN_ROOT=/var/run
     NODE=/usr/bin/node
 fi
-DB="$DATA_ROOT/db/farming.db"
+PATH=/usr/sbin:/usr/bin:/sbin:/bin
+export PATH
+DATA_DB="$DATA_ROOT/db/farming.db" # production target: /data/db/farming.db
 STATE_ROOT="$DATA_ROOT/osi-deploy"
 SEED="$ROM_ROOT/usr/share/db/farming.db"
 PROVENANCE="$ROM_ROOT/usr/share/osi-deploy/factory-image-provenance.json"
+MANIFEST="$ROM_ROOT/usr/share/osi-deploy/image-guard-manifest.json"
+PROVENANCE_CODEC="$ROM_ROOT/usr/libexec/osi-factory-image-provenance.js"
+SEED_LIBRARY="$ROM_ROOT/usr/libexec/osi-factory-database-seed.js"
+STATE_LIBRARY="$ROM_ROOT/usr/libexec/osi-deployment-state.js"
+SEED_HELPER="$ROM_ROOT/usr/libexec/osi-factory-database-seed-cli.js"
+STATE_CLI="$ROM_ROOT/usr/libexec/osi-deployment-state-cli.js"
+PROVENANCE_CLI="$ROM_ROOT/usr/libexec/osi-factory-image-provenance-cli.js"
+RESULT="$RUN_ROOT/osi-factory-image-verification.json"
 STATE="$STATE_ROOT/deployment-state.json"
-RECEIPT="$STATE_ROOT/receipts/factory-seed.json"
-LINEAGE="$STATE_ROOT/database-lineage.json"
-PUBLICATION="$LINEAGE.seed-publication.json"
+LINEAGE="$STATE_ROOT/factory-database-lineage.json"
 
 fail() { logger -t osi-db-seed "$1" 2>/dev/null || :; return 1; }
 safe_path() {
@@ -34,78 +44,112 @@ safe_path() {
         candidate=$(dirname "$candidate")
     done
 }
-for candidate in "$ROM_ROOT" "$DATA_ROOT" "$DB" "$STATE_ROOT" "$STATE" "$RECEIPT" "$LINEAGE" "$PUBLICATION" "$SEED" "$PROVENANCE"; do safe_path "$candidate"; done
+safe_path "$0"
+[ -f "$0" ] && cmp -s "$0" "$ROM_ROOT/etc/uci-defaults/97_osi_db_seed" || fail "overlay 97 differs from ROM authority"
+for candidate in "$ROM_ROOT" "$DATA_ROOT" "$DATA_DB" "$STATE_ROOT" "$STATE" "$LINEAGE" "$SEED" "$PROVENANCE" "$MANIFEST" "$PROVENANCE_CODEC" "$SEED_LIBRARY" "$STATE_LIBRARY" "$SEED_HELPER" "$STATE_CLI" "$PROVENANCE_CLI" "$RESULT"; do safe_path "$candidate"; done
 [ -d "$DATA_ROOT" ] && [ ! -L "$DATA_ROOT" ] || fail "persistent data root missing or unsafe"
 [ -f "$SEED" ] && [ ! -L "$SEED" ] || fail "ROM seed missing or unsafe"
 [ -f "$PROVENANCE" ] && [ ! -L "$PROVENANCE" ] || fail "ROM provenance missing or unsafe"
+[ -f "$MANIFEST" ] && [ ! -L "$MANIFEST" ] || fail "ROM manifest missing or unsafe"
+[ -f "$PROVENANCE_CODEC" ] && [ ! -L "$PROVENANCE_CODEC" ] || fail "provenance codec missing or unsafe"
+[ -f "$SEED_LIBRARY" ] && [ ! -L "$SEED_LIBRARY" ] || fail "factory seed library missing or unsafe"
+[ -f "$STATE_LIBRARY" ] && [ ! -L "$STATE_LIBRARY" ] || fail "deployment state library missing or unsafe"
+[ -f "$SEED_HELPER" ] && [ ! -L "$SEED_HELPER" ] || fail "factory seed helper missing or unsafe"
+[ -f "$STATE_CLI" ] && [ ! -L "$STATE_CLI" ] || fail "deployment state CLI missing or unsafe"
+[ -f "$PROVENANCE_CLI" ] && [ ! -L "$PROVENANCE_CLI" ] || fail "provenance CLI missing or unsafe"
+[ ! -e "$RESULT" ] && [ ! -L "$RESULT" ] || fail "factory verification result must be consumed by initialize-image-baseline"
+
+"$NODE" "$PROVENANCE_CLI" check-runtime \
+    --factory-provenance "$PROVENANCE" \
+    --image-guard-manifest "$MANIFEST" \
+    --initializer "$ROM_ROOT/etc/uci-defaults/93_osi_deploy_guard_init" \
+    --factory-seed "$SEED" \
+    --factory-seed-helper "$SEED_HELPER" \
+    --ack-audit-cli "$ROM_ROOT/usr/libexec/osi-audit-command-ack-state.js" \
+    --protocol-cli "$ROM_ROOT/usr/libexec/osi-sync-protocol-capability-cli.js" \
+    --expected-profile "$($NODE -e 'const fs=require("fs"); process.stdout.write(JSON.parse(fs.readFileSync(process.argv[1])).profile);' "$PROVENANCE")" >/dev/null
+
+BASELINE_ID=$($NODE - "$PROVENANCE" "$MANIFEST" "$ROM_ROOT/usr/libexec/osi-factory-image-provenance.js" <<'NODE'
+const fs = require('node:fs');
+const [provenancePath, manifestPath, codecPath] = process.argv.slice(2);
+const codec = require(codecPath);
+const p = codec.readCanonicalJson(provenancePath, 'factory provenance');
+const manifestBytes = fs.readFileSync(manifestPath);
+const manifest = codec.readCanonicalJson(manifestPath, 'image-guard manifest');
+codec.assertProfileRelation(p, p.profile);
+codec.validateManifest(manifest, p.profile);
+if (p.imageBuildId !== manifest.imageBuildId || p.imageGuardManifestSha256 !== codec.hashFile(manifestPath)) process.exit(1);
+process.stdout.write(codec.factoryBaselineId(p.profile, manifestBytes));
+NODE
+)
+RECEIPT="$STATE_ROOT/receipts/$BASELINE_ID.factory-seed.json"
+PUBLICATION="$LINEAGE.seed-publication.json"
+safe_path "$RECEIPT"; safe_path "$PUBLICATION"
 
 # Sidecars are checked before the existing-main-file branch.  An abandoned
 # WAL/SHM/journal is never made harmless by an apparently valid main file.
-for sidecar in "$DB-wal" "$DB-shm" "$DB-journal"; do
+for sidecar in "$DATA_DB-wal" "$DATA_DB-shm" "$DATA_DB-journal"; do
     safe_path "$sidecar"
     [ ! -e "$sidecar" ] || fail "sidecar exists; refusing seed"
 done
 
-# A foreign/mismatched state chain is not idempotence.  Validate all durable
-# evidence before accepting an existing database (or attempting any seed).
-"$NODE" - "$STATE" "$RECEIPT" "$LINEAGE" "$DB" "$PROVENANCE" "$SEED" "$PUBLICATION" "$ROM_ROOT/usr/libexec/osi-factory-database-seed.js" "$ROM_ROOT/usr/libexec/osi-deployment-state.js" <<'NODE'
+# A foreign/mismatched state chain is not idempotence.  The factory-seed
+# helper remains the sole lineage/schema authority; this wrapper only binds
+# its result to the deployment envelope and ROM provenance.
+"$NODE" - "$STATE" "$RECEIPT" "$LINEAGE" "$DATA_DB" "$PROVENANCE" "$SEED" "$SEED_LIBRARY" "$STATE_LIBRARY" "$PROVENANCE_CODEC" "$MANIFEST" "$BASELINE_ID" <<'NODE'
 const fs = require('node:fs');
 const crypto = require('node:crypto');
-const [statePath, receiptPath, lineagePath, databasePath, provenancePath, seedPath, publicationPath, seedLibraryPath, stateLibraryPath] = process.argv.slice(2);
+const [statePath, receiptPath, lineagePath, databasePath, provenancePath, seedPath, seedLibraryPath, stateLibraryPath, provenanceLibraryPath, manifestPath, baselineId] = process.argv.slice(2);
 const sha = value => crypto.createHash('sha256').update(value).digest('hex');
-const canonical = value => Array.isArray(value) ? `[${value.map(canonical).join(',')}]`
-  : (value && typeof value === 'object' ? `{${Object.keys(value).sort().map(key => `${JSON.stringify(key)}:${canonical(value[key])}`).join(',')}}` : JSON.stringify(value));
 function regular(file, label, expectedMode = 0o600) {
   const stat = fs.lstatSync(file);
   if (!stat.isFile() || stat.isSymbolicLink()) throw new Error(`${label} must be a regular nonsymlink file`);
   if (expectedMode !== null && stat.uid !== process.getuid()) throw new Error(`${label} must be owned by the runtime user`);
-  if (expectedMode !== null && (stat.mode & 0o777) !== expectedMode) throw new Error(`${label} must be mode ${expectedMode.toString(8).padStart(4, '0')}`);
+  if (expectedMode !== null && (stat.mode & 0o7777) !== expectedMode) throw new Error(`${label} must be mode ${expectedMode.toString(8).padStart(4, '0')}`);
   if (expectedMode === null && (stat.mode & 0o444) === 0) throw new Error(`${label} must be readable`);
   return stat;
 }
 function json(file, label, expectedMode = 0o600) { regular(file, label, expectedMode); return JSON.parse(fs.readFileSync(file, 'utf8')); }
 const state = json(statePath, 'deployment state');
 const receipt = json(receiptPath, 'factory seed receipt');
-const lineage = json(lineagePath, 'factory database lineage');
-// ROM artifacts are read-only image inputs and are shipped mode 0644.  Only
-// mutable factory evidence in /data is root-only mode 0600.
-const provenance = json(provenancePath, 'factory provenance', null);
-regular(seedPath, 'factory seed', null);
-regular(publicationPath, 'factory database publication authority');
-const receiptKeys = ['format', 'receiptKind', 'operationId', 'databasePath', 'seedSha256', 'dataMountIdentitySha256', 'databasePublicationSha256', 'createdDevice', 'createdInode', 'createdAt'];
-if (!receipt || Object.keys(receipt).sort().join() !== receiptKeys.sort().join()
-    || receipt.format !== 1 || receipt.receiptKind !== 'factory-seed' || receipt.databasePath !== databasePath
-    || typeof receipt.operationId !== 'string' || receipt.operationId.length === 0) throw new Error('factory seed receipt is foreign or mismatched');
-const lineageKeys = ['format', 'databasePath', 'seedReceiptSha256', 'seedSha256', 'dataMountIdentitySha256', 'databasePublicationSha256', 'createdDevice', 'createdInode', 'createdAt'];
-if (!lineage || Object.keys(lineage).sort().join() !== lineageKeys.sort().join()
-    || lineage.format !== 1 || lineage.databasePath !== databasePath) throw new Error('factory database lineage is foreign or mismatched');
-const receiptSha = sha(fs.readFileSync(receiptPath));
 const stateLibrary = require(stateLibraryPath);
-const lineageSha = sha(Buffer.from(canonical(lineage)));
-const provenanceSha = sha(fs.readFileSync(provenancePath));
-stateLibrary.validateFactoryBaselineEnvelope(state, {
-  expectedDeploymentId: receipt.operationId,
-  expectedFactoryProvenanceSha256: provenanceSha,
-  expectedSeedReceiptSha256: receiptSha,
-  expectedDatabaseLineageSha256: lineageSha,
-});
-const stateLineage = state.parentDeployment.databaseLineage;
-if (lineage.seedReceiptSha256 !== receiptSha || receipt.seedSha256 !== provenance.factorySeedSha256 || lineage.seedSha256 !== provenance.factorySeedSha256) throw new Error('factory seed receipt/lineage/provenance mismatch');
-if (stateLineage.databaseLineageSha256 !== lineageSha || stateLineage.seedReceiptSha256 !== receiptSha) throw new Error('deployment state lineage does not bind receipt/lineage bytes');
-if (sha(fs.readFileSync(seedPath)) !== provenance.factorySeedSha256) throw new Error('factory seed bytes do not match provenance');
+const provenanceCodec = require(provenanceLibraryPath);
 const seed = require(seedLibraryPath);
-seed.verifyFactoryDatabaseLineage(lineagePath, {
+// ROM artifacts are read-only image inputs and are shipped mode 0644.  The
+// shared provenance codec owns their exact schema/hash validation.
+const provenance = json(provenancePath, 'factory provenance', 0o644);
+regular(manifestPath, 'image-guard manifest', 0o644);
+const manifest = provenanceCodec.readCanonicalJson(manifestPath, 'image-guard manifest');
+provenanceCodec.assertProfileRelation(provenance, manifest.profile);
+provenanceCodec.validateManifest(manifest, manifest.profile);
+if (provenance.imageBuildId !== manifest.imageBuildId || provenance.imageGuardManifestSha256 !== provenanceCodec.hashFile(manifestPath)) throw new Error('ROM provenance/manifest mismatch');
+if (receipt.operationId !== baselineId) throw new Error('factory seed receipt operationId is not the deterministic baseline ID');
+regular(seedPath, 'factory seed', 0o644);
+if (!state.parentDeployment || state.parentDeployment.imageBaselinePrefix !== 'baseline-completing') throw new Error('factory baseline is not in the next-boot completion prefix');
+const receiptSha = sha(fs.readFileSync(receiptPath));
+const provenanceSha = provenanceCodec.provenanceHash(provenance);
+const stateLineage = state.parentDeployment && state.parentDeployment.databaseLineage;
+if (!stateLineage || stateLineage.status !== 'valid' || !/^[0-9a-f]{64}$/.test(stateLineage.databaseLineageSha256)) throw new Error('deployment state has no valid lineage hash');
+const verifiedLineage = seed.verifyFactoryDatabaseLineage(lineagePath, {
   database: databasePath,
   seedReceiptPath: receiptPath,
   expectedSeedReceiptSha256: receiptSha,
   expectedSeedSha256: provenance.factorySeedSha256,
-  expectedDatabaseLineageSha256: lineageSha,
+  expectedDatabaseLineageSha256: stateLineage.databaseLineageSha256,
   databaseLineageState: stateLineage,
 });
+const lineageSha = verifiedLineage.databaseLineageSha256;
+stateLibrary.validateFactoryBaselineEnvelope(state, {
+  expectedDeploymentId: baselineId,
+  expectedFactoryProvenanceSha256: provenanceSha,
+  expectedSeedReceiptSha256: receiptSha,
+  expectedDatabaseLineageSha256: lineageSha,
+});
+if (sha(fs.readFileSync(seedPath)) !== provenance.factorySeedSha256) throw new Error('factory seed bytes do not match provenance');
 NODE
 
-[ -e "$DB" ] || fail "database missing after verified 93 baseline"
-if [ -f "$DB" ] && [ ! -L "$DB" ]; then
+[ -e "$DATA_DB" ] || fail "database missing after verified 93 baseline"
+if [ -f "$DATA_DB" ] && [ ! -L "$DATA_DB" ]; then
     exit 0
 fi
 fail "database is not a regular nonsymlink file"

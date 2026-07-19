@@ -11,13 +11,26 @@ function verifyProfile(root, profile) {
   const artifacts = generator.makeArtifacts({ root, profile, imageBuildId: undefined });
   const manifest = codec.readCanonicalJson(artifacts.manifestPath, `${profile} image-guard manifest`);
   const provenance = codec.readCanonicalJson(artifacts.provenancePath, `${profile} factory provenance`);
+  for (const [file, label] of [[artifacts.manifestPath, 'image-guard manifest'], [artifacts.provenancePath, 'factory provenance']]) {
+    const stat = fs.lstatSync(file);
+    if (!stat.isFile() || stat.isSymbolicLink() || (stat.mode & 0o7777) !== 0o644) throw new Error(`${profile} ${label} mode mismatch`);
+  }
   cli.verifyManifest(manifest, profile);
   codec.assertProfileRelation(provenance, profile);
+  if (provenance.imageBuildId !== manifest.imageBuildId) throw new Error(`${profile} imageBuildId mismatch`);
   if (!Buffer.from(`${codec.canonical(artifacts.manifest)}\n`).equals(fs.readFileSync(artifacts.manifestPath))) throw new Error(`${profile} image-guard manifest hash mismatch`);
   if (!Buffer.from(`${codec.canonical(artifacts.provenance)}\n`).equals(fs.readFileSync(artifacts.provenancePath))) throw new Error(`${profile} factory provenance hash mismatch`);
   for (const [key, relative] of Object.entries(codec.BOUND)) {
     const file = codec.safeJoin(artifacts.filesRoot, relative, `${profile} ${key}`);
     if (codec.hashFile(file, `${profile} ${key}`) !== manifest.files[key]) throw new Error(`${profile} ${key} hash mismatch`);
+    const executable = new Set([
+      'etc/uci-defaults/93_osi_deploy_guard_init', 'etc/uci-defaults/97_osi_db_seed',
+      'usr/libexec/osi-factory-database-seed-cli.js', 'usr/libexec/osi-deployment-state-cli.js',
+      'usr/libexec/osi-audit-command-ack-state.js', 'usr/libexec/osi-sync-protocol-capability-cli.js',
+    ]);
+    const expectedMode = executable.has(relative) ? 0o755 : 0o644;
+    const stat = fs.lstatSync(file);
+    if ((stat.mode & 0o7777) !== expectedMode) throw new Error(`${profile} ${key} mode mismatch`);
   }
   const sourceLib = path.join(root, 'scripts/lib/factory-image-provenance.js');
   const sourceState = path.join(root, 'scripts/lib/deployment-state.js');
@@ -46,9 +59,16 @@ if (require.main === module) {
   try {
     const args = process.argv.slice(2);
     const options = { root: path.resolve(__dirname, '..') };
+    const seen = new Set();
     for (let i = 0; i < args.length; i += 1) {
       const arg = args[i];
-      if (arg === '--root' || arg === '--profile') options[arg.slice(2)] = args[++i];
+      if (seen.has(arg)) throw new Error(`duplicate flag: ${arg}`);
+      if (arg === '--root' || arg === '--profile') {
+        seen.add(arg);
+        const value = args[++i];
+        if (!value || value.startsWith('--')) throw new Error(`missing value for ${arg}`);
+        options[arg.slice(2)] = value;
+      }
       else throw new Error(`unknown flag: ${arg}`);
     }
     if (!path.isAbsolute(options.root)) throw new Error('--root must be absolute');
