@@ -9,7 +9,7 @@ import { useDraftsQueue } from '../../journal/useDraftsQueue';
 import { useJournalCatalog } from '../../journal/useJournalCatalog';
 import type { CreateEntryPayload } from '../../services/journalApi';
 import { journalApi } from '../../services/journalApi';
-import type { EntryAggregate } from '../../types/journal';
+import type { EntryAggregate, JournalCatalog } from '../../types/journal';
 import type {
   CaptureEntryValueInput,
   CaptureEntryValueOutput,
@@ -64,6 +64,7 @@ function draftFieldStates(
 interface DraftResumePanelProps {
   draft: EntryAggregate;
   model: JournalCaptureCatalogModel;
+  products: JournalCatalog['products'];
   locale: string | undefined;
   onClose: () => void;
   retry: () => Promise<void>;
@@ -79,6 +80,7 @@ function initialResumeSeed(
   layout: JournalLayoutDefinition | undefined,
   fieldStates: JournalFieldState[],
   draft: EntryAggregate,
+  products: JournalCatalog['products'],
   t: EntryFormTranslate,
 ): { payload: CaptureEntryValueOutput[]; valid: boolean } {
   if (!layout) return { payload: [], valid: false };
@@ -89,13 +91,13 @@ function initialResumeSeed(
     inputs: draft.values,
     selections: { activity_code: draft.activity_code },
     numberInputErrors: new Map(),
-    products: [],
+    products,
     t,
   });
   return { payload: result.payload, valid: result.valid };
 }
 
-const DraftResumePanel: React.FC<DraftResumePanelProps> = ({ draft, model, locale, onClose, retry }) => {
+const DraftResumePanel: React.FC<DraftResumePanelProps> = ({ draft, model, products, locale, onClose, retry }) => {
   const { t } = useTranslation('journal');
   const layout = model.layouts.get(draft.layout_code ?? '');
   const template = model.templates.get(draft.template_code);
@@ -127,10 +129,10 @@ const DraftResumePanel: React.FC<DraftResumePanelProps> = ({ draft, model, local
   ), [fieldStates, model]);
 
   const [payload, setPayload] = useState<CaptureEntryValueOutput[]>(
-    () => initialResumeSeed(model, layout, fieldStates, draft, t).payload,
+    () => initialResumeSeed(model, layout, fieldStates, draft, products, t).payload,
   );
   const [valid, setValid] = useState<boolean>(
-    () => initialResumeSeed(model, layout, fieldStates, draft, t).valid,
+    () => initialResumeSeed(model, layout, fieldStates, draft, products, t).valid,
   );
   const [completing, setCompleting] = useState(false);
   const [staleError, setStaleError] = useState(false);
@@ -214,6 +216,7 @@ const DraftResumePanel: React.FC<DraftResumePanelProps> = ({ draft, model, local
           setValid(nextValid);
         }}
         selections={selections}
+        products={products}
         locale={locale}
         showValidation
       />
@@ -379,10 +382,11 @@ export const DraftsQueue: React.FC<DraftsQueueProps> = ({ enabled = true, onResu
               )}
 
               {resumingUuid === draft.entry_uuid && (
-                model ? (
+                model && catalog ? (
                   <DraftResumePanel
                     draft={draft}
                     model={model}
+                    products={catalog.products}
                     locale={locale}
                     onClose={() => setResumingUuid(null)}
                     retry={retry}
