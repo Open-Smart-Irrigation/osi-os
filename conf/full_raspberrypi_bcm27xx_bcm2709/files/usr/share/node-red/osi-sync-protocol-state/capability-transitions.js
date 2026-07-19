@@ -1174,6 +1174,24 @@ function prepareDatabaseRestoreUnlocked(options) {
     );
   }
 
+  // The caller may explicitly report that no safe SQLite online-backup
+  // destination is available.  This is a rejected-only branch: do not call
+  // the adapter (which expects a concrete path), and do not append an
+  // invalidation generation without a durable snapshot.
+  if (opts.currentSnapshot == null) {
+    return publishImmutableJson(
+      opts.resultOut,
+      {
+        ...common,
+        result: 'REJECTED',
+        reason: 'SNAPSHOT_UNAVAILABLE',
+        changedNonCommandTables: [],
+        evidenceSha256: codecs.canonicalSha256({ currentEvidence, changedNonCommandTables: [] }),
+      },
+      opts.ownershipAdapter || paths.defaultOwnershipAdapter
+    );
+  }
+
   // The snapshot producer is deliberately injectable for deterministic
   // tests. Production wiring must supply the SQLite online-backup adapter;
   // a raw filesystem copy is never used here.
@@ -1467,10 +1485,11 @@ function prepareIntegrityRecoveryUnlocked(options) {
     loaded = load.loadProtocolState(opts);
   } catch (error) {
     // A hard crash during all-root genesis leaves a deliberately resumable
-    // prefix.  Only the typed all-root authority may interpret that prefix;
-    // every other caller still fails closed on partial roots.
-    if (error.code !== 'protocol_state_partial_root_set' || opts.integrityAllRootsAbsent !== true) throw error;
-    loaded = { initialized: false, midFlight: true };
+    // prefix.  The immutable absence intent and typed authority below decide
+    // whether that prefix may resume; the caller's recomputed Boolean is not
+    // trusted across a CLI retry.
+    if (error.code !== 'protocol_state_partial_root_set') throw error;
+    loaded = { initialized: false, midFlight: true, partial: true };
   }
   const initializationIntentPath = opts.integrityInitializationIntentOut || `${opts.resultOut}.initialization-intent.json`;
   let rootAbsenceRecovery = false;
@@ -1488,7 +1507,7 @@ function prepareIntegrityRecoveryUnlocked(options) {
     rootAbsenceRecovery = true;
     hasAbsenceIntent = true;
   }
-  const allRootsAbsent = !loaded.initialized && opts.integrityAllRootsAbsent === true;
+  const allRootsAbsent = !loaded.initialized && !loaded.partial && opts.integrityAllRootsAbsent === true;
   rootAbsenceRecovery = rootAbsenceRecovery || allRootsAbsent;
   let protocolInitialization = 'EXISTING';
   if (rootAbsenceRecovery) protocolInitialization = 'ALL_ROOT_ABSENCE';
@@ -1506,25 +1525,39 @@ function prepareIntegrityRecoveryUnlocked(options) {
       'all-root integrity recovery requires typed root-absence evidence and trusted absent backup heads'
     );
   }
-  if (allRootsAbsent) {
-    const roots = paths.resolveRoots(opts);
+  let initializationIntent = null;
+  const genesisOperationId = derivedOperationId(`integrity-genesis:${authority.recoveryOperationId}`);
+  const genesisRootsComplete = loaded.initialized === true &&
+    loaded.capability && loaded.capability.generations &&
+    loaded.capability.generations[0] &&
+    loaded.capability.generations[0].generation.operationId === genesisOperationId &&
+    loaded.activity && loaded.activity.genesisRow &&
+    loaded.activity.genesisRow.operation_id === genesisOperationId &&
+    loaded.activity.externalHead &&
+    loaded.activity.externalHead.generation === 0 &&
+    loaded.activity.resumable == null;
+  if (rootAbsenceRecovery && !genesisRootsComplete) {
     const ownershipAdapter = opts.ownershipAdapter || paths.defaultOwnershipAdapter;
-    const genesisOperationId = derivedOperationId(`integrity-genesis:${authority.recoveryOperationId}`);
-    const initializationIntent = publishImmutableJson(
-      initializationIntentPath,
-      {
-        format: 1,
-        kind: 'DATABASE_INTEGRITY_ROOT_ABSENCE_INITIALIZATION_INTENT',
-        recoveryOperationId: authority.recoveryOperationId,
-        genesisOperationId,
-        authoritySha256: codecs.canonicalSha256(authority),
-        observedEvidenceSha256,
-        backupManifestSha256,
-        protocolRootsAbsent: true,
-        createdAt: authority.createdAt,
-      },
-      ownershipAdapter
-    );
+    initializationIntent = allRootsAbsent
+      ? publishImmutableJson(
+        initializationIntentPath,
+        {
+          format: 1,
+          kind: 'DATABASE_INTEGRITY_ROOT_ABSENCE_INITIALIZATION_INTENT',
+          recoveryOperationId: authority.recoveryOperationId,
+          genesisOperationId,
+          authoritySha256: codecs.canonicalSha256(authority),
+          observedEvidenceSha256,
+          backupManifestSha256,
+          protocolRootsAbsent: true,
+          createdAt: authority.createdAt,
+        },
+        ownershipAdapter
+      )
+      : JSON.parse(fs.readFileSync(initializationIntentPath, 'utf8'));
+    if (initializationIntent.genesisOperationId !== genesisOperationId) {
+      throw transitionError('integrity_initialization_intent_mismatch', 'root-absence intent genesis operation does not match recovery authority');
+    }
     initModule.createFourRootsUnlocked({
       ...opts,
       operationId: genesisOperationId,
@@ -1537,7 +1570,7 @@ function prepareIntegrityRecoveryUnlocked(options) {
     }
     protocolInitialization = 'ALL_ROOT_ABSENCE';
   }
-  if ((!loaded.initialized && !allRootsAbsent) || (loaded.resumePending && !pendingTransition(
+  if ((!loaded.initialized && !rootAbsenceRecovery) || (loaded.resumePending && !pendingTransition(
     loaded,
     authority.recoveryOperationId,
     'DATABASE_INTEGRITY_INVALIDATION'

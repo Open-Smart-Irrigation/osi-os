@@ -540,6 +540,22 @@ test('completeDatabaseRestoreReconciliation clears only the exact invalidated re
   const dir = path.join(tmp, 'general-restore-reconcile');
   fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
   const recoveryOperationId = '66666666-6666-4666-8666-666666666666';
+  const unavailable = transitions.prepareDatabaseRestore({
+    ...opts, deploymentId: 'dep-1', parentGeneration: 9, recoveryOperationId,
+    backupManifest, restoreBaseline: baseline, reverseMergeAdapterInventory: reverseInventory,
+    backupCommandAudit, backupFarmingAudit, currentCommandAudit, currentFarmingAudit,
+    databaseLineageInvalidationReceiptSha256: null,
+    expectedHeadSha256: initial.capability.head.generationSha256,
+    expectedWitnessSha256: initial.capability.head.witnessSha256,
+    expectedActivityGeneration: initial.activity.externalHead.generation,
+    expectedActivityHeadSha256: protocol.canonicalSha256(initial.activity.externalHead),
+    prepareIntentOut: path.join(dir, 'unavailable-intent.json'), resultOut: path.join(dir, 'unavailable-result.json'),
+    currentSnapshot: null,
+    createdAt: '2026-07-19T00:05:00.000Z',
+  });
+  assert.equal(unavailable.result, 'REJECTED');
+  assert.equal(unavailable.reason, 'SNAPSHOT_UNAVAILABLE');
+  assert.equal(protocol.status(opts).capabilityGeneration, initial.capability.head.generation);
   const prepared = transitions.prepareDatabaseRestore({
     ...opts, deploymentId: 'dep-1', parentGeneration: 9, recoveryOperationId,
     backupManifest, restoreBaseline: baseline, reverseMergeAdapterInventory: reverseInventory,
@@ -684,17 +700,23 @@ test('prepareIntegrityRecovery initializes exact all-root absence before integri
   assert.equal(loaded.capability.generations.at(-1).generation.state.databaseRestore.status, 'RECONCILIATION_REQUIRED');
 });
 
-test('prepareIntegrityRecovery resumes all-root genesis after capability and activity head crashes', (t) => {
+test('prepareIntegrityRecovery resumes all-root genesis after every init crash with a recomputed CLI absence flag', (t) => {
   const { tmp, opts } = makeRoots();
   t.after(() => fs.rmSync(tmp, { recursive: true, force: true }));
-  for (const crashAfter of ['capability_head_published', 'activity_head_published']) {
+  const steps = [
+    'capability_dirs_created', 'capability_genesis_written', 'witness_root_created',
+    'capability_witness_written', 'capability_head_published', 'activity_root_created',
+    'activity_database_created', 'activity_head_witness_root_created',
+    'activity_checkpoint_written', 'activity_head_published',
+  ];
+  for (const crashAfter of steps) {
     fs.rmSync(tmp, { recursive: true, force: true });
     fs.mkdirSync(tmp, { recursive: true });
     const call = makeIntegrityAbsenceCall(tmp, opts, crashAfter);
     const script = `require(${JSON.stringify(path.join(__dirname, 'capability-transitions.js'))}).prepareIntegrityRecovery(${JSON.stringify(call)})`;
     const crashed = childProcess.spawnSync(process.execPath, ['-e', script], { encoding: 'utf8' });
     assert.equal(crashed.status, 137, crashAfter);
-    const resumed = transitions.prepareIntegrityRecovery({ ...call, crashAfter: undefined });
+    const resumed = transitions.prepareIntegrityRecovery({ ...call, crashAfter: undefined, integrityAllRootsAbsent: false });
     assert.equal(resumed.protocolInitialization, 'ALL_ROOT_ABSENCE', crashAfter);
     assert.equal(resumed.result, 'BACKUP_REPLACEMENT_PREPARED', crashAfter);
     assert.equal(protocol.loadProtocolState(opts).capability.generations.length, 2, crashAfter);

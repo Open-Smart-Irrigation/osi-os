@@ -777,6 +777,11 @@ function runPrepareDatabaseRestore(values) {
   const reverseInventory = readJsonFile(values['--reverse-merge-adapter-inventory'], { artifactOwned: true });
   const backupCommandAudit = readJsonFile(values['--backup-command-audit-report']);
   const backupFarmingAudit = readJsonFile(values['--backup-farming-audit-report']);
+  const currentCommandUnreadable = values['--current-command-audit-report'] === 'current-database-unreadable-json';
+  const currentFarmingUnreadable = values['--current-farming-audit-report'] === 'current-database-unreadable-json';
+  if (currentCommandUnreadable !== currentFarmingUnreadable) {
+    throw cliError('current_database_evidence_mismatch', 'current command and farming audit reports must use the same unreadable sentinel');
+  }
   const currentEvidenceCreatedAt = values['--recovery-operation-id'] ?
     `1970-01-01T00:00:00.000Z` : undefined;
   const currentCommandAudit = readCurrentDatabaseEvidence(values['--current-command-audit-report'], 'current command audit', currentEvidenceCreatedAt);
@@ -794,6 +799,7 @@ function runPrepareDatabaseRestore(values) {
     backupFarmingAudit,
     currentCommandAudit,
     currentFarmingAudit,
+    currentDatabaseUnreadable: currentFarmingUnreadable,
     currentSnapshot: values['--current-snapshot'] === 'snapshot-unavailable-json' ? null : values['--current-snapshot'],
     databaseLineageInvalidationReceiptSha256: lineageReceipt ? canonicalSha256(lineageReceipt) : null,
     expectedHeadSha256: values['--expected-head-sha256'],
