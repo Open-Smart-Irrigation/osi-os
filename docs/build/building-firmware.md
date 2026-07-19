@@ -77,7 +77,8 @@ the non-writing checks. The record binds the image build ID to the ROM
 initializer, seed, guard topology, and factory protocol helpers.
 
 ```bash
-IMAGE_BUILD_ID="$(date -u +%Y%m%d-%H%M%S)-${GIT_COMMIT:-$(git rev-parse --short HEAD)}"
+BUILD_DATE="$(date -u +%Y%m%d)"
+IMAGE_BUILD_ID="${BUILD_DATE}-factory-bcm2712"
 node scripts/generate-factory-image-provenance.js --write \
   --profile bcm2712 --image-build-id "$IMAGE_BUILD_ID"
 node scripts/generate-factory-image-provenance.js --check
@@ -85,9 +86,15 @@ node scripts/verify-factory-image-provenance.js
 sh scripts/test-image-guard-bootstrap.sh
 ```
 
-Repeat the `--write` command with `--profile bcm2709` when building the second
-target. Never build or publish an image before both profile records pass the
-same checks.
+For the second target, use the matching profile-bound ID:
+
+```bash
+node scripts/generate-factory-image-provenance.js --write \
+  --profile bcm2709 --image-build-id "${BUILD_DATE}-factory-bcm2709"
+```
+
+Never build or publish an image before both profile records pass the same
+checks.
 
 If the GUI changed:
 

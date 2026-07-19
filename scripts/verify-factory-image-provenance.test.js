@@ -19,6 +19,18 @@ test('verifier rejects an extra provenance field', () => {
     const value = JSON.parse(original);
     value.extra = true;
     fs.writeFileSync(file, `${JSON.stringify(value)}\n`);
-    assert.throws(() => verifier.verify({ root, profile: 'bcm2712' }), /unknown field/);
+    assert.throws(() => verifier.verify({ root, profile: 'bcm2712' }), /unknown field|canonical JSON bytes/);
   } finally { fs.writeFileSync(file, original); }
+});
+
+test('verifier rejects coordinated resident-copy drift', () => {
+  const residents = ['conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/libexec/osi-factory-image-provenance.js',
+    'conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/libexec/osi-factory-image-provenance.js'];
+  const originals = residents.map((file) => fs.readFileSync(path.join(root, file)));
+  try {
+    for (const file of residents) fs.appendFileSync(path.join(root, file), '\n// drift\n');
+    assert.throws(() => verifier.verify({ root }), /hash mismatch|resident provenance library drift/);
+  } finally {
+    residents.forEach((file, index) => fs.writeFileSync(path.join(root, file), originals[index]));
+  }
 });

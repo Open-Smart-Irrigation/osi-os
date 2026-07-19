@@ -4,22 +4,27 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const codec = require('./lib/factory-image-provenance');
-const generator = require('./generate-factory-image-provenance');
 const cli = require('./factory-image-provenance-cli');
 
 function verify({ rootfs, profile }) {
   if (!rootfs || !path.isAbsolute(rootfs)) throw new Error('rootfs must be absolute');
+  codec.assertNoSymlinkAncestors(rootfs, 'rootfs');
+  const rootStat = fs.lstatSync(rootfs);
+  if (!rootStat.isDirectory() || rootStat.isSymbolicLink()) throw new Error('rootfs must be a regular directory');
   codec.profileInfo(profile);
-  if (fs.existsSync(path.join(rootfs, 'rom'))) throw new Error('nested /rom packaging is not allowed');
-  const manifestPath = path.join(rootfs, 'usr/share/osi-deploy/image-guard-manifest.json');
-  const provenancePath = path.join(rootfs, 'usr/share/osi-deploy/factory-image-provenance.json');
-  const manifest = codec.readJson(manifestPath, 'built image-guard manifest');
-  const provenance = codec.readJson(provenancePath, 'built factory provenance');
+  const romPath = codec.safeJoin(rootfs, 'rom', 'nested /rom packaging');
+  try { fs.lstatSync(romPath); throw new Error('nested /rom packaging is not allowed'); } catch (error) {
+    if (error.code !== 'ENOENT') throw error;
+  }
+  const manifestPath = codec.safeJoin(rootfs, 'usr/share/osi-deploy/image-guard-manifest.json', 'built image-guard manifest');
+  const provenancePath = codec.safeJoin(rootfs, 'usr/share/osi-deploy/factory-image-provenance.json', 'built factory provenance');
+  const manifest = codec.readCanonicalJson(manifestPath, 'built image-guard manifest');
+  const provenance = codec.readCanonicalJson(provenancePath, 'built factory provenance');
   cli.verifyManifest(manifest, profile);
   codec.assertProfileRelation(provenance, profile);
   if (provenance.imageGuardManifestSha256 !== codec.hashFile(manifestPath)) throw new Error('built image-guard manifest hash mismatch');
-  for (const [key, relative] of Object.entries(generator.BOUND)) {
-    const file = path.join(rootfs, relative);
+  for (const [key, relative] of Object.entries(codec.BOUND)) {
+    const file = codec.safeJoin(rootfs, relative, `${key} built candidate`);
     const digest = codec.hashFile(file, `${key} built candidate`);
     if (digest !== manifest.files[key] || digest !== provenance[key]) throw new Error(`${key} hash mismatch`);
   }
@@ -27,7 +32,7 @@ function verify({ rootfs, profile }) {
   // source bytes, never an overlay-only replacement.
   for (const [source, relative] of [['scripts/lib/factory-image-provenance.js', 'usr/libexec/osi-factory-image-provenance.js'], ['scripts/factory-image-provenance-cli.js', 'usr/libexec/osi-factory-image-provenance-cli.js']]) {
     const sourcePath = path.resolve(__dirname, '..', source);
-    if (codec.hashFile(path.join(rootfs, relative)) !== codec.hashFile(sourcePath)) throw new Error(`built resident ${relative} drift`);
+    if (codec.hashFile(codec.safeJoin(rootfs, relative, `built resident ${relative}`)) !== codec.hashFile(sourcePath)) throw new Error(`built resident ${relative} drift`);
   }
   return { ok: true, profile };
 }

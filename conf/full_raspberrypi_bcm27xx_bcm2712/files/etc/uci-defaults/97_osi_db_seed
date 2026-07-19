@@ -1,27 +1,97 @@
 #!/bin/sh
 set -eu
 
-# The ROM seed helper owns hashing, SQLite checks, atomic publication, and the
-# one-use receipt.  This UCI wrapper never overwrites a live database.
-ROM_ROOT=${OSI_ROM_ROOT:-/rom}
-DATA_ROOT=${OSI_DATA_ROOT:-/data}
+# 97 is a completion/verification hook, never an authority creator.  The
+# only legal authority is the verified 93 image-baseline chain; test roots and
+# adapters are available solely inside the explicit repair-program gate.
+if [ "${OSI_REPAIR_PROGRAM_MODE:-0}" = 1 ] && [ "${OSI_DEPLOY_ARTIFACT_MODE:-}" = test ]; then
+    ROM_ROOT=${OSI_ROM_ROOT:-/rom}
+    DATA_ROOT=${OSI_DATA_ROOT:-/data}
+    NODE=${OSI_NODE:-node}
+else
+    ROM_ROOT=/rom
+    DATA_ROOT=/data
+    NODE=/usr/bin/node
+fi
 DB="$DATA_ROOT/db/farming.db"
 STATE_ROOT="$DATA_ROOT/osi-deploy"
 SEED="$ROM_ROOT/usr/share/db/farming.db"
 PROVENANCE="$ROM_ROOT/usr/share/osi-deploy/factory-image-provenance.json"
-NODE=${OSI_NODE:-node}
-PROFILE=${OSI_IMAGE_PROFILE:-$("$NODE" -e 'const fs=require("fs"); const p=JSON.parse(fs.readFileSync(process.argv[1])); process.stdout.write(p.profile);' "$PROVENANCE")}
+STATE="$STATE_ROOT/deployment-state.json"
+RECEIPT="$STATE_ROOT/receipts/factory-seed.json"
+LINEAGE="$STATE_ROOT/database-lineage.json"
+PUBLICATION="$LINEAGE.seed-publication.json"
 
-[ -f "$SEED" ] || { logger -t osi-db-seed "ROM seed missing" 2>/dev/null || :; exit 1; }
-[ -f "$PROVENANCE" ] || { logger -t osi-db-seed "ROM provenance missing" 2>/dev/null || :; exit 1; }
-[ ! -e "$DB" ] || exit 0
+fail() { logger -t osi-db-seed "$1" 2>/dev/null || :; return 1; }
+safe_path() {
+    candidate=$1
+    while [ "$candidate" != / ]; do
+        [ ! -L "$candidate" ] || fail "symlink path component: $candidate"
+        candidate=$(dirname "$candidate")
+    done
+}
+for candidate in "$ROM_ROOT" "$DATA_ROOT" "$DB" "$STATE_ROOT" "$STATE" "$RECEIPT" "$LINEAGE" "$PUBLICATION" "$SEED" "$PROVENANCE"; do safe_path "$candidate"; done
+[ -d "$DATA_ROOT" ] && [ ! -L "$DATA_ROOT" ] || fail "persistent data root missing or unsafe"
+[ -f "$SEED" ] && [ ! -L "$SEED" ] || fail "ROM seed missing or unsafe"
+[ -f "$PROVENANCE" ] && [ ! -L "$PROVENANCE" ] || fail "ROM provenance missing or unsafe"
+
+# Sidecars are checked before the existing-main-file branch.  An abandoned
+# WAL/SHM/journal is never made harmless by an apparently valid main file.
 for sidecar in "$DB-wal" "$DB-shm" "$DB-journal"; do
-    [ ! -e "$sidecar" ] || { logger -t osi-db-seed "sidecar exists; refusing seed" 2>/dev/null || :; exit 1; }
+    safe_path "$sidecar"
+    [ ! -e "$sidecar" ] || fail "sidecar exists; refusing seed"
 done
-mkdir -p "$DATA_ROOT/db" "$STATE_ROOT/receipts"
-SEED_SHA256=$("$NODE" -e 'const fs=require("fs"); const p=JSON.parse(fs.readFileSync(process.argv[1])); process.stdout.write(p.factorySeedSha256);' "$PROVENANCE")
-"$NODE" "$ROM_ROOT/usr/libexec/osi-factory-database-seed-cli.js" realize \
-    --factory-seed "$SEED" --expected-seed-sha256 "$SEED_SHA256" --database "$DB" \
-    --operation-id "factory-baseline-$PROFILE" \
-    --receipt-out "$STATE_ROOT/receipts/factory-seed.json" \
-    --database-lineage-out "$STATE_ROOT/database-lineage.json"
+
+# A foreign/mismatched state chain is not idempotence.  Validate all durable
+# evidence before accepting an existing database (or attempting any seed).
+"$NODE" - "$STATE" "$RECEIPT" "$LINEAGE" "$DB" "$PROVENANCE" "$SEED" "$PUBLICATION" "$ROM_ROOT/usr/libexec/osi-factory-database-seed.js" <<'NODE'
+const fs = require('node:fs');
+const crypto = require('node:crypto');
+const [statePath, receiptPath, lineagePath, databasePath, provenancePath, seedPath, publicationPath, seedLibraryPath] = process.argv.slice(2);
+const sha = value => crypto.createHash('sha256').update(value).digest('hex');
+const canonical = value => Array.isArray(value) ? `[${value.map(canonical).join(',')}]`
+  : (value && typeof value === 'object' ? `{${Object.keys(value).sort().map(key => `${JSON.stringify(key)}:${canonical(value[key])}`).join(',')}}` : JSON.stringify(value));
+function regular(file, label) {
+  const stat = fs.lstatSync(file);
+  if (!stat.isFile() || stat.isSymbolicLink()) throw new Error(`${label} must be a regular nonsymlink file`);
+  if ((stat.mode & 0o777) !== 0o600) throw new Error(`${label} must be mode 0600`);
+}
+function json(file, label) { regular(file, label); return JSON.parse(fs.readFileSync(file, 'utf8')); }
+const state = json(statePath, 'deployment state');
+const receipt = json(receiptPath, 'factory seed receipt');
+const lineage = json(lineagePath, 'factory database lineage');
+const provenance = json(provenancePath, 'factory provenance');
+regular(publicationPath, 'factory database publication authority');
+const phase = state && state.parentDeployment ? state.parentDeployment.phase : state && state.phase;
+if (!state || !state.parentDeployment || !['image-baseline-initializing', 'baseline-completing'].includes(phase)) throw new Error('deployment state is not the exact factory baseline chain');
+const stateLineage = state.parentDeployment.databaseLineage;
+if (!stateLineage || stateLineage.status !== 'valid'
+    || Object.keys(stateLineage).sort().join() !== ['status', 'databaseLineageSha256', 'seedReceiptSha256'].sort().join()) throw new Error('deployment state lineage is not valid');
+const receiptKeys = ['format', 'receiptKind', 'operationId', 'databasePath', 'seedSha256', 'dataMountIdentitySha256', 'databasePublicationSha256', 'createdDevice', 'createdInode', 'createdAt'];
+if (!receipt || Object.keys(receipt).sort().join() !== receiptKeys.sort().join()
+    || receipt.format !== 1 || receipt.receiptKind !== 'factory-seed' || receipt.databasePath !== databasePath
+    || receipt.operationId !== `factory-baseline-${provenance.profile}`) throw new Error('factory seed receipt is foreign or mismatched');
+const lineageKeys = ['format', 'databasePath', 'seedReceiptSha256', 'seedSha256', 'dataMountIdentitySha256', 'databasePublicationSha256', 'createdDevice', 'createdInode', 'createdAt'];
+if (!lineage || Object.keys(lineage).sort().join() !== lineageKeys.sort().join()
+    || lineage.format !== 1 || lineage.databasePath !== databasePath) throw new Error('factory database lineage is foreign or mismatched');
+const receiptSha = sha(fs.readFileSync(receiptPath));
+if (lineage.seedReceiptSha256 !== receiptSha || receipt.seedSha256 !== provenance.factorySeedSha256 || lineage.seedSha256 !== provenance.factorySeedSha256) throw new Error('factory seed receipt/lineage/provenance mismatch');
+const lineageSha = sha(Buffer.from(canonical(lineage)));
+if (stateLineage.databaseLineageSha256 !== lineageSha || stateLineage.seedReceiptSha256 !== receiptSha) throw new Error('deployment state lineage does not bind receipt/lineage bytes');
+if (sha(fs.readFileSync(seedPath)) !== provenance.factorySeedSha256) throw new Error('factory seed bytes do not match provenance');
+const seed = require(seedLibraryPath);
+seed.verifyFactoryDatabaseLineage(lineagePath, {
+  database: databasePath,
+  seedReceiptPath: receiptPath,
+  expectedSeedReceiptSha256: receiptSha,
+  expectedSeedSha256: provenance.factorySeedSha256,
+  expectedDatabaseLineageSha256: lineageSha,
+  databaseLineageState: stateLineage,
+});
+NODE
+
+[ -e "$DB" ] || fail "database missing after verified 93 baseline"
+if [ -f "$DB" ] && [ ! -L "$DB" ]; then
+    exit 0
+fi
+fail "database is not a regular nonsymlink file"

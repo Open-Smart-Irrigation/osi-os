@@ -115,7 +115,15 @@ function loadFactoryProvenanceValidator(provenancePath) {
     path.join(__dirname, 'lib/factory-image-provenance.js'),
     path.join(__dirname, 'osi-factory-image-provenance.js'),
   ];
-  let validatorPath = productionCandidates.find((candidate) => fs.existsSync(candidate));
+  // A0 commit 2 ships the provenance codec, while the audit-specific
+  // validateFactoryImageProvenance contract is added by the sync slice.  Do
+  // not mistake the generic codec for that narrower contract; select only a
+  // resident module that actually exports the audited validator.
+  let validatorPath = productionCandidates.find((candidate) => {
+    if (!fs.existsSync(candidate)) return false;
+    const loaded = require(candidate);
+    return typeof loaded.validateFactoryImageProvenance === 'function';
+  });
   const adapter = process.env.OSI_FACTORY_PROVENANCE_TEST_VALIDATOR;
   if (adapter) {
     if (validatorPath) throw new Error('test validator cannot override the production factory provenance validator');
