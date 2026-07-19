@@ -60,20 +60,26 @@ const SHARED_WITH_ENGLISH: Record<string, readonly string[]> = {
   // otherwise translates freely (Fertilization -> Düngung). Optional/Details:
   // genuine German words. Final: the record-state loanword, beside Entwurf/Storniert.
   // Name, Zone, and Station are the legitimate English-identical field labels in de-CH.
-  'de-CH': [...LAYOUT_KEYS, ...SHARED_STRUCTURE_KEYS, 'activity.fertigation', 'capture.confirm.values', 'capture.form.optional', 'row.status.final', 'plot.name', 'plot.station', 'plot.zone', 'where.station'],
+  // Status (Task 28 workspace filter) is the same loanword in German too.
+  'de-CH': [...LAYOUT_KEYS, ...SHARED_STRUCTURE_KEYS, 'activity.fertigation', 'capture.confirm.values', 'capture.form.optional', 'row.status.final', 'plot.name', 'plot.station', 'plot.zone', 'where.station', 'filters.status'],
   // Irrigation/Fertigation/Observation are spelled identically in French; Final
   // agrees with the implicit masculine "statut", beside Brouillon/Annulé.
-  // Zone, Station, and Active are the legitimate English-identical French labels.
-  fr: [...LAYOUT_KEYS, ...SHARED_STRUCTURE_KEYS, 'activity.fertigation', 'activity.general_observation', 'activity.irrigation', 'row.status.final', 'plot.active', 'plot.station', 'plot.zone', 'where.station'],
+  // Zone, Station, and Active are the legitimate English-identical French labels;
+  // the Task 28 workspace "Stations" heading is the same plural.
+  fr: [...LAYOUT_KEYS, ...SHARED_STRUCTURE_KEYS, 'activity.fertigation', 'activity.general_observation', 'activity.irrigation', 'row.status.final', 'plot.active', 'plot.station', 'plot.zone', 'where.station', 'workspace.scope.stations'],
   // "Note" (pl. of nota) and "No" are the correct Italian words.
   it: [...LAYOUT_KEYS, ...SHARED_STRUCTURE_KEYS, 'capture.form.booleanNo', 'capture.form.note'],
-  // "No" is identical in Spanish.
-  es: [...LAYOUT_KEYS, ...SHARED_STRUCTURE_KEYS, 'capture.form.booleanNo'],
-  // "Final" is the correct Portuguese word for this record state.
-  pt: [...LAYOUT_KEYS, ...SHARED_STRUCTURE_KEYS, 'row.status.final'],
+  // "No" is identical in Spanish; singular "sensor" (Task 28 workspace scope) is
+  // spelled the same in Spanish as in English.
+  es: [...LAYOUT_KEYS, ...SHARED_STRUCTURE_KEYS, 'capture.form.booleanNo', 'workspace.scope.sensors_one'],
+  // "Final" is the correct Portuguese word for this record state; singular
+  // "sensor" (Task 28 workspace scope) is spelled the same in Portuguese.
+  pt: [...LAYOUT_KEYS, ...SHARED_STRUCTURE_KEYS, 'row.status.final', 'workspace.scope.sensors_one'],
   // Fertigation has no vernacular Luganda equivalent; Timezone is a computing
-  // term the shipped lg files also leave in English.
-  lg: [...LAYOUT_KEYS, ...SHARED_STRUCTURE_KEYS, 'activity.fertigation', 'capture.where.timezone'],
+  // term the shipped lg files also leave in English. Campaign, Protocol, and
+  // Sensor(s) (Task 28 workspace filters/scope) follow the same precedent —
+  // no established Luganda term, kept as the source English word.
+  lg: [...LAYOUT_KEYS, ...SHARED_STRUCTURE_KEYS, 'activity.fertigation', 'capture.where.timezone', 'filters.campaign', 'filters.protocol', 'workspace.scope.sensors'],
 };
 
 const REQUIRED_CAPTURE_KEYS = [

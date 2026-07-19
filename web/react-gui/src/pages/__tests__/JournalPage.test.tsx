@@ -24,6 +24,8 @@ const mocks = vi.hoisted(() => ({
   retryPlots: vi.fn(),
   retryGroups: vi.fn(),
   retryZones: vi.fn(),
+  isDesktopBrowser: vi.fn(() => false),
+  workspace: vi.fn(),
 }));
 
 vi.mock('react-i18next', () => ({
@@ -58,6 +60,15 @@ vi.mock('../../services/api', () => ({
 }));
 vi.mock('../../services/journalApi', () => ({
   journalApi: mocks.journalApi,
+}));
+vi.mock('../../utils/isDesktopBrowser', () => ({
+  isDesktopBrowser: mocks.isDesktopBrowser,
+}));
+vi.mock('../../components/journal/desktop/JournalWorkspace', () => ({
+  JournalWorkspace: (props: unknown) => {
+    mocks.workspace(props);
+    return <div data-testid="journal-workspace" />;
+  },
 }));
 vi.mock('../../components/journal/JournalTimeline', () => ({
   JournalTimeline: (props: unknown) => {
@@ -532,6 +543,32 @@ describe('JournalPage', () => {
       updatePlotGroup: vi.fn(),
       revalidate: mocks.retryGroups,
     });
+  });
+
+  it('renders the desktop journal workspace instead of the mobile timeline on a desktop browser', () => {
+    mocks.isDesktopBrowser.mockReturnValue(true);
+
+    renderPage();
+
+    expect(screen.getByTestId('journal-workspace')).toBeInTheDocument();
+    expect(screen.queryByTestId('timeline')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'logActivity' })).not.toBeInTheDocument();
+    expect(mocks.workspace).toHaveBeenLastCalledWith(expect.objectContaining({
+      plots,
+      activeGroups: [],
+      zones,
+      activities: expect.arrayContaining([expect.objectContaining({ code: 'irrigation' })]),
+    }));
+  });
+
+  it('keeps the mobile capture and timeline route unchanged when the browser is not desktop', () => {
+    mocks.isDesktopBrowser.mockReturnValue(false);
+
+    renderPage();
+
+    expect(screen.getByTestId('timeline')).toBeInTheDocument();
+    expect(screen.queryByTestId('journal-workspace')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'logActivity' })).toBeInTheDocument();
   });
 
   it('keeps reads disabled while the catalog probe is loading', () => {

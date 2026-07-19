@@ -150,7 +150,31 @@
     "plot": "Parzelle",
     "allPlots": "Alle Parzellen",
     "activity": "Aktivität",
-    "allActivities": "Alle Aktivitäten"
+    "allActivities": "Alle Aktivitäten",
+    "status": "Status",
+    "allStatuses": "Alle Status",
+    "dateFrom": "Von",
+    "dateTo": "Bis",
+    "campaign": "Kampagne",
+    "protocol": "Protokoll"
+  },
+  "workspace": {
+    "search": "Suchen",
+    "searchPlaceholder": "Parzellen, Stationen, Gruppen suchen",
+    "scope": {
+      "stations": "Stationen",
+      "groups": "Gruppen",
+      "sensors": "Sensoren",
+      "sensors_one": "{{count}} Sensor",
+      "sensors_other": "{{count}} Sensoren",
+      "noSensors": "Keine Sensoren"
+    },
+    "table": {
+      "placeholder": "Wählen Sie eine Station, Gruppe oder Parzelle aus, um die Einträge zu sehen."
+    },
+    "detail": {
+      "placeholder": "Wählen Sie einen Eintrag aus, um die Details zu sehen."
+    }
   },
   "logActivity": "Aktivität erfassen",
   "capture": {

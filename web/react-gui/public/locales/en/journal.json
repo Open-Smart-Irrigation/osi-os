@@ -150,7 +150,31 @@
     "plot": "Plot",
     "allPlots": "All plots",
     "activity": "Activity",
-    "allActivities": "All activities"
+    "allActivities": "All activities",
+    "status": "Status",
+    "allStatuses": "All statuses",
+    "dateFrom": "From",
+    "dateTo": "To",
+    "campaign": "Campaign",
+    "protocol": "Protocol"
+  },
+  "workspace": {
+    "search": "Search",
+    "searchPlaceholder": "Search plots, stations, groups",
+    "scope": {
+      "stations": "Stations",
+      "groups": "Groups",
+      "sensors": "sensors",
+      "sensors_one": "{{count}} sensor",
+      "sensors_other": "{{count}} sensors",
+      "noSensors": "No sensors"
+    },
+    "table": {
+      "placeholder": "Select a station, group, or plot to see its entries."
+    },
+    "detail": {
+      "placeholder": "Select an entry to see its details."
+    }
   },
   "logActivity": "Log activity",
   "capture": {

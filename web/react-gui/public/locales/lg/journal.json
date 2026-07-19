@@ -150,7 +150,31 @@
     "plot": "Omusiri",
     "allPlots": "Emisiri gyonna",
     "activity": "Ekikolwa",
-    "allActivities": "Ebikolwa byonna"
+    "allActivities": "Ebikolwa byonna",
+    "status": "Embeera",
+    "allStatuses": "Embeera zonna",
+    "dateFrom": "Okuva",
+    "dateTo": "Okutuuka",
+    "campaign": "Campaign",
+    "protocol": "Protocol"
+  },
+  "workspace": {
+    "search": "Noonya",
+    "searchPlaceholder": "Noonya emisiri, siteegi, oba ebibinja",
+    "scope": {
+      "stations": "Siteegi",
+      "groups": "Ebibinja",
+      "sensors": "sensors",
+      "sensors_one": "Sensor {{count}}",
+      "sensors_other": "Sensors {{count}}",
+      "noSensors": "Tewali sensor"
+    },
+    "table": {
+      "placeholder": "Londa siteegi, ekibinja, oba omusiri okulaba ebiwandiiko byakyo."
+    },
+    "detail": {
+      "placeholder": "Londa ekiwandiiko okulaba ebikwata ku kyo."
+    }
   },
   "logActivity": "Wandiika ky'okoze",
   "capture": {

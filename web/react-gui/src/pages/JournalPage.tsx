@@ -6,6 +6,7 @@ import { useSearchParams } from 'react-router-dom';
 import { AppHeader } from '../components/AppHeader';
 import { JournalTimeline } from '../components/journal/JournalTimeline';
 import { JournalCaptureFlow } from '../components/journal/capture/JournalCaptureFlow';
+import { JournalWorkspace } from '../components/journal/desktop/JournalWorkspace';
 import { useAuth } from '../contexts/AuthContext';
 import { useJournalCatalog } from '../journal/useJournalCatalog';
 import { useJournalEntries } from '../journal/useJournalEntries';
@@ -13,6 +14,7 @@ import { useJournalPlots } from '../journal/useJournalPlots';
 import { useJournalPlotGroups } from '../journal/useJournalPlotGroups';
 import { irrigationZonesAPI } from '../services/api';
 import { journalApi } from '../services/journalApi';
+import { isDesktopBrowser } from '../utils/isDesktopBrowser';
 import type { IrrigationZone } from '../types/farming';
 import type { EntryListFilters } from '../types/journal';
 import type { JournalTimelineProps } from '../components/journal/JournalTimeline';
@@ -40,6 +42,7 @@ function zoneTimezone(zone: JournalIrrigationZone | undefined): string | undefin
 export const JournalPage: React.FC = () => {
   const { t } = useTranslation('journal');
   const { username, logout } = useAuth();
+  const isDesktop = isDesktopBrowser();
   const [searchParams, setSearchParams] = useSearchParams();
   const [captureOpen, setCaptureOpen] = useState(false);
   const closingCaptureRef = useRef(false);
@@ -159,6 +162,9 @@ export const JournalPage: React.FC = () => {
   };
 
   const showCapture = captureOpen && captureReady && catalogState.catalog;
+  const reachedTimelineBranch = !catalogState.loading && !catalogState.unavailable && !catalogState.error &&
+    !timelineReadError && !((captureRequested || captureOpen) && captureEnrichmentError) && !showCapture;
+  const showWorkspace = isDesktop && reachedTimelineBranch;
 
   const retryTimelineReads = () => Promise.all([entryState.retry(), plotState.retry()]);
   const listBatchEntries = React.useCallback<JournalTimelineProps['listBatchEntries']>(
@@ -191,7 +197,7 @@ export const JournalPage: React.FC = () => {
         onLogout={logout}
       />
 
-      <main className="mx-auto max-w-3xl px-4 py-8">
+      <main className={showWorkspace ? 'mx-auto max-w-[1600px]' : 'mx-auto max-w-3xl px-4 py-8'}>
         {catalogState.loading ? (
           <p className="text-[var(--text-secondary)]">{t('timeline.loading')}</p>
         ) : catalogState.unavailable ? (
@@ -222,6 +228,13 @@ export const JournalPage: React.FC = () => {
             onClose={closeCapture}
             onOpenExisting={onOpenExisting}
             onSaved={onSaved}
+          />
+        ) : showWorkspace ? (
+          <JournalWorkspace
+            plots={plotState.plots}
+            activeGroups={groupState.activeGroups}
+            zones={zonesState.data ?? []}
+            activities={activities}
           />
         ) : (
           <>

@@ -150,7 +150,31 @@
     "plot": "Parcela",
     "allPlots": "Todas las parcelas",
     "activity": "Actividad",
-    "allActivities": "Todas las actividades"
+    "allActivities": "Todas las actividades",
+    "status": "Estado",
+    "allStatuses": "Todos los estados",
+    "dateFrom": "Desde",
+    "dateTo": "Hasta",
+    "campaign": "Campaña",
+    "protocol": "Protocolo"
+  },
+  "workspace": {
+    "search": "Buscar",
+    "searchPlaceholder": "Buscar parcelas, estaciones, grupos",
+    "scope": {
+      "stations": "Estaciones",
+      "groups": "Grupos",
+      "sensors": "sensores",
+      "sensors_one": "{{count}} sensor",
+      "sensors_other": "{{count}} sensores",
+      "noSensors": "Sin sensores"
+    },
+    "table": {
+      "placeholder": "Selecciona una estación, un grupo o una parcela para ver sus entradas."
+    },
+    "detail": {
+      "placeholder": "Selecciona una entrada para ver sus detalles."
+    }
   },
   "logActivity": "Registrar actividad",
   "capture": {
