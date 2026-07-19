@@ -239,7 +239,7 @@ function createFourRootsUnlocked(options) {
     const activityHead = {
       format: 1,
       generation: genesisRow.generation,
-      entrySha256: genesisRow.entrySha256,
+      entrySha256: genesisRow.entrySha256 || genesisRow.entry_sha256,
       checkpointGeneration: checkpoint.checkpointGeneration,
       checkpointSha256,
     };

@@ -13,6 +13,7 @@ const paths = require('./paths');
 const locks = require('./locks');
 const load = require('./load');
 const activityDb = require('./activity-db');
+const initModule = require('./init');
 
 const MAX_CAPABILITY_GENERATION = 4095;
 
@@ -1428,10 +1429,10 @@ function prepareIntegrityRecovery(options) {
       { bootId: opts.bootId, ownershipAdapter, isProcessAlive: opts.isProcessAlive }
     );
     try {
-      require('./index').initializeUnlocked({
-        ...opts,
-        operationId: derivedOperationId(`integrity-genesis:${authority.recoveryOperationId}`),
-        sourceKind: 'integrity-recovery',
+    initModule.createFourRootsUnlocked({
+      ...opts,
+      operationId: derivedOperationId(`integrity-genesis:${authority.recoveryOperationId}`),
+      sourceKind: 'integrity-recovery',
       });
     } finally {
       absenceLock.release();
@@ -1875,6 +1876,12 @@ function initializeFactoryZeroUnlocked(options) {
     if (err.code !== 'protocol_state_partial_root_set') throw err;
     before = { initialized: false, midFlight: true };
   }
+  if (!before.initialized && fs.existsSync(opts.factoryIntentOut)) {
+    // The immutable factory intent is itself the resume authority for a
+    // crash before the first chain entry (including a crash immediately
+    // after creating only the lock-bearing directories).
+    before.midFlight = true;
+  }
   if ((before.initialized || before.midFlight) && !fs.existsSync(opts.factoryIntentOut)) {
     throw transitionError(
       'factory_resume_intent_missing',
@@ -1977,11 +1984,12 @@ function initializeFactoryZeroUnlocked(options) {
     before.capability && before.capability.generations.length === 1
   );
   if (needsGenesisResume) {
-    require('./index').initializeUnlocked({
+    initModule.createFourRootsUnlocked({
       ...opts,
       operationId: opts.operationId,
       sourceKind: 'factory-baseline',
       createdAt,
+      resume: true,
     });
   }
   const initialized = load.loadProtocolState(opts);

@@ -87,34 +87,6 @@ function findProposalForOperation(opts, roots, ownershipAdapter, operationId) {
   return null;
 }
 
-function initializeUnlocked(options, ownershipAdapter) {
-  const opts = options || {};
-  const operationId = opts.operationId || crypto.randomUUID();
-  const effectiveOwnershipAdapter = ownershipAdapter || opts.ownershipAdapter || paths.defaultOwnershipAdapter;
-  const roots = paths.resolveRoots(opts);
-  const loaded = loadProtocolStateTolerant(opts, effectiveOwnershipAdapter, true);
-  if (loaded.midFlight || !loaded.initialized) {
-    const created = initModule.createFourRootsUnlocked(Object.assign({}, opts, {
-      operationId,
-      resume: Boolean(loaded.midFlight),
-      ownershipAdapter: effectiveOwnershipAdapter,
-    }));
-    return {
-      created: true,
-      resumed: Boolean(loaded.midFlight),
-      capabilityHead: created.capabilityHead,
-      activityHead: created.activityHead,
-      operationId: created.operationId,
-    };
-  }
-  return {
-    created: false,
-    resumed: Boolean(loaded.repaired),
-    capabilityHead: loaded.capability.head,
-    activityHead: loaded.activity.externalHead,
-  };
-}
-
 function initialize(options) {
   const opts = options || {};
   const roots = paths.resolveRoots(opts);
@@ -142,7 +114,27 @@ function initialize(options) {
     }
   );
   try {
-    return initializeUnlocked(Object.assign({}, opts, { operationId }), ownershipAdapter);
+    const loaded = loadProtocolStateTolerant(opts, ownershipAdapter, true);
+    if (loaded.midFlight || !loaded.initialized) {
+      const created = initModule.createFourRootsUnlocked(Object.assign({}, opts, {
+        operationId,
+        resume: Boolean(loaded.midFlight),
+        ownershipAdapter,
+      }));
+      return {
+        created: true,
+        resumed: Boolean(loaded.midFlight),
+        capabilityHead: created.capabilityHead,
+        activityHead: created.activityHead,
+        operationId: created.operationId,
+      };
+    }
+    return {
+      created: false,
+      resumed: Boolean(loaded.repaired),
+      capabilityHead: loaded.capability.head,
+      activityHead: loaded.activity.externalHead,
+    };
   } finally {
     lock.release();
   }
@@ -259,7 +251,6 @@ module.exports = {
   // mutations live in capability-transitions.js and are imported directly by
   // the root-owned CLI; they are deliberately absent here and from osi-lib.
   initialize,
-  initializeUnlocked,
   status,
 
   // Internals exposed only for scripts/sync-protocol-capability-cli.js
