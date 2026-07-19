@@ -2,6 +2,7 @@ import { api } from './api';
 import type {
   BatchMutationReceipt,
   CreateFinalBatchPayload,
+  EntryDiscardReceipt,
   EntryFinalMutationReceipt,
   EntryListFilters,
   EntryListResponse,
@@ -78,6 +79,17 @@ export const journalApi = {
       await api.post<EntryFinalMutationReceipt>(
         `/api/journal/entries/${encodeURIComponent(uuid)}/void`,
         { void_reason, base_sync_version },
+      )
+    ).data,
+
+  // Reuses the same journal-entry PUT transport as updateEntry: a body of
+  // { discard: true } is a distinct verb the edge routes to a transactional
+  // hard-delete of a version-zero draft, rather than a save.
+  discardDraft: async (uuid: string): Promise<EntryDiscardReceipt> =>
+    (
+      await api.put<EntryDiscardReceipt>(
+        `/api/journal/entries/${encodeURIComponent(uuid)}`,
+        { discard: true },
       )
     ).data,
 
