@@ -61,6 +61,52 @@
 - No `flows.json` change in this range; ChirpStack reprovision on restart is unaffected.
 - **NOT done here (require explicit instruction):** push, PR/merge to `main`, any live-gateway action, Playwright browser-acceptance run (Task 35's browser step is outstanding — see below).
 
-## Outstanding (not blocking this branch, needs a new instruction)
+## Live verification (kaba100 demo Pi, 2026-07-20) — DONE, and it caught a real bug
 
-- **Browser acceptance (Playwright):** Task 35 called for 320/360/desktop-width runs (mobile capture, desktop three-pane, draft resume/discard, transition review, marker densities, keyboard paths, exports, no horizontal overflow) with screenshots stored **outside** the repo. Not executed in this autonomous run (no browser evidence captured). Recommend before any production deploy.
+The branch was deployed to the **kaba100** demo gateway (`100.93.68.86`) via the runbook
+reverse-tunnel flow and browser-verified with Playwright over http (screenshots outside the repo at
+`/home/phil/playwright-osi/agrolink-slice2/`). HEAD verified: `6b13e8ac`.
+
+- **Deploy:** clean (`[migrate] applied: [22]` first time, no-op after; self-check PASSED; `farming.db`
+  preserved — 159,844 device_data rows; new GUI bundle; `catalog_version=2`; `farmer_quick` v1+v2
+  both active; export.csv 401). No divergence — kaba100 was at migration head 0021 with checksums
+  identical to the branch, so only `0022` applied.
+- **Render:** desktop 3-pane workspace + mobile capture flow render correctly at 1440 / 320 / 360;
+  **horizontal overflow 0 and console errors 0 at every viewport.**
+- **End-to-end data:** real journal entries created and read back live — table row → detail read-back
+  (all recorded values) → Correct/void actions, all working against the live backend.
+
+### BUG FOUND + FIXED by the live verify (unit suite could not catch it)
+- **`crypto.randomUUID` crash on insecure origin** (commit `319ca405`). The capture flow called
+  `crypto.randomUUID()` with no fallback in 4 shipped files (JournalCaptureFlow entry_uuid, PlotForm
+  plot_uuid, PlotPicker group, useCaptureDraft). `crypto.randomUUID` exists **only in secure
+  contexts**; gateways serve the GUI over plain `http://<pi-ip>:1880`, so it is `undefined` and
+  logging an activity / creating a plot threw and crashed to a blank screen. jsdom provides it, so
+  all 1400+ unit tests were green. **Predates Slice 2** (Slice 1 capture code) — a latent production
+  crash for the whole journal capture feature in the field. Fixed with `src/utils/uuid.ts`
+  `randomUuid()` (uses `crypto.randomUUID` when present, else a canonical v4 from
+  `crypto.getRandomValues`, else Math.random) wired to all 4 sites, +4 unit tests. Verified live: a
+  real entry saved with a fallback-generated UUID.
+
+### New feature added on request (this session): desktop "Log activity"
+- Commits `27f2bced` (feature) + `6b13e8ac` (review fix). The desktop workspace was review/manage
+  only (no capture button); added a "Log activity" button that opens the existing `JournalCaptureFlow`
+  in an accessible modal (role=dialog, aria-modal, backdrop, Escape, focus-trap, focus-return), owns
+  the post-save table refresh, and selects the new entry. Opus-reviewed; Important-1 fixed (every
+  modal-dismiss path — Escape/backdrop included — now refreshes the table). Full suite green
+  (**vitest 1417 + node:test 94, tsc, build**). Verified live: desktop Log activity → modal capture →
+  "Saved on farm gateway" → entry appears in the table (journal_entries went 0→1→2 on kaba100).
+
+### Residual (not done)
+- Wider Playwright coverage of draft resume/discard, layout-transition review, and marker densities
+  was not scripted (marker/draft data not seeded on the demo Pi); those paths are covered by the unit
+  suite. Desktop-capture Minor #2 (Escape ignores the flow's `closeLocked`/nested-view state) left as
+  a documented code comment. Two irrigation **test entries** remain on kaba100 (`cf32ea0a`,
+  `a2084b27`) and kaba100 now shows **AgroLink/Agroscope branding** — both revertable on request
+  (remove entries via void/discard; redeploy mainline to restore branding).
+
+## Outstanding (needs a new instruction)
+
+- Push / PR / merge to `main` (branch stays off-mainline by design), any **production** gateway
+  action, and restoring kaba100 to mainline branding / removing the test entries — all await an
+  explicit instruction.
