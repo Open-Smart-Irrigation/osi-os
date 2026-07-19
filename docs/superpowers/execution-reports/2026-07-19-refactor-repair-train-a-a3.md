@@ -152,3 +152,9 @@ The umbrella table understated A0's first ownership of `node-red.init`, pipeline
   - `node --check scripts/deployment-state-cli.js`, `node --check scripts/lib/deployment-state.js`, `sh -n scripts/node-red-guarded-launch.js`, and `git diff --check` — exit 0.
   - Supplemental union — exit 0: deploy compatibility 19/19; ChirpStack backup 37/37; profile detector all pass; backup/restore deferred-purpose checks pass; staged-npm wrapper pass; deployment inhibitor pass; factory seed 22/22; factory-zero audit 6/6; protocol skeleton 2/2; role-start 2/2.
 - Independent Review 15 specification `PASS` and quality `APPROVED`; no Critical or Important findings remain. A0 commit 1 is approved for integration.
+
+## A0 commit 2 approval
+
+Source candidate `3e741e746ad130c2b2134f15d8e4dbbfe6d01f49` (`fix: align factory bootstrap contracts`) passed independent specification and quality review after corrective loops for path/argv binding, image identity, mode enforcement, deterministic baseline IDs, one-use verification-result handling, generator refresh semantics, and resident authority no-follow checks. It is intentionally non-deployable until the later image-baseline state-verb checkpoint.
+
+Final serial gates: provenance CLI 7/7; generator 4/4; built-rootfs verifier 6/6; source verifier 4/4; factory-baseline envelope 3/3; factory seed 22/22; factory-zero audit 6/6; resident-copy guard 6/6; bootstrap shell PASS; `verify-sync-flow.js`, generator check, source verifier, profile parity, and `git diff --check` exit 0; deployment-state CLI 378/378. The exact-SHA reviews are specification `PASS` and quality `APPROVED`, with no Critical or Important findings. Anchor-mutating tests are recorded as serial-only because default parallel execution can race on tracked JSON fixtures.
