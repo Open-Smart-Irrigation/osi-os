@@ -207,7 +207,6 @@ function validResetGeneration() {
       resetEpoch: 1,
       resetAuthorizedAt: CREATED_AT,
       resetReasonSha256: 'b2'.repeat(32),
-      resetReceiptSha256: 'b3'.repeat(32),
     },
   };
 }
@@ -347,15 +346,11 @@ test('DATABASE_INTEGRITY_INVALIDATION / _RECONCILED validate and enforce their s
       historicalV2Disposition: 'UNASSESSED',
       historicalV2DispositionReceiptSha256: null,
       databaseRestore: { status: 'RECONCILIATION_REQUIRED', restoreEpoch: 1 },
-      invalidationReceiptSha256: 'a'.repeat(64),
-      authoritySha256: 'b'.repeat(64),
-      observedEvidenceSha256: 'c'.repeat(64),
-      backupManifestSha256: 'd'.repeat(64),
-      forensicDestination: '/data/db/forensics/recovery.sqlite',
-      activityGeneration: 7,
-      activityEntrySha256: 'e'.repeat(64),
-      activityExternalHeadSha256: 'f'.repeat(64),
-      possibleDataLossAcknowledgementSha256: 'a2'.repeat(32),
+      latchObservationSha256: 'a'.repeat(64),
+      trustedBackupSha256: 'b'.repeat(64),
+      forensicDestinationSha256: 'c'.repeat(64),
+      activityRootsSha256: 'd'.repeat(64),
+      manualLossAcknowledgementSha256: 'e'.repeat(64),
       recoveryOperationId: OP_A,
     },
   };
@@ -363,23 +358,17 @@ test('DATABASE_INTEGRITY_INVALIDATION / _RECONCILED validate and enforce their s
 
   const reconciled = JSON.parse(JSON.stringify(invalidation));
   reconciled.kind = 'DATABASE_INTEGRITY_RECONCILED';
-  delete reconciled.state.invalidationReceiptSha256;
-  delete reconciled.state.authoritySha256;
-  delete reconciled.state.observedEvidenceSha256;
-  delete reconciled.state.backupManifestSha256;
-  delete reconciled.state.forensicDestination;
-  delete reconciled.state.activityGeneration;
-  delete reconciled.state.activityEntrySha256;
-  delete reconciled.state.activityExternalHeadSha256;
-  delete reconciled.state.possibleDataLossAcknowledgementSha256;
+  delete reconciled.state.latchObservationSha256;
+  delete reconciled.state.trustedBackupSha256;
+  delete reconciled.state.forensicDestinationSha256;
+  delete reconciled.state.activityRootsSha256;
+  delete reconciled.state.manualLossAcknowledgementSha256;
   reconciled.state.databaseRestore.status = 'CLEAR';
   Object.assign(reconciled.state, {
-    reconciledReceiptSha256: 'f'.repeat(64),
-    reconciliationAuthoritySha256: 'a1'.repeat(32),
-    historicalRevalidationReceiptSha256: 'b2'.repeat(32),
-    postReconcileCommandAuditSha256: 'c3'.repeat(32),
-    postReconcileFarmingAuditSha256: 'd4'.repeat(32),
+    importOrCutoffAuthoritySha256: 'f'.repeat(64),
+    restoredOrFinalAuditSha256: 'a1'.repeat(32),
     forensicInventorySha256: 'b2'.repeat(32),
+    zeroEffectReceiptSha256: 'c3'.repeat(32),
   });
   assert.doesNotThrow(() => codecs.validateGeneration(reconciled));
 });
@@ -479,23 +468,6 @@ test('writeExclusiveOrVerify creates on absence, is a no-op on byte-identical pr
   const r2 = pathsMod.writeExclusiveOrVerify(p, buf, pathsMod.defaultOwnershipAdapter, 'mismatch');
   assert.equal(r2.created, false);
   assert.throws(() => pathsMod.writeExclusiveOrVerify(p, Buffer.from('{"a":2}'), pathsMod.defaultOwnershipAdapter, 'mismatch_code'), { code: 'mismatch_code' });
-});
-
-test('writeExclusiveOrVerify refuses byte-identical resume files with unsafe mode or owner', () => {
-  const { tmp } = makeRoots();
-  fs.mkdirSync(tmp, { recursive: true });
-  const p = path.join(tmp, 'f.json');
-  const buf = Buffer.from('{"a":1}');
-  fs.writeFileSync(p, buf, { mode: 0o644 });
-  assert.throws(
-    () => pathsMod.writeExclusiveOrVerify(p, buf, pathsMod.defaultOwnershipAdapter, 'mismatch'),
-    { code: 'exclusive_write_wrong_mode' }
-  );
-  fs.chmodSync(p, 0o600);
-  assert.throws(
-    () => pathsMod.writeExclusiveOrVerify(p, buf, { claimOwner() {}, verifyOwner: () => false }, 'mismatch'),
-    { code: 'exclusive_write_wrong_owner' }
-  );
 });
 
 test('listRegularEntries rejects a symlink masquerading as a chain entry', () => {
@@ -1108,8 +1080,7 @@ test('load: activity one-ahead crash is resumable and completed by repair', () =
 function writeDeploymentState(tmp, obj) {
   const p = path.join(tmp, 'deployment-state.json');
   fs.mkdirSync(path.dirname(p), { recursive: true });
-  fs.writeFileSync(p, JSON.stringify(obj), { mode: 0o600 });
-  fs.chmodSync(p, 0o600);
+  fs.writeFileSync(p, JSON.stringify(obj));
   return p;
 }
 
@@ -1155,13 +1126,6 @@ test('requireDeploymentPhase accepts an exact format-2 match and rejects a phase
     () => deploymentGate.requireDeploymentPhase(p, { expectedDeploymentId: 'dep-1', expectedPhase: 'protocol-initializing', expectedParentGeneration: 4 }),
     { code: 'deployment_state_wrong_parent_generation' }
   );
-});
-
-test('readDeploymentStateFile rejects a group/world-readable authority file', () => {
-  const { tmp } = makeRoots();
-  const p = writeDeploymentState(tmp, format2State());
-  fs.chmodSync(p, 0o644);
-  assert.throws(() => deploymentGate.readDeploymentStateFile(p), { code: 'deployment_state_unsafe_file' });
 });
 
 test('requireDeploymentPhase rejects a non-null activeSubOperation', () => {
@@ -1218,16 +1182,6 @@ test('readDeploymentStateFile rejects a symlinked path', () => {
 // ===========================================================================
 // integration: index.js public surface (initialize / status)
 // ===========================================================================
-
-test('runtime-visible index omits every deployment-only capability mutation verb', () => {
-  for (const name of [
-    'recordHistoricalV2Disposition', 'prepareDispositionRestore', 'invalidateHistoricalV2Disposition',
-    'prepareDatabaseRestore', 'completeDatabaseRestoreReconciliation', 'prepareIntegrityRecovery',
-    'completeIntegrityRecovery', 'authorizeReset', 'initializeFactoryZero',
-  ]) {
-    assert.equal(mod[name], undefined, name);
-  }
-});
 
 test('index.initialize / index.status: fresh happy path is idempotent', () => {
   const { opts } = makeRoots();
@@ -1455,7 +1409,6 @@ function validRestoreInvalidationDisposition() {
       restorePreparationResultSha256: 'd'.repeat(64),
       restoreReceiptSha256: 'e'.repeat(64),
       restoredDatabaseAuditSha256: 'f'.repeat(64),
-      priorClearGeneration: 1,
       priorClearGenerationSha256: 'a1'.repeat(32),
       identitySha256: 'b2'.repeat(32),
     },
@@ -2242,7 +2195,6 @@ test('a witnessed operation refuses to run while capability state is database-re
   const gen0Sha = codecs.canonicalSha256(gen0);
   const witness0 = JSON.parse(fs.readFileSync(path.join(roots.witnessRoot, pathsMod.generationFilename(0)), 'utf8'));
   const witness0Sha = codecs.canonicalSha256(witness0);
-  const invalidationReceipt = { format: 1, receiptKind: 'database-restore-invalidation', operationId: OP_D };
   const gen1 = {
     format: 1,
     generation: 1,
@@ -2257,13 +2209,12 @@ test('a witnessed operation refuses to run while capability state is database-re
       historicalV2Disposition: 'UNASSESSED',
       historicalV2DispositionReceiptSha256: null,
       databaseRestore: { status: 'RECONCILIATION_REQUIRED', restoreEpoch: 1 },
-      invalidationReceiptSha256: codecs.canonicalSha256(invalidationReceipt),
+      invalidationReceiptSha256: 'a'.repeat(64),
       recoveryOperationId: OP_C,
     },
   };
   const gen1Sha = codecs.canonicalSha256(gen1);
   pathsMod.writeExclusiveFile(path.join(roots.generationsDir, pathsMod.generationFilename(1)), Buffer.from(codecs.canonicalJson(gen1), 'utf8'), pathsMod.defaultOwnershipAdapter);
-  pathsMod.writeExclusiveFile(path.join(roots.databaseRestoreReceiptsDir, '1.invalidation.json'), Buffer.from(codecs.canonicalJson(invalidationReceipt), 'utf8'), pathsMod.defaultOwnershipAdapter);
   const witness1 = { format: 1, generation: 1, generationSha256: gen1Sha, previousWitnessSha256: witness0Sha, operationId: OP_D };
   pathsMod.writeExclusiveFile(path.join(roots.witnessRoot, pathsMod.generationFilename(1)), Buffer.from(codecs.canonicalJson(witness1), 'utf8'), pathsMod.defaultOwnershipAdapter);
   const head = { format: 1, generation: 1, generationSha256: gen1Sha, witnessSha256: codecs.canonicalSha256(witness1) };

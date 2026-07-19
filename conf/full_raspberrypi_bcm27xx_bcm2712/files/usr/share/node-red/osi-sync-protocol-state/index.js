@@ -1,5 +1,5 @@
 'use strict';
-// osi-sync-protocol-state/index.js — public sync protocol state surface.
+// osi-sync-protocol-state/index.js — public surface for this slice.
 //
 // Source of truth: docs/superpowers/plans/2026-07-15-sync-delivery-stop-loss.md,
 // Task 3 Step 0, the region from "Persist negotiation through
@@ -7,10 +7,19 @@
 // than claiming tamper resistance". See the brief at
 // /tmp/.../scratchpad/briefs/protocol-state-core-brief.md for exact scope.
 //
-// The module owns four-root initialization/load verification, the closed
-// generation/witness codecs, normalized identity helpers, witnessed command
-// activity, and the deployment-only capability transition verbs. Runtime
-// consumers receive no raw capability append primitive.
+// This slice implements: four-root initialization, the full closed
+// generation/witness codec (validation only — GENESIS is the only kind
+// ever created here), normalizedServerBase/identitySha256, load
+// verification (including GENESIS-adjacent crash resume), and the
+// four-root lock protocol. Every other documented method on this object
+// (runWitnessedOperation, recordHistoricalV2Disposition,
+// prepareDispositionRestore, invalidateHistoricalV2Disposition,
+// prepareDatabaseRestore, completeDatabaseRestoreReconciliation,
+// prepareIntegrityRecovery, completeIntegrityRecovery, recordNegotiation,
+// authorizeReset, initializeFactoryZero) is out of scope for this slice
+// and is NOT exported — a caller must not be able to pretend those exist.
+// scripts/sync-protocol-capability-cli.js pins their CLI verb names to a
+// bounded NOT_IMPLEMENTED_IN_THIS_SLICE error instead.
 
 const fs = require('node:fs');
 const path = require('node:path');
@@ -230,8 +239,6 @@ module.exports = {
   // deployment-state gate
   readDeploymentStateFile: deploymentStateGate.readDeploymentStateFile,
   requireDeploymentPhase: deploymentStateGate.requireDeploymentPhase,
-  requireRecoveryPhase: deploymentStateGate.requireRecoveryPhase,
-  requireFactoryBaselinePhase: deploymentStateGate.requireFactoryBaselinePhase,
 
   // witnessed operations (plan line 335) — machinery for the future
   // osi-command-ledger slice. The bare runWitnessedOperation surface below
@@ -248,9 +255,7 @@ module.exports = {
     return defaultWitnessedRunner().runWitnessedOperation(db, descriptor, args);
   },
 
-  // Runtime-visible read/initialization surface. Deployment-only capability
-  // mutations live in capability-transitions.js and are imported directly by
-  // the root-owned CLI; they are deliberately absent here and from osi-lib.
+  // high-level verbs implemented in this slice
   initialize,
   status,
 

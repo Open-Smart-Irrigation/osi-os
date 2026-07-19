@@ -182,7 +182,6 @@ function createFourRootsUnlocked(options) {
     ensureModeDirRecursive(roots.resetReceiptsDir, ownershipAdapter, { enforceFrom: roots.root });
     ensureModeDirRecursive(roots.v2DispositionReceiptsDir, ownershipAdapter, { enforceFrom: roots.root });
     ensureModeDirRecursive(roots.databaseRestoreReceiptsDir, ownershipAdapter, { enforceFrom: roots.root });
-    ensureModeDirRecursive(roots.databaseIntegrityReceiptsDir, ownershipAdapter, { enforceFrom: roots.root });
     maybeCrash('capability_dirs_created', crashAfter);
 
     const genesisGeneration = buildGenesisGeneration({ operationId, createdAt });
