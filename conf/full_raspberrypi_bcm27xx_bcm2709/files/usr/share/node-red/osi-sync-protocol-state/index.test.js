@@ -2244,7 +2244,10 @@ test('a witnessed operation refuses to run while capability state is database-re
   const gen0Sha = codecs.canonicalSha256(gen0);
   const witness0 = JSON.parse(fs.readFileSync(path.join(roots.witnessRoot, pathsMod.generationFilename(0)), 'utf8'));
   const witness0Sha = codecs.canonicalSha256(witness0);
-  const invalidationReceipt = { format: 1, receiptKind: 'database-restore-invalidation', operationId: OP_D };
+  const invalidationReceipt = {
+    format: 1, receiptKind: 'database-restore-invalidation', operationId: OP_D,
+    restoreEpoch: 1, predecessorGeneration: 0, predecessorHeadSha256: gen0Sha,
+  };
   const gen1 = {
     format: 1,
     generation: 1,

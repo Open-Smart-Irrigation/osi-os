@@ -277,17 +277,22 @@ test('CLI record-v2-disposition commits a deployment-bound CLEAR transition', ()
   const audit = { format: 1, databaseIdentitySha256: 'c'.repeat(64) };
   const backup = {
     format: 1,
+    capabilityGeneration: loaded.capability.head.generation,
     capabilityHeadSha256: loaded.capability.head.generationSha256,
     capabilityWitnessSha256: loaded.capability.head.witnessSha256,
     activityGeneration: loaded.activity.externalHead.generation,
     activityEntrySha256: loaded.activity.externalHead.entrySha256,
     activityExternalHeadSha256: protocol.canonicalSha256(loaded.activity.externalHead),
+    databaseIdentitySha256: audit.databaseIdentitySha256,
   };
   const disposition = {
     format: 1,
     sourceKind: 'zero',
     historicalV2Disposition: 'CLEAR',
     identitySha256,
+    auditSha256: protocol.canonicalSha256(audit),
+    databaseSha256: audit.databaseIdentitySha256,
+    backupSha256: protocol.canonicalSha256(backup),
   };
   const auditPath = writePrivateJson(path.join(tmp, 'evidence', 'audit.json'), audit);
   const backupPath = writePrivateJson(path.join(tmp, 'evidence', 'backup.json'), backup);

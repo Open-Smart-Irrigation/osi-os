@@ -586,6 +586,14 @@ function runRecordDisposition(values) {
   ) {
     throw cliError('disposition_backup_invalid', 'record-v2-disposition backup must bind capability and activity heads');
   }
+  const live = protocolState.loadProtocolState(opts);
+  if (
+    backup.capabilityGeneration !== live.capability.head.generation ||
+    backup.activityEntrySha256 !== live.activity.externalHead.entrySha256 ||
+    backup.databaseIdentitySha256 !== audit.databaseIdentitySha256
+  ) {
+    throw cliError('disposition_backup_state_mismatch', 'disposition backup does not bind the live generation, activity entry, and audited database identity');
+  }
   requireHash(disposition, values['--expected-disposition-receipt-sha256'], 'disposition receipt');
   if (disposition.identitySha256 != null && disposition.identitySha256 !== values['--expected-identity-sha256']) {
     throw cliError('disposition_identity_mismatch', 'disposition receipt identity does not match --expected-identity-sha256');
@@ -607,7 +615,7 @@ function runRecordDisposition(values) {
     ['databaseSha256', source.databaseSha256],
     ['backupSha256', source.backupSha256],
   ]) {
-    if (disposition[field] != null && disposition[field] !== actual) {
+    if (disposition[field] !== actual) {
       throw cliError('disposition_source_fact_mismatch', `disposition receipt ${field} does not match the supplied evidence`);
     }
   }

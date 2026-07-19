@@ -162,6 +162,65 @@ function verifyTypedReceipts(roots, generations, adapter) {
         });
       }
     }
+    if (generation.kind === 'HISTORICAL_V2_DISPOSITION') {
+      const state = generation.state;
+      const expectedKind = state.sourceKind === 'restore-invalidation'
+        ? 'historical-v2-disposition'
+        : 'historical-v2-disposition';
+      if (
+        receipt.receiptKind !== expectedKind ||
+        receipt.sourceKind !== state.sourceKind ||
+        receipt.historicalV2Disposition !== state.historicalV2Disposition ||
+        (receipt.predecessorGeneration ?? receipt.priorClearGeneration) !== generation.previousGeneration ||
+        receipt.predecessorHeadSha256 !== generation.previousSha256
+      ) {
+        throw loadError('typed_receipt_state_mismatch', 'HISTORICAL_V2_DISPOSITION receipt does not bind its generation predecessor/state', { path: receiptPath });
+      }
+      const bindings = [
+        ['sourceDispositionReceiptSha256', state.dispositionReceiptSha256],
+        ['auditSha256', state.auditSha256],
+        ['databaseSha256', state.databaseSha256],
+        ['backupSha256', state.backupSha256],
+        ['identitySha256', state.identitySha256],
+        ['factoryProvenanceSha256', state.romProvenanceSha256],
+        ['imageGuardManifestSha256', state.imageManifestSha256],
+        ['factorySeedIdentitySha256', state.factorySeedIdentitySha256],
+        ['liveDatabaseIdentitySha256', state.liveDatabaseIdentitySha256],
+        ['factoryZeroAuditSha256', state.factoryZeroAuditSha256],
+        ['factoryZeroSourceReceiptSha256', state.factoryZeroSourceReceiptSha256],
+        ['factoryCommandActivityAnchorSha256', state.factoryCommandActivityAnchorSha256],
+        ['imageBaselineOperationId', state.imageBaselineOperationId],
+        ['imageBaselineGeneration', state.imageBaselineGeneration],
+        ['allRootAbsenceIntentSha256', state.allRootAbsenceIntentSha256],
+      ];
+      for (const [field, expected] of bindings) {
+        if (expected !== undefined && receipt[field] !== expected) {
+          throw loadError('typed_receipt_state_mismatch', `HISTORICAL_V2_DISPOSITION receipt field ${field} does not bind state`, { path: receiptPath });
+        }
+      }
+      if (state.factoryCommandActivityAnchor &&
+          canonicalJson(receipt.factoryCommandActivityAnchor) !== canonicalJson(state.factoryCommandActivityAnchor)) {
+        throw loadError('typed_receipt_state_mismatch', 'factory command-activity anchor is not receipt-bound', { path: receiptPath });
+      }
+    }
+    if (generation.kind.startsWith('DATABASE_')) {
+      const state = generation.state;
+      const expectedReceiptKind = generation.kind === 'DATABASE_RESTORE_INVALIDATION'
+        ? 'database-restore-invalidation'
+        : generation.kind === 'DATABASE_RESTORE_RECONCILED'
+          ? 'database-restore-reconciled'
+          : generation.kind === 'DATABASE_INTEGRITY_INVALIDATION'
+            ? 'database-integrity-invalidation'
+            : 'database-integrity-reconciled';
+      if (
+        receipt.receiptKind !== expectedReceiptKind ||
+        receipt.restoreEpoch !== state.databaseRestore.restoreEpoch ||
+        (receipt.predecessorGeneration ?? receipt.invalidationGeneration) !== generation.previousGeneration ||
+        receipt.predecessorHeadSha256 !== generation.previousSha256
+      ) {
+        throw loadError('typed_receipt_state_mismatch', `${generation.kind} receipt does not bind its generation predecessor/state`, { path: receiptPath });
+      }
+    }
   }
 }
 
