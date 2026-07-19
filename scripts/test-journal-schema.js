@@ -929,10 +929,11 @@ try {
     templates.map(({ code, version }) => [code, version]),
     [
       ['farmer_quick', 1],
+      ['farmer_quick', 2],
       ['full_record', 1],
       ['research_observation', 1],
     ],
-    'seed must contain exactly three v1 templates'
+    'seed must contain the three template codes, with farmer_quick published at v1 (frozen, historical) and v2 (current)'
   );
   const templateDefinitions = new Map(
     templates.map((template) => [template.code, JSON.parse(template.definition_json)])
@@ -1085,7 +1086,7 @@ try {
     'SELECT id, catalog_version, catalog_hash FROM journal_catalog_state WHERE id = 1;'
   );
   assert.equal(catalogState.length, 1, 'catalog state row id=1 must exist');
-  assert.equal(catalogState[0].catalog_version, 1, 'catalog version must be 1');
+  assert.equal(catalogState[0].catalog_version, 2, 'seed-built catalog version must be the current version (2, since farmer_quick@2 / Task 27)');
   assert.match(catalogState[0].catalog_hash, /^[0-9a-f]{64}$/, 'catalog hash must be SHA-256');
 
   const seedText = fs.readFileSync(seedPath, 'utf8');
@@ -1110,19 +1111,38 @@ try {
     );
   }
 
+  // 0019 is guarded to run only while catalog_version <= 1 (Task 27's
+  // versioned delta design). The seed-built `dbPath` is now at the current
+  // version (2), so the 0019-specific replay/conflict scenarios below need
+  // an explicit "device that has only ever applied 0019" baseline: the
+  // farmer_quick@2 row removed and catalog_state rolled back to v1's own
+  // recorded hash (parsed straight out of 0019 so it can never drift from
+  // the frozen file).
+  const v1CatalogHashMatch = migrationText.match(/catalog_hash='([0-9a-f]{64})'/);
+  assert.ok(v1CatalogHashMatch, '0019 must embed its own recorded catalog_hash');
+  const v1CatalogHash = v1CatalogHashMatch[1];
+  const v1OnlyDbPath = path.join(tmpDir, 'v1-only.db');
+  fs.copyFileSync(dbPath, v1OnlyDbPath);
+  sqliteExec(v1OnlyDbPath, `
+    DELETE FROM journal_templates WHERE code='farmer_quick' AND version=2;
+    UPDATE journal_catalog_state
+       SET catalog_version=1, catalog_hash='${v1CatalogHash}', updated_at='2026-07-12T00:00:00.000Z'
+     WHERE id=1;
+  `);
+
   const replayDbPath = path.join(tmpDir, 'replay.db');
-  fs.copyFileSync(dbPath, replayDbPath);
+  fs.copyFileSync(v1OnlyDbPath, replayDbPath);
   sqliteExec(replayDbPath, `BEGIN IMMEDIATE;\n${migrationText}\nCOMMIT;\n`);
   const afterFirstReplay = catalogSnapshot(replayDbPath);
   sqliteExec(replayDbPath, `BEGIN IMMEDIATE;\n${migrationText}\nCOMMIT;\n`);
   assert.deepEqual(
     catalogSnapshot(replayDbPath),
     afterFirstReplay,
-    '0019 must be exactly idempotent on a matching installed catalog'
+    '0019 must be exactly idempotent on a matching installed v1 catalog'
   );
 
   const conflictDbPath = path.join(tmpDir, 'conflict.db');
-  fs.copyFileSync(dbPath, conflictDbPath);
+  fs.copyFileSync(v1OnlyDbPath, conflictDbPath);
   const sentinelHash = '0'.repeat(64);
   sqliteExec(conflictDbPath, `
     UPDATE journal_vocab

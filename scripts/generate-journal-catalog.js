@@ -12,14 +12,34 @@ const SOURCE_PATH = path.join(
   REPO_ROOT,
   'docs/superpowers/specs/agroscope-open-field/catalog.json'
 );
-const MIGRATION_NAME = '0019__journal_catalog_v1.sql';
-const MIGRATION_PATH = path.join(REPO_ROOT, 'database/migrations/ordered', MIGRATION_NAME);
-const MANIFEST_PATH = path.join(REPO_ROOT, 'database/migrations/ordered/CHECKSUMS.json');
+const MIGRATIONS_DIR = path.join(REPO_ROOT, 'database/migrations/ordered');
+const MANIFEST_PATH = path.join(MIGRATIONS_DIR, 'CHECKSUMS.json');
 const SEED_PATH = path.join(REPO_ROOT, 'database/seed-blank.sql');
 const SEED_BEGIN = '-- BEGIN GENERATED JOURNAL CATALOG V1';
 const SEED_END = '-- END GENERATED JOURNAL CATALOG V1';
-const CATALOG_VERSION = 1;
 const FIXED_TIMESTAMP = '2026-07-12T00:00:00.000Z';
+
+// Registry of catalog migrations, one entry per published catalog version, in
+// ascending order. `0019` is the frozen v1 baseline; every later entry is an
+// incremental delta (only the rows whose `since` equals that version). To
+// publish a new catalog version: tag the new/changed core row(s) with a
+// template/layout `version` (or a `since_version` on other row kinds) one
+// higher than today's latest, append one entry here naming the next
+// contiguous ordered-migration slot, and regenerate. Earlier entries are
+// never rewritten — `writeGeneratedArtifacts` refuses to touch an existing
+// migration file whose bytes would change.
+const CATALOG_MIGRATIONS = [
+  { version: 1, name: '0019__journal_catalog_v1.sql' },
+  { version: 2, name: '0022__journal_catalog_v2.sql' },
+];
+
+const TABLE_ORDER = [
+  'journal_vocab',
+  'journal_vocab_mappings',
+  'journal_templates',
+  'journal_layouts',
+  'journal_products',
+];
 
 function fail(message) {
   throw new Error(message);
@@ -55,8 +75,15 @@ function sqlValue(value) {
   return "'" + String(value).replace(/'/g, "''") + "'";
 }
 
-const CATALOG_V1_ACTIVE =
-  'COALESCE((SELECT catalog_version FROM journal_catalog_state WHERE id=1),0) <= 1';
+// A row introduced at catalog version N must only (re-)insert itself while
+// the installed catalog hasn't moved past N yet — this is a defense-in-depth
+// guard on top of the NOT EXISTS idempotency check below, not the primary
+// idempotency mechanism. Reproduces the historical v1 predicate
+// (`<= 1`) exactly for since=1 rows, so 0019 stays byte-identical.
+function catalogActiveGuard(sinceVersion) {
+  assert(Number.isInteger(sinceVersion) && sinceVersion >= 1, `invalid since version ${sinceVersion}`);
+  return `COALESCE((SELECT catalog_version FROM journal_catalog_state WHERE id=1),0) <= ${sinceVersion}`;
+}
 
 const ROW_IDENTITY_COLUMNS = {
   journal_vocab: ['code'],
@@ -77,7 +104,7 @@ function insertIfCatalogNotNewer(row) {
   return [
     `INSERT INTO ${row.table}(${row.columns.join(',')})`,
     `SELECT ${row.values.map(sqlValue).join(',')}`,
-    `WHERE ${CATALOG_V1_ACTIVE}`,
+    `WHERE ${catalogActiveGuard(row.since)}`,
     `  AND NOT EXISTS (SELECT 1 FROM ${row.table} WHERE ${identityPredicate});`,
   ].join('\n');
 }
@@ -94,10 +121,24 @@ function postconditionGuard(row) {
   ).join(' AND ');
   return [
     'INSERT INTO journal_catalog_state(id,catalog_version,catalog_hash,updated_at)',
-    `SELECT 0,0,'catalog-v1-postcondition-failed',${sqlValue(FIXED_TIMESTAMP)}`,
-    `WHERE ${CATALOG_V1_ACTIVE}`,
+    `SELECT 0,0,${sqlValue(`catalog-v${row.since}-postcondition-failed`)},${sqlValue(FIXED_TIMESTAMP)}`,
+    `WHERE ${catalogActiveGuard(row.since)}`,
     `  AND NOT EXISTS (SELECT 1 FROM ${row.table} WHERE ${exact});`,
   ].join('\n');
+}
+
+// Rows outside `journal_templates`/`journal_layouts` don't carry their own
+// `version`; they default to catalog version 1 (matching every row that
+// existed when v1 was generated) unless the core object explicitly opts a
+// future row into a later version via `since_version`.
+function rowSince(sourceObject) {
+  const since = sourceObject && sourceObject.since_version;
+  if (since == null) return 1;
+  assert(
+    Number.isInteger(since) && since >= 1,
+    `invalid since_version on ${(sourceObject && sourceObject.code) || '(unknown)'}`
+  );
+  return since;
 }
 
 function humanize(code) {
@@ -172,8 +213,22 @@ function validateCore(coreDef) {
   assert(Object.keys(coreDef).join(',') === 'activities,attributes,units,choices,templates,layouts,products',
     'core export must contain exactly the seven catalog collections in contract order');
   assert(coreDef.activities.length === 16, 'core must define exactly 16 activities');
-  assert(coreDef.templates.length === 3, 'core must define exactly three templates');
+  assert(
+    new Set(coreDef.templates.map((row) => row.code)).size === 3,
+    'core must define exactly three distinct template codes (any number of versions each)'
+  );
   assert(coreDef.layouts.length === 3, 'core must define exactly three generic layouts');
+
+  const templateVersionsByCode = new Map();
+  for (const template of coreDef.templates) {
+    assert(Number.isInteger(template.version) && template.version >= 1,
+      `${template.code} has an invalid version`);
+    const seenVersions = templateVersionsByCode.get(template.code) || new Set();
+    assert(!seenVersions.has(template.version),
+      `duplicate template version ${template.code}@${template.version}`);
+    seenVersions.add(template.version);
+    templateVersionsByCode.set(template.code, seenVersions);
+  }
 
   const unitByCode = new Map(coreDef.units.map((row) => [row.code, row]));
   const attributeByCode = new Map(coreDef.attributes.map((row) => [row.code, row]));
@@ -468,6 +523,7 @@ function vocabRow(row) {
       0,
       FIXED_TIMESTAMP,
     ],
+    since: rowSince(row),
   };
 }
 
@@ -535,6 +591,7 @@ function buildRows(coreDef, source) {
           mapping.source_uri,
           mapping.active,
         ],
+        since: rowSince(activity),
       });
     }
   }
@@ -545,6 +602,7 @@ function buildRows(coreDef, source) {
       key: `${template.code}:${template.version}`,
       columns: ['code', 'version', 'labels_json', 'definition_json', 'active'],
       values: [template.code, template.version, JSON.stringify({ en: template.label }), JSON.stringify(template.definition), 1],
+      since: template.version,
     });
   }
   for (const layout of [...coreDef.layouts, agroscope.layout]) {
@@ -553,6 +611,7 @@ function buildRows(coreDef, source) {
       key: `${layout.code}:${layout.version}`,
       columns: ['code', 'version', 'labels_json', 'definition_json', 'active'],
       values: [layout.code, layout.version, JSON.stringify({ en: layout.label }), JSON.stringify(layout.definition), 1],
+      since: layout.version,
     });
   }
   for (const product of coreDef.products) {
@@ -573,6 +632,7 @@ function buildRows(coreDef, source) {
         0,
         FIXED_TIMESTAMP,
       ],
+      since: rowSince(product),
     });
   }
 
@@ -593,52 +653,99 @@ function buildRows(coreDef, source) {
   return rows;
 }
 
-function compileCatalog(coreDef, source) {
-  const rows = buildRows(coreDef, source);
-  const hashInput = rows.map((row) => ({
+function catalogRowsHash(rowsSubset) {
+  const hashInput = rowsSubset.map((row) => ({
     table: row.table,
     key: row.key,
     columns: row.columns,
     values: row.values,
   }));
-  const catalogHash = sha256(stableStringify(hashInput));
+  return sha256(stableStringify(hashInput));
+}
+
+// Renders INSERT statements (grouped by table, tables with no rows in this
+// slice are omitted) plus postcondition guards for exactly `rowsSubset`, and
+// optionally a `journal_catalog_state` stamp to `stampVersion`/`stampHash`.
+// Used both for a single version's delta migration (rowsSubset = only that
+// version's new rows) and for the full cumulative seed block (rowsSubset =
+// every row, stamped to the latest version).
+function buildRowSql(rowsSubset, { commentVersion, includeStateStamp, stampVersion, stampHash }) {
   const sections = [];
-  for (const table of [
-    'journal_vocab',
-    'journal_vocab_mappings',
-    'journal_templates',
-    'journal_layouts',
-    'journal_products',
-  ]) {
+  for (const table of TABLE_ORDER) {
+    const tableRows = rowsSubset.filter((row) => row.table === table);
+    if (tableRows.length === 0) continue;
     sections.push(`-- ${table}`);
-    for (const row of rows.filter((candidate) => candidate.table === table)) {
-      sections.push(insertIfCatalogNotNewer(row));
-    }
+    for (const row of tableRows) sections.push(insertIfCatalogNotNewer(row));
     sections.push('');
   }
-  sections.push('-- Immutable v1 postconditions. Each mismatch deliberately attempts id=0,');
-  sections.push('-- tripping journal_catalog_state CHECK(id=1) before state can be stamped.');
-  for (const row of rows) sections.push(postconditionGuard(row));
-  sections.push('');
-  sections.push('-- journal_catalog_state');
-  sections.push(
-    `INSERT OR IGNORE INTO journal_catalog_state(id,catalog_version,catalog_hash,updated_at) VALUES (1,${CATALOG_VERSION},${sqlValue(catalogHash)},${sqlValue(FIXED_TIMESTAMP)});`
-  );
-  sections.push(
-    `UPDATE journal_catalog_state SET catalog_version=${CATALOG_VERSION},catalog_hash=${sqlValue(catalogHash)},updated_at=${sqlValue(FIXED_TIMESTAMP)} WHERE id=1 AND catalog_version <= ${CATALOG_VERSION};`
-  );
-  const rowSql = sections.join('\n').trimEnd() + '\n';
-  const migration = [
-    '-- risk: data',
-    '-- GENERATED by scripts/generate-journal-catalog.js; do not edit by hand.',
-    '-- Source: SoilManageR management-data template v2.6 + scripts/journal-catalog-core.js.',
-    `-- catalog-row-content-sha256: ${catalogHash}`,
-    '',
-    rowSql.trimEnd(),
-    '',
-  ].join('\n');
-  const seedBlock = `${SEED_BEGIN}\n${rowSql}${SEED_END}\n`;
-  return { rows, catalogHash, migration, seedBlock };
+  if (rowsSubset.length > 0) {
+    sections.push(`-- Immutable v${commentVersion} postconditions. Each mismatch deliberately attempts id=0,`);
+    sections.push('-- tripping journal_catalog_state CHECK(id=1) before state can be stamped.');
+    for (const row of rowsSubset) sections.push(postconditionGuard(row));
+    sections.push('');
+  }
+  if (includeStateStamp) {
+    sections.push('-- journal_catalog_state');
+    sections.push(
+      `INSERT OR IGNORE INTO journal_catalog_state(id,catalog_version,catalog_hash,updated_at) VALUES (1,${stampVersion},${sqlValue(stampHash)},${sqlValue(FIXED_TIMESTAMP)});`
+    );
+    sections.push(
+      `UPDATE journal_catalog_state SET catalog_version=${stampVersion},catalog_hash=${sqlValue(stampHash)},updated_at=${sqlValue(FIXED_TIMESTAMP)} WHERE id=1 AND catalog_version <= ${stampVersion};`
+    );
+  }
+  return sections.join('\n').trimEnd() + '\n';
+}
+
+// Compiles the full current catalog into: every generated row (each carrying
+// the catalog version it was introduced `since`), one migration per
+// registered catalog version (a pure delta: only that version's new rows),
+// and the seed block (the full cumulative state, for bootstrapping a fresh
+// database in one shot). `migrationsRegistry` defaults to the real
+// CATALOG_MIGRATIONS list; tests may pass an extended copy to prove a
+// hypothetical next version stays a pure delta without touching this file.
+function compileCatalog(coreDef, source, migrationsRegistry = CATALOG_MIGRATIONS) {
+  const rows = buildRows(coreDef, source);
+  const versions = [...new Set(rows.map((row) => row.since))].sort((left, right) => left - right);
+  versions.forEach((version, index) => {
+    assert(version === index + 1,
+      `catalog row versions must be contiguous starting at 1 (found gap before version ${version})`);
+  });
+  const registryByVersion = new Map(migrationsRegistry.map((entry) => [entry.version, entry]));
+
+  const migrations = versions.map((version) => {
+    const entry = registryByVersion.get(version);
+    assert(entry,
+      `no CATALOG_MIGRATIONS entry declared for catalog version ${version}; add one before publishing new core content`);
+    const deltaRows = rows.filter((row) => row.since === version);
+    const cumulativeRows = rows.filter((row) => row.since <= version);
+    const stampHash = catalogRowsHash(cumulativeRows);
+    const rowSql = buildRowSql(deltaRows, {
+      commentVersion: version,
+      includeStateStamp: true,
+      stampVersion: version,
+      stampHash,
+    });
+    const content = [
+      '-- risk: data',
+      '-- GENERATED by scripts/generate-journal-catalog.js; do not edit by hand.',
+      '-- Source: SoilManageR management-data template v2.6 + scripts/journal-catalog-core.js.',
+      `-- catalog-row-content-sha256: ${catalogRowsHash(deltaRows)}`,
+      '',
+      rowSql.trimEnd(),
+      '',
+    ].join('\n');
+    return { version, name: entry.name, content, stampHash };
+  });
+
+  const latest = migrations[migrations.length - 1];
+  const seedRowSql = buildRowSql(rows, {
+    commentVersion: latest.version,
+    includeStateStamp: true,
+    stampVersion: latest.version,
+    stampHash: latest.stampHash,
+  });
+  const seedBlock = `${SEED_BEGIN}\n${seedRowSql}${SEED_END}\n`;
+  return { rows, catalogHash: latest.stampHash, migrations, seedBlock };
 }
 
 function replaceSeedBlock(seed, seedBlock) {
@@ -661,8 +768,9 @@ function replaceSeedBlock(seed, seedBlock) {
   return seed.slice(0, start) + seedBlock.trimEnd() + seed.slice(after);
 }
 
-function expectedManifestText(manifest, migration) {
-  const next = { ...manifest, [MIGRATION_NAME]: sha256(migration) };
+function expectedManifestText(manifest, migrations) {
+  const next = { ...manifest };
+  for (const migration of migrations) next[migration.name] = sha256(migration.content);
   const ordered = Object.fromEntries(Object.entries(next).sort(([left], [right]) => left.localeCompare(right)));
   return JSON.stringify(ordered, null, 2) + '\n';
 }
@@ -675,7 +783,7 @@ function checkEqual(actual, expected, label) {
 
 function artifactPaths(overrides = {}) {
   return {
-    migrationPath: overrides.migrationPath || MIGRATION_PATH,
+    migrationsDir: overrides.migrationsDir || MIGRATIONS_DIR,
     seedPath: overrides.seedPath || SEED_PATH,
     manifestPath: overrides.manifestPath || MANIFEST_PATH,
   };
@@ -686,23 +794,30 @@ function expectedArtifacts(compiled, overrides = {}) {
   const currentSeed = fs.readFileSync(paths.seedPath, 'utf8');
   const expectedSeed = replaceSeedBlock(currentSeed, compiled.seedBlock);
   const manifest = JSON.parse(fs.readFileSync(paths.manifestPath, 'utf8'));
-  const generatedChecksum = sha256(compiled.migration);
+  const migrationChecks = compiled.migrations.map((migration) => ({
+    name: migration.name,
+    path: path.join(paths.migrationsDir, migration.name),
+    content: migration.content,
+    checksum: sha256(migration.content),
+  }));
   return {
     paths,
     manifest,
-    generatedChecksum,
+    migrationChecks,
     expectedSeed,
-    expectedManifest: expectedManifestText(manifest, compiled.migration),
+    expectedManifest: expectedManifestText(manifest, compiled.migrations),
   };
 }
 
 function checkGeneratedArtifacts(compiled, overrides = {}) {
-  const { paths, expectedSeed, expectedManifest } = expectedArtifacts(compiled, overrides);
-  checkEqual(
-    fs.existsSync(paths.migrationPath) ? fs.readFileSync(paths.migrationPath, 'utf8') : '',
-    compiled.migration,
-    path.basename(paths.migrationPath)
-  );
+  const { paths, migrationChecks, expectedSeed, expectedManifest } = expectedArtifacts(compiled, overrides);
+  for (const migration of migrationChecks) {
+    checkEqual(
+      fs.existsSync(migration.path) ? fs.readFileSync(migration.path, 'utf8') : '',
+      migration.content,
+      migration.name
+    );
+  }
   checkEqual(fs.readFileSync(paths.seedPath, 'utf8'), expectedSeed,
     path.basename(paths.seedPath) + ' generated catalog block');
   checkEqual(fs.readFileSync(paths.manifestPath, 'utf8'), expectedManifest,
@@ -713,24 +828,29 @@ function writeGeneratedArtifacts(compiled, overrides = {}) {
   const {
     paths,
     manifest,
-    generatedChecksum,
+    migrationChecks,
     expectedSeed,
     expectedManifest,
   } = expectedArtifacts(compiled, overrides);
-  const migrationExists = fs.existsSync(paths.migrationPath);
-  if (migrationExists) {
-    const installed = fs.readFileSync(paths.migrationPath, 'utf8');
-    if (installed !== compiled.migration) {
-      fail(`${path.basename(paths.migrationPath)} exists and differs; refuse to rewrite an immutable migration — create a new migration`);
-    }
-  } else {
-    const recordedChecksum = manifest[MIGRATION_NAME];
-    if (recordedChecksum && recordedChecksum !== generatedChecksum) {
-      fail(`${MIGRATION_NAME} has a different recorded checksum; restore it or create a new migration`);
+
+  // Validate every migration before writing any of them, so a refusal on one
+  // migration never leaves a partial write behind on another.
+  for (const migration of migrationChecks) {
+    const exists = fs.existsSync(migration.path);
+    if (exists) {
+      const installed = fs.readFileSync(migration.path, 'utf8');
+      if (installed !== migration.content) {
+        fail(`${migration.name} exists and differs; refuse to rewrite an immutable migration — create a new migration`);
+      }
+    } else {
+      const recordedChecksum = manifest[migration.name];
+      if (recordedChecksum && recordedChecksum !== migration.checksum) {
+        fail(`${migration.name} has a different recorded checksum; restore it or create a new migration`);
+      }
     }
   }
-  if (!migrationExists) {
-    fs.writeFileSync(paths.migrationPath, compiled.migration);
+  for (const migration of migrationChecks) {
+    if (!fs.existsSync(migration.path)) fs.writeFileSync(migration.path, migration.content);
   }
   if (fs.readFileSync(paths.seedPath, 'utf8') !== expectedSeed) {
     fs.writeFileSync(paths.seedPath, expectedSeed);
@@ -764,6 +884,7 @@ module.exports = {
   replaceSeedBlock,
   expectedManifestText,
   writeGeneratedArtifacts,
+  CATALOG_MIGRATIONS,
 };
 
 if (require.main === module) {

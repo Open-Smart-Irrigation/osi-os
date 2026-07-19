@@ -192,6 +192,28 @@ const harvestCatalog: JournalCatalog = {
   })),
 };
 
+// Mirrors the shipped farmer_quick@2 shape (Task 27 / P4 fix): three
+// low-risk fields are both visibly shown and carried forward at once.
+const tripleCarryForwardCatalog: JournalCatalog = {
+  ...catalog,
+  vocab: [
+    ...catalog.vocab,
+    row('attr.operator', 'attribute'),
+    row('attr.equipment', 'attribute'),
+    row('attr.method', 'attribute'),
+  ],
+  templates: catalog.templates.map((candidate) => candidate.code === 'farmer_quick'
+    ? {
+        ...candidate,
+        definition: {
+          ...candidate.definition,
+          fields: ['attr.crop', 'attr.operator', 'attr.equipment', 'attr.method'],
+          carry_forward: ['attr.operator', 'attr.equipment', 'attr.method'],
+        },
+      }
+    : candidate),
+};
+
 const quickWithoutCropCatalog: JournalCatalog = {
   ...canonicalCropCatalog,
   templates: canonicalCropCatalog.templates.map((candidate) => candidate.code === 'farmer_quick'
@@ -365,7 +387,10 @@ const numericCatalog: JournalCatalog = {
     unitRow('unit.kg', 'kg/ha', 1),
   ],
   templates: catalog.templates.map((candidate) => candidate.code === 'farmer_quick'
-    ? { ...candidate, definition: { ...candidate.definition, fields: ['attr.amount'] } }
+    ? {
+        ...candidate,
+        definition: { ...candidate.definition, fields: ['attr.amount'], carry_forward: [] },
+      }
     : candidate),
 };
 
@@ -387,7 +412,10 @@ const booleanCatalog: JournalCatalog = {
     { ...row('attr.success', 'attribute'), value_type: 'boolean' as const, labels: { en: 'Successful' } },
   ],
   templates: catalog.templates.map((candidate) => candidate.code === 'farmer_quick'
-    ? { ...candidate, definition: { ...candidate.definition, fields: ['attr.success'] } }
+    ? {
+        ...candidate,
+        definition: { ...candidate.definition, fields: ['attr.success'], carry_forward: [] },
+      }
     : candidate),
 };
 
@@ -403,7 +431,11 @@ const activityTransitionCatalog: JournalCatalog = {
   templates: catalog.templates.map((candidate) => candidate.code === 'farmer_quick'
     ? {
         ...candidate,
-        definition: { ...candidate.definition, fields: [{ code: 'attr.amount', required: true }] },
+        definition: {
+          ...candidate.definition,
+          fields: [{ code: 'attr.amount', required: true }],
+          carry_forward: [],
+        },
       }
     : candidate),
   layouts: [{
@@ -452,13 +484,14 @@ function validationTransitionCatalog(options: {
               code: 'attr.amount',
               visible_if: { field: 'activity_code', op: 'eq', value: 'fertilization' },
             }] : ['attr.amount'],
+            carry_forward: [],
           },
         };
       }
       if (candidate.code === 'full_record' && reveal === 'template') {
         return {
           ...candidate,
-          definition: { ...candidate.definition, fields: ['attr.amount'] },
+          definition: { ...candidate.definition, fields: ['attr.amount'], carry_forward: [] },
         };
       }
       return candidate;
@@ -542,6 +575,7 @@ const invalidRepeatCatalog: JournalCatalog = {
         definition: {
           ...candidate.definition,
           fields: ['attr.product_uuid', 'attr.amount_mass_area_product'],
+          carry_forward: ['attr.product_uuid'],
         },
       }
     : candidate),
@@ -687,6 +721,7 @@ const templateSwitchCatalog: JournalCatalog = {
         definition: {
           ...candidate.definition,
           fields: [{ code: 'attr.extra', required: true }],
+          carry_forward: [],
         },
       }
     : candidate),
@@ -715,6 +750,7 @@ const invalidRetainedTemplateCatalog: JournalCatalog = {
     definition: {
       ...candidate.definition,
       fields: candidate.code === 'farmer_quick' ? [] : ['attr.explicit_amount'],
+      carry_forward: [],
     },
   })),
 };
@@ -1411,6 +1447,90 @@ describe('JournalCaptureFlow', () => {
     );
     fireEvent.click(screen.getByRole('button', { name: 'capture.back' }));
     await waitFor(() => expect(screen.getByText('capture.carry.prefilled')).toBeInTheDocument());
+  });
+
+  it('quick-entry carry-forward marks and submits all three low-risk values in the final payload (Task 27 P4 fix)', async () => {
+    const source = entry({
+      entry_uuid: 'source-triple',
+      plot_uuid: 'plot-1',
+      zone_uuid: 'zone-1',
+      activity_code: 'irrigation',
+      occurred_start: '2026-07-16T00:00:00.000Z',
+      status: 'final',
+      season_uuid: 'season-1',
+      season_crop: 'Wheat',
+      layout_code: 'greenhouse',
+      layout_version: 6,
+      values: [
+        {
+          group_index: 0,
+          attribute_code: 'attr.operator',
+          value_status: 'observed' as const,
+          value_text: 'Alex',
+          value_num: null,
+          unit_code: null,
+          entered_value_num: null,
+          entered_unit_code: null,
+        },
+        {
+          group_index: 0,
+          attribute_code: 'attr.equipment',
+          value_status: 'observed' as const,
+          value_text: 'Boom sprayer',
+          value_num: null,
+          unit_code: null,
+          entered_value_num: null,
+          entered_unit_code: null,
+        },
+        {
+          group_index: 0,
+          attribute_code: 'attr.method',
+          value_status: 'observed' as const,
+          value_text: 'Drip line',
+          value_num: null,
+          unit_code: null,
+          entered_value_num: null,
+          entered_unit_code: null,
+        },
+      ],
+    });
+    apiMocks.listEntries.mockImplementation(async (filters: { entry_uuid?: string }) => {
+      if (filters.entry_uuid) {
+        return { entries: [{ ...source, entry_uuid: '11111111-1111-4111-8111-111111111111', status: 'draft', values: [] }], next_cursor: null };
+      }
+      return { entries: [source], next_cursor: null };
+    });
+    render(<JournalCaptureFlow
+      {...baseProps}
+      catalog={tripleCarryForwardCatalog}
+      recentEntries={[source]}
+      initialPlot={plot}
+    />);
+    fireEvent.click(screen.getByRole('button', { name: 'irrigation' }));
+    fireEvent.click(screen.getByRole('button', { name: 'capture.next' }));
+    fireEvent.click(screen.getByRole('button', { name: 'capture.next' }));
+    await waitFor(() => expect(apiMocks.createEntry).toHaveBeenCalled());
+
+    fireEvent.click(screen.getByRole('button', { name: 'capture.back' }));
+    await waitFor(() => expect(screen.getByText('capture.carry.prefilled')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByRole('textbox', { name: 'attr.operator' })).toHaveValue('Alex'));
+    expect(screen.getByRole('textbox', { name: 'attr.equipment' })).toHaveValue('Boom sprayer');
+    expect(screen.getByRole('textbox', { name: 'attr.method' })).toHaveValue('Drip line');
+
+    fireEvent.click(screen.getByRole('button', { name: 'capture.next' }));
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'capture.confirm.title' })).toBeInTheDocument());
+    fireEvent.click(screen.getByRole('button', { name: 'capture.finish' }));
+
+    await waitFor(() => expect(apiMocks.updateEntry).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({
+        values: expect.arrayContaining([
+          expect.objectContaining({ attribute_code: 'attr.operator', value: 'Alex' }),
+          expect.objectContaining({ attribute_code: 'attr.equipment', value: 'Boom sprayer' }),
+          expect.objectContaining({ attribute_code: 'attr.method', value: 'Drip line' }),
+        ]),
+      }),
+    ));
   });
 
   it('revalidates an out-of-range automatic carry-forward value before Finish', async () => {

@@ -187,6 +187,27 @@ function parseSections(
   return sections;
 }
 
+// The set of field codes a template actually shows the user: its top-level
+// `fields` plus every (already-expanded) section's `fields`. Used to guard
+// `carry_forward` below — see that call site for why.
+function visibleFieldCodes(
+  fields: JournalFieldInput[],
+  sections: JournalTemplateSection[],
+): Set<string> {
+  const codes = new Set<string>();
+  for (const field of fields) {
+    const code = fieldCode(field);
+    if (code) codes.add(code);
+  }
+  for (const section of sections) {
+    for (const field of section.fields) {
+      const code = fieldCode(field);
+      if (code) codes.add(code);
+    }
+  }
+  return codes;
+}
+
 function parseTemplate(
   row: JournalDefinitionRow,
   domain: DefinitionDomain,
@@ -202,6 +223,14 @@ function parseTemplate(
   if (!rootRequirement || !requirements) return null;
   const carryForward = definition.carry_forward == null ? [] : stringArray(definition.carry_forward);
   if (!carryForward || carryForward.some((code) => !knownField(domain.vocabByCode, code))) return null;
+  // A carry_forward code must be part of this template's own visible field
+  // set (top-level `fields` or a section's `fields`) — otherwise a value is
+  // silently carried into the entry with no field for the user to see or
+  // correct it. This was the P4 bug in farmer_quick@1 (Task 27): shipped
+  // alone, this guard would reject that live definition, which is exactly
+  // why the visibility fix (farmer_quick@2) must ship atomically with it.
+  const visible = visibleFieldCodes(fields, sections);
+  if (carryForward.some((code) => !visible.has(code))) return null;
   const maxPrimaryFields = definition.max_primary_fields;
   if (maxPrimaryFields != null &&
       (!Number.isInteger(maxPrimaryFields) || (maxPrimaryFields as number) <= 0)) return null;

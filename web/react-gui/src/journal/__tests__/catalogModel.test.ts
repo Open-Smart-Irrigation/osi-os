@@ -1,3 +1,4 @@
+import type { TFunction } from 'i18next';
 import { describe, expect, it } from 'vitest';
 
 import {
@@ -10,6 +11,8 @@ import {
   deriveActivityLeaves,
   isLayoutTemplateCompatible,
 } from '../catalogModel';
+import { deriveFieldStates } from '../templateEngine';
+import { validateEntryForm } from '../../components/journal/capture/EntryForm';
 import type {
   JournalCatalog,
   JournalDefinitionRow,
@@ -80,7 +83,7 @@ const templates = [
   definition('farmer_quick', {
     sections: [
       { code: 'identity', fields: ['activity_code', 'plot_uuid', 'occurred_start'] },
-      { code: 'values', fields: ['attr.amount', 'note'] },
+      { code: 'values', fields: ['attr.amount', 'note', 'attr.custom.note'] },
     ],
     max_primary_fields: 5,
     carry_forward: ['attr.custom.note'],
@@ -439,6 +442,128 @@ describe('catalog model', () => {
       option_dependencies: [],
     });
     expect(buildCatalogModel(badArray).ok).toBe(false);
+  });
+
+  it('rejects a carry_forward code that is not in the template\'s own visible field set (Task 27 P4 guard)', () => {
+    // This is exactly the shape of the historical farmer_quick@1 bug: a
+    // carry_forward code that is never shown in any section, so nobody can
+    // see or correct the value being silently carried into their entry.
+    const invisibleCarryForward = catalog();
+    invisibleCarryForward.templates[0] = definition('farmer_quick', {
+      sections: [
+        { code: 'identity', fields: ['activity_code', 'plot_uuid', 'occurred_start'] },
+        { code: 'values', fields: ['attr.amount', 'note'] },
+      ],
+      max_primary_fields: 5,
+      carry_forward: ['attr.flag'],
+    });
+    const result = buildCatalogModel(invisibleCarryForward);
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.errors.join('; ')).toMatch(/farmer_quick/);
+
+    // The same code, once actually shown in a visible section, must pass.
+    const visibleCarryForward = catalog();
+    visibleCarryForward.templates[0] = definition('farmer_quick', {
+      sections: [
+        { code: 'identity', fields: ['activity_code', 'plot_uuid', 'occurred_start'] },
+        { code: 'values', fields: ['attr.amount', 'note', 'attr.flag'] },
+      ],
+      max_primary_fields: 5,
+      carry_forward: ['attr.flag'],
+    });
+    expect(buildCatalogModel(visibleCarryForward).ok).toBe(true);
+
+    // A carry_forward code covered only via a top-level (non-section) field
+    // must also count as visible.
+    const topLevelFieldCarryForward = catalog();
+    topLevelFieldCarryForward.templates[0] = definition('farmer_quick', {
+      fields: ['attr.flag'],
+      sections: [
+        { code: 'identity', fields: ['activity_code', 'plot_uuid', 'occurred_start'] },
+      ],
+      carry_forward: ['attr.flag'],
+    });
+    expect(buildCatalogModel(topLevelFieldCarryForward).ok).toBe(true);
+  });
+
+  it('accepts the shipped farmer_quick@2 carry_forward, since operator/equipment/method are visible there (P4 fix)', () => {
+    const fixture = shippedCatalog();
+    const result = buildCatalogModel(fixture);
+    expect(result.ok, result.ok ? '' : result.errors.join('; ')).toBe(true);
+    if (!result.ok) return;
+    const farmer = result.model.templates.get('farmer_quick');
+    expect(farmer?.version).toBe(2);
+    expect(farmer?.carry_forward).toEqual(['attr.operator', 'attr.equipment', 'attr.method']);
+    const visibleCodes = new Set(
+      (farmer?.sections ?? []).flatMap((section) => section.fields).map((field) =>
+        typeof field === 'string' ? field : String((field as { code?: unknown }).code)),
+    );
+    for (const code of farmer?.carry_forward ?? []) {
+      expect(visibleCodes.has(code)).toBe(true);
+    }
+  });
+
+  it('quick-entry capture pipeline: the P4 guard fails closed if v2 is missing; with the real v1+v2 catalog it visibly marks and submits all three', () => {
+    const t = ((key: string) => key) as TFunction<'journal'>;
+    const fullFixture = shippedCatalog();
+
+    // If farmer_quick@2 were ever missing (the pre-Task-27 world), @1 would
+    // become the active definition again — and the parseTemplate guard
+    // (catalogModel.ts) now correctly fails the whole model closed rather
+    // than silently shipping a quick-entry template that carries values
+    // nobody can see. This is deliberately re-derived from the *real*
+    // catalog content on every run, so it keeps proving the fix forever
+    // instead of only at the moment this test was written.
+    const v1OnlyFixture: JournalCatalog = {
+      ...fullFixture,
+      templates: fullFixture.templates.filter((row) =>
+        !(row.code === 'farmer_quick' && row.version === 2)),
+    };
+    const v1OnlyResult = buildCatalogModel(v1OnlyFixture);
+    expect(v1OnlyResult.ok).toBe(false);
+    if (v1OnlyResult.ok) return;
+    expect(v1OnlyResult.errors.join('; ')).toMatch(/farmer_quick/);
+
+    // With the real, current catalog (v1 frozen + v2 active), the pipeline
+    // must visibly mark operator/equipment/method as carried-forward fields
+    // and include all three in the final submitted payload.
+    const result = buildCatalogModel(fullFixture);
+    expect(result.ok, result.ok ? '' : result.errors.join('; ')).toBe(true);
+    if (!result.ok) return;
+    const template = result.model.templates.get('farmer_quick');
+    const layout = result.model.layouts.get('open_field');
+    expect(template?.version).toBe(2);
+    expect(layout).toBeDefined();
+    if (!template || !layout) return;
+
+    const selections = { activity_code: 'irrigation' };
+    const fieldStates = deriveFieldStates(template, layout, selections);
+    for (const code of ['attr.operator', 'attr.equipment', 'attr.method']) {
+      const state = fieldStates.find((candidate) => candidate.code === code);
+      expect(state?.visible, `${code} must be a visible field state`).toBe(true);
+    }
+
+    const carriedInputs = [
+      { attribute_code: 'attr.operator', value_status: 'observed' as const, value_text: 'Alex' },
+      { attribute_code: 'attr.equipment', value_status: 'observed' as const, value_text: 'Boom sprayer' },
+      { attribute_code: 'attr.method', value_status: 'observed' as const, value_text: 'Drip line' },
+    ];
+    const validation = validateEntryForm({
+      model: result.model,
+      layout,
+      fieldStates,
+      inputs: carriedInputs,
+      selections,
+      numberInputErrors: new Map(),
+      products: [],
+      t,
+    });
+    expect(validation.payload).toEqual(expect.arrayContaining([
+      expect.objectContaining({ attribute_code: 'attr.operator', value: 'Alex' }),
+      expect.objectContaining({ attribute_code: 'attr.equipment', value: 'Boom sprayer' }),
+      expect.objectContaining({ attribute_code: 'attr.method', value: 'Drip line' }),
+    ]));
   });
 
   it('derives the Agroscope operation to device to unit cascade and deterministic leaves', () => {
