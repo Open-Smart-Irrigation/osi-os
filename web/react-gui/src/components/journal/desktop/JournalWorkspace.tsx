@@ -133,6 +133,12 @@ function CaptureModal({ accessibleName, onRequestClose, children }: CaptureModal
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
         event.preventDefault();
+        // Known limitation: this force-closes the whole flow even while
+        // JournalCaptureFlow is mid-finalize (its own closeLocked) or
+        // showing a nested sub-view (plot editor, layout-transition review
+        // sheet), where Escape arguably should dismiss just the sub-view.
+        // This wrapper has no visibility into the flow's internal state
+        // without reaching into its internals, so it isn't handled here.
         onRequestCloseRef.current();
         return;
       }
@@ -259,7 +265,18 @@ export function JournalWorkspace({
   }, [captureOpen]);
 
   const openCapture = useCallback(() => setCaptureOpen(true), []);
-  const closeCapture = useCallback(() => setCaptureOpen(false), []);
+  // Wired to every "plain" dismiss path — the modal's own Escape/backdrop
+  // handling, and JournalCaptureFlow's onClose (fired by its close() after
+  // onSaved, or directly when there's nothing to save). A saved entry only
+  // reaches the server once the flow shows its success state; the flow only
+  // fires onSaved from its own in-body Close button, so Escape/backdrop must
+  // refresh here or a finalized entry silently won't appear in the table. A
+  // double retry when onSaved's own retry already ran is harmless (SWR
+  // mutate is idempotent).
+  const closeCapture = useCallback(() => {
+    setCaptureOpen(false);
+    void retryEntries();
+  }, [retryEntries]);
 
   const handleCaptureSaved = useCallback(async (receipt: JournalSavedReceipt) => {
     await retryEntries();

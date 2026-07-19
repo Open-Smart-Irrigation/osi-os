@@ -467,6 +467,33 @@ describe('JournalWorkspace', () => {
       expect(trigger).toHaveFocus();
     });
 
+    // A saved entry is only guaranteed to reach the server by the time the
+    // success state is showing; JournalCaptureFlow's own onSaved firing is
+    // wired to its in-body Close button only (see JournalCaptureFlow.tsx
+    // `close()`). Escape and backdrop-click bypass that entirely, so without
+    // this refresh the entries table silently misses the new row until an
+    // unrelated revalidation.
+    it('refreshes entries via the entries hook retry when the dialog is dismissed via Escape', () => {
+      mocks.retryEntries.mockClear();
+      renderWorkspace();
+      openCaptureModal();
+
+      fireEvent.keyDown(window, { key: 'Escape' });
+
+      expect(mocks.retryEntries).toHaveBeenCalled();
+    });
+
+    it('refreshes entries via the entries hook retry when the dialog is dismissed via a backdrop click', () => {
+      mocks.retryEntries.mockClear();
+      renderWorkspace();
+      openCaptureModal();
+
+      const dialog = screen.getByRole('dialog');
+      fireEvent.click(dialog.parentElement as HTMLElement);
+
+      expect(mocks.retryEntries).toHaveBeenCalled();
+    });
+
     it('closes the dialog and returns focus to the Log activity button when the capture flow calls onClose', () => {
       renderWorkspace();
       const trigger = screen.getByRole('button', { name: 'logActivity' });
