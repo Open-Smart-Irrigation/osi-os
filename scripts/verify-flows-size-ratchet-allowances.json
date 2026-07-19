@@ -102,8 +102,8 @@
       "reason": "live identity restart sentinel (Option C Slice 1), including bounded deterministic msg._msgid request key and fail-closed two-output publication (+1773)"
     },
     "put-chameleon-enabled-auth-fn": {
-      "max_chars": 4964,
-      "reason": "issue #5: UPDATE bumps sync_version so the enable toggle reaches the cloud"
+      "max_chars": 5611,
+      "reason": "issue #5: UPDATE bumps sync_version so the enable toggle reaches the cloud; Device API auth/status repair exact ceiling (Plan 6 Tasks 1-2)"
     },
     "dendro-ref-tree-fn": {
       "max_chars": 1491,
@@ -122,8 +122,8 @@
       "reason": "issue #10: zone_daily_environment upsert bumps sync_version"
     },
     "device-api-http500": {
-      "max_chars": 293,
-      "reason": "issue #9: adopt msg.error.statusCode instead of hardcoding 500, so auth failures (401) survive the responder"
+      "max_chars": 2202,
+      "reason": "issue #9: adopt msg.error.statusCode instead of hardcoding 500, so auth failures (401) survive the responder; Device API auth/status repair exact ceiling (Plan 6 Tasks 1-2)"
     },
     "dendro-raw-fn": {
       "max_chars": 5345,
@@ -158,8 +158,8 @@
       "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
     },
     "get-devices-auth": {
-      "max_chars": 2953,
-      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
+      "max_chars": 3522,
+      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason.; Device API auth/status repair exact ceiling (Plan 6 Tasks 1-2)"
     },
     "get-devices-query": {
       "max_chars": 1499,
@@ -178,8 +178,8 @@
       "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
     },
     "post-devices-auth": {
-      "max_chars": 3677,
-      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
+      "max_chars": 4252,
+      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason.; Device API auth/status repair exact ceiling (Plan 6 Tasks 1-2)"
     },
     "check-existing-device": {
       "max_chars": 404,
@@ -194,8 +194,8 @@
       "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
     },
     "delete-device-auth": {
-      "max_chars": 3080,
-      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
+      "max_chars": 3661,
+      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason.; Device API auth/status repair exact ceiling (Plan 6 Tasks 1-2)"
     },
     "delete-device-unlink": {
       "max_chars": 712,
@@ -206,8 +206,8 @@
       "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
     },
     "post-zone-auth": {
-      "max_chars": 3166,
-      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
+      "max_chars": 3723,
+      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason.; Device API auth/status repair exact ceiling (Plan 6 Tasks 1-2)"
     },
     "post-zone-insert": {
       "max_chars": 1080,
@@ -222,8 +222,8 @@
       "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
     },
     "get-zones-auth": {
-      "max_chars": 2953,
-      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
+      "max_chars": 3510,
+      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason.; Device API auth/status repair exact ceiling (Plan 6 Tasks 1-2)"
     },
     "get-zones-query": {
       "max_chars": 3564,
@@ -234,8 +234,8 @@
       "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
     },
     "delete-zone-auth": {
-      "max_chars": 2953,
-      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
+      "max_chars": 3522,
+      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason.; Device API auth/status repair exact ceiling (Plan 6 Tasks 1-2)"
     },
     "delete-zone-verify": {
       "max_chars": 634,
@@ -254,8 +254,8 @@
       "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
     },
     "assign-device-auth": {
-      "max_chars": 2953,
-      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
+      "max_chars": 3534,
+      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason.; Device API auth/status repair exact ceiling (Plan 6 Tasks 1-2)"
     },
     "assign-device-verify-zone": {
       "max_chars": 855,
@@ -274,8 +274,8 @@
       "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
     },
     "unassign-device-auth": {
-      "max_chars": 2953,
-      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
+      "max_chars": 3546,
+      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason.; Device API auth/status repair exact ceiling (Plan 6 Tasks 1-2)"
     },
     "unassign-device-update": {
       "max_chars": 1018,
@@ -286,8 +286,8 @@
       "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
     },
     "70fcbea336401bd1": {
-      "max_chars": 2981,
-      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
+      "max_chars": 3550,
+      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason.; Device API auth/status repair exact ceiling (Plan 6 Tasks 1-2)"
     },
     "22cc64fa2a899cea": {
       "max_chars": 4256,
@@ -302,16 +302,16 @@
       "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
     },
     "settings-disable-schedules-fn": {
-      "max_chars": 4249,
-      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
+      "max_chars": 4896,
+      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason.; Device API auth/status repair exact ceiling (Plan 6 Tasks 1-2)"
     },
     "8180476b6ab55d6e": {
       "max_chars": 756,
       "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
     },
     "83bb4a452dd9ae37": {
-      "max_chars": 5883,
-      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
+      "max_chars": 6452,
+      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason.; Device API auth/status repair exact ceiling (Plan 6 Tasks 1-2)"
     },
     "9ad895844533fb35": {
       "max_chars": 470,
@@ -418,8 +418,8 @@
       "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
     },
     "dendro-history-fn": {
-      "max_chars": 4145,
-      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
+      "max_chars": 4720,
+      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason.; Device API auth/status repair exact ceiling (Plan 6 Tasks 1-2)"
     },
     "dendro-history-format": {
       "max_chars": 520,
@@ -434,32 +434,32 @@
       "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
     },
     "put-dendro-auth-fn": {
-      "max_chars": 3373,
-      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
+      "max_chars": 3954,
+      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason.; Device API auth/status repair exact ceiling (Plan 6 Tasks 1-2)"
     },
     "put-dendro-format": {
       "max_chars": 88,
       "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
     },
     "put-temp-auth-fn": {
-      "max_chars": 3369,
-      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
+      "max_chars": 3938,
+      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason.; Device API auth/status repair exact ceiling (Plan 6 Tasks 1-2)"
     },
     "put-temp-format": {
       "max_chars": 84,
       "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
     },
     "sensor-history-fn": {
-      "max_chars": 4293,
-      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
+      "max_chars": 4868,
+      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason.; Device API auth/status repair exact ceiling (Plan 6 Tasks 1-2)"
     },
     "sensor-history-format": {
       "max_chars": 161,
       "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
     },
     "rain-history-fn": {
-      "max_chars": 4320,
-      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
+      "max_chars": 4883,
+      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason.; Device API auth/status repair exact ceiling (Plan 6 Tasks 1-2)"
     },
     "sys-reboot-fn": {
       "max_chars": 3117,
@@ -614,8 +614,8 @@
       "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
     },
     "put-lsn50-mode-auth-fn": {
-      "max_chars": 4159,
-      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
+      "max_chars": 4764,
+      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason.; Device API auth/status repair exact ceiling (Plan 6 Tasks 1-2)"
     },
     "put-lsn50-mode-authorize-fn": {
       "max_chars": 933,
@@ -626,8 +626,8 @@
       "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
     },
     "put-lsn50-interval-auth-fn": {
-      "max_chars": 4318,
-      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
+      "max_chars": 4947,
+      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason.; Device API auth/status repair exact ceiling (Plan 6 Tasks 1-2)"
     },
     "put-lsn50-interval-authorize-fn": {
       "max_chars": 889,
@@ -642,8 +642,8 @@
       "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
     },
     "put-kiwi-interval-auth-fn": {
-      "max_chars": 4225,
-      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
+      "max_chars": 4848,
+      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason.; Device API auth/status repair exact ceiling (Plan 6 Tasks 1-2)"
     },
     "put-kiwi-interval-authorize-fn": {
       "max_chars": 908,
@@ -654,8 +654,8 @@
       "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
     },
     "post-kiwi-enable-auth-fn": {
-      "max_chars": 4200,
-      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
+      "max_chars": 4817,
+      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason.; Device API auth/status repair exact ceiling (Plan 6 Tasks 1-2)"
     },
     "post-kiwi-enable-authorize-fn": {
       "max_chars": 912,
@@ -666,8 +666,8 @@
       "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
     },
     "put-strega-interval-auth-fn": {
-      "max_chars": 4843,
-      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
+      "max_chars": 5478,
+      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason.; Device API auth/status repair exact ceiling (Plan 6 Tasks 1-2)"
     },
     "put-strega-interval-authorize-fn": {
       "max_chars": 1111,
@@ -678,12 +678,12 @@
       "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
     },
     "put-lsn50-interrupt-auth-fn": {
-      "max_chars": 4186,
-      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
+      "max_chars": 4821,
+      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason.; Device API auth/status repair exact ceiling (Plan 6 Tasks 1-2)"
     },
     "put-lsn50-5v-auth-fn": {
-      "max_chars": 4180,
-      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
+      "max_chars": 4773,
+      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason.; Device API auth/status repair exact ceiling (Plan 6 Tasks 1-2)"
     },
     "put-lsn50-advanced-authorize-fn": {
       "max_chars": 1292,
@@ -694,24 +694,24 @@
       "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
     },
     "put-strega-model-auth-fn": {
-      "max_chars": 3694,
-      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
+      "max_chars": 4311,
+      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason.; Device API auth/status repair exact ceiling (Plan 6 Tasks 1-2)"
     },
     "put-strega-timed-auth-fn": {
-      "max_chars": 4888,
-      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
+      "max_chars": 5505,
+      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason.; Device API auth/status repair exact ceiling (Plan 6 Tasks 1-2)"
     },
     "put-strega-magnet-auth-fn": {
-      "max_chars": 3921,
-      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
+      "max_chars": 4544,
+      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason.; Device API auth/status repair exact ceiling (Plan 6 Tasks 1-2)"
     },
     "put-strega-partial-auth-fn": {
-      "max_chars": 4316,
-      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
+      "max_chars": 4945,
+      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason.; Device API auth/status repair exact ceiling (Plan 6 Tasks 1-2)"
     },
     "put-strega-flush-auth-fn": {
-      "max_chars": 4355,
-      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
+      "max_chars": 4972,
+      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason.; Device API auth/status repair exact ceiling (Plan 6 Tasks 1-2)"
     },
     "put-strega-advanced-authorize-fn": {
       "max_chars": 4071,
@@ -722,8 +722,8 @@
       "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
     },
     "get-gateway-location-auth-fn": {
-      "max_chars": 4040,
-      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
+      "max_chars": 4681,
+      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason.; Device API auth/status repair exact ceiling (Plan 6 Tasks 1-2)"
     },
     "get-gateway-location-format-fn": {
       "max_chars": 949,
@@ -734,16 +734,16 @@
       "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
     },
     "put-rain-gauge-auth-fn": {
-      "max_chars": 3381,
-      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
+      "max_chars": 3986,
+      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason.; Device API auth/status repair exact ceiling (Plan 6 Tasks 1-2)"
     },
     "put-rain-gauge-resp-fn": {
       "max_chars": 96,
       "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
     },
     "put-flow-meter-auth-fn": {
-      "max_chars": 3381,
-      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
+      "max_chars": 3986,
+      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason.; Device API auth/status repair exact ceiling (Plan 6 Tasks 1-2)"
     },
     "put-flow-meter-resp-fn": {
       "max_chars": 96,
@@ -758,12 +758,12 @@
       "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
     },
     "s2120-zones-get-fn": {
-      "max_chars": 2967,
-      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
+      "max_chars": 3380,
+      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason.; Device API auth/status repair exact ceiling (Plan 6 Tasks 1-2)"
     },
     "s2120-zones-put-auth-fn": {
-      "max_chars": 4705,
-      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
+      "max_chars": 5138,
+      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason.; Device API auth/status repair exact ceiling (Plan 6 Tasks 1-2)"
     },
     "al-link-store-mqtt": {
       "max_chars": 2715,
@@ -790,20 +790,20 @@
       "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
     },
     "put-soil-depth-fn": {
-      "max_chars": 5739,
-      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
+      "max_chars": 6314,
+      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason.; Device API auth/status repair exact ceiling (Plan 6 Tasks 1-2)"
     },
     "put-dendro-config-auth-fn": {
-      "max_chars": 9578,
-      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
+      "max_chars": 10201,
+      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason.; Device API auth/status repair exact ceiling (Plan 6 Tasks 1-2)"
     },
     "put-dendro-config-format": {
       "max_chars": 709,
       "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
     },
     "post-dendro-baseline-reset-auth-fn": {
-      "max_chars": 4575,
-      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
+      "max_chars": 5252,
+      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason.; Device API auth/status repair exact ceiling (Plan 6 Tasks 1-2)"
     },
     "post-dendro-baseline-reset-format": {
       "max_chars": 327,
@@ -846,8 +846,8 @@
       "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
     },
     "cancel-strega-actuation-fn": {
-      "max_chars": 6689,
-      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
+      "max_chars": 7318,
+      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason.; Device API auth/status repair exact ceiling (Plan 6 Tasks 1-2)"
     },
     "strega-today-liters-fn": {
       "max_chars": 1494,
@@ -870,8 +870,8 @@
       "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
     },
     "44e7d74ff3668e01": {
-      "max_chars": 2915,
-      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
+      "max_chars": 3484,
+      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason.; Device API auth/status repair exact ceiling (Plan 6 Tasks 1-2)"
     },
     "cc34104ef33b76fd": {
       "max_chars": 1418,
@@ -886,16 +886,16 @@
       "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
     },
     "8b93fa005d78e25f": {
-      "max_chars": 2915,
-      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
+      "max_chars": 3484,
+      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason.; Device API auth/status repair exact ceiling (Plan 6 Tasks 1-2)"
     },
     "bf93cd55db0eb57f": {
       "max_chars": 3486,
       "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
     },
     "get-actuations-auth": {
-      "max_chars": 3669,
-      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
+      "max_chars": 4256,
+      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason.; Device API auth/status repair exact ceiling (Plan 6 Tasks 1-2)"
     },
     "get-actuations-query": {
       "max_chars": 2957,
@@ -963,7 +963,7 @@
     }
   },
   "total_allowance": {
-    "max_total": 1071363,
-    "reason": "1.A5 sync outbox hardening + 1.A6 history card-data + 1.C command-type registry expansion + 5.6 time integrity guards + heartbeat RTC fields + issue #10 upsert sync versioning + issue #9 device-api-http500 statusCode fix (+45) + issue #6 dendro-raw-fn regex fix (+10) + issue #5 chameleon_enabled sync (+349: sync-init-fn +99, sync-bootstrap-build +102, sync-force-build +102, put-chameleon-enabled-auth-fn +46) + issue #15 dendro-ref-tree-fn sync_version bump (+46) + issue #16 sync-init-fn EUI-resolvability guards restored to two boot triggers (+420, trigger-body parity adjudication Pattern A) + PR #140 review finding: sync_version added to 3 inline fallback CREATE TABLE statements in dendro-compute-fn (+104) and to dendroDaily/zoneRecommendations/zoneEnvironments SELECTs in sync-bootstrap-build + sync-force-build (+79 each, +158) (+262 total) + Field Journal Tasks 10-12 vs main @0f1361a3 (+11443: sync-bootstrap-build +4078, sync-force-build +4936, sync-pending-split +401, history-api-router-fn +312, new nodes journal-api-router-fn +489 and journal-command-apply-fn +1258; covered within this existing headroom) + PR #141 malformed-payload and STREGA calibration hardening (+1058 per profile: sync-bootstrap-build +139, sync-outbox-build +397, sync-force-build +100, write-strega-expectation +422) + PR #141 guarded journal helper loading (+2117 per profile: dedupe +627, apply +465, ACK queue +494, API router +531) + live identity restart sentinel, marked identity errors, and fail-closed restart publication (Option C Slice 1) (+11605) + filtered restartPending status with explicit blocked/malformed/unreadable restartPending states, deduplicated fan-probe warnings, and a capped, hotplug-pruned context map (Option C Slice 1b) (+4862)"
+    "max_total": 1097515,
+    "reason": "1.A5 sync outbox hardening + 1.A6 history card-data + 1.C command-type registry expansion + 5.6 time integrity guards + heartbeat RTC fields + issue #10 upsert sync versioning + issue #9 device-api-http500 statusCode fix (+45) + issue #6 dendro-raw-fn regex fix (+10) + issue #5 chameleon_enabled sync (+349: sync-init-fn +99, sync-bootstrap-build +102, sync-force-build +102, put-chameleon-enabled-auth-fn +46) + issue #15 dendro-ref-tree-fn sync_version bump (+46) + issue #16 sync-init-fn EUI-resolvability guards restored to two boot triggers (+420, trigger-body parity adjudication Pattern A) + PR #140 review finding: sync_version added to 3 inline fallback CREATE TABLE statements in dendro-compute-fn (+104) and to dendroDaily/zoneRecommendations/zoneEnvironments SELECTs in sync-bootstrap-build + sync-force-build (+79 each, +158) (+262 total) + Field Journal Tasks 10-12 vs main @0f1361a3 (+11443: sync-bootstrap-build +4078, sync-force-build +4936, sync-pending-split +401, history-api-router-fn +312, new nodes journal-api-router-fn +489 and journal-command-apply-fn +1258; covered within this existing headroom) + PR #141 malformed-payload and STREGA calibration hardening (+1058 per profile: sync-bootstrap-build +139, sync-outbox-build +397, sync-force-build +100, write-strega-expectation +422) + PR #141 guarded journal helper loading (+2117 per profile: dedupe +627, apply +465, ACK queue +494, API router +531) + live identity restart sentinel, marked identity errors, and fail-closed restart publication (Option C Slice 1) (+11605) + filtered restartPending status with explicit blocked/malformed/unreadable restartPending states, deduplicated fan-probe warnings, and a capped, hotplug-pruned context map (Option C Slice 1b) (+4862); Device API auth/status repair exact total ceiling (Plan 6 Tasks 1-2)"
   }
 }

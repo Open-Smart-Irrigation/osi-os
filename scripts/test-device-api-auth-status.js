@@ -892,7 +892,7 @@ for (const rel of PROFILES) {
       target.func += '/*x*/';
       const dirty = sizeRatchet.checkSurface(rel, mutated, allowances);
       assert.ok(
-        dirty.failures.some((f) => f.includes(HTTP500_ID) && f.includes('grew')),
+        dirty.failures.some((f) => f.includes(HTTP500_ID) && f.includes('exceeding its committed ceiling')),
         'expected one extra character on ' + HTTP500_ID + ' to fail size-ratchet without an explicit ceiling edit: ' + dirty.failures.join('\n')
       );
     });
