@@ -19,7 +19,9 @@ function fixture() {
   };
   for (const rel of ['etc/uci-defaults/93_osi_deploy_guard_init', 'etc/uci-defaults/97_osi_db_seed', 'usr/share/db/farming.db',
     'usr/libexec/osi-factory-database-seed.js', 'usr/libexec/osi-factory-database-seed-cli.js',
-    'usr/libexec/osi-audit-command-ack-state.js', 'usr/libexec/osi-sync-protocol-capability-cli.js']) {
+    'usr/libexec/osi-deployment-state-cli.js', 'usr/libexec/osi-audit-command-ack-state.js',
+    'usr/libexec/osi-sync-protocol-capability-cli.js', 'usr/libexec/osi-factory-image-provenance.js',
+    'usr/libexec/osi-factory-image-provenance-cli.js']) {
     const file = path.join(profileRoot, rel);
     fs.mkdirSync(path.dirname(file), { recursive: true });
     fs.writeFileSync(file, rel, { mode: 0o600 });
@@ -32,7 +34,7 @@ function fixture() {
 
 test('generator writes canonical manifest and provenance for a profile', () => {
   const f = fixture();
-  const result = gen.generate({ root: f.root, profile: 'bcm2712', imageBuildId: 'build-1' });
+  const result = gen.generate({ root: f.root, profile: 'bcm2712', imageBuildId: '20260719-factory-bcm2712' });
   assert.equal(result.profile, 'bcm2712');
   assert.equal(JSON.parse(fs.readFileSync(f.provenance)).format, 2);
   assert.equal(JSON.parse(fs.readFileSync(f.manifest)).format, 1);
@@ -41,7 +43,12 @@ test('generator writes canonical manifest and provenance for a profile', () => {
 
 test('generator check fails after a bound source changes', () => {
   const f = fixture();
-  gen.generate({ root: f.root, profile: 'bcm2712', imageBuildId: 'build-1' });
+  gen.generate({ root: f.root, profile: 'bcm2712', imageBuildId: '20260719-factory-bcm2712' });
   fs.appendFileSync(path.join(f.profileRoot, 'usr/libexec/osi-factory-database-seed-cli.js'), 'tamper');
   assert.throws(() => gen.check({ root: f.root, profile: 'bcm2712' }), /hash mismatch/);
+});
+
+test('generator rejects reserved refresh flags instead of accepting a no-op', () => {
+  assert.throws(() => gen.parse(['--write', '--profile', 'bcm2712', '--refresh-bound-hashes']), /reserved/);
+  assert.throws(() => gen.parse(['--check', '--preserve-image-build-id']), /reserved/);
 });

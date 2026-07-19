@@ -1,11 +1,22 @@
 #!/bin/sh
 set -eu
 
-# This is a ROM-owned, fresh-image initializer.  It is intentionally inert on
-# an existing gateway: deleting /data/osi-deploy must never recreate authority.
-ROM_ROOT=${OSI_ROM_ROOT:-/rom}
-DATA_ROOT=${OSI_DATA_ROOT:-/data}
-RUN_ROOT=${OSI_RUN_ROOT:-/var/run}
+# This is a ROM-owned, fresh-image initializer.  Test roots are accepted only
+# by the explicit repair-program gate; production always uses fixed mounts and
+# the trusted system Node binary.
+if [ "${OSI_REPAIR_PROGRAM_MODE:-0}" = 1 ] && [ "${OSI_DEPLOY_ARTIFACT_MODE:-}" = test ]; then
+    ROM_ROOT=${OSI_ROM_ROOT:-/rom}
+    DATA_ROOT=${OSI_DATA_ROOT:-/data}
+    RUN_ROOT=${OSI_RUN_ROOT:-/var/run}
+    NODE=${OSI_NODE:-node}
+    REBOOT_COMMAND=${OSI_REBOOT_COMMAND:-/sbin/reboot}
+else
+    ROM_ROOT=/rom
+    DATA_ROOT=/data
+    RUN_ROOT=/var/run
+    NODE=/usr/bin/node
+    REBOOT_COMMAND=/sbin/reboot
+fi
 PROVENANCE="$ROM_ROOT/usr/share/osi-deploy/factory-image-provenance.json"
 MANIFEST="$ROM_ROOT/usr/share/osi-deploy/image-guard-manifest.json"
 RESULT="$RUN_ROOT/osi-factory-image-verification.json"
@@ -13,25 +24,42 @@ STATE_ROOT="$DATA_ROOT/osi-deploy"
 DB="$DATA_ROOT/db/farming.db"
 
 fail() { logger -t osi-deploy-guard-init "$1" 2>/dev/null || :; return 1; }
-[ -d "$DATA_ROOT" ] || fail "persistent data root missing"
-[ -f "$PROVENANCE" ] || fail "factory provenance missing"
-[ -f "$MANIFEST" ] || fail "image guard manifest missing"
+safe_path() {
+    candidate=$1
+    while [ "$candidate" != / ]; do
+        [ ! -L "$candidate" ] || fail "symlink path component: $candidate"
+        candidate=$(dirname "$candidate")
+    done
+}
+safe_path "$ROM_ROOT"; safe_path "$DATA_ROOT"; safe_path "$RUN_ROOT"
+safe_path "$PROVENANCE"; safe_path "$MANIFEST"; safe_path "$STATE_ROOT"; safe_path "$DB"
+[ -d "$DATA_ROOT" ] && [ ! -L "$DATA_ROOT" ] || fail "persistent data root missing or unsafe"
+[ -f "$PROVENANCE" ] && [ ! -L "$PROVENANCE" ] || fail "factory provenance missing or unsafe"
+[ -f "$MANIFEST" ] && [ ! -L "$MANIFEST" ] || fail "image guard manifest missing or unsafe"
 [ ! -e "$STATE_ROOT" ] || fail "deployment state already exists; fresh-image initializer refused"
 for sidecar in "$DB-wal" "$DB-shm" "$DB-journal"; do
+    safe_path "$sidecar"
     [ ! -e "$sidecar" ] || fail "database sidecar already exists"
 done
 [ ! -e "$DB" ] || fail "database already exists; fresh-image initializer refused"
 
-NODE=${OSI_NODE:-node}
-PROFILE=${OSI_IMAGE_PROFILE:-$("$NODE" -e 'const fs=require("fs"); const p=JSON.parse(fs.readFileSync(process.argv[1])); process.stdout.write(p.profile);' "$PROVENANCE")}
+if [ "${OSI_REPAIR_PROGRAM_MODE:-0}" = 1 ] && [ "${OSI_DEPLOY_ARTIFACT_MODE:-}" = test ] && [ -n "${OSI_IMAGE_PROFILE:-}" ]; then
+    PROFILE=$OSI_IMAGE_PROFILE
+else
+    PROFILE=$($NODE -e 'const fs=require("fs"); const p=JSON.parse(fs.readFileSync(process.argv[1])); process.stdout.write(p.profile);' "$PROVENANCE")
+fi
 "$NODE" "$ROM_ROOT/usr/libexec/osi-factory-image-provenance-cli.js" verify-runtime \
     --factory-provenance "$PROVENANCE" \
     --image-guard-manifest "$MANIFEST" \
     --initializer "$ROM_ROOT/etc/uci-defaults/93_osi_deploy_guard_init" \
     --factory-seed "$ROM_ROOT/usr/share/db/farming.db" \
+    --factory-seed-library "$ROM_ROOT/usr/libexec/osi-factory-database-seed.js" \
     --factory-seed-helper "$ROM_ROOT/usr/libexec/osi-factory-database-seed-cli.js" \
+    --deployment-state-cli "$ROM_ROOT/usr/libexec/osi-deployment-state-cli.js" \
     --ack-audit-cli "$ROM_ROOT/usr/libexec/osi-audit-command-ack-state.js" \
     --protocol-cli "$ROM_ROOT/usr/libexec/osi-sync-protocol-capability-cli.js" \
+    --provenance-library "$ROM_ROOT/usr/libexec/osi-factory-image-provenance.js" \
+    --provenance-cli "$ROM_ROOT/usr/libexec/osi-factory-image-provenance-cli.js" \
     --expected-profile "$PROFILE" \
     --result "$RESULT"
 
@@ -47,9 +75,4 @@ PROFILE=${OSI_IMAGE_PROFILE:-$("$NODE" -e 'const fs=require("fs"); const p=JSON.
     --database-lineage "$STATE_ROOT/database-lineage.json" \
     --profile "$PROFILE"
 
-if [ "${OSI_REPAIR_PROGRAM_MODE:-0}" = 1 ] && [ "${OSI_DEPLOY_ARTIFACT_MODE:-}" = test ]; then
-    reboot_command=${OSI_REBOOT_COMMAND:-/sbin/reboot}
-else
-    reboot_command=/sbin/reboot
-fi
-"$reboot_command"
+"$REBOOT_COMMAND"

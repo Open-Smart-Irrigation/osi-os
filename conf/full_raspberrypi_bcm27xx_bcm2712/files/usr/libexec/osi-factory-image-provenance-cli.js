@@ -11,7 +11,9 @@ const codec = require(fs.existsSync(path.join(__dirname, 'lib/factory-image-prov
 const SPEC = Object.freeze({
   'verify-runtime': [
     'factory-provenance', 'image-guard-manifest', 'initializer', 'factory-seed',
-    'factory-seed-helper', 'ack-audit-cli', 'protocol-cli', 'expected-profile', 'result',
+    'factory-seed-library', 'factory-seed-helper', 'deployment-state-cli',
+    'ack-audit-cli', 'protocol-cli', 'provenance-library', 'provenance-cli',
+    'expected-profile', 'result',
   ],
 });
 
@@ -45,8 +47,7 @@ function requireRegular(file, label) {
 }
 
 function readJson(file, label) {
-  requireRegular(file, label);
-  try { return JSON.parse(fs.readFileSync(file, 'utf8')); } catch (error) { throw new Error(`${label} is invalid JSON: ${error.message}`); }
+  return codec.readCanonicalJson(file, label);
 }
 
 function bootId() {
@@ -83,27 +84,7 @@ function writeExclusive(file, value) {
 }
 
 function verifyManifest(manifest, expectedProfile) {
-  if (!manifest || typeof manifest !== 'object' || Array.isArray(manifest)) throw new Error('image-guard manifest must be an object');
-  const expected = ['format', 'profile', 'imageBuildId', 'rcLinks', 'uciDefaultsOrder', 'files'];
-  const keys = Object.keys(manifest).sort();
-  if (keys.join('\0') !== expected.sort().join('\0')) throw new Error('image-guard manifest schema mismatch');
-  if (manifest.format !== 1 || manifest.profile !== expectedProfile) throw new Error('image-guard manifest profile/format mismatch');
-  codec.profileInfo(expectedProfile);
-  if (typeof manifest.imageBuildId !== 'string') throw new Error('image-guard manifest imageBuildId is invalid');
-  const expectedLinks = {
-    S90osiDbIntegrity: '/etc/init.d/osi-db-integrity', S98osiIdentityd: '/etc/init.d/osi-identityd',
-    K98osiIdentityd: '/etc/init.d/osi-identityd', S99nodeRed: '/etc/init.d/node-red',
-    K99nodeRed: '/etc/init.d/node-red', S99osiBootstrap: '/etc/init.d/osi-bootstrap',
-  };
-  if (codec.canonical(manifest.rcLinks) !== codec.canonical(expectedLinks)) throw new Error('image-guard manifest rc-link topology mismatch');
-  if (codec.canonical(manifest.uciDefaultsOrder) !== codec.canonical(['93_osi_deploy_guard_init', '94_osi_identityd_enable', '97_osi_db_seed'])) throw new Error('image-guard manifest UCI ordering mismatch');
-  const fileKeys = ['initializerSha256', 'factorySeedSha256', 'factorySeedHelperSha256',
-    'dbSeedInitializerSha256', 'commandStateAuditSha256', 'protocolCapabilityHelperSha256', 'protocolCapabilityCliSha256'];
-  if (!manifest.files || Object.keys(manifest.files).sort().join('\0') !== [...fileKeys].sort().join('\0')) throw new Error('image-guard manifest file anchors mismatch');
-  for (const key of fileKeys) {
-    if (!/^[0-9a-f]{64}$/.test(manifest.files[key])) throw new Error(`image-guard manifest ${key} is invalid`);
-  }
-  return manifest;
+  return codec.validateManifest(manifest, expectedProfile);
 }
 
 function verifyRuntime(values) {
@@ -116,7 +97,9 @@ function verifyRuntime(values) {
   const candidates = {
     initializerSha256: values.initializer,
     factorySeedSha256: values['factory-seed'],
+    factorySeedLibrarySha256: values['factory-seed-library'],
     factorySeedHelperSha256: values['factory-seed-helper'],
+    deploymentStateCliSha256: values['deployment-state-cli'],
     // The UCI seed runner is a fixed sibling of the trusted 93 initializer;
     // keeping this derivation in the codec preserves the exact ROM argv while
     // still comparing the live 97 bytes.
@@ -124,6 +107,8 @@ function verifyRuntime(values) {
     commandStateAuditSha256: values['ack-audit-cli'],
     protocolCapabilityHelperSha256: values['protocol-cli'],
     protocolCapabilityCliSha256: values['protocol-cli'],
+    provenanceLibrarySha256: values['provenance-library'],
+    provenanceCliSha256: values['provenance-cli'],
   };
   const candidateHashes = {};
   for (const [key, file] of Object.entries(candidates)) if (file) candidateHashes[key] = codec.hashFile(file, key);

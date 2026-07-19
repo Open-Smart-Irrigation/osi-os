@@ -9,16 +9,20 @@ const HASH = 'a'.repeat(64);
 function valid() {
   return {
     format: 2,
-    imageBuildId: '20260719-test-001',
+    imageBuildId: '20260719-factory-bcm2712',
     profile: 'bcm2712',
     imageGuardManifestSha256: HASH,
     initializerSha256: HASH,
     factorySeedSha256: HASH,
     factorySeedHelperSha256: HASH,
+    factorySeedLibrarySha256: HASH,
+    deploymentStateCliSha256: HASH,
     dbSeedInitializerSha256: HASH,
     commandStateAuditSha256: HASH,
     protocolCapabilityHelperSha256: HASH,
     protocolCapabilityCliSha256: HASH,
+    provenanceLibrarySha256: HASH,
+    provenanceCliSha256: HASH,
   };
 }
 

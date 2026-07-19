@@ -97,6 +97,10 @@ test('no shipped init, uci-default, deploy, workflow, or pipeline caller names a
     const absolute = path.join(repo, root);
     for (const [file, source] of readableEntries(absolute)) {
       if (file.endsWith('/etc/init.d/osi-deployment-inhibit')) continue;
+      // Commit 2 makes the pre-94 ROM initializer invoke the trusted state
+      // CLI for the image-baseline handoff; this is the sole intended caller
+      // before the full runtime tranche lands.
+      if (file.endsWith('/etc/uci-defaults/93_osi_deploy_guard_init')) continue;
       for (const pattern of patterns) assert.doesNotMatch(source, new RegExp(pattern), `${file} unexpectedly calls ${pattern}`);
     }
   }

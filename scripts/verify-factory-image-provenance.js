@@ -9,17 +9,20 @@ const cli = require('./factory-image-provenance-cli');
 
 function verifyProfile(root, profile) {
   const artifacts = generator.makeArtifacts({ root, profile, imageBuildId: undefined });
-  const manifest = codec.readJson(artifacts.manifestPath, `${profile} image-guard manifest`);
-  const provenance = codec.readJson(artifacts.provenancePath, `${profile} factory provenance`);
+  const manifest = codec.readCanonicalJson(artifacts.manifestPath, `${profile} image-guard manifest`);
+  const provenance = codec.readCanonicalJson(artifacts.provenancePath, `${profile} factory provenance`);
   cli.verifyManifest(manifest, profile);
   codec.assertProfileRelation(provenance, profile);
-  if (!provenance.imageBuildId.includes(profile)) throw new Error(`${profile} imageBuildId/profile relation mismatch`);
-  if (codec.canonical(manifest) !== codec.canonical(artifacts.manifest)) throw new Error(`${profile} image-guard manifest hash mismatch`);
-  if (codec.canonical(provenance) !== codec.canonical(artifacts.provenance)) throw new Error(`${profile} factory provenance hash mismatch`);
+  if (!Buffer.from(`${codec.canonical(artifacts.manifest)}\n`).equals(fs.readFileSync(artifacts.manifestPath))) throw new Error(`${profile} image-guard manifest hash mismatch`);
+  if (!Buffer.from(`${codec.canonical(artifacts.provenance)}\n`).equals(fs.readFileSync(artifacts.provenancePath))) throw new Error(`${profile} factory provenance hash mismatch`);
+  for (const [key, relative] of Object.entries(codec.BOUND)) {
+    const file = codec.safeJoin(artifacts.filesRoot, relative, `${profile} ${key}`);
+    if (codec.hashFile(file, `${profile} ${key}`) !== manifest.files[key]) throw new Error(`${profile} ${key} hash mismatch`);
+  }
   const sourceLib = path.join(root, 'scripts/lib/factory-image-provenance.js');
   const sourceCli = path.join(root, 'scripts/factory-image-provenance-cli.js');
-  const residentLib = path.join(artifacts.filesRoot, 'usr/libexec/osi-factory-image-provenance.js');
-  const residentCli = path.join(artifacts.filesRoot, 'usr/libexec/osi-factory-image-provenance-cli.js');
+  const residentLib = codec.safeJoin(artifacts.filesRoot, 'usr/libexec/osi-factory-image-provenance.js', `${profile} resident provenance library`);
+  const residentCli = codec.safeJoin(artifacts.filesRoot, 'usr/libexec/osi-factory-image-provenance-cli.js', `${profile} resident provenance CLI`);
   if (!Buffer.from(fs.readFileSync(sourceLib)).equals(Buffer.from(fs.readFileSync(residentLib)))) throw new Error(`${profile} resident provenance library drift`);
   if (!Buffer.from(fs.readFileSync(sourceCli)).equals(Buffer.from(fs.readFileSync(residentCli)))) throw new Error(`${profile} resident provenance CLI drift`);
   return provenance;
@@ -30,7 +33,7 @@ function verify(options = {}) {
   const profiles = options.profile ? [options.profile] : Object.keys(codec.PROFILES);
   const values = profiles.map((profile) => verifyProfile(root, profile));
   if (values.length > 1) {
-    const shared = ['initializerSha256', 'factorySeedSha256', 'factorySeedHelperSha256', 'dbSeedInitializerSha256', 'commandStateAuditSha256', 'protocolCapabilityHelperSha256', 'protocolCapabilityCliSha256'];
+    const shared = codec.MANIFEST_FILE_KEYS;
     for (const key of shared) if (new Set(values.map((value) => value[key])).size !== 1) throw new Error(`shared provenance anchor drift: ${key}`);
   }
   return { ok: true, profiles };
