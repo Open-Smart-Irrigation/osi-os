@@ -186,7 +186,8 @@
       "exportCsv": "CSV exportieren",
       "exportJson": "JSON exportieren",
       "exportPackage": "Forschungspaket exportieren",
-      "exportError": "Export fehlgeschlagen. Erneut versuchen."
+      "exportError": "Export fehlgeschlagen. Erneut versuchen.",
+      "scopeNotNarrowed": "Es werden Einträge aller Parzellen angezeigt. Das Filtern der Liste und der Exporte nach Station oder Gruppe ist noch nicht möglich."
     },
     "detail": {
       "placeholder": "Wählen Sie einen Eintrag aus, um die Details zu sehen."

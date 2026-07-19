@@ -439,5 +439,24 @@ describe('EntryTable', () => {
 
       await waitFor(() => expect(mocks.exportEntriesCsv).toHaveBeenCalledTimes(2));
     });
+
+    it('clears a stale export-error banner when the filters prop changes (e.g. the user moves to a different scope)', async () => {
+      mocks.exportEntriesCsv.mockRejectedValueOnce(new Error('network down'));
+      const { rerender } = renderTable({ filters: scopedFilters });
+
+      fireEvent.click(screen.getByRole('button', { name: 'workspace.table.exportCsv' }));
+      await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('workspace.table.exportError'));
+
+      rerender(
+        <EntryTable
+          filters={{ status: 'draft' }}
+          plots={[plot()]}
+          selectedEntryUuid={null}
+          onSelectEntry={vi.fn()}
+        />,
+      );
+
+      expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    });
   });
 });

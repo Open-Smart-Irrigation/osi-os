@@ -2,6 +2,7 @@ import React from 'react';
 import { useTranslation } from 'react-i18next';
 
 import type { EntryAggregate } from '../../types/journal';
+import { statusBadgeClass } from './statusBadgeClass';
 
 export function formatOccurredDate(value: string, timeZone: string, locale?: string): string {
   const date = new Date(value);
@@ -23,11 +24,7 @@ export const JournalEntryRow: React.FC<JournalEntryRowProps> = ({ entry, plotLab
   const { t, i18n } = useTranslation('journal');
   const locale = i18n.resolvedLanguage || i18n.language;
   const date = formatOccurredDate(entry.occurred_start, entry.occurred_timezone, locale);
-  const statusClass = entry.status === 'final'
-    ? 'bg-[var(--success-bg)] text-[var(--success-text)]'
-    : entry.status === 'voided'
-      ? 'bg-red-100 text-red-800'
-      : 'bg-[var(--warn-bg)] text-[var(--warn-text)]';
+  const statusClass = statusBadgeClass(entry.status);
 
   return (
     <article className="flex items-center justify-between gap-3 rounded-xl border border-[var(--border)] bg-[var(--card)] px-4 py-3">
