@@ -1016,6 +1016,9 @@ module.exports = {
   buildAggregate,
   buildContext,
   convertToCanonical,
+  discardDraft: function discardDraft() {
+    return require('./lifecycle').discardDraft.apply(null, arguments);
+  },
   finalize: function finalize() {
     return require('./lifecycle').finalize.apply(null, arguments);
   },
@@ -1032,6 +1035,7 @@ module.exports = {
   void_: function void_() {
     return require('./lifecycle').void_.apply(null, arguments);
   },
+  discardEntry: journalApi.discardEntry,
   errorResponse: journalApi.errorResponse,
   exportJson: journalApi.exportJson,
   exportResearchPackage: journalApi.exportResearchPackage,

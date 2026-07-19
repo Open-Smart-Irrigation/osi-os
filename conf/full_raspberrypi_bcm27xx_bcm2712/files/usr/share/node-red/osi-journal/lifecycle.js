@@ -1675,9 +1675,38 @@ async function void_(db, _catalog, entryUuid, baseSyncVersion, reason, principal
   });
 }
 
+async function discardDraft(db, entryUuid, principal) {
+  entryUuid = normalizeUuid(entryUuid, 'entry_uuid', true);
+  return db.transaction(async function(tx) {
+    await validatePrincipal(tx, principal);
+    const entry = await tx.get(
+      'SELECT * FROM journal_entries WHERE entry_uuid=? AND deleted_at IS NULL',
+      [entryUuid]
+    );
+    if (!entry) {
+      // Idempotent: a draft that is already gone (discarded earlier, or never
+      // existed) is a no-op success, not a not-found failure. There is no
+      // tombstone to distinguish "already discarded" from "never existed",
+      // and both are harmless to report as success.
+      return { entry_uuid: entryUuid, discarded: true };
+    }
+    assertOwnedEntry(entry, principal);
+    if (entry.status !== 'draft' || Number(entry.sync_version) !== 0) {
+      throw lifecycleError('invalid_state', 'Only a version-zero draft can be discarded');
+    }
+    await tx.run('DELETE FROM journal_entry_values WHERE entry_uuid=?', [entryUuid]);
+    await tx.run(
+      'DELETE FROM journal_entries WHERE entry_uuid=? AND sync_version=?',
+      [entryUuid, 0]
+    );
+    return { entry_uuid: entryUuid, discarded: true };
+  });
+}
+
 module.exports = {
   assertJournalEntryEffectKey,
   batchMemberEventUuid,
+  discardDraft,
   emitJournalOutbox,
   finalize,
   finalizeCreate,

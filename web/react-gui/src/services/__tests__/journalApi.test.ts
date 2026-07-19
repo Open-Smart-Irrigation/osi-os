@@ -443,6 +443,15 @@ describe('journalApi', () => {
     });
   });
 
+  it('discards a draft through the same UUID-encoded PUT route with a discard body', async () => {
+    const receipt = { entry_uuid: 'e1/segment', discarded: true as const };
+    put.mockResolvedValue({ data: receipt });
+
+    await expect(journalApi.discardDraft('e1/segment')).resolves.toEqual(receipt);
+    expect(put).toHaveBeenCalledWith('/api/journal/entries/e1%2Fsegment', { discard: true });
+    expect(put).toHaveBeenCalledTimes(1);
+  });
+
   it('treats only 404 and 501 responses as journal-unavailable', () => {
     expect(isJournalUnavailable({ response: { status: 404 } })).toBe(true);
     expect(isJournalUnavailable({ response: { status: 501 } })).toBe(true);
