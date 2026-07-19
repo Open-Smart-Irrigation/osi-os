@@ -296,5 +296,29 @@
       "lossWarning": "Changes are held only in this open screen until the gateway saves them",
       "leaveWarning": "Leaving now will discard changes that the gateway has not saved"
     }
+  },
+  "markers": {
+    "regionLabel": "Field journal entries on this chart",
+    "loading": "Loading journal entries…",
+    "error": "Could not load journal entries.",
+    "retry": "Retry",
+    "unknownActivity": "Other",
+    "entryLabel": "{{activity}} on {{date}}",
+    "clusterLabel": "journal entries",
+    "clusterLabel_one": "{{count}} journal entry near {{date}}",
+    "clusterLabel_other": "{{count}} journal entries near {{date}}",
+    "filters": {
+      "groupLabel": "Filter journal entries by activity"
+    },
+    "sheet": {
+      "title": "Journal entries",
+      "titleSingle": "Journal entry",
+      "close": "Close",
+      "when": "When",
+      "noNote": "No note",
+      "overflow": "And {{count}} more entries",
+      "overflow_one": "And {{count}} more entry",
+      "overflow_other": "And {{count}} more entries"
+    }
   }
 }
