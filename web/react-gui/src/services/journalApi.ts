@@ -36,6 +36,28 @@ export interface UpdateEntryPayload extends EntryWritePayload {
   base_sync_version: number;
 }
 
+// Triggers a browser download for a shipped, filter-scoped journal export
+// route. `filters` is forwarded as-is (the same EntryListFilters the caller
+// used to list entries, minus cursor/limit) so an export can never diverge
+// from — escape — the caller's active scope.
+async function downloadJournalExport(
+  path: string,
+  filters: EntryListFilters,
+  contentType: string,
+  filename: string,
+): Promise<void> {
+  const response = await api.get(path, { params: filters, responseType: 'blob' });
+  const blob = new Blob([response.data], { type: contentType });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement('a');
+  anchor.href = url;
+  anchor.download = filename;
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  URL.revokeObjectURL(url);
+}
+
 export const journalApi = {
   getCatalog: async (options: JournalCatalogOptions = {}): Promise<JournalCatalog> => {
     if (options.includeDefinitions) {
@@ -124,6 +146,28 @@ export const journalApi = {
       )
     ).data.plot_group;
   },
+
+  // Slice-1 ships export.csv/.package/.json; export.adapt.json answers 501
+  // ("not implemented") and is deliberately not wrapped here — see
+  // isJournalUnavailable and osi-journal/api.js.
+  exportEntriesCsv: (filters: EntryListFilters = {}): Promise<void> =>
+    downloadJournalExport('/api/journal/export.csv', filters, 'text/csv;charset=utf-8', 'journal-entries.csv'),
+
+  exportEntriesJson: (filters: EntryListFilters = {}): Promise<void> =>
+    downloadJournalExport(
+      '/api/journal/export.json',
+      filters,
+      'application/json;charset=utf-8',
+      'journal-entries.json',
+    ),
+
+  exportEntriesResearchPackage: (filters: EntryListFilters = {}): Promise<void> =>
+    downloadJournalExport(
+      '/api/journal/export.package',
+      filters,
+      'application/zip',
+      'journal-entries-package.zip',
+    ),
 };
 
 export function isJournalUnavailable(err: unknown): boolean {

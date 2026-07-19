@@ -170,7 +170,23 @@
       "noSensors": "No sensors"
     },
     "table": {
-      "placeholder": "Select a station, group, or plot to see its entries."
+      "heading": "Journal entries",
+      "loading": "Loading entries…",
+      "error": "Could not load entries.",
+      "retry": "Try again",
+      "empty": "No entries match the current filters.",
+      "column": {
+        "occurred": "When",
+        "activity": "Activity",
+        "plot": "Plot",
+        "status": "Status"
+      },
+      "previousPage": "Previous page",
+      "nextPage": "Next page",
+      "exportCsv": "Export CSV",
+      "exportJson": "Export JSON",
+      "exportPackage": "Export research package",
+      "exportError": "Export failed. Try again."
     },
     "detail": {
       "placeholder": "Select an entry to see its details."

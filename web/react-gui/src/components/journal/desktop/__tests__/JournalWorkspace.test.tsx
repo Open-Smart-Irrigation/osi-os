@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
   scopeRail: vi.fn(),
+  entryTable: vi.fn(),
 }));
 
 vi.mock('react-i18next', () => ({
@@ -23,8 +24,16 @@ vi.mock('../ScopeRail', async () => {
   };
 });
 
+vi.mock('../EntryTable', () => ({
+  EntryTable: (props: unknown) => {
+    mocks.entryTable(props);
+    return <div data-testid="entry-table" />;
+  },
+}));
+
 import { JournalWorkspace } from '../JournalWorkspace';
 import { DEFAULT_SCOPE_RAIL_FILTERS, type ScopeRailProps } from '../ScopeRail';
+import type { EntryTableProps } from '../EntryTable';
 import type { JournalPlot, JournalVocabRow, PlotGroup } from '../../../../types/journal';
 import type { IrrigationZone } from '../../../../types/farming';
 
@@ -100,16 +109,77 @@ function lastScopeRailProps(): ScopeRailProps {
   return mocks.scopeRail.mock.lastCall?.[0] as ScopeRailProps;
 }
 
+function lastEntryTableProps(): EntryTableProps {
+  return mocks.entryTable.mock.lastCall?.[0] as EntryTableProps;
+}
+
 describe('JournalWorkspace', () => {
-  it('renders a three-pane grid with the scope rail, an entries pane, and a detail pane', () => {
+  it('renders a three-pane grid with the scope rail, an entry table, and a detail pane', () => {
     const { container } = renderWorkspace();
 
     const grid = container.firstElementChild as HTMLElement;
     expect(grid.className).toContain('grid');
     expect(grid.className).toContain('lg:grid-cols-[320px_1fr_360px]');
     expect(screen.getByTestId('scope-rail')).toBeInTheDocument();
-    expect(screen.getByText('workspace.table.placeholder')).toBeInTheDocument();
+    expect(screen.getByTestId('entry-table')).toBeInTheDocument();
     expect(screen.getByText('workspace.detail.placeholder')).toBeInTheDocument();
+  });
+
+  it('passes plots straight through to the entry table', () => {
+    const plots = [journalPlot({ plot_uuid: 'plot-a' })];
+
+    renderWorkspace({ plots });
+
+    expect(lastEntryTableProps().plots).toBe(plots);
+  });
+
+  it('owns selectedEntryUuid state, starting at null, and passes updates back down through onSelectEntry', () => {
+    renderWorkspace();
+
+    expect(lastEntryTableProps().selectedEntryUuid).toBeNull();
+    act(() => lastEntryTableProps().onSelectEntry('entry-1'));
+
+    expect(lastEntryTableProps().selectedEntryUuid).toBe('entry-1');
+  });
+
+  it('combines the active scope and rail filters into entry-list filters for the entry table', () => {
+    renderWorkspace();
+
+    expect(lastEntryTableProps().filters).toEqual({ status: 'all' });
+
+    act(() => lastScopeRailProps().onScopeChange({ kind: 'plot', plotUuid: 'plot-a' }));
+    act(() => lastScopeRailProps().onFiltersChange({
+      ...DEFAULT_SCOPE_RAIL_FILTERS,
+      activityCode: 'irrigation',
+      status: 'final',
+      occurredFrom: '2026-07-01',
+      occurredTo: '2026-07-31',
+      campaignUuid: 'campaign-1',
+      protocolCode: 'protocol-1',
+    }));
+
+    expect(lastEntryTableProps().filters).toEqual({
+      plot_uuid: 'plot-a',
+      status: 'final',
+      activity_code: 'irrigation',
+      occurred_from: '2026-07-01',
+      occurred_to: '2026-07-31',
+      campaign_uuid: 'campaign-1',
+      protocol_code: 'protocol-1',
+    });
+  });
+
+  it('does not narrow the entry-list filters by plot for station or group scope (the shipped API only accepts one plot_uuid)', () => {
+    renderWorkspace();
+
+    act(() => lastScopeRailProps().onScopeChange({ kind: 'station', stationCode: 'ST-1' }));
+    expect(lastEntryTableProps().filters).not.toHaveProperty('plot_uuid');
+
+    act(() => lastScopeRailProps().onScopeChange({ kind: 'group', groupUuid: 'group-1' }));
+    expect(lastEntryTableProps().filters).not.toHaveProperty('plot_uuid');
+
+    act(() => lastScopeRailProps().onScopeChange({ kind: 'all' }));
+    expect(lastEntryTableProps().filters).not.toHaveProperty('plot_uuid');
   });
 
   it('passes the real plots, active groups, and activities straight through to the scope rail', () => {

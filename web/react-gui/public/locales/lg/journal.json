@@ -170,7 +170,23 @@
       "noSensors": "Tewali sensor"
     },
     "table": {
-      "placeholder": "Londa siteegi, ekibinja, oba omusiri okulaba ebiwandiiko byakyo."
+      "heading": "Ebiwandiiko bya Journal",
+      "loading": "Ebiwandiiko bitikkibwa…",
+      "error": "Ebiwandiiko tebiyinzise kutikkibwa.",
+      "retry": "Gezaako nate",
+      "empty": "Tewali biwandiiko bikwatagana ne filters ezaakolebwa kaakano.",
+      "column": {
+        "occurred": "Ddi",
+        "activity": "Ekikolwa",
+        "plot": "Omusiri",
+        "status": "Embeera"
+      },
+      "previousPage": "Page eyayita",
+      "nextPage": "Page eddako",
+      "exportCsv": "Fulumya CSV",
+      "exportJson": "Fulumya JSON",
+      "exportPackage": "Fulumya ekipakiti ky'okunoonyereza",
+      "exportError": "Fulumya kigaanye. Gezaako nate."
     },
     "detail": {
       "placeholder": "Londa ekiwandiiko okulaba ebikwata ku kyo."

@@ -170,7 +170,23 @@
       "noSensors": "Sem sensores"
     },
     "table": {
-      "placeholder": "Selecione uma estação, um grupo ou uma parcela para ver os registos."
+      "heading": "Registos do diário",
+      "loading": "A carregar registos…",
+      "error": "Não foi possível carregar os registos.",
+      "retry": "Tentar novamente",
+      "empty": "Nenhum registo corresponde aos filtros atuais.",
+      "column": {
+        "occurred": "Quando",
+        "activity": "Atividade",
+        "plot": "Parcela",
+        "status": "Estado"
+      },
+      "previousPage": "Página anterior",
+      "nextPage": "Página seguinte",
+      "exportCsv": "Exportar CSV",
+      "exportJson": "Exportar JSON",
+      "exportPackage": "Exportar pacote de investigação",
+      "exportError": "Falha ao exportar. Tente novamente."
     },
     "detail": {
       "placeholder": "Selecione um registo para ver os detalhes."
