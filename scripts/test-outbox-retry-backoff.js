@@ -100,9 +100,9 @@ test('retry-bump UPDATE is present verbatim in sync-outbox-mark and sync-force-b
 
 test('sync-outbox-mark: the statusCode transport-failure guard returns before retryableIds is ever touched', () => {
   const f = nodeById(FLOW_PATHS[0], 'sync-outbox-mark').func;
-  const guardIdx = f.indexOf('if (msg.statusCode && (msg.statusCode < 200 || msg.statusCode >= 300)) {');
+  const guardIdx = f.indexOf('if (!isHttpSuccess(msg.statusCode)) {');
   const guardReturnIdx = f.indexOf('return null;', guardIdx);
-  const retryDeclIdx = f.indexOf('let retryableIds');
+  const retryDeclIdx = f.indexOf('const retryableIds');
   const retryUpdateIdx = f.indexOf('retry_count = retry_count + 1');
   assert.ok(guardIdx !== -1 && guardReturnIdx !== -1 && retryDeclIdx !== -1 && retryUpdateIdx !== -1, 'expected markers not found');
   assert.ok(guardReturnIdx < retryDeclIdx, 'transport-failure guard must return before retryableIds is declared');
