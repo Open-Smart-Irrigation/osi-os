@@ -22,7 +22,7 @@
   },
   "warning": {
     "title": "Importante",
-    "message": "After linking, you must use your OSI Server credentials to log in. OSI OS stores a gateway-specific offline verifier for linked login.",
+    "message": "Después de vincular, debes usar tus credenciales de OSI Server para iniciar sesión. OSI OS guarda un verificador offline específico de la puerta de enlace para el inicio de sesión vinculado.",
     "proceed": "Continuar"
   },
   "success": {
@@ -40,30 +40,30 @@
     "networkError": "No se puede llegar a OSI Server. Comprueba la URL y tu conexión a Internet.",
     "authFailed": "Credenciales de OSI Server no válidas.",
     "generic": "Ocurrió un error. Por favor, inténtalo de nuevo.",
-    "forceSyncFailed": "Manual sync failed. Please try again."
+    "forceSyncFailed": "Error en la sincronización manual. Inténtalo de nuevo."
   },
   "sync": {
-    "title": "Manual sync",
-    "description": "Run an immediate recovery sync with OSI Server.",
-    "button": "Force sync now",
-    "running": "Syncing...",
-    "successTitle": "Manual sync completed",
-    "partialTitle": "Manual sync finished with issues",
-    "refreshed": "Sync token refreshed before sync.",
-    "usedCurrentToken": "Using current sync token.",
-    "bootstrap": "Bootstrap applied: {{applied}}, skipped: {{skipped}}",
-    "outbox": "Outbox delivered: {{delivered}} ({{before}} -> {{after}} pending)",
-    "pending": "Pending commands fetched: {{fetched}}, queued for local apply: {{queued}}",
-    "pendingAfterResponse": "Local apply continues after this response returns.",
-    "lastError": "Last error from {{source}}: {{message}}"
+    "title": "Sincronización manual",
+    "description": "Ejecuta una sincronización de recuperación inmediata con OSI Server.",
+    "button": "Forzar sincronización ahora",
+    "running": "Sincronizando...",
+    "successTitle": "Sincronización manual completada",
+    "partialTitle": "Sincronización manual finalizada con incidencias",
+    "refreshed": "Token de sincronización renovado antes de sincronizar.",
+    "usedCurrentToken": "Usando el token de sincronización actual.",
+    "bootstrap": "Bootstrap aplicado: {{applied}}, omitido: {{skipped}}",
+    "outbox": "Bandeja de salida entregada: {{delivered}} ({{before}} -> {{after}} pendientes)",
+    "pending": "Comandos pendientes obtenidos: {{fetched}}, en cola para aplicación local: {{queued}}",
+    "pendingAfterResponse": "La aplicación local continúa después de que esta respuesta se reciba.",
+    "lastError": "Último error de {{source}}: {{message}}"
   },
   "reauth": {
-    "title": "Sync token expired",
-    "description": "Re-authenticate with OSI Server to mint a fresh sync token for this gateway.",
-    "button": "Re-authenticate",
-    "username": "Server Username",
-    "password": "OSI Server Password",
-    "submit": "Refresh connection",
-    "running": "Refreshing..."
+    "title": "Token de sincronización caducado",
+    "description": "Vuelve a autenticarte con OSI Server para generar un nuevo token de sincronización para esta puerta de enlace.",
+    "button": "Volver a autenticar",
+    "username": "Nombre de usuario del servidor",
+    "password": "Contraseña de OSI Server",
+    "submit": "Renovar conexión",
+    "running": "Renovando..."
   }
 }
