@@ -699,3 +699,40 @@ standing note). No hard stop for empty compositions.
 Translation native-review sign-off: who approves de-CH / fr / **lg** GUI copy before farmers
 see it, especially the newly-coined Luganda vocabulary on the live Uganda gateway. Needs a named
 reviewer, not a menu choice. Carried forward.
+
+---
+
+# Phase 4 `where/` review — CLEAN (2026-07-19)
+
+Reviewed the committed Phase 4 selection/CRUD components (not in the run's in-flight P6 set):
+`StationGrid`, `PlotPicker`, `PlotGroupChips`, `PlotForm`, `HarvestGroupNudge`. The D11
+correctness properties are all correctly enforced. No Important findings.
+
+- **Layout homogeneity (D11 §183) is enforced at a single choke point.** Every selection path
+  in `PlotPicker` — `togglePlot`, `selectGroup`, `selectAll`, `invert`, `applyRange` — routes
+  through `commitSelection`, which computes the unique `layout_code`s of the candidate and
+  blocks (`heterogeneous_group`, returns false, no `onChange`) when >1. It also blocks
+  stale-membership and enforces `maxPlots` (D11 batch ≤ 100). A mixed-layout selection cannot
+  be committed, so a batch always renders under one layout.
+- **Null-layout plots can't exist.** `PlotForm` hard-returns before submit if no active layout
+  is chosen (`plot.layoutRequired`), so the homogeneity check always compares real layouts —
+  the one edge that could have slipped it is closed.
+- **Groups inherit homogeneity.** `PlotGroupChips` is display-only and routes selection through
+  the same guarded `commitSelection`; a group built from a valid (homogeneous) selection stays
+  homogeneous.
+- **Harvest resolution is offer-only.** `HarvestGroupNudge.onResolve` fires only from a
+  user-initiated `resolve()` (guarded against double-resolve); no effect auto-resolves —
+  satisfies D11 "offered, never automatic".
+- **StationGrid** is presentational and mobile-sound: 56px touch controls throughout,
+  `flex-wrap` so a 72-plot station wraps rather than scrolling horizontally, correct
+  `aria-pressed`/`aria-expanded`/`role="group"`. `rangeSelection.ts` (its parse layer) was
+  already reviewed clean.
+
+**Minor (cosmetic), PlotForm:** when both plot-code and layout are missing at submit, focus
+goes to the plot-code field while the top-level error message reads "select a layout" (the
+`!selectedLayout` return at line 175 precedes the plot-code branch). Field-level `aria-invalid`
+markers are correct; only the combined-error headline/focus disagree. Not a correctness defect.
+
+**Still not reviewed:** Task 25 browser acceptance is worth confirming against a real 72-plot
+station (not a small fixture) — the grid wraps correctly in code, but the ≤5/≤9-tap and
+no-horizontal-scroll evidence at 320px should exercise the full station size.
