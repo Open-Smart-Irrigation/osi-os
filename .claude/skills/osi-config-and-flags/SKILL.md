@@ -432,9 +432,11 @@ points, read from the file (no invented ones):
 | `fix_mosquitto_ownership` | Repairs file ownership/permissions on `mosquitto.passwd`/`.acl`/`/var/lib/mosquitto` if mosquitto is installed, using the UCI-configured mosquitto user if set |
 | React GUI swap | Fetches `react_gui.tar.gz`, wipes `/usr/lib/node-red/gui/*` (including dotfiles), extracts fresh bundle; runs after the payload flip/self-check step above |
 
-**What it restarts:** `deploy.sh` itself now restarts Node-RED, twice, in the
-normal path. `run_schema_migration()` stops Node-RED before touching the
-database and restarts it once the migration completes; then, after the
+**What it restarts:** `deploy.sh` itself now restarts Node-RED up to twice in
+the normal path. `run_schema_migration()` stops Node-RED before touching the
+database and restarts it once the migration completes — but only when a live
+`/data/db/farming.db` exists; on a fresh Pi that step SKIPs, so this restart
+does not happen. Then, after the
 payload flip, the script issues `/etc/init.d/node-red restart` again and
 probes `/gui` before deciding whether to commit or auto-roll-back (rolling
 back restarts Node-RED a further time on the previous payload). The one
@@ -446,7 +448,7 @@ next full boot, or can be triggered manually with
 `node /usr/share/node-red/chirpstack-bootstrap.js`.
 
 **Re-verify:**
-```
+```sh
 grep -n "^[a-z_]*() {" deploy.sh
 grep -n "restart\|flipTo\|stagePayload" deploy.sh   # executed restarts around the migration step and payload flip
 ```

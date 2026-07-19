@@ -165,7 +165,7 @@ an unknown credential.
 | Deploy over reverse tunnel | see "Deploy runbook" step 4 below |
 | Restart Node-RED | `/etc/init.d/node-red restart` |
 | Show active flows payload | `ls -l /srv/node-red/flows.json` (symlink into `payloads/<stamp>`) |
-| Cloud canary verdict after deploy | `node scripts/deploy-canary-gate.js` from the operator machine (see step 5) |
+| Cloud canary verdict after deploy | `OSI_ADMIN_TOKEN=<admin JWT> node scripts/deploy-canary-gate.js --eui <EUI> --since <deploy-start ISO8601>` from the operator machine (full invocation: `docs/operations/deploy-canary-gate-runbook.md`; see step 5) |
 | Free a leaked local port | `pkill -9 -f 'http.server 9876'` |
 | SSH to a gateway | `ssh -i ~/.ssh/<key> -o IdentitiesOnly=yes root@<pi-ip>` |
 | Filter SSH banner noise | pipe through `grep -v -e 'post-quantum' -e 'store now'` (portable; BusyBox grep lacks BRE alternation) |
@@ -219,20 +219,22 @@ dev workstation unless noted.
    trust.
 
 5. **Read the deploy verdict — do not restart by hand.** `deploy.sh` already
-   restarts Node-RED itself, twice: once around the schema-migration step
-   (`run_schema_migration` stops it before migrating and starts it again after),
-   and once after the payload flip (`/etc/init.d/node-red restart` right after
-   `flipTo`). There is nothing left for you to restart on a normal deploy.
+   restarts Node-RED itself, up to twice: once around the schema-migration step
+   **only when a live `/data/db/farming.db` exists** (`run_schema_migration`
+   stops it before migrating and starts it again after; on a fresh Pi the
+   migration step SKIPs, so this restart does not happen), and once after the
+   payload flip (`/etc/init.d/node-red restart` right after `flipTo`, always).
+   There is nothing left for you to restart on a normal deploy.
 
    On a passing post-flip self-check the script prints, in order:
-   ```
+   ```text
    OK: local health self-check PASSED (Node-RED alive, /gui reachable)
    OK: committing payload <stamp>
    ```
    and prunes old payload directories down to `PAYLOAD_KEEP_N` (default 5).
 
    On a failing self-check it instead prints:
-   ```
+   ```text
    ALERT: local health self-check FAILED - AUTO-ROLLING-BACK the flows payload
    ROLLED BACK: flows.json -> payloads/<prev>; Node-RED restarted on last-known-good payload
    NOTE: any committed DB migration is NOT auto-undone (DD10); restore is an operator call via 1.B1 backup.
@@ -254,12 +256,21 @@ dev workstation unless noted.
    The local self-check only proves Node-RED came up and `/gui` answered on
    *this* Pi. For the cloud-side verdict — whether the gateway is actually
    delivering healthy heartbeats to osi-server after the deploy — run, from
-   your operator machine (not the Pi):
+   your operator machine (not the Pi). It requires an admin token in the
+   environment plus the gateway EUI and the deploy-start timestamp — a bare
+   invocation exits `2` (usage error), not a verdict:
    ```bash
-   node scripts/deploy-canary-gate.js
+   export OSI_ADMIN_TOKEN=<admin JWT>
+   node scripts/deploy-canary-gate.js \
+     --eui <GATEWAY_EUI> \
+     --since <ISO8601 deploy-start timestamp> \
+     [--expect-schema-sig <sig>]   # for schema-changing deploys
    ```
-   Defaults: 5 consecutive healthy heartbeats, 60000 ms poll interval,
-   900000 ms overall timeout, `minDiskFreePct` 10.
+   Exit `0` = pass, `1` = fail (read stderr reasons), `2` = usage/auth/transport
+   error (treat as fail). Defaults when their flags are omitted: 5 consecutive
+   healthy heartbeats (`--consecutive`), 60 s poll interval (`--interval`),
+   900 s overall timeout (`--timeout`), `minDiskFreePct` 10. Full procedure:
+   `docs/operations/deploy-canary-gate-runbook.md`.
 
    ChirpStack reprovisioning happens automatically — `osi-bootstrap`
    (`conf/full_raspberrypi_bcm27xx_bcm2712/files/etc/init.d/osi-bootstrap`, `START=99`)
@@ -303,8 +314,9 @@ Reading straight through the script, in order:
    `osi-command-ledger`, `osi-history-sync-helper`, `osi-chameleon-helper`,
    `osi-cloud-http`, `osi-lib`, `osi-device-writer`, `osi-lsn50-normalize`,
    `osi-uc512-normalize`), `edge-channels.json`, the `chirpstack-bootstrap.js`
-   bootstrap script, and six device codecs (STREGA, LSN50, S2120, LoRain,
-   UC512, Agroscope uplink transform).
+   bootstrap script, five device codecs (STREGA, LSN50, S2120, LoRain, UC512),
+   and the Agroscope uplink transform (`agroscope_uplink_transform.js`, an
+   edge→cloud forwarding transform, not a device decoder).
 7. Runs `npm install --omit=dev --no-fund --no-audit` in `/srv/node-red`, exiting
    non-zero on failure.
 8. Runs `run_schema_migration()`: **SKIPs entirely** if `/data/db/farming.db`
