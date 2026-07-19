@@ -513,6 +513,34 @@ function sanitizeValues(
   });
 }
 
+// Task 32 follow-up fix: computeLayoutTransitionDiff is intentionally pure
+// and returns [] when the target layout is undefined (there's nothing to
+// diff *against*) — see layoutTransition.ts. But an empty/"No plot" target is
+// itself a real transition that hides every field a value was entered under,
+// and the "never silently sanitize a user-entered value" contract applies to
+// it just the same. Mirrors computeLayoutTransitionDiff's field_hidden branch
+// (same hasEnteredValue/attribute-kind filtering as `inputHasValue` below),
+// but every currently-entered value counts as hidden by definition since
+// there is no layout left for anything to be visible under.
+function fieldHiddenForEmptyTarget(
+  values: readonly CaptureEntryValueInput[],
+  model: JournalCaptureCatalogModel,
+): LayoutTransitionAffectedItem[] {
+  const items: LayoutTransitionAffectedItem[] = [];
+  for (const value of values) {
+    if (!inputHasValue(value)) continue;
+    const attribute = model.vocabByCode.get(value.attribute_code);
+    if (!attribute || attribute.kind !== 'attribute') continue;
+    items.push({
+      attribute_code: value.attribute_code,
+      group_index: value.group_index ?? 0,
+      reason: 'field_hidden',
+      value,
+    });
+  }
+  return items;
+}
+
 export const JournalCaptureFlow: React.FC<JournalCaptureFlowProps> = ({
   catalog,
   plots,
@@ -594,6 +622,21 @@ export const JournalCaptureFlow: React.FC<JournalCaptureFlowProps> = ({
   const [pendingTransitionItems, setPendingTransitionItems] = useState<LayoutTransitionAffectedItem[]>([]);
   const [keptTransitionValues, setKeptTransitionValues] = useState<CaptureEntryValueInput[]>([]);
   const [transitionSheetOpen, setTransitionSheetOpen] = useState(false);
+  // An empty ("No plot") target is itself a transition that can hide every
+  // field a value was entered under, and PlotPicker routes a plot-A -> plot-B
+  // switch across different layouts through exactly that empty step (it
+  // forbids co-selecting plots of different layouts, so the farmer must
+  // deselect A before picking B). By the time B is picked, `layout`/`leaf`
+  // component state has already been reset to nothing by the empty step, so
+  // the closure values alone can no longer supply the diff's "old" side. This
+  // ref remembers the last *real* layout/leaf a value was entered under so
+  // the eventual real-to-real diff (e.g. greenhouse -> open_field) still
+  // fires correctly across the empty step instead of comparing against
+  // `undefined` and silently losing the transition a second time.
+  const lastRealDiffContextRef = useRef<{
+    layout: JournalLayoutDefinition;
+    leaf: ActivityLeafSelection | null;
+  } | null>(null);
   const headingRef = useRef<HTMLHeadingElement>(null);
   const savePromiseRef = useRef<Promise<void> | null>(null);
   const savedCallbackFiredRef = useRef(false);
@@ -994,21 +1037,42 @@ export const JournalCaptureFlow: React.FC<JournalCaptureFlowProps> = ({
     if (!model) {
       setPendingTransitionItems([]);
       setTransitionSheetOpen(false);
+      lastRealDiffContextRef.current = null;
       return retainedValues;
     }
+    // If the immediate old layout is itself unavailable (component state was
+    // already reset to nothing by a prior empty-target transition — see
+    // lastRealDiffContextRef above), fall back to the last real layout/leaf a
+    // value was entered under so a real-to-real diff still fires correctly
+    // across the empty step.
+    const effectiveOldLayout = oldLayoutForDiff ?? lastRealDiffContextRef.current?.layout;
+    const effectiveOldLeaf = oldLayoutForDiff
+      ? oldLeafForDiff
+      : lastRealDiffContextRef.current?.leaf ?? oldLeafForDiff;
     // Diffing uses the activity/context the values were entered under (the leaf
     // about to be reset for re-picking), not the empty post-reset selections —
     // otherwise an activity-anchored option_dependency (e.g. "this choice is
     // only valid for irrigation") can never fire during the transition itself.
-    const diffSelections = captureSelections(model, oldLeafForDiff, nextCrop);
-    const diffItems = computeLayoutTransitionDiff({
-      model,
-      oldLayout: oldLayoutForDiff,
-      newLayout: nextLayout,
-      template: nextTemplateDef,
-      selections: diffSelections,
-      currentValues: [...retainedValues, ...keptTransitionValues],
-    });
+    const diffSelections = captureSelections(model, effectiveOldLeaf, nextCrop);
+    const candidateValues = [...retainedValues, ...keptTransitionValues];
+    // An empty/"No plot" target (nextLayout === undefined) hides every field a
+    // value was entered under — the same "never silently sanitize" contract
+    // applies as to a real layout swap. computeLayoutTransitionDiff is pure
+    // and deliberately returns [] when there's no target layout to diff
+    // against (see layoutTransition.ts), so that case is handled here instead
+    // of falling through to sanitizeValues(..., undefined, ...), which always
+    // returns [] and would otherwise silently drop every entered value with
+    // no review sheet.
+    const diffItems = nextLayout
+      ? computeLayoutTransitionDiff({
+        model,
+        oldLayout: effectiveOldLayout,
+        newLayout: nextLayout,
+        template: nextTemplateDef,
+        selections: diffSelections,
+        currentValues: candidateValues,
+      })
+      : fieldHiddenForEmptyTarget(candidateValues, model);
     const diffKeys = new Set(diffItems.map((item) =>
       layoutTransitionItemKey(item.attribute_code, item.group_index)));
     const survivingKept = keptTransitionValues.filter((value) =>
@@ -1021,6 +1085,11 @@ export const JournalCaptureFlow: React.FC<JournalCaptureFlowProps> = ({
     setKeptTransitionValues(survivingKept);
     setPendingTransitionItems(diffItems);
     setTransitionSheetOpen(diffItems.length > 0);
+    lastRealDiffContextRef.current = nextLayout
+      ? null
+      : effectiveOldLayout
+        ? { layout: effectiveOldLayout, leaf: effectiveOldLeaf }
+        : null;
     return [...sanitizedNonDiff, ...diffValues];
   };
 
