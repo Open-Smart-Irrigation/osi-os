@@ -250,6 +250,10 @@
     "discardError": "Dieser Entwurf konnte nicht verworfen werden. Versuchen Sie es erneut.",
     "resumeUnavailable": "Die Vorlage dieses Entwurfs ist nicht mehr verfügbar.",
     "close": "Schliessen",
+    "complete": "Vervollständigen",
+    "completing": "Wird vervollständigt…",
+    "completeError": "Dieser Entwurf konnte nicht vervollständigt werden. Versuchen Sie es erneut.",
+    "completeStale": "Dieser Entwurf hat sich anderswo geändert. Laden Sie ihn neu, bevor Sie ihn erneut vervollständigen.",
     "error": {
       "title": "Entwürfe konnten nicht geladen werden",
       "retry": "Erneut versuchen"
@@ -371,13 +375,13 @@
     },
     "transition": {
       "title": "Geänderte Werte prüfen",
-      "body": "Diese Änderung der Anbaueinstellung wirkt sich auf bereits eingegebene Werte aus. Entscheiden Sie für jeden Wert, bevor Sie fortfahren.",
+      "body": "Diese Änderung des Layouts wirkt sich auf bereits eingegebene Werte aus. Entscheiden Sie für jeden Wert, bevor Sie fortfahren.",
       "close": "Schliessen",
       "keep": "Behalten",
       "replace": "Ersetzen",
       "remove": "Entfernen",
-      "reasonFieldHidden": "Diese Anbaueinstellung zeigt dieses Feld nicht mehr an.",
-      "reasonChoiceInvalid": "Dieser Wert ist unter der neuen Anbaueinstellung nicht zulässig.",
+      "reasonFieldHidden": "Dieses Layout zeigt dieses Feld nicht mehr an.",
+      "reasonChoiceInvalid": "Dieser Wert ist unter dem neuen Layout nicht zulässig.",
       "pendingBanner": "Einige Werte erfordern Ihre Entscheidung, bevor Sie fortfahren können.",
       "reviewAction": "Geänderte Werte prüfen"
     },

@@ -250,6 +250,10 @@
     "discardError": "Twayisiddwa okusuula ekitannamala kino. Gezaako nate.",
     "resumeUnavailable": "Fomu y'ekitannamala kino teri kyaliwo.",
     "close": "Ggalawo",
+    "complete": "Maliriza",
+    "completing": "Kimalirizibwa…",
+    "completeError": "Twayisiddwa okumaliriza ekitannamala kino. Gezaako nate.",
+    "completeStale": "Ekitannamala kino kikyusiddwa mu kifo ekirala. Kiddemu okutikka nga tonnamaliriza nate.",
     "error": {
       "title": "Ebitannamala tebiyinzise kutikkibwa",
       "retry": "Gezaako nate"
@@ -371,13 +375,13 @@
     },
     "transition": {
       "title": "Kebera emiwendo egikyusiddwa",
-      "body": "Enkyukakyuka mu nkola y'okulima ekwata ku miwendo gy'oyingiza dda. Londa ky'oyagala okukola ku buli guumu nga tonnagenda mu maaso.",
+      "body": "Enkyukakyuka mu layout ekwata ku miwendo gy'oyingiza dda. Londa ky'oyagala okukola ku buli guumu nga tonnagenda mu maaso.",
       "close": "Ggalawo",
       "keep": "Kuuma",
       "replace": "Kyusaamu",
       "remove": "Ggyawo",
-      "reasonFieldHidden": "Enkola eno ey'okulima terikyalaga kifo kino.",
-      "reasonChoiceInvalid": "Omuwendo guno tekukkirizibwa mu nkola empya ey'okulima.",
+      "reasonFieldHidden": "Layout eno terikyalaga kifo kino.",
+      "reasonChoiceInvalid": "Omuwendo guno tekukkirizibwa mu layout empya.",
       "pendingBanner": "Emiwendo emirala geetaaga okusalawo kwo nga tonnagenda mu maaso.",
       "reviewAction": "Kebera emiwendo egikyusiddwa"
     },

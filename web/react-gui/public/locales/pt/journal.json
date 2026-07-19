@@ -250,6 +250,10 @@
     "discardError": "Não foi possível descartar este rascunho. Tente novamente.",
     "resumeUnavailable": "O formulário deste rascunho já não está disponível.",
     "close": "Fechar",
+    "complete": "Concluir",
+    "completing": "A concluir…",
+    "completeError": "Não foi possível concluir este rascunho. Tente novamente.",
+    "completeStale": "Este rascunho foi alterado noutro local. Volte a carregá-lo antes de o concluir novamente.",
     "error": {
       "title": "Não foi possível carregar os rascunhos",
       "retry": "Tentar novamente"
@@ -371,13 +375,13 @@
     },
     "transition": {
       "title": "Rever valores alterados",
-      "body": "Esta alteração na configuração de cultivo afeta valores que já introduziu. Escolha o que fazer com cada um antes de continuar.",
+      "body": "Esta alteração no layout afeta valores que já introduziu. Escolha o que fazer com cada um antes de continuar.",
       "close": "Fechar",
       "keep": "Manter",
       "replace": "Substituir",
       "remove": "Remover",
-      "reasonFieldHidden": "Esta configuração de cultivo já não mostra este campo.",
-      "reasonChoiceInvalid": "Este valor não é permitido com a nova configuração de cultivo.",
+      "reasonFieldHidden": "Este layout já não mostra este campo.",
+      "reasonChoiceInvalid": "Este valor não é permitido com o novo layout.",
       "pendingBanner": "Alguns valores precisam da sua decisão antes de poder continuar.",
       "reviewAction": "Rever valores alterados"
     },

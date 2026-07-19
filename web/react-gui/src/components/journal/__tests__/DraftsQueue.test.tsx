@@ -22,9 +22,15 @@ vi.mock('../../../journal/useJournalCatalog', () => ({
   useJournalCatalog: useJournalCatalogMock,
 }));
 
-const { discardDraftMock } = vi.hoisted(() => ({ discardDraftMock: vi.fn() }));
+const { discardDraftMock, createEntryMock } = vi.hoisted(() => ({
+  discardDraftMock: vi.fn(),
+  createEntryMock: vi.fn(),
+}));
 vi.mock('../../../services/journalApi', () => ({
-  journalApi: { discardDraft: (uuid: string) => discardDraftMock(uuid) },
+  journalApi: {
+    discardDraft: (uuid: string) => discardDraftMock(uuid),
+    createEntry: (payload: unknown) => createEntryMock(payload),
+  },
 }));
 
 import { DraftsQueue } from '../DraftsQueue';
@@ -41,7 +47,9 @@ function draft(entryUuid: string, overrides: Partial<EntryAggregate> = {}): Entr
     template_code: 'full_record',
     template_version: 1,
     occurred_start: '2026-07-18T08:00:00.000Z',
+    occurred_end: null,
     occurred_timezone: 'Europe/Zurich',
+    occurred_utc_offset_minutes: 120,
     values: [],
     ...overrides,
   } as unknown as EntryAggregate;
@@ -121,6 +129,7 @@ beforeEach(() => {
   useJournalCatalogMock.mockReset();
   useJournalCatalogMock.mockReturnValue({ catalog: undefined, available: false });
   discardDraftMock.mockReset();
+  createEntryMock.mockReset();
 });
 
 describe('DraftsQueue queue states', () => {
@@ -296,5 +305,61 @@ describe('DraftsQueue resume', () => {
     });
 
     expect(document.getElementById('attr.required_note')).not.toBeInTheDocument();
+  });
+});
+
+describe('DraftsQueue resume complete', () => {
+  it('finalizes the draft via journalApi.createEntry once the missing field is filled in', async () => {
+    const retry = vi.fn().mockResolvedValue(undefined);
+    useDraftsQueueMock.mockReturnValue(queueState({
+      status: 'ready',
+      drafts: [draft('d1', { values: [] })],
+      retry,
+    }));
+    useJournalCatalogMock.mockReturnValue({ catalog: resumeCatalog(), available: true });
+    createEntryMock.mockResolvedValue({ entry_uuid: 'd1', outbox_event_uuid: 'evt-1', sync_version: 1 });
+
+    render(<DraftsQueue />);
+    fireEvent.click(screen.getByRole('button', { name: 'drafts.resume' }));
+
+    await waitFor(() => expect(document.getElementById('attr.required_note')).not.toBeNull());
+    fireEvent.change(document.getElementById('attr.required_note') as HTMLInputElement, {
+      target: { value: 'filled in' },
+    });
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'drafts.complete' }));
+    });
+
+    await waitFor(() => expect(createEntryMock).toHaveBeenCalledTimes(1));
+    const payload = createEntryMock.mock.calls[0][0] as {
+      entry_uuid?: string;
+      status?: string;
+      base_sync_version?: number;
+      values: Array<{ attribute_code: string }>;
+    };
+    expect(payload.entry_uuid).toBe('d1');
+    expect(payload.status).toBe('final');
+    expect(payload.base_sync_version).toBe(0);
+    expect(payload.values.some((value) => value.attribute_code === 'attr.required_note')).toBe(true);
+
+    await waitFor(() => expect(retry).toHaveBeenCalledTimes(1));
+    expect(document.getElementById('attr.required_note')).not.toBeInTheDocument();
+  });
+
+  it('blocks Complete while the resumed draft is still invalid', async () => {
+    useDraftsQueueMock.mockReturnValue(queueState({
+      status: 'ready',
+      drafts: [draft('d1', { values: [] })],
+    }));
+    useJournalCatalogMock.mockReturnValue({ catalog: resumeCatalog(), available: true });
+
+    render(<DraftsQueue />);
+    fireEvent.click(screen.getByRole('button', { name: 'drafts.resume' }));
+    await waitFor(() => expect(document.getElementById('attr.required_note')).not.toBeNull());
+
+    fireEvent.click(screen.getByRole('button', { name: 'drafts.complete' }));
+
+    expect(createEntryMock).not.toHaveBeenCalled();
   });
 });

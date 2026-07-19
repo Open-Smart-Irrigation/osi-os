@@ -250,6 +250,10 @@
     "discardError": "Impossibile scartare questa bozza. Riprova.",
     "resumeUnavailable": "Il modulo di questa bozza non è più disponibile.",
     "close": "Chiudi",
+    "complete": "Completa",
+    "completing": "Completamento in corso…",
+    "completeError": "Impossibile completare questa bozza. Riprova.",
+    "completeStale": "Questa bozza è cambiata altrove. Ricaricala prima di completarla di nuovo.",
     "error": {
       "title": "Impossibile caricare le bozze",
       "retry": "Riprova"
@@ -371,13 +375,13 @@
     },
     "transition": {
       "title": "Controlla i valori modificati",
-      "body": "Questa modifica dell'impostazione colturale influisce sui valori già inseriti. Scegli cosa fare per ciascuno prima di continuare.",
+      "body": "Questa modifica del layout influisce sui valori già inseriti. Scegli cosa fare per ciascuno prima di continuare.",
       "close": "Chiudi",
       "keep": "Mantieni",
       "replace": "Sostituisci",
       "remove": "Rimuovi",
-      "reasonFieldHidden": "Questa impostazione colturale non mostra più questo campo.",
-      "reasonChoiceInvalid": "Questo valore non è consentito con la nuova impostazione colturale.",
+      "reasonFieldHidden": "Questo layout non mostra più questo campo.",
+      "reasonChoiceInvalid": "Questo valore non è consentito con il nuovo layout.",
       "pendingBanner": "Alcuni valori richiedono una tua decisione prima di poter continuare.",
       "reviewAction": "Controlla i valori modificati"
     },
