@@ -350,6 +350,18 @@
       "openExisting": "Open existing",
       "saveSeparately": "Save separately"
     },
+    "transition": {
+      "title": "Review changed values",
+      "body": "This growing setting change affects values you already entered. Choose what to do with each one before continuing.",
+      "close": "Close",
+      "keep": "Keep",
+      "replace": "Replace",
+      "remove": "Remove",
+      "reasonFieldHidden": "This growing setting no longer shows this field.",
+      "reasonChoiceInvalid": "This value is not allowed under the new growing setting.",
+      "pendingBanner": "Some values need your decision before you can continue.",
+      "reviewAction": "Review changed values"
+    },
     "save": {
       "saving": "Saving…",
       "draftSavedGateway": "Draft saved on farm gateway",
