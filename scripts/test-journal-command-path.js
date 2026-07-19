@@ -502,6 +502,7 @@ test('both pending-command producers keep payload command type outside the trust
   }
   const runReplay = new Function('msg', 'flow', 'node', replay.func);
   const output = runReplay({
+    statusCode: 200,
     payload: {
       commands: [{
         commandId: 99,
