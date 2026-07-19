@@ -9,6 +9,9 @@ const { URL } = require('node:url');
 const edgeJournal = require(
   '../conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-journal'
 );
+const { batchMemberEventUuid } = require(
+  '../conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-journal/lifecycle'
+);
 
 const repoRoot = path.resolve(__dirname, '..');
 const defaultBuildDir = path.join(repoRoot, 'web/react-gui/build');
@@ -31,7 +34,6 @@ const DEMO_AUTH_TOKEN = 'task14-demo-token';
 const DEMO_USERNAME = 'demo';
 const FIXTURE_TIME = '2026-07-16T05:30:00.000Z';
 const LOCAL_TIMESTAMP = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2})(?:\.(\d{1,3}))?)?$/;
-
 function parseJson(value, fallback) {
   try {
     return value == null ? fallback : JSON.parse(value);
@@ -388,9 +390,54 @@ function createState(catalog) {
     groupPostCount: 0,
     groupPutCount: 0,
     batchPostCount: 0,
+    batchOutboxCount: 0,
+    batchReceipts: new Map(),
     lastFinalPayload: null,
     lastBatchPayload: null,
   };
+}
+
+function previewBatchMemberKey(member) {
+  return member.entry_uuid + '\u0000' + member.plot_uuid;
+}
+
+function previewBatchConflict(res, message) {
+  return errorJson(res, 409, 'idempotency_conflict', message);
+}
+
+function existingPreviewBatchRetry(state, payload, members, existingEntries, res) {
+  if (existingEntries.size !== members.length) {
+    return previewBatchConflict(res, 'A batch retry cannot mix existing and new member UUIDs');
+  }
+  const batchUuids = [...existingEntries.values()].map((entry) => entry.batch_uuid);
+  const batchUuid = batchUuids[0];
+  if (!batchUuid || batchUuids.some((value) => value !== batchUuid)) {
+    return previewBatchConflict(res, 'A batch retry requires one non-null persisted batch UUID');
+  }
+  if ([...existingEntries.values()].some((entry) => entry.sync_version !== 1)) {
+    return previewBatchConflict(res, 'A batch retry requires the original version-one batch state');
+  }
+  const persisted = [...state.entries.values()]
+    .filter((entry) => entry.status === 'final' && entry.batch_uuid === batchUuid);
+  const requestedKeys = new Set(members.map(previewBatchMemberKey));
+  const persistedKeys = new Set(persisted.map(previewBatchMemberKey));
+  if (requestedKeys.size !== persistedKeys.size ||
+      [...requestedKeys].some((key) => !persistedKeys.has(key))) {
+    return previewBatchConflict(res, 'A batch retry must match the persisted final batch members exactly');
+  }
+  const receipts = [];
+  for (const member of members) {
+    const entry = existingEntries.get(member.entry_uuid);
+    const receipt = state.batchReceipts.get(member.entry_uuid);
+    if (!receipt || receipt.sync_version !== entry.sync_version ||
+        receipt.entry_uuid !== member.entry_uuid || receipt.plot_uuid !== member.plot_uuid ||
+        typeof receipt.outbox_event_uuid !== 'string' || !receipt.outbox_event_uuid ||
+        receipt.outbox_event_uuid !== batchMemberEventUuid(payload, member)) {
+      return previewBatchConflict(res, 'A persisted journal entry is missing its current outbox receipt');
+    }
+    receipts.push(receipt);
+  }
+  return json(res, 201, { batch_uuid: batchUuid, entries: receipts });
 }
 
 function plotFromPayload(payload, syncVersion) {
@@ -525,6 +572,7 @@ function parseOccurredBound(query, field) {
 }
 
 const PREVIEW_UUID = /^[0-9a-fA-F]{8}-?[0-9a-fA-F]{4}-?[0-9a-fA-F]{4}-?[0-9a-fA-F]{4}-?[0-9a-fA-F]{12}$/;
+const CANONICAL_PREVIEW_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
 function canonicalPreviewUuid(value) {
   const compact = value.replaceAll('-', '').toLowerCase();
@@ -664,38 +712,92 @@ async function handleApi(req, res, requestUrl, state) {
 
   if (req.method === 'POST' && requestPath === '/api/journal/entries') {
     const payload = await readBody(req);
-    if (Array.isArray(payload.plot_uuids)) {
+    if (Object.prototype.hasOwnProperty.call(payload, 'plot_uuids') ||
+        Object.prototype.hasOwnProperty.call(payload, 'members')) {
       state.batchPostCount += 1;
-      if (payload.status !== 'final' || payload.plot_uuids.length === 0 || payload.plot_uuids.length > 100 ||
-          new Set(payload.plot_uuids).size !== payload.plot_uuids.length ||
+      if (Object.prototype.hasOwnProperty.call(payload, 'plot_uuids')) {
+        return errorJson(res, 400, 'invalid_batch_payload');
+      }
+      const members = payload.members;
+      if (payload.status !== 'final' || !Array.isArray(members) || members.length === 0 || members.length > 100 ||
+          members.some((member) => !member || typeof member !== 'object' ||
+            !CANONICAL_PREVIEW_UUID.test(member.plot_uuid || '') ||
+            !CANONICAL_PREVIEW_UUID.test(member.entry_uuid || '')) ||
+          new Set(members.map((member) => member.plot_uuid)).size !== members.length ||
+          new Set(members.map((member) => member.entry_uuid)).size !== members.length ||
           Object.prototype.hasOwnProperty.call(payload, 'plot_uuid') ||
           Object.prototype.hasOwnProperty.call(payload, 'zone_uuid')) {
         return errorJson(res, 400, 'invalid_batch_payload');
       }
+      const existingEntries = new Map();
+      for (const member of members) {
+        const existing = state.entries.get(member.entry_uuid);
+        if (existing) {
+          if (existing.status !== 'final' || existing.plot_uuid !== member.plot_uuid) {
+            return previewBatchConflict(res, 'Entry UUID is already assigned to another plot');
+          }
+          existingEntries.set(member.entry_uuid, existing);
+        }
+      }
+      if (existingEntries.size) {
+        return existingPreviewBatchRetry(state, payload, members, existingEntries, res);
+      }
+      const resolvedPlots = new Map();
+      for (const member of members) {
+        const resolved = state.plots.find((candidate) =>
+          candidate.plot_uuid === member.plot_uuid &&
+          candidate.owner_user_uuid === CANONICAL_IDS.userUuid &&
+          candidate.gateway_device_eui === CANONICAL_IDS.gatewayEui &&
+          Number(candidate.active) === 1 && candidate.deleted_at == null);
+        if (!resolved) return errorJson(res, 404, 'plot_not_found');
+        resolvedPlots.set(member.plot_uuid, resolved);
+      }
       const validation = validateEntryPayload(state, {
         ...payload,
-        plot_uuid: payload.plot_uuids[0],
+        plot_uuid: members[0].plot_uuid,
         zone_uuid: null,
       });
       if (!validation.ok) return json(res, 422, { error: 'invalid_entry_payload', errors: validation.errors });
 
-      const duplicateCandidates = payload.plot_uuids.map((plotUuid, index) => ({
-        entryUuid: `eeeeeeee-eeee-4eee-8eee-${String(index + 1).padStart(12, '0')}`,
-        occurredStart: FIXTURE_TIME,
-        activityCode: payload.activity_code,
-        plotUuid,
-      }));
+      const requestedOccurredStart = aggregateFromPayload({
+        ...payload,
+        plot_uuid: members[0].plot_uuid,
+      }, 'final', members[0].entry_uuid, state.catalog.catalog_version).occurred_start;
+      const duplicateCandidates = members.flatMap((member) => {
+        const existing = state.entries.get(member.entry_uuid);
+        if (existing && existing.status === 'final') return [];
+        const candidate = [...state.entries.values()].find((entry) =>
+          entry.status === 'final' &&
+          entry.plot_uuid === member.plot_uuid &&
+          entry.activity_code === payload.activity_code &&
+          Math.abs(Date.parse(entry.occurred_start) - Date.parse(requestedOccurredStart)) <= 60 * 60 * 1000);
+        if (!candidate) return [];
+        return [{
+          entryUuid: candidate.entry_uuid,
+          occurredStart: candidate.occurred_start,
+          activityCode: candidate.activity_code,
+          plotUuid: candidate.plot_uuid,
+        }];
+      });
       const acknowledgements = Array.isArray(payload.duplicate_guard_ack_entry_uuids)
         ? payload.duplicate_guard_ack_entry_uuids
         : [];
+      if (acknowledgements.some((value) => !CANONICAL_PREVIEW_UUID.test(value)) ||
+          new Set(acknowledgements).size !== acknowledgements.length) {
+        return errorJson(res, 400, 'invalid_batch_payload');
+      }
+      if (acknowledgements.some((value) => !duplicateCandidates.some((candidate) => candidate.entryUuid === value))) {
+        return errorJson(res, 422, 'invalid_duplicate_ack');
+      }
       if (!duplicateCandidates.every((candidate) => acknowledgements.includes(candidate.entryUuid))) {
         return json(res, 409, { error: 'duplicate_candidates', details: { duplicateCandidates } });
       }
 
       const batchUuid = `ffffffff-ffff-4fff-8fff-${String(state.batchPostCount).padStart(12, '0')}`;
-      const receipts = payload.plot_uuids.map((plotUuid, index) => {
-        const entryUuid = duplicateCandidates[index].entryUuid;
-        const plotRecord = state.plots.find((candidate) => candidate.plot_uuid === plotUuid);
+      const receipts = members.map((member) => {
+        const plotUuid = member.plot_uuid;
+        const entryUuid = member.entry_uuid;
+        const plotRecord = resolvedPlots.get(plotUuid);
         const entry = aggregateFromPayload({
           ...payload,
           plot_uuid: plotUuid,
@@ -703,12 +805,15 @@ async function handleApi(req, res, requestUrl, state) {
           batch_uuid: batchUuid,
         }, 'final', entryUuid, state.catalog.catalog_version);
         state.entries.set(entryUuid, entry);
-        return {
+        const receipt = {
           plot_uuid: plotUuid,
           entry_uuid: entryUuid,
-          outbox_event_uuid: `dddddddd-dddd-4ddd-8ddd-${String(index + 1).padStart(12, '0')}`,
+          outbox_event_uuid: batchMemberEventUuid(payload, member),
           sync_version: 1,
         };
+        state.batchReceipts.set(entryUuid, receipt);
+        state.batchOutboxCount += 1;
+        return receipt;
       });
       state.lastBatchPayload = payload;
       return json(res, 201, { batch_uuid: batchUuid, entries: receipts });
@@ -807,6 +912,7 @@ function createTask14JournalPreviewServer(options = {}) {
           group_post_count: state.groupPostCount,
           group_put_count: state.groupPutCount,
           batch_post_count: state.batchPostCount,
+          batch_outbox_count: state.batchOutboxCount,
           last_final_payload: state.lastFinalPayload,
           last_batch_payload: state.lastBatchPayload,
         });

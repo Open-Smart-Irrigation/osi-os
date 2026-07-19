@@ -130,9 +130,14 @@ export interface JournalEntryWriteFields {
 export interface CreateFinalBatchPayload
   extends Omit<JournalEntryWriteFields, 'status' | 'plot_uuid' | 'zone_uuid'> {
   status: 'final';
-  plot_uuids: string[];
+  members: JournalBatchMember[];
   base_sync_version: 0;
   duplicate_guard_ack_entry_uuids?: string[];
+}
+
+export interface JournalBatchMember {
+  plot_uuid: string;
+  entry_uuid: string;
 }
 
 export interface BatchEntryMutationReceipt {

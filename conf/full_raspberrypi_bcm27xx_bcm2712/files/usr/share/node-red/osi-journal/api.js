@@ -166,6 +166,39 @@ function canonicalDuplicateAcknowledgements(raw) {
   return values;
 }
 
+function canonicalBatchMembers(raw) {
+  if (!Array.isArray(raw) || raw.length === 0) {
+    badRequest('invalid_batch', 'members must be a nonempty array');
+  }
+  if (raw.length > 100) {
+    throw apiError(413, 'batch_too_large', 'A journal batch may contain at most 100 members');
+  }
+  const members = raw.map(function(member, index) {
+    if (!isObject(member)) {
+      badRequest('invalid_batch', 'members[' + index + '] must be an object');
+    }
+    if (typeof member.plot_uuid !== 'string' || !CANONICAL_UUID.test(member.plot_uuid)) {
+      badRequest('invalid_uuid', 'members[' + index + '].plot_uuid must be a canonical UUID');
+    }
+    if (typeof member.entry_uuid !== 'string' || !CANONICAL_UUID.test(member.entry_uuid)) {
+      badRequest('invalid_uuid', 'members[' + index + '].entry_uuid must be a canonical UUID');
+    }
+    return {
+      plot_uuid: member.plot_uuid,
+      entry_uuid: member.entry_uuid,
+    };
+  });
+  const plotUuids = new Set(members.map(function(member) { return member.plot_uuid; }));
+  if (plotUuids.size !== members.length) {
+    badRequest('duplicate_member', 'Batch member plot UUIDs must be unique');
+  }
+  const entryUuids = new Set(members.map(function(member) { return member.entry_uuid; }));
+  if (entryUuids.size !== members.length) {
+    badRequest('duplicate_member', 'Batch member entry UUIDs must be unique');
+  }
+  return members;
+}
+
 function normalizeGatewayIdentity(identity) {
   const shaped = identity;
   if (!isObject(shaped)) {
@@ -913,7 +946,17 @@ async function saveEntry(db, input, principal, options) {
   options = options || {};
   const mode = options.mode || 'create';
   const body = Object.assign({}, input);
-  const batchRequest = Array.isArray(body.plot_uuids);
+  const hasMembers = Object.prototype.hasOwnProperty.call(body, 'members');
+  const hasLegacyPlotUuids = Object.prototype.hasOwnProperty.call(body, 'plot_uuids');
+  if (hasLegacyPlotUuids) {
+    badRequest('invalid_batch', 'Batches require members with plot_uuid and entry_uuid');
+  }
+  const batchRequest = hasMembers;
+  if (batchRequest && (Object.prototype.hasOwnProperty.call(body, 'plot_uuid') ||
+      Object.prototype.hasOwnProperty.call(body, 'zone_uuid'))) {
+    badRequest('invalid_batch', 'Batch members carry plot UUIDs; top-level plot or zone UUIDs are forbidden');
+  }
+  const batchMembers = hasMembers ? canonicalBatchMembers(body.members) : null;
   if (Object.prototype.hasOwnProperty.call(body, 'duplicate_guard_ack_entry_uuids')) {
     if (!batchRequest) {
       badRequest('invalid_batch_control', 'duplicate_guard_ack_entry_uuids is valid only for batches');
@@ -936,12 +979,12 @@ async function saveEntry(db, input, principal, options) {
     if (!Number.isInteger(body.base_sync_version) || body.base_sync_version < 0) {
       throw apiError(409, 'stale_version', 'PUT requires base_sync_version');
     }
-    if (Array.isArray(body.plot_uuids)) badRequest('invalid_batch', 'PUT cannot create a multi-plot batch');
+    if (batchRequest) badRequest('invalid_batch', 'PUT cannot create a multi-plot batch');
   } else {
     if (body.status === 'final' && body.base_sync_version !== 0) {
       throw apiError(409, 'stale_version', 'POST final requires base_sync_version 0');
     }
-    if (!body.entry_uuid && !Array.isArray(body.plot_uuids)) body.entry_uuid = crypto.randomUUID();
+    if (!body.entry_uuid && !batchRequest) body.entry_uuid = crypto.randomUUID();
   }
   const zoneUuid = canonicalUuid(body.zone_uuid, 'zone_uuid', false);
   let plotUuid = canonicalUuid(body.plot_uuid, 'plot_uuid', false);
@@ -954,14 +997,13 @@ async function saveEntry(db, input, principal, options) {
   const catalog = await loadCatalog(db, principal);
   const lifecycle = require('./lifecycle');
   if (body.status === 'draft') {
-    if (Array.isArray(body.plot_uuids)) badRequest('invalid_batch', 'Drafts cannot be multi-plot batches');
+    if (batchRequest) badRequest('invalid_batch', 'Drafts cannot be multi-plot batches');
     return lifecycle.saveDraft(db, catalog, body, principal);
   }
-  if (Array.isArray(body.plot_uuids)) {
+  if (batchRequest) {
     if (mode !== 'create') badRequest('invalid_batch', 'Only POST may create a batch');
-    const plotUuids = body.plot_uuids.map(function(value) { return canonicalUuid(value, 'plot_uuids', true); });
-    delete body.plot_uuids;
-    return lifecycle.finalizeBatch(db, catalog, body, plotUuids, principal);
+    delete body.members;
+    return lifecycle.finalizeBatch(db, catalog, body, batchMembers, principal);
   }
   return mode === 'create'
     ? lifecycle.finalizeCreate(db, catalog, body, principal)

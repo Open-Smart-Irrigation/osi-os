@@ -68,6 +68,29 @@ const INPUT_UUID_FIELDS = ['entry_uuid', 'plot_uuid', 'campaign_uuid', 'pass_uui
 const EUI64 = /^[0-9a-fA-F]{16}$/;
 const LOCAL_TIMESTAMP = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2})(?:\.(\d{1,3}))?)?$/;
 const formatterCache = new Map();
+const BATCH_INTENT_FIELDS = [
+  'status',
+  'activity_code',
+  'template_code',
+  'template_version',
+  'layout_code',
+  'layout_version',
+  'occurred_start_local',
+  'occurred_end_local',
+  'occurred_timezone',
+  'occurred_utc_offset_minutes',
+  'occurred_end_utc_offset_minutes',
+  'device_eui',
+  'season_crop',
+  'season_variety',
+  'campaign_uuid',
+  'protocol_code',
+  'protocol_version',
+  'observation_unit_code',
+  'pass_uuid',
+  'note',
+  'values',
+];
 
 function lifecycleError(code, message) {
   const error = new Error(message);
@@ -135,14 +158,29 @@ function normalizeInputIdentities(input) {
   return normalized;
 }
 
-function normalizeBatchPlotUuids(plotUuids) {
-  const normalized = [];
-  for (let index = 0; index < plotUuids.length; index += 1) {
-    const plotUuid = plotUuids[index];
-    if (typeof plotUuid !== 'string' || !UUID.test(plotUuid)) {
-      throw lifecycleError('invalid_batch', 'Every batch member must be a plot UUID');
+function normalizeBatchMembers(members) {
+  if (!Array.isArray(members) || members.length === 0) {
+    throw lifecycleError('invalid_batch', 'Batch members must be a nonempty array');
+  }
+  if (members.length > 100) {
+    throw lifecycleError('batch_too_large', 'A journal batch may contain at most 100 members');
+  }
+  const normalized = members.map(function(member, index) {
+    if (!member || typeof member !== 'object' || Array.isArray(member)) {
+      throw lifecycleError('invalid_batch', 'Batch member ' + index + ' must be an object');
     }
-    normalized.push(canonicalUuid(plotUuid));
+    if (typeof member.plot_uuid !== 'string' || !CANONICAL_UUID.test(member.plot_uuid) ||
+        typeof member.entry_uuid !== 'string' || !CANONICAL_UUID.test(member.entry_uuid)) {
+      throw lifecycleError('invalid_uuid', 'Batch member UUIDs must be canonical');
+    }
+    return {
+      plot_uuid: member.plot_uuid,
+      entry_uuid: member.entry_uuid,
+    };
+  });
+  if (new Set(normalized.map(function(member) { return member.plot_uuid; })).size !== normalized.length ||
+      new Set(normalized.map(function(member) { return member.entry_uuid; })).size !== normalized.length) {
+    throw lifecycleError('duplicate_member', 'Batch member plot and entry UUIDs must be unique');
   }
   return normalized;
 }
@@ -786,18 +824,19 @@ async function emitJournalOutbox(tx, source, op) {
   let occurredAt;
   let gatewayDeviceEui;
   let entry = null;
-  if (typeof source === 'string') {
+  const entryUuid = typeof source === 'string' ? source : source && source.entry_uuid;
+  if (entryUuid) {
     entry = await tx.get(
       'SELECT * FROM journal_entries WHERE entry_uuid=?',
-      [source]
+      [entryUuid]
     );
     const values = await tx.all(
       'SELECT * FROM journal_entry_values WHERE entry_uuid=? ORDER BY group_index,attribute_code',
-      [source]
+      [entryUuid]
     );
     aggregate = buildAggregate(Object.assign({ contract_version: 1 }, entry), values);
     aggregateType = 'JOURNAL_ENTRY';
-    aggregateKey = source;
+    aggregateKey = entryUuid;
     syncVersion = entry.sync_version;
     occurredAt = entry.updated_at;
     gatewayDeviceEui = entry.gateway_device_eui;
@@ -809,7 +848,7 @@ async function emitJournalOutbox(tx, source, op) {
     occurredAt = source.occurred_at;
     gatewayDeviceEui = source.gateway_device_eui;
   }
-  const eventUuid = crypto.randomUUID();
+  const eventUuid = source && source.event_uuid ? source.event_uuid : crypto.randomUUID();
   await tx.run(
     'INSERT INTO sync_outbox (' +
       'event_uuid,aggregate_type,aggregate_key,op,payload_json,sync_version,occurred_at,gateway_device_eui' +
@@ -835,6 +874,111 @@ function safeDuplicateCandidate(candidate) {
     activityCode: candidate.activity_code,
     plotUuid: candidate.plot_uuid,
   };
+}
+
+function idempotencyConflict(message) {
+  const error = lifecycleError('idempotency_conflict', message);
+  error.statusCode = 409;
+  return error;
+}
+
+function batchMemberKey(member) {
+  return member.entry_uuid + '\u0000' + member.plot_uuid;
+}
+
+function batchMemberIntent(input, member) {
+  const intent = {
+    intent_version: 1,
+    entry_uuid: member.entry_uuid,
+    plot_uuid: member.plot_uuid,
+  };
+  for (const field of BATCH_INTENT_FIELDS) {
+    if (Object.prototype.hasOwnProperty.call(input, field)) intent[field] = input[field];
+  }
+  if (Array.isArray(intent.values)) {
+    intent.values = intent.values.map(function(value) {
+      return Object.assign({}, value, {
+        group_index: value.group_index == null ? 0 : value.group_index,
+        value_status: value.value_status == null ? 'observed' : value.value_status,
+      });
+    }).sort(function(left, right) {
+      return left.group_index - right.group_index ||
+        (left.attribute_code < right.attribute_code ? -1 : left.attribute_code > right.attribute_code ? 1 : 0);
+    });
+  }
+  return intent;
+}
+
+function batchMemberEventUuid(input, member) {
+  const bytes = Buffer.from(aggregateHash(batchMemberIntent(input, member)), 'hex')
+    .subarray(0, 16);
+  bytes[6] = (bytes[6] & 0x0f) | 0x40;
+  bytes[8] = (bytes[8] & 0x3f) | 0x80;
+  const hex = bytes.toString('hex');
+  return hex.slice(0, 8) + '-' + hex.slice(8, 12) + '-' + hex.slice(12, 16) + '-' +
+    hex.slice(16, 20) + '-' + hex.slice(20);
+}
+
+async function persistedEntryReceipt(tx, entry, expectedEventUuid) {
+  const receipt = await tx.get(
+    "SELECT event_uuid FROM sync_outbox WHERE aggregate_type='JOURNAL_ENTRY' " +
+      "AND aggregate_key=? AND op='JOURNAL_ENTRY_UPSERTED' AND sync_version=? " +
+      'ORDER BY rowid DESC LIMIT 1',
+    [entry.entry_uuid, entry.sync_version]
+  );
+  if (!receipt || typeof receipt.event_uuid !== 'string' || !receipt.event_uuid) {
+    throw idempotencyConflict('A persisted journal entry is missing its current outbox receipt');
+  }
+  if (expectedEventUuid && receipt.event_uuid !== expectedEventUuid) {
+    throw idempotencyConflict('A batch retry does not match the original write intent');
+  }
+  return {
+    entry_uuid: entry.entry_uuid,
+    outbox_event_uuid: receipt.event_uuid,
+    sync_version: entry.sync_version,
+  };
+}
+
+async function existingBatchRetry(tx, input, members, existingEntries) {
+  if (existingEntries.size !== members.length) {
+    throw idempotencyConflict('A batch retry cannot mix existing and new member UUIDs');
+  }
+  for (const entry of existingEntries.values()) {
+    if (entry.status !== 'final') {
+      throw idempotencyConflict('A batch retry requires final persisted entries');
+    }
+    if (entry.sync_version !== 1) {
+      throw idempotencyConflict('A batch retry requires the original version-one batch state');
+    }
+  }
+  const batchUuids = [...existingEntries.values()].map(function(entry) {
+    return entry.batch_uuid;
+  });
+  const batchUuid = batchUuids[0];
+  if (!batchUuid || batchUuids.some(function(value) { return value !== batchUuid; })) {
+    throw idempotencyConflict('A batch retry requires one non-null persisted batch UUID');
+  }
+
+  const persisted = await tx.all(
+    "SELECT entry_uuid,plot_uuid FROM journal_entries WHERE batch_uuid=? AND status='final' AND deleted_at IS NULL",
+    [batchUuid]
+  );
+  const requestedKeys = new Set(members.map(batchMemberKey));
+  const persistedKeys = new Set(persisted.map(batchMemberKey));
+  if (requestedKeys.size !== persistedKeys.size ||
+      [...requestedKeys].some(function(key) { return !persistedKeys.has(key); })) {
+    throw idempotencyConflict('A batch retry must match the persisted final batch members exactly');
+  }
+
+  const entries = [];
+  for (const member of members) {
+    entries.push(Object.assign({ plot_uuid: member.plot_uuid }, await persistedEntryReceipt(
+      tx,
+      existingEntries.get(member.entry_uuid),
+      batchMemberEventUuid(input, member)
+    )));
+  }
+  return { batch_uuid: batchUuid, entries };
 }
 
 async function findDuplicateCandidate(tx, input, plot, occurrence, excludeEntryUuid) {
@@ -1279,7 +1423,9 @@ async function createFinalInTransaction(tx, catalog, input, principal, entryInde
   });
   const emission = await emitJournalOutbox(
     tx,
-    row.entry_uuid,
+    options && options.outbox_event_uuid
+      ? { entry_uuid: row.entry_uuid, event_uuid: options.outbox_event_uuid }
+      : row.entry_uuid,
     'JOURNAL_ENTRY_UPSERTED'
   );
   const terminal = {
@@ -1369,19 +1515,10 @@ async function finalizeCreate(db, catalog, input, principal) {
   });
 }
 
-async function finalizeBatch(db, catalog, input, plotUuids, principal) {
+async function finalizeBatch(db, catalog, input, members, principal) {
   validateRequestLimit(input);
   input = normalizeInputIdentities(input);
-  if (!Array.isArray(plotUuids) || plotUuids.length === 0) {
-    throw lifecycleError('invalid_batch', 'Batch plots must be a nonempty array');
-  }
-  if (plotUuids.length > 100) {
-    throw lifecycleError('batch_too_large', 'A journal batch may contain at most 100 plots');
-  }
-  plotUuids = normalizeBatchPlotUuids(plotUuids);
-  if (new Set(plotUuids).size !== plotUuids.length) {
-    throw lifecycleError('duplicate_plot', 'A journal batch cannot contain duplicate plots');
-  }
+  members = normalizeBatchMembers(members);
   const acknowledgementValues = input.duplicate_guard_ack_entry_uuids == null
     ? []
     : input.duplicate_guard_ack_entry_uuids;
@@ -1393,9 +1530,37 @@ async function finalizeBatch(db, catalog, input, plotUuids, principal) {
   const acknowledgements = new Set(acknowledgementValues);
   return db.transaction(async function(tx) {
     const duplicateCandidates = [];
-    for (const plotUuid of plotUuids) {
-      const plot = await resolvePlotContext(tx, plotUuid, principal);
-      const candidateInput = Object.assign({}, input, { plot_uuid: plotUuid });
+    const existingEntries = new Map();
+    const newMembers = [];
+    for (const member of members) {
+      const existing = await tx.get(
+        'SELECT * FROM journal_entries WHERE entry_uuid=?',
+        [member.entry_uuid]
+      );
+      if (existing) {
+        assertOwnedEntry(existing, principal);
+        if (existing.deleted_at != null) {
+          throw idempotencyConflict('A batch retry cannot replay a deleted journal entry');
+        }
+        if (existing.plot_uuid !== member.plot_uuid) {
+          throw idempotencyConflict('Entry UUID is already assigned to another plot');
+        }
+        existingEntries.set(member.entry_uuid, existing);
+      } else {
+        const plot = await resolvePlotContext(tx, member.plot_uuid, principal);
+        newMembers.push({ member, plot });
+      }
+    }
+    if (existingEntries.size) {
+      if (existingEntries.size !== members.length) {
+        throw idempotencyConflict('A batch retry cannot mix existing and new member UUIDs');
+      }
+      return existingBatchRetry(tx, input, members, existingEntries);
+    }
+    for (const item of newMembers) {
+      const member = item.member;
+      const plot = item.plot;
+      const candidateInput = Object.assign({}, input, { plot_uuid: member.plot_uuid });
       const occurrence = occurrenceFor(candidateInput, plot);
       const candidate = await findDuplicateCandidate(tx, candidateInput, plot, occurrence, null);
       if (candidate) duplicateCandidates.push(safeDuplicateCandidate(candidate));
@@ -1428,10 +1593,11 @@ async function finalizeBatch(db, catalog, input, plotUuids, principal) {
     const batchUuid = crypto.randomUUID();
     const contextCache = new Map();
     const entries = [];
-    for (let index = 0; index < plotUuids.length; index += 1) {
+    for (let index = 0; index < members.length; index += 1) {
+      const member = members[index];
       const entryInput = Object.assign({}, input, {
-        entry_uuid: crypto.randomUUID(),
-        plot_uuid: plotUuids[index],
+        entry_uuid: member.entry_uuid,
+        plot_uuid: member.plot_uuid,
         batch_uuid: batchUuid,
         base_sync_version: 0,
       });
@@ -1442,9 +1608,12 @@ async function finalizeBatch(db, catalog, input, plotUuids, principal) {
         principal,
         index,
         contextCache,
-        { duplicateAcknowledgements: acknowledgements }
+        {
+          duplicateAcknowledgements: acknowledgements,
+          outbox_event_uuid: batchMemberEventUuid(input, member),
+        }
       );
-      entries.push(Object.assign({ plot_uuid: plotUuids[index] }, result));
+      entries.push(Object.assign({ plot_uuid: member.plot_uuid }, result));
     }
     return { batch_uuid: batchUuid, entries };
   });
@@ -1508,6 +1677,7 @@ async function void_(db, _catalog, entryUuid, baseSyncVersion, reason, principal
 
 module.exports = {
   assertJournalEntryEffectKey,
+  batchMemberEventUuid,
   emitJournalOutbox,
   finalize,
   finalizeCreate,

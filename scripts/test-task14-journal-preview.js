@@ -519,7 +519,10 @@ test('Task 21 preview exposes plot, group, range, and atomic batch envelopes', a
 
   const batchPayload = {
     status: 'final',
-    plot_uuids: [newPlotUuid, CANONICAL_IDS.plotUuid].sort(),
+    members: [
+      { plot_uuid: newPlotUuid, entry_uuid: '86010000-0000-4000-8000-000000000001' },
+      { plot_uuid: CANONICAL_IDS.plotUuid, entry_uuid: '86010000-0000-4000-8000-000000000002' },
+    ],
     base_sync_version: 0,
     activity_code: 'irrigation',
     template_code: 'farmer_quick',
@@ -531,25 +534,374 @@ test('Task 21 preview exposes plot, group, range, and atomic batch envelopes', a
     occurred_utc_offset_minutes: 120,
     values: [{ attribute_code: 'attr.irrigation_depth', value: 12 }],
   };
-  const duplicate = await request(baseUrl, 'POST', '/api/journal/entries', batchPayload);
+  const first = await request(baseUrl, 'POST', '/api/journal/entries', batchPayload);
+  assert.equal(first.statusCode, 201);
+  assert.match(first.json.batch_uuid, /^[0-9a-f-]{36}$/);
+  assert.equal(first.json.entries.length, 2);
+  assert.ok(first.json.entries.every((entry) => entry.plot_uuid));
+
+  const retry = await request(baseUrl, 'POST', '/api/journal/entries', batchPayload);
+  assert.equal(retry.statusCode, 201);
+  assert.equal(retry.json.batch_uuid, first.json.batch_uuid);
+  assert.deepEqual(retry.json.entries, first.json.entries);
+
+  const freshMembers = batchPayload.members.map((member, index) => ({
+    plot_uuid: member.plot_uuid,
+    entry_uuid: `86020000-0000-4000-8000-00000000000${index + 1}`,
+  }));
+  const duplicate = await request(baseUrl, 'POST', '/api/journal/entries', {
+    ...batchPayload,
+    members: freshMembers,
+  });
   assert.equal(duplicate.statusCode, 409);
   assert.equal(duplicate.json.error, 'duplicate_candidates');
   assert.equal(duplicate.json.details.duplicateCandidates.length, 2);
 
   const retried = await request(baseUrl, 'POST', '/api/journal/entries', {
     ...batchPayload,
+    members: freshMembers,
     duplicate_guard_ack_entry_uuids: duplicate.json.details.duplicateCandidates.map((candidate) => candidate.entryUuid),
   });
   assert.equal(retried.statusCode, 201);
-  assert.match(retried.json.batch_uuid, /^[0-9a-f-]{36}$/);
   assert.equal(retried.json.entries.length, 2);
-  assert.ok(retried.json.entries.every((entry) => entry.plot_uuid));
+  assert.deepEqual(retried.json.entries.map((entry) => entry.entry_uuid), freshMembers.map((member) => member.entry_uuid));
 
   const status = await request(baseUrl, 'GET', '/__task14/status');
   assert.equal(status.statusCode, 200);
-  assert.equal(status.json.batch_post_count, 2);
+  assert.equal(status.json.batch_post_count, 4);
   assert.equal(status.json.last_batch_payload.plot_uuid, undefined);
+  assert.deepEqual(status.json.last_batch_payload.members, freshMembers);
   assert.equal(status.json.last_batch_payload.zone_uuid, undefined);
+});
+
+test('preview batch audit records members, proves same-UUID retry is a no-op, and acknowledges fresh UUID duplicates', async (t) => {
+  const preview = createTask14JournalPreviewServer();
+  await preview.listen();
+  t.after(() => preview.close());
+  const baseUrl = preview.url();
+  const members = [
+    { plot_uuid: CANONICAL_IDS.numericPlotUuid, entry_uuid: '85800000-0000-4000-8000-000000000001' },
+    { plot_uuid: CANONICAL_IDS.namedPlotUuid, entry_uuid: '85800000-0000-4000-8000-000000000002' },
+  ];
+  const batchPayload = {
+    status: 'final',
+    members,
+    base_sync_version: 0,
+    activity_code: 'irrigation',
+    template_code: 'farmer_quick',
+    template_version: 1,
+    layout_code: 'open_field',
+    layout_version: 1,
+    occurred_start_local: '2026-07-17T08:30',
+    occurred_timezone: 'Europe/Zurich',
+    occurred_utc_offset_minutes: 120,
+    values: [{ attribute_code: 'attr.irrigation_depth', value: 12 }],
+  };
+
+  const first = await request(baseUrl, 'POST', '/api/journal/entries', batchPayload);
+  assert.equal(first.statusCode, 201);
+  const entryCount = preview.state.entries.size;
+  const outboxCount = preview.state.batchOutboxCount;
+  const firstOutboxEventUuids = first.json.entries.map((entry) => entry.outbox_event_uuid);
+  assert.equal(new Set(firstOutboxEventUuids).size, members.length,
+    'one successful batch must allocate unique outbox event UUIDs');
+
+  const retry = await request(baseUrl, 'POST', '/api/journal/entries', batchPayload);
+  assert.equal(retry.statusCode, 201);
+  assert.equal(retry.json.batch_uuid, first.json.batch_uuid);
+  assert.deepEqual(retry.json.entries, first.json.entries);
+  assert.equal(preview.state.entries.size, entryCount);
+  assert.equal(preview.state.batchOutboxCount, outboxCount);
+
+  const changed = await request(baseUrl, 'POST', '/api/journal/entries', {
+    ...batchPayload,
+    values: [{ attribute_code: 'attr.irrigation_depth', value: 13 }],
+  });
+  assert.equal(changed.statusCode, 409);
+  assert.equal(changed.json.error, 'idempotency_conflict');
+  assert.equal(preview.state.entries.size, entryCount);
+  assert.equal(preview.state.batchOutboxCount, outboxCount);
+
+  for (const plotUuid of members.map((member) => member.plot_uuid)) {
+    const current = preview.state.plots.find((plot) => plot.plot_uuid === plotUuid);
+    const deactivated = await request(baseUrl, 'PUT', `/api/journal/plots/${plotUuid}`, {
+      ...current,
+      base_sync_version: current.sync_version,
+      active: 0,
+    });
+    assert.equal(deactivated.statusCode, 200);
+  }
+  const retryAfterDeactivation = await request(baseUrl, 'POST', '/api/journal/entries', batchPayload);
+  assert.equal(retryAfterDeactivation.statusCode, 201);
+  assert.deepEqual(retryAfterDeactivation.json, first.json);
+  assert.equal(preview.state.entries.size, entryCount);
+  assert.equal(preview.state.batchOutboxCount, outboxCount);
+
+  const freshMembers = members.map((member, index) => ({
+    plot_uuid: member.plot_uuid,
+    entry_uuid: `85900000-0000-4000-8000-00000000000${index + 1}`,
+  }));
+  const inactiveFresh = await request(baseUrl, 'POST', '/api/journal/entries', {
+    ...batchPayload,
+    members: freshMembers,
+  });
+  assert.equal(inactiveFresh.statusCode, 404);
+  assert.equal(inactiveFresh.json.error, 'plot_not_found');
+  assert.equal(preview.state.entries.size, entryCount);
+  assert.equal(preview.state.batchOutboxCount, outboxCount);
+
+  for (const plotUuid of members.map((member) => member.plot_uuid)) {
+    const current = preview.state.plots.find((plot) => plot.plot_uuid === plotUuid);
+    const reactivated = await request(baseUrl, 'PUT', `/api/journal/plots/${plotUuid}`, {
+      ...current,
+      base_sync_version: current.sync_version,
+      active: 1,
+    });
+    assert.equal(reactivated.statusCode, 200);
+  }
+  const duplicate = await request(baseUrl, 'POST', '/api/journal/entries', {
+    ...batchPayload,
+    members: freshMembers,
+  });
+  assert.equal(duplicate.statusCode, 409);
+  assert.equal(duplicate.json.error, 'duplicate_candidates');
+  assert.equal(duplicate.json.details.duplicateCandidates.length, members.length);
+
+  const acknowledged = await request(baseUrl, 'POST', '/api/journal/entries', {
+    ...batchPayload,
+    members: freshMembers,
+    duplicate_guard_ack_entry_uuids: duplicate.json.details.duplicateCandidates.map((candidate) => candidate.entryUuid),
+  });
+  assert.equal(acknowledged.statusCode, 201);
+  assert.deepEqual(acknowledged.json.entries.map((entry) => entry.entry_uuid), freshMembers.map((member) => member.entry_uuid));
+  const acknowledgedOutboxEventUuids = acknowledged.json.entries.map((entry) => entry.outbox_event_uuid);
+  assert.equal(new Set(acknowledgedOutboxEventUuids).size, members.length,
+    'the acknowledged batch must allocate unique outbox event UUIDs');
+  assert.equal(new Set([...firstOutboxEventUuids, ...acknowledgedOutboxEventUuids]).size, members.length * 2,
+    'distinct successful batches must never reuse outbox event UUIDs');
+  assert.equal(preview.state.entries.size, entryCount + members.length);
+  assert.equal(preview.state.batchOutboxCount, outboxCount + members.length);
+
+  const status = await request(baseUrl, 'GET', '/__task14/status');
+  assert.deepEqual(status.json.last_batch_payload.members, freshMembers);
+  assert.equal(status.json.last_batch_payload.plot_uuids, undefined);
+});
+
+test('preview binds changed batch write intent and preserves receipts across plot lifecycle changes', async (t) => {
+  const preview = createTask14JournalPreviewServer();
+  await preview.listen();
+  t.after(() => preview.close());
+  const baseUrl = preview.url();
+  const members = [{
+    plot_uuid: CANONICAL_IDS.numericPlotUuid,
+    entry_uuid: '85810000-0000-4000-8000-000000000001',
+  }];
+  const payload = {
+    status: 'final', members, base_sync_version: 0, activity_code: 'irrigation',
+    template_code: 'farmer_quick', template_version: 1, layout_code: 'open_field', layout_version: 1,
+    occurred_start_local: '2026-07-17T10:30', occurred_timezone: 'Europe/Zurich',
+    occurred_utc_offset_minutes: 120, values: [{ attribute_code: 'attr.irrigation_depth', value: 12 }],
+  };
+  const first = await request(baseUrl, 'POST', '/api/journal/entries', payload);
+  assert.equal(first.statusCode, 201);
+  const entryCount = preview.state.entries.size;
+  const outboxCount = preview.state.batchOutboxCount;
+  for (const changed of [
+    { ...payload, activity_code: 'fertilization' },
+    { ...payload, occurred_start_local: '2026-07-17T10:31' },
+    { ...payload, values: [{ ...payload.values[0], value: 13 }] },
+  ]) {
+    const response = await request(baseUrl, 'POST', '/api/journal/entries', changed);
+    assert.equal(response.statusCode, 409);
+    assert.equal(response.json.error, 'idempotency_conflict');
+  }
+  const plotRecord = preview.state.plots.find((plot) => plot.plot_uuid === members[0].plot_uuid);
+  plotRecord.active = 0;
+  const inactiveRetry = await request(baseUrl, 'POST', '/api/journal/entries', payload);
+  assert.equal(inactiveRetry.statusCode, 201);
+  assert.deepEqual(inactiveRetry.json, first.json);
+  const inactiveFresh = await request(baseUrl, 'POST', '/api/journal/entries', {
+    ...payload,
+    members: [{
+      plot_uuid: members[0].plot_uuid,
+      entry_uuid: '85810000-0000-4000-8000-000000000002',
+    }],
+  });
+  assert.equal(inactiveFresh.statusCode, 404);
+  assert.equal(inactiveFresh.json.error, 'plot_not_found');
+  assert.equal(preview.state.entries.size, entryCount);
+  assert.equal(preview.state.batchOutboxCount, outboxCount);
+  plotRecord.active = 1;
+  plotRecord.deleted_at = '2026-07-17T11:00:00.000Z';
+  const deletedRetry = await request(baseUrl, 'POST', '/api/journal/entries', payload);
+  assert.equal(deletedRetry.statusCode, 201);
+  assert.deepEqual(deletedRetry.json, first.json);
+  const deletedFresh = await request(baseUrl, 'POST', '/api/journal/entries', {
+    ...payload,
+    members: [{
+      plot_uuid: members[0].plot_uuid,
+      entry_uuid: '85810000-0000-4000-8000-000000000003',
+    }],
+  });
+  assert.equal(deletedFresh.statusCode, 404);
+  assert.equal(deletedFresh.json.error, 'plot_not_found');
+  assert.equal(preview.state.entries.size, entryCount);
+  assert.equal(preview.state.batchOutboxCount, outboxCount);
+});
+
+test('preview rejects the original batch retry after a member correction reaches version two', async (t) => {
+  const preview = createTask14JournalPreviewServer();
+  await preview.listen();
+  t.after(() => preview.close());
+  const baseUrl = preview.url();
+  const members = [
+    { plot_uuid: CANONICAL_IDS.numericPlotUuid, entry_uuid: '85910000-0000-4000-8000-000000000001' },
+    { plot_uuid: CANONICAL_IDS.namedPlotUuid, entry_uuid: '85910000-0000-4000-8000-000000000002' },
+  ];
+  const payload = {
+    status: 'final', members, base_sync_version: 0, activity_code: 'irrigation',
+    template_code: 'farmer_quick', template_version: 1, layout_code: 'open_field', layout_version: 1,
+    occurred_start_local: '2026-07-17T09:30', occurred_timezone: 'Europe/Zurich',
+    occurred_utc_offset_minutes: 120, values: [{ attribute_code: 'attr.irrigation_depth', value: 12 }],
+  };
+  const first = await request(baseUrl, 'POST', '/api/journal/entries', payload);
+  assert.equal(first.statusCode, 201);
+
+  const correctedEntry = preview.state.entries.get(members[0].entry_uuid);
+  correctedEntry.sync_version = 2;
+  preview.state.batchReceipts.get(members[0].entry_uuid).sync_version = 2;
+  const beforeEntries = preview.state.entries.size;
+  const beforeOutbox = preview.state.batchOutboxCount;
+  const retry = await request(baseUrl, 'POST', '/api/journal/entries', payload);
+
+  assert.equal(retry.statusCode, 409);
+  assert.equal(retry.json.error, 'idempotency_conflict');
+  assert.equal(preview.state.entries.size, beforeEntries);
+  assert.equal(preview.state.batchOutboxCount, beforeOutbox);
+});
+
+test('preview keeps one global outbox sequence across independently successful batches', async (t) => {
+  const preview = createTask14JournalPreviewServer();
+  await preview.listen();
+  t.after(() => preview.close());
+  const baseUrl = preview.url();
+  const batchPayload = (members, occurred_start_local) => ({
+    status: 'final', members, base_sync_version: 0, activity_code: 'irrigation',
+    template_code: 'farmer_quick', template_version: 1, layout_code: 'open_field', layout_version: 1,
+    occurred_start_local, occurred_timezone: 'Europe/Zurich', occurred_utc_offset_minutes: 120,
+    values: [{ attribute_code: 'attr.irrigation_depth', value: 12 }],
+  });
+  const first = await request(baseUrl, 'POST', '/api/journal/entries', batchPayload([
+    { plot_uuid: CANONICAL_IDS.numericPlotUuid, entry_uuid: '85920000-0000-4000-8000-000000000001' },
+    { plot_uuid: CANONICAL_IDS.namedPlotUuid, entry_uuid: '85920000-0000-4000-8000-000000000002' },
+  ], '2026-07-18T08:30'));
+  const second = await request(baseUrl, 'POST', '/api/journal/entries', batchPayload([
+    { plot_uuid: CANONICAL_IDS.plotUuid, entry_uuid: '85930000-0000-4000-8000-000000000001' },
+    { plot_uuid: CANONICAL_IDS.numericPlotUuid, entry_uuid: '85930000-0000-4000-8000-000000000002' },
+  ], '2026-07-18T14:30'));
+
+  assert.equal(first.statusCode, 201);
+  assert.equal(second.statusCode, 201);
+  const eventUuids = [...first.json.entries, ...second.json.entries]
+    .map((entry) => entry.outbox_event_uuid);
+  assert.equal(new Set(eventUuids).size, eventUuids.length);
+  assert.equal(preview.state.batchOutboxCount, eventUuids.length);
+});
+
+test('preview rejects mixed existing and new batch members before writes', async (t) => {
+  const preview = createTask14JournalPreviewServer();
+  await preview.listen();
+  t.after(() => preview.close());
+  const baseUrl = preview.url();
+  const members = [
+    { plot_uuid: CANONICAL_IDS.numericPlotUuid, entry_uuid: '86030000-0000-4000-8000-000000000001' },
+    { plot_uuid: CANONICAL_IDS.namedPlotUuid, entry_uuid: '86030000-0000-4000-8000-000000000002' },
+  ];
+  const payload = {
+    status: 'final', members, base_sync_version: 0, activity_code: 'irrigation',
+    template_code: 'farmer_quick', template_version: 1, layout_code: 'open_field', layout_version: 1,
+    occurred_start_local: '2026-07-17T08:30', occurred_timezone: 'Europe/Zurich',
+    occurred_utc_offset_minutes: 120, values: [{ attribute_code: 'attr.irrigation_depth', value: 12 }],
+  };
+  const first = await request(baseUrl, 'POST', '/api/journal/entries', payload);
+  assert.equal(first.statusCode, 201);
+  const beforeEntries = preview.state.entries.size;
+  const beforeOutbox = preview.state.batchOutboxCount;
+  const mixed = await request(baseUrl, 'POST', '/api/journal/entries', {
+    ...payload,
+    members: [members[0], { plot_uuid: members[1].plot_uuid, entry_uuid: '86040000-0000-4000-8000-000000000001' }],
+    duplicate_guard_ack_entry_uuids: [members[1].entry_uuid],
+  });
+  assert.equal(mixed.statusCode, 409);
+  assert.equal(mixed.json.error, 'idempotency_conflict');
+  assert.equal(preview.state.entries.size, beforeEntries);
+  assert.equal(preview.state.batchOutboxCount, beforeOutbox);
+});
+
+test('preview rejects subset, superset, and cross-batch existing retries', async (t) => {
+  const preview = createTask14JournalPreviewServer();
+  await preview.listen();
+  t.after(() => preview.close());
+  const baseUrl = preview.url();
+  const members = [
+    { plot_uuid: CANONICAL_IDS.numericPlotUuid, entry_uuid: '86050000-0000-4000-8000-000000000001' },
+    { plot_uuid: CANONICAL_IDS.namedPlotUuid, entry_uuid: '86050000-0000-4000-8000-000000000002' },
+  ];
+  const payload = {
+    status: 'final', members, base_sync_version: 0, activity_code: 'irrigation',
+    template_code: 'farmer_quick', template_version: 1, layout_code: 'open_field', layout_version: 1,
+    occurred_start_local: '2026-07-17T10:30', occurred_timezone: 'Europe/Zurich',
+    occurred_utc_offset_minutes: 120, values: [{ attribute_code: 'attr.irrigation_depth', value: 12 }],
+  };
+  const first = await request(baseUrl, 'POST', '/api/journal/entries', payload);
+  assert.equal(first.statusCode, 201);
+  const otherMember = { plot_uuid: CANONICAL_IDS.plotUuid, entry_uuid: '86060000-0000-4000-8000-000000000001' };
+  const other = await request(baseUrl, 'POST', '/api/journal/entries', {
+    ...payload,
+    members: [otherMember],
+    occurred_start_local: '2026-07-17T12:30',
+  });
+  assert.equal(other.statusCode, 201);
+  const beforeEntries = preview.state.entries.size;
+  const beforeOutbox = preview.state.batchOutboxCount;
+  for (const retryMembers of [
+    [members[0]],
+    [...members, { plot_uuid: '86070000-0000-4000-8000-000000000001', entry_uuid: '86080000-0000-4000-8000-000000000001' }],
+    [members[0], otherMember],
+  ]) {
+    const retry = await request(baseUrl, 'POST', '/api/journal/entries', { ...payload, members: retryMembers });
+    assert.equal(retry.statusCode, 409);
+    assert.equal(retry.json.error, 'idempotency_conflict');
+  }
+  assert.equal(preview.state.entries.size, beforeEntries);
+  assert.equal(preview.state.batchOutboxCount, beforeOutbox);
+});
+
+test('preview rejects an existing batch member without its receipt', async (t) => {
+  const preview = createTask14JournalPreviewServer();
+  await preview.listen();
+  t.after(() => preview.close());
+  const baseUrl = preview.url();
+  const members = [
+    { plot_uuid: CANONICAL_IDS.numericPlotUuid, entry_uuid: '86090000-0000-4000-8000-000000000001' },
+    { plot_uuid: CANONICAL_IDS.namedPlotUuid, entry_uuid: '86090000-0000-4000-8000-000000000002' },
+  ];
+  const payload = {
+    status: 'final', members, base_sync_version: 0, activity_code: 'irrigation',
+    template_code: 'farmer_quick', template_version: 1, layout_code: 'open_field', layout_version: 1,
+    occurred_start_local: '2026-07-17T14:30', occurred_timezone: 'Europe/Zurich',
+    occurred_utc_offset_minutes: 120, values: [{ attribute_code: 'attr.irrigation_depth', value: 12 }],
+  };
+  const first = await request(baseUrl, 'POST', '/api/journal/entries', payload);
+  assert.equal(first.statusCode, 201);
+  preview.state.batchReceipts.delete(members[0].entry_uuid);
+  const beforeEntries = preview.state.entries.size;
+  const beforeOutbox = preview.state.batchOutboxCount;
+  const retry = await request(baseUrl, 'POST', '/api/journal/entries', payload);
+  assert.equal(retry.statusCode, 409);
+  assert.equal(retry.json.error, 'idempotency_conflict');
+  assert.equal(preview.state.entries.size, beforeEntries);
+  assert.equal(preview.state.batchOutboxCount, beforeOutbox);
 });
 
 test('preview records the exact UUID-encoded generic resolved plot-group PUT envelope', async (t) => {

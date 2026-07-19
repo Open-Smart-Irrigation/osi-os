@@ -187,7 +187,7 @@ function cloneFinalBatchPayload(payload: Parameters<typeof journalApi.createFina
   Parameters<typeof journalApi.createFinalBatch>[0] {
   return {
     ...payload,
-    plot_uuids: [...payload.plot_uuids],
+    members: payload.members.map((member) => ({ ...member })),
     values: payload.values.map((value) => ({ ...value })),
     ...(payload.duplicate_guard_ack_entry_uuids
       ? { duplicate_guard_ack_entry_uuids: [...payload.duplicate_guard_ack_entry_uuids] }
@@ -527,6 +527,7 @@ export const JournalCaptureFlow: React.FC<JournalCaptureFlowProps> = ({
   const mountedRef = useRef(true);
   const preparationTokenRef = useRef(0);
   const batchPayloadSnapshotRef = useRef<Parameters<typeof journalApi.createFinalBatch>[0] | null>(null);
+  const batchEntryUuidsRef = useRef(new Map<string, string>());
   const contextKeyRef = useRef('');
   const automaticPrefillRef = useRef(new Map<string, CaptureEntryValueInput>());
   const prefillContextRef = useRef<string | null>(null);
@@ -707,7 +708,12 @@ export const JournalCaptureFlow: React.FC<JournalCaptureFlowProps> = ({
   }), [draft.entryUuid, endResolved?.offsetMinutes, endUtcOffset, occurredEndLocal, inferredCrop, layout, leaf, occurredLocal, payloadValues, resolved?.offsetMinutes, selectedPlot, template, timezone, utcOffset]);
 
   const buildBatchInput = useCallback((acknowledgements: readonly string[] = []) => ({
-    plotUuids: selectedPlotUuids,
+    members: selectedPlotUuids.map((plotUuid) => {
+      const existingEntryUuid = batchEntryUuidsRef.current.get(plotUuid);
+      const entryUuid = existingEntryUuid ?? crypto.randomUUID();
+      batchEntryUuidsRef.current.set(plotUuid, entryUuid);
+      return { plot_uuid: plotUuid, entry_uuid: entryUuid };
+    }),
     season_crop: inferredCrop || null,
     activity_code: leaf?.activity_code ?? '',
     template_code: template?.code ?? '',
@@ -848,6 +854,7 @@ export const JournalCaptureFlow: React.FC<JournalCaptureFlowProps> = ({
       return;
     }
     batchPayloadSnapshotRef.current = null;
+    batchEntryUuidsRef.current.clear();
     setBatchAttemptPending(false);
     const nextPlot = plots.find(({ plot_uuid: plotUuid }) => plotUuid === uuid);
     const nextLayoutCode = nextPlot?.settings.layout_code ?? '';
