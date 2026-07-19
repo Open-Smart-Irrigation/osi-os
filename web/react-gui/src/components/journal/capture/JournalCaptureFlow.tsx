@@ -22,6 +22,14 @@ import {
   deriveFieldStates,
 } from '../../../journal/templateEngine';
 import {
+  computeLayoutTransitionDiff,
+  layoutTransitionItemKey,
+} from '../../../journal/layoutTransition';
+import type {
+  LayoutTransitionAffectedItem,
+  LayoutTransitionResolutionKind,
+} from '../../../journal/layoutTransition';
+import {
   isValidApiInstant,
   OccurrenceResolutionError,
   resolveOccurrence,
@@ -61,6 +69,7 @@ import type {
 import { ActivityPicker } from './ActivityPicker';
 import { ConfirmStrip, type CaptureEditStep, type ConfirmValueToken } from './ConfirmStrip';
 import { EntryForm, validateEntryForm } from './EntryForm';
+import { LayoutTransitionReviewSheet } from './LayoutTransitionReviewSheet';
 import { PlotForm } from '../where/PlotForm';
 import { HarvestGroupNudge } from '../where/HarvestGroupNudge';
 import { PlotPicker } from '../where/PlotPicker';
@@ -579,6 +588,12 @@ export const JournalCaptureFlow: React.FC<JournalCaptureFlowProps> = ({
   const [plotEditor, setPlotEditor] = useState<{ mode: 'create' | 'update'; plot?: JournalPlot } | null>(null);
   const [preparingConfirm, setPreparingConfirm] = useState(false);
   const [batchAttemptPending, setBatchAttemptPending] = useState(false);
+  // Layout-transition review gate (Task 32): values a plot/layout switch would
+  // otherwise silently sanitize away (a hidden field, an invalid choice) sit
+  // here pending explicit user resolution instead. Never mutated directly.
+  const [pendingTransitionItems, setPendingTransitionItems] = useState<LayoutTransitionAffectedItem[]>([]);
+  const [keptTransitionValues, setKeptTransitionValues] = useState<CaptureEntryValueInput[]>([]);
+  const [transitionSheetOpen, setTransitionSheetOpen] = useState(false);
   const headingRef = useRef<HTMLHeadingElement>(null);
   const savePromiseRef = useRef<Promise<void> | null>(null);
   const savedCallbackFiredRef = useRef(false);
@@ -670,13 +685,25 @@ export const JournalCaptureFlow: React.FC<JournalCaptureFlowProps> = ({
         // The catalog model already failed closed; the form remains the visible validation seam.
       }
     }
+    if (model && keptTransitionValues.length > 0) {
+      try {
+        // Kept-under-the-old-setting values (Task 32) bypass the current layout's
+        // visibility/choice filtering by design — the user explicitly chose to
+        // preserve them rather than lose them silently.
+        combined.push(...buildEntryValues(model, keptTransitionValues));
+      } catch {
+        // A kept value that no longer resolves against the catalog is left out of
+        // the payload rather than corrupting it; it stays visible via the review
+        // state only, never silently reintroduced.
+      }
+    }
     combined.push(...formPayload);
     const valuesByKey = new Map<string, CaptureEntryValueOutput>();
     for (const value of combined) {
       valuesByKey.set(`${value.attribute_code}:${value.group_index ?? 0}`, value);
     }
     return [...valuesByKey.values()];
-  }, [cropValue, formOwnsCrop, formPayload, leaf, model]);
+  }, [cropValue, formOwnsCrop, formPayload, keptTransitionValues, leaf, model]);
   const validateTransition = useCallback((
     nextLayout: JournalLayoutDefinition | undefined,
     nextTemplate: JournalTemplateDefinition | undefined,
@@ -948,6 +975,70 @@ export const JournalCaptureFlow: React.FC<JournalCaptureFlowProps> = ({
     return () => { cancelled = true; };
   }, [draft.entryUuid, leaf, layout, model, resolved, selectedPlot]);
 
+  // Task 32: replaces the unconditional sanitizeValues() call at a plot/layout
+  // transition with an explicit review gate. Values sanitizeValues would hide or
+  // reject (a field the new growing setting no longer shows, a choice it no
+  // longer allows) are pulled out of `retainedValues` and preserved raw rather
+  // than dropped; everything else still goes through the existing sanitize path
+  // unchanged. Previously kept values are re-diffed too, so a value kept through
+  // one transition that becomes affected again by a later one comes back for
+  // review instead of riding along forever.
+  const applyLayoutTransitionGate = (
+    oldLayoutForDiff: JournalLayoutDefinition | undefined,
+    oldLeafForDiff: ActivityLeafSelection | null,
+    nextLayout: JournalLayoutDefinition | undefined,
+    nextTemplateDef: JournalTemplateDefinition | undefined,
+    nextCrop: string,
+    retainedValues: CaptureEntryValueInput[],
+  ): CaptureEntryValueInput[] => {
+    if (!model) {
+      setPendingTransitionItems([]);
+      setTransitionSheetOpen(false);
+      return retainedValues;
+    }
+    // Diffing uses the activity/context the values were entered under (the leaf
+    // about to be reset for re-picking), not the empty post-reset selections —
+    // otherwise an activity-anchored option_dependency (e.g. "this choice is
+    // only valid for irrigation") can never fire during the transition itself.
+    const diffSelections = captureSelections(model, oldLeafForDiff, nextCrop);
+    const diffItems = computeLayoutTransitionDiff({
+      model,
+      oldLayout: oldLayoutForDiff,
+      newLayout: nextLayout,
+      template: nextTemplateDef,
+      selections: diffSelections,
+      currentValues: [...retainedValues, ...keptTransitionValues],
+    });
+    const diffKeys = new Set(diffItems.map((item) =>
+      layoutTransitionItemKey(item.attribute_code, item.group_index)));
+    const survivingKept = keptTransitionValues.filter((value) =>
+      !diffKeys.has(layoutTransitionItemKey(value.attribute_code, value.group_index ?? 0)));
+    const nonDiffValues = retainedValues.filter((value) =>
+      !diffKeys.has(layoutTransitionItemKey(value.attribute_code, value.group_index ?? 0)));
+    const diffValues = retainedValues.filter((value) =>
+      diffKeys.has(layoutTransitionItemKey(value.attribute_code, value.group_index ?? 0)));
+    const sanitizedNonDiff = sanitizeValues(model, nextLayout, nextTemplateDef, null, nextCrop, nonDiffValues);
+    setKeptTransitionValues(survivingKept);
+    setPendingTransitionItems(diffItems);
+    setTransitionSheetOpen(diffItems.length > 0);
+    return [...sanitizedNonDiff, ...diffValues];
+  };
+
+  const resolveTransitionItem = (
+    item: LayoutTransitionAffectedItem,
+    resolution: LayoutTransitionResolutionKind,
+  ) => {
+    const key = layoutTransitionItemKey(item.attribute_code, item.group_index);
+    setPendingTransitionItems((current) => current.filter((candidate) =>
+      layoutTransitionItemKey(candidate.attribute_code, candidate.group_index) !== key));
+    if (resolution === 'kept') {
+      setKeptTransitionValues((current) => [...current, item.value]);
+    }
+    const nextValues = values.filter((value) =>
+      layoutTransitionItemKey(value.attribute_code, value.group_index ?? 0) !== key);
+    if (nextValues.length !== values.length) commitValues(nextValues);
+  };
+
   const selectPlot = (uuid: string, selectionOverride?: readonly string[]) => {
     if (interactionLocked) return;
     const requestedSelection = [...new Set(selectionOverride ?? (uuid ? [uuid] : []))];
@@ -1000,21 +1091,15 @@ export const JournalCaptureFlow: React.FC<JournalCaptureFlowProps> = ({
     setOccurrenceError(null);
     setEndOccurrenceError(null);
     setLeaf(null);
+    const nextTemplateDef = model?.templates.get(nextTemplate);
     const nextValues = withCanonicalContextCrop(
       model,
       nextCrop,
-      sanitizeValues(
-        model!,
-        nextLayout,
-        model?.templates.get(nextTemplate),
-        null,
-        nextCrop,
-        retainedValues,
-      ),
+      applyLayoutTransitionGate(layout, leaf, nextLayout, nextTemplateDef, nextCrop, retainedValues),
     );
     const validation = validateTransition(
       nextLayout,
-      model?.templates.get(nextTemplate),
+      nextTemplateDef,
       null,
       nextCrop,
       nextValues,
@@ -1067,10 +1152,12 @@ export const JournalCaptureFlow: React.FC<JournalCaptureFlowProps> = ({
       : nextLayout?.supported_templates[0] ?? '';
     setTemplateCode(nextTemplate);
     const previousDependencyCodes = new Set(leaf?.dependent_selections.map(({ attribute_code }) => attribute_code));
-    const nextValues = sanitizeValues(model!, nextLayout, model?.templates.get(nextTemplate), null, crop, contextValues, previousDependencyCodes);
+    const retainedValues = contextValues.filter((value) => !previousDependencyCodes.has(value.attribute_code));
+    const nextTemplateDef = model?.templates.get(nextTemplate);
+    const nextValues = applyLayoutTransitionGate(layout, leaf, nextLayout, nextTemplateDef, crop, retainedValues);
     const validation = validateTransition(
       nextLayout,
-      model?.templates.get(nextTemplate),
+      nextTemplateDef,
       null,
       crop,
       nextValues,
@@ -1145,6 +1232,10 @@ export const JournalCaptureFlow: React.FC<JournalCaptureFlowProps> = ({
 
   const next = async () => {
     if (interactionLocked) return;
+    if (pendingTransitionItems.length > 0) {
+      setTransitionSheetOpen(true);
+      return;
+    }
     if (step === 'where') {
       if (!selectedPlot && !layoutCode) {
         setWhereError('capture.validation.invalidDefinition');
@@ -1207,6 +1298,10 @@ export const JournalCaptureFlow: React.FC<JournalCaptureFlowProps> = ({
   const finalizeBatch = useCallback(async (ackOverride: readonly string[] = duplicateAckEntryUuids) => {
     if (finalReceipt || !isMultiPlot) return finalReceipt ?? undefined;
     if (savePromiseRef.current) return savePromiseRef.current;
+    if (pendingTransitionItems.length > 0) {
+      setTransitionSheetOpen(true);
+      return undefined;
+    }
     if (duplicateCandidates.length > 0 && ackOverride.length === 0) return undefined;
 
     const payload = batchPayloadSnapshotRef.current
@@ -1273,6 +1368,7 @@ export const JournalCaptureFlow: React.FC<JournalCaptureFlowProps> = ({
     finalReceipt,
     isMultiPlot,
     leaf?.activity_code,
+    pendingTransitionItems.length,
     plotGroups,
     selectedPlotUuids,
   ]);
@@ -1283,6 +1379,10 @@ export const JournalCaptureFlow: React.FC<JournalCaptureFlowProps> = ({
       return finalizeBatch(ackOverride ? [ackOverride] : duplicateAckEntryUuids);
     }
     if (savePromiseRef.current) return savePromiseRef.current;
+    if (pendingTransitionItems.length > 0) {
+      setTransitionSheetOpen(true);
+      return;
+    }
     const acknowledgedDuplicateUuid = duplicateCandidate &&
       (duplicateAck === duplicateCandidate.entry_uuid || ackOverride === duplicateCandidate.entry_uuid)
       ? duplicateCandidate.entry_uuid
@@ -1328,7 +1428,7 @@ export const JournalCaptureFlow: React.FC<JournalCaptureFlowProps> = ({
     })();
     savePromiseRef.current = promise.then(() => undefined, () => undefined);
     return promise;
-  }, [buildPayload, duplicateAck, duplicateAckEntryUuids, duplicateCandidate, draft, finalizeBatch, isMultiPlot, payloadValues]);
+  }, [buildPayload, duplicateAck, duplicateAckEntryUuids, duplicateCandidate, draft, finalizeBatch, isMultiPlot, pendingTransitionItems.length, payloadValues]);
 
   const retry = useCallback(async () => {
     if (savePromiseRef.current) return savePromiseRef.current;
@@ -1714,7 +1814,7 @@ export const JournalCaptureFlow: React.FC<JournalCaptureFlowProps> = ({
         {duplicateCandidates.length > 0 && <section role="alert" className="mb-4 space-y-3 rounded-xl border border-[var(--primary)] bg-[var(--secondary-bg)] p-4"><h2 className="font-bold text-[var(--text)]">{t('batch.duplicateTitle', { defaultValue: 'Duplicate entries found' })}</h2><p className="text-sm text-[var(--text-secondary)]">{t('batch.duplicateBody', { defaultValue: 'Review every duplicate candidate before saving this batch.' })}</p><ul className="space-y-3 text-sm text-[var(--text)]">{duplicateCandidateGroups.map((group) => <li key={group.key}><h3 className="font-bold">{group.label}</h3><ul className="ml-4 list-disc space-y-1">{group.candidates.map((candidate) => <li key={candidate.entry_uuid}><span>{occurrenceLabel(candidate.occurred_start, timezone, locale)} · {duplicateActivity(candidate)}</span>{' '}<span className="text-xs text-[var(--text-secondary)]">{candidate.entry_uuid}</span></li>)}</ul></li>)}</ul><button type="button" disabled={saving || Boolean(finalReceipt)} className={`min-h-11 rounded-xl bg-[var(--primary)] px-4 font-bold text-white ${FOCUS_RING}`} onClick={acknowledgeBatchDuplicates}>{t('batch.duplicateAcknowledge', { defaultValue: 'Acknowledge all and retry' })}</button></section>}
         {duplicateCandidate && <section role="alert" className="mb-4 space-y-3 rounded-xl border border-[var(--primary)] bg-[var(--secondary-bg)] p-4"><h2 className="font-bold text-[var(--text)]">{t('capture.confirm.duplicateTitle')}</h2><p className="text-sm text-[var(--text-secondary)]">{occurrenceLabel(duplicateCandidate.occurred_start, timezone, locale)} · {duplicateActivityLabel}</p>{duplicateCandidate.values.length > 0 && <ul className="space-y-1 text-sm text-[var(--text)]">{duplicateCandidate.values.map((value, index) => { const label = duplicateValueLabel(value, model, locale); return label ? <li key={`${value.attribute_code}:${value.group_index ?? index}`}>{label}</li> : null; })}</ul>}<div className="flex flex-wrap gap-2"><button type="button" disabled={saving || Boolean(finalReceipt)} className={`min-h-11 rounded-xl border border-[var(--primary)] px-4 font-bold text-[var(--primary)] ${FOCUS_RING}`} onClick={() => { if (!saving && !finalReceipt) onOpenExisting(duplicateCandidate.entry_uuid); }}>{t('capture.confirm.openExisting')}</button><button type="button" className={`min-h-11 rounded-xl bg-[var(--primary)] px-4 font-bold text-white ${FOCUS_RING}`} onClick={saveSeparately} disabled={saving || Boolean(finalReceipt)}>{t('capture.confirm.saveSeparately')}</button></div>{duplicateWarningShown && <p role="status" className="text-sm font-semibold text-[var(--text-secondary)]">{t('capture.confirm.duplicateBody')}</p>}</section>}
         {isMultiPlot && <p className="rounded-xl bg-[var(--secondary-bg)] px-3 py-2 text-sm font-semibold text-[var(--text-secondary)]">{t('batch.confirmCount', { count: selectedPlotUuids.length, defaultValue: `${selectedPlotUuids.length} plots` })}</p>}
-        <ConfirmStrip activity={{ label: t('capture.confirm.activity'), value: leaf ? catalogLabel(catalog.vocab.find((row) => row.code === leaf.activity_code) ?? { code: leaf?.activity_code ?? '' }, locale) : '', step: 'activity' }} plot={{ label: t('capture.confirm.plot'), value: selectedPlotLabel, step: 'where' }} layout={{ label: t('capture.confirm.layout'), value: `${catalogLabel(catalog.layouts.find((row) => row.code === layout?.code) ?? { code: layout?.code ?? '' }, locale)} · v${layout?.version}`, step: 'where' }} occurrence={{ label: t('capture.confirm.occurrence'), value: resolved ? occurrenceLabel(resolved.instant, timezone, locale) : occurredLocal, timezone, endTimezone: occurredEndLocal ? timezone : null, step: 'details' }} values={confirmValues} onEdit={edit} onFinalize={() => { void finalize().catch(() => undefined); }} validationInFlight={showValidation && !formValid} duplicateInFlight={duplicateInFlight} saveInFlight={saving} editDisabled={interactionLocked} readOnly={Boolean(finalReceipt)} finalizeDisabled={Boolean(duplicateCandidate && duplicateAck !== duplicateCandidate.entry_uuid) || duplicateCandidates.length > 0} />
+        <ConfirmStrip activity={{ label: t('capture.confirm.activity'), value: leaf ? catalogLabel(catalog.vocab.find((row) => row.code === leaf.activity_code) ?? { code: leaf?.activity_code ?? '' }, locale) : '', step: 'activity' }} plot={{ label: t('capture.confirm.plot'), value: selectedPlotLabel, step: 'where' }} layout={{ label: t('capture.confirm.layout'), value: `${catalogLabel(catalog.layouts.find((row) => row.code === layout?.code) ?? { code: layout?.code ?? '' }, locale)} · v${layout?.version}`, step: 'where' }} occurrence={{ label: t('capture.confirm.occurrence'), value: resolved ? occurrenceLabel(resolved.instant, timezone, locale) : occurredLocal, timezone, endTimezone: occurredEndLocal ? timezone : null, step: 'details' }} values={confirmValues} onEdit={edit} onFinalize={() => { void finalize().catch(() => undefined); }} validationInFlight={showValidation && !formValid} duplicateInFlight={duplicateInFlight} saveInFlight={saving} editDisabled={interactionLocked} readOnly={Boolean(finalReceipt)} finalizeDisabled={Boolean(duplicateCandidate && duplicateAck !== duplicateCandidate.entry_uuid) || duplicateCandidates.length > 0 || pendingTransitionItems.length > 0} />
       </>
     );
   };
@@ -1723,6 +1823,20 @@ export const JournalCaptureFlow: React.FC<JournalCaptureFlowProps> = ({
     <div className="min-h-full bg-[var(--bg)] px-4 py-5">
       <header className="mx-auto flex max-w-3xl items-center justify-between gap-3"><h1 ref={headingRef} tabIndex={-1} className="text-2xl font-bold text-[var(--text)]">{t('capture.title')}</h1><button type="button" disabled={closeLocked} onClick={() => { void close().catch(() => undefined); }} className={`min-h-11 rounded-xl px-3 font-bold text-[var(--primary)] ${FOCUS_RING}`}>{t('capture.close')}</button></header>
       <div className="mx-auto mt-5 max-w-3xl space-y-5">
+        {pendingTransitionItems.length > 0 && !transitionSheetOpen && (
+          <section role="alert" className="space-y-2 rounded-xl border border-[var(--primary)] bg-[var(--secondary-bg)] p-3">
+            <p className="text-sm font-semibold text-[var(--text)]">
+              {t('capture.transition.pendingBanner', { defaultValue: 'Some values need your decision before you can continue.' })}
+            </p>
+            <button
+              type="button"
+              onClick={() => setTransitionSheetOpen(true)}
+              className={`min-h-11 rounded-xl bg-[var(--primary)] px-4 font-bold text-white ${FOCUS_RING}`}
+            >
+              {t('capture.transition.reviewAction', { defaultValue: 'Review changed values' })}
+            </button>
+          </section>
+        )}
         {body()}
         {receiptHarvestGroups.length > 0 && (
           <HarvestGroupNudge
@@ -1734,6 +1848,15 @@ export const JournalCaptureFlow: React.FC<JournalCaptureFlowProps> = ({
         <div className="flex flex-wrap justify-between gap-3">{step !== 'where' && <button type="button" disabled={interactionLocked} onClick={() => { if (interactionLocked) return; preparationTokenRef.current += 1; setStep(step === 'confirm' ? 'details' : step === 'details' ? 'activity' : 'where'); }} className={`min-h-11 rounded-xl px-4 font-bold text-[var(--primary)] ${FOCUS_RING}`}>{t('capture.back')}</button>}<span />{step !== 'confirm' && <button type="button" onClick={next} disabled={(step === 'activity' && !leaf) || (step === 'details' && preparingConfirm) || interactionLocked} style={{ minHeight: '56px' }} className={`min-h-11 rounded-xl bg-[var(--primary)] px-5 font-bold text-white disabled:cursor-not-allowed disabled:opacity-50 ${FOCUS_RING}`}>{t('capture.next')}</button>}</div>
         {!duplicateCandidate && duplicateCandidates.length === 0 && (step === 'confirm' || draft.lossWarning || stickyLossWarning) && <SaveState status={finalReceipt ? 'final-saved-gateway' : draft.status} lossWarning={draft.lossWarning || stickyLossWarning} onRetry={async () => { await retry(); }} />}
       </div>
+      {transitionSheetOpen && pendingTransitionItems.length > 0 && (
+        <LayoutTransitionReviewSheet
+          items={pendingTransitionItems}
+          model={model}
+          locale={locale}
+          onResolve={resolveTransitionItem}
+          onRequestClose={() => setTransitionSheetOpen(false)}
+        />
+      )}
     </div>
   );
 };
