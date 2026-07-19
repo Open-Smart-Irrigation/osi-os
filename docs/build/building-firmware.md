@@ -72,6 +72,23 @@ scripts/check-mqtt-topics.sh
 
 Do not build release images if any verifier fails.
 
+Before `make`, write the profile-specific factory provenance record, then run
+the non-writing checks. The record binds the image build ID to the ROM
+initializer, seed, guard topology, and factory protocol helpers.
+
+```bash
+IMAGE_BUILD_ID="$(date -u +%Y%m%d-%H%M%S)-${GIT_COMMIT:-$(git rev-parse --short HEAD)}"
+node scripts/generate-factory-image-provenance.js --write \
+  --profile bcm2712 --image-build-id "$IMAGE_BUILD_ID"
+node scripts/generate-factory-image-provenance.js --check
+node scripts/verify-factory-image-provenance.js
+sh scripts/test-image-guard-bootstrap.sh
+```
+
+Repeat the `--write` command with `--profile bcm2709` when building the second
+target. Never build or publish an image before both profile records pass the
+same checks.
+
 If the GUI changed:
 
 ```bash
@@ -183,6 +200,19 @@ sqlite3 "$ROOT/usr/share/db/farming.db" 'SELECT COUNT(*) FROM chameleon_calibrat
 
 An image is not release-ready until checksum verification and rootfs inspection
 both pass.
+
+Run the built-rootfs verifier against each extracted OpenWrt root. It checks the
+manifest and provenance bytes in their lower-layer paths, resident verifier
+copies, and all bound boot files. A nested `<rootfs>/rom` is rejected.
+
+```bash
+node scripts/verify-built-factory-image-provenance.js \
+  --rootfs /home/phil/Repos/osi-os/openwrt/build_dir/target-aarch64_cortex-a76_musl/root-bcm27xx \
+  --profile bcm2712
+node scripts/verify-built-factory-image-provenance.js \
+  --rootfs /home/phil/Repos/osi-os/openwrt/build_dir/target-arm_cortex-a7+neon-vfpv4_musl_eabi/root-bcm27xx \
+  --profile bcm2709
+```
 
 ## Troubleshooting
 
