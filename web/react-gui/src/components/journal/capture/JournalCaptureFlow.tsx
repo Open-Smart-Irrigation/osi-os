@@ -75,6 +75,7 @@ import { HarvestGroupNudge } from '../where/HarvestGroupNudge';
 import { PlotPicker } from '../where/PlotPicker';
 import { RepeatTreatmentCard } from './RepeatTreatmentCard';
 import { SaveState } from './SaveState';
+import { randomUuid } from '../../../utils/uuid';
 
 export interface JournalCaptureFlowProps {
   catalog: JournalCatalog;
@@ -841,7 +842,7 @@ export const JournalCaptureFlow: React.FC<JournalCaptureFlowProps> = ({
   const buildBatchInput = useCallback((acknowledgements: readonly string[] = []) => ({
     members: selectedPlotUuids.map((plotUuid) => {
       const existingEntryUuid = batchEntryUuidsRef.current.get(plotUuid);
-      const entryUuid = existingEntryUuid ?? crypto.randomUUID();
+      const entryUuid = existingEntryUuid ?? randomUuid();
       batchEntryUuidsRef.current.set(plotUuid, entryUuid);
       return { plot_uuid: plotUuid, entry_uuid: entryUuid };
     }),

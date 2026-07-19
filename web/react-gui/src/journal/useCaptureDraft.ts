@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { journalApi } from '../services/journalApi';
+import { randomUuid } from '../utils/uuid';
 import type {
   CreateEntryPayload,
   UpdateEntryPayload,
@@ -98,7 +99,7 @@ export function useCaptureDraft(options: UseCaptureDraftOptions = {}): UseCaptur
 
   useEffect(() => {
     if (!canEdit || uuidRef.current) return;
-    const uuid = crypto.randomUUID();
+    const uuid = randomUuid();
     uuidRef.current = uuid;
     setEntryUuid(uuid);
   }, [canEdit]);
