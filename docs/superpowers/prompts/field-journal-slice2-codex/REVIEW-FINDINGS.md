@@ -736,3 +736,52 @@ markers are correct; only the combined-error headline/focus disagree. Not a corr
 **Still not reviewed:** Task 25 browser acceptance is worth confirming against a real 72-plot
 station (not a small fixture) — the grid wraps correctly in code, but the ≤5/≤9-tap and
 no-horizontal-scroll evidence at 320px should exercise the full station size.
+
+---
+
+# P6 + Task 26 external review — ACCEPTED (2026-07-19)
+
+Reviewed `3690d6e1` (P6 batch idempotency) and `918d5d03` (Task 26: P1, P2, P3, F8). All five
+findings closed correctly, each with a non-vacuous test. Gates re-run independently: full GUI
+1197/1197 Vitest across 133 files, edge journal API 55/55, edge lifecycle/index suite 106/106,
+TypeScript, production build. Worktree clean.
+
+**P6 — FIXED, proven at the DB level.** Batch finalize now requires a client `entry_uuid` per
+member (canonical UUID, unique within the batch), and `finalizeBatch` uses it instead of
+`crypto.randomUUID()`. The edge test `saveEntry batch retry returns original receipts without
+entry or outbox writes` counts `journal_entries` and `sync_outbox` before and after a repeated
+identical batch and asserts **both counts unchanged** — a true no-op, not just an equal
+receipt. Two more edge tests guard the flanks: a retry whose content differs for the same UUID
+is rejected `idempotency_conflict` (409) with no writes, and an exact retry stays a no-op even
+after a member plot is deactivated. The event_uuid is now stable, so outbox events are
+idempotent too. Fresh-batch duplicate guard is unchanged — a genuinely new batch to the same
+plots still prompts. This matches the P6 resolution and is stronger than I specified (the
+content-mismatch guard I did not ask for is good defensive design).
+
+**P1 — FIXED and catalog-derived.** The 12 phantom codes are gone and `attr.denominator` (the
+real shipped dose-basis code) is added. `carryForward.test.ts` now imports the compiled catalog
+and asserts the `denominator` code found in `open_field.minimum_fields` is in the protected
+set, so the set can no longer drift from the catalog — exactly the hardening recommended.
+
+**P2 — FIXED.** The mount-scoped invalidation effect (with no cleanup) is replaced by parent-
+side invalidation keyed on `sameCarryForwardContext`: a plot/season/layout/crop/time change
+clears the accepted candidate and `automaticPrefillRef`. Two tests cover the plot-switch and
+layout-change paths, asserting the product and rate controls are empty after the switch —
+non-vacuous (they would fail if the values survived). My own probe confirms it from the other
+side: after confirming a repeat and switching plots, the flow cannot reach Finish because the
+protected required fields are correctly empty. The AGR-7 hole I raised (mechanism-only,
+unreproduced) is genuinely closed.
+
+**P3 — FIXED.** The repeat card now derives `groupedTreatments` across every `group_index`
+(not just the first row per code) and gates confirmation on `everyGroupComplete`, so a tank-mix
+with multiple products is fully disclosed before confirm.
+
+**F8 — FIXED.** `slaFixture.ts` derives the SLA test's template/layout definitions from
+`compileCatalog(coreCatalog, agroscopeSource)` — the real generator — so the pinned 9-tap
+fixture can no longer silently diverge from the shipped catalog.
+
+**Verdict: P6 and Task 26 accepted.** With this, every Important finding from the Phase 3/4
+review (P1, P2, P3, P4, P6, F8) is either closed or, for P4, a confirmed catalog change owned
+by the run. Remaining open: NutrientRepeater math (deferred with migration 0022, fixture-only
+under N1); P5 (minor, cloud-waiting state); the F1/N1/N2 catalog-data deferrals; and P4's
+farmer_quick carry-forward field addition.
