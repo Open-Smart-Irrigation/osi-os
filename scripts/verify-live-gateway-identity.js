@@ -985,10 +985,10 @@ try {
   fail(`Task 4 ratchet JSON is invalid: ${error.message}`);
 }
 if (silentCatchBaseline) {
-  expectCondition(silentCatchBaseline.profiles?.bcm2712?.silentCatchCount === 215 && silentCatchBaseline.profiles?.bcm2709?.silentCatchCount === 215,
-    'silent-catch baseline records 215 for both maintained profiles',
-    'silent-catch baseline must be 215 for both maintained profiles after three sys-stats fan catches are removed');
-  expectIncludes('silent-catch baseline', String(silentCatchBaseline.generatedFrom || ''), 'removed three silent fan-detection catches from sys-stats-fn', 'records the Task 5 catch cleanup');
+  expectCondition(silentCatchBaseline.profiles?.bcm2712?.silentCatchCount === 213 && silentCatchBaseline.profiles?.bcm2709?.silentCatchCount === 213,
+    'silent-catch baseline records 213 for both maintained profiles',
+    'silent-catch baseline must be 213 for both maintained profiles after registration compensation stops swallowing failures');
+  expectIncludes('silent-catch baseline', String(silentCatchBaseline.generatedFrom || ''), 'registration compensation now reports failures instead of swallowing them', 'records the PR #149 compensation cleanup');
 }
 // Ownership split (refactor-program A0 repair commit 3): the numeric ceilings
 // (max_chars / max_total) in scripts/verify-flows-size-ratchet-allowances.json are now
