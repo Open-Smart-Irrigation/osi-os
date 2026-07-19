@@ -39,7 +39,7 @@ def ctx():
         gateway_host="100.93.68.86", ssh_user="root",
         ssh_key="~/.ssh/id_ed25519", db_path="/data/db/farming.db",
         gui_url="http://100.93.68.86:1880/gui",
-        deploy_timestamp="2026-07-10T18:00:00Z",
+        verification_started_at="2026-07-10T18:00:00Z",
         pre_deploy_baselines={"device_data_rows": "1000"},
     )
 
@@ -295,6 +295,68 @@ def test_sync_missing_table_fails(mock_ssh, _sleep, ctx):
 
 
 # --- ingest -----------------------------------------------------------------
+#
+# check_ingest correlates ChirpStack `device(dev_eui, last_seen_at)` (network-
+# server truth) with edge `device_data.recorded_at` (did it persist?) for the
+# registered DRAGINO_LSN50 fleet. The mock branches on `db_path` and
+# recognizable SQL text, never on a fragile call count, so tests exercise the
+# real polling/quiet-interval control flow.
+
+CHIRPSTACK_DB = "/srv/chirpstack/chirpstack.sqlite"
+A8 = "A8404101FD5ECF41"
+B1 = "B1234567890ABCDE"
+
+
+def _ingest_responder(registered=f"{A8}\n",
+                       chirpstack_polls=(f"{A8}|2026-07-15T09:00:00Z\n",),
+                       edge_polls=None,
+                       quarantine_count="0",
+                       devices_err=None,
+                       chirpstack_err=None):
+    """Branches on db_path (ChirpStack vs farming) and recognizable SQL.
+
+    chirpstack_polls: one raw stdout string per poll (last value repeats once
+    exhausted, so a single-element tuple models an unchanging fresh set).
+    edge_polls: {eui: [raw stdout per query to that eui]}; an eui absent from
+    this dict answers every MAX(recorded_at) query for it with "" (no row).
+    """
+    edge_polls = edge_polls or {}
+    state = {"chirpstack": 0, "edge": {}}
+
+    def responder(ctx_, sql, timeout=30, extra_args="", db_path=None):
+        if "FROM devices WHERE type_id" in sql:
+            if devices_err:
+                return None, devices_err
+            return registered, None
+        if db_path == CHIRPSTACK_DB:
+            if chirpstack_err:
+                return None, chirpstack_err
+            idx = min(state["chirpstack"], len(chirpstack_polls) - 1)
+            state["chirpstack"] += 1
+            return chirpstack_polls[idx], None
+        if "FROM device_data WHERE deveui" in sql:
+            for eui, polls in edge_polls.items():
+                if f"deveui = '{eui}'" in sql:
+                    i = state["edge"].get(eui, 0)
+                    idx = min(i, len(polls) - 1)
+                    state["edge"][eui] = i + 1
+                    return polls[idx], None
+            return "", None  # no post-boundary row for this EUI
+        if "ingest_quarantine" in sql:
+            return quarantine_count, None
+        raise AssertionError(f"unexpected SQL: {sql!r} db_path={db_path!r}")
+    return responder
+
+
+def _uci_responder(value="0\n", err=None):
+    def responder(ctx_, cmd, timeout=30):
+        if "lsn50_writer_disable" in cmd:
+            if err:
+                return None, err
+            return proc(value), None
+        raise AssertionError(f"unexpected remote command: {cmd}")
+    return responder
+
 
 @patch("pipeline.checks.ssh_cmd",
        return_value=proc(stderr="Error: in prepare, no such table: device_data",
@@ -303,6 +365,347 @@ def test_ingest_missing_table_fails(mock_ssh, ctx):
     r = check_ingest(ctx)
     assert not r.passed
     assert "no such table" in r.detail
+
+
+@patch("pipeline.checks.ssh_cmd")
+def test_ingest_database_stderr_with_exit_zero_fails(mock_ssh, ctx):
+    # Real remote_sql path (not mocked): exit 0 but stderr present must never
+    # be misread as a clean empty result.
+    mock_ssh.return_value = proc(
+        "", stderr="Error: near line 1: no such column: type_id", returncode=0)
+    result = check_ingest(ctx)
+    assert not result.passed
+    assert "sqlite reported errors despite exit 0" in result.detail
+
+
+@patch("pipeline.checks.remote_sql")
+def test_ingest_no_registered_devices_required_fails(mock_remote_sql, ctx):
+    ctx.require_ingest = True
+    mock_remote_sql.side_effect = _ingest_responder(registered="")
+    result = check_ingest(ctx)
+    assert not result.passed
+    assert "no DRAGINO_LSN50 devices registered" in result.detail
+
+
+@patch("pipeline.checks.remote_sql")
+def test_ingest_no_registered_devices_not_required_passes(mock_remote_sql, ctx):
+    mock_remote_sql.side_effect = _ingest_responder(registered="")
+    result = check_ingest(ctx)
+    assert result.passed
+
+
+@patch("pipeline.checks.remote_sql")
+def test_ingest_registered_deveui_malformed_fails(mock_remote_sql, ctx):
+    mock_remote_sql.side_effect = _ingest_responder(registered="A840410-BAD\n")
+    result = check_ingest(ctx)
+    assert not result.passed
+    assert "malformed DevEUI in devices table" in result.detail
+
+
+@patch("pipeline.checks.ingest.time.sleep")
+@patch("pipeline.checks.ingest.time.time")
+@patch("pipeline.checks.remote_sql")
+def test_ingest_fails_when_chirpstack_is_fresh_but_edge_has_no_row(
+    mock_remote_sql, mock_time, mock_sleep, ctx
+):
+    # ChirpStack has a fresh uplink for a registered DevEUI; edge has no
+    # post-boundary row for it at all.
+    ctx.ingest_wait_seconds = 0
+    ctx.require_ingest = True
+    mock_remote_sql.side_effect = _ingest_responder(edge_polls={})
+    mock_time.side_effect = [1000.0, 1000.0]
+    result = check_ingest(ctx)
+    assert not result.passed
+    assert "ChirpStack uplink" in result.detail
+
+
+@patch("pipeline.checks.ingest.time.sleep")
+@patch("pipeline.checks.ingest.time.time")
+@patch("pipeline.checks.remote")
+@patch("pipeline.checks.remote_sql")
+def test_ingest_passes_only_when_same_deveui_reaches_edge(
+    mock_remote_sql, mock_remote, mock_time, mock_sleep, ctx
+):
+    # ChirpStack returns A8404101FD5ECF41; edge max timestamp (+10s) is
+    # inside the symmetric skew bound.
+    mock_remote_sql.side_effect = _ingest_responder(
+        edge_polls={A8: ["2026-07-15 09:00:10\n"]})
+    mock_remote.side_effect = _uci_responder()
+    mock_time.side_effect = [1000.0, 1000.0, 1015.0]  # deadline calc, poll 1, poll 2
+    result = check_ingest(ctx)
+    assert result.passed
+    assert result.evidence["deveui"] == A8
+
+
+@patch("pipeline.checks.ingest.time.sleep")
+@patch("pipeline.checks.ingest.time.time")
+@patch("pipeline.checks.remote_sql")
+def test_required_ingest_fails_when_observation_window_expires(
+    mock_remote_sql, mock_time, mock_sleep, ctx
+):
+    # ChirpStack has zero fresh rows for the whole (zero-length) window.
+    ctx.ingest_wait_seconds = 0
+    ctx.require_ingest = True
+    mock_remote_sql.side_effect = _ingest_responder(chirpstack_polls=("",))
+    mock_time.side_effect = [1000.0, 1000.0]
+    result = check_ingest(ctx)
+    assert not result.passed
+    assert "no ChirpStack uplink" in result.detail
+
+
+@patch("pipeline.checks.ingest.time.sleep")
+@patch("pipeline.checks.ingest.time.time")
+@patch("pipeline.checks.remote")
+@patch("pipeline.checks.remote_sql")
+def test_ingest_fails_when_fallback_marker_exists(
+    mock_remote_sql, mock_remote, mock_time, mock_sleep, ctx
+):
+    # Would otherwise pass (matched + quiet elapsed), but a writer_fallback
+    # quarantine row landed since verification start.
+    mock_remote_sql.side_effect = _ingest_responder(
+        edge_polls={A8: ["2026-07-15 09:00:10\n"]}, quarantine_count="2")
+    mock_remote.side_effect = _uci_responder()
+    mock_time.side_effect = [1000.0, 1000.0, 1015.0]
+    result = check_ingest(ctx)
+    assert not result.passed
+    assert "writer_fallback" in result.detail
+
+
+@patch("pipeline.checks.ingest.time.sleep")
+@patch("pipeline.checks.ingest.time.time")
+@patch("pipeline.checks.remote")
+@patch("pipeline.checks.remote_sql")
+def test_ingest_runs_one_probe_when_wait_is_zero(
+    mock_remote_sql, mock_remote, mock_time, mock_sleep, ctx
+):
+    ctx.ingest_wait_seconds = 0
+    mock_remote_sql.side_effect = _ingest_responder(chirpstack_polls=("",))
+    mock_remote.side_effect = _uci_responder()
+    mock_time.side_effect = [1000.0, 1000.0]
+    check_ingest(ctx)
+    assert mock_remote_sql.call_count > 0
+
+
+@patch("pipeline.checks.ingest.time.sleep")
+@patch("pipeline.checks.ingest.time.time")
+@patch("pipeline.checks.remote_sql")
+def test_post_boundary_edge_row_older_than_selected_uplink_does_not_pass(
+    mock_remote_sql, mock_time, mock_sleep, ctx
+):
+    # Edge has a post-boundary row, but it predates the latest selected
+    # ChirpStack observation by more than the skew tolerance.
+    ctx.ingest_wait_seconds = 0
+    mock_remote_sql.side_effect = _ingest_responder(
+        edge_polls={A8: ["2026-07-15 08:59:00\n"]})  # -60s vs 09:00:00
+    mock_time.side_effect = [1000.0, 1000.0]
+    result = check_ingest(ctx)
+    assert not result.passed
+    assert "predates selected ChirpStack uplink" in result.detail
+
+
+@patch("pipeline.checks.ingest.time.sleep")
+@patch("pipeline.checks.ingest.time.time")
+@patch("pipeline.checks.remote_sql")
+def test_post_boundary_edge_row_too_far_after_selected_uplink_does_not_pass(
+    mock_remote_sql, mock_time, mock_sleep, ctx
+):
+    # A future-dated edge row cannot prove persistence of the selected uplink.
+    ctx.ingest_wait_seconds = 0
+    mock_remote_sql.side_effect = _ingest_responder(
+        edge_polls={A8: ["2026-07-15 09:01:00\n"]})  # +60s vs 09:00:00
+    mock_time.side_effect = [1000.0, 1000.0]
+    result = check_ingest(ctx)
+    assert not result.passed
+    assert "exceeds selected ChirpStack uplink" in result.detail
+
+
+@patch("pipeline.checks.ingest.time.sleep")
+@patch("pipeline.checks.ingest.time.time")
+@patch("pipeline.checks.remote")
+@patch("pipeline.checks.remote_sql")
+def test_ingest_inclusive_skew_boundaries_pass(
+    mock_remote_sql, mock_remote, mock_time, mock_sleep, ctx
+):
+    # Exactly +/- the configured skew must still match (closed interval).
+    mock_remote_sql.side_effect = _ingest_responder(
+        registered=f"{A8}\n{B1}\n",
+        chirpstack_polls=(f"{A8}|2026-07-15T09:00:00Z\n{B1}|2026-07-15T09:05:00Z\n",),
+        edge_polls={
+            A8: ["2026-07-15 08:59:30\n"],  # delta exactly -30s
+            B1: ["2026-07-15 09:05:30\n"],  # delta exactly +30s
+        },
+    )
+    mock_remote.side_effect = _uci_responder()
+    mock_time.side_effect = [1000.0, 1000.0, 1015.0]
+    result = check_ingest(ctx)
+    assert result.passed
+    assert result.evidence["matched"] == [A8, B1]
+
+
+@patch("pipeline.checks.ingest.time.sleep")
+@patch("pipeline.checks.ingest.time.time")
+@patch("pipeline.checks.remote_sql")
+def test_ingest_malformed_chirpstack_row_fails(mock_remote_sql, mock_time, mock_sleep, ctx):
+    ctx.ingest_wait_seconds = 0
+    mock_remote_sql.side_effect = _ingest_responder(
+        chirpstack_polls=(f"{A8}-2026-07-15T09:00:00Z\n",))  # missing '|' separator
+    mock_time.side_effect = [1000.0, 1000.0]
+    result = check_ingest(ctx)
+    assert not result.passed
+    assert "malformed ChirpStack row" in result.detail
+
+
+@patch("pipeline.checks.ingest.time.sleep")
+@patch("pipeline.checks.ingest.time.time")
+@patch("pipeline.checks.remote_sql")
+def test_ingest_duplicate_chirpstack_rows_fails(mock_remote_sql, mock_time, mock_sleep, ctx):
+    ctx.ingest_wait_seconds = 0
+    mock_remote_sql.side_effect = _ingest_responder(
+        chirpstack_polls=(f"{A8}|2026-07-15T09:00:00Z\n{A8}|2026-07-15T09:00:05Z\n",))
+    mock_time.side_effect = [1000.0, 1000.0]
+    result = check_ingest(ctx)
+    assert not result.passed
+    assert "duplicate" in result.detail.lower()
+
+
+@patch("pipeline.checks.ingest.time.sleep")
+@patch("pipeline.checks.ingest.time.time")
+@patch("pipeline.checks.remote_sql")
+def test_ingest_unregistered_deveui_in_chirpstack_fails(mock_remote_sql, mock_time, mock_sleep, ctx):
+    ctx.ingest_wait_seconds = 0
+    mock_remote_sql.side_effect = _ingest_responder(
+        registered=f"{A8}\n",
+        chirpstack_polls=("FFFFFFFFFFFFFFFF|2026-07-15T09:00:00Z\n",))
+    mock_time.side_effect = [1000.0, 1000.0]
+    result = check_ingest(ctx)
+    assert not result.passed
+    assert "not a registered" in result.detail
+
+
+@patch("pipeline.checks.ingest.time.sleep")
+@patch("pipeline.checks.ingest.time.time")
+@patch("pipeline.checks.remote_sql")
+def test_ingest_two_devices_second_fresh_eui_missing_from_edge_fails(
+    mock_remote_sql, mock_time, mock_sleep, ctx
+):
+    # The newest DevEUI is healthy, but a second fresh EUI never reached
+    # device_data — it must not be hidden behind the first EUI's success.
+    ctx.ingest_wait_seconds = 0
+    mock_remote_sql.side_effect = _ingest_responder(
+        registered=f"{A8}\n{B1}\n",
+        chirpstack_polls=(f"{A8}|2026-07-15T09:00:00Z\n{B1}|2026-07-15T09:05:00Z\n",),
+        edge_polls={A8: ["2026-07-15 09:00:05\n"]},  # B1 has no edge row
+    )
+    mock_time.side_effect = [1000.0, 1000.0]
+    result = check_ingest(ctx)
+    assert not result.passed
+    assert B1 in result.detail
+
+
+@patch("pipeline.checks.ingest.time.sleep")
+@patch("pipeline.checks.ingest.time.time")
+@patch("pipeline.checks.remote")
+@patch("pipeline.checks.remote_sql")
+def test_ingest_two_healthy_devices_passes(
+    mock_remote_sql, mock_remote, mock_time, mock_sleep, ctx
+):
+    mock_remote_sql.side_effect = _ingest_responder(
+        registered=f"{A8}\n{B1}\n",
+        chirpstack_polls=(f"{A8}|2026-07-15T09:00:00Z\n{B1}|2026-07-15T09:05:00Z\n",),
+        edge_polls={
+            A8: ["2026-07-15 09:00:05\n"],
+            B1: ["2026-07-15 09:05:05\n"],
+        },
+    )
+    mock_remote.side_effect = _uci_responder()
+    mock_time.side_effect = [1000.0, 1000.0, 1015.0]
+    result = check_ingest(ctx)
+    assert result.passed
+    assert result.evidence["matched"] == [A8, B1]
+
+
+@patch("pipeline.checks.ingest.time.sleep")
+@patch("pipeline.checks.ingest.time.time")
+@patch("pipeline.checks.remote")
+@patch("pipeline.checks.remote_sql")
+def test_ingest_late_second_uplink_resets_quiet_interval_passes(
+    mock_remote_sql, mock_remote, mock_time, mock_sleep, ctx
+):
+    # Poll 1 sees only A8 fresh; poll 2 sees B1 newly fresh too (a late
+    # second uplink) — this must reset the quiet timer rather than let it
+    # ride out on A8's already-elapsed window. Only poll 3, after the set is
+    # unchanged for a full quiet interval, may pass.
+    mock_remote_sql.side_effect = _ingest_responder(
+        registered=f"{A8}\n{B1}\n",
+        chirpstack_polls=(
+            f"{A8}|2026-07-15T09:00:00Z\n",
+            f"{A8}|2026-07-15T09:00:00Z\n{B1}|2026-07-15T09:05:00Z\n",
+        ),
+        edge_polls={
+            A8: ["2026-07-15 09:00:05\n"],
+            B1: ["2026-07-15 09:05:05\n"],
+        },
+    )
+    mock_remote.side_effect = _uci_responder()
+    mock_time.side_effect = [900.0, 1000.0, 1011.0, 1026.0]
+    result = check_ingest(ctx)
+    assert result.passed
+    # 1 (registered) + poll1(chirpstack+edge(A8)=2) + poll2(chirpstack+edge(A8)+edge(B1)=3)
+    # + poll3(chirpstack+edge(A8)+edge(B1)=3) + 1 (quarantine) = 10. A no-reset
+    # implementation would have passed already at poll 2 (call_count == 7).
+    assert mock_remote_sql.call_count == 10
+
+
+@patch("pipeline.checks.ingest.time.sleep")
+@patch("pipeline.checks.ingest.time.time")
+@patch("pipeline.checks.remote")
+@patch("pipeline.checks.remote_sql")
+def test_ingest_empty_fresh_set_demo_gateway_passes_with_warning(
+    mock_remote_sql, mock_remote, mock_time, mock_sleep, ctx
+):
+    ctx.ingest_wait_seconds = 0
+    ctx.require_ingest = False
+    mock_remote_sql.side_effect = _ingest_responder(chirpstack_polls=("",))
+    mock_remote.side_effect = _uci_responder()
+    mock_time.side_effect = [1000.0, 1000.0]
+    result = check_ingest(ctx)
+    assert result.passed
+    assert "not required" in result.detail
+
+
+@patch("pipeline.checks.ingest.time.sleep")
+@patch("pipeline.checks.ingest.time.time")
+@patch("pipeline.checks.remote")
+@patch("pipeline.checks.remote_sql")
+def test_ingest_kill_switch_command_failure_is_hard_fail(
+    mock_remote_sql, mock_remote, mock_time, mock_sleep, ctx
+):
+    mock_remote_sql.side_effect = _ingest_responder(
+        edge_polls={A8: ["2026-07-15 09:00:10\n"]})
+    mock_remote.side_effect = _uci_responder(
+        err="remote command failed (exit 255): ssh: connect to host: Connection refused")
+    mock_time.side_effect = [1000.0, 1000.0, 1015.0]
+    result = check_ingest(ctx)
+    assert not result.passed
+    assert "lsn50_writer_disable" in result.detail
+    # A command failure must never be read as an empty (off) setting.
+    assert "Connection refused" in result.detail
+
+
+@patch("pipeline.checks.ingest.time.sleep")
+@patch("pipeline.checks.ingest.time.time")
+@patch("pipeline.checks.remote")
+@patch("pipeline.checks.remote_sql")
+def test_ingest_kill_switch_enabled_fails(
+    mock_remote_sql, mock_remote, mock_time, mock_sleep, ctx
+):
+    mock_remote_sql.side_effect = _ingest_responder(
+        edge_polls={A8: ["2026-07-15 09:00:10\n"]})
+    mock_remote.side_effect = _uci_responder(value="1\n")
+    mock_time.side_effect = [1000.0, 1000.0, 1015.0]
+    result = check_ingest(ctx)
+    assert not result.passed
+    assert "lsn50_writer_disable" in result.detail
 
 
 # --- daily ------------------------------------------------------------------
