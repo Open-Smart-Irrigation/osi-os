@@ -232,6 +232,17 @@
       "crop": "Cultivo",
       "product": "Producto",
       "rate": "Dosis",
+      "protectedValues": "Valores protegidos",
+      "unknownProduct": "Producto no disponible",
+      "unknownRate": "Dosis no disponible",
+      "unknownValue": "Valor no disponible",
+      "valueStatus": {
+        "observed": "Observado",
+        "not_observed": "No observado",
+        "not_applicable": "No aplicable",
+        "below_detection": "Por debajo del límite de detección"
+      },
+      "group": "Grupo {{number}}",
       "useValues": "Usar estos valores",
       "dismiss": "No copiar",
       "invalidated": "El tratamiento anterior ya no coincide con esta parcela, cultivo, hora, temporada o layout"

@@ -12,7 +12,11 @@ import {
   loadActivityShortlist,
   type ActivityShortlist,
 } from '../../../journal/activityShortlist';
-import { loadCarryForwardCandidate, partitionCarryForward } from '../../../journal/carryForward';
+import {
+  loadCarryForwardCandidate,
+  partitionCarryForward,
+  sameCarryForwardContext,
+} from '../../../journal/carryForward';
 import {
   buildEntryValues,
   deriveFieldStates,
@@ -95,6 +99,13 @@ interface DuplicateCandidateGroup {
   key: string;
   label: string;
   candidates: DuplicateCandidate[];
+}
+
+interface AcceptedRepeatSnapshot {
+  sourceEntryUuid: string;
+  context: CarryForwardContext;
+  candidateValues: ReadonlyArray<Readonly<CaptureEntryValueInput>>;
+  values: CaptureEntryValueInput[];
 }
 
 const FOCUS_RING =
@@ -386,6 +397,54 @@ function inputHasValue(input: CaptureEntryValueInput): boolean {
     || input.value_num !== undefined && input.value_num !== null;
 }
 
+function carryForwardValueKey(value: CaptureEntryValueInput): string {
+  return `${value.attribute_code}:${value.group_index ?? 0}`;
+}
+
+function sameCaptureValue(
+  left: CaptureEntryValueInput,
+  right: CaptureEntryValueInput,
+): boolean {
+  return JSON.stringify(left) === JSON.stringify(right);
+}
+
+function stableCaptureValueContent(value: Readonly<CaptureEntryValueInput>): string {
+  return JSON.stringify([
+    value.attribute_code,
+    value.group_index ?? 0,
+    value.value_status ?? null,
+    value.value ?? null,
+    value.value_num ?? null,
+    value.value_text ?? null,
+    value.unit_code ?? null,
+    value.entered_value_num ?? null,
+    value.entered_unit_code ?? null,
+  ]);
+}
+
+function sameCandidateValues(
+  left: ReadonlyArray<Readonly<CaptureEntryValueInput>>,
+  right: ReadonlyArray<Readonly<CaptureEntryValueInput>>,
+): boolean {
+  if (left.length !== right.length) return false;
+  const leftContent = left.map(stableCaptureValueContent).sort();
+  const rightContent = right.map(stableCaptureValueContent).sort();
+  return leftContent.every((value, index) => value === rightContent[index]);
+}
+
+function withoutUnchangedOwnedValues(
+  values: CaptureEntryValueInput[],
+  owned: Iterable<CaptureEntryValueInput>,
+): CaptureEntryValueInput[] {
+  const byKey = new Map(
+    [...owned].map((value) => [carryForwardValueKey(value), value]),
+  );
+  return values.filter((value) => {
+    const snapshot = byKey.get(carryForwardValueKey(value));
+    return !snapshot || !sameCaptureValue(value, snapshot);
+  });
+}
+
 function requiredFieldsSatisfied(
   states: Array<{ code: string; visible: boolean; required: boolean; required_any_groups: number[] }>,
   inputs: CaptureEntryValueInput[],
@@ -511,6 +570,7 @@ export const JournalCaptureFlow: React.FC<JournalCaptureFlowProps> = ({
   const [duplicateWarningShown, setDuplicateWarningShown] = useState(false);
   const [saving, setSaving] = useState(false);
   const [carryForwardCandidate, setCarryForwardCandidate] = useState<CarryForwardCandidate | null>(null);
+  const [acceptedRepeat, setAcceptedRepeat] = useState<AcceptedRepeatSnapshot | null>(null);
   const [safePrefill, setSafePrefill] = useState<CaptureEntryValueInput[]>([]);
   const [stickyLossWarning, setStickyLossWarning] = useState(false);
   const [finalReceipt, setFinalReceipt] = useState<JournalSavedReceipt | null>(null);
@@ -530,6 +590,7 @@ export const JournalCaptureFlow: React.FC<JournalCaptureFlowProps> = ({
   const batchEntryUuidsRef = useRef(new Map<string, string>());
   const contextKeyRef = useRef('');
   const automaticPrefillRef = useRef(new Map<string, CaptureEntryValueInput>());
+  const acceptedRepeatRef = useRef<AcceptedRepeatSnapshot | null>(null);
   const prefillContextRef = useRef<string | null>(null);
 
   const selectedPlotUuid = selectedPlotUuids.length === 1 ? selectedPlotUuids[0] : '';
@@ -746,18 +807,62 @@ export const JournalCaptureFlow: React.FC<JournalCaptureFlowProps> = ({
     setNumberInputErrors(validation.numberInputErrors);
   }, [crop, layout, leaf, numberInputErrors, template, validateTransition]);
 
-  const applyAutomaticPrefill = useCallback((incoming: CaptureEntryValueInput[]) => {
-    const existing = new Set(values.map((value) =>
-      `${value.attribute_code}:${value.group_index ?? 0}`));
-    const additions = incoming.filter((value) =>
-      !existing.has(`${value.attribute_code}:${value.group_index ?? 0}`));
-    additions.forEach((value) => automaticPrefillRef.current.set(
-      `${value.attribute_code}:${value.group_index ?? 0}`,
-      value,
-    ));
-    if (additions.length > 0) commitValues([...values, ...additions]);
-    setSafePrefill(incoming);
-  }, [commitValues, values]);
+  const storeAcceptedRepeat = useCallback((snapshot: AcceptedRepeatSnapshot | null) => {
+    acceptedRepeatRef.current = snapshot;
+    setAcceptedRepeat(snapshot);
+  }, []);
+
+  const clearOwnedCarryForward = useCallback((currentValues: CaptureEntryValueInput[]) => {
+    const accepted = acceptedRepeatRef.current;
+    const withoutAccepted = accepted
+      ? withoutUnchangedOwnedValues(currentValues, accepted.values)
+      : currentValues;
+    const nextValues = withoutUnchangedOwnedValues(
+      withoutAccepted,
+      automaticPrefillRef.current.values(),
+    );
+    automaticPrefillRef.current.clear();
+    storeAcceptedRepeat(null);
+    setSafePrefill([]);
+    setCarryForwardCandidate(null);
+    return nextValues;
+  }, [storeAcceptedRepeat]);
+
+  const applyCarryForwardCandidate = useCallback((
+    nextCandidate: CarryForwardCandidate | null,
+    incomingAutomatic: CaptureEntryValueInput[],
+  ) => {
+    let nextValues = values;
+    const accepted = acceptedRepeatRef.current;
+    const nextTreatment = nextCandidate?.repeatTreatment;
+    const acceptedStillCurrent = Boolean(
+      accepted && nextCandidate && nextTreatment &&
+      accepted.sourceEntryUuid === nextTreatment.sourceEntryUuid &&
+      sameCarryForwardContext(accepted.context, nextCandidate.context) &&
+      sameCandidateValues(accepted.candidateValues, nextTreatment.values),
+    );
+    if (accepted && !acceptedStillCurrent) {
+      nextValues = withoutUnchangedOwnedValues(nextValues, accepted.values);
+      storeAcceptedRepeat(null);
+    }
+
+    nextValues = withoutUnchangedOwnedValues(
+      nextValues,
+      automaticPrefillRef.current.values(),
+    );
+    automaticPrefillRef.current.clear();
+    const existing = new Set(nextValues.map(carryForwardValueKey));
+    const additions = incomingAutomatic.filter((value) =>
+      !existing.has(carryForwardValueKey(value)));
+    additions.forEach((value) => {
+      automaticPrefillRef.current.set(carryForwardValueKey(value), value);
+      existing.add(carryForwardValueKey(value));
+    });
+    const mergedValues = [...nextValues, ...additions];
+    if (JSON.stringify(mergedValues) !== JSON.stringify(values)) commitValues(mergedValues);
+    setSafePrefill(incomingAutomatic);
+    setCarryForwardCandidate(nextCandidate);
+  }, [commitValues, storeAcceptedRepeat, values]);
 
   const updateStableDraft = useCallback(async (token: number, contextKey: string): Promise<boolean> => {
     const current = () => mountedRef.current && token === preparationTokenRef.current &&
@@ -769,16 +874,17 @@ export const JournalCaptureFlow: React.FC<JournalCaptureFlowProps> = ({
     const candidate = await loadCarryForwardCandidate(receipt.entry_uuid, carryForwardLabels);
     if (!current()) return false;
     if (!candidate) {
-      setCarryForwardCandidate(null);
-      setSafePrefill([]);
+      applyCarryForwardCandidate(null, []);
       return true;
     }
     const partition = partitionCarryForward(candidate.source, template, carryForwardLabels);
     if (!current()) return false;
-    setCarryForwardCandidate({ ...candidate, repeatTreatment: partition.repeatTreatment });
-    applyAutomaticPrefill(partition.automaticValues);
+    applyCarryForwardCandidate(
+      { ...candidate, repeatTreatment: partition.repeatTreatment },
+      partition.automaticValues,
+    );
     return true;
-  }, [applyAutomaticPrefill, buildPayload, carryForwardLabels, draft, formValid, layout, leaf, model, template]);
+  }, [applyCarryForwardCandidate, buildPayload, carryForwardLabels, draft, formValid, layout, leaf, model, template]);
 
   useEffect(() => {
     if (!model || !layout || !selectedPlotUuid && layoutCode === '') return;
@@ -862,17 +968,18 @@ export const JournalCaptureFlow: React.FC<JournalCaptureFlowProps> = ({
     const nextTemplate = nextLayout?.supported_templates.includes('farmer_quick')
       ? 'farmer_quick'
       : nextLayout?.supported_templates[0] ?? '';
+    const plotContextChanged = requestedSelection.length !== selectedPlotUuids.length ||
+      requestedSelection.some((plotUuid, index) => plotUuid !== selectedPlotUuids[index]);
+    const layoutContextChanged = nextLayoutCode !== layoutCode;
+    const contextValues = plotContextChanged || layoutContextChanged
+      ? clearOwnedCarryForward(values)
+      : values;
     const dependencyCodes = new Set(
       leaf?.dependent_selections.map(({ attribute_code }) => attribute_code) ?? [],
     );
-    const retainedValues = values.filter((value) => {
-      if (dependencyCodes.has(value.attribute_code)) return false;
-      const key = `${value.attribute_code}:${value.group_index ?? 0}`;
-      const automatic = automaticPrefillRef.current.get(key);
-      return !automatic || JSON.stringify(value) !== JSON.stringify(automatic);
-    });
+    const retainedValues = contextValues.filter((value) =>
+      !dependencyCodes.has(value.attribute_code));
 
-    automaticPrefillRef.current.clear();
     const nextTimezone = nextPlot?.zone_uuid
       ? zoneTimezones[nextPlot.zone_uuid] ?? browserTimezone
       : browserTimezone;
@@ -950,6 +1057,9 @@ export const JournalCaptureFlow: React.FC<JournalCaptureFlowProps> = ({
 
   const chooseLayout = (code: string) => {
     if (interactionLocked) return;
+    const contextValues = code !== layoutCode
+      ? clearOwnedCarryForward(values)
+      : values;
     setLayoutCode(code);
     const nextLayout = model?.layouts.get(code);
     const nextTemplate = nextLayout?.supported_templates.includes('farmer_quick')
@@ -957,7 +1067,7 @@ export const JournalCaptureFlow: React.FC<JournalCaptureFlowProps> = ({
       : nextLayout?.supported_templates[0] ?? '';
     setTemplateCode(nextTemplate);
     const previousDependencyCodes = new Set(leaf?.dependent_selections.map(({ attribute_code }) => attribute_code));
-    const nextValues = sanitizeValues(model!, nextLayout, model?.templates.get(nextTemplate), null, crop, values, previousDependencyCodes);
+    const nextValues = sanitizeValues(model!, nextLayout, model?.templates.get(nextTemplate), null, crop, contextValues, previousDependencyCodes);
     const validation = validateTransition(
       nextLayout,
       model?.templates.get(nextTemplate),
@@ -974,9 +1084,12 @@ export const JournalCaptureFlow: React.FC<JournalCaptureFlowProps> = ({
 
   const pickActivity = (chosen: ActivityLeafSelection) => {
     if (interactionLocked) return;
+    const contextValues = chosen.activity_code !== leaf?.activity_code
+      ? clearOwnedCarryForward(values)
+      : values;
     setLeaf(chosen);
     const previousDependencyCodes = new Set(leaf?.dependent_selections.map(({ attribute_code }) => attribute_code));
-    const retainedValues = sanitizeValues(model!, layout, template, chosen, crop, values, previousDependencyCodes);
+    const retainedValues = sanitizeValues(model!, layout, template, chosen, crop, contextValues, previousDependencyCodes);
     const nextValues = [
       ...retainedValues,
       ...activityDependencyInputs(chosen),
@@ -1326,18 +1439,37 @@ export const JournalCaptureFlow: React.FC<JournalCaptureFlowProps> = ({
   }, [inferredCrop, layout, leaf, resolved, selectedPlot, shortlist.currentSeasonUuid]);
 
   const useRepeatTreatment = useCallback((incoming: CaptureEntryValueInput[]) => {
-    if (interactionLocked) return;
-    const incomingKeys = new Set(incoming.map((value) => `${value.attribute_code}:${value.group_index ?? 0}`));
+    const treatment = carryForwardCandidate?.repeatTreatment;
+    if (interactionLocked || !treatment || !carryForwardContext) return;
+    const previous = acceptedRepeatRef.current;
+    const retainedValues = previous
+      ? withoutUnchangedOwnedValues(values, previous.values)
+      : values;
+    const candidateValues = incoming.map((value) => ({ ...value }));
+    const acceptedValues = candidateValues.map((value) => ({ ...value }));
+    const incomingKeys = new Set(acceptedValues.map(carryForwardValueKey));
+    storeAcceptedRepeat({
+      sourceEntryUuid: treatment.sourceEntryUuid,
+      context: { ...carryForwardContext },
+      candidateValues,
+      values: acceptedValues,
+    });
     commitValues([
-      ...values.filter((value) => !incomingKeys.has(`${value.attribute_code}:${value.group_index ?? 0}`)),
-      ...incoming,
+      ...retainedValues.filter((value) => !incomingKeys.has(carryForwardValueKey(value))),
+      ...acceptedValues,
     ]);
-  }, [commitValues, interactionLocked, values]);
+  }, [carryForwardCandidate, carryForwardContext, commitValues, interactionLocked, storeAcceptedRepeat, values]);
 
-  const invalidateRepeatTreatment = useCallback((removed: CaptureEntryValueInput[]) => {
-    const removedKeys = new Set(removed.map((value) => `${value.attribute_code}:${value.group_index ?? 0}`));
-    commitValues(values.filter((value) => !removedKeys.has(`${value.attribute_code}:${value.group_index ?? 0}`)));
-  }, [commitValues, values]);
+  const dismissRepeatTreatment = useCallback(() => {
+    if (interactionLocked) return;
+    const accepted = acceptedRepeatRef.current;
+    const nextValues = accepted
+      ? withoutUnchangedOwnedValues(values, accepted.values)
+      : values;
+    storeAcceptedRepeat(null);
+    setCarryForwardCandidate(null);
+    if (JSON.stringify(nextValues) !== JSON.stringify(values)) commitValues(nextValues);
+  }, [commitValues, interactionLocked, storeAcceptedRepeat, values]);
 
   const chooseTemplate = useCallback((code: string) => {
     if (interactionLocked) return;
@@ -1368,16 +1500,27 @@ export const JournalCaptureFlow: React.FC<JournalCaptureFlowProps> = ({
   ) => {
     if (interactionLocked) return;
     for (const [key, automatic] of automaticPrefillRef.current) {
-      const current = next.find((value) => `${value.attribute_code}:${value.group_index ?? 0}` === key);
-      if (!current || JSON.stringify(current) !== JSON.stringify(automatic)) {
+      const current = next.find((value) => carryForwardValueKey(value) === key);
+      if (!current || !sameCaptureValue(current, automatic)) {
         automaticPrefillRef.current.delete(key);
+      }
+    }
+    const accepted = acceptedRepeatRef.current;
+    if (accepted) {
+      const stillOwned = accepted.values.filter((snapshot) => {
+        const current = next.find((value) =>
+          carryForwardValueKey(value) === carryForwardValueKey(snapshot));
+        return current != null && sameCaptureValue(current, snapshot);
+      });
+      if (stillOwned.length !== accepted.values.length) {
+        storeAcceptedRepeat({ ...accepted, values: stillOwned });
       }
     }
     setValues(next);
     setFormPayload(payload);
     setFormValid(valid);
     setNumberInputErrors(inputErrors);
-  }, [interactionLocked]);
+  }, [interactionLocked, storeAcceptedRepeat]);
 
   useEffect(() => {
     const previousContext = prefillContextRef.current;
@@ -1387,18 +1530,10 @@ export const JournalCaptureFlow: React.FC<JournalCaptureFlowProps> = ({
       preparationTokenRef.current += 1;
       if (preparingConfirm) setPreparingConfirm(false);
     }
-    if (!previousContext || previousContext === prefillContext || automaticPrefillRef.current.size === 0) return;
-    const automaticKeys = new Set(automaticPrefillRef.current.keys());
-    const nextValues = values.filter((value) => {
-      const key = `${value.attribute_code}:${value.group_index ?? 0}`;
-      const automatic = automaticPrefillRef.current.get(key);
-      return !automaticKeys.has(key) || JSON.stringify(value) !== JSON.stringify(automatic);
-    });
-    automaticPrefillRef.current.clear();
-    setSafePrefill([]);
-    setCarryForwardCandidate(null);
+    if (!previousContext || previousContext === prefillContext) return;
+    const nextValues = clearOwnedCarryForward(values);
     if (nextValues.length !== values.length) commitValues(nextValues);
-  }, [commitValues, preparingConfirm, prefillContext, values]);
+  }, [clearOwnedCarryForward, commitValues, preparingConfirm, prefillContext, values]);
 
   if (!model) {
     return <p role="alert" className="text-sm font-semibold text-[var(--error-text)]">{t('capture.validation.invalidDefinition')}</p>;
@@ -1555,13 +1690,18 @@ export const JournalCaptureFlow: React.FC<JournalCaptureFlowProps> = ({
             <RepeatTreatmentCard
               candidate={carryForwardCandidate}
               currentContext={carryForwardContext}
+              catalog={catalog}
+              accepted={Boolean(
+                acceptedRepeat &&
+                acceptedRepeat.sourceEntryUuid === carryForwardCandidate.repeatTreatment.sourceEntryUuid &&
+                sameCarryForwardContext(acceptedRepeat.context, carryForwardContext) &&
+                sameCandidateValues(
+                  acceptedRepeat.candidateValues,
+                  carryForwardCandidate.repeatTreatment.values,
+                )
+              )}
               onConfirm={useRepeatTreatment}
-              onInvalidate={invalidateRepeatTreatment}
-              onDismiss={() => {
-                if (!interactionLocked) {
-                  invalidateRepeatTreatment(carryForwardCandidate.repeatTreatment?.values ?? []);
-                }
-              }}
+              onDismiss={dismissRepeatTreatment}
             />
           )}
           </fieldset>

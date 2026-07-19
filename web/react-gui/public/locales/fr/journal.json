@@ -232,6 +232,17 @@
       "crop": "Culture",
       "product": "Produit",
       "rate": "Dose",
+      "protectedValues": "Valeurs protégées",
+      "unknownProduct": "Produit indisponible",
+      "unknownRate": "Dose indisponible",
+      "unknownValue": "Valeur indisponible",
+      "valueStatus": {
+        "observed": "Observé",
+        "not_observed": "Non observé",
+        "not_applicable": "Non applicable",
+        "below_detection": "Sous la limite de détection"
+      },
+      "group": "Groupe {{number}}",
       "useValues": "Utiliser ces valeurs",
       "dismiss": "Ne pas copier",
       "invalidated": "Le traitement précédent ne correspond plus à cette parcelle, cette culture, cette heure, cette saison ou ce layout"

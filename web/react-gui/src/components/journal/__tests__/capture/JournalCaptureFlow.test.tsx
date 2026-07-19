@@ -529,18 +529,153 @@ const invalidRepeatCatalog: JournalCatalog = {
   ...protectedCatalog,
   vocab: [
     ...protectedCatalog.vocab,
-    numericAttribute('attr.rate', 'Application rate'),
-    unitRow('unit.kg', 'kg/ha', 1),
+    {
+      ...numericAttribute('attr.amount_mass_area_product', 'Product rate'),
+      default_unit_code: 'unit.kg_per_ha_product',
+    },
+    unitRow('unit.kg', 'kg', 1),
+    unitRow('unit.kg_per_ha_product', 'kg/ha', 1),
   ],
   templates: protectedCatalog.templates.map((candidate) => candidate.code === 'farmer_quick'
     ? {
         ...candidate,
         definition: {
           ...candidate.definition,
-          fields: ['attr.product_uuid', 'attr.rate'],
+          fields: ['attr.product_uuid', 'attr.amount_mass_area_product'],
         },
       }
     : candidate),
+};
+
+const repeatFlowCatalog: JournalCatalog = {
+  ...protectedCatalog,
+  vocab: [
+    ...protectedCatalog.vocab,
+    numericAttribute('attr.amount_mass_area_product', 'Product rate'),
+    unitRow('unit.kg', 'kg', 1),
+    unitRow('unit.kg_per_ha_product', 'kg/ha', 1),
+  ],
+  templates: protectedCatalog.templates.map((candidate) => candidate.code === 'farmer_quick'
+    ? {
+        ...candidate,
+        definition: {
+          ...candidate.definition,
+          fields: ['attr.crop', 'attr.product_uuid', 'attr.amount_mass_area_product'],
+        },
+      }
+    : candidate),
+  layouts: [
+    protectedCatalog.layouts[0],
+    {
+      ...protectedCatalog.layouts[0],
+      code: 'open_field',
+      version: 3,
+      labels: { en: 'open field' },
+    },
+  ],
+};
+
+const automaticRepeatFlowCatalog: JournalCatalog = {
+  ...repeatFlowCatalog,
+  vocab: [...repeatFlowCatalog.vocab, row('attr.operator', 'attribute')],
+  templates: repeatFlowCatalog.templates.map((candidate) => candidate.code === 'farmer_quick'
+    ? {
+        ...candidate,
+        definition: {
+          ...candidate.definition,
+          fields: ['attr.crop', 'attr.operator', 'attr.product_uuid', 'attr.amount_mass_area_product'],
+          carry_forward: ['attr.operator'],
+        },
+      }
+    : candidate),
+};
+
+const replacementRepeatFlowCatalog: JournalCatalog = {
+  ...repeatFlowCatalog,
+  products: [
+    ...repeatFlowCatalog.products,
+    {
+      ...repeatFlowCatalog.products[0],
+      product_uuid: 'product-2',
+      name: 'Replacement product',
+    },
+  ],
+};
+
+const activityRepeatFlowCatalog: JournalCatalog = {
+  ...repeatFlowCatalog,
+  vocab: [...repeatFlowCatalog.vocab, row('irrigation', 'activity')],
+  layouts: repeatFlowCatalog.layouts.map((candidate) => ({
+    ...candidate,
+    definition: {
+      ...candidate.definition,
+      activity_codes: ['plant_protection_application', 'irrigation'],
+    },
+  })),
+};
+
+const repeatSource = entry({
+  entry_uuid: 'source-repeat-flow',
+  activity_code: 'plant_protection_application',
+  occurred_start: '2026-07-15T00:00:00.000Z',
+  values: [
+    {
+      group_index: 0,
+      attribute_code: 'attr.product_uuid',
+      value_status: 'observed' as const,
+      value_text: 'product-1',
+      value_num: null,
+      unit_code: null,
+      entered_value_num: null,
+      entered_unit_code: null,
+    },
+    {
+      group_index: 0,
+      attribute_code: 'attr.amount_mass_area_product',
+      value_status: 'observed' as const,
+      value_text: null,
+      value_num: 2,
+      unit_code: 'unit.kg',
+      entered_value_num: 2,
+      entered_unit_code: 'unit.kg_per_ha_product',
+    },
+  ],
+});
+
+const repeatSourceWithAutomatic = entry({
+  ...repeatSource,
+  entry_uuid: 'source-repeat-flow-with-automatic',
+  values: [
+    {
+      group_index: 0,
+      attribute_code: 'attr.operator',
+      value_status: 'observed' as const,
+      value_text: 'Alex',
+      value_num: null,
+      unit_code: null,
+      entered_value_num: null,
+      entered_unit_code: null,
+    },
+    ...repeatSource.values,
+  ],
+});
+
+const replacementRepeatSource = entry({
+  ...repeatSource,
+  entry_uuid: 'source-repeat-flow-replacement',
+  values: repeatSource.values.map((value) => value.attribute_code === 'attr.product_uuid'
+    ? { ...value, value_text: 'product-2' }
+    : { ...value, value_num: 3, entered_value_num: 3 }),
+});
+
+const correctedRepeatSource = entry({
+  ...replacementRepeatSource,
+  entry_uuid: repeatSource.entry_uuid,
+});
+
+const layoutSwitchPlot: JournalPlot = {
+  ...plot,
+  settings: { ...plot.settings, layout_code: 'open_field' },
 };
 
 const templateSwitchCatalog: JournalCatalog = {
@@ -742,6 +877,26 @@ function deferJournalEffects(): () => Promise<void> {
       }
     });
   };
+}
+
+function mockRepeatAuthorityFor(source: EntryAggregate): void {
+  apiMocks.listEntries.mockImplementation(async (filters: { entry_uuid?: string }) =>
+    filters.entry_uuid
+      ? {
+          entries: [{
+            ...source,
+            entry_uuid: '11111111-1111-4111-8111-111111111111',
+            status: 'draft',
+            occurred_start: '2026-07-16T08:30:00.000Z',
+            values: [],
+          }],
+          next_cursor: null,
+        }
+      : { entries: [source], next_cursor: null });
+}
+
+function mockRepeatAuthority(): void {
+  mockRepeatAuthorityFor(repeatSource);
 }
 
 beforeEach(() => {
@@ -1475,6 +1630,9 @@ describe('JournalCaptureFlow', () => {
     render(<JournalCaptureFlow {...baseProps} catalog={protectedCatalog} initialPlot={plot} />);
     fireEvent.click(screen.getByRole('button', { name: 'plant_protection_application' }));
     fireEvent.click(screen.getByRole('button', { name: 'capture.next' }));
+    fireEvent.change(screen.getByLabelText(START_OCCURRENCE_LABEL), {
+      target: { value: '2026-07-16T10:30' },
+    });
     fireEvent.click(screen.getByRole('button', { name: 'capture.next' }));
     await waitFor(() => expect(apiMocks.createEntry).toHaveBeenCalled());
     fireEvent.click(screen.getByRole('button', { name: 'capture.back' }));
@@ -1482,6 +1640,358 @@ describe('JournalCaptureFlow', () => {
     await waitFor(() => expect(screen.getByText('capture.carry.repeatTreatment')).toBeInTheDocument());
     expect(screen.getByRole('combobox', { name: 'capture.form.product' })).toHaveValue('');
     expect(screen.queryByText('capture.carry.prefilled')).not.toBeInTheDocument();
+  });
+
+  it('retains accepted protected values and accepted UI across Details to Confirm to Details', async () => {
+    mockRepeatAuthority();
+    render(<JournalCaptureFlow
+      {...baseProps}
+      catalog={repeatFlowCatalog}
+      recentEntries={[repeatSource]}
+      initialPlot={plot}
+    />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'plant_protection_application' }));
+    fireEvent.click(screen.getByRole('button', { name: 'capture.next' }));
+    fireEvent.change(screen.getByLabelText(START_OCCURRENCE_LABEL), {
+      target: { value: '2026-07-16T10:30' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'capture.next' }));
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'capture.confirm.title' })).toBeInTheDocument());
+    fireEvent.click(screen.getByRole('button', { name: 'capture.back' }));
+    await waitFor(() => expect(screen.getByText('capture.carry.repeatTreatment')).toBeInTheDocument());
+    fireEvent.click(screen.getByRole('button', { name: 'capture.carry.useValues' }));
+    await waitFor(() => expect(screen.getByRole('textbox', { name: 'Product rate' })).toHaveValue('2'));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'capture.next' })).not.toBeDisabled());
+    fireEvent.click(screen.getByRole('button', { name: 'capture.next' }));
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'capture.confirm.title' })).toBeInTheDocument());
+    fireEvent.click(screen.getByRole('button', { name: 'capture.back' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'capture.carry.useValues' })).toBeDisabled());
+    expect(screen.getByRole('combobox', { name: 'capture.form.product' })).toHaveValue('product-1');
+    expect(screen.getByRole('textbox', { name: 'Product rate' })).toHaveValue('2');
+    fireEvent.click(screen.getByRole('button', { name: 'capture.next' }));
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'capture.confirm.title' })).toBeInTheDocument());
+    fireEvent.click(screen.getByRole('button', { name: 'capture.finish' }));
+
+    await waitFor(() => expect(apiMocks.updateEntry.mock.calls.some(([, payload]) => payload.status === 'final')).toBe(true));
+    const finalPayload = apiMocks.updateEntry.mock.calls
+      .map(([, payload]) => payload)
+      .find((payload) => payload.status === 'final');
+    expect(finalPayload.values).toEqual(expect.arrayContaining([
+      expect.objectContaining({ attribute_code: 'attr.product_uuid', value: 'product-1' }),
+      expect.objectContaining({ attribute_code: 'attr.amount_mass_area_product' }),
+    ]));
+  });
+
+  it('reconciles a same-context authority replacement before exposing the new candidate', async () => {
+    mockRepeatAuthority();
+    render(<JournalCaptureFlow
+      {...baseProps}
+      catalog={replacementRepeatFlowCatalog}
+      recentEntries={[repeatSource]}
+      initialPlot={plot}
+    />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'plant_protection_application' }));
+    fireEvent.click(screen.getByRole('button', { name: 'capture.next' }));
+    fireEvent.change(screen.getByLabelText(START_OCCURRENCE_LABEL), {
+      target: { value: '2026-07-16T10:30' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'capture.next' }));
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'capture.confirm.title' })).toBeInTheDocument());
+    fireEvent.click(screen.getByRole('button', { name: 'capture.back' }));
+    fireEvent.click(screen.getByRole('button', { name: 'capture.carry.useValues' }));
+    await waitFor(() => expect(screen.getByRole('combobox', { name: 'capture.form.product' })).toHaveValue('product-1'));
+
+    mockRepeatAuthorityFor(replacementRepeatSource);
+    fireEvent.click(screen.getByRole('button', { name: 'capture.next' }));
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'capture.confirm.title' })).toBeInTheDocument());
+    fireEvent.click(screen.getByRole('button', { name: 'capture.back' }));
+
+    await waitFor(() => expect(screen.getByRole('button', { name: 'capture.carry.useValues' })).toBeEnabled());
+    expect(screen.getByRole('combobox', { name: 'capture.form.product' })).toHaveValue('');
+    expect(screen.getByRole('textbox', { name: 'Product rate' })).toHaveValue('');
+    fireEvent.click(screen.getByRole('button', { name: 'capture.carry.useValues' }));
+    await waitFor(() => {
+      expect(screen.getByRole('combobox', { name: 'capture.form.product' })).toHaveValue('product-2');
+      expect(screen.getByRole('textbox', { name: 'Product rate' })).toHaveValue('3');
+    });
+  });
+
+  it('clears acceptance when the same authority row changes its complete protected content', async () => {
+    mockRepeatAuthority();
+    render(<JournalCaptureFlow
+      {...baseProps}
+      catalog={replacementRepeatFlowCatalog}
+      recentEntries={[repeatSource]}
+      initialPlot={plot}
+    />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'plant_protection_application' }));
+    fireEvent.click(screen.getByRole('button', { name: 'capture.next' }));
+    fireEvent.change(screen.getByLabelText(START_OCCURRENCE_LABEL), {
+      target: { value: '2026-07-16T10:30' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'capture.next' }));
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'capture.confirm.title' })).toBeInTheDocument());
+    fireEvent.click(screen.getByRole('button', { name: 'capture.back' }));
+    fireEvent.click(screen.getByRole('button', { name: 'capture.carry.useValues' }));
+    const rate = screen.getByRole('textbox', { name: 'Product rate' });
+    fireEvent.change(rate, { target: { value: '4' } });
+    expect(screen.getByRole('combobox', { name: 'capture.form.product' })).toHaveValue('product-1');
+    expect(rate).toHaveValue('4');
+
+    mockRepeatAuthorityFor(correctedRepeatSource);
+    fireEvent.click(screen.getByRole('button', { name: 'capture.next' }));
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'capture.confirm.title' })).toBeInTheDocument());
+    fireEvent.click(screen.getByRole('button', { name: 'capture.back' }));
+
+    await waitFor(() => expect(screen.getByRole('button', { name: 'capture.carry.useValues' })).toBeEnabled());
+    expect(screen.getByRole('combobox', { name: 'capture.form.product' })).toHaveValue('');
+    expect(screen.getByRole('textbox', { name: 'Product rate' })).toHaveValue('4');
+    fireEvent.click(screen.getByRole('button', { name: 'capture.carry.useValues' }));
+    await waitFor(() => {
+      expect(screen.getByRole('combobox', { name: 'capture.form.product' })).toHaveValue('product-2');
+      expect(screen.getByRole('textbox', { name: 'Product rate' })).toHaveValue('3');
+    });
+  });
+
+  it('releases an edited accepted row to user ownership before a context change', async () => {
+    mockRepeatAuthority();
+    render(<JournalCaptureFlow
+      {...baseProps}
+      catalog={repeatFlowCatalog}
+      recentEntries={[repeatSource]}
+      initialPlot={plot}
+    />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'plant_protection_application' }));
+    fireEvent.click(screen.getByRole('button', { name: 'capture.next' }));
+    fireEvent.change(screen.getByLabelText(START_OCCURRENCE_LABEL), {
+      target: { value: '2026-07-16T10:30' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'capture.next' }));
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'capture.confirm.title' })).toBeInTheDocument());
+    fireEvent.click(screen.getByRole('button', { name: 'capture.back' }));
+    fireEvent.click(screen.getByRole('button', { name: 'capture.carry.useValues' }));
+    const rate = screen.getByRole('textbox', { name: 'Product rate' });
+    fireEvent.change(rate, { target: { value: '4' } });
+    expect(rate).toHaveValue('4');
+
+    fireEvent.change(screen.getByLabelText(START_OCCURRENCE_LABEL), {
+      target: { value: '2026-07-16T11:30' },
+    });
+
+    await waitFor(() => {
+      expect(screen.getByRole('combobox', { name: 'capture.form.product' })).toHaveValue('');
+      expect(screen.getByRole('textbox', { name: 'Product rate' })).toHaveValue('4');
+      expect(screen.getByRole('button', { name: 'capture.next' })).toBeEnabled();
+    });
+  });
+
+  it('removes accepted rows and revalidates retained values when activity changes', async () => {
+    mockRepeatAuthority();
+    render(<JournalCaptureFlow
+      {...baseProps}
+      catalog={activityRepeatFlowCatalog}
+      recentEntries={[repeatSource]}
+      initialPlot={plot}
+    />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'plant_protection_application' }));
+    fireEvent.click(screen.getByRole('button', { name: 'capture.next' }));
+    fireEvent.change(screen.getByLabelText(START_OCCURRENCE_LABEL), {
+      target: { value: '2026-07-16T10:30' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'capture.next' }));
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'capture.confirm.title' })).toBeInTheDocument());
+    fireEvent.click(screen.getByRole('button', { name: 'capture.back' }));
+    fireEvent.click(screen.getByRole('button', { name: 'capture.carry.useValues' }));
+    fireEvent.change(screen.getByRole('textbox', { name: 'attr.crop' }), {
+      target: { value: 'Wheat' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'capture.back' }));
+    fireEvent.click(screen.getByRole('button', { name: 'irrigation' }));
+    fireEvent.click(screen.getByRole('button', { name: 'capture.next' }));
+
+    await waitFor(() => expect(screen.getByRole('combobox', { name: 'capture.form.product' })).toBeInTheDocument());
+    expect(screen.getByRole('combobox', { name: 'capture.form.product' })).toHaveValue('');
+    expect(screen.getByRole('textbox', { name: 'Product rate' })).toHaveValue('');
+    expect(screen.getByRole('textbox', { name: 'attr.crop' })).toHaveValue('Wheat');
+    expect(screen.getByRole('button', { name: 'capture.next' })).toBeEnabled();
+  });
+
+  it('removes accepted protected values when the farmer switches plots', async () => {
+    mockRepeatAuthority();
+    render(<JournalCaptureFlow
+      {...baseProps}
+      catalog={repeatFlowCatalog}
+      plots={[plot, homogeneousSecondPlot]}
+      recentEntries={[repeatSource]}
+      initialPlot={plot}
+    />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'plant_protection_application' }));
+    fireEvent.click(screen.getByRole('button', { name: 'capture.next' }));
+    fireEvent.change(screen.getByLabelText(START_OCCURRENCE_LABEL), {
+      target: { value: '2026-07-16T10:30' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'capture.next' }));
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'capture.confirm.title' })).toBeInTheDocument());
+    fireEvent.click(screen.getByRole('button', { name: 'capture.back' }));
+    await waitFor(() => expect(screen.getByText('capture.carry.repeatTreatment')).toBeInTheDocument());
+    fireEvent.click(screen.getByRole('button', { name: 'capture.carry.useValues' }));
+    fireEvent.click(screen.getByRole('button', { name: 'capture.back' }));
+    fireEvent.click(screen.getByRole('button', { name: 'capture.back' }));
+    fireEvent.click(screen.getByRole('button', { name: 'East field' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'East field' })).toHaveAttribute('aria-pressed', 'true'));
+    fireEvent.click(screen.getByRole('button', { name: 'capture.next' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'plant_protection_application' })).toBeInTheDocument());
+    fireEvent.click(screen.getByRole('button', { name: 'plant_protection_application' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'capture.next' })).not.toBeDisabled());
+    fireEvent.click(screen.getByRole('button', { name: 'capture.next' }));
+
+    await waitFor(() => expect(screen.getByRole('combobox', { name: 'capture.form.product' })).toBeInTheDocument());
+    expect(screen.getByRole('combobox', { name: 'capture.form.product' })).toHaveValue('');
+    expect(screen.getByRole('textbox', { name: 'Product rate' })).toHaveValue('');
+  });
+
+  it('removes accepted protected values when a refreshed plot changes its layout', async () => {
+    mockRepeatAuthority();
+    const props = {
+      ...baseProps,
+      catalog: repeatFlowCatalog,
+      recentEntries: [repeatSource],
+      initialPlot: plot,
+    };
+    const { rerender } = render(<JournalCaptureFlow {...props} />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'plant_protection_application' }));
+    fireEvent.click(screen.getByRole('button', { name: 'capture.next' }));
+    fireEvent.change(screen.getByLabelText(START_OCCURRENCE_LABEL), {
+      target: { value: '2026-07-16T10:30' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'capture.next' }));
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'capture.confirm.title' })).toBeInTheDocument());
+    fireEvent.click(screen.getByRole('button', { name: 'capture.back' }));
+    await waitFor(() => expect(screen.getByText('capture.carry.repeatTreatment')).toBeInTheDocument());
+    fireEvent.click(screen.getByRole('button', { name: 'capture.carry.useValues' }));
+    fireEvent.click(screen.getByRole('button', { name: 'capture.back' }));
+    fireEvent.click(screen.getByRole('button', { name: 'capture.back' }));
+    rerender(<JournalCaptureFlow {...props} plots={[layoutSwitchPlot, homogeneousSecondPlot]} />);
+    fireEvent.click(screen.getByRole('button', { name: 'North field' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'North field' })).toHaveAttribute('aria-pressed', 'false'));
+    fireEvent.click(screen.getByRole('button', { name: 'North field' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'North field' })).toHaveAttribute('aria-pressed', 'true'));
+    fireEvent.click(screen.getByRole('button', { name: 'capture.next' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'plant_protection_application' })).toBeInTheDocument());
+    fireEvent.click(screen.getByRole('button', { name: 'plant_protection_application' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'capture.next' })).not.toBeDisabled());
+    fireEvent.click(screen.getByRole('button', { name: 'capture.next' }));
+
+    await waitFor(() => expect(screen.getByRole('combobox', { name: 'capture.form.product' })).toBeInTheDocument());
+    expect(screen.getByRole('combobox', { name: 'capture.form.product' })).toHaveValue('');
+    expect(screen.getByRole('textbox', { name: 'Product rate' })).toHaveValue('');
+  });
+
+  it('removes accepted protected values when the occurrence changes', async () => {
+    mockRepeatAuthority();
+    render(<JournalCaptureFlow
+      {...baseProps}
+      catalog={repeatFlowCatalog}
+      recentEntries={[repeatSource]}
+      initialPlot={plot}
+    />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'plant_protection_application' }));
+    fireEvent.click(screen.getByRole('button', { name: 'capture.next' }));
+    fireEvent.change(screen.getByLabelText(START_OCCURRENCE_LABEL), {
+      target: { value: '2026-07-16T10:30' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'capture.next' }));
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'capture.confirm.title' })).toBeInTheDocument());
+    fireEvent.click(screen.getByRole('button', { name: 'capture.back' }));
+    await waitFor(() => expect(screen.getByText('capture.carry.repeatTreatment')).toBeInTheDocument());
+    fireEvent.click(screen.getByRole('button', { name: 'capture.carry.useValues' }));
+    expect(screen.getByRole('textbox', { name: 'Product rate' })).toHaveValue('2');
+
+    fireEvent.change(screen.getByLabelText(START_OCCURRENCE_LABEL), {
+      target: { value: '2026-07-16T11:30' },
+    });
+
+    await waitFor(() => {
+      expect(screen.getByRole('combobox', { name: 'capture.form.product' })).toHaveValue('');
+      expect(screen.getByRole('textbox', { name: 'Product rate' })).toHaveValue('');
+    });
+  });
+
+  it('removes accepted protected values when the timezone changes', async () => {
+    mockRepeatAuthority();
+    render(<JournalCaptureFlow
+      {...baseProps}
+      catalog={repeatFlowCatalog}
+      recentEntries={[repeatSource]}
+      initialPlot={plot}
+    />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'plant_protection_application' }));
+    fireEvent.click(screen.getByRole('button', { name: 'capture.next' }));
+    fireEvent.change(screen.getByLabelText(START_OCCURRENCE_LABEL), {
+      target: { value: '2026-07-16T10:30' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'capture.next' }));
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'capture.confirm.title' })).toBeInTheDocument());
+    fireEvent.click(screen.getByRole('button', { name: 'capture.back' }));
+    await waitFor(() => expect(screen.getByText('capture.carry.repeatTreatment')).toBeInTheDocument());
+    fireEvent.click(screen.getByRole('button', { name: 'capture.carry.useValues' }));
+    expect(screen.getByRole('textbox', { name: 'Product rate' })).toHaveValue('2');
+
+    fireEvent.change(screen.getByLabelText('capture.where.timezone'), {
+      target: { value: 'UTC' },
+    });
+
+    await waitFor(() => {
+      expect(screen.getByRole('combobox', { name: 'capture.form.product' })).toHaveValue('');
+      expect(screen.getByRole('textbox', { name: 'Product rate' })).toHaveValue('');
+    });
+  });
+
+  it('removes automatic and accepted carry-forward rows before clearing ownership on plot change', async () => {
+    mockRepeatAuthorityFor(repeatSourceWithAutomatic);
+    render(<JournalCaptureFlow
+      {...baseProps}
+      catalog={automaticRepeatFlowCatalog}
+      plots={[plot, homogeneousSecondPlot]}
+      recentEntries={[repeatSourceWithAutomatic]}
+      initialPlot={plot}
+    />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'plant_protection_application' }));
+    fireEvent.click(screen.getByRole('button', { name: 'capture.next' }));
+    fireEvent.change(screen.getByLabelText(START_OCCURRENCE_LABEL), {
+      target: { value: '2026-07-16T10:30' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'capture.next' }));
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'capture.confirm.title' })).toBeInTheDocument());
+    fireEvent.click(screen.getByRole('button', { name: 'capture.back' }));
+    await waitFor(() => expect(screen.getByText('capture.carry.repeatTreatment')).toBeInTheDocument());
+    fireEvent.click(screen.getByRole('button', { name: 'capture.carry.useValues' }));
+    await waitFor(() => expect(screen.getByRole('textbox', { name: 'attr.operator' })).toHaveValue('Alex'));
+    expect(screen.getByRole('textbox', { name: 'Product rate' })).toHaveValue('2');
+
+    fireEvent.click(screen.getByRole('button', { name: 'capture.back' }));
+    fireEvent.click(screen.getByRole('button', { name: 'capture.back' }));
+    fireEvent.click(screen.getByRole('button', { name: 'East field' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'East field' })).toHaveAttribute('aria-pressed', 'true'));
+    fireEvent.click(screen.getByRole('button', { name: 'capture.next' }));
+    fireEvent.click(screen.getByRole('button', { name: 'plant_protection_application' }));
+    fireEvent.click(screen.getByRole('button', { name: 'capture.next' }));
+
+    await waitFor(() => {
+      expect(screen.getByRole('textbox', { name: 'attr.operator' })).toHaveValue('');
+      expect(screen.getByRole('combobox', { name: 'capture.form.product' })).toHaveValue('');
+      expect(screen.getByRole('textbox', { name: 'Product rate' })).toHaveValue('');
+    });
   });
 
   it('revalidates an out-of-range repeat-treatment merge before saving another draft', async () => {
@@ -1500,13 +2010,13 @@ describe('JournalCaptureFlow', () => {
         entered_unit_code: null,
       }, {
         group_index: 0,
-        attribute_code: 'attr.rate',
+        attribute_code: 'attr.amount_mass_area_product',
         value_status: 'observed',
         value_num: 2500,
         value_text: null,
-        unit_code: 'unit.kg',
+        unit_code: 'unit.kg_per_ha_product',
         entered_value_num: 2500,
-        entered_unit_code: 'unit.kg',
+        entered_unit_code: 'unit.kg_per_ha_product',
       }],
     });
     apiMocks.listEntries.mockImplementation(async (filters: { entry_uuid?: string }) => filters.entry_uuid
@@ -1541,7 +2051,7 @@ describe('JournalCaptureFlow', () => {
     try {
       await waitFor(() => expect(screen.getByText('capture.carry.repeatTreatment')).toBeInTheDocument());
       fireEvent.click(screen.getByRole('button', { name: 'capture.carry.useValues' }));
-      expect(screen.getByRole('textbox', { name: 'Application rate' })).toHaveValue('2500');
+      expect(screen.getByRole('textbox', { name: 'Product rate' })).toHaveValue('2500');
       expect(screen.getByRole('alert')).toHaveTextContent('capture.validation.maximum');
       const updatesBefore = apiMocks.updateEntry.mock.calls.length;
       fireEvent.click(screen.getByRole('button', { name: 'capture.next' }));

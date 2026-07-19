@@ -232,6 +232,17 @@
       "crop": "Cultura",
       "product": "Produto",
       "rate": "Dose",
+      "protectedValues": "Valores protegidos",
+      "unknownProduct": "Produto indisponível",
+      "unknownRate": "Dose indisponível",
+      "unknownValue": "Valor indisponível",
+      "valueStatus": {
+        "observed": "Observado",
+        "not_observed": "Não observado",
+        "not_applicable": "Não aplicável",
+        "below_detection": "Abaixo do limite de deteção"
+      },
+      "group": "Grupo {{number}}",
       "useValues": "Utilizar estes valores",
       "dismiss": "Não copiar",
       "invalidated": "O tratamento anterior deixou de corresponder a esta parcela, cultura, hora, época ou layout"

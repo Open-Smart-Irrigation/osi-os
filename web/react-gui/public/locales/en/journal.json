@@ -232,6 +232,17 @@
       "crop": "Crop",
       "product": "Product",
       "rate": "Rate",
+      "protectedValues": "Protected values",
+      "unknownProduct": "Product unavailable",
+      "unknownRate": "Rate unavailable",
+      "unknownValue": "Value unavailable",
+      "valueStatus": {
+        "observed": "Observed",
+        "not_observed": "Not observed",
+        "not_applicable": "Not applicable",
+        "below_detection": "Below detection"
+      },
+      "group": "Group {{number}}",
       "useValues": "Use these values",
       "dismiss": "Do not copy",
       "invalidated": "The previous treatment no longer matches this plot, crop, time, season, or layout"

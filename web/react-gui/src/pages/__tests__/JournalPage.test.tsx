@@ -97,6 +97,7 @@ vi.mock('../../components/journal/capture/JournalCaptureFlow', async () => {
 import { JournalPage } from '../JournalPage';
 import { IrrigationZoneCard } from '../../components/farming/IrrigationZoneCard';
 import { partitionCarryForward } from '../../journal/carryForward';
+import { compiledSlaCatalog } from '../../journal/__tests__/slaFixture';
 import type {
   EntryAggregate,
   JournalCatalog,
@@ -154,6 +155,13 @@ function catalogVocabRow(
     code,
     kind,
   };
+}
+
+const compiledSla = compiledSlaCatalog();
+const compiledFarmerQuick = compiledSla.templates.find(({ code, version }) => code === 'farmer_quick' && version === 1);
+const compiledOpenField = compiledSla.layouts.find(({ code, version }) => code === 'open_field' && version === 1);
+if (!compiledFarmerQuick || !compiledOpenField) {
+  throw new Error('compiled SLA catalog is missing farmer_quick or open_field');
 }
 
 const captureCatalog: JournalCatalog = {
@@ -290,22 +298,7 @@ const captureCatalog: JournalCatalog = {
     active: 1,
     catalog_errors: [],
     labels: { en: 'Quick' },
-    definition: {
-      sections: [
-        { code: 'what_where_when', fields: ['activity_code', 'plot_uuid', 'occurred_start'] },
-        {
-          code: 'key_values',
-          fields: [
-            'attr.irrigation_depth',
-            'attr.amount_mass_area_product',
-            'attr.amount_volume_area_product',
-            'note',
-          ],
-        },
-      ],
-      max_primary_fields: 5,
-      carry_forward: ['attr.operator', 'attr.equipment', 'attr.method'],
-    },
+    definition: compiledFarmerQuick.definition,
   }, {
     code: 'full_record',
     version: 1,
@@ -327,13 +320,7 @@ const captureCatalog: JournalCatalog = {
     active: 1,
     catalog_errors: [],
     labels: { en: 'Open field' },
-    definition: {
-      activity_codes: [...openFieldActivityCodes],
-      supported_templates: ['farmer_quick', 'full_record', 'research_observation'],
-      minimum_fields: ['attr.block_bed_row', 'attr.treated_area', 'attr.cover_type', 'attr.denominator'],
-      denominator_contract: ['area', 'plant', 'row'],
-      option_dependencies: [],
-    },
+    definition: compiledOpenField.definition,
   }],
   products: [],
   mappings: [],
@@ -1271,46 +1258,6 @@ describe('JournalPage', () => {
   });
 
   it('preserves the existing nine-activation open_field SLA regression', async () => {
-    expect(captureCatalog.templates.find(({ code }) => code === 'farmer_quick')?.definition).toEqual({
-      sections: [
-        { code: 'what_where_when', fields: ['activity_code', 'plot_uuid', 'occurred_start'] },
-        {
-          code: 'key_values',
-          fields: [
-            'attr.irrigation_depth',
-            'attr.amount_mass_area_product',
-            'attr.amount_volume_area_product',
-            'note',
-          ],
-        },
-      ],
-      max_primary_fields: 5,
-      carry_forward: ['attr.operator', 'attr.equipment', 'attr.method'],
-    });
-    expect(captureCatalog.layouts.find(({ code }) => code === 'open_field')?.definition).toEqual({
-      activity_codes: [
-        'irrigation',
-        'fertilization',
-        'fertigation',
-        'plant_protection_application',
-        'weed_control_nonchemical',
-        'seeding',
-        'planting_transplanting',
-        'pruning',
-        'crop_care',
-        'tillage_soil_work',
-        'mowing',
-        'harvest',
-        'sampling',
-        'general_observation',
-        'pest_disease_observation',
-        'equipment_maintenance',
-      ],
-      supported_templates: ['farmer_quick', 'full_record', 'research_observation'],
-      minimum_fields: ['attr.block_bed_row', 'attr.treated_area', 'attr.cover_type', 'attr.denominator'],
-      denominator_contract: ['area', 'plant', 'row'],
-      option_dependencies: [],
-    });
     expect(partitionCarryForward(carryForwardSource, {
       definition: captureCatalog.templates.find(({ code }) => code === 'farmer_quick')?.definition,
     }).automaticValues).toEqual(expect.arrayContaining([{

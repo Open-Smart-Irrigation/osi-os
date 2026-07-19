@@ -9,12 +9,18 @@ vi.mock('../../services/journalApi', () => ({
 import {
   loadCarryForwardCandidate,
   partitionCarryForward,
+  PLANT_PROTECTION_PROTECTED_CODES,
 } from '../carryForward';
 import type {
   EntryAggregate,
   EntryValue,
   JournalDefinitionRow,
 } from '../../types/journal';
+// @ts-expect-error The authoritative catalog source is a CommonJS generator input.
+import coreCatalog from '../../../../../scripts/journal-catalog-core.js';
+// @ts-expect-error The authoritative generator is CommonJS and has no TypeScript declaration.
+import catalogGenerator from '../../../../../scripts/generate-journal-catalog.js';
+import agroscopeSource from '../../../../../docs/superpowers/specs/agroscope-open-field/catalog.json';
 
 const draftUuid = 'draft-uuid';
 const timestamp = '2026-07-16T00:00:00.000Z';
@@ -352,7 +358,10 @@ describe('carry-forward loading', () => {
 
 describe('carry-forward partitioning', () => {
   const labels = {
-    productLabels: new Map([['product-1', 'Catalog Product']]),
+    productLabels: new Map([
+      ['product-1', 'Catalog Product'],
+      ['product-2', 'Second Product'],
+    ]),
     unitLabels: new Map([['unit.kg_per_ha_product', 'kg/ha']]),
   };
 
@@ -360,16 +369,13 @@ describe('carry-forward partitioning', () => {
     const protectedCodes = [
       'attr.product_uuid',
       'attr.product',
-      'attr.authorization',
       'attr.target',
-      'attr.dose',
       'attr.amount_mass_area_product',
       'attr.amount_volume_area_product',
       'attr.amount_biological_count_area',
-      'attr.amount_count_area',
-      'attr.basis',
       'attr.treated_area',
       'attr.waiting_period_days',
+      'attr.denominator',
     ];
     const source = entry({ values: [
       value('attr.operator', 'Alex'),
@@ -377,22 +383,13 @@ describe('carry-forward partitioning', () => {
       value('attr.method', 'Broadcast'),
       value('attr.product_uuid', 'product-1'),
       value('attr.product', 'Product A'),
-      value('attr.authorization', 'CH-123'),
       value('attr.target', 'Aphids'),
-      value('attr.dose', '2', {
-        value_text: null,
-        value_num: 2,
-        unit_code: 'unit.kg_per_ha_product',
-        entered_value_num: 2,
-        entered_unit_code: 'unit.kg_per_ha_product',
-      }),
       value('attr.amount_mass_area_product', '2'),
       value('attr.amount_volume_area_product', '2'),
       value('attr.amount_biological_count_area', '2'),
-      value('attr.amount_count_area', '2'),
-      value('attr.basis', 'product_mass_per_area'),
       value('attr.treated_area', '1.5'),
       value('attr.waiting_period_days', '14'),
+      value('attr.denominator', 'choice.denominator.area'),
     ] });
     const template = {
       code: 'full_record',
@@ -419,6 +416,49 @@ describe('carry-forward partitioning', () => {
       sourceDate: source.occurred_start,
       crop: source.season_crop,
     });
+  });
+
+  it('derives protection expectations from the compiled plant-protection contract', () => {
+    const compiled = (catalogGenerator as {
+      compileCatalog: (core: unknown, source: unknown) => { rows: Array<{ table: string; columns: string[]; values: unknown[] }> };
+    }).compileCatalog(coreCatalog, agroscopeSource);
+    const rowObject = (row: { columns: string[]; values: unknown[] }) =>
+      Object.fromEntries(row.columns.map((column, index) => [column, row.values[index]]));
+    const definition = (table: string, code: string) => {
+      const row = compiled.rows.find((candidate) => {
+        if (candidate.table !== table) return false;
+        const object = rowObject(candidate);
+        return object.code === code && object.version === 1;
+      });
+      if (!row) throw new Error(`missing compiled ${table} ${code}`);
+      return JSON.parse(String(rowObject(row).definition_json)) as Record<string, unknown>;
+    };
+    const fullRecord = definition('journal_templates', 'full_record');
+    const openField = definition('journal_layouts', 'open_field');
+    const protection = (fullRecord.activity_requirements as Record<string, Record<string, unknown>>)
+      .plant_protection_application;
+    const attributeRows = compiled.rows
+      .filter((row) => row.table === 'journal_vocab' && rowObject(row).kind === 'attribute')
+      .map(rowObject);
+    const denominatorCode = (openField.minimum_fields as string[]).find((code) =>
+      attributeRows.some((row) => row.code === code &&
+        String((JSON.parse(String(row.labels_json)) as Record<string, string>).en)
+          .toLowerCase().includes('denominator')));
+    const expectedFromCatalog = new Set([
+      ...(protection.required as string[]),
+      ...(protection.required_any as string[][]).flat(),
+      ...(denominatorCode ? [denominatorCode] : []),
+      'attr.target',
+      'attr.waiting_period_days',
+    ].filter((code) => code.startsWith('attr.')));
+    const catalogAttributeCodes = new Set(
+      compiled.rows
+        .filter((row) => row.table === 'journal_vocab' && rowObject(row).kind === 'attribute')
+        .map((row) => String(rowObject(row).code)),
+    );
+
+    expect(new Set(PLANT_PROTECTION_PROTECTED_CODES)).toEqual(expectedFromCatalog);
+    expect([...expectedFromCatalog].every((code) => catalogAttributeCodes.has(code))).toBe(true);
   });
 
   it('does not expose a repeat-treatment action for other activities', () => {
@@ -453,7 +493,7 @@ describe('carry-forward partitioning', () => {
     const source = entry({ values: [
       value('attr.product', 'Free-text fallback'),
       value('attr.product_uuid', 'product-1'),
-      value('attr.dose', '2000', {
+      value('attr.amount_mass_area_product', '2000', {
         value_text: null,
         value_num: 2000,
         unit_code: 'unit.g_per_ha_product',
@@ -480,7 +520,7 @@ describe('carry-forward partitioning', () => {
   it.each([
     ['unknown product UUID', [
       value('attr.product_uuid', 'unknown-product'),
-      value('attr.dose', '2', {
+      value('attr.amount_mass_area_product', '2', {
         value_text: null,
         value_num: 2,
         unit_code: 'unit.kg_per_ha_product',
@@ -507,5 +547,32 @@ describe('carry-forward partitioning', () => {
       product: null,
       rate: null,
     });
+  });
+
+  it('does not make a multi-group treatment confirmable when a later group lacks product or rate', () => {
+    const source = entry({ values: [
+      value('attr.product_uuid', 'product-1', { group_index: 0 }),
+      value('attr.amount_mass_area_product', '2', {
+        group_index: 0,
+        value_text: null,
+        value_num: 2,
+        unit_code: 'unit.kg_per_ha_product',
+        entered_value_num: 2,
+        entered_unit_code: 'unit.kg_per_ha_product',
+      }),
+      value('attr.product_uuid', 'product-2', { group_index: 1 }),
+    ] });
+
+    const result = partitionCarryForward(source, { carry_forward: [] }, labels);
+
+    expect(result.repeatTreatment).toMatchObject({
+      complete: false,
+      product: null,
+      rate: null,
+    });
+    expect(result.repeatTreatment?.groupedTreatments).toEqual([
+      { groupIndex: 0, product: 'Catalog Product', rate: '2 kg/ha' },
+      { groupIndex: 1, product: 'Second Product', rate: null },
+    ]);
   });
 });
