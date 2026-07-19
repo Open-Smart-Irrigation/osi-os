@@ -99,7 +99,7 @@ single reviewed record of "legitimately English" strings across the whole GUI.
 
 ## Open question for the product owner
 
-Native review. The spec's §6.4 native-review requirement is written about *catalog* labels,
+Native review is **product-owner-handled**: the owner distributes the translations to multiple named reviewers directly (2026-07-19), so no reviewer name is tracked here. Deliverable owed at the end of the translation work: a consolidated list of every translated term (all locales, all namespaces) plus the worker-flagged uncertain/newly-coined terms, for those reviewers.
 and catalog labels are explicitly staying English, so it does not formally bind this program.
 But `de-CH`, `fr` and `lg` GUI copy still ends up in front of farmers, and `lg` serves the
 live Uganda gateway. These waves produce reviewable drafts with uncertain terms flagged

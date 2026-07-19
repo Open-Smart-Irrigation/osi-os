@@ -62,7 +62,26 @@
     "soilWaterTension1": "TENSÃO HÍDRICA DO SOLO 1",
     "soilWaterTension2": "TENSÃO HÍDRICA DO SOLO 2",
     "lightIntensity": "INTENSIDADE LUMINOSA",
-    "lastSeen": "Visto há {{minutes}} minutos"
+    "lastSeen": "Visto há {{minutes}} minutos",
+    "ambientTemperature": "TEMPERATURA AMBIENTE",
+    "relativeHumidity": "HUMIDADE RELATIVA",
+    "neverSeen": "Nunca visto",
+    "settings": "DEFINIÇÕES",
+    "intervalLabel": "Intervalo desejado (minutos)",
+    "intervalPlaceholder": "ex. 15",
+    "intervalNote": "As alterações de intervalo do Kiwi usam o FPort 100 do LoRaWAN. Introduza um número inteiro de minutos entre 1 e 1440.",
+    "invalidInterval": "Introduza um número inteiro de minutos entre 1 e 1440.",
+    "applyInterval": "Aplicar intervalo",
+    "applyingInterval": "A aplicar intervalo...",
+    "intervalPending": "Alteração do intervalo de uplink solicitada para {{minutes}} minuto(s).",
+    "failedToSetInterval": "Falha ao alterar o intervalo de uplink do Kiwi",
+    "enableTempHumidityTitle": "TEMPERATURA AMBIENTE + HUMIDADE",
+    "enableTempHumidityNote": "Ativa o relatório de temperatura ambiente e humidade usando o intervalo introduzido acima.",
+    "enableTempHumidity": "Ativar temperatura + humidade",
+    "enablingTempHumidity": "A ativar temperatura + humidade...",
+    "enableTempHumidityPending": "Relatório de temperatura ambiente e humidade solicitado. O comando utiliza um intervalo de {{minutes}} minuto(s).",
+    "failedToEnableTempHumidity": "Falha ao ativar a temperatura e humidade do Kiwi",
+    "enableTempHumidityRequiresInterval": "Introduza um número inteiro de minutos entre 1 e 1440 antes de ativar a temperatura e humidade ambiente."
   },
   "stregaValve": {
       "confirmOpen": "Confirmar — abrir {{minutes}} min",
@@ -152,7 +171,10 @@
       "applyFlush": "Agendar purga antissedimentos",
       "flushPending": "Purga solicitada a {{percentage}}%, retorno a {{state}}.",
       "failedFlush": "Não foi possível agendar a purga antissedimentos",
-      "invalidOpenDuration": "Introduza uma duração de abertura entre 1 e 255 minutos."
+      "invalidOpenDuration": "Introduza uma duração de abertura entre 1 e 255 minutos.",
+      "intervalLabel": "Intervalo de caixa fechada (minutos)",
+      "intervalPlaceholder": "ex. 10",
+      "intervalNote": "A OSI define o intervalo normal de caixa fechada no FPort 11. O intervalo de caixa aberta permanece fixo em 2 minutos e a deteção de adulteração permanece ativada."
     },
   "zone": {
     "deviceCount_one": "{{count}} dispositivo",
@@ -265,7 +287,8 @@
       "tomorrow": "amanhã",
       "noData": "Previsão indisponível",
       "noLocation": "Defina as coordenadas da zona para ativar a previsão",
-      "hourlyTitle": "Chuva por hora (próx. 24 h)"
+      "hourlyTitle": "Chuva por hora (próx. 24 h)",
+      "unavailable": "Indisponível"
     },
     "metrics": {
       "air_temperature_c": "Temp. ar",

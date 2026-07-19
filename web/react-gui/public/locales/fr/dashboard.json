@@ -32,6 +32,7 @@
   "unassignedSubtitle": "Ces appareils ne sont assignés à aucune zone d'irrigation",
   "soilSensors": "Capteurs de sol",
   "smartValves": "Vannes intelligentes",
+  "journal": "Journal",
   "tabs": {
     "zones": "Zones",
     "data": "Données",
