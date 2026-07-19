@@ -2,6 +2,7 @@ import { useEffect, useId, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import type { JournalPlot, JournalPlotWritePayload } from '../../../types/journal';
+import { randomUuid } from '../../../utils/uuid';
 
 const FOCUS_RING =
   'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--card)]';
@@ -92,7 +93,7 @@ function PlotFormState({
   const layoutId = `${idPrefix}-layout`;
   const activeId = `${idPrefix}-active`;
   const [plotUuid] = useState(() =>
-    mode === 'create' ? crypto.randomUUID() : (initialPlot?.plot_uuid ?? ''),
+    mode === 'create' ? randomUuid() : (initialPlot?.plot_uuid ?? ''),
   );
   const [plotCode, setPlotCode] = useState(initialPlot?.plot_code ?? '');
   const [name, setName] = useState(initialPlot?.name ?? '');

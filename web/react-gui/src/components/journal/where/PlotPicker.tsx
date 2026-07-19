@@ -10,6 +10,7 @@ import type {
 } from '../../../types/journal';
 import { PlotGroupChips } from './PlotGroupChips';
 import { StationGrid } from './StationGrid';
+import { randomUuid } from '../../../utils/uuid';
 
 const FOCUS_RING =
   'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--card)]';
@@ -390,7 +391,7 @@ export function PlotPicker({
           type="button"
           onClick={() => {
             setPickerError(null);
-            setGroupEditor({ mode: 'create', groupUuid: crypto.randomUUID(), label: '' });
+            setGroupEditor({ mode: 'create', groupUuid: randomUuid(), label: '' });
           }}
           className={`rounded-xl border border-[var(--border)] bg-[var(--surface)] px-4 py-2 font-bold text-[var(--text)] hover:border-[var(--primary)] ${TOUCH_CONTROL} ${FOCUS_RING}`}
         >
