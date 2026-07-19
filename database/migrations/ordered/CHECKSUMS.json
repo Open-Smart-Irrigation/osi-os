@@ -19,5 +19,6 @@
   "0018__field_journal.sql": "7f3a542510ed71a944843334a563d6df1b8396e23c4d959ddd90e84db8b87d69",
   "0019__journal_catalog_v1.sql": "c7cb59d92908926c6b3ed2222dc4a81d45df113ef31a7c1ebb2b3935944b19c7",
   "0020__journal_resource_owner_scope.sql": "85249a25aa9ed6d0cfdca029a35efc249e1f0f3152817357b37d884b5dff1ad2",
-  "0021__journal_plot_lookup_indexes.sql": "21591c7a050c46331f1d2ed9494d6883a0c421866f5f65168b7c5fccd9862c8c"
+  "0021__journal_plot_lookup_indexes.sql": "21591c7a050c46331f1d2ed9494d6883a0c421866f5f65168b7c5fccd9862c8c",
+  "0022__journal_catalog_v2.sql": "8b002914d7bdae1996917b046d81d76498346ef8aa1c6fb879efd3264033442c"
 }

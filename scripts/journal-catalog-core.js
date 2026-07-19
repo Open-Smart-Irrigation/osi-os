@@ -345,6 +345,26 @@ const templates = [
       carry_forward: ['attr.operator', 'attr.equipment', 'attr.method'],
     },
   },
+  // v2 (Task 27 / P4 fix): attr.operator/attr.equipment/attr.method were
+  // carried forward but never shown in a visible section in v1 — a silent
+  // prefill nobody could see or correct. v2 surfaces them as an explicit
+  // section so the parseTemplate visibility guard (catalogModel.ts) accepts
+  // this definition, and so the GUI actually renders + submits the values.
+  // v1 stays byte-identical above so historical entries still resolve.
+  {
+    code: 'farmer_quick',
+    version: 2,
+    label: 'Quick',
+    definition: {
+      sections: [
+        { code: 'what_where_when', fields: ['activity_code', 'plot_uuid', 'occurred_start'] },
+        { code: 'key_values', fields: ['attr.irrigation_depth', 'attr.amount_mass_area_product', 'attr.amount_volume_area_product', 'note'] },
+        { code: 'carried_forward_details', fields: ['attr.operator', 'attr.equipment', 'attr.method'] },
+      ],
+      max_primary_fields: 5,
+      carry_forward: ['attr.operator', 'attr.equipment', 'attr.method'],
+    },
+  },
   {
     code: 'full_record',
     version: 1,

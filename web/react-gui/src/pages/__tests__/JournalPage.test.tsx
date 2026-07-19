@@ -169,7 +169,15 @@ function catalogVocabRow(
 }
 
 const compiledSla = compiledSlaCatalog();
-const compiledFarmerQuick = compiledSla.templates.find(({ code, version }) => code === 'farmer_quick' && version === 1);
+// Always take the highest (active) farmer_quick version, not a version
+// pinned at fixture-authoring time: farmer_quick@1 is frozen (Task 27) and
+// no longer the active definition once @2 exists, so pinning to version 1
+// here would exercise a template `buildCatalogModel` now correctly rejects
+// (the P4 carry_forward-visibility guard) rather than what capture actually
+// uses.
+const compiledFarmerQuick = compiledSla.templates
+  .filter(({ code }) => code === 'farmer_quick')
+  .sort((left, right) => right.version - left.version)[0];
 const compiledOpenField = compiledSla.layouts.find(({ code, version }) => code === 'open_field' && version === 1);
 if (!compiledFarmerQuick || !compiledOpenField) {
   throw new Error('compiled SLA catalog is missing farmer_quick or open_field');
@@ -305,7 +313,7 @@ const captureCatalog: JournalCatalog = {
   ],
   templates: [{
     code: 'farmer_quick',
-    version: 1,
+    version: compiledFarmerQuick.version,
     active: 1,
     catalog_errors: [],
     labels: { en: 'Quick' },
