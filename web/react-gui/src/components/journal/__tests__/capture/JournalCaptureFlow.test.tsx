@@ -39,13 +39,27 @@ vi.mock('react-i18next', () => ({
   }),
 }));
 
-import type { EntryAggregate, JournalCatalog, JournalPlot, PlotGroup } from '../../../../types/journal';
+import type {
+  CreateFinalBatchPayload,
+  EntryAggregate,
+  JournalCatalog,
+  JournalPlot,
+  PlotGroup,
+} from '../../../../types/journal';
 import { JournalCaptureFlow } from '../../capture/JournalCaptureFlow';
 
 const timestamp = '2026-07-16T00:00:00.000Z';
 
 function duplicateUuid(index: number): string {
   return `22222222-2222-4222-8222-${String(index).padStart(12, '0')}`;
+}
+
+let defaultRandomUuidCounter = 0;
+
+function nextDefaultRandomUuid(): ReturnType<typeof crypto.randomUUID> {
+  const suffix = (0x111111111111 + defaultRandomUuidCounter).toString(16).padStart(12, '0');
+  defaultRandomUuidCounter += 1;
+  return `11111111-1111-4111-8111-${suffix}` as ReturnType<typeof crypto.randomUUID>;
 }
 
 function row(code: string, kind: 'activity' | 'attribute', valueType: 'text' | 'choice' = 'text') {
@@ -762,7 +776,8 @@ beforeEach(() => {
     outbox_event_uuid: 'outbox-1',
   });
   buildFinalBatchPayloadMock.mockClear();
-  vi.spyOn(crypto, 'randomUUID').mockReturnValue('11111111-1111-4111-8111-111111111111');
+  defaultRandomUuidCounter = 0;
+  vi.spyOn(crypto, 'randomUUID').mockReset().mockImplementation(nextDefaultRandomUuid);
 });
 
 afterEach(() => {
@@ -2661,7 +2676,7 @@ describe('JournalCaptureFlow', () => {
     expect(screen.getByText(/North field, East field/)).toBeInTheDocument();
   });
 
-  it('posts one atomic final batch with sorted plot_uuids and no batch_uuid', async () => {
+  it('posts one atomic final batch with sorted members and no batch_uuid', async () => {
     const onSaved = vi.fn();
     render(<JournalCaptureFlow
       {...baseProps}
@@ -2678,8 +2693,12 @@ describe('JournalCaptureFlow', () => {
     fireEvent.click(screen.getByRole('button', { name: 'capture.finish' }));
 
     await waitFor(() => expect(apiMocks.createFinalBatch).toHaveBeenCalledOnce());
-    const payload = apiMocks.createFinalBatch.mock.calls[0][0];
-    expect(payload.plot_uuids).toEqual([...payload.plot_uuids].sort());
+    const payload = apiMocks.createFinalBatch.mock.calls[0][0] as CreateFinalBatchPayload;
+    expect(payload.members.map(({ plot_uuid }) => plot_uuid)).toEqual(
+      [...payload.members.map(({ plot_uuid }) => plot_uuid)].sort(),
+    );
+    expect(payload.members).toHaveLength(2);
+    expect(payload.members.every(({ entry_uuid }) => typeof entry_uuid === 'string')).toBe(true);
     expect(payload).not.toHaveProperty('batch_uuid');
     expect(payload).not.toHaveProperty('entry_uuid');
     expect(payload).not.toHaveProperty('plot_uuid');
@@ -2690,6 +2709,41 @@ describe('JournalCaptureFlow', () => {
     await waitFor(() => expect(onSaved).toHaveBeenCalledWith(expect.objectContaining({
       batch_uuid: '99999999-9999-4999-8999-999999999999',
     })));
+  });
+
+  it('reuses the same member entry UUIDs when a failed batch is re-finalized', async () => {
+    const generatedUuids = [
+      '22222222-2222-4222-8222-000000000201',
+      '22222222-2222-4222-8222-000000000202',
+      '22222222-2222-4222-8222-000000000203',
+    ] as const;
+    let generatedUuidIndex = 0;
+    vi.mocked(crypto.randomUUID).mockImplementation(() =>
+      generatedUuids[generatedUuidIndex++] ?? '22222222-2222-4222-8222-000000000204');
+    apiMocks.createFinalBatch
+      .mockRejectedValueOnce(new Error('gateway unavailable'))
+      .mockResolvedValueOnce({ batch_uuid: '99999999-9999-4999-8999-999999999999', entries: [] });
+    render(<JournalCaptureFlow {...baseProps} plots={[plot, homogeneousSecondPlot]} />);
+    fireEvent.click(screen.getByRole('button', { name: 'North field' }));
+    fireEvent.click(screen.getByRole('button', { name: 'East field' }));
+    fireEvent.click(screen.getByRole('button', { name: 'capture.next' }));
+    fireEvent.click(screen.getByRole('button', { name: 'irrigation' }));
+    fireEvent.click(screen.getByRole('button', { name: 'capture.next' }));
+    fireEvent.click(screen.getByRole('button', { name: 'capture.next' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'capture.finish' })).toBeEnabled());
+
+    fireEvent.click(screen.getByRole('button', { name: 'capture.finish' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'capture.save.retry' })).toBeInTheDocument());
+    const firstPayload = apiMocks.createFinalBatch.mock.calls[0][0];
+    expect(firstPayload.members).toEqual([
+      expect.objectContaining({ plot_uuid: plot.plot_uuid, entry_uuid: expect.any(String) }),
+      expect.objectContaining({ plot_uuid: homogeneousSecondPlot.plot_uuid, entry_uuid: expect.any(String) }),
+    ]);
+    expect(new Set(firstPayload.members.map(({ entry_uuid }: { entry_uuid: string }) => entry_uuid)).size).toBe(2);
+
+    fireEvent.click(screen.getByRole('button', { name: 'capture.save.retry' }));
+    await waitFor(() => expect(apiMocks.createFinalBatch).toHaveBeenCalledTimes(2));
+    expect(apiMocks.createFinalBatch.mock.calls[1][0].members).toEqual(firstPayload.members);
   });
 
   it('uses the returned batch receipt', async () => {

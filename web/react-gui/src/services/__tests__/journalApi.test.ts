@@ -108,7 +108,10 @@ describe('journalApi', () => {
 
   const validBatch: CreateFinalBatchPayload = {
     status: 'final',
-    plot_uuids: [plotUuid, secondPlotUuid],
+    members: [
+      { plot_uuid: plotUuid, entry_uuid: entryUuid },
+      { plot_uuid: secondPlotUuid, entry_uuid: secondEntryUuid },
+    ],
     base_sync_version: 0,
     duplicate_guard_ack_entry_uuids: [duplicateAckUuid],
     activity_code: 'irrigation',
@@ -245,7 +248,7 @@ describe('journalApi', () => {
     expect(post).toHaveBeenLastCalledWith('/api/journal/entries', draftPayload);
   });
 
-  it('creates one final batch request with plot_uuids and returns the edge batch receipt', async () => {
+  it('creates one final batch request with members and returns the edge batch receipt', async () => {
     const receipt: BatchMutationReceipt = {
       batch_uuid: batchUuid,
       entries: [
@@ -270,7 +273,11 @@ describe('journalApi', () => {
     expect(post).toHaveBeenCalledWith('/api/journal/entries', validBatch);
     expect(validBatch.status).toBe('final');
     expect(validBatch.base_sync_version).toBe(0);
-    expect(Array.isArray(validBatch.plot_uuids)).toBe(true);
+    expect(Array.isArray(validBatch.members)).toBe(true);
+    expect(validBatch.members).toEqual([
+      { plot_uuid: plotUuid, entry_uuid: entryUuid },
+      { plot_uuid: secondPlotUuid, entry_uuid: secondEntryUuid },
+    ]);
     expect(validBatch).not.toHaveProperty('plot_uuid');
     expect(validBatch).not.toHaveProperty('zone_uuid');
   });

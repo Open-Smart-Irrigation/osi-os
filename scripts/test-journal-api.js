@@ -2269,10 +2269,13 @@ test('batch duplicate preflight returns every candidate and accepts only the exa
   const beforeOutbox = db.prepare('SELECT COUNT(*) AS n FROM sync_outbox').get().n;
   const batch = entryInput(null, null, '2026-07-13T08:30:00', {
     entry_uuid: null,
-    plot_uuid: null,
-    plot_uuids: plots,
+    members: plots.map((plotUuid, index) => ({
+      plot_uuid: plotUuid,
+      entry_uuid: `83000000-0000-4000-8000-00000000000${index + 1}`,
+    })),
     season_crop: 'barley',
   });
+  delete batch.plot_uuid;
 
   await assert.rejects(
     journal.saveEntry(db, batch, principal(), { mode: 'create' }),
@@ -2349,6 +2352,410 @@ test('batch duplicate preflight returns every candidate and accepts only the exa
     assert.equal('duplicate_guard_ack_entry_uuids' in aggregate, false);
     assert.equal('duplicate_guard_ack_entry_uuid' in aggregate, false);
   }
+});
+
+test('batch finalization requires canonical unique members and rejects the legacy plot list', async () => {
+  const db = new TestDb('batch-member-contract');
+  seedIdentity(db);
+  const plots = [
+    '85100000-0000-4000-8000-000000000001',
+    '85100000-0000-4000-8000-000000000002',
+  ];
+  for (let index = 0; index < plots.length; index += 1) {
+    await journal.upsertPlot(db, plotInput(plots[index], 'batch-member-' + index), principal());
+  }
+  const base = entryInput(null, null, '2026-07-13T16:00:00', {
+    entry_uuid: null,
+    plot_uuid: null,
+    season_crop: 'barley',
+  });
+
+  for (const invalid of [
+    Object.assign({}, base, { plot_uuids: plots }),
+    Object.assign({}, base, { members: [{ plot_uuid: plots[0], entry_uuid: 'not-a-uuid' }] }),
+    Object.assign({}, base, { members: [{ plot_uuid: plots[0].replaceAll('-', ''), entry_uuid: '85110000-0000-4000-8000-000000000001' }] }),
+    Object.assign({}, base, { members: [{ plot_uuid: plots[0], entry_uuid: '85110000-0000-4000-8000-000000000001' }, { plot_uuid: plots[0], entry_uuid: '85110000-0000-4000-8000-000000000002' }] }),
+    Object.assign({}, base, { members: [{ plot_uuid: plots[0], entry_uuid: '85110000-0000-4000-8000-000000000001' }, { plot_uuid: plots[1], entry_uuid: '85110000-0000-4000-8000-000000000001' }] }),
+  ]) {
+    await assert.rejects(
+      journal.saveEntry(db, invalid, principal(), { mode: 'create' }),
+      (error) => error && ['invalid_batch', 'invalid_uuid', 'duplicate_member'].includes(error.code)
+    );
+  }
+});
+
+test('batch members reject top-level plot or zone scalars before any provisioning or writes', async () => {
+  const db = new TestDb('batch-member-scalar-fields');
+  seedIdentity(db);
+  const plotUuid = '85110000-0000-4000-8000-000000000001';
+  await journal.upsertPlot(db, plotInput(plotUuid, 'batch-scalar-plot', { zone_uuid: ZONE_UUID }), principal());
+  const members = [{
+    plot_uuid: plotUuid,
+    entry_uuid: '85110000-0000-4000-8000-000000000002',
+  }];
+  const snapshot = () => JSON.stringify({
+    plots: db.prepare('SELECT * FROM journal_plots ORDER BY plot_uuid').all(),
+    plotSettings: db.prepare('SELECT * FROM journal_plot_settings ORDER BY plot_uuid').all(),
+    entries: db.prepare('SELECT * FROM journal_entries ORDER BY entry_uuid').all(),
+    values: db.prepare('SELECT * FROM journal_entry_values ORDER BY entry_uuid,group_index,attribute_code').all(),
+    outbox: db.prepare('SELECT * FROM sync_outbox ORDER BY rowid').all(),
+    appliedCommands: db.prepare('SELECT * FROM applied_commands ORDER BY command_id').all(),
+    commandAcks: db.prepare('SELECT * FROM command_ack_outbox ORDER BY command_id').all(),
+  });
+  const before = snapshot();
+  const base = entryInput(null, null, '2026-07-13T16:30:00', {
+    entry_uuid: null,
+    plot_uuid: null,
+    members,
+  });
+
+  for (const invalid of [
+    Object.assign({}, base, { plot_uuid: plotUuid }),
+    Object.assign({}, base, { zone_uuid: ZONE_UUID }),
+  ]) {
+    await assert.rejects(
+      journal.saveEntry(db, invalid, principal(), { mode: 'create' }),
+      (error) => error && error.code === 'invalid_batch' && error.statusCode === 400
+    );
+    assert.equal(snapshot(), before);
+  }
+});
+
+test('batch retry with the same member UUIDs returns existing receipts without writes while fresh UUIDs hit the duplicate guard', async () => {
+  const db = new TestDb('batch-member-idempotency');
+  seedIdentity(db);
+  const plots = [
+    '85200000-0000-4000-8000-000000000001',
+    '85200000-0000-4000-8000-000000000002',
+  ];
+  const members = [
+    { plot_uuid: plots[0], entry_uuid: '85300000-0000-4000-8000-000000000001' },
+    { plot_uuid: plots[1], entry_uuid: '85300000-0000-4000-8000-000000000002' },
+  ];
+  for (let index = 0; index < plots.length; index += 1) {
+    await journal.upsertPlot(db, plotInput(plots[index], 'batch-idempotent-' + index), principal());
+  }
+  const batch = entryInput(null, null, '2026-07-13T17:00:00', {
+    entry_uuid: null,
+    members,
+    season_crop: 'barley',
+  });
+  delete batch.plot_uuid;
+
+  const first = await journal.saveEntry(db, batch, principal(), { mode: 'create' });
+  assert.deepEqual(first.entries.map((entry) => entry.entry_uuid), members.map((member) => member.entry_uuid));
+  const entryCount = db.prepare('SELECT COUNT(*) AS n FROM journal_entries').get().n;
+  const outboxCount = db.prepare('SELECT COUNT(*) AS n FROM sync_outbox').get().n;
+
+  const retried = await journal.saveEntry(db, batch, principal(), { mode: 'create' });
+  assert.equal(retried.batch_uuid, first.batch_uuid);
+  assert.deepEqual(retried.entries, first.entries);
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM journal_entries').get().n, entryCount);
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM sync_outbox').get().n, outboxCount);
+
+  await assert.rejects(
+    journal.saveEntry(db, Object.assign({}, batch, {
+      values: [Object.assign({}, batch.values[0], { value: 13 })],
+    }), principal(), { mode: 'create' }),
+    (error) => error && error.code === 'idempotency_conflict' && error.statusCode === 409
+  );
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM journal_entries').get().n, entryCount);
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM sync_outbox').get().n, outboxCount);
+
+  db.prepare('UPDATE journal_plots SET active=1 WHERE plot_uuid IN (?,?)').run(...plots);
+
+  const freshMembers = members.map((member, index) => ({
+    plot_uuid: member.plot_uuid,
+    entry_uuid: `85400000-0000-4000-8000-00000000000${index + 1}`,
+  }));
+  await assert.rejects(
+    journal.saveEntry(db, Object.assign({}, batch, { members: freshMembers }), principal(), { mode: 'create' }),
+    (error) => error && error.code === 'duplicate_candidates' && error.statusCode === 409 &&
+      error.details.duplicateCandidates.length === members.length
+  );
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM journal_entries').get().n, entryCount);
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM sync_outbox').get().n, outboxCount);
+
+  const acknowledged = await journal.saveEntry(db, Object.assign({}, batch, {
+    members: freshMembers,
+    duplicate_guard_ack_entry_uuids: db.prepare(
+      "SELECT entry_uuid FROM journal_entries WHERE entry_uuid IN (?,?) ORDER BY entry_uuid"
+    ).all(...members.map((member) => member.entry_uuid)).map((row) => row.entry_uuid),
+  }), principal(), { mode: 'create' });
+  assert.deepEqual(acknowledged.entries.map((entry) => entry.entry_uuid), freshMembers.map((member) => member.entry_uuid));
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM journal_entries').get().n, entryCount + members.length);
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM sync_outbox').get().n, outboxCount + members.length);
+
+  for (const plotUuid of plots) {
+    db.prepare('UPDATE journal_plots SET active=0 WHERE plot_uuid=?').run(plotUuid);
+  }
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM journal_entries WHERE deleted_at IS NULL').get().n, 4);
+  const retryAfterDeactivation = await journal.saveEntry(db, batch, principal(), { mode: 'create' });
+  assert.deepEqual(retryAfterDeactivation, retried);
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM journal_entries').get().n, entryCount + members.length);
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM sync_outbox').get().n, outboxCount + members.length);
+});
+
+test('batch retry binds activity, occurrence, and value intent and survives plot lifecycle changes', async () => {
+  const db = new TestDb('batch-member-intent-binding');
+  seedIdentity(db);
+  const members = [{
+    plot_uuid: '87100000-0000-4000-8000-000000000001',
+    entry_uuid: '87200000-0000-4000-8000-000000000001',
+  }];
+  await journal.upsertPlot(db, plotInput(members[0].plot_uuid, 'batch-intent-binding'), principal());
+  const batch = entryInput(null, null, '2026-07-14T08:00:00', {
+    entry_uuid: null,
+    members,
+    season_crop: 'barley',
+  });
+  delete batch.plot_uuid;
+  await journal.saveEntry(db, batch, principal(), { mode: 'create' });
+
+  for (const changed of [
+    Object.assign({}, batch, { activity_code: 'fertilization' }),
+    Object.assign({}, batch, { occurred_start_local: '2026-07-14T08:01:00' }),
+    Object.assign({}, batch, { values: [Object.assign({}, batch.values[0], { value: 13 })] }),
+  ]) {
+    await assert.rejects(
+      journal.saveEntry(db, changed, principal(), { mode: 'create' }),
+      (error) => error && error.code === 'idempotency_conflict' && error.statusCode === 409
+    );
+  }
+
+  for (const update of [
+    ['active', "UPDATE journal_plots SET active=0 WHERE plot_uuid=?", [members[0].plot_uuid]],
+    ['deleted', "UPDATE journal_plots SET active=1,deleted_at=? WHERE plot_uuid=?", ['2026-07-14T09:00:00.000Z', members[0].plot_uuid]],
+  ]) {
+    db.prepare(update[1]).run(...update[2]);
+    const retry = await journal.saveEntry(db, batch, principal(), { mode: 'create' });
+    assert.equal(retry.entries[0].entry_uuid, members[0].entry_uuid, update[0]);
+    db.prepare(
+      'UPDATE journal_plots SET active=1,deleted_at=NULL WHERE plot_uuid=?'
+    ).run(members[0].plot_uuid);
+  }
+});
+
+test('batch API rejects tombstoned member UUIDs without writes and masks foreign ownership', async () => {
+  const db = new TestDb('batch-member-tombstone');
+  seedIdentity(db);
+  const member = {
+    plot_uuid: '87300000-0000-4000-8000-000000000001',
+    entry_uuid: '87400000-0000-4000-8000-000000000001',
+  };
+  await journal.upsertPlot(db, plotInput(member.plot_uuid, 'batch-tombstone'), principal());
+  const batch = entryInput(null, null, '2026-07-14T09:00:00', {
+    entry_uuid: null,
+    members: [member],
+    season_crop: 'barley',
+  });
+  delete batch.plot_uuid;
+  await journal.saveEntry(db, batch, principal(), { mode: 'create' });
+  db.prepare('UPDATE journal_entries SET deleted_at=? WHERE entry_uuid=?').run(
+    '2026-07-14T10:00:00.000Z', member.entry_uuid
+  );
+  const snapshot = () => JSON.stringify({
+    entries: db.prepare('SELECT * FROM journal_entries ORDER BY entry_uuid').all(),
+    values: db.prepare('SELECT * FROM journal_entry_values ORDER BY entry_uuid,group_index,attribute_code').all(),
+    outbox: db.prepare('SELECT * FROM sync_outbox ORDER BY rowid').all(),
+  });
+  const before = snapshot();
+
+  await assert.rejects(
+    journal.saveEntry(db, batch, principal(), { mode: 'create' }),
+    (error) => error && error.code === 'idempotency_conflict' && error.statusCode === 409
+  );
+  await assert.rejects(
+    journal.saveEntry(db, batch, principal({
+      user_id: 2,
+      owner_user_uuid: OTHER_OWNER_UUID,
+    }), { mode: 'create' }),
+    (error) => {
+      const response = journal.errorResponse(error);
+      return error && error.code === 'ownership' && response.statusCode === 404;
+    }
+  );
+  assert.equal(snapshot(), before);
+});
+
+test('batch rejects mixed existing and new members before duplicate preflight or writes', async () => {
+  const db = new TestDb('batch-member-mixed-idempotency');
+  seedIdentity(db);
+  const plots = [
+    '86100000-0000-4000-8000-000000000001',
+    '86100000-0000-4000-8000-000000000002',
+  ];
+  const members = [
+    { plot_uuid: plots[0], entry_uuid: '86200000-0000-4000-8000-000000000001' },
+    { plot_uuid: plots[1], entry_uuid: '86200000-0000-4000-8000-000000000002' },
+  ];
+  for (let index = 0; index < plots.length; index += 1) {
+    await journal.upsertPlot(db, plotInput(plots[index], 'batch-mixed-' + index), principal());
+  }
+  const batch = entryInput(null, null, '2026-07-13T19:00:00', {
+    entry_uuid: null,
+    members,
+    season_crop: 'barley',
+  });
+  delete batch.plot_uuid;
+  await journal.saveEntry(db, batch, principal(), { mode: 'create' });
+  const beforeEntries = db.prepare('SELECT COUNT(*) AS n FROM journal_entries').get().n;
+  const beforeOutbox = db.prepare('SELECT COUNT(*) AS n FROM sync_outbox').get().n;
+
+  await assert.rejects(
+    journal.saveEntry(db, Object.assign({}, batch, {
+      members: [
+        members[0],
+        { plot_uuid: plots[1], entry_uuid: '86300000-0000-4000-8000-000000000001' },
+      ],
+      duplicate_guard_ack_entry_uuids: [members[1].entry_uuid],
+    }), principal(), { mode: 'create' }),
+    (error) => error && error.code === 'idempotency_conflict' && error.statusCode === 409
+  );
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM journal_entries').get().n, beforeEntries);
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM sync_outbox').get().n, beforeOutbox);
+});
+
+test('all-existing batch retries require one batch and an exact persisted member set', async () => {
+  const db = new TestDb('batch-member-exact-idempotency');
+  seedIdentity(db);
+  const plots = [
+    '86400000-0000-4000-8000-000000000001',
+    '86400000-0000-4000-8000-000000000002',
+    '86400000-0000-4000-8000-000000000003',
+    '86400000-0000-4000-8000-000000000004',
+  ];
+  const members = [
+    { plot_uuid: plots[0], entry_uuid: '86500000-0000-4000-8000-000000000001' },
+    { plot_uuid: plots[1], entry_uuid: '86500000-0000-4000-8000-000000000002' },
+  ];
+  const otherMember = { plot_uuid: plots[2], entry_uuid: '86500000-0000-4000-8000-000000000003' };
+  for (let index = 0; index < plots.length; index += 1) {
+    await journal.upsertPlot(db, plotInput(plots[index], 'batch-exact-' + index), principal());
+  }
+  const firstBatch = entryInput(null, null, '2026-07-13T20:00:00', {
+    entry_uuid: null,
+    members,
+    season_crop: 'barley',
+  });
+  delete firstBatch.plot_uuid;
+  await journal.saveEntry(db, firstBatch, principal(), { mode: 'create' });
+  const secondBatch = entryInput(null, null, '2026-07-13T21:00:00', {
+    entry_uuid: null,
+    members: [otherMember],
+    season_crop: 'barley',
+  });
+  delete secondBatch.plot_uuid;
+  await journal.saveEntry(db, secondBatch, principal(), { mode: 'create' });
+  const beforeEntries = db.prepare('SELECT COUNT(*) AS n FROM journal_entries').get().n;
+  const beforeOutbox = db.prepare('SELECT COUNT(*) AS n FROM sync_outbox').get().n;
+
+  await assert.rejects(
+    journal.saveEntry(db, Object.assign({}, firstBatch, { members: [members[0]] }), principal(), { mode: 'create' }),
+    (error) => error && error.code === 'idempotency_conflict' && error.statusCode === 409
+  );
+  await assert.rejects(
+    journal.saveEntry(db, Object.assign({}, firstBatch, { members: [...members, {
+      plot_uuid: plots[3],
+      entry_uuid: '86600000-0000-4000-8000-000000000001',
+    }] }), principal(), { mode: 'create' }),
+    (error) => error && error.code === 'idempotency_conflict' && error.statusCode === 409
+  );
+  await assert.rejects(
+    journal.saveEntry(db, Object.assign({}, firstBatch, {
+      members: [members[0], otherMember],
+    }), principal(), { mode: 'create' }),
+    (error) => error && error.code === 'idempotency_conflict' && error.statusCode === 409
+  );
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM journal_entries').get().n, beforeEntries);
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM sync_outbox').get().n, beforeOutbox);
+});
+
+test('batch retry fails closed when an existing member lacks its current outbox receipt', async () => {
+  const db = new TestDb('batch-member-missing-receipt');
+  seedIdentity(db);
+  const plots = [
+    '86700000-0000-4000-8000-000000000001',
+    '86700000-0000-4000-8000-000000000002',
+  ];
+  const members = [
+    { plot_uuid: plots[0], entry_uuid: '86800000-0000-4000-8000-000000000001' },
+    { plot_uuid: plots[1], entry_uuid: '86800000-0000-4000-8000-000000000002' },
+  ];
+  for (let index = 0; index < plots.length; index += 1) {
+    await journal.upsertPlot(db, plotInput(plots[index], 'batch-receipt-' + index), principal());
+  }
+  const batch = entryInput(null, null, '2026-07-13T22:00:00', {
+    entry_uuid: null,
+    members,
+    season_crop: 'barley',
+  });
+  delete batch.plot_uuid;
+  await journal.saveEntry(db, batch, principal(), { mode: 'create' });
+  db.prepare(
+    "DELETE FROM sync_outbox WHERE aggregate_type='JOURNAL_ENTRY' AND aggregate_key=?"
+  ).run(members[0].entry_uuid);
+  const beforeEntries = db.prepare('SELECT COUNT(*) AS n FROM journal_entries').get().n;
+  const beforeOutbox = db.prepare('SELECT COUNT(*) AS n FROM sync_outbox').get().n;
+
+  await assert.rejects(
+    journal.saveEntry(db, batch, principal(), { mode: 'create' }),
+    (error) => error && error.code === 'idempotency_conflict' && error.statusCode === 409
+  );
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM journal_entries').get().n, beforeEntries);
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM sync_outbox').get().n, beforeOutbox);
+});
+
+test('batch retry fails closed when the receipt sync version differs from the persisted entry', async () => {
+  const db = new TestDb('batch-member-stale-receipt');
+  seedIdentity(db);
+  const plotUuid = '86900000-0000-4000-8000-000000000001';
+  const entryUuid = '87000000-0000-4000-8000-000000000001';
+  await journal.upsertPlot(db, plotInput(plotUuid, 'batch-stale-receipt'), principal());
+  const batch = entryInput(null, null, '2026-07-13T23:00:00', {
+    entry_uuid: null,
+    members: [{ plot_uuid: plotUuid, entry_uuid: entryUuid }],
+    season_crop: 'barley',
+  });
+  delete batch.plot_uuid;
+  await journal.saveEntry(db, batch, principal(), { mode: 'create' });
+  db.prepare(
+    "UPDATE sync_outbox SET sync_version=sync_version+1 WHERE aggregate_type='JOURNAL_ENTRY' AND aggregate_key=?"
+  ).run(entryUuid);
+  const beforeEntries = db.prepare('SELECT COUNT(*) AS n FROM journal_entries').get().n;
+  const beforeOutbox = db.prepare('SELECT COUNT(*) AS n FROM sync_outbox').get().n;
+
+  await assert.rejects(
+    journal.saveEntry(db, batch, principal(), { mode: 'create' }),
+    (error) => error && error.code === 'idempotency_conflict' && error.statusCode === 409
+  );
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM journal_entries').get().n, beforeEntries);
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM sync_outbox').get().n, beforeOutbox);
+});
+
+test('batch member finalization remains atomic when a later member cannot resolve', async () => {
+  const db = new TestDb('batch-member-atomicity');
+  seedIdentity(db);
+  const validPlot = '85500000-0000-4000-8000-000000000001';
+  await journal.upsertPlot(db, plotInput(validPlot, 'batch-atomic'), principal());
+  const beforeEntries = db.prepare('SELECT COUNT(*) AS n FROM journal_entries').get().n;
+  const beforeOutbox = db.prepare('SELECT COUNT(*) AS n FROM sync_outbox').get().n;
+
+  const batch = entryInput(null, null, '2026-07-13T18:00:00', {
+      entry_uuid: null,
+      members: [
+        { plot_uuid: validPlot, entry_uuid: '85600000-0000-4000-8000-000000000001' },
+        { plot_uuid: '85700000-0000-4000-8000-000000000001', entry_uuid: '85600000-0000-4000-8000-000000000002' },
+      ],
+      season_crop: 'barley',
+    });
+  delete batch.plot_uuid;
+  await assert.rejects(
+    journal.saveEntry(db, batch, principal(), { mode: 'create' }),
+    (error) => error && error.code === 'plot_not_found'
+  );
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM journal_entries').get().n, beforeEntries);
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM sync_outbox').get().n, beforeOutbox);
 });
 
 test('code-only plot layout binding rolls forward to the latest active version without rewriting history', async () => {

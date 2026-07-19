@@ -13,6 +13,8 @@ const {
   allowedUnits,
   assertJournalEntryEffectKey,
   convertToCanonical,
+  saveEntry,
+  upsertPlot,
   validateEntry,
 } = require('./index');
 const { numericAttributePreflight } = require('./units');
@@ -22,6 +24,8 @@ const repoRoot = path.resolve(__dirname, '../../../../../../..');
 const seedSql = fs.readFileSync(path.join(repoRoot, 'database/seed-blank.sql'), 'utf8');
 const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'osi-journal-test-'));
 const databases = [];
+const JOURNAL_TEST_OWNER_UUID = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+const JOURNAL_TEST_GATEWAY_EUI = '0016C001F1000001';
 
 test.after(() => {
   for (const db of databases) db.close();
@@ -33,6 +37,52 @@ function createTestDb(name) {
   db.exec(seedSql);
   databases.push(db);
   return db;
+}
+
+function createJournalDb(name) {
+  const raw = createTestDb(name);
+  const db = {
+    prepare: raw.prepare.bind(raw),
+    get(sql, params) {
+      return raw.prepare(sql).get(...(params || []));
+    },
+    all(sql, params) {
+      return raw.prepare(sql).all(...(params || []));
+    },
+    run(sql, params) {
+      return raw.prepare(sql).run(...(params || []));
+    },
+    exec: raw.exec.bind(raw),
+    async transaction(executor) {
+      raw.exec('BEGIN IMMEDIATE');
+      try {
+        const result = await executor(db);
+        raw.exec('COMMIT');
+        return result;
+      } catch (error) {
+        raw.exec('ROLLBACK');
+        throw error;
+      }
+    },
+  };
+  return db;
+}
+
+function seedJournalTestIdentity(db) {
+  db.prepare(
+    'INSERT INTO users(id,username,password_hash,created_at,user_uuid) VALUES (?,?,?,?,?)'
+  ).run(1, 'journal-test-user', 'unused', '2026-07-19T00:00:00.000Z', JOURNAL_TEST_OWNER_UUID);
+}
+
+function journalTestPrincipal() {
+  return {
+    user_id: 1,
+    owner_user_uuid: JOURNAL_TEST_OWNER_UUID,
+    author_principal_uuid: JOURNAL_TEST_OWNER_UUID,
+    author_label: 'journal-test-user',
+    gateway_device_eui: JOURNAL_TEST_GATEWAY_EUI,
+    origin: 'edge-ui',
+  };
 }
 
 async function loadedFixture(name) {
@@ -63,6 +113,446 @@ function validIrrigation(overrides) {
     note: 'Morning irrigation',
   }, overrides || {});
 }
+
+test('saveEntry batch retry returns original receipts without entry or outbox writes', async () => {
+  const db = createJournalDb('batch-retry-noop');
+  seedJournalTestIdentity(db);
+  const principal = journalTestPrincipal();
+  const members = [
+    { plot_uuid: '11110000-0000-4000-8000-000000000001', entry_uuid: '22220000-0000-4000-8000-000000000001' },
+    { plot_uuid: '11110000-0000-4000-8000-000000000002', entry_uuid: '22220000-0000-4000-8000-000000000002' },
+  ];
+  for (const [index, member] of members.entries()) {
+    await upsertPlot(db, {
+      plot_uuid: member.plot_uuid,
+      base_sync_version: 0,
+      plot_code: 'retry-' + index,
+      name: 'Retry ' + index,
+      zone_uuid: null,
+      station_code: null,
+      crop_hint: 'barley',
+      area_m2: 100,
+      active: 1,
+      layout_code: 'open_field',
+      layout_version: 1,
+    }, principal);
+  }
+  const batch = {
+    status: 'final',
+    base_sync_version: 0,
+    members,
+    activity_code: 'irrigation',
+    template_code: 'farmer_quick',
+    template_version: 1,
+    layout_code: 'open_field',
+    layout_version: 1,
+    occurred_start_local: '2026-07-19T08:00:00',
+    occurred_timezone: 'Europe/Zurich',
+    season_crop: 'barley',
+    values: [{
+      attribute_code: 'attr.irrigation_depth',
+      group_index: 0,
+      value: 12,
+      unit_code: 'unit.mm_water',
+      value_status: 'observed',
+    }],
+  };
+
+  const first = await saveEntry(db, batch, principal, { mode: 'create' });
+  const entriesBeforeRetry = db.prepare('SELECT COUNT(*) AS n FROM journal_entries').get().n;
+  const outboxBeforeRetry = db.prepare('SELECT COUNT(*) AS n FROM sync_outbox').get().n;
+  const retry = await saveEntry(db, batch, principal, { mode: 'create' });
+
+  assert.equal(retry.batch_uuid, first.batch_uuid);
+  assert.deepEqual(retry.entries, first.entries);
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM journal_entries').get().n, entriesBeforeRetry);
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM sync_outbox').get().n, outboxBeforeRetry);
+});
+
+test('saveEntry rejects changed content for the same batch member UUID without writes', async () => {
+  const db = createJournalDb('batch-retry-content-conflict');
+  seedJournalTestIdentity(db);
+  const principal = journalTestPrincipal();
+  const member = {
+    plot_uuid: '11130000-0000-4000-8000-000000000001',
+    entry_uuid: '22240000-0000-4000-8000-000000000001',
+  };
+  await upsertPlot(db, {
+    plot_uuid: member.plot_uuid,
+    base_sync_version: 0,
+    plot_code: 'content-conflict',
+    name: 'Content conflict',
+    zone_uuid: null,
+    station_code: null,
+    crop_hint: 'barley',
+    area_m2: 100,
+    active: 1,
+    layout_code: 'open_field',
+    layout_version: 1,
+  }, principal);
+  const batch = {
+    status: 'final',
+    base_sync_version: 0,
+    members: [member],
+    activity_code: 'irrigation',
+    template_code: 'farmer_quick',
+    template_version: 1,
+    layout_code: 'open_field',
+    layout_version: 1,
+    occurred_start_local: '2026-07-19T10:00:00',
+    occurred_timezone: 'Europe/Zurich',
+    season_crop: 'barley',
+    values: [{
+      attribute_code: 'attr.irrigation_depth',
+      group_index: 0,
+      value: 12,
+      unit_code: 'unit.mm_water',
+      value_status: 'observed',
+    }, {
+      attribute_code: 'attr.observation_text',
+      group_index: 0,
+      value: 'same intent',
+      value_status: 'observed',
+    }],
+  };
+  const first = await saveEntry(db, batch, principal, { mode: 'create' });
+  const reordered = await saveEntry(db, Object.assign({}, batch, {
+    values: [batch.values[1], batch.values[0]],
+  }), principal, { mode: 'create' });
+  assert.deepEqual(reordered, first);
+  const before = JSON.stringify({
+    entries: db.prepare('SELECT * FROM journal_entries').all(),
+    values: db.prepare('SELECT * FROM journal_entry_values').all(),
+    outbox: db.prepare('SELECT * FROM sync_outbox').all(),
+  });
+
+  await assert.rejects(
+    saveEntry(db, Object.assign({}, batch, {
+      values: [Object.assign({}, batch.values[0], { value: 13 })],
+    }), principal, { mode: 'create' }),
+    (error) => error && error.code === 'idempotency_conflict' && error.statusCode === 409
+  );
+  assert.equal(JSON.stringify({
+    entries: db.prepare('SELECT * FROM journal_entries').all(),
+    values: db.prepare('SELECT * FROM journal_entry_values').all(),
+    outbox: db.prepare('SELECT * FROM sync_outbox').all(),
+  }), before);
+});
+
+test('saveEntry exact batch retry remains a no-op after plot deactivation', async () => {
+  const db = createJournalDb('batch-retry-inactive-plot');
+  seedJournalTestIdentity(db);
+  const principal = journalTestPrincipal();
+  const member = {
+    plot_uuid: '11140000-0000-4000-8000-000000000001',
+    entry_uuid: '22250000-0000-4000-8000-000000000001',
+  };
+  await upsertPlot(db, {
+    plot_uuid: member.plot_uuid,
+    base_sync_version: 0,
+    plot_code: 'inactive-retry',
+    name: 'Inactive retry',
+    zone_uuid: null,
+    station_code: null,
+    crop_hint: 'barley',
+    area_m2: 100,
+    active: 1,
+    layout_code: 'open_field',
+    layout_version: 1,
+  }, principal);
+  const batch = {
+    status: 'final',
+    base_sync_version: 0,
+    members: [member],
+    activity_code: 'irrigation',
+    template_code: 'farmer_quick',
+    template_version: 1,
+    layout_code: 'open_field',
+    layout_version: 1,
+    occurred_start_local: '2026-07-19T11:00:00',
+    occurred_timezone: 'Europe/Zurich',
+    season_crop: 'barley',
+    values: [{
+      attribute_code: 'attr.irrigation_depth',
+      group_index: 0,
+      value: 12,
+      unit_code: 'unit.mm_water',
+      value_status: 'observed',
+    }],
+  };
+  const first = await saveEntry(db, batch, principal, { mode: 'create' });
+  await upsertPlot(db, Object.assign({}, {
+    plot_uuid: member.plot_uuid,
+    base_sync_version: 1,
+    plot_code: 'inactive-retry',
+    name: 'Inactive retry',
+    zone_uuid: null,
+    station_code: null,
+    crop_hint: 'barley',
+    area_m2: 100,
+    active: 0,
+    layout_code: 'open_field',
+    layout_version: 1,
+  }), principal, member.plot_uuid);
+  const before = JSON.stringify({
+    entries: db.prepare('SELECT * FROM journal_entries').all(),
+    values: db.prepare('SELECT * FROM journal_entry_values').all(),
+    outbox: db.prepare('SELECT * FROM sync_outbox').all(),
+  });
+  const retry = await saveEntry(db, batch, principal, { mode: 'create' });
+  assert.deepEqual(retry, first);
+  assert.equal(JSON.stringify({
+    entries: db.prepare('SELECT * FROM journal_entries').all(),
+    values: db.prepare('SELECT * FROM journal_entry_values').all(),
+    outbox: db.prepare('SELECT * FROM sync_outbox').all(),
+  }), before);
+});
+
+test('saveEntry rejects a tombstoned batch member UUID with a controlled conflict and no writes', async () => {
+  const db = createJournalDb('batch-retry-tombstoned-entry');
+  seedJournalTestIdentity(db);
+  const principal = journalTestPrincipal();
+  const member = {
+    plot_uuid: '11150000-0000-4000-8000-000000000001',
+    entry_uuid: '22260000-0000-4000-8000-000000000001',
+  };
+  await upsertPlot(db, {
+    plot_uuid: member.plot_uuid,
+    base_sync_version: 0,
+    plot_code: 'tombstoned-entry',
+    name: 'Tombstoned entry',
+    zone_uuid: null,
+    station_code: null,
+    crop_hint: 'barley',
+    area_m2: 100,
+    active: 1,
+    layout_code: 'open_field',
+    layout_version: 1,
+  }, principal);
+  const batch = {
+    status: 'final',
+    base_sync_version: 0,
+    members: [member],
+    activity_code: 'irrigation',
+    template_code: 'farmer_quick',
+    template_version: 1,
+    layout_code: 'open_field',
+    layout_version: 1,
+    occurred_start_local: '2026-07-19T11:30:00',
+    occurred_timezone: 'Europe/Zurich',
+    season_crop: 'barley',
+    values: [{
+      attribute_code: 'attr.irrigation_depth',
+      group_index: 0,
+      value: 12,
+      unit_code: 'unit.mm_water',
+      value_status: 'observed',
+    }],
+  };
+  await saveEntry(db, batch, principal, { mode: 'create' });
+  db.prepare('UPDATE journal_entries SET deleted_at=? WHERE entry_uuid=?').run(
+    '2026-07-19T12:00:00.000Z', member.entry_uuid
+  );
+  const before = JSON.stringify({
+    entries: db.prepare('SELECT * FROM journal_entries').all(),
+    values: db.prepare('SELECT * FROM journal_entry_values').all(),
+    outbox: db.prepare('SELECT * FROM sync_outbox').all(),
+  });
+
+  await assert.rejects(
+    saveEntry(db, batch, principal, { mode: 'create' }),
+    (error) => error && error.code === 'idempotency_conflict' && error.statusCode === 409
+  );
+  assert.equal(JSON.stringify({
+    entries: db.prepare('SELECT * FROM journal_entries').all(),
+    values: db.prepare('SELECT * FROM journal_entry_values').all(),
+    outbox: db.prepare('SELECT * FROM sync_outbox').all(),
+  }), before);
+});
+
+test('saveEntry rejects a same-UUID retry after one member is corrected to version two', async () => {
+  const db = createJournalDb('batch-retry-after-correction');
+  seedJournalTestIdentity(db);
+  const principal = journalTestPrincipal();
+  const members = [
+    { plot_uuid: '11120000-0000-4000-8000-000000000001', entry_uuid: '22230000-0000-4000-8000-000000000001' },
+    { plot_uuid: '11120000-0000-4000-8000-000000000002', entry_uuid: '22230000-0000-4000-8000-000000000002' },
+  ];
+  for (const [index, member] of members.entries()) {
+    await upsertPlot(db, {
+      plot_uuid: member.plot_uuid,
+      base_sync_version: 0,
+      plot_code: 'corrected-retry-' + index,
+      name: 'Corrected retry ' + index,
+      zone_uuid: null,
+      station_code: null,
+      crop_hint: 'barley',
+      area_m2: 100,
+      active: 1,
+      layout_code: 'open_field',
+      layout_version: 1,
+    }, principal);
+  }
+  const batch = {
+    status: 'final',
+    base_sync_version: 0,
+    members,
+    activity_code: 'irrigation',
+    template_code: 'farmer_quick',
+    template_version: 1,
+    layout_code: 'open_field',
+    layout_version: 1,
+    occurred_start_local: '2026-07-19T09:00:00',
+    occurred_timezone: 'Europe/Zurich',
+    season_crop: 'barley',
+    values: [{
+      attribute_code: 'attr.irrigation_depth',
+      group_index: 0,
+      value: 12,
+      unit_code: 'unit.mm_water',
+      value_status: 'observed',
+    }],
+  };
+
+  await saveEntry(db, batch, principal, { mode: 'create' });
+  const corrected = Object.assign({}, batch, {
+    entry_uuid: members[0].entry_uuid,
+    plot_uuid: members[0].plot_uuid,
+    base_sync_version: 1,
+  });
+  delete corrected.members;
+  await saveEntry(db, corrected, principal, {
+    mode: 'update',
+    entryUuid: members[0].entry_uuid,
+  });
+  const entriesBeforeRetry = db.prepare('SELECT * FROM journal_entries ORDER BY entry_uuid').all();
+  const outboxBeforeRetry = db.prepare('SELECT * FROM sync_outbox ORDER BY rowid').all();
+
+  await assert.rejects(
+    saveEntry(db, batch, principal, { mode: 'create' }),
+    (error) => error && error.code === 'idempotency_conflict' && error.statusCode === 409
+  );
+  assert.deepEqual(db.prepare('SELECT * FROM journal_entries ORDER BY entry_uuid').all(), entriesBeforeRetry);
+  assert.deepEqual(db.prepare('SELECT * FROM sync_outbox ORDER BY rowid').all(), outboxBeforeRetry);
+});
+
+test('saveEntry rejects a same-UUID retry when a write-bearing batch field changes', async () => {
+  const changes = [
+    ['activity', (payload) => Object.assign({}, payload, { activity_code: 'fertilization' })],
+    ['occurrence', (payload) => Object.assign({}, payload, { occurred_start_local: '2026-07-19T08:01:00' })],
+    ['value', (payload) => Object.assign({}, payload, {
+      values: [Object.assign({}, payload.values[0], { value: 13 })],
+    })],
+  ];
+  for (const [label, change] of changes) {
+    const db = createJournalDb('batch-retry-intent-' + label);
+    seedJournalTestIdentity(db);
+    const principal = journalTestPrincipal();
+    const member = {
+      plot_uuid: '11130000-0000-4000-8000-000000000001',
+      entry_uuid: '22240000-0000-4000-8000-000000000001',
+    };
+    await upsertPlot(db, {
+      plot_uuid: member.plot_uuid,
+      base_sync_version: 0,
+      plot_code: 'intent-' + label,
+      name: 'Intent ' + label,
+      zone_uuid: null,
+      station_code: null,
+      crop_hint: 'barley',
+      area_m2: 100,
+      active: 1,
+      layout_code: 'open_field',
+      layout_version: 1,
+    }, principal);
+    const batch = {
+      status: 'final',
+      base_sync_version: 0,
+      members: [member],
+      activity_code: 'irrigation',
+      template_code: 'farmer_quick',
+      template_version: 1,
+      layout_code: 'open_field',
+      layout_version: 1,
+      occurred_start_local: '2026-07-19T10:00:00',
+      occurred_timezone: 'Europe/Zurich',
+      season_crop: 'barley',
+      values: [{
+        attribute_code: 'attr.irrigation_depth',
+        group_index: 0,
+        value: 12,
+        unit_code: 'unit.mm_water',
+        value_status: 'observed',
+      }],
+    };
+    const first = await saveEntry(db, batch, principal, { mode: 'create' });
+    const outboxCount = db.prepare('SELECT COUNT(*) AS n FROM sync_outbox').get().n;
+    await assert.rejects(
+      saveEntry(db, change(batch), principal, { mode: 'create' }),
+      (error) => error && error.code === 'idempotency_conflict' && error.statusCode === 409,
+      label + ' retry must not replay a different write intent'
+    );
+    assert.equal(db.prepare('SELECT COUNT(*) AS n FROM journal_entries').get().n, 1, label);
+    assert.equal(db.prepare('SELECT COUNT(*) AS n FROM sync_outbox').get().n, outboxCount, label);
+    assert.equal(first.entries.length, 1);
+  }
+});
+
+test('saveEntry returns the original batch receipts after the plot is inactive or soft-deleted', async () => {
+  for (const [label, mutate] of [
+    ['inactive', (db, plotUuid) => db.prepare(
+      'UPDATE journal_plots SET active=0 WHERE plot_uuid=?'
+    ).run(plotUuid)],
+    ['soft-deleted', (db, plotUuid) => db.prepare(
+      'UPDATE journal_plots SET deleted_at=? WHERE plot_uuid=?'
+    ).run('2026-07-19T12:00:00.000Z', plotUuid)],
+  ]) {
+    const db = createJournalDb('batch-retry-plot-' + label);
+    seedJournalTestIdentity(db);
+    const principal = journalTestPrincipal();
+    const member = {
+      plot_uuid: '11140000-0000-4000-8000-000000000001',
+      entry_uuid: '22250000-0000-4000-8000-000000000001',
+    };
+    await upsertPlot(db, {
+      plot_uuid: member.plot_uuid,
+      base_sync_version: 0,
+      plot_code: 'plot-retry-' + label,
+      name: 'Plot retry ' + label,
+      zone_uuid: null,
+      station_code: null,
+      crop_hint: 'barley',
+      area_m2: 100,
+      active: 1,
+      layout_code: 'open_field',
+      layout_version: 1,
+    }, principal);
+    const batch = {
+      status: 'final',
+      base_sync_version: 0,
+      members: [member],
+      activity_code: 'irrigation',
+      template_code: 'farmer_quick',
+      template_version: 1,
+      layout_code: 'open_field',
+      layout_version: 1,
+      occurred_start_local: '2026-07-19T11:00:00',
+      occurred_timezone: 'Europe/Zurich',
+      season_crop: 'barley',
+      values: [{
+        attribute_code: 'attr.irrigation_depth',
+        group_index: 0,
+        value: 12,
+        unit_code: 'unit.mm_water',
+        value_status: 'observed',
+      }],
+    };
+    const first = await saveEntry(db, batch, principal, { mode: 'create' });
+    mutate(db, member.plot_uuid);
+    const retry = await saveEntry(db, batch, principal, { mode: 'create' });
+    assert.deepEqual(retry, first, label + ' retry must preserve the original receipt');
+  }
+});
 
 test('assertJournalEntryEffectKey binds UUID and prior version exactly', () => {
   const entryUuid = '12345678-1234-4234-8234-123456789abc';
