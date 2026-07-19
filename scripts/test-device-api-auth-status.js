@@ -884,13 +884,13 @@ for (const rel of PROFILES) {
       });
       const baseFlows = JSON.parse(baseRaw);
       const allowances = sizeRatchet.loadAllowances(ALLOWANCES_PATH);
-      const clean = sizeRatchet.checkSurface(rel, flows, baseFlows, allowances);
+      const clean = sizeRatchet.checkSurface(rel, flows, allowances);
       assert.deepEqual(clean.failures, [], 'expected the committed allowance to already be exact for every touched node: ' + clean.failures.join('\n'));
 
       const mutated = cloneFlows(flows);
       const target = mutated.find((n) => n.id === HTTP500_ID);
       target.func += '/*x*/';
-      const dirty = sizeRatchet.checkSurface(rel, mutated, baseFlows, allowances);
+      const dirty = sizeRatchet.checkSurface(rel, mutated, allowances);
       assert.ok(
         dirty.failures.some((f) => f.includes(HTTP500_ID) && f.includes('grew')),
         'expected one extra character on ' + HTTP500_ID + ' to fail size-ratchet without an explicit ceiling edit: ' + dirty.failures.join('\n')
