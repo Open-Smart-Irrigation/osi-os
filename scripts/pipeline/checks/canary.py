@@ -19,7 +19,7 @@ def run(ctx: VerifyContext) -> CheckResult:
                            "gate explicitly via canary_gate_available")
     cmd = ["node", str(REPO_ROOT / "scripts" / "deploy-canary-gate.js"),
            "--eui", "0016C001F11766E7",
-           "--since", ctx.deploy_timestamp,
+           "--since", ctx.verification_started_at,
            "--timeout", "900"]
     if ctx.expected_schema_sig:
         cmd += ["--expect-schema-sig", ctx.expected_schema_sig]

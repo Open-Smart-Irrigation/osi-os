@@ -20,6 +20,20 @@ class GatewayConfig:
     # Optional: not every gateway entry in bundles.json carries a backup_dir
     # (e.g. "silvan" is a reference-only gateway, never a deploy_target here).
     backup_dir: str | None = None
+    # Ingest correlation policy (checks/ingest.py). Defaults are the inactive/
+    # demo-gateway shape: a short window, ingest never required. Kaba100
+    # overrides all four in bundles.json.
+    ingest_wait_seconds: int = 120
+    ingest_quiet_seconds: int = 10
+    require_ingest: bool = False
+    ingest_max_clock_skew_seconds: int = 30
+
+    def __post_init__(self) -> None:
+        if not (0 <= self.ingest_quiet_seconds < self.ingest_wait_seconds):
+            raise ValueError(
+                f"{self.host}: ingest_quiet_seconds ({self.ingest_quiet_seconds}) "
+                f"must satisfy 0 <= ingest_quiet_seconds < ingest_wait_seconds "
+                f"(ingest_wait_seconds={self.ingest_wait_seconds})")
 
 
 @dataclass(frozen=True)
