@@ -232,6 +232,17 @@
       "crop": "Kultur",
       "product": "Produkt",
       "rate": "Aufwandmenge",
+      "protectedValues": "Geschützte Werte",
+      "unknownProduct": "Produkt nicht verfügbar",
+      "unknownRate": "Aufwandmenge nicht verfügbar",
+      "unknownValue": "Wert nicht verfügbar",
+      "valueStatus": {
+        "observed": "Beobachtet",
+        "not_observed": "Nicht beobachtet",
+        "not_applicable": "Nicht anwendbar",
+        "below_detection": "Unter der Nachweisgrenze"
+      },
+      "group": "Gruppe {{number}}",
       "useValues": "Diese Werte verwenden",
       "dismiss": "Nicht übernehmen",
       "invalidated": "Die vorherige Behandlung passt nicht mehr zu dieser Parzelle, Kultur, Zeit, Saison oder zu diesem Layout"

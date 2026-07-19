@@ -232,6 +232,17 @@
       "crop": "Ekirime",
       "product": "Ekyakozesebwa",
       "rate": "Omuwendo gw'okukozesa",
+      "protectedValues": "Emiwendo egikuumibwa",
+      "unknownProduct": "Ekyakozesebwa tekiriwo",
+      "unknownRate": "Omuwendo teguliwo",
+      "unknownValue": "Omuwendo teguliwo",
+      "valueStatus": {
+        "observed": "Kyetegeddwa",
+        "not_observed": "Tekyetegeddwa",
+        "not_applicable": "Tekikwatagana",
+        "below_detection": "Wansi w'ekkomo ly'okulabika"
+      },
+      "group": "Ekibinja {{number}}",
       "useValues": "Kozesa emiwendo gino",
       "dismiss": "Tokoppa",
       "invalidated": "Ekyakozesebwa ekyasooka tekikyakwatagana na musiri guno, ekirime kino, akaseera kano, ebbanga lino ery'okulima, oba layout eno"

@@ -18,30 +18,18 @@ export const PLANT_PROTECTION_PRODUCT_CODES = [
 ] as const;
 
 export const PLANT_PROTECTION_RATE_CODES = [
-  'attr.dose',
   'attr.amount_mass_area_product',
   'attr.amount_volume_area_product',
   'attr.amount_biological_count_area',
-  'attr.amount_count_area',
-  'attr.rate',
-  'attr.application_rate',
 ] as const;
 
 export const PLANT_PROTECTION_PROTECTED_CODES = [
   ...PLANT_PROTECTION_PRODUCT_CODES,
   ...PLANT_PROTECTION_RATE_CODES,
-  'attr.authorization',
-  'attr.authorization_number',
   'attr.target',
-  'attr.dose_basis',
-  'attr.basis',
-  'attr.application_basis',
   'attr.treated_area',
-  'attr.area_treated',
+  'attr.denominator',
   'attr.waiting_period_days',
-  'attr.waiting_period',
-  'attr.phi',
-  'attr.phi_days',
 ] as const;
 
 const PROTECTED_CODE_SET = new Set<string>(PLANT_PROTECTION_PROTECTED_CODES);
@@ -75,6 +63,13 @@ interface RepeatTreatmentPreviewBase {
   crop: string | null;
   values: CaptureEntryValueInput[];
   context: CarryForwardContext;
+  groupedTreatments?: RepeatTreatmentGroupPreview[];
+}
+
+export interface RepeatTreatmentGroupPreview {
+  groupIndex: number;
+  product: string | null;
+  rate: string | null;
 }
 
 export type RepeatTreatmentPreview = RepeatTreatmentPreviewBase & (
@@ -263,9 +258,11 @@ function resolveLabel(labels: CarryForwardLabelMap, code: string): string | null
 function firstValueForCode(
   values: CaptureEntryValueInput[],
   attributeCode: string,
+  groupIndex?: number,
 ): CaptureEntryValueInput | undefined {
   return values
-    .filter(({ attribute_code: code }) => code === attributeCode)
+    .filter(({ attribute_code: code, group_index: valueGroup }) =>
+      code === attributeCode && (groupIndex == null || (valueGroup ?? 0) === groupIndex))
     .sort((left, right) => (left.group_index ?? 0) - (right.group_index ?? 0))[0];
 }
 
@@ -277,19 +274,21 @@ function nonEmptyText(row: CaptureEntryValueInput | undefined): string | null {
 function productLabel(
   values: CaptureEntryValueInput[],
   labels: CarryForwardLabelMap,
+  groupIndex?: number,
 ): string | null {
-  const productUuid = nonEmptyText(firstValueForCode(values, 'attr.product_uuid'));
+  const productUuid = nonEmptyText(firstValueForCode(values, 'attr.product_uuid', groupIndex));
   const catalogLabel = productUuid == null ? null : resolveLabel(labels, productUuid);
   if (catalogLabel) return catalogLabel;
-  return nonEmptyText(firstValueForCode(values, 'attr.product'));
+  return nonEmptyText(firstValueForCode(values, 'attr.product', groupIndex));
 }
 
 function rateLabel(
   values: CaptureEntryValueInput[],
   labels: CarryForwardLabelMap,
+  groupIndex?: number,
 ): string | null {
   const row = PLANT_PROTECTION_RATE_CODES
-    .map((code) => firstValueForCode(values, code))
+    .map((code) => firstValueForCode(values, code, groupIndex))
     .find((value): value is CaptureEntryValueInput => value != null);
   if (!row) return null;
 
@@ -307,8 +306,17 @@ function repeatTreatment(
   context: CarryForwardContext,
   labels: CarryForwardLabelSources,
 ): RepeatTreatmentPreview {
-  const product = productLabel(values, labels.productLabels);
-  const rate = rateLabel(values, labels.unitLabels);
+  const groupIndices = [...new Set(values.map((value) => value.group_index ?? 0))].sort((a, b) => a - b);
+  const groupedTreatments = groupIndices.map((groupIndex) => ({
+    groupIndex,
+    product: productLabel(values, labels.productLabels, groupIndex),
+    rate: rateLabel(values, labels.unitLabels, groupIndex),
+  }));
+  const everyGroupComplete = groupedTreatments.length > 0 && groupedTreatments.every((group) =>
+    group.product != null && group.rate != null);
+  const firstGroup = groupedTreatments[0] ?? { product: null, rate: null };
+  const product = firstGroup.product;
+  const rate = firstGroup.rate;
   const crop = typeof source.season_crop === 'string' && source.season_crop.trim().length > 0
     ? source.season_crop.trim()
     : null;
@@ -318,8 +326,9 @@ function repeatTreatment(
     crop,
     values,
     context,
+    groupedTreatments,
   };
-  return product && rate && crop
+  return everyGroupComplete && product && rate && crop
     ? { ...base, complete: true, product, rate }
     : { ...base, complete: false, product: null, rate: null };
 }
