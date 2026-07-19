@@ -1635,6 +1635,8 @@ expectIncludes('Build Command ACK Batch', "'X-OSI-Sync-Protocol': '2'", 'opts RE
 expectIncludes('Mark Command ACKs Delivered', 'UPDATE command_ack_outbox SET delivered_at', 'marks REST command ACK rows delivered only after a successful response');
 expectIncludesById('command-ack-mark-delivered', "Number.isInteger(statusCode) && statusCode === 200", 'requires an eligible integer HTTP 200 before evaluating any per-entry ACK result');
 expectIncludesById('command-ack-mark-delivered', "status === 'ACKED' && matches[0].accepted !== false", 'delivers a command ACK outbox row only for a single unambiguous accepted-terminal result');
+expectIncludesById('command-ack-mark-delivered', 'msg._localAckCorrelation', 'resolves the server business commandId to local outbox row ids via the build-batch correlation map, not the row PKs directly');
+expectIncludesById('command-ack-mark-delivered', 'const hasCorrelation = !!(correlation && Object.keys(correlation).length);', 'falls back to id-as-commandId only when no correlation metadata is present, preserving the pre-fix per-entry contract');
 expectIncludesById('command-ack-build-batch', 'if (row.payload_json !== group.canonicalPayloadJson) group.conflict = true;', 'detects conflicting local ACK rows for the same commandId by canonical payload equality');
 expectIncludesById('command-ack-build-batch', 'msg._localAckCorrelation = localAckCorrelation;', 'carries local outbox row correlation for collapsed duplicate ACKs');
 expectIncludesById('command-ack-build-batch', "node.warn('Command ACK conflict for commandId ' + group.commandId", 'withholds delivery and warns on conflicting local ACK rows without leaking lease tokens');

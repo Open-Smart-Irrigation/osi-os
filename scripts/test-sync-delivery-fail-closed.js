@@ -660,6 +660,50 @@ function registerAckTests() {
     });
   }
 
+  test('ack', 'command-ack-mark-delivered: resolves the business commandId to outbox row ids via _localAckCorrelation (chained regression - the fixed join)', async () => {
+    const seed = {
+      command_ack_outbox: {
+        801: { id: 801, command_id: 'cmd-900', delivered_at: null, retry_count: 0, last_error: null },
+        802: { id: 802, command_id: 'cmd-900', delivered_at: null, retry_count: 0, last_error: null },
+      },
+    };
+    const msg = {
+      statusCode: 200,
+      _commandAckIds: [801, 802],
+      _localAckCorrelation: { 'cmd-900': [801, 802] },
+      payload: { results: [{ commandId: 'cmd-900', status: 'ACKED', accepted: true, terminal: true }] },
+    };
+    const { db } = await executeFlowFunction('command-ack-mark-delivered', msg, { seed });
+    assert.ok(
+      db.tables.command_ack_outbox.get('801').delivered_at,
+      'row 801 must be marked delivered via the commandId->rowId correlation join (Number(commandId) would be NaN for cmd-900)',
+    );
+    assert.ok(
+      db.tables.command_ack_outbox.get('802').delivered_at,
+      'row 802 must be marked delivered via the commandId->rowId correlation join',
+    );
+  });
+
+  test('ack', 'command-ack-mark-delivered: LEASE_MISMATCH on the correlated commandId leaves both correlated rows pending with a retry bump (negative companion)', async () => {
+    const seed = {
+      command_ack_outbox: {
+        801: { id: 801, command_id: 'cmd-900', delivered_at: null, retry_count: 0, last_error: null },
+        802: { id: 802, command_id: 'cmd-900', delivered_at: null, retry_count: 0, last_error: null },
+      },
+    };
+    const msg = {
+      statusCode: 200,
+      _commandAckIds: [801, 802],
+      _localAckCorrelation: { 'cmd-900': [801, 802] },
+      payload: { results: [{ commandId: 'cmd-900', status: 'LEASE_MISMATCH', accepted: false, terminal: false }] },
+    };
+    const { db } = await executeFlowFunction('command-ack-mark-delivered', msg, { seed });
+    assert.strictEqual(db.tables.command_ack_outbox.get('801').delivered_at, null, 'row 801 must remain pending');
+    assert.strictEqual(db.tables.command_ack_outbox.get('802').delivered_at, null, 'row 802 must remain pending');
+    assert.strictEqual(db.tables.command_ack_outbox.get('801').retry_count, 1, 'row 801 must retry');
+    assert.strictEqual(db.tables.command_ack_outbox.get('802').retry_count, 1, 'row 802 must retry');
+  });
+
   test('ack', 'command-ack-build-batch: identical duplicate local ACK rows are NOT deduped into one outgoing ACK (unimplemented correlation)', async () => {
     const payload = JSON.stringify({ commandId: 'cmd-900', leaseToken: 'lease-xyz', status: 'ACKED', result: 'ACKED' });
     const seed = {
