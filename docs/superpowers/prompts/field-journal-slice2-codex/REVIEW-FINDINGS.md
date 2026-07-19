@@ -649,3 +649,53 @@ match: a lost-response retry of the same finalize must not create a second set o
 P6 is adjudicated: **fix it**, do not accept the duplicate-guard as sufficient. Sequence it as
 a Phase 4 correction; it may run alongside remaining Phase 4/5 work but must land before Slice
 2 is called done, because it is a live data-integrity gap on farm records.
+
+---
+
+# Design decisions confirmed (product owner, 2026-07-19)
+
+Three open decisions adjudicated in one pass. Do not re-litigate these.
+
+## F7 — two-tier tap SLA: CONFIRMED
+
+The product owner confirms the two-tier target was their decision: `<=9` primary activations on
+the shipped `open_field` default, `<=5` only under a future approved safe-default policy. The
+run's 2026-07-17 record is legitimate. Spec §257 and the pinned SLA test are unchanged. (F8 —
+derive the SLA fixture from the compiled catalog rather than a hand-written copy — is still a
+worthwhile hardening, but the number itself is accepted.)
+
+## P4 — low-risk carry-forward: show AND carry in farmer_quick
+
+Decision: `farmer_quick` gains `attr.operator`, `attr.equipment`, `attr.method` as **visible,
+prefill-marked fields**, and keeps its existing `carry_forward` for the three. This satisfies
+AGR-7 / P4 ("low-risk fields carry by default with visible prefill marking") for the common
+quick-entry path, and it makes the carried values survive EntryForm's prune-to-visible step
+(the reason they were dropped — see the Tasks 9/10/12 review).
+
+Catalog-data change, owned by the run (same domain as P1): add the three codes to
+`farmer_quick`'s section fields in `journal-catalog-core.js`, regenerate, mirror both profile
+copies, keep sync/catalog-version parity, and add a regression proving the three carried values
+reach the final payload for a quick entry. `full_record` is unchanged (it already shows them;
+leaving its `carry_forward` empty is acceptable). Also do the P4 hardening: have `parseTemplate`
+reject a `carry_forward` code that is not in the template's visible field set, so this class of
+"declared but never shown" mismatch cannot ship silently again.
+
+## F1 — product compositions: DEFERRED to the post-image round (risk accepted)
+
+Decision: do **not** prioritize migration 0022 now. Populate composition_json (Agroscope
+reference values) and add a mineral fertiliser in the post-image live-verification round.
+
+Risk acknowledged by the product owner: composition is immutable after first use (spec §4.6),
+so if any farm logs a fertilisation against these products before 0022 lands, the fix becomes a
+product-version exercise with live references rather than a clean populate. **Guardrail on the
+deferral:** 0022 must land before any real fertilisation entry is recorded on a deployed image
+— i.e. populate during the live-verification round *before* the journal is used for a real
+fertilisation, not after. Until then, product-first nutrient derivation and SoilManageR derived
+rates render nothing against the real catalog; this is expected, not a defect (N1 stays as the
+standing note). No hard stop for empty compositions.
+
+## Still open — NOT decided here
+
+Translation native-review sign-off: who approves de-CH / fr / **lg** GUI copy before farmers
+see it, especially the newly-coined Luganda vocabulary on the live Uganda gateway. Needs a named
+reviewer, not a menu choice. Carried forward.
