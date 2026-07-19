@@ -158,3 +158,15 @@ The umbrella table understated A0's first ownership of `node-red.init`, pipeline
 Source candidate `3e741e746ad130c2b2134f15d8e4dbbfe6d01f49` (`fix: align factory bootstrap contracts`) passed independent specification and quality review after corrective loops for path/argv binding, image identity, mode enforcement, deterministic baseline IDs, one-use verification-result handling, generator refresh semantics, and resident authority no-follow checks. It is intentionally non-deployable until the later image-baseline state-verb checkpoint.
 
 Final serial gates: provenance CLI 7/7; generator 4/4; built-rootfs verifier 6/6; source verifier 4/4; factory-baseline envelope 3/3; factory seed 22/22; factory-zero audit 6/6; resident-copy guard 6/6; bootstrap shell PASS; `verify-sync-flow.js`, generator check, source verifier, profile parity, and `git diff --check` exit 0; deployment-state CLI 378/378. The exact-SHA reviews are specification `PASS` and quality `APPROVED`, with no Critical or Important findings. Anchor-mutating tests are recorded as serial-only because default parallel execution can race on tracked JSON fixtures.
+
+## Safe local handoff after constrained finalization
+
+Integration branch: `integration/refactor-repair-train-a-a3-20260719`, final safe handoff `c8c8f0b4`. Main checkout remained untouched; no live host, SSH, push, PR, or deployment was used.
+
+Retained and rechecked: A0 commits 1–3; sync delivery stop-loss Tasks 1–2 (`16/16` delivery cases, including the present-but-empty `results[]` batch error); Device API auth Tasks 1–2 (`75/75`); absolute flow ceilings (`verify-flows-size-ratchet`); profile parity; `verify-sync-flow`; and `git diff --check`.
+
+Removed before handoff because their required companion wiring was not complete: the protocol-verb candidate, async writer primitive activation, and ChirpStack helper contract change. Their review evidence and corrective findings remain in the handoff branches/reports and must be reimplemented, reviewed, and integrated as complete slices.
+
+Remaining blockers: protocol verbs need ROM-resident CLI copies and runtime path resolution, exact phase/operation/evidence binding, four-root separation, immutable factory/activity anchors, absent-root integrity recovery, replay/quarantine state guards, and lock-spanned factory ordering; protocol audit/reconcile/baseline CLIs and command-activity witnessed integration remain; LSN50 writer Task 3 still needs awaited consumers, fallback/quarantine nodes, UCI flag, init export, close-error handling, and correlation gates; ChirpStack Task 4 flow rewiring remains; A0 deployment integration and workflow/CI union remain; final A2 transcript and independent A3 review remain. A3.5/A4 live prerequisites are intentionally untouched.
+
+Safe-handoff gates: `node scripts/verify-profile-parity.js` exit 0; `node scripts/verify-sync-flow.js` exit 0; `node scripts/verify-flows-size-ratchet.js` exit 0; `git diff --check` exit 0. This is not a deployable release.
