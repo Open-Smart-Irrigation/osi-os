@@ -248,7 +248,7 @@ Read the repo-owned `architect.yaml` and `RULES.yaml` overlays before edits. See
 
 ## Agent skills
 
-Field manuals for agents live in `.claude/skills/` (Agent Skills spec: SKILL.md + `name`/`description` frontmatter). Claude Code and OpenCode auto-discover that path; `.agents/skills` is a committed symlink to it for `.agents`-convention tools (Codex, Gemini CLI, …) — never materialize a copy there. Index:
+Field manuals for agents live in `.claude/skills/` (Agent Skills spec: SKILL.md + `name`/`description` frontmatter). Claude Code and OpenCode auto-discover that path; `.agents/skills` is a committed symlink to it for `.agents`-convention tools (Codex, Gemini CLI, …). See "Cross-harness discovery and process parity" below before changing that layout. Index:
 
 - `osi-debugging-playbook` — symptom→triage table + verifier toolbox; load when investigating any edge failure or data gap.
 - `osi-live-ops-runbook` — deploy/repair/post-check procedures for live Pis; load before touching a real gateway.
@@ -256,8 +256,37 @@ Field manuals for agents live in `.claude/skills/` (Agent Skills spec: SKILL.md 
 - `osi-schema-change-control` — migrations, risk classes, frozen boot DDL, parity gates; load before ANY schema change.
 - `osi-agronomy-sensors-reference` — domain pack (SWT/pF, Chameleon, dendrometry, rain, LoRaWAN as used here); load when touching sensor semantics or displays.
 - `osi-config-and-flags` — UCI/env/flag catalog incl. DEVICE_EUI resolution; load when configuring or provisioning.
+- `osi-common-pitfalls` — short cross-cutting hazard card (FK fences, silent catches, profile mirroring, missing-data rule, pipe-exit traps); load at the start of any edge change or review.
+- `osi-verification-commands` — verifier catalog with pass signals and per-surface minimum evidence; load when selecting gates or writing execution reports.
+- `osi-sync-contract-awareness` — sync contract invariants (edge-authoritative writes, outbox/inbox/cursor, canonicalization, cross-repo PR rule); load for any sync or paired edge/cloud change.
+- `osi-react-gui-patterns` — GUI serving/routing/auth/i18n/missing-data patterns and test invocation; load for `web/react-gui` changes.
+- `osi-server-backend-patterns` — paired-repo awareness for osi-server (Flyway discipline, Gradle builds, API bridge); load for cloud-side work initiated from this repo.
+- `osi-forge-boundaries` — Stage 1 Forge worker/controller boundaries and stop-and-report rules; load for issue-to-PR automation tasks.
 - `osi-hardest-problem-campaign` — deferred stub; do not author without maintainer input.
 - `anti-slop-writing` — prose floor for ALL documentation and user-facing text; load before writing or editing any docs/README/ADR/runbook/PR prose. Mechanical check: `node .claude/skills/anti-slop-writing/slop-check.js <files>`.
+
+### Cross-harness discovery and process parity
+
+The 14 project skills above load in all three supported harnesses from one
+source. Claude Code reads `.claude/skills/` directly. Codex reads the same
+files through the `.agents/skills` symlink (its `.agents` convention); it does
+not read `.claude/skills`, so that symlink is load-bearing. OpenCode scans both
+`.claude/skills` and `.agents/skills`, walking up from the working directory.
+
+Because OpenCode scans both roots and they alias to the same files, it logs one
+`duplicate skill name` warning per skill at startup. The warning is cosmetic:
+the skill still loads, keyed by its frontmatter `name`. OpenCode exposes no
+config to disable a scan root, so deduping symlinked roots is an OpenCode-side
+fix, not ours. Keep the single symlink; a second real copy to silence the
+warning would drift from the first.
+
+Process discipline is not at parity. Claude Code carries the
+plan→review→execute→verify loop as auto-loaded superpowers skills (TDD,
+systematic-debugging, verification-before-completion). Codex and OpenCode do
+not. Agents on those harnesses apply the same loop manually from
+`docs/engineering-playbook.md`, which all three read through this file. The
+`osi-*` skills above cover the domain layer for every harness; the process
+layer is playbook-driven outside Claude Code.
 
 ## Session closeout
 

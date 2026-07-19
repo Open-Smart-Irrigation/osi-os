@@ -47,7 +47,8 @@ Do NOT use this skill for (route instead):
 | `MILESIGHT_UC512` | Sensors | Yes — `milesight_uc512_decoder.js` | `valve_1_state`/`valve_2_state` (text), `valve_1_pulse`/`valve_2_pulse` (integer), `pipe_pressure_kpa` (real) | —, counts, kPa |
 
 File locations for all OSI-authored decoders:
-`conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/codecs/{aquascope_lorain_decoder.js, dragino_lsn50_decoder.js, sensecap_s2120_decoder.js, strega_gen1_decoder.js}`.
+`conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/codecs/{aquascope_lorain_decoder.js, dragino_lsn50_decoder.js, milesight_uc512_decoder.js, sensecap_s2120_decoder.js, strega_gen1_decoder.js}`.
+The same directory also holds `agroscope_uplink_transform.js`, the edge→Agroscope IoT forwarding transform (osi-os PR #110) — it is not a device decoder.
 KIWI/CLOVER have no file here — their payload arrives already decoded (vendor/ChirpStack-side codec), which is why the table above says "No".
 
 **VWC note (not implemented on the edge):** `web/react-gui/src/types/farming.ts` types a

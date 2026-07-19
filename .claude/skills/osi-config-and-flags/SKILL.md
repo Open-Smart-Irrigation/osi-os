@@ -94,16 +94,18 @@ key with a default, then commits.
 | `openagri_weather_current_cache_minutes` | Current-conditions cache TTL | `30` | exports as `OPENAGRI_WEATHER_CURRENT_CACHE_MINUTES` |
 | `openagri_weather_forecast_cache_minutes` | Forecast cache TTL | `120` | exports as `OPENAGRI_WEATHER_FORECAST_CACHE_MINUTES` |
 | `chirpstack_app_sensors`, `chirpstack_app_actuators`, `chirpstack_app_field_tester` | Per-installation ChirpStack application UUIDs | unset until bootstrap runs | Written by `chirpstack-bootstrap.js`; see section 3 |
-| `chirpstack_profile_kiwi`, `chirpstack_profile_strega`, `chirpstack_profile_lsn50`, `chirpstack_profile_clover`, `chirpstack_profile_rak10701`, `chirpstack_profile_s2120` | Per-installation ChirpStack device-profile UUIDs | unset until bootstrap runs | Written by `chirpstack-bootstrap.js`; see section 3 |
+| `chirpstack_profile_kiwi`, `chirpstack_profile_strega`, `chirpstack_profile_lsn50`, `chirpstack_profile_clover`, `chirpstack_profile_rak10701`, `chirpstack_profile_s2120`, `chirpstack_profile_lorain`, `chirpstack_profile_uc512` | Per-installation ChirpStack device-profile UUIDs | unset until bootstrap runs | Written by `chirpstack-bootstrap.js`; see section 3 |
 
-Note: `chirpstack-bootstrap.js` writes `CHIRPSTACK_PROFILE_LORAIN` to both the
-env file and UCI — `chirpstack_profile_lorain` **is** mapped in
-`toUciCloudKey()` (`scripts/chirpstack-bootstrap.js:299`, mirrored at
+Note: `chirpstack-bootstrap.js` writes both `CHIRPSTACK_PROFILE_LORAIN` and
+`CHIRPSTACK_PROFILE_UC512` to both the env file and UCI — `chirpstack_profile_lorain`
+and `chirpstack_profile_uc512` **are** mapped in `toUciCloudKey()`
+(`scripts/chirpstack-bootstrap.js`, mirrored at
 `conf/.../usr/share/node-red/chirpstack-bootstrap.js`). The real asymmetry is
 in `node-red.init`: its `resolve_chirpstack_value` list and `procd_set_param
-env` block omit `CHIRPSTACK_PROFILE_LORAIN`, so at Node-RED runtime the LoRain
-profile ID arrives only via `settings.js`'s `.chirpstack.env` compat loader,
-not via the UCI→procd path the other profiles use (as of 2026-07-06).
+env` block omit both `CHIRPSTACK_PROFILE_LORAIN` and `CHIRPSTACK_PROFILE_UC512`,
+so at Node-RED runtime the LoRain and Milesight UC512 profile IDs arrive only
+via `settings.js`'s `.chirpstack.env` compat loader, not via the UCI→procd
+path the other profiles use (as of 2026-07-19).
 
 **Live inspection:** `uci show osi-server` on the Pi. This prints
 `mqtt_password`, `openagri_weather_password`, and
@@ -236,8 +238,9 @@ mirrored under both hardware profiles'
 and creates-or-reuses:
 
 - 3 ChirpStack applications: **OSI Sensors**, **OSI Actuators**, **OSI Field Tester**
-- 6 device profiles: **KIWI Sensor**, **STREGA Valve**, **Dragino LSN50**,
-  **RAK Field Tester**, **SenseCAP S2120**, **Aqua-Scope LoRain**
+- 7 device profiles: **KIWI Sensor**, **STREGA Valve**, **Dragino LSN50**,
+  **RAK Field Tester**, **SenseCAP S2120**, **Aqua-Scope LoRain**,
+  **OSI Milesight UC512**
 - 1 API key (`osi-nodered`)
 
 Verified full set of env vars it writes (`writeEnvFile` / `envVars` object in
@@ -257,6 +260,7 @@ Verified full set of env vars it writes (`writeEnvFile` / `envVars` object in
 | `CHIRPSTACK_PROFILE_RAK10701` | RAK Field Tester profile UUID | `chirpstack_profile_rak10701` |
 | `CHIRPSTACK_PROFILE_S2120` | SenseCAP S2120 profile UUID | `chirpstack_profile_s2120` |
 | `CHIRPSTACK_PROFILE_LORAIN` | Aqua-Scope LoRain profile UUID | `chirpstack_profile_lorain` — mapped to UCI by `chirpstack-bootstrap.js`, but **not exported by `node-red.init`** (runtime sees it via the env-file path only; see section 1 note) |
+| `CHIRPSTACK_PROFILE_UC512` | Milesight UC512 profile UUID | `chirpstack_profile_uc512` — mapped to UCI by `chirpstack-bootstrap.js` but, like LORAIN, not exported by `node-red.init` (runtime sees it via the env-file path only; see section 1 note) |
 
 All `CHIRPSTACK_APP_*`/`CHIRPSTACK_PROFILE_*` values are validated as
 ChirpStack UUIDs (`assertValidUciValue`, regex
@@ -273,11 +277,12 @@ gateway into flows.json or a script will silently break every other gateway
 about not trusting a bare `FIXED_APP_ID` fallback).
 
 **Who consumes them:** `node-red.init` resolves each one **except
-`CHIRPSTACK_PROFILE_LORAIN`** with `resolve_chirpstack_value` (UCI first, then
-per-key `.chirpstack.env` fallback via `load_chirpstack_env_value`, logging the
-source via `logger -t node-red.init`) and exports the result as a Node-RED
-process env var; LORAIN reaches the runtime only through `settings.js`'s
-`.chirpstack.env` compat loader (see section 1 note, as of 2026-07-06).
+`CHIRPSTACK_PROFILE_LORAIN` and `CHIRPSTACK_PROFILE_UC512`** with
+`resolve_chirpstack_value` (UCI first, then per-key `.chirpstack.env` fallback
+via `load_chirpstack_env_value`, logging the source via `logger -t
+node-red.init`) and exports the result as a Node-RED process env var; LORAIN
+and UC512 reach the runtime only through `settings.js`'s `.chirpstack.env`
+compat loader (see section 1 note, as of 2026-07-19).
 flows.json function nodes then read them with `env.get('CHIRPSTACK_PROFILE_S2120')`
 etc. to discriminate device type on uplink. The actual MQTT topic
 subscription rule and the `deviceProfileName`-fallback discrimination pattern
@@ -285,9 +290,10 @@ inside flows.json are mechanics of `osi-flows-json-editing` — not duplicated
 here.
 
 **Deploy-time post-check:** `deploy.sh` does **not** assert
-`CHIRPSTACK_PROFILE_RAK10701` or `CHIRPSTACK_PROFILE_S2120` anywhere (verified
-by reading the full 687-line file: it fetches, seeds the DB conditionally, and
-repairs schema — it has no ChirpStack-profile assertions at all). The actual
+`CHIRPSTACK_PROFILE_RAK10701` or `CHIRPSTACK_PROFILE_S2120` anywhere
+(re-verified 2026-07-19: it fetches, seeds the DB conditionally, runs the
+ordered-migration runner, and flips the flows payload — it still has no
+ChirpStack-profile assertions at all). The actual
 check for "is RAK10701/S2120 provisioned" is `scripts/diagnose-pi-communication.sh`
 (prints `uci.chirpstack_profile_rak10701` / `env.CHIRPSTACK_PROFILE_S2120`) and
 `scripts/prepare-pi-communication-config.sh` (repairs missing UCI values from
@@ -408,34 +414,41 @@ grep -n "osi-db-helper" conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/no
 
 ## 6. `deploy.sh` knobs
 
-`deploy.sh` (repo root, 687 lines, verified 2026-07-06) runs **on the Pi**,
-fetching artifacts over a tunnelled local HTTP server. Actual tunables and
-decision points, read from the file (no invented ones):
+`deploy.sh` (repo root, re-verified 2026-07-19) runs **on the Pi**, fetching
+artifacts over a tunnelled local HTTP server. Actual tunables and decision
+points, read from the file (no invented ones):
 
 | Knob | What it does |
 |---|---|
 | `$1` (positional arg, default `9876`) | HTTP port the deploy source server is tunnelled on (`PORT="${1:-9876}"`) |
 | `/proc/device-tree/model` | Auto-detects Pi 5 vs Pi 4/400/3/2 vs Pi Zero/Model to pick the matching seed DB path (`detect_seed_db_rel`); unknown models fall back to the bcm2712 (Pi 5) seed as the canonical default |
 | DB seeding gate | `seed_db_if_missing` only copies the bundled seed DB when `/data/db/farming.db` is **absent** *and* no `-wal`/`-shm`/`-journal` sidecar files exist; otherwise it refuses (exits 1) or skips. **Never** overwrite a live DB — full rule and recovery steps are in `osi-live-ops-runbook`. |
-| Live schema repair functions | `ensure_dendro_schema`, `ensure_zone_irrigation_calibration_schema`, `ensure_analysis_views_schema`, `ensure_chameleon_schema`, `ensure_gateway_health_schema` — each is idempotent (checks `PRAGMA table_info` / catches `duplicate column name`) and runs unconditionally on every deploy if `farming.db` exists. `ensure_gateway_health_schema` specifically fetches `database/migrations/ordered/0002__gateway_health.sql` and refuses to apply it unless its first line is `-- risk: additive` — a hard-coded safety gate against ever running a non-additive migration through this path. |
+| `run_schema_migration()` | Runs after `npm install`. Skips (`return 0`) if `/data/db/farming.db` is absent. Otherwise: ensures the `sqlite3` CLI (`opkg install sqlite3-cli`); fetches `CHECKSUMS.json` + every ordered migration + the Stage 0 helpers (`repair-sync-outbox-v2.js`, `baseline-existing-db.js`, `migrate-cli.js`, `semantic-schema-compare.js`) + `lib/osi-migrate` modules; stops Node-RED (waits up to 30s for the process to exit); WAL-checkpoints and integrity-checks the DB; on a ledger-less DB runs the outbox-v2 repair then `baseline-existing-db.js`; runs `migrate-cli.js` with its backup dir; restarts Node-RED afterward — **except** on `migrate-cli.js` exit code `3` (backup-restore integrity failure), which deliberately leaves Node-RED stopped for the operator. |
+| `MIGRATE_BACKUP_DIR` (env override) | Where `migrate-cli.js` writes its pre-migration backup; default `/data/backups/migrate` |
+| `PAYLOAD_KEEP_N` (env override) | Number of staged `payloads/<stamp>` directories kept after a committed flip; default `5` |
+| Payload flip + self-check + auto-rollback | `flows.json` is staged early as `/srv/node-red/payloads/<UTC stamp>` (`scripts/deploy-payload-swap.js`); the flip is deferred until after the migration and mosquitto steps, when the `/srv/node-red/flows.json` symlink is repointed at the new stamp, Node-RED is restarted, and `http://127.0.0.1:1880/gui` is probed after a 5s wait. Pass → commit the flip and prune old payload dirs to `PAYLOAD_KEEP_N`. Fail → flip back to the previous stamp, restart Node-RED, and exit 1 (any DB migration already committed is **not** auto-undone). |
 | `run_communication_preflight` | Fetches `scripts/verify-communication-contract.js` plus copies of flows.json (all three hardware profiles), `node-red.init`, `settings.js`, `chirpstack-bootstrap.js`, `diagnose-pi-communication.sh` into a temp dir and runs the contract verifier against them **before** touching the live install. Aborts the whole deploy on failure. |
 | `npm install --omit=dev --no-fund --no-audit` | Installs Node-RED runtime dependencies on-device from the fetched `package.json`/`package-lock.json`; failure aborts the deploy (last 80 log lines printed to stderr) |
 | `fix_mosquitto_ownership` | Repairs file ownership/permissions on `mosquitto.passwd`/`.acl`/`/var/lib/mosquitto` if mosquitto is installed, using the UCI-configured mosquitto user if set |
-| React GUI swap | Fetches `react_gui.tar.gz`, wipes `/usr/lib/node-red/gui/*` (including dotfiles), extracts fresh bundle |
+| React GUI swap | Fetches `react_gui.tar.gz`, wipes `/usr/lib/node-red/gui/*` (including dotfiles), extracts fresh bundle; runs after the payload flip/self-check step above |
 
-**What it restarts:** nothing, automatically. `deploy.sh`'s final output
-explicitly tells the operator to run `/etc/init.d/node-red restart`
-manually — confirmed by reading the trailing `echo` block; there is no
-`/etc/init.d/node-red restart` call anywhere in the script itself. ChirpStack
-re-provisioning (`osi-bootstrap`, `START=99`) only happens automatically on
-the next full boot, or can be triggered manually with
-`node /usr/share/node-red/chirpstack-bootstrap.js` (per the script's own
-closing instructions).
+**What it restarts:** `deploy.sh` itself now restarts Node-RED, twice, in the
+normal path. `run_schema_migration()` stops Node-RED before touching the
+database and restarts it once the migration completes; then, after the
+payload flip, the script issues `/etc/init.d/node-red restart` again and
+probes `/gui` before deciding whether to commit or auto-roll-back (rolling
+back restarts Node-RED a further time on the previous payload). The one
+deliberate exception is `migrate-cli.js` exit code `3` (backup-restore
+integrity failure) — that path leaves Node-RED stopped on purpose for
+operator intervention rather than restarting it. ChirpStack re-provisioning
+is unchanged: `osi-bootstrap` (`START=99`) only runs automatically on the
+next full boot, or can be triggered manually with
+`node /usr/share/node-red/chirpstack-bootstrap.js`.
 
 **Re-verify:**
 ```
 grep -n "^[a-z_]*() {" deploy.sh
-grep -n "restart" deploy.sh   # expect: only in the trailing echo instructions, not an executed command
+grep -n "restart\|flipTo\|stagePayload" deploy.sh   # executed restarts around the migration step and payload flip
 ```
 
 ---
@@ -558,10 +571,11 @@ grep -n "firmware_version" conf/full_raspberrypi_bcm27xx_bcm2712/files/etc/uci-d
   broker. It does not — that URL is hardcoded in flows.json (section 9).
 - Assuming `.chirpstack.env` is dead weight that's safe to delete blindly.
   It's still the fallback path for every `CHIRPSTACK_*` key that isn't yet in
-  UCI (fresh bootstrap before first successful UCI write, or a key like
-  `CHIRPSTACK_PROFILE_LORAIN` that has no UCI mapping at all) — removing it
-  is correct only for identity keys during a repair, not universally.
-  `osi-live-ops-runbook` has the actual repair sequence.
+  UCI (fresh bootstrap before first successful UCI write, or the
+  `CHIRPSTACK_PROFILE_LORAIN`/`CHIRPSTACK_PROFILE_UC512` pair that
+  `node-red.init` never exports) — removing it is correct only for identity
+  keys during a repair, not universally. `osi-live-ops-runbook` has the actual
+  repair sequence.
 - Believing `OSI_HEALTH_*_RETENTION_DAYS` can be tuned per-gateway today. It
   cannot without a flows.json edit — there is no UCI/env plumbing yet
   (section 4).
@@ -576,6 +590,9 @@ grep -n "firmware_version" conf/full_raspberrypi_bcm27xx_bcm2712/files/etc/uci-d
   without understanding why the alias exists.
 - Assuming deploy.sh enforces ChirpStack profile completeness. It doesn't;
   that's a manual operator check (`diagnose-pi-communication.sh`).
+- Assuming deploy.sh never restarts services. Since the payload-flip redesign
+  it stops/starts Node-RED around the schema-migration step and restarts it
+  again after the payload flip (see section 6).
 
 ## Provenance and maintenance
 
@@ -583,8 +600,11 @@ This skill embeds knowledge gathered by reading repository source directly
 (uci-defaults, `osi-gateway-identity.sh`, `chirpstack-bootstrap.js`,
 `node-red.init`, `settings.js`, `deploy.sh`, flows.json, `docs/operations/edge-history-retention.md`,
 `AGENTS.md`) on 2026-07-06 against the `feat/agent-skill-library` worktree.
-Nothing here should contradict `AGENTS.md`; if it does, `AGENTS.md` wins and
-this file is stale — re-verify and fix.
+The `deploy.sh` and ChirpStack-profile sections (1, 3, 6) were re-verified
+2026-07-19 on `main` (deploy.sh payload-flip/migration-runner redesign;
+Milesight UC512 added as a seventh ChirpStack device profile). Nothing here
+should contradict `AGENTS.md`; if it does, `AGENTS.md` wins and this file is
+stale — re-verify and fix.
 
 Re-verify the whole surface in one pass:
 ```

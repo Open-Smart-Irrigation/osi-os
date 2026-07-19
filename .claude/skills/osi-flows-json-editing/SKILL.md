@@ -161,6 +161,7 @@ const exampleFunctionNode = {
   outputs: 1,
   // libs only needed for real npm modules bound via settings.js functionExternalModules,
   // e.g. [{ var: 'osiDb', module: 'osi-db-helper' }] — see "Function-node conventions" below.
+  // In-repo seam modules: bind osiLib and call osiLib.require('<name>') — see "In-repo seam modules" below.
   libs: [],
   x: 400,
   y: 400,
@@ -230,6 +231,55 @@ const n = flows.find(x => x.id === 'auth-db-query');
 console.log(JSON.stringify(n.libs));
 "
 ```
+
+### In-repo seam modules: bind `osiLib`, load with `osiLib.require()`
+
+`osi-lib` (repo source
+`conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-lib/index.js`,
+deployed at `/srv/node-red/osi-lib`) is the single-choke-point loader for
+extracted in-repo seam modules (refactor-program item 1.A1). Rather than
+binding a helper module directly, a function node binds the loader itself
+via `libs`:
+
+```json
+"libs": [{ "var": "osiLib", "module": "osi-lib" }]
+```
+
+and then calls `osiLib.require('<name>')` at the point of use. Real
+precedent, node `dendro-compute-fn` ("Daily Dendrometer Analytics"):
+
+```js
+const _daLoad = osiLib.require('dendro-analytics');
+if (!_daLoad.ok) {
+  node.error('Daily Dendro Analytics: analytics module unavailable: ' + _daLoad.error, msg);
+  return null;
+}
+const DA = _daLoad.value;
+// A failed load is quarantined for 30s (OSI_LIB_COOLDOWN_MS): a retry within
+// that window fails fast with `quarantined: true` instead of re-attempting a
+// doomed require() on every tick.
+```
+
+`osiLib.require(name)` never throws. It always returns either
+`{ ok: true, value }` or `{ ok: false, error, quarantined? }` — check `.ok`
+before touching `.value`, and on `ok: false` call `node.error(...)` and
+return, exactly as above.
+
+Registered names live in the `NAME_TO_PATH` map in `osi-lib/index.js`
+(examples: `'history-sync'` → `osi-history-sync-helper`, `'dendro-analytics'`
+→ `osi-dendro-analytics`, `'device-writer'` → `osi-device-writer`). A new
+helper module needs three-surface registration — registry entry, loader
+test, and `deploy.sh` coverage — enforced by
+`node scripts/verify-helper-registration.js`; run it after registering any
+new module and before wiring a function node to it.
+
+- Legacy direct `libs` bindings of specific helpers (`osiDb` via
+  `osi-db-helper`, `osiCloudHttp`, `chameleon`, `dendro`) are widespread
+  precedent (~137 nodes) and stay valid in nodes that already use them.
+- New in-repo module access goes through `osiLib.require` instead (rule #15
+  in the sibling skill `osi-common-pitfalls`); a bare `require()` of anything
+  but a Node builtin in a function node fails
+  `node scripts/flows-bare-require-scan.js`.
 
 ### Guarded shared-module locals: `global.get(...)`, not `libs`
 
@@ -527,6 +577,8 @@ from the repo root.
 | Stray DDL ratchet | `node scripts/verify-no-stray-ddl.js` | exit 0; no unreviewed DDL-marker count increase in flows/deploy surfaces |
 | Flows size ratchet | `node scripts/verify-flows-size-ratchet.js` | exit 0; no node grew, no new node exceeds 4 KB, total embedded JS did not increase |
 | Bare require scan | `node scripts/flows-bare-require-scan.js` | exit 0; no function node uses bare `require()` instead of `osiLib.require()` |
+| Function-node parse | `node scripts/verify-flows-fn-parse.js` | ends `verify-flows-fn-parse: OK`, exit 0 — required for any function-node edit |
+| Helper registration (only when adding or moving a helper/seam module) | `node scripts/verify-helper-registration.js` | exit 0; registry, loader test, and deploy.sh coverage all match |
 
 If you intentionally changed a pinned wiring contract, update
 `scripts/test-flows-wiring.js` in the same commit and say why in the commit
@@ -564,6 +616,11 @@ non-author) — §8 defines done, not a green checklist.
   function node.
 - Trusting `functionExternalModules: true` alone to make a module available.
   It only enables the *mechanism*; each node still needs its own `libs` entry.
+- Binding a brand-new in-repo helper directly via `libs` (or bare
+  `require()`) instead of registering it in osi-lib's `NAME_TO_PATH` and
+  loading it with `osiLib.require` — the bare form fails
+  `flows-bare-require-scan.js` and an unregistered module fails
+  `verify-helper-registration.js`.
 - Adding schema DDL inside `sync-init-fn` because "it's just one more ADD
   COLUMN" — that node is frozen; see `osi-schema-change-control`.
 - Adding or leaving an empty catch in a touched function node. The
