@@ -41,6 +41,27 @@ describe('markerXPx', () => {
   });
 });
 
+describe('markerXPx with plot-area insets', () => {
+  // The history time-charts inset their plotted area within the lane's full
+  // width (HISTORY_CHART_MARGIN + the value-axis width — see chartAxis.ts and
+  // SoilLineChartView.tsx). The marker lane is a full-width DOM sibling of
+  // those charts, so it must map through the SAME insets or every marker
+  // renders under the wrong point on the chart.
+  const insets = { left: 60, right: 16 };
+
+  it('maps the window start to the left inset, not 0px', () => {
+    expect(markerXPx(0, 0, DAY_MS, 320, insets)).toBe(60);
+  });
+
+  it('maps the window end to widthPx minus the right inset', () => {
+    expect(markerXPx(DAY_MS, 0, DAY_MS, 320, insets)).toBe(320 - 16);
+  });
+
+  it('maps the midpoint proportionally within the inset plot width', () => {
+    expect(markerXPx(DAY_MS / 2, 0, DAY_MS, 320, insets)).toBe(60 + (320 - 60 - 16) / 2);
+  });
+});
+
 describe('clusterMarkersByDistance', () => {
   it('returns an empty cluster list for zero markers', () => {
     expect(clusterMarkersByDistance([], 0, DAY_MS, 320)).toEqual([]);

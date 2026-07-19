@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { clusterMarkersByDistance, DEFAULT_CLUSTER_DISTANCE_PX } from './journalMarkerClustering';
 import type { MarkerCluster } from './journalMarkerClustering';
+import { HISTORY_CHART_PLOT_INSET_PX } from '../../history/visualizations/chartAxis';
 
 /**
  * Pure presentational marker lane for journal entries on a history chart's
@@ -218,7 +219,14 @@ export const JournalMarkerLane: React.FC<JournalMarkerLaneProps> = ({
   );
 
   const clusters = useMemo(
-    () => clusterMarkersByDistance(visibleMarkers, fromMs, toMs, effectiveWidth, DEFAULT_CLUSTER_DISTANCE_PX),
+    () => clusterMarkersByDistance(
+      visibleMarkers,
+      fromMs,
+      toMs,
+      effectiveWidth,
+      DEFAULT_CLUSTER_DISTANCE_PX,
+      HISTORY_CHART_PLOT_INSET_PX,
+    ),
     [visibleMarkers, fromMs, toMs, effectiveWidth],
   );
 

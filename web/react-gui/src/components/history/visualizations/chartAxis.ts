@@ -11,6 +11,25 @@ import type { CSSProperties, SVGProps } from 'react';
 // `bottom: 28` keeps x-axis ticks above mobile browser chrome and home indicators.
 export const HISTORY_CHART_MARGIN = { top: 36, right: 16, bottom: 28, left: 8 } as const;
 
+// The width the time-series chart views pass to `historyValueYAxis` for
+// their value axis (see e.g. `SoilLineChartView`'s `historyValueYAxis('kPa',
+// 52)`). Exported so anything that needs to line up with a chart's plotted
+// x-axis — without rendering inside the chart itself — can reproduce the
+// same horizontal offset.
+export const HISTORY_TIME_SERIES_Y_AXIS_WIDTH_PX = 52;
+
+/**
+ * Left/right inset (px) between a time chart's outer edge and its plotted
+ * area: `HISTORY_CHART_MARGIN` plus the value-axis width above. The journal
+ * marker lane renders as a full-width DOM sibling below these charts and
+ * uses this so a marker at timestamp T lines up under the chart's point for
+ * T instead of the lane's raw edge.
+ */
+export const HISTORY_CHART_PLOT_INSET_PX = {
+  left: HISTORY_CHART_MARGIN.left + HISTORY_TIME_SERIES_Y_AXIS_WIDTH_PX,
+  right: HISTORY_CHART_MARGIN.right,
+} as const;
+
 const DAY_MS = 86_400_000;
 const AXIS_TICK: SVGProps<SVGTextElement> = { fontSize: 11, fill: 'var(--text-tertiary)' };
 const X_AXIS_TICK: SVGProps<SVGTextElement> = { fontSize: 10, fill: 'var(--text-tertiary)' };

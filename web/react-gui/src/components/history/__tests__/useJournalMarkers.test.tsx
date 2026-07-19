@@ -146,9 +146,12 @@ describe('useJournalMarkers', () => {
     );
 
     await waitFor(() => expect(result.current.loading).toBe(false));
-    // A runaway server must not cause an unbounded number of requests or an unbounded marker list.
-    expect(listEntries.mock.calls.length).toBeLessThan(100);
-    expect(result.current.markers.length).toBeLessThan(10_000);
+    // A runaway server must not cause an unbounded number of requests or an unbounded marker
+    // list. The hook's real caps are MAX_PAGES=25 / MAX_MARKERS=5000; this fixture returns one
+    // marker per page, so MAX_PAGES is the binding cap here — assert against it directly (not a
+    // loose round number) so a regression that loosens the cap (e.g. MAX_PAGES -> 50) fails.
+    expect(listEntries.mock.calls.length).toBe(25);
+    expect(result.current.markers.length).toBe(25);
   });
 
   it('keeps a failed request distinct from an empty result and retries', async () => {
