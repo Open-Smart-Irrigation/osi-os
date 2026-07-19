@@ -337,7 +337,7 @@ function readOptionalJson(value, options) {
   return value === 'not-applicable' ? null : readJsonFile(value, options);
 }
 
-function readCurrentDatabaseEvidence(value, label) {
+function readCurrentDatabaseEvidence(value, label, createdAt) {
   if (value === 'current-database-unreadable-json') {
     return {
       format: 1,
@@ -346,7 +346,12 @@ function readCurrentDatabaseEvidence(value, label) {
       observedDatabaseIdentitySha256: null,
       quickCheckResult: 'unreadable',
       errorCode: 'SQLITE_OPEN_FAILED',
-      createdAt: new Date().toISOString(),
+      // The shorthand is a protocol fixture, not a clocked observation.  A
+      // retry must hash the exact same evidence bytes; production callers
+      // should provide the immutable evidence JSON emitted by the audit
+      // helper.  Keep the shorthand deterministic for recovery tests and
+      // emergency bootstraps.
+      createdAt: createdAt || '1970-01-01T00:00:00.000Z',
     };
   }
   return readJsonFile(value, { label });
@@ -406,6 +411,10 @@ function runInitialize(values) {
     expectedPhase: values['--expected-phase'],
     expectedParentGeneration: values['--expected-parent-generation'],
   });
+  const deploymentState = protocolState.readDeploymentStateFile(values['--deployment-state']);
+  if (deploymentState.parentDeployment.operationId !== values['--operation-id']) {
+    throw cliError('initialize_operation_mismatch', 'initialize operationId must match the journaled parent deployment operationId');
+  }
   const ackAuditReport = readJsonFile(values['--ack-audit-report']);
   if (ackAuditReport.format !== 1 || ackAuditReport.writersStopped !== true) {
     throw cliError('initialize_ack_audit_invalid', 'initialize requires a format-1 stopped-writer audit report');
@@ -419,6 +428,13 @@ function runInitialize(values) {
     backupManifest.capabilityWitnessSha256 !== expectedWitnessHead
   ) {
     throw cliError('initialize_backup_head_mismatch', 'initialize backup evidence does not bind the expected capability heads');
+  }
+  const current = protocolState.status(opts);
+  if (current.initialized) {
+    const currentLoaded = protocolState.loadProtocolState(opts);
+    if (current.capabilityHeadSha256 !== expectedCapabilityHead || currentLoaded.capability.head.witnessSha256 !== expectedWitnessHead) {
+      throw cliError('initialize_live_head_mismatch', 'already-initialized protocol roots do not match the expected backup heads');
+    }
   }
   const result = protocolState.initialize(Object.assign({}, opts, {
     operationId: values['--operation-id'],
@@ -458,17 +474,22 @@ function runStatus(values) {
 
 function runFactoryZero(values) {
   const opts = rootOptionsFrom(values);
+  if (values['--expected-baseline-prefix'] !== 'baseline-completing') {
+    throw cliError('factory_prefix_invalid', 'initialize-factory-zero requires the exact baseline-completing prefix');
+  }
   if (values['--expected-phase'] !== 'image-baseline-initializing') {
     throw cliError('factory_phase_invalid', 'initialize-factory-zero requires the exact image-baseline-initializing phase');
   }
   protocolState.requireFactoryBaselinePhase(values['--deployment-state'], {
     expectedBaselineId: values['--expected-baseline-id'],
     expectedPhase: values['--expected-phase'],
-    expectedBaselinePrefix: values['--expected-baseline-prefix'],
+    // This prefix is a protocol authority, not caller-controlled routing.
+    expectedBaselinePrefix: 'baseline-completing',
     expectedParentGeneration: values['--expected-parent-generation'],
     operationId: values['--operation-id'],
   });
-  const databaseStat = fs.lstatSync(values['--database']);
+  const databasePath = values['--database'];
+  const databaseStat = fs.lstatSync(databasePath);
   if (!databaseStat.isFile() || databaseStat.isSymbolicLink() || (databaseStat.mode & 0o777) !== 0o600) {
     throw cliError('factory_database_invalid', '--database must be a regular nonsymlink file');
   }
@@ -477,16 +498,42 @@ function runFactoryZero(values) {
       throw cliError('factory_database_sidecar_present', `factory database SQLite set must be absent of sidecars: ${suffix || 'main'}`);
     }
   }
-  const quickCheck = childProcess.spawnSync('/usr/bin/sqlite3', ['-readonly', values['--database'], 'PRAGMA quick_check;'], {
+  const databaseFd = fs.openSync(databasePath, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW);
+  const openedIdentity = fs.fstatSync(databaseFd);
+  const quickCheck = childProcess.spawnSync('/usr/bin/sqlite3', ['-readonly', '/proc/self/fd/3', 'PRAGMA quick_check;'], {
     encoding: 'utf8',
     timeout: 30000,
+    stdio: ['ignore', 'pipe', 'pipe', databaseFd],
   });
-  if (quickCheck.status !== 0 || quickCheck.stdout.trim() !== 'ok') {
-    throw cliError('factory_database_quick_check_failed', 'factory database failed SQLite quick_check');
+  try {
+    if (quickCheck.status !== 0 || quickCheck.stdout.trim() !== 'ok') {
+      throw cliError('factory_database_quick_check_failed', 'factory database failed SQLite quick_check');
+    }
+    const afterQuickCheck = fs.fstatSync(databaseFd);
+    if (afterQuickCheck.dev !== openedIdentity.dev || afterQuickCheck.ino !== openedIdentity.ino || afterQuickCheck.size !== openedIdentity.size) {
+      throw cliError('factory_database_identity_changed', 'factory database changed while SQLite validated the opened inode');
+    }
+  } finally {
+    fs.closeSync(databaseFd);
   }
+  const factorySeedReceipt = readJsonFile(values['--factory-seed-receipt']);
   const ackAuditReport = readJsonFile(values['--ack-audit-report']);
+  const factoryProvenance = readJsonFile(values['--factory-provenance'], { artifactOwned: true });
+  for (const [label, evidence] of [
+    ['factory provenance', factoryProvenance],
+    ['factory seed receipt', factorySeedReceipt],
+    ['stopped-writer audit', ackAuditReport],
+  ]) {
+    if (typeof evidence.databasePath !== 'string' || evidence.databasePath !== databasePath) {
+      throw cliError('factory_database_path_mismatch', `${label} does not bind --database`);
+    }
+    if (evidence.databaseDevice != null && evidence.databaseInode != null &&
+        (evidence.databaseDevice !== openedIdentity.dev || evidence.databaseInode !== openedIdentity.ino)) {
+      throw cliError('factory_database_identity_mismatch', `${label} does not bind the opened database inode`);
+    }
+  }
   const observedIdentitySha256 = crypto.createHash('sha256')
-    .update(protocolState.canonicalJson({ device: databaseStat.dev, inode: databaseStat.ino }))
+    .update(protocolState.canonicalJson({ device: openedIdentity.dev, inode: openedIdentity.ino }))
     .digest('hex');
   if (ackAuditReport.databaseIdentitySha256 !== observedIdentitySha256) {
     throw cliError('factory_database_identity_mismatch', 'factory database inode identity does not match the stopped-writer audit');
@@ -496,9 +543,9 @@ function runFactoryZero(values) {
     operationId: values['--operation-id'],
     baselineId: values['--expected-baseline-id'],
     parentGeneration: values['--expected-parent-generation'],
-    factoryProvenance: readJsonFile(values['--factory-provenance'], { artifactOwned: true }),
+    factoryProvenance,
     imageGuardManifest: readJsonFile(values['--image-guard-manifest'], { artifactOwned: true }),
-    factorySeedReceipt: readJsonFile(values['--factory-seed-receipt']),
+    factorySeedReceipt,
     ackAuditReport,
     factoryIntentOut: values['--factory-intent-out'],
     factoryZeroSourceReceiptOut: values['--factory-zero-source-receipt-out'],
@@ -517,6 +564,10 @@ function runRecordDisposition(values) {
       expectedPhase: values['--expected-phase'],
       expectedParentGeneration: values['--expected-parent-generation'],
     });
+    const deploymentState = protocolState.readDeploymentStateFile(values['--deployment-state']);
+    if (deploymentState.parentDeployment.operationId !== values['--operation-id']) {
+      throw cliError('disposition_operation_mismatch', 'record-v2-disposition operationId must match the journaled deployment operationId');
+    }
   } else if (values['--expected-phase'] === 'integrity-historical-dispositioning') {
     requireRecovery(values, disposition.recoveryOperationId, 'integrity-historical-dispositioning', disposition.requestId);
   } else {
@@ -718,8 +769,10 @@ function runPrepareDatabaseRestore(values) {
   const reverseInventory = readJsonFile(values['--reverse-merge-adapter-inventory'], { artifactOwned: true });
   const backupCommandAudit = readJsonFile(values['--backup-command-audit-report']);
   const backupFarmingAudit = readJsonFile(values['--backup-farming-audit-report']);
-  const currentCommandAudit = readCurrentDatabaseEvidence(values['--current-command-audit-report'], 'current command audit');
-  const currentFarmingAudit = readCurrentDatabaseEvidence(values['--current-farming-audit-report'], 'current farming audit');
+  const currentEvidenceCreatedAt = values['--recovery-operation-id'] ?
+    `1970-01-01T00:00:00.000Z` : undefined;
+  const currentCommandAudit = readCurrentDatabaseEvidence(values['--current-command-audit-report'], 'current command audit', currentEvidenceCreatedAt);
+  const currentFarmingAudit = readCurrentDatabaseEvidence(values['--current-farming-audit-report'], 'current farming audit', currentEvidenceCreatedAt);
   const lineageReceipt = readOptionalJson(values['--database-lineage-invalidation-receipt']);
   const result = capabilityTransitions.prepareDatabaseRestore({
     ...opts,
@@ -777,7 +830,13 @@ function runPrepareIntegrity(values) {
   const observedEvidence = readJsonFile(path.join(path.dirname(values['--authority']), 'observed-evidence.json'));
   const lineageReceipt = readOptionalJson(values['--database-lineage-invalidation-receipt']);
   const backupManifest = readJsonFile(values['--backup-manifest']);
-  const protocolStatus = protocolState.status(opts);
+  let protocolStatus;
+  try {
+    protocolStatus = protocolState.status(opts);
+  } catch (error) {
+    if (error.code !== 'protocol_state_partial_root_set') throw error;
+    protocolStatus = { initialized: false, midFlight: true };
+  }
   const result = capabilityTransitions.prepareIntegrityRecovery({
     ...opts,
     recoveryRequest,

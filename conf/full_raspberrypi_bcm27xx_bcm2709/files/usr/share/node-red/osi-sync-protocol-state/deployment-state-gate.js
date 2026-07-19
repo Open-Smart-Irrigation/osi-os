@@ -210,7 +210,7 @@ function requireFactoryBaselinePhase(deploymentStatePath, {
   if (prefix !== expectedBaselinePrefix) {
     throw gateError('deployment_state_wrong_baseline_prefix', 'factory baseline prefix does not match --expected-baseline-prefix');
   }
-  if (parent.operationId != null && parent.operationId !== operationId) {
+  if (typeof parent.operationId !== 'string' || parent.operationId !== operationId) {
     throw gateError('deployment_state_wrong_factory_operation', 'factory baseline operation does not match --operation-id');
   }
   if (state.activeSubOperation !== null) {

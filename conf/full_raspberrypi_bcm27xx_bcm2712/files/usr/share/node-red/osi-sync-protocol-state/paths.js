@@ -74,7 +74,7 @@ function resolveRoots(options) {
   const activityWitnessRoot = opts.activityWitnessRoot || DEFAULT_ACTIVITY_WITNESS_ROOT;
   const activityHeadWitnessRoot = deriveActivityHeadWitnessRoot(activityWitnessRoot);
   const capabilityRoot = path.join(root, 'protocol-capabilities');
-  return {
+  const roots = {
     root,
     capabilityRoot,
     generationsDir: path.join(capabilityRoot, GENERATIONS_DIRNAME),
@@ -90,18 +90,38 @@ function resolveRoots(options) {
     checkpointsDir: path.join(activityHeadWitnessRoot, CHECKPOINTS_DIRNAME),
     activityHeadPath: path.join(activityHeadWitnessRoot, 'head.json'),
   };
+  // Validate separation at resolution time, not only when a mutator later
+  // acquires locks. Read-only status/load calls must reject co-located roots
+  // just as strictly as writers.
+  fourRootsInLockOrder(roots);
+  return roots;
 }
 
 // The four physical roots in the plan's fixed lock order (line 353):
 // activity-head-witness, activity-database, capability-witness,
 // capability-root.
 function fourRootsInLockOrder(roots) {
-  return [
+  const ordered = [
     { key: 'activityHeadWitnessRoot', dir: roots.activityHeadWitnessRoot },
     { key: 'activityWitnessRoot', dir: roots.activityWitnessRoot },
     { key: 'witnessRoot', dir: roots.witnessRoot },
     { key: 'capabilityRoot', dir: roots.capabilityRoot },
   ];
+  const normalized = ordered.map((entry) => ({ ...entry, dir: path.resolve(entry.dir) }));
+  for (let i = 0; i < normalized.length; i += 1) {
+    for (let j = i + 1; j < normalized.length; j += 1) {
+      const a = normalized[i];
+      const b = normalized[j];
+      if (a.dir === b.dir || a.dir.startsWith(`${b.dir}${path.sep}`) || b.dir.startsWith(`${a.dir}${path.sep}`)) {
+        throw pathsError(
+          'protocol_roots_not_separate',
+          `protocol lock roots must be distinct, non-nested directories (${a.key}, ${b.key})`,
+          { first: a.dir, second: b.dir }
+        );
+      }
+    }
+  }
+  return ordered;
 }
 
 // ---------------------------------------------------------------------------
@@ -311,6 +331,7 @@ function listRegularEntries(dirPath, pattern) {
 // Never touches chain content; an already-existing directory is verified
 // (mode 0700 + ownership, fail-closed) from each module-owned root down.
 function ensureFourRootDirsForLocking(roots, ownershipAdapter) {
+  fourRootsInLockOrder(roots);
   ensureModeDirRecursive(roots.activityHeadWitnessRoot, ownershipAdapter, { enforceFrom: roots.activityHeadWitnessRoot });
   ensureModeDirRecursive(roots.activityWitnessRoot, ownershipAdapter, { enforceFrom: roots.activityWitnessRoot });
   ensureModeDirRecursive(roots.witnessRoot, ownershipAdapter, { enforceFrom: roots.witnessRoot });

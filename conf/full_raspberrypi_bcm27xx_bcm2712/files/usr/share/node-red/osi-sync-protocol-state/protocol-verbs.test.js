@@ -30,6 +30,39 @@ function makeRoots() {
   };
 }
 
+function makeIntegrityAbsenceCall(tmp, opts, crashAfter) {
+  const request = { format: 1, requestId: 'request-crash', recoveryRequestSha256: SHA_A };
+  const observedEvidence = {
+    format: 1, kind: 'DATABASE_INTEGRITY_OBSERVATION', requestId: request.requestId,
+    recoveryRequestSha256: protocol.canonicalSha256(request), databasePath: '/data/db/farming.db',
+    observedDatabaseIdentitySha256: SHA_B, quickCheckResult: 'missing', protocolRootsAbsent: true,
+    sqliteMembers: ['journal', 'main', 'shm', 'wal'].map((name) => ({
+      name, path: `/data/db/farming.db${name === 'main' ? '' : `-${name}`}`,
+      status: 'ABSENT', device: null, inode: null, sizeBytes: null, sha256: null,
+    })), bootIdSha256: SHA_C, createdAt: '2026-07-19T00:07:00.000Z',
+  };
+  const backupManifest = {
+    format: 1, databaseSha256: SHA_D, commandAuditSha256: SHA_A, farmingAuditSha256: SHA_B,
+    capabilityHeadSha256: 'absent', capabilityWitnessSha256: 'absent', activityGeneration: 0,
+    activityExternalHeadSha256: 'absent',
+  };
+  const recoveryOperationId = 'abababab-abab-4bab-8bab-abababababab';
+  const authority = {
+    format: 1, kind: 'DATABASE_INTEGRITY_RECOVERY_AUTHORITY', requestId: request.requestId, recoveryOperationId,
+    recoveryRequestSha256: protocol.canonicalSha256(request), backupManifestSha256: protocol.canonicalSha256(backupManifest),
+    backupDatabaseSha256: SHA_D, observedEvidenceSha256: protocol.canonicalSha256(observedEvidence),
+    possibleDataLossAcknowledgementSha256: SHA_E, databaseLineageInvalidationReceiptSha256: null,
+    disposition: 'RESTORE_TRUSTED_BACKUP_AND_RECONCILE', protocolRootsAbsent: true, createdAt: observedEvidence.createdAt,
+  };
+  return {
+    ...opts, recoveryRequest: request, authority, observedEvidence, backupManifest,
+    integrityAllRootsAbsent: true, databaseLineageInvalidationReceiptSha256: null,
+    forensicDestination: path.join(tmp, 'forensic', request.requestId),
+    resultOut: path.join(tmp, 'integrity', 'prepare-crash-result.json'), crashAfter,
+    createdAt: observedEvidence.createdAt,
+  };
+}
+
 test('recordHistoricalV2Disposition appends a receipt-bound deployment zero/CLEAR generation', (t) => {
   const { tmp, opts } = makeRoots();
   t.after(() => fs.rmSync(tmp, { recursive: true, force: true }));
@@ -576,7 +609,7 @@ test('prepareIntegrityRecovery appends the exact existing-root integrity invalid
       { name: 'shm', path: '/data/db/farming.db-shm', status: 'ABSENT', device: null, inode: null, sizeBytes: null, sha256: null },
       { name: 'wal', path: '/data/db/farming.db-wal', status: 'ABSENT', device: null, inode: null, sizeBytes: null, sha256: null },
     ],
-    bootIdSha256: SHA_C, createdAt: '2026-07-19T00:07:00.000Z',
+    bootIdSha256: SHA_C, createdAt: '2026-07-19T00:07:00.000Z', protocolRootsAbsent: false,
   };
   const backupManifest = {
     format: 1, databaseSha256: SHA_D, commandAuditSha256: SHA_A, farmingAuditSha256: SHA_B,
@@ -591,7 +624,7 @@ test('prepareIntegrityRecovery appends the exact existing-root integrity invalid
     backupManifestSha256: protocol.canonicalSha256(backupManifest), backupDatabaseSha256: SHA_D,
     observedEvidenceSha256: protocol.canonicalSha256(observedEvidence),
     possibleDataLossAcknowledgementSha256: SHA_E, databaseLineageInvalidationReceiptSha256: null,
-    disposition: 'RESTORE_TRUSTED_BACKUP_AND_RECONCILE', createdAt: '2026-07-19T00:07:00.000Z',
+    disposition: 'RESTORE_TRUSTED_BACKUP_AND_RECONCILE', protocolRootsAbsent: false, createdAt: '2026-07-19T00:07:00.000Z',
   };
   const result = transitions.prepareIntegrityRecovery({
     ...opts, recoveryRequest: request, authority, observedEvidence, backupManifest,
@@ -623,16 +656,20 @@ test('prepareIntegrityRecovery initializes exact all-root absence before integri
       { name: 'main', path: '/data/db/farming.db', status: 'ABSENT', device: null, inode: null, sizeBytes: null, sha256: null },
       { name: 'shm', path: '/data/db/farming.db-shm', status: 'ABSENT', device: null, inode: null, sizeBytes: null, sha256: null },
       { name: 'wal', path: '/data/db/farming.db-wal', status: 'ABSENT', device: null, inode: null, sizeBytes: null, sha256: null },
-    ], bootIdSha256: SHA_C, createdAt: '2026-07-19T00:07:00.000Z',
+    ], bootIdSha256: SHA_C, createdAt: '2026-07-19T00:07:00.000Z', protocolRootsAbsent: true,
   };
-  const backupManifest = { format: 1, databaseSha256: SHA_D, commandAuditSha256: SHA_A, farmingAuditSha256: SHA_B };
+  const backupManifest = {
+    format: 1, databaseSha256: SHA_D, commandAuditSha256: SHA_A, farmingAuditSha256: SHA_B,
+    capabilityHeadSha256: 'absent', capabilityWitnessSha256: 'absent', activityGeneration: 0,
+    activityExternalHeadSha256: 'absent',
+  };
   const recoveryOperationId = 'abababab-abab-4bab-8bab-abababababab';
   const authority = {
     format: 1, kind: 'DATABASE_INTEGRITY_RECOVERY_AUTHORITY', requestId: request.requestId, recoveryOperationId,
     recoveryRequestSha256: protocol.canonicalSha256(request), backupManifestSha256: protocol.canonicalSha256(backupManifest),
     backupDatabaseSha256: SHA_D, observedEvidenceSha256: protocol.canonicalSha256(observedEvidence),
     possibleDataLossAcknowledgementSha256: SHA_E, databaseLineageInvalidationReceiptSha256: null,
-    disposition: 'RESTORE_TRUSTED_BACKUP_AND_RECONCILE', createdAt: observedEvidence.createdAt,
+    disposition: 'RESTORE_TRUSTED_BACKUP_AND_RECONCILE', protocolRootsAbsent: true, createdAt: observedEvidence.createdAt,
   };
   const result = transitions.prepareIntegrityRecovery({
     ...opts, recoveryRequest: request, authority, observedEvidence, backupManifest,
@@ -645,6 +682,23 @@ test('prepareIntegrityRecovery initializes exact all-root absence before integri
   assert.equal(loaded.capability.generations[0].generation.state.historicalV2Disposition, 'UNASSESSED');
   assert.equal(loaded.capability.generations.at(-1).generation.kind, 'DATABASE_INTEGRITY_INVALIDATION');
   assert.equal(loaded.capability.generations.at(-1).generation.state.databaseRestore.status, 'RECONCILIATION_REQUIRED');
+});
+
+test('prepareIntegrityRecovery resumes all-root genesis after capability and activity head crashes', (t) => {
+  const { tmp, opts } = makeRoots();
+  t.after(() => fs.rmSync(tmp, { recursive: true, force: true }));
+  for (const crashAfter of ['capability_head_published', 'activity_head_published']) {
+    fs.rmSync(tmp, { recursive: true, force: true });
+    fs.mkdirSync(tmp, { recursive: true });
+    const call = makeIntegrityAbsenceCall(tmp, opts, crashAfter);
+    const script = `require(${JSON.stringify(path.join(__dirname, 'capability-transitions.js'))}).prepareIntegrityRecovery(${JSON.stringify(call)})`;
+    const crashed = childProcess.spawnSync(process.execPath, ['-e', script], { encoding: 'utf8' });
+    assert.equal(crashed.status, 137, crashAfter);
+    const resumed = transitions.prepareIntegrityRecovery({ ...call, crashAfter: undefined });
+    assert.equal(resumed.protocolInitialization, 'ALL_ROOT_ABSENCE', crashAfter);
+    assert.equal(resumed.result, 'BACKUP_REPLACEMENT_PREPARED', crashAfter);
+    assert.equal(protocol.loadProtocolState(opts).capability.generations.length, 2, crashAfter);
+  }
 });
 
 test('completeIntegrityRecovery clears only the prepared integrity epoch with cutoff authority', (t) => {
@@ -661,7 +715,7 @@ test('completeIntegrityRecovery clears only the prepared integrity epoch with cu
       { name: 'main', path: '/data/db/farming.db', status: 'ABSENT', device: null, inode: null, sizeBytes: null, sha256: null },
       { name: 'shm', path: '/data/db/farming.db-shm', status: 'ABSENT', device: null, inode: null, sizeBytes: null, sha256: null },
       { name: 'wal', path: '/data/db/farming.db-wal', status: 'ABSENT', device: null, inode: null, sizeBytes: null, sha256: null },
-    ], bootIdSha256: SHA_C, createdAt: '2026-07-19T00:08:00.000Z',
+    ], bootIdSha256: SHA_C, createdAt: '2026-07-19T00:08:00.000Z', protocolRootsAbsent: false,
   };
   const backupManifest = {
     format: 1, databaseSha256: SHA_D, commandAuditSha256: SHA_A, farmingAuditSha256: SHA_B,
@@ -675,7 +729,7 @@ test('completeIntegrityRecovery clears only the prepared integrity epoch with cu
     recoveryRequestSha256: protocol.canonicalSha256(request), backupManifestSha256: protocol.canonicalSha256(backupManifest),
     backupDatabaseSha256: SHA_D, observedEvidenceSha256: protocol.canonicalSha256(observedEvidence),
     possibleDataLossAcknowledgementSha256: SHA_E, databaseLineageInvalidationReceiptSha256: null,
-    disposition: 'RESTORE_TRUSTED_BACKUP_AND_RECONCILE', createdAt: '2026-07-19T00:08:00.000Z',
+    disposition: 'RESTORE_TRUSTED_BACKUP_AND_RECONCILE', protocolRootsAbsent: false, createdAt: '2026-07-19T00:08:00.000Z',
   };
   const prepared = transitions.prepareIntegrityRecovery({
     ...opts, recoveryRequest: request, authority, observedEvidence, backupManifest,

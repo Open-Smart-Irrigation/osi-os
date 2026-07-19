@@ -154,6 +154,20 @@ function maybeInjectCrash(options, boundary) {
   }
 }
 
+function recoveryLockReconcile(opts, ownershipAdapter) {
+  return {
+    verifyChain: () => {
+      try { return load.loadProtocolState({ ...opts, ownershipAdapter, repair: false }); }
+      catch (error) {
+        if (error.code === 'protocol_state_partial_root_set' &&
+            (opts.integrityAllRootsAbsent === true || opts.authority?.protocolRootsAbsent === true)) return null;
+        throw error;
+      }
+    },
+    findProposalForOperation: () => null,
+  };
+}
+
 function appendTransition(options, { kind, state, receipt, receiptPath }) {
   const opts = options || {};
   assertOperationId(opts.operationId, 'operationId');
@@ -582,7 +596,7 @@ function prepareDispositionRestore(options) {
       },
       typedReceiptSha256: null,
     },
-    { bootId: opts.bootId, ownershipAdapter, isProcessAlive: opts.isProcessAlive }
+    { bootId: opts.bootId, ownershipAdapter, isProcessAlive: opts.isProcessAlive, reconcile: recoveryLockReconcile(opts, ownershipAdapter) }
   );
   try {
     let loaded = load.loadProtocolState({ ...opts, ownershipAdapter, repair: false });
@@ -922,7 +936,7 @@ function changedTableNames(before, after) {
   return [...new Set([...a.keys(), ...b.keys()])].filter((name) => a.get(name) !== b.get(name)).sort();
 }
 
-function prepareDatabaseRestore(options) {
+function prepareDatabaseRestoreUnlocked(options) {
   const opts = options || {};
   assertOperationId(opts.recoveryOperationId, 'recoveryOperationId');
   validateWholeDatabaseAudit(opts.backupFarmingAudit, 'backup farming audit');
@@ -1211,6 +1225,7 @@ function prepareDatabaseRestore(options) {
       operationId: opts.recoveryOperationId,
       expectedActivityGeneration: loaded.activity.externalHead.generation,
       expectedActivityHeadSha256: codecs.canonicalSha256(loaded.activity.externalHead),
+      lockAlreadyHeld: true,
       createdAt,
       sourceAuthority: 'linked-recovery',
     },
@@ -1246,6 +1261,38 @@ function prepareDatabaseRestore(options) {
     },
     opts.ownershipAdapter || paths.defaultOwnershipAdapter
   );
+}
+
+// A database-restore preparation is one read/decision/publication protocol.
+// Hold the same four-root lock across the evidence read, immutable intent,
+// and (when required) capability append so a concurrent writer cannot race
+// the heads or leave an intent describing a different predecessor.
+function prepareDatabaseRestore(options) {
+  const opts = options || {};
+  assertOperationId(opts.recoveryOperationId, 'recoveryOperationId');
+  const roots = paths.resolveRoots(opts);
+  const ownershipAdapter = opts.ownershipAdapter || paths.defaultOwnershipAdapter;
+  paths.ensureFourRootDirsForLocking(roots, ownershipAdapter);
+  const lock = locks.acquireFourRootLocks(
+    roots,
+    {
+      operationId: opts.recoveryOperationId,
+      sourceKind: 'prepare-database-restore',
+      sourceAuthority: 'linked-recovery',
+      headIdentities: {
+        capabilityHeadSha256: opts.expectedHeadSha256,
+        capabilityWitnessSha256: opts.expectedWitnessSha256,
+        activityHeadSha256: opts.expectedActivityHeadSha256 || null,
+      },
+      typedReceiptSha256: null,
+    },
+    { bootId: opts.bootId, ownershipAdapter, isProcessAlive: opts.isProcessAlive, reconcile: recoveryLockReconcile(opts, ownershipAdapter) }
+  );
+  try {
+    return prepareDatabaseRestoreUnlocked({ ...opts, ownershipAdapter, lockAlreadyHeld: true });
+  } finally {
+    lock.release();
+  }
 }
 
 function completeDatabaseRestoreReconciliation(options) {
@@ -1351,10 +1398,12 @@ function validateIntegrityObservation(observed) {
   assertExactKeys(observed, [
     'format', 'kind', 'requestId', 'recoveryRequestSha256', 'databasePath',
     'observedDatabaseIdentitySha256', 'quickCheckResult', 'sqliteMembers', 'bootIdSha256', 'createdAt',
+    'protocolRootsAbsent',
   ], 'database-integrity observation');
   if (
     observed.format !== 1 || observed.kind !== 'DATABASE_INTEGRITY_OBSERVATION' ||
     observed.databasePath !== '/data/db/farming.db' ||
+    typeof observed.protocolRootsAbsent !== 'boolean' ||
     !['missing', 'failed', 'timeout', 'unreadable'].includes(observed.quickCheckResult) ||
     !Array.isArray(observed.sqliteMembers) || observed.sqliteMembers.length !== 4
   ) throw transitionError('integrity_observation_invalid', 'database-integrity observation has invalid fixed fields');
@@ -1381,20 +1430,23 @@ function validateIntegrityObservation(observed) {
   return observed;
 }
 
-function prepareIntegrityRecovery(options) {
+function prepareIntegrityRecoveryUnlocked(options) {
   const opts = options || {};
   const authority = opts.authority;
   assertExactKeys(authority, [
     'format', 'kind', 'requestId', 'recoveryOperationId', 'recoveryRequestSha256',
     'backupManifestSha256', 'backupDatabaseSha256', 'observedEvidenceSha256',
     'possibleDataLossAcknowledgementSha256', 'databaseLineageInvalidationReceiptSha256',
-    'disposition', 'createdAt',
+    'disposition', 'protocolRootsAbsent', 'createdAt',
   ], 'database-integrity recovery authority');
   if (
     authority.format !== 1 || authority.kind !== 'DATABASE_INTEGRITY_RECOVERY_AUTHORITY' ||
     authority.disposition !== 'RESTORE_TRUSTED_BACKUP_AND_RECONCILE'
   ) throw transitionError('integrity_authority_invalid', 'database-integrity authority has invalid fixed fields');
   assertOperationId(authority.recoveryOperationId, 'authority.recoveryOperationId');
+  if (typeof authority.protocolRootsAbsent !== 'boolean') {
+    throw transitionError('integrity_authority_invalid', 'authority must carry a typed protocol-root absence fact');
+  }
   validateIntegrityObservation(opts.observedEvidence);
   const recoveryRequestSha256 = codecs.canonicalSha256(opts.recoveryRequest);
   const observedEvidenceSha256 = codecs.canonicalSha256(opts.observedEvidence);
@@ -1410,34 +1462,79 @@ function prepareIntegrityRecovery(options) {
   ) throw transitionError('integrity_authority_mismatch', 'database-integrity authority graph does not close over the supplied evidence');
   paths.assertNoSymlinkComponents(opts.forensicDestination);
   const forensicDestinationExists = fs.existsSync(opts.forensicDestination);
-  let loaded = load.loadProtocolState(opts);
+  let loaded;
+  try {
+    loaded = load.loadProtocolState(opts);
+  } catch (error) {
+    // A hard crash during all-root genesis leaves a deliberately resumable
+    // prefix.  Only the typed all-root authority may interpret that prefix;
+    // every other caller still fails closed on partial roots.
+    if (error.code !== 'protocol_state_partial_root_set' || opts.integrityAllRootsAbsent !== true) throw error;
+    loaded = { initialized: false, midFlight: true };
+  }
+  const initializationIntentPath = opts.integrityInitializationIntentOut || `${opts.resultOut}.initialization-intent.json`;
+  let rootAbsenceRecovery = false;
+  let hasAbsenceIntent = false;
+  if (fs.existsSync(initializationIntentPath)) {
+    const existingIntent = JSON.parse(fs.readFileSync(initializationIntentPath, 'utf8'));
+    if (
+      existingIntent.kind !== 'DATABASE_INTEGRITY_ROOT_ABSENCE_INITIALIZATION_INTENT' ||
+      existingIntent.recoveryOperationId !== authority.recoveryOperationId ||
+      existingIntent.authoritySha256 !== codecs.canonicalSha256(authority) ||
+      existingIntent.observedEvidenceSha256 !== observedEvidenceSha256 ||
+      existingIntent.backupManifestSha256 !== backupManifestSha256 ||
+      existingIntent.protocolRootsAbsent !== true
+    ) throw transitionError('integrity_initialization_intent_mismatch', 'root-absence initialization intent does not match recovery authority');
+    rootAbsenceRecovery = true;
+    hasAbsenceIntent = true;
+  }
   const allRootsAbsent = !loaded.initialized && opts.integrityAllRootsAbsent === true;
+  rootAbsenceRecovery = rootAbsenceRecovery || allRootsAbsent;
   let protocolInitialization = 'EXISTING';
+  if (rootAbsenceRecovery) protocolInitialization = 'ALL_ROOT_ABSENCE';
+  if (rootAbsenceRecovery && (
+    authority.protocolRootsAbsent !== true ||
+    opts.observedEvidence.protocolRootsAbsent !== true ||
+    (!hasAbsenceIntent && opts.integrityAllRootsAbsent !== true) ||
+    opts.backupManifest.capabilityHeadSha256 !== 'absent' ||
+    opts.backupManifest.capabilityWitnessSha256 !== 'absent' ||
+    opts.backupManifest.activityGeneration !== 0 ||
+    opts.backupManifest.activityExternalHeadSha256 !== 'absent'
+  )) {
+    throw transitionError(
+      'integrity_absence_authority_invalid',
+      'all-root integrity recovery requires typed root-absence evidence and trusted absent backup heads'
+    );
+  }
   if (allRootsAbsent) {
     const roots = paths.resolveRoots(opts);
     const ownershipAdapter = opts.ownershipAdapter || paths.defaultOwnershipAdapter;
-    paths.ensureFourRootDirsForLocking(roots, ownershipAdapter);
-    const absenceLock = locks.acquireFourRootLocks(
-      roots,
+    const genesisOperationId = derivedOperationId(`integrity-genesis:${authority.recoveryOperationId}`);
+    const initializationIntent = publishImmutableJson(
+      initializationIntentPath,
       {
-        operationId: authority.recoveryOperationId,
-        sourceKind: 'integrity-initialization',
-        sourceAuthority: 'integrity-recovery',
-        headIdentities: {},
-        typedReceiptSha256: null,
+        format: 1,
+        kind: 'DATABASE_INTEGRITY_ROOT_ABSENCE_INITIALIZATION_INTENT',
+        recoveryOperationId: authority.recoveryOperationId,
+        genesisOperationId,
+        authoritySha256: codecs.canonicalSha256(authority),
+        observedEvidenceSha256,
+        backupManifestSha256,
+        protocolRootsAbsent: true,
+        createdAt: authority.createdAt,
       },
-      { bootId: opts.bootId, ownershipAdapter, isProcessAlive: opts.isProcessAlive }
+      ownershipAdapter
     );
-    try {
     initModule.createFourRootsUnlocked({
       ...opts,
-      operationId: derivedOperationId(`integrity-genesis:${authority.recoveryOperationId}`),
+      operationId: genesisOperationId,
       sourceKind: 'integrity-recovery',
-      });
-    } finally {
-      absenceLock.release();
-    }
+      resume: true,
+    });
     loaded = load.loadProtocolState(opts);
+    if (codecs.canonicalSha256(initializationIntent) !== codecs.canonicalSha256(JSON.parse(fs.readFileSync(initializationIntentPath, 'utf8')))) {
+      throw transitionError('integrity_initialization_intent_mismatch', 'root-absence initialization intent changed during recovery');
+    }
     protocolInitialization = 'ALL_ROOT_ABSENCE';
   }
   if ((!loaded.initialized && !allRootsAbsent) || (loaded.resumePending && !pendingTransition(
@@ -1474,8 +1571,8 @@ function prepareIntegrityRecovery(options) {
   if (forensicDestinationExists) {
     throw transitionError('forensic_destination_not_absent', 'forensic destination must be absent before invalidation');
   }
-  if (!sameCommittedTransition && !allRootsAbsent) assertExpectedHeads(loaded, opts);
-  if (!allRootsAbsent && (
+  if (!sameCommittedTransition && !rootAbsenceRecovery) assertExpectedHeads(loaded, opts);
+  if (!rootAbsenceRecovery && (
     loaded.activity.externalHead.generation !== opts.backupManifest.activityGeneration ||
     loaded.activity.externalHead.entrySha256 !== opts.backupManifest.activityEntrySha256 ||
     codecs.canonicalSha256(loaded.activity.externalHead) !== opts.backupManifest.activityExternalHeadSha256
@@ -1522,6 +1619,7 @@ function prepareIntegrityRecovery(options) {
       expectedActivityGeneration: loaded.activity.externalHead.generation,
       expectedActivityHeadSha256: codecs.canonicalSha256(loaded.activity.externalHead),
       sourceAuthority: 'integrity-recovery',
+      lockAlreadyHeld: true,
     },
     {
       kind: 'DATABASE_INTEGRITY_INVALIDATION',
@@ -1573,6 +1671,35 @@ function prepareIntegrityRecovery(options) {
     },
     opts.ownershipAdapter || paths.defaultOwnershipAdapter
   );
+}
+
+function prepareIntegrityRecovery(options) {
+  const opts = options || {};
+  const authority = opts.authority;
+  assertOperationId(authority && authority.recoveryOperationId, 'authority.recoveryOperationId');
+  const roots = paths.resolveRoots(opts);
+  const ownershipAdapter = opts.ownershipAdapter || paths.defaultOwnershipAdapter;
+  paths.ensureFourRootDirsForLocking(roots, ownershipAdapter);
+  const lock = locks.acquireFourRootLocks(
+    roots,
+    {
+      operationId: authority.recoveryOperationId,
+      sourceKind: 'prepare-integrity-recovery',
+      sourceAuthority: 'integrity-recovery',
+      headIdentities: {
+        capabilityHeadSha256: opts.expectedHeadSha256 || null,
+        capabilityWitnessSha256: opts.expectedWitnessSha256 || null,
+        activityHeadSha256: opts.expectedActivityHeadSha256 || null,
+      },
+      typedReceiptSha256: null,
+    },
+    { bootId: opts.bootId, ownershipAdapter, isProcessAlive: opts.isProcessAlive, reconcile: recoveryLockReconcile(opts, ownershipAdapter) }
+  );
+  try {
+    return prepareIntegrityRecoveryUnlocked({ ...opts, ownershipAdapter, lockAlreadyHeld: true });
+  } finally {
+    lock.release();
+  }
 }
 
 function completeIntegrityRecovery(options) {

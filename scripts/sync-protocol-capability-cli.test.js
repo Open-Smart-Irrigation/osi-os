@@ -55,10 +55,11 @@ function initializeFlags(tmp, overrides) {
   // {format:2, parentDeployment, activeSubOperation} with identity/phase/
   // generation nested under parentDeployment.
   const o = overrides || {};
+  const operationId = o.operationId || '11111111-1111-4111-8111-111111111111';
   const stateObj = {
     format: 2,
     parentDeployment: Object.assign(
-      { deploymentId: 'dep-1', phase: 'protocol-initializing', generation: 0, leaseActive: true },
+      { deploymentId: 'dep-1', phase: 'protocol-initializing', generation: 0, leaseActive: true, operationId },
       o.parentDeployment
     ),
     activeSubOperation: o.activeSubOperation !== undefined ? o.activeSubOperation : null,
@@ -80,7 +81,7 @@ function initializeFlags(tmp, overrides) {
     '--expected-deployment-id', (overrides && overrides.expectedDeploymentId) || 'dep-1',
     '--expected-phase', (overrides && overrides.expectedPhase) || 'protocol-initializing',
     '--expected-parent-generation', String((overrides && overrides.expectedParentGeneration) != null ? overrides.expectedParentGeneration : 0),
-    '--operation-id', (overrides && overrides.operationId) || '11111111-1111-4111-8111-111111111111',
+    '--operation-id', operationId,
     '--ack-audit-report', path.join(tmp, 'ack.json'),
     '--backup-manifest', path.join(tmp, 'backup.json'),
     '--expected-capability-head-sha256', 'absent',
@@ -109,6 +110,22 @@ test('CLI initialize: re-running against an already-initialized root set is idem
   const flags = initializeFlags(tmp);
   const first = runCli(flags);
   assert.equal(first.status, 0, first.stderr);
+  const protocol = require('../conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-sync-protocol-state');
+  const opts = {
+    root: path.join(tmp, 'osi-sync'),
+    witnessRoot: path.join(tmp, 'osi-sync-witness', 'protocol-capability-witnesses'),
+    activityWitnessRoot: path.join(tmp, 'osi-sync-witness', 'command-activity-witnesses'),
+  };
+  const state = protocol.status(opts);
+  const loaded = protocol.loadProtocolState(opts);
+  const backupPath = path.join(tmp, 'backup.json');
+  writePrivateJson(backupPath, {
+    format: 1,
+    capabilityHeadSha256: state.capabilityHeadSha256,
+    capabilityWitnessSha256: loaded.capability.head.witnessSha256,
+  });
+  flags[flags.indexOf('--expected-capability-head-sha256') + 1] = state.capabilityHeadSha256;
+  flags[flags.indexOf('--expected-witness-head-sha256') + 1] = loaded.capability.head.witnessSha256;
   const second = runCli(flags);
   assert.equal(second.status, 0, second.stderr);
   const parsed = JSON.parse(second.stdout.trim());
@@ -277,7 +294,10 @@ test('CLI record-v2-disposition commits a deployment-bound CLEAR transition', ()
   const dispositionPath = writePrivateJson(path.join(tmp, 'evidence', 'disposition.json'), disposition);
   const deploymentState = writeDeploymentState(tmp, {
     format: 2,
-    parentDeployment: { deploymentId: 'dep-1', phase: 'protocol-dispositioning', generation: 1 },
+    parentDeployment: {
+      deploymentId: 'dep-1', phase: 'protocol-dispositioning', generation: 1,
+      operationId: '22222222-2222-4222-8222-222222222222',
+    },
     activeSubOperation: null,
   });
   const result = runCli([
@@ -312,11 +332,11 @@ test('CLI initialize-factory-zero commits factory genesis and CLEAR only in the 
     activeSubOperation: null,
   });
   const evidenceDir = path.join(tmp, 'factory-evidence');
-  const provenance = writePrivateJson(path.join(evidenceDir, 'provenance.json'), { format: 2, profile: 'bcm2712' });
-  const imageManifest = writePrivateJson(path.join(evidenceDir, 'image-manifest.json'), { format: 2, profile: 'bcm2712' });
   const database = path.join(tmp, 'farming.db');
   cp.execFileSync('/usr/bin/sqlite3', [database, 'CREATE TABLE factory_marker (id INTEGER PRIMARY KEY);']);
   fs.chmodSync(database, 0o600);
+  const provenance = writePrivateJson(path.join(evidenceDir, 'provenance.json'), { format: 2, profile: 'bcm2712', databasePath: database });
+  const imageManifest = writePrivateJson(path.join(evidenceDir, 'image-manifest.json'), { format: 2, profile: 'bcm2712' });
   const databaseStat = fs.lstatSync(database);
   const databaseIdentitySha256 = crypto.createHash('sha256')
     .update(require('../conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-sync-protocol-state').canonicalJson({
@@ -326,11 +346,11 @@ test('CLI initialize-factory-zero commits factory genesis and CLEAR only in the 
     .digest('hex');
   const seed = writePrivateJson(path.join(evidenceDir, 'seed.json'), {
     format: 1, receiptKind: 'factory-seed', seedSha256: 'a'.repeat(64),
-    databaseIdentitySha256, databaseLineageSha256: 'c'.repeat(64),
+    databasePath: database, databaseIdentitySha256, databaseLineageSha256: 'c'.repeat(64),
   });
   const audit = writePrivateJson(path.join(evidenceDir, 'audit.json'), {
     format: 1, factorySeedEligible: true, databaseIdentitySha256,
-    databaseLineageSha256: 'c'.repeat(64), allCountersZero: true,
+    databasePath: database, databaseLineageSha256: 'c'.repeat(64), allCountersZero: true,
   });
   const result = runCli([
     'initialize-factory-zero', ...rootFlags(tmp),
