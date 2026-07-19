@@ -22,8 +22,8 @@
       "reason": "history API card-data source field passthrough (1.A6, +150); Field Journal Task 12: fieldJournalUxEnabled feature flag, visible touched-node catches, rejecting DB-close wrapper (+312)"
     },
     "sync-pending-split": {
-      "max_chars": 2965,
-      "reason": "Field Journal Task 11: preserve the trusted pending-command envelope alongside legacy flat routing fields"
+      "max_chars": 3083,
+      "reason": "Field Journal Task 11: preserve the trusted pending-command envelope alongside legacy flat routing fields; sync-failclosed-20260719: explicit isHttpSuccess integer-2xx gate replaces the truthy/negative statusCode check so status 0, missing, string '200', and non-2xx never advance lastPendingCommandPollSuccessAt (+118)"
     },
     "command-dedupe-dispatch": {
       "max_chars": 2890,
@@ -34,8 +34,8 @@
       "reason": "1.C: expanded command-type registry from 8 to 33 types"
     },
     "reject-indefinite-open": {
-      "max_chars": 6024,
-      "reason": "1.C: expanded COMMAND_TYPES_FALLBACK to match 33-type registry"
+      "max_chars": 6656,
+      "reason": "1.C: expanded COMMAND_TYPES_FALLBACK to match 33-type registry; sync-failclosed-20260719: durable REJECTED_PERMANENT ack builder (rejectionAck) replaces the silent null drop for bare OPEN, unknown command types, and OPEN_FOR_DURATION without a duration (+632)"
     },
     "write-strega-expectation": {
       "max_chars": 10197,
@@ -82,8 +82,8 @@
       "reason": "issue #5: devices SELECT gains chameleon_enabled + 3 depth columns (+102); PR #140 review finding: dendroDaily/zoneRecommendations/zoneEnvironments SELECTs gain sync_version (+79); retryable backoff: same cooldown-exclusion SELECT clause + retry_count/last_retryable_failure_at UPDATE as sync-outbox-mark (+280, Task J); Field Journal Tasks 11-12 plus final review: preserve trusted envelopes, fail-closed 12-table readiness, tuple-watermark manifest, rejecting DB-close wrapper, and exposeEmptyCatches over main's Task J catches (+4936); PR #141 hardening: object-only outbox payload parser, rollback propagation, and strict delivery mapping (+100); live identity restart sentinel (Option C Slice 1), including marked gateway-identity errors (+1200)"
     },
     "command-ack-build-batch": {
-      "max_chars": 3659,
-      "reason": "live identity restart sentinel (Option C Slice 1)"
+      "max_chars": 4687,
+      "reason": "live identity restart sentinel (Option C Slice 1); sync-failclosed-20260719: groups local command_ack_outbox rows by parsed commandId, collapses byte-identical canonical duplicates into one outgoing ACK with _localAckCorrelation, and withholds delivery with a token-free warning on conflicting rows (+1028)"
     },
     "sync-state-build": {
       "max_chars": 10119,
@@ -830,8 +830,8 @@
       "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
     },
     "command-ack-mark-delivered": {
-      "max_chars": 1211,
-      "reason": "Inherited f50950b1 baseline at exact measured size; later approved growth requires a specific owner reason."
+      "max_chars": 2704,
+      "reason": "sync-failclosed-20260719: per-entry ACK result handling - only a single unambiguous ACKED+accepted result delivers a command_ack_outbox row; missing/duplicate/malformed entries, statusCode 0, non-200, and HTTP 500 leave the row pending with a bounded retry error (+1493)"
     },
     "gateway-health-persist-fn": {
       "max_chars": 4331,
@@ -963,7 +963,7 @@
     }
   },
   "total_allowance": {
-    "max_total": 1097515,
-    "reason": "1.A5 sync outbox hardening + 1.A6 history card-data + 1.C command-type registry expansion + 5.6 time integrity guards + heartbeat RTC fields + issue #10 upsert sync versioning + issue #9 device-api-http500 statusCode fix (+45) + issue #6 dendro-raw-fn regex fix (+10) + issue #5 chameleon_enabled sync (+349: sync-init-fn +99, sync-bootstrap-build +102, sync-force-build +102, put-chameleon-enabled-auth-fn +46) + issue #15 dendro-ref-tree-fn sync_version bump (+46) + issue #16 sync-init-fn EUI-resolvability guards restored to two boot triggers (+420, trigger-body parity adjudication Pattern A) + PR #140 review finding: sync_version added to 3 inline fallback CREATE TABLE statements in dendro-compute-fn (+104) and to dendroDaily/zoneRecommendations/zoneEnvironments SELECTs in sync-bootstrap-build + sync-force-build (+79 each, +158) (+262 total) + Field Journal Tasks 10-12 vs main @0f1361a3 (+11443: sync-bootstrap-build +4078, sync-force-build +4936, sync-pending-split +401, history-api-router-fn +312, new nodes journal-api-router-fn +489 and journal-command-apply-fn +1258; covered within this existing headroom) + PR #141 malformed-payload and STREGA calibration hardening (+1058 per profile: sync-bootstrap-build +139, sync-outbox-build +397, sync-force-build +100, write-strega-expectation +422) + PR #141 guarded journal helper loading (+2117 per profile: dedupe +627, apply +465, ACK queue +494, API router +531) + live identity restart sentinel, marked identity errors, and fail-closed restart publication (Option C Slice 1) (+11605) + filtered restartPending status with explicit blocked/malformed/unreadable restartPending states, deduplicated fan-probe warnings, and a capped, hotplug-pruned context map (Option C Slice 1b) (+4862); Device API auth/status repair exact total ceiling (Plan 6 Tasks 1-2)"
+    "max_total": 1100786,
+    "reason": "1.A5 sync outbox hardening + 1.A6 history card-data + 1.C command-type registry expansion + 5.6 time integrity guards + heartbeat RTC fields + issue #10 upsert sync versioning + issue #9 device-api-http500 statusCode fix (+45) + issue #6 dendro-raw-fn regex fix (+10) + issue #5 chameleon_enabled sync (+349: sync-init-fn +99, sync-bootstrap-build +102, sync-force-build +102, put-chameleon-enabled-auth-fn +46) + issue #15 dendro-ref-tree-fn sync_version bump (+46) + issue #16 sync-init-fn EUI-resolvability guards restored to two boot triggers (+420, trigger-body parity adjudication Pattern A) + PR #140 review finding: sync_version added to 3 inline fallback CREATE TABLE statements in dendro-compute-fn (+104) and to dendroDaily/zoneRecommendations/zoneEnvironments SELECTs in sync-bootstrap-build + sync-force-build (+79 each, +158) (+262 total) + Field Journal Tasks 10-12 vs main @0f1361a3 (+11443: sync-bootstrap-build +4078, sync-force-build +4936, sync-pending-split +401, history-api-router-fn +312, new nodes journal-api-router-fn +489 and journal-command-apply-fn +1258; covered within this existing headroom) + PR #141 malformed-payload and STREGA calibration hardening (+1058 per profile: sync-bootstrap-build +139, sync-outbox-build +397, sync-force-build +100, write-strega-expectation +422) + PR #141 guarded journal helper loading (+2117 per profile: dedupe +627, apply +465, ACK queue +494, API router +531) + live identity restart sentinel, marked identity errors, and fail-closed restart publication (Option C Slice 1) (+11605) + filtered restartPending status with explicit blocked/malformed/unreadable restartPending states, deduplicated fan-probe warnings, and a capped, hotplug-pruned context map (Option C Slice 1b) (+4862); Device API auth/status repair exact total ceiling (Plan 6 Tasks 1-2) + sync-failclosed-20260719 Train A ack/commands fail-closed slice: command-ack-mark-delivered +1493, command-ack-build-batch +1028, sync-pending-split +118, reject-indefinite-open +632 (+3271 total)"
   }
 }
