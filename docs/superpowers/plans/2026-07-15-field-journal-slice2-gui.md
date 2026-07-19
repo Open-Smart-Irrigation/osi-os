@@ -2422,6 +2422,54 @@ export interface JournalTimelineProps {
 
 **Acceptance:** the rail lists a 72-plot station as one row; the same `EntryForm` engine renders as a side panel; keyboard navigation between table rows and form fields; exports scoped to active filters sit on the table header.
 
+### Remaining-work decomposition approved at the Phase 5 boundary
+
+The controller reached this boundary on 2026-07-19 after Phase 4 commit `3690d6e1`. Luna inspected the shipped seams and Sol required the corrections below. Tasks 26–35 supersede the two undecomposed Phase 5/6 sketches. They preserve the no-live-gateway and no-`flows.json` boundaries. Migration `0022` remains reserved for the deferred product-composition work; the P4 catalog correction uses a distinct data-migration identity and does not alter schema.
+
+### Task 26: Close Phase 3 review findings P1–P3 and F8
+
+**Files:** `web/react-gui/src/journal/carryForward.ts`, its focused tests, `JournalCaptureFlow.tsx` and its focused tests, plus the shipped-SLA test seam.
+
+- [ ] RED/GREEN P1: derive the plant-protection protected-field expectation from the compiled catalog, include `attr.denominator`, and remove or document phantom codes.
+- [ ] RED/GREEN P2: use a complete valid plant-protection source, confirm repeat values, switch plot and layout, and prove protected values are invalidated. Fix only if the reproduction fails.
+- [ ] RED/GREEN P3: use a multi-group tank-mix source and require the confirmation disclosure to identify every carried protected row before acceptance.
+- [ ] RED/GREEN F8: derive the activation-SLA fixture from the compiled `farmer_quick@1` and `open_field@1` definitions instead of a hand-maintained mirror.
+- [ ] Luna implements; Sol reviews specification, then quality; the controller runs the focused set, full GUI tests, typecheck, build, and commits only approved files.
+
+### Task 27: Land adjudicated P4 as catalog version 2
+
+**Files:** `scripts/journal-catalog-core.js`, generator/tests, a new ordered data migration that does not consume reserved `0022`, seed and bundled database artifacts, both profile copies as applicable, `catalogModel.ts`, and focused catalog/capture tests.
+
+- [ ] RED: `farmer_quick@2` visibly contains `attr.operator`, `attr.equipment`, and `attr.method`, carries the three, and preserves `farmer_quick@1` for historical entries.
+- [ ] RED: `parseTemplate` rejects any `carry_forward` code outside that template version's visible field set.
+- [ ] RED: a quick-entry carry-forward flow visibly marks and submits all three values in the final payload.
+- [ ] GREEN: publish a catalog-version-2 data update without rewriting immutable migration `0019`; update the authoritative seed and bundled DB copies, catalog hash/version, checksums, and both-profile parity. Do not change schema or the deferred composition rows.
+- [ ] Apply the `osi-schema-change-control` data-migration gates, including seed replay, migration verification, DB consistency, sync/catalog parity, and production-copy rehearsal. Luna implements; Sol reviews specification, then quality.
+
+### Task 28: Desktop shell and scope rail
+
+**Files:** `desktop/JournalWorkspace.tsx`, `desktop/ScopeRail.tsx`, their tests, `JournalPage.tsx`, and its test.
+
+- [ ] RED/GREEN the `isDesktopBrowser()` branch while preserving the mobile capture/timeline route.
+- [ ] Render stations, active groups, ungrouped plots, search, and activity/status/date/campaign/protocol filters from existing plot/group data. A 72-plot station is one collapsible row with plot count and sensor-status summary.
+- [ ] Keep filter state in the workspace owner and expose keyboard-operable scope controls. Luna implements; Sol reviews specification, then quality.
+
+### Task 29: Keyset table and filter-scoped exports
+
+**Files:** `desktop/EntryTable.tsx`, tests, `journalApi.ts`, service tests, and a typed pagination helper if needed.
+
+- [ ] RED/GREEN dense sortable rows, row selection, Arrow/Home/End keyboard movement, loading/error/empty states, and defensive opaque-cursor pagination.
+- [ ] Add typed CSV, JSON, and research-package downloads using the shipped endpoints. Preserve active filters exactly; do not advertise the Slice-1 `501` ADAPT endpoint as available.
+- [ ] Put export controls in the table header and prove that selected bulk-entry filters combine with, rather than escape, the active scope. Luna implements; Sol reviews specification, then quality.
+
+### Task 30: Detail read-back and full-record correction
+
+**Files:** `desktop/DetailPanel.tsx`, an aggregate-to-update adapter, focused tests, and `JournalWorkspace.tsx` integration.
+
+- [ ] RED/GREEN read-back for values and parsed context snapshot, final-entry void with explicit reason, and safe stale/error states.
+- [ ] Build correction from the selected complete `EntryAggregate`; initialize the shared `EntryForm` engine and submit one complete `UpdateEntryPayload`, preserving all unchanged identity/context fields, occurrence offsets, grouped values, and `batch_uuid`.
+- [ ] Block correction for draft/voided entries and prove one changed field does not drop untouched values. Move keyboard focus from the selected table row into the first form field on request. Luna implements; Sol reviews specification, then quality.
+
 ## Phase 6 — Chart markers, drafts queue, layout-transition review, locale mirror (code-decompose when reached)
 
 **Blocked on Phases 2, 3.**
@@ -2429,6 +2477,45 @@ export interface JournalTimelineProps {
 **Files (planned):** `src/components/journal/markers/JournalMarkerLane.tsx` + integration into the history chart surfaces (`src/components/history/visualizations/`) — separate event lane, icon+shape+color (not color alone), ≥48px hit targets, rendered-distance clustering with counts, bottom sheet; `src/components/journal/DraftsQueue.tsx` (P7 "needs completion"); layout-transition review sheet blocking finalize (UX-3); then add `journal` to the feed locale mirror in `feeds/chirpstack-openwrt-feed/apps/node-red/files/gui/locales/` and extend `tests/agrolinkBranding.test.ts` to enforce it.
 
 **Acceptance:** marker density tested at 0/1/50/500 events at 320px over 24h and season ranges; drafts queue opens the detail panel with field-level focus on what is missing; the locale mirror test covers `journal.json`.
+
+### Task 31: Persisted-draft discard contract and drafts queue
+
+**Files:** both maintained `osi-journal` API/lifecycle copies and tests, GUI types/service tests, `DraftsQueue.tsx` and tests, and page/workspace integration.
+
+- [ ] RED/GREEN an explicit discard operation over the existing journal entry `PUT` transport so `flows.json` remains untouched. It is owner-scoped, accepts only `draft` at sync version zero, transactionally hard-deletes entry values and the draft, emits no tombstone/outbox event, rejects final/voided entries, and treats an exact repeated discard as success.
+- [ ] Mirror both profile copies byte-identically and run lifecycle, API, sync/outbox, profile-parity, and no-stray-DDL gates.
+- [ ] RED/GREEN the “Needs completion” queue from `status=draft`: loading/retry/empty/stale states, resume into the shared detail/capture form, focus the first missing field, and discard success/error behavior. No browser-only persistence or hidden flag is allowed. Luna implements; Sol reviews specification, then quality.
+
+### Task 32: Layout-transition review sheet
+
+**Files:** capture transition model/tests, `JournalCaptureFlow.tsx`, a focused review-sheet component, capture tests, and locale keys.
+
+- [ ] RED/GREEN a diff of values made invalid or hidden by a layout change, including choices no longer allowed and fields no longer present.
+- [ ] Block finalize until every item is explicitly kept under the old setting, replaced with a valid value, or removed. Preserve valid values and never silently sanitize a user-entered value.
+- [ ] Cover plot/layout changes, Back navigation, retry, and accessible focus return. Luna implements; Sol reviews specification, then quality.
+
+### Task 33: History-owned journal marker data and pure marker lane
+
+**Files:** a history journal-marker data hook/helper and tests, `JournalMarkerLane.tsx` and tests, `HistoryCardVisualization.tsx`, `HistoryDesktopDetail.tsx`, and focused integration tests.
+
+- [ ] The history detail data layer, not the lane or individual chart components, keyset-pages final entries by `zone_uuid`, visible `occurred_from`, and `occurred_to`; expose loading/error/retry and normalized markers.
+- [ ] RED/GREEN the pure lane at 0/1/50/500 events and 320 px over 24-hour and season windows. Cluster by rendered distance, show counts, use icon plus shape plus color, provide at least 48 px targets, keyboard operation, filters, and a details bottom sheet.
+- [ ] Integrate one sibling lane through the common `HistoryCardVisualization` seam without duplicating journal requests in chart implementations. Luna implements; Sol reviews specification, then quality.
+
+### Task 34: Journal locale completion and feed mirror
+
+**Files:** all seven source `journal.json` files, the seven feed mirrors, journal locale tests, and `web/react-gui/tests/agrolinkBranding.test.ts`.
+
+- [ ] Add every Task 26–33 user-facing key to all source locales while preserving interpolation-token parity and the de-CH `ß` rule.
+- [ ] Copy source resources byte-for-byte into the feed locale tree and extend the branding test to require `journal.json` for every locale.
+- [ ] Run JSON, locale, mirror, branding, anti-slop, and diff gates. Luna implements; Sol reviews specification, then quality.
+
+### Task 35: Slice 2 final verification and merge-readiness
+
+- [ ] Run all focused journal, lifecycle, API, migration, sync, profile, locale, history, and preview suites; then full GUI unit tests, typecheck, and production build.
+- [ ] Run Playwright acceptance at 320x568, 360x640, and desktop widths for mobile capture, desktop three-pane operation, draft resume/discard, transition review, marker densities, keyboard paths, exports, and no horizontal overflow. Save screenshots and request evidence outside the repository.
+- [ ] Re-read `REVIEW-FINDINGS.md`; record P1–P4, P6, F8, deferred F1/0022, native-translation sign-off, and broader Phase 3 review status accurately in `RUN-NOTES.md`.
+- [ ] Sol performs final specification and quality range reviews. Write `MERGE-READINESS.md` with exact commits, gates, evidence paths, residual risks, and deployment prerequisites. Require a clean worktree; do not push, merge, or touch a live gateway without a new explicit instruction.
 
 ---
 
