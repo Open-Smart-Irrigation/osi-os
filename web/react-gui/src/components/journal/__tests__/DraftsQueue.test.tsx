@@ -2,7 +2,13 @@ import '@testing-library/jest-dom/vitest';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import type { EntryAggregate, JournalCatalog, JournalDefinitionRow, JournalVocabRow } from '../../../types/journal';
+import type {
+  EntryAggregate,
+  JournalCatalog,
+  JournalDefinitionRow,
+  JournalProductRow,
+  JournalVocabRow,
+} from '../../../types/journal';
 import type { DraftsQueueStatus } from '../../../journal/useDraftsQueue';
 
 vi.mock('react-i18next', () => ({
@@ -120,6 +126,47 @@ function resumeCatalog(): JournalCatalog {
       option_dependencies: [],
     })],
     products: [],
+    mappings: [],
+  } as unknown as JournalCatalog;
+}
+
+// G3: a fertilization/fertigation draft's attr.product_uuid is a first-class
+// visible, required field (see scripts/journal-catalog-core.js) validated
+// against catalog.products — DraftResumePanel must thread the real product
+// catalog through or the field can never be satisfied.
+function productResumeCatalog(): JournalCatalog {
+  const product: JournalProductRow = {
+    product_uuid: 'prod-1',
+    scope: 'farm',
+    owner_user_uuid: null,
+    gateway_device_eui: null,
+    name: 'Test Fertilizer',
+    kind: 'mineral',
+    active: 1,
+    sync_version: 0,
+    created_at: '2026-07-18T00:00:00.000Z',
+    deleted_at: null,
+    catalog_errors: [],
+    composition: {},
+  };
+  return {
+    catalog_version: 1,
+    catalog_hash: 'product-resume-catalog',
+    vocab: [
+      vocabRow('fertilization', { kind: 'activity', value_type: null }),
+      vocabRow('attr.product_uuid', { value_type: 'text' }),
+    ],
+    templates: [definitionRow('full_record', {
+      fields: [
+        { code: 'attr.product_uuid', required: true },
+      ],
+    })],
+    layouts: [definitionRow('open_field', {
+      activity_codes: ['fertilization'],
+      supported_templates: ['full_record'],
+      option_dependencies: [],
+    })],
+    products: [product],
     mappings: [],
   } as unknown as JournalCatalog;
 }
@@ -361,5 +408,39 @@ describe('DraftsQueue resume complete', () => {
     fireEvent.click(screen.getByRole('button', { name: 'drafts.complete' }));
 
     expect(createEntryMock).not.toHaveBeenCalled();
+  });
+
+  it('threads catalog products into a resumed fertilization draft so its product field can be completed (G3)', async () => {
+    const retry = vi.fn().mockResolvedValue(undefined);
+    useDraftsQueueMock.mockReturnValue(queueState({
+      status: 'ready',
+      drafts: [draft('d1', { activity_code: 'fertilization', values: [] })],
+      retry,
+    }));
+    useJournalCatalogMock.mockReturnValue({ catalog: productResumeCatalog(), available: true });
+    createEntryMock.mockResolvedValue({ entry_uuid: 'd1', outbox_event_uuid: 'evt-1', sync_version: 1 });
+
+    render(<DraftsQueue />);
+    fireEvent.click(screen.getByRole('button', { name: 'drafts.resume' }));
+
+    await waitFor(() => expect(document.getElementById('attr.product_uuid')).not.toBeNull());
+
+    const productSelect = screen.getByRole('combobox', { name: /capture\.form\.product/ });
+    fireEvent.change(productSelect, { target: { value: 'prod-1' } });
+
+    await waitFor(() => expect(screen.getByRole('button', { name: 'drafts.complete' })).toBeEnabled());
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'drafts.complete' }));
+    });
+
+    await waitFor(() => expect(createEntryMock).toHaveBeenCalledTimes(1));
+    const payload = createEntryMock.mock.calls[0][0] as {
+      values: Array<{ attribute_code: string; value?: unknown }>;
+    };
+    expect(payload.values.some((value) =>
+      value.attribute_code === 'attr.product_uuid' && value.value === 'prod-1')).toBe(true);
+
+    await waitFor(() => expect(retry).toHaveBeenCalledTimes(1));
   });
 });
