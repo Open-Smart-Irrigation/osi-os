@@ -3404,6 +3404,24 @@ expectFileIncludes('chirpstack-bootstrap.js', chirpstackBootstrapScript, "readCo
 expectFileIncludes('chirpstack-bootstrap.js', chirpstackBootstrapScript, "getOrCreateProfileWithCodec(client, tenantId, CFG.profileLorainName", 'creates or repairs the OSI LoRain profile with a payload codec');
 expectFileIncludes('chirpstack-bootstrap.js', chirpstackBootstrapScript, 'CHIRPSTACK_PROFILE_LORAIN', 'writes the LoRain ChirpStack profile ID for Node-RED');
 expectFileIncludes('chirpstack-bootstrap.js', chirpstackBootstrapScript, 'chirpstack_profile_lorain', 'persists the LoRain profile ID to UCI');
+
+// --- ChirpStack bootstrap: provisioning client close discipline ---
+// The bootstrap client is created once and used for tenant/app/profile setup.
+// It must be closed in a finally so a failure partway through provisioning
+// (or a clean run) never leaks the gRPC client.
+{
+  const bootstrapClientIdx = chirpstackBootstrapScript.indexOf("const client = chirpstack.createClient({ apiUrl: CFG.url, apiKey });");
+  const bootstrapTryIdx = chirpstackBootstrapScript.indexOf('  try {\n    console.log(\'\\n[ 2/5 ] Tenant\');');
+  const bootstrapFinallyIdx = chirpstackBootstrapScript.indexOf('} finally {\n    try {\n      client.close();');
+  const bootstrapWriteConfigIdx = chirpstackBootstrapScript.indexOf("console.log('\\n[ 5/5 ] Writing configuration');");
+  if (bootstrapClientIdx < 0 || bootstrapTryIdx < 0 || bootstrapFinallyIdx < 0 || bootstrapWriteConfigIdx < 0
+      || !(bootstrapClientIdx < bootstrapTryIdx && bootstrapTryIdx < bootstrapFinallyIdx && bootstrapFinallyIdx < bootstrapWriteConfigIdx)) {
+    fail('chirpstack-bootstrap.js does not close the provisioning client in a finally that spans all tenant/app/profile calls (success and failure)');
+  } else {
+    console.log('OK chirpstack-bootstrap.js closes the provisioning client in a finally after both success and provisioning failure');
+  }
+}
+expectFileIncludes('chirpstack-bootstrap.js', chirpstackBootstrapScript, 'client.close();', 'closes the sole ChirpStack provisioning client during bootstrap cleanup');
 expectFileIncludes('deploy.sh', deployScript, 'run_communication_preflight()', 'runs communication validation before deploy artifacts are copied');
 expectFileIncludes('deploy.sh', deployScript, 'scripts/verify-communication-contract.js', 'uses the focused communication contract verifier during deploy preflight');
 expectFileIncludes('deploy.sh', deployScript, 'scripts/diagnose-pi-communication.sh', 'fetches the required communication diagnostic during deploy preflight');
@@ -3972,6 +3990,83 @@ if (!helperPath) {
     }
   }
 }
+
+// --- ChirpStack registration flow nodes: rewired to the reconciling helper's
+// contract (deviceAction/keysAction/keysVerified/verifiedApplicationId/
+// verifiedDeviceProfileId + normalized error.code), one client per node,
+// client.close() + DB close in a finally on every path. ---
+function expectSingleClientById(nodeId, description) {
+  const node = findNodeById(nodeId);
+  if (!node) {
+    fail(`missing node ${nodeId}`);
+    return;
+  }
+  const func = String(node.func || '');
+  const count = func.split('createProvisioningClientFromEnv').length - 1;
+  if (count !== 1) {
+    fail(`${nodeId} must create exactly one ChirpStack client, found ${count} createProvisioningClientFromEnv call(s): ${description}`);
+  } else {
+    console.log(`OK ${nodeId} creates exactly one ChirpStack client: ${description}`);
+  }
+}
+
+// cs-register-device-fn (local HTTP registration)
+expectIncludesById('cs-register-device-fn', 'let client = null;', 'declares the sole ChirpStack client outside the try block');
+expectIncludesById('cs-register-device-fn', 'client = chirpstack.createProvisioningClientFromEnv(env);', 'assigns the client inside the try block');
+expectSingleClientById('cs-register-device-fn', 'no second cleanup client');
+expectExcludesById('cs-register-device-fn', 'cleanupClient', 'the retired second cleanup client');
+expectExcludesById('cs-register-device-fn', 'deviceCreated', 'the retired deviceCreated field');
+expectExcludesById('cs-register-device-fn', 'grpcStatus', 'the retired numeric grpcStatus field');
+expectExcludesById('cs-register-device-fn', 'error.details', 'the retired error.details field');
+expectIncludesById('cs-register-device-fn', "provisioned.deviceAction === 'created'", 'reads the new deviceAction field to decide post-commit-failure rollback');
+expectIncludesById('cs-register-device-fn', 'const code = error.code || null;', 'reads the new normalized error.code instead of numeric grpcStatus');
+expectIncludesById('cs-register-device-fn', "flow.set('device_chirpstack_result', provisioned);", 'surfaces the full reconciliation result (deviceAction/keysAction/keysVerified/verifiedApplicationId/verifiedDeviceProfileId) as local registration evidence');
+expectIncludesById('cs-register-device-fn', '} finally {\n  if (client) {\n    try {\n      client.close();\n    } catch (_) {\n      node.warn(\'CS Register Device: ChirpStack client close threw unexpectedly\');\n    }\n  }\n  try { await close(); } catch (_) {}\n}\n})();', 'closes the ChirpStack client and the local DB in a single finally on every path, surfacing an unexpected close() throw via node.warn');
+
+// cs-reg-cloud-fn (cloud-command registration) — minimal contract rewrite,
+// commit/ACK path otherwise unchanged; no ledger boundary introduced.
+expectIncludesById('cs-reg-cloud-fn', 'let client = null;', 'declares the sole ChirpStack client outside the try block for REGISTER_DEVICE');
+expectIncludesById('cs-reg-cloud-fn', 'client = chirpstack.createProvisioningClientFromEnv(env);', 'assigns the client inside the try block');
+expectSingleClientById('cs-reg-cloud-fn', 'no second cleanup client');
+expectExcludesById('cs-reg-cloud-fn', 'deviceCreated', 'the retired deviceCreated field');
+expectExcludesById('cs-reg-cloud-fn', 'grpcStatus', 'the retired numeric grpcStatus field');
+expectExcludesById('cs-reg-cloud-fn', 'error.details', 'the retired error.details field');
+expectIncludesById('cs-reg-cloud-fn', "result.deviceAction === 'created'", 'reads the new deviceAction field to decide post-commit-failure rollback');
+expectIncludesById('cs-reg-cloud-fn', 'const code = error.code || null;', 'reads the new normalized error.code instead of numeric grpcStatus');
+expectIncludesById('cs-reg-cloud-fn', "return [buildAck('SUCCESS', { state: 'APPLIED', deviceEui: devEui, provisionedInChirpStack: true }), null];", 'preserves the exact success ACK shape (commit/ACK path unchanged)');
+expectIncludesById('cs-reg-cloud-fn', '} finally {\n  if (client) {\n    try {\n      client.close();\n    } catch (_) {\n      node.warn(\'CS Register (cloud cmd): ChirpStack client close threw unexpectedly\');\n    }\n  }\n  try { await close(); } catch (_) {}\n}\n})();', 'closes the ChirpStack client and the local DB in a single finally on every REGISTER_DEVICE path, surfacing an unexpected close() throw via node.warn');
+
+// cs-reg-cloud-ack-fn (Build Special Command ACK) — grpcStatus -> error.code,
+// nine-field lease-token-bound cloud ACK contract otherwise byte-stable.
+expectIncludesById('cs-reg-cloud-ack-fn', 'if (ack.code) payload.code = String(ack.code);', 'forwards the normalized error.code instead of the retired grpcStatus');
+expectExcludesById('cs-reg-cloud-ack-fn', 'grpcStatus', 'the retired grpcStatus field');
+
+// post-devices-response (Format Response) — forwards the reconciliation
+// result opaquely; never hardcodes the retired deviceCreated field.
+expectIncludesById('post-devices-response', 'chirpstack: provisioning', 'forwards the whole reconciliation result (deviceAction/keysAction/keysVerified/verifiedApplicationId/verifiedDeviceProfileId) to API callers');
+expectExcludesById('post-devices-response', 'deviceCreated', 'the retired deviceCreated field');
+
+// cancel-strega-actuation-fn — gRPC client close() must run in a finally on
+// every path (success, missing expectation, queue-flush failure, DB
+// failure), with no key/token sentinels leaked in the bounded warning.
+expectIncludesById('cancel-strega-actuation-fn', 'let client = null;', 'declares the sole ChirpStack client outside the try block');
+expectExcludesById('cancel-strega-actuation-fn', 'const client = chirpstack.createProvisioningClientFromEnv', 'the client must be hoisted (not const-declared) so the finally can close it');
+expectSingleClientById('cancel-strega-actuation-fn', 'no second cleanup client');
+expectOrderedIncludesById(
+  'cancel-strega-actuation-fn',
+  [
+    "const db = new osiDb.Database('/data/db/farming.db');",
+    'let client = null;',
+    'client = chirpstack.createProvisioningClientFromEnv(env);',
+    'const queueFlush = await client.flushDeviceQueue(deveui);',
+    '} finally {',
+    'const closeErrors = client.close();',
+    'try { await close(); } catch (_) {}',
+  ],
+  'closes both the ChirpStack client and the local DB in a single finally that runs on every path'
+);
+expectIncludesById('cancel-strega-actuation-fn', "node.warn('Cancel STREGA actuation: ChirpStack client reported ' + closeErrors.length + ' bounded cleanup error(s)');", 'surfaces bounded close() cleanup failures via node.warn without leaking key/token sentinels');
+expectIncludesById('cancel-strega-actuation-fn', "node.warn('Cancel STREGA actuation: ChirpStack client close threw unexpectedly');", 'surfaces an unexpected close() throw via a fixed, secret-free node.warn message');
 
 expectFileIncludes('strega_gen1_decoder.js', stregaCodecSource, 'function decodeUplink(input)', 'ships the STREGA ChirpStack decoder entry point');
 expectFileIncludes('strega_gen1_decoder.js', stregaCodecSource, 'function Decode(fPort, bytes)', 'ships the vendor Gen1 STREGA decoder implementation');
