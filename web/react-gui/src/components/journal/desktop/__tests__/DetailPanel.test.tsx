@@ -472,4 +472,75 @@ describe('DetailPanel — full-record correction', () => {
 
     expect(screen.getByRole('button', { name: 'workspace.detail.actions.correct' })).toBeDisabled();
   });
+
+  it('re-emits the full original value set when correction is saved with no edits (a no-op correction must not wipe the record)', async () => {
+    mockDetail({ entries: [entry()] });
+    mocks.updateEntry.mockResolvedValue({ entry_uuid: 'entry-1', outbox_event_uuid: 'evt-1', sync_version: 3 });
+    renderPanel();
+
+    fireEvent.click(screen.getByRole('button', { name: 'workspace.detail.actions.correct' }));
+    fireEvent.click(screen.getByRole('button', { name: 'workspace.detail.correction.save' }));
+
+    await waitFor(() => expect(mocks.updateEntry).toHaveBeenCalled());
+    const [, payload] = mocks.updateEntry.mock.calls[0];
+    expect(payload.values).toHaveLength(1);
+    const operatorValue = payload.values.find((value: { attribute_code: string }) => value.attribute_code === 'attr.operator');
+    expect(operatorValue).toMatchObject({ value: 'Alex' });
+  });
+
+  it('preserves an owned-but-invisible attribute value through a correction (ownership must match emission)', async () => {
+    const hiddenCatalog: JournalCatalog = {
+      ...catalog,
+      vocab: [
+        ...catalog.vocab,
+        row('attr.hidden', 'attribute', 'text'),
+        row('attr.mode', 'attribute', 'text'),
+      ],
+      templates: [{
+        ...catalog.templates[0],
+        definition: {
+          ...catalog.templates[0].definition,
+          fields: [
+            'attr.operator',
+            { code: 'attr.hidden', visible_if: { field: 'attr.mode', op: 'eq', value: 'special' } },
+          ],
+        },
+      }],
+    };
+    mockDetail({ entries: [entry({
+      values: [
+        {
+          group_index: 0,
+          attribute_code: 'attr.operator',
+          value_status: 'observed',
+          value_num: null,
+          value_text: 'Alex',
+          unit_code: null,
+          entered_value_num: null,
+          entered_unit_code: null,
+        },
+        {
+          group_index: 0,
+          attribute_code: 'attr.hidden',
+          value_status: 'observed',
+          value_num: null,
+          value_text: 'secret',
+          unit_code: null,
+          entered_value_num: null,
+          entered_unit_code: null,
+        },
+      ],
+    })] });
+    mocks.updateEntry.mockResolvedValue({ entry_uuid: 'entry-1', outbox_event_uuid: 'evt-1', sync_version: 3 });
+    renderPanel({ catalogOverride: hiddenCatalog });
+
+    fireEvent.click(screen.getByRole('button', { name: 'workspace.detail.actions.correct' }));
+    fireEvent.change(screen.getByRole('textbox', { name: 'Operator' }), { target: { value: 'Sam' } });
+    fireEvent.click(screen.getByRole('button', { name: 'workspace.detail.correction.save' }));
+
+    await waitFor(() => expect(mocks.updateEntry).toHaveBeenCalled());
+    const [, payload] = mocks.updateEntry.mock.calls[0];
+    const hiddenValue = payload.values.find((value: { attribute_code: string }) => value.attribute_code === 'attr.hidden');
+    expect(hiddenValue).toMatchObject({ value_text: 'secret' });
+  });
 });
