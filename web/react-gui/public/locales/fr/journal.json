@@ -150,7 +150,31 @@
     "plot": "Parcelle",
     "allPlots": "Toutes les parcelles",
     "activity": "Activité",
-    "allActivities": "Toutes les activités"
+    "allActivities": "Toutes les activités",
+    "status": "Statut",
+    "allStatuses": "Tous les statuts",
+    "dateFrom": "Du",
+    "dateTo": "Au",
+    "campaign": "Campagne",
+    "protocol": "Protocole"
+  },
+  "workspace": {
+    "search": "Rechercher",
+    "searchPlaceholder": "Rechercher des parcelles, stations, groupes",
+    "scope": {
+      "stations": "Stations",
+      "groups": "Groupes",
+      "sensors": "capteurs",
+      "sensors_one": "{{count}} capteur",
+      "sensors_other": "{{count}} capteurs",
+      "noSensors": "Aucun capteur"
+    },
+    "table": {
+      "placeholder": "Sélectionnez une station, un groupe ou une parcelle pour afficher les entrées."
+    },
+    "detail": {
+      "placeholder": "Sélectionnez une entrée pour afficher ses détails."
+    }
   },
   "logActivity": "Consigner une activité",
   "capture": {

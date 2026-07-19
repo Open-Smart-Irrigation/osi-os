@@ -150,7 +150,31 @@
     "plot": "Particella",
     "allPlots": "Tutte le particelle",
     "activity": "Attività",
-    "allActivities": "Tutte le attività"
+    "allActivities": "Tutte le attività",
+    "status": "Stato",
+    "allStatuses": "Tutti gli stati",
+    "dateFrom": "Dal",
+    "dateTo": "Al",
+    "campaign": "Campagna",
+    "protocol": "Protocollo"
+  },
+  "workspace": {
+    "search": "Cerca",
+    "searchPlaceholder": "Cerca particelle, stazioni, gruppi",
+    "scope": {
+      "stations": "Stazioni",
+      "groups": "Gruppi",
+      "sensors": "sensori",
+      "sensors_one": "{{count}} sensore",
+      "sensors_other": "{{count}} sensori",
+      "noSensors": "Nessun sensore"
+    },
+    "table": {
+      "placeholder": "Seleziona una stazione, un gruppo o una particella per vedere le registrazioni."
+    },
+    "detail": {
+      "placeholder": "Seleziona una registrazione per vedere i dettagli."
+    }
   },
   "logActivity": "Registra attività",
   "capture": {
