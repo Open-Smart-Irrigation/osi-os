@@ -3294,6 +3294,69 @@ describe('JournalCaptureFlow', () => {
     });
   });
 
+  it('surfaces an entered value through an intervening empty plot selection ([plotA] -> [] -> [plotB]) instead of losing it silently', async () => {
+    // PlotPicker forbids co-selecting plots of different layouts, so switching
+    // from plot A (greenhouse) to plot B (open_field) forces the farmer to
+    // deselect A first — a genuine, ordinary-user-reachable empty selection
+    // (`layout` becomes undefined), not a synthetic one. Task 32 originally
+    // handled this by falling through to sanitizeValues(..., undefined, ...),
+    // which always returns [], silently wiping every entered value with no
+    // review sheet. This proves the fix: the value is surfaced (not lost)
+    // through the empty step, AND the eventual real greenhouse -> open_field
+    // diff still fires once plot B is picked (not suppressed by the gap).
+    render(<JournalCaptureFlow
+      {...baseProps}
+      catalog={layoutTransitionChoiceCatalog}
+      plots={[plot, secondPlot]}
+    />);
+    fireEvent.click(screen.getByRole('button', { name: 'North field' }));
+    fireEvent.click(screen.getByRole('button', { name: 'capture.next' }));
+    fireEvent.click(screen.getByRole('button', { name: 'irrigation' }));
+    fireEvent.click(screen.getByRole('button', { name: 'capture.next' }));
+    fireEvent.change(screen.getByRole('combobox', { name: 'attr.method' }), {
+      target: { value: 'method.b' },
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'capture.back' }));
+    fireEvent.click(screen.getByRole('button', { name: 'capture.back' }));
+    expect(screen.getByRole('heading', { name: 'capture.where.title' })).toBeInTheDocument();
+
+    // Deselect plot A: an empty selection with a real, reachable target
+    // layout of `undefined` — the exact branch that used to silently sanitize.
+    fireEvent.click(screen.getByRole('button', { name: 'North field' }));
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    // Not lost: surfaced for explicit review, and Next is blocked, exactly
+    // like any other layout-transition invalidation.
+    expect(screen.getByRole('dialog')).toBeVisible();
+    expect(screen.getByText('attr.method')).toBeInTheDocument();
+    expect(screen.getByText('Method B')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'capture.next' }));
+    expect(screen.getByRole('heading', { name: 'capture.where.title' })).toBeInTheDocument();
+    expect(screen.getByRole('dialog')).toBeVisible();
+
+    // Now pick plot B (open_field) without resolving the pending item first.
+    // The intervening empty step must not suppress the real greenhouse ->
+    // open_field diff: method.b is still not allowed under open_field.
+    fireEvent.click(screen.getByRole('button', { name: 'East field' }));
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(screen.getByRole('dialog')).toBeVisible();
+    expect(screen.getByText('attr.method')).toBeInTheDocument();
+    expect(screen.getByText('Method B')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: /remove.*method/i }));
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'capture.next' }));
+    expect(screen.getByRole('heading', { name: 'capture.picker.title' })).toBeInTheDocument();
+  });
+
   it('retries a failed finalize after resolving a layout-transition item, keeping the kept value in the retried payload', async () => {
     render(<JournalCaptureFlow {...baseProps} catalog={layoutSanitizationCatalog} />);
     fireEvent.change(screen.getByRole('combobox', { name: 'capture.where.layout' }), {
