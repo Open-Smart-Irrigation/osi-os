@@ -49,15 +49,6 @@ var DEFAULT_MAP = {
 
 var ENVELOPE_KEYS = { devEui: 1, timestamp: 1, detectedMode: 1 };
 
-// Union of every key either shipped LSN50 mode recognizes. The real flow
-// object always assembles both mode key sets: the inactive mode's keys are
-// present but null/undefined because the source uplink never populated them.
-// A key in this union is only ignored when it is both outside the selected
-// mode AND nullish; a populated out-of-mode key (or a schema drift/new field
-// outside both maps entirely) still surfaces as unknown so it isn't silently
-// discarded.
-var KNOWN_SOURCE_KEYS = Object.assign({}, DEFAULT_MAP, MODE9_MAP);
-
 function normalize(decoded, meta) {
   var map = decoded.detectedMode === 9 ? MODE9_MAP : DEFAULT_MAP;
   var channels = {};
@@ -71,9 +62,7 @@ function normalize(decoded, meta) {
     if (!Object.prototype.hasOwnProperty.call(decoded, key)) continue;
     if (ENVELOPE_KEYS[key]) continue;
     if (!map[key]) {
-      var knownInactiveNullish = Object.prototype.hasOwnProperty.call(KNOWN_SOURCE_KEYS, key)
-        && decoded[key] == null;
-      if (!knownInactiveNullish) unknown[key] = decoded[key];
+      unknown[key] = decoded[key];
     }
   }
 
