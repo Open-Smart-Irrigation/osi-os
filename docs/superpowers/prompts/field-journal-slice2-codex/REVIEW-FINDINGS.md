@@ -591,3 +591,61 @@ and Task 25's browser acceptance (screenshots + keyboard at mobile widths), whos
 not in this checkout. The station grid at 72 plots is the highest untested mobile-layout risk
 (horizontal scroll, 44px touch targets) and is exactly what Task 25's browser pass should cover
 — worth confirming Task 25 actually exercised 72-plot widths, not a small fixture.
+
+---
+
+# P6 RESOLUTION — batch must be idempotent like single-plot (product owner, 2026-07-19)
+
+**Decision:** "A batch should have the same behaviour as a single plot. The batch is only a
+collection of single plots and should be handled by the backend the same way."
+
+This reverses the Phase 4 preflight choice ("the path does not use a client-generated UUID").
+It is now a required Phase 4 follow-up, owned by the run because it is the run's code, touches
+the shipped edge contract, and needs edge-parity + sync discipline. **This is not a GUI-only
+change** — a GUI patch alone is worse than nothing, because the edge would ignore client UUIDs
+and still mint its own (`lifecycle.js:1433`).
+
+## Target semantics (what "same as single-plot" means, verified)
+
+Single-plot is retry-safe because the client generates one stable `entry_uuid`
+(`useCaptureDraft.ts:101`) and re-sends it on every write; the edge upserts by it, so a
+lost-response retry either no-ops or returns `stale_version` — never a duplicate. Batch must
+match: a lost-response retry of the same finalize must not create a second set of N entries.
+
+## Required change
+
+1. **GUI** — generate one stable client `entry_uuid` per selected plot when the batch payload
+   is first built, and snapshot them with `batchPayloadSnapshotRef` (the snapshot already
+   exists for byte-stable retry — extend it to carry the UUIDs). Send them, e.g.
+   `members: [{ plot_uuid, entry_uuid }, …]` or an `entry_uuids` array parallel to
+   `plot_uuids`. `buildFinalBatchPayload` and `finalizeBatch` in `JournalCaptureFlow.tsx`.
+
+2. **Edge `finalizeBatch`** (`lifecycle.js:1372`) — use the supplied per-plot `entry_uuid`
+   instead of `crypto.randomUUID()` at line 1433. Route each member through the SAME
+   idempotent create/upsert `createFinalInTransaction` already uses for single-plot: if an
+   entry with that `entry_uuid` already exists as a final, the retry returns the existing
+   receipt (or a safe `stale_version`), it does NOT create a duplicate and does NOT surface it
+   as a `duplicate_candidates` 409. Input validation must accept and require the per-member
+   `entry_uuid` (canonical UUID, unique within the batch).
+
+3. **Duplicate-guard interaction** — this must stay correct. A *same-UUID* retry is idempotent
+   (no prompt). A *genuinely new* batch (fresh UUIDs) targeting plots that already have a
+   matching final still triggers the duplicate-guard for the user to ack "save separately" —
+   that path is unchanged and is the legitimate "two real activities same day" case. The bug
+   being fixed is only the lost-response retry where the user wrongly believes the first
+   attempt failed.
+
+4. **Atomicity preserved** — the batch stays one transaction (all-N-or-none), so there is no
+   partial-persist case; the only lost-response case is full success, which the stable UUIDs
+   turn into a clean no-op.
+
+5. **Edge discipline** — mirror both profile copies byte-identical (bcm2712 + bcm2709), keep
+   sync/outbox parity, update the batch edge tests (currently 99/99) to assert the retry is a
+   no-op, and add a GUI regression proving a re-finalize with the same snapshot sends the same
+   entry_uuids and produces no second write. Follow `osi-schema-change-control`.
+
+## Verdict
+
+P6 is adjudicated: **fix it**, do not accept the duplicate-guard as sufficient. Sequence it as
+a Phase 4 correction; it may run alongside remaining Phase 4/5 work but must land before Slice
+2 is called done, because it is a live data-integrity gap on farm records.
