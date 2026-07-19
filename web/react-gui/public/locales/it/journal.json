@@ -190,7 +190,54 @@
       "scopeNotNarrowed": "Vengono mostrate le registrazioni di tutte le particelle. Il filtraggio dell'elenco e delle esportazioni per stazione o gruppo non è ancora disponibile."
     },
     "detail": {
-      "placeholder": "Seleziona una registrazione per vedere i dettagli."
+      "heading": "Dettaglio della registrazione",
+      "placeholder": "Seleziona una registrazione per vedere i dettagli.",
+      "loading": "Caricamento della registrazione…",
+      "error": "Impossibile caricare questa registrazione.",
+      "retry": "Riprova",
+      "notFound": "Questa registrazione non è stata trovata. Potrebbe essere stata modificata o rimossa altrove.",
+      "locked": {
+        "draft": "Questa registrazione è una bozza. Riprendila dalla coda delle bozze per modificarla.",
+        "voided": "Questa registrazione è annullata e non può essere modificata."
+      },
+      "field": {
+        "campaign_uuid": "Campagna",
+        "protocol_code": "Protocollo",
+        "observation_unit_code": "Unità di osservazione",
+        "season_crop": "Coltura",
+        "note": "Nota"
+      },
+      "values": {
+        "heading": "Valori registrati",
+        "empty": "Non è stato registrato alcun valore."
+      },
+      "context": {
+        "heading": "Contesto dei sensori in quel momento",
+        "empty": "Non è stato acquisito alcun contesto dei sensori per questa registrazione.",
+        "channelEmpty": "Nessuna lettura"
+      },
+      "actions": {
+        "correct": "Correggi",
+        "void": "Invalida"
+      },
+      "correction": {
+        "heading": "Correggi questa registrazione",
+        "unavailable": "Il modello di questa registrazione non è più disponibile, quindi non può essere corretta qui.",
+        "cancel": "Annulla",
+        "save": "Salva la correzione",
+        "saving": "Salvataggio…",
+        "stale": "Questa registrazione è cambiata altrove. Ricaricala prima di correggerla di nuovo.",
+        "error": "Impossibile salvare la correzione. Riprova."
+      },
+      "void": {
+        "reasonLabel": "Motivo dell'invalidazione",
+        "reasonRequired": "Inserisci un motivo prima di invalidare questa registrazione.",
+        "cancel": "Annulla",
+        "submit": "Invalida registrazione",
+        "saving": "Invalidazione…",
+        "stale": "Questa registrazione è cambiata altrove. Ricaricala prima di invalidarla di nuovo.",
+        "error": "Impossibile invalidare questa registrazione. Riprova."
+      }
     }
   },
   "logActivity": "Registra attività",

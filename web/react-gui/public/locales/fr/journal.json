@@ -190,7 +190,54 @@
       "scopeNotNarrowed": "Les entrées de toutes les parcelles sont affichées. Le filtrage de la liste et des exports par station ou groupe n'est pas encore disponible."
     },
     "detail": {
-      "placeholder": "Sélectionnez une entrée pour afficher ses détails."
+      "heading": "Détail de l'entrée",
+      "placeholder": "Sélectionnez une entrée pour afficher ses détails.",
+      "loading": "Chargement de l'entrée…",
+      "error": "Impossible de charger cette entrée.",
+      "retry": "Réessayer",
+      "notFound": "Cette entrée est introuvable. Elle a peut-être été modifiée ou supprimée ailleurs.",
+      "locked": {
+        "draft": "Cette entrée est un brouillon. Reprenez-la depuis la file des brouillons pour la modifier.",
+        "voided": "Cette entrée est annulée et ne peut plus être modifiée."
+      },
+      "field": {
+        "campaign_uuid": "Campagne",
+        "protocol_code": "Protocole",
+        "observation_unit_code": "Unité d'observation",
+        "season_crop": "Culture",
+        "note": "Remarque"
+      },
+      "values": {
+        "heading": "Valeurs enregistrées",
+        "empty": "Aucune valeur n'a été enregistrée."
+      },
+      "context": {
+        "heading": "Contexte des capteurs à ce moment",
+        "empty": "Aucun contexte de capteurs n'a été capturé pour cette entrée.",
+        "channelEmpty": "Aucune mesure"
+      },
+      "actions": {
+        "correct": "Corriger",
+        "void": "Invalider"
+      },
+      "correction": {
+        "heading": "Corriger cette entrée",
+        "unavailable": "Le modèle de cette entrée n'est plus disponible ; elle ne peut donc pas être corrigée ici.",
+        "cancel": "Annuler",
+        "save": "Enregistrer la correction",
+        "saving": "Enregistrement…",
+        "stale": "Cette entrée a changé ailleurs. Rechargez-la avant de la corriger à nouveau.",
+        "error": "Impossible d'enregistrer la correction. Réessayez."
+      },
+      "void": {
+        "reasonLabel": "Motif de l'invalidation",
+        "reasonRequired": "Saisissez un motif avant d'invalider cette entrée.",
+        "cancel": "Annuler",
+        "submit": "Invalider l'entrée",
+        "saving": "Invalidation…",
+        "stale": "Cette entrée a changé ailleurs. Rechargez-la avant de l'invalider à nouveau.",
+        "error": "Impossible d'invalider cette entrée. Réessayez."
+      }
     }
   },
   "logActivity": "Consigner une activité",

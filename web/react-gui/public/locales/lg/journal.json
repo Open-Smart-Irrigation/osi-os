@@ -190,7 +190,54 @@
       "scopeNotNarrowed": "Ebiwandiiko by'emisiri gyonna bye birabika. Okusengejja olukalala n'ebifulumizibwa okusinziira ku siteegi oba ekibinja tekinnayinzika kaakano."
     },
     "detail": {
-      "placeholder": "Londa ekiwandiiko okulaba ebikwata ku kyo."
+      "heading": "Ebikwata ku kiwandiiko",
+      "placeholder": "Londa ekiwandiiko okulaba ebikwata ku kyo.",
+      "loading": "Ekiwandiiko kitikkibwa…",
+      "error": "Ekiwandiiko tekiyinzise kutikkibwa.",
+      "retry": "Gezaako nate",
+      "notFound": "Ekiwandiiko kino tekizuuliddwa. Kiyinza okuba nga kikyusiddwa oba kiggiddwawo mu kifo ekirala.",
+      "locked": {
+        "draft": "Ekiwandiiko kino kitannamala. Kiddiremu okuva mu lukalala lw'ebitannamala okukola enkyukakyuka.",
+        "voided": "Ekiwandiiko kino kisaziddwamu era tekisobola kukyusibwa."
+      },
+      "field": {
+        "campaign_uuid": "Campaign",
+        "protocol_code": "Protocol",
+        "observation_unit_code": "Ekipimo ky'okulambula",
+        "season_crop": "Ekirime",
+        "note": "Akawandiiko"
+      },
+      "values": {
+        "heading": "Emiwendo egyakwatiddwa",
+        "empty": "Tewali muwendo gwakwatiddwa."
+      },
+      "context": {
+        "heading": "Embeera za sensor mu kiseera ekyo",
+        "empty": "Tewali mbeera za sensor ezaakwatiddwa ku kiwandiiko kino.",
+        "channelEmpty": "Tewali kipimo"
+      },
+      "actions": {
+        "correct": "Longoosa",
+        "void": "Saza"
+      },
+      "correction": {
+        "heading": "Longoosa ekiwandiiko kino",
+        "unavailable": "Fomu y'ekiwandiiko kino teri kyaliwo, n'olwekyo tekisobola kulongoosebwa wano.",
+        "cancel": "Sazaamu",
+        "save": "Tereka enkyusa",
+        "saving": "Tikutereka…",
+        "stale": "Ekiwandiiko kino kikyusiddwa mu kifo ekirala. Kiddemu okutikka nga tonnalongoosa nate.",
+        "error": "Twayisiddwa okutereka enkyusa. Gezaako nate."
+      },
+      "void": {
+        "reasonLabel": "Ensonga ey'okusaza",
+        "reasonRequired": "Yingiza ensonga nga tonnasaza kiwandiiko kino.",
+        "cancel": "Sazaamu",
+        "submit": "Saza ekiwandiiko",
+        "saving": "Kisaziddwa…",
+        "stale": "Ekiwandiiko kino kikyusiddwa mu kifo ekirala. Kiddemu okutikka nga tonnaddamu kukisaza.",
+        "error": "Twayisiddwa okusaza ekiwandiiko kino. Gezaako nate."
+      }
     }
   },
   "logActivity": "Wandiika ky'okoze",
